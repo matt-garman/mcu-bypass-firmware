@@ -5,7 +5,14 @@
       "Bash(command -v klee)",
       "Bash(make test *)",
       "Bash(make test-host *)",
-      "Bash(make test-symbolic-klee *)"
+      "Bash(make test-symbolic-klee *)",
+      "Bash(cc -fsanitize=undefined,address -xc - -o /tmp/santest)",
+      "Bash(make test-sim *)",
+      "Bash(make test-sim-t85 *)",
+      "Bash(chmod +x test/run_mutation_tests.sh)",
+      "Bash(./test/run_mutation_tests.sh)",
+      "Bash(make clean *)",
+      "Bash(make test-mutation *)"
     ]
   }
 }
