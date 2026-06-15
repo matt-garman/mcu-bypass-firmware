@@ -12,7 +12,12 @@
       "Bash(chmod +x test/run_mutation_tests.sh)",
       "Bash(./test/run_mutation_tests.sh)",
       "Bash(make clean *)",
-      "Bash(make test-mutation *)"
+      "Bash(make test-mutation *)",
+      "Bash(avr-objdump -d attiny13_bypass.elf)",
+      "Bash(sed -n '/<__vector_6>:/,/^$/p; /<__vector_/p')",
+      "Bash(avr-size attiny13_bypass.elf)",
+      "Bash(awk '/^ 12c:/,0')",
+      "Bash(make clean-tests *)"
     ]
   }
 }
