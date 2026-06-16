@@ -28,7 +28,9 @@
       "Bash(clang-tidy --version)",
       "Bash(simavr --version)",
       "Read(//usr/**)",
-      "Bash(dpkg -l simavr)"
+      "Bash(dpkg -l simavr)",
+      "Bash(avr-gcc -mmcu=attiny13a -DF_CPU=1200000UL -DCD4053_SIMPLE -fshort-enums -funsigned-char -Wall -Wextra -Werror -c bypass_core.c -o /tmp/bypass_core.o)",
+      "Bash(avr-gcc -mmcu=attiny13a -DF_CPU=1200000UL -DTQ2_L2_5V_RELAY -I. -E /tmp/probe.c -o /dev/null)"
     ]
   }
 }
