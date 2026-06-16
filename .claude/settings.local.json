@@ -50,7 +50,23 @@
       "Bash(sed -i 's@attiny13_bypass\\\\.c@bypass_core.c@g' test/model_step.h test/test_symbolic.c)",
       "Bash(sed -i 's@attiny13_bypass debounce@bypass debounce@; s@attiny13_bypass\\\\.c constants@bypass_core.c constants@' test/test_logic_host.c)",
       "Bash(sed -i 's@attiny13_bypass@bypass@' test/test_model_check.c)",
-      "Bash(sed -i 's@attiny13_bypass\\\\.md / \\\\.c header@the design doc / bypass_core.c header@' test/test_fuses.c)"
+      "Bash(sed -i 's@attiny13_bypass\\\\.md / \\\\.c header@the design doc / bypass_core.c header@' test/test_fuses.c)",
+      "Bash(grep -cE \"^\\\\./test/test_sim_[a-z0-9]+_t45$\")",
+      "Bash(grep -cE \"^\\\\./test/test_sim_[a-z0-9]+_t45 fault-inject$\")",
+      "Bash(make -n test-sim-secondary)",
+      "Bash(make -n test-sim-t45)",
+      "Bash(make -n test-sim-t85)",
+      "Bash(grep -cE \"^\\\\./test/test_sim_[a-z0-9]+$\")",
+      "Bash(make -n test-fault-inject test-sim test-sim-secondary)",
+      "Bash(make -n test-sim test-fault-inject)",
+      "Bash(make -n test-fault-inject test-sim)",
+      "Bash(make -n test-sim test-sim-secondary)",
+      "Bash(grep -cE \"^\\\\./test/test_sim_[a-z0-9]+\\(_t[0-9]+\\)?$\")",
+      "Bash(make -n test-fault-inject test-sim-secondary)",
+      "Bash(make -p -n test)",
+      "Bash(grep -n \"^test-sim:\\\\|^test-sim-secondary:\\\\|^test-fault-inject:\\\\|VARIANT_SIM_RULES\\\\|VARIANT_SIM_T13\\\\|VARIANT_SIM_X5\\\\|test-fault-inject-\\\\$\\(1\\)\\\\b\\\\|foreach v,\\\\$\\(VARIANTS\\),\\\\$\\(eval \\\\$\\(call VARIANT_SIM\" Makefile)",
+      "Bash(grep -cE \"^\\\\./test/test_sim_[a-z0-9]+_t[0-9]+$\")",
+      "Bash(grep -cE \"fault-inject$\")"
     ]
   }
 }
