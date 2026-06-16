@@ -30,7 +30,27 @@
       "Read(//usr/**)",
       "Bash(dpkg -l simavr)",
       "Bash(avr-gcc -mmcu=attiny13a -DF_CPU=1200000UL -DCD4053_SIMPLE -fshort-enums -funsigned-char -Wall -Wextra -Werror -c bypass_core.c -o /tmp/bypass_core.o)",
-      "Bash(avr-gcc -mmcu=attiny13a -DF_CPU=1200000UL -DTQ2_L2_5V_RELAY -I. -E /tmp/probe.c -o /dev/null)"
+      "Bash(avr-gcc -mmcu=attiny13a -DF_CPU=1200000UL -DTQ2_L2_5V_RELAY -I. -E /tmp/probe.c -o /dev/null)",
+      "Bash(git check-ignore *)",
+      "Bash(./test/test_logic_host)",
+      "Bash(./test/test_model_check)",
+      "Bash(./test/test_symbolic)",
+      "Bash(./test/test_fuses)",
+      "Bash(cc -std=c11 -Wall -Wextra -Werror -I/usr/include/simavr -Itest '-DFW_PATH=\"attiny13_bypass.elf\"' test/test_sim.c -o /tmp/test_sim_probe -lsimavr -lelf)",
+      "Bash(cc -std=c11 -Wall -Wextra -Werror -I/usr/include/simavr -Itest -DTRACE /tmp/test_sim_orig.c -o /tmp/ts_trace_orig -lsimavr -lelf)",
+      "Bash(/tmp/ts_cd4053)",
+      "Bash(echo \"exit rc=$?\")",
+      "Bash(/tmp/ts_mute)",
+      "Bash(cd *)",
+      "Bash(make -n all13)",
+      "Bash(make -n test-sim)",
+      "Bash(make -n test)",
+      "Bash(echo \"=== make test exit: $? ===\")",
+      "Bash(echo \"=== mutation exit: $? ===\")",
+      "Bash(sed -i 's@attiny13_bypass\\\\.c@bypass_core.c@g' test/model_step.h test/test_symbolic.c)",
+      "Bash(sed -i 's@attiny13_bypass debounce@bypass debounce@; s@attiny13_bypass\\\\.c constants@bypass_core.c constants@' test/test_logic_host.c)",
+      "Bash(sed -i 's@attiny13_bypass@bypass@' test/test_model_check.c)",
+      "Bash(sed -i 's@attiny13_bypass\\\\.md / \\\\.c header@the design doc / bypass_core.c header@' test/test_fuses.c)"
     ]
   }
 }
