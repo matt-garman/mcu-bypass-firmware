@@ -103,7 +103,16 @@
       "Bash(echo \"make test exit: $?\")",
       "Bash(make test/test_model_check)",
       "Bash(make test-model-check *)",
-      "Bash(make analyze *)"
+      "Bash(make analyze *)",
+      "Bash(jobs)",
+      "Bash(break)",
+      "Bash(python3 -c \"import yaml,sys; yaml.safe_load\\(open\\('.github/workflows/ci.yml'\\)\\); print\\('YAML OK'\\)\")",
+      "Bash(grep -nE 'all[0-9]|size[0-9]|all\\\\$|size\\\\$|all8|all4' Makefile)",
+      "Bash(command -v ruby)",
+      "Bash(ruby -ryaml -e \"YAML.load_file\\('.github/workflows/ci.yml'\\); puts 'YAML OK \\(ruby\\)'\")",
+      "Bash(command -v node)",
+      "Bash(pip install *)",
+      "Bash(python3 -c \"import yaml; yaml.safe_load\\(open\\('.github/workflows/ci.yml'\\)\\); print\\('YAML OK \\(pip\\)'\\)\")"
     ]
   }
 }
