@@ -112,7 +112,23 @@
       "Bash(ruby -ryaml -e \"YAML.load_file\\('.github/workflows/ci.yml'\\); puts 'YAML OK \\(ruby\\)'\")",
       "Bash(command -v node)",
       "Bash(pip install *)",
-      "Bash(python3 -c \"import yaml; yaml.safe_load\\(open\\('.github/workflows/ci.yml'\\)\\); print\\('YAML OK \\(pip\\)'\\)\")"
+      "Bash(python3 -c \"import yaml; yaml.safe_load\\(open\\('.github/workflows/ci.yml'\\)\\); print\\('YAML OK \\(pip\\)'\\)\")",
+      "Bash(node -e \"const y=require\\('js-yaml'\\);y.load\\(require\\('fs'\\).readFileSync\\('.github/workflows/ci.yml','utf8'\\)\\);console.log\\('YAML OK'\\);\")",
+      "Bash(cc -std=c11 -Wall -Wextra -Werror -Wconversion -Itest -include test/bypass_config_host.h -c bypass_pure.c -o /tmp/bp.o)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(make test/test_sim_cd4053)",
+      "Bash(./test/test_sim_cd4053)",
+      "Bash(avr-nm -C bypass_attiny13_cd4053.elf)",
+      "Bash(avr-nm bypass_attiny13_cd4053.elf)",
+      "Bash(avr-nm bypass_cd4053.elf)",
+      "Bash(make test/test_sim_cd4053_t85)",
+      "Bash(make test-fuses *)",
+      "Bash(make test-sim-cd4053 *)",
+      "Bash(make bypass_cd4053.elf)",
+      "Bash(avr-objdump -d bypass_cd4053.elf)",
+      "Bash(./test/test_sim_relay)",
+      "Bash(make test-sim-relay *)",
+      "Read(//tmp/**)"
     ]
   }
 }
