@@ -47,22 +47,20 @@ counter climbing to 7…"); reword as a normal lead-in. Both are trivial.
 Each load-bearing decision should trace to a page/section: WDT ~16 ms post-reset
 window; WDTON always-on; internal-RC ±10%; Timer0 CTC formula; BOD level.
 
-**Minimum-tap-interval regression test.** The design states the fastest
-recognized tap interval is `PRESSED_THRESH + RELEASE_THRESH = 33 ms`. The 33 ms
-figure appears only in test comments; there is no test that drives two presses
-exactly 33 ms apart and asserts both register. This is the natural guard for any
-future threshold change and maps directly to the "fast taps recognized" row of
-the traceability matrix.
+**Minimum-tap-interval regression test.** ~~Done~~ — `test_minimum_tap_interval()` in
+`test/test_logic_host.c`: drives two presses exactly `PRESSED_THRESH + RELEASE_THRESH = 33 ms`
+apart and asserts both register; includes a boundary guard (one tick short on release
+must keep the second press locked out). Wired into `make test`.
 
-**`-fstack-usage` static bound.** Complements the runtime HWM test with a
-compile-time structural upper bound that doesn't depend on a test exercising the
-deepest path. Add the flag to the firmware build and optionally assert the
-summed worst-case frame in `make test`.
+**`-fstack-usage` static bound.** ~~Done~~ — `make test-stack-bound` compiles every
+firmware TU with `-fstack-usage`, prints all per-function frames, and fails if any
+frame exceeds `STACK_MAX_FRAME` (default 32 B). Observed frames: ISR 19 B,
+`debounce_step` 10 B, all others ≤ 2 B. Wired into `make test`.
 
-**Flash-utilization budget assertion.** Capture `avr-size` output and fail the
-build if flash exceeds a threshold (e.g. 90% of 1 KB). Firmware is ~46% today; a
-future accidental bloat that eats the headroom would otherwise pass silently.
-The firmware analog of a bundle-size budget.
+**Flash-utilization budget assertion.** ~~Done~~ — `make test-flash-budget` runs
+`avr-size` on each ATtiny13a variant ELF and fails if Program bytes exceed
+`FLASH_T13_BUDGET`% of 1 KB (default 90% = 921 B). Current usage: cd4053 612 B
+(59.8%), mute 660 B (64.5%), relay 652 B (63.7%). Wired into `make test`.
 
 ---
 
@@ -75,10 +73,6 @@ asserted by analogy, not direct simulation. Document a bench procedure: scope
 PB1/PB2, artificially stop the ISR, confirm the device resets to BYPASS within
 the WDT window; plus power-on glitch and BOD behavior. Bridges to the
 manufacturing item below.
-
-**CBMC formal analysis.** Prove properties of the *actual* C source rather than
-a re-implementation: `cbmc --unwind 50` on the debounce path. Platinum-level
-differentiator; CBMC ships as a Debian package.
 
 **KLEE in CI.** `test_symbolic.c` already supports `-DUSE_KLEE` and there is a
 `test-symbolic-klee` target; a CI job (klee/klee Docker image) would prove the
@@ -142,11 +136,10 @@ left to the implementer" is itself evidence of thoroughness.
 | Design doc: resource-utilization section     | 1    | 1 h       | High — measured numbers exist   |
 | Stale refs + editorial-note fix              | 1    | 15 min    | Medium — correctness of docs    |
 | Design doc: datasheet citations              | 2    | 2 h       | High — completeness/rigor       |
-| Minimum-tap-interval test                    | 2    | 1 h       | Medium — closes traceability    |
-| `-fstack-usage` static bound                 | 2    | 30 min    | Medium — complements HWM test   |
-| Flash-utilization budget assertion           | 2    | 20 min    | Medium — resource budget        |
+| Minimum-tap-interval test                    | 2    | done      | Medium — closes traceability    |
+| `-fstack-usage` static bound                 | 2    | done      | Medium — complements HWM test   |
+| Flash-utilization budget assertion           | 2    | done      | Medium — resource budget        |
 | Hardware-validation procedure doc            | 3    | 2–3 h     | High — primary-part WDT gap     |
-| CBMC formal analysis                         | 3    | 4–8 h     | Platinum-level credibility      |
 | KLEE in CI                                   | 3    | 2 h       | Nice-to-have                    |
 | tinyAVR 2-Series (ATtiny202) support         | 3    | 2–4 days  | Nice-to-have; simavr gap        |
 | Manufacturing artifacts (name as scope)      | 4    | —         | Completeness signal             |

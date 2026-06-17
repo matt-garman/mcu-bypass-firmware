@@ -171,6 +171,17 @@ SIM_LIBS     = -lsimavr -lelf
 #   make test SANITIZE=
 SANITIZE    ?= -fsanitize=undefined,address -fno-sanitize-recover=all
 
+# --- Resource-budget gate thresholds -----------------------------------------
+# Per-function stack-frame ceiling for test-stack-bound (-fstack-usage).
+# The firmware's full-path runtime HWM is ~10 B; any individual frame above
+# this threshold signals unintended bloat (e.g. an accidental local array).
+STACK_MAX_FRAME ?= 32
+
+# ATtiny13a flash-budget ceiling for test-flash-budget (percentage of 1 KB).
+# Firmware is ~46% today; a future accidental bloat passes silently without
+# this gate.
+FLASH_T13_BUDGET ?= 90
+
 # Host-compiled copy of the firmware's PURE logic (bypass_pure.c), linked into
 # every test that includes model_step.h. Since the convergence, model_step.h's
 # step() delegates to the real debounce_integrate()/debounce_step() instead of a
@@ -364,6 +375,7 @@ FORCE:
         test test-fast test-long stress \
         test-host test-sim test-sim-secondary \
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
+        test-stack-bound test-flash-budget \
         analyze analyze-tidy analyze-cppcheck analyze-deep \
         trace coverage coverage-check coverage-clean
 
@@ -445,6 +457,7 @@ clean:
 		test/test_logic_host \
 		test/test_model_check test/test_symbolic test/test_fuses \
 		test/test_symbolic.bc \
+		test/stack_*.o test/stack_*.su \
 		bypass_trace.vcd $(FW_BASE).plist \
 		$(TOOLCHAIN_STAMP)
 	rm -f *.dump *.ctu-info cppcheck-addon-ctu-file-list*
@@ -502,7 +515,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-fault-inject test-sim test-sim-secondary coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-sim test-sim-secondary coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -513,7 +526,7 @@ test-fast: test
 # overrides). Use before tagging a release or signing off for hardware.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-fault-inject test-sim test-sim-secondary test-mutation coverage-check
+test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-sim test-sim-secondary test-mutation coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -648,6 +661,64 @@ test/test_fuses: test/test_fuses.c Makefile
 		-DT13_LFUSE=$(LFUSE) -DT13_HFUSE=$(HFUSE) \
 		-DT85_LFUSE=$(LFUSE_X5) -DT85_HFUSE=$(HFUSE_X5) \
 		$< -o $@
+
+# Static stack-frame bound via -fstack-usage: compile every firmware TU with
+# the flag, collect the per-function .su files, and fail if any single frame
+# exceeds STACK_MAX_FRAME bytes.  Complements the runtime HWM test (test-sim)
+# with a compile-time structural upper bound that does not depend on exercising
+# the deepest call path.  Override: make test-stack-bound STACK_MAX_FRAME=16
+test-stack-bound:
+	@echo "=== -fstack-usage static bound (limit: $(STACK_MAX_FRAME) B/frame) ==="
+	@fail=0; \
+	for f in $(FW_SOURCES); do \
+		case $$f in \
+			*cd4053_with_mute*) m=CD4053_WITH_MUTE ;; \
+			*tq2_l2_5v_relay*)  m=TQ2_L2_5V_RELAY ;; \
+			*)                  m=$(macro_$(VARIANT)) ;; \
+		esac; \
+		$(CC) $(CFLAGS) -D$$m -fstack-usage \
+			-c $$f -o test/stack_$$(basename $$f .c)_$$m.o || fail=1; \
+	done; \
+	if [ "$$fail" -ne 0 ]; then \
+		echo "FAIL: compilation error(s) during -fstack-usage build"; \
+		rm -f test/stack_*.o test/stack_*.su; \
+		exit 1; \
+	fi; \
+	echo "Per-function stack frames:"; \
+	cat test/stack_*.su; \
+	bad=$$(awk -F'\t' -v max=$(STACK_MAX_FRAME) '$$2+0 > max { print }' test/stack_*.su); \
+	if [ -n "$$bad" ]; then \
+		echo "FAIL: frame(s) exceed $(STACK_MAX_FRAME) B:"; \
+		echo "$$bad"; \
+		fail=1; \
+	else \
+		echo "OK: all frames <= $(STACK_MAX_FRAME) B"; \
+	fi; \
+	rm -f test/stack_*.o test/stack_*.su; \
+	exit $$fail
+
+# Flash-utilization budget assertion: run avr-size on every ATtiny13a variant
+# ELF and fail if flash (Program bytes) exceeds FLASH_T13_BUDGET% of 1024 B.
+# Firmware is ~46% today; a future accidental bloat would otherwise pass
+# silently.  Override: make test-flash-budget FLASH_T13_BUDGET=80
+test-flash-budget: $(ALL_ELF13)
+	@echo "=== flash-utilization budget (ATtiny13a: $(FLASH_T13_BUDGET)% of 1024 B) ==="
+	@limit=$$(( 1024 * $(FLASH_T13_BUDGET) / 100 )); \
+	fail=0; \
+	for elf in $(ALL_ELF13); do \
+		used=$$($(SIZE) --mcu=$(MCU) -C $$elf | awk '/^Program:/ {print $$2; exit}'); \
+		if [ -z "$$used" ]; then \
+			echo "WARN: could not read flash size from $$elf"; continue; \
+		fi; \
+		pct=$$(awk -v u="$$used" 'BEGIN {printf "%.1f", u*100/1024}'); \
+		if [ "$$used" -gt "$$limit" ]; then \
+			echo "FAIL: $$elf uses $$used B ($${pct}%) -- exceeds $$limit B ($(FLASH_T13_BUDGET)%)"; \
+			fail=1; \
+		else \
+			echo "OK:   $$elf uses $$used B ($${pct}%) of 1024 B"; \
+		fi; \
+	done; \
+	exit $$fail
 
 # simavr integration tests: run the REAL compiled firmware .elf in the
 # instruction-accurate simulator, drive PB0, and assert LED + control-output
@@ -932,6 +1003,8 @@ help:
 	@echo "  test-symbolic-klee  same properties under KLEE (if installed)"
 	@echo "  test-cbmc       CBMC SAT/SMT proof of the real bypass_pure.c (if installed)"
 	@echo "  test-fuses      decode + verify the design fuse bytes (t13a + tinyx5)"
+	@echo "  test-stack-bound  -fstack-usage static frame bound (limit: STACK_MAX_FRAME=$(STACK_MAX_FRAME) B)"
+	@echo "  test-flash-budget flash-utilization gate: all t13a variants < FLASH_T13_BUDGET=$(FLASH_T13_BUDGET)% of 1 KB"
 	@echo "  test-sim        real firmware in simavr, all variants (ATtiny13a)"
 	@echo "  test-sim-t85 / test-sim-t45  all variants on that tinyx5 chip"
 	@echo "  test-sim-secondary  all variants on every tinyx5 chip"

@@ -234,6 +234,49 @@ static void test_release_lockout(void) {
     CHECK(m.program_state == PRESS_DEBOUNCE_WAIT, "recovered to press-wait");
 }
 
+// Minimum-tap-interval regression test: the fastest double-tap the algorithm
+// can register is PRESSED_THRESH + RELEASE_THRESH = 33 ms (8 ms press debounce
+// + 25 ms release lockout).  Any future threshold change that violates this
+// guarantee will kill this test before reaching silicon.  Maps directly to the
+// "fast taps recognized" row of the traceability matrix.
+static void test_minimum_tap_interval(void) {
+    model_t m; model_init(&m, 0);
+
+    // Tap 1: exactly PRESSED_THRESH low ticks -- minimum to cross threshold.
+    drive(&m, 1, PRESSED_THRESH);
+    CHECK(m.toggle_count == 1,
+          "min-tap: first press (%u ms) should toggle, got %u",
+          PRESSED_THRESH, m.toggle_count);
+    CHECK(m.program_state == RELEASE_DEBOUNCE_WAIT,
+          "min-tap: should be in RELEASE_DEBOUNCE_WAIT after first toggle");
+
+    // Minimum release: exactly RELEASE_THRESH high ticks drain counter to 0
+    // and re-arm the press path.
+    drive(&m, 0, RELEASE_THRESH);
+    CHECK(m.program_state == PRESS_DEBOUNCE_WAIT,
+          "min-tap: re-armed after %u ms release (total interval = %u ms)",
+          RELEASE_THRESH, PRESSED_THRESH + RELEASE_THRESH);
+
+    // Tap 2 at minimum interval: must register as a second distinct press.
+    drive(&m, 1, PRESSED_THRESH);
+    CHECK(m.toggle_count == 2,
+          "min-tap: second press at minimum interval (%u ms) should toggle, got %u",
+          PRESSED_THRESH + RELEASE_THRESH, m.toggle_count);
+
+    // Boundary guard: one tick short on release must not re-arm -- a press
+    // attempted during the lockout must not register.
+    model_init(&m, 0);
+    drive(&m, 1, PRESSED_THRESH);          // tap 1: toggle 1, enter lockout
+    drive(&m, 0, RELEASE_THRESH - 1u);    // one tick short: counter still 1
+    CHECK(m.program_state == RELEASE_DEBOUNCE_WAIT,
+          "min-tap boundary: RELEASE_THRESH-1 high ticks must not re-arm");
+    drive(&m, 1, PRESSED_THRESH);          // attempt tap 2 while still locked
+    drive(&m, 0, RELEASE_THRESH + 1u);    // fully drain any residual counter
+    CHECK(m.toggle_count == 1,
+          "min-tap boundary: press inside release lockout must not register, got %u",
+          m.toggle_count);
+}
+
 // Fast repeated taps (>=~30ms apart per design) are each recognized.
 static void test_fast_repeated_taps(void) {
     model_t m; model_init(&m, 0);
@@ -552,6 +595,7 @@ int main(void) {
     test_exact_threshold_toggles();
     test_power_on_pressed();
     test_release_lockout();
+    test_minimum_tap_interval();
     test_fast_repeated_taps();
     
     // Fuzz/stress tests
