@@ -128,7 +128,12 @@
       "Bash(avr-objdump -d bypass_cd4053.elf)",
       "Bash(./test/test_sim_relay)",
       "Bash(make test-sim-relay *)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(cbmc --version)",
+      "Bash(cbmc bypass_pure.c -Itest -include test/bypass_config_host.h --show-symbol-table)",
+      "Bash(cbmc bypass_pure.c -Itest --include test/bypass_config_host.h --show-symbol-table)",
+      "Bash(cbmc bypass_pure.c -Itest -DF_CPU=1200000UL -DPB0=0 -DPB1=1 -DPB2=2 --show-symbol-table)",
+      "Bash(make test-cbmc *)"
     ]
   }
 }
