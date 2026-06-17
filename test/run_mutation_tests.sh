@@ -48,6 +48,9 @@ MUTATIONS=(
 # --- ISR bounds guards (bypass_pure.c) -----------------------------------------
 "bypass_pure.c	s@if (debounce_counter < RELEASE_THRESH) { ++counter; }@++counter;@	test-sim-cd4053	ISR increment: remove saturation guard (counter wraps from 255->0 after 256 sustained ticks)"
 "bypass_pure.c	s@if (debounce_counter > 0U) { --counter; }@--counter;@	test-sim-cd4053	ISR decrement: remove underflow guard (counter wraps 0->255 on release; lock-step catches divergence)"
+# --- power-on initialization (bypass_pure.c) ------------------------------------
+"bypass_pure.c	s@ctx.program_state = RELEASE_DEBOUNCE_WAIT;@ctx.program_state = PRESS_DEBOUNCE_WAIT;@	test-sim-cd4053	power-on-pressed: wrong program_state (PRESS_WAIT not RELEASE_WAIT); held switch has counter=25 >=8 -> immediate toggle; test_power_on_pressed catches it"
+"bypass_pure.c	s@ctx.debounce_counter = RELEASE_THRESH;@ctx.debounce_counter = 0U;@	test-sim-cd4053	power-on-pressed: lockout counter starts at 0 (immediate re-arm); held switch re-presses and toggles at once; test_power_on_pressed catches it"
 # --- lockout mechanism (bypass_pure.c) -----------------------------------------
 "bypass_pure.c	s@res.lockout_value = RELEASE_THRESH;@res.lockout_value = 0;@g	test-sim-cd4053	toggle lockout: counter reset to 0 instead of RELEASE_THRESH (immediate re-arm, no hold lockout)"
 "bypass_pure.c	s@res.program_state = RELEASE_DEBOUNCE_WAIT;@res.program_state = PRESS_DEBOUNCE_WAIT;@g	test-sim-cd4053	toggle lockout: stays in PRESS_DEBOUNCE_WAIT after toggle (counter=25 >= 8 -> immediate re-toggle cascade)"
