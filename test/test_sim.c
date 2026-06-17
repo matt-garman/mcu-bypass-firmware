@@ -856,6 +856,40 @@ static int run_one_tick_settled(int pin_low) {
     return 0;
 }
 
+// Minimum-threshold press: exactly PRESSED_THRESH ticks must toggle.
+//
+// The firmware uses >=, not >, so a counter of exactly PRESSED_THRESH is
+// sufficient to fire. This test drives PRESSED_THRESH ticks via
+// run_one_tick_settled() (tick-accurate, immune to phase jitter) and asserts
+// that the toggle occurs. A >= -> > mutant requires PRESSED_THRESH+1 ticks
+// and does NOT toggle here, making it the independent killer for that mutation.
+//
+// The lock-step co-sim cannot catch this mutation because its golden model
+// calls debounce_step() from bypass_pure.c directly -- both the firmware binary
+// and the model receive the same mutated code and continue to agree tick-for-tick.
+// This test has an independent hard-coded expectation that breaks the symmetry.
+static void test_minimum_press_toggles(void) {
+    if (sim_reset(0) != 0) { g_failures++; return; }
+
+    uint32_t before = g_led_changes;
+
+    for (unsigned t = 0; t < (unsigned)PRESSED_THRESH; ++t) {
+        if (run_one_tick_settled(1) != 0) {
+            CHECK(0, "min-press: tick %u failed (crash or stuck core)", t);
+            return;
+        }
+    }
+
+    CHECK((g_led_changes - before) == 1,
+          "PRESSED_THRESH=%u ticks must toggle (>= check, not >), got %u changes",
+          (unsigned)PRESSED_THRESH, g_led_changes - before);
+    CHECK(g_led_level == 1,
+          "LED should be lit after PRESSED_THRESH=%u ticks pressed",
+          (unsigned)PRESSED_THRESH);
+
+    footsw_drive(0, 50);
+}
+
 static void test_lockstep_cosim(void) {
     if (sim_reset(0) != 0) { g_failures++; return; }
 
@@ -1681,6 +1715,7 @@ int main(int argc, char **argv) {
     test_fast_repeated_taps();
     test_random_noise_resilience();
     test_adversarial_patterns();
+    test_minimum_press_toggles();
     test_extreme_bounce();
     test_sustained_noise();
     test_init_completes_before_wdt();
