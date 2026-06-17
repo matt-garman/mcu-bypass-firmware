@@ -24,12 +24,14 @@
 // WDTON     | 0 (enabled, i.e., WDT always on)          | Silicon-level guarantee: WDT cannot be disabled by software;
 //           |                                           | resilient against stray WDTCR writes (EMI, cosmic rays)
 // BODEN     | 0 (enabled)                               | Required for brown-out protection
-// BODLEVEL  | 0b10 (2.7V)                               | Matches your design spec
+// BODLEVEL  | 0b00 (4.3V)                               | Peripheral-safe: relay and MOSFET
+//           |                                           | control both require >4V; 4.3V ensures
+//           |                                           | BOD fires while hardware can still respond
 // RSTDISBL  | 1 (disabled, i.e., PB5 remains RESET)     | Critical: clearing this disables ISP programming
 // SELFPRGEN | 1 (disabled)                              | No self-programming needed
 // DWEN      | 1 (disabled)                              | debugWIRE not needed in production; consumes PB5
 //
-// avrdude fuse targets: -U lfuse:w:0x4a:m -U hfuse:w:0xfb:m
+// avrdude fuse targets: -U lfuse:w:0x4a:m -U hfuse:w:0xf9:m
 // 
 // Note: useful fuse tool here: https://www.engbedded.com/fusecalc/
 //

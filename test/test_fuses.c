@@ -12,7 +12,7 @@
 //
 // The fuse byte values are injected by the Makefile via -D so there is a single
 // source of truth (the Makefile's LFUSE/HFUSE/LFUSE85/HFUSE85 variables):
-//   -DT13_LFUSE=0x6a -DT13_HFUSE=0xfb -DT85_LFUSE=0x62 -DT85_HFUSE=0xdd
+//   -DT13_LFUSE=0x6a -DT13_HFUSE=0xf9 -DT85_LFUSE=0x62 -DT85_HFUSE=0xcc
 //
 // Datasheet references:
 //   ATtiny13A  rev. 8126F, "Fuse Bytes" (low/high byte bit maps)
@@ -27,13 +27,13 @@
 #  define T13_LFUSE 0x6a
 #endif
 #ifndef T13_HFUSE
-#  define T13_HFUSE 0xfb
+#  define T13_HFUSE 0xf9
 #endif
 #ifndef T85_LFUSE
 #  define T85_LFUSE 0x62
 #endif
 #ifndef T85_HFUSE
-#  define T85_HFUSE 0xdd
+#  define T85_HFUSE 0xcc
 #endif
 
 static int g_failures = 0;
@@ -98,8 +98,8 @@ static void verify_t13(void) {
     CHECK(field(hi, 4, 1) == 1, "t13 SELFPRGEN must be disabled (1); hfuse bit4=%u", field(hi,4,1));
     CHECK(field(hi, 3, 1) == 1, "t13 DWEN must be disabled (1) so PB5 stays RESET/ISP; hfuse bit3=%u", field(hi,3,1));
     CHECK(field(hi, 0, 1) == 1, "t13 RSTDISBL must be 1 (external RESET kept, ISP preserved); hfuse bit0=%u", field(hi,0,1));
-    // BODLEVEL[1:0] = (bit2,bit1). 0b01 == 2.7V on the ATtiny13A.
-    CHECK(field(hi, 1, 2) == 0x1, "t13 BODLEVEL[1:0] must be 0b01 (2.7V); got 0b%u%u",
+    // BODLEVEL[1:0] = (bit2,bit1). 0b00 == 4.3V on the ATtiny13A.
+    CHECK(field(hi, 1, 2) == 0x0, "t13 BODLEVEL[1:0] must be 0b00 (4.3V); got 0b%u%u",
           field(hi,2,1), field(hi,1,1));
 }
 
@@ -143,7 +143,7 @@ static void verify_t85(void) {
     CHECK(field(hi, 6, 1) == 1, "t85 DWEN must be disabled (1); hfuse bit6=%u", field(hi,6,1));
     CHECK(field(hi, 5, 1) == 0, "t85 SPIEN must be enabled (0) to keep ISP; hfuse bit5=%u", field(hi,5,1));
     CHECK(field(hi, 4, 1) == 0, "t85 WDTON must be 0 (WDT forced always-on, cannot be disabled by software); hfuse bit4=%u", field(hi,4,1));
-    CHECK(field(hi, 0, 3) == 0x5, "t85 BODLEVEL[2:0] must be 0b101 (2.7V); got 0x%x", field(hi,0,3));
+    CHECK(field(hi, 0, 3) == 0x4, "t85 BODLEVEL[2:0] must be 0b100 (4.3V); got 0x%x", field(hi,0,3));
 }
 
 int main(void) {
@@ -153,23 +153,23 @@ int main(void) {
 
     // -------------------------------------------------------------------------
     // CRITICAL CROSS-CHECK: the design spec (the design doc / bypass_core.c header)
-    // states "enable brown-out detection (BOD) at 2.7V". Verify BOTH parts
-    // actually encode 2.7V BOD, since a wrong BODLEVEL is invisible to every
+    // states "enable brown-out detection (BOD) at 4.3V". Verify BOTH parts
+    // actually encode 4.3V BOD, since a wrong BODLEVEL is invisible to every
     // other test (it only bites as brown-out glitches on real silicon).
     //
-    //   ATtiny13a: hfuse BODLEVEL[1:0] = (bit2,bit1); 0b01 == 2.7V.
-    //   ATtiny85:  hfuse BODLEVEL[2:0] = (bit2,bit1,bit0); 0b101 == 2.7V.
+    //   ATtiny13a: hfuse BODLEVEL[1:0] = (bit2,bit1); 0b00 == 4.3V.
+    //   ATtiny85:  hfuse BODLEVEL[2:0] = (bit2,bit1,bit0); 0b100 == 4.3V.
     // -------------------------------------------------------------------------
     {
         unsigned t13_bodlevel = field((unsigned)T13_HFUSE, 1, 2);
-        CHECK(t13_bodlevel == 0x1,
-              "DESIGN INTENT: ATtiny13a BOD must be 2.7V (BODLEVEL=0b01). "
+        CHECK(t13_bodlevel == 0x0,
+              "DESIGN INTENT: ATtiny13a BOD must be 4.3V (BODLEVEL=0b00). "
               "Configured hfuse=0x%02x has BODLEVEL=0b%u%u",
               (unsigned)T13_HFUSE, field((unsigned)T13_HFUSE,2,1), field((unsigned)T13_HFUSE,1,1));
 
         unsigned t85_bodlevel = field((unsigned)T85_HFUSE, 0, 3);
-        CHECK(t85_bodlevel == 0x5,
-              "DESIGN INTENT: ATtiny85 BOD must be 2.7V (BODLEVEL=0b101). "
+        CHECK(t85_bodlevel == 0x4,
+              "DESIGN INTENT: ATtiny85 BOD must be 4.3V (BODLEVEL=0b100). "
               "Configured hfuse=0x%02x has BODLEVEL=0x%x",
               (unsigned)T85_HFUSE, t85_bodlevel);
     }

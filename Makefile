@@ -134,15 +134,15 @@ AVRDUDE_PART   ?= t13
 
 # Fuse bytes for this design (verified bit-by-bit; see bypass_core.c header):
 #   lfuse=0x4A : SPIEN on, CKDIV8 on (1.2MHz), SUT=14CK+64ms, int 9.6MHz RC, WDTON forced on
-#   hfuse=0xFB : 2.7V brown-out detection enabled; RSTDISBL/DWEN left safe
+#   hfuse=0xF9 : 4.3V brown-out detection enabled; RSTDISBL/DWEN left safe
 LFUSE = 0x4a
-HFUSE = 0xfb
+HFUSE = 0xf9
 
 # tinyx5 family fuse bytes (identical across ATtiny25/45/85):
 #   lfuse=0x62 : CKDIV8 on (1.0MHz), CKOUT off, SUT=14CK+64ms, int 8MHz RC
-#   hfuse=0xCD : 2.7V BOD, SPIEN on, RSTDISBL/DWEN safe, WDTON forced on
+#   hfuse=0xCC : 4.3V BOD, SPIEN on, RSTDISBL/DWEN safe, WDTON forced on
 LFUSE_X5 = 0x62
-HFUSE_X5 = 0xcd
+HFUSE_X5 = 0xcc
 
 # Common avrdude flags for the ATtiny13a (programmer + part).
 AVRDUDE_FLAGS = -c $(PROGRAMMER) -p $(AVRDUDE_PART)
@@ -632,7 +632,7 @@ test-cbmc:
 
 # Fuse-byte verification: decode the EXACT lfuse/hfuse bytes this Makefile will
 # burn (LFUSE/HFUSE for t13a, LFUSE_X5/HFUSE_X5 for the tinyx5 family) and assert
-# they match the documented design intent (clock, BOD 2.7V, ISP/RESET preserved,
+# they match the documented design intent (clock, BOD 4.3V, ISP/RESET preserved,
 # etc). Catches a wrong fuse before it reaches silicon -- invisible to every
 # other test. The tinyx5 fuse bytes are identical across ATtiny25/45/85, so the
 # checker's T85_* bytes cover the whole family.
