@@ -526,7 +526,7 @@ test-fast: test
 # overrides). Use before tagging a release or signing off for hardware.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-sim test-sim-secondary test-mutation coverage-check
+test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-mutation test-sim test-sim-secondary coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).

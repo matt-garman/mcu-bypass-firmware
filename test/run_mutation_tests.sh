@@ -39,24 +39,24 @@ PROJ_DIR="$(dirname "$SCRIPT_DIR")"
 # Each entry: file<TAB>sed-expression<TAB>make-target<TAB>description
 # The sed expression uses '@' as delimiter to avoid clashing with C operators.
 MUTATIONS=(
-# --- core debounce algorithm (bypass_core.c) -----------------------------------
-"bypass_core.c	s@++debounce_counter_@--debounce_counter_@	test-sim-cd4053	ISR integrator: increment-on-press becomes decrement (counter never rises -> never toggles)"
-"bypass_core.c	s@debounce_counter_ >= PRESSED_THRESH@debounce_counter_ > PRESSED_THRESH@	test-sim-cd4053	press threshold off-by-one (>= becomes >); lock-step must catch the 1-tick divergence"
+# --- core debounce algorithm (bypass_pure.c) -----------------------------------
+"bypass_pure.c	s@{ ++counter; }@{ --counter; }@	test-sim-cd4053	ISR integrator: increment-on-press becomes decrement (counter never rises -> never toggles)"
+"bypass_pure.c	s@ctx.debounce_counter >= PRESSED_THRESH@ctx.debounce_counter > PRESSED_THRESH@	test-sim-cd4053	press threshold off-by-one (>= becomes >); lock-step must catch the 1-tick divergence"
 "bypass_core.c	s@PORTB |=  (1 << LED_PIN)@PORTB \&= (uint8_t)~(1 << LED_PIN)@	test-sim-cd4053	set_engaged LED output inverted (lights become dark)"
 "bypass_config.h	s@#define PRESSED_THRESH (8U)@#define PRESSED_THRESH (4U)@	test-sim-cd4053	press threshold shortened 8->4 (timing/noise-count regression)"
 "bypass_config.h	s@#define RELEASE_THRESH (25U)@#define RELEASE_THRESH (15U)@	test-sim-cd4053	release lock-out shortened 25->15 (noise-count regression)"
-# --- ISR bounds guards (bypass_core.c) -----------------------------------------
-"bypass_core.c	s@if (debounce_counter_ < RELEASE_THRESH) { ++debounce_counter_; }@++debounce_counter_;@	test-sim-cd4053	ISR increment: remove saturation guard (counter wraps from 255->0 after 256 sustained ticks)"
-"bypass_core.c	s@if (debounce_counter_ > 0U) { --debounce_counter_; }@--debounce_counter_;@	test-sim-cd4053	ISR decrement: remove underflow guard (counter wraps 0->255 on release; lock-step catches divergence)"
-# --- lockout mechanism (bypass_core.c) -----------------------------------------
-"bypass_core.c	s@debounce_counter_ = RELEASE_THRESH;@debounce_counter_ = 0;@g	test-sim-cd4053	toggle lockout: counter reset to 0 instead of RELEASE_THRESH (immediate re-arm, no hold lockout)"
-"bypass_core.c	s@program_state_ = RELEASE_DEBOUNCE_WAIT;@program_state_ = PRESS_DEBOUNCE_WAIT;@g	test-sim-cd4053	toggle lockout: stays in PRESS_DEBOUNCE_WAIT after toggle (counter=25 >= 8 -> immediate re-toggle cascade)"
+# --- ISR bounds guards (bypass_pure.c) -----------------------------------------
+"bypass_pure.c	s@if (debounce_counter < RELEASE_THRESH) { ++counter; }@++counter;@	test-sim-cd4053	ISR increment: remove saturation guard (counter wraps from 255->0 after 256 sustained ticks)"
+"bypass_pure.c	s@if (debounce_counter > 0U) { --counter; }@--counter;@	test-sim-cd4053	ISR decrement: remove underflow guard (counter wraps 0->255 on release; lock-step catches divergence)"
+# --- lockout mechanism (bypass_pure.c) -----------------------------------------
+"bypass_pure.c	s@res.lockout_value = RELEASE_THRESH;@res.lockout_value = 0;@g	test-sim-cd4053	toggle lockout: counter reset to 0 instead of RELEASE_THRESH (immediate re-arm, no hold lockout)"
+"bypass_pure.c	s@res.program_state = RELEASE_DEBOUNCE_WAIT;@res.program_state = PRESS_DEBOUNCE_WAIT;@g	test-sim-cd4053	toggle lockout: stays in PRESS_DEBOUNCE_WAIT after toggle (counter=25 >= 8 -> immediate re-toggle cascade)"
 # --- watchdog handshake (bypass_core.c) ----------------------------------------
 "bypass_core.c	s@wdt_reset(); // \"pet the dog\"@(void)0; /* MUTANT: no WDT reset */@	test-sim-cd4053	WDT pet removed from main loop: watchdog fires within ~250ms; test_watchdog_not_tripped_normally catches it"
 "bypass_core.c	s@timer_isr_called_ = TIMER_ISR_CALLED;@timer_isr_called_ = TIMER_ISR_NOT_CALLED;@	test-sim-cd4053	WDT handshake: ISR clears its own flag -> main never sees CALLED -> WDT fires within timeout"
 # --- main-loop sanity guard / toggle dispatch (bypass_core.c) -------------------
-"bypass_core.c	s@if ( (program_state_ > RELEASE_DEBOUNCE_WAIT)@if ( 0 \&\& (program_state_ > RELEASE_DEBOUNCE_WAIT)@	test-sim-cd4053	sanity guard disabled: DDRB/state corruption goes undetected; corruption test catches it"
-"bypass_core.c	s@else { set_bypass_state(); }@else { set_engaged_state(); }@	test-sim-cd4053	toggle: always sets ENGAGED (never returns to BYPASS); round-trip and lock-step tests catch it"
+"bypass_core.c	s@if ( (ctx_.program_state > RELEASE_DEBOUNCE_WAIT)@if ( 0 \&\& (ctx_.program_state > RELEASE_DEBOUNCE_WAIT)@	test-sim-cd4053	sanity guard disabled: DDRB/state corruption goes undetected; corruption test catches it"
+"bypass_pure.c	s@res.effect_state = BYPASS;@res.effect_state = ENGAGED;@	test-sim-cd4053	toggle: always sets ENGAGED (never returns to BYPASS); round-trip and lock-step tests catch it"
 # --- CD4053 simple output driver -----------------------------------------------
 "bypass_output_cd4053_simple.c	s@pin_set_high(CD4053_PIN)@pin_set_low(CD4053_PIN)@	test-sim-cd4053	engaged routes CD4053 the wrong way (PB2 stuck low); control-output test catches it"
 # --- TQ2 relay output driver ---------------------------------------------------
