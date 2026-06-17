@@ -136,7 +136,9 @@
       "Bash(make test-cbmc *)",
       "Bash(make test-stack-bound *)",
       "Bash(make test-flash-budget *)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(grep -E '\\\\.\\(c|h|mk|sh\\)$')",
+      "Bash(wait)"
     ]
   }
 }
