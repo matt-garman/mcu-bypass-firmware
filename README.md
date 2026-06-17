@@ -38,10 +38,12 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
 
 ## Testing and Validation Features
 
-    - MISRA-C 2012 compliant
-    - Host-compilable algorithm copy for exhaustive fuzz testing
-    - Comprehensive simavr-based functional testing
+    - [MISRA-C](https://en.wikipedia.org/wiki/MISRA_C) 2012 compliant
+    - [CBMC](https://www.cprover.org/cbmc/) formal analysis
     - Provable correctness via formal state analysis
+    - Core debounce algorithm written as pure functionality, thus
+      host-compilable for exhaustive fuzz testing
+    - Exhaustive simavr-based functional testing
 
 
 # Quickstart
