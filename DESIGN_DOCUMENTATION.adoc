@@ -408,29 +408,34 @@ Specific tests verify specific requirements, as show in the following table:
 == Resource Utilization
 
 The firmware is deliberately tiny, leaving large headroom on every supported
-part. Flash figures below are reported by `avr-size`; static data is the four
-1-byte global state variables (`effect_state_`, `program_state_`,
-`timer_isr_called_`, `debounce_counter_`); and peak stack is the empirical
-high-water mark measured by the simavr stack-canary test (see Testing and
-Validation above).
+part. Flash figures below are reported by `avr-size`; static data comprises
+two global variables — `timer_isr_called_` (1 byte, shared between main and
+the timer ISR) and `ctx_` (3-byte `debounce_context_t` struct containing
+`program_state`, `effect_state`, and `debounce_counter`) — totalling 4 bytes;
+and peak stack is the empirical high-water mark measured by the simavr
+stack-canary test (see Testing and Validation above).
 
 .Table Flash Utilization by Variant (measured, `avr-size`)
 |===
 | Part      | Variant | Flash               | of device flash
 
-| ATtiny13a | cd4053  | 470 bytes           | 46% of 1 KB
-| ATtiny13a | relay   | 510 bytes           | 50% of 1 KB
-| ATtiny13a | mute    | 518 bytes           | 51% of 1 KB
-| ATtiny85  | cd4053  | 484 bytes           | 6% of 8 KB
-| ATtiny85  | relay   | 524 bytes           | 6% of 8 KB
-| ATtiny85  | mute    | 532 bytes           | 7% of 8 KB
+| ATtiny13a | cd4053  | 612 bytes           | 60% of 1 KB
+| ATtiny13a | relay   | 652 bytes           | 64% of 1 KB
+| ATtiny13a | mute    | 660 bytes           | 65% of 1 KB
+| ATtiny45  | cd4053  | 638 bytes           | 16% of 4 KB
+| ATtiny45  | relay   | 678 bytes           | 17% of 4 KB
+| ATtiny45  | mute    | 686 bytes           | 17% of 4 KB
+| ATtiny85  | cd4053  | 638 bytes           | 8% of 8 KB
+| ATtiny85  | relay   | 678 bytes           | 8% of 8 KB
+| ATtiny85  | mute    | 686 bytes           | 8% of 8 KB
 |===
 
-SRAM use is dominated by 4 bytes of static data; peak stack measured 10 bytes
-across all variants. On the most constrained part, the ATtiny13a, with 64
-bytes of SRAM: that leaves roughly 52 bytes of headroom (about 12 of 64 bytes
-in use). The tinyx5 family has far more of both flash and SRAM (the ATtiny85
-uses approximaly 6% of flash and under 3% of its 512 bytes of SRAM).
+SRAM use is dominated by 4 bytes of static data; peak stack measured 31 bytes
+(relay and mute variants) and 29 bytes (cd4053). On the most constrained part,
+the ATtiny13a, with 64 bytes of SRAM: worst-case consumption is 35 bytes
+(4 static + 31 stack), leaving roughly 29 bytes of free headroom. The tinyx5
+family has far more of both flash and SRAM (the ATtiny85 uses approximately
+8% of flash and approximately 7% of its 512 bytes of SRAM).
 
 This headroom is a deliberate design property: it leaves ample room for future
 features without approaching any resource limit, and it is enforced as a test:
