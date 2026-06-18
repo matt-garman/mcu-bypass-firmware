@@ -220,6 +220,48 @@ does not *compare* the behavioural results between compiler versions; adding a
 `test-cross-compiler` target that builds with `CC=avr-gcc-12` (if installed)
 and re-runs `test-sim` would close this gap.
 
+**Stuck-switch long-duration test.** The design documents that a mechanically
+stuck (permanently closed) switch results in the firmware sitting in
+RELEASE_DEBOUNCE_WAIT indefinitely with no recovery — this is intentional.
+However, no test explicitly drives the footswitch permanently low for an
+extended simulated duration (hours) and asserts exactly zero toggles occur.
+The existing `test_long_hold_single_toggle` holds for 3-5 seconds; a
+multi-hour simavr run (or a golden-model run, which is much faster) with a
+permanent low input would make this documented behavior an explicit, enforced
+guarantee. Mechanically trivial: `drive(&m, 1, 3600000)` and assert
+`toggle_count == 1` (the one toggle from the initial press). The golden-model
+path is preferred for duration since simavr real-time ratio makes hours of
+simulated time impractical.
+
+**WDT pet frequency measurement.** The existing `test_watchdog_not_tripped_normally`
+confirms the WDT does *not* fire during normal operation, but does not verify
+the *rate* at which `wdt_reset()` is called. A more precise assertion: during
+steady-state idle operation, `wdt_reset()` should be called at approximately
+1 kHz (once per 1ms tick, gated by the `timer_isr_called_` handshake). This
+could be verified in the simavr harness by counting the number of times the
+main loop reaches the `wdt_reset()` call site over a known simulated time
+window (e.g., count over 100ms, assert 95-105 calls). Requires either a
+breakpoint hook on the `wdt_reset()` instruction sequence or a cycle-count
+measurement between consecutive WDT resets via the WDT register model. Catches
+a regression where the `timer_isr_called_` handshake is broken in a way that
+still allows occasional WDT pets (e.g., if the flag is cleared but the
+`wdt_reset()` is skipped on some iterations).
+
+**Negative static_assert verification.** The `init()` function contains several
+`static_assert` guards that enforce critical configuration constraints (e.g.,
+`RELEASE_THRESH > PRESSED_THRESH`, `PRESSED_THRESH > 0`, timer formula
+consistency). These are compile-time checks, so they are implicitly verified
+every time the firmware builds — but there is no test that confirms they
+*actually fire* when violated. A meta-test would: (a) create a throwaway copy
+of the source with a deliberately broken constraint (e.g., swap the threshold
+values in `bypass_config.h`); (b) attempt to compile; (c) assert the
+compilation fails with the expected `static_assert` diagnostic. This is
+analogous to the mutation testing approach but targets build-time guards
+rather than runtime behavior. Mechanically similar to `run_mutation_tests.sh`
+but checking for compile failure instead of test failure. Low effort (~30 min)
+and closes the gap where a future refactor could accidentally weaken or remove
+a `static_assert` without anyone noticing.
+
 ---
 
 ## Tier 3 — platinum-level / nice-to-have
@@ -309,6 +351,9 @@ left to the implementer" is itself evidence of thoroughness.
 | Power-supply ramp-up simulation              | 2.5  | 2–3 h     | Medium — real-world robustness  |
 | VCD waveform diff across output variants     | 2.5  | 1 h       | Low — visual/empirical artifact |
 | Cross-compiler verification                  | 2.5  | 2 h       | Medium — compiler-safety net    |
+| Stuck-switch long-duration test              | 2.5  | 30 min    | Medium — enforces documented    |
+| WDT pet frequency measurement                | 2.5  | 1–2 h     | Medium — catches handshake bugs |
+| Negative static_assert verification          | 2.5  | 30 min    | Low — build-guard meta-test     |
 | Hardware-validation procedure doc            | 3    | 2–3 h     | High — primary-part WDT gap     |
 | KLEE in CI                                   | 3    | 2 h       | Nice-to-have                    |
 | tinyAVR 2-Series (ATtiny202) support         | 3    | 2–4 days  | Nice-to-have; simavr gap        |
