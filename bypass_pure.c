@@ -9,9 +9,16 @@
 // saturating integrator update
 // footswitch pin zero (low) == switch closed
 // footswitch pin one (high) == switch open
+//
+// NOTE: ideally we'd make the debounce_counter const, since it is not
+// modified; however, making it cost makes both parameters const, and that
+// triggers clang-tidy errors about too-easily-swappable parameters.  MISRA-C
+// doesn't allow modifying parameters anyway, hence why we immediately make a
+// local copy of the parameter.  So the parameter is essentially const in
+// practice, though not explicitly enforced by the compiler.
 uint8_t debounce_integrate(
         pin_state_t const pin_state, // PIN_STATE_LOW means footswitch is closed
-        uint8_t           debounce_counter) { // not explicitly const, but not modified
+        uint8_t           debounce_counter) {
 
     uint8_t counter = debounce_counter;
 

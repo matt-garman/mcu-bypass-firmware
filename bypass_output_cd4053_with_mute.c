@@ -31,11 +31,24 @@ void hw_init_ddrb_setup(void) {
 
 
 // See "Improved Scheme With Muting" in DESIGN_DOCUMENTATION.adoc
+//
+// NOTE: both set_bypass and set_engaged claim a re-assertion of the state
+//       from which we're switching.  Note that "re-assertion" is not
+//       technically true for the set_bypass function at startup (or after a
+//       RESET) - this is because the hardware design intent is to default to
+//       bypass state at power-on.  In effect, at power-on, the following
+//       happens:
+//          - the effect state is bypass due to hardware wiring
+//          - the MCU boots, and immediately calls hw_set_bypass_state()
+//          - the engaged state is "re-asserted": in this specific case, it
+//            actually flips to engaged, then...
+//          - immediately flips to bypass
+//
 void hw_set_bypass_state(void) {
     hw_pin_set_high(CD4053_CTL1); // re-assert previous ENGAGED state
     hw_pin_set_high(CD4053_CTL2);
 
-    hw_led_pin_set_low();        // dark status LED
+    hw_led_pin_set_low(); // dark status LED
 
     hw_pin_set_low(CD4053_CTL1); // MUTE
     _delay_ms(CD4053_MUTE_DELAY_MS); // busy sleep for pre-switch mute time
@@ -47,7 +60,7 @@ void hw_set_engaged_state(void) {
     hw_pin_set_low(CD4053_CTL1); // re-assert previous BYPASS state
     hw_pin_set_low(CD4053_CTL2);
 
-    hw_led_pin_set_high();       // light status LED
+    hw_led_pin_set_high(); // light status LED
 
     hw_pin_set_high(CD4053_CTL2); // MUTE
     _delay_ms(CD4053_MUTE_DELAY_MS); // busy sleep for pre-switch mute time
