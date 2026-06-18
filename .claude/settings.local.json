@@ -138,7 +138,17 @@
       "Bash(make test-flash-budget *)",
       "Bash(git *)",
       "Bash(grep -E '\\\\.\\(c|h|mk|sh\\)$')",
-      "Bash(wait)"
+      "Bash(wait)",
+      "Bash(mkdir mut_test)",
+      "Bash(cp -r /mnt/home/matt/development/github/mcu-bypass-firmware/* mut_test/)",
+      "Bash(sed -i 's@ctx.program_state = RELEASE_DEBOUNCE_WAIT;@ctx.program_state = PRESS_DEBOUNCE_WAIT;@' mut_test/bypass_pure.c)",
+      "Bash(make -C mut_test test-model-check)",
+      "Bash(rm -rf /tmp/mut_test)",
+      "Bash(mkdir -p /tmp/mut_test/test)",
+      "Bash(cp /mnt/home/matt/development/github/mcu-bypass-firmware/*.c /mnt/home/matt/development/github/mcu-bypass-firmware/*.h /mnt/home/matt/development/github/mcu-bypass-firmware/Makefile /tmp/mut_test/)",
+      "Bash(cp /mnt/home/matt/development/github/mcu-bypass-firmware/test/*.c /mnt/home/matt/development/github/mcu-bypass-firmware/test/*.h /tmp/mut_test/test/)",
+      "Bash(sed -i 's@ctx.program_state = RELEASE_DEBOUNCE_WAIT;@ctx.program_state = PRESS_DEBOUNCE_WAIT;@' /tmp/mut_test/bypass_pure.c)",
+      "Bash(sed -i 's@ctx.debounce_counter = RELEASE_THRESH;@ctx.debounce_counter = 0U;@' /tmp/mut_test/bypass_pure.c)"
     ]
   }
 }
