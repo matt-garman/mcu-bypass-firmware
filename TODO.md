@@ -1,11 +1,17 @@
 # Remaining work toward textbook reference quality
 
-Status note (2026-06-16): the firmware and test/validation suite have been
-meta-reviewed. The firmware has no known correctness defects; `make test`
-passes clean across all three output variants and both MCU families (ATtiny13a
-and tinyx5), with 100% golden-model line coverage. The items below are
-deferrable polish and credibility work — none are bugs. Anything that *is* a
-bug gets fixed immediately, not parked here.
+Status note (2026-06-18): the firmware and test/validation suite have been
+meta-reviewed (design doc, firmware implementation, golden-model accuracy,
+test correctness, and additional verification opportunities). The firmware has
+no known correctness defects; `make test` passes clean across all three output
+variants and both MCU families (ATtiny13a and tinyx5), with 100% golden-model
+line coverage. The meta-review confirmed: (1) the design meets its stated goals,
+(2) no bugs, race conditions, or footguns were found in the firmware, (3) the
+golden model matches the firmware exactly via three independent verification
+paths, (4) all existing tests are correct and meaningful, and (5) identified
+seven additional pre-hardware verification opportunities (added as Tier 2.5).
+The items below are deferrable polish and credibility work — none are bugs.
+Anything that *is* a bug gets fixed immediately, not parked here.
 
 Completed since the previous revision (kept here only as a record; safe to
 delete): README.md; design doc renamed to `DESIGN_DOCUMENTATION.adoc`; timer
@@ -61,6 +67,102 @@ frame exceeds `STACK_MAX_FRAME` (default 32 B). Observed frames: ISR 19 B,
 `avr-size` on each ATtiny13a variant ELF and fails if Program bytes exceed
 `FLASH_T13_BUDGET`% of 1 KB (default 90% = 921 B). Current usage: cd4053 612 B
 (59.8%), mute 660 B (64.5%), relay 652 B (63.7%). Wired into `make test`.
+
+---
+
+## Tier 2.5 — additional software verification (pre-hardware)
+
+These items were identified during a full meta-review of the firmware, design
+doc, and test suite (2026-06-18). All close residual verification gaps that can
+be addressed in software before physical hardware testing begins.
+
+**AVR instruction-level fault injection.** The existing fault-injection suite
+corrupts individual SRAM globals (`program_state_`, `effect_state_`,
+`timer_isr_called_`) and I/O registers (DDRB, PORTB, TIMSK). A more powerful
+approach: corrupt *arbitrary* SRAM bytes (stack, unused RAM, BSS padding) and
+verify the firmware's sanity-check + WDT-recovery path still fires. simavr
+supports writing to any SRAM address via `avr_core_watch_write()`, so this is
+mechanically straightforward. Specific scenarios: (a) corrupt the stack pointer
+and verify the firmware doesn't silently survive with a broken call chain; (b)
+corrupt a byte in the unused SRAM region and verify no side effect (defense in
+depth); (c) corrupt `ctx_` at a struct offset that doesn't correspond to a
+named field (padding, though `-fshort-enums` + `static_assert` make this
+unlikely). This extends the existing `test_fault_inject_*` family in
+`test_sim.c`.
+
+**Extended lock-step co-sim with variant-specific control outputs.** The
+`test_lockstep_cosim()` test compares firmware internal state against the golden
+model every tick, and verifies the LED tracks `effect_state`. For the CD4053
+simple variant it also checks PB2. Extending this to the relay and mute variants
+would close a coverage gap: currently the relay pulse timing and mute window are
+only verified by dedicated single-scenario tests (`test_control_relay_pulse`,
+`test_control_mute_sequence`), not by the exhaustive random-input co-sim. A
+lock-step extension would verify that across thousands of random ticks, PB2/PB3
+*always* end up in the correct steady state (both low for bypass, both high for
+engaged, coils parked low for relay) after any toggle. Requires modeling the
+variant's pin behavior in the lock-step oracle (a small state machine for relay
+coil pulses / mute sequencing, or simply checking steady-state levels after a
+settle window).
+
+**Power-on-pressed in simavr.** The simavr harness sets the footswitch IRQ
+*before* the firmware starts (via `sim_reset(1)`), which correctly exercises
+`debounce_init_context(PIN_STATE_LOW)`. However, the simavr test for this case
+(`test_power_on_pressed`) has a known limitation: after a WDT reset, simavr
+clears PINB to 0x00, which is inconsistent with the externally-driven IRQ
+level. The golden model and model-check both cover the power-on-pressed logic
+exhaustively. Closing the simavr gap would require either (a) a simavr patch to
+preserve IRQ-driven input levels across reset, or (b) re-establishing the
+footswitch IRQ drive immediately after each simavr reset. Option (b) is
+mechanically feasible in the test harness; the WDT-backstop test already
+partially works around this.
+
+**Formal verification of out-of-range counter recovery.** The model check and
+CBMC proofs assume `debounce_counter` is always in `[0, RELEASE_THRESH]`. CBMC's
+`prove_integrate()` already proves the *closure* property for in-range inputs
+(`dc <= RELEASE_THRESH` implies `out <= RELEASE_THRESH`). An additional proof
+that a *corrupted* counter above `RELEASE_THRESH` is safely brought back into
+range by repeated integrator steps would verify defense in depth against an SEU
+that flips the counter to an out-of-range value. This is a small extension to
+`test_cbmc.c`: a new harness with `dc` unconstrained over the full `uint8_t`
+range, proving that after N "released" steps the counter returns to `[0,
+RELEASE_THRESH]`. (The integrator already handles this correctly — it simply
+decrements any counter > 0 — but the formal proof would make this an explicit
+guarantee rather than an implicit one.)
+
+**Formal verification of output drivers.** The output drivers (relay, mute,
+CD4053) contain blocking delays and multi-step pin sequences. They are tested by
+scenario-based simavr tests but are not formally verified. A state-machine model
+of each driver could be proved to: (a) never leave both relay coils energized
+simultaneously; (b) always park coils low after a pulse; (c) never enter an
+invalid mute/engage/bypass pin combination. The drivers are small enough
+(~30-60 lines each) that a CBMC proof or exhaustive state-space check is
+feasible. The main obstacle is that the drivers call `_delay_ms()` (a busy-wait
+loop), which CBMC cannot symbolically execute; the workaround is to stub
+`_delay_ms()` as a no-op and verify the pin sequence logic in isolation.
+
+**Long-duration soak test.** A 24-hour simulated soak test with random input
+patterns would stress the firmware's WDT handshake and sanity-check paths at a
+timescale the current tests don't reach. Mechanically trivial: a `make
+test-soak` target with `SIM_RANDOM_NOISE_DURATION_MS=86400000u` (or
+configurable). The existing test infrastructure supports arbitrary duration
+overrides. The value is in catching extremely rare state drift or WDT-pet
+timing edge cases that the current 5-60s runs cannot exercise. Caveat: at
+simavr's real-time ratio, 24 hours of simulated time may take many hours of
+wall-clock time; a shorter but still multi-minute soak (e.g., 10 minutes
+simulated = 600000 ms) is a practical compromise for CI, with the full soak
+available for pre-release validation.
+
+**ISR-timing-jitter stress test.** On real hardware, the timer ISR latency can
+vary (e.g., if `cli()` is held across the compare-match point during a toggle
+that calls `hw_force_wdt_reset()`). The existing `test_clean_press_phase_jitter`
+partially addresses this by scattering footswitch edges across the 1ms tick
+window. A more aggressive version would: (a) deliberately delay ISR servicing
+by random cycle counts (possible via simavr cycle-level control in
+`run_cycles()`); (b) verify that the firmware's debounce behavior is insensitive
+to ISR jitter — the counter increments by exactly 1 per tick regardless of when
+within the tick the ISR fires. The firmware is designed for this (the ISR
+samples the pin once per compare-match), so the test would confirm an existing
+design property rather than find a new bug.
 
 ---
 
@@ -139,6 +241,13 @@ left to the implementer" is itself evidence of thoroughness.
 | Minimum-tap-interval test                    | 2    | done      | Medium — closes traceability    |
 | `-fstack-usage` static bound                 | 2    | done      | Medium — complements HWM test   |
 | Flash-utilization budget assertion           | 2    | done      | Medium — resource budget        |
+| AVR instruction-level fault injection        | 2.5  | 2–3 h     | High — extends fault coverage   |
+| Extended lock-step with variant ctrl outputs | 2.5  | 2–4 h     | High — closes co-sim gap        |
+| Power-on-pressed in simavr                   | 2.5  | 1–2 h     | Medium — simavr quirk workaround|
+| Out-of-range counter recovery proof          | 2.5  | 30 min    | Medium — formal defense in depth|
+| Formal verification of output drivers        | 2.5  | 3–4 h     | Medium — driver correctness     |
+| Long-duration soak test                      | 2.5  | 1 h       | Medium — rare-edge-case stress  |
+| ISR-timing-jitter stress test                | 2.5  | 1–2 h     | Low — confirms design property  |
 | Hardware-validation procedure doc            | 3    | 2–3 h     | High — primary-part WDT gap     |
 | KLEE in CI                                   | 3    | 2 h       | Nice-to-have                    |
 | tinyAVR 2-Series (ATtiny202) support         | 3    | 2–4 days  | Nice-to-have; simavr gap        |
