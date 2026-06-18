@@ -163,7 +163,7 @@ user.  The release-debounce, or lock-out period, is longer so as to
       33ms at nominal clock.
 
 
-== GPIO pin assignment
+== GPIO Pin Assignment, Simple CD4053 Scheme
 
     * NOTE: PB5 serves multiple roles (e.g. physical RESET pin) in
       ATTiny13a; deliberately not used in this design
