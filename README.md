@@ -30,7 +30,7 @@ The firmware currently supports circuit-switching via:
 
   - Panasonic TQ-L2-5v mechanical relay
   - CD4053 or TMUX4053 electrical analog switches, two variants:
-    - Simple scheme only two of the 4053 DPDT switches
+    - Simple scheme using only two DPDT switches
     - Fancier scheme using all three DPDT switches with a 5ms mute
 
 See the [Design Documentation](DESIGN_DOCUMENTATION.adoc) for the control line

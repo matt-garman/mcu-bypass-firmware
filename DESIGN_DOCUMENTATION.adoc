@@ -14,7 +14,7 @@
 
 == High-Level Functional Description
 
-This ATTiny13a will be used with a physical human-operated footswitch
+The ATtiny13a/ATtinyX5 will be used with a physical human-operated footswitch
 (momentary, normally open), and an electric signal switching IC (CD4053 or
 TMUX4053). These components comprise a sub-circuit of a larger effect circuit,
 typically for use in a pedal.
@@ -32,7 +32,7 @@ Therefore, the MCU needs to:
     * maintain state (engage/bypass)
     * light or dark the status LED
     * respond to footswitch presses (including debounce)
-    * control the actual signal switching mechanism (4053)
+    * control the actual signal switching mechanism (4053/relay)
 
 At power-on, the circuit should default to the bypass state with the
 LED dark (no state persistence between power cycles).
@@ -57,8 +57,8 @@ adverse conditions:
     * Resiliency against EMI/RFI-induced false state changes in
       expected operating environments
     * Switch bounce must never generate multiple state changes
-    * Holding the switch down for several seconds must not generate additional
-      state changes
+    * Holding the switch down for several seconds must not generate
+      additional state changes
     * Fast, repeated taps should always be recognized (see Caveats
       and Limitations)
     * Latency should feel instantaneous as possible given switch
@@ -74,16 +74,16 @@ adverse conditions:
       actual sampling is roughly 0.9-1.1ms.  The algorithm still
       holds, and timing variations of this magnitude will not be
       perceptible to the user and are therefore acceptable.
-    * Pop/click suppression is out-of-scope for this design; a
-      future revision will incorporate a temporary muting scheme
-      during engaged-bypass transitions
-    * The design could be made more battery-friendly by use of a
-      DEEP_SLEEP state when waiting for a footswitch press; that may
-      be considered for a future revision - but the current design
-      bias is towards simplicity and verifiability
-    * A mechanically stuck switch results in permanent active-mode
-      power draw and no recovery; this is by design
-    * "Fast" repeated taps: "fast" generally means at least
+    * Pop/click suppression is provided by the "4053 with muting"
+      variant; the other two schemes (simple 4053, relay) do not
+      have explicit pop/click suppression
+    * The design could arguably be made more battery-friendly by use
+      of a DEEP_SLEEP state when waiting for a footswitch press;
+      that may be considered for a future revision - but the current
+      design bias is towards simplicity and verifiability
+    * By design, no recovery is currently provided for a
+      mechanically stuck switch
+    * "Fast repeated taps": _fast_ generally means at least
       33 milliseconds between presses under ideal conditions; time
       between recognized repeated taps will be longer in noisy
       environments, or when using old switches, etc
@@ -277,7 +277,7 @@ PCB space, the TVS diode and ferrite bead can be omitted.
 === Circuit Net Naming Conventions
 
     * JOU = output jack, i.e. final output signal to next device/amp
-    * DRY = buffered input signal
+    * INP = input signal
     * FXO = effect output/return
     * FXN = effect input/send
 
@@ -305,7 +305,7 @@ PCB space, the TVS diode and ferrite bead can be omitted.
  B0 = FXO
  B1 = C1
 
- CCOM = DRY
+ CCOM = INP
  C0 = FXN
  C1 = B1
 
@@ -315,17 +315,17 @@ PCB space, the TVS diode and ferrite bead can be omitted.
 
 .Table Simple Scheme: Truth Table
 |===
-| MCU | CTL | BCOM | JOU | CCOM | DRY | FXN      | FXO      | program state 
+| MCU | CTL | BCOM | JOU | CCOM | INP | FXN      | FXO      | program state 
 
-| 0   | 1   | B1   | DRY | C1   | JOU | floating | floating | BYPASS
-| 1   | 0   | B0   | FXO | C0   | FXN | DRY      | JOU      | ENGAGE
+| 0   | 1   | B1   | INP | C1   | JOU | floating | floating | BYPASS
+| 1   | 0   | B0   | FXO | C0   | FXN | INP      | JOU      | ENGAGE
 |===
 
 
 === Improved Scheme With Muting
 
  ACOM = FXN
- A0 = DRY
+ A0 = INP
  A1 = GND
 
  BCOM = GND
@@ -334,7 +334,7 @@ PCB space, the TVS diode and ferrite bead can be omitted.
 
  CCOM = JOU
  C0 = FXO
- C1 = DRY
+ C1 = INP
 
  CTL1 = combined control bus for ASEL and BSEL
  CTL2 = control bus for CSEL
@@ -345,12 +345,12 @@ PCB space, the TVS diode and ferrite bead can be omitted.
 
 .Table Improved Scheme With Muting: Truth Table
 |===
-| MCU1 | CTL1 | MCU2 | CTL2 | ACOM | BCOM | CCOM | DRY      | FXN | FXO | JOU | Program State
+| MCU1 | CTL1 | MCU2 | CTL2 | ACOM | BCOM | CCOM | INP      | FXN | FXO | JOU | Program State
 
-| 0    | 1    | 0    | 1    | A1   | B1   | C1   | JOU      | GND | GND | DRY | BYPASS
+| 0    | 1    | 0    | 1    | A1   | B1   | C1   | JOU      | GND | GND | INP | BYPASS
 | 0    | 1    | 1    | 0    | A1   | B1   | C0   | floating | GND | GND | FXO | MUTE
-| 1    | 0    | 0    | 1    | A0   | B0   | C1   | FXN+JOU  | DRY |     | DRY | *_invalid_*
-| 1    | 0    | 1    | 0    | A0   | B0   | C0   | FXN      | DRY | FXO | FXO | ENGAGE
+| 1    | 0    | 0    | 1    | A0   | B0   | C1   | FXN+JOU  | INP |     | INP | *_invalid_*
+| 1    | 0    | 1    | 0    | A0   | B0   | C0   | FXN      | INP | FXO | FXO | ENGAGE
 |===
 
 
@@ -385,9 +385,8 @@ PCB space, the TVS diode and ferrite bead can be omitted.
 
 == Testing and Validation
 
-This project features and extensive testing, validation and
-simulation suite.  Specific tests verify specific requirements, as
-show in the following table:
+This project features an extensive testing, validation and simulation suite.
+Specific tests verify specific requirements, as show in the following table:
 
 
 .Table Requirements vs Test/Validation Case
@@ -427,14 +426,14 @@ Validation above).
 | ATtiny85  | mute    | 532 bytes           | 7% of 8 KB
 |===
 
-SRAM use is dominated by 4 bytes of static data; peak stack measured ≤10 bytes
-across all variants. On the most constrained part — the ATtiny13a, with 64
-bytes of SRAM — that leaves roughly 52 bytes of headroom (about 12 of 64 bytes
+SRAM use is dominated by 4 bytes of static data; peak stack measured 10 bytes
+across all variants. On the most constrained part, the ATtiny13a, with 64
+bytes of SRAM: that leaves roughly 52 bytes of headroom (about 12 of 64 bytes
 in use). The tinyx5 family has far more of both flash and SRAM (the ATtiny85
-uses ~6% of flash and under 3% of its 512 bytes of SRAM).
+uses approximaly 6% of flash and under 3% of its 512 bytes of SRAM).
 
 This headroom is a deliberate design property: it leaves ample room for future
-features without approaching any resource limit, and it is enforced as a test —
+features without approaching any resource limit, and it is enforced as a test:
 the stack high-water-mark check fails the build if free SRAM margin drops below
 its floor.
 
