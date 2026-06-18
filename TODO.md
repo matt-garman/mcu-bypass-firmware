@@ -164,6 +164,62 @@ within the tick the ISR fires. The firmware is designed for this (the ISR
 samples the pin once per compare-match), so the test would confirm an existing
 design property rather than find a new bug.
 
+**Golden-model vs model_step cross-validation.** The golden model
+(`test_logic_host.c`) re-implements the algorithm independently; `model_step.h`
+delegates to the real firmware's `bypass_pure.c`. Both produce identical results
+for the same input stream (verified implicitly by the lock-step co-sim and the
+model proofs), but no test drives the same random input sequence through *both*
+oracles and asserts byte-for-byte agreement. A small test (or assertion block
+added to an existing test) that compares `model_step.step()` output against
+`test_logic_host.c`'s `model_tick_isr()`+`model_main_step()` for a long random
+stream would provide a fourth independent verification path, catching any subtle
+discrepancy between the hand-written golden oracle and the compiled firmware
+logic that the current tests could theoretically miss if both relied on the same
+underlying `bypass_pure.c` functions.
+
+**Clock drift fine-grained sweep.** The existing `test_oscillator_drift_tolerance`
+checks the ±10% endpoints (drift factors 0.9 and 1.1). An exhaustive sweep
+across the full ±10% range in finer increments (e.g., 1% steps, drift factors
+0.90, 0.91, …, 1.10) would confirm that no threshold change or off-by-one-latency
+lurks at any intermediate frequency. The concern is narrow but real: the
+PRESSED_THRESH=8 tick boundary is calculated for the +10% worst case, but
+intermediate frequencies could expose a rounding or tick-count edge case in the
+ISR timing that the endpoints alone don't exercise. Mechanically simple: loop
+over drift factors, reset sim, measure latency, assert <10ms.
+
+**Power-supply ramp-up simulation.** The design assumes clean 5V at power-on, but
+real LDOs with large output capacitors can produce slow-rising VCC (tens of ms to
+reach full voltage). A slow ramp could cause the MCU to begin code execution
+before the internal oscillator stabilises, or before the footswitch's external
+pull-up reaches a valid logic high. simavr does not natively model voltage ramps,
+but the concern can be tested indirectly: (a) clock-prescale and GPIO setup are
+the first operations in `init()`, so verify these complete correctly under a
+bogus initial register state (inject pre-init register corruption via simavr's
+data array before the firmware starts); (b) confirm the 64ms SUT delay is
+sufficient for the LDO ramp by worst-case analysis (check the LP2950/AP7375
+datasheet startup time against 64ms). Item (b) is a documentation/analysis task.
+
+**VCD waveform diff across output variants.** The simavr trace target
+(`make trace`) currently produces a VCD for one variant at a time. A scripted
+comparison of the same footswitch input sequence across all three variants
+(CD4053, mute, relay) would: (a) confirm the LED (PB1) timing is byte-identical
+across variants; (b) verify that the mute and relay delays only add their fixed
+extra latency to PB2/PB3 transitions without perturbing the debounce state
+machine; (c) produce a visual artifact suitable for inclusion in the design
+documentation as empirical proof of variant-consistent behaviour. Requires
+generating three VCDs from the same input script and diffing the PB1 edges.
+
+**Cross-compiler verification.** The firmware is built with avr-gcc 7.3. A
+different AVR compiler (newer avr-gcc, or clang targeting AVR if available)
+could optimise differently, potentially altering register allocation, ISR
+prologue/epilogue timing, or the volatile-access ordering that the sanity checks
+rely on. Building the firmware with an alternative compiler and running the full
+simavr suite would catch compiler-specific behavioural changes. The Makefile's
+existing `TOOLCHAIN_STAMP` already triggers a rebuild on compiler change, but
+does not *compare* the behavioural results between compiler versions; adding a
+`test-cross-compiler` target that builds with `CC=avr-gcc-12` (if installed)
+and re-runs `test-sim` would close this gap.
+
 ---
 
 ## Tier 3 — platinum-level / nice-to-have
@@ -248,6 +304,11 @@ left to the implementer" is itself evidence of thoroughness.
 | Formal verification of output drivers        | 2.5  | 3–4 h     | Medium — driver correctness     |
 | Long-duration soak test                      | 2.5  | 1 h       | Medium — rare-edge-case stress  |
 | ISR-timing-jitter stress test                | 2.5  | 1–2 h     | Low — confirms design property  |
+| Golden-model vs model_step cross-validation  | 2.5  | 1–2 h     | Medium — fourth oracle path     |
+| Clock drift fine-grained sweep               | 2.5  | 1 h       | Low — narrow but real edge case |
+| Power-supply ramp-up simulation              | 2.5  | 2–3 h     | Medium — real-world robustness  |
+| VCD waveform diff across output variants     | 2.5  | 1 h       | Low — visual/empirical artifact |
+| Cross-compiler verification                  | 2.5  | 2 h       | Medium — compiler-safety net    |
 | Hardware-validation procedure doc            | 3    | 2–3 h     | High — primary-part WDT gap     |
 | KLEE in CI                                   | 3    | 2 h       | Nice-to-have                    |
 | tinyAVR 2-Series (ATtiny202) support         | 3    | 2–4 days  | Nice-to-have; simavr gap        |
