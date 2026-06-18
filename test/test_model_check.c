@@ -399,6 +399,31 @@ static void verify_nondeterministic_scheduling(void) {
            "k={0,1,2} main-passes per ISR verified\n", total_reachable);
 }
 
+// Direct oracle for debounce_init_context(): the simavr harness cannot reliably
+// inject a "switch held at power-on" state (PORTB write during init() resets the
+// simavr IRQ-driven pin), so the init-path mutations are killed here instead.
+static void verify_init_context(void) {
+    // Normal power-on (switch released): arm for first press, counter at floor.
+    debounce_context_t r = debounce_init_context(PIN_STATE_HIGH);
+    CHECK(r.program_state    == PRESS_DEBOUNCE_WAIT,
+          "init(released): expected PRESS_DEBOUNCE_WAIT, got %u", r.program_state);
+    CHECK(r.effect_state     == BYPASS,
+          "init(released): expected BYPASS, got %u", r.effect_state);
+    CHECK(r.debounce_counter == 0U,
+          "init(released): expected counter 0, got %u", r.debounce_counter);
+
+    // Power-on-pressed (switch held at boot): arm release lockout so the held
+    // press is debounced out before any toggle is possible.
+    r = debounce_init_context(PIN_STATE_LOW);
+    CHECK(r.program_state    == RELEASE_DEBOUNCE_WAIT,
+          "init(pressed): expected RELEASE_DEBOUNCE_WAIT, got %u", r.program_state);
+    CHECK(r.effect_state     == BYPASS,
+          "init(pressed): expected BYPASS, got %u", r.effect_state);
+    CHECK(r.debounce_counter == RELEASE_THRESH,
+          "init(pressed): expected counter RELEASE_THRESH (%u), got %u",
+          (unsigned)RELEASE_THRESH, r.debounce_counter);
+}
+
 int main(void) {
     printf("exhaustive state-space verification "
            "(PRESSED_THRESH=%d, RELEASE_THRESH=%d):\n",
@@ -409,6 +434,7 @@ int main(void) {
     verify_release_liveness();
     verify_press_liveness();
     verify_nondeterministic_scheduling();
+    verify_init_context();
 
     printf("state-space model check: %d checks, %d failures\n",
            g_checks, g_failures);
