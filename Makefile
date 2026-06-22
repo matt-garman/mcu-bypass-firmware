@@ -129,7 +129,7 @@ VARIANT ?= cd4053
 # AVRDUDE_PART: avrdude's short name for the ATtiny13/13a.
 # Override on the command line if needed, e.g.:
 #   make flash PROGRAMMER=usbtiny
-PROGRAMMER   ?= usbasp
+PROGRAMMER   ?= usbtiny
 AVRDUDE_PART   ?= t13
 
 # Fuse bytes for this design (verified bit-by-bit; see bypass_core.c header):
