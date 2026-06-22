@@ -496,6 +496,123 @@ build is validated by static analysis + CBMC + model check + real hardware (no
 simulation layer); or evaluate QEMU's AVR plugin, which has a better AVR8X
 trajectory.
 
+**PIC MCU family support (PIC10F320/PIC10F322).** These are 8-pin, 256–512 word
+flash enhanced mid-range PICs targeted at low-power embedded control — a natural
+companion to the ATtiny13a for this application. The debounce algorithm
+(`bypass_pure.c`) and all host-side tests (model check, CBMC, logic host) are
+already fully portable. The hardware shell, build system, programmer integration,
+and simulation layer all need new PIC-specific implementations. Six sequential
+phases:
+
+*Phase 0 — toolchain and simulator feasibility gate (completed: ~2 h).* gpsim
+0.32.1 (Ubuntu/Debian: `apt install gpsim`) has confirmed working support for
+both PIC10F320 and PIC10F322: both appear in the processor list, the device
+loads and executes instructions, and all key peripherals are accessible by name —
+`porta` (0x05), `trisa` (0x06), `tmr0` (0x01), `intcon` (0x0B), `option_reg`
+(0x0E), `wdtcon` (0x30), `iocap`/`iocan`/`iocaf` (0x1A–0x1C). A `SetProcessor
+ByType FIXME` warning appears on load but is benign. No gpsim C development
+headers are installed with the package, so simulation tests will use gpsim's
+built-in script/command interface (`.stc` files or piped CLI commands) rather
+than a C embedding API analogous to simavr; this means the simulation layer will
+be real but shallower than the AVR suite (no lock-step co-simulation in the same
+style, no cycle-accurate fault injection). For the compiler: Microchip XC8 free
+tier, Linux `.run` installer from Microchip.com (requires a free account); the
+free tier's optimization restrictions are inconsequential for this firmware's
+size. For the programmer: `pk2cmd` (open-source Linux binary) for PICkit 2;
+PICkit 3/4 on Linux uses `ipecmd.sh`, the headless CLI that ships inside the
+MPLAB X installer package — MPLAB X IDE itself need not be launched.
+
+*Phase 1 — hardware abstraction refactor (~1–2 days, shared with ATtiny202).*
+This is a prerequisite for both PIC and the ATtiny202 entry above. The firmware
+currently has two abstraction gaps: (a) `bypass_core.c` contains AVR-specific
+timer setup, WDT arm/reset, clock prescaler, sleep invocation, interrupt
+controller init, and footswitch pin read as inline classic-AVR register writes;
+(b) the output drivers (`bypass_output_cd4053_simple.c`,
+`bypass_output_tq2_l2_5v_relay.c`, `bypass_output_cd4053_with_mute.c`) write
+`DDRB` directly in `hw_init_ddrb_setup()` and `hw_is_sanity_check_failed()`.
+Close both gaps: extend `bypass_hw_iface.h` with primitives for footswitch read,
+pin direction setup, WDT arm/reset/pet, sleep invocation, and MCU init; extract
+the AVR shell into a new `bypass_mcu_attiny13a.c`; update the output drivers to
+use the abstracted pin direction calls. All existing tests must pass unchanged —
+this is a restructuring, not a behavioral change.
+
+*Phase 2 — PIC hardware shell (~1–2 days).* Write `bypass_mcu_pic10f322.c`
+implementing `bypass_hw_iface.h` for PIC10F322. Key architectural differences
+from AVR: GPIO uses `TRISA`/`PORTA` instead of `DDRB`/`PORTB`; there is no
+SLEEP_IDLE equivalent (the main oscillator stops during SLEEP), so the main loop
+switches to a WDT-periodic-wakeup pattern — sample, debounce, update outputs,
+CLRWDT, SLEEP; WDT wakes every ~1 ms via the internal LFINTOSC (31 kHz),
+independent of the main oscillator. This is architecturally cleaner than the
+AVR design: the WDT serves both roles (periodic waker when sleeping, fault-reset
+watchdog when stuck awake) without the `timer_isr_called_` handshake flag. The
+tradeoff is timing precision: LFINTOSC has ±10–15% variation with temperature
+and voltage, so the 1 ms tick becomes 0.85–1.15 ms in practice — inconsequential
+for switch debouncing. XC8 compiler differences: interrupt syntax is
+`void __interrupt() isr(void)` instead of AVR's `ISR()` macro; delays use
+`__delay_ms()` from `<xc.h>` instead of `_delay_ms()`. CONFIG bits (the PIC
+equivalent of AVR fuse bytes) are embedded in the HEX file by XC8 via
+`#pragma config` in source: enable WDT (`WDTE = ON`), set WDTPS for ~1 ms
+(`WDTPS = WDTPS1`), configure MCLR pin, enable brownout reset. Pin assignment
+for PIC10F322 (five bidirectional I/Os: RA0–RA2, RA4–RA5; RA3 is input-only):
+all three output variants fit — the relay variant's one footswitch input plus LED
+plus two coil outputs occupies exactly four pins with one to spare. PIC10F322
+(512 words) is the recommended primary target; PIC10F320 (256 words) is tight
+for the relay variant.
+
+*Phase 3 — build system (~4–8 h).* Add XC8 toolchain variables to the Makefile:
+`PIC_CC = xc8-cc`, `--chip=10F322` device flag, output format flags. Add new
+build targets: `pic10f322_cd4053`, `pic10f322_mute`, `pic10f322_relay`, plus a
+`program-pic` target using `pk2cmd`/`ipecmd`. Add resource utilization reporting
+(`xc8-cc --summary`). Add a flash-budget assertion analogous to
+`test-flash-budget`: PIC10F322 has 512 words (1024 bytes) of program memory;
+verify each variant fits with comfortable headroom. Note that XC8 free-tier
+optimization produces larger code than an optimizing compiler; measure actual
+usage before committing to the budget ceiling.
+
+*Phase 4 — CONFIG bits validation and static analysis (~2–4 h).* PIC CONFIG bits
+are embedded in the generated HEX file by XC8's `#pragma config` directives.
+Write a `test_config_pic.c` analogous to `test_fuses.c` that parses the HEX
+file and verifies the CONFIG word values match the intended settings (WDT enabled,
+WDTPS correct, BOD voltage, MCLR config, code-protect off). The existing
+`make analyze-misra` and `make analyze-cppcheck` targets operate on C source and
+apply to PIC code without modification; however, XC8 has known MISRA deviations
+(implicit static storage class for locals under the free tier, non-standard
+interrupt declaration syntax) that need to be documented and suppressed
+appropriately in `MISRA_COMPLIANCE.md`. XC8 does not support `-fstack-usage`
+(a GCC-specific flag); the stack bound test needs an alternate approach — XC8's
+`--callgraph` output provides per-function frame sizes for a similar static bound.
+
+*Phase 5 — simulation (~1–2 weeks).* gpsim 0.32.1 has the required peripheral
+models (confirmed in Phase 0), so this phase is implementation work rather than
+a feasibility question. The interface difference from simavr is significant:
+gpsim exposes a command/script interface (`.stc` files or piped CLI input)
+rather than a C embedding API, and no development headers are available in the
+Ubuntu/Debian package. The practical approach is gpsim script files that load
+the firmware HEX, drive the footswitch pin via `stimulus`/`node` commands,
+step the simulation forward, and assert register state via `reg()` reads — all
+orchestrated by a shell script called from the Makefile as a new
+`test-sim-pic10f322` target. This produces a meaningful simulation layer
+(real firmware executing, GPIO state verified, WDT behavior observable) but
+without the cycle-accurate lock-step co-simulation and fault injection that the
+simavr C harness provides for AVR. To close that gap partially: the WDT-based
+main-loop architecture lends itself to a coarser but still meaningful
+co-simulation — drive the gpsim stimulus for N press/release cycles, compare
+the final `porta` state to the golden model's prediction via a shell-level
+assertion. Fault injection is feasible via gpsim's `reg()` write command
+(corrupt `porta` or internal state between stimulus events and verify recovery)
+though at a coarser granularity than simavr's `avr_core_watch_write()`.
+
+*Phase 6 — documentation (~2–4 h).* Update `TOOLCHAIN.adoc` with a PIC section
+(XC8 installation steps, `pk2cmd`/`ipecmd` setup, gpsim). Extend the
+resource-utilization table in `DESIGN_DOCUMENTATION.adoc` with PIC10F322 flash
+and RAM numbers per variant. Add XC8-specific MISRA notes to
+`MISRA_COMPLIANCE.md`. Update `README.md`'s supported-MCU list.
+
+Total effort: ~1 week of focused work for phases 1–4 and 6; another 1–2 weeks
+for phase 5 depending on how deeply the gpsim scripting layer is developed.
+Phase 1 (the hardware abstraction refactor) is shared with ATtiny202 and should
+be done once to unblock both.
+
 ---
 
 ## Tier 4 — out of scope for firmware (name only)
@@ -551,4 +668,5 @@ left to the implementer" is itself evidence of thoroughness.
 | Hardware-validation procedure doc               | 3    | 2–3 h     | High — primary-part WDT gap     |
 | KLEE in CI                                      | 3    | 2 h       | Nice-to-have                    |
 | tinyAVR 2-Series (ATtiny202) support            | 3    | 2–4 days  | Nice-to-have; simavr gap        |
+| PIC10F320/322 support                           | 3    | 2–4 weeks | Nice-to-have; gpsim confirmed   |
 | Manufacturing artifacts (name as scope)         | 4    | —         | Completeness signal             |
