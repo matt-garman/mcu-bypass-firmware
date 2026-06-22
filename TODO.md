@@ -31,26 +31,20 @@ formula `static_assert`; `__attribute__((OS_main))`; MISRA-C:2012 analysis +
 
 ## Tier 1 — high impact, low effort (do first)
 
-**No CI/CD pipeline.** Still the most conspicuous gap for a project making
-Boss-grade verification claims: a green "build passing" badge proves the suite
-is reproducible off the developer's machine. Note this is now bigger than the
-original "6-line apt + make test" estimate — to be honest it must exercise the
-real matrix: all three variants × {ATtiny13a, tinyx5}, plus the analysis gates
-(clang-tidy, cppcheck, MISRA). simavr is in Ubuntu 24.04's default repos. KLEE
-can be a separate optional job (see Tier 3).
+**~~No CI/CD pipeline.~~** ~~Done~~ — `ci.yml` exercises the full matrix: all
+three variants × {ATtiny13a, ATtiny45, ATtiny85}, plus analysis gates
+(clang-tidy, cppcheck, MISRA, CBMC) and a separate stress/mutation job.
+CI badge wired into `README.md`.
 
-**Design-doc resource-utilization section.** The suite now *measures* the
-numbers; they belong in the design doc as a resource table. Measured today:
-ATtiny13a cd4053 ≈ 470 B flash (~46% of 1 KB), 8 B peak stack, 56 B SRAM margin
-(64 B total); tinyx5 relay ≈ 524 B flash, 10 B peak stack, 246 B margin (256 B
-total). For an engineer evaluating this as a reference base, headroom is a key
-parameter. Pull flash from `avr-size` and stack from the HWM test output.
+**~~Design-doc resource-utilization section.~~** ~~Done~~ — `== Resource
+Utilization` section in `DESIGN_DOCUMENTATION.adoc` with a flash table for all
+nine variant/MCU combinations (sourced from `avr-size`) and a prose paragraph on
+SRAM headroom (sourced from the simavr stack-canary HWM test).
 
-**Fix stale references / editorial note.** (a) This file and any prose still
-referencing `attiny13_bypass.md` / `attiny13_bypass.c` must point at
-`DESIGN_DOCUMENTATION.adoc` / `bypass_core.c` + drivers. (b) `DESIGN_
-DOCUMENTATION.adoc` line ~464 still reads like an authoring note ("It shows the
-counter climbing to 7…"); reword as a normal lead-in. Both are trivial.
+**~~Fix stale references / editorial note.~~** ~~Done~~ — (a) `attiny13_bypass.md`
+/ `attiny13_bypass.c` references removed from all prose; `TOOLCHAIN.adoc` updated
+to "bypass firmware". (b) `DESIGN_DOCUMENTATION.adoc` editorial note reworded
+from "It shows…" to a normal diagram lead-in.
 
 ---
 
@@ -629,13 +623,13 @@ left to the implementer" is itself evidence of thoroughness.
 
 | Item                                            | Tier | Effort    | Impact                          |
 |-------------------------------------------------|------|-----------|---------------------------------|
-| GitHub Actions CI (full variant/MCU matrix)     | 1    | 1–2 h     | Very high — credibility signal  |
-| Design doc: resource-utilization section        | 1    | 1 h       | High — measured numbers exist   |
-| Stale refs + editorial-note fix                 | 1    | 15 min    | Medium — correctness of docs    |
+| ~~GitHub Actions CI (full variant/MCU matrix)~~  | 1    | done      | Very high — credibility signal  |
+| ~~Design doc: resource-utilization section~~    | 1    | done      | High — measured numbers exist   |
+| ~~Stale refs + editorial-note fix~~             | 1    | done      | Medium — correctness of docs    |
 | Design doc: datasheet citations                 | 2    | 2 h       | High — completeness/rigor       |
-| Minimum-tap-interval test                       | 2    | done      | Medium — closes traceability    |
-| `-fstack-usage` static bound                    | 2    | done      | Medium — complements HWM test   |
-| Flash-utilization budget assertion              | 2    | done      | Medium — resource budget        |
+| ~~Minimum-tap-interval test~~                   | 2    | done      | Medium — closes traceability    |
+| ~~`-fstack-usage` static bound~~                | 2    | done      | Medium — complements HWM test   |
+| ~~Flash-utilization budget assertion~~          | 2    | done      | Medium — resource budget        |
 | AVR instruction-level fault injection           | 2.5  | 2–3 h     | High — extends fault coverage   |
 | Extended lock-step with variant ctrl outputs    | 2.5  | 2–4 h     | High — closes co-sim gap        |
 | Power-on-pressed in simavr                      | 2.5  | 1–2 h     | Medium — simavr quirk workaround|
