@@ -375,7 +375,7 @@ FORCE:
         test test-fast test-long stress \
         test-host test-sim test-sim-secondary \
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
-        test-stack-bound test-flash-budget \
+        test-stack-bound test-flash-budget test-soak \
         analyze analyze-tidy analyze-cppcheck analyze-deep \
         trace coverage coverage-check coverage-clean
 
@@ -454,6 +454,7 @@ clean:
 	rm -f $(ALL_ELF13) $(ALL_HEX13) $(ALL_ELFX5) $(ALL_HEXX5) \
 		$(foreach v,$(VARIANTS),test/test_sim_$(v) test/test_trace_$(v)) \
 		$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/test_sim_$(v)_t$(n))) \
+		$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/test_soak_$(v)_t$(n))) \
 		test/test_logic_host \
 		test/test_model_check test/test_symbolic test/test_fuses \
 		test/test_symbolic.bc \
@@ -794,6 +795,58 @@ test-fault-inject: $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test-fault-inje
 test-mutation:
 	./test/run_mutation_tests.sh
 
+# Long-duration soak test.
+#
+# Drives random input for SOAK_DURATION_MS of simulated time (default 24 h).
+# Checks WDT liveness (no unexpected resets) and device responsiveness (a
+# 2-press round-trip every SOAK_LIVENESS_INTERVAL_MS).  Unlike test_sim.c,
+# failures are NEVER fatal: each anomaly is logged and the run continues so
+# the full duration is exercised even after an early failure.
+#
+# Intentionally NOT part of `make test` or `make test-long` -- run standalone
+# before hardware signoff or as a pre-release gate.
+#
+# Overrides (command line):
+#   SOAK_VARIANT=relay        variant to test (cd4053/mute/relay; default cd4053)
+#   SOAK_CHIP=45              tinyx5 chip number (85/45; default 85)
+#   SOAK_DURATION_MS=3600000  simulated duration in ms (default 86400000 = 24 h)
+#   SOAK_LIVENESS_INTERVAL_MS=10000   liveness-check interval (default 60000 ms)
+SOAK_VARIANT     ?= cd4053
+SOAK_CHIP        ?= 85
+SOAK_DURATION_MS ?= 86400000
+SOAK_BIN  = test/test_soak_$(SOAK_VARIANT)_t$(SOAK_CHIP)
+SOAK_DEPS = test/test_soak.c test/bypass_output_host.h test/bypass_config_host.h \
+            bypass_config.h $(FW_HEADERS)
+
+# The SOAK_* variables (-DSOAK_DURATION_MS, -DSOAK_LIVENESS_INTERVAL_MS, etc.)
+# are baked into the binary at compile time. To ensure command-line overrides
+# (e.g. `make test-soak SOAK_DURATION_MS=3600000`) are always picked up, the
+# test-soak recipe is phony and always recompiles before running.
+SOAK_LIVENESS_INTERVAL_MS  ?= 60000
+SOAK_PROGRESS_INTERVAL_MS  ?= 3600000
+SOAK_COMPILE = $(HOSTCC) $(SIM_CFLAGS) $(PURE_HOST_CFLAGS) \
+	-D$(macro_$(SOAK_VARIANT)) \
+	-Itest \
+	-DFW_PATH=\"$(FW_BASE)_$(SOAK_VARIANT)_t$(SOAK_CHIP).elf\" \
+	-DMCU_NAME=\"$(mmcu_$(SOAK_CHIP))\" \
+	-DF_CPU_HZ=$(F_CPU_X5) \
+	-DTARGET_TINYX5 \
+	-DSOAK_DURATION_MS=$(SOAK_DURATION_MS) \
+	-DSOAK_LIVENESS_INTERVAL_MS=$(SOAK_LIVENESS_INTERVAL_MS) \
+	-DSOAK_PROGRESS_INTERVAL_MS=$(SOAK_PROGRESS_INTERVAL_MS) \
+	test/test_soak.c -o $(SOAK_BIN) $(SIM_LIBS)
+
+# Optional build-only convenience: build without running (Make's normal
+# dependency tracking applies; won't rebuild on SOAK_DURATION_MS change alone).
+$(SOAK_BIN): $(SOAK_DEPS) $(FW_BASE)_$(SOAK_VARIANT)_t$(SOAK_CHIP).elf
+	$(SOAK_COMPILE)
+
+# Run target: always recompiles (phony) so every SOAK_* override is applied.
+test-soak: $(SOAK_DEPS) $(FW_BASE)_$(SOAK_VARIANT)_t$(SOAK_CHIP).elf
+	$(SOAK_COMPILE)
+	@echo "--- soak test: variant=$(SOAK_VARIANT)  MCU=ATtiny$(SOAK_CHIP)  duration=$(SOAK_DURATION_MS) ms ---"
+	./$(SOAK_BIN)
+
 # Generate a GTKWave-viewable waveform of PB0/PB1/PB2/PB3 over a representative
 # press/release sequence for the selected VARIANT. Writes bypass_trace.vcd.
 trace: test/test_trace_$(VARIANT)
@@ -1011,6 +1064,8 @@ help:
 	@echo "  test-sim-<v>[-t<n>]  single variant, e.g. test-sim-relay / test-sim-relay-t45"
 	@echo "  test-fault-inject  corrupt state, verify WDT recovery (all variants x tinyx5)"
 	@echo "  test-mutation   inject firmware faults, verify the suite kills them"
+	@echo "  test-soak       24-h soak test (standalone; SOAK_VARIANT, SOAK_CHIP, SOAK_DURATION_MS,"
+	@echo "                  SOAK_LIVENESS_INTERVAL_MS, SOAK_PROGRESS_INTERVAL_MS)"
 	@echo "  trace           emit bypass_trace.vcd for VARIANT (GTKWave)"
 	@echo "Analysis:"
 	@echo "  analyze         static analysis of core + all drivers (3 analyzers)"
