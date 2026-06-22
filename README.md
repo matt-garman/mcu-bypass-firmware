@@ -8,17 +8,17 @@ microcontrollers.  The firmware is intended to be used for electric instrument
 effects (e.g. guitar effect pedals) bypass switching.  The firmware has four
 responsibilities:
 
-    - Maintain state (engage/bypass)
-    - Light or dark a status indicator LED
-    - Respond to footswitch presses, *including debounce*
-    - Control the actual signal switching mechanism
+  - Maintain state (engage/bypass)
+  - Light or dark a status indicator LED
+  - Respond to footswitch presses, _including debounce_
+  - Control the actual signal switching mechanism
 
 Fundamentally, the algorithm uses a saturating integrator to debounce the
 footswitch and offer some EMI/RFI protection.
 
-The firmware is bundled with an extensive test and validation suite. the
-project's overall goal is to be reference-quality, suitable for use in
-professional, touring-grade effects.
+The firmware is bundled with an extensive test and validation suite.
+The project's overall goal is to be reference-quality, suitable for
+use in professional, touring-grade effects.
 
 See the [Design Documentation](DESIGN_DOCUMENTATION.adoc) for the complete
 firmware description and design details.
@@ -28,8 +28,10 @@ firmware description and design details.
 
 The firmware currently supports circuit-switching via:
 
-    - CD4053 or TMUX4053 electrical analog switches
-    - Panasonic TQ-L2-5v mechanical relay
+  - Panasonic TQ-L2-5v mechanical relay
+  - CD4053 or TMUX4053 electrical analog switches, two variants:
+    - Simple scheme using only two DPDT switches
+    - Fancier scheme using all three DPDT switches with a 5ms mute
 
 See the [Design Documentation](DESIGN_DOCUMENTATION.adoc) for the control line
 specifics.  Note that it should be possible to use other analog switches (e.g.
