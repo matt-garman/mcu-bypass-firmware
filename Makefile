@@ -100,7 +100,7 @@ F_CPU_X5   = 1000000UL
 # driver. A variant is identified by a short name; each maps to the -D selector
 # macro the firmware/tests compile with and to its driver source file. To add a
 # variant: add its short name here and define macro_<name>/src_<name> below.
-CORE_SRC = bypass_core.c bypass_pure.c
+CORE_SRC = src/bypass_core.c src/bypass_pure.c
 VARIANTS = cd4053 mute relay
 
 # variant short name -> firmware -D selector macro
@@ -109,15 +109,15 @@ macro_mute   = CD4053_WITH_MUTE
 macro_relay  = TQ2_L2_5V_RELAY
 
 # variant short name -> output driver source file
-src_cd4053 = bypass_output_cd4053_simple.c
-src_mute   = bypass_output_cd4053_with_mute.c
-src_relay  = bypass_output_tq2_l2_5v_relay.c
+src_cd4053 = src/bypass_output_cd4053_simple.c
+src_mute   = src/bypass_output_cd4053_with_mute.c
+src_relay  = src/bypass_output_tq2_l2_5v_relay.c
 
 # Headers shared by every firmware build; any change rebuilds all variants.
-FW_HEADERS = bypass_config.h bypass_types.h bypass_hw_iface.h \
-             bypass_output_common.h \
-             bypass_output_cd4053_simple.h bypass_output_cd4053_with_mute.h \
-             bypass_output_tq2_l2_5v_relay.h
+FW_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
+             src/bypass_output_common.h \
+             src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
+             src/bypass_output_tq2_l2_5v_relay.h
 
 # VARIANT selects the single-target build for size/flash/trace/program actions.
 # `make`/`make test` cover ALL variants; VARIANT only matters when you act on
@@ -192,8 +192,8 @@ FLASH_T13_BUDGET ?= 90
 # bypass_config.h) resolves on the host. The shim has an include guard, so
 # force-including it into the test TU as well (which already pulls it in via
 # model_step.h) is harmless.
-PURE_HOST_SRC    = bypass_pure.c
-PURE_HOST_DEP    = bypass_pure.c bypass_pure.h bypass_types.h
+PURE_HOST_SRC    = src/bypass_pure.c
+PURE_HOST_DEP    = src/bypass_pure.c src/bypass_pure.h src/bypass_types.h
 PURE_HOST_CFLAGS = -include test/bypass_config_host.h
 
 # --- Test workload sizing ----------------------------------------------------
@@ -551,7 +551,7 @@ test-host: test/test_logic_host
 
 # Build rule for the golden model. Constants come from bypass_config.h (via the
 # host shim) so the model can never drift from the firmware thresholds.
-test/test_logic_host: test/test_logic_host.c test/bypass_config_host.h bypass_config.h
+test/test_logic_host: test/test_logic_host.c test/bypass_config_host.h src/bypass_config.h
 	$(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) $(HOST_DEFS) -Itest $< -o $@
 
 # Exhaustive small-model state-space verification: breadth-first search over the
@@ -733,7 +733,7 @@ test-flash-budget: $(ALL_ELF13)
 #   test/test_sim_<v>_t<n>    tinyx5 chip -> run via test-sim-<v>-t<n>
 #   test/test_trace_<v>       VCD waveform builder (-DTRACE, ATtiny13a)
 SIM_DEPS = test/test_sim.c test/model_step.h test/bypass_config_host.h \
-           test/bypass_output_host.h bypass_config.h $(FW_HEADERS) $(PURE_HOST_DEP)
+           test/bypass_output_host.h src/bypass_config.h $(FW_HEADERS) $(PURE_HOST_DEP)
 
 # $(call VARIANT_SIM_T13,variant)
 define VARIANT_SIM_T13
@@ -816,7 +816,7 @@ SOAK_CHIP        ?= 85
 SOAK_DURATION_MS ?= 86400000
 SOAK_BIN  = test/test_soak_$(SOAK_VARIANT)_t$(SOAK_CHIP)
 SOAK_DEPS = test/test_soak.c test/bypass_output_host.h test/bypass_config_host.h \
-            bypass_config.h $(FW_HEADERS)
+            src/bypass_config.h $(FW_HEADERS)
 
 # The SOAK_* variables (-DSOAK_DURATION_MS, -DSOAK_LIVENESS_INTERVAL_MS, etc.)
 # are baked into the binary at compile time. To ensure command-line overrides

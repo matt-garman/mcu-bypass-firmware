@@ -27,7 +27,7 @@
 #include <stdint.h>
 
 #include "bypass_config_host.h" // RELEASE_THRESH, PRESSED_THRESH (firmware truth)
-#include "../bypass_pure.h"     // debounce_integrate(), debounce_step(), and the
+#include "../src/bypass_pure.h" // debounce_integrate(), debounce_step(), and the
                                 // program_state_t / effect_state_t enums
                                 // (PRESS_DEBOUNCE_WAIT, BYPASS, ENGAGED, ...)
                                 // shared with the firmware via bypass_types.h.

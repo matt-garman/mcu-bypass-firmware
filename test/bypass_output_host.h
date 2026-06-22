@@ -43,16 +43,16 @@
 #endif
 
 // Pins common to every variant (footswitch + status LED).
-#include "../bypass_output_common.h"
+#include "../src/bypass_output_common.h"
 
 // Variant-specific control pins. Default to the CD4053 simple variant when no
 // selector is defined, matching the firmware's behavior.
 #if defined(CD4053_WITH_MUTE)
-#  include "../bypass_output_cd4053_with_mute.h"
+#  include "../src/bypass_output_cd4053_with_mute.h"
 #elif defined(TQ2_L2_5V_RELAY)
-#  include "../bypass_output_tq2_l2_5v_relay.h"
+#  include "../src/bypass_output_tq2_l2_5v_relay.h"
 #else
-#  include "../bypass_output_cd4053_simple.h"
+#  include "../src/bypass_output_cd4053_simple.h"
 #endif
 
 #endif // BYPASS_OUTPUT_HOST_H__

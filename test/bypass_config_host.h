@@ -39,6 +39,6 @@
 #  define F_CPU 1200000UL
 #endif
 
-#include "../bypass_config.h"
+#include "../src/bypass_config.h"
 
 #endif // BYPASS_CONFIG_HOST_H__

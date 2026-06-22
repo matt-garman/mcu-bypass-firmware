@@ -92,30 +92,48 @@ reason in professional embedded MISRA projects.
 translation unit will not be silently covered — it must be reviewed and the file
 added here explicitly.
 
-### D-2 — Cross-translation-unit shared pin macros
+### D-2 — Cross-translation-unit shared macros
 
 | | |
 |---|---|
 | **Rule** | 2.5 (unused macro definition, Advisory) |
-| **File** | `bypass_output_common.h` |
-| **Instances** | 3 |
+| **Files** | `bypass_output_common.h`, `bypass_config.h` |
+| **Instances** | 6 |
 
-**Rationale.** `FOOTSW_PIN` and `LED_PIN` are the two pins common to every
-output variant, so they are defined once in the shared `bypass_output_common.h`:
+**Rationale.** Several macros are defined in shared headers that are included
+by multiple translation units, but are only *used* by a subset of them. cppcheck
+analyzes each TU independently and reports a macro as "unused" whenever the TU
+includes its defining header but does not reference it. These are **not dead
+code** — they are single-source definitions that avoid duplication and keep the
+shared invariant in one place.
+
+Two groups of macros fall under this deviation:
+
+**`bypass_output_common.h` — pin macros `FOOTSW_PIN` and `LED_PIN`**
 
 ```c
 #define FOOTSW_PIN (PB0)
 #define LED_PIN    (PB1)
 ```
 
-They are referenced by the **core** (which reads the footswitch and drives the
-LED) but not by the **output-driver** translation units, which only drive their
-own control pins. Because cppcheck analyzes each translation unit independently,
-it reports these macros as "unused" when checking a driver TU that includes the
-header but does not reference them. They are **not dead code** — they are used by
-the core, and centralizing them avoids three-way duplication with no compiler
-check that the copies stay in sync. The finding is an artifact of per-TU
-analysis of a deliberately shared definition.
+These are the two pins common to every output variant. They are referenced by
+the **core** (which reads the footswitch and drives the LED) but not by the
+**output-driver** translation units, which only drive their own control pins.
+Centralizing them avoids three-way duplication with no compiler check that the
+copies stay in sync.
+
+**`bypass_config.h` — threshold macros `PRESSED_THRESH` and `RELEASE_THRESH`**
+
+```c
+#define PRESSED_THRESH  (8U)
+#define RELEASE_THRESH  (25U)
+```
+
+These are consumed by `bypass_pure.c` (debounce logic) and `bypass_core.c`
+(lockout reload), but `bypass_config.h` is also included by the output-driver
+TUs for their `static_assert` guards on the timing constants. Those TUs do not
+use the threshold macros directly, so cppcheck reports them as unused when
+analyzing a driver TU in isolation.
 
 ## Maintenance
 
