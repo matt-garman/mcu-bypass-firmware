@@ -1,9 +1,10 @@
 = Toolchain Reference
 
-This file documents the exact toolchain versions used to build and test the
-attiny13_bypass firmware.  It serves the same purpose as a Python
-requirements.txt: a human-readable record of what the project was validated
-against, so a new developer (or CI system) can reproduce the exact environment.
+This file documents the exact toolchain versions used to build and
+test the bypass firmware.  It serves the same purpose as a Python
+requirements.txt: a human-readable record of what the project was
+validated against, so a new developer (or CI system) can reproduce
+the exact environment.
 
 The Makefile writes a hash of the compiler version strings into
 test/.toolchain.sig at build time; any change to the installed toolchain
