@@ -190,6 +190,18 @@ user.  The release-debounce, or lock-out period, is longer so as to
 ....
 
 
+== PIC103F32x DIP-8 Package Pinout
+
+....
+                                                     +----+
+                                            N/C pin1-|    |-pin8 RA3 (~MCLR/V_PP)
+                                           V_DD pin2-|    |-pin7 V_SS (GND)
+ (INT/T0CKI/NCO1/CLC1IN1/CLKR/AN2/~CWG1FLT) RA2 pin3-|    |-pin6 N/C
+(PWM2/CLC1/CWG1B/AN1/CLKIN/ICSPCLK/NCO1CLK) RA1 pin4-|    |-pin5 RA0 (PWM1/CLC1IN0/CWG1A/AN0/ICSPDAT)
+                                                     +----+
+....
+
+
 == Optimal Footswitch-GPIO Wiring for EMI/RFI resiliency
 
 The GPIO pin tied to the footswitch (normally high) will have some
@@ -546,3 +558,5 @@ then noise interrupts and it falls back, never reaching the threshold of 8.
    LED/4053: dark (unchanged)
 
 
+
+// vim: tw=0
