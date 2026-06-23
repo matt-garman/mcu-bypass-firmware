@@ -94,18 +94,15 @@ footswitch IRQ drive immediately after each simavr reset. Option (b) is
 mechanically feasible in the test harness; the WDT-backstop test already
 partially works around this.
 
-**Formal verification of out-of-range counter recovery.** The model check and
-CBMC proofs assume `debounce_counter` is always in `[0, RELEASE_THRESH]`. CBMC's
-`prove_integrate()` already proves the *closure* property for in-range inputs
-(`dc <= RELEASE_THRESH` implies `out <= RELEASE_THRESH`). An additional proof
-that a *corrupted* counter above `RELEASE_THRESH` is safely brought back into
-range by repeated integrator steps would verify defense in depth against an SEU
-that flips the counter to an out-of-range value. This is a small extension to
-`test_cbmc.c`: a new harness with `dc` unconstrained over the full `uint8_t`
-range, proving that after N "released" steps the counter returns to `[0,
-RELEASE_THRESH]`. (The integrator already handles this correctly — it simply
-decrements any counter > 0 — but the formal proof would make this an explicit
-guarantee rather than an implicit one.)
+**~~Formal verification of out-of-range counter recovery.~~** ~~Done~~ — two new
+CBMC harnesses in `test_cbmc.c`, wired into `make test-cbmc`: `prove_oor_recovery_step`
+(C7a) proves the single-step contraction property over the full `uint8_t` domain —
+a counter above `RELEASE_THRESH` is never grown (a released sample decrements it
+toward range, a pressed sample holds it saturated); `prove_oor_recovery_bounded`
+(C7b) proves the literal recovery claim with a deep `--unwind 257` loop (new
+`CBMC_PROOFS_DEEP` list) — from any of the 256 `uint8_t` values a run of released
+samples returns the counter to `[0, RELEASE_THRESH]` and drains it to 0. All
+assertions SUCCESS, including CBMC's automatic overflow/conversion checks.
 
 **Formal verification of output drivers.** The output drivers (relay, mute,
 CD4053) contain blocking delays and multi-step pin sequences. They are tested by
@@ -230,36 +227,25 @@ but checking for compile failure instead of test failure. Low effort (~30 min)
 and closes the gap where a future refactor could accidentally weaken or remove
 a `static_assert` without anyone noticing.
 
-**Boot-loop verification test.** The firmware is designed to handle a
-WDT-reset-triggered reboot gracefully: `init()` is called on every reset, and
-its first actions are `wdt_reset()` followed by `wdt_enable(WDTO_250MS)`. In
-theory, if a persistent fault condition survives the reset (e.g., a corrupted
-fuse, a physically shorted pin, an SEU that flips a register to the same bad
-value every boot), the firmware would boot-loop — reset, re-init, hit the
-sanity check, force another reset — harmlessly. However, no test explicitly
-simulates a boot-loop scenario to confirm the device does not enter an
-undefined state during repeated rapid resets. A simavr test would: (a) inject
-a persistent fault (e.g., corrupt `program_state_` to 0xFF in the reset path,
-which cannot be fixed by re-init); (b) let the WDT fire and the firmware
-reset; (c) verify the LED returns to dark (re-init to BYPASS) after each
-reset; (d) repeat for several cycles and confirm consistent BYPASS recovery
-each time. Requires the tinyx5 build (simavr models WDT reset). Low effort
-(~30 min). Closes the gap where a fault that survives reset could cause
-undefined behavior rather than a clean, bounded boot-loop.
+**~~Boot-loop verification test.~~** ~~Done~~ — `test_boot_loop_persistent_fault()`
+in `test_sim.c` (tinyx5-only, run from the fault-injection suite): re-injects an
+out-of-range `program_state_` (0xFF) after each recovery to emulate a fault that
+survives every reset, and over 5 rapid cycles asserts the firmware (a) actually
+reset — the reinit cleared the corruption back into `[0, RELEASE_DEBOUNCE_WAIT]`;
+(b) recovered to BYPASS (LED dark); and (c) re-entered idle sleep (alive, not
+wedged). Confirms a bounded, clean boot-loop rather than drift into an undefined
+state. Post-reset re-press is deliberately avoided — a documented simavr
+PINB-on-reset limitation (see `test_watchdog_backstop_reset`).
 
-**WDT re-arm timing window measurement.** After a watchdog-triggered reset on
-AVR, the WDT runs with a ~16ms timeout (prescaler reset to its shortest
-setting) until software explicitly reconfigures it. The firmware's `init()` is
-designed to call `wdt_reset()` then `wdt_enable(WDTO_250MS)` within the first
-few dozen instructions — comfortably within the ~16ms window even at 1.0-1.2
-MHz with the loose WDT oscillator tolerance. However, no test measures the
-actual cycle count between these two calls to confirm the window is
-comfortable. A simavr test would: (a) set a breakpoint or cycle counter at the
-first instruction of `init()`; (b) measure cycles to the `wdt_enable()` call;
-(c) assert the elapsed cycles are well under the worst-case post-reset WDT
-window (allowing for the WDT oscillator's loose tolerance, the window could be
-as low as ~7ms — so the test should assert << 7ms, ideally < 1ms). Low effort
-(~30 min). Closes the safety-margin gap for the WDT-reset-recovery path.
+**~~WDT re-arm timing window measurement.~~** ~~Done~~ — `test_wdt_rearm_window()`
+in `test_sim.c` (all nine builds): sits the sim exactly at reset and measures the
+cycles to the `WDTCR` write that selects the `WDTO_250MS` prescaler (detected via
+the WDP3:0 nibble == 0b0100, independent of the WDTON-forced WDE/WDCE bits).
+Measured 0.048–0.062 ms (~50–75 cycles at 1.2 MHz) — far inside the worst-case
+~7 ms post-reset window. The test asserts `< 1 ms` so any future `init()` change
+that pushes `wdt_enable()` away from the top of the function fails here. Confirmed
+`init()` does `wdt_reset()` → `wdt_enable(WDTO_250MS)` before the variant's
+blocking output pulse, so the margin holds on every variant.
 
 **Footswitch-pin glitch regression test (simavr quirk).** The simavr harness's
 `run_one_tick_settled()` re-drives the footswitch pin on every `avr_run()`
@@ -396,8 +382,16 @@ strongest possible verification of the ISR/main interaction.
 **Signal-integrity SPICE modeling of the footswitch input network.** (NEW — from third review pass)
 The design's EMI/RFI defense includes a hardware filter (TVS, ferrite, 1k series, 22nF to ground, 10k pull-up) with a time constant τ ≈ 18 µs. The firmware's 8 ms integrator threshold is claimed to be ~80× the hardware filter corner, but this ratio is based on an order-of-magnitude estimate, not a SPICE simulation. Before the first PCB is ordered, run a SPICE transient analysis of the complete input network with: (a) a 5 kV ESD pulse (IEC 61000-4-2 contact discharge model) to verify the MCU pin stays within absolute maximum ratings and the clamped pulse does not exceed Schmitt-trigger VIL/VIH thresholds; (b) a GSM 900 MHz burst-coupled interference source on a 10 cm twisted-pair cable to verify the filtered envelope stays above VIH (does not falsely register as a press) for any burst shorter than the firmware's integration window. This is the last pre-hardware design-check gap before the board can be considered EMI-hardened by design rather than by hope. Low effort if the user already has a SPICE deck; ~2 h if starting from a schematic capture. High value as it validates the hardware assumptions the firmware relies on.
 
-**Multi-seed Monte Carlo random-noise fuzzing.** (NEW — from third review pass)
-The existing random-noise tests (`test_random_noise_resilience`, `test_fuzz_random_patterns`) use a single fixed seed (0xDEADBEEF) and assert an exact toggle count for that seed. This provides a strong regression lock but does not prove the firmware is correct for ALL random seeds. A seed-dependence bug (statistically unlikely but mathematically possible) would pass the fixed-seed test and only manifest in the field. A pre-hardware Monte Carlo campaign: run the random-noise stream with 100 different seeds (or a configurable number), and for each seed verify (a) the toggle count stays within the physical maximum ceiling (`duration / (PRESSED_THRESH + RELEASE_THRESH) + 1`), (b) the lock-step co-sim produces zero mismatches against the golden model, and (c) the final effect state is consistent with the toggle-count parity. Any seed that violates these invariants triggers a regression. Mechanically trivial: a script loops over seeds and re-runs `test_sim.c` or `test_logic_host.c` with each. Low effort (~1 h) and provides statistical confidence that the fixed-seed lock is not hiding a seed-dependent anomaly.
+**~~Multi-seed Monte Carlo random-noise fuzzing.~~** ~~Done~~ — two tiers:
+`test_monte_carlo_seeds()` in `test_logic_host.c` runs `MC_SEED_COUNT` (default 100)
+distinct seeds through the golden model, asserting per seed that (a) state stays in
+range, (b) the toggle count never exceeds the physical ceiling
+`duration / (PRESSED_THRESH + RELEASE_THRESH) + 1`, and (c) the final effect-state
+parity matches the toggle count. `test_monte_carlo_lockstep()` in `test_sim.c` drives
+`MC_SIM_SEED_COUNT` (default 5) additional seeds through the *real firmware* in
+lock-step against the golden model (byte-for-byte agreement; zero mismatches across
+all nine builds). Both wired into `make test`; seed counts/durations overridable via
+`-D`.
 
 **Multi-press boundary-case regression tests.** (NEW — from third review pass)
 The existing tests cover the principle press-release scenarios well, but three specific boundary combinations are not explicitly asserted: (a) two back-to-back PRESSED_THRESH-minus-one intervals (total 2×(PRESSED_THRESH−1) = 14 ms > PRESSED_THRESH = 8 ms, but the counter never holds at threshold long enough because each interval drops before the next rise) — must produce zero toggles; (b) release-bounce that lands exactly when the lockout counter is at 1 (a single-tick press during drain raises counter to 2, then drain resumes to 0) — must delay re-arm by one tick but still re-arm correctly; (c) the maximum-frequency tap train at exactly PRESSED_THRESH + RELEASE_THRESH intervals (33 ms apart) — the fastest clean press the algorithm can theoretically register, repeated 10–20 presses to verify no drift or missed taps at the rate limit. These three scenarios exercise the integrator's saturating behavior at the exact tick boundaries that matter. Add them to both `test_logic_host.c` (fast golden-model regression) and `test_sim.c` (instruction-accurated firmware confirmation). Low effort (~1 h per scenario; 3–4 h total).
@@ -599,7 +593,7 @@ left to the implementer" is itself evidence of thoroughness.
 | ~~AVR instruction-level fault injection~~        | 2.5  | done      | High — extends fault coverage   |
 | ~~Extended lock-step with variant ctrl outputs~~ | 2.5  | done      | High — closes co-sim gap        |
 | Power-on-pressed in simavr                      | 2.5  | 1–2 h     | Medium — simavr quirk workaround|
-| Out-of-range counter recovery proof             | 2.5  | 30 min    | Medium — formal defense in depth|
+| ~~Out-of-range counter recovery proof~~         | 2.5  | done      | Medium — formal defense in depth|
 | Formal verification of output drivers           | 2.5  | 3–4 h     | Medium — driver correctness     |
 | ~~Long-duration soak test~~                     | 2.5  | done      | Medium — rare-edge-case stress  |
 | ISR-timing-jitter stress test                   | 2.5  | 1–2 h     | Low — confirms design property  |
@@ -611,8 +605,8 @@ left to the implementer" is itself evidence of thoroughness.
 | Stuck-switch long-duration test                 | 2.5  | 30 min    | Medium — enforces documented    |
 | WDT pet frequency measurement                   | 2.5  | 1–2 h     | Medium — catches handshake bugs |
 | Negative static_assert verification             | 2.5  | 30 min    | Low — build-guard meta-test     |
-| Boot-loop verification test                     | 2.5  | 30 min    | Medium — bounded recovery under persistent fault |
-| WDT re-arm timing window measurement            | 2.5  | 30 min    | Medium — safety-margin for WDT-reset path |
+| ~~Boot-loop verification test~~                 | 2.5  | done      | Medium — bounded recovery under persistent fault |
+| ~~WDT re-arm timing window measurement~~        | 2.5  | done      | Medium — safety-margin for WDT-reset path |
 | Footswitch-pin glitch regression test           | 2.5  | 30 min    | Low — test-harness meta-test    |
 | Compiler optimization sensitivity test          | 2.5  | 1 h       | Medium — quick win, catches opt-sensitive bugs |
 | Interrupt latency measurement in simavr         | 2.5  | 1–2 h     | Low — confirms design assumption |
@@ -623,7 +617,7 @@ left to the implementer" is itself evidence of thoroughness.
 | Property-based testing framework                | 2.5  | 2–4 h     | Medium — targeted edge-case generation |
 | Formal ISR/main interleaving model (TLA+/SPIN)  | 2.5  | 4–8 h     | High — definitive concurrency-safety proof |
 | Signal-integrity SPICE modeling                 | 2.5  | 2 h       | High — validates hardware assumptions before PCB |
-| Multi-seed Monte Carlo fuzzing                  | 2.5  | 1 h       | Medium — statistical confidence beyond fixed-seed lock |
+| ~~Multi-seed Monte Carlo fuzzing~~              | 2.5  | done      | Medium — statistical confidence beyond fixed-seed lock |
 | Multi-press boundary cases                      | 2.5  | 3–4 h     | Medium — tick-boundary edge cases at rate limit |
 | Hardware-validation procedure doc               | 3    | 2–3 h     | High — primary-part WDT gap     |
 | KLEE in CI                                      | 3    | 2 h       | Nice-to-have                    |

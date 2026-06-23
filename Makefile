@@ -623,8 +623,13 @@ CBMC_CHECKS = --bounds-check --pointer-check --div-by-zero-check \
 # assertion proves the bound is real, not assumed). Matches TODO.md's
 # `cbmc --unwind 50` on the debounce path.
 CBMC_PROOFS      = prove_integrate prove_debounce_step prove_corrupt_state_faults \
-                   prove_init_context prove_step_transition
+                   prove_init_context prove_step_transition prove_oor_recovery_step
 CBMC_PROOFS_LOOP = prove_press_liveness prove_release_liveness
+# Deep-loop proof: out-of-range counter recovery unrolls the worst-case 255 -> 0
+# descent, so it needs an unwind > 256 (the shorter --unwind 50 above is < the
+# horizon and would fail its unwinding assertion).
+CBMC_PROOFS_DEEP = prove_oor_recovery_bounded
+CBMC_DEEP_UNWIND = 257
 test-cbmc:
 	@if command -v $(CBMC) >/dev/null 2>&1; then \
 		for p in $(CBMC_PROOFS); do \
@@ -636,6 +641,11 @@ test-cbmc:
 			echo "cbmc: $$p (--unwind 50)"; \
 			$(CBMC) test/test_cbmc.c $(PURE_HOST_SRC) -Itest $(CBMC_DEFS) \
 				--function $$p --unwind 50 --unwinding-assertions $(CBMC_CHECKS) || exit 1; \
+		done; \
+		for p in $(CBMC_PROOFS_DEEP); do \
+			echo "cbmc: $$p (--unwind $(CBMC_DEEP_UNWIND))"; \
+			$(CBMC) test/test_cbmc.c $(PURE_HOST_SRC) -Itest $(CBMC_DEFS) \
+				--function $$p --unwind $(CBMC_DEEP_UNWIND) --unwinding-assertions $(CBMC_CHECKS) || exit 1; \
 		done; \
 		echo "=== CBMC: all debounce-core proofs SUCCESSFUL ==="; \
 	else \

@@ -161,6 +161,7 @@
 #define PORTB_MEM_ADDR 0x38  // PORTB I/O addr 0x18 + SFR offset 0x20
 #define SPL_MEM_ADDR   0x5D  // SPL I/O addr 0x3D + SFR offset 0x20
 #define SPH_MEM_ADDR   0x5E  // SPH I/O addr 0x3E + SFR offset 0x20 (not present on ATtiny13a)
+#define WDTCSR_MEM_ADDR 0x41 // WDTCR I/O addr 0x21 + SFR offset 0x20 (same on t13a and tinyx5)
 
 // --- global sim state shared with output-watch callbacks -------------------
 static avr_t      *g_avr = NULL;
@@ -658,6 +659,52 @@ static void test_init_completes_before_wdt(void) {
           "init() to first idle took %.3f ms; too close to WDT window", init_ms);
 }
 
+// (#WDT) WDT re-arm window: after a watchdog reset the AVR runs with the WDT's
+// SHORTEST (~16ms, prescaler 0) timeout until software reconfigures it, and with
+// the WDT oscillator's loose tolerance that window can be as short as ~7ms.
+// init()'s first actions are wdt_reset() then wdt_enable(WDTO_250MS) (see
+// bypass_core.c lines 180-182, before any blocking output pulse), so the re-arm
+// MUST land comfortably inside that window or a fault that survives reset could
+// re-trigger the WDT before init() widens the timeout -- a tight boot-loop.
+//
+// We measure the cycles from reset to the WDTCR write that selects the 250ms
+// prescaler.  At reset the prescaler nibble (WDP3:0) is 0 (~16ms);
+// wdt_enable(WDTO_250MS) sets it to 0b0100 (WDP2 only).  Masking with 0x27
+// isolates WDP3|WDP2|WDP1|WDP0 so the detection is independent of WDE/WDCE/WDIE,
+// which may already be set at reset (the design uses the WDTON always-on fuse).
+static void test_wdt_rearm_window(void) {
+    if (sim_reset_raw(0, 0) != 0) { g_failures++; return; } // sit exactly at reset
+
+    avr_cycle_count_t start  = g_avr->cycle;
+    avr_cycle_count_t target = start + (avr_cycle_count_t)(50UL * CYCLES_PER_MS);
+    avr_cycle_count_t armed_at = 0;
+
+    while (g_avr->cycle < target) {
+        int st = avr_run(g_avr);
+        if (st == cpu_Crashed) { g_saw_crash = 1; break; }
+        if (st == cpu_Done)    { break; }
+        // WDP3:0 == 0b0100 == the WDTO_250MS prescaler selection.
+        if ((g_avr->data[WDTCSR_MEM_ADDR] & 0x27u) == 0x04u) {
+            armed_at = g_avr->cycle;
+            break;
+        }
+    }
+
+    CHECK(armed_at != 0,
+          "WDT re-arm: wdt_enable(WDTO_250MS) write never observed within 50ms");
+    if (armed_at == 0) return;
+
+    double rearm_ms = (double)(armed_at - start) / (double)CYCLES_PER_MS;
+    printf("  WDT re-arm: %.4f ms reset -> wdt_enable(250ms) "
+           "(post-reset window can be as low as ~7ms)\n", rearm_ms);
+    // A few dozen instructions at 1.2MHz is well under 0.1ms; require < 1ms with
+    // generous margin so any future init() bloat that pushes the re-arm toward
+    // the ~7ms window fails here instead of risking a boot-loop on silicon.
+    CHECK(rearm_ms < 1.0,
+          "WDT re-arm took %.4f ms from reset; too close to the ~7ms post-reset "
+          "window (wdt_enable must stay at the very top of init())", rearm_ms);
+}
+
 // (#2) Power-on sampling order: the footswitch level present at reset must be
 // the one init() acts on. If held at power-on, the firmware enters
 // RELEASE_DEBOUNCE_WAIT and must NOT toggle when later released (verified
@@ -1003,6 +1050,70 @@ static void test_lockstep_cosim(void) {
           "input not stimulating the toggle path", toggles);
     printf("  lock-step: %u ticks compared, %u toggles, %u mismatches\n",
            ticks, toggles, mismatches);
+}
+
+// Multi-seed lock-step: test_lockstep_cosim runs ONE fixed seed; this drives
+// several more random seeds through the REAL firmware vs. the golden model and
+// asserts byte-for-byte agreement on every tick, so the fixed-seed co-sim lock
+// cannot hide a seed-dependent divergence between the compiled firmware and the
+// model.  Kept short per seed -- simavr is slow -- because the wide, long
+// long-duration sweep is covered far more cheaply by the golden-model Monte
+// Carlo (test_monte_carlo_seeds in test_logic_host.c).  Tunable via -D.
+#ifndef MC_SIM_SEED_COUNT
+#define MC_SIM_SEED_COUNT 5u
+#endif
+#ifndef MC_SIM_SEED_TICKS
+#define MC_SIM_SEED_TICKS 1000u
+#endif
+static void test_monte_carlo_lockstep(void) {
+    for (uint32_t s = 0; s < MC_SIM_SEED_COUNT; ++s) {
+        if (sim_reset(0) != 0) { g_failures++; return; }
+        if (!g_addr_debounce || !g_addr_program_state || !g_addr_effect_state) {
+            CHECK(0, "mc-lockstep: could not resolve firmware globals "
+                     "(need ELF symbols)");
+            return;
+        }
+
+        ls_model_t m;
+        ls_model_init(&m, 0); // released at power-on, matching sim_reset(0)
+        run_until_first_sleep((avr_cycle_count_t)(10UL * CYCLES_PER_MS));
+
+        // Distinct, well-spread seed per iteration (never 0: xorshift32 sticks
+        // at 0).  0x9E3779B9 is the golden-ratio odd constant used elsewhere.
+        uint32_t rng = 0x9E3779B9u * (s + 1u);
+        if (rng == 0u) { rng = 0xA5A5A5A5u; }
+
+        unsigned ticks = 0, mismatches = 0;
+        while (ticks < MC_SIM_SEED_TICKS && mismatches < 3) {
+            int pin_low      = ((xorshift32(&rng) & 0xFF) < 128); // ~50% pressed
+            unsigned hold    = 1u + (xorshift32(&rng) % 30u);     // up to 30 ticks
+            for (unsigned h = 0; h < hold && ticks < MC_SIM_SEED_TICKS;
+                 ++h, ++ticks) {
+                if (run_one_tick_settled(pin_low) != 0) {
+                    CHECK(0, "mc-lockstep seed %u: firmware tick %u failed "
+                             "(crash or stuck core)", s, ticks);
+                    return;
+                }
+                ls_model_step(&m, pin_low);
+
+                uint8_t fw_ps = g_avr->data[g_addr_program_state];
+                uint8_t fw_es = g_avr->data[g_addr_effect_state];
+                uint8_t fw_dc = g_avr->data[g_addr_debounce];
+                int ok = (fw_ps == m.program_state)
+                      && (fw_es == m.effect_state)
+                      && (fw_dc == m.debounce_counter)
+                      && (g_led_level == (int)m.effect_state);
+                CHECK(ok,
+                      "mc-lockstep seed %u divergence at tick %u (in=%d): "
+                      "fw(ps=%u es=%u dc=%u led=%d) != model(ps=%u es=%u dc=%u)",
+                      s, ticks, pin_low, fw_ps, fw_es, fw_dc, g_led_level,
+                      m.program_state, m.effect_state, m.debounce_counter);
+                if (!ok) { mismatches++; }
+            }
+        }
+    }
+    printf("  mc-lockstep: %u seeds x %u ticks, real firmware vs golden model\n",
+           (unsigned)MC_SIM_SEED_COUNT, (unsigned)MC_SIM_SEED_TICKS);
 }
 
 
@@ -1379,12 +1490,70 @@ static void test_fault_inject_unused_sram(void) {
           "fault-inject-unused-sram: not responsive after unused-SRAM write");
 }
 
+// Boot-loop under a PERSISTENT fault.  The firmware is designed so a fault that
+// survives a reset (a stuck pin, a corrupted fuse, or an SEU that re-flips the
+// same byte on every boot) produces a harmless, BOUNDED boot-loop: reset ->
+// re-init to BYPASS -> sanity check fires -> force another reset, forever, never
+// drifting into an undefined state.  This test confirms that bounded behavior
+// over several rapid cycles by RE-injecting the corruption after each recovery.
+//
+// Per cycle: corrupt program_state_ to 0xFF (out of enum range -> the main-loop
+// sanity check forces a WDT reset), wait past the WDT window, then assert the
+// firmware (a) actually reset -- the reinit cleared our 0xFF back into the valid
+// [0, RELEASE_DEBOUNCE_WAIT] range; (b) recovered to BYPASS (LED dark); and (c)
+// is alive again (re-entered idle sleep) rather than wedged.  We deliberately do
+// NOT re-press across resets: post-WDT-reset footswitch responsiveness is a
+// documented simavr limitation (PINB is cleared to 0x00 on reset, inconsistent
+// with the IRQ-driven level -- see test_watchdog_backstop_reset), so the
+// reset-occurred proof is the cleared-corruption check, not a re-toggle.
+//
+// tinyx5-only: simavr models the WDT system reset there, giving a deterministic
+// recovery signal.  On the ATtiny13a the WDT reset is not modeled.
+#ifdef TARGET_TINYX5
+static void test_boot_loop_persistent_fault(void) {
+    if (sim_reset(0) != 0) { g_failures++; return; }
+    CHECK(g_addr_program_state != 0,
+          "boot-loop: could not resolve program_state_ address");
+    if (g_addr_program_state == 0) return;
+
+    const int cycles = 5;
+    for (int c = 0; c < cycles; ++c) {
+        // Released level for the post-reset reinit (mitigates the PINB quirk).
+        footsw_set(0);
+
+        // Inject the persistent fault: an out-of-enum-range program_state_ that
+        // re-appears on this boot.  The sanity check catches it -> WDT reset.
+        avr_core_watch_write(g_avr, g_addr_program_state, 0xFFu);
+
+        g_saw_sleep = 0;
+        run_ms(500); // > WDT 250ms timeout: let the reset fire and init() re-run
+
+        // (a) A reset really happened: reinit overwrote our 0xFF with a valid
+        //     in-range program_state_ (PRESS_DEBOUNCE_WAIT, or RELEASE_DEBOUNCE_
+        //     WAIT if the PINB quirk made the reinit sample the pin as pressed).
+        uint8_t ps = g_avr->data[g_addr_program_state];
+        CHECK(ps <= (uint8_t)RELEASE_DEBOUNCE_WAIT,
+              "boot-loop cycle %d: program_state_ still corrupt (%u) -- no reset?",
+              c, ps);
+        // (b) Recovered to BYPASS.
+        CHECK(g_led_level == 0,
+              "boot-loop cycle %d: did not recover to BYPASS (LED=%d)",
+              c, g_led_level);
+        // (c) Alive, not wedged: the firmware re-entered steady-state idle sleep.
+        CHECK(g_saw_sleep == 1,
+              "boot-loop cycle %d: firmware not sleeping after recovery "
+              "(wedged instead of bounded boot-loop?)", c);
+    }
+}
+#endif
+
 static void run_fault_injection_suite(void) {
     test_fault_inject_program_state();
     test_fault_inject_effect_state();
 #ifdef TARGET_TINYX5
     test_fault_inject_timer_isr_flag();
     test_fault_inject_stack_pointer();
+    test_boot_loop_persistent_fault();
 #endif
     test_fault_inject_lost_pullup();
     test_fault_inject_control_ddr();
@@ -1825,10 +1994,12 @@ int main(int argc, char **argv) {
     test_extreme_bounce();
     test_sustained_noise();
     test_init_completes_before_wdt();
+    test_wdt_rearm_window();
     test_power_on_sampling_race();
     test_clean_press_latency();
     test_toggle_parity_invariant();
     test_lockstep_cosim();
+    test_monte_carlo_lockstep();
     test_enters_idle_sleep();
     test_watchdog_not_tripped_normally();
 #ifdef TARGET_TINYX5

@@ -586,6 +586,60 @@ static void test_asymmetric_emi_bursts(void) {
           "asymmetric EMI bursts: remained in BYPASS");
 }
 
+// Multi-seed Monte Carlo: the fixed-seed fuzz tests (test_fuzz_random_patterns,
+// and test_random_noise_resilience in test_sim.c) lock an EXACT toggle count for
+// ONE seed (0xDEADBEEF). That is a strong regression lock but does not prove the
+// firmware is correct for ALL seeds -- a seed-dependent anomaly would pass the
+// fixed-seed test and only surface in the field. This runs many seeds through
+// the golden model (fast: hundreds of seeds x a long stream in well under a
+// second) and, for each, asserts the invariants that must hold regardless of
+// input: (a) every state stays in range, (b) the toggle count never exceeds the
+// physical ceiling, and (c) the final effect-state parity matches the toggle
+// count (power-on BYPASS, each toggle flips it). Counts/duration tunable via -D.
+#ifndef MC_SEED_COUNT
+#define MC_SEED_COUNT 100u
+#endif
+#ifndef MC_SEED_DURATION_MS
+#define MC_SEED_DURATION_MS 100000u
+#endif
+static void test_monte_carlo_seeds(void) {
+    uint32_t const physical_max =
+        MC_SEED_DURATION_MS / (PRESSED_THRESH + RELEASE_THRESH) + 1u;
+
+    for (uint32_t s = 0; s < MC_SEED_COUNT; ++s) {
+        model_t m; model_init(&m, 0);
+
+        // Distinct, well-spread seed per iteration (never 0: xorshift32 sticks
+        // at 0). 0x9E3779B9 is the golden-ratio odd constant.
+        uint32_t rng = 0x9E3779B9u * (s + 1u);
+        if (rng == 0u) { rng = 0xA5A5A5A5u; }
+
+        int bad_state = 0;
+        for (uint32_t t = 0; t < MC_SEED_DURATION_MS; ++t) {
+            int pin_low = (xorshift32(&rng) & 0xFF) < 128; // ~50% duty
+            model_step_ms(&m, pin_low);
+            if (m.program_state > RELEASE_DEBOUNCE_WAIT ||
+                m.effect_state  > ENGAGED ||
+                m.debounce_counter > RELEASE_THRESH) {
+                bad_state = 1;
+                break;
+            }
+        }
+
+        CHECK(!bad_state,
+              "monte-carlo seed %u: invalid state reached (ps=%u es=%u dc=%u)",
+              s, m.program_state, m.effect_state, m.debounce_counter);
+        CHECK(m.toggle_count <= physical_max,
+              "monte-carlo seed %u: toggles %u exceeded physical ceiling %u",
+              s, m.toggle_count, physical_max);
+        // Power-on BYPASS + each toggle flips the effect => final parity check.
+        effect_state_t expected = (m.toggle_count & 1u) ? ENGAGED : BYPASS;
+        CHECK(m.effect_state == expected,
+              "monte-carlo seed %u: effect_state %u disagrees with toggle "
+              "parity (toggles=%u)", s, m.effect_state, m.toggle_count);
+    }
+}
+
 int main(void) {
     test_single_clean_press();
     test_two_presses_round_trip();
@@ -602,6 +656,7 @@ int main(void) {
     test_fuzz_random_patterns();
     test_fuzz_adversarial_patterns();
     test_fuzz_extreme_bounce();
+    test_monte_carlo_seeds();
     test_stress_sustained_noise();
     test_latency_measurement();
     test_latency_with_oscillator_drift();

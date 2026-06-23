@@ -326,3 +326,55 @@ void prove_release_liveness(void) {
     __CPROVER_assert(reached, "(C6) released hold did not re-arm within the horizon");
     __CPROVER_assert(toggles <= 1, "(C6) released hold produced more than one toggle");
 }
+
+//////////////////////////////////////////////////////////////////////////////
+// (C7) Out-of-range counter recovery: defense in depth against an SEU that flips
+// debounce_counter ABOVE RELEASE_THRESH. (C1) already proves in-range closure;
+// these prove the corrupted-counter region heals. Two complementary arguments:
+//
+//   (C7a) single-step contraction (no loop): from ANY out-of-range counter the
+//         integrator never grows it -- a released sample strictly decrements it
+//         (toward the valid range) and a pressed sample holds it (saturated).
+//         Combined with (C1)'s closure this inductively guarantees recovery.
+//   (C7b) bounded recovery (loop): the literal "after N steps" claim -- from ANY
+//         uint8_t value, a finite run of released samples returns the counter to
+//         [0, RELEASE_THRESH] (and, since a uint8_t maxes at 255, all the way to
+//         0). Run with a deep unwind (> 256) so the worst-case 255 -> 0 descent
+//         is fully unrolled and the unwinding assertion proves the bound is real.
+//////////////////////////////////////////////////////////////////////////////
+void prove_oor_recovery_step(void) {
+    int     pin_low = nondet_int();
+    uint8_t dc      = nondet_uint8();
+    __CPROVER_assume(pin_low == 0 || pin_low == 1);
+    __CPROVER_assume(dc > RELEASE_THRESH); // corrupted: above the valid range
+
+    pin_state_t const pin = (pin_low != 0) ? PIN_STATE_LOW : PIN_STATE_HIGH;
+    uint8_t const out = debounce_integrate(pin, dc);
+
+    // Never grows an out-of-range counter.
+    __CPROVER_assert(out <= dc, "(C7a) integrator grew an out-of-range counter");
+    if (pin == PIN_STATE_HIGH) {
+        // Released: strictly contracts toward the valid range.
+        __CPROVER_assert(out == (uint8_t)(dc - 1U),
+                         "(C7a) released sample did not decrement an OOR counter");
+    } else {
+        // Pressed: saturated, holds steady (cannot climb further).
+        __CPROVER_assert(out == dc,
+                         "(C7a) pressed sample moved a saturated OOR counter");
+    }
+}
+
+#define OOR_HORIZON 256
+void prove_oor_recovery_bounded(void) {
+    uint8_t dc = nondet_uint8(); // full 0..255 domain, NO range assumption
+
+    int recovered = 0;
+    for (int t = 0; t < OOR_HORIZON; ++t) {
+        dc = debounce_integrate(PIN_STATE_HIGH, dc); // hold the line released
+        if (dc <= RELEASE_THRESH) { recovered = 1; }
+    }
+    // After a bounded run of released samples the counter is back in range...
+    __CPROVER_assert(recovered, "(C7b) OOR counter never returned to valid range");
+    // ...and in fact has floored at 0 (a fully released line drains completely).
+    __CPROVER_assert(dc == 0U, "(C7b) released hold did not drain the counter to 0");
+}
