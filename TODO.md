@@ -118,17 +118,7 @@ feasible. The main obstacle is that the drivers call `_delay_ms()` (a busy-wait
 loop), which CBMC cannot symbolically execute; the workaround is to stub
 `_delay_ms()` as a no-op and verify the pin sequence logic in isolation.
 
-**Long-duration soak test.** A 24-hour simulated soak test with random input
-patterns would stress the firmware's WDT handshake and sanity-check paths at a
-timescale the current tests don't reach. Mechanically trivial: a `make
-test-soak` target with `SIM_RANDOM_NOISE_DURATION_MS=86400000u` (or
-configurable). The existing test infrastructure supports arbitrary duration
-overrides. The value is in catching extremely rare state drift or WDT-pet
-timing edge cases that the current 5-60s runs cannot exercise. Caveat: at
-simavr's real-time ratio, 24 hours of simulated time may take many hours of
-wall-clock time; a shorter but still multi-minute soak (e.g., 10 minutes
-simulated = 600000 ms) is a practical compromise for CI, with the full soak
-available for pre-release validation.
+**~~Long-duration soak test.~~** ~~Done~~ — `test/test_soak.c` + `make test-soak`: drives random footswitch input for `SOAK_DURATION_MS` of simulated time (default 86 400 000 ms = 24 h), verifying (1) WDT liveness — unexpected resets are logged but do not halt the run, so the remaining duration is always exercised — and (2) periodic responsiveness — every `SOAK_LIVENESS_INTERVAL_MS` a clean 2-press round-trip confirms the device still toggles correctly. Progress lines printed every `SOAK_PROGRESS_INTERVAL_MS`. Standalone binary; excluded from `make test` by design — available as `make test-soak` for pre-release validation.
 
 **ISR-timing-jitter stress test.** On real hardware, the timer ISR latency can
 vary (e.g., if `cli()` is held across the compare-match point during a toggle
@@ -611,7 +601,7 @@ left to the implementer" is itself evidence of thoroughness.
 | Power-on-pressed in simavr                      | 2.5  | 1–2 h     | Medium — simavr quirk workaround|
 | Out-of-range counter recovery proof             | 2.5  | 30 min    | Medium — formal defense in depth|
 | Formal verification of output drivers           | 2.5  | 3–4 h     | Medium — driver correctness     |
-| Long-duration soak test                         | 2.5  | 1 h       | Medium — rare-edge-case stress  |
+| ~~Long-duration soak test~~                     | 2.5  | done      | Medium — rare-edge-case stress  |
 | ISR-timing-jitter stress test                   | 2.5  | 1–2 h     | Low — confirms design property  |
 | Golden-model vs model_step cross-validation     | 2.5  | 1–2 h     | Medium — fourth oracle path     |
 | Clock drift fine-grained sweep                  | 2.5  | 1 h       | Low — narrow but real edge case |
