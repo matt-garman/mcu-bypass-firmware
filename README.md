@@ -3,9 +3,10 @@
 
 [![CI](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml)
 
-The project contains firmware for the ATtiny13a and ATtinyX5 AVR-family
-microcontrollers.  The firmware is intended to be used for electric instrument
-effects (e.g. guitar effect pedals) bypass switching.  The firmware has four
+The project contains firmware for the "AVR Classic" (ATtiny13a,
+ATtiny45, ATtiny85) AVR-family microcontrollers.  The firmware is
+intended to be used for electric instrument effects (e.g. guitar
+effect pedals) bypass switching.  The firmware has four
 responsibilities:
 
   - Maintain state (engage/bypass)
@@ -51,8 +52,9 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
 
 # Quickstart
 
-Requres avrtools, assumes a USBtiny programmer, and a fresh ATtiny13a/ATtinyX5
-chip:
+Requres avrtools, assumes a USBtiny programmer, and a fresh
+ATtiny13a chip (see `make help` for how to build/program other
+MCUs):
 
 ```
 make
