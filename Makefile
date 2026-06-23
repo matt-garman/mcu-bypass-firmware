@@ -562,7 +562,7 @@ test-model-check: test/test_model_check
 
 # Build rule for the state-space checker. Links bypass_pure.c so step() exercises
 # the real firmware functions (see model_step.h / PURE_HOST_SRC).
-test/test_model_check: test/test_model_check.c test/model_step.h test/bypass_config_host.h bypass_config.h $(PURE_HOST_DEP)
+test/test_model_check: test/test_model_check.c test/model_step.h test/bypass_config_host.h src/bypass_config.h $(PURE_HOST_DEP)
 	$(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) $(PURE_HOST_CFLAGS) -Itest $< $(PURE_HOST_SRC) -o $@
 
 # Symbolic / exhaustive single-step property check: proves the per-step
@@ -575,7 +575,7 @@ test-symbolic: test/test_symbolic
 
 # Build rule for the symbolic step checker. Links bypass_pure.c so step()
 # exercises the real firmware functions (see model_step.h / PURE_HOST_SRC).
-test/test_symbolic: test/test_symbolic.c test/model_step.h test/bypass_config_host.h bypass_config.h $(PURE_HOST_DEP)
+test/test_symbolic: test/test_symbolic.c test/model_step.h test/bypass_config_host.h src/bypass_config.h $(PURE_HOST_DEP)
 	$(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) $(PURE_HOST_CFLAGS) -Itest $< $(PURE_HOST_SRC) -o $@
 
 # Optional: run the SAME single-step properties under KLEE symbolic execution
