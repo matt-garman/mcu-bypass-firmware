@@ -85,6 +85,6 @@ For CI reproducibility, prefer Ubuntu 24.04 LTS Docker image:
 ....
     docker run --rm -v $(pwd):/src ubuntu:24.04 bash -c \
       "apt-get install -y gcc-avr avr-libc simavr libsimavr-dev libelf-dev gcc && \
-       cd /src/nextgen && make test"
+       cd src/ && make test"
 ....
 

@@ -51,7 +51,7 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
 
 # Quickstart
 
-Requres avrtools, assumes a USBasp programmer, and a fresh ATtiny13a/ATtinyX5
+Requres avrtools, assumes a USBtiny programmer, and a fresh ATtiny13a/ATtinyX5
 chip:
 
 ```

@@ -4,7 +4,7 @@ Status note (2026-06-18): the firmware and test/validation suite have been
 meta-reviewed (design doc, firmware implementation, golden-model accuracy,
 test correctness, and additional verification opportunities). The firmware has
 no known correctness defects; `make test` passes clean across all three output
-variants and both MCU families (ATtiny13a and tinyx5), with 100% golden-model
+variants and both MCU families (ATtiny13a and tinyx5), with 99.35% golden-model
 line coverage. The meta-review confirmed: (1) the design meets its stated goals,
 (2) no bugs, race conditions, or footguns were found in the firmware, (3) the
 golden model matches the firmware exactly via three independent verification

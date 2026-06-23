@@ -398,9 +398,9 @@ Specific tests verify specific requirements, as show in the following table:
 
 | One press → exactly one state change | model_check I2/I5; test_single_clean_press; test_lockstep_cosim
 | Release → zero state changes         | model_check I3; test_single_clean_press; test_two_presses_round_trip
-| Switch bounce → no extra changes     | test_bouncy_press; test_fuzz_extreme_bounce; test_extreme_bounce (sim)
+| Switch bounce → no extra changes     | test_bouncy_press_single_toggle; test_fuzz_extreme_bounce; test_extreme_bounce (sim)
 | Hold seconds → no repeat             | test_long_hold; model_check I5 (liveness proof shows exactly 1)
-| EMI/RFI resilience                   | test_sustained_noise; test_asymmetric_emi_bursts; test_random_noise
+| EMI/RFI resilience                   | test_sustained_noise; test_asymmetric_emi_bursts; test_random_noise_resilience
 | Fast taps recognized                 | test_fast_repeated_taps; caveats section
 | Latency <10ms                        | test_clean_press_latency; test_oscillator_drift_tolerance
 | Deterministic/analyzable             | model_check exhaustive BFS; test_symbolic exhaustive enumeration

@@ -52,7 +52,7 @@
 #       make test SIM_DEFS='-DSIM_RANDOM_NOISE_DURATION_MS=20000u'
 #
 # USEFUL OVERRIDES (command line)
-#   PROGRAMMER=usbtiny      use a different ISP programmer
+#   PROGRAMMER=usbasp       use a different ISP programmer
 #   COVERAGE_MIN=95         raise the coverage gate
 #   HOSTCC=clang            use a different host compiler for the test suite
 #
@@ -128,7 +128,7 @@ VARIANT ?= cd4053
 # PROGRAMMER: "51 AVR USB ISP ASP" dongle is a USBasp clone -> usbasp.
 # AVRDUDE_PART: avrdude's short name for the ATtiny13/13a.
 # Override on the command line if needed, e.g.:
-#   make flash PROGRAMMER=usbtiny
+#   make flash PROGRAMMER=usbasp
 PROGRAMMER   ?= usbtiny
 AVRDUDE_PART   ?= t13
 
