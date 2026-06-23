@@ -159,6 +159,8 @@
 #define TIMSK_MEM_ADDR 0x59  // TIMSK0/TIMSK I/O addr 0x39 + SFR offset 0x20
 #define DDRB_MEM_ADDR  0x37  // DDRB I/O addr 0x17 + SFR offset 0x20
 #define PORTB_MEM_ADDR 0x38  // PORTB I/O addr 0x18 + SFR offset 0x20
+#define SPL_MEM_ADDR   0x5D  // SPL I/O addr 0x3D + SFR offset 0x20
+#define SPH_MEM_ADDR   0x5E  // SPH I/O addr 0x3E + SFR offset 0x20 (not present on ATtiny13a)
 
 // --- global sim state shared with output-watch callbacks -------------------
 static avr_t      *g_avr = NULL;
@@ -910,6 +912,18 @@ static void test_lockstep_cosim(void) {
           g_avr->data[g_addr_program_state], g_avr->data[g_addr_effect_state],
           g_avr->data[g_addr_debounce], m.program_state, m.effect_state, m.debounce_counter);
 
+    // Anchor: control-output steady state at power-on BYPASS. The SETTLE_MS
+    // settle guarantees init()'s blocking output call has completed.
+#if defined(TQ2_L2_5V_RELAY)
+    CHECK(g_ctl_level[CTL_PB2] == 0 && g_ctl_level[CTL_PB3] == 0,
+          "lock-step anchor: relay coils not parked at init (PB2=%d PB3=%d)",
+          g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3]);
+#elif defined(CD4053_WITH_MUTE)
+    CHECK(g_ctl_level[CTL_PB2] == 0 && g_ctl_level[CTL_PB3] == 0,
+          "lock-step anchor: mute not in BYPASS steady state at init (PB2=%d PB3=%d)",
+          g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3]);
+#endif
+
     uint32_t rng = 0xC051A1EDu;
     unsigned ticks = 0;
     unsigned mismatches = 0;
@@ -959,6 +973,27 @@ static void test_lockstep_cosim(void) {
             CHECK(g_ctl_level[CTL_PB2] == (int)m.effect_state,
                   "lock-step: CD4053 (PB2=%d) disagrees with model effect_state=%u at tick %u",
                   g_ctl_level[CTL_PB2], m.effect_state, ticks);
+#elif defined(TQ2_L2_5V_RELAY)
+            // Relay: both coils must be parked low after every settled tick.
+            // run_one_tick_settled() waits for the CPU to re-enter sleep, which
+            // only occurs after the blocking coil pulse and set_relay_coils_low()
+            // have both completed.
+            CHECK(g_ctl_level[CTL_PB2] == 0 && g_ctl_level[CTL_PB3] == 0,
+                  "lock-step relay: coils not parked at tick %u (PB2=%d PB3=%d)",
+                  ticks, g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3]);
+#elif defined(CD4053_WITH_MUTE)
+            // Mute: both control lines equal effect_state in steady state
+            // (both low for BYPASS, both high for ENGAGED). ls_model_step()
+            // has already updated m.effect_state to the post-tick value, so
+            // this compares against the same state the firmware just settled into.
+            {
+                int expected_ctl = (int)m.effect_state;
+                CHECK(g_ctl_level[CTL_PB2] == expected_ctl &&
+                      g_ctl_level[CTL_PB3] == expected_ctl,
+                      "lock-step mute: control lines wrong at tick %u "
+                      "(PB2=%d PB3=%d expected=%d)",
+                      ticks, g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3], expected_ctl);
+            }
 #endif
         }
     }
@@ -1275,14 +1310,85 @@ static void test_fault_inject_control_ddr(void) {
     expect_fault_response("control DDR (PB2)");
 }
 
+// Redirect the stack pointer into the ctx_ BSS region and verify the firmware
+// detects the resulting corruption.
+//
+// When SP is set to ctx_+2, the next Timer0 ISR's hardware interrupt dispatch
+// pushes the return PC into ctx_.debounce_counter (data[ctx+2]) and
+// ctx_.effect_state (data[ctx+1]).  The ISR prologue then saves r0 into
+// ctx_.program_state (data[ctx+0]), writing whatever r0 held at interrupt
+// time.  Further register saves spill into I/O register address space:
+// the fourth push lands on data[0x5F] = the SREG I/O register, which clears
+// the global-interrupt-enable (I) bit, disabling future ISRs.  With the ISR
+// stopped, the main loop can no longer pet the watchdog, and the WDT fires
+// within ~250 ms and resets the MCU to BYPASS.
+//
+// If the sanity check fires first (program_state or effect_state out of range
+// from the PC-byte write), hw_force_wdt_reset() triggers the same outcome.
+//
+// Gated to tinyx5: simavr models the WDT system reset on that family, giving
+// a clean LED-dark recovery signal.  ATtiny13a's WDT is not simulated, and the
+// I-bit-clear path (firmware sleeps forever) makes the no-sleep assertion
+// unreliable there -- the same limitation as test_fault_inject_timer_isr_flag.
+#ifdef TARGET_TINYX5
+static void test_fault_inject_stack_pointer(void) {
+    if (sim_reset(0) != 0) { g_failures++; return; }
+    CHECK(g_addr_ctx != 0,
+          "fault-inject-stack: could not resolve ctx_ address (need ELF symbols)");
+    if (g_addr_ctx == 0) return;
+
+    footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
+    CHECK(g_led_level == 1, "fault-inject-stack: normal press engages");
+
+    avr_core_watch_write(g_avr, SPL_MEM_ADDR, (uint8_t)(g_addr_ctx + 2u));
+    avr_core_watch_write(g_avr, SPH_MEM_ADDR, 0x00u);
+    expect_fault_response("stack pointer -> ctx BSS");
+}
+#endif
+
+// Corrupt a byte in the unused SRAM gap between BSS globals and the active
+// stack, and verify the sanity check does NOT fire (negative / defense-in-depth
+// test).  The target (ctx_ base + 10) lies past all known globals (ctx_ = 3 B,
+// timer_isr_called_ = 1 B, giving 4 B total; +10 clears that with margin) and
+// safely below the stack high-water mark (~0x81 on ATtiny13a, measured by
+// test_stack_high_water_mark), so the write is never touched by normal
+// execution.  The firmware must remain fully responsive after the corruption.
+static void test_fault_inject_unused_sram(void) {
+    if (sim_reset(0) != 0) { g_failures++; return; }
+    CHECK(g_addr_ctx != 0,
+          "fault-inject-unused-sram: could not resolve ctx_ address (need ELF symbols)");
+    if (g_addr_ctx == 0) return;
+
+    uint32_t unused_addr = g_addr_ctx + 10u;
+    avr_core_watch_write(g_avr, unused_addr, 0x42u);
+
+    g_saw_crash = 0;
+    g_saw_sleep = 0;
+    run_ms(50);
+
+    CHECK(g_saw_crash == 0,
+          "fault-inject-unused-sram: unexpected WDT reset "
+          "(sanity check false-fired on unused SRAM byte?)");
+    CHECK(g_saw_sleep == 1,
+          "fault-inject-unused-sram: CPU not sleeping "
+          "(stuck in force_wdt_reset loop from false alarm?)");
+
+    uint32_t before = g_led_changes;
+    footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
+    CHECK((g_led_changes - before) == 1u,
+          "fault-inject-unused-sram: not responsive after unused-SRAM write");
+}
+
 static void run_fault_injection_suite(void) {
     test_fault_inject_program_state();
     test_fault_inject_effect_state();
 #ifdef TARGET_TINYX5
     test_fault_inject_timer_isr_flag();
+    test_fault_inject_stack_pointer();
 #endif
     test_fault_inject_lost_pullup();
     test_fault_inject_control_ddr();
+    test_fault_inject_unused_sram();
 }
 
 // Oscillator drift tolerance: verify the <10ms press-latency goal holds across

@@ -78,33 +78,9 @@ These items were identified during a full meta-review of the firmware, design
 doc, and test suite (2026-06-18). All close residual verification gaps that can
 be addressed in software before physical hardware testing begins.
 
-**AVR instruction-level fault injection.** The existing fault-injection suite
-corrupts individual SRAM globals (`program_state_`, `effect_state_`,
-`timer_isr_called_`) and I/O registers (DDRB, PORTB, TIMSK). A more powerful
-approach: corrupt *arbitrary* SRAM bytes (stack, unused RAM, BSS padding) and
-verify the firmware's sanity-check + WDT-recovery path still fires. simavr
-supports writing to any SRAM address via `avr_core_watch_write()`, so this is
-mechanically straightforward. Specific scenarios: (a) corrupt the stack pointer
-and verify the firmware doesn't silently survive with a broken call chain; (b)
-corrupt a byte in the unused SRAM region and verify no side effect (defense in
-depth); (c) corrupt `ctx_` at a struct offset that doesn't correspond to a
-named field (padding, though `-fshort-enums` + `static_assert` make this
-unlikely). This extends the existing `test_fault_inject_*` family in
-`test_sim.c`.
+**~~AVR instruction-level fault injection.~~** ~~Done~~ — `test_fault_inject_stack_pointer()` (tinyx5-only: redirects SP into BSS; ISR pushes overwrite `ctx_` fields and spill into I/O space, stopping timer ISR and triggering WDT recovery) and `test_fault_inject_unused_sram()` (all nine builds: sentinel write to `ctx_+10` verifies no false-positive sanity-check fire and full responsiveness) added to the `test_fault_inject_*` family in `test/test_sim.c`. Scenario (c) (struct padding) is N/A due to `-fshort-enums`.
 
-**Extended lock-step co-sim with variant-specific control outputs.** The
-`test_lockstep_cosim()` test compares firmware internal state against the golden
-model every tick, and verifies the LED tracks `effect_state`. For the CD4053
-simple variant it also checks PB2. Extending this to the relay and mute variants
-would close a coverage gap: currently the relay pulse timing and mute window are
-only verified by dedicated single-scenario tests (`test_control_relay_pulse`,
-`test_control_mute_sequence`), not by the exhaustive random-input co-sim. A
-lock-step extension would verify that across thousands of random ticks, PB2/PB3
-*always* end up in the correct steady state (both low for bypass, both high for
-engaged, coils parked low for relay) after any toggle. Requires modeling the
-variant's pin behavior in the lock-step oracle (a small state machine for relay
-coil pulses / mute sequencing, or simply checking steady-state levels after a
-settle window).
+**~~Extended lock-step co-sim with variant-specific control outputs.~~** ~~Done~~ — `test_lockstep_cosim()` extended with per-tick steady-state checks for all three variants: relay (PB2=0 and PB3=0 after every settled tick, coils parked); mute (PB2 and PB3 both equal `effect_state`); CD4053 simple (PB2 equals `effect_state`). Anchor checks at power-on BYPASS also added for relay and mute. All nine builds pass, adding ~3000 extra checks per tinyx5 variant run.
 
 **Power-on-pressed in simavr.** The simavr harness sets the footswitch IRQ
 *before* the firmware starts (via `sim_reset(1)`), which correctly exercises
@@ -630,8 +606,8 @@ left to the implementer" is itself evidence of thoroughness.
 | ~~Minimum-tap-interval test~~                   | 2    | done      | Medium — closes traceability    |
 | ~~`-fstack-usage` static bound~~                | 2    | done      | Medium — complements HWM test   |
 | ~~Flash-utilization budget assertion~~          | 2    | done      | Medium — resource budget        |
-| AVR instruction-level fault injection           | 2.5  | 2–3 h     | High — extends fault coverage   |
-| Extended lock-step with variant ctrl outputs    | 2.5  | 2–4 h     | High — closes co-sim gap        |
+| ~~AVR instruction-level fault injection~~        | 2.5  | done      | High — extends fault coverage   |
+| ~~Extended lock-step with variant ctrl outputs~~ | 2.5  | done      | High — closes co-sim gap        |
 | Power-on-pressed in simavr                      | 2.5  | 1–2 h     | Medium — simavr quirk workaround|
 | Out-of-range counter recovery proof             | 2.5  | 30 min    | Medium — formal defense in depth|
 | Formal verification of output drivers           | 2.5  | 3–4 h     | Medium — driver correctness     |
