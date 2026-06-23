@@ -1,74 +1,25 @@
 # Remaining work toward textbook reference quality
 
-Status note (2026-06-18): the firmware and test/validation suite have been
-meta-reviewed (design doc, firmware implementation, golden-model accuracy,
-test correctness, and additional verification opportunities). The firmware has
-no known correctness defects; `make test` passes clean across all three output
+Status note: the firmware and test/validation suite have been meta-reviewed
+several times (design doc, firmware implementation, golden-model accuracy, test
+correctness, and additional verification opportunities). The firmware has no
+known correctness defects; `make test` passes clean across all three output
 variants and both MCU families (ATtiny13a and tinyx5), with 99.35% golden-model
-line coverage. The meta-review confirmed: (1) the design meets its stated goals,
-(2) no bugs, race conditions, or footguns were found in the firmware, (3) the
+line coverage. The reviews confirmed: (1) the design meets its stated goals;
+(2) no bugs, race conditions, or footguns were found in the firmware; (3) the
 golden model matches the firmware exactly via three independent verification
-paths, (4) all existing tests are correct and meaningful, and (5) identified
-seven additional pre-hardware verification opportunities (added as Tier 2.5).
-The items below are deferrable polish and credibility work — none are bugs.
-Anything that *is* a bug gets fixed immediately, not parked here.
-A second meta-review (same date) confirmed the earlier findings, found no new
-correctness defects, and identified three more pre-hardware verification
-opportunities — the boot-loop, WDT re-arm window, and footswitch-glitch regression
-items added below.
-A third meta-review (same date, third pass) re-confirmed all prior findings,
-found no new correctness defects, and identified three additional pre-hardware
-verification not yet in the TODO: signal-integrity SPICE modeling, multi-seed
-Monte Carlo fuzzing, and multi-press edge-case regression tests (marked "NEW" below).
-
-Completed since the previous revision (kept here only as a record; safe to
-delete): README.md; design doc renamed to `DESIGN_DOCUMENTATION.adoc`; timer
-formula `static_assert`; `__attribute__((OS_main))`; MISRA-C:2012 analysis +
-`MISRA_COMPLIANCE.md` + `make analyze-misra` gate; KLEE support
-(`make test-symbolic-klee`, `test_symbolic.c -DUSE_KLEE`).
-
----
-
-## Tier 1 — high impact, low effort (do first)
-
-**~~No CI/CD pipeline.~~** ~~Done~~ — `ci.yml` exercises the full matrix: all
-three variants × {ATtiny13a, ATtiny45, ATtiny85}, plus analysis gates
-(clang-tidy, cppcheck, MISRA, CBMC) and a separate stress/mutation job.
-CI badge wired into `README.md`.
-
-**~~Design-doc resource-utilization section.~~** ~~Done~~ — `== Resource
-Utilization` section in `DESIGN_DOCUMENTATION.adoc` with a flash table for all
-nine variant/MCU combinations (sourced from `avr-size`) and a prose paragraph on
-SRAM headroom (sourced from the simavr stack-canary HWM test).
-
-**~~Fix stale references / editorial note.~~** ~~Done~~ — (a) `attiny13_bypass.md`
-/ `attiny13_bypass.c` references removed from all prose; `TOOLCHAIN.adoc` updated
-to "bypass firmware". (b) `DESIGN_DOCUMENTATION.adoc` editorial note reworded
-from "It shows…" to a normal diagram lead-in.
+paths; and (4) all existing tests are correct and meaningful. The items below
+are deferrable polish and credibility work — none are bugs. Anything that *is* a
+bug gets fixed immediately, not parked here.
 
 ---
 
 ## Tier 2 — closes verification / traceability gaps
 
 **Datasheet citations in the design doc.** The sleep-wakeup §7.3 cite lives in
-`bypass_core.c`; the *design doc itself* currently cites no datasheet sections.
+`bypass_mcu_avr_classic.c`; the *design doc itself* currently cites no datasheet sections.
 Each load-bearing decision should trace to a page/section: WDT ~16 ms post-reset
 window; WDTON always-on; internal-RC ±10%; Timer0 CTC formula; BOD level.
-
-**Minimum-tap-interval regression test.** ~~Done~~ — `test_minimum_tap_interval()` in
-`test/test_logic_host.c`: drives two presses exactly `PRESSED_THRESH + RELEASE_THRESH = 33 ms`
-apart and asserts both register; includes a boundary guard (one tick short on release
-must keep the second press locked out). Wired into `make test`.
-
-**`-fstack-usage` static bound.** ~~Done~~ — `make test-stack-bound` compiles every
-firmware TU with `-fstack-usage`, prints all per-function frames, and fails if any
-frame exceeds `STACK_MAX_FRAME` (default 32 B). Observed frames: ISR 19 B,
-`debounce_step` 10 B, all others ≤ 2 B. Wired into `make test`.
-
-**Flash-utilization budget assertion.** ~~Done~~ — `make test-flash-budget` runs
-`avr-size` on each ATtiny13a variant ELF and fails if Program bytes exceed
-`FLASH_T13_BUDGET`% of 1 KB (default 90% = 921 B). Current usage: cd4053 612 B
-(59.8%), mute 660 B (64.5%), relay 652 B (63.7%). Wired into `make test`.
 
 ---
 
@@ -77,10 +28,6 @@ frame exceeds `STACK_MAX_FRAME` (default 32 B). Observed frames: ISR 19 B,
 These items were identified during a full meta-review of the firmware, design
 doc, and test suite (2026-06-18). All close residual verification gaps that can
 be addressed in software before physical hardware testing begins.
-
-**~~AVR instruction-level fault injection.~~** ~~Done~~ — `test_fault_inject_stack_pointer()` (tinyx5-only: redirects SP into BSS; ISR pushes overwrite `ctx_` fields and spill into I/O space, stopping timer ISR and triggering WDT recovery) and `test_fault_inject_unused_sram()` (all nine builds: sentinel write to `ctx_+10` verifies no false-positive sanity-check fire and full responsiveness) added to the `test_fault_inject_*` family in `test/test_sim.c`. Scenario (c) (struct padding) is N/A due to `-fshort-enums`.
-
-**~~Extended lock-step co-sim with variant-specific control outputs.~~** ~~Done~~ — `test_lockstep_cosim()` extended with per-tick steady-state checks for all three variants: relay (PB2=0 and PB3=0 after every settled tick, coils parked); mute (PB2 and PB3 both equal `effect_state`); CD4053 simple (PB2 equals `effect_state`). Anchor checks at power-on BYPASS also added for relay and mute. All nine builds pass, adding ~3000 extra checks per tinyx5 variant run.
 
 **Power-on-pressed in simavr.** The simavr harness sets the footswitch IRQ
 *before* the firmware starts (via `sim_reset(1)`), which correctly exercises
@@ -94,16 +41,6 @@ footswitch IRQ drive immediately after each simavr reset. Option (b) is
 mechanically feasible in the test harness; the WDT-backstop test already
 partially works around this.
 
-**~~Formal verification of out-of-range counter recovery.~~** ~~Done~~ — two new
-CBMC harnesses in `test_cbmc.c`, wired into `make test-cbmc`: `prove_oor_recovery_step`
-(C7a) proves the single-step contraction property over the full `uint8_t` domain —
-a counter above `RELEASE_THRESH` is never grown (a released sample decrements it
-toward range, a pressed sample holds it saturated); `prove_oor_recovery_bounded`
-(C7b) proves the literal recovery claim with a deep `--unwind 257` loop (new
-`CBMC_PROOFS_DEEP` list) — from any of the 256 `uint8_t` values a run of released
-samples returns the counter to `[0, RELEASE_THRESH]` and drains it to 0. All
-assertions SUCCESS, including CBMC's automatic overflow/conversion checks.
-
 **Formal verification of output drivers.** The output drivers (relay, mute,
 CD4053) contain blocking delays and multi-step pin sequences. They are tested by
 scenario-based simavr tests but are not formally verified. A state-machine model
@@ -114,8 +51,6 @@ invalid mute/engage/bypass pin combination. The drivers are small enough
 feasible. The main obstacle is that the drivers call `_delay_ms()` (a busy-wait
 loop), which CBMC cannot symbolically execute; the workaround is to stub
 `_delay_ms()` as a no-op and verify the pin sequence logic in isolation.
-
-**~~Long-duration soak test.~~** ~~Done~~ — `test/test_soak.c` + `make test-soak`: drives random footswitch input for `SOAK_DURATION_MS` of simulated time (default 86 400 000 ms = 24 h), verifying (1) WDT liveness — unexpected resets are logged but do not halt the run, so the remaining duration is always exercised — and (2) periodic responsiveness — every `SOAK_LIVENESS_INTERVAL_MS` a clean 2-press round-trip confirms the device still toggles correctly. Progress lines printed every `SOAK_PROGRESS_INTERVAL_MS`. Standalone binary; excluded from `make test` by design — available as `make test-soak` for pre-release validation.
 
 **ISR-timing-jitter stress test.** On real hardware, the timer ISR latency can
 vary (e.g., if `cli()` is held across the compare-match point during a toggle
@@ -226,26 +161,6 @@ rather than runtime behavior. Mechanically similar to `run_mutation_tests.sh`
 but checking for compile failure instead of test failure. Low effort (~30 min)
 and closes the gap where a future refactor could accidentally weaken or remove
 a `static_assert` without anyone noticing.
-
-**~~Boot-loop verification test.~~** ~~Done~~ — `test_boot_loop_persistent_fault()`
-in `test_sim.c` (tinyx5-only, run from the fault-injection suite): re-injects an
-out-of-range `program_state_` (0xFF) after each recovery to emulate a fault that
-survives every reset, and over 5 rapid cycles asserts the firmware (a) actually
-reset — the reinit cleared the corruption back into `[0, RELEASE_DEBOUNCE_WAIT]`;
-(b) recovered to BYPASS (LED dark); and (c) re-entered idle sleep (alive, not
-wedged). Confirms a bounded, clean boot-loop rather than drift into an undefined
-state. Post-reset re-press is deliberately avoided — a documented simavr
-PINB-on-reset limitation (see `test_watchdog_backstop_reset`).
-
-**~~WDT re-arm timing window measurement.~~** ~~Done~~ — `test_wdt_rearm_window()`
-in `test_sim.c` (all nine builds): sits the sim exactly at reset and measures the
-cycles to the `WDTCR` write that selects the `WDTO_250MS` prescaler (detected via
-the WDP3:0 nibble == 0b0100, independent of the WDTON-forced WDE/WDCE bits).
-Measured 0.048–0.062 ms (~50–75 cycles at 1.2 MHz) — far inside the worst-case
-~7 ms post-reset window. The test asserts `< 1 ms` so any future `init()` change
-that pushes `wdt_enable()` away from the top of the function fails here. Confirmed
-`init()` does `wdt_reset()` → `wdt_enable(WDTO_250MS)` before the variant's
-blocking output pulse, so the margin holds on every variant.
 
 **Footswitch-pin glitch regression test (simavr quirk).** The simavr harness's
 `run_one_tick_settled()` re-drives the footswitch pin on every `avr_run()`
@@ -372,7 +287,7 @@ read on 8-bit AVR). A TLA+ or SPIN model would formalize the ISR/main
 interleaving at the byte level, modeling each byte read/write as a separate
 step, and verify that all possible interleavings preserve the safety
 invariants. This would be the definitive proof that the race conditions in the
-`ctx_` struct sharing (documented in `bypass_core.c` lines 284–286 and
+`ctx_` struct sharing (documented in `bypass_mcu_avr_classic.c` lines 284–286 and
 analyzed in the firmware review) are truly benign. The state space is tiny (3
 bytes + 1 handshake byte + 2 program states), so the model check completes in
 milliseconds. High value as a formal concurrency-safety argument. Medium-high
@@ -381,17 +296,6 @@ strongest possible verification of the ISR/main interaction.
 
 **Signal-integrity SPICE modeling of the footswitch input network.** (NEW — from third review pass)
 The design's EMI/RFI defense includes a hardware filter (TVS, ferrite, 1k series, 22nF to ground, 10k pull-up) with a time constant τ ≈ 18 µs. The firmware's 8 ms integrator threshold is claimed to be ~80× the hardware filter corner, but this ratio is based on an order-of-magnitude estimate, not a SPICE simulation. Before the first PCB is ordered, run a SPICE transient analysis of the complete input network with: (a) a 5 kV ESD pulse (IEC 61000-4-2 contact discharge model) to verify the MCU pin stays within absolute maximum ratings and the clamped pulse does not exceed Schmitt-trigger VIL/VIH thresholds; (b) a GSM 900 MHz burst-coupled interference source on a 10 cm twisted-pair cable to verify the filtered envelope stays above VIH (does not falsely register as a press) for any burst shorter than the firmware's integration window. This is the last pre-hardware design-check gap before the board can be considered EMI-hardened by design rather than by hope. Low effort if the user already has a SPICE deck; ~2 h if starting from a schematic capture. High value as it validates the hardware assumptions the firmware relies on.
-
-**~~Multi-seed Monte Carlo random-noise fuzzing.~~** ~~Done~~ — two tiers:
-`test_monte_carlo_seeds()` in `test_logic_host.c` runs `MC_SEED_COUNT` (default 100)
-distinct seeds through the golden model, asserting per seed that (a) state stays in
-range, (b) the toggle count never exceeds the physical ceiling
-`duration / (PRESSED_THRESH + RELEASE_THRESH) + 1`, and (c) the final effect-state
-parity matches the toggle count. `test_monte_carlo_lockstep()` in `test_sim.c` drives
-`MC_SIM_SEED_COUNT` (default 5) additional seeds through the *real firmware* in
-lock-step against the golden model (byte-for-byte agreement; zero mismatches across
-all nine builds). Both wired into `make test`; seed counts/durations overridable via
-`-D`.
 
 **Multi-press boundary-case regression tests.** (NEW — from third review pass)
 The existing tests cover the principle press-release scenarios well, but three specific boundary combinations are not explicitly asserted: (a) two back-to-back PRESSED_THRESH-minus-one intervals (total 2×(PRESSED_THRESH−1) = 14 ms > PRESSED_THRESH = 8 ms, but the counter never holds at threshold long enough because each interval drops before the next rise) — must produce zero toggles; (b) release-bounce that lands exactly when the lockout counter is at 1 (a single-tick press during drain raises counter to 2, then drain resumes to 0) — must delay re-arm by one tick but still re-arm correctly; (c) the maximum-frequency tap train at exactly PRESSED_THRESH + RELEASE_THRESH intervals (33 ms apart) — the fastest clean press the algorithm can theoretically register, repeated 10–20 presses to verify no drift or missed taps at the rate limit. These three scenarios exercise the integrator's saturating behavior at the exact tick boundaries that matter. Add them to both `test_logic_host.c` (fast golden-model regression) and `test_sim.c` (instruction-accurated firmware confirmation). Low effort (~1 h per scenario; 3–4 h total).
@@ -427,7 +331,7 @@ avrdude programmer. Fuse bytes are a completely different layout
 The algorithm (`bypass_pure.c`) and all host-side tests are already fully
 portable. The output abstraction (`bypass_hw_iface.h`) is partially complete —
 effect state switching is already behind the interface — but the following
-remain in `bypass_core.c` as classic-AVR code not yet abstracted: timer setup
+remain in `bypass_mcu_avr_classic.c` as classic-AVR code not yet abstracted: timer setup
 and ISR vector, WDT arm/reset/clear, clock prescaler, ADC/analog-comparator
 disable, power gating, sleep, interrupt controller setup, and footswitch pin
 reading. The output drivers also use `DDRB` directly in `hw_init_ddrb_setup()`
@@ -435,11 +339,12 @@ and `hw_is_sanity_check_failed()`.
 
 The clean implementation path is: (1) extend `bypass_hw_iface.h` with
 primitives for footswitch read, pin direction, WDT reset, idle sleep, and MCU
-init; (2) extract the classic-AVR implementations of those into a new
-`bypass_mcu_attiny13a.c` (separating the currently monolithic `bypass_core.c`);
-(3) update the output drivers to call `hw_pin_set_output(pin)` instead of
-writing `DDRB` directly; (4) write `bypass_mcu_attiny202.c` implementing the
-same interface with AVR8X registers; (5) add `attiny202` to the Makefile
+init; (2) move the classic-AVR implementations of those behind that interface
+within `bypass_mcu_avr_classic.c` (the shell, already renamed from the former
+`bypass_core.c`), separating the still-inline register code from the portable
+main loop; (3) update the output drivers to call `hw_pin_set_output(pin)`
+instead of writing `DDRB` directly; (4) write `bypass_mcu_avr_xt.c` implementing
+the same interface with AVR8X registers; (5) add `attiny202` to the Makefile
 (trivial given the existing template structure); (6) add ATtiny202 fuse config
 and extend `test_fuses.c`.
 
@@ -478,19 +383,20 @@ MPLAB X installer package — MPLAB X IDE itself need not be launched.
 
 *Phase 1 — hardware abstraction refactor (~1–2 days, shared with ATtiny202).*
 This is a prerequisite for both PIC and the ATtiny202 entry above. The firmware
-currently has two abstraction gaps: (a) `bypass_core.c` contains AVR-specific
+currently has two abstraction gaps: (a) `bypass_mcu_avr_classic.c` contains AVR-specific
 timer setup, WDT arm/reset, clock prescaler, sleep invocation, interrupt
 controller init, and footswitch pin read as inline classic-AVR register writes;
 (b) the output drivers (`bypass_output_cd4053_simple.c`,
 `bypass_output_tq2_l2_5v_relay.c`, `bypass_output_cd4053_with_mute.c`) write
 `DDRB` directly in `hw_init_ddrb_setup()` and `hw_is_sanity_check_failed()`.
 Close both gaps: extend `bypass_hw_iface.h` with primitives for footswitch read,
-pin direction setup, WDT arm/reset/pet, sleep invocation, and MCU init; extract
-the AVR shell into a new `bypass_mcu_attiny13a.c`; update the output drivers to
-use the abstracted pin direction calls. All existing tests must pass unchanged —
-this is a restructuring, not a behavioral change.
+pin direction setup, WDT arm/reset/pet, sleep invocation, and MCU init; factor
+the classic-AVR register code behind that interface within
+`bypass_mcu_avr_classic.c` (the shell already renamed from `bypass_core.c`);
+update the output drivers to use the abstracted pin direction calls. All existing
+tests must pass unchanged — this is a restructuring, not a behavioral change.
 
-*Phase 2 — PIC hardware shell (~1–2 days).* Write `bypass_mcu_pic10f322.c`
+*Phase 2 — PIC hardware shell (~1–2 days).* Write `bypass_mcu_pic10f32x.c`
 implementing `bypass_hw_iface.h` for PIC10F322. Key architectural differences
 from AVR: GPIO uses `TRISA`/`PORTA` instead of `DDRB`/`PORTB`; there is no
 SLEEP_IDLE equivalent (the main oscillator stops during SLEEP), so the main loop
@@ -583,19 +489,9 @@ left to the implementer" is itself evidence of thoroughness.
 
 | Item                                            | Tier | Effort    | Impact                          |
 |-------------------------------------------------|------|-----------|---------------------------------|
-| ~~GitHub Actions CI (full variant/MCU matrix)~~  | 1    | done      | Very high — credibility signal  |
-| ~~Design doc: resource-utilization section~~    | 1    | done      | High — measured numbers exist   |
-| ~~Stale refs + editorial-note fix~~             | 1    | done      | Medium — correctness of docs    |
 | Design doc: datasheet citations                 | 2    | 2 h       | High — completeness/rigor       |
-| ~~Minimum-tap-interval test~~                   | 2    | done      | Medium — closes traceability    |
-| ~~`-fstack-usage` static bound~~                | 2    | done      | Medium — complements HWM test   |
-| ~~Flash-utilization budget assertion~~          | 2    | done      | Medium — resource budget        |
-| ~~AVR instruction-level fault injection~~        | 2.5  | done      | High — extends fault coverage   |
-| ~~Extended lock-step with variant ctrl outputs~~ | 2.5  | done      | High — closes co-sim gap        |
 | Power-on-pressed in simavr                      | 2.5  | 1–2 h     | Medium — simavr quirk workaround|
-| ~~Out-of-range counter recovery proof~~         | 2.5  | done      | Medium — formal defense in depth|
 | Formal verification of output drivers           | 2.5  | 3–4 h     | Medium — driver correctness     |
-| ~~Long-duration soak test~~                     | 2.5  | done      | Medium — rare-edge-case stress  |
 | ISR-timing-jitter stress test                   | 2.5  | 1–2 h     | Low — confirms design property  |
 | Golden-model vs model_step cross-validation     | 2.5  | 1–2 h     | Medium — fourth oracle path     |
 | Clock drift fine-grained sweep                  | 2.5  | 1 h       | Low — narrow but real edge case |
@@ -605,8 +501,6 @@ left to the implementer" is itself evidence of thoroughness.
 | Stuck-switch long-duration test                 | 2.5  | 30 min    | Medium — enforces documented    |
 | WDT pet frequency measurement                   | 2.5  | 1–2 h     | Medium — catches handshake bugs |
 | Negative static_assert verification             | 2.5  | 30 min    | Low — build-guard meta-test     |
-| ~~Boot-loop verification test~~                 | 2.5  | done      | Medium — bounded recovery under persistent fault |
-| ~~WDT re-arm timing window measurement~~        | 2.5  | done      | Medium — safety-margin for WDT-reset path |
 | Footswitch-pin glitch regression test           | 2.5  | 30 min    | Low — test-harness meta-test    |
 | Compiler optimization sensitivity test          | 2.5  | 1 h       | Medium — quick win, catches opt-sensitive bugs |
 | Interrupt latency measurement in simavr         | 2.5  | 1–2 h     | Low — confirms design assumption |
@@ -617,7 +511,6 @@ left to the implementer" is itself evidence of thoroughness.
 | Property-based testing framework                | 2.5  | 2–4 h     | Medium — targeted edge-case generation |
 | Formal ISR/main interleaving model (TLA+/SPIN)  | 2.5  | 4–8 h     | High — definitive concurrency-safety proof |
 | Signal-integrity SPICE modeling                 | 2.5  | 2 h       | High — validates hardware assumptions before PCB |
-| ~~Multi-seed Monte Carlo fuzzing~~              | 2.5  | done      | Medium — statistical confidence beyond fixed-seed lock |
 | Multi-press boundary cases                      | 2.5  | 3–4 h     | Medium — tick-boundary edge cases at rate limit |
 | Hardware-validation procedure doc               | 3    | 2–3 h     | High — primary-part WDT gap     |
 | KLEE in CI                                      | 3    | 2 h       | Nice-to-have                    |

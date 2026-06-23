@@ -35,7 +35,7 @@ maintaining this document), run `make analyze-misra-report`.
 
 ## Compliance boundary
 
-The compliance boundary is **this project's own source** — `bypass_core.c` and
+The compliance boundary is **this project's own source** — `bypass_mcu_avr_classic.c` and
 the `bypass_output_*` driver/header set. The **avr-libc / avr-gcc system
 headers** are outside the boundary: they are adopted toolchain code, not authored
 by this project, and are excluded from the analysis (by include-path suppression
@@ -53,7 +53,7 @@ fails the gate and forces a conscious review.
 | | |
 |---|---|
 | **Rules** | 11.4 (pointer ↔ integer conversion, Advisory); 10.1 (inappropriate essential type, Required); 10.8 (composite-expression cast, Required) |
-| **Files** | `bypass_core.c`, `bypass_output_cd4053_simple.c`, `bypass_output_cd4053_with_mute.c`, `bypass_output_tq2_l2_5v_relay.c` |
+| **Files** | `bypass_mcu_avr_classic.c`, `bypass_output_cd4053_simple.c`, `bypass_output_cd4053_with_mute.c`, `bypass_output_tq2_l2_5v_relay.c` |
 | **Instances** | 11.4 ×28, 10.1 ×26, 10.8 ×6 |
 
 **Rationale.** Direct manipulation of AVR I/O registers is unavoidable in
@@ -129,7 +129,7 @@ copies stay in sync.
 #define RELEASE_THRESH  (25U)
 ```
 
-These are consumed by `bypass_pure.c` (debounce logic) and `bypass_core.c`
+These are consumed by `bypass_pure.c` (debounce logic) and `bypass_mcu_avr_classic.c`
 (lockout reload), but `bypass_config.h` is also included by the output-driver
 TUs for their `static_assert` guards on the timing constants. Those TUs do not
 use the threshold macros directly, so cppcheck reports them as unused when

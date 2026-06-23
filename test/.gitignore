@@ -1,13 +1,15 @@
-test_logic_host
-test_model_check
-test_symbolic
-test_symbolic.bc
-test_fuses
-test_soak_*_t85
+# Compiled test binaries live next to their sources in per-substrate subdirs.
+host/test_logic_host
+formal/test_model_check
+formal/test_symbolic
+formal/test_symbolic.bc
+avr/test_fuses
+avr/test_soak_*_t85
 # per-variant simavr harnesses: test_sim_<variant>[_t85], test_trace_<variant>
-test_sim
-test_sim_*
-test_trace_*
+avr/test_sim
+avr/test_sim_*
+avr/test_trace_*
+# KLEE output and the toolchain stamp are produced at the test root.
 klee-last
 klee-out-*/
 .toolchain.sig

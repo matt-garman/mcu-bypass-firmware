@@ -152,7 +152,7 @@ int main(void) {
     verify_t85();
 
     // -------------------------------------------------------------------------
-    // CRITICAL CROSS-CHECK: the design spec (the design doc / bypass_core.c header)
+    // CRITICAL CROSS-CHECK: the design spec (the design doc / bypass_mcu_avr_classic.c header)
     // states "enable brown-out detection (BOD) at 4.3V". Verify BOTH parts
     // actually encode 4.3V BOD, since a wrong BODLEVEL is invisible to every
     // other test (it only bites as brown-out glitches on real silicon).

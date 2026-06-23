@@ -39,7 +39,7 @@
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
-// Golden model: mirrors bypass_core.c constants and logic exactly.
+// Golden model: mirrors bypass_mcu_avr_classic.c constants and logic exactly.
 //////////////////////////////////////////////////////////////////////////////
 
 // RELEASE_THRESH and PRESSED_THRESH come from bypass_config.h (via the host

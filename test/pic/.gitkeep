@@ -1,0 +1,2 @@
+# Reserved for PIC10F32x (gpsim) tests — see ../README.md and TODO.md Tier 3.
+# Remove this placeholder once test_config_pic.c / *.stc land here.

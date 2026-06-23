@@ -663,7 +663,7 @@ static void test_init_completes_before_wdt(void) {
 // SHORTEST (~16ms, prescaler 0) timeout until software reconfigures it, and with
 // the WDT oscillator's loose tolerance that window can be as short as ~7ms.
 // init()'s first actions are wdt_reset() then wdt_enable(WDTO_250MS) (see
-// bypass_core.c lines 180-182, before any blocking output pulse), so the re-arm
+// bypass_mcu_avr_classic.c lines 180-182, before any blocking output pulse), so the re-arm
 // MUST land comfortably inside that window or a fault that survives reset could
 // re-trigger the WDT before init() widens the timeout -- a tight boot-loop.
 //
@@ -1299,7 +1299,7 @@ static void test_register_corruption_recovery(void) {
 // path. These exercise the sanity-check branches that the existing
 // DDRB-corruption test does not reach:
 //
-//   firmware main() guard (bypass_core.c):
+//   firmware main() guard (bypass_mcu_avr_classic.c):
 //     program_state_ > RELEASE_DEBOUNCE_WAIT   -> invalid program state
 //     effect_state_  > ENGAGED                 -> invalid effect state
 //     timer_isr_called_ > TIMER_ISR_NOT_CALLED -> invalid handshake flag

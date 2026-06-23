@@ -49,7 +49,7 @@ typedef struct {
 } step_result_t;
 
 // One 1ms step: the firmware's ISR saturating integrator followed by one
-// main-loop state-machine pass -- i.e. exactly the per-tick work bypass_core.c's
+// main-loop state-machine pass -- i.e. exactly the per-tick work bypass_mcu_avr_classic.c's
 // main() does (debounce_integrate() inside the timer-tick block, then
 // debounce_step()). Delegates to the real firmware functions so this verifies
 // the shipping algorithm, not a copy.
@@ -71,7 +71,7 @@ static step_result_t step(state_t s, int pin_low) {
     ctx.debounce_counter = integrated;
     debounce_step_result_t const dr = debounce_step(ctx);
 
-    // Apply exactly as bypass_core.c main() does: caller-owned fields always,
+    // Apply exactly as bypass_mcu_avr_classic.c main() does: caller-owned fields always,
     // and the counter ONLY on an explicit lockout reload -- otherwise it keeps
     // the ISR-integrated value (the caller never clobbers the ISR's update).
     step_result_t r;
