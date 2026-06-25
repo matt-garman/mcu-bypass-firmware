@@ -478,6 +478,9 @@ PIC_XTAL  ?= 16000000UL
 PIC_BUILD_DIR ?= build_pic
 # PIC10F322 device budget: 512 words flash / 64 B RAM.
 PIC_FLASH_WORDS ?= 512
+# gpsim simulator + processor name for the register-level functional test.
+GPSIM         ?= gpsim
+PIC_GPSIM_PROC ?= p10f322
 
 # The PIC shell + the unchanged pure core (the AVR counterpart is CORE_SRC =
 # bypass_mcu_avr_classic.c + bypass_pure.c).
@@ -495,6 +498,50 @@ PIC_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
 # PIC pin map, and _XTAL_FREQ for __delay_ms.
 PIC_CFLAGS = -mcpu=$(PIC_CHIP) -mdfp=$(PIC_DFP) -std=c99 -O2 \
              -DBYPASS_MCU_PIC10F32X -D_XTAL_FREQ=$(PIC_XTAL)
+
+# --- PIC static analysis (cppcheck + MISRA addon) ----------------------------
+# The cppcheck/MISRA register-correct parse of the PIC shell needs the real XC8
+# + DFP headers (the PIC analogue of avr-libc). XC8's base include dir supplies
+# xc.h; the DFP supplies pic.h + the device header proc/pic10f322.h, selected by
+# the chip macro -D_<CHIP> (e.g. -D_10F322). The pic8-enhanced cppcheck platform
+# models the enhanced-midrange core (16-bit int).
+PIC_XC8_INCLUDE  ?= /opt/microchip/xc8/v3.10/pic/include
+PIC_DFP_INCLUDE  ?= $(PIC_DFP)/pic/include
+PIC_CHIP_MACRO   ?= _$(PIC_CHIP)
+
+# Defines/includes shared by both PIC cppcheck passes: select the device header,
+# pin the PIC configuration so cppcheck does not also explore the AVR branch of
+# bypass_output_common.h, and add the XC8 + DFP header search paths.
+PIC_CPPCHECK_CPPFLAGS = -D__XC8 -D$(PIC_CHIP_MACRO) -D_XTAL_FREQ=$(PIC_XTAL) \
+                        -DBYPASS_MCU_PIC10F32X -U__AVR__ -UBYPASS_MCU_AVR_CLASSIC \
+                        -Isrc -I$(PIC_DFP_INCLUDE) -I$(PIC_DFP_INCLUDE)/proc -I$(PIC_XC8_INCLUDE)
+
+# Plain bug-finding pass (parallel to analyze-cppcheck for the AVR build).
+PIC_CPPCHECK_FLAGS ?= --enable=warning,style,performance,portability \
+                      --std=c11 --platform=pic8-enhanced --error-exitcode=2 \
+                      --inline-suppr --max-configs=1 \
+                      --suppress=missingIncludeSystem \
+                      --suppress=unmatchedSuppression \
+                      --suppress=unusedStructMember \
+                      '--suppress=*:$(PIC_XC8_INCLUDE)/*' \
+                      '--suppress=*:$(PIC_DFP_INCLUDE)/*' \
+                      $(PIC_CPPCHECK_CPPFLAGS)
+
+# MISRA addon pass (parallel to MISRA_CPPCHECK_FLAGS for the AVR build). Notes:
+#   - System headers (XC8 base + DFP) are outside the compliance boundary, like
+#     avr-libc for the AVR run -> suppressed by path.
+#   - --suppress=misra-config: cppcheck cannot value-flow-model the volatile SFR
+#     bitfield unions from the Microchip headers (e.g. PIR1bits.TMR2IF in the
+#     tick poll); that is a cppcheck modeling limitation on adopted toolchain
+#     headers, NOT a code defect.
+PIC_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 --platform=pic8-enhanced \
+                      --enable=style --inline-suppr --max-configs=1 \
+                      --suppress=missingIncludeSystem \
+                      --suppress=unmatchedSuppression \
+                      --suppress=misra-config \
+                      '--suppress=*:$(PIC_XC8_INCLUDE)/*' \
+                      '--suppress=*:$(PIC_DFP_INCLUDE)/*' \
+                      $(PIC_CPPCHECK_CPPFLAGS)
 
 # Build every PIC variant and enforce the flash-word budget. The variant -D
 # selector and driver source are chosen inline (the same case-pattern the AVR
@@ -535,6 +582,116 @@ pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v)))
 	done; \
 	exit $$fail
 
+# --- PIC CONFIG-word verification --------------------------------------------
+# Host-compiled check (the PIC analogue of test-fuses, but STRONGER): it parses
+# the CONFIG word XC8 emitted into each built HEX from the shell's `#pragma
+# config` and asserts it matches the documented design intent (FOSC=INTOSC,
+# WDTE=ON, MCLRE=OFF, BOREN=ON, ...). The PIC CONFIG word lives in firmware
+# source -- no host/formal test sees it and the PIC shell has no simavr harness
+# -- so a fat-fingered pragma would otherwise only bite on silicon. Reads the
+# ACTUAL compiler output rather than a Makefile-injected value.
+#
+# Depends on `pic` to build the HEX, and runs against every produced variant
+# (all share the same #pragma config, so each must match -- also catches
+# divergence). Skips cleanly when XC8 is absent (no HEX produced).
+test/pic/test_config_pic: test/pic/test_config_pic.c
+	$(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) $< -o $@
+
+.PHONY: pic-test-config
+pic-test-config: pic test/pic/test_config_pic
+	@hexes=`ls $(PIC_BUILD_DIR)/$(FW_BASE)_*_$(PIC_TAG).hex 2>/dev/null`; \
+	if [ -z "$$hexes" ]; then \
+		echo "no PIC HEX in $(PIC_BUILD_DIR)/ (XC8 absent?); skipping CONFIG-word check"; \
+		exit 0; \
+	fi; \
+	./test/pic/test_config_pic $$hexes
+
+# --- PIC static analysis (cppcheck + MISRA) ----------------------------------
+# Two analyzers over the PIC shell, parallel to the AVR analyze-cppcheck /
+# analyze-misra. STANDALONE (XC8/DFP headers may be absent in CI; NOT part of
+# `make test`) -- each skips cleanly when cppcheck/python3 or the XC8+DFP headers
+# are missing. The DFP register headers are the PIC compliance-boundary analogue
+# of avr-libc and are excluded by path.
+
+# Guard recipe fragment: true (continue) only if the toolchain headers exist.
+# (Duplicated as a shell test in each recipe below.)
+.PHONY: pic-analyze pic-analyze-cppcheck pic-analyze-misra
+pic-analyze: pic-analyze-cppcheck pic-analyze-misra
+	@echo "=== PIC static analysis (cppcheck + MISRA) complete ==="
+
+pic-analyze-cppcheck: src/bypass_mcu_pic10f32x.c $(PIC_HEADERS)
+	@if ! command -v $(CPPCHECK) >/dev/null 2>&1; then \
+		echo "cppcheck not installed; skipping PIC cppcheck analysis"; exit 0; \
+	fi; \
+	if [ ! -f "$(PIC_XC8_INCLUDE)/xc.h" ] || [ ! -f "$(PIC_DFP_INCLUDE)/proc/pic10f322.h" ]; then \
+		echo "XC8/DFP headers not found; skipping PIC cppcheck analysis"; exit 0; \
+	fi; \
+	echo "cppcheck (PIC, pic8-enhanced): $(CPPCHECK) src/bypass_mcu_pic10f32x.c"; \
+	$(CPPCHECK) $(PIC_CPPCHECK_FLAGS) src/bypass_mcu_pic10f32x.c
+
+pic-analyze-misra: src/bypass_mcu_pic10f32x.c $(PIC_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
+	@if ! command -v $(CPPCHECK) >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then \
+		echo "cppcheck and/or python3 not available; skipping PIC MISRA analysis"; exit 0; \
+	fi; \
+	if [ ! -f "$(PIC_XC8_INCLUDE)/xc.h" ] || [ ! -f "$(PIC_DFP_INCLUDE)/proc/pic10f322.h" ]; then \
+		echo "XC8/DFP headers not found; skipping PIC MISRA analysis"; exit 0; \
+	fi; \
+	echo "MISRA-C:2012 analysis -- PIC shell ($(CPPCHECK) + misra addon, pic8-enhanced)"; \
+	out=`mktemp`; rc=0; \
+	PYTHONWARNINGS=ignore $(CPPCHECK) $(PIC_MISRA_CPPCHECK_FLAGS) \
+		--suppressions-list=$(MISRA_SUPPRESS) --error-exitcode=2 \
+		src/bypass_mcu_pic10f32x.c 2>>$$out || rc=1; \
+	if [ $$rc -ne 0 ]; then \
+		echo "MISRA findings NOT covered by a documented deviation:"; \
+		grep -E "misra-c2012" $$out || true; \
+		echo ""; \
+		echo "Fix it, or (if genuinely unavoidable) add a per-file entry to"; \
+		echo "$(MISRA_SUPPRESS) with a matching record in MISRA_COMPLIANCE.md."; \
+		rm -f $$out *.dump *.ctu-info cppcheck-addon-ctu-file-list*; \
+		exit 1; \
+	fi; \
+	rm -f $$out *.dump *.ctu-info cppcheck-addon-ctu-file-list*; \
+	echo "MISRA-C:2012 (PIC shell): clean (documented deviations waived per MISRA_COMPLIANCE.md)"
+
+# --- PIC gpsim register-level functional test --------------------------------
+# Run the real built HEX inside gpsim, drive the footswitch (RA3) through two
+# momentary presses, and assert the observable register state (LED on RA0 /
+# LATA, footswitch on RA3 / PORTA) at four settled checkpoints: power-on BYPASS
+# -> press toggles + latches ENGAGED -> second press toggles back to BYPASS.
+# This is the PIC shell's analogue of the AVR simavr suite (the PIC shell has no
+# simavr lock-step). Variant-agnostic stimulus (test/pic/footswitch_toggle.stc);
+# the expected ENGAGED control-pin pattern is passed per variant. Depends on
+# `pic` to build the HEX; skips cleanly when gpsim or the HEX is absent.
+.PHONY: pic-test-gpsim
+pic-test-gpsim: pic
+	@if ! command -v $(GPSIM) >/dev/null 2>&1; then \
+		echo "gpsim not installed; skipping PIC gpsim register-level test"; exit 0; \
+	fi; \
+	fail=0; \
+	for v in $(VARIANTS); do \
+		case $$v in \
+			*mute)  el=0x7 ;; \
+			*relay) el=0x1 ;; \
+			*)      el=0x3 ;; \
+		esac; \
+		hex=$(PIC_BUILD_DIR)/$(FW_BASE)_$${v}_$(PIC_TAG).hex; \
+		if [ ! -f "$$hex" ]; then \
+			echo "no $$hex (XC8 absent?); skipping gpsim test for $$v"; continue; \
+		fi; \
+		echo "--- gpsim register-level test: variant $$v ---"; \
+		GPSIM=$(GPSIM) PIC_GPSIM_PROC=$(PIC_GPSIM_PROC) \
+			test/pic/run_gpsim_test.sh $$hex $$el || fail=1; \
+	done; \
+	exit $$fail
+
+# Aggregate: every PIC pre-hardware check (build+budget, CONFIG word, static
+# analysis, gpsim functional). Standalone -- NOT part of `make test`, which is
+# the AVR pre-hardware gate (XC8/gpsim may be absent in CI). Each sub-target
+# skips cleanly when its tool is missing.
+.PHONY: pic-test
+pic-test: pic-test-config pic-analyze pic-test-gpsim
+	@echo "=== all PIC10F322 pre-hardware checks complete ==="
+
 # ============================================================================
 # CLEAN
 # ============================================================================
@@ -546,7 +703,7 @@ clean:
 		$(foreach v,$(VARIANTS),test/avr/test_sim_$(v) test/avr/test_trace_$(v)) \
 		$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_sim_$(v)_t$(n))) \
 		$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_soak_$(v)_t$(n))) \
-		test/host/test_logic_host \
+		test/host/test_logic_host test/pic/test_config_pic \
 		test/formal/test_model_check test/formal/test_symbolic test/avr/test_fuses \
 		test/formal/test_symbolic.bc \
 		test/stack_*.o test/stack_*.su \
@@ -1150,6 +1307,10 @@ help:
 	@echo "  size            print flash/RAM usage for every ATtiny13a variant"
 	@echo "  size85 / size45 print flash/RAM usage for every tinyx5 variant"
 	@echo "  pic             build all variants for PIC10F322 (XC8) + 512-word budget gate"
+	@echo "  pic-test        all PIC pre-hardware checks (CONFIG word + analyze + gpsim)"
+	@echo "  pic-test-config build PIC HEX, then verify each CONFIG word vs design intent"
+	@echo "  pic-analyze     cppcheck + MISRA on the PIC shell (XC8/DFP headers; standalone)"
+	@echo "  pic-test-gpsim  drive the footswitch in gpsim, assert PORTA/LATA toggle"
 	@echo "Test (each runs across ALL variants):"
 	@echo "  test            FAST full suite -- analyze, model, sim (all MCUs), coverage"
 	@echo "  test-long       FULL exhaustive suite (minutes); alias: stress"

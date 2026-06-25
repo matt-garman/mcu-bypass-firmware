@@ -166,9 +166,39 @@ make a multi-field struct atomic regardless. No such sharing exists today.
   `src/bypass_pins_pic10f32x.h`; add `#pragma config`; wire Makefile PIC targets
   (`xc8-cc -mcpu=10F322 -mdfp=/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8`);
   get it compiling + a flash-budget check (512 words / 64 B RAM). DFP installed.
-- **2c — validation.** `test/pic/test_config_pic.c` (parse the HEX, verify the
-  CONFIG word); MISRA/cppcheck on the PIC source (document XC8 deviations); gpsim
-  `.stc`/CLI scripts that drive the footswitch and assert `PORTA`/`LATA`.
+- **2c — validation — IMPLEMENTED (2026-06-25).** Three host/sim-side checks,
+  each a standalone Make target (XC8/gpsim may be absent in CI, so none are wired
+  into `make test`); `make pic-test` runs all three.
+  - **CONFIG-word check — `make pic-test-config`.** `test/pic/test_config_pic.c`
+    parses the CONFIG word XC8 emitted into each built HEX (word 0x2007 / byte
+    0x400E, little-endian) and asserts it matches the design intent
+    (`0x389E`; implemented bits `0x189E`): FOSC=INTOSC, BOREN=ON, WDTE=ON,
+    PWRTE=ON, MCLRE=OFF, CP=OFF, LVP=OFF, LPBOR=OFF, BORV=HI, WRT=OFF, with
+    critical cross-checks on WDTE/MCLRE/BOREN. The PIC analogue of `test-fuses`,
+    but stronger: it reads the actual compiler output, not a Makefile-injected
+    value. Passes (45 checks).
+  - **Static analysis — `make pic-analyze`** (`pic-analyze-cppcheck` +
+    `pic-analyze-misra`). cppcheck `--platform=pic8-enhanced` over the real XC8 +
+    DFP register headers, `-D_10F322` selecting the device header. Plain
+    bug-finding pass is clean. MISRA addon is clean except **2 × Rule 10.5**
+    (lines 101, 135: an explicit `(uint8_t)` cast of an essentially-Boolean
+    result in the two `hw_*_intact` helpers) — *firmware-fixable*: dropping the
+    outer cast, as the AVR shell already does, clears it with no new deviation.
+    The PIC pin map's Rule 2.5 (and the cross-config AVR pin map) extend the
+    existing D-2 deviation; `misra-config` (cppcheck can't value-flow-model the
+    SFR bitfield unions) and the XC8/DFP system headers are handled on the
+    command line. See `MISRA_COMPLIANCE.md` (PIC shell section).
+  - **gpsim register-level test — `make pic-test-gpsim`.** The PIC shell's
+    analogue of the AVR simavr suite (the shell has no simavr lock-step). The
+    real built HEX runs in gpsim (`-p p10f322`); `test/pic/footswitch_toggle.stc`
+    drives RA3 through two momentary presses and snapshots PORTA/LATA at four
+    settled checkpoints; `test/pic/run_gpsim_test.sh` asserts the round-trip
+    BYPASS -> (press) latched ENGAGED -> (press) BYPASS (LED on RA0, footswitch
+    on RA3), plus the per-variant ENGAGED control pins (cd4053 `0x3`, mute `0x7`,
+    relay `0x1`). Passes for all three variants.
+  - **Pending (firmware, user):** drop the outer `(uint8_t)` cast in
+    `hw_output_pins_intact` and `hw_footswitch_pullup_intact` to clear the 2 ×
+    10.5 and make `make pic-test` fully green.
 - **2d — docs.** `TOOLCHAIN.adoc` (XC8 + DFP + gpsim), resource-utilization table,
   README MCU list.
 

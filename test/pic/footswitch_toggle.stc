@@ -1,0 +1,78 @@
+# gpsim command script: drive the PIC10F322 footswitch and snapshot PORTA/LATA.
+#
+# WHAT THIS IS
+#   A register-level functional check of the PIC shell (bypass_mcu_pic10f32x.c)
+#   running inside gpsim. The pure debounce core and the output drivers are
+#   already covered by the host/formal suite and (on AVR) by simavr lock-step;
+#   the PIC SHELL -- oscillator/TMR2 tick, footswitch read on RA3, the debounce
+#   integrate/step wiring, and the GPIO outputs -- has no simavr equivalent, so
+#   this drives the real built HEX in gpsim and asserts the observable register
+#   state at four settled checkpoints. The wrapper test/pic/run_gpsim_test.sh
+#   parses the snapshots and turns them into PASS/FAIL.
+#
+# HOW IT IS RUN (see the wrapper / `make pic-test-gpsim`)
+#   gpsim -i -pp10f322 <variant>.hex -c test/pic/footswitch_toggle.stc
+#   The HEX (any of the three variants) is supplied on the gpsim command line, so
+#   this script is variant-agnostic. gpsim names the PIC pins ra0..ra3.
+#
+# PINS (per src/bypass_pins_pic10f32x.h)
+#   RA3 = footswitch (input; high = released, low = pressed)
+#   RA0 = status LED  (LATA bit 0; high = effect ENGAGED, low = BYPASS)
+#   RA1/RA2 = the active variant's control output(s)
+#
+# TIMING
+#   FOSC = 16 MHz -> instruction clock FOSC/4 = 4 MHz -> 4000 cycles per 1 ms.
+#   The debounce needs PRESSED_THRESH(8) low samples to register a press and
+#   RELEASE_THRESH(25) high samples to re-arm; the relay/mute drivers also block
+#   ~12 ms per actuation. All checkpoints below are placed well clear of those
+#   windows so every variant has SETTLED by the time it is sampled.
+#
+# SCENARIO (two MOMENTARY presses; the effect latches between them)
+#   cyc      0..100k  : released  -> BYPASS (power-on default)
+#   cyc 100k..220k    : press #1  (~30 ms)  -> toggles to ENGAGED, then released
+#   cyc 220k..520k    : released, effect stays ENGAGED (latching)
+#   cyc 520k..640k    : press #2  (~30 ms)  -> toggles back to BYPASS
+#
+# CHECKPOINTS (the wrapper keys on these exact === labels ===)
+#   INIT_BYPASS  @  90k : LATA bit0 == 0 (LED off), PORTA bit3 == 1 (released)
+#   PRESS1_LOW   @ 150k : PORTA bit3 == 0 (footswitch read as pressed)
+#   ENGAGED      @ 300k : LATA bit0 == 1 (LED on, latched), PORTA bit3 == 1
+#   BYPASS_AGAIN @ 800k : LATA bit0 == 0 (toggled back off)
+
+stimulus asynchronous_stimulus
+  initial_state 1
+  { 100000, 0,
+    220000, 1,
+    520000, 0,
+    640000, 1 }
+  name fsw
+end
+
+node n1
+attach n1 fsw ra3
+
+break c 90000
+run
+echo ===INIT_BYPASS===
+porta
+lata
+
+break c 150000
+run
+echo ===PRESS1_LOW===
+porta
+lata
+
+break c 300000
+run
+echo ===ENGAGED===
+porta
+lata
+
+break c 800000
+run
+echo ===BYPASS_AGAIN===
+porta
+lata
+
+quit

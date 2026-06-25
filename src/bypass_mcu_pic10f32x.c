@@ -98,7 +98,7 @@ void hw_configure_output_pins(uint8_t const output_mask) {
 // sanity-check utility: return non-zero IFF every pin in expected_mask is still
 // configured as an output (its TRISA direction bit is still 0).
 uint8_t hw_output_pins_intact(uint8_t const expected_mask) {
-    return (uint8_t)(((uint8_t)(TRISA & expected_mask)) == 0U);
+    return (0U == (TRISA & expected_mask));
 }
 
 
@@ -132,7 +132,7 @@ static pin_state_t hw_read_footswitch(void) {
 // non-zero IFF the footswitch weak pull-up is still enabled (its WPUA latch bit
 // is still asserted) -- the PIC analogue of the AVR PORTB-latch pull-up check.
 static uint8_t hw_footswitch_pullup_intact(void) {
-    return (uint8_t)((WPUA & (uint8_t)(1U << FOOTSW_PIN)) != 0U);
+    return (0U != (WPUA & (1U << FOOTSW_PIN)));
 }
 
 
