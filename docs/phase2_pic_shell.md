@@ -1,8 +1,8 @@
 # PIC Phase 2 — PIC10F32x hardware shell
 
 Status: **implemented (pre-hardware)** on branch `pic10f32x_support` — increments
-2a–2d are all done (2a+2b committed; 2c+2d on the branch). What remains is real
-PIC10F322 hardware bring-up. Phase 1 (the hardware-
+2a–2d are all done and committed on `pic10f32x_support` (not yet merged to
+`main`). What remains is real PIC10F322 hardware bring-up. Phase 1 (the hardware-
 abstraction refactor) is complete; this phase adds a second implementation of the
 `bypass_hw_iface.h` contract for the PIC10F320/322, plus that family's own
 `main()` and CONFIG bits. Builds on the architecture decision from Phase 1: the

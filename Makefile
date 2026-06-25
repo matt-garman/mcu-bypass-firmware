@@ -692,6 +692,53 @@ pic-test-gpsim: pic
 pic-test: pic-test-config pic-analyze pic-test-gpsim
 	@echo "=== all PIC10F322 pre-hardware checks complete ==="
 
+# --- PIC device programming (hardware) ---------------------------------------
+# Flash ONE built PIC variant (chosen by VARIANT, default $(VARIANT)) onto a real
+# PIC10F322. Unlike AVR fuses, the PIC CONFIG word is embedded IN the HEX by
+# XC8's `#pragma config`, so writing the HEX programs the configuration too --
+# there is no separate fuse step (and the gpsim/CONFIG-word checks already
+# verified that word pre-flash).
+#
+# Two common Linux programmers, selected by PIC_PROG:
+#   pk2cmd  (PICkit 2, open-source CLI)            <- default
+#   ipecmd  (PICkit 3/4/5 via MPLAB IPE; PIC_PROG=ipecmd, PIC_PROG_TOOL=PK3|PK4|PK5)
+# The full command is PIC_PROG_CMD; override it wholesale for any other tool.
+# Power defaults are CONSERVATIVE: the programmer does NOT source Vdd (safe for an
+# externally-powered pedal board). For a bare chip powered by the programmer, add
+# the power flag: pk2cmd `-T` (and `-A<volts>`), ipecmd `-W`.
+PIC_PART      ?= PIC10F322
+PIC_PROG      ?= pk2cmd
+PIC_PROG_TOOL ?= PK4
+PIC_PROG_HEX   = $(PIC_BUILD_DIR)/$(FW_BASE)_$(VARIANT)_$(PIC_TAG).hex
+ifeq ($(PIC_PROG),ipecmd)
+PIC_PROG_CMD ?= $(PIC_PROG) -TP$(PIC_PROG_TOOL) -P$(PIC_PART) -M -F$(PIC_PROG_HEX)
+else
+PIC_PROG_CMD ?= $(PIC_PROG) -P$(PIC_PART) -F$(PIC_PROG_HEX) -M -Y -R
+endif
+
+# Builds all variants + the flash-budget gate first (so the image is fresh and
+# proven to fit), then flashes the VARIANT-selected HEX. Unlike the pre-hardware
+# checks, this is an intentional bench action: it FAILS LOUDLY (does not silently
+# skip) if the HEX or the programmer is missing. Echoes the exact command before
+# it touches silicon.
+.PHONY: program-pic
+program-pic: pic
+	@hex="$(PIC_PROG_HEX)"; \
+	if [ ! -f "$$hex" ]; then \
+		echo "ERROR: $$hex not found -- 'make pic' produced no HEX (XC8 installed?)."; \
+		echo "       select a variant with VARIANT=<$(VARIANTS)> (default $(VARIANT))."; \
+		exit 1; \
+	fi; \
+	if ! command -v $(PIC_PROG) >/dev/null 2>&1; then \
+		echo "ERROR: PIC programmer '$(PIC_PROG)' not found on PATH."; \
+		echo "       install pk2cmd (PICkit 2), or set PIC_PROG=ipecmd (PICkit 3/4/5),"; \
+		echo "       or override the whole command with PIC_PROG_CMD=..."; \
+		exit 1; \
+	fi; \
+	echo "Programming PIC10F322 (variant $(VARIANT)) via $(PIC_PROG):"; \
+	echo "  $(PIC_PROG_CMD)"; \
+	$(PIC_PROG_CMD)
+
 # ============================================================================
 # CLEAN
 # ============================================================================
@@ -1311,6 +1358,7 @@ help:
 	@echo "  pic-test-config build PIC HEX, then verify each CONFIG word vs design intent"
 	@echo "  pic-analyze     cppcheck + MISRA on the PIC shell (XC8/DFP headers; standalone)"
 	@echo "  pic-test-gpsim  drive the footswitch in gpsim, assert PORTA/LATA toggle"
+	@echo "  program-pic     flash one PIC variant to hardware (VARIANT=, PIC_PROG=pk2cmd|ipecmd)"
 	@echo "Test (each runs across ALL variants):"
 	@echo "  test            FAST full suite -- analyze, model, sim (all MCUs), coverage"
 	@echo "  test-long       FULL exhaustive suite (minutes); alias: stress"
@@ -1348,6 +1396,7 @@ help:
 	@echo "  clean-tests     remove only test binaries"
 	@echo "  coverage-clean  remove coverage artifacts"
 	@echo "Overrides: VARIANT=, PROGRAMMER=, COVERAGE_MIN=, HOSTCC=, HOST_DEFS=, SIM_DEFS="
+	@echo "PIC overrides: PIC_CC=, PIC_PROG=pk2cmd|ipecmd, PIC_PROG_TOOL=PK3|PK4|PK5, PIC_PROG_CMD="
 
 
 # vim: tw=0 nowrap
