@@ -48,9 +48,9 @@ jobs:
   verify:
     name: verify (make test)
     runs-on: ubuntu-24.04
-    # TEMP(pic-ci): AVR suite disabled while iterating on the PIC gate (it is
-    # slow); re-enable by removing this single line before merge.
-    if: false
+    # Gate the AVR suite behind the fast PIC job: a PIC failure short-circuits
+    # the run -- the slow AVR jobs are skipped instead of running in parallel.
+    needs: pic
     steps:
       - uses: actions/checkout@v4
 
@@ -185,9 +185,7 @@ jobs:
   build-matrix:
     name: build (${{ matrix.mcu }})
     runs-on: ubuntu-24.04
-    # TEMP(pic-ci): AVR build matrix disabled while iterating on the PIC gate;
-    # re-enable by removing this single line before merge.
-    if: false
+    needs: pic   # gate behind the fast PIC job (see `verify`)
     strategy:
       fail-fast: false
       matrix:
@@ -233,13 +231,11 @@ jobs:
   stress:
     name: stress (make test-long)
     runs-on: ubuntu-24.04
-    # TEMP(pic-ci): AVR stress suite disabled while iterating on the PIC gate;
-    # restore the original condition (commented out just below) before merge.
-    if: false
-    # if: >-
-    #   github.event_name == 'push' ||
-    #   github.event_name == 'schedule' ||
-    #   github.event_name == 'workflow_dispatch'
+    needs: pic   # gate behind the fast PIC job (see `verify`)
+    if: >-
+      github.event_name == 'push' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
 
