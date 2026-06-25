@@ -27,6 +27,62 @@ make test` and commit the new signature.
   Minimum avr-gcc version: 4.9 (for _Static_assert / C11 support with -std=gnu11)
   Recommended: 7.x or later (best -fshort-enums / LTO support for tiny parts)
 
+== PIC toolchain (PIC10F32x family, optional second target)
+
+The PIC10F322 port (`make pic`, `make pic-test`) is a SEPARATE, optional
+toolchain, entirely independent of the AVR build above and deliberately NOT part
+of `make test` (the AVR pre-hardware gate).  Every PIC target skips cleanly when
+its tool is absent, so the AVR workflow is unaffected if these are not installed.
+
+  MPLAB XC8:    V3.10  (Microchip MPLAB XC8 C Compiler; build date Aug 13 2025)
+                install dir: /opt/microchip/xc8/v3.10
+                driver:      /opt/microchip/xc8/v3.10/bin/xc8-cc
+                override the path with PIC_CC=... on the make command line.
+
+  Device pack:  PIC10-12Fxxx_DFP  v1.9.189  (Microchip device family pack)
+                Supplies the PIC10F322 device-support + register headers
+                (proc/pic10f322.h) that the XC8 base install does NOT include.
+                install dir: /opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189
+                NOTE: -mdfp must point at the pack's xc8/ SUBDIR, not the pack
+                root (pointing at the root gives XC8 error 2104):
+                  -mdfp=/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8
+                override with PIC_DFP=... on the make command line.
+
+  gpsim:        0.32.1  (Ubuntu package: gpsim)
+                Instruction-level PIC simulator used by `make pic-test-gpsim`
+                (the PIC analogue of the AVR simavr suite; the PIC shell has no
+                simavr lock-step equivalent).
+                install: apt install gpsim
+                note: gpsim 0.32.1 DOES support the p10f322; its I/O pins are
+                named ra0..ra3 (lower-case) in stimulus/attach scripts.
+
+  cppcheck:     2.13.0  (the SAME binary as the AVR analysis, below)
+                `make pic-analyze` runs it with --platform=pic8-enhanced over the
+                real XC8 + DFP register headers.  No install beyond the XC8/DFP
+                packs.
+
+XC8 / device-pack behaviours relied on (proven against V3.10 + DFP v1.9.189):
+
+  - XC8 V3.10 compiles C99 only (no C11); the firmware's static_assert is shimmed
+    to the _Static_assert keyword in src/bypass_static_assert.h.
+  - XC8 rejects -fshort-enums and sizes enums as int.  Harmless here: the PIC
+    shell is single-threaded (polled tick, no ISR-shared state), so the 8-bit
+    atomicity the AVR build gets from -fshort-enums is not needed.
+  - const-qualified locals are placed in program ROM, so a const local
+    initialised from a runtime call is rejected; the PIC shell drops that const.
+  - _XTAL_FREQ (for the drivers' __delay_ms) is supplied via -D in the Makefile,
+    parallel to the AVR's -DF_CPU.
+
+Device budget (PIC10F322): 512 words of flash, 64 bytes of RAM.  `make pic`
+enforces the flash-word budget per variant; see "Resource Utilization" in
+DESIGN_DOCUMENTATION.adoc for the measured figures.
+
+XC8 and the device pack are Microchip downloads, NOT apt packages:
+
+  XC8:         https://www.microchip.com/en-us/tools-resources/develop/mplab-xc-compilers
+  Device pack: install via MPLAB X (Tools -> Packs), or download the
+               PIC10-12Fxxx_DFP pack from Microchip's pack repository.
+
 == Simulator (integration tests)
 
   simavr:       1.6+dfsg-3build2  (Ubuntu package: simavr, libsimavr-dev)
@@ -70,6 +126,12 @@ make test` and commit the new signature.
 
   Optional analysis tools:
   sudo apt install valgrind lcov gcovr
+
+  Optional PIC10F32x port (`make pic` / `make pic-test`):
+  sudo apt install gpsim          # the PIC simulator (apt)
+  # XC8 V3.10 + the PIC10-12Fxxx_DFP pack are separate Microchip downloads
+  # (see the PIC toolchain section above).  Without them, the pic* targets
+  # skip cleanly and the AVR `make test` is unaffected.
 
 == Version pinning strategy
 

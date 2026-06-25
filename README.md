@@ -3,11 +3,13 @@
 
 [![CI](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml)
 
-The project contains firmware for the "AVR Classic" (ATtiny13a,
-ATtiny45, ATtiny85) AVR-family microcontrollers.  The firmware is
-intended to be used for electric instrument effects (e.g. guitar
-effect pedals) bypass switching.  The firmware has four
-responsibilities:
+The project contains firmware for two microcontroller families: the
+"AVR Classic" parts (ATtiny13a, ATtiny45, ATtiny85) and the Microchip
+PIC10F322.  A shared, hardware-independent debounce core and the
+output drivers are common to both; only a small per-MCU hardware shell
+differs.  The firmware is intended to be used for electric instrument
+effects (e.g. guitar effect pedals) bypass switching.  The firmware
+has four responsibilities:
 
   - Maintain state (engage/bypass)
   - Light or dark a status indicator LED
@@ -60,6 +62,18 @@ MCUs):
 make
 make program
 ```
+
+To build and validate the PIC10F322 port instead (requires the Microchip
+XC8 compiler + the PIC10-12Fxxx device pack, plus `gpsim` for the
+simulator test):
+
+```
+make pic        # build all variants + 512-word flash-budget gate
+make pic-test    # CONFIG-word, MISRA, and gpsim register-level checks
+```
+
+These targets are independent of the AVR build and skip cleanly if the
+PIC toolchain is not installed.
 
 See [TOOLCHAIN](TOOLCHAIN.adoc) for full environmental details.  
 

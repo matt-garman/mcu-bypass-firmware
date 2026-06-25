@@ -423,10 +423,14 @@ Specific tests verify specific requirements, as show in the following table:
 == Resource Utilization
 
 The firmware is deliberately tiny, leaving large headroom on every supported
-part. Flash figures below are reported by `avr-size`; static data comprises
-two global variables — `timer_isr_called_` (1 byte, shared between main and
+part. Measured figures per MCU family follow.
+
+=== AVR Classic family
+
+Flash figures below are reported by `avr-size`; static data comprises
+two global variables, `timer_isr_called_` (1 byte, shared between main and
 the timer ISR) and `ctx_` (3-byte `debounce_context_t` struct containing
-`program_state`, `effect_state`, and `debounce_counter`) — totalling 4 bytes;
+`program_state`, `effect_state`, and `debounce_counter`), totalling 4 bytes;
 and peak stack is the empirical high-water mark measured by the simavr
 stack-canary test (see Testing and Validation above).
 
@@ -456,6 +460,29 @@ This headroom is a deliberate design property: it leaves ample room for future
 features without approaching any resource limit, and it is enforced as a test:
 the stack high-water-mark check fails the build if free SRAM margin drops below
 its floor.
+
+=== PIC10F322 (XC8 build)
+
+The PIC10F322 port has a much tighter device budget, 512 fourteen-bit program
+words and 64 bytes of RAM, so its figures are reported in WORDS (by the XC8
+compiler), not bytes. `make pic` enforces the flash-word budget per variant.
+
+.Table PIC10F322 Utilization by Variant (measured, XC8 V3.10)
+|===
+| Variant | Program (flash) | of 512 words | Data (RAM) | of 64 bytes
+
+| cd4053  | 342 words | 66.8% | 34 bytes | 53.1%
+| relay   | 367 words | 71.7% | 34 bytes | 53.1%
+| mute    | 372 words | 72.7% | 34 bytes | 53.1%
+|===
+
+The 34-byte data figure is XC8's total reservation, not just the firmware's
+state: the single live global is `ctx_` (the 3-byte `debounce_context_t`; the
+PIC's polled Model-B loop has no `timer_isr_called_` handshake, unlike the
+AVR ISR design), and the remainder is the XC8 runtime's scratch and temporaries.
+The PIC10F322 is the most flash-constrained supported part (the mute variant's
+72.7% is the tightest fit in the whole matrix) yet still leaves comfortable
+headroom against the 512-word limit, which `make pic` gates on every build.
 
 
 == AVR Classic Program Flow

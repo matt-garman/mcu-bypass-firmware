@@ -1,6 +1,8 @@
 # PIC Phase 2 — PIC10F32x hardware shell
 
-Status: **planning** on branch `pic10f32x_support`. Phase 1 (the hardware-
+Status: **implemented (pre-hardware)** on branch `pic10f32x_support` — increments
+2a–2d are all done (2a+2b committed; 2c+2d on the branch). What remains is real
+PIC10F322 hardware bring-up. Phase 1 (the hardware-
 abstraction refactor) is complete; this phase adds a second implementation of the
 `bypass_hw_iface.h` contract for the PIC10F320/322, plus that family's own
 `main()` and CONFIG bits. Builds on the architecture decision from Phase 1: the
@@ -196,11 +198,23 @@ make a multi-field struct atomic regardless. No such sharing exists today.
     BYPASS -> (press) latched ENGAGED -> (press) BYPASS (LED on RA0, footswitch
     on RA3), plus the per-variant ENGAGED control pins (cd4053 `0x3`, mute `0x7`,
     relay `0x1`). Passes for all three variants.
-  - **Pending (firmware, user):** drop the outer `(uint8_t)` cast in
-    `hw_output_pins_intact` and `hw_footswitch_pullup_intact` to clear the 2 ×
-    10.5 and make `make pic-test` fully green.
-- **2d — docs.** `TOOLCHAIN.adoc` (XC8 + DFP + gpsim), resource-utilization table,
-  README MCU list.
+  - **Firmware fix applied:** the outer `(uint8_t)` cast was dropped from
+    `hw_output_pins_intact` and `hw_footswitch_pullup_intact` (return the
+    Boolean directly, as the AVR shell does), clearing the 2 × 10.5 with no new
+    deviation. `make pic-test` is fully green (CONFIG 45/0, MISRA clean, gpsim
+    PASS on all three variants).
+- **2d — docs — IMPLEMENTED (2026-06-25).**
+  - `TOOLCHAIN.adoc`: new "PIC toolchain" section (XC8 V3.10, PIC10-12Fxxx DFP
+    v1.9.189 with the `-mdfp` xc8/-subdir note, gpsim 0.32.1, the
+    `--platform=pic8-enhanced` analysis, the XC8 C99/no-`-fshort-enums`/const-ROM
+    behaviours, and the 512-word/64-byte budget); the reproduce section gained
+    `gpsim` + a note that XC8/DFP are separate Microchip downloads.
+  - `DESIGN_DOCUMENTATION.adoc`: Resource Utilization split into "AVR Classic
+    family" and a new "PIC10F322 (XC8 build)" sub-table (program words + data
+    bytes: cd4053 342, relay 367, mute 372 of 512 words; 34 of 64 B).
+  - `README.md`: opening now names both MCU families (AVR Classic + PIC10F322)
+    and the shared-core/per-MCU-shell architecture; Quickstart gained the
+    `make pic` / `make pic-test` commands.
 
 ## 7. Verification strategy
 
