@@ -9,9 +9,11 @@
 #include <stdint.h>
 
 
-// Classic-AVR (ATtiny13a / tinyx5) pin map — PORTB/DDRB/PINB bit positions.
+// Classic-AVR (ATtiny13a / tinyx5) pin map: PORTB/DDRB/PINB bit positions.
 // PB0 = footswitch (input), PB1..PB4 = outputs, PB5 = RESET (input, untouched).
 // Single source of truth for the classic-AVR pinout.
+//
+// see also PIC counterpart bypass_pins_pic10f32x.h
 //
 // footswitch and status LED pins are common across all output variants
 //   - FOOTSW_PIN is configured for input, with both internal and external
@@ -23,13 +25,13 @@
 // CD4053 simple
 #define CD4053_PIN (2U)
 
-// dual-latching mechanical relay bypass (e.g. Panasonic TQ2-2L)
-#define RELAY_RESET_PIN (2U) // PB2
-#define RELAY_SET_PIN   (3U) // PB3
-
 // CD4053 with muting
 #define CD4053_CTL1 (2U) // PB2
 #define CD4053_CTL2 (3U) // PB3
+
+// dual-latching mechanical relay bypass (e.g. Panasonic TQ2-2L)
+#define RELAY_RESET_PIN (2U) // PB2
+#define RELAY_SET_PIN   (3U) // PB3
 
 
 // NOTE: all three variants (4053-simple, 4053-with-mute, tq2-l2 relay) have

@@ -41,8 +41,8 @@
 #include "bypass_types.h"
 #include "bypass_pure.h"
 #include "bypass_hw_iface.h"
+#include "bypass_static_assert.h" // for static_assert()
 
-#include <assert.h>        // For static_assert()
 #include <avr/io.h>        // Defines register and bit names
 #include <avr/wdt.h>       // watchdog timer: wdt_enable(), wdt_reset(), WDTO_* timeouts
 #include <avr/power.h>     // clock_prescale_set(), power_all_disable()

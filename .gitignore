@@ -4,6 +4,7 @@
 # compilation artifacts
 *.hex
 *.elf
+build_pic/
 
 # cppcheck addon artifacts (e.g. "make analyze-misra"); normally auto-cleaned,
 # but a cancelled run can leave them behind

@@ -123,6 +123,31 @@ counter to `RELEASE_THRESH`), the switch is held, and re-arm requires
 after the actuation. To be made an explicit equivalence argument, not just asserted,
 during PIC verification.
 
+### 5.1 Concurrency model: single-threaded, so no atomicity requirement
+
+The AVR shell relies on `-fshort-enums` partly for **atomicity**: it samples the
+footswitch in the Timer0 ISR and shares `timer_isr_called_` and `ctx_` across the
+ISR/`main()` boundary, so those individual shared fields must be 8-bit to be read
+and written in a single (uninterruptible) instruction on the 8-bit AVR.
+
+Model B on the PIC has **no such requirement, because it has no second thread.**
+It *polls* `TMR2IF` in the main loop — there is no timer ISR, no
+`timer_isr_called_`, and `ctx_` is owned solely by `main()` (kept non-`volatile`
+to advertise that single-owner invariant). `debounce_integrate()` runs inline in
+the polled loop, not asynchronously. One execution context ⇒ nothing is shared
+⇒ no atomic-access requirement. This is a second payoff of Model B alongside the
+blocking-actuation/WDT resolution above: it also dissolves the ISR-shared-state
+hazard, which is why XC8's lack of `-fshort-enums` (it sizes enums as `int`) is
+harmless here.
+
+For the record: the PIC10F322 is an 8-bit core and does **not** provide atomic
+multi-byte access — a 16-bit `int` (or the 3-byte `debounce_context_t`) read/write
+compiles to several instructions and is interruptible mid-operation. So *if* a
+future revision ever added an ISR sharing a multi-byte object with `main()`, that
+change must add explicit protection (disable interrupts around the access via
+`GIE`/`di()`/`ei()`, or share only a single byte) — note an 8-bit enum would not
+make a multi-field struct atomic regardless. No such sharing exists today.
+
 ## 6. Increment plan
 
 - **2a — pin-name neutralization (AVR-only) — DONE (2026-06-24).** Moved pin

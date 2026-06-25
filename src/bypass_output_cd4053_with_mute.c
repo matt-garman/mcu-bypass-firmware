@@ -6,9 +6,8 @@
 #include "bypass_output_common.h"
 #include "bypass_config.h"
 #include "bypass_hw_iface.h"
-
-#include <util/delay.h> // _delay_ms()
-#include <assert.h>     // For static_assert()
+#include "bypass_blocking_delay.h"
+#include "bypass_static_assert.h" // static_assert()
 
 
 uint8_t hw_is_sanity_check_failed(void) {
@@ -47,7 +46,7 @@ void hw_set_bypass_state(void) {
     hw_led_pin_set_low(); // dark status LED
 
     hw_pin_set_low(CD4053_CTL1); // MUTE
-    _delay_ms(CD4053_MUTE_DELAY_MS); // busy sleep for pre-switch mute time
+    BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS); // busy sleep for pre-switch mute time
 
     hw_pin_set_low(CD4053_CTL2); // un-mute in BYPASS state
 }
@@ -59,7 +58,7 @@ void hw_set_engaged_state(void) {
     hw_led_pin_set_high(); // light status LED
 
     hw_pin_set_high(CD4053_CTL2); // MUTE
-    _delay_ms(CD4053_MUTE_DELAY_MS); // busy sleep for pre-switch mute time
+    BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS); // busy sleep for pre-switch mute time
 
     hw_pin_set_high(CD4053_CTL1); // un-mute in ENGAGED state
 }

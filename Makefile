@@ -116,6 +116,7 @@ src_relay  = src/bypass_output_tq2_l2_5v_relay.c
 # Headers shared by every firmware build; any change rebuilds all variants.
 FW_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
              src/bypass_output_common.h src/bypass_pins_avr_classic.h \
+             src/bypass_blocking_delay.h src/bypass_static_assert.h \
              src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
              src/bypass_output_tq2_l2_5v_relay.h
 
@@ -445,6 +446,96 @@ endef
 $(foreach n,$(TINYX5),$(eval $(call MCU_X5_BUILD_TARGETS,$(n))))
 
 # ============================================================================
+# BUILD -- PIC10F32x (Microchip XC8) cross-build
+# ============================================================================
+#
+# A SECOND toolchain (XC8 + the PIC10-12Fxxx DFP), entirely separate from the
+# AVR build above. The PIC shell (bypass_mcu_pic10f32x.c) implements the same
+# bypass_hw_iface.h contract for the PIC10F322 and links the UNCHANGED pure
+# core (bypass_pure.c) + one output driver -- exactly like the AVR build.
+#
+# `make pic` builds every variant for the PIC10F322 and gates each on the
+# device's 512-word flash budget (mirrors test-flash-budget for the AVR). It is
+# STANDALONE -- deliberately NOT part of `make test` (that is the AVR
+# pre-hardware gate, and XC8 may be absent in CI) -- and skips cleanly when XC8
+# is not installed.
+#
+# Three PIC-specific build facts, each proven against XC8 v3.10 + DFP v1.9.189:
+#   - -mdfp points at the pack's xc8/ SUBDIR, not the pack root (root -> err 2104).
+#   - XC8 v3.10 has no C11, so it compiles as C99; the firmware's static_assert
+#     is shimmed to the _Static_assert keyword (see bypass_config.h).
+#   - _XTAL_FREQ is supplied here via -D (parallel to the AVR's -DF_CPU) so the
+#     relay/mute drivers' __delay_ms() resolves it in every TU, not just the shell.
+#
+# XC8 scatters intermediates (startup.*, *.p1, *.d, .elf/.cmf/.hxl/.sym/.sdb)
+# into its working directory, so the build runs inside PIC_BUILD_DIR to keep the
+# repo root clean; `clean` just removes that directory.
+PIC_CC    ?= /opt/microchip/xc8/v3.10/bin/xc8-cc
+PIC_DFP   ?= /opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8
+PIC_CHIP  ?= 10F322
+PIC_TAG   ?= pic10f322
+PIC_XTAL  ?= 16000000UL
+PIC_BUILD_DIR ?= build_pic
+# PIC10F322 device budget: 512 words flash / 64 B RAM.
+PIC_FLASH_WORDS ?= 512
+
+# The PIC shell + the unchanged pure core (the AVR counterpart is CORE_SRC =
+# bypass_mcu_avr_classic.c + bypass_pure.c).
+PIC_CORE_SRC = src/bypass_mcu_pic10f32x.c src/bypass_pure.c
+
+# Headers that, if changed, should rebuild the PIC images: the AVR FW_HEADERS
+# set with the PIC pin map substituted for the AVR-classic one.
+PIC_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
+              src/bypass_output_common.h src/bypass_pins_pic10f32x.h \
+              src/bypass_blocking_delay.h src/bypass_static_assert.h \
+              src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
+              src/bypass_output_tq2_l2_5v_relay.h
+
+# XC8 compile flags: select the PIC10F322 + its DFP, C99 (no C11 in XC8), the
+# PIC pin map, and _XTAL_FREQ for __delay_ms.
+PIC_CFLAGS = -mcpu=$(PIC_CHIP) -mdfp=$(PIC_DFP) -std=c99 -O2 \
+             -DBYPASS_MCU_PIC10F32X -D_XTAL_FREQ=$(PIC_XTAL)
+
+# Build every PIC variant and enforce the flash-word budget. The variant -D
+# selector and driver source are chosen inline (the same case-pattern the AVR
+# analyze/budget recipes use, since $(macro_<v>)/$(src_<v>) cannot expand inside
+# a shell loop). Sources are passed as make-time absolute paths so the compiler
+# can run with its cwd in PIC_BUILD_DIR.
+.PHONY: pic
+pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v)))
+	@if [ ! -x "$(PIC_CC)" ] && ! command -v $(PIC_CC) >/dev/null 2>&1; then \
+		echo "XC8 not found at $(PIC_CC); skipping PIC build (override with PIC_CC=...)"; \
+		exit 0; \
+	fi; \
+	mkdir -p $(PIC_BUILD_DIR); \
+	echo "=== PIC10F322 build + flash-budget ($(PIC_FLASH_WORDS) words) ==="; \
+	fail=0; \
+	for v in $(VARIANTS); do \
+		case $$v in \
+			*mute)  m=CD4053_WITH_MUTE; drv=src/bypass_output_cd4053_with_mute.c ;; \
+			*relay) m=TQ2_L2_5V_RELAY;  drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
+			*)      m=CD4053_SIMPLE;    drv=src/bypass_output_cd4053_simple.c ;; \
+		esac; \
+		out=`cd $(PIC_BUILD_DIR) && $(PIC_CC) $(PIC_CFLAGS) -D$$m \
+			$(addprefix $(CURDIR)/,$(PIC_CORE_SRC)) $(CURDIR)/$$drv \
+			-o $(FW_BASE)_$${v}_$(PIC_TAG).hex 2>&1` \
+			|| { printf '%s\n' "$$out"; echo "FAIL: variant $$v did not compile for PIC10F322"; fail=1; continue; }; \
+		dec=`printf '%s\n' "$$out" | grep -E 'Program space' \
+			| grep -oE '\( *[0-9]+ *\)' | head -1 | tr -d '() '`; \
+		if [ -z "$$dec" ]; then \
+			echo "WARN: $$v: could not parse program-word count from XC8 output:"; \
+			printf '%s\n' "$$out"; continue; \
+		fi; \
+		pct=`awk -v u=$$dec -v t=$(PIC_FLASH_WORDS) 'BEGIN{printf "%.1f", u*100/t}'`; \
+		if [ $$dec -gt $(PIC_FLASH_WORDS) ]; then \
+			echo "FAIL: $$v uses $$dec words ($${pct}%) -- exceeds $(PIC_FLASH_WORDS)"; fail=1; \
+		else \
+			echo "OK:   $$v -> $(PIC_BUILD_DIR)/$(FW_BASE)_$${v}_$(PIC_TAG).hex : $$dec words ($${pct}%) of $(PIC_FLASH_WORDS)"; \
+		fi; \
+	done; \
+	exit $$fail
+
+# ============================================================================
 # CLEAN
 # ============================================================================
 
@@ -463,6 +554,7 @@ clean:
 		$(TOOLCHAIN_STAMP)
 	rm -f *.dump *.ctu-info cppcheck-addon-ctu-file-list*
 	rm -rf test/klee-out-* test/klee-last
+	rm -rf $(PIC_BUILD_DIR)
 
 # ============================================================================
 # FLASH / FUSES -- hardware (select the image with VARIANT=<name>)
@@ -1057,6 +1149,7 @@ help:
 	@echo "  all85 / all45   build all variant firmwares for ATtiny85 / ATtiny45"
 	@echo "  size            print flash/RAM usage for every ATtiny13a variant"
 	@echo "  size85 / size45 print flash/RAM usage for every tinyx5 variant"
+	@echo "  pic             build all variants for PIC10F322 (XC8) + 512-word budget gate"
 	@echo "Test (each runs across ALL variants):"
 	@echo "  test            FAST full suite -- analyze, model, sim (all MCUs), coverage"
 	@echo "  test-long       FULL exhaustive suite (minutes); alias: stress"

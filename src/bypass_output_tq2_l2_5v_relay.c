@@ -6,9 +6,8 @@
 #include "bypass_output_common.h"
 #include "bypass_config.h"
 #include "bypass_hw_iface.h"
-
-#include <util/delay.h> // _delay_ms()
-#include <assert.h>     // For static_assert()
+#include "bypass_blocking_delay.h"
+#include "bypass_static_assert.h" // static_assert()
 
 
 
@@ -39,7 +38,7 @@ void hw_set_bypass_state(void) {
     hw_led_pin_set_low();        // dark status LED
 
     hw_pin_set_high(RELAY_RESET_PIN); // pulse reset coil
-    _delay_ms(TQ2_L2_5V_PULSE_MS); // busy sleep for coil pulse time
+    BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS); // busy sleep for coil pulse time
 
     set_relay_coils_low();
 }
@@ -50,7 +49,7 @@ void hw_set_engaged_state(void) {
     hw_led_pin_set_high();       // light status LED
 
     hw_pin_set_high(RELAY_SET_PIN);   // pulse set coil
-    _delay_ms(TQ2_L2_5V_PULSE_MS); // busy sleep for coil pulse time
+    BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS); // busy sleep for coil pulse time
 
     set_relay_coils_low();
 }
