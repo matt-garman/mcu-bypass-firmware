@@ -1918,13 +1918,19 @@ static void test_control_output(void) {
 // VCD waveform trace (opt-in; built when TRACE is defined)
 //////////////////////////////////////////////////////////////////////////////
 #ifdef TRACE
+// Output path for the trace, relative to the CWD (the repo root, where `make`
+// runs). The Makefile passes -DTRACE_VCD_PATH=... pointing into the AVR build
+// directory; this fallback keeps a standalone build self-contained.
+#ifndef TRACE_VCD_PATH
+#define TRACE_VCD_PATH "bypass_trace.vcd"
+#endif
 // Produce a GTKWave-viewable trace of PB0/PB1/PB2 through a representative
-// press/release sequence. Writes bypass_trace.vcd in the CWD.
+// press/release sequence. Writes TRACE_VCD_PATH in the CWD.
 static int generate_trace(void) {
     if (sim_reset(0) != 0) { return 1; }
 
     avr_vcd_t vcd;
-    if (avr_vcd_init(g_avr, "bypass_trace.vcd", &vcd, 1000 /*usec flush*/) != 0) {
+    if (avr_vcd_init(g_avr, TRACE_VCD_PATH, &vcd, 1000 /*usec flush*/) != 0) {
         fprintf(stderr, "ERROR: avr_vcd_init failed\n");
         return 1;
     }
@@ -1956,7 +1962,7 @@ static int generate_trace(void) {
 
     avr_vcd_stop(&vcd);
     avr_vcd_close(&vcd);
-    printf("wrote bypass_trace.vcd (open with: gtkwave bypass_trace.vcd)\n");
+    printf("wrote %s (open with: gtkwave %s)\n", TRACE_VCD_PATH, TRACE_VCD_PATH);
     return 0;
 }
 #endif

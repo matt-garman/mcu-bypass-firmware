@@ -16,7 +16,8 @@
 #                             do for the ATtiny13a), so they also carry the
 #                             WDT-reset / fault-injection coverage.
 #
-#   Variant outputs are named bypass_<variant>.elf/.hex (ATtiny13a) and
+#   Variant outputs are written under build_avr_classic/ (override with
+#   AVR_BUILD_DIR=...), named bypass_<variant>.elf/.hex (ATtiny13a) and
 #   bypass_<variant>_t<n>.elf/.hex (tinyx5, n in {85,45}). Pick a variant for
 #   single-target actions with VARIANT=<name>, e.g. `make VARIANT=relay program`
 #   (ATtiny13a) or `make VARIANT=relay program45` (ATtiny45).
@@ -40,7 +41,7 @@
 #   make                 build all ATtiny13a variant firmwares (.hex) + sizes
 #   make test            fast full test suite (all variants) -- use constantly
 #   make test-long       exhaustive test suite (minutes) -- before release/HW
-#   make trace           emit bypass_trace.vcd waveform (VARIANT=, GTKWave)
+#   make trace           emit build_avr_classic/bypass_trace.vcd (VARIANT=, GTKWave)
 #   make VARIANT=relay program   set fuses + flash one variant (fresh chip)
 #   make clean           remove all build/test artifacts
 #
@@ -79,6 +80,15 @@ CC       = avr-gcc
 OBJCOPY  = avr-objcopy
 SIZE     = avr-size
 AVRDUDE  = avrdude
+
+# --- AVR build-artifact directory --------------------------------------------
+# Every AVR firmware image (.elf/.hex) and the trace .vcd is written here to
+# keep the repo root clean -- the AVR counterpart of the PIC build's
+# PIC_BUILD_DIR. Override on the command line, e.g. `make AVR_BUILD_DIR=out`.
+AVR_BUILD_DIR ?= build_avr_classic
+# Per-image path stem: $(AVR_BUILD_DIR)/$(FW_BASE). Each variant/chip suffix
+# (_$(v)[.elf|.hex] for t13a, _$(v)_t<n>... for tinyx5) is appended to it.
+AVR_FW         = $(AVR_BUILD_DIR)/$(FW_BASE)
 
 # --- Secondary targets: the tinyx5 family (ATtiny25/45/85) ------------------
 # These parts are core-identical to one another: same 1.0 MHz config, same
@@ -391,39 +401,45 @@ FORCE:
 # thus re-runs the fault-injection gate that validates the RAM-corruption guard).
 #
 # Generated per variant <v> (ATtiny13a, 1.2 MHz):
-#   bypass_<v>.elf / bypass_<v>.hex
+#   $(AVR_BUILD_DIR)/bypass_<v>.elf / .hex
 # Generated per variant <v> x tinyx5 chip <n> (1.0 MHz):
-#   bypass_<v>_t<n>.elf / bypass_<v>_t<n>.hex
+#   $(AVR_BUILD_DIR)/bypass_<v>_t<n>.elf / .hex
+
+# Create the AVR build-output directory on demand. It is an ORDER-ONLY
+# prerequisite of every image rule below (after the '|'), so the dir's mtime
+# never forces a rebuild of an already-current image.
+$(AVR_BUILD_DIR):
+	@mkdir -p $@
 
 # $(call VARIANT_BUILD_T13,variant)
 define VARIANT_BUILD_T13
-$(FW_BASE)_$(1).elf: $$(CORE_SRC) $$(src_$(1)) $$(FW_HEADERS) $$(TOOLCHAIN_STAMP)
+$(AVR_FW)_$(1).elf: $$(CORE_SRC) $$(src_$(1)) $$(FW_HEADERS) $$(TOOLCHAIN_STAMP) | $$(AVR_BUILD_DIR)
 	$$(CC) $$(CFLAGS) -D$$(macro_$(1)) $$(LDFLAGS) -o $$@ $$(CORE_SRC) $$(src_$(1))
 
-$(FW_BASE)_$(1).hex: $(FW_BASE)_$(1).elf
+$(AVR_FW)_$(1).hex: $(AVR_FW)_$(1).elf
 	$$(OBJCOPY) -O ihex -R .eeprom $$< $$@
 endef
 $(foreach v,$(VARIANTS),$(eval $(call VARIANT_BUILD_T13,$(v))))
 
 # $(call VARIANT_BUILD_X5,variant,chip-number) -- one tinyx5 chip
 define VARIANT_BUILD_X5
-$(FW_BASE)_$(1)_t$(2).elf: $$(CORE_SRC) $$(src_$(1)) $$(FW_HEADERS) $$(TOOLCHAIN_STAMP)
+$(AVR_FW)_$(1)_t$(2).elf: $$(CORE_SRC) $$(src_$(1)) $$(FW_HEADERS) $$(TOOLCHAIN_STAMP) | $$(AVR_BUILD_DIR)
 	$$(CC) -mmcu=$$(mmcu_$(2)) -DF_CPU=$$(F_CPU_X5) $$(CFLAGS_COMMON) -Wl,--gc-sections \
 		-D$$(macro_$(1)) -o $$@ $$(CORE_SRC) $$(src_$(1))
 
-$(FW_BASE)_$(1)_t$(2).hex: $(FW_BASE)_$(1)_t$(2).elf
+$(AVR_FW)_$(1)_t$(2).hex: $(AVR_FW)_$(1)_t$(2).elf
 	$$(OBJCOPY) -O ihex -R .eeprom $$< $$@
 endef
 $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(eval $(call VARIANT_BUILD_X5,$(v),$(n)))))
 
 # Convenience lists of every variant's artifacts (t13a + each tinyx5 chip).
-ALL_ELF13 = $(foreach v,$(VARIANTS),$(FW_BASE)_$(v).elf)
-ALL_HEX13 = $(foreach v,$(VARIANTS),$(FW_BASE)_$(v).hex)
-ALL_ELFX5 = $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(FW_BASE)_$(v)_t$(n).elf))
-ALL_HEXX5 = $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(FW_BASE)_$(v)_t$(n).hex))
+ALL_ELF13 = $(foreach v,$(VARIANTS),$(AVR_FW)_$(v).elf)
+ALL_HEX13 = $(foreach v,$(VARIANTS),$(AVR_FW)_$(v).hex)
+ALL_ELFX5 = $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(AVR_FW)_$(v)_t$(n).elf))
+ALL_HEXX5 = $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(AVR_FW)_$(v)_t$(n).hex))
 # Per-chip ELF/HEX lists (for the size<n>/all<n> targets).
-$(foreach n,$(TINYX5),$(eval ELF_t$(n) := $(foreach v,$(VARIANTS),$(FW_BASE)_$(v)_t$(n).elf)))
-$(foreach n,$(TINYX5),$(eval HEX_t$(n) := $(foreach v,$(VARIANTS),$(FW_BASE)_$(v)_t$(n).hex)))
+$(foreach n,$(TINYX5),$(eval ELF_t$(n) := $(foreach v,$(VARIANTS),$(AVR_FW)_$(v)_t$(n).elf)))
+$(foreach n,$(TINYX5),$(eval HEX_t$(n) := $(foreach v,$(VARIANTS),$(AVR_FW)_$(v)_t$(n).hex)))
 
 # Default goal: build every ATtiny13a variant image and print sizes.
 all: all13
@@ -746,19 +762,18 @@ program-pic: pic
 # Remove all build outputs and test binaries (keeps coverage/ -- see
 # coverage-clean for that).
 clean:
-	rm -f $(ALL_ELF13) $(ALL_HEX13) $(ALL_ELFX5) $(ALL_HEXX5) \
-		$(foreach v,$(VARIANTS),test/avr/test_sim_$(v) test/avr/test_trace_$(v)) \
+	rm -f $(foreach v,$(VARIANTS),test/avr/test_sim_$(v) test/avr/test_trace_$(v)) \
 		$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_sim_$(v)_t$(n))) \
 		$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_soak_$(v)_t$(n))) \
 		test/host/test_logic_host test/pic/test_config_pic \
 		test/formal/test_model_check test/formal/test_symbolic test/avr/test_fuses \
 		test/formal/test_symbolic.bc \
 		test/stack_*.o test/stack_*.su \
-		bypass_trace.vcd $(FW_BASE).plist \
+		$(FW_BASE).plist \
 		$(TOOLCHAIN_STAMP)
 	rm -f *.dump *.ctu-info cppcheck-addon-ctu-file-list*
 	rm -rf test/klee-out-* test/klee-last
-	rm -rf $(PIC_BUILD_DIR)
+	rm -rf $(AVR_BUILD_DIR) $(PIC_BUILD_DIR)
 
 # ============================================================================
 # FLASH / FUSES -- hardware (select the image with VARIANT=<name>)
@@ -780,8 +795,8 @@ fuses:
 		-U hfuse:w:$(HFUSE):m
 
 # Flash the selected variant's ATtiny13a image to the MCU.
-flash: $(FW_BASE)_$(VARIANT).hex
-	$(AVRDUDE) $(AVRDUDE_FLAGS) -U flash:w:$(FW_BASE)_$(VARIANT).hex:i
+flash: $(AVR_FW)_$(VARIANT).hex
+	$(AVRDUDE) $(AVRDUDE_FLAGS) -U flash:w:$(AVR_FW)_$(VARIANT).hex:i
 
 # Convenience: set fuses, then flash firmware. Use for a fresh chip.
 program: fuses flash
@@ -796,8 +811,8 @@ fuses$(1):
 	$$(AVRDUDE) -c $$(PROGRAMMER) -p $$(part_$(1)) \
 		-U lfuse:w:$$(LFUSE_X5):m \
 		-U hfuse:w:$$(HFUSE_X5):m
-flash$(1): $(FW_BASE)_$$(VARIANT)_t$(1).hex
-	$$(AVRDUDE) -c $$(PROGRAMMER) -p $$(part_$(1)) -U flash:w:$(FW_BASE)_$$(VARIANT)_t$(1).hex:i
+flash$(1): $(AVR_FW)_$$(VARIANT)_t$(1).hex
+	$$(AVRDUDE) -c $$(PROGRAMMER) -p $$(part_$(1)) -U flash:w:$(AVR_FW)_$$(VARIANT)_t$(1).hex:i
 program$(1): fuses$(1) flash$(1)
 endef
 $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
@@ -1043,14 +1058,15 @@ SIM_DEPS = test/avr/test_sim.c test/model_step.h test/bypass_config_host.h \
 
 # $(call VARIANT_SIM_T13,variant)
 define VARIANT_SIM_T13
-test/avr/test_sim_$(1): $$(SIM_DEPS) $(FW_BASE)_$(1).elf
+test/avr/test_sim_$(1): $$(SIM_DEPS) $(AVR_FW)_$(1).elf
 	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -Itest \
-		-DFW_PATH=\"$(FW_BASE)_$(1).elf\" \
+		-DFW_PATH=\"$(AVR_FW)_$(1).elf\" \
 		test/avr/test_sim.c $$(PURE_HOST_SRC) -o $$@ $$(SIM_LIBS)
 
-test/avr/test_trace_$(1): $$(SIM_DEPS) $(FW_BASE)_$(1).elf
+test/avr/test_trace_$(1): $$(SIM_DEPS) $(AVR_FW)_$(1).elf
 	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -DTRACE -Itest \
-		-DFW_PATH=\"$(FW_BASE)_$(1).elf\" \
+		-DFW_PATH=\"$(AVR_FW)_$(1).elf\" \
+		-DTRACE_VCD_PATH=\"$(AVR_BUILD_DIR)/bypass_trace.vcd\" \
 		test/avr/test_sim.c $$(PURE_HOST_SRC) -o $$@ $$(SIM_LIBS)
 
 .PHONY: test-sim-$(1)
@@ -1062,9 +1078,9 @@ $(foreach v,$(VARIANTS),$(eval $(call VARIANT_SIM_T13,$(v))))
 
 # $(call VARIANT_SIM_X5,variant,chip-number)
 define VARIANT_SIM_X5
-test/avr/test_sim_$(1)_t$(2): $$(SIM_DEPS) $(FW_BASE)_$(1)_t$(2).elf
+test/avr/test_sim_$(1)_t$(2): $$(SIM_DEPS) $(AVR_FW)_$(1)_t$(2).elf
 	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -Itest \
-		-DFW_PATH=\"$(FW_BASE)_$(1)_t$(2).elf\" \
+		-DFW_PATH=\"$(AVR_FW)_$(1)_t$(2).elf\" \
 		-DMCU_NAME=\"$$(mmcu_$(2))\" \
 		-DF_CPU_HZ=$$(F_CPU_X5) \
 		-DTARGET_TINYX5 \
@@ -1133,7 +1149,7 @@ SOAK_PROGRESS_INTERVAL_MS  ?= 3600000
 SOAK_COMPILE = $(HOSTCC) $(SIM_CFLAGS) $(PURE_HOST_CFLAGS) \
 	-D$(macro_$(SOAK_VARIANT)) \
 	-Itest \
-	-DFW_PATH=\"$(FW_BASE)_$(SOAK_VARIANT)_t$(SOAK_CHIP).elf\" \
+	-DFW_PATH=\"$(AVR_FW)_$(SOAK_VARIANT)_t$(SOAK_CHIP).elf\" \
 	-DMCU_NAME=\"$(mmcu_$(SOAK_CHIP))\" \
 	-DF_CPU_HZ=$(F_CPU_X5) \
 	-DTARGET_TINYX5 \
@@ -1144,20 +1160,21 @@ SOAK_COMPILE = $(HOSTCC) $(SIM_CFLAGS) $(PURE_HOST_CFLAGS) \
 
 # Optional build-only convenience: build without running (Make's normal
 # dependency tracking applies; won't rebuild on SOAK_DURATION_MS change alone).
-$(SOAK_BIN): $(SOAK_DEPS) $(FW_BASE)_$(SOAK_VARIANT)_t$(SOAK_CHIP).elf
+$(SOAK_BIN): $(SOAK_DEPS) $(AVR_FW)_$(SOAK_VARIANT)_t$(SOAK_CHIP).elf
 	$(SOAK_COMPILE)
 
 # Run target: always recompiles (phony) so every SOAK_* override is applied.
-test-soak: $(SOAK_DEPS) $(FW_BASE)_$(SOAK_VARIANT)_t$(SOAK_CHIP).elf
+test-soak: $(SOAK_DEPS) $(AVR_FW)_$(SOAK_VARIANT)_t$(SOAK_CHIP).elf
 	$(SOAK_COMPILE)
 	@echo "--- soak test: variant=$(SOAK_VARIANT)  MCU=ATtiny$(SOAK_CHIP)  duration=$(SOAK_DURATION_MS) ms ---"
 	./$(SOAK_BIN)
 
 # Generate a GTKWave-viewable waveform of PB0/PB1/PB2/PB3 over a representative
-# press/release sequence for the selected VARIANT. Writes bypass_trace.vcd.
+# press/release sequence for the selected VARIANT. Writes
+# $(AVR_BUILD_DIR)/bypass_trace.vcd.
 trace: test/avr/test_trace_$(VARIANT)
 	./test/avr/test_trace_$(VARIANT)
-	@echo "View with: gtkwave bypass_trace.vcd"
+	@echo "View with: gtkwave $(AVR_BUILD_DIR)/bypass_trace.vcd"
 
 # ============================================================================
 # STATIC ANALYSIS & COVERAGE
@@ -1378,7 +1395,7 @@ help:
 	@echo "  test-mutation   inject firmware faults, verify the suite kills them"
 	@echo "  test-soak       24-h soak test (standalone; SOAK_VARIANT, SOAK_CHIP, SOAK_DURATION_MS,"
 	@echo "                  SOAK_LIVENESS_INTERVAL_MS, SOAK_PROGRESS_INTERVAL_MS)"
-	@echo "  trace           emit bypass_trace.vcd for VARIANT (GTKWave)"
+	@echo "  trace           emit $(AVR_BUILD_DIR)/bypass_trace.vcd for VARIANT (GTKWave)"
 	@echo "Analysis:"
 	@echo "  analyze         static analysis of core + all drivers (3 analyzers)"
 	@echo "  analyze-tidy / analyze-cppcheck / analyze-deep  individual analyzers"
@@ -1395,7 +1412,7 @@ help:
 	@echo "  clean           remove build + test artifacts"
 	@echo "  clean-tests     remove only test binaries"
 	@echo "  coverage-clean  remove coverage artifacts"
-	@echo "Overrides: VARIANT=, PROGRAMMER=, COVERAGE_MIN=, HOSTCC=, HOST_DEFS=, SIM_DEFS="
+	@echo "Overrides: VARIANT=, PROGRAMMER=, COVERAGE_MIN=, HOSTCC=, HOST_DEFS=, SIM_DEFS=, AVR_BUILD_DIR="
 	@echo "PIC overrides: PIC_CC=, PIC_PROG=pk2cmd|ipecmd, PIC_PROG_TOOL=PK3|PK4|PK5, PIC_PROG_CMD="
 
 

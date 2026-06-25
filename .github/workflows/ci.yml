@@ -111,7 +111,7 @@ jobs:
         with:
           name: firmware-${{ matrix.mcu }}
           path: |
-            *.hex
+            build_avr_classic/*.hex
             size-${{ matrix.mcu }}.txt
           if-no-files-found: error
 

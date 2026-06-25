@@ -4,6 +4,7 @@
 # compilation artifacts
 *.hex
 *.elf
+build_avr_classic/
 build_pic/
 
 # cppcheck addon artifacts (e.g. "make analyze-misra"); normally auto-cleaned,
