@@ -5,7 +5,9 @@
 #ifndef BYPASS_HW_IFACE_H__
 #define BYPASS_HW_IFACE_H__
 
+
 #include <stdint.h>
+
 
 
 // - set a GPIO pin high or low
@@ -18,6 +20,19 @@ void hw_pin_set_low(uint8_t const pin);
 // LED_PIN low = status LED dark
 void hw_led_pin_set_high(void);
 void hw_led_pin_set_low(void);
+
+
+// - configure output pins via output_mask
+// - GPIO pins in output_mask are configured as output; other GPIO pins are
+//   implicitly configured as input
+// - the configured output pins are pulled low
+void hw_configure_output_pins(uint8_t const output_mask);
+
+
+// - sanity check function for output pins: returns non-zero IFF every pin in
+//   expected_mask is still configured as an output
+// - consumed by the per-variant hw_is_sanity_check_failed()
+uint8_t hw_output_pins_intact(uint8_t const expected_mask);
 
 
 // - sets global effect state (ENGAGE/BYPASS)
@@ -34,7 +49,10 @@ void hw_set_engaged_state(void);
 uint8_t hw_is_sanity_check_failed(void);
 
 
-void hw_init_ddrb_setup(void);
+// initialization of output pins
+void hw_init_output_pins(void);
+
+
 
 
 #endif // BYPASS_HW_IFACE_H__

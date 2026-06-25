@@ -411,13 +411,15 @@ for switch debouncing. XC8 compiler differences: interrupt syntax is
 `void __interrupt() isr(void)` instead of AVR's `ISR()` macro; delays use
 `__delay_ms()` from `<xc.h>` instead of `_delay_ms()`. CONFIG bits (the PIC
 equivalent of AVR fuse bytes) are embedded in the HEX file by XC8 via
-`#pragma config` in source: enable WDT (`WDTE = ON`), set WDTPS for ~1 ms
-(`WDTPS = WDTPS1`), configure MCLR pin, enable brownout reset. Pin assignment
-for PIC10F322 (five bidirectional I/Os: RA0–RA2, RA4–RA5; RA3 is input-only):
-all three output variants fit — the relay variant's one footswitch input plus LED
-plus two coil outputs occupies exactly four pins with one to spare. PIC10F322
-(512 words) is the recommended primary target; PIC10F320 (256 words) is tight
-for the relay variant.
+`#pragma config` in source: enable the WDT as a fault watchdog (`WDTE = ON`),
+set `MCLRE` off (RA3 is the footswitch), enable brownout reset. Pin assignment
+for PIC10F322 (only four I/O: RA0–RA2 bidirectional, RA3 input-only / MCLR):
+the footswitch goes on the input-only RA3 (MCLR disabled), freeing RA0–RA2 as
+outputs. All three variants fit — the relay variant uses all four pins exactly
+(footswitch + LED + two coils, no spare); cd4053-simple and mute have room.
+PIC10F322 (512 words) is the recommended primary target; PIC10F320 (256 words)
+is tight for the relay variant. (Detailed Model-B plan — 1 ms tick from TMR2,
+WDT as a ~32 ms fault watchdog — in `docs/phase2_pic_shell.md`.)
 
 *Phase 3 — build system (~4–8 h).* Add XC8 toolchain variables to the Makefile:
 `PIC_CC = xc8-cc`, `--chip=10F322` device flag, output format flags. Add new

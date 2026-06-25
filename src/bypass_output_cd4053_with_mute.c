@@ -7,7 +7,6 @@
 #include "bypass_config.h"
 #include "bypass_hw_iface.h"
 
-#include <avr/io.h>     // Defines register and bit names
 #include <util/delay.h> // _delay_ms()
 #include <assert.h>     // For static_assert()
 
@@ -18,15 +17,12 @@ uint8_t hw_is_sanity_check_failed(void) {
             "CD4053 mute delay must be shorter than the release-lockout window, "
             "or the re-arm point can be missed during the blocking actuation");
 
-    return 
-        ((DDRB & ((1 << LED_PIN) | (1 << CD4053_CTL1) | (1 << CD4053_CTL2))) !=
-         ((1 << LED_PIN) | (1 << CD4053_CTL1) | (1 << CD4053_CTL2)))
-        ;
+    return (0U == hw_output_pins_intact((1 << LED_PIN) | (1 << CD4053_CTL1) | (1 << CD4053_CTL2)));
 }
 
 
-void hw_init_ddrb_setup(void) {
-    DDRB = (1 << LED_PIN) | (1 << CD4053_CTL1) | (1 << CD4053_CTL2) | (1 << PB4);
+void hw_init_output_pins(void) {
+    hw_configure_output_pins(BYPASS_OUTPUT_DDR_MASK);
 }
 
 

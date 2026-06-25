@@ -2,22 +2,18 @@
 // Licensed under the MIT License. See LICENSE in the project root for
 // license information.
 
-#include "bypass_output_cd4053_simple.h"
 #include "bypass_output_common.h"
 #include "bypass_hw_iface.h"
-
-#include <avr/io.h> // Defines register and bit names
 
 
 // assert critical pin directions hold: LED & CD4053 outputs, footswitch input
 uint8_t hw_is_sanity_check_failed(void) {
-    return ((DDRB & ((1 << LED_PIN) | (1 << CD4053_PIN))) !=
-            ((1 << LED_PIN) | (1 << CD4053_PIN)));
+    return (hw_output_pins_intact((1 << LED_PIN) | (1 << CD4053_PIN)) == 0U);
 }
 
 
-void hw_init_ddrb_setup(void) {
-    DDRB = (1 << LED_PIN) | (1 << CD4053_PIN) | (1 << PB3) | (1 << PB4);
+void hw_init_output_pins(void) {
+    hw_configure_output_pins(BYPASS_OUTPUT_DDR_MASK);
 }
 
 

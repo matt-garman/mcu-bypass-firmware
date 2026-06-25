@@ -115,7 +115,7 @@ src_relay  = src/bypass_output_tq2_l2_5v_relay.c
 
 # Headers shared by every firmware build; any change rebuilds all variants.
 FW_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
-             src/bypass_output_common.h \
+             src/bypass_output_common.h src/bypass_pins_avr_classic.h \
              src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
              src/bypass_output_tq2_l2_5v_relay.h
 

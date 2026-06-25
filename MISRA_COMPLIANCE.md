@@ -97,8 +97,8 @@ added here explicitly.
 | | |
 |---|---|
 | **Rule** | 2.5 (unused macro definition, Advisory) |
-| **Files** | `bypass_output_common.h`, `bypass_config.h` |
-| **Instances** | 6 |
+| **Files** | `bypass_pins_avr_classic.h`, `bypass_config.h` |
+| **Instances** | 16 (14 pin map + 2 `bypass_config.h`) |
 
 **Rationale.** Several macros are defined in shared headers that are included
 by multiple translation units, but are only *used* by a subset of them. cppcheck
@@ -109,18 +109,26 @@ shared invariant in one place.
 
 Two groups of macros fall under this deviation:
 
-**`bypass_output_common.h` — pin macros `FOOTSW_PIN` and `LED_PIN`**
+**`bypass_pins_avr_classic.h` — the per-MCU pin map**
 
 ```c
-#define FOOTSW_PIN (PB0)
-#define LED_PIN    (PB1)
+#define FOOTSW_PIN (0U)              // core only
+#define LED_PIN    (1U)              // core + every driver
+#define CD4053_PIN (2U)              // cd4053-simple driver only
+#define RELAY_RESET_PIN (2U)         // relay driver only
+#define RELAY_SET_PIN   (3U)         // relay driver only
+#define CD4053_CTL1 (2U)             // mute driver only
+#define CD4053_CTL2 (3U)             // mute driver only
+#define BYPASS_OUTPUT_DDR_MASK (...) // every driver's hw_init_output_pins()
 ```
 
-These are the two pins common to every output variant. They are referenced by
-the **core** (which reads the footswitch and drives the LED) but not by the
-**output-driver** translation units, which only drive their own control pins.
-Centralizing them avoids three-way duplication with no compiler check that the
-copies stay in sync.
+This header is the single source of truth for the classic-AVR pinout across all
+three output variants. A given translation unit references only the pins it
+needs — the **core** uses `FOOTSW_PIN`/`LED_PIN`; each **driver** uses its own
+variant's control pins plus the shared output mask — so cppcheck, analyzing one
+TU at a time, reports the rest as "unused". They are **not dead code**: every
+macro is used by some build. Centralizing them keeps the classic-AVR pinout in
+one place rather than duplicating it across the variant headers.
 
 **`bypass_config.h` — threshold macros `PRESSED_THRESH` and `RELEASE_THRESH`**
 

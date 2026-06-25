@@ -42,7 +42,13 @@
 #  define PB5 5
 #endif
 
-// Pins common to every variant (footswitch + status LED).
+// Select the classic-AVR pin map — the same map the firmware build uses (it
+// keys off __AVR__, which the host compiler does not define). The PBx shims
+// above stay for the sim harness's own register-bit references (e.g.
+// avr_io_getirq(..., PB2)); the firmware pin POSITIONS come from the pin map.
+#ifndef BYPASS_MCU_AVR_CLASSIC
+#  define BYPASS_MCU_AVR_CLASSIC 1
+#endif
 #include "../src/bypass_output_common.h"
 
 // Variant-specific control pins. Default to the CD4053 simple variant when no
