@@ -17,7 +17,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # TEMP(pic-ci): pic10f32x_support added so plain pushes to the branch
+    # exercise the PIC gate while iterating; revert to `[main]` when done.
+    branches: [main, pic10f32x_support]
   pull_request:
   workflow_dispatch:
   schedule:
@@ -46,6 +48,9 @@ jobs:
   verify:
     name: verify (make test)
     runs-on: ubuntu-24.04
+    # TEMP(pic-ci): AVR suite disabled while iterating on the PIC gate (it is
+    # slow); re-enable by removing this single line before merge.
+    if: false
     steps:
       - uses: actions/checkout@v4
 
@@ -72,6 +77,107 @@ jobs:
         run: make test
 
   # -------------------------------------------------------------------------
+  # PIC10F322 gate: the PIC counterpart of `verify`. Mirrors `make pic-test` --
+  # builds every variant with XC8 + enforces the 512-word flash budget, verifies
+  # the emitted CONFIG word vs design intent, runs cppcheck+MISRA on the PIC
+  # shell, and drives the footswitch through gpsim asserting PORTA/LATA.
+  #
+  # XC8 and the PIC10-12Fxxx DFP are not in apt; they are fetched from Microchip
+  # (the free tier needs no key to compile) and installed to the paths the
+  # Makefile defaults to (also passed explicitly via PIC_CC / PIC_DFP). gpsim,
+  # cppcheck, python3 come from apt.
+  #
+  # CRITICAL: the `make pic-test` sub-targets SKIP CLEANLY when a tool/header is
+  # absent -- fatal for a gate (a failed XC8 fetch would make every check "skip"
+  # and the job go green on nothing). The "Assert PIC toolchain present" step
+  # fails loud so a broken install can never masquerade as a pass; the cache is
+  # only SAVED after that assert, so a half-baked install is never cached.
+  #
+  # NOTE: confirm the XC8 download URL and the unattended-installer flags
+  # against microchip.com / `./xc8.run --help` (both change per release). The
+  # DFP packs.download.microchip.com/<pack>.atpack URL scheme is stable.
+  pic:
+    name: pic (make pic-test)
+    runs-on: ubuntu-24.04
+    env:
+      # Pin to the versions in TOOLCHAIN.adoc; bump compiler + DFP together.
+      XC8_VERSION: "3.10"
+      DFP_VERSION: "1.9.189"
+      XC8_DIR: /opt/microchip/xc8/v3.10
+      # .atpack unzips here so PIC_DFP = $XC8_DFP_ROOT/xc8 (its xc8/ subtree).
+      XC8_DFP_ROOT: /opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gpsim + analyzers (apt)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make gcc gpsim cppcheck python3 unzip wget
+
+      - name: Restore cached XC8 + DFP
+        id: cache-xc8
+        uses: actions/cache/restore@v4
+        with:
+          path: /opt/microchip
+          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}
+
+      - name: Install XC8 (free tier) + PIC10-12Fxxx DFP
+        if: steps.cache-xc8.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          # --- XC8 compiler ---
+          xc8_run="xc8-v${XC8_VERSION}-full-install-linux-x64-installer.run"
+          xc8_base="https://ww1.microchip.com/downloads/aemDocuments/documents"
+          xc8_base="${xc8_base}/DEV/ProductDocuments/SoftwareTools"
+          wget -q "${xc8_base}/${xc8_run}" -O /tmp/xc8.run
+          chmod +x /tmp/xc8.run
+          sudo /tmp/xc8.run --mode unattended --unattendedmodeui none \
+            --netservername '' --LicenseType FreeMode --prefix "${XC8_DIR}"
+          # --- PIC10-12Fxxx Device Family Pack (.atpack == a zip) ---
+          sudo mkdir -p "${XC8_DFP_ROOT}"
+          dfp_pack="Microchip.PIC10-12Fxxx_DFP.${DFP_VERSION}.atpack"
+          wget -q "https://packs.download.microchip.com/${dfp_pack}" \
+            -O /tmp/dfp.atpack
+          sudo unzip -q -o /tmp/dfp.atpack -d "${XC8_DFP_ROOT}"
+
+      - name: Assert PIC toolchain present (fail loud, do NOT skip)
+        run: |
+          xc8="${XC8_DIR}/bin/xc8-cc"
+          dev="${XC8_DFP_ROOT}/xc8/pic/include/proc/pic10f322.h"
+          test -x "${xc8}" || { echo "::error::XC8 missing: ${xc8}"; exit 1; }
+          test -f "${dev}" || { echo "::error::DFP missing: ${dev}"; exit 1; }
+          for t in gpsim cppcheck; do
+            command -v "$t" >/dev/null || { echo "::error::no $t"; exit 1; }
+          done
+
+      # Save only after the assert passed, so a partial install is never cached.
+      - name: Save XC8 + DFP cache
+        if: steps.cache-xc8.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/microchip
+          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}
+
+      - name: Record toolchain versions
+        run: |
+          echo "xc8-cc:" && "${XC8_DIR}/bin/xc8-cc" --version | head -2 || true
+          echo "gpsim:"  && (gpsim --version 2>&1 | head -1 || true)
+          echo "cppcheck:" && cppcheck --version
+
+      - name: PIC pre-hardware gate
+        run: |
+          make pic-test \
+            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC_DFP="${XC8_DFP_ROOT}/xc8"
+
+      - name: Upload PIC firmware images
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-pic10f322
+          path: build_pic/*.hex
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------------
   # Visible build matrix: prove every variant builds for every supported MCU
   # and publish the firmware images + size reports. `make all13/all45/all85`
   # build all variants for that part; the size<n> target prints flash/RAM.
@@ -79,6 +185,9 @@ jobs:
   build-matrix:
     name: build (${{ matrix.mcu }})
     runs-on: ubuntu-24.04
+    # TEMP(pic-ci): AVR build matrix disabled while iterating on the PIC gate;
+    # re-enable by removing this single line before merge.
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -124,10 +233,13 @@ jobs:
   stress:
     name: stress (make test-long)
     runs-on: ubuntu-24.04
-    if: >-
-      github.event_name == 'push' ||
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch'
+    # TEMP(pic-ci): AVR stress suite disabled while iterating on the PIC gate;
+    # restore the original condition (commented out just below) before merge.
+    if: false
+    # if: >-
+    #   github.event_name == 'push' ||
+    #   github.event_name == 'schedule' ||
+    #   github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
 

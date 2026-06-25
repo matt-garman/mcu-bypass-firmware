@@ -14,6 +14,87 @@ bug gets fixed immediately, not parked here.
 
 ---
 
+## PIC branch meta-review (2026-06-25, `pic10f32x_support`)
+
+A pre-merge meta-review of the PIC10F322 shell (`bypass_mcu_pic10f32x.c`) and the
+hardware-abstraction refactor on this branch found **no correctness defects** —
+the PIC tick/WDT timing, the TRISA/LATA output logic, the footswitch read, and
+every variant's engaged/bypass register pattern check out against the gpsim
+expectations. The items below are quality-parity and robustness-consistency gaps
+relative to the mature AVR Classic path. The CI item is the one worth closing at
+(or before) merge; the rest are deferrable polish, consistent with the
+no-bugs-parked-here rule above.
+
+**PIC firmware has no CI / automated gate (highest).** `make test` (the gating
+CI job) is AVR-only; the PIC build, CONFIG-word check, MISRA, and gpsim test all
+live under the standalone `make pic-test` target, which CI never invokes (`grep`
+for pic/xc8/gpsim in `.github/workflows/ci.yml` → nothing). Result: a regression
+in `bypass_mcu_pic10f32x.c`, the PIC pin map, or a `#pragma config` line is
+caught only if a developer locally has XC8 + the DFP + gpsim and remembers to run
+it. The AVR shell, by contrast, is gated on every push (analyze + host +
+model-check + symbolic + CBMC + simavr + coverage). Add a `pic` CI job that
+installs XC8 + the PIC10-12Fxxx DFP + gpsim and runs `make pic-test` (YAML sketch
+drafted 2026-06-25). Critical subtlety: the `pic-test` sub-targets *skip cleanly*
+when a tool/header is absent, so the CI job MUST assert the toolchain is present
+(fail loud) — otherwise a broken XC8 install would turn the gate green silently.
+Effort: ~2–4 h (mostly XC8-in-CI plumbing). Impact: High — brings the PIC path
+under the same continuous protection as AVR.
+
+**PIC footswitch pull-up integrity check is weaker than the AVR's (firmware).**
+`hw_footswitch_pullup_intact()` (`bypass_mcu_pic10f32x.c` ~L134) checks only the
+per-pin `WPUA[FOOTSW_PIN]` latch, but the PIC weak pull-up has a two-part enable:
+the per-pin `WPUA` bit *and* the global active-low `OPTION_REGbits.nWPUEN`. An
+SEU/EMI event that flips `nWPUEN` to 1 disables the footswitch pull-up while this
+sanity check still passes. The AVR analogue (`bypass_mcu_avr_classic.c:140`)
+checks the single bit that *is* its pull-up enable, so it is complete. For
+parity, the PIC check should also assert `0U == OPTION_REGbits.nWPUEN`. Firmware
+edit (user). Effort: ~15 min. Impact: Medium — restores SEU-detection symmetry
+under the project's stated cosmic-ray/EMI threat model.
+
+**PIC `init()` has no early WDT handling, and why that is safe is undocumented
+(firmware/doc).** The AVR makes re-arming the WDT its first init action and
+documents the post-WDRF ~16 ms reset-loop hazard that motivates it
+(`bypass_mcu_avr_classic.c:149-175`). The PIC `init()` has no `CLRWDT()` at all —
+the first pet is in the loop, after the ~12 ms `hw_set_bypass_state()` pulse.
+This appears safe (the PIC POR/reset WDT default of 1:65536 ≈ 2 s far exceeds
+init + the pulse, and the PIC lacks the AVR's short-post-reset hazard), but that
+reasoning is nowhere in the code. Either add a comment to the PIC shell
+explaining why no early pet is needed, or add a belt-and-suspenders `CLRWDT()` at
+the top of `init()` mirroring the AVR. Confirm the PIC10F322 WDTCON POR default
+against datasheet DS40001585 while doing so. Firmware/doc edit (user). Effort:
+~30 min. Impact: Low-Medium — closes a doc/parity gap on a load-bearing
+fault-recovery path.
+
+**Hoist the duplicated MCU-neutral compile-time contract into a shared header
+(redundancy).** `DEBOUNCE_COUNTER_MAX (255U)` plus its ~10-line MISRA rationale,
+and the five MCU-neutral threshold `static_assert`s (`RELEASE_THRESH <
+DEBOUNCE_COUNTER_MAX`, `> 0`, `> PRESSED_THRESH`, and the two `PRESSED_THRESH`
+bounds) are copy-pasted verbatim into both shells (`bypass_mcu_avr_classic.c`
+L53-62/L262-266 and `bypass_mcu_pic10f32x.c` L64-69/L216-220). Beyond the
+duplication this is a drift risk: someone could tighten the invariant in one
+shell and not the other. Move them into one shared header (a new
+`bypass_compile_checks.h`, or fold into `bypass_config.h`/`bypass_pure.h`)
+included by both shells. The genuinely MCU-specific asserts (the `-fshort-enums`
+size checks, the `PBx`/`_PORTA_RAx_POSN` pin pinning, the `F_CPU`/`_XTAL_FREQ`
+checks) stay per-shell. Leave the per-shell HW helpers (`hw_force_wdt_reset`,
+`hw_read_footswitch`, the fault/toggle dispatch) duplicated — the two main loops
+differ structurally (ISR vs polled) and per-shell clarity beats DRY for a
+reference design. Firmware edit (user). Effort: ~30–45 min. Impact: Medium —
+removes verbatim duplication and a drift risk.
+
+**PIC functional-test rigor is below the AVR's (test, tooling-constrained).**
+The AVR has simavr lock-step (`model_step.h` converging on real code) plus fault
+injection and mutation; the PIC has a 4-checkpoint gpsim functional test
+(`test/pic/footswitch_toggle.stc`). The shared pure core is fully covered by the
+host/formal/mutation suites, so the PIC-specific exposure is only shell wiring —
+which gpsim does exercise — and there is no lock-step model for gpsim, so this is
+a tooling constraint, not an oversight. To narrow the gap cheaply, extend the
+gpsim scenario to (a) cover the power-on-pressed startup case (exercises the
+`debounce_init_context` RELEASE-wait branch) and (b) assert `porta` at the
+`BYPASS_AGAIN` checkpoint. Test edit. Effort: ~1 h. Impact: Low-Medium.
+
+---
+
 ## Tier 2 — closes verification / traceability gaps
 
 **Datasheet citations in the design doc.** The sleep-wakeup §7.3 cite lives in
@@ -491,6 +572,11 @@ left to the implementer" is itself evidence of thoroughness.
 
 | Item                                            | Tier | Effort    | Impact                          |
 |-------------------------------------------------|------|-----------|---------------------------------|
+| PIC: add CI gate (`make pic-test`)              | MR   | 2–4 h     | High — PIC under same CI as AVR |
+| PIC: pull-up check incl. `nWPUEN`               | MR   | 15 min    | Medium — SEU-detection parity   |
+| PIC: document/early WDT in `init()`             | MR   | 30 min    | Low-Med — fault-path parity     |
+| Hoist shared compile-time checks (both shells)  | MR   | 30–45 min | Medium — de-dup + drift risk    |
+| PIC: extend gpsim scenario coverage             | MR   | 1 h       | Low-Med — shell-wiring coverage |
 | Design doc: datasheet citations                 | 2    | 2 h       | High — completeness/rigor       |
 | Power-on-pressed in simavr                      | 2.5  | 1–2 h     | Medium — simavr quirk workaround|
 | Formal verification of output drivers           | 2.5  | 3–4 h     | Medium — driver correctness     |
@@ -519,3 +605,6 @@ left to the implementer" is itself evidence of thoroughness.
 | tinyAVR 2-Series (ATtiny202) support            | 3    | 2–4 days  | Nice-to-have; simavr gap        |
 | PIC10F320/322 support                           | 3    | 2–4 weeks | Nice-to-have; gpsim confirmed   |
 | Manufacturing artifacts (name as scope)         | 4    | —         | Completeness signal             |
+
+(Tier `MR` = the 2026-06-25 PIC branch meta-review batch; see that section above.
+The CI-gate row is the only near-term/pre-merge item — the rest are deferrable.)
