@@ -419,7 +419,7 @@ outputs. All three variants fit — the relay variant uses all four pins exactly
 (footswitch + LED + two coils, no spare); cd4053-simple and mute have room.
 PIC10F322 (512 words) is the recommended primary target; PIC10F320 (256 words)
 is tight for the relay variant. (Detailed Model-B plan — 1 ms tick from TMR2,
-WDT as a ~32 ms fault watchdog — in `docs/phase2_pic_shell.md`.)
+WDT as a ~256 ms fault watchdog — in `docs/phase2_pic_shell.md`.)
 
 *Phase 3 — build system (~4–8 h).* Add XC8 toolchain variables to the Makefile:
 `PIC_CC = xc8-cc`, `--chip=10F322` device flag, output format flags. Add new

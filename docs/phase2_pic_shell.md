@@ -16,9 +16,9 @@ operations are shared through the interface.
   pure fault watchdog at a longer period, `CLRWDT`'d once per tick. Chosen over the
   WDT-periodic-wakeup model because it matches the AVR design more closely and is
   simpler to reason about — and crucially it **dissolves the blocking-actuation
-  conflict**: with the WDT at ~32 ms and the worst-case awake burst ≈ 13–14 ms
+  conflict**: with the WDT at ~256 ms and the worst-case awake burst ≈ 13–14 ms
   (1 ms tick wait + the 12 ms relay/mute pulse + overhead), the blocking actuation
-  fits inside one WDT period, so **the output drivers keep their plain
+  fits comfortably inside one WDT period, so **the output drivers keep their plain
   `__delay_ms`** — no WDT-aware delay abstraction needed. (Trade-off accepted: no
   low-power sleep; fine for an always-powered pedal.)
 - **Toolchain (confirmed working):** XC8 v3.10 (`/opt/microchip/xc8/v3.10/bin/xc8-cc`)
@@ -46,8 +46,11 @@ Confirmed against the datasheet and the now-installed DFP device header
   bit 1**. At `FOSC`=16 MHz → FOSC/4 = 4 MHz, prescale /16 → 250 kHz, `PR2`=249 →
   exactly 1 ms. Postscale 1:1 so `TMR2IF` sets every period; the loop polls + clears it.
 - **WDT** (fault watchdog): time base = 31 kHz LFINTOSC, independent of FOSC.
-  `WDTCON`(0x30) = `SWDTEN`(bit 0) + `WDTPS<4:0>`(bits 1–5). ~32 ms ≈ `WDTPS`=0b00101
-  (1:1024); confirm the nominal ms in the datasheet WDT period table. Awake WDT
+  `WDTCON`(0x30) = `SWDTEN`(bit 0) + `WDTPS<4:0>`(bits 1–5). ~256 ms ≈ `WDTPS`=0b01000
+  (1:8192), mirroring the AVR's 250 ms. Datasheet-confirmed: LFINTOSC = 31 kHz
+  **±25%** (OS09) and the WDT period is characterized at **−37%/+69%** (param 31),
+  so worst-case ~160 ms still spans the ~14 ms awake burst with comfortable margin
+  (the prior ~32 ms gave only ~1.4×). Awake WDT
   timeout = device reset (the fault-recovery path we want).
 - **Oscillator:** internal HFINTOSC, frequency via `OSCCON`(0x10) `IRCF<2:0>`
   (3-bit; 16 MHz = 0b111, confirm); `FOSC` CONFIG bit = INTOSC.
@@ -97,7 +100,7 @@ functions (as the AVR shell does), not via the shared header.
 | `hw_wait_for_tick`            | spin until `TMR2IF`, then clear it (renamed from `hw_sleep_until_tick`) |
 | `hw_tick_timer_start`         | configure + start TMR2 (`PR2`, `T2CON`); no interrupt (polled) |
 | `hw_mcu_init`                 | `OSCCON` 16 MHz; `ANSELA=0`; footswitch `WPUA` + `OPTION_REG` `WPUEN`; (TRISA set by `hw_init_output_pins`) |
-| `hw_force_wdt_reset` (static) | disable interrupts + spin → WDT resets (~32 ms)              |
+| `hw_force_wdt_reset` (static) | disable interrupts + spin → WDT resets (~256 ms)             |
 | driver `hw_set_*` / sanity / `hw_init_output_pins` | unchanged logic; pins from the pin map |
 
 The PIC `main()` (Model B), conceptually parallel to the AVR's but with no ISR and

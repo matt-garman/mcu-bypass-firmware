@@ -6,7 +6,7 @@ the contract→register mapping, the pin map, and the Model-B `main()` sketch li
 in `docs/phase2_pic_shell.md` — read §1–§5 of that first.** This file is the
 concrete "what to write."
 
-Branch: `pic10f32x_support`. Model **B** (polled TMR2 1 ms tick + ~32 ms fault
+Branch: `pic10f32x_support`. Model **B** (polled TMR2 1 ms tick + ~256 ms fault
 WDT, no sleep). Per AGENTS.md, **firmware edits are the user's**; Claude owns the
 Makefile / test wiring and verifies.
 
@@ -47,7 +47,7 @@ Makefile / test wiring and verifies.
    #  define BYPASS_DELAY_MS(n) __delay_ms(n)
    #endif
    ```
-   and call `BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)` etc. Model B's ~32 ms WDT spans
+   and call `BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)` etc. Model B's ~256 ms WDT spans
    the 12 ms pulse, so plain blocking delays are fine (no CLRWDT interleaving).
    `cd4053_simple` has no delay — unaffected.
 
@@ -95,7 +95,7 @@ mirrors the AVR shell's structure but with a polled loop and no ISR.
 // CONFIG — verify names/values against the DFP pic10f322.h config block.
 #pragma config FOSC = INTOSC   // internal HFINTOSC
 #pragma config BOREN = ON      // brown-out reset
-#pragma config WDTE = ON       // watchdog always on (fault watchdog, ~32 ms via WDTPS)
+#pragma config WDTE = ON       // watchdog always on (fault watchdog, ~256 ms via WDTPS)
 #pragma config PWRTE = ON      // power-up timer
 #pragma config MCLRE = OFF     // RA3 is a digital input (footswitch), not MCLR
 #pragma config CP = OFF
@@ -103,7 +103,7 @@ mirrors the AVR shell's structure but with a polled loop and no ISR.
 #pragma config LPBOR = OFF
 #pragma config BORV = LO       // verify
 #pragma config WRT = OFF
-// NOTE: WDTPS for ~32 ms (≈1:1024 on the 31 kHz LFINTOSC) is set in WDTCON at
+// NOTE: WDTPS for ~256 ms (≈1:8192 on the 31 kHz LFINTOSC) is set in WDTCON at
 // runtime in hw_mcu_init() if WDTE=ON doesn't fix it; confirm from the datasheet.
 
 #define _XTAL_FREQ 16000000UL  // for __delay_ms(); must match OSCCON below
@@ -129,7 +129,7 @@ static pin_state_t hw_read_footswitch(void){
 static uint8_t hw_footswitch_pullup_intact(void){ return (uint8_t)((WPUA & (1U << FOOTSW_PIN)) != 0U); }
 static void hw_wdt_pet(void){ CLRWDT(); }
 /* noreturn: use the attribute spelling XC8 accepts, or omit */
-static void hw_force_wdt_reset(void){ INTCONbits.GIE = 0; for(;;){ } } // WDT (awake) resets ~32 ms
+static void hw_force_wdt_reset(void){ INTCONbits.GIE = 0; for(;;){ } } // WDT (awake) resets ~256 ms
 
 static void hw_mcu_init(void){
     OSCCON = /* IRCF = 0b111 -> 16 MHz; verify bit layout */;

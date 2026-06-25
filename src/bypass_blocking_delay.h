@@ -8,7 +8,7 @@
 
 // Blocking coil-pulse delay. AVR uses avr-libc's _delay_ms(); the PIC uses
 // XC8's __delay_ms() from <xc.h> (which needs _XTAL_FREQ, supplied via -D in
-// the PIC build). Model B keeps the WDT period (~32ms) longer than the 12ms
+// the PIC build). Model B keeps the WDT period (~256ms) longer than the 12ms
 // pulse, so a plain blocking delay is safe on both targets.
 //
 // platform agnostic blocking delay, millisecond precision

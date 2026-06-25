@@ -13,14 +13,14 @@
 //
 // Tick/WDT model "B" (see docs/phase2_pic_shell.md): a hardware timer (TMR2)
 // drives a ~1ms tick that is POLLED in the main loop (no sleep); the watchdog
-// is a pure FAULT watchdog at ~32ms, CLRWDT'd once per tick. There is no timer
+// is a pure FAULT watchdog at ~256ms, CLRWDT'd once per tick. There is no timer
 // ISR and no ISR/main handshake -- the single polled loop reaching CLRWDT is
 // itself the liveness proof.
 //
 // CONFIG / fuse rationale (PIC analogue of the AVR fuse table in the AVR shell):
 //   FOSC=INTOSC  internal 16MHz HFINTOSC (CLKIN pin function disabled)
 //   WDTE=ON      watchdog cannot be disabled by software (EMI/SEU resilience);
-//                period set to ~32ms via WDTCON.WDTPS at runtime
+//                period set to ~256ms via WDTCON.WDTPS at runtime
 //   PWRTE=ON     power-up timer: let the supply settle before code runs
 //   BOREN=ON     brown-out reset enabled
 //   BORV=HI      higher BOR trip point selected -- see the BOR note below
@@ -141,8 +141,8 @@ static void hw_wdt_pet(void) { CLRWDT(); }
 
 
 // core MCU bring-up: 16MHz HFINTOSC, all-digital port, the footswitch weak
-// pull-up, the global weak-pull-up enable, and the ~32ms watchdog period. Does
-// NOT start the tick timer (see hw_tick_timer_start()).
+// pull-up, the global weak-pull-up enable, and the ~256ms watchdog period.
+// Does NOT start the tick timer (see hw_tick_timer_start()).
 //
 // Ordering: call AFTER hw_init_output_pins() so the ANSELA/pull-up writes here
 // do not disturb the output-pin direction setup.
@@ -159,9 +159,13 @@ static void hw_mcu_init(void) {
     WPUA  |= (uint8_t)(1U << FOOTSW_PIN);
     OPTION_REGbits.nWPUEN = 0; // enable weak pull-ups globally (active-low)
 
-    // WDTE=ON (CONFIG) already runs the watchdog; set the period to ~32ms
-    // (WDTPS = 0b00101 = 1:1024 prescale on the ~31kHz LFINTOSC).
-    WDTCONbits.WDTPS = 0x05U;
+    // ~256ms (WDTPS = 0b01000 = 1:8192 on the ~31kHz LFINTOSC), mirroring the
+    // AVR shell's 250ms. The LFINTOSC has ±25% tolerance (datasheet OS09) and
+    // the WDT period is characterized at -37%/+69% (param 31), so worst-case
+    // it is still ~160ms -- comfortably > the ~14ms worst-case pet-to-pet
+    // window (1ms tick + 12ms relay coil pulse), unlike the prior 32ms (~1.4x
+    // margin).
+    WDTCONbits.WDTPS = 0x08U;
 }
 
 
