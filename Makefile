@@ -690,6 +690,24 @@ pic-test-gpsim: pic
 	@if ! command -v $(GPSIM) >/dev/null 2>&1; then \
 		echo "gpsim not installed; skipping PIC gpsim register-level test"; exit 0; \
 	fi; \
+	guard=0; \
+	for s in test/pic/run_gpsim_test.sh test/pic/run_gpsim_power_on_pressed.sh; do \
+		mode=`git ls-files --stage -- "$$s" | cut -d' ' -f1`; \
+		if [ "$$mode" != "100755" ]; then \
+			echo "ERROR: $$s is not mode 100755 in git (found '$$mode')."; \
+			echo "       CI checks out git's mode, so a non-exec script fails as"; \
+			echo "       '/bin/sh: ...: Permission denied'."; \
+			echo "       Fix: git update-index --chmod=+x $$s   (then commit)"; \
+			guard=1; \
+		elif [ ! -x "$$s" ]; then \
+			echo "ERROR: $$s is 100755 in git but lacks its local exec bit"; \
+			echo "       (e.g. a clone onto NFS that didn't honor the mode)."; \
+			echo "       CI is unaffected; this only blocks the local run."; \
+			echo "       Fix: chmod +x $$s"; \
+			guard=1; \
+		fi; \
+	done; \
+	[ $$guard -eq 0 ] || exit 1; \
 	fail=0; \
 	for v in $(VARIANTS); do \
 		case $$v in \
