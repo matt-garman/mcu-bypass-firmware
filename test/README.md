@@ -29,7 +29,10 @@ test/
            test_soak.c          long-duration soak    (make test-soak)
            test_fuses.c         fuse-byte validation  (make test-fuses)
 
-  pic/     PIC10F32x-specific tests (gpsim). Reserved; populated during PIC support.
+  pic/     PIC10F32x-specific tests (gpsim).
+           test_config_pic.c    CONFIG-word check     (make pic-test-config)
+           *.stc + run_gpsim_*  register-level gpsim  (make pic-test-gpsim)
+           test_soak_pic.cc     libgpsim soak         (make pic-test-soak)
 ```
 
 Build artifacts (compiled binaries, `*.bc`) are written next to their sources in

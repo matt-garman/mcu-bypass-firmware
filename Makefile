@@ -717,6 +717,55 @@ pic-test-gpsim: pic
 pic-test: pic-test-config pic-analyze pic-test-gpsim
 	@echo "=== all PIC10F322 pre-hardware checks complete ==="
 
+# --- PIC long-duration soak test (libgpsim) ----------------------------------
+# The PIC analogue of `test-soak`: drive the real built HEX in gpsim -- via
+# libgpsim, NOT the gpsim CLI -- for PIC_SOAK_DURATION_MS of simulated time and
+# assert WDT liveness + a periodic 2-press responsiveness round-trip. Failures
+# are non-fatal and logged; the run continues the full duration. The driver is
+# variant-agnostic (LED is RA0 on every variant). See test/pic/test_soak_pic.cc.
+#
+# STANDALONE -- deliberately NOT in `make test`/`pic-test`: it runs for minutes
+# and links libgpsim, which needs the gpsim-dev + libglib2.0-dev headers (CI may
+# lack them). Skips cleanly (exit 0) when the compiler, those headers, or the
+# built HEX are absent -- exactly as `pic-test-gpsim` skips without gpsim. Phony
+# + always recompiles so PIC_SOAK_* command-line overrides are always applied.
+#
+# Overrides: PIC_SOAK_VARIANT (cd4053/mute/relay), PIC_SOAK_DURATION_MS (default
+# 1 h; pass 86400000 for 24 h), PIC_SOAK_LIVENESS_INTERVAL_MS, PIC_SOAK_PROGRESS_INTERVAL_MS.
+PIC_SOAK_CXX         ?= c++
+PIC_SOAK_GPSIM_INC   ?= /usr/include/gpsim
+PIC_SOAK_VARIANT     ?= cd4053
+PIC_SOAK_DURATION_MS ?= 3600000
+PIC_SOAK_LIVENESS_INTERVAL_MS ?= 60000
+PIC_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
+PIC_SOAK_SRC = test/pic/test_soak_pic.cc
+PIC_SOAK_BIN = test/pic/test_soak_pic
+PIC_SOAK_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_SOAK_VARIANT)_$(PIC_TAG).hex
+.PHONY: pic-test-soak
+pic-test-soak: pic
+	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
+		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC soak"; exit 0; \
+	fi; \
+	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
+		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC soak (install gpsim-dev)"; exit 0; \
+	fi; \
+	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
+		echo "libglib2.0-dev not found; skipping PIC soak (install libglib2.0-dev)"; exit 0; \
+	fi; \
+	if [ ! -f "$(PIC_SOAK_HEX)" ]; then \
+		echo "no $(PIC_SOAK_HEX) (XC8 absent?); skipping PIC soak for variant $(PIC_SOAK_VARIANT)"; exit 0; \
+	fi; \
+	echo "--- PIC soak: variant=$(PIC_SOAK_VARIANT) proc=$(PIC_GPSIM_PROC) duration=$(PIC_SOAK_DURATION_MS) ms ---"; \
+	$(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
+		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
+		-DFW_PATH='"$(PIC_SOAK_HEX)"' -DPROC_NAME='"$(PIC_GPSIM_PROC)"' \
+		-DF_CPU_HZ=$(PIC_XTAL) \
+		-DSOAK_DURATION_MS=$(PIC_SOAK_DURATION_MS) \
+		-DSOAK_LIVENESS_INTERVAL_MS=$(PIC_SOAK_LIVENESS_INTERVAL_MS) \
+		-DSOAK_PROGRESS_INTERVAL_MS=$(PIC_SOAK_PROGRESS_INTERVAL_MS) \
+		$(PIC_SOAK_SRC) -o $(PIC_SOAK_BIN) -lgpsim; \
+	./$(PIC_SOAK_BIN)
+
 # --- PIC device programming (hardware) ---------------------------------------
 # Flash ONE built PIC variant (chosen by VARIANT, default $(VARIANT)) onto a real
 # PIC10F322. Unlike AVR fuses, the PIC CONFIG word is embedded IN the HEX by
@@ -774,7 +823,7 @@ clean:
 	rm -f $(foreach v,$(VARIANTS),test/avr/test_sim_$(v) test/avr/test_trace_$(v)) \
 		$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_sim_$(v)_t$(n))) \
 		$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_soak_$(v)_t$(n))) \
-		test/host/test_logic_host test/pic/test_config_pic \
+		test/host/test_logic_host test/pic/test_config_pic test/pic/test_soak_pic \
 		test/formal/test_model_check test/formal/test_symbolic test/avr/test_fuses \
 		test/formal/test_symbolic.bc \
 		test/stack_*.o test/stack_*.su \
@@ -1384,6 +1433,8 @@ help:
 	@echo "  pic-test-config build PIC HEX, then verify each CONFIG word vs design intent"
 	@echo "  pic-analyze     cppcheck + MISRA on the PIC shell (XC8/DFP headers; standalone)"
 	@echo "  pic-test-gpsim  drive the footswitch in gpsim, assert PORTA/LATA toggle"
+	@echo "  pic-test-soak   libgpsim soak: WDT liveness + responsiveness (standalone; needs"
+	@echo "                  gpsim-dev+libglib2.0-dev; PIC_SOAK_VARIANT, PIC_SOAK_DURATION_MS)"
 	@echo "  program-pic     flash one PIC variant to hardware (VARIANT=, PIC_PROG=pk2cmd|ipecmd)"
 	@echo "Test (each runs across ALL variants):"
 	@echo "  test            FAST full suite -- analyze, model, sim (all MCUs), coverage"
