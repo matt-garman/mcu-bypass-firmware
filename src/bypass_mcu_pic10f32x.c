@@ -129,10 +129,20 @@ static pin_state_t hw_read_footswitch(void) {
 }
 
 
-// non-zero IFF the footswitch weak pull-up is still enabled (its WPUA latch bit
-// is still asserted) -- the PIC analogue of the AVR PORTB-latch pull-up check.
+// non-zero IFF the footswitch weak pull-up is genuinely active. The PIC weak
+// pull-up has a TWO-part enable: the per-pin WPUA latch AND the global,
+// active-low OPTION_REG.nWPUEN. An SEU/EMI flip of EITHER silently disables the
+// pull-up, so both are checked. (The AVR analogue checks the single PORTB latch
+// bit that IS its pull-up enable; checking both here restores SEU-detection
+// parity under the project's cosmic-ray/EMI threat model.)
+//
+// The two volatile SFRs are read into locals first so the && combines two plain
+// (non-volatile) booleans: this keeps MISRA Rule 13.5 clean (no persistent side
+// effect on the right operand of &&), which the project does not deviate.
 static uint8_t hw_footswitch_pullup_intact(void) {
-    return (0U != (WPUA & (1U << FOOTSW_PIN)));
+    uint8_t pin_latched = (uint8_t)(WPUA & (1U << FOOTSW_PIN));
+    uint8_t wpu_global  = (uint8_t)OPTION_REGbits.nWPUEN; // 0 = enabled
+    return (0U != pin_latched) && (0U == wpu_global);
 }
 
 
@@ -236,6 +246,20 @@ static void init(void) {
     // would be wrong.
     static_assert(_XTAL_FREQ == 16000000UL, "_XTAL_FREQ must be 16 MHz (matches OSCCON IRCF)");
 
+
+    // Pet the WDT first thing, mirroring the AVR shell's "re-arm first". Unlike
+    // the AVR -- whose WDTCR collapses to the ~16ms minimum after a WDRF,
+    // creating a short post-reset reset-loop hazard -- the PIC has no such
+    // window: WDTE=ON runs the WDT from reset at its ~2s POR-default prescale
+    // (1:65536 on the 31kHz LFINTOSC; confirm WDTCON's reset value in
+    // DS40001585), which dwarfs init() + the <=12ms bypass pulse. hw_mcu_init()
+    // narrows the period to ~256ms afterward (WDTPS=0x08). This early pet is
+    // therefore belt-and-suspenders, not required -- it documents why no early
+    // arming is needed and costs one instruction.
+    hw_wdt_pet(); // i.e., CLRWDT()
+
+
+
     // driver: set pin directions FIRST (TRISA/ANSELA/LATA for the active variant)
     hw_init_output_pins();
 
@@ -313,7 +337,7 @@ void main(void) {
         }
 
         // pet the dog: completing the loop body proves main() is alive
-        hw_wdt_pet();
+        hw_wdt_pet(); // i.e. CLRWDT()
     }
 }
 

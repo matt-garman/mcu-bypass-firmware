@@ -72,10 +72,11 @@ echo "gpsim register-level test: $HEX (proc $PROC)"
 ib_porta=$(parse INIT_BYPASS porta);  ib_lata=$(parse INIT_BYPASS lata)
 p1_porta=$(parse PRESS1_LOW  porta)
 en_porta=$(parse ENGAGED     porta);  en_lata=$(parse ENGAGED     lata)
-ba_lata=$(parse BYPASS_AGAIN lata)
+ba_porta=$(parse BYPASS_AGAIN porta); ba_lata=$(parse BYPASS_AGAIN lata)
 
 # Guard: did gpsim actually produce all the snapshots?
-if [ -z "$ib_lata" ] || [ -z "$p1_porta" ] || [ -z "$en_lata" ] || [ -z "$ba_lata" ]; then
+if [ -z "$ib_lata" ] || [ -z "$p1_porta" ] || [ -z "$en_lata" ] || \
+   [ -z "$ba_lata" ] || [ -z "$ba_porta" ]; then
     echo "FAIL: could not parse gpsim snapshots (gpsim run incomplete). Output was:"
     printf '%s\n' "$out"
     exit 1
@@ -84,7 +85,7 @@ fi
 note "INIT_BYPASS"  "porta=$ib_porta lata=$ib_lata"
 note "PRESS1_LOW"   "porta=$p1_porta"
 note "ENGAGED"      "porta=$en_porta lata=$en_lata"
-note "BYPASS_AGAIN" "lata=$ba_lata"
+note "BYPASS_AGAIN" "porta=$ba_porta lata=$ba_lata"
 
 # --- assertions ---
 # 1. Power-on default is BYPASS: LED (RA0) off, footswitch (RA3) released.
@@ -107,7 +108,9 @@ if [ -n "$EXP_ENGAGED_LATA" ]; then
 fi
 
 # 4. A second momentary press toggles back to BYPASS (LED off) -> re-arm works.
-[ "$(bit "$ba_lata" 0x1)"  = 0 ] && pass "BYPASS_AGAIN: LED off (toggled back)" || fail "BYPASS_AGAIN: LED (RA0) should be off, lata=$ba_lata"
+#    By this checkpoint the switch has been released again, so RA3 reads high.
+[ "$(bit "$ba_lata" 0x1)"  = 0 ] && pass "BYPASS_AGAIN: LED off (toggled back)"        || fail "BYPASS_AGAIN: LED (RA0) should be off, lata=$ba_lata"
+[ "$(bit "$ba_porta" 0x8)" = 1 ] && pass "BYPASS_AGAIN: footswitch released (RA3=1)" || fail "BYPASS_AGAIN: RA3 should read released (high), porta=$ba_porta"
 
 if [ "$fails" -ne 0 ]; then
     echo "RESULT: $fails check(s) FAILED for $HEX"

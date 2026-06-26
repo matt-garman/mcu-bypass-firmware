@@ -676,7 +676,12 @@ pic-analyze-misra: src/bypass_mcu_pic10f32x.c $(PIC_HEADERS) $(MISRA_ADDON) $(MI
 # -> press toggles + latches ENGAGED -> second press toggles back to BYPASS.
 # This is the PIC shell's analogue of the AVR simavr suite (the PIC shell has no
 # simavr lock-step). Variant-agnostic stimulus (test/pic/footswitch_toggle.stc);
-# the expected ENGAGED control-pin pattern is passed per variant. Depends on
+# the expected ENGAGED control-pin pattern is passed per variant.
+#
+# A second scenario (test/pic/power_on_pressed.stc, via
+# run_gpsim_power_on_pressed.sh) covers the startup branch the toggle scenario
+# never hits: the footswitch HELD at power-on must come up BYPASS and must NOT
+# engage until a genuine release + fresh press. Both run per variant. Depends on
 # `pic` to build the HEX; skips cleanly when gpsim or the HEX is absent.
 .PHONY: pic-test-gpsim
 pic-test-gpsim: pic
@@ -697,6 +702,8 @@ pic-test-gpsim: pic
 		echo "--- gpsim register-level test: variant $$v ---"; \
 		GPSIM=$(GPSIM) PIC_GPSIM_PROC=$(PIC_GPSIM_PROC) \
 			test/pic/run_gpsim_test.sh $$hex $$el || fail=1; \
+		GPSIM=$(GPSIM) PIC_GPSIM_PROC=$(PIC_GPSIM_PROC) \
+			test/pic/run_gpsim_power_on_pressed.sh $$hex || fail=1; \
 	done; \
 	exit $$fail
 
