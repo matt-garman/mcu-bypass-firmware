@@ -452,6 +452,14 @@ already fully portable. The hardware shell, build system, programmer integration
 and simulation layer all need new PIC-specific implementations. Six sequential
 phases:
 
+**STATUS (2026-06-26):** Phases 1–4 and 6 were implemented for the **PIC10F322**
+on branch `pic10f32x_support` (see the "PIC branch meta-review" section above).
+The **PIC10F320 was subsequently determined NOT viable** — its 256-word flash is
+~100 words short for even the smallest variant under free-tier XC8, and no
+correctness-preserving size reduction closes the gap. Full measurements and
+rationale: `docs/pic10f320_feasibility.md`. The original six-phase plan below is
+retained for historical context.
+
 *Phase 0 — toolchain and simulator feasibility gate (completed: ~2 h).* gpsim
 0.32.1 (Ubuntu/Debian: `apt install gpsim`) has confirmed working support for
 both PIC10F320 and PIC10F322: both appear in the processor list, the device
@@ -504,11 +512,14 @@ equivalent of AVR fuse bytes) are embedded in the HEX file by XC8 via
 set `MCLRE` off (RA3 is the footswitch), enable brownout reset. Pin assignment
 for PIC10F322 (only four I/O: RA0–RA2 bidirectional, RA3 input-only / MCLR):
 the footswitch goes on the input-only RA3 (MCLR disabled), freeing RA0–RA2 as
-outputs. All three variants fit — the relay variant uses all four pins exactly
-(footswitch + LED + two coils, no spare); cd4053-simple and mute have room.
-PIC10F322 (512 words) is the recommended primary target; PIC10F320 (256 words)
-is tight for the relay variant. (Detailed Model-B plan — 1 ms tick from TMR2,
-WDT as a ~256 ms fault watchdog — in `docs/phase2_pic_shell.md`.)
+outputs. All three variants fit the PIC10F322's four I/O pins — the relay variant
+uses all four exactly (footswitch + LED + two coils, no spare); cd4053-simple and
+mute leave a spare pin. PIC10F322 (512 words) is the supported target; all three
+variants build at ≤75% of its flash. **The PIC10F320 (256 words) is NOT viable:
+measured under free-tier XC8 the smallest variant is 356 words — ~100 words (39%)
+over the 320's entire flash — and no correctness-preserving size reduction closes
+the gap (see `docs/pic10f320_feasibility.md`).** (Detailed Model-B plan — 1 ms
+tick from TMR2, WDT as a ~256 ms fault watchdog — in `docs/phase2_pic_shell.md`.)
 
 *Phase 3 — build system (~4–8 h).* Add XC8 toolchain variables to the Makefile:
 `PIC_CC = xc8-cc`, `--chip=10F322` device flag, output format flags. Add new
@@ -611,7 +622,7 @@ left to the implementer" is itself evidence of thoroughness.
 | Hardware-validation procedure doc               | 3    | 2–3 h     | High — primary-part WDT gap     |
 | KLEE in CI                                      | 3    | 2 h       | Nice-to-have                    |
 | tinyAVR 2-Series (ATtiny202) support            | 3    | 2–4 days  | Nice-to-have; simavr gap        |
-| PIC10F320/322 support                           | 3    | 2–4 weeks | Nice-to-have; gpsim confirmed   |
+| PIC10F322 support (shipped); PIC10F320 infeasible | 3  | —         | 322 done; 320 too small for free-tier XC8 — see docs/pic10f320_feasibility.md |
 | Manufacturing artifacts (name as scope)         | 4    | —         | Completeness signal             |
 
 (The five rows marked `done` above are the 2026-06-25 PIC branch meta-review

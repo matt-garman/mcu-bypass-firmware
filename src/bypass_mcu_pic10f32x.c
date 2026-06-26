@@ -173,10 +173,11 @@ static void hw_mcu_init(void) {
 
 
 // configure + start the 1ms tick on TMR2, polled (no interrupt). At FOSC=16MHz
-// the timer clock is FOSC/4 = 4MHz; prescale 1:16 -> 250kHz; PR2=249 -> (249+1)
-// counts = 1ms (the postscaler is fixed 1:1 on this device). MUST run AFTER any
-// blocking output actuation so a TMR2IF that set during init is not mistaken
-// for the first real tick.
+// the timer clock is FOSC/4 = 4MHz; the 1:16 PREscaler (T2CKPS) -> 250kHz, and
+// PR2=249 -> (249+1) = 250 counts = 1ms per period. The output POSTscaler
+// (T2OUTPS) is set to 1:1, so TMR2IF asserts on every PR2 match (once per 1ms),
+// not once per N matches. MUST run AFTER any blocking output actuation so a
+// TMR2IF that set during init is not mistaken for the first real tick.
 static void hw_tick_timer_start(void) {
     PR2   = 249U;        // 1ms period
     T2CON = 0x07U;       // T2CKPS = 0b11 (1:16 prescale), TMR2ON = 1
