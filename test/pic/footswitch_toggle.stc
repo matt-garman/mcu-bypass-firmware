@@ -35,7 +35,8 @@
 #
 # CHECKPOINTS (the wrapper keys on these exact === labels ===)
 #   INIT_BYPASS  @  90k : LATA bit0 == 0 (LED off), PORTA bit3 == 1 (released)
-#   PRESS1_LOW   @ 150k : PORTA bit3 == 0 (footswitch read as pressed)
+#   PRESS1_LOW   @ 150k : PORTA bit3 == 0 (pressed), LATA bit0 == 1 (LED latched
+#                         ENGAGED -- the effect toggled ON the press, not release)
 #   ENGAGED      @ 300k : LATA bit0 == 1 (LED on, latched), PORTA bit3 == 1
 #   BYPASS_AGAIN @ 800k : LATA bit0 == 0 (toggled back off)
 

@@ -36,6 +36,17 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJ_DIR="$(dirname "$SCRIPT_DIR")"
 
+# PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
+# the PIC-shell mutants and their toolchain probe below.
+FW_BASE="${FW_BASE:-bypass}"
+PIC_TAG="${PIC_TAG:-pic10f322}"
+GPSIM="${GPSIM:-gpsim}"
+PIC_SOAK_GPSIM_INC="${PIC_SOAK_GPSIM_INC:-/usr/include/gpsim}"
+# Short soak window for the WDT-liveness mutant: must exceed one gpsim WDT period
+# (~1.057s at WDTPS=0x08, per the soak's own note) so an un-pet dog actually
+# fires, while staying quick. The baseline (pet) run sees zero resets and passes.
+PIC_SOAK_MUT_MS="${PIC_SOAK_MUT_MS:-2500}"
+
 # Each entry: file<TAB>sed-expression<TAB>make-target<TAB>description
 # The sed expression uses '@' as delimiter to avoid clashing with C operators.
 MUTATIONS=(
@@ -87,13 +98,117 @@ copy_tree() {
     # added or renamed.
     cp "$PROJ_DIR"/test/*.h "$dst/test/"
     for sub in "$PROJ_DIR"/test/*/; do
+        local name; name="$(basename "$sub")"
+        # .c covers most substrates; .cc is the libgpsim PIC soak driver
+        # (test/pic/test_soak_pic.cc), which the WDT-liveness mutant compiles.
         if compgen -G "$sub"*.c >/dev/null 2>&1; then
-            local name; name="$(basename "$sub")"
-            mkdir -p "$dst/test/$name"
-            cp "$sub"*.c "$dst/test/$name/"
+            mkdir -p "$dst/test/$name"; cp "$sub"*.c "$dst/test/$name/"
+        fi
+        if compgen -G "$sub"*.cc >/dev/null 2>&1; then
+            mkdir -p "$dst/test/$name"; cp "$sub"*.cc "$dst/test/$name/"
         fi
     done
 }
+
+# Run one PIC gpsim register-level check against a freshly built (mutated) HEX.
+# We build + drive the wrapper DIRECTLY rather than via `make pic-test-gpsim`,
+# because that target has a git-mode guard on its wrapper scripts that cannot
+# pass inside a non-git mktemp sandbox; the wrapper itself has no such guard. The
+# cd4053 variant with its full ENGAGED LATA (0x3) exercises the LED (RA0), the
+# footswitch read (RA3) and a control pin (RA1) in one run -- enough to kill
+# every PIC gpsim mutant below. Returns nonzero (killed) on a build break or a
+# failed gpsim assertion.
+pic_gpsim_run() {
+    local work="$1"
+    make -C "$work" pic >/dev/null 2>&1 || return 1
+    local hex="$work/build_pic/${FW_BASE}_cd4053_${PIC_TAG}.hex"
+    [ -f "$hex" ] || return 1
+    GPSIM="$GPSIM" "$PROJ_DIR/test/pic/run_gpsim_test.sh" "$hex" 0x3 >/dev/null 2>&1
+}
+
+# Apply one mutation in a throwaway sandbox and run the mapped checker.
+#   $1 kind : make | picgpsim | picsoak
+#   $2 arg  : make target (kind=make); ignored otherwise
+#   $3 file ; $4 sed-expr ; $5 description
+# Updates the global idx/killed/survived/errored/SURVIVORS tallies.
+run_mutant() {
+    local kind="$1" arg="$2" file="$3" sed_expr="$4" desc="$5"
+    idx=$((idx + 1))
+
+    local work; work="$(mktemp -d)"
+    copy_tree "$work"
+
+    # Apply the mutation; confirm it actually changed the file.
+    if ! sed -i "$sed_expr" "$work/$file"; then
+        echo "[$idx] ERROR  applying sed to $file: $desc"
+        errored=$((errored + 1)); rm -rf "$work"; return
+    fi
+    if cmp -s "$work/$file" "$PROJ_DIR/$file"; then
+        echo "[$idx] ERROR  mutation did not change $file (pattern stale?): $desc"
+        errored=$((errored + 1)); rm -rf "$work"; return
+    fi
+
+    # Run the mapped checker. Killed == nonzero exit (a build OR a test failure
+    # both count as "the suite did not silently accept the fault").
+    local label rc
+    case "$kind" in
+        make)
+            label="$arg"
+            make -C "$work" $arg >/dev/null 2>&1; rc=$?
+            ;;
+        picgpsim)
+            label="pic-test-gpsim"
+            pic_gpsim_run "$work"; rc=$?
+            ;;
+        picsoak)
+            label="pic-test-soak"
+            make -C "$work" pic-test-soak \
+                PIC_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" PIC_SOAK_VARIANT=cd4053 \
+                >/dev/null 2>&1; rc=$?
+            ;;
+        *)
+            label="$kind"; rc=0
+            ;;
+    esac
+
+    if [ "$rc" -eq 0 ]; then
+        echo "[$idx] SURVIVED ($label): $desc"
+        survived=$((survived + 1))
+        SURVIVORS+=("$file: $desc")
+    else
+        echo "[$idx] killed   ($label): $desc"
+        killed=$((killed + 1))
+    fi
+    rm -rf "$work"
+}
+
+# --- PIC shell mutants (src/bypass_mcu_pic10f32x.c) ----------------------------
+# The PIC shell has no simavr lock-step, so these drive the real XC8-built HEX in
+# gpsim. They are GATED on the PIC toolchain being present AND the unmutated tree
+# genuinely PASSING (see the PIC toolchain probe below): gpsim/XC8/gpsim-dev
+# absence makes the targets skip (exit 0), which would otherwise read as a false
+# "survivor". gpsim's WDT calibration is wrong (~1.057s vs the silicon ~256ms)
+# and it does not model the analog BOR, so WDT-timing / BOR / tick-RATE mutants
+# are deliberately excluded; only faults observable as register state or a
+# qualitative WDT reset are included.
+#
+# Each entry: file<TAB>sed-expression<TAB>description. These are killed by the
+# four-checkpoint PORTA/LATA assertions in test/pic/run_gpsim_test.sh.
+PIC_GPSIM_MUTATIONS=(
+"src/bypass_mcu_pic10f32x.c	s@LATA |=  (uint8_t)(1U << LED_PIN)@LATA \&= (uint8_t)~(1U << LED_PIN)@	PIC set_engaged LED inverted (LATA RA0 stays dark); ENGAGED checkpoint catches it"
+"src/bypass_mcu_pic10f32x.c	s@LATA &= (uint8_t)~(1U << LED_PIN)@LATA |= (uint8_t)(1U << LED_PIN)@	PIC set_bypass LED clear inverted (RA0 stuck on); INIT/BYPASS_AGAIN checkpoints catch it"
+"src/bypass_mcu_pic10f32x.c	s@(0U == (PORTA & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (PORTA \& (uint8_t)(1U << FOOTSW_PIN)))@	PIC footswitch read polarity inverted (RA3 sense flipped -> toggles on release, not press); PRESS1 LED-on (toggle-on-press) checkpoint catches it"
+"src/bypass_mcu_pic10f32x.c	s@LATA |=  (uint8_t)(1U << pin)@LATA \&= (uint8_t)~(1U << pin)@	PIC control-pin drive inverted (LATA bit never set); ENGAGED full-LATA (0x3) check catches it"
+"src/bypass_mcu_pic10f32x.c	s@T2CON = 0x07U;@T2CON = 0x03U;@	PIC TMR2 tick disabled (TMR2ON = bit2 cleared); main loop hangs in hw_wait_for_tick -> never toggles"
+)
+
+# WDT-liveness mutant: gpsim's ~200ms functional run is too short to see an
+# un-pet WDT fire (period ~1.057s), so this is killed by the libgpsim soak (which
+# counts resets) over a short window > one WDT period. Gated additionally on
+# gpsim-dev + glib + a C++ compiler.
+PIC_SOAK_MUTATIONS=(
+"src/bypass_mcu_pic10f32x.c	s@{ CLRWDT(); }@{ (void)0; /* MUTANT: no WDT pet */ }@	PIC WDT pet (CLRWDT) removed; soak reset counter trips within ~1s of an un-pet WDT"
+)
 
 killed=0
 survived=0
@@ -115,37 +230,70 @@ fi
 rm -rf "$BASE_DIR"
 echo
 
-echo "=== mutation testing: ${#MUTATIONS[@]} mutants ==="
+echo "=== mutation testing: ${#MUTATIONS[@]} core/AVR mutants ==="
 idx=0
 for entry in "${MUTATIONS[@]}"; do
-    idx=$((idx + 1))
     IFS=$'\t' read -r file sed_expr target desc <<< "$entry"
-
-    work="$(mktemp -d)"
-    copy_tree "$work"
-
-    # Apply the mutation; confirm it actually changed the file.
-    if ! sed -i "$sed_expr" "$work/$file"; then
-        echo "[$idx] ERROR  applying sed to $file: $desc"
-        errored=$((errored + 1)); rm -rf "$work"; continue
-    fi
-    if cmp -s "$work/$file" "$PROJ_DIR/$file"; then
-        echo "[$idx] ERROR  mutation did not change $file (pattern stale?): $desc"
-        errored=$((errored + 1)); rm -rf "$work"; continue
-    fi
-
-    # Run the mapped target. Killed == nonzero exit (build or test failure
-    # both count as "the suite did not silently accept the fault").
-    if make -C "$work" "$target" >/dev/null 2>&1; then
-        echo "[$idx] SURVIVED ($target): $desc"
-        survived=$((survived + 1))
-        SURVIVORS+=("$file: $desc")
-    else
-        echo "[$idx] killed   ($target): $desc"
-        killed=$((killed + 1))
-    fi
-    rm -rf "$work"
+    run_mutant make "$target" "$file" "$sed_expr" "$desc"
 done
+
+# --- PIC toolchain probe ------------------------------------------------------
+# Enable the PIC-shell mutants only when the PIC tools are present AND the
+# UNMUTATED tree genuinely PASSES (a clean skip is NOT a pass). pic-test-gpsim /
+# pic-test-soak both exit 0 when their tools are absent, so without this gate an
+# unguarded PIC mutant would be a false "survivor" on any box lacking XC8/gpsim.
+PIC_GPSIM_OK=0
+PIC_SOAK_OK=0
+echo
+echo "=== PIC toolchain probe (gates the PIC-shell mutants) ==="
+PIC_BASE="$(mktemp -d)"
+copy_tree "$PIC_BASE"
+make -C "$PIC_BASE" pic >/dev/null 2>&1
+PIC_BASE_HEX="$PIC_BASE/build_pic/${FW_BASE}_cd4053_${PIC_TAG}.hex"
+if command -v "$GPSIM" >/dev/null 2>&1 && [ -f "$PIC_BASE_HEX" ]; then
+    if GPSIM="$GPSIM" "$PROJ_DIR/test/pic/run_gpsim_test.sh" \
+            "$PIC_BASE_HEX" 0x3 >/dev/null 2>&1; then
+        PIC_GPSIM_OK=1
+        echo "gpsim + XC8 present, baseline PASS -> PIC gpsim mutants ENABLED"
+        if command -v c++ >/dev/null 2>&1 \
+           && [ -f "$PIC_SOAK_GPSIM_INC/sim_context.h" ] \
+           && pkg-config --exists glib-2.0 2>/dev/null; then
+            if make -C "$PIC_BASE" pic-test-soak \
+                    PIC_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" \
+                    PIC_SOAK_VARIANT=cd4053 >/dev/null 2>&1; then
+                PIC_SOAK_OK=1
+                echo "gpsim-dev + glib + c++ present, soak baseline PASS -> WDT mutant ENABLED"
+            else
+                echo "soak baseline did not pass cleanly -> WDT (soak) mutant SKIPPED"
+            fi
+        else
+            echo "gpsim-dev/glib/c++ absent -> WDT (soak) mutant SKIPPED"
+        fi
+    else
+        echo "PIC gpsim baseline did not pass -> PIC-shell mutants SKIPPED"
+    fi
+else
+    echo "gpsim and/or XC8 absent -> PIC-shell mutants SKIPPED"
+fi
+rm -rf "$PIC_BASE"
+
+if [ "$PIC_GPSIM_OK" -eq 1 ]; then
+    echo
+    echo "=== ${#PIC_GPSIM_MUTATIONS[@]} PIC-shell mutants (gpsim register-level) ==="
+    for entry in "${PIC_GPSIM_MUTATIONS[@]}"; do
+        IFS=$'\t' read -r file sed_expr desc <<< "$entry"
+        run_mutant picgpsim "" "$file" "$sed_expr" "$desc"
+    done
+fi
+
+if [ "$PIC_SOAK_OK" -eq 1 ]; then
+    echo
+    echo "=== ${#PIC_SOAK_MUTATIONS[@]} PIC-shell mutant (WDT liveness, libgpsim soak ${PIC_SOAK_MUT_MS}ms) ==="
+    for entry in "${PIC_SOAK_MUTATIONS[@]}"; do
+        IFS=$'\t' read -r file sed_expr desc <<< "$entry"
+        run_mutant picsoak "" "$file" "$sed_expr" "$desc"
+    done
+fi
 
 echo
 echo "=== mutation summary: $killed killed, $survived survived, $errored errored ==="

@@ -70,12 +70,12 @@ echo "gpsim register-level test: $HEX (proc $PROC)"
 
 # Gather snapshots.
 ib_porta=$(parse INIT_BYPASS porta);  ib_lata=$(parse INIT_BYPASS lata)
-p1_porta=$(parse PRESS1_LOW  porta)
+p1_porta=$(parse PRESS1_LOW  porta); p1_lata=$(parse PRESS1_LOW lata)
 en_porta=$(parse ENGAGED     porta);  en_lata=$(parse ENGAGED     lata)
 ba_porta=$(parse BYPASS_AGAIN porta); ba_lata=$(parse BYPASS_AGAIN lata)
 
 # Guard: did gpsim actually produce all the snapshots?
-if [ -z "$ib_lata" ] || [ -z "$p1_porta" ] || [ -z "$en_lata" ] || \
+if [ -z "$ib_lata" ] || [ -z "$p1_porta" ] || [ -z "$p1_lata" ] || [ -z "$en_lata" ] || \
    [ -z "$ba_lata" ] || [ -z "$ba_porta" ]; then
     echo "FAIL: could not parse gpsim snapshots (gpsim run incomplete). Output was:"
     printf '%s\n' "$out"
@@ -83,7 +83,7 @@ if [ -z "$ib_lata" ] || [ -z "$p1_porta" ] || [ -z "$en_lata" ] || \
 fi
 
 note "INIT_BYPASS"  "porta=$ib_porta lata=$ib_lata"
-note "PRESS1_LOW"   "porta=$p1_porta"
+note "PRESS1_LOW"   "porta=$p1_porta lata=$p1_lata"
 note "ENGAGED"      "porta=$en_porta lata=$en_lata"
 note "BYPASS_AGAIN" "porta=$ba_porta lata=$ba_lata"
 
@@ -94,6 +94,15 @@ note "BYPASS_AGAIN" "porta=$ba_porta lata=$ba_lata"
 
 # 2. During press #1 the footswitch reads as pressed (RA3 low) -> input path works.
 [ "$(bit "$p1_porta" 0x8)" = 0 ] && pass "PRESS1: footswitch pressed (RA3=0)" || fail "PRESS1: RA3 should read pressed (low), porta=$p1_porta"
+
+# 2b. The effect must toggle ON the press: cyc 150k is well past the ~8 ms
+#     PRESSED_THRESH window, so a correct firmware has already latched ENGAGED
+#     (LED on) while the switch is still held. This distinguishes "toggle on
+#     press" (correct) from "toggle on release" -- e.g. an inverted footswitch
+#     read -- which the settled ENGAGED / BYPASS_AGAIN checkpoints alone CANNOT
+#     tell apart: the stimulus presses then releases, so both firmwares read
+#     ENGAGED by the time those later checkpoints sample.
+[ "$(bit "$p1_lata" 0x1)" = 1 ] && pass "PRESS1: LED on (toggled on the press)" || fail "PRESS1: LED (RA0) should be on mid-press (toggle-on-press), lata=$p1_lata"
 
 # 3. After the momentary press #1, the effect LATCHES ENGAGED (LED on) even
 #    though the footswitch is released again.
