@@ -42,6 +42,7 @@
 #include "bypass_pure.h"
 #include "bypass_hw_iface.h"
 #include "bypass_static_assert.h" // static_assert()
+#include "bypass_compile_checks.h"
 
 #include <xc.h> // device SFRs, CLRWDT(), __delay_ms()
 
@@ -59,14 +60,6 @@
 #pragma config LPBOR = OFF
 #pragma config BORV  = HI
 #pragma config WRT   = OFF
-
-
-// Upper bound for the uint8_t debounce counter, as an UNSIGNED constant. As
-// in the AVR shell, we deliberately do NOT use <stdint.h>'s UINT8_MAX: by C
-// integer-promotion rules it has type (signed) int, which mixes essential
-// type categories against our unsigned thresholds (MISRA 10.4) and trips
-// 12.1. A plain unsigned literal means the same thing.
-#define DEBOUNCE_COUNTER_MAX (255U)
 
 
 //////////////////////////////////////////////////////////////////////////////
@@ -217,17 +210,6 @@ static debounce_context_t ctx_;
 // high-level initialization
 // called at power-on, and after a reset (e.g. brown-out or watchdog timeout)
 static void init(void) {
-
-    // compile-time sanity checks -- zero runtime cost. The threshold invariants
-    // are MCU-neutral (identical to the AVR shell). The enum-size
-    // (-fshort-enums) asserts from the AVR shell are intentionally OMITTED: XC8
-    // has no -fshort-enums and sizes enums as int, which the shared,
-    // width-agnostic algorithm tolerates.
-    static_assert(RELEASE_THRESH < DEBOUNCE_COUNTER_MAX, "RELEASE_THRESH >= UINT8_MAX");
-    static_assert(RELEASE_THRESH > 0U,                   "RELEASE_THRESH <= 0");
-    static_assert(RELEASE_THRESH > PRESSED_THRESH,       "RELEASE_THRESH <= PRESSED_THRESH");
-    static_assert(PRESSED_THRESH < DEBOUNCE_COUNTER_MAX, "PRESSED_THRESH >= UINT8_MAX");
-    static_assert(PRESSED_THRESH > 0U,                   "PRESSED_THRESH <= 0");
 
     // pin-map sanity: the PIC pin map hard-codes PORTA bit positions as literals
     // (0U,1U,2U,3U). Pin them at compile time against the DFP's _PORTA_RAx_POSN

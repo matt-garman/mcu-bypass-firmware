@@ -42,24 +42,13 @@
 #include "bypass_pure.h"
 #include "bypass_hw_iface.h"
 #include "bypass_static_assert.h" // for static_assert()
+#include "bypass_compile_checks.h"
 
 #include <avr/io.h>        // Defines register and bit names
 #include <avr/wdt.h>       // watchdog timer: wdt_enable(), wdt_reset(), WDTO_* timeouts
 #include <avr/power.h>     // clock_prescale_set(), power_all_disable()
 #include <avr/sleep.h>     // sleep states
 #include <avr/interrupt.h> // ISR() interrupt service routine macro
-
-
-// Upper bound for values stored in the uint8_t debounce counter, as an
-// UNSIGNED constant. We deliberately do NOT use <stdint.h>'s UINT8_MAX: by C
-// integer-promotion rules a uint8_t promotes to (signed) int, so UINT8_MAX
-// itself has type int. Comparing it to our unsigned thresholds is an
-// essential-type-category mix (MISRA 10.4), and its expansion (0x7f*2+1) also
-// trips MISRA 12.1. A plain unsigned literal means the same thing and avoids
-// both -- see MISRA_COMPLIANCE.md.
-//
-// Loosely speaking: MISRA-C compliant UINT8_MAX
-#define DEBOUNCE_COUNTER_MAX (255U)
 
 
 //////////////////////////////////////////////////////////////////////////////
@@ -259,11 +248,6 @@ static void init(void) {
 
     // compile-time sanity checks
     // zero runtime cost - these are only evaluated at compile-time
-    static_assert(RELEASE_THRESH < DEBOUNCE_COUNTER_MAX,           "RELEASE_THRESH >= UINT8_MAX");
-    static_assert(RELEASE_THRESH > 0U,                             "RELEASE_THRESH <= 0");
-    static_assert(RELEASE_THRESH > PRESSED_THRESH,                 "RELEASE_THRESH <= PRESSED_THRESH");
-    static_assert(PRESSED_THRESH < DEBOUNCE_COUNTER_MAX,           "PRESSED_THRESH >= UINT8_MAX");
-    static_assert(PRESSED_THRESH > 0U,                             "PRESSED_THRESH <= 0");
     static_assert(1U == sizeof(effect_state_t),                    "sizeof(effect_state_t) != 1, use -fshort-enums");
     static_assert(1U == sizeof(program_state_t),                   "sizeof(program_state_t) != 1, use -fshort-enums");
     static_assert(1U == sizeof(timer_isr_called_t),                "sizeof(timer_isr_called_t) != 1, use -fshort-enums");
