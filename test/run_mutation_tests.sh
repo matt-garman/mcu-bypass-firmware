@@ -66,10 +66,10 @@ MUTATIONS=(
 # --- CD4053 simple output driver -----------------------------------------------
 "src/bypass_output_cd4053_simple.c	s@pin_set_high(CD4053_PIN)@pin_set_low(CD4053_PIN)@	test-sim-cd4053	engaged routes CD4053 the wrong way (PB2 stuck low); control-output test catches it"
 # --- TQ2 relay output driver ---------------------------------------------------
-"src/bypass_output_tq2_l2_5v_relay.c	s@_delay_ms(TQ2_L2_5V_PULSE_MS)@_delay_ms(1)@g	test-sim-relay	relay coil pulse shortened to 1ms (< 4ms datasheet min); pulse-width test catches it"
+"src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	test-sim-relay	relay coil pulse shortened to 1ms (< 4ms datasheet min); pulse-width test catches it"
 "src/bypass_output_tq2_l2_5v_relay.c	s@pin_set_high(RELAY_SET_PIN)@pin_set_high(RELAY_RESET_PIN)@	test-sim-relay	engage pulses the wrong (RESET) coil; relay test catches SET-not-pulsed / RESET-moved"
 # --- CD4053 with-mute output driver --------------------------------------------
-"src/bypass_output_cd4053_with_mute.c	s@_delay_ms(CD4053_MUTE_DELAY_MS)@_delay_ms(1)@g	test-sim-mute	mute settle window shortened to 1ms; mute-window timing test catches it"
+"src/bypass_output_cd4053_with_mute.c	s@BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS)@BYPASS_DELAY_MS(1)@g	test-sim-mute	mute settle window shortened to 1ms; mute-window timing test catches it"
 )
 
 # Files copied into each sandbox (all firmware sources + headers + harness +
