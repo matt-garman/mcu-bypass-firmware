@@ -1,5 +1,5 @@
 
-= Electric Guitar Effect Engage/Bypass Scheme using AVR Classic
+= Electric Guitar Effect Engage/Bypass Scheme Firmware for Microcontrollers
 
 
 == Why AVR Classic (ATtiny13a, ATtiny45, ATtiny85):
@@ -11,6 +11,12 @@
     * Low-ish power by use of CPU IDLE mode for typically <1mA current draw
     * Trivial hardware implementation
     * Schmitt trigger GPIO pins
+
+Note this project also supports the Microchip PIC10F322, which has _some_ of
+the same benefits as AVR Classic, but the tooling is decidedly less compelling.
+Compilation requires Microchip's XC8 compiler, which is not open source,
+although Microchip does offer a limited free version of this compiler.  The
+free tier XC8 restricts the options that are available.
 
 
 == High-Level Functional Description
