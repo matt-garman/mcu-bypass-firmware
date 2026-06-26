@@ -17,9 +17,7 @@ name: CI
 
 on:
   push:
-    # TEMP(pic-ci): pic10f32x_support added so plain pushes to the branch
-    # exercise the PIC gate while iterating; revert to `[main]` when done.
-    branches: [main, pic10f32x_support]
+    branches: [main]
   pull_request:
   workflow_dispatch:
   schedule:
