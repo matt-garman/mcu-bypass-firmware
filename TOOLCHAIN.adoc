@@ -56,6 +56,18 @@ its tool is absent, so the AVR workflow is unaffected if these are not installed
                 note: gpsim 0.32.1 DOES support the p10f322; its I/O pins are
                 named ra0..ra3 (lower-case) in stimulus/attach scripts.
 
+  libgpsim:     gpsim-dev + libglib2.0-dev  (Ubuntu packages)
+                Needed ONLY by `make pic-test-soak` -- the long-duration soak
+                (test/pic/test_soak_pic.cc) LINKS libgpsim instead of scripting
+                the gpsim CLI; the runtime `gpsim` package ships no headers.
+                install: apt install gpsim-dev libglib2.0-dev
+                note: gpsim-dev's headers `#include <glib.h>`, which is NOT
+                pulled in by gpsim-dev, so libglib2.0-dev must be installed
+                explicitly (parallel to the libelf-dev gotcha for simavr).
+                The build passes -isystem for the gpsim headers (they emit their
+                own -Woverloaded-virtual warnings).  `make pic-test-soak` skips
+                cleanly when either dev package or the XC8-built HEX is absent.
+
   cppcheck:     2.13.0  (the SAME binary as the AVR analysis, below)
                 `make pic-analyze` runs it with --platform=pic8-enhanced over the
                 real XC8 + DFP register headers.  No install beyond the XC8/DFP
@@ -129,6 +141,8 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
 
   Optional PIC10F32x port (`make pic` / `make pic-test`):
   sudo apt install gpsim          # the PIC simulator (apt)
+  # For the libgpsim soak (`make pic-test-soak`; standalone, run locally):
+  sudo apt install gpsim-dev libglib2.0-dev
   # XC8 V3.10 + the PIC10-12Fxxx_DFP pack are separate Microchip downloads
   # (see the PIC toolchain section above).  Without them, the pic* targets
   # skip cleanly and the AVR `make test` is unaffected.
