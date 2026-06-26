@@ -81,6 +81,50 @@ The pure debounce core is the biggest consumer — almost entirely because
 compiler materialises and copies. That observation motivated several of the
 ideas below.
 
+### Why no free/open toolchain substitutes for the PRO optimizer
+
+A natural follow-up: XC8 v3 has an LLVM/clang front-end, and LLVM is a powerful
+open optimizer — so can a free tool do the `-Os`-equivalent work and hand the
+result to XC8? **No.** The size-critical optimizations are PIC-architecture-specific
+*back-end* passes that live only in Microchip's proprietary, license-gated code
+generator, and there is no open substitute for them.
+
+- **No open 8-bit PIC backend exists.** Upstream LLVM/clang has AVR, MSP430, etc.
+  targets but **no 8-bit PIC target** (verified: `clang --print-targets` on the
+  clang installed here lists none). XC8's clang front-end lowers C to LLVM IR, then
+  hands that IR to Microchip's proprietary *Optimizing Code Generator* (OCG) for
+  PIC codegen — so clang cannot emit PIC10F32x assembly at all, optimized or not.
+- **The free tier already does the generic optimization.** The *IR-level mid-end*
+  passes (inlining, dead-code elimination, GVN — the portable `-O2` work) run for
+  free; that is exactly why the `always_inline` and packed-enum experiments below
+  change nothing. What the license gates are the *machine-level* OCG passes that
+  actually shrink 8-bit PIC code, and they are inherently PIC-specific:
+  - **compiled-stack overlay** — the PIC has no data stack, so locals are statically
+    overlaid via whole-program call-graph analysis;
+  - **bank/page minimization** — eliminating redundant `BANKSEL` / `MOVLP` / `PCLATH`;
+  - **procedural abstraction** — factoring repeated instruction sequences into shared
+    subroutines (a large win on this ISA).
+  A generic IR optimizer does not do these; they require a PIC-aware back end.
+- **"Optimize elsewhere, finalize in XC8" cannot be assembled.** Even setting aside
+  the missing backend, compiled-stack overlay is a *whole-program* decision, so XC8
+  must own the entire back end — you cannot hand its linker independently-optimized
+  objects and expect them to share the static-overlay/bank model. There is no
+  intermediate hand-off point where a foreign tool could insert optimized code.
+- **SDCC (the only open 8-bit-PIC compiler) is the wrong tool.** SDCC's `pic14`
+  port targets these parts, but (a) its PIC codegen lacks the optimizations above
+  and would almost certainly produce *larger* code than XC8's 356 words; (b) its
+  enhanced-mid-range (PIC10F32x) device support is experimental; and (c) it is a
+  separate ABI/runtime/CONFIG/intrinsic world, requiring a parallel toolchain *and*
+  a forked firmware shell for one nice-to-have part. Net: more code, less device
+  confidence, more maintenance — strictly worse.
+
+So the `-Os` "equivalent" is not a portable pass any compiler can run; it is
+architecture-specific back-end work that exists only in XC8 PRO. The remaining
+levers are a paid/eval PRO license (and even then the estimate fits only
+cd4053-simple, ~250 words, not mute/relay) or hand-written PIC assembly (which
+discards the C portability *and* the formal-verification/host-test story that is
+the project's entire value) — neither worth it for a nice-to-have target.
+
 ---
 
 ## 3. The size ideas that were considered — and why none close the gap
