@@ -759,6 +759,36 @@ PIC_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
 PIC_SOAK_SRC = test/pic/test_soak_pic.cc
 PIC_SOAK_BIN = test/pic/test_soak_pic
 PIC_SOAK_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_SOAK_VARIANT)_$(PIC_TAG).hex
+
+# Compile command for the PIC soak driver, factored into one variable so BOTH
+# the run target (pic-test-soak) and the build-only rule ($(PIC_SOAK_BIN) below)
+# share a single definition -- the PIC analogue of the AVR SOAK_COMPILE. FW_PATH
+# is baked as an ABSOLUTE path ($(CURDIR)/...) so the resulting binary does not
+# depend on the cwd it is launched from. That matters for the release pipeline:
+# scripts/make-release.sh builds one soak binary per variant and runs them in
+# parallel, each in its own working directory, so their gpsim.log files (gpsim
+# always drops one in the cwd) never collide. Running from repo root (as
+# pic-test-soak does) is unaffected -- an absolute FW_PATH resolves either way.
+PIC_SOAK_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
+		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
+		-DFW_PATH='"$(CURDIR)/$(PIC_SOAK_HEX)"' -DPROC_NAME='"$(PIC_GPSIM_PROC)"' \
+		-DF_CPU_HZ=$(PIC_XTAL) \
+		-DSOAK_DURATION_MS=$(PIC_SOAK_DURATION_MS) \
+		-DSOAK_LIVENESS_INTERVAL_MS=$(PIC_SOAK_LIVENESS_INTERVAL_MS) \
+		-DSOAK_PROGRESS_INTERVAL_MS=$(PIC_SOAK_PROGRESS_INTERVAL_MS) \
+		$(PIC_SOAK_SRC) -o $(PIC_SOAK_BIN) -lgpsim
+
+# Build-only convenience rule: compile the soak driver for the selected
+# PIC_SOAK_VARIANT to PIC_SOAK_BIN WITHOUT running it (the PIC analogue of the
+# AVR $(SOAK_BIN) build rule). Used by scripts/make-release.sh, which builds one
+# binary per variant under unique PIC_SOAK_BIN names and then runs them
+# concurrently. The HEX it embeds is produced by `make pic`, which the release
+# script runs first; like the AVR convenience rule it will not rebuild on a
+# PIC_SOAK_DURATION_MS change alone, so the release script always `make clean`s
+# before a fresh build.
+$(PIC_SOAK_BIN): $(PIC_SOAK_SRC)
+	$(PIC_SOAK_COMPILE)
+
 .PHONY: pic-test-soak
 pic-test-soak: pic
 	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
@@ -774,14 +804,7 @@ pic-test-soak: pic
 		echo "no $(PIC_SOAK_HEX) (XC8 absent?); skipping PIC soak for variant $(PIC_SOAK_VARIANT)"; exit 0; \
 	fi; \
 	echo "--- PIC soak: variant=$(PIC_SOAK_VARIANT) proc=$(PIC_GPSIM_PROC) duration=$(PIC_SOAK_DURATION_MS) ms ---"; \
-	$(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
-		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
-		-DFW_PATH='"$(PIC_SOAK_HEX)"' -DPROC_NAME='"$(PIC_GPSIM_PROC)"' \
-		-DF_CPU_HZ=$(PIC_XTAL) \
-		-DSOAK_DURATION_MS=$(PIC_SOAK_DURATION_MS) \
-		-DSOAK_LIVENESS_INTERVAL_MS=$(PIC_SOAK_LIVENESS_INTERVAL_MS) \
-		-DSOAK_PROGRESS_INTERVAL_MS=$(PIC_SOAK_PROGRESS_INTERVAL_MS) \
-		$(PIC_SOAK_SRC) -o $(PIC_SOAK_BIN) -lgpsim; \
+	$(PIC_SOAK_COMPILE); \
 	./$(PIC_SOAK_BIN)
 
 # --- PIC device programming (hardware) ---------------------------------------
@@ -1433,6 +1456,46 @@ coverage-clean:
 	find . -name '*.gcda' -o -name '*.gcno' | xargs rm -f
 
 # ============================================================================
+# INTROSPECTION -- expose one Makefile variable's value to scripts
+# ============================================================================
+# `make print-VARIANTS` echoes "$(VARIANTS)", `make print-LFUSE` echoes the fuse
+# byte, `make print-PIC_CC` echoes the XC8 path, and so on. scripts/make-release.sh
+# reads the release manifest's variant list, fuse bytes, device names and build
+# directories through this target so they come from THIS Makefile (the single
+# source of truth) rather than a hand-maintained copy that could silently drift.
+print-%:
+	@echo '$($*)'
+
+# ============================================================================
+# RELEASE -- reproducible, fully-validated prebuilt firmware images
+# ============================================================================
+# Thin wrapper around scripts/make-release.sh. The script is a deliberate,
+# long-running (~24 h, because of the parallel 24-h soaks) pre-tag gate that:
+#   1. refuses to run unless the working tree is clean and EVERY required tool
+#      is present (the inverse of the dev-time "skip cleanly" behaviour -- a
+#      release must never green-light on a tool that silently did nothing);
+#   2. clean-builds all AVR + PIC variant images;
+#   3. runs `make test-long` + `make pic-test` and ALL soak combos in parallel;
+#   4. stages release/<VERSION>/ with the .hex images, SHA256SUMS, a provenance
+#      MANIFEST (toolchain versions, per-image fuse bytes / CONFIG word, flashing
+#      command, soak evidence) and a README;
+#   5. STOPS and prints the exact `git add` / `git commit` / `git tag -s` and
+#      checksum-signing commands for you to run by hand (it never commits or tags).
+# The pushed tag then triggers .github/workflows/release.yml, which rebuilds from
+# the tag on a clean runner, verifies the committed image hashes reproduce
+# bit-for-bit, and publishes the GitHub Release.
+#
+#   make release VERSION=v1.0.0
+#   make release VERSION=v1.0.0 RELEASE_ARGS='--dry-run'   # skip the 24-h soak
+.PHONY: release
+release:
+	@if [ -z "$(VERSION)" ]; then \
+		echo "usage: make release VERSION=vX.Y.Z [RELEASE_ARGS='--dry-run']"; \
+		exit 2; \
+	fi
+	./scripts/make-release.sh $(RELEASE_ARGS) $(VERSION)
+
+# ============================================================================
 # HELP
 # ============================================================================
 
@@ -1486,6 +1549,9 @@ help:
 	@echo "  fuses / fuses<n>   write design fuse bytes (t13a / tinyx5)"
 	@echo "  flash / flash<n>   flash the selected variant's firmware"
 	@echo "  program / program<n>  fuses + flash (fresh chip)"
+	@echo "Release:"
+	@echo "  release         VERSION=vX.Y.Z: build+validate (incl. 24-h soak) + stage release/<ver>/"
+	@echo "                  (RELEASE_ARGS='--dry-run' skips the soak; see scripts/make-release.sh)"
 	@echo "Clean:"
 	@echo "  clean           remove build + test artifacts"
 	@echo "  clean-tests     remove only test binaries"

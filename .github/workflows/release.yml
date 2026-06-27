@@ -1,0 +1,164 @@
+name: Release
+
+# Publishes a firmware release when a vX.Y.Z tag is pushed.
+#
+# This is the PUBLIC ATTESTATION half of the release pipeline. The local
+# scripts/make-release.sh (run by the maintainer before tagging) does the heavy
+# validation -- the exhaustive suite plus the 24-hour parallel soaks that cannot
+# fit in a hosted runner's time limit -- and commits the prebuilt images under
+# release/<tag>/ with a SHA256SUMS manifest.
+#
+# When the tag lands here, this workflow:
+#   1. rebuilds every image from the TAGGED source on a clean, pinned runner;
+#   2. REPRODUCIBILITY GATE: asserts the freshly built images reproduce the
+#      committed SHA256SUMS byte-for-byte -- i.e. proves the committed binaries
+#      really are what the tagged source compiles to (fails the release if not);
+#   3. re-runs `make test-long` + `make pic-test` on the clean runner;
+#   4. publishes a GitHub Release with the images, SHA256SUMS(.asc) and MANIFEST.
+#
+# The runner is pinned to ubuntu-24.04 so the toolchain matches TOOLCHAIN.adoc;
+# byte-exact reproduction depends on that pin (esp. avr-gcc + binutils-avr).
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: write          # required to create the GitHub Release
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  # Pin to the versions in TOOLCHAIN.adoc; bump compiler + DFP together.
+  XC8_VERSION: "3.10"
+  DFP_VERSION: "1.9.189"
+  XC8_DIR: /opt/microchip/xc8/v3.10
+  XC8_DFP_ROOT: /opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189
+
+jobs:
+  release:
+    name: reproduce + publish ${{ github.ref_name }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate the committed release directory
+        id: rel
+        run: |
+          set -euo pipefail
+          tag='${{ github.ref_name }}'
+          dir="release/${tag}"
+          test -d "$dir"               || { echo "::error::no committed $dir/ -- run scripts/make-release.sh and commit it before tagging"; exit 1; }
+          test -f "$dir/SHA256SUMS"    || { echo "::error::$dir/SHA256SUMS missing"; exit 1; }
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+      # --- toolchains: AVR + host analyzers (apt) ---------------------------
+      - name: Install AVR + analysis toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            make gcc-avr avr-libc binutils-avr \
+            simavr libsimavr-dev libelf-dev \
+            clang clang-tidy cppcheck cbmc python3 unzip wget
+
+      # --- toolchain: XC8 + PIC10-12Fxxx DFP (Microchip downloads) ----------
+      - name: Install gpsim (apt)
+        run: sudo apt-get install -y gpsim
+
+      - name: Restore cached XC8 + DFP
+        id: cache-xc8
+        uses: actions/cache/restore@v4
+        with:
+          path: /opt/microchip
+          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}
+
+      - name: Install XC8 (free tier) + DFP
+        if: steps.cache-xc8.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          xc8_run="xc8-v${XC8_VERSION}-full-install-linux-x64-installer.run"
+          xc8_base="https://ww1.microchip.com/downloads/aemDocuments/documents"
+          xc8_base="${xc8_base}/DEV/ProductDocuments/SoftwareTools"
+          wget -q "${xc8_base}/${xc8_run}" -O /tmp/xc8.run
+          chmod +x /tmp/xc8.run
+          sudo /tmp/xc8.run --mode unattended --unattendedmodeui none \
+            --netservername '' --LicenseType FreeMode --prefix "${XC8_DIR}"
+          sudo mkdir -p "${XC8_DFP_ROOT}"
+          dfp_pack="Microchip.PIC10-12Fxxx_DFP.${DFP_VERSION}.atpack"
+          wget -q "https://packs.download.microchip.com/${dfp_pack}" -O /tmp/dfp.atpack
+          sudo unzip -q -o /tmp/dfp.atpack -d "${XC8_DFP_ROOT}"
+
+      - name: Assert PIC toolchain present (fail loud, do NOT skip)
+        run: |
+          test -x "${XC8_DIR}/bin/xc8-cc" || { echo "::error::XC8 missing"; exit 1; }
+          test -f "${XC8_DFP_ROOT}/xc8/pic/include/proc/pic10f322.h" || { echo "::error::DFP missing"; exit 1; }
+
+      - name: Save XC8 + DFP cache
+        if: steps.cache-xc8.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/microchip
+          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}
+
+      - name: Record toolchain versions
+        run: |
+          echo "== avr-gcc ==" && avr-gcc --version | head -1
+          echo "== binutils-avr ==" && avr-objcopy --version | head -1
+          echo "== xc8-cc ==" && "${XC8_DIR}/bin/xc8-cc" --version | head -2 || true
+          echo "== cppcheck ==" && cppcheck --version
+          echo "== cbmc ==" && cbmc --version
+
+      # --- rebuild from the tag --------------------------------------------
+      - name: Rebuild all images from the tagged source
+        run: |
+          make clean
+          make all13 all85 all45
+          make pic PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
+
+      # --- THE reproducibility gate ----------------------------------------
+      - name: Verify committed images reproduce bit-for-bit
+        run: |
+          set -euo pipefail
+          dir='${{ steps.rel.outputs.dir }}'
+
+          echo "== (a) committed images match committed SHA256SUMS =="
+          ( cd "$dir" && sha256sum -c SHA256SUMS )
+
+          echo "== (b) freshly built images match committed SHA256SUMS =="
+          fresh="$(mktemp -d)"
+          cp build_avr_classic/*.hex build_pic/*.hex "$fresh"/
+          # Run the committed checksum list against the FRESH bytes. A mismatch
+          # here means the committed binary is NOT what the tagged source builds.
+          ( cd "$fresh" && sha256sum -c "${GITHUB_WORKSPACE}/$dir/SHA256SUMS" )
+
+          # Belt-and-suspenders: every committed image was reproduced (count match).
+          n_committed=$(grep -c '\.hex$' "$dir/SHA256SUMS")
+          n_fresh=$(ls -1 "$fresh"/*.hex | wc -l)
+          echo "committed=$n_committed fresh=$n_fresh"
+          test "$n_committed" -le "$n_fresh" || { echo "::error::fewer fresh images than committed"; exit 1; }
+          echo "REPRODUCED: committed images are byte-identical to the tagged source build."
+
+      # --- re-run the gates on the clean runner -----------------------------
+      - name: Re-run make test-long
+        run: make test-long
+
+      - name: Re-run make pic-test
+        run: make pic-test PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
+
+      # --- publish ----------------------------------------------------------
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dir='${{ steps.rel.outputs.dir }}'
+          tag='${{ github.ref_name }}'
+          assets=( "$dir"/*.hex "$dir/SHA256SUMS" "$dir/MANIFEST.md" )
+          [ -f "$dir/SHA256SUMS.asc" ] && assets+=( "$dir/SHA256SUMS.asc" )
+          notes="$dir/MANIFEST.md"; [ -f "$notes" ] || notes=/dev/null
+          gh release create "$tag" \
+            --title "Firmware $tag" \
+            --notes-file "$notes" \
+            --verify-tag \
+            "${assets[@]}"

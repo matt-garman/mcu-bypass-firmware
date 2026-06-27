@@ -7,6 +7,11 @@
 build_avr_classic/
 build_pic/
 
+# ...EXCEPT the prebuilt release images, which ARE tracked: committing them is
+# the whole point of release/ (scripts/make-release.sh stages them there). The
+# global *.hex ignore above would otherwise silently drop them from `git add`.
+!release/**/*.hex
+
 # cppcheck addon artifacts (e.g. "make analyze-misra"); normally auto-cleaned,
 # but a cancelled run can leave them behind
 *.dump
