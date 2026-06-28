@@ -3,6 +3,8 @@
 
 [![CI](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml)
 
+**NOTE:** for PIC10F320 support, see the child project [pic10f320-bypass-firmware](https://github.com/matt-garman/pic10f320-bypass-firmware).  This project support PIC10F322 and AVR Classic.  This is the preferred project, unless the 10F320 is a hard requirement.
+
 The project contains firmware for two microcontroller families: the
 "AVR Classic" parts (ATtiny13a, ATtiny45, ATtiny85) and the Microchip
 PIC10F322.  A shared, hardware-independent debounce core and the
