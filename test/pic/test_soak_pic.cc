@@ -88,6 +88,18 @@ static NullBuf g_nullbuf;
 #ifndef SOAK_PROGRESS_INTERVAL_MS
 #  define SOAK_PROGRESS_INTERVAL_MS 3600000u
 #endif
+// Worst-case blocking output actuation (ms). A relay coil pulse / CD4053 mute
+// runs as a busy __delay_ms() in hw_set_*_state(), which freezes the POLLED PIC
+// main loop: the loop stops spinning, TMR2IF merely latches once, and up to this
+// many 1 ms debounce-integration TICKS are stolen from whichever window the
+// pulse overlaps. (The AVR integrates in its timer ISR, which keeps counting
+// through the block, so it is immune -- see the liveness-check note below.) The
+// Makefile passes the active variant's value (relay 12, mute 5, cd4053 0);
+// default to the relay's 12 ms -- the maximum -- so an unspecified build is held
+// long enough rather than under-held.
+#ifndef SOAK_ACTUATION_BLOCK_MS
+#  define SOAK_ACTUATION_BLOCK_MS 12u
+#endif
 // Safety cap: max run() resumes to cover one ms. A genuinely wedged core (PC
 // stuck, never reaching the cycle break) trips this instead of hanging forever.
 #define MAX_RESUMES_PER_MS 64
@@ -174,17 +186,29 @@ static void soak_run_ms(unsigned ms) {
     sample_led();   // track LED edges at each ms boundary
 }
 
-// ---- 2-press round-trip liveness check (ported 1:1 from test_soak.c) --------
+// ---- 2-press round-trip liveness check --------------------------------------
+// Each press/release is held for THRESH + SOAK_ACTUATION_BLOCK_MS + 10 ms. The
+// AVR soak (test_soak.c) holds only THRESH + 10 ms because its integrator runs
+// in the timer ISR and keeps counting through a blocking actuation. The PIC is
+// Model B (a polled main loop): a coil/mute pulse freezes sampling and steals up
+// to SOAK_ACTUATION_BLOCK_MS integration ticks from a window. With only +10 ms
+// of slack a relay pulse (12 ms) can leave the settle window short of
+// RELEASE_THRESH ticks, so the check would enter un-re-armed and waste a press
+// (observed as "toggles=1"). Sizing every window THRESH + block + slack models a
+// realistic minimum footswitch press on the polled core -- still far below any
+// human press (>=50 ms) -- and does NOT relax what the firmware must do.
+#define SOAK_PRESS_HOLD_MS    (PRESSED_THRESH + SOAK_ACTUATION_BLOCK_MS + 10u)
+#define SOAK_RELEASE_HOLD_MS  (RELEASE_THRESH + SOAK_ACTUATION_BLOCK_MS + 10u)
 static void soak_liveness_check(uint32_t sim_ms) {
     footsw_set(0);
-    soak_run_ms(RELEASE_THRESH + 10u);          // drain release-lockout
+    soak_run_ms(SOAK_RELEASE_HOLD_MS);          // settle: drain release-lockout
     guint64 before = g_led_changes;
     int led_start  = g_led_level;
 
-    footsw_set(1); soak_run_ms(PRESSED_THRESH + 10u);   // press 1
-    footsw_set(0); soak_run_ms(RELEASE_THRESH + 10u);
-    footsw_set(1); soak_run_ms(PRESSED_THRESH + 10u);   // press 2
-    footsw_set(0); soak_run_ms(RELEASE_THRESH + 10u);
+    footsw_set(1); soak_run_ms(SOAK_PRESS_HOLD_MS);     // press 1
+    footsw_set(0); soak_run_ms(SOAK_RELEASE_HOLD_MS);
+    footsw_set(1); soak_run_ms(SOAK_PRESS_HOLD_MS);     // press 2
+    footsw_set(0); soak_run_ms(SOAK_RELEASE_HOLD_MS);
 
     guint64 delta = g_led_changes - before;
     g_total_checks++;

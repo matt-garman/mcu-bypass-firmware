@@ -760,6 +760,16 @@ PIC_SOAK_SRC = test/pic/test_soak_pic.cc
 PIC_SOAK_BIN = test/pic/test_soak_pic
 PIC_SOAK_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_SOAK_VARIANT)_$(PIC_TAG).hex
 
+# Worst-case blocking output actuation (ms) per variant, passed to the soak as
+# -DSOAK_ACTUATION_BLOCK_MS. A relay coil pulse / CD4053 mute busy-blocks the
+# POLLED PIC main loop, stealing that many 1 ms debounce ticks from a window, so
+# the soak's liveness check must hold each press/release that much longer to stay
+# robust (see test/pic/test_soak_pic.cc). Mirror the driver headers'
+# TQ2_L2_5V_PULSE_MS (12) and CD4053_MUTE_DELAY_MS (5); cd4053-simple is 0.
+pic_soak_block_cd4053 = 0
+pic_soak_block_mute   = 5
+pic_soak_block_relay  = 12
+
 # Compile command for the PIC soak driver, factored into one variable so BOTH
 # the run target (pic-test-soak) and the build-only rule ($(PIC_SOAK_BIN) below)
 # share a single definition -- the PIC analogue of the AVR SOAK_COMPILE. FW_PATH
@@ -776,6 +786,7 @@ PIC_SOAK_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.
 		-DSOAK_DURATION_MS=$(PIC_SOAK_DURATION_MS) \
 		-DSOAK_LIVENESS_INTERVAL_MS=$(PIC_SOAK_LIVENESS_INTERVAL_MS) \
 		-DSOAK_PROGRESS_INTERVAL_MS=$(PIC_SOAK_PROGRESS_INTERVAL_MS) \
+		-DSOAK_ACTUATION_BLOCK_MS=$(pic_soak_block_$(PIC_SOAK_VARIANT))u \
 		$(PIC_SOAK_SRC) -o $(PIC_SOAK_BIN) -lgpsim
 
 # Build-only convenience rule: compile the soak driver for the selected
