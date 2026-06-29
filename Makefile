@@ -1564,6 +1564,7 @@ help:
 	@echo "Test (each runs across ALL variants):"
 	@echo "  test            FAST full suite -- analyze, model, sim (all MCUs), coverage"
 	@echo "  test-long       FULL exhaustive suite (minutes); alias: stress"
+	@echo "  scripts/ci-local.sh  reproduce the GitHub CI suite locally before pushing (--pr, --help)"
 	@echo "  test-host       golden-model algorithm tests (host, variant-agnostic)"
 	@echo "  test-model-check exhaustive state-space proof of invariants"
 	@echo "  test-symbolic   exhaustive single-step property proof of step()"
