@@ -4,6 +4,7 @@
 
 #include "bypass_output_cd4053_with_mute.h"
 #include "bypass_output_common.h"
+#include "bypass_output_x4053_polarity.h"
 #include "bypass_config.h"
 #include "bypass_hw_iface.h"
 #include "bypass_blocking_delay.h"
@@ -40,27 +41,27 @@ void hw_init_output_pins(void) {
 //          - immediately flips to bypass
 //
 void hw_set_bypass_state(void) {
-    hw_pin_set_high(CD4053_CTL1); // re-assert previous ENGAGED state
-    hw_pin_set_high(CD4053_CTL2);
+    hw_x4053_ctl_low(CD4053_CTL1); // re-assert previous ENGAGED state
+    hw_x4053_ctl_low(CD4053_CTL2);
 
     hw_led_pin_set_low(); // dark status LED
 
-    hw_pin_set_low(CD4053_CTL1); // MUTE
+    hw_x4053_ctl_high(CD4053_CTL1); // MUTE
     BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS); // busy sleep for pre-switch mute time
 
-    hw_pin_set_low(CD4053_CTL2); // un-mute in BYPASS state
+    hw_x4053_ctl_high(CD4053_CTL2); // un-mute in BYPASS state
 }
 
 void hw_set_engaged_state(void) {
-    hw_pin_set_low(CD4053_CTL1); // re-assert previous BYPASS state
-    hw_pin_set_low(CD4053_CTL2);
+    hw_x4053_ctl_high(CD4053_CTL1); // re-assert previous BYPASS state
+    hw_x4053_ctl_high(CD4053_CTL2);
 
     hw_led_pin_set_high(); // light status LED
 
-    hw_pin_set_high(CD4053_CTL2); // MUTE
+    hw_x4053_ctl_low(CD4053_CTL2); // MUTE
     BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS); // busy sleep for pre-switch mute time
 
-    hw_pin_set_high(CD4053_CTL1); // un-mute in ENGAGED state
+    hw_x4053_ctl_low(CD4053_CTL1); // un-mute in ENGAGED state
 }
 
 

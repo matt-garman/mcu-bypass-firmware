@@ -23,9 +23,13 @@
 //   PB0 = footswitch input : LOW = pressed, HIGH = released
 //   PB1 = status LED output: HIGH = engaged/lit, LOW = bypass/dark
 //   PB2/PB3 = control outputs, meaning depends on the selected variant:
-//     CD4053_SIMPLE    : PB2 = CD4053 ctrl (HIGH=engaged), PB3 unused (low)
+//     CD4053_SIMPLE    : PB2 = CD4053 ctrl, PB3 unused (low)
 //     CD4053_WITH_MUTE : PB2 = CTL1, PB3 = CTL2 (mute-before-switch)
 //     TQ2_L2_5V_RELAY  : PB2 = RESET coil, PB3 = SET coil (pulsed, then parked low)
+//   For the CD4053/TMUX4053 analog-switch variants the MCU *pin* level for a
+//   given effect state depends on the drive polarity (see X4053_CTL_FOR_STATE):
+//   the CD4053 build inverts through a MOSFET (MCU HIGH == switch sees LOW), the
+//   TMUX4053 build (BYPASS_X4053_DIRECT_DRIVE) drives the pin directly.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -81,6 +85,31 @@
 #else
 #  define CTL_DELAY_MS  0
 #endif
+
+// Expected MCU control-pin level for a given effect state, on the CD4053/
+// TMUX4053 analog-switch variants. The 4053 device sees the SAME logic level in
+// both builds (so the audio routing is identical); only the MCU drive polarity
+// differs:
+//   - CD4053 (MOSFET inverter, default): MCU pin == effect_state
+//       (ENGAGED -> 4053 sees LOW  -> MCU drives HIGH;
+//        BYPASS  -> 4053 sees HIGH -> MCU drives LOW)
+//   - TMUX4053 (BYPASS_X4053_DIRECT_DRIVE): MCU pin == !effect_state
+// (effect_state: 1 = ENGAGED, 0 = BYPASS. Not meaningful for the relay variant,
+// whose coil pins are pulsed and parked low regardless of polarity.)
+#if defined(BYPASS_X4053_DIRECT_DRIVE)
+#  define X4053_CTL_FOR_STATE(es)  (!(int)(es))
+#else
+#  define X4053_CTL_FOR_STATE(es)  ((int)(es))
+#endif
+
+// Cycle at which control line `ctl` last settled to its level for effect state
+// `es`. The mute-before-switch sequence (CD4053_WITH_MUTE) reaches the engaged/
+// bypass level via a rising edge on the CD4053 build and a falling edge on the
+// TMUX4053 direct-drive build; selecting the edge by the target level keeps the
+// mute-window timing measurement polarity-agnostic. (g_ctl_rise_cycle /
+// g_ctl_fall_cycle are defined below; this macro is only expanded after them.)
+#define X4053_CTL_EDGE_CYCLE(ctl, es) \
+    (X4053_CTL_FOR_STATE(es) ? g_ctl_rise_cycle[ctl] : g_ctl_fall_cycle[ctl])
 
 // Settle time after (re)loading firmware: enough for init() -- which on the
 // relay/mute variants performs one blocking coil/mute pulse before enabling the
@@ -434,9 +463,22 @@ static int sim_reset(int footsw_pressed_at_power_on) {
 static void test_power_on_default(void) {
     if (sim_reset(0) != 0) { g_failures++; return; }
     CHECK(g_led_level == 0, "power-on LED should be dark, got %d", g_led_level);
+#if defined(TQ2_L2_5V_RELAY)
     CHECK(g_ctl_level[CTL_PB2] == 0 && g_ctl_level[CTL_PB3] == 0,
-          "power-on control lines should be low, got PB2=%d PB3=%d",
+          "power-on relay coils should be parked low, got PB2=%d PB3=%d",
           g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3]);
+#elif defined(CD4053_WITH_MUTE)
+    // Both control lines at the BYPASS steady-state level (polarity-dependent).
+    CHECK(g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(0) &&
+          g_ctl_level[CTL_PB3] == X4053_CTL_FOR_STATE(0),
+          "power-on mute control lines wrong, got PB2=%d PB3=%d expected=%d",
+          g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3], X4053_CTL_FOR_STATE(0));
+#else // CD4053_SIMPLE
+    // PB2 at the BYPASS control level (polarity-dependent); PB3 unused (low).
+    CHECK(g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(0) && g_ctl_level[CTL_PB3] == 0,
+          "power-on CD4053 control wrong, got PB2=%d PB3=%d (expected PB2=%d PB3=0)",
+          g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3], X4053_CTL_FOR_STATE(0));
+#endif
 }
 
 // One clean press engages: LED lit, exactly one LED transition. (The control
@@ -787,10 +829,12 @@ static void test_toggle_parity_invariant(void) {
               "parity broken at i=%u: toggles=%u led=%d expected=%d",
               i, toggles, g_led_level, expect_lit);
 #if defined(CD4053_SIMPLE) || (!defined(CD4053_WITH_MUTE) && !defined(TQ2_L2_5V_RELAY))
-        // CD4053 simple: the control output (PB2) tracks the LED exactly (both
-        // reflect engaged/bypass). The mute/relay variants drive PB2/PB3
-        // differently (pulses), so this mirror invariant is simple-only.
-        CHECK(g_ctl_level[CTL_PB2] == g_led_level,
+        // CD4053 simple: the control output (PB2) tracks the effect state (which
+        // the LED also reflects), modulo drive polarity -- equal to the LED on
+        // the CD4053 build, inverted on the TMUX4053 direct-drive build. The
+        // mute/relay variants drive PB2/PB3 differently (pulses), so this mirror
+        // invariant is simple-only.
+        CHECK(g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(g_led_level),
               "CD4053 (PB2=%d) diverged from LED (PB1=%d) at i=%u",
               g_ctl_level[CTL_PB2], g_led_level, i);
 #endif
@@ -966,9 +1010,10 @@ static void test_lockstep_cosim(void) {
           "lock-step anchor: relay coils not parked at init (PB2=%d PB3=%d)",
           g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3]);
 #elif defined(CD4053_WITH_MUTE)
-    CHECK(g_ctl_level[CTL_PB2] == 0 && g_ctl_level[CTL_PB3] == 0,
-          "lock-step anchor: mute not in BYPASS steady state at init (PB2=%d PB3=%d)",
-          g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3]);
+    CHECK(g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(0) &&
+          g_ctl_level[CTL_PB3] == X4053_CTL_FOR_STATE(0),
+          "lock-step anchor: mute not in BYPASS steady state at init (PB2=%d PB3=%d expected=%d)",
+          g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3], X4053_CTL_FOR_STATE(0));
 #endif
 
     uint32_t rng = 0xC051A1EDu;
@@ -1016,8 +1061,8 @@ static void test_lockstep_cosim(void) {
                   "lock-step: LED (PB1=%d) disagrees with model effect_state=%u at tick %u",
                   g_led_level, m.effect_state, ticks);
 #if defined(CD4053_SIMPLE) || (!defined(CD4053_WITH_MUTE) && !defined(TQ2_L2_5V_RELAY))
-            // CD4053 simple only: PB2 also tracks effect state directly.
-            CHECK(g_ctl_level[CTL_PB2] == (int)m.effect_state,
+            // CD4053 simple only: PB2 tracks effect state (modulo drive polarity).
+            CHECK(g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(m.effect_state),
                   "lock-step: CD4053 (PB2=%d) disagrees with model effect_state=%u at tick %u",
                   g_ctl_level[CTL_PB2], m.effect_state, ticks);
 #elif defined(TQ2_L2_5V_RELAY)
@@ -1029,12 +1074,14 @@ static void test_lockstep_cosim(void) {
                   "lock-step relay: coils not parked at tick %u (PB2=%d PB3=%d)",
                   ticks, g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3]);
 #elif defined(CD4053_WITH_MUTE)
-            // Mute: both control lines equal effect_state in steady state
-            // (both low for BYPASS, both high for ENGAGED). ls_model_step()
-            // has already updated m.effect_state to the post-tick value, so
-            // this compares against the same state the firmware just settled into.
+            // Mute: both control lines equal the effect-state control level in
+            // steady state (polarity-dependent: both LOW for BYPASS / HIGH for
+            // ENGAGED on the CD4053 build, inverted on the TMUX4053 build).
+            // ls_model_step() has already updated m.effect_state to the
+            // post-tick value, so this compares against the same state the
+            // firmware just settled into.
             {
-                int expected_ctl = (int)m.effect_state;
+                int expected_ctl = X4053_CTL_FOR_STATE(m.effect_state);
                 CHECK(g_ctl_level[CTL_PB2] == expected_ctl &&
                       g_ctl_level[CTL_PB3] == expected_ctl,
                       "lock-step mute: control lines wrong at tick %u "
@@ -1829,20 +1876,23 @@ static void test_control_relay_pulse(void) {
 static void test_control_mute_sequence(void) {
     if (sim_reset(0) != 0) { g_failures++; return; }
 
-    // Power-on bypass steady state: both control lines low.
-    CHECK(g_ctl_level[CTL_PB2] == 0 && g_ctl_level[CTL_PB3] == 0,
-          "mute: bypass steady state both low (PB2=%d PB3=%d)",
-          g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3]);
+    // Power-on bypass steady state: both control lines at the BYPASS level
+    // (low on CD4053, high on TMUX4053 direct-drive).
+    CHECK(g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(0) &&
+          g_ctl_level[CTL_PB3] == X4053_CTL_FOR_STATE(0),
+          "mute: bypass steady state both at bypass level (PB2=%d PB3=%d expected=%d)",
+          g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3], X4053_CTL_FOR_STATE(0));
 
     // --- Engage: CTL2 (PB3) asserts mute first, CTL1 (PB2) un-mutes after the
-    //     settle delay. End state: both high. ---
+    //     settle delay. End state: both at the ENGAGED level. ---
     footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
     CHECK(g_led_level == 1, "mute: engage lights LED");
-    CHECK(g_ctl_level[CTL_PB2] == 1 && g_ctl_level[CTL_PB3] == 1,
-          "mute: engaged steady state both high (PB2=%d PB3=%d)",
-          g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3]);
+    CHECK(g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(1) &&
+          g_ctl_level[CTL_PB3] == X4053_CTL_FOR_STATE(1),
+          "mute: engaged steady state both at engaged level (PB2=%d PB3=%d expected=%d)",
+          g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3], X4053_CTL_FOR_STATE(1));
     double mute_engage_ms =
-        (double)(g_ctl_rise_cycle[CTL_PB2] - g_ctl_rise_cycle[CTL_PB3])
+        (double)(X4053_CTL_EDGE_CYCLE(CTL_PB2, 1) - X4053_CTL_EDGE_CYCLE(CTL_PB3, 1))
         / (double)CYCLES_PER_MS;
     printf("  mute window (engage): %.2f ms (design %d ms)\n",
            mute_engage_ms, CD4053_MUTE_DELAY_MS);
@@ -1852,14 +1902,15 @@ static void test_control_mute_sequence(void) {
           mute_engage_ms, CD4053_MUTE_DELAY_MS);
 
     // --- Bypass: CTL1 (PB2) asserts mute first, CTL2 (PB3) un-mutes after the
-    //     settle delay. End state: both low. ---
+    //     settle delay. End state: both at the BYPASS level. ---
     footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
     CHECK(g_led_level == 0, "mute: second press bypasses (LED dark)");
-    CHECK(g_ctl_level[CTL_PB2] == 0 && g_ctl_level[CTL_PB3] == 0,
-          "mute: bypass steady state both low (PB2=%d PB3=%d)",
-          g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3]);
+    CHECK(g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(0) &&
+          g_ctl_level[CTL_PB3] == X4053_CTL_FOR_STATE(0),
+          "mute: bypass steady state both at bypass level (PB2=%d PB3=%d expected=%d)",
+          g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3], X4053_CTL_FOR_STATE(0));
     double mute_bypass_ms =
-        (double)(g_ctl_fall_cycle[CTL_PB3] - g_ctl_fall_cycle[CTL_PB2])
+        (double)(X4053_CTL_EDGE_CYCLE(CTL_PB3, 0) - X4053_CTL_EDGE_CYCLE(CTL_PB2, 0))
         / (double)CYCLES_PER_MS;
     printf("  mute window (bypass): %.2f ms\n", mute_bypass_ms);
     CHECK(mute_bypass_ms >= (double)CD4053_MUTE_DELAY_MS - 1.0 &&
@@ -1869,18 +1920,19 @@ static void test_control_mute_sequence(void) {
 }
 
 #else // CD4053_SIMPLE (default)
-// Simple CD4053: a single control line (PB2) follows the effect state directly
-// -- high when engaged, low when bypassed, one edge per toggle. PB3 is an
-// unused output parked low and must never move.
+// Simple CD4053/TMUX4053: a single control line (PB2) follows the effect state,
+// one edge per toggle. The MCU pin tracks the LED on the CD4053 build and is
+// inverted on the TMUX4053 direct-drive build (see X4053_CTL_FOR_STATE); either
+// way the 4053 sees engaged/bypass. PB3 is an unused output parked low.
 static void test_control_cd4053_simple(void) {
     if (sim_reset(0) != 0) { g_failures++; return; }
 
-    CHECK(g_ctl_level[CTL_PB2] == 0, "cd4053: bypass -> control low");
+    CHECK(g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(0), "cd4053: bypass -> control at bypass level");
 
     uint32_t before = g_ctl_changes[CTL_PB2];
     footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
-    CHECK(g_led_level == 1 && g_ctl_level[CTL_PB2] == 1,
-          "cd4053: engage -> control high tracks LED (PB2=%d LED=%d)",
+    CHECK(g_led_level == 1 && g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(1),
+          "cd4053: engage -> control at engaged level (PB2=%d LED=%d)",
           g_ctl_level[CTL_PB2], g_led_level);
     CHECK((g_ctl_changes[CTL_PB2] - before) == 1,
           "cd4053: exactly one control edge on engage, got %u",
@@ -1888,8 +1940,8 @@ static void test_control_cd4053_simple(void) {
 
     before = g_ctl_changes[CTL_PB2];
     footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
-    CHECK(g_led_level == 0 && g_ctl_level[CTL_PB2] == 0,
-          "cd4053: bypass -> control low tracks LED (PB2=%d LED=%d)",
+    CHECK(g_led_level == 0 && g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(0),
+          "cd4053: bypass -> control at bypass level (PB2=%d LED=%d)",
           g_ctl_level[CTL_PB2], g_led_level);
     CHECK((g_ctl_changes[CTL_PB2] - before) == 1,
           "cd4053: exactly one control edge on bypass, got %u",

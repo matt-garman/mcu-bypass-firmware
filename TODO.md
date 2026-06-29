@@ -587,6 +587,50 @@ left to the implementer" is itself evidence of thoroughness.
 
 ---
 
+## Embedded provenance URL (firmware "comment" in flash)
+
+Idea: embed the project's GitHub URL as a string constant in the firmware so
+that someone who reads the image off an undocumented pedal's MCU and hex-dumps
+it can find the authoritative source/docs — the machine-code equivalent of a
+comment. Deferrable polish; not a bug.
+
+Key constraints (so it actually works for the read-off-the-chip scenario):
+
+- **Must land in a *programmed* (loadable) section**, i.e. end up in the `.hex`
+  that gets flashed — not a metadata-only ELF section (`.comment`, `.note`),
+  which exists only in the build-host `.elf` and is never written to silicon.
+  On AVR that means `PROGMEM` (flash, never copied to RAM); on PIC/XC8 a
+  program-memory `const`.
+- **Must survive dead-stripping.** The AVR link line uses
+  `-Wl,--gc-sections` (see `LDFLAGS`), so an unreferenced string is collected.
+  The clean modern fix `__attribute__((used, retain))` needs GCC 11+; our
+  toolchain is **avr-gcc 7.3.0**, where `retain` is unavailable and `used`
+  alone does NOT survive link-time gc. Robust approach: force a zero-cost
+  reference from `main`, e.g.
+  ```c
+  const char project_url[] PROGMEM = "github.com/matt-garman/mcu-bypass-firmware";
+  /* in main(): keep --gc-sections from dropping the string (emits no real code) */
+  __asm__ volatile("" :: "r" (project_url));
+  ```
+  For PIC, XC8 V3.10 places a `const char[]` in program memory; mark it
+  `__attribute__((used))`.
+- **Flash budget is the real constraint.** ATtiny13a is 1 KB with a 90% gate
+  (`FLASH_T13_BUDGET`); PIC10F322 is 512 words (`PIC_FLASH_WORDS`). A ~43-char
+  URL is ~44 bytes — meaningful on the t13, possibly fatal on the PIC. The
+  budget gates (`test-flash-budget`, the PIC build check) will catch overflow,
+  but plan to gate the string behind a macro (e.g. `BYPASS_EMBED_URL`) so only
+  parts with headroom carry it, and/or use a compact form (bare host/path, no
+  scheme). Consider a recognizable leading marker so it's greppable in a dump.
+- **Verify it reached flash** (not just the ELF):
+  ```
+  avr-objcopy -O binary build_avr_classic/bypass_relay_t85.elf - | strings | grep github
+  ```
+
+Effort: ~1–2 h incl. the `BYPASS_EMBED_URL` Makefile wiring + a `strings`-based
+build check. Firmware source edit is the user's.
+
+---
+
 ## Priority summary
 
 | Item                                            | Tier | Effort    | Impact                          |

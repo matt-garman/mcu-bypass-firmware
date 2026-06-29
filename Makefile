@@ -3,11 +3,18 @@
 ################################################################################
 #
 # WHAT THIS BUILDS
-#   A hardware-agnostic core (bypass_mcu_avr_classic.c) plus one of three interchangeable
-#   output drivers, selected at build time:
-#     - cd4053 : CD4053/TMUX4053 analog switch, single control line (CD4053_SIMPLE)
-#     - mute   : CD4053/TMUX4053 with mute-before-switch (CD4053_WITH_MUTE)
-#     - relay  : Panasonic TQ2-L2-5V latching relay, pulsed coils (TQ2_L2_5V_RELAY)
+#   A hardware-agnostic core (bypass_mcu_avr_classic.c) plus one interchangeable
+#   output driver, selected at build time:
+#     - cd4053      : CD4053 analog switch, single control line (CD4053_SIMPLE),
+#                     driven via a MOSFET inverter (MCU 5V, switch supply 9-18V)
+#     - cd4053_tmux : same driver source as cd4053 but direct-drive polarity for
+#                     the TMUX4053 (adds -DBYPASS_X4053_DIRECT_DRIVE)
+#     - mute        : CD4053 with mute-before-switch (CD4053_WITH_MUTE)
+#     - mute_tmux   : same driver source as mute but TMUX4053 direct-drive polarity
+#     - relay       : Panasonic TQ2-L2-5V latching relay, pulsed coils (TQ2_L2_5V_RELAY)
+#   The *_tmux variants differ from their base ONLY in the analog-switch control
+#   pin drive polarity (see src/bypass_output_x4053_polarity.h); they reuse the
+#   same driver .c so the switching logic can never drift between the two.
 #   Each variant is built for:
 #     - ATtiny13a @ 1.2 MHz : the primary part (distinct core).
 #     - tinyx5 family @ 1.0 MHz : ATtiny85 and ATtiny45 (and trivially the t25).
@@ -111,17 +118,29 @@ F_CPU_X5   = 1000000UL
 # macro the firmware/tests compile with and to its driver source file. To add a
 # variant: add its short name here and define macro_<name>/src_<name> below.
 CORE_SRC = src/bypass_mcu_avr_classic.c src/bypass_pure.c
-VARIANTS = cd4053 mute relay
+VARIANTS = cd4053 cd4053_tmux mute mute_tmux relay
 
 # variant short name -> firmware -D selector macro
-macro_cd4053 = CD4053_SIMPLE
-macro_mute   = CD4053_WITH_MUTE
-macro_relay  = TQ2_L2_5V_RELAY
+macro_cd4053      = CD4053_SIMPLE
+macro_cd4053_tmux = CD4053_SIMPLE
+macro_mute        = CD4053_WITH_MUTE
+macro_mute_tmux   = CD4053_WITH_MUTE
+macro_relay       = TQ2_L2_5V_RELAY
 
 # variant short name -> output driver source file
-src_cd4053 = src/bypass_output_cd4053_simple.c
-src_mute   = src/bypass_output_cd4053_with_mute.c
-src_relay  = src/bypass_output_tq2_l2_5v_relay.c
+src_cd4053      = src/bypass_output_cd4053_simple.c
+src_cd4053_tmux = src/bypass_output_cd4053_simple.c
+src_mute        = src/bypass_output_cd4053_with_mute.c
+src_mute_tmux   = src/bypass_output_cd4053_with_mute.c
+src_relay       = src/bypass_output_tq2_l2_5v_relay.c
+
+# variant short name -> EXTRA firmware -D flags (beyond macro_<v>). The *_tmux
+# variants build the SAME driver source as their base with the analog-switch
+# control pins driven directly (TMUX4053) instead of through a MOSFET inverter
+# (CD4053). Undefined for the base variants -> expands to empty. Appended at
+# every site that compiles firmware or a variant-aware host test.
+extra_cd4053_tmux = -DBYPASS_X4053_DIRECT_DRIVE
+extra_mute_tmux   = -DBYPASS_X4053_DIRECT_DRIVE
 
 # Headers shared by every firmware build; any change rebuilds all variants.
 FW_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
@@ -129,6 +148,7 @@ FW_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
              src/bypass_blocking_delay.h src/bypass_static_assert.h \
              src/bypass_compile_checks.h \
              src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
+             src/bypass_output_x4053_polarity.h \
              src/bypass_output_tq2_l2_5v_relay.h
 
 # VARIANT selects the single-target build for size/flash/trace/program actions.
@@ -268,8 +288,11 @@ ANALYZE_CMD        ?= $(CLANG_TIDY) --checks='$(CLANG_TIDY_CHECKS)' --warnings-a
 # Firmware translation units analyzed/linted by the `analyze` targets: the
 # hardware-agnostic core plus every variant's output driver. Each is analyzed
 # variant-agnostically (the core needs no selector; each driver includes its own
-# header directly).
-FW_SOURCES         = $(CORE_SRC) $(foreach v,$(VARIANTS),$(src_$(v)))
+# header directly). $(sort) de-duplicates: the *_tmux variants reuse their
+# base's driver .c, so the unique source set is what gets analyzed once each.
+# (cppcheck's own configuration analysis covers both polarity #if branches of
+# bypass_output_x4053_polarity.h.)
+FW_SOURCES         = $(sort $(CORE_SRC) $(foreach v,$(VARIANTS),$(src_$(v))))
 
 # cppcheck: a second, independent analyzer. Uses the AVR platform model and the
 # avr-libc include path so it sees the real register definitions.
@@ -415,7 +438,7 @@ $(AVR_BUILD_DIR):
 # $(call VARIANT_BUILD_T13,variant)
 define VARIANT_BUILD_T13
 $(AVR_FW)_$(1).elf: $$(CORE_SRC) $$(src_$(1)) $$(FW_HEADERS) $$(TOOLCHAIN_STAMP) | $$(AVR_BUILD_DIR)
-	$$(CC) $$(CFLAGS) -D$$(macro_$(1)) $$(LDFLAGS) -o $$@ $$(CORE_SRC) $$(src_$(1))
+	$$(CC) $$(CFLAGS) -D$$(macro_$(1)) $$(extra_$(1)) $$(LDFLAGS) -o $$@ $$(CORE_SRC) $$(src_$(1))
 
 $(AVR_FW)_$(1).hex: $(AVR_FW)_$(1).elf
 	$$(OBJCOPY) -O ihex -R .eeprom $$< $$@
@@ -426,7 +449,7 @@ $(foreach v,$(VARIANTS),$(eval $(call VARIANT_BUILD_T13,$(v))))
 define VARIANT_BUILD_X5
 $(AVR_FW)_$(1)_t$(2).elf: $$(CORE_SRC) $$(src_$(1)) $$(FW_HEADERS) $$(TOOLCHAIN_STAMP) | $$(AVR_BUILD_DIR)
 	$$(CC) -mmcu=$$(mmcu_$(2)) -DF_CPU=$$(F_CPU_X5) $$(CFLAGS_COMMON) -Wl,--gc-sections \
-		-D$$(macro_$(1)) -o $$@ $$(CORE_SRC) $$(src_$(1))
+		-D$$(macro_$(1)) $$(extra_$(1)) -o $$@ $$(CORE_SRC) $$(src_$(1))
 
 $(AVR_FW)_$(1)_t$(2).hex: $(AVR_FW)_$(1)_t$(2).elf
 	$$(OBJCOPY) -O ihex -R .eeprom $$< $$@
@@ -576,12 +599,14 @@ pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v)))
 	echo "=== PIC10F322 build + flash-budget ($(PIC_FLASH_WORDS) words) ==="; \
 	fail=0; \
 	for v in $(VARIANTS); do \
-		case $$v in \
+		base=$${v%_tmux}; pol=; \
+		[ "$$base" != "$$v" ] && pol=-DBYPASS_X4053_DIRECT_DRIVE; \
+		case $$base in \
 			*mute)  m=CD4053_WITH_MUTE; drv=src/bypass_output_cd4053_with_mute.c ;; \
 			*relay) m=TQ2_L2_5V_RELAY;  drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
 			*)      m=CD4053_SIMPLE;    drv=src/bypass_output_cd4053_simple.c ;; \
 		esac; \
-		out=`cd $(PIC_BUILD_DIR) && $(PIC_CC) $(PIC_CFLAGS) -D$$m \
+		out=`cd $(PIC_BUILD_DIR) && $(PIC_CC) $(PIC_CFLAGS) -D$$m $$pol \
 			$(addprefix $(CURDIR)/,$(PIC_CORE_SRC)) $(CURDIR)/$$drv \
 			-o $(FW_BASE)_$${v}_$(PIC_TAG).hex 2>&1` \
 			|| { printf '%s\n' "$$out"; echo "FAIL: variant $$v did not compile for PIC10F322"; fail=1; continue; }; \
@@ -678,7 +703,11 @@ pic-analyze-misra: src/bypass_mcu_pic10f32x.c $(PIC_HEADERS) $(MISRA_ADDON) $(MI
 # -> press toggles + latches ENGAGED -> second press toggles back to BYPASS.
 # This is the PIC shell's analogue of the AVR simavr suite (the PIC shell has no
 # simavr lock-step). Variant-agnostic stimulus (test/pic/footswitch_toggle.stc);
-# the expected ENGAGED control-pin pattern is passed per variant.
+# the expected ENGAGED full-LATA pattern is passed per variant (el). It is
+# polarity-dependent for the analog-switch variants: CD4053 drives the control
+# pins HIGH when engaged (cd4053=0x3, mute=0x7), while the TMUX4053 direct-drive
+# *_tmux variants drive them LOW, leaving only the LED bit set (el=0x1, same as
+# the relay, whose coils are parked low at the settled checkpoint).
 #
 # A second scenario (test/pic/power_on_pressed.stc, via
 # run_gpsim_power_on_pressed.sh) covers the startup branch the toggle scenario
@@ -711,6 +740,7 @@ pic-test-gpsim: pic
 	fail=0; \
 	for v in $(VARIANTS); do \
 		case $$v in \
+			*_tmux) el=0x1 ;; \
 			*mute)  el=0x7 ;; \
 			*relay) el=0x1 ;; \
 			*)      el=0x3 ;; \
@@ -748,7 +778,7 @@ pic-test: pic-test-config pic-analyze pic-test-gpsim
 # built HEX are absent -- exactly as `pic-test-gpsim` skips without gpsim. Phony
 # + always recompiles so PIC_SOAK_* command-line overrides are always applied.
 #
-# Overrides: PIC_SOAK_VARIANT (cd4053/mute/relay), PIC_SOAK_DURATION_MS (default
+# Overrides: PIC_SOAK_VARIANT (cd4053[_tmux]/mute[_tmux]/relay), PIC_SOAK_DURATION_MS (default
 # 1 h; pass 86400000 for 24 h), PIC_SOAK_LIVENESS_INTERVAL_MS, PIC_SOAK_PROGRESS_INTERVAL_MS.
 PIC_SOAK_CXX         ?= c++
 PIC_SOAK_GPSIM_INC   ?= /usr/include/gpsim
@@ -765,10 +795,13 @@ PIC_SOAK_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_SOAK_VARIANT)_$(PIC_TAG).hex
 # POLLED PIC main loop, stealing that many 1 ms debounce ticks from a window, so
 # the soak's liveness check must hold each press/release that much longer to stay
 # robust (see test/pic/test_soak_pic.cc). Mirror the driver headers'
-# TQ2_L2_5V_PULSE_MS (12) and CD4053_MUTE_DELAY_MS (5); cd4053-simple is 0.
-pic_soak_block_cd4053 = 0
-pic_soak_block_mute   = 5
-pic_soak_block_relay  = 12
+# TQ2_L2_5V_PULSE_MS (12) and CD4053_MUTE_DELAY_MS (5); cd4053-simple is 0. The
+# block time is polarity-independent, so each *_tmux variant matches its base.
+pic_soak_block_cd4053      = 0
+pic_soak_block_cd4053_tmux = 0
+pic_soak_block_mute        = 5
+pic_soak_block_mute_tmux   = 5
+pic_soak_block_relay       = 12
 
 # Compile command for the PIC soak driver, factored into one variable so BOTH
 # the run target (pic-test-soak) and the build-only rule ($(PIC_SOAK_BIN) below)
@@ -1169,12 +1202,12 @@ SIM_DEPS = test/avr/test_sim.c test/model_step.h test/bypass_config_host.h \
 # $(call VARIANT_SIM_T13,variant)
 define VARIANT_SIM_T13
 test/avr/test_sim_$(1): $$(SIM_DEPS) $(AVR_FW)_$(1).elf
-	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -Itest \
+	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) $$(extra_$(1)) -Itest \
 		-DFW_PATH=\"$(AVR_FW)_$(1).elf\" \
 		test/avr/test_sim.c $$(PURE_HOST_SRC) -o $$@ $$(SIM_LIBS)
 
 test/avr/test_trace_$(1): $$(SIM_DEPS) $(AVR_FW)_$(1).elf
-	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -DTRACE -Itest \
+	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) $$(extra_$(1)) -DTRACE -Itest \
 		-DFW_PATH=\"$(AVR_FW)_$(1).elf\" \
 		-DTRACE_VCD_PATH=\"$(AVR_BUILD_DIR)/bypass_trace.vcd\" \
 		test/avr/test_sim.c $$(PURE_HOST_SRC) -o $$@ $$(SIM_LIBS)
@@ -1189,7 +1222,7 @@ $(foreach v,$(VARIANTS),$(eval $(call VARIANT_SIM_T13,$(v))))
 # $(call VARIANT_SIM_X5,variant,chip-number)
 define VARIANT_SIM_X5
 test/avr/test_sim_$(1)_t$(2): $$(SIM_DEPS) $(AVR_FW)_$(1)_t$(2).elf
-	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -Itest \
+	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) $$(extra_$(1)) -Itest \
 		-DFW_PATH=\"$(AVR_FW)_$(1)_t$(2).elf\" \
 		-DMCU_NAME=\"$$(mmcu_$(2))\" \
 		-DF_CPU_HZ=$$(F_CPU_X5) \
@@ -1239,7 +1272,7 @@ test-mutation:
 # before hardware signoff or as a pre-release gate.
 #
 # Overrides (command line):
-#   SOAK_VARIANT=relay        variant to test (cd4053/mute/relay; default cd4053)
+#   SOAK_VARIANT=relay        variant to test (cd4053[_tmux]/mute[_tmux]/relay; default cd4053)
 #   SOAK_CHIP=45              tinyx5 chip number (85/45; default 85)
 #   SOAK_DURATION_MS=3600000  simulated duration in ms (default 86400000 = 24 h)
 #   SOAK_LIVENESS_INTERVAL_MS=10000   liveness-check interval (default 60000 ms)
@@ -1257,7 +1290,7 @@ SOAK_DEPS = test/avr/test_soak.c test/bypass_output_host.h test/bypass_config_ho
 SOAK_LIVENESS_INTERVAL_MS  ?= 60000
 SOAK_PROGRESS_INTERVAL_MS  ?= 3600000
 SOAK_COMPILE = $(HOSTCC) $(SIM_CFLAGS) $(PURE_HOST_CFLAGS) \
-	-D$(macro_$(SOAK_VARIANT)) \
+	-D$(macro_$(SOAK_VARIANT)) $(extra_$(SOAK_VARIANT)) \
 	-Itest \
 	-DFW_PATH=\"$(AVR_FW)_$(SOAK_VARIANT)_t$(SOAK_CHIP).elf\" \
 	-DMCU_NAME=\"$(mmcu_$(SOAK_CHIP))\" \
