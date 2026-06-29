@@ -96,6 +96,24 @@ adverse conditions:
       33 milliseconds between presses under ideal conditions; time
       between recognized repeated taps will be longer in noisy
       environments, or when using old switches, etc
+    * On the PIC10F32x port specifically: the footswitch loop is
+      polled (Model B, no timer interrupt), so while a blocking
+      output actuation runs - the relay coil pulse (12ms) or the
+      CD4053 mute (5ms), a busy delay inside the state change -
+      the loop pauses and the footswitch is not sampled.  The
+      debounce integrator counts loop ticks, so such a pulse can
+      "steal" up to its own duration in ticks from a press or
+      release.  A footswitch transition is therefore reliably
+      registered once it is held for PRESSED_THRESH (press) or
+      RELEASE_THRESH (release) plus the worst-case actuation
+      block: about 20ms for a press and 37ms for a release on the
+      relay variant.  A real footswitch press (>=50ms) clears this
+      comfortably.  The AVR Classic parts are unaffected - they
+      integrate in the timer ISR, which keeps sampling through the
+      blocking pulse.  The relay driver's compile-time assertion
+      (TQ2_L2_5V_PULSE_MS < RELEASE_THRESH) guarantees the
+      release/re-arm path is never missed; the press path is
+      covered by the hold figure above.
     * The design attempts to be EMI/RFI resilient; however, an
       old/low-quality/fouled-contact footswitch might be very
       "bouncy"; the design can't distinguish EMI/RFI noise from
