@@ -629,6 +629,89 @@ Key constraints (so it actually works for the read-off-the-chip scenario):
 Effort: ~1–2 h incl. the `BYPASS_EMBED_URL` Makefile wiring + a `strings`-based
 build check. Firmware source edit is the user's.
 
+### Considerations for PIC10F320 (child project, 2026-06-30)
+
+Context: the spun-out child project `pic10f320-bypass-firmware` ships five
+variants at v0.9.1 (cd4053-simple, tmux4053-simple, cd4053-mute, tmux4053-mute,
+tq2-relay), all inside the 256-word flash. This note records whether the
+provenance-URL idea above is feasible *there* — the most flash-constrained
+target — and a flash-compression opportunity found while investigating. All
+word counts below were **measured** by rebuilding the child firmware with its
+exact flags (free-tier XC8 v3.10, `-O2`, PIC10-12Fxxx DFP 1.9.189); nothing here
+is estimated. **Firmware source edits are the user's; the build/Makefile wiring
+is fair game.**
+
+**Does the full URL fit today? No — not in any variant.** The PIC10F320 has only
+256 words of 14-bit program flash, and that is the only place a flash "comment"
+can live (no EEPROM, no separate data flash). On a 14-bit core you cannot pack
+two 8-bit characters into one word, so embedding readable ASCII costs **one
+program word per character** (whether `retlw 0xNN` or a `dw`). The canonical URL
+`https://github.com/matt-garman/pic10f320-bypass-firmware/` is **57 chars → 57
+words**. Current v0.9.1 footprint and free space:
+
+| Variant                  | Used | Free (of 256) | Fits 57-word URL? |
+|--------------------------|------|---------------|-------------------|
+| cd4053-simple / tmux     | 208  | 48            | No (9 short)      |
+| tq2-relay                | 233  | 23            | No                |
+| cd4053-mute / tmux       | 238  | 18            | No                |
+
+So today, only a **short form** works: ≤18 chars fits every variant (even the
+mute pair), and a bare repo slug `matt-garman/pic10f320-bypass-firmware` (37)
+fits the simple variants. A third-party shortener (bit.ly etc.) trivially fits
+≤18 but trades a space problem for a provenance-rot one (the link dies if the
+service does); a self-contained slug avoids that.
+
+**Flash-compression opportunity (the more interesting finding).** Because the
+child is on **free-tier XC8**, `-O2` is largely inert and `-Os` is paid-only:
+the compiler does **no inlining and no cross-call constant propagation**. The
+dominant consequence, visible in the generated `.s`: `hw_pin_set_high(uint8_t
+pin)` / `hw_pin_set_low(uint8_t pin)` take the pin as a **runtime argument**, so
+XC8 emits a general **variable-shift loop** (`1U << pin` computed at runtime,
+~12 words of body each) plus call/arg-passing overhead — even though *every*
+caller passes a compile-time constant (`CD4053_PIN`, `RELAY_SET_PIN`, …). The
+LED helpers, which bake in a constant bit, already collapse to a single
+`bsf`/`bcf`. Letting the constant reach the bit op — converting the four trivial
+helpers (`hw_pin_set_high/low` + `hw_led_pin_set_high/low`) to **function-like
+macros** — measured (baseline reproduced exactly, build warning-free, shift
+loops confirmed gone in the `.s`):
+
+| Variant              | Baseline | + macroize 4 helpers | Free after |
+|----------------------|----------|----------------------|------------|
+| cd4053-simple / tmux | 208      | **176**              | **80**     |
+| cd4053-mute / tmux   | 238      | **203**              | **53**     |
+| tq2-relay            | 233      | **200**              | **56**     |
+
+That is **−32 to −35 words (~13–15%)** — roughly doubles the headroom, the same
+*class* of structural win as inlining the debounce core. After it, the full
+57-word URL fits **cd4053-simple** outright (23 to spare) and is only 1–4 words
+short on the others, so a trivial trim (drop `https://` → 48 chars) fits the full
+repo URL into **every** variant with no shortener.
+
+Caveats / boundaries:
+- **Do NOT macroize `hw_read_footswitch()`** — measured **+8 words** (it is
+  called twice, so inlining the ternary duplicates branch logic that was cheaper
+  as a shared call). Keep it a function.
+- **Behaviorally identical by construction**: the same `LATA` bit is set/cleared
+  for the same pin in the same order, `LATA` is the only externally visible
+  output, and relay/mute `__delay_ms` timing is untouched. No multiple-evaluation
+  hazard because every macro argument is a side-effect-free compile-time
+  constant. It still must be re-validated through the child's
+  equivalence/gpsim/soak suite — a re-run, not a redesign.
+- **MISRA**: function-like macros touch Dir 4.9 (Advisory — "prefer a
+  function"); Rule 20.7 (parenthesization, Required) is satisfied. Note the
+  child's `hw_x4053_ctl_high/low` are *already* function-like macros, so this
+  extends an existing pattern. MISRA-purist alternative: replace the one
+  parametric helper with **per-pin constant-bit functions** (like
+  `hw_led_pin_set_high`) — recovers the ~24-word shift-loop bulk while staying
+  real functions, at ~1 word/site of call overhead.
+
+Effort: helper change is a ~4-line source swap (user) + optional Makefile
+provenance-string block and word-budget assertion. Impact: Medium — frees enough
+flash to make the embedded-URL feature viable on the child's tightest variants,
+and is independently worthwhile headroom. Reference: child repo
+`pic10f320-bypass-firmware`, `bypass_mcu_pic10f320.c` helpers at
+`hw_led_pin_set_*` / `hw_pin_set_*`.
+
 ---
 
 ## Priority summary
