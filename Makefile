@@ -851,6 +851,54 @@ pic-test-soak: pic
 	$(PIC_SOAK_COMPILE); \
 	./$(PIC_SOAK_BIN)
 
+# --- PIC critical-SFR fault-injection test (libgpsim) ------------------------
+# Corrupt each critical config SFR (OSCCON/WDTCON/PR2/T2CON) in the running HEX
+# and assert the per-tick gate (hw_critical_sfrs_intact) forces a WDT reset --
+# the PIC analogue of the AVR simavr inject_config_sfr tests (test/avr/test_sim.c)
+# and the mirror image of pic-test-soak (a reset is the expected PASS here, a
+# FAILURE there). See test/pic/test_fault_pic.cc.
+#
+# STANDALONE -- like pic-test-soak it links libgpsim (needs gpsim-dev +
+# libglib2.0-dev) and is deliberately NOT in `make test`/`pic-test`, whose PIC
+# leg (pic-test-gpsim) needs only the gpsim CLI. Skips cleanly when the compiler,
+# those headers, or the built HEX are absent. The gate is variant-agnostic (all
+# three output shells share main()'s gate), so PIC_FAULT_VARIANT only selects the
+# HEX. Reuses the soak's toolchain settings (PIC_SOAK_CXX, PIC_SOAK_GPSIM_INC).
+PIC_FAULT_VARIANT ?= cd4053
+PIC_FAULT_SRC = test/pic/test_fault_pic.cc
+PIC_FAULT_BIN = test/pic/test_fault_pic
+PIC_FAULT_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_FAULT_VARIANT)_$(PIC_TAG).hex
+
+# FW_PATH baked as an ABSOLUTE path so the binary is cwd-independent (parity with
+# the soak). Phony run rule always recompiles so a PIC_FAULT_VARIANT override is
+# always applied; the build-only $(PIC_FAULT_BIN) rule is the release-parity hook.
+PIC_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
+		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
+		-DFW_PATH='"$(CURDIR)/$(PIC_FAULT_HEX)"' -DPROC_NAME='"$(PIC_GPSIM_PROC)"' \
+		-DF_CPU_HZ=$(PIC_XTAL) \
+		$(PIC_FAULT_SRC) -o $(PIC_FAULT_BIN) -lgpsim
+
+$(PIC_FAULT_BIN): $(PIC_FAULT_SRC)
+	$(PIC_FAULT_COMPILE)
+
+.PHONY: pic-test-fault
+pic-test-fault: pic
+	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
+		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC fault-inject"; exit 0; \
+	fi; \
+	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
+		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC fault-inject (install gpsim-dev)"; exit 0; \
+	fi; \
+	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
+		echo "libglib2.0-dev not found; skipping PIC fault-inject (install libglib2.0-dev)"; exit 0; \
+	fi; \
+	if [ ! -f "$(PIC_FAULT_HEX)" ]; then \
+		echo "no $(PIC_FAULT_HEX) (XC8 absent?); skipping PIC fault-inject for variant $(PIC_FAULT_VARIANT)"; exit 0; \
+	fi; \
+	echo "--- PIC fault-inject: variant=$(PIC_FAULT_VARIANT) proc=$(PIC_GPSIM_PROC) ---"; \
+	$(PIC_FAULT_COMPILE); \
+	./$(PIC_FAULT_BIN)
+
 # --- PIC device programming (hardware) ---------------------------------------
 # Flash ONE built PIC variant (chosen by VARIANT, default $(VARIANT)) onto a real
 # PIC10F322. Unlike AVR fuses, the PIC CONFIG word is embedded IN the HEX by
@@ -909,6 +957,7 @@ clean:
 		$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_sim_$(v)_t$(n))) \
 		$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_soak_$(v)_t$(n))) \
 		test/host/test_logic_host test/pic/test_config_pic test/pic/test_soak_pic \
+		test/pic/test_fault_pic \
 		test/formal/test_model_check test/formal/test_symbolic test/avr/test_fuses \
 		test/formal/test_symbolic.bc \
 		test/stack_*.o test/stack_*.su \
@@ -1560,6 +1609,8 @@ help:
 	@echo "  pic-test-gpsim  drive the footswitch in gpsim, assert PORTA/LATA toggle"
 	@echo "  pic-test-soak   libgpsim soak: WDT liveness + responsiveness (standalone; needs"
 	@echo "                  gpsim-dev+libglib2.0-dev; PIC_SOAK_VARIANT, PIC_SOAK_DURATION_MS)"
+	@echo "  pic-test-fault  libgpsim fault-inject: corrupt a critical SFR, assert the gate"
+	@echo "                  forces a WDT reset (standalone; needs gpsim-dev; PIC_FAULT_VARIANT)"
 	@echo "  program-pic     flash one PIC variant to hardware (VARIANT=, PIC_PROG=pk2cmd|ipecmd)"
 	@echo "Test (each runs across ALL variants):"
 	@echo "  test            FAST full suite -- analyze, model, sim (all MCUs), coverage"
