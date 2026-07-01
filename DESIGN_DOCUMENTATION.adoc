@@ -326,7 +326,7 @@ PCB space, the TVS diode and ferrite bead can be omitted.
     * TMUX4053 surface-mount only
     * TMUX4053 can use lower-voltage logic true (e.g. CMOS, TTL)
     * CD4053 needs logic true to be at VDD
-    * VDD will be effect volate 9-18v
+    * VDD will be effect voltage (typically 9-18v)
     * Control from MCU running at 5v: can't be used directly on
       CD4053
     * Control switches held high via pullup resistor to VDD
@@ -336,7 +336,7 @@ PCB space, the TVS diode and ferrite bead can be omitted.
     * Mosfet scheme not needed for TMUX4053, but retained for
       schematic/wiring consistency across parts
 
-=== Simple Scheme: No Explicit Muting
+=== Simple Scheme: No Explicit Muting: CD4053 w/inverting MOSFET
 
  Switch A not used
 
@@ -352,7 +352,7 @@ PCB space, the TVS diode and ferrite bead can be omitted.
  MCU = MCU signal to mosfet gate
 
 
-.Table Simple Scheme: Truth Table
+.Table CD4053 Simple Scheme: Truth Table
 |===
 | MCU | CTL | BCOM | JOU | CCOM | INP | FXN      | FXO      | program state 
 
@@ -360,8 +360,33 @@ PCB space, the TVS diode and ferrite bead can be omitted.
 | 1   | 0   | B0   | FXO | C0   | FXN | INP      | JOU      | ENGAGE
 |===
 
+=== Simple Scheme: No Explicit Muting: TMUX4053 direct-drive by MCU
 
-=== Improved Scheme With Muting
+ Switch A not used
+
+ BCOM = JOU
+ B0 = C0
+ B1 = FXO
+
+ CCOM = INP
+ C0 = B0
+ C1 = FXN
+
+ CTL = single control bus for both BSEL and CSEL
+ MCU = MCU signal to switch control
+
+
+.Table TMUX4053 Simple Scheme: Truth Table
+|===
+| MCU | CTL | BCOM | JOU | CCOM | INP | FXN      | FXO      | program state 
+
+| 0   | 0   | B0   | INP | C0   | JOU | floating | floating | BYPASS
+| 1   | 1   | B1   | FXO | C1   | FXN | INP      | JOU      | ENGAGE
+|===
+
+
+
+=== Improved Scheme With Muting: CD4053 w/inverting MOSFETs
 
  ACOM = FXN
  A0 = INP
@@ -382,7 +407,7 @@ PCB space, the TVS diode and ferrite bead can be omitted.
  MCU2 = MCU signal to msofet gate for CTL2
 
 
-.Table Improved Scheme With Muting: Truth Table
+.Table CD4053 Improved Scheme With Muting: Truth Table
 |===
 | MCU1 | CTL1 | MCU2 | CTL2 | ACOM | BCOM | CCOM | INP      | FXN | FXO | JOU | Program State
 
@@ -393,7 +418,7 @@ PCB space, the TVS diode and ferrite bead can be omitted.
 |===
 
 
-.Table Improved Scheme With Muting: MCU CTL Pin States Across Changes
+.Table CD4053 Improved Scheme With Muting: MCU CTL Pin States Across Changes
 |===
 | STATE  | MCU1, MCU2
 
@@ -405,10 +430,66 @@ PCB space, the TVS diode and ferrite bead can be omitted.
 |===
 
 
+=== Improved Scheme With Muting: TMUX4053 direct-drive by MCU
+
+ ACOM = FXN
+ A0 = GND
+ A1 = INP
+
+ BCOM = GND
+ B0 = FXO
+ B1 = floating/NC
+
+ CCOM = JOU
+ C0 = INP
+ C1 = FXO
+
+ CTL1 = combined control bus for ASEL and BSEL
+ CTL2 = control bus for CSEL
+
+ MCU1 = MCU signal to CTL1
+ MCU2 = MCU signal to CTL2
+
+
+.Table CD4053 Improved Scheme With Muting: Truth Table
+|===
+| MCU1 | CTL1 | MCU2 | CTL2 | ACOM | BCOM | CCOM | INP      | FXN | FXO | JOU | Program State
+
+| 0    | 0    | 0    | 0    | A0   | B0   | C0   | JOU      | GND | GND | INP | BYPASS
+| 0    | 0    | 1    | 1    | A0   | B0   | C1   | floating | GND | GND | FXO | MUTE
+| 1    | 1    | 0    | 0    | A1   | B1   | C0   | FXN+JOU  | INP |     | INP | *_invalid_*
+| 1    | 1    | 1    | 1    | A1   | B1   | C1   | FXN      | INP | FXO | FXO | ENGAGE
+|===
+
+
+.Table CD4053 Improved Scheme With Muting: MCU CTL Pin States Across Changes
+|===
+| STATE  | MCU1, MCU2
+
+| BYPASS | 0, 0
+| MUTE   | 0, 1
+| ENGAGE | 1, 1
+| MUTE   | 0, 1
+| BYPASS | 0, 0
+|===
+
+
+
 == Toolchain
 
-    * avr tools: avr-gcc, avr-libc, avrdude toolchain
-    * no Arduino
+See TOOLCHAIN.md for details.  Summary:
+
+    * Common
+      ** cppcheck
+      ** clang/clang-tidy
+    * AVR Classic
+      ** avr tools: avr-gcc, avr-libc, avrdude toolchain
+      ** no Arduino
+      ** simavr
+    * PIC10F322
+      ** XC8 free-tier compiler
+      ** PIC10-12Fxxx_DFP device pack
+      ** gpsim/libgpsim
 
 == Compilation Flags
 
