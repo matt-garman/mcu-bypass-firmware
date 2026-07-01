@@ -868,6 +868,15 @@ PIC_FAULT_VARIANT ?= cd4053
 PIC_FAULT_SRC = test/pic/test_fault_pic.cc
 PIC_FAULT_BIN = test/pic/test_fault_pic
 PIC_FAULT_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_FAULT_VARIANT)_$(PIC_TAG).hex
+PIC_FAULT_SYM = $(PIC_FAULT_HEX:.hex=.sym)
+
+# _ctx_'s data address from the XC8 .sym, as -DCTX_ADDR=0x<addr> for the ctx_
+# SRAM cases (so the test self-adjusts per variant instead of hard-coding it).
+# A $(shell) in this recursive (=) variable re-runs when PIC_FAULT_COMPILE is
+# expanded in the recipe -- i.e. AFTER the `pic` prerequisite has built the .sym.
+# Empty when the .sym is absent (XC8 not installed), so the ctx_ cases compile
+# out and the test reports them skipped.
+PIC_FAULT_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC_FAULT_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DCTX_ADDR=0x$$a)
 
 # FW_PATH baked as an ABSOLUTE path so the binary is cwd-independent (parity with
 # the soak). Phony run rule always recompiles so a PIC_FAULT_VARIANT override is
@@ -875,7 +884,7 @@ PIC_FAULT_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_FAULT_VARIANT)_$(PIC_TAG).hex
 PIC_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
 		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
 		-DFW_PATH='"$(CURDIR)/$(PIC_FAULT_HEX)"' -DPROC_NAME='"$(PIC_GPSIM_PROC)"' \
-		-DF_CPU_HZ=$(PIC_XTAL) \
+		-DF_CPU_HZ=$(PIC_XTAL) $(PIC_FAULT_CTX_DEF) \
 		$(PIC_FAULT_SRC) -o $(PIC_FAULT_BIN) -lgpsim
 
 $(PIC_FAULT_BIN): $(PIC_FAULT_SRC)

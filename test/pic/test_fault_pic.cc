@@ -1,9 +1,17 @@
-// Fault-injection test for the PIC10F322 shell's per-tick critical-SFR sanity
-// gate -- the PIC analogue of the AVR simavr `inject_config_sfr` tests in
-// test/avr/test_sim.c. It links libgpsim, drives the real built HEX, corrupts a
-// critical configuration SFR at runtime (an SEU/EMI single-event-upset model),
-// and asserts the firmware DETECTS the corruption and RECOVERS via a watchdog
-// reset -- exactly what hw_critical_sfrs_intact() + hw_force_wdt_reset() promise.
+// Fault-injection test for the PIC10F322 shell's per-tick sanity gate -- the PIC
+// analogue of the AVR simavr `inject_config_sfr` tests in test/avr/test_sim.c. It
+// links libgpsim, drives the real built HEX, corrupts a guarded location at
+// runtime (an SEU/EMI single-event-upset model), and asserts the firmware DETECTS
+// the corruption and RECOVERS via a watchdog reset -- exactly what the main-loop
+// gate + hw_force_wdt_reset() promise.
+//
+// COVERAGE -- every location the gate guards:
+//   * config SFRs    OSCCON.IRCF / WDTCON.WDTPS / PR2 / T2CON (hw_critical_sfrs_intact)
+//   * pull-up SFRs   WPUA (RA3 latch) + OPTION_REG.nWPUEN     (hw_footswitch_pullup_intact)
+//   * ctx_ SRAM      program_state / effect_state / debounce_counter (range checks)
+// The ctx_ cases run only when CTX_ADDR is passed (the Makefile extracts _ctx_'s
+// data address from the XC8 .sym so the test self-adjusts per variant); they are
+// skipped with a note otherwise.
 //
 // WHY THIS IS THE MIRROR IMAGE OF THE SOAK (test/pic/test_soak_pic.cc):
 // the polled PIC shell has no recovery path OTHER than the watchdog. When the
@@ -35,7 +43,18 @@
 // keeps petting, so absent the gate there is provably NO reset -- a WDTPS skew
 // is otherwise entirely silent. PR2/T2CON are also read by the TMR2 hardware, so
 // their corruption is kept tick-preserving (T2CON keeps TMR2ON set; PR2 stays a
-// valid period) so the reset is the gate, not a wedged tick.
+// valid period) so the reset is the gate, not a wedged tick. The pull-up SFRs
+// are gate-only too: the footswitch is externally driven here, so disabling the
+// pull-up does not change the pin -- only the gate's check reacts.
+//
+// The ctx_ cases differ subtly. effect_state and debounce_counter are copied
+// through debounce_step unchanged when the device is quiescent (no toggle), so a
+// single injection persists to the next gate check -- and they are caught ONLY by
+// the gate (gate discriminators, like the SFRs). program_state is DIFFERENT: an
+// out-of-range value also drives debounce_step into its `default:` -> res.fault
+// path, so main() resets via the pure core's belt-and-suspenders too; it is
+// therefore redundantly protected (defense in depth), not a pure gate
+// discriminator. All three still yield exactly one reset, which is the assertion.
 //
 // Build/run via the Makefile:  `make pic-test-fault`
 //   STANDALONE -- like pic-test-soak it links libgpsim (needs gpsim-dev +
@@ -55,6 +74,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <cctype>
 #include <string>
 #include <iostream>
 
@@ -92,14 +112,28 @@ static NullBuf g_nullbuf;
 // 0=pressed), RA0 = LED on LATA bit0.
 #define FOOTSW_PIN_NAME "ra3"
 
-// ---- Critical-SFR addresses (PIC10F322 DFP header; gpsim mirrors these; the
+// ---- Guarded-SFR addresses (PIC10F322 DFP header; gpsim mirrors these; the
 // soak proves gpsim's rma uses the SAME file addresses, e.g. LATA@0x07). Each is
 // cross-checked against the register's gpsim name at runtime (fetch_sfr) so an
 // address drift is surfaced rather than silently corrupting the wrong register.
+#define WPUA_ADDR    0x009u  // RA3 weak-pull-up latch = bit 3 (mask 0x08)
 #define OSCCON_ADDR  0x010u
 #define PR2_ADDR     0x012u
 #define T2CON_ADDR   0x013u
+#define OPTION_ADDR  0x00Eu  // OPTION_REG; nWPUEN (global pull-up enable) = bit 7
 #define WDTCON_ADDR  0x030u
+
+// ctx_ (debounce_context_t, src/bypass_types.h) is file-static SRAM; the Makefile
+// passes CTX_ADDR = _ctx_'s data address (from the XC8 .sym). Field OFFSETS follow
+// the struct order (program_state, effect_state, debounce_counter), each a 1-byte
+// object as XC8 lays them out -- confirmed against the generated .s ((_ctx_),
+// (_ctx_+1), (_ctx_+2)). ctx_ is a GPR, so its gpsim register has no meaningful
+// name: pass a null token to fetch_sfr to skip the name cross-check.
+#ifdef CTX_ADDR
+#  define CTX_PROGRAM_STATE     ((unsigned)(CTX_ADDR) + 0u)
+#  define CTX_EFFECT_STATE      ((unsigned)(CTX_ADDR) + 1u)
+#  define CTX_DEBOUNCE_COUNTER  ((unsigned)(CTX_ADDR) + 2u)
+#endif
 
 // ---- Timing -----------------------------------------------------------------
 // Settle time to (re)reach the quiescent main loop after power-on or a recovery
@@ -148,21 +182,24 @@ static void footsw_set(int pressed) {
     g_fsw_node->update();
 }
 
-// Fetch an SFR by file address and cross-check its gpsim name contains the
-// expected token (lowercase). A mismatch warns but does not abort: the address
-// is authoritative (from the DFP header, proven by the soak), and gpsim naming
-// quirks should not fail an otherwise-correct injection.
+// Fetch a register by file address and (for named SFRs) cross-check its gpsim
+// name contains the expected token (lowercase). A mismatch warns but does not
+// abort: the address is authoritative (from the DFP header, proven by the soak),
+// and gpsim naming quirks should not fail an otherwise-correct injection. Pass
+// token == nullptr for GPRs (e.g. ctx_), which have no meaningful name.
 static Register *fetch_sfr(unsigned addr, const char *token) {
     Register *r = g_cpu->rma.get_register(addr);
     if (r == nullptr) {
         fprintf(stderr, "FATAL: no register at 0x%03x\n", addr);
         return nullptr;
     }
-    std::string nm = r->name();
-    for (char &c : nm) c = (char)tolower((unsigned char)c);
-    if (nm.find(token) == std::string::npos) {
-        fprintf(stderr, "WARN: register at 0x%03x is named '%s', expected '%s'\n",
-                addr, r->name().c_str(), token);
+    if (token != nullptr) {
+        std::string nm = r->name();
+        for (char &c : nm) c = (char)tolower((unsigned char)c);
+        if (nm.find(token) == std::string::npos) {
+            fprintf(stderr, "WARN: register at 0x%03x is named '%s', expected '%s'\n",
+                    addr, r->name().c_str(), token);
+        }
     }
     return r;
 }
@@ -278,8 +315,10 @@ int main() {
            FW_PATH, PROC_NAME, (unsigned long)F_CPU_HZ, WDT_RESET_WINDOW_MS);
     fflush(stdout);
 
-    // Negative control first, then one case per critical SFR the gate guards.
+    // Negative control first, then one case per guarded location.
     control_case();
+
+    // config SFRs (hw_critical_sfrs_intact)
     inject_case("OSCCON.IRCF",  OSCCON_ADDR, "osccon", false, 0x10,
                 "IRCF 0b111->0b110: 16MHz->8MHz clock skew");
     inject_case("WDTCON.WDTPS", WDTCON_ADDR, "wdtcon", false, 0x10,
@@ -288,6 +327,25 @@ int main() {
                 "tick period 249->99: 1ms tick skewed");
     inject_case("T2CON",        T2CON_ADDR,  "t2con",  false, 0x01,
                 "T2CKPS 1:16->1:4, TMR2ON preserved: timer cfg skew");
+
+    // pull-up SFRs (hw_footswitch_pullup_intact) -- footswitch is externally
+    // driven, so the pin stays released; only the gate's check reacts.
+    inject_case("WPUA.RA3",     WPUA_ADDR,   "wpu",    false, 0x08,
+                "clear RA3 pull-up latch: footswitch weak pull-up disabled");
+    inject_case("OPTION.nWPUEN",OPTION_ADDR, "option", false, 0x80,
+                "set nWPUEN: global weak pull-ups disabled");
+
+    // ctx_ SRAM range checks (see the ctx_ note in the header comment)
+#ifdef CTX_ADDR
+    inject_case("ctx.program_state",    CTX_PROGRAM_STATE,    nullptr, true, 0x02,
+                "0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault)");
+    inject_case("ctx.effect_state",     CTX_EFFECT_STATE,     nullptr, true, 0x02,
+                "->2: > ENGAGED (gate-only)");
+    inject_case("ctx.debounce_counter", CTX_DEBOUNCE_COUNTER, nullptr, true, 0xFF,
+                "->255: > RELEASE_THRESH (gate-only)");
+#else
+    printf("  (ctx_ SRAM cases skipped: no CTX_ADDR -- pass -DCTX_ADDR=0x<_ctx_> from the .sym)\n");
+#endif
 
     int pass = (g_fails == 0);
     printf("\nFAULT-INJECT %s: %u checks, %u failures\n",

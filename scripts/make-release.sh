@@ -259,6 +259,20 @@ log "running make pic-test (PIC CONFIG word + analyze + gpsim)..."
 make pic-test PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/pic-test.log" 2>&1 || { tail -40 "$EVID/pic-test.log" >&2; die "make pic-test FAILED."; }
 ok "pic-test passed."
 
+# Fault injection (libgpsim): per variant, corrupt each guarded location (config
+# SFRs, pull-up SFRs, ctx_ SRAM) and assert the per-tick gate forces a WDT reset.
+# Fast (seconds/variant), so it runs here in the pre-hardware gates rather than
+# the parallel-soak stage. The grep guard turns a silent skip (missing gpsim-dev/
+# glib -- already required above) into a release failure. Logs auto-packaged by
+# the evidence copy loop.
+log "running make pic-test-fault (gpsim fault injection) on every variant..."
+for v in $VARIANTS; do
+	make pic-test-fault PIC_FAULT_VARIANT="$v" PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
+		>"$EVID/pic-fault-$v.log" 2>&1 || { tail -40 "$EVID/pic-fault-$v.log" >&2; die "pic-test-fault FAILED for variant $v."; }
+	grep -q "FAULT-INJECT PASS" "$EVID/pic-fault-$v.log" || { tail -40 "$EVID/pic-fault-$v.log" >&2; die "pic-test-fault did not PASS for variant $v (skipped or failed)."; }
+	ok "pic-test-fault $v: PASS"
+done
+
 # ============================================================================
 # 3. PARALLEL SOAK -- every combo, full duration
 # ============================================================================
@@ -405,7 +419,7 @@ REL_BANNER=""
 	printf -- '- **Source commit:** `%s`\n' "$GIT_SHA"
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
-	printf -- '- **Validation:** `make test-long` + `make pic-test` + %s-h parallel soak of every variant x MCU (see evidence/).\n\n' "$hours"
+	printf -- '- **Validation:** `make test-long` + `make pic-test` + `make pic-test-fault` (gpsim SFR/pull-up/ctx_ fault injection) + %s-h parallel soak of every variant x MCU (see evidence/).\n\n' "$hours"
 
 	printf '## Toolchain\n\n'
 	printf -- '| tool | version |\n|---|---|\n'
