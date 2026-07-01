@@ -191,6 +191,19 @@
 #define SPL_MEM_ADDR   0x5D  // SPL I/O addr 0x3D + SFR offset 0x20
 #define SPH_MEM_ADDR   0x5E  // SPH I/O addr 0x3E + SFR offset 0x20 (not present on ATtiny13a)
 #define WDTCSR_MEM_ADDR 0x41 // WDTCR I/O addr 0x21 + SFR offset 0x20 (same on t13a and tinyx5)
+// Config SFRs re-checked by the firmware's per-tick SFR-integrity gate. CLKPR
+// and TCCR0B share the same I/O address on both families, but TCCR0A and OCR0A
+// do NOT (verified against avr-libc iotn13a.h vs iotn85.h), so they are selected
+// per target -- mirroring the SPH per-family note above.
+#define CLKPR_MEM_ADDR  0x46 // CLKPR  I/O addr 0x26 + SFR offset 0x20 (same on t13a and tinyx5)
+#define TCCR0B_MEM_ADDR 0x53 // TCCR0B I/O addr 0x33 + SFR offset 0x20 (same on t13a and tinyx5)
+#ifdef TARGET_TINYX5
+#  define TCCR0A_MEM_ADDR 0x4A // ATtiny85 TCCR0A I/O addr 0x2A + SFR offset 0x20
+#  define OCR0A_MEM_ADDR  0x49 // ATtiny85 OCR0A  I/O addr 0x29 + SFR offset 0x20
+#else
+#  define TCCR0A_MEM_ADDR 0x4F // ATtiny13A TCCR0A I/O addr 0x2F + SFR offset 0x20
+#  define OCR0A_MEM_ADDR  0x56 // ATtiny13A OCR0A  I/O addr 0x36 + SFR offset 0x20
+#endif
 
 // --- global sim state shared with output-watch callbacks -------------------
 static avr_t      *g_avr = NULL;
@@ -1468,6 +1481,75 @@ static void test_fault_inject_control_ddr(void) {
     expect_fault_response("control DDR (PB2)");
 }
 
+//////////////////////////////////////////////////////////////////////////////
+// SFR-integrity fault injection: corrupt each critical CONFIG register the
+// firmware writes once in init() -- the clock prescaler, the watchdog config,
+// and the Timer0 tick config -- and confirm the firmware's per-tick
+// SFR-integrity gate detects the mismatch and forces a reset.
+//
+// These complement the pull-up / DDRB checks above. Those catch a corrupted pin
+// DIRECTION or pull-up; these catch a corrupted clock/WDT/timer CONFIG that
+// would silently skew the tick rate, the coil/mute pulse widths, or the WDT
+// safety margin while the timer ISR keeps firing -- so the ISR-liveness
+// handshake alone (which only notices the ISR STOPPING) would not detect it.
+// This is the AVR-shell parity of the PIC shell's OSCCON/WDTCON/PR2/T2CON gate.
+//
+// Each register is written once at init and never touched again, so a single
+// poke persists until the next gate pass -- deterministic on both families.
+// Every corruption value is chosen to (a) differ from the init value, (b) keep
+// the Timer0 compare ISR firing so main() runs the gate again, and (c) preserve
+// WDE so hw_force_wdt_reset()'s watchdog still bites on tinyx5.
+static void inject_config_sfr(uint32_t addr, uint8_t bad, const char *what) {
+    if (sim_reset(0) != 0) { g_failures++; return; }
+
+    footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
+    CHECK(g_led_level == 1, "fault-inject [%s]: normal press engages", what);
+
+    avr_core_watch_write(g_avr, addr, bad);
+    expect_fault_response(what);
+}
+
+// Clock prescaler (CLKPR): init selects clock_div_8 (0x03); corrupt to div1
+// (0x00). The Timer0 clock still runs, so the ISR keeps firing.
+static void test_fault_inject_clkpr(void) {
+    inject_config_sfr(CLKPR_MEM_ADDR, 0x00, "CLKPR (clock prescaler)");
+}
+
+// Watchdog config (WDTCR): init sets WDE + the ~250 ms prescaler; corrupt to
+// WDE-only (1<<WDE == 0x08), i.e. all WDP bits cleared -> the ~16 ms minimum.
+// WDE stays set so the forced reset still fires (just faster) on tinyx5, and the
+// value differs from any 250 ms encoding so the gate trips.
+static void test_fault_inject_wdtcr(void) {
+    inject_config_sfr(WDTCSR_MEM_ADDR, (uint8_t)(1u << 3), "WDTCR (watchdog config)"); // 1<<WDE
+}
+
+// Timer0 mode (TCCR0A): init selects CTC (1<<WGM01); corrupt to 0x00 (normal
+// mode). The OCR0A compare-match interrupt still fires in normal mode, so main()
+// runs the gate again.
+static void test_fault_inject_tccr0a(void) {
+    inject_config_sfr(TCCR0A_MEM_ADDR, 0x00, "TCCR0A (timer mode)");
+}
+
+// Timer0 clock select (TCCR0B): init selects /8 (1<<CS01 == 0x02); corrupt to
+// /64 (CS01|CS00 == 0x03). The timer keeps running (slower), ISR still fires.
+static void test_fault_inject_tccr0b(void) {
+    inject_config_sfr(TCCR0B_MEM_ADDR, 0x03, "TCCR0B (timer prescaler)");
+}
+
+// Timer0 compare (OCR0A): init sets the 1 ms period value; corrupt by flipping
+// bit6, which keeps a sane, nonzero period so the ISR still fires at a modest
+// rate (device-independent -- no need to know the exact per-family init value).
+static void test_fault_inject_ocr0a(void) {
+    if (sim_reset(0) != 0) { g_failures++; return; }
+
+    footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
+    CHECK(g_led_level == 1, "fault-inject [OCR0A]: normal press engages");
+
+    uint8_t bad = (uint8_t)(g_avr->data[OCR0A_MEM_ADDR] ^ 0x40u);
+    avr_core_watch_write(g_avr, OCR0A_MEM_ADDR, bad);
+    expect_fault_response("OCR0A (timer compare)");
+}
+
 // Redirect the stack pointer into the ctx_ BSS region and verify the firmware
 // detects the resulting corruption.
 //
@@ -1604,6 +1686,12 @@ static void run_fault_injection_suite(void) {
 #endif
     test_fault_inject_lost_pullup();
     test_fault_inject_control_ddr();
+    // SFR-integrity gate: clock / watchdog / Timer0 config registers
+    test_fault_inject_clkpr();
+    test_fault_inject_wdtcr();
+    test_fault_inject_tccr0a();
+    test_fault_inject_tccr0b();
+    test_fault_inject_ocr0a();
     test_fault_inject_unused_sram();
 }
 

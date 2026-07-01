@@ -51,6 +51,19 @@
 #include <avr/interrupt.h> // ISR() interrupt service routine macro
 
 
+// Compile-time constants only
+// Do NOT snapshot into a file-static (it grows BSS, moves ctx_, and breaks
+// test_fault_inject_stack_pointer).
+#define CLKPR_EXPECTED   ((uint8_t)clock_div_8)                // system clock /8
+#define WDTCR_EXPECTED   ((uint8_t)((1 << WDE) | (1 << WDP2))) // WDTO_250MS -> WDP=0b0100 (verified t13a+t85)
+#define TCCR0A_EXPECTED  ((uint8_t)(1 << WGM01))               // CTC
+#define TCCR0B_EXPECTED  ((uint8_t)(1 << CS01))                // /8
+#define OCR0A_EXPECTED   ((uint8_t)TIMER0_OCR0A_1MS)
+#define TIMSK0_EXPECTED  ((uint8_t)(1 << OCIE0A))
+
+
+
+
 //////////////////////////////////////////////////////////////////////////////
 // FILE-SCOPED TYPES
 //////////////////////////////////////////////////////////////////////////////
@@ -113,6 +126,27 @@ void hw_configure_output_pins(uint8_t const output_mask) { DDRB = output_mask; }
 // expected_mask is still configured as output
 uint8_t hw_output_pins_intact(uint8_t const expected_mask) {
     return (DDRB & expected_mask) == expected_mask;
+}
+
+
+// sanity-check utility: return non-zero ("true") IFF all the critial pin
+// values are what we want
+// SRF = special function register, the "control panel" of the MCU
+static uint8_t hw_critical_sfrs_intact(void) {
+    uint8_t clkpr  = CLKPR;
+    uint8_t wdtcr  = WDTCR;
+    uint8_t tccr0a = TCCR0A;
+    uint8_t tccr0b = TCCR0B;
+    uint8_t ocr0a  = OCR0A;
+    uint8_t timsk  = TIMSK0;
+
+    return 
+        (CLKPR_EXPECTED  == clkpr)  &&
+        (WDTCR_EXPECTED  == wdtcr)  &&
+        (TCCR0A_EXPECTED == tccr0a) &&
+        (TCCR0B_EXPECTED == tccr0b) &&
+        (OCR0A_EXPECTED  == ocr0a)  &&
+        (TIMSK0_EXPECTED == timsk)  ;
 }
 
 
@@ -320,8 +354,10 @@ __attribute__((OS_main)) int main(void) {
         if ( (ctx_.program_state > RELEASE_DEBOUNCE_WAIT) ||
                 (ctx_.effect_state > ENGAGED) ||
                 (timer_isr_called_ > TIMER_ISR_NOT_CALLED) ||
+                (ctx_.debounce_counter > RELEASE_THRESH) ||
                 // assert footswitch pullup still enabled
                 (0U == hw_footswitch_pullup_intact()) ||
+                (0U == hw_critical_sfrs_intact()) ||
                 // config-specific runtime sanity checks
                 hw_is_sanity_check_failed()
            ) {

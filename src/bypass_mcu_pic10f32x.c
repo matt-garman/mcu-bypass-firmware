@@ -62,6 +62,13 @@
 #pragma config WRT   = OFF
 
 
+#define HFINTOSC_16MHZ_IRCF (0x07U)  // OSCCONbits.IRCF = 16 MHz; must match _XTAL_FREQ
+#define WDT_WDTPS_256MS     (0x08U)  // WDTCONbits.WDTPS = 1:8192 -> ~256 ms
+#define TMR2_PR2_PERIOD     (249U)   // PR2 -> 250 counts @ 250 kHz = 1 ms
+#define TMR2_T2CON_CONFIG   (0x07U)  // T2CON: T2CKPS=0b11 (1:16), TMR2ON=1
+
+
+
 //////////////////////////////////////////////////////////////////////////////
 // CROSS-BOUNDARY HW OPS (implement bypass_hw_iface.h)
 //////////////////////////////////////////////////////////////////////////////
@@ -88,11 +95,29 @@ void hw_configure_output_pins(uint8_t const output_mask) {
 }
 
 
-// sanity-check utility: return non-zero IFF every pin in expected_mask is still
-// configured as an output (its TRISA direction bit is still 0).
+// sanity-check utility: return non-zero ("true") IFF every pin in
+// expected_mask is still configured as an output (its TRISA direction bit is
+// still 0).
 uint8_t hw_output_pins_intact(uint8_t const expected_mask) {
     return (0U == (TRISA & expected_mask));
 }
+
+// sanity-check utility: return non-zero ("true") IFF all the critial pin
+// values are what we want
+// SFR = special function register, the "control panel" of the MCU
+static uint8_t hw_critical_sfrs_intact(void) {
+    uint8_t ircf  = (uint8_t)OSCCONbits.IRCF;
+    uint8_t wdtps = (uint8_t)WDTCONbits.WDTPS;
+    uint8_t pr2   = (uint8_t)PR2;
+    uint8_t t2con = (uint8_t)T2CON;
+
+    return 
+        (HFINTOSC_16MHZ_IRCF == ircf) &&
+        (WDT_WDTPS_256MS == wdtps)    &&
+        (TMR2_PR2_PERIOD     == pr2)  && 
+        (TMR2_T2CON_CONFIG == t2con);
+}
+
 
 
 //////////////////////////////////////////////////////////////////////////////
@@ -152,7 +177,7 @@ static void hw_wdt_pet(void) { CLRWDT(); }
 static void hw_mcu_init(void) {
     // HFINTOSC = 16 MHz (IRCF = 0b111). Must match _XTAL_FREQ (asserted below),
     // which the relay/mute drivers' __delay_ms() relies on.
-    OSCCONbits.IRCF = 0x07U;
+    OSCCONbits.IRCF = HFINTOSC_16MHZ_IRCF;
 
     // entire port digital -- the I/O pins power up as analog inputs.
     ANSELA = 0x00U;
@@ -168,7 +193,7 @@ static void hw_mcu_init(void) {
     // it is still ~160ms -- comfortably > the ~14ms worst-case pet-to-pet
     // window (1ms tick + 12ms relay coil pulse), unlike the prior 32ms (~1.4x
     // margin).
-    WDTCONbits.WDTPS = 0x08U;
+    WDTCONbits.WDTPS = WDT_WDTPS_256MS;
 }
 
 
@@ -179,9 +204,9 @@ static void hw_mcu_init(void) {
 // not once per N matches. MUST run AFTER any blocking output actuation so a
 // TMR2IF that set during init is not mistaken for the first real tick.
 static void hw_tick_timer_start(void) {
-    PR2   = 249U;        // 1ms period
-    T2CON = 0x07U;       // T2CKPS = 0b11 (1:16 prescale), TMR2ON = 1
-    PIR1bits.TMR2IF = 0; // start clean
+    PR2   = TMR2_PR2_PERIOD;   // 1ms period
+    T2CON = TMR2_T2CON_CONFIG; // T2CKPS = 0b11 (1:16 prescale), TMR2ON = 1
+    PIR1bits.TMR2IF = 0;       // start clean
 }
 
 
@@ -278,12 +303,14 @@ void main(void) {
         // always checked, regardless of state; force a WDT reset on any
         // violation. (No timer_isr_called_ guard as on AVR -- the PIC has no
         // ISR; main-loop liveness is proven by reaching hw_wdt_pet() below.)
-        if ( (ctx_.program_state > RELEASE_DEBOUNCE_WAIT) ||
+        if (    (ctx_.program_state > RELEASE_DEBOUNCE_WAIT) ||
+                (ctx_.debounce_counter > RELEASE_THRESH) ||
                 (ctx_.effect_state > ENGAGED) ||
                 // assert footswitch pull-up still enabled
                 (0U == hw_footswitch_pullup_intact()) ||
                 // config-specific runtime sanity checks
-                hw_is_sanity_check_failed()
+                hw_is_sanity_check_failed() ||
+                (0U == hw_critical_sfrs_intact())
            ) {
             hw_force_wdt_reset();
         }
