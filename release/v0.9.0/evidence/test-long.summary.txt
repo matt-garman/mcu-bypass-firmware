@@ -1,0 +1,78 @@
+# test-long summary -- the full log is in the release CI run.
+
+47:MISRA-C:2012 analysis (cppcheck + misra addon)
+58:MISRA-C:2012: clean (documented deviations waived per MISRA_COMPLIANCE.md)
+59:=== static analysis (clang-tidy + cppcheck + clang-analyzer + MISRA) clean ===
+75:cbmc: prove_integrate
+190:cbmc: prove_debounce_step
+305:cbmc: prove_corrupt_state_faults
+420:cbmc: prove_init_context
+535:cbmc: prove_step_transition
+650:cbmc: prove_oor_recovery_step
+765:cbmc: prove_press_liveness (--unwind 50)
+906:cbmc: prove_release_liveness (--unwind 50)
+1050:cbmc: prove_oor_recovery_bounded (--unwind 257)
+1421:=== CBMC: all debounce-core proofs SUCCESSFUL ===
+1431:=== -fstack-usage static bound (limit: 32 B/frame) ===
+1457:OK: all frames <= 32 B
+1458:=== flash-utilization budget (ATtiny13a: 90% of 1024 B) ===
+1459:OK:   build_avr_classic/bypass_cd4053.elf uses 628 B (61.3%) of 1024 B
+1460:OK:   build_avr_classic/bypass_cd4053_tmux.elf uses 628 B (61.3%) of 1024 B
+1461:OK:   build_avr_classic/bypass_mute.elf uses 676 B (66.0%) of 1024 B
+1462:OK:   build_avr_classic/bypass_mute_tmux.elf uses 676 B (66.0%) of 1024 B
+1463:OK:   build_avr_classic/bypass_relay.elf uses 668 B (65.2%) of 1024 B
+1465:--- fault-injection (ATtiny85) variant: cd4053 ---
+1486:--- fault-injection (ATtiny45) variant: cd4053 ---
+1507:--- fault-injection (ATtiny85) variant: cd4053_tmux ---
+1528:--- fault-injection (ATtiny45) variant: cd4053_tmux ---
+1549:--- fault-injection (ATtiny85) variant: mute ---
+1570:--- fault-injection (ATtiny45) variant: mute ---
+1591:--- fault-injection (ATtiny85) variant: mute_tmux ---
+1612:--- fault-injection (ATtiny45) variant: mute_tmux ---
+1633:--- fault-injection (ATtiny85) variant: relay ---
+1654:--- fault-injection (ATtiny45) variant: relay ---
+1675:=== mutation testing: baseline sanity check ===
+1678:=== mutation testing: 19 core/AVR mutants ===
+1699:=== PIC toolchain probe (gates the PIC-shell mutants) ===
+1703:=== 5 PIC-shell mutants (gpsim register-level) ===
+1710:=== 1 PIC-shell mutant (WDT liveness, libgpsim soak 2500ms) ===
+1713:=== mutation summary: 25 killed, 0 survived, 0 errored ===
+1716:--- sim (ATtiny13a) variant: cd4053 ---
+1873:--- sim (ATtiny13a) variant: cd4053_tmux ---
+2030:--- sim (ATtiny13a) variant: mute ---
+2189:--- sim (ATtiny13a) variant: mute_tmux ---
+2348:--- sim (ATtiny13a) variant: relay ---
+2506:--- sim (ATtiny85) variant: cd4053 ---
+2671:--- sim (ATtiny85) variant: cd4053_tmux ---
+2836:--- sim (ATtiny85) variant: mute ---
+3003:--- sim (ATtiny85) variant: mute_tmux ---
+3170:--- sim (ATtiny85) variant: relay ---
+3337:--- sim (ATtiny45) variant: cd4053 ---
+3502:--- sim (ATtiny45) variant: cd4053_tmux ---
+3667:--- sim (ATtiny45) variant: mute ---
+3834:--- sim (ATtiny45) variant: mute_tmux ---
+4001:--- sim (ATtiny45) variant: relay ---
+4168:golden-model line coverage: 99.35% (floor 90%)
+4169:=== all FULL (exhaustive) pre-hardware tests passed ===
+
+# --- last 20 lines ---
+Loaded 694 .text at address 0x0
+Loaded 0 .data
+Loaded 694 .text at address 0x0
+Loaded 0 .data
+Loaded 694 .text at address 0x0
+Loaded 0 .data
+Loaded 694 .text at address 0x0
+Loaded 0 .data
+Loaded 694 .text at address 0x0
+Loaded 0 .data
+  stack HWM: deepest SP=0x141, used=31 B, margin=225 B (SRAM 0x060-0x15F, 256 B total)
+Loaded 694 .text at address 0x0
+Loaded 0 .data
+  relay SET (engage) pulse: 13.40 ms (datasheet min 4ms, design 12 ms)
+  relay RESET (bypass) pulse: 13.37 ms (datasheet min 4ms, design 12 ms)
+
+simavr firmware tests: 20646 checks, 0 failures
+golden-model line coverage: 99.35% (floor 90%)
+=== all FULL (exhaustive) pre-hardware tests passed ===
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
