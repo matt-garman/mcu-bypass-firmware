@@ -401,6 +401,54 @@ PB1/PB2, artificially stop the ISR, confirm the device resets to BYPASS within
 the WDT window; plus power-on glitch and BOD behavior. Bridges to the
 manufacturing item below.
 
+**Inverted-copy (complemented) storage of the debounce context.** (NEW — from
+the 2026-07-01 meta-review) The main-loop sanity gate detects *out-of-range*
+corruption of `ctx_` (`program_state > RELEASE_DEBOUNCE_WAIT`,
+`effect_state > ENGAGED`, `debounce_counter > RELEASE_THRESH`), but a
+single-event upset that lands *in* range is invisible to it. Concretely:
+(a) a `program_state` flip RELEASE_DEBOUNCE_WAIT→PRESS_DEBOUNCE_WAIT while the
+lockout counter is still ≥ PRESSED_THRESH causes an **immediate spurious
+toggle** — the worst case, audible; (b) an in-range `debounce_counter` flip
+(e.g. 3→19, bit 4) can cross PRESSED_THRESH and likewise toggle without a
+press; (c) an `effect_state` flip silently inverts the meaning of the next
+press (it re-asserts the current physical state, so one press "does nothing").
+The classic hardening is complement storage: keep a second copy of the context
+with all bits inverted (`ctx_inv_`), update both at every write site, and have
+the existing per-tick sanity gate verify `ctx_ == ~ctx_inv_` byte-wise,
+forcing the WDT reset (→ safe BYPASS) on mismatch. Any single bit flip in
+either copy is then detected within one tick.
+
+Design notes if picked up:
+- Keep `bypass_pure.c` untouched — the shadow is shell-owned fault-detection
+  mechanics, not algorithm; the pure core and its proofs stay as they are.
+- AVR: the ISR writes `debounce_counter` every tick, so a naive 3-byte
+  shadow check in main races the ISR (ISR fires between main reading a byte
+  and its complement → false mismatch → spurious reset). Two clean options:
+  shadow only the two main-loop-owned state bytes (no race by construction;
+  still catches cases (a) and (c), and the counter is already range-checked
+  and self-correcting); or full 3-byte shadow with pair-update in the ISR and
+  a read-pair-retry in main (a mismatch is re-read once; only a *persistent*
+  mismatch is corruption). Do NOT reach for cli/sei around the check — that
+  would break the documented "no interrupts disabled in steady state"
+  invariant.
+- PIC: single-threaded polled loop, so a full 3-byte shadow is trivial — but
+  watch the flash budget (the mute variants are the tightest at ~83% of 512
+  words; `make pic` gates it). RAM cost is +2–3 bytes against ~29 B free on
+  the ATtiny13a and ~30 B on the PIC10F322 — comfortably affordable.
+- Tests: extend both fault-injection suites with an **in-range** flip case
+  (simavr t85: flip `effect_state` 0↔1, expect WDT reset; gpsim: same via the
+  ctx_ cases, which today deliberately inject only out-of-range values
+  precisely because in-range flips are undetectable), plus a mutation
+  ("shadow update removed at one write site") proving the suite catches a
+  maintenance slip.
+
+Effort: ~3–6 h incl. tests; firmware edits are the user's. Impact: Medium —
+closes the last undetectable single-bit-corruption class in the global state
+under the project's cosmic-ray/EMI threat model. This is genuinely platinum:
+range checks + WDT already exceed typical practice for this device class, and
+the next rung above complement storage (TMR / triple modular redundancy) is
+out of proportion for a guitar pedal.
+
 **KLEE in CI.** `test_symbolic.c` already supports `-DUSE_KLEE` and there is a
 `test-symbolic-klee` target; a CI job (klee/klee Docker image) would prove the
 symbolic path is actually exercised, not merely compilable.
@@ -747,6 +795,7 @@ and is independently worthwhile headroom. Reference: child repo
 | Signal-integrity SPICE modeling                 | 2.5  | 2 h       | High — validates hardware assumptions before PCB |
 | Multi-press boundary cases                      | 2.5  | 3–4 h     | Medium — tick-boundary edge cases at rate limit |
 | Hardware-validation procedure doc               | 3    | 2–3 h     | High — primary-part WDT gap     |
+| Inverted-copy (complemented) ctx_ storage       | 3    | 3–6 h     | Medium — in-range SEU detection |
 | KLEE in CI                                      | 3    | 2 h       | Nice-to-have                    |
 | tinyAVR 2-Series (ATtiny202) support            | 3    | 2–4 days  | Nice-to-have; simavr gap        |
 | PIC10F322 support (shipped); PIC10F320 infeasible | 3  | —         | 322 done; 320 too small for free-tier XC8 — see docs/pic10f320_feasibility.md |
