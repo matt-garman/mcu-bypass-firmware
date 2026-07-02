@@ -25,7 +25,7 @@ uint8_t debounce_integrate(
 
 
 // sets initial debounce state by looking at the current footswitch state
-// (open/closed); designed to be called at program start-up/ater a RESET
+// (open/closed); designed to be called at program start-up/after a RESET
 //
 // return a debounce context that corresponds to the footswitch state
 debounce_context_t debounce_init_context(pin_state_t const pin_state);

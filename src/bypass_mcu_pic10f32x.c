@@ -102,7 +102,7 @@ uint8_t hw_output_pins_intact(uint8_t const expected_mask) {
     return (0U == (TRISA & expected_mask));
 }
 
-// sanity-check utility: return non-zero ("true") IFF all the critial pin
+// sanity-check utility: return non-zero ("true") IFF all the critical pin
 // values are what we want
 // SFR = special function register, the "control panel" of the MCU
 static uint8_t hw_critical_sfrs_intact(void) {

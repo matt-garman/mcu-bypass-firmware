@@ -124,7 +124,7 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   clang:        18.1.3  (Ubuntu LLVM 18.1.3, package: clang-18)
 
   Either compiler works for all test/* host binaries.  The Makefile uses gcc
-  by default (HOSTCC := gcc); set HOSTCC=clang to override.
+  by default (HOSTCC ?= gcc); set HOSTCC=clang to override.
 
 == Static analysis
 

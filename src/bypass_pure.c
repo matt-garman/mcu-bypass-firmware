@@ -11,7 +11,7 @@
 // footswitch pin one (high) == switch open
 //
 // NOTE: ideally we'd make the debounce_counter const, since it is not
-// modified; however, making it cost makes both parameters const, and that
+// modified; however, making it const makes both parameters const, and that
 // triggers clang-tidy errors about too-easily-swappable parameters.  MISRA-C
 // doesn't allow modifying parameters anyway, hence why we immediately make a
 // local copy of the parameter.  So the parameter is essentially const in
@@ -65,23 +65,23 @@ debounce_step_result_t debounce_step(debounce_context_t const ctx) {
             }
             break;
 
-            // waiting for the footswitch to be release-debounced
-            // note: holding the switch closed, or mechanical
-            //       failure (e.g. switch welded shut) causes this
-            //       state to exist indefinitely: this is the design
-            //       intent (software is "helpless", need physical
-            //       human resolution)
-            case RELEASE_DEBOUNCE_WAIT:
-                {
-                    if (0U == ctx.debounce_counter) {
-                        res.program_state = PRESS_DEBOUNCE_WAIT;
-                    }
+        // waiting for the footswitch to be release-debounced
+        // note: holding the switch closed, or mechanical
+        //       failure (e.g. switch welded shut) causes this
+        //       state to exist indefinitely: this is the design
+        //       intent (software is "helpless", need physical
+        //       human resolution)
+        case RELEASE_DEBOUNCE_WAIT:
+            {
+                if (0U == ctx.debounce_counter) {
+                    res.program_state = PRESS_DEBOUNCE_WAIT;
                 }
-                break;
+            }
+            break;
 
-            default: // should be impossible (but let caller know)
-                res.fault = true;
-                break;
+        default: // should be impossible (but let caller know)
+            res.fault = true;
+            break;
         }
 
     return res;
