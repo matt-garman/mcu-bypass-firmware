@@ -77,9 +77,21 @@ XC8 / device-pack behaviours relied on (proven against V3.10 + DFP v1.9.189):
 
   - XC8 V3.10 compiles C99 only (no C11); the firmware's static_assert is shimmed
     to the _Static_assert keyword in src/bypass_static_assert.h.
-  - XC8 rejects -fshort-enums and sizes enums as int.  Harmless here: the PIC
-    shell is single-threaded (polled tick, no ISR-shared state), so the 8-bit
-    atomicity the AVR build gets from -fshort-enums is not needed.
+  - XC8 rejects -fshort-enums, and its enum sizing is TWO-FACED: the clang
+    front end (which evaluates sizeof and _Static_assert) sizes enums as int,
+    so sizeof(debounce_context_t) is 5 -- but the CODE GENERATOR packs each
+    enum to the smallest sufficient type, so _ctx_ actually assembles to
+    `ds 3` with fields at byte offsets +0/+1/+2 (verified, including with
+    volatile members, i.e. it is systematic layout, not an optimization).
+    Consequences: (a) a static_assert CANNOT pin the real layout -- `make
+    pic-test-fault` asserts `_ctx_: ds 3` from the generated .s instead,
+    since its ctx_ fault-injection offsets and the RAM figures in
+    DESIGN_DOCUMENTATION.adoc depend on it; (b) never take sizeof of an
+    enum-bearing type in PIC-shell code (e.g. memset(&ctx_, 0, sizeof ctx_)
+    would write 5 bytes over a 3-byte object).  The atomicity angle is
+    harmless either way: the PIC shell is single-threaded (polled tick, no
+    ISR-shared state), so the 8-bit atomicity the AVR build gets from
+    -fshort-enums is not needed.
   - const-qualified locals are placed in program ROM, so a const local
     initialised from a runtime call is rejected; the PIC shell drops that const.
   - _XTAL_FREQ (for the drivers' __delay_ms) is supplied via -D in the Makefile,

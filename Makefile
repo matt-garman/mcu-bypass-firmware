@@ -259,8 +259,27 @@ SIM_DEFS  ?= $(FAST_SIM_DEFS)
 # clang-tidy needs to know where avr-libc's headers live and which AVR target
 # defines to assume. These shell-outs discover the avr-gcc include paths and
 # architecture so clang can parse the firmware as the AVR build sees it.
+#
+# Robust avr-libc include discovery, shared by clang-tidy, clang --analyze,
+# cppcheck AND the MISRA run. `$(CC) -print-file-name=avr/io.h` returns a BARE
+# NAME on this toolchain (avr-libc's headers live outside avr-gcc's own dirs),
+# which used to leave this variable as the garbage relative path "avr/": that
+# silently degraded analyze-cppcheck (it analyzed without the real register
+# headers), while the clang passes survived only via clang's own hardcoded AVR
+# search paths. So discover the directory from the preprocessor's ACTUAL search
+# path first, and fall back to -print-file-name only if that yields a directory
+# that really contains avr/io.h. Result: a verified real path, or empty (the
+# $(if ...) guards below then omit the -I and the analyzers fail loudly on the
+# missing include rather than parsing garbage).
 AVR_IO_HEADER      := $(shell $(CC) -print-file-name=avr/io.h)
+AVR_LIBC_INCLUDE   := $(shell echo | $(CC) -xc -E -Wp,-v - 2>&1 | grep -oE '^ /[^ ]+' | tr -d ' ' | while read d; do if [ -f "$$d/avr/io.h" ]; then realpath "$$d" 2>/dev/null || echo "$$d"; break; fi; done)
+ifeq ($(AVR_LIBC_INCLUDE),)
 AVR_LIBC_INCLUDE   := $(patsubst %/avr/, %, $(dir $(AVR_IO_HEADER)))
+# reject a non-path result ("avr/" when -print-file-name found nothing)
+ifeq ($(wildcard $(AVR_LIBC_INCLUDE)/avr/io.h),)
+AVR_LIBC_INCLUDE   :=
+endif
+endif
 AVR_GCC_INCLUDE    := $(shell $(CC) -print-file-name=include)
 AVR_ARCH           := $(shell $(CC) -mmcu=$(MCU) -dM -E - < /dev/null | awk '/__AVR_ARCH__/ { print $$3; exit }')
 # Shared clang target/flags so clang-tidy AND the clang static analyzer parse
@@ -295,7 +314,10 @@ ANALYZE_CMD        ?= $(CLANG_TIDY) --checks='$(CLANG_TIDY_CHECKS)' --warnings-a
 FW_SOURCES         = $(sort $(CORE_SRC) $(foreach v,$(VARIANTS),$(src_$(v))))
 
 # cppcheck: a second, independent analyzer. Uses the AVR platform model and the
-# avr-libc include path so it sees the real register definitions.
+# avr-libc include path so it sees the real register definitions. Findings
+# INSIDE the avr-libc / avr-gcc headers are suppressed by path -- adopted
+# toolchain code is outside the compliance boundary (same treatment as the
+# MISRA run below; e.g. avr-libc's util/delay.h shadows its own __ticks).
 CPPCHECK           ?= cppcheck
 CPPCHECK_FLAGS     ?= --enable=warning,style,performance,portability \
                       --std=c11 --platform=avr8 --error-exitcode=2 \
@@ -304,7 +326,8 @@ CPPCHECK_FLAGS     ?= --enable=warning,style,performance,portability \
                       --suppress=unmatchedSuppression \
                       --suppress=unusedStructMember \
                       -D__AVR__ -D__AVR_ATtiny13A__ -DF_CPU=$(F_CPU) \
-                      $(if $(AVR_LIBC_INCLUDE),-I$(AVR_LIBC_INCLUDE))
+                      $(if $(AVR_LIBC_INCLUDE),'--suppress=*:$(AVR_LIBC_INCLUDE)/*' -I$(AVR_LIBC_INCLUDE)) \
+                      $(if $(AVR_GCC_INCLUDE),'--suppress=*:$(AVR_GCC_INCLUDE)/*' -I$(AVR_GCC_INCLUDE))
 
 # --- MISRA-C:2012 analysis (cppcheck misra addon) ----------------------------
 # Same cppcheck binary, driven by its bundled misra.py addon. Three committed
@@ -327,17 +350,12 @@ MISRA_ADDON        ?= test/misra.json
 MISRA_RULES        ?= test/misra_rules.txt
 MISRA_SUPPRESS     ?= test/misra_suppressions.txt
 
-# Robust avr-libc include discovery for the MISRA run. The shared
-# AVR_LIBC_INCLUDE (above) is derived from `$(CC) -print-file-name=avr/io.h`,
-# which on this toolchain returns a bare name -- avr-libc's headers live outside
-# avr-gcc's own dirs -- so it can resolve to a non-path. MISRA's value rules
-# (10.x essential type, 11.x pointer/integer) are meaningless without the real
-# register headers, so we discover the directory from the preprocessor's actual
-# search path and fall back to the shared variable only if that fails.
-MISRA_AVR_INCLUDE  := $(shell echo | $(CC) -xc -E -Wp,-v - 2>&1 | grep -oE '^ /[^ ]+' | tr -d ' ' | while read d; do if [ -f "$$d/avr/io.h" ]; then realpath "$$d" 2>/dev/null || echo "$$d"; break; fi; done)
-ifeq ($(MISRA_AVR_INCLUDE),)
+# The MISRA run shares the robust AVR_LIBC_INCLUDE discovery above (it
+# originally had its own preprocessor-search-path discovery, which is now the
+# shared implementation). MISRA's value rules (10.x essential type, 11.x
+# pointer/integer) are meaningless without the real register headers, hence the
+# verified-real-path-or-empty contract.
 MISRA_AVR_INCLUDE  := $(AVR_LIBC_INCLUDE)
-endif
 
 # Base flags shared by the gating (analyze-misra) and report (analyze-misra-
 # report) targets. The documented-deviation waiver (--suppressions-list) is
@@ -870,6 +888,12 @@ PIC_FAULT_BIN = test/pic/test_fault_pic
 PIC_FAULT_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_FAULT_VARIANT)_$(PIC_TAG).hex
 PIC_FAULT_SYM = $(PIC_FAULT_HEX:.hex=.sym)
 
+# The test's ctx_ field offsets (+0/+1/+2) depend on XC8's code generator
+# packing each enum to 1 byte -- which its clang FRONT END disagrees with
+# (sizeof(debounce_context_t) == 5 there, so a firmware static_assert cannot
+# pin the layout). The run recipe therefore asserts `_ctx_: ds 3` in the
+# generated .s before running.
+#
 # _ctx_'s data address from the XC8 .sym, as -DCTX_ADDR=0x<addr> for the ctx_
 # SRAM cases (so the test self-adjusts per variant instead of hard-coding it).
 # A $(shell) in this recursive (=) variable re-runs when PIC_FAULT_COMPILE is
@@ -904,7 +928,20 @@ pic-test-fault: pic
 	if [ ! -f "$(PIC_FAULT_HEX)" ]; then \
 		echo "no $(PIC_FAULT_HEX) (XC8 absent?); skipping PIC fault-inject for variant $(PIC_FAULT_VARIANT)"; exit 0; \
 	fi; \
-	echo "--- PIC fault-inject: variant=$(PIC_FAULT_VARIANT) proc=$(PIC_GPSIM_PROC) ---"; \
+	s="$(PIC_FAULT_HEX:.hex=.s)"; \
+	alloc=`awk 'prev=="_ctx_:"{print $$2; exit} {prev=$$1}' "$$s" 2>/dev/null`; \
+	if [ "$$alloc" != "3" ]; then \
+		echo "FAIL: _ctx_ allocates $${alloc:-?} bytes in $$s -- expected 3 (packed 1-byte enums)."; \
+		echo "      test_fault_pic.cc injects at the hard-coded byte offsets ctx_+0/+1/+2"; \
+		echo "      (program_state/effect_state/debounce_counter), which assume XC8's code"; \
+		echo "      generator packs each enum to 1 byte. It has stopped doing so: fix the"; \
+		echo "      offsets (and the RAM figures in DESIGN_DOCUMENTATION.adoc) before running."; \
+		echo "      NOTE: this is checked from the generated .s because it CANNOT be a"; \
+		echo "      static_assert -- XC8's clang front end sizes enums as int, so"; \
+		echo "      sizeof(debounce_context_t) evaluates to 5 even while the allocation is 3."; \
+		exit 1; \
+	fi; \
+	echo "--- PIC fault-inject: variant=$(PIC_FAULT_VARIANT) proc=$(PIC_GPSIM_PROC) (ctx_ layout verified: 3 bytes) ---"; \
 	$(PIC_FAULT_COMPILE); \
 	./$(PIC_FAULT_BIN)
 
