@@ -1,0 +1,33 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053 -> build_pic/bypass_cd4053_pic10f322.hex : 395 words (77.1%) of 512
+OK:   cd4053_tmux -> build_pic/bypass_cd4053_tmux_pic10f322.hex : 395 words (77.1%) of 512
+OK:   mute -> build_pic/bypass_mute_pic10f322.hex : 425 words (83.0%) of 512
+OK:   mute_tmux -> build_pic/bypass_mute_tmux_pic10f322.hex : 425 words (83.0%) of 512
+OK:   relay -> build_pic/bypass_relay_pic10f322.hex : 420 words (82.0%) of 512
+--- PIC fault-inject: variant=cd4053_tmux proc=p10f322 (ctx_ layout verified: 3 bytes) ---
+FAULT-INJECT START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic/bypass_cd4053_tmux_pic10f322.hex proc=p10f322 FOSC=16000000 window=2000 ms
+  (NB: gpsim WDT@WDTPS=0x08 ~1.057s -- recovery reset, not 256ms silicon)
+  control (no injection)
+    PASS: quiescent device did not reset
+  inject OSCCON.IRCF   @0x010: 0x79 -> 0x69  (IRCF 0b111->0b110: 16MHz->8MHz clock skew)
+    PASS: gate forced exactly 1 WDT reset
+  inject WDTCON.WDTPS  @0x030: 0x10 -> 0x00  (WDTPS 0b01000->0b00000: 1:8192->1:32, WDT miscalibrated (else silent))
+    PASS: gate forced exactly 1 WDT reset
+  inject PR2           @0x012: 0xf9 -> 0x63  (tick period 249->99: 1ms tick skewed)
+    PASS: gate forced exactly 1 WDT reset
+  inject T2CON         @0x013: 0x07 -> 0x06  (T2CKPS 1:16->1:4, TMR2ON preserved: timer cfg skew)
+    PASS: gate forced exactly 1 WDT reset
+  inject WPUA.RA3      @0x009: 0x0f -> 0x07  (clear RA3 pull-up latch: footswitch weak pull-up disabled)
+    PASS: gate forced exactly 1 WDT reset
+  inject OPTION.nWPUEN @0x00e: 0x7f -> 0xff  (set nWPUEN: global weak pull-ups disabled)
+    PASS: gate forced exactly 1 WDT reset
+  inject ctx.program_state @0x05d: 0x00 -> 0x02  (0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault))
+    PASS: gate forced exactly 1 WDT reset
+  inject ctx.effect_state @0x05e: 0x00 -> 0x02  (->2: > ENGAGED (gate-only))
+    PASS: gate forced exactly 1 WDT reset
+  inject ctx.debounce_counter @0x05f: 0x00 -> 0xff  (->255: > RELEASE_THRESH (gate-only))
+    PASS: gate forced exactly 1 WDT reset
+
+FAULT-INJECT PASS: 10 checks, 0 failures
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware'

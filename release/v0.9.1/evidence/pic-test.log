@@ -1,0 +1,160 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053 -> build_pic/bypass_cd4053_pic10f322.hex : 395 words (77.1%) of 512
+OK:   cd4053_tmux -> build_pic/bypass_cd4053_tmux_pic10f322.hex : 395 words (77.1%) of 512
+OK:   mute -> build_pic/bypass_mute_pic10f322.hex : 425 words (83.0%) of 512
+OK:   mute_tmux -> build_pic/bypass_mute_tmux_pic10f322.hex : 425 words (83.0%) of 512
+OK:   relay -> build_pic/bypass_relay_pic10f322.hex : 420 words (82.0%) of 512
+cc -std=c11 -Wall -Wextra -Werror -Wconversion -fsanitize=undefined,address -fno-sanitize-recover=all test/pic/test_config_pic.c -o test/pic/test_config_pic
+PIC10F322 CONFIG-word verification (word addr 0x2007 / byte 0x400E):
+  build_pic/bypass_cd4053_pic10f322.hex: CONFIG=0x389E (implemented bits 0x189E)
+  build_pic/bypass_cd4053_tmux_pic10f322.hex: CONFIG=0x389E (implemented bits 0x189E)
+  build_pic/bypass_mute_pic10f322.hex: CONFIG=0x389E (implemented bits 0x189E)
+  build_pic/bypass_mute_tmux_pic10f322.hex: CONFIG=0x389E (implemented bits 0x189E)
+  build_pic/bypass_relay_pic10f322.hex: CONFIG=0x389E (implemented bits 0x189E)
+CONFIG checks: 75 checks, 0 failures
+cppcheck (PIC, pic8-enhanced): cppcheck src/bypass_mcu_pic10f32x.c
+Checking src/bypass_mcu_pic10f32x.c ...
+Checking src/bypass_mcu_pic10f32x.c: __XC8=1;_10F322=1;_XTAL_FREQ=16000000UL;BYPASS_MCU_PIC10F32X=1...
+MISRA-C:2012 analysis -- PIC shell (cppcheck + misra addon, pic8-enhanced)
+Checking src/bypass_mcu_pic10f32x.c ...
+Checking src/bypass_mcu_pic10f32x.c: __XC8=1;_10F322=1;_XTAL_FREQ=16000000UL;BYPASS_MCU_PIC10F32X=1...
+MISRA-C:2012 (PIC shell): clean (documented deviations waived per MISRA_COMPLIANCE.md)
+=== PIC static analysis (cppcheck + MISRA) complete ===
+--- gpsim register-level test: variant cd4053 ---
+gpsim register-level test: build_pic/bypass_cd4053_pic10f322.hex (proc p10f322)
+  INIT_BYPASS    porta=0x8 lata=0x0
+  PRESS1_LOW     porta=0x3 lata=0x3
+  ENGAGED        porta=0xb lata=0x3
+  BYPASS_AGAIN   porta=0x8 lata=0x0
+  ok:   INIT: LED off (bypass)
+  ok:   INIT: footswitch released (RA3=1)
+  ok:   PRESS1: footswitch pressed (RA3=0)
+  ok:   PRESS1: LED on (toggled on the press)
+  ok:   ENGAGED: LED on (latched)
+  ok:   ENGAGED: footswitch released (RA3=1)
+  ok:   ENGAGED: full LATA == 0x3 (variant control pins)
+  ok:   BYPASS_AGAIN: LED off (toggled back)
+  ok:   BYPASS_AGAIN: footswitch released (RA3=1)
+RESULT: PASS (build_pic/bypass_cd4053_pic10f322.hex)
+gpsim power-on-pressed test: build_pic/bypass_cd4053_pic10f322.hex (proc p10f322)
+  PON_HELD       porta=0x0 lata=0x0
+  PON_RELEASED   porta=0x8 lata=0x0
+  PON_ENGAGED    porta=0xb lata=0x3
+  ok:   PON_HELD: LED off (held switch did not engage)
+  ok:   PON_HELD: footswitch pressed (RA3=0)
+  ok:   PON_RELEASED: still bypass (release did not toggle)
+  ok:   PON_RELEASED: footswitch released (RA3=1)
+  ok:   PON_ENGAGED: LED on (fresh press toggled, latched)
+  ok:   PON_ENGAGED: footswitch released (RA3=1)
+RESULT: PASS (build_pic/bypass_cd4053_pic10f322.hex)
+--- gpsim register-level test: variant cd4053_tmux ---
+gpsim register-level test: build_pic/bypass_cd4053_tmux_pic10f322.hex (proc p10f322)
+  INIT_BYPASS    porta=0xa lata=0x2
+  PRESS1_LOW     porta=0x1 lata=0x1
+  ENGAGED        porta=0x9 lata=0x1
+  BYPASS_AGAIN   porta=0xa lata=0x2
+  ok:   INIT: LED off (bypass)
+  ok:   INIT: footswitch released (RA3=1)
+  ok:   PRESS1: footswitch pressed (RA3=0)
+  ok:   PRESS1: LED on (toggled on the press)
+  ok:   ENGAGED: LED on (latched)
+  ok:   ENGAGED: footswitch released (RA3=1)
+  ok:   ENGAGED: full LATA == 0x1 (variant control pins)
+  ok:   BYPASS_AGAIN: LED off (toggled back)
+  ok:   BYPASS_AGAIN: footswitch released (RA3=1)
+RESULT: PASS (build_pic/bypass_cd4053_tmux_pic10f322.hex)
+gpsim power-on-pressed test: build_pic/bypass_cd4053_tmux_pic10f322.hex (proc p10f322)
+  PON_HELD       porta=0x2 lata=0x2
+  PON_RELEASED   porta=0xa lata=0x2
+  PON_ENGAGED    porta=0x9 lata=0x1
+  ok:   PON_HELD: LED off (held switch did not engage)
+  ok:   PON_HELD: footswitch pressed (RA3=0)
+  ok:   PON_RELEASED: still bypass (release did not toggle)
+  ok:   PON_RELEASED: footswitch released (RA3=1)
+  ok:   PON_ENGAGED: LED on (fresh press toggled, latched)
+  ok:   PON_ENGAGED: footswitch released (RA3=1)
+RESULT: PASS (build_pic/bypass_cd4053_tmux_pic10f322.hex)
+--- gpsim register-level test: variant mute ---
+gpsim register-level test: build_pic/bypass_mute_pic10f322.hex (proc p10f322)
+  INIT_BYPASS    porta=0x8 lata=0x0
+  PRESS1_LOW     porta=0x7 lata=0x7
+  ENGAGED        porta=0xf lata=0x7
+  BYPASS_AGAIN   porta=0x8 lata=0x0
+  ok:   INIT: LED off (bypass)
+  ok:   INIT: footswitch released (RA3=1)
+  ok:   PRESS1: footswitch pressed (RA3=0)
+  ok:   PRESS1: LED on (toggled on the press)
+  ok:   ENGAGED: LED on (latched)
+  ok:   ENGAGED: footswitch released (RA3=1)
+  ok:   ENGAGED: full LATA == 0x7 (variant control pins)
+  ok:   BYPASS_AGAIN: LED off (toggled back)
+  ok:   BYPASS_AGAIN: footswitch released (RA3=1)
+RESULT: PASS (build_pic/bypass_mute_pic10f322.hex)
+gpsim power-on-pressed test: build_pic/bypass_mute_pic10f322.hex (proc p10f322)
+  PON_HELD       porta=0x0 lata=0x0
+  PON_RELEASED   porta=0x8 lata=0x0
+  PON_ENGAGED    porta=0xf lata=0x7
+  ok:   PON_HELD: LED off (held switch did not engage)
+  ok:   PON_HELD: footswitch pressed (RA3=0)
+  ok:   PON_RELEASED: still bypass (release did not toggle)
+  ok:   PON_RELEASED: footswitch released (RA3=1)
+  ok:   PON_ENGAGED: LED on (fresh press toggled, latched)
+  ok:   PON_ENGAGED: footswitch released (RA3=1)
+RESULT: PASS (build_pic/bypass_mute_pic10f322.hex)
+--- gpsim register-level test: variant mute_tmux ---
+gpsim register-level test: build_pic/bypass_mute_tmux_pic10f322.hex (proc p10f322)
+  INIT_BYPASS    porta=0xe lata=0x6
+  PRESS1_LOW     porta=0x1 lata=0x1
+  ENGAGED        porta=0x9 lata=0x1
+  BYPASS_AGAIN   porta=0xe lata=0x6
+  ok:   INIT: LED off (bypass)
+  ok:   INIT: footswitch released (RA3=1)
+  ok:   PRESS1: footswitch pressed (RA3=0)
+  ok:   PRESS1: LED on (toggled on the press)
+  ok:   ENGAGED: LED on (latched)
+  ok:   ENGAGED: footswitch released (RA3=1)
+  ok:   ENGAGED: full LATA == 0x1 (variant control pins)
+  ok:   BYPASS_AGAIN: LED off (toggled back)
+  ok:   BYPASS_AGAIN: footswitch released (RA3=1)
+RESULT: PASS (build_pic/bypass_mute_tmux_pic10f322.hex)
+gpsim power-on-pressed test: build_pic/bypass_mute_tmux_pic10f322.hex (proc p10f322)
+  PON_HELD       porta=0x6 lata=0x6
+  PON_RELEASED   porta=0xe lata=0x6
+  PON_ENGAGED    porta=0x9 lata=0x1
+  ok:   PON_HELD: LED off (held switch did not engage)
+  ok:   PON_HELD: footswitch pressed (RA3=0)
+  ok:   PON_RELEASED: still bypass (release did not toggle)
+  ok:   PON_RELEASED: footswitch released (RA3=1)
+  ok:   PON_ENGAGED: LED on (fresh press toggled, latched)
+  ok:   PON_ENGAGED: footswitch released (RA3=1)
+RESULT: PASS (build_pic/bypass_mute_tmux_pic10f322.hex)
+--- gpsim register-level test: variant relay ---
+gpsim register-level test: build_pic/bypass_relay_pic10f322.hex (proc p10f322)
+  INIT_BYPASS    porta=0x8 lata=0x0
+  PRESS1_LOW     porta=0x5 lata=0x5
+  ENGAGED        porta=0x9 lata=0x1
+  BYPASS_AGAIN   porta=0x8 lata=0x0
+  ok:   INIT: LED off (bypass)
+  ok:   INIT: footswitch released (RA3=1)
+  ok:   PRESS1: footswitch pressed (RA3=0)
+  ok:   PRESS1: LED on (toggled on the press)
+  ok:   ENGAGED: LED on (latched)
+  ok:   ENGAGED: footswitch released (RA3=1)
+  ok:   ENGAGED: full LATA == 0x1 (variant control pins)
+  ok:   BYPASS_AGAIN: LED off (toggled back)
+  ok:   BYPASS_AGAIN: footswitch released (RA3=1)
+RESULT: PASS (build_pic/bypass_relay_pic10f322.hex)
+gpsim power-on-pressed test: build_pic/bypass_relay_pic10f322.hex (proc p10f322)
+  PON_HELD       porta=0x0 lata=0x0
+  PON_RELEASED   porta=0x8 lata=0x0
+  PON_ENGAGED    porta=0x9 lata=0x1
+  ok:   PON_HELD: LED off (held switch did not engage)
+  ok:   PON_HELD: footswitch pressed (RA3=0)
+  ok:   PON_RELEASED: still bypass (release did not toggle)
+  ok:   PON_RELEASED: footswitch released (RA3=1)
+  ok:   PON_ENGAGED: LED on (fresh press toggled, latched)
+  ok:   PON_ENGAGED: footswitch released (RA3=1)
+RESULT: PASS (build_pic/bypass_relay_pic10f322.hex)
+=== all PIC10F322 pre-hardware checks complete ===
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
