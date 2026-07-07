@@ -105,16 +105,19 @@ uint8_t hw_output_pins_intact(uint8_t const expected_mask) {
 // values are what we want
 // SFR = special function register, the "control panel" of the MCU
 static uint8_t hw_critical_sfrs_intact(void) {
-    uint8_t ircf  = (uint8_t)OSCCONbits.IRCF;
-    uint8_t wdtps = (uint8_t)WDTCONbits.WDTPS;
-    uint8_t pr2   = (uint8_t)PR2;
-    uint8_t t2con = (uint8_t)T2CON;
+    uint8_t ircf   = (uint8_t)OSCCONbits.IRCF;
+    uint8_t wdtps  = (uint8_t)WDTCONbits.WDTPS;
+    uint8_t pr2    = (uint8_t)PR2;
+    uint8_t t2con  = (uint8_t)T2CON;
+    uint8_t ansela = (uint8_t)(ANSELA & BYPASS_OUTPUT_DDR_MASK); // 0 = output pins still digital
+
 
     return 
         (HFINTOSC_2MHZ_IRCF == ircf)  &&
         (WDT_WDTPS_256MS    == wdtps) &&
         (TMR2_PR2_PERIOD    == pr2)   && 
-        (TMR2_T2CON_CONFIG  == t2con);
+        (TMR2_T2CON_CONFIG  == t2con) &&
+        (0U                 == ansela);
 }
 
 

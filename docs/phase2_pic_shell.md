@@ -9,6 +9,15 @@ abstraction refactor) is complete; this phase adds a second implementation of th
 `main()`/tick/watchdog-liveness model is **per-MCU shell**; only the leaf hardware
 operations are shared through the interface.
 
+> **As-built note (2 MHz build).** This document captures the original **16 MHz**
+> design intent. The shipped firmware (`src/bypass_mcu_pic10f322.c`) now clocks the
+> core at **2 MHz** for lower current draw, deriving the same 1 ms tick from
+> `T2CKPS = 0b01` (1:4) with `PR2 = 124` (FOSC/4 = 500 kHz → 125 kHz → 125 counts).
+> Wherever this doc says "16 MHz / prescale 1:16 / `PR2` = 249 / `IRCF` = 0b111",
+> read the 2 MHz values above (see commit `f7d872e`). Note also the TMR2 prescale
+> field is a 2-bit code `00/01/10/11 = 1:1/1:4/1:16/1:64` — the datasheet prose is
+> incomplete; the register table is authoritative.
+
 ## 1. Locked decisions
 
 - **Tick/WDT model = "B" (polled timer + fault watchdog).** A hardware timer
@@ -41,10 +50,12 @@ Confirmed against the datasheet and the now-installed DFP device header
   `ANSELA`(0x08, 1=analog; **must be cleared for digital I/O** — pins power up
   analog), `WPUA`(0x09, per-pin weak pull-up), and **`OPTION_REG`(0x0E)`.nWPUEN`
   (bit 7, active-low — *clear* to enable the weak pull-ups)**.
-- **Timer2** (1 ms tick source): `T2CON`(0x13: `T2CKPS` prescale 1/4/16, `T2OUTPS`
-  postscale, `TMR2ON`), `PR2`(0x12), `TMR2`(0x11), flag **`TMR2IF` = `PIR1`(0x0C)
-  bit 1**. At `FOSC`=16 MHz → FOSC/4 = 4 MHz, prescale /16 → 250 kHz, `PR2`=249 →
-  exactly 1 ms. Postscale 1:1 so `TMR2IF` sets every period; the loop polls + clears it.
+- **Timer2** (1 ms tick source): `T2CON`(0x13: `T2CKPS` prescale 1/4/16/64,
+  `T2OUTPS` postscale, `TMR2ON`), `PR2`(0x12), `TMR2`(0x11), flag **`TMR2IF` =
+  `PIR1`(0x0C) bit 1**. At `FOSC`=16 MHz → FOSC/4 = 4 MHz, prescale /16 → 250 kHz,
+  `PR2`=249 → exactly 1 ms. (**As-built 2 MHz: FOSC/4 = 500 kHz, prescale /4
+  (`T2CKPS`=0b01) → 125 kHz, `PR2`=124 → 1 ms.**) Postscale 1:1 so `TMR2IF` sets
+  every period; the loop polls + clears it.
 - **WDT** (fault watchdog): time base = 31 kHz LFINTOSC, independent of FOSC.
   `WDTCON`(0x30) = `SWDTEN`(bit 0) + `WDTPS<4:0>`(bits 1–5). ~256 ms ≈ `WDTPS`=0b01000
   (1:8192), mirroring the AVR's 250 ms. Datasheet-confirmed: LFINTOSC = 31 kHz
@@ -53,7 +64,7 @@ Confirmed against the datasheet and the now-installed DFP device header
   (the prior ~32 ms gave only ~1.4×). Awake WDT
   timeout = device reset (the fault-recovery path we want).
 - **Oscillator:** internal HFINTOSC, frequency via `OSCCON`(0x10) `IRCF<2:0>`
-  (3-bit; 16 MHz = 0b111, confirm); `FOSC` CONFIG bit = INTOSC.
+  (3-bit; **as-built 2 MHz = 0b100**; 16 MHz = 0b111); `FOSC` CONFIG bit = INTOSC.
 - **CONFIG (`#pragma config`)** bits available: `FOSC` (INTOSC), `BOREN`
   (ON/OFF/NSLEEP/SBODEN), `WDTE` (ON/OFF/NSLEEP/SWDTEN), `PWRTE`, `MCLRE`
   (ON = MCLR / OFF = RA3 digital input), `CP`, `LVP`, `LPBOR`, `BORV`, `WRT`.

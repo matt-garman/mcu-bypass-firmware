@@ -10,6 +10,13 @@ Branch: `pic10f32x_support`. Model **B** (polled TMR2 1 ms tick + ~256 ms fault
 WDT, no sleep). Per AGENTS.md, **firmware edits are the user's**; Claude owns the
 Makefile / test wiring and verifies.
 
+> **As-built note (2 MHz build).** This is the *pre-implementation* spec and shows
+> the original **16 MHz** skeleton (with `/* verify */` placeholders). The shipped
+> firmware in `src/bypass_mcu_pic10f322.c` is the source of truth: it runs the core
+> at **2 MHz** (`OSCCON` `IRCF` = 0b100), and derives the 1 ms tick from
+> `PR2 = 124` with `T2CON = 0x05` (`T2CKPS` = 0b01 = 1:4) — not the `PR2 = 249` /
+> 1:16 / `_XTAL_FREQ = 16000000UL` shown below. See commit `f7d872e`.
+
 ## Prereqs (already proven this session)
 - XC8 v3.10: `/opt/microchip/xc8/v3.10/bin/xc8-cc`
 - DFP: `/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189`

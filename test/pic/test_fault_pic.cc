@@ -6,7 +6,7 @@
 // gate + hw_force_wdt_reset() promise.
 //
 // COVERAGE -- every location the gate guards:
-//   * config SFRs    OSCCON.IRCF / WDTCON.WDTPS / PR2 / T2CON (hw_critical_sfrs_intact)
+//   * config SFRs    OSCCON.IRCF / WDTCON.WDTPS / PR2 / T2CON / ANSELA (hw_critical_sfrs_intact)
 //   * pull-up SFRs   WPUA (RA3 latch) + OPTION_REG.nWPUEN     (hw_footswitch_pullup_intact)
 //   * ctx_ SRAM      program_state / effect_state / debounce_counter (range checks)
 // The ctx_ cases run only when CTX_ADDR is passed (the Makefile extracts _ctx_'s
@@ -43,9 +43,10 @@
 // keeps petting, so absent the gate there is provably NO reset -- a WDTPS skew
 // is otherwise entirely silent. PR2/T2CON are also read by the TMR2 hardware, so
 // their corruption is kept tick-preserving (T2CON keeps TMR2ON set; PR2 stays a
-// valid period) so the reset is the gate, not a wedged tick. The pull-up SFRs
-// are gate-only too: the footswitch is externally driven here, so disabling the
-// pull-up does not change the pin -- only the gate's check reacts.
+// valid period) so the reset is the gate, not a wedged tick. ANSELA and the
+// pull-up SFRs are gate-only too: the footswitch is externally driven here, so
+// re-selecting an output pin analog / disabling the pull-up does not change the
+// footswitch pin -- only the gate's check reacts.
 //
 // The ctx_ cases differ subtly. effect_state and debounce_counter are copied
 // through debounce_step unchanged when the device is quiescent (no toggle), so a
@@ -120,6 +121,7 @@ static NullBuf g_nullbuf;
 #define OSCCON_ADDR  0x010u
 #define PR2_ADDR     0x012u
 #define T2CON_ADDR   0x013u
+#define ANSELA_ADDR  0x008u  // ANSA0..ANSA2 = RA0..RA2 analog select (mask 0x07 = BYPASS_OUTPUT_DDR_MASK)
 #define OPTION_ADDR  0x00Eu  // OPTION_REG; nWPUEN (global pull-up enable) = bit 7
 #define WDTCON_ADDR  0x030u
 
@@ -361,6 +363,19 @@ int main() {
                 "tick period 124->99: 1ms tick skewed");
     inject_case("T2CON",        T2CON_ADDR,  "t2con",  false, 0x01,
                 "T2CKPS 1:4->1:1, TMR2ON preserved: timer cfg skew");
+
+    // ANSELA: re-select an output pin analog. The gate masks the fixed
+    // RA0|RA1|RA2 (BYPASS_OUTPUT_DDR_MASK), so ANY of the three must recover via
+    // one reset -- a narrowed mask that only checked RA0 would slip RA1/RA2 past.
+    // This is the one config-SFR case the TRISA-only hw_is_sanity_check_failed()
+    // cannot see: an ANSELA flip pulls the pin out of digital service while its
+    // TRISA direction bit still reads "output".
+    inject_case("ANSELA.RA0",   ANSELA_ADDR, "ansel",  false, 0x01,
+                "ANSA0=1: RA0 (LED) re-selected analog, out of digital service");
+    inject_case("ANSELA.RA1",   ANSELA_ADDR, "ansel",  false, 0x02,
+                "ANSA1=1: RA1 (control pin) re-selected analog, out of digital service");
+    inject_case("ANSELA.RA2",   ANSELA_ADDR, "ansel",  false, 0x04,
+                "ANSA2=1: RA2 (control pin) re-selected analog, out of digital service");
 
     // pull-up SFRs (hw_footswitch_pullup_intact) -- footswitch is externally
     // driven, so the pin stays released; only the gate's check reacts.
