@@ -18,7 +18,7 @@
 # Exit status: 0 = all checks passed (or gpsim not installed -> skipped); 1 = a
 # check failed or gpsim/the HEX could not be run.
 #
-# Pins (src/bypass_pins_pic10f32x.h): RA3 = footswitch (1=released, 0=pressed),
+# Pins (src/bypass_pins_pic10f322.h): RA3 = footswitch (1=released, 0=pressed),
 # RA0 = status LED (LATA bit0; 1=ENGAGED, 0=BYPASS).
 
 set -u

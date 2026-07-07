@@ -35,7 +35,7 @@ maintaining this document), run `make analyze-misra-report`.
 
 ### The PIC shell (XC8 build)
 
-The PIC10F322 shell (`bypass_mcu_pic10f32x.c`) is a separate toolchain track and
+The PIC10F322 shell (`bypass_mcu_pic10f322.c`) is a separate toolchain track and
 is analyzed by its own target, **`make pic-analyze-misra`** (with a companion
 bug-finding pass, `make pic-analyze-cppcheck`). It is *not* part of `make test`
 because the XC8 toolchain / DFP headers may be absent in CI; it skips cleanly
@@ -58,7 +58,7 @@ Two PIC-specific analysis notes:
   modeling limitation on *adopted toolchain headers*, not a code defect, and is
   suppressed on the command line (`--suppress=misra-config`) — the analogue of
   how avr-libc is treated for the AVR run.
-- **Pinned configuration.** The PIC run forces `-D_10F322 -DBYPASS_MCU_PIC10F32X`
+- **Pinned configuration.** The PIC run forces `-D_10F322 -DBYPASS_MCU_PIC10F322`
   and `-U__AVR__ -UBYPASS_MCU_AVR_CLASSIC` with `--max-configs=1` so only the PIC
   branch of `bypass_output_common.h` is active. cppcheck still records the
   *unselected* AVR pin map's macros in its cross-configuration directive list, so
@@ -68,7 +68,7 @@ Two PIC-specific analysis notes:
 ## Compliance boundary
 
 The compliance boundary is **this project's own source** — the per-MCU shells
-(`bypass_mcu_avr_classic.c`, `bypass_mcu_pic10f32x.c`) and the `bypass_output_*`
+(`bypass_mcu_avr_classic.c`, `bypass_mcu_pic10f322.c`) and the `bypass_output_*`
 driver/header set. The **avr-libc / avr-gcc** (AVR) and **XC8 / DFP** (PIC)
 **system headers** are outside the boundary: they are adopted toolchain code, not
 authored by this project, and are excluded from the analysis (by include-path
@@ -130,7 +130,7 @@ added here explicitly.
 | | |
 |---|---|
 | **Rule** | 2.5 (unused macro definition, Advisory) |
-| **Files** | `bypass_pins_avr_classic.h`, `bypass_pins_pic10f32x.h`, `bypass_config.h` |
+| **Files** | `bypass_pins_avr_classic.h`, `bypass_pins_pic10f322.h`, `bypass_config.h` |
 | **Instances** | AVR run: 16 (14 pin map + 2 `bypass_config.h`). PIC run: the PIC pin map plus the cross-config AVR pin map (see below). |
 
 **Rationale.** Several macros are defined in shared headers that are included
@@ -176,7 +176,7 @@ TUs for their `static_assert` guards on the timing constants. Those TUs do not
 use the threshold macros directly, so cppcheck reports them as unused when
 analyzing a driver TU in isolation.
 
-**`bypass_pins_pic10f32x.h` — the PIC10F322 pin map**
+**`bypass_pins_pic10f322.h` — the PIC10F322 pin map**
 
 The PIC pin map is the exact PIC analogue of the classic-AVR one, and Rule 2.5
 fires on it in the PIC MISRA run (`make pic-analyze-misra`) for the same reason:

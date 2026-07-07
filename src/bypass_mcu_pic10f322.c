@@ -1,11 +1,10 @@
-// Copyright (c) Matthew Garman.  All rights reserved.
-// Licensed under the MIT License. See LICENSE in the project root for
-// license information.
+// SPDX-License-Identifier: MIT
+// Copyright (c) Matthew Garman
 
 
-// PIC10F320/322 hardware shell (Microchip XC8 toolchain).
+// PIC10F322 hardware shell (Microchip XC8 toolchain).
 //
-// Implements the bypass_hw_iface.h contract for the PIC10F32x family and
+// Implements the bypass_hw_iface.h contract for the PIC10F322 MCU and
 // provides this family's main(), CONFIG bits, and tick/watchdog model. It is
 // the PIC counterpart of the classic-AVR shell (bypass_mcu_avr_classic.c); the
 // pure debounce core (bypass_pure.c) and the three output drivers are shared
@@ -18,7 +17,7 @@
 // itself the liveness proof.
 //
 // CONFIG / fuse rationale (PIC analogue of the AVR fuse table in the AVR shell):
-//   FOSC=INTOSC  internal 16MHz HFINTOSC (CLKIN pin function disabled)
+//   FOSC=INTOSC  internal 2MHz HFINTOSC (CLKIN pin function disabled)
 //   WDTE=ON      watchdog cannot be disabled by software (EMI/SEU resilience);
 //                period set to ~256ms via WDTCON.WDTPS at runtime
 //   PWRTE=ON     power-up timer: let the supply settle before code runs
@@ -37,7 +36,7 @@
 // the most conservative reset behaviour the device offers.
 
 #include "bypass_config.h"        // PRESSED_THRESH / RELEASE_THRESH
-#include "bypass_output_common.h" // -> bypass_pins_pic10f32x.h (build defines -DBYPASS_MCU_PIC10F32X)
+#include "bypass_output_common.h" // -> bypass_pins_pic10f322.h (build defines -DBYPASS_MCU_PIC10F322)
 #include "bypass_types.h"
 #include "bypass_pure.h"
 #include "bypass_hw_iface.h"
@@ -62,10 +61,10 @@
 #pragma config WRT   = OFF
 
 
-#define HFINTOSC_16MHZ_IRCF (0x07U)  // OSCCONbits.IRCF = 16 MHz; must match _XTAL_FREQ
-#define WDT_WDTPS_256MS     (0x08U)  // WDTCONbits.WDTPS = 1:8192 -> ~256 ms
-#define TMR2_PR2_PERIOD     (249U)   // PR2 -> 250 counts @ 250 kHz = 1 ms
-#define TMR2_T2CON_CONFIG   (0x07U)  // T2CON: T2CKPS=0b11 (1:16), TMR2ON=1
+#define HFINTOSC_2MHZ_IRCF  (0x04U) // 0b100 = 2 MHz; must match _XTAL_FREQ
+#define WDT_WDTPS_256MS     (0x08U) // WDTCONbits.WDTPS = 1:8192 -> ~256 ms
+#define TMR2_PR2_PERIOD     (124U)  // PR2 = 124 -> 125 counts @ 125 kHz = 1 ms
+#define TMR2_T2CON_CONFIG   (0x05U) // T2CKPS=0b01 (1:4),  TMR2ON=1
 
 
 
@@ -112,10 +111,10 @@ static uint8_t hw_critical_sfrs_intact(void) {
     uint8_t t2con = (uint8_t)T2CON;
 
     return 
-        (HFINTOSC_16MHZ_IRCF == ircf) &&
-        (WDT_WDTPS_256MS == wdtps)    &&
-        (TMR2_PR2_PERIOD     == pr2)  && 
-        (TMR2_T2CON_CONFIG == t2con);
+        (HFINTOSC_2MHZ_IRCF == ircf)  &&
+        (WDT_WDTPS_256MS    == wdtps) &&
+        (TMR2_PR2_PERIOD    == pr2)   && 
+        (TMR2_T2CON_CONFIG  == t2con);
 }
 
 
@@ -168,16 +167,16 @@ static uint8_t hw_footswitch_pullup_intact(void) {
 static void hw_wdt_pet(void) { CLRWDT(); }
 
 
-// core MCU bring-up: 16MHz HFINTOSC, all-digital port, the footswitch weak
+// core MCU bring-up: 2MHz HFINTOSC, all-digital port, the footswitch weak
 // pull-up, the global weak-pull-up enable, and the ~256ms watchdog period.
 // Does NOT start the tick timer (see hw_tick_timer_start()).
 //
 // Ordering: call AFTER hw_init_output_pins() so the ANSELA/pull-up writes here
 // do not disturb the output-pin direction setup.
 static void hw_mcu_init(void) {
-    // HFINTOSC = 16 MHz (IRCF = 0b111). Must match _XTAL_FREQ (asserted below),
-    // which the relay/mute drivers' __delay_ms() relies on.
-    OSCCONbits.IRCF = HFINTOSC_16MHZ_IRCF;
+    // HFINTOSC = 2 MHz (IRCF = 0b100).  Must match _XTAL_FREQ (asserted
+    // below), which the relay/mute drivers' __delay_ms() relies on.
+    OSCCONbits.IRCF = HFINTOSC_2MHZ_IRCF;
 
     // entire port digital -- the I/O pins power up as analog inputs.
     ANSELA = 0x00U;
@@ -197,15 +196,16 @@ static void hw_mcu_init(void) {
 }
 
 
-// configure + start the 1ms tick on TMR2, polled (no interrupt). At FOSC=16MHz
-// the timer clock is FOSC/4 = 4MHz; the 1:16 PREscaler (T2CKPS) -> 250kHz, and
-// PR2=249 -> (249+1) = 250 counts = 1ms per period. The output POSTscaler
-// (T2OUTPS) is set to 1:1, so TMR2IF asserts on every PR2 match (once per 1ms),
-// not once per N matches. MUST run AFTER any blocking output actuation so a
-// TMR2IF that set during init is not mistaken for the first real tick.
+// configure + start the 1ms tick on TMR2, polled (no interrupt).  At
+// FOSC=2MHz the timer clock is FOSC/4 = 500kHz; the 1:4 PREscaler (T2CKPS) ->
+// 125kHz, and  │ PR2=124 -> (124+1) = 125 counts = 1ms period.  The output
+// POSTscaler (T2OUTPS) is set to 1:1, so TMR2IF asserts on every PR2 match
+// (once per 1ms), not once per N matches. MUST run AFTER any blocking output
+// actuation so a TMR2IF that set during init is not mistaken for the first
+// real tick.
 static void hw_tick_timer_start(void) {
     PR2   = TMR2_PR2_PERIOD;   // 1ms period
-    T2CON = TMR2_T2CON_CONFIG; // T2CKPS = 0b11 (1:16 prescale), TMR2ON = 1
+    T2CON = TMR2_T2CON_CONFIG; // T2CKPS = 0b01 (1:4 prescale), TMR2ON = 1
     PIR1bits.TMR2IF = 0;       // start clean
 }
 
@@ -250,9 +250,9 @@ static void init(void) {
     static_assert(CD4053_CTL2     == _PORTA_RA2_POSN, "CD4053_CTL2 must be RA2");
 
     // _XTAL_FREQ (a build flag, used by the drivers' __delay_ms) must match the
-    // 16MHz HFINTOSC selected in hw_mcu_init(), or the coil/mute pulse widths
+    // 2MHz HFINTOSC selected in init(), or the coil/mute pulse widths
     // would be wrong.
-    static_assert(_XTAL_FREQ == 16000000UL, "_XTAL_FREQ must be 16 MHz (matches OSCCON IRCF)");
+    static_assert(_XTAL_FREQ ==  2000000UL, "_XTAL_FREQ must be 2 MHz (matches OSCCON IRCF)");
 
 
     // Pet the WDT first thing, mirroring the AVR shell's "re-arm first". Unlike

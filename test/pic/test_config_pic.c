@@ -3,7 +3,7 @@
 // WHY THIS EXISTS
 // ---------------
 // The firmware's correctness depends on the device CONFIG word, which is set in
-// the C source via `#pragma config` (see src/bypass_mcu_pic10f32x.c). A wrong
+// the C source via `#pragma config` (see src/bypass_mcu_pic10f322.c). A wrong
 // CONFIG bit does NOT show up in any host/formal test (those compile only the
 // MCU-neutral pure core) and the PIC shell has no simavr lock-step harness -- a
 // fat-fingered pragma would only bite on real silicon:

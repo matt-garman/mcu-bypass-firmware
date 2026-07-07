@@ -27,7 +27,7 @@ make test` and commit the new signature.
   Minimum avr-gcc version: 4.9 (for _Static_assert / C11 support with -std=gnu11)
   Recommended: 7.x or later (best -fshort-enums / LTO support for tiny parts)
 
-== PIC toolchain (PIC10F32x family, optional second target)
+== PIC toolchain (PIC10F322, optional second target)
 
 The PIC10F322 port (`make pic`, `make pic-test`) is a SEPARATE, optional
 toolchain, entirely independent of the AVR build above and deliberately NOT part
@@ -151,7 +151,7 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   Optional analysis tools:
   sudo apt install valgrind lcov gcovr
 
-  Optional PIC10F32x port (`make pic` / `make pic-test`):
+  Optional PIC10F322 port (`make pic` / `make pic-test`):
   sudo apt install gpsim          # the PIC simulator (apt)
   # For the libgpsim soak (`make pic-test-soak`; standalone, run locally):
   sudo apt install gpsim-dev libglib2.0-dev

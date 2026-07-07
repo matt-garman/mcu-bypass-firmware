@@ -1,13 +1,12 @@
-// Copyright (c) Matthew Garman.  All rights reserved.
-// Licensed under the MIT License. See LICENSE in the project root for
-// license information.
+// SPDX-License-Identifier: MIT
+// Copyright (c) Matthew Garman
 
 #ifndef BYPASS_OUTPUT_COMMON_H__
 #define BYPASS_OUTPUT_COMMON_H__
 
 
-#if defined(BYPASS_MCU_PIC10F32X)
-#  include "bypass_pins_pic10f32x.h"
+#if defined(BYPASS_MCU_PIC10F322)
+#  include "bypass_pins_pic10f322.h"
 #elif defined(__AVR__) || defined(BYPASS_MCU_AVR_CLASSIC)
 #  include "bypass_pins_avr_classic.h"
 #else

@@ -182,7 +182,7 @@ run_mutant() {
     rm -rf "$work"
 }
 
-# --- PIC shell mutants (src/bypass_mcu_pic10f32x.c) ----------------------------
+# --- PIC shell mutants (src/bypass_mcu_pic10f322.c) ----------------------------
 # The PIC shell has no simavr lock-step, so these drive the real XC8-built HEX in
 # gpsim. They are GATED on the PIC toolchain being present AND the unmutated tree
 # genuinely PASSING (see the PIC toolchain probe below): gpsim/XC8/gpsim-dev
@@ -195,11 +195,11 @@ run_mutant() {
 # Each entry: file<TAB>sed-expression<TAB>description. These are killed by the
 # four-checkpoint PORTA/LATA assertions in test/pic/run_gpsim_test.sh.
 PIC_GPSIM_MUTATIONS=(
-"src/bypass_mcu_pic10f32x.c	s@LATA |=  (uint8_t)(1U << LED_PIN)@LATA \&= (uint8_t)~(1U << LED_PIN)@	PIC set_engaged LED inverted (LATA RA0 stays dark); ENGAGED checkpoint catches it"
-"src/bypass_mcu_pic10f32x.c	s@LATA &= (uint8_t)~(1U << LED_PIN)@LATA |= (uint8_t)(1U << LED_PIN)@	PIC set_bypass LED clear inverted (RA0 stuck on); INIT/BYPASS_AGAIN checkpoints catch it"
-"src/bypass_mcu_pic10f32x.c	s@(0U == (PORTA & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (PORTA \& (uint8_t)(1U << FOOTSW_PIN)))@	PIC footswitch read polarity inverted (RA3 sense flipped -> toggles on release, not press); PRESS1 LED-on (toggle-on-press) checkpoint catches it"
-"src/bypass_mcu_pic10f32x.c	s@LATA |=  (uint8_t)(1U << pin)@LATA \&= (uint8_t)~(1U << pin)@	PIC control-pin drive inverted (LATA bit never set); ENGAGED full-LATA (0x3) check catches it"
-"src/bypass_mcu_pic10f32x.c	s@T2CON = TMR2_T2CON_CONFIG;@T2CON = 0x03U;@	PIC TMR2 tick disabled (TMR2ON = bit2 cleared); main loop hangs in hw_wait_for_tick -> never toggles"
+"src/bypass_mcu_pic10f322.c	s@LATA |=  (uint8_t)(1U << LED_PIN)@LATA \&= (uint8_t)~(1U << LED_PIN)@	PIC set_engaged LED inverted (LATA RA0 stays dark); ENGAGED checkpoint catches it"
+"src/bypass_mcu_pic10f322.c	s@LATA &= (uint8_t)~(1U << LED_PIN)@LATA |= (uint8_t)(1U << LED_PIN)@	PIC set_bypass LED clear inverted (RA0 stuck on); INIT/BYPASS_AGAIN checkpoints catch it"
+"src/bypass_mcu_pic10f322.c	s@(0U == (PORTA & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (PORTA \& (uint8_t)(1U << FOOTSW_PIN)))@	PIC footswitch read polarity inverted (RA3 sense flipped -> toggles on release, not press); PRESS1 LED-on (toggle-on-press) checkpoint catches it"
+"src/bypass_mcu_pic10f322.c	s@LATA |=  (uint8_t)(1U << pin)@LATA \&= (uint8_t)~(1U << pin)@	PIC control-pin drive inverted (LATA bit never set); ENGAGED full-LATA (0x3) check catches it"
+"src/bypass_mcu_pic10f322.c	s@T2CON = TMR2_T2CON_CONFIG;@T2CON = 0x03U;@	PIC TMR2 tick disabled (TMR2ON = bit2 cleared); main loop hangs in hw_wait_for_tick -> never toggles"
 )
 
 # WDT-liveness mutant: gpsim's ~200ms functional run is too short to see an
@@ -207,7 +207,7 @@ PIC_GPSIM_MUTATIONS=(
 # counts resets) over a short window > one WDT period. Gated additionally on
 # gpsim-dev + glib + a C++ compiler.
 PIC_SOAK_MUTATIONS=(
-"src/bypass_mcu_pic10f32x.c	s@{ CLRWDT(); }@{ (void)0; /* MUTANT: no WDT pet */ }@	PIC WDT pet (CLRWDT) removed; soak reset counter trips within ~1s of an un-pet WDT"
+"src/bypass_mcu_pic10f322.c	s@{ CLRWDT(); }@{ (void)0; /* MUTANT: no WDT pet */ }@	PIC WDT pet (CLRWDT) removed; soak reset counter trips within ~1s of an un-pet WDT"
 )
 
 killed=0

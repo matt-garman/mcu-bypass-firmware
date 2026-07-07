@@ -1,6 +1,5 @@
-// Copyright (c) Matthew Garman.  All rights reserved.
-// Licensed under the MIT License. See LICENSE in the project root for
-// license information.
+// SPDX-License-Identifier: MIT
+// Copyright (c) Matthew Garman
 
 #ifndef BYPASS_HW_IFACE_H__
 #define BYPASS_HW_IFACE_H__

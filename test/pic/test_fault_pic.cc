@@ -104,11 +104,11 @@ static NullBuf g_nullbuf;
 #  define PROC_NAME "p10f322"
 #endif
 #ifndef F_CPU_HZ
-#  define F_CPU_HZ 16000000UL          // FOSC; instruction clock = FOSC/4
+#  define F_CPU_HZ 2000000UL           // FOSC; instruction clock = FOSC/4
 #endif
-#define CYCLES_PER_MS  ((F_CPU_HZ / 4UL) / 1000UL)   // 4000 @ 16 MHz
+#define CYCLES_PER_MS  ((F_CPU_HZ / 4UL) / 1000UL)   // 500 @ 2 MHz
 
-// PIC pin map (src/bypass_pins_pic10f32x.h): RA3 footswitch (1=released,
+// PIC pin map (src/bypass_pins_pic10f322.h): RA3 footswitch (1=released,
 // 0=pressed), RA0 = LED on LATA bit0.
 #define FOOTSW_PIN_NAME "ra3"
 
@@ -221,6 +221,39 @@ static void run_ms(unsigned ms) {
     }
 }
 
+// After settle the firmware loops forever, so init()'s one-shot CLRWDT is never
+// revisited -- the ONLY CLRWDT reached in quiescent steady state is the main
+// loop's "pet the dog", the last instruction before looping back to the tick
+// poll. Single-step (via run(false), which -- unlike step_one -- services
+// peripherals) until the opcode at the PC is that CLRWDT, so a subsequent
+// injection lands at a DETERMINISTIC, gate-before-integrate loop phase: the next
+// iteration's sanity gate reads the corruption before debounce_step (which
+// rewrites ctx_ every tick) can overwrite it. Detecting the opcode rather than a
+// hardcoded address keeps this variant-independent -- the loop CLRWDT sits at a
+// different program address in each output variant (0x05a / 0x05d / 0x078 here).
+// Caps the search at a few ticks' worth of cycles so a wedged core cannot spin
+// forever.
+//
+// Without this, injecting at whatever loop phase the ms-based settle happens to
+// halt on is a race: at 2 MHz every variant lands some ctx_ case in the
+// integrate-before-gate window, the integrator overwrites the injected field, and
+// the gate never sees it -> 0 resets -> false FAIL. (16 MHz happened to land safe
+// phases, which is why the parent never flagged it.)
+#define CLRWDT_OPCODE 0x0064u
+static void advance_to_loop_clrwdt(void) {
+    for (int i = 0; i < 8000; ++i) {
+        unsigned pc = g_cpu->pc->get_value();
+        if (g_cpu->pma->get_opcode(pc) == CLRWDT_OPCODE)
+            return;
+        guint64 c = get_cycles().get() + 1;
+        get_cycles().set_break(c);
+        g_cpu->run(false);
+        get_cycles().clear_break(c);
+    }
+    fprintf(stderr, "WARN: never reached loop CLRWDT (opcode 0x%04x) -- layout changed?\n",
+            CLRWDT_OPCODE);
+}
+
 // ---- One injection case -----------------------------------------------------
 // absolute=true writes `val`; absolute=false writes (current ^ val), i.e. an
 // SEU bit-flip of the bits in `val`. Asserts EXACTLY ONE recovery reset.
@@ -228,6 +261,7 @@ static void inject_case(const char *label, unsigned addr, const char *token,
                         bool absolute, unsigned val, const char *note) {
     footsw_set(0);                 // released: quiescent, only the SFR can trip
     run_ms(SETTLE_MS);             // (re)reach the main loop after any prior reset
+    advance_to_loop_clrwdt();      // park at a deterministic loop phase (see note)
 
     Register *r = fetch_sfr(addr, token);
     if (r == nullptr) { g_checks++; g_fails++; return; }
@@ -320,13 +354,13 @@ int main() {
 
     // config SFRs (hw_critical_sfrs_intact)
     inject_case("OSCCON.IRCF",  OSCCON_ADDR, "osccon", false, 0x10,
-                "IRCF 0b111->0b110: 16MHz->8MHz clock skew");
+                "IRCF 0b100->0b101: 2MHz->4MHz clock skew");
     inject_case("WDTCON.WDTPS", WDTCON_ADDR, "wdtcon", false, 0x10,
                 "WDTPS 0b01000->0b00000: 1:8192->1:32, WDT miscalibrated (else silent)");
     inject_case("PR2",          PR2_ADDR,    "pr2",    true,  99,
-                "tick period 249->99: 1ms tick skewed");
+                "tick period 124->99: 1ms tick skewed");
     inject_case("T2CON",        T2CON_ADDR,  "t2con",  false, 0x01,
-                "T2CKPS 1:16->1:4, TMR2ON preserved: timer cfg skew");
+                "T2CKPS 1:4->1:1, TMR2ON preserved: timer cfg skew");
 
     // pull-up SFRs (hw_footswitch_pullup_intact) -- footswitch is externally
     // driven, so the pin stays released; only the gate's check reacts.

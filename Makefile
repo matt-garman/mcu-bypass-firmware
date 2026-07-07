@@ -504,11 +504,11 @@ endef
 $(foreach n,$(TINYX5),$(eval $(call MCU_X5_BUILD_TARGETS,$(n))))
 
 # ============================================================================
-# BUILD -- PIC10F32x (Microchip XC8) cross-build
+# BUILD -- PIC10F322 (Microchip XC8) cross-build
 # ============================================================================
 #
 # A SECOND toolchain (XC8 + the PIC10-12Fxxx DFP), entirely separate from the
-# AVR build above. The PIC shell (bypass_mcu_pic10f32x.c) implements the same
+# AVR build above. The PIC shell (bypass_mcu_pic10f322.c) implements the same
 # bypass_hw_iface.h contract for the PIC10F322 and links the UNCHANGED pure
 # core (bypass_pure.c) + one output driver -- exactly like the AVR build.
 #
@@ -532,7 +532,7 @@ PIC_CC    ?= /opt/microchip/xc8/v3.10/bin/xc8-cc
 PIC_DFP   ?= /opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8
 PIC_CHIP  ?= 10F322
 PIC_TAG   ?= pic10f322
-PIC_XTAL  ?= 16000000UL
+PIC_XTAL  ?= 2000000UL
 PIC_BUILD_DIR ?= build_pic
 # PIC10F322 device budget: 512 words flash / 64 B RAM.
 PIC_FLASH_WORDS ?= 512
@@ -542,12 +542,12 @@ PIC_GPSIM_PROC ?= p10f322
 
 # The PIC shell + the unchanged pure core (the AVR counterpart is CORE_SRC =
 # bypass_mcu_avr_classic.c + bypass_pure.c).
-PIC_CORE_SRC = src/bypass_mcu_pic10f32x.c src/bypass_pure.c
+PIC_CORE_SRC = src/bypass_mcu_pic10f322.c src/bypass_pure.c
 
 # Headers that, if changed, should rebuild the PIC images: the AVR FW_HEADERS
 # set with the PIC pin map substituted for the AVR-classic one.
 PIC_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
-              src/bypass_output_common.h src/bypass_pins_pic10f32x.h \
+              src/bypass_output_common.h src/bypass_pins_pic10f322.h \
               src/bypass_blocking_delay.h src/bypass_static_assert.h \
               src/bypass_compile_checks.h \
               src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
@@ -556,7 +556,7 @@ PIC_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
 # XC8 compile flags: select the PIC10F322 + its DFP, C99 (no C11 in XC8), the
 # PIC pin map, and _XTAL_FREQ for __delay_ms.
 PIC_CFLAGS = -mcpu=$(PIC_CHIP) -mdfp=$(PIC_DFP) -std=c99 -O2 \
-             -DBYPASS_MCU_PIC10F32X -D_XTAL_FREQ=$(PIC_XTAL)
+             -DBYPASS_MCU_PIC10F322 -D_XTAL_FREQ=$(PIC_XTAL)
 
 # --- PIC static analysis (cppcheck + MISRA addon) ----------------------------
 # The cppcheck/MISRA register-correct parse of the PIC shell needs the real XC8
@@ -572,7 +572,7 @@ PIC_CHIP_MACRO   ?= _$(PIC_CHIP)
 # pin the PIC configuration so cppcheck does not also explore the AVR branch of
 # bypass_output_common.h, and add the XC8 + DFP header search paths.
 PIC_CPPCHECK_CPPFLAGS = -D__XC8 -D$(PIC_CHIP_MACRO) -D_XTAL_FREQ=$(PIC_XTAL) \
-                        -DBYPASS_MCU_PIC10F32X -U__AVR__ -UBYPASS_MCU_AVR_CLASSIC \
+                        -DBYPASS_MCU_PIC10F322 -U__AVR__ -UBYPASS_MCU_AVR_CLASSIC \
                         -Isrc -I$(PIC_DFP_INCLUDE) -I$(PIC_DFP_INCLUDE)/proc -I$(PIC_XC8_INCLUDE)
 
 # Plain bug-finding pass (parallel to analyze-cppcheck for the AVR build).
@@ -680,17 +680,17 @@ pic-test-config: pic test/pic/test_config_pic
 pic-analyze: pic-analyze-cppcheck pic-analyze-misra
 	@echo "=== PIC static analysis (cppcheck + MISRA) complete ==="
 
-pic-analyze-cppcheck: src/bypass_mcu_pic10f32x.c $(PIC_HEADERS)
+pic-analyze-cppcheck: src/bypass_mcu_pic10f322.c $(PIC_HEADERS)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1; then \
 		echo "cppcheck not installed; skipping PIC cppcheck analysis"; exit 0; \
 	fi; \
 	if [ ! -f "$(PIC_XC8_INCLUDE)/xc.h" ] || [ ! -f "$(PIC_DFP_INCLUDE)/proc/pic10f322.h" ]; then \
 		echo "XC8/DFP headers not found; skipping PIC cppcheck analysis"; exit 0; \
 	fi; \
-	echo "cppcheck (PIC, pic8-enhanced): $(CPPCHECK) src/bypass_mcu_pic10f32x.c"; \
-	$(CPPCHECK) $(PIC_CPPCHECK_FLAGS) src/bypass_mcu_pic10f32x.c
+	echo "cppcheck (PIC, pic8-enhanced): $(CPPCHECK) src/bypass_mcu_pic10f322.c"; \
+	$(CPPCHECK) $(PIC_CPPCHECK_FLAGS) src/bypass_mcu_pic10f322.c
 
-pic-analyze-misra: src/bypass_mcu_pic10f32x.c $(PIC_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
+pic-analyze-misra: src/bypass_mcu_pic10f322.c $(PIC_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then \
 		echo "cppcheck and/or python3 not available; skipping PIC MISRA analysis"; exit 0; \
 	fi; \
@@ -701,7 +701,7 @@ pic-analyze-misra: src/bypass_mcu_pic10f32x.c $(PIC_HEADERS) $(MISRA_ADDON) $(MI
 	out=`mktemp`; rc=0; \
 	PYTHONWARNINGS=ignore $(CPPCHECK) $(PIC_MISRA_CPPCHECK_FLAGS) \
 		--suppressions-list=$(MISRA_SUPPRESS) --error-exitcode=2 \
-		src/bypass_mcu_pic10f32x.c 2>>$$out || rc=1; \
+		src/bypass_mcu_pic10f322.c 2>>$$out || rc=1; \
 	if [ $$rc -ne 0 ]; then \
 		echo "MISRA findings NOT covered by a documented deviation:"; \
 		grep -E "misra-c2012" $$out || true; \

@@ -52,7 +52,7 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
   - Core debounce algorithm written as pure functionality, thus
     host-compilable for exhaustive fuzz testing
   - Exhaustive simavr-based functional testing for AVR Classic;
-    gpsim/libgpsim for PIC10F32x
+    gpsim/libgpsim for PIC10F322
   - Mutation tests (deliberately break code to prove tests catch
     firmware errors)
   - Simulated fault-injection tests to verify WDT functioning

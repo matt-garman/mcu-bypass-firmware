@@ -1,6 +1,5 @@
-// Copyright (c) Matthew Garman.  All rights reserved.
-// Licensed under the MIT License. See LICENSE in the project root for
-// license information.
+// SPDX-License-Identifier: MIT
+// Copyright (c) Matthew Garman
 
 
 // designed for avrtools (standard avr-gcc, avr-libc, avrdude toolchain)

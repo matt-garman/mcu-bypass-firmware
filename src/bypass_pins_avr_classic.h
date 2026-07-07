@@ -1,6 +1,5 @@
-// Copyright (c) Matthew Garman.  All rights reserved.
-// Licensed under the MIT License. See LICENSE in the project root for
-// license information.
+// SPDX-License-Identifier: MIT
+// Copyright (c) Matthew Garman
 
 #ifndef BYPASS_PINS_AVR_CLASSIC_H__
 #define BYPASS_PINS_AVR_CLASSIC_H__
@@ -13,7 +12,7 @@
 // PB0 = footswitch (input), PB1..PB4 = outputs, PB5 = RESET (input, untouched).
 // Single source of truth for the classic-AVR pinout.
 //
-// see also PIC counterpart bypass_pins_pic10f32x.h
+// see also PIC counterpart bypass_pins_pic10f322.h
 //
 // footswitch and status LED pins are common across all output variants
 //   - FOOTSW_PIN is configured for input, with both internal and external

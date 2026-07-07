@@ -34,7 +34,7 @@ misra-c2012-10.1:src/bypass_output_tq2_l2_5v_relay.c
 misra-c2012-10.8:src/bypass_mcu_avr_classic.c
 
 # --- D-2: cross-translation-unit shared pin macros (Rule 2.5) ----------------
-# The per-MCU pin map (bypass_pins_avr_classic.h / bypass_pins_pic10f32x.h) is
+# The per-MCU pin map (bypass_pins_avr_classic.h / bypass_pins_pic10f322.h) is
 # the single source of truth for every variant's pin assignment: FOOTSW_PIN /
 # LED_PIN (used by the core), each variant's control pins (CD4053_PIN;
 # RELAY_SET/RESET_PIN; CD4053_CTL1/2 -- each used only by its own driver), and
@@ -44,11 +44,11 @@ misra-c2012-10.8:src/bypass_mcu_avr_classic.c
 # PRESSED_THRESH / RELEASE_THRESH are defined in bypass_config.h and used by
 # bypass_pure.c and bypass_mcu_avr_classic.c, but not by the output driver TUs that
 # nonetheless include bypass_config.h for their static_assert guards.
-# The PIC pin map (bypass_pins_pic10f32x.h) is flagged for the SAME reason in the
+# The PIC pin map (bypass_pins_pic10f322.h) is flagged for the SAME reason in the
 # PIC MISRA run (make pic-analyze-misra); additionally, the unselected AVR pin map
 # is reachable via bypass_output_common.h's #elif, so cppcheck records ITS macros
 # in the cross-config directive list and reports them "unused" too -- already
 # covered by the bypass_pins_avr_classic.h entry above.
 misra-c2012-2.5:src/bypass_pins_avr_classic.h
-misra-c2012-2.5:src/bypass_pins_pic10f32x.h
+misra-c2012-2.5:src/bypass_pins_pic10f322.h
 misra-c2012-2.5:src/bypass_config.h

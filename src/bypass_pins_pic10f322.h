@@ -1,15 +1,14 @@
-// Copyright (c) Matthew Garman.  All rights reserved.
-// Licensed under the MIT License. See LICENSE in the project root for
-// license information.
+// SPDX-License-Identifier: MIT
+// Copyright (c) Matthew Garman
 
-#ifndef BYPASS_PINS_PIC10F32X_H__
-#define BYPASS_PINS_PIC10F32X_H__
+#ifndef BYPASS_PINS_PIC10F322_H__
+#define BYPASS_PINS_PIC10F322_H__
 
 
 #include <stdint.h>
 
 
-// PIC10F322 pin map -- PORTA/TRISA/LATA bit positions. The PIC10F322 has only
+// PIC10F32x pin map -- PORTA/TRISA/LATA bit positions. The PIC10F32x has only
 // 4 I/O: RA0, RA1, RA2 are bidirectional, and RA3 is INPUT-ONLY (it shares
 // MCLR/VPP; with MCLRE=OFF it is a plain digital input). So the footswitch (an
 // input) goes on RA3, freeing RA0-RA2 as the three outputs.
@@ -17,8 +16,8 @@
 // see also AVR Classic counterpart bypass_pins_avr_classic.h
 //
 // PIC vs AVR Classic selected by bypass_output_common.h on the
-// BYPASS_MCU_PIC10F32X build macro. Bit positions are pinned to the device
-// header's _PORTA_RAx_POSN by compile-time asserts in bypass_mcu_pic10f32x.c.
+// BYPASS_MCU_PIC10F322 build macro. Bit positions are pinned to the device
+// header's _PORTA_RAx_POSN by compile-time asserts in bypass_mcu_pic10f322.c.
 //
 // footswitch and status LED pins are common across all output variants
 #define FOOTSW_PIN      (3U) // RA3 (input-only) + weak pull-up
@@ -47,4 +46,4 @@
 #define BYPASS_OUTPUT_DDR_MASK (0x07U)  // RA0|RA1|RA2
 
 
-#endif // BYPASS_PINS_PIC10F32X_H__
+#endif // BYPASS_PINS_PIC10F322_H__

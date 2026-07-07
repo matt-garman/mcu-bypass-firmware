@@ -1,13 +1,12 @@
-// Copyright (c) Matthew Garman.  All rights reserved.
-// Licensed under the MIT License. See LICENSE in the project root for
-// license information.
+// SPDX-License-Identifier: MIT
+// Copyright (c) Matthew Garman
 
 #ifndef BYPASS_COMPILE_CHECKS_H__
 #define BYPASS_COMPILE_CHECKS_H__
 
 // Shared, MCU-NEUTRAL compile-time contract for the debounce thresholds.
 // Included by every hardware shell (bypass_mcu_avr_classic.c,
-// bypass_mcu_pic10f32x.c) so the invariant lives in ONE place and cannot drift
+// bypass_mcu_pic10f322.c) so the invariant lives in ONE place and cannot drift
 // between shells. MCU-SPECIFIC compile-time checks stay in their shells: the
 // -fshort-enums size asserts, the F_CPU / _XTAL_FREQ checks, and the per-MCU
 // pin-map pinning.

@@ -61,16 +61,16 @@ static NullBuf g_nullbuf;
 #  define PROC_NAME "p10f322"
 #endif
 #ifndef F_CPU_HZ
-#  define F_CPU_HZ 16000000UL          // FOSC; instruction clock = FOSC/4
+#  define F_CPU_HZ 2000000UL           // FOSC; instruction clock = FOSC/4
 #endif
-#define CYCLES_PER_MS  ((F_CPU_HZ / 4UL) / 1000UL)   // 4000 @ 16 MHz
+#define CYCLES_PER_MS  ((F_CPU_HZ / 4UL) / 1000UL)   // 500 @ 2 MHz
 
 // Debounce thresholds (PRESSED_THRESH, RELEASE_THRESH) come from the firmware's
 // single source of truth (src/bypass_config.h) via the host-test shim, so this
 // test can never silently drift from the firmware. The Makefile adds -Itest.
 #include "bypass_config_host.h"
 
-// PIC pin map (src/bypass_pins_pic10f32x.h): RA3 footswitch (1=released,
+// PIC pin map (src/bypass_pins_pic10f322.h): RA3 footswitch (1=released,
 // 0=pressed), RA0 = LED on LATA bit0 (1=ENGAGED). LATA is reg 0x07, bank 0.
 #define LATA_ADDR   0x07u
 #define LED_MASK    0x01u              // RA0

@@ -1,6 +1,5 @@
-// Copyright (c) Matthew Garman.  All rights reserved.
-// Licensed under the MIT License. See LICENSE in the project root for
-// license information.
+// SPDX-License-Identifier: MIT
+// Copyright (c) Matthew Garman
 
 #ifndef BYPASS_CONFIG_H__
 #define BYPASS_CONFIG_H__
@@ -12,7 +11,7 @@
 
 // This block is AVR-specific: the tinyx5 detection, the Timer0 1ms CTC
 // reload, the F_CPU validation, and the tinyx5 TIMSK/TIFR register aliases.
-// The PIC10F32x build (and the native host tests) need NONE of it -- they
+// The PIC10F322 build (and the native host tests) need NONE of it -- they
 // consume only the MCU-neutral PRESSED_THRESH / RELEASE_THRESH below.
 // Guarding it on __AVR__ keeps the PIC build from tripping the F_CPU #error,
 // and keeps these symbols out of every non-AVR translation unit. (Verified:

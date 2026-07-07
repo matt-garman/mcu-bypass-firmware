@@ -1,6 +1,5 @@
-// Copyright (c) Matthew Garman.  All rights reserved.
-// Licensed under the MIT License. See LICENSE in the project root for
-// license information.
+// SPDX-License-Identifier: MIT
+// Copyright (c) Matthew Garman
 
 #ifndef BYPASS_OUTPUT_X4053_POLARITY_H__
 #define BYPASS_OUTPUT_X4053_POLARITY_H__

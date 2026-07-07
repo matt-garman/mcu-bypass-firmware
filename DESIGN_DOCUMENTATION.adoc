@@ -96,7 +96,7 @@ adverse conditions:
       33 milliseconds between presses under ideal conditions; time
       between recognized repeated taps will be longer in noisy
       environments, or when using old switches, etc
-    * On the PIC10F32x port specifically: the footswitch loop is
+    * On the PIC10F322 port specifically: the footswitch loop is
       polled (Model B, no timer interrupt), so while a blocking
       output actuation runs - the relay coil pulse (12ms) or the
       CD4053 mute (5ms), a busy delay inside the state change -
@@ -214,7 +214,7 @@ user.  The release-debounce, or lock-out period, is longer so as to
 ....
 
 
-== PIC10F32x DIP-8 Package Pinout
+== PIC10F322 DIP-8 Package Pinout
 
 ....
                                                      +----+

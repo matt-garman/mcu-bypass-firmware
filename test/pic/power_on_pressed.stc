@@ -17,55 +17,55 @@
 #   confirms each variant's init-time blocking actuation (the relay/mute ~12 ms
 #   bypass pulse) does not perturb the held-at-boot path.
 #
-# PINS (per src/bypass_pins_pic10f32x.h)
+# PINS (per src/bypass_pins_pic10f322.h)
 #   RA3 = footswitch (input; high = released, low = pressed)
 #   RA0 = status LED  (LATA bit 0; high = effect ENGAGED, low = BYPASS)
 #
 # TIMING
-#   FOSC = 16 MHz -> instruction clock FOSC/4 = 4 MHz -> 4000 cycles per 1 ms.
+#   FOSC = 2 MHz -> instruction clock FOSC/4 = 500 kHz -> 500 cycles per 1 ms.
 #   PRESSED_THRESH(8) low samples register a press and RELEASE_THRESH(25) high
-#   samples re-arm; the relay/mute drivers also block ~12 ms (~48k cyc) per
+#   samples re-arm; the relay/mute drivers also block ~12 ms (~6k cyc) per
 #   actuation (including the init bypass pulse). Every checkpoint sits well clear
 #   of those windows so all variants have SETTLED by the time it is sampled.
 #
 # SCENARIO (switch HELD at power-on, then released, then a fresh press)
-#   cyc      0..200k : PRESSED at boot -> stay BYPASS (RELEASE-wait), NO toggle
-#   cyc 200k..400k   : released         -> lockout drains, arm for press; BYPASS
-#   cyc 400k..600k   : fresh press       -> toggles to ENGAGED (the only toggle)
-#   cyc 600k..       : released          -> effect latches ENGAGED
+#   cyc      0..25k : PRESSED at boot -> stay BYPASS (RELEASE-wait), NO toggle
+#   cyc 25k..50k    : released         -> lockout drains, arm for press; BYPASS
+#   cyc 50k..75k    : fresh press       -> toggles to ENGAGED (the only toggle)
+#   cyc 75k..       : released          -> effect latches ENGAGED
 #
 # CHECKPOINTS (the wrapper keys on these exact === labels ===)
-#   PON_HELD     @ 120k : LATA bit0 == 0 (LED off; held switch did NOT engage),
+#   PON_HELD     @ 15k : LATA bit0 == 0 (LED off; held switch did NOT engage),
 #                         PORTA bit3 == 0 (footswitch read as pressed)
-#   PON_RELEASED @ 350k : LATA bit0 == 0 (release alone does not toggle),
+#   PON_RELEASED @ 43.75k : LATA bit0 == 0 (release alone does not toggle),
 #                         PORTA bit3 == 1 (released)
-#   PON_ENGAGED  @ 750k : LATA bit0 == 1 (fresh press toggled ENGAGED, latched),
+#   PON_ENGAGED  @ 93.75k : LATA bit0 == 1 (fresh press toggled ENGAGED, latched),
 #                         PORTA bit3 == 1 (released)
 
 stimulus asynchronous_stimulus
   initial_state 0
-  { 200000, 1,
-    400000, 0,
-    600000, 1 }
+  { 25000, 1,
+    50000, 0,
+    75000, 1 }
   name fsw
 end
 
 node n1
 attach n1 fsw ra3
 
-break c 120000
+break c 15000
 run
 echo ===PON_HELD===
 porta
 lata
 
-break c 350000
+break c 43750
 run
 echo ===PON_RELEASED===
 porta
 lata
 
-break c 750000
+break c 93750
 run
 echo ===PON_ENGAGED===
 porta

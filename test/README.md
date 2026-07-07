@@ -29,7 +29,7 @@ test/
            test_soak.c          long-duration soak    (make test-soak)
            test_fuses.c         fuse-byte validation  (make test-fuses)
 
-  pic/     PIC10F32x-specific tests (gpsim).
+  pic/     PIC10F322-specific tests (gpsim).
            test_config_pic.c    CONFIG-word check     (make pic-test-config)
            *.stc + run_gpsim_*  register-level gpsim  (make pic-test-gpsim)
            test_soak_pic.cc     libgpsim soak         (make pic-test-soak)
