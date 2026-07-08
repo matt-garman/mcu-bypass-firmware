@@ -492,6 +492,96 @@ build is validated by static analysis + CBMC + model check + real hardware (no
 simulation layer); or evaluate QEMU's AVR plugin, which has a better AVR8X
 trajectory.
 
+**Hardware-in-the-loop (HIL) validation rig with register-level
+introspection.** The simavr (AVR Classic) and libgpsim (PIC) suites prove
+the shells in simulation, but two gaps remain: (a) the ATtiny202/AVR8X
+target has no scriptable instruction-level simulator (see the tinyAVR item
+above — simavr's AVR8X support is nonexistent, and QEMU-AVR models only
+ATmega peripherals, not the AVR8X TCA/TCB/CLKCTRL/virtual-port set), so its
+shell would otherwise be validated by static analysis + real hardware only;
+and (b) no existing test observes *internal state* on real silicon — the
+suites assert I/O behaviour, not that the behaviour arises from the intended
+internal trajectory. A HIL rig closes both: it re-hosts the behavioural
+suites on real parts and adds register-level introspection, letting us claim
+the firmware matches its formal model at the register level on real
+automotive-grade silicon — a claim most reference firmware cannot make.
+
+*On-chip debug reality (verified 2026-07-08).* All three families expose
+full internal state (SRAM, registers, I/O) over an on-chip debug interface,
+but only in **stop mode** — halt the core at a breakpoint, then read memory.
+None of these 8-bit parts have data trace (continuous non-intrusive
+streaming of internals while running; that is a Cortex-M SWO/ITM feature),
+so internal state is snapshotted at breakpoints, which perturbs timing. Per
+family:
+- AVR Classic (t13a/x5): debugWIRE (1-wire, over RESET). Open-source host:
+  Bloom (https://github.com/bloombloombloom/Bloom) → GDB remote-serial. Full
+  SRAM/regs/IO when halted; HW breakpoints. Takes over RESET via DWEN fuse.
+- AVR8X (ATtiny202): UPDI (1-wire, own pin). Open-source host: Bloom → GDB;
+  its Insight view reads all data-space registers, GPIO, RAM/EEPROM and
+  peripherals. 8-pin budget is tight; MPLAB SNAP needs the R48 mod + a UPDI
+  pull-up.
+- PIC10F32x: ICD via ICSP (2-wire). Weakest of the three — needs the bond-out
+  debug header (AC244045) for full ICD, and there is no open-source host
+  (MPLAB X only), ~1 HW breakpoint. (Ironic: best simulator, worst silicon
+  debug.)
+One cheap probe covers the whole fleet: MPLAB SNAP (~$20) speaks debugWIRE,
+UPDI, and ICSP; Bloom drives it for the AVR sides and exposes a GDB server
+scriptable from Python (e.g. pygdbmi).
+
+*Two-plane architecture.* Because the firmware is deterministic and
+tick-driven, behaviour and internal state are validated over *identical*
+stimulus in two passes:
+1. Behavioural plane (real-time, non-intrusive): a dedicated driver MCU (an
+   RP2040/Pico — PIO gives µs-precise edge generation + timestamped capture)
+   replays footswitch patterns and records LED/relay edges. This is the
+   simavr/gpsim behavioural suite re-hosted in hardware, and the home for the
+   flaky/aging-switch models. Host orchestrates in Python and compares output
+   timing against the golden model.
+2. Introspection plane (stop-mode): SNAP + Bloom + GDB, scripted from Python
+   — breakpoint at end-of-tick, dump {integrator, effect_state, lockout,
+   ctx_, ~ctx_}, assert equality with the golden model's prediction for that
+   tick. This is `model_step.h` lock-step lifted onto real silicon: same
+   golden model, same comparison discipline, substrate changed from a
+   simulator's memory to a chip's SRAM over a wire.
+Run both planes over bit-identical stimulus (same driver MCU replaying the
+same recorded waveform); determinism guarantees plane 2 reproduces plane 1,
+so the internal-state proof and behavioural proof describe the same run.
+State matching the model at every tick boundary is the "by design, not by
+accident" evidence.
+
+*Caveats to design in.*
+- Stop-mode perturbs timing — it is a separate pass, never layered on the
+  behavioural run.
+- Software breakpoints rewrite flash (wear); prefer the limited HW
+  breakpoints, or treat dev parts as consumable.
+- Aging switches are partly analog (rising contact resistance, marginal /
+  intermittent opens — exactly what the integrator exists to reject).
+  Logic-level replay covers the debounce *logic*; testing the analog margin
+  needs an analog stage (series MOSFET or digital pot) ahead of the input
+  pin — a dedicated sub-tier.
+- Prefer stop-mode introspection over a telemetry firmware build: telemetry
+  is a different binary (observer effect) and the ATtiny202's 8 pins are
+  nearly all spoken for. Stop-mode keeps the shipped binary un-instrumented.
+- Determinism boundary: WDT/BOD async events and power-on/reset ramp timing
+  are where the two passes could diverge; make the driver MCU the single
+  source of truth for reset and input timing.
+
+Relationship to the "Hardware-validation procedure doc" item below: the HIL
+rig is the automated realisation of that manual bring-up procedure (notably
+the primary-part WDT-reset check simavr cannot model); keep the manual doc
+as the no-rig fallback rather than deleting it. The rig is substrate-general,
+so it back-fills AVR Classic and (via the AC244045 header) the PIC too.
+
+Effort: large — rough phasing: (1) behavioural plane on one AVR target with
+the Pico driver + Python orchestration (~1–2 days); (2) introspection plane
+via Bloom/SNAP/GDB with the `model_step.h` comparator (~1–2 days); (3)
+aging/analog switch sub-tier (~1 day + hardware); (4) generalise across
+families (~1–2 days each). Impact: High — enables a register-level
+"validated against the formal model on real silicon" claim, and is the
+primary mitigation for the ATtiny202 simulator gap. All of this is test/rig
++ docs work (no firmware-source changes), so it is outside the
+firmware-edit-by-user constraint.
+
 **PIC MCU family support (PIC10F320/PIC10F322).** These are 8-pin, 256–512 word
 flash enhanced mid-range PICs targeted at low-power embedded control — a natural
 companion to the ATtiny13a for this application. The debounce algorithm
@@ -795,6 +885,7 @@ and is independently worthwhile headroom. Reference: child repo
 | Signal-integrity SPICE modeling                 | 2.5  | 2 h       | High — validates hardware assumptions before PCB |
 | Multi-press boundary cases                      | 2.5  | 3–4 h     | Medium — tick-boundary edge cases at rate limit |
 | Hardware-validation procedure doc               | 3    | 2–3 h     | High — primary-part WDT gap     |
+| HIL rig: behavioural + register introspection   | 3    | 5–8 d     | High — silicon-level model validation; XT sim-gap mitigation |
 | Inverted-copy (complemented) ctx_ storage       | 3    | 3–6 h     | Medium — in-range SEU detection |
 | KLEE in CI                                      | 3    | 2 h       | Nice-to-have                    |
 | tinyAVR 2-Series (ATtiny202) support            | 3    | 2–4 days  | Nice-to-have; simavr gap        |
