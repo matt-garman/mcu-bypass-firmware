@@ -11,7 +11,17 @@ build_avr_xt/
 # vendored ATtiny_DFP device files for the ATtiny202 (AVR-XT) build -- fetched
 # on demand by scripts/fetch_attiny_dfp.sh (pinned version + SHA), NOT committed,
 # mirroring the external/uncommitted PIC_DFP. Override the location with XT_DFP.
-third_party/
+# NOTE: ignore the CONTENTS (third_party/*), not the directory itself
+# (third_party/), so the negations below can re-include specific files -- git
+# will not descend into a directory excluded with a trailing slash.
+third_party/*
+
+# ...EXCEPT the yasimavr upstream-bug patches, which ARE tracked: they are the
+# source of truth for scripts/fetch_yasimavr.sh (which builds the patched
+# yasimavr venv used by the attiny202-{sim,soak,fault} harness). The venv it
+# produces IS a generated artifact and stays ignored. Same escape as release/**.
+!third_party/yasimavr/
+third_party/yasimavr/venv/
 
 # ...EXCEPT the prebuilt release images, which ARE tracked: committing them is
 # the whole point of release/ (scripts/make-release.sh stages them there). The

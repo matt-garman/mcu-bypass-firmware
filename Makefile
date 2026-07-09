@@ -1073,11 +1073,13 @@ attiny202-smoke: $(XT_SMOKE_SRC) | $(AVR_BUILD_DIR)
 # NO AVR8X simulator) and gates every variant on the device's 2 KB flash budget;
 # it skips cleanly when the DFP or the shell source is absent.
 #
-# Because simavr/QEMU do not model AVR8X, the shell carries no sim/soak/fault
-# coverage (unlike the classic build). It is validated by (1) this strict-flag
-# cross-build, (2) the flash-budget gate, (3) cppcheck + MISRA static analysis
-# (attiny202-analyze), and (4) real hardware. The pure core keeps full host +
-# formal coverage via `make test`.
+# simavr/QEMU do not model AVR8X, but yasimavr DOES: the `attiny202-sim` /
+# -soak / -fault targets below run the real built image on a patched yasimavr
+# (scripts/fetch_yasimavr.sh), giving the shell register-level dynamic coverage
+# close to the classic simavr harness. The shell is thus validated by (1) this
+# strict-flag cross-build, (2) the flash-budget gate, (3) cppcheck + MISRA
+# static analysis (attiny202-analyze), (4) the yasimavr harness, and (5) real
+# hardware. The pure core keeps full host + formal coverage via `make test`.
 XT_BUILD_DIR ?= build_avr_xt
 XT_TAG       ?= attiny202
 XT_F_CPU     ?= 2000000UL
@@ -1148,6 +1150,59 @@ attiny202: $(XT_CORE_SRC) $(XT_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v))) | $
 		fi; \
 	done; \
 	rm -f $(XT_BUILD_DIR)/*.log; \
+	exit $$fail
+
+# --- ATtiny202 yasimavr dynamic-simulation harness ---------------------------
+# The AVR-XT analogue of the AVR-classic simavr suite (test-sim / test-soak /
+# fault-inject) and the PIC libgpsim track (pic-test-gpsim / -soak / -fault):
+# run the REAL built ATtiny202 image on a PATCHED yasimavr and exercise the
+# peripheral-register layer of the shell (bypass_mcu_avr_xt.c) that the
+# target-agnostic host/formal suites cannot reach -- TCB0 tick, fuse-locked WDT,
+# PORTA in/out, RSTCTRL. The pure debounce core keeps its own full coverage.
+#
+# yasimavr is not in apt; it is built from a pinned upstream release plus two
+# vendored bug-fix patches (third_party/yasimavr/patches/) into a project-local,
+# gitignored venv by scripts/fetch_yasimavr.sh -- the yasimavr counterpart of
+# scripts/fetch_attiny_dfp.sh. These targets are STANDALONE (NOT in `make test`)
+# and SKIP CLEANLY (exit 0) when that venv is absent, exactly as `attiny202`
+# skips without the DFP and `pic-test-soak` skips without gpsim-dev. CI builds
+# the venv explicitly (a fetch step) so a skip there cannot mask a real failure.
+#
+# XT_SIM_VARIANT selects one variant (cd4053[_tmux]/mute[_tmux]/relay); empty
+# (the default) runs every built variant. The drivers import test/avr/
+# sim_attiny202.py, so the recipes put that dir on PYTHONPATH.
+YASIMAVR_VENV ?= third_party/yasimavr/venv
+YASIMAVR_PY    = $(YASIMAVR_VENV)/bin/python
+XT_SIM_VARIANT ?=
+XT_SIM_DRIVER   = test/avr/test_sim_attiny202.py
+
+# Shell guard shared by every harness target: skip cleanly (exit 0 out of the
+# whole recipe via the caller) when the patched venv is missing or non-importable.
+# Usage: `$(yasimavr_skip_if_absent)` as the first line of the recipe body.
+define yasimavr_skip_if_absent
+if [ ! -x "$(YASIMAVR_PY)" ] || ! "$(YASIMAVR_PY)" -c "import yasimavr" >/dev/null 2>&1; then \
+	echo "patched yasimavr venv not found at $(YASIMAVR_VENV); skipping ATtiny202 simulation."; \
+	echo "  Build it (pinned upstream release + vendored patches):"; \
+	echo "    scripts/fetch_yasimavr.sh"; \
+	exit 0; \
+fi
+endef
+
+.PHONY: attiny202-sim
+attiny202-sim: attiny202
+	@$(yasimavr_skip_if_absent); \
+	vars="$(XT_SIM_VARIANT)"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
+	fail=0; ran=0; \
+	for v in $$vars; do \
+		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
+		if [ ! -f "$$elf" ]; then \
+			echo "no $$elf (DFP absent?); skipping ATtiny202 sim for variant $$v"; continue; \
+		fi; \
+		echo "--- ATtiny202 sim (functional): variant=$$v ---"; \
+		ran=1; \
+		PYTHONPATH=test/avr $(YASIMAVR_PY) $(XT_SIM_DRIVER) "$$elf" || fail=1; \
+	done; \
+	if [ "$$ran" = 0 ]; then echo "no ATtiny202 images built; nothing to simulate."; fi; \
 	exit $$fail
 
 # --- ATtiny202 fuses + UPDI programming --------------------------------------
@@ -1294,7 +1349,7 @@ clean:
 		$(FW_BASE).plist \
 		$(TOOLCHAIN_STAMP)
 	rm -f *.dump *.ctu-info cppcheck-addon-ctu-file-list*
-	rm -rf test/klee-out-* test/klee-last
+	rm -rf test/klee-out-* test/klee-last test/avr/__pycache__
 	rm -rf $(AVR_BUILD_DIR) $(PIC_BUILD_DIR) $(XT_BUILD_DIR)
 
 # ============================================================================
@@ -1949,6 +2004,8 @@ help:
 	@echo "  attiny202        build all variants for ATtiny202 + 2 KB flash-budget gate"
 	@echo "  attiny202-analyze  cppcheck + MISRA on the AVR-XT shell (DFP+avr-libc; standalone)"
 	@echo "  attiny202-test   all ATtiny202 pre-hardware checks (smoke + build + analyze)"
+	@echo "  attiny202-sim    yasimavr functional test: drive footswitch, assert LED toggles"
+	@echo "                   (standalone; needs scripts/fetch_yasimavr.sh; XT_SIM_VARIANT=)"
 	@echo "  attiny202-program  set fuses + flash one variant over UPDI (VARIANT=, XT_UPDI_PORT=)"
 	@echo "Test (each runs across ALL variants):"
 	@echo "  test            FAST full suite -- analyze, model, sim (all MCUs), coverage"

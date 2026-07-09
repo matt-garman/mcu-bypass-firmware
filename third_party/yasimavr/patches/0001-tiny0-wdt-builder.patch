@@ -1,0 +1,23 @@
+# yasimavr 0.1.6 -- add the WDT peripheral to the tinyAVR 0-series device builder.
+#
+# UPSTREAM BUG #1 (filed at github.com/clesav/yasimavr):
+#   dev_tiny_0series.py builds an explicit peripheral list that omits 'WDT', so
+#   load_device('attiny202').find_peripheral('WDT') is None even though the
+#   ArchXT_WDT model and its 'WDT' -> _get_wdt_builder registry mapping both
+#   exist (the sibling dev_tinyx4 / dev_megaxx8 builders DO list it). Any
+#   firmware read/write of the WDT register block (base 0x0100) then hits an
+#   "unregistered I/O address" and the CPU crashes. Our ATtiny202 shell arms /
+#   pets a fuse-locked WDT, so it cannot run at all without this.
+#
+# Fix: add 'WDT' to the 0-series peripheral list (placed after 'TCB0', matching
+# the sibling builders' ordering).
+--- a/py/yasimavr/device_library/builders/dev_tiny_0series.py
++++ b/py/yasimavr/device_library/builders/dev_tiny_0series.py
+@@ -48,6 +48,7 @@
+             'RTC',
+             'TCA0',
+             'TCB0',
++            'WDT',
+             'VREF',
+             'ADC0',
+             'ACP0',

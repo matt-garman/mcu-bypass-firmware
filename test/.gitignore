@@ -12,6 +12,13 @@ pic/test_fault_pic
 avr/test_sim
 avr/test_sim_*
 avr/test_trace_*
+# ...but the yasimavr harness DRIVERS are Python source, not compiled binaries:
+# keep every avr/*.py tracked even though names like test_sim_attiny202.py would
+# otherwise match the compiled-binary globs above. Only the bytecode cache is
+# ignored.
+!avr/*.py
+avr/__pycache__/
+
 # KLEE output and the toolchain stamp are produced at the test root.
 klee-last
 klee-out-*/

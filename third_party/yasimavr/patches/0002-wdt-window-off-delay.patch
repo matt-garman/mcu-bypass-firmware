@@ -1,0 +1,33 @@
+# yasimavr 0.1.6 -- ArchXT_WDT: treat PERIOD/WINDOW field code 0 (OFF) as a
+# zero delay instead of 1 << 2 = 4 clocks.
+#
+# UPSTREAM BUG #2 (filed at github.com/clesav/yasimavr):
+#   calculate_delays() maps the WDT PERIOD/WINDOW field code 0 -- which means
+#   OFF -- to `1 << (0 + 2) = 4` clocks rather than 0. The bogus non-zero
+#   *window* activates the closed-window ("petted too early") reset path in
+#   wdr_sync_timer_next(), so a correctly-petted watchdog running with WINDOW=OFF
+#   (the normal configuration, e.g. our WDTCFG=0x06) issues a watchdog system
+#   reset on essentially every pet (~every 1.2 ms). This is the root cause of
+#   BOTH spike discrepancies: the spurious ~1.2 ms resets, and -- downstream --
+#   the LED never engaging (each reset re-inits into the footswitch-pressed-at-
+#   power-on bypass-lock state).
+#
+# Fix: guard each field on `>= 1` so the OFF code (0) yields a 0 delay. Proven:
+# rebuilt with this change -> 0 resets over 300 ms idle, press/LED smoke PASS.
+# (The 1UL cast is incidental tidy-up; upstream `main` has a plain `long` here.)
+--- a/lib_arch_xt/src/arch_xt_wdt.cpp
++++ b/lib_arch_xt/src/arch_xt_wdt.cpp
+@@ -139,11 +139,11 @@ std::tuple<cycle_count_t, cycle_count_t> ArchXT_WDT::calculate_delays(uint8_t reg
+ std::tuple<cycle_count_t, cycle_count_t> ArchXT_WDT::calculate_delays(uint8_t reg_value)
+ {
+     uint8_t reg_period = EXTRACT_F(reg_value, WDT_PERIOD);
+-    unsigned long p = (reg_period <= 11) ? 1 << (reg_period + 2) : 0;
++    unsigned long p = (reg_period >= 1 && reg_period <= 11) ? (1UL << (reg_period + 2)) : 0;
+     cycle_count_t period = (device()->frequency() * p) / m_config.clock_frequency;
+
+     uint8_t reg_window = EXTRACT_F(reg_value, WDT_WINDOW);
+-    unsigned long w = (reg_window <= 11) ? 1 << (reg_window + 2) : 0;
++    unsigned long w = (reg_window >= 1 && reg_window <= 11) ? (1UL << (reg_window + 2)) : 0;
+     cycle_count_t window = (device()->frequency() * w) / m_config.clock_frequency;
+
+     return std::tuple<cycle_count_t, cycle_count_t>(period, window);
