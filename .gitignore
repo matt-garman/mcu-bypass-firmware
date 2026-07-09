@@ -6,6 +6,7 @@
 *.elf
 build_avr_classic/
 build_pic/
+build_avr_xt/
 
 # vendored ATtiny_DFP device files for the ATtiny202 (AVR-XT) build -- fetched
 # on demand by scripts/fetch_attiny_dfp.sh (pinned version + SHA), NOT committed,

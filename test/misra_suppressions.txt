@@ -33,6 +33,16 @@ misra-c2012-10.1:src/bypass_output_cd4053_with_mute.c
 misra-c2012-10.1:src/bypass_output_tq2_l2_5v_relay.c
 misra-c2012-10.8:src/bypass_mcu_avr_classic.c
 
+# ATtiny202 (AVR-XT / avrxmega3) shell. Same register-access deviation as the
+# classic-AVR shell (make attiny202-analyze-misra). The AVR8X register model adds
+# Rule 10.4: the DFP headers expose register group-configs as ENUM constants
+# (e.g. TCB_CLKSEL_CLKDIV1_gc) and bit masks as plain-int macros (e.g.
+# WDT_LOCK_bm), so register expressions mix essential types. See D-1.
+misra-c2012-11.4:src/bypass_mcu_avr_xt.c
+misra-c2012-10.1:src/bypass_mcu_avr_xt.c
+misra-c2012-10.8:src/bypass_mcu_avr_xt.c
+misra-c2012-10.4:src/bypass_mcu_avr_xt.c
+
 # --- D-2: cross-translation-unit shared pin macros (Rule 2.5) ----------------
 # The per-MCU pin map (bypass_pins_avr_classic.h / bypass_pins_pic10f322.h) is
 # the single source of truth for every variant's pin assignment: FOOTSW_PIN /

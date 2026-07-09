@@ -1062,6 +1062,221 @@ attiny202-smoke: $(XT_SMOKE_SRC) | $(AVR_BUILD_DIR)
 	echo "OK:   avrxmega3, $(XT_SMOKE_ELF) uses $$used B ($${pct}%) of $(XT_FLASH_BYTES) B"
 
 # ============================================================================
+# BUILD -- ATtiny202 (AVR-XT / avrxmega3) firmware  [Increment 2]
+# ============================================================================
+#
+# The real firmware build (the smoke gate above only proves the toolchain). The
+# ATtiny202 shell (src/bypass_mcu_avr_xt.c) implements the same bypass_hw_iface.h
+# contract as the classic-AVR and PIC shells and links the UNCHANGED pure core
+# (bypass_pure.c) + one output driver -- exactly like `all13` / `pic`. Like the
+# PIC build it is STANDALONE (the vendored DFP may be absent in CI, and there is
+# NO AVR8X simulator) and gates every variant on the device's 2 KB flash budget;
+# it skips cleanly when the DFP or the shell source is absent.
+#
+# Because simavr/QEMU do not model AVR8X, the shell carries no sim/soak/fault
+# coverage (unlike the classic build). It is validated by (1) this strict-flag
+# cross-build, (2) the flash-budget gate, (3) cppcheck + MISRA static analysis
+# (attiny202-analyze), and (4) real hardware. The pure core keeps full host +
+# formal coverage via `make test`.
+XT_BUILD_DIR ?= build_avr_xt
+XT_TAG       ?= attiny202
+XT_F_CPU     ?= 2000000UL
+# The shell + the unchanged pure core (the AVR-classic counterpart is CORE_SRC).
+XT_CORE_SRC = src/bypass_mcu_avr_xt.c src/bypass_pure.c
+# Headers that, if changed, should rebuild the XT images: the FW_HEADERS set with
+# the AVR-XT pin map substituted for the classic one.
+XT_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
+             src/bypass_output_common.h src/bypass_pins_avr_xt.h \
+             src/bypass_blocking_delay.h src/bypass_static_assert.h \
+             src/bypass_compile_checks.h \
+             src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
+             src/bypass_output_x4053_polarity.h \
+             src/bypass_output_tq2_l2_5v_relay.h
+# Firmware compile flags: the smoke gate's strict XT_CFLAGS (-B/-I device-pack
+# injection + CFLAGS_COMMON) plus the runtime -D selectors (F_CPU + the AVR-XT
+# shell selector). XT_LDFLAGS (from the smoke section) carries the link flags.
+XT_FW_CFLAGS = -DF_CPU=$(XT_F_CPU) -DBYPASS_MCU_AVR_XT $(XT_CFLAGS)
+
+$(XT_BUILD_DIR):
+	@mkdir -p $@
+
+# Build every variant for the ATtiny202 and enforce the 2 KB flash-word budget.
+# The variant -D selector + driver source are chosen inline (the same case-
+# pattern the PIC/analyze recipes use, since $(macro_<v>)/$(src_<v>) cannot
+# expand inside a shell loop). Emits bypass_<variant>_attiny202.elf/.hex.
+.PHONY: attiny202
+attiny202: $(XT_CORE_SRC) $(XT_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v))) | $(XT_BUILD_DIR)
+	@if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
+		echo "ATtiny_DFP device files not found under XT_DFP=$(XT_DFP); skipping ATtiny202 build."; \
+		echo "  Fetch them (open-source apt toolchain + pinned atpack):"; \
+		echo "    scripts/fetch_attiny_dfp.sh $(XT_DFP)"; \
+		exit 0; \
+	fi; \
+	if [ ! -f "src/bypass_mcu_avr_xt.c" ]; then \
+		echo "src/bypass_mcu_avr_xt.c not present (Increment 2 shell); skipping ATtiny202 build."; \
+		exit 0; \
+	fi; \
+	echo "=== ATtiny202 (avrxmega3) build + flash-budget ($(XT_FLASH_BYTES) B) ==="; \
+	fail=0; \
+	for v in $(VARIANTS); do \
+		base=$${v%_tmux}; pol=; \
+		[ "$$base" != "$$v" ] && pol=-DBYPASS_X4053_DIRECT_DRIVE; \
+		case $$base in \
+			*mute)  m=CD4053_WITH_MUTE; drv=src/bypass_output_cd4053_with_mute.c ;; \
+			*relay) m=TQ2_L2_5V_RELAY;  drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
+			*)      m=CD4053_SIMPLE;    drv=src/bypass_output_cd4053_simple.c ;; \
+		esac; \
+		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
+		hex=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).hex; \
+		if ! $(CC) $(XT_FW_CFLAGS) -D$$m $$pol $(XT_LDFLAGS) -o $$elf \
+				$(XT_CORE_SRC) $$drv 2> $(XT_BUILD_DIR)/$$v.log; then \
+			cat $(XT_BUILD_DIR)/$$v.log; \
+			echo "FAIL: variant $$v did not compile for ATtiny202"; fail=1; continue; \
+		fi; \
+		flags=`readelf -h $$elf 2>/dev/null | sed -n 's/.*Flags:[[:space:]]*//p'`; \
+		case "$$flags" in *avr:103*) : ;; \
+			*) echo "FAIL: $$v is not avrxmega3 (ELF flags: $$flags)"; fail=1; continue ;; \
+		esac; \
+		$(OBJCOPY) -O ihex -R .eeprom $$elf $$hex; \
+		used=`$(SIZE) --mcu=$(XT_MCU) -C $$elf 2>/dev/null | awk '/^Program:/ {print $$2; exit}'`; \
+		if [ -z "$$used" ]; then echo "WARN: $$v: could not read Program size from $$elf"; continue; fi; \
+		pct=`awk -v u="$$used" -v t=$(XT_FLASH_BYTES) 'BEGIN{printf "%.1f", u*100/t}'`; \
+		if [ "$$used" -gt "$(XT_FLASH_BYTES)" ]; then \
+			echo "FAIL: $$v uses $$used B ($${pct}%) -- exceeds $(XT_FLASH_BYTES) B"; fail=1; \
+		else \
+			echo "OK:   $$v -> $$hex : $$used B ($${pct}%) of $(XT_FLASH_BYTES) B"; \
+		fi; \
+	done; \
+	rm -f $(XT_BUILD_DIR)/*.log; \
+	exit $$fail
+
+# --- ATtiny202 fuses + UPDI programming --------------------------------------
+# Programmed over UPDI (single wire). The default uses avrdude's open-source
+# serialupdi (a plain USB-serial adapter + a series resistor -- the cheapest,
+# most open path, matching this project's open-toolchain preference); override
+# XT_PROGRAMMER / XT_UPDI_PORT for jtag2updi, an Atmel-ICE, pymcuprog, etc.
+#
+# Fuse bytes: see the fuse table in the src/bypass_mcu_avr_xt.c header. avrdude
+# exposes the AVR8X fuses as named memories. CONFIRM XT_FUSE_BODCFG's BOD level
+# against the ATtiny202 datasheet -- only some levels are characterised on the
+# 0-series (0xE5 selects BODLEVEL7 ~4.2V, ACTIVE+SLEEP enabled).
+XT_PROGRAMMER   ?= serialupdi
+XT_UPDI_PORT    ?= /dev/ttyUSB0
+XT_AVRDUDE_PART ?= t202
+XT_AVRDUDE_FLAGS = -c $(XT_PROGRAMMER) -P $(XT_UPDI_PORT) -p $(XT_AVRDUDE_PART)
+
+XT_FUSE_WDTCFG  ?= 0x06
+XT_FUSE_BODCFG  ?= 0xE5
+XT_FUSE_OSCCFG  ?= 0x01
+XT_FUSE_SYSCFG0 ?= 0xF6
+XT_FUSE_SYSCFG1 ?= 0x07
+XT_FUSE_APPEND  ?= 0x00
+XT_FUSE_BOOTEND ?= 0x00
+
+.PHONY: attiny202-fuses attiny202-flash attiny202-program
+attiny202-fuses:
+	$(AVRDUDE) $(XT_AVRDUDE_FLAGS) \
+		-U wdtcfg:w:$(XT_FUSE_WDTCFG):m   -U bodcfg:w:$(XT_FUSE_BODCFG):m \
+		-U osccfg:w:$(XT_FUSE_OSCCFG):m   -U syscfg0:w:$(XT_FUSE_SYSCFG0):m \
+		-U syscfg1:w:$(XT_FUSE_SYSCFG1):m -U append:w:$(XT_FUSE_APPEND):m \
+		-U bootend:w:$(XT_FUSE_BOOTEND):m
+
+# Flash ONE variant image to hardware (select with VARIANT=<name>); builds first.
+attiny202-flash: attiny202
+	$(AVRDUDE) $(XT_AVRDUDE_FLAGS) \
+		-U flash:w:$(XT_BUILD_DIR)/$(FW_BASE)_$(VARIANT)_$(XT_TAG).hex:i
+
+# Fresh chip: write the fuses, then flash the selected variant.
+attiny202-program: attiny202-fuses attiny202-flash
+
+# --- ATtiny202 static analysis (cppcheck + MISRA addon) ----------------------
+# Two analyzers over the AVR-XT shell, parallel to analyze-cppcheck/analyze-misra
+# (classic) and pic-analyze-* (PIC). STANDALONE (needs the vendored DFP + apt
+# avr-libc headers; NOT part of `make test`); each skips cleanly when cppcheck/
+# python3 or the DFP device header is absent. The AVR-XT register headers resolve
+# exactly as the real build sees them: <avr/io.h> reaches iotn202.h via the
+# spec's __AVR_DEV_LIB_NAME__=tn202 fallback, and the device-family macros that
+# -mmcu normally predefines (__AVR_XMEGA__ / __AVR_ATtiny202__ / ...) are supplied
+# explicitly here -- mirroring the classic run's -D__AVR_ATtiny13A__ and the PIC
+# run's -D_10F322. avr-libc / avr-gcc / DFP headers are outside the compliance
+# boundary -> suppressed by path.
+XT_ARCH ?= 103
+XT_CPPCHECK_CPPFLAGS = -D__AVR__ -D__AVR_XMEGA__ -D__AVR_MEGA__ \
+                       -D__AVR_ATtiny202__ -D__AVR_ARCH__=$(XT_ARCH) \
+                       -D__AVR_DEV_LIB_NAME__=$(XT_DEVLIB) \
+                       -DBYPASS_MCU_AVR_XT -DF_CPU=$(XT_F_CPU) \
+                       -UBYPASS_MCU_PIC10F322 -UBYPASS_MCU_AVR_CLASSIC \
+                       -Isrc $(if $(AVR_LIBC_INCLUDE),-I$(AVR_LIBC_INCLUDE)) \
+                       -I$(XT_INC) $(if $(AVR_GCC_INCLUDE),-I$(AVR_GCC_INCLUDE))
+
+# Plain bug-finding pass (parallel to analyze-cppcheck for the classic build).
+XT_CPPCHECK_FLAGS ?= --enable=warning,style,performance,portability \
+                     --std=c11 --platform=avr8 --error-exitcode=2 \
+                     --inline-suppr --max-configs=1 \
+                     --suppress=missingIncludeSystem \
+                     --suppress=unmatchedSuppression \
+                     --suppress=unusedStructMember \
+                     $(if $(AVR_LIBC_INCLUDE),'--suppress=*:$(AVR_LIBC_INCLUDE)/*') \
+                     $(if $(AVR_GCC_INCLUDE),'--suppress=*:$(AVR_GCC_INCLUDE)/*') \
+                     '--suppress=*:$(XT_INC)/*' \
+                     $(XT_CPPCHECK_CPPFLAGS)
+
+# MISRA addon pass (parallel to MISRA_CPPCHECK_FLAGS for the classic build).
+XT_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 --platform=avr8 \
+                     --enable=style --inline-suppr --max-configs=1 \
+                     --suppress=missingIncludeSystem \
+                     --suppress=unmatchedSuppression \
+                     $(if $(AVR_LIBC_INCLUDE),'--suppress=*:$(AVR_LIBC_INCLUDE)/*') \
+                     $(if $(AVR_GCC_INCLUDE),'--suppress=*:$(AVR_GCC_INCLUDE)/*') \
+                     '--suppress=*:$(XT_INC)/*' \
+                     $(XT_CPPCHECK_CPPFLAGS)
+
+.PHONY: attiny202-analyze attiny202-analyze-cppcheck attiny202-analyze-misra
+attiny202-analyze: attiny202-analyze-cppcheck attiny202-analyze-misra
+	@echo "=== ATtiny202 static analysis (cppcheck + MISRA) complete ==="
+
+attiny202-analyze-cppcheck: src/bypass_mcu_avr_xt.c $(XT_HEADERS)
+	@if ! command -v $(CPPCHECK) >/dev/null 2>&1; then \
+		echo "cppcheck not installed; skipping ATtiny202 cppcheck analysis"; exit 0; \
+	fi; \
+	if [ ! -f "$(XT_IO_HEADER)" ]; then \
+		echo "ATtiny_DFP device header not found (XT_DFP=$(XT_DFP)); skipping ATtiny202 cppcheck analysis"; exit 0; \
+	fi; \
+	echo "cppcheck (ATtiny202, avr8/avrxmega3): $(CPPCHECK) src/bypass_mcu_avr_xt.c"; \
+	$(CPPCHECK) $(XT_CPPCHECK_FLAGS) src/bypass_mcu_avr_xt.c
+
+attiny202-analyze-misra: src/bypass_mcu_avr_xt.c $(XT_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
+	@if ! command -v $(CPPCHECK) >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then \
+		echo "cppcheck and/or python3 not available; skipping ATtiny202 MISRA analysis"; exit 0; \
+	fi; \
+	if [ ! -f "$(XT_IO_HEADER)" ]; then \
+		echo "ATtiny_DFP device header not found (XT_DFP=$(XT_DFP)); skipping ATtiny202 MISRA analysis"; exit 0; \
+	fi; \
+	echo "MISRA-C:2012 analysis -- ATtiny202 shell ($(CPPCHECK) + misra addon, avr8)"; \
+	out=`mktemp`; rc=0; \
+	PYTHONWARNINGS=ignore $(CPPCHECK) $(XT_MISRA_CPPCHECK_FLAGS) \
+		--suppressions-list=$(MISRA_SUPPRESS) --error-exitcode=2 \
+		src/bypass_mcu_avr_xt.c 2>>$$out || rc=1; \
+	if [ $$rc -ne 0 ]; then \
+		echo "MISRA findings NOT covered by a documented deviation:"; \
+		grep -E "misra-c2012" $$out || true; \
+		echo ""; \
+		echo "Fix it, or (if genuinely unavoidable) add a per-file entry to"; \
+		echo "$(MISRA_SUPPRESS) with a matching record in MISRA_COMPLIANCE.md."; \
+		rm -f $$out *.dump *.ctu-info cppcheck-addon-ctu-file-list*; \
+		exit 1; \
+	fi; \
+	rm -f $$out *.dump *.ctu-info cppcheck-addon-ctu-file-list*; \
+	echo "MISRA-C:2012 (ATtiny202 shell): clean (documented deviations waived per MISRA_COMPLIANCE.md)"
+
+# Aggregate: every ATtiny202 pre-hardware check (smoke + build/budget + analysis).
+# STANDALONE -- NOT part of `make test` (no AVR8X simulator; DFP may be absent in
+# CI). Each sub-target skips cleanly when its tool/DFP is missing.
+.PHONY: attiny202-test
+attiny202-test: attiny202-smoke attiny202 attiny202-analyze
+	@echo "=== all ATtiny202 pre-hardware checks complete ==="
+
+# ============================================================================
 # CLEAN
 # ============================================================================
 
@@ -1080,7 +1295,7 @@ clean:
 		$(TOOLCHAIN_STAMP)
 	rm -f *.dump *.ctu-info cppcheck-addon-ctu-file-list*
 	rm -rf test/klee-out-* test/klee-last
-	rm -rf $(AVR_BUILD_DIR) $(PIC_BUILD_DIR)
+	rm -rf $(AVR_BUILD_DIR) $(PIC_BUILD_DIR) $(XT_BUILD_DIR)
 
 # ============================================================================
 # FLASH / FUSES -- hardware (select the image with VARIANT=<name>)
@@ -1731,6 +1946,10 @@ help:
 	@echo "  scripts/fetch_attiny_dfp.sh [DIR]  vendor the pinned device files (default XT_DFP=$(XT_DFP))"
 	@echo "  attiny202-smoke  Phase-0 gate: compile/link test/avr/attiny202_smoke.c, assert"
 	@echo "                   avrxmega3 + $(XT_FLASH_BYTES) B budget (standalone; skips if XT_DFP absent)"
+	@echo "  attiny202        build all variants for ATtiny202 + 2 KB flash-budget gate"
+	@echo "  attiny202-analyze  cppcheck + MISRA on the AVR-XT shell (DFP+avr-libc; standalone)"
+	@echo "  attiny202-test   all ATtiny202 pre-hardware checks (smoke + build + analyze)"
+	@echo "  attiny202-program  set fuses + flash one variant over UPDI (VARIANT=, XT_UPDI_PORT=)"
 	@echo "Test (each runs across ALL variants):"
 	@echo "  test            FAST full suite -- analyze, model, sim (all MCUs), coverage"
 	@echo "  test-long       FULL exhaustive suite (minutes); alias: stress"
