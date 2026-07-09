@@ -72,9 +72,9 @@
 
 // Compile-time constants only (mirroring the AVR classic shell: do NOT snapshot into
 // file-statics - that grows BSS and can perturb the fault-injection tests).
-#define MCLKCTRLB_EXPECTED    ((uint8_t)(CLKCTRL_PDIV_8X_gc | CLKCTRL_PEN_bm)) // 16MHz/8
+#define MCLKCTRLB_EXPECTED    ((uint8_t)((uint8_t)CLKCTRL_PDIV_8X_gc | (uint8_t)CLKCTRL_PEN_bm)) // 16MHz/8
 #define WDT_CTRLA_EXPECTED    ((uint8_t)WDT_PERIOD_256CLK_gc) // fuse-locked ~256ms
-#define TCB0_CTRLA_EXPECTED   ((uint8_t)(TCB_CLKSEL_CLKDIV1_gc | TCB_ENABLE_bm))
+#define TCB0_CTRLA_EXPECTED   ((uint8_t)((uint8_t)TCB_CLKSEL_CLKDIV1_gc | (uint8_t)TCB_ENABLE_bm))
 #define TCB0_CTRLB_EXPECTED   ((uint8_t)TCB_CNTMODE_INT_gc)
 #define TCB0_INTCTRL_EXPECTED ((uint8_t)TCB_CAPT_bm)
 
@@ -161,7 +161,7 @@ uint8_t hw_output_pins_intact(uint8_t const expected_mask) {
 static uint8_t hw_critical_sfrs_intact(void) {
     uint8_t mclkctrlb   = CLKCTRL.MCLKCTRLB;
     uint8_t wdt_ctrla   = WDT.CTRLA;
-    uint8_t wdt_locked  = (uint8_t)(WDT.STATUS & WDT_LOCK_bm);
+    uint8_t wdt_locked  = (uint8_t)(WDT.STATUS & (uint8_t)WDT_LOCK_bm);
     uint8_t tcb0_ctrla  = TCB0.CTRLA;
     uint8_t tcb0_ctrlb  = TCB0.CTRLB;
     uint8_t tcb0_intctl = TCB0.INTCTRL;
@@ -170,7 +170,7 @@ static uint8_t hw_critical_sfrs_intact(void) {
     return
         (MCLKCTRLB_EXPECTED    == mclkctrlb)   &&
         (WDT_CTRLA_EXPECTED    == wdt_ctrla)   &&
-        (WDT_LOCK_bm           == wdt_locked)  && // WDT still hardware-locked
+        ((uint8_t)WDT_LOCK_bm  == wdt_locked)  && // WDT still hardware-locked
         (TCB0_CTRLA_EXPECTED   == tcb0_ctrla)  &&
         (TCB0_CTRLB_EXPECTED   == tcb0_ctrlb)  &&
         (TCB0_INTCTRL_EXPECTED == tcb0_intctl) &&
@@ -188,7 +188,7 @@ static pin_state_t hw_read_footswitch(void) {
 // pull-up lives in the per-pin PORTA.PINnCTRL PULLUPEN bit (single enable, like
 // the classic PORTB latch bit -- unlike the PIC's two-part WPUA/nWPUEN).
 static uint8_t hw_footswitch_pullup_intact(void) {
-    return (PORTA.PIN7CTRL & PORT_PULLUPEN_bm) != 0U;
+    return (PORTA.PIN7CTRL & (uint8_t)PORT_PULLUPEN_bm) != 0U;
 }
 
 
@@ -225,7 +225,7 @@ static void hw_tick_timer_start(void) {
     TCB0.CTRLB    = TCB_CNTMODE_INT_gc;             // periodic interrupt mode
     TCB0.INTFLAGS = TCB_CAPT_bm;                    // clear a stale timeout flag
     TCB0.INTCTRL  = TCB_CAPT_bm;                    // enable CAPT interrupt
-    TCB0.CTRLA    = TCB_CLKSEL_CLKDIV1_gc | TCB_ENABLE_bm; // CLK_PER, run
+    TCB0.CTRLA    = TCB0_CTRLA_EXPECTED; // CLK_PER, run (see macro)
 
     // CPU sleeps in IDLE between ticks: core halts but TCB0 keeps running, so
     // the tick ISR still wakes us. (Deeper modes would gate TCB0's clock.)
@@ -273,13 +273,13 @@ static void init(void) {
     // pin-map sanity: the map hard-codes PORTA bit positions as literals; pin
     // them to <avr/io.h>'s generic PINn_bp so a typo can never misroute a pin
     // (parity with the AVR-classic PBx and PIC _PORTA_RAx_POSN asserts).
-    static_assert(FOOTSW_PIN      == PIN7_bp, "FOOTSW_PIN must be PA7");
-    static_assert(LED_PIN         == PIN1_bp, "LED_PIN must be PA1");
-    static_assert(CD4053_PIN      == PIN2_bp, "CD4053_PIN must be PA2");
-    static_assert(RELAY_RESET_PIN == PIN2_bp, "RELAY_RESET_PIN must be PA2");
-    static_assert(RELAY_SET_PIN   == PIN3_bp, "RELAY_SET_PIN must be PA3");
-    static_assert(CD4053_CTL1     == PIN2_bp, "CD4053_CTL1 must be PA2");
-    static_assert(CD4053_CTL2     == PIN3_bp, "CD4053_CTL2 must be PA3");
+    static_assert(FOOTSW_PIN      == (unsigned)PIN7_bp, "FOOTSW_PIN must be PA7");
+    static_assert(LED_PIN         == (unsigned)PIN1_bp, "LED_PIN must be PA1");
+    static_assert(CD4053_PIN      == (unsigned)PIN2_bp, "CD4053_PIN must be PA2");
+    static_assert(RELAY_RESET_PIN == (unsigned)PIN2_bp, "RELAY_RESET_PIN must be PA2");
+    static_assert(RELAY_SET_PIN   == (unsigned)PIN3_bp, "RELAY_SET_PIN must be PA3");
+    static_assert(CD4053_CTL1     == (unsigned)PIN2_bp, "CD4053_CTL1 must be PA2");
+    static_assert(CD4053_CTL2     == (unsigned)PIN3_bp, "CD4053_CTL2 must be PA3");
 
     // don't let init() be interrupted; re-enabled at the end.
     cli();

@@ -85,9 +85,9 @@ fails the gate and forces a conscious review.
 
 | | |
 |---|---|
-| **Rules** | 11.4 (pointer ↔ integer conversion, Advisory); 10.1 (inappropriate essential type, Required); 10.8 (composite-expression cast, Required); 10.4 (mismatched essential types in an operation, Required — AVR-XT shell only) |
+| **Rules** | 11.4 (pointer ↔ integer conversion, Advisory); 10.1 (inappropriate essential type, Required); 10.8 (composite-expression cast, Required) |
 | **Files** | `bypass_mcu_avr_classic.c`, `bypass_output_cd4053_simple.c`, `bypass_output_cd4053_with_mute.c`, `bypass_output_tq2_l2_5v_relay.c`, `bypass_mcu_avr_xt.c` (avrxmega3 shell) |
-| **Instances** | classic AVR: 11.4 ×28, 10.1 ×26, 10.8 ×6. ATtiny202 shell: 11.4 ×29, 10.4 ×14, 10.8 ×4, 10.1 ×1 |
+| **Instances** | classic AVR: 11.4 ×28, 10.1 ×26, 10.8 ×6. ATtiny202 shell: 11.4 ×29, 10.8 ×4, 10.1 ×1 |
 
 **Rationale.** Direct manipulation of AVR I/O registers is unavoidable in
 bare-metal firmware, and avr-libc exposes every register through the `_SFR_*`
@@ -115,26 +115,15 @@ for any register access:
   expressions, which are themselves present *to keep the result in `uint8_t`*
   and silence `-Wconversion`.
 
-- **Rule 10.4** fires **only in the ATtiny202 (AVR-XT) shell**, because the
-  AVR8X device headers model registers differently from classic AVR: peripheral
-  configurations are `enum` group-config constants (essential type *enum*, e.g.
-  `TCB_CLKSEL_CLKDIV1_gc`) while bit masks are plain-`int` object-like macros
-  (e.g. `WDT_LOCK_bm`, `PORT_PULLUPEN_bm`). Combining or comparing them with the
-  `uint8_t` register fields — unavoidable when configuring or sanity-checking a
-  register — mixes essential-type categories, e.g.
-
-  ```c
-  TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc | TCB_ENABLE_bm;   // enum | signed int
-  (PORTA.PIN7CTRL & PORT_PULLUPEN_bm) != 0U;            // uint8_t & signed int
-  ```
-
-  This is the AVR-XT counterpart of the 10.1 idioms above; the classic-AVR
-  `_BV()`/`_SFR_*` model expresses the same operations without an `enum` operand,
-  so it never triggers 10.4. (7 of the 14 instances are the pin-map
-  `static_assert`s comparing the unsigned pin macros against the signed
-  `PINn_bp`; casting those `(unsigned)` — as the classic shell does with
-  `(unsigned)PBx` — sheds them, leaving only the unavoidable register-model
-  cases. A recommended tightening, not required for the waiver.)
+The AVR8X (ATtiny202) headers model registers differently from classic AVR —
+peripheral configurations are `enum` group-config constants (e.g.
+`TCB_CLKSEL_CLKDIV1_gc`) and bit masks are plain-`int` macros (e.g.
+`WDT_LOCK_bm`) — which would additionally trip **Rule 10.4** (mismatched
+essential types) when those are combined with the `uint8_t` register fields. The
+`bypass_mcu_avr_xt.c` shell **avoids** this by casting each register constant to
+`uint8_t` at its use site (and its pin `static_assert`s cast `(unsigned)PINn_bp`,
+mirroring the classic shell's `(unsigned)PBx`), so it deviates the **same three
+rules** as the classic shell and introduces no new one.
 
 There is no portable, register-correct way to express these operations without
 the underlying integer-to-pointer conversion and bit arithmetic. The accesses
