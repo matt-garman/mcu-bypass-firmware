@@ -993,6 +993,75 @@ program-pic: pic
 	$(PIC_PROG_CMD)
 
 # ============================================================================
+# BUILD -- ATtiny202 (AVR-XT / avrxmega3) toolchain smoke gate  [Phase 0]
+# ============================================================================
+#
+# A THIRD toolchain path -- but, unlike the PIC's closed XC8, the compiler here
+# stays 100% open-source apt packages: the stock gcc-avr / binutils-avr already
+# ship the avrxmega3 (AVR8X) architecture support, so only the per-device
+# DESCRIPTION files (spec, crt, device lib, <avr/io.h> header) are missing. Those
+# are vendored from a pinned, SHA-verified ATtiny_DFP atpack by
+# scripts/fetch_attiny_dfp.sh into XT_DFP -- an EXTERNAL, uncommitted dir
+# (third_party/ is gitignored), exactly mirroring how the PIC build consumes an
+# uncommitted PIC_DFP.
+#
+# `make attiny202-smoke` is a COMPILE/LINK gate only: there is no firmware shell
+# yet (src/bypass_mcu_avr_xt.c is Increment 2). It builds test/avr/attiny202_smoke.c
+# -- which exercises every peripheral group the shell will drive (PORTA GPIO +
+# PINnCTRL pull-up, CCP-protected CLKCTRL + WDT, TCB0 tick ISR, SLPCTRL idle,
+# RSTCTRL) -- with the project's exact strict CFLAGS, then asserts the emitted
+# image is avrxmega3 and fits the 2 KB flash budget. STANDALONE (NOT part of
+# `make test`, since the DFP may be absent in CI); skips cleanly when the
+# vendored device files are missing. There is no instruction-level simulator for
+# AVR8X (simavr/QEMU do not model it), so the eventual shell is validated by
+# static analysis + real hardware; the pure core keeps full formal coverage.
+XT_MCU   ?= attiny202
+XT_DEVLIB ?= tn202
+XT_DFP   ?= third_party/attiny_dfp
+XT_SPEC_DIR = $(XT_DFP)/gcc/dev/$(XT_MCU)
+XT_INC      = $(XT_DFP)/include
+# ATtiny202: 2 KB flash / 128 B SRAM. Budget the smoke against the full 2 KB (the
+# shell's own budget gate lands in Increment 2). NOTE: avr-size --mcu=attiny202
+# prints "Device: Unknown" under binutils 2.26 but STILL reports the Program:
+# byte count, so the awk parse below works (same tactic as the PIC word parse).
+XT_FLASH_BYTES ?= 2048
+# The vendored device files that must exist for the build (the fetch script's
+# output); their absence -> skip cleanly with a fetch hint.
+XT_SPEC_FILE = $(XT_SPEC_DIR)/device-specs/specs-$(XT_MCU)
+XT_IO_HEADER = $(XT_INC)/avr/io$(XT_DEVLIB).h
+# Strict flags: the classic-AVR CFLAGS_COMMON plus the -B/-I device-pack
+# injection (the open-source analogue of the PIC's -mdfp).
+XT_CFLAGS = -mmcu=$(XT_MCU) -B $(XT_SPEC_DIR) -I $(XT_INC) $(CFLAGS_COMMON)
+XT_LDFLAGS = -mmcu=$(XT_MCU) -B $(XT_SPEC_DIR) -Wl,--gc-sections
+
+XT_SMOKE_SRC = test/avr/attiny202_smoke.c
+XT_SMOKE_ELF = $(AVR_BUILD_DIR)/attiny202_smoke.elf
+
+.PHONY: attiny202-smoke
+attiny202-smoke: $(XT_SMOKE_SRC) | $(AVR_BUILD_DIR)
+	@if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
+		echo "ATtiny_DFP device files not found under XT_DFP=$(XT_DFP); skipping ATtiny202 smoke build."; \
+		echo "  Fetch them (open-source apt toolchain + pinned atpack):"; \
+		echo "    scripts/fetch_attiny_dfp.sh $(XT_DFP)"; \
+		exit 0; \
+	fi; \
+	echo "=== ATtiny202 (avrxmega3) smoke: compile + link + arch + $(XT_FLASH_BYTES) B budget ==="; \
+	$(CC) $(XT_CFLAGS) $(XT_LDFLAGS) -o $(XT_SMOKE_ELF) $(XT_SMOKE_SRC) \
+		|| { echo "FAIL: ATtiny202 smoke did not compile/link"; exit 1; }; \
+	flags=`readelf -h $(XT_SMOKE_ELF) 2>/dev/null | sed -n 's/.*Flags:[[:space:]]*//p'`; \
+	case "$$flags" in \
+		*avr:103*) : ;; \
+		*) echo "FAIL: $(XT_SMOKE_ELF) is not avrxmega3 (ELF flags: $$flags)"; exit 1 ;; \
+	esac; \
+	used=`$(SIZE) --mcu=$(XT_MCU) -C $(XT_SMOKE_ELF) 2>/dev/null | awk '/^Program:/ {print $$2; exit}'`; \
+	if [ -z "$$used" ]; then echo "FAIL: could not read Program size from $(XT_SMOKE_ELF)"; exit 1; fi; \
+	pct=`awk -v u="$$used" -v t=$(XT_FLASH_BYTES) 'BEGIN {printf "%.1f", u*100/t}'`; \
+	if [ "$$used" -gt "$(XT_FLASH_BYTES)" ]; then \
+		echo "FAIL: smoke uses $$used B ($${pct}%) -- exceeds $(XT_FLASH_BYTES) B"; exit 1; \
+	fi; \
+	echo "OK:   avrxmega3, $(XT_SMOKE_ELF) uses $$used B ($${pct}%) of $(XT_FLASH_BYTES) B"
+
+# ============================================================================
 # CLEAN
 # ============================================================================
 
@@ -1658,6 +1727,10 @@ help:
 	@echo "  pic-test-fault  libgpsim fault-inject: corrupt a critical SFR, assert the gate"
 	@echo "                  forces a WDT reset (standalone; needs gpsim-dev; PIC_FAULT_VARIANT)"
 	@echo "  program-pic     flash one PIC variant to hardware (VARIANT=, PIC_PROG=pk2cmd|ipecmd)"
+	@echo "ATtiny202 (AVR-XT / avrxmega3; open apt toolchain + vendored ATtiny_DFP):"
+	@echo "  scripts/fetch_attiny_dfp.sh [DIR]  vendor the pinned device files (default XT_DFP=$(XT_DFP))"
+	@echo "  attiny202-smoke  Phase-0 gate: compile/link test/avr/attiny202_smoke.c, assert"
+	@echo "                   avrxmega3 + $(XT_FLASH_BYTES) B budget (standalone; skips if XT_DFP absent)"
 	@echo "Test (each runs across ALL variants):"
 	@echo "  test            FAST full suite -- analyze, model, sim (all MCUs), coverage"
 	@echo "  test-long       FULL exhaustive suite (minutes); alias: stress"

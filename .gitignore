@@ -7,6 +7,11 @@
 build_avr_classic/
 build_pic/
 
+# vendored ATtiny_DFP device files for the ATtiny202 (AVR-XT) build -- fetched
+# on demand by scripts/fetch_attiny_dfp.sh (pinned version + SHA), NOT committed,
+# mirroring the external/uncommitted PIC_DFP. Override the location with XT_DFP.
+third_party/
+
 # ...EXCEPT the prebuilt release images, which ARE tracked: committing them is
 # the whole point of release/ (scripts/make-release.sh stages them there). The
 # global *.hex ignore above would otherwise silently drop them from `git add`.

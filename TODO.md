@@ -492,6 +492,63 @@ build is validated by static analysis + CBMC + model check + real hardware (no
 simulation layer); or evaluate QEMU's AVR plugin, which has a better AVR8X
 trajectory.
 
+*Implementation-path correction (2026-07-09).* Steps (1)/(2) above ("extend
+`bypass_hw_iface.h` with MCU primitives ... move the classic-AVR implementations
+behind that interface") are **superseded** by the pattern the project actually
+settled on with the PIC shell: `bypass_hw_iface.h` is the *output-driver*
+boundary ONLY (`hw_pin_set_*`, `hw_led_pin_set_*`, `hw_configure_output_pins`,
+`hw_output_pins_intact`, plus the driver-provided bypass/engage/sanity/init).
+Every MCU-core primitive (footswitch read, WDT arm/pet, clock/peripheral
+bring-up, tick source, wait-for-tick, `hw_force_wdt_reset`,
+`hw_critical_sfrs_intact`, `init`, `main`) is shell-private and re-written per
+shell. So ATtiny202 support = a THIRD standalone shell `src/bypass_mcu_avr_xt.c`
+(+ pin map `src/bypass_pins_avr_xt.h`, a `BYPASS_MCU_AVR_XT` branch in
+`bypass_output_common.h` / `bypass_config.h`), structured like
+`bypass_mcu_pic10f322.c`, reusing the pure core and all three output drivers
+unchanged. No refactor of the existing shells is required.
+
+*Toolchain decision (Phase 0 gate, 2026-07-09).* Path A chosen: keep the
+open-source **apt** toolchain (`gcc-avr` 7.3.0 / `binutils-avr` 2.26 /
+`avr-libc` from Ubuntu universe) and vendor ONLY the tinyAVR device-description
+files (spec, `<avr/io.h>` device header `iotn202.h`, `crtattiny202.o`) from a
+pinned, SHA-verified **ATtiny_DFP atpack**. Rationale: the packaged binutils
+already has the `avrxmega3` (AVR8X) linker emulation and gcc-avr ships the
+`avrxmega3` runtime libs -- the compiler/as/ld are open apt packages and already
+speak the ISA; only per-device data is missing. This is the exact `-B`/`-I`
+device-pack injection pattern the repo already uses for the PIC DFP, and is a
+STRICTLY smaller openness compromise than PIC (there the whole *compiler* XC8 is
+closed; here only static, permissively-licensed device files are external). The
+atpack is a direct, no-account, no-EULA, version-pinned static download
+(`packs.download.microchip.com/Microchip.ATtiny_DFP.<ver>.atpack`, HTTP 200, no
+auth header, indexed by `index.idx`), so a `scripts/fetch_attiny_dfp.sh` can pin
+version + SHA-256 and extract just the ~4 attiny202 files, keeping build-time
+independence from the URL. Fallback if gcc 7.3/binutils 2.26 cannot digest a
+modern atpack's spec/crt: Option B below.
+
+**Broader compiler & toolchain portability (adoption + reliability).** (NEW --
+2026-07-09) Motivated less by any single MCU than by two project goals: lowering
+the barrier for others to adopt/contribute, and surfacing latent defects that a
+single compiler can mask (register-allocation, volatile-ordering, ISR
+prologue/epilogue, UB that happens to "work" under one optimizer). Two concrete
+strands:
+- *Modern pure-FSF AVR toolchain (Option B from the ATtiny202 Phase 0 review).*
+  Build/document a canonical open toolchain from stable upstream sources
+  (`binutils` >= 2.41 @ ftp.gnu.org, `gcc` >= 13 avr target, `avr-libc` >= 2.2.0
+  @ github.com/avrdudes/avr-libc). avr-libc 2.2.0 has **native attiny202
+  support** -- no atpack at all -- so this both modernizes the AVR story and
+  removes the one Microchip-hosted dependency the Path-A ATtiny202 gate accepts.
+  Heavier (a from-source build + a documented build procedure) but 100% FSF and
+  reproducible; keep it as the escape hatch if the packaged 7.3.0 toolchain ever
+  blocks a modern device.
+- *Multi-compiler CI matrix.* Generalize the narrow "Cross-compiler
+  verification" item (Tier 2.5, avr-gcc-12) into a matrix that builds the
+  firmware under several open toolchains (multiple avr-gcc versions; clang's AVR
+  target where viable) and runs the full behavioral suite against each, asserting
+  identical results. Each added compiler is both an adoption on-ramp and an
+  independent bug-detector for the reliability goals. Effort: Medium (mostly CI
+  plumbing + a documented from-source toolchain build). Impact: Medium-High --
+  adoption + a genuine reliability net.
+
 **Hardware-in-the-loop (HIL) validation rig with register-level
 introspection.** The simavr (AVR Classic) and libgpsim (PIC) suites prove
 the shells in simulation, but two gaps remain: (a) the ATtiny202/AVR8X
