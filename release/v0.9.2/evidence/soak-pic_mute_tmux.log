@@ -1,0 +1,27 @@
+SOAK START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic/bypass_mute_tmux_pic10f322.hex proc=p10f322 FOSC=2000000  dur=24.00 h  (NB: gpsim WDT@WDTPS=0x08 ~1.057s, not 256ms -- liveness only)
+SOAK [1.00/24.00 h] checks=60 fails=0 wdt_resets=0
+SOAK [2.00/24.00 h] checks=120 fails=0 wdt_resets=0
+SOAK [3.00/24.00 h] checks=180 fails=0 wdt_resets=0
+SOAK [4.00/24.00 h] checks=240 fails=0 wdt_resets=0
+SOAK [5.00/24.00 h] checks=300 fails=0 wdt_resets=0
+SOAK [6.00/24.00 h] checks=360 fails=0 wdt_resets=0
+SOAK [7.00/24.00 h] checks=420 fails=0 wdt_resets=0
+SOAK [8.00/24.00 h] checks=480 fails=0 wdt_resets=0
+SOAK [9.00/24.00 h] checks=540 fails=0 wdt_resets=0
+SOAK [10.00/24.00 h] checks=600 fails=0 wdt_resets=0
+SOAK [11.00/24.00 h] checks=660 fails=0 wdt_resets=0
+SOAK [12.00/24.00 h] checks=720 fails=0 wdt_resets=0
+SOAK [13.00/24.00 h] checks=780 fails=0 wdt_resets=0
+SOAK [14.00/24.00 h] checks=840 fails=0 wdt_resets=0
+SOAK [15.00/24.00 h] checks=900 fails=0 wdt_resets=0
+SOAK [16.00/24.00 h] checks=960 fails=0 wdt_resets=0
+SOAK [17.00/24.00 h] checks=1020 fails=0 wdt_resets=0
+SOAK [18.00/24.00 h] checks=1080 fails=0 wdt_resets=0
+SOAK [19.00/24.00 h] checks=1140 fails=0 wdt_resets=0
+SOAK [20.00/24.00 h] checks=1200 fails=0 wdt_resets=0
+SOAK [21.00/24.00 h] checks=1260 fails=0 wdt_resets=0
+SOAK [22.00/24.00 h] checks=1320 fails=0 wdt_resets=0
+SOAK [23.00/24.00 h] checks=1380 fails=0 wdt_resets=0
+SOAK [24.00/24.00 h] checks=1440 fails=0 wdt_resets=0
+
+SOAK PASS: 24.00 h simulated. wdt_resets=0 liveness_fails=0 checks=1440
