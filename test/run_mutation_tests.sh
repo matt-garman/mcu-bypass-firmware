@@ -36,6 +36,20 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJ_DIR="$(dirname "$SCRIPT_DIR")"
 
+# Missing PIC tools normally make the PIC mutation subset an explicit partial
+# local run. In strict/full-tool contexts, skipped PIC mutants are failures.
+if [ -z "${MUTATION_ALLOW_SKIP+x}" ]; then
+    if [ -n "${STRICT_TOOLS:-}" ]; then
+        MUTATION_ALLOW_SKIP=0
+    else
+        MUTATION_ALLOW_SKIP=1
+    fi
+fi
+case "$MUTATION_ALLOW_SKIP" in
+    0|1) ;;
+    *) echo "ERROR: MUTATION_ALLOW_SKIP must be 0 or 1 (got '$MUTATION_ALLOW_SKIP')" >&2; exit 2 ;;
+esac
+
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
 FW_BASE="${FW_BASE:-bypass}"
@@ -127,8 +141,8 @@ pic_gpsim_run() {
 }
 
 # Apply one mutation in a throwaway sandbox and run the mapped checker.
-#   $1 kind : make | picgpsim | picsoak
-#   $2 arg  : make target (kind=make); ignored otherwise
+#   $1 kind : make | picgpsim | picsoak | pictarget
+#   $2 arg  : make target (kind=make), PIC variant (kind=pictarget), ignored otherwise
 #   $3 file ; $4 sed-expr ; $5 description
 # Updates the global idx/killed/survived/errored/SURVIVORS tallies.
 run_mutant() {
@@ -166,6 +180,10 @@ run_mutant() {
                 PIC_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" PIC_SOAK_VARIANT=cd4053 \
                 >/dev/null 2>&1; rc=$?
             ;;
+        pictarget)
+            label="pic-test-target($arg)"
+            make -C "$work" PIC_TARGET_VARIANT="$arg" pic-test-target >/dev/null 2>&1; rc=$?
+            ;;
         *)
             label="$kind"; rc=0
             ;;
@@ -193,13 +211,26 @@ run_mutant() {
 # qualitative WDT reset are included.
 #
 # Each entry: file<TAB>sed-expression<TAB>description. These are killed by the
-# four-checkpoint PORTA/LATA assertions in test/pic/run_gpsim_test.sh.
+# PORTA/LATA assertions in test/pic/run_gpsim_test.sh, including the mid-debounce
+# PRESS1_EARLY cadence checkpoint.
 PIC_GPSIM_MUTATIONS=(
 "src/bypass_mcu_pic10f322.c	s@LATA |=  (uint8_t)(1U << LED_PIN)@LATA \&= (uint8_t)~(1U << LED_PIN)@	PIC set_engaged LED inverted (LATA RA0 stays dark); ENGAGED checkpoint catches it"
 "src/bypass_mcu_pic10f322.c	s@LATA &= (uint8_t)~(1U << LED_PIN)@LATA |= (uint8_t)(1U << LED_PIN)@	PIC set_bypass LED clear inverted (RA0 stuck on); INIT/BYPASS_AGAIN checkpoints catch it"
 "src/bypass_mcu_pic10f322.c	s@(0U == (PORTA & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (PORTA \& (uint8_t)(1U << FOOTSW_PIN)))@	PIC footswitch read polarity inverted (RA3 sense flipped -> toggles on release, not press); PRESS1 LED-on (toggle-on-press) checkpoint catches it"
 "src/bypass_mcu_pic10f322.c	s@LATA |=  (uint8_t)(1U << pin)@LATA \&= (uint8_t)~(1U << pin)@	PIC control-pin drive inverted (LATA bit never set); ENGAGED full-LATA (0x3) check catches it"
 "src/bypass_mcu_pic10f322.c	s@T2CON = TMR2_T2CON_CONFIG;@T2CON = 0x03U;@	PIC TMR2 tick disabled (TMR2ON = bit2 cleared); main loop hangs in hw_wait_for_tick -> never toggles"
+"src/bypass_mcu_pic10f322.c	s@PIR1bits.TMR2IF = 0;@@	PIC TMR2IF tick-flag clear removed: loop free-runs and PRESS1_EARLY catches the too-fast debounce"
+)
+
+# Mutants killed by the fail-closed PIC target aggregate (fault + lock-step +
+# target I/O). Each entry: file<TAB>sed-expression<TAB>variant<TAB>description.
+PIC_TARGET_MUTATIONS=(
+"src/bypass_mcu_pic10f322.c	s@WPUA = (uint8_t)(1U << FOOTSW_PIN);@WPUA |= (uint8_t)(1U << FOOTSW_PIN);@	cd4053	PIC pull-up init regressed to read-modify-write; exact WPUA state can preserve unexpected output-pin latches"
+"src/bypass_mcu_pic10f322.c	s@wpua_latches == (uint8_t)(1U << FOOTSW_PIN)@0U != (wpua_latches \& (uint8_t)(1U << FOOTSW_PIN))@	cd4053	PIC exact WPUA guard weakened to RA3-present only; extra RA0..RA2 latches go undetected"
+"src/bypass_mcu_pic10f322.c	s@ANSELA & BYPASS_OUTPUT_DDR_MASK@ANSELA \& 0x01U@	cd4053	PIC ANSELA sanity mask narrowed to RA0 only; RA1/RA2 analog re-selection undetected"
+"src/bypass_output_cd4053_with_mute.c	s@hw_led_pin_set_low();          // dark status LED@hw_pin_set_high(CD4053_CTL1);  // MUTANT: reassert ENGAGED at startup\\n    hw_pin_set_high(CD4053_CTL2);\\n\\n    hw_led_pin_set_low();          // dark status LED@	mute	PIC cd4053-mute startup reasserts ENGAGED before MUTE; target I/O startup trace catches it"
+"src/bypass_output_cd4053_with_mute.c	s@BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS)@BYPASS_DELAY_MS(1)@g	mute	PIC cd4053-mute pre-switch mute window shortened; target I/O pulse-width check catches it"
+"src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	relay	PIC relay coil pulse shortened below datasheet minimum; target I/O pulse-width check catches it"
 )
 
 # WDT-liveness mutant: gpsim's ~200ms functional run is too short to see an
@@ -251,6 +282,7 @@ done
 # unguarded PIC mutant would be a false "survivor" on any box lacking XC8/gpsim.
 PIC_GPSIM_OK=0
 PIC_SOAK_OK=0
+PIC_TARGET_OK=0
 echo
 echo "=== PIC toolchain probe (gates the PIC-shell mutants) ==="
 PIC_BASE="$(mktemp -d)"
@@ -272,6 +304,12 @@ if command -v "$GPSIM" >/dev/null 2>&1 && [ -f "$PIC_BASE_HEX" ]; then
                 echo "gpsim-dev + glib + c++ present, soak baseline PASS -> WDT mutant ENABLED"
             else
                 echo "soak baseline did not pass cleanly -> WDT (soak) mutant SKIPPED"
+            fi
+            if make -C "$PIC_BASE" pic-test-target-variants >/dev/null 2>&1; then
+                PIC_TARGET_OK=1
+                echo "target aggregate baseline PASS -> PIC target mutants ENABLED"
+            else
+                echo "target aggregate baseline did not pass cleanly -> PIC target mutants SKIPPED"
             fi
         else
             echo "gpsim-dev/glib/c++ absent -> WDT (soak) mutant SKIPPED"
@@ -302,20 +340,40 @@ if [ "$PIC_SOAK_OK" -eq 1 ]; then
     done
 fi
 
+if [ "$PIC_TARGET_OK" -eq 1 ]; then
+    echo
+    echo "=== ${#PIC_TARGET_MUTATIONS[@]} PIC target mutants (fault + lock-step + target I/O) ==="
+    for entry in "${PIC_TARGET_MUTATIONS[@]}"; do
+        IFS=$'\t' read -r file sed_expr variant desc <<< "$entry"
+        run_mutant pictarget "$variant" "$file" "$sed_expr" "$desc"
+    done
+fi
+
 echo
 # Make the PIC-shell coverage explicit in the summary: a run on a host without
 # XC8/gpsim silently omits the PIC mutants, and "all killed" must not be read as
 # "PIC mutants passed" when they never ran. (CI's PIC job has the toolchain.)
+pic_skipped=0
 if [ "$PIC_GPSIM_OK" -eq 1 ]; then
+    msg="PIC-shell mutants: RAN (gpsim register-level"
     if [ "$PIC_SOAK_OK" -eq 1 ]; then
-        echo "PIC-shell mutants: RAN (gpsim register-level + libgpsim soak WDT)"
+        msg="$msg + libgpsim soak WDT"
     else
-        echo "PIC-shell mutants: RAN (gpsim register-level; soak WDT mutant skipped)"
+        msg="$msg; soak WDT skipped"
+        pic_skipped=$((pic_skipped + ${#PIC_SOAK_MUTATIONS[@]}))
     fi
+    if [ "$PIC_TARGET_OK" -eq 1 ]; then
+        msg="$msg + target aggregate"
+    else
+        msg="$msg; target aggregate skipped"
+        pic_skipped=$((pic_skipped + ${#PIC_TARGET_MUTATIONS[@]}))
+    fi
+    echo "$msg)"
 else
     echo "PIC-shell mutants: SKIPPED (PIC toolchain absent -- not gated on this host)"
+    pic_skipped=$((pic_skipped + ${#PIC_GPSIM_MUTATIONS[@]} + ${#PIC_SOAK_MUTATIONS[@]} + ${#PIC_TARGET_MUTATIONS[@]}))
 fi
-echo "=== mutation summary: $killed killed, $survived survived, $errored errored ==="
+echo "=== mutation summary: $killed killed, $survived survived, $errored errored, $pic_skipped PIC skipped ==="
 if [ "$survived" -ne 0 ]; then
     echo "SURVIVING MUTANTS (test suite gap -- a real fault went undetected):"
     for s in "${SURVIVORS[@]}"; do echo "  - $s"; done
@@ -323,6 +381,14 @@ fi
 if [ "$survived" -ne 0 ] || [ "$errored" -ne 0 ]; then
     exit 1
 fi
+if [ "$pic_skipped" -ne 0 ] && [ "$MUTATION_ALLOW_SKIP" -ne 1 ]; then
+    echo "ERROR: $pic_skipped PIC mutant(s) skipped; complete mutation gate did not run." >&2
+    echo "       Install the PIC toolchain/libgpsim stack, or set MUTATION_ALLOW_SKIP=1 for an explicitly partial local run." >&2
+    exit 1
+fi
+if [ "$pic_skipped" -ne 0 ]; then
+    echo "PARTIAL: all evaluated mutants killed, but $pic_skipped PIC mutant(s) were explicitly allowed to skip."
+    exit 0
+fi
 echo "all mutants killed: the suite detects every injected fault."
 exit 0
-

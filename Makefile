@@ -428,6 +428,7 @@ FORCE:
         test test-fast test-long stress \
         test-host test-sim test-sim-secondary \
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
+        pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
         test-stack-bound test-flash-budget test-soak \
         analyze analyze-tidy analyze-cppcheck analyze-deep \
         trace coverage coverage-check coverage-clean
@@ -891,8 +892,9 @@ PIC_FAULT_SYM = $(PIC_FAULT_HEX:.hex=.sym)
 # SRAM cases (so the test self-adjusts per variant instead of hard-coding it).
 # A $(shell) in this recursive (=) variable re-runs when PIC_FAULT_COMPILE is
 # expanded in the recipe -- i.e. AFTER the `pic` prerequisite has built the .sym.
-# Empty when the .sym is absent (XC8 not installed), so the ctx_ cases compile
-# out and the test reports them skipped.
+# Empty when the .sym is absent (XC8 not installed); the run recipe below fails
+# if the HEX exists but _ctx_ cannot be resolved, so the target cannot pass with
+# its SRAM cases omitted.
 PIC_FAULT_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC_FAULT_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DCTX_ADDR=0x$$a)
 
 # FW_PATH baked as an ABSOLUTE path so the binary is cwd-independent (parity with
@@ -934,9 +936,136 @@ pic-test-fault: pic
 		echo "      sizeof(debounce_context_t) evaluates to 5 even while the allocation is 3."; \
 		exit 1; \
 	fi; \
+	ctx_addr=`awk '$$1=="_ctx_"{print $$2; exit}' "$(PIC_FAULT_SYM)" 2>/dev/null`; \
+	if [ -z "$$ctx_addr" ]; then \
+		echo "FAIL: _ctx_ symbol not found in $(PIC_FAULT_SYM); ctx_ SRAM fault cases would be omitted."; \
+		exit 1; \
+	fi; \
 	echo "--- PIC fault-inject: variant=$(PIC_FAULT_VARIANT) proc=$(PIC_GPSIM_PROC) (ctx_ layout verified: 3 bytes) ---"; \
 	$(PIC_FAULT_COMPILE); \
 	./$(PIC_FAULT_BIN)
+
+# --- PIC built-HEX lock-step test (libgpsim + shared model) -------------------
+# Drive the real XC8-built HEX and the shared model with the same footswitch
+# stream, then compare live ctx_ SRAM after every completed main-loop iteration.
+# Standalone use is skip-clean for missing tools; pic-test-target below turns it
+# into a fail-closed gate by requiring the LOCK-STEP PASS sentinel.
+PIC_LOCKSTEP_VARIANT ?= cd4053
+PIC_LOCKSTEP_SRC = test/pic/test_lockstep_pic.cc
+PIC_LOCKSTEP_BIN = test/pic/test_lockstep_pic
+PIC_LOCKSTEP_MODEL_OBJ = $(PIC_BUILD_DIR)/bypass_pure_lockstep.o
+PIC_LOCKSTEP_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_LOCKSTEP_VARIANT)_$(PIC_TAG).hex
+PIC_LOCKSTEP_SYM = $(PIC_LOCKSTEP_HEX:.hex=.sym)
+PIC_LOCKSTEP_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC_LOCKSTEP_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DCTX_ADDR=0x$$a)
+PIC_LOCKSTEP_COMPILE = \
+		$(HOSTCC) $(HOST_CFLAGS) $(PURE_HOST_CFLAGS) -Itest -Isrc \
+			-c $(PURE_HOST_SRC) -o $(PIC_LOCKSTEP_MODEL_OBJ) && \
+		$(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
+			-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
+			-DFW_PATH='"$(CURDIR)/$(PIC_LOCKSTEP_HEX)"' -DPROC_NAME='"$(PIC_GPSIM_PROC)"' \
+			-DF_CPU_HZ=$(PIC_XTAL) $(PIC_LOCKSTEP_CTX_DEF) \
+			$(PIC_LOCKSTEP_SRC) $(PIC_LOCKSTEP_MODEL_OBJ) -o $(PIC_LOCKSTEP_BIN) -lgpsim
+
+$(PIC_LOCKSTEP_BIN): $(PIC_LOCKSTEP_SRC) $(PURE_HOST_DEP)
+	$(PIC_LOCKSTEP_COMPILE)
+
+.PHONY: pic-test-lockstep
+pic-test-lockstep: pic
+	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
+		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC lock-step"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
+		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC lock-step (install gpsim-dev)"; $(SKIP); \
+	fi; \
+	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
+		echo "libglib2.0-dev not found; skipping PIC lock-step (install libglib2.0-dev)"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC_LOCKSTEP_HEX)" ]; then \
+		echo "no $(PIC_LOCKSTEP_HEX) (XC8 absent?); skipping PIC lock-step for variant $(PIC_LOCKSTEP_VARIANT)"; $(SKIP); \
+	fi; \
+	s="$(PIC_LOCKSTEP_HEX:.hex=.s)"; \
+	alloc=`awk 'prev=="_ctx_:"{print $$2; exit} {prev=$$1}' "$$s" 2>/dev/null`; \
+	if [ "$$alloc" != "3" ]; then \
+		echo "FAIL: _ctx_ allocates $${alloc:-?} bytes in $$s -- expected 3 (packed 1-byte enums)."; \
+		echo "      test_lockstep_pic.cc reads ctx_+0/+1/+2; fix offsets if packing changed."; \
+		exit 1; \
+	fi; \
+	ctx_addr=`awk '$$1=="_ctx_"{print $$2; exit}' "$(PIC_LOCKSTEP_SYM)" 2>/dev/null`; \
+	if [ -z "$$ctx_addr" ]; then \
+		echo "FAIL: _ctx_ symbol not found in $(PIC_LOCKSTEP_SYM); lock-step cannot read firmware state."; \
+		exit 1; \
+	fi; \
+	echo "--- PIC lock-step: variant=$(PIC_LOCKSTEP_VARIANT) proc=$(PIC_GPSIM_PROC) (ctx_ layout verified: 3 bytes) ---"; \
+	$(PIC_LOCKSTEP_COMPILE); \
+	./$(PIC_LOCKSTEP_BIN)
+
+# --- PIC built-HEX GPIO transitions + pulse timing (libgpsim) ----------------
+# Observe the real XC8 instruction stream around startup and an engage/bypass
+# round trip. Asserts exact TRISA/ANSELA/LATA/PORTA behaviour, relay coil
+# exclusion, and mute/relay pulse widths. Standalone use is skip-clean;
+# pic-test-target below requires the TARGET-IO PASS sentinel.
+PIC_IO_VARIANT ?= cd4053
+PIC_IO_SRC = test/pic/test_io_pic.cc
+PIC_IO_BIN = test/pic/test_io_pic
+PIC_IO_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_IO_VARIANT)_$(PIC_TAG).hex
+PIC_IO_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
+		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
+		-DFW_PATH='"$(CURDIR)/$(PIC_IO_HEX)"' -DPROC_NAME='"$(PIC_GPSIM_PROC)"' \
+		-DF_CPU_HZ=$(PIC_XTAL) -D$(macro_$(PIC_IO_VARIANT)) \
+		$(PIC_IO_SRC) -o $(PIC_IO_BIN) -lgpsim
+
+$(PIC_IO_BIN): $(PIC_IO_SRC)
+	$(PIC_IO_COMPILE)
+
+.PHONY: pic-test-io
+pic-test-io: pic
+	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
+		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC target-I/O test"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
+		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC target-I/O test (install gpsim-dev)"; $(SKIP); \
+	fi; \
+	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
+		echo "libglib2.0-dev not found; skipping PIC target-I/O test (install libglib2.0-dev)"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC_IO_HEX)" ]; then \
+		echo "no $(PIC_IO_HEX) (XC8 absent?); skipping PIC target-I/O for variant $(PIC_IO_VARIANT)"; $(SKIP); \
+	fi; \
+	echo "--- PIC target I/O: variant=$(PIC_IO_VARIANT) proc=$(PIC_GPSIM_PROC) ---"; \
+	$(PIC_IO_COMPILE); \
+	./$(PIC_IO_BIN)
+
+# Fail-closed real-HEX aggregate. The individual libgpsim targets above remain
+# convenient skip-clean development commands; this wrapper requires explicit PASS
+# markers, so a missing compiler/header, missing ctx_ symbol, or partial run fails
+# CI/release instead of masquerading as green.
+PIC_TARGET_VARIANT ?= cd4053
+.PHONY: pic-test-target pic-test-target-variants
+pic-test-target:
+	@set -e; \
+	for spec in \
+		"pic-test-fault PIC_FAULT_VARIANT=$(PIC_TARGET_VARIANT)|FAULT-INJECT PASS" \
+		"pic-test-lockstep PIC_LOCKSTEP_VARIANT=$(PIC_TARGET_VARIANT)|LOCK-STEP PASS" \
+		"pic-test-io PIC_IO_VARIANT=$(PIC_TARGET_VARIANT)|TARGET-IO PASS"; do \
+		target=$${spec%%|*}; marker=$${spec#*|}; log=`mktemp`; \
+		if ! $(MAKE) --no-print-directory $$target >$$log 2>&1; then \
+			cat $$log; rm -f $$log; exit 1; \
+		fi; \
+		cat $$log; \
+		if ! grep -q "$$marker" $$log; then \
+			echo "FAIL: $$target did not report '$$marker' (skipped or incomplete?)"; \
+			rm -f $$log; exit 1; \
+		fi; \
+		rm -f $$log; \
+	done
+	@echo "=== PIC target fault/lock-step/I-O PASS (variant $(PIC_TARGET_VARIANT)) ==="
+
+pic-test-target-variants:
+	@for v in $(VARIANTS); do \
+		echo "===================== PIC TARGET VARIANT $$v ====================="; \
+		$(MAKE) --no-print-directory PIC_TARGET_VARIANT=$$v pic-test-target || exit 1; \
+	done
+	@echo "=== PIC target fault/lock-step/I-O validated for all variants ==="
 
 # --- PIC device programming (hardware) ---------------------------------------
 # Flash ONE built PIC variant (chosen by VARIANT, default $(VARIANT)) onto a real
@@ -2044,6 +2173,10 @@ help:
 	@echo "                  gpsim-dev+libglib2.0-dev; PIC_SOAK_VARIANT, PIC_SOAK_DURATION_MS)"
 	@echo "  pic-test-fault  libgpsim fault-inject: corrupt a critical SFR, assert the gate"
 	@echo "                  forces a WDT reset (standalone; needs gpsim-dev; PIC_FAULT_VARIANT)"
+	@echo "  pic-test-lockstep  libgpsim HEX-vs-model ctx_ lock-step (PIC_LOCKSTEP_VARIANT)"
+	@echo "  pic-test-io     libgpsim GPIO transition + pulse timing check (PIC_IO_VARIANT)"
+	@echo "  pic-test-target fail-closed fault + lock-step + target-I/O for one PIC variant"
+	@echo "                  (PIC_TARGET_VARIANT); pic-test-target-variants runs all variants"
 	@echo "  program-pic     flash one PIC variant to hardware (VARIANT=, PIC_PROG=pk2cmd|ipecmd)"
 	@echo "ATtiny202 (AVR-XT / avrxmega3; open apt toolchain + vendored ATtiny_DFP):"
 	@echo "  scripts/fetch_attiny_dfp.sh [DIR]  vendor the pinned device files (default XT_DFP=$(XT_DFP))"
