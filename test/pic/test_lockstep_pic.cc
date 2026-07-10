@@ -166,38 +166,57 @@ static Phase   g_phase     = PHASE_CALIB;
 static unsigned g_loop_addr = 0;
 
 static std::vector<uint8_t> g_stim;
-static size_t   g_i         = 0;
+static size_t   g_i         = 0;     // next stimulus index to APPLY to the pin
+static size_t   g_applied   = 0;     // stimulus index now on the pin (just integrated)
+static bool     g_primed    = false; // false until the first pin value is applied
+static size_t   g_compared  = 0;     // number of lock-step comparisons performed
 static state_t  g_model;
 static bool     g_done      = false;
 static unsigned g_toggles   = 0;
 static unsigned g_mismatch  = 0;
 
+// Called at every loop CLRWDT during PHASE_LOCKSTEP. The firmware SAMPLES the
+// footswitch at the TOP of each main-loop iteration (hw_read_footswitch feeding
+// debounce_integrate) and only reaches CLRWDT at the BOTTOM, so the ctx_ we read
+// here reflects the pin value that was applied at the PREVIOUS CLRWDT -- one
+// iteration earlier than the pin we set now. We therefore:
+//   (1) step the model with the input the firmware JUST integrated (g_applied)
+//       and compare, then
+//   (2) apply the NEXT input for the iteration about to run.
+// The very first CLRWDT only primes the pin (nothing to compare yet): applying
+// stimulus[0] from inside the handler guarantees the firmware's next sample sees
+// it fresh, so no input is dropped and the firmware never runs a step behind.
 static void lockstep_on_iteration(void) {
     if (g_done) return;
 
-    state_t fw = fw_ctx();
-    step_result_t r = step(g_model, g_stim[g_i]);
-    g_model = r.next;
-    if (r.toggled) g_toggles++;
-    mark_state_seen(g_model);
+    if (g_primed) {
+        state_t fw = fw_ctx();
+        step_result_t r = step(g_model, g_stim[g_applied]);
+        g_model = r.next;
+        if (r.toggled) g_toggles++;
+        mark_state_seen(g_model);
 
-    g_checks++;
-    if (!state_eq(fw, g_model)) {
-        if (g_mismatch < 5u) {
-            fprintf(stderr,
-                "FAIL: lock-step divergence at iter %zu (in=%u): "
-                "fw(ps=%u es=%u dc=%u) != model(ps=%u es=%u dc=%u)\n",
-                g_i, (unsigned)g_stim[g_i], fw.program_state, fw.effect_state,
-                fw.debounce_counter, g_model.program_state, g_model.effect_state,
-                g_model.debounce_counter);
+        g_checks++;
+        g_compared++;
+        if (!state_eq(fw, g_model)) {
+            if (g_mismatch < 5u) {
+                fprintf(stderr,
+                    "FAIL: lock-step divergence at iter %zu (in=%u): "
+                    "fw(ps=%u es=%u dc=%u) != model(ps=%u es=%u dc=%u)\n",
+                    g_applied, (unsigned)g_stim[g_applied], fw.program_state,
+                    fw.effect_state, fw.debounce_counter, g_model.program_state,
+                    g_model.effect_state, g_model.debounce_counter);
+            }
+            g_fails++;
+            g_mismatch++;
         }
-        g_fails++;
-        g_mismatch++;
     }
 
-    g_i++;
     if (g_i < g_stim.size()) {
         footsw_set(g_stim[g_i]);
+        g_applied = g_i;
+        g_i++;
+        g_primed = true;
     } else {
         g_done = true;
     }
@@ -304,8 +323,10 @@ int main() {
 
     build_stimulus();
     g_phase = PHASE_LOCKSTEP;
-    g_i = 0; g_done = false;
-    footsw_set(g_stim[0]);
+    g_i = 0; g_applied = 0; g_primed = false; g_compared = 0; g_done = false;
+    // Leave the pin RELEASED here (as it has been through settle/calib/anchor):
+    // the first lock-step CLRWDT applies stimulus[0] so the firmware samples it
+    // on a fresh iteration boundary instead of dropping it.
     guint64 hardcap_ms = (guint64)LOCKSTEP_ITERS * 3u + 2000u;
     guint64 t0 = get_cycles().get();
     while (!g_done && (get_cycles().get() - t0) < hardcap_ms * CYCLES_PER_MS) {
@@ -330,7 +351,7 @@ int main() {
     }
 
     printf("  lock-step: %zu iterations compared, %u toggles, %u mismatches\n",
-           g_i, g_toggles, g_mismatch);
+           g_compared, g_toggles, g_mismatch);
     int pass = (g_fails == 0);
     printf("LOCK-STEP %s: %u checks, %u failures\n", pass ? "PASS" : "FAIL", g_checks, g_fails);
     return pass ? 0 : 1;
