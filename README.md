@@ -55,7 +55,7 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
     host-compilable for exhaustive fuzz testing
   - Exhaustive simavr-based functional testing for AVR Classic;
     gpsim/libgpsim for PIC10F322; yasimavr for AVR-XT (ATtiny202)
-    functional, fault-injection, and soak tests
+    functional, fault-injection, lock-step, target-I/O, and soak tests
   - Mutation tests (deliberately break code to prove tests catch
     firmware errors)
   - Simulated fault-injection tests to verify WDT functioning
@@ -73,16 +73,18 @@ make program
 ```
 
 To build and validate the PIC10F322 port instead (requires the Microchip
-XC8 compiler + the PIC10-12Fxxx device pack, plus `gpsim` for the
-simulator test):
+XC8 compiler + the PIC10-12Fxxx device pack, plus `gpsim` and `gpsim-dev`
+for the target-level simulator gates):
 
 ```
-make pic        # build all variants + 512-word flash-budget gate
-make pic-test    # CONFIG-word, MISRA, and gpsim register-level checks
+make pic                         # build all variants + 512-word flash-budget gate
+make pic-test                    # CONFIG-word, MISRA, and gpsim register-level checks
+make pic-test-target-variants    # fail-closed libgpsim fault/lock-step/I/O gates
 ```
 
-These targets are independent of the AVR build and skip cleanly if the
-PIC toolchain is not installed.
+These targets are independent of the AVR build. Individual PIC tests skip
+cleanly if their tools are not installed; the target aggregate is the
+authoritative gate and fails closed on any missing/skipped libgpsim layer.
 
 To build and validate the ATtiny202 (AVR-XT) port (uses the open-source
 avr-gcc toolchain plus the fetched-on-demand Microchip device files and a
@@ -99,4 +101,3 @@ These targets are also independent of the AVR build and skip cleanly if the
 device pack or the `yasimavr` venv is not present.
 
 See [TOOLCHAIN](TOOLCHAIN.adoc) for full environmental details.  
-

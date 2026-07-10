@@ -29,10 +29,13 @@ make test` and commit the new signature.
 
 == PIC toolchain (PIC10F322, optional second target)
 
-The PIC10F322 port (`make pic`, `make pic-test`) is a SEPARATE, optional
-toolchain, entirely independent of the AVR build above and deliberately NOT part
-of `make test` (the AVR pre-hardware gate).  Every PIC target skips cleanly when
-its tool is absent, so the AVR workflow is unaffected if these are not installed.
+The PIC10F322 port (`make pic`, `make pic-test`,
+`make pic-test-target-variants`) is a SEPARATE, optional toolchain, entirely
+independent of the AVR build above and deliberately NOT part of `make test` (the
+AVR pre-hardware gate).  Individual PIC targets skip cleanly when their tools
+are absent, so the AVR workflow is unaffected if these are not installed.  CI
+and release use `STRICT_TOOLS=1` and the fail-closed `pic-test-target-variants`
+aggregate so missing PIC tooling cannot produce a false green release gate.
 
   MPLAB XC8:    V3.10  (Microchip MPLAB XC8 C Compiler; build date Aug 13 2025)
                 install dir: /opt/microchip/xc8/v3.10
@@ -50,26 +53,31 @@ its tool is absent, so the AVR workflow is unaffected if these are not installed
 
   gpsim:        0.32.1  (Ubuntu package: gpsim)
                 Instruction-level PIC simulator used by `make pic-test-gpsim`
-                (the PIC analogue of the AVR simavr suite; the PIC shell has no
-                simavr lock-step equivalent).
+                for register-level functional tests.  The libgpsim harnesses
+                below add the PIC lock-step, fault-injection, and target-I/O
+                gates.
                 install: apt install gpsim
                 note: gpsim 0.32.1 DOES support the p10f322; its I/O pins are
                 named ra0..ra3 (lower-case) in stimulus/attach scripts.
 
-  libgpsim:     gpsim-dev + libglib2.0-dev + g++  (Ubuntu packages)
-                Needed by `make pic-test-fault` (the libgpsim SFR / pull-up /
-                ctx_ fault-injection gate, run in CI for every variant) AND by
-                `make pic-test-soak` (the long-duration soak). Both LINK libgpsim
-                (test/pic/test_fault_pic.cc, test/pic/test_soak_pic.cc) instead
-                of scripting the gpsim CLI; the runtime `gpsim` package ships no
-                headers, and the C++ harness needs g++.
-                install: apt install gpsim-dev libglib2.0-dev g++
+  libgpsim:     gpsim-dev + libglib2.0-dev + g++ + pkg-config  (Ubuntu packages)
+                Needed by `make pic-test-fault` (SFR / pull-up / ctx_
+                fault-injection), `make pic-test-lockstep` (built-HEX live SRAM
+                vs model), `make pic-test-io` (GPIO transition and pulse timing),
+                and `make pic-test-soak` (long-duration soak). These harnesses
+                LINK libgpsim instead of scripting the gpsim CLI; the runtime
+                `gpsim` package ships no headers, the C++ harnesses need g++,
+                and the glib include/link flags are discovered through
+                pkg-config.
+                install: apt install gpsim-dev libglib2.0-dev g++ pkg-config
                 note: gpsim-dev's headers `#include <glib.h>`, which is NOT
                 pulled in by gpsim-dev, so libglib2.0-dev must be installed
                 explicitly (parallel to the libelf-dev gotcha for simavr).
                 The build passes -isystem for the gpsim headers (they emit their
-                own -Woverloaded-virtual warnings).  `make pic-test-soak` skips
-                cleanly when either dev package or the XC8-built HEX is absent.
+                own -Woverloaded-virtual warnings).  The standalone libgpsim
+                targets skip cleanly when dev packages or the XC8-built HEX are
+                absent; use `make pic-test-target-variants STRICT_TOOLS=1` when
+                a missing or skipped target must fail closed.
 
   cppcheck:     2.13.0  (the SAME binary as the AVR analysis, below)
                 `make pic-analyze` runs it with --platform=pic8-enhanced over the
@@ -86,10 +94,10 @@ XC8 / device-pack behaviours relied on (proven against V3.10 + DFP v1.9.189):
     enum to the smallest sufficient type, so _ctx_ actually assembles to
     `ds 3` with fields at byte offsets +0/+1/+2 (verified, including with
     volatile members, i.e. it is systematic layout, not an optimization).
-    Consequences: (a) a static_assert CANNOT pin the real layout -- `make
-    pic-test-fault` asserts `_ctx_: ds 3` from the generated .s instead,
-    since its ctx_ fault-injection offsets and the RAM figures in
-    DESIGN_DOCUMENTATION.adoc depend on it; (b) never take sizeof of an
+    Consequences: (a) a static_assert CANNOT pin the real layout -- the PIC
+    libgpsim tests assert `_ctx_: ds 3` from the generated .s instead, since
+    their ctx_ SRAM offsets and the RAM figures in DESIGN_DOCUMENTATION.adoc
+    depend on it; (b) never take sizeof of an
     enum-bearing type in PIC-shell code (e.g. memset(&ctx_, 0, sizeof ctx_)
     would write 5 bytes over a 3-byte object).  The atomicity angle is
     harmless either way: the PIC shell is single-threaded (polled tick, no
@@ -201,14 +209,20 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   Optional analysis tools:
   sudo apt install valgrind lcov gcovr
 
-  Optional PIC10F322 port (`make pic` / `make pic-test`):
+  Optional PIC10F322 port (`make pic` / `make pic-test` /
+  `make pic-test-target-variants`):
   sudo apt install gpsim          # the PIC simulator (apt)
-  # For the libgpsim fault-injection gate (`make pic-test-fault`, run in CI for
-  # every variant) and the soak (`make pic-test-soak`, standalone/local):
-  sudo apt install gpsim-dev libglib2.0-dev g++
+  # For the libgpsim fault/lock-step/target-I/O gates and the soak:
+  sudo apt install gpsim-dev libglib2.0-dev g++ pkg-config
   # XC8 V3.10 + the PIC10-12Fxxx_DFP pack are separate Microchip downloads
   # (see the PIC toolchain section above).  Without them, the pic* targets
-  # skip cleanly and the AVR `make test` is unaffected.
+  # skip cleanly and the AVR `make test` is unaffected.  Release/CI use
+  # STRICT_TOOLS=1 plus `make pic-test-target-variants`, where any skip fails.
+
+  Mutation tests that require the PIC target toolchain may be allowed to skip
+  locally with `MUTATION_ALLOW_SKIP=1` (the default).  Full-toolchain and release
+  runs use `MUTATION_ALLOW_SKIP=0` or `STRICT_TOOLS=1`, so a skipped PIC mutant
+  is treated as a failed gate.
 
   Optional ATtiny202 (AVR-XT) dynamic harness (`make attiny202-sim` / -fault /
   -soak; standalone, run locally):
@@ -243,4 +257,3 @@ The image is minimal: `apt-get update` and `make` itself are required, and
 gate skip silently (or fail under `STRICT_TOOLS=1`). For the authoritative,
 tested command set, use `scripts/ci-local.sh` (it mirrors the CI job order).
 ....
-
