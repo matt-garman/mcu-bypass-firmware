@@ -201,8 +201,8 @@ run_mutant() {
 }
 
 # --- PIC shell mutants (src/bypass_mcu_pic10f322.c) ----------------------------
-# The PIC shell has no simavr lock-step, so these drive the real XC8-built HEX in
-# gpsim. They are GATED on the PIC toolchain being present AND the unmutated tree
+# The PIC shell target-level mutants drive the real XC8-built HEX in gpsim and
+# libgpsim. They are GATED on the PIC toolchain being present AND the unmutated tree
 # genuinely PASSING (see the PIC toolchain probe below): gpsim/XC8/gpsim-dev
 # absence makes the targets skip (exit 0), which would otherwise read as a false
 # "survivor". gpsim's WDT calibration is wrong (~1.057s vs the silicon ~256ms)

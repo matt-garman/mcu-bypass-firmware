@@ -234,6 +234,7 @@ make a multi-field struct atomic regardless. No such sharing exists today.
 
 `bypass_pure.c` is unchanged and MCU-neutral, so the host/formal suite
 (golden-model, CBMC, model-check, KLEE) **still fully covers the algorithm** for
-PIC. The PIC *shell* has no simavr lock-step equivalent — it is validated by static
-analysis + the CONFIG-word check + gpsim register-level scripts + real hardware.
-The AVR shell remains the more rigorously verified reference.
+PIC. The PIC *shell* is validated by static analysis, the CONFIG-word check,
+gpsim register-level scripts, libgpsim fault injection, built-HEX/model
+lock-step, target-I/O timing checks, and real hardware. The AVR shell remains
+the reference with the longest validation history.
