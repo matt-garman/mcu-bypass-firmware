@@ -13,7 +13,8 @@
 #   The trust model rests on two legs:
 #     1. PROVENANCE -- every released image carries a MANIFEST recording the git
 #        commit, the exact toolchain versions, the per-image fuse bytes / CONFIG
-#        word, and the validation evidence (test-long + pic-test + 24-h soak).
+#        word, and the validation evidence (test-long + pic-test + PIC target
+#        aggregate + 24-h soak).
 #     2. REPRODUCIBILITY -- the Intel-HEX images are byte-deterministic for a
 #        fixed toolchain (objcopy ihex carries only code/data bytes, no
 #        timestamps/paths). SHA256SUMS pins those bytes; the tag-triggered CI
@@ -28,7 +29,8 @@
 #      cleanly when a tool is missing), a release FAILS LOUD on any absence -- a
 #      gate must never go green on a check that silently did nothing.
 #   1. Clean-build every AVR + PIC variant image.
-#   2. Run `make test-long` and `make pic-test` (the full pre-hardware gates).
+#   2. Run `make test-long`, `make pic-test`, and `make pic-test-target-variants`
+#      (the full pre-hardware gates).
 #   3. Run ALL soak combos (every variant x MCU) IN PARALLEL for the full
 #      duration, collecting a pass/fail verdict and evidence from each.
 #   4. Stage release/<VERSION>/ : the .hex images, SHA256SUMS, a provenance
@@ -255,27 +257,24 @@ ok "built ${#IMAGES[@]} images."
 # ============================================================================
 # 2. FULL PRE-HARDWARE GATES
 # ============================================================================
-section "2. validation: make test-long + make pic-test"
+section "2. validation: make test-long + make pic-test + PIC target aggregate"
 log "running make test-long (exhaustive AVR suite + mutation)..."
-make test-long >"$EVID/test-long.log" 2>&1 || { tail -40 "$EVID/test-long.log" >&2; die "make test-long FAILED."; }
+make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 >"$EVID/test-long.log" 2>&1 || { tail -40 "$EVID/test-long.log" >&2; die "make test-long FAILED."; }
 ok "test-long passed."
 log "running make pic-test (PIC CONFIG word + analyze + gpsim)..."
-make pic-test PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/pic-test.log" 2>&1 || { tail -40 "$EVID/pic-test.log" >&2; die "make pic-test FAILED."; }
+make pic-test STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/pic-test.log" 2>&1 || { tail -40 "$EVID/pic-test.log" >&2; die "make pic-test FAILED."; }
 ok "pic-test passed."
 
-# Fault injection (libgpsim): per variant, corrupt each guarded location (config
-# SFRs, pull-up SFRs, ctx_ SRAM) and assert the per-tick gate forces a WDT reset.
-# Fast (seconds/variant), so it runs here in the pre-hardware gates rather than
-# the parallel-soak stage. The grep guard turns a silent skip (missing gpsim-dev/
-# glib -- already required above) into a release failure. Logs auto-packaged by
-# the evidence copy loop.
-log "running make pic-test-fault (gpsim fault injection) on every variant..."
-for v in $VARIANTS; do
-	make pic-test-fault PIC_FAULT_VARIANT="$v" PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
-		>"$EVID/pic-fault-$v.log" 2>&1 || { tail -40 "$EVID/pic-fault-$v.log" >&2; die "pic-test-fault FAILED for variant $v."; }
-	grep -q "FAULT-INJECT PASS" "$EVID/pic-fault-$v.log" || { tail -40 "$EVID/pic-fault-$v.log" >&2; die "pic-test-fault did not PASS for variant $v (skipped or failed)."; }
-	ok "pic-test-fault $v: PASS"
-done
+# Fail-closed PIC target aggregate (libgpsim): per variant, require target fault
+# recovery, firmware/model ctx_ lock-step, and GPIO transition/pulse timing PASS
+# sentinels. This target converts the standalone skip-clean libgpsim drivers into
+# a release gate: any missing tool, missing ctx_ symbol, skipped subtarget, or
+# partial run is a hard failure.
+log "running make pic-test-target-variants (fault + lock-step + target I/O on the real HEX)..."
+make pic-test-target-variants STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
+	>"$EVID/pic-test-target-variants.log" 2>&1 \
+	|| { tail -60 "$EVID/pic-test-target-variants.log" >&2; die "make pic-test-target-variants FAILED."; }
+ok "pic-test-target-variants passed."
 
 # ============================================================================
 # 3. PARALLEL SOAK -- every combo, full duration
@@ -423,7 +422,7 @@ REL_BANNER=""
 	printf -- '- **Source commit:** `%s`\n' "$GIT_SHA"
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
-	printf -- '- **Validation:** `make test-long` + `make pic-test` + `make pic-test-fault` (gpsim SFR/pull-up/ctx_ fault injection) + %s-h parallel soak of every variant x MCU (see evidence/).\n\n' "$hours"
+	printf -- '- **Validation:** `make test-long` + `make pic-test` + `make pic-test-target-variants` (real-HEX SFR/SRAM fault recovery, firmware/model ctx_ lock-step, and GPIO transition/pulse timing) + %s-h parallel soak of every variant x MCU (see evidence/).\n\n' "$hours"
 
 	printf '## Toolchain\n\n'
 	printf -- '| tool | version |\n|---|---|\n'
@@ -498,8 +497,9 @@ ok "wrote MANIFEST.md"
 	printf 'release: firmware %s\n\n' "$VERSION"
 	printf 'Prebuilt, fully-validated firmware images for %s.\n\n' "$VERSION"
 	printf 'Built from %s with the toolchain pinned in TOOLCHAIN.adoc.\n' "$GIT_SHORT"
-	printf 'Validation: make test-long + make pic-test + %s-h parallel soak of\n' "$hours"
-	printf 'every variant x MCU (evidence under release/%s/evidence/).\n\n' "$VERSION"
+	printf 'Validation: make test-long + make pic-test + make pic-test-target-variants\n'
+	printf '+ %s-h parallel soak of every variant x MCU (evidence under\n' "$hours"
+	printf 'release/%s/evidence/).\n\n' "$VERSION"
 	printf 'Reproducibility is pinned by release/%s/SHA256SUMS and verified on a\n' "$VERSION"
 	printf 'clean runner by .github/workflows/release.yml when the tag is pushed.\n'
 } > "$OUTPUT_DIR/commit_msg.txt"

@@ -83,10 +83,9 @@ jobs:
   # builds every variant with XC8 + enforces the 512-word flash budget, verifies
   # the emitted CONFIG word vs design intent, runs cppcheck+MISRA on the PIC
   # shell, and drives the footswitch through gpsim asserting PORTA/LATA -- then
-  # runs the libgpsim fault-injection gate (`make pic-test-fault`) per variant:
-  # corrupt each guarded SFR / ctx_ byte and assert the per-tick sanity gate
-  # forces a WDT reset (previously exercised only at release time by
-  # scripts/make-release.sh; it costs seconds per variant, so it belongs here).
+  # runs the fail-closed real-HEX target aggregate (`make pic-test-target-variants`):
+  # libgpsim fault recovery, firmware/model ctx_ lock-step, and GPIO transition /
+  # pulse timing for every PIC variant.
   #
   # XC8 and the PIC10-12Fxxx DFP are not in apt; they are fetched from Microchip
   # (the free tier needs no key to compile) and installed to the paths the
@@ -157,7 +156,7 @@ jobs:
           for t in gpsim cppcheck c++; do
             command -v "$t" >/dev/null || { echo "::error::no $t"; exit 1; }
           done
-          # the libgpsim fault-injection gate needs the gpsim headers + glib
+          # the libgpsim target aggregate needs the gpsim headers + glib
           test -f /usr/include/gpsim/sim_context.h \
             || { echo "::error::gpsim-dev headers missing"; exit 1; }
           pkg-config --exists glib-2.0 \
@@ -185,19 +184,14 @@ jobs:
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC_DFP="${XC8_DFP_ROOT}/xc8"
 
-      # Fault injection (libgpsim), every variant. The grep guard turns a silent
-      # skip into a failure (same belt-and-suspenders as scripts/make-release.sh),
-      # even though the assert step above has already checked every tool.
-      - name: PIC fault-injection gate (make pic-test-fault)
+      # Fail-closed target aggregate (libgpsim), every variant. The aggregate
+      # itself requires explicit PASS sentinels from fault, lock-step, and I/O;
+      # a silent skip or partial run is therefore a failure.
+      - name: PIC target aggregate (make pic-test-target-variants)
         run: |
-          set -o pipefail
-          for v in $(make -s print-VARIANTS); do
-            make pic-test-fault PIC_FAULT_VARIANT="$v" STRICT_TOOLS=1 \
-              PIC_CC="${XC8_DIR}/bin/xc8-cc" \
-              PIC_DFP="${XC8_DFP_ROOT}/xc8" 2>&1 | tee "fault-$v.log"
-            grep -q "FAULT-INJECT PASS" "fault-$v.log" \
-              || { echo "::error::pic-test-fault did not PASS for variant $v (skipped or failed)"; exit 1; }
-          done
+          make pic-test-target-variants STRICT_TOOLS=1 \
+            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC_DFP="${XC8_DFP_ROOT}/xc8"
 
       - name: Upload PIC firmware images
         uses: actions/upload-artifact@v4
