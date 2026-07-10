@@ -1,6 +1,6 @@
 This project's top priorities are correctness, robustness and
 reliability.  The project concerns microcontroller firmware intended
-for musicial effect circuits (e.g. guitar pedals), specifically the
+for musical effect circuits (e.g. guitar pedals), specifically the
 sub-circuit that responds to a physical switch, debounces the
 switch, controls effect bypass or engage state, and lights/darks a
 status indicator LED.
