@@ -144,6 +144,21 @@ order to fail gracefully in the face of extraordinary circumstances:
       relay coil.  The assumption is that the parent effect is
       designed for 9-18v operation, so is almost certainly
       performing out-of-spec at a voltage below 5v.
++
+NOTE: The 4.3v figure above is the *AVR Classic* (ATtiny13a/45/85)
+BOD fuse. The BOD/BOR floor is MCU-family-specific and not every
+supported part can enforce the >4v peripheral-safe threshold:
++
+[horizontal]
+AVR Classic (ATtiny13a/45/85):: 4.3v BOD fuse -- enforces the >4v
+  floor the 5v relay coil / MOSFET peripherals require.
+PIC10F322:: BOR is enabled at the highest available trip
+  (`BORV=HI`), but the PIC10F322's trip points are only ~2.4v (LO) /
+  ~2.7v (HI). The PIC therefore *cannot* enforce a >4v floor in
+  firmware -- this is a hardware-design limitation. A PIC build that
+  drives >4v peripherals must guarantee the peripheral-safe supply
+  in hardware (e.g. regulator dropout / supervisor), not rely on the
+  MCU's BOR.
 
     * Watchdog timout (WDT): while the program flow has been
       exhaustively tested/simulated, including formal

@@ -56,11 +56,14 @@ its tool is absent, so the AVR workflow is unaffected if these are not installed
                 note: gpsim 0.32.1 DOES support the p10f322; its I/O pins are
                 named ra0..ra3 (lower-case) in stimulus/attach scripts.
 
-  libgpsim:     gpsim-dev + libglib2.0-dev  (Ubuntu packages)
-                Needed ONLY by `make pic-test-soak` -- the long-duration soak
-                (test/pic/test_soak_pic.cc) LINKS libgpsim instead of scripting
-                the gpsim CLI; the runtime `gpsim` package ships no headers.
-                install: apt install gpsim-dev libglib2.0-dev
+  libgpsim:     gpsim-dev + libglib2.0-dev + g++  (Ubuntu packages)
+                Needed by `make pic-test-fault` (the libgpsim SFR / pull-up /
+                ctx_ fault-injection gate, run in CI for every variant) AND by
+                `make pic-test-soak` (the long-duration soak). Both LINK libgpsim
+                (test/pic/test_fault_pic.cc, test/pic/test_soak_pic.cc) instead
+                of scripting the gpsim CLI; the runtime `gpsim` package ships no
+                headers, and the C++ harness needs g++.
+                install: apt install gpsim-dev libglib2.0-dev g++
                 note: gpsim-dev's headers `#include <glib.h>`, which is NOT
                 pulled in by gpsim-dev, so libglib2.0-dev must be installed
                 explicitly (parallel to the libelf-dev gotcha for simavr).
@@ -200,8 +203,9 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
 
   Optional PIC10F322 port (`make pic` / `make pic-test`):
   sudo apt install gpsim          # the PIC simulator (apt)
-  # For the libgpsim soak (`make pic-test-soak`; standalone, run locally):
-  sudo apt install gpsim-dev libglib2.0-dev
+  # For the libgpsim fault-injection gate (`make pic-test-fault`, run in CI for
+  # every variant) and the soak (`make pic-test-soak`, standalone/local):
+  sudo apt install gpsim-dev libglib2.0-dev g++
   # XC8 V3.10 + the PIC10-12Fxxx_DFP pack are separate Microchip downloads
   # (see the PIC toolchain section above).  Without them, the pic* targets
   # skip cleanly and the AVR `make test` is unaffected.
@@ -228,7 +232,15 @@ For CI reproducibility, prefer Ubuntu 24.04 LTS Docker image:
 
 ....
     docker run --rm -v $(pwd):/src ubuntu:24.04 bash -c \
-      "apt-get install -y gcc-avr avr-libc simavr libsimavr-dev libelf-dev gcc && \
+      "apt-get update && \
+       apt-get install -y make gcc-avr avr-libc simavr libsimavr-dev libelf-dev \
+                          gcc clang clang-tidy cppcheck cbmc python3 && \
        cd /src && make test"
+
+The image is minimal: `apt-get update` and `make` itself are required, and
+`make test` runs the analyzers (clang-tidy, cppcheck), the MISRA addon (needs
+`python3`), and CBMC (`cbmc`) -- omitting any of these makes the corresponding
+gate skip silently (or fail under `STRICT_TOOLS=1`). For the authoritative,
+tested command set, use `scripts/ci-local.sh` (it mirrors the CI job order).
 ....
 

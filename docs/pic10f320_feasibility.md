@@ -236,6 +236,14 @@ shared `debounce_context_t`.
 
 From the repo root, with XC8 + the DFP installed at the `TOOLCHAIN.adoc` paths:
 
+> **Historical snapshot (2026-06-26).** The commands below are the exact
+> invocations used for the flash-fit measurement at that date. They predate the
+> `pic10f32x` → `pic10f322` rename and the 16 MHz → 2 MHz clock change, so the
+> macro (`BYPASS_MCU_PIC10F32X`), source name (`bypass_mcu_pic10f32x.c`), and
+> `_XTAL_FREQ=16000000UL` no longer match the tree. For a current build use
+> `make pic`; these are retained only to document how the 320-vs-322 fit was
+> determined.
+
 ```sh
 XC8=/opt/microchip/xc8/v3.10/bin/xc8-cc
 DFP=/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8

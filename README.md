@@ -46,7 +46,9 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
 ## Testing and Validation Features
 
 
-  - [MISRA-C](https://en.wikipedia.org/wiki/MISRA_C) 2012 compliant
+  - [MISRA-C](https://en.wikipedia.org/wiki/MISRA_C):2012 checked;
+    compliant with documented deviations (see
+    [MISRA_COMPLIANCE.md](MISRA_COMPLIANCE.md))
   - [CBMC](https://www.cprover.org/cbmc/) formal analysis
   - Provable correctness via formal state analysis
   - Core debounce algorithm written as pure functionality, thus

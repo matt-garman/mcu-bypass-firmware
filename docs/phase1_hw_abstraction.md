@@ -1,7 +1,10 @@
 # PIC Phase 1 — hardware-abstraction refactor
 
-Status: **in progress** on branch `pic10f32x_support` (started 2026-06-23).
-Increment 1 complete; Increments 2–3 pending.
+Status: **historical planning note.** The hardware-abstraction refactor this
+describes is complete and shipped (the PIC10F322 shell and the classic-AVR /
+AVR-XT ports; see `CHANGELOG.md`). Retained for design rationale — it is **not**
+current build instructions, and its branch/increment status and `pic10f32x`
+naming are as-drafted (2026-06-23), not the shipped names.
 
 This note plans the Phase 1 refactor described in `TODO.md` (Tier 3, "PIC MCU
 family support"). Phase 1 is a **restructuring, not a behavioral change** — the
