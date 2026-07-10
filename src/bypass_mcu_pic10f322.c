@@ -105,12 +105,23 @@ uint8_t hw_output_pins_intact(uint8_t const expected_mask) {
 // values are what we want
 // SFR = special function register, the "control panel" of the MCU
 static uint8_t hw_critical_sfrs_intact(void) {
+
+    // OSCCON: IRCF<6:4> is the ONLY read/write field on the PIC10F322 and is
+    // what selects the HFINTOSC frequency, so validating it covers the whole
+    // register's timing-relevant state. The rest need no check and must not be
+    // checked: HFIOFS(0)/LFIOFR(1)/HFIOFR(3) are read-only oscillator-status
+    // flags that change legitimately as the oscillator settles (checking them
+    // would false-trip), and bits 2 and 7 are unimplemented (read 0). This part
+    // has no runtime clock-source select (no SCS/OSTS/PLL) -- FOSC=INTOSC is
+    // fixed in CONFIG1 at program time and is validated separately
+    // (test_config_pic / the fault-injection CONFIG check).
+    // (Datasheet DS40001585, Register 5-1.)
+
     uint8_t ircf   = (uint8_t)OSCCONbits.IRCF;
     uint8_t wdtps  = (uint8_t)WDTCONbits.WDTPS;
     uint8_t pr2    = (uint8_t)PR2;
     uint8_t t2con  = (uint8_t)T2CON;
     uint8_t ansela = (uint8_t)(ANSELA & BYPASS_OUTPUT_DDR_MASK); // 0 = output pins still digital
-
 
     return 
         (HFINTOSC_2MHZ_IRCF == ircf)  &&
