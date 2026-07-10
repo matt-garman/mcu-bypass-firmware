@@ -27,9 +27,9 @@
 //     CD4053_WITH_MUTE : PB2 = CTL1, PB3 = CTL2 (mute-before-switch)
 //     TQ2_L2_5V_RELAY  : PB2 = RESET coil, PB3 = SET coil (pulsed, then parked low)
 //   For the CD4053/TMUX4053 analog-switch variants the MCU *pin* level for a
-//   given effect state depends on the drive polarity (see X4053_CTL_FOR_STATE):
-//   the CD4053 build inverts through a MOSFET (MCU HIGH == switch sees LOW), the
-//   TMUX4053 build (BYPASS_X4053_DIRECT_DRIVE) drives the pin directly.
+//   given effect state is the same in both builds (see X4053_CTL_FOR_STATE):
+//   the CD4053's MOSFET inverter and the TMUX4053's swapped analog throws
+//   cancel, so the firmware drives the pin identically.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -87,27 +87,22 @@
 #endif
 
 // Expected MCU control-pin level for a given effect state, on the CD4053/
-// TMUX4053 analog-switch variants. The 4053 device sees the SAME logic level in
-// both builds (so the audio routing is identical); only the MCU drive polarity
-// differs:
-//   - CD4053 (MOSFET inverter, default): MCU pin == effect_state
-//       (ENGAGED -> 4053 sees LOW  -> MCU drives HIGH;
-//        BYPASS  -> 4053 sees HIGH -> MCU drives LOW)
-//   - TMUX4053 (BYPASS_X4053_DIRECT_DRIVE): MCU pin == !effect_state
+// TMUX4053 analog-switch variants. Both builds drive the MCU pin with the SAME
+// polarity: the CD4053's MOSFET inverter and the TMUX4053's swapped analog
+// throws cancel out, so the firmware is byte-identical for both. The natural,
+// MCU-absent state (control pins at the bypass level via pulldown/pullup) is
+// BYPASS by design.
+//   MCU pin == effect_state  (ENGAGED -> MCU HIGH, BYPASS -> MCU LOW)
 // (effect_state: 1 = ENGAGED, 0 = BYPASS. Not meaningful for the relay variant,
 // whose coil pins are pulsed and parked low regardless of polarity.)
-#if defined(BYPASS_X4053_DIRECT_DRIVE)
-#  define X4053_CTL_FOR_STATE(es)  (!(int)(es))
-#else
-#  define X4053_CTL_FOR_STATE(es)  ((int)(es))
-#endif
+#define X4053_CTL_FOR_STATE(es)  ((int)(es))
 
 // Cycle at which control line `ctl` last settled to its level for effect state
-// `es`. The mute-before-switch sequence (CD4053_WITH_MUTE) reaches the engaged/
-// bypass level via a rising edge on the CD4053 build and a falling edge on the
-// TMUX4053 direct-drive build; selecting the edge by the target level keeps the
-// mute-window timing measurement polarity-agnostic. (g_ctl_rise_cycle /
-// g_ctl_fall_cycle are defined below; this macro is only expanded after them.)
+// `es`. The mute-before-switch sequence (CD4053_WITH_MUTE) reaches the engaged
+// level via a rising edge and the bypass level via a falling edge; selecting the
+// edge by the target level keeps the mute-window timing measurement correct.
+// (g_ctl_rise_cycle / g_ctl_fall_cycle are defined below; this macro is only
+// expanded after them.)
 #define X4053_CTL_EDGE_CYCLE(ctl, es) \
     (X4053_CTL_FOR_STATE(es) ? g_ctl_rise_cycle[ctl] : g_ctl_fall_cycle[ctl])
 

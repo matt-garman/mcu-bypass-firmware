@@ -2,7 +2,6 @@
 // Copyright (c) Matthew Garman
 
 #include "bypass_output_common.h"
-#include "bypass_output_x4053_polarity.h"
 #include "bypass_hw_iface.h"
 
 
@@ -25,12 +24,13 @@ void hw_init_output_pins(void) {
 //   CD4053_PIN high -> [direct drive] -> 4053 control pins high
 //   CD4053_PIN low  -> [direct drive] -> 4053 control pins low
 void hw_set_bypass_state(void) {
-    hw_led_pin_set_low(); // dark status LED
-    hw_x4053_ctl_high(CD4053_PIN);
+    hw_led_pin_set_low();       // dark status LED
+    hw_pin_set_low(CD4053_PIN); // BYPASS = MCU low (natural/default state)
 }
 
 void hw_set_engaged_state(void) {
-    hw_led_pin_set_high(); // light status LED
-    hw_x4053_ctl_low(CD4053_PIN);
+    hw_led_pin_set_high();       // light status LED
+    hw_pin_set_high(CD4053_PIN); // ENGAGE = MCU high
 }
+
 
