@@ -102,11 +102,12 @@ note "BYPASS_AGAIN" "porta=$ba_porta lata=$ba_lata"
 [ $(( ib_lata )) -eq $(( EXP_BYPASS_LATA )) ] && pass "INIT: full LATA == $EXP_BYPASS_LATA (bypass control pins)" || fail "INIT: LATA should be $EXP_BYPASS_LATA in bypass, got $ib_lata"
 [ "$(bit "$ib_porta" 0x8)" = 1 ] && pass "INIT: footswitch released (RA3=1)" || fail "INIT: RA3 should read released (high), porta=$ib_porta"
 
-# 1b. Cadence check: ~3.5 ms into press #1, a correctly gated 1 ms loop is still
-#     mid-debounce, so the LED must remain off while RA3 reads pressed. A stuck
-#     TMR2IF/polling fault free-runs through the 8-sample threshold too early.
+# 1b. Cadence check: ~6 ms into press #1, a correctly gated 1 ms loop is still
+#     mid-debounce (it does not toggle until ~8 ms / 8 separated samples), so the
+#     LED must remain off while RA3 reads pressed. A stuck TMR2IF/polling fault
+#     free-runs and crosses the 8-sample threshold ~2 ms too early (~4.2 ms in).
 [ "$(bit "$pe_porta" 0x8)" = 0 ] && pass "PRESS1_EARLY: footswitch pressed (RA3=0)" || fail "PRESS1_EARLY: RA3 should read pressed (low), porta=$pe_porta"
-[ "$(bit "$pe_lata" 0x1)"  = 0 ] && pass "PRESS1_EARLY: LED still off (tick cadence intact)" || fail "PRESS1_EARLY: LED (RA0) on too early (~3.5 ms in), lata=$pe_lata"
+[ "$(bit "$pe_lata" 0x1)"  = 0 ] && pass "PRESS1_EARLY: LED still off (tick cadence intact)" || fail "PRESS1_EARLY: LED (RA0) on too early (~6 ms in), lata=$pe_lata"
 
 # 2. During press #1 the footswitch reads as pressed (RA3 low) -> input path works.
 [ "$(bit "$p1_porta" 0x8)" = 0 ] && pass "PRESS1: footswitch pressed (RA3=0)" || fail "PRESS1: RA3 should read pressed (low), porta=$p1_porta"
