@@ -405,6 +405,19 @@ __attribute__((OS_main)) int main(void) {
         // interrupt before the next instruction (ATtiny13A datasheet §7.3,
         // Sleep Modes). No tick is ever missed even without disabling
         // interrupts around the check-then-sleep sequence.
+        //
+        // Nor can a threshold crossing be "coalesced away."  The integrator
+        // runs in the ISR, so every 1ms sample folds into debounce_counter
+        // whether or not main has run; and debounce_step() is level-triggered
+        // on that saturating counter (>= PRESSED_THRESH), not edge-triggered,
+        // so it needs no transient crossing to be observed live.  In
+        // PRESS_DEBOUNCE_WAIT main does no blocking work, so it steps once
+        // per tick and inspects the counter after every ISR.  The only place
+        // main can miss ticks is the blocking actuation in set_*_state() -
+        // which runs only on a toggle, as we enter RELEASE_DEBOUNCE_WAIT with
+        // the counter reloaded to and saturating at RELEASE_THRESH while
+        // awaiting release: no press is at risk there.  (See the
+        // integrator-in-ISR rationale in bypass_pure.c.)
         hw_wait_for_tick();
     }
 
