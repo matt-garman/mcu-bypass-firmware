@@ -132,12 +132,19 @@ jobs:
           # here means the committed binary is NOT what the tagged source builds.
           ( cd "$fresh" && sha256sum -c "${GITHUB_WORKSPACE}/$dir/SHA256SUMS" )
 
-          # Belt-and-suspenders: every committed image was reproduced (count match).
-          n_committed=$(grep -c '\.hex$' "$dir/SHA256SUMS")
-          n_fresh=$(ls -1 "$fresh"/*.hex | wc -l)
-          echo "committed=$n_committed fresh=$n_fresh"
-          test "$n_committed" -le "$n_fresh" || { echo "::error::fewer fresh images than committed"; exit 1; }
-          echo "REPRODUCED: committed images are byte-identical to the tagged source build."
+          echo "== (c) release image set is EXACTLY what the tagged source builds =="
+          # (b) proves every *listed* image reproduces, but sha256sum -c only
+          # iterates SHA256SUMS -- a freshly built image omitted from the release
+          # would slip through. Compare the filename SETS (not counts) so both a
+          # missing committed image and an omitted fresh image fail the release.
+          work="$(mktemp -d)"
+          ( cd "$dir"   && awk '/\.hex$/ {print $2}' SHA256SUMS | sort -u ) > "$work/committed.txt"
+          ( cd "$fresh" && ls -1 *.hex                          | sort -u ) > "$work/fresh.txt"
+          if ! diff -u "$work/committed.txt" "$work/fresh.txt"; then
+            echo "::error::release image set does not match the tagged source build (see diff: '-' committed-only, '+' built-but-unreleased)"
+            exit 1
+          fi
+          echo "REPRODUCED: release image set is byte-identical AND complete vs. the tagged source build."
 
       # --- re-run the gates on the clean runner -----------------------------
       - name: Re-run make test-long

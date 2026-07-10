@@ -49,7 +49,7 @@ Images are named `bypass_<variant>[_<mcu>].hex`:
 | *(none)* | ATtiny13a (primary), 1.2 MHz |
 | `_t85` | ATtiny85, 1.0 MHz |
 | `_t45` | ATtiny45, 1.0 MHz |
-| `_pic10f322` | Microchip PIC10F322, 16 MHz |
+| `_pic10f322` | Microchip PIC10F322, 2 MHz (HFINTOSC) |
 
 The per-release `MANIFEST.md` lists every image with its MCU, clock, flash
 usage, fuse bytes, and exact flashing command.
@@ -93,11 +93,18 @@ pk2cmd -PPIC10F322 -Fbypass_cd4053_pic10f322.hex -M -Y -R      # PICkit 2
 
 ## Reproduce the images bit-for-bit
 
+A freshly built HEX lands under `build_avr_classic/` and `build_pic/`, not in
+the release directory, so run the checksum list against those fresh bytes —
+running it from the repo root would only re-verify the committed copies against
+themselves.
+
 ```sh
 git checkout vX.Y.Z
 # install the pinned toolchain (see TOOLCHAIN.adoc), then:
 make clean && make all13 all85 all45 && make pic
-sha256sum -c release/vX.Y.Z/SHA256SUMS
+tmp=$(mktemp -d)
+cp build_avr_classic/*.hex build_pic/*.hex "$tmp"/
+( cd "$tmp" && sha256sum -c "$OLDPWD/release/vX.Y.Z/SHA256SUMS" )
 ```
 
 A matching `sha256sum -c` proves your locally built images are identical to the

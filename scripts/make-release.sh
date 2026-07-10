@@ -118,6 +118,10 @@ FW_BASE=$(mkv FW_BASE)             # bypass
 AVR_BUILD_DIR=$(mkv AVR_BUILD_DIR) # build_avr_classic
 PIC_BUILD_DIR=$(mkv PIC_BUILD_DIR) # build_pic
 PIC_TAG=$(mkv PIC_TAG)             # pic10f322
+PIC_XTAL=$(mkv PIC_XTAL)           # 2000000UL  (_XTAL_FREQ; drives __delay_ms)
+# Human clock string for the manifest, derived from PIC_XTAL so it can never
+# drift from the firmware's asserted _XTAL_FREQ / OSCCON IRCF setting.
+PIC_CLK_MHZ=$(awk -v h="${PIC_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
 PIC_GPSIM_PROC=$(mkv PIC_GPSIM_PROC)
 LFUSE=$(mkv LFUSE);     HFUSE=$(mkv HFUSE)
 LFUSE_X5=$(mkv LFUSE_X5); HFUSE_X5=$(mkv HFUSE_X5)
@@ -375,7 +379,7 @@ img_row() {
 	local mcu clk fuses flashcmd prog amcu used="n/a"
 	case "$base" in
 		*_${PIC_TAG}.hex)
-			mcu="PIC10F322"; clk="16 MHz (INTOSC)"; fuses="CONFIG word embedded in HEX"
+			mcu="PIC10F322"; clk="${PIC_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
 			flashcmd="pk2cmd -PPIC10F322 -F$base -M -Y -R   (or: make program-pic VARIANT=<v>)" ;;
 		*_t85.hex|*_t45.hex)
 			case "$base" in
@@ -457,14 +461,23 @@ REL_BANNER=""
 	printf '\n'
 
 	printf '## Reproducing these images\n\n'
+	printf 'Check the images this tag *builds* against the committed checksums. A\n'
+	printf 'freshly built HEX lands under `build_avr_classic/` and `build_pic/`, not\n'
+	printf 'in this release directory, so the checksum list must be run against those\n'
+	printf 'fresh bytes (running it from the repo root would just re-verify the\n'
+	printf 'committed copies against themselves).\n\n'
 	printf '```\n'
 	printf 'git checkout %s\n' "$VERSION"
 	printf '# install the pinned toolchain (see TOOLCHAIN.adoc), then:\n'
 	printf 'make clean && make all13 all85 all45 && make pic\n'
-	printf 'sha256sum -c release/%s/SHA256SUMS\n' "$VERSION"
+	printf 'tmp=$(mktemp -d)\n'
+	printf 'cp build_avr_classic/*.hex build_pic/*.hex "$tmp"/\n'
+	printf '( cd "$tmp" && sha256sum -c "$OLDPWD/release/%s/SHA256SUMS" )\n' "$VERSION"
 	printf '```\n'
-	printf 'The tag-triggered CI (.github/workflows/release.yml) performs exactly this\n'
-	printf 'check on a clean runner and fails the release on any mismatch.\n'
+	printf 'A matching `sha256sum -c` proves your freshly built images are byte-identical\n'
+	printf 'to the published ones. The tag-triggered CI (.github/workflows/release.yml)\n'
+	printf 'performs exactly this fresh-build check on a clean runner -- and also asserts\n'
+	printf 'the release image set is complete -- failing the release on any mismatch.\n'
 } > "$OUTPUT_DIR/MANIFEST.md"
 ok "wrote MANIFEST.md"
 
