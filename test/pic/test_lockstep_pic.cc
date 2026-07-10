@@ -172,8 +172,27 @@ static bool     g_done      = false;
 static unsigned g_toggles   = 0;
 static unsigned g_mismatch  = 0;
 
+static bool g_primed = false;
+
 static void lockstep_on_iteration(void) {
     if (g_done) return;
+
+    // Phase sync. Until this point the footswitch is still held at the settled
+    // anchor level (released) that init_state()/fw_ctx() were captured at, so the
+    // firmware and model are both quiescent at the anchor and no stimulus has been
+    // applied yet. Consume this first CLRWDT hit as a clean loop boundary: apply
+    // g_stim[0] here (no compare, no model step) so the NEXT iteration samples it
+    // exactly once before its own CLRWDT -- identical to how every later
+    // footsw_set() below is issued at the boundary. Applying the first stimulus at
+    // a real loop boundary (rather than at an arbitrary PC outside the loop) makes
+    // the initial alignment independent of the variant's startup timing -- e.g.
+    // the relay driver's ~5 ms power-on coil pulse, which otherwise shifts the
+    // sample phase and lagged the firmware one stimulus sample behind the model.
+    if (!g_primed) {
+        g_primed = true;
+        footsw_set(g_stim[0]);
+        return;
+    }
 
     state_t fw = fw_ctx();
     step_result_t r = step(g_model, g_stim[g_i]);
@@ -305,7 +324,10 @@ int main() {
     build_stimulus();
     g_phase = PHASE_LOCKSTEP;
     g_i = 0; g_done = false;
-    footsw_set(g_stim[0]);
+    // Do NOT drive g_stim[0] here: the footswitch stays at the settled anchor
+    // level until the first lockstep callback applies g_stim[0] at a clean loop
+    // boundary (see lockstep_on_iteration's priming step), which keeps the
+    // initial phase alignment independent of variant startup timing.
     guint64 hardcap_ms = (guint64)LOCKSTEP_ITERS * 3u + 2000u;
     guint64 t0 = get_cycles().get();
     while (!g_done && (get_cycles().get() - t0) < hardcap_ms * CYCLES_PER_MS) {
