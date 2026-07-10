@@ -12,6 +12,19 @@ paths; and (4) all existing tests are correct and meaningful. The items below
 are deferrable polish and credibility work — none are bugs. Anything that *is* a
 bug gets fixed immediately, not parked here.
 
+**Update (2026-07-10):** a subsequent external review of the multi-MCU build
+did surface one real correctness defect — the TMUX4053 direct-drive (`_tmux`)
+output variants drove the analog-switch control pin at the inverted MCU
+polarity (BYPASS asserted at pin-high instead of the fail-safe pin-low), which
+mis-switched the effect and, on the muted variant, transited the invalid
+FXN+JOU-short state. Root cause: the polarity wrapper modeled the CD4053
+MOSFET-inverter vs TMUX direct-drive electrical difference but not the swapped
+analog throws, which cancel it. Fixed by driving one MCU polarity for both
+boards and deleting the wrapper; the now-identical `_tmux` build variants were
+dropped. Re-validated green (AVR + host + PIC, mutation 25/25). So the
+"no bugs found" claim above holds for the firmware *as it now stands*, but the
+record should note that this one was found and corrected here.
+
 ---
 
 ## PIC branch meta-review (2026-06-25, `pic10f32x_support`)
@@ -828,7 +841,15 @@ build check. Firmware source edit is the user's.
 
 Context: the spun-out child project `pic10f320-bypass-firmware` ships five
 variants at v0.9.1 (cd4053-simple, tmux4053-simple, cd4053-mute, tmux4053-mute,
-tq2-relay), all inside the 256-word flash. This note records whether the
+tq2-relay), all inside the 256-word flash.
+
+**Carry-over defect (2026-07-10):** the child was spun out with the same
+`bypass_output_x4053_polarity.h` wrapper, so it almost certainly inherits the
+TMUX polarity-inversion bug fixed in the parent (see the top-of-file update).
+The child should get the same fix — drive one MCU polarity for both boards,
+delete the wrapper, and drop the redundant `tmux4053-*` variants. Note this
+also moots the "five variants" framing and the per-variant word counts below
+(the `tmux` columns collapse into their base). This note records whether the
 provenance-URL idea above is feasible *there* — the most flash-constrained
 target — and a flash-compression opportunity found while investigating. All
 word counts below were **measured** by rebuilding the child firmware with its

@@ -13,6 +13,26 @@ file is the human-readable summary of *what changed*.
 
 ## [Unreleased]
 
+### Fixed
+- **TMUX4053 control-pin polarity was inverted on the direct-drive variants.**
+  The `cd4053_tmux` / `mute_tmux` images drove the analog-switch control pin at
+  the opposite MCU level from the design intent — BYPASS asserted at pin-high
+  instead of the fail-safe pin-low — which switched the effect the wrong way and,
+  on the muted variant, transited the invalid FXN+JOU-short state instead of
+  stepping around it. Root cause: `bypass_output_x4053_polarity.h` modeled the
+  CD4053-MOSFET-inverter vs TMUX-direct-drive electrical difference but not the
+  TMUX board's swapped analog throws, which already cancel it. The MCU now drives
+  a single polarity (BYPASS = pin low) that serves both the CD4053 and TMUX4053
+  boards. CD4053 builds are unaffected (already correct).
+
+### Removed
+- The separate `cd4053_tmux` and `mute_tmux` build variants and the
+  `BYPASS_X4053_DIRECT_DRIVE` compile flag. With the polarity corrected, the
+  TMUX images are byte-identical to their `cd4053` / `mute` bases, so a single
+  image now covers both the CD4053 and TMUX4053 hardware; the redundant variants
+  were dropped. The supported matrix is now three variants (`cd4053`, `mute`,
+  `relay`) per MCU.
+
 ## [0.9.2] - 2026-07-09
 
 ### Added

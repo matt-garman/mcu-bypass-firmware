@@ -327,14 +327,31 @@ PCB space, the TVS diode and ferrite bead can be omitted.
     * TMUX4053 can use lower-voltage logic true (e.g. CMOS, TTL)
     * CD4053 needs logic true to be at VDD
     * VDD will be effect voltage (typically 9-18v)
-    * Control from MCU running at 5v: can't be used directly on
-      CD4053
-    * Control switches held high via pullup resistor to VDD
-    * Control switches gated to GND via mosfet
-    * MCU signaling to GND-gate mosfets
-    * MCU high -> Switch signal low, MCU low -> Switch signal high
-    * Mosfet scheme not needed for TMUX4053, but retained for
-      schematic/wiring consistency across parts
+    * Two board options, one firmware image:
+        ** CD4053 (control logic at VDD, typically 9-18v): the 5v MCU
+           cannot drive the control pins directly, so each control pin is
+           held HIGH via a pullup to VDD and pulled LOW through a MOSFET
+           whose gate the MCU drives. This inverts the MCU signal:
+           MCU high -> switch control low; MCU low -> switch control high.
+        ** TMUX4053 (logic-level control, e.g. CMOS/TTL): the MCU drives
+           the control pins DIRECTLY. Each control pin has a pulldown to
+           GND, so MCU low -> switch control low; MCU high -> switch
+           control high. There is no MOSFET.
+    * Fail-safe by design: the natural state, with the MCU pins undriven
+      (they sit at their pulldown level, i.e. low), must be BYPASS. For the
+      CD4053 the MOSFET is then off and the control pins sit HIGH; for the
+      TMUX they sit LOW. The TMUX board therefore SWAPS its analog throws
+      (A0/A1, B0/B1, C0/C1) relative to the CD4053 so that both parts land
+      in BYPASS from their opposite rest levels (see the per-part truth
+      tables below).
+    * Consequence: the CD4053's MOSFET inversion and the TMUX's swapped
+      throws cancel, so the MCU drives an IDENTICAL polarity for both parts
+      (BYPASS = pin low, ENGAGE = pin high). A single firmware image
+      (cd4053 / mute) drives BOTH boards -- there is deliberately no
+      separate TMUX build. (An earlier revision shipped separate _tmux
+      images that re-inverted the MCU drive; because the hardware already
+      cancels the difference, that was a latent polarity bug and the
+      variants were byte-identical once corrected, so they were dropped.)
 
 === Simple Scheme: No Explicit Muting: CD4053 w/inverting MOSFET
 
@@ -543,15 +560,15 @@ stack-canary test (see Testing and Validation above).
 |===
 | Part      | Variant | Flash               | of device flash
 
-| ATtiny13a | cd4053  | 612 bytes           | 60% of 1 KB
-| ATtiny13a | relay   | 652 bytes           | 64% of 1 KB
-| ATtiny13a | mute    | 660 bytes           | 65% of 1 KB
-| ATtiny45  | cd4053  | 638 bytes           | 16% of 4 KB
-| ATtiny45  | relay   | 678 bytes           | 17% of 4 KB
-| ATtiny45  | mute    | 686 bytes           | 17% of 4 KB
-| ATtiny85  | cd4053  | 638 bytes           | 8% of 8 KB
-| ATtiny85  | relay   | 678 bytes           | 8% of 8 KB
-| ATtiny85  | mute    | 686 bytes           | 8% of 8 KB
+| ATtiny13a | cd4053  | 684 bytes           | 67% of 1 KB
+| ATtiny13a | relay   | 724 bytes           | 71% of 1 KB
+| ATtiny13a | mute    | 732 bytes           | 72% of 1 KB
+| ATtiny45  | cd4053  | 710 bytes           | 17% of 4 KB
+| ATtiny45  | relay   | 750 bytes           | 18% of 4 KB
+| ATtiny45  | mute    | 758 bytes           | 19% of 4 KB
+| ATtiny85  | cd4053  | 710 bytes           | 9% of 8 KB
+| ATtiny85  | relay   | 750 bytes           | 9% of 8 KB
+| ATtiny85  | mute    | 758 bytes           | 9% of 8 KB
 |===
 
 SRAM use is dominated by 4 bytes of static data; peak stack measured 31 bytes
@@ -559,7 +576,7 @@ SRAM use is dominated by 4 bytes of static data; peak stack measured 31 bytes
 the ATtiny13a, with 64 bytes of SRAM: worst-case consumption is 35 bytes
 (4 static + 31 stack), leaving roughly 29 bytes of free headroom. The tinyx5
 family has far more of both flash and SRAM (the ATtiny85 uses approximately
-8% of flash and approximately 7% of its 512 bytes of SRAM).
+9% of flash and approximately 7% of its 512 bytes of SRAM).
 
 This headroom is a deliberate design property: it leaves ample room for future
 features without approaching any resource limit, and it is enforced as a test:
@@ -576,9 +593,9 @@ compiler), not bytes. `make pic` enforces the flash-word budget per variant.
 |===
 | Variant | Program (flash) | of 512 words | Data (RAM) | of 64 bytes
 
-| cd4053  | 342 words | 66.8% | 34 bytes | 53.1%
-| relay   | 367 words | 71.7% | 34 bytes | 53.1%
-| mute    | 372 words | 72.7% | 34 bytes | 53.1%
+| cd4053  | 404 words | 78.9% | 34 bytes | 53.1%
+| relay   | 431 words | 84.2% | 34 bytes | 53.1%
+| mute    | 434 words | 84.8% | 34 bytes | 53.1%
 |===
 
 The 34-byte data figure is XC8's total reservation, not just the firmware's
@@ -586,8 +603,8 @@ state: the single live global is `ctx_` (the 3-byte `debounce_context_t`; the
 PIC's polled Model-B loop has no `timer_isr_called_` handshake, unlike the
 AVR ISR design), and the remainder is the XC8 runtime's scratch and temporaries.
 The PIC10F322 is the most flash-constrained supported part (the mute variant's
-72.7% is the tightest fit in the whole matrix) yet still leaves comfortable
-headroom against the 512-word limit, which `make pic` gates on every build.
+84.8% is the tightest fit in the whole matrix) yet still leaves headroom
+against the 512-word limit, which `make pic` gates on every build.
 
 
 == AVR Classic Program Flow
