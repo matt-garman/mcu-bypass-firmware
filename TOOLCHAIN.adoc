@@ -118,6 +118,53 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
                 the ATtiny85 path is used for WDT tests.  See test/avr/test_sim.c
                 for the #ifdef TARGET_T85 stubs.
 
+  yasimavr:     0.1.6 + 2 vendored patches  (PyPI sdist, GPL-3.0; NOT apt)
+                Scriptable AVR8X/XT simulator used by the ATtiny202 (AVR-XT)
+                dynamic harness -- `make attiny202-sim` (functional footswitch
+                -> LED), `attiny202-fault` (critical-SFR / state fault
+                injection), `attiny202-soak` (long-duration liveness).  It is
+                the AVR-XT analogue of simavr for the classic parts and gpsim
+                for the PIC: simavr 1.6 and QEMU do not model the AVR8X core, so
+                the ATtiny202 shell would otherwise have no lock-step / soak /
+                fault coverage (only static analysis + hardware).  The three
+                targets are STANDALONE and skip cleanly when the venv is absent,
+                exactly like the PIC gpsim targets, so the AVR `make test` is
+                unaffected if yasimavr is not built.
+  build:        scripts/fetch_yasimavr.sh -- the yasimavr counterpart of
+                scripts/fetch_attiny_dfp.sh.  Builds a PATCHED yasimavr into a
+                project-local, gitignored venv (third_party/yasimavr/venv) from
+                the pinned sdist (yasimavr==0.1.6, SHA-256 verified) plus the two
+                vendored bug-fix patches in third_party/yasimavr/patches/.
+                Idempotent (stamped on version + sdist SHA + patch-set SHA).
+  needs:        python3 + python3-venv + python3-dev and a C++ compiler (it
+                compiles yasimavr's C++/SIP extension modules from source,
+                ~75 s), plus curl/wget and network access to PyPI.  Portable
+                across a stripped-ensurepip host (creates the venv --without-pip
+                and bootstraps get-pip) and a normal one.
+  install:      sudo apt install python3 python3-venv python3-dev g++ curl
+                scripts/fetch_yasimavr.sh
+  patches:      two upstream yasimavr bugs (reported upstream) block our
+                fuse-locked-WDT firmware and are carried as the vendored patches:
+                (0001) the tinyAVR 0-series device builder omits the WDT
+                peripheral, so any WDT register access crashes the simulated CPU;
+                (0002) ArchXT_WDT maps WINDOW=OFF to a 4-clock window instead of
+                0, resetting a correctly-petted WDT ~every pet.  Bug 0002 lives
+                in compiled C++, so a patched BUILD is required -- a runtime
+                monkeypatch cannot reach it.
+  scope:        yasimavr models the ATtiny202 TCB0 tick, the fuse-locked WDT
+                (real reset + STATUS.LOCK), RSTCTRL and PORTA (input + output)
+                well enough to run the REAL built image.  It treats the shell's
+                interrupts-off force-reset spin (cli; for(;;){}) as a terminal
+                halt, so it cannot show the watchdog PHYSICALLY completing that
+                reset (a hardware guarantee); the fault test asserts the sanity
+                gate ENTERING the force-reset path instead, and the watchdog
+                liveness reset (out of SLEEP) is observed directly.  The pure
+                debounce core keeps its full host + formal coverage regardless.
+                See test/avr/sim_attiny202.py.
+  builds on:    the ATtiny_DFP device files (scripts/fetch_attiny_dfp.sh, pinned
+                atpack) that `make attiny202` needs to COMPILE the image; those
+                are a Microchip download, fetched on demand, not committed.
+
 == Host toolchain (native test harnesses)
 
   gcc:          13.3.0  (Ubuntu 13.3.0-6ubuntu2~24.04.1)
@@ -158,6 +205,15 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   # XC8 V3.10 + the PIC10-12Fxxx_DFP pack are separate Microchip downloads
   # (see the PIC toolchain section above).  Without them, the pic* targets
   # skip cleanly and the AVR `make test` is unaffected.
+
+  Optional ATtiny202 (AVR-XT) dynamic harness (`make attiny202-sim` / -fault /
+  -soak; standalone, run locally):
+  sudo apt install python3 python3-venv python3-dev g++ curl
+  scripts/fetch_attiny_dfp.sh     # Microchip device files (to build the image)
+  scripts/fetch_yasimavr.sh       # patched yasimavr venv (to run it)
+  # Both are version-pinned, fetched on demand, and NOT committed.  Without them
+  # the attiny202-{sim,fault,soak} targets skip cleanly and `make test` is
+  # unaffected (see the yasimavr entry under "Simulator" above).
 
 == Version pinning strategy
 
