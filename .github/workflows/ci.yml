@@ -201,6 +201,147 @@ jobs:
           if-no-files-found: error
 
   # -------------------------------------------------------------------------
+  # ATtiny202 (AVR-XT) gate: the AVR-XT counterpart of the `pic` job. It is the
+  # ONLY place the ATtiny202 is built in CI (build-matrix covers the classic
+  # parts), so it doubles as the 202 build + 2 KB flash-budget gate, then runs
+  # the yasimavr dynamic harness -- functional (attiny202-sim), fault injection
+  # (attiny202-fault), and a short soak smoke (attiny202-soak).
+  #
+  # Two out-of-apt inputs, both fetched + version-pinned by repo scripts and
+  # cached: the ATtiny_DFP device files (scripts/fetch_attiny_dfp.sh -- a static
+  # atpack, no account/EULA) needed to COMPILE the image, and a PATCHED yasimavr
+  # (scripts/fetch_yasimavr.sh -- pinned sdist + the two vendored bug-fix patches,
+  # compiled into a project-local venv) needed to RUN it. The rest (avr-gcc,
+  # python3-dev, g++) is apt.
+  #
+  # CRITICAL (same hazard as the pic job): the attiny202-* targets SKIP CLEANLY
+  # when the DFP or the venv is absent -- fatal for a gate. The two "Assert ...
+  # present" steps fail loud so a broken fetch can never make the gates go green
+  # on nothing, and each run step greps for the expected number of PASS lines as
+  # belt-and-suspenders against a partial (per-variant) skip.
+  attiny202:
+    name: attiny202 (yasimavr sim/fault/soak)
+    runs-on: ubuntu-24.04
+    needs: pic   # gate behind the fast PIC job (see `verify`)
+    env:
+      # Bump with scripts/fetch_attiny_dfp.sh's pinned VER (keeps the cache key
+      # in step). The venv cache keys on the patch set + fetch script instead.
+      ATTINY_DFP_VER: "3.1.260"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain (apt)
+        run: |
+          sudo apt-get update
+          # avr-gcc/avr-libc + binutils-avr (avr-nm, used by the fault harness to
+          # resolve ctx_) build+inspect the image; python3-dev + g++ compile
+          # yasimavr's C++/SIP extension; python3-venv provides ensurepip.
+          sudo apt-get install -y \
+            make gcc-avr avr-libc binutils-avr \
+            python3 python3-venv python3-dev g++ \
+            curl unzip patch
+
+      - name: Restore cached ATtiny_DFP
+        id: cache-dfp
+        uses: actions/cache/restore@v4
+        with:
+          path: third_party/attiny_dfp
+          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}
+
+      - name: Fetch ATtiny_DFP device files
+        run: scripts/fetch_attiny_dfp.sh
+
+      - name: Build ATtiny202 firmware (+ 2 KB flash-budget gate)
+        run: make attiny202
+
+      - name: Assert ATtiny202 images built (fail loud, do NOT skip)
+        run: |
+          for v in $(make -s print-VARIANTS); do
+            hex="build_avr_xt/bypass_${v}_attiny202.hex"
+            test -f "$hex" || { echo "::error::missing $hex (DFP fetch or build failed)"; exit 1; }
+          done
+
+      - name: Save ATtiny_DFP cache
+        if: steps.cache-dfp.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: third_party/attiny_dfp
+          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}
+
+      - name: Restore cached patched yasimavr venv
+        id: cache-yasimavr
+        uses: actions/cache/restore@v4
+        with:
+          path: third_party/yasimavr/venv
+          # Rebuild when the pinned release, the patches, or the build script
+          # change. fetch_yasimavr.sh re-verifies the venv on a hit and rebuilds
+          # it if the interpreter/import is broken, so a stale cache self-heals.
+          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'third_party/yasimavr/patches/**') }}
+
+      - name: Build patched yasimavr (pinned sdist + vendored patches)
+        run: scripts/fetch_yasimavr.sh
+
+      - name: Assert patched yasimavr present (fail loud, do NOT skip)
+        run: |
+          py=third_party/yasimavr/venv/bin/python
+          test -x "$py" || { echo "::error::yasimavr venv missing ($py)"; exit 1; }
+          "$py" - <<'PY' || { echo "::error::yasimavr import / WDT model broken"; exit 1; }
+          from yasimavr.device_library import load_device
+          assert load_device('attiny202').find_peripheral('WDT') is not None
+          PY
+
+      - name: Save yasimavr venv cache
+        if: steps.cache-yasimavr.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: third_party/yasimavr/venv
+          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'third_party/yasimavr/patches/**') }}
+
+      - name: Record versions
+        run: |
+          echo "== avr-gcc ==" && avr-gcc --version | head -1
+          echo "== python3 ==" && python3 --version
+          echo "== yasimavr ==" && third_party/yasimavr/venv/bin/python -c \
+            "import yasimavr; print(getattr(yasimavr,'__version__','(patched 0.1.6)'))"
+
+      # Each gate greps for one PASS line per variant, so a per-variant skip
+      # (e.g. a missing image) fails the step even though make returned 0.
+      - name: Functional gate (make attiny202-sim)
+        run: |
+          set -o pipefail
+          n=$(make -s print-VARIANTS | wc -w)
+          make attiny202-sim 2>&1 | tee sim.log
+          p=$(grep -c "SIM PASS" sim.log || true)
+          [ "$p" -eq "$n" ] || { echo "::error::attiny202-sim: $p/$n variants PASSed (skip or fail)"; exit 1; }
+
+      - name: Fault-injection gate (make attiny202-fault)
+        run: |
+          set -o pipefail
+          n=$(make -s print-VARIANTS | wc -w)
+          make attiny202-fault 2>&1 | tee fault.log
+          p=$(grep -c "FAULT PASS" fault.log || true)
+          [ "$p" -eq "$n" ] || { echo "::error::attiny202-fault: $p/$n variants PASSed (skip or fail)"; exit 1; }
+
+      # Short soak smoke (5 min simulated ~= 2 s/variant) -- proves the soak
+      # harness + liveness path work on every variant. The full 1 h / 24 h soak
+      # stays a deliberate local/release run via XT_SOAK_DURATION_MS.
+      - name: Soak smoke (make attiny202-soak, 5 min simulated)
+        run: |
+          set -o pipefail
+          n=$(make -s print-VARIANTS | wc -w)
+          make attiny202-soak XT_SOAK_DURATION_MS=300000 \
+               XT_SOAK_PROGRESS_INTERVAL_MS=300000 2>&1 | tee soak.log
+          p=$(grep -c "SOAK PASS" soak.log || true)
+          [ "$p" -eq "$n" ] || { echo "::error::attiny202-soak: $p/$n variants PASSed (skip or fail)"; exit 1; }
+
+      - name: Upload ATtiny202 firmware images
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-attiny202
+          path: build_avr_xt/*.hex
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------------
   # Visible build matrix: prove every variant builds for every supported MCU
   # and publish the firmware images + size reports. `make all13/all45/all85`
   # build all variants for that part; the size<n> target prints flash/RAM.

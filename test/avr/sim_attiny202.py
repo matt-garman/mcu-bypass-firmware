@@ -35,6 +35,7 @@
 # replaces the spike's YAML edit.
 
 import os
+import subprocess
 import sys
 
 try:
@@ -74,10 +75,32 @@ REG_RSTCTRL_RSTFR = 0x0040
 RSTFR_WDRF_bm = 0x08            # RSTFR.WDRF (watchdog reset flag)
 REG_CLKCTRL_MCLKCTRLB = 0x0061  # expected 0x05 (PDIV 8, PEN)
 
-# PC of the shell's force-reset spin (hw_force_wdt_reset: cli; for(;;){}). Two
-# adjacent addresses observed depending on the entry path; treated as a range.
-TRAP_PC_LO = 0x0190
-TRAP_PC_HI = 0x0192
+# TCB0 (tick timer) and PORTA registers the shell's sanity gate guards.
+REG_TCB0_CTRLA = 0x0A40
+REG_TCB0_CTRLB = 0x0A41
+REG_TCB0_INTCTRL = 0x0A45
+REG_TCB0_CCMP_L = 0x0A4C
+REG_TCB0_CCMP_H = 0x0A4D
+REG_PORTA_DIR = 0x0400
+REG_PORTA_PIN7CTRL = 0x0417
+PORT_PULLUPEN_bm = 0x08
+
+# General-purpose I/O register GPR0 (0x001C). The firmware never touches the GPRs,
+# so a sentinel written here survives normal operation and is cleared to 0 only by
+# a device reset -- the soak's reset witness.
+REG_GPR0 = 0x001C
+
+# SRAM lives at 0x3F80.. in the unified data space; ELF data VMAs are 0x800000 |
+# offset (avr-nm reports e.g. 0x00803F80). The debug probe addresses SRAM by the
+# low 16 bits (0x3F80), so mask off the 0x800000 data flag.
+DATA_ADDR_MASK = 0xFFFF
+
+# The shell's force-reset spin is `cli; for(;;){}`. hw_force_wdt_reset is static
+# and gets INLINED (no symbol to resolve), but the empty infinite loop always
+# compiles to a single AVR `rjmp .-0` -- jump-to-self, opcode 0xCFFF. That opcode
+# is a robust, variant-independent signature for "the CPU is parked in the
+# force-reset spin": the firmware emits no other jump-to-self.
+TRAP_OPCODE = 0xCFFF
 
 
 def resolve_elf(arg=None):
@@ -96,6 +119,50 @@ def resolve_elf(arg=None):
     return path
 
 
+NM = os.environ.get("AVR_NM", "avr-nm")
+
+
+def _read_symbols(elf_path):
+    """Return [(addr, name), ...] from `avr-nm -n`, sorted by address.
+
+    avr-nm ships with binutils-avr, which built the ELF, so it is always present
+    when there is an image to simulate. Raises with an actionable message if it
+    is missing -- the harness self-adjusts to each variant's SRAM symbol
+    addresses (ctx_, timer_isr_called_) rather than hard-coding them, the same
+    discipline the PIC fault test uses reading _ctx_ from the .sym."""
+    try:
+        out = subprocess.check_output([NM, "-n", elf_path],
+                                      text=True, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        sys.stderr.write("ERROR: could not run '%s' to resolve firmware symbols "
+                         "(%s). Install binutils-avr or set AVR_NM.\n" % (NM, exc))
+        sys.exit(2)
+    except subprocess.CalledProcessError as exc:
+        sys.stderr.write("ERROR: '%s -n %s' failed (%s).\n" % (NM, elf_path, exc))
+        sys.exit(2)
+
+    syms = []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) != 3:
+            continue
+        addr_s, _kind, name = parts
+        try:
+            syms.append((int(addr_s, 16), name))
+        except ValueError:
+            continue
+    syms.sort(key=lambda t: t[0])
+    return syms
+
+
+def _symbol_addr(syms, name):
+    for addr, n in syms:
+        if n == name:
+            return addr
+    sys.stderr.write("ERROR: symbol '%s' not found in the firmware image.\n" % name)
+    sys.exit(2)
+
+
 class Sim:
     """A loaded, fuse-programmed ATtiny202 running a real firmware image.
 
@@ -107,6 +174,15 @@ class Sim:
 
     def __init__(self, elf_path, f_cpu=F_CPU_HZ, wdtcfg=WDTCFG_LOCKED):
         self.f_cpu = f_cpu
+        self.elf_path = elf_path
+
+        # Resolve per-variant SRAM addresses from the ELF (avr-nm) so the harness
+        # never hard-codes them: the debounce context + the ISR handshake flag.
+        # (The force-reset trap needs no symbol -- it is found by its 0xCFFF
+        # jump-to-self opcode; hw_force_wdt_reset is static and inlined.)
+        syms = _read_symbols(elf_path)
+        self.addr_ctx = _symbol_addr(syms, "ctx_") & DATA_ADDR_MASK
+        self.addr_timer_isr = _symbol_addr(syms, "timer_isr_called_") & DATA_ADDR_MASK
 
         # Build the device from a descriptor with a patched WDTCFG factory fuse
         # (see the module header). create_from_model returns a fresh descriptor,
@@ -180,11 +256,48 @@ class Sim:
     def state(self):
         return self.loop.state()
 
+    def is_done(self):
+        return self.state() == _core.SimLoop.State.Done
+
     def wdt_locked(self):
         return bool(self.read_ioreg(REG_WDT_STATUS) & WDT_STATUS_LOCK_bm)
 
     def in_trap_spin(self):
-        return TRAP_PC_LO <= self.pc() <= TRAP_PC_HI
+        """The CPU is parked in the force-reset spin: the instruction at PC is
+        the `rjmp .-0` jump-to-self (opcode 0xCFFF)."""
+        w = self.probe.read_flash(self.pc(), 2)
+        return (w[0] | (w[1] << 8)) == TRAP_OPCODE
+
+    # --- SRAM (debounce context / ISR flag) --------------------------------
+    def read_ram(self, addr, size=1):
+        return self.probe.read_data(addr, size)
+
+    def write_ram(self, addr, values):
+        self.probe.write_data(addr, bytes(values))
+
+    # --- fault injection ---------------------------------------------------
+    # yasimavr treats the interrupts-off force-reset spin as a terminal halt:
+    # the device reaches SimLoop.State.Done and the loop stops before the ~250 ms
+    # WDT would fire, so the harness cannot observe the WDT completing the reset
+    # (a hardware guarantee). Instead the deterministic, in-sim signal that the
+    # per-tick sanity gate CAUGHT a corruption is: the device halts (Done) with
+    # its PC inside hw_force_wdt_reset. That is what a fault case asserts.
+    def in_force_reset(self):
+        return self.is_done() and self.in_trap_spin()
+
+    def run_until_force_reset(self, max_ms, step_ms=1):
+        """Advance in small steps until the shell enters the force-reset spin
+        (Done @ hw_force_wdt_reset) or max_ms elapses. Returns the elapsed ms at
+        which it was detected, or None if it never happened."""
+        elapsed = 0
+        if self.in_force_reset():
+            return elapsed
+        while elapsed < max_ms:
+            self.loop.run(self.cycles(step_ms))
+            elapsed += step_ms
+            if self.in_force_reset():
+                return elapsed
+        return None
 
     def critical_sfrs_intact(self):
         """Mirror the shell's hw_critical_sfrs_intact for the SFRs the harness

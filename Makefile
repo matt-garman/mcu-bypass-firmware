@@ -1175,6 +1175,13 @@ YASIMAVR_VENV ?= third_party/yasimavr/venv
 YASIMAVR_PY    = $(YASIMAVR_VENV)/bin/python
 XT_SIM_VARIANT ?=
 XT_SIM_DRIVER   = test/avr/test_sim_attiny202.py
+XT_FAULT_DRIVER = test/avr/test_fault_attiny202.py
+XT_SOAK_DRIVER  = test/avr/test_soak_attiny202.py
+# Soak knobs (parity with the PIC soak's SOAK_*). Default 1 h simulated (~17 s
+# wall/variant in yasimavr fast mode); pass 86400000 for 24 h.
+XT_SOAK_DURATION_MS ?= 3600000
+XT_SOAK_LIVENESS_INTERVAL_MS ?= 60000
+XT_SOAK_PROGRESS_INTERVAL_MS ?= 600000
 
 # Shell guard shared by every harness target: skip cleanly (exit 0 out of the
 # whole recipe via the caller) when the patched venv is missing or non-importable.
@@ -1203,6 +1210,54 @@ attiny202-sim: attiny202
 		PYTHONPATH=test/avr $(YASIMAVR_PY) $(XT_SIM_DRIVER) "$$elf" || fail=1; \
 	done; \
 	if [ "$$ran" = 0 ]; then echo "no ATtiny202 images built; nothing to simulate."; fi; \
+	exit $$fail
+
+# Fault injection: corrupt each guarded critical SFR / state byte in the running
+# image and assert the shell catches it -- the per-tick sanity gate diverts to
+# the force-reset spin, or (for the tick timer itself) the watchdog resets on
+# lost liveness. Mirror image of the soak: a reset is the PASS here. Same guard /
+# skip / variant-selection contract as attiny202-sim.
+.PHONY: attiny202-fault
+attiny202-fault: attiny202
+	@$(yasimavr_skip_if_absent); \
+	vars="$(XT_SIM_VARIANT)"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
+	fail=0; ran=0; \
+	for v in $$vars; do \
+		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
+		if [ ! -f "$$elf" ]; then \
+			echo "no $$elf (DFP absent?); skipping ATtiny202 fault-inject for variant $$v"; continue; \
+		fi; \
+		echo "--- ATtiny202 fault-injection: variant=$$v ---"; \
+		ran=1; \
+		PYTHONPATH=test/avr $(YASIMAVR_PY) $(XT_FAULT_DRIVER) "$$elf" || fail=1; \
+	done; \
+	if [ "$$ran" = 0 ]; then echo "no ATtiny202 images built; nothing to fault-inject."; fi; \
+	exit $$fail
+
+# Long-duration soak: run the healthy image for XT_SOAK_DURATION_MS of simulated
+# time and assert liveness holds throughout -- the watchdog never resets (a GPR0
+# reset-witness stays armed) and a periodic 2-press round-trip still toggles the
+# LED. Mirror image of the fault test: a reset is a FAILURE. Non-fatal, logged,
+# cumulative. Standalone; same guard / skip / variant-selection as the others.
+.PHONY: attiny202-soak
+attiny202-soak: attiny202
+	@$(yasimavr_skip_if_absent); \
+	vars="$(XT_SIM_VARIANT)"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
+	fail=0; ran=0; \
+	for v in $$vars; do \
+		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
+		if [ ! -f "$$elf" ]; then \
+			echo "no $$elf (DFP absent?); skipping ATtiny202 soak for variant $$v"; continue; \
+		fi; \
+		echo "--- ATtiny202 soak: variant=$$v duration=$(XT_SOAK_DURATION_MS) ms ---"; \
+		ran=1; \
+		PYTHONPATH=test/avr \
+		ATTINY202_SOAK_DURATION_MS=$(XT_SOAK_DURATION_MS) \
+		ATTINY202_SOAK_LIVENESS_INTERVAL_MS=$(XT_SOAK_LIVENESS_INTERVAL_MS) \
+		ATTINY202_SOAK_PROGRESS_INTERVAL_MS=$(XT_SOAK_PROGRESS_INTERVAL_MS) \
+		$(YASIMAVR_PY) $(XT_SOAK_DRIVER) "$$elf" || fail=1; \
+	done; \
+	if [ "$$ran" = 0 ]; then echo "no ATtiny202 images built; nothing to soak."; fi; \
 	exit $$fail
 
 # --- ATtiny202 fuses + UPDI programming --------------------------------------
@@ -2006,6 +2061,10 @@ help:
 	@echo "  attiny202-test   all ATtiny202 pre-hardware checks (smoke + build + analyze)"
 	@echo "  attiny202-sim    yasimavr functional test: drive footswitch, assert LED toggles"
 	@echo "                   (standalone; needs scripts/fetch_yasimavr.sh; XT_SIM_VARIANT=)"
+	@echo "  attiny202-fault  yasimavr fault-inject: corrupt a guarded SFR/state, assert the"
+	@echo "                   gate or WDT catches it (standalone; XT_SIM_VARIANT=)"
+	@echo "  attiny202-soak   yasimavr soak: long run, assert no WDT reset + stays responsive"
+	@echo "                   (standalone; XT_SOAK_DURATION_MS=, XT_SIM_VARIANT=)"
 	@echo "  attiny202-program  set fuses + flash one variant over UPDI (VARIANT=, XT_UPDI_PORT=)"
 	@echo "Test (each runs across ALL variants):"
 	@echo "  test            FAST full suite -- analyze, model, sim (all MCUs), coverage"
