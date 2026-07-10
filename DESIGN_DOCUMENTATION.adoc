@@ -160,7 +160,7 @@ PIC10F322:: BOR is enabled at the highest available trip
   in hardware (e.g. regulator dropout / supervisor), not rely on the
   MCU's BOR.
 
-    * Watchdog timout (WDT): while the program flow has been
+    * Watchdog timeout (WDT): while the program flow has been
       exhaustively tested/simulated, including formal
       state-analysis, there is the possibility of extreme
       environmental factors that could corrupt the runtime state:
@@ -538,7 +538,7 @@ See TOOLCHAIN.adoc for details.  Summary:
 == Testing and Validation
 
 This project features an extensive testing, validation and simulation suite.
-Specific tests verify specific requirements, as show in the following table:
+Specific tests verify specific requirements, as shown in the following table:
 
 
 .Table Requirements vs Test/Validation Case

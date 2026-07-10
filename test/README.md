@@ -32,6 +32,7 @@ test/
   pic/     PIC10F322-specific tests (gpsim).
            test_config_pic.c    CONFIG-word check     (make pic-test-config)
            *.stc + run_gpsim_*  register-level gpsim  (make pic-test-gpsim)
+           test_fault_pic.cc    libgpsim fault-inject (make pic-test-fault)
            test_soak_pic.cc     libgpsim soak         (make pic-test-soak)
 ```
 
