@@ -241,10 +241,13 @@ jobs:
           sudo apt-get update
           # avr-gcc/avr-libc + binutils-avr (avr-nm, used by the fault harness to
           # resolve ctx_) build+inspect the image; python3-dev + g++ compile
-          # yasimavr's C++/SIP extension; python3-venv provides ensurepip.
+          # yasimavr's C++/SIP extension; python3-venv provides ensurepip;
+          # libelf-dev supplies libelf.h, which yasimavr's sim_firmware.cpp
+          # needs to load the ELF image.
           sudo apt-get install -y \
             make gcc-avr avr-libc binutils-avr \
             python3 python3-venv python3-dev g++ \
+            libelf-dev \
             curl unzip patch
 
       - name: Restore cached ATtiny_DFP
