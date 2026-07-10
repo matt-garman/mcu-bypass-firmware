@@ -72,7 +72,11 @@ jobs:
           echo "== python3 =="     && python3 --version
 
       - name: Full verification suite
-        run: make test
+        # STRICT_TOOLS=1: this runner installs the whole toolchain, so any
+        # optional gate that would otherwise skip cleanly (cppcheck, cbmc, the
+        # MISRA python addon, ...) must actually RUN -- a silent skip here would
+        # mean a broken install masquerading as a green build.
+        run: make test STRICT_TOOLS=1
 
   # -------------------------------------------------------------------------
   # PIC10F322 gate: the PIC counterpart of `verify`. Mirrors `make pic-test` --
@@ -174,8 +178,10 @@ jobs:
           echo "cppcheck:" && cppcheck --version
 
       - name: PIC pre-hardware gate
+        # STRICT_TOOLS=1: the assert step above proved XC8/DFP/gpsim are present,
+        # so the pic-test sub-gates must run, not skip. (Consistent with that assert.)
         run: |
-          make pic-test \
+          make pic-test STRICT_TOOLS=1 \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC_DFP="${XC8_DFP_ROOT}/xc8"
 
@@ -186,7 +192,7 @@ jobs:
         run: |
           set -o pipefail
           for v in $(make -s print-VARIANTS); do
-            make pic-test-fault PIC_FAULT_VARIANT="$v" \
+            make pic-test-fault PIC_FAULT_VARIANT="$v" STRICT_TOOLS=1 \
               PIC_CC="${XC8_DIR}/bin/xc8-cc" \
               PIC_DFP="${XC8_DFP_ROOT}/xc8" 2>&1 | tee "fault-$v.log"
             grep -q "FAULT-INJECT PASS" "fault-$v.log" \

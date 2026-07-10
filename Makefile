@@ -200,6 +200,22 @@ STACK_MAX_FRAME ?= 32
 # this gate.
 FLASH_T13_BUDGET ?= 90
 
+# Missing-tool policy for the optional gates (PIC/XC8, gpsim, cppcheck, python3,
+# the ATtiny_DFP / yasimavr venv, ...). By default a missing tool prints its
+# reason and skips that gate cleanly, so host-only development stays convenient.
+# With STRICT_TOOLS=1 the same condition is a HARD FAILURE instead: a green run
+# can then never mean "the gate was silently skipped" -- it means every gate
+# actually ran. CI and scripts/ci-local.sh install the full toolchain and set
+# STRICT_TOOLS=1 so a broken/absent install fails the job rather than passing.
+# Every skip guard ends its reason echo with "$(SKIP);" in place of a bare
+# exit-0; $(SKIP) resolves to that clean skip, or to a failing exit-1.
+STRICT_TOOLS ?=
+ifeq ($(strip $(STRICT_TOOLS)),)
+  SKIP := exit 0
+else
+  SKIP := { echo "::error::STRICT_TOOLS=1: the tool/dependency reported above is required and must not be skipped"; exit 1; }
+endif
+
 # Host-compiled copy of the firmware's PURE logic (bypass_pure.c), linked into
 # every test that includes model_step.h. Since the convergence, model_step.h's
 # step() delegates to the real debounce_integrate()/debounce_step() instead of a
@@ -595,7 +611,7 @@ PIC_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 --platform=pic8-enh
 pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v)))
 	@if [ ! -x "$(PIC_CC)" ] && ! command -v $(PIC_CC) >/dev/null 2>&1; then \
 		echo "XC8 not found at $(PIC_CC); skipping PIC build (override with PIC_CC=...)"; \
-		exit 0; \
+		$(SKIP); \
 	fi; \
 	mkdir -p $(PIC_BUILD_DIR); \
 	echo "=== PIC10F322 build + flash-budget ($(PIC_FLASH_WORDS) words) ==="; \
@@ -645,7 +661,7 @@ pic-test-config: pic test/pic/test_config_pic
 	@hexes=`ls $(PIC_BUILD_DIR)/$(FW_BASE)_*_$(PIC_TAG).hex 2>/dev/null`; \
 	if [ -z "$$hexes" ]; then \
 		echo "no PIC HEX in $(PIC_BUILD_DIR)/ (XC8 absent?); skipping CONFIG-word check"; \
-		exit 0; \
+		$(SKIP); \
 	fi; \
 	./test/pic/test_config_pic $$hexes
 
@@ -664,20 +680,20 @@ pic-analyze: pic-analyze-cppcheck pic-analyze-misra
 
 pic-analyze-cppcheck: src/bypass_mcu_pic10f322.c $(PIC_HEADERS)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1; then \
-		echo "cppcheck not installed; skipping PIC cppcheck analysis"; exit 0; \
+		echo "cppcheck not installed; skipping PIC cppcheck analysis"; $(SKIP); \
 	fi; \
 	if [ ! -f "$(PIC_XC8_INCLUDE)/xc.h" ] || [ ! -f "$(PIC_DFP_INCLUDE)/proc/pic10f322.h" ]; then \
-		echo "XC8/DFP headers not found; skipping PIC cppcheck analysis"; exit 0; \
+		echo "XC8/DFP headers not found; skipping PIC cppcheck analysis"; $(SKIP); \
 	fi; \
 	echo "cppcheck (PIC, pic8-enhanced): $(CPPCHECK) src/bypass_mcu_pic10f322.c"; \
 	$(CPPCHECK) $(PIC_CPPCHECK_FLAGS) src/bypass_mcu_pic10f322.c
 
 pic-analyze-misra: src/bypass_mcu_pic10f322.c $(PIC_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then \
-		echo "cppcheck and/or python3 not available; skipping PIC MISRA analysis"; exit 0; \
+		echo "cppcheck and/or python3 not available; skipping PIC MISRA analysis"; $(SKIP); \
 	fi; \
 	if [ ! -f "$(PIC_XC8_INCLUDE)/xc.h" ] || [ ! -f "$(PIC_DFP_INCLUDE)/proc/pic10f322.h" ]; then \
-		echo "XC8/DFP headers not found; skipping PIC MISRA analysis"; exit 0; \
+		echo "XC8/DFP headers not found; skipping PIC MISRA analysis"; $(SKIP); \
 	fi; \
 	echo "MISRA-C:2012 analysis -- PIC shell ($(CPPCHECK) + misra addon, pic8-enhanced)"; \
 	out=`mktemp`; rc=0; \
@@ -716,7 +732,7 @@ pic-analyze-misra: src/bypass_mcu_pic10f322.c $(PIC_HEADERS) $(MISRA_ADDON) $(MI
 .PHONY: pic-test-gpsim
 pic-test-gpsim: pic
 	@if ! command -v $(GPSIM) >/dev/null 2>&1; then \
-		echo "gpsim not installed; skipping PIC gpsim register-level test"; exit 0; \
+		echo "gpsim not installed; skipping PIC gpsim register-level test"; $(SKIP); \
 	fi; \
 	guard=0; \
 	for s in test/pic/run_gpsim_test.sh test/pic/run_gpsim_power_on_pressed.sh; do \
@@ -831,16 +847,16 @@ $(PIC_SOAK_BIN): $(PIC_SOAK_SRC)
 .PHONY: pic-test-soak
 pic-test-soak: pic
 	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
-		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC soak"; exit 0; \
+		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC soak"; $(SKIP); \
 	fi; \
 	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
-		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC soak (install gpsim-dev)"; exit 0; \
+		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC soak (install gpsim-dev)"; $(SKIP); \
 	fi; \
 	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
-		echo "libglib2.0-dev not found; skipping PIC soak (install libglib2.0-dev)"; exit 0; \
+		echo "libglib2.0-dev not found; skipping PIC soak (install libglib2.0-dev)"; $(SKIP); \
 	fi; \
 	if [ ! -f "$(PIC_SOAK_HEX)" ]; then \
-		echo "no $(PIC_SOAK_HEX) (XC8 absent?); skipping PIC soak for variant $(PIC_SOAK_VARIANT)"; exit 0; \
+		echo "no $(PIC_SOAK_HEX) (XC8 absent?); skipping PIC soak for variant $(PIC_SOAK_VARIANT)"; $(SKIP); \
 	fi; \
 	echo "--- PIC soak: variant=$(PIC_SOAK_VARIANT) proc=$(PIC_GPSIM_PROC) duration=$(PIC_SOAK_DURATION_MS) ms ---"; \
 	$(PIC_SOAK_COMPILE); \
@@ -894,16 +910,16 @@ $(PIC_FAULT_BIN): $(PIC_FAULT_SRC)
 .PHONY: pic-test-fault
 pic-test-fault: pic
 	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
-		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC fault-inject"; exit 0; \
+		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC fault-inject"; $(SKIP); \
 	fi; \
 	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
-		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC fault-inject (install gpsim-dev)"; exit 0; \
+		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC fault-inject (install gpsim-dev)"; $(SKIP); \
 	fi; \
 	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
-		echo "libglib2.0-dev not found; skipping PIC fault-inject (install libglib2.0-dev)"; exit 0; \
+		echo "libglib2.0-dev not found; skipping PIC fault-inject (install libglib2.0-dev)"; $(SKIP); \
 	fi; \
 	if [ ! -f "$(PIC_FAULT_HEX)" ]; then \
-		echo "no $(PIC_FAULT_HEX) (XC8 absent?); skipping PIC fault-inject for variant $(PIC_FAULT_VARIANT)"; exit 0; \
+		echo "no $(PIC_FAULT_HEX) (XC8 absent?); skipping PIC fault-inject for variant $(PIC_FAULT_VARIANT)"; $(SKIP); \
 	fi; \
 	s="$(PIC_FAULT_HEX:.hex=.s)"; \
 	alloc=`awk 'prev=="_ctx_:"{print $$2; exit} {prev=$$1}' "$$s" 2>/dev/null`; \
@@ -1020,7 +1036,7 @@ attiny202-smoke: $(XT_SMOKE_SRC) | $(AVR_BUILD_DIR)
 		echo "ATtiny_DFP device files not found under XT_DFP=$(XT_DFP); skipping ATtiny202 smoke build."; \
 		echo "  Fetch them (open-source apt toolchain + pinned atpack):"; \
 		echo "    scripts/fetch_attiny_dfp.sh $(XT_DFP)"; \
-		exit 0; \
+		$(SKIP); \
 	fi; \
 	echo "=== ATtiny202 (avrxmega3) smoke: compile + link + arch + $(XT_FLASH_BYTES) B budget ==="; \
 	$(CC) $(XT_CFLAGS) $(XT_LDFLAGS) -o $(XT_SMOKE_ELF) $(XT_SMOKE_SRC) \
@@ -1088,11 +1104,11 @@ attiny202: $(XT_CORE_SRC) $(XT_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v))) | $
 		echo "ATtiny_DFP device files not found under XT_DFP=$(XT_DFP); skipping ATtiny202 build."; \
 		echo "  Fetch them (open-source apt toolchain + pinned atpack):"; \
 		echo "    scripts/fetch_attiny_dfp.sh $(XT_DFP)"; \
-		exit 0; \
+		$(SKIP); \
 	fi; \
 	if [ ! -f "src/bypass_mcu_avr_xt.c" ]; then \
 		echo "src/bypass_mcu_avr_xt.c not present (Increment 2 shell); skipping ATtiny202 build."; \
-		exit 0; \
+		$(SKIP); \
 	fi; \
 	echo "=== ATtiny202 (avrxmega3) build + flash-budget ($(XT_FLASH_BYTES) B) ==="; \
 	fail=0; \
@@ -1165,7 +1181,7 @@ if [ ! -x "$(YASIMAVR_PY)" ] || ! "$(YASIMAVR_PY)" -c "import yasimavr" >/dev/nu
 	echo "patched yasimavr venv not found at $(YASIMAVR_VENV); skipping ATtiny202 simulation."; \
 	echo "  Build it (pinned upstream release + vendored patches):"; \
 	echo "    scripts/fetch_yasimavr.sh"; \
-	exit 0; \
+	$(SKIP); \
 fi
 endef
 
@@ -1321,20 +1337,20 @@ attiny202-analyze: attiny202-analyze-cppcheck attiny202-analyze-misra
 
 attiny202-analyze-cppcheck: src/bypass_mcu_avr_xt.c $(XT_HEADERS)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1; then \
-		echo "cppcheck not installed; skipping ATtiny202 cppcheck analysis"; exit 0; \
+		echo "cppcheck not installed; skipping ATtiny202 cppcheck analysis"; $(SKIP); \
 	fi; \
 	if [ ! -f "$(XT_IO_HEADER)" ]; then \
-		echo "ATtiny_DFP device header not found (XT_DFP=$(XT_DFP)); skipping ATtiny202 cppcheck analysis"; exit 0; \
+		echo "ATtiny_DFP device header not found (XT_DFP=$(XT_DFP)); skipping ATtiny202 cppcheck analysis"; $(SKIP); \
 	fi; \
 	echo "cppcheck (ATtiny202, avr8/avrxmega3): $(CPPCHECK) src/bypass_mcu_avr_xt.c"; \
 	$(CPPCHECK) $(XT_CPPCHECK_FLAGS) src/bypass_mcu_avr_xt.c
 
 attiny202-analyze-misra: src/bypass_mcu_avr_xt.c $(XT_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then \
-		echo "cppcheck and/or python3 not available; skipping ATtiny202 MISRA analysis"; exit 0; \
+		echo "cppcheck and/or python3 not available; skipping ATtiny202 MISRA analysis"; $(SKIP); \
 	fi; \
 	if [ ! -f "$(XT_IO_HEADER)" ]; then \
-		echo "ATtiny_DFP device header not found (XT_DFP=$(XT_DFP)); skipping ATtiny202 MISRA analysis"; exit 0; \
+		echo "ATtiny_DFP device header not found (XT_DFP=$(XT_DFP)); skipping ATtiny202 MISRA analysis"; $(SKIP); \
 	fi; \
 	echo "MISRA-C:2012 analysis -- ATtiny202 shell ($(CPPCHECK) + misra addon, avr8)"; \
 	out=`mktemp`; rc=0; \
@@ -1864,10 +1880,10 @@ analyze-deep: $(FW_SOURCES) $(FW_HEADERS)
 .PHONY: analyze-misra
 analyze-misra: $(FW_SOURCES) $(FW_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1; then \
-		echo "cppcheck not installed; skipping MISRA analysis"; exit 0; \
+		echo "cppcheck not installed; skipping MISRA analysis"; $(SKIP); \
 	fi; \
 	if ! command -v python3 >/dev/null 2>&1; then \
-		echo "python3 not found (required by the cppcheck misra addon); skipping"; exit 0; \
+		echo "python3 not found (required by the cppcheck misra addon); skipping"; $(SKIP); \
 	fi; \
 	echo "MISRA-C:2012 analysis ($(CPPCHECK) + misra addon)"; \
 	rc=0; out=`mktemp`; \
@@ -1900,7 +1916,7 @@ analyze-misra: $(FW_SOURCES) $(FW_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA
 .PHONY: analyze-misra-report
 analyze-misra-report: $(FW_SOURCES) $(FW_HEADERS) $(MISRA_ADDON) $(MISRA_RULES)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then \
-		echo "cppcheck and/or python3 not available; skipping MISRA report"; exit 0; \
+		echo "cppcheck and/or python3 not available; skipping MISRA report"; $(SKIP); \
 	fi; \
 	echo "MISRA-C:2012 full inventory (report-only, includes waived deviations)"; \
 	out=`mktemp`; \
@@ -1951,7 +1967,10 @@ coverage-check:
 	fi; \
 	echo "golden-model line coverage: $${pct:-unknown}% (floor $(COVERAGE_MIN)%)"; \
 	if [ -z "$$pct" ]; then \
-		echo "WARNING: could not determine coverage (gcov output parse failed); not gating."; \
+		echo "FAIL: could not determine coverage (gcov output parse failed)."; \
+		echo "      Unknown coverage is not a passing result -- refusing to gate on it."; \
+		echo "      (For a non-gating best-effort report, use 'make coverage'.)"; \
+		exit 1; \
 	else \
 		awk -v p="$$pct" -v m="$(COVERAGE_MIN)" 'BEGIN { exit !(p+0 >= m+0) }' \
 			|| { echo "FAIL: coverage $$pct% below floor $(COVERAGE_MIN)%"; exit 1; }; \

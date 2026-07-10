@@ -13,7 +13,8 @@ name: Release
 #   2. REPRODUCIBILITY GATE: asserts the freshly built images reproduce the
 #      committed SHA256SUMS byte-for-byte -- i.e. proves the committed binaries
 #      really are what the tagged source compiles to (fails the release if not);
-#   3. re-runs `make test-long` + `make pic-test` on the clean runner;
+#   3. re-runs `make test-long` + `make pic-test` + `make pic-test-fault`
+#      (every variant) on the clean runner -- the same gates the MANIFEST claims;
 #   4. publishes a GitHub Release with the images, SHA256SUMS(.asc) and MANIFEST.
 #
 # The runner is pinned to ubuntu-24.04 so the toolchain matches TOOLCHAIN.adoc;
@@ -63,8 +64,10 @@ jobs:
             clang clang-tidy cppcheck cbmc python3 unzip wget
 
       # --- toolchain: XC8 + PIC10-12Fxxx DFP (Microchip downloads) ----------
-      - name: Install gpsim (apt)
-        run: sudo apt-get install -y gpsim
+      # gpsim CLI drives `make pic-test`; gpsim-dev + libglib2.0-dev + g++ build
+      # the libgpsim harness behind `make pic-test-fault` (re-run below, step 3).
+      - name: Install gpsim + libgpsim build deps (apt)
+        run: sudo apt-get install -y gpsim gpsim-dev libglib2.0-dev g++
 
       - name: Restore cached XC8 + DFP
         id: cache-xc8
@@ -147,11 +150,28 @@ jobs:
           echo "REPRODUCED: release image set is byte-identical AND complete vs. the tagged source build."
 
       # --- re-run the gates on the clean runner -----------------------------
+      # STRICT_TOOLS=1 throughout: this is THE public attestation, so every gate
+      # must actually run -- a silently-skipped tool must fail the release.
       - name: Re-run make test-long
-        run: make test-long
+        run: make test-long STRICT_TOOLS=1
 
       - name: Re-run make pic-test
-        run: make pic-test PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
+        run: make pic-test STRICT_TOOLS=1 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
+
+      # The MANIFEST's Validation line claims pic-test-fault; the public clean-
+      # runner attestation must actually re-run it rather than lean on committed
+      # local evidence. Same per-variant loop + grep guard as ci.yml, so a silent
+      # skip (missing gpsim-dev, etc.) fails the release instead of passing.
+      - name: Re-run make pic-test-fault (libgpsim, every variant)
+        run: |
+          set -o pipefail
+          for v in $(make -s print-VARIANTS); do
+            make pic-test-fault PIC_FAULT_VARIANT="$v" STRICT_TOOLS=1 \
+              PIC_CC="${XC8_DIR}/bin/xc8-cc" \
+              PIC_DFP="${XC8_DFP_ROOT}/xc8" 2>&1 | tee "fault-$v.log"
+            grep -q "FAULT-INJECT PASS" "fault-$v.log" \
+              || { echo "::error::pic-test-fault did not PASS for variant $v (skipped or failed)"; exit 1; }
+          done
 
       # --- publish ----------------------------------------------------------
       - name: Publish GitHub Release

@@ -215,18 +215,25 @@ survived=0
 errored=0
 SURVIVORS=()
 
-# Sanity: the unmutated tree must PASS the targets we rely on, otherwise a
+# Sanity: the unmutated tree must PASS every target we rely on, otherwise a
 # "killed" result is meaningless (it would just mean the baseline is broken).
+# Baseline-check EVERY distinct kill target the MUTATIONS list uses -- not just
+# test-sim -- so a mutant killed by e.g. test-model-check can never be a false
+# kill against a baseline that was never verified. (The PIC-shell mutants have
+# their own baseline probe below, since their tools may be absent.)
 echo "=== mutation testing: baseline sanity check ==="
 BASE_DIR="$(mktemp -d)"
 copy_tree "$BASE_DIR"
-if make -C "$BASE_DIR" test-sim >/dev/null 2>&1; then
-    echo "baseline test-sim: PASS"
-else
-    echo "ERROR: baseline test-sim FAILS on unmutated tree; aborting." >&2
-    rm -rf "$BASE_DIR"
-    exit 2
-fi
+BASE_TARGETS=$(printf '%s\n' "${MUTATIONS[@]}" | cut -f3 | sort -u)
+for t in $BASE_TARGETS; do
+    if make -C "$BASE_DIR" "$t" >/dev/null 2>&1; then
+        echo "baseline $t: PASS"
+    else
+        echo "ERROR: baseline $t FAILS on unmutated tree; aborting." >&2
+        rm -rf "$BASE_DIR"
+        exit 2
+    fi
+done
 rm -rf "$BASE_DIR"
 echo
 
@@ -296,6 +303,18 @@ if [ "$PIC_SOAK_OK" -eq 1 ]; then
 fi
 
 echo
+# Make the PIC-shell coverage explicit in the summary: a run on a host without
+# XC8/gpsim silently omits the PIC mutants, and "all killed" must not be read as
+# "PIC mutants passed" when they never ran. (CI's PIC job has the toolchain.)
+if [ "$PIC_GPSIM_OK" -eq 1 ]; then
+    if [ "$PIC_SOAK_OK" -eq 1 ]; then
+        echo "PIC-shell mutants: RAN (gpsim register-level + libgpsim soak WDT)"
+    else
+        echo "PIC-shell mutants: RAN (gpsim register-level; soak WDT mutant skipped)"
+    fi
+else
+    echo "PIC-shell mutants: SKIPPED (PIC toolchain absent -- not gated on this host)"
+fi
 echo "=== mutation summary: $killed killed, $survived survived, $errored errored ==="
 if [ "$survived" -ne 0 ]; then
     echo "SURVIVING MUTANTS (test suite gap -- a real fault went undetected):"

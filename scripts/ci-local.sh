@@ -178,6 +178,13 @@ else
 	section "ci-local: PUSH-TO-MAIN mode (full matrix, incl. exhaustive + mutation)"
 fi
 
+# Mirror CI's "no silent skips" contract: every optional-tool gate must actually
+# run here, so a missing tool is a hard failure rather than a clean skip. Every
+# Makefile skip guard honors STRICT_TOOLS=1. assert_pic_toolchain (above) already
+# checks the PIC side up front; this extends the same guarantee to the host/AVR
+# gates (cppcheck, cbmc, python3, ...) so a local green truly means "all ran".
+export STRICT_TOOLS=1
+
 [ "$DO_CLEAN" -eq 1 ] && run_step "make clean (match CI fresh checkout)" make clean
 
 if [ "$SKIP_PIC" -eq 1 ]; then
