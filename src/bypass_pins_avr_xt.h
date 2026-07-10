@@ -39,7 +39,10 @@
 // All three variants use PA1..PA3: LED(PA1) + two control pins (PA2/PA3); the
 // cd4053-simple variant leaves PA3 a spare driven low. ("DDR" is legacy AVR
 // wording, kept for a single cross-MCU macro name.)
-#define BYPASS_OUTPUT_DDR_MASK (0x0EU) // PA1|PA2|PA3
+// 
+// we also include PA6 here: it's unused, but we don't want it to float, so
+// we'll configure it as an output driven low.
+#define BYPASS_OUTPUT_DDR_MASK (0x4EU) // PA1|PA2|PA3|PA6
 
 #endif // BYPASS_PINS_AVR_XT_H__
 
