@@ -11,8 +11,10 @@
 # CI-JOB MAPPING (.github/workflows/ci.yml)
 #   pic           -> assert toolchain present, then
 #                    make pic-test          (XC8 + gpsim PORTA/LATA gate)
-#                    make pic-test-fault    (libgpsim SFR/pull-up/ctx_ fault
-#                                            injection, every variant)
+#                    make pic-test-target-variants
+#                                           (libgpsim fault recovery,
+#                                            firmware/model ctx_ lock-step,
+#                                            and target I/O, every variant)
 #   build-matrix  -> make all13 all85 all45 (every variant builds for every
 #                                            AVR; each prints flash/RAM)
 #   verify        -> make test              ) covered together by `make
@@ -42,7 +44,7 @@
 #   Needs the same tools CI installs: avr-gcc + avr-libc, simavr + libsimavr-dev,
 #   clang-tidy, cppcheck, cbmc (the `verify`/`stress` side) and XC8 + the
 #   PIC10-12Fxxx DFP + gpsim + gpsim-dev + libglib2.0-dev + a C++ compiler
-#   (the `pic` side, incl. the libgpsim fault-injection gate). See TOOLCHAIN.adoc.
+#   (the `pic` side, incl. the libgpsim target aggregate). See TOOLCHAIN.adoc.
 #
 #   The PIC toolchain is ASSERTED present before the pic job runs (mirroring
 #   CI's fail-loud step): the pic sub-targets skip cleanly when a tool is
@@ -125,11 +127,11 @@ on_exit() {
 trap on_exit EXIT
 
 # ----------------------------------------------------------------------------
-# PIC toolchain assert + fault-injection runner (the local mirror of the CI pic
-# job's "Assert PIC toolchain present" and "PIC fault-injection gate" steps)
+# PIC toolchain assert (the local mirror of the CI pic job's fail-loud
+# "Assert PIC toolchain present" step).
 # ----------------------------------------------------------------------------
 
-# Fail loud if any PIC tool/header is missing. Every pic-test / pic-test-fault
+# Fail loud if any PIC tool/header is missing. Every pic-test / libgpsim PIC
 # sub-target SKIPS CLEANLY when its tool is absent -- fatal for a gate, since a
 # missing toolchain would otherwise read as a local PASS while CI still runs
 # the real checks. Paths come from the Makefile defaults; an exported PIC_CC /
@@ -144,29 +146,15 @@ assert_pic_toolchain() {
 	[ -f "$pic_dfp/pic/include/proc/pic10f322.h" ]    || missing+=("PIC10-12Fxxx DFP at $pic_dfp  (export PIC_DFP=...)")
 	command -v gpsim >/dev/null 2>&1                  || missing+=("gpsim  (apt: gpsim)")
 	command -v cppcheck >/dev/null 2>&1               || missing+=("cppcheck  (apt: cppcheck)")
-	command -v c++ >/dev/null 2>&1                    || missing+=("c++  (apt: g++; pic-test-fault)")
-	[ -f "$gpsim_inc/sim_context.h" ]                 || missing+=("libgpsim headers at $gpsim_inc  (apt: gpsim-dev; pic-test-fault)")
-	pkg-config --exists glib-2.0 2>/dev/null          || missing+=("glib-2.0  (apt: libglib2.0-dev; pic-test-fault)")
+	command -v c++ >/dev/null 2>&1                    || missing+=("c++  (apt: g++; pic-test-target-variants)")
+	[ -f "$gpsim_inc/sim_context.h" ]                 || missing+=("libgpsim headers at $gpsim_inc  (apt: gpsim-dev; pic-test-target-variants)")
+	pkg-config --exists glib-2.0 2>/dev/null          || missing+=("glib-2.0  (apt: libglib2.0-dev; pic-test-target-variants)")
 	if [ "${#missing[@]}" -gt 0 ]; then
 		log "PIC toolchain incomplete -- the pic targets would silently SKIP, not fail:"
 		for m in "${missing[@]}"; do log "  - $m"; done
 		die "install the above (see TOOLCHAIN.adoc), or --skip-pic (no longer mirrors CI)."
 	fi
 	ok "PIC toolchain present (XC8 + DFP + gpsim + gpsim-dev + glib + cppcheck + c++)."
-}
-
-# Run the libgpsim fault-injection gate for every variant. The grep guard turns
-# a silent skip into a failure (same belt-and-suspenders as make-release.sh and
-# the CI step), even though assert_pic_toolchain has already checked the tools.
-pic_fault_all() {
-	local v log
-	for v in $(make -s print-VARIANTS); do
-		log="$(mktemp)"
-		make pic-test-fault PIC_FAULT_VARIANT="$v" 2>&1 | tee "$log"
-		grep -q "FAULT-INJECT PASS" "$log" \
-			|| { rm -f "$log"; die "pic-test-fault did not PASS for variant $v (skipped or failed)."; }
-		rm -f "$log"
-	done
 }
 
 # ----------------------------------------------------------------------------
@@ -192,7 +180,7 @@ if [ "$SKIP_PIC" -eq 1 ]; then
 else
 	run_step "pic job: assert PIC toolchain present" assert_pic_toolchain
 	run_step "pic job: make pic-test" make pic-test
-	run_step "pic job: pic-test-fault (all variants)" pic_fault_all
+	run_step "pic job: pic-test-target-variants" make pic-test-target-variants
 fi
 
 run_step "build-matrix: make all13 all85 all45" make all13 all85 all45

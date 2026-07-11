@@ -171,9 +171,17 @@ static pin_state_t hw_read_footswitch(void) {
 // (non-volatile) booleans: this keeps MISRA Rule 13.5 clean (no persistent side
 // effect on the right operand of &&), which the project does not deviate.
 static uint8_t hw_footswitch_pullup_intact(void) {
-    uint8_t pin_latched = (uint8_t)(WPUA & (1U << FOOTSW_PIN));
-    uint8_t wpu_global  = (uint8_t)OPTION_REGbits.nWPUEN; // 0 = enabled
-    return (0U != pin_latched) && (0U == wpu_global);
+
+    // Exact pull-up configuration integrity: RA3 latch set, RA0..RA2 clear,
+    // and global weak pull-ups enabled.  Extra output-pin latches are faults
+    // because a TRISA upset would make them electrically active.
+
+    uint8_t wpua_latches = (uint8_t)(WPUA & 0x0FU);
+    uint8_t wpu_global   = (uint8_t)OPTION_REGbits.nWPUEN; // 0 = enabled
+
+    return
+        (wpua_latches == (uint8_t)(1U << FOOTSW_PIN)) &&
+        (0U == wpu_global);
 }
 
 
@@ -197,7 +205,7 @@ static void hw_mcu_init(void) {
 
     // enable the footswitch (RA3) input pull-up; FOOTSW_PIN high = released,
     // low = pressed. (Belt-and-suspenders alongside any external pull-up.)
-    WPUA  |= (uint8_t)(1U << FOOTSW_PIN);
+    WPUA = (uint8_t)(1U << FOOTSW_PIN);
     OPTION_REGbits.nWPUEN = 0; // enable weak pull-ups globally (active-low)
 
     // ~256ms (WDTPS = 0b01000 = 1:8192 on the ~31kHz LFINTOSC), mirroring the

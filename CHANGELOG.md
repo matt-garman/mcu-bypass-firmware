@@ -13,7 +13,41 @@ file is the human-readable summary of *what changed*.
 
 ## [Unreleased]
 
+### Added
+- `make pic-test-lockstep`: a libgpsim PIC10F322 gate that runs the XC8-built
+  HEX and compares live `_ctx_` SRAM against the shared pure-model state after
+  each completed main-loop iteration.
+- `make pic-test-io`: a libgpsim PIC10F322 GPIO/timing gate that checks real
+  TRISA/ANSELA/LATA/PORTA transitions, relay coil exclusion, and analog-switch /
+  relay pulse widths from the built HEX.
+- `make pic-test-target-variants`: a fail-closed aggregate for the PIC
+  target-level gates (`pic-test-fault`, `pic-test-lockstep`, and `pic-test-io`)
+  across every PIC variant. Component targets may still skip cleanly on a local
+  host without PIC tools; this aggregate requires every PASS marker.
+- PIC gpsim register-level coverage now includes a mid-debounce `PRESS1_EARLY`
+  sample and full BYPASS `LATA` assertions, catching a collapsed 1 ms tick gate
+  and checking all settled analog-switch control bits in both directions.
+- Mutation coverage for PIC target-level properties, including exact `WPUA`
+  pull-up state, collapsed TMR2IF cadence, ANSELA output masks, muted-CD4053
+  startup ordering, mute-window duration, and relay pulse duration.
+
+### Changed
+- CI and the release pipeline now run `make pic-test-target-variants
+  STRICT_TOOLS=1`, so target-level PIC fault, lock-step, and GPIO/timing
+  validation are required for green builds and release provenance.
+- Release creation now runs mutation testing in strict mode
+  (`MUTATION_ALLOW_SKIP=0` / `STRICT_TOOLS=1`) so PIC mutants cannot disappear
+  behind skipped target tooling.
+
 ### Fixed
+- **PIC10F322 weak-pull-up validation now requires the exact RA0-only state.**
+  The per-tick sanity gate no longer accepts extra enabled `WPUA` bits merely
+  because the footswitch pull-up is still on; a corrupt enabled pull-up on an
+  output pin is treated as configuration damage and forces watchdog recovery.
+- **Muted CD4053 startup no longer traverses ENGAGED before settling BYPASS.**
+  The mute-before-switch driver now asserts the bypass-side control first, waits
+  the mute window, then releases the second control line, avoiding a transient
+  wet-path state during initialization.
 - **TMUX4053 control-pin polarity was inverted on the direct-drive variants.**
   The `cd4053_tmux` / `mute_tmux` images drove the analog-switch control pin at
   the opposite MCU level from the design intent — BYPASS asserted at pin-high

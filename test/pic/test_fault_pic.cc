@@ -381,6 +381,8 @@ int main() {
     // driven, so the pin stays released; only the gate's check reacts.
     inject_case("WPUA.RA3",     WPUA_ADDR,   "wpu",    false, 0x08,
                 "clear RA3 pull-up latch: footswitch weak pull-up disabled");
+    inject_case("WPUA.RA0..2",  WPUA_ADDR,   "wpu",    false, 0x07,
+                "set RA0..RA2 pull-up latches: unexpected output-pin pull-ups enabled");
     inject_case("OPTION.nWPUEN",OPTION_ADDR, "option", false, 0x80,
                 "set nWPUEN: global weak pull-ups disabled");
 

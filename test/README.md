@@ -30,16 +30,65 @@ test/
            test_fuses.c         fuse-byte validation  (make test-fuses)
 
   pic/     PIC10F322-specific tests (gpsim).
-           test_config_pic.c    CONFIG-word check     (make pic-test-config)
-           *.stc + run_gpsim_*  register-level gpsim  (make pic-test-gpsim)
-           test_fault_pic.cc    libgpsim fault-inject (make pic-test-fault)
-           test_soak_pic.cc     libgpsim soak         (make pic-test-soak)
+            test_config_pic.c    CONFIG-word check     (make pic-test-config)
+            *.stc + run_gpsim_*  register-level gpsim  (make pic-test-gpsim)
+            test_fault_pic.cc    libgpsim fault-inject (make pic-test-fault)
+            test_lockstep_pic.cc libgpsim HEX/model ctx lock-step
+                                                       (make pic-test-lockstep)
+            test_io_pic.cc       libgpsim GPIO/pulse timing
+                                                       (make pic-test-io)
+            test_soak_pic.cc     libgpsim soak         (make pic-test-soak)
 ```
 
 Build artifacts (compiled binaries, `*.bc`) are written next to their sources in
 each subdirectory and are git-ignored; see `.gitignore`. The `-fstack-usage`
 `stack_*` files, the KLEE output directories, and `.toolchain.sig` are produced
 at the `test/` root.
+
+
+## PIC10F322 target validation layers
+
+The PIC targets are intentionally outside the default AVR `make test` path: XC8,
+the PIC10-12Fxxx DFP, gpsim, and libgpsim may be absent on a normal AVR
+development machine. Individual PIC targets therefore skip cleanly when their
+tools are missing. CI/release use `STRICT_TOOLS=1` plus the fail-closed aggregate
+described below so a green gate means every PIC layer actually ran.
+
+| layer | target | what it proves | substrate |
+|---|---|---|---|
+| CONFIG word | `pic-test-config` | The XC8-emitted CONFIG word matches the documented oscillator/WDT/BOR/MCLR/LVP design intent. | host parser over HEX |
+| Static analysis | `pic-analyze` | cppcheck + MISRA pass over the PIC shell with real XC8/DFP register headers. | host tools |
+| Register-level functional | `pic-test-gpsim` | Real HEX toggles on press, handles power-on-held switch, keeps settled LATA/PORTA expectations, and includes the mid-debounce `PRESS1_EARLY` tick-cadence check. | gpsim CLI |
+| Fault recovery | `pic-test-fault` | Runtime SFR, pull-up, and `ctx_` corruptions force exactly one WDT reset. | libgpsim |
+| HEX/model lock-step | `pic-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches the shared pure model after every completed main-loop iteration. | libgpsim |
+| Target I/O timing | `pic-test-io` | TRISA/ANSELA/LATA/PORTA transitions, relay coil exclusion, and mute/relay pulse widths match the design. | libgpsim |
+| Fail-closed aggregate | `pic-test-target-variants` | Runs fault recovery, lock-step, and target-I/O for every PIC variant and requires each PASS sentinel. | Makefile wrapper |
+
+`pic-test-gpsim` now samples one non-settled point, `PRESS1_EARLY`, roughly
+3.5 ms after the first press edge. A correct 1 ms tick has not yet accumulated the
+eight separated pressed samples needed to toggle, so the LED must still be off.
+This catches a collapsed tick gate, for example if `TMR2IF` stopped being cleared
+and the main loop free-ran through the debounce threshold. The same wrapper also
+asserts full BYPASS `LATA` at startup and after the second press, so analog-switch
+control pins are checked in both settled directions, not just the LED bit.
+
+`pic-test-target-variants` is the gate to use when a PIC result must be
+authoritative. The component libgpsim targets remain useful standalone commands,
+but they are allowed to skip for missing tools; the aggregate turns any skip or
+missing PASS marker into a failure.
+
+
+## Mutation testing and skipped PIC tools
+
+`make test-mutation` includes PIC mutants whose kill targets need XC8, gpsim, and
+libgpsim. A local host without those tools may run an explicitly partial mutation
+suite with `MUTATION_ALLOW_SKIP=1`; that is the non-strict default so AVR-only
+development stays practical. In strict/full-tool contexts, including
+`STRICT_TOOLS=1` or `MUTATION_ALLOW_SKIP=0`, skipped PIC mutants fail the run.
+
+The PIC mutation set includes target-level faults for the new coverage: collapsed
+TMR2IF cadence, exact WPUA pull-up state, ANSELA mask narrowing, muted-CD4053
+startup reassertion, mute-window shortening, and relay pulse shortening.
 
 
 ## Known gaps (PIC — hardware-bench only)
