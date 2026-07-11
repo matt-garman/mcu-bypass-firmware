@@ -35,15 +35,19 @@
 #
 # CHECKPOINTS (the wrapper keys on these exact === labels ===)
 #   INIT_BYPASS  @ 11.25k : LATA bit0 == 0 (LED off), PORTA bit3 == 1 (released)
-#   PRESS1_EARLY @ 14.25k : LATA bit0 == 0 (LED still OFF), PORTA bit3 == 0 (pressed).
-#                         This is ~1.75k cyc (~3.5 ms) AFTER the press edge (12.5k) but
-#                         ~1.75k cyc BEFORE the earliest legitimate toggle (~16k =
+#   PRESS1_EARLY @ 15.5k  : LATA bit0 == 0 (LED still OFF), PORTA bit3 == 0 (pressed).
+#                         This is 3.0k cyc (~6 ms) AFTER the press edge (12.5k) but
+#                         ~1.0k cyc (~2 ms) BEFORE the earliest legitimate toggle (~16.5k =
 #                         12.5k + PRESSED_THRESH*500). It pins that the TICK GATES the
 #                         loop: the debounce demands 8 *separated* 1 ms samples, so a
-#                         correct firmware is still mid-debounce here. A firmware
-#                         whose tick stopped gating (e.g. the TMR2IF poll never
-#                         re-blocks) free-runs and crosses PRESSED_THRESH within
-#                         microseconds of the edge -> LED already ON here -> FAIL.
+#                         correct firmware is still mid-debounce here (it toggles at
+#                         ~16.5k). A firmware whose tick stopped gating (e.g. the TMR2IF
+#                         poll never re-blocks) free-runs -- but its un-gated loop still
+#                         spends a few hundred instruction cycles per sample, so it does
+#                         not toggle at the edge; it crosses PRESSED_THRESH at ~14.6k,
+#                         ~0.9k cyc (~1.8 ms) BEFORE this checkpoint -> LED already ON
+#                         here -> FAIL. (The checkpoint must therefore sit AFTER that
+#                         free-run toggle, not right on the edge.)
 #   PRESS1_LOW   @ 18.75k : PORTA bit3 == 0 (pressed), LATA bit0 == 1 (LED latched
 #                         ENGAGED -- the effect toggled ON the press, not release)
 #   ENGAGED      @ 37.5k : LATA bit0 == 1 (LED on, latched), PORTA bit3 == 1
@@ -67,7 +71,7 @@ echo ===INIT_BYPASS===
 porta
 lata
 
-break c 14250
+break c 15500
 run
 echo ===PRESS1_EARLY===
 porta

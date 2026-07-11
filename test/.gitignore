@@ -8,6 +8,8 @@ avr/test_soak_*5
 pic/test_config_pic
 pic/test_soak_pic
 pic/test_fault_pic
+pic/test_io_pic
+pic/test_lockstep_pic
 # per-variant simavr harnesses: test_sim_<variant>[_t85], test_trace_<variant>
 avr/test_sim
 avr/test_sim_*
