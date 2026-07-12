@@ -1,0 +1,27 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+cc -std=c11 -Wall -Wextra -Werror -I/usr/include/simavr -include test/bypass_config_host.h -DCD4053_SIMPLE -Itest -DFW_PATH=\"build_avr_classic/bypass_cd4053_t85.elf\" -DMCU_NAME=\"attiny85\" -DF_CPU_HZ=1000000UL -DTARGET_TINYX5 -DSOAK_DURATION_MS=86400000 -DSOAK_LIVENESS_INTERVAL_MS=60000 -DSOAK_PROGRESS_INTERVAL_MS=3600000 test/avr/test_soak.c -o test/avr/test_soak_cd4053_t85 -lsimavr -lelf
+make[1]: Leaving directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+make[1]: Entering directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+cc -std=c11 -Wall -Wextra -Werror -I/usr/include/simavr -include test/bypass_config_host.h -DCD4053_SIMPLE -Itest -DFW_PATH=\"build_avr_classic/bypass_cd4053_t45.elf\" -DMCU_NAME=\"attiny45\" -DF_CPU_HZ=1000000UL -DTARGET_TINYX5 -DSOAK_DURATION_MS=86400000 -DSOAK_LIVENESS_INTERVAL_MS=60000 -DSOAK_PROGRESS_INTERVAL_MS=3600000 test/avr/test_soak.c -o test/avr/test_soak_cd4053_t45 -lsimavr -lelf
+make[1]: Leaving directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+make[1]: Entering directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+cc -std=c11 -Wall -Wextra -Werror -I/usr/include/simavr -include test/bypass_config_host.h -DCD4053_WITH_MUTE -Itest -DFW_PATH=\"build_avr_classic/bypass_mute_t85.elf\" -DMCU_NAME=\"attiny85\" -DF_CPU_HZ=1000000UL -DTARGET_TINYX5 -DSOAK_DURATION_MS=86400000 -DSOAK_LIVENESS_INTERVAL_MS=60000 -DSOAK_PROGRESS_INTERVAL_MS=3600000 test/avr/test_soak.c -o test/avr/test_soak_mute_t85 -lsimavr -lelf
+make[1]: Leaving directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+make[1]: Entering directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+cc -std=c11 -Wall -Wextra -Werror -I/usr/include/simavr -include test/bypass_config_host.h -DCD4053_WITH_MUTE -Itest -DFW_PATH=\"build_avr_classic/bypass_mute_t45.elf\" -DMCU_NAME=\"attiny45\" -DF_CPU_HZ=1000000UL -DTARGET_TINYX5 -DSOAK_DURATION_MS=86400000 -DSOAK_LIVENESS_INTERVAL_MS=60000 -DSOAK_PROGRESS_INTERVAL_MS=3600000 test/avr/test_soak.c -o test/avr/test_soak_mute_t45 -lsimavr -lelf
+make[1]: Leaving directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+make[1]: Entering directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+cc -std=c11 -Wall -Wextra -Werror -I/usr/include/simavr -include test/bypass_config_host.h -DTQ2_L2_5V_RELAY -Itest -DFW_PATH=\"build_avr_classic/bypass_relay_t85.elf\" -DMCU_NAME=\"attiny85\" -DF_CPU_HZ=1000000UL -DTARGET_TINYX5 -DSOAK_DURATION_MS=86400000 -DSOAK_LIVENESS_INTERVAL_MS=60000 -DSOAK_PROGRESS_INTERVAL_MS=3600000 test/avr/test_soak.c -o test/avr/test_soak_relay_t85 -lsimavr -lelf
+make[1]: Leaving directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+make[1]: Entering directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+cc -std=c11 -Wall -Wextra -Werror -I/usr/include/simavr -include test/bypass_config_host.h -DTQ2_L2_5V_RELAY -Itest -DFW_PATH=\"build_avr_classic/bypass_relay_t45.elf\" -DMCU_NAME=\"attiny45\" -DF_CPU_HZ=1000000UL -DTARGET_TINYX5 -DSOAK_DURATION_MS=86400000 -DSOAK_LIVENESS_INTERVAL_MS=60000 -DSOAK_PROGRESS_INTERVAL_MS=3600000 test/avr/test_soak.c -o test/avr/test_soak_relay_t45 -lsimavr -lelf
+make[1]: Leaving directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+make[1]: Entering directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+c++ -std=c++17 -O2 $(pkg-config --cflags glib-2.0) -isystem /usr/include/gpsim -Itest -Isrc -DFW_PATH='"/mnt/home/matt/development/github/bypass-srf-dmz-two/build_pic/bypass_cd4053_pic10f322.hex"' -DPROC_NAME='"p10f322"' -DF_CPU_HZ=2000000UL -DSOAK_DURATION_MS=86400000 -DSOAK_LIVENESS_INTERVAL_MS=60000 -DSOAK_PROGRESS_INTERVAL_MS=3600000 -DSOAK_ACTUATION_BLOCK_MS=0u test/pic/test_soak_pic.cc -o /tmp/mcu-release.CS6dNZ/soak/test_soak_pic_cd4053 -lgpsim
+make[1]: Leaving directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+make[1]: Entering directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+c++ -std=c++17 -O2 $(pkg-config --cflags glib-2.0) -isystem /usr/include/gpsim -Itest -Isrc -DFW_PATH='"/mnt/home/matt/development/github/bypass-srf-dmz-two/build_pic/bypass_mute_pic10f322.hex"' -DPROC_NAME='"p10f322"' -DF_CPU_HZ=2000000UL -DSOAK_DURATION_MS=86400000 -DSOAK_LIVENESS_INTERVAL_MS=60000 -DSOAK_PROGRESS_INTERVAL_MS=3600000 -DSOAK_ACTUATION_BLOCK_MS=5u test/pic/test_soak_pic.cc -o /tmp/mcu-release.CS6dNZ/soak/test_soak_pic_mute -lgpsim
+make[1]: Leaving directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+make[1]: Entering directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+c++ -std=c++17 -O2 $(pkg-config --cflags glib-2.0) -isystem /usr/include/gpsim -Itest -Isrc -DFW_PATH='"/mnt/home/matt/development/github/bypass-srf-dmz-two/build_pic/bypass_relay_pic10f322.hex"' -DPROC_NAME='"p10f322"' -DF_CPU_HZ=2000000UL -DSOAK_DURATION_MS=86400000 -DSOAK_LIVENESS_INTERVAL_MS=60000 -DSOAK_PROGRESS_INTERVAL_MS=3600000 -DSOAK_ACTUATION_BLOCK_MS=12u test/pic/test_soak_pic.cc -o /tmp/mcu-release.CS6dNZ/soak/test_soak_pic_relay -lgpsim
+make[1]: Leaving directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'

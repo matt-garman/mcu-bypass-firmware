@@ -1,0 +1,67 @@
+# test-long summary -- the full log is in the release CI run.
+
+47:MISRA-C:2012 analysis (cppcheck + misra addon)
+58:MISRA-C:2012: clean (documented deviations waived per MISRA_COMPLIANCE.md)
+59:=== static analysis (clang-tidy + cppcheck + clang-analyzer + MISRA) clean ===
+75:cbmc: prove_integrate
+190:cbmc: prove_debounce_step
+305:cbmc: prove_corrupt_state_faults
+420:cbmc: prove_init_context
+535:cbmc: prove_step_transition
+650:cbmc: prove_oor_recovery_step
+765:cbmc: prove_press_liveness (--unwind 50)
+906:cbmc: prove_release_liveness (--unwind 50)
+1050:cbmc: prove_oor_recovery_bounded (--unwind 257)
+1421:=== CBMC: all debounce-core proofs SUCCESSFUL ===
+1431:=== -fstack-usage static bound (limit: 32 B/frame) ===
+1457:OK: all frames <= 32 B
+1458:=== flash-utilization budget (ATtiny13a: 90% of 1024 B) ===
+1459:OK:   build_avr_classic/bypass_cd4053.elf uses 684 B (66.8%) of 1024 B
+1460:OK:   build_avr_classic/bypass_mute.elf uses 724 B (70.7%) of 1024 B
+1461:OK:   build_avr_classic/bypass_relay.elf uses 724 B (70.7%) of 1024 B
+1463:--- fault-injection (ATtiny85) variant: cd4053 ---
+1494:--- fault-injection (ATtiny45) variant: cd4053 ---
+1525:--- fault-injection (ATtiny85) variant: mute ---
+1556:--- fault-injection (ATtiny45) variant: mute ---
+1587:--- fault-injection (ATtiny85) variant: relay ---
+1618:--- fault-injection (ATtiny45) variant: relay ---
+1649:=== mutation testing: baseline sanity check ===
+1655:=== mutation testing: 19 core/AVR mutants ===
+1676:=== PIC toolchain probe (gates the PIC-shell mutants) ===
+1681:=== 6 PIC-shell mutants (gpsim register-level) ===
+1689:=== 1 PIC-shell mutant (WDT liveness, libgpsim soak 2500ms) ===
+1692:=== 6 PIC target mutants (fault + lock-step + target I/O) ===
+1701:=== mutation summary: 32 killed, 0 survived, 0 errored, 0 PIC skipped ===
+1704:--- sim (ATtiny13a) variant: cd4053 ---
+1871:--- sim (ATtiny13a) variant: mute ---
+2040:--- sim (ATtiny13a) variant: relay ---
+2208:--- sim (ATtiny85) variant: cd4053 ---
+2383:--- sim (ATtiny85) variant: mute ---
+2560:--- sim (ATtiny85) variant: relay ---
+2737:--- sim (ATtiny45) variant: cd4053 ---
+2912:--- sim (ATtiny45) variant: mute ---
+3089:--- sim (ATtiny45) variant: relay ---
+3266:golden-model line coverage: 99.35% (floor 90%)
+3267:=== all FULL (exhaustive) pre-hardware tests passed ===
+
+# --- last 20 lines ---
+Loaded 750 .text at address 0x0
+Loaded 0 .data
+Loaded 750 .text at address 0x0
+Loaded 0 .data
+Loaded 750 .text at address 0x0
+Loaded 0 .data
+Loaded 750 .text at address 0x0
+Loaded 0 .data
+Loaded 750 .text at address 0x0
+Loaded 0 .data
+  stack HWM: deepest SP=0x141, used=31 B, margin=225 B (SRAM 0x060-0x15F, 256 B total)
+Loaded 750 .text at address 0x0
+Loaded 0 .data
+  relay SET (engage) pulse: 13.40 ms (datasheet min 4ms, design 12 ms)
+  relay RESET (bypass) pulse: 13.37 ms (datasheet min 4ms, design 12 ms)
+
+simavr firmware tests: 20656 checks, 0 failures
+golden-model line coverage: 99.35% (floor 90%)
+=== all FULL (exhaustive) pre-hardware tests passed ===
+make[1]: Leaving directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'

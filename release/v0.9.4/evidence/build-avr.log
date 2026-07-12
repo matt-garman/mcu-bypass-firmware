@@ -1,0 +1,129 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+toolchain signature changed (4171507941): firmware will rebuild and the fault-injection gate will re-run
+avr-gcc -mmcu=attiny13a   -DF_CPU=1200000UL   -Os -fshort-enums -funsigned-char -ffunction-sections -fdata-sections -Werror -Wall -Wextra -Wconversion -std=c11 -DCD4053_SIMPLE -mmcu=attiny13a   -Wl,--gc-sections -o build_avr_classic/bypass_cd4053.elf src/bypass_mcu_avr_classic.c src/bypass_pure.c src/bypass_output_cd4053_simple.c
+avr-objcopy -O ihex -R .eeprom build_avr_classic/bypass_cd4053.elf build_avr_classic/bypass_cd4053.hex
+avr-gcc -mmcu=attiny13a   -DF_CPU=1200000UL   -Os -fshort-enums -funsigned-char -ffunction-sections -fdata-sections -Werror -Wall -Wextra -Wconversion -std=c11 -DCD4053_WITH_MUTE -mmcu=attiny13a   -Wl,--gc-sections -o build_avr_classic/bypass_mute.elf src/bypass_mcu_avr_classic.c src/bypass_pure.c src/bypass_output_cd4053_with_mute.c
+avr-objcopy -O ihex -R .eeprom build_avr_classic/bypass_mute.elf build_avr_classic/bypass_mute.hex
+avr-gcc -mmcu=attiny13a   -DF_CPU=1200000UL   -Os -fshort-enums -funsigned-char -ffunction-sections -fdata-sections -Werror -Wall -Wextra -Wconversion -std=c11 -DTQ2_L2_5V_RELAY -mmcu=attiny13a   -Wl,--gc-sections -o build_avr_classic/bypass_relay.elf src/bypass_mcu_avr_classic.c src/bypass_pure.c src/bypass_output_tq2_l2_5v_relay.c
+avr-objcopy -O ihex -R .eeprom build_avr_classic/bypass_relay.elf build_avr_classic/bypass_relay.hex
+== build_avr_classic/bypass_cd4053.elf ==
+AVR Memory Usage
+----------------
+Device: attiny13a
+
+Program:     684 bytes (66.8% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (6.2% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass_mute.elf ==
+AVR Memory Usage
+----------------
+Device: attiny13a
+
+Program:     724 bytes (70.7% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (6.2% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass_relay.elf ==
+AVR Memory Usage
+----------------
+Device: attiny13a
+
+Program:     724 bytes (70.7% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (6.2% Full)
+(.data + .bss + .noinit)
+
+
+avr-gcc -mmcu=attiny85 -DF_CPU=1000000UL -Os -fshort-enums -funsigned-char -ffunction-sections -fdata-sections -Werror -Wall -Wextra -Wconversion -std=c11 -Wl,--gc-sections -DCD4053_SIMPLE -o build_avr_classic/bypass_cd4053_t85.elf src/bypass_mcu_avr_classic.c src/bypass_pure.c src/bypass_output_cd4053_simple.c
+avr-objcopy -O ihex -R .eeprom build_avr_classic/bypass_cd4053_t85.elf build_avr_classic/bypass_cd4053_t85.hex
+avr-gcc -mmcu=attiny85 -DF_CPU=1000000UL -Os -fshort-enums -funsigned-char -ffunction-sections -fdata-sections -Werror -Wall -Wextra -Wconversion -std=c11 -Wl,--gc-sections -DCD4053_WITH_MUTE -o build_avr_classic/bypass_mute_t85.elf src/bypass_mcu_avr_classic.c src/bypass_pure.c src/bypass_output_cd4053_with_mute.c
+avr-objcopy -O ihex -R .eeprom build_avr_classic/bypass_mute_t85.elf build_avr_classic/bypass_mute_t85.hex
+avr-gcc -mmcu=attiny85 -DF_CPU=1000000UL -Os -fshort-enums -funsigned-char -ffunction-sections -fdata-sections -Werror -Wall -Wextra -Wconversion -std=c11 -Wl,--gc-sections -DTQ2_L2_5V_RELAY -o build_avr_classic/bypass_relay_t85.elf src/bypass_mcu_avr_classic.c src/bypass_pure.c src/bypass_output_tq2_l2_5v_relay.c
+avr-objcopy -O ihex -R .eeprom build_avr_classic/bypass_relay_t85.elf build_avr_classic/bypass_relay_t85.hex
+== build_avr_classic/bypass_cd4053_t85.elf ==
+AVR Memory Usage
+----------------
+Device: attiny85
+
+Program:     710 bytes (8.7% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (0.8% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass_mute_t85.elf ==
+AVR Memory Usage
+----------------
+Device: attiny85
+
+Program:     750 bytes (9.2% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (0.8% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass_relay_t85.elf ==
+AVR Memory Usage
+----------------
+Device: attiny85
+
+Program:     750 bytes (9.2% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (0.8% Full)
+(.data + .bss + .noinit)
+
+
+avr-gcc -mmcu=attiny45 -DF_CPU=1000000UL -Os -fshort-enums -funsigned-char -ffunction-sections -fdata-sections -Werror -Wall -Wextra -Wconversion -std=c11 -Wl,--gc-sections -DCD4053_SIMPLE -o build_avr_classic/bypass_cd4053_t45.elf src/bypass_mcu_avr_classic.c src/bypass_pure.c src/bypass_output_cd4053_simple.c
+avr-objcopy -O ihex -R .eeprom build_avr_classic/bypass_cd4053_t45.elf build_avr_classic/bypass_cd4053_t45.hex
+avr-gcc -mmcu=attiny45 -DF_CPU=1000000UL -Os -fshort-enums -funsigned-char -ffunction-sections -fdata-sections -Werror -Wall -Wextra -Wconversion -std=c11 -Wl,--gc-sections -DCD4053_WITH_MUTE -o build_avr_classic/bypass_mute_t45.elf src/bypass_mcu_avr_classic.c src/bypass_pure.c src/bypass_output_cd4053_with_mute.c
+avr-objcopy -O ihex -R .eeprom build_avr_classic/bypass_mute_t45.elf build_avr_classic/bypass_mute_t45.hex
+avr-gcc -mmcu=attiny45 -DF_CPU=1000000UL -Os -fshort-enums -funsigned-char -ffunction-sections -fdata-sections -Werror -Wall -Wextra -Wconversion -std=c11 -Wl,--gc-sections -DTQ2_L2_5V_RELAY -o build_avr_classic/bypass_relay_t45.elf src/bypass_mcu_avr_classic.c src/bypass_pure.c src/bypass_output_tq2_l2_5v_relay.c
+avr-objcopy -O ihex -R .eeprom build_avr_classic/bypass_relay_t45.elf build_avr_classic/bypass_relay_t45.hex
+== build_avr_classic/bypass_cd4053_t45.elf ==
+AVR Memory Usage
+----------------
+Device: attiny45
+
+Program:     710 bytes (17.3% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (1.6% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass_mute_t45.elf ==
+AVR Memory Usage
+----------------
+Device: attiny45
+
+Program:     750 bytes (18.3% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (1.6% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass_relay_t45.elf ==
+AVR Memory Usage
+----------------
+Device: attiny45
+
+Program:     750 bytes (18.3% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (1.6% Full)
+(.data + .bss + .noinit)
+
+
+make[1]: Leaving directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'

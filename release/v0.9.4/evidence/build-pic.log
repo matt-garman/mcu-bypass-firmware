@@ -1,0 +1,6 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053 -> build_pic/bypass_cd4053_pic10f322.hex : 406 words (79.3%) of 512
+OK:   mute -> build_pic/bypass_mute_pic10f322.hex : 432 words (84.4%) of 512
+OK:   relay -> build_pic/bypass_relay_pic10f322.hex : 433 words (84.6%) of 512
+make[1]: Leaving directory '/mnt/home/matt/development/github/bypass-srf-dmz-two'
