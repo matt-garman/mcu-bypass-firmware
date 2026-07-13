@@ -13,6 +13,9 @@ mkdir -p "$tools" "$dfp/gcc/dev/attiny202/device-specs" "$dfp/include/avr"
 checks=0
 unset FAKE_CC_MODE FAKE_READELF_MODE FAKE_SIZE_MODE FAKE_OBJCOPY_MODE
 unset TEST_VARIANTS TEST_DFP XT_FLASH_BYTES
+# The skip-policy checks below pin STRICT_TOOLS explicitly; clear any ambient
+# value (scripts/ci-local.sh exports STRICT_TOOLS=1) so nothing inherits it.
+unset STRICT_TOOLS
 
 cat > "$tools/cc" <<'EOF'
 #!/usr/bin/env bash
@@ -172,10 +175,25 @@ for assignment in 'XT_FLASH_BYTES="' 'TEST_VARIANTS="'; do
 	checks=$((checks + 1))
 done
 
+# Absent DFP skips cleanly by default, but is a HARD FAILURE under STRICT_TOOLS=1
+# (the policy scripts/ci-local.sh runs with). Pin STRICT_TOOLS on the make command
+# line for both so the ambient CI environment cannot flip either expectation.
 seed_stale
-run_build_output=$(export TEST_DFP="$work/missing-dfp"; run_build 2>&1) \
+run_build_output=$(export TEST_DFP="$work/missing-dfp"; run_build STRICT_TOOLS= 2>&1) \
 	|| { printf 'FAIL: absent DFP did not skip cleanly: %s\n' "$run_build_output" >&2; exit 1; }
+[[ "$run_build_output" == *"skipping ATtiny202 build"* ]] \
+	|| { printf 'FAIL: absent DFP skip missing its reason: %s\n' "$run_build_output" >&2; exit 1; }
 assert_no_artifacts "absent DFP skip"
+checks=$((checks + 1))
+
+seed_stale
+if output=$(export TEST_DFP="$work/missing-dfp"; run_build STRICT_TOOLS=1 2>&1); then
+	printf 'FAIL: absent DFP under STRICT_TOOLS=1 did not fail: %s\n' "$output" >&2
+	exit 1
+fi
+[[ "$output" == *"STRICT_TOOLS=1"* ]] \
+	|| { printf 'FAIL: STRICT_TOOLS=1 absent DFP failed for the wrong reason: %s\n' "$output" >&2; exit 1; }
+assert_no_artifacts "absent DFP strict"
 checks=$((checks + 1))
 
 seed_stale
