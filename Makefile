@@ -443,7 +443,7 @@ FORCE:
         test test-fast test-long stress \
         test-host test-sim test-sim-secondary \
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
-        test-attiny202-build test-release-images test-soak-timing \
+        test-attiny202-build test-release-images test-soak-timing test-workload-rebuild \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
         test-flash-budget-regression test-soak \
@@ -1709,7 +1709,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1717,10 +1717,11 @@ test-fast: test
 
 # FULL exhaustive workload: same targets as `test`, but the fuzz/stress tests
 # are rebuilt with their large in-source default durations (FULL_*_DEFS adds no
-# overrides). Use before tagging a release or signing off for hardware.
+# overrides). Workload-dependent binaries have a FORCE prerequisite, so this
+# does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing coverage-check
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -1755,9 +1756,13 @@ test-release-images:
 test-soak-timing:
 	HOSTCC="$(HOSTCC)" HOSTCXX="$(PIC_SOAK_CXX)" ./test/test_soak_timing.sh
 
+# Isolated fake-compiler proof that workload changes always rebuild host/sim bins.
+test-workload-rebuild:
+	./test/test_workload_rebuild.sh
+
 # Build rule for the golden model. Constants come from bypass_config.h (via the
 # host shim) so the model can never drift from the firmware thresholds.
-test/host/test_logic_host: test/host/test_logic_host.c test/bypass_config_host.h src/bypass_config.h
+test/host/test_logic_host: test/host/test_logic_host.c test/bypass_config_host.h src/bypass_config.h FORCE
 	$(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) $(HOST_DEFS) -Itest $< -o $@
 
 # Exhaustive small-model state-space verification: breadth-first search over the
@@ -2008,12 +2013,12 @@ SIM_DEPS = test/avr/test_sim.c test/model_step.h test/bypass_config_host.h \
 
 # $(call VARIANT_SIM_T13,variant)
 define VARIANT_SIM_T13
-test/avr/test_sim_$(1): $$(SIM_DEPS) $(AVR_FW)_$(1).elf
+test/avr/test_sim_$(1): $$(SIM_DEPS) $(AVR_FW)_$(1).elf FORCE
 	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -Itest \
 		-DFW_PATH=\"$(AVR_FW)_$(1).elf\" \
 		test/avr/test_sim.c $$(PURE_HOST_SRC) -o $$@ $$(SIM_LIBS)
 
-test/avr/test_trace_$(1): $$(SIM_DEPS) $(AVR_FW)_$(1).elf
+test/avr/test_trace_$(1): $$(SIM_DEPS) $(AVR_FW)_$(1).elf FORCE
 	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -DTRACE -Itest \
 		-DFW_PATH=\"$(AVR_FW)_$(1).elf\" \
 		-DTRACE_VCD_PATH=\"$(AVR_BUILD_DIR)/bypass_trace.vcd\" \
@@ -2028,7 +2033,7 @@ $(foreach v,$(VARIANTS),$(eval $(call VARIANT_SIM_T13,$(v))))
 
 # $(call VARIANT_SIM_X5,variant,chip-number)
 define VARIANT_SIM_X5
-test/avr/test_sim_$(1)_t$(2): $$(SIM_DEPS) $(AVR_FW)_$(1)_t$(2).elf
+test/avr/test_sim_$(1)_t$(2): $$(SIM_DEPS) $(AVR_FW)_$(1)_t$(2).elf FORCE
 	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -Itest \
 		-DFW_PATH=\"$(AVR_FW)_$(1)_t$(2).elf\" \
 		-DMCU_NAME=\"$$(mmcu_$(2))\" \
@@ -2447,6 +2452,7 @@ help:
 	@echo "  test-attiny202-build  fail-closed AVR-XT image-generation checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
+	@echo "  test-workload-rebuild  FAST/FULL/custom rebuild regression checks"
 	@echo "  test-soak       24-h soak test (standalone; SOAK_VARIANT, SOAK_CHIP, SOAK_DURATION_MS,"
 	@echo "                  SOAK_LIVENESS_INTERVAL_MS, SOAK_PROGRESS_INTERVAL_MS)"
 	@echo "  trace           emit $(AVR_BUILD_DIR)/bypass_trace.vcd for VARIANT (GTKWave)"
