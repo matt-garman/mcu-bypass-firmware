@@ -10,9 +10,9 @@ name: Release
 #
 # When the tag lands here, this workflow:
 #   1. rebuilds every image from the TAGGED source on a clean, pinned runner;
-#   2. REPRODUCIBILITY GATE: asserts the freshly built images reproduce the
-#      committed SHA256SUMS byte-for-byte -- i.e. proves the committed binaries
-#      really are what the tagged source compiles to (fails the release if not);
+#   2. REPRODUCIBILITY GATE: asserts the committed files, SHA256SUMS entries, and
+#      freshly built files are the same complete set with byte-identical contents
+#      (fails the release if not);
 #   3. re-runs `make test-long` + `make pic-test` +
 #      `make pic-test-target-variants` on the clean runner -- the same gates the
 #      MANIFEST claims;
@@ -126,33 +126,30 @@ jobs:
 
       # --- THE reproducibility gate ----------------------------------------
       - name: Verify committed images reproduce bit-for-bit
+        id: repro
         run: |
           set -euo pipefail
           dir='${{ steps.rel.outputs.dir }}'
 
-          echo "== (a) committed images match committed SHA256SUMS =="
-          ( cd "$dir" && sha256sum -c SHA256SUMS )
+          # Enforce three-way equality: actual committed .hex files, checksum
+          # entries, and fresh build output. Hash-only verification misses
+          # unlisted files that the publication glob would otherwise upload.
+          scripts/verify-release-images.sh "$dir" build_avr_classic build_pic
 
-          echo "== (b) freshly built images match committed SHA256SUMS =="
-          fresh="$(mktemp -d)"
-          cp build_avr_classic/*.hex build_pic/*.hex "$fresh"/
-          # Run the committed checksum list against the FRESH bytes. A mismatch
-          # here means the committed binary is NOT what the tagged source builds.
-          ( cd "$fresh" && sha256sum -c "${GITHUB_WORKSPACE}/$dir/SHA256SUMS" )
-
-          echo "== (c) release image set is EXACTLY what the tagged source builds =="
-          # (b) proves every *listed* image reproduces, but sha256sum -c only
-          # iterates SHA256SUMS -- a freshly built image omitted from the release
-          # would slip through. Compare the filename SETS (not counts) so both a
-          # missing committed image and an omitted fresh image fail the release.
-          work="$(mktemp -d)"
-          ( cd "$dir"   && awk '/\.hex$/ {print $2}' SHA256SUMS | sort -u ) > "$work/committed.txt"
-          ( cd "$fresh" && ls -1 *.hex                          | sort -u ) > "$work/fresh.txt"
-          if ! diff -u "$work/committed.txt" "$work/fresh.txt"; then
-            echo "::error::release image set does not match the tagged source build (see diff: '-' committed-only, '+' built-but-unreleased)"
-            exit 1
+          # Freeze the verified release assets before later test targets run.
+          # Publication consumes only this snapshot, never the mutable tree.
+          test -f "$dir/MANIFEST.md" && test ! -L "$dir/MANIFEST.md" \
+            || { echo "::error::$dir/MANIFEST.md is missing or not a regular file"; exit 1; }
+          publish="${RUNNER_TEMP}/verified-release"
+          rm -rf "$publish"
+          mkdir -p "$publish"
+          cp -p -- "$dir"/*.hex "$dir/SHA256SUMS" "$dir/MANIFEST.md" "$publish"/
+          if [ -e "$dir/SHA256SUMS.asc" ]; then
+            test -f "$dir/SHA256SUMS.asc" && test ! -L "$dir/SHA256SUMS.asc" \
+              || { echo "::error::$dir/SHA256SUMS.asc is not a regular file"; exit 1; }
+            cp -p -- "$dir/SHA256SUMS.asc" "$publish"/
           fi
-          echo "REPRODUCED: release image set is byte-identical AND complete vs. the tagged source build."
+          echo "dir=$publish" >> "$GITHUB_OUTPUT"
 
       # --- re-run the gates on the clean runner -----------------------------
       # STRICT_TOOLS=1 throughout: this is THE public attestation, so every gate
@@ -178,7 +175,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          dir='${{ steps.rel.outputs.dir }}'
+          dir='${{ steps.repro.outputs.dir }}'
           tag='${{ github.ref_name }}'
           assets=( "$dir"/*.hex "$dir/SHA256SUMS" "$dir/MANIFEST.md" )
           [ -f "$dir/SHA256SUMS.asc" ] && assets+=( "$dir/SHA256SUMS.asc" )

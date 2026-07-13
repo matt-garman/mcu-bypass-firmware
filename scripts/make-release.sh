@@ -486,14 +486,12 @@ REL_BANNER=""
 	printf 'git checkout %s\n' "$VERSION"
 	printf '# install the pinned toolchain (see TOOLCHAIN.adoc), then:\n'
 	printf 'make clean && make all13 all85 all45 && make pic\n'
-	printf 'tmp=$(mktemp -d)\n'
-	printf 'cp build_avr_classic/*.hex build_pic/*.hex "$tmp"/\n'
-	printf '( cd "$tmp" && sha256sum -c "$OLDPWD/release/%s/SHA256SUMS" )\n' "$VERSION"
+	printf 'scripts/verify-release-images.sh release/%s build_avr_classic build_pic\n' "$VERSION"
 	printf '```\n'
-	printf 'A matching `sha256sum -c` proves your freshly built images are byte-identical\n'
-	printf 'to the published ones. The tag-triggered CI (.github/workflows/release.yml)\n'
-	printf 'performs exactly this fresh-build check on a clean runner -- and also asserts\n'
-	printf 'the release image set is complete -- failing the release on any mismatch.\n'
+	printf 'A passing verifier proves the committed files, checksum entries, and freshly\n'
+	printf 'built files are the same complete set with byte-identical contents. The\n'
+	printf 'tag-triggered CI (.github/workflows/release.yml) runs this exact check on a\n'
+	printf 'clean runner and fails the release on any mismatch.\n'
 } > "$OUTPUT_DIR/MANIFEST.md"
 ok "wrote MANIFEST.md"
 

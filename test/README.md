@@ -16,6 +16,7 @@ test/
   misra_suppressions.txt    shared: documented per-file MISRA deviations
   run_mutation_tests.sh     shared: mutation-testing driver (make test-mutation)
   soak_timing_config.h      shared: native soak timing bounds
+  test_release_images.sh    shared: exact release artifact verification
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
 
   host/    MCU-independent golden-model tests, compiled and run natively.

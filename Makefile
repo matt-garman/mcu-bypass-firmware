@@ -428,7 +428,8 @@ FORCE:
 .PHONY: all all13 clean size readfuses fuses flash program help \
         test test-fast test-long stress \
         test-host test-sim test-sim-secondary \
-        test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation test-soak-timing \
+        test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
+        test-release-images test-soak-timing \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
         test-stack-bound test-flash-budget test-soak \
         analyze analyze-tidy analyze-cppcheck analyze-deep \
@@ -1603,7 +1604,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-sim test-sim-secondary test-soak-timing coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-sim test-sim-secondary test-release-images test-soak-timing coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1614,7 +1615,7 @@ test-fast: test
 # overrides). Use before tagging a release or signing off for hardware.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-mutation test-sim test-sim-secondary test-soak-timing coverage-check
+test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-mutation test-sim test-sim-secondary test-release-images test-soak-timing coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -1635,6 +1636,10 @@ clean-tests:
 # firmware matches.)
 test-host: test/host/test_logic_host
 	./test/host/test_logic_host
+
+# Exact-set and hash checks for the tag workflow's committed/listed/fresh images.
+test-release-images:
+	./test/test_release_images.sh
 
 # Fast host-only boundary checks for every soak timing input path: the shared
 # C/C++ compile-time contract, ATtiny202 environment parser, and release CLI.
@@ -2268,6 +2273,7 @@ help:
 	@echo "  test-sim-<v>[-t<n>]  single variant, e.g. test-sim-relay / test-sim-relay-t45"
 	@echo "  test-fault-inject  corrupt state, verify WDT recovery (all variants x tinyx5)"
 	@echo "  test-mutation   inject firmware faults, verify the suite kills them"
+	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-soak       24-h soak test (standalone; SOAK_VARIANT, SOAK_CHIP, SOAK_DURATION_MS,"
 	@echo "                  SOAK_LIVENESS_INTERVAL_MS, SOAK_PROGRESS_INTERVAL_MS)"

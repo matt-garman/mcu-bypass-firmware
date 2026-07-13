@@ -27,7 +27,7 @@ validation suite — backs these binaries, through two mechanisms:
    bytes. When the release tag is pushed, CI
    ([`.github/workflows/release.yml`](../.github/workflows/release.yml)) rebuilds
    the images from the tagged source on a clean runner and **fails the release
-   unless they reproduce these exact hashes**. That check is the public
+   unless the image sets and exact hashes reproduce**. That check is the public
    attestation that *these binaries are exactly what the tested source compiles
    to* — you do not have to take the maintainer's word for it, and you can run
    the same check yourself (see "Reproduce" below).
@@ -103,12 +103,21 @@ themselves.
 git checkout vX.Y.Z
 # install the pinned toolchain (see TOOLCHAIN.adoc), then:
 make clean && make all13 all85 all45 && make pic
-tmp=$(mktemp -d)
-cp build_avr_classic/*.hex build_pic/*.hex "$tmp"/
-( cd "$tmp" && sha256sum -c "$OLDPWD/release/vX.Y.Z/SHA256SUMS" )
+scripts/verify-release-images.sh release/vX.Y.Z build_avr_classic build_pic
 ```
 
-A matching `sha256sum -c` proves your locally built images are identical to the
-published ones. (Byte-exact reproduction requires the *same* `avr-gcc` **and**
-`binutils-avr` versions recorded in the manifest; a different toolchain may
-produce functionally identical but not byte-identical images.)
+A passing verifier proves the committed files, checksum entries, and locally
+built files are the same complete set with byte-identical contents. Byte-exact
+reproduction requires the *same* `avr-gcc` **and** `binutils-avr` versions
+recorded in the manifest; a different toolchain may produce functionally
+identical but not byte-identical images.
+
+For tags predating `scripts/verify-release-images.sh`, use their original
+hash-only check with an absolute checksum path:
+
+```sh
+repo=$PWD
+tmp=$(mktemp -d)
+cp build_avr_classic/*.hex build_pic/*.hex "$tmp"/
+( cd "$tmp" && sha256sum -c "$repo/release/vX.Y.Z/SHA256SUMS" )
+```
