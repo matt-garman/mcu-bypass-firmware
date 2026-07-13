@@ -874,9 +874,9 @@ pic-test-soak: pic
 # STANDALONE -- like pic-test-soak it links libgpsim (needs gpsim-dev +
 # libglib2.0-dev) and is deliberately NOT in `make test`/`pic-test`, whose PIC
 # leg (pic-test-gpsim) needs only the gpsim CLI. Skips cleanly when the compiler,
-# those headers, or the built HEX are absent. The gate is variant-agnostic (all
-# three output shells share main()'s gate), so PIC_FAULT_VARIANT only selects the
-# HEX. Reuses the soak's toolchain settings (PIC_SOAK_CXX, PIC_SOAK_GPSIM_INC).
+# those headers, or the built HEX are absent. PIC_FAULT_VARIANT selects the HEX
+# and the output-stage macro needed for variant-aware TRISA fault expectations.
+# Reuses the soak's toolchain settings (PIC_SOAK_CXX, PIC_SOAK_GPSIM_INC).
 PIC_FAULT_VARIANT ?= cd4053
 PIC_FAULT_SRC = test/pic/test_fault_pic.cc
 PIC_FAULT_BIN = test/pic/test_fault_pic
@@ -904,7 +904,7 @@ PIC_FAULT_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC_FAULT
 PIC_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
 		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
 		-DFW_PATH='"$(CURDIR)/$(PIC_FAULT_HEX)"' -DPROC_NAME='"$(PIC_GPSIM_PROC)"' \
-		-DF_CPU_HZ=$(PIC_XTAL) $(PIC_FAULT_CTX_DEF) \
+		-DF_CPU_HZ=$(PIC_XTAL) -D$(macro_$(PIC_FAULT_VARIANT)) $(PIC_FAULT_CTX_DEF) \
 		$(PIC_FAULT_SRC) -o $(PIC_FAULT_BIN) -lgpsim
 
 $(PIC_FAULT_BIN): $(PIC_FAULT_SRC)

@@ -227,6 +227,7 @@ PIC_GPSIM_MUTATIONS=(
 PIC_TARGET_MUTATIONS=(
 "src/bypass_mcu_pic10f322.c	s@WPUA = (uint8_t)(1U << FOOTSW_PIN);@WPUA |= (uint8_t)(1U << FOOTSW_PIN);@	cd4053	PIC pull-up init regressed to read-modify-write; exact WPUA state can preserve unexpected output-pin latches"
 "src/bypass_mcu_pic10f322.c	s@wpua_latches == (uint8_t)(1U << FOOTSW_PIN)@0U != (wpua_latches \& (uint8_t)(1U << FOOTSW_PIN))@	cd4053	PIC exact WPUA guard weakened to RA3-present only; extra RA0..RA2 latches go undetected"
+"src/bypass_mcu_pic10f322.c	s@return (0U == (TRISA \& expected_mask));@return 1U;@	cd4053	PIC output-direction guard disabled; TRISA faults no longer force watchdog recovery"
 "src/bypass_mcu_pic10f322.c	s@ANSELA & BYPASS_OUTPUT_DDR_MASK@ANSELA \& 0x01U@	cd4053	PIC ANSELA sanity mask narrowed to RA0 only; RA1/RA2 analog re-selection undetected"
 "src/bypass_output_cd4053_with_mute.c	s@hw_led_pin_set_low();          // dark status LED@hw_pin_set_high(CD4053_CTL1);  // MUTANT: reassert ENGAGED at startup\\n    hw_pin_set_high(CD4053_CTL2);\\n\\n    hw_led_pin_set_low();          // dark status LED@	mute	PIC cd4053-mute startup reasserts ENGAGED before MUTE; target I/O startup trace catches it"
 "src/bypass_output_cd4053_with_mute.c	s@BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS)@BYPASS_DELAY_MS(1)@g	mute	PIC cd4053-mute pre-switch mute window shortened; target I/O pulse-width check catches it"

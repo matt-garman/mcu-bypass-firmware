@@ -6,12 +6,14 @@
 // gate + hw_force_wdt_reset() promise.
 //
 // COVERAGE -- every location the gate guards:
+//   * output SFRs    TRISA (required output directions, variant-aware)
 //   * config SFRs    OSCCON.IRCF / WDTCON.WDTPS / PR2 / T2CON / ANSELA (hw_critical_sfrs_intact)
-//   * pull-up SFRs   WPUA (RA3 latch) + OPTION_REG.nWPUEN     (hw_footswitch_pullup_intact)
+//   * pull-up SFRs   WPUA (exactly RA3 latched, RA0..RA2 clear) +
+//                    OPTION_REG.nWPUEN                         (hw_footswitch_pullup_intact)
 //   * ctx_ SRAM      program_state / effect_state / debounce_counter (range checks)
-// The ctx_ cases run only when CTX_ADDR is passed (the Makefile extracts _ctx_'s
-// data address from the XC8 .sym so the test self-adjusts per variant); they are
-// skipped with a note otherwise.
+// CTX_ADDR is required. The Makefile extracts _ctx_'s data address from the XC8
+// .sym so the test self-adjusts per variant and cannot pass with SRAM cases
+// silently omitted.
 //
 // WHY THIS IS THE MIRROR IMAGE OF THE SOAK (test/pic/test_soak_pic.cc):
 // the polled PIC shell has no recovery path OTHER than the watchdog. When the
@@ -35,7 +37,9 @@
 //      note below), which would otherwise pass silently.
 // A no-injection CONTROL case runs first and asserts delta == 0: a quiescent
 // device must NOT reset in a full window, proving the window is not catching
-// phantom resets and the gate does not fire spuriously.
+// phantom resets and the gate does not fire spuriously. The simple variant also
+// has one write-back-verified negative injection: changing spare RA2 to an input
+// must produce zero resets because RA2 is outside that variant's runtime guard.
 //
 // CORRUPTION VALUES are chosen so the main loop keeps running and the GATE is
 // the sole reset path (confound analysis, per case, below). OSCCON.IRCF and
@@ -61,9 +65,9 @@
 //   STANDALONE -- like pic-test-soak it links libgpsim (needs gpsim-dev +
 //   libglib2.0-dev) and is NOT part of `make test`/`pic-test` (whose PIC leg,
 //   pic-test-gpsim, needs only the gpsim CLI). Skips cleanly when the compiler,
-//   those headers, or the built HEX are absent. The gate is variant-agnostic
-//   (all three output shells share main()'s gate), so this is variant-agnostic
-//   too; PIC_FAULT_VARIANT only selects which HEX is loaded.
+//   those headers, or the built HEX are absent. The all-variant target aggregate
+//   runs this test for each output stage because the required TRISA mask is
+//   variant-aware.
 //
 // IMPORTANT (gpsim WDT calibration; see test_soak_pic.cc): gpsim honors
 // WDTCON.WDTPS but does NOT match the datasheet -- at the firmware's WDTPS=0x08
@@ -77,6 +81,7 @@
 #include <cstring>
 #include <cctype>
 #include <string>
+#include <vector>
 #include <iostream>
 
 #include <glib.h>                 // guint64
@@ -108,6 +113,12 @@ static NullBuf g_nullbuf;
 #  define F_CPU_HZ 2000000UL           // FOSC; instruction clock = FOSC/4
 #endif
 #define CYCLES_PER_MS  ((F_CPU_HZ / 4UL) / 1000UL)   // 500 @ 2 MHz
+#define CLRWDT_OPCODE  0x0064u
+
+#if (defined(CD4053_SIMPLE) + defined(CD4053_WITH_MUTE) + \
+     defined(TQ2_L2_5V_RELAY)) != 1
+#  error "define exactly one output variant"
+#endif
 
 // PIC pin map (src/bypass_pins_pic10f322.h): RA3 footswitch (1=released,
 // 0=pressed), RA0 = LED on LATA bit0.
@@ -118,12 +129,13 @@ static NullBuf g_nullbuf;
 // cross-checked against the register's gpsim name at runtime (fetch_sfr) so an
 // address drift is surfaced rather than silently corrupting the wrong register.
 #define WPUA_ADDR    0x009u  // RA3 weak-pull-up latch = bit 3 (mask 0x08)
-#define OSCCON_ADDR  0x010u
+#define TRISA_ADDR   0x006u  // RA3 input; RA0..RA2 outputs after init (0x08)
+#define OSCCON_ADDR  0x010u  // IRCF = bits 6:4 (mask 0x70)
 #define PR2_ADDR     0x012u
 #define T2CON_ADDR   0x013u
 #define ANSELA_ADDR  0x008u  // ANSA0..ANSA2 = RA0..RA2 analog select (mask 0x07 = BYPASS_OUTPUT_DDR_MASK)
 #define OPTION_ADDR  0x00Eu  // OPTION_REG; nWPUEN (global pull-up enable) = bit 7
-#define WDTCON_ADDR  0x030u
+#define WDTCON_ADDR  0x030u  // WDTPS = bits 5:1 (mask 0x3E)
 
 // ctx_ (debounce_context_t, src/bypass_types.h) is file-static SRAM; the Makefile
 // passes CTX_ADDR = _ctx_'s data address (from the XC8 .sym). Field OFFSETS follow
@@ -131,11 +143,12 @@ static NullBuf g_nullbuf;
 // object as XC8 lays them out -- confirmed against the generated .s ((_ctx_),
 // (_ctx_+1), (_ctx_+2)). ctx_ is a GPR, so its gpsim register has no meaningful
 // name: pass a null token to fetch_sfr to skip the name cross-check.
-#ifdef CTX_ADDR
-#  define CTX_PROGRAM_STATE     ((unsigned)(CTX_ADDR) + 0u)
-#  define CTX_EFFECT_STATE      ((unsigned)(CTX_ADDR) + 1u)
-#  define CTX_DEBOUNCE_COUNTER  ((unsigned)(CTX_ADDR) + 2u)
+#ifndef CTX_ADDR
+#  error "CTX_ADDR (the _ctx_ SRAM address from the XC8 .sym) is required"
 #endif
+#define CTX_PROGRAM_STATE     ((unsigned)(CTX_ADDR) + 0u)
+#define CTX_EFFECT_STATE      ((unsigned)(CTX_ADDR) + 1u)
+#define CTX_DEBOUNCE_COUNTER  ((unsigned)(CTX_ADDR) + 2u)
 
 // ---- Timing -----------------------------------------------------------------
 // Settle time to (re)reach the quiescent main loop after power-on or a recovery
@@ -149,6 +162,15 @@ static NullBuf g_nullbuf;
 // Safety cap: max run() resumes to cover one ms. A genuinely wedged core (PC
 // stuck, never reaching the cycle break) trips this instead of hanging forever.
 #define MAX_RESUMES_PER_MS 64
+// Identify the repeatedly executed main-loop CLRWDT rather than relying on a
+// variant-sensitive program address. PIC10F322 has 512 program words.
+#define PROGRAM_WORDS 0x200u
+#define CLRWDT_CALIB_MS 8u
+#if defined(CD4053_SIMPLE)
+#  define EXPECTED_CHECKS 23u
+#else
+#  define EXPECTED_CHECKS 22u
+#endif
 
 // ---- Sim globals ------------------------------------------------------------
 static pic_processor   *g_cpu      = nullptr;
@@ -157,6 +179,7 @@ static source_stimulus *g_fsw_src  = nullptr;
 static guint64   g_resets  = 0;   // incremented by ResetNotifier at 0x000
 static unsigned  g_checks  = 0;
 static unsigned  g_fails   = 0;
+static unsigned  g_loop_clrwdt_addr = 0;
 
 // ---- Reset detection (identical to the soak; verdict inverted at the call
 // site). A NOTIFY breakpoint at the reset vector fires WITHOUT halting the run,
@@ -184,11 +207,10 @@ static void footsw_set(int pressed) {
     g_fsw_node->update();
 }
 
-// Fetch a register by file address and (for named SFRs) cross-check its gpsim
-// name contains the expected token (lowercase). A mismatch warns but does not
-// abort: the address is authoritative (from the DFP header, proven by the soak),
-// and gpsim naming quirks should not fail an otherwise-correct injection. Pass
-// token == nullptr for GPRs (e.g. ctx_), which have no meaningful name.
+// Fetch a register by file address and (for named SFRs) require that its gpsim
+// name contains the expected token (lowercase). A mismatch is fatal: injecting
+// the wrong register must never count as evidence that the named guard works.
+// Pass token == nullptr for GPRs (e.g. ctx_), which have no meaningful name.
 static Register *fetch_sfr(unsigned addr, const char *token) {
     Register *r = g_cpu->rma.get_register(addr);
     if (r == nullptr) {
@@ -199,8 +221,9 @@ static Register *fetch_sfr(unsigned addr, const char *token) {
         std::string nm = r->name();
         for (char &c : nm) c = (char)tolower((unsigned char)c);
         if (nm.find(token) == std::string::npos) {
-            fprintf(stderr, "WARN: register at 0x%03x is named '%s', expected '%s'\n",
+            fprintf(stderr, "FATAL: register at 0x%03x is named '%s', expected '%s'\n",
                     addr, r->name().c_str(), token);
+            return nullptr;
         }
     }
     return r;
@@ -209,7 +232,7 @@ static Register *fetch_sfr(unsigned addr, const char *token) {
 // Advance the simulation by `ms` ms of simulated time. Cycle break at the
 // target; resume run() until the target cycle is reached (a WDT reset may halt
 // run() early and/or fire the notify callback -- either way we resume).
-static void run_ms(unsigned ms) {
+static bool run_ms(unsigned ms) {
     guint64 target = get_cycles().get() + (guint64)ms * CYCLES_PER_MS;
     get_cycles().set_break(target);
     int resumes = 0;
@@ -218,52 +241,90 @@ static void run_ms(unsigned ms) {
         if (++resumes > MAX_RESUMES_PER_MS) {
             fprintf(stderr, "FATAL: core not advancing (wedged?) at run_ms\n");
             get_cycles().clear_break(target);
-            return;
+            return false;
         }
     }
+    return true;
 }
 
-// After settle the firmware loops forever, so init()'s one-shot CLRWDT is never
-// revisited -- the ONLY CLRWDT reached in quiescent steady state is the main
-// loop's "pet the dog", the last instruction before looping back to the tick
-// poll. Single-step (via run(false), which -- unlike step_one -- services
-// peripherals) until the opcode at the PC is that CLRWDT, so a subsequent
-// injection lands at a DETERMINISTIC, gate-before-integrate loop phase: the next
-// iteration's sanity gate reads the corruption before debounce_step (which
-// rewrites ctx_ every tick) can overwrite it. Detecting the opcode rather than a
-// hardcoded address keeps this variant-independent -- the loop CLRWDT sits at a
-// different program address in each output variant (0x05a / 0x05d / 0x078 here).
-// Caps the search at a few ticks' worth of cycles so a wedged core cannot spin
-// forever.
-//
-// Without this, injecting at whatever loop phase the ms-based settle happens to
-// halt on is a race: at 2 MHz every variant lands some ctx_ case in the
-// integrate-before-gate window, the integrator overwrites the injected field, and
-// the gate never sees it -> 0 resets -> false FAIL. (16 MHz happened to land safe
-// phases, which is why the parent never flagged it.)
-#define CLRWDT_OPCODE 0x0064u
-static void advance_to_loop_clrwdt(void) {
+// Identify the loop CLRWDT behaviorally. init() and the main loop each contain
+// one, and their addresses are not reliably ordered; after settle only the loop
+// site fires repeatedly.
+struct ClrwdtCounter : public TriggerObject {
+    unsigned addr;
+    long hits = 0;
+    explicit ClrwdtCounter(unsigned a) : addr(a) {}
+    void callback() override { hits++; }
+};
+
+static bool identify_loop_clrwdt(void) {
+    std::vector<ClrwdtCounter *> hooks;
+    for (unsigned addr = 0; addr < PROGRAM_WORDS; ++addr) {
+        if (g_cpu->pma->get_opcode(addr) == CLRWDT_OPCODE) {
+            ClrwdtCounter *hook = new ClrwdtCounter(addr);
+            hooks.push_back(hook);
+            get_bp().set_notify_break(g_cpu, addr, hook);
+        }
+    }
+    if (!run_ms(CLRWDT_CALIB_MS)) {
+        g_checks++;
+        g_fails++;
+        return false;
+    }
+    long best = -1;
+    for (ClrwdtCounter *hook : hooks) {
+        if (hook->hits > best) {
+            best = hook->hits;
+            g_loop_clrwdt_addr = hook->addr;
+        }
+    }
+    g_checks++;
+    if (hooks.empty() || best < (long)(CLRWDT_CALIB_MS / 2u)) {
+        g_fails++;
+        fprintf(stderr,
+                "FAIL: could not identify loop CLRWDT (%zu sites, max %ld hits in %u ms)\n",
+                hooks.size(), best, CLRWDT_CALIB_MS);
+        return false;
+    }
+    printf("  loop CLRWDT identified at 0x%03x (%ld hits in %u ms)\n",
+           g_loop_clrwdt_addr, best, CLRWDT_CALIB_MS);
+    return true;
+}
+
+// Advance (single-cycle steps via run(), which -- unlike step_one -- services
+// peripherals) until the core is parked AT the loop CLRWDT, so a subsequent
+// injection lands at a deterministic, gate-before-integrate loop phase.
+static bool advance_to_loop_clrwdt(void) {
     for (int i = 0; i < 8000; ++i) {
-        unsigned pc = g_cpu->pc->get_value();
-        if (g_cpu->pma->get_opcode(pc) == CLRWDT_OPCODE)
-            return;
+        if (g_cpu->pc->get_value() == g_loop_clrwdt_addr)
+            return true;
         guint64 c = get_cycles().get() + 1;
         get_cycles().set_break(c);
         g_cpu->run(false);
         get_cycles().clear_break(c);
     }
-    fprintf(stderr, "WARN: never reached loop CLRWDT (opcode 0x%04x) -- layout changed?\n",
-            CLRWDT_OPCODE);
+    fprintf(stderr, "FAIL: never reached loop CLRWDT 0x%03x\n", g_loop_clrwdt_addr);
+    return false;
 }
 
 // ---- One injection case -----------------------------------------------------
 // absolute=true writes `val`; absolute=false writes (current ^ val), i.e. an
-// SEU bit-flip of the bits in `val`. Asserts EXACTLY ONE recovery reset.
+// SEU bit-flip of the bits in `val`. expected_resets is one for guarded faults
+// and zero for the simple variant's spare-RA2 negative control.
 static void inject_case(const char *label, unsigned addr, const char *token,
-                        bool absolute, unsigned val, const char *note) {
+                        bool absolute, unsigned val, unsigned expected_resets,
+                        const char *note) {
     footsw_set(0);                 // released: quiescent, only the SFR can trip
-    run_ms(SETTLE_MS);             // (re)reach the main loop after any prior reset
-    advance_to_loop_clrwdt();      // park at a deterministic loop phase (see note)
+    if (!run_ms(SETTLE_MS)) {      // (re)reach the main loop after any prior reset
+        g_checks++;
+        g_fails++;
+        return;
+    }
+    if (!advance_to_loop_clrwdt()) {
+        g_checks++;
+        g_fails++;
+        return;
+    }
 
     Register *r = fetch_sfr(addr, token);
     if (r == nullptr) { g_checks++; g_fails++; return; }
@@ -273,22 +334,49 @@ static void inject_case(const char *label, unsigned addr, const char *token,
 
     guint64 before = g_resets;
     r->put_value(bad);
-    printf("  inject %-13s @0x%03x: 0x%02x -> 0x%02x  (%s)\n",
+    unsigned const written = r->get_value() & 0xFFu;
+    printf("  inject %-18s @0x%03x: 0x%02x -> 0x%02x  (%s)\n",
            label, addr, cur, bad, note);
     fflush(stdout);
 
-    run_ms(WDT_RESET_WINDOW_MS);
+    if (written != bad) {
+        g_checks++;
+        g_fails++;
+        fprintf(stderr,
+                "    FAIL: injection did not stick (read 0x%02x, wanted 0x%02x)\n",
+                written, bad);
+        r->put_value(cur);
+        return;
+    }
+
+    if (!run_ms(WDT_RESET_WINDOW_MS)) {
+        g_checks++;
+        g_fails++;
+        if (expected_resets == 0u) r->put_value(cur);
+        return;
+    }
     guint64 delta = g_resets - before;
 
     g_checks++;
-    if (delta == 1u) {
-        printf("    PASS: gate forced exactly 1 WDT reset\n");
+    if (delta == expected_resets) {
+        printf("    PASS: observed exactly %u WDT reset%s\n", expected_resets,
+               expected_resets == 1u ? "" : "s");
     } else {
         g_fails++;
-        printf("    FAIL: %" G_GUINT64_FORMAT " resets in %u ms (want exactly 1)%s\n",
-               delta, WDT_RESET_WINDOW_MS,
-               delta > 1u ? "  [reset-loop: is gpsim retaining corrupted WDTCON?]"
+        char const *reason = expected_resets == 0u
+            ? "  [unexpected reset path fired]"
+            : (delta > 1u ? "  [reset-loop: is gpsim retaining corrupted WDTCON?]"
                           : "  [gate did not fire?]");
+        printf("    FAIL: %" G_GUINT64_FORMAT " resets in %u ms (want exactly %u)%s\n",
+               delta, WDT_RESET_WINDOW_MS, expected_resets, reason);
+    }
+    if (expected_resets == 0u) {
+        r->put_value(cur);
+        g_checks++;
+        if ((r->get_value() & 0xFFu) != cur) {
+            g_fails++;
+            fprintf(stderr, "    FAIL: could not restore register after negative control\n");
+        }
     }
     fflush(stdout);
 }
@@ -296,11 +384,19 @@ static void inject_case(const char *label, unsigned addr, const char *token,
 // No-injection control: a quiescent device must NOT reset in a full window.
 static void control_case(void) {
     footsw_set(0);
-    run_ms(SETTLE_MS);
+    if (!run_ms(SETTLE_MS)) {
+        g_checks++;
+        g_fails++;
+        return;
+    }
     guint64 before = g_resets;
     printf("  control (no injection)\n");
     fflush(stdout);
-    run_ms(WDT_RESET_WINDOW_MS);
+    if (!run_ms(WDT_RESET_WINDOW_MS)) {
+        g_checks++;
+        g_fails++;
+        return;
+    }
     guint64 delta = g_resets - before;
     g_checks++;
     if (delta == 0u) {
@@ -310,6 +406,32 @@ static void control_case(void) {
         printf("    FAIL: %" G_GUINT64_FORMAT " spurious reset(s) with no injection\n", delta);
     }
     fflush(stdout);
+}
+
+static void check_startup_wpua(void) {
+    Register *r = fetch_sfr(WPUA_ADDR, "wpu");
+    g_checks++;
+    if (r == nullptr) { g_fails++; return; }
+    unsigned const val = r->get_value() & 0x0Fu;
+    if (val == 0x08u) {
+        printf("  PASS: startup WPUA is RA3-only (0x08)\n");
+    } else {
+        g_fails++;
+        printf("  FAIL: startup WPUA is 0x%02x (want exact RA3-only 0x08)\n", val);
+    }
+}
+
+static void check_startup_trisa(void) {
+    Register *r = fetch_sfr(TRISA_ADDR, "tris");
+    g_checks++;
+    if (r == nullptr) { g_fails++; return; }
+    unsigned const val = r->get_value() & 0x0Fu;
+    if (val == 0x08u) {
+        printf("  PASS: startup TRISA is RA3 input, RA0..RA2 outputs (0x08)\n");
+    } else {
+        g_fails++;
+        printf("  FAIL: startup TRISA is 0x%02x (want exact 0x08)\n", val);
+    }
 }
 
 int main() {
@@ -341,7 +463,9 @@ int main() {
     g_fsw_node->attach_stimulus(ra3);
 
     footsw_set(0);                              // released at power-on
-    run_ms(SETTLE_MS);                          // let init() settle, reach main loop
+    if (!run_ms(SETTLE_MS)) {                   // let init() settle, reach main loop
+        return 1;
+    }
 
     // Arm reset counting only now (skip the power-on pass through 0x000).
     get_bp().set_notify_break(g_cpu, 0x000, &g_reset_notifier);
@@ -351,17 +475,39 @@ int main() {
            FW_PATH, PROC_NAME, (unsigned long)F_CPU_HZ, WDT_RESET_WINDOW_MS);
     fflush(stdout);
 
-    // Negative control first, then one case per guarded location.
+    // Startup invariants and negative control, then every guarded location.
+    check_startup_wpua();
+    check_startup_trisa();
+    if (!identify_loop_clrwdt()) {
+        printf("\nFAULT-INJECT FAIL: %u checks, %u failures\n", g_checks, g_fails);
+        return 1;
+    }
     control_case();
 
+    // Output directions (hw_is_sanity_check_failed). RA0/RA1 are required for
+    // every variant. RA2 is intentionally a negative control for the simple
+    // variant, whose runtime sanity mask covers only its load-bearing RA0/RA1;
+    // mute and relay require all three output directions.
+    inject_case("TRISA.RA0", TRISA_ADDR, "tris", false, 0x01, 1,
+                "RA0 changed from output to input");
+    inject_case("TRISA.RA1", TRISA_ADDR, "tris", false, 0x02, 1,
+                "RA1 changed from output to input");
+#if defined(CD4053_SIMPLE)
+    inject_case("TRISA.RA2", TRISA_ADDR, "tris", false, 0x04, 0,
+                "spare RA2 input is outside this variant's runtime guard");
+#else
+    inject_case("TRISA.RA2", TRISA_ADDR, "tris", false, 0x04, 1,
+                "RA2 changed from output to input");
+#endif
+
     // config SFRs (hw_critical_sfrs_intact)
-    inject_case("OSCCON.IRCF",  OSCCON_ADDR, "osccon", false, 0x10,
+    inject_case("OSCCON.IRCF",  OSCCON_ADDR, "osccon", false, 0x10, 1,
                 "IRCF 0b100->0b101: 2MHz->4MHz clock skew");
-    inject_case("WDTCON.WDTPS", WDTCON_ADDR, "wdtcon", false, 0x10,
+    inject_case("WDTCON.WDTPS", WDTCON_ADDR, "wdtcon", false, 0x10, 1,
                 "WDTPS 0b01000->0b00000: 1:8192->1:32, WDT miscalibrated (else silent)");
-    inject_case("PR2",          PR2_ADDR,    "pr2",    true,  99,
+    inject_case("PR2",          PR2_ADDR,    "pr2",    true,  99, 1,
                 "tick period 124->99: 1ms tick skewed");
-    inject_case("T2CON",        T2CON_ADDR,  "t2con",  false, 0x01,
+    inject_case("T2CON",        T2CON_ADDR,  "t2con",  false, 0x01, 1,
                 "T2CKPS 1:4->1:1, TMR2ON preserved: timer cfg skew");
 
     // ANSELA: re-select an output pin analog. The gate masks the fixed
@@ -370,33 +516,39 @@ int main() {
     // This is the one config-SFR case the TRISA-only hw_is_sanity_check_failed()
     // cannot see: an ANSELA flip pulls the pin out of digital service while its
     // TRISA direction bit still reads "output".
-    inject_case("ANSELA.RA0",   ANSELA_ADDR, "ansel",  false, 0x01,
+    inject_case("ANSELA.RA0",   ANSELA_ADDR, "ansel",  false, 0x01, 1,
                 "ANSA0=1: RA0 (LED) re-selected analog, out of digital service");
-    inject_case("ANSELA.RA1",   ANSELA_ADDR, "ansel",  false, 0x02,
+    inject_case("ANSELA.RA1",   ANSELA_ADDR, "ansel",  false, 0x02, 1,
                 "ANSA1=1: RA1 (control pin) re-selected analog, out of digital service");
-    inject_case("ANSELA.RA2",   ANSELA_ADDR, "ansel",  false, 0x04,
+    inject_case("ANSELA.RA2",   ANSELA_ADDR, "ansel",  false, 0x04, 1,
                 "ANSA2=1: RA2 (control pin) re-selected analog, out of digital service");
 
     // pull-up SFRs (hw_footswitch_pullup_intact) -- footswitch is externally
     // driven, so the pin stays released; only the gate's check reacts.
-    inject_case("WPUA.RA3",     WPUA_ADDR,   "wpu",    false, 0x08,
+    inject_case("WPUA.RA3",     WPUA_ADDR,   "wpu",    false, 0x08, 1,
                 "clear RA3 pull-up latch: footswitch weak pull-up disabled");
-    inject_case("WPUA.RA0..2",  WPUA_ADDR,   "wpu",    false, 0x07,
-                "set RA0..RA2 pull-up latches: unexpected output-pin pull-ups enabled");
-    inject_case("OPTION.nWPUEN",OPTION_ADDR, "option", false, 0x80,
+    inject_case("WPUA.RA0",     WPUA_ADDR,   "wpu",    false, 0x01, 1,
+                "set RA0 output-pin pull-up latch: exact RA3-only mask violated");
+    inject_case("WPUA.RA1",     WPUA_ADDR,   "wpu",    false, 0x02, 1,
+                "set RA1 output-pin pull-up latch: exact RA3-only mask violated");
+    inject_case("WPUA.RA2",     WPUA_ADDR,   "wpu",    false, 0x04, 1,
+                "set RA2 output-pin pull-up latch: exact RA3-only mask violated");
+    inject_case("OPTION.nWPUEN",OPTION_ADDR, "option", false, 0x80, 1,
                 "set nWPUEN: global weak pull-ups disabled");
 
     // ctx_ SRAM range checks (see the ctx_ note in the header comment)
-#ifdef CTX_ADDR
-    inject_case("ctx.program_state",    CTX_PROGRAM_STATE,    nullptr, true, 0x02,
+    inject_case("ctx.program_state",    CTX_PROGRAM_STATE,    nullptr, true, 0x02, 1,
                 "0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault)");
-    inject_case("ctx.effect_state",     CTX_EFFECT_STATE,     nullptr, true, 0x02,
+    inject_case("ctx.effect_state",     CTX_EFFECT_STATE,     nullptr, true, 0x02, 1,
                 "->2: > ENGAGED (gate-only)");
-    inject_case("ctx.debounce_counter", CTX_DEBOUNCE_COUNTER, nullptr, true, 0xFF,
+    inject_case("ctx.debounce_counter", CTX_DEBOUNCE_COUNTER, nullptr, true, 0xFF, 1,
                 "->255: > RELEASE_THRESH (gate-only)");
-#else
-    printf("  (ctx_ SRAM cases skipped: no CTX_ADDR -- pass -DCTX_ADDR=0x<_ctx_> from the .sym)\n");
-#endif
+
+    if (g_checks != EXPECTED_CHECKS) {
+        g_fails++;
+        fprintf(stderr, "FAIL: executed %u checks, expected %u for this variant\n",
+                g_checks, EXPECTED_CHECKS);
+    }
 
     int pass = (g_fails == 0);
     printf("\nFAULT-INJECT %s: %u checks, %u failures\n",

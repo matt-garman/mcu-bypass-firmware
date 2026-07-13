@@ -59,7 +59,7 @@ described below so a green gate means every PIC layer actually ran.
 | CONFIG word | `pic-test-config` | The XC8-emitted CONFIG word matches the documented oscillator/WDT/BOR/MCLR/LVP design intent. | host parser over HEX |
 | Static analysis | `pic-analyze` | cppcheck + MISRA pass over the PIC shell with real XC8/DFP register headers. | host tools |
 | Register-level functional | `pic-test-gpsim` | Real HEX toggles on press, handles power-on-held switch, keeps settled LATA/PORTA expectations, and includes the mid-debounce `PRESS1_EARLY` tick-cadence check. | gpsim CLI |
-| Fault recovery | `pic-test-fault` | Runtime SFR, pull-up, and `ctx_` corruptions force exactly one WDT reset. | libgpsim |
+| Fault recovery | `pic-test-fault` | Runtime direction, configuration, pull-up, and `ctx_` corruptions produce the variant-appropriate WDT recovery response. | libgpsim |
 | HEX/model lock-step | `pic-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches the shared pure model after every completed main-loop iteration. | libgpsim |
 | Target I/O timing | `pic-test-io` | TRISA/ANSELA/LATA/PORTA transitions, relay coil exclusion, and mute/relay pulse widths match the design. | libgpsim |
 | Fail-closed aggregate | `pic-test-target-variants` | Runs fault recovery, lock-step, and target-I/O for every PIC variant and requires each PASS sentinel. | Makefile wrapper |
@@ -77,6 +77,12 @@ authoritative. The component libgpsim targets remain useful standalone commands,
 but they are allowed to skip for missing tools; the aggregate turns any skip or
 missing PASS marker into a failure.
 
+`pic-test-fault` first requires exact startup `WPUA=0x08` and `TRISA=0x08`, then
+injects every guarded direction/SFR/SRAM fault at the behaviorally identified
+main-loop `CLRWDT`. Register identity, injection readback, the expected per-
+variant check count, and restoration after the simple variant's spare-RA2
+negative control are all fail-closed test invariants.
+
 
 ## Mutation testing and skipped PIC tools
 
@@ -87,8 +93,9 @@ development stays practical. In strict/full-tool contexts, including
 `STRICT_TOOLS=1` or `MUTATION_ALLOW_SKIP=0`, skipped PIC mutants fail the run.
 
 The PIC mutation set includes target-level faults for the new coverage: collapsed
-TMR2IF cadence, exact WPUA pull-up state, ANSELA mask narrowing, muted-CD4053
-startup reassertion, mute-window shortening, and relay pulse shortening.
+TMR2IF cadence, output-direction guard removal, exact WPUA pull-up state, ANSELA
+mask narrowing, muted-CD4053 startup reassertion, mute-window shortening, and
+relay pulse shortening.
 
 
 ## Known gaps (PIC — hardware-bench only)
