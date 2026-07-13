@@ -168,6 +168,7 @@ AVRDUDE_FLAGS = -c $(PROGRAMMER) -p $(AVRDUDE_PART)
 # --- Host test-suite compiler / simavr ---------------------------------------
 # Host (PC) compiler for the test suite (NOT the AVR cross-compiler).
 HOSTCC      ?= cc
+GCOV        ?= gcov
 # -Wconversion catches implicit integer-narrowing/sign-change footguns in the
 # debounce arithmetic. The host model and the firmware share the same integer
 # semantics, so the model is a good place to enforce it too.
@@ -2083,42 +2084,69 @@ analyze-misra-report: $(FW_SOURCES) $(FW_HEADERS) $(MISRA_ADDON) $(MISRA_RULES)
 COVERAGE_DIR = coverage
 # Minimum acceptable golden-model line-coverage percentage (the gate threshold).
 COVERAGE_MIN ?= 90
+COVERAGE_SRC = test/host/test_logic_host.c
+COVERAGE_REPORT_DIR = $(COVERAGE_DIR)/report
+COVERAGE_OBJ_NAME = test_logic_host_cov.o
+COVERAGE_BIN_NAME = test_logic_host_cov
+COVERAGE_DATA_NAME = test_logic_host_cov.gcda
+COVERAGE_ANNOTATION = test_logic_host.c.gcov
+
+define RUN_GOLDEN_MODEL_COVERAGE
+	rm -rf "$(1)" || exit 1; \
+	mkdir -p "$(1)" || exit 1; \
+	$(HOSTCC) $(HOST_CFLAGS) $(HOST_DEFS) -Itest --coverage -c $(abspath $(COVERAGE_SRC)) \
+		-o "$(1)/$(COVERAGE_OBJ_NAME)" || exit 1; \
+	$(HOSTCC) --coverage "$(1)/$(COVERAGE_OBJ_NAME)" \
+		-o "$(1)/$(COVERAGE_BIN_NAME)" || exit 1; \
+	"$(1)/$(COVERAGE_BIN_NAME)" >/dev/null || exit 1; \
+	if [ ! -f "$(1)/$(COVERAGE_DATA_NAME)" ] || \
+	   [ ! -s "$(1)/$(COVERAGE_DATA_NAME)" ]; then \
+		echo "FAIL: coverage run did not produce fresh profile data in $(1)"; exit 1; \
+	fi
+endef
 
 # Human-readable coverage report of the golden model (line + branch via gcov).
 # Use this when you want to SEE coverage; use coverage-check to ENFORCE it.
 coverage:
-	@mkdir -p $(COVERAGE_DIR)
-	$(HOSTCC) $(HOST_CFLAGS) $(HOST_DEFS) -Itest --coverage test/host/test_logic_host.c -o $(COVERAGE_DIR)/test_logic_host
-	cd $(COVERAGE_DIR) && ./test_logic_host
-	cd $(COVERAGE_DIR) && gcov -b test_logic_host.c 2>/dev/null || true
-	@echo "Coverage report: $(COVERAGE_DIR)/test_logic_host.c.gcov"
-	@echo "For HTML report: lcov --capture -d $(COVERAGE_DIR) -o $(COVERAGE_DIR)/coverage.info && genhtml $(COVERAGE_DIR)/coverage.info -o $(COVERAGE_DIR)/html"
+	@$(call RUN_GOLDEN_MODEL_COVERAGE,$(COVERAGE_REPORT_DIR))
+	@out=`cd "$(COVERAGE_REPORT_DIR)" && $(GCOV) -b -o . $(COVERAGE_OBJ_NAME) 2>&1` \
+		|| { printf '%s\n' "$$out"; echo "FAIL: gcov could not generate golden-model coverage"; exit 1; }; \
+	if [ ! -f "$(COVERAGE_REPORT_DIR)/$(COVERAGE_ANNOTATION)" ] || \
+	   [ ! -s "$(COVERAGE_REPORT_DIR)/$(COVERAGE_ANNOTATION)" ]; then \
+		echo "FAIL: gcov reported success but did not produce $(COVERAGE_ANNOTATION)"; \
+		printf '%s\n' "$$out"; exit 1; \
+	fi; \
+	printf '%s\n' "$$out"
+	@echo "Coverage report: $(COVERAGE_REPORT_DIR)/$(COVERAGE_ANNOTATION)"
+	@echo "For HTML report: lcov --capture -d $(COVERAGE_REPORT_DIR) -o $(COVERAGE_DIR)/coverage.info && genhtml $(COVERAGE_DIR)/coverage.info -o $(COVERAGE_DIR)/html"
 
 # Coverage GATE (wired into `make test`): build the model with coverage, run it,
 # and FAIL the build if golden-model line coverage drops below COVERAGE_MIN.
 coverage-check:
-	@mkdir -p $(COVERAGE_DIR)
-	@$(HOSTCC) $(HOST_CFLAGS) $(HOST_DEFS) -Itest --coverage \
-		test/host/test_logic_host.c -o $(COVERAGE_DIR)/test_logic_host_cov
-	@cd $(COVERAGE_DIR) && ./test_logic_host_cov >/dev/null
-	@cd $(COVERAGE_DIR) && gcov test_logic_host_cov-test_logic_host.c >/dev/null 2>&1 \
-		|| gcov test_logic_host.c >/dev/null 2>&1 || true
-	@pct=$$(cd $(COVERAGE_DIR) && gcov test_logic_host_cov-test_logic_host.c 2>/dev/null \
-		| awk -F'[:%]' '/Lines executed/ {print $$2; exit}'); \
-	if [ -z "$$pct" ]; then \
-		pct=$$(cd $(COVERAGE_DIR) && gcov -o . test_logic_host_cov 2>/dev/null \
-			| awk -F'[:%]' '/Lines executed/ {print $$2; exit}'); \
-	fi; \
+	@mkdir -p "$(COVERAGE_DIR)" || exit 1; \
+	work=`mktemp -d "$(COVERAGE_DIR)/check.XXXXXX"` || exit 1; \
+	trap 'rm -rf "$$work"' EXIT HUP INT TERM; \
+	$(call RUN_GOLDEN_MODEL_COVERAGE,$$work); \
+	out=`cd "$$work" && $(GCOV) -o . $(COVERAGE_OBJ_NAME) 2>&1` \
+		|| { printf '%s\n' "$$out"; echo "FAIL: gcov could not generate golden-model coverage"; exit 1; }; \
+	pct=`printf '%s\n' "$$out" | awk -F'[:%]' '/Lines executed/{print $$2; exit}'`; \
 	echo "golden-model line coverage: $${pct:-unknown}% (floor $(COVERAGE_MIN)%)"; \
-	if [ -z "$$pct" ]; then \
-		echo "FAIL: could not determine coverage (gcov output parse failed)."; \
-		echo "      Unknown coverage is not a passing result -- refusing to gate on it."; \
-		echo "      (For a non-gating best-effort report, use 'make coverage'.)"; \
-		exit 1; \
-	else \
-		awk -v p="$$pct" -v m="$(COVERAGE_MIN)" 'BEGIN { exit !(p+0 >= m+0) }' \
-			|| { echo "FAIL: coverage $$pct% below floor $(COVERAGE_MIN)%"; exit 1; }; \
-	fi
+	if ! printf '%s\n' "$$pct" | grep -Eq '^[0-9]+([.][0-9]+)?$$'; then \
+		echo "FAIL: gcov line coverage is missing or malformed:"; \
+		printf '%s\n' "$$out"; exit 1; \
+	fi; \
+	if [ ! -f "$$work/$(COVERAGE_ANNOTATION)" ] || \
+	   [ ! -s "$$work/$(COVERAGE_ANNOTATION)" ]; then \
+		echo "FAIL: gcov reported success but did not produce a fresh $(COVERAGE_ANNOTATION)"; \
+		printf '%s\n' "$$out"; exit 1; \
+	fi; \
+	if ! printf '%s\n' "$(COVERAGE_MIN)" | grep -Eq '^[0-9]+([.][0-9]+)?$$'; then \
+		echo "FAIL: COVERAGE_MIN is malformed: $(COVERAGE_MIN)"; exit 1; \
+	fi; \
+	awk -v p="$$pct" -v m="$(COVERAGE_MIN)" 'BEGIN{exit !(p>=0 && p<=100 && m>=0 && m<=100)}' \
+		|| { echo "FAIL: coverage percentage or floor is outside 0..100"; exit 1; }; \
+	awk -v p="$$pct" -v m="$(COVERAGE_MIN)" 'BEGIN{exit !(p>=m)}' \
+		|| { echo "FAIL: coverage $$pct% below floor $(COVERAGE_MIN)%"; exit 1; }
 
 # Remove coverage artifacts (the coverage/ dir and any stray gcov data files).
 coverage-clean:
