@@ -135,6 +135,12 @@ copy_tree() {
     mkdir -p "$dst/src" "$dst/test"
     cp "$PROJ_DIR"/src/*.c "$PROJ_DIR"/src/*.h "$dst/src/"
     cp "$PROJ_DIR/Makefile" "$dst/"
+    # The Makefile's build/validate recipes invoke helper scripts under
+    # scripts/ -- notably IHEX_VALIDATOR (scripts/validate-ihex.sh), which
+    # `make pic` and the .hex rules REQUIRE and fail closed without. Mirror the
+    # whole dir so a sandbox build behaves exactly like the real tree; -a
+    # preserves the executable bit the validator-present check relies on.
+    cp -a "$PROJ_DIR/scripts" "$dst/"
     # Shared shims/config live at the test root; the test programs themselves
     # live in per-substrate subdirectories (host/ formal/ avr/ pic/). Recreate
     # that tree so the Makefile's test/<sub>/test_*.c paths resolve in the
