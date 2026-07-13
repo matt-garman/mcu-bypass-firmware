@@ -16,9 +16,13 @@ test/
   misra_suppressions.txt    shared: documented per-file MISRA deviations
   run_mutation_tests.sh     shared: mutation-testing driver (make test-mutation)
   soak_timing_config.h      shared: native soak timing bounds
+  check_flash_budget.sh     shared: exact flash-budget checker
   test_attiny202_build.sh   shared: fail-closed AVR-XT build checks
+  test_flash_budget.sh      shared: fail-closed flash measurement checks
   test_release_images.sh    shared: exact release artifact verification
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
+  test_stack_bound.sh       shared: fail-closed stack evidence checks
+  test_workload_rebuild.sh  shared: FAST/FULL/custom rebuild checks
 
   host/    MCU-independent golden-model tests, compiled and run natively.
            test_logic_host.c
@@ -47,9 +51,10 @@ test/
 ```
 
 Build artifacts (compiled binaries, `*.bc`) are written next to their sources in
-each subdirectory and are git-ignored; see `.gitignore`. The `-fstack-usage`
-`stack_*` files, the KLEE output directories, and `.toolchain.sig` are produced
-at the `test/` root.
+each subdirectory and are git-ignored; see `.gitignore`. KLEE output directories
+and `.toolchain.sig` are produced at the `test/` root. The `-fstack-usage`
+`stack_*` evidence uses a private temporary directory and is removed after each
+gate run.
 
 
 ## PIC10F322 target validation layers

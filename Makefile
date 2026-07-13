@@ -197,11 +197,23 @@ SANITIZE    ?= -fsanitize=undefined,address -fno-sanitize-recover=all
 # The firmware's full-path runtime HWM is ~10 B; any individual frame above
 # this threshold signals unintended bloat (e.g. an accidental local array).
 STACK_MAX_FRAME ?= 32
+STACK_BUILD_DIR ?=
+override STACK_SOURCES := src/bypass_mcu_avr_classic.c src/bypass_pure.c \
+                          src/bypass_output_cd4053_simple.c \
+                          src/bypass_output_cd4053_with_mute.c \
+                          src/bypass_output_tq2_l2_5v_relay.c
 
 # ATtiny13a flash-budget ceiling for test-flash-budget (percentage of 1 KB).
 # Firmware is ~46% today; a future accidental bloat passes silently without
 # this gate.
 FLASH_T13_BUDGET ?= 90
+override FLASH_T13_MCU := attiny13a
+override FLASH_T13_BYTES := 1024
+override FLASH_T13_VARIANTS := cd4053 mute relay
+override FLASH_T13_UNKNOWN := $(filter-out $(FLASH_T13_VARIANTS),$(VARIANTS))
+override FLASH_T13_ELFS := $(AVR_BUILD_DIR)/bypass_cd4053.elf \
+                          $(AVR_BUILD_DIR)/bypass_mute.elf \
+                          $(AVR_BUILD_DIR)/bypass_relay.elf
 
 # Missing-tool policy for the optional gates (PIC/XC8, gpsim, cppcheck, python3,
 # the ATtiny_DFP / yasimavr venv, ...). By default a missing tool prints its
@@ -431,9 +443,10 @@ FORCE:
         test test-fast test-long stress \
         test-host test-sim test-sim-secondary \
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
-        test-attiny202-build test-release-images test-soak-timing \
+        test-attiny202-build test-release-images test-soak-timing test-workload-rebuild \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
-        test-stack-bound test-flash-budget test-soak \
+        test-stack-bound test-stack-bound-regression test-flash-budget \
+        test-flash-budget-regression test-soak \
         analyze analyze-tidy analyze-cppcheck analyze-deep \
         trace coverage coverage-check coverage-clean
 
@@ -1696,7 +1709,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1704,10 +1717,11 @@ test-fast: test
 
 # FULL exhaustive workload: same targets as `test`, but the fuzz/stress tests
 # are rebuilt with their large in-source default durations (FULL_*_DEFS adds no
-# overrides). Use before tagging a release or signing off for hardware.
+# overrides). Workload-dependent binaries have a FORCE prerequisite, so this
+# does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing coverage-check
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -1742,9 +1756,13 @@ test-release-images:
 test-soak-timing:
 	HOSTCC="$(HOSTCC)" HOSTCXX="$(PIC_SOAK_CXX)" ./test/test_soak_timing.sh
 
+# Isolated fake-compiler proof that workload changes always rebuild host/sim bins.
+test-workload-rebuild:
+	./test/test_workload_rebuild.sh
+
 # Build rule for the golden model. Constants come from bypass_config.h (via the
 # host shim) so the model can never drift from the firmware thresholds.
-test/host/test_logic_host: test/host/test_logic_host.c test/bypass_config_host.h src/bypass_config.h
+test/host/test_logic_host: test/host/test_logic_host.c test/bypass_config_host.h src/bypass_config.h FORCE
 	$(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) $(HOST_DEFS) -Itest $< -o $@
 
 # Exhaustive small-model state-space verification: breadth-first search over the
@@ -1872,57 +1890,112 @@ test/avr/test_fuses: test/avr/test_fuses.c Makefile
 # with a compile-time structural upper bound that does not depend on exercising
 # the deepest call path.  Override: make test-stack-bound STACK_MAX_FRAME=16
 test-stack-bound:
-	@echo "=== -fstack-usage static bound (limit: $(STACK_MAX_FRAME) B/frame) ==="
-	@fail=0; \
-	for f in $(FW_SOURCES); do \
+	@stack_dir="$(STACK_BUILD_DIR)"; remove_dir=0; \
+	if [ -z "$$stack_dir" ]; then \
+		stack_dir=$$(mktemp -d "$${TMPDIR:-/tmp}/mcu-stack-bound.XXXXXX") \
+			|| { echo "FAIL: could not create private stack-evidence directory"; exit 1; }; \
+		remove_dir=1; \
+	elif ! mkdir -p "$$stack_dir"; then \
+		echo "FAIL: could not create stack-evidence directory $$stack_dir"; exit 1; \
+	fi; \
+	cleanup_stack_bound() { \
+		rc=$$?; \
+		rm -f "$$stack_dir"/stack_*.o "$$stack_dir"/stack_*.su || rc=1; \
+		if [ "$$remove_dir" -eq 1 ]; then rmdir "$$stack_dir" || rc=1; fi; \
+		trap - 0; exit $$rc; \
+	}; \
+	trap cleanup_stack_bound 0; \
+	if ! rm -f "$$stack_dir"/stack_*.o "$$stack_dir"/stack_*.su; then \
+		echo "FAIL: could not remove stale stack evidence"; exit 1; \
+	fi; \
+	if ! awk -v max="$(STACK_MAX_FRAME)" 'BEGIN {exit !(max ~ /^[0-9]+$$/ && max ~ /[1-9]/)}'; then \
+		echo "FAIL: STACK_MAX_FRAME must be a positive decimal integer"; exit 2; \
+	fi; \
+	echo "=== -fstack-usage static bound (limit: $(STACK_MAX_FRAME) B/frame) ==="; \
+	expected=0; \
+	for f in $(STACK_SOURCES); do \
 		case $$f in \
 			*cd4053_with_mute*) m=CD4053_WITH_MUTE ;; \
 			*tq2_l2_5v_relay*)  m=TQ2_L2_5V_RELAY ;; \
-			*)                  m=$(macro_$(VARIANT)) ;; \
+			*)                  m=CD4053_SIMPLE ;; \
 		esac; \
-		$(CC) $(CFLAGS) -D$$m -fstack-usage \
-			-c $$f -o test/stack_$$(basename $$f .c)_$$m.o || fail=1; \
+		base=$$(basename "$$f" .c); \
+		obj="$$stack_dir/stack_$${base}_$${m}.o"; \
+		su="$${obj%.o}.su"; \
+		expected=$$((expected + 1)); \
+		if ! $(CC) $(CFLAGS) -D$$m -fstack-usage -c "$$f" -o "$$obj"; then \
+			echo "FAIL: compilation error during -fstack-usage build: $$f"; exit 1; \
+		fi; \
+		if [ ! -s "$$obj" ]; then \
+			echo "FAIL: compiler produced no stack-check object for $$f"; exit 1; \
+		fi; \
+		if [ ! -s "$$su" ]; then \
+			echo "FAIL: compiler produced no stack-usage report for $$f"; exit 1; \
+		fi; \
 	done; \
-	if [ "$$fail" -ne 0 ]; then \
-		echo "FAIL: compilation error(s) during -fstack-usage build"; \
-		rm -f test/stack_*.o test/stack_*.su; \
-		exit 1; \
+	set -- "$$stack_dir"/stack_*.o; \
+	actual_obj=$$#; [ -e "$$1" ] || actual_obj=0; \
+	if [ "$$actual_obj" -ne "$$expected" ]; then \
+		echo "FAIL: expected $$expected stack-check objects, found $$actual_obj"; exit 1; \
+	fi; \
+	set -- "$$stack_dir"/stack_*.su; \
+	actual_su=$$#; [ -e "$$1" ] || actual_su=0; \
+	if [ "$$actual_su" -ne "$$expected" ]; then \
+		echo "FAIL: expected $$expected stack-usage reports, found $$actual_su"; exit 1; \
 	fi; \
 	echo "Per-function stack frames:"; \
-	cat test/stack_*.su; \
-	bad=$$(awk -F'\t' -v max=$(STACK_MAX_FRAME) '$$2+0 > max { print }' test/stack_*.su); \
-	if [ -n "$$bad" ]; then \
-		echo "FAIL: frame(s) exceed $(STACK_MAX_FRAME) B:"; \
-		echo "$$bad"; \
-		fail=1; \
-	else \
-		echo "OK: all frames <= $(STACK_MAX_FRAME) B"; \
+	if ! cat "$$@"; then echo "FAIL: could not read stack-usage reports"; exit 1; fi; \
+	if ! awk -F'\t' -v max="$(STACK_MAX_FRAME)" ' \
+		function decimal_gt(a, b) { \
+			sub(/^0+/, "", a); sub(/^0+/, "", b); \
+			if (a == "") a = "0"; if (b == "") b = "0"; \
+			if (length(a) != length(b)) return length(a) > length(b); \
+			return ("x" a) > ("x" b) \
+		} \
+		BEGIN { bad = 0; records = 0 } \
+		NF != 3 || $$1 == "" || $$2 !~ /^[0-9]+$$/ || $$3 != "static" { \
+			printf "invalid stack-usage record: %s\n", $$0 > "/dev/stderr"; bad = 1; next \
+		} \
+		{ records++; if (decimal_gt($$2, max)) { \
+			printf "frame exceeds %s B: %s\n", max, $$0 > "/dev/stderr"; bad = 1 \
+		} } \
+		END { if (records == 0) { print "no stack-usage records" > "/dev/stderr"; bad = 1 } \
+			exit bad }' "$$@"; then \
+		echo "FAIL: invalid or oversized stack frame evidence"; exit 1; \
 	fi; \
-	rm -f test/stack_*.o test/stack_*.su; \
-	exit $$fail
+	echo "OK: $$actual_su fresh reports; all frames <= $(STACK_MAX_FRAME) B"
+
+# Fake-compiler regression checks for stale, missing, and malformed .su evidence.
+test-stack-bound-regression:
+	./test/test_stack_bound.sh
 
 # Flash-utilization budget assertion: run avr-size on every ATtiny13a variant
 # ELF and fail if flash (Program bytes) exceeds FLASH_T13_BUDGET% of 1024 B.
 # Firmware is ~46% today; a future accidental bloat would otherwise pass
 # silently.  Override: make test-flash-budget FLASH_T13_BUDGET=80
-test-flash-budget: $(ALL_ELF13)
-	@echo "=== flash-utilization budget (ATtiny13a: $(FLASH_T13_BUDGET)% of 1024 B) ==="
-	@limit=$$(( 1024 * $(FLASH_T13_BUDGET) / 100 )); \
-	fail=0; \
-	for elf in $(ALL_ELF13); do \
-		used=$$($(SIZE) --mcu=$(MCU) -C $$elf | awk '/^Program:/ {print $$2; exit}'); \
-		if [ -z "$$used" ]; then \
-			echo "WARN: could not read flash size from $$elf"; continue; \
-		fi; \
-		pct=$$(awk -v u="$$used" 'BEGIN {printf "%.1f", u*100/1024}'); \
-		if [ "$$used" -gt "$$limit" ]; then \
-			echo "FAIL: $$elf uses $$used B ($${pct}%) -- exceeds $$limit B ($(FLASH_T13_BUDGET)%)"; \
-			fail=1; \
-		else \
-			echo "OK:   $$elf uses $$used B ($${pct}%) of 1024 B"; \
-		fi; \
-	done; \
-	exit $$fail
+test-flash-budget:
+	@if [ "$(MCU)" != "$(FLASH_T13_MCU)" ] || [ "$(FW_BASE)" != "bypass" ] \
+			|| [ "$(AVR_FW)" != "$(AVR_BUILD_DIR)/bypass" ]; then \
+		echo "FAIL: test-flash-budget requires MCU=attiny13a, FW_BASE=bypass, and the canonical AVR_FW"; \
+		exit 2; \
+	fi; \
+	if [ "$(words $(strip $(VARIANTS)))" -ne 3 ] \
+			|| [ "$(words $(sort $(VARIANTS)))" -ne 3 ] \
+			|| [ "$(words $(FLASH_T13_UNKNOWN))" -ne 0 ]; then \
+		echo "FAIL: test-flash-budget requires the complete cd4053/mute/relay variant matrix"; \
+		exit 2; \
+	fi
+	@$(MAKE) --no-print-directory _test-flash-budget-measure
+
+.PHONY: _test-flash-budget-measure
+_test-flash-budget-measure: $(FLASH_T13_ELFS)
+	./test/check_flash_budget.sh "$(SIZE)" "$(FLASH_T13_MCU)" "$(FLASH_T13_BYTES)" \
+		"$(FLASH_T13_BUDGET)" 3 \
+		$(FLASH_T13_ELFS)
+
+# Fake-size regression checks for missing, malformed, and partial measurements.
+test-flash-budget-regression:
+	./test/test_flash_budget.sh
 
 # simavr integration tests: run the REAL compiled firmware .elf in the
 # instruction-accurate simulator, drive PB0, and assert LED + control-output
@@ -1940,12 +2013,12 @@ SIM_DEPS = test/avr/test_sim.c test/model_step.h test/bypass_config_host.h \
 
 # $(call VARIANT_SIM_T13,variant)
 define VARIANT_SIM_T13
-test/avr/test_sim_$(1): $$(SIM_DEPS) $(AVR_FW)_$(1).elf
+test/avr/test_sim_$(1): $$(SIM_DEPS) $(AVR_FW)_$(1).elf FORCE
 	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -Itest \
 		-DFW_PATH=\"$(AVR_FW)_$(1).elf\" \
 		test/avr/test_sim.c $$(PURE_HOST_SRC) -o $$@ $$(SIM_LIBS)
 
-test/avr/test_trace_$(1): $$(SIM_DEPS) $(AVR_FW)_$(1).elf
+test/avr/test_trace_$(1): $$(SIM_DEPS) $(AVR_FW)_$(1).elf FORCE
 	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -DTRACE -Itest \
 		-DFW_PATH=\"$(AVR_FW)_$(1).elf\" \
 		-DTRACE_VCD_PATH=\"$(AVR_BUILD_DIR)/bypass_trace.vcd\" \
@@ -1960,7 +2033,7 @@ $(foreach v,$(VARIANTS),$(eval $(call VARIANT_SIM_T13,$(v))))
 
 # $(call VARIANT_SIM_X5,variant,chip-number)
 define VARIANT_SIM_X5
-test/avr/test_sim_$(1)_t$(2): $$(SIM_DEPS) $(AVR_FW)_$(1)_t$(2).elf
+test/avr/test_sim_$(1)_t$(2): $$(SIM_DEPS) $(AVR_FW)_$(1)_t$(2).elf FORCE
 	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -Itest \
 		-DFW_PATH=\"$(AVR_FW)_$(1)_t$(2).elf\" \
 		-DMCU_NAME=\"$$(mmcu_$(2))\" \
@@ -1983,11 +2056,16 @@ $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(eval $(call VARIANT_SIM_X5,$(v),
 # test-sim-t<n>     : all variants on tinyx5 chip <n> (e.g. test-sim-t85)
 # test-sim-secondary: all variants on every tinyx5 chip
 # test-fault-inject : all variants x every tinyx5 chip
-test-sim: $(foreach v,$(VARIANTS),test-sim-$(v))
+# Two recursive phases enforce ordering even under parallel `make test`: finish
+# the validated ELF build first, then allow simulator targets to consume it.
+test-sim:
+	@$(MAKE) --no-print-directory test-flash-budget
+	@$(MAKE) --no-print-directory _test-sim-run SIM_DEFS="$(SIM_DEFS)"
+_test-sim-run: $(foreach v,$(VARIANTS),test-sim-$(v))
 $(foreach n,$(TINYX5),$(eval test-sim-t$(n): $(foreach v,$(VARIANTS),test-sim-$(v)-t$(n))))
 test-sim-secondary: $(foreach n,$(TINYX5),test-sim-t$(n))
 test-fault-inject: $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test-fault-inject-$(v)-t$(n)))
-.PHONY: test-sim test-sim-secondary test-fault-inject \
+.PHONY: test-sim _test-sim-run test-sim-secondary test-fault-inject \
         $(foreach n,$(TINYX5),test-sim-t$(n))
 
 # Mutation testing: inject deliberate faults into the PRODUCTION sources
@@ -2362,7 +2440,9 @@ help:
 	@echo "  test-cbmc       CBMC SAT/SMT proof of the real bypass_pure.c (if installed)"
 	@echo "  test-fuses      decode + verify the design fuse bytes (t13a + tinyx5)"
 	@echo "  test-stack-bound  -fstack-usage static frame bound (limit: STACK_MAX_FRAME=$(STACK_MAX_FRAME) B)"
-	@echo "  test-flash-budget flash-utilization gate: all t13a variants < FLASH_T13_BUDGET=$(FLASH_T13_BUDGET)% of 1 KB"
+	@echo "  test-stack-bound-regression  fail-closed stack-evidence checks"
+	@echo "  test-flash-budget  exact ATtiny13a gate (<= FLASH_T13_BUDGET=$(FLASH_T13_BUDGET)% of 1 KB)"
+	@echo "  test-flash-budget-regression  fail-closed flash-measurement checks"
 	@echo "  test-sim        real firmware in simavr, all variants (ATtiny13a)"
 	@echo "  test-sim-t85 / test-sim-t45  all variants on that tinyx5 chip"
 	@echo "  test-sim-secondary  all variants on every tinyx5 chip"
@@ -2372,6 +2452,7 @@ help:
 	@echo "  test-attiny202-build  fail-closed AVR-XT image-generation checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
+	@echo "  test-workload-rebuild  FAST/FULL/custom rebuild regression checks"
 	@echo "  test-soak       24-h soak test (standalone; SOAK_VARIANT, SOAK_CHIP, SOAK_DURATION_MS,"
 	@echo "                  SOAK_LIVENESS_INTERVAL_MS, SOAK_PROGRESS_INTERVAL_MS)"
 	@echo "  trace           emit $(AVR_BUILD_DIR)/bypass_trace.vcd for VARIANT (GTKWave)"
