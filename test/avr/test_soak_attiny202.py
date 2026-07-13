@@ -50,11 +50,14 @@ RELEASE_HOLD_MS = 40
 CHECK_CHUNK_MS = 1000
 
 
-def _env_ms(name, default):
-    try:
-        return max(0, int(os.environ.get(name, default)))
-    except ValueError:
-        return default
+def _env_ms(name, default, maximum):
+    raw = os.environ.get(name, str(default))
+    if not raw or any(ch < "0" or ch > "9" for ch in raw):
+        raise ValueError("%s must be a positive base-10 integer" % name)
+    value = int(raw)
+    if value < 1 or value > maximum:
+        raise ValueError("%s must be in [1, %d]" % (name, maximum))
+    return value
 
 
 class Soak:
@@ -160,12 +163,18 @@ class Soak:
 
 
 def main(argv):
+    try:
+        duration = _env_ms("ATTINY202_SOAK_DURATION_MS", 3600000,
+                           0xFFFFFFFE)                                  # 1 h
+        liveness = _env_ms("ATTINY202_SOAK_LIVENESS_INTERVAL_MS", 60000,
+                           0xFFFFFFFF)                                  # 60 s
+        progress = _env_ms("ATTINY202_SOAK_PROGRESS_INTERVAL_MS", 600000,
+                           0xFFFFFFFF)                                  # 10 min
+    except ValueError as exc:
+        sys.stderr.write("FATAL: %s\n" % exc)
+        return 2
+
     elf = S.resolve_elf(argv[1] if len(argv) > 1 else None)
-    duration = _env_ms("ATTINY202_SOAK_DURATION_MS", 3600000)          # 1 h
-    liveness = _env_ms("ATTINY202_SOAK_LIVENESS_INTERVAL_MS", 60000)   # 60 s
-    progress = _env_ms("ATTINY202_SOAK_PROGRESS_INTERVAL_MS", 600000)  # 10 min
-    liveness = max(1, liveness)
-    progress = max(1, progress)
 
     print("SOAK START: fw=%s  F_CPU=%d Hz  duration=%.2f h  liveness=%ds  progress=%ds"
           % (elf, S.F_CPU_HZ, duration / 3600000.0, liveness // 1000, progress // 1000))

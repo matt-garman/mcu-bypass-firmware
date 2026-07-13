@@ -88,6 +88,9 @@ static NullBuf g_nullbuf;
 #ifndef SOAK_PROGRESS_INTERVAL_MS
 #  define SOAK_PROGRESS_INTERVAL_MS 3600000u
 #endif
+
+#include "../soak_timing_config.h"
+
 // Worst-case blocking output actuation (ms). A relay coil pulse / CD4053 mute
 // runs as a busy __delay_ms() in hw_set_*_state(), which freezes the POLLED PIC
 // main loop: the loop stops spinning, TMR2IF merely latches once, and up to this
@@ -264,7 +267,8 @@ int main() {
     fflush(stdout);
 
     uint32_t rng = 0xDEADBEEFu;
-    uint32_t next_live = SOAK_LIVENESS_INTERVAL_MS, next_prog = SOAK_PROGRESS_INTERVAL_MS;
+    uint64_t next_live = SOAK_LIVENESS_INTERVAL_MS;
+    uint64_t next_prog = SOAK_PROGRESS_INTERVAL_MS;
     for (uint32_t t = 0; t < (uint32_t)SOAK_DURATION_MS; ++t) {
         footsw_set(((int)(xs(&rng) & 0xFFu)) < 128);
         soak_run_ms(1);

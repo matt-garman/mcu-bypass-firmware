@@ -82,6 +82,8 @@
 #  define SOAK_PROGRESS_INTERVAL_MS 3600000u
 #endif
 
+#include "../soak_timing_config.h"
+
 // ---- Variant-specific settle time ------------------------------------------
 // init() on the relay/mute variants performs one blocking coil/mute pulse
 // before enabling the timer.  SETTLE_MS must cover that delay plus a few
@@ -278,8 +280,8 @@ int main(void) {
     fflush(stdout);
 
     uint32_t rng             = 0xDEADBEEF;
-    uint32_t next_liveness_t = SOAK_LIVENESS_INTERVAL_MS;
-    uint32_t next_progress_t = SOAK_PROGRESS_INTERVAL_MS;
+    uint64_t next_liveness_t = SOAK_LIVENESS_INTERVAL_MS;
+    uint64_t next_progress_t = SOAK_PROGRESS_INTERVAL_MS;
 
     for (uint32_t t = 0; t < (uint32_t)SOAK_DURATION_MS; ++t) {
         // Drive one millisecond of random footswitch noise and run the sim.

@@ -46,7 +46,8 @@
 #     --dry-run                rehearse the whole pipeline with a SHORT soak
 #                              (does not produce a real release; output is
 #                              clearly marked and no git commands are emitted)
-#     --soak-duration-ms N     per-combo soak duration (default 86400000 = 24 h)
+#     --soak-duration-ms N     per-combo soak duration (default/minimum for a
+#                              real release: 24 h; dry runs may use less)
 #     --jobs N                 max concurrent soak combos (default: all of them)
 #     --output-dir DIR         where to stage (default release/<version>)
 #     -h | --help              this help
@@ -75,7 +76,9 @@ die()     { printf '%sFATAL%s %s\n' "$RED" "$RST" "$*" >&2; exit 1; }
 VERSION=""
 DRY_RUN=0
 ALLOW_DIRTY=0
-SOAK_DURATION_MS=86400000          # 24 h
+MIN_RELEASE_SOAK_MS=86400000
+MAX_SOAK_DURATION_MS=4294967294    # uint32_t loop bound; preserve t + 1
+SOAK_DURATION_MS=$MIN_RELEASE_SOAK_MS
 JOBS=0                             # 0 => "all combos"
 OUTPUT_DIR=""
 
@@ -98,11 +101,25 @@ done
 [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]] \
 	|| die "version '$VERSION' is not vX.Y.Z (optionally -suffix)"
 
+# The C/C++ soak loops use uint32_t millisecond counters. Validate before any
+# preconditions or builds so a bad value cannot wrap to a short/empty passing
+# run. Canonical decimal syntax also keeps later shell arithmetic unambiguous.
+[[ "$SOAK_DURATION_MS" =~ ^[1-9][0-9]*$ ]] \
+	|| die "--soak-duration-ms must be a positive base-10 integer"
+if [ "${#SOAK_DURATION_MS}" -gt "${#MAX_SOAK_DURATION_MS}" ] \
+		|| { [ "${#SOAK_DURATION_MS}" -eq "${#MAX_SOAK_DURATION_MS}" ] \
+			&& [[ "$SOAK_DURATION_MS" > "$MAX_SOAK_DURATION_MS" ]]; }; then
+	die "--soak-duration-ms must not exceed $MAX_SOAK_DURATION_MS"
+fi
+if [ "$DRY_RUN" -eq 0 ] && [ "$SOAK_DURATION_MS" -lt "$MIN_RELEASE_SOAK_MS" ]; then
+	die "real releases require --soak-duration-ms >= $MIN_RELEASE_SOAK_MS (24 h); use --dry-run for a short rehearsal"
+fi
+
 if [ "$DRY_RUN" -eq 1 ]; then
 	# A dry run is an explicit rehearsal: shorten the soak so the whole pipeline
 	# finishes quickly, and tolerate an uncommitted tree (you typically rehearse
 	# BEFORE committing the release scaffolding itself).
-	[ "$SOAK_DURATION_MS" = "86400000" ] && SOAK_DURATION_MS=60000
+	[ "$SOAK_DURATION_MS" = "$MIN_RELEASE_SOAK_MS" ] && SOAK_DURATION_MS=60000
 	ALLOW_DIRTY=1
 fi
 

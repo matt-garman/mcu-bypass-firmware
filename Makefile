@@ -428,7 +428,7 @@ FORCE:
 .PHONY: all all13 clean size readfuses fuses flash program help \
         test test-fast test-long stress \
         test-host test-sim test-sim-secondary \
-        test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
+        test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation test-soak-timing \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
         test-stack-bound test-flash-budget test-soak \
         analyze analyze-tidy analyze-cppcheck analyze-deep \
@@ -822,6 +822,7 @@ PIC_SOAK_DURATION_MS ?= 3600000
 PIC_SOAK_LIVENESS_INTERVAL_MS ?= 60000
 PIC_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
 PIC_SOAK_SRC = test/pic/test_soak_pic.cc
+PIC_SOAK_DEPS = $(PIC_SOAK_SRC) test/soak_timing_config.h
 PIC_SOAK_BIN = test/pic/test_soak_pic
 PIC_SOAK_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_SOAK_VARIANT)_$(PIC_TAG).hex
 
@@ -862,7 +863,7 @@ PIC_SOAK_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.
 # script runs first; like the AVR convenience rule it will not rebuild on a
 # PIC_SOAK_DURATION_MS change alone, so the release script always `make clean`s
 # before a fresh build.
-$(PIC_SOAK_BIN): $(PIC_SOAK_SRC)
+$(PIC_SOAK_BIN): $(PIC_SOAK_DEPS)
 	$(PIC_SOAK_COMPILE)
 
 .PHONY: pic-test-soak
@@ -1602,7 +1603,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-sim test-sim-secondary coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-sim test-sim-secondary test-soak-timing coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1613,7 +1614,7 @@ test-fast: test
 # overrides). Use before tagging a release or signing off for hardware.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-mutation test-sim test-sim-secondary coverage-check
+test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-mutation test-sim test-sim-secondary test-soak-timing coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -1634,6 +1635,11 @@ clean-tests:
 # firmware matches.)
 test-host: test/host/test_logic_host
 	./test/host/test_logic_host
+
+# Fast host-only boundary checks for every soak timing input path: the shared
+# C/C++ compile-time contract, ATtiny202 environment parser, and release CLI.
+test-soak-timing:
+	HOSTCC="$(HOSTCC)" HOSTCXX="$(PIC_SOAK_CXX)" ./test/test_soak_timing.sh
 
 # Build rule for the golden model. Constants come from bypass_config.h (via the
 # host shim) so the model can never drift from the firmware thresholds.
@@ -1913,7 +1919,7 @@ SOAK_CHIP        ?= 85
 SOAK_DURATION_MS ?= 86400000
 SOAK_BIN  = test/avr/test_soak_$(SOAK_VARIANT)_t$(SOAK_CHIP)
 SOAK_DEPS = test/avr/test_soak.c test/bypass_output_host.h test/bypass_config_host.h \
-            src/bypass_config.h $(FW_HEADERS)
+            test/soak_timing_config.h src/bypass_config.h $(FW_HEADERS)
 
 # The SOAK_* variables (-DSOAK_DURATION_MS, -DSOAK_LIVENESS_INTERVAL_MS, etc.)
 # are baked into the binary at compile time. To ensure command-line overrides
@@ -2262,6 +2268,7 @@ help:
 	@echo "  test-sim-<v>[-t<n>]  single variant, e.g. test-sim-relay / test-sim-relay-t45"
 	@echo "  test-fault-inject  corrupt state, verify WDT recovery (all variants x tinyx5)"
 	@echo "  test-mutation   inject firmware faults, verify the suite kills them"
+	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-soak       24-h soak test (standalone; SOAK_VARIANT, SOAK_CHIP, SOAK_DURATION_MS,"
 	@echo "                  SOAK_LIVENESS_INTERVAL_MS, SOAK_PROGRESS_INTERVAL_MS)"
 	@echo "  trace           emit $(AVR_BUILD_DIR)/bypass_trace.vcd for VARIANT (GTKWave)"
