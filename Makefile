@@ -535,6 +535,7 @@ PIC_CHIP  ?= 10F322
 PIC_TAG   ?= pic10f322
 PIC_XTAL  ?= 2000000UL
 PIC_BUILD_DIR ?= build_pic
+PIC_HEXES = $(foreach v,$(VARIANTS),$(PIC_BUILD_DIR)/$(FW_BASE)_$(v)_$(PIC_TAG).hex)
 # PIC10F322 device budget: 512 words flash / 64 B RAM.
 PIC_FLASH_WORDS ?= 512
 # gpsim simulator + processor name for the register-level functional test.
@@ -610,6 +611,7 @@ PIC_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 --platform=pic8-enh
 # can run with its cwd in PIC_BUILD_DIR.
 .PHONY: pic
 pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v)))
+	@rm -f $(PIC_HEXES)
 	@if [ ! -x "$(PIC_CC)" ] && ! command -v $(PIC_CC) >/dev/null 2>&1; then \
 		echo "XC8 not found at $(PIC_CC); skipping PIC build (override with PIC_CC=...)"; \
 		$(SKIP); \
@@ -623,21 +625,30 @@ pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v)))
 			*relay) m=TQ2_L2_5V_RELAY;  drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
 			*)      m=CD4053_SIMPLE;    drv=src/bypass_output_cd4053_simple.c ;; \
 		esac; \
+		name=$(FW_BASE)_$${v}_$(PIC_TAG).hex; \
+		hex=$(PIC_BUILD_DIR)/$$name; \
+		if ! rm -f "$$hex"; then \
+			echo "FAIL: could not remove stale $$hex before compiling"; fail=1; continue; \
+		fi; \
 		out=`cd $(PIC_BUILD_DIR) && $(PIC_CC) $(PIC_CFLAGS) -D$$m \
 			$(addprefix $(CURDIR)/,$(PIC_CORE_SRC)) $(CURDIR)/$$drv \
-			-o $(FW_BASE)_$${v}_$(PIC_TAG).hex 2>&1` \
-			|| { printf '%s\n' "$$out"; echo "FAIL: variant $$v did not compile for PIC10F322"; fail=1; continue; }; \
+			-o $$name 2>&1` \
+			|| { printf '%s\n' "$$out"; echo "FAIL: variant $$v did not compile for PIC10F322"; rm -f "$$hex"; fail=1; continue; }; \
+		if [ ! -s "$$hex" ]; then \
+			echo "FAIL: XC8 reported success but did not produce a nonempty $$hex"; \
+			printf '%s\n' "$$out"; fail=1; continue; \
+		fi; \
 		dec=`printf '%s\n' "$$out" | grep -E 'Program space' \
 			| grep -oE '\( *[0-9]+ *\)' | head -1 | tr -d '() '`; \
 		if [ -z "$$dec" ]; then \
-			echo "WARN: $$v: could not parse program-word count from XC8 output:"; \
-			printf '%s\n' "$$out"; continue; \
+			echo "FAIL: $$v: could not parse program-word count from XC8 output:"; \
+			printf '%s\n' "$$out"; rm -f "$$hex"; fail=1; continue; \
 		fi; \
 		pct=`awk -v u=$$dec -v t=$(PIC_FLASH_WORDS) 'BEGIN{printf "%.1f", u*100/t}'`; \
 		if [ $$dec -gt $(PIC_FLASH_WORDS) ]; then \
-			echo "FAIL: $$v uses $$dec words ($${pct}%) -- exceeds $(PIC_FLASH_WORDS)"; fail=1; \
+			echo "FAIL: $$v uses $$dec words ($${pct}%) -- exceeds $(PIC_FLASH_WORDS)"; rm -f "$$hex"; fail=1; \
 		else \
-			echo "OK:   $$v -> $(PIC_BUILD_DIR)/$(FW_BASE)_$${v}_$(PIC_TAG).hex : $$dec words ($${pct}%) of $(PIC_FLASH_WORDS)"; \
+			echo "OK:   $$v -> $$hex : $$dec words ($${pct}%) of $(PIC_FLASH_WORDS)"; \
 		fi; \
 	done; \
 	exit $$fail
