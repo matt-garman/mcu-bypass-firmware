@@ -18,6 +18,7 @@ test/
   soak_timing_config.h      shared: native soak timing bounds
   check_flash_budget.sh     shared: exact flash-budget checker
   test_attiny202_build.sh   shared: fail-closed AVR-XT build checks
+  test_avr_build_rebuild.sh shared: classic AVR rebuild/partial-output checks
   test_flash_budget.sh      shared: fail-closed flash measurement checks
   test_release_images.sh    shared: exact release artifact verification
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
@@ -52,9 +53,8 @@ test/
 
 Build artifacts (compiled binaries, `*.bc`) are written next to their sources in
 each subdirectory and are git-ignored; see `.gitignore`. KLEE output directories
-and `.toolchain.sig` are produced at the `test/` root. The `-fstack-usage`
-`stack_*` evidence uses a private temporary directory and is removed after each
-gate run.
+are produced at the `test/` root. The `-fstack-usage` `stack_*` evidence uses a
+private temporary directory and is removed after each gate run.
 
 
 ## PIC10F322 target validation layers

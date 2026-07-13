@@ -6,10 +6,9 @@ requirements.txt: a human-readable record of what the project was
 validated against, so a new developer (or CI system) can reproduce
 the exact environment.
 
-The Makefile writes a hash of the compiler version strings into
-test/.toolchain.sig at build time; any change to the installed toolchain
-triggers a full firmware rebuild.  If you update a tool, re-run `make clean &&
-make test` and commit the new signature.
+Classic AVR firmware targets rebuild whenever they are requested, ensuring the
+current compiler, flags, and source tree are always consumed.  If you update a
+tool, re-run `make clean && make test` before relying on its output.
 
 == Development platform
 

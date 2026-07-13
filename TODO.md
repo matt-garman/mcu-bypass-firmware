@@ -216,9 +216,9 @@ different AVR compiler (newer avr-gcc, or clang targeting AVR if available)
 could optimise differently, potentially altering register allocation, ISR
 prologue/epilogue timing, or the volatile-access ordering that the sanity checks
 rely on. Building the firmware with an alternative compiler and running the full
-simavr suite would catch compiler-specific behavioural changes. The Makefile's
-existing `TOOLCHAIN_STAMP` already triggers a rebuild on compiler change, but
-does not *compare* the behavioural results between compiler versions; adding a
+simavr suite would catch compiler-specific behavioural changes. Classic firmware
+targets now rebuild whenever requested, but the suite does not *compare* the
+behavioural results between compiler versions; adding a
 `test-cross-compiler` target that builds with `CC=avr-gcc-12` (if installed)
 and re-runs `test-sim` would close this gap.
 

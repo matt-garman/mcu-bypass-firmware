@@ -378,7 +378,7 @@ jobs:
         run: make ${{ matrix.build }}
 
       - name: Resource utilization (flash / RAM)
-        run: make ${{ matrix.size }} | tee size-${{ matrix.mcu }}.txt
+        run: make ${{ matrix.size }} AVR_REBUILD_PREREQ= | tee size-${{ matrix.mcu }}.txt
 
       - name: Upload firmware images
         uses: actions/upload-artifact@v4

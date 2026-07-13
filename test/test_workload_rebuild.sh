@@ -9,7 +9,7 @@ tools="$work/tools"
 log="$work/compiler.log"
 checks=0
 unset HOST_DEFS SIM_DEFS MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES SIZE
-unset AVR_BUILD_DIR AVR_FW FW_BASE TOOLCHAIN_STAMP TOOLCHAIN_SIG VARIANTS MCU
+unset AVR_BUILD_DIR AVR_FW FW_BASE AVR_REBUILD_PREREQ VARIANTS MCU
 mkdir -p "$repo/test/host" "$repo/test/avr" "$repo/src" \
 	"$repo/build_avr_classic" "$tools"
 cp "$ROOT/Makefile" "$repo/Makefile"
@@ -37,7 +37,14 @@ cat > "$tools/size" <<'EOF'
 set -euo pipefail
 printf 'Program: 512 bytes (50.0%% Full)\n'
 EOF
-chmod 750 "$tools/size" "$repo/test/check_flash_budget.sh"
+
+cat > "$tools/readelf" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '  Machine: Atmel AVR 8-bit microcontroller\n'
+printf '  Flags: 0x19, avr:25, link-relax\n'
+EOF
+chmod 750 "$tools/size" "$tools/readelf" "$repo/test/check_flash_budget.sh"
 
 files=(
 	test/host/test_logic_host.c test/avr/test_sim.c test/model_step.h
@@ -55,7 +62,6 @@ for file in "${files[@]}"; do
 	mkdir -p "$repo/${file%/*}"
 	: > "$repo/$file"
 done
-printf 'test\n' > "$repo/test/.toolchain.sig"
 for image in bypass_cd4053.elf bypass_mute.elf bypass_relay.elf \
 	bypass_cd4053_t85.elf; do
 	printf 'firmware ELF\n' > "$repo/build_avr_classic/$image"
@@ -65,8 +71,7 @@ done
 run_make() {
 	FAKE_COMPILER_LOG="$log" make --no-print-directory -C "$repo" "$@" \
 		CC="$tools/cc" HOSTCC="$tools/cc" SANITIZE= \
-		SIZE="$tools/size" SIM_LIBS= TOOLCHAIN_SIG=test \
-		TOOLCHAIN_STAMP=test/.toolchain.sig AVR_BUILD_DIR=build_avr_classic \
+		SIZE="$tools/size" READELF="$tools/readelf" SIM_LIBS= AVR_BUILD_DIR=build_avr_classic \
 		AVR_FW=build_avr_classic/bypass FW_BASE=bypass MCU=attiny13a \
 		VARIANTS="cd4053 mute relay"
 }
@@ -121,6 +126,25 @@ if grep -q -- '-DSIM_RANDOM_NOISE_DURATION_MS=' "$log"; then
 	printf 'FAIL: recursive FULL simulator phase fell back to FAST definitions\n' >&2
 	exit 1
 fi
+checks=$((checks + 1))
+
+: > "$log"
+(
+	export MAKEFLAGS=-B
+	run_make test-sim SIM_DEFS=-DFORCED_SIM=1
+) >/dev/null
+[[ "$(compile_count build_avr_classic/bypass_cd4053.elf)" -eq 1 \
+	&& "$(compile_count build_avr_classic/bypass_mute.elf)" -eq 1 \
+	&& "$(compile_count build_avr_classic/bypass_relay.elf)" -eq 1 ]] \
+	|| { printf 'FAIL: inherited -B rebuilt ELFs after flash-budget validation\n' >&2; exit 1; }
+checks=$((checks + 1))
+
+: > "$log"
+run_make -j2 test-sim test-flash-budget SIM_DEFS=-DCOALESCED_SIM=1 >/dev/null
+[[ "$(compile_count build_avr_classic/bypass_cd4053.elf)" -eq 1 \
+	&& "$(compile_count build_avr_classic/bypass_mute.elf)" -eq 1 \
+	&& "$(compile_count build_avr_classic/bypass_relay.elf)" -eq 1 ]] \
+	|| { printf 'FAIL: parallel simulator and flash gates rebuilt shared ELFs more than once\n' >&2; exit 1; }
 checks=$((checks + 1))
 
 : > "$log"

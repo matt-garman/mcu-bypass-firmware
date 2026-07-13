@@ -10,7 +10,19 @@ images="$work/images"
 mkdir -p "$tools" "$images"
 checks=0
 unset FAKE_SIZE_MODE FAKE_SIZE_FAIL_NAME TEST_SIZE_COMMAND TEST_FLASH_BYTES TEST_BUDGET
-unset FLASH_T13_BUDGET MAKEFLAGS MFLAGS GNUMAKEFLAGS
+unset FLASH_T13_BUDGET AVR_REBUILD_PREREQ MAKEFLAGS MFLAGS GNUMAKEFLAGS
+
+cat > "$tools/cc" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = --version ]; then printf 'fake avr-gcc 1\n'; exit 0; fi
+out=
+while [ "$#" -gt 0 ]; do
+	if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi
+done
+[ -n "$out" ] || exit 0
+printf 'fresh firmware ELF\n' > "$out"
+EOF
 
 cat > "$tools/size" <<'EOF'
 #!/usr/bin/env bash
@@ -42,12 +54,18 @@ cat > "$tools/wrapper" <<'EOF'
 set -euo pipefail
 exec "$@"
 EOF
-chmod 750 "$tools/size" "$tools/wrapper"
+
+cat > "$tools/readelf" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '  Machine: Atmel AVR 8-bit microcontroller\n'
+printf '  Flags: 0x19, avr:25, link-relax\n'
+EOF
+chmod 750 "$tools/cc" "$tools/size" "$tools/wrapper" "$tools/readelf"
 
 reset_images() {
 	rm -rf "$images"
 	mkdir -p "$images"
-	printf 'test\n' > "$work/toolchain.stamp"
 	for name in cd4053 mute relay; do printf 'ELF %s\n' "$name" > "$images/bypass_$name.elf"; done
 }
 
@@ -59,8 +77,8 @@ run_check() {
 
 run_make_gate() {
 	make --no-print-directory -C "$ROOT" test-flash-budget \
-		AVR_BUILD_DIR="$images" SIZE="$tools/size" \
-		TOOLCHAIN_STAMP="$work/toolchain.stamp" TOOLCHAIN_SIG=test \
+		AVR_BUILD_DIR="$images" CC="$tools/cc" HOSTCC="$tools/cc" SIZE="$tools/size" \
+		READELF="$tools/readelf" \
 		FLASH_T13_BUDGET=90 VARIANTS="cd4053 mute relay" \
 		MCU=attiny13a FW_BASE=bypass "$@"
 }
