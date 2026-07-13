@@ -784,12 +784,20 @@ pic-test-gpsim: pic
 	done; \
 	exit $$fail
 
+# Host-gcov gate over the real PIC shipping source set: the PIC shell, shared
+# pure core, and all three output drivers. This complements the independent
+# golden-model percentage gate and the real-HEX gpsim/libgpsim behavior gates.
+.PHONY: pic-coverage-check-fw
+pic-coverage-check-fw:
+	@HOSTCC="$(HOSTCC)" GCOV="$(GCOV)" COVERAGE_DIR="$(abspath $(COVERAGE_DIR))" \
+		test/pic/fw_coverage/run_fw_coverage.sh
+
 # Aggregate: every PIC pre-hardware check (build+budget, CONFIG word, static
-# analysis, gpsim functional). Standalone -- NOT part of `make test`, which is
-# the AVR pre-hardware gate (XC8/gpsim may be absent in CI). Each sub-target
-# skips cleanly when its tool is missing.
+# analysis, shipping-source coverage, gpsim functional). Standalone -- NOT part
+# of `make test`, which is the AVR pre-hardware gate (XC8/gpsim may be absent in
+# CI). Each external-tool sub-target skips cleanly when its tool is missing.
 .PHONY: pic-test
-pic-test: pic-test-config pic-analyze pic-test-gpsim
+pic-test: pic-test-config pic-analyze pic-coverage-check-fw pic-test-gpsim
 	@echo "=== all PIC10F322 pre-hardware checks complete ==="
 
 # --- PIC long-duration soak test (libgpsim) ----------------------------------
@@ -2208,9 +2216,10 @@ help:
 	@echo "  size            print flash/RAM usage for every ATtiny13a variant"
 	@echo "  size85 / size45 print flash/RAM usage for every tinyx5 variant"
 	@echo "  pic             build all variants for PIC10F322 (XC8) + 512-word budget gate"
-	@echo "  pic-test        all PIC pre-hardware checks (CONFIG word + analyze + gpsim)"
+	@echo "  pic-test        all PIC pre-hardware checks (CONFIG + analysis + source coverage + gpsim)"
 	@echo "  pic-test-config build PIC HEX, then verify each CONFIG word vs design intent"
 	@echo "  pic-analyze     cppcheck + MISRA on the PIC shell (XC8/DFP headers; standalone)"
+	@echo "  pic-coverage-check-fw  exact host-gcov gate over PIC shell, core, and drivers"
 	@echo "  pic-test-gpsim  drive the footswitch in gpsim, assert PORTA/LATA toggle"
 	@echo "  pic-test-soak   libgpsim soak: WDT liveness + responsiveness (standalone; needs"
 	@echo "                  gpsim-dev+libglib2.0-dev; PIC_SOAK_VARIANT, PIC_SOAK_DURATION_MS)"

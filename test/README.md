@@ -29,7 +29,9 @@ test/
            test_soak.c          long-duration soak    (make test-soak)
            test_fuses.c         fuse-byte validation  (make test-fuses)
 
-  pic/     PIC10F322-specific tests (gpsim).
+  pic/     PIC10F322-specific host and gpsim tests.
+             fw_coverage/         real PIC source via host SFR mock + gcov
+                                                        (make pic-coverage-check-fw)
             test_config_pic.c    CONFIG-word check     (make pic-test-config)
             *.stc + run_gpsim_*  register-level gpsim  (make pic-test-gpsim)
             test_fault_pic.cc    libgpsim fault-inject (make pic-test-fault)
@@ -50,14 +52,16 @@ at the `test/` root.
 
 The PIC targets are intentionally outside the default AVR `make test` path: XC8,
 the PIC10-12Fxxx DFP, gpsim, and libgpsim may be absent on a normal AVR
-development machine. Individual PIC targets therefore skip cleanly when their
-tools are missing. CI/release use `STRICT_TOOLS=1` plus the fail-closed aggregate
-described below so a green gate means every PIC layer actually ran.
+development machine. Targets needing those external PIC tools may skip cleanly;
+the host source-coverage gate requires Bash, a host C compiler, and matching
+gcov. CI/release use `STRICT_TOOLS=1` plus the fail-closed aggregate described
+below so a green gate means every PIC layer actually ran.
 
 | layer | target | what it proves | substrate |
 |---|---|---|---|
 | CONFIG word | `pic-test-config` | The XC8-emitted CONFIG word matches the documented oscillator/WDT/BOR/MCLR/LVP design intent. | host parser over HEX |
 | Static analysis | `pic-analyze` | cppcheck + MISRA pass over the PIC shell with real XC8/DFP register headers. | host tools |
+| Shipping-source coverage | `pic-coverage-check-fw` | Every executable line in the real PIC shell, shared pure core, and all three output drivers is host-executed except the documented non-returning reset path. | host gcov with PIC SFR mock |
 | Register-level functional | `pic-test-gpsim` | Real HEX toggles on press, handles power-on-held switch, keeps settled LATA/PORTA expectations, and includes the mid-debounce `PRESS1_EARLY` tick-cadence check. | gpsim CLI |
 | Fault recovery | `pic-test-fault` | Runtime direction, configuration, pull-up, and `ctx_` corruptions produce the variant-appropriate WDT recovery response. | libgpsim |
 | HEX/model lock-step | `pic-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches the shared pure model after every completed main-loop iteration. | libgpsim |

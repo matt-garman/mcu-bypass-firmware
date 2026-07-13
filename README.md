@@ -72,19 +72,20 @@ make
 make program
 ```
 
-To build and validate the PIC10F322 port instead (requires the Microchip
-XC8 compiler + the PIC10-12Fxxx device pack, plus `gpsim` and `gpsim-dev`
-for the target-level simulator gates):
+To build and validate the PIC10F322 port instead requires a host C compiler,
+matching `gcov`, and Bash for source coverage, plus the Microchip XC8 compiler,
+PIC10-12Fxxx device pack, `gpsim`, and `gpsim-dev` for the target-level gates:
 
 ```
 make pic                         # build all variants + 512-word flash-budget gate
-make pic-test                    # CONFIG-word, MISRA, and gpsim register-level checks
+make pic-test                    # CONFIG, analysis, source coverage, and gpsim checks
 make pic-test-target-variants    # fail-closed libgpsim fault/lock-step/I/O gates
 ```
 
-These targets are independent of the AVR build. Individual PIC tests skip
-cleanly if their tools are not installed; the target aggregate is the
-authoritative gate and fails closed on any missing/skipped libgpsim layer.
+These targets are independent of the AVR build. External PIC tool targets skip
+cleanly if XC8/gpsim are not installed; host source coverage is mandatory when
+`pic-test` runs. The target aggregate is the authoritative simulator gate and
+fails closed on any missing/skipped libgpsim layer.
 
 To build and validate the ATtiny202 (AVR-XT) port (uses the open-source
 avr-gcc toolchain plus the fetched-on-demand Microchip device files and a
