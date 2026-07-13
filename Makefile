@@ -78,6 +78,7 @@
 # CC      : AVR cross-compiler
 # OBJCOPY : ELF -> Intel HEX
 # SIZE    : flash/RAM usage reporter
+# READELF : ELF architecture inspector
 # AVRDUDE : ISP flashing tool
 MCU      = attiny13a
 F_CPU    = 1200000UL
@@ -85,6 +86,7 @@ FW_BASE  = bypass
 CC       = avr-gcc
 OBJCOPY  = avr-objcopy
 SIZE     = avr-size
+READELF  ?= readelf
 AVRDUDE  = avrdude
 
 # --- AVR build-artifact directory --------------------------------------------
@@ -429,7 +431,7 @@ FORCE:
         test test-fast test-long stress \
         test-host test-sim test-sim-secondary \
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
-        test-release-images test-soak-timing \
+        test-attiny202-build test-release-images test-soak-timing \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
         test-stack-bound test-flash-budget test-soak \
         analyze analyze-tidy analyze-cppcheck analyze-deep \
@@ -1196,7 +1198,7 @@ attiny202-smoke: $(XT_SMOKE_SRC) | $(AVR_BUILD_DIR)
 	echo "=== ATtiny202 (avrxmega3) smoke: compile + link + arch + $(XT_FLASH_BYTES) B budget ==="; \
 	$(CC) $(XT_CFLAGS) $(XT_LDFLAGS) -o $(XT_SMOKE_ELF) $(XT_SMOKE_SRC) \
 		|| { echo "FAIL: ATtiny202 smoke did not compile/link"; exit 1; }; \
-	flags=`readelf -h $(XT_SMOKE_ELF) 2>/dev/null | sed -n 's/.*Flags:[[:space:]]*//p'`; \
+	flags=`$(READELF) -h $(XT_SMOKE_ELF) 2>/dev/null | sed -n 's/.*Flags:[[:space:]]*//p'`; \
 	case "$$flags" in \
 		*avr:103*) : ;; \
 		*) echo "FAIL: $(XT_SMOKE_ELF) is not avrxmega3 (ELF flags: $$flags)"; exit 1 ;; \
@@ -1231,6 +1233,9 @@ attiny202-smoke: $(XT_SMOKE_SRC) | $(AVR_BUILD_DIR)
 XT_BUILD_DIR ?= build_avr_xt
 XT_TAG       ?= attiny202
 XT_F_CPU     ?= 2000000UL
+override XT_VARIANTS_SUPPORTED := cd4053 mute relay
+override XT_VARIANTS_REQUESTED := $(filter $(XT_VARIANTS_SUPPORTED),$(VARIANTS))
+override XT_VARIANTS_UNKNOWN := $(filter-out $(XT_VARIANTS_SUPPORTED),$(VARIANTS))
 # The shell + the unchanged pure core (the AVR-classic counterpart is CORE_SRC).
 XT_CORE_SRC = src/bypass_mcu_avr_xt.c src/bypass_pure.c
 # Headers that, if changed, should rebuild the XT images: the FW_HEADERS set with
@@ -1254,7 +1259,13 @@ $(XT_BUILD_DIR):
 # pattern the PIC/analyze recipes use, since $(macro_<v>)/$(src_<v>) cannot
 # expand inside a shell loop). Emits bypass_<variant>_attiny202.elf/.hex.
 .PHONY: attiny202
-attiny202: $(XT_CORE_SRC) $(XT_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v))) | $(XT_BUILD_DIR)
+attiny202: | $(XT_BUILD_DIR)
+	@if ! rm -f "$(XT_BUILD_DIR)"/$(FW_BASE)_*_$(XT_TAG).elf \
+			"$(XT_BUILD_DIR)"/$(FW_BASE)_*_$(XT_TAG).hex \
+			"$(XT_BUILD_DIR)"/$(FW_BASE)_*_$(XT_TAG).elf.tmp \
+			"$(XT_BUILD_DIR)"/$(FW_BASE)_*_$(XT_TAG).hex.tmp; then \
+		echo "FAIL: could not remove stale ATtiny202 artifacts"; exit 1; \
+	fi
 	@if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
 		echo "ATtiny_DFP device files not found under XT_DFP=$(XT_DFP); skipping ATtiny202 build."; \
 		echo "  Fetch them (open-source apt toolchain + pinned atpack):"; \
@@ -1266,35 +1277,116 @@ attiny202: $(XT_CORE_SRC) $(XT_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v))) | $
 		$(SKIP); \
 	fi; \
 	echo "=== ATtiny202 (avrxmega3) build + flash-budget ($(XT_FLASH_BYTES) B) ==="; \
+	if ! awk -v t="$(XT_FLASH_BYTES)" 'BEGIN {exit !(t ~ /^[0-9]+$$/ && t ~ /[1-9]/)}'; then \
+		echo "FAIL: XT_FLASH_BYTES must be a positive decimal integer"; exit 2; \
+	fi; \
+	if [ "$(words $(strip $(VARIANTS)))" -eq 0 ]; then \
+		echo "FAIL: VARIANTS is empty; no ATtiny202 images requested"; exit 2; \
+	fi; \
+	if [ "$(words $(XT_VARIANTS_UNKNOWN))" -ne 0 ]; then \
+		echo "FAIL: VARIANTS contains an unsupported ATtiny202 variant"; exit 2; \
+	fi; \
+	if [ "$(words $(strip $(VARIANTS)))" -ne "$(words $(sort $(VARIANTS)))" ]; then \
+		echo "FAIL: VARIANTS contains a duplicate ATtiny202 variant"; exit 2; \
+	fi; \
+	set -- $(XT_VARIANTS_REQUESTED); \
 	fail=0; \
-	for v in $(VARIANTS); do \
+	for v in "$$@"; do \
 		case $$v in \
-			*mute)  m=CD4053_WITH_MUTE; drv=src/bypass_output_cd4053_with_mute.c ;; \
-			*relay) m=TQ2_L2_5V_RELAY;  drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
-			*)      m=CD4053_SIMPLE;    drv=src/bypass_output_cd4053_simple.c ;; \
+			cd4053) m=CD4053_SIMPLE;     drv=src/bypass_output_cd4053_simple.c ;; \
+			mute)    m=CD4053_WITH_MUTE;  drv=src/bypass_output_cd4053_with_mute.c ;; \
+			relay)   m=TQ2_L2_5V_RELAY;   drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
+			*) echo "FAIL: unsupported ATtiny202 variant '$$v'"; fail=1; continue ;; \
 		esac; \
 		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
 		hex=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).hex; \
-		if ! $(CC) $(XT_FW_CFLAGS) -D$$m $(XT_LDFLAGS) -o $$elf \
-				$(XT_CORE_SRC) $$drv 2> $(XT_BUILD_DIR)/$$v.log; then \
-			cat $(XT_BUILD_DIR)/$$v.log; \
-			echo "FAIL: variant $$v did not compile for ATtiny202"; fail=1; continue; \
+		elf_tmp=$$elf.tmp; hex_tmp=$$hex.tmp; log=$(XT_BUILD_DIR)/$$v.log; \
+		if ! rm -f "$$elf" "$$hex" "$$elf_tmp" "$$hex_tmp" "$$log"; then \
+			echo "FAIL: could not clean outputs for ATtiny202 variant $$v"; fail=1; continue; \
 		fi; \
-		flags=`readelf -h $$elf 2>/dev/null | sed -n 's/.*Flags:[[:space:]]*//p'`; \
+		if ! $(CC) $(XT_FW_CFLAGS) -D$$m $(XT_LDFLAGS) -o "$$elf_tmp" \
+				$(XT_CORE_SRC) $$drv 2> "$$log"; then \
+			cat "$$log"; \
+			echo "FAIL: variant $$v did not compile for ATtiny202"; \
+			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
+		fi; \
+		if [ ! -s "$$elf_tmp" ]; then \
+			echo "FAIL: compiler produced no ELF for ATtiny202 variant $$v"; \
+			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
+		fi; \
+		if ! elf_header=`$(READELF) -h "$$elf_tmp" 2>/dev/null`; then \
+			echo "FAIL: could not inspect ELF for ATtiny202 variant $$v"; \
+			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
+		fi; \
+		flags=`printf '%s\n' "$$elf_header" | sed -n 's/.*Flags:[[:space:]]*//p'`; \
 		case "$$flags" in *avr:103*) : ;; \
-			*) echo "FAIL: $$v is not avrxmega3 (ELF flags: $$flags)"; fail=1; continue ;; \
+			*) echo "FAIL: $$v is not avrxmega3 (ELF flags: $$flags)"; \
+				rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue ;; \
 		esac; \
-		$(OBJCOPY) -O ihex -R .eeprom $$elf $$hex; \
-		used=`$(SIZE) --mcu=$(XT_MCU) -C $$elf 2>/dev/null | awk '/^Program:/ {print $$2; exit}'`; \
-		if [ -z "$$used" ]; then echo "WARN: $$v: could not read Program size from $$elf"; continue; fi; \
-		pct=`awk -v u="$$used" -v t=$(XT_FLASH_BYTES) 'BEGIN{printf "%.1f", u*100/t}'`; \
-		if [ "$$used" -gt "$(XT_FLASH_BYTES)" ]; then \
-			echo "FAIL: $$v uses $$used B ($${pct}%) -- exceeds $(XT_FLASH_BYTES) B"; fail=1; \
-		else \
-			echo "OK:   $$v -> $$hex : $$used B ($${pct}%) of $(XT_FLASH_BYTES) B"; \
+		if ! size_out=`$(SIZE) --mcu=$(XT_MCU) -C "$$elf_tmp" 2>&1`; then \
+			printf '%s\n' "$$size_out"; \
+			echo "FAIL: could not measure Program size for ATtiny202 variant $$v"; \
+			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
 		fi; \
+		used=`printf '%s\n' "$$size_out" | awk '/^Program:/ {print $$2; exit}'`; \
+		case "$$used" in ''|*[!0-9]*) \
+			echo "FAIL: invalid Program size for ATtiny202 variant $$v: '$$used'"; \
+			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue ;; \
+		esac; \
+		if awk -v u="$$used" -v t="$(XT_FLASH_BYTES)" 'BEGIN { \
+			sub(/^0+/, "", u); sub(/^0+/, "", t); \
+			if (u == "") u = "0"; if (t == "") t = "0"; \
+			if (length(u) > length(t)) exit 0; \
+			if (length(u) < length(t)) exit 1; \
+			exit !(("x" u) > ("x" t)); \
+		}'; then \
+			pct=`awk -v u="$$used" -v t="$(XT_FLASH_BYTES)" 'BEGIN{printf "%.1f", u*100/t}'`; \
+			echo "FAIL: $$v uses $$used B ($${pct}%) -- exceeds $(XT_FLASH_BYTES) B"; \
+			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
+		fi; \
+		pct=`awk -v u="$$used" -v t="$(XT_FLASH_BYTES)" 'BEGIN{printf "%.1f", u*100/t}'`; \
+		if ! $(OBJCOPY) -O ihex -R .eeprom "$$elf_tmp" "$$hex_tmp"; then \
+			echo "FAIL: could not generate HEX for ATtiny202 variant $$v"; \
+			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
+		fi; \
+		if [ ! -s "$$hex_tmp" ] || ! awk ' \
+			function nibble(c) { return index("0123456789ABCDEF", c) - 1 } \
+			function byte_at(s, p) { return nibble(substr(s, p, 1)) * 16 + nibble(substr(s, p + 1, 1)) } \
+			BEGIN { valid = 1 } \
+			{ sub(/\r$$/, ""); line = toupper($$0); \
+			  if (eof_count || line !~ /^:[[:xdigit:]]+$$/) { valid = 0; next } \
+			  record = substr(line, 2); record_len = length(record); \
+			  if (record_len < 10 || record_len % 2) { valid = 0; next } \
+			  byte_count = byte_at(record, 1); \
+			  if (record_len != 10 + byte_count * 2) { valid = 0; next } \
+			  sum = 0; for (i = 1; i <= record_len; i += 2) sum += byte_at(record, i); \
+			  if (sum % 256 != 0) { valid = 0; next } \
+			  address = substr(record, 3, 4); record_type = substr(record, 7, 2); \
+			  if (record_type == "00") { \
+			    if (byte_count == 0) { valid = 0; next } \
+			    data_bytes += byte_count \
+			  } else if (record_type == "01") { \
+			    if (record != "00000001FF") { valid = 0; next } \
+			    eof_count++ \
+			  } else if (record_type == "02" || record_type == "04") { \
+			    if (byte_count != 2 || address != "0000") { valid = 0; next } \
+			  } else if (record_type == "03" || record_type == "05") { \
+			    if (byte_count != 4 || address != "0000") { valid = 0; next } \
+			  } else { \
+			    valid = 0; next \
+			  } \
+			} \
+			END { exit !(valid && NR > 0 && data_bytes > 0 && eof_count == 1) }' "$$hex_tmp"; then \
+			echo "FAIL: objcopy produced an empty or invalid HEX for ATtiny202 variant $$v"; \
+			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
+		fi; \
+		if ! mv "$$elf_tmp" "$$elf" || ! mv "$$hex_tmp" "$$hex"; then \
+			echo "FAIL: could not publish ATtiny202 artifacts for variant $$v"; \
+			rm -f "$$elf" "$$hex" "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
+		fi; \
+		rm -f "$$log"; \
+		echo "OK:   $$v -> $$hex : $$used B ($${pct}%) of $(XT_FLASH_BYTES) B"; \
 	done; \
-	rm -f $(XT_BUILD_DIR)/*.log; \
 	exit $$fail
 
 # --- ATtiny202 yasimavr dynamic-simulation harness ---------------------------
@@ -1604,7 +1696,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-sim test-sim-secondary test-release-images test-soak-timing coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1615,7 +1707,7 @@ test-fast: test
 # overrides). Use before tagging a release or signing off for hardware.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-mutation test-sim test-sim-secondary test-release-images test-soak-timing coverage-check
+test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -1636,6 +1728,10 @@ clean-tests:
 # firmware matches.)
 test-host: test/host/test_logic_host
 	./test/host/test_logic_host
+
+# Fake-tool regression checks for fail-closed ATtiny202 ELF/HEX generation.
+test-attiny202-build:
+	./test/test_attiny202_build.sh
 
 # Exact-set and hash checks for the tag workflow's committed/listed/fresh images.
 test-release-images:
@@ -2273,6 +2369,7 @@ help:
 	@echo "  test-sim-<v>[-t<n>]  single variant, e.g. test-sim-relay / test-sim-relay-t45"
 	@echo "  test-fault-inject  corrupt state, verify WDT recovery (all variants x tinyx5)"
 	@echo "  test-mutation   inject firmware faults, verify the suite kills them"
+	@echo "  test-attiny202-build  fail-closed AVR-XT image-generation checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-soak       24-h soak test (standalone; SOAK_VARIANT, SOAK_CHIP, SOAK_DURATION_MS,"
