@@ -197,6 +197,11 @@ SANITIZE    ?= -fsanitize=undefined,address -fno-sanitize-recover=all
 # The firmware's full-path runtime HWM is ~10 B; any individual frame above
 # this threshold signals unintended bloat (e.g. an accidental local array).
 STACK_MAX_FRAME ?= 32
+STACK_BUILD_DIR ?=
+override STACK_SOURCES := src/bypass_mcu_avr_classic.c src/bypass_pure.c \
+                          src/bypass_output_cd4053_simple.c \
+                          src/bypass_output_cd4053_with_mute.c \
+                          src/bypass_output_tq2_l2_5v_relay.c
 
 # ATtiny13a flash-budget ceiling for test-flash-budget (percentage of 1 KB).
 # Firmware is ~46% today; a future accidental bloat passes silently without
@@ -433,7 +438,7 @@ FORCE:
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
         test-attiny202-build test-release-images test-soak-timing \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
-        test-stack-bound test-flash-budget test-soak \
+        test-stack-bound test-stack-bound-regression test-flash-budget test-soak \
         analyze analyze-tidy analyze-cppcheck analyze-deep \
         trace coverage coverage-check coverage-clean
 
@@ -1696,7 +1701,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget test-fault-inject test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1707,7 +1712,7 @@ test-fast: test
 # overrides). Use before tagging a release or signing off for hardware.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-flash-budget test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing coverage-check
+test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -1872,34 +1877,84 @@ test/avr/test_fuses: test/avr/test_fuses.c Makefile
 # with a compile-time structural upper bound that does not depend on exercising
 # the deepest call path.  Override: make test-stack-bound STACK_MAX_FRAME=16
 test-stack-bound:
-	@echo "=== -fstack-usage static bound (limit: $(STACK_MAX_FRAME) B/frame) ==="
-	@fail=0; \
-	for f in $(FW_SOURCES); do \
+	@stack_dir="$(STACK_BUILD_DIR)"; remove_dir=0; \
+	if [ -z "$$stack_dir" ]; then \
+		stack_dir=$$(mktemp -d "$${TMPDIR:-/tmp}/mcu-stack-bound.XXXXXX") \
+			|| { echo "FAIL: could not create private stack-evidence directory"; exit 1; }; \
+		remove_dir=1; \
+	elif ! mkdir -p "$$stack_dir"; then \
+		echo "FAIL: could not create stack-evidence directory $$stack_dir"; exit 1; \
+	fi; \
+	cleanup_stack_bound() { \
+		rc=$$?; \
+		rm -f "$$stack_dir"/stack_*.o "$$stack_dir"/stack_*.su || rc=1; \
+		if [ "$$remove_dir" -eq 1 ]; then rmdir "$$stack_dir" || rc=1; fi; \
+		trap - 0; exit $$rc; \
+	}; \
+	trap cleanup_stack_bound 0; \
+	if ! rm -f "$$stack_dir"/stack_*.o "$$stack_dir"/stack_*.su; then \
+		echo "FAIL: could not remove stale stack evidence"; exit 1; \
+	fi; \
+	if ! awk -v max="$(STACK_MAX_FRAME)" 'BEGIN {exit !(max ~ /^[0-9]+$$/ && max ~ /[1-9]/)}'; then \
+		echo "FAIL: STACK_MAX_FRAME must be a positive decimal integer"; exit 2; \
+	fi; \
+	echo "=== -fstack-usage static bound (limit: $(STACK_MAX_FRAME) B/frame) ==="; \
+	expected=0; \
+	for f in $(STACK_SOURCES); do \
 		case $$f in \
 			*cd4053_with_mute*) m=CD4053_WITH_MUTE ;; \
 			*tq2_l2_5v_relay*)  m=TQ2_L2_5V_RELAY ;; \
-			*)                  m=$(macro_$(VARIANT)) ;; \
+			*)                  m=CD4053_SIMPLE ;; \
 		esac; \
-		$(CC) $(CFLAGS) -D$$m -fstack-usage \
-			-c $$f -o test/stack_$$(basename $$f .c)_$$m.o || fail=1; \
+		base=$$(basename "$$f" .c); \
+		obj="$$stack_dir/stack_$${base}_$${m}.o"; \
+		su="$${obj%.o}.su"; \
+		expected=$$((expected + 1)); \
+		if ! $(CC) $(CFLAGS) -D$$m -fstack-usage -c "$$f" -o "$$obj"; then \
+			echo "FAIL: compilation error during -fstack-usage build: $$f"; exit 1; \
+		fi; \
+		if [ ! -s "$$obj" ]; then \
+			echo "FAIL: compiler produced no stack-check object for $$f"; exit 1; \
+		fi; \
+		if [ ! -s "$$su" ]; then \
+			echo "FAIL: compiler produced no stack-usage report for $$f"; exit 1; \
+		fi; \
 	done; \
-	if [ "$$fail" -ne 0 ]; then \
-		echo "FAIL: compilation error(s) during -fstack-usage build"; \
-		rm -f test/stack_*.o test/stack_*.su; \
-		exit 1; \
+	set -- "$$stack_dir"/stack_*.o; \
+	actual_obj=$$#; [ -e "$$1" ] || actual_obj=0; \
+	if [ "$$actual_obj" -ne "$$expected" ]; then \
+		echo "FAIL: expected $$expected stack-check objects, found $$actual_obj"; exit 1; \
+	fi; \
+	set -- "$$stack_dir"/stack_*.su; \
+	actual_su=$$#; [ -e "$$1" ] || actual_su=0; \
+	if [ "$$actual_su" -ne "$$expected" ]; then \
+		echo "FAIL: expected $$expected stack-usage reports, found $$actual_su"; exit 1; \
 	fi; \
 	echo "Per-function stack frames:"; \
-	cat test/stack_*.su; \
-	bad=$$(awk -F'\t' -v max=$(STACK_MAX_FRAME) '$$2+0 > max { print }' test/stack_*.su); \
-	if [ -n "$$bad" ]; then \
-		echo "FAIL: frame(s) exceed $(STACK_MAX_FRAME) B:"; \
-		echo "$$bad"; \
-		fail=1; \
-	else \
-		echo "OK: all frames <= $(STACK_MAX_FRAME) B"; \
+	if ! cat "$$@"; then echo "FAIL: could not read stack-usage reports"; exit 1; fi; \
+	if ! awk -F'\t' -v max="$(STACK_MAX_FRAME)" ' \
+		function decimal_gt(a, b) { \
+			sub(/^0+/, "", a); sub(/^0+/, "", b); \
+			if (a == "") a = "0"; if (b == "") b = "0"; \
+			if (length(a) != length(b)) return length(a) > length(b); \
+			return ("x" a) > ("x" b) \
+		} \
+		BEGIN { bad = 0; records = 0 } \
+		NF != 3 || $$1 == "" || $$2 !~ /^[0-9]+$$/ || $$3 != "static" { \
+			printf "invalid stack-usage record: %s\n", $$0 > "/dev/stderr"; bad = 1; next \
+		} \
+		{ records++; if (decimal_gt($$2, max)) { \
+			printf "frame exceeds %s B: %s\n", max, $$0 > "/dev/stderr"; bad = 1 \
+		} } \
+		END { if (records == 0) { print "no stack-usage records" > "/dev/stderr"; bad = 1 } \
+			exit bad }' "$$@"; then \
+		echo "FAIL: invalid or oversized stack frame evidence"; exit 1; \
 	fi; \
-	rm -f test/stack_*.o test/stack_*.su; \
-	exit $$fail
+	echo "OK: $$actual_su fresh reports; all frames <= $(STACK_MAX_FRAME) B"
+
+# Fake-compiler regression checks for stale, missing, and malformed .su evidence.
+test-stack-bound-regression:
+	./test/test_stack_bound.sh
 
 # Flash-utilization budget assertion: run avr-size on every ATtiny13a variant
 # ELF and fail if flash (Program bytes) exceeds FLASH_T13_BUDGET% of 1024 B.
@@ -2362,6 +2417,7 @@ help:
 	@echo "  test-cbmc       CBMC SAT/SMT proof of the real bypass_pure.c (if installed)"
 	@echo "  test-fuses      decode + verify the design fuse bytes (t13a + tinyx5)"
 	@echo "  test-stack-bound  -fstack-usage static frame bound (limit: STACK_MAX_FRAME=$(STACK_MAX_FRAME) B)"
+	@echo "  test-stack-bound-regression  fail-closed stack-evidence checks"
 	@echo "  test-flash-budget flash-utilization gate: all t13a variants < FLASH_T13_BUDGET=$(FLASH_T13_BUDGET)% of 1 KB"
 	@echo "  test-sim        real firmware in simavr, all variants (ATtiny13a)"
 	@echo "  test-sim-t85 / test-sim-t45  all variants on that tinyx5 chip"
