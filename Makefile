@@ -860,7 +860,8 @@ pic-test-soak: pic
 		echo "no $(PIC_SOAK_HEX) (XC8 absent?); skipping PIC soak for variant $(PIC_SOAK_VARIANT)"; $(SKIP); \
 	fi; \
 	echo "--- PIC soak: variant=$(PIC_SOAK_VARIANT) proc=$(PIC_GPSIM_PROC) duration=$(PIC_SOAK_DURATION_MS) ms ---"; \
-	$(PIC_SOAK_COMPILE); \
+	rm -f $(PIC_SOAK_BIN) && \
+	$(PIC_SOAK_COMPILE) && \
 	./$(PIC_SOAK_BIN)
 
 # --- PIC critical-SFR fault-injection test (libgpsim) ------------------------
@@ -942,7 +943,8 @@ pic-test-fault: pic
 		exit 1; \
 	fi; \
 	echo "--- PIC fault-inject: variant=$(PIC_FAULT_VARIANT) proc=$(PIC_GPSIM_PROC) (ctx_ layout verified: 3 bytes) ---"; \
-	$(PIC_FAULT_COMPILE); \
+	rm -f $(PIC_FAULT_BIN) && \
+	$(PIC_FAULT_COMPILE) && \
 	./$(PIC_FAULT_BIN)
 
 # --- PIC built-HEX lock-step test (libgpsim + shared model) -------------------
@@ -996,7 +998,8 @@ pic-test-lockstep: pic
 		exit 1; \
 	fi; \
 	echo "--- PIC lock-step: variant=$(PIC_LOCKSTEP_VARIANT) proc=$(PIC_GPSIM_PROC) (ctx_ layout verified: 3 bytes) ---"; \
-	$(PIC_LOCKSTEP_COMPILE); \
+	rm -f $(PIC_LOCKSTEP_BIN) && \
+	$(PIC_LOCKSTEP_COMPILE) && \
 	./$(PIC_LOCKSTEP_BIN)
 
 # --- PIC built-HEX GPIO transitions + pulse timing (libgpsim) ----------------
@@ -1032,7 +1035,8 @@ pic-test-io: pic
 		echo "no $(PIC_IO_HEX) (XC8 absent?); skipping PIC target-I/O for variant $(PIC_IO_VARIANT)"; $(SKIP); \
 	fi; \
 	echo "--- PIC target I/O: variant=$(PIC_IO_VARIANT) proc=$(PIC_GPSIM_PROC) ---"; \
-	$(PIC_IO_COMPILE); \
+	rm -f $(PIC_IO_BIN) && \
+	$(PIC_IO_COMPILE) && \
 	./$(PIC_IO_BIN)
 
 # Fail-closed real-HEX aggregate. The individual libgpsim targets above remain
@@ -1516,7 +1520,7 @@ clean:
 		$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_sim_$(v)_t$(n))) \
 		$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_soak_$(v)_t$(n))) \
 		test/host/test_logic_host test/pic/test_config_pic test/pic/test_soak_pic \
-		test/pic/test_fault_pic \
+		test/pic/test_fault_pic test/pic/test_lockstep_pic test/pic/test_io_pic \
 		test/formal/test_model_check test/formal/test_symbolic test/avr/test_fuses \
 		test/formal/test_symbolic.bc \
 		test/stack_*.o test/stack_*.su \
