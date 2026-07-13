@@ -21,7 +21,8 @@ avr/test_trace_*
 !avr/*.py
 avr/__pycache__/
 
-# KLEE output and the toolchain stamp are produced at the test root.
+# KLEE output is produced at the test root. Keep the retired toolchain stamp
+# ignored for existing worktrees; `make clean` removes it.
 klee-last
 klee-out-*/
 .toolchain.sig

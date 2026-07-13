@@ -265,11 +265,30 @@ make pic PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/build-pic.log" 2>&1 || { ca
 
 # Enumerate the expected image set and assert each exists.
 IMAGES=()
-for v in $VARIANTS; do IMAGES+=("$AVR_BUILD_DIR/${FW_BASE}_${v}.hex"); done
-for v in $VARIANTS; do for n in $TINYX5; do IMAGES+=("$AVR_BUILD_DIR/${FW_BASE}_${v}_t${n}.hex"); done; done
+AVR_IMAGES=()
+AVR_ELFS=()
+for v in $VARIANTS; do
+	img="$AVR_BUILD_DIR/${FW_BASE}_${v}.hex"
+	elf="${img%.hex}.elf"
+	IMAGES+=("$img"); AVR_IMAGES+=("$img"); AVR_ELFS+=("$elf")
+done
+for v in $VARIANTS; do for n in $TINYX5; do
+	img="$AVR_BUILD_DIR/${FW_BASE}_${v}_t${n}.hex"
+	elf="${img%.hex}.elf"
+	IMAGES+=("$img"); AVR_IMAGES+=("$img"); AVR_ELFS+=("$elf")
+done; done
 for v in $VARIANTS; do IMAGES+=("$PIC_BUILD_DIR/${FW_BASE}_${v}_${PIC_TAG}.hex"); done
 for img in "${IMAGES[@]}"; do [ -f "$img" ] || die "expected image not produced: $img"; done
 ok "built ${#IMAGES[@]} images."
+
+hash_avr_elf_set() {
+	local elf
+	for elf in "$@"; do
+		[ -f "$elf" ] && [ ! -L "$elf" ] && [ -s "$elf" ] \
+			|| die "validated classic AVR ELF missing, empty, or not regular: $elf"
+	done
+	sha256sum -- "$@"
+}
 
 # ============================================================================
 # 2. FULL PRE-HARDWARE GATES
@@ -278,6 +297,7 @@ section "2. validation: make test-long + make pic-test + PIC target aggregate"
 log "running make test-long (exhaustive AVR suite + mutation)..."
 make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 >"$EVID/test-long.log" 2>&1 || { tail -40 "$EVID/test-long.log" >&2; die "make test-long FAILED."; }
 ok "test-long passed."
+validated_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
 log "running make pic-test (PIC CONFIG word + analyze + gpsim)..."
 make pic-test STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/pic-test.log" 2>&1 || { tail -40 "$EVID/pic-test.log" >&2; die "make pic-test FAILED."; }
 ok "pic-test passed."
@@ -305,7 +325,9 @@ declare -A SOAK_BIN SOAK_CWD SOAK_LOG SOAK_RC
 log "compiling soak binaries..."
 for v in $VARIANTS; do for n in $TINYX5; do
 	name="avr_${v}_t${n}"; bin="test/avr/test_soak_${v}_t${n}"
-	make "$bin" SOAK_VARIANT="$v" SOAK_CHIP="$n" SOAK_DURATION_MS="$SOAK_DURATION_MS" \
+	elf="$AVR_BUILD_DIR/${FW_BASE}_${v}_t${n}.elf"
+	make --old-file="$elf" "$bin" AVR_REBUILD_PREREQ= \
+		SOAK_VARIANT="$v" SOAK_CHIP="$n" SOAK_DURATION_MS="$SOAK_DURATION_MS" \
 		>>"$EVID/soak-build.log" 2>&1 || die "failed to build AVR soak $name"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$REPO_ROOT/$bin"
 	SOAK_CWD[$name]="$REPO_ROOT"   # relative FW_PATH; the binary writes no files
@@ -320,6 +342,11 @@ for v in $VARIANTS; do
 	SOAK_CWD[$name]="$rundir"      # absolute FW_PATH; isolates gpsim.log per combo
 	SOAK_LOG[$name]="$EVID/soak-$name.log"
 done
+
+# Soak harness compilation must not replace the ELFs that test-long exercised.
+current_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
+[ "$current_avr_elf_hashes" = "$validated_avr_elf_hashes" ] \
+	|| die "a classic AVR ELF changed while compiling its soak harness"
 
 NCOMBOS=${#SOAK_NAMES[@]}
 [ "$JOBS" -gt 0 ] 2>/dev/null || JOBS=$NCOMBOS
@@ -356,6 +383,29 @@ if [ "$SOAK_FAILS" -ne 0 ]; then
 	die "$SOAK_FAILS soak combo(s) FAILED. No release staged. Logs in $WORK (preserved)."
 fi
 ok "all $NCOMBOS soak combos passed (wall-clock ${SOAK_WALL}s)."
+
+current_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
+[ "$current_avr_elf_hashes" = "$validated_avr_elf_hashes" ] \
+	|| die "a classic AVR ELF changed after its final validation began"
+
+# Validation and soak rebuild classic ELFs, invalidating their paired HEX files.
+# Re-materialize HEX from those exact, just-tested ELFs without compiling again.
+log "regenerating classic AVR HEX from the validated ELFs..."
+rm -f -- "${AVR_IMAGES[@]}" \
+	|| die "could not remove stale classic AVR HEX before final regeneration"
+old_file_args=()
+for elf in "${AVR_ELFS[@]}"; do old_file_args+=("--old-file=$elf"); done
+make "${old_file_args[@]}" all13 all85 all45 AVR_REBUILD_PREREQ= \
+	>"$EVID/final-image-build.log" 2>&1 \
+	|| { tail -60 "$EVID/final-image-build.log" >&2; die "final classic HEX regeneration FAILED."; }
+current_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
+[ "$current_avr_elf_hashes" = "$validated_avr_elf_hashes" ] \
+	|| die "a validated classic AVR ELF changed during final HEX regeneration"
+for img in "${IMAGES[@]}"; do
+	[ -f "$img" ] && [ ! -L "$img" ] && [ -s "$img" ] \
+		|| die "validated release image missing, empty, or not regular after final regeneration: $img"
+done
+ok "all validated release images are present and nonempty."
 
 # ============================================================================
 # 4. STAGE THE RELEASE

@@ -33,6 +33,7 @@ EXP_ENGAGED_LATA="${2:-}"
 EXP_BYPASS_LATA="${3:-0x0}"
 
 GPSIM="${GPSIM:-gpsim}"
+GPSIM_TIMEOUT_SECONDS="${GPSIM_TIMEOUT_SECONDS:-60}"
 PROC="${PIC_GPSIM_PROC:-p10f322}"
 STC="$(dirname "$0")/footswitch_toggle.stc"
 
@@ -49,7 +50,15 @@ if [ ! -f "$STC" ]; then
     exit 1
 fi
 
-out=$(timeout -s KILL 60 "$GPSIM" -i -p"$PROC" "$HEX" -c "$STC" </dev/null 2>&1)
+if out=$(timeout -s KILL "$GPSIM_TIMEOUT_SECONDS" \
+		"$GPSIM" -i -p"$PROC" "$HEX" -c "$STC" </dev/null 2>&1); then
+	:
+else
+	rc=$?
+	echo "FAIL: gpsim exited with status $rc for $HEX. Output was:"
+	printf '%s\n' "$out"
+	exit 1
+fi
 
 # Pull the value of register $2 at the checkpoint labelled $1 out of gpsim's
 # output (lines look like "lata = 0x3", possibly behind a "**gpsim> " prompt).
