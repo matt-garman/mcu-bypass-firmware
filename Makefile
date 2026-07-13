@@ -1791,7 +1791,7 @@ test-release-images:
 test-soak-timing:
 	HOSTCC="$(HOSTCC)" HOSTCXX="$(PIC_SOAK_CXX)" ./test/test_soak_timing.sh
 
-# Isolated fake-compiler proof that workload changes always rebuild host/sim bins.
+# Isolated fake-compiler proof of workload and fuse-configuration rebuilds.
 test-workload-rebuild:
 	./test/test_workload_rebuild.sh
 
@@ -1910,14 +1910,25 @@ test-fuses: test/avr/test_fuses
 	./test/avr/test_fuses
 
 # Build rule for the fuse checker. Fuse byte values are injected from the
-# Makefile variables (single source of truth) via -D. Depends on the Makefile
-# so that editing a fuse byte forces a rebuild (the values live in the recipe,
-# not in a tracked source file).
-test/avr/test_fuses: test/avr/test_fuses.c Makefile
-	$(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) \
-		-DT13_LFUSE=$(LFUSE) -DT13_HFUSE=$(HFUSE) \
-		-DT85_LFUSE=$(LFUSE_X5) -DT85_HFUSE=$(HFUSE_X5) \
-		$< -o $@
+# Makefile variables (single source of truth) via -D. FORCE makes command-line
+# overrides observable even when the source and Makefile timestamps are
+# unchanged. Publish atomically so a failed or empty compiler result cannot
+# leave a stale checker that validates previous fuse values.
+test/avr/test_fuses: test/avr/test_fuses.c Makefile FORCE
+	@if ! rm -f "$@"; then echo "FAIL: could not remove stale fuse checker"; exit 1; fi; \
+	tmp=$$(mktemp "$@.tmp.XXXXXX") || exit 1; \
+	trap 'rm -f "$$tmp"' 0 1 2 15; \
+	if ! $(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) \
+			-DT13_LFUSE=$(LFUSE) -DT13_HFUSE=$(HFUSE) \
+			-DT85_LFUSE=$(LFUSE_X5) -DT85_HFUSE=$(HFUSE_X5) \
+			$< -o "$$tmp"; then \
+		exit 1; \
+	fi; \
+	if [ ! -f "$$tmp" ] || [ -L "$$tmp" ] || [ ! -s "$$tmp" ] || [ ! -x "$$tmp" ]; then \
+		echo "FAIL: compiler produced no executable fuse checker"; exit 1; \
+	fi; \
+	if ! mv "$$tmp" "$@"; then exit 1; fi; \
+	trap - 0 1 2 15
 
 # Static stack-frame bound via -fstack-usage: compile every firmware TU with
 # the flag, collect the per-function .su files, and fail if any single frame
@@ -2489,7 +2500,7 @@ help:
 	@echo "  test-avr-build-rebuild  classic AVR stale/config/partial-output checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
-	@echo "  test-workload-rebuild  FAST/FULL/custom rebuild regression checks"
+	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
 	@echo "  test-soak       24-h soak test (standalone; SOAK_VARIANT, SOAK_CHIP, SOAK_DURATION_MS,"
 	@echo "                  SOAK_LIVENESS_INTERVAL_MS, SOAK_PROGRESS_INTERVAL_MS)"
 	@echo "  trace           emit $(AVR_BUILD_DIR)/bypass_trace.vcd for VARIANT (GTKWave)"

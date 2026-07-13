@@ -10,6 +10,7 @@ log="$work/compiler.log"
 checks=0
 unset HOST_DEFS SIM_DEFS MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES SIZE
 unset AVR_BUILD_DIR AVR_FW FW_BASE AVR_REBUILD_PREREQ VARIANTS MCU
+unset FAKE_COMPILER_MODE
 mkdir -p "$repo/test/host" "$repo/test/avr" "$repo/src" \
 	"$repo/build_avr_classic" "$tools"
 cp "$ROOT/Makefile" "$repo/Makefile"
@@ -27,7 +28,21 @@ done
 [ -n "$out" ] || exit 0
 printf '%s\n' "$*" >> "$FAKE_COMPILER_LOG"
 mkdir -p "$(dirname "$out")"
-printf '#!/bin/sh\nexit 0\n' > "$out"
+case "${FAKE_COMPILER_MODE:-pass}" in
+	fail) printf 'partial compiler output\n' > "$out"; exit 1 ;;
+	empty) : > "$out"; exit 0 ;;
+esac
+status=0
+case "$out" in
+	*test_fuses.tmp.*)
+		for define in \
+			-DT13_LFUSE=0x4a -DT13_HFUSE=0xf9 \
+			-DT85_LFUSE=0x62 -DT85_HFUSE=0xcc; do
+			case " $* " in *" $define "*) ;; *) status=1 ;; esac
+		done
+		;;
+esac
+printf '#!/bin/sh\nexit %d\n' "$status" > "$out"
 chmod 750 "$out"
 EOF
 chmod 750 "$tools/cc"
@@ -47,7 +62,7 @@ EOF
 chmod 750 "$tools/size" "$tools/readelf" "$repo/test/check_flash_budget.sh"
 
 files=(
-	test/host/test_logic_host.c test/avr/test_sim.c test/model_step.h
+	test/host/test_logic_host.c test/avr/test_sim.c test/avr/test_fuses.c test/model_step.h
 	test/bypass_config_host.h test/bypass_output_host.h
 	src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h
 	src/bypass_output_common.h src/bypass_pins_avr_classic.h
@@ -85,6 +100,54 @@ run_make test-host HOST_DEFS=-DHOST_FAST=1 >/dev/null
 [[ "$(compile_count test/host/test_logic_host)" -eq 1 ]] \
 	|| { printf 'FAIL: initial host workload did not compile once\n' >&2; exit 1; }
 checks=$((checks + 1))
+
+run_make test-fuses >/dev/null
+[[ "$(compile_count test/avr/test_fuses)" -eq 1 ]] \
+	|| { printf 'FAIL: initial fuse configuration did not compile once\n' >&2; exit 1; }
+checks=$((checks + 1))
+if run_make test-fuses LFUSE=0x00 HFUSE=0x00 \
+		LFUSE_X5=0x00 HFUSE_X5=0x00 >/dev/null 2>&1; then
+	printf 'FAIL: unsafe fuse overrides reused a stale checker\n' >&2
+	exit 1
+fi
+[[ "$(compile_count test/avr/test_fuses)" -eq 2 ]] \
+	&& grep -q -- '-DT13_LFUSE=0x00' "$log" \
+	&& grep -q -- '-DT13_HFUSE=0x00' "$log" \
+	&& grep -q -- '-DT85_LFUSE=0x00' "$log" \
+	&& grep -q -- '-DT85_HFUSE=0x00' "$log" \
+	|| { printf 'FAIL: current fuse overrides did not reach the checker compiler\n' >&2; exit 1; }
+checks=$((checks + 1))
+run_make test-fuses >/dev/null
+[[ "$(compile_count test/avr/test_fuses)" -eq 3 ]] \
+	|| { printf 'FAIL: restoring safe fuse values did not rebuild the checker\n' >&2; exit 1; }
+checks=$((checks + 1))
+
+if (export FAKE_COMPILER_MODE=fail; run_make test-fuses) >/dev/null 2>&1; then
+	printf 'FAIL: fuse-checker compiler failure was accepted\n' >&2
+	exit 1
+fi
+[[ ! -e "$repo/test/avr/test_fuses" ]] \
+	|| { printf 'FAIL: compiler failure left a stale fuse checker\n' >&2; exit 1; }
+shopt -s nullglob
+fuse_temps=("$repo/test/avr/test_fuses".tmp.*)
+shopt -u nullglob
+[[ "${#fuse_temps[@]}" -eq 0 ]] \
+	|| { printf 'FAIL: compiler failure left temporary fuse-checker output\n' >&2; exit 1; }
+run_make test-fuses >/dev/null
+[[ -x "$repo/test/avr/test_fuses" ]] \
+	|| { printf 'FAIL: could not restore fuse checker before empty-output test\n' >&2; exit 1; }
+if (export FAKE_COMPILER_MODE=empty; run_make test-fuses) >/dev/null 2>&1; then
+	printf 'FAIL: empty fuse-checker compiler output was accepted\n' >&2
+	exit 1
+fi
+[[ ! -e "$repo/test/avr/test_fuses" ]] \
+	|| { printf 'FAIL: empty compiler output left a stale fuse checker\n' >&2; exit 1; }
+shopt -s nullglob
+fuse_temps=("$repo/test/avr/test_fuses".tmp.*)
+shopt -u nullglob
+[[ "${#fuse_temps[@]}" -eq 0 ]] \
+	|| { printf 'FAIL: fuse-checker compiler failures left temporary output\n' >&2; exit 1; }
+checks=$((checks + 2))
 run_make test-host HOST_DEFS= >/dev/null
 [[ "$(compile_count test/host/test_logic_host)" -eq 2 ]] \
 	|| { printf 'FAIL: FAST-to-FULL host workload reused a stale binary\n' >&2; exit 1; }

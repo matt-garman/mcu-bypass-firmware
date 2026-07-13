@@ -23,7 +23,7 @@ test/
   test_release_images.sh    shared: exact release artifact verification
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
   test_stack_bound.sh       shared: fail-closed stack evidence checks
-  test_workload_rebuild.sh  shared: FAST/FULL/custom rebuild checks
+  test_workload_rebuild.sh  shared: workload/fuse rebuild checks
 
   host/    MCU-independent golden-model tests, compiled and run natively.
            test_logic_host.c
