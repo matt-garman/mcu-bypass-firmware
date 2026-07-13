@@ -20,6 +20,7 @@ test/
   test_attiny202_build.sh   shared: fail-closed AVR-XT build checks
   test_avr_build_rebuild.sh shared: classic AVR rebuild/partial-output checks
   test_flash_budget.sh      shared: fail-closed flash measurement checks
+  test_gpsim_wrappers.sh    shared: fail-closed gpsim wrapper checks
   test_pic_build.sh         shared: fail-closed PIC image-generation checks
   test_release_images.sh    shared: exact release artifact verification
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)

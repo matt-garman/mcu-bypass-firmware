@@ -431,7 +431,8 @@ FORCE:
         test test-fast test-long stress \
         test-host test-sim test-sim-secondary \
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
-        test-attiny202-build test-avr-build-rebuild test-pic-build test-release-images \
+        test-attiny202-build test-avr-build-rebuild test-gpsim-wrappers \
+        test-pic-build test-release-images \
         test-soak-timing test-workload-rebuild \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
@@ -1762,7 +1763,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-avr-build-rebuild test-pic-build test-release-images test-soak-timing test-workload-rebuild coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1774,7 +1775,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-avr-build-rebuild test-pic-build test-release-images test-soak-timing test-workload-rebuild coverage-check
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -1803,6 +1804,10 @@ test-attiny202-build:
 # Isolated fake-tool proof of classic AVR dependency/configuration invalidation.
 test-avr-build-rebuild:
 	./test/test_avr_build_rebuild.sh
+
+# Fake-gpsim proof that complete snapshots cannot hide process failure/timeout.
+test-gpsim-wrappers:
+	./test/test_gpsim_wrappers.sh
 
 # Isolated fake-XC8 proof of fail-closed PIC image generation.
 test-pic-build:
@@ -2524,6 +2529,7 @@ help:
 	@echo "  test-mutation   inject firmware faults, verify the suite kills them"
 	@echo "  test-attiny202-build  fail-closed AVR-XT image-generation checks"
 	@echo "  test-avr-build-rebuild  classic AVR stale/config/partial-output checks"
+	@echo "  test-gpsim-wrappers  fail-closed gpsim process-status checks"
 	@echo "  test-pic-build  PIC image-generation and Intel-HEX validation checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
