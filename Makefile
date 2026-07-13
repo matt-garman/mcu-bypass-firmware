@@ -2056,16 +2056,35 @@ $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(eval $(call VARIANT_SIM_X5,$(v),
 # test-sim-t<n>     : all variants on tinyx5 chip <n> (e.g. test-sim-t85)
 # test-sim-secondary: all variants on every tinyx5 chip
 # test-fault-inject : all variants x every tinyx5 chip
-# Two recursive phases enforce ordering even under parallel `make test`: finish
-# the validated ELF build first, then allow simulator targets to consume it.
+#
+# Each aggregate dispatches its (variant x MCU) fan-out through a recursive
+# `$(MAKE) -jSIM_JOBS`. The individual runs are independent: every ELF compiles
+# in a single command to a distinct output (no shared .o), and every simavr run
+# only reads its own ELF and asserts via exit code (the VCD writer is TRACE-only,
+# not built here), so nothing is shared and the runs parallelize cleanly. The
+# recursive phase also preserves the original ordering guarantee -- for test-sim,
+# the validated ELF/flash-budget build finishes (serially) before any simulator
+# target consumes it.
+#
+# SIM_JOBS caps how many runs execute at once; it defaults to the core count and
+# is overridable (SIM_JOBS=1 forces the old serial behaviour, SIM_JOBS=4 leaves
+# headroom). Wall time drops to roughly the slowest single run rather than their
+# sum.
+SIM_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
+
 test-sim:
 	@$(MAKE) --no-print-directory test-flash-budget
-	@$(MAKE) --no-print-directory _test-sim-run SIM_DEFS="$(SIM_DEFS)"
+	@$(MAKE) --no-print-directory -j$(SIM_JOBS) _test-sim-run SIM_DEFS="$(SIM_DEFS)"
 _test-sim-run: $(foreach v,$(VARIANTS),test-sim-$(v))
 $(foreach n,$(TINYX5),$(eval test-sim-t$(n): $(foreach v,$(VARIANTS),test-sim-$(v)-t$(n))))
-test-sim-secondary: $(foreach n,$(TINYX5),test-sim-t$(n))
-test-fault-inject: $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test-fault-inject-$(v)-t$(n)))
-.PHONY: test-sim _test-sim-run test-sim-secondary test-fault-inject \
+test-sim-secondary:
+	@$(MAKE) --no-print-directory -j$(SIM_JOBS) _test-sim-secondary-run SIM_DEFS="$(SIM_DEFS)"
+_test-sim-secondary-run: $(foreach n,$(TINYX5),test-sim-t$(n))
+test-fault-inject:
+	@$(MAKE) --no-print-directory -j$(SIM_JOBS) _test-fault-inject-run SIM_DEFS="$(SIM_DEFS)"
+_test-fault-inject-run: $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test-fault-inject-$(v)-t$(n)))
+.PHONY: test-sim _test-sim-run test-sim-secondary _test-sim-secondary-run \
+        test-fault-inject _test-fault-inject-run \
         $(foreach n,$(TINYX5),test-sim-t$(n))
 
 # Mutation testing: inject deliberate faults into the PRODUCTION sources

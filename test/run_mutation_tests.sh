@@ -61,6 +61,36 @@ PIC_SOAK_GPSIM_INC="${PIC_SOAK_GPSIM_INC:-/usr/include/gpsim}"
 # fires, while staying quick. The baseline (pet) run sees zero resets and passes.
 PIC_SOAK_MUT_MS="${PIC_SOAK_MUT_MS:-2500}"
 
+# Parallelism. Every mutant runs in its own throwaway mktemp sandbox with its own
+# build dirs (copy_tree + `make -C "$work"`), so mutants share nothing and can run
+# concurrently. MUTATION_JOBS caps how many run at once; it defaults to the core
+# count and is overridable (e.g. MUTATION_JOBS=4 to leave headroom, or =1 to force
+# the old serial behaviour). Results are collected per-mutant into files and
+# tallied deterministically after the pool drains, so the pass/fail verdict and
+# the survivor list are identical to a serial run regardless of job count.
+MUTATION_JOBS="${MUTATION_JOBS:-$(nproc 2>/dev/null || echo 4)}"
+case "$MUTATION_JOBS" in
+    ''|*[!0-9]*|0) echo "ERROR: MUTATION_JOBS must be a positive integer (got '$MUTATION_JOBS')" >&2; exit 2 ;;
+esac
+
+# Per-mutant result sink (one $idx.status + $idx.out file per mutant). Cleaned on
+# exit so an interrupted run leaves nothing behind.
+RESULT_DIR="$(mktemp -d)"
+trap 'rm -rf "$RESULT_DIR"' EXIT
+
+# Bounded-concurrency dispatch: launch a mutant in the background, and once
+# MUTATION_JOBS are in flight, block (`wait -n`) for one to finish before
+# launching the next. A final `wait` (at the call site) drains the pool.
+_active=0
+dispatch() {
+    run_mutant "$@" &
+    _active=$((_active + 1))
+    if [ "$_active" -ge "$MUTATION_JOBS" ]; then
+        wait -n
+        _active=$((_active - 1))
+    fi
+}
+
 # Each entry: file<TAB>sed-expression<TAB>make-target<TAB>description
 # The sed expression uses '@' as delimiter to avoid clashing with C operators.
 MUTATIONS=(
@@ -141,25 +171,36 @@ pic_gpsim_run() {
 }
 
 # Apply one mutation in a throwaway sandbox and run the mapped checker.
-#   $1 kind : make | picgpsim | picsoak | pictarget
-#   $2 arg  : make target (kind=make), PIC variant (kind=pictarget), ignored otherwise
-#   $3 file ; $4 sed-expr ; $5 description
-# Updates the global idx/killed/survived/errored/SURVIVORS tallies.
+#   $1 idx  : 1-based mutant number (stable, assigned at dispatch time)
+#   $2 kind : make | picgpsim | picsoak | pictarget
+#   $3 arg  : make target (kind=make), PIC variant (kind=pictarget), ignored otherwise
+#   $4 file ; $5 sed-expr ; $6 description
+# Runs in the background under the dispatch() pool, so it must NOT touch shared
+# shell state. It records its verdict to two files under $RESULT_DIR, keyed by a
+# zero-padded index (lexical order == numeric order):
+#   $idx.status : first line = killed|survived|errored;
+#                 second line (survived only) = "file: desc" for the survivor list
+#   $idx.out    : the human-readable "[idx] ..." line, replayed in order after the
+#                 pool drains so the log stays deterministic regardless of timing
+# The main shell tallies these files after `wait`, so the summary is identical to
+# a serial run.
 run_mutant() {
-    local kind="$1" arg="$2" file="$3" sed_expr="$4" desc="$5"
-    idx=$((idx + 1))
+    local idx="$1" kind="$2" arg="$3" file="$4" sed_expr="$5" desc="$6"
+    local stem; stem="$RESULT_DIR/$(printf '%04d' "$idx")"
 
     local work; work="$(mktemp -d)"
     copy_tree "$work"
 
     # Apply the mutation; confirm it actually changed the file.
     if ! sed -i "$sed_expr" "$work/$file"; then
-        echo "[$idx] ERROR  applying sed to $file: $desc"
-        errored=$((errored + 1)); rm -rf "$work"; return
+        printf 'errored\n' > "$stem.status"
+        printf '[%s] ERROR  applying sed to %s: %s\n' "$idx" "$file" "$desc" > "$stem.out"
+        rm -rf "$work"; return
     fi
     if cmp -s "$work/$file" "$PROJ_DIR/$file"; then
-        echo "[$idx] ERROR  mutation did not change $file (pattern stale?): $desc"
-        errored=$((errored + 1)); rm -rf "$work"; return
+        printf 'errored\n' > "$stem.status"
+        printf '[%s] ERROR  mutation did not change %s (pattern stale?): %s\n' "$idx" "$file" "$desc" > "$stem.out"
+        rm -rf "$work"; return
     fi
 
     # Run the mapped checker. Killed == nonzero exit (a build OR a test failure
@@ -190,12 +231,11 @@ run_mutant() {
     esac
 
     if [ "$rc" -eq 0 ]; then
-        echo "[$idx] SURVIVED ($label): $desc"
-        survived=$((survived + 1))
-        SURVIVORS+=("$file: $desc")
+        printf 'survived\n%s\n' "$file: $desc" > "$stem.status"
+        printf '[%s] SURVIVED (%s): %s\n' "$idx" "$label" "$desc" > "$stem.out"
     else
-        echo "[$idx] killed   ($label): $desc"
-        killed=$((killed + 1))
+        printf 'killed\n' > "$stem.status"
+        printf '[%s] killed   (%s): %s\n' "$idx" "$label" "$desc" > "$stem.out"
     fi
     rm -rf "$work"
 }
@@ -242,10 +282,17 @@ PIC_SOAK_MUTATIONS=(
 "src/bypass_mcu_pic10f322.c	s@{ CLRWDT(); }@{ (void)0; /* MUTANT: no WDT pet */ }@	PIC WDT pet (CLRWDT) removed; soak reset counter trips within ~1s of an un-pet WDT"
 )
 
-killed=0
-survived=0
-errored=0
-SURVIVORS=()
+# Combined work list, filled in mutant order (core/AVR first, then any enabled PIC
+# subsets). Each element packs: category<US>kind<US>arg<US>file<US>sed<US>desc,
+# where <US> is the ASCII unit-separator (\x1f). A NON-whitespace separator is
+# required: the `arg` field is empty for the PIC gpsim/soak kinds, and `read`
+# with an IFS-whitespace delimiter (space/tab/newline) COLLAPSES the adjacent
+# delimiters around an empty field, shifting every later field left. \x1f cannot
+# appear in a sed expression or description, so the pack/unpack is lossless.
+# `category` is a display label used only to group the ordered replay of results;
+# the whole list is dispatched through one bounded-parallel pool below.
+US=$'\x1f'
+job_specs=()
 
 # Sanity: the unmutated tree must PASS every target we rely on, otherwise a
 # "killed" result is meaningless (it would just mean the baseline is broken).
@@ -269,11 +316,12 @@ done
 rm -rf "$BASE_DIR"
 echo
 
-echo "=== mutation testing: ${#MUTATIONS[@]} core/AVR mutants ==="
-idx=0
+# Collect the core/AVR mutants (always run). Dispatch happens once, after the PIC
+# probe below has decided which PIC subsets are eligible.
+core_cat="${#MUTATIONS[@]} core/AVR mutants"
 for entry in "${MUTATIONS[@]}"; do
     IFS=$'\t' read -r file sed_expr target desc <<< "$entry"
-    run_mutant make "$target" "$file" "$sed_expr" "$desc"
+    job_specs+=("$core_cat$US""make$US$target$US$file$US$sed_expr$US$desc")
 done
 
 # --- PIC toolchain probe ------------------------------------------------------
@@ -323,32 +371,76 @@ else
 fi
 rm -rf "$PIC_BASE"
 
+# Collect the enabled PIC subsets onto the same work list.
 if [ "$PIC_GPSIM_OK" -eq 1 ]; then
-    echo
-    echo "=== ${#PIC_GPSIM_MUTATIONS[@]} PIC-shell mutants (gpsim register-level) ==="
+    gpsim_cat="${#PIC_GPSIM_MUTATIONS[@]} PIC-shell mutants (gpsim register-level)"
     for entry in "${PIC_GPSIM_MUTATIONS[@]}"; do
         IFS=$'\t' read -r file sed_expr desc <<< "$entry"
-        run_mutant picgpsim "" "$file" "$sed_expr" "$desc"
+        job_specs+=("$gpsim_cat$US""picgpsim$US$US$file$US$sed_expr$US$desc")
     done
 fi
 
 if [ "$PIC_SOAK_OK" -eq 1 ]; then
-    echo
-    echo "=== ${#PIC_SOAK_MUTATIONS[@]} PIC-shell mutant (WDT liveness, libgpsim soak ${PIC_SOAK_MUT_MS}ms) ==="
+    soak_cat="${#PIC_SOAK_MUTATIONS[@]} PIC-shell mutant (WDT liveness, libgpsim soak ${PIC_SOAK_MUT_MS}ms)"
     for entry in "${PIC_SOAK_MUTATIONS[@]}"; do
         IFS=$'\t' read -r file sed_expr desc <<< "$entry"
-        run_mutant picsoak "" "$file" "$sed_expr" "$desc"
+        job_specs+=("$soak_cat$US""picsoak$US$US$file$US$sed_expr$US$desc")
     done
 fi
 
 if [ "$PIC_TARGET_OK" -eq 1 ]; then
-    echo
-    echo "=== ${#PIC_TARGET_MUTATIONS[@]} PIC target mutants (fault + lock-step + target I/O) ==="
+    target_cat="${#PIC_TARGET_MUTATIONS[@]} PIC target mutants (fault + lock-step + target I/O)"
     for entry in "${PIC_TARGET_MUTATIONS[@]}"; do
         IFS=$'\t' read -r file sed_expr variant desc <<< "$entry"
-        run_mutant pictarget "$variant" "$file" "$sed_expr" "$desc"
+        job_specs+=("$target_cat$US""pictarget$US$variant$US$file$US$sed_expr$US$desc")
     done
 fi
+
+# --- dispatch every collected mutant through the bounded-parallel pool ---------
+# Each mutant gets a stable 1-based index (its position in job_specs) so its
+# result files and the ordered replay below line up regardless of finish order.
+echo
+echo "=== running ${#job_specs[@]} mutants across up to $MUTATION_JOBS parallel job(s) ==="
+job_cat=("")   # 1-based; index 0 unused
+idx=0
+for spec in "${job_specs[@]}"; do
+    idx=$((idx + 1))
+    IFS="$US" read -r category kind arg file sed_expr desc <<< "$spec"
+    job_cat[idx]="$category"
+    dispatch "$idx" "$kind" "$arg" "$file" "$sed_expr" "$desc"
+done
+wait   # drain the pool: every mutant has now written its result files
+
+# --- tally + ordered replay ---------------------------------------------------
+# Read the per-mutant result files in index order so the log and the survivor
+# list are deterministic no matter how the pool interleaved the runs.
+killed=0
+survived=0
+errored=0
+SURVIVORS=()
+prev_cat=""
+for idx in $(seq 1 "${#job_specs[@]}"); do
+    stem="$RESULT_DIR/$(printf '%04d' "$idx")"
+    if [ "${job_cat[idx]}" != "$prev_cat" ]; then
+        echo
+        echo "=== ${job_cat[idx]} ==="
+        prev_cat="${job_cat[idx]}"
+    fi
+    if [ ! -f "$stem.status" ]; then
+        # A mutant that produced no result file never ran to completion (killed
+        # background job, disk error): fail closed rather than silently drop it.
+        echo "[$idx] ERROR  no result recorded (mutant did not complete)"
+        errored=$((errored + 1))
+        continue
+    fi
+    cat "$stem.out"
+    case "$(sed -n 1p "$stem.status")" in
+        killed)   killed=$((killed + 1)) ;;
+        survived) survived=$((survived + 1)); SURVIVORS+=("$(sed -n 2p "$stem.status")") ;;
+        errored)  errored=$((errored + 1)) ;;
+        *)        echo "[$idx] ERROR  unrecognized result status" ; errored=$((errored + 1)) ;;
+    esac
+done
 
 echo
 # Make the PIC-shell coverage explicit in the summary: a run on a host without
