@@ -20,6 +20,7 @@ test/
   test_attiny202_build.sh   shared: fail-closed AVR-XT build checks
   test_avr_build_rebuild.sh shared: classic AVR rebuild/partial-output checks
   test_flash_budget.sh      shared: fail-closed flash measurement checks
+  test_pic_build.sh         shared: fail-closed PIC image-generation checks
   test_release_images.sh    shared: exact release artifact verification
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
   test_stack_bound.sh       shared: fail-closed stack evidence checks
@@ -59,15 +60,17 @@ private temporary directory and is removed after each gate run.
 
 ## PIC10F322 target validation layers
 
-The PIC targets are intentionally outside the default AVR `make test` path: XC8,
-the PIC10-12Fxxx DFP, gpsim, and libgpsim may be absent on a normal AVR
-development machine. Targets needing those external PIC tools may skip cleanly;
-the host source-coverage gate requires Bash, a host C compiler, and matching
+Real-tool PIC targets are intentionally outside the default AVR `make test` path:
+XC8, the PIC10-12Fxxx DFP, gpsim, and libgpsim may be absent on a normal AVR
+development machine. The fake-XC8 `test-pic-build` regression is host-only and
+is included in `make test`; targets needing external PIC tools may skip cleanly.
+The host source-coverage gate requires Bash, a host C compiler, and matching
 gcov. CI/release use `STRICT_TOOLS=1` plus the fail-closed aggregate described
 below so a green gate means every PIC layer actually ran.
 
 | layer | target | what it proves | substrate |
 |---|---|---|---|
+| Image generation | `test-pic-build` | Missing, partial, malformed, or non-regular XC8 output cannot become a PIC firmware image. | host fake-XC8 regression |
 | CONFIG word | `pic-test-config` | The XC8-emitted CONFIG word matches the documented oscillator/WDT/BOR/MCLR/LVP design intent. | host parser over HEX |
 | Static analysis | `pic-analyze` | cppcheck + MISRA pass over the PIC shell with real XC8/DFP register headers. | host tools |
 | Shipping-source coverage | `pic-coverage-check-fw` | Every executable line in the real PIC shell, shared pure core, and all three output drivers is host-executed except the documented non-returning reset path. | host gcov with PIC SFR mock |
