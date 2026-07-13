@@ -207,6 +207,13 @@ override STACK_SOURCES := src/bypass_mcu_avr_classic.c src/bypass_pure.c \
 # Firmware is ~46% today; a future accidental bloat passes silently without
 # this gate.
 FLASH_T13_BUDGET ?= 90
+override FLASH_T13_MCU := attiny13a
+override FLASH_T13_BYTES := 1024
+override FLASH_T13_VARIANTS := cd4053 mute relay
+override FLASH_T13_UNKNOWN := $(filter-out $(FLASH_T13_VARIANTS),$(VARIANTS))
+override FLASH_T13_ELFS := $(AVR_BUILD_DIR)/bypass_cd4053.elf \
+                          $(AVR_BUILD_DIR)/bypass_mute.elf \
+                          $(AVR_BUILD_DIR)/bypass_relay.elf
 
 # Missing-tool policy for the optional gates (PIC/XC8, gpsim, cppcheck, python3,
 # the ATtiny_DFP / yasimavr venv, ...). By default a missing tool prints its
@@ -438,7 +445,8 @@ FORCE:
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
         test-attiny202-build test-release-images test-soak-timing \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
-        test-stack-bound test-stack-bound-regression test-flash-budget test-soak \
+        test-stack-bound test-stack-bound-regression test-flash-budget \
+        test-flash-budget-regression test-soak \
         analyze analyze-tidy analyze-cppcheck analyze-deep \
         trace coverage coverage-check coverage-clean
 
@@ -1701,7 +1709,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget test-fault-inject test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1712,7 +1720,7 @@ test-fast: test
 # overrides). Use before tagging a release or signing off for hardware.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing coverage-check
+test-long: clean-tests analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-release-images test-soak-timing coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -1960,24 +1968,29 @@ test-stack-bound-regression:
 # ELF and fail if flash (Program bytes) exceeds FLASH_T13_BUDGET% of 1024 B.
 # Firmware is ~46% today; a future accidental bloat would otherwise pass
 # silently.  Override: make test-flash-budget FLASH_T13_BUDGET=80
-test-flash-budget: $(ALL_ELF13)
-	@echo "=== flash-utilization budget (ATtiny13a: $(FLASH_T13_BUDGET)% of 1024 B) ==="
-	@limit=$$(( 1024 * $(FLASH_T13_BUDGET) / 100 )); \
-	fail=0; \
-	for elf in $(ALL_ELF13); do \
-		used=$$($(SIZE) --mcu=$(MCU) -C $$elf | awk '/^Program:/ {print $$2; exit}'); \
-		if [ -z "$$used" ]; then \
-			echo "WARN: could not read flash size from $$elf"; continue; \
-		fi; \
-		pct=$$(awk -v u="$$used" 'BEGIN {printf "%.1f", u*100/1024}'); \
-		if [ "$$used" -gt "$$limit" ]; then \
-			echo "FAIL: $$elf uses $$used B ($${pct}%) -- exceeds $$limit B ($(FLASH_T13_BUDGET)%)"; \
-			fail=1; \
-		else \
-			echo "OK:   $$elf uses $$used B ($${pct}%) of 1024 B"; \
-		fi; \
-	done; \
-	exit $$fail
+test-flash-budget:
+	@if [ "$(MCU)" != "$(FLASH_T13_MCU)" ] || [ "$(FW_BASE)" != "bypass" ] \
+			|| [ "$(AVR_FW)" != "$(AVR_BUILD_DIR)/bypass" ]; then \
+		echo "FAIL: test-flash-budget requires MCU=attiny13a, FW_BASE=bypass, and the canonical AVR_FW"; \
+		exit 2; \
+	fi; \
+	if [ "$(words $(strip $(VARIANTS)))" -ne 3 ] \
+			|| [ "$(words $(sort $(VARIANTS)))" -ne 3 ] \
+			|| [ "$(words $(FLASH_T13_UNKNOWN))" -ne 0 ]; then \
+		echo "FAIL: test-flash-budget requires the complete cd4053/mute/relay variant matrix"; \
+		exit 2; \
+	fi
+	@$(MAKE) --no-print-directory _test-flash-budget-measure
+
+.PHONY: _test-flash-budget-measure
+_test-flash-budget-measure: $(FLASH_T13_ELFS)
+	./test/check_flash_budget.sh "$(SIZE)" "$(FLASH_T13_MCU)" "$(FLASH_T13_BYTES)" \
+		"$(FLASH_T13_BUDGET)" 3 \
+		$(FLASH_T13_ELFS)
+
+# Fake-size regression checks for missing, malformed, and partial measurements.
+test-flash-budget-regression:
+	./test/test_flash_budget.sh
 
 # simavr integration tests: run the REAL compiled firmware .elf in the
 # instruction-accurate simulator, drive PB0, and assert LED + control-output
@@ -2038,11 +2051,16 @@ $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(eval $(call VARIANT_SIM_X5,$(v),
 # test-sim-t<n>     : all variants on tinyx5 chip <n> (e.g. test-sim-t85)
 # test-sim-secondary: all variants on every tinyx5 chip
 # test-fault-inject : all variants x every tinyx5 chip
-test-sim: $(foreach v,$(VARIANTS),test-sim-$(v))
+# Two recursive phases enforce ordering even under parallel `make test`: finish
+# the validated ELF build first, then allow simulator targets to consume it.
+test-sim:
+	@$(MAKE) --no-print-directory test-flash-budget
+	@$(MAKE) --no-print-directory _test-sim-run SIM_DEFS="$(SIM_DEFS)"
+_test-sim-run: $(foreach v,$(VARIANTS),test-sim-$(v))
 $(foreach n,$(TINYX5),$(eval test-sim-t$(n): $(foreach v,$(VARIANTS),test-sim-$(v)-t$(n))))
 test-sim-secondary: $(foreach n,$(TINYX5),test-sim-t$(n))
 test-fault-inject: $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test-fault-inject-$(v)-t$(n)))
-.PHONY: test-sim test-sim-secondary test-fault-inject \
+.PHONY: test-sim _test-sim-run test-sim-secondary test-fault-inject \
         $(foreach n,$(TINYX5),test-sim-t$(n))
 
 # Mutation testing: inject deliberate faults into the PRODUCTION sources
@@ -2418,7 +2436,8 @@ help:
 	@echo "  test-fuses      decode + verify the design fuse bytes (t13a + tinyx5)"
 	@echo "  test-stack-bound  -fstack-usage static frame bound (limit: STACK_MAX_FRAME=$(STACK_MAX_FRAME) B)"
 	@echo "  test-stack-bound-regression  fail-closed stack-evidence checks"
-	@echo "  test-flash-budget flash-utilization gate: all t13a variants < FLASH_T13_BUDGET=$(FLASH_T13_BUDGET)% of 1 KB"
+	@echo "  test-flash-budget  exact ATtiny13a gate (<= FLASH_T13_BUDGET=$(FLASH_T13_BUDGET)% of 1 KB)"
+	@echo "  test-flash-budget-regression  fail-closed flash-measurement checks"
 	@echo "  test-sim        real firmware in simavr, all variants (ATtiny13a)"
 	@echo "  test-sim-t85 / test-sim-t45  all variants on that tinyx5 chip"
 	@echo "  test-sim-secondary  all variants on every tinyx5 chip"

@@ -16,7 +16,9 @@ test/
   misra_suppressions.txt    shared: documented per-file MISRA deviations
   run_mutation_tests.sh     shared: mutation-testing driver (make test-mutation)
   soak_timing_config.h      shared: native soak timing bounds
+  check_flash_budget.sh     shared: exact flash-budget checker
   test_attiny202_build.sh   shared: fail-closed AVR-XT build checks
+  test_flash_budget.sh      shared: fail-closed flash measurement checks
   test_release_images.sh    shared: exact release artifact verification
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
   test_stack_bound.sh       shared: fail-closed stack evidence checks
