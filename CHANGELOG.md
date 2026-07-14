@@ -38,6 +38,9 @@ file is the human-readable summary of *what changed*.
 - Release creation now runs mutation testing in strict mode
   (`MUTATION_ALLOW_SKIP=0` / `STRICT_TOOLS=1`) so PIC mutants cannot disappear
   behind skipped target tooling.
+- Routine push, scheduled, and manually dispatched CI now runs mutation testing
+  in strict mode on the full PIC-toolchain runner; pull requests retain the
+  faster non-mutation path.
 
 ### Fixed
 - **PIC10F322 weak-pull-up validation now requires the exact RA0-only state.**

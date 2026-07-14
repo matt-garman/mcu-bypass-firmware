@@ -193,6 +193,27 @@ jobs:
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC_DFP="${XC8_DFP_ROOT}/xc8"
 
+      # The mutation driver also runs its core AVR mutants. Keep their extra
+      # toolchain and the minutes-long gate off the pull-request hot path.
+      - name: Install AVR mutation dependencies (apt)
+        if: >-
+          github.event_name == 'push' ||
+          github.event_name == 'schedule' ||
+          github.event_name == 'workflow_dispatch'
+        run: |
+          sudo apt-get install -y \
+            gcc-avr avr-libc simavr libsimavr-dev libelf-dev
+
+      - name: Fail-closed mutation gate (make test-mutation)
+        if: >-
+          github.event_name == 'push' ||
+          github.event_name == 'schedule' ||
+          github.event_name == 'workflow_dispatch'
+        run: |
+          make test-mutation STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 \
+            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC_DFP="${XC8_DFP_ROOT}/xc8"
+
       - name: Upload PIC firmware images
         uses: actions/upload-artifact@v4
         with:
