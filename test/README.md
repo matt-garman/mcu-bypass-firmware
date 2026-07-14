@@ -38,7 +38,9 @@ test/
   avr/     ATtiny-specific tests: the real firmware ELF in simavr, plus fuses.
            test_sim.c           simavr integration    (make test-sim-<variant>)
            test_soak.c          long-duration soak    (make test-soak)
-           test_fuses.c         fuse-byte validation  (make test-fuses)
+           test_fuses.c         all-target fuse bytes (make test-fuses)
+           attiny202_fuses.py   fail-closed simulator fuse configuration
+           test_attiny202_fuses.py  simulator-fuse host regression
 
   pic/     PIC10F322-specific host and gpsim tests.
              fw_coverage/         real PIC source via host SFR mock + gcov

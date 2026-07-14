@@ -11,14 +11,18 @@
 // fat-fingered fuse edit fails CI instead of a bench session.
 //
 // The fuse byte values are injected by the Makefile via -D so there is a single
-// source of truth (the Makefile's LFUSE/HFUSE/LFUSE85/HFUSE85 variables):
-//   -DT13_LFUSE=0x6a -DT13_HFUSE=0xf9 -DT85_LFUSE=0x62 -DT85_HFUSE=0xcc
+// source of truth (the Makefile's classic-AVR and XT_FUSE_* variables):
+//   -DT13_LFUSE=... -DT13_HFUSE=... -DT85_LFUSE=... -DT85_HFUSE=...
+//   -DT202_WDTCFG=... -DT202_BODCFG=... -DT202_OSCCFG=...
+//   -DT202_SYSCFG0=... -DT202_SYSCFG1=... -DT202_APPEND=...
+//   -DT202_BOOTEND=...
 //
 // Datasheet references:
 //   ATtiny13A  rev. 8126F, "Fuse Bytes" (low/high byte bit maps)
 //   ATtiny25/45/85 rev. 2586Q, "Fuse Bytes"
+//   ATtiny202/204/402/404/406 family data sheet, "FUSE - Fuses"
 //
-// AVR fuses are ACTIVE-LOW: a programmed (enabled) bit reads 0.
+// Classic AVR fuses are active-low. AVR-XT fuses use encoded byte fields.
 
 #include <stdint.h>
 #include <stdio.h>
@@ -34,6 +38,27 @@
 #endif
 #ifndef T85_HFUSE
 #  define T85_HFUSE 0xcc
+#endif
+#ifndef T202_WDTCFG
+#  define T202_WDTCFG 0x06
+#endif
+#ifndef T202_BODCFG
+#  define T202_BODCFG 0xe5
+#endif
+#ifndef T202_OSCCFG
+#  define T202_OSCCFG 0x01
+#endif
+#ifndef T202_SYSCFG0
+#  define T202_SYSCFG0 0xf6
+#endif
+#ifndef T202_SYSCFG1
+#  define T202_SYSCFG1 0x07
+#endif
+#ifndef T202_APPEND
+#  define T202_APPEND 0x00
+#endif
+#ifndef T202_BOOTEND
+#  define T202_BOOTEND 0x00
 #endif
 
 static int g_failures = 0;
@@ -52,6 +77,10 @@ static int g_checks = 0;
 // Extract a contiguous bit field [lsb .. lsb+width-1] from a byte.
 static unsigned field(unsigned byte, unsigned lsb, unsigned width) {
     return (byte >> lsb) & ((1u << width) - 1u);
+}
+
+static void verify_byte_range(const char *name, unsigned value) {
+    CHECK(value <= 0xffu, "%s must fit in one fuse byte; got 0x%x", name, value);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -146,19 +175,86 @@ static void verify_t85(void) {
     CHECK(field(hi, 0, 3) == 0x4, "t85 BODLEVEL[2:0] must be 0b100 (4.3V); got 0x%x", field(hi,0,3));
 }
 
+//////////////////////////////////////////////////////////////////////////////
+// ATtiny202 fuse map (AVR-XT encoded fields; bytes are written as named fuse
+// memories by attiny202-fuses).
+//
+// WDTCFG:  WINDOW[7:4]=0 (off), PERIOD[3:0]=6 (256 cycles, fuse-locked).
+// BODCFG:  LVL[7:5]=7 (~4.2V), SAMPFREQ[4]=0,
+//          ACTIVE[3:2]=1 (enabled), SLEEP[1:0]=1 (enabled).
+// OSCCFG:  FREQSEL[1:0]=1 (16 MHz).
+// SYSCFG0: CRCSRC[7:6]=3 (no CRC), RSTPINCFG[3:2]=1 (UPDI).
+// SYSCFG1: SUT[2:0]=7 (64 ms startup delay).
+// APPEND/BOOTEND: both zero (one application section, no boot section).
+//////////////////////////////////////////////////////////////////////////////
+static void verify_t202(void) {
+    unsigned wdtcfg = (unsigned)T202_WDTCFG;
+    unsigned bodcfg = (unsigned)T202_BODCFG;
+    unsigned osccfg = (unsigned)T202_OSCCFG;
+    unsigned syscfg0 = (unsigned)T202_SYSCFG0;
+    unsigned syscfg1 = (unsigned)T202_SYSCFG1;
+    unsigned append = (unsigned)T202_APPEND;
+    unsigned bootend = (unsigned)T202_BOOTEND;
+
+    printf("  ATtiny202:  WDTCFG=0x%02x BODCFG=0x%02x OSCCFG=0x%02x "
+           "SYSCFG0=0x%02x SYSCFG1=0x%02x APPEND=0x%02x BOOTEND=0x%02x\n",
+           wdtcfg, bodcfg, osccfg, syscfg0, syscfg1, append, bootend);
+
+    verify_byte_range("t202 WDTCFG", wdtcfg);
+    verify_byte_range("t202 BODCFG", bodcfg);
+    verify_byte_range("t202 OSCCFG", osccfg);
+    verify_byte_range("t202 SYSCFG0", syscfg0);
+    verify_byte_range("t202 SYSCFG1", syscfg1);
+    verify_byte_range("t202 APPEND", append);
+    verify_byte_range("t202 BOOTEND", bootend);
+
+    // Exact-byte checks catch unexpected reserved-bit changes as well as fields.
+    CHECK(wdtcfg == 0x06u, "t202 WDTCFG must be 0x06; got 0x%02x", wdtcfg);
+    CHECK(bodcfg == 0xe5u, "t202 BODCFG must be 0xe5; got 0x%02x", bodcfg);
+    CHECK(osccfg == 0x01u, "t202 OSCCFG must be 0x01; got 0x%02x", osccfg);
+    CHECK(syscfg0 == 0xf6u, "t202 SYSCFG0 must be 0xf6; got 0x%02x", syscfg0);
+    CHECK(syscfg1 == 0x07u, "t202 SYSCFG1 must be 0x07; got 0x%02x", syscfg1);
+    CHECK(append == 0x00u, "t202 APPEND must be 0x00; got 0x%02x", append);
+    CHECK(bootend == 0x00u, "t202 BOOTEND must be 0x00; got 0x%02x", bootend);
+
+    CHECK(field(wdtcfg, 4, 4) == 0x0u,
+          "t202 WDTCFG.WINDOW must be OFF (0); got 0x%x", field(wdtcfg,4,4));
+    CHECK(field(wdtcfg, 0, 4) == 0x6u,
+          "t202 WDTCFG.PERIOD must be 256 cycles (6); got 0x%x", field(wdtcfg,0,4));
+    CHECK(field(bodcfg, 5, 3) == 0x7u,
+          "t202 BODCFG.LVL must be BODLEVEL7 (~4.2V); got %u", field(bodcfg,5,3));
+    CHECK(field(bodcfg, 4, 1) == 0x0u,
+          "t202 BODCFG.SAMPFREQ must be 0; got %u", field(bodcfg,4,1));
+    CHECK(field(bodcfg, 2, 2) == 0x1u,
+          "t202 BODCFG.ACTIVE must be ENABLED (1); got %u", field(bodcfg,2,2));
+    CHECK(field(bodcfg, 0, 2) == 0x1u,
+          "t202 BODCFG.SLEEP must be ENABLED (1); got %u", field(bodcfg,0,2));
+    CHECK(field(osccfg, 0, 2) == 0x1u,
+          "t202 OSCCFG.FREQSEL must be 16 MHz (1); got %u", field(osccfg,0,2));
+    CHECK(field(syscfg0, 6, 2) == 0x3u,
+          "t202 SYSCFG0.CRCSRC must be no CRC (3); got %u", field(syscfg0,6,2));
+    CHECK(field(syscfg0, 2, 2) == 0x1u,
+          "t202 SYSCFG0.RSTPINCFG must preserve UPDI (1); got %u", field(syscfg0,2,2));
+    CHECK(field(syscfg1, 0, 3) == 0x7u,
+          "t202 SYSCFG1.SUT must be 64 ms (7); got %u", field(syscfg1,0,3));
+}
+
 int main(void) {
     printf("fuse-byte verification:\n");
     verify_t13();
     verify_t85();
+    verify_t202();
 
     // -------------------------------------------------------------------------
     // CRITICAL CROSS-CHECK: the design spec (the design doc / bypass_mcu_avr_classic.c header)
-    // states "enable brown-out detection (BOD) at 4.3V". Verify BOTH parts
-    // actually encode 4.3V BOD, since a wrong BODLEVEL is invisible to every
+    // states "enable brown-out detection (BOD) near the peripheral-safe 4.3V
+    // floor". Verify every part actually encodes that intent, since a wrong
+    // BODLEVEL is invisible to every
     // other test (it only bites as brown-out glitches on real silicon).
     //
     //   ATtiny13a: hfuse BODLEVEL[1:0] = (bit2,bit1); 0b00 == 4.3V.
     //   ATtiny85:  hfuse BODLEVEL[2:0] = (bit2,bit1,bit0); 0b100 == 4.3V.
+    //   ATtiny202: BODCFG LVL[2:0] = bits[7:5]; 0b111 == BODLEVEL7 (~4.2V).
     // -------------------------------------------------------------------------
     {
         unsigned t13_bodlevel = field((unsigned)T13_HFUSE, 1, 2);
@@ -172,6 +268,12 @@ int main(void) {
               "DESIGN INTENT: ATtiny85 BOD must be 4.3V (BODLEVEL=0b100). "
               "Configured hfuse=0x%02x has BODLEVEL=0x%x",
               (unsigned)T85_HFUSE, t85_bodlevel);
+
+        unsigned t202_bodlevel = field((unsigned)T202_BODCFG, 5, 3);
+        CHECK(t202_bodlevel == 0x7,
+              "DESIGN INTENT: ATtiny202 BOD must be BODLEVEL7 (~4.2V). "
+              "Configured BODCFG=0x%02x has LVL=0x%x",
+              (unsigned)T202_BODCFG, t202_bodlevel);
     }
 
     printf("fuse checks: %d checks, %d failures\n", g_checks, g_failures);

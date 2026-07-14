@@ -10,6 +10,8 @@ log="$work/compiler.log"
 checks=0
 unset HOST_DEFS SIM_DEFS MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES SIZE
 unset AVR_BUILD_DIR AVR_FW FW_BASE AVR_REBUILD_PREREQ VARIANTS MCU
+unset XT_FUSE_WDTCFG XT_FUSE_BODCFG XT_FUSE_OSCCFG XT_FUSE_SYSCFG0
+unset XT_FUSE_SYSCFG1 XT_FUSE_APPEND XT_FUSE_BOOTEND
 unset FAKE_COMPILER_MODE
 mkdir -p "$repo/test/host" "$repo/test/avr" "$repo/src" \
 	"$repo/build_avr_classic" "$tools"
@@ -37,7 +39,11 @@ case "$out" in
 	*test_fuses.tmp.*)
 		for define in \
 			-DT13_LFUSE=0x4a -DT13_HFUSE=0xf9 \
-			-DT85_LFUSE=0x62 -DT85_HFUSE=0xcc; do
+			-DT85_LFUSE=0x62 -DT85_HFUSE=0xcc \
+			-DT202_WDTCFG=0x06 -DT202_BODCFG=0xE5 \
+			-DT202_OSCCFG=0x01 -DT202_SYSCFG0=0xF6 \
+			-DT202_SYSCFG1=0x07 -DT202_APPEND=0x00 \
+			-DT202_BOOTEND=0x00; do
 			case " $* " in *" $define "*) ;; *) status=1 ;; esac
 		done
 		;;
@@ -62,7 +68,8 @@ EOF
 chmod 750 "$tools/size" "$tools/readelf" "$repo/test/check_flash_budget.sh"
 
 files=(
-	test/host/test_logic_host.c test/avr/test_sim.c test/avr/test_fuses.c test/model_step.h
+	test/host/test_logic_host.c test/avr/test_sim.c test/avr/test_fuses.c
+	test/model_step.h
 	test/bypass_config_host.h test/bypass_output_host.h
 	src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h
 	src/bypass_output_common.h src/bypass_pins_avr_classic.h
@@ -77,6 +84,8 @@ for file in "${files[@]}"; do
 	mkdir -p "$repo/${file%/*}"
 	: > "$repo/$file"
 done
+cp "$ROOT/test/avr/attiny202_fuses.py" "$ROOT/test/avr/test_attiny202_fuses.py" \
+	"$repo/test/avr/"
 for image in bypass_cd4053.elf bypass_mute.elf bypass_relay.elf \
 	bypass_cd4053_t85.elf; do
 	printf 'firmware ELF\n' > "$repo/build_avr_classic/$image"
@@ -106,7 +115,11 @@ run_make test-fuses >/dev/null
 	|| { printf 'FAIL: initial fuse configuration did not compile once\n' >&2; exit 1; }
 checks=$((checks + 1))
 if run_make test-fuses LFUSE=0x00 HFUSE=0x00 \
-		LFUSE_X5=0x00 HFUSE_X5=0x00 >/dev/null 2>&1; then
+		LFUSE_X5=0x00 HFUSE_X5=0x00 \
+		XT_FUSE_WDTCFG=0x00 XT_FUSE_BODCFG=0x00 \
+		XT_FUSE_OSCCFG=0x00 XT_FUSE_SYSCFG0=0x00 \
+		XT_FUSE_SYSCFG1=0x00 XT_FUSE_APPEND=0x01 \
+		XT_FUSE_BOOTEND=0x01 >/dev/null 2>&1; then
 	printf 'FAIL: unsafe fuse overrides reused a stale checker\n' >&2
 	exit 1
 fi
@@ -115,6 +128,13 @@ fi
 	&& grep -q -- '-DT13_HFUSE=0x00' "$log" \
 	&& grep -q -- '-DT85_LFUSE=0x00' "$log" \
 	&& grep -q -- '-DT85_HFUSE=0x00' "$log" \
+	&& grep -q -- '-DT202_WDTCFG=0x00' "$log" \
+	&& grep -q -- '-DT202_BODCFG=0x00' "$log" \
+	&& grep -q -- '-DT202_OSCCFG=0x00' "$log" \
+	&& grep -q -- '-DT202_SYSCFG0=0x00' "$log" \
+	&& grep -q -- '-DT202_SYSCFG1=0x00' "$log" \
+	&& grep -q -- '-DT202_APPEND=0x01' "$log" \
+	&& grep -q -- '-DT202_BOOTEND=0x01' "$log" \
 	|| { printf 'FAIL: current fuse overrides did not reach the checker compiler\n' >&2; exit 1; }
 checks=$((checks + 1))
 run_make test-fuses >/dev/null

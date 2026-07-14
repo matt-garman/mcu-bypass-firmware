@@ -25,18 +25,18 @@
 # floating ('Z', pulled high). The status LED is PA1, driven High when the
 # effect is engaged.
 #
-# FUSE PROGRAMMING: the firmware ELF carries no .fuse section, and yasimavr's
-# WDT reads WDTCFG at reset to set the period + STATUS.LOCK. The shell's per-tick
-# sanity gate (hw_critical_sfrs_intact) force-resets unless WDT.CTRLA == 0x06 and
-# STATUS.LOCK is set, so the harness MUST program WDTCFG = 0x06 (the same byte
-# `make attiny202-fuses` burns). The clean, self-contained way to do that -- with
-# no edit to the installed yasimavr config -- is to build the device from a
-# descriptor whose fuse factory-values we patch (see build_device below). This
-# replaces the spike's YAML edit.
+# FUSE PROGRAMMING: the firmware ELF carries no .fuse section. The Makefile
+# therefore passes all seven production XT_FUSE_* bytes as required environment
+# variables. attiny202_fuses.py validates them and patches a private copy of the
+# yasimavr descriptor's factory values before reset. Missing, malformed,
+# incomplete, or out-of-range configuration fails instead of silently falling
+# back to simulator defaults.
 
 import os
 import subprocess
 import sys
+
+import attiny202_fuses as Fuse
 
 try:
     from yasimavr.device_library.descriptors import DeviceDescriptor
@@ -63,9 +63,10 @@ PIN_LED = "PA1"                 # driven High when the effect is engaged
 PRESSED_THRESH_MS = 8           # bypass_config PRESSED_THRESH (ticks == ms here)
 RELEASE_THRESH_MS = 25          # bypass_config RELEASE_THRESH
 
-# Fuse layout: WDTCFG is fuse index 0. 0x06 = PERIOD 256CLK, WINDOW OFF, LOCK.
-WDTCFG_FUSE_INDEX = 0
-WDTCFG_LOCKED = 0x06
+# Production values are required from the Makefile for every driver. Keep the
+# WDTCFG alias used by functional assertions and critical_sfrs_intact().
+FUSE_VALUES = Fuse.read_fuses(os.environ)
+WDTCFG_LOCKED = FUSE_VALUES["WDTCFG"]
 
 # ATtiny202 register addresses (data space) the harness inspects.
 REG_WDT_CTRLA = 0x0100
@@ -172,7 +173,7 @@ class Sim:
 
     StateEnum = _core.Pin.StateEnum
 
-    def __init__(self, elf_path, f_cpu=F_CPU_HZ, wdtcfg=WDTCFG_LOCKED):
+    def __init__(self, elf_path, f_cpu=F_CPU_HZ):
         self.f_cpu = f_cpu
         self.elf_path = elf_path
 
@@ -184,13 +185,14 @@ class Sim:
         self.addr_ctx = _symbol_addr(syms, "ctx_") & DATA_ADDR_MASK
         self.addr_timer_isr = _symbol_addr(syms, "timer_isr_called_") & DATA_ADDR_MASK
 
-        # Build the device from a descriptor with a patched WDTCFG factory fuse
-        # (see the module header). create_from_model returns a fresh descriptor,
-        # so mutating it here does not leak into other Sim instances.
+        # Build the device from a descriptor with every production fuse applied
+        # (see the module header). create_from_model returns a fresh descriptor;
+        # apply_factory_values also copies its list, so no Sim instance can leak
+        # fuse changes into another.
         desc = DeviceDescriptor.create_from_model("attiny202")
-        fuses = list(desc.fuses["factory_values"])
-        fuses[WDTCFG_FUSE_INDEX] = wdtcfg
-        desc.fuses["factory_values"] = fuses
+        desc.fuses["factory_values"] = Fuse.apply_factory_values(
+            desc.fuses["factory_values"], FUSE_VALUES
+        )
         self.dev = XT_DeviceBuilder.build_device(desc, _tiny0_mod.dev_tiny_0series)
 
         # The SimLoop constructor initialises the device; firmware must load

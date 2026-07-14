@@ -31,6 +31,9 @@ file is the human-readable summary of *what changed*.
 - Mutation coverage for PIC target-level properties, including exact `WPUA`
   pull-up state, collapsed TMR2IF cadence, ANSELA output masks, muted-CD4053
   startup ordering, mute-window duration, and relay pulse duration.
+- Fail-closed ATtiny202 production-fuse verification for `WDTCFG`, `BODCFG`,
+  `OSCCFG`, `SYSCFG0/1`, `APPEND`, and `BOOTEND`, including host regressions
+  proving yasimavr receives the same complete Makefile-defined fuse set.
 
 ### Changed
 - CI and the release pipeline now run `make pic-test-target-variants

@@ -1457,6 +1457,26 @@ attiny202: | $(XT_BUILD_DIR)
 	done; \
 	exit $$fail
 
+# --- ATtiny202 production fuses (programmer + checker + simulator) -----------
+# One source of truth for every consumer. test-fuses injects these bytes into
+# the host checker, attiny202-fuses writes them to silicon, and XT_FUSE_ENV
+# passes them to yasimavr's factory-fuse descriptor without Python-side defaults.
+XT_FUSE_WDTCFG  ?= 0x06
+XT_FUSE_BODCFG  ?= 0xE5
+XT_FUSE_OSCCFG  ?= 0x01
+XT_FUSE_SYSCFG0 ?= 0xF6
+XT_FUSE_SYSCFG1 ?= 0x07
+XT_FUSE_APPEND  ?= 0x00
+XT_FUSE_BOOTEND ?= 0x00
+
+XT_FUSE_ENV = ATTINY202_FUSE_WDTCFG=$(XT_FUSE_WDTCFG) \
+              ATTINY202_FUSE_BODCFG=$(XT_FUSE_BODCFG) \
+              ATTINY202_FUSE_OSCCFG=$(XT_FUSE_OSCCFG) \
+              ATTINY202_FUSE_SYSCFG0=$(XT_FUSE_SYSCFG0) \
+              ATTINY202_FUSE_SYSCFG1=$(XT_FUSE_SYSCFG1) \
+              ATTINY202_FUSE_APPEND=$(XT_FUSE_APPEND) \
+              ATTINY202_FUSE_BOOTEND=$(XT_FUSE_BOOTEND)
+
 # --- ATtiny202 yasimavr dynamic-simulation harness ---------------------------
 # The AVR-XT analogue of the AVR-classic simavr suite (test-sim / test-soak /
 # fault-inject) and the PIC libgpsim track (pic-test-gpsim / -soak / -fault):
@@ -1474,8 +1494,10 @@ attiny202: | $(XT_BUILD_DIR)
 # the venv explicitly (a fetch step) so a skip there cannot mask a real failure.
 #
 # XT_SIM_VARIANT selects one variant (cd4053/mute/relay); empty
-# (the default) runs every built variant. The drivers import test/avr/
-# sim_attiny202.py, so the recipes put that dir on PYTHONPATH.
+# (the default) runs every built variant. Each target first runs test-fuses, so
+# complete but non-production overrides cannot reach a simulator that does not
+# behaviorally observe every fuse. The drivers import test/avr/sim_attiny202.py,
+# so the recipes put that dir on PYTHONPATH.
 YASIMAVR_VENV ?= third_party/yasimavr/venv
 YASIMAVR_PY    = $(YASIMAVR_VENV)/bin/python
 XT_SIM_VARIANT ?=
@@ -1501,7 +1523,7 @@ fi
 endef
 
 .PHONY: attiny202-sim
-attiny202-sim: attiny202
+attiny202-sim: test-fuses attiny202
 	@$(yasimavr_skip_if_absent); \
 	vars="$(XT_SIM_VARIANT)"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
 	fail=0; ran=0; \
@@ -1512,7 +1534,8 @@ attiny202-sim: attiny202
 		fi; \
 		echo "--- ATtiny202 sim (functional): variant=$$v ---"; \
 		ran=1; \
-		PYTHONPATH=test/avr $(YASIMAVR_PY) $(XT_SIM_DRIVER) "$$elf" || fail=1; \
+		PYTHONPATH=test/avr $(XT_FUSE_ENV) \
+		$(YASIMAVR_PY) $(XT_SIM_DRIVER) "$$elf" || fail=1; \
 	done; \
 	if [ "$$ran" = 0 ]; then echo "no ATtiny202 images built; nothing to simulate."; fi; \
 	exit $$fail
@@ -1523,7 +1546,7 @@ attiny202-sim: attiny202
 # lost liveness. Mirror image of the soak: a reset is the PASS here. Same guard /
 # skip / variant-selection contract as attiny202-sim.
 .PHONY: attiny202-fault
-attiny202-fault: attiny202
+attiny202-fault: test-fuses attiny202
 	@$(yasimavr_skip_if_absent); \
 	vars="$(XT_SIM_VARIANT)"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
 	fail=0; ran=0; \
@@ -1534,7 +1557,8 @@ attiny202-fault: attiny202
 		fi; \
 		echo "--- ATtiny202 fault-injection: variant=$$v ---"; \
 		ran=1; \
-		PYTHONPATH=test/avr $(YASIMAVR_PY) $(XT_FAULT_DRIVER) "$$elf" || fail=1; \
+		PYTHONPATH=test/avr $(XT_FUSE_ENV) \
+		$(YASIMAVR_PY) $(XT_FAULT_DRIVER) "$$elf" || fail=1; \
 	done; \
 	if [ "$$ran" = 0 ]; then echo "no ATtiny202 images built; nothing to fault-inject."; fi; \
 	exit $$fail
@@ -1545,7 +1569,7 @@ attiny202-fault: attiny202
 # LED. Mirror image of the fault test: a reset is a FAILURE. Non-fatal, logged,
 # cumulative. Standalone; same guard / skip / variant-selection as the others.
 .PHONY: attiny202-soak
-attiny202-soak: attiny202
+attiny202-soak: test-fuses attiny202
 	@$(yasimavr_skip_if_absent); \
 	vars="$(XT_SIM_VARIANT)"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
 	fail=0; ran=0; \
@@ -1557,6 +1581,7 @@ attiny202-soak: attiny202
 		echo "--- ATtiny202 soak: variant=$$v duration=$(XT_SOAK_DURATION_MS) ms ---"; \
 		ran=1; \
 		PYTHONPATH=test/avr \
+		$(XT_FUSE_ENV) \
 		ATTINY202_SOAK_DURATION_MS=$(XT_SOAK_DURATION_MS) \
 		ATTINY202_SOAK_LIVENESS_INTERVAL_MS=$(XT_SOAK_LIVENESS_INTERVAL_MS) \
 		ATTINY202_SOAK_PROGRESS_INTERVAL_MS=$(XT_SOAK_PROGRESS_INTERVAL_MS) \
@@ -1571,22 +1596,12 @@ attiny202-soak: attiny202
 # most open path, matching this project's open-toolchain preference); override
 # XT_PROGRAMMER / XT_UPDI_PORT for jtag2updi, an Atmel-ICE, pymcuprog, etc.
 #
-# Fuse bytes: see the fuse table in the src/bypass_mcu_avr_xt.c header. avrdude
-# exposes the AVR8X fuses as named memories. CONFIRM XT_FUSE_BODCFG's BOD level
-# against the ATtiny202 datasheet -- only some levels are characterised on the
-# 0-series (0xE5 selects BODLEVEL7 ~4.2V, ACTIVE+SLEEP enabled).
+# Fuse bytes are defined once above the simulator harness and decoded by
+# test-fuses. avrdude exposes the AVR8X fuses as named memories.
 XT_PROGRAMMER   ?= serialupdi
 XT_UPDI_PORT    ?= /dev/ttyUSB0
 XT_AVRDUDE_PART ?= t202
 XT_AVRDUDE_FLAGS = -c $(XT_PROGRAMMER) -P $(XT_UPDI_PORT) -p $(XT_AVRDUDE_PART)
-
-XT_FUSE_WDTCFG  ?= 0x06
-XT_FUSE_BODCFG  ?= 0xE5
-XT_FUSE_OSCCFG  ?= 0x01
-XT_FUSE_SYSCFG0 ?= 0xF6
-XT_FUSE_SYSCFG1 ?= 0x07
-XT_FUSE_APPEND  ?= 0x00
-XT_FUSE_BOOTEND ?= 0x00
 
 .PHONY: attiny202-fuses attiny202-flash attiny202-program
 attiny202-fuses:
@@ -1684,11 +1699,12 @@ attiny202-analyze-misra: src/bypass_mcu_avr_xt.c $(XT_HEADERS) $(MISRA_ADDON) $(
 	rm -f $$out *.dump *.ctu-info cppcheck-addon-ctu-file-list*; \
 	echo "MISRA-C:2012 (ATtiny202 shell): clean (documented deviations waived per MISRA_COMPLIANCE.md)"
 
-# Aggregate: every ATtiny202 pre-hardware check (smoke + build/budget + analysis).
+# Aggregate: every ATtiny202 pre-hardware check (fuses + smoke + build/budget +
+# analysis).
 # STANDALONE -- NOT part of `make test` (no AVR8X simulator; DFP may be absent in
 # CI). Each sub-target skips cleanly when its tool/DFP is missing.
 .PHONY: attiny202-test
-attiny202-test: attiny202-smoke attiny202 attiny202-analyze
+attiny202-test: test-fuses attiny202-smoke attiny202 attiny202-analyze
 	@echo "=== all ATtiny202 pre-hardware checks complete ==="
 
 # ============================================================================
@@ -1931,14 +1947,15 @@ test-cbmc:
 		echo "enable SAT/SMT proof of the real bypass_pure.c source."; \
 	fi
 
-# Fuse-byte verification: decode the EXACT lfuse/hfuse bytes this Makefile will
-# burn (LFUSE/HFUSE for t13a, LFUSE_X5/HFUSE_X5 for the tinyx5 family) and assert
-# they match the documented design intent (clock, BOD 4.3V, ISP/RESET preserved,
-# etc). Catches a wrong fuse before it reaches silicon -- invisible to every
-# other test. The tinyx5 fuse bytes are identical across ATtiny25/45/85, so the
+# Fuse-byte verification: decode the EXACT bytes this Makefile will burn for
+# ATtiny13a, tinyx5, and ATtiny202 and assert they match the documented design
+# intent (clock, BOD, watchdog, reset/programming access, and flash sections).
+# The Python companion also proves yasimavr consumes all seven ATtiny202 bytes
+# fail-closed. The tinyx5 fuse bytes are identical across ATtiny25/45/85, so the
 # checker's T85_* bytes cover the whole family.
-test-fuses: test/avr/test_fuses
+test-fuses: test/avr/test_fuses test/avr/test_attiny202_fuses.py test/avr/attiny202_fuses.py
 	./test/avr/test_fuses
+	$(XT_FUSE_ENV) PYTHONPATH=test/avr python3 test/avr/test_attiny202_fuses.py
 
 # Build rule for the fuse checker. Fuse byte values are injected from the
 # Makefile variables (single source of truth) via -D. FORCE makes command-line
@@ -1952,6 +1969,10 @@ test/avr/test_fuses: test/avr/test_fuses.c Makefile FORCE
 	if ! $(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) \
 			-DT13_LFUSE=$(LFUSE) -DT13_HFUSE=$(HFUSE) \
 			-DT85_LFUSE=$(LFUSE_X5) -DT85_HFUSE=$(HFUSE_X5) \
+			-DT202_WDTCFG=$(XT_FUSE_WDTCFG) -DT202_BODCFG=$(XT_FUSE_BODCFG) \
+			-DT202_OSCCFG=$(XT_FUSE_OSCCFG) -DT202_SYSCFG0=$(XT_FUSE_SYSCFG0) \
+			-DT202_SYSCFG1=$(XT_FUSE_SYSCFG1) -DT202_APPEND=$(XT_FUSE_APPEND) \
+			-DT202_BOOTEND=$(XT_FUSE_BOOTEND) \
 			$< -o "$$tmp"; then \
 		exit 1; \
 	fi; \
@@ -2519,7 +2540,7 @@ help:
 	@echo "                   avrxmega3 + $(XT_FLASH_BYTES) B budget (standalone; skips if XT_DFP absent)"
 	@echo "  attiny202        build all variants for ATtiny202 + 2 KB flash-budget gate"
 	@echo "  attiny202-analyze  cppcheck + MISRA on the AVR-XT shell (DFP+avr-libc; standalone)"
-	@echo "  attiny202-test   all ATtiny202 pre-hardware checks (smoke + build + analyze)"
+	@echo "  attiny202-test   all ATtiny202 pre-hardware checks (fuses + smoke + build + analyze)"
 	@echo "  attiny202-sim    yasimavr functional test: drive footswitch, assert LED toggles"
 	@echo "                   (standalone; needs scripts/fetch_yasimavr.sh; XT_SIM_VARIANT=)"
 	@echo "  attiny202-fault  yasimavr fault-inject: corrupt a guarded SFR/state, assert the"
@@ -2536,7 +2557,7 @@ help:
 	@echo "  test-symbolic   exhaustive single-step property proof of step()"
 	@echo "  test-symbolic-klee  same properties under KLEE (if installed)"
 	@echo "  test-cbmc       CBMC SAT/SMT proof of the real bypass_pure.c (if installed)"
-	@echo "  test-fuses      decode + verify the design fuse bytes (t13a + tinyx5)"
+	@echo "  test-fuses      decode + verify design fuse bytes (t13a + tinyx5 + ATtiny202)"
 	@echo "  test-stack-bound  -fstack-usage static frame bound (limit: STACK_MAX_FRAME=$(STACK_MAX_FRAME) B)"
 	@echo "  test-stack-bound-regression  fail-closed stack-evidence checks"
 	@echo "  test-flash-budget  exact ATtiny13a gate (<= FLASH_T13_BUDGET=$(FLASH_T13_BUDGET)% of 1 KB)"

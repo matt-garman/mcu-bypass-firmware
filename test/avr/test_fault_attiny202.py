@@ -34,7 +34,7 @@
 # firmware behaviour that leads into it. (The LIVE path resets from SLEEP, which
 # the simulator DOES advance through, so there the reset is directly observed.)
 #
-# Usage:   python3 test_fault_attiny202.py <firmware.elf>
+# Usage:   make attiny202-fault  (supplies the ELF and required production fuses)
 # Exit:    0 = PASS, 1 = a case failed, 2 = bad invocation / missing image.
 
 import sys

@@ -13,7 +13,7 @@
 # were the WINDOW=OFF bug present, the fuse-locked WDT would reset ~every pet and
 # the LED would never engage, so the toggle assertions below would fail.
 #
-# Usage:   python3 test_sim_attiny202.py <firmware.elf>
+# Usage:   make attiny202-sim  (supplies the ELF and required production fuses)
 # Exit:    0 = PASS, 1 = a check failed, 2 = bad invocation / missing image.
 
 import sys

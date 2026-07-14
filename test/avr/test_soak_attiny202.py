@@ -30,7 +30,7 @@
 #   ATTINY202_SOAK_LIVENESS_INTERVAL_MS between responsiveness checks (default 60 s)
 #   ATTINY202_SOAK_PROGRESS_INTERVAL_MS between progress lines     (default 10 min)
 #
-# Usage:   python3 test_soak_attiny202.py <firmware.elf>
+# Usage:   make attiny202-soak  (supplies the ELF and required production fuses)
 # Exit:    0 = PASS, 1 = one or more liveness failures, 2 = bad invocation.
 
 import os
