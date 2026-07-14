@@ -27,6 +27,7 @@ file is the human-readable summary of *what changed*.
 - PIC gpsim register-level coverage now includes a mid-debounce `PRESS1_EARLY`
   sample and full BYPASS `LATA` assertions, catching a collapsed 1 ms tick gate
   and checking all settled analog-switch control bits in both directions.
+- Mutation coverage explicitly rejects the wrong unified x4053 BYPASS polarity.
 - Mutation coverage for PIC target-level properties, including exact `WPUA`
   pull-up state, collapsed TMR2IF cadence, ANSELA output masks, muted-CD4053
   startup ordering, mute-window duration, and relay pulse duration.
