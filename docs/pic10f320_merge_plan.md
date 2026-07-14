@@ -289,10 +289,10 @@ Legend: **FOLD** = collapse to one shared copy (parent's wins) · **DROP**
    target/soak mutants. Routine hosted full-tool CI and release must invoke the
    PIC mutation set with `MUTATION_ALLOW_SKIP=0`; narrow any documentation that
    currently claims this is already true.
-7. **Decide ATtiny202 release status.** It is validated in normal CI but omitted
-   from current release creation/reproduction despite "every MCU" language.
-   Either complete its release lane or label it development-only/non-release
-   before claiming that unified releases cover all targets.
+7. **Record ATtiny202 release status.** It is development-only/non-release. Keep
+   its normal CI lane, but intentionally omit it from release creation,
+   reproduction, images, and soak evidence, and scope unified-release claims to
+   release-supported targets.
 8. **Repair release/changelog baselines.** Restore missing parent v0.9.3/v0.9.4
    changelog entries and classify the child's v0.9.4/v0.9.5 changes under their
    historical versions. Choose `v0.10.0` (preferred) or another version greater
@@ -317,8 +317,8 @@ lane green. Do not delete a child reference implementation merely because the
 parent's unrelated tests still pass.
 
 **Phase 0 — Decisions, audit, and baseline.** Complete §6. Resolve the
-three-variant contract, ATtiny202 release status, aggregate semantics,
-mutation topology, first unified version, and full file-disposition manifest.
+three-variant contract, documented ATtiny202 non-release status, aggregate
+semantics, mutation topology, first unified version, and full file-disposition manifest.
 Record clean parent and child evidence and the parent base SHA. No import yet.
 
 **Phase 1 — Provenance import, inert.** Fetch and verify the pinned child
@@ -381,8 +381,9 @@ set, exactly three PIC10F320 release images, the dedicated build/reproduction
 directory, all release-script metadata and validation, three per-variant
 24-hour-equivalent soaks, strict target/mutation gates, generated documentation,
 and tag-workflow reproduction. Add negative tests showing that global omission
-of PIC10F320 from all observed image sets fails. Resolve ATtiny202's release
-lane or narrow the release scope before this phase is green.
+of PIC10F320 from all observed image sets fails. Keep the development-only
+ATtiny202 lane outside the canonical release set and scope all release claims
+accordingly before this phase is green.
 
 **Phase 7 — Documentation and incoming-tree cleanup.** Land the caveat and
 validation documentation, repair historical changelogs, update every public
@@ -509,10 +510,9 @@ the assurance comparison rather than restating it.
   (constrained target)" sub-lane within each entry rather than a
   separate changelog. First repair both existing timelines so historical
   v0.9.4/v0.9.5 work is not misreported as new unified-release work.
-- Resolve ATtiny202 release status before claiming a release covers every MCU.
-  If supported for release, add its images, fuse/config evidence, target gates,
-  reproduction, and soaks to the same canonical contract. Otherwise explicitly
-  label it non-release and narrow "all targets/every MCU" language.
+- ATtiny202 is development-only/non-release. Keep its normal CI coverage, omit
+  its images and soak evidence from the canonical release contract, and scope
+  "all targets/every MCU" language to release-supported targets.
 
 ---
 
@@ -590,7 +590,7 @@ the assurance comparison rather than restating it.
 - [ ] The first unified release version is greater than both historical lines
       (preferably `v0.10.0`), and parent/child changelogs accurately classify
       all v0.9.x work before the unified entry.
-- [ ] ATtiny202's release-supported or development-only status is explicit and
+- [x] ATtiny202's development-only/non-release status is explicit and
       implementation, canonical image set, soak claims, and documentation agree.
 - [ ] `docs/pic10f320_special_case.md` is the sole assurance-caveat narrative;
       README, design, feasibility, validation, toolchain, MISRA, TODO, release,
@@ -666,7 +666,7 @@ unarchiving as the normal rollback path.
    objects means accepting that ordinary `git log --follow` may not cross the
    subtree merge. Documented `-m --follow`, namespaced tags, and the archived
    child repository are the provenance controls.
-10. **Existing parent release ambiguity.** ATtiny202's current CI/release
-    mismatch predates this merge but becomes visible when claiming one project
-    releases all targets. The explicit Phase 0 decision prevents PIC10F320 from
-    deepening that ambiguity.
+10. **Existing parent release scope.** ATtiny202 is explicitly development-only
+    and remains in normal CI while release creation excludes it. Preserve that
+    boundary so PIC10F320 integration does not reintroduce ambiguous "all
+    targets" claims.

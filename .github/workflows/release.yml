@@ -9,7 +9,8 @@ name: Release
 # release/<tag>/ with a SHA256SUMS manifest.
 #
 # When the tag lands here, this workflow:
-#   1. rebuilds every image from the TAGGED source on a clean, pinned runner;
+#   1. rebuilds every release image from the TAGGED source on a clean, pinned
+#      runner (AVR Classic + PIC10F322; ATtiny202 is development-only);
 #   2. REPRODUCIBILITY GATE: asserts the committed files, SHA256SUMS entries, and
 #      freshly built files are the same complete set with byte-identical contents
 #      (fails the release if not);
@@ -118,7 +119,9 @@ jobs:
           echo "== cbmc ==" && cbmc --version
 
       # --- rebuild from the tag --------------------------------------------
-      - name: Rebuild all images from the tagged source
+      # build_avr_xt is intentionally absent: ATtiny202 is development-only and
+      # not part of the release image set or release qualification.
+      - name: Rebuild all release images from the tagged source
         run: |
           make clean
           make all13 all85 all45
@@ -131,9 +134,10 @@ jobs:
           set -euo pipefail
           dir='${{ steps.rel.outputs.dir }}'
 
-          # Enforce three-way equality: actual committed .hex files, checksum
-          # entries, and fresh build output. Hash-only verification misses
-          # unlisted files that the publication glob would otherwise upload.
+          # Enforce three-way equality for release images: actual committed .hex
+          # files, checksum entries, and fresh build output. Hash-only
+          # verification misses unlisted files that the publication glob would
+          # otherwise upload.
           scripts/verify-release-images.sh "$dir" build_avr_classic build_pic
 
           # Freeze the verified release assets before later test targets run.

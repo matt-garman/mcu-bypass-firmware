@@ -222,11 +222,12 @@ jobs:
           if-no-files-found: error
 
   # -------------------------------------------------------------------------
-  # ATtiny202 (AVR-XT) gate: the AVR-XT counterpart of the `pic` job. It is the
-  # ONLY place the ATtiny202 is built in CI (build-matrix covers the classic
-  # parts), so it doubles as the 202 build + 2 KB flash-budget gate, then runs
-  # the yasimavr dynamic harness -- functional (attiny202-sim), fault injection
-  # (attiny202-fault), and a short soak smoke (attiny202-soak).
+  # Development-only ATtiny202 (AVR-XT) gate: the AVR-XT counterpart of the
+  # `pic` job. It is the ONLY place the ATtiny202 is built in CI (build-matrix
+  # covers the release-supported classic parts), so it doubles as the 202 build
+  # + 2 KB flash-budget gate, then runs the yasimavr dynamic harness --
+  # functional (attiny202-sim), fault injection (attiny202-fault), and a short
+  # soak smoke (attiny202-soak). This lane is not release qualification.
   #
   # Two out-of-apt inputs, both fetched + version-pinned by repo scripts and
   # cached: the ATtiny_DFP device files (scripts/fetch_attiny_dfp.sh -- a static
@@ -241,7 +242,7 @@ jobs:
   # on nothing, and each run step greps for the expected number of PASS lines as
   # belt-and-suspenders against a partial (per-variant) skip.
   attiny202:
-    name: attiny202 (yasimavr sim/fault/soak)
+    name: attiny202 development (yasimavr sim/fault/soak)
     runs-on: ubuntu-24.04
     needs: pic   # gate behind the fast PIC job (see `verify`)
     env:
@@ -347,8 +348,9 @@ jobs:
           [ "$p" -eq "$n" ] || { echo "::error::attiny202-fault: $p/$n variants PASSed (skip or fail)"; exit 1; }
 
       # Short soak smoke (5 min simulated ~= 2 s/variant) -- proves the soak
-      # harness + liveness path work on every variant. The full 1 h / 24 h soak
-      # stays a deliberate local/release run via XT_SOAK_DURATION_MS.
+      # harness + liveness path work on every variant. Longer soaks remain an
+      # optional local development run via XT_SOAK_DURATION_MS; they are not
+      # part of release qualification.
       - name: Soak smoke (make attiny202-soak, 5 min simulated)
         run: |
           set -o pipefail
@@ -358,17 +360,18 @@ jobs:
           p=$(grep -c "SOAK PASS" soak.log || true)
           [ "$p" -eq "$n" ] || { echo "::error::attiny202-soak: $p/$n variants PASSed (skip or fail)"; exit 1; }
 
-      - name: Upload ATtiny202 firmware images
+      - name: Upload development-only ATtiny202 images
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-attiny202
+          name: development-attiny202
           path: build_avr_xt/*.hex
           if-no-files-found: error
 
   # -------------------------------------------------------------------------
-  # Visible build matrix: prove every variant builds for every supported MCU
-  # and publish the firmware images + size reports. `make all13/all45/all85`
-  # build all variants for that part; the size<n> target prints flash/RAM.
+  # Visible build matrix: prove every variant builds for every release-supported
+  # AVR Classic MCU and publish the firmware images + size reports. `make
+  # all13/all45/all85` builds all variants for that part; the size<n> target
+  # prints flash/RAM.
   # -------------------------------------------------------------------------
   build-matrix:
     name: build (${{ matrix.mcu }})

@@ -1280,7 +1280,7 @@ attiny202-smoke: $(XT_SMOKE_SRC) | $(AVR_BUILD_DIR)
 	echo "OK:   avrxmega3, $(XT_SMOKE_ELF) uses $$used B ($${pct}%) of $(XT_FLASH_BYTES) B"
 
 # ============================================================================
-# BUILD -- ATtiny202 (AVR-XT / avrxmega3) firmware  [Increment 2]
+# BUILD -- ATtiny202 (AVR-XT / avrxmega3) development firmware  [non-release]
 # ============================================================================
 #
 # The real firmware build (the smoke gate above only proves the toolchain). The
@@ -2513,7 +2513,7 @@ help:
 	@echo "  pic-test-target fail-closed fault + lock-step + target-I/O for one PIC variant"
 	@echo "                  (PIC_TARGET_VARIANT); pic-test-target-variants runs all variants"
 	@echo "  program-pic     flash one PIC variant to hardware (VARIANT=, PIC_PROG=pk2cmd|ipecmd)"
-	@echo "ATtiny202 (AVR-XT / avrxmega3; open apt toolchain + vendored ATtiny_DFP):"
+	@echo "ATtiny202 DEVELOPMENT-ONLY / NON-RELEASE (AVR-XT / avrxmega3):"
 	@echo "  scripts/fetch_attiny_dfp.sh [DIR]  vendor the pinned device files (default XT_DFP=$(XT_DFP))"
 	@echo "  attiny202-smoke  Phase-0 gate: compile/link test/avr/attiny202_smoke.c, assert"
 	@echo "                   avrxmega3 + $(XT_FLASH_BYTES) B budget (standalone; skips if XT_DFP absent)"
@@ -2570,8 +2570,9 @@ help:
 	@echo "  flash / flash<n>   flash the selected variant's firmware"
 	@echo "  program / program<n>  fuses + flash (fresh chip)"
 	@echo "Release:"
-	@echo "  release         VERSION=vX.Y.Z: build+validate (incl. 24-h soak) + stage release/<ver>/"
-	@echo "                  (RELEASE_ARGS='--dry-run' skips the soak; see scripts/make-release.sh)"
+	@echo "  release         VERSION=vX.Y.Z: build+validate AVR Classic + PIC10F322 release images"
+	@echo "                  (incl. 24-h soak) + stage release/<ver>/; RELEASE_ARGS='--dry-run'"
+	@echo "                  skips the soak; see scripts/make-release.sh"
 	@echo "Clean:"
 	@echo "  clean           remove build + test artifacts"
 	@echo "  clean-tests     remove only test binaries"

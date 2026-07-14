@@ -5,6 +5,10 @@ this firmware without installing a cross-compiler or building anything. Each
 release lives in its own `vX.Y.Z/` subdirectory and is also published as a
 [GitHub Release](../../releases).
 
+The release product set covers AVR Classic (ATtiny13a/45/85) and PIC10F322.
+ATtiny202 is a development-only target: its normal CI artifacts are not
+ready-to-flash release assets and are intentionally absent here.
+
 If you would rather build from source, ignore this directory and see the
 top-level [README](../README.md) and [TOOLCHAIN.adoc](../TOOLCHAIN.adoc).
 
@@ -19,7 +23,7 @@ validation suite — backs these binaries, through two mechanisms:
    AVR suite + mutation testing), `make pic-test` (PIC CONFIG-word + static
    analysis + gpsim functional), `make pic-test-target-variants` (fail-closed
    PIC libgpsim fault, lock-step, and target-I/O validation), and a **24-hour
-   soak of every variant on every MCU** (logs under `evidence/`).
+   soak of every release soak combination** (logs under `evidence/`).
 
 2. **Reproducibility.** The Intel-HEX images are byte-deterministic for a fixed
    toolchain — `objcopy` ihex output contains only the program's code/data
@@ -51,6 +55,9 @@ Images are named `bypass_<variant>[_<mcu>].hex`:
 | `_t85` | ATtiny85, 1.0 MHz |
 | `_t45` | ATtiny45, 1.0 MHz |
 | `_pic10f322` | Microchip PIC10F322, 2 MHz (HFINTOSC) |
+
+There is no ATtiny202 suffix because that development-only target is not part
+of the prebuilt release set.
 
 The per-release `MANIFEST.md` lists every image with its MCU, clock, flash
 usage, fuse bytes, and exact flashing command.
@@ -94,10 +101,11 @@ pk2cmd -PPIC10F322 -Fbypass_cd4053_pic10f322.hex -M -Y -R      # PICkit 2
 
 ## Reproduce the images bit-for-bit
 
-A freshly built HEX lands under `build_avr_classic/` and `build_pic/`, not in
-the release directory, so run the checksum list against those fresh bytes —
-running it from the repo root would only re-verify the committed copies against
-themselves.
+A freshly built release HEX lands under `build_avr_classic/` and `build_pic/`,
+not in the release directory, so run the checksum list against those fresh
+bytes — running it from the repo root would only re-verify the committed copies
+against themselves. The omission of `build_avr_xt/` is intentional because
+ATtiny202 is not release-supported.
 
 ```sh
 git checkout vX.Y.Z

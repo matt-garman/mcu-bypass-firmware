@@ -42,6 +42,10 @@ file is the human-readable summary of *what changed*.
 - Routine push, scheduled, and manually dispatched CI now runs mutation testing
   in strict mode on the full PIC-toolchain runner; pull requests retain the
   faster non-mutation path.
+- ATtiny202 is now explicitly classified as development-only/non-release. Its
+  normal build and yasimavr CI lane remains available, while release images,
+  reproduction, and long-soak qualification remain scoped to AVR Classic and
+  PIC10F322.
 
 ### Fixed
 - **PIC10F322 weak-pull-up validation now requires the exact RA0-only state.**

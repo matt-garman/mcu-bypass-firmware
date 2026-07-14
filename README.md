@@ -3,13 +3,19 @@
 
 [![CI](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml)
 
-**NOTE:** for PIC10F320 support, see the child project [pic10f320-bypass-firmware](https://github.com/matt-garman/pic10f320-bypass-firmware).  This project supports PIC10F322 and AVR Classic.  This is the preferred project, unless the 10F320 is a hard requirement.
+**NOTE:** for PIC10F320 support, see the child project
+[pic10f320-bypass-firmware](https://github.com/matt-garman/pic10f320-bypass-firmware).
+This project's release-supported targets are PIC10F322 and AVR Classic. It also
+contains a development-only ATtiny202 port that is built and exercised in
+normal CI but is not included in prebuilt releases. This is the preferred
+project unless the PIC10F320 is a hard requirement.
 
-The project contains firmware for two microcontroller families: the
+The release-supported firmware covers two microcontroller families: the
 "AVR Classic" parts (ATtiny13a, ATtiny45, ATtiny85) and the Microchip
-PIC10F322.  A shared, hardware-independent debounce core and the
-output drivers are common to both; only a small per-MCU hardware shell
-differs.  The firmware is intended to be used for electric instrument
+PIC10F322. The development-only AVR-XT lane currently targets ATtiny202.
+A shared, hardware-independent debounce core and the output drivers are
+common to all targets; only a small per-MCU hardware shell differs. The
+firmware is intended to be used for electric instrument
 effects (e.g. guitar effect pedals) bypass switching.  The firmware
 has four responsibilities:
 
@@ -87,9 +93,9 @@ cleanly if XC8/gpsim are not installed; host source coverage is mandatory when
 `pic-test` runs. The target aggregate is the authoritative simulator gate and
 fails closed on any missing/skipped libgpsim layer.
 
-To build and validate the ATtiny202 (AVR-XT) port (uses the open-source
-avr-gcc toolchain plus the fetched-on-demand Microchip device files and a
-patched `yasimavr` simulator built by `scripts/fetch_yasimavr.sh`):
+To build and validate the development-only ATtiny202 (AVR-XT) port (uses the
+open-source avr-gcc toolchain plus the fetched-on-demand Microchip device files
+and a patched `yasimavr` simulator built by `scripts/fetch_yasimavr.sh`):
 
 ```
 make attiny202        # build all variants + 2 KB flash-budget gate
@@ -99,6 +105,8 @@ make attiny202-soak   # long-duration liveness soak (XT_SOAK_DURATION_MS=)
 ```
 
 These targets are also independent of the AVR build and skip cleanly if the
-device pack or the `yasimavr` venv is not present.
+device pack or the `yasimavr` venv is not present. Normal CI builds and runs
+the dynamic gates for this lane, but ATtiny202 images and long-soak evidence are
+not part of the release product set or release qualification.
 
 See [TOOLCHAIN](TOOLCHAIN.adoc) for full environmental details.  

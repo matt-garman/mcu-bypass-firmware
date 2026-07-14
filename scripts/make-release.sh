@@ -28,10 +28,10 @@
 #      EVERY required tool present. Unlike the dev-time targets (which skip
 #      cleanly when a tool is missing), a release FAILS LOUD on any absence -- a
 #      gate must never go green on a check that silently did nothing.
-#   1. Clean-build every AVR + PIC variant image.
+#   1. Clean-build every release-supported AVR Classic + PIC10F322 image.
 #   2. Run `make test-long`, `make pic-test`, and `make pic-test-target-variants`
 #      (the full pre-hardware gates).
-#   3. Run ALL soak combos (every variant x MCU) IN PARALLEL for the full
+#   3. Run ALL release soak combinations IN PARALLEL for the full
 #      duration, collecting a pass/fail verdict and evidence from each.
 #   4. Stage release/<VERSION>/ : the .hex images, SHA256SUMS, a provenance
 #      MANIFEST, a README, the soak/validation evidence, and a commit message.
@@ -258,8 +258,10 @@ esac
 # ============================================================================
 # 1. CLEAN BUILD -- every image
 # ============================================================================
-section "1. clean build (all variants x all MCUs)"
+section "1. clean build (all variants x release-supported MCUs)"
 make clean >/dev/null
+# ATtiny202 is development-only: clean removes build_avr_xt/ and this release
+# build intentionally does not recreate it.
 make all13 all85 all45 >"$EVID/build-avr.log" 2>&1 || { cat "$EVID/build-avr.log" >&2; die "AVR build failed."; }
 make pic PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/build-pic.log" 2>&1 || { cat "$EVID/build-pic.log" >&2; die "PIC build failed."; }
 
@@ -314,9 +316,9 @@ make pic-test-target-variants STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP"
 ok "pic-test-target-variants passed."
 
 # ============================================================================
-# 3. PARALLEL SOAK -- every combo, full duration
+# 3. PARALLEL SOAK -- every release combo, full duration
 # ============================================================================
-section "3. soak (all combos, parallel, ${SOAK_DURATION_MS} ms each)"
+section "3. soak (all release combos, parallel, ${SOAK_DURATION_MS} ms each)"
 
 # Build metadata for every soak combo: a binary, the cwd to run it from, a log.
 declare -a SOAK_NAMES=()
@@ -483,13 +485,15 @@ REL_BANNER=""
 	[ -n "$REL_BANNER" ] && printf '%s\n' "$REL_BANNER"
 	printf 'Prebuilt, fully-validated firmware images. Verify integrity with\n'
 	printf '`sha256sum -c SHA256SUMS`; reproduce from source per "Reproducing" below.\n\n'
+	printf 'Release scope: AVR Classic (ATtiny13a/45/85) and PIC10F322. ATtiny202\n'
+	printf 'is development-only and is intentionally excluded from this release.\n\n'
 
 	printf '## Provenance\n\n'
 	printf -- '- **Version / tag:** %s\n' "$VERSION"
 	printf -- '- **Source commit:** `%s`\n' "$GIT_SHA"
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
-	printf -- '- **Validation:** `make test-long` + `make pic-test` + `make pic-test-target-variants` (real-HEX SFR/SRAM fault recovery, firmware/model ctx_ lock-step, and GPIO transition/pulse timing) + %s-h parallel soak of every variant x MCU (see evidence/).\n\n' "$hours"
+	printf -- '- **Validation:** `make test-long` + `make pic-test` + `make pic-test-target-variants` (real-HEX SFR/SRAM fault recovery, firmware/model ctx_ lock-step, and GPIO transition/pulse timing) + %s-h parallel soak of every release soak combination (see evidence/).\n\n' "$hours"
 
 	printf '## Toolchain\n\n'
 	printf -- '| tool | version |\n|---|---|\n'
@@ -531,7 +535,8 @@ REL_BANNER=""
 	printf 'freshly built HEX lands under `build_avr_classic/` and `build_pic/`, not\n'
 	printf 'in this release directory, so the checksum list must be run against those\n'
 	printf 'fresh bytes (running it from the repo root would just re-verify the\n'
-	printf 'committed copies against themselves).\n\n'
+	printf 'committed copies against themselves). `build_avr_xt/` is intentionally\n'
+	printf 'absent because ATtiny202 is not release-supported.\n\n'
 	printf '```\n'
 	printf 'git checkout %s\n' "$VERSION"
 	printf '# install the pinned toolchain (see TOOLCHAIN.adoc), then:\n'
@@ -539,8 +544,8 @@ REL_BANNER=""
 	printf 'scripts/verify-release-images.sh release/%s build_avr_classic build_pic\n' "$VERSION"
 	printf '```\n'
 	printf 'A passing verifier proves the committed files, checksum entries, and freshly\n'
-	printf 'built files are the same complete set with byte-identical contents. The\n'
-	printf 'tag-triggered CI (.github/workflows/release.yml) runs this exact check on a\n'
+	printf 'built files are the same complete release set with byte-identical contents.\n'
+	printf 'The tag-triggered CI (.github/workflows/release.yml) runs this exact check on a\n'
 	printf 'clean runner and fails the release on any mismatch.\n'
 } > "$OUTPUT_DIR/MANIFEST.md"
 ok "wrote MANIFEST.md"
@@ -563,7 +568,7 @@ ok "wrote MANIFEST.md"
 	printf 'Prebuilt, fully-validated firmware images for %s.\n\n' "$VERSION"
 	printf 'Built from %s with the toolchain pinned in TOOLCHAIN.adoc.\n' "$GIT_SHORT"
 	printf 'Validation: make test-long + make pic-test + make pic-test-target-variants\n'
-	printf '+ %s-h parallel soak of every variant x MCU (evidence under\n' "$hours"
+	printf '+ %s-h parallel soak of every release soak combination (evidence under\n' "$hours"
 	printf 'release/%s/evidence/).\n\n' "$VERSION"
 	printf 'Reproducibility is pinned by release/%s/SHA256SUMS and verified on a\n' "$VERSION"
 	printf 'clean runner by .github/workflows/release.yml when the tag is pushed.\n'
