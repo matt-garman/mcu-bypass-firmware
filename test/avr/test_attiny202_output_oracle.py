@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Host-only regression for the ATtiny202 target-output oracle."""
+"""Host-only regression for the ATtiny202 target-output oracle.
+
+Covers the STRUCTURAL trace checks the yasimavr harness performs -- transition
+sequence/polarity, safe startup, coil exclusion, and complete-pulse presence.
+The ABSOLUTE coil-pulse WIDTH is deliberately NOT a yasimavr check (that sim is
+not cycle-accurate for instruction timing; see check_pulse_present in
+test_sim_attiny202.py); it is verified from the compiled image by
+test_attiny202_delay_oracle.py, whose own --selftest exercises the width logic.
+"""
 
 import contextlib
 import importlib.util
@@ -24,7 +32,6 @@ driver_path = Path(__file__).with_name("test_sim_attiny202.py")
 spec = importlib.util.spec_from_file_location("attiny202_sim_driver", driver_path)
 driver = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(driver)
-driver.OUTPUT_TIMING_TOLERANCE_CYCLES = 0
 
 checks = 0
 failures = 0
@@ -57,34 +64,28 @@ def run_oracle(action):
 mute = make_trace("mute", [(100, 0x2), (105, 0x3)])
 check(run_oracle(lambda ck: (
     driver.check_trace(ck, mute, [0x2, 0x3]),
-    driver.check_pulse(ck, mute, 0x2, 5)
-)) == 0, "valid 5 ms mute sequence must pass")
+    driver.check_pulse_present(ck, mute, 0x2)
+)) == 0, "valid mute sequence with a complete pulse must pass")
 
 relay = make_trace("relay", [(200, 0x1), (212, 0x0)])
 check(run_oracle(lambda ck: (
     driver.check_trace(ck, relay, [0x1, 0x0]),
-    driver.check_pulse(ck, relay, 0x1, 12, relay_minimum=True)
-)) == 0, "valid 12 ms relay sequence must pass")
+    driver.check_pulse_present(ck, relay, 0x1)
+)) == 0, "valid relay sequence with a complete pulse must pass")
 
 wrong_sequence = make_trace("wrong sequence", [(100, 0x3)])
 check(run_oracle(lambda ck: driver.check_trace(ck, wrong_sequence, [0x2, 0x3])) == 1,
       "wrong transition sequence must fail")
 
-short_pulse = make_trace("short pulse", [(100, 0x2), (104, 0x3)])
-check(run_oracle(lambda ck: driver.check_pulse(ck, short_pulse, 0x2, 5)) == 1,
-      "short mute window must fail")
-
-long_pulse = make_trace("long pulse", [(100, 0x2), (106, 0x3)])
-check(run_oracle(lambda ck: driver.check_pulse(ck, long_pulse, 0x2, 5)) == 1,
-      "long mute window must fail")
-
-short_relay = make_trace("short relay", [(100, 0x1), (103, 0x0)])
-check(run_oracle(lambda ck: driver.check_pulse(
-    ck, short_relay, 0x1, 12, relay_minimum=True)) == 2,
-    "short relay pulse must fail design timing and datasheet minimum")
+# check_pulse_present asserts a COMPLETE pulse (an edge in AND an edge out); its
+# WIDTH is not judged here (that lives in test_attiny202_delay_oracle.py). A lone
+# entering edge with no exit, or the pulse state never appearing, must fail.
+incomplete_pulse = make_trace("incomplete pulse", [(100, 0x2)])
+check(run_oracle(lambda ck: driver.check_pulse_present(ck, incomplete_pulse, 0x2)) == 1,
+      "pulse with no trailing edge must fail")
 
 missing_pulse = make_trace("missing pulse", [(100, 0x0)])
-check(run_oracle(lambda ck: driver.check_pulse(ck, missing_pulse, 0x2, 5)) == 1,
+check(run_oracle(lambda ck: driver.check_pulse_present(ck, missing_pulse, 0x2)) == 1,
       "missing pulse must fail")
 
 for attribute, label in (
@@ -144,9 +145,8 @@ class ControlSim:
         self.events = {}
         self.engaged = False
         if scenario_variant == "relay":
-            width = 3 if scenario_fault == "short_relay" else 12
             self.events[1] = 0x1
-            self.events[1 + width] = 0x0
+            self.events[1 + 12] = 0x0
 
     def control_levels(self):
         return self.state & 0x1, (self.state >> 1) & 0x1
@@ -172,25 +172,23 @@ class ControlSim:
             if scenario_variant == "cd4053":
                 self.events[start] = 0x1
             elif scenario_variant == "mute":
-                width = 6 if scenario_fault == "long_mute" else 5
                 self.events[start] = 0x2
-                self.events[start + width] = 0x3
+                self.events[start + 5] = 0x3
             else:
-                width = 3 if scenario_fault == "short_relay" else 12
+                # relay_overlap drives both coils high at once -- a coil-exclusion
+                # fault the harness must reject.
                 self.events[start] = 0x3 if scenario_fault == "relay_overlap" else 0x2
-                self.events[start + width] = 0x0
+                self.events[start + 12] = 0x0
             self.engaged = True
         else:
             if scenario_variant == "cd4053":
                 self.events[start] = 0x0
             elif scenario_variant == "mute":
-                width = 6 if scenario_fault == "long_mute" else 5
                 self.events[start] = 0x2
-                self.events[start + width] = 0x0
+                self.events[start + 5] = 0x0
             else:
-                width = 3 if scenario_fault == "short_relay" else 12
                 self.events[start] = 0x1
-                self.events[start + width] = 0x0
+                self.events[start + 12] = 0x0
             self.engaged = False
 
     def release(self):
@@ -214,10 +212,10 @@ def run_control_orchestration(variant, fault=None):
 for variant in driver.VARIANTS:
     check(run_control_orchestration(variant) == 0,
           "%s production output orchestration must pass" % variant)
-check(run_control_orchestration("mute", "long_mute") > 0,
-      "orchestration must reject a long mute window")
-check(run_control_orchestration("relay", "short_relay") > 0,
-      "orchestration must reject a relay pulse below design/minimum")
+# Coil exclusion is a structural property yasimavr observes, so it stays a
+# harness check. Pulse-WIDTH faults (a short relay coil, a long mute window) are
+# no longer judged here -- test_attiny202_delay_oracle.py owns width, and its
+# --selftest asserts those fail-closed paths from the compiled loop count.
 check(run_control_orchestration("relay", "relay_overlap") > 0,
       "orchestration must reject simultaneous relay coils")
 

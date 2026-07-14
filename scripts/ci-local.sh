@@ -17,6 +17,16 @@
 #                                            and target I/O, every variant)
 #   build-matrix  -> make all13 all85 all45 (every variant builds for every
 #                                            AVR; each prints flash/RAM)
+#   attiny202     -> assert toolchain present, then
+#                    make attiny202-test    (fuses + smoke + build/budget +
+#                                            cppcheck/MISRA + coil-pulse width
+#                                            oracle; STRICT_TOOLS=1)
+#                    make attiny202-sim     (yasimavr functional + output trace)
+#                    make attiny202-fault   (yasimavr fault injection)
+#                    make attiny202-soak    (yasimavr 5-min soak smoke)
+#                                           (the development-only AVR-XT lane;
+#                                            needs the vendored ATtiny_DFP + the
+#                                            patched yasimavr venv)
 #   verify        -> make test              ) covered together by `make
 #   stress        -> make test-long         ) test-long`, which is a strict
 #                                             superset of `make test`
@@ -38,6 +48,8 @@
 #                    clean-checkout reproduction of CI)
 #     --skip-pic     skip the PIC (XC8/gpsim) job -- ONLY if you lack that
 #                    toolchain; this no longer mirrors CI, so it warns loudly
+#     --skip-attiny202  skip the ATtiny202 (DFP/yasimavr) job -- ONLY if you lack
+#                    that toolchain; this no longer mirrors CI, so it warns loudly
 #     -h | --help    this help
 #
 # TOOLCHAIN
@@ -77,12 +89,14 @@ usage() { sed -n '/^# USAGE/,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
 PR_MODE=0
 DO_CLEAN=1
 SKIP_PIC=0
+SKIP_ATTINY202=0
 
 while [ $# -gt 0 ]; do
 	case "$1" in
-		--pr)         PR_MODE=1; shift ;;
-		--no-clean)   DO_CLEAN=0; shift ;;
-		--skip-pic)   SKIP_PIC=1; shift ;;
+		--pr)             PR_MODE=1; shift ;;
+		--no-clean)       DO_CLEAN=0; shift ;;
+		--skip-pic)       SKIP_PIC=1; shift ;;
+		--skip-attiny202) SKIP_ATTINY202=1; shift ;;
 		-h|--help)    usage; exit 0 ;;
 		-*)           die "unknown option: $1 (try --help)" ;;
 		*)            die "unexpected argument: $1 (try --help)" ;;
@@ -157,6 +171,47 @@ assert_pic_toolchain() {
 	ok "PIC toolchain present (XC8 + DFP + gpsim + gpsim-dev + glib + cppcheck + c++)."
 }
 
+# Fail loud if any ATtiny202 (AVR-XT) input is missing. Like the PIC targets,
+# every attiny202-* target SKIPS CLEANLY without the vendored ATtiny_DFP device
+# files or the patched yasimavr venv -- a missing input would otherwise read as a
+# local PASS while CI still runs the real gates. The two out-of-apt inputs are
+# fetched + pinned by repo scripts (scripts/fetch_attiny_dfp.sh, scripts/
+# fetch_yasimavr.sh); XT_DFP / YASIMAVR_VENV honor an exported override (?= in
+# the Makefile). avr-objdump (binutils-avr) backs the coil-pulse width oracle.
+assert_attiny202_toolchain() {
+	local xt_dfp venv objdump py
+	xt_dfp="${XT_DFP:-$(make -s print-XT_DFP)}"
+	venv="${YASIMAVR_VENV:-$(make -s print-YASIMAVR_VENV)}"
+	objdump="${OBJDUMP:-$(make -s print-OBJDUMP)}"
+	py="$venv/bin/python"
+	local missing=()
+	command -v avr-gcc >/dev/null 2>&1 \
+		|| missing+=("avr-gcc  (apt: gcc-avr avr-libc)")
+	command -v "$objdump" >/dev/null 2>&1 \
+		|| missing+=("$objdump  (apt: binutils-avr; delay-width oracle)")
+	command -v cppcheck >/dev/null 2>&1 \
+		|| missing+=("cppcheck  (apt: cppcheck; attiny202-analyze)")
+	[ -f "$xt_dfp/gcc/dev/attiny202/device-specs/specs-attiny202" ] \
+		|| missing+=("ATtiny_DFP at $xt_dfp  (scripts/fetch_attiny_dfp.sh; export XT_DFP=...)")
+	[ -f "$xt_dfp/include/avr/iotn202.h" ] \
+		|| missing+=("ATtiny_DFP header iotn202.h at $xt_dfp  (scripts/fetch_attiny_dfp.sh)")
+	if [ -x "$py" ] && "$py" -c "import yasimavr" >/dev/null 2>&1; then
+		"$py" - >/dev/null 2>&1 <<-'PY' \
+			|| missing+=("patched yasimavr (WDT model) in $venv  (scripts/fetch_yasimavr.sh)")
+		from yasimavr.device_library import load_device
+		assert load_device('attiny202').find_peripheral('WDT') is not None
+		PY
+	else
+		missing+=("patched yasimavr venv at $venv  (scripts/fetch_yasimavr.sh; export YASIMAVR_VENV=...)")
+	fi
+	if [ "${#missing[@]}" -gt 0 ]; then
+		log "ATtiny202 toolchain incomplete -- the attiny202 targets would silently SKIP, not fail:"
+		for m in "${missing[@]}"; do log "  - $m"; done
+		die "provide the above (see TOOLCHAIN.adoc), or --skip-attiny202 (no longer mirrors CI)."
+	fi
+	ok "ATtiny202 toolchain present (avr-gcc + binutils-avr + cppcheck + ATtiny_DFP + patched yasimavr)."
+}
+
 # ----------------------------------------------------------------------------
 # The pipeline -- same order CI runs the jobs
 # ----------------------------------------------------------------------------
@@ -185,6 +240,17 @@ fi
 
 run_step "build-matrix: make all13 all85 all45" make all13 all85 all45
 
+if [ "$SKIP_ATTINY202" -eq 1 ]; then
+	warn "--skip-attiny202: NOT running the ATtiny202 job; this does not mirror CI."
+else
+	run_step "attiny202 job: assert ATtiny202 toolchain present" assert_attiny202_toolchain
+	run_step "attiny202 job: make attiny202-test" make attiny202-test
+	run_step "attiny202 job: make attiny202-sim" make attiny202-sim
+	run_step "attiny202 job: make attiny202-fault" make attiny202-fault
+	# CI runs a 5-minute simulated soak smoke (XT_SOAK_DURATION_MS=300000).
+	run_step "attiny202 job: make attiny202-soak" make attiny202-soak XT_SOAK_DURATION_MS=300000
+fi
+
 if [ "$PR_MODE" -eq 1 ]; then
 	run_step "verify job: make test" make test
 else
@@ -205,5 +271,8 @@ printf '  %s%-44s%s %ss\n' "$BOLD" "total" "$RST" "$total" >&2
 log ""
 if [ "$SKIP_PIC" -eq 1 ]; then
 	warn "PIC job was skipped -- CI will still run it. Push with that in mind."
+fi
+if [ "$SKIP_ATTINY202" -eq 1 ]; then
+	warn "ATtiny202 job was skipped -- CI will still run it. Push with that in mind."
 fi
 ok "Local CI reproduction complete. Safe to push."

@@ -85,6 +85,7 @@ F_CPU    = 1200000UL
 FW_BASE  = bypass
 CC       = avr-gcc
 OBJCOPY  = avr-objcopy
+OBJDUMP  ?= avr-objdump
 SIZE     = avr-size
 READELF  ?= readelf
 IHEX_VALIDATOR ?= scripts/validate-ihex.sh
@@ -431,7 +432,7 @@ FORCE:
         test test-fast test-long stress \
         test-host test-sim test-sim-secondary \
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
-        test-attiny202-output-oracle test-attiny202-fault-oracle \
+        test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle \
         test-attiny202-build test-avr-build-rebuild test-gpsim-wrappers \
         test-pic-build test-release-images \
         test-soak-timing test-workload-rebuild \
@@ -1723,12 +1724,41 @@ attiny202-analyze-misra: src/bypass_mcu_avr_xt.c $(XT_HEADERS) $(MISRA_ADDON) $(
 	rm -f $$out *.dump *.ctu-info cppcheck-addon-ctu-file-list*; \
 	echo "MISRA-C:2012 (ATtiny202 shell): clean (documented deviations waived per MISRA_COMPLIANCE.md)"
 
+# Absolute coil-pulse WIDTH gate, read straight from the compiled image. The
+# relay/mute pulses are avr-libc _delay_ms() busy loops, so their duration is a
+# compile-time CPU-cycle count -- verifiable by disassembly and NOT by the
+# yasimavr harness, which is not cycle-accurate for instruction timing (it runs
+# every busy delay at ~half its true length; see
+# test/avr/test_attiny202_delay_oracle.py and test_sim_attiny202.check_pulse_
+# present). This gate parses the _delay_ms loop count out of `avr-objdump -d`
+# and asserts each variant's design widths (relay 12 ms x2, mute 5 ms x2, simple
+# cd4053 none) plus the relay's 4 ms datasheet minimum. Needs only binutils-avr
+# (already required to build), so it runs in the same standalone pre-hardware
+# aggregate; it skips cleanly (STRICT_TOOLS honored) when the DFP is absent.
+.PHONY: attiny202-delay-oracle
+attiny202-delay-oracle: attiny202
+	@if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
+		echo "ATtiny_DFP device files not found under XT_DFP=$(XT_DFP); skipping ATtiny202 delay-width oracle."; \
+		$(SKIP); \
+	fi; \
+	command -v $(OBJDUMP) >/dev/null 2>&1 \
+		|| { echo "$(OBJDUMP) not found (install binutils-avr)"; $(SKIP); }; \
+	elves=""; \
+	for v in $(XT_VARIANTS_REQUESTED); do \
+		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
+		if [ ! -f "$$elf" ]; then \
+			echo "FAIL: expected ATtiny202 image missing: $$elf"; exit 1; \
+		fi; \
+		elves="$$elves $$elf"; \
+	done; \
+	OBJDUMP=$(OBJDUMP) python3 test/avr/test_attiny202_delay_oracle.py $$elves
+
 # Aggregate: every ATtiny202 pre-hardware check (fuses + smoke + build/budget +
-# analysis).
+# analysis + coil-pulse width oracle).
 # STANDALONE -- NOT part of `make test` (no AVR8X simulator; DFP may be absent in
 # CI). Each sub-target skips cleanly when its tool/DFP is missing.
 .PHONY: attiny202-test
-attiny202-test: test-fuses attiny202-smoke attiny202 attiny202-analyze
+attiny202-test: test-fuses attiny202-smoke attiny202 attiny202-analyze attiny202-delay-oracle
 	@echo "=== all ATtiny202 pre-hardware checks complete ==="
 
 # ============================================================================
@@ -1803,7 +1833,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-soak-timing test-workload-rebuild coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1815,7 +1845,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-soak-timing test-workload-rebuild coverage-check
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -1986,6 +2016,13 @@ test-fuses: test/avr/test_fuses test/avr/test_attiny202_fuses.py test/avr/attiny
 # the full-tool CI job remains authoritative for the real built-image execution.
 test-attiny202-output-oracle:
 	PYTHONPATH=test/avr python3 test/avr/test_attiny202_output_oracle.py
+
+# Host-only regression for the coil-pulse WIDTH oracle's parser + width logic.
+# Needs no ELF/DFP (it drives synthetic disassembly), so it guards the width
+# checker in `make test` even where the real images cannot be built; the
+# attiny202-delay-oracle target runs the same code against the real images.
+test-attiny202-delay-oracle:
+	python3 test/avr/test_attiny202_delay_oracle.py --selftest
 
 # Host-only accounting regression for the ATtiny202 fault driver. The actual
 # corruption/recovery behavior remains covered by the built-image yasimavr job.
@@ -2575,8 +2612,9 @@ help:
 	@echo "                   avrxmega3 + $(XT_FLASH_BYTES) B budget (standalone; skips if XT_DFP absent)"
 	@echo "  attiny202        build all variants for ATtiny202 + 2 KB flash-budget gate"
 	@echo "  attiny202-analyze  cppcheck + MISRA on the AVR-XT shell (DFP+avr-libc; standalone)"
-	@echo "  attiny202-test   all ATtiny202 pre-hardware checks (fuses + smoke + build + analyze)"
-	@echo "  attiny202-sim    yasimavr functional + PA2/PA3 transition/pulse timing test"
+	@echo "  attiny202-delay-oracle  verify coil-pulse widths from the disassembled _delay_ms loop"
+	@echo "  attiny202-test   all ATtiny202 pre-hardware checks (fuses + smoke + build + analyze + delay)"
+	@echo "  attiny202-sim    yasimavr functional + PA2/PA3 transition/pulse-presence test"
 	@echo "                   (standalone; needs scripts/fetch_yasimavr.sh; XT_SIM_VARIANT=)"
 	@echo "  attiny202-fault  yasimavr fault-inject: 11 guarded SFR/state corruptions,"
 	@echo "                   zero skips, exact completion (standalone; XT_SIM_VARIANT=)"
@@ -2593,7 +2631,8 @@ help:
 	@echo "  test-symbolic-klee  same properties under KLEE (if installed)"
 	@echo "  test-cbmc       CBMC SAT/SMT proof of the real bypass_pure.c (if installed)"
 	@echo "  test-fuses      decode + verify design fuse bytes (t13a + tinyx5 + ATtiny202)"
-	@echo "  test-attiny202-output-oracle  host regression for PA2/PA3 sequence/timing checks"
+	@echo "  test-attiny202-output-oracle  host regression for PA2/PA3 sequence/pulse-presence checks"
+	@echo "  test-attiny202-delay-oracle  host regression for the coil-pulse width parser (--selftest)"
 	@echo "  test-attiny202-fault-oracle  host regression for exact fault-run accounting"
 	@echo "  test-stack-bound  -fstack-usage static frame bound (limit: STACK_MAX_FRAME=$(STACK_MAX_FRAME) B)"
 	@echo "  test-stack-bound-regression  fail-closed stack-evidence checks"

@@ -27,6 +27,26 @@
 #   This is the yasimavr analogue of scripts/fetch_attiny_dfp.sh (which vendors
 #   the ATtiny_DFP device files for the compiler).
 #
+# KNOWN LIMITATION (NOT patched -- worked around in the test suite)
+#   yasimavr 0.1.6 is a functional/logic simulator: its AVR core charges a flat
+#   ~1 cycle per instruction and does NOT model the AVR's true multi-cycle
+#   instruction timing. (Single-stepping shows SBIW -> +1 cycle and a taken
+#   BRNE -> +1 cycle; on silicon each is 2 cycles.) Consequences:
+#     * TCB0-tick-driven timing (debounce thresholds, LED/state sequencing) is
+#       ACCURATE -- the tick period is counted by the peripheral, not by summing
+#       instruction cycles -- so `make attiny202-sim` validates it directly.
+#     * A raw-CPU-cycle busy delay is NOT accurate: avr-libc _delay_ms() coil
+#       pulses (the relay's 12 ms, the muted-x4053's 5 ms) run at ~HALF their
+#       real wall-clock length here (a 4-cycle loop body executes as 2). The
+#       harness therefore does NOT assert absolute pulse WIDTH; that is verified
+#       from the compiled image's _delay_ms loop by
+#       test/avr/test_attiny202_delay_oracle.py. See that file's header, the
+#       check_pulse_present() note in test/avr/test_sim_attiny202.py, and the
+#       project memory "yasimavr-flat-instruction-timing".
+#   This is a fidelity limit, not a firmware defect: the built image is correct
+#   for real 2 MHz silicon. It is left unpatched (accurate XT instruction timing
+#   would be a large core change); the disassembly oracle covers the gap exactly.
+#
 # USAGE
 #   scripts/fetch_yasimavr.sh [VENV_DIR]
 #     VENV_DIR  where to create the venv (default: ./third_party/yasimavr/venv).
