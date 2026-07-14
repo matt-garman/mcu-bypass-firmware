@@ -56,6 +56,9 @@ file is the human-readable summary of *what changed*.
   normal build and yasimavr CI lane remains available, while release images,
   reproduction, and long-soak qualification remain scoped to AVR Classic and
   PIC10F322.
+- The full-tool ATtiny202 CI job now runs `make attiny202-test STRICT_TOOLS=1`,
+  making its cppcheck and MISRA analysis mandatory alongside fuse, build, and
+  flash-budget validation.
 
 ### Fixed
 - **PIC10F322 weak-pull-up validation now requires the exact RA0-only state.**

@@ -142,8 +142,9 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
                 exactly like the PIC gpsim targets, so the AVR `make test` is
                 unaffected if yasimavr is not built.
   status:       ATtiny202 is a development-only, non-release target. Normal CI
-                builds it and runs the yasimavr gates, but release creation and
-                release CI intentionally exclude its images and soak evidence.
+                builds it, gates cppcheck/MISRA, and runs the yasimavr gates,
+                but release creation and release CI intentionally exclude its
+                images and soak evidence.
   build:        scripts/fetch_yasimavr.sh -- the yasimavr counterpart of
                 scripts/fetch_attiny_dfp.sh.  Builds a PATCHED yasimavr into a
                 project-local, gitignored venv (third_party/yasimavr/venv) from

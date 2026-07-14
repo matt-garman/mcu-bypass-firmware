@@ -224,8 +224,8 @@ jobs:
   # -------------------------------------------------------------------------
   # Development-only ATtiny202 (AVR-XT) gate: the AVR-XT counterpart of the
   # `pic` job. It is the ONLY place the ATtiny202 is built in CI (build-matrix
-  # covers the release-supported classic parts), so it doubles as the 202 build
-  # + 2 KB flash-budget gate, then runs the yasimavr dynamic harness --
+  # covers the release-supported classic parts), so it runs the 202 fuse,
+  # smoke/build-budget, cppcheck, and MISRA gates before the yasimavr harness --
   # functional + physical output timing (attiny202-sim), fault injection
   # (attiny202-fault), and a short soak smoke (attiny202-soak). This lane is not
   # release qualification.
@@ -235,15 +235,15 @@ jobs:
   # atpack, no account/EULA) needed to COMPILE the image, and a PATCHED yasimavr
   # (scripts/fetch_yasimavr.sh -- pinned sdist + the two vendored bug-fix patches,
   # compiled into a project-local venv) needed to RUN it. The rest (avr-gcc,
-  # python3-dev, g++) is apt.
+  # cppcheck, python3-dev, g++) is apt.
   #
   # CRITICAL (same hazard as the pic job): the attiny202-* targets SKIP CLEANLY
-  # when the DFP or the venv is absent -- fatal for a gate. The two "Assert ...
+  # when the DFP or the venv is absent -- fatal for a gate. Explicit "Assert ...
   # present" steps fail loud so a broken fetch can never make the gates go green
   # on nothing, and each run step greps for the expected number of PASS lines as
   # belt-and-suspenders against a partial (per-variant) skip.
   attiny202:
-    name: attiny202 development (yasimavr sim/fault/soak)
+    name: attiny202 development (analyze/sim/fault/soak)
     runs-on: ubuntu-24.04
     needs: pic   # gate behind the fast PIC job (see `verify`)
     env:
@@ -263,7 +263,7 @@ jobs:
           # needs to load the ELF image.
           sudo apt-get install -y \
             make gcc-avr avr-libc binutils-avr \
-            python3 python3-venv python3-dev g++ \
+            cppcheck python3 python3-venv python3-dev g++ \
             libelf-dev \
             curl unzip patch
 
@@ -277,8 +277,19 @@ jobs:
       - name: Fetch ATtiny_DFP device files
         run: scripts/fetch_attiny_dfp.sh
 
-      - name: Build ATtiny202 firmware (+ 2 KB flash-budget gate)
-        run: make attiny202
+      - name: Assert ATtiny202 build + analysis inputs present
+        run: |
+          command -v cppcheck >/dev/null || { echo "::error::cppcheck missing"; exit 1; }
+          test -f third_party/attiny_dfp/gcc/dev/attiny202/device-specs/specs-attiny202 \
+            || { echo "::error::ATtiny202 device specs missing"; exit 1; }
+          test -f third_party/attiny_dfp/include/avr/iotn202.h \
+            || { echo "::error::ATtiny202 DFP header missing"; exit 1; }
+          test -f test/misra.json && test -f test/misra_rules.txt \
+            && test -f test/misra_suppressions.txt \
+            || { echo "::error::MISRA analysis inputs missing"; exit 1; }
+
+      - name: ATtiny202 pre-hardware gate (make attiny202-test)
+        run: make attiny202-test STRICT_TOOLS=1
 
       - name: Assert ATtiny202 images built (fail loud, do NOT skip)
         run: |
@@ -326,6 +337,7 @@ jobs:
       - name: Record versions
         run: |
           echo "== avr-gcc ==" && avr-gcc --version | head -1
+          echo "== cppcheck ==" && cppcheck --version
           echo "== python3 ==" && python3 --version
           echo "== yasimavr ==" && third_party/yasimavr/venv/bin/python -c \
             "import yasimavr; print(getattr(yasimavr,'__version__','(patched 0.1.6)'))"
