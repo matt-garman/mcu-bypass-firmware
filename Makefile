@@ -431,6 +431,7 @@ FORCE:
         test test-fast test-long stress \
         test-host test-sim test-sim-secondary \
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
+        test-attiny202-output-oracle \
         test-attiny202-build test-avr-build-rebuild test-gpsim-wrappers \
         test-pic-build test-release-images \
         test-soak-timing test-workload-rebuild \
@@ -1524,20 +1525,30 @@ endef
 
 .PHONY: attiny202-sim
 attiny202-sim: test-fuses attiny202
-	@$(yasimavr_skip_if_absent); \
-	vars="$(XT_SIM_VARIANT)"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
+	@selected="$(XT_SIM_VARIANT)"; \
+	if [ -n "$$selected" ]; then \
+		case "$$selected" in cd4053|mute|relay) ;; \
+			*) echo "FAIL: XT_SIM_VARIANT must be one supported variant"; exit 2 ;; esac; \
+		case " $(VARIANTS) " in *" $$selected "*) ;; \
+			*) echo "FAIL: XT_SIM_VARIANT=$$selected is not in VARIANTS=$(VARIANTS)"; exit 2 ;; esac; \
+	fi; \
+	if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
+		echo "ATtiny_DFP device files not found; skipping ATtiny202 simulation."; $(SKIP); \
+	fi; \
+	$(yasimavr_skip_if_absent); \
+	vars="$$selected"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
 	fail=0; ran=0; \
 	for v in $$vars; do \
 		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
 		if [ ! -f "$$elf" ]; then \
-			echo "no $$elf (DFP absent?); skipping ATtiny202 sim for variant $$v"; continue; \
+			echo "FAIL: expected ATtiny202 image missing: $$elf"; fail=1; continue; \
 		fi; \
 		echo "--- ATtiny202 sim (functional): variant=$$v ---"; \
 		ran=1; \
-		PYTHONPATH=test/avr $(XT_FUSE_ENV) \
+		PYTHONPATH=test/avr ATTINY202_VARIANT=$$v $(XT_FUSE_ENV) \
 		$(YASIMAVR_PY) $(XT_SIM_DRIVER) "$$elf" || fail=1; \
 	done; \
-	if [ "$$ran" = 0 ]; then echo "no ATtiny202 images built; nothing to simulate."; fi; \
+	if [ "$$ran" = 0 ]; then echo "FAIL: no ATtiny202 images were simulated"; fail=1; fi; \
 	exit $$fail
 
 # Fault injection: corrupt each guarded critical SFR / state byte in the running
@@ -1779,7 +1790,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-soak-timing test-workload-rebuild coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1791,7 +1802,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-soak-timing test-workload-rebuild coverage-check
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -1956,6 +1967,12 @@ test-cbmc:
 test-fuses: test/avr/test_fuses test/avr/test_attiny202_fuses.py test/avr/attiny202_fuses.py
 	./test/avr/test_fuses
 	$(XT_FUSE_ENV) PYTHONPATH=test/avr python3 test/avr/test_attiny202_fuses.py
+
+# Host-only regression for the ATtiny202 transition/timing oracle. It stubs the
+# unavailable yasimavr module and exercises positive and fail-closed trace paths;
+# the full-tool CI job remains authoritative for the real built-image execution.
+test-attiny202-output-oracle:
+	PYTHONPATH=test/avr python3 test/avr/test_attiny202_output_oracle.py
 
 # Build rule for the fuse checker. Fuse byte values are injected from the
 # Makefile variables (single source of truth) via -D. FORCE makes command-line
@@ -2541,7 +2558,7 @@ help:
 	@echo "  attiny202        build all variants for ATtiny202 + 2 KB flash-budget gate"
 	@echo "  attiny202-analyze  cppcheck + MISRA on the AVR-XT shell (DFP+avr-libc; standalone)"
 	@echo "  attiny202-test   all ATtiny202 pre-hardware checks (fuses + smoke + build + analyze)"
-	@echo "  attiny202-sim    yasimavr functional test: drive footswitch, assert LED toggles"
+	@echo "  attiny202-sim    yasimavr functional + PA2/PA3 transition/pulse timing test"
 	@echo "                   (standalone; needs scripts/fetch_yasimavr.sh; XT_SIM_VARIANT=)"
 	@echo "  attiny202-fault  yasimavr fault-inject: corrupt a guarded SFR/state, assert the"
 	@echo "                   gate or WDT catches it (standalone; XT_SIM_VARIANT=)"
@@ -2558,6 +2575,7 @@ help:
 	@echo "  test-symbolic-klee  same properties under KLEE (if installed)"
 	@echo "  test-cbmc       CBMC SAT/SMT proof of the real bypass_pure.c (if installed)"
 	@echo "  test-fuses      decode + verify design fuse bytes (t13a + tinyx5 + ATtiny202)"
+	@echo "  test-attiny202-output-oracle  host regression for PA2/PA3 sequence/timing checks"
 	@echo "  test-stack-bound  -fstack-usage static frame bound (limit: STACK_MAX_FRAME=$(STACK_MAX_FRAME) B)"
 	@echo "  test-stack-bound-regression  fail-closed stack-evidence checks"
 	@echo "  test-flash-budget  exact ATtiny13a gate (<= FLASH_T13_BUDGET=$(FLASH_T13_BUDGET)% of 1 KB)"

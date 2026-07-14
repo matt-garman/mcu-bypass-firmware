@@ -59,9 +59,10 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
   - Provable correctness via formal state analysis
   - Core debounce algorithm written as pure functionality, thus
     host-compilable for exhaustive fuzz testing
-  - Exhaustive simavr-based functional testing for AVR Classic;
-    gpsim/libgpsim for PIC10F322; yasimavr for AVR-XT (ATtiny202)
-    functional, fault-injection, lock-step, target-I/O, and soak tests
+  - Built-image simulator validation: simavr for AVR Classic and gpsim/libgpsim
+    for PIC10F322 provide functional, fault-injection, lock-step, target-I/O,
+    and soak tests; yasimavr for AVR-XT (ATtiny202) provides functional,
+    fault-injection, physical target-output timing, and soak tests
   - Mutation tests (deliberately break code to prove tests catch
     firmware errors)
   - Simulated fault-injection tests to verify WDT functioning
@@ -99,7 +100,7 @@ and a patched `yasimavr` simulator built by `scripts/fetch_yasimavr.sh`):
 
 ```
 make attiny202        # build all variants + 2 KB flash-budget gate
-make attiny202-sim    # yasimavr functional test: footswitch -> LED toggle
+make attiny202-sim    # yasimavr functional + PA2/PA3 transition/timing test
 make attiny202-fault  # fault-injection: corrupt a guarded SFR/state, assert recovery
 make attiny202-soak   # long-duration liveness soak (XT_SOAK_DURATION_MS=)
 ```

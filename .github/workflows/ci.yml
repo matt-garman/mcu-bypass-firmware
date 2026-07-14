@@ -226,8 +226,9 @@ jobs:
   # `pic` job. It is the ONLY place the ATtiny202 is built in CI (build-matrix
   # covers the release-supported classic parts), so it doubles as the 202 build
   # + 2 KB flash-budget gate, then runs the yasimavr dynamic harness --
-  # functional (attiny202-sim), fault injection (attiny202-fault), and a short
-  # soak smoke (attiny202-soak). This lane is not release qualification.
+  # functional + physical output timing (attiny202-sim), fault injection
+  # (attiny202-fault), and a short soak smoke (attiny202-soak). This lane is not
+  # release qualification.
   #
   # Two out-of-apt inputs, both fetched + version-pinned by repo scripts and
   # cached: the ATtiny_DFP device files (scripts/fetch_attiny_dfp.sh -- a static
@@ -331,7 +332,7 @@ jobs:
 
       # Each gate greps for one PASS line per variant, so a per-variant skip
       # (e.g. a missing image) fails the step even though make returned 0.
-      - name: Functional gate (make attiny202-sim)
+      - name: Functional + target-output gate (make attiny202-sim)
         run: |
           set -o pipefail
           n=$(make -s print-VARIANTS | wc -w)

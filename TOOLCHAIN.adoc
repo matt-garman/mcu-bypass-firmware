@@ -131,12 +131,13 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   yasimavr:     0.1.6 + 2 vendored patches  (PyPI sdist, GPL-3.0; NOT apt)
                 Scriptable AVR8X/XT simulator used by the ATtiny202 (AVR-XT)
                 dynamic harness -- `make attiny202-sim` (functional footswitch
-                -> LED), `attiny202-fault` (critical-SFR / state fault
+                -> LED plus physical PA2/PA3 transition/pulse timing),
+                `attiny202-fault` (critical-SFR / state fault
                 injection), `attiny202-soak` (long-duration liveness).  It is
                 the AVR-XT analogue of simavr for the classic parts and gpsim
                 for the PIC: simavr 1.6 and QEMU do not model the AVR8X core, so
-                the ATtiny202 shell would otherwise have no lock-step / soak /
-                fault coverage (only static analysis + hardware).  The three
+                the ATtiny202 shell would otherwise have no target-output timing,
+                soak, or fault coverage (only static analysis + hardware). The three
                 targets are STANDALONE and skip cleanly when the venv is absent,
                 exactly like the PIC gpsim targets, so the AVR `make test` is
                 unaffected if yasimavr is not built.

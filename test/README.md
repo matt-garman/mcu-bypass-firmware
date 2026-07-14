@@ -41,6 +41,11 @@ test/
            test_fuses.c         all-target fuse bytes (make test-fuses)
            attiny202_fuses.py   fail-closed simulator fuse configuration
            test_attiny202_fuses.py  simulator-fuse host regression
+           sim_attiny202.py     shared yasimavr device/pin support
+           test_sim_attiny202.py   functional + PA2/PA3 transition/timing checks
+           test_attiny202_output_oracle.py  host regression for output checks
+           test_fault_attiny202.py critical-SFR/state fault injection
+           test_soak_attiny202.py  long-duration liveness soak
 
   pic/     PIC10F322-specific host and gpsim tests.
              fw_coverage/         real PIC source via host SFR mock + gcov

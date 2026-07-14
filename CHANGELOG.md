@@ -34,6 +34,10 @@ file is the human-readable summary of *what changed*.
 - Fail-closed ATtiny202 production-fuse verification for `WDTCFG`, `BODCFG`,
   `OSCCFG`, `SYSCFG0/1`, `APPEND`, and `BOOTEND`, including host regressions
   proving yasimavr receives the same complete Makefile-defined fuse set.
+- ATtiny202 built-image target-output coverage for exact physical PA2/PA3
+  startup/engage/bypass sequences, 5 ms mute windows, 12 ms relay pulses,
+  relay-coil exclusion, and low parked outputs, backed by a host-only oracle
+  regression for positive and fail-closed trace paths.
 
 ### Changed
 - CI and the release pipeline now run `make pic-test-target-variants

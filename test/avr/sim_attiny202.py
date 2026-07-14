@@ -59,6 +59,8 @@ TICK_MS = 1                     # TCB0 period, CCMP+1 = 2000 cyc @ 2 MHz
 
 PIN_FOOTSW = "PA7"              # active-low input, internal pull-up
 PIN_LED = "PA1"                 # driven High when the effect is engaged
+PIN_CTL1 = "PA2"                # x4053 CTL1 / relay RESET
+PIN_CTL2 = "PA3"                # x4053 CTL2 / relay SET
 
 PRESSED_THRESH_MS = 8           # bypass_config PRESSED_THRESH (ticks == ms here)
 RELEASE_THRESH_MS = 25          # bypass_config RELEASE_THRESH
@@ -207,6 +209,8 @@ class Sim:
 
         self.footsw = self.dev.find_pin(PIN_FOOTSW)
         self.led = self.dev.find_pin(PIN_LED)
+        self.ctl1 = self.dev.find_pin(PIN_CTL1)
+        self.ctl2 = self.dev.find_pin(PIN_CTL2)
 
         # Start with the footswitch released (floating -> pulled high) so the
         # power-on-pressed special case is not triggered unless a test asks.
@@ -220,6 +224,13 @@ class Sim:
         """Advance simulated time by `milliseconds` (SimLoop.run takes a
         DURATION in cycles, not a target cycle count)."""
         self.loop.run(self.cycles(milliseconds))
+
+    def run_cycles(self, cycles):
+        """Advance by an exact cycle count for output-transition tracing."""
+        self.loop.run(cycles)
+
+    def cycle(self):
+        return self.loop.cycle()
 
     def run_ms_stepped(self, milliseconds, step_ms=1, on_step=None):
         """Advance in `step_ms` chunks, calling on_step(elapsed_ms) after each.
@@ -244,6 +255,25 @@ class Sim:
 
     def led_on(self):
         return self.led.state() == self.StateEnum.High
+
+    def control_levels(self):
+        """Physical PA2/PA3 levels as 0/1; a non-driven level is None."""
+        def level(pin):
+            state = pin.state()
+            if state == self.StateEnum.Low:
+                return 0
+            if state == self.StateEnum.High:
+                return 1
+            return None
+
+        return level(self.ctl1), level(self.ctl2)
+
+    def control_state(self):
+        """Physical PA2/PA3 levels as bit0/bit1, or None if not both driven."""
+        ctl1, ctl2 = self.control_levels()
+        if ctl1 is None or ctl2 is None:
+            return None
+        return ctl1 | (ctl2 << 1)
 
     # --- registers / core --------------------------------------------------
     def read_ioreg(self, addr):
