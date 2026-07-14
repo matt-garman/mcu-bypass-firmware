@@ -433,7 +433,7 @@ FORCE:
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
         test-attiny202-output-oracle test-attiny202-fault-oracle \
         test-attiny202-build test-avr-build-rebuild test-gpsim-wrappers \
-        test-pic-build test-release-images \
+        test-pic-build test-release-images test-target-matrix \
         test-soak-timing test-workload-rebuild \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
@@ -1137,6 +1137,7 @@ pic-test-io: pic
 # markers, so a missing compiler/header, missing ctx_ symbol, or partial run fails
 # CI/release instead of masquerading as green.
 PIC_TARGET_VARIANT ?= cd4053
+override PIC_TARGET_VARIANTS_SUPPORTED := cd4053 mute relay
 .PHONY: pic-test-target pic-test-target-variants
 pic-test-target:
 	@set -e; \
@@ -1158,6 +1159,15 @@ pic-test-target:
 	@echo "=== PIC target fault/lock-step/I-O PASS (variant $(PIC_TARGET_VARIANT)) ==="
 
 pic-test-target-variants:
+	@if [ "$(if $(strip $(VARIANTS)),yes,no)" != yes ]; then \
+		echo "FAIL: VARIANTS must not be empty" >&2; exit 2; \
+	fi; \
+	if [ "$(words $(VARIANTS))" -ne "$(words $(sort $(VARIANTS)))" ]; then \
+		echo "FAIL: VARIANTS must not contain duplicate names" >&2; exit 2; \
+	fi; \
+	if [ "$(if $(filter-out $(PIC_TARGET_VARIANTS_SUPPORTED),$(VARIANTS)),yes,no)" = yes ]; then \
+		echo "FAIL: VARIANTS contains unsupported names; supported: $(PIC_TARGET_VARIANTS_SUPPORTED)" >&2; exit 2; \
+	fi
 	@for v in $(VARIANTS); do \
 		echo "===================== PIC TARGET VARIANT $$v ====================="; \
 		$(MAKE) --no-print-directory PIC_TARGET_VARIANT=$$v pic-test-target || exit 1; \
@@ -1803,7 +1813,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-soak-timing test-workload-rebuild coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-target-matrix test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1815,7 +1825,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-soak-timing test-workload-rebuild coverage-check
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-target-matrix test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -1856,6 +1866,10 @@ test-pic-build:
 # Exact-set and hash checks for the tag workflow's committed/listed/fresh images.
 test-release-images:
 	./test/test_release_images.sh
+
+# Host-only proof that the authoritative PIC target aggregate rejects bad matrices.
+test-target-matrix:
+	./test/test_target_matrix.sh
 
 # Fast host-only boundary checks for every soak timing input path: the shared
 # C/C++ compile-time contract, ATtiny202 environment parser, and release CLI.
@@ -2610,6 +2624,7 @@ help:
 	@echo "  test-gpsim-wrappers  fail-closed gpsim process-status checks"
 	@echo "  test-pic-build  PIC image-generation and Intel-HEX validation checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
+	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
 	@echo "  test-soak       24-h soak test (standalone; SOAK_VARIANT, SOAK_CHIP, SOAK_DURATION_MS,"

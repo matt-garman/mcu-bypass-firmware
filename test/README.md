@@ -87,7 +87,8 @@ below so a green gate means every PIC layer actually ran.
 | Fault recovery | `pic-test-fault` | Runtime direction, configuration, pull-up, and `ctx_` corruptions produce the variant-appropriate WDT recovery response. | libgpsim |
 | HEX/model lock-step | `pic-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches the shared pure model after every completed main-loop iteration. | libgpsim |
 | Target I/O timing | `pic-test-io` | TRISA/ANSELA/LATA/PORTA transitions, relay coil exclusion, and mute/relay pulse widths match the design. | libgpsim |
-| Fail-closed aggregate | `pic-test-target-variants` | Runs fault recovery, lock-step, and target-I/O for every PIC variant and requires each PASS sentinel. | Makefile wrapper |
+| Fail-closed aggregate | `pic-test-target-variants` | Rejects empty, duplicate, or unsupported matrices, then runs fault recovery, lock-step, and target-I/O for every selected PIC variant and requires each PASS sentinel. | Makefile wrapper |
+| Aggregate regression | `test-target-matrix` | Proves valid matrices run exactly once per variant and invalid matrices fail before any target invocation. | Bash + fake recursive Make |
 
 `pic-test-gpsim` now samples one non-settled point, `PRESS1_EARLY`, roughly
 3.5 ms after the first press edge. A correct 1 ms tick has not yet accumulated the
@@ -100,7 +101,9 @@ control pins are checked in both settled directions, not just the LED bit.
 `pic-test-target-variants` is the gate to use when a PIC result must be
 authoritative. The component libgpsim targets remain useful standalone commands,
 but they are allowed to skip for missing tools; the aggregate turns any skip or
-missing PASS marker into a failure.
+missing PASS marker into a failure. It also validates the complete variant matrix
+before starting its first target, so an empty or malformed matrix cannot report
+an all-variants PASS or leave a misleading partial run.
 
 `pic-test-fault` first requires exact startup `WPUA=0x08` and `TRISA=0x08`, then
 injects every guarded direction/SFR/SRAM fault at the behaviorally identified
