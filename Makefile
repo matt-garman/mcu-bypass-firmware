@@ -433,7 +433,7 @@ FORCE:
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
         test-attiny202-output-oracle test-attiny202-fault-oracle \
         test-attiny202-build test-avr-build-rebuild test-gpsim-wrappers \
-        test-pic-build test-release-images test-target-matrix \
+        test-pic-build test-release-images test-target-matrix test-lockstep-progress \
         test-soak-timing test-workload-rebuild \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
@@ -1813,7 +1813,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-target-matrix test-soak-timing test-workload-rebuild coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-target-matrix test-lockstep-progress test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1825,7 +1825,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-target-matrix test-soak-timing test-workload-rebuild coverage-check
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-target-matrix test-lockstep-progress test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -1870,6 +1870,10 @@ test-release-images:
 # Host-only proof that the authoritative PIC target aggregate rejects bad matrices.
 test-target-matrix:
 	./test/test_target_matrix.sh
+
+# Compile the real lock-step driver against a fake core and inject progress stalls.
+test-lockstep-progress:
+	PIC_SOAK_CXX="$(PIC_SOAK_CXX)" ./test/test_lockstep_progress.sh
 
 # Fast host-only boundary checks for every soak timing input path: the shared
 # C/C++ compile-time contract, ATtiny202 environment parser, and release CLI.
@@ -2625,6 +2629,7 @@ help:
 	@echo "  test-pic-build  PIC image-generation and Intel-HEX validation checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
+	@echo "  test-lockstep-progress  lock-step simulator-stall propagation checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
 	@echo "  test-soak       24-h soak test (standalone; SOAK_VARIANT, SOAK_CHIP, SOAK_DURATION_MS,"

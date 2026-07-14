@@ -148,7 +148,7 @@ static int state_eq(state_t a, state_t b) {
         && a.debounce_counter == b.debounce_counter;
 }
 
-static void run_ms(unsigned ms) {
+static bool run_ms(unsigned ms) {
     guint64 target = get_cycles().get() + (guint64)ms * CYCLES_PER_MS;
     get_cycles().set_break(target);
     int resumes = 0;
@@ -156,9 +156,11 @@ static void run_ms(unsigned ms) {
         g_cpu->run(false);
         if (++resumes > 4096) {
             fprintf(stderr, "FATAL: core not advancing (wedged?)\n");
-            return;
+            get_cycles().clear_break(target);
+            return false;
         }
     }
+    return true;
 }
 
 enum Phase { PHASE_CALIB, PHASE_LOCKSTEP };
@@ -281,7 +283,7 @@ int main() {
     g_fsw_node->attach_stimulus(ra3);
 
     footsw_set(0);
-    run_ms(SETTLE_MS);
+    if (!run_ms(SETTLE_MS)) return 1;
 
     std::vector<ClrwdtHook *> hooks;
     for (unsigned a = 0; a < 0x200u; ++a) {
@@ -292,7 +294,7 @@ int main() {
         }
     }
     g_phase = PHASE_CALIB;
-    run_ms(CALIB_MS);
+    if (!run_ms(CALIB_MS)) return 1;
     long best = -1;
     for (ClrwdtHook *h : hooks) {
         if (h->hits > best) { best = h->hits; g_loop_addr = h->addr; }
@@ -330,7 +332,7 @@ int main() {
     guint64 hardcap_ms = (guint64)LOCKSTEP_ITERS * 3u + 2000u;
     guint64 t0 = get_cycles().get();
     while (!g_done && (get_cycles().get() - t0) < hardcap_ms * CYCLES_PER_MS) {
-        run_ms(50);
+        if (!run_ms(50)) return 1;
     }
     g_checks++;
     if (!g_done) {
