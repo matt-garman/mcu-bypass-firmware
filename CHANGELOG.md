@@ -38,6 +38,9 @@ file is the human-readable summary of *what changed*.
   startup/engage/bypass sequences, 5 ms mute windows, 12 ms relay pulses,
   relay-coil exclusion, and low parked outputs, backed by a host-only oracle
   regression for positive and fail-closed trace paths.
+- Fail-closed ATtiny202 fault execution now requires all 11 independently pinned
+  injectable guards, zero skips, exact result counts, witnessed WDT resets,
+  phase-swept ISR-handshake corruption, and a long healthy negative control.
 
 ### Changed
 - CI and the release pipeline now run `make pic-test-target-variants

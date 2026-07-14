@@ -343,7 +343,9 @@ jobs:
       - name: Fault-injection gate (make attiny202-fault)
         run: |
           set -o pipefail
-          n=$(make -s print-VARIANTS | wc -w)
+          # Pin the complete development matrix independently of Make defaults;
+          # each FAULT PASS also requires 11/11 injections, 12/12 results, no skips.
+          n=3
           make attiny202-fault 2>&1 | tee fault.log
           p=$(grep -c "FAULT PASS" fault.log || true)
           [ "$p" -eq "$n" ] || { echo "::error::attiny202-fault: $p/$n variants PASSed (skip or fail)"; exit 1; }

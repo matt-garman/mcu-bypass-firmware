@@ -36,6 +36,8 @@
 #
 # Usage:   make attiny202-fault  (supplies the ELF and required production fuses)
 # Exit:    0 = PASS, 1 = a case failed, 2 = bad invocation / missing image.
+# Completeness: exactly 11 independently pinned injections plus one long healthy
+# negative control must finish; any rejected/re-latched injection is a failure.
 
 import sys
 
@@ -44,17 +46,23 @@ import sim_attiny202 as S
 SETTLE_MS = 40           # run to steady state before injecting
 GATE_MS = 8              # a few ticks: the gate runs every 1 ms tick
 LIVE_MS = 650            # > 2x the ~250 ms WDT period, plus injection-phase slack
-NEG_CONTROL_MS = 60      # no-corruption window (< WDT period; must stay healthy)
+NEG_CONTROL_MS = 650     # >2x WDT period: healthy firmware must keep petting it
 LIVE_STEP_MS = 5
+RETRY_GATE_MS = 50
+RETRY_GATE_STEP_CYCLES = 137  # coprime with the 2,000-cycle tick
+EXPECTED_FAULT_CASES = 11
+EXPECTED_TOTAL_RESULTS = EXPECTED_FAULT_CASES + 1  # injections + negative control
+RESET_SENTINEL = 0xA5
 
 REG = "reg"              # I/O register  (write_ioreg)
 RAM = "ram"              # SRAM byte     (write_ram, addr resolved per variant)
 GATE = "gate"            # expected mechanism: per-tick sanity gate
 LIVE = "live"            # expected mechanism: WDT liveness (or the gate)
+RETRY_GATE = "retry_gate"  # phase-swept reinjection for ISR-rewritten state
 
 
 def _fault_cases(sim):
-    """(name, kind, addr, corrupt_value, mechanism) for each guarded value.
+    """(name, kind, addr, corrupt_value, mechanism) for each injectable guard.
 
     SRAM addresses come from the resolved symbols on `sim`; I/O addresses are the
     datasheet constants in sim_attiny202. Each corrupt_value unambiguously
@@ -63,9 +71,13 @@ def _fault_cases(sim):
         # --- caught by the per-tick sanity gate (tick stays alive) ---
         ("CLKCTRL.MCLKCTRLB",     REG, S.REG_CLKCTRL_MCLKCTRLB, 0x00, GATE),
         ("PORTA.PIN7CTRL(pullup)", REG, S.REG_PORTA_PIN7CTRL,   0x00, GATE),
+        ("PORTA.DIR(outputs)",     REG, S.REG_PORTA_DIR,        0x00, GATE),
         ("ctx_.program_state",    RAM, sim.addr_ctx + 0,        0xFF, GATE),
         ("ctx_.effect_state",     RAM, sim.addr_ctx + 1,        0xFF, GATE),
         ("ctx_.debounce_counter", RAM, sim.addr_ctx + 2,        0xFF, GATE),
+        ("timer_isr_called_",      RAM, sim.addr_timer_isr,      0xFF, RETRY_GATE),
+        ("TCB0.CTRLB(mode)",      REG, S.REG_TCB0_CTRLB,        0x07, GATE),
+        ("TCB0.CCMP_L(period)",   REG, S.REG_TCB0_CCMP_L,       0x00, GATE),
         # --- caught by WDT liveness (disabling the tick kills the wake source) ---
         ("TCB0.CTRLA(tick)",      REG, S.REG_TCB0_CTRLA,        0x00, LIVE),
         ("TCB0.INTCTRL(tick)",    REG, S.REG_TCB0_INTCTRL,      0x00, LIVE),
@@ -76,8 +88,11 @@ class Checker:
     def __init__(self):
         self.fails = 0
         self.skips = 0
+        self.results = 0
+        self.injections = 0
 
     def result(self, ok, msg, skipped=False):
+        self.results += 1
         if skipped:
             self.skips += 1
             tag = "SKIP"
@@ -91,6 +106,35 @@ class Checker:
             self.fails += 1
         stream.write("[fault] %s  %s\n" % (tag, msg))
         stream.flush()
+
+    def injected(self):
+        self.injections += 1
+
+    def _completion_failure(self, msg):
+        self.fails += 1
+        sys.stderr.write("[fault] FAIL  %s\n" % msg)
+
+    def finalize(self, declared_cases):
+        if declared_cases != EXPECTED_FAULT_CASES:
+            self._completion_failure(
+                "fault case list has %d entries; expected exactly %d"
+                % (declared_cases, EXPECTED_FAULT_CASES)
+            )
+        if self.results != EXPECTED_TOTAL_RESULTS:
+            self._completion_failure(
+                "recorded %d result(s); expected exactly %d"
+                % (self.results, EXPECTED_TOTAL_RESULTS)
+            )
+        if self.injections != EXPECTED_FAULT_CASES:
+            self._completion_failure(
+                "completed %d injectable fault(s); expected exactly %d"
+                % (self.injections, EXPECTED_FAULT_CASES)
+            )
+        if self.skips != 0:
+            self._completion_failure(
+                "%d fault injection(s) skipped; authoritative execution must be complete"
+                % self.skips
+            )
 
 
 def _inject(sim, kind, addr, value):
@@ -112,9 +156,33 @@ def _run_case(elf, name, kind, addr, corrupt, mech, ck):
         return
 
     healthy = sim.read_ioreg(addr) if kind == REG else sim.read_ram(addr, 1)[0]
+    if mech == LIVE:
+        sim.write_ioreg(S.REG_GPR0, RESET_SENTINEL)
+        if sim.read_ioreg(S.REG_GPR0) != RESET_SENTINEL:
+            ck.result(False, "%s: could not arm reset witness" % name)
+            return
     if not _inject(sim, kind, addr, corrupt):
         ck.result(True, "%s: not injectable in sim (write rejected/re-latched)"
                         % name, skipped=True)
+        return
+    ck.injected()
+
+    if mech == RETRY_GATE:
+        elapsed_cycles = 0
+        max_cycles = S.F_CPU_HZ * RETRY_GATE_MS // 1000
+        while elapsed_cycles < max_cycles:
+            if sim.in_force_reset():
+                ck.result(True, "%s repeatedly corrupted -> gate forced reset"
+                                % name)
+                return
+            if not _inject(sim, kind, addr, corrupt):
+                ck.result(True, "%s: reinjection was rejected/re-latched"
+                                % name, skipped=True)
+                return
+            sim.run_cycles(RETRY_GATE_STEP_CYCLES)
+            elapsed_cycles += RETRY_GATE_STEP_CYCLES
+        ck.result(False, "%s repeatedly corrupted -> NOT caught within %d ms"
+                         % (name, RETRY_GATE_MS))
         return
 
     if mech == GATE:
@@ -134,8 +202,13 @@ def _run_case(elf, name, kind, addr, corrupt, mech, ck):
                             % (name, elapsed))
             return
         if sim.read_ioreg(addr) == healthy and healthy != corrupt:
-            ck.result(True, "%s corrupted -> WDT reset recovered device (+%d ms)"
-                            % (name, elapsed))
+            reset_seen = sim.read_ioreg(S.REG_GPR0) != RESET_SENTINEL
+            ck.result(reset_seen,
+                      "%s corrupted -> register restored%s (+%d ms)"
+                      % (name,
+                         " by witnessed WDT reset" if reset_seen
+                         else " WITHOUT reset witness",
+                         elapsed))
             return
         sim.run_ms(LIVE_STEP_MS)
         elapsed += LIVE_STEP_MS
@@ -143,15 +216,33 @@ def _run_case(elf, name, kind, addr, corrupt, mech, ck):
 
 
 def _run_negative_control(elf, ck):
-    # No corruption: the firmware must stay healthy -- no force-reset spin over a
-    # window shorter than the WDT period. Proves the detectors are not trivially
-    # always-true and the gate does not false-trip.
+    # No corruption: stay healthy for >2 watchdog periods. The reset witness
+    # proves the WDT is being petted rather than repeatedly resetting a firmware
+    # image that happens to look healthy again after each reboot.
     sim = S.Sim(elf)
     sim.run_ms(SETTLE_MS)
-    at = sim.run_until_force_reset(NEG_CONTROL_MS)
-    ck.result(at is None,
-              "no corruption -> stays healthy over %d ms%s"
-              % (NEG_CONTROL_MS, "" if at is None else " (spurious reset at +%d ms!)" % at))
+    sim.write_ioreg(S.REG_GPR0, RESET_SENTINEL)
+    if sim.read_ioreg(S.REG_GPR0) != RESET_SENTINEL:
+        ck.result(False, "no corruption: could not arm reset witness")
+        return
+
+    elapsed = 0
+    failure = None
+    while elapsed < NEG_CONTROL_MS:
+        sim.run_ms(LIVE_STEP_MS)
+        elapsed += LIVE_STEP_MS
+        if sim.in_force_reset():
+            failure = "entered force-reset spin at +%d ms" % elapsed
+            break
+        if sim.read_ioreg(S.REG_GPR0) != RESET_SENTINEL:
+            failure = "reset witness cleared at +%d ms" % elapsed
+            break
+        if sim.is_done():
+            failure = "simulator stopped at +%d ms" % elapsed
+            break
+    ck.result(failure is None,
+              "no corruption -> healthy for %d ms%s"
+              % (NEG_CONTROL_MS, "" if failure is None else " (" + failure + ")"))
 
 
 def main(argv):
@@ -160,12 +251,17 @@ def main(argv):
 
     ck = Checker()
     probe = S.Sim(elf)                 # one instance just to resolve the case list
-    for name, kind, addr, corrupt, mech in _fault_cases(probe):
+    cases = _fault_cases(probe)
+    for name, kind, addr, corrupt, mech in cases:
         _run_case(elf, name, kind, addr, corrupt, mech, ck)
     _run_negative_control(elf, ck)
+    ck.finalize(len(cases))
 
     verdict = "PASS" if ck.fails == 0 else "FAIL"
-    print("\nFAULT %s: %d failed, %d skipped." % (verdict, ck.fails, ck.skips))
+    print("\nFAULT %s: %d failed, %d skipped, %d/%d injections, %d/%d results."
+          % (verdict, ck.fails, ck.skips,
+             ck.injections, EXPECTED_FAULT_CASES,
+             ck.results, EXPECTED_TOTAL_RESULTS))
     return 0 if ck.fails == 0 else 1
 
 
