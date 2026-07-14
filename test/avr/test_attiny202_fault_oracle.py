@@ -63,8 +63,8 @@ expected_cases = (
     ("ctx_.effect_state",      "ram", 0x3F81, 0xFF, "gate"),
     ("ctx_.debounce_counter",  "ram", 0x3F82, 0xFF, "gate"),
     ("timer_isr_called_",       "ram", 0x3F83, 0xFF, "retry_gate"),
-    ("TCB0.CTRLB(mode)",       "reg", 0x0A41, 0x07, "gate"),
-    ("TCB0.CCMP_L(period)",    "reg", 0x0A4C, 0x00, "gate"),
+    ("TCB0.CTRLB(mode)",       "reg",   0x0A41, 0x10,   "gate"),
+    ("TCB0.CCMP(period)",      "reg16", 0x0A4C, 0x0FFF, "gate"),
     ("TCB0.CTRLA(tick)",       "reg", 0x0A40, 0x00, "live"),
     ("TCB0.INTCTRL(tick)",     "reg", 0x0A45, 0x00, "live"),
 )
