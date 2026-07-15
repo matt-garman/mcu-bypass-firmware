@@ -140,8 +140,8 @@ added here explicitly.
 | | |
 |---|---|
 | **Rule** | 2.5 (unused macro definition, Advisory) |
-| **Files** | `bypass_pins_avr_classic.h`, `bypass_pins_pic10f322.h`, `bypass_config.h` |
-| **Instances** | AVR run: 16 (14 pin map + 2 `bypass_config.h`). PIC run: the PIC pin map plus the cross-config AVR pin map (see below). |
+| **Files** | `bypass_pins_avr_classic.h`, `bypass_pins_pic10f322.h`, `bypass_pins_avr_xt.h`, `bypass_config.h` |
+| **Instances** | AVR run: 16 (14 pin map + 2 `bypass_config.h`) plus the cross-config PIC and AVR-XT maps. PIC run: the PIC pin map plus the cross-config classic-AVR and AVR-XT maps (see below). |
 
 **Rationale.** Several macros are defined in shared headers that are included
 by multiple translation units, but are only *used* by a subset of them. cppcheck
@@ -198,6 +198,45 @@ recorded in cppcheck's cross-configuration directive list, so its macros are
 reported "unused" in the PIC run too — already waived by the AVR pin map's
 entry. None of these are dead code: every macro is used by some build of some
 MCU.
+
+**`bypass_pins_avr_xt.h` — the AVR-XT (ATtiny202) pin map**
+
+The AVR-XT map is the third per-MCU pin map, and `bypass_output_common.h`
+selects among the three with `#if/#elif`. Whichever build runs, the two
+*unselected* maps are recorded in cppcheck's cross-configuration directive list
+and their macros read "unused" — so the classic and PIC runs both flag Rule 2.5
+on `bypass_pins_avr_xt.h`, exactly as they already do for each other's maps. Not
+dead code: the AVR-XT map is the single source of truth for the ATtiny202 build.
+
+### D-3 — Shared algorithm-type header
+
+| | |
+|---|---|
+| **Rule** | 2.3 (unused type declaration, Advisory); 2.4 (unused tag declaration, Advisory) |
+| **Files** | `bypass_types.h` |
+| **Instances** | AVR run: 2.3 ×2, 2.4 ×2 (`pin_state_t`, `debounce_context_t`), reported once per output-driver TU. |
+
+**Rationale.** `bypass_types.h` is the single source of truth for the
+debounce/bypass algorithm's types: `program_state_t`, `effect_state_t`,
+`pin_state_t`, and `debounce_context_t`. The hardware interface
+(`bypass_hw_iface.h`) includes it because `hw_is_sanity_check_failed()` now takes
+an `effect_state_t` argument (so the per-variant check can validate the settled
+output latch against the current logical effect state). Every output-driver TU
+therefore transitively sees the whole type set, but references only
+`effect_state_t` — `pin_state_t` and `debounce_context_t` are used solely by the
+core (`bypass_pure.c`) and the per-MCU shells. cppcheck analyzes each TU in
+isolation and reports the unreferenced type (2.3) and its tag (2.4) as unused.
+
+These are **not dead code** — each type is used by some translation unit. This is
+the same single-source-of-truth situation as D-2 (shared header, per-TU subset),
+applied to type/tag declarations rather than macros. Splitting the header so that
+`effect_state_t` lives apart from `pin_state_t`/`debounce_context_t` would silence
+the advisory but fragment the algorithm's cohesive type definitions across
+several headers for no functional gain, so the shared header is kept and the
+advisory is deviated.
+
+**Scope control.** Waived per-file. A new unused type in another header still
+fails the gate and must be reviewed.
 
 ## Maintenance
 

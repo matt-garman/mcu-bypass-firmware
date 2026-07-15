@@ -60,3 +60,20 @@ misra-c2012-10.8:src/bypass_mcu_avr_xt.c
 misra-c2012-2.5:src/bypass_pins_avr_classic.h
 misra-c2012-2.5:src/bypass_pins_pic10f322.h
 misra-c2012-2.5:src/bypass_config.h
+# The AVR-XT (ATtiny202) pin map is the third per-MCU map and behaves exactly
+# like the two above: bypass_output_common.h selects a map with #if/#elif, so
+# the unselected AVR-XT map is recorded in cppcheck's cross-config directive
+# list and its macros read "unused" in the classic and PIC runs. Same D-2
+# cross-config artifact.
+misra-c2012-2.5:src/bypass_pins_avr_xt.h
+
+# --- D-3: shared algorithm-type header (Rules 2.3, 2.4) ----------------------
+# bypass_types.h is the single source of truth for the debounce/bypass algorithm
+# types. bypass_hw_iface.h now includes it for effect_state_t (the argument to
+# hw_is_sanity_check_failed), so every output-driver TU transitively sees
+# pin_state_t and debounce_context_t as well -- types used only by the core
+# (bypass_pure.c) and the per-MCU shells, never by an output driver. cppcheck
+# analyzes each TU alone and reports the unreferenced type (2.3) and its tag
+# (2.4) as unused. Not dead code: each is used by some TU. See MISRA_COMPLIANCE.md D-3.
+misra-c2012-2.3:src/bypass_types.h
+misra-c2012-2.4:src/bypass_types.h
