@@ -32,10 +32,11 @@ IDLE_STABILITY_MS = 250     # idle soak for the sanity-gate / no-spurious-reset 
 N_TOGGLES = 6
 
 # Physical output tracing runs one simulator cycle at a time so even a one-cycle
-# wrong ordering or dual-coil state is observable. Measured edges are therefore
-# cycle-exact; a small tolerance covers compiled delay-loop/call overhead.
+# wrong ordering or dual-coil state is observable. This driver asserts pulse
+# ORDERING/POLARITY/exclusion, not wall-clock WIDTH -- see check_pulse_present()
+# for why absolute coil-pulse width is verified from the image by
+# test_attiny202_delay_oracle.py instead.
 OUTPUT_SAMPLE_CYCLES = 1
-OUTPUT_TIMING_TOLERANCE_CYCLES = 200
 OUTPUT_TRACE_MS = 30
 
 VARIANTS = ("cd4053", "mute", "relay")
@@ -137,7 +138,23 @@ def check_trace(ck, trace, expected_states):
              % (trace.name, actual_states, expected_states))
 
 
-def check_pulse(ck, trace, pulse_state, expected_ms, relay_minimum=False):
+def check_pulse_present(ck, trace, pulse_state):
+    """Assert a COMPLETE pulse of `pulse_state` (an edge into it and an edge out)
+    is observed -- the structural coil-pulse property yasimavr CAN verify.
+
+    Deliberately does NOT assert the pulse's WALL-CLOCK WIDTH. The coil pulses
+    are avr-libc _delay_ms() busy loops, so their duration is a pure CPU-cycle
+    count -- and yasimavr 0.1.6 is a functional simulator that charges a flat
+    ~1 cycle per instruction rather than the AVR-XT's true instruction timing
+    (SBIW and a taken BRNE are 2 cycles each on silicon, 1 each here). It thus
+    runs every busy delay at ~half its real length (a 12 ms pulse traces as
+    ~6 ms), so an absolute-width check here would fail a CORRECT image. The
+    absolute width is a compile-time property of the flash and is verified from
+    the disassembled _delay_ms loop by test_attiny202_delay_oracle.py -- see that
+    file's header (and the project memory note "yasimavr-flat-instruction-
+    timing") for the full rationale. yasimavr's TCB0-tick timing is unaffected,
+    so the debounce/LED/sequence checks elsewhere in this driver stay accurate.
+    """
     start = None
     end = None
     for index, (cycle, state) in enumerate(trace.transitions):
@@ -147,22 +164,9 @@ def check_pulse(ck, trace, pulse_state, expected_ms, relay_minimum=False):
                 end = trace.transitions[index + 1][0]
             break
 
-    if not ck.check(start is not None and end is not None,
-                    "%s: complete state 0x%X pulse observed"
-                    % (trace.name, pulse_state)):
-        return
-
-    width = end - start
-    expected = S.F_CPU_HZ * expected_ms // 1000
-    difference = abs(width - expected)
-    width_ms = width * 1000.0 / S.F_CPU_HZ
-    ck.check(difference <= OUTPUT_TIMING_TOLERANCE_CYCLES,
-             "%s: pulse %.3f ms within %d ms +/-0.10 ms"
-             % (trace.name, width_ms, expected_ms))
-    if relay_minimum:
-        ck.check(width >= S.F_CPU_HZ * 4 // 1000,
-                 "%s: relay pulse %.3f ms meets 4 ms minimum"
-                 % (trace.name, width_ms))
+    ck.check(start is not None and end is not None,
+             "%s: complete state 0x%X pulse observed"
+             % (trace.name, pulse_state))
 
 
 def test_control_outputs(elf, variant, ck):
@@ -194,8 +198,8 @@ def test_control_outputs(elf, variant, ck):
         check_trace(ck, startup, [])
         check_trace(ck, engage, [0x2, 0x3])
         check_trace(ck, bypass, [0x2, 0x0])
-        check_pulse(ck, engage, 0x2, 5)
-        check_pulse(ck, bypass, 0x2, 5)
+        check_pulse_present(ck, engage, 0x2)
+        check_pulse_present(ck, bypass, 0x2)
         ck.check(sim.control_state() == 0x0,
                  "muted x4053: PA2/PA3 finish at BYPASS 0x0")
     else:
@@ -205,9 +209,9 @@ def test_control_outputs(elf, variant, ck):
         for trace in (startup, engage, release_one, bypass, release_two):
             ck.check(not trace.saw_both_high,
                      "%s: relay coils were never both high" % trace.name)
-        check_pulse(ck, startup, 0x1, 12, relay_minimum=True)
-        check_pulse(ck, engage, 0x2, 12, relay_minimum=True)
-        check_pulse(ck, bypass, 0x1, 12, relay_minimum=True)
+        check_pulse_present(ck, startup, 0x1)
+        check_pulse_present(ck, engage, 0x2)
+        check_pulse_present(ck, bypass, 0x1)
         ck.check(sim.control_state() == 0x0,
                  "relay: PA2/PA3 coils finish parked low")
 

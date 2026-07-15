@@ -54,7 +54,8 @@ EXPECTED_FAULT_CASES = 11
 EXPECTED_TOTAL_RESULTS = EXPECTED_FAULT_CASES + 1  # injections + negative control
 RESET_SENTINEL = 0xA5
 
-REG = "reg"              # I/O register  (write_ioreg)
+REG = "reg"              # I/O register        (write_ioreg, one byte)
+REG16 = "reg16"          # 16-bit I/O register  (write_ioreg low then high)
 RAM = "ram"              # SRAM byte     (write_ram, addr resolved per variant)
 GATE = "gate"            # expected mechanism: per-tick sanity gate
 LIVE = "live"            # expected mechanism: WDT liveness (or the gate)
@@ -66,21 +67,31 @@ def _fault_cases(sim):
 
     SRAM addresses come from the resolved symbols on `sim`; I/O addresses are the
     datasheet constants in sim_attiny202. Each corrupt_value unambiguously
-    violates what the firmware expects."""
+    violates what the firmware expects.
+
+    GATE-case corrupt values MUST KEEP THE 1 ms TICK ALIVE. The per-tick gate
+    only runs when the TCB0 CAPT interrupt wakes the CPU from IDLE sleep, so a
+    corruption that also stops the tick would never let the gate run -- it would
+    be caught only by the WDT, ~256 ms later. Hence TCB0.CTRLB is corrupted by
+    setting CCMPEN (0x10) while leaving CNTMODE at INT (not e.g. PWM8/0x07, which
+    disrupts the tick), and TCB0.CCMP is set to 0x0FFF (a valid running period
+    != the expected 1999, not 0x0000, which is degenerate). Corruptions that
+    genuinely KILL the tick are the TCB0.CTRLA/INTCTRL LIVE cases below, where
+    the WDT is the correct (and only possible) catcher."""
     return [
         # --- caught by the per-tick sanity gate (tick stays alive) ---
-        ("CLKCTRL.MCLKCTRLB",     REG, S.REG_CLKCTRL_MCLKCTRLB, 0x00, GATE),
-        ("PORTA.PIN7CTRL(pullup)", REG, S.REG_PORTA_PIN7CTRL,   0x00, GATE),
-        ("PORTA.DIR(outputs)",     REG, S.REG_PORTA_DIR,        0x00, GATE),
-        ("ctx_.program_state",    RAM, sim.addr_ctx + 0,        0xFF, GATE),
-        ("ctx_.effect_state",     RAM, sim.addr_ctx + 1,        0xFF, GATE),
-        ("ctx_.debounce_counter", RAM, sim.addr_ctx + 2,        0xFF, GATE),
-        ("timer_isr_called_",      RAM, sim.addr_timer_isr,      0xFF, RETRY_GATE),
-        ("TCB0.CTRLB(mode)",      REG, S.REG_TCB0_CTRLB,        0x07, GATE),
-        ("TCB0.CCMP_L(period)",   REG, S.REG_TCB0_CCMP_L,       0x00, GATE),
+        ("CLKCTRL.MCLKCTRLB",     REG,   S.REG_CLKCTRL_MCLKCTRLB, 0x00,   GATE),
+        ("PORTA.PIN7CTRL(pullup)", REG,  S.REG_PORTA_PIN7CTRL,    0x00,   GATE),
+        ("PORTA.DIR(outputs)",     REG,  S.REG_PORTA_DIR,         0x00,   GATE),
+        ("ctx_.program_state",    RAM,   sim.addr_ctx + 0,        0xFF,   GATE),
+        ("ctx_.effect_state",     RAM,   sim.addr_ctx + 1,        0xFF,   GATE),
+        ("ctx_.debounce_counter", RAM,   sim.addr_ctx + 2,        0xFF,   GATE),
+        ("timer_isr_called_",      RAM,  sim.addr_timer_isr,      0xFF,   RETRY_GATE),
+        ("TCB0.CTRLB(mode)",      REG,   S.REG_TCB0_CTRLB,        0x10,   GATE),
+        ("TCB0.CCMP(period)",     REG16, S.REG_TCB0_CCMP_L,       0x0FFF, GATE),
         # --- caught by WDT liveness (disabling the tick kills the wake source) ---
-        ("TCB0.CTRLA(tick)",      REG, S.REG_TCB0_CTRLA,        0x00, LIVE),
-        ("TCB0.INTCTRL(tick)",    REG, S.REG_TCB0_INTCTRL,      0x00, LIVE),
+        ("TCB0.CTRLA(tick)",      REG,   S.REG_TCB0_CTRLA,        0x00,   LIVE),
+        ("TCB0.INTCTRL(tick)",    REG,   S.REG_TCB0_INTCTRL,      0x00,   LIVE),
     ]
 
 
@@ -144,6 +155,19 @@ def _inject(sim, kind, addr, value):
     if kind == REG:
         sim.write_ioreg(addr, value)
         return sim.read_ioreg(addr) == value
+    if kind == REG16:
+        # TCB0.CCMP is a 16-bit register accessed through the AVR temp-register
+        # protocol: a write to the low byte loads the temp, and only the
+        # high-byte write commits {high:temp}; a read of the low byte latches the
+        # high byte into the temp, which the high-byte read then returns. So a
+        # single-byte poke never commits (it leaves the healthy value), and both
+        # halves must be accessed low-then-high. Inject both bytes and confirm
+        # the committed 16-bit word by reading them back in the same order.
+        sim.write_ioreg(addr, value & 0xFF)
+        sim.write_ioreg(addr + 1, (value >> 8) & 0xFF)
+        lo = sim.read_ioreg(addr)
+        hi = sim.read_ioreg(addr + 1)
+        return ((hi << 8) | lo) == value
     sim.write_ram(addr, [value])
     return sim.read_ram(addr, 1)[0] == value
 
@@ -155,7 +179,8 @@ def _run_case(elf, name, kind, addr, corrupt, mech, ck):
         ck.result(False, "%s: device already force-reset before injection" % name)
         return
 
-    healthy = sim.read_ioreg(addr) if kind == REG else sim.read_ram(addr, 1)[0]
+    healthy = (sim.read_ioreg(addr) if kind in (REG, REG16)
+               else sim.read_ram(addr, 1)[0])
     if mech == LIVE:
         sim.write_ioreg(S.REG_GPR0, RESET_SENTINEL)
         if sim.read_ioreg(S.REG_GPR0) != RESET_SENTINEL:
