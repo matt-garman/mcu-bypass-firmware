@@ -356,7 +356,7 @@ jobs:
         run: |
           set -o pipefail
           # Pin the complete development matrix independently of Make defaults;
-          # each FAULT PASS also requires 13/13 injections, 14/14 results, no skips.
+          # each FAULT PASS also requires 17/17 injections, 18/18 results, no skips.
           n=3
           make attiny202-fault 2>&1 | tee fault.log
           p=$(grep -c "FAULT PASS" fault.log || true)

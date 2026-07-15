@@ -99,6 +99,13 @@ static void apply_injection(int inj) {
             ctx_.program_state = RELEASE_DEBOUNCE_WAIT;
             ctx_.effect_state = ENGAGED;
             ctx_.debounce_counter = RELEASE_THRESH;
+#if defined(CD4053_SIMPLE)
+            LATA = 0x03u;
+#elif defined(CD4053_WITH_MUTE)
+            LATA = 0x07u;
+#else
+            LATA = 0x01u;
+#endif
             break;
         case FWI_PROGRAM_STATE_OOR:    ctx_.program_state = (program_state_t)2; break;
         case FWI_EFFECT_STATE_OOR:     ctx_.effect_state = (effect_state_t)2; break;
@@ -111,6 +118,9 @@ static void apply_injection(int inj) {
         case FWI_LED_PIN_TO_INPUT:     TRISA |= (uint8_t)(1u << 0); break;
         case FWI_CTL1_PIN_TO_INPUT:    TRISA |= (uint8_t)(1u << 1); break;
         case FWI_RA2_PIN_TO_INPUT:     TRISA |= (uint8_t)(1u << 2); break;
+        case FWI_LATA_RA0_HIGH:        LATA |= (uint8_t)(1u << 0); break;
+        case FWI_LATA_RA1_HIGH:        LATA |= (uint8_t)(1u << 1); break;
+        case FWI_LATA_RA2_HIGH:        LATA |= (uint8_t)(1u << 2); break;
         case FWI_OSCCON_IRCF_SKEW:     OSCCONbits.IRCF ^= 1u; break;
         case FWI_WDTPS_SKEW:           WDTCONbits.WDTPS ^= 1u; break;
         case FWI_PR2_SKEW:             PR2 ^= (uint8_t)0x01u; break;
@@ -188,8 +198,12 @@ uint8_t fw_drive(const uint8_t *fsw, int n) {
     return g_last_lata;
 }
 
-int fwp_output_pins_intact(uint8_t mask) { return (int)hw_output_pins_intact(mask); }
-int fwp_sanity_failed(void)              { return (int)hw_is_sanity_check_failed(); }
+int fwp_output_state_intact(uint8_t required_mask, uint8_t expected_high_mask) {
+    return (int)hw_output_state_intact(required_mask, expected_high_mask);
+}
+int fwp_sanity_failed(effect_state_t effect_state) {
+    return (int)hw_is_sanity_check_failed(effect_state);
+}
 int fwp_pullup_intact(void)              { return (int)hw_footswitch_pullup_intact(); }
 int fwp_critical_sfrs_intact(void)       { return (int)hw_critical_sfrs_intact(); }
 int fwp_footswitch_is_high(void) {

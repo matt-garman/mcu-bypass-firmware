@@ -95,10 +95,18 @@ void hw_configure_output_pins(uint8_t const output_mask) {
 
 
 // sanity-check utility: return non-zero ("true") IFF every pin in
-// expected_mask is still configured as an output (its TRISA direction bit is
-// still 0).
-uint8_t hw_output_pins_intact(uint8_t const expected_mask) {
-    return (0U == (TRISA & expected_mask));
+// required_output_mask is still configured as an output (its TRISA direction
+// bit is still 0) and the complete output latch matches the expected state.
+uint8_t hw_output_state_intact(
+        uint8_t const required_output_mask,
+        uint8_t const expected_high_mask) {
+    uint8_t actual_direction_mask = (uint8_t)(TRISA & 0x0FU);
+    uint8_t actual_high_mask =
+        (uint8_t)(LATA & (uint8_t)BYPASS_OUTPUT_DDR_MASK);
+
+    return
+        (0U == (actual_direction_mask & required_output_mask)) &&
+        (actual_high_mask == expected_high_mask);
 }
 
 // sanity-check utility: return non-zero ("true") IFF all the critical pin
@@ -331,7 +339,7 @@ void main(void) {
                 // assert footswitch pull-up still enabled
                 (0U == hw_footswitch_pullup_intact()) ||
                 // config-specific runtime sanity checks
-                hw_is_sanity_check_failed() ||
+                hw_is_sanity_check_failed(ctx_.effect_state) ||
                 (0U == hw_critical_sfrs_intact())
            ) {
             hw_force_wdt_reset();
@@ -372,4 +380,3 @@ void main(void) {
         hw_wdt_pet(); // i.e. CLRWDT()
     }
 }
-

@@ -9,13 +9,33 @@
 #include "bypass_static_assert.h" // static_assert()
 
 
-uint8_t hw_is_sanity_check_failed(void) {
+uint8_t hw_is_sanity_check_failed(effect_state_t const effect_state) {
 
     static_assert(CD4053_MUTE_DELAY_MS < RELEASE_THRESH,
             "CD4053 mute delay must be shorter than the release-lockout window, "
             "or the re-arm point can be missed during the blocking actuation");
 
-    return (0U == hw_output_pins_intact((1 << LED_PIN) | (1 << CD4053_CTL1) | (1 << CD4053_CTL2)));
+    uint8_t expected_high_mask = 0U;
+
+    if (BYPASS == effect_state) {
+        expected_high_mask = 0U;
+    }
+    else if (ENGAGED == effect_state) {
+        expected_high_mask = (uint8_t)(
+                (1U << LED_PIN) |
+                (1U << CD4053_CTL1) |
+                (1U << CD4053_CTL2));
+    }
+    else {
+        return 1U;
+    }
+
+    return (0U == hw_output_state_intact(
+            (uint8_t)(
+                    (1U << LED_PIN) |
+                    (1U << CD4053_CTL1) |
+                    (1U << CD4053_CTL2)),
+            expected_high_mask));
 }
 
 

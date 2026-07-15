@@ -1513,6 +1513,40 @@ static void test_fault_inject_spare_ddr(void) {
     expect_fault_response("spare DDR (PB4 input)");
 }
 
+// Flip each output-latch bit away from its settled value while preserving the
+// complete direction configuration. PB1 starts in BYPASS so a missed fault
+// leaves the LED visibly high; PB2..PB4 start ENGAGED so a missed fault leaves
+// the LED high. In either case recovery to a dark LED is an independent reset
+// witness on tinyx5, while ATtiny13a uses the established no-sleep witness.
+static void inject_output_latch_bit(uint8_t const pin, const char *what) {
+    if (sim_reset(0) != 0) { g_failures++; return; }
+
+    if (pin == LED_PIN) {
+        footsw_set(0); run_ms(20);
+        CHECK(g_led_level == 0,
+              "fault-inject [%s]: normal BYPASS starts with LED dark", what);
+    }
+    else {
+        footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
+        CHECK(g_led_level == 1,
+              "fault-inject [%s]: normal press engages", what);
+    }
+
+    uint8_t const bad = (uint8_t)(g_avr->data[PORTB_MEM_ADDR]
+                                  ^ (uint8_t)(1U << pin));
+    avr_core_watch_write(g_avr, PORTB_MEM_ADDR, bad);
+    CHECK(g_avr->data[PORTB_MEM_ADDR] == bad,
+          "fault-inject [%s]: PORTB latch corruption did not stick", what);
+    expect_fault_response(what);
+}
+
+static void test_fault_inject_output_latches(void) {
+    inject_output_latch_bit(PB1, "PORTB.PB1 LED latch");
+    inject_output_latch_bit(PB2, "PORTB.PB2 control/coil latch");
+    inject_output_latch_bit(PB3, "PORTB.PB3 control/coil/spare latch");
+    inject_output_latch_bit(PB4, "PORTB.PB4 spare latch");
+}
+
 //////////////////////////////////////////////////////////////////////////////
 // SFR-integrity fault injection: corrupt each critical CONFIG register the
 // firmware writes once in init() -- the clock prescaler, the watchdog config,
@@ -1720,6 +1754,7 @@ static void run_fault_injection_suite(void) {
     test_fault_inject_control_ddr();
     test_fault_inject_footswitch_ddr();
     test_fault_inject_spare_ddr();
+    test_fault_inject_output_latches();
     // SFR-integrity gate: clock / watchdog / Timer0 config registers
     test_fault_inject_clkpr();
     test_fault_inject_wdtcr();

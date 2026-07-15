@@ -6,7 +6,7 @@
 // gate + hw_force_wdt_reset() promise.
 //
 // COVERAGE -- every location the gate guards:
-//   * output SFRs    TRISA (required output directions, variant-aware)
+//   * output SFRs    TRISA (required directions) + LATA (settled output state)
 //   * config SFRs    OSCCON.IRCF / WDTCON.WDTPS / PR2 / T2CON / ANSELA (hw_critical_sfrs_intact)
 //   * pull-up SFRs   WPUA (exactly RA3 latched, RA0..RA2 clear) +
 //                    OPTION_REG.nWPUEN                         (hw_footswitch_pullup_intact)
@@ -66,8 +66,8 @@
 //   libglib2.0-dev) and is NOT part of `make test`/`pic-test` (whose PIC leg,
 //   pic-test-gpsim, needs only the gpsim CLI). Skips cleanly when the compiler,
 //   those headers, or the built HEX are absent. The all-variant target aggregate
-//   runs this test for each output stage because the required TRISA mask is
-//   variant-aware.
+//   runs this test for each output stage because the required TRISA subset and
+//   settled LATA state are variant-aware.
 //
 // IMPORTANT (gpsim WDT calibration; see test_soak_pic.cc): gpsim honors
 // WDTCON.WDTPS but does NOT match the datasheet -- at the firmware's WDTPS=0x08
@@ -130,6 +130,7 @@ static NullBuf g_nullbuf;
 // address drift is surfaced rather than silently corrupting the wrong register.
 #define WPUA_ADDR    0x009u  // RA3 weak-pull-up latch = bit 3 (mask 0x08)
 #define TRISA_ADDR   0x006u  // RA3 input; RA0..RA2 outputs after init (0x08)
+#define LATA_ADDR    0x007u  // LED/control output latch (mask 0x07)
 #define OSCCON_ADDR  0x010u  // IRCF = bits 6:4 (mask 0x70)
 #define PR2_ADDR     0x012u
 #define T2CON_ADDR   0x013u
@@ -167,9 +168,9 @@ static NullBuf g_nullbuf;
 #define PROGRAM_WORDS 0x200u
 #define CLRWDT_CALIB_MS 8u
 #if defined(CD4053_SIMPLE)
-#  define EXPECTED_CHECKS 23u
+#  define EXPECTED_CHECKS 26u
 #else
-#  define EXPECTED_CHECKS 22u
+#  define EXPECTED_CHECKS 25u
 #endif
 
 // ---- Sim globals ------------------------------------------------------------
@@ -500,6 +501,16 @@ int main() {
                 "RA2 changed from output to input");
 #endif
 
+    // Output latches (hw_output_state_intact). The device is settled in BYPASS,
+    // where every RA0..RA2 latch must be low. Relay RA1/RA2 faults model a coil
+    // held energized until watchdog recovery.
+    inject_case("LATA.RA0", LATA_ADDR, "lata", false, 0x01, 1,
+                "RA0 LED latch changed from settled low to high");
+    inject_case("LATA.RA1", LATA_ADDR, "lata", false, 0x02, 1,
+                "RA1 control/reset-coil latch changed from low to high");
+    inject_case("LATA.RA2", LATA_ADDR, "lata", false, 0x04, 1,
+                "RA2 control/set-coil/spare latch changed from low to high");
+
     // config SFRs (hw_critical_sfrs_intact)
     inject_case("OSCCON.IRCF",  OSCCON_ADDR, "osccon", false, 0x10, 1,
                 "IRCF 0b100->0b101: 2MHz->4MHz clock skew");
@@ -513,9 +524,9 @@ int main() {
     // ANSELA: re-select an output pin analog. The gate masks the fixed
     // RA0|RA1|RA2 (BYPASS_OUTPUT_DDR_MASK), so ANY of the three must recover via
     // one reset -- a narrowed mask that only checked RA0 would slip RA1/RA2 past.
-    // This is the one config-SFR case the TRISA-only hw_is_sanity_check_failed()
+    // This is the one config-SFR case the direction/latch output-state check
     // cannot see: an ANSELA flip pulls the pin out of digital service while its
-    // TRISA direction bit still reads "output".
+    // TRISA direction bit and LATA value still look correct.
     inject_case("ANSELA.RA0",   ANSELA_ADDR, "ansel",  false, 0x01, 1,
                 "ANSA0=1: RA0 (LED) re-selected analog, out of digital service");
     inject_case("ANSELA.RA1",   ANSELA_ADDR, "ansel",  false, 0x02, 1,

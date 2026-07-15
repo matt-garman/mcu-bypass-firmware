@@ -116,7 +116,8 @@ MUTATIONS=(
 "src/bypass_mcu_avr_classic.c	s@hw_wdt_pet();@(void)0; /* MUTANT: no WDT pet */@	test-sim-cd4053	WDT pet removed from main loop: watchdog fires within ~250ms; test_watchdog_not_tripped_normally catches it"
 "src/bypass_mcu_avr_classic.c	s@timer_isr_called_ = TIMER_ISR_CALLED;@timer_isr_called_ = TIMER_ISR_NOT_CALLED;@	test-sim-cd4053	WDT handshake: ISR clears its own flag -> main never sees CALLED -> WDT fires within timeout"
 # --- main-loop sanity guard / toggle dispatch (bypass_mcu_avr_classic.c) -------------------
-"src/bypass_mcu_avr_classic.c	s@(actual_mask == (uint8_t)BYPASS_OUTPUT_DDR_MASK)@(1U != 0U)@	test-sim-cd4053	DDRB exact-mask predicate removed: PB0 output and PB4 input corruptions evade the former caller-output subset check"
+"src/bypass_mcu_avr_classic.c	s@(actual_direction_mask == (uint8_t)BYPASS_OUTPUT_DDR_MASK)@(1U != 0U)@	test-sim-cd4053	DDRB exact-mask predicate removed: PB0 output and PB4 input corruptions evade the former caller-output subset check"
+"src/bypass_mcu_avr_classic.c	s@PORTB & (uint8_t)BYPASS_OUTPUT_DDR_MASK@PORTB \& (uint8_t)0x0EU@	test-sim-cd4053	output-latch mask omits spare PB4; PB4 corruption must still force watchdog recovery"
 "src/bypass_mcu_avr_classic.c	s@if ( (ctx_.program_state > RELEASE_DEBOUNCE_WAIT)@if ( 0 \&\& (ctx_.program_state > RELEASE_DEBOUNCE_WAIT)@	test-sim-cd4053	sanity guard disabled: DDRB/state corruption goes undetected; corruption test catches it"
 "src/bypass_pure.c	s@res.effect_state = BYPASS;@res.effect_state = ENGAGED;@	test-sim-cd4053	toggle: always sets ENGAGED (never returns to BYPASS); round-trip and lock-step tests catch it"
 # --- CD4053 simple output driver -----------------------------------------------
@@ -275,7 +276,8 @@ PIC_GPSIM_MUTATIONS=(
 PIC_TARGET_MUTATIONS=(
 "src/bypass_mcu_pic10f322.c	s@WPUA = (uint8_t)(1U << FOOTSW_PIN);@WPUA |= (uint8_t)(1U << FOOTSW_PIN);@	cd4053	PIC pull-up init regressed to read-modify-write; exact WPUA state can preserve unexpected output-pin latches"
 "src/bypass_mcu_pic10f322.c	s@wpua_latches == (uint8_t)(1U << FOOTSW_PIN)@0U != (wpua_latches \& (uint8_t)(1U << FOOTSW_PIN))@	cd4053	PIC exact WPUA guard weakened to RA3-present only; extra RA0..RA2 latches go undetected"
-"src/bypass_mcu_pic10f322.c	s@return (0U == (TRISA \& expected_mask));@return 1U;@	cd4053	PIC output-direction guard disabled; TRISA faults no longer force watchdog recovery"
+"src/bypass_mcu_pic10f322.c	s@(0U == (actual_direction_mask \& required_output_mask))@1U@	cd4053	PIC output-direction guard disabled; TRISA faults no longer force watchdog recovery"
+"src/bypass_mcu_pic10f322.c	s@LATA & (uint8_t)BYPASS_OUTPUT_DDR_MASK@LATA \& (uint8_t)0x03U@	cd4053	PIC output-latch mask omits RA2; an unexpected high spare/control/coil latch goes undetected"
 "src/bypass_mcu_pic10f322.c	s@ANSELA & BYPASS_OUTPUT_DDR_MASK@ANSELA \& 0x01U@	cd4053	PIC ANSELA sanity mask narrowed to RA0 only; RA1/RA2 analog re-selection undetected"
 "src/bypass_output_cd4053_with_mute.c	s@hw_led_pin_set_low();          // dark status LED@hw_pin_set_high(CD4053_CTL1);  // MUTANT: reassert ENGAGED at startup\\n    hw_pin_set_high(CD4053_CTL2);\\n\\n    hw_led_pin_set_low();          // dark status LED@	mute	PIC cd4053-mute startup reasserts ENGAGED before MUTE; target I/O startup trace catches it"
 "src/bypass_output_cd4053_with_mute.c	s@BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS)@BYPASS_DELAY_MS(1)@g	mute	PIC cd4053-mute pre-switch mute window shortened; target I/O pulse-width check catches it"

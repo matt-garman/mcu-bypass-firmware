@@ -5,6 +5,8 @@
 #define BYPASS_HW_IFACE_H__
 
 
+#include "bypass_types.h"
+
 #include <stdint.h>
 
 
@@ -29,9 +31,12 @@ void hw_configure_output_pins(uint8_t const output_mask);
 
 
 // - sanity check function for output pins: returns non-zero IFF every pin in
-//   expected_mask is still configured as an output
-// - consumed by the per-variant hw_is_sanity_check_failed()
-uint8_t hw_output_pins_intact(uint8_t const expected_mask);
+//   required_output_mask is still configured as an output and the complete
+//   output latch matches expected_high_mask
+// - consumed by the per-variant sanity check
+uint8_t hw_output_state_intact(
+        uint8_t const required_output_mask,
+        uint8_t const expected_high_mask);
 
 
 // - sets global effect state (ENGAGE/BYPASS)
@@ -45,7 +50,7 @@ void hw_set_engaged_state(void);
 // - output-implementation-specific sanity check(s)
 // - return 1 on sanity check failure: will force WDT timeout
 // - return 0 on sanity check OK
-uint8_t hw_is_sanity_check_failed(void);
+uint8_t hw_is_sanity_check_failed(effect_state_t const effect_state);
 
 
 // initialization of output pins

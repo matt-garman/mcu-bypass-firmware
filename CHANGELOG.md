@@ -21,7 +21,7 @@ file is the human-readable summary of *what changed*.
   startup/engage/bypass sequences, pulse presence and ordering, relay-coil
   exclusion, and low parked outputs, backed by a host-only oracle regression
   for positive and fail-closed trace paths.
-- Fail-closed ATtiny202 fault execution now requires all 13 independently pinned
+- Fail-closed ATtiny202 fault execution now requires all 17 independently pinned
   injectable guards, zero skips, exact result counts, witnessed WDT resets,
   phase-swept ISR-handshake corruption, and a long healthy negative control.
 - An ATtiny202 disassembly oracle now verifies absolute 5 ms mute and 12 ms
@@ -31,6 +31,9 @@ file is the human-readable summary of *what changed*.
   simulator stalls without requiring XC8 or libgpsim.
 
 ### Changed
+- Classic AVR, AVR-XT, and PIC10F322 sanity gates now verify the complete
+  settled output latch against the logical effect state, including low-driven
+  spare pins and inactive relay coils.
 - Classic AVR and ATtiny202 sanity gates now require the complete GPIO direction
   state configured at startup, detecting footswitch pins becoming strong outputs
   and intended low-driven spare outputs becoming inputs.

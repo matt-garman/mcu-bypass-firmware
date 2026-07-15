@@ -5,9 +5,24 @@
 #include "bypass_hw_iface.h"
 
 
-// assert critical pin directions hold: LED & CD4053 outputs, footswitch input
-uint8_t hw_is_sanity_check_failed(void) {
-    return (hw_output_pins_intact((1 << LED_PIN) | (1 << CD4053_PIN)) == 0U);
+// assert critical pin directions and the complete output latch state hold
+uint8_t hw_is_sanity_check_failed(effect_state_t const effect_state) {
+    uint8_t expected_high_mask = 0U;
+
+    if (BYPASS == effect_state) {
+        expected_high_mask = 0U;
+    }
+    else if (ENGAGED == effect_state) {
+        expected_high_mask =
+            (uint8_t)((1U << LED_PIN) | (1U << CD4053_PIN));
+    }
+    else {
+        return 1U;
+    }
+
+    return (0U == hw_output_state_intact(
+            (uint8_t)((1U << LED_PIN) | (1U << CD4053_PIN)),
+            expected_high_mask));
 }
 
 

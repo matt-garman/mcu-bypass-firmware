@@ -22,6 +22,7 @@ static int g_failures;
 } while (0)
 
 static void sfr_clean(void) {
+    LATA = 0u;
     TRISA = 0x08u;
     ANSELA = 0u;
     WPUA = 0x08u;
@@ -36,8 +37,10 @@ static void sfr_clean(void) {
 
 static void test_predicates(void) {
     sfr_clean();
-    CHECK(fwp_output_pins_intact(0x07u) != 0, "clean outputs should be intact");
-    CHECK(fwp_sanity_failed() == 0, "clean output configuration should pass");
+    CHECK(fwp_output_state_intact(0x07u, 0x00u) != 0,
+          "clean outputs should be intact and low");
+    CHECK(fwp_sanity_failed(BYPASS) == 0,
+          "clean bypass output configuration should pass");
     CHECK(fwp_pullup_intact() != 0, "clean pull-up should be intact");
     CHECK(fwp_critical_sfrs_intact() != 0, "clean critical SFRs should pass");
     CHECK(fwp_footswitch_is_high() == 1, "released footswitch should read high");
@@ -46,17 +49,40 @@ static void test_predicates(void) {
     CHECK(fwp_footswitch_is_high() == 0, "pressed footswitch should read low");
 
     sfr_clean(); TRISA |= 0x01u;
-    CHECK(fwp_output_pins_intact(0x01u) == 0, "RA0 input must fail direction check");
-    CHECK(fwp_sanity_failed() != 0, "RA0 input must fail output sanity");
+    CHECK(fwp_output_state_intact(0x01u, 0x00u) == 0,
+          "RA0 input must fail direction check");
+    CHECK(fwp_sanity_failed(BYPASS) != 0, "RA0 input must fail output sanity");
 
     sfr_clean(); TRISA |= 0x02u;
-    CHECK(fwp_sanity_failed() != 0, "RA1 input must fail output sanity");
+    CHECK(fwp_sanity_failed(BYPASS) != 0, "RA1 input must fail output sanity");
 
     sfr_clean(); TRISA |= 0x04u;
-    CHECK(fwp_output_pins_intact(0x04u) == 0, "RA2 input must fail direction check");
+    CHECK(fwp_output_state_intact(0x04u, 0x00u) == 0,
+          "RA2 input must fail direction check");
 #if !defined(CD4053_SIMPLE)
-    CHECK(fwp_sanity_failed() != 0, "RA2 input must fail this variant's output sanity");
+    CHECK(fwp_sanity_failed(BYPASS) != 0,
+          "RA2 input must fail this variant's output sanity");
 #endif
+
+    sfr_clean(); LATA = 0x01u;
+    CHECK(fwp_sanity_failed(BYPASS) != 0, "RA0 high must fail bypass sanity");
+    sfr_clean(); LATA = 0x02u;
+    CHECK(fwp_sanity_failed(BYPASS) != 0, "RA1 high must fail bypass sanity");
+    sfr_clean(); LATA = 0x04u;
+    CHECK(fwp_sanity_failed(BYPASS) != 0, "RA2 high must fail bypass sanity");
+
+    sfr_clean();
+#if defined(CD4053_SIMPLE)
+    LATA = 0x03u;
+#elif defined(CD4053_WITH_MUTE)
+    LATA = 0x07u;
+#else
+    LATA = 0x01u;
+#endif
+    CHECK(fwp_sanity_failed(ENGAGED) == 0,
+          "variant's settled engaged latch must pass sanity");
+    CHECK(fwp_sanity_failed((effect_state_t)2) != 0,
+          "invalid effect state must fail output sanity");
 
     sfr_clean(); WPUA = 0u;
     CHECK(fwp_pullup_intact() == 0, "missing RA3 pull-up must fail");
@@ -99,6 +125,9 @@ static void test_faults(void) {
 #else
     expect_reset(FWI_RA2_PIN_TO_INPUT, "RA2 direction fault");
 #endif
+    expect_reset(FWI_LATA_RA0_HIGH, "RA0 output-latch fault");
+    expect_reset(FWI_LATA_RA1_HIGH, "RA1 output-latch fault");
+    expect_reset(FWI_LATA_RA2_HIGH, "RA2 output-latch fault");
     expect_reset(FWI_OSCCON_IRCF_SKEW, "oscillator configuration fault");
     expect_reset(FWI_WDTPS_SKEW, "watchdog configuration fault");
     expect_reset(FWI_PR2_SKEW, "timer period fault");

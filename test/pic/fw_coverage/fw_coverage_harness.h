@@ -6,6 +6,8 @@
 
 #include <stdint.h>
 
+#include "bypass_types.h"
+
 typedef enum {
     FWI_NONE = 0,
     FWI_VALID_ENGAGED,
@@ -20,6 +22,9 @@ typedef enum {
     FWI_LED_PIN_TO_INPUT,
     FWI_CTL1_PIN_TO_INPUT,
     FWI_RA2_PIN_TO_INPUT,
+    FWI_LATA_RA0_HIGH,
+    FWI_LATA_RA1_HIGH,
+    FWI_LATA_RA2_HIGH,
     FWI_OSCCON_IRCF_SKEW,
     FWI_WDTPS_SKEW,
     FWI_PR2_SKEW,
@@ -32,8 +37,8 @@ typedef enum {
 
 int fw_fault_run(fw_inject_t inj);
 uint8_t fw_drive(const uint8_t *fsw, int n);
-int fwp_output_pins_intact(uint8_t mask);
-int fwp_sanity_failed(void);
+int fwp_output_state_intact(uint8_t required_mask, uint8_t expected_high_mask);
+int fwp_sanity_failed(effect_state_t effect_state);
 int fwp_pullup_intact(void);
 int fwp_critical_sfrs_intact(void);
 int fwp_footswitch_is_high(void);

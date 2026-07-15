@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) Matthew Garman
 #
-# test_fault_attiny202.py -- ATtiny202 (AVR-XT) critical-SFR / state
+# test_fault_attiny202.py -- ATtiny202 (AVR-XT) critical-SFR / latch / state
 # fault-injection test on a patched yasimavr. The AVR-XT analogue of the PIC
 # libgpsim fault test (test/pic/test_fault_pic.cc / pic-test-fault) and the AVR
 # simavr inject_config_sfr cases (test/avr/test_sim.c): corrupt a value the shell
@@ -36,7 +36,7 @@
 #
 # Usage:   make attiny202-fault  (supplies the ELF and required production fuses)
 # Exit:    0 = PASS, 1 = a case failed, 2 = bad invocation / missing image.
-# Completeness: exactly 13 independently pinned injections plus one long healthy
+# Completeness: exactly 17 independently pinned injections plus one long healthy
 # negative control must finish; any rejected/re-latched injection is a failure.
 
 import sys
@@ -50,7 +50,7 @@ NEG_CONTROL_MS = 650     # >2x WDT period: healthy firmware must keep petting it
 LIVE_STEP_MS = 5
 RETRY_GATE_MS = 50
 RETRY_GATE_STEP_CYCLES = 137  # coprime with the 2,000-cycle tick
-EXPECTED_FAULT_CASES = 13
+EXPECTED_FAULT_CASES = 17
 EXPECTED_TOTAL_RESULTS = EXPECTED_FAULT_CASES + 1  # injections + negative control
 RESET_SENTINEL = 0xA5
 
@@ -85,6 +85,10 @@ def _fault_cases(sim):
         ("PORTA.DIR(outputs)",     REG,  S.REG_PORTA_DIR,         0x00,   GATE),
         ("PORTA.DIR(footswitch)",  REG,  S.REG_PORTA_DIR,         0xCE,   GATE),
         ("PORTA.DIR(spare PA6)",   REG,  S.REG_PORTA_DIR,         0x0E,   GATE),
+        ("PORTA.OUT(PA1 LED)",     REG,  S.REG_PORTA_OUT,         0x02,   GATE),
+        ("PORTA.OUT(PA2 control)", REG,  S.REG_PORTA_OUT,         0x04,   GATE),
+        ("PORTA.OUT(PA3 control)", REG,  S.REG_PORTA_OUT,         0x08,   GATE),
+        ("PORTA.OUT(PA6 spare)",   REG,  S.REG_PORTA_OUT,         0x40,   GATE),
         ("ctx_.program_state",    RAM,   sim.addr_ctx + 0,        0xFF,   GATE),
         ("ctx_.effect_state",     RAM,   sim.addr_ctx + 1,        0xFF,   GATE),
         ("ctx_.debounce_counter", RAM,   sim.addr_ctx + 2,        0xFF,   GATE),

@@ -16,6 +16,7 @@ sim_stub.F_CPU_HZ = 2_000_000
 sim_stub.REG_CLKCTRL_MCLKCTRLB = 0x0061
 sim_stub.REG_PORTA_PIN7CTRL = 0x0417
 sim_stub.REG_PORTA_DIR = 0x0400
+sim_stub.REG_PORTA_OUT = 0x0404
 sim_stub.REG_TCB0_CTRLA = 0x0A40
 sim_stub.REG_TCB0_CTRLB = 0x0A41
 sim_stub.REG_TCB0_INTCTRL = 0x0A45
@@ -40,7 +41,7 @@ def check(condition, message):
         sys.stderr.write("FAIL: %s\n" % message)
 
 
-def finalize(declared, results=14, injections=13, skips=0):
+def finalize(declared, results=18, injections=17, skips=0):
     checker = driver.Checker()
     checker.results = results
     checker.injections = injections
@@ -61,6 +62,10 @@ expected_cases = (
     ("PORTA.DIR(outputs)",      "reg", 0x0400, 0x00, "gate"),
     ("PORTA.DIR(footswitch)",   "reg", 0x0400, 0xCE, "gate"),
     ("PORTA.DIR(spare PA6)",    "reg", 0x0400, 0x0E, "gate"),
+    ("PORTA.OUT(PA1 LED)",      "reg", 0x0404, 0x02, "gate"),
+    ("PORTA.OUT(PA2 control)",  "reg", 0x0404, 0x04, "gate"),
+    ("PORTA.OUT(PA3 control)",  "reg", 0x0404, 0x08, "gate"),
+    ("PORTA.OUT(PA6 spare)",    "reg", 0x0404, 0x40, "gate"),
     ("ctx_.program_state",     "ram", 0x3F80, 0xFF, "gate"),
     ("ctx_.effect_state",      "ram", 0x3F81, 0xFF, "gate"),
     ("ctx_.debounce_counter",  "ram", 0x3F82, 0xFF, "gate"),
@@ -82,17 +87,17 @@ check((direction_values["PORTA.DIR(footswitch)"] & 0x0E) == 0x0E
       and (direction_values["PORTA.DIR(spare PA6)"] & 0x0E) == 0x0E,
       "exact-direction faults must preserve every caller-requested output bit")
 
-check(driver.EXPECTED_FAULT_CASES == 13 and driver.EXPECTED_TOTAL_RESULTS == 14,
-      "driver must pin thirteen injections plus one negative control")
-check(finalize(13) == 0, "complete thirteen-injection plus control run must pass")
-check(finalize(12) == 1, "short declared case list must fail")
-check(finalize(14) == 1, "long declared case list must fail")
-check(finalize(13, results=13) == 1, "missing result must fail")
-check(finalize(13, results=15) == 1, "extra result must fail")
-check(finalize(13, injections=12) == 1, "missing successful injection must fail")
-check(finalize(13, injections=14) == 1, "extra successful injection must fail")
-check(finalize(13, skips=1) == 1, "any skipped injection must fail")
-check(finalize(13, injections=0, skips=13) == 2,
+check(driver.EXPECTED_FAULT_CASES == 17 and driver.EXPECTED_TOTAL_RESULTS == 18,
+      "driver must pin seventeen injections plus one negative control")
+check(finalize(17) == 0, "complete seventeen-injection plus control run must pass")
+check(finalize(16) == 1, "short declared case list must fail")
+check(finalize(18) == 1, "long declared case list must fail")
+check(finalize(17, results=17) == 1, "missing result must fail")
+check(finalize(17, results=19) == 1, "extra result must fail")
+check(finalize(17, injections=16) == 1, "missing successful injection must fail")
+check(finalize(17, injections=18) == 1, "extra successful injection must fail")
+check(finalize(17, skips=1) == 1, "any skipped injection must fail")
+check(finalize(17, injections=0, skips=17) == 2,
       "all-skipped run must fail both injection and skip invariants")
 
 checker = driver.Checker()

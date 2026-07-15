@@ -84,7 +84,7 @@ below so a green gate means every PIC layer actually ran.
 | Static analysis | `pic-analyze` | cppcheck + MISRA pass over the PIC shell with real XC8/DFP register headers. | host tools |
 | Shipping-source coverage | `pic-coverage-check-fw` | Every executable line in the real PIC shell, shared pure core, and all three output drivers is host-executed except the documented non-returning reset path. | host gcov with PIC SFR mock |
 | Register-level functional | `pic-test-gpsim` | Real HEX toggles on press, handles power-on-held switch, keeps settled LATA/PORTA expectations, and includes the mid-debounce `PRESS1_EARLY` tick-cadence check. | gpsim CLI |
-| Fault recovery | `pic-test-fault` | Runtime direction, configuration, pull-up, and `ctx_` corruptions produce the variant-appropriate WDT recovery response. | libgpsim |
+| Fault recovery | `pic-test-fault` | Runtime direction, settled-output-latch, configuration, pull-up, and `ctx_` corruptions produce the variant-appropriate WDT recovery response. | libgpsim |
 | HEX/model lock-step | `pic-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches the shared pure model after every completed main-loop iteration. | libgpsim |
 | Lock-step progress regression | `test-lockstep-progress` | Simulator stalls during settle, calibration, or completion abort immediately; the completion loop cannot spin forever on a frozen cycle counter. | host C++ + fake gpsim API |
 | Target I/O timing | `pic-test-io` | TRISA/ANSELA/LATA/PORTA transitions, relay coil exclusion, and mute/relay pulse widths match the design. | libgpsim |
@@ -108,10 +108,10 @@ before starting its first target, so an empty or malformed matrix cannot report
 an all-variants PASS or leave a misleading partial run.
 
 `pic-test-fault` first requires exact startup `WPUA=0x08` and `TRISA=0x08`, then
-injects every guarded direction/SFR/SRAM fault at the behaviorally identified
-main-loop `CLRWDT`. Register identity, injection readback, the expected per-
-variant check count, and restoration after the simple variant's spare-RA2
-negative control are all fail-closed test invariants.
+injects every guarded direction, settled-output-latch, SFR, and SRAM fault at the
+behaviorally identified main-loop `CLRWDT`. Register identity, injection
+readback, the expected per-variant check count, and restoration after the simple
+variant's spare-RA2 negative control are all fail-closed test invariants.
 
 
 ## Mutation testing and skipped PIC tools
@@ -123,9 +123,9 @@ development stays practical. In strict/full-tool contexts, including
 `STRICT_TOOLS=1` or `MUTATION_ALLOW_SKIP=0`, skipped PIC mutants fail the run.
 
 The PIC mutation set includes target-level faults for the new coverage: collapsed
-TMR2IF cadence, output-direction guard removal, exact WPUA pull-up state, ANSELA
-mask narrowing, muted-CD4053 startup reassertion, mute-window shortening, and
-relay pulse shortening.
+TMR2IF cadence, output-direction guard removal, output-latch mask narrowing,
+exact WPUA pull-up state, ANSELA mask narrowing, muted-CD4053 startup
+reassertion, mute-window shortening, and relay pulse shortening.
 
 
 ## Known gaps (PIC — hardware-bench only)

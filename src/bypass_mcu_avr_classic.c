@@ -122,17 +122,23 @@ void hw_configure_output_pins(uint8_t const output_mask) { DDRB = output_mask; }
 
 
 // sanity check utility function: return non-zero IFF the complete direction
-// configuration still matches initialization and every caller-requested
-// output remains an output
+// configuration still matches initialization, every caller-requested output
+// remains an output, and the complete output latch matches the expected state
 //
 // Exact DDRB protects PB0 as the footswitch input, PB1..PB4 as outputs
 // (including spare low-driven pins), and PB5 as the RESET input.
-uint8_t hw_output_pins_intact(uint8_t const expected_mask) {
-    uint8_t const actual_mask = DDRB;
+uint8_t hw_output_state_intact(
+        uint8_t const required_output_mask,
+        uint8_t const expected_high_mask) {
+    uint8_t const actual_direction_mask = DDRB;
+    uint8_t const actual_high_mask =
+        (uint8_t)(PORTB & (uint8_t)BYPASS_OUTPUT_DDR_MASK);
 
     return
-        (actual_mask == (uint8_t)BYPASS_OUTPUT_DDR_MASK) &&
-        ((actual_mask & expected_mask) == expected_mask);
+        (actual_direction_mask == (uint8_t)BYPASS_OUTPUT_DDR_MASK) &&
+        ((actual_direction_mask & required_output_mask) ==
+            required_output_mask) &&
+        (actual_high_mask == expected_high_mask);
 }
 
 
@@ -366,7 +372,7 @@ __attribute__((OS_main)) int main(void) {
                 (0U == hw_footswitch_pullup_intact()) ||
                 (0U == hw_critical_sfrs_intact()) ||
                 // config-specific runtime sanity checks
-                hw_is_sanity_check_failed()
+                hw_is_sanity_check_failed(ctx_.effect_state)
            ) {
             hw_force_wdt_reset();
         }
