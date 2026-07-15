@@ -286,9 +286,13 @@ Legend: **FOLD** = collapse to one shared copy (parent's wins) · **DROP**
    README figures when the child v0.9.5 manifest records 219/240/243 words.
 6. **Define mutation topology and policy.** Identify duplicate model mutants,
    child-only firmware mutants, required sandbox files, kill targets, and new
-   target/soak mutants. Routine hosted full-tool CI and release must invoke the
-   PIC mutation set with `MUTATION_ALLOW_SKIP=0`; narrow any documentation that
-   currently claims this is already true.
+   target/soak mutants. Preserve the parent's current event policy: its
+   full-tool PIC job already invokes mutation with `MUTATION_ALLOW_SKIP=0` on
+   pushes, schedules, and manual dispatches, and release validation is strict;
+   pull requests intentionally omit the minutes-long mutation gate. The separate
+   non-PIC stress job permits explicit PIC skips because it lacks PIC tools and
+   is not authoritative PIC mutation evidence. Extend the strict full-tool lane
+   to the combined PIC10F322/PIC10F320 set rather than weakening either subset.
 7. **Record ATtiny202 release status.** It is development-only/non-release. Keep
    its normal CI lane, but intentionally omit it from release creation,
    reproduction, images, and soak evidence, and scope unified-release claims to
@@ -526,10 +530,11 @@ the assurance comparison rather than restating it.
   and the required host coverage tools. Run build/budget, analysis/MISRA,
   equivalence, actuation, host fault, CONFIG, model/firmware coverage, CLI
   gpsim, and all-variant fail-closed target fault/lockstep/I/O gates.
-- Run the combined relevant mutation set with `MUTATION_ALLOW_SKIP=0` in a
-  hosted job that has all PIC tools. This is a required improvement: current
-  parent routine hosted CI allows PIC mutation skips in the non-PIC stress job,
-  even though release validation is strict.
+- Extend the existing full-tool PIC mutation step to the combined relevant set
+  and retain `MUTATION_ALLOW_SKIP=0` for pushes, schedules, and manual dispatches.
+  Pull requests remain off the minutes-long mutation path. The separate non-PIC
+  stress job may continue its explicit partial mode, but its skipped PIC mutants
+  are diagnostic output, never authoritative PIC mutation evidence.
 - Upload `build_pic10f320/*.hex` as a separately named artifact and update all
   downstream `needs` relationships if PIC10F320 is a separate job.
 - `release.yml` asserts the PIC10F320 header, rebuilds into a private fresh
@@ -570,9 +575,10 @@ the assurance comparison rather than restating it.
 - [ ] Default `test` / `test-long` remain compatible with their documented
       tool-independent semantics. Any full-tool all-target aggregate is
       explicitly named and documented.
-- [ ] Routine hosted full-tool CI and release CI run PIC10F320 mutation with
-      `MUTATION_ALLOW_SKIP=0`; skipped PIC tools cannot produce an authoritative
-      pass.
+- [ ] Push, scheduled, and manually dispatched full-tool CI plus release CI run
+      the combined PIC10F322/PIC10F320 mutation set with
+      `MUTATION_ALLOW_SKIP=0`; PR omission is explicit, and skipped PIC tools in
+      a partial non-PIC stress run cannot produce an authoritative pass.
 - [ ] Soak duration parsing rejects zero, overflow/wrap, and sub-minimum release
       values. Release creation runs one isolated 24-hour-equivalent soak for
       each of the three PIC10F320 variants and records evidence.
