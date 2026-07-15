@@ -121,10 +121,18 @@ void hw_pin_set_low(uint8_t const pin)  { PORTB &= (uint8_t)~(1 << pin); }
 void hw_configure_output_pins(uint8_t const output_mask) { DDRB = output_mask; }
 
 
-// sanity check utility function: return non-zero IFF every pin in
-// expected_mask is still configured as output
+// sanity check utility function: return non-zero IFF the complete direction
+// configuration still matches initialization and every caller-requested
+// output remains an output
+//
+// Exact DDRB protects PB0 as the footswitch input, PB1..PB4 as outputs
+// (including spare low-driven pins), and PB5 as the RESET input.
 uint8_t hw_output_pins_intact(uint8_t const expected_mask) {
-    return (DDRB & expected_mask) == expected_mask;
+    uint8_t const actual_mask = DDRB;
+
+    return
+        (actual_mask == (uint8_t)BYPASS_OUTPUT_DDR_MASK) &&
+        ((actual_mask & expected_mask) == expected_mask);
 }
 
 

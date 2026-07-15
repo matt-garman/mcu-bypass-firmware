@@ -42,6 +42,12 @@
 // 
 // we also include PA6 here: it's unused, but we don't want it to float, so
 // we'll configure it as an output driven low.
+//
+//   PA0 => UPDI/input
+//   PA1-PA3 => outputs
+//   PA4-PA5 => unbonded inputs
+//   PA6 => spare low-driven output
+//   PA7 => footswitch input
 #define BYPASS_OUTPUT_DDR_MASK (0x4EU) // PA1|PA2|PA3|PA6
 
 #endif // BYPASS_PINS_AVR_XT_H__

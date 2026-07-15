@@ -146,9 +146,18 @@ void hw_configure_output_pins(uint8_t const output_mask) {
     PORTA.DIR    = output_mask; // exactly these = output, all others = input
 }
 
-// non-zero IFF every pin in expected_mask is still an output (DIR bit still 1).
+// sanity check utility function: return non-zero IFF the complete direction
+// configuration still matches initialization and every caller-requested
+// output remains an output.
+//
+// Exact DIR protects PA7 as the footswitch input, PA1/PA2/PA3/PA6 as
+// outputs, PA0 as UPDI, and unbonded PA4/PA5 as inputs.
 uint8_t hw_output_pins_intact(uint8_t const expected_mask) {
-    return (PORTA.DIR & expected_mask) == expected_mask;
+    uint8_t const actual_mask = PORTA.DIR;
+
+    return
+        (actual_mask == (uint8_t)BYPASS_OUTPUT_DDR_MASK) &&
+        ((actual_mask & expected_mask) == expected_mask);
 }
 
 
