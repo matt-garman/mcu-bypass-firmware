@@ -14,6 +14,53 @@ file is the human-readable summary of *what changed*.
 ## [Unreleased]
 
 ### Added
+- Fail-closed ATtiny202 production-fuse verification for `WDTCFG`, `BODCFG`,
+  `OSCCFG`, `SYSCFG0/1`, `APPEND`, and `BOOTEND`, including host regressions
+  proving yasimavr receives the same complete Makefile-defined fuse set.
+- ATtiny202 built-image target-output coverage for exact physical PA2/PA3
+  startup/engage/bypass sequences, pulse presence and ordering, relay-coil
+  exclusion, and low parked outputs, backed by a host-only oracle regression
+  for positive and fail-closed trace paths.
+- Fail-closed ATtiny202 fault execution now requires all 11 independently pinned
+  injectable guards, zero skips, exact result counts, witnessed WDT resets,
+  phase-swept ISR-handshake corruption, and a long healthy negative control.
+- An ATtiny202 disassembly oracle now verifies absolute 5 ms mute and 12 ms
+  relay pulse widths directly from each built image, independent of yasimavr's
+  non-cycle-accurate delay execution.
+- Host-only regressions now exercise PIC target-matrix validation and lock-step
+  simulator stalls without requiring XC8 or libgpsim.
+
+### Changed
+- Routine push, scheduled, and manually dispatched CI now runs mutation testing
+  in strict mode on the full PIC-toolchain runner; pull requests retain the
+  faster non-mutation path.
+- ATtiny202 is now explicitly classified as development-only/non-release. Its
+  normal build and yasimavr CI lane remains available, while release images,
+  reproduction, and long-soak qualification remain scoped to AVR Classic and
+  PIC10F322.
+- The full-tool ATtiny202 CI job now runs `make attiny202-test STRICT_TOOLS=1`,
+  making its cppcheck and MISRA analysis mandatory alongside fuse, build, and
+  flash-budget and pulse-width validation.
+- PIC shipping-source coverage is now a required gate, and mutation coverage
+  explicitly rejects the wrong unified x4053 BYPASS polarity.
+
+### Fixed
+- Classic AVR, ATtiny202, and PIC image generation now fails closed on missing,
+  stale, partial, malformed, over-budget, or unverifiable output. Intel HEX
+  structure, stack/flash/fuse evidence, workload rebuilds, model coverage, soak
+  timing, and release image sets all have isolated negative-path regressions.
+- gpsim wrappers now propagate simulator failures and timeouts even after valid
+  snapshots, while libgpsim targets remove stale binaries before rebuilding.
+- PIC target fault injection now verifies register identity, write-back,
+  simulator progress, exact per-variant completion counts, and restoration of
+  negative controls before reporting PASS.
+- PIC target aggregates reject empty, duplicate, or unsupported variant matrices
+  before execution, and PIC lock-step stalls abort immediately during settle,
+  calibration, or completion instead of looping on a frozen cycle counter.
+
+## [0.9.4] - 2026-07-11
+
+### Added
 - `make pic-test-lockstep`: a libgpsim PIC10F322 gate that runs the XC8-built
   HEX and compares live `_ctx_` SRAM against the shared pure-model state after
   each completed main-loop iteration.
@@ -25,68 +72,52 @@ file is the human-readable summary of *what changed*.
   across every PIC variant. Component targets may still skip cleanly on a local
   host without PIC tools; this aggregate requires every PASS marker.
 - PIC gpsim register-level coverage now includes a mid-debounce `PRESS1_EARLY`
-  sample and full BYPASS `LATA` assertions, catching a collapsed 1 ms tick gate
-  and checking all settled analog-switch control bits in both directions.
-- Mutation coverage explicitly rejects the wrong unified x4053 BYPASS polarity.
-- Mutation coverage for PIC target-level properties, including exact `WPUA`
-  pull-up state, collapsed TMR2IF cadence, ANSELA output masks, muted-CD4053
-  startup ordering, mute-window duration, and relay pulse duration.
-- Fail-closed ATtiny202 production-fuse verification for `WDTCFG`, `BODCFG`,
-  `OSCCFG`, `SYSCFG0/1`, `APPEND`, and `BOOTEND`, including host regressions
-  proving yasimavr receives the same complete Makefile-defined fuse set.
-- ATtiny202 built-image target-output coverage for exact physical PA2/PA3
-  startup/engage/bypass sequences, 5 ms mute windows, 12 ms relay pulses,
-  relay-coil exclusion, and low parked outputs, backed by a host-only oracle
-  regression for positive and fail-closed trace paths.
-- Fail-closed ATtiny202 fault execution now requires all 11 independently pinned
-  injectable guards, zero skips, exact result counts, witnessed WDT resets,
-  phase-swept ISR-handshake corruption, and a long healthy negative control.
+  sample and full BYPASS `LATA` assertions, catching a collapsed tick gate and
+  checking all settled analog-switch control bits in both directions.
+- Mutation coverage for exact `WPUA`, TMR2IF cadence, ANSELA output masks,
+  muted-CD4053 startup ordering, mute-window duration, and relay pulse duration.
 
 ### Changed
-- CI and the release pipeline now run `make pic-test-target-variants
-  STRICT_TOOLS=1`, so target-level PIC fault, lock-step, and GPIO/timing
-  validation are required for green builds and release provenance.
-- Release creation now runs mutation testing in strict mode
-  (`MUTATION_ALLOW_SKIP=0` / `STRICT_TOOLS=1`) so PIC mutants cannot disappear
-  behind skipped target tooling.
-- Routine push, scheduled, and manually dispatched CI now runs mutation testing
-  in strict mode on the full PIC-toolchain runner; pull requests retain the
-  faster non-mutation path.
-- ATtiny202 is now explicitly classified as development-only/non-release. Its
-  normal build and yasimavr CI lane remains available, while release images,
-  reproduction, and long-soak qualification remain scoped to AVR Classic and
-  PIC10F322.
-- The full-tool ATtiny202 CI job now runs `make attiny202-test STRICT_TOOLS=1`,
-  making its cppcheck and MISRA analysis mandatory alongside fuse, build, and
-  flash-budget validation.
+- CI and release now run `make pic-test-target-variants STRICT_TOOLS=1`, so
+  target-level PIC fault, lock-step, and GPIO/timing validation are required.
+- Release creation runs mutation testing in strict mode so PIC mutants cannot
+  disappear behind skipped target tooling.
 
 ### Fixed
-- **PIC10F322 weak-pull-up validation now requires the exact RA0-only state.**
-  The per-tick sanity gate no longer accepts extra enabled `WPUA` bits merely
-  because the footswitch pull-up is still on; a corrupt enabled pull-up on an
-  output pin is treated as configuration damage and forces watchdog recovery.
+- **PIC10F322 weak-pull-up validation now requires the exact RA3-only state.**
+  Extra enabled `WPUA` bits on output pins are treated as configuration damage
+  and force watchdog recovery.
 - **Muted CD4053 startup no longer traverses ENGAGED before settling BYPASS.**
-  The mute-before-switch driver now asserts the bypass-side control first, waits
-  the mute window, then releases the second control line, avoiding a transient
-  wet-path state during initialization.
+  The driver asserts the bypass-side control first, waits the mute window, then
+  releases the second control line.
+- Lock-step stimulus is applied at a fresh loop boundary, avoiding relay phase
+  lag and startup phase skew.
+
+## [0.9.3] - 2026-07-11
+
+### Added
+- ATtiny202 development support: an AVR-XT firmware shell, avrxmega3 build and
+  flash-budget gate, cppcheck/MISRA analysis, UPDI programming targets, and
+  pinned ATtiny_DFP acquisition.
+- A yasimavr functional, fault-injection, and soak harness for ATtiny202, plus a
+  dedicated CI lane. The spare PA6 pin is actively driven low.
+
+### Changed
+- Build, coverage, mutation, and release gates now fail closed when required
+  tools, outputs, percentages, or exact release image sets are missing.
+- Release reproduction uses fresh build outputs and validates complete image
+  sets instead of relying on committed artifacts alone.
+
+### Fixed
 - **TMUX4053 control-pin polarity was inverted on the direct-drive variants.**
-  The `cd4053_tmux` / `mute_tmux` images drove the analog-switch control pin at
-  the opposite MCU level from the design intent — BYPASS asserted at pin-high
-  instead of the fail-safe pin-low — which switched the effect the wrong way and,
-  on the muted variant, transited the invalid FXN+JOU-short state instead of
-  stepping around it. Root cause: `bypass_output_x4053_polarity.h` modeled the
-  CD4053-MOSFET-inverter vs TMUX-direct-drive electrical difference but not the
-  TMUX board's swapped analog throws, which already cancel it. The MCU now drives
-  a single polarity (BYPASS = pin low) that serves both the CD4053 and TMUX4053
-  boards. CD4053 builds are unaffected (already correct).
+  The MCU now uses one fail-safe polarity (BYPASS = pin low) for both CD4053 and
+  TMUX4053 boards; the TMUX board's swapped analog throws already compensate for
+  the CD4053 board's MOSFET inversion.
 
 ### Removed
-- The separate `cd4053_tmux` and `mute_tmux` build variants and the
-  `BYPASS_X4053_DIRECT_DRIVE` compile flag. With the polarity corrected, the
-  TMUX images are byte-identical to their `cd4053` / `mute` bases, so a single
-  image now covers both the CD4053 and TMUX4053 hardware; the redundant variants
-  were dropped. The supported matrix is now three variants (`cd4053`, `mute`,
-  `relay`) per MCU.
+- The redundant `cd4053_tmux` and `mute_tmux` variants and the
+  `BYPASS_X4053_DIRECT_DRIVE` flag. The supported release matrix is now three
+  variants (`cd4053`, `mute`, and `relay`) per MCU.
 
 ## [0.9.2] - 2026-07-09
 
@@ -206,7 +237,9 @@ file is the human-readable summary of *what changed*.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.3...v0.9.4
+[0.9.3]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/matt-garman/mcu-bypass-firmware/releases/tag/v0.9.0
