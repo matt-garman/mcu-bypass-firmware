@@ -182,6 +182,7 @@
 // fault-injection tests to poke registers directly.
 #define TIMSK_MEM_ADDR 0x59  // TIMSK0/TIMSK I/O addr 0x39 + SFR offset 0x20
 #define DDRB_MEM_ADDR  0x37  // DDRB I/O addr 0x17 + SFR offset 0x20
+#define DDRB_EXPECTED  0x1EU // PB1..PB4 outputs; PB0 footswitch/PB5 RESET inputs
 #define PORTB_MEM_ADDR 0x38  // PORTB I/O addr 0x18 + SFR offset 0x20
 #define SPL_MEM_ADDR   0x5D  // SPL I/O addr 0x3D + SFR offset 0x20
 #define SPH_MEM_ADDR   0x5E  // SPH I/O addr 0x3E + SFR offset 0x20 (not present on ATtiny13a)
@@ -470,6 +471,10 @@ static int sim_reset(int footsw_pressed_at_power_on) {
 // during switching is checked by the per-variant control tests.
 static void test_power_on_default(void) {
     if (sim_reset(0) != 0) { g_failures++; return; }
+    CHECK(g_avr->data[DDRB_MEM_ADDR] == (uint8_t)DDRB_EXPECTED,
+          "power-on DDRB should be exact 0x%02x, got 0x%02x",
+          (unsigned)DDRB_EXPECTED,
+          (unsigned)g_avr->data[DDRB_MEM_ADDR]);
     CHECK(g_led_level == 0, "power-on LED should be dark, got %d", g_led_level);
 #if defined(TQ2_L2_5V_RELAY)
     CHECK(g_ctl_level[CTL_PB2] == 0 && g_ctl_level[CTL_PB3] == 0,
@@ -1476,6 +1481,38 @@ static void test_fault_inject_control_ddr(void) {
     expect_fault_response("control DDR (PB2)");
 }
 
+// Set the footswitch direction bit, changing PB0 from a pulled-up input into a
+// strong output. All required active-output bits remain set, so this specifically
+// distinguishes the exact DDRB invariant from the former output-subset check.
+static void test_fault_inject_footswitch_ddr(void) {
+    if (sim_reset(0) != 0) { g_failures++; return; }
+
+    footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
+    CHECK(g_led_level == 1,
+          "fault-inject [footswitch DDR]: normal press engages");
+
+    avr_core_watch_write(g_avr, DDRB_MEM_ADDR,
+                         g_avr->data[DDRB_MEM_ADDR]
+                         | (uint8_t)(1U << FOOTSW_PIN));
+    expect_fault_response("footswitch DDR (PB0 output)");
+}
+
+// PB4 is intentionally configured as a low-driven spare output on every classic
+// AVR variant. It is absent from each driver's active-output subset, so losing
+// this direction proves the complete initialization mask is enforced.
+static void test_fault_inject_spare_ddr(void) {
+    if (sim_reset(0) != 0) { g_failures++; return; }
+
+    footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
+    CHECK(g_led_level == 1,
+          "fault-inject [spare DDR]: normal press engages");
+
+    avr_core_watch_write(g_avr, DDRB_MEM_ADDR,
+                         g_avr->data[DDRB_MEM_ADDR]
+                         & (uint8_t)~(1U << PB4));
+    expect_fault_response("spare DDR (PB4 input)");
+}
+
 //////////////////////////////////////////////////////////////////////////////
 // SFR-integrity fault injection: corrupt each critical CONFIG register the
 // firmware writes once in init() -- the clock prescaler, the watchdog config,
@@ -1681,6 +1718,8 @@ static void run_fault_injection_suite(void) {
 #endif
     test_fault_inject_lost_pullup();
     test_fault_inject_control_ddr();
+    test_fault_inject_footswitch_ddr();
+    test_fault_inject_spare_ddr();
     // SFR-integrity gate: clock / watchdog / Timer0 config registers
     test_fault_inject_clkpr();
     test_fault_inject_wdtcr();

@@ -36,7 +36,7 @@
 #
 # Usage:   make attiny202-fault  (supplies the ELF and required production fuses)
 # Exit:    0 = PASS, 1 = a case failed, 2 = bad invocation / missing image.
-# Completeness: exactly 11 independently pinned injections plus one long healthy
+# Completeness: exactly 13 independently pinned injections plus one long healthy
 # negative control must finish; any rejected/re-latched injection is a failure.
 
 import sys
@@ -50,7 +50,7 @@ NEG_CONTROL_MS = 650     # >2x WDT period: healthy firmware must keep petting it
 LIVE_STEP_MS = 5
 RETRY_GATE_MS = 50
 RETRY_GATE_STEP_CYCLES = 137  # coprime with the 2,000-cycle tick
-EXPECTED_FAULT_CASES = 11
+EXPECTED_FAULT_CASES = 13
 EXPECTED_TOTAL_RESULTS = EXPECTED_FAULT_CASES + 1  # injections + negative control
 RESET_SENTINEL = 0xA5
 
@@ -83,6 +83,8 @@ def _fault_cases(sim):
         ("CLKCTRL.MCLKCTRLB",     REG,   S.REG_CLKCTRL_MCLKCTRLB, 0x00,   GATE),
         ("PORTA.PIN7CTRL(pullup)", REG,  S.REG_PORTA_PIN7CTRL,    0x00,   GATE),
         ("PORTA.DIR(outputs)",     REG,  S.REG_PORTA_DIR,         0x00,   GATE),
+        ("PORTA.DIR(footswitch)",  REG,  S.REG_PORTA_DIR,         0xCE,   GATE),
+        ("PORTA.DIR(spare PA6)",   REG,  S.REG_PORTA_DIR,         0x0E,   GATE),
         ("ctx_.program_state",    RAM,   sim.addr_ctx + 0,        0xFF,   GATE),
         ("ctx_.effect_state",     RAM,   sim.addr_ctx + 1,        0xFF,   GATE),
         ("ctx_.debounce_counter", RAM,   sim.addr_ctx + 2,        0xFF,   GATE),

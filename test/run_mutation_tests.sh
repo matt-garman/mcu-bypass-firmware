@@ -116,6 +116,7 @@ MUTATIONS=(
 "src/bypass_mcu_avr_classic.c	s@hw_wdt_pet();@(void)0; /* MUTANT: no WDT pet */@	test-sim-cd4053	WDT pet removed from main loop: watchdog fires within ~250ms; test_watchdog_not_tripped_normally catches it"
 "src/bypass_mcu_avr_classic.c	s@timer_isr_called_ = TIMER_ISR_CALLED;@timer_isr_called_ = TIMER_ISR_NOT_CALLED;@	test-sim-cd4053	WDT handshake: ISR clears its own flag -> main never sees CALLED -> WDT fires within timeout"
 # --- main-loop sanity guard / toggle dispatch (bypass_mcu_avr_classic.c) -------------------
+"src/bypass_mcu_avr_classic.c	s@(actual_mask == (uint8_t)BYPASS_OUTPUT_DDR_MASK)@(1U != 0U)@	test-sim-cd4053	DDRB exact-mask predicate removed: PB0 output and PB4 input corruptions evade the former caller-output subset check"
 "src/bypass_mcu_avr_classic.c	s@if ( (ctx_.program_state > RELEASE_DEBOUNCE_WAIT)@if ( 0 \&\& (ctx_.program_state > RELEASE_DEBOUNCE_WAIT)@	test-sim-cd4053	sanity guard disabled: DDRB/state corruption goes undetected; corruption test catches it"
 "src/bypass_pure.c	s@res.effect_state = BYPASS;@res.effect_state = ENGAGED;@	test-sim-cd4053	toggle: always sets ENGAGED (never returns to BYPASS); round-trip and lock-step tests catch it"
 # --- CD4053 simple output driver -----------------------------------------------

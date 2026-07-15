@@ -226,6 +226,8 @@ def test_boot_health(sim, ck):
     ck.check(sim.wdt_locked(), "boot: WDT.STATUS.LOCK set")
     ck.check(sim.read_ioreg(S.REG_WDT_CTRLA) == S.WDTCFG_LOCKED,
              "boot: WDT.CTRLA == 0x%02X" % S.WDTCFG_LOCKED)
+    ck.check(sim.read_ioreg(S.REG_PORTA_DIR) == S.PORTA_DIR_EXPECTED,
+             "boot: PORTA.DIR == exact 0x%02X" % S.PORTA_DIR_EXPECTED)
     ck.check(sim.critical_sfrs_intact(), "boot: critical SFRs intact")
     ck.check(not sim.led_on(), "boot: LED dark at idle")
 
