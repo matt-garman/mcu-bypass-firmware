@@ -92,8 +92,9 @@ below so a green gate means every PIC layer actually ran.
 | Aggregate regression | `test-target-matrix` | Proves valid matrices run exactly once per variant and invalid matrices fail before any target invocation. | Bash + fake recursive Make |
 
 `pic-test-gpsim` now samples one non-settled point, `PRESS1_EARLY`, roughly
-3.5 ms after the first press edge. A correct 1 ms tick has not yet accumulated the
-eight separated pressed samples needed to toggle, so the LED must still be off.
+6 ms (3,000 instruction cycles) after the first press edge. A correct 1 ms tick
+has not yet accumulated the eight separated pressed samples needed to toggle, so
+the LED must still be off.
 This catches a collapsed tick gate, for example if `TMR2IF` stopped being cleared
 and the main loop free-ran through the debounce threshold. The same wrapper also
 asserts full BYPASS `LATA` at startup and after the second press, so analog-switch
