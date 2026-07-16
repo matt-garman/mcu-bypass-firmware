@@ -2075,7 +2075,10 @@ test/formal/test_model_check: test/formal/test_model_check.c test/model_step.h t
 
 # Symbolic / exhaustive single-step property check: proves the per-step
 # transition invariants of step() hold for EVERY (state x input) combination in
-# the full domain (the inductive step behind the whole-program invariants).
+# the invariant-valid domain, including unreachable-but-valid states (the
+# inductive step behind the whole-program invariants). CBMC separately covers
+# corrupt program-state fault handling and released-input recovery of an
+# out-of-range counter.
 # Default build enumerates exhaustively; if KLEE is installed, `make
 # test-symbolic-klee` runs the same assertions under symbolic execution.
 test-symbolic: test/formal/test_symbolic
@@ -2120,17 +2123,18 @@ test-symbolic-klee:
 		cd test && "$$klee_cmd" --exit-on-error formal/test_symbolic_klee.bc; \
 	else \
 		echo "KLEE (or its matching clang/llvm-link) not installed; the exhaustive"; \
-		echo "'test-symbolic' target covers the same input domain. Install klee +"; \
+		echo "'test-symbolic' target covers the same valid domain. Install klee +"; \
 		echo "a matching llvm to enable SMT-backed symbolic execution."; \
 	fi
 
 # Optional: CBMC bounded-model-checking of the REAL pure core (bypass_pure.c).
-# A third, independent proof engine (SAT/SMT) for the same safety + liveness
-# invariants, run on the actual firmware functions rather than a re-model -- plus
-# CBMC's automatic instrumentation proving the debounce path is free of integer
-# overflow / out-of-range conversion / out-of-bounds undefined behaviour. See
-# test/formal/test_cbmc.c. Only runs if cbmc is installed; otherwise the exhaustive
-# test-model-check / test-symbolic targets already cover the same properties.
+# A third, independent SAT/SMT proof of the valid-domain safety/liveness
+# invariants, plus corrupt program-state handling, integrator contraction and
+# released-input recovery for out-of-range counters, and automatic instrumentation
+# for integer overflow, conversions, bounds, and other undefined behaviour. See
+# test/formal/test_cbmc.c. The exhaustive host
+# proofs remain useful when CBMC is absent, but do not replace those extra CBMC
+# obligations.
 .PHONY: test-cbmc
 CBMC        ?= cbmc
 # bypass_pure.c includes the AVR-targeted bypass_config.h directly; supply the
@@ -2174,8 +2178,8 @@ test-cbmc:
 		echo "=== CBMC: all debounce-core proofs SUCCESSFUL ==="; \
 	else \
 		echo "cbmc not installed; the exhaustive 'test-model-check' and 'test-symbolic'"; \
-		echo "targets cover the same properties. Install cbmc (apt-get install cbmc) to"; \
-		echo "enable SAT/SMT proof of the real bypass_pure.c source."; $(SKIP); \
+		echo "targets still cover valid-domain transitions and liveness. Install cbmc"; \
+		echo "to add program-state corruption, released-input counter recovery, and UB proofs."; $(SKIP); \
 	fi
 
 # Fuse-byte verification: decode the EXACT bytes this Makefile will burn for

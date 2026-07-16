@@ -82,6 +82,14 @@ private temporary directory and is removed after each gate run.
 version matching KLEE, and executes only the linked module. The host-only
 `test-klee-build` regression pins that two-module flow without requiring KLEE.
 
+The host enumerator and KLEE prove the same complete invariant-valid Cartesian
+product: both program states, both effect states, every counter from 0 through
+`RELEASE_THRESH`, and both input levels. This includes valid tuples unreachable
+from power-on, but deliberately excludes corrupt program-state values and
+counters above `RELEASE_THRESH`. CBMC's C2x harness proves fault handling for an
+invalid program state; C7 proves integrator contraction and released-input
+recovery for an out-of-range counter.
+
 
 ## PIC10F322 target validation layers
 

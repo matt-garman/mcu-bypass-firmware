@@ -5,25 +5,24 @@
 // ---------------
 // test_model_check.c proves whole-program invariants via BFS over the reachable
 // state graph. This file complements it with a SYMBOLIC-style proof of the
-// per-step transition relation: for EVERY possible (program_state, effect_state,
-// debounce_counter, input) -- including states that are NOT reachable from the
-// power-on roots -- the single-step function step() must preserve a set of
-// local invariants. Proving properties over the *entire* input domain (not just
-// reachable states) is exactly what a symbolic executor like KLEE does; because
-// the domain here is tiny and the only inputs are bounded integers + one bit, a
-// complete enumeration is mathematically equivalent to symbolic execution with
-// no path explosion.
+// per-step transition relation: for EVERY invariant-valid combination of
+// (program_state, effect_state, debounce_counter, input) -- including valid
+// states that are NOT reachable from the power-on roots -- the single-step
+// function step() must preserve a set of local invariants. The domain here is
+// tiny (two program states, two effect states, counters 0..RELEASE_THRESH, and
+// one input bit), so complete host enumeration is mathematically equivalent to
+// KLEE's symbolic exploration of the same constrained domain.
 //
 // DUAL MODE
-//   - Default (host cc): exhaustive enumeration of the full input domain.
+//   - Default (host cc): exhaustive enumeration of the invariant-valid domain.
 //   - KLEE (cc=klee/clang -emit-llvm, this file compiled with -DUSE_KLEE):
 //     mark the inputs symbolic with klee_make_symbolic() and let KLEE explore.
 //     The SAME assertions are used in both modes, so the Makefile target can run
 //     under KLEE when available without any code changes here.
 //
-// step() is byte-identical to the algorithm in bypass_mcu_avr_classic.c, the golden
-// model, and test_model_check.c, and pulls thresholds from bypass_config.h via
-// the host shim -- so this verifies the real design.
+// step() delegates to debounce_integrate() and debounce_step() from the shipping
+// bypass_pure.c and pulls thresholds from bypass_config.h via the host shim, so
+// both modes verify the real pure-core implementation rather than a copy.
 
 #include <stdint.h>
 #include <stdio.h>
@@ -168,8 +167,9 @@ int main(void) {
     klee_make_symbolic(&debounce_counter,sizeof debounce_counter,"debounce_counter");
     klee_make_symbolic(&pin_low,         sizeof pin_low,         "pin_low");
 
-    // Constrain to the valid domain (the firmware's invariants guarantee these
-    // ranges; the model-checker proves reachability stays inside them).
+    // Constrain to the invariant-valid domain. The model checker proves all
+    // reachable states stay inside these ranges; CBMC separately proves corrupt
+    // program-state fault handling and out-of-range counter integrator recovery.
     klee_assume(program_state <= RELEASE_DEBOUNCE_WAIT);
     klee_assume(effect_state  <= ENGAGED);
     klee_assume(debounce_counter <= RELEASE_THRESH);
@@ -183,11 +183,11 @@ int main(void) {
            "(PRESSED_THRESH=%d, RELEASE_THRESH=%d):\n",
            PRESSED_THRESH, RELEASE_THRESH);
 
-    // Exhaustive enumeration over the FULL input domain -- including the two
-    // out-of-enum-range program_state values (2,3) and counter values above
-    // RELEASE_THRESH up to 255, to confirm step() does not misbehave even on
-    // corrupted inputs (defense in depth; the firmware's sanity guard catches
-    // these, but step() should still not produce nonsense).
+    // Exhaustive enumeration over the same invariant-valid domain KLEE admits.
+    // This includes every valid tuple, not only states reachable from power-on.
+    // Corrupt program-state values and counters above RELEASE_THRESH are
+    // deliberately outside this proof; CBMC's C2x and C7 harnesses cover fault
+    // handling for the former and integrator recovery for the latter.
     long combos = 0;
     for (int ps = 0; ps <= RELEASE_DEBOUNCE_WAIT; ++ps) {
         for (int es = 0; es <= ENGAGED; ++es) {

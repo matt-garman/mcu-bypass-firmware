@@ -55,6 +55,10 @@ file is the human-readable summary of *what changed*.
   explicitly rejects the wrong unified x4053 BYPASS polarity.
 
 ### Fixed
+- Symbolic-test documentation now accurately scopes host/KLEE coverage to every
+  invariant-valid state/input tuple and identifies CBMC as the separate proof of
+  corrupt program-state handling, released-input recovery of out-of-range
+  counters, and undefined behavior obligations.
 - The optional KLEE target now compiles and links the symbolic harness with the
   shipping `src/bypass_pure.c` bitcode before execution, preventing unresolved
   core calls from masquerading as a proof of the real implementation.
