@@ -1381,6 +1381,14 @@ static void expect_fault_response(const char *what) {
           "fault-inject [%s]: WDT reset recovered, LED dark (reinit BYPASS)",
           what);
 #else
+    // A fault injected at an arbitrary point in the main loop may land just
+    // after the current tick's sanity gate has already run, so the core can
+    // complete one more IDLE sleep before the next tick's gate catches it (a
+    // <=1ms detection latency). Allow a bounded settle window for the gate to
+    // react, then assert the core is PERMANENTLY wedged in the cli()+busy loop
+    // (no further sleeps). A genuinely undetected fault keeps sleeping through
+    // the 200ms window and still fails.
+    run_ms(10);
     g_saw_sleep = 0;
     run_ms(200);
     CHECK(g_saw_sleep == 0,
