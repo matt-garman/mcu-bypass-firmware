@@ -51,6 +51,9 @@ file is the human-readable summary of *what changed*.
   explicitly rejects the wrong unified x4053 BYPASS polarity.
 
 ### Fixed
+- Release reproduction now rejects committed-as-fresh and duplicate fresh
+  directories after physical-path resolution, then verifies `SHA256SUMS`,
+  committed images, and fresh images from one immutable set of private snapshots.
 - Historical `v0.9.0` through `v0.9.2` release documentation now prominently
   identifies the superseded `*_tmux*` images whose direct-drive polarity maps
   the absent/undriven-MCU pull-down state to ENGAGED instead of fail-safe

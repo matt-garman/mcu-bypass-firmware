@@ -22,7 +22,7 @@ test/
   test_flash_budget.sh      shared: fail-closed flash measurement checks
   test_gpsim_wrappers.sh    shared: fail-closed gpsim wrapper checks
   test_pic_build.sh         shared: fail-closed PIC image-generation checks
-  test_release_images.sh    shared: exact release artifact verification
+  test_release_images.sh    shared: isolated exact release artifact verification
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
   test_stack_bound.sh       shared: fail-closed stack evidence checks
   test_workload_rebuild.sh  shared: workload/fuse rebuild checks

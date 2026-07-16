@@ -131,11 +131,16 @@ make clean && make all13 all85 all45 && make pic
 scripts/verify-release-images.sh release/vX.Y.Z build_avr_classic build_pic
 ```
 
-A passing verifier proves the committed files, checksum entries, and locally
-built files are the same complete set with byte-identical contents. Byte-exact
-reproduction requires the *same* `avr-gcc` **and** `binutils-avr` versions
-recorded in the manifest; a different toolchain may produce functionally
-identical but not byte-identical images.
+The verifier resolves symlink aliases to physical directory paths and rejects
+both committed-as-fresh reuse and duplicate fresh directories. It copies
+`SHA256SUMS`, the committed images, and all fresh images into private storage
+before comparing sets or bytes, so later source mutations cannot contaminate
+the checksum phase. A passing verifier proves those three private snapshots are
+the same complete set with byte-identical contents.
+
+Byte-exact reproduction requires the *same* `avr-gcc` **and**
+`binutils-avr` versions recorded in the manifest; a different toolchain may
+produce functionally identical but not byte-identical images.
 
 For tags predating `scripts/verify-release-images.sh`, use their original
 hash-only check with an absolute checksum path:
