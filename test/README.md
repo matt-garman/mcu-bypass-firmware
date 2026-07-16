@@ -91,6 +91,7 @@ below so a green gate means every PIC layer actually ran.
 | Static analysis | `pic-analyze` | cppcheck + MISRA pass over the PIC shell with real XC8/DFP register headers. | host tools |
 | Shipping-source coverage | `pic-coverage-check-fw` | Every executable line in the real PIC shell, shared pure core, and all three output drivers is host-executed except the documented non-returning reset path. | host gcov with PIC SFR mock |
 | Register-level functional | `pic-test-gpsim` | Real HEX toggles on press, handles power-on-held switch, keeps settled LATA/PORTA expectations, and includes the mid-debounce `PRESS1_EARLY` tick-cadence check. | gpsim CLI |
+| gpsim process gate | `test-gpsim-wrappers` | Both functional wrappers require a positive decimal timeout and reject nonzero or killed gpsim runs even after complete snapshots. | Bash + fake gpsim |
 | Fault recovery | `pic-test-fault` | Runtime direction, settled-output-latch, configuration, pull-up, and `ctx_` corruptions produce the variant-appropriate WDT recovery response. | libgpsim |
 | HEX/model lock-step | `pic-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches the shared pure model after every completed main-loop iteration. | libgpsim |
 | Lock-step progress regression | `test-lockstep-progress` | Simulator stalls during settle, calibration, or completion abort immediately; the completion loop cannot spin forever on a frozen cycle counter. | host C++ + fake gpsim API |

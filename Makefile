@@ -615,6 +615,8 @@ PIC_FLASH_WORDS ?= 512
 # gpsim simulator + processor name for the register-level functional test.
 GPSIM         ?= gpsim
 PIC_GPSIM_PROC ?= p10f322
+GPSIM_TIMEOUT_SECONDS ?= 60
+export GPSIM_TIMEOUT_SECONDS
 
 # The PIC shell + the unchanged pure core (the AVR counterpart is CORE_SRC =
 # bypass_mcu_avr_classic.c + bypass_pure.c).
@@ -879,7 +881,16 @@ pic-analyze-misra: src/bypass_mcu_pic10f322.c $(PIC_HEADERS) $(MISRA_ADDON) $(MI
 # `pic` to build the HEX; skips cleanly when gpsim or the HEX is absent.
 .PHONY: pic-test-gpsim
 pic-test-gpsim: pic
-	@if ! command -v $(GPSIM) >/dev/null 2>&1; then \
+	@timeout_seconds="$${GPSIM_TIMEOUT_SECONDS:-60}"; \
+	case "$$timeout_seconds" in \
+		''|*[!0-9.]*|*.*.*|.*|*.) \
+			echo "FAIL: GPSIM_TIMEOUT_SECONDS must be a positive decimal number of seconds"; exit 1 ;; \
+	esac; \
+	case "$$timeout_seconds" in \
+		*[1-9]*) ;; \
+		*) echo "FAIL: GPSIM_TIMEOUT_SECONDS must be a positive decimal number of seconds"; exit 1 ;; \
+	esac; \
+	if ! command -v $(GPSIM) >/dev/null 2>&1; then \
 		echo "gpsim not installed; skipping PIC gpsim register-level test"; $(SKIP); \
 	fi; \
 	guard=0; \

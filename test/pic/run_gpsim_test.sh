@@ -37,6 +37,11 @@ GPSIM_TIMEOUT_SECONDS="${GPSIM_TIMEOUT_SECONDS:-60}"
 PROC="${PIC_GPSIM_PROC:-p10f322}"
 STC="$(dirname "$0")/footswitch_toggle.stc"
 
+if ! [[ "$GPSIM_TIMEOUT_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] \
+		|| ! [[ "$GPSIM_TIMEOUT_SECONDS" =~ [1-9] ]]; then
+	echo "FAIL: GPSIM_TIMEOUT_SECONDS must be a positive decimal number of seconds"
+	exit 1
+fi
 if ! command -v "$GPSIM" >/dev/null 2>&1; then
     echo "gpsim not installed; skipping gpsim register-level test for $HEX"
     exit 0

@@ -69,7 +69,8 @@ file is the human-readable summary of *what changed*.
   stale, partial, malformed, over-budget, or unverifiable output. Intel HEX
   structure, stack/flash/fuse evidence, workload rebuilds, model coverage, soak
   timing, and release image sets all have isolated negative-path regressions.
-- gpsim wrappers now propagate simulator failures and timeouts even after valid
+- gpsim wrappers reject non-positive or malformed timeout values before invoking
+  the simulator and propagate process failures or kills even after valid
   snapshots, while libgpsim targets remove stale binaries before rebuilding.
 - PIC target fault injection now verifies register identity, write-back,
   simulator progress, exact per-variant completion counts, and restoration of
