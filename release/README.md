@@ -40,7 +40,10 @@ validation suite — backs these binaries, through two mechanisms:
    AVR suite + mutation testing), `make pic-test` (PIC CONFIG-word + static
    analysis + gpsim functional), `make pic-test-target-variants` (fail-closed
    PIC libgpsim fault, lock-step, and target-I/O validation), and a **24-hour
-   soak of every release soak combination** (logs under `evidence/`).
+   soak of every release soak combination** (logs under `evidence/`). Because
+   those gates are long-running, release orchestration rechecks both the recorded
+   source `HEAD` and worktree cleanliness immediately before staging artifacts.
+   Only explicitly non-publishable dry runs may proceed from a dirty tree.
 
 2. **Reproducibility.** The Intel-HEX images are byte-deterministic for a fixed
    toolchain — `objcopy` ihex output contains only the program's code/data

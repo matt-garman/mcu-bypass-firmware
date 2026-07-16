@@ -33,8 +33,9 @@
 #      (the full pre-hardware gates).
 #   3. Run ALL release soak combinations IN PARALLEL for the full
 #      duration, collecting a pass/fail verdict and evidence from each.
-#   4. Stage release/<VERSION>/ : the .hex images, SHA256SUMS, a provenance
-#      MANIFEST, a README, the soak/validation evidence, and a commit message.
+#   4. Recheck source HEAD + cleanliness, then stage release/<VERSION>/ : the
+#      .hex images, SHA256SUMS, a provenance MANIFEST, a README, the
+#      soak/validation evidence, and a commit message.
 #   5. STOP. Print the exact git + signing commands for the human to run. This
 #      script NEVER commits, tags, signs, or pushes -- per project policy all
 #      modifying git operations are done by hand.
@@ -88,7 +89,6 @@ die()     { printf '%sFATAL%s %s\n' "$RED" "$RST" "$*" >&2; exit 1; }
 # ----------------------------------------------------------------------------
 VERSION=""
 DRY_RUN=0
-ALLOW_DIRTY=0
 MIN_RELEASE_SOAK_MS=86400000
 MAX_SOAK_DURATION_MS=4294967294    # uint32_t loop bound; preserve t + 1
 SOAK_DURATION_MS=$MIN_RELEASE_SOAK_MS
@@ -101,7 +101,6 @@ usage() { sed -n '2,200p' "$0" | sed -n '/^# USAGE/,/^$/p' | sed 's/^# \{0,1\}//
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--dry-run)            DRY_RUN=1; shift ;;
-		--allow-dirty)        ALLOW_DIRTY=1; shift ;;
 		--soak-duration-ms)   SOAK_DURATION_MS="${2:?--soak-duration-ms needs a value}"; shift 2 ;;
 		--jobs)               JOBS="${2:?--jobs needs a value}"; shift 2 ;;
 		--output-dir)         OUTPUT_DIR="${2:?--output-dir needs a value}"; shift 2 ;;
@@ -134,7 +133,6 @@ if [ "$DRY_RUN" -eq 1 ]; then
 	# finishes quickly, and tolerate an uncommitted tree (you typically rehearse
 	# BEFORE committing the release scaffolding itself).
 	[ "$SOAK_DURATION_MS" = "$MIN_RELEASE_SOAK_MS" ] && SOAK_DURATION_MS=60000
-	ALLOW_DIRTY=1
 fi
 # A short rehearsal must still execute at least one responsiveness round-trip.
 [ "$SOAK_DURATION_MS" -lt "$SOAK_LIVENESS_INTERVAL_MS" ] \
@@ -147,6 +145,12 @@ fi
 # ----------------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repo"
 cd "$REPO_ROOT"
+# Load this once at startup so an edit during the long run cannot replace the
+# final provenance-check implementation used by this process.
+# shellcheck source=release-provenance.sh
+source "$REPO_ROOT/scripts/release-provenance.sh"
+declare -F release_source_is_unchanged >/dev/null \
+	|| die "release provenance checker did not define its required function"
 
 mkv() { make -s print-"$1"; }      # echo one Makefile variable
 
@@ -191,11 +195,11 @@ fi
 section "0. preconditions"
 
 # Clean working tree -- the provenance commit SHA must mean something. A real
-# release requires it; a rehearsal (--dry-run / --allow-dirty) only warns.
+# release requires it; an explicitly non-publishable dry run only warns.
 GIT_DIRTY=0
 if [ -n "$(git status --porcelain)" ]; then
 	GIT_DIRTY=1
-	if [ "$ALLOW_DIRTY" -eq 1 ]; then
+	if [ "$DRY_RUN" -eq 1 ]; then
 		warn "working tree is DIRTY; provenance SHA $(git rev-parse --short HEAD) will not capture uncommitted changes."
 	else
 		git status --short >&2
@@ -428,6 +432,16 @@ for img in "${IMAGES[@]}"; do
 		|| die "validated release image missing, empty, or not regular after final regeneration: $img"
 done
 ok "all validated release images are present and nonempty."
+
+# Builds and parallel soaks can run for 24 hours. The Make lock protects shared
+# artifacts from other Make invocations, but intentionally cannot prevent a
+# human or editor from changing source or moving HEAD. Recheck immediately
+# before creating the release directory so the recorded commit still identifies
+# the validated source. Dirty rehearsals retain their explicit warning policy.
+if ! release_source_is_unchanged "$GIT_SHA" "$DRY_RUN"; then
+	die "source provenance changed after validation. No release staged."
+fi
+ok "source provenance still matches $GIT_SHORT immediately before staging."
 
 # ============================================================================
 # 4. STAGE THE RELEASE

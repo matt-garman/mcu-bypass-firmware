@@ -55,6 +55,10 @@ file is the human-readable summary of *what changed*.
   explicitly rejects the wrong unified x4053 BYPASS polarity.
 
 ### Fixed
+- Long release runs now recheck the recorded source `HEAD` and worktree
+  cleanliness after validation and immediately before creating the staging
+  directory, refusing to attach artifacts or evidence to stale provenance. The
+  dirty-tree exception is now restricted to non-publishable dry runs.
 - Tap-timing documentation now scopes the 33 ms minimum to the pure model,
   ISR-driven AVR shells, and simple PIC variant, and records conservative polled
   PIC mute/relay qualification budgets of 38 ms/45 ms plus the pending-timer

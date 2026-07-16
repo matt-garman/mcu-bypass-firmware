@@ -38,6 +38,7 @@ command -v "${MAKE_CMD[0]}" >/dev/null 2>&1 \
 mkdir -p "$repo/scripts"
 cp "$ROOT/Makefile" "$repo/Makefile"
 cp "$ROOT/scripts/make-release.sh" "$repo/scripts/make-release.sh"
+cp "$ROOT/scripts/release-provenance.sh" "$repo/scripts/release-provenance.sh"
 chmod +x "$repo/scripts/make-release.sh"
 : > "$log"
 

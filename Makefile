@@ -453,7 +453,7 @@ FORCE:
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
         test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle \
         test-attiny202-build test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build \
-        test-pic-build test-release-images test-build-serialization \
+        test-pic-build test-release-images test-release-provenance test-build-serialization \
         test-make-lock-probe test-make-safe-parallel-probe \
         _test-make-safe-parallel-probe-run _test-make-safe-parallel-probe-a \
         _test-make-safe-parallel-probe-b _test-mutation-policy-probe \
@@ -1918,7 +1918,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1930,7 +1930,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -1971,6 +1971,10 @@ test-pic-build:
 # Exact-set and hash checks for the tag workflow's committed/listed/fresh images.
 test-release-images:
 	./test/test_release_images.sh
+
+# Isolated Git-repository proof that long release runs recheck source identity.
+test-release-provenance:
+	./test/test_release_provenance.sh
 
 # Internal probes used only by test/test_make_serialization.sh.
 SERIAL_PROBE_DIR ?= $(AVR_BUILD_DIR)
@@ -2739,9 +2743,10 @@ print-%:
 #      release must never green-light on a tool that silently did nothing);
 #   2. clean-builds all AVR + PIC variant images;
 #   3. runs `make test-long` + `make pic-test` and ALL soak combos in parallel;
-#   4. stages release/<VERSION>/ with the .hex images, SHA256SUMS, a provenance
-#      MANIFEST (toolchain versions, per-image fuse bytes / CONFIG word, flashing
-#      command, soak evidence) and a README;
+#   4. rechecks source HEAD + worktree cleanliness, then stages
+#      release/<VERSION>/ with the .hex images, SHA256SUMS, a provenance MANIFEST
+#      (toolchain versions, per-image fuse bytes / CONFIG word, flashing command,
+#      soak evidence) and a README;
 #   5. STOPS and prints the exact `git add` / `git commit` / `git tag -s` and
 #      checksum-signing commands for you to run by hand (it never commits or tags).
 # The pushed tag then triggers .github/workflows/release.yml, which rebuilds from
@@ -2832,6 +2837,7 @@ help:
 	@echo "  test-klee-build  linked harness/pure-core KLEE bitcode regression"
 	@echo "  test-pic-build  PIC image-generation and Intel-HEX validation checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
+	@echo "  test-release-provenance  final release source HEAD/cleanliness checks"
 	@echo "  test-build-serialization  worktree Make/release lock regression"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
 	@echo "  test-lockstep-progress  lock-step simulator-stall propagation checks"
