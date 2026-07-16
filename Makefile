@@ -457,7 +457,7 @@ FORCE:
         test-make-lock-probe test-make-safe-parallel-probe \
         _test-make-safe-parallel-probe-run _test-make-safe-parallel-probe-a \
         _test-make-safe-parallel-probe-b test-target-matrix test-lockstep-progress \
-        test-soak-timing test-workload-rebuild \
+        test-soak-timing test-strict-tools test-workload-rebuild \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
         test-flash-budget-regression test-soak \
@@ -1916,7 +1916,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-workload-rebuild coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1928,7 +1928,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-workload-rebuild coverage-check
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -2036,6 +2036,10 @@ test-lockstep-progress:
 test-soak-timing:
 	HOSTCC="$(HOSTCC)" HOSTCXX="$(PIC_SOAK_CXX)" ./test/test_soak_timing.sh
 
+# Host-only proof that required CBMC/cppcheck gates follow STRICT_TOOLS.
+test-strict-tools:
+	./test/test_strict_tools.sh
+
 # Isolated fake-compiler proof of workload and fuse-configuration rebuilds.
 test-workload-rebuild:
 	./test/test_workload_rebuild.sh
@@ -2142,7 +2146,7 @@ test-cbmc:
 	else \
 		echo "cbmc not installed; the exhaustive 'test-model-check' and 'test-symbolic'"; \
 		echo "targets cover the same properties. Install cbmc (apt-get install cbmc) to"; \
-		echo "enable SAT/SMT proof of the real bypass_pure.c source."; \
+		echo "enable SAT/SMT proof of the real bypass_pure.c source."; $(SKIP); \
 	fi
 
 # Fuse-byte verification: decode the EXACT bytes this Makefile will burn for
@@ -2516,7 +2520,7 @@ analyze-cppcheck: $(FW_SOURCES) $(FW_HEADERS)
 		echo "cppcheck: $(CPPCHECK)"; \
 		$(CPPCHECK) $(CPPCHECK_FLAGS) $(FW_SOURCES); \
 	else \
-		echo "cppcheck not installed; skipping (install cppcheck to enable)"; \
+		echo "cppcheck not installed; skipping (install cppcheck to enable)"; $(SKIP); \
 	fi
 
 # Deep path analysis via the clang static analyzer on the AVR target. Emits
@@ -2797,6 +2801,7 @@ help:
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
 	@echo "  test-lockstep-progress  lock-step simulator-stall propagation checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
+	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
 	@echo "  test-soak       24-h soak test (standalone; SOAK_VARIANT, SOAK_CHIP, SOAK_DURATION_MS,"
 	@echo "                  SOAK_LIVENESS_INTERVAL_MS, SOAK_PROGRESS_INTERVAL_MS)"
