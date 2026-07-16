@@ -31,6 +31,10 @@ file is the human-readable summary of *what changed*.
   simulator stalls without requiring XC8 or libgpsim.
 
 ### Changed
+- Complete Make and direct release-script invocations now hold one worktree-local
+  lock, preventing independent processes from replacing shared firmware, test,
+  coverage, or simulator artifacts while preserving explicitly isolated
+  recursive test fan-out.
 - Classic AVR, AVR-XT, and PIC10F322 sanity gates now verify the complete
   settled output latch against the logical effect state, including low-driven
   spare pins and inactive relay coils.

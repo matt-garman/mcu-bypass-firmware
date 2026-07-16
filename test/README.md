@@ -6,6 +6,12 @@ root because every substrate consumes them (the Makefile puts `test/` on the
 include path with `-Itest`, so the test programs reference these by bare name
 regardless of which subdirectory they live in).
 
+Complete Make and direct release-script invocations hold one worktree-local
+`flock` because firmware images, host binaries, coverage data, and simulator
+logs are shared. Independent commands wait rather than replacing artifacts used
+by another process. The ordinary graph is serial, while reviewed recursive
+fan-out targets retain parallelism for isolated per-variant outputs.
+
 ```
 test/
   bypass_config_host.h      shared: firmware config (RELEASE_THRESH, …) for host builds
@@ -21,6 +27,7 @@ test/
   test_avr_build_rebuild.sh shared: classic AVR rebuild/partial-output checks
   test_flash_budget.sh      shared: fail-closed flash measurement checks
   test_gpsim_wrappers.sh    shared: fail-closed gpsim wrapper checks
+  test_make_serialization.sh shared: worktree Make/release lock regression
   test_pic_build.sh         shared: fail-closed PIC image-generation checks
   test_release_images.sh    shared: isolated exact release artifact verification
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)

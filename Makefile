@@ -1,3 +1,20 @@
+# Build and validation recipes share worktree-local firmware images, host test
+# binaries, coverage data, and simulator logs. Route each independent top-level
+# invocation through one persistent flock, then execute the real graph serially.
+# Recipes that explicitly launch isolated recursive `$(MAKE) -jN` workloads may
+# still use their reviewed internal parallelism. Recursive makes and release
+# scripts inherit the held marker and must not reacquire the same lock.
+_MAKE_SERIAL_WORKTREE_ID := $(shell stat -Lc '%d:%i' . 2>/dev/null)
+ifeq ($(_MAKE_SERIAL_WORKTREE_ID),)
+$(error ERROR: stat is required to identify the worktree serialization lock)
+endif
+ifneq ($(findstring q,$(firstword $(MAKEFLAGS))),)
+override _MAKE_SERIAL_LOCK_HELD := $(_MAKE_SERIAL_WORKTREE_ID)
+endif
+
+ifeq ($(_MAKE_SERIAL_LOCK_HELD),$(_MAKE_SERIAL_WORKTREE_ID))
+export _MAKE_SERIAL_LOCK_HELD
+
 ################################################################################
 # bypass -- build / test / flash Makefile
 ################################################################################
@@ -175,6 +192,7 @@ AVRDUDE_FLAGS = -c $(PROGRAMMER) -p $(AVRDUDE_PART)
 # Host (PC) compiler for the test suite (NOT the AVR cross-compiler).
 HOSTCC      ?= cc
 GCOV        ?= gcov
+export PROJECT_MAKE := $(MAKE_COMMAND)
 # -Wconversion catches implicit integer-narrowing/sign-change footguns in the
 # debounce arithmetic. The host model and the firmware share the same integer
 # semantics, so the model is a good place to enforce it too.
@@ -434,7 +452,10 @@ FORCE:
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
         test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle \
         test-attiny202-build test-avr-build-rebuild test-gpsim-wrappers \
-        test-pic-build test-release-images test-target-matrix test-lockstep-progress \
+        test-pic-build test-release-images test-build-serialization \
+        test-make-lock-probe test-make-safe-parallel-probe \
+        _test-make-safe-parallel-probe-run _test-make-safe-parallel-probe-a \
+        _test-make-safe-parallel-probe-b test-target-matrix test-lockstep-progress \
         test-soak-timing test-workload-rebuild \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
@@ -1843,7 +1864,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-target-matrix test-lockstep-progress test-soak-timing test-workload-rebuild coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1855,7 +1876,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-target-matrix test-lockstep-progress test-soak-timing test-workload-rebuild coverage-check
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-gpsim-wrappers test-pic-build test-release-images test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-workload-rebuild coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -1896,6 +1917,59 @@ test-pic-build:
 # Exact-set and hash checks for the tag workflow's committed/listed/fresh images.
 test-release-images:
 	./test/test_release_images.sh
+
+# Internal probes used only by test/test_make_serialization.sh.
+SERIAL_PROBE_DIR ?= $(AVR_BUILD_DIR)
+
+# Independent top-level Make processes must never enter this critical section
+# concurrently when they share one worktree.
+test-make-lock-probe:
+	@mkdir -p "$(SERIAL_PROBE_DIR)"; \
+	active="$(SERIAL_PROBE_DIR)/.make-lock-probe-active"; \
+	if ! mkdir "$$active" 2>/dev/null; then \
+		echo "FAIL: concurrent Make recipes overlapped" >&2; exit 1; \
+	fi; \
+	cleanup_probe() { rmdir "$$active" 2>/dev/null || true; }; \
+	trap cleanup_probe 0 1 2 15; \
+	printf 'start %s\n' "$(PROBE_ID)" >> "$(PROBE_LOG)"; \
+	sleep 0.5; \
+	printf 'end %s\n' "$(PROBE_ID)" >> "$(PROBE_LOG)"
+
+# The outer graph is serial, but explicitly reviewed recursive fan-out with
+# isolated artifacts remains available. These two prerequisites must overlap.
+test-make-safe-parallel-probe:
+	@mkdir -p "$(SERIAL_PROBE_DIR)"; \
+	cleanup_parallel() { rm -f "$(SERIAL_PROBE_DIR)/parallel-a" \
+		"$(SERIAL_PROBE_DIR)/parallel-b"; }; \
+	cleanup_parallel; trap cleanup_parallel 0 1 2 15; \
+	$(MAKE) --no-print-directory -j2 _test-make-safe-parallel-probe-run \
+		SERIAL_PROBE_DIR="$(SERIAL_PROBE_DIR)"
+
+_test-make-safe-parallel-probe-run: \
+		_test-make-safe-parallel-probe-a _test-make-safe-parallel-probe-b
+
+_test-make-safe-parallel-probe-a:
+	@mkdir -p "$(SERIAL_PROBE_DIR)"; \
+	marker="$(SERIAL_PROBE_DIR)/parallel-a"; \
+	other="$(SERIAL_PROBE_DIR)/parallel-b"; \
+	: > "$$marker"; \
+	i=0; while [ ! -e "$$other" ] && [ $$i -lt 500 ]; do \
+		i=$$((i + 1)); sleep 0.01; \
+	done; \
+	[ -e "$$other" ] || { echo "FAIL: reviewed recursive fan-out was serialized" >&2; exit 1; }
+
+_test-make-safe-parallel-probe-b:
+	@mkdir -p "$(SERIAL_PROBE_DIR)"; \
+	marker="$(SERIAL_PROBE_DIR)/parallel-b"; \
+	other="$(SERIAL_PROBE_DIR)/parallel-a"; \
+	: > "$$marker"; \
+	i=0; while [ ! -e "$$other" ] && [ $$i -lt 500 ]; do \
+		i=$$((i + 1)); sleep 0.01; \
+	done; \
+	[ -e "$$other" ] || { echo "FAIL: reviewed recursive fan-out was serialized" >&2; exit 1; }
+
+test-build-serialization:
+	./test/test_make_serialization.sh
 
 # Host-only proof that the authoritative PIC target aggregate rejects bad matrices.
 test-target-matrix:
@@ -2667,6 +2741,7 @@ help:
 	@echo "  test-gpsim-wrappers  fail-closed gpsim process-status checks"
 	@echo "  test-pic-build  PIC image-generation and Intel-HEX validation checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
+	@echo "  test-build-serialization  worktree Make/release lock regression"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
 	@echo "  test-lockstep-progress  lock-step simulator-stall propagation checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
@@ -2696,6 +2771,25 @@ help:
 	@echo "  coverage-clean  remove coverage artifacts"
 	@echo "Overrides: VARIANT=, PROGRAMMER=, COVERAGE_MIN=, HOSTCC=, HOST_DEFS=, SIM_DEFS=, AVR_BUILD_DIR="
 	@echo "PIC overrides: PIC_CC=, PIC_PROG=pk2cmd|ipecmd, PIC_PROG_TOOL=PK3|PK4|PK5, PIC_PROG_CMD="
+
+else
+
+_MAKE_REQUESTED_GOALS := $(if $(MAKECMDGOALS),$(MAKECMDGOALS),all)
+.DEFAULT_GOAL := all
+.PHONY: _make-serialized-invocation $(_MAKE_REQUESTED_GOALS)
+
+$(_MAKE_REQUESTED_GOALS): _make-serialized-invocation
+	@:
+
+_make-serialized-invocation:
+	@command -v flock >/dev/null 2>&1 \
+		|| { echo "ERROR: flock is required to serialize shared build artifacts" >&2; exit 1; }
+	@flock ".make.lock" $(MAKE_COMMAND) \
+		--no-print-directory -j1 \
+		_MAKE_SERIAL_LOCK_HELD='$(_MAKE_SERIAL_WORKTREE_ID)' \
+		MAKE='$(MAKE)' $(_MAKE_REQUESTED_GOALS)
+
+endif
 
 
 # vim: tw=0 nowrap

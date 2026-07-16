@@ -56,7 +56,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            make gcc-avr avr-libc \
+            make util-linux gcc-avr avr-libc \
             simavr libsimavr-dev libelf-dev \
             clang clang-tidy cppcheck cbmc
 
@@ -118,7 +118,7 @@ jobs:
       - name: Install gpsim + analyzers (apt)
         run: |
           sudo apt-get update
-          sudo apt-get install -y make gcc g++ gpsim gpsim-dev libglib2.0-dev \
+          sudo apt-get install -y make util-linux gcc g++ gpsim gpsim-dev libglib2.0-dev \
             pkg-config cppcheck python3 unzip wget
 
       - name: Restore cached XC8 + DFP
@@ -262,7 +262,7 @@ jobs:
           # libelf-dev supplies libelf.h, which yasimavr's sim_firmware.cpp
           # needs to load the ELF image.
           sudo apt-get install -y \
-            make gcc-avr avr-libc binutils-avr \
+            make util-linux gcc-avr avr-libc binutils-avr \
             cppcheck python3 python3-venv python3-dev g++ \
             libelf-dev \
             curl unzip patch
@@ -411,7 +411,7 @@ jobs:
       - name: Install AVR toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y make gcc-avr avr-libc
+          sudo apt-get install -y make util-linux gcc-avr avr-libc
 
       - name: Build all variants for ${{ matrix.mcu }}
         run: make ${{ matrix.build }}
@@ -449,7 +449,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            make gcc-avr avr-libc \
+            make util-linux gcc-avr avr-libc \
             simavr libsimavr-dev libelf-dev \
             clang clang-tidy cppcheck cbmc
 

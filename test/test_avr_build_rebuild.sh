@@ -199,8 +199,13 @@ checks=$((checks + 1))
 validated_hash=$(sha256sum "$repo/$t13.elf")
 validated_cc_count=$(cc_count "$t13.elf")
 validated_objcopy_count=$(objcopy_count "$t13.hex")
+# GNU Make deliberately omits --old-file from recursive MAKEFLAGS. This private
+# sandbox call therefore identifies itself as an already-held graph so the
+# wrapper does not consume and lose the option before the real build rules see
+# it. The enclosing regression is the sandbox's sole owner.
+repo_lock_id=$(stat -Lc '%d:%i' "$repo")
 (
-	export MAKEFLAGS=-B
+	export MAKEFLAGS=-B _MAKE_SERIAL_LOCK_HELD="$repo_lock_id"
 	run_make --old-file="$t13.elf" "$t13.hex" AVR_REBUILD_PREREQ=
 ) >/dev/null
 [[ "$(cc_count "$t13.elf")" -eq "$validated_cc_count" \

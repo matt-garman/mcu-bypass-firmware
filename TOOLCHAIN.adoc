@@ -15,6 +15,10 @@ tool, re-run `make clean && make test` before relying on its output.
   OS:           Linux 6.12.33 (TrueNAS production kernel), x86_64
   Distribution: Ubuntu 24.04 (Noble) base packages
 
+  flock:        util-linux (required). Complete Make and direct release-script
+                invocations use one worktree-local advisory lock because build,
+                test, coverage, and simulator artifacts are intentionally shared.
+
 == AVR toolchain (cross-compile to MCU target)
 
   avr-gcc:      7.3.0  (package: gcc-avr)
@@ -207,7 +211,7 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
 
 == Reproducing the environment (Ubuntu 24.04)
 
-  sudo apt install gcc-avr avr-libc simavr libsimavr-dev libelf-dev \
+  sudo apt install make util-linux gcc-avr avr-libc simavr libsimavr-dev libelf-dev \
                    gcc clang clang-tidy cppcheck
 
   Optional analysis tools:
@@ -252,7 +256,7 @@ For CI reproducibility, prefer Ubuntu 24.04 LTS Docker image:
 ....
     docker run --rm -v $(pwd):/src ubuntu:24.04 bash -c \
       "apt-get update && \
-       apt-get install -y make gcc-avr avr-libc simavr libsimavr-dev libelf-dev \
+       apt-get install -y make util-linux gcc-avr avr-libc simavr libsimavr-dev libelf-dev \
                           gcc clang clang-tidy cppcheck cbmc python3 && \
        cd /src && make test"
 

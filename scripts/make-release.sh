@@ -58,6 +58,19 @@
 
 set -euo pipefail
 
+# `make release` already owns the worktree lock. Direct execution acquires the
+# same lock for the complete build/validation/staging pipeline so nested Make
+# calls cannot interleave with another invocation's artifacts.
+REPO_HINT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+REPO_LOCK_ID=$(stat -Lc '%d:%i' "$REPO_HINT" 2>/dev/null) \
+	|| { printf 'FATAL: stat is required to identify the worktree lock\n' >&2; exit 1; }
+if [ "${_MAKE_SERIAL_LOCK_HELD:-}" != "$REPO_LOCK_ID" ]; then
+	command -v flock >/dev/null 2>&1 \
+		|| { printf 'FATAL: flock is required to serialize release artifacts\n' >&2; exit 1; }
+	exec flock "$REPO_HINT/.make.lock" env _MAKE_SERIAL_LOCK_HELD="$REPO_LOCK_ID" \
+		"$REPO_HINT/scripts/make-release.sh" "$@"
+fi
+
 # ----------------------------------------------------------------------------
 # Small output helpers (stderr for status; stdout reserved for the final recipe)
 # ----------------------------------------------------------------------------
@@ -207,6 +220,7 @@ req_cmd()   { have "$1" || MISSING+=("$1${2:+  ($2)}"); }
 req_file()  { [ -e "$1" ] || MISSING+=("$1${2:+  ($2)}"); }
 
 req_cmd make
+req_cmd flock          "apt: util-linux (whole-worktree serialization)"
 req_cmd avr-gcc        "apt: gcc-avr"
 req_cmd avr-objcopy    "apt: binutils-avr (HEX bytes + reproducibility)"
 req_cmd avr-size       "apt: binutils-avr"

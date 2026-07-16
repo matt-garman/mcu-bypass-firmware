@@ -61,7 +61,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            make gcc-avr avr-libc binutils-avr \
+            make util-linux gcc-avr avr-libc binutils-avr \
             simavr libsimavr-dev libelf-dev \
             clang clang-tidy cppcheck cbmc python3 unzip wget
 

@@ -8,7 +8,9 @@ fake_make="$work/fake-make"
 log="$work/make.log"
 checks=0
 supported=(cd4053 mute relay)
-MAKE_CMD=${PROJECT_MAKE:-make}
+read -r -a MAKE_CMD <<<"${PROJECT_MAKE:-make}"
+[ "${#MAKE_CMD[@]}" -gt 0 ] \
+	|| { printf 'FAIL: PROJECT_MAKE must name a Make command\n' >&2; exit 1; }
 
 cat > "$fake_make" <<'EOF'
 #!/usr/bin/env bash
@@ -28,7 +30,7 @@ run_matrix() {
 	: > "$log"
 	(
 		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKE VARIANTS PIC_TARGET_VARIANTS_SUPPORTED
-		FAKE_MAKE_LOG="$log" "$MAKE_CMD" --no-print-directory -C "$ROOT" \
+		FAKE_MAKE_LOG="$log" "${MAKE_CMD[@]}" --no-print-directory -C "$ROOT" \
 			MAKE="$fake_make" "${matrix_arg[@]}" pic-test-target-variants
 	)
 }
