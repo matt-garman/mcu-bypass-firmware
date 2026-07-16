@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The mutation-policy probe reads STRICT_TOOLS and MUTATION_ALLOW_SKIP from its
+# environment (see test/mutation_policy.sh). This regression drives both knobs
+# explicitly on each make command line, so strip any ambient values inherited
+# from an interactive shell or an enclosing `make` invocation. Otherwise a
+# leaked MUTATION_ALLOW_SKIP is honored ahead of STRICT_TOOLS and masks the
+# defaulting that the final checks assert.
+unset MUTATION_ALLOW_SKIP STRICT_TOOLS
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 CI_LOCAL="$ROOT/scripts/ci-local.sh"
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-ci-local-routing.XXXXXX")
