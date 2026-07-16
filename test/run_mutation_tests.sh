@@ -60,6 +60,13 @@ PIC_SOAK_GPSIM_INC="${PIC_SOAK_GPSIM_INC:-/usr/include/gpsim}"
 # (~1.057s at WDTPS=0x08, per the soak's own note) so an un-pet dog actually
 # fires, while staying quick. The baseline (pet) run sees zero resets and passes.
 PIC_SOAK_MUT_MS="${PIC_SOAK_MUT_MS:-2500}"
+# Liveness interval for that short window. The shared soak timing contract
+# statically asserts SOAK_LIVENESS_INTERVAL_MS <= SOAK_DURATION_MS, so the
+# Makefile default (60000 ms) will not compile against PIC_SOAK_MUT_MS. Keep it
+# comfortably inside the window so the baseline (pet) run performs at least one
+# real press/release round-trip instead of a vacuous zero-check pass. Must stay
+# <= PIC_SOAK_MUT_MS.
+PIC_SOAK_MUT_LIVENESS_MS="${PIC_SOAK_MUT_LIVENESS_MS:-1000}"
 
 # Parallelism. Every mutant runs in its own throwaway mktemp sandbox with its own
 # build dirs (copy_tree + `make -C "$work"`), so mutants share nothing and can run
@@ -227,7 +234,9 @@ run_mutant() {
         picsoak)
             label="pic-test-soak"
             make -C "$work" pic-test-soak \
-                PIC_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" PIC_SOAK_VARIANT=cd4053 \
+                PIC_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" \
+                PIC_SOAK_LIVENESS_INTERVAL_MS="$PIC_SOAK_MUT_LIVENESS_MS" \
+                PIC_SOAK_VARIANT=cd4053 \
                 >/dev/null 2>&1; rc=$?
             ;;
         pictarget)
@@ -358,6 +367,7 @@ if command -v "$GPSIM" >/dev/null 2>&1 && [ -f "$PIC_BASE_HEX" ]; then
            && pkg-config --exists glib-2.0 2>/dev/null; then
             if make -C "$PIC_BASE" pic-test-soak \
                     PIC_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" \
+                    PIC_SOAK_LIVENESS_INTERVAL_MS="$PIC_SOAK_MUT_LIVENESS_MS" \
                     PIC_SOAK_VARIANT=cd4053 >/dev/null 2>&1; then
                 PIC_SOAK_OK=1
                 echo "gpsim-dev + glib + c++ present, soak baseline PASS -> WDT mutant ENABLED"
