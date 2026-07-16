@@ -1,9 +1,26 @@
 # Prebuilt firmware images
 
-This directory holds **prebuilt, ready-to-flash firmware images** so you can use
-this firmware without installing a cross-compiler or building anything. Each
-release lives in its own `vX.Y.Z/` subdirectory and is also published as a
+This directory holds **prebuilt firmware images** so you can use this firmware
+without installing a cross-compiler or building anything. Images are
+ready-to-flash unless a historical safety warning here or in their per-release
+documentation marks them as superseded. Each release lives in its own
+`vX.Y.Z/` subdirectory and is also published as a
 [GitHub Release](../../releases).
+
+## Safety warning: v0.9.0-v0.9.2 TMUX images
+
+The `bypass_cd4053_tmux*.hex` and `bypass_mute_tmux*.hex` images in releases
+`v0.9.0`, `v0.9.1`, and `v0.9.2` encode an incorrect direct-drive control
+polarity. With the associated TMUX4053 board pull-down contract, an absent or
+undriven MCU therefore selects ENGAGED instead of the intended fail-safe
+BYPASS state.
+
+These images are retained only for historical integrity and reproducibility.
+**Do not select or flash them for new TMUX4053 hardware.** Use release `v0.9.3`
+or later and choose the standard `bypass_cd4053*.hex` or `bypass_mute*.hex`
+image for the target MCU, without `_tmux` in the filename. Those unified images
+support both CD4053 and TMUX4053 boards with fail-safe BYPASS polarity. See the
+[`v0.9.3` correction](../CHANGELOG.md#093---2026-07-11).
 
 The release product set covers AVR Classic (ATtiny13a/45/85) and PIC10F322.
 ATtiny202 is a development-only target: its normal CI artifacts are not

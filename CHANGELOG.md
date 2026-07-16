@@ -51,6 +51,10 @@ file is the human-readable summary of *what changed*.
   explicitly rejects the wrong unified x4053 BYPASS polarity.
 
 ### Fixed
+- Historical `v0.9.0` through `v0.9.2` release documentation now prominently
+  identifies the superseded `*_tmux*` images whose direct-drive polarity maps
+  the absent/undriven-MCU pull-down state to ENGAGED instead of fail-safe
+  BYPASS, and directs users to the unified images from `v0.9.3` or later.
 - Classic AVR, ATtiny202, and PIC image generation now fails closed on missing,
   stale, partial, malformed, over-budget, or unverifiable output. Intel HEX
   structure, stack/flash/fuse evidence, workload rebuilds, model coverage, soak

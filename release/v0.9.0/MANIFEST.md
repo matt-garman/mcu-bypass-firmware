@@ -1,6 +1,15 @@
 # Firmware release v0.9.0
 
-Prebuilt, fully-validated firmware images. Verify integrity with
+> [!WARNING]
+> The `bypass_cd4053_tmux*.hex` and `bypass_mute_tmux*.hex` images in this
+> release use an incorrect direct-drive polarity: the TMUX4053 board's
+> absent/undriven-MCU pull-down state selects ENGAGED instead of fail-safe
+> BYPASS. They are retained only for historical reproducibility. **Do not flash
+> them for new TMUX4053 hardware.** Use `v0.9.3` or later and select the
+> corresponding image without `_tmux` in its filename. See the
+> [top-level safety warning](../README.md#safety-warning-v090-v092-tmux-images).
+
+Prebuilt historical firmware images. Verify integrity with
 `sha256sum -c SHA256SUMS`; reproduce from source per "Reproducing" below.
 
 ## Provenance
