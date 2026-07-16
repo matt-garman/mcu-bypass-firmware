@@ -98,6 +98,7 @@ below so a green gate means every PIC layer actually ran.
 | Target I/O timing | `pic-test-io` | TRISA/ANSELA/LATA/PORTA transitions, relay coil exclusion, and mute/relay pulse widths match the design. | libgpsim |
 | Fail-closed aggregate | `pic-test-target-variants` | Rejects empty, duplicate, or unsupported matrices, then runs fault recovery, lock-step, and target-I/O for every selected PIC variant and requires each PASS sentinel. | Makefile wrapper |
 | Aggregate regression | `test-target-matrix` | Proves valid matrices run exactly once per variant and invalid matrices fail before any target invocation. | Bash + fake recursive Make |
+| Soak timing contract | `test-soak-timing` | Native Classic AVR/PIC soaks require the liveness interval within the total duration; short release rehearsals clamp it so every passing run completes a responsiveness round-trip. | host C/C++ compilers + release CLI |
 
 `pic-test-gpsim` now samples one non-settled point, `PRESS1_EARLY`, roughly
 6 ms (3,000 instruction cycles) after the first press edge. A correct 1 ms tick

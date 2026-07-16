@@ -272,7 +272,10 @@ int main() {
     for (uint32_t t = 0; t < (uint32_t)SOAK_DURATION_MS; ++t) {
         footsw_set(((int)(xs(&rng) & 0xFFu)) < 128);
         soak_run_ms(1);
-        if (t + 1u >= next_live) { soak_liveness_check(t + 1u); next_live += SOAK_LIVENESS_INTERVAL_MS; }
+        if (SOAK_LIVENESS_DUE(t + 1u, next_live)) {
+            soak_liveness_check(t + 1u);
+            next_live += SOAK_LIVENESS_INTERVAL_MS;
+        }
         if (t + 1u >= next_prog) {
             printf("SOAK [%.2f/%.2f h] checks=%" G_GUINT64_FORMAT " fails=%"
                    G_GUINT64_FORMAT " wdt_resets=%" G_GUINT64_FORMAT "\n",

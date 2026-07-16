@@ -292,7 +292,7 @@ int main(void) {
         check_and_log_crash(t + 1u);
 
         // Periodic liveness check: pause noise, do 2-press round-trip.
-        if (t + 1u >= next_liveness_t) {
+        if (SOAK_LIVENESS_DUE(t + 1u, next_liveness_t)) {
             soak_liveness_check(t + 1u);
             next_liveness_t += SOAK_LIVENESS_INTERVAL_MS;
         }

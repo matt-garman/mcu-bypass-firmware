@@ -55,6 +55,9 @@ file is the human-readable summary of *what changed*.
   explicitly rejects the wrong unified x4053 BYPASS polarity.
 
 ### Fixed
+- Native Classic AVR and PIC soaks now require the liveness interval to fit
+  within the total run, and short release rehearsals clamp and propagate that
+  interval so a passing soak includes at least one responsiveness round-trip.
 - PIC flash-budget acceptance now requires a positive decimal budget, compares
   arbitrarily long usage counts without fixed-width shell arithmetic, and
   rejects failed comparisons or missing percentage results.

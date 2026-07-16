@@ -61,19 +61,42 @@ expect_release_range_pass() {
 	rm -rf "$tmp"
 	[[ "$output" == *"not inside a git repo"* ]] \
 		|| fail "release rejected valid $mode duration '$value' during range validation: $output"
+	if [ "$mode" = dry ] && [ "$value" -lt 60000 ]; then
+		[[ "$output" == *"liveness interval ${value}ms"* ]] \
+			|| fail "short dry run did not clamp liveness to '$value' ms: $output"
+	fi
+	checks=$((checks + 1))
+}
+
+expect_default_dry_run_shortened() {
+	local output tmp
+	tmp=$(mktemp -d "${TMPDIR:-/tmp}/soak-timing.XXXXXX")
+	output=$(cd "$tmp" && "$RELEASE" --dry-run v99.0.0 2>&1) || true
+	rm -rf "$tmp"
+	[[ "$output" == *"DRY RUN: short 60000ms soak (liveness interval 60000ms)"* ]] \
+		|| fail "default dry run did not retain one liveness interval: $output"
+	checks=$((checks + 1))
+}
+
+expect_release_liveness_wiring() {
+	grep -Eq '^[[:space:]]+SOAK_LIVENESS_INTERVAL_MS="\$SOAK_LIVENESS_INTERVAL_MS"' "$RELEASE" \
+		|| fail "release does not pass the liveness interval to Classic AVR soaks"
+	grep -Eq '^[[:space:]]+PIC_SOAK_LIVENESS_INTERVAL_MS="\$SOAK_LIVENESS_INTERVAL_MS"' "$RELEASE" \
+		|| fail "release does not pass the liveness interval to PIC soaks"
 	checks=$((checks + 1))
 }
 
 for language in c c++; do
 	if [ "$language" = c ]; then compiler=$HOSTCC; else compiler=$HOSTCXX; fi
 	expect_compile_pass "$compiler" "$language" 1 1 1
-	expect_compile_pass "$compiler" "$language" 4294967294 4294967295 4294967295
+	expect_compile_pass "$compiler" "$language" 4294967294 4294967294 4294967295
 	expect_compile_fail "$compiler" "$language" 0 60000 3600000
 	expect_compile_fail "$compiler" "$language" -1 60000 3600000
 	expect_compile_fail "$compiler" "$language" 1.5 60000 3600000
 	expect_compile_fail "$compiler" "$language" 4294967295 60000 3600000
 	expect_compile_fail "$compiler" "$language" 1000 0 3600000
 	expect_compile_fail "$compiler" "$language" 1000 -1 3600000
+	expect_compile_fail "$compiler" "$language" 1000 1001 3600000
 	expect_compile_fail "$compiler" "$language" 1000 60000 4294967296
 done
 
@@ -102,6 +125,7 @@ for value in ("", "0", "-1", "1.5", "abc", "4294967295"):
 PY
 checks=$((checks + 8))
 
+expect_default_dry_run_shortened
 expect_release_range_pass dry 1
 expect_release_range_pass real 86400000
 expect_release_range_pass dry 4294967294
@@ -110,5 +134,7 @@ expect_release_reject -1 "positive base-10 integer"
 expect_release_reject malformed "positive base-10 integer"
 expect_release_reject 60000 "real releases require"
 expect_release_reject 4294967295 "must not exceed"
+expect_release_reject 9999999999999999999999999999999999999999 "must not exceed"
+expect_release_liveness_wiring
 
 printf 'soak timing validation: %d checks, 0 failures\n' "$checks"

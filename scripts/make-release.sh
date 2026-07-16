@@ -92,6 +92,7 @@ ALLOW_DIRTY=0
 MIN_RELEASE_SOAK_MS=86400000
 MAX_SOAK_DURATION_MS=4294967294    # uint32_t loop bound; preserve t + 1
 SOAK_DURATION_MS=$MIN_RELEASE_SOAK_MS
+SOAK_LIVENESS_INTERVAL_MS=60000
 JOBS=0                             # 0 => "all combos"
 OUTPUT_DIR=""
 
@@ -135,6 +136,11 @@ if [ "$DRY_RUN" -eq 1 ]; then
 	[ "$SOAK_DURATION_MS" = "$MIN_RELEASE_SOAK_MS" ] && SOAK_DURATION_MS=60000
 	ALLOW_DIRTY=1
 fi
+# A short rehearsal must still execute at least one responsiveness round-trip.
+[ "$SOAK_DURATION_MS" -lt "$SOAK_LIVENESS_INTERVAL_MS" ] \
+	&& SOAK_LIVENESS_INTERVAL_MS=$SOAK_DURATION_MS
+[ "$DRY_RUN" -eq 1 ] \
+	&& warn "DRY RUN: short ${SOAK_DURATION_MS}ms soak (liveness interval ${SOAK_LIVENESS_INTERVAL_MS}ms); output is NOT a real release."
 
 # ----------------------------------------------------------------------------
 # Locate the repo and read the Makefile's single source of truth
@@ -183,8 +189,6 @@ fi
 # 0. PRECONDITIONS
 # ============================================================================
 section "0. preconditions"
-
-[ "$DRY_RUN" -eq 1 ] && warn "DRY RUN: short ${SOAK_DURATION_MS}ms soak; output is NOT a real release."
 
 # Clean working tree -- the provenance commit SHA must mean something. A real
 # release requires it; a rehearsal (--dry-run / --allow-dirty) only warns.
@@ -344,6 +348,7 @@ for v in $VARIANTS; do for n in $TINYX5; do
 	elf="$AVR_BUILD_DIR/${FW_BASE}_${v}_t${n}.elf"
 	make --old-file="$elf" "$bin" AVR_REBUILD_PREREQ= \
 		SOAK_VARIANT="$v" SOAK_CHIP="$n" SOAK_DURATION_MS="$SOAK_DURATION_MS" \
+		SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
 		>>"$EVID/soak-build.log" 2>&1 || die "failed to build AVR soak $name"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$REPO_ROOT/$bin"
 	SOAK_CWD[$name]="$REPO_ROOT"   # relative FW_PATH; the binary writes no files
@@ -352,6 +357,7 @@ done; done
 for v in $VARIANTS; do
 	name="pic_${v}"; bin="$SOAKDIR/test_soak_pic_${v}"
 	make "$bin" PIC_SOAK_BIN="$bin" PIC_SOAK_VARIANT="$v" PIC_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
+		PIC_SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
 		>>"$EVID/soak-build.log" 2>&1 || die "failed to build PIC soak $name"
 	rundir="$SOAKDIR/run-$name"; mkdir -p "$rundir"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"

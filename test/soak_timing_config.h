@@ -23,6 +23,9 @@
     default: 0)
 #endif
 
+#define SOAK_LIVENESS_DUE(elapsed_ms, deadline_ms) \
+    ((uint64_t)(elapsed_ms) >= (uint64_t)(deadline_ms))
+
 SOAK_STATIC_ASSERT(SOAK_INTEGER_CONSTANT(SOAK_DURATION_MS) &&
                    SOAK_DURATION_MS > 0 && SOAK_DURATION_MS < UINT32_MAX,
                    "SOAK_DURATION_MS must be in [1, UINT32_MAX - 1]");
@@ -30,6 +33,11 @@ SOAK_STATIC_ASSERT(SOAK_INTEGER_CONSTANT(SOAK_LIVENESS_INTERVAL_MS) &&
                    SOAK_LIVENESS_INTERVAL_MS > 0 &&
                    SOAK_LIVENESS_INTERVAL_MS <= UINT32_MAX,
                    "SOAK_LIVENESS_INTERVAL_MS must be in [1, UINT32_MAX]");
+SOAK_STATIC_ASSERT(SOAK_LIVENESS_INTERVAL_MS <= SOAK_DURATION_MS,
+                   "SOAK_LIVENESS_INTERVAL_MS must not exceed SOAK_DURATION_MS");
+SOAK_STATIC_ASSERT(SOAK_LIVENESS_DUE(SOAK_LIVENESS_INTERVAL_MS,
+                                     SOAK_LIVENESS_INTERVAL_MS),
+                   "the liveness deadline must fire at equality");
 SOAK_STATIC_ASSERT(SOAK_INTEGER_CONSTANT(SOAK_PROGRESS_INTERVAL_MS) &&
                    SOAK_PROGRESS_INTERVAL_MS > 0 &&
                    SOAK_PROGRESS_INTERVAL_MS <= UINT32_MAX,
