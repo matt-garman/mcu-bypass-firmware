@@ -7,7 +7,15 @@ set -euo pipefail
 # from an interactive shell or an enclosing `make` invocation. Otherwise a
 # leaked MUTATION_ALLOW_SKIP is honored ahead of STRICT_TOOLS and masks the
 # defaulting that the final checks assert.
-unset MUTATION_ALLOW_SKIP STRICT_TOOLS
+#
+# A plain env-var unset is not enough: when this suite runs under an enclosing
+# `make test-long ... MUTATION_ALLOW_SKIP=0` (as scripts/make-release.sh does),
+# that command-line override is re-applied to every child `make` through
+# MAKEFLAGS/MAKEOVERRIDES, so the default-behavior probes below would inherit
+# MUTATION_ALLOW_SKIP=0 and report 0 where they must observe the unset default.
+# Clear the make override channels too; the probes always pass the variables
+# they care about explicitly.
+unset MUTATION_ALLOW_SKIP STRICT_TOOLS MAKEFLAGS MAKEOVERRIDES MFLAGS GNUMAKEFLAGS
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 CI_LOCAL="$ROOT/scripts/ci-local.sh"
