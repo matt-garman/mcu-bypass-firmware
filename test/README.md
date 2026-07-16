@@ -133,6 +133,14 @@ missing PASS marker into a failure. It also validates the complete variant matri
 before starting its first target, so an empty or malformed matrix cannot report
 an all-variants PASS or leave a misleading partial run.
 
+Debounce thresholds define a 33-sample pure-model minimum between press onsets.
+That is also the nominal 33 ms physical minimum on ISR-driven AVR targets and the
+simple polled PIC variant. PIC mute and relay actuation blocks the polling loop
+for 5 ms and 12 ms after a toggle, so qualification uses conservative 38 ms and
+45 ms physical budgets. A latched TMR2 flag normally preserves one pending
+post-block sample, making the ideal path roughly one tick shorter; the PIC soak
+deliberately adds the full active variant block to every liveness window.
+
 `pic-test-fault` first requires exact startup `WPUA=0x08` and `TRISA=0x08`, then
 injects every guarded direction, settled-output-latch, SFR, and SRAM fault at the
 behaviorally identified main-loop `CLRWDT`. Register identity, injection

@@ -55,6 +55,10 @@ file is the human-readable summary of *what changed*.
   explicitly rejects the wrong unified x4053 BYPASS polarity.
 
 ### Fixed
+- Tap-timing documentation now scopes the 33 ms minimum to the pure model,
+  ISR-driven AVR shells, and simple PIC variant, and records conservative polled
+  PIC mute/relay qualification budgets of 38 ms/45 ms plus the pending-timer
+  nuance that can shorten the ideal path by roughly one tick.
 - Symbolic-test documentation now accurately scopes host/KLEE coverage to every
   invariant-valid state/input tuple and identifies CBMC as the separate proof of
   corrupt program-state handling, released-input recovery of out-of-range

@@ -92,28 +92,38 @@ adverse conditions:
       design bias is towards simplicity and verifiability
     * By design, no recovery is currently provided for a
       mechanically stuck switch
-    * "Fast repeated taps": _fast_ generally means at least
-      33 milliseconds between presses under ideal conditions; time
-      between recognized repeated taps will be longer in noisy
-      environments, or when using old switches, etc
+    * "Fast repeated taps": under ideal conditions, the pure debounce model
+      and ISR-driven AVR shells can re-arm 33ms after a press begins. The
+      polled PIC10F322 simple/mute/relay variants use conservative nominal
+      press-onset budgets of 33ms/38ms/45ms respectively because mute and
+      relay actuation block sampling for 5ms/12ms after the toggle. The latched
+      timer flag normally preserves one pending sample after a block, so an
+      ideal simulated mute/relay path can re-arm roughly one tick sooner
+      (about 37ms/44ms); instruction overhead and sample phase make the exact
+      physical minimum non-integral. Noise and old switches lengthen recognition,
+      while oscillator tolerance can move nominal wall time in either direction.
     * On the PIC10F322 port specifically: the footswitch loop is
       polled (Model B, no timer interrupt), so while a blocking
       output actuation runs - the relay coil pulse (12ms) or the
       CD4053 mute (5ms), a busy delay inside the state change -
       the loop pauses and the footswitch is not sampled.  The
-      debounce integrator counts loop ticks, so such a pulse can
-      "steal" up to its own duration in ticks from a press or
-      release.  A footswitch transition is therefore reliably
-      registered once it is held for PRESSED_THRESH (press) or
-      RELEASE_THRESH (release) plus the worst-case actuation
-      block: about 20ms for a press and 37ms for a release on the
-      relay variant.  A real footswitch press (>=50ms) clears this
-      comfortably.  The AVR Classic parts are unaffected - they
-      integrate in the timer ISR, which keeps sampling through the
-      blocking pulse.  The relay driver's compile-time assertion
-      (TQ2_L2_5V_PULSE_MS < RELEASE_THRESH) guarantees the
-      release/re-arm path is never missed; the press path is
-      covered by the hold figure above.
+      debounce integrator counts loop ticks. A press still toggles after
+      PRESSED_THRESH sampled low ticks; the block starts only after that
+      toggle, with the lockout counter already loaded. If the user releases
+      immediately, those first 5ms/12ms of physical release occur while the
+      mute/relay routine is still blocking and cannot drain the counter. The
+      conservative release hold budget is therefore block + RELEASE_THRESH
+      wall-time milliseconds before re-arm. TMR2 continues during the block and
+      its latched flag normally supplies one immediate post-block sample, so the
+      ideal earliest path can be about one tick shorter; the full-block budget
+      remains robust to instruction overhead and sample phase. From one press
+      onset to the next, use PRESSED_THRESH + block + RELEASE_THRESH for
+      qualification: 33ms simple, 38ms mute, and 45ms relay. A normal physical
+      tap clears these budgets comfortably. AVR Classic is unaffected because
+      its timer ISR keeps integrating through the blocking pulse. The driver
+      compile-time assertions bound block < RELEASE_THRESH, which keeps the
+      conservative PIC release/re-arm wall-time budget below
+      2 * RELEASE_THRESH; they do not make the block disappear from that budget.
     * The design attempts to be EMI/RFI resilient; however, an
       old/low-quality/fouled-contact footswitch might be very
       "bouncy"; the design can't distinguish EMI/RFI noise from
@@ -201,8 +211,13 @@ user.  The release-debounce, or lock-out period, is longer so as to
       roughly 80× the hardware filter's corner.
 
     * RELEASE_THRESH (minimum lockout before next press):
-      The minimum tap interval is PRESSED_THRESH + RELEASE_THRESH =
-      33ms at nominal clock.
+      At the pure-algorithm sample level, and on ISR-driven AVR shells, the
+      minimum press-onset interval is PRESSED_THRESH + RELEASE_THRESH = 33ms
+      at nominal clock. For the polled PIC shell, conservative qualification
+      adds the full blocking output actuation after the toggle: 33ms simple,
+      38ms mute, 45ms relay. A pending TMR2 flag can make the ideal mute/relay
+      path roughly one tick shorter, so these are robust budgets rather than
+      claims of exact physical minima.
 
 
 == GPIO Pin Assignment, Simple CD4053 Scheme

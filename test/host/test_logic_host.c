@@ -234,11 +234,13 @@ static void test_release_lockout(void) {
     CHECK(m.program_state == PRESS_DEBOUNCE_WAIT, "recovered to press-wait");
 }
 
-// Minimum-tap-interval regression test: the fastest double-tap the algorithm
-// can register is PRESSED_THRESH + RELEASE_THRESH = 33 ms (8 ms press debounce
-// + 25 ms release lockout).  Any future threshold change that violates this
-// guarantee will kill this test before reaching silicon.  Maps directly to the
-// "fast taps recognized" row of the traceability matrix.
+// Pure-model minimum sample interval: the fastest double-tap the debounce
+// algorithm can register is PRESSED_THRESH + RELEASE_THRESH = 33 one-ms samples
+// (8 press + 25 release). This is also the nominal wall-time bound on AVR shells,
+// whose timer ISR keeps integrating through output actuation. The polled PIC
+// mute/relay shells require a target-specific physical timing budget for their
+// 5/12 ms blocking actuation; those conservative bounds are documented
+// separately.
 static void test_minimum_tap_interval(void) {
     model_t m; model_init(&m, 0);
 
@@ -277,7 +279,7 @@ static void test_minimum_tap_interval(void) {
           m.toggle_count);
 }
 
-// Fast repeated taps (>=~30ms apart per design) are each recognized.
+// Model-level repeated taps with both holds safely above their sample thresholds.
 static void test_fast_repeated_taps(void) {
     model_t m; model_init(&m, 0);
     int expected = 0;

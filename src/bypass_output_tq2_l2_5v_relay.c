@@ -12,8 +12,8 @@
 uint8_t hw_is_sanity_check_failed(effect_state_t const effect_state) {
 
     static_assert(TQ2_L2_5V_PULSE_MS < RELEASE_THRESH,
-            "relay coil pulse must be shorter than the release-lockout window, "
-            "or the re-arm point can be missed during the blocking actuation");
+        "relay coil pulse must be shorter than RELEASE_THRESH so the "
+        "polled-core release/re-arm budget stays below 2 * RELEASE_THRESH");
 
     uint8_t const output_mask =
         (1U << LED_PIN) | (1U << RELAY_SET_PIN) | (1U << RELAY_RESET_PIN);

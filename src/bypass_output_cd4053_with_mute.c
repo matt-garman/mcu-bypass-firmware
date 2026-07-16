@@ -12,8 +12,8 @@
 uint8_t hw_is_sanity_check_failed(effect_state_t const effect_state) {
 
     static_assert(CD4053_MUTE_DELAY_MS < RELEASE_THRESH,
-            "CD4053 mute delay must be shorter than the release-lockout window, "
-            "or the re-arm point can be missed during the blocking actuation");
+            "CD4053 mute delay must be shorter than RELEASE_THRESH so the "
+            "polled-core release/re-arm budget stays below 2 * RELEASE_THRESH");
 
     uint8_t const output_mask =
         (1U << LED_PIN) | (1U << CD4053_CTL1) | (1U << CD4053_CTL2);
