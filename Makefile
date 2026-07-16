@@ -192,6 +192,7 @@ AVRDUDE_FLAGS = -c $(PROGRAMMER) -p $(AVRDUDE_PART)
 # Host (PC) compiler for the test suite (NOT the AVR cross-compiler).
 HOSTCC      ?= cc
 GCOV        ?= gcov
+AWK         ?= awk
 export PROJECT_MAKE := $(MAKE_COMMAND)
 # -Wconversion catches implicit integer-narrowing/sign-change footguns in the
 # debounce arithmetic. The host model and the firmware share the same integer
@@ -704,10 +705,21 @@ pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v)))
 	}; \
 	trap cleanup_pic_images 0 1 2 15; \
 	export PIC_RECIPE_PID=$$$$; \
+	LC_ALL=C; export LC_ALL; \
+	budget="$(PIC_FLASH_WORDS)"; \
+	case "$$budget" in \
+		''|*[!0-9]*) echo "FAIL: PIC_FLASH_WORDS must be a positive decimal integer"; exit 1 ;; \
+	esac; \
+	while [ "$${#budget}" -gt 1 ] && [ "$${budget#0}" != "$$budget" ]; do \
+		budget=$${budget#0}; \
+	done; \
+	if [ "$$budget" = 0 ]; then \
+		echo "FAIL: PIC_FLASH_WORDS must be a positive decimal integer"; exit 1; \
+	fi; \
 	if [ "$(words $(strip $(VARIANTS)))" -eq 0 ]; then \
 		echo "FAIL: VARIANTS is empty; no PIC images requested"; exit 2; \
 	fi; \
-	echo "=== PIC10F322 build + flash-budget ($(PIC_FLASH_WORDS) words) ==="; \
+	echo "=== PIC10F322 build + flash-budget ($$budget words) ==="; \
 	fail=0; \
 	for v in $(VARIANTS); do \
 		case $$v in \
@@ -738,11 +750,40 @@ pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v)))
 			echo "FAIL: $$v: could not parse program-word count from XC8 output:"; \
 			printf '%s\n' "$$out"; rm -f "$$hex"; fail=1; continue; \
 		fi; \
-		pct=`awk -v u=$$dec -v t=$(PIC_FLASH_WORDS) 'BEGIN{printf "%.1f", u*100/t}'`; \
-		if [ $$dec -gt $(PIC_FLASH_WORDS) ]; then \
-			echo "FAIL: $$v uses $$dec words ($${pct}%) -- exceeds $(PIC_FLASH_WORDS)"; rm -f "$$hex"; fail=1; \
+		while [ "$${#dec}" -gt 1 ] && [ "$${dec#0}" != "$$dec" ]; do \
+			dec=$${dec#0}; \
+		done; \
+		over_budget=0; \
+		if [ "$${#dec}" -gt "$${#budget}" ]; then \
+			over_budget=1; \
+		elif [ "$${#dec}" -eq "$${#budget}" ]; then \
+			cmp=`$(AWK) -v a="x$$dec" -v b="x$$budget" \
+				'BEGIN { print (a > b ? "gt" : "le") }'`; cmp_rc=$$?; \
+			if [ $$cmp_rc -ne 0 ]; then \
+				echo "FAIL: $$v: could not compare program usage with flash budget"; \
+				rm -f "$$hex"; fail=1; continue; \
+			fi; \
+			case "$$cmp" in \
+				gt) over_budget=1 ;; \
+				le) ;; \
+				*) echo "FAIL: $$v: invalid flash-budget comparison result"; \
+					rm -f "$$hex"; fail=1; continue ;; \
+			esac; \
+		fi; \
+		pct=`$(AWK) -v u="$$dec" -v t="$$budget" \
+			'BEGIN { printf "%.1f", u * 100 / t }'`; pct_rc=$$?; \
+		pct_integer=$${pct%.*}; pct_fraction=$${pct#*.}; pct_valid=1; \
+		[ "$$pct_integer" != "$$pct" ] || pct_valid=0; \
+		case "$$pct_integer" in ''|*[!0-9]*) pct_valid=0 ;; esac; \
+		case "$$pct_fraction" in [0-9]) ;; *) pct_valid=0 ;; esac; \
+		if [ $$pct_rc -ne 0 ] || [ $$pct_valid -ne 1 ]; then \
+			echo "FAIL: $$v: could not calculate flash usage percentage"; \
+			rm -f "$$hex"; fail=1; continue; \
+		fi; \
+		if [ $$over_budget -eq 1 ]; then \
+			echo "FAIL: $$v uses $$dec words ($${pct}%) -- exceeds $$budget"; rm -f "$$hex"; fail=1; \
 		else \
-			echo "OK:   $$v -> $$hex : $$dec words ($${pct}%) of $(PIC_FLASH_WORDS)"; \
+			echo "OK:   $$v -> $$hex : $$dec words ($${pct}%) of $$budget"; \
 		fi; \
 	done; \
 	[ $$fail -ne 0 ] || pic_complete=1; \

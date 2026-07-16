@@ -55,6 +55,9 @@ file is the human-readable summary of *what changed*.
   explicitly rejects the wrong unified x4053 BYPASS polarity.
 
 ### Fixed
+- PIC flash-budget acceptance now requires a positive decimal budget, compares
+  arbitrarily long usage counts without fixed-width shell arithmetic, and
+  rejects failed comparisons or missing percentage results.
 - Release reproduction now rejects committed-as-fresh and duplicate fresh
   directories after physical-path resolution, then verifies `SHA256SUMS`,
   committed images, and fresh images from one immutable set of private snapshots.
