@@ -29,6 +29,7 @@ test/
   test_ci_local_routing.sh  shared: local-CI skip-option command routing
   test_flash_budget.sh      shared: fail-closed flash measurement checks
   test_gpsim_wrappers.sh    shared: fail-closed gpsim wrapper checks
+  test_klee_build.sh        shared: linked KLEE bitcode build regression
   test_make_serialization.sh shared: worktree Make/release lock regression
   test_pic_build.sh         shared: fail-closed PIC image-generation checks
   test_release_images.sh    shared: isolated exact release artifact verification
@@ -43,7 +44,7 @@ test/
   formal/  MCU-independent formal verification (proofs / exhaustive enumeration).
            test_cbmc.c          CBMC harnesses        (make test-cbmc)
            test_model_check.c   exhaustive BFS model  (make test-model-check)
-           test_symbolic.c      KLEE / host enumerator (make test-symbolic)
+           test_symbolic.c      KLEE / host enumerator (make test-symbolic[-klee])
 
   avr/     ATtiny-specific tests: the real firmware ELF in simavr, plus fuses.
            test_sim.c           simavr integration    (make test-sim-<variant>)
@@ -75,6 +76,11 @@ Build artifacts (compiled binaries, `*.bc`) are written next to their sources in
 each subdirectory and are git-ignored; see `.gitignore`. KLEE output directories
 are produced at the `test/` root. The `-fstack-usage` `stack_*` evidence uses a
 private temporary directory and is removed after each gate run.
+
+`make test-symbolic-klee` compiles `test_symbolic.c` and the shipping
+`src/bypass_pure.c` into separate LLVM bitcode modules, links them with the LLVM
+version matching KLEE, and executes only the linked module. The host-only
+`test-klee-build` regression pins that two-module flow without requiring KLEE.
 
 
 ## PIC10F322 target validation layers

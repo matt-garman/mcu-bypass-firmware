@@ -204,10 +204,10 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
 
   KLEE:         not installed; test/formal/test_symbolic.c compiles and runs under
                 the host gcc as an exhaustive enumerator when USE_KLEE is not
-                defined.  To use with KLEE, build KLEE from source against
-                LLVM 18 and compile test_symbolic.c with:
-                  clang -emit-llvm -DUSE_KLEE ... -o test_symbolic.bc
-                  klee test_symbolic.bc
+                defined.  `make test-symbolic-klee` requires KLEE plus matching
+                clang/llvm-link versions. It compiles test_symbolic.c and the
+                shipping src/bypass_pure.c separately, links both bitcode modules,
+                and executes the linked module so core calls are fully defined.
 
 == Reproducing the environment (Ubuntu 24.04)
 

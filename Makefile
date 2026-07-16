@@ -452,7 +452,7 @@ FORCE:
         test-host test-sim test-sim-secondary \
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
         test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle \
-        test-attiny202-build test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers \
+        test-attiny202-build test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build \
         test-pic-build test-release-images test-build-serialization \
         test-make-lock-probe test-make-safe-parallel-probe \
         _test-make-safe-parallel-probe-run _test-make-safe-parallel-probe-a \
@@ -1858,7 +1858,8 @@ clean:
 		test/host/test_logic_host test/pic/test_config_pic test/pic/test_soak_pic \
 		test/pic/test_fault_pic test/pic/test_lockstep_pic test/pic/test_io_pic \
 		test/formal/test_model_check test/formal/test_symbolic test/avr/test_fuses \
-		test/formal/test_symbolic.bc \
+		test/formal/test_symbolic.bc test/formal/bypass_pure_klee.bc \
+		test/formal/test_symbolic_klee.bc \
 		test/stack_*.o test/stack_*.su \
 		test/.toolchain.sig $(FW_BASE).plist
 	rm -f *.dump *.ctu-info cppcheck-addon-ctu-file-list*
@@ -1917,7 +1918,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-pic-build test-release-images test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1929,7 +1930,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-pic-build test-release-images test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -2028,6 +2029,10 @@ test-build-serialization:
 test-ci-local-routing:
 	./test/test_ci_local_routing.sh
 
+# Fake-tool proof that KLEE receives linked harness + shipping pure-core bitcode.
+test-klee-build:
+	./test/test_klee_build.sh
+
 _test-mutation-policy-probe:
 	@bash -c '. ./test/mutation_policy.sh; resolve_mutation_allow_skip'
 
@@ -2082,25 +2087,41 @@ test/formal/test_symbolic: test/formal/test_symbolic.c test/model_step.h test/by
 	$(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) $(PURE_HOST_CFLAGS) -Itest $< $(PURE_HOST_SRC) -o $@
 
 # Optional: run the SAME single-step properties under KLEE symbolic execution
-# (only if KLEE is installed). KLEE explores the symbolic input domain and
-# proves the assertions with an SMT solver rather than by enumeration.
+# (only if KLEE and a matching clang/llvm-link are installed). KLEE explores the
+# symbolic input domain and proves the assertions with an SMT solver rather than
+# by enumeration. Compile the harness and shipping pure core separately, then
+# link both modules so step() cannot resolve to undefined external functions.
 .PHONY: test-symbolic-klee
 # Absolute paths to the brew-installed KLEE and its matching LLVM clang. Using
 # absolute defaults so the target works even when `make`'s recipe shell does not
 # have brew's shellenv on PATH (an interactive shell may, /bin/sh may not).
 # Using llvm@16's clang (KLEE's own LLVM) to emit the bitcode avoids the
 # host/module target-triple mismatch warning seen with /usr/bin/clang.
-KLEE        ?= /home/linuxbrew/.linuxbrew/bin/klee
-KLEE_CLANG  ?= /home/linuxbrew/.linuxbrew/opt/llvm@16/bin/clang
-KLEE_INC    := /home/linuxbrew/.linuxbrew/Cellar/klee/3.2_3/include
+KLEE          ?= /home/linuxbrew/.linuxbrew/bin/klee
+KLEE_CLANG    ?= /home/linuxbrew/.linuxbrew/opt/llvm@16/bin/clang
+KLEE_LLVMLINK ?= /home/linuxbrew/.linuxbrew/opt/llvm@16/bin/llvm-link
+KLEE_INC      ?= /home/linuxbrew/.linuxbrew/Cellar/klee/3.2_3/include
 test-symbolic-klee:
-	@if command -v $(KLEE) >/dev/null 2>&1 && command -v $(KLEE_CLANG) >/dev/null 2>&1; then \
+	@rm -f test/formal/test_symbolic.bc test/formal/bypass_pure_klee.bc \
+		test/formal/test_symbolic_klee.bc && \
+	rm -rf test/klee-out-* test/klee-last && \
+	if command -v $(KLEE) >/dev/null 2>&1 && command -v $(KLEE_CLANG) >/dev/null 2>&1 \
+			&& command -v $(KLEE_LLVMLINK) >/dev/null 2>&1; then \
+		klee_cmd=`command -v $(KLEE)`; repo_root=`pwd -P`; \
+		case "$$klee_cmd" in /*) ;; *) klee_cmd="$$repo_root/$$klee_cmd" ;; esac; \
 		$(KLEE_CLANG) -DUSE_KLEE -I$(KLEE_INC) -I$(SIMAVR_INC) -Itest -emit-llvm -c -g -O0 \
-			test/formal/test_symbolic.c -o test/formal/test_symbolic.bc && \
-		$(KLEE) --exit-on-error test/formal/test_symbolic.bc; \
+			$(PURE_HOST_CFLAGS) test/formal/test_symbolic.c \
+			-o test/formal/test_symbolic.bc && \
+		$(KLEE_CLANG) -DUSE_KLEE -I$(KLEE_INC) -I$(SIMAVR_INC) -Itest -emit-llvm -c -g -O0 \
+			$(PURE_HOST_CFLAGS) $(PURE_HOST_SRC) \
+			-o test/formal/bypass_pure_klee.bc && \
+		$(KLEE_LLVMLINK) test/formal/test_symbolic.bc test/formal/bypass_pure_klee.bc \
+			-o test/formal/test_symbolic_klee.bc && \
+		cd test && "$$klee_cmd" --exit-on-error formal/test_symbolic_klee.bc; \
 	else \
-		echo "KLEE or its clang not installed; the exhaustive 'test-symbolic' target"; \
-		echo "covers the same input domain. Install klee to enable SMT-backed proof."; \
+		echo "KLEE (or its matching clang/llvm-link) not installed; the exhaustive"; \
+		echo "'test-symbolic' target covers the same input domain. Install klee +"; \
+		echo "a matching llvm to enable SMT-backed symbolic execution."; \
 	fi
 
 # Optional: CBMC bounded-model-checking of the REAL pure core (bypass_pure.c).
@@ -2804,6 +2825,7 @@ help:
 	@echo "  test-avr-build-rebuild  classic AVR stale/config/partial-output checks"
 	@echo "  test-gpsim-wrappers  fail-closed gpsim process-status checks"
 	@echo "  test-ci-local-routing  local-CI skip-option command routing checks"
+	@echo "  test-klee-build  linked harness/pure-core KLEE bitcode regression"
 	@echo "  test-pic-build  PIC image-generation and Intel-HEX validation checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
 	@echo "  test-build-serialization  worktree Make/release lock regression"

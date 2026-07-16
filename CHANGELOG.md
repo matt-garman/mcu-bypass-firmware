@@ -55,6 +55,9 @@ file is the human-readable summary of *what changed*.
   explicitly rejects the wrong unified x4053 BYPASS polarity.
 
 ### Fixed
+- The optional KLEE target now compiles and links the symbolic harness with the
+  shipping `src/bypass_pure.c` bitcode before execution, preventing unresolved
+  core calls from masquerading as a proof of the real implementation.
 - `scripts/ci-local.sh --skip-pic` now permits unavailable PIC mutants to skip
   during push-mode `test-long` while retaining `STRICT_TOOLS=1` for host/AVR
   gates; full local-CI runs explicitly keep mutation fail-closed.

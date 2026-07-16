@@ -3,6 +3,8 @@ host/test_logic_host
 formal/test_model_check
 formal/test_symbolic
 formal/test_symbolic.bc
+formal/bypass_pure_klee.bc
+formal/test_symbolic_klee.bc
 avr/test_fuses
 avr/test_soak_*5
 pic/test_config_pic
