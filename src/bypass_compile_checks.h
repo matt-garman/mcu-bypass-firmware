@@ -38,4 +38,4 @@ static_assert(PRESSED_THRESH > 0U,                   "PRESSED_THRESH <= 0");
 
 
 #endif // BYPASS_COMPILE_CHECKS_H__
- 
+

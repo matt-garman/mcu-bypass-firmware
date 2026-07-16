@@ -6,7 +6,7 @@
 
 
 //////////////////////////////////////////////////////////////////////////////
-// Config specific to AVR Classic 
+// Config specific to AVR Classic
 //////////////////////////////////////////////////////////////////////////////
 
 // This block is AVR-specific: the tinyx5 detection, the Timer0 1ms CTC
@@ -88,7 +88,7 @@
 #endif // __AVR__
 
 
-// number of HIGH PB0/footswitch pin reads to be considered 
+// number of HIGH PB0/footswitch pin reads to be considered
 // release-debounced, i.e. the "lock-out" period
 #define RELEASE_THRESH (25U)
 

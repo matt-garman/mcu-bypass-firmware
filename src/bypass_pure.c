@@ -55,7 +55,7 @@ debounce_step_result_t debounce_step(debounce_context_t const ctx) {
                     res.program_state = RELEASE_DEBOUNCE_WAIT;
                     res.toggled = true;
                     if (BYPASS == ctx.effect_state)
-                    { 
+                    {
                         res.effect_state = ENGAGED;
                     } else { // ENGAGED == res.ctx.effect_state
                         res.effect_state = BYPASS;

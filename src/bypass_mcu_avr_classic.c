@@ -31,7 +31,7 @@
 // DWEN      | 1 (disabled)                              | debugWIRE not needed in production; consumes PB5
 //
 // avrdude fuse targets: -U lfuse:w:0x4a:m -U hfuse:w:0xf9:m
-// 
+//
 // Note: useful fuse tool here: https://www.engbedded.com/fusecalc/
 //
 
@@ -153,7 +153,7 @@ static uint8_t hw_critical_sfrs_intact(void) {
     uint8_t ocr0a  = OCR0A;
     uint8_t timsk  = TIMSK0;
 
-    return 
+    return
         (CLKPR_EXPECTED  == clkpr)  &&
         (WDTCR_EXPECTED  == wdtcr)  &&
         (TCCR0A_EXPECTED == tccr0a) &&

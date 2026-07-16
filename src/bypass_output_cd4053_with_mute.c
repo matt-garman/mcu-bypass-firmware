@@ -27,10 +27,10 @@ uint8_t hw_is_sanity_check_failed(effect_state_t const effect_state) {
     else if (ENGAGED == effect_state) {
         // LED and both CD4053 controls must be high
         intact = hw_output_state_intact(output_mask, output_mask);
-    }   
+    }
     else {
         intact = 0U; // invalid logical state fails closed
-    }   
+    }
 
     return (0U == intact);
 }
