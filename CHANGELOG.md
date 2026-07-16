@@ -55,6 +55,9 @@ file is the human-readable summary of *what changed*.
   explicitly rejects the wrong unified x4053 BYPASS polarity.
 
 ### Fixed
+- `scripts/ci-local.sh --skip-pic` now permits unavailable PIC mutants to skip
+  during push-mode `test-long` while retaining `STRICT_TOOLS=1` for host/AVR
+  gates; full local-CI runs explicitly keep mutation fail-closed.
 - Missing CBMC or cppcheck now fails `test-cbmc` and `analyze-cppcheck` under
   `STRICT_TOOLS=1` instead of silently turning required CI analysis into a skip.
 - Native Classic AVR and PIC soaks now require the liveness interval to fit

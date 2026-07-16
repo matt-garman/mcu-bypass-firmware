@@ -20,11 +20,13 @@ test/
   misra.json                shared: cppcheck MISRA addon config
   misra_rules.txt           shared: MISRA rule paraphrases
   misra_suppressions.txt    shared: documented per-file MISRA deviations
+  mutation_policy.sh        shared: strict/partial mutation policy resolver
   run_mutation_tests.sh     shared: mutation-testing driver (make test-mutation)
   soak_timing_config.h      shared: native soak timing bounds
   check_flash_budget.sh     shared: exact flash-budget checker
   test_attiny202_build.sh   shared: fail-closed AVR-XT build checks
   test_avr_build_rebuild.sh shared: classic AVR rebuild/partial-output checks
+  test_ci_local_routing.sh  shared: local-CI skip-option command routing
   test_flash_budget.sh      shared: fail-closed flash measurement checks
   test_gpsim_wrappers.sh    shared: fail-closed gpsim wrapper checks
   test_make_serialization.sh shared: worktree Make/release lock regression
@@ -129,8 +131,10 @@ variant's spare-RA2 negative control are all fail-closed test invariants.
 `make test-mutation` includes PIC mutants whose kill targets need XC8, gpsim, and
 libgpsim. A local host without those tools may run an explicitly partial mutation
 suite with `MUTATION_ALLOW_SKIP=1`; that is the non-strict default so AVR-only
-development stays practical. In strict/full-tool contexts, including
-`STRICT_TOOLS=1` or `MUTATION_ALLOW_SKIP=0`, skipped PIC mutants fail the run.
+development stays practical. `STRICT_TOOLS=1` changes the default to fail closed,
+and full-tool CI also pins `MUTATION_ALLOW_SKIP=0`. An explicit
+`MUTATION_ALLOW_SKIP` value takes precedence: `ci-local.sh --skip-pic` retains
+strict host/AVR gates but deliberately passes `1` for its partial mutation run.
 
 The PIC mutation set includes target-level faults for the new coverage: collapsed
 TMR2IF cadence, output-direction guard removal, output-latch mask narrowing,

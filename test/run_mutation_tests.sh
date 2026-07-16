@@ -37,18 +37,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJ_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Missing PIC tools normally make the PIC mutation subset an explicit partial
-# local run. In strict/full-tool contexts, skipped PIC mutants are failures.
-if [ -z "${MUTATION_ALLOW_SKIP+x}" ]; then
-    if [ -n "${STRICT_TOOLS:-}" ]; then
-        MUTATION_ALLOW_SKIP=0
-    else
-        MUTATION_ALLOW_SKIP=1
-    fi
-fi
-case "$MUTATION_ALLOW_SKIP" in
-    0|1) ;;
-    *) echo "ERROR: MUTATION_ALLOW_SKIP must be 0 or 1 (got '$MUTATION_ALLOW_SKIP')" >&2; exit 2 ;;
-esac
+# local run. Strict/full-tool contexts default to failure unless the caller
+# explicitly authorizes a partial mutation run.
+source "$SCRIPT_DIR/mutation_policy.sh"
+MUTATION_ALLOW_SKIP=$(resolve_mutation_allow_skip)
+policy_rc=$?
+[ "$policy_rc" -eq 0 ] || exit "$policy_rc"
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.

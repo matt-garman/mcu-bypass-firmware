@@ -47,7 +47,9 @@
 #     --no-clean     skip the initial `make clean` (faster, but not a true
 #                    clean-checkout reproduction of CI)
 #     --skip-pic     skip the PIC (XC8/gpsim) job -- ONLY if you lack that
-#                    toolchain; this no longer mirrors CI, so it warns loudly
+#                    toolchain; push mode still runs host/AVR mutation strictly
+#                    but permits unavailable PIC mutants to be reported skipped
+#                    instead of failing; this no longer mirrors CI, so it warns
 #     --skip-attiny202  skip the ATtiny202 (DFP/yasimavr) job -- ONLY if you lack
 #                    that toolchain; this no longer mirrors CI, so it warns loudly
 #     -h | --help    this help
@@ -254,7 +256,16 @@ fi
 if [ "$PR_MODE" -eq 1 ]; then
 	run_step "verify job: make test" make test
 else
-	run_step "verify + stress: make test-long" make test-long
+	# test-long contains mutation testing. Keep every host/AVR optional gate under
+	# STRICT_TOOLS=1, but honor --skip-pic by explicitly allowing only the
+	# unavailable PIC mutation subset to be reported as skipped.
+	if [ "$SKIP_PIC" -eq 1 ]; then
+		run_step "verify + stress: make test-long (PIC mutations may skip)" \
+			make test-long MUTATION_ALLOW_SKIP=1
+	else
+		run_step "verify + stress: make test-long" \
+			make test-long MUTATION_ALLOW_SKIP=0
+	fi
 fi
 
 # ----------------------------------------------------------------------------
