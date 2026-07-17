@@ -161,7 +161,7 @@ and full-tool CI also pins `MUTATION_ALLOW_SKIP=0`. An explicit
 strict host/AVR gates but deliberately passes `1` for its partial mutation run.
 
 The PIC mutation set includes target-level faults for the new coverage: collapsed
-TMR2IF cadence, output-direction guard removal, output-latch mask narrowing,
+TMR2IF cadence, exact-TRISA predicate removal, output-latch mask narrowing,
 exact WPUA pull-up state, ANSELA mask narrowing, muted-CD4053 startup
 reassertion, mute-window shortening, and relay pulse shortening.
 
