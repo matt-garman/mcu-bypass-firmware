@@ -34,6 +34,8 @@ void hw_configure_output_pins(uint8_t const output_mask);
 //   required_output_mask is still configured as an output and the complete
 //   output latch matches expected_high_mask
 // - consumed by the per-variant sanity check
+// - implementations additionally require the complete direction configuration
+//   to match initialization
 uint8_t hw_output_state_intact(
         uint8_t const required_output_mask,
         uint8_t const expected_high_mask);

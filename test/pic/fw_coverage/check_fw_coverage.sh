@@ -31,9 +31,9 @@ for gcov_file in "$@"; do
         src=$(printf '%s' "$rec" | cut -d: -f3- | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
         if [ "$base" = "bypass_mcu_pic10f322.c.gcov" ]; then
             case "$lineno:$src" in
-                "154:__attribute__((noreturn)) static void hw_force_wdt_reset(void) {"|\
-                "155:INTCONbits.GIE = 0;"|\
-                "369:hw_force_wdt_reset();")
+                "164:__attribute__((noreturn)) static void hw_force_wdt_reset(void) {"|\
+                "165:INTCONbits.GIE = 0;"|\
+                "379:hw_force_wdt_reset();")
                     allowed=$((allowed + 1))
                     continue
                     ;;
@@ -44,8 +44,8 @@ for gcov_file in "$@"; do
     done < <(grep -E '^[[:space:]]*#####:' "$gcov_file")
 
     if [ "$base" = "bypass_mcu_pic10f322.c.gcov" ]; then
-        if ! grep -Eq '^[[:space:]]*[1-9][0-9]*:[[:space:]]*345:[[:space:]]*hw_force_wdt_reset\(\);[[:space:]]*$' "$gcov_file"; then
-            echo "  FAIL: live sanity-gate reset call at source line 345 is not covered"
+        if ! grep -Eq '^[[:space:]]*[1-9][0-9]*:[[:space:]]*355:[[:space:]]*hw_force_wdt_reset\(\);[[:space:]]*$' "$gcov_file"; then
+            echo "  FAIL: live sanity-gate reset call at source line 355 is not covered"
             file_bad=$((file_bad + 1))
         fi
     fi

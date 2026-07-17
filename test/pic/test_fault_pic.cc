@@ -6,7 +6,7 @@
 // gate + hw_force_wdt_reset() promise.
 //
 // COVERAGE -- every location the gate guards:
-//   * output SFRs    TRISA (required directions) + LATA (settled output state)
+//   * output SFRs    TRISA (exact directions) + LATA (settled output state)
 //   * config SFRs    OSCCON.IRCF / WDTCON.WDTPS / PR2 / T2CON / ANSELA (hw_critical_sfrs_intact)
 //   * pull-up SFRs   WPUA (exactly RA3 latched, RA0..RA2 clear) +
 //                    OPTION_REG.nWPUEN                         (hw_footswitch_pullup_intact)
@@ -37,9 +37,10 @@
 //      note below), which would otherwise pass silently.
 // A no-injection CONTROL case runs first and asserts delta == 0: a quiescent
 // device must NOT reset in a full window, proving the window is not catching
-// phantom resets and the gate does not fire spuriously. The simple variant also
-// has one write-back-verified negative injection: changing spare RA2 to an input
-// must produce zero resets because RA2 is outside that variant's runtime guard.
+// phantom resets and the gate does not fire spuriously. Every RA0..RA2
+// direction flip is a guarded fault for every variant: the exact-TRISA
+// predicate covers the simple variant's spare RA2, which its required-subset
+// mask alone cannot see.
 //
 // CORRUPTION VALUES are chosen so the main loop keeps running and the GATE is
 // the sole reset path (confound analysis, per case, below). OSCCON.IRCF and
@@ -167,11 +168,7 @@ static NullBuf g_nullbuf;
 // variant-sensitive program address. PIC10F322 has 512 program words.
 #define PROGRAM_WORDS 0x200u
 #define CLRWDT_CALIB_MS 8u
-#if defined(CD4053_SIMPLE)
-#  define EXPECTED_CHECKS 26u
-#else
-#  define EXPECTED_CHECKS 25u
-#endif
+#define EXPECTED_CHECKS 25u
 
 // ---- Sim globals ------------------------------------------------------------
 static pic_processor   *g_cpu      = nullptr;
@@ -310,8 +307,9 @@ static bool advance_to_loop_clrwdt(void) {
 
 // ---- One injection case -----------------------------------------------------
 // absolute=true writes `val`; absolute=false writes (current ^ val), i.e. an
-// SEU bit-flip of the bits in `val`. expected_resets is one for guarded faults
-// and zero for the simple variant's spare-RA2 negative control.
+// SEU bit-flip of the bits in `val`. expected_resets is one for guarded faults;
+// zero (a restored negative control) is currently unused because the
+// exact-TRISA guard covers every output direction bit.
 static void inject_case(const char *label, unsigned addr, const char *token,
                         bool absolute, unsigned val, unsigned expected_resets,
                         const char *note) {
@@ -485,21 +483,16 @@ int main() {
     }
     control_case();
 
-    // Output directions (hw_is_sanity_check_failed). RA0/RA1 are required for
-    // every variant. RA2 is intentionally a negative control for the simple
-    // variant, whose runtime sanity mask covers only its load-bearing RA0/RA1;
-    // mute and relay require all three output directions.
+    // Output directions (hw_is_sanity_check_failed). The exact-TRISA predicate
+    // requires the complete direction state to match initialization (0x08), so
+    // every variant detects any RA0..RA2 direction flip -- including the simple
+    // variant's spare RA2, which its required-subset mask alone cannot see.
     inject_case("TRISA.RA0", TRISA_ADDR, "tris", false, 0x01, 1,
                 "RA0 changed from output to input");
     inject_case("TRISA.RA1", TRISA_ADDR, "tris", false, 0x02, 1,
                 "RA1 changed from output to input");
-#if defined(CD4053_SIMPLE)
-    inject_case("TRISA.RA2", TRISA_ADDR, "tris", false, 0x04, 0,
-                "spare RA2 input is outside this variant's runtime guard");
-#else
     inject_case("TRISA.RA2", TRISA_ADDR, "tris", false, 0x04, 1,
                 "RA2 changed from output to input");
-#endif
 
     // Output latches (hw_output_state_intact). The device is settled in BYPASS,
     // where every RA0..RA2 latch must be low. Relay RA1/RA2 faults model a coil

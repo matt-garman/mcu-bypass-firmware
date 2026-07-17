@@ -59,10 +59,10 @@ static void test_predicates(void) {
     sfr_clean(); TRISA |= 0x04u;
     CHECK(fwp_output_state_intact(0x04u, 0x00u) == 0,
           "RA2 input must fail direction check");
-#if !defined(CD4053_SIMPLE)
+    CHECK(fwp_output_state_intact(0x03u, 0x00u) == 0,
+          "RA2 input must fail the exact check outside the required subset");
     CHECK(fwp_sanity_failed(BYPASS) != 0,
-          "RA2 input must fail this variant's output sanity");
-#endif
+          "RA2 input must fail every variant's output sanity");
 
     sfr_clean(); LATA = 0x01u;
     CHECK(fwp_sanity_failed(BYPASS) != 0, "RA0 high must fail bypass sanity");
@@ -120,11 +120,7 @@ static void test_faults(void) {
     expect_reset(FWI_PULLUP_GLOBAL_OFF, "global pull-up disable");
     expect_reset(FWI_LED_PIN_TO_INPUT, "RA0 direction fault");
     expect_reset(FWI_CTL1_PIN_TO_INPUT, "RA1 direction fault");
-#if defined(CD4053_SIMPLE)
-    expect_no_reset(FWI_RA2_PIN_TO_INPUT, "simple-variant spare RA2 direction fault");
-#else
     expect_reset(FWI_RA2_PIN_TO_INPUT, "RA2 direction fault");
-#endif
     expect_reset(FWI_LATA_RA0_HIGH, "RA0 output-latch fault");
     expect_reset(FWI_LATA_RA1_HIGH, "RA1 output-latch fault");
     expect_reset(FWI_LATA_RA2_HIGH, "RA2 output-latch fault");

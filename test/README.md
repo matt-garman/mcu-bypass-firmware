@@ -144,9 +144,10 @@ deliberately adds the full active variant block to every liveness window.
 
 `pic-test-fault` first requires exact startup `WPUA=0x08` and `TRISA=0x08`, then
 injects every guarded direction, settled-output-latch, SFR, and SRAM fault at the
-behaviorally identified main-loop `CLRWDT`. Register identity, injection
-readback, the expected per-variant check count, and restoration after the simple
-variant's spare-RA2 negative control are all fail-closed test invariants.
+behaviorally identified main-loop `CLRWDT`, including every RA0..RA2 direction
+flip (the exact-TRISA gate covers the simple variant's spare RA2). Register
+identity, injection readback, and the expected per-variant check count are all
+fail-closed test invariants.
 
 
 ## Mutation testing and skipped PIC tools

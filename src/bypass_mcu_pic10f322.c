@@ -94,17 +94,27 @@ void hw_configure_output_pins(uint8_t const output_mask) {
 }
 
 
-// sanity-check utility: return non-zero ("true") IFF every pin in
+// sanity-check utility: return non-zero ("true") IFF the complete direction
+// configuration still matches initialization, every pin in
 // required_output_mask is still configured as an output (its TRISA direction
-// bit is still 0) and the complete output latch matches the expected state.
+// bit is still 0), and the complete output latch matches the expected state.
+//
+// Exact TRISA protects RA0..RA2 as outputs (including the spare low-driven
+// pin on the simple-CD4053 variant) and RA3 as the footswitch input. RA3 is
+// input-only in silicon (its TRISA bit always reads 1), so the expected value
+// is the four implemented direction bits minus the configured outputs.
 uint8_t hw_output_state_intact(
         uint8_t const required_output_mask,
         uint8_t const expected_high_mask) {
+
+    uint8_t expected_direction_mask =
+        0x0FU ^ BYPASS_OUTPUT_DDR_MASK; // = 0x08: only RA3 remains an input
     uint8_t actual_direction_mask = (uint8_t)(TRISA & 0x0FU);
     uint8_t actual_high_mask =
         (uint8_t)(LATA & (uint8_t)BYPASS_OUTPUT_DDR_MASK);
 
     return
+        (actual_direction_mask == expected_direction_mask) &&
         (0U == (actual_direction_mask & required_output_mask)) &&
         (actual_high_mask == expected_high_mask);
 }

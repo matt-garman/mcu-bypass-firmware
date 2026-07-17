@@ -41,6 +41,11 @@ file is the human-readable summary of *what changed*.
 - Classic AVR and ATtiny202 sanity gates now require the complete GPIO direction
   state configured at startup, detecting footswitch pins becoming strong outputs
   and intended low-driven spare outputs becoming inputs.
+- The PIC10F322 sanity gate now requires the complete TRISA direction state
+  configured at startup (exact `0x08`), closing the gap where a spare RA2
+  direction upset on the simple-CD4053 variant fell outside the required-subset
+  check. Fault injection, shipping-source coverage, and mutation coverage now
+  exercise the exact predicate on every variant.
 - Routine push, scheduled, and manually dispatched CI now runs mutation testing
   in strict mode on the full PIC-toolchain runner; pull requests retain the
   faster non-mutation path.
