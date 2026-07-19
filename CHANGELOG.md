@@ -11,7 +11,7 @@ Per-release provenance (source commit, pinned toolchain, image hashes, flash
 usage, and validation evidence) lives in `release/<version>/MANIFEST.md`; this
 file is the human-readable summary of *what changed*.
 
-## [Unreleased]
+## [0.9.5] - 2026-07-18
 
 ### Added
 - Fail-closed ATtiny202 production-fuse verification for `WDTCFG`, `BODCFG`,
