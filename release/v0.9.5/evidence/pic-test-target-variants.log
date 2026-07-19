@@ -1,0 +1,231 @@
+===================== PIC TARGET VARIANT cd4053 =====================
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053 -> build_pic/bypass_cd4053_pic10f322.hex : 445 words (86.9%) of 512
+OK:   mute -> build_pic/bypass_mute_pic10f322.hex : 471 words (92.0%) of 512
+OK:   relay -> build_pic/bypass_relay_pic10f322.hex : 473 words (92.4%) of 512
+--- PIC fault-inject: variant=cd4053 proc=p10f322 (ctx_ layout verified: 3 bytes) ---
+FAULT-INJECT START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic/bypass_cd4053_pic10f322.hex proc=p10f322 FOSC=2000000 window=2000 ms
+  (NB: gpsim WDT@WDTPS=0x08 ~1.057s -- recovery reset, not 256ms silicon)
+  PASS: startup WPUA is RA3-only (0x08)
+  PASS: startup TRISA is RA3 input, RA0..RA2 outputs (0x08)
+  loop CLRWDT identified at 0x04f (8 hits in 8 ms)
+  control (no injection)
+    PASS: quiescent device did not reset
+  inject TRISA.RA0          @0x006: 0x08 -> 0x09  (RA0 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+  inject TRISA.RA1          @0x006: 0x08 -> 0x0a  (RA1 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+  inject TRISA.RA2          @0x006: 0x08 -> 0x0c  (RA2 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+  inject LATA.RA0           @0x007: 0x00 -> 0x01  (RA0 LED latch changed from settled low to high)
+    PASS: observed exactly 1 WDT reset
+  inject LATA.RA1           @0x007: 0x00 -> 0x02  (RA1 control/reset-coil latch changed from low to high)
+    PASS: observed exactly 1 WDT reset
+  inject LATA.RA2           @0x007: 0x00 -> 0x04  (RA2 control/set-coil/spare latch changed from low to high)
+    PASS: observed exactly 1 WDT reset
+  inject OSCCON.IRCF        @0x010: 0x49 -> 0x59  (IRCF 0b100->0b101: 2MHz->4MHz clock skew)
+    PASS: observed exactly 1 WDT reset
+  inject WDTCON.WDTPS       @0x030: 0x10 -> 0x00  (WDTPS 0b01000->0b00000: 1:8192->1:32, WDT miscalibrated (else silent))
+    PASS: observed exactly 1 WDT reset
+  inject PR2                @0x012: 0x7c -> 0x63  (tick period 124->99: 1ms tick skewed)
+    PASS: observed exactly 1 WDT reset
+  inject T2CON              @0x013: 0x05 -> 0x04  (T2CKPS 1:4->1:1, TMR2ON preserved: timer cfg skew)
+    PASS: observed exactly 1 WDT reset
+  inject ANSELA.RA0         @0x008: 0x00 -> 0x01  (ANSA0=1: RA0 (LED) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+  inject ANSELA.RA1         @0x008: 0x00 -> 0x02  (ANSA1=1: RA1 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+  inject ANSELA.RA2         @0x008: 0x00 -> 0x04  (ANSA2=1: RA2 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+  inject WPUA.RA3           @0x009: 0x08 -> 0x00  (clear RA3 pull-up latch: footswitch weak pull-up disabled)
+    PASS: observed exactly 1 WDT reset
+  inject WPUA.RA0           @0x009: 0x08 -> 0x09  (set RA0 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+  inject WPUA.RA1           @0x009: 0x08 -> 0x0a  (set RA1 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+  inject WPUA.RA2           @0x009: 0x08 -> 0x0c  (set RA2 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+  inject OPTION.nWPUEN      @0x00e: 0x7f -> 0xff  (set nWPUEN: global weak pull-ups disabled)
+    PASS: observed exactly 1 WDT reset
+  inject ctx.program_state  @0x05d: 0x00 -> 0x02  (0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault))
+    PASS: observed exactly 1 WDT reset
+  inject ctx.effect_state   @0x05e: 0x00 -> 0x02  (->2: > ENGAGED (gate-only))
+    PASS: observed exactly 1 WDT reset
+  inject ctx.debounce_counter @0x05f: 0x00 -> 0xff  (->255: > RELEASE_THRESH (gate-only))
+    PASS: observed exactly 1 WDT reset
+
+FAULT-INJECT PASS: 25 checks, 0 failures
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053 -> build_pic/bypass_cd4053_pic10f322.hex : 445 words (86.9%) of 512
+OK:   mute -> build_pic/bypass_mute_pic10f322.hex : 471 words (92.0%) of 512
+OK:   relay -> build_pic/bypass_relay_pic10f322.hex : 473 words (92.4%) of 512
+--- PIC lock-step: variant=cd4053 proc=p10f322 (ctx_ layout verified: 3 bytes) ---
+LOCK-STEP START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic/bypass_cd4053_pic10f322.hex proc=p10f322 FOSC=2000000 ctx_=0x05d iters=3000
+  loop CLRWDT identified at 0x04f (8 hits in 8 ms; 2 CLRWDT sites total)
+  coverage: 66/66 reachable model states visited by the stimulus
+  lock-step: 3000 iterations compared, 27 toggles, 0 mismatches
+LOCK-STEP PASS: 3005 checks, 0 failures
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053 -> build_pic/bypass_cd4053_pic10f322.hex : 445 words (86.9%) of 512
+OK:   mute -> build_pic/bypass_mute_pic10f322.hex : 471 words (92.0%) of 512
+OK:   relay -> build_pic/bypass_relay_pic10f322.hex : 473 words (92.4%) of 512
+--- PIC target I/O: variant=cd4053 proc=p10f322 ---
+TARGET-IO START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic/bypass_cd4053_pic10f322.hex proc=p10f322 FOSC=2000000
+TARGET-IO PASS: 25 checks, 0 failures
+=== PIC target fault/lock-step/I-O PASS (variant cd4053) ===
+===================== PIC TARGET VARIANT mute =====================
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053 -> build_pic/bypass_cd4053_pic10f322.hex : 445 words (86.9%) of 512
+OK:   mute -> build_pic/bypass_mute_pic10f322.hex : 471 words (92.0%) of 512
+OK:   relay -> build_pic/bypass_relay_pic10f322.hex : 473 words (92.4%) of 512
+--- PIC fault-inject: variant=mute proc=p10f322 (ctx_ layout verified: 3 bytes) ---
+FAULT-INJECT START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic/bypass_mute_pic10f322.hex proc=p10f322 FOSC=2000000 window=2000 ms
+  (NB: gpsim WDT@WDTPS=0x08 ~1.057s -- recovery reset, not 256ms silicon)
+  PASS: startup WPUA is RA3-only (0x08)
+  PASS: startup TRISA is RA3 input, RA0..RA2 outputs (0x08)
+  loop CLRWDT identified at 0x035 (8 hits in 8 ms)
+  control (no injection)
+    PASS: quiescent device did not reset
+  inject TRISA.RA0          @0x006: 0x08 -> 0x09  (RA0 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+  inject TRISA.RA1          @0x006: 0x08 -> 0x0a  (RA1 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+  inject TRISA.RA2          @0x006: 0x08 -> 0x0c  (RA2 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+  inject LATA.RA0           @0x007: 0x00 -> 0x01  (RA0 LED latch changed from settled low to high)
+    PASS: observed exactly 1 WDT reset
+  inject LATA.RA1           @0x007: 0x00 -> 0x02  (RA1 control/reset-coil latch changed from low to high)
+    PASS: observed exactly 1 WDT reset
+  inject LATA.RA2           @0x007: 0x00 -> 0x04  (RA2 control/set-coil/spare latch changed from low to high)
+    PASS: observed exactly 1 WDT reset
+  inject OSCCON.IRCF        @0x010: 0x49 -> 0x59  (IRCF 0b100->0b101: 2MHz->4MHz clock skew)
+    PASS: observed exactly 1 WDT reset
+  inject WDTCON.WDTPS       @0x030: 0x10 -> 0x00  (WDTPS 0b01000->0b00000: 1:8192->1:32, WDT miscalibrated (else silent))
+    PASS: observed exactly 1 WDT reset
+  inject PR2                @0x012: 0x7c -> 0x63  (tick period 124->99: 1ms tick skewed)
+    PASS: observed exactly 1 WDT reset
+  inject T2CON              @0x013: 0x05 -> 0x04  (T2CKPS 1:4->1:1, TMR2ON preserved: timer cfg skew)
+    PASS: observed exactly 1 WDT reset
+  inject ANSELA.RA0         @0x008: 0x00 -> 0x01  (ANSA0=1: RA0 (LED) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+  inject ANSELA.RA1         @0x008: 0x00 -> 0x02  (ANSA1=1: RA1 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+  inject ANSELA.RA2         @0x008: 0x00 -> 0x04  (ANSA2=1: RA2 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+  inject WPUA.RA3           @0x009: 0x08 -> 0x00  (clear RA3 pull-up latch: footswitch weak pull-up disabled)
+    PASS: observed exactly 1 WDT reset
+  inject WPUA.RA0           @0x009: 0x08 -> 0x09  (set RA0 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+  inject WPUA.RA1           @0x009: 0x08 -> 0x0a  (set RA1 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+  inject WPUA.RA2           @0x009: 0x08 -> 0x0c  (set RA2 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+  inject OPTION.nWPUEN      @0x00e: 0x7f -> 0xff  (set nWPUEN: global weak pull-ups disabled)
+    PASS: observed exactly 1 WDT reset
+  inject ctx.program_state  @0x05d: 0x00 -> 0x02  (0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault))
+    PASS: observed exactly 1 WDT reset
+  inject ctx.effect_state   @0x05e: 0x00 -> 0x02  (->2: > ENGAGED (gate-only))
+    PASS: observed exactly 1 WDT reset
+  inject ctx.debounce_counter @0x05f: 0x00 -> 0xff  (->255: > RELEASE_THRESH (gate-only))
+    PASS: observed exactly 1 WDT reset
+
+FAULT-INJECT PASS: 25 checks, 0 failures
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053 -> build_pic/bypass_cd4053_pic10f322.hex : 445 words (86.9%) of 512
+OK:   mute -> build_pic/bypass_mute_pic10f322.hex : 471 words (92.0%) of 512
+OK:   relay -> build_pic/bypass_relay_pic10f322.hex : 473 words (92.4%) of 512
+--- PIC lock-step: variant=mute proc=p10f322 (ctx_ layout verified: 3 bytes) ---
+LOCK-STEP START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic/bypass_mute_pic10f322.hex proc=p10f322 FOSC=2000000 ctx_=0x05d iters=3000
+  loop CLRWDT identified at 0x035 (8 hits in 8 ms; 2 CLRWDT sites total)
+  coverage: 66/66 reachable model states visited by the stimulus
+  lock-step: 3000 iterations compared, 27 toggles, 0 mismatches
+LOCK-STEP PASS: 3005 checks, 0 failures
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053 -> build_pic/bypass_cd4053_pic10f322.hex : 445 words (86.9%) of 512
+OK:   mute -> build_pic/bypass_mute_pic10f322.hex : 471 words (92.0%) of 512
+OK:   relay -> build_pic/bypass_relay_pic10f322.hex : 473 words (92.4%) of 512
+--- PIC target I/O: variant=mute proc=p10f322 ---
+TARGET-IO START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic/bypass_mute_pic10f322.hex proc=p10f322 FOSC=2000000
+  engage pulse: 2522 cycles (5.044 ms; design 5 ms)
+  bypass pulse: 2530 cycles (5.060 ms; design 5 ms)
+TARGET-IO PASS: 26 checks, 0 failures
+=== PIC target fault/lock-step/I-O PASS (variant mute) ===
+===================== PIC TARGET VARIANT relay =====================
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053 -> build_pic/bypass_cd4053_pic10f322.hex : 445 words (86.9%) of 512
+OK:   mute -> build_pic/bypass_mute_pic10f322.hex : 471 words (92.0%) of 512
+OK:   relay -> build_pic/bypass_relay_pic10f322.hex : 473 words (92.4%) of 512
+--- PIC fault-inject: variant=relay proc=p10f322 (ctx_ layout verified: 3 bytes) ---
+FAULT-INJECT START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic/bypass_relay_pic10f322.hex proc=p10f322 FOSC=2000000 window=2000 ms
+  (NB: gpsim WDT@WDTPS=0x08 ~1.057s -- recovery reset, not 256ms silicon)
+  PASS: startup WPUA is RA3-only (0x08)
+  PASS: startup TRISA is RA3 input, RA0..RA2 outputs (0x08)
+  loop CLRWDT identified at 0x034 (8 hits in 8 ms)
+  control (no injection)
+    PASS: quiescent device did not reset
+  inject TRISA.RA0          @0x006: 0x08 -> 0x09  (RA0 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+  inject TRISA.RA1          @0x006: 0x08 -> 0x0a  (RA1 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+  inject TRISA.RA2          @0x006: 0x08 -> 0x0c  (RA2 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+  inject LATA.RA0           @0x007: 0x00 -> 0x01  (RA0 LED latch changed from settled low to high)
+    PASS: observed exactly 1 WDT reset
+  inject LATA.RA1           @0x007: 0x00 -> 0x02  (RA1 control/reset-coil latch changed from low to high)
+    PASS: observed exactly 1 WDT reset
+  inject LATA.RA2           @0x007: 0x00 -> 0x04  (RA2 control/set-coil/spare latch changed from low to high)
+    PASS: observed exactly 1 WDT reset
+  inject OSCCON.IRCF        @0x010: 0x49 -> 0x59  (IRCF 0b100->0b101: 2MHz->4MHz clock skew)
+    PASS: observed exactly 1 WDT reset
+  inject WDTCON.WDTPS       @0x030: 0x10 -> 0x00  (WDTPS 0b01000->0b00000: 1:8192->1:32, WDT miscalibrated (else silent))
+    PASS: observed exactly 1 WDT reset
+  inject PR2                @0x012: 0x7c -> 0x63  (tick period 124->99: 1ms tick skewed)
+    PASS: observed exactly 1 WDT reset
+  inject T2CON              @0x013: 0x05 -> 0x04  (T2CKPS 1:4->1:1, TMR2ON preserved: timer cfg skew)
+    PASS: observed exactly 1 WDT reset
+  inject ANSELA.RA0         @0x008: 0x00 -> 0x01  (ANSA0=1: RA0 (LED) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+  inject ANSELA.RA1         @0x008: 0x00 -> 0x02  (ANSA1=1: RA1 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+  inject ANSELA.RA2         @0x008: 0x00 -> 0x04  (ANSA2=1: RA2 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+  inject WPUA.RA3           @0x009: 0x08 -> 0x00  (clear RA3 pull-up latch: footswitch weak pull-up disabled)
+    PASS: observed exactly 1 WDT reset
+  inject WPUA.RA0           @0x009: 0x08 -> 0x09  (set RA0 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+  inject WPUA.RA1           @0x009: 0x08 -> 0x0a  (set RA1 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+  inject WPUA.RA2           @0x009: 0x08 -> 0x0c  (set RA2 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+  inject OPTION.nWPUEN      @0x00e: 0x7f -> 0xff  (set nWPUEN: global weak pull-ups disabled)
+    PASS: observed exactly 1 WDT reset
+  inject ctx.program_state  @0x05d: 0x00 -> 0x02  (0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault))
+    PASS: observed exactly 1 WDT reset
+  inject ctx.effect_state   @0x05e: 0x00 -> 0x02  (->2: > ENGAGED (gate-only))
+    PASS: observed exactly 1 WDT reset
+  inject ctx.debounce_counter @0x05f: 0x00 -> 0xff  (->255: > RELEASE_THRESH (gate-only))
+    PASS: observed exactly 1 WDT reset
+
+FAULT-INJECT PASS: 25 checks, 0 failures
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053 -> build_pic/bypass_cd4053_pic10f322.hex : 445 words (86.9%) of 512
+OK:   mute -> build_pic/bypass_mute_pic10f322.hex : 471 words (92.0%) of 512
+OK:   relay -> build_pic/bypass_relay_pic10f322.hex : 473 words (92.4%) of 512
+--- PIC lock-step: variant=relay proc=p10f322 (ctx_ layout verified: 3 bytes) ---
+LOCK-STEP START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic/bypass_relay_pic10f322.hex proc=p10f322 FOSC=2000000 ctx_=0x05d iters=3000
+  loop CLRWDT identified at 0x034 (8 hits in 8 ms; 2 CLRWDT sites total)
+  coverage: 66/66 reachable model states visited by the stimulus
+  lock-step: 3000 iterations compared, 27 toggles, 0 mismatches
+LOCK-STEP PASS: 3005 checks, 0 failures
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053 -> build_pic/bypass_cd4053_pic10f322.hex : 445 words (86.9%) of 512
+OK:   mute -> build_pic/bypass_mute_pic10f322.hex : 471 words (92.0%) of 512
+OK:   relay -> build_pic/bypass_relay_pic10f322.hex : 473 words (92.4%) of 512
+--- PIC target I/O: variant=relay proc=p10f322 ---
+TARGET-IO START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic/bypass_relay_pic10f322.hex proc=p10f322 FOSC=2000000
+  startup pulse: 6024 cycles (12.048 ms; design 12 ms)
+  engage pulse: 6054 cycles (12.108 ms; design 12 ms)
+  bypass pulse: 6024 cycles (12.048 ms; design 12 ms)
+TARGET-IO PASS: 36 checks, 0 failures
+=== PIC target fault/lock-step/I-O PASS (variant relay) ===
+=== PIC target fault/lock-step/I-O validated for all variants ===

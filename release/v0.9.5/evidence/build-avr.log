@@ -1,0 +1,108 @@
+== build_avr_classic/bypass_cd4053.elf ==
+AVR Memory Usage
+----------------
+Device: attiny13a
+
+Program:     716 bytes (69.9% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (6.2% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass_mute.elf ==
+AVR Memory Usage
+----------------
+Device: attiny13a
+
+Program:     756 bytes (73.8% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (6.2% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass_relay.elf ==
+AVR Memory Usage
+----------------
+Device: attiny13a
+
+Program:     756 bytes (73.8% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (6.2% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass_cd4053_t85.elf ==
+AVR Memory Usage
+----------------
+Device: attiny85
+
+Program:     742 bytes (9.1% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (0.8% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass_mute_t85.elf ==
+AVR Memory Usage
+----------------
+Device: attiny85
+
+Program:     782 bytes (9.5% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (0.8% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass_relay_t85.elf ==
+AVR Memory Usage
+----------------
+Device: attiny85
+
+Program:     782 bytes (9.5% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (0.8% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass_cd4053_t45.elf ==
+AVR Memory Usage
+----------------
+Device: attiny45
+
+Program:     742 bytes (18.1% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (1.6% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass_mute_t45.elf ==
+AVR Memory Usage
+----------------
+Device: attiny45
+
+Program:     782 bytes (19.1% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (1.6% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass_relay_t45.elf ==
+AVR Memory Usage
+----------------
+Device: attiny45
+
+Program:     782 bytes (19.1% Full)
+(.text + .data + .bootloader)
+
+Data:          4 bytes (1.6% Full)
+(.data + .bss + .noinit)
+
+

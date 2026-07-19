@@ -1,0 +1,69 @@
+# test-long summary -- the full log is in the release CI run.
+
+42:MISRA-C:2012 analysis (cppcheck + misra addon)
+53:MISRA-C:2012: clean (documented deviations waived per MISRA_COMPLIANCE.md)
+54:=== static analysis (clang-tidy + cppcheck + clang-analyzer + MISRA) clean ===
+70:cbmc: prove_integrate
+185:cbmc: prove_debounce_step
+300:cbmc: prove_corrupt_state_faults
+415:cbmc: prove_init_context
+530:cbmc: prove_step_transition
+645:cbmc: prove_oor_recovery_step
+760:cbmc: prove_press_liveness (--unwind 50)
+901:cbmc: prove_release_liveness (--unwind 50)
+1045:cbmc: prove_oor_recovery_bounded (--unwind 257)
+1416:=== CBMC: all debounce-core proofs SUCCESSFUL ===
+1425:=== -fstack-usage static bound (limit: 32 B/frame) ===
+1451:OK: 5 fresh reports; all frames <= 32 B
+1462:--- fault-injection (ATtiny45) variant: mute ---
+1463:--- fault-injection (ATtiny85) variant: cd4053 ---
+1465:--- fault-injection (ATtiny45) variant: cd4053 ---
+1467:--- fault-injection (ATtiny85) variant: mute ---
+1470:--- fault-injection (ATtiny85) variant: relay ---
+1472:--- fault-injection (ATtiny45) variant: relay ---
+1715:=== mutation testing: baseline sanity check ===
+1722:=== PIC toolchain probe (gates the PIC-shell mutants) ===
+1727:=== running 37 mutants across up to 16 parallel job(s) ===
+1729:=== 22 core/AVR mutants ===
+1753:=== 6 PIC-shell mutants (gpsim register-level) ===
+1761:=== 1 PIC-shell mutant (WDT liveness, libgpsim soak 2500ms) ===
+1764:=== 8 PIC target mutants (fault + lock-step + target I/O) ===
+1775:=== mutation summary: 37 killed, 0 survived, 0 errored, 0 PIC skipped ===
+1780:=== flash-utilization budget (attiny13a: 90% of 1024 B = 921 B) ===
+1781:OK:   build_avr_classic/bypass_cd4053.elf uses 716 B (69.9%) of 1024 B
+1782:OK:   build_avr_classic/bypass_mute.elf uses 756 B (73.8%) of 1024 B
+1783:OK:   build_avr_classic/bypass_relay.elf uses 756 B (73.8%) of 1024 B
+1784:OK: measured all 3 firmware images; each is within the 921 B limit.
+1788:--- sim (ATtiny13a) variant: mute ---
+1790:--- sim (ATtiny13a) variant: cd4053 ---
+1791:--- sim (ATtiny13a) variant: relay ---
+2332:--- sim (ATtiny45) variant: cd4053 ---
+2333:--- sim (ATtiny45) variant: relay ---
+2335:--- sim (ATtiny85) variant: cd4053 ---
+2337:--- sim (ATtiny85) variant: mute ---
+2340:--- sim (ATtiny45) variant: mute ---
+2342:--- sim (ATtiny85) variant: relay ---
+3513:golden-model line coverage: 99.35% (floor 90%)
+3514:=== all FULL (exhaustive) pre-hardware tests passed ===
+
+# --- last 20 lines ---
+release provenance validation: 9 checks, 0 failures
+./test/test_make_serialization.sh
+make[1]: warning: -j1 forced in submake: resetting jobserver mode.
+make[1]: warning: -j1 forced in submake: resetting jobserver mode.
+make[1]: warning: -j1 forced in submake: resetting jobserver mode.
+Make serialization validation: 6 checks, 3 concurrent invocations, 0 overlaps
+./test/test_target_matrix.sh
+PIC target-variant matrix validation: 5 checks, 0 failures
+PIC_SOAK_CXX="c++" ./test/test_lockstep_progress.sh
+lock-step progress failure validation: 3 checks, 0 failures
+HOSTCC="cc" HOSTCXX="c++" ./test/test_soak_timing.sh
+soak timing validation: 39 checks, 0 failures
+./test/test_strict_tools.sh
+strict host-analysis tool validation: 6 checks, 0 failures
+./test/test_workload_rebuild.sh
+make[4]: warning: -j1 forced in submake: resetting jobserver mode.
+make[4]: warning: -j1 forced in submake: resetting jobserver mode.
+workload rebuild validation: 22 checks, 0 failures
+golden-model line coverage: 99.35% (floor 90%)
+=== all FULL (exhaustive) pre-hardware tests passed ===

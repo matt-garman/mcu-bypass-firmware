@@ -1,0 +1,34 @@
+Loaded 782 .text at address 0x0
+Loaded 0 .data
+SOAK START: firmware=build_avr_classic/bypass_mute_t85.elf  MCU=attiny85  F_CPU=1000000 Hz
+SOAK START: duration=86400000 ms (24.0 h)  liveness every 60000 ms  progress every 3600000 ms
+SOAK [1.0 / 24.0 h]: checks=60  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [2.0 / 24.0 h]: checks=120  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [3.0 / 24.0 h]: checks=180  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [4.0 / 24.0 h]: checks=240  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [5.0 / 24.0 h]: checks=300  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [6.0 / 24.0 h]: checks=360  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [7.0 / 24.0 h]: checks=420  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [8.0 / 24.0 h]: checks=480  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [9.0 / 24.0 h]: checks=540  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [10.0 / 24.0 h]: checks=600  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [11.0 / 24.0 h]: checks=660  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [12.0 / 24.0 h]: checks=720  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [13.0 / 24.0 h]: checks=780  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [14.0 / 24.0 h]: checks=840  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [15.0 / 24.0 h]: checks=900  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [16.0 / 24.0 h]: checks=960  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [17.0 / 24.0 h]: checks=1020  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [18.0 / 24.0 h]: checks=1080  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [19.0 / 24.0 h]: checks=1140  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [20.0 / 24.0 h]: checks=1200  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [21.0 / 24.0 h]: checks=1260  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [22.0 / 24.0 h]: checks=1320  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [23.0 / 24.0 h]: checks=1380  fails=0  (wdt_crashes=0  liveness_fails=0)
+SOAK [24.0 / 24.0 h]: checks=1440  fails=0  (wdt_crashes=0  liveness_fails=0)
+
+SOAK PASS: 86400000 ms (24.0 h) simulated.
+  WDT crashes:       0
+  Liveness failures: 0
+  Total checks:      1440
+  Total failures:    0
