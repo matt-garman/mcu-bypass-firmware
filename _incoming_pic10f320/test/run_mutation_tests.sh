@@ -53,7 +53,7 @@ MUTATIONS=(
 # These mutants WEAKEN a runtime sanity check so a real fault would go undetected.
 # They are invisible to test-equiv/test-gpsim (valid stimulus never trips the
 # check); only test-fault, which injects corrupted state, kills them.
-"bypass_mcu_pic10f320.c	s@return (hw_output_pins_intact((1U << LED_PIN) | (1U << CD4053_PIN)) == 0U);@return 0U;@	test-fault-variants	FW output-pin SEU check neutered (lost LED/CD4053 output never detected)"
+"bypass_mcu_pic10f320.c	s@(uint8_t)(0x0FU ^ BYPASS_OUTPUT_DDR_MASK)@(uint8_t)(TRISA \& 0x0FU)@	test-fault-variants	FW output-pin SEU check neutered (exact-TRISA compare made a tautology; no direction fault ever detected)"
 "bypass_mcu_pic10f320.c	s@(0U == wpu_global)@1U@	test-fault-variants	FW global footswitch pull-up SEU check neutered (nWPUEN corruption never detected)"
 "bypass_mcu_pic10f320.c	s@(ctx_.effect_state > ENGAGED)@(ctx_.effect_state > 99U)@	test-fault-variants	FW effect_state range guard defeated (corrupt effect_state never forces reset)"
 "bypass_mcu_pic10f320.c	s@(ctx_.debounce_counter > RELEASE_THRESH)@(ctx_.debounce_counter > 255U)@	test-fault-variants	FW counter range guard defeated (corrupt debounce_counter never forces reset)"
@@ -125,7 +125,7 @@ MUTATIONS=(
 # the newer built-image aggregate independently kills each physical failure mode.
 "bypass_mcu_pic10f320.c	s@WPUA = (uint8_t)(1U << FOOTSW_PIN);@WPUA |= (uint8_t)(1U << FOOTSW_PIN);@	PIC_VARIANT=cd4053-simple test-target-gpsim	TARGET pull-up init regressed to read-modify-write; exact startup WPUA check catches retained RA0..RA2 latches"
 "bypass_mcu_pic10f320.c	s@wpua_latches == (uint8_t)(1U << FOOTSW_PIN)@0U != (wpua_latches \& (uint8_t)(1U << FOOTSW_PIN))@	PIC_VARIANT=cd4053-simple test-target-gpsim	TARGET exact WPUA guard weakened to RA3-present only; target fault injections catch extra output-pin latches"
-"bypass_mcu_pic10f320.c	s@return (0U == (TRISA & expected_mask));@return 1U;@	PIC_VARIANT=cd4053-simple test-target-gpsim	TARGET output-direction guard disabled; simulated-core TRISA injections no longer recover"
+"bypass_mcu_pic10f320.c	s@static uint8_t hw_output_pins_intact(void) {@static uint8_t hw_output_pins_intact(void) { return 1U;@	PIC_VARIANT=cd4053-simple test-target-gpsim	TARGET output-direction guard disabled; simulated-core TRISA injections no longer recover"
 "bypass_mcu_pic10f320.c	s@ANSELA & BYPASS_OUTPUT_DDR_MASK@ANSELA \& 0x01U@	PIC_VARIANT=cd4053-simple test-target-gpsim	TARGET ANSELA sanity mask narrowed to RA0; RA1/RA2 analog re-selection goes undetected"
 "bypass_mcu_pic10f320.c	s@    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@    hw_x4053_ctl1_low(); // MUTANT: reassert ENGAGED at startup\n    hw_x4053_ctl2_low();\n\n    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@	PIC_VARIANT=cd4053-mute test-target-gpsim	TARGET mute startup reasserts ENGAGED before MUTE; physical startup transition trace catches it"
 "bypass_mcu_pic10f320.c	s@#  define CD4053_MUTE_DELAY_MS (5U)@#  define CD4053_MUTE_DELAY_MS (1U)@	PIC_VARIANT=cd4053-mute test-target-gpsim	TARGET mute window shortened below 5ms; cycle-exact target I/O timing catches it"

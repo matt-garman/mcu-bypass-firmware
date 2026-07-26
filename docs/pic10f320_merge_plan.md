@@ -1886,7 +1886,55 @@ silent: `$$v_$(PIC320_TAG)` in a shell loop expands as a variable named `v_`, no
 missing baseline rather than a mismatch. Use `$${v}` in any recipe that
 concatenates a loop variable with `_`.
 
-### 15.5 Tool inventory, and the one recorded blocker
+### 15.5 §6.11 exact-TRISA port — landed 2026-07-26
+
+The measured resolution of §6.11, applied after the Phase-2 byte-identity gate
+passed and as its own rebaselining commit, exactly as the ordering there
+requires. Firmware edit by the user; the seven test sites by the assistant.
+
+Flash cost matched the prediction on every variant — **+1 word each**:
+
+| Variant | before | after | free |
+| --- | --- | --- | --- |
+| cd4053-simple | 219 | **220** | 36 |
+| cd4053-mute | 240 | **241** | 15 |
+| tq2-relay | 243 | **244** | 12 |
+
+Host lanes green on all three variants, with the fault-check count now a
+**uniform 41/41/41** where it was 41/42/42. That change *is* the assurance gain:
+cd4053-simple's spare RA2 pin was previously a documented blind spot — the old
+per-variant mask did not cover it — and exact TRISA closes it. The variant split
+in the fault expectations is gone at both host and target level.
+
+**The gate proved it has teeth.** Re-running
+`pic320-verify-baseline-images` after the edit **failed on all three variants**,
+which is the intended outcome: it is the one check that notices any change to
+emitted bytes (§14.2), so a clean pass here would have meant the gate was blind.
+Rebaselined hashes:
+
+```
+e48ed8e50e89a7f2c2e145603d16c25099925269ea0b29b31becc9c02eb2143f  bypass_mcu_cd4053-simple_pic10f320.hex
+1cc2cbf6572a876b1a0a5d19e2e3179a41c7a46bd1b7419d2b5e72aa2aec27a7  bypass_mcu_cd4053-mute_pic10f320.hex
+b30783d20e1ef088b3fa612cb7c41755b48ba1060395e01cf7360ea664d1e50f  bypass_mcu_tq2-relay_pic10f320.hex
+```
+
+Consequence for the gate's remaining life: `PIC320_BASELINE_DIR` still points at
+the child's v0.9.5 images, against which the answer is now permanently "differs".
+Phase 4's re-run must compare against **these** hashes instead. Point the gate at
+a rebaselined copy, or retire it here and record that its migration purpose was
+served at the Phase-2 boundary — the plan's §6.13 sequencing anticipated exactly
+this and left the choice open.
+
+Two of the seven sites — `test/pic/test_fault_pic.cc` and
+`test/run_mutation_tests.sh` — were still under `_incoming_pic10f320/` when the
+edit landed and were updated in place so they arrive correct rather than stale.
+Nothing builds from the prefix, so they are **not verified in position**; their
+content is the text proven at 42 killed / 0 survived / 0 errored in the scratch
+clone, and Phase 4 must re-run the gpsim and mutation lanes once they are wired.
+This is the one piece of §6.11 evidence that is transferred rather than
+reproduced in the merged tree.
+
+### 15.6 Tool inventory, and the one recorded blocker
 
 §6.9 requires unavailable tools to be recorded as blockers rather than passes.
 Verified present on the execution host: XC8 V3.10 at the pinned

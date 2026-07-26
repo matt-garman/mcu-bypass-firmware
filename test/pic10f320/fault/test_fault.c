@@ -55,9 +55,8 @@ static void sfr_clean(void) {
 //////////////////////////////////////////////////////////////////////////////
 static void test_predicates(void) {
     sfr_clean();
-    CHECK(fwp_output_pins_intact((uint8_t)((1u << 0) | (1u << 1))) != 0,
-          "clean: LED+CD4053 should read as outputs");
-    CHECK(fwp_output_pins_intact(0x07u) != 0, "clean: RA0..RA2 should all be outputs");
+    CHECK(fwp_output_pins_intact() != 0,
+          "clean: TRISA exactly matches init() (RA0..RA2 out, RA3 in)");
     CHECK(fwp_sanity_failed() == 0, "clean: no sanity failure expected");
     CHECK(fwp_pullup_intact() != 0, "clean: pull-up should read intact");
     CHECK(fwp_footswitch_is_high() == 1, "clean: released footswitch reads HIGH");
@@ -68,7 +67,7 @@ static void test_predicates(void) {
 
     // LED pin (RA0) flipped to input -- SEU on TRISA bit 0
     sfr_clean(); TRISA |= (uint8_t)(1u << 0);
-    CHECK(fwp_output_pins_intact(0x01u) == 0, "RA0 as input must read NOT intact");
+    CHECK(fwp_output_pins_intact() == 0, "RA0 as input must read NOT intact");
     CHECK(fwp_sanity_failed() != 0, "lost LED output must flag sanity failure");
 
     // CD4053 pin (RA1) flipped to input -- SEU on TRISA bit 1
@@ -76,15 +75,13 @@ static void test_predicates(void) {
     CHECK(fwp_sanity_failed() != 0, "lost CD4053 output must flag sanity failure");
 
     // RA2 flipped to input -- SEU on TRISA bit 2.  RA2 is load-bearing for
-    // mute/relay variants (CTL2/SET coil); for cd4053-simple it
-    // is configured as an output but not logically driven, so the firmware does
-    // not expect it as an output and flipping it to input must NOT be a reset.
-    // The variant sweep covers both cases.
+    // mute/relay (CTL2/SET coil).  For cd4053-simple it is configured as an
+    // output but not logically driven; the exact-TRISA gate nonetheless covers
+    // it, so a direction fault on the spare pin is a reset on EVERY variant --
+    // no variant split here any more.
     sfr_clean(); TRISA |= (uint8_t)(1u << 2);
-    CHECK(fwp_output_pins_intact(0x04u) == 0, "RA2 as input must read NOT intact");
-#if !defined(OUTPUT_CD4053_SIMPLE)
+    CHECK(fwp_output_pins_intact() == 0, "RA2 as input must read NOT intact");
     CHECK(fwp_sanity_failed() != 0, "lost RA2 output must flag sanity failure");
-#endif
 
     // pull-up latch cleared -- SEU on WPUA
     sfr_clean(); WPUA &= (uint8_t)~(1u << 3);
@@ -144,15 +141,12 @@ static void test_fault_injection(void) {
     expect_reset(FWI_PULLUP_GLOBAL_OFF,    "OPTION_REG nWPUEN=1 (global pull-up off)");
     expect_reset(FWI_LED_PIN_TO_INPUT,     "TRISA RA0 (LED) flipped to input");
     expect_reset(FWI_CD4053_PIN_TO_INPUT,  "TRISA RA1 (CD4053/RESET) flipped to input");
-    // RA2 is only load-bearing for variants that use it (cd4053-mute /
-    // tq2-relay); for cd4053-simple it is a spare output and the
-    // sanity check does not include it, so flipping it to input must NOT force a
-    // reset. The variant sweep covers both cases.
-#if defined(OUTPUT_CD4053_SIMPLE)
-    expect_no_reset(FWI_RA2_PIN_TO_INPUT, "TRISA RA2 flipped to input (spare on simple)");
-#else
-    expect_reset(FWI_RA2_PIN_TO_INPUT, "TRISA RA2 (CTL2/SET) flipped to input");
-#endif
+    // RA2 is load-bearing for cd4053-mute / tq2-relay (CTL2 / SET coil) and a
+    // spare driven-low output on cd4053-simple. The gate compares TRISA exactly
+    // against its init() value, so a direction fault on RA2 forces a reset on
+    // EVERY variant -- the spare pin is covered too, and no variant split
+    // remains here.
+    expect_reset(FWI_RA2_PIN_TO_INPUT, "TRISA RA2 flipped to input");
 
     // Critical configuration SFRs (variant-independent): an SEU that skews the
     // clock select, watchdog period, or the 1 ms tick timer off its configured

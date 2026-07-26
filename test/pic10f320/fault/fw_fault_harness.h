@@ -76,8 +76,8 @@ uint8_t fw_drive(const uint8_t *fsw, int n);
 // Direct probes of the firmware's static defensive predicates, evaluated against
 // the CURRENT mock-SFR state (set TRISA/WPUA/PORTA/OPTION_REGbits via the extern
 // <xc.h> symbols first, then call).
-int fwp_output_pins_intact(uint8_t mask); // nonzero IFF every `mask` pin is an output
-int fwp_sanity_failed(void);              // nonzero IFF LED|CD4053 are not both outputs
+int fwp_output_pins_intact(void);         // nonzero IFF TRISA exactly matches init()
+int fwp_sanity_failed(void);              // nonzero IFF the output-direction gate trips
 int fwp_pullup_intact(void);              // nonzero IFF the footswitch pull-up is fully on
 int fwp_footswitch_is_high(void);         // 1 IFF RA3 reads HIGH (released), else 0
 

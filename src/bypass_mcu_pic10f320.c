@@ -228,10 +228,13 @@ static void hw_led_pin_set_high(void) { LATA |=  (uint8_t)(1U << LED_PIN); }
 static void hw_led_pin_set_low(void)  { LATA &= (uint8_t)~(1U << LED_PIN); }
 
 
-// sanity-check utility: return non-zero IFF every pin in expected_mask is still
-// configured as an output (its TRISA direction bit is still 0).
-static uint8_t hw_output_pins_intact(uint8_t const expected_mask) {
-    return (0U == (TRISA & expected_mask));
+// sanity-check utility: return non-zero IFF the complete direction
+// configuration still matches initialization: RA0..RA2 outputs, RA3 input.
+// Exact TRISA subsumes the former per-variant "every required pin is still an
+// output" test, so the variant gates need no mask argument.
+static uint8_t hw_output_pins_intact(void) {
+    return ((uint8_t)(TRISA & 0x0FU) ==
+            (uint8_t)(0x0FU ^ BYPASS_OUTPUT_DDR_MASK));
 }
 
 
@@ -255,7 +258,7 @@ static uint8_t hw_output_pins_intact(uint8_t const expected_mask) {
 static uint8_t hw_is_sanity_check_failed(void) {
     static_assert(CD4053_PIN  == _PORTA_RA1_POSN, "CD4053_PIN must be RA1");
 
-    return (hw_output_pins_intact((1U << LED_PIN) | (1U << CD4053_PIN)) == 0U);
+    return (hw_output_pins_intact() == 0U);
 }
 
 // Unified drive polarity (see the drive-polarity comment above): hw_x4053_ctl_high()
@@ -298,7 +301,7 @@ static uint8_t hw_is_sanity_check_failed(void) {
     static_assert((TICK_PERIOD_MS + CD4053_MUTE_DELAY_MS) < WDT_MIN_PERIOD_MS,
             "1ms tick + mute pulse must stay under the worst-case WDT period");
 
-    return (0U == hw_output_pins_intact((1U << LED_PIN) | (1U << CD4053_CTL1) | (1U << CD4053_CTL2)));
+    return (0U == hw_output_pins_intact());
 }
 
 // wrap this into a function to save firmware space
@@ -361,7 +364,7 @@ static uint8_t hw_is_sanity_check_failed(void) {
     static_assert(RELAY_RESET_PIN == _PORTA_RA1_POSN, "RELAY_RESET_PIN must be RA1");
     static_assert(RELAY_SET_PIN   == _PORTA_RA2_POSN, "RELAY_SET_PIN must be RA2");
 
-    return (0U == hw_output_pins_intact((1U << LED_PIN) | (1U << RELAY_SET_PIN) | (1U << RELAY_RESET_PIN)));
+    return (0U == hw_output_pins_intact());
 }
 
 // constant-bit functions, not a parametric hw_pin_set_high/low(pin) helper:

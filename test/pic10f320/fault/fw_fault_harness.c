@@ -242,7 +242,7 @@ uint8_t fw_drive(const uint8_t *fsw, int n) {
 }
 
 // --- direct predicate probes (no main loop) ----------------------------------
-int fwp_output_pins_intact(uint8_t mask) { return (int)hw_output_pins_intact(mask); }
+int fwp_output_pins_intact(void)         { return (int)hw_output_pins_intact(); }
 int fwp_sanity_failed(void)              { return (int)hw_is_sanity_check_failed(); }
 int fwp_pullup_intact(void)              { return (int)hw_footswitch_pullup_intact(); }
 int fwp_footswitch_is_high(void) {

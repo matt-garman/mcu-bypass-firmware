@@ -181,12 +181,10 @@ static NullBuf g_nullbuf;
 #define CLRWDT_CALIB_MS 8u
 
 // Two startup checks + CLRWDT discovery + no-injection control + 18 injections.
-// The simple variant also verifies restoration after its RA2 negative control.
-#if defined(OUTPUT_CD4053_SIMPLE)
-#  define EXPECTED_CHECKS 23u
-#else
-#  define EXPECTED_CHECKS 22u
-#endif
+// Identical for every variant: the exact-TRISA gate guards all three output
+// directions, so cd4053-simple no longer has an RA2 negative control (and so no
+// longer has the extra post-control restoration check).
+#define EXPECTED_CHECKS 22u
 
 // ---- Sim globals ------------------------------------------------------------
 static pic_processor   *g_cpu      = nullptr;
@@ -504,21 +502,16 @@ int main() {
     }
     control_case();
 
-    // Output directions (hw_is_sanity_check_failed). RA0/RA1 are required for
-    // every variant. RA2 is intentionally a negative control for the simple
-    // variant, whose runtime sanity mask covers only its load-bearing RA0/RA1;
-    // mute and relay require all three output directions.
+    // Output directions (hw_is_sanity_check_failed). The gate compares TRISA
+    // exactly against its init() value, so all three output directions are
+    // guarded on every variant -- including cd4053-simple's spare RA2, which
+    // used to be a negative control here.
     inject_case("TRISA.RA0", TRISA_ADDR, "tris", false, 0x01, 1,
                 "RA0 changed from output to input");
     inject_case("TRISA.RA1", TRISA_ADDR, "tris", false, 0x02, 1,
                 "RA1 changed from output to input");
-#if defined(OUTPUT_CD4053_SIMPLE)
-    inject_case("TRISA.RA2", TRISA_ADDR, "tris", false, 0x04, 0,
-                "spare RA2 input is outside this variant's runtime guard");
-#else
     inject_case("TRISA.RA2", TRISA_ADDR, "tris", false, 0x04, 1,
                 "RA2 changed from output to input");
-#endif
 
     // config SFRs (hw_critical_sfrs_intact)
     inject_case("OSCCON.IRCF",  OSCCON_ADDR, "osccon", false, 0x10, 1,
