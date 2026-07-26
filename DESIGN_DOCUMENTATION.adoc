@@ -637,6 +637,56 @@ The PIC10F322 is the most flash-constrained supported part (the mute variant's
 against the 512-word limit, which `make pic` gates on every build.
 
 
+== Multi-MCU Architecture: Shared Core, Per-MCU Shell
+
+The firmware targets three unrelated MCU families that share the debounce
+algorithm but differ completely at the register level. The split that makes
+this work has two rules.
+
+**The algorithm is shared, exactly once.** `src/bypass_pure.c` is the
+functional core: no hardware access, no globals, no side effects. Every
+target compiles the same file, and it is the sole subject of the host tests
+and the formal proofs. Nothing about it is per-MCU.
+
+**The main loop is NOT shared.** Each MCU shell owns its own `main()`, tick
+mechanism, and watchdog-liveness model; only the leaf hardware operations are
+abstracted. This is a deliberate decision, revisited when the second and third
+shells were written, and it is worth recording why — the alternative (one
+portable `main()` parameterized by an interface) looks cleaner and is wrong
+here.
+
+The AVR Classic design samples the footswitch *inside* the 1 ms Timer0 ISR
+while `main()` sleeps, and proves liveness through the `timer_isr_called_`
+ISR-to-main handshake. The PIC10F322 uses a fundamentally different model: no
+tick ISR at all, a single polled loop that waits on `TMR2IF`, samples, updates,
+and pets the watchdog, where reaching `CLRWDT` *is* the liveness proof. A single
+shared `main()` cannot express both without changing AVR's ISR-sampling
+behaviour, which would invalidate the documented design and the tests built on
+it — lock-step co-simulation, ISR-jitter, and the handshake mutants.
+
+So `main()`, the tick source, `init()` as orchestrator, and the reset path stay
+file-static inside each shell. The consequences are visible elsewhere in this
+document: the polled PIC shell qualifies press timing differently than the
+ISR-driven AVR shells (see Asymmetric Debounce Timing), and it carries no
+`timer_isr_called_` byte (see Resource Utilization).
+
+**What the shared interface does cover.** `src/bypass_hw_iface.h` is the
+*output-driver* boundary only: the GPIO leaf operations a shell provides to a
+driver (`hw_pin_set_*`, `hw_led_pin_set_*`, `hw_configure_output_pins`,
+`hw_output_state_intact`) and the operations a driver provides back
+(`hw_set_bypass_state`, `hw_set_engaged_state`, `hw_is_sanity_check_failed`,
+`hw_init_output_pins`). The pin-direction API is mask-based so one driver body
+serves all targets: the AVR implementation writes `DDRB`, the PIC maps the mask
+onto `TRISA`.
+
+Everything else — footswitch read, watchdog arm and pet, clock and peripheral
+bring-up, wait-for-tick, the forced-reset path, and the SFR integrity checks —
+is shell-private and rewritten per shell. That is not an oversight: MISRA
+Rule 8.7 flagged the earlier arrangement, since each of those helpers is
+referenced only within its own translation unit. Adding a fourth target means
+adding a fourth shell plus a pin map, and reusing the core and all three output
+drivers unchanged. No existing shell needs to be refactored.
+
 == AVR Classic Program Flow
 
 === Functional Description

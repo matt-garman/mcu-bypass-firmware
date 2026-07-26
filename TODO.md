@@ -4,13 +4,12 @@ Status note: the firmware and test/validation suite have been meta-reviewed
 several times (design doc, firmware implementation, golden-model accuracy, test
 correctness, and additional verification opportunities). The firmware has no
 known correctness defects; `make test` passes clean across all three output
-variants and both MCU families (ATtiny13a and tinyx5), with 99.35% golden-model
-line coverage. The reviews confirmed: (1) the design meets its stated goals;
-(2) no bugs, race conditions, or footguns were found in the firmware; (3) the
-golden model matches the firmware exactly via three independent verification
-paths; and (4) all existing tests are correct and meaningful. The items below
-are deferrable polish and credibility work — none are bugs. Anything that *is* a
-bug gets fixed immediately, not parked here.
+variants and every supported MCU family. The reviews confirmed: (1) the design
+meets its stated goals; (2) no bugs, race conditions, or footguns were found in
+the firmware; (3) the golden model matches the firmware exactly via three
+independent verification paths; and (4) all existing tests are correct and
+meaningful. The items below are deferrable polish and credibility work — none
+are bugs. Anything that *is* a bug gets fixed immediately, not parked here.
 
 **Update (2026-07-10):** a subsequent external review of the multi-MCU build
 did surface one real correctness defect — the TMUX4053 direct-drive (`_tmux`)
@@ -21,386 +20,219 @@ FXN+JOU-short state. Root cause: the polarity wrapper modeled the CD4053
 MOSFET-inverter vs TMUX direct-drive electrical difference but not the swapped
 analog throws, which cancel it. Fixed by driving one MCU polarity for both
 boards and deleting the wrapper; the now-identical `_tmux` build variants were
-dropped. Re-validated green (AVR + host + PIC, mutation 25/25). So the
-"no bugs found" claim above holds for the firmware *as it now stands*, but the
-record should note that this one was found and corrected here.
+dropped. Re-validated green. So the "no bugs found" claim above holds for the
+firmware *as it now stands*, but the record should note that this one was found
+and corrected here.
 
----
-
-## PIC branch meta-review (2026-06-25, `pic10f32x_support`)
-
-A pre-merge meta-review of the PIC10F322 shell (`bypass_mcu_pic10f32x.c`) and the
-hardware-abstraction refactor on this branch found **no correctness defects** —
-the PIC tick/WDT timing, the TRISA/LATA output logic, the footswitch read, and
-every variant's engaged/bypass register pattern check out against the gpsim
-expectations. The items below are quality-parity and robustness-consistency gaps
-relative to the mature AVR Classic path. The CI item is the one worth closing at
-(or before) merge; the rest are deferrable polish, consistent with the
-no-bugs-parked-here rule above.
-
-**STATUS — DONE.** All five items below were completed on branch
-`pic10f32x_support` (2026-06-25): the CI gate in the `ci:` commits (the PIC
-job plus the AVR re-enable, with the temporary branch push-trigger reverted
-to `[main]`); items 1, 2, and 4 in `pic: nWPUEN pull-up + early WDT pet;
-gpsim power-on coverage`; and item 3 in `refactor: hoist shared compile-time
-threshold contract to a header`. Each item is tagged `— DONE` below, and
-retained for traceability rather than deleted.
-
-**PIC firmware has no CI / automated gate (highest — DONE).** `make test` (the gating
-CI job) is AVR-only; the PIC build, CONFIG-word check, MISRA, and gpsim test all
-live under the standalone `make pic-test` target, which CI never invokes (`grep`
-for pic/xc8/gpsim in `.github/workflows/ci.yml` → nothing). Result: a regression
-in `bypass_mcu_pic10f32x.c`, the PIC pin map, or a `#pragma config` line is
-caught only if a developer locally has XC8 + the DFP + gpsim and remembers to run
-it. The AVR shell, by contrast, is gated on every push (analyze + host +
-model-check + symbolic + CBMC + simavr + coverage). Add a `pic` CI job that
-installs XC8 + the PIC10-12Fxxx DFP + gpsim and runs `make pic-test` (YAML sketch
-drafted 2026-06-25). Critical subtlety: the `pic-test` sub-targets *skip cleanly*
-when a tool/header is absent, so the CI job MUST assert the toolchain is present
-(fail loud) — otherwise a broken XC8 install would turn the gate green silently.
-Effort: ~2–4 h (mostly XC8-in-CI plumbing). Impact: High — brings the PIC path
-under the same continuous protection as AVR.
-
-**PIC footswitch pull-up integrity check is weaker than the AVR's (firmware — DONE).**
-`hw_footswitch_pullup_intact()` (`bypass_mcu_pic10f32x.c` ~L134) checks only the
-per-pin `WPUA[FOOTSW_PIN]` latch, but the PIC weak pull-up has a two-part enable:
-the per-pin `WPUA` bit *and* the global active-low `OPTION_REGbits.nWPUEN`. An
-SEU/EMI event that flips `nWPUEN` to 1 disables the footswitch pull-up while this
-sanity check still passes. The AVR analogue (`bypass_mcu_avr_classic.c:140`)
-checks the single bit that *is* its pull-up enable, so it is complete. For
-parity, the PIC check should also assert `0U == OPTION_REGbits.nWPUEN`. Firmware
-edit (user). Effort: ~15 min. Impact: Medium — restores SEU-detection symmetry
-under the project's stated cosmic-ray/EMI threat model.
-
-**PIC `init()` has no early WDT handling, and why that is safe is undocumented
-(firmware/doc — DONE).** The AVR makes re-arming the WDT its first init action and
-documents the post-WDRF ~16 ms reset-loop hazard that motivates it
-(`bypass_mcu_avr_classic.c:149-175`). The PIC `init()` has no `CLRWDT()` at all —
-the first pet is in the loop, after the ~12 ms `hw_set_bypass_state()` pulse.
-This appears safe (the PIC POR/reset WDT default of 1:65536 ≈ 2 s far exceeds
-init + the pulse, and the PIC lacks the AVR's short-post-reset hazard), but that
-reasoning is nowhere in the code. Either add a comment to the PIC shell
-explaining why no early pet is needed, or add a belt-and-suspenders `CLRWDT()` at
-the top of `init()` mirroring the AVR. Confirm the PIC10F322 WDTCON POR default
-against datasheet DS40001585 while doing so. Firmware/doc edit (user). Effort:
-~30 min. Impact: Low-Medium — closes a doc/parity gap on a load-bearing
-fault-recovery path.
-
-**Hoist the duplicated MCU-neutral compile-time contract into a shared header
-(redundancy — DONE).** `DEBOUNCE_COUNTER_MAX (255U)` plus its ~10-line MISRA rationale,
-and the five MCU-neutral threshold `static_assert`s (`RELEASE_THRESH <
-DEBOUNCE_COUNTER_MAX`, `> 0`, `> PRESSED_THRESH`, and the two `PRESSED_THRESH`
-bounds) are copy-pasted verbatim into both shells (`bypass_mcu_avr_classic.c`
-L53-62/L262-266 and `bypass_mcu_pic10f32x.c` L64-69/L216-220). Beyond the
-duplication this is a drift risk: someone could tighten the invariant in one
-shell and not the other. Move them into one shared header (a new
-`bypass_compile_checks.h`, or fold into `bypass_config.h`/`bypass_pure.h`)
-included by both shells. The genuinely MCU-specific asserts (the `-fshort-enums`
-size checks, the `PBx`/`_PORTA_RAx_POSN` pin pinning, the `F_CPU`/`_XTAL_FREQ`
-checks) stay per-shell. Leave the per-shell HW helpers (`hw_force_wdt_reset`,
-`hw_read_footswitch`, the fault/toggle dispatch) duplicated — the two main loops
-differ structurally (ISR vs polled) and per-shell clarity beats DRY for a
-reference design. Firmware edit (user). Effort: ~30–45 min. Impact: Medium —
-removes verbatim duplication and a drift risk.
-
-**PIC functional-test rigor is below the AVR's (test, tooling-constrained — DONE).**
-The AVR has simavr lock-step (`model_step.h` converging on real code) plus fault
-injection and mutation; the PIC has a 4-checkpoint gpsim functional test
-(`test/pic/footswitch_toggle.stc`). The shared pure core is fully covered by the
-host/formal/mutation suites, so the PIC-specific exposure is only shell wiring —
-which gpsim does exercise — and there is no lock-step model for gpsim, so this is
-a tooling constraint, not an oversight. To narrow the gap cheaply, extend the
-gpsim scenario to (a) cover the power-on-pressed startup case (exercises the
-`debounce_init_context` RELEASE-wait branch) and (b) assert `porta` at the
-`BYPASS_AGAIN` checkpoint. Test edit. Effort: ~1 h. Impact: Low-Medium.
+**Housekeeping note (2026-07-26):** this file was audited against the actual
+test suite, Makefile targets, and CI. Completed work was removed rather than
+kept as `— DONE` entries (git history and `CHANGELOG.md` are the record for
+that), and items judged not worth doing were moved to "Considered and declined"
+with their reasoning so they do not get re-proposed. Everything remaining below
+was verified to still be open.
 
 ---
 
 ## Tier 2 — closes verification / traceability gaps
 
 **Datasheet citations in the design doc.** The sleep-wakeup §7.3 cite lives in
-`bypass_mcu_avr_classic.c`; the *design doc itself* currently cites no datasheet sections.
-Each load-bearing decision should trace to a page/section: WDT ~16 ms post-reset
-window; WDTON always-on; internal-RC ±10%; Timer0 CTC formula; BOD level.
+`bypass_mcu_avr_classic.c`; the *design doc itself* currently cites no datasheet
+sections at all (verified: zero datasheet references in
+`DESIGN_DOCUMENTATION.adoc`). Each load-bearing decision should trace to a
+page/section: WDT ~16 ms post-reset window; WDTON always-on; internal-RC ±10%;
+Timer0 CTC formula; BOD level. The PIC shell's datasheet facts are already
+recorded in `docs/phase2_pic_shell.md` §2 and can be cross-referenced rather
+than duplicated.
 
 ---
 
-## Tier 2.5 — additional software verification (pre-hardware)
+## Tier 2.5 — additional software verification
 
 These items were identified during a full meta-review of the firmware, design
-doc, and test suite (2026-06-18). All close residual verification gaps that can
-be addressed in software before physical hardware testing begins.
-
-**Power-on-pressed in simavr.** The simavr harness sets the footswitch IRQ
-*before* the firmware starts (via `sim_reset(1)`), which correctly exercises
-`debounce_init_context(PIN_STATE_LOW)`. However, the simavr test for this case
-(`test_power_on_pressed`) has a known limitation: after a WDT reset, simavr
-clears PINB to 0x00, which is inconsistent with the externally-driven IRQ
-level. The golden model and model-check both cover the power-on-pressed logic
-exhaustively. Closing the simavr gap would require either (a) a simavr patch to
-preserve IRQ-driven input levels across reset, or (b) re-establishing the
-footswitch IRQ drive immediately after each simavr reset. Option (b) is
-mechanically feasible in the test harness; the WDT-backstop test already
-partially works around this.
+doc, and test suite (2026-06-18) and re-verified as open on 2026-07-26. All
+close residual verification gaps that can be addressed in software.
 
 **Formal verification of output drivers.** The output drivers (relay, mute,
 CD4053) contain blocking delays and multi-step pin sequences. They are tested by
-scenario-based simavr tests but are not formally verified. A state-machine model
-of each driver could be proved to: (a) never leave both relay coils energized
-simultaneously; (b) always park coils low after a pulse; (c) never enter an
-invalid mute/engage/bypass pin combination. The drivers are small enough
-(~30-60 lines each) that a CBMC proof or exhaustive state-space check is
-feasible. The main obstacle is that the drivers call `_delay_ms()` (a busy-wait
-loop), which CBMC cannot symbolically execute; the workaround is to stub
-`_delay_ms()` as a no-op and verify the pin sequence logic in isolation.
+scenario-based simulation tests but are not formally verified — `test_cbmc.c`
+currently proves the pure core only. A state-machine model of each driver could
+be proved to: (a) never leave both relay coils energized simultaneously;
+(b) always park coils low after a pulse; (c) never enter an invalid
+mute/engage/bypass pin combination. The drivers are small enough (~30–60 lines
+each) that a CBMC proof or exhaustive state-space check is feasible. The main
+obstacle is that the drivers call a blocking delay, which CBMC cannot
+symbolically execute; the workaround is to stub the delay as a no-op and verify
+the pin sequence logic in isolation.
 
-**ISR-timing-jitter stress test.** On real hardware, the timer ISR latency can
-vary (e.g., if `cli()` is held across the compare-match point during a toggle
-that calls `hw_force_wdt_reset()`). The existing `test_clean_press_phase_jitter`
-partially addresses this by scattering footswitch edges across the 1ms tick
-window. A more aggressive version would: (a) deliberately delay ISR servicing
-by random cycle counts (possible via simavr cycle-level control in
-`run_cycles()`); (b) verify that the firmware's debounce behavior is insensitive
-to ISR jitter — the counter increments by exactly 1 per tick regardless of when
-within the tick the ISR fires. The firmware is designed for this (the ISR
-samples the pin once per compare-match), so the test would confirm an existing
-design property rather than find a new bug.
+**Formal verification of blocking-delay safety.** The relay and mute output
+drivers call a busy-wait delay inside `hw_set_bypass_state()` /
+`hw_set_engaged_state()`. During this window the main loop cannot pet the
+watchdog, and on AVR the timer ISR continues firing and integrating the debounce
+counter. The `static_assert` guards (`CD4053_MUTE_DELAY_MS < RELEASE_THRESH`,
+`TQ2_L2_5V_PULSE_MS < RELEASE_THRESH`) already prove the delay is shorter than
+the release lockout, preventing counter drain to zero during the block. A CBMC
+proof would formalize the full safety argument: (a) the blocking delay is always
+less than the WDT timeout (trivially true — 12 ms << 250 ms — but made explicit);
+(b) the delay is always less than RELEASE_THRESH (already `static_assert`ed, but
+CBMC would prove the inequality holds for any future config change that passes
+the assert); (c) the relay coil pulse duration is within the TQ2-L2-5V datasheet
+limits. Low effort (~1–2 h). Makes the blocking-delay safety argument explicit
+rather than implicit. Note the PIC and AVR shells reach this window differently
+(polled loop vs ISR-driven), so state which shell each clause covers.
 
-**Golden-model vs model_step cross-validation.** The golden model
+**Golden-model vs `model_step` cross-validation.** The golden model
 (`test_logic_host.c`) re-implements the algorithm independently; `model_step.h`
 delegates to the real firmware's `bypass_pure.c`. Both produce identical results
 for the same input stream (verified implicitly by the lock-step co-sim and the
 model proofs), but no test drives the same random input sequence through *both*
-oracles and asserts byte-for-byte agreement. A small test (or assertion block
-added to an existing test) that compares `model_step.step()` output against
-`test_logic_host.c`'s `model_tick_isr()`+`model_main_step()` for a long random
-stream would provide a fourth independent verification path, catching any subtle
-discrepancy between the hand-written golden oracle and the compiled firmware
-logic that the current tests could theoretically miss if both relied on the same
-underlying `bypass_pure.c` functions.
-
-**Clock drift fine-grained sweep.** The existing `test_oscillator_drift_tolerance`
-checks the ±10% endpoints (drift factors 0.9 and 1.1). An exhaustive sweep
-across the full ±10% range in finer increments (e.g., 1% steps, drift factors
-0.90, 0.91, …, 1.10) would confirm that no threshold change or off-by-one-latency
-lurks at any intermediate frequency. The concern is narrow but real: the
-PRESSED_THRESH=8 tick boundary is calculated for the +10% worst case, but
-intermediate frequencies could expose a rounding or tick-count edge case in the
-ISR timing that the endpoints alone don't exercise. Mechanically simple: loop
-over drift factors, reset sim, measure latency, assert <10ms.
-
-**Power-supply ramp-up simulation.** The design assumes clean 5V at power-on, but
-real LDOs with large output capacitors can produce slow-rising VCC (tens of ms to
-reach full voltage). A slow ramp could cause the MCU to begin code execution
-before the internal oscillator stabilises, or before the footswitch's external
-pull-up reaches a valid logic high. simavr does not natively model voltage ramps,
-but the concern can be tested indirectly: (a) clock-prescale and GPIO setup are
-the first operations in `init()`, so verify these complete correctly under a
-bogus initial register state (inject pre-init register corruption via simavr's
-data array before the firmware starts); (b) confirm the 64ms SUT delay is
-sufficient for the LDO ramp by worst-case analysis (check the LP2950/AP7375
-datasheet startup time against 64ms). Item (b) is a documentation/analysis task.
-
-**VCD waveform diff across output variants.** The simavr trace target
-(`make trace`) currently produces a VCD for one variant at a time. A scripted
-comparison of the same footswitch input sequence across all three variants
-(CD4053, mute, relay) would: (a) confirm the LED (PB1) timing is byte-identical
-across variants; (b) verify that the mute and relay delays only add their fixed
-extra latency to PB2/PB3 transitions without perturbing the debounce state
-machine; (c) produce a visual artifact suitable for inclusion in the design
-documentation as empirical proof of variant-consistent behaviour. Requires
-generating three VCDs from the same input script and diffing the PB1 edges.
-
-**Cross-compiler verification.** The firmware is built with avr-gcc 7.3. A
-different AVR compiler (newer avr-gcc, or clang targeting AVR if available)
-could optimise differently, potentially altering register allocation, ISR
-prologue/epilogue timing, or the volatile-access ordering that the sanity checks
-rely on. Building the firmware with an alternative compiler and running the full
-simavr suite would catch compiler-specific behavioural changes. Classic firmware
-targets now rebuild whenever requested, but the suite does not *compare* the
-behavioural results between compiler versions; adding a
-`test-cross-compiler` target that builds with `CC=avr-gcc-12` (if installed)
-and re-runs `test-sim` would close this gap.
-
-**Stuck-switch long-duration test.** The design documents that a mechanically
-stuck (permanently closed) switch results in the firmware sitting in
-RELEASE_DEBOUNCE_WAIT indefinitely with no recovery — this is intentional.
-However, no test explicitly drives the footswitch permanently low for an
-extended simulated duration (hours) and asserts exactly zero toggles occur.
-The existing `test_long_hold_single_toggle` holds for 3-5 seconds; a
-multi-hour simavr run (or a golden-model run, which is much faster) with a
-permanent low input would make this documented behavior an explicit, enforced
-guarantee. Mechanically trivial: `drive(&m, 1, 3600000)` and assert
-`toggle_count == 1` (the one toggle from the initial press). The golden-model
-path is preferred for duration since simavr real-time ratio makes hours of
-simulated time impractical.
-
-**WDT pet frequency measurement.** The existing `test_watchdog_not_tripped_normally`
-confirms the WDT does *not* fire during normal operation, but does not verify
-the *rate* at which `wdt_reset()` is called. A more precise assertion: during
-steady-state idle operation, `wdt_reset()` should be called at approximately
-1 kHz (once per 1ms tick, gated by the `timer_isr_called_` handshake). This
-could be verified in the simavr harness by counting the number of times the
-main loop reaches the `wdt_reset()` call site over a known simulated time
-window (e.g., count over 100ms, assert 95-105 calls). Requires either a
-breakpoint hook on the `wdt_reset()` instruction sequence or a cycle-count
-measurement between consecutive WDT resets via the WDT register model. Catches
-a regression where the `timer_isr_called_` handshake is broken in a way that
-still allows occasional WDT pets (e.g., if the flag is cleared but the
-`wdt_reset()` is skipped on some iterations).
-
-**Negative static_assert verification.** The `init()` function contains several
-`static_assert` guards that enforce critical configuration constraints (e.g.,
-`RELEASE_THRESH > PRESSED_THRESH`, `PRESSED_THRESH > 0`, timer formula
-consistency). These are compile-time checks, so they are implicitly verified
-every time the firmware builds — but there is no test that confirms they
-*actually fire* when violated. A meta-test would: (a) create a throwaway copy
-of the source with a deliberately broken constraint (e.g., swap the threshold
-values in `bypass_config.h`); (b) attempt to compile; (c) assert the
-compilation fails with the expected `static_assert` diagnostic. This is
-analogous to the mutation testing approach but targets build-time guards
-rather than runtime behavior. Mechanically similar to `run_mutation_tests.sh`
-but checking for compile failure instead of test failure. Low effort (~30 min)
-and closes the gap where a future refactor could accidentally weaken or remove
-a `static_assert` without anyone noticing.
-
-**Footswitch-pin glitch regression test (simavr quirk).** The simavr harness's
-`run_one_tick_settled()` re-drives the footswitch pin on every `avr_run()`
-call to work around a known simavr modeling quirk: when the firmware does a
-read-modify-write of PORTB (to drive the LED or a control pin), simavr
-re-evaluates the IRQ-driven INPUT pin PB0 back to its pull-up level, dropping
-an externally-driven "pressed" (low) state. On real hardware, writing
-PB1/PB2/PB3 cannot disturb the PB0 switch input. The re-drive workaround is
-documented and correct, but no test *explicitly* verifies the scenario it
-prevents: a dedicated test would: (a) assert the footswitch pin LOW (pressed);
-(b) trigger a toggle so the firmware performs PORTB writes during the
-relay/mute delay; (c) measure the debounce counter immediately after the
-toggle and confirm it is not spuriously decremented (which would happen if the
-workaround were removed — simavr would feed the integrator "released" samples
-during the blocking delay). This is a meta-test: it verifies the test harness
-itself is not masking a real firmware bug. Low effort (~30 min). Prevents a
-future refactor from removing the re-drive workaround without detection.
-
-**Compiler optimization sensitivity test.** The firmware is currently built
-with a single optimization level (`-Os` for size). Different optimization
-levels (`-O0`, `-O1`, `-O2`, `-O3`) could theoretically alter register
-allocation, ISR prologue/epilogue timing, or the volatile-access ordering that
-the sanity checks and ISR/main handshake rely on. A `test-opt-sweep` Makefile
-target would build each variant with each optimization level, run the full
-simavr test suite against each build, and assert identical behavioral results.
-This catches a regression where a future code change introduces
-optimization-sensitive behavior (e.g., a missing `volatile` that happens to
-work under `-Os` but breaks under `-O2`). Mechanically simple: the Makefile
-already supports `CFLAGS` overrides and the simavr harness is variant-agnostic.
-Low effort (~1 h). Quick win with good coverage value.
-
-**Interrupt latency measurement in simavr.** The design assumes the Timer0
-compare-match ISR fires promptly and the footswitch pin is sampled within the
-same 1ms tick. No test currently measures the actual cycle count between the
-Timer0 compare-match event and the first ISR instruction, or between the ISR
-and the main-loop's consumption of the integrated counter. A simavr test would
-use cycle-accurate timing to measure: (a) ISR entry latency (compare-match to
-first ISR instruction); (b) ISR execution duration (entry to `reti`); (c) total
-interrupt-disabled time per tick. These measurements confirm the ISR overhead
-is negligible relative to the 1ms tick period (1200 cycles at 1.2 MHz), so
-timing accuracy is not compromised. Low effort (~1–2 h). Confirms a design
-assumption that is currently unmeasured.
-
-**Formal verification of `_delay_ms()` blocking safety.** The relay and mute
-output drivers call `_delay_ms()` (a busy-wait loop) inside
-`hw_set_bypass_state()` / `hw_set_engaged_state()`. During this blocking
-window, the main loop cannot pet the watchdog, and the timer ISR continues
-firing and integrating the debounce counter. The `static_assert` guards
-(`CD4053_MUTE_DELAY_MS < RELEASE_THRESH`,
-`TQ2_L2_5V_PULSE_MS < RELEASE_THRESH`) already prove the delay is shorter than
-the release lockout, preventing counter drain to zero during the block. A CBMC
-proof would formalize the full safety argument: (a) the blocking delay
-duration is always less than the WDT timeout (trivially true: 12 ms << 250 ms,
-but made explicit); (b) the delay is always less than RELEASE_THRESH (already
-static_asserted, but CBMC would prove the inequality holds for any future
-config change that passes the static_assert); (c) the relay coil pulse duration
-is within the TQ2-L2-5V datasheet limits. Implemented as a new CBMC harness in
-`test_cbmc.c` with `_delay_ms()` stubbed as a no-op. Low effort (~1–2 h).
-Makes the blocking-delay safety argument explicit rather than implicit.
-
-**Interrupt-free window measurement.** During normal operation, the firmware
-should never disable interrupts: the timer ISR and main loop both run with
-interrupts enabled (`sei()` is called once at the end of `init()` and never
-disabled during steady state). The only `cli()` calls are in `init()` (once,
-before interrupts are enabled) and in `hw_force_wdt_reset()` (fault-only path).
-A simavr test would verify this property at runtime: monitor the global
-interrupt-enable flag (I-bit in SREG) throughout a representative workload
-(idle, press, toggle, release, repeated taps) and assert it remains set at all
-times outside `init()`. This catches a regression where a future code change
-inadvertently introduces a `cli()` without a matching `sei()`, which could
-cause missed timer ticks or a WDT timeout. Low effort (~1 h). Confirms a
-design invariant that is currently only enforced by code inspection.
-
-**Stack depth cross-verification.** The firmware's stack usage is currently
-verified by two independent methods: (1) `-fstack-usage` static per-function
-frame analysis (Makefile `test-stack-bound` target, 32 B ceiling), and (2)
-simavr runtime high-water mark measurement with a 0xAA canary pattern
-(`test_stack_high_water_mark`). A third independent method — disassembly-based
-call-graph analysis — would cross-reference the other two and catch any case
-where the compiler's stack usage report disagrees with the actual binary. The
-approach: `avr-objdump -d` the firmware ELF, extract the call graph (CALL/RCALL
-instructions), compute the maximum call depth, and sum the per-function frame
-sizes from the `-fstack-usage` output. Compare the resulting static bound
-against the simavr dynamic measurement. The firmware is small enough (a dozen
-functions, max depth ~4) that this can be done with a simple script. Medium
-effort (~2–3 h). Closes the gap where a compiler bug or inline assembly could
-make the actual binary's stack usage diverge from the compiler's report.
+oracles and asserts byte-for-byte agreement. A small test comparing
+`model_step.step()` against `test_logic_host.c`'s `model_tick_isr()` +
+`model_main_step()` over a long random stream would provide a fourth independent
+verification path, catching any discrepancy between the hand-written oracle and
+the compiled firmware logic. This also becomes materially more valuable in a
+merged tree, where the independent-oracle and direct-core roles must be kept
+distinct on purpose.
 
 **Full-path symbolic execution (KLEE with bounded loops).** The existing KLEE
 path in `test_symbolic.c` proves per-step (single-tick) invariants — the
 inductive step that, combined with valid initial states, implies whole-program
 correctness. Extending this to multi-step verification would prove
-whole-trajectory properties directly: e.g., "no input sequence of length N can
+whole-trajectory properties directly: e.g. "no input sequence of length N can
 cause more than 1 toggle," or "from any valid state, any input sequence of
-length N returns to a valid state." This provides an independent argument to
-the exhaustive BFS proof in `test_model_check.c`, discharged by a different
-engine (KLEE's symbolic execution vs. explicit BFS). The infrastructure
-already exists (`-DUSE_KLEE`, `klee_make_symbolic`); the extension adds a new
-harness function with a bounded loop (e.g., `--unwind 50`) that steps the
-firmware's `debounce_integrate()` + `debounce_step()` N times with symbolic
-inputs and asserts the trajectory property. Medium effort (~2–4 h). High value
-as an independent whole-trajectory proof.
+length N returns to a valid state." This provides an independent argument to the
+exhaustive BFS proof in `test_model_check.c`, discharged by a different engine.
+The infrastructure already exists (`-DUSE_KLEE`, `klee_make_symbolic`, and the
+`test-symbolic-klee` target now links the real shipping core); the extension adds
+a harness function with a bounded loop (e.g. `--unwind 50`). Medium effort
+(~2–4 h). High value as an independent whole-trajectory proof.
 
-**Property-based testing framework.** The existing fuzz tests use a hand-rolled
-`xorshift32` PRNG with uniform random inputs. A property-based testing
-framework (e.g., rapidcheck for C/C++, or a custom generator) could generate
-more sophisticated input distributions biased toward edge cases — e.g.,
-"presses that reach exactly PRESSED_THRESH-1 then bounce," "sustained noise
-with random duty cycles," "presses with exponentially distributed hold times"
-— and automatically shrink failing cases to minimal reproductions. The current
-tests would be retained; the property-based tests would supplement them with
-more targeted input generation. The value is in finding edge cases that uniform
-random fuzzing is statistically unlikely to hit (e.g., a bug that only
-manifests when the counter reaches exactly PRESSED_THRESH-1 for 3 consecutive
-ticks, then drops to 0 for 2 ticks, then rises again). Medium effort (~2–4 h).
-Requires adding a C property-based testing library or writing custom generators.
+**KLEE in CI.** `test-symbolic-klee` and `test-klee-build` exist, and the latter
+runs in the default `test` aggregate — but that only proves the KLEE path still
+*compiles and links*. No CI job actually runs KLEE (verified: no `klee` reference
+in `.github/workflows/ci.yml`). A job using the `klee/klee` Docker image would
+prove the symbolic path is genuinely exercised. ~2 h.
 
-**Formal ISR/main interleaving model (TLA+ or SPIN).** The `test_model_check.c`
-nondeterministic scheduling proof verifies invariants I1–I3 hold when main
-runs 0, 1, or 2 times per ISR tick. However, this C-level model cannot express
-sub-byte interleavings — e.g., the ISR writing `debounce_counter` (a `uint8_t`
-on AVR, hence atomic) while main reads the `ctx_` struct (3 bytes, non-atomic
-read on 8-bit AVR). A TLA+ or SPIN model would formalize the ISR/main
-interleaving at the byte level, modeling each byte read/write as a separate
-step, and verify that all possible interleavings preserve the safety
-invariants. This would be the definitive proof that the race conditions in the
-`ctx_` struct sharing (documented in `bypass_mcu_avr_classic.c` lines 284–286 and
-analyzed in the firmware review) are truly benign. The state space is tiny (3
-bytes + 1 handshake byte + 2 program states), so the model check completes in
-milliseconds. High value as a formal concurrency-safety argument. Medium-high
-effort (~4–8 h). Overkill for a project of this size, but would be the
-strongest possible verification of the ISR/main interaction.
+**Cross-compiler verification.** The AVR firmware is built with avr-gcc 7.3. A
+different compiler (newer avr-gcc, or clang targeting AVR if viable) could
+optimise differently, potentially altering register allocation, ISR
+prologue/epilogue timing, or the volatile-access ordering the sanity checks rely
+on. Building with an alternative compiler and running the full simulation suite
+would catch compiler-specific behavioural changes. Classic firmware targets
+already rebuild on request, but nothing *compares* behavioural results between
+compiler versions. A `test-cross-compiler` target that builds with
+`CC=avr-gcc-12` (if installed) and re-runs `test-sim` would close this gap. See
+also the broader multi-compiler matrix in Tier 3, of which this is the narrow
+first step.
 
-**Signal-integrity SPICE modeling of the footswitch input network.** (NEW — from third review pass)
-The design's EMI/RFI defense includes a hardware filter (TVS, ferrite, 1k series, 22nF to ground, 10k pull-up) with a time constant τ ≈ 18 µs. The firmware's 8 ms integrator threshold is claimed to be ~80× the hardware filter corner, but this ratio is based on an order-of-magnitude estimate, not a SPICE simulation. Before the first PCB is ordered, run a SPICE transient analysis of the complete input network with: (a) a 5 kV ESD pulse (IEC 61000-4-2 contact discharge model) to verify the MCU pin stays within absolute maximum ratings and the clamped pulse does not exceed Schmitt-trigger VIL/VIH thresholds; (b) a GSM 900 MHz burst-coupled interference source on a 10 cm twisted-pair cable to verify the filtered envelope stays above VIH (does not falsely register as a press) for any burst shorter than the firmware's integration window. This is the last pre-hardware design-check gap before the board can be considered EMI-hardened by design rather than by hope. Low effort if the user already has a SPICE deck; ~2 h if starting from a schematic capture. High value as it validates the hardware assumptions the firmware relies on.
+**Compiler optimization sensitivity test.** The firmware is built at a single
+optimization level (`-Os` for size). Other levels could theoretically alter
+register allocation, ISR timing, or the volatile-access ordering the sanity
+checks and the ISR/main handshake rely on. A `test-opt-sweep` target would build
+each variant at each level, run the full simulation suite against each, and
+assert identical behavioural results — catching a regression where a change
+introduces optimization-sensitive behaviour (e.g. a missing `volatile` that
+happens to work under `-Os`). The Makefile already supports `CFLAGS` overrides
+and the harness is variant-agnostic. Low effort (~1 h), good coverage value.
 
-**Multi-press boundary-case regression tests.** (NEW — from third review pass)
-The existing tests cover the principle press-release scenarios well, but three specific boundary combinations are not explicitly asserted: (a) two back-to-back PRESSED_THRESH-minus-one intervals (total 2×(PRESSED_THRESH−1) = 14 ms > PRESSED_THRESH = 8 ms, but the counter never holds at threshold long enough because each interval drops before the next rise) — must produce zero toggles; (b) release-bounce that lands exactly when the lockout counter is at 1 (a single-tick press during drain raises counter to 2, then drain resumes to 0) — must delay re-arm by one tick but still re-arm correctly; (c) the maximum-frequency tap train at exactly PRESSED_THRESH + RELEASE_THRESH intervals (33 ms apart) — the fastest clean press the algorithm can theoretically register, repeated 10–20 presses to verify no drift or missed taps at the rate limit. These three scenarios exercise the integrator's saturating behavior at the exact tick boundaries that matter. Add them to both `test_logic_host.c` (fast golden-model regression) and `test_sim.c` (instruction-accurated firmware confirmation). Low effort (~1 h per scenario; 3–4 h total).
+**Stack depth cross-verification.** Stack usage is currently verified two ways:
+`-fstack-usage` static per-function frame analysis (`test-stack-bound`, 32 B
+ceiling) and runtime high-water measurement with a canary pattern
+(`test_stack_high_water_mark`). A third independent method — disassembly-based
+call-graph analysis — would cross-reference the other two and catch any case
+where the compiler's report disagrees with the actual binary. Approach:
+`avr-objdump -d` the ELF, extract the call graph (CALL/RCALL), compute maximum
+call depth, sum the per-function frame sizes, compare against the dynamic
+measurement. The firmware is small enough (a dozen functions, max depth ~4) for a
+simple script. Medium effort (~2–3 h). Note XC8 does not support
+`-fstack-usage`; its `--callgraph` output is the PIC equivalent if this is
+extended there.
+
+**Negative `static_assert` verification.** `init()` and the config headers
+contain several `static_assert` guards enforcing critical constraints
+(`RELEASE_THRESH > PRESSED_THRESH`, `PRESSED_THRESH > 0`, timer formula
+consistency, pin-ordinal agreement). These are compile-time checks, implicitly
+verified on every build — but no test confirms they *actually fire* when
+violated. A meta-test would copy the source with a deliberately broken
+constraint, attempt to compile, and assert the build fails with the expected
+diagnostic. Mechanically similar to `run_mutation_tests.sh` but checking for
+compile failure rather than test failure. Low effort (~30 min); closes the gap
+where a refactor could weaken or remove a guard unnoticed.
+
+**Clock drift fine-grained sweep.** `test_oscillator_drift_tolerance` checks only
+the ±10% endpoints (drift factors 0.9 and 1.1). An exhaustive sweep in finer
+increments (1% steps) would confirm no threshold change or off-by-one latency
+lurks at any intermediate frequency. The concern is narrow but real: the
+PRESSED_THRESH=8 tick boundary is calculated for the +10% worst case, and
+intermediate frequencies could expose a rounding or tick-count edge case the
+endpoints alone miss. Mechanically simple: loop over drift factors, reset sim,
+measure latency, assert <10 ms.
+
+**Stuck-switch long-duration test.** The design documents that a mechanically
+stuck (permanently closed) switch leaves the firmware in RELEASE_DEBOUNCE_WAIT
+indefinitely with no recovery — intentional. But no test drives the footswitch
+permanently low for an extended duration and asserts exactly zero further
+toggles. `test_long_hold_single_toggle` holds for 3–5 seconds; a multi-hour
+golden-model run with a permanent low input would make this documented behaviour
+an enforced guarantee. Mechanically trivial. Use the golden-model path for
+duration — the simulator's real-time ratio makes hours impractical.
+
+**WDT pet frequency measurement.** `test_watchdog_not_tripped_normally` confirms
+the WDT does not fire during normal operation, but does not verify the *rate* at
+which it is petted. During steady-state idle the pet should occur at
+approximately 1 kHz (once per 1 ms tick, gated on AVR by the `timer_isr_called_`
+handshake). Verifiable by counting pet-site executions over a known simulated
+window (e.g. 95–105 over 100 ms). Catches a regression where the handshake is
+broken in a way that still allows occasional pets. Applies to both the AVR
+handshake and the PIC polled loop, with different expected counts — note the PIC
+loses ticks during blocking actuation, so its expectation must budget for that.
+
+**Interrupt-free window measurement.** During normal operation the AVR firmware
+should never disable interrupts: `sei()` is called once at the end of `init()`
+and never disabled in steady state. The only `cli()` calls are in `init()` and in
+the forced-reset fault path. A simulation test would monitor the I-bit in SREG
+across a representative workload (idle, press, toggle, release, repeated taps)
+and assert it stays set outside `init()`. Catches a regression introducing a
+`cli()` without a matching `sei()`, which could cause missed ticks or a WDT
+timeout. Low effort (~1 h). Confirms a design invariant currently enforced only
+by code inspection.
+
+**Multi-press boundary-case regression tests.** Existing tests cover the
+principal press-release scenarios well, but three boundary combinations are not
+explicitly asserted: (a) two back-to-back PRESSED_THRESH-minus-one intervals
+(total 14 ms > PRESSED_THRESH = 8 ms, but the counter never holds at threshold
+long enough because each interval drops before the next rise) — must produce zero
+toggles; (b) release-bounce landing exactly when the lockout counter is at 1 (a
+single-tick press during drain raises the counter to 2, then drain resumes to 0)
+— must delay re-arm by one tick but still re-arm correctly; (c) a
+maximum-frequency tap train at exactly PRESSED_THRESH + RELEASE_THRESH intervals
+(33 ms apart), the fastest clean press the algorithm can register, repeated 10–20
+times to verify no drift or missed taps at the rate limit. These exercise the
+integrator's saturating behaviour at the exact tick boundaries that matter. Add
+to both the golden-model regression and the instruction-accurate firmware
+confirmation. ~3–4 h total.
+
+**Power-on-pressed simulation gap.** The simavr harness sets the footswitch IRQ
+*before* the firmware starts (via `sim_reset(1)`), correctly exercising
+`debounce_init_context(PIN_STATE_LOW)`. The known limitation: after a WDT reset,
+simavr clears PINB to 0x00, inconsistent with the externally-driven IRQ level.
+The golden model and model check both cover the power-on-pressed logic
+exhaustively, so this is a simulator-fidelity gap rather than a coverage gap.
+Closing it needs either a simavr patch preserving IRQ-driven input levels across
+reset, or re-establishing the footswitch IRQ drive immediately after each reset —
+option two is mechanically feasible in the harness, and the WDT-backstop test
+already partially works around it.
+
+**Power-supply ramp-up analysis.** The design assumes clean 5 V at power-on, but
+real LDOs with large output capacitors can produce slow-rising VCC (tens of ms).
+A slow ramp could let the MCU begin executing before the internal oscillator
+stabilises or before the footswitch pull-up reaches a valid logic high. simavr
+does not model voltage ramps, but the concern can be addressed indirectly:
+(a) clock-prescale and GPIO setup are the first operations in `init()`, so verify
+they complete correctly under a bogus initial register state (inject pre-init
+register corruption before the firmware starts); (b) confirm by worst-case
+analysis that the 64 ms SUT delay covers the LDO ramp (check the LP2950/AP7375
+datasheet startup time against 64 ms). Item (b) is a documentation task and pairs
+naturally with the Tier 2 datasheet-citation item.
 
 ---
 
@@ -411,410 +243,180 @@ is structural: simavr cannot model the ATtiny13a watchdog system reset (only the
 tinyx5 family), so the headline WDT-recovery guarantee on the *primary* part is
 asserted by analogy, not direct simulation. Document a bench procedure: scope
 PB1/PB2, artificially stop the ISR, confirm the device resets to BYPASS within
-the WDT window; plus power-on glitch and BOD behavior. Bridges to the
-manufacturing item below.
+the WDT window; plus power-on glitch and BOD behaviour. Bridges to the HIL item
+below, which is its automated realisation — keep this as the no-rig fallback.
 
-**Inverted-copy (complemented) storage of the debounce context.** (NEW — from
-the 2026-07-01 meta-review) The main-loop sanity gate detects *out-of-range*
-corruption of `ctx_` (`program_state > RELEASE_DEBOUNCE_WAIT`,
-`effect_state > ENGAGED`, `debounce_counter > RELEASE_THRESH`), but a
-single-event upset that lands *in* range is invisible to it. Concretely:
-(a) a `program_state` flip RELEASE_DEBOUNCE_WAIT→PRESS_DEBOUNCE_WAIT while the
-lockout counter is still ≥ PRESSED_THRESH causes an **immediate spurious
-toggle** — the worst case, audible; (b) an in-range `debounce_counter` flip
-(e.g. 3→19, bit 4) can cross PRESSED_THRESH and likewise toggle without a
-press; (c) an `effect_state` flip silently inverts the meaning of the next
-press (it re-asserts the current physical state, so one press "does nothing").
-The classic hardening is complement storage: keep a second copy of the context
-with all bits inverted (`ctx_inv_`), update both at every write site, and have
-the existing per-tick sanity gate verify `ctx_ == ~ctx_inv_` byte-wise,
-forcing the WDT reset (→ safe BYPASS) on mismatch. Any single bit flip in
-either copy is then detected within one tick.
+**Inverted-copy (complemented) storage of the debounce context.** The main-loop
+sanity gate detects *out-of-range* corruption of `ctx_` (`program_state >
+RELEASE_DEBOUNCE_WAIT`, `effect_state > ENGAGED`, `debounce_counter >
+RELEASE_THRESH`), but a single-event upset landing *in* range is invisible to it.
+Concretely: (a) a `program_state` flip RELEASE_DEBOUNCE_WAIT→PRESS_DEBOUNCE_WAIT
+while the lockout counter is still ≥ PRESSED_THRESH causes an **immediate
+spurious toggle** — the worst case, audible; (b) an in-range `debounce_counter`
+flip (e.g. 3→19, bit 4) can cross PRESSED_THRESH and likewise toggle without a
+press; (c) an `effect_state` flip silently inverts the meaning of the next press
+(it re-asserts the current physical state, so one press "does nothing"). The
+classic hardening is complement storage: keep a second copy with all bits
+inverted, update both at every write site, and have the per-tick sanity gate
+verify `ctx_ == ~ctx_inv_` byte-wise, forcing the WDT reset (→ safe BYPASS) on
+mismatch. Any single bit flip in either copy is then detected within one tick.
 
 Design notes if picked up:
 - Keep `bypass_pure.c` untouched — the shadow is shell-owned fault-detection
   mechanics, not algorithm; the pure core and its proofs stay as they are.
-- AVR: the ISR writes `debounce_counter` every tick, so a naive 3-byte
-  shadow check in main races the ISR (ISR fires between main reading a byte
-  and its complement → false mismatch → spurious reset). Two clean options:
-  shadow only the two main-loop-owned state bytes (no race by construction;
-  still catches cases (a) and (c), and the counter is already range-checked
-  and self-correcting); or full 3-byte shadow with pair-update in the ISR and
-  a read-pair-retry in main (a mismatch is re-read once; only a *persistent*
-  mismatch is corruption). Do NOT reach for cli/sei around the check — that
-  would break the documented "no interrupts disabled in steady state"
-  invariant.
-- PIC: single-threaded polled loop, so a full 3-byte shadow is trivial — but
-  watch the flash budget (the mute variants are the tightest at ~83% of 512
-  words; `make pic` gates it). RAM cost is +2–3 bytes against ~29 B free on
-  the ATtiny13a and ~30 B on the PIC10F322 — comfortably affordable.
+- AVR: the ISR writes `debounce_counter` every tick, so a naive 3-byte shadow
+  check in main races the ISR (ISR fires between main reading a byte and its
+  complement → false mismatch → spurious reset). Two clean options: shadow only
+  the two main-loop-owned state bytes (no race by construction; still catches
+  cases (a) and (c), and the counter is already range-checked and
+  self-correcting); or a full shadow with pair-update in the ISR and a
+  read-pair-retry in main (a mismatch is re-read once; only a *persistent*
+  mismatch is corruption). Do NOT reach for cli/sei around the check — that would
+  break the documented "no interrupts disabled in steady state" invariant.
+- PIC10F322: single-threaded polled loop, so a full shadow is trivial — but watch
+  the flash budget, which `make pic` gates. RAM cost is +2–3 bytes against ample
+  free space on both parts.
+- PIC10F320: almost certainly does not fit. Check against its budget before
+  promising cross-target parity, and record the omission if it cannot be done.
 - Tests: extend both fault-injection suites with an **in-range** flip case
   (simavr t85: flip `effect_state` 0↔1, expect WDT reset; gpsim: same via the
-  ctx_ cases, which today deliberately inject only out-of-range values
-  precisely because in-range flips are undetectable), plus a mutation
-  ("shadow update removed at one write site") proving the suite catches a
-  maintenance slip.
+  ctx_ cases, which today deliberately inject only out-of-range values precisely
+  because in-range flips are undetectable), plus a mutation ("shadow update
+  removed at one write site") proving the suite catches a maintenance slip.
 
 Effort: ~3–6 h incl. tests; firmware edits are the user's. Impact: Medium —
 closes the last undetectable single-bit-corruption class in the global state
 under the project's cosmic-ray/EMI threat model. This is genuinely platinum:
-range checks + WDT already exceed typical practice for this device class, and
-the next rung above complement storage (TMR / triple modular redundancy) is
-out of proportion for a guitar pedal.
+range checks + WDT already exceed typical practice for this device class, and the
+next rung above complement storage (triple modular redundancy) is out of
+proportion for a guitar pedal.
 
-**KLEE in CI.** `test_symbolic.c` already supports `-DUSE_KLEE` and there is a
-`test-symbolic-klee` target; a CI job (klee/klee Docker image) would prove the
-symbolic path is actually exercised, not merely compilable.
+**Broader compiler & toolchain portability.** Motivated less by any single MCU
+than by two project goals: lowering the barrier for others to adopt/contribute,
+and surfacing latent defects that a single compiler can mask
+(register-allocation, volatile-ordering, ISR prologue/epilogue, UB that happens
+to "work" under one optimizer). Two strands:
 
-**tinyAVR 2-Series (ATtiny202) support.** The ATtiny202 is the natural
-next-generation successor to the ATtiny13a: 8-pin SOT-23 or DFN-8, 2 KB flash,
-256 B SRAM, capable at 3.3 V/5 V. However it is based on the AVR8X architecture
-(tinyAVR 2-Series), a complete peripheral redesign — the ISA is
-backward-compatible but virtually every register differs: GPIO is
-`PORTA.DIR`/`PORTA.OUT`/`PORTA.IN` instead of `DDRB`/`PORTB`/`PINB`; the timer
-is TCA0/TCB0 (different ISR vectors, different CTC setup); the WDT uses
-`WDT.CTRLA`; the clock prescaler is `CLKCTRL.MCLKCTRLB`; sleep is
-`SLPCTRL.CTRLA`. Programming uses UPDI (not ISP/SPI), requiring a different
-avrdude programmer. Fuse bytes are a completely different layout
-(`FUSE.WDTCFG`, `FUSE.BODCFG`, etc.).
+- *Modern pure-FSF AVR toolchain.* Build and document a canonical open toolchain
+  from stable upstream sources (`binutils` ≥ 2.41, `gcc` ≥ 13 avr target,
+  `avr-libc` ≥ 2.2.0 from github.com/avrdudes/avr-libc). avr-libc 2.2.0 has
+  **native ATtiny202 support** — no atpack at all — so this both modernizes the
+  AVR story and removes the one Microchip-hosted dependency the current ATtiny202
+  build accepts. Heavier (a from-source build plus a documented procedure) but
+  100% FSF and reproducible; keep it as the escape hatch if the packaged 7.3.0
+  toolchain ever blocks a modern device.
+- *Multi-compiler CI matrix.* Generalize the narrow cross-compiler item in
+  Tier 2.5 into a matrix building the firmware under several open toolchains
+  (multiple avr-gcc versions; clang's AVR target where viable) and running the
+  full behavioural suite against each, asserting identical results. Each added
+  compiler is both an adoption on-ramp and an independent bug-detector.
 
-The algorithm (`bypass_pure.c`) and all host-side tests are already fully
-portable. The output abstraction (`bypass_hw_iface.h`) is partially complete —
-effect state switching is already behind the interface — but the following
-remain in `bypass_mcu_avr_classic.c` as classic-AVR code not yet abstracted: timer setup
-and ISR vector, WDT arm/reset/clear, clock prescaler, ADC/analog-comparator
-disable, power gating, sleep, interrupt controller setup, and footswitch pin
-reading. The output drivers also use `DDRB` directly in `hw_init_ddrb_setup()`
-and `hw_is_sanity_check_failed()`.
+Effort: Medium (mostly CI plumbing plus a documented from-source build). Impact:
+Medium-High — adoption plus a genuine reliability net.
 
-The clean implementation path is: (1) extend `bypass_hw_iface.h` with
-primitives for footswitch read, pin direction, WDT reset, idle sleep, and MCU
-init; (2) move the classic-AVR implementations of those behind that interface
-within `bypass_mcu_avr_classic.c` (the shell, already renamed from the former
-`bypass_core.c`), separating the still-inline register code from the portable
-main loop; (3) update the output drivers to call `hw_pin_set_output(pin)`
-instead of writing `DDRB` directly; (4) write `bypass_mcu_avr_xt.c` implementing
-the same interface with AVR8X registers; (5) add `attiny202` to the Makefile
-(trivial given the existing template structure); (6) add ATtiny202 fuse config
-and extend `test_fuses.c`.
+**Hardware-in-the-loop (HIL) validation rig with register-level introspection.**
+The simavr (AVR Classic), libgpsim (PIC), and yasimavr (AVR-XT) suites prove the
+shells in simulation, but two gaps remain:
 
-The significant open gap is **simavr**: its AVR8X/tinyAVR-2-Series support is
-limited to nonexistent, so the fault-injection and lock-step co-simulation tests
-cannot automatically extend to ATtiny202. Options are: accept that the ATtiny202
-build is validated by static analysis + CBMC + model check + real hardware (no
-simulation layer); or evaluate QEMU's AVR plugin, which has a better AVR8X
-trajectory.
+- (a) **No cycle-accurate simulator for the AVR-XT target.** yasimavr runs real
+  ATtiny202 firmware and is a genuine behavioural simulator, but it executes
+  approximately one cycle per instruction with no multi-cycle timing model — so
+  busy-wait pulse widths come out at roughly half their real duration, and
+  absolute timing has to be recovered from a disassembly oracle rather than
+  measured in the simulator. Instruction-level behaviour is covered; cycle-level
+  timing is not.
+- (b) **No existing test observes internal state on real silicon.** The suites
+  assert I/O behaviour, not that the behaviour arises from the intended internal
+  trajectory.
 
-*Implementation-path correction (2026-07-09).* Steps (1)/(2) above ("extend
-`bypass_hw_iface.h` with MCU primitives ... move the classic-AVR implementations
-behind that interface") are **superseded** by the pattern the project actually
-settled on with the PIC shell: `bypass_hw_iface.h` is the *output-driver*
-boundary ONLY (`hw_pin_set_*`, `hw_led_pin_set_*`, `hw_configure_output_pins`,
-`hw_output_pins_intact`, plus the driver-provided bypass/engage/sanity/init).
-Every MCU-core primitive (footswitch read, WDT arm/pet, clock/peripheral
-bring-up, tick source, wait-for-tick, `hw_force_wdt_reset`,
-`hw_critical_sfrs_intact`, `init`, `main`) is shell-private and re-written per
-shell. So ATtiny202 support = a THIRD standalone shell `src/bypass_mcu_avr_xt.c`
-(+ pin map `src/bypass_pins_avr_xt.h`, a `BYPASS_MCU_AVR_XT` branch in
-`bypass_output_common.h` / `bypass_config.h`), structured like
-`bypass_mcu_pic10f322.c`, reusing the pure core and all three output drivers
-unchanged. No refactor of the existing shells is required.
+A HIL rig closes both: it re-hosts the behavioural suites on real parts and adds
+register-level introspection, supporting a claim that the firmware matches its
+formal model at the register level on real silicon — which most reference
+firmware cannot make.
 
-*Toolchain decision (Phase 0 gate, 2026-07-09).* Path A chosen: keep the
-open-source **apt** toolchain (`gcc-avr` 7.3.0 / `binutils-avr` 2.26 /
-`avr-libc` from Ubuntu universe) and vendor ONLY the tinyAVR device-description
-files (spec, `<avr/io.h>` device header `iotn202.h`, `crtattiny202.o`) from a
-pinned, SHA-verified **ATtiny_DFP atpack**. Rationale: the packaged binutils
-already has the `avrxmega3` (AVR8X) linker emulation and gcc-avr ships the
-`avrxmega3` runtime libs -- the compiler/as/ld are open apt packages and already
-speak the ISA; only per-device data is missing. This is the exact `-B`/`-I`
-device-pack injection pattern the repo already uses for the PIC DFP, and is a
-STRICTLY smaller openness compromise than PIC (there the whole *compiler* XC8 is
-closed; here only static, permissively-licensed device files are external). The
-atpack is a direct, no-account, no-EULA, version-pinned static download
-(`packs.download.microchip.com/Microchip.ATtiny_DFP.<ver>.atpack`, HTTP 200, no
-auth header, indexed by `index.idx`), so a `scripts/fetch_attiny_dfp.sh` can pin
-version + SHA-256 and extract just the ~4 attiny202 files, keeping build-time
-independence from the URL. Fallback if gcc 7.3/binutils 2.26 cannot digest a
-modern atpack's spec/crt: Option B below.
-
-**Broader compiler & toolchain portability (adoption + reliability).** (NEW --
-2026-07-09) Motivated less by any single MCU than by two project goals: lowering
-the barrier for others to adopt/contribute, and surfacing latent defects that a
-single compiler can mask (register-allocation, volatile-ordering, ISR
-prologue/epilogue, UB that happens to "work" under one optimizer). Two concrete
-strands:
-- *Modern pure-FSF AVR toolchain (Option B from the ATtiny202 Phase 0 review).*
-  Build/document a canonical open toolchain from stable upstream sources
-  (`binutils` >= 2.41 @ ftp.gnu.org, `gcc` >= 13 avr target, `avr-libc` >= 2.2.0
-  @ github.com/avrdudes/avr-libc). avr-libc 2.2.0 has **native attiny202
-  support** -- no atpack at all -- so this both modernizes the AVR story and
-  removes the one Microchip-hosted dependency the Path-A ATtiny202 gate accepts.
-  Heavier (a from-source build + a documented build procedure) but 100% FSF and
-  reproducible; keep it as the escape hatch if the packaged 7.3.0 toolchain ever
-  blocks a modern device.
-- *Multi-compiler CI matrix.* Generalize the narrow "Cross-compiler
-  verification" item (Tier 2.5, avr-gcc-12) into a matrix that builds the
-  firmware under several open toolchains (multiple avr-gcc versions; clang's AVR
-  target where viable) and runs the full behavioral suite against each, asserting
-  identical results. Each added compiler is both an adoption on-ramp and an
-  independent bug-detector for the reliability goals. Effort: Medium (mostly CI
-  plumbing + a documented from-source toolchain build). Impact: Medium-High --
-  adoption + a genuine reliability net.
-
-**Hardware-in-the-loop (HIL) validation rig with register-level
-introspection.** The simavr (AVR Classic) and libgpsim (PIC) suites prove
-the shells in simulation, but two gaps remain: (a) the ATtiny202/AVR8X
-target has no scriptable instruction-level simulator (see the tinyAVR item
-above — simavr's AVR8X support is nonexistent, and QEMU-AVR models only
-ATmega peripherals, not the AVR8X TCA/TCB/CLKCTRL/virtual-port set), so its
-shell would otherwise be validated by static analysis + real hardware only;
-and (b) no existing test observes *internal state* on real silicon — the
-suites assert I/O behaviour, not that the behaviour arises from the intended
-internal trajectory. A HIL rig closes both: it re-hosts the behavioural
-suites on real parts and adds register-level introspection, letting us claim
-the firmware matches its formal model at the register level on real
-automotive-grade silicon — a claim most reference firmware cannot make.
-
-*On-chip debug reality (verified 2026-07-08).* All three families expose
-full internal state (SRAM, registers, I/O) over an on-chip debug interface,
-but only in **stop mode** — halt the core at a breakpoint, then read memory.
-None of these 8-bit parts have data trace (continuous non-intrusive
-streaming of internals while running; that is a Cortex-M SWO/ITM feature),
-so internal state is snapshotted at breakpoints, which perturbs timing. Per
-family:
-- AVR Classic (t13a/x5): debugWIRE (1-wire, over RESET). Open-source host:
-  Bloom (https://github.com/bloombloombloom/Bloom) → GDB remote-serial. Full
-  SRAM/regs/IO when halted; HW breakpoints. Takes over RESET via DWEN fuse.
-- AVR8X (ATtiny202): UPDI (1-wire, own pin). Open-source host: Bloom → GDB;
-  its Insight view reads all data-space registers, GPIO, RAM/EEPROM and
-  peripherals. 8-pin budget is tight; MPLAB SNAP needs the R48 mod + a UPDI
-  pull-up.
+*On-chip debug reality (verified 2026-07-08).* All three families expose full
+internal state (SRAM, registers, I/O) over an on-chip debug interface, but only
+in **stop mode** — halt at a breakpoint, then read memory. None of these 8-bit
+parts have data trace (continuous non-intrusive streaming while running; that is
+a Cortex-M SWO/ITM feature), so internal state is snapshotted at breakpoints,
+which perturbs timing. Per family:
+- AVR Classic (t13a/x5): debugWIRE (1-wire, over RESET). Open-source host: Bloom
+  (https://github.com/bloombloombloom/Bloom) → GDB remote-serial. Full
+  SRAM/regs/IO when halted; HW breakpoints. Takes over RESET via the DWEN fuse.
+- AVR-XT (ATtiny202): UPDI (1-wire, own pin). Open-source host: Bloom → GDB; its
+  Insight view reads all data-space registers, GPIO, RAM/EEPROM and peripherals.
+  The 8-pin budget is tight; MPLAB SNAP needs the R48 mod plus a UPDI pull-up.
 - PIC10F32x: ICD via ICSP (2-wire). Weakest of the three — needs the bond-out
-  debug header (AC244045) for full ICD, and there is no open-source host
-  (MPLAB X only), ~1 HW breakpoint. (Ironic: best simulator, worst silicon
-  debug.)
+  debug header (AC244045) for full ICD, and there is no open-source host (MPLAB X
+  only), ~1 HW breakpoint. (Ironic: best simulator, worst silicon debug.)
+
 One cheap probe covers the whole fleet: MPLAB SNAP (~$20) speaks debugWIRE,
 UPDI, and ICSP; Bloom drives it for the AVR sides and exposes a GDB server
-scriptable from Python (e.g. pygdbmi).
+scriptable from Python.
 
-*Two-plane architecture.* Because the firmware is deterministic and
-tick-driven, behaviour and internal state are validated over *identical*
-stimulus in two passes:
+*Two-plane architecture.* Because the firmware is deterministic and tick-driven,
+behaviour and internal state are validated over *identical* stimulus in two
+passes:
 1. Behavioural plane (real-time, non-intrusive): a dedicated driver MCU (an
-   RP2040/Pico — PIO gives µs-precise edge generation + timestamped capture)
+   RP2040/Pico — PIO gives µs-precise edge generation plus timestamped capture)
    replays footswitch patterns and records LED/relay edges. This is the
-   simavr/gpsim behavioural suite re-hosted in hardware, and the home for the
-   flaky/aging-switch models. Host orchestrates in Python and compares output
+   simulation behavioural suite re-hosted in hardware, and the home for the
+   flaky/aging-switch models. The host orchestrates in Python and compares output
    timing against the golden model.
-2. Introspection plane (stop-mode): SNAP + Bloom + GDB, scripted from Python
-   — breakpoint at end-of-tick, dump {integrator, effect_state, lockout,
-   ctx_, ~ctx_}, assert equality with the golden model's prediction for that
-   tick. This is `model_step.h` lock-step lifted onto real silicon: same
-   golden model, same comparison discipline, substrate changed from a
-   simulator's memory to a chip's SRAM over a wire.
-Run both planes over bit-identical stimulus (same driver MCU replaying the
-same recorded waveform); determinism guarantees plane 2 reproduces plane 1,
-so the internal-state proof and behavioural proof describe the same run.
-State matching the model at every tick boundary is the "by design, not by
-accident" evidence.
+2. Introspection plane (stop-mode): SNAP + Bloom + GDB, scripted from Python —
+   breakpoint at end-of-tick, dump the context, assert equality with the golden
+   model's prediction for that tick. This is `model_step.h` lock-step lifted onto
+   real silicon: same golden model, same comparison discipline, substrate changed
+   from a simulator's memory to a chip's SRAM over a wire.
+
+Run both planes over bit-identical stimulus; determinism guarantees plane 2
+reproduces plane 1, so the internal-state proof and behavioural proof describe
+the same run. State matching the model at every tick boundary is the "by design,
+not by accident" evidence.
 
 *Caveats to design in.*
 - Stop-mode perturbs timing — it is a separate pass, never layered on the
   behavioural run.
-- Software breakpoints rewrite flash (wear); prefer the limited HW
-  breakpoints, or treat dev parts as consumable.
-- Aging switches are partly analog (rising contact resistance, marginal /
-  intermittent opens — exactly what the integrator exists to reject).
-  Logic-level replay covers the debounce *logic*; testing the analog margin
-  needs an analog stage (series MOSFET or digital pot) ahead of the input
-  pin — a dedicated sub-tier.
-- Prefer stop-mode introspection over a telemetry firmware build: telemetry
-  is a different binary (observer effect) and the ATtiny202's 8 pins are
-  nearly all spoken for. Stop-mode keeps the shipped binary un-instrumented.
-- Determinism boundary: WDT/BOD async events and power-on/reset ramp timing
-  are where the two passes could diverge; make the driver MCU the single
-  source of truth for reset and input timing.
+- Software breakpoints rewrite flash (wear); prefer the limited HW breakpoints,
+  or treat dev parts as consumable.
+- Aging switches are partly analog (rising contact resistance, marginal or
+  intermittent opens — exactly what the integrator exists to reject). Logic-level
+  replay covers the debounce *logic*; testing the analog margin needs an analog
+  stage (series MOSFET or digital pot) ahead of the input pin — a dedicated
+  sub-tier.
+- Prefer stop-mode introspection over a telemetry firmware build: telemetry is a
+  different binary (observer effect) and the ATtiny202's 8 pins are nearly all
+  spoken for. Stop-mode keeps the shipped binary un-instrumented.
+- Determinism boundary: WDT/BOD async events and power-on/reset ramp timing are
+  where the two passes could diverge; make the driver MCU the single source of
+  truth for reset and input timing.
 
-Relationship to the "Hardware-validation procedure doc" item below: the HIL
-rig is the automated realisation of that manual bring-up procedure (notably
-the primary-part WDT-reset check simavr cannot model); keep the manual doc
-as the no-rig fallback rather than deleting it. The rig is substrate-general,
-so it back-fills AVR Classic and (via the AC244045 header) the PIC too.
+Effort: large — rough phasing: (1) behavioural plane on one AVR target with the
+Pico driver plus Python orchestration (~1–2 days); (2) introspection plane via
+Bloom/SNAP/GDB with the `model_step.h` comparator (~1–2 days); (3) aging/analog
+switch sub-tier (~1 day plus hardware); (4) generalise across families (~1–2 days
+each). Impact: High — enables a register-level "validated against the formal
+model on real silicon" claim, and is the primary mitigation for the AVR-XT
+cycle-timing gap. All test/rig plus docs work (no firmware-source changes), so it
+is outside the firmware-edit-by-user constraint.
 
-Effort: large — rough phasing: (1) behavioural plane on one AVR target with
-the Pico driver + Python orchestration (~1–2 days); (2) introspection plane
-via Bloom/SNAP/GDB with the `model_step.h` comparator (~1–2 days); (3)
-aging/analog switch sub-tier (~1 day + hardware); (4) generalise across
-families (~1–2 days each). Impact: High — enables a register-level
-"validated against the formal model on real silicon" claim, and is the
-primary mitigation for the ATtiny202 simulator gap. All of this is test/rig
-+ docs work (no firmware-source changes), so it is outside the
-firmware-edit-by-user constraint.
-
-**PIC MCU family support (PIC10F320/PIC10F322).** These are 8-pin, 256–512 word
-flash enhanced mid-range PICs targeted at low-power embedded control — a natural
-companion to the ATtiny13a for this application. The debounce algorithm
-(`bypass_pure.c`) and all host-side tests (model check, CBMC, logic host) are
-already fully portable. The hardware shell, build system, programmer integration,
-and simulation layer all need new PIC-specific implementations. Six sequential
-phases:
-
-**STATUS (2026-06-26):** Phases 1–4 and 6 were implemented for the **PIC10F322**
-on branch `pic10f32x_support` (see the "PIC branch meta-review" section above).
-The **PIC10F320 was subsequently determined NOT viable** — its 256-word flash is
-~100 words short for even the smallest variant under free-tier XC8, and no
-correctness-preserving size reduction closes the gap. Full measurements and
-rationale: `docs/pic10f320_feasibility.md`. The original six-phase plan below is
-retained for historical context.
-
-*Phase 0 — toolchain and simulator feasibility gate (completed: ~2 h).* gpsim
-0.32.1 (Ubuntu/Debian: `apt install gpsim`) has confirmed working support for
-both PIC10F320 and PIC10F322: both appear in the processor list, the device
-loads and executes instructions, and all key peripherals are accessible by name —
-`porta` (0x05), `trisa` (0x06), `tmr0` (0x01), `intcon` (0x0B), `option_reg`
-(0x0E), `wdtcon` (0x30), `iocap`/`iocan`/`iocaf` (0x1A–0x1C). A `SetProcessor
-ByType FIXME` warning appears on load but is benign. No gpsim C development
-headers are installed with the package, so simulation tests will use gpsim's
-built-in script/command interface (`.stc` files or piped CLI commands) rather
-than a C embedding API analogous to simavr; this means the simulation layer will
-be real but shallower than the AVR suite (no lock-step co-simulation in the same
-style, no cycle-accurate fault injection). For the compiler: Microchip XC8 free
-tier, Linux `.run` installer from Microchip.com (requires a free account); the
-free tier's optimization restrictions are inconsequential for this firmware's
-size. For the programmer: `pk2cmd` (open-source Linux binary) for PICkit 2;
-PICkit 3/4 on Linux uses `ipecmd.sh`, the headless CLI that ships inside the
-MPLAB X installer package — MPLAB X IDE itself need not be launched.
-
-*Phase 1 — hardware abstraction refactor (~1–2 days, shared with ATtiny202).*
-This is a prerequisite for both PIC and the ATtiny202 entry above. The firmware
-currently has two abstraction gaps: (a) `bypass_mcu_avr_classic.c` contains AVR-specific
-timer setup, WDT arm/reset, clock prescaler, sleep invocation, interrupt
-controller init, and footswitch pin read as inline classic-AVR register writes;
-(b) the output drivers (`bypass_output_cd4053_simple.c`,
-`bypass_output_tq2_l2_5v_relay.c`, `bypass_output_cd4053_with_mute.c`) write
-`DDRB` directly in `hw_init_ddrb_setup()` and `hw_is_sanity_check_failed()`.
-Close both gaps: extend `bypass_hw_iface.h` with primitives for footswitch read,
-pin direction setup, WDT arm/reset/pet, sleep invocation, and MCU init; factor
-the classic-AVR register code behind that interface within
-`bypass_mcu_avr_classic.c` (the shell already renamed from `bypass_core.c`);
-update the output drivers to use the abstracted pin direction calls. All existing
-tests must pass unchanged — this is a restructuring, not a behavioral change.
-
-*Phase 2 — PIC hardware shell (~1–2 days).* Write `bypass_mcu_pic10f32x.c`
-implementing `bypass_hw_iface.h` for PIC10F322. Key architectural differences
-from AVR: GPIO uses `TRISA`/`PORTA` instead of `DDRB`/`PORTB`; there is no
-SLEEP_IDLE equivalent (the main oscillator stops during SLEEP), so the main loop
-switches to a WDT-periodic-wakeup pattern — sample, debounce, update outputs,
-CLRWDT, SLEEP; WDT wakes every ~1 ms via the internal LFINTOSC (31 kHz),
-independent of the main oscillator. This is architecturally cleaner than the
-AVR design: the WDT serves both roles (periodic waker when sleeping, fault-reset
-watchdog when stuck awake) without the `timer_isr_called_` handshake flag. The
-tradeoff is timing precision: LFINTOSC has ±10–15% variation with temperature
-and voltage, so the 1 ms tick becomes 0.85–1.15 ms in practice — inconsequential
-for switch debouncing. XC8 compiler differences: interrupt syntax is
-`void __interrupt() isr(void)` instead of AVR's `ISR()` macro; delays use
-`__delay_ms()` from `<xc.h>` instead of `_delay_ms()`. CONFIG bits (the PIC
-equivalent of AVR fuse bytes) are embedded in the HEX file by XC8 via
-`#pragma config` in source: enable the WDT as a fault watchdog (`WDTE = ON`),
-set `MCLRE` off (RA3 is the footswitch), enable brownout reset. Pin assignment
-for PIC10F322 (only four I/O: RA0–RA2 bidirectional, RA3 input-only / MCLR):
-the footswitch goes on the input-only RA3 (MCLR disabled), freeing RA0–RA2 as
-outputs. All three variants fit the PIC10F322's four I/O pins — the relay variant
-uses all four exactly (footswitch + LED + two coils, no spare); cd4053-simple and
-mute leave a spare pin. PIC10F322 (512 words) is the supported target; all three
-variants build at ≤75% of its flash. **The PIC10F320 (256 words) is NOT viable:
-measured under free-tier XC8 the smallest variant is 356 words — ~100 words (39%)
-over the 320's entire flash — and no correctness-preserving size reduction closes
-the gap (see `docs/pic10f320_feasibility.md`).** (Detailed Model-B plan — 1 ms
-tick from TMR2, WDT as a ~256 ms fault watchdog — in `docs/phase2_pic_shell.md`.)
-
-*Phase 3 — build system (~4–8 h).* Add XC8 toolchain variables to the Makefile:
-`PIC_CC = xc8-cc`, `--chip=10F322` device flag, output format flags. Add new
-build targets: `pic10f322_cd4053`, `pic10f322_mute`, `pic10f322_relay`, plus a
-`program-pic` target using `pk2cmd`/`ipecmd`. Add resource utilization reporting
-(`xc8-cc --summary`). Add a flash-budget assertion analogous to
-`test-flash-budget`: PIC10F322 has 512 words (1024 bytes) of program memory;
-verify each variant fits with comfortable headroom. Note that XC8 free-tier
-optimization produces larger code than an optimizing compiler; measure actual
-usage before committing to the budget ceiling.
-
-*Phase 4 — CONFIG bits validation and static analysis (~2–4 h).* PIC CONFIG bits
-are embedded in the generated HEX file by XC8's `#pragma config` directives.
-Write a `test_config_pic.c` analogous to `test_fuses.c` that parses the HEX
-file and verifies the CONFIG word values match the intended settings (WDT enabled,
-WDTPS correct, BOD voltage, MCLR config, code-protect off). The existing
-`make analyze-misra` and `make analyze-cppcheck` targets operate on C source and
-apply to PIC code without modification; however, XC8 has known MISRA deviations
-(implicit static storage class for locals under the free tier, non-standard
-interrupt declaration syntax) that need to be documented and suppressed
-appropriately in `MISRA_COMPLIANCE.md`. XC8 does not support `-fstack-usage`
-(a GCC-specific flag); the stack bound test needs an alternate approach — XC8's
-`--callgraph` output provides per-function frame sizes for a similar static bound.
-
-*Phase 5 — simulation (~1–2 weeks).* gpsim 0.32.1 has the required peripheral
-models (confirmed in Phase 0), so this phase is implementation work rather than
-a feasibility question. The interface difference from simavr is significant:
-gpsim exposes a command/script interface (`.stc` files or piped CLI input)
-rather than a C embedding API, and no development headers are available in the
-Ubuntu/Debian package. The practical approach is gpsim script files that load
-the firmware HEX, drive the footswitch pin via `stimulus`/`node` commands,
-step the simulation forward, and assert register state via `reg()` reads — all
-orchestrated by a shell script called from the Makefile as a new
-`test-sim-pic10f322` target. This produces a meaningful simulation layer
-(real firmware executing, GPIO state verified, WDT behavior observable) but
-without the cycle-accurate lock-step co-simulation and fault injection that the
-simavr C harness provides for AVR. To close that gap partially: the WDT-based
-main-loop architecture lends itself to a coarser but still meaningful
-co-simulation — drive the gpsim stimulus for N press/release cycles, compare
-the final `porta` state to the golden model's prediction via a shell-level
-assertion. Fault injection is feasible via gpsim's `reg()` write command
-(corrupt `porta` or internal state between stimulus events and verify recovery)
-though at a coarser granularity than simavr's `avr_core_watch_write()`.
-
-*Phase 6 — documentation (~2–4 h).* Update `TOOLCHAIN.adoc` with a PIC section
-(XC8 installation steps, `pk2cmd`/`ipecmd` setup, gpsim). Extend the
-resource-utilization table in `DESIGN_DOCUMENTATION.adoc` with PIC10F322 flash
-and RAM numbers per variant. Add XC8-specific MISRA notes to
-`MISRA_COMPLIANCE.md`. Update `README.md`'s supported-MCU list.
-
-Total effort: ~1 week of focused work for phases 1–4 and 6; another 1–2 weeks
-for phase 5 depending on how deeply the gpsim scripting layer is developed.
-Phase 1 (the hardware abstraction refactor) is shared with ATtiny202 and should
-be done once to unblock both.
-
----
-
-## Tier 4 — out of scope for firmware (name only)
-
-A manufacturer adopting this reference design additionally needs: a professional
-schematic (KiCad), a BOM with manufacturer part numbers and approved
-substitutes, a hardware production test procedure, and an FMEA. These are
-outside the firmware scope; naming them in the design doc as "out of scope /
-left to the implementer" is itself evidence of thoroughness.
-
----
-
-## Embedded provenance URL (firmware "comment" in flash)
-
-Idea: embed the project's GitHub URL as a string constant in the firmware so
-that someone who reads the image off an undocumented pedal's MCU and hex-dumps
-it can find the authoritative source/docs — the machine-code equivalent of a
-comment. Deferrable polish; not a bug.
+**Embedded provenance URL (firmware "comment" in flash).** Embed the project's
+GitHub URL as a string constant in the firmware so that someone who reads the
+image off an undocumented pedal's MCU and hex-dumps it can find the authoritative
+source — the machine-code equivalent of a comment. Deferrable polish; not a bug.
 
 Key constraints (so it actually works for the read-off-the-chip scenario):
 
 - **Must land in a *programmed* (loadable) section**, i.e. end up in the `.hex`
   that gets flashed — not a metadata-only ELF section (`.comment`, `.note`),
-  which exists only in the build-host `.elf` and is never written to silicon.
-  On AVR that means `PROGMEM` (flash, never copied to RAM); on PIC/XC8 a
+  which exists only in the build-host `.elf` and is never written to silicon. On
+  AVR that means `PROGMEM` (flash, never copied to RAM); on PIC/XC8 a
   program-memory `const`.
-- **Must survive dead-stripping.** The AVR link line uses
-  `-Wl,--gc-sections` (see `LDFLAGS`), so an unreferenced string is collected.
-  The clean modern fix `__attribute__((used, retain))` needs GCC 11+; our
-  toolchain is **avr-gcc 7.3.0**, where `retain` is unavailable and `used`
-  alone does NOT survive link-time gc. Robust approach: force a zero-cost
-  reference from `main`, e.g.
+- **Must survive dead-stripping.** The AVR link line uses `-Wl,--gc-sections`, so
+  an unreferenced string is collected. The clean modern fix
+  `__attribute__((used, retain))` needs GCC 11+; the toolchain is **avr-gcc
+  7.3.0**, where `retain` is unavailable and `used` alone does NOT survive
+  link-time gc. Robust approach: force a zero-cost reference from `main`, e.g.
   ```c
   const char project_url[] PROGMEM = "github.com/matt-garman/mcu-bypass-firmware";
   /* in main(): keep --gc-sections from dropping the string (emits no real code) */
@@ -822,154 +424,124 @@ Key constraints (so it actually works for the read-off-the-chip scenario):
   ```
   For PIC, XC8 V3.10 places a `const char[]` in program memory; mark it
   `__attribute__((used))`.
-- **Flash budget is the real constraint.** ATtiny13a is 1 KB with a 90% gate
-  (`FLASH_T13_BUDGET`); PIC10F322 is 512 words (`PIC_FLASH_WORDS`). A ~43-char
-  URL is ~44 bytes — meaningful on the t13, possibly fatal on the PIC. The
-  budget gates (`test-flash-budget`, the PIC build check) will catch overflow,
-  but plan to gate the string behind a macro (e.g. `BYPASS_EMBED_URL`) so only
-  parts with headroom carry it, and/or use a compact form (bare host/path, no
-  scheme). Consider a recognizable leading marker so it's greppable in a dump.
+- **Flash budget is the real constraint**, and it decides which parts can carry
+  the string at all. On a 14-bit PIC core you cannot pack two characters into one
+  word, so readable ASCII costs **one program word per character**. Gate the
+  string behind a macro (e.g. `BYPASS_EMBED_URL`) so only parts with headroom
+  carry it, and/or use a compact form (bare host/path, no scheme). Consider a
+  recognizable leading marker so it is greppable in a dump.
+- **PIC10F320 cannot carry a full URL** and likely never will: its three variants
+  currently sit at 219/240/243 of 256 words, leaving 37/16/13 free against a
+  ~48-character minimum for even a scheme-less repo URL. If the feature ships,
+  scope it to the parts with real headroom rather than shortening the URL to
+  something that rots. (A third-party shortener trades a space problem for a
+  provenance-rot problem — the link dies if the service does.)
 - **Verify it reached flash** (not just the ELF):
   ```
   avr-objcopy -O binary build_avr_classic/bypass_relay_t85.elf - | strings | grep github
   ```
 
-Effort: ~1–2 h incl. the `BYPASS_EMBED_URL` Makefile wiring + a `strings`-based
-build check. Firmware source edit is the user's.
+Effort: ~1–2 h incl. the `BYPASS_EMBED_URL` Makefile wiring plus a
+`strings`-based build check. Firmware source edit is the user's.
 
-### Considerations for PIC10F320 (child project, 2026-06-30)
+---
 
-Context: the spun-out child project `pic10f320-bypass-firmware` ships five
-variants at v0.9.1 (cd4053-simple, tmux4053-simple, cd4053-mute, tmux4053-mute,
-tq2-relay), all inside the 256-word flash.
+## Tier 4 — out of scope for firmware (name only)
 
-**Carry-over defect (2026-07-10):** the child was spun out with the same
-`bypass_output_x4053_polarity.h` wrapper, so it almost certainly inherits the
-TMUX polarity-inversion bug fixed in the parent (see the top-of-file update).
-The child should get the same fix — drive one MCU polarity for both boards,
-delete the wrapper, and drop the redundant `tmux4053-*` variants. Note this
-also moots the "five variants" framing and the per-variant word counts below
-(the `tmux` columns collapse into their base). This note records whether the
-provenance-URL idea above is feasible *there* — the most flash-constrained
-target — and a flash-compression opportunity found while investigating. All
-word counts below were **measured** by rebuilding the child firmware with its
-exact flags (free-tier XC8 v3.10, `-O2`, PIC10-12Fxxx DFP 1.9.189); nothing here
-is estimated. **Firmware source edits are the user's; the build/Makefile wiring
-is fair game.**
+A manufacturer adopting this reference design additionally needs: a professional
+schematic (KiCad), a BOM with manufacturer part numbers and approved
+substitutes, a hardware production test procedure, and an FMEA. These are outside
+the firmware scope; naming them in the design doc as "out of scope / left to the
+implementer" is itself evidence of thoroughness.
 
-**Does the full URL fit today? No — not in any variant.** The PIC10F320 has only
-256 words of 14-bit program flash, and that is the only place a flash "comment"
-can live (no EEPROM, no separate data flash). On a 14-bit core you cannot pack
-two 8-bit characters into one word, so embedding readable ASCII costs **one
-program word per character** (whether `retlw 0xNN` or a `dw`). The canonical URL
-`https://github.com/matt-garman/pic10f320-bypass-firmware/` is **57 chars → 57
-words**. Current v0.9.1 footprint and free space:
+**Signal-integrity SPICE modeling of the footswitch input network.** Moved here
+from Tier 2.5 (2026-07-26): this is hardware analysis, not firmware verification.
+The design's EMI/RFI defense includes a hardware filter (TVS, ferrite, 1k series,
+22nF to ground, 10k pull-up) with a time constant τ ≈ 18 µs. The firmware's 8 ms
+integrator threshold is claimed to be ~80× the hardware filter corner, but that
+ratio is an order-of-magnitude estimate, not a simulation. Before a PCB is
+ordered, a SPICE transient analysis of the complete input network would verify
+(a) that a 5 kV ESD pulse (IEC 61000-4-2 contact discharge) leaves the MCU pin
+within absolute maximum ratings and the clamped pulse below Schmitt-trigger
+VIL/VIH thresholds, and (b) that a GSM 900 MHz burst coupled onto a 10 cm
+twisted pair leaves the filtered envelope above VIH for any burst shorter than
+the integration window. Worth doing for whoever builds the board; it validates
+the hardware assumptions the firmware relies on, but it is not firmware work and
+should not gate firmware releases.
 
-| Variant                  | Used | Free (of 256) | Fits 57-word URL? |
-|--------------------------|------|---------------|-------------------|
-| cd4053-simple / tmux     | 208  | 48            | No (9 short)      |
-| tq2-relay                | 233  | 23            | No                |
-| cd4053-mute / tmux       | 238  | 18            | No                |
+---
 
-So today, only a **short form** works: ≤18 chars fits every variant (even the
-mute pair), and a bare repo slug `matt-garman/pic10f320-bypass-firmware` (37)
-fits the simple variants. A third-party shortener (bit.ly etc.) trivially fits
-≤18 but trades a space problem for a provenance-rot one (the link dies if the
-service does); a self-contained slug avoids that.
+## Considered and declined
 
-**Flash-compression opportunity (the more interesting finding).** Because the
-child is on **free-tier XC8**, `-O2` is largely inert and `-Os` is paid-only:
-the compiler does **no inlining and no cross-call constant propagation**. The
-dominant consequence, visible in the generated `.s`: `hw_pin_set_high(uint8_t
-pin)` / `hw_pin_set_low(uint8_t pin)` take the pin as a **runtime argument**, so
-XC8 emits a general **variable-shift loop** (`1U << pin` computed at runtime,
-~12 words of body each) plus call/arg-passing overhead — even though *every*
-caller passes a compile-time constant (`CD4053_PIN`, `RELAY_SET_PIN`, …). The
-LED helpers, which bake in a constant bit, already collapse to a single
-`bsf`/`bcf`. Letting the constant reach the bit op — converting the four trivial
-helpers (`hw_pin_set_high/low` + `hw_led_pin_set_high/low`) to **function-like
-macros** — measured (baseline reproduced exactly, build warning-free, shift
-loops confirmed gone in the `.s`):
+Recorded so these do not get re-proposed. None are refusals on grounds of
+difficulty — each was judged to cost more than it returns *for this project*.
 
-| Variant              | Baseline | + macroize 4 helpers | Free after |
-|----------------------|----------|----------------------|------------|
-| cd4053-simple / tmux | 208      | **176**              | **80**     |
-| cd4053-mute / tmux   | 238      | **203**              | **53**     |
-| tq2-relay            | 233      | **200**              | **56**     |
+**Formal ISR/main interleaving model (TLA+ or SPIN).** Would formalize the
+AVR ISR/main interleaving at the byte level, modeling each byte read/write as a
+separate step, to prove all interleavings preserve the safety invariants — the
+definitive treatment of the `ctx_` sharing that `test_model_check.c` covers only
+at C-statement granularity. Declined as disproportionate: the existing
+nondeterministic-scheduling proof plus lock-step co-simulation plus fault
+injection already exceed what this device class receives, and the item's own
+assessment was "overkill for a project of this size." Reconsider only if a
+future shell shares a genuinely multi-byte object across an ISR boundary — the
+PIC and AVR-XT shells deliberately do not.
 
-That is **−32 to −35 words (~13–15%)** — roughly doubles the headroom, the same
-*class* of structural win as inlining the debounce core. After it, the full
-57-word URL fits **cd4053-simple** outright (23 to spare) and is only 1–4 words
-short on the others, so a trivial trim (drop `https://` → 48 chars) fits the full
-repo URL into **every** variant with no shortener.
+**Property-based testing framework.** Would add rapidcheck-style generators with
+biased distributions and automatic shrinking to supplement the hand-rolled
+`xorshift32` fuzzing. Declined: the algorithm's state space is *already
+exhaustively* proved by `test_model_check.c`'s BFS and by CBMC, so a smarter
+random search cannot find a state those miss. It would add a dependency and a
+maintenance surface to re-derive what is already proved by construction.
 
-Caveats / boundaries:
-- **Do NOT macroize `hw_read_footswitch()`** — measured **+8 words** (it is
-  called twice, so inlining the ternary duplicates branch logic that was cheaper
-  as a shared call). Keep it a function.
-- **Behaviorally identical by construction**: the same `LATA` bit is set/cleared
-  for the same pin in the same order, `LATA` is the only externally visible
-  output, and relay/mute `__delay_ms` timing is untouched. No multiple-evaluation
-  hazard because every macro argument is a side-effect-free compile-time
-  constant. It still must be re-validated through the child's
-  equivalence/gpsim/soak suite — a re-run, not a redesign.
-- **MISRA**: function-like macros touch Dir 4.9 (Advisory — "prefer a
-  function"); Rule 20.7 (parenthesization, Required) is satisfied. Note the
-  child's `hw_x4053_ctl_high/low` are *already* function-like macros, so this
-  extends an existing pattern. MISRA-purist alternative: replace the one
-  parametric helper with **per-pin constant-bit functions** (like
-  `hw_led_pin_set_high`) — recovers the ~24-word shift-loop bulk while staying
-  real functions, at ~1 word/site of call overhead.
+**ISR-timing-jitter stress test.** Would deliberately delay ISR servicing by
+random cycle counts to confirm the debounce behaviour is insensitive to jitter.
+Declined by its own reasoning: the firmware samples the pin once per
+compare-match by design, so the test "would confirm an existing design property
+rather than find a new bug." `test_clean_press_phase_jitter` already scatters
+footswitch edges across the tick window, which covers the realistic case.
 
-Effort: helper change is a ~4-line source swap (user) + optional Makefile
-provenance-string block and word-budget assertion. Impact: Medium — frees enough
-flash to make the embedded-URL feature viable on the child's tightest variants,
-and is independently worthwhile headroom. Reference: child repo
-`pic10f320-bypass-firmware`, `bypass_mcu_pic10f320.c` helpers at
-`hw_led_pin_set_*` / `hw_pin_set_*`.
+**Interrupt latency measurement in simavr.** Would measure compare-match-to-ISR
+entry latency, ISR duration, and interrupt-disabled time per tick. Declined:
+confirms an assumption (ISR overhead is negligible against a 1 ms tick at
+1.2 MHz) that is not in doubt and whose violation would already surface as a
+lock-step co-simulation divergence. The interrupt-free window item in Tier 2.5 is
+retained because it guards an invariant a code change could actually break; this
+one measures a constant.
+
+**VCD waveform diff across output variants.** Would generate three VCDs from
+identical stimulus and diff the LED edges to show variant-consistent behaviour.
+Declined: the property is already asserted directly by the per-variant
+behavioural tests, and the output is a documentation artifact rather than a gate.
+`make trace` remains available for anyone who wants the waveform.
 
 ---
 
 ## Priority summary
 
-| Item                                            | Tier | Effort    | Impact                          |
-|-------------------------------------------------|------|-----------|---------------------------------|
-| PIC: add CI gate (`make pic-test`)              | done | 2–4 h     | High — PIC under same CI as AVR |
-| PIC: pull-up check incl. `nWPUEN`               | done | 15 min    | Medium — SEU-detection parity   |
-| PIC: document/early WDT in `init()`             | done | 30 min    | Low-Med — fault-path parity     |
-| Hoist shared compile-time checks (both shells)  | done | 30–45 min | Medium — de-dup + drift risk    |
-| PIC: extend gpsim scenario coverage             | done | 1 h       | Low-Med — shell-wiring coverage |
-| Design doc: datasheet citations                 | 2    | 2 h       | High — completeness/rigor       |
-| Power-on-pressed in simavr                      | 2.5  | 1–2 h     | Medium — simavr quirk workaround|
-| Formal verification of output drivers           | 2.5  | 3–4 h     | Medium — driver correctness     |
-| ISR-timing-jitter stress test                   | 2.5  | 1–2 h     | Low — confirms design property  |
-| Golden-model vs model_step cross-validation     | 2.5  | 1–2 h     | Medium — fourth oracle path     |
-| Clock drift fine-grained sweep                  | 2.5  | 1 h       | Low — narrow but real edge case |
-| Power-supply ramp-up simulation                 | 2.5  | 2–3 h     | Medium — real-world robustness  |
-| VCD waveform diff across output variants        | 2.5  | 1 h       | Low — visual/empirical artifact |
-| Cross-compiler verification                     | 2.5  | 2 h       | Medium — compiler-safety net    |
-| Stuck-switch long-duration test                 | 2.5  | 30 min    | Medium — enforces documented    |
-| WDT pet frequency measurement                   | 2.5  | 1–2 h     | Medium — catches handshake bugs |
-| Negative static_assert verification             | 2.5  | 30 min    | Low — build-guard meta-test     |
-| Footswitch-pin glitch regression test           | 2.5  | 30 min    | Low — test-harness meta-test    |
-| Compiler optimization sensitivity test          | 2.5  | 1 h       | Medium — quick win, catches opt-sensitive bugs |
-| Interrupt latency measurement in simavr         | 2.5  | 1–2 h     | Low — confirms design assumption |
-| Formal verification of `_delay_ms()` safety     | 2.5  | 1–2 h     | Medium — makes blocking-delay argument explicit |
-| Interrupt-free window measurement               | 2.5  | 1 h       | Medium — confirms runtime invariant |
-| Stack depth cross-verification                  | 2.5  | 2–3 h     | Medium — third independent stack bound |
-| Full-path symbolic execution (KLEE)             | 2.5  | 2–4 h     | High — independent whole-trajectory proof |
-| Property-based testing framework                | 2.5  | 2–4 h     | Medium — targeted edge-case generation |
-| Formal ISR/main interleaving model (TLA+/SPIN)  | 2.5  | 4–8 h     | High — definitive concurrency-safety proof |
-| Signal-integrity SPICE modeling                 | 2.5  | 2 h       | High — validates hardware assumptions before PCB |
-| Multi-press boundary cases                      | 2.5  | 3–4 h     | Medium — tick-boundary edge cases at rate limit |
-| Hardware-validation procedure doc               | 3    | 2–3 h     | High — primary-part WDT gap     |
-| HIL rig: behavioural + register introspection   | 3    | 5–8 d     | High — silicon-level model validation; XT sim-gap mitigation |
-| Inverted-copy (complemented) ctx_ storage       | 3    | 3–6 h     | Medium — in-range SEU detection |
-| KLEE in CI                                      | 3    | 2 h       | Nice-to-have                    |
-| tinyAVR 2-Series (ATtiny202) support            | 3    | 2–4 days  | Nice-to-have; simavr gap        |
-| PIC10F322 support (shipped); PIC10F320 infeasible | 3  | —         | 322 done; 320 too small for free-tier XC8 — see docs/pic10f320_feasibility.md |
-| Manufacturing artifacts (name as scope)         | 4    | —         | Completeness signal             |
-
-(The five rows marked `done` above are the 2026-06-25 PIC branch meta-review
-batch — all completed on branch `pic10f32x_support`; see that section for the
-per-item detail. They are kept here for traceability rather than deleted.)
+| Item | Tier | Effort | Impact |
+|---|---|---|---|
+| Design doc: datasheet citations | 2 | 2 h | High — completeness/rigor |
+| Formal verification of output drivers | 2.5 | 3–4 h | Medium — driver correctness |
+| Formal verification of blocking-delay safety | 2.5 | 1–2 h | Medium — makes the argument explicit |
+| Golden-model vs `model_step` cross-validation | 2.5 | 1–2 h | Medium — fourth oracle path |
+| Full-path symbolic execution (KLEE) | 2.5 | 2–4 h | High — whole-trajectory proof |
+| KLEE in CI | 2.5 | 2 h | Medium — proves the path actually runs |
+| Cross-compiler verification | 2.5 | 2 h | Medium — compiler-safety net |
+| Compiler optimization sensitivity test | 2.5 | 1 h | Medium — quick win |
+| Stack depth cross-verification | 2.5 | 2–3 h | Medium — third independent bound |
+| Negative `static_assert` verification | 2.5 | 30 min | Low — build-guard meta-test |
+| Clock drift fine-grained sweep | 2.5 | 1 h | Low — narrow but real edge case |
+| Stuck-switch long-duration test | 2.5 | 30 min | Medium — enforces documented behaviour |
+| WDT pet frequency measurement | 2.5 | 1–2 h | Medium — catches handshake bugs |
+| Interrupt-free window measurement | 2.5 | 1 h | Medium — confirms runtime invariant |
+| Multi-press boundary cases | 2.5 | 3–4 h | Medium — tick-boundary edge cases |
+| Power-on-pressed simulation gap | 2.5 | 1–2 h | Low — simulator fidelity, not coverage |
+| Power-supply ramp-up analysis | 2.5 | 2–3 h | Medium — real-world robustness |
+| Hardware-validation procedure doc | 3 | 2–3 h | High — primary-part WDT gap |
+| HIL rig: behavioural + register introspection | 3 | 5–8 d | High — silicon-level model validation |
+| Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |
+| Broader compiler & toolchain portability | 3 | Medium | Medium-High — adoption + reliability |
+| Embedded provenance URL | 3 | 1–2 h | Low — provenance polish |
+| Manufacturing artifacts (name as scope) | 4 | — | Completeness signal |
+| Signal-integrity SPICE modeling | 4 | 2 h | High for the board, not firmware work |

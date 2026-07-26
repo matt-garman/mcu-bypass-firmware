@@ -248,21 +248,25 @@ plan must respect:
 - `Makefile` `clean` / `clean-tests` and both ignore files — remove/ignore all
   PIC10F320 build, test, coverage, and mutation artifacts; verify a clean tree
   after `make clean`.
-- `TODO.md`, `test/README.md`, `docs/pic10f320_feasibility.md`,
-  `docs/phase2_pic_shell.md`, README/design claims, and release documentation —
-  remove or qualify every "unsupported" or external-child statement. Known
-  instances at parent `21012ae`: `README.md:6-7` ("for PIC10F320 support, see
-  the child project" + the GitHub link) and `:11` ("unless the PIC10F320 is a
-  hard requirement"); `test/README.md:173` ("the sibling
-  **pic10f320-bypass-firmware** child project shares them");
-  `docs/phase2_pic_shell.md:7` (describes the `bypass_hw_iface.h` contract as
-  covering "the PIC10F320/322", which the 320 never actually implements);
-  `docs/pic10f320_feasibility.md:3` (**Status:** ... **NOT a supported
-  target**); and `TODO.md` lines 655, 665, 668, 673, 726, 729, 840, 842, 860,
-  865, 875, 928, 970. The stale child-project link in
-  `src/bypass_mcu_avr_xt.c:16-17` is a comment-only firmware-source edit and
-  must be performed by the user under project policy; confirm non-comment
-  firmware bytes remain unchanged.
+- `README.md`, `test/README.md`, and release documentation — remove or qualify
+  every "unsupported" or external-child statement. Outstanding instances:
+  `README.md:6-7` ("for PIC10F320 support, see the child project" + the GitHub
+  link) and `:11` ("unless the PIC10F320 is a hard requirement");
+  `test/README.md:173` ("the sibling **pic10f320-bypass-firmware** child project
+  shares them"). The stale child-project link in `src/bypass_mcu_avr_xt.c:16-17`
+  is a comment-only firmware-source edit and must be performed by the user under
+  project policy; confirm non-comment firmware bytes remain unchanged.
+- **Already cleaned (2026-07-26 documentation audit)** — verify rather than
+  redo: `TODO.md` no longer contains the "PIC10F320 is NOT viable" verdict, the
+  historical six-phase PIC plan, or the external-child-project section;
+  `docs/pic10f320_feasibility.md` now scopes its finding to the *modular*
+  architecture and points here instead of declaring the part unsupported;
+  `docs/phase2_pic_shell.md` was rewritten as PIC10F322-only design notes and no
+  longer claims the shared contract covers the 320. `docs/phase1_hw_abstraction.md`
+  and `docs/phase2b_pic_shell_spec.md` were deleted (obsolete planning
+  scaffolding); the multi-MCU architecture rationale they carried now lives in
+  `DESIGN_DOCUMENTATION.adoc`, "Multi-MCU Architecture". Phase 7 should confirm
+  these rather than re-open them.
 
 ---
 

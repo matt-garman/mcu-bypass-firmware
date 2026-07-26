@@ -1,18 +1,37 @@
-# PIC10F320 feasibility — why the 320 is out of scope (and the 322 is not)
+# PIC10F320 feasibility — why the reference architecture does not fit 256 words
 
-**Status:** decided — **PIC10F320 is NOT a supported target.** The firmware does
-not fit its 256-word flash under the free-tier XC8 compiler, and no
-correctness-preserving source change closes the gap. The PIC10F322 (512 words)
-remains the supported PIC target, alongside the classic-AVR parts.
+**Status:** historical evidence, and still the governing measurement — but read
+the scope line below before quoting it.
+
+**What this document proves:** the project's **modular** firmware — the pure
+functional core in `bypass_pure.c` compiled and linked into a hardware shell —
+does not fit the PIC10F320's 256-word flash under free-tier XC8, and no
+correctness-preserving source change closes the ~100-word gap. That finding is
+unchanged and is why the PIC10F322 (512 words) is the PIC target for the
+reference architecture.
+
+**What this document does *not* prove:** that the PIC10F320 is unbuildable. It
+is a **supported, release-gated target**, implemented differently: a single
+self-contained source file with the debounce logic inlined into `main()`,
+which is exactly the architecture this document concluded was necessary if the
+part were ever to be supported (see §3b — "a preprocessor macro would force
+textual inlining the compiler cannot skip"). That implementation trades the
+compile-the-verified-core property for an equivalence-and-lockstep argument
+against the same core. See `pic10f320_merge_plan.md` for the integration and
+`pic10f320_special_case.md` for the assurance caveat.
+
+So: the 320 is the constrained exception, not evidence that the reference
+architecture fits 256 words. This document is the record of the latter.
 
 **Date / branch:** 2026-06-26, `pic10f32x_support`. All figures below were
 measured with **XC8 v3.10 (free tier)** + **PIC10-12Fxxx DFP v1.9.189**, the
 toolchain pinned in `TOOLCHAIN.adoc`.
 
-> Scope note: 10F320 support was always a *nice-to-have* (see the Tier-3 item in
-> `TODO.md`). The robustness abstractions discussed at the end of this document
-> are *must-haves*. When the two conflicted, robustness won — which is the whole
-> point of recording the analysis here.
+> Scope note: 10F320 support was always a *nice-to-have*, while the robustness
+> abstractions discussed at the end of this document are *must-haves*. When the
+> two conflicted, robustness won — which is the whole point of recording the
+> analysis here, and it remains the rule that governs the separate inlined
+> implementation the part eventually got.
 
 ---
 
@@ -216,19 +235,28 @@ shared `debounce_context_t`.
 
 ## 4. Decision
 
-- **PIC10F320: not supported.** The 256-word flash cannot host the firmware under
-  free-tier XC8, and the only source changes that would help enough either don't
-  exist (the optimizer is capped) or sacrifice the robustness abstractions that
-  are the project's reason for being.
-- **PIC10F322: the supported PIC target** — all three variants fit with
-  comfortable headroom (≤75%).
+The decision as taken in 2026-06-26, and what became of each part of it:
+
+- **PIC10F320: not supported *by the modular architecture*.** The 256-word flash
+  cannot host it under free-tier XC8, and the only source changes that would help
+  enough either don't exist (the optimizer is capped) or sacrifice the robustness
+  abstractions that are the project's reason for being. **Still true.** What
+  changed is the conclusion drawn from it: rather than dropping the part, a
+  separate inlined implementation was written for it — the option §3b identified
+  and priced. It is now a supported, release-gated target under the caveat
+  described in `pic10f320_special_case.md`.
+- **PIC10F322: the supported PIC target for the reference architecture** — all
+  three variants fit with comfortable headroom. **Still true.**
 - **Keep `debounce_context_t`, the enum types, and the pure
   functional-core/imperative-shell split exactly as they are.** They were
   measured to be *not* the blocker, and the abstraction is the project's
-  strongest correctness asset.
+  strongest correctness asset. **Still true, and load-bearing:** the 320's
+  inlined firmware is proved equivalent against this same unmodified core, so
+  the core had to stay verifiable for that argument to exist at all.
 - The family naming (`bypass_mcu_pic10f32x.c`, `bypass_pins_pic10f32x.h`,
-  `BYPASS_MCU_PIC10F32X`) is retained for convenience; "32x" denotes the register
-  family, **not** a claim that the 320 is a buildable target.
+  `BYPASS_MCU_PIC10F32X`) was retained at the time as a register-family label.
+  **Superseded:** those were renamed to `pic10f322` once a genuinely separate
+  320 implementation existed and "32x" became ambiguous rather than convenient.
 
 ---
 

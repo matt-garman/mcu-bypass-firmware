@@ -16,8 +16,8 @@
 //   2. On the ACTUAL firmware functions -- debounce_integrate(), debounce_step()
 //      and debounce_init_context() from bypass_pure.c, the exact code that ships
 //      (the functional-core/imperative-shell split is what makes the core
-//      hardware-free and therefore model-checkable). This is TODO.md Tier 3:
-//      "Prove properties of the actual C source rather than a re-implementation."
+//      hardware-free and therefore model-checkable) -- properties are proved of
+//      the actual shipping C source, never of a re-implementation.
 //   3. With CBMC's automatic instrumentation enabled (--bounds-check,
 //      --conversion-check, --signed/unsigned-overflow-check, --unwinding-
 //      assertions, ...), which additionally proves the debounce path is free of

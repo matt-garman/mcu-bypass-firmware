@@ -2152,8 +2152,7 @@ CBMC_CHECKS = --bounds-check --pointer-check --div-by-zero-check \
               --conversion-check --undefined-shift-check
 # Straight-line proofs (no loops) and the two bounded-liveness proofs (loops
 # fully unrolled at --unwind 50, > every harness's fixed horizon; the unwinding
-# assertion proves the bound is real, not assumed). Matches TODO.md's
-# `cbmc --unwind 50` on the debounce path.
+# assertion proves the bound is real, not assumed).
 CBMC_PROOFS      = prove_integrate prove_debounce_step prove_corrupt_state_faults \
                    prove_init_context prove_step_transition prove_oor_recovery_step
 CBMC_PROOFS_LOOP = prove_press_liveness prove_release_liveness
