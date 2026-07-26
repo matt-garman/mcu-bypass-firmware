@@ -1934,7 +1934,79 @@ clone, and Phase 4 must re-run the gpsim and mutation lanes once they are wired.
 This is the one piece of §6.11 evidence that is transferred rather than
 reproduced in the merged tree.
 
-### 15.6 Tool inventory, and the one recorded blocker
+### 15.6 Phase 3 — shared assets folded 2026-07-26
+
+Verified before deleting anything, per the phase's own rule that a green parent
+suite is not evidence for dark files:
+
+- **0-diff claims all hold.** `test/misra_rules.txt`, `test/misra.json`,
+  `test/test_lockstep_progress.sh` and `scripts/validate-ihex.sh` are
+  byte-identical between the two projects.
+- **The vendored core is code-identical** to `src/`. Comparing with comments and
+  trailing whitespace normalized (§6.2's caveat), `bypass_pure.c`,
+  `bypass_pure.h` and `bypass_types.h` differ only in licence-header style.
+- **The child's MISRA suppression file carries no entries** — comments only, so
+  there was nothing to merge, and the parent's 18 entries are all file-scoped
+  (`0` non-scoped), so none can leak onto the imported firmware.
+
+**Principle 8, case 1 — the corrupt-state property, migrated.** The parent had
+**zero** occurrences of `verify_corrupt_state_faults()`; the child had it. It is
+now in `test/formal/test_model_check.c` as invariant (I7), documented as the one
+property that deliberately starts *outside* the reachable state space: an SEU can
+leave `program_state` holding a value the machine cannot produce, and the core
+must fault without toggling — a toggle on the way out would be an audible
+spurious switch. Model check went 2153 → **2157 checks, 0 failures**.
+
+**Principle 8, case 2 — the coverage gate, promoted.** Confirmed the hole was
+real: `COVERAGE_SRC = test/host/test_logic_host.c` with a 90% floor measures the
+independent **oracle**, which by its own header "does NOT include the firmware",
+so no parent target measured `src/bypass_pure.c` at all. New
+`coverage-check-core` measures the real core via the two formal drivers that link
+it, floor **95%**, added to `test` and `test-long`. Result: **100.00%**.
+
+The gate was negative-tested rather than assumed, all three failure modes:
+malformed floor → fail; out-of-range floor → fail; and — the one that matters —
+a reduced driver set produces **74.29%** and is correctly rejected against the
+95% floor. That last case also proves the driver list is meaningful: neither
+formal driver reaches the floor alone.
+
+**Both host assurance roles are preserved, and here is the reviewed argument
+§4 asks for.** All 23 test functions in the child's `test_logic_host.c` have a
+parent counterpart by name; the difference is only what they run *against*
+(parent = its own re-implementation, child = the real core through
+`model_step.h`). Post-fold the oracle role is the parent's untouched
+`test_logic_host.c`, and the direct-core role is carried by
+`test_model_check` + `test_symbolic` — which link the real core, now provably at
+100% line coverage — plus `pic320-test-equiv`'s 266144-sequence differential.
+That is strictly stronger than 23 hand-written scenarios, so the child copy is
+dropped rather than kept as a third runner.
+
+**Correction to §4 — the "Known gaps" row rested on a stale observation.** It
+states "The parent never back-ported any of it". That was true when written and
+is **false at this tip**: `test/README.md:169` already carried a
+`## Known gaps (PIC — hardware-bench only)` section, and on the WDT bullet it is
+*more* detailed than the child's — it quotes the concrete gpsim ~1.06 s versus
+silicon ~256 ms figure that the child's lacks. The real Phase-3 work was
+therefore smaller and different from what the row predicted:
+
+- the child's **"Real-silicon pulse timing remains bench-only"** bullet genuinely
+  was missing, and is now added (it applies to the 322's blocking actuations
+  just as much);
+- the section was scoped to "properties of the **PIC10F322** build" plus a
+  pointer to the sibling child project. It is rescoped to cover both PIC targets
+  as properties of the shared gpsim environment, which also retires the stale
+  external-child reference §4 catalogues at `test/README.md:173`.
+
+Deleted from the prefix, in this order — gate wired first, so nothing measuring
+the real core vanished between two green commits: `test/model/bypass_pure.{c,h}`,
+`test/model/bypass_types.h`, `test/model/bypass_config.h`, all three
+`test/formal/` drivers, `test/host/test_logic_host.c`, both MISRA rule files and
+the empty suppression file, `test/model_step.h`, `test/soak_timing_config.h`,
+`test/test_lockstep_progress.sh`, and `scripts/validate-ihex.sh`. The tree now
+holds exactly one copy of each. `test/model/README.md` is deliberately left for
+Phase 7 with the rest of the documentation disposition.
+
+### 15.7 Tool inventory, and the one recorded blocker
 
 §6.9 requires unavailable tools to be recorded as blockers rather than passes.
 Verified present on the execution host: XC8 V3.10 at the pinned

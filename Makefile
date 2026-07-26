@@ -1918,7 +1918,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check coverage-check-core
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1930,7 +1930,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check coverage-check-core
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -2654,6 +2654,27 @@ COVERAGE_DIR = coverage
 COVERAGE_MIN ?= 90
 COVERAGE_SRC = test/host/test_logic_host.c
 COVERAGE_REPORT_DIR = $(COVERAGE_DIR)/report
+# --- the SECOND coverage gate: the real core ---------------------------------
+# COVERAGE_SRC above measures test/host/test_logic_host.c -- the independent
+# "golden model" ORACLE, which by design does NOT include the firmware (see that
+# file's header). So the 90% floor above says nothing about src/bypass_pure.c,
+# the code that actually ships on every target.
+#
+# This gate closes that hole. It measures the REAL core, exercised by the two
+# formal drivers that link it, against its own higher floor. Promoted from the
+# PIC10F320 child project during the merge: it was the only line-coverage gate
+# over the shipping core that either project had, and folding the child's copy
+# away would have DELETED it rather than deduplicated it (merge plan,
+# Principle 8). Two subjects need two floors -- do not merge these two gates.
+COVERAGE_CORE_MIN ?= 95
+COVERAGE_CORE_SRC  = $(PURE_HOST_SRC)
+COVERAGE_CORE_OBJ_NAME   = bypass_pure_cov.o
+COVERAGE_CORE_ANNOTATION = bypass_pure.c.gcov
+# Drivers that link the real core. test/host/test_logic_host is deliberately
+# ABSENT: it is the oracle and links no core object, so adding it would inflate
+# nothing and confuse the gate's subject.
+COVERAGE_CORE_DRIVERS = test/formal/test_model_check.c test/formal/test_symbolic.c
+
 COVERAGE_OBJ_NAME = test_logic_host_cov.o
 COVERAGE_BIN_NAME = test_logic_host_cov
 COVERAGE_DATA_NAME = test_logic_host_cov.gcda
@@ -2715,6 +2736,47 @@ coverage-check:
 		|| { echo "FAIL: coverage percentage or floor is outside 0..100"; exit 1; }; \
 	awk -v p="$$pct" -v m="$(COVERAGE_MIN)" 'BEGIN{exit !(p>=m)}' \
 		|| { echo "FAIL: coverage $$pct% below floor $(COVERAGE_MIN)%"; exit 1; }
+
+# Line-coverage gate over the REAL core, src/bypass_pure.c (see
+# COVERAGE_CORE_MIN above for why this is a separate gate from coverage-check).
+# The core is compiled ONCE with --coverage and linked into each driver, so the
+# .gcda accumulates across all of them and the percentage reflects the whole
+# formal suite rather than any single run.
+.PHONY: coverage-check-core
+coverage-check-core:
+	@mkdir -p "$(COVERAGE_DIR)" || exit 1; \
+	work=`mktemp -d "$(COVERAGE_DIR)/core.XXXXXX"` || exit 1; \
+	trap 'rm -rf "$$work"' EXIT HUP INT TERM; \
+	$(HOSTCC) $(HOST_CFLAGS) $(HOST_DEFS) $(PURE_HOST_CFLAGS) -Itest --coverage \
+		-c $(abspath $(COVERAGE_CORE_SRC)) -o "$$work/$(COVERAGE_CORE_OBJ_NAME)" || exit 1; \
+	for drv in $(COVERAGE_CORE_DRIVERS); do \
+		bin="$$work/`basename $$drv .c`"; \
+		$(HOSTCC) $(HOST_CFLAGS) $(HOST_DEFS) $(PURE_HOST_CFLAGS) -Itest --coverage \
+			$(abspath $$drv) "$$work/$(COVERAGE_CORE_OBJ_NAME)" -o "$$bin" || exit 1; \
+		"$$bin" >/dev/null || { echo "FAIL: $$drv failed under coverage"; exit 1; }; \
+	done; \
+	if [ ! -s "$$work/bypass_pure_cov.gcda" ]; then \
+		echo "FAIL: coverage run did not produce fresh profile data for the core"; exit 1; \
+	fi; \
+	out=`cd "$$work" && $(GCOV) -o . $(COVERAGE_CORE_OBJ_NAME) 2>&1` \
+		|| { printf '%s\n' "$$out"; echo "FAIL: gcov could not generate core coverage"; exit 1; }; \
+	pct=`printf '%s\n' "$$out" | awk -F'[:%]' '/Lines executed/{print $$2; exit}'`; \
+	echo "verified-core line coverage (src/bypass_pure.c): $${pct:-unknown}% (floor $(COVERAGE_CORE_MIN)%)"; \
+	if ! printf '%s\n' "$$pct" | grep -Eq '^[0-9]+([.][0-9]+)?$$'; then \
+		echo "FAIL: gcov line coverage is missing or malformed:"; \
+		printf '%s\n' "$$out"; exit 1; \
+	fi; \
+	if [ ! -s "$$work/$(COVERAGE_CORE_ANNOTATION)" ]; then \
+		echo "FAIL: gcov reported success but produced no fresh $(COVERAGE_CORE_ANNOTATION)"; \
+		printf '%s\n' "$$out"; exit 1; \
+	fi; \
+	if ! printf '%s\n' "$(COVERAGE_CORE_MIN)" | grep -Eq '^[0-9]+([.][0-9]+)?$$'; then \
+		echo "FAIL: COVERAGE_CORE_MIN is malformed: $(COVERAGE_CORE_MIN)"; exit 1; \
+	fi; \
+	awk -v p="$$pct" -v m="$(COVERAGE_CORE_MIN)" 'BEGIN{exit !(p>=0 && p<=100 && m>=0 && m<=100)}' \
+		|| { echo "FAIL: coverage percentage or floor is outside 0..100"; exit 1; }; \
+	awk -v p="$$pct" -v m="$(COVERAGE_CORE_MIN)" 'BEGIN{exit !(p>=m)}' \
+		|| { echo "FAIL: core coverage $$pct% below floor $(COVERAGE_CORE_MIN)%"; exit 1; }
 
 # Remove coverage artifacts (the coverage/ dir and any stray gcov data files).
 coverage-clean:

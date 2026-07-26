@@ -424,6 +424,35 @@ static void verify_init_context(void) {
           (unsigned)RELEASE_THRESH, r.debounce_counter);
 }
 
+// (I7) Corrupt program_state faults, and faults WITHOUT toggling.
+//
+// The properties above all explore REACHABLE states. This one deliberately
+// starts outside the reachable set: an SEU/EMI upset can leave program_state
+// holding a value the state machine can never produce. The core must report
+// that as a fault rather than acting on it, and -- the part that matters
+// audibly -- it must not toggle the effect on the way out. A corrupt state that
+// toggled before faulting would be a spurious switch on the user's pedal.
+//
+// The shell's response to `fault` is a forced watchdog reset to the safe BYPASS
+// state; this checks the pure core's half of that contract for every
+// out-of-range program_state the 2-bit field can hold.
+//
+// Migrated from the PIC10F320 child project during the merge. It is
+// target-agnostic -- a property of the shared core, not of any one MCU -- and
+// it doubles as a mutation/coverage oracle, so it belongs here rather than in
+// a PIC10F320-only lane (merge plan, Principle 8).
+static void verify_corrupt_state_faults(void) {
+    for (unsigned ps = (unsigned)RELEASE_DEBOUNCE_WAIT + 1u; ps <= 3u; ++ps) {
+        debounce_context_t ctx;
+        ctx.program_state    = (program_state_t)ps;
+        ctx.effect_state     = BYPASS;
+        ctx.debounce_counter = 0u;
+        debounce_step_result_t const dr = debounce_step(ctx);
+        CHECK(dr.fault, "corrupt program_state %u did not raise fault", ps);
+        CHECK(!dr.toggled, "corrupt program_state %u toggled the effect", ps);
+    }
+}
+
 int main(void) {
     printf("exhaustive state-space verification "
            "(PRESSED_THRESH=%d, RELEASE_THRESH=%d):\n",
@@ -435,6 +464,7 @@ int main(void) {
     verify_press_liveness();
     verify_nondeterministic_scheduling();
     verify_init_context();
+    verify_corrupt_state_faults();
 
     printf("state-space model check: %d checks, %d failures\n",
            g_checks, g_failures);

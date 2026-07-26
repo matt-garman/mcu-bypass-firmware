@@ -168,10 +168,15 @@ reassertion, mute-window shortening, and relay pulse shortening.
 
 ## Known gaps (PIC — hardware-bench only)
 
-These are properties of the **PIC10F322** build that the gpsim-based simulation
-cannot faithfully assert; they are ultimately validated on a real chip at the
-bench. The sibling **pic10f320-bypass-firmware** child project shares them (same
-TMR2, same datasheet, same gpsim environment) and carries the mirror note.
+These are properties of the PIC builds that the gpsim-based simulation cannot
+faithfully assert; they are ultimately validated on a real chip at the bench.
+
+They apply to **both PIC targets — PIC10F322 and PIC10F320 — equally**, because
+they are properties of the shared gpsim environment rather than of either
+firmware: same TMR2, same datasheet family, same simulator. Neither chip's lanes
+are more or less exposed than the other's, and a gap closed here is closed for
+both. (Before the PIC10F320 merge these notes lived in two places, one per
+repository, and drifted; this is the single copy.)
 
 - **WDT-timing / brown-out behaviour** is not simulated. gpsim's WDT calibration
   differs from silicon — at the firmware's `WDTPS = 0x08` gpsim's period is
@@ -200,3 +205,12 @@ TMR2, same datasheet, same gpsim environment) and carries the mirror note.
   tick-*counted*, so they are period-agnostic by construction and cannot catch it
   either. As with WDT timing, the *absolute* 1 ms tick period on silicon is a
   hardware-bench guarantee.
+- **Real-silicon pulse timing remains bench-only.** The target-I/O gate measures
+  the XC8-generated busy-wait duration in gpsim instruction cycles, so it
+  verifies the programmed delays (the CD4053 mute window and the TQ2 relay coil
+  pulse) at nominal configured FOSC and nothing more. It cannot validate
+  HFINTOSC tolerance over voltage and temperature, output rise/fall time,
+  relay-coil current, or analog-switch mute settling on physical hardware. This
+  bullet was carried only by the PIC10F320 project before the merge; it is
+  equally true of the PIC10F322 build, whose blocking actuations are measured
+  the same way.
