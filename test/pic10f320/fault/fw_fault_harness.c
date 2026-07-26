@@ -132,7 +132,7 @@ static void disarm_timer(void) {
 
 // Bring in the real firmware. -Dmain=fw_main renames its entry point so this TU
 // keeps its own linkage; ctx_ and the static hw_* functions become visible below.
-#include "../../bypass_mcu_pic10f320.c"
+#include "../../../src/bypass_mcu_pic10f320.c"
 
 // Apply a corruption to the firmware's live state, modelling an SEU/EMI flip.
 // Runs in the CLRWDT hook after one clean warm-up iteration, so it is in effect

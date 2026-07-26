@@ -180,7 +180,7 @@ static void on_alarm(int sig) {
 }
 
 // Bring in the real firmware. -Dmain=fw_main renames its entry point.
-#include "../../bypass_mcu_pic10f320.c"
+#include "../../../src/bypass_mcu_pic10f320.c"
 
 // CLRWDT() hook: fires once per firmware loop iteration (plus once inside init).
 // Defined here (after the firmware #include) so ctx_ is visible for the per-tick

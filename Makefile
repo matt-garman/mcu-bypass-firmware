@@ -2722,6 +2722,199 @@ coverage-clean:
 	find . -name '*.gcda' -o -name '*.gcno' | xargs rm -f
 
 # ============================================================================
+# PIC10F320 -- the constrained target (Phase 2 scaffolding: host lanes)
+# ============================================================================
+# PIC10F320 has 256 words of flash, HALF the PIC10F322's. The pure/result-struct
+# architecture every other target uses does not fit, so its firmware inlines the
+# debounce algorithm into main() by hand. That is the whole reason this target
+# exists, and it is why its lanes are separate from the `pic-` (PIC10F322) ones
+# rather than parameterized alongside them.
+#
+# NAMING (docs/pic10f320_merge_plan.md §15, D1): `pic-*` / `PIC_*` mean
+# PIC10F322; `pic320-*` / `PIC320_*` mean PIC10F320. The asymmetry is deliberate
+# and recorded -- unifying it is the TODO.md "Unified naming scheme" item. Do NOT
+# add a PIC-shaped variable here without the PIC320_ prefix: a mis-scoped chip
+# variable produces no compile error and no failing test, it produces a PASSING
+# one (§14.7 -- e.g. the wrong flash budget silently gates 256 words against 512).
+#
+# Toolchain is deliberately SHARED with the PIC10F322 lane: both parts are built
+# by the same XC8 V3.10 + PIC10-12Fxxx DFP 1.9.189 (verified equal, plan §6.14).
+PIC320_CC          ?= $(PIC_CC)
+PIC320_DFP         ?= $(PIC_DFP)
+
+PIC320_CHIP        ?= 10F320
+PIC320_TAG         ?= pic10f320
+PIC320_XTAL        ?= 2000000UL
+PIC320_FLASH_WORDS ?= 256
+
+PIC320_FW_BASE     := bypass_mcu
+PIC320_SRC         := src/bypass_mcu_pic10f320.c
+PIC320_BUILD_DIR   ?= build_pic10f320
+
+# §5.7: PIC10F320 coverage lives UNDER the build directory, never in the shared
+# top-level coverage/ that the parent lanes own. One ignore entry covers both,
+# and every destructive recipe below can be scoped to a single root.
+PIC320_COVERAGE_DIR := $(PIC320_BUILD_DIR)/coverage
+
+# --- output variant ----------------------------------------------------------
+PIC320_VARIANT      ?= cd4053-simple
+PIC320_VARIANTS_ALL := cd4053-simple cd4053-mute tq2-relay
+
+ifeq ($(PIC320_VARIANT),cd4053-simple)
+  PIC320_OUTPUT_MACRO := OUTPUT_CD4053_SIMPLE
+else ifeq ($(PIC320_VARIANT),cd4053-mute)
+  PIC320_OUTPUT_MACRO := OUTPUT_CD4053_WITH_MUTE
+else ifeq ($(PIC320_VARIANT),tq2-relay)
+  PIC320_OUTPUT_MACRO := OUTPUT_TQ2_RELAY
+else
+  $(error PIC320_VARIANT must be one of: $(PIC320_VARIANTS_ALL) (got '$(PIC320_VARIANT)'))
+endif
+PIC320_OUTPUT_DEF := -D$(PIC320_OUTPUT_MACRO)
+
+PIC320_CFLAGS := -mcpu=$(PIC320_CHIP) -mdfp=$(PIC320_DFP) -std=c99 -O2 \
+                 -D_XTAL_FREQ=$(PIC320_XTAL) $(PIC320_OUTPUT_DEF)
+PIC320_HEX    := $(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$(PIC320_VARIANT)_$(PIC320_TAG).hex
+
+# --- host lanes --------------------------------------------------------------
+# HOST_CFLAGS here intentionally mirrors the IMPORTED build contract (no
+# -Wconversion) rather than the parent's stricter host flags: the relocated
+# harnesses were written and proven green under these. Tightening them is a
+# deliberate follow-up, not a side effect of relocation.
+PIC320_HOST_CC     ?= $(HOSTCC)
+PIC320_HOST_CFLAGS ?= -std=c11 -O2 -Wall -Wextra -Werror
+PIC320_HOST_INC    := -Itest
+
+# The equivalence and lock-step lanes compile and link the ONE verified core --
+# src/bypass_pure.c -- never a vendored copy (Principle 2).
+PIC320_MODEL_SRC   := src/bypass_pure.c
+
+PIC320_EQUIV_DIR   := test/pic10f320/equiv
+PIC320_ACT_DIR     := test/pic10f320/actuation
+PIC320_FAULT_DIR   := test/pic10f320/fault
+
+# The firmware is #included verbatim by both host harnesses, with main() renamed
+# so the driver can step it. -Wno-unknown-pragmas because XC8 pragmas (CONFIG)
+# are meaningless to the host compiler.
+PIC320_FW_HOST_DEFS := -Wno-unknown-pragmas -Dmain=fw_main \
+                       -D_XTAL_FREQ=$(PIC320_XTAL) $(PIC320_OUTPUT_DEF)
+PIC320_FAULT_INC    := -I$(PIC320_EQUIV_DIR) -I$(PIC320_FAULT_DIR)
+
+.PHONY: pic320-test-equiv pic320-test-actuation pic320-test-fault-host \
+        pic320-test-host pic320-clean pic320-verify-baseline-images
+
+# Firmware<->core equivalence: the real firmware, host-compiled, stepped tick for
+# tick against src/bypass_pure.c on the same stimulus.
+pic320-test-equiv:
+	@mkdir -p $(PIC320_BUILD_DIR)
+	@$(PIC320_HOST_CC) -std=c11 -O2 $(PIC320_FW_HOST_DEFS) -I$(PIC320_EQUIV_DIR) \
+		-c $(PIC320_EQUIV_DIR)/fw_harness.c -o $(PIC320_BUILD_DIR)/fw_harness.o
+	@$(PIC320_HOST_CC) $(PIC320_HOST_CFLAGS) $(PIC320_HOST_INC) \
+		-c $(PIC320_EQUIV_DIR)/test_equiv.c -o $(PIC320_BUILD_DIR)/test_equiv_drv.o
+	@$(PIC320_HOST_CC) $(PIC320_HOST_CFLAGS) $(PIC320_HOST_INC) \
+		-c $(PIC320_MODEL_SRC) -o $(PIC320_BUILD_DIR)/bypass_pure_equiv.o
+	@$(PIC320_HOST_CC) $(PIC320_BUILD_DIR)/fw_harness.o \
+		$(PIC320_BUILD_DIR)/test_equiv_drv.o $(PIC320_BUILD_DIR)/bypass_pure_equiv.o \
+		-o $(PIC320_BUILD_DIR)/test_equiv
+	@$(PIC320_BUILD_DIR)/test_equiv
+
+# Settled control-pin sequence for the selected output stage (the variant-
+# specific RA1/RA2 pattern the equivalence lane deliberately does not check).
+pic320-test-actuation:
+	@mkdir -p $(PIC320_BUILD_DIR)
+	@$(PIC320_HOST_CC) -std=c11 -O2 $(PIC320_FW_HOST_DEFS) -I$(PIC320_EQUIV_DIR) \
+		-c $(PIC320_EQUIV_DIR)/fw_harness.c -o $(PIC320_BUILD_DIR)/fw_harness_$(PIC320_VARIANT).o
+	@$(PIC320_HOST_CC) $(PIC320_HOST_CFLAGS) $(PIC320_OUTPUT_DEF) \
+		-c $(PIC320_ACT_DIR)/test_actuation.c \
+		-o $(PIC320_BUILD_DIR)/test_actuation_drv_$(PIC320_VARIANT).o
+	@$(PIC320_HOST_CC) $(PIC320_BUILD_DIR)/fw_harness_$(PIC320_VARIANT).o \
+		$(PIC320_BUILD_DIR)/test_actuation_drv_$(PIC320_VARIANT).o \
+		-o $(PIC320_BUILD_DIR)/test_actuation_$(PIC320_VARIANT)
+	@$(PIC320_BUILD_DIR)/test_actuation_$(PIC320_VARIANT)
+
+# Host fault injection over the firmware's defensive layer: corrupt an SFR or the
+# debounce context, assert the sanity gate forces a watchdog reset. Distinct from
+# the libgpsim TARGET fault lane added in Phase 4 -- hence the -host suffix.
+pic320-test-fault-host:
+	@mkdir -p $(PIC320_BUILD_DIR)
+	@$(PIC320_HOST_CC) -std=c11 -O2 $(PIC320_FW_HOST_DEFS) $(PIC320_FAULT_INC) \
+		-c $(PIC320_FAULT_DIR)/fw_fault_harness.c \
+		-o $(PIC320_BUILD_DIR)/fw_fault_harness.o
+	@$(PIC320_HOST_CC) $(PIC320_HOST_CFLAGS) $(PIC320_OUTPUT_DEF) $(PIC320_FAULT_INC) \
+		-c $(PIC320_FAULT_DIR)/test_fault.c -o $(PIC320_BUILD_DIR)/test_fault_drv.o
+	@$(PIC320_HOST_CC) $(PIC320_BUILD_DIR)/fw_fault_harness.o \
+		$(PIC320_BUILD_DIR)/test_fault_drv.o -o $(PIC320_BUILD_DIR)/test_fault
+	@$(PIC320_BUILD_DIR)/test_fault
+
+# Tool-independent aggregate: everything above needs only a host C compiler, so
+# this may join `test` once green (Principle 5). It does NOT build any HEX.
+pic320-test-host: pic320-test-equiv pic320-test-actuation pic320-test-fault-host
+	@echo "=== all PIC10F320 host lanes passed (variant $(PIC320_VARIANT)) ==="
+
+# --- §6.13 byte-identity gate (pulled forward from Phase 4) ------------------
+# Proves the RELOCATED firmware, built by the PORTED recipe, reproduces the
+# child project's last signed release byte for byte. This is the one check that
+# validates the whole ported XC8 invocation at once: a recipe that silently
+# changed -O level, -mdfp, include order or CONFIG-word emission cannot pass it,
+# and neither the equivalence nor the lock-step lane would notice (they assert
+# behaviour, not emitted bytes).
+#
+# LIFETIME (plan §15, D4): this is a ONE-SHOT MIGRATION GATE, not a standing
+# regression. Run it here in Phase 2 and again in Phase 4, record the compared
+# hashes in the phase commits and docs/pic10f320_validation.md, then retire it
+# together with the imported baseline directory in Phase 7. It CANNOT be re-run
+# at the merged tip once _incoming_pic10f320/ is deleted -- that is intended.
+#
+# It is also invalidated on purpose by the §6.11 exact-TRISA firmware edit, which
+# must therefore land AFTER this gate has passed, as its own rebaselining commit.
+PIC320_BASELINE_DIR ?= _incoming_pic10f320/release/v0.9.5
+
+pic320-verify-baseline-images:
+	@test -x "$(PIC320_CC)" || { echo "SKIP: XC8 not found at $(PIC320_CC)"; exit 0; }
+	@test -d "$(PIC320_BASELINE_DIR)" || { \
+		echo "FAIL: baseline directory $(PIC320_BASELINE_DIR) is gone."; \
+		echo "      This gate is one-shot by design (plan §15, D4) and cannot run"; \
+		echo "      after Phase 7 removes the imported tree."; exit 1; }
+	@mkdir -p $(PIC320_BUILD_DIR)
+	@rc=0; for v in $(PIC320_VARIANTS_ALL); do \
+		$(MAKE) --no-print-directory PIC320_VARIANT=$$v _pic320-build-one || exit 1; \
+		fresh="$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).hex"; \
+		base="$(PIC320_BASELINE_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).hex"; \
+		test -f "$$base" || { echo "FAIL: missing baseline image $$base"; exit 1; }; \
+		if cmp -s "$$fresh" "$$base"; then \
+			echo "  OK   $$v  $$(sha256sum "$$fresh" | cut -c1-16)...  byte-identical"; \
+		else \
+			echo "  FAIL $$v  fresh build differs from the child's signed v0.9.5 image"; \
+			echo "       fresh: $$(sha256sum "$$fresh" | cut -d' ' -f1)"; \
+			echo "       base : $$(sha256sum "$$base"  | cut -d' ' -f1)"; \
+			rc=1; \
+		fi; \
+	done; \
+	test $$rc -eq 0 || { echo "=== PIC10F320 byte-identity gate FAILED ==="; exit 1; }; \
+	echo "=== PIC10F320 byte-identity gate PASSED (3/3 variants) ==="
+
+# Minimal build used by the gate above. The HARDENED build (flash-budget gate,
+# structural IHEX validation, failed-artifact cleanup) arrives in Phase 4; this
+# deliberately stays small so the gate can run at the Phase-2 boundary.
+.PHONY: _pic320-build-one
+_pic320-build-one:
+	@mkdir -p $(PIC320_BUILD_DIR)
+	@test -f $(PIC320_SRC) || { \
+		echo "FAIL: $(PIC320_SRC) not found."; \
+		echo "      Phase 2 requires the firmware to be moved (by the user) from"; \
+		echo "      _incoming_pic10f320/bypass_mcu_pic10f320.c to src/ -- verbatim."; \
+		exit 1; }
+	@cd $(PIC320_BUILD_DIR) && $(PIC320_CC) $(PIC320_CFLAGS) $(CURDIR)/$(PIC320_SRC) \
+		-o $(notdir $(PIC320_HEX)) > /dev/null
+
+# --- cleanup -----------------------------------------------------------------
+# §5.7: scoped to PIC10F320 paths ONLY. The imported child recipe did
+# `rm -rf $(COVERAGE_DIR)` on the SHARED top-level coverage/, which would have
+# deleted the parent's coverage report and any concurrent gate working directory.
+# Every destructive path below is under $(PIC320_BUILD_DIR).
+pic320-clean:
+	rm -rf $(PIC320_BUILD_DIR)
+
+# ============================================================================
 # INTROSPECTION -- expose one Makefile variable's value to scripts
 # ============================================================================
 # `make print-VARIANTS` echoes "$(VARIANTS)", `make print-LFUSE` echoes the fuse

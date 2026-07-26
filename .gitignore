@@ -7,6 +7,10 @@
 build_avr_classic/
 build_pic/
 build_avr_xt/
+# PIC10F320 build + coverage artifacts (coverage lives UNDER the build dir --
+# see docs/pic10f320_merge_plan.md §5.7 -- so this one entry covers both, and no
+# PIC10F320 recipe can reach the shared top-level coverage/)
+build_pic10f320/
 
 # vendored ATtiny_DFP device files for the ATtiny202 (AVR-XT) build -- fetched
 # on demand by scripts/fetch_attiny_dfp.sh (pinned version + SHA), NOT committed,

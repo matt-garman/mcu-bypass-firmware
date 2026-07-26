@@ -1121,7 +1121,9 @@ scheme across MCU targets and output stages", not by re-opening this plan.
 **Phase 1 — Provenance import, inert.** Fetch and verify the pinned child
 branch and original signed tags under namespaced refs, then perform a
 non-squashed subtree import at `_incoming_pic10f320/` (§9). Nothing builds
-from the prefix. Verify parent tests are unchanged and record the subtree merge
+from the prefix. **Executed 2026-07-26 — see §15.3 for the merge SHA, the
+verbatim-import proof, and the exec-bit gotcha.**
+Verify parent tests are unchanged and record the subtree merge
 commit. Do not delete historical releases or documentation yet.
 
 **Phase 2 — Relocate and establish host build scaffolding.** The user moves
@@ -1761,7 +1763,130 @@ equal to the committed `SHA256SUMS` in that directory:
 b77e21221b8a94788781b2d1df6a66e0487317cb215d5d540c5582db2a47c4e2  bypass_mcu_tq2-relay_pic10f320.hex
 ```
 
-### 15.3 Tool inventory, and the one recorded blocker
+### 15.3 Phase 1 — executed 2026-07-26
+
+Integration branch `pic10f320-merge`, based on parent
+`5180881e9592ec9b1b822fd3a4334c9d41f2b34f`.
+
+```
+subtree merge commit : a15d7b62c8d1242439559f7a2387ee393a34580e   <- §13 rollback anchor
+                       (git revert -m 1 a15d7b6)
+imported child ref   : refs/remotes/pic10f320/main = f58d2d5…     (== the §6.1 pin)
+namespaced tags      : refs/tags/pic10f320/v0.9.0 … v0.9.5, all six SIGNED-OK,
+                       all annotated tag objects, same object IDs as in the child
+```
+
+**Import is provably verbatim.** The imported subtree's tree object equals the
+child's tree at `f58d2d5` exactly — `393cbac2268f9e8510a86c571749da7c78dcf9d5`
+on both sides — so nothing was rewritten in transit. The three §6.13 baseline
+images came across intact and are tracked at
+`_incoming_pic10f320/release/v0.9.5/*.hex`, hashes matching §15.2.
+
+Exit condition verified: no parent Makefile, script, test or workflow file
+references `_incoming_pic10f320`, so the prefix is inert; the imported
+`.github/workflows/` are inert too, because GitHub Actions only reads the
+repository-root path.
+
+Green boundary confirmed — `make test` post-import is **identical** to the
+§15.2 pre-import baseline: `EXIT=0`, same closing
+`=== all fast pre-hardware tests passed ===`, same golden-model line coverage
+99.35% against the 90% floor, and zero `FAIL`/`ERROR` lines anywhere in the
+run. The import demonstrably changed nothing the parent suite can observe.
+
+**Gotcha worth recording — imported executables lost their exec bit on
+checkout.** Fifteen `.sh` files arrived mode `600` on disk while the commit
+correctly recorded `100755`, so `git status` showed fifteen phantom
+modifications and `git subtree add` had already committed the *right* modes.
+The umask is a normal `0002`; the cause appears to be the ZFS/NFSv4 ACL layer
+on this filesystem overriding POSIX mode bits during the merge checkout. The
+fix is a worktree-only `chmod 711` (this project's script mode) to match the
+committed tree — **not** a commit. Watch for the same effect when Phase 2
+relocates these files, and check `git diff --summary` for `mode change` lines
+before committing any phase; committing one would strip the exec bit from
+scripts the Makefile invokes directly.
+
+Two incidental confirmations, so they are not re-derived: the parent's existing
+`!release/**/*.hex` negation already covers D2's `bypass_mcu_*` basenames, so no
+`.gitignore` change is needed for future unified release images; and
+`build_pic10f320/*.hex` is already ignored by the global `*.hex` rule, though
+the directory still needs its own entry in Phase 2 for non-HEX artifacts.
+
+### 15.4 Phase 2 — host scaffolding landed 2026-07-26 (firmware move pending)
+
+Relocated to `test/pic10f320/{equiv,actuation,fault}/` (plain `mv`, index left
+for the user to stage). Includes repointed off the vendored model and onto the
+shared core: `test_equiv.c` now takes `bypass_config_host.h` (the parent's shim,
+`-Itest`) instead of the child's minimal `test/model/bypass_config.h`, and both
+firmware harnesses now include `../../../src/bypass_mcu_pic10f320.c`. The
+equivalence recipe compiles and links **`src/bypass_pure.c`** — no vendored copy
+is reachable from any PIC10F320 lane any more.
+
+New Makefile section `PIC10F320 -- the constrained target`, inserted before
+INTROSPECTION, carrying `PIC320_*` variables and `pic320-*` targets per D1, with
+`build_pic10f320/` and coverage as a subtree of it per §5.7. Host lanes:
+`pic320-test-equiv`, `pic320-test-actuation`, `pic320-test-fault-host`, and the
+tool-independent aggregate `pic320-test-host`. Plus `pic320-clean`, and
+`pic320-verify-baseline-images` — the §6.13 gate pulled forward from Phase 4 as
+D4's one-shot migration check, with its lifetime and its
+"must run BEFORE the §6.11 edit" ordering written into the recipe's own comment
+so it cannot be lost.
+
+**Firmware move completed by the user 2026-07-26**, as a `git mv` from
+`_incoming_pic10f320/bypass_mcu_pic10f320.c` to `src/bypass_mcu_pic10f320.c`
+(git recorded it as a rename, preserving the path link). Confirmed byte-identical
+to the child original at `f58d2d5`, so "verbatim" is a checked fact, not a review
+claim. No mode change accompanied it; note that every file in `src/` is mode
+`600` on this filesystem, which git ignores because only the exec bit is tracked.
+
+Validated first in a sandbox copy with the move simulated, then **re-run in the
+real tree after the move — identical results, reproduced below**:
+
+| Lane | Result |
+| --- | --- |
+| `pic320-test-equiv` | 266144 sequences, **0 divergences**, 66/66 reachable model states — against the real `src/bypass_pure.c` |
+| `pic320-test-actuation` ×3 | 108 / 113 / 115 checks, 0 failures |
+| `pic320-test-fault-host` ×3 | 41 / 42 / 42 checks, 0 failures (the pre-port counts, confirming the sandbox ran the *verbatim* firmware) |
+| `pic320-verify-baseline-images` | **PASSED 3/3 — byte-identical** to the child's signed v0.9.5 images, hashes matching §15.2 |
+
+**§6.13 gate evidence, recorded here because the gate is one-shot (D4) and its
+baseline disappears with `_incoming_pic10f320/` in Phase 7.** These are the
+SHA-256 sums of the three images built from `src/bypass_mcu_pic10f320.c` by the
+ported recipe in the merged tree, each `cmp`-equal to the child's signed
+`release/v0.9.5/` image of the same name:
+
+```
+26531d3408a75297656d722699a1ffafdc47de376af6b4d2aa62b303c6713ca8  bypass_mcu_cd4053-simple_pic10f320.hex
+7709a3979b9103411b1f2e0c892d2291e1c232b5033344bd645ae289ac55649f  bypass_mcu_cd4053-mute_pic10f320.hex
+b77e21221b8a94788781b2d1df6a66e0487317cb215d5d540c5582db2a47c4e2  bypass_mcu_tq2-relay_pic10f320.hex
+```
+
+This is the moment the merge's central provenance claim becomes machine-checked:
+the relocated firmware, built by a recipe rewritten under new variable names in a
+different Makefile, still emits the exact bytes the child shipped and signed.
+The §6.11 exact-TRISA edit deliberately invalidates these hashes and must
+therefore land as its own commit *after* this point, carrying the rebaselined
+values.
+
+Guard checks: `pic320-clean` leaves the shared top-level `coverage/` intact
+(§5.7 — the imported child recipe would have deleted it); the default `test`
+aggregate gained no `pic320` member, so its tool contract is unchanged
+(Principle 5); and no `.NOTPARALLEL` entered the Makefile (§5.8).
+
+Green boundary confirmed. The parent suite is now identical across all three
+checkpoints — pre-import (§15.2), post-import (§15.3), and post-relocation:
+`EXIT=0`, same closing `=== all fast pre-hardware tests passed ===`, same
+golden-model line coverage 99.35% against the 90% floor, zero `FAIL`/`ERROR`
+lines. Adding a fifth target and a whole new validation lane changed nothing the
+existing suite can observe, which is exactly the property Phases 1 and 2 were
+supposed to preserve.
+
+One recipe bug found and fixed while validating, worth remembering because it is
+silent: `$$v_$(PIC320_TAG)` in a shell loop expands as a variable named `v_`, not
+`v` followed by `_`, so the gate looked for `bypass_mcu_.hex` and reported a
+missing baseline rather than a mismatch. Use `$${v}` in any recipe that
+concatenates a loop variable with `_`.
+
+### 15.5 Tool inventory, and the one recorded blocker
 
 §6.9 requires unavailable tools to be recorded as blockers rather than passes.
 Verified present on the execution host: XC8 V3.10 at the pinned

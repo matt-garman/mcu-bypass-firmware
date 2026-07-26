@@ -5,12 +5,16 @@
 //
 // Proves that the REAL PIC10F320 firmware (run on the host via fw_harness.c)
 // produces the EXACT same LED output AND internal state (program_state,
-// effect_state, debounce_counter), tick for tick, as the vendored reference
-// model (test/model/bypass_pure.c) for the same footswitch stimulus.
-// This is what licenses the project's "correctness inherited by derivation"
-// claim concretely: the firmware inlines the model's algorithm to fit flash, and
-// this test pins that the inlining did not change behaviour. It also
-// AUTOMATICALLY guards against the firmware and model debounce thresholds
+// effect_state, debounce_counter), tick for tick, as the project's verified
+// pure core (src/bypass_pure.c) for the same footswitch stimulus.
+//
+// Note what this compares against: NOT a vendored snapshot of the core, but the
+// single copy that the AVR and PIC10F322 targets compile into their shipping
+// images. The PIC10F320 is the one target that cannot link that core -- its
+// 256-word flash forces the algorithm to be inlined by hand into main() -- so
+// this test is what closes that seam: it pins that the hand-inlining did not
+// change behaviour, against the same code every other target actually runs. It
+// also AUTOMATICALLY guards against the firmware and core debounce thresholds
 // drifting apart -- a mismatch makes the traces diverge and fails here.
 //
 // Coverage:
@@ -33,7 +37,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "bypass_config.h" // RELEASE_THRESH, PRESSED_THRESH (model side)
+#include "bypass_config_host.h" // RELEASE_THRESH, PRESSED_THRESH (firmware truth)
 #include "model_step.h"    // step(), state_t, debounce_init_context(), enums
 
 // Provided by fw_harness.c (the real firmware on the host).
