@@ -1,0 +1,231 @@
+name: CI
+
+# Continuous integration for the PIC10F320 bypass firmware.
+#
+# The goal of this workflow is reproducibility: it proves that the full
+# build + validation suite passes on a clean machine, not just on the
+# developer's box. The runner is pinned to ubuntu-24.04 so the installed
+# toolchain matches TOOLCHAIN.adoc (XC8 3.10 + PIC10-12Fxxx DFP 1.9.189, gpsim
+# 0.32.x, cppcheck 2.13, cbmc, gcc 13) as closely as the distro packages allow.
+#
+# Most of the matrix lives inside the Makefile: a single `make test-variants`
+# already exercises all three output variants (cd4053-simple, cd4053-mute,
+# tq2-relay), each through the whole `make test` gate
+# -- static analysis
+# (cppcheck + MISRA-C:2012), the reference-model host/formal suite (unit + property
+# + exhaustive state-space + symbolic + CBMC), the firmware<->model equivalence
+# trace, the firmware fault-injection harness, the CONFIG-word check, the gpsim
+# register-level functional test, and the model + firmware coverage gates. The
+# verify job also runs the fail-closed libgpsim target aggregate (fault recovery,
+# firmware/model lock-step, and GPIO transition/pulse timing) for every variant;
+# the stress job runs the slower mutation suite off the PR hot path.
+#
+# XC8 and the PIC10-12Fxxx DFP are not in apt; they are fetched from Microchip
+# (the free tier needs no key to compile) and installed to the paths the Makefile
+# defaults to (PIC_CC / PIC_DFP). gpsim, cppcheck, cbmc, gcc and python3 are apt
+# packages. gpsim-dev + libglib2.0-dev provide the libgpsim headers used by the
+# regular target fault, lock-step, and I/O gate. The long soak remains release-only.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly run (Mondays 06:00 UTC) so the suite is exercised even with no pushes.
+    - cron: '0 6 * * 1'
+
+# Cancel superseded runs for the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  # Pin to the versions in TOOLCHAIN.adoc; bump compiler + DFP together.
+  XC8_VERSION: "3.10"
+  DFP_VERSION: "1.9.189"
+  XC8_DIR: /opt/microchip/xc8/v3.10
+  # .atpack unzips here so PIC_DFP = $XC8_DFP_ROOT/xc8 (its xc8/ subtree). These
+  # are the Makefile's default PIC_CC / PIC_DFP paths, so nothing needs overriding.
+  XC8_DFP_ROOT: /opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Gating job: the full validation suite across all three output variants.
+  # This is the "build passing" badge. `make test-variants` runs `make test`
+  # (analyze + host/formal + equiv + actuation + fault + CONFIG word + gpsim + coverage)
+  # once per variant.
+  #
+  # CRITICAL: the `make test` sub-targets SKIP CLEANLY when a tool/header is
+  # absent -- fatal for a gate (a failed XC8 fetch would make every check "skip"
+  # and the job go green on nothing). The "Assert toolchain present" step fails
+  # loud so a broken install can never masquerade as a pass; the cache is only
+  # SAVED after that assert, so a half-baked install is never cached.
+  #
+  # NOTE: confirm the XC8 download URL and the unattended-installer flags against
+  # microchip.com / `./xc8.run --help` (both change per release). The DFP
+  # packs.download.microchip.com/<pack>.atpack URL scheme is stable.
+  verify:
+    name: verify (source + target gates)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gpsim + host/analysis toolchain (apt)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            make util-linux gcc g++ gpsim gpsim-dev libglib2.0-dev pkg-config \
+            cppcheck cbmc python3 unzip wget
+
+      - name: Restore cached XC8 + DFP
+        id: cache-xc8
+        uses: actions/cache/restore@v4
+        with:
+          path: /opt/microchip
+          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}
+
+      - name: Install XC8 (free tier) + PIC10-12Fxxx DFP
+        if: steps.cache-xc8.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          # --- XC8 compiler ---
+          xc8_run="xc8-v${XC8_VERSION}-full-install-linux-x64-installer.run"
+          xc8_base="https://ww1.microchip.com/downloads/aemDocuments/documents"
+          xc8_base="${xc8_base}/DEV/ProductDocuments/SoftwareTools"
+          wget -q "${xc8_base}/${xc8_run}" -O /tmp/xc8.run
+          chmod +x /tmp/xc8.run
+          sudo /tmp/xc8.run --mode unattended --unattendedmodeui none \
+            --netservername '' --LicenseType FreeMode --prefix "${XC8_DIR}"
+          # --- PIC10-12Fxxx Device Family Pack (.atpack == a zip) ---
+          sudo mkdir -p "${XC8_DFP_ROOT}"
+          dfp_pack="Microchip.PIC10-12Fxxx_DFP.${DFP_VERSION}.atpack"
+          wget -q "https://packs.download.microchip.com/${dfp_pack}" \
+            -O /tmp/dfp.atpack
+          sudo unzip -q -o /tmp/dfp.atpack -d "${XC8_DFP_ROOT}"
+
+      - name: Assert toolchain present (fail loud, do NOT skip)
+        run: |
+          xc8="${XC8_DIR}/bin/xc8-cc"
+          dev="${XC8_DFP_ROOT}/xc8/pic/include/proc/pic10f320.h"
+          test -x "${xc8}" || { echo "::error::XC8 missing: ${xc8}"; exit 1; }
+          test -f "${dev}" || { echo "::error::DFP missing: ${dev}"; exit 1; }
+          for t in gpsim cppcheck cbmc gcc c++ pkg-config python3; do
+            command -v "$t" >/dev/null || { echo "::error::no $t"; exit 1; }
+          done
+          test -f /usr/include/gpsim/sim_context.h \
+            || { echo "::error::gpsim-dev headers missing"; exit 1; }
+          pkg-config --exists glib-2.0 \
+            || { echo "::error::libglib2.0-dev missing"; exit 1; }
+
+      # Save only after the assert passed, so a partial install is never cached.
+      - name: Save XC8 + DFP cache
+        if: steps.cache-xc8.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/microchip
+          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}
+
+      - name: Record toolchain versions
+        run: |
+          echo "== xc8-cc ==" && "${XC8_DIR}/bin/xc8-cc" --version | head -2 || true
+          echo "== gpsim =="   && (gpsim --version 2>&1 | head -1 || true)
+          echo "== cppcheck ==" && cppcheck --version
+          echo "== cbmc =="     && cbmc --version
+          echo "== gcc =="      && gcc --version | head -1
+          echo "== python3 ==" && python3 --version
+
+      - name: Full validation suite (all variants)
+        run: |
+          make test-variants \
+            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC_DFP="${XC8_DFP_ROOT}/xc8"
+
+      - name: Target fault, lock-step, and I/O gate (all variants)
+        run: |
+          make test-target-variants \
+            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC_DFP="${XC8_DFP_ROOT}/xc8"
+
+      - name: Upload PIC firmware images
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-pic10f320
+          path: build_pic/*.hex
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------------
+  # Mutation suite (minutes-long, rebuilds per mutant). Kept off every PR: runs
+  # on pushes to main, the weekly schedule, and manual dispatch. `make
+  # test-mutation` injects deliberate firmware + model faults and asserts the
+  # suite KILLS each one (a passing suite proves tests pass on correct code; this
+  # proves they fail on broken code). Gated behind verify: a verify failure
+  # short-circuits the run instead of burning minutes on the slow job.
+  #
+  # The mutation script (test/run_mutation_tests.sh) drives `make` on a throwaway
+  # copy of the tree with the default PIC_CC / PIC_DFP paths, so XC8 + the DFP are
+  # installed to those same default locations here (no override threading).
+  # -------------------------------------------------------------------------
+  stress:
+    name: stress (make test-mutation)
+    runs-on: ubuntu-24.04
+    needs: verify
+    if: >-
+      github.event_name == 'push' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gpsim + host/analysis toolchain (apt)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            make util-linux gcc g++ gpsim gpsim-dev libglib2.0-dev pkg-config \
+            cppcheck cbmc python3 unzip wget
+
+      - name: Restore cached XC8 + DFP
+        id: cache-xc8
+        uses: actions/cache/restore@v4
+        with:
+          path: /opt/microchip
+          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}
+
+      - name: Install XC8 (free tier) + PIC10-12Fxxx DFP
+        if: steps.cache-xc8.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          xc8_run="xc8-v${XC8_VERSION}-full-install-linux-x64-installer.run"
+          xc8_base="https://ww1.microchip.com/downloads/aemDocuments/documents"
+          xc8_base="${xc8_base}/DEV/ProductDocuments/SoftwareTools"
+          wget -q "${xc8_base}/${xc8_run}" -O /tmp/xc8.run
+          chmod +x /tmp/xc8.run
+          sudo /tmp/xc8.run --mode unattended --unattendedmodeui none \
+            --netservername '' --LicenseType FreeMode --prefix "${XC8_DIR}"
+          sudo mkdir -p "${XC8_DFP_ROOT}"
+          dfp_pack="Microchip.PIC10-12Fxxx_DFP.${DFP_VERSION}.atpack"
+          wget -q "https://packs.download.microchip.com/${dfp_pack}" -O /tmp/dfp.atpack
+          sudo unzip -q -o /tmp/dfp.atpack -d "${XC8_DFP_ROOT}"
+
+      - name: Assert toolchain present (fail loud, do NOT skip)
+        run: |
+          test -x "${XC8_DIR}/bin/xc8-cc" || { echo "::error::XC8 missing"; exit 1; }
+          test -f "${XC8_DFP_ROOT}/xc8/pic/include/proc/pic10f320.h" || { echo "::error::DFP missing"; exit 1; }
+          for t in gpsim cppcheck cbmc gcc c++ pkg-config; do
+            command -v "$t" >/dev/null || { echo "::error::no $t"; exit 1; }
+          done
+          test -f /usr/include/gpsim/sim_context.h \
+            || { echo "::error::gpsim-dev headers missing"; exit 1; }
+          pkg-config --exists glib-2.0 \
+            || { echo "::error::libglib2.0-dev missing"; exit 1; }
+
+      - name: Save XC8 + DFP cache
+        if: steps.cache-xc8.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/microchip
+          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}
+
+      - name: Mutation suite
+        run: make test-mutation MUTATION_ALLOW_SKIP=0

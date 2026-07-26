@@ -1,0 +1,10 @@
+release: firmware v0.9.0
+
+Prebuilt, fully-validated PIC10F320 firmware images for v0.9.0.
+
+Built from cf892da with the toolchain pinned in TOOLCHAIN.adoc.
+Validation: make test-variants + make test-mutation + 24.0-h parallel soak
+of every output variant (evidence under release/v0.9.0/evidence/).
+
+Reproducibility is pinned by release/v0.9.0/SHA256SUMS and verified on a
+clean runner by .github/workflows/release.yml when the tag is pushed.

@@ -1,0 +1,4 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/pic10f320-bypass-firmware'
+=== PIC10F320 build + flash-budget (256 words, variant cd4053-mute) ===
+OK:   build_pic/bypass_mcu_cd4053-mute_pic10f320.hex : 238 words (93.0%) of 256
+make[1]: Leaving directory '/mnt/home/matt/development/github/pic10f320-bypass-firmware'

@@ -1,0 +1,27 @@
+# cppcheck per-file suppressions for the MISRA-C:2012 analysis (make analyze-misra).
+
+# This file holds DOCUMENTED, PROJECT-SPECIFIC deviations: MISRA rules we
+# knowingly do not satisfy in our own source. Every entry must map to a numbered
+# deviation record ("D-n") in MISRA_COMPLIANCE.md, which carries the rationale.
+# A suppression here without a matching D-record there is a defect -- the whole
+# point of MISRA compliance is that every deviation is justified.
+
+# Suppressions are PER FILE (errorId:filename), not project-wide, so a new
+# instance of a waived rule in a NEW file still surfaces and fails the analysis.
+
+# Out of scope (handled on the cppcheck command line in the Makefile, not here):
+# violations inside the XC8 / DFP system headers -- the toolchain library is
+# outside this project's compliance boundary.
+
+# NOTE: a line that is exactly "#" is parsed by cppcheck as a malformed
+# suppression ("Failed to add suppression. No id."), so the separator lines in
+# this file are left genuinely empty rather than a bare "#".
+
+# --- STATUS: ZERO project deviations -----------------------------------------
+# Unlike the parent (mcu-bypass-firmware), whose AVR shells need documented
+# deviations for integer-address register access (Rules 11.4, 10.1, 10.8), this
+# single-file PIC10F320 firmware accesses every SFR through XC8's volatile
+# named-register / bitfield-union model, which is MISRA-clean. `make analyze-misra`
+# therefore passes with NO suppressions. Keep it that way: prefer fixing a finding
+# over adding an entry here. Any genuinely unavoidable future deviation goes below,
+# paired with a D-record in MISRA_COMPLIANCE.md.

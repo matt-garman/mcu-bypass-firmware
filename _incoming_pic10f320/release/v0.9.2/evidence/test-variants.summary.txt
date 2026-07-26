@@ -1,0 +1,99 @@
+# test-variants summary -- the full log is in the release CI run.
+
+2:===================== VARIANT cd4053-simple =====================
+4:OK:   build_pic/bypass_mcu_cd4053-simple_pic10f320.hex : 202 words (78.9%) of 256
+8:MISRA-C:2012 analysis (cppcheck + misra addon, pic8-enhanced)
+11:MISRA-C:2012: clean (no deviations)
+29:cbmc: prove_integrate
+30:cbmc: prove_debounce_step
+31:cbmc: prove_corrupt_state_faults
+32:cbmc: prove_init_context
+33:cbmc: prove_step_transition
+34:cbmc: prove_oor_recovery_step
+35:cbmc: prove_press_liveness (--unwind 50)
+36:cbmc: prove_release_liveness (--unwind 50)
+37:cbmc: prove_oor_recovery_bounded (--unwind 257)
+87:OK: every firmware line is covered except the allowlisted watchdog-reset fault path.
+89:===================== VARIANT tmux4053-simple =====================
+91:OK:   build_pic/bypass_mcu_tmux4053-simple_pic10f320.hex : 202 words (78.9%) of 256
+95:MISRA-C:2012 analysis (cppcheck + misra addon, pic8-enhanced)
+98:MISRA-C:2012: clean (no deviations)
+116:cbmc: prove_integrate
+117:cbmc: prove_debounce_step
+118:cbmc: prove_corrupt_state_faults
+119:cbmc: prove_init_context
+120:cbmc: prove_step_transition
+121:cbmc: prove_oor_recovery_step
+122:cbmc: prove_press_liveness (--unwind 50)
+123:cbmc: prove_release_liveness (--unwind 50)
+124:cbmc: prove_oor_recovery_bounded (--unwind 257)
+174:OK: every firmware line is covered except the allowlisted watchdog-reset fault path.
+176:===================== VARIANT cd4053-mute =====================
+178:OK:   build_pic/bypass_mcu_cd4053-mute_pic10f320.hex : 225 words (87.9%) of 256
+182:MISRA-C:2012 analysis (cppcheck + misra addon, pic8-enhanced)
+185:MISRA-C:2012: clean (no deviations)
+203:cbmc: prove_integrate
+204:cbmc: prove_debounce_step
+205:cbmc: prove_corrupt_state_faults
+206:cbmc: prove_init_context
+207:cbmc: prove_step_transition
+208:cbmc: prove_oor_recovery_step
+209:cbmc: prove_press_liveness (--unwind 50)
+210:cbmc: prove_release_liveness (--unwind 50)
+211:cbmc: prove_oor_recovery_bounded (--unwind 257)
+261:OK: every firmware line is covered except the allowlisted watchdog-reset fault path.
+263:===================== VARIANT tmux4053-mute =====================
+265:OK:   build_pic/bypass_mcu_tmux4053-mute_pic10f320.hex : 225 words (87.9%) of 256
+269:MISRA-C:2012 analysis (cppcheck + misra addon, pic8-enhanced)
+272:MISRA-C:2012: clean (no deviations)
+290:cbmc: prove_integrate
+291:cbmc: prove_debounce_step
+292:cbmc: prove_corrupt_state_faults
+293:cbmc: prove_init_context
+294:cbmc: prove_step_transition
+295:cbmc: prove_oor_recovery_step
+296:cbmc: prove_press_liveness (--unwind 50)
+297:cbmc: prove_release_liveness (--unwind 50)
+298:cbmc: prove_oor_recovery_bounded (--unwind 257)
+348:OK: every firmware line is covered except the allowlisted watchdog-reset fault path.
+350:===================== VARIANT tq2-relay =====================
+352:OK:   build_pic/bypass_mcu_tq2-relay_pic10f320.hex : 225 words (87.9%) of 256
+356:MISRA-C:2012 analysis (cppcheck + misra addon, pic8-enhanced)
+359:MISRA-C:2012: clean (no deviations)
+377:cbmc: prove_integrate
+378:cbmc: prove_debounce_step
+379:cbmc: prove_corrupt_state_faults
+380:cbmc: prove_init_context
+381:cbmc: prove_step_transition
+382:cbmc: prove_oor_recovery_step
+383:cbmc: prove_press_liveness (--unwind 50)
+384:cbmc: prove_release_liveness (--unwind 50)
+385:cbmc: prove_oor_recovery_bounded (--unwind 257)
+435:OK: every firmware line is covered except the allowlisted watchdog-reset fault path.
+437:===================== FAULT VARIANT cd4053-simple =====================
+440:===================== FAULT VARIANT tmux4053-simple =====================
+443:===================== FAULT VARIANT cd4053-mute =====================
+446:===================== FAULT VARIANT tmux4053-mute =====================
+449:===================== FAULT VARIANT tq2-relay =====================
+
+# --- last 20 lines ---
+OK: every firmware line is covered except the allowlisted watchdog-reset fault path.
+=== all PIC10F320 validation complete (variant tq2-relay) ===
+===================== FAULT VARIANT cd4053-simple =====================
+firmware fault-injection + defensive-path tests:
+firmware fault harness: 27 checks, 0 failures
+===================== FAULT VARIANT tmux4053-simple =====================
+firmware fault-injection + defensive-path tests:
+firmware fault harness: 27 checks, 0 failures
+===================== FAULT VARIANT cd4053-mute =====================
+firmware fault-injection + defensive-path tests:
+firmware fault harness: 28 checks, 0 failures
+===================== FAULT VARIANT tmux4053-mute =====================
+firmware fault-injection + defensive-path tests:
+firmware fault harness: 28 checks, 0 failures
+===================== FAULT VARIANT tq2-relay =====================
+firmware fault-injection + defensive-path tests:
+firmware fault harness: 28 checks, 0 failures
+=== all fault-injection variants validated ===
+=== all output variants validated ===
+make[1]: Leaving directory '/mnt/home/matt/development/github/pic10f320-bypass-firmware'

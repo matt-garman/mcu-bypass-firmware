@@ -1,0 +1,185 @@
+name: Release
+
+# Publishes a firmware release when a vX.Y.Z tag is pushed.
+#
+# This is the PUBLIC ATTESTATION half of the release pipeline. The local
+# scripts/make-release.sh (run by the maintainer before tagging) does the heavy
+# validation -- the full per-variant gate, the mutation suite, plus the 24-hour
+# parallel soaks that cannot fit in a hosted runner's time limit -- and commits
+# the prebuilt images under release/<tag>/ with a SHA256SUMS manifest.
+#
+# When the tag lands here, this workflow:
+#   1. rebuilds every image from the TAGGED source on a clean, pinned runner;
+#   2. REPRODUCIBILITY GATE: asserts the freshly built images reproduce the
+#      committed SHA256SUMS byte-for-byte -- i.e. proves the committed binaries
+#      really are what the tagged source compiles to (fails the release if not);
+#   3. re-runs `make test-variants` + `make test-mutation` +
+#      `make test-target-variants` (real-HEX fault recovery, firmware/model
+#      lock-step, and GPIO transition/pulse timing) on the clean runner;
+#   4. publishes a GitHub Release with the images, SHA256SUMS(.asc) and MANIFEST.
+#
+# The runner is pinned to ubuntu-24.04 so the toolchain matches TOOLCHAIN.adoc;
+# byte-exact reproduction depends on that pin (esp. XC8 V3.10 + the DFP).
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: write          # required to create the GitHub Release
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  # Pin to the versions in TOOLCHAIN.adoc; bump compiler + DFP together.
+  XC8_VERSION: "3.10"
+  DFP_VERSION: "1.9.189"
+  XC8_DIR: /opt/microchip/xc8/v3.10
+  XC8_DFP_ROOT: /opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189
+
+jobs:
+  release:
+    name: reproduce + publish ${{ github.ref_name }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate the committed release directory
+        id: rel
+        run: |
+          set -euo pipefail
+          tag='${{ github.ref_name }}'
+          dir="release/${tag}"
+          test -d "$dir"               || { echo "::error::no committed $dir/ -- run scripts/make-release.sh and commit it before tagging"; exit 1; }
+          test -f "$dir/SHA256SUMS"    || { echo "::error::$dir/SHA256SUMS missing"; exit 1; }
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+      # --- toolchains: gpsim + host analyzers (apt) -------------------------
+      - name: Install gpsim + host/analysis toolchain (apt)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            make util-linux gcc g++ gpsim gpsim-dev libglib2.0-dev pkg-config \
+            cppcheck cbmc python3 unzip wget
+
+      # --- toolchain: XC8 + PIC10-12Fxxx DFP (Microchip downloads) ----------
+      - name: Restore cached XC8 + DFP
+        id: cache-xc8
+        uses: actions/cache/restore@v4
+        with:
+          path: /opt/microchip
+          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}
+
+      - name: Install XC8 (free tier) + DFP
+        if: steps.cache-xc8.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          xc8_run="xc8-v${XC8_VERSION}-full-install-linux-x64-installer.run"
+          xc8_base="https://ww1.microchip.com/downloads/aemDocuments/documents"
+          xc8_base="${xc8_base}/DEV/ProductDocuments/SoftwareTools"
+          wget -q "${xc8_base}/${xc8_run}" -O /tmp/xc8.run
+          chmod +x /tmp/xc8.run
+          sudo /tmp/xc8.run --mode unattended --unattendedmodeui none \
+            --netservername '' --LicenseType FreeMode --prefix "${XC8_DIR}"
+          sudo mkdir -p "${XC8_DFP_ROOT}"
+          dfp_pack="Microchip.PIC10-12Fxxx_DFP.${DFP_VERSION}.atpack"
+          wget -q "https://packs.download.microchip.com/${dfp_pack}" -O /tmp/dfp.atpack
+          sudo unzip -q -o /tmp/dfp.atpack -d "${XC8_DFP_ROOT}"
+
+      - name: Assert toolchain present (fail loud, do NOT skip)
+        run: |
+          test -x "${XC8_DIR}/bin/xc8-cc" || { echo "::error::XC8 missing"; exit 1; }
+          test -f "${XC8_DFP_ROOT}/xc8/pic/include/proc/pic10f320.h" || { echo "::error::DFP missing"; exit 1; }
+          for t in gpsim cppcheck cbmc gcc c++ pkg-config; do
+            command -v "$t" >/dev/null || { echo "::error::no $t"; exit 1; }
+          done
+          # The target aggregate links libgpsim: assert headers + glib so every
+          # driver runs (the aggregate also rejects each individual clean skip).
+          inc="$(make -s print-PIC_SOAK_GPSIM_INC)"
+          test -f "$inc/sim_context.h" || { echo "::error::gpsim-dev headers missing at $inc"; exit 1; }
+          pkg-config --exists glib-2.0 || { echo "::error::glib-2.0 missing"; exit 1; }
+
+      - name: Save XC8 + DFP cache
+        if: steps.cache-xc8.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/microchip
+          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}
+
+      - name: Record toolchain versions
+        run: |
+          echo "== xc8-cc ==" && "${XC8_DIR}/bin/xc8-cc" --version | head -2 || true
+          echo "== gpsim =="   && (gpsim --version 2>&1 | head -1 || true)
+          echo "== cppcheck ==" && cppcheck --version
+          echo "== cbmc =="     && cbmc --version
+
+      # --- rebuild from the tag --------------------------------------------
+      - name: Rebuild all images from the tagged source
+        run: |
+          set -euo pipefail
+          make clean
+          for v in $(make -s print-PIC_VARIANTS_ALL); do
+            make all PIC_VARIANT="$v" \
+              PIC_CC="${XC8_DIR}/bin/xc8-cc" \
+              PIC_DFP="${XC8_DFP_ROOT}/xc8"
+          done
+
+      # --- THE reproducibility gate ----------------------------------------
+      - name: Verify committed images reproduce bit-for-bit
+        run: |
+          set -euo pipefail
+          dir='${{ steps.rel.outputs.dir }}'
+          work="$(mktemp -d)"
+
+          # Independently derive the required build set from the tagged
+          # Makefile. The reusable verifier then checks that fresh, committed,
+          # and checksummed sets are exact and byte-identical.
+          base="$(make -s print-FW_BASE)"
+          pic_tag="$(make -s print-PIC_TAG)"
+          for v in $(make -s print-PIC_VARIANTS_ALL); do
+            printf '%s_%s_%s.hex\n' "$base" "$v" "$pic_tag"
+          done | sort > "$work/expected.txt"
+          shopt -s nullglob dotglob
+          fresh=( build_pic/*.hex )
+          for f in "${fresh[@]}"; do basename "$f"; done \
+            | sort > "$work/fresh.txt"
+          if ! diff -u "$work/expected.txt" "$work/fresh.txt"; then
+            echo "::error::fresh HEX set differs from the tagged Makefile's expected variants"
+            exit 1
+          fi
+          scripts/verify-release-images.sh "$dir" build_pic
+
+      # --- re-run the gates on the clean runner -----------------------------
+      - name: Re-run make test-variants
+        run: |
+          make test-variants \
+            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC_DFP="${XC8_DFP_ROOT}/xc8"
+
+      - name: Re-run make test-mutation
+        run: make test-mutation MUTATION_ALLOW_SKIP=0
+
+      - name: Re-run target fault, lock-step, and I/O gate (all variants)
+        run: |
+          make test-target-variants \
+            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC_DFP="${XC8_DFP_ROOT}/xc8"
+
+      # --- publish ----------------------------------------------------------
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dir='${{ steps.rel.outputs.dir }}'
+          tag='${{ github.ref_name }}'
+          assets=( "$dir"/*.hex "$dir/SHA256SUMS" "$dir/MANIFEST.md" )
+          [ -f "$dir/SHA256SUMS.asc" ] && assets+=( "$dir/SHA256SUMS.asc" )
+          [ -f "$dir/README.md" ] && assets+=( "$dir/README.md" )
+          notes="$dir/MANIFEST.md"; [ -f "$notes" ] || notes=/dev/null
+          gh release create "$tag" \
+            --title "Firmware $tag" \
+            --notes-file "$notes" \
+            --verify-tag \
+            "${assets[@]}"

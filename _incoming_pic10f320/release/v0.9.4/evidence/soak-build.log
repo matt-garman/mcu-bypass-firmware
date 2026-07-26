@@ -1,0 +1,9 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/pic10f320-bypass-firmware'
+c++ -std=c++17 -O2 $(pkg-config --cflags glib-2.0) -isystem /usr/include/gpsim -Itest/model -DFW_PATH='"/mnt/home/matt/development/github/pic10f320-bypass-firmware/build_pic/bypass_mcu_cd4053-simple_pic10f320.hex"' -DPROC_NAME='"p10f320"' -DF_CPU_HZ=2000000UL -DSOAK_DURATION_MS=86400000 -DSOAK_LIVENESS_INTERVAL_MS=60000 -DSOAK_PROGRESS_INTERVAL_MS=3600000 test/pic/test_soak_pic.cc -o /tmp/pic10f320-release.XmOK5W/soak/test_soak_cd4053-simple -lgpsim
+make[1]: Leaving directory '/mnt/home/matt/development/github/pic10f320-bypass-firmware'
+make[1]: Entering directory '/mnt/home/matt/development/github/pic10f320-bypass-firmware'
+c++ -std=c++17 -O2 $(pkg-config --cflags glib-2.0) -isystem /usr/include/gpsim -Itest/model -DFW_PATH='"/mnt/home/matt/development/github/pic10f320-bypass-firmware/build_pic/bypass_mcu_cd4053-mute_pic10f320.hex"' -DPROC_NAME='"p10f320"' -DF_CPU_HZ=2000000UL -DSOAK_DURATION_MS=86400000 -DSOAK_LIVENESS_INTERVAL_MS=60000 -DSOAK_PROGRESS_INTERVAL_MS=3600000 test/pic/test_soak_pic.cc -o /tmp/pic10f320-release.XmOK5W/soak/test_soak_cd4053-mute -lgpsim
+make[1]: Leaving directory '/mnt/home/matt/development/github/pic10f320-bypass-firmware'
+make[1]: Entering directory '/mnt/home/matt/development/github/pic10f320-bypass-firmware'
+c++ -std=c++17 -O2 $(pkg-config --cflags glib-2.0) -isystem /usr/include/gpsim -Itest/model -DFW_PATH='"/mnt/home/matt/development/github/pic10f320-bypass-firmware/build_pic/bypass_mcu_tq2-relay_pic10f320.hex"' -DPROC_NAME='"p10f320"' -DF_CPU_HZ=2000000UL -DSOAK_DURATION_MS=86400000 -DSOAK_LIVENESS_INTERVAL_MS=60000 -DSOAK_PROGRESS_INTERVAL_MS=3600000 test/pic/test_soak_pic.cc -o /tmp/pic10f320-release.XmOK5W/soak/test_soak_tq2-relay -lgpsim
+make[1]: Leaving directory '/mnt/home/matt/development/github/pic10f320-bypass-firmware'

@@ -1,0 +1,51 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/pic10f320-bypass-firmware'
+MUTATION_ALLOW_SKIP=0 PIC_CC="/opt/microchip/xc8/v3.10/bin/xc8-cc" \
+	PIC_DFP="/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8" GPSIM="gpsim" ./test/run_mutation_tests.sh
+=== mutation testing: baseline sanity check ===
+baseline test-host: PASS
+baseline test-model-check: PASS
+baseline test-equiv: PASS
+baseline test-actuation: PASS
+baseline test-fault-variants: PASS
+baseline PIC_VARIANT=tq2-relay test-actuation: PASS
+baseline PIC_VARIANT=cd4053-mute test-actuation: PASS
+baseline test-gpsim: PASS (gpsim mutants ENABLED)
+
+[1] killed   (test-equiv): FW integrator: increment-on-press becomes decrement (never reaches threshold)
+[2] killed   (test-equiv): FW press threshold off-by-one (>= becomes >): 1-tick latency divergence
+[3] killed   (test-equiv): FW release re-arm condition inverted (lock-out never clears / clears wrongly)
+[4] killed   (test-equiv): FW press threshold shortened 8->4 (diverges from the model's 8)
+[5] killed   (test-equiv): FW release lock-out shortened 25->15 (diverges from the model)
+[6] killed   (test-equiv): FW power-on-pressed: wrong program_state (held switch could spuriously engage)
+[7] killed   (test-fault-variants): FW output-pin SEU check neutered (lost LED/CD4053 output never detected)
+[8] killed   (test-fault-variants): FW global footswitch pull-up SEU check neutered (nWPUEN corruption never detected)
+[9] killed   (test-fault-variants): FW effect_state range guard defeated (corrupt effect_state never forces reset)
+[10] killed   (test-fault-variants): FW counter range guard defeated (corrupt debounce_counter never forces reset)
+[11] killed   (test-fault-variants): FW pull-up init regressed to read-modify-write: WPUA reset value 0x0F preserved instead of exact RA3-only 0x08
+[12] killed   (test-fault-variants): FW pull-up integrity guard masks away unexpected RA0..RA2 WPUA latches
+[13] killed   (test-fault-variants): FW clock-select (OSCCON IRCF) SEU guard defeated (corrupt clock never forces reset)
+[14] killed   (test-fault-variants): FW watchdog-period (WDTCON WDTPS) SEU guard defeated (corrupt WDT period never forces reset)
+[15] killed   (test-fault-variants): FW tick-period (PR2) SEU guard defeated (corrupt 1 ms reload never forces reset)
+[16] killed   (test-fault-variants): FW tick-control (T2CON) SEU guard defeated (corrupt prescale/enable never forces reset)
+[17] killed   (test-fault-variants): FW digital-port (ANSELA) SEU guard defeated (output pin re-selected analog never forces reset)
+[18] killed   (test-fault-variants): FW ANSELA sanity mask narrowed to RA0 only (RA1/RA2 analog re-selection undetected)
+[19] killed   (test-equiv): FW set_engaged LED output inverted (RA0 stays dark when ENGAGED)
+[20] killed   (PIC_VARIANT=cd4053-simple test-actuation): FW CD4053 control routed the wrong way (set_engaged drives the bypass level); settled ENGAGED LATA 0x1 not 0x3 (RA0 unaffected, so equiv/gpsim-RA0 miss it; killed by the actuation settled-LATA check)
+[21] killed   (PIC_VARIANT=cd4053-simple test-actuation): FW CD4053 control-pin drive polarity inverted at the definition (ctl_high drives the pin HIGH not LOW); bypass control pin settles wrong (BYPASS 0x2 not 0x0), RA0 unaffected so equiv/gpsim-RA0 miss it
+[22] killed   (test-equiv): FW footswitch read polarity inverted (toggles on release, not press)
+[23] killed   (test-gpsim): FW TMR2IF tick-flag clear removed: 1 ms poll never re-blocks, loop free-runs, debounce window collapses (host forces TMR2IF=1, so only gpsim's PRESS1_EARLY catches it)
+[24] killed   (PIC_VARIANT=tq2-relay test-actuation): FW relay ENGAGE pulses the RESET coil instead of SET (relay latches backwards; settles to same LATA, so equiv/gpsim miss it)
+[25] killed   (PIC_VARIANT=tq2-relay test-actuation): FW relay BYPASS pulses the SET coil instead of RESET (relay latches backwards)
+[26] killed   (PIC_VARIANT=cd4053-mute test-actuation): FW cd4053-mute pre-switch mute window defeated (5->0 ms): audible click on every switch
+[27] killed   (PIC_VARIANT=cd4053-mute test-actuation): FW cd4053-mute CTL1/CTL2 pins swapped (mute applied to wrong control; mid-mute LATA pattern wrong, settles to same LATA so equiv/gpsim miss it)
+[28] killed   (PIC_VARIANT=cd4053-mute test-actuation): FW cd4053-mute startup reasserts ENGAGED before MUTE, traversing INVALID/ENGAGED routing instead of remaining continuously in BYPASS
+[29] killed   (test-host): MODEL integrator increment becomes decrement
+[30] killed   (test-host): MODEL press threshold off-by-one (>= becomes >)
+[31] killed   (test-host): MODEL toggle lock-out reload 0 instead of RELEASE_THRESH
+[32] killed   (test-model-check): MODEL stays in PRESS_DEBOUNCE_WAIT after toggle (re-toggle cascade)
+[33] killed   (test-model-check): MODEL power-on-pressed: wrong program_state (verify_init_context catches it)
+[34] killed   (test-model-check): MODEL corrupt-state fault suppressed (verify_corrupt_state_faults catches it)
+
+=== mutation summary: 34 killed, 0 survived, 0 errored, 0 skipped ===
+all mutants ran and were killed: the suite detects every injected fault.
+make[1]: Leaving directory '/mnt/home/matt/development/github/pic10f320-bypass-firmware'

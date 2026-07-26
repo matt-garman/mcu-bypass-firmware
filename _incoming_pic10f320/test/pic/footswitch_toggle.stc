@@ -1,0 +1,101 @@
+# gpsim command script: drive the PIC10F320 footswitch and snapshot PORTA/LATA.
+#
+# WHAT THIS IS
+#   A register-level functional check of the firmware (bypass_mcu_pic10f320.c)
+#   running inside gpsim. The debounce algorithm is already covered by the
+#   host/formal suite (against the vendored model) and by the firmware<->model
+#   equivalence test; this drives the REAL built HEX in gpsim to additionally
+#   exercise what those host harnesses mock -- the oscillator/TMR2 tick, the
+#   footswitch read on RA3, the debounce integrate/step wiring, and the GPIO
+#   outputs -- and asserts the observable register state at four settled
+#   checkpoints. The wrapper test/pic/run_gpsim_test.sh parses the snapshots and
+#   turns them into PASS/FAIL.
+#
+# HOW IT IS RUN (see the wrapper / `make test-gpsim`)
+#   gpsim -i -pp10f320 <variant>.hex -c test/pic/footswitch_toggle.stc
+#   The HEX (any of the five output variants) is supplied on the gpsim command
+#   line, so this script is variant-agnostic (the wrapper supplies the per-variant
+#   expected LATA). gpsim names the PIC pins ra0..ra3.
+#
+# PINS (per bypass_mcu_pic10f320.c)
+#   RA3 = footswitch (input; high = released, low = pressed)
+#   RA0 = status LED  (LATA bit 0; high = effect ENGAGED, low = BYPASS)
+#   RA1/RA2 = the active variant's control output(s)
+#
+# TIMING
+#   FOSC = 2 MHz -> instruction clock FOSC/4 = 500 kHz -> 500 cycles per 1 ms.
+#   The debounce needs PRESSED_THRESH(8) low samples to register a press and
+#   RELEASE_THRESH(25) high samples to re-arm; the relay/mute drivers also block
+#   ~12 ms per actuation. All checkpoints below are placed well clear of those
+#   windows so every variant has SETTLED by the time it is sampled.
+#
+# SCENARIO (two MOMENTARY presses; the effect latches between them)
+#   cyc      0..12.5k : released  -> BYPASS (power-on default)
+#   cyc 12.5k..27.5k  : press #1  (~30 ms)  -> toggles to ENGAGED, then released
+#   cyc 27.5k..65k    : released, effect stays ENGAGED (latching)
+#   cyc 65k..80k      : press #2  (~30 ms)  -> toggles back to BYPASS
+#
+# CHECKPOINTS (the wrapper keys on these exact === labels ===)
+#   INIT_BYPASS  @ 11.25k : LATA bit0 == 0 (LED off), PORTA bit3 == 1 (released)
+#   PRESS1_EARLY @ 14.25k : LATA bit0 == 0 (LED still OFF), PORTA bit3 == 0 (pressed).
+#                         This is ~1.75k cyc (~3.5 ms) AFTER the press edge (12.5k) but
+#                         ~1.75k cyc BEFORE the earliest legitimate toggle (~16k =
+#                         12.5k + PRESSED_THRESH*500). It pins that the TICK GATES the
+#                         loop: the debounce demands 8 *separated* 1 ms samples, so a
+#                         correct firmware is still mid-debounce here. A firmware
+#                         whose tick stopped gating (e.g. the TMR2IF poll never
+#                         re-blocks) free-runs and crosses PRESSED_THRESH within
+#                         microseconds of the edge -> LED already ON here -> FAIL.
+#                         (One-sided *too-fast* guard, run in gpsim's own timer; the
+#                         absolute 1 ms period is a bench-only matter -- see test
+#                         README "Known gaps".) This is the ONE behaviour the host
+#                         harnesses cannot see (they force TMR2IF=1, so the poll never
+#                         waits); see the tick-gating mutant in test/run_mutation_tests.sh.
+#   PRESS1_LOW   @ 18.75k : PORTA bit3 == 0 (pressed), LATA bit0 == 1 (LED latched
+#                         ENGAGED -- the effect toggled ON the press, not release)
+#   ENGAGED      @ 37.5k : LATA bit0 == 1 (LED on, latched), PORTA bit3 == 1
+#   BYPASS_AGAIN @ 100k : LATA bit0 == 0 (toggled back off)
+
+stimulus asynchronous_stimulus
+  initial_state 1
+  { 12500, 0,
+    27500, 1,
+    65000, 0,
+    80000, 1 }
+  name fsw
+end
+
+node n1
+attach n1 fsw ra3
+
+break c 11250
+run
+echo ===INIT_BYPASS===
+porta
+lata
+
+break c 14250
+run
+echo ===PRESS1_EARLY===
+porta
+lata
+
+break c 18750
+run
+echo ===PRESS1_LOW===
+porta
+lata
+
+break c 37500
+run
+echo ===ENGAGED===
+porta
+lata
+
+break c 100000
+run
+echo ===BYPASS_AGAIN===
+porta
+lata
+
+quit

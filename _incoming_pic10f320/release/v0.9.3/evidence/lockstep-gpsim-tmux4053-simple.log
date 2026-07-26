@@ -1,0 +1,10 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/pic10f320-bypass-firmware'
+=== PIC10F320 build + flash-budget (256 words, variant tmux4053-simple) ===
+OK:   build_pic/bypass_mcu_tmux4053-simple_pic10f320.hex : 217 words (84.8%) of 256
+--- gpsim lock-step: variant=tmux4053-simple proc=p10f320 ---
+LOCK-STEP START: fw=/mnt/home/matt/development/github/pic10f320-bypass-firmware/build_pic/bypass_mcu_tmux4053-simple_pic10f320.hex proc=p10f320 FOSC=2000000 ctx_=0x045 iters=3000
+  loop CLRWDT identified at 0x05d (8 hits in 8 ms; 2 CLRWDT sites total)
+  coverage: 66/66 reachable model states visited by the stimulus
+  lock-step: 3000 iterations compared, 27 toggles, 0 mismatches
+LOCK-STEP PASS: 3005 checks, 0 failures
+make[1]: Leaving directory '/mnt/home/matt/development/github/pic10f320-bypass-firmware'

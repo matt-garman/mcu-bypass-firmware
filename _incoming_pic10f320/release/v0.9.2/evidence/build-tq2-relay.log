@@ -1,0 +1,4 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/pic10f320-bypass-firmware'
+=== PIC10F320 build + flash-budget (256 words, variant tq2-relay) ===
+OK:   build_pic/bypass_mcu_tq2-relay_pic10f320.hex : 225 words (87.9%) of 256
+make[1]: Leaving directory '/mnt/home/matt/development/github/pic10f320-bypass-firmware'

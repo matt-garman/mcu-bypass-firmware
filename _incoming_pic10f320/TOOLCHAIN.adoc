@@ -1,0 +1,158 @@
+= Toolchain Reference
+
+This file documents the exact toolchain versions used to build and
+test the PIC10F320 bypass firmware.  It serves the same purpose as a
+Python requirements.txt: a human-readable record of what the project
+was validated against, so a new developer (or CI system) can reproduce
+the exact environment.
+
+Unlike the parent `mcu-bypass-firmware` project (which targets AVR Classic +
+PIC10F322), this project is **PIC10F320-only**: there is a single firmware
+translation unit (`bypass_mcu_pic10f320.c`) built with XC8, and a host-side
+test/validation suite (the vendored reference model, the formal proofs, and the
+firmware<->model equivalence/fault harnesses) built with the host compiler.
+
+Optional analysis/simulator targets may SKIP CLEANLY when their tools are absent,
+so a partial development toolchain can still run useful checks. Build and
+coverage gates instead FAIL LOUD on missing or malformed output. Mutation testing
+also requires every mutant by default; `MUTATION_ALLOW_SKIP=1` permits an
+explicitly partial local report. CI and the release pipeline never enable that
+override and fail on any missing tool or skipped gate. In particular,
+`test-target-variants` converts the individually skip-clean libgpsim drivers into
+a strict aggregate by requiring each driver's explicit PASS marker.
+
+== Development / CI platform
+
+  OS:           Linux 6.12.x (TrueNAS production kernel), x86_64
+  Distribution: Ubuntu 24.04 (Noble) base packages
+  CI runner:    ubuntu-24.04 (pinned; see .github/workflows/ci.yml)
+
+== PIC toolchain (target: PIC10F320, 2 MHz INTOSC)
+
+The firmware is cross-compiled to the PIC10F320 with Microchip XC8.  Both XC8 and
+the device-family pack are Microchip downloads, NOT apt packages.  Override the
+paths with `PIC_CC=` / `PIC_DFP=` on the make command line if your install
+differs.
+
+  MPLAB XC8:    V3.10  (Microchip MPLAB XC8 C Compiler)
+                install dir: /opt/microchip/xc8/v3.10
+                driver:      /opt/microchip/xc8/v3.10/bin/xc8-cc
+                override the path with PIC_CC=... on the make command line.
+
+  Device pack:  PIC10-12Fxxx_DFP  v1.9.189  (Microchip device family pack)
+                Supplies the PIC10F320 device-support + register headers
+                (proc/pic10f320.h) that the XC8 base install does NOT include.
+                install dir: /opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189
+                NOTE: -mdfp must point at the pack's xc8/ SUBDIR, not the pack
+                root (pointing at the root gives XC8 error 2104):
+                  -mdfp=/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8
+                override with PIC_DFP=... on the make command line.
+
+  gpsim:        0.32.x  (Ubuntu package: gpsim)
+                Instruction-level PIC simulator used by `make test-gpsim` (the
+                register-level functional test of the built HEX).
+                install: apt install gpsim
+                note: the processor is `p10f320`; its I/O pins are named
+                ra0..ra3 (lower-case) in stimulus/attach scripts.
+
+  libgpsim:     g++ + gpsim-dev + libglib2.0-dev  (Ubuntu packages)
+                Needed by `make test-target-variants` -- real-HEX fault
+                recovery, firmware/model lock-step, and GPIO transition/pulse
+                timing -- and by the long-duration `make test-soak`. These
+                drivers LINK libgpsim instead of scripting the gpsim CLI; the
+                runtime `gpsim` package ships no headers.
+                install: apt install g++ gpsim-dev libglib2.0-dev
+                note: gpsim-dev's headers `#include <glib.h>`, which is NOT
+                pulled in by gpsim-dev, so libglib2.0-dev must be installed
+                explicitly.  The build passes -isystem for the gpsim headers
+                (they emit their own -Woverloaded-virtual warnings).
+                Individual libgpsim targets skip cleanly when the development
+                stack or XC8-built HEX is absent. The regular-CI/release
+                `test-target-variants` aggregate requires explicit PASS evidence
+                and therefore fails closed on any such skip. The release soak
+                (one combo per output variant, in parallel) also requires this
+                whole stack.
+
+XC8 / device-pack behaviours relied on (proven against V3.10 + DFP v1.9.189):
+
+  - XC8 V3.10 compiles C99 only (no C11); the firmware's static_assert is shimmed
+    to the _Static_assert keyword in the source.
+  - _XTAL_FREQ (for the drivers' __delay_ms and the 2 MHz HFINTOSC compile-time
+    assert) is supplied via -D_XTAL_FREQ=2000000UL in the Makefile.
+  - const-qualified locals initialised from a runtime call are placed in program
+    ROM and rejected, so the firmware avoids that pattern.
+
+Device budget (PIC10F320): **256 words of flash, 64 bytes of RAM** -- HALF the
+flash of the PIC10F322 the parent project targets.  `make all` enforces the
+flash-word budget per output variant; see the README for the measured figures.
+
+XC8 and the device pack are Microchip downloads:
+
+  XC8:         https://www.microchip.com/en-us/tools-resources/develop/mplab-xc-compilers
+  Device pack: install via MPLAB X (Tools -> Packs), or download the
+               PIC10-12Fxxx_DFP pack from Microchip's pack repository
+               (https://packs.download.microchip.com/).
+
+== Host toolchain (native test harnesses + formal proofs)
+
+The reference model, the formal proofs, and the firmware<->model
+equivalence/fault harnesses build and run on the host (no PIC hardware needed).
+
+  gcc:          13.x  (Ubuntu 24.04; package: gcc) -- the default HOST_CC.
+  clang:        18.x  (optional; set HOST_CC=clang to override.)
+  flock:        util-linux (required) -- serializes complete Make/release
+                invocations that share one worktree's build/test artifacts.
+
+  Either compiler works for all test/* host binaries.  The Makefile uses gcc by
+  default (HOST_CC := gcc).
+
+== Static analysis + formal verification
+
+  cppcheck:     2.13.x  (Ubuntu package: cppcheck)
+                `make analyze-cppcheck` runs the bug-finding pass and
+                `make analyze-misra` the MISRA-C:2012 conformance pass, both with
+                --platform=pic8-enhanced over the real XC8 + DFP register headers.
+                The MISRA addon needs python3.
+  python3:      3.x  (Ubuntu package: python3) -- runs the cppcheck MISRA addon.
+
+  cbmc:         (Ubuntu package: cbmc)
+                `make test-cbmc` bounded-model-checks the vendored reference model
+                (SAT/SMT backend), proving the debounce invariants over the
+                symbolic input domain plus freedom from undefined behaviour.  Skips
+                cleanly when absent; the exhaustive `make test-model-check` /
+                `make test-symbolic` targets cover the same properties.
+
+== Optional (symbolic execution)
+
+  KLEE:         not required.  `make test-symbolic-klee` runs the SAME single-step
+                properties under KLEE if `klee` + a matching `clang`/`llvm-link`
+                are installed; otherwise it skips cleanly (the exhaustive
+                `make test-symbolic` enumerates the same input domain on the host).
+
+== Reproducing the environment (Ubuntu 24.04)
+
+  # host + analysis + simulator (apt):
+  sudo apt install make util-linux gcc g++ gpsim gpsim-dev libglib2.0-dev cppcheck cbmc python3
+
+  # The libgpsim development packages above are regular-CI requirements for
+  # `make test-target-variants` and release requirements for `make test-soak`.
+
+  # XC8 V3.10 + the PIC10-12Fxxx_DFP pack are separate Microchip downloads
+  # (see the PIC toolchain section above). Without them, build-dependent targets
+  # fail; independent host-side model/formal targets remain usable.
+
+The CI workflow (`.github/workflows/ci.yml`) installs exactly this set on a
+pinned ubuntu-24.04 runner: util-linux + gpsim/libgpsim + cppcheck + cbmc + gcc/g++ + python3
+from apt, and XC8 + the DFP fetched from Microchip and cached.
+
+== Version pinning strategy
+
+The exact versions above were the latest Ubuntu 24.04 LTS packages, plus XC8
+V3.10 / DFP v1.9.189, at the time of release.  Upgrading minor versions of the
+host tools is generally safe.  XC8 and the DFP are pinned together: byte-exact
+reproduction of the released Intel-HEX images (the reproducibility gate in
+`.github/workflows/release.yml`) depends on building with the SAME XC8 + DFP
+recorded in each release MANIFEST.  A different XC8 may produce functionally
+identical but not byte-identical images.
+
+For CI reproducibility, prefer the pinned Ubuntu 24.04 LTS runner image.
