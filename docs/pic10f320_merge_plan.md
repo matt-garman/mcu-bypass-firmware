@@ -52,6 +52,16 @@ It also identified the *bias* that produced three of those misses and wrote it
 up as Principle 8: the plan's default disposition demotes child assets that are
 chip-agnostic into PIC10F320-only sections.
 
+A **third 2026-07-26 pass**, against parent `5180881` and the same child tip,
+re-verified the plan's factual claims against both trees and found them sound
+with one exception: §4's `LICENSE` row asserted a non-SPDX header on the moved
+firmware and scheduled a normalization edit for a file that is already SPDX —
+withdrawn there. It added one missing collision class, §5.8 (global Make
+directives; the child's bare `.NOTPARALLEL` would fail the parent's
+`test-make-safe-parallel-probe` outright), noted that §5.7's destructive-recipe
+review runs in the parent's direction too, and closed Phase 0 by recording §15:
+the decisions, the green baselines and image hashes, and the tool inventory.
+
 ---
 
 ## 1. Goal and non-goals
@@ -248,7 +258,7 @@ Legend: **FOLD** = collapse to one shared copy (parent's wins) · **DROP**
 | `.github/workflows/ci.yml` | FOLD/EXTEND | Add a strict full-tool PIC10F320 job or a two-chip matrix, assert `proc/pic10f320.h`, preserve every unique test layer, upload `build_pic10f320/*.hex` separately, and update downstream `needs`. Run PIC mutation fail-closed in a full-tool hosted job. |
 | `.github/workflows/release.yml` | FOLD/EXTEND | Rebuild PIC10F320 into a private directory, enforce the canonical set, rerun strict target/mutation gates, and pass the extra directory to reproduction verification before publication. |
 | `TOOLCHAIN.adoc`, `MISRA_COMPLIANCE.md` | MERGE | Add the PIC10F320 device/header, `p10f320`, 256-word gate, CONFIG word, build directory, commands, analyzer configuration, and zero-unwaived-finding policy. Keep detailed technical facts here, linked to the caveat. Three specifics for `MISRA_COMPLIANCE.md` *(added by the second 2026-07-26 pass)*: (a) its "Status: zero deviations" section argues by comparison — "cleaner than the parent project (`mcu-bypass-firmware`), whose AVR shells require documented deviations" — which becomes self-referential the moment it lands *in* that project; rewrite it as a per-target statement, exactly like the `## Provenance` case below. (b) The claim is only meaningful under strict tools: the child's `analyze-misra` exits 0 when cppcheck/python3 or the XC8/DFP headers are absent (`Makefile:348`, `:351`), which is precisely the §6.12 strict-tools hole — re-establish it in the merged tree with `STRICT_TOOLS=1` before repeating it. (c) Its `## Notes on specific constructs` records (`UINT8_MAX` is signed so `DEBOUNCE_COUNTER_MAX` is a plain literal; XC8 places `const` locals in program ROM) are **cited from the firmware** at `bypass_mcu_pic10f320.c:107`, so they must survive the merge with working anchors or the moved source acquires a dangling reference. |
-| `AGENTS.md`, `CLAUDE.md`, `LICENSE` | FOLD | Parent copies remain authoritative — but `LICENSE` is *not* identical: parent reads `Copyright (c) 2026 matt-garman`, child reads `Copyright (c) 2026 Matthew Garman`. Folding silently reverts the attribution string; confirm the intended holder rather than defaulting. Separately, the verbatim-moved firmware carries the child's non-SPDX three-line header into `src/`, where every other file uses `SPDX-License-Identifier: MIT`; normalizing it is a comment-only, user-owned firmware edit. |
+| `AGENTS.md`, `CLAUDE.md`, `LICENSE` | FOLD | Parent copies remain authoritative — but `LICENSE` is *not* identical: parent reads `Copyright (c) 2026 matt-garman`, child reads `Copyright (c) 2026 Matthew Garman`. Folding silently reverts the attribution string; confirm the intended holder rather than defaulting. Useful tiebreaker *(third 2026-07-26 pass)*: every source file on **both** sides already carries `// Copyright (c) Matthew Garman`, so it is the parent's `LICENSE` file that disagrees with its own sources, not the child's. **Correction — the second half of this row was false and is withdrawn.** It claimed the verbatim-moved firmware "carries the child's non-SPDX three-line header into `src/`" and scheduled a normalization edit. `bypass_mcu_pic10f320.c:1-2` is already `// SPDX-License-Identifier: MIT` / `// Copyright (c) Matthew Garman`, byte-identical in form to `src/bypass_pure.c:1-2`, `src/bypass_mcu_pic10f322.c:1-2` and `src/bypass_config.h:1-2`. The three-line "All rights reserved" form exists only in `test/model/{bypass_pure.c,bypass_pure.h,bypass_types.h}` — the DROP rows above — so it dies with the vendored copy. There is no header to normalize and no firmware edit to budget for. |
 | `.gitignore` | MERGE | Ignore the dedicated build directory and all generated nested test/coverage artifacts, extending the parent's `test/.gitignore` to cover the new nested PIC10F320 test tree. Do not import ignored local child artifacts such as `coverage/`, root `.gcda`/`.gcno`, backup files, or the current `build_pic/`. Corrected 2026-07-26: the child has **no** `test/.gitignore`; that file is parent-only, so this row has one contributing child file, not two. |
 | `README.md`, `CHANGELOG.md` | MERGE | Add the constrained target and reconstruct child v0.9.4/v0.9.5 history under the correct historical releases rather than putting it under the first unified release. Two child README sections need *opposite* treatment and are easy to lose inside a bare "MERGE" (found 2026-07-26): `## Manual-sync contract` (`:137-156`) is **promoted, not folded away** — it is the §14.3 cross-target checklist, already written and maintained; `## Provenance` (`:110-136`) is **rewritten, not merged** — every claim in it ("frozen one-off", "pinned to `bf6a6c1`", "not automatically kept in sync", "correctness inherited by derivation, not independently re-proven in this repository") becomes false the moment the vendored copy dies in Phase 3. |
 | `test/README.md` | MERGE — **but do not scope the gaps to the 320** | Preserve the child file's technical validation semantics, mutation rationale, and commands in a dedicated PIC10F320 section/document. The caveat document is not a substitute for test documentation. **Corrected by the second 2026-07-26 pass:** the earlier instruction to file the "known simulator gaps" in that 320 section is wrong. The child's section is titled `## Known gaps (hardware-bench only — shared with the parent's PIC build)` (`:313`) and says so in its body: gpsim's TMR2 prescaler-*select* clamp (`T2CKPS=0b11` modelled as 1:16 instead of the datasheet's 1:64), the absent WDT-calibration and analog-BOR models, and bench-only real-silicon pulse timing are properties of the **gpsim environment both PIC chips share**. The parent never back-ported any of it, so the merge is the moment it becomes shared PIC test documentation covering 322 and 320 alike. Principle 8's second case. |
@@ -335,8 +345,10 @@ plan must respect:
   carve-out needs. Two sequencing notes: these are comment-only, so they
   **preserve emitted bytes** and may land after the §6.13 gate without
   rebaselining it — unlike §6.11's defensive-layer edit, which does rebaseline
-  and must not be batched with them. The license-header normalization in the
-  `LICENSE` row below belongs to this same comment-only commit.
+  and must not be batched with them. *(The `LICENSE` row below used to add a
+  license-header normalization to this same commit; that instruction rested on a
+  false premise and was withdrawn by the third 2026-07-26 pass — the file's
+  header is already SPDX. These six comment sites are the whole sweep.)*
 - `src/bypass_blocking_delay.h:15` and `src/bypass_pins_pic10f322.h:11` say
   "PIC10F32x" *(noted second 2026-07-26 pass; low priority)*. Per the project's
   322-vs-32x convention the delay note is fine as-is — `__delay_ms()` is true of
@@ -404,6 +416,9 @@ plan must respect:
    `pic-coverage-check-fw`) — so `pic-*` reads as "PIC10F322" and `pic320-*` as
    "PIC10F320". If that asymmetry is judged too subtle given §14.7, rename the
    322 lane to `pic322-` in the same phase rather than living with it.
+   **Decided (§15, D1): keep `pic-` = 322, add `pic320-`/`PIC320_*`; the 322 lane
+   is not renamed.** The asymmetry is accepted and deferred to the `TODO.md`
+   unified-naming item. Do not re-open it while executing.
 
    Host-only checks may join top-level `test` / `test-long` after they are
    green. Real-tool gates remain in strict PIC CI/release lanes, or join a new
@@ -443,6 +458,12 @@ plan must respect:
    Note the bare-name convention is pre-existing parent debt (`bypass_cd4053.hex`
    *is* the ATtiny13A image); unifying that is out of scope here, but a canonical
    set (§10) that encodes three conventions should say why.
+
+   **Decided (§15, D2): keep the child basenames.** No migration at `v0.10.0`, so
+   both obligations of the first option are now required work — the
+   `bypass_mcu_` prefix in `scripts/make-release.sh`'s image→MCU classifier, and
+   an explicit statement of the asymmetry in the release `README.md`/`MANIFEST.md`.
+   Whole-tree unification is deferred to the `TODO.md` unified-naming item.
 4. **Build/test output names.** Use `build_pic10f320/` and variant-private
    nested outputs. Never let concurrent variants share an object, executable,
    coverage file, `gpsim.log`, or PASS-evidence path. This item covers
@@ -533,6 +554,59 @@ plan must respect:
    `cppcheck-addon-ctu-file-list*`, and `commit_msg.txt`. `/.make.lock` is the one
    path that is *intentionally* shared — it is the §6.4 whole-worktree lock and
    must stay a single inode.
+
+   The hazard runs in the parent's direction too *(third 2026-07-26 pass)*:
+   `coverage-clean` (`Makefile:2722`) ends with
+   `find . -name '*.gcda' -o -name '*.gcno' | xargs rm -f`, rooted at the
+   repository. After Phase 1 that descends into `_incoming_pic10f320/`, and after
+   Phase 2 into `test/pic10f320/`. It is harmless — those are generated files with
+   no tracked counterpart — but it means "scope every destructive recipe" is a
+   two-way review, not just an audit of imported recipes.
+8. **Global Make directives and exported variables.** *(New — third 2026-07-26
+   pass. Missing class: §5.1 covered targets and §5.6 covered variables, but the
+   merge also collapses two sets of Make **special targets**, which are
+   file-scoped rather than target-scoped and therefore change behaviour
+   repository-wide.)*
+
+   | Directive | Parent | Child | Consequence of a naive import |
+   | --- | --- | --- | --- |
+   | `.NOTPARALLEL:` | absent | **present** (`Makefile:205`, bare) | serializes the **entire** merged graph |
+   | `.DELETE_ON_ERROR:` | **present** (`Makefile:445`) | absent | every imported recipe gains delete-on-failure semantics |
+   | `export PROJECT_MAKE :=` | `$(MAKE_COMMAND)` (`:196`) | `$(MAKE)` (`:119`) | same exported name, different value, in every recipe's environment |
+
+   **`.NOTPARALLEL` is the sharp one, and it is a hard test failure rather than a
+   slowdown.** A bare `.NOTPARALLEL` applies to the makefile it appears in, not to
+   a target, so importing the child's line disables parallelism for the whole
+   merged build. The parent has a regression that exists specifically to assert
+   the opposite: `test-make-safe-parallel-probe` (`Makefile:1998`) invokes
+   `$(MAKE) --no-print-directory -j2` over two mutually-waiting marker targets and
+   fails with `FAIL: reviewed recursive fan-out was serialized` if they do not
+   overlap. The recursive sub-make re-reads the same Makefile, so `.NOTPARALLEL`
+   applies there too and the probe fails — with the cause roughly 1700 lines away
+   from the symptom. The parent's serialization design is deliberately *not*
+   `.NOTPARALLEL`: it is the whole-worktree `/.make.lock` plus the exported
+   `_MAKE_SERIAL_LOCK_HELD` marker (`Makefile:16`), which serializes complete
+   invocations while leaving reviewed recursive fan-out parallel. Do not import
+   the child's directive; fold its intent into the existing lock (§6.4).
+
+   `.DELETE_ON_ERROR` is the quieter one. Imported recipes were written under a
+   makefile that lacked it, so they will newly have their target deleted when a
+   recipe fails. That is usually an improvement, but it interacts directly with
+   §6.4's `ec6fa48` ("build: reject malformed PIC images") hardening, which does
+   its own post-failure artifact cleanup — verify the two do not fight, and that
+   the child's cleanup regressions still observe what they assert.
+
+   `PROJECT_MAKE` belongs to §5.6's variable class but is easy to miss there
+   because it is `export`ed rather than merely defined: it reaches every recipe
+   and anything a recipe shells out to. Parent-only exports to preserve on the
+   fold: `_MAKE_SERIAL_LOCK_HELD` (`:16`) and `GPSIM_TIMEOUT_SECONDS` (`:620`).
+
+   Requirement: before merging any recipe block, diff the two Makefiles'
+   *directive* lines (`.PHONY` aside) as a distinct review step —
+   `grep -nE '^\.[A-Z_]+:|^export|^vpath|^include'` over both — and record a
+   disposition per directive. Neither file uses `vpath`, `include`, or
+   `.ONESHELL`, and both implement `print-%` identically, so the table above is
+   the complete inventory at the pinned tips.
 
 ---
 
@@ -711,6 +785,115 @@ plan must respect:
        story, and state in the mutation topology (§6.6) why the exact-TRISA
        mutant has no 320 twin.
 
+    **Measured 2026-07-26 — step (a) is done, and the answer splits the
+    divergence in two.** XC8 V3.10 + DFP 1.9.189, the Makefile's exact flags
+    (`-mcpu=10F320 -mdfp=… -std=c99 -O2 -D_XTAL_FREQ=2000000UL -D<OUTPUT_*>`),
+    measured in a scratch copy so neither worktree was touched. Baselines
+    reproduced the documented 219 / 240 / 243 of 256 words exactly. Overflowing
+    configurations were re-measured on the pin-compatible 512-word 10F322, whose
+    baseline is identical word-for-word, so the deltas transfer:
+
+    | Configuration | cd4053-simple | cd4053-mute | tq2-relay | Fits 256? |
+    | --- | --- | --- | --- | --- |
+    | baseline (unmodified child tip) | 219 | 240 | 243 | — |
+    | **exact TRISA only, no-arg helper** | **220** | **241** | **244** | **all three (+1)** |
+    | exact TRISA only, helper keeps its unused mask parameter | 221 | 242 | 245 | all three (+2) |
+    | exact TRISA + latch match, lean (ternary; no fail-closed `else`) | 240 | 261 | 259 | simple only (+21/+21/+16) |
+    | exact TRISA + latch match, faithful 322/`bypass_output_*.c` shape | 258 | 279 | 282 | none (+39 uniformly) |
+
+    So the two halves of the divergence have completely different prices:
+
+    - **Exact TRISA costs one word and should be ported.** It is not merely
+      affordable, it is nearly free, because exact TRISA *subsumes* the existing
+      per-variant "every required pin is still an output" test: if
+      `(TRISA & 0x0F) == (0x0F ^ BYPASS_OUTPUT_DDR_MASK)` then every RA0..RA2
+      direction bit is already 0 and RA3 is still an input. The helper therefore
+      loses its `expected_mask` parameter and all three call sites shrink, which
+      is why the no-arg form is cheaper than the parameterized one. This closes
+      exactly the half that the parent's exact-TRISA mutation category
+      (`2214a78`) targets, so the 320 gains a twin for it.
+    - **The latch match does not fit and is the recorded omission.** Even the
+      lean formulation — which exploits the fact that the main-loop gate already
+      range-checks `ctx_.effect_state` (`bypass_mcu_pic10f320.c:624`), so the
+      third fail-closed branch is redundant — overshoots on two of three
+      variants: cd4053-mute by 5 words and tq2-relay by 3. Only cd4053-simple
+      fits, at 240/256.
+
+    **Do not take the latch match on cd4053-simple alone.** A per-variant
+    defensive layer inside one firmware is worse than a uniform documented
+    omission: the fault harness and the mutation topology would both need
+    per-variant expected check counts, and `docs/pic10f320_special_case.md`
+    would have to explain a three-way split instead of one clean statement.
+    Resolution is therefore (b) for exact TRISA — uniformly, on all three
+    variants — and (c) for the latch match.
+
+    Two consequences for sequencing and scope:
+
+    - This is a firmware edit that **changes emitted bytes**, so per §6.13 and
+      §15's D4 it lands *after* the Phase-2 byte-identity gate has passed, as its
+      own reviewed commit carrying the rebaselined hashes — never batched with
+      the comment-only sweep of §4.
+    - It is **not firmware-only**, and the coupled test surface is wider than a
+      grep for the changed symbol suggests: **five test files, seven edit sites.**
+      Written and verified 2026-07-26 in a scratch clone (neither worktree
+      touched); the accompanying test patch is the deliverable, and the exact
+      diff is preserved with this measurement.
+
+      | File | Why it moves with the firmware |
+      | --- | --- |
+      | `test/fault/fw_fault_harness.h:79-80` | shim declaration loses the `uint8_t mask` parameter |
+      | `test/fault/fw_fault_harness.c:245` | shim body follows the signature change |
+      | `test/fault/test_fault.c` (predicate probes) | four `fwp_output_pins_intact(mask)` call sites; two clean-state probes collapse into one, since the exact-TRISA predicate no longer varies by mask |
+      | `test/fault/test_fault.c:148-152` (**main-loop case**) | `expect_no_reset(FWI_RA2_PIN_TO_INPUT)` **inverts to `expect_reset`** on cd4053-simple, and the `#if defined(OUTPUT_CD4053_SIMPLE)` split disappears |
+      | `test/pic/test_fault_pic.cc:183-189, 507-521` | the RA2 `inject_case` flips from `expect_reset=0` to `1`, its variant `#if` collapses, and **`EXPECTED_CHECKS` goes from 23/22 to a uniform 22** |
+      | `test/run_mutation_tests.sh:56` | the "FW output-pin SEU check neutered" host mutant quotes the old line verbatim |
+      | `test/run_mutation_tests.sh:128` | the "TARGET output-direction guard disabled" mutant quotes the old helper **body** (`return (0U == (TRISA & expected_mask));`), so a grep for the *function name* does not find it |
+
+      Two of those are the substance rather than mechanical follow-on, and both
+      are *assurance gains* that should be called out in the commit message
+      rather than buried: the spare RA2 pin on cd4053-simple becomes a guarded
+      direction fault instead of a documented blind spot, so **the variant split
+      in the fault expectations disappears entirely** — all three variants now
+      assert identical defensive behaviour, at both host and target level.
+
+      Rewriting the mutant is a small design decision worth recording. The old
+      pattern quoted one variant's gate body, which after the port is no longer
+      unique (mute and relay reduce to identical text) and no longer
+      variant-covering. It is retargeted at the helper's comparison —
+      `s@(uint8_t)(0x0FU ^ BYPASS_OUTPUT_DDR_MASK)@(uint8_t)(TRISA & 0x0FU)@`,
+      making the exact-TRISA test a tautology — which is both unique and
+      variant-independent, so one mutant now covers all three builds.
+
+      Evidence, all from the scratch clone with the firmware port applied:
+      `make test-fault-variants` → 41 checks / 0 failures on each of the three
+      variants (uniform, where the counts previously differed); the child's full
+      `make test` → EXIT=0; and `MUTATION_ALLOW_SKIP=0 make test-mutation` →
+      **42 killed, 0 survived, 0 errored, 0 skipped**.
+
+      **Two of the seven sites were found by *running* the suite, not by reading
+      it — record this, because it is the reusable lesson.** A review-only port
+      would have shipped both:
+
+      - `test_fault.c:122` failed with `valid state [TRISA RA2 flipped to input
+        (spare on simple)] must NOT force a reset (got r=1)` — an inverted
+        expectation, invisible to a symbol grep because it names an enum
+        (`FWI_RA2_PIN_TO_INPUT`), not the changed function.
+      - `run_mutation_tests.sh:128` surfaced only on the full fail-closed
+        mutation run, as `[31] ERROR mutation did not change
+        bypass_mcu_pic10f320.c (stale pattern?)`. It quotes the helper *body*
+        rather than its name, so it evades a `hw_output_pins_intact` grep
+        entirely. It is retargeted to disable the new helper by early return,
+        which keeps it textually distinct from the §6.11 host mutant's
+        tautology.
+
+      This is Principle 7 working as intended in both directions: the driver
+      fails closed on the stale-pattern class (`run_mutation_tests.sh:249`
+      `cmp -s`-checks every mutant), *and* the check earned its keep. One
+      caution learned while validating the replacement: a mutant that fails to
+      **compile** also makes `make <target>` exit nonzero and would therefore
+      score as "killed" — a false kill. Confirm any new or retargeted firmware
+      mutant builds (exit 0, image produced) before accepting its kill.
+
     Do **not** let this resolve silently by moving the file verbatim and never
     revisiting it — "verbatim" is the right provenance rule and the wrong
     assurance rule.
@@ -790,9 +973,16 @@ plan must respect:
       rebaseline it in the same reviewed commit. This keeps §6.11-class edits
       visible forever, at the cost of one more file to maintain deliberately.
 
-    Recommend the standing regression: §14.2 records that the differential lanes
-    are blind to the hardware-integrity checks, and an expected-image hash is the
-    one gate that notices *any* change to emitted bytes, including that class.
+    This plan recommended the standing regression, because §14.2 records that the
+    differential lanes are blind to the hardware-integrity checks and an
+    expected-image hash is the one gate that notices *any* change to emitted
+    bytes, including that class. **Decided (§15, D4): the one-shot gate**, under
+    the merge's governing simplest-option rule. The gate's migration purpose —
+    proving the ported XC8 recipe reproduces the child's shipped bytes — is fully
+    served either way; what is knowingly given up is the standing watch on emitted
+    bytes after Phase 4. §15 records that as the single place where "simplest"
+    trades assurance, and promotion to the standing regression stays a one-file
+    change if that trade is later judged wrong.
 14. **Toolchain-pin equality — verified compatible; recorded so it is not
     re-derived.** *(New 2026-07-26.)* The whole merge rests on one XC8
     installation building both PIC targets, and it does: parent
@@ -921,6 +1111,12 @@ than deciding as it goes.
 
 Record clean parent and child evidence, the three child release image hashes
 (§6.9), and the parent base SHA. No import yet.
+
+**Phase 0 is complete. Its output is §15** — the decision record, the captured
+baselines and image hashes, and the tool inventory with its one recorded blocker.
+Later phases consume §15 rather than re-deciding; where §15 accepts a naming
+asymmetry, the deferral is tracked by the `TODO.md` Tier 3 item "Unified naming
+scheme across MCU targets and output stages", not by re-opening this plan.
 
 **Phase 1 — Provenance import, inert.** Fetch and verify the pinned child
 branch and original signed tags under namespaced refs, then perform a
@@ -1225,7 +1421,10 @@ the assurance comparison rather than restating it.
   too, or whether a PIC10F320 failure is allowed to let the rest of CI report
   green). The child workflow has only two jobs (`verify`, `stress`), so nothing
   on the child side informs this. Settle it in Phase 0 with the runtime tradeoff
-  stated.
+  stated. **Decided (§15, D3): extend the existing `pic` job.** No sibling job and
+  no `needs` edits, so all four dependents gate on PIC10F320 automatically; the
+  accepted cost is the full PIC10F320 lane on their critical path. Splitting later
+  is mechanical if CI wall-clock becomes binding.
 - `release.yml` asserts the PIC10F320 header, rebuilds into a private fresh
   directory, passes that directory and the canonical set to verification, and
   reruns strict target and mutation gates before publication.
@@ -1236,15 +1435,30 @@ the assurance comparison rather than restating it.
 
 ## 12. Definition of done
 
+Several items below say "has a recorded decision". Those decisions are recorded —
+§15 holds them, as of 2026-07-26 — so what remains for each is the
+*implementation*, and the checkbox stays open until the merged tree matches the
+decision. Where §15 accepted a naming asymmetry, the accompanying `TODO.md` item
+is part of the record, not a substitute for it.
+
+- [ ] Global Make directives have a per-directive disposition (§5.8): the child's
+      bare `.NOTPARALLEL` is **not** imported and
+      `test-make-safe-parallel-probe` still passes, imported recipes were
+      re-checked under the parent's `.DELETE_ON_ERROR`, and `PROJECT_MAKE` plus
+      the parent-only exports resolve to one definition each.
 - [ ] The imported graph is pinned to the recorded child SHA (`f58d2d5...`, not
       the superseded `915ee03...`), all six original signed tags are verifiable
       under `pic10f320/v0.9.*`, and provenance lookup instructions document
       `git log -m --follow`.
-- [ ] The §6.11 PIC firmware defensive-layer divergence is resolved by an
-      explicit decision: either exact-TRISA/latch-match is ported to
-      PIC10F320 by the user, or its absence is documented in
-      `docs/pic10f320_special_case.md` and reflected in the mutation topology.
-      The reverse ANSELA question has an answer too.
+- [ ] The §6.11 PIC firmware defensive-layer divergence is resolved as measured
+      2026-07-26: **exact TRISA is ported** to all three PIC10F320 variants by
+      the user (+1 word each; 220/241/244 of 256), landing after the Phase-2
+      byte-identity gate as its own rebaselining commit, with
+      `test/fault/fw_fault_harness.c`, `test/run_mutation_tests.sh` and
+      `test/pic/test_fault_pic.cc` updated alongside; and **the output-latch
+      match is documented as omitted** in `docs/pic10f320_special_case.md`
+      (does not fit: cd4053-mute over by 5 words, tq2-relay by 3) and reflected
+      in the mutation topology. The reverse ANSELA question has an answer too.
 - [ ] Every §6.12 parent-only gate has a recorded PIC10F320 decision: mutation
       policy, flash budget, strict-tools inventory, ci-local routing, release
       provenance, rebuild determinism, stack bound, and firmware-coverage /
@@ -1470,3 +1684,98 @@ unarchiving as the normal rollback path.
     §6.1's pin is a decision to re-take, not a constant; and the honest
     conclusion is that the cheapest version of this merge is the one executed
     soonest.
+
+---
+
+## 15. Phase-0 decision record
+
+Settled 2026-07-26 against parent `5180881` / child `f58d2d5`. §7's Phase 0
+requires these to be recorded rather than decided as execution goes; this section
+is that record.
+
+**Governing rule for this merge: take the simplest, smallest-change option
+wherever the plan offered a choice.** The merge's job is to end the split, not to
+fix the naming debt the split exposed. Every naming asymmetry noted below is
+therefore *accepted, documented, and deferred* to the TODO item "Unified naming
+scheme across MCU targets and output stages" (`TODO.md`, Tier 3), which is the
+single place the cross-cutting redesign is tracked. Do not re-litigate these
+individually while executing; do not quietly "improve" one of them mid-phase,
+because a partial unification is worse than either endpoint.
+
+### 15.1 Decisions
+
+| # | Question | Decision | Consequences to implement |
+| --- | --- | --- | --- |
+| D1 | §5.1/§5.6 lane prefix | **Keep `pic-` = PIC10F322**; new lane is `pic320-` with `PIC320_*` variables. The 322 lane is not renamed. | No churn on known-good 322 targets and no interface break for existing `make print-PIC_*` consumers. Accepts the asymmetry §5.1 flags: `pic-` silently means "the other PIC". Because `PIC_*` stays 322, §5.6's rule reads "anything chip-specific and new gets `PIC320_`", and the shared-tool allowlist in §5.6 stays exactly as written. |
+| D2 | §5.3 release image basenames | **Keep the child basenames** (`bypass_mcu_{cd4053-simple,cd4053-mute,tq2-relay}_pic10f320.hex`). No migration at `v0.10.0`. | No published-name break, and §6.13's comparison can key on filename. Two obligations follow and are not optional: (a) `scripts/make-release.sh`'s image→MCU classifier must recognize the `bypass_mcu_` prefix explicitly, or a PIC10F320 image falls through to generic AVR metadata (§10); (b) the release `README.md`/`MANIFEST.md` must state the three-convention asymmetry rather than leave it to be inferred. |
+| D3 | §11 CI job graph | **Extend the existing `pic` job** to build and validate both chips serially. No sibling job, no `needs` edits. | Simplest DAG, one XC8 install/cache restore, and `verify`/`attiny202`/`build-matrix`/`stress` keep gating on PIC10F320 for free because they already declare `needs: pic`. Cost: the full PIC10F320 lane lands on the critical path of all four dependents. Revisit only if CI wall-clock becomes the binding constraint — splitting later is a mechanical change, whereas choosing the split now would force the gating question in §11 immediately. |
+| D4 | §6.13 gate lifetime | **One-shot migration check.** Run the byte-identity comparison at the Phase-2 exit gate and again in Phase 4, record the compared hashes in both phase commit messages and in `docs/pic10f320_validation.md`, then retire it. No checked-in expected-hash file. | Nothing new to maintain, and the gate's *purpose* — proving the ported XC8 recipe reproduces the child's shipped bytes — is fully served. **This is the one place the simplest option costs assurance, and the cost is named in §14.2:** the equivalence and lockstep lanes are blind to the hardware-integrity checks, so after retirement nothing at the merged tip watches emitted bytes. Recorded as a deliberate, revisitable trade; promoting it to the standing regression later is one file plus one `pic320-test-build` prerequisite. |
+
+Defaults taken without a separate question, on the same simplest-option rule.
+Each is cheap to reverse and none changes a name outside PIC10F320:
+
+- **§5.7 coverage directory** — PIC10F320 coverage lives at
+  `build_pic10f320/coverage/`, a subtree of the directory §3 already mandates,
+  rather than a new top-level `coverage_pic10f320/`. One `.gitignore` entry
+  (`build_pic10f320/`) covers build *and* coverage artifacts, and scoping the
+  imported `rm -rf` becomes trivially correct because every PIC10F320 output is
+  under one root. `coverage/` stays exclusively the parent lanes'.
+- **§6.12 flash budget** — the 256-word gate is **inline Makefile arithmetic**
+  parsing XC8's own output, exactly mirroring the existing PIC10F322 512-word
+  gate (`Makefile:614-725`). `test/check_flash_budget.sh` stays ELF/`$(SIZE)`-
+  shaped and untouched, and the 322 lane is not refactored. This is the "keep
+  both PIC budgets inline" branch of that row, chosen for consistency and zero
+  322 churn.
+- **§4 `LICENSE`** — the parent's file is kept **unchanged**
+  (`Copyright (c) 2026 matt-garman`); the child's copy is dropped. Flagged rather
+  than silently defaulted, per that row: every source file on both sides says
+  `Copyright (c) Matthew Garman`, so the parent's `LICENSE` is the outlier
+  against its own sources. Changing it is a one-line edit whenever the intended
+  holder string is confirmed; it is not merge work and does not gate any phase.
+- **§6.12 strict-tools inventory** — still extended to both chips' optional-tool
+  recipes, as that row requires. This is not a naming choice and the simplest-
+  option rule does not reach it: without it, Phase 4's `STRICT_TOOLS` requirement
+  has no enforcing regression for either PIC lane.
+
+### 15.2 Baseline evidence (§6.9)
+
+Captured 2026-07-26T21:54Z from clean worktrees (both repositories reported zero
+modified tracked paths).
+
+```
+parent base SHA : 5180881e9592ec9b1b822fd3a4334c9d41f2b34f
+child HEAD      : f58d2d57ef5a72637fbc032a3f3676f249409b68   (== the §6.1 pin)
+parent 'make test' : EXIT=0   ("all fast pre-hardware tests passed";
+                               golden-model line coverage 99.35%, floor 90%)
+child  'make test' : EXIT=0   ("all PIC10F320 validation complete",
+                               variant cd4053-simple; firmware line coverage
+                               80/84 executable lines, 4 allowlisted)
+```
+
+Child `release/v0.9.5` image hashes — the §6.13 byte-identity baseline. Verified
+equal to the committed `SHA256SUMS` in that directory:
+
+```
+26531d3408a75297656d722699a1ffafdc47de376af6b4d2aa62b303c6713ca8  bypass_mcu_cd4053-simple_pic10f320.hex
+7709a3979b9103411b1f2e0c892d2291e1c232b5033344bd645ae289ac55649f  bypass_mcu_cd4053-mute_pic10f320.hex
+b77e21221b8a94788781b2d1df6a66e0487317cb215d5d540c5582db2a47c4e2  bypass_mcu_tq2-relay_pic10f320.hex
+```
+
+### 15.3 Tool inventory, and the one recorded blocker
+
+§6.9 requires unavailable tools to be recorded as blockers rather than passes.
+Verified present on the execution host: XC8 V3.10 at the pinned
+`/opt/microchip/xc8/v3.10/bin/xc8-cc`, PIC10-12Fxxx DFP 1.9.189 at the pinned
+`/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8`, `gpsim`, the `gpsim-dev`
+headers (`/usr/include/gpsim/sim_context.h`), `cppcheck`, `cbmc`, `avr-gcc`,
+`gcov`, `python3`, and `git-subtree` under Git 2.43.0 — confirming §6.10 and
+§6.14 with no re-derivation needed.
+
+**`klee` is absent.** Consequences, stated so Phase 3 does not discover them:
+`make test` is unaffected, because its member `test-klee-build` only compiles and
+links bitcode (`test/test_klee_build.sh`) and does not execute the solver. But
+`test-symbolic-klee` — a target on *both* sides, and the subject of §6.2/§6.3's
+"preserve the child's correct two-object KLEE flow" instruction — cannot be run
+locally. Phase 3 may verify the *link* recipe here; the executed-proof evidence
+must come from CI or a host with KLEE installed, and a local pass of
+`test-klee-build` must not be recorded as evidence that the KLEE proof ran.

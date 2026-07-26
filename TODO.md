@@ -444,6 +444,59 @@ Key constraints (so it actually works for the read-off-the-chip scenario):
 Effort: ~1–2 h incl. the `BYPASS_EMBED_URL` Makefile wiring plus a
 `strings`-based build check. Firmware source edit is the user's.
 
+**Unified naming scheme across MCU targets and output stages.** Added 2026-07-26
+as the deferred half of the PIC10F320 merge (`docs/pic10f320_merge_plan.md` §15).
+That merge deliberately took the smallest-change option at every naming fork so
+it would not also become a rename project. The debt is real, it is now
+*visible in one tree* for the first time, and it should be paid deliberately
+rather than drifting further. Four inconsistent axes:
+
+- **Make target prefixes.** ATtiny13a/tinyx5 use bare or suffixed goals (`all`,
+  `all13`, `all85`, `size45`); PIC10F322 uses `pic-`; ATtiny202 uses
+  `attiny202-`; PIC10F320 adds `pic320-`. So `pic-` silently means "the PIC that
+  got here first", which is exactly the near-name hazard the merge plan lists as
+  residual risk 7.
+- **Makefile variable prefixes.** Three idioms for "which chip": `MCU`,
+  `PIC_TAG`/`PIC_*`, `XT_*`, plus the new `PIC320_*`. `PIC_FLASH_WORDS` is the
+  cautionary case — a mis-scoped chip variable produces no compile error and no
+  failing test, it produces a *passing* one (a 256-word image gated at 512).
+- **Release image basenames.** Three conventions coexist: prefix `bypass_` vs
+  `bypass_mcu_`; stage tokens `cd4053`/`mute`/`relay` vs
+  `cd4053-simple`/`cd4053-mute`/`tq2-relay`; and a part suffix that is
+  `_pic10f322`/`_pic10f320`/`_t45`/`_t85` — or *absent*, because a bare
+  `bypass_cd4053.hex` is the ATtiny13a image. `bypass_mute_pic10f322.hex` and
+  `bypass_mcu_cd4053-mute_pic10f320.hex` name the same output stage on two PIC
+  chips. Note the bare-name convention is pre-existing debt, older than either
+  PIC.
+- **Output-stage vocabulary.** The parent's `VARIANTS` and the PIC10F320's
+  variant list describe the same three output stages in different words.
+
+Design notes if picked up:
+- This is a **breaking rename of published artifact names**, so it belongs at a
+  minor-version boundary with a redirect note in the release documentation and in
+  the archived child repository's pointer. Decide first whether historical
+  `release/vX/` directories are left alone (recommended — they are signed and
+  their `SHA256SUMS` name the files) or reissued.
+- `FW_BASE` is the mechanism for the image prefix; the stage tokens come from the
+  variant lists. Both are already Makefile-owned, so the canonical product set
+  built for the merge (`docs/pic10f320_merge_plan.md` §10) is the natural single
+  point of change — do this *after* that set exists, not before.
+- Renaming a Makefile variable is an **external interface change**, not an
+  internal one: `scripts/make-release.sh` reads Makefile truth through
+  `make -s print-<VAR>`. Grep `print-` across `scripts/` and
+  `.github/workflows/` as part of any rename.
+- Sequence it so the tree is never half-unified — one axis per commit, each with
+  its consumers, rather than a sweeping rename that has to be reviewed all at
+  once.
+- The merge plan's §15 records which asymmetries were knowingly accepted; use it
+  as the worklist rather than re-deriving them.
+
+Effort: ~4–8 h, most of it consumer updates and release-documentation redirects
+rather than the renames themselves. Impact: Medium — no behavioural change and no
+new assurance, but it removes a class of silent-misconfiguration hazard that
+grows with every added target, and it is the difference between "five targets in
+one repository" and "four projects sharing a Makefile".
+
 ---
 
 ## Tier 4 — out of scope for firmware (name only)
@@ -543,5 +596,6 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |
 | Broader compiler & toolchain portability | 3 | Medium | Medium-High — adoption + reliability |
 | Embedded provenance URL | 3 | 1–2 h | Low — provenance polish |
+| Unified naming scheme across MCUs | 3 | 4–8 h | Medium — removes a silent-misconfig class |
 | Manufacturing artifacts (name as scope) | 4 | — | Completeness signal |
 | Signal-integrity SPICE modeling | 4 | 2 h | High for the board, not firmware work |
