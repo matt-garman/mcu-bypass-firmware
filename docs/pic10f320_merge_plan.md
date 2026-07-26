@@ -41,6 +41,17 @@ contract (§4, §14.3), and the child's non-git GitHub assets (§6.15). It also
 records a minimum-coherent-merge cut (§7) as the concrete mitigation for
 §14.11.
 
+A **second 2026-07-26 pass**, against parent `ed6ddab` and the same child tip,
+found that the plan was strong on process but thin on the mechanical merge
+surface. It added two collision classes that were missing entirely — the
+Makefile *variable* namespace (§5.6, 56 colliding names) and shared artifact
+directories (§5.7, `coverage/`) — a permanence decision for the byte-identity
+baseline (§6.13), the release-image naming asymmetry (§5.3, §10), the moved
+firmware's own comment sweep (§4), and two stale parent-side references (§4).
+It also identified the *bias* that produced three of those misses and wrote it
+up as Principle 8: the plan's default disposition demotes child assets that are
+chip-agnostic into PIC10F320-only sections.
+
 ---
 
 ## 1. Goal and non-goals
@@ -115,6 +126,18 @@ future release expectations.
    useful, but not conclusive where a harness can discard tool status, skip
    all variants, execute zero soak iterations, or accept incomplete simulator
    progress. Those paths are hardened before the merged lane becomes a gate.
+8. **Ask of every child-only asset: 320-*specific*, or merely 320-*discovered*?**
+   *(Added by the second 2026-07-26 pass.)* This plan's default disposition is
+   "parent wins; surviving child content becomes a PIC10F320 section." That default
+   is right for genuinely chip-specific material and wrong for work the child
+   happened to do first. The first pass caught one instance
+   (`verify_corrupt_state_faults()`, §4) and missed two: the child's only-in-the-
+   project line-coverage gate over the real pure core (§4, `test_logic_host.c`
+   row) and its explicitly cross-chip gpsim "Known gaps" documentation (§4,
+   `test/README.md` row). Both would have been quietly demoted to `pic320-`
+   lanes or 320 sections, *reducing* parent assurance through a merge whose
+   entire premise is that it increases shared coverage. Phase 0 and Phase 3 must
+   ask this question per asset and record the answer, not assume the default.
 
 ---
 
@@ -172,6 +195,13 @@ generic intermediates into its working directory, and the child also reuses
 common test output names. Sharing the directory risks cross-chip, cross-
 variant, and concurrent-invocation contamination.
 
+`build_pic10f320/` is **not the only** artifact directory the merge has to
+separate, and the layout above understated the problem *(corrected by the second
+2026-07-26 pass)*: coverage output also collides, and the imported clean recipes
+are destructive. See §5.7 — either a sibling `coverage_pic10f320/` or a
+`build_pic10f320/coverage/` subtree, decided in Phase 0 along with the rest of
+the naming.
+
 ---
 
 ## 4. File-by-file disposition
@@ -182,11 +212,11 @@ Legend: **FOLD** = collapse to one shared copy (parent's wins) · **DROP**
 
 | Child file | Disposition | Destination / note |
 | --- | --- | --- |
-| `bypass_mcu_pic10f320.c` | RELOCATE | `src/bypass_mcu_pic10f320.c`, verbatim. Firmware — **user moves**. |
+| `bypass_mcu_pic10f320.c` | RELOCATE | `src/bypass_mcu_pic10f320.c`, verbatim. Firmware — **user moves**. Carries its own comment sweep, enumerated below the table *(found by the second 2026-07-26 pass)*. |
 | `test/model/bypass_pure.{c,h}`, `bypass_types.h` | DROP after verification | Behaviour-identical to the parent at the audited child tip; current differences are license headers. Superseded by `src/`, but record the comparison before deletion. |
 | `test/model/bypass_config.h` | DROP/REPLACE | Not a clone: it is an intentional minimal host threshold shim. Replace its consumers with `src/bypass_config.h` plus the parent's host configuration shim, and verify identical effective thresholds. |
 | `test/model/README.md` | MERGE | Put assurance-seam/provenance content in `docs/pic10f320_special_case.md`; put technical model/test instructions in the validation documentation. |
-| `test/host/test_logic_host.c` | FOLD w/ care | The parent test is an independent implementation oracle; the child drives the real pure functions. Preserve both assurance roles, either through two backends/property runners or an explicit, reviewed argument that existing shared-core tests make the direct run redundant. Do not discard the difference as noise. |
+| `test/host/test_logic_host.c` | FOLD w/ care — **and promote a gate** | The parent test is an independent implementation oracle; the child drives the real pure functions. Preserve both assurance roles, either through two backends/property runners or an explicit, reviewed argument that existing shared-core tests make the direct run redundant. Do not discard the difference as noise. **Second 2026-07-26 pass — the row was materially incomplete:** the child's copy is also the *driver* for the only line-coverage gate over the real core that either repository has. Parent `COVERAGE_SRC = test/host/test_logic_host.c` (`Makefile:2655`) and that file states at `:4` that it does **not** include the firmware — it re-implements the model — so the parent's 90% floor measures the **oracle**, and no parent target measures `src/bypass_pure.c` at all. The child's `coverage-check` measures `bypass_pure.c` itself (host + formal drivers, floor **95%**, `Makefile:193`, `:592-613`). Folding the child copy away therefore deletes a gate rather than deduplicating one. Promote it as a shared `coverage-check-core` over `src/bypass_pure.c` with its own floor variable — which is also how the `COVERAGE_MIN` collision of §5.6 resolves, since two subjects need two floors. This is Principle 8's first case. |
 | `test/formal/test_cbmc.c`, `test_symbolic.c` | FOLD w/ care | Diff-audit assertions and preserve the child's correct two-object KLEE flow: compile driver and `src/bypass_pure.c` to bitcode, `llvm-link`, then run KLEE. Fix the parent's current KLEE wiring before calling the child copy redundant. |
 | `test/formal/test_model_check.c` | FOLD w/ care | Migrate the child's concrete `verify_corrupt_state_faults()` property before deletion. It is target-agnostic and is also used as a mutation/coverage oracle. Audit the remaining drift. |
 | `test/misra_rules.txt` | DROP | 0 diff — identical to parent's. |
@@ -217,11 +247,11 @@ Legend: **FOLD** = collapse to one shared copy (parent's wins) · **DROP**
 | `scripts/make-release.sh` | FOLD/EXTEND | Add PIC10F320 variables, DFP/header checks, build, validation, mutation, three soaks, evidence, image metadata, programmer commands, reproduction commands, verifier inputs, constrained-target wording, and generated commit text. Do not merely append filenames. |
 | `.github/workflows/ci.yml` | FOLD/EXTEND | Add a strict full-tool PIC10F320 job or a two-chip matrix, assert `proc/pic10f320.h`, preserve every unique test layer, upload `build_pic10f320/*.hex` separately, and update downstream `needs`. Run PIC mutation fail-closed in a full-tool hosted job. |
 | `.github/workflows/release.yml` | FOLD/EXTEND | Rebuild PIC10F320 into a private directory, enforce the canonical set, rerun strict target/mutation gates, and pass the extra directory to reproduction verification before publication. |
-| `TOOLCHAIN.adoc`, `MISRA_COMPLIANCE.md` | MERGE | Add the PIC10F320 device/header, `p10f320`, 256-word gate, CONFIG word, build directory, commands, analyzer configuration, and zero-unwaived-finding policy. Keep detailed technical facts here, linked to the caveat. |
+| `TOOLCHAIN.adoc`, `MISRA_COMPLIANCE.md` | MERGE | Add the PIC10F320 device/header, `p10f320`, 256-word gate, CONFIG word, build directory, commands, analyzer configuration, and zero-unwaived-finding policy. Keep detailed technical facts here, linked to the caveat. Three specifics for `MISRA_COMPLIANCE.md` *(added by the second 2026-07-26 pass)*: (a) its "Status: zero deviations" section argues by comparison — "cleaner than the parent project (`mcu-bypass-firmware`), whose AVR shells require documented deviations" — which becomes self-referential the moment it lands *in* that project; rewrite it as a per-target statement, exactly like the `## Provenance` case below. (b) The claim is only meaningful under strict tools: the child's `analyze-misra` exits 0 when cppcheck/python3 or the XC8/DFP headers are absent (`Makefile:348`, `:351`), which is precisely the §6.12 strict-tools hole — re-establish it in the merged tree with `STRICT_TOOLS=1` before repeating it. (c) Its `## Notes on specific constructs` records (`UINT8_MAX` is signed so `DEBOUNCE_COUNTER_MAX` is a plain literal; XC8 places `const` locals in program ROM) are **cited from the firmware** at `bypass_mcu_pic10f320.c:107`, so they must survive the merge with working anchors or the moved source acquires a dangling reference. |
 | `AGENTS.md`, `CLAUDE.md`, `LICENSE` | FOLD | Parent copies remain authoritative — but `LICENSE` is *not* identical: parent reads `Copyright (c) 2026 matt-garman`, child reads `Copyright (c) 2026 Matthew Garman`. Folding silently reverts the attribution string; confirm the intended holder rather than defaulting. Separately, the verbatim-moved firmware carries the child's non-SPDX three-line header into `src/`, where every other file uses `SPDX-License-Identifier: MIT`; normalizing it is a comment-only, user-owned firmware edit. |
 | `.gitignore` | MERGE | Ignore the dedicated build directory and all generated nested test/coverage artifacts, extending the parent's `test/.gitignore` to cover the new nested PIC10F320 test tree. Do not import ignored local child artifacts such as `coverage/`, root `.gcda`/`.gcno`, backup files, or the current `build_pic/`. Corrected 2026-07-26: the child has **no** `test/.gitignore`; that file is parent-only, so this row has one contributing child file, not two. |
 | `README.md`, `CHANGELOG.md` | MERGE | Add the constrained target and reconstruct child v0.9.4/v0.9.5 history under the correct historical releases rather than putting it under the first unified release. Two child README sections need *opposite* treatment and are easy to lose inside a bare "MERGE" (found 2026-07-26): `## Manual-sync contract` (`:137-156`) is **promoted, not folded away** — it is the §14.3 cross-target checklist, already written and maintained; `## Provenance` (`:110-136`) is **rewritten, not merged** — every claim in it ("frozen one-off", "pinned to `bf6a6c1`", "not automatically kept in sync", "correctness inherited by derivation, not independently re-proven in this repository") becomes false the moment the vendored copy dies in Phase 3. |
-| `test/README.md` | MERGE | Preserve the child file's technical validation semantics, mutation rationale, commands, and known simulator gaps in a dedicated PIC10F320 section/document. The caveat document is not a substitute for test documentation. |
+| `test/README.md` | MERGE — **but do not scope the gaps to the 320** | Preserve the child file's technical validation semantics, mutation rationale, and commands in a dedicated PIC10F320 section/document. The caveat document is not a substitute for test documentation. **Corrected by the second 2026-07-26 pass:** the earlier instruction to file the "known simulator gaps" in that 320 section is wrong. The child's section is titled `## Known gaps (hardware-bench only — shared with the parent's PIC build)` (`:313`) and says so in its body: gpsim's TMR2 prescaler-*select* clamp (`T2CKPS=0b11` modelled as 1:16 instead of the datasheet's 1:64), the absent WDT-calibration and analog-BOR models, and bench-only real-silicon pulse timing are properties of the **gpsim environment both PIC chips share**. The parent never back-ported any of it, so the merge is the moment it becomes shared PIC test documentation covering 322 and 320 alike. Principle 8's second case. |
 | `release/README.md` | MERGE | Preserve PIC10F320 flashing, trust, and reproduction details in the parent's shared release documentation. |
 | `release/v0.9.*` | DELETE FROM MERGED TIP / PRESERVE IN HISTORY | Do **not** place colliding historical release directories in the merged current tree. Preserve them through the imported graph and namespaced original tag objects. Include the child top-level `release/README.md` in the merge above. |
 
@@ -272,6 +302,47 @@ plan must respect:
   shares them"). The stale child-project link in `src/bypass_mcu_avr_xt.c:16-17`
   is a comment-only firmware-source edit and must be performed by the user under
   project policy; confirm non-comment firmware bytes remain unchanged.
+  **Two more instances, found by the second 2026-07-26 pass** — neither is a
+  simple deletion, so decide rather than sweep:
+  - `CHANGELOG.md:233-234` quotes the child as an external repository
+    ("[pic10f320-bypass-firmware](https://github.com/…) child project, which
+    landed the same TMR2 / 2 MHz / `ANSELA` work after the …"). It is a
+    *historical* release note and was true when written. Changelog entries are
+    normally immutable, so the default is preserve-as-history — but §10's "one
+    file, one timeline" then leaves a merged changelog that refers to part of
+    itself as an external project. Either leave it and let the unified entry
+    explain the absorption, or annotate it in place; do not silently rewrite
+    history.
+  - `TODO.md:279` still reads "PIC10F320: almost certainly does not fit. Check
+    against its budget before promising cross-target parity, and record the
+    omission if it cannot be done" — inside the shadow-state hardening item, not
+    the retired viability verdict. Post-merge that is a **live cross-target
+    task**, correctly stated, and it is now in scope for this repository. The
+    "Already cleaned" note below therefore must not be read as "TODO.md needs no
+    further work": this line needs re-framing from "the other project's problem"
+    to a tracked item, and it is the same flash-headroom question §6.11 asks
+    about the defensive layer. (`TODO.md:433` is already correct and needs
+    nothing: three variants at 219/240/243 of 256.)
+- **The moved firmware's own comments** *(new — second 2026-07-26 pass)*. The
+  child source was written from outside and says so. `bypass_mcu_pic10f320.c:6-8`
+  opens with "NOTE: this source code makes numerous references to the parent
+  project, mcu-bypass-firmware: <URL>", and five more sites say "the parent
+  project" meaning this repository: `:68` (the "DDR" macro-name convention),
+  `:74` (`hw_configure_output_pins()`), `:321` ("Improved Scheme With Muting"),
+  `:640` and `:657` (the inlined `debounce_integrate()` / `debounce_step()`).
+  Post-merge every one of them is self-referential. §12 already carves out
+  "separately reviewed user-owned source comments"; this is the enumeration that
+  carve-out needs. Two sequencing notes: these are comment-only, so they
+  **preserve emitted bytes** and may land after the §6.13 gate without
+  rebaselining it — unlike §6.11's defensive-layer edit, which does rebaseline
+  and must not be batched with them. The license-header normalization in the
+  `LICENSE` row below belongs to this same comment-only commit.
+- `src/bypass_blocking_delay.h:15` and `src/bypass_pins_pic10f322.h:11` say
+  "PIC10F32x" *(noted second 2026-07-26 pass; low priority)*. Per the project's
+  322-vs-32x convention the delay note is fine as-is — `__delay_ms()` is true of
+  both parts. The pin-map header is the softer case: with both parts in one
+  repository, "PIC10F32x pin map" now reads as covering a part whose pin map is
+  inlined in its own firmware instead. One clarifying word, user-owned, optional.
 - **Already cleaned (2026-07-26 documentation audit)** — verify rather than
   redo: `TODO.md` no longer contains the "PIC10F320 is NOT viable" verdict, the
   historical six-phase PIC plan, or the external-child-project section;
@@ -345,12 +416,123 @@ plan must respect:
 3. **Release image names.** Already disambiguated by the `_pic10f320`
    suffix. Keep the three public child basenames unless an explicit migration
    decision says otherwise; do not regenerate historical TMUX names.
+
+   **The asymmetry is wider than the suffix** *(second 2026-07-26 pass)*, and
+   "already disambiguated" was true only about *collisions*. The two lines differ
+   in prefix **and** in output-stage vocabulary:
+
+   | | Parent `release/v0.9.5/` | Child `release/v0.9.5/` |
+   | --- | --- | --- |
+   | prefix | `bypass_` (`FW_BASE = bypass`, `Makefile:102`) | `bypass_mcu_` (`FW_BASE := bypass_mcu`, `:103`) |
+   | stage tokens | `cd4053`, `mute`, `relay` (`VARIANTS`, `:142`) | `cd4053-simple`, `cd4053-mute`, `tq2-relay` |
+   | part suffix | `_pic10f322`, `_t45`, `_t85`, **or none** (bare = ATtiny13A) | `_pic10f320` |
+
+   So a merged `release/v0.10.0/` carries **three** conventions at once, and
+   `bypass_mute_pic10f322.hex` and `bypass_mcu_cd4053-mute_pic10f320.hex` name the
+   *same output stage on two PIC chips*. `FW_BASE` is the mechanism, and it is one
+   of the §5.6 colliding variables. Decide in Phase 0:
+
+   - **Keep** the child basenames (cheapest; no published-name break). Then the
+     release `README.md`/`MANIFEST.md` must state the asymmetry explicitly, and
+     the image→MCU classifier in `scripts/make-release.sh` must handle both
+     prefixes — a `bypass_mcu_*` name must not fall through to AVR metadata (§10).
+   - **Migrate** to one scheme at `v0.10.0`. This breaks three published
+     basenames, needs a redirect note in the child archival pointer (§6.15), and
+     forces §6.13's comparison to key on **content, not filename**.
+
+   Note the bare-name convention is pre-existing parent debt (`bypass_cd4053.hex`
+   *is* the ATtiny13A image); unifying that is out of scope here, but a canonical
+   set (§10) that encodes three conventions should say why.
 4. **Build/test output names.** Use `build_pic10f320/` and variant-private
    nested outputs. Never let concurrent variants share an object, executable,
-   coverage file, `gpsim.log`, or PASS-evidence path.
+   coverage file, `gpsim.log`, or PASS-evidence path. This item covers
+   variant-vs-variant collisions only; the cross-*chip* directory collisions —
+   which include a destructive imported `rm -rf` — are §5.7.
 5. **Git tags.** Both repos carry bare `v0.9.*` names. Preserve the child's
    original signed annotated tag objects under `pic10f320/v0.9.*`; do not rely
    on commits alone and do not recreate signed tags.
+6. **Makefile variable namespace.** *(New — second 2026-07-26 pass. This class was
+   missing entirely, and it is the highest-severity gap the pass found.)* §5 listed
+   targets, test basenames, image names, output names, and tags — but the merge
+   also collapses two *variable* namespaces into one file. **56 names collide, 35
+   of them `PIC_*`**, and many carry chip-specific values:
+
+   | Variable | Parent | Child |
+   | --- | --- | --- |
+   | `PIC_CHIP` / `PIC_TAG` | `10F322` / `pic10f322` (`Makefile:609-610`) | `10F320` / `pic10f320` (`:50-51`) |
+   | `PIC_FLASH_WORDS` | **512** (`:615`) | **256** (`:56`) |
+   | `PIC_GPSIM_PROC` | `p10f322` (`:618`) | `p10f320` (`:125`) |
+   | `FW_BASE` | `bypass` (`:102`) | `bypass_mcu` (`:103`) |
+   | `COVERAGE_MIN` | 90, over the oracle (`:2654`) | 95, over the real core (`:193`) |
+   | `COVERAGE_DIR` | `coverage` (`:2652`) | `coverage` (`:192`) — see §5.7 |
+   | `PIC_CHIP_MACRO`, `PIC_XTAL`, `PIC_CFLAGS`, `HOST_CFLAGS`, `PIC_CPPCHECK_*`, `PIC_MISRA_CPPCHECK_FLAGS` | 322-shaped | 320-shaped |
+   | `PIC_{FAULT,IO,LOCKSTEP,SOAK}_{SRC,BIN,COMPILE,CTX_DEF,DEPS}`, `PIC_LOCKSTEP_MODEL_OBJ`, `PIC_SOAK_{CXX,GPSIM_INC,DURATION_MS,LIVENESS_INTERVAL_MS,PROGRESS_INTERVAL_MS}` | 322 harnesses | 320 harnesses |
+
+   Genuinely shared, and safe to fold to one definition: `AWK`, `CBMC`,
+   `CBMC_CHECKS`, `CBMC_DEEP_UNWIND`, `CBMC_PROOFS_LOOP`, `CPPCHECK`, `GCOV`,
+   `GPSIM`, `KLEE`, `KLEE_CLANG`, `KLEE_INC`, `KLEE_LLVMLINK`, `MISRA_ADDON`,
+   `MISRA_RULES`, `MISRA_SUPPRESS`, `IHEX_VALIDATOR`, `PIC_CC`, `PIC_DFP`,
+   `PIC_DFP_INCLUDE`, `PIC_XC8_INCLUDE` (the last four by §6.14's verified
+   toolchain-pin equality).
+
+   **Why this is a blocker, not bookkeeping.** The failure is silent and it defeats
+   a release gate: a merged Makefile that keeps one `PIC_FLASH_WORDS` gates the 320
+   against **512** words, so an over-budget image passes the budget check that
+   §14.4 calls release-critical. `FW_BASE` mis-picks rename every image on one side
+   (§5.3). One `PIC_SOAK_DURATION_MS` makes a single override apply to both chips'
+   soaks, so a short-duration test run silently shortens the other chip's too.
+
+   Requirements:
+   - Chip-specific variables get an explicit prefix, chosen in Phase 0 **together
+     with** the §5.1 target-prefix decision so `pic320-test-soak` and
+     `PIC320_SOAK_DURATION_MS` read consistently. If §5.1 renames the 322 lane to
+     `pic322-`, rename `PIC_*` → `PIC322_*` in the same commit; if it keeps `pic-`,
+     `PIC_*` stays 322 and the new names are `PIC320_*`. Do not mix.
+   - The shared-tool list above is an explicit allowlist, not a residue. Anything
+     not on it is presumed chip-specific.
+   - **This is an external interface, not an internal rename.**
+     `scripts/make-release.sh:155` reads Makefile variables through
+     `mkv() { make -s print-"$1"; }`, and `print-%` exists in both Makefiles. Every
+     renamed variable is therefore a change to the release script, its manifest
+     output, and any CI step that reads it. Grep `print-` across
+     `scripts/` and `.github/workflows/` before renaming.
+   - The plan's own Phase-4 command block already writes
+     `PIC320_SOAK_DURATION_MS`, i.e. it assumed this rule before stating it. That
+     example is now normative.
+   - Two child targets are internal machinery that also collides by name with a
+     different implementation on each side: `_make-serialized-invocation` and
+     `_MAKE_REQUESTED_GOALS`. They appear in neither help text, so they are easy to
+     miss — and they are exactly the mechanical merge point of §6.4's
+     single-lock reconciliation.
+   - Watch the inverse case too: a child-only *name* can still carry a colliding
+     *value*. `BUILD_DIR ?= build_pic` (child `Makefile:104`) does not collide by
+     name — the parent uses per-target build-directory variables — yet it points at
+     the parent's PIC10F322 build directory. §3 already mandates
+     `build_pic10f320/`; this is where the override actually has to change. The
+     other child-only names to place under the prefix rule are `SRC`, `HEX`,
+     `MODEL_SRC`, `PIC_VARIANT`, `PIC_VARIANTS_ALL`, `PIC_OUTPUT_DEF`,
+     `COVERAGE_TESTS`, `FAULT_*`, and `HOST_{CC,INC}`; `MUTATION_ALLOW_SKIP` is
+     deliberately shared, since §6.6 keeps one central mutation policy.
+7. **Shared artifact directories, and destructive imported clean recipes.** *(New —
+   second 2026-07-26 pass.)* §5.4 forbids *cross-variant* sharing of outputs; the
+   real hazard here is **cross-chip**, and §3's layout addressed only the build
+   directory. Both Makefiles set `COVERAGE_DIR = coverage`. The parent works inside
+   subdirectories of it (`coverage/report`, and a `mktemp -d coverage/check.XXXXXX`
+   per gate run), while the child writes flat into it (`model_cov.o`,
+   `bypass_pure.c.gcov`, `fw_fault_cov.*`, `test_fault_cov`). Worse, two imported
+   recipes are destructive at directory granularity: the child's `coverage-clean`
+   (`Makefile:649`) and its `clean` (`:979`) both `rm -rf $(COVERAGE_DIR)`, so an
+   imported `pic320-coverage-clean` — or `pic320-clean`, or a `make clean` that
+   reaches it — deletes the parent's coverage report and any concurrent gate
+   working directory.
+
+   Give PIC10F320 coverage its own directory (`coverage_pic10f320/`, or a subtree
+   under `build_pic10f320/`), and scope every imported `rm -rf` to it. The same
+   check applies to the other shared root-level paths the child's recipes touch:
+   `gpsim.log`, stray `*.gcov`, `*.dump` / `*.ctu-info` /
+   `cppcheck-addon-ctu-file-list*`, and `commit_msg.txt`. `/.make.lock` is the one
+   path that is *intentionally* shared — it is the §6.4 whole-worktree lock and
+   must stay a single inode.
 
 ---
 
@@ -582,6 +764,35 @@ plan must respect:
     the defensive-layer edit as a separately reviewed commit that deliberately
     rebaselines, recording the new expected hashes in that same commit. Do not
     run the two changes together, or neither is verifiable.
+
+    **The gate is known-achievable** *(added by the second 2026-07-26 pass)*, so
+    this is not a speculative requirement: the child's own `release.yml` already
+    rebuilds every image from tagged source on a clean pinned `ubuntu-24.04`
+    runner and fails the release unless the fresh build reproduces the committed
+    `SHA256SUMS` byte-for-byte. XC8 output is reproducible across machines given
+    §6.14's pinned compiler and DFP; what §6.13 adds is proving it across the
+    *ported recipe*.
+
+    **Decide the gate's lifetime, too.** As written, §12's checkbox ("identical to
+    the child's `release/v0.9.5/*.hex`") becomes unverifiable at the merged tip,
+    for two independent reasons: the baseline images live in
+    `_incoming_pic10f320/release/v0.9.5/`, which **Phase 7 deletes** from the
+    current tree, and §6.11's firmware edit invalidates them anyway. Pick one:
+
+    - **One-shot gate.** Run it in Phases 2 and 4, record the compared hashes in
+      the phase commit messages and in `docs/pic10f320_validation.md`, then retire
+      it. Cheapest, and honest — it is a *migration* check, not a standing
+      property. State plainly that it cannot be re-run at the tip once the
+      baseline is gone.
+    - **Standing regression.** Check in an expected-hash file (e.g.
+      `test/pic10f320/expected_images.sha256`) that survives Phase 7, wire it into
+      `pic320-test-build`, and require any firmware change that moves the hashes to
+      rebaseline it in the same reviewed commit. This keeps §6.11-class edits
+      visible forever, at the cost of one more file to maintain deliberately.
+
+    Recommend the standing regression: §14.2 records that the differential lanes
+    are blind to the hardware-integrity checks, and an expected-image hash is the
+    one gate that notices *any* change to emitted bytes, including that class.
 14. **Toolchain-pin equality — verified compatible; recorded so it is not
     re-derived.** *(New 2026-07-26.)* The whole merge rests on one XC8
     installation building both PIC targets, and it does: parent
@@ -621,6 +832,34 @@ plan must respect:
     - **Inbound references.** Anything pinning the child URL — external build
       scripts, forks, and the parent's own stale links catalogued in §4 — needs
       the redirect at archival time.
+16. **Verified clean — recorded so it is not re-derived.** *(New — second
+    2026-07-26 pass, against parent `ed6ddab` / child `f58d2d5`.)* Each of these
+    looked like work and is not. Re-verify only if the named file changes.
+
+    - **Namespaced tags cannot trigger a release.** `release.yml` filters
+      `v[0-9]+.[0-9]+.[0-9]+` and `v[0-9]+.[0-9]+.[0-9]+-*` (both repositories,
+      identically). Pushing `pic10f320/v0.9.*` to the parent remote matches
+      neither pattern, so §9's namespaced import cannot fire six bogus release
+      runs. No guard needed; do not add one.
+    - **Parent MISRA suppressions cannot leak onto the imported firmware.** Every
+      entry in `test/misra_suppressions.txt` is file-scoped
+      (`misra-c2012-11.4:src/bypass_mcu_avr_classic.c`, and 17 more in the same
+      form), so folding the suppression files cannot silently waive a finding in
+      `src/bypass_mcu_pic10f320.c`. The child's zero-deviation position survives
+      the merge intact — subject to the strict-tools caveat in §4's
+      `MISRA_COMPLIANCE.md` row.
+    - **The §4 disposition table is complete.** Checked against the child's
+      `git ls-files`: every tracked child path outside `release/v0.9.*` has a row.
+      The child tracks no `docs/` directory, no `.claude/` (it is `.gitignore`d on
+      both sides), and nothing under `.github/` beyond the two workflows.
+    - **§5.1's target inventory is complete** but for `print-%` (a pattern rule
+      both Makefiles already implement identically) and
+      `_make-serialized-invocation` (internal, present on both sides with
+      different bodies — see §5.6's closing bullet).
+    - **`AGENTS.md` folds with no loss.** The child copy differs from the parent's
+      by a single typo ("musicial"), so the parent copy winning is strictly
+      correct. `LICENSE` remains the one genuine content difference, exactly as
+      §4's row states.
 
 ---
 
@@ -668,6 +907,18 @@ should be answered now rather than discovered at Phase 8. Decide the §11 CI
 job-graph shape here too, for the same reason as the prefix question: it changes
 job names and `needs` edges in two later phases.
 
+Then resolve the four decisions added by the second 2026-07-26 pass, all of which
+change names or files in later phases and are cheap now and expensive later:
+§5.6's Makefile **variable** prefix rule (decide it in the same breath as the
+§5.1 target prefix — they must agree, and it is an interface change to every
+`make print-<VAR>` consumer); §5.7's artifact-directory separation, including
+which directory PIC10F320 coverage owns; §5.3's release-image naming call, keep
+or migrate; and §6.13's gate **lifetime**, one-shot or standing regression, since
+the standing option adds a checked-in hash file that Phase 4 must wire up. Also
+run the Principle 8 sweep here: walk the child-only assets once and mark each
+"320-specific" or "320-discovered", so Phase 3 folds from a decided list rather
+than deciding as it goes.
+
 Record clean parent and child evidence, the three child release image hashes
 (§6.9), and the parent base SHA. No import yet.
 
@@ -687,6 +938,13 @@ host-side build/equivalence/actuation/fault/coverage lanes. Update all explicit
 dependencies and relative includes, including both firmware harness includes,
 the model implementation, host config shim, actuation-to-equivalence reuse,
 and fault-to-`xc.h` reuse. Use variant-private outputs.
+
+This is also where the §5.6 variable prefixes and §5.7 directory separation land,
+because they are properties of the imported recipes themselves: rename the
+chip-specific variables as the recipes arrive rather than after they have been
+wired into later phases' aggregates, give PIC10F320 coverage its own directory,
+and scope every imported `rm -rf` to PIC10F320 paths before running any of these
+lanes — the destructive `coverage-clean` is imported already armed.
 
 Validate `pic320-test-equiv`, `pic320-test-actuation`,
 `pic320-test-fault-host`, model/firmware coverage, and the inherited parent
@@ -708,6 +966,14 @@ KLEE recipe, and then delete the vendored core and superseded formal/MISRA
 copies. Re-run host, formal, coverage, and mutation baselines against the sole
 `src/bypass_pure.c`. Fresh MISRA analysis must have zero unwaived findings;
 only newly demonstrated, documented, file-scoped suppressions may be added.
+
+Land the Principle 8 promotions in this phase, from the Phase-0 list: the shared
+line-coverage gate over `src/bypass_pure.c` (with its own floor, distinct from the
+parent's oracle floor) and the cross-chip gpsim "Known gaps" documentation. Both
+are folds that *add* parent coverage, so they belong with the rest of the
+shared-asset work rather than in the PIC10F320 lanes — and the coverage gate must
+be wired before the vendored core is deleted, or the only thing measuring the real
+core disappears between two green commits.
 
 **Phase 4 — Build and target validation.** Add hardened three-variant XC8
 rules, fake-XC8 regressions, generic CONFIG verification, CLI gpsim, and
@@ -880,6 +1146,24 @@ the assurance comparison rather than restating it.
   *producer* of the checksum manifest has the same hole as the verifier. Fixing
   only the verifier leaves the generating side free to emit an incomplete set
   that the verifier then dutifully confirms.
+
+  **The delivery mechanism already exists** *(second 2026-07-26 pass)* — do not
+  invent a new one. Both Makefiles implement `print-%`, and
+  `scripts/make-release.sh:155` already reads Makefile truth through
+  `mkv() { make -s print-"$1"; }` for the variant list, device names and build
+  directories. So the canonical set is a new Makefile variable consumed by
+  `make -s print-<VAR>` in `make-release.sh`,
+  `scripts/verify-release-images.sh`, and `test/test_release_images.sh` alike.
+  Name it under the §5.6 prefix rule, and remember that adding it to the
+  `print-`-consumed surface makes it an interface: the negative test of §6 must
+  assert the *verifier* fails when the variable and the directory disagree, not
+  merely that the variable exists.
+- **Image basenames carry three conventions** unless §5.3's migration option is
+  taken *(second 2026-07-26 pass)*. Whichever way that decision goes, the
+  canonical set is where it becomes concrete, and `scripts/make-release.sh`'s
+  image→MCU classification must recognize the `bypass_mcu_*` prefix explicitly —
+  the "never fall through to generic AVR metadata" requirement below is exactly
+  this, and a prefix the classifier has never seen is the likeliest way to trip it.
 - **Release provenance.** `scripts/release-provenance.sh` and its
   `test-release-provenance` gate are parent-only, but **corrected 2026-07-26**:
   they are target-agnostic — a HEAD-SHA comparison plus a dirty-worktree
@@ -977,9 +1261,28 @@ the assurance comparison rather than restating it.
       `test_release_images.sh`, `test_soak_timing.sh`, `test_target_matrix.sh`,
       `test_lockstep_progress.sh`) has a recorded FOLD-or-FORK disposition, and
       no fold silently added a tool dependency to the default `test` aggregate.
+- [ ] Every colliding Makefile **variable** has a recorded disposition (§5.6):
+      chip-specific names carry the prefix chosen alongside §5.1's target prefix,
+      the shared-tool allowlist is explicit, no chip inherits the other's
+      `PIC_FLASH_WORDS` / `FW_BASE` / `COVERAGE_MIN` / soak durations, and every
+      `make print-<VAR>` consumer in `scripts/` and `.github/workflows/` was
+      updated with the rename.
+- [ ] No PIC10F320 lane writes into, or `rm -rf`s, a shared artifact directory
+      (§5.7). `coverage/` belongs to the parent lanes; `pic320-coverage-clean` and
+      `pic320-clean` touch only PIC10F320 paths; `/.make.lock` remains a single
+      shared inode.
+- [ ] The release-image naming decision of §5.3 is recorded — keep the child
+      basenames and document the three-convention asymmetry, or migrate at
+      `v0.10.0` — and `scripts/make-release.sh`'s image→MCU classifier recognizes
+      whichever prefixes survive.
 - [ ] Exactly one `src/bypass_pure.c`, formal property set,
       `test/model_step.h`, `misra.json`, and `misra_rules.txt` remains; no
       vendored model copy survives.
+- [ ] Principle 8 was applied per child-only asset, and the two known cases
+      landed as *promotions*, not 320 sections: a shared line-coverage gate over
+      `src/bypass_pure.c` with its own floor (the child's 95% over the real core,
+      distinct from the parent's 90% over the independent oracle), and the
+      cross-chip gpsim "Known gaps" documentation covering both PIC chips.
 - [ ] Shared host/formal tests retain both independent-oracle and direct-core
       assurance where justified, include the concrete corrupt-state check, and
       the KLEE target links and executes the real pure core.
@@ -994,6 +1297,14 @@ the assurance comparison rather than restating it.
       identical to the child's `release/v0.9.5/*.hex` (§6.13), proven *before*
       any §6.11 firmware edit lands; if that edit landed, the rebaselined hashes
       are recorded in its own separate commit.
+- [ ] §6.13's gate has a recorded **lifetime**: either retired after Phase 4 with
+      the compared hashes preserved in the phase commits and
+      `docs/pic10f320_validation.md`, or kept as a standing expected-image-hash
+      regression that survives Phase 7's deletion of the imported baseline.
+- [ ] The moved firmware's self-referential comments are swept in one reviewed,
+      comment-only commit (§4: `:6-8` header note plus `:68`, `:74`, `:321`,
+      `:640`, `:657`), separately from §6.11's rebaselining edit, and the images
+      are confirmed byte-identical across it.
 - [ ] Exactly three supported PIC10F320 variants build into
       `build_pic10f320/`, pass structural IHEX checks, fit the 256-word budget,
       and contain exact emitted CONFIG word `0x389E`.
@@ -1033,6 +1344,10 @@ the assurance comparison rather than restating it.
       README, design, feasibility, validation, toolchain, MISRA, TODO, release,
       and manifest content is technically complete, links to it, and does not
       imply architectural parity.
+- [ ] Every stale cross-project reference has a recorded disposition, including
+      the two the first audit missed (§4): `CHANGELOG.md:233-234`
+      preserve-as-history or annotated, and `TODO.md:279` re-framed from an
+      external-project caveat into a tracked cross-target task.
 - [ ] The child's manual-sync contract survives the merge as a promoted,
       `src/`-repointed cross-target checklist (§14.3), and the child README's
       `## Provenance` claims are rewritten rather than merged forward.
@@ -1122,9 +1437,17 @@ unarchiving as the normal rollback path.
 6. **Makefile mass.** Parent Makefile is already ~127 KB; PIC10F320
    targets grow it. Acceptable, but a future factor-into-includes pass
    may be worth its own task.
-7. **Two PIC chips, near-name harnesses.** `test_*_pic.cc` for 322 vs
-   320 differ enough that an edit to the wrong copy is easy. Directory
+7. **Two PIC chips, near-name harnesses — and near-name variables.** `test_*_pic.cc`
+   for 322 vs 320 differ enough that an edit to the wrong copy is easy. Directory
    separation + distinct `pic-`/`pic320-` target prefixes are the guard.
+
+   The same hazard applies to the Makefile variables of §5.6 and is permanently
+   worse there, because a mis-scoped variable produces no compile error and no
+   failing test — it produces a *passing* one. `PIC_FLASH_WORDS` is the sharp
+   example: the wrong value makes an over-budget 256-word image pass a 512-word
+   gate. Consistent prefixes and the explicit shared-tool allowlist are the
+   standing control, and any future PIC-shaped variable added without a prefix
+   re-opens the hazard.
 8. **Release-set drift.** A generic three-way equality check can validate three
    identically incomplete sets. The independent Makefile-owned canonical set
    and global-omission regression are permanent controls, not one-time merge
