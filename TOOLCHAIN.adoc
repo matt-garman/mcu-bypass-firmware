@@ -36,7 +36,9 @@ ONE XC8 + device-pack installation serves BOTH PIC parts. They are kept on
 separate Makefile variable pairs (`PIC_CC`/`PIC_DFP` for the 10F322,
 `PIC320_CC`/`PIC320_DFP` for the 10F320) so either chip can be re-pinned to a
 different compiler or pack without silently moving the other; by default the
-320's variables track the 322's.
+320's variables track the 322's. The release manifest probes and records both
+selected compiler paths and versions independently, even when they resolve to
+the same installation.
 
 The PIC10F322 port (`make pic`, `make pic-test`,
 `make pic-test-target-variants`) is a SEPARATE, optional toolchain, entirely

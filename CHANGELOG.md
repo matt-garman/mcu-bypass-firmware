@@ -67,6 +67,9 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- Release provenance now probes both selected XC8 compilers fail-closed and
+  records target-qualified compiler paths and versions instead of attributing
+  both PIC image families to `PIC_CC`.
 - PIC host and real-target "all variants" aggregates now reject proper subsets
   of the supported matrix instead of running one variant and reporting that all
   variants passed.

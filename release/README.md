@@ -169,9 +169,10 @@ the same set with byte-identical contents **and** that the set is the canonical
 `RELEASE_IMAGES` one — the fourth comparison is what makes the other three mean
 "complete" rather than merely "consistent".
 
-Byte-exact reproduction requires the *same* `avr-gcc` **and**
-`binutils-avr` versions recorded in the manifest; a different toolchain may
-produce functionally identical but not byte-identical images.
+Byte-exact reproduction requires the same `avr-gcc` and `binutils-avr` versions,
+plus the target-qualified XC8 compiler and DFP recorded for each PIC family in
+the manifest. A different toolchain may produce functionally identical but not
+byte-identical images.
 
 Note that the canonical set describes **the release you checked out**. Verify an
 older release from its own tag, as the block above does — running the current

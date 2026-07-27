@@ -2023,7 +2023,7 @@ test-pic-build:
 test-release-images:
 	./test/test_release_images.sh
 
-# Isolated Git-repository proof that long release runs recheck source identity.
+# Isolated proof of final source identity and per-PIC compiler attribution.
 test-release-provenance:
 	./test/test_release_provenance.sh
 
@@ -3918,7 +3918,7 @@ help:
 	@echo "  test-klee-build  linked harness/pure-core KLEE bitcode regression"
 	@echo "  test-pic-build  PIC image-generation and Intel-HEX validation checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
-	@echo "  test-release-provenance  final release source HEAD/cleanliness checks"
+	@echo "  test-release-provenance  release source/compiler provenance checks"
 	@echo "  test-build-serialization  worktree Make/release lock regression"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
 	@echo "  test-lockstep-progress  both PIC exact-pin/stall-propagation checks"
