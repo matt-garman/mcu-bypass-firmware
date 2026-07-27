@@ -2256,7 +2256,7 @@ more reconciliation than existed:
 | Asset | Disposition | Actual divergence |
 | --- | --- | --- |
 | `power_on_pressed.stc` | FOLD | executable stimulus byte-identical |
-| `run_gpsim*.sh` | FOLD | default `PROC` only — already parameterized on `PIC_GPSIM_PROC` |
+| `run_gpsim*.sh` | FOLD | default `PROC` only; the shared toggle wrapper is parameterized on `PIC_GPSIM_PROC` and `PIC_GPSIM_STC` so the forked cadence stimulus remains active |
 | `test_soak_pic.cc` | FOLD | parent ahead (`SOAK_LIVENESS_DUE`), as §4 predicted |
 | `test_config_pic.c` | PARAMETERIZE | **one printf label.** Address, layout, mask and expected word were already identical, so `PIC_DEVICE_NAME` is the whole change |
 | `test_{fault,io,lockstep}_pic.cc`, `footswitch_toggle.stc` | FORK | genuinely chip-specific → `test/pic10f320/gpsim/` |
@@ -2328,16 +2328,17 @@ per concern now covers both chips:
 | --- | --- | --- |
 | `test_pic_build.sh` | `PB_*` knobs (target, build dir, image naming, budget, matrix) | 28 checks × 2 chips |
 | `test_target_matrix.sh` | `TM_*` knobs (target, variants variable, supported set) | 5 checks × 2 chips |
-| `test_gpsim_wrappers.sh` | *no folding needed* — see below | 28 checks (was 25) |
+| `test_gpsim_wrappers.sh` | *no folding needed* — see below | 29 checks (was 25) |
 
 `test_gpsim_wrappers.sh` is the interesting one: it is already chip-agnostic
-(it unsets `PIC_GPSIM_PROC` and drives the wrappers through a fake gpsim), and
+(it unsets the PIC overrides and drives the wrappers through a fake gpsim), and
 because the PIC10F320 lane reuses those exact wrapper files rather than forking
 them, every existing check already covered both chips. What was *not* covered
-is the override mechanism that makes the sharing work, so it gains a check that
-the wrapper hands gpsim the right `-p` processor — recorded **behaviourally**
-from gpsim's argv, after a first attempt using a source `grep` proved useless
-(a substring match for `PIC_GPSIM_PROC` still matches `PIC_GPSIM_PROC_RENAMED`).
+is the override mechanism that makes the sharing work, so it checks that the
+wrapper hands gpsim both the right `-p` processor and the right `-c` stimulus —
+recorded **behaviourally** from gpsim's argv, after a first attempt using a source
+`grep` proved useless (a substring match for `PIC_GPSIM_PROC` still matches
+`PIC_GPSIM_PROC_RENAMED`).
 
 Supporting these folds, `pic320-test-target-variants` was rewritten to mirror
 the parent's Make-function guard exactly — empty, duplicate **and unsupported**

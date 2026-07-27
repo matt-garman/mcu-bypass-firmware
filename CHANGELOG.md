@@ -67,6 +67,8 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- `pic320-test-gpsim` now runs the forked PIC10F320 toggle stimulus instead of
+  silently using the PIC10F322 cadence checkpoints through the shared wrapper.
 - PIC10F320 mutation sandboxes now include the folded gpsim wrappers and stimuli,
   and the tool probe baselines every distinct kill command. A missing harness can
   no longer make the TMR2IF cadence mutant falsely count as killed.

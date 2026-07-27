@@ -3326,6 +3326,7 @@ pic320-analyze-misra: $(PIC320_SRC) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRE
 #                                   -- genuinely chip-specific, in test/pic10f320/gpsim/
 PIC320_GPSIM_PROC ?= p10f320
 PIC320_GPSIM_DIR   = test/pic10f320/gpsim
+PIC320_GPSIM_TOGGLE_STC := $(PIC320_GPSIM_DIR)/footswitch_toggle.stc
 
 # Reuse the parent's C++ toolchain settings; these are environment, not chip.
 PIC320_SOAK_CXX       ?= $(PIC_SOAK_CXX)
@@ -3430,9 +3431,11 @@ pic320-test-config: pic320-variants
 
 # CLI gpsim: drive the footswitch, assert PORTA/LATA transitions. Reuses the
 # parent's hardened wrappers (timeout + nonzero status are never discarded)
-# with only the processor overridden.
+# with the processor and chip-specific toggle cadence stimulus overridden. The
+# power-on-pressed stimulus remains the byte-identical shared PIC file.
 pic320-test-gpsim: pic320
 	@PIC_GPSIM_PROC=$(PIC320_GPSIM_PROC) \
+		PIC_GPSIM_STC="$(CURDIR)/$(PIC320_GPSIM_TOGGLE_STC)" \
 		test/pic/run_gpsim_test.sh $(PIC320_HEX) \
 		$(call pic320_engaged_lata_of,$(PIC320_VARIANT)) \
 		$(call pic320_bypass_lata_of,$(PIC320_VARIANT))

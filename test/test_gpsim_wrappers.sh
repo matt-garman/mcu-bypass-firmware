@@ -7,8 +7,8 @@ trap 'rm -rf "$work"' EXIT
 tools="$work/tools"
 hex="$work/firmware.hex"
 checks=0
-unset FAKE_GPSIM_MODE FAKE_GPSIM_EXIT FAKE_GPSIM_MARKER FAKE_TIMEOUT_MARKER \
-	GPSIM GPSIM_TIMEOUT_SECONDS PIC_GPSIM_PROC
+unset FAKE_GPSIM_MODE FAKE_GPSIM_EXIT FAKE_GPSIM_MARKER FAKE_GPSIM_STC_LOG \
+	FAKE_TIMEOUT_MARKER GPSIM GPSIM_TIMEOUT_SECONDS PIC_GPSIM_PROC PIC_GPSIM_STC
 mkdir -p "$tools"
 printf ':00000001FF\n' > "$hex"
 REAL_TIMEOUT=$(command -v timeout)
@@ -50,6 +50,7 @@ case "$script" in
 		exit 64
 		;;
 esac
+[ -z "${FAKE_GPSIM_STC_LOG:-}" ] || printf '%s\n' "$script" >> "$FAKE_GPSIM_STC_LOG"
 [ -z "${FAKE_GPSIM_MARKER:-}" ] || : > "$FAKE_GPSIM_MARKER"
 printf 'FAKE_GPSIM_SNAPSHOTS_COMPLETE\n'
 case "${FAKE_GPSIM_MODE:-pass}" in
@@ -154,9 +155,9 @@ checks=$((checks + 1))
 # Same for the PIC10F320 lane's public target. The wrappers themselves are
 # SHARED -- the PIC10F320 merge folded onto these exact scripts rather than
 # forking them (§4), so every check above already covers both chips. What is NOT
-# otherwise covered is the mechanism that makes sharing possible: pic320-test-gpsim
-# must reach the wrappers with PIC_GPSIM_PROC overridden to the 320, and must
-# still validate its timeout before the optional-tool skip.
+# otherwise covered is the mechanism that makes sharing possible:
+# pic320-test-gpsim must override both PIC_GPSIM_PROC and the toggle stimulus,
+# and must still validate its timeout before the optional-tool skip.
 if output=$(
 	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL
 	_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" "${MAKE_CMD[@]}" --no-print-directory \
@@ -201,5 +202,34 @@ for probe_proc in p10f320 p10f322; do
 			"$probe_proc" "$(tr '\n' ' ' < "$proc_log")" >&2; exit 1; }
 	checks=$((checks + 1))
 done
+
+# Exercise the PUBLIC PIC10F320 target and record both scripts handed to gpsim.
+# The toggle stimulus is chip-specific because its cadence checkpoint differs;
+# power-on-pressed is byte-identical and remains shared under test/pic/.
+pic320_build="$work/build_pic10f320"
+mkdir -p "$pic320_build"
+: > "$pic320_build/bypass_mcu_tq2-relay_pic10f320.hex"
+stc_log="$work/pic320.stc.log"
+: > "$stc_log"
+if ! output=$(
+	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL
+	FAKE_GPSIM_STC_LOG="$stc_log" \
+	_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" "${MAKE_CMD[@]}" --no-print-directory \
+		-C "$ROOT" --old-file=pic320 pic320-test-gpsim STRICT_TOOLS= \
+		PIC320_VARIANT=tq2-relay PIC320_BUILD_DIR="$pic320_build" \
+		GPSIM="$tools/gpsim" GPSIM_TIMEOUT_SECONDS=2 2>&1
+); then
+	printf 'FAIL: pic320-test-gpsim rejected the fake-gpsim routing probe: %s\n' "$output" >&2
+	exit 1
+fi
+mapfile -t routed_stc < "$stc_log"
+if [ "${#routed_stc[@]}" -ne 2 ] \
+		|| [ "${routed_stc[0]:-}" != "$ROOT/test/pic10f320/gpsim/footswitch_toggle.stc" ] \
+		|| [ "${routed_stc[1]:-}" != "test/pic/power_on_pressed.stc" ]; then
+	printf 'FAIL: pic320-test-gpsim routed the wrong stimuli: %s\n' \
+		"$(tr '\n' ' ' < "$stc_log")" >&2
+	exit 1
+fi
+checks=$((checks + 1))
 
 printf 'gpsim wrapper validation: %d checks, 0 failures\n' "$checks"
