@@ -9,14 +9,16 @@ begins once these designs are validated on real hardware.** Everything shipped
 so far is validated by simulation, formal proof and static analysis — thorough,
 and not the same claim as "it has run on the part". Until that changes, new
 work lands as `0.9.x` however large it is; the merge of a whole additional MCU
-target as `0.9.6` rather than `0.10.0` is that rule applied, not an oversight.
+target planned for `0.9.6` rather than `0.10.0` is that rule applied, not an
+oversight.
 
 Per-release provenance (source commit, pinned toolchain, image hashes, flash
 usage, and validation evidence) lives in `release/<version>/MANIFEST.md`; this
 file is the human-readable summary of *what changed*.
 
 > **On the PIC10F320's version history.** The PIC10F320 target was developed in a
-> separate repository and merged into this one (see `0.9.6` below). That
+> separate repository and merged into this one (see **Unreleased** below, planned
+> for `0.9.6`). That
 > project ran its own `v0.9.0`–`v0.9.5` series with **different content and
 > different dates** from the identically numbered releases in this file — its
 > `0.9.5` is dated 2026-07-10, this project's 2026-07-18. Those entries are
@@ -27,10 +29,10 @@ file is the human-readable summary of *what changed*.
 > unified release onward there is one timeline, with PIC10F320 changes recorded
 > as a sub-lane inside each entry.
 
-## [0.9.6] - 2026-07-27
+## [Unreleased]
 
 ### Added
-- **PIC10F320 as a release-supported target** — the fifth part, and the first
+- **PIC10F320 integrated as the planned fifth release target** — the first
   whose firmware does not compile the verified core but hand-inlines it, because
   256 words of flash cannot hold the shared-core architecture. Merged from a
   separate repository with its full history preserved. See
@@ -49,8 +51,9 @@ file is the human-readable summary of *what changed*.
   Previously the committed directory, the `SHA256SUMS` entries and the fresh
   build were all derived by globbing, so three "independent" checks agreed
   perfectly on a release with an entire MCU missing. They no longer can.
-- Three PIC10F320 release soak combinations at full duration, and PIC10F320
-  images in every release, uploaded as their own CI artifact.
+- Three PIC10F320 full-duration soak combinations are required by the release
+  pipeline, which will add PIC10F320 images and their own CI artifact beginning
+  with the first successfully qualified unified release.
 - `make pic320-*` targets, `make help` entries for them, and a
   `docs/pic10f320_special_case.md` linked from the README, the design
   documentation, the release documentation and the generated release manifest.
@@ -388,7 +391,7 @@ file is the human-readable summary of *what changed*.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[0.9.6]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.5...v0.9.6
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.5...HEAD
 [0.9.5]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.2...v0.9.3

@@ -6,6 +6,10 @@ requirements.txt: a human-readable record of what the project was
 validated against, so a new developer (or CI system) can reproduce
 the exact environment.
 
+This is a requirements and historical-environment record, not proof that every
+gate ran at the current tip. PIC10F320 current qualification status is recorded
+in `docs/pic10f320_validation.md`.
+
 Classic AVR firmware targets rebuild whenever they are requested, ensuring the
 current compiler, flags, and source tree are always consumed.  If you update a
 tool, re-run `make clean && make test` before relying on its output.

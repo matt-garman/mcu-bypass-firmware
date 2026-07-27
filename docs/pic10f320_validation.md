@@ -12,6 +12,16 @@ below outlive it, and one of them (the byte-identity proof) came from a
 deliberately one-shot gate whose baseline was deleted, so if it is not written
 down here it is not written down anywhere durable.
 
+**Current qualification status (2026-07-27): pending.** The last complete
+merged-tree toolchain run was recorded at `0536615`, before this repair branch's
+test/release hardening. The branch audit proved one reported mutation kill was
+caused by a missing sandbox harness, invalidating the run's 74/74 tally. The
+corrected host and fake-tool regressions pass, but this host lacks XC8,
+gpsim/libgpsim, and the other release tools. A fresh fail-closed full-tool run,
+including 74/74 mutation testing and release rehearsal, is required before the
+first unified release. Numeric results below are historical evidence at their
+recorded merge-time tips, not a current-tip release attestation.
+
 ---
 
 ## 1. Provenance: the firmware is the reviewed source, moved verbatim
@@ -31,14 +41,15 @@ The import commit is `a15d7b6`, importing child HEAD
 the moved file was confirmed byte-identical to the child original — a checked
 fact, not a review claim.
 
-Both release lines — that project's `v0.9.0`–`v0.9.5` and this one's — are signed
-with the same key, `6184219C6670945D7174F2B0149F042FCC3D3AEC`, so verifying a
-pre-merge PIC10F320 image and verifying a current one trust the same signature.
+Both historical release lines are signed with the same key,
+`6184219C6670945D7174F2B0149F042FCC3D3AEC`; the planned unified release uses that
+same signing identity, so there is no intended key transition.
 The historical PIC10F320 binaries themselves were deliberately not copied into
 this repository (their version numbers collide with this project's own line, and
 the older ones contain retired `tmux4053-*` images); they remain downloadable
-from the predecessor repository's release pages, and prebuilt PIC10F320 images
-ship here from `v0.9.6` onward.
+from the predecessor repository's release pages. Prebuilt images are planned to
+start with the first successfully qualified unified release (`v0.9.6` is the
+current candidate); no such release exists yet.
 
 **Querying that history.** The import is a merge commit, so ordinary
 `git log --follow` stops at it: by default `git log` does not descend into a
@@ -106,10 +117,11 @@ across a source change; the equivalence and lock-step lanes assert behaviour.
 Promoting this to a standing expected-image-hash regression is one file plus one
 `pic320` prerequisite if that trade is ever judged wrong.
 
-## 3. The verification lanes, and what each returned
+## 3. Historical verification results
 
-Measured on XC8 V3.10 + PIC10-12Fxxx DFP 1.9.189, gpsim 0.32.1, all three output
-variants unless noted.
+Measured during the merge on XC8 V3.10 + PIC10-12Fxxx DFP 1.9.189, gpsim 0.32.1,
+all three output variants unless noted. These results establish the implemented
+lanes and historical baseline; the status note above governs release readiness.
 
 | Lane | Result |
 | --- | --- |

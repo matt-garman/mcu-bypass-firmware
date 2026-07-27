@@ -3,11 +3,11 @@
 
 [![CI](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml)
 
-The release-supported firmware covers five parts across three microcontroller
+The source tree covers five intended release parts across three microcontroller
 families: the "AVR Classic" parts (ATtiny13a, ATtiny45, ATtiny85) and the
-Microchip PIC10F322 and PIC10F320. The development-only AVR-XT lane currently
-targets ATtiny202. A shared, hardware-independent debounce core and the output
-drivers are common to all targets; only a small per-MCU hardware shell differs.
+Microchip PIC10F322 and PIC10F320. Published releases through `v0.9.5` predate
+the PIC10F320 merge; its first unified release remains pending fresh full-tool
+qualification. The development-only AVR-XT lane currently targets ATtiny202.
 
 ## Targets
 
@@ -16,12 +16,12 @@ drivers are common to all targets; only a small per-MCU hardware shell differs.
 | ATtiny13a | release-supported | the primary/default target |
 | ATtiny45 / ATtiny85 | release-supported | tinyx5 family |
 | PIC10F322 | release-supported | 512 words |
-| **PIC10F320** | release-supported | **the constrained exception: 256 words, so the verified core is hand-inlined rather than compiled in — see [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md)** |
+| **PIC10F320** | integrated release candidate | **first unified release pending; constrained exception: 256 words, so the verified core is hand-inlined rather than compiled in — see [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md)** |
 | ATtiny202 (AVR-XT) | development-only | built and exercised in normal CI; **not** in prebuilt releases |
 
-Every release-supported target except the PIC10F320 compiles the verified core
-(`src/bypass_pure.c`) directly into its shipping image. The PIC10F320 cannot —
-its flash is half the PIC10F322's — so it carries an inlining seam that
+Every established release target compiles the verified core (`src/bypass_pure.c`)
+directly into its shipping image. The integrated PIC10F320 candidate cannot — its
+flash is half the PIC10F322's — so it carries an inlining seam that
 equivalence, real-HEX lock-step and fault injection against that same core
 mitigate but do not eliminate. Prefer another part when the choice is yours;
 the caveat document explains the trade in full, and

@@ -7,6 +7,11 @@ documentation marks them as superseded. Each release lives in its own
 `vX.Y.Z/` subdirectory and is also published as a
 [GitHub Release](../../releases).
 
+> **Current availability:** committed releases stop at `v0.9.5` and contain no
+> PIC10F320 image. The PIC10F320 is integrated in the source tree, but its first
+> unified prebuilt release remains pending fresh full-tool qualification and the
+> release run.
+
 ## Safety warning: v0.9.0-v0.9.2 TMUX images
 
 The `bypass_cd4053_tmux*.hex` and `bypass_mute_tmux*.hex` images in releases
@@ -22,9 +27,10 @@ image for the target MCU, without `_tmux` in the filename. Those unified images
 support both CD4053 and TMUX4053 boards with fail-safe BYPASS polarity. See the
 [`v0.9.3` correction](../CHANGELOG.md#093---2026-07-11).
 
-The release product set covers AVR Classic (ATtiny13a/45/85), PIC10F322 and
-PIC10F320. ATtiny202 is a development-only target: its normal CI artifacts are
-not ready-to-flash release assets and are intentionally absent here.
+The current Makefile's product set for the pending unified release covers AVR
+Classic (ATtiny13a/45/85), PIC10F322 and PIC10F320. ATtiny202 is a
+development-only target: its normal CI artifacts are not ready-to-flash release
+assets and are intentionally absent here.
 
 That set is not a description of whatever a build happened to produce — it is
 declared once in the Makefile as `RELEASE_IMAGES` and enforced. The verifier
@@ -41,18 +47,17 @@ The same philosophy that backs the source — an extensive, multi-engine test an
 validation suite — backs these binaries, through two mechanisms:
 
 1. **Provenance.** Every release carries a `MANIFEST.md` recording the exact
-   source commit, the pinned toolchain versions, the per-image fuse bytes /
-   CONFIG word, and the validation evidence: `make test-long` (the exhaustive
-   AVR suite + mutation testing), `make pic-test` (PIC CONFIG-word + static
-   analysis + gpsim functional), `make pic-test-target-variants` (fail-closed
-   PIC libgpsim fault, lock-step, and target-I/O validation), the same two gates
-   again for the PIC10F320 (`make pic320-test`, which additionally covers that
-   target's firmware-to-core equivalence, actuation, host fault injection and
-   exact firmware line coverage, and `make pic320-test-target-variants`), and a
-   **24-hour soak of every release soak combination** (logs under `evidence/`). Because
-   those gates are long-running, release orchestration rechecks both the recorded
-   source `HEAD` and worktree cleanliness immediately before staging artifacts.
-   Only explicitly non-publishable dry runs may proceed from a dirty tree.
+   source commit, pinned toolchain versions, per-image fuse bytes / CONFIG word,
+   and its validation evidence. The current unified pipeline requires
+   `make test-long`, both PIC10F322 gates (`make pic-test` and
+   `make pic-test-target-variants`), both PIC10F320 gates (`make pic320-test` and
+   `make pic320-test-target-variants`), and a **24-hour soak of every release
+   soak combination**. Those PIC10F320 requirements begin with its pending first
+   unified release; historical manifests describe the smaller target set they
+   actually shipped. Because the gates are long-running, release orchestration
+   rechecks both the recorded source `HEAD` and worktree cleanliness immediately
+   before staging artifacts. Only explicitly non-publishable dry runs may proceed
+   from a dirty tree.
 
 2. **Reproducibility.** The Intel-HEX images are byte-deterministic for a fixed
    toolchain — `objcopy` ihex output contains only the program's code/data

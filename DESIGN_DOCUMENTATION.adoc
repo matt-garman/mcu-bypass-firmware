@@ -766,14 +766,16 @@ measured, not assumed: the modular firmware overshoots by roughly 100 words
 Its firmware, `src/bypass_mcu_pic10f320.c`, therefore reuses *neither* the core
 nor the output drivers as linked code. It is a single self-contained file with
 the integrator, the state machine, the power-on initialisation and the three
-output stages hand-inlined into `main()` and `#if defined(OUTPUT_*)` blocks. So
-the count is five release-supported targets implemented by four shells plus one
-inlined implementation.
+output stages hand-inlined into `main()` and `#if defined(OUTPUT_*)` blocks. The
+source tree therefore has five intended release targets implemented by four
+shells plus one inlined implementation; the PIC10F320's first unified release is
+still pending qualification.
 
 That trades the compile-the-verified-core property for a behavioural
 equivalence argument against the same core — host equivalence tick-for-tick,
 real-HEX lock-step in gpsim, host and target fault injection, and an exact-line
-firmware coverage gate. It is a supported, release-gated target.
+firmware coverage gate. It is integrated and wired into the release gates, but
+is not present in a published unified release yet.
 **`docs/pic10f320_special_case.md` is the single authoritative statement of what
 that difference does and does not buy**; this section deliberately does not
 restate the assurance argument.

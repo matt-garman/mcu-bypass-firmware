@@ -10,6 +10,16 @@ phases, each of which leaves the tree green. Firmware source edits are
 the user's to make; the phases below call out which steps touch
 firmware vs. test/Makefile/docs.
 
+**Current status / erratum (2026-07-27).** Integration and release wiring are
+implemented, but the first unified release has **not** been cut. The most recent
+complete toolchain run, recorded at `0536615`, is historical: this branch's audit
+proved one of its reported 74 mutation kills came from a missing sandbox harness.
+The corrected topology therefore requires a fresh fail-closed 74/74 run and
+release rehearsal before `v0.9.6`. Later uses of “shipped”, “all killed”, or
+completed qualification in this working plan describe the phase checkpoint at
+its cited tip and are superseded by this status and
+`docs/pic10f320_validation.md`.
+
 **Decision.** Consolidation is the right direction. The repositories have
 the same maintainer, product domain, toolchain family, behaviour contract,
 and output stages; the child intentionally derives from the parent and
@@ -1255,9 +1265,9 @@ of the architectural/assurance caveat**, seeded from the child's existing
   PIC10F320 retains an inlining seam. Equivalence and real-HEX lockstep against
   that same core, host actuation-sequence tests, and host/target fault injection
   mitigate the seam but do not make the architecture identical.
-- PIC10F320 is supported and release-gated, but remains the constrained
-  exception rather than evidence that the reference architecture fits 256
-  words.
+- PIC10F320 is integrated and release-gated, but its first unified release is
+  pending; it remains the constrained exception rather than evidence that the
+  reference architecture fits 256 words.
 
 Everywhere else links here instead of re-explaining:
 - `README.md` — a short "Targets" table row for PIC10F320 with a
@@ -1480,15 +1490,16 @@ Several items below say "has a recorded decision". Those decisions are recorded 
 decision. Where §15 accepted a naming asymmetry, the accompanying `TODO.md` item
 is part of the record, not a substitute for it.
 
-**Ticked 2026-07-27 against tip `6c475ba`**, from an independent re-run rather
-than from the phase records: `make test`, `make pic320-test` and
+**Historical checkpoint, ticked 2026-07-27 against tip `6c475ba`**, from an
+independent re-run rather than from the phase records: `make test`,
+`make pic320-test` and
 `make pic-test`/`-target-variants` under `STRICT_TOOLS=1`,
 `make test-mutation MUTATION_ALLOW_SKIP=0` (74 killed / 0 survived / 0 errored /
 0 skipped), a full `make-release.sh --dry-run` at this tip, and a rebuild of all
-15 release images. Re-checked 2026-07-27 after §6.15 was decided (§15.13) and the
-first unified tag was renumbered to `v0.9.6` (§10). **32 of 36 boxes are closed;
-the four that are not are marked OPEN with what remains** — do not read an
-unticked box as an oversight, each says why. Where a box's own text names a pre-relocation path (`test/fault/…`,
+15 release images. A later audit invalidated the mutation tally as current
+evidence; §5 of the validation record gives the failure mechanism. Treat the
+checkboxes below as an implementation ledger, not present release qualification.
+Where a box's own text names a pre-relocation path (`test/fault/…`,
 `test/pic/test_fault_pic.cc`), the work landed at the post-Phase-2 location
 (`test/pic10f320/…`); the box text is left as written so the plan still reads as
 the document it was when the requirement was set.
@@ -1667,14 +1678,15 @@ the document it was when the requirement was set.
       variant §1 says must never reappear. `override PIC320_VARIANTS_SUPPORTED`
       stops a command-line matrix whitelisting itself. Exact counts enforced:
       `EXPECTED_CHECKS 22`, lock-step 3005, uniform across variants.)*
-- [x] `pic320-test-host`, selected/all-variant development tests,
+- [ ] **OPEN (fresh qualification).** `pic320-test-host`, selected/all-variant development tests,
       `pic320-test-target-variants`, coverage, analysis, soak, build regression,
-      and mutation targets pass under the documented tool policy.
-      *(Re-run 2026-07-27 under `STRICT_TOOLS=1`: `pic320-test` EXIT=0,
+      and mutation targets must pass under the documented tool policy at the
+      corrected tip.
+      *(Historical run at `6c475ba`: `pic320-test` EXIT=0,
       `pic320-test-target-variants` EXIT=0 — fault 22/22/22, lock-step 3005×3,
       I/O 25/26/36 — and `test-mutation MUTATION_ALLOW_SKIP=0` at 74 killed / 0
-      survived / 0 errored / 0 skipped. The 322 lane was re-run alongside and is
-      unregressed.)*
+      survived / 0 errored / 0 skipped. The mutation tally was later invalidated;
+      rerun all real-tool lanes and the corrected mutation topology.)*
 - [x] Default `test` / `test-long` remain compatible with their documented
       tool-independent semantics. Any full-tool all-target aggregate is
       explicitly named and documented.
@@ -1702,15 +1714,15 @@ the document it was when the requirement was set.
       fails a regression test.
       *(`RELEASE_IMAGES` = 15 basenames, consumed by all three of the release
       script, the verifier and its regression through `make -s print-`.
-      `test_release_images.sh` 40 checks; the global-omission negative test was
+      `test_release_images.sh` 41 checks; the global-omission negative test was
       demonstrated in **both** directions on real staged release data, per
       §15.10.)*
 - [x] Local release creation and tag CI handle PIC10F320 build prerequisites,
       validation, evidence, image metadata/programmer commands, reproduction,
       checksums, caveat links, and publication without generic-AVR fallthrough.
-      *(Local: a full `--dry-run` at this tip, EXIT=0 — 15 images matched to the
-      canonical set, five gates, 12/12 soaks, verifier re-run against the staged
-      output. **Caveat worth carrying into the release run:** `release.yml` is
+      *(Historical local run: a full `--dry-run` at `6c475ba`, EXIT=0 — 15 images
+      matched to the canonical set, five gates, 12/12 soaks, verifier re-run
+      against the staged output. **Caveat worth carrying into the release run:** `release.yml` is
       written, parses, and asserts both device headers, but has never executed —
       no tag has been pushed, so the tag-CI half is implemented rather than
       exercised. The first `v0.9.6` push is its first run.)*
@@ -1731,12 +1743,10 @@ the document it was when the requirement was set.
       than both historical lines
       (preferably `v0.9.6`), and parent/child changelogs accurately classify
       all v0.9.x work before the unified entry.
-      *(Changelog half done: `## [0.9.6] - 2026-07-27` is cut, and the header
-      note explains why the child's colliding `v0.9.0`–`v0.9.5` entries are
-      deliberately not back-filled. `v0.9.6` is confirmed free on the remote and
-      exceeds both lines. What remains is cutting it — see the last box. Correct
-      the changelog date if the release lands on a different day; nothing enforces
-      it, because `make-release.sh` does not read the changelog.)*
+      *(The `Unreleased` section is prepared for `v0.9.6`, and the header note
+      explains why the child's colliding `v0.9.0`–`v0.9.5` entries are deliberately
+      not back-filled. Add the release date and comparison link only when the
+      qualification and release run succeed.)*
 - [x] ATtiny202's development-only/non-release status is explicit and
       implementation, canonical image set, soak claims, and documentation agree.
 - [x] `docs/pic10f320_special_case.md` is the sole assurance-caveat narrative;
@@ -2294,13 +2304,14 @@ top-level `coverage/` intact (§5.7 verified by sentinel file, not by inspection
   flag, so the merge narrows that waiver rather than importing it, and the 320 is
   now the stricter of the two PIC lanes.
 
-**Mutation topology (§6.6) — merged, 74 mutants, all killed.** The child's 42
-resolve to 36 PIC10F320 firmware mutants plus 6 model mutants, five of which
+**Mutation topology (§6.6) — merged; historical 74/74 result invalidated.** The
+child's 42 resolve to 36 PIC10F320 firmware mutants plus 6 model mutants, five of which
 duplicate entries already in the parent driver. The sixth does not: it is the
 oracle for `verify_corrupt_state_faults()`, the property Phase 3 migrated, and
 it is retargeted from the dead vendored copy to `src/bypass_pure.c` — verified
-killed before being relied on. Final tally, `MUTATION_ALLOW_SKIP=0`:
-**74 killed, 0 survived, 0 errored, 0 skipped.**
+killed before being relied on. The merge-time `MUTATION_ALLOW_SKIP=0` run
+reported **74 killed, 0 survived, 0 errored, 0 skipped**, but that tally is not
+current evidence for the reason below.
 
 Mutants are split by what they *need*, not by what they test: 27 host-lane ones
 require only a C compiler and ride with the core batch unskippable; 9 require
@@ -2313,13 +2324,15 @@ partial run cannot read as full PIC10F320 coverage.
 `copy_tree` needed fixing for this: its single-level `test/*/` loop could not
 reach `test/pic10f320/{equiv,actuation,fault,gpsim}/`, and it copied neither
 `.stc` scripts nor `.sh` helpers. A PIC10F320 mutant would have built against a
-sandbox missing its own harness and died for the wrong reason — an *error*
-rather than a kill, but an equally misleading green.
+sandbox missing its own harness and returned nonzero for the wrong reason. The
+driver scored that nonzero status as a *kill*, producing the misleading green
+that the corrected sandbox-copy and per-command baseline checks now prevent.
 
-**This also closes the last §15.5 evidence gap.** That section recorded the two
-retargeted mutants in `run_mutation_tests.sh` as *transferred* rather than
+**At that historical tip this also closed the last §15.5 evidence gap.** That
+section recorded the two retargeted mutants in `run_mutation_tests.sh` as *transferred* rather than
 reproduced, because nothing built from the import prefix. Both now ran in the
-merged tree and were killed. No §6.11 evidence remains un-reproduced here.
+merged tree and were killed. Those individual reproductions remain useful, but
+the aggregate mutation claim requires the fresh corrected run named above.
 
 **The four shared-name harness regressions (§4) — FOLD, not FORK.** One script
 per concern now covers both chips:
@@ -2738,8 +2751,9 @@ gap is closed — but the documentation still describes two projects.
 
 ### 15.11 Phase 7 — documentation and incoming-tree cleanup (COMPLETE except the firmware comment sweep and the prefix removal, both user actions)
 
-**Landed 2026-07-27.** Phases 5 and 6 made the PIC10F320 a real, gated, shipped
-target. Phase 7 makes the *documentation* describe one project instead of two.
+**Landed 2026-07-27.** Phases 5 and 6 made the PIC10F320 a real, gated,
+release-wired target. Phase 7 makes the *documentation* describe one project
+instead of two.
 
 **`docs/pic10f320_special_case.md` exists, and it is the only place the caveat is
 argued.** Seven sections: why 256 words forces the difference; the seam stated
@@ -2784,7 +2798,7 @@ claim rather than left implicit.
 
 | Document | Change |
 | --- | --- |
-| `README.md` | The "see the child project" NOTE is gone. A **Targets table** replaces it: five release-supported parts, PIC10F320 flagged as the constrained exception with the link, ATtiny202 marked development-only. `pic320-*` quickstart added. |
+| `README.md` | The "see the child project" NOTE is gone. A **Targets table** replaces it: four established release parts plus the integrated PIC10F320 candidate, flagged as the constrained exception with its first unified release pending; ATtiny202 remains development-only. `pic320-*` quickstart added. |
 | `DESIGN_DOCUMENTATION.adoc` | Went from **zero** PIC10F320 mentions to five. Fixed the direct contradiction at `:686-688` ("adding a fourth target … reusing the core and all three output drivers unchanged") — the count is now five targets, four shells plus one inlined implementation, with a subsection naming the exception. Added measured PIC10F320 resource use (220/241/244 of 256; 10 of 64 bytes RAM, all three variants) and corrected the now-false claim that the PIC10F322 is the most flash-constrained part. Added the pin-compatibility note and a new **PIC Power / Current Draw** section merged from the child (the 2 MHz-vs-16 MHz IDD table and *why* the polled loop never sleeps). |
 | `TOOLCHAIN.adoc` | One XC8 install, two variable pairs, and why they are separate; both device headers asserted; gpsim's native `p10f320`; both flash budgets; the `pic320-*` command list; `build_pic10f320/`. |
 | `MISRA_COMPLIANCE.md` | Per-target posture, both PIC shells in the analysis table, D-4 added, the child's "Notes on specific constructs" rehomed so the firmware's `MISRA_COMPLIANCE.md` citation resolves, maintenance step 1 lists all four analysis lanes and the `STRICT_TOOLS=1` requirement. |
@@ -2835,12 +2849,13 @@ Everything else in Phase 7 has landed. `make test` was green immediately before
 the prefix removal was handed over, so a failure after it is attributable to the
 removal alone.
 
-### 15.12 Phase 8 — unified release preparation (COMPLETE up to the release run, which is the user's)
+### 15.12 Phase 8 — unified release preparation (IMPLEMENTED; fresh qualification and release OPEN)
 
-**Prepared 2026-07-27.** Phase 8's deliverable is a released `v0.9.6` and an
-archived child repository. Both end in actions only the user can take — a
-24-hour soak run, `git tag -s`, and an operation on a different repository — so
-this record is what was *made ready*, what was *checked*, and what remains.
+**Prepared 2026-07-27, then reopened by post-merge audit.** Phase 8's deliverable
+is a released `v0.9.6` and an archived child repository. The release run, fresh
+full-tool qualification, signed tag, and operation on the child repository all
+remain open, so this records what was implemented, what evidence is historical,
+and what remains.
 
 **Post-removal state verified.** `git ls-files -- _incoming_pic10f320` returns
 zero paths, the directory is gone, the worktree is clean, and `v0.9.6` is free
@@ -2872,15 +2887,14 @@ reproduction fail**:
 ERROR: fresh build image set does not exactly match the canonical release product set
 ```
 
-Fixed with a subshell, and the cleanup widened to XC8's `.elf/.cmf/.s/.sdb/.sym/
-.hxl` companions, which the old `.hex`-only form left behind even when it ran.
-Verified in both directions. Note the release *script* was never exposed — it
-`make clean`s first — so only a hand-run reproduction from a tag could have hit
-this. That is precisely the path a third party uses to check the project's central
-claim, which makes it worse rather than better. No regression was added: the
-verifier already catches the consequence class, the cause is a one-character
-recipe bug with the hazard now written beside it, and an XC8-dependent test for a
-recipe-local cleanup would be disproportionate. Recorded here instead.
+The initial fix used a subshell and widened cleanup to XC8's
+`.elf/.cmf/.s/.sdb/.sym/.hxl` companions, which the old `.hex`-only form left
+behind even when it ran. The post-merge audit then made the size probe fully
+fail-closed and added fake-XC8 regression coverage for success, compiler/image/
+summary failures, missing tools, and interruption, including proof that no probe
+or companion remains. The release *script* was never exposed because it runs
+`make clean` first, but hand-run reproduction from a tag now has a direct
+cause-level regression as well as the verifier's consequence-level check.
 
 **`clean-tests` extended.** It removed every other target's test binaries but not
 the PIC10F320's, because those live under the chip's build directory (§5.7)
@@ -2907,9 +2921,10 @@ bringing the PIC10F322 shell to parity with "the sibling child project", is
 preserved as written — it was true at v0.9.2 — with a dated annotation noting
 that project is no longer separate.
 
-**`CHANGELOG.md` cut to `## [0.9.6] - 2026-07-27`.** The date must be corrected
-if the release lands on a different day; nothing enforces it, because
-`make-release.sh` does not read the changelog.
+**`CHANGELOG.md` prepared under `## [Unreleased]` for candidate `v0.9.6`.** Add
+the actual date and tag comparison link only after fresh qualification and the
+release run succeed; `make-release.sh` deliberately does not rewrite the
+changelog.
 
 *(Phase 8 originally cut this entry as `## [0.10.0]`, on this plan's long-standing
 `v0.10.0` recommendation. **Renumbered to `v0.9.6` on 2026-07-27** — see §10 for
@@ -2930,10 +2945,12 @@ lines and reuses neither.)*
    archived until the unified release succeeds; until then it remains the
    operational fallback.
 
-A dry run of the full pipeline already passed end to end in Phase 6 (§15.10):
+A historical dry run of the full pipeline passed end to end at `6c475ba` in
+Phase 6 (§15.10):
 15 images matched to the canonical set, five validation gates, 12/12 soak combos,
-and the verifier re-run against the staged output. The only difference in the
-real run is soak duration.
+and the verifier re-run against the staged output. Post-merge hardening and the
+invalidated mutation tally mean this run must be repeated; soak duration is not
+the only remaining difference.
 
 ### 15.13 §6.15 — the child's non-git GitHub assets, decided 2026-07-27
 
