@@ -67,6 +67,9 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- The host lock-step progress regression now compiles and stalls both PIC
+  adapters. Dropping the byte-identical child script had accidentally retained
+  only the PIC10F322 source path and left PIC10F320 stall handling untested.
 - The shared fake-XC8 interruption regression now requires proof that SIGTERM
   reached each PIC build recipe; `pic320` exports its recipe PID so a missing
   variable can no longer masquerade as successful cleanup validation.

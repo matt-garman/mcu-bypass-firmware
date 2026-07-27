@@ -2127,7 +2127,7 @@ test-target-matrix:
 	TM_CHECK_SENTINELS=0 \
 		./test/test_target_matrix.sh
 
-# Compile the real lock-step driver against a fake core and inject progress stalls.
+# Compile both real PIC lock-step drivers against a fake core and inject stalls.
 test-lockstep-progress:
 	PIC_SOAK_CXX="$(PIC_SOAK_CXX)" ./test/test_lockstep_progress.sh
 
@@ -3910,7 +3910,7 @@ help:
 	@echo "  test-release-provenance  final release source HEAD/cleanliness checks"
 	@echo "  test-build-serialization  worktree Make/release lock regression"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
-	@echo "  test-lockstep-progress  lock-step simulator-stall propagation checks"
+	@echo "  test-lockstep-progress  both PIC lock-step simulator-stall propagation checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
