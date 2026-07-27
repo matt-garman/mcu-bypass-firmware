@@ -236,17 +236,19 @@ reassertion, mute-window shortening, and relay pulse shortening.
 **PIC10F320 mutants are split by what they NEED, not by what they test.** 27 of
 them are killed by the host lanes and require only a C compiler, so they ride
 with the unskippable core batch; 9 need XC8 + gpsim + libgpsim and sit behind
-their own tool probe, which first verifies that the *unmutated* tree genuinely
-passes. Without that split they would "survive" on any host lacking the PIC
-toolchain — a false pass, and the exact hazard the existing PIC probe was written
-to prevent. Skip accounting is wired through the same policy resolver, so a
-partial run cannot be mistaken for full PIC10F320 coverage.
+their own tool probe, which first verifies every distinct kill command against
+the *unmutated* tree. Without that split they would "survive" on any host lacking
+the PIC toolchain; without the per-command baselines, a broken gpsim or soak
+harness could make them die for an infrastructure reason and falsely count as
+killed. Skip accounting is wired through the same policy resolver, so a partial
+run cannot be mistaken for full PIC10F320 coverage.
 
 One further note on the driver, learned the hard way: its sandbox tree copy has
-to reach `test/pic10f320/{equiv,actuation,fault,gpsim}/` and to carry `.stc` and
-`.sh` files. A PIC10F320 mutant built against a sandbox missing its own harness
-dies for the wrong reason — an *error* rather than a kill, which is an equally
-misleading green.
+to reach `test/pic10f320/{equiv,actuation,fault,gpsim}/` and the folded `.sh` and
+`.stc` assets under `test/pic/`. The probe checks those shared helpers before it
+can enable the tool-dependent PIC10F320 mutants. The host-only
+`test-mutation-sandbox` regression exercises the same copy routine in `make test`,
+including the wrappers' executable mode.
 
 
 ## Known gaps (PIC — hardware-bench only)

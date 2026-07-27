@@ -67,6 +67,9 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- PIC10F320 mutation sandboxes now include the folded gpsim wrappers and stimuli,
+  and the tool probe baselines every distinct kill command. A missing harness can
+  no longer make the TMR2IF cadence mutant falsely count as killed.
 - The PIC10F320 real-HEX target aggregate now requires explicit fault-injection,
   lock-step, and target-I/O completion markers, so a skipped or incomplete lane
   cannot be reported as a successful CI/release gate.

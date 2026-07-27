@@ -450,7 +450,7 @@ FORCE:
 .PHONY: all all13 clean size readfuses fuses flash program help \
         test test-fast test-long stress \
         test-host test-sim test-sim-secondary \
-        test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation \
+        test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation test-mutation-sandbox \
         test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle \
         test-attiny202-build test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build \
         test-pic-build test-release-images test-release-provenance test-build-serialization \
@@ -1922,7 +1922,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check coverage-check-core
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check coverage-check-core
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1934,7 +1934,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check coverage-check-core
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check coverage-check-core
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -2085,6 +2085,11 @@ test-klee-build:
 
 _test-mutation-policy-probe:
 	@bash -c '. ./test/mutation_policy.sh; resolve_mutation_allow_skip'
+
+# Host-only proof that mutation sandboxes include every folded PIC helper used by
+# a kill target, preserving executable mode for the gpsim wrappers.
+test-mutation-sandbox:
+	MUTATION_SANDBOX_SELFTEST=1 ./test/run_mutation_tests.sh
 
 # Host-only proof that the authoritative PIC target aggregate rejects bad matrices.
 test-target-matrix:
@@ -3838,6 +3843,7 @@ help:
 	@echo "  test-sim-<v>[-t<n>]  single variant, e.g. test-sim-relay / test-sim-relay-t45"
 	@echo "  test-fault-inject  corrupt state, verify WDT recovery (all variants x tinyx5)"
 	@echo "  test-mutation   inject firmware faults, verify the suite kills them"
+	@echo "  test-mutation-sandbox  verify mutation copies include executable shared PIC helpers"
 	@echo "  test-attiny202-build  fail-closed AVR-XT image-generation checks"
 	@echo "  test-avr-build-rebuild  classic AVR stale/config/partial-output checks"
 	@echo "  test-gpsim-wrappers  fail-closed gpsim process-status checks"

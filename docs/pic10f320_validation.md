@@ -166,9 +166,14 @@ firmware is worse than a uniform documented omission. See
 
 ## 5. Mutation topology
 
-The suite is only as good as its ability to *fail*. Final tally under
-`MUTATION_ALLOW_SKIP=0`: **74 mutants, 74 killed, 0 survived, 0 errored,
-0 skipped.**
+The suite is only as good as its ability to *fail*. The merge-time run under
+`MUTATION_ALLOW_SKIP=0` reported **74 mutants, 74 killed, 0 survived, 0 errored,
+0 skipped**, but a post-merge audit invalidated one result: the TMR2IF mutant's
+sandbox omitted the shared gpsim wrapper, so infrastructure failure rather than
+the cadence assertion killed it. The driver now copies the folded `.sh`/`.stc`
+assets and baselines every distinct PIC10F320 kill command. A fresh full-tool
+74/74 run is required before release; until then the old tally is historical,
+not current evidence.
 
 Mutants are split by what they **need**, not by what they test: 27 require only a
 host C compiler and ride with the unskippable core batch; 9 require XC8 + gpsim +
@@ -182,10 +187,11 @@ misleading greens:
 - **A mutant that fails to compile also makes `make <target>` exit non-zero**, so
   it scores as "killed". Confirm any new firmware mutant builds before accepting
   its kill.
-- **A mutant built against a sandbox missing its own harness dies for the wrong
-  reason** — an *error*, not a kill. The driver's tree copy must reach
-  `test/pic10f320/{equiv,actuation,fault,gpsim}/` and carry `.stc` and `.sh`
-  files.
+- **A mutant built against a sandbox missing its harness dies for the wrong
+  reason.** The driver's tree copy must reach both
+  `test/pic10f320/{equiv,actuation,fault,gpsim}/` and the folded wrappers and
+  stimuli under `test/pic/`. The tool probe now checks those files before
+  authorizing any PIC10F320 tool-dependent mutant.
 
 ## 6. What is *not* validated here
 
