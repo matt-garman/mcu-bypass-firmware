@@ -234,27 +234,6 @@ analysis that the 64 ms SUT delay covers the LDO ramp (check the LP2950/AP7375
 datasheet startup time against 64 ms). Item (b) is a documentation task and pairs
 naturally with the Tier 2 datasheet-citation item.
 
-**PIC10F320 rebuild determinism.** Added 2026-07-27, from the PIC10F320 merge:
-`docs/pic10f320_merge_plan.md` §6.12 required a recorded decision for every
-parent-only gate, and this is one of two rows that closed with neither an
-implementation nor a "no, because" (§15.9 says so explicitly). The parent has
-`test-workload-rebuild` and `test-avr-build-rebuild`, which prove a rebuild after
-a workload/flag change actually re-runs rather than reusing a stale artifact.
-There is no PIC10F320 equivalent, and its build directory is the one place a
-stale binary is easiest to miss: every PIC10F320 host test binary lands in
-`build_pic10f320/` rather than beside its source, so `clean-tests` needed a
-dedicated arm to reach them at all (it has one now). Decide explicitly: add a
-`PB_*`-style parameterized rebuild probe covering the 320's XC8 and host lanes,
-or record why the existing `pic320` recipes — which rebuild unconditionally,
-having no intermediate object targets — make it unnecessary. The second answer
-may well be the right one; what is not acceptable is leaving it undecided, since
-"the recipes are phony today" is a property a future incremental-build
-optimisation would silently invalidate.
-
-Effort: ~1 h to record the decision with evidence, ~2–3 h if a probe is written.
-Impact: Low–Medium — closes a §6.12 row and removes a trap for anyone who later
-makes the PIC10F320 lanes incremental.
-
 **Standing expected-image-hash regression for PIC10F320.** The merge's
 byte-identity gate (`docs/pic10f320_merge_plan.md` §6.13, decision D4) was
 deliberately one-shot: it proved twice that the ported XC8 recipe emits the
@@ -658,7 +637,6 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Multi-press boundary cases | 2.5 | 3–4 h | Medium — tick-boundary edge cases |
 | Power-on-pressed simulation gap | 2.5 | 1–2 h | Low — simulator fidelity, not coverage |
 | Power-supply ramp-up analysis | 2.5 | 2–3 h | Medium — real-world robustness |
-| PIC10F320 rebuild determinism | 2.5 | 1–3 h | Low-Medium — open merge §6.12 row |
 | PIC10F320 expected-image-hash regression | 2.5 | 1 h | Medium — restores the only gate watching emitted bytes |
 | Hardware-validation procedure doc | 3 | 2–3 h | High — primary-part WDT gap |
 | HIL rig: behavioural + register introspection | 3 | 5–8 d | High — silicon-level model validation |

@@ -55,6 +55,14 @@ file is the human-readable summary of *what changed*.
   `pic320-test`.
   Its state and return stack preserve the 9-bit architectural PC; instruction
   fetch alone aliases through the low eight bits to 256 physical words.
+- The shared fake-tool PIC build regression now has a PIC10F320-only
+  rebuild-trigger lane. Exact output-specific compiler logs prove identical
+  `pic320` and host-test requests rebuild, and that changed/restored clock,
+  output-variant and host flags reach the current invocation. Canonical target
+  counts make activation fail closed; same-name target sentinels enforce
+  `.PHONY`, and exact fake-binary execution counts enforce each host run recipe.
+  This proves fresh triggering, not byte-for-byte XC8 reproducibility; the
+  standing expected-image hash regression remains an open follow-up.
 - A **canonical release product set** (`RELEASE_IMAGES` in the Makefile),
   enforced by the release script, the image verifier and its regression alike.
   Previously the committed directory, the `SHA256SUMS` entries and the fresh

@@ -1994,7 +1994,9 @@ test-avr-build-rebuild:
 test-gpsim-wrappers:
 	./test/test_gpsim_wrappers.sh
 
-# Isolated fake-XC8 proof of fail-closed PIC image generation.
+# Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
+# image/host rebuild triggering. The script enforces the canonical 28/68 counts,
+# so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
 	@# Same fake-XC8 regression against the PIC10F320 contract: its own
@@ -2020,6 +2022,7 @@ test-pic-build:
 	PB_MATRIX_REQUIRE_COMPLETE=1 PB_MATRIX_UNSUPPORTED='tmux4053-simple' \
 	PB_RETURN_STACK_REQUIRED=1 \
 	PB_SELECTOR_ROUTING=1 PB_SIZE_TARGET='pic320-size' \
+	PB_REBUILD_REQUIRED=1 \
 		./test/test_pic_build.sh
 
 # Exact-set and hash checks for the tag workflow's committed/listed/fresh images.
@@ -3982,7 +3985,7 @@ help:
 	@echo "  test-gpsim-wrappers  fail-closed gpsim process-status checks"
 	@echo "  test-ci-local-routing  local-CI skip-option command routing checks"
 	@echo "  test-klee-build  linked harness/pure-core KLEE bitcode regression"
-	@echo "  test-pic-build  PIC image-generation and Intel-HEX validation checks"
+	@echo "  test-pic-build  PIC image validation + PIC10F320 rebuild-trigger checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
 	@echo "  test-release-provenance  release source/compiler provenance checks"
 	@echo "  test-build-serialization  worktree Make/release lock regression"
