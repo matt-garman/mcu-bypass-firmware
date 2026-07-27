@@ -31,6 +31,7 @@ PB_MATRIX_VARIANTS_VAR=${PB_MATRIX_VARIANTS_VAR:-VARIANTS}
 PB_MATRIX_VARIANTS=${PB_MATRIX_VARIANTS:-cd4053 mute relay}
 PB_MATRIX_IMAGES=${PB_MATRIX_IMAGES:-bypass_cd4053_pic10f322.hex bypass_mute_pic10f322.hex bypass_relay_pic10f322.hex}
 PB_MATRIX_FAIL_IMAGE=${PB_MATRIX_FAIL_IMAGE:-bypass_relay_pic10f322.hex}
+PB_SELECTOR_ROUTING=${PB_SELECTOR_ROUTING:-0}
 hex="$repo/$PB_BUILD_DIR/${PB_FW_BASE}_${PB_VARIANT}_${PB_TAG}.hex"
 checks=0
 unset FAKE_XC8_MODE FAKE_XC8_FAIL_NAME MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES
@@ -252,5 +253,38 @@ for image in $PB_MATRIX_IMAGES; do
 		|| { printf 'FAIL: late variant failure left partial PIC image matrix\n' >&2; exit 1; }
 done
 checks=$((checks + 1))
+
+# PIC10F320's target/soak lanes have selectors separate from PIC320_VARIANT.
+# Each selector must control the image rebuilt by the pic320 prerequisite, even
+# when a caller supplies a conflicting PIC320_VARIANT that names a stale image.
+if [ "$PB_SELECTOR_ROUTING" -eq 1 ]; then
+	selected=tq2-relay
+	selected_hex="$repo/$PB_BUILD_DIR/${PB_FW_BASE}_${selected}_${PB_TAG}.hex"
+	selector_specs=(
+		"pic320-test-fault-target PIC320_FAULT_VARIANT"
+		"pic320-test-lockstep PIC320_LOCKSTEP_VARIANT"
+		"pic320-test-io PIC320_IO_VARIANT"
+		"pic320-test-soak PIC320_SOAK_VARIANT"
+	)
+	for spec in "${selector_specs[@]}"; do
+		read -r target selector <<<"$spec"
+		rm -f "$hex" "$selected_hex"
+		if ! make --no-print-directory -C "$repo" "$target" \
+				CC=true HOSTCC=true PIC320_CC="$tools/xc8" \
+				PIC320_BUILD_DIR="$PB_BUILD_DIR" PIC320_FW_BASE="$PB_FW_BASE" \
+				PIC320_TAG="$PB_TAG" PIC320_FLASH_WORDS="$PB_FLASH_WORDS" \
+				PIC320_VARIANT="$PB_VARIANT" "$selector=$selected" \
+				PIC320_SOAK_CXX="$tools/missing-cxx" STRICT_TOOLS= AWK=awk \
+				>/dev/null 2>&1; then
+			printf 'FAIL: %s did not skip cleanly after building its selected variant\n' \
+				"$target" >&2
+			exit 1
+		fi
+		[[ -s "$selected_hex" && ! -e "$hex" ]] \
+			|| { printf 'FAIL: %s built %s instead of selected %s\n' \
+				"$target" "$hex" "$selected_hex" >&2; exit 1; }
+		checks=$((checks + 1))
+	done
+fi
 
 printf '%s build validation: %d checks, 0 failures\n' "$PB_LABEL" "$checks"

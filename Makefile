@@ -2012,6 +2012,7 @@ test-pic-build:
 	PB_MATRIX_VARIANTS='cd4053-simple cd4053-mute tq2-relay' \
 	PB_MATRIX_IMAGES='bypass_mcu_cd4053-simple_pic10f320.hex bypass_mcu_cd4053-mute_pic10f320.hex bypass_mcu_tq2-relay_pic10f320.hex' \
 	PB_MATRIX_FAIL_IMAGE='bypass_mcu_tq2-relay_pic10f320.hex' \
+	PB_SELECTOR_ROUTING=1 \
 		./test/test_pic_build.sh
 
 # Exact-set and hash checks for the tag workflow's committed/listed/fresh images.
@@ -3419,7 +3420,8 @@ PIC320_LOCKSTEP_COMPILE = \
 
 .PHONY: pic320-test-config pic320-test-gpsim pic320-test-fault-target \
         pic320-test-io pic320-test-lockstep pic320-test-target \
-        pic320-test-target-variants
+        pic320-test-target-variants _pic320-build-fault-target \
+        _pic320-build-io _pic320-build-lockstep _pic320-build-soak
 
 # Emitted CONFIG word, from the built HEX. Uses the SHARED checker with a
 # device-accurate label (§4's FOLD/PARAMETERIZE), run over every built image.
@@ -3479,7 +3481,23 @@ pic320-test: pic320-test-host-variants pic320-test-config
 	done
 	@echo "=== all PIC10F320 pre-hardware checks complete ==="
 
-pic320-test-fault-target: pic320
+# Lane selectors are distinct from PIC320_VARIANT. Re-enter Make with the
+# selected value so all simply-expanded build paths, flags and output macros are
+# recomputed together; target-specific variables are too late for those `:=`
+# definitions and can produce a selected label on a default-variant image.
+_pic320-build-fault-target:
+	@$(MAKE) --no-print-directory PIC320_VARIANT=$(PIC320_FAULT_VARIANT) pic320
+
+_pic320-build-io:
+	@$(MAKE) --no-print-directory PIC320_VARIANT=$(PIC320_IO_VARIANT) pic320
+
+_pic320-build-lockstep:
+	@$(MAKE) --no-print-directory PIC320_VARIANT=$(PIC320_LOCKSTEP_VARIANT) pic320
+
+_pic320-build-soak:
+	@$(MAKE) --no-print-directory PIC320_VARIANT=$(PIC320_SOAK_VARIANT) pic320
+
+pic320-test-fault-target: _pic320-build-fault-target
 	@if ! command -v $(PIC320_SOAK_CXX) >/dev/null 2>&1; then \
 		echo "no C++ compiler ($(PIC320_SOAK_CXX)); skipping PIC10F320 target fault-inject"; $(SKIP); \
 	fi; \
@@ -3505,7 +3523,7 @@ pic320-test-fault-target: pic320
 	fi; \
 	$(PIC320_FAULT_COMPILE) && $(PIC320_FAULT_BIN)
 
-pic320-test-io: pic320
+pic320-test-io: _pic320-build-io
 	@if ! command -v $(PIC320_SOAK_CXX) >/dev/null 2>&1 \
 	   || [ ! -f "$(PIC320_SOAK_GPSIM_INC)/sim_context.h" ] \
 	   || ! pkg-config --exists glib-2.0 2>/dev/null; then \
@@ -3516,7 +3534,7 @@ pic320-test-io: pic320
 	fi; \
 	$(PIC320_IO_COMPILE) && $(PIC320_IO_BIN)
 
-pic320-test-lockstep: pic320
+pic320-test-lockstep: _pic320-build-lockstep
 	@if ! command -v $(PIC320_SOAK_CXX) >/dev/null 2>&1 \
 	   || [ ! -f "$(PIC320_SOAK_GPSIM_INC)/sim_context.h" ] \
 	   || ! pkg-config --exists glib-2.0 2>/dev/null; then \
@@ -3631,7 +3649,7 @@ $(PIC320_SOAK_BIN): $(PIC320_SOAK_DEPS)
 	$(PIC320_SOAK_COMPILE)
 
 .PHONY: pic320-test-soak
-pic320-test-soak: pic320
+pic320-test-soak: _pic320-build-soak
 	@if ! command -v $(PIC320_SOAK_CXX) >/dev/null 2>&1 \
 	   || [ ! -f "$(PIC320_SOAK_GPSIM_INC)/sim_context.h" ] \
 	   || ! pkg-config --exists glib-2.0 2>/dev/null; then \

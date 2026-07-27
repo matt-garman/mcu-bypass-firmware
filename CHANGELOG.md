@@ -67,6 +67,9 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- Standalone PIC10F320 target and soak selectors now rebuild the selected
+  variant instead of potentially consuming a stale image while rebuilding the
+  default `PIC320_VARIANT`.
 - `pic320-test-gpsim` now runs the forked PIC10F320 toggle stimulus instead of
   silently using the PIC10F322 cadence checkpoints through the shared wrapper.
 - PIC10F320 mutation sandboxes now include the folded gpsim wrappers and stimuli,
