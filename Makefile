@@ -1955,9 +1955,18 @@ clean-tests:
 	@# workload sizing, which is the exact failure this target exists to prevent.
 	@# The .hex images are deliberately NOT removed: they are build output, not
 	@# test output, and `make clean` owns them.
+	@# $(PIC320_SOAK_BIN) is named explicitly because it is the ONE binary here
+	@# that literally has its workload sizing compiled in (-DSOAK_DURATION_MS /
+	@# -DSOAK_LIVENESS_INTERVAL_MS), and the only one reachable through a Make
+	@# file rule that will not rebuild on a duration change alone -- so it is the
+	@# precise case the paragraph above describes. The target-lane binaries are
+	@# listed alongside it for completeness; their recipes recompile
+	@# unconditionally, so they are hygiene rather than a staleness hazard.
 	rm -rf $(PIC320_COVERAGE_DIR)
 	rm -f $(PIC320_BUILD_DIR)/test_equiv $(PIC320_BUILD_DIR)/test_fault \
 	      $(PIC320_BUILD_DIR)/test_config_pic \
+	      $(PIC320_SOAK_BIN) $(PIC320_FAULT_BIN) $(PIC320_IO_BIN) \
+	      $(PIC320_LOCKSTEP_BIN) \
 	      $(foreach v,$(PIC320_VARIANTS_ALL),$(PIC320_BUILD_DIR)/test_actuation_$(v)) \
 	      $(PIC320_BUILD_DIR)/*.o
 
@@ -3317,7 +3326,41 @@ PIC320_LOCKSTEP_VARIANT ?= $(PIC320_TARGET_VARIANT)
 PIC320_SOAK_VARIANT     ?= $(PIC320_TARGET_VARIANT)
 
 pic320_hex_of = $(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$(1)_$(PIC320_TAG).hex
-pic320_macro_of = $(if $(filter cd4053-simple,$(1)),OUTPUT_CD4053_SIMPLE,$(if $(filter cd4053-mute,$(1)),OUTPUT_CD4053_WITH_MUTE,OUTPUT_TQ2_RELAY))
+
+# Per-variant facts, each with a FAILING default rather than a fall-through.
+#
+# The imported project held all three of these in the same ifeq/else ladder as
+# the output macro, ending in $(error) -- so adding a variant could not silently
+# inherit another one's expectations. Folding them into nested $(if ...) here
+# lost that: an unrecognized name used to resolve to tq2-relay's values (its
+# OUTPUT_ macro and its 0x1 settled LATA) and run a green-looking test against
+# the wrong contract. The top-level PIC320_VARIANT ladder still rejects unknown
+# names, but it is NOT the only entry point -- PIC320_{FAULT,IO,LOCKSTEP,TARGET}_
+# VARIANT can each be set directly on the command line and never pass through it.
+# The explicit final arm restores the imported behaviour: an unknown variant is a
+# hard error at the point of use, not a wrong answer.
+#
+# $(strip) wraps each one because a backslash-newline inside a variable
+# definition collapses to a SPACE: without it these would expand to
+# " OUTPUT_TQ2_RELAY" and land in the compile line as "-D OUTPUT_TQ2_RELAY".
+pic320_macro_of = $(strip \
+	$(if $(filter cd4053-simple,$(1)),OUTPUT_CD4053_SIMPLE, \
+	$(if $(filter cd4053-mute,$(1)),OUTPUT_CD4053_WITH_MUTE, \
+	$(if $(filter tq2-relay,$(1)),OUTPUT_TQ2_RELAY, \
+	$(error pic320_macro_of: no output macro for PIC10F320 variant '$(1)'; supported: $(PIC320_VARIANTS_SUPPORTED))))))
+
+# The full RA0..RA2 LATA each variant drives once settled, asserted by the gpsim
+# register-level test. RA0 (the LED) is bit 0 in all three. BYPASS settles to 0x0
+# for every variant today, but it is answered per variant rather than assumed,
+# for the same reason as above.
+pic320_engaged_lata_of = $(strip \
+	$(if $(filter cd4053-simple,$(1)),0x3, \
+	$(if $(filter cd4053-mute,$(1)),0x7, \
+	$(if $(filter tq2-relay,$(1)),0x1, \
+	$(error pic320_engaged_lata_of: no settled ENGAGED LATA for PIC10F320 variant '$(1)'; supported: $(PIC320_VARIANTS_SUPPORTED))))))
+pic320_bypass_lata_of = $(strip \
+	$(if $(filter $(PIC320_VARIANTS_SUPPORTED),$(1)),0x0, \
+	$(error pic320_bypass_lata_of: no settled BYPASS LATA for PIC10F320 variant '$(1)'; supported: $(PIC320_VARIANTS_SUPPORTED))))
 
 PIC320_FAULT_SRC = $(PIC320_GPSIM_DIR)/test_fault_pic.cc
 PIC320_FAULT_BIN = $(PIC320_BUILD_DIR)/test_fault_pic
@@ -3379,7 +3422,8 @@ pic320-test-config: pic320-variants
 pic320-test-gpsim: pic320
 	@PIC_GPSIM_PROC=$(PIC320_GPSIM_PROC) \
 		test/pic/run_gpsim_test.sh $(PIC320_HEX) \
-		$(if $(filter cd4053-simple,$(PIC320_VARIANT)),0x3,$(if $(filter cd4053-mute,$(PIC320_VARIANT)),0x7,0x1)) 0x0
+		$(call pic320_engaged_lata_of,$(PIC320_VARIANT)) \
+		$(call pic320_bypass_lata_of,$(PIC320_VARIANT))
 	@PIC_GPSIM_PROC=$(PIC320_GPSIM_PROC) \
 		test/pic/run_gpsim_power_on_pressed.sh $(PIC320_HEX)
 

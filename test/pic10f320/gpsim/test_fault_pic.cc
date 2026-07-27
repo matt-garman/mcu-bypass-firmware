@@ -114,7 +114,7 @@ static NullBuf g_nullbuf;
 
 // ---- Firmware / MCU parameters (injected by the Makefile build rule) --------
 #ifndef FW_PATH
-#  define FW_PATH  "build_pic/bypass_mcu_cd4053-simple_pic10f320.hex"
+#  define FW_PATH  "build_pic10f320/bypass_mcu_cd4053-simple_pic10f320.hex"
 #endif
 #ifndef PROC_NAME
 #  define PROC_NAME "p10f320"

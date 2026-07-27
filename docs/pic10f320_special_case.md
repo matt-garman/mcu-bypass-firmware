@@ -110,12 +110,30 @@ split instead of one clean statement.
 
 **What the omission means in practice.** The firmware still range-checks
 `ctx_.effect_state` in the main-loop sanity gate before acting on it, and the
-actuation, target-I/O and lock-step lanes all assert the *observed* output state
-at every settled tick. What is missing is the firmware's own in-line
-self-check that its output latch still matches what its state says it should be —
-a defence against a single-event upset in `LATA` between one tick and the next.
-On the PIC10F322 that window is closed in firmware; on the PIC10F320 it is
-covered only by the watchdog and the next tick's write.
+output lanes do observe real pin state: `pic320-test-actuation` asserts the full
+settled `LATA` at every tick on the host, and `pic320-test-io` asserts each
+variant's exact `LATA` transition sequence, the physical `PORTA` levels that
+follow it, and the pulse widths between edges on the emitted image.
+(`pic320-test-lockstep` compares `ctx_`, not the output latch.) Every one of
+those catches firmware that *writes* the wrong latch.
+
+What is missing is a different thing: the firmware's own in-line self-check that
+its output latch still matches what its state says it should be — a defence
+against a single-event upset in `LATA` *after* the firmware wrote it. On the
+PIC10F322 that window is closed in firmware. `hw_output_state_intact()`
+(`src/bypass_mcu_pic10f322.c:106`) compares the exact latch against the expected
+mask inside the per-tick sanity gate, so an upset forces a watchdog reset.
+
+On the PIC10F320 **nothing closes it**, and the two mitigations a reader might
+reasonably assume are both absent. The watchdog does not help: `CLRWDT()` runs
+unconditionally at the end of every loop iteration
+(`src/bypass_mcu_pic10f320.c:698`), so a corrupt `LATA` never delays a pet. Nor
+is there a per-tick rewrite to correct it: `LATA` is written only by
+`hw_set_bypass_state()` / `hw_set_engaged_state()`, and those run on a *debounced
+press* (`:665`, `:669`), not every tick. An upset therefore persists — wrong LED,
+wrong signal path, or both — until the next footswitch press re-drives the
+outputs. That is the actual size of this omission, and it is why §6 says to
+prefer another part when the choice is yours.
 
 ## 5. Keeping it in step: the shared surface
 
