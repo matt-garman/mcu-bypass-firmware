@@ -77,3 +77,29 @@ misra-c2012-2.5:src/bypass_pins_avr_xt.h
 # (2.4) as unused. Not dead code: each is used by some TU. See MISRA_COMPLIANCE.md D-3.
 misra-c2012-2.3:src/bypass_types.h
 misra-c2012-2.4:src/bypass_types.h
+
+# --- D-4: PIC10F320 device-SFR symbol resolution (misra-config) --------------
+# NOT a MISRA rule deviation. `misra-config` is cppcheck's own diagnostic for
+# "the addon could not resolve this symbol" -- here `PIR1bits`/`TMR2IF` in the
+# 1 ms tick wait. The declaration is present and correct: the identical
+# statement against the identical DFP header analyses clean in
+# src/bypass_mcu_pic10f322.c. The addon loses the device symbol table on this
+# file specifically, bisected to its heavy in-function `static_assert` use --
+# stripping those lines makes the diagnostic vanish with every other flag
+# unchanged.
+# .
+# Scoped to the one file, deliberately. The PIC10F320 project suppressed
+# `misra-config` GLOBALLY via a cppcheck flag, which would also blind the AVR
+# shells and the PIC10F322 to genuine unresolved-symbol problems; this project
+# scopes every suppression to a file, so the merge NARROWS the waiver instead of
+# importing it. Real MISRA rule findings in this file are still reported --
+# verified by injecting a Rule 14.4 violation and confirming the lane fails.
+# See MISRA_COMPLIANCE.md D-4.
+misra-config:src/bypass_mcu_pic10f320.c
+# Same root cause, rule side: TICK_PERIOD_MS and WDT_MIN_PERIOD_MS are consumed
+# ONLY inside static_assert() expressions, which the addon cannot see for this
+# file, so it reports them as unused macros. They are demonstrably used -- the
+# asserts they feed are what enforce "1 ms tick + blocking pulse < worst-case
+# WDT period" at compile time. Waived explicitly rather than left to pass
+# silently. See MISRA_COMPLIANCE.md D-4.
+misra-c2012-2.5:src/bypass_mcu_pic10f320.c

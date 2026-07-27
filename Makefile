@@ -1865,6 +1865,10 @@ clean:
 	rm -f *.dump *.ctu-info cppcheck-addon-ctu-file-list*
 	rm -rf test/klee-out-* test/klee-last test/avr/__pycache__
 	rm -rf $(AVR_BUILD_DIR) $(PIC_BUILD_DIR) $(XT_BUILD_DIR)
+	# PIC10F320: one directory holds every build, coverage and test artifact
+	# for this target (merge plan §5.7), so a single rm covers the lot and
+	# cannot reach the shared top-level coverage/ the parent lanes own.
+	rm -rf $(PIC320_BUILD_DIR)
 
 # ============================================================================
 # FLASH / FUSES -- hardware (select the image with VARIANT=<name>)
@@ -1967,6 +1971,27 @@ test-gpsim-wrappers:
 # Isolated fake-XC8 proof of fail-closed PIC image generation.
 test-pic-build:
 	./test/test_pic_build.sh
+	@# Same fake-XC8 regression against the PIC10F320 contract: its own
+	@# build target, build directory, image naming and 256-word budget.
+	PB_LABEL='PIC10F320' \
+	PB_TARGET='pic320' \
+	PB_CC_VAR='PIC320_CC' \
+	PB_BUILD_DIR_VAR='PIC320_BUILD_DIR' \
+	PB_BUILD_DIR='build_pic10f320' \
+	PB_FW_BASE_VAR='PIC320_FW_BASE' \
+	PB_FW_BASE='bypass_mcu' \
+	PB_TAG_VAR='PIC320_TAG' \
+	PB_TAG='pic10f320' \
+	PB_FLASH_VAR='PIC320_FLASH_WORDS' \
+	PB_FLASH_WORDS='256' \
+	PB_VARIANT_VAR='PIC320_VARIANT' \
+	PB_VARIANT='cd4053-simple' \
+	PB_MATRIX_TARGET='pic320-variants' \
+	PB_MATRIX_VARIANTS_VAR='PIC320_VARIANTS_ALL' \
+	PB_MATRIX_VARIANTS='cd4053-simple cd4053-mute tq2-relay' \
+	PB_MATRIX_IMAGES='bypass_mcu_cd4053-simple_pic10f320.hex bypass_mcu_cd4053-mute_pic10f320.hex bypass_mcu_tq2-relay_pic10f320.hex' \
+	PB_MATRIX_FAIL_IMAGE='bypass_mcu_tq2-relay_pic10f320.hex' \
+		./test/test_pic_build.sh
 
 # Exact-set and hash checks for the tag workflow's committed/listed/fresh images.
 test-release-images:
@@ -2043,6 +2068,16 @@ _test-mutation-policy-probe:
 # Host-only proof that the authoritative PIC target aggregate rejects bad matrices.
 test-target-matrix:
 	./test/test_target_matrix.sh
+	@# Same regression, PIC10F320 contract. One script, two chips (§4 FOLD).
+	TM_LABEL='PIC10F320' \
+	TM_TARGET='pic320-test-target-variants' \
+	TM_PER_VARIANT_TARGET='pic320-test-target' \
+	TM_VARIANTS_VAR='PIC320_VARIANTS_ALL' \
+	TM_VARIANT_ARG='PIC320_TARGET_VARIANT' \
+	TM_SUPPORTED='cd4053-simple cd4053-mute tq2-relay' \
+	TM_SUBSET='cd4053-mute' \
+	TM_UNSUPPORTED='tmux4053-simple' \
+		./test/test_target_matrix.sh
 
 # Compile the real lock-step driver against a fake core and inject progress stalls.
 test-lockstep-progress:
@@ -2821,6 +2856,10 @@ PIC320_COVERAGE_DIR := $(PIC320_BUILD_DIR)/coverage
 # --- output variant ----------------------------------------------------------
 PIC320_VARIANT      ?= cd4053-simple
 PIC320_VARIANTS_ALL := cd4053-simple cd4053-mute tq2-relay
+# The authoritative supported set, `override` so a command-line
+# PIC320_VARIANTS_ALL cannot also redefine what counts as supported --
+# otherwise an unsupported-name matrix could whitelist itself.
+override PIC320_VARIANTS_SUPPORTED := cd4053-simple cd4053-mute tq2-relay
 
 ifeq ($(PIC320_VARIANT),cd4053-simple)
   PIC320_OUTPUT_MACRO := OUTPUT_CD4053_SIMPLE
@@ -2862,7 +2901,7 @@ PIC320_FW_HOST_DEFS := -Wno-unknown-pragmas -Dmain=fw_main \
 PIC320_FAULT_INC    := -I$(PIC320_EQUIV_DIR) -I$(PIC320_FAULT_DIR)
 
 .PHONY: pic320-test-equiv pic320-test-actuation pic320-test-fault-host \
-        pic320-test-host pic320-clean pic320-verify-baseline-images
+        pic320-test-host pic320-clean
 
 # Firmware<->core equivalence: the real firmware, host-compiled, stepped tick for
 # tick against src/bypass_pure.c on the same stimulus.
@@ -2912,61 +2951,456 @@ pic320-test-fault-host:
 pic320-test-host: pic320-test-equiv pic320-test-actuation pic320-test-fault-host
 	@echo "=== all PIC10F320 host lanes passed (variant $(PIC320_VARIANT)) ==="
 
-# --- §6.13 byte-identity gate (pulled forward from Phase 4) ------------------
-# Proves the RELOCATED firmware, built by the PORTED recipe, reproduces the
-# child project's last signed release byte for byte. This is the one check that
-# validates the whole ported XC8 invocation at once: a recipe that silently
-# changed -O level, -mdfp, include order or CONFIG-word emission cannot pass it,
-# and neither the equivalence nor the lock-step lane would notice (they assert
-# behaviour, not emitted bytes).
-#
-# LIFETIME (plan §15, D4): this is a ONE-SHOT MIGRATION GATE, not a standing
-# regression. Run it here in Phase 2 and again in Phase 4, record the compared
-# hashes in the phase commits and docs/pic10f320_validation.md, then retire it
-# together with the imported baseline directory in Phase 7. It CANNOT be re-run
-# at the merged tip once _incoming_pic10f320/ is deleted -- that is intended.
-#
-# It is also invalidated on purpose by the §6.11 exact-TRISA firmware edit, which
-# must therefore land AFTER this gate has passed, as its own rebaselining commit.
-PIC320_BASELINE_DIR ?= _incoming_pic10f320/release/v0.9.5
+# --- Phase 4: hardened build, flash budget, static analysis ------------------
+# XC8/DFP header locations. Shared installation with the PIC10F322 lane, but
+# kept as separate variables so one chip can be re-pinned without silently
+# moving the other (§5.6: anything not on the shared-tool allowlist is presumed
+# chip-specific).
+PIC320_XC8_INCLUDE ?= $(PIC_XC8_INCLUDE)
+PIC320_DFP_INCLUDE ?= $(PIC320_DFP)/pic/include
+PIC320_CHIP_MACRO  ?= _$(PIC320_CHIP)
 
-pic320-verify-baseline-images:
-	@test -x "$(PIC320_CC)" || { echo "SKIP: XC8 not found at $(PIC320_CC)"; exit 0; }
-	@test -d "$(PIC320_BASELINE_DIR)" || { \
-		echo "FAIL: baseline directory $(PIC320_BASELINE_DIR) is gone."; \
-		echo "      This gate is one-shot by design (plan §15, D4) and cannot run"; \
-		echo "      after Phase 7 removes the imported tree."; exit 1; }
+PIC320_CPPCHECK_CPPFLAGS = -D__XC8 -D$(PIC320_CHIP_MACRO) \
+                           -D_XTAL_FREQ=$(PIC320_XTAL) $(PIC320_OUTPUT_DEF) \
+                           -I$(PIC320_DFP_INCLUDE) -I$(PIC320_DFP_INCLUDE)/proc \
+                           -I$(PIC320_XC8_INCLUDE)
+
+PIC320_CPPCHECK_FLAGS ?= --enable=warning,style,performance,portability \
+                      --std=c11 --platform=pic8-enhanced --error-exitcode=2 \
+                      --inline-suppr --max-configs=1 \
+                      --suppress=missingIncludeSystem \
+                      --suppress=unmatchedSuppression \
+                      --suppress=unusedStructMember \
+                      '--suppress=*:$(PIC320_XC8_INCLUDE)/*' \
+                      '--suppress=*:$(PIC320_DFP_INCLUDE)/*' \
+                      $(PIC320_CPPCHECK_CPPFLAGS)
+
+PIC320_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 \
+                      --platform=pic8-enhanced \
+                      --enable=style --inline-suppr --max-configs=1 \
+                      --suppress=unmatchedSuppression \
+                      --suppress=missingIncludeSystem \
+                      '--suppress=*:$(PIC320_XC8_INCLUDE)/*' \
+                      '--suppress=*:$(PIC320_DFP_INCLUDE)/*' \
+                      $(PIC320_CPPCHECK_CPPFLAGS)
+
+.PHONY: pic320 pic320-size pic320-analyze pic320-analyze-cppcheck \
+        pic320-analyze-misra
+
+# Build one variant and gate it against the 256-word budget.
+#
+# Every failure mode here is one the child project hardened against and proved
+# with fake-XC8 regressions (merge plan §6.4, commit ec6fa48), so this is a port
+# of tested logic, not a fresh attempt:
+#   - the output path is removed FIRST, and removal is symlink/directory safe,
+#     so a stale or hostile $(PIC320_HEX) cannot be mistaken for fresh output;
+#   - an EXIT trap deletes the image unless the recipe reached the end, so a
+#     failed or interrupted build never leaves a plausible-looking HEX behind
+#     for a later lane to consume;
+#   - XC8's exit status, a nonempty image, structural Intel HEX validity, and a
+#     parseable word count are each checked separately -- XC8 can report success
+#     and still not produce a usable image;
+#   - the budget comparison is done by string length then lexically, never by
+#     shell arithmetic, so a huge or malformed word count cannot wrap into a
+#     passing value.
+pic320: $(PIC320_SRC)
+	@if [ -d "$(PIC320_HEX)" ] && [ ! -L "$(PIC320_HEX)" ]; then rmdir "$(PIC320_HEX)"; \
+	 else rm -f "$(PIC320_HEX)"; fi
+	@if [ ! -x "$(PIC320_CC)" ] && ! command -v $(PIC320_CC) >/dev/null 2>&1; then \
+		echo "XC8 not found at $(PIC320_CC) (override with PIC320_CC=...)"; $(SKIP); \
+	fi
 	@mkdir -p $(PIC320_BUILD_DIR)
-	@rc=0; for v in $(PIC320_VARIANTS_ALL); do \
-		$(MAKE) --no-print-directory PIC320_VARIANT=$$v _pic320-build-one || exit 1; \
-		fresh="$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).hex"; \
-		base="$(PIC320_BASELINE_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).hex"; \
-		test -f "$$base" || { echo "FAIL: missing baseline image $$base"; exit 1; }; \
-		if cmp -s "$$fresh" "$$base"; then \
-			echo "  OK   $$v  $$(sha256sum "$$fresh" | cut -c1-16)...  byte-identical"; \
-		else \
-			echo "  FAIL $$v  fresh build differs from the child's signed v0.9.5 image"; \
-			echo "       fresh: $$(sha256sum "$$fresh" | cut -d' ' -f1)"; \
-			echo "       base : $$(sha256sum "$$base"  | cut -d' ' -f1)"; \
-			rc=1; \
+	@echo "=== PIC10F320 build + flash-budget ($(PIC320_FLASH_WORDS) words, variant $(PIC320_VARIANT)) ==="
+	@hex="$(PIC320_HEX)"; image_complete=0; \
+	remove_image() { \
+		if [ -d "$$hex" ] && [ ! -L "$$hex" ]; then rmdir "$$hex"; else rm -f "$$hex"; fi; \
+	}; \
+	cleanup_image() { \
+		rc=$$?; \
+		if [ $$rc -ne 0 ] || [ $$image_complete -ne 1 ]; then \
+			remove_image || rc=1; \
+			[ $$rc -ne 0 ] || rc=1; \
 		fi; \
-	done; \
-	test $$rc -eq 0 || { echo "=== PIC10F320 byte-identity gate FAILED ==="; exit 1; }; \
-	echo "=== PIC10F320 byte-identity gate PASSED (3/3 variants) ==="
+		trap - 0 1 2 15; exit $$rc; \
+	}; \
+	trap cleanup_image 0 1 2 15; \
+	LC_ALL=C; export LC_ALL; \
+	budget="$(PIC320_FLASH_WORDS)"; \
+	case "$$budget" in ''|*[!0-9]*) echo "FAIL: PIC320_FLASH_WORDS must be a positive decimal integer"; exit 1 ;; esac; \
+	while [ "$${#budget}" -gt 1 ] && [ "$${budget#0}" != "$$budget" ]; do budget=$${budget#0}; done; \
+	if [ "$$budget" = 0 ]; then echo "FAIL: PIC320_FLASH_WORDS must be a positive decimal integer"; exit 1; fi; \
+	out=`cd $(PIC320_BUILD_DIR) && $(PIC320_CC) $(PIC320_CFLAGS) $(CURDIR)/$(PIC320_SRC) \
+		-o $(notdir $(PIC320_HEX)) 2>&1` \
+		|| { printf '%s\n' "$$out"; echo "FAIL: did not compile for PIC10F320"; exit 1; }; \
+	if [ ! -s "$$hex" ]; then \
+		echo "FAIL: XC8 reported success but did not produce a nonempty $$hex"; \
+		printf '%s\n' "$$out"; exit 1; \
+	fi; \
+	if ! $(IHEX_VALIDATOR) "$$hex"; then \
+		echo "FAIL: XC8 produced an invalid Intel HEX image: $$hex"; exit 1; \
+	fi; \
+	dec=`printf '%s\n' "$$out" | grep -E 'Program space' \
+		| grep -oE '\( *[0-9]+ *\)' | head -1 | tr -d '() '`; \
+	if [ -z "$$dec" ]; then \
+		echo "FAIL: could not parse program-word count from XC8 output:"; \
+		printf '%s\n' "$$out"; exit 1; \
+	fi; \
+	while [ "$${#dec}" -gt 1 ] && [ "$${dec#0}" != "$$dec" ]; do dec=$${dec#0}; done; \
+	over_budget=0; \
+	if [ "$${#dec}" -gt "$${#budget}" ]; then over_budget=1; \
+	elif [ "$${#dec}" -eq "$${#budget}" ]; then \
+		cmp=`$(AWK) -v a="x$$dec" -v b="x$$budget" \
+			'BEGIN { print (a > b ? "gt" : "le") }'`; cmp_rc=$$?; \
+		if [ $$cmp_rc -ne 0 ]; then \
+			echo "FAIL: could not compare program usage with flash budget"; exit 1; \
+		fi; \
+		case "$$cmp" in \
+			gt) over_budget=1 ;; \
+			le) ;; \
+			*) echo "FAIL: invalid flash-budget comparison result"; exit 1 ;; \
+		esac; \
+	fi; \
+	pct=`$(AWK) -v u="$$dec" -v t="$$budget" \
+		'BEGIN { printf "%.1f", u * 100 / t }'`; pct_rc=$$?; \
+	pct_integer=$${pct%.*}; pct_fraction=$${pct#*.}; pct_valid=1; \
+	[ "$$pct_integer" != "$$pct" ] || pct_valid=0; \
+	case "$$pct_integer" in ''|*[!0-9]*) pct_valid=0 ;; esac; \
+	case "$$pct_fraction" in [0-9]) ;; *) pct_valid=0 ;; esac; \
+	if [ $$pct_rc -ne 0 ] || [ $$pct_valid -ne 1 ]; then \
+		echo "FAIL: could not calculate flash usage percentage"; exit 1; \
+	fi; \
+	if [ $$over_budget -eq 1 ]; then \
+		echo "FAIL: uses $$dec words ($${pct}%) -- exceeds $$budget"; exit 1; \
+	else \
+		echo "OK:   $$hex : $$dec words ($${pct}%) of $$budget"; \
+	fi; \
+	image_complete=1
 
-# Minimal build used by the gate above. The HARDENED build (flash-budget gate,
-# structural IHEX validation, failed-artifact cleanup) arrives in Phase 4; this
-# deliberately stays small so the gate can run at the Phase-2 boundary.
-.PHONY: _pic320-build-one
-_pic320-build-one:
+# Build every supported variant, fail-closed on the matrix itself.
+.PHONY: pic320-variants
+pic320-variants:
+	@set -- $(PIC320_VARIANTS_ALL); \
+	if [ $$# -eq 0 ]; then echo "FAIL: PIC320_VARIANTS_ALL must not be empty"; exit 1; fi; \
+	uniq=`printf '%s\n' "$$@" | sort -u | wc -l`; \
+	if [ "$$uniq" -ne $$# ]; then echo "FAIL: PIC320_VARIANTS_ALL must not contain duplicate names"; exit 1; fi; \
+	rc=0; \
+	for v in "$$@"; do \
+		$(MAKE) --no-print-directory PIC320_VARIANT=$$v pic320 || { rc=1; break; }; \
+	done; \
+	if [ $$rc -ne 0 ]; then \
+		echo "FAIL: a PIC10F320 variant did not build; removing the partial image set"; \
+		for v in "$$@"; do \
+			rm -f "$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).hex"; \
+		done; \
+		exit 1; \
+	fi
+	@echo "=== all PIC10F320 variants built within budget ==="
+
+# XC8's full memory-usage summary (program + data space) for one variant.
+pic320-size: $(PIC320_SRC)
+	@if [ ! -x "$(PIC320_CC)" ] && ! command -v $(PIC320_CC) >/dev/null 2>&1; then \
+		echo "XC8 not found at $(PIC320_CC) (override with PIC320_CC=...)"; $(SKIP); \
+	fi
 	@mkdir -p $(PIC320_BUILD_DIR)
-	@test -f $(PIC320_SRC) || { \
-		echo "FAIL: $(PIC320_SRC) not found."; \
-		echo "      Phase 2 requires the firmware to be moved (by the user) from"; \
-		echo "      _incoming_pic10f320/bypass_mcu_pic10f320.c to src/ -- verbatim."; \
-		exit 1; }
 	@cd $(PIC320_BUILD_DIR) && $(PIC320_CC) $(PIC320_CFLAGS) $(CURDIR)/$(PIC320_SRC) \
-		-o $(notdir $(PIC320_HEX)) > /dev/null
+		-o size_probe_$(PIC320_VARIANT).hex 2>&1 | grep -A6 -E 'Memory Summary|Program space' || true
+	@rm -f $(PIC320_BUILD_DIR)/size_probe_$(PIC320_VARIANT).hex
+
+# Two analyzers over the PIC10F320 shell, parallel to the AVR analyze-cppcheck /
+# analyze-misra and the PIC10F322 pic-analyze-*. STANDALONE (XC8/DFP headers may
+# be absent in CI; NOT part of `make test`) -- and skip-clean via $(SKIP), so
+# STRICT_TOOLS=1 turns a missing toolchain into a hard failure rather than a
+# silent pass. Until this lane existed the PIC10F320 shell had no static
+# analysis at all.
+pic320-analyze: pic320-analyze-cppcheck pic320-analyze-misra
+	@echo "=== PIC10F320 static analysis (cppcheck + MISRA) clean ==="
+
+pic320-analyze-cppcheck: $(PIC320_SRC)
+	@if ! command -v $(CPPCHECK) >/dev/null 2>&1; then \
+		echo "cppcheck not installed; skipping PIC10F320 cppcheck analysis"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC320_XC8_INCLUDE)/xc.h" ] || [ ! -f "$(PIC320_DFP_INCLUDE)/proc/pic10f320.h" ]; then \
+		echo "XC8/DFP headers not found; skipping PIC10F320 cppcheck analysis"; $(SKIP); \
+	fi; \
+	echo "cppcheck (PIC10F320, pic8-enhanced): $(PIC320_SRC)"; \
+	$(CPPCHECK) $(PIC320_CPPCHECK_FLAGS) $(PIC320_SRC)
+
+pic320-analyze-misra: $(PIC320_SRC) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
+	@if ! command -v $(CPPCHECK) >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then \
+		echo "cppcheck and/or python3 not available; skipping PIC10F320 MISRA analysis"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC320_XC8_INCLUDE)/xc.h" ] || [ ! -f "$(PIC320_DFP_INCLUDE)/proc/pic10f320.h" ]; then \
+		echo "XC8/DFP headers not found; skipping PIC10F320 MISRA analysis"; $(SKIP); \
+	fi; \
+	echo "MISRA-C:2012 analysis -- PIC10F320 shell ($(CPPCHECK) + misra addon, pic8-enhanced)"; \
+	out=`mktemp`; rc=0; \
+	PYTHONWARNINGS=ignore $(CPPCHECK) $(PIC320_MISRA_CPPCHECK_FLAGS) \
+		--suppressions-list=$(MISRA_SUPPRESS) --error-exitcode=2 \
+		$(PIC320_SRC) 2>>$$out || rc=1; \
+	if [ $$rc -ne 0 ]; then \
+		echo "MISRA findings NOT covered by a documented deviation:"; \
+		grep -E "misra-c2012" $$out || true; \
+		echo ""; \
+		echo "Fix it, or (if genuinely unavoidable) add a per-file entry to"; \
+		echo "$(MISRA_SUPPRESS) with a matching record in MISRA_COMPLIANCE.md."; \
+		rm -f $$out *.dump *.ctu-info cppcheck-addon-ctu-file-list*; \
+		exit 1; \
+	fi; \
+	rm -f $$out *.dump *.ctu-info cppcheck-addon-ctu-file-list*; \
+	echo "MISRA-C:2012 (PIC10F320 shell): clean (documented deviations waived per MISRA_COMPLIANCE.md)"
+
+# --- Phase 4: gpsim / libgpsim target lanes ----------------------------------
+# The PIC10F320 counterparts of pic-test-{gpsim,fault,lockstep,io,soak}. These
+# run the REAL built HEX in a simulated PIC10F320, so they are the only lanes
+# that see the emitted image rather than host-compiled source.
+#
+# FOLD/FORK dispositions actually taken (merge plan §4), each decided from a
+# non-comment diff rather than assumed:
+#   FOLD   power_on_pressed.stc     -- executable stimulus byte-identical
+#   FOLD   run_gpsim*.sh            -- differed only in the default PROC, and
+#                                      they already parameterize on
+#                                      PIC_GPSIM_PROC, so the 320 just overrides
+#   FOLD   test_soak_pic.cc         -- the parent copy is AHEAD (SOAK_LIVENESS_DUE)
+#   PARAM  test_config_pic.c        -- one printf label; now PIC_DEVICE_NAME
+#   FORK   test_{fault,io,lockstep}_pic.cc, footswitch_toggle.stc
+#                                   -- genuinely chip-specific, in test/pic10f320/gpsim/
+PIC320_GPSIM_PROC ?= p10f320
+PIC320_GPSIM_DIR   = test/pic10f320/gpsim
+
+# Reuse the parent's C++ toolchain settings; these are environment, not chip.
+PIC320_SOAK_CXX       ?= $(PIC_SOAK_CXX)
+PIC320_SOAK_GPSIM_INC ?= $(PIC_SOAK_GPSIM_INC)
+
+PIC320_TARGET_VARIANT   ?= $(PIC320_VARIANT)
+PIC320_FAULT_VARIANT    ?= $(PIC320_TARGET_VARIANT)
+PIC320_IO_VARIANT       ?= $(PIC320_TARGET_VARIANT)
+PIC320_LOCKSTEP_VARIANT ?= $(PIC320_TARGET_VARIANT)
+PIC320_SOAK_VARIANT     ?= $(PIC320_TARGET_VARIANT)
+
+pic320_hex_of = $(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$(1)_$(PIC320_TAG).hex
+pic320_macro_of = $(if $(filter cd4053-simple,$(1)),OUTPUT_CD4053_SIMPLE,$(if $(filter cd4053-mute,$(1)),OUTPUT_CD4053_WITH_MUTE,OUTPUT_TQ2_RELAY))
+
+PIC320_FAULT_SRC = $(PIC320_GPSIM_DIR)/test_fault_pic.cc
+PIC320_FAULT_BIN = $(PIC320_BUILD_DIR)/test_fault_pic
+PIC320_FAULT_HEX = $(call pic320_hex_of,$(PIC320_FAULT_VARIANT))
+PIC320_FAULT_SYM = $(PIC320_FAULT_HEX:.hex=.sym)
+# _ctx_'s SRAM address from the XC8 .sym, so the harness self-adjusts per variant
+# instead of hard-coding it. Empty when the .sym is absent; the run recipe fails
+# rather than silently dropping the ctx_ cases.
+PIC320_FAULT_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC320_FAULT_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DCTX_ADDR=0x$$a)
+PIC320_FAULT_COMPILE = $(PIC320_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
+		-isystem $(PIC320_SOAK_GPSIM_INC) -Itest \
+		-DFW_PATH='"$(CURDIR)/$(PIC320_FAULT_HEX)"' -DPROC_NAME='"$(PIC320_GPSIM_PROC)"' \
+		-DF_CPU_HZ=$(PIC320_XTAL) -D$(call pic320_macro_of,$(PIC320_FAULT_VARIANT)) \
+		$(PIC320_FAULT_CTX_DEF) $(PIC320_FAULT_SRC) -o $(PIC320_FAULT_BIN) -lgpsim
+
+PIC320_IO_SRC = $(PIC320_GPSIM_DIR)/test_io_pic.cc
+PIC320_IO_BIN = $(PIC320_BUILD_DIR)/test_io_pic
+PIC320_IO_HEX = $(call pic320_hex_of,$(PIC320_IO_VARIANT))
+PIC320_IO_COMPILE = $(PIC320_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
+		-isystem $(PIC320_SOAK_GPSIM_INC) -Itest \
+		-DFW_PATH='"$(CURDIR)/$(PIC320_IO_HEX)"' -DPROC_NAME='"$(PIC320_GPSIM_PROC)"' \
+		-DF_CPU_HZ=$(PIC320_XTAL) -D$(call pic320_macro_of,$(PIC320_IO_VARIANT)) \
+		$(PIC320_IO_SRC) -o $(PIC320_IO_BIN) -lgpsim
+
+PIC320_LOCKSTEP_SRC = $(PIC320_GPSIM_DIR)/test_lockstep_pic.cc
+PIC320_LOCKSTEP_BIN = $(PIC320_BUILD_DIR)/test_lockstep_pic
+PIC320_LOCKSTEP_HEX = $(call pic320_hex_of,$(PIC320_LOCKSTEP_VARIANT))
+PIC320_LOCKSTEP_SYM = $(PIC320_LOCKSTEP_HEX:.hex=.sym)
+# Lock-step compares the running image's ctx_ against the SHARED verified core,
+# so it links src/bypass_pure.c -- never a vendored copy (Principle 2).
+PIC320_LOCKSTEP_MODEL_OBJ = $(PIC320_BUILD_DIR)/bypass_pure_lockstep.o
+PIC320_LOCKSTEP_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC320_LOCKSTEP_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DCTX_ADDR=0x$$a)
+PIC320_LOCKSTEP_COMPILE = \
+		$(HOSTCC) $(PURE_HOST_CFLAGS) -std=c11 -O2 -Itest -c $(PURE_HOST_SRC) \
+			-o $(PIC320_LOCKSTEP_MODEL_OBJ) && \
+		$(PIC320_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
+			-isystem $(PIC320_SOAK_GPSIM_INC) -Itest -Isrc \
+			-DFW_PATH='"$(CURDIR)/$(PIC320_LOCKSTEP_HEX)"' -DPROC_NAME='"$(PIC320_GPSIM_PROC)"' \
+			-DF_CPU_HZ=$(PIC320_XTAL) -D$(call pic320_macro_of,$(PIC320_LOCKSTEP_VARIANT)) \
+			$(PIC320_LOCKSTEP_CTX_DEF) \
+			$(PIC320_LOCKSTEP_SRC) $(PIC320_LOCKSTEP_MODEL_OBJ) \
+			-o $(PIC320_LOCKSTEP_BIN) -lgpsim
+
+.PHONY: pic320-test-config pic320-test-gpsim pic320-test-fault-target \
+        pic320-test-io pic320-test-lockstep pic320-test-target \
+        pic320-test-target-variants
+
+# Emitted CONFIG word, from the built HEX. Uses the SHARED checker with a
+# device-accurate label (§4's FOLD/PARAMETERIZE), run over every built image.
+pic320-test-config: pic320-variants
+	@mkdir -p $(PIC320_BUILD_DIR)
+	@$(HOSTCC) $(HOST_CFLAGS) -DPIC_DEVICE_NAME='"PIC10F320"' \
+		test/pic/test_config_pic.c -o $(PIC320_BUILD_DIR)/test_config_pic
+	@$(PIC320_BUILD_DIR)/test_config_pic $(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_*_$(PIC320_TAG).hex
+
+# CLI gpsim: drive the footswitch, assert PORTA/LATA transitions. Reuses the
+# parent's hardened wrappers (timeout + nonzero status are never discarded)
+# with only the processor overridden.
+pic320-test-gpsim: pic320
+	@PIC_GPSIM_PROC=$(PIC320_GPSIM_PROC) \
+		test/pic/run_gpsim_test.sh $(PIC320_HEX) \
+		$(if $(filter cd4053-simple,$(PIC320_VARIANT)),0x3,$(if $(filter cd4053-mute,$(PIC320_VARIANT)),0x7,0x1)) 0x0
+	@PIC_GPSIM_PROC=$(PIC320_GPSIM_PROC) \
+		test/pic/run_gpsim_power_on_pressed.sh $(PIC320_HEX)
+
+pic320-test-fault-target: pic320
+	@if ! command -v $(PIC320_SOAK_CXX) >/dev/null 2>&1; then \
+		echo "no C++ compiler ($(PIC320_SOAK_CXX)); skipping PIC10F320 target fault-inject"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC320_SOAK_GPSIM_INC)/sim_context.h" ]; then \
+		echo "gpsim-dev headers not at $(PIC320_SOAK_GPSIM_INC); skipping (install gpsim-dev)"; $(SKIP); \
+	fi; \
+	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
+		echo "libglib2.0-dev not found; skipping PIC10F320 target fault-inject"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC320_FAULT_HEX)" ]; then \
+		echo "no $(PIC320_FAULT_HEX) (XC8 absent?); skipping"; $(SKIP); \
+	fi; \
+	s="$(PIC320_FAULT_HEX:.hex=.s)"; \
+	alloc=`awk 'prev=="_ctx_:"{print $$2; exit} {prev=$$1}' "$$s" 2>/dev/null`; \
+	if [ "$$alloc" != "3" ]; then \
+		echo "FAIL: _ctx_ allocates $${alloc:-?} bytes in $$s -- expected 3 (packed 1-byte enums)."; \
+		echo "      The harness injects at ctx_+0/+1/+2; XC8's code generator has"; \
+		echo "      stopped packing enums to 1 byte. Fix the offsets before running."; \
+		exit 1; \
+	fi; \
+	if [ -z "$(PIC320_FAULT_CTX_DEF)" ]; then \
+		echo "FAIL: could not resolve _ctx_ from $(PIC320_FAULT_SYM); refusing to run with the SRAM cases omitted"; exit 1; \
+	fi; \
+	$(PIC320_FAULT_COMPILE) && $(PIC320_FAULT_BIN)
+
+pic320-test-io: pic320
+	@if ! command -v $(PIC320_SOAK_CXX) >/dev/null 2>&1 \
+	   || [ ! -f "$(PIC320_SOAK_GPSIM_INC)/sim_context.h" ] \
+	   || ! pkg-config --exists glib-2.0 2>/dev/null; then \
+		echo "C++/gpsim-dev/glib not available; skipping PIC10F320 target I/O"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC320_IO_HEX)" ]; then \
+		echo "no $(PIC320_IO_HEX) (XC8 absent?); skipping"; $(SKIP); \
+	fi; \
+	$(PIC320_IO_COMPILE) && $(PIC320_IO_BIN)
+
+pic320-test-lockstep: pic320
+	@if ! command -v $(PIC320_SOAK_CXX) >/dev/null 2>&1 \
+	   || [ ! -f "$(PIC320_SOAK_GPSIM_INC)/sim_context.h" ] \
+	   || ! pkg-config --exists glib-2.0 2>/dev/null; then \
+		echo "C++/gpsim-dev/glib not available; skipping PIC10F320 lock-step"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC320_LOCKSTEP_HEX)" ]; then \
+		echo "no $(PIC320_LOCKSTEP_HEX) (XC8 absent?); skipping"; $(SKIP); \
+	fi; \
+	if [ -z "$(PIC320_LOCKSTEP_CTX_DEF)" ]; then \
+		echo "FAIL: could not resolve _ctx_ from $(PIC320_LOCKSTEP_SYM); refusing to run blind"; exit 1; \
+	fi; \
+	$(PIC320_LOCKSTEP_COMPILE) && $(PIC320_LOCKSTEP_BIN)
+
+# All-variant HOST fault aggregate -- the PIC10F320 analogue of the child's
+# test-fault-variants, and the kill target for most of its firmware mutants.
+# Rejects an empty or duplicated matrix first, so "all variants passed" can never
+# mean "no variant ran".
+.PHONY: pic320-test-fault-variants
+pic320-test-fault-variants:
+	@set -- $(PIC320_VARIANTS_ALL); \
+	if [ $$# -eq 0 ]; then echo "FAIL: PIC320_VARIANTS_ALL must not be empty"; exit 1; fi; \
+	uniq=`printf '%s\n' "$$@" | sort -u | wc -l`; \
+	if [ "$$uniq" -ne $$# ]; then echo "FAIL: PIC320_VARIANTS_ALL must not contain duplicate names"; exit 1; fi; \
+	for v in "$$@"; do \
+		echo "===================== FAULT VARIANT $$v ====================="; \
+		$(MAKE) --no-print-directory PIC320_VARIANT=$$v pic320-test-fault-host || exit 1; \
+	done
+	@echo "=== all PIC10F320 host fault variants validated ==="
+
+# Fail-closed target aggregate for ONE variant.
+pic320-test-target: pic320-test-fault-target pic320-test-lockstep pic320-test-io
+	@echo "=== PIC10F320 target lanes passed (variant $(PIC320_TARGET_VARIANT)) ==="
+
+# ...and for ALL of them. Rejects an empty or duplicated matrix before running,
+# so "all variants passed" can never mean "no variant ran" (§6.5).
+pic320-test-target-variants:
+	@if [ "$(if $(strip $(PIC320_VARIANTS_ALL)),yes,no)" != yes ]; then \
+		echo "FAIL: PIC320_VARIANTS_ALL must not be empty" >&2; exit 2; \
+	fi; \
+	if [ "$(words $(PIC320_VARIANTS_ALL))" -ne "$(words $(sort $(PIC320_VARIANTS_ALL)))" ]; then \
+		echo "FAIL: PIC320_VARIANTS_ALL must not contain duplicate names" >&2; exit 2; \
+	fi; \
+	if [ "$(if $(filter-out $(PIC320_VARIANTS_SUPPORTED),$(PIC320_VARIANTS_ALL)),yes,no)" = yes ]; then \
+		echo "FAIL: PIC320_VARIANTS_ALL contains unsupported names; supported: $(PIC320_VARIANTS_SUPPORTED)" >&2; exit 2; \
+	fi
+	@for v in $(PIC320_VARIANTS_ALL); do \
+		echo "===================== PIC10F320 TARGET VARIANT $$v ====================="; \
+		$(MAKE) --no-print-directory PIC320_TARGET_VARIANT=$$v PIC320_VARIANT=$$v \
+			pic320-test-target || exit 1; \
+	done
+	@echo "=== PIC10F320 target fault/lock-step/I-O validated for all variants ==="
+
+# --- Phase 4: long-duration soak (libgpsim) ----------------------------------
+# Reuses the PARENT's soak driver and timing contract verbatim (§4: the parent
+# copy is ahead -- it carries SOAK_LIVENESS_DUE() and the "liveness deadline must
+# fire at equality" static assert the child lacked). Only the chip, image,
+# processor and per-variant blocking-actuation duration differ.
+#
+# Blocking actuation per variant, in ms: a relay coil pulse or CD4053 mute
+# busy-blocks the POLLED main loop and steals that many 1 ms debounce ticks, so
+# the soak must hold each press/release correspondingly longer. Mirrors the
+# firmware's TQ2_L2_5V_PULSE_MS (12) and CD4053_MUTE_DELAY_MS (5).
+pic320_soak_block_cd4053-simple = 0
+pic320_soak_block_cd4053-mute   = 5
+pic320_soak_block_tq2-relay     = 12
+
+PIC320_SOAK_DURATION_MS          ?= 3600000
+PIC320_SOAK_LIVENESS_INTERVAL_MS ?= 60000
+PIC320_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
+PIC320_SOAK_SRC  = $(PIC_SOAK_SRC)
+PIC320_SOAK_DEPS = $(PIC320_SOAK_SRC) test/soak_timing_config.h
+PIC320_SOAK_BIN  = $(PIC320_BUILD_DIR)/test_soak_pic
+PIC320_SOAK_HEX  = $(call pic320_hex_of,$(PIC320_SOAK_VARIANT))
+
+PIC320_SOAK_COMPILE = $(PIC320_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
+		-isystem $(PIC320_SOAK_GPSIM_INC) -Itest -Isrc \
+		-DFW_PATH='"$(CURDIR)/$(PIC320_SOAK_HEX)"' -DPROC_NAME='"$(PIC320_GPSIM_PROC)"' \
+		-DF_CPU_HZ=$(PIC320_XTAL) \
+		-DSOAK_DURATION_MS=$(PIC320_SOAK_DURATION_MS) \
+		-DSOAK_LIVENESS_INTERVAL_MS=$(PIC320_SOAK_LIVENESS_INTERVAL_MS) \
+		-DSOAK_PROGRESS_INTERVAL_MS=$(PIC320_SOAK_PROGRESS_INTERVAL_MS) \
+		-DSOAK_ACTUATION_BLOCK_MS=$(pic320_soak_block_$(PIC320_SOAK_VARIANT))u \
+		$(PIC320_SOAK_SRC) -o $(PIC320_SOAK_BIN) -lgpsim
+
+.PHONY: pic320-test-soak
+pic320-test-soak: pic320
+	@if ! command -v $(PIC320_SOAK_CXX) >/dev/null 2>&1 \
+	   || [ ! -f "$(PIC320_SOAK_GPSIM_INC)/sim_context.h" ] \
+	   || ! pkg-config --exists glib-2.0 2>/dev/null; then \
+		echo "C++/gpsim-dev/glib not available; skipping PIC10F320 soak"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC320_SOAK_HEX)" ]; then \
+		echo "no $(PIC320_SOAK_HEX) (XC8 absent?); skipping PIC10F320 soak"; $(SKIP); \
+	fi; \
+	echo "--- PIC10F320 soak: variant=$(PIC320_SOAK_VARIANT) proc=$(PIC320_GPSIM_PROC) duration=$(PIC320_SOAK_DURATION_MS) ms ---"; \
+	rm -f $(PIC320_SOAK_BIN) && \
+	$(PIC320_SOAK_COMPILE) && \
+	./$(PIC320_SOAK_BIN)
+
+# --- §6.13 byte-identity gate: RETIRED 2026-07-26 ----------------------------
+# This was a one-shot MIGRATION gate (merge plan §15, D4), not a standing
+# regression, and it has served its purpose. It ran twice, exactly as §6.13
+# required:
+#
+#   Phase 2, vs the child project's signed release/v0.9.5 images -- PASSED 3/3.
+#     Proved the relocated firmware, built by the ported recipe under new
+#     variable names in a different Makefile, emitted the child's exact bytes.
+#   Phase 4, vs the hashes the §6.11 exact-TRISA edit rebaselined to -- PASSED
+#     3/3, with the HARDENED build rule (budget gate, IHEX validation, cleanup
+#     traps), proving that hardening changed no emitted bytes either.
+#
+# Both hash sets are recorded in docs/pic10f320_merge_plan.md §15.4 and §15.5 and
+# in the phase commit messages. It is retired rather than kept because its
+# baseline lives in _incoming_pic10f320/, which Phase 7 deletes -- a gate whose
+# reference disappears is worse than no gate. What it can no longer catch is
+# stated plainly in §14.2: nothing at the merged tip now watches emitted bytes,
+# so a change to the hardware-integrity checks is invisible to the differential
+# lanes. Promoting it to a standing expected-image-hash regression is one file
+# plus one pic320-test-build prerequisite if that trade is later judged wrong.
 
 # --- cleanup -----------------------------------------------------------------
 # §5.7: scoped to PIC10F320 paths ONLY. The imported child recipe did

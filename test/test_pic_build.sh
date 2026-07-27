@@ -6,7 +6,32 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/test-pic-build.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 repo="$work/repo"
 tools="$work/tools"
-hex="$repo/build_pic/bypass_cd4053_pic10f322.hex"
+# Parameterized so ONE fake-XC8 regression covers both PIC targets (§4 FOLD).
+# Defaults reproduce the PIC10F322 run exactly, so `make test-pic-build` is
+# unchanged; the PIC10F320 lane re-invokes with the PB_* overrides.
+PB_LABEL=${PB_LABEL:-PIC}
+PB_TARGET=${PB_TARGET:-pic}
+PB_CC_VAR=${PB_CC_VAR:-PIC_CC}
+PB_BUILD_DIR_VAR=${PB_BUILD_DIR_VAR:-PIC_BUILD_DIR}
+PB_BUILD_DIR=${PB_BUILD_DIR:-build_pic}
+PB_FW_BASE_VAR=${PB_FW_BASE_VAR:-FW_BASE}
+PB_FW_BASE=${PB_FW_BASE:-bypass}
+PB_TAG_VAR=${PB_TAG_VAR:-PIC_TAG}
+PB_TAG=${PB_TAG:-pic10f322}
+PB_FLASH_VAR=${PB_FLASH_VAR:-PIC_FLASH_WORDS}
+PB_FLASH_WORDS=${PB_FLASH_WORDS:-512}
+PB_VARIANT_VAR=${PB_VARIANT_VAR:-VARIANTS}
+PB_VARIANT=${PB_VARIANT:-cd4053}
+# The all-variant build target, and the images it must produce. `pic` builds the
+# whole VARIANTS matrix in one invocation; the PIC10F320 lane splits that into
+# per-variant `pic320` plus the `pic320-variants` aggregate, so the matrix checks
+# below point at whichever target owns the matrix for this chip.
+PB_MATRIX_TARGET=${PB_MATRIX_TARGET:-pic}
+PB_MATRIX_VARIANTS_VAR=${PB_MATRIX_VARIANTS_VAR:-VARIANTS}
+PB_MATRIX_VARIANTS=${PB_MATRIX_VARIANTS:-cd4053 mute relay}
+PB_MATRIX_IMAGES=${PB_MATRIX_IMAGES:-bypass_cd4053_pic10f322.hex bypass_mute_pic10f322.hex bypass_relay_pic10f322.hex}
+PB_MATRIX_FAIL_IMAGE=${PB_MATRIX_FAIL_IMAGE:-bypass_relay_pic10f322.hex}
+hex="$repo/$PB_BUILD_DIR/${PB_FW_BASE}_${PB_VARIANT}_${PB_TAG}.hex"
 checks=0
 unset FAKE_XC8_MODE FAKE_XC8_FAIL_NAME MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES
 mkdir -p "$repo/src" "$repo/scripts" "$repo/build_pic" "$tools"
@@ -89,14 +114,27 @@ files=(
 	src/bypass_output_cd4053_with_mute.c src/bypass_output_tq2_l2_5v_relay.c
 	src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h
 	src/bypass_output_tq2_l2_5v_relay.h
+	# PIC10F320's shell is self-contained -- it includes no src/ header -- but
+	# the `pic320` rule still needs its source to exist. Harmless for the
+	# PIC10F322 leg, which never compiles it.
+	src/bypass_mcu_pic10f320.c
 )
 for file in "${files[@]}"; do : > "$repo/$file"; done
 
 run_make() {
-	make --no-print-directory -C "$repo" pic \
-		CC=true HOSTCC=true PIC_CC="$tools/xc8" PIC_BUILD_DIR=build_pic \
-		FW_BASE=bypass PIC_TAG=pic10f322 PIC_FLASH_WORDS=512 \
-		VARIANTS=cd4053 STRICT_TOOLS=1 AWK=awk "$@"
+	make --no-print-directory -C "$repo" "$PB_TARGET" \
+		CC=true HOSTCC=true "$PB_CC_VAR=$tools/xc8" "$PB_BUILD_DIR_VAR=$PB_BUILD_DIR" \
+		"$PB_FW_BASE_VAR=$PB_FW_BASE" "$PB_TAG_VAR=$PB_TAG" \
+		"$PB_FLASH_VAR=$PB_FLASH_WORDS" \
+		"$PB_VARIANT_VAR=$PB_VARIANT" STRICT_TOOLS=1 AWK=awk "$@"
+}
+
+# Same fake toolchain, but aimed at whichever target owns the variant matrix.
+run_matrix_make() {
+	make --no-print-directory -C "$repo" "$PB_MATRIX_TARGET" \
+		CC=true HOSTCC=true "$PB_CC_VAR=$tools/xc8" "$PB_BUILD_DIR_VAR=$PB_BUILD_DIR" \
+		"$PB_FW_BASE_VAR=$PB_FW_BASE" "$PB_TAG_VAR=$PB_TAG" \
+		"$PB_FLASH_VAR=$PB_FLASH_WORDS" STRICT_TOOLS=1 AWK=awk "$@"
 }
 
 expect_override_rejected() {
@@ -127,17 +165,17 @@ for mode in over-budget huge-count; do
 	checks=$((checks + 1))
 done
 
-expect_override_rejected "an empty flash budget" "PIC_FLASH_WORDS="
-expect_override_rejected "a malformed flash budget" PIC_FLASH_WORDS=malformed
-expect_override_rejected "a negative flash budget" PIC_FLASH_WORDS=-1
-expect_override_rejected "a non-integer flash budget" PIC_FLASH_WORDS=512.0
-expect_override_rejected "a zero flash budget" PIC_FLASH_WORDS=0
+expect_override_rejected "an empty flash budget" "$PB_FLASH_VAR="
+expect_override_rejected "a malformed flash budget" $PB_FLASH_VAR=malformed
+expect_override_rejected "a negative flash budget" $PB_FLASH_VAR=-1
+expect_override_rejected "a non-integer flash budget" $PB_FLASH_VAR=512.0
+expect_override_rejected "a zero flash budget" $PB_FLASH_VAR=0
 expect_override_rejected "a failed budget comparison" \
-	PIC_FLASH_WORDS=41 AWK="$tools/failing-awk"
+	$PB_FLASH_VAR=41 AWK="$tools/failing-awk"
 expect_override_rejected "a status-1 budget comparison failure" \
-	PIC_FLASH_WORDS=41 AWK="$tools/status1-comparison-awk"
+	$PB_FLASH_VAR=41 AWK="$tools/status1-comparison-awk"
 expect_override_rejected "an invalid budget comparison result" \
-	PIC_FLASH_WORDS=41 AWK="$tools/invalid-comparison-awk"
+	$PB_FLASH_VAR=41 AWK="$tools/invalid-comparison-awk"
 expect_override_rejected "a failed percentage calculation" \
 	AWK="$tools/failing-awk"
 expect_override_rejected "an empty percentage result" \
@@ -145,13 +183,13 @@ expect_override_rejected "an empty percentage result" \
 expect_override_rejected "an invalid percentage result" \
 	AWK="$tools/invalid-percentage-awk"
 
-(export FAKE_XC8_MODE=leading-count; run_make PIC_FLASH_WORDS=000512) >/dev/null
+(export FAKE_XC8_MODE=leading-count; run_make $PB_FLASH_VAR=000512) >/dev/null
 "$repo/scripts/validate-ihex.sh" "$hex"
 checks=$((checks + 1))
 
 printf 'stale image\n' > "$hex"
 if (export FAKE_XC8_MODE=over-budget; \
-		run_make PIC_FLASH_WORDS=000512) >/dev/null 2>&1; then
+		run_make $PB_FLASH_VAR=000512) >/dev/null 2>&1; then
 	printf 'FAIL: leading-zero flash budget bypassed the limit\n' >&2
 	exit 1
 fi
@@ -161,7 +199,7 @@ checks=$((checks + 1))
 
 printf 'stale image\n' > "$hex"
 if (export FAKE_XC8_MODE=leading-count; \
-		run_make PIC_FLASH_WORDS=41) >/dev/null 2>&1; then
+		run_make $PB_FLASH_VAR=41) >/dev/null 2>&1; then
 	printf 'FAIL: leading-zero usage count bypassed the limit\n' >&2
 	exit 1
 fi
@@ -198,22 +236,21 @@ fi
 	|| { printf 'FAIL: missing validator left a stale PIC image\n' >&2; exit 1; }
 checks=$((checks + 1))
 
-if run_make "VARIANTS=" >/dev/null 2>&1; then
-	printf 'FAIL: empty PIC variant matrix was accepted\n' >&2
+if run_matrix_make "$PB_MATRIX_VARIANTS_VAR=" >/dev/null 2>&1; then
+	printf 'FAIL: empty %s variant matrix was accepted\n' "$PB_LABEL" >&2
 	exit 1
 fi
 checks=$((checks + 1))
 
-if (export FAKE_XC8_FAIL_NAME=bypass_relay_pic10f322.hex; \
-		run_make "VARIANTS=cd4053 mute relay") >/dev/null 2>&1; then
-	printf 'FAIL: late PIC variant compiler failure was accepted\n' >&2
+if (export FAKE_XC8_FAIL_NAME="$PB_MATRIX_FAIL_IMAGE"; \
+		run_matrix_make "$PB_MATRIX_VARIANTS_VAR=$PB_MATRIX_VARIANTS") >/dev/null 2>&1; then
+	printf 'FAIL: late %s variant compiler failure was accepted\n' "$PB_LABEL" >&2
 	exit 1
 fi
-for image in bypass_cd4053_pic10f322.hex bypass_mute_pic10f322.hex \
-		bypass_relay_pic10f322.hex; do
-	[[ ! -e "$repo/build_pic/$image" ]] \
+for image in $PB_MATRIX_IMAGES; do
+	[[ ! -e "$repo/$PB_BUILD_DIR/$image" ]] \
 		|| { printf 'FAIL: late variant failure left partial PIC image matrix\n' >&2; exit 1; }
 done
 checks=$((checks + 1))
 
-printf 'PIC build validation: %d checks, 0 failures\n' "$checks"
+printf '%s build validation: %d checks, 0 failures\n' "$PB_LABEL" "$checks"

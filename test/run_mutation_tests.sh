@@ -129,6 +129,13 @@ MUTATIONS=(
 "src/bypass_output_tq2_l2_5v_relay.c	s@pin_set_high(RELAY_SET_PIN)@pin_set_high(RELAY_RESET_PIN)@	test-sim-relay	engage pulses the wrong (RESET) coil; relay test catches SET-not-pulsed / RESET-moved"
 # --- CD4053 with-mute output driver --------------------------------------------
 "src/bypass_output_cd4053_with_mute.c	s@BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS)@BYPASS_DELAY_MS(1)@g	test-sim-mute	mute settle window shortened to 1ms; mute-window timing test catches it"
+
+# --- shared core: migrated from the PIC10F320 project (merge, 2026-07-26) ------
+# Its other five model mutants duplicate entries already above; this one does
+# not. It is the oracle for verify_corrupt_state_faults(), the property Phase 3
+# moved into test/formal/test_model_check.c, and it is retargeted from the dead
+# vendored copy to the single verified core.
+"src/bypass_pure.c	s@res.fault = true;@res.fault = false;@	test-model-check	MODEL corrupt-state fault suppressed (verify_corrupt_state_faults catches it)"
 )
 
 # Files copied into each sandbox (all firmware sources + headers + harness +
@@ -151,6 +158,16 @@ copy_tree() {
     # sandbox. Iterating over the subdirs keeps this robust as substrates are
     # added or renamed.
     cp "$PROJ_DIR"/test/*.h "$dst/test/"
+    # PIC10F320's harnesses nest TWO levels deep (test/pic10f320/{equiv,actuation,
+    # fault,gpsim}/), which the single-level loop below cannot reach, and they
+    # include .stc gpsim scripts and .sh helpers that it does not copy either.
+    # Mirror that subtree wholesale; -a keeps the executable bit on
+    # check_fw_coverage.sh. Without this a PIC10F320 mutant builds against a
+    # sandbox missing its own harness and "dies" for the wrong reason -- an
+    # error, not a kill, but an equally misleading one.
+    if [ -d "$PROJ_DIR/test/pic10f320" ]; then
+        cp -a "$PROJ_DIR/test/pic10f320" "$dst/test/"
+    fi
     for sub in "$PROJ_DIR"/test/*/; do
         local name; name="$(basename "$sub")"
         # .c covers most substrates; .cc is the libgpsim PIC soak driver
@@ -291,6 +308,54 @@ PIC_TARGET_MUTATIONS=(
 # un-pet WDT fire (period ~1.057s), so this is killed by the libgpsim soak (which
 # counts resets) over a short window > one WDT period. Gated additionally on
 # gpsim-dev + glib + a C++ compiler.
+# --- PIC10F320 mutants (merged 2026-07-26) -----------------------------------
+# Split by what they NEED, not by what they test: the host lanes want only a C
+# compiler, so they run wherever `make test` runs; the rest need XC8 + gpsim +
+# libgpsim and are gated by the PIC10F320 probe below. Without that split the
+# tool-dependent ones would "survive" on any box lacking the toolchain -- the
+# exact false-pass the existing PIC probe was written to prevent.
+PIC320_HOST_MUTATIONS=(
+"src/bypass_mcu_pic10f320.c	s@++ctx_.debounce_counter@--ctx_.debounce_counter@	pic320-test-equiv	FW integrator: increment-on-press becomes decrement (never reaches threshold)"
+"src/bypass_mcu_pic10f320.c	s@ctx_.debounce_counter >= PRESSED_THRESH@ctx_.debounce_counter > PRESSED_THRESH@	pic320-test-equiv	FW press threshold off-by-one (>= becomes >): 1-tick latency divergence"
+"src/bypass_mcu_pic10f320.c	s@if (0U == ctx_.debounce_counter)@if (0U != ctx_.debounce_counter)@	pic320-test-equiv	FW release re-arm condition inverted (lock-out never clears / clears wrongly)"
+"src/bypass_mcu_pic10f320.c	s@#define PRESSED_THRESH  (8U)@#define PRESSED_THRESH  (4U)@	pic320-test-equiv	FW press threshold shortened 8->4 (diverges from the model's 8)"
+"src/bypass_mcu_pic10f320.c	s@#define RELEASE_THRESH  (25U)@#define RELEASE_THRESH  (15U)@	pic320-test-equiv	FW release lock-out shortened 25->15 (diverges from the model)"
+"src/bypass_mcu_pic10f320.c	s@ctx_.program_state = RELEASE_DEBOUNCE_WAIT;@ctx_.program_state = PRESS_DEBOUNCE_WAIT;@	pic320-test-equiv	FW power-on-pressed: wrong program_state (held switch could spuriously engage)"
+"src/bypass_mcu_pic10f320.c	s@(uint8_t)(0x0FU ^ BYPASS_OUTPUT_DDR_MASK)@(uint8_t)(TRISA \& 0x0FU)@	pic320-test-fault-variants	FW output-pin SEU check neutered (exact-TRISA compare made a tautology; no direction fault ever detected)"
+"src/bypass_mcu_pic10f320.c	s@(0U == wpu_global)@1U@	pic320-test-fault-variants	FW global footswitch pull-up SEU check neutered (nWPUEN corruption never detected)"
+"src/bypass_mcu_pic10f320.c	s@(ctx_.effect_state > ENGAGED)@(ctx_.effect_state > 99U)@	pic320-test-fault-variants	FW effect_state range guard defeated (corrupt effect_state never forces reset)"
+"src/bypass_mcu_pic10f320.c	s@(ctx_.debounce_counter > RELEASE_THRESH)@(ctx_.debounce_counter > 255U)@	pic320-test-fault-variants	FW counter range guard defeated (corrupt debounce_counter never forces reset)"
+"src/bypass_mcu_pic10f320.c	s@WPUA = (uint8_t)(1U << FOOTSW_PIN);@WPUA |= (uint8_t)(1U << FOOTSW_PIN);@	pic320-test-fault-variants	FW pull-up init regressed to read-modify-write: WPUA reset value 0x0F preserved instead of exact RA3-only 0x08"
+"src/bypass_mcu_pic10f320.c	s@WPUA \& 0x0FU@WPUA \& (1U << FOOTSW_PIN)@	pic320-test-fault-variants	FW pull-up integrity guard masks away unexpected RA0..RA2 WPUA latches"
+"src/bypass_mcu_pic10f320.c	s@(HFINTOSC_2MHZ_IRCF == OSCCONbits.IRCF)@1U@	pic320-test-fault-variants	FW clock-select (OSCCON IRCF) SEU guard defeated (corrupt clock never forces reset)"
+"src/bypass_mcu_pic10f320.c	s@(WDT_WDTPS_256MS == WDTCONbits.WDTPS)@1U@	pic320-test-fault-variants	FW watchdog-period (WDTCON WDTPS) SEU guard defeated (corrupt WDT period never forces reset)"
+"src/bypass_mcu_pic10f320.c	s@(TMR2_PR2_PERIOD == PR2)@1U@	pic320-test-fault-variants	FW tick-period (PR2) SEU guard defeated (corrupt 1 ms reload never forces reset)"
+"src/bypass_mcu_pic10f320.c	s@(TMR2_T2CON_CONFIG == T2CON)@1U@	pic320-test-fault-variants	FW tick-control (T2CON) SEU guard defeated (corrupt prescale/enable never forces reset)"
+"src/bypass_mcu_pic10f320.c	s@(0U == (uint8_t)(ANSELA & BYPASS_OUTPUT_DDR_MASK))@1U@	pic320-test-fault-variants	FW digital-port (ANSELA) SEU guard defeated (output pin re-selected analog never forces reset)"
+"src/bypass_mcu_pic10f320.c	s@ANSELA & BYPASS_OUTPUT_DDR_MASK@ANSELA \& 0x01U@	pic320-test-fault-variants	FW ANSELA sanity mask narrowed to RA0 only (RA1/RA2 analog re-selection undetected)"
+"src/bypass_mcu_pic10f320.c	s@LATA |=  (uint8_t)(1U << LED_PIN)@LATA \&= (uint8_t)~(1U << LED_PIN)@	pic320-test-equiv	FW set_engaged LED output inverted (RA0 stays dark when ENGAGED)"
+"src/bypass_mcu_pic10f320.c	s@hw_x4053_ctl_low();@hw_x4053_ctl_high();@	PIC320_VARIANT=cd4053-simple pic320-test-actuation	FW CD4053 control routed the wrong way (set_engaged drives the bypass level); settled ENGAGED LATA 0x1 not 0x3 (RA0 unaffected, so equiv/gpsim-RA0 miss it; killed by the actuation settled-LATA check)"
+"src/bypass_mcu_pic10f320.c	s@static void hw_x4053_ctl_high(void) { LATA \&= (uint8_t)~(1U << CD4053_PIN); }@static void hw_x4053_ctl_high(void) { LATA |=  (uint8_t)(1U << CD4053_PIN); }@	PIC320_VARIANT=cd4053-simple pic320-test-actuation	FW CD4053 control-pin drive polarity inverted at the definition (ctl_high drives the pin HIGH not LOW); bypass control pin settles wrong (BYPASS 0x2 not 0x0), RA0 unaffected so equiv/gpsim-RA0 miss it"
+"src/bypass_mcu_pic10f320.c	s@(0U == (PORTA & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (PORTA \& (uint8_t)(1U << FOOTSW_PIN)))@	pic320-test-equiv	FW footswitch read polarity inverted (toggles on release, not press)"
+"src/bypass_mcu_pic10f320.c	s@hw_relay_set_pin_set_high(); // pulse set coil@hw_relay_reset_pin_set_high(); // MUTANT@	PIC320_VARIANT=tq2-relay pic320-test-actuation	FW relay ENGAGE pulses the RESET coil instead of SET (relay latches backwards; settles to same LATA, so equiv/gpsim miss it)"
+"src/bypass_mcu_pic10f320.c	s@hw_relay_reset_pin_set_high(); // pulse reset coil@hw_relay_set_pin_set_high(); // MUTANT@	PIC320_VARIANT=tq2-relay pic320-test-actuation	FW relay BYPASS pulses the SET coil instead of RESET (relay latches backwards)"
+"src/bypass_mcu_pic10f320.c	s@#  define CD4053_MUTE_DELAY_MS (5U)@#  define CD4053_MUTE_DELAY_MS (0U)@	PIC320_VARIANT=cd4053-mute pic320-test-actuation	FW cd4053-mute pre-switch mute window defeated (5->0 ms): audible click on every switch"
+"src/bypass_mcu_pic10f320.c	s@#  define CD4053_CTL1     (1U) // RA1@#  define CD4053_CTL1     (2U) // MUTANT@;s@#  define CD4053_CTL2     (2U) // RA2@#  define CD4053_CTL2     (1U) // MUTANT@	PIC320_VARIANT=cd4053-mute pic320-test-actuation	FW cd4053-mute CTL1/CTL2 pins swapped (mute applied to wrong control; mid-mute LATA pattern wrong, settles to same LATA so equiv/gpsim miss it)"
+"src/bypass_mcu_pic10f320.c	s@    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@    hw_x4053_ctl1_low(); // MUTANT: reassert ENGAGED at startup\\n    hw_x4053_ctl2_low();\\n\\n    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@	PIC320_VARIANT=cd4053-mute pic320-test-actuation	FW cd4053-mute startup reasserts ENGAGED before MUTE, traversing INVALID/ENGAGED routing instead of remaining continuously in BYPASS"
+)
+
+PIC320_TOOL_MUTATIONS=(
+"src/bypass_mcu_pic10f320.c	s@PIR1bits.TMR2IF = 0;@@	pic320-test-gpsim	FW TMR2IF tick-flag clear removed: 1 ms poll never re-blocks, loop free-runs, debounce window collapses (host forces TMR2IF=1, so only gpsim's PRESS1_EARLY catches it)"
+"src/bypass_mcu_pic10f320.c	s@WPUA = (uint8_t)(1U << FOOTSW_PIN);@WPUA |= (uint8_t)(1U << FOOTSW_PIN);@	PIC320_VARIANT=cd4053-simple PIC320_TARGET_VARIANT=cd4053-simple pic320-test-target	TARGET pull-up init regressed to read-modify-write; exact startup WPUA check catches retained RA0..RA2 latches"
+"src/bypass_mcu_pic10f320.c	s@wpua_latches == (uint8_t)(1U << FOOTSW_PIN)@0U != (wpua_latches \& (uint8_t)(1U << FOOTSW_PIN))@	PIC320_VARIANT=cd4053-simple PIC320_TARGET_VARIANT=cd4053-simple pic320-test-target	TARGET exact WPUA guard weakened to RA3-present only; target fault injections catch extra output-pin latches"
+"src/bypass_mcu_pic10f320.c	s@static uint8_t hw_output_pins_intact(void) {@static uint8_t hw_output_pins_intact(void) { return 1U;@	PIC320_VARIANT=cd4053-simple PIC320_TARGET_VARIANT=cd4053-simple pic320-test-target	TARGET output-direction guard disabled; simulated-core TRISA injections no longer recover"
+"src/bypass_mcu_pic10f320.c	s@ANSELA & BYPASS_OUTPUT_DDR_MASK@ANSELA \& 0x01U@	PIC320_VARIANT=cd4053-simple PIC320_TARGET_VARIANT=cd4053-simple pic320-test-target	TARGET ANSELA sanity mask narrowed to RA0; RA1/RA2 analog re-selection goes undetected"
+"src/bypass_mcu_pic10f320.c	s@    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@    hw_x4053_ctl1_low(); // MUTANT: reassert ENGAGED at startup\n    hw_x4053_ctl2_low();\n\n    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@	PIC320_VARIANT=cd4053-mute PIC320_TARGET_VARIANT=cd4053-mute pic320-test-target	TARGET mute startup reasserts ENGAGED before MUTE; physical startup transition trace catches it"
+"src/bypass_mcu_pic10f320.c	s@#  define CD4053_MUTE_DELAY_MS (5U)@#  define CD4053_MUTE_DELAY_MS (1U)@	PIC320_VARIANT=cd4053-mute PIC320_TARGET_VARIANT=cd4053-mute pic320-test-target	TARGET mute window shortened below 5ms; cycle-exact target I/O timing catches it"
+"src/bypass_mcu_pic10f320.c	s@#  define TQ2_L2_5V_PULSE_MS (12U)@#  define TQ2_L2_5V_PULSE_MS (1U)@	PIC320_VARIANT=tq2-relay PIC320_TARGET_VARIANT=tq2-relay pic320-test-target	TARGET relay pulse shortened below the 4ms datasheet minimum; cycle-exact target I/O timing catches it"
+"src/bypass_mcu_pic10f320.c	/void main(void)/,\$s@CLRWDT();@(void)0; /* MUTANT: no main-loop WDT pet */@	PIC320_VARIANT=cd4053-simple PIC320_SOAK_DURATION_MS=$PIC_SOAK_MUT_MS PIC320_SOAK_LIVENESS_INTERVAL_MS=$PIC_SOAK_MUT_MS pic320-test-soak	SOAK main-loop WDT pet removed; reset notifier catches the un-pet watchdog within the short mutation window"
+)
+
 PIC_SOAK_MUTATIONS=(
 "src/bypass_mcu_pic10f322.c	s@{ CLRWDT(); }@{ (void)0; /* MUTANT: no WDT pet */ }@	PIC WDT pet (CLRWDT) removed; soak reset counter trips within ~1s of an un-pet WDT"
 )
@@ -335,6 +400,14 @@ core_cat="${#MUTATIONS[@]} core/AVR mutants"
 for entry in "${MUTATIONS[@]}"; do
     IFS=$'\t' read -r file sed_expr target desc <<< "$entry"
     job_specs+=("$core_cat$US""make$US$target$US$file$US$sed_expr$US$desc")
+done
+
+# PIC10F320 host-lane mutants: only a C compiler is required, so these ride with
+# the core batch and are never skipped.
+p320_host_cat="${#PIC320_HOST_MUTATIONS[@]} PIC10F320 host mutants (equiv/actuation/fault)"
+for entry in "${PIC320_HOST_MUTATIONS[@]}"; do
+    IFS=$'\t' read -r file sed_expr target desc <<< "$entry"
+    job_specs+=("$p320_host_cat$US""make$US$target$US$file$US$sed_expr$US$desc")
 done
 
 # --- PIC toolchain probe ------------------------------------------------------
@@ -385,7 +458,42 @@ else
 fi
 rm -rf "$PIC_BASE"
 
+# --- PIC10F320 toolchain probe -----------------------------------------------
+# Same discipline as the PIC10F322 probe above: the tool-dependent PIC10F320
+# mutants are enabled only when the tools exist AND the UNMUTATED tree genuinely
+# passes. pic320-test-{gpsim,target,soak} all exit 0 when their tools are absent
+# (the $(SKIP) contract), so without this an unguarded mutant is a false
+# "survivor" on any host without XC8/gpsim/libgpsim.
+PIC320_TOOL_OK=0
+echo
+echo "=== PIC10F320 toolchain probe (gates its tool-dependent mutants) ==="
+P320_BASE="$(mktemp -d)"
+copy_tree "$P320_BASE"
+if make -C "$P320_BASE" pic320-variants >/dev/null 2>&1 \
+   && command -v "$GPSIM" >/dev/null 2>&1 \
+   && command -v c++ >/dev/null 2>&1 \
+   && [ -f "$PIC_SOAK_GPSIM_INC/sim_context.h" ] \
+   && pkg-config --exists glib-2.0 2>/dev/null; then
+    if make -C "$P320_BASE" pic320-test-target-variants >/dev/null 2>&1; then
+        PIC320_TOOL_OK=1
+        echo "XC8 + gpsim + libgpsim present, baseline PASS -> PIC10F320 tool mutants ENABLED"
+    else
+        echo "PIC10F320 target baseline did not pass cleanly -> its tool mutants SKIPPED"
+    fi
+else
+    echo "XC8/gpsim/libgpsim absent -> PIC10F320 tool mutants SKIPPED"
+fi
+rm -rf "$P320_BASE"
+
 # Collect the enabled PIC subsets onto the same work list.
+if [ "$PIC320_TOOL_OK" -eq 1 ]; then
+    p320_tool_cat="${#PIC320_TOOL_MUTATIONS[@]} PIC10F320 target mutants (gpsim/libgpsim/soak)"
+    for entry in "${PIC320_TOOL_MUTATIONS[@]}"; do
+        IFS=$'\t' read -r file sed_expr target desc <<< "$entry"
+        job_specs+=("$p320_tool_cat$US""make$US$target$US$file$US$sed_expr$US$desc")
+    done
+fi
+
 if [ "$PIC_GPSIM_OK" -eq 1 ]; then
     gpsim_cat="${#PIC_GPSIM_MUTATIONS[@]} PIC-shell mutants (gpsim register-level)"
     for entry in "${PIC_GPSIM_MUTATIONS[@]}"; do
@@ -479,6 +587,12 @@ if [ "$PIC_GPSIM_OK" -eq 1 ]; then
 else
     echo "PIC-shell mutants: SKIPPED (PIC toolchain absent -- not gated on this host)"
     pic_skipped=$((pic_skipped + ${#PIC_GPSIM_MUTATIONS[@]} + ${#PIC_SOAK_MUTATIONS[@]} + ${#PIC_TARGET_MUTATIONS[@]}))
+fi
+if [ "$PIC320_TOOL_OK" -eq 1 ]; then
+    echo "PIC10F320 mutants: RAN (host lanes + gpsim/libgpsim/soak)"
+else
+    echo "PIC10F320 mutants: host lanes RAN; target/soak SKIPPED (toolchain absent)"
+    pic_skipped=$((pic_skipped + ${#PIC320_TOOL_MUTATIONS[@]}))
 fi
 echo "=== mutation summary: $killed killed, $survived survived, $errored errored, $pic_skipped PIC skipped ==="
 if [ "$survived" -ne 0 ]; then

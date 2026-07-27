@@ -151,4 +151,55 @@ fi
 	|| { printf 'FAIL: pic-test-gpsim validated gpsim before its timeout: %s\n' "$output" >&2; exit 1; }
 checks=$((checks + 1))
 
+# Same for the PIC10F320 lane's public target. The wrappers themselves are
+# SHARED -- the PIC10F320 merge folded onto these exact scripts rather than
+# forking them (§4), so every check above already covers both chips. What is NOT
+# otherwise covered is the mechanism that makes sharing possible: pic320-test-gpsim
+# must reach the wrappers with PIC_GPSIM_PROC overridden to the 320, and must
+# still validate its timeout before the optional-tool skip.
+if output=$(
+	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL
+	_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" "${MAKE_CMD[@]}" --no-print-directory \
+		-C "$ROOT" --old-file=pic320 pic320-test-gpsim STRICT_TOOLS= \
+		GPSIM="$tools/missing-gpsim" GPSIM_TIMEOUT_SECONDS=0 2>&1
+); then
+	printf 'FAIL: pic320-test-gpsim skipped an invalid timeout\n' >&2
+	exit 1
+fi
+[[ "$output" == *"GPSIM_TIMEOUT_SECONDS must be a positive decimal number"* \
+	&& "$output" != *"gpsim not installed"* ]] \
+	|| { printf 'FAIL: pic320-test-gpsim validated gpsim before its timeout: %s\n' "$output" >&2; exit 1; }
+checks=$((checks + 1))
+
+# The PIC10F320 lane reaches the SHARED wrappers with its own processor.
+# Checked BEHAVIOURALLY, by recording the -p argument the wrapper actually hands
+# gpsim -- not by grepping the source, which a rename would slip past (a
+# substring grep for PIC_GPSIM_PROC still matches PIC_GPSIM_PROC_RENAMED).
+# If this regresses, the PIC10F320 lanes silently simulate a PIC10F322.
+cat > "$tools/proc-recording-gpsim" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+for a in "$@"; do
+	case "$a" in -p*) printf '%s\n' "${a#-p}" >> "${FAKE_PROC_LOG:?}" ;; esac
+done
+exit 1   # fail fast: we only care about the argv, not a full simulation
+EOF
+chmod 750 "$tools/proc-recording-gpsim"
+# The wrapper refuses a missing image before it ever calls gpsim, so give it a
+# file to find; its contents are irrelevant because the fake exits immediately.
+: > "$work/probe.hex"
+for probe_proc in p10f320 p10f322; do
+	proc_log="$work/proc.$probe_proc"
+	: > "$proc_log"
+	(
+		export GPSIM="$tools/proc-recording-gpsim" GPSIM_TIMEOUT_SECONDS=5 \
+			FAKE_PROC_LOG="$proc_log" PIC_GPSIM_PROC="$probe_proc"
+		"$ROOT/test/pic/run_gpsim_test.sh" "$work/probe.hex" 0x1 >/dev/null 2>&1 || true
+	)
+	grep -qx "$probe_proc" "$proc_log" \
+		|| { printf 'FAIL: run_gpsim_test.sh did not pass -p%s to gpsim (saw: %s)\n' \
+			"$probe_proc" "$(tr '\n' ' ' < "$proc_log")" >&2; exit 1; }
+	checks=$((checks + 1))
+done
+
 printf 'gpsim wrapper validation: %d checks, 0 failures\n' "$checks"

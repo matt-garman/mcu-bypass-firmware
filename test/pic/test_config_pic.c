@@ -39,7 +39,16 @@
 #include <string.h>
 
 //////////////////////////////////////////////////////////////////////////////
-// CONFIG word location + field map (PIC10F322)
+// Device label for the report line. The CONFIG address, layout, implemented-bit
+// mask and expected word are IDENTICAL on the PIC10F322 and PIC10F320, so one
+// checker serves both chips; only the printed device name differs. The
+// PIC10F320 lane overrides this on the command line (merge plan §4:
+// "one checker with device-accurate labels ... for both chips").
+#ifndef PIC_DEVICE_NAME
+#  define PIC_DEVICE_NAME "PIC10F322"
+#endif
+
+// CONFIG word location + field map (identical on PIC10F322 and PIC10F320)
 //
 // The CONFIG word lives at PROGRAM-MEMORY WORD address 0x2007. Intel HEX uses
 // BYTE addresses, and PIC program words are stored little-endian (low byte
@@ -303,7 +312,7 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    printf("PIC10F322 CONFIG-word verification (word addr 0x%04X / byte 0x%04X):\n",
+    printf(PIC_DEVICE_NAME " CONFIG-word verification (word addr 0x%04X / byte 0x%04X):\n",
            (unsigned)CONFIG_WORD_ADDR, (unsigned)CONFIG_BYTE_ADDR);
 
     for (int a = 1; a < argc; a++) {

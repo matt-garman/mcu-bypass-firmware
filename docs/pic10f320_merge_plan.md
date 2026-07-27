@@ -2006,7 +2006,85 @@ the empty suppression file, `test/model_step.h`, `test/soak_timing_config.h`,
 holds exactly one copy of each. `test/model/README.md` is deliberately left for
 Phase 7 with the rest of the documentation disposition.
 
-### 15.7 Tool inventory, and the one recorded blocker
+### 15.7 Phase 4 — build, analysis and target validation (in progress)
+
+**Landed and verified 2026-07-26.** All three variants unless noted.
+
+| Lane | Result |
+| --- | --- |
+| `pic320` / `pic320-variants` | 220 / 241 / 244 words of 256, IHEX-validated |
+| `pic320-analyze` (cppcheck + MISRA) | clean, **zero unwaived** findings |
+| `pic320-test-config` | 45 checks, 0 failures — CONFIG `0x389E` on all three |
+| `pic320-test-fault-target` | **22 / 22 / 22** checks, 0 failures |
+| `pic320-test-io` | 25 / 26 / 36 checks, 0 failures |
+| `pic320-test-lockstep` | 3005 checks each, 0 mismatches, 66/66 states |
+| `pic320-test-target-variants` | **EXIT=0**, fail-closed matrix |
+| `pic320-test-soak` | PASS on all three at short duration |
+
+**The §15.5 evidence gap is closed.** §15.5 recorded that the exact-TRISA edits to
+`test_fault_pic.cc` were *transferred* from a scratch clone rather than
+reproduced here, because nothing built from the import prefix. The target fault
+lane now reports exactly **22 checks on every variant** — the `EXPECTED_CHECKS`
+that edit sets, and a uniform count that only holds once cd4053-simple's RA2
+negative control becomes a positive case. Verified in position.
+
+Lock-step deserves its own note: the real emitted image, running in a simulated
+PIC10F320, tracked against **`src/bypass_pure.c`** — the shared verified core, not
+a vendored copy — for 3000 iterations per variant with zero divergence. That is
+the inlining seam of §8 being closed against the same code every other target
+compiles into its shipping image.
+
+**FOLD/FORK dispositions, each decided from a non-comment diff.** §4 predicted
+more reconciliation than existed:
+
+| Asset | Disposition | Actual divergence |
+| --- | --- | --- |
+| `power_on_pressed.stc` | FOLD | executable stimulus byte-identical |
+| `run_gpsim*.sh` | FOLD | default `PROC` only — already parameterized on `PIC_GPSIM_PROC` |
+| `test_soak_pic.cc` | FOLD | parent ahead (`SOAK_LIVENESS_DUE`), as §4 predicted |
+| `test_config_pic.c` | PARAMETERIZE | **one printf label.** Address, layout, mask and expected word were already identical, so `PIC_DEVICE_NAME` is the whole change |
+| `test_{fault,io,lockstep}_pic.cc`, `footswitch_toggle.stc` | FORK | genuinely chip-specific → `test/pic10f320/gpsim/` |
+
+**§6.13 gate: ran twice, then retired (D4).** Phase 2 against the child's signed
+v0.9.5 images — PASSED 3/3. Phase 4 against the §15.5 rebaselined hashes, using
+the *hardened* build rule — PASSED 3/3, which additionally proves the budget
+gate, IHEX validation and cleanup traps changed no emitted bytes. Both hash sets
+are recorded in §15.4/§15.5 and the phase commits. Retired because its baseline
+lives under `_incoming_pic10f320/`, which Phase 7 deletes; a gate whose reference
+disappears is worse than none. The cost is stated plainly: per §14.2 nothing at
+the merged tip now watches emitted bytes.
+
+`make clean` removes all 49 PIC10F320 artifacts and leaves the shared
+top-level `coverage/` intact (§5.7 verified by sentinel file, not by inspection).
+
+**Three findings from building the analysis lane, all worth keeping:**
+
+- **The MISRA lane was vacuous twice before it was real.** v1 grepped stdout
+  instead of using cppcheck's exit status; v2 still passed an injected violation
+  because it omitted `--enable=style`, and *MISRA addon findings are
+  style-severity*. Any new cppcheck gate must be negative-tested with a real
+  injected violation before its "clean" is believed.
+- **A bare `#` line in `test/misra_suppressions.txt` breaks every lane** with
+  `cppcheck: error: Failed to add suppression. No id.` — and it does not say
+  which line. That file is shared by the AVR, 322 and 320 gates, so one stray
+  comment line takes all three down.
+- **The 320 needed two documented waivers, both from one root cause.** Its heavy
+  in-function `static_assert` use costs the addon its device symbol table, giving
+  `misra-config` on `PIR1bits`/`TMR2IF` and two false "unused macro" (2.5)
+  reports for macros consumed only inside those asserts. Bisected by stripping
+  the asserts with every other flag unchanged; the identical statement against
+  the identical DFP header analyses clean in the 322. Both are **file-scoped**
+  (D-4) — note the 322 lane suppresses `misra-config` *globally* via a cppcheck
+  flag, so the merge narrows that waiver rather than importing it, and the 320 is
+  now the stricter of the two PIC lanes.
+
+**Still outstanding in Phase 4:** the mutation topology (§6.6 — the child's
+driver is still at `_incoming_pic10f320/test/run_mutation_tests.sh`, carrying the
+two retargeted output-direction mutants that remain unverified in position),
+`pic320-test-build` fake-XC8 regressions, and `test/test_pic_build.sh` /
+`test_target_matrix.sh` / `test_gpsim_wrappers.sh` FOLD-or-FORK resolution.
+
+### 15.8 Tool inventory, and the one recorded blocker
 
 §6.9 requires unavailable tools to be recorded as blockers rather than passes.
 Verified present on the execution host: XC8 V3.10 at the pinned
