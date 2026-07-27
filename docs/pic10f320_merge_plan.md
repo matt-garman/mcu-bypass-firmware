@@ -1173,7 +1173,9 @@ shared-asset work rather than in the PIC10F320 lanes — and the coverage gate m
 be wired before the vendored core is deleted, or the only thing measuring the real
 core disappears between two green commits.
 
-**Phase 4 — Build and target validation.** Add hardened three-variant XC8
+**Phase 4 — Build and target validation.** **Executed 2026-07-26 — see §15.7**
+**for the results, the FOLD/FORK dispositions and the defects it exposed.**
+Add hardened three-variant XC8
 rules, fake-XC8 regressions, generic CONFIG verification, CLI gpsim, and
 PIC10F320-specific libgpsim fault/lockstep/I/O lanes. Reuse the parent soak
 driver/timing contract. Port every false-pass fix in §6 and require strict tool
@@ -1206,8 +1208,13 @@ tool contract. Add a strict full-tool hosted PIC10F320 job (or two-chip PIC
 matrix) covering every unique child layer and fail-closed mutation. Update
 artifacts, job dependencies, local CI, tool assertions, and skip semantics.
 Optionally add `test-all-targets` as the explicit full-tool aggregate.
+**Executed 2026-07-26 — see §15.9** **for the results, the declined
+`test-all-targets`, and the skip-guard defect the extended strict-tools
+inventory exposed.**
 
-**Phase 6 — Release integration.** Implement one canonical expected-product
+**Phase 6 — Release integration.** *(Executed 2026-07-27 — see §15.10 for the
+results, the real-data global-omission negative test, and the two deliberate
+omissions.)* Implement one canonical expected-product
 set, exactly three PIC10F320 release images, the dedicated build/reproduction
 directory, all release-script metadata and validation, three per-variant
 24-hour-equivalent soaks, strict target/mutation gates, generated documentation,
@@ -1329,6 +1336,11 @@ the assurance comparison rather than restating it.
 
 ## 10. Release and versioning
 
+*Implemented 2026-07-27 — see §15.10. The canonical-set, image-naming,
+classifier, soak and reproduction bullets have landed; the `CHANGELOG.md`
+repair, the child `release/v0.9.*` disposition and the `v0.10.0` tag itself are
+Phases 7 and 8.*
+
 - Parent `release/<ver>/` already mixes MCU images. Exactly **three**
   PIC10F320 images join each future unified release: `cd4053-simple`,
   `cd4053-mute`, and `tq2-relay`; no historical `tmux4053-*` image returns.
@@ -1397,6 +1409,9 @@ the assurance comparison rather than restating it.
 ---
 
 ## 11. CI
+
+*Implemented 2026-07-26 — see §15.9. Everything below except the `release.yml`
+bullet has landed; that bullet is Phase 6.*
 
 - Keep the routine host `verify` job tool-independent. It may run
   `pic320-test-host`, but it must not acquire an accidental XC8/gpsim
@@ -1811,7 +1826,7 @@ Two incidental confirmations, so they are not re-derived: the parent's existing
 `build_pic10f320/*.hex` is already ignored by the global `*.hex` rule, though
 the directory still needs its own entry in Phase 2 for non-HEX artifacts.
 
-### 15.4 Phase 2 — host scaffolding landed 2026-07-26 (firmware move pending)
+### 15.4 Phase 2 — relocation and host lanes, 2026-07-26 (COMPLETE)
 
 Relocated to `test/pic10f320/{equiv,actuation,fault}/` (plain `mv`, index left
 for the user to stage). Includes repointed off the vendored model and onto the
@@ -2006,7 +2021,7 @@ the empty suppression file, `test/model_step.h`, `test/soak_timing_config.h`,
 holds exactly one copy of each. `test/model/README.md` is deliberately left for
 Phase 7 with the rest of the documentation disposition.
 
-### 15.7 Phase 4 — build, analysis and target validation (in progress)
+### 15.7 Phase 4 — build, analysis and target validation (COMPLETE)
 
 **Landed and verified 2026-07-26.** All three variants unless noted.
 
@@ -2078,11 +2093,108 @@ top-level `coverage/` intact (§5.7 verified by sentinel file, not by inspection
   flag, so the merge narrows that waiver rather than importing it, and the 320 is
   now the stricter of the two PIC lanes.
 
-**Still outstanding in Phase 4:** the mutation topology (§6.6 — the child's
-driver is still at `_incoming_pic10f320/test/run_mutation_tests.sh`, carrying the
-two retargeted output-direction mutants that remain unverified in position),
-`pic320-test-build` fake-XC8 regressions, and `test/test_pic_build.sh` /
-`test_target_matrix.sh` / `test_gpsim_wrappers.sh` FOLD-or-FORK resolution.
+**Mutation topology (§6.6) — merged, 74 mutants, all killed.** The child's 42
+resolve to 36 PIC10F320 firmware mutants plus 6 model mutants, five of which
+duplicate entries already in the parent driver. The sixth does not: it is the
+oracle for `verify_corrupt_state_faults()`, the property Phase 3 migrated, and
+it is retargeted from the dead vendored copy to `src/bypass_pure.c` — verified
+killed before being relied on. Final tally, `MUTATION_ALLOW_SKIP=0`:
+**74 killed, 0 survived, 0 errored, 0 skipped.**
+
+Mutants are split by what they *need*, not by what they test: 27 host-lane ones
+require only a C compiler and ride with the core batch unskippable; 9 require
+XC8 + gpsim + libgpsim and sit behind a new PIC10F320 probe that verifies the
+**unmutated** tree genuinely passes first. Without that split they would
+"survive" on any host lacking the toolchain — the precise false-pass the
+existing PIC probe was written to prevent. Skip accounting is wired too, so a
+partial run cannot read as full PIC10F320 coverage.
+
+`copy_tree` needed fixing for this: its single-level `test/*/` loop could not
+reach `test/pic10f320/{equiv,actuation,fault,gpsim}/`, and it copied neither
+`.stc` scripts nor `.sh` helpers. A PIC10F320 mutant would have built against a
+sandbox missing its own harness and died for the wrong reason — an *error*
+rather than a kill, but an equally misleading green.
+
+**This also closes the last §15.5 evidence gap.** That section recorded the two
+retargeted mutants in `run_mutation_tests.sh` as *transferred* rather than
+reproduced, because nothing built from the import prefix. Both now ran in the
+merged tree and were killed. No §6.11 evidence remains un-reproduced here.
+
+**The three shared-name harness regressions (§4) — FOLD, not FORK.** One script
+per concern now covers both chips:
+
+| Script | Mechanism | Result |
+| --- | --- | --- |
+| `test_pic_build.sh` | `PB_*` knobs (target, build dir, image naming, budget, matrix) | 28 checks × 2 chips |
+| `test_target_matrix.sh` | `TM_*` knobs (target, variants variable, supported set) | 5 checks × 2 chips |
+| `test_gpsim_wrappers.sh` | *no folding needed* — see below | 28 checks (was 25) |
+
+`test_gpsim_wrappers.sh` is the interesting one: it is already chip-agnostic
+(it unsets `PIC_GPSIM_PROC` and drives the wrappers through a fake gpsim), and
+because the PIC10F320 lane reuses those exact wrapper files rather than forking
+them, every existing check already covered both chips. What was *not* covered
+is the override mechanism that makes the sharing work, so it gains a check that
+the wrapper hands gpsim the right `-p` processor — recorded **behaviourally**
+from gpsim's argv, after a first attempt using a source `grep` proved useless
+(a substring match for `PIC_GPSIM_PROC` still matches `PIC_GPSIM_PROC_RENAMED`).
+
+Supporting these folds, `pic320-test-target-variants` was rewritten to mirror
+the parent's Make-function guard exactly — empty, duplicate **and unsupported**
+matrices, rejected on stderr with exit 2 — and gained
+`override PIC320_VARIANTS_SUPPORTED` so a command-line matrix cannot whitelist
+itself. The unsupported-name probe uses `tmux4053-simple`, the retired variant
+§1 says must never reappear.
+
+**Two defects this phase exposed in its own work**, both surfaced by *running*
+the folded regressions rather than reading them:
+
+- `pic320-variants` left a **partial image matrix** when one variant failed —
+  a half-built release set, exactly the hazard §14.8 describes. It now removes
+  the whole set on any failure.
+- The budget comparison ported from the child was **weaker** than the parent's.
+  `exit !(a > b)` conflates "awk says not over budget" with "awk failed", so a
+  fake awk exiting 1 passes straight through. Replaced with the parent's
+  `print (a > b ? "gt" : "le")` form, which treats any nonzero status as a
+  failure, validates the printed token, and checks the percentage's format.
+  Where the two projects' hardening differs, the merge should take the stronger
+  side rather than the imported one by default.
+
+A third near-miss is worth recording as method: the PIC10F320 matrix check
+initially *passed for the wrong reason* — a multi-word `PIC320_VARIANT` tripped
+the `$(error)` guard rather than the injected compiler failure. It was caught
+only by asking why it passed. Together with the twice-vacuous MISRA lane above,
+that is three gates in this phase that reported success while proving nothing.
+**Assume a new gate is vacuous until a deliberately broken input makes it fail.**
+
+**Phase-4 green boundary, against the committed tree** (`af8bb93`, worktree
+clean): `make test` → `EXIT=0`, zero `FAIL`/`ERROR` lines, with every new and
+folded lane present in the run —
+
+```
+state-space model check:              2157 checks, 0 failures   (was 2153)
+PIC build validation:                   28 checks, 0 failures
+PIC10F320 build validation:             28 checks, 0 failures
+PIC target-variant matrix validation:    5 checks, 0 failures
+PIC10F320 target-variant matrix:         5 checks, 0 failures
+gpsim wrapper validation:               28 checks, 0 failures   (was 25)
+golden-model line coverage:          99.35% (floor 90%)
+verified-core line coverage:        100.00% (floor 95%)
+```
+
+**Phases 0–4 are complete: this is §7's minimum coherent merge.** The merged
+tree builds and validates all three PIC10F320 variants against a single verified
+core, holds exactly one copy of every shared asset, and the child repository
+remains unarchived as the operational fallback. Per §7 this is a defensible
+resting state that can be left indefinitely; the one bad place to stop is after
+Phase 6, where release machinery would name images no CI gate produces.
+
+**Carried into later phases.** Six files remain under `_incoming_pic10f320/`:
+`test/README.md` and `test/model/README.md` (Phase 7 documentation);
+`test_make_serialization.sh`, `test_release_images.sh` and `test_soak_timing.sh`
+(Phase 6 release integration, still needing their FOLD/FORK calls); and
+`run_mutation_tests.sh`, which is now **fully superseded** — its mutants live in
+the parent driver — so it is dead weight awaiting Phase 7's disposition sweep,
+not outstanding work.
 
 ### 15.8 Tool inventory, and the one recorded blocker
 
@@ -2102,3 +2214,319 @@ links bitcode (`test/test_klee_build.sh`) and does not execute the solver. But
 locally. Phase 3 may verify the *link* recipe here; the executed-proof evidence
 must come from CI or a host with KLEE installed, and a local pass of
 `test-klee-build` must not be recorded as evidence that the KLEE proof ran.
+
+### 15.9 Phase 5 — CI and aggregate integration (COMPLETE)
+
+**Landed and verified 2026-07-26.** Phase 5 is the phase that makes PIC10F320
+failures *visible*: before it, every lane built in Phase 4 had to be invoked by
+hand, so a regression could sit in `main` indefinitely without turning anything
+red.
+
+**D3 implemented as decided — the existing `pic` job extended, no sibling job,
+no `needs` edits.** The DAG is unchanged and was re-verified by parsing the
+workflow rather than by reading it: five jobs, and `verify`, `attiny202`,
+`build-matrix` and `stress` still declare `needs: pic`, so all four now gate on
+PIC10F320 for free. The `pic` job grew four steps — the two PIC10F320 aggregates,
+and a second artifact upload — and its assert step now requires **both** device
+headers, because one DFP ships both parts and a truncated unzip would otherwise
+make an entire chip's lane skip silently.
+
+The two chips' images are uploaded as **separately named artifacts**, never one
+merged upload. Both chips emit `bypass_mcu_<variant>_<tag>.hex` into different
+directories; flattening them into one artifact is the first step toward shipping
+a 322 image under a 320 name, which is precisely what §10 and D2's classifier
+obligation exist to prevent.
+
+**The last child validation layer now has an equivalent here.**
+`pic320-coverage-check-fw` is the exact-line firmware coverage gate over
+`src/bypass_mcu_pic10f320.c` — not a percentage floor, but "every line covered
+except the enumerated watchdog-reset fault path". It runs per variant, and that
+is not ceremony: the three output stages give **84 / 95 / 99** executable lines,
+so a single-variant run would leave real firmware logic unmeasured. All three
+report 4 allowed-uncovered fault-path lines and **0 disallowed**.
+
+It is a host lane (`cc` + `gcov`, both already inside `make test`'s tool
+contract), so it joined `pic320-test-host`, and the all-variant sweep
+`pic320-test-host-variants` is now a member of `test` and `test-long` — the
+first PIC10F320 lane in the default aggregate. Cost: ~18 s. Principle 5 is
+preserved; the tool contract did not change.
+
+**The §6.12 firmware-coverage / `xc.h` convergence question is answered: keep
+both, documented.** The merged tree deliberately retains two firmware-coverage
+mechanisms and two `xc.h` shims. The 320's asserts an exact property over a
+single fully-inlined translation unit; the 322's
+(`test/pic/fw_coverage/run_fw_coverage.sh`) is a percentage-style harness over a
+multi-file shipping set — shell, shared pure core, three output drivers.
+Converging them would weaken one or the other, so the split is recorded in the
+Makefile at the point of use rather than forced.
+
+**Analysis coverage tripled without anyone asking for it.** `pic320-analyze`
+compiles one output stage's `#ifdef` branch, so Phase 4's "zero unwaived MISRA
+findings" was, strictly, a claim about `cd4053-simple` only — roughly a fifth of
+the shipping source had never been analyzed at all. `pic320-test` sweeps
+cppcheck and MISRA across all three variants. All three are clean, so the Phase-4
+claim survives; it is now *earned* rather than extrapolated.
+
+**The strict-tools inventory found a real defect on its first run — exactly the
+one §6.12 predicted.** That row warned: extend the inventory to both chips'
+recipes "or the Phase-4 requirement is decorative and a `pic320-` recipe with a
+private early exit will pass review." The inventory grew from 2 recipes to 8
+(6 → 18 checks, both chips' XC8 and cppcheck/MISRA lanes) and immediately failed:
+
+> `FAIL: pic320 did not skip a missing tool by default` … `FAIL: did not compile for PIC10F320`
+
+`$(SKIP)` is `exit 0` in non-strict mode, and it exits **only the shell running
+it**. `pic320`'s XC8 guard sat on its own recipe line, so with XC8 absent the
+recipe printed "XC8 not found … skipping" and then Make ran the *next* line and
+tried to compile with the missing compiler anyway. A clean skip that isn't.
+An audit of every `$(SKIP)` guard in the Makefile found exactly one other
+instance — `pic320-size`, the same shape — and **no others anywhere**: all the
+AVR, ATtiny202 and PIC10F322 recipes correctly continue the guard's shell with
+`fi; \`. Both are fixed, both verified in all three modes (real build, missing
+tool non-strict → clean skip, missing tool strict → `::error::` + exit 1), and
+the joining comment now says why the line continuation is load-bearing.
+
+The inventory's own honesty is worth recording: it does **not** cover the gpsim,
+libgpsim and soak recipes, and the script says so and says why. Those sit behind
+a build prerequisite, so a harness driving them would return a different verdict
+depending on whether XC8 happens to be installed on the runner. A regression
+whose result depends on the runner's toolchain is worse than a stated gap.
+
+**Every new gate was negative-tested before being believed** (§15.7's rule, applied
+deliberately this time rather than learned again):
+
+| Gate | Deliberate break | Result |
+| --- | --- | --- |
+| `pic320-coverage-check-fw` | disabled the happy-path driver in a restored-afterwards edit | 17 DISALLOWED uncovered lines, exit 1 |
+| `pic320-test-host-variants` matrix guard | neutered the unsupported-name branch | `FAIL: unsupported matrix was accepted` |
+| strict-tools inventory (322 side) | replaced `pic`'s `$(SKIP)` with a private `exit 0` | `FAIL: pic accepted a missing tool under STRICT_TOOLS=1` |
+| ci-local routing | deleted the `pic320-test` step from `ci-local.sh` | `FAIL: full push executed 5 Make commands, expected 6` |
+
+The strict-tools inventory needed no synthetic break on the 320 side — it found
+a genuine defect unaided, which is the stronger evidence.
+
+**Local CI mirrors the two-chip job.** `scripts/ci-local.sh` asserts both chips
+through their **own** `PIC_*` / `PIC320_*` variable pairs rather than assuming
+the 320 still tracks the 322 — the whole point of the separate pair (§5.6) is
+that one chip can be re-pinned, and a checker reading only `PIC_*` would then
+assert the wrong installation and pass while the 320 lane skipped. `--skip-pic`
+is documented as skipping **both** chips (one toolchain, one CI job), and as
+*not* skipping the PIC10F320 host lanes, which need no XC8 and run inside
+`make test` regardless. `test_ci_local_routing.sh` asserts the exact call
+sequence — six Make commands, not four — so a silently dropped chip is a failure
+rather than a shorter, greener run.
+
+Skip semantics were also made explicit where they had been merely defaulted: the
+`stress` job now passes `MUTATION_ALLOW_SKIP=1` on the command line. It installs
+no XC8, so both chips' PIC mutants are unavailable there and its PIC mutation
+output is diagnostic only; the authoritative fail-closed evidence comes from the
+`pic` job, which asserts the toolchain first and runs `MUTATION_ALLOW_SKIP=0`
+(now with `PIC320_CC`/`PIC320_DFP` threaded alongside `PIC_CC`/`PIC_DFP`).
+
+**`test-all-targets` was declined.** §7 offers it as optional. Every full-tool
+lane is already reachable through `pic-test`, `pic-test-target-variants`,
+`pic320-test`, `pic320-test-target-variants` and the `attiny202-*` targets, all
+of which CI and `ci-local.sh` invoke by name; a fifth alias would add a name the
+`TODO.md` "Unified naming scheme" item would then have to reconcile, and would
+buy nothing that is not already gated. Recorded as a decision, not an oversight.
+
+**Phase-5 green boundary.** `make pic320-test STRICT_TOOLS=1` → EXIT=0 (26 s,
+220/241/244 words, CONFIG `0x389E` ×3, cppcheck+MISRA clean ×3, gpsim PASS ×6),
+and `make test` → EXIT=0, zero `FAIL`/`ERROR` lines:
+
+```
+state-space model check:                  2157 checks, 0 failures
+PIC10F320 firmware line coverage:         80/84, 91/95, 95/99   (0 disallowed)
+PIC build validation:                       28 checks, 0 failures
+PIC10F320 build validation:                 28 checks, 0 failures
+PIC target-variant matrix validation:        5 checks, 0 failures
+PIC10F320 target-variant matrix:             5 checks, 0 failures
+PIC10F320 host target-variant matrix:        5 checks, 0 failures   (new)
+gpsim wrapper validation:                   28 checks, 0 failures
+ci-local routing validation:                 4 checks, 0 failures
+strict optional-tool validation:            18 checks, 0 failures   (was 6)
+golden-model line coverage:              99.35% (floor 90%)
+verified-core line coverage:            100.00% (floor 95%)
+```
+
+No stray `*.gcov` at the repo root, no leftover coverage working directories, and
+the shared top-level `coverage/` untouched (§5.7).
+
+**Definition-of-done boxes this closes** (§12): the CI job-graph decision is now
+recorded *and implemented*; the strict-tools inventory covers optional-tool
+recipes for both PIC chips; and §6.12's firmware-coverage / `xc.h` convergence
+row has a recorded decision. Two §6.12 rows remain open and are neither this
+phase's nor blockers for Phase 6: rebuild determinism
+(`test_workload_rebuild.sh`, `test_avr_build_rebuild.sh`) and stack bound
+(`test_stack_bound.sh`), the latter arguably the most relevant of all to a fully
+inlined `main()`.
+
+**Not in this phase, by design.** `release.yml` is untouched — release
+integration is Phase 6, and §7's warning stands: after Phase 6 is the one bad
+place to stop, because release machinery would name images no CI gate produces.
+The three remaining prefix harnesses (`test_make_serialization.sh`,
+`test_release_images.sh`, `test_soak_timing.sh`) still need their FOLD/FORK
+calls there. One user-facing pointer is deliberately absent from `make help`
+until Phase 7 creates its target: `docs/pic10f320_special_case.md`.
+
+A narrower carry-forward worth writing down: the relocated PIC10F320 test files
+still carry pre-move path references in their comments (`test/equiv/…`,
+`test/fault/…`, `test/actuation/…`). Only `check_fw_coverage.sh` was corrected
+here, because Phase 5 turned it into a live gate whose failure message *tells a
+developer which file to edit* — and it named a path that does not exist. The
+rest is a mechanical sweep and belongs with Phase 7's disposition pass.
+
+### 15.10 Phase 6 — release integration (COMPLETE)
+
+**Landed and verified 2026-07-27.** Phase 5 made PIC10F320 failures visible in
+CI; Phase 6 makes PIC10F320 *part of the product*. The merged tree can now cut a
+release that contains it, proves it contains it, and refuses to publish one that
+does not.
+
+**The canonical product set exists, and it is the point of this phase.** §10 and
+§14.8 describe a hole the plan called "three identically incomplete sets": the
+producer built `SHA256SUMS` by globbing `./*.hex`, the verifier listed
+`"$dir"/*.hex`, and the release script enumerated images from the same variant
+matrices the build commands use. All three would shrink together. Omit an entire
+MCU and every check agrees on the shortened set — which is exactly the mistake
+adding a second PIC part invites.
+
+`RELEASE_IMAGES` in the Makefile is the independent fourth opinion: **15 image
+basenames**, derived from the variant matrices so it cannot drift from the build
+rules, but derived from nothing on disk so no build, copy or publish step can
+influence it. It is consumed through `make -s print-RELEASE_IMAGES` by
+`scripts/make-release.sh`, `scripts/verify-release-images.sh` and
+`test/test_release_images.sh` alike — the delivery mechanism §10 said already
+existed and should not be reinvented. `RELEASE_IMAGE_DIRS` accompanies it so the
+generated reproduction instructions and `release.yml` cannot name a stale set of
+build directories.
+
+**Proven against real release data, not only fixtures.** A staged 15-image dry
+run was stripped of all three PIC10F320 images from *every* observed set —
+release directory, `SHA256SUMS` regenerated over the remaining 12, and the fresh
+build directory — producing three perfectly consistent sets describing a release
+with no PIC10F320 firmware in it at all. The verifier named the three missing
+images and exited 1. With the anchor neutered to its previous listed-vs-observed
+form, the same input **passed**. That is the §7 requirement ("negative tests
+showing that global omission of PIC10F320 from all observed image sets fails")
+demonstrated in both directions.
+
+The set has three more guards, because a canonical set that is itself wrong is
+just a fourth way to be confidently incomplete: `test_release_images.sh` asserts
+the real Makefile variable has exactly 15 entries, 3 per PIC part and 3 per
+tinyx5 part, **0** matching ATtiny202, the three PIC10F320 basenames present by
+name, and no retired `tmux4053` image. Dropping the PIC10F320 line from
+`RELEASE_IMAGES` fails with `canonical release set has 12 images, expected 15`.
+
+**The env-var override fails closed.** `RELEASE_EXPECTED_IMAGES` exists so the
+regression can drive synthetic fixtures, and it is tested for being *set*, not
+for being non-empty — `RELEASE_EXPECTED_IMAGES=` is an error, not a quietly
+disabled gate. Empty, malformed and duplicated override sets each have their own
+rejection, and one check drives the verifier with no override at all and requires
+the failure message to name the Makefile as the source, so a broken
+`print-RELEASE_IMAGES` cannot leave the gate reading an empty set.
+
+**The classifier hazard D2 created is closed.** `make-release.sh`'s image→MCU
+`case` ends in a bare `*.hex` arm that means "ATtiny13a". A PIC10F320 basename —
+which carries the `bypass_mcu_` prefix no other target uses — would not have
+errored; it would have produced a manifest row confidently describing PIC
+firmware as an ATtiny13a image *with AVR fuse bytes a user might then write to a
+part*. The new arm is placed first and verified in the generated manifest:
+
+```
+| bypass_mcu_cd4053-simple_pic10f320.hex | PIC10F320 | 2 MHz (HFINTOSC) | 220 / 256 words | CONFIG word embedded in HEX |
+| bypass_mcu_cd4053-mute_pic10f320.hex   | PIC10F320 | 2 MHz (HFINTOSC) | 241 / 256 words | CONFIG word embedded in HEX |
+| bypass_mcu_tq2-relay_pic10f320.hex     | PIC10F320 | 2 MHz (HFINTOSC) | 244 / 256 words | CONFIG word embedded in HEX |
+```
+
+The word figures satisfy §10's "256-word usage figures" and are parsed from
+*this run's own build log*, so they can never be a stale hand-copied number.
+Every other target's `flash used` column is bytes from an ELF; XC8 reports words,
+and the column says so per row rather than reading `n/a` as the 322's still does.
+
+**Twelve release soak combos, not nine.** Three PIC10F320 combos join at the same
+full duration as every other combo — not a shortened smoke. This needed the
+build-only `$(PIC320_SOAK_BIN)` rule, the exact analogue of the 322's, because
+the release script compiles one binary per variant under unique names and runs
+them all concurrently, which the `pic320-test-soak` run target cannot do.
+`test_soak_timing.sh` now asserts the liveness interval reaches all three lanes
+(AVR, 322, 320) and that the 320 combos exist at all — the liveness grep alone
+would pass vacuously if the loop building those combos were deleted.
+
+**Full `--dry-run` end to end: EXIT=0.** 15 images built and matched to the
+canonical set, all 3 PIC10F320 images structurally IHEX-validated, five
+validation gates green (`test-long`, `pic-test`, `pic-test-target-variants`,
+`pic320-test`, `pic320-test-target-variants`), 12/12 soak combos PASS, staging
+directory asserted to hold exactly the canonical set, and the verifier re-run
+against the staged output: `REPRODUCED: 15 committed, listed, and freshly built
+images match the canonical set exactly.`
+
+**`release.yml` closes the loop.** It asserts both device headers, builds through
+`pic320-variants` (which removes the whole image set if any variant fails, so a
+partial matrix cannot reach the reproducibility gate), passes
+`$(make -s print-RELEASE_IMAGE_DIRS)` to the verifier rather than a hardcoded
+list, and re-runs both PIC10F320 gates on the clean runner. The PIC10F320's
+images are in the release set, so its evidence belongs in the public attestation
+on identical terms.
+
+**The three remaining §4 prefix harnesses, dispositioned.** All three are FOLD,
+and in every case for the same reason: **the parent copy is ahead**, so folding
+loses nothing.
+
+| Script | Divergence | Action |
+| --- | --- | --- |
+| `test_release_images.sh` | parent adds symlink-alias, duplicate-directory, FIFO/directory and input-snapshot-mutation cases the child lacks | FOLD, then extend with the canonical-set cases above (24 → 40 checks) |
+| `test_soak_timing.sh` | parent adds the ATtiny202 parser probes and the liveness-wiring assertion | FOLD, then add the PIC10F320 lane (38 → 40 checks) |
+| `test_make_serialization.sh` | parent adds recursive `-j` fan-out, query/dry-run and release-lock coverage, and a path with spaces | FOLD unchanged; it exercises `make-release.sh` and still passes against the extended script |
+
+That completes §4's shared-name harness ledger: every one of the seven now has a
+recorded disposition, and no fold added a tool dependency to the default `test`
+aggregate.
+
+**Two deliberate omissions, both stated rather than discovered later.**
+
+- **No `program-pic320` target.** The 322 has `make program-pic`; the 320 does
+  not, so `release/README.md` and the generated manifest print the direct
+  `pk2cmd -PPIC10F320 …` command and the README says the convenience target does
+  not exist yet. Adding it is ~15 lines of untestable-here hardware-programming
+  surface, and a wrong programmer invocation is worse than an honest absence.
+  Recorded as a follow-up, not smuggled in unverified.
+- **No link to `docs/pic10f320_special_case.md` yet.** The generated MANIFEST
+  carries the caveat **inline** — 256 words of flash, the inlining seam, what is
+  and is not proven — and links the document only `if [ -f ]`. A release cut
+  before Phase 7 therefore states the caveat rather than dangling a link at a
+  file that does not exist; a release cut after Phase 7 links it automatically.
+
+**One published-workflow consequence, documented.** The canonical set describes
+*the release you checked out*, so running the current verifier against
+`release/v0.9.4/` from a newer checkout now reports a mismatch. That is correct —
+the older release predates targets the current set includes — and the documented
+reproduction flow already begins with `git checkout <tag>`, where both the
+verifier and the Makefile are that tag's. `release/README.md` says so explicitly
+rather than leaving a confusing error for someone to hit.
+
+**Phase-6 green boundary.** `scripts/make-release.sh --dry-run v99.0.0` → EXIT=0
+(15 images, 12 soaks, 5 gates); `make test` → EXIT=0, zero `FAIL`/`ERROR` lines:
+
+```
+release image verification:        40 checks, 0 failures   (was 24)
+soak timing validation:            40 checks, 0 failures   (was 39)
+Make serialization validation:      6 checks, 3 concurrent, 0 overlaps
+strict optional-tool validation:   18 checks, 0 failures
+PIC10F320 host target-variant matrix: 5 checks, 0 failures
+golden-model line coverage:     99.35% (floor 90%)
+verified-core line coverage:   100.00% (floor 95%)
+```
+
+**Definition-of-done boxes this closes** (§12): the canonical expected-product
+set exists and every consumer agrees with it; global omission of PIC10F320 fails;
+§5.3/D2's naming decision is implemented *and* `make-release.sh`'s classifier
+recognizes the surviving prefixes; each §4 shared-name harness has a recorded
+FOLD-or-FORK disposition; and ATtiny202 is explicitly outside the canonical
+release set with the release claims scoped to match.
+
+**Not in this phase, by design.** `CHANGELOG.md` repair, the caveat document
+itself, the child-README rewrite and the `_incoming_pic10f320/` prefix removal
+are all Phase 7. §7's warning about stopping here is now the operative one: the
+release machinery names PIC10F320 images and CI produces them, so the dangerous
+gap is closed — but the documentation still describes two projects.

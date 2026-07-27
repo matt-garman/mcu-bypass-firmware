@@ -78,11 +78,30 @@ expect_default_dry_run_shortened() {
 	checks=$((checks + 1))
 }
 
+# Every release soak combo must receive the SAME validated liveness interval.
+# A combo that silently keeps the Makefile default would soak for the full
+# release duration while checking liveness on a different schedule from the
+# evidence the MANIFEST claims -- and it would still print SOAK PASS.
 expect_release_liveness_wiring() {
 	grep -Eq '^[[:space:]]+SOAK_LIVENESS_INTERVAL_MS="\$SOAK_LIVENESS_INTERVAL_MS"' "$RELEASE" \
 		|| fail "release does not pass the liveness interval to Classic AVR soaks"
 	grep -Eq '^[[:space:]]+PIC_SOAK_LIVENESS_INTERVAL_MS="\$SOAK_LIVENESS_INTERVAL_MS"' "$RELEASE" \
-		|| fail "release does not pass the liveness interval to PIC soaks"
+		|| fail "release does not pass the liveness interval to PIC10F322 soaks"
+	grep -Eq '^[[:space:]]+PIC320_SOAK_LIVENESS_INTERVAL_MS="\$SOAK_LIVENESS_INTERVAL_MS"' "$RELEASE" \
+		|| fail "release does not pass the liveness interval to PIC10F320 soaks"
+	checks=$((checks + 1))
+}
+
+# ...and the release must actually HAVE a PIC10F320 soak combo to wire. The grep
+# above passes vacuously if the loop that builds those combos is deleted, since
+# the string simply stops appearing -- which is a failure, not a pass, so assert
+# the duration knob is threaded too. Both are per-combo `make` arguments, so
+# their presence is the closest a static check gets to "the combo exists".
+expect_release_pic320_soak_combos() {
+	grep -Eq '^[[:space:]]+PIC320_SOAK_DURATION_MS="\$SOAK_DURATION_MS"' "$RELEASE" \
+		|| fail "release does not build PIC10F320 soak combos at the release duration"
+	grep -Eq 'PIC320_SOAK_VARIANT="\$v"' "$RELEASE" \
+		|| fail "release does not select a PIC10F320 soak combo per output variant"
 	checks=$((checks + 1))
 }
 
@@ -136,5 +155,6 @@ expect_release_reject 60000 "real releases require"
 expect_release_reject 4294967295 "must not exceed"
 expect_release_reject 9999999999999999999999999999999999999999 "must not exceed"
 expect_release_liveness_wiring
+expect_release_pic320_soak_combos
 
 printf 'soak timing validation: %d checks, 0 failures\n' "$checks"

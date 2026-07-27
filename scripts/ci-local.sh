@@ -9,12 +9,19 @@
 #   clean pass here means the CI matrix will be green.
 #
 # CI-JOB MAPPING (.github/workflows/ci.yml)
-#   pic           -> assert toolchain present, then
-#                    make pic-test          (XC8 + gpsim PORTA/LATA gate)
+#   pic           -> assert toolchain present (BOTH chips), then
+#                    make pic-test          (10F322: XC8 + gpsim PORTA/LATA gate)
 #                    make pic-test-target-variants
-#                                           (libgpsim fault recovery,
+#                                           (10F322: libgpsim fault recovery,
 #                                            firmware/model ctx_ lock-step,
 #                                            and target I/O, every variant)
+#                    make pic320-test       (10F320: host equivalence/actuation/
+#                                            fault/firmware-coverage + build,
+#                                            budget, CONFIG, cppcheck/MISRA and
+#                                            CLI gpsim across all variants)
+#                    make pic320-test-target-variants
+#                                           (10F320: the same fail-closed
+#                                            libgpsim aggregate)
 #   build-matrix  -> make all13 all85 all45 (every variant builds for every
 #                                            AVR; each prints flash/RAM)
 #   attiny202     -> assert toolchain present, then
@@ -46,10 +53,15 @@
 #                    `stress` job and run `make test` instead of `make test-long`
 #     --no-clean     skip the initial `make clean` (faster, but not a true
 #                    clean-checkout reproduction of CI)
-#     --skip-pic     skip the PIC (XC8/gpsim) job -- ONLY if you lack that
-#                    toolchain; push mode still runs host/AVR mutation strictly
-#                    but permits unavailable PIC mutants to be reported skipped
-#                    instead of failing; this no longer mirrors CI, so it warns
+#     --skip-pic     skip the PIC (XC8/gpsim) job -- BOTH chips, 10F322 and
+#                    10F320, since they share one toolchain and one CI job;
+#                    ONLY if you lack that toolchain. Push mode still runs
+#                    host/AVR mutation strictly but permits unavailable PIC
+#                    mutants of EITHER chip to be reported skipped instead of
+#                    failing; this no longer mirrors CI, so it warns.
+#                    NOTE: it does not skip the PIC10F320 HOST lanes -- those
+#                    need only a host compiler and run inside `make test` /
+#                    `make test-long` regardless.
 #     --skip-attiny202  skip the ATtiny202 (DFP/yasimavr) job -- ONLY if you lack
 #                    that toolchain; this no longer mirrors CI, so it warns loudly
 #     -h | --help    this help
@@ -65,9 +77,12 @@
 #   absent, which must never read as a local pass. Use --skip-pic if you
 #   genuinely lack the toolchain.
 #
-#   The PIC job uses the Makefile's PIC_CC / PIC_DFP defaults. If your XC8/DFP
-#   live elsewhere, export PIC_CC and/or PIC_DFP before invoking and make will
-#   pick them up (they are `?=` defaults, so the environment wins).
+#   The PIC job uses the Makefile's PIC_CC / PIC_DFP defaults, and the PIC10F320
+#   lane's PIC320_CC / PIC320_DFP default to those in turn (one shared XC8 + DFP
+#   install serves both chips). If your XC8/DFP live elsewhere, export PIC_CC
+#   and/or PIC_DFP before invoking and make will pick them up (they are `?=`
+#   defaults, so the environment wins); export PIC320_CC / PIC320_DFP as well
+#   only if you deliberately want the two chips on different toolchains.
 
 set -euo pipefail
 
@@ -147,30 +162,40 @@ trap on_exit EXIT
 # "Assert PIC toolchain present" step).
 # ----------------------------------------------------------------------------
 
-# Fail loud if any PIC tool/header is missing. Every pic-test / libgpsim PIC
-# sub-target SKIPS CLEANLY when its tool is absent -- fatal for a gate, since a
-# missing toolchain would otherwise read as a local PASS while CI still runs
-# the real checks. Paths come from the Makefile defaults; an exported PIC_CC /
-# PIC_DFP / PIC_SOAK_GPSIM_INC wins (they are ?= in the Makefile).
+# Fail loud if any PIC tool/header is missing, for BOTH chips. Every pic-test /
+# pic320-test / libgpsim PIC sub-target SKIPS CLEANLY when its tool is absent --
+# fatal for a gate, since a missing toolchain would otherwise read as a local
+# PASS while CI still runs the real checks. Paths come from the Makefile
+# defaults; an exported PIC_CC / PIC_DFP / PIC320_CC / PIC320_DFP /
+# PIC_SOAK_GPSIM_INC wins (they are ?= in the Makefile).
+#
+# The two chips are checked through their OWN variables rather than assuming
+# PIC320_* still tracks PIC_*: the whole point of the separate pair (merge plan
+# §5.6) is that one chip can be re-pinned, and a checker that reads only PIC_*
+# would then assert the wrong installation and pass while the 320 lane skipped.
 assert_pic_toolchain() {
-	local pic_cc pic_dfp gpsim_inc
+	local pic_cc pic_dfp pic320_cc pic320_dfp gpsim_inc
 	pic_cc="${PIC_CC:-$(make -s print-PIC_CC)}"
 	pic_dfp="${PIC_DFP:-$(make -s print-PIC_DFP)}"
+	pic320_cc="${PIC320_CC:-$(make -s print-PIC320_CC)}"
+	pic320_dfp="${PIC320_DFP:-$(make -s print-PIC320_DFP)}"
 	gpsim_inc="${PIC_SOAK_GPSIM_INC:-$(make -s print-PIC_SOAK_GPSIM_INC)}"
 	local missing=()
-	[ -x "$pic_cc" ]                                  || missing+=("XC8 at $pic_cc  (export PIC_CC=...)")
+	[ -x "$pic_cc" ]                                  || missing+=("XC8 (10F322) at $pic_cc  (export PIC_CC=...)")
 	[ -f "$pic_dfp/pic/include/proc/pic10f322.h" ]    || missing+=("PIC10-12Fxxx DFP at $pic_dfp  (export PIC_DFP=...)")
+	[ -x "$pic320_cc" ]                               || missing+=("XC8 (10F320) at $pic320_cc  (export PIC320_CC=...)")
+	[ -f "$pic320_dfp/pic/include/proc/pic10f320.h" ] || missing+=("PIC10F320 device header under $pic320_dfp  (export PIC320_DFP=...)")
 	command -v gpsim >/dev/null 2>&1                  || missing+=("gpsim  (apt: gpsim)")
 	command -v cppcheck >/dev/null 2>&1               || missing+=("cppcheck  (apt: cppcheck)")
 	command -v c++ >/dev/null 2>&1                    || missing+=("c++  (apt: g++; pic-test-target-variants)")
 	[ -f "$gpsim_inc/sim_context.h" ]                 || missing+=("libgpsim headers at $gpsim_inc  (apt: gpsim-dev; pic-test-target-variants)")
 	pkg-config --exists glib-2.0 2>/dev/null          || missing+=("glib-2.0  (apt: libglib2.0-dev; pic-test-target-variants)")
 	if [ "${#missing[@]}" -gt 0 ]; then
-		log "PIC toolchain incomplete -- the pic targets would silently SKIP, not fail:"
+		log "PIC toolchain incomplete -- the pic/pic320 targets would silently SKIP, not fail:"
 		for m in "${missing[@]}"; do log "  - $m"; done
 		die "install the above (see TOOLCHAIN.adoc), or --skip-pic (no longer mirrors CI)."
 	fi
-	ok "PIC toolchain present (XC8 + DFP + gpsim + gpsim-dev + glib + cppcheck + c++)."
+	ok "PIC toolchain present, both chips (XC8 + DFP + gpsim + gpsim-dev + glib + cppcheck + c++)."
 }
 
 # Fail loud if any ATtiny202 (AVR-XT) input is missing. Like the PIC targets,
@@ -233,11 +258,13 @@ export STRICT_TOOLS=1
 [ "$DO_CLEAN" -eq 1 ] && run_step "make clean (match CI fresh checkout)" make clean
 
 if [ "$SKIP_PIC" -eq 1 ]; then
-	warn "--skip-pic: NOT running the PIC job; this does not mirror CI."
+	warn "--skip-pic: NOT running the PIC job (either chip); this does not mirror CI."
 else
 	run_step "pic job: assert PIC toolchain present" assert_pic_toolchain
 	run_step "pic job: make pic-test" make pic-test
 	run_step "pic job: pic-test-target-variants" make pic-test-target-variants
+	run_step "pic job: make pic320-test" make pic320-test
+	run_step "pic job: pic320-test-target-variants" make pic320-test-target-variants
 fi
 
 run_step "build-matrix: make all13 all85 all45" make all13 all85 all45
@@ -281,7 +308,7 @@ done
 printf '  %s%-44s%s %ss\n' "$BOLD" "total" "$RST" "$total" >&2
 log ""
 if [ "$SKIP_PIC" -eq 1 ]; then
-	warn "PIC job was skipped -- CI will still run it. Push with that in mind."
+	warn "PIC job was skipped (10F322 AND 10F320) -- CI will still run both. Push with that in mind."
 fi
 if [ "$SKIP_ATTINY202" -eq 1 ]; then
 	warn "ATtiny202 job was skipped -- CI will still run it. Push with that in mind."

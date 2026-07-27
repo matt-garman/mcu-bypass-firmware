@@ -10,13 +10,16 @@ name: Release
 #
 # When the tag lands here, this workflow:
 #   1. rebuilds every release image from the TAGGED source on a clean, pinned
-#      runner (AVR Classic + PIC10F322; ATtiny202 is development-only);
-#   2. REPRODUCIBILITY GATE: asserts the committed files, SHA256SUMS entries, and
-#      freshly built files are the same complete set with byte-identical contents
-#      (fails the release if not);
-#   3. re-runs `make test-long` + `make pic-test` +
-#      `make pic-test-target-variants` on the clean runner -- the same gates the
-#      MANIFEST claims;
+#      runner (AVR Classic + PIC10F322 + PIC10F320; ATtiny202 is development-only);
+#   2. REPRODUCIBILITY GATE: asserts the committed files, SHA256SUMS entries,
+#      freshly built files, AND the canonical RELEASE_IMAGES set the Makefile
+#      declares are all the same complete set with byte-identical contents
+#      (fails the release if not). The fourth set is what makes the other three
+#      mean anything: three sets derived by globbing the same directories agree
+#      perfectly on a release that is missing an entire MCU (merge plan §10);
+#   3. re-runs `make test-long` + `make pic-test` + `make pic-test-target-variants`
+#      + `make pic320-test` + `make pic320-test-target-variants` on the clean
+#      runner -- the same gates the MANIFEST claims;
 #   4. publishes a GitHub Release with the images, SHA256SUMS(.asc) and MANIFEST.
 #
 # The runner is pinned to ubuntu-24.04 so the toolchain matches TOOLCHAIN.adoc;
@@ -97,7 +100,13 @@ jobs:
       - name: Assert PIC toolchain present (fail loud, do NOT skip)
         run: |
           test -x "${XC8_DIR}/bin/xc8-cc" || { echo "::error::XC8 missing"; exit 1; }
-          test -f "${XC8_DFP_ROOT}/xc8/pic/include/proc/pic10f322.h" || { echo "::error::DFP missing"; exit 1; }
+          # Both device headers. One DFP ships both parts, but a truncated
+          # unpack would leave one chip's lane skipping silently -- and this is
+          # the public attestation, where a skipped lane must never read green.
+          for d in pic10f322 pic10f320; do
+            dev="${XC8_DFP_ROOT}/xc8/pic/include/proc/${d}.h"
+            test -f "$dev" || { echo "::error::DFP missing: $dev"; exit 1; }
+          done
           command -v gpsim >/dev/null || { echo "::error::gpsim missing"; exit 1; }
           command -v c++ >/dev/null || { echo "::error::c++ missing"; exit 1; }
           test -f /usr/include/gpsim/sim_context.h || { echo "::error::gpsim-dev headers missing"; exit 1; }
@@ -126,6 +135,11 @@ jobs:
           make clean
           make all13 all85 all45
           make pic PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
+          # pic320-variants, not pic: it builds all three output stages and
+          # removes the whole image set if any one of them fails, so a partial
+          # matrix can never reach the reproducibility gate.
+          make pic320-variants PIC320_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC320_DFP="${XC8_DFP_ROOT}/xc8"
 
       # --- THE reproducibility gate ----------------------------------------
       - name: Verify committed images reproduce bit-for-bit
@@ -134,11 +148,16 @@ jobs:
           set -euo pipefail
           dir='${{ steps.rel.outputs.dir }}'
 
-          # Enforce three-way equality for release images: actual committed .hex
-          # files, checksum entries, and fresh build output. Hash-only
-          # verification misses unlisted files that the publication glob would
-          # otherwise upload.
-          scripts/verify-release-images.sh "$dir" build_avr_classic build_pic
+          # Enforce FOUR-way equality for release images: the canonical
+          # RELEASE_IMAGES set, the actual committed .hex files, the checksum
+          # entries, and the fresh build output. Hash-only verification misses
+          # unlisted files that the publication glob would otherwise upload, and
+          # three-way equality between observations misses anything all three
+          # observations omit together.
+          #
+          # The fresh directories come from the Makefile too, so adding a target
+          # cannot leave this line behind pointing at a stale set of dirs.
+          scripts/verify-release-images.sh "$dir" $(make -s print-RELEASE_IMAGE_DIRS)
 
           # Freeze the verified release assets before later test targets run.
           # Publication consumes only this snapshot, never the mutable tree.
@@ -172,6 +191,22 @@ jobs:
           make pic-test-target-variants STRICT_TOOLS=1 \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC_DFP="${XC8_DFP_ROOT}/xc8"
+
+      # The PIC10F320 half of the same claim. Its images are in the release set,
+      # so its gates belong in the public attestation on identical terms -- and
+      # the constrained target is the one whose evidence a reader is most likely
+      # to want to see re-run on a clean machine.
+      - name: Re-run make pic320-test
+        run: |
+          make pic320-test STRICT_TOOLS=1 \
+            PIC320_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC320_DFP="${XC8_DFP_ROOT}/xc8"
+
+      - name: Re-run make pic320-test-target-variants (libgpsim, every variant)
+        run: |
+          make pic320-test-target-variants STRICT_TOOLS=1 \
+            PIC320_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC320_DFP="${XC8_DFP_ROOT}/xc8"
 
       # --- publish ----------------------------------------------------------
       - name: Publish GitHub Release

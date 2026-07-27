@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Firmware line-coverage gate for bypass_mcu_pic10f320.c, driven by the fault +
-# happy-path harness (test/fault). Unlike the model coverage gate (a percentage
+# Firmware line-coverage gate for src/bypass_mcu_pic10f320.c, driven by the fault
+# + happy-path harness (test/pic10f320/fault). Unlike the model coverage gate (a percentage
 # floor), this asserts an EXACT property: every firmware line must be covered
 # EXCEPT the watchdog-reset fault path, which is uncoverable on the host for two
 # documented reasons --
@@ -33,7 +33,7 @@
 # main() (which MUST be covered). They are textually identical, so this allow-list
 # necessarily permits both; it cannot, by text alone, tell a regression in the
 # live call site apart from the dead one. That is acceptable because the live
-# call's coverage is guaranteed INDEPENDENTLY and loudly by test/fault: its eight
+# call's coverage is guaranteed INDEPENDENTLY and loudly by test/pic10f320/fault: its eight
 # `expect_reset(...)` cases all route through that exact statement, so if it ever
 # went uncovered the fault test would fail long before this gate could mask it.
 #
@@ -98,7 +98,7 @@ if [ "$bad" -ne 0 ]; then
     echo "FAIL: ${bad} firmware line(s) are uncovered and NOT on the fault-path allowlist."
     echo "      Add a test that exercises them, or -- if they are genuinely"
     echo "      unreachable defensive code -- extend the allowlist in"
-    echo "      test/fault/check_fw_coverage.sh with a rationale."
+    echo "      test/pic10f320/fault/check_fw_coverage.sh with a rationale."
     exit 1
 fi
 

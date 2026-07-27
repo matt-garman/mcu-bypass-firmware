@@ -11,7 +11,9 @@ name: CI
 # Most of the matrix lives inside the Makefile: a single `make test` already
 # exercises all three variants (cd4053, mute, relay) across the ATtiny13a and
 # the tinyx5 family, plus every analysis gate (clang-tidy, cppcheck,
-# clang-analyzer, MISRA-C:2012) and the golden-model coverage gate. The jobs
+# clang-analyzer, MISRA-C:2012), the PIC10F320 host lanes (firmware<->core
+# equivalence, actuation, host fault injection and firmware line coverage, all
+# three variants -- host compiler only, no XC8), and the coverage gates. The jobs
 # below wrap that, surface the per-MCU build matrix as discrete checks, and run
 # the slower exhaustive/mutation suite off the PR hot path.
 
@@ -39,9 +41,11 @@ jobs:
   # `make test` = analyze (clang-tidy + cppcheck + clang-analyzer + MISRA)
   #             + host/model-check/symbolic/fuse tests
   #             + CBMC SAT/SMT proof of the real bypass_pure.c core
+  #             + PIC10F320 host lanes, all three variants (equivalence against
+  #               that same core, actuation, host fault, firmware line coverage)
   #             + simavr functional + fault-injection across all variants,
   #               ATtiny13a and tinyx5
-  #             + golden-model coverage gate.
+  #             + golden-model and verified-core coverage gates.
   # -------------------------------------------------------------------------
   verify:
     name: verify (make test)
@@ -79,31 +83,51 @@ jobs:
         run: make test STRICT_TOOLS=1
 
   # -------------------------------------------------------------------------
-  # PIC10F322 gate: the PIC counterpart of `verify`. Mirrors `make pic-test` --
-  # builds every variant with XC8 + enforces the 512-word flash budget, verifies
-  # the emitted CONFIG word vs design intent, runs cppcheck+MISRA on the PIC
-  # shell, and drives the footswitch through gpsim asserting PORTA/LATA -- then
-  # runs the fail-closed real-HEX target aggregate (`make pic-test-target-variants`):
-  # libgpsim fault recovery, firmware/model ctx_ lock-step, and GPIO transition /
-  # pulse timing for every PIC variant.
+  # PIC gate (BOTH chips): the PIC counterpart of `verify`.
+  #
+  # PIC10F322 -- `make pic-test`: builds every variant with XC8 + enforces the
+  # 512-word flash budget, verifies the emitted CONFIG word vs design intent,
+  # runs cppcheck+MISRA on the PIC shell, and drives the footswitch through gpsim
+  # asserting PORTA/LATA -- then the fail-closed real-HEX target aggregate
+  # (`make pic-test-target-variants`): libgpsim fault recovery, firmware/model
+  # ctx_ lock-step, and GPIO transition / pulse timing for every PIC variant.
+  #
+  # PIC10F320 -- `make pic320-test` + `make pic320-test-target-variants`: the same
+  # shape for the constrained 256-word part, plus the host lanes it alone has
+  # (firmware<->core equivalence, actuation sequence, host fault injection, and
+  # the exact-line firmware coverage gate). See docs/pic10f320_special_case.md
+  # for why that chip's firmware inlines the verified core rather than calling it.
+  #
+  # ONE job for both chips, deliberately (merge plan §11, decision D3). `verify`,
+  # `attiny202`, `build-matrix` and `stress` ALL declare `needs: pic`, so this job
+  # gates the whole repository -- and folding PIC10F320 into it means those four
+  # gate on the new chip for free, with one XC8 install and one cache restore.
+  # The accepted cost is that the full PIC10F320 lane sits on their critical path.
+  # Splitting it into a sibling `pic320` job later is mechanical, but it would
+  # force an explicit decision about whether those four should gate on it; that
+  # is the trade to revisit only if CI wall-clock becomes binding.
   #
   # XC8 and the PIC10-12Fxxx DFP are not in apt; they are fetched from Microchip
   # (the free tier needs no key to compile) and installed to the paths the
-  # Makefile defaults to (also passed explicitly via PIC_CC / PIC_DFP). gpsim,
+  # Makefile defaults to (also passed explicitly via PIC_CC / PIC_DFP and
+  # PIC320_CC / PIC320_DFP -- one shared installation, two variable pairs, so
+  # either chip can be re-pinned without silently moving the other). gpsim,
   # gpsim-dev + libglib2.0-dev + g++ (the libgpsim fault-inject build), cppcheck,
   # python3 come from apt.
   #
-  # CRITICAL: the `make pic-test` sub-targets SKIP CLEANLY when a tool/header is
-  # absent -- fatal for a gate (a failed XC8 fetch would make every check "skip"
-  # and the job go green on nothing). The "Assert PIC toolchain present" step
-  # fails loud so a broken install can never masquerade as a pass; the cache is
-  # only SAVED after that assert, so a half-baked install is never cached.
+  # CRITICAL: the `make pic-test` / `make pic320-test` sub-targets SKIP CLEANLY
+  # when a tool/header is absent -- fatal for a gate (a failed XC8 fetch would make
+  # every check "skip" and the job go green on nothing). The "Assert PIC toolchain
+  # present" step fails loud so a broken install can never masquerade as a pass;
+  # the cache is only SAVED after that assert, so a half-baked install is never
+  # cached. Both device headers are asserted: the DFP ships both parts, but a
+  # truncated unzip could leave one behind.
   #
   # NOTE: confirm the XC8 download URL and the unattended-installer flags
   # against microchip.com / `./xc8.run --help` (both change per release). The
   # DFP packs.download.microchip.com/<pack>.atpack URL scheme is stable.
   pic:
-    name: pic (make pic-test)
+    name: pic (10F322 + 10F320)
     runs-on: ubuntu-24.04
     env:
       # Pin to the versions in TOOLCHAIN.adoc; bump compiler + DFP together.
@@ -150,9 +174,13 @@ jobs:
       - name: Assert PIC toolchain present (fail loud, do NOT skip)
         run: |
           xc8="${XC8_DIR}/bin/xc8-cc"
-          dev="${XC8_DFP_ROOT}/xc8/pic/include/proc/pic10f322.h"
           test -x "${xc8}" || { echo "::error::XC8 missing: ${xc8}"; exit 1; }
-          test -f "${dev}" || { echo "::error::DFP missing: ${dev}"; exit 1; }
+          # One DFP, two devices. Assert BOTH headers: a truncated unzip that
+          # left one behind would make that chip's whole lane skip silently.
+          for d in pic10f322 pic10f320; do
+            dev="${XC8_DFP_ROOT}/xc8/pic/include/proc/${d}.h"
+            test -f "${dev}" || { echo "::error::DFP missing: ${dev}"; exit 1; }
+          done
           for t in gpsim cppcheck c++; do
             command -v "$t" >/dev/null || { echo "::error::no $t"; exit 1; }
           done
@@ -193,6 +221,27 @@ jobs:
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC_DFP="${XC8_DFP_ROOT}/xc8"
 
+      # PIC10F320 pre-hardware gate. Covers every validation layer the child
+      # project had: host equivalence against src/bypass_pure.c, per-variant
+      # actuation sequence, host fault injection, the exact-line firmware
+      # coverage gate, build + 256-word budget, CONFIG word, cppcheck + MISRA,
+      # and the CLI-gpsim register-level test -- the last two swept across all
+      # three variants, because each compiles a different output stage.
+      - name: PIC10F320 pre-hardware gate (make pic320-test)
+        run: |
+          make pic320-test STRICT_TOOLS=1 \
+            PIC320_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC320_DFP="${XC8_DFP_ROOT}/xc8"
+
+      # ...and the PIC10F320 fail-closed target aggregate, same contract as the
+      # 322's above: explicit PASS sentinels from fault, lock-step and I/O, so a
+      # silent skip or a partial matrix is a failure.
+      - name: PIC10F320 target aggregate (make pic320-test-target-variants)
+        run: |
+          make pic320-test-target-variants STRICT_TOOLS=1 \
+            PIC320_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC320_DFP="${XC8_DFP_ROOT}/xc8"
+
       # The mutation driver also runs its core AVR mutants. Keep their extra
       # toolchain and the minutes-long gate off the pull-request hot path.
       - name: Install AVR mutation dependencies (apt)
@@ -204,6 +253,10 @@ jobs:
           sudo apt-get install -y \
             gcc-avr avr-libc simavr libsimavr-dev libelf-dev
 
+      # MUTATION_ALLOW_SKIP=0 covers BOTH chips' mutants: the driver's PIC10F320
+      # subset sits behind its own tool probe, so without fail-closed mode a
+      # missing 320 toolchain would report those mutants "skipped" and still exit
+      # green. This job asserted the toolchain above, so nothing may skip.
       - name: Fail-closed mutation gate (make test-mutation)
         if: >-
           github.event_name == 'push' ||
@@ -212,13 +265,27 @@ jobs:
         run: |
           make test-mutation STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC_DFP="${XC8_DFP_ROOT}/xc8"
+            PIC_DFP="${XC8_DFP_ROOT}/xc8" \
+            PIC320_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC320_DFP="${XC8_DFP_ROOT}/xc8"
 
-      - name: Upload PIC firmware images
+      # Two chips, two separately named artifacts -- never one merged upload.
+      # The release machinery keys on image basename, and both chips build
+      # `bypass_mcu_<variant>_<tag>.hex` into different directories; flattening
+      # them into one artifact would be the first step toward shipping a 322
+      # image under a 320 name.
+      - name: Upload PIC10F322 firmware images
         uses: actions/upload-artifact@v4
         with:
           name: firmware-pic10f322
           path: build_pic/*.hex
+          if-no-files-found: error
+
+      - name: Upload PIC10F320 firmware images
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-pic10f320
+          path: build_pic10f320/*.hex
           if-no-files-found: error
 
   # -------------------------------------------------------------------------
@@ -453,5 +520,13 @@ jobs:
             simavr libsimavr-dev libelf-dev \
             clang clang-tidy cppcheck cbmc
 
+      # MUTATION_ALLOW_SKIP=1 is stated explicitly rather than left to the
+      # default. This job installs no XC8/gpsim, so BOTH chips' PIC mutants are
+      # unavailable here and must be allowed to report skipped -- but that makes
+      # this job's PIC mutation output diagnostic only. The authoritative,
+      # fail-closed PIC mutation evidence comes from the `pic` job, which
+      # asserted the toolchain first and runs MUTATION_ALLOW_SKIP=0 (§11).
+      # Saying so on the command line means a future change to the default
+      # cannot silently turn this into either a false pass or a spurious failure.
       - name: Exhaustive + mutation suite
-        run: make test-long
+        run: make test-long MUTATION_ALLOW_SKIP=1

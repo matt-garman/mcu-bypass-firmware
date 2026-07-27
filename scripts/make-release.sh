@@ -28,11 +28,18 @@
 #      EVERY required tool present. Unlike the dev-time targets (which skip
 #      cleanly when a tool is missing), a release FAILS LOUD on any absence -- a
 #      gate must never go green on a check that silently did nothing.
-#   1. Clean-build every release-supported AVR Classic + PIC10F322 image.
-#   2. Run `make test-long`, `make pic-test`, and `make pic-test-target-variants`
-#      (the full pre-hardware gates).
+#   1. Clean-build every release-supported image: AVR Classic, PIC10F322 and
+#      PIC10F320. The built set is then cross-checked against the CANONICAL set
+#      the Makefile declares (RELEASE_IMAGES), which is the only check here that
+#      can catch a forgotten build step -- an enumeration derived from the same
+#      variant matrices as the build commands shrinks in lock-step with an
+#      omission and agrees with itself (merge plan §10, §14.8).
+#   2. Run `make test-long`, `make pic-test`, `make pic-test-target-variants`,
+#      `make pic320-test`, and `make pic320-test-target-variants` (the full
+#      pre-hardware gates for both PIC parts).
 #   3. Run ALL release soak combinations IN PARALLEL for the full
-#      duration, collecting a pass/fail verdict and evidence from each.
+#      duration, collecting a pass/fail verdict and evidence from each. That is
+#      6 AVR + 3 PIC10F322 + 3 PIC10F320 = 12 combos.
 #   4. Recheck source HEAD + cleanliness, then stage release/<VERSION>/ : the
 #      .hex images, SHA256SUMS, a provenance MANIFEST, a README, the
 #      soak/validation evidence, and a commit message.
@@ -173,6 +180,37 @@ AVRDUDE_PART=$(mkv AVRDUDE_PART)   # t13
 declare -A AVRDUDE_PART_X5
 for n in $TINYX5; do AVRDUDE_PART_X5[$n]=$(mkv part_"$n"); done
 
+# --- PIC10F320, the constrained release target -------------------------------
+# Read through its OWN variables, never by deriving from the PIC10F322's. The
+# two chips share one XC8 + DFP installation today, but the separate variable
+# pairs exist precisely so one can be re-pinned (merge plan §5.6) -- and a
+# release script that assumed they track would build one chip with the other's
+# toolchain and say nothing.
+PIC320_BUILD_DIR=$(mkv PIC320_BUILD_DIR)     # build_pic10f320
+PIC320_TAG=$(mkv PIC320_TAG)                 # pic10f320
+PIC320_FW_BASE=$(mkv PIC320_FW_BASE)         # bypass_mcu
+PIC320_VARIANTS=$(mkv PIC320_VARIANTS_ALL)   # cd4053-simple cd4053-mute tq2-relay
+PIC320_XTAL=$(mkv PIC320_XTAL)
+PIC320_CLK_MHZ=$(awk -v h="${PIC320_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
+PIC320_FLASH_WORDS=$(mkv PIC320_FLASH_WORDS) # 256
+PIC320_CC=$(mkv PIC320_CC)
+PIC320_DFP=$(mkv PIC320_DFP)
+
+# The canonical release product set (merge plan §10). This script ENUMERATES the
+# images it expects to build from the variant matrices below; RELEASE_IMAGES is
+# the independent statement of what a complete release contains, and the two are
+# cross-checked before anything is staged. Enumeration alone cannot catch a
+# missing build step -- it would simply enumerate fewer images and agree with
+# itself, which is the whole failure mode §14.8 describes.
+RELEASE_IMAGES=$(mkv RELEASE_IMAGES)
+[ -n "${RELEASE_IMAGES// /}" ] \
+	|| die "Makefile RELEASE_IMAGES is empty; the canonical release set is unusable"
+# The build directories those images come from, so the reproduction instructions
+# this script GENERATES cannot list a stale set of directories.
+RELEASE_IMAGE_DIRS=$(mkv RELEASE_IMAGE_DIRS)
+[ -n "${RELEASE_IMAGE_DIRS// /}" ] \
+	|| die "Makefile RELEASE_IMAGE_DIRS is empty"
+
 # Scratch area for evidence + per-combo soak run dirs. Preserved on failure so a
 # crashed/failed run can be inspected; folded into the release on success.
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/mcu-release.XXXXXX")"
@@ -242,10 +280,17 @@ req_cmd python3        "MISRA addon"
 # PIC toolchain (paths come from the Makefile defaults / PIC_CC, PIC_DFP).
 req_file "$PIC_CC"                                  "XC8 (PIC_CC=)"
 req_file "$PIC_DFP/pic/include/proc/pic10f322.h"    "PIC10-12Fxxx DFP (PIC_DFP=)"
-req_cmd gpsim          "apt: gpsim (pic-test-gpsim)"
-req_cmd c++            "host C++ compiler (PIC soak)"
-req_file /usr/include/gpsim/sim_context.h           "apt: gpsim-dev (PIC soak)"
-pkg-config --exists glib-2.0 2>/dev/null || MISSING+=("glib-2.0  (apt: libglib2.0-dev, PIC soak)")
+# ...and the PIC10F320's, asserted through its own pair. One DFP ships both
+# device headers, so this normally passes with the line above -- but a truncated
+# unpack, or a deliberately re-pinned PIC320_DFP, is exactly the case where the
+# 320 lane would otherwise skip cleanly and the release would ship 12 images
+# while claiming 15.
+req_file "$PIC320_CC"                                "XC8 (PIC320_CC=)"
+req_file "$PIC320_DFP/pic/include/proc/pic10f320.h"  "PIC10F320 device header (PIC320_DFP=)"
+req_cmd gpsim          "apt: gpsim (pic-test-gpsim, pic320-test-gpsim)"
+req_cmd c++            "host C++ compiler (PIC soaks)"
+req_file /usr/include/gpsim/sim_context.h           "apt: gpsim-dev (PIC soaks)"
+pkg-config --exists glib-2.0 2>/dev/null || MISSING+=("glib-2.0  (apt: libglib2.0-dev, PIC soaks)")
 
 if [ "${#MISSING[@]}" -gt 0 ]; then
 	log "Required tools/headers MISSING (a release needs the full toolchain):"
@@ -286,11 +331,17 @@ make clean >/dev/null
 # build intentionally does not recreate it.
 make all13 all85 all45 >"$EVID/build-avr.log" 2>&1 || { cat "$EVID/build-avr.log" >&2; die "AVR build failed."; }
 make pic PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/build-pic.log" 2>&1 || { cat "$EVID/build-pic.log" >&2; die "PIC build failed."; }
+# pic320-variants builds all three and, on any failure, removes the WHOLE image
+# set rather than leaving a partial matrix behind for a later step to stage.
+make pic320-variants PIC320_CC="$PIC320_CC" PIC320_DFP="$PIC320_DFP" \
+	>"$EVID/build-pic320.log" 2>&1 \
+	|| { cat "$EVID/build-pic320.log" >&2; die "PIC10F320 build failed."; }
 
 # Enumerate the expected image set and assert each exists.
 IMAGES=()
 AVR_IMAGES=()
 AVR_ELFS=()
+PIC320_IMAGES=()
 for v in $VARIANTS; do
 	img="$AVR_BUILD_DIR/${FW_BASE}_${v}.hex"
 	elf="${img%.hex}.elf"
@@ -302,8 +353,35 @@ for v in $VARIANTS; do for n in $TINYX5; do
 	IMAGES+=("$img"); AVR_IMAGES+=("$img"); AVR_ELFS+=("$elf")
 done; done
 for v in $VARIANTS; do IMAGES+=("$PIC_BUILD_DIR/${FW_BASE}_${v}_${PIC_TAG}.hex"); done
+for v in $PIC320_VARIANTS; do
+	img="$PIC320_BUILD_DIR/${PIC320_FW_BASE}_${v}_${PIC320_TAG}.hex"
+	IMAGES+=("$img"); PIC320_IMAGES+=("$img")
+done
 for img in "${IMAGES[@]}"; do [ -f "$img" ] || die "expected image not produced: $img"; done
-ok "built ${#IMAGES[@]} images."
+
+# Cross-check the enumeration against the canonical set BEFORE any validation
+# runs, so a mismatch costs seconds rather than a 24-hour soak. This is the
+# check that catches a forgotten build step: the enumeration above is derived
+# from the same variant matrices as the build commands, so it would shrink in
+# lock-step with an omission and never notice. RELEASE_IMAGES would not.
+enumerated=$(for img in "${IMAGES[@]}"; do basename "$img"; done | LC_ALL=C sort)
+canonical=$(printf '%s\n' $RELEASE_IMAGES | LC_ALL=C sort)
+if [ "$enumerated" != "$canonical" ]; then
+	log "release set mismatch (left: built by this script, right: Makefile RELEASE_IMAGES):"
+	diff -u <(printf '%s\n' "$enumerated") <(printf '%s\n' "$canonical") >&2 || true
+	die "the images this release builds do not match the canonical release product set."
+fi
+ok "built ${#IMAGES[@]} images; set matches the canonical RELEASE_IMAGES exactly."
+
+# Structural Intel-HEX validation of every PIC10F320 image. The PIC10F322 lane
+# gets this inside `make pic`, and the 320's `make pic320` validates each image
+# as it is produced; repeating it here covers the window between build and
+# staging, and costs nothing.
+for img in "${PIC320_IMAGES[@]}"; do
+	scripts/validate-ihex.sh "$img" >/dev/null \
+		|| die "PIC10F320 image failed Intel-HEX validation: $img"
+done
+ok "all ${#PIC320_IMAGES[@]} PIC10F320 images are structurally valid Intel HEX."
 
 hash_avr_elf_set() {
 	local elf
@@ -337,6 +415,19 @@ make pic-test-target-variants STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP"
 	|| { tail -60 "$EVID/pic-test-target-variants.log" >&2; die "make pic-test-target-variants FAILED."; }
 ok "pic-test-target-variants passed."
 
+log "running make pic320-test (PIC10F320 host lanes + CONFIG + analysis + gpsim, all variants)..."
+make pic320-test STRICT_TOOLS=1 PIC320_CC="$PIC320_CC" PIC320_DFP="$PIC320_DFP" \
+	>"$EVID/pic320-test.log" 2>&1 \
+	|| { tail -60 "$EVID/pic320-test.log" >&2; die "make pic320-test FAILED."; }
+ok "pic320-test passed."
+
+log "running make pic320-test-target-variants (fault + lock-step + target I/O on the real HEX)..."
+make pic320-test-target-variants STRICT_TOOLS=1 \
+	PIC320_CC="$PIC320_CC" PIC320_DFP="$PIC320_DFP" \
+	>"$EVID/pic320-test-target-variants.log" 2>&1 \
+	|| { tail -60 "$EVID/pic320-test-target-variants.log" >&2; die "make pic320-test-target-variants FAILED."; }
+ok "pic320-test-target-variants passed."
+
 # ============================================================================
 # 3. PARALLEL SOAK -- every release combo, full duration
 # ============================================================================
@@ -363,6 +454,21 @@ for v in $VARIANTS; do
 	make "$bin" PIC_SOAK_BIN="$bin" PIC_SOAK_VARIANT="$v" PIC_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
 		PIC_SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
 		>>"$EVID/soak-build.log" 2>&1 || die "failed to build PIC soak $name"
+	rundir="$SOAKDIR/run-$name"; mkdir -p "$rundir"
+	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
+	SOAK_CWD[$name]="$rundir"      # absolute FW_PATH; isolates gpsim.log per combo
+	SOAK_LOG[$name]="$EVID/soak-$name.log"
+done
+# Three more combos, one per PIC10F320 output stage -- the same full duration as
+# every other release combo, not a shortened smoke. Each drives its own real HEX
+# in libgpsim. PIC320_SOAK_VARIANT selects the image; the driver itself is the
+# shared parent one (§4: the parent copy is ahead, carrying SOAK_LIVENESS_DUE).
+for v in $PIC320_VARIANTS; do
+	name="pic320_${v}"; bin="$SOAKDIR/test_soak_pic320_${v}"
+	make "$bin" PIC320_SOAK_BIN="$bin" PIC320_SOAK_VARIANT="$v" \
+		PIC320_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
+		PIC320_SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
+		>>"$EVID/soak-build.log" 2>&1 || die "failed to build PIC10F320 soak $name"
 	rundir="$SOAKDIR/run-$name"; mkdir -p "$rundir"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
 	SOAK_CWD[$name]="$rundir"      # absolute FW_PATH; isolates gpsim.log per combo
@@ -450,9 +556,30 @@ section "4. stage $OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR/evidence"
 for img in "${IMAGES[@]}"; do cp -p "$img" "$OUTPUT_DIR/"; done
 
-# Checksums over the images (verifiable with: sha256sum -c SHA256SUMS).
-( cd "$OUTPUT_DIR" && sha256sum ./*.hex | sed 's# \./# #' > SHA256SUMS )
-ok "wrote SHA256SUMS over ${#IMAGES[@]} images."
+# Checksums over the images. Named EXPLICITLY, never globbed: `sha256sum ./*.hex`
+# would faithfully record whatever happens to be sitting in the staging
+# directory, so a stale image left by an earlier run would be checksummed,
+# committed and published as part of this release. The verifier would then
+# confirm it -- the producer and the verifier sharing one blind spot is the
+# §14.8 hole from the writing side.
+release_basenames=()
+for img in "${IMAGES[@]}"; do release_basenames+=("$(basename "$img")"); done
+( cd "$OUTPUT_DIR" && sha256sum -- "${release_basenames[@]}" > SHA256SUMS ) \
+	|| die "could not checksum the staged release images"
+
+# ...and assert the staging directory holds exactly that set and nothing else,
+# because publication (.github/workflows/release.yml) uploads by glob.
+shopt -s nullglob dotglob
+staged=()
+for f in "$OUTPUT_DIR"/*.hex; do staged+=("$(basename "$f")"); done
+shopt -u nullglob dotglob
+staged_sorted=$(printf '%s\n' "${staged[@]}" | LC_ALL=C sort)
+wanted_sorted=$(printf '%s\n' "${release_basenames[@]}" | LC_ALL=C sort)
+if [ "$staged_sorted" != "$wanted_sorted" ]; then
+	diff -u <(printf '%s\n' "$wanted_sorted") <(printf '%s\n' "$staged_sorted") >&2 || true
+	die "$OUTPUT_DIR holds images that are not part of this release (stale output?)."
+fi
+ok "wrote SHA256SUMS over ${#IMAGES[@]} images; staging directory holds exactly that set."
 
 # Copy evidence. The per-combo soak logs and build/pic-test logs are small and
 # kept in full; the exhaustive test-long log is large (100s of KB) and would
@@ -480,6 +607,19 @@ img_row() {
 	local elf="$AVR_BUILD_DIR/${base%.hex}.elf"
 	local mcu clk fuses flashcmd prog amcu used="n/a"
 	case "$base" in
+		# PIC10F320 FIRST. Its basenames carry a different prefix (bypass_mcu_)
+		# from every other target, and the final `*.hex` arm below is an
+		# ATtiny13a fallback -- so an unrecognized PIC name does not produce an
+		# error, it produces a row confidently labelling PIC firmware as an
+		# ATtiny13a image with AVR fuse bytes. Decision D2 kept those imported
+		# basenames, which makes this arm the thing that makes that safe.
+		*_${PIC320_TAG}.hex)
+			mcu="PIC10F320"; clk="${PIC320_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
+			# XC8 reports program space in WORDS, not bytes; the figure comes from
+			# this run's own build log, so it can never be a stale hand-copied number.
+			used=$(awk -v f="$base" '$0 ~ ("/" f " :") { for (i = 1; i <= NF; i++) if ($i == "words") { print $(i-1) " / '"$PIC320_FLASH_WORDS"' words"; exit } }' \
+				"$EVID/build-pic320.log" 2>/dev/null)
+			flashcmd="pk2cmd -PPIC10F320 -F$base -M -Y -R" ;;
 		*_${PIC_TAG}.hex)
 			mcu="PIC10F322"; clk="${PIC_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
 			flashcmd="pk2cmd -PPIC10F322 -F$base -M -Y -R   (or: make program-pic VARIANT=<v>)" ;;
@@ -519,15 +659,35 @@ REL_BANNER=""
 	[ -n "$REL_BANNER" ] && printf '%s\n' "$REL_BANNER"
 	printf 'Prebuilt, fully-validated firmware images. Verify integrity with\n'
 	printf '`sha256sum -c SHA256SUMS`; reproduce from source per "Reproducing" below.\n\n'
-	printf 'Release scope: AVR Classic (ATtiny13a/45/85) and PIC10F322. ATtiny202\n'
-	printf 'is development-only and is intentionally excluded from this release.\n\n'
+	printf 'Release scope: AVR Classic (ATtiny13a/45/85), PIC10F322 and PIC10F320.\n'
+	printf 'ATtiny202 is development-only and is intentionally excluded from this\n'
+	printf 'release: it has CI coverage but no release images and no soak evidence.\n\n'
+
+	printf '## PIC10F320 -- the constrained target\n\n'
+	printf 'The PIC10F320 has 256 words of flash, half the PIC10F322. The pure/result-struct\n'
+	printf 'architecture every other target compiles into its shipping image does not fit, so\n'
+	printf 'its firmware inlines the debounce algorithm into `main()` by hand. It is fully\n'
+	printf 'release-gated -- firmware-to-core equivalence against the same verified\n'
+	printf '`src/bypass_pure.c`, real-HEX lock-step, host and target fault injection, exact\n'
+	printf 'firmware line coverage, and its own %s-h soak per output stage -- but the\n' "$hours"
+	printf 'inlining seam means its architecture is not identical to the other targets.\n'
+	printf 'It is the constrained exception, not evidence that the reference architecture\n'
+	printf 'fits 256 words.\n\n'
+	if [ -f "$REPO_ROOT/docs/pic10f320_special_case.md" ]; then
+		printf 'Full detail: [docs/pic10f320_special_case.md](../../docs/pic10f320_special_case.md).\n\n'
+	fi
+	printf 'Its images use a different basename prefix from every other target\n'
+	printf '(`bypass_mcu_<variant>_%s.hex`), inherited from the project it was merged\n' "$PIC320_TAG"
+	printf 'from and deliberately not renamed. Match images to MCUs by the table below,\n'
+	printf 'not by prefix.\n\n'
 
 	printf '## Provenance\n\n'
 	printf -- '- **Version / tag:** %s\n' "$VERSION"
 	printf -- '- **Source commit:** `%s`\n' "$GIT_SHA"
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
-	printf -- '- **Validation:** `make test-long` + `make pic-test` + `make pic-test-target-variants` (real-HEX SFR/SRAM fault recovery, firmware/model ctx_ lock-step, and GPIO transition/pulse timing) + %s-h parallel soak of every release soak combination (see evidence/).\n\n' "$hours"
+	printf -- '- **Validation:** `make test-long` + `make pic-test` + `make pic-test-target-variants` + `make pic320-test` + `make pic320-test-target-variants` (real-HEX SFR/SRAM fault recovery, firmware/model ctx_ lock-step, and GPIO transition/pulse timing on BOTH PIC parts) + %s-h parallel soak of every release soak combination (see evidence/).\n' "$hours"
+	printf -- '- **Release set:** %d images, checked against the canonical `RELEASE_IMAGES` set declared in the Makefile -- not against whatever the build happened to produce.\n\n' "${#IMAGES[@]}"
 
 	printf '## Toolchain\n\n'
 	printf -- '| tool | version |\n|---|---|\n'
@@ -536,7 +696,8 @@ REL_BANNER=""
 	printf -- '| avr-libc (pkg) | %s |\n' "$TC_AVR_LIBC"
 	printf -- '| host cc | %s |\n' "$TC_HOST_CC"
 	printf -- '| XC8 | %s |\n' "$TC_XC8"
-	printf -- '| PIC DFP | %s |\n' "$PIC_DFP"
+	printf -- '| PIC10F322 DFP | %s |\n' "$PIC_DFP"
+	printf -- '| PIC10F320 DFP | %s |\n' "$PIC320_DFP"
 	printf -- '| gpsim | %s |\n' "$TC_GPSIM"
 	printf -- '| libsimavr-dev (pkg) | %s |\n' "$TC_SIMAVR"
 	printf -- '| cppcheck | %s |\n' "$TC_CPPCHECK"
@@ -566,7 +727,8 @@ REL_BANNER=""
 
 	printf '## Reproducing these images\n\n'
 	printf 'Check the images this tag *builds* against the committed checksums. A\n'
-	printf 'freshly built HEX lands under `build_avr_classic/` and `build_pic/`, not\n'
+	printf 'freshly built HEX lands under %s, not\n' \
+		"$(printf '%s\n' $RELEASE_IMAGE_DIRS | sed 's#^#`#; s#$#/`#' | paste -sd' ' -)"
 	printf 'in this release directory, so the checksum list must be run against those\n'
 	printf 'fresh bytes (running it from the repo root would just re-verify the\n'
 	printf 'committed copies against themselves). `build_avr_xt/` is intentionally\n'
@@ -574,11 +736,14 @@ REL_BANNER=""
 	printf '```\n'
 	printf 'git checkout %s\n' "$VERSION"
 	printf '# install the pinned toolchain (see TOOLCHAIN.adoc), then:\n'
-	printf 'make clean && make all13 all85 all45 && make pic\n'
-	printf 'scripts/verify-release-images.sh release/%s build_avr_classic build_pic\n' "$VERSION"
+	printf 'make clean && make all13 all85 all45 && make pic && make pic320-variants\n'
+	printf 'scripts/verify-release-images.sh release/%s %s\n' "$VERSION" "$RELEASE_IMAGE_DIRS"
 	printf '```\n'
-	printf 'A passing verifier proves the committed files, checksum entries, and freshly\n'
-	printf 'built files are the same complete release set with byte-identical contents.\n'
+	printf 'A passing verifier proves four things agree: the committed files, the checksum\n'
+	printf 'entries, the freshly built files, and the canonical `RELEASE_IMAGES` set the\n'
+	printf 'Makefile declares. The fourth is what makes the first three mean something --\n'
+	printf 'three sets derived by globbing the same directories agree perfectly on a\n'
+	printf 'release that is missing an entire MCU.\n'
 	printf 'The tag-triggered CI (.github/workflows/release.yml) runs this exact check on a\n'
 	printf 'clean runner and fails the release on any mismatch.\n'
 } > "$OUTPUT_DIR/MANIFEST.md"
@@ -601,7 +766,12 @@ ok "wrote MANIFEST.md"
 	printf 'release: firmware %s\n\n' "$VERSION"
 	printf 'Prebuilt, fully-validated firmware images for %s.\n\n' "$VERSION"
 	printf 'Built from %s with the toolchain pinned in TOOLCHAIN.adoc.\n' "$GIT_SHORT"
+	printf 'Scope: AVR Classic (ATtiny13a/45/85), PIC10F322 and PIC10F320 --\n'
+	printf '%d images, checked against the canonical RELEASE_IMAGES set the Makefile\n' "${#IMAGES[@]}"
+	printf 'declares rather than against whatever the build produced. ATtiny202 is\n'
+	printf 'development-only and is excluded.\n\n'
 	printf 'Validation: make test-long + make pic-test + make pic-test-target-variants\n'
+	printf '+ make pic320-test + make pic320-test-target-variants\n'
 	printf '+ %s-h parallel soak of every release soak combination (evidence under\n' "$hours"
 	printf 'release/%s/evidence/).\n\n' "$VERSION"
 	printf 'Reproducibility is pinned by release/%s/SHA256SUMS and verified on a\n' "$VERSION"

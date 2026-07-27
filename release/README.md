@@ -22,9 +22,15 @@ image for the target MCU, without `_tmux` in the filename. Those unified images
 support both CD4053 and TMUX4053 boards with fail-safe BYPASS polarity. See the
 [`v0.9.3` correction](../CHANGELOG.md#093---2026-07-11).
 
-The release product set covers AVR Classic (ATtiny13a/45/85) and PIC10F322.
-ATtiny202 is a development-only target: its normal CI artifacts are not
-ready-to-flash release assets and are intentionally absent here.
+The release product set covers AVR Classic (ATtiny13a/45/85), PIC10F322 and
+PIC10F320. ATtiny202 is a development-only target: its normal CI artifacts are
+not ready-to-flash release assets and are intentionally absent here.
+
+That set is not a description of whatever a build happened to produce — it is
+declared once in the Makefile as `RELEASE_IMAGES` and enforced. The verifier
+below fails unless the committed directory, the `SHA256SUMS` entries, and the
+freshly built images each match it exactly, so a release missing an entire MCU
+cannot pass by having three internally consistent but incomplete sets.
 
 If you would rather build from source, ignore this directory and see the
 top-level [README](../README.md) and [TOOLCHAIN.adoc](../TOOLCHAIN.adoc).
@@ -39,8 +45,11 @@ validation suite — backs these binaries, through two mechanisms:
    CONFIG word, and the validation evidence: `make test-long` (the exhaustive
    AVR suite + mutation testing), `make pic-test` (PIC CONFIG-word + static
    analysis + gpsim functional), `make pic-test-target-variants` (fail-closed
-   PIC libgpsim fault, lock-step, and target-I/O validation), and a **24-hour
-   soak of every release soak combination** (logs under `evidence/`). Because
+   PIC libgpsim fault, lock-step, and target-I/O validation), the same two gates
+   again for the PIC10F320 (`make pic320-test`, which additionally covers that
+   target's firmware-to-core equivalence, actuation, host fault injection and
+   exact firmware line coverage, and `make pic320-test-target-variants`), and a
+   **24-hour soak of every release soak combination** (logs under `evidence/`). Because
    those gates are long-running, release orchestration rechecks both the recorded
    source `HEAD` and worktree cleanliness immediately before staging artifacts.
    Only explicitly non-publishable dry runs may proceed from a dirty tree.
@@ -75,6 +84,14 @@ Images are named `bypass_<variant>[_<mcu>].hex`:
 | `_t85` | ATtiny85, 1.0 MHz |
 | `_t45` | ATtiny45, 1.0 MHz |
 | `_pic10f322` | Microchip PIC10F322, 2 MHz (HFINTOSC) |
+| `_pic10f320` | Microchip PIC10F320, 2 MHz (HFINTOSC) |
+
+The PIC10F320 images are the one exception to the naming scheme above: they are
+called `bypass_mcu_<variant>_pic10f320.hex`, with a different prefix and the
+variant names `cd4053-simple`, `cd4053-mute` and `tq2-relay`. Those names are
+inherited from the separate project that target was merged from and were kept
+deliberately, so previously published image names stay valid. **Match images to
+MCUs by the suffix table and by `MANIFEST.md`, never by prefix.**
 
 There is no ATtiny202 suffix because that development-only target is not part
 of the prebuilt release set.
@@ -119,19 +136,28 @@ pk2cmd -PPIC10F322 -Fbypass_cd4053_pic10f322.hex -M -Y -R      # PICkit 2
 # or, from the source tree: make program-pic VARIANT=<variant>
 ```
 
+**PIC10F320** — same story; the CONFIG word is embedded in the HEX:
+
+```sh
+pk2cmd -PPIC10F320 -Fbypass_mcu_cd4053-simple_pic10f320.hex -M -Y -R   # PICkit 2
+```
+
+There is no `make program-pic320` convenience target yet; flash it with the
+programmer command above.
+
 ## Reproduce the images bit-for-bit
 
-A freshly built release HEX lands under `build_avr_classic/` and `build_pic/`,
-not in the release directory, so run the checksum list against those fresh
-bytes — running it from the repo root would only re-verify the committed copies
+A freshly built release HEX lands under `build_avr_classic/`, `build_pic/` and
+`build_pic10f320/`, not in the release directory, so run the checksum list
+against those fresh bytes — running it from the repo root would only re-verify the committed copies
 against themselves. The omission of `build_avr_xt/` is intentional because
 ATtiny202 is not release-supported.
 
 ```sh
 git checkout vX.Y.Z
 # install the pinned toolchain (see TOOLCHAIN.adoc), then:
-make clean && make all13 all85 all45 && make pic
-scripts/verify-release-images.sh release/vX.Y.Z build_avr_classic build_pic
+make clean && make all13 all85 all45 && make pic && make pic320-variants
+scripts/verify-release-images.sh release/vX.Y.Z $(make -s print-RELEASE_IMAGE_DIRS)
 ```
 
 The verifier resolves symlink aliases to physical directory paths and rejects
@@ -139,11 +165,20 @@ both committed-as-fresh reuse and duplicate fresh directories. It copies
 `SHA256SUMS`, the committed images, and all fresh images into private storage
 before comparing sets or bytes, so later source mutations cannot contaminate
 the checksum phase. A passing verifier proves those three private snapshots are
-the same complete set with byte-identical contents.
+the same set with byte-identical contents **and** that the set is the canonical
+`RELEASE_IMAGES` one — the fourth comparison is what makes the other three mean
+"complete" rather than merely "consistent".
 
 Byte-exact reproduction requires the *same* `avr-gcc` **and**
 `binutils-avr` versions recorded in the manifest; a different toolchain may
 produce functionally identical but not byte-identical images.
+
+Note that the canonical set describes **the release you checked out**. Verify an
+older release from its own tag, as the block above does — running the current
+verifier against, say, `release/v0.9.4/` from a newer checkout correctly reports
+a mismatch, because that release predates targets the current set includes. That
+is a statement about which release you are looking at, not a defect in the old
+one.
 
 For tags predating `scripts/verify-release-images.sh`, use their original
 hash-only check with an absolute checksum path:

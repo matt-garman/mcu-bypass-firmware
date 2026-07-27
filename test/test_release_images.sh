@@ -26,6 +26,10 @@ reset_fixture() {
 	printf ':0100000002FD\n:00000001FF\n' > "$release/b.hex"
 	cp "$release/a.hex" "$release/b.hex" "$fresh"/
 	(cd "$release" && sha256sum a.hex b.hex > SHA256SUMS)
+	# The canonical product set for the synthetic fixture. Exported, so the
+	# verifier uses it instead of the real Makefile RELEASE_IMAGES; the
+	# canonical set's REAL content is asserted separately at the end.
+	export RELEASE_EXPECTED_IMAGES='a.hex b.hex'
 }
 
 real_sha256sum=$(command -v sha256sum) \
@@ -183,5 +187,105 @@ expect_fail "duplicate checksum entry" "duplicate SHA256SUMS image entry"
 reset_fixture
 printf 'not a checksum\n' >> "$release/SHA256SUMS"
 expect_fail "malformed checksum entry" "malformed SHA256SUMS entry"
+
+# ---------------------------------------------------------------------------
+# The canonical product set (merge plan §10). Everything above compares the
+# three OBSERVED sets -- committed directory, SHA256SUMS, fresh build -- against
+# each other. That is the check that cannot catch an omission the observations
+# share. These assert the independent fourth opinion.
+# ---------------------------------------------------------------------------
+
+# THE headline case: delete an image from ALL THREE observed sets at once, so
+# every pairwise comparison agrees perfectly. This is precisely what shipping a
+# release with an entire MCU missing looks like, and before the canonical set
+# existed it PASSED.
+reset_fixture
+rm "$release/b.hex" "$fresh/b.hex"
+(cd "$release" && sha256sum a.hex > SHA256SUMS)
+expect_fail "image omitted from all three observed sets" \
+	"do not exactly match the canonical release product set"
+
+# ...and the same omission in the other direction: an image present everywhere
+# but absent from the canonical set is equally a release-contents change, and
+# must not slip through as "all three agree".
+reset_fixture
+RELEASE_EXPECTED_IMAGES='a.hex' \
+	expect_fail "image present everywhere but not canonical" \
+		"do not exactly match the canonical release product set"
+
+# Fail closed, not open: an empty expected set must be an error rather than a
+# silently disabled gate. This is the failure mode an env-var override invites.
+reset_fixture
+RELEASE_EXPECTED_IMAGES='' \
+	expect_fail "empty canonical set" "canonical release image set is empty"
+
+reset_fixture
+RELEASE_EXPECTED_IMAGES='a.hex ../escape.hex' \
+	expect_fail "invalid name in canonical set" \
+		"canonical release image set has an invalid image name"
+
+reset_fixture
+RELEASE_EXPECTED_IMAGES='a.hex b.hex a.hex' \
+	expect_fail "duplicate in canonical set" \
+		"canonical release image set has a duplicate image name"
+
+# The verifier must read the real Makefile when nothing overrides it. Drive it
+# with no RELEASE_EXPECTED_IMAGES at all against a fixture that cannot match, and
+# require the failure to name the Makefile as the source -- otherwise a broken
+# `make -s print-RELEASE_IMAGES` could leave the gate reading an empty set.
+reset_fixture
+unset RELEASE_EXPECTED_IMAGES
+expect_fail "canonical set read from the Makefile by default" \
+	"(Makefile RELEASE_IMAGES)"
+
+# Finally, the content of the real canonical set. Every check above works
+# equally well on a set that has quietly lost a whole MCU, so assert what the
+# Makefile actually declares: all four release-supported parts present, in the
+# quantity the variant matrix implies, and ATtiny202 absent because it is
+# development-only (§10).
+canonical=$(cd "$ROOT" && make -s print-RELEASE_IMAGES) \
+	|| fail "could not read RELEASE_IMAGES from the Makefile"
+read -r -a canonical_arr <<<"$canonical"
+[ "${#canonical_arr[@]}" -eq 15 ] \
+	|| fail "canonical release set has ${#canonical_arr[@]} images, expected 15"
+checks=$((checks + 1))
+
+count_matching() {
+	local pattern=$1 n=0 base
+	for base in "${canonical_arr[@]}"; do
+		case "$base" in $pattern) n=$((n + 1)) ;; esac
+	done
+	printf '%s' "$n"
+}
+
+expect_count() {
+	local label=$1 pattern=$2 want=$3 got
+	got=$(count_matching "$pattern")
+	[ "$got" -eq "$want" ] \
+		|| fail "canonical set has $got $label images, expected $want (pattern $pattern)"
+	checks=$((checks + 1))
+}
+
+expect_count "PIC10F320"  '*_pic10f320.hex' 3
+expect_count "PIC10F322"  '*_pic10f322.hex' 3
+expect_count "ATtiny85"   '*_t85.hex'       3
+expect_count "ATtiny45"   '*_t45.hex'       3
+expect_count "ATtiny202"  '*attiny202*'     0
+
+# Name the three PIC10F320 images explicitly. A count alone would survive a
+# rename, and these basenames are a published interface (decision D2: the child's
+# names are kept, not migrated).
+for base in bypass_mcu_cd4053-simple_pic10f320.hex \
+		bypass_mcu_cd4053-mute_pic10f320.hex \
+		bypass_mcu_tq2-relay_pic10f320.hex; do
+	[[ " $canonical " == *" $base "* ]] \
+		|| fail "canonical release set is missing $base"
+	checks=$((checks + 1))
+done
+
+# No retired variant may return (§1).
+[[ "$canonical" != *tmux4053* ]] \
+	|| fail "canonical release set contains a retired tmux4053 image"
+checks=$((checks + 1))
 
 printf 'release image verification: %d checks, 0 failures\n' "$checks"

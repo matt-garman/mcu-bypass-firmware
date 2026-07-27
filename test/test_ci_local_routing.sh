@@ -32,7 +32,11 @@ fail() {
 }
 
 mkdir -p "$fakebin" "$work/dfp/pic/include/proc" "$work/gpsim-inc"
+# Both device headers: assert_pic_toolchain checks each chip through its own
+# PIC_*/PIC320_* pair, so a fake DFP with only one of them would fail the assert
+# before any routing was exercised.
 : > "$work/dfp/pic/include/proc/pic10f322.h"
+: > "$work/dfp/pic/include/proc/pic10f320.h"
 : > "$work/gpsim-inc/sim_context.h"
 
 cat > "$fakebin/git" <<'EOF'
@@ -86,6 +90,7 @@ run_ci() {
 	env PATH="$fakebin:$PATH" FAKE_REPO_ROOT="$ROOT" FAKE_MAKE_LOG="$log" \
 		REAL_MAKE="$REAL_MAKE" \
 		PIC_CC="$work/xc8" PIC_DFP="$work/dfp" \
+		PIC320_CC="$work/xc8" PIC320_DFP="$work/dfp" \
 		PIC_SOAK_GPSIM_INC="$work/gpsim-inc" \
 		"$CI_LOCAL" --no-clean --skip-attiny202 "$@" 2>&1
 }
@@ -110,15 +115,22 @@ if ! output=$(run_ci); then
 fi
 mapfile -t lines <<<"$output"
 mapfile -t calls < "$log"
-[ "${#calls[@]}" -eq 4 ] \
-	|| fail "full push executed ${#calls[@]} Make commands, expected 4"
+# Six, not four: the pic job covers BOTH chips (merge plan §11/D3 -- one job, one
+# XC8 install), so the 10F320 pre-hardware and target aggregates must appear here
+# too. Asserting the exact count is what makes a silently dropped chip a failure
+# rather than a shorter, greener run.
+[ "${#calls[@]}" -eq 6 ] \
+	|| fail "full push executed ${#calls[@]} Make commands, expected 6"
 [ "${calls[0]}" = $'STRICT_TOOLS=1\tpic-test' ] \
 	&& [ "${calls[1]}" = $'STRICT_TOOLS=1\tpic-test-target-variants' ] \
-	|| fail "full push omitted or reordered the PIC gates"
-[ "${calls[2]}" = $'STRICT_TOOLS=1\tall13\tall85\tall45' ] \
-	|| fail "full push routed the build matrix incorrectly: ${calls[2]}"
-[ "${calls[3]}" = $'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=0' ] \
-	|| fail "full push did not keep mutation fail-closed: ${calls[3]}"
+	|| fail "full push omitted or reordered the PIC10F322 gates"
+[ "${calls[2]}" = $'STRICT_TOOLS=1\tpic320-test' ] \
+	&& [ "${calls[3]}" = $'STRICT_TOOLS=1\tpic320-test-target-variants' ] \
+	|| fail "full push omitted or reordered the PIC10F320 gates"
+[ "${calls[4]}" = $'STRICT_TOOLS=1\tall13\tall85\tall45' ] \
+	|| fail "full push routed the build matrix incorrectly: ${calls[4]}"
+[ "${calls[5]}" = $'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=0' ] \
+	|| fail "full push did not keep mutation fail-closed: ${calls[5]}"
 checks=$((checks + 1))
 
 if ! output=$(run_ci --pr --skip-pic); then
