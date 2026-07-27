@@ -1458,16 +1458,37 @@ Several items below say "has a recorded decision". Those decisions are recorded 
 decision. Where §15 accepted a naming asymmetry, the accompanying `TODO.md` item
 is part of the record, not a substitute for it.
 
-- [ ] Global Make directives have a per-directive disposition (§5.8): the child's
+**Ticked 2026-07-27 against tip `6c475ba`**, from an independent re-run rather
+than from the phase records: `make test`, `make pic320-test` and
+`make pic-test`/`-target-variants` under `STRICT_TOOLS=1`,
+`make test-mutation MUTATION_ALLOW_SKIP=0` (74 killed / 0 survived / 0 errored /
+0 skipped), a full `make-release.sh --dry-run` at this tip, and a rebuild of all
+15 release images. **31 of 36 boxes are closed; the five that are not are marked
+OPEN with what remains** — do not read an unticked box as an oversight, each says
+why. Where a box's own text names a pre-relocation path (`test/fault/…`,
+`test/pic/test_fault_pic.cc`), the work landed at the post-Phase-2 location
+(`test/pic10f320/…`); the box text is left as written so the plan still reads as
+the document it was when the requirement was set.
+
+- [x] Global Make directives have a per-directive disposition (§5.8): the child's
       bare `.NOTPARALLEL` is **not** imported and
       `test-make-safe-parallel-probe` still passes, imported recipes were
       re-checked under the parent's `.DELETE_ON_ERROR`, and `PROJECT_MAKE` plus
       the parent-only exports resolve to one definition each.
-- [ ] The imported graph is pinned to the recorded child SHA (`f58d2d5...`, not
+      *(Verified: the complete directive inventory is `.PHONY`,
+      `.DELETE_ON_ERROR:` and three `export`s — `_MAKE_SERIAL_LOCK_HELD`,
+      `PROJECT_MAKE := $(MAKE_COMMAND)`, `GPSIM_TIMEOUT_SECONDS` — with no
+      `.NOTPARALLEL`, `vpath`, `include` or `.ONESHELL` anywhere.)*
+- [x] The imported graph is pinned to the recorded child SHA (`f58d2d5...`, not
       the superseded `915ee03...`), all six original signed tags are verifiable
       under `pic10f320/v0.9.*`, and provenance lookup instructions document
       `git log -m --follow`.
-- [ ] The §6.11 PIC firmware defensive-layer divergence is resolved as measured
+      *(Import `a15d7b6` carries `f58d2d5`; all six tags re-verified SIGNED-OK
+      and pushed to `origin` 2026-07-27 with their original annotated objects.
+      The lookup instructions landed in `docs/pic10f320_validation.md` §1, with
+      the two-stage `a15d7b6^2` fallback; all three commands were run against the
+      real graph before being documented.)*
+- [x] The §6.11 PIC firmware defensive-layer divergence is resolved as measured
       2026-07-26: **exact TRISA is ported** to all three PIC10F320 variants by
       the user (+1 word each; 220/241/244 of 256), landing after the Phase-2
       byte-identity gate as its own rebaselining commit, with
@@ -1476,120 +1497,279 @@ is part of the record, not a substitute for it.
       match is documented as omitted** in `docs/pic10f320_special_case.md`
       (does not fit: cd4053-mute over by 5 words, tq2-relay by 3) and reflected
       in the mutation topology. The reverse ANSELA question has an answer too.
-- [ ] Every §6.12 parent-only gate has a recorded PIC10F320 decision: mutation
+      *(The reverse ANSELA answer, recorded here because it was reached but never
+      written down: **no 322 firmware change is needed.** Both shells evaluate the
+      identical predicate over the identical mask —
+      `ANSELA & BYPASS_OUTPUT_DDR_MASK` at `src/bypass_mcu_pic10f322.c:142` and
+      `src/bypass_mcu_pic10f320.c:483` — so the 320's "dedicated check" and the
+      322's "inside `hw_critical_sfrs_intact`" differ in placement only, not in
+      the fault they detect. §6.11's table framed a structural difference as a
+      coverage one.)*
+- [ ] **OPEN (2 of 8 rows).** Every §6.12 parent-only gate has a recorded
+      PIC10F320 decision: mutation
       policy, flash budget, strict-tools inventory, ci-local routing, release
       provenance, rebuild determinism, stack bound, and firmware-coverage /
       `xc.h` convergence.
-- [ ] The strict-tools inventory covers optional-tool recipes for **both** PIC
+      *(Six are decided and implemented — central mutation policy extended,
+      inline 256-word budget, strict-tools inventory at 18 checks, two-chip
+      ci-local routing, provenance verified target-agnostic, and the deliberate
+      two-mechanism firmware-coverage split. **Rebuild determinism** and **stack
+      bound** closed with neither an implementation nor a "no, because", as §15.9
+      states. Both are now tracked as `TODO.md` Tier 2.5 items rather than living
+      only in this plan; the stack-bound one is the substantive gap — the 14-bit
+      core's 8-level hardware return stack is observed by no current gate.)*
+- [x] The strict-tools inventory covers optional-tool recipes for **both** PIC
       chips, not only the newly added ones (§6.12), and the flash-budget
       disposition — inline for both chips, or the shared script for both — is
       recorded and implemented consistently rather than left mixed.
-- [ ] The CI job-graph decision is recorded and implemented: `pic320` extends the
+      *(8 recipes / 18 checks, up from 2 / 6; it found the real `$(SKIP)`
+      line-continuation defect on its first run, per §15.9. Both PIC budgets are
+      inline Makefile arithmetic; `test/check_flash_budget.sh` stays
+      ELF/`$(SIZE)`-shaped and the 322 lane was not churned.)*
+- [x] The CI job-graph decision is recorded and implemented: `pic320` extends the
       existing `pic` job or is a sibling, and whether `verify`, `attiny202`,
       `build-matrix`, and `stress` gate on it (§11).
-- [ ] Each §4 shared-name harness regression (`test_pic_build.sh`,
+      *(D3 as decided. Re-verified by parsing `ci.yml` rather than reading it:
+      five jobs, and `verify`, `attiny202`, `build-matrix`, `stress` all still
+      declare `needs: pic`, so all four gate on PIC10F320.)*
+- [x] Each §4 shared-name harness regression (`test_pic_build.sh`,
       `test_make_serialization.sh`, `test_gpsim_wrappers.sh`,
       `test_release_images.sh`, `test_soak_timing.sh`, `test_target_matrix.sh`,
       `test_lockstep_progress.sh`) has a recorded FOLD-or-FORK disposition, and
       no fold silently added a tool dependency to the default `test` aggregate.
-- [ ] Every colliding Makefile **variable** has a recorded disposition (§5.6):
+      *(All seven FOLD — dispositions in §15.7 and §15.10;
+      `test_lockstep_progress.sh` was 0-diff and dropped. The only PIC10F320
+      member of `test`/`test-long` is `pic320-test-host-variants`, which needs
+      `cc` + `gcov` only, so the aggregate's tool contract is unchanged.)*
+- [x] Every colliding Makefile **variable** has a recorded disposition (§5.6):
       chip-specific names carry the prefix chosen alongside §5.1's target prefix,
       the shared-tool allowlist is explicit, no chip inherits the other's
       `PIC_FLASH_WORDS` / `FW_BASE` / `COVERAGE_MIN` / soak durations, and every
       `make print-<VAR>` consumer in `scripts/` and `.github/workflows/` was
       updated with the rename.
-- [ ] No PIC10F320 lane writes into, or `rm -rf`s, a shared artifact directory
+      *(`PIC320_*` throughout per D1; `PIC320_FLASH_WORDS = 256` against the 322's
+      512, separate `FW_BASE` and soak durations, and `coverage-check-core` carries
+      its own floor rather than sharing `COVERAGE_MIN`. `scripts/ci-local.sh` reads
+      both chips through their own `print-PIC*_CC`/`_DFP` pairs deliberately, so a
+      re-pin of one chip cannot make the checker assert the other's install.)*
+- [x] No PIC10F320 lane writes into, or `rm -rf`s, a shared artifact directory
       (§5.7). `coverage/` belongs to the parent lanes; `pic320-coverage-clean` and
       `pic320-clean` touch only PIC10F320 paths; `/.make.lock` remains a single
       shared inode.
-- [ ] The release-image naming decision of §5.3 is recorded — keep the child
+      *(`pic320-clean` is `rm -rf build_pic10f320` and nothing else. Note there is
+      **no** `pic320-coverage-clean` target, and that is the implementation of
+      §5.7 rather than an omission: coverage lives at
+      `build_pic10f320/coverage/`, so the one clean covers both and the imported
+      `rm -rf $(COVERAGE_DIR)` — which would have deleted the parent's report —
+      has no descendant. Verified by sentinel file, not inspection.)*
+- [x] The release-image naming decision of §5.3 is recorded — keep the child
       basenames and document the three-convention asymmetry, or migrate at
       `v0.10.0` — and `scripts/make-release.sh`'s image→MCU classifier recognizes
       whichever prefixes survive.
-- [ ] Exactly one `src/bypass_pure.c`, formal property set,
+      *(D2, keep. The `*_${PIC320_TAG}.hex` arm is placed **first**, ahead of the
+      bare `*.hex` ATtiny13a fallback; confirmed in a staged manifest, where all
+      three PIC10F320 rows read `PIC10F320 | 2 MHz (HFINTOSC) | n/256 words`
+      rather than falling through to AVR fuse bytes.)*
+- [x] Exactly one `src/bypass_pure.c`, formal property set,
       `test/model_step.h`, `misra.json`, and `misra_rules.txt` remains; no
       vendored model copy survives.
-- [ ] Principle 8 was applied per child-only asset, and the two known cases
+      *(Confirmed by tree-wide search: one of each, and no `test/model/`.)*
+- [x] Principle 8 was applied per child-only asset, and the two known cases
       landed as *promotions*, not 320 sections: a shared line-coverage gate over
       `src/bypass_pure.c` with its own floor (the child's 95% over the real core,
       distinct from the parent's 90% over the independent oracle), and the
       cross-chip gpsim "Known gaps" documentation covering both PIC chips.
-- [ ] Shared host/formal tests retain both independent-oracle and direct-core
+      *(`coverage-check-core` reports 100.00% against its 95% floor alongside the
+      oracle's 99.35% against 90%; both run inside `make test`.)*
+- [ ] **OPEN (the "executes" half).** Shared host/formal tests retain both
+      independent-oracle and direct-core
       assurance where justified, include the concrete corrupt-state check, and
       the KLEE target links and executes the real pure core.
-- [ ] PIC10F320 equivalence and lockstep compile/link `src/bypass_pure.c`
+      *(Done: both roles preserved with the reviewed argument in §15.6, the
+      corrupt-state property migrated as invariant I7 — model check 2153 → 2157
+      checks — and `test-klee-build` links the shipping core and is a member of
+      `make test`. **Not done: nothing executes the KLEE proof.** `klee` is
+      absent on the execution host (§15.8) and no CI job runs
+      `test-symbolic-klee`, so the solver has never been run against the merged
+      tree. This is pre-existing rather than merge-caused, and it is tracked as
+      the `TODO.md` Tier 2.5 "KLEE in CI" item; the box stays open because a
+      passing `test-klee-build` must never be recorded as evidence the proof
+      ran.)*
+- [x] PIC10F320 equivalence and lockstep compile/link `src/bypass_pure.c`
       directly with the parent host config shim; no stale implementation can be
       selected through include-path ordering.
-- [ ] PIC10F320 firmware is the reviewed child source moved verbatim by the
+      *(`PIC320_MODEL_SRC := src/bypass_pure.c`, and the lock-step recipe links
+      the same object; no vendored copy exists to select. Enforcement
+      demonstrated, not assumed: changing `PRESSED_THRESH` 8→9 in the core alone
+      fails `pic320-test-equiv` with 1 divergence.)*
+- [x] PIC10F320 firmware is the reviewed child source moved verbatim by the
       user, except for any separately reviewed user-owned source comments.
       Firmware images for every pre-existing target are byte-identical to their
       pre-merge baselines unless an independently approved change says otherwise.
-- [ ] The three PIC10F320 images built in the merged tree are byte-for-byte
+      *(Re-proven 2026-07-27 rather than inherited from the phase records: all 12
+      pre-existing release images rebuilt at this tip and compared against the
+      committed `release/v0.9.5/` — **12/12 byte-identical**. The merge changed no
+      other target's emitted bytes.)*
+- [x] The three PIC10F320 images built in the merged tree are byte-for-byte
       identical to the child's `release/v0.9.5/*.hex` (§6.13), proven *before*
       any §6.11 firmware edit lands; if that edit landed, the rebaselined hashes
       are recorded in its own separate commit.
-- [ ] §6.13's gate has a recorded **lifetime**: either retired after Phase 4 with
+      *(§15.4 for the pre-edit pass, §15.5 for the rebaselined hashes in the
+      edit's own commit. Both sets also preserved in
+      `docs/pic10f320_validation.md` §2, which is where they survive this plan.)*
+- [x] §6.13's gate has a recorded **lifetime**: either retired after Phase 4 with
       the compared hashes preserved in the phase commits and
       `docs/pic10f320_validation.md`, or kept as a standing expected-image-hash
       regression that survives Phase 7's deletion of the imported baseline.
-- [ ] The moved firmware's self-referential comments are swept in one reviewed,
+      *(D4: retired, hashes preserved. The cost — nothing at the tip watches
+      emitted bytes — is stated in `docs/pic10f320_validation.md` §2 and §6, and
+      promotion to the standing regression is now a `TODO.md` Tier 2.5 item so the
+      trade stays revisitable rather than merely recorded here.)*
+- [x] The moved firmware's self-referential comments are swept in one reviewed,
       comment-only commit (§4: `:6-8` header note plus `:68`, `:74`, `:321`,
       `:640`, `:657`), separately from §6.11's rebaselining edit, and the images
       are confirmed byte-identical across it.
-- [ ] Exactly three supported PIC10F320 variants build into
+      *(§15.12, run 3 of the byte-identity evidence: MATCH on all three against
+      the §15.5 hashes. Re-confirmed since — the same three hashes appear in the
+      2026-07-27 dry-run manifest.)*
+- [x] Exactly three supported PIC10F320 variants build into
       `build_pic10f320/`, pass structural IHEX checks, fit the 256-word budget,
       and contain exact emitted CONFIG word `0x389E`.
-- [ ] Empty, duplicate, incomplete, or unknown variant matrices fail every
+      *(220 / 241 / 244 of 256; `pic320-test-config` 45 checks, 0 failures.)*
+- [x] Empty, duplicate, incomplete, or unknown variant matrices fail every
       authoritative all-variant aggregate; each target layer requires its exact
       expected PASS markers/check counts and propagates simulator/tool failure.
-- [ ] `pic320-test-host`, selected/all-variant development tests,
+      *(Three matrix guards at 5 checks each — target, host, and the 322's — with
+      the unsupported-name probe deliberately using `tmux4053-simple`, the retired
+      variant §1 says must never reappear. `override PIC320_VARIANTS_SUPPORTED`
+      stops a command-line matrix whitelisting itself. Exact counts enforced:
+      `EXPECTED_CHECKS 22`, lock-step 3005, uniform across variants.)*
+- [x] `pic320-test-host`, selected/all-variant development tests,
       `pic320-test-target-variants`, coverage, analysis, soak, build regression,
       and mutation targets pass under the documented tool policy.
-- [ ] Default `test` / `test-long` remain compatible with their documented
+      *(Re-run 2026-07-27 under `STRICT_TOOLS=1`: `pic320-test` EXIT=0,
+      `pic320-test-target-variants` EXIT=0 — fault 22/22/22, lock-step 3005×3,
+      I/O 25/26/36 — and `test-mutation MUTATION_ALLOW_SKIP=0` at 74 killed / 0
+      survived / 0 errored / 0 skipped. The 322 lane was re-run alongside and is
+      unregressed.)*
+- [x] Default `test` / `test-long` remain compatible with their documented
       tool-independent semantics. Any full-tool all-target aggregate is
       explicitly named and documented.
-- [ ] Push, scheduled, and manually dispatched full-tool CI plus release CI run
+      *(`make test` EXIT=0 with zero FAIL/ERROR lines; its only PIC10F320 member
+      needs `cc` + `gcov`. `test-all-targets` was declined as a decision, with
+      reasoning, in §15.9 — every full-tool lane is already reachable by name.)*
+- [x] Push, scheduled, and manually dispatched full-tool CI plus release CI run
       the combined PIC10F322/PIC10F320 mutation set with
       `MUTATION_ALLOW_SKIP=0`; PR omission is explicit, and skipped PIC tools in
       a partial non-PIC stress run cannot produce an authoritative pass.
-- [ ] Soak duration parsing rejects zero, overflow/wrap, and sub-minimum release
+      *(The `pic` job threads `PIC320_CC`/`PIC320_DFP` alongside the 322's and
+      asserts both device headers first; the `stress` job now states
+      `MUTATION_ALLOW_SKIP=1` on the command line so its PIC output is explicitly
+      diagnostic rather than defaulted.)*
+- [x] Soak duration parsing rejects zero, overflow/wrap, and sub-minimum release
       values. Release creation runs one isolated 24-hour-equivalent soak for
       each of the three PIC10F320 variants and records evidence.
-- [ ] One canonical expected-product set requires all three PIC10F320 images.
+      *(`test_soak_timing.sh` 40 checks, 0 failures, including that the liveness
+      interval reaches all three lanes and that the 320 combos exist at all — the
+      grep alone would pass vacuously if the loop building them were deleted.
+      12/12 combos PASS in the dry run, the three PIC10F320 ones at full duration
+      rather than a shortened smoke.)*
+- [x] One canonical expected-product set requires all three PIC10F320 images.
       Removing them from committed files, checksums, and fresh builds still
       fails a regression test.
-- [ ] Local release creation and tag CI handle PIC10F320 build prerequisites,
+      *(`RELEASE_IMAGES` = 15 basenames, consumed by all three of the release
+      script, the verifier and its regression through `make -s print-`.
+      `test_release_images.sh` 40 checks; the global-omission negative test was
+      demonstrated in **both** directions on real staged release data, per
+      §15.10.)*
+- [x] Local release creation and tag CI handle PIC10F320 build prerequisites,
       validation, evidence, image metadata/programmer commands, reproduction,
       checksums, caveat links, and publication without generic-AVR fallthrough.
-- [ ] `make clean` and `clean-tests` remove every PIC10F320 build/test/coverage
+      *(Local: a full `--dry-run` at this tip, EXIT=0 — 15 images matched to the
+      canonical set, five gates, 12/12 soaks, verifier re-run against the staged
+      output. **Caveat worth carrying into the release run:** `release.yml` is
+      written, parses, and asserts both device headers, but has never executed —
+      no tag has been pushed, so the tag-CI half is implemented rather than
+      exercised. The first `v0.10.0` push is its first run.)*
+- [x] `make clean` and `clean-tests` remove every PIC10F320 build/test/coverage
       artifact; concurrent variant invocations use private outputs and pass.
-- [ ] Fresh static analysis has zero unwaived findings across all targets. Any
+      *(`make clean` leaves no `build_pic10f320/` and a clean `git status` after a
+      full build of all 15 images; `clean-tests` gained the dedicated arm for the
+      host binaries, objects and coverage subtree that live under the build
+      directory rather than beside their sources.)*
+- [x] Fresh static analysis has zero unwaived findings across all targets. Any
       PIC10F320 deviation is justified, documented, and scoped to its file;
       existing parent documented deviations are not mislabeled as zero.
-- [ ] The first unified release version is greater than both historical lines
+      *(cppcheck + MISRA clean on all three PIC10F320 variants — the sweep matters,
+      since each compiles a different `#if defined(OUTPUT_*)` branch. D-4's two
+      entries are file-scoped, bisected to an analyzer limitation, and **narrow**
+      the waiver the child suppressed globally.)*
+- [ ] **OPEN (the release half).** The first unified release version is greater
+      than both historical lines
       (preferably `v0.10.0`), and parent/child changelogs accurately classify
       all v0.9.x work before the unified entry.
+      *(Changelog half done: `## [0.10.0] - 2026-07-27` is cut, and the header
+      note explains why the child's colliding `v0.9.0`–`v0.9.5` entries are
+      deliberately not back-filled. `v0.10.0` is confirmed free on the remote and
+      exceeds both lines. What remains is cutting it — see the last box. Correct
+      the changelog date if the release lands on a different day; nothing enforces
+      it, because `make-release.sh` does not read the changelog.)*
 - [x] ATtiny202's development-only/non-release status is explicit and
       implementation, canonical image set, soak claims, and documentation agree.
-- [ ] `docs/pic10f320_special_case.md` is the sole assurance-caveat narrative;
+- [x] `docs/pic10f320_special_case.md` is the sole assurance-caveat narrative;
       README, design, feasibility, validation, toolchain, MISRA, TODO, release,
       and manifest content is technically complete, links to it, and does not
       imply architectural parity.
-- [ ] Every stale cross-project reference has a recorded disposition, including
+      *(Seven sections, and every other document links rather than re-explains.
+      The generated `MANIFEST.md` carries the caveat inline and links the document
+      conditionally, so a release cut before it existed would have stated the
+      caveat rather than dangling a link.)*
+- [x] Every stale cross-project reference has a recorded disposition, including
       the two the first audit missed (§4): `CHANGELOG.md:233-234`
       preserve-as-history or annotated, and `TODO.md:279` re-framed from an
       external-project caveat into a tracked cross-target task.
-- [ ] The child's manual-sync contract survives the merge as a promoted,
+      *(Tree-wide search finds exactly two surviving mentions of the child
+      repository, both deliberate: the annotated historical changelog entry, and
+      the `Makefile` comment recording why the retired byte-identity gate's
+      baseline is gone. The `TODO.md` line now sits inside the shadow-state
+      hardening item as a live cross-target task alongside the 322's.)*
+- [x] The child's manual-sync contract survives the merge as a promoted,
       `src/`-repointed cross-target checklist (§14.3), and the child README's
       `## Provenance` claims are rewritten rather than merged forward.
-- [ ] The child's non-git GitHub assets have recorded dispositions (§6.15): open
+      *(`docs/pic10f320_special_case.md` §5, with the "Parent source" column
+      repointed to `src/` and the claim **strengthened**: the sync is manual but
+      now enforced by `pic320-test-equiv`, which the vendored-copy arrangement
+      could not do. The two gaps it still cannot see are named there.)*
+- [ ] **OPEN — and it is the archival gate.** The child's non-git GitHub assets
+      have recorded dispositions (§6.15): open
       issues and pull requests, published release pages and their assets, the
       release signing key's continuity, and inbound URL references.
-- [ ] No tracked `_incoming_pic10f320/` path or obsolete child badge/link
+      *(The one Phase-0 checkpoint with no entry in §15 — Phase 0 asked for the
+      signing-key answer specifically so it would not be discovered here, and it
+      was not answered. All four are decisions rather than work, but they are the
+      decisions archival makes irreversible: archiving freezes issues and PRs
+      read-only in a repository this project cannot search, the six published
+      release pages and their uploaded assets do **not** migrate with the
+      namespaced tags, and a `v0.10.0` signed under a different key than the
+      archived child releases is a trust-continuity break a user verifying an
+      older image can actually observe. If the keys differ, say so in the release
+      notes rather than leaving it to be found.)*
+- [x] No tracked `_incoming_pic10f320/` path or obsolete child badge/link
       remains at the merged tip; all intentionally discarded material remains
       recoverable through imported history/tags.
-- [ ] A green unified release has been independently verified before the child
+      *(`git ls-files -- _incoming_pic10f320` returns zero paths. All six
+      `pic10f320/v0.9.*` tags re-verified SIGNED-OK and pushed to `origin`
+      2026-07-27, so the discarded trees — including the six historical release
+      directories — are recoverable from the remote and not merely from one
+      clone.)*
+- [ ] **OPEN — the remaining user action.** A green unified release has been
+      independently verified before the child
       repository receives its pointer and is archived.
+      *(`make release VERSION=v0.10.0` with the real 24-hour soak of all 12
+      combos, then tagging and signing, then the child pointer and archival — in
+      that order, per §7. Archive rather than delete: the annotated changelog
+      entry and this plan both link the child URL, and archived repositories stay
+      readable.)*
 
 ---
 

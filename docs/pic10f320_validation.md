@@ -31,6 +31,27 @@ The import commit is `a15d7b6`, importing child HEAD
 the moved file was confirmed byte-identical to the child original — a checked
 fact, not a review claim.
 
+**Querying that history.** The import is a merge commit, so ordinary
+`git log --follow` stops at it: by default `git log` does not descend into a
+merge's second parent, and `--follow`'s rename detection does not survive the
+crossing. Use `-m`, which splits the merge and lets the walk continue:
+
+```sh
+git log -m --follow -- src/bypass_mcu_pic10f320.c
+```
+
+If a query still stops short, look the path up in two stages — this repository's
+history down to the import, then the child's original path from the imported side:
+
+```sh
+git log --oneline -- src/bypass_mcu_pic10f320.c            # since the move
+git log --oneline a15d7b6^2 -- bypass_mcu_pic10f320.c      # before it
+```
+
+Seamless single-command `--follow` would have required rewriting the imported
+commits, which sacrifices their original object identity and invalidates the
+signed tags above. That trade was declined deliberately.
+
 ## 2. Byte identity: the ported build recipe emits the same bytes
 
 This is the evidence with no live gate behind it, so it is recorded in full.

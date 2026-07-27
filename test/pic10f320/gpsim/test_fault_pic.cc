@@ -44,9 +44,13 @@
 //      note below), which would otherwise pass silently.
 // A no-injection CONTROL case runs first and asserts delta == 0: a quiescent
 // device must NOT reset in a full window, proving the window is not catching
-// phantom resets and the gate does not fire spuriously. The simple variant also
-// has one write-back-verified negative injection: changing spare RA2 to an input
-// must produce zero resets because RA2 is outside that variant's runtime guard.
+// phantom resets and the gate does not fire spuriously. That control is now the
+// ONLY delta == 0 assertion here: since the exact-TRISA port every injection
+// below is a guarded fault expecting exactly one reset, identically on all three
+// variants. (Before the port, cd4053-simple carried an extra write-back-verified
+// negative injection -- its spare RA2 sat outside the old per-variant mask.
+// Exact TRISA covers RA2 too, so both that blind spot and the variant split in
+// these expectations are gone; see EXPECTED_CHECKS below.)
 //
 // CORRUPTION VALUES are chosen so the main loop keeps running and the GATE is
 // the sole reset path (confound analysis, per case, below). OSCCON.IRCF and
@@ -324,8 +328,12 @@ static bool advance_to_loop_clrwdt(void) {
 
 // ---- One injection case -----------------------------------------------------
 // absolute=true writes `val`; absolute=false writes (current ^ val), i.e. an
-// SEU bit-flip of the bits in `val`. expected_resets is one for guarded faults
-// and zero for the simple variant's spare-RA2 negative control.
+// SEU bit-flip of the bits in `val`. Every call site passes expected_resets == 1
+// since the exact-TRISA port made all three variants guard the same directions;
+// the parameter and its restore-and-verify branch below are kept because a
+// zero-expectation case is exactly what a future unguarded location would need,
+// and because that branch is what proved the old RA2 negative control genuinely
+// left the register unchanged rather than silently failing to inject.
 static void inject_case(const char *label, unsigned addr, const char *token,
                         bool absolute, unsigned val, unsigned expected_resets,
                         const char *note) {

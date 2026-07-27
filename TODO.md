@@ -234,6 +234,68 @@ analysis that the 64 ms SUT delay covers the LDO ramp (check the LP2950/AP7375
 datasheet startup time against 64 ms). Item (b) is a documentation task and pairs
 naturally with the Tier 2 datasheet-citation item.
 
+**PIC10F320 rebuild determinism.** Added 2026-07-27, from the PIC10F320 merge:
+`docs/pic10f320_merge_plan.md` §6.12 required a recorded decision for every
+parent-only gate, and this is one of two rows that closed with neither an
+implementation nor a "no, because" (§15.9 says so explicitly). The parent has
+`test-workload-rebuild` and `test-avr-build-rebuild`, which prove a rebuild after
+a workload/flag change actually re-runs rather than reusing a stale artifact.
+There is no PIC10F320 equivalent, and its build directory is the one place a
+stale binary is easiest to miss: every PIC10F320 host test binary lands in
+`build_pic10f320/` rather than beside its source, so `clean-tests` needed a
+dedicated arm to reach them at all (it has one now). Decide explicitly: add a
+`PB_*`-style parameterized rebuild probe covering the 320's XC8 and host lanes,
+or record why the existing `pic320` recipes — which rebuild unconditionally,
+having no intermediate object targets — make it unnecessary. The second answer
+may well be the right one; what is not acceptable is leaving it undecided, since
+"the recipes are phony today" is a property a future incremental-build
+optimisation would silently invalidate.
+
+Effort: ~1 h to record the decision with evidence, ~2–3 h if a probe is written.
+Impact: Low–Medium — closes a §6.12 row and removes a trap for anyone who later
+makes the PIC10F320 lanes incremental.
+
+**PIC10F320 stack-bound coverage.** The other open §6.12 row, and the more
+interesting of the two: `test-stack-bound` / `test-stack-bound-regression` use
+`-fstack-usage` to bound the AVR call depth, and the PIC10F320 is the target
+where that question has the most unusual shape — its entire logic is inlined into
+`main()`, so it has almost no call graph, while free-tier XC8 emits a
+compiled-stack (statically allocated, non-reentrant) model rather than a hardware
+stack the AVR tooling understands. The 14-bit core also has a *hardware* return
+stack only 8 levels deep, which is the bound that actually matters on this part
+and which nothing currently checks. Decide: teach the gate an XC8 mode (XC8 can
+emit a call-graph/stack report), assert the hardware-stack depth from the
+generated `.s`/map output, or record that the fully-inlined structure plus the
+8-level ceiling makes overflow unreachable by construction — with the evidence,
+not the assertion.
+
+Effort: ~2–4 h. Impact: Medium — it is the one resource bound on this part that
+no current gate observes, and the "inlined, so it cannot recurse" argument is
+worth writing down properly rather than assuming.
+
+**Standing expected-image-hash regression for PIC10F320.** The merge's
+byte-identity gate (`docs/pic10f320_merge_plan.md` §6.13, decision D4) was
+deliberately one-shot: it proved twice that the ported XC8 recipe emits the
+child project's exact signed bytes, then retired because its baseline lived under
+the deleted import prefix. The cost was named at the time and stands:
+**nothing at the current tip watches emitted bytes.** The equivalence, lock-step
+and actuation lanes assert *behaviour*, and merge-plan §14.2 records the class
+they are blind to — the firmware's hardware-integrity checks, where a change is
+invisible to every differential lane. Promotion is small and mechanical: check in
+`test/pic10f320/expected_images.sha256`, wire it as a `pic320` / `pic320-test-build`
+prerequisite, and require any change that moves the hashes to rebaseline it in
+the same reviewed commit. The current values are recorded in
+`docs/pic10f320_validation.md` §2 (run 2, re-confirmed by the run-3 comment sweep
+and by every release manifest since).
+
+Design note: the value is entirely in the *rebaselining discipline*, not the
+hashes. A file that gets updated reflexively whenever it fails is worse than
+nothing, because it converts a real signal into a chore. Only take this on with
+the review rule attached.
+
+Effort: ~1 h. Impact: Medium — restores the only gate that notices *any* change
+to emitted bytes, including the defensive-layer class no differential lane sees.
+
 ---
 
 ## Tier 3 — platinum-level / nice-to-have
@@ -497,6 +559,29 @@ new assurance, but it removes a class of silent-misconfiguration hazard that
 grows with every added target, and it is the difference between "five targets in
 one repository" and "four projects sharing a Makefile".
 
+**`make program-pic320` convenience target.** Added 2026-07-27. The PIC10F322
+has `make program-pic` (`Makefile:1282`, with `PIC_PROG=pk2cmd|ipecmd`,
+`PIC_PROG_TOOL`, `PIC_PROG_CMD` overrides); the PIC10F320 has no equivalent, so
+`release/README.md` and the generated `MANIFEST.md` print the bare
+`pk2cmd -PPIC10F320 -F<image> -M -Y -R` instead. The merge recorded this as a
+deliberate omission rather than shipping it unverified
+(`docs/pic10f320_merge_plan.md` §15.10): it is ~15 lines modelled on the 322
+recipe, but it is hardware-programming surface that **cannot be tested without a
+programmer and a part on the bench**, and a wrong programmer invocation aimed at
+the wrong device is worse than an honest absence.
+
+Design notes if picked up: mirror `program-pic` exactly rather than inventing a
+second idiom, add `PIC320_PROG*` variables under the §5.6 prefix rule (the whole
+point of the separate pair is that one chip can be re-pinned without moving the
+other), and update the `make help` Hardware block, `release/README.md:145` and
+the manifest's flashing command in the same change. Verify against real silicon
+before removing the "no convenience target yet" note — the note is currently
+correct, and a target that has never driven a programmer is not an improvement
+over a command the user can read.
+
+Effort: ~1 h to write, plus bench time. Impact: Low — convenience only; the
+documented `pk2cmd` invocation already works.
+
 ---
 
 ## Tier 4 — out of scope for firmware (name only)
@@ -591,11 +676,15 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Multi-press boundary cases | 2.5 | 3–4 h | Medium — tick-boundary edge cases |
 | Power-on-pressed simulation gap | 2.5 | 1–2 h | Low — simulator fidelity, not coverage |
 | Power-supply ramp-up analysis | 2.5 | 2–3 h | Medium — real-world robustness |
+| PIC10F320 rebuild determinism | 2.5 | 1–3 h | Low-Medium — open merge §6.12 row |
+| PIC10F320 stack-bound coverage | 2.5 | 2–4 h | Medium — open merge §6.12 row; unchecked 8-level HW stack |
+| PIC10F320 expected-image-hash regression | 2.5 | 1 h | Medium — restores the only gate watching emitted bytes |
 | Hardware-validation procedure doc | 3 | 2–3 h | High — primary-part WDT gap |
 | HIL rig: behavioural + register introspection | 3 | 5–8 d | High — silicon-level model validation |
 | Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |
 | Broader compiler & toolchain portability | 3 | Medium | Medium-High — adoption + reliability |
 | Embedded provenance URL | 3 | 1–2 h | Low — provenance polish |
 | Unified naming scheme across MCUs | 3 | 4–8 h | Medium — removes a silent-misconfig class |
+| `make program-pic320` target | 3 | 1 h + bench | Low — convenience; `pk2cmd` documented |
 | Manufacturing artifacts (name as scope) | 4 | — | Completeness signal |
 | Signal-integrity SPICE modeling | 4 | 2 h | High for the board, not firmware work |
