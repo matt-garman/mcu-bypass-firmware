@@ -101,18 +101,26 @@ grep -q '^module:pure-core$' "${inputs[1]}" || exit 79
 cat "${inputs[@]}" > "$output"
 EOF
 
+# The output directory is asserted, not assumed. Real KLEE derives its default
+# klee-out-N from the INPUT BITCODE's directory rather than from the working
+# directory -- so this fake used to `mkdir klee-out-0` in its cwd (test/) while
+# the tool actually wrote test/formal/klee-out-0, and the cleanup paths in
+# `make clean` and the recipe's own scrub were validated against the fake's
+# guess instead of the tool's behaviour. Requiring --output-dir here is what
+# keeps the recipe, the two scrubs and the ignore file naming one real path.
 cat > "$tools/klee" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-[ "$#" -eq 2 ] && [ "$1" = --exit-on-error ] \
-	&& [ "$2" = formal/test_symbolic_klee.bc ] || exit 80
-printf 'klee %s\n' "$2" >> "${FAKE_TOOL_LOG:?}"
+[ "$#" -eq 3 ] && [ "$1" = --exit-on-error ] \
+	&& [ "$2" = --output-dir=formal/klee-out ] \
+	&& [ "$3" = formal/test_symbolic_klee.bc ] || exit 80
+printf 'klee %s\n' "$3" >> "${FAKE_TOOL_LOG:?}"
 [ "${FAKE_KLEE_FAIL:-0}" -eq 0 ] || exit 81
-grep -q '^module:harness$' "$2" || exit 82
-grep -q '^module:pure-core$' "$2" || exit 83
-grep -q '^defines:debounce_integrate,debounce_step$' "$2" || exit 84
-mkdir klee-out-0
-ln -s klee-out-0 klee-last
+grep -q '^module:harness$' "$3" || exit 82
+grep -q '^module:pure-core$' "$3" || exit 83
+grep -q '^defines:debounce_integrate,debounce_step$' "$3" || exit 84
+out=${2#--output-dir=}
+mkdir -p "$out"
 : > "${FAKE_KLEE_MARKER:?}"
 EOF
 chmod 750 "$tools/clang" "$tools/llvm-link" "$tools/klee"
@@ -143,9 +151,10 @@ mapfile -t events < "$log"
 	&& [ "${events[3]}" = 'klee formal/test_symbolic_klee.bc' ] \
 	|| fail "KLEE tools ran in the wrong order: ${events[*]}"
 [ -f "$klee_marker" ] || fail "KLEE did not execute the linked module"
-[ -d "$repo/test/klee-out-0" ] && [ -L "$repo/test/klee-last" ] \
-	&& [ ! -e "$repo/klee-out-0" ] && [ ! -e "$repo/klee-last" ] \
-	|| fail "KLEE runtime output was not isolated under test/"
+[ -d "$repo/test/formal/klee-out" ] \
+	&& [ ! -e "$repo/klee-out" ] && [ ! -e "$repo/klee-out-0" ] \
+	&& [ ! -e "$repo/test/klee-out" ] && [ ! -e "$repo/test/klee-out-0" ] \
+	|| fail "KLEE runtime output was not written to the pinned test/formal/klee-out"
 checks=$((checks + 1))
 
 : > "$log"
@@ -157,7 +166,8 @@ output=$(run_make KLEE_LLVMLINK="$tools/missing-llvm-link" 2>&1) \
 [ ! -s "$log" ] && [ ! -e "$klee_marker" ] \
 	|| fail "missing llvm-link still invoked the KLEE toolchain"
 for artifact in test/formal/test_symbolic.bc test/formal/bypass_pure_klee.bc \
-		test/formal/test_symbolic_klee.bc test/klee-out-0 test/klee-last; do
+		test/formal/test_symbolic_klee.bc test/formal/klee-out \
+		test/formal/klee-last test/klee-out-0 test/klee-last; do
 	[ ! -e "$repo/$artifact" ] && [ ! -L "$repo/$artifact" ] \
 		|| fail "missing-tool skip retained stale KLEE artifact: $artifact"
 done

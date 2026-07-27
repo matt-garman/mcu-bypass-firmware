@@ -23,8 +23,13 @@ avr/test_trace_*
 !avr/*.py
 avr/__pycache__/
 
-# KLEE output is produced at the test root. Keep the retired toolchain stamp
-# ignored for existing worktrees; `make clean` removes it.
+# KLEE output. The Makefile pins it to test/formal/klee-out; the unsuffixed
+# klee-last / klee-out-*/ entries stay because KLEE's own default naming lands
+# there when the solver is driven by hand, and because existing worktrees may
+# still carry the pre-`src/`-reorganization copies at the test root. These are
+# pathless patterns, so they match at any depth under test/. `make clean`
+# removes all three forms. Keep the retired toolchain stamp ignored too.
+klee-out/
 klee-last
 klee-out-*/
 .toolchain.sig

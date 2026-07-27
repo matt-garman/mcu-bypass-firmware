@@ -1486,8 +1486,11 @@ than from the phase records: `make test`, `make pic320-test` and
 `make test-mutation MUTATION_ALLOW_SKIP=0` (74 killed / 0 survived / 0 errored /
 0 skipped), a full `make-release.sh --dry-run` at this tip, and a rebuild of all
 15 release images. Re-checked 2026-07-27 after §6.15 was decided (§15.13) and the
-first unified tag was renumbered to `v0.9.6` (§10). **32 of 36 boxes are closed;
-the four that are not are marked OPEN with what remains** — do not read an
+first unified tag was renumbered to `v0.9.6` (§10). Re-checked again 2026-07-27
+by a third post-merge audit, which corrected one ticked box that was not true at
+the Make level (the PIC10F320 target aggregate) and closed the KLEE box on a
+premise that turned out to be false (§15.8). **33 of 36 boxes are closed; the
+three that are not are marked OPEN with what remains** — do not read an
 unticked box as an oversight, each says why. Where a box's own text names a pre-relocation path (`test/fault/…`,
 `test/pic/test_fault_pic.cc`), the work landed at the post-Phase-2 location
 (`test/pic10f320/…`); the box text is left as written so the plan still reads as
@@ -1604,20 +1607,32 @@ the document it was when the requirement was set.
       cross-chip gpsim "Known gaps" documentation covering both PIC chips.
       *(`coverage-check-core` reports 100.00% against its 95% floor alongside the
       oracle's 99.35% against 90%; both run inside `make test`.)*
-- [ ] **OPEN (the "executes" half).** Shared host/formal tests retain both
-      independent-oracle and direct-core
+- [x] Shared host/formal tests retain both independent-oracle and direct-core
       assurance where justified, include the concrete corrupt-state check, and
       the KLEE target links and executes the real pure core.
-      *(Done: both roles preserved with the reviewed argument in §15.6, the
+      *(Both roles preserved with the reviewed argument in §15.6, the
       corrupt-state property migrated as invariant I7 — model check 2153 → 2157
       checks — and `test-klee-build` links the shipping core and is a member of
-      `make test`. **Not done: nothing executes the KLEE proof.** `klee` is
-      absent on the execution host (§15.8) and no CI job runs
-      `test-symbolic-klee`, so the solver has never been run against the merged
-      tree. This is pre-existing rather than merge-caused, and it is tracked as
-      the `TODO.md` Tier 2.5 "KLEE in CI" item; the box stays open because a
-      passing `test-klee-build` must never be recorded as evidence the proof
-      ran.)*
+      `make test`.*
+
+      ***Closed 2026-07-27 (third post-merge audit): the proof now executes.***
+      This box was open on the premise, recorded in §15.8, that `klee` was absent
+      from the execution host. It is not — KLEE 3.2 is installed under
+      `/home/linuxbrew/.linuxbrew`, which is exactly where `KLEE`, `KLEE_CLANG`,
+      `KLEE_LLVMLINK` and `KLEE_INC` already point, so `make test-symbolic-klee
+      STRICT_TOOLS=1` needed no wiring change and ran clean against the merged
+      tree: **5,918 instructions, 14 completed paths, 0 partially completed,
+      EXIT=0**, over `test/formal/test_symbolic_klee.bc` — the driver linked with
+      `src/bypass_pure.c`, so the solver executed the shipping core rather than a
+      re-implementation. §15.8 is corrected accordingly.
+
+      **What remains is CI coverage, not execution.** No CI job installs KLEE or
+      runs `test-symbolic-klee`, so the proof is reproducible on this host and
+      unwatched on every other one. That stays the `TODO.md` Tier 2.5 "KLEE in
+      CI" item — now a packaging question with a known-good local recipe rather
+      than an unknown. The original caution still stands and is worth keeping in
+      view: a passing `test-klee-build` is a *link* check and must never be
+      recorded as evidence the solver ran.)*
 - [x] PIC10F320 equivalence and lockstep compile/link `src/bypass_pure.c`
       directly with the parent host config shim; no stale implementation can be
       selected through include-path ordering.
@@ -1667,6 +1682,34 @@ the document it was when the requirement was set.
       variant §1 says must never reappear. `override PIC320_VARIANTS_SUPPORTED`
       stops a command-line matrix whitelisting itself. Exact counts enforced:
       `EXPECTED_CHECKS 22`, lock-step 3005, uniform across variants.)*
+
+      **Corrected 2026-07-27 (third post-merge audit) — the second clause was
+      half true, and the false half is the one that mattered.** "Exact expected
+      PASS markers/check counts" held *inside* the harnesses (`EXPECTED_CHECKS`)
+      but **not at the Make level for the PIC10F320**. `pic320-test-target` was a
+      bare prerequisite list plus an unconditional success echo, so its three
+      libgpsim lanes — each of which exits 0 through `$(SKIP)` when its tool is
+      absent — produced a full green three-variant sweep having run **zero
+      checks** on a host with XC8 but without `gpsim-dev`. The PIC10F322's
+      `pic-test-target` had required the markers since before the merge; the port
+      did not carry that across, and §12 ticked the property on the strength of
+      the harness-level counts. A check count is evidence only once something
+      guarantees the harness ran.
+      `STRICT_TOOLS=1` masked it in CI and in the release workflow, which is why
+      review missed it — the hole was reachable only where a variant name gets
+      typed by hand.
+      Fixed by porting the 322 driver verbatim in structure (and threading
+      `PIC320_VARIANT` down, which the old shape also lacked: the 320's lanes
+      build one image chosen by that variable, so
+      `make pic320-test-target PIC320_TARGET_VARIANT=tq2-relay` built
+      cd4053-simple and then skipped). Now covered by
+      `test/test_target_lane_markers.sh` — `make test-target-lane-markers`, six
+      checks per chip, inside `make test` — which was confirmed to **fail**
+      against the pre-fix recipe before being accepted.
+      The same false-evidence shape one level down was fixed alongside:
+      `pic320-variants` printed "all PIC10F320 variants built within budget"
+      after building nothing, and now asserts the postcondition (every expected
+      image present) instead of the loop's exit status.
 - [x] `pic320-test-host`, selected/all-variant development tests,
       `pic320-test-target-variants`, coverage, analysis, soak, build regression,
       and mutation targets pass under the documented tool policy.
@@ -2397,7 +2440,7 @@ Phase 6, where release machinery would name images no CI gate produces.
 the parent driver — so it is dead weight awaiting Phase 7's disposition sweep,
 not outstanding work.
 
-### 15.8 Tool inventory, and the one recorded blocker
+### 15.8 Tool inventory (the one recorded blocker was a false alarm)
 
 §6.9 requires unavailable tools to be recorded as blockers rather than passes.
 Verified present on the execution host: XC8 V3.10 at the pinned
@@ -2407,14 +2450,31 @@ headers (`/usr/include/gpsim/sim_context.h`), `cppcheck`, `cbmc`, `avr-gcc`,
 `gcov`, `python3`, and `git-subtree` under Git 2.43.0 — confirming §6.10 and
 §6.14 with no re-derivation needed.
 
-**`klee` is absent.** Consequences, stated so Phase 3 does not discover them:
-`make test` is unaffected, because its member `test-klee-build` only compiles and
-links bitcode (`test/test_klee_build.sh`) and does not execute the solver. But
-`test-symbolic-klee` — a target on *both* sides, and the subject of §6.2/§6.3's
-"preserve the child's correct two-object KLEE flow" instruction — cannot be run
-locally. Phase 3 may verify the *link* recipe here; the executed-proof evidence
-must come from CI or a host with KLEE installed, and a local pass of
-`test-klee-build` must not be recorded as evidence that the KLEE proof ran.
+**`klee` was recorded absent, and that was wrong — corrected 2026-07-27 (third
+post-merge audit).** The original entry read: "`klee` is absent … `test-symbolic-klee`
+cannot be run locally … the executed-proof evidence must come from CI or a host
+with KLEE installed." It is installed, under `/home/linuxbrew/.linuxbrew`, which
+is precisely where the Makefile's `KLEE`, `KLEE_CLANG`, `KLEE_LLVMLINK` and
+`KLEE_INC` defaults already point (`Makefile:2198`). The probe behind the
+original claim looked for `klee` on the bare `PATH`, so it missed a Homebrew
+install that the build was already configured for — the one blocker recorded
+against this merge never existed.
+
+`make test-symbolic-klee STRICT_TOOLS=1` therefore runs here with no wiring
+change: **5,918 instructions, 14 completed paths, 0 partially completed,
+EXIT=0**, against the driver linked with `src/bypass_pure.c`. §12's KLEE box is
+closed on that evidence.
+
+Two things the original entry got right and that survive the correction. `make
+test`'s member `test-klee-build` only compiles and links bitcode
+(`test/test_klee_build.sh`) and does **not** execute the solver, so a pass there
+must never be recorded as evidence the proof ran. And no CI job installs KLEE or
+runs `test-symbolic-klee`, so the executed proof is reproducible on this host and
+unwatched everywhere else — the `TODO.md` Tier 2.5 "KLEE in CI" item, now a
+packaging task with a working local recipe rather than an open question.
+
+**Tool inventory verdict: no blocker remains.** Every tool this merge depends on
+is present on the execution host.
 
 ### 15.9 Phase 5 — CI and aggregate integration (COMPLETE)
 

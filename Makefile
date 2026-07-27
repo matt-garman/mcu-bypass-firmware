@@ -457,7 +457,7 @@ FORCE:
         test-make-lock-probe test-make-safe-parallel-probe \
         _test-make-safe-parallel-probe-run _test-make-safe-parallel-probe-a \
         _test-make-safe-parallel-probe-b _test-mutation-policy-probe \
-        test-target-matrix test-lockstep-progress \
+        test-target-matrix test-target-lane-markers test-lockstep-progress \
         test-soak-timing test-strict-tools test-workload-rebuild \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
@@ -1863,7 +1863,10 @@ clean:
 		test/stack_*.o test/stack_*.su \
 		test/.toolchain.sig $(FW_BASE).plist
 	rm -f *.dump *.ctu-info cppcheck-addon-ctu-file-list*
-	rm -rf test/klee-out-* test/klee-last test/avr/__pycache__
+	@# KLEE output: the pinned directory, plus the default-named and pre-`src/`
+	@# -reorganization forms so an existing worktree carrying either is cleaned too.
+	rm -rf $(KLEE_OUT_DIR) test/formal/klee-out-* test/formal/klee-last \
+		test/klee-out-* test/klee-last test/avr/__pycache__
 	rm -rf $(AVR_BUILD_DIR) $(PIC_BUILD_DIR) $(XT_BUILD_DIR)
 	# PIC10F320: one directory holds every build, coverage and test artifact
 	# for this target (merge plan §5.7), so a single rm covers the lot and
@@ -1922,7 +1925,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check coverage-check-core
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check coverage-check-core
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1934,7 +1937,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check coverage-check-core
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check coverage-check-core
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -2114,6 +2117,27 @@ test-target-matrix:
 	TM_UNSUPPORTED='tmux4053-simple' \
 		./test/test_target_matrix.sh
 
+# Host-only proof that the PIC target aggregates are fail-CLOSED, which the
+# matrix regression above does NOT cover: it proves the right variants are
+# invoked, not that a lane which skipped is rejected. Both properties are needed,
+# because every lane exits 0 through $(SKIP) when its tool is absent -- so an
+# aggregate reading only exit status reports a full green sweep having run
+# nothing. pic320-test-target shipped in exactly that shape; see the script
+# header. Two chips, one script (§4 FOLD).
+test-target-lane-markers:
+	./test/test_target_lane_markers.sh
+	@# The PIC10F320 contract. LM_REQUIRE_ARG pins the second half of that fix:
+	@# its lanes' build prerequisite `pic320` compiles ONE image chosen by
+	@# PIC320_VARIANT, so an aggregate that forwards only PIC320_TARGET_VARIANT
+	@# builds one variant and then looks for another's HEX.
+	LM_LABEL='PIC10F320' \
+	LM_TARGET='pic320-test-target' \
+	LM_VARIANT_ARG='PIC320_TARGET_VARIANT' \
+	LM_VARIANT='cd4053-mute' \
+	LM_SUCCESS_MARKER='PIC10F320 target lanes passed' \
+	LM_REQUIRE_ARG='PIC320_VARIANT=cd4053-mute' \
+		./test/test_target_lane_markers.sh
+
 # Compile the real lock-step driver against a fake core and inject progress stalls.
 test-lockstep-progress:
 	PIC_SOAK_CXX="$(PIC_SOAK_CXX)" ./test/test_lockstep_progress.sh
@@ -2178,10 +2202,24 @@ KLEE          ?= /home/linuxbrew/.linuxbrew/bin/klee
 KLEE_CLANG    ?= /home/linuxbrew/.linuxbrew/opt/llvm@16/bin/clang
 KLEE_LLVMLINK ?= /home/linuxbrew/.linuxbrew/opt/llvm@16/bin/llvm-link
 KLEE_INC      ?= /home/linuxbrew/.linuxbrew/Cellar/klee/3.2_3/include
+# The solver runs from test/, so it gets the path relative to there; every
+# cleanup site gets the repo-relative one. Defined once so they cannot disagree.
+KLEE_OUT_SUBDIR := formal/klee-out
+KLEE_OUT_DIR    := test/$(KLEE_OUT_SUBDIR)
 test-symbolic-klee:
+	@# --output-dir is PINNED rather than left to KLEE's default, and that is the
+	@# point of it. KLEE derives its default klee-out-N from the directory of the
+	@# INPUT BITCODE, not from the working directory -- so the output landed in
+	@# test/formal/ while this scrub and `make clean` both named test/, and real
+	@# runs accumulated untouched. (The bug hid because test/test_klee_build.sh's
+	@# fake klee wrote to its cwd, modelling the guess instead of the tool.) With
+	@# the directory pinned, the path this removes is the path KLEE writes, by
+	@# construction; test_klee_build.sh asserts the flag is passed so the two
+	@# cannot drift apart again.
 	@rm -f test/formal/test_symbolic.bc test/formal/bypass_pure_klee.bc \
 		test/formal/test_symbolic_klee.bc && \
-	rm -rf test/klee-out-* test/klee-last && \
+	rm -rf $(KLEE_OUT_DIR) test/formal/klee-out-* test/formal/klee-last \
+		test/klee-out-* test/klee-last && \
 	if command -v $(KLEE) >/dev/null 2>&1 && command -v $(KLEE_CLANG) >/dev/null 2>&1 \
 			&& command -v $(KLEE_LLVMLINK) >/dev/null 2>&1; then \
 		klee_cmd=`command -v $(KLEE)`; repo_root=`pwd -P`; \
@@ -2194,7 +2232,8 @@ test-symbolic-klee:
 			-o test/formal/bypass_pure_klee.bc && \
 		$(KLEE_LLVMLINK) test/formal/test_symbolic.bc test/formal/bypass_pure_klee.bc \
 			-o test/formal/test_symbolic_klee.bc && \
-		cd test && "$$klee_cmd" --exit-on-error formal/test_symbolic_klee.bc; \
+		cd test && "$$klee_cmd" --exit-on-error \
+			--output-dir=$(KLEE_OUT_SUBDIR) formal/test_symbolic_klee.bc; \
 	else \
 		echo "KLEE (or its matching clang/llvm-link) not installed; the exhaustive"; \
 		echo "'test-symbolic' target covers the same valid domain. Install klee +"; \
@@ -3215,6 +3254,25 @@ pic320: $(PIC320_SRC)
 	image_complete=1
 
 # Build every supported variant, fail-closed on the matrix itself.
+#
+# The closing sentinel asserts the POSTCONDITION -- every expected image exists --
+# rather than trusting the loop's exit status. The two are not the same thing
+# here, because `pic320` skips cleanly (exit 0) when XC8 is absent, so a
+# status-only check printed "all PIC10F320 variants built within budget" having
+# built nothing at all. The 322's `pic` cannot do that: it skips as one recipe
+# and claims nothing. This is the same false-evidence shape as the one
+# test/test_target_lane_markers.sh exists to prevent, one level down.
+#
+# `pic320` removes its own image before deciding whether to skip, so after the
+# loop the image set is either complete (a real build) or empty (every variant
+# skipped) -- a PARTIAL set means a variant produced no image while reporting
+# success, which is a defect rather than an absent toolchain, and is removed and
+# failed rather than skipped.
+#
+# The sentinel and the skip must live in the SAME shell as the loop: $(SKIP) is
+# `exit 0` in non-strict mode and exits only its own shell, so a sentinel on a
+# separate recipe line would print regardless -- exactly the trap the `pic320`
+# recipe above documents.
 .PHONY: pic320-variants
 pic320-variants:
 	@set -- $(PIC320_VARIANTS_ALL); \
@@ -3225,14 +3283,31 @@ pic320-variants:
 	for v in "$$@"; do \
 		$(MAKE) --no-print-directory PIC320_VARIANT=$$v pic320 || { rc=1; break; }; \
 	done; \
-	if [ $$rc -ne 0 ]; then \
-		echo "FAIL: a PIC10F320 variant did not build; removing the partial image set"; \
+	remove_image_set() { \
 		for v in "$$@"; do \
 			rm -f "$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).hex"; \
 		done; \
+	}; \
+	if [ $$rc -ne 0 ]; then \
+		echo "FAIL: a PIC10F320 variant did not build; removing the partial image set"; \
+		remove_image_set "$$@"; \
 		exit 1; \
-	fi
-	@echo "=== all PIC10F320 variants built within budget ==="
+	fi; \
+	built=0; \
+	for v in "$$@"; do \
+		if [ -s "$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).hex" ]; then \
+			built=`expr $$built + 1`; \
+		fi; \
+	done; \
+	if [ $$built -eq 0 ]; then \
+		echo "no PIC10F320 images were produced (XC8 absent?); skipping"; $(SKIP); \
+	fi; \
+	if [ $$built -ne $$# ]; then \
+		echo "FAIL: only $$built of $$# PIC10F320 images exist after a reported-successful build; removing the partial image set"; \
+		remove_image_set "$$@"; \
+		exit 1; \
+	fi; \
+	echo "=== all PIC10F320 variants built within budget ==="
 
 # XC8's full memory-usage summary (program + data space) for one variant.
 pic320-size: $(PIC320_SRC)
@@ -3531,8 +3606,47 @@ pic320-test-fault-variants:
 	done
 	@echo "=== all PIC10F320 host fault variants validated ==="
 
-# Fail-closed target aggregate for ONE variant.
-pic320-test-target: pic320-test-fault-target pic320-test-lockstep pic320-test-io
+# Fail-closed target aggregate for ONE variant, and the emphasis on "fail-closed"
+# is the whole point of the shape below.
+#
+# This used to be a plain prerequisite list -- `pic320-test-target: <the three
+# lanes>` plus an unconditional success echo. That is NOT fail-closed, because
+# every one of those lanes exits 0 through $(SKIP) when its tool is missing (the
+# documented skip-clean contract for the individual development commands). So on
+# a host with XC8 but without gpsim-dev/glib -- an ordinary development box --
+# the aggregate printed "target lanes passed" for all three variants having run
+# ZERO checks, while the PIC10F322 counterpart failed loudly on the same host.
+#
+# Requiring each lane's explicit PASS marker is what closes it: a skip, a missing
+# ctx_ symbol, a partial run or a crashed simulator all fail here instead of
+# masquerading as green. Both chips' harnesses print the identical markers
+# (test/pic{,10f320}/**/test_{fault,lockstep,io}_pic.cc all emit
+# "<LANE> %s: %u checks" with PASS/FAIL), so this is the PIC10F322 driver at
+# `pic-test-target` above, verbatim in structure, with the PIC320_ names.
+#
+# PIC320_VARIANT is threaded down alongside each lane's own variable because
+# `pic320` (the build prerequisite of all three lanes) builds exactly ONE image,
+# selected by PIC320_VARIANT -- unlike the 322's `pic`, which builds the whole
+# matrix. Without it, `make pic320-test-target PIC320_TARGET_VARIANT=tq2-relay`
+# would build cd4053-simple and then fail looking for the tq2-relay image.
+pic320-test-target:
+	@set -e; \
+	for spec in \
+		"pic320-test-fault-target PIC320_FAULT_VARIANT=$(PIC320_TARGET_VARIANT)|FAULT-INJECT PASS" \
+		"pic320-test-lockstep PIC320_LOCKSTEP_VARIANT=$(PIC320_TARGET_VARIANT)|LOCK-STEP PASS" \
+		"pic320-test-io PIC320_IO_VARIANT=$(PIC320_TARGET_VARIANT)|TARGET-IO PASS"; do \
+		target=$${spec%%|*}; marker=$${spec#*|}; log=`mktemp`; \
+		if ! $(MAKE) --no-print-directory PIC320_VARIANT=$(PIC320_TARGET_VARIANT) \
+				$$target >$$log 2>&1; then \
+			cat $$log; rm -f $$log; exit 1; \
+		fi; \
+		cat $$log; \
+		if ! grep -q "$$marker" $$log; then \
+			echo "FAIL: $$target did not report '$$marker' (skipped or incomplete?)"; \
+			rm -f $$log; exit 1; \
+		fi; \
+		rm -f $$log; \
+	done
 	@echo "=== PIC10F320 target lanes passed (variant $(PIC320_TARGET_VARIANT)) ==="
 
 # ...and for ALL of them. Rejects an empty or duplicated matrix before running,
@@ -3823,6 +3937,7 @@ help:
 	@echo "  test-release-provenance  final release source HEAD/cleanliness checks"
 	@echo "  test-build-serialization  worktree Make/release lock regression"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
+	@echo "  test-target-lane-markers  PIC target aggregates must require each lane's PASS marker"
 	@echo "  test-lockstep-progress  lock-step simulator-stall propagation checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"

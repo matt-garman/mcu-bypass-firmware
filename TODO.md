@@ -112,6 +112,15 @@ runs in the default `test` aggregate — but that only proves the KLEE path stil
 in `.github/workflows/ci.yml`). A job using the `klee/klee` Docker image would
 prove the symbolic path is genuinely exercised. ~2 h.
 
+Updated 2026-07-27: this is now a *packaging* task with a known-good recipe, not
+an open question. KLEE 3.2 is installed locally under `/home/linuxbrew/.linuxbrew`
+— where the Makefile's `KLEE*` defaults already point — and
+`make test-symbolic-klee STRICT_TOOLS=1` runs clean against the shipping core
+(5,918 instructions, 14 completed paths, 0 partially completed). The proof is
+therefore reproducible on one host and watched on none, which is precisely the
+gap a CI job closes. Pin the KLEE and matching-LLVM versions in `TOOLCHAIN.adoc`
+when it lands, as every other tool here is pinned.
+
 **Cross-compiler verification.** The AVR firmware is built with avr-gcc 7.3. A
 different compiler (newer avr-gcc, or clang targeting AVR if viable) could
 optimise differently, potentially altering register allocation, ISR
