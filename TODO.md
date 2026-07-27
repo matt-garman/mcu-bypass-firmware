@@ -255,24 +255,6 @@ Effort: ~1 h to record the decision with evidence, ~2–3 h if a probe is writte
 Impact: Low–Medium — closes a §6.12 row and removes a trap for anyone who later
 makes the PIC10F320 lanes incremental.
 
-**PIC10F320 stack-bound coverage.** The other open §6.12 row, and the more
-interesting of the two: `test-stack-bound` / `test-stack-bound-regression` use
-`-fstack-usage` to bound the AVR call depth, and the PIC10F320 is the target
-where that question has the most unusual shape — its entire logic is inlined into
-`main()`, so it has almost no call graph, while free-tier XC8 emits a
-compiled-stack (statically allocated, non-reentrant) model rather than a hardware
-stack the AVR tooling understands. The 14-bit core also has a *hardware* return
-stack only 8 levels deep, which is the bound that actually matters on this part
-and which nothing currently checks. Decide: teach the gate an XC8 mode (XC8 can
-emit a call-graph/stack report), assert the hardware-stack depth from the
-generated `.s`/map output, or record that the fully-inlined structure plus the
-8-level ceiling makes overflow unreachable by construction — with the evidence,
-not the assertion.
-
-Effort: ~2–4 h. Impact: Medium — it is the one resource bound on this part that
-no current gate observes, and the "inlined, so it cannot recurse" argument is
-worth writing down properly rather than assuming.
-
 **Standing expected-image-hash regression for PIC10F320.** The merge's
 byte-identity gate (`docs/pic10f320_merge_plan.md` §6.13, decision D4) was
 deliberately one-shot: it proved twice that the ported XC8 recipe emits the
@@ -677,7 +659,6 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Power-on-pressed simulation gap | 2.5 | 1–2 h | Low — simulator fidelity, not coverage |
 | Power-supply ramp-up analysis | 2.5 | 2–3 h | Medium — real-world robustness |
 | PIC10F320 rebuild determinism | 2.5 | 1–3 h | Low-Medium — open merge §6.12 row |
-| PIC10F320 stack-bound coverage | 2.5 | 2–4 h | Medium — open merge §6.12 row; unchecked 8-level HW stack |
 | PIC10F320 expected-image-hash regression | 2.5 | 1 h | Medium — restores the only gate watching emitted bytes |
 | Hardware-validation procedure doc | 3 | 2–3 h | High — primary-part WDT gap |
 | HIL rig: behavioural + register introspection | 3 | 5–8 d | High — silicon-level model validation |

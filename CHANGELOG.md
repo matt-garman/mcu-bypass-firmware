@@ -46,6 +46,15 @@ file is the human-readable summary of *what changed*.
   timing, CONFIG-word verification, cppcheck + MISRA across all three variants,
   and a libgpsim soak. The host subset needs only a C compiler and gcov, so it
   runs inside `make test` on every push.
+- A dependency-free PIC10F320 final-HEX return-stack oracle now strictly parses
+  Intel HEX and explores reachable classic mid-range PIC14 control flow with the
+  exact abstract hardware stack. Its host fixtures are in `make test`; the
+  fail-closed base `pic320` recipe checks every generated image before marking it
+  complete, while `pic320-test-return-stack` rebuilds and rechecks the supported
+  three-image matrix against the architectural eight-entry limit as part of
+  `pic320-test`.
+  Its state and return stack preserve the 9-bit architectural PC; instruction
+  fetch alone aliases through the low eight bits to 256 physical words.
 - A **canonical release product set** (`RELEASE_IMAGES` in the Makefile),
   enforced by the release script, the image verifier and its regression alike.
   Previously the committed directory, the `SHA256SUMS` entries and the fresh

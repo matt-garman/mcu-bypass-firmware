@@ -95,8 +95,9 @@ make program
 ```
 
 To build and validate the PIC ports instead requires a host C compiler,
-matching `gcov`, and Bash for source coverage, plus the Microchip XC8 compiler,
-PIC10-12Fxxx device pack, `gpsim`, and `gpsim-dev` for the target-level gates:
+matching `gcov`, Python 3, and Bash for source coverage, plus the Microchip XC8
+compiler, PIC10-12Fxxx device pack, `gpsim`, and `gpsim-dev` for the target-level
+gates:
 
 ```
 make pic                         # build all variants + 512-word flash-budget gate
@@ -108,16 +109,21 @@ The PIC10F320 has its own lane, using the same toolchain (`pic320-*` targets,
 `PIC320_*` variables):
 
 ```
-make pic320-variants             # build all variants + 256-word flash-budget gate
+make pic320-variants             # build all variants + flash-budget/return-stack gates
+make pic320-test-return-stack    # rebuild + recheck/report all three final HEX images
 make pic320-test                 # host equivalence/actuation/fault/coverage,
-                                 #   CONFIG, analysis, and gpsim, all variants
+                                 #   CONFIG, return stack, analysis, gpsim, all variants
 make pic320-test-target-variants # fail-closed libgpsim fault/lock-step/I/O gates
 ```
 
-These targets are independent of the AVR build. External PIC tool targets skip
-cleanly if XC8/gpsim are not installed; host source coverage is mandatory when
-`pic-test` runs. The target aggregate is the authoritative simulator gate and
-fails closed on any missing/skipped libgpsim layer.
+These targets are independent of the AVR build. Individual optional-tool targets
+generally skip cleanly if their primary compiler/simulator is absent. The
+PIC10F320 exception is deliberate: every generated `pic320` image must pass the
+Python return-stack oracle, and `pic320-test-return-stack` (therefore
+`pic320-test`) fails closed if Python or any rebuilt image is missing. Host source
+coverage is mandatory when `pic-test` runs. The target aggregates are the
+authoritative simulator gates and fail closed on any missing/skipped libgpsim
+layer.
 
 To build and validate the development-only ATtiny202 (AVR-XT) port (uses the
 open-source avr-gcc toolchain plus the fetched-on-demand Microchip device files

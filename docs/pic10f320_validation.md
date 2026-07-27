@@ -20,7 +20,10 @@ corrected host and fake-tool regressions pass, but this host lacks XC8,
 gpsim/libgpsim, and the other release tools. A fresh fail-closed full-tool run,
 including 74/74 mutation testing and release rehearsal, is required before the
 first unified release. Numeric results below are historical evidence at their
-recorded merge-time tips, not a current-tip release attestation.
+recorded merge-time tips, not a current-tip release attestation. The new
+dependency-free return-stack oracle selftest passes on this host, but XC8 is not
+available to produce current-tip images, so no current real-image stack depths
+are claimed here.
 
 ---
 
@@ -151,6 +154,51 @@ Two of these deserve emphasis:
   running in a simulated PIC10F320, its live `_ctx_` SRAM compared to the model
   after every completed main-loop iteration.
 
+### 3a. Final-HEX hardware return-stack gate
+
+`test/pic10f320/return_stack_oracle.py` closes the previously open gate-
+implementation gap for the 8-level hardware return-stack bound without relying
+on XC8's listing format or an external disassembler. It strictly validates Intel
+HEX, reconstructs the PIC10F320's little-endian 14-bit words, and traverses
+reachable control flow from reset with the exact abstract return-address stack.
+Every direct `CALL` pushes, `RETURN` and every classic `RETLW` alias pop, and all
+four skip instructions fork along both independently tested edges. The classic
+`MOVLW` aliases all fall through. Control states and return addresses preserve
+the 9-bit architectural PC (`0x000..0x1ff`); only instruction fetch aliases
+through the low eight bits into the 256 implemented physical words. Reachable
+holes and empty returns fail.
+
+The proof is deliberately narrower than a general PIC emulator and fails closed
+at that boundary: reserved/non-classic words, `RETFIE`, computed PCL writes,
+data-dependent writes through classic `INDF`, and any path that could enable GIE
+are rejected because they can create an unmodelled successor or asynchronous
+push. The command-line default is eight and the Makefile limit is immutably
+eight. `test-pic320-return-stack-oracle` runs 139 deterministic checks in
+`make test` and `test-long`, including an exhaustive independent legality map,
+every destination-writer class, operand-boundary skip cases, wrap behavior,
+nested LIFO returns, and a literal precomputed HEX layout fixture.
+
+Every `pic320` build invokes the immutable oracle before setting
+`image_complete=1`, inside the existing cleanup trap. This covers later
+gpsim/target/soak/release rebuilds as well as direct builds; Python, oracle, or
+analysis failure deletes that generated image. `pic320-test-return-stack` remains
+the complete-matrix reporting target: it depends on fresh `pic320-variants`,
+expands all three image names from the immutable supported set, then rechecks all
+three together as part of `pic320-test`. This is not a claim that a file cannot
+be modified after a successful recipe; release provenance and reproduction
+checks remain separate evidence.
+
+The fake-XC8 build regression reports 28 PIC10F322 checks and 54 PIC10F320
+checks. The 320-specific cases prove the base build deletes structurally valid
+reachable-RETFIE and depth-9 images, and that nonempty successful-oracle and
+limit-99 command-line overrides cannot bypass the immutable Makefile settings.
+
+As retrospective parser/decoder context only, the predecessor project's signed
+`v0.9.5` images measure 3 / 3 / 4 entries for simple / mute / relay. Those files
+predate the merged-tree exact-TRISA firmware change and are not current-image
+qualification evidence. Current-tip real-image results remain pending for the
+reason in the status block above.
+
 ## 4. The defensive-layer decision, measured
 
 The PIC10F322 shell carries two pin-integrity checks the PIC10F320 did not. Both
@@ -214,6 +262,10 @@ Stated so nobody has to infer it:
   code is the shipped code", which is what every other target gets for free.
 - **Emitted bytes are no longer watched** across source changes (§2).
 - **The output-latch integrity check is absent** (§4).
+- **A current-tip real-image return-stack result is not yet recorded.** The gate
+  and its synthetic fail-closed fixtures are implemented, but this host cannot
+  rebuild the three images without XC8. This is pending qualification evidence,
+  not an unimplemented bound.
 - **Hardware-bench properties are simulated, not proven**: WDT timing and
   brown-out behaviour, absolute tick period, and real-silicon pulse timing. These
   are shared with the PIC10F322 build, since both are validated in the same gpsim
@@ -223,11 +275,13 @@ Stated so nobody has to infer it:
 ## 7. Reproducing any of this
 
 ```
-make pic320-test                    # build+budget, CONFIG, analysis, gpsim, host lanes
+make pic320-test                    # all lanes; each build stack-checks its final HEX
+make pic320-test-return-stack       # fresh all-image stack recheck + depth witnesses
 make pic320-test-target-variants    # fail-closed libgpsim fault/lock-step/I-O
 make test-mutation MUTATION_ALLOW_SKIP=0
 make pic320-test-soak PIC320_SOAK_DURATION_MS=86400000
 ```
 
-Add `STRICT_TOOLS=1` to any of these. Without it a missing tool makes the lane
-skip and exit 0, and a skipped lane must never be read as a passing one.
+Add `STRICT_TOOLS=1` for authoritative optional analyzer/simulator results.
+Individual optional-tool lanes may otherwise skip, but the return-stack target
+does not: missing Python or any image is a failure, and `pic320-test` includes it.

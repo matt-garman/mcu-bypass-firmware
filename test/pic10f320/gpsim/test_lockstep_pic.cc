@@ -98,7 +98,7 @@ extern "C" {
 #  error "CTX_ADDR (the _ctx_ SRAM address from the XC8 .sym) must be passed by the Makefile"
 #endif
 #define CYCLES_PER_MS  ((F_CPU_HZ / 4UL) / 1000UL)   // 500 @ 2 MHz
-#define CLRWDT_OPCODE  0x0064u                        // 14-bit enhanced-midrange CLRWDT
+#define CLRWDT_OPCODE  0x0064u                        // 14-bit classic mid-range CLRWDT
 #define FOOTSW_PIN_NAME "ra3"
 
 // ctx_ field offsets (struct order; each a 1-byte object -- the Makefile asserts

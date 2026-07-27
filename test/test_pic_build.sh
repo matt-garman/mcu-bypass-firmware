@@ -35,23 +35,41 @@ PB_MATRIX_REQUIRE_COMPLETE=${PB_MATRIX_REQUIRE_COMPLETE:-0}
 PB_MATRIX_UNSUPPORTED=${PB_MATRIX_UNSUPPORTED:-unknown}
 PB_SELECTOR_ROUTING=${PB_SELECTOR_ROUTING:-0}
 PB_SIZE_TARGET=${PB_SIZE_TARGET:-}
+PB_RETURN_STACK_REQUIRED=${PB_RETURN_STACK_REQUIRED:-0}
 hex="$repo/$PB_BUILD_DIR/${PB_FW_BASE}_${PB_VARIANT}_${PB_TAG}.hex"
 size_probe_stem="$repo/$PB_BUILD_DIR/size_probe_$PB_VARIANT"
 checks=0
 unset FAKE_XC8_MODE FAKE_XC8_FAIL_NAME FAKE_XC8_SIGNAL_MARKER \
 	MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES
-mkdir -p "$repo/src" "$repo/scripts" "$repo/build_pic" "$tools"
+mkdir -p "$repo/src" "$repo/scripts" "$repo/test/pic10f320" \
+	"$repo/build_pic" "$tools"
 cp "$ROOT/Makefile" "$repo/Makefile"
 cp "$ROOT/scripts/validate-ihex.sh" "$repo/scripts/validate-ihex.sh"
+cp "$ROOT/test/pic10f320/return_stack_oracle.py" \
+	"$repo/test/pic10f320/return_stack_oracle.py"
 
 cat > "$tools/xc8" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 write_valid_hex() {
 	printf '%s\n' \
-		':02000000FA29DB' \
-		':1000D6008B136C2807140800640008000730A92059' \
+		':020000000028D6' \
 		':02400E009E38DA' \
+		':00000001FF'
+}
+write_bad_stack_hex() {
+	# Structurally valid PIC14 image whose reset instruction is RETFIE (0x0009).
+	printf '%s\n' \
+		':020000000900F5' \
+		':02400E009E38DA' \
+		':00000001FF'
+}
+write_bad_depth_hex() {
+	# Precomputed classic-PIC14 chain: CALLs at words 0,2,...,16 reach depth 9.
+	printf '%s\n' \
+		':10000000022001280420080006200800082008001B' \
+		':100010000A2008000C2008000E200800102008000C' \
+		':0600200012200800080098' \
 		':00000001FF'
 }
 out=
@@ -83,6 +101,8 @@ case "$mode" in
 		sleep 1
 		;;
 	bad-checksum) printf ':0100000001FF\n:00000001FF\n' > "$out" ;;
+	bad-stack) write_bad_stack_hex > "$out" ;;
+	bad-depth) write_bad_depth_hex > "$out" ;;
 	eof-only) printf ':00000001FF\n' > "$out" ;;
 	trailing) printf ':0100000001FE\n:00000001FF\ntrailing garbage\n' > "$out" ;;
 	symlink)
@@ -97,6 +117,11 @@ case "$out" in
 esac
 EOF
 chmod 750 "$tools/xc8" "$repo/scripts/validate-ihex.sh"
+cat > "$tools/noop-oracle.py" <<'EOF'
+#!/usr/bin/env python3
+raise SystemExit(0)
+EOF
+chmod 640 "$tools/noop-oracle.py"
 printf '#!/usr/bin/env sh\nexit 2\n' > "$tools/failing-awk"
 printf '#!/usr/bin/env sh\nexit 0\n' > "$tools/empty-awk"
 cat > "$tools/status1-comparison-awk" <<'EOF'
@@ -221,9 +246,46 @@ expect_override_rejected() {
 	checks=$((checks + 1))
 }
 
+expect_oracle_image_rejected() {
+	local label=$1 mode=$2
+	shift 2
+	printf 'stale image\n' > "$hex"
+	if (export FAKE_XC8_MODE="$mode"; run_make "$@") >/dev/null 2>&1; then
+		printf 'FAIL: PIC10F320 build accepted %s\n' "$label" >&2
+		exit 1
+	fi
+	[[ ! -e "$hex" && ! -L "$hex" ]] \
+		|| { printf 'FAIL: %s left a rejected PIC10F320 image\n' "$label" >&2; exit 1; }
+	checks=$((checks + 1))
+}
+
 run_make >/dev/null
 "$repo/scripts/validate-ihex.sh" "$hex"
 checks=$((checks + 1))
+
+if [ "$PB_RETURN_STACK_REQUIRED" -eq 1 ]; then
+	expect_oracle_image_rejected "a reachable RETFIE image" bad-stack
+	expect_oracle_image_rejected \
+		"a reachable RETFIE image with a successful no-op oracle override" bad-stack \
+		"PIC320_RETURN_STACK_ORACLE=$tools/noop-oracle.py"
+
+	bad_depth_fixture="$work/depth-9.hex"
+	FAKE_XC8_MODE=bad-depth "$tools/xc8" -o "$bad_depth_fixture" >/dev/null
+	"$repo/scripts/validate-ihex.sh" "$bad_depth_fixture"
+	python3 "$repo/test/pic10f320/return_stack_oracle.py" \
+		--limit 9 "$bad_depth_fixture" >/dev/null \
+		|| { printf 'FAIL: precomputed depth-9 fixture is not valid at limit 9\n' >&2; exit 1; }
+	if python3 "$repo/test/pic10f320/return_stack_oracle.py" \
+			--limit 8 "$bad_depth_fixture" >/dev/null 2>&1; then
+		printf 'FAIL: precomputed depth-9 fixture passed the architectural limit\n' >&2
+		exit 1
+	fi
+	checks=$((checks + 1))
+
+	expect_oracle_image_rejected \
+		"a depth-9 image with PIC320_RETURN_STACK_LIMIT=99" bad-depth \
+		PIC320_RETURN_STACK_LIMIT=99
+fi
 
 for mode in over-budget huge-count; do
 	printf 'stale image\n' > "$hex"

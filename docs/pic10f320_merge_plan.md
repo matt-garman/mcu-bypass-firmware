@@ -18,7 +18,8 @@ The corrected topology therefore requires a fresh fail-closed 74/74 run and
 release rehearsal before `v0.9.6`. Later uses of “shipped”, “all killed”, or
 completed qualification in this working plan describe the phase checkpoint at
 its cited tip and are superseded by this status and
-`docs/pic10f320_validation.md`.
+`docs/pic10f320_validation.md`. The §6.12 hardware return-stack row has since
+been implemented; rebuild determinism is the sole remaining undecided §6.12 row.
 
 **Decision.** Consolidation is the right direction. The repositories have
 the same maintainer, product domain, toolchain family, behaviour contract,
@@ -1539,19 +1540,24 @@ the document it was when the requirement was set.
       322's "inside `hw_critical_sfrs_intact`" differ in placement only, not in
       the fault they detect. §6.11's table framed a structural difference as a
       coverage one.)*
-- [ ] **OPEN (2 of 8 rows).** Every §6.12 parent-only gate has a recorded
+- [ ] **OPEN (1 of 8 rows).** Every §6.12 parent-only gate has a recorded
       PIC10F320 decision: mutation
       policy, flash budget, strict-tools inventory, ci-local routing, release
       provenance, rebuild determinism, stack bound, and firmware-coverage /
       `xc.h` convergence.
-      *(Six are decided and implemented — central mutation policy extended,
+      *(Seven are decided and implemented — central mutation policy extended,
       inline 256-word budget, strict-tools inventory at 18 checks, two-chip
       ci-local routing, provenance verified target-agnostic, and the deliberate
-      two-mechanism firmware-coverage split. **Rebuild determinism** and **stack
-      bound** closed with neither an implementation nor a "no, because", as §15.9
-      states. Both are now tracked as `TODO.md` Tier 2.5 items rather than living
-      only in this plan; the stack-bound one is the substantive gap — the 14-bit
-      core's 8-level hardware return stack is observed by no current gate.)*
+      two-mechanism firmware-coverage split. The stack row's implementation gap
+      is closed by the dependency-free final-HEX oracle: its selftest is in
+      `make test`, every `pic320` build checks its generated image inside the
+      incomplete-image trap, and `pic320-test-return-stack` rebuilds and rechecks
+      the immutable supported three-image set as part of `pic320-test`;
+      current-image evidence remains pending full-tool qualification.
+      **Rebuild determinism**
+      alone still has neither an
+      implementation nor a "no, because" decision and remains tracked in
+      `TODO.md`.)*
 - [x] The strict-tools inventory covers optional-tool recipes for **both** PIC
       chips, not only the newly added ones (§6.12), and the flash-budget
       disposition — inline for both chips, or the shared script for both — is
@@ -1572,9 +1578,10 @@ the document it was when the requirement was set.
       `test_lockstep_progress.sh`) has a recorded FOLD-or-FORK disposition, and
       no fold silently added a tool dependency to the default `test` aggregate.
       *(All seven FOLD — dispositions in §15.7 and §15.10;
-      `test_lockstep_progress.sh` was 0-diff and dropped. The only PIC10F320
-      member of `test`/`test-long` is `pic320-test-host-variants`, which needs
-      `cc` + `gcov` only, so the aggregate's tool contract is unchanged.)*
+      `test_lockstep_progress.sh` was 0-diff and dropped. The PIC10F320 members
+      of `test`/`test-long` are `pic320-test-host-variants` and the dependency-free
+      return-stack oracle selftest; they need `cc` + `gcov` and Python 3, not XC8.
+      Python 3 was already in the aggregate's tool contract.)*
 - [x] Every colliding Makefile **variable** has a recorded disposition (§5.6):
       chip-specific names carry the prefix chosen alongside §5.1's target prefix,
       the shared-tool allowlist is explicit, no chip inherits the other's
@@ -2577,6 +2584,11 @@ phase's nor blockers for Phase 6: rebuild determinism
 (`test_stack_bound.sh`), the latter arguably the most relevant of all to a fully
 inlined `main()`.
 
+Subsequent status (2026-07-27): the final-HEX return-stack oracle described in
+§15.14 closes the stack-bound implementation gap. This paragraph remains the
+Phase-5 checkpoint; rebuild determinism is now the only undecided §6.12
+implementation row, while current return-stack image evidence remains pending.
+
 **Not in this phase, by design.** `release.yml` is untouched — release
 integration is Phase 6, and §7's warning stands: after Phase 6 is the one bad
 place to stop, because release machinery would name images no CI gate produces.
@@ -3038,3 +3050,46 @@ appears in search results and in the archived-repository banner context while th
 README is not. Leave this repository's two child references as they are — both
 are historical statements that were true when written, and both keep resolving
 against an archived repository.
+
+### 15.14 §6.12 hardware return stack — gate implemented, current evidence pending
+
+The stack-bound implementation gap is closed by
+`test/pic10f320/return_stack_oracle.py`, not by interpreting XC8's compiled-stack
+report. That distinction matters: the PIC10F320 resource at issue is its separate
+eight-entry hardware return stack, so the final instruction image is the direct
+evidence. Because current XC8 images have not run through it on this host, this
+does not close current-image qualification evidence.
+
+The dependency-free oracle strictly parses Intel HEX and traverses every
+reachable `(PC, exact return-address stack)` state from reset. It models the
+classic 35-instruction mid-range ISA: direct `CALL`/`GOTO`, both outcomes of
+`BTFSC`/`BTFSS`/`DECFSZ`/`INCFSZ`, `RETURN`, and all classic `RETLW` aliases.
+All classic `MOVLW` aliases fall through. It rejects malformed, overlapping,
+linked, nonregular, empty, or incomplete inputs; reachable holes and empty
+returns; recursion and depth above eight; reserved/non-classic words; `RETFIE`;
+computed PCL writes; and paths that could enable GIE and therefore add
+asynchronous pushes. State PCs, upper direct-target bits, sequential/skip
+successors and pushed/popped return addresses preserve the 9-bit architectural
+range; instruction fetch alone aliases through the low eight bits into the 256
+implemented physical words. The file documents the exact classic PIC14 masks.
+
+`test-pic320-return-stack-oracle` is wired into `make test` and `test-long` with
+139 deterministic checks. Every `pic320` recipe runs the immutable oracle before
+marking its output complete, so its existing trap removes an image on Python,
+oracle, or analysis failure. `pic320-test-return-stack` depends on fresh
+`pic320-variants`, derives the three explicit image paths from the immutable
+supported set, rechecks them together, reports a maximum and witness per image,
+and is a prerequisite of `pic320-test`. This is build/use-point enforcement, not
+an assertion that a staged artifact cannot subsequently be changed.
+
+The parameterized fake-XC8 regression remains 28/28 for PIC10F322 and is 54/54
+for PIC10F320. Its 320-only cases validate a static depth-9 HEX with the real
+parser, require its deletion under the immutable limit of eight, and prove that
+neither a nonempty successful no-op oracle override nor a limit-99 override can
+bypass the base build gate.
+
+The historical signed child `v0.9.5` images were inspected as decoder context and
+produce 3 / 3 / 4. They predate the merged-tree exact-TRISA firmware edit and do
+not attest the current images. XC8 is unavailable on the implementation host, so
+the first current-tip real-image result remains part of fresh qualification, not
+an outcome claimed by this closure.

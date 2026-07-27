@@ -98,7 +98,16 @@ aggregate so missing PIC tooling cannot produce a false green release gate.
                 own -Woverloaded-virtual warnings).  The standalone libgpsim
                 targets skip cleanly when dev packages or the XC8-built HEX are
                 absent; use `make pic-test-target-variants STRICT_TOOLS=1` when
-                a missing or skipped target must fail closed.
+                 a missing or skipped target must fail closed.
+
+  Python:       Python 3, standard library only. `make
+                test-pic320-return-stack-oracle` runs deterministic parser and
+                control-flow fixtures in the normal `make test` / `test-long`
+                graph. Every successful `make pic320` build applies the oracle
+                before its image is marked complete. `make
+                pic320-test-return-stack` rebuilds and rechecks all three XC8
+                HEX images together and never skips for a missing interpreter
+                or image.
 
   cppcheck:     2.13.0  (the SAME binary as the AVR analysis, below)
                 `make pic-analyze` runs it with --platform=pic8-enhanced over the
@@ -144,14 +153,36 @@ PIC10F320 commands, for reference (same toolchain, `pic320-` targets):
 
   make pic320-variants             build all three variants + 256-word gate
   make pic320-size                 XC8 program/data memory summary
+  make pic320-test-return-stack    final-HEX reachable return-stack proof (all images)
   make pic320-test                 host equivalence/actuation/fault/coverage,
-                                     CONFIG word, cppcheck+MISRA, and CLI gpsim,
-                                     swept across all three variants
+                                     CONFIG/return stack, cppcheck+MISRA, and
+                                     CLI gpsim, swept across all three variants
   make pic320-test-target-variants fail-closed libgpsim fault/lock-step/I-O
   make pic320-test-soak            long-duration libgpsim soak
 
 Its build output goes to build_pic10f320/ (build and coverage artifacts alike),
 kept separate from the 322's build_pic/ and from the shared top-level coverage/.
+
+The final-HEX stack oracle decodes the PIC10F320's classic 35-instruction
+mid-range PIC14 ISA directly. `CALL`/`GOTO` use masks `0x2000/0x3800` and
+`0x2800/0x3800`; `BTFSC`, `BTFSS`, `DECFSZ`, and `INCFSZ` each fork into
+independently tested skip and no-skip outcomes. `RETURN` and the complete classic
+`RETLW` alias range (`0x3400..0x37ff`) pop the exact abstract hardware stack;
+the complete `MOVLW` alias range (`0x3000..0x33ff`) falls through. Reserved words
+fail closed instead of acquiring an opcode from another PIC14 ISA. The model
+rejects `RETFIE`, direct PCL writes, data-dependent writes through classic
+`INDF`, and any reachable write that could enable GIE because those can introduce
+unmodelled successors or asynchronous pushes. Full opcode-mask rationale and
+fail-closed fixtures are in `test/pic10f320/return_stack_oracle.py`.
+
+PIC10F320 has a 9-bit architectural PC and 256 implemented physical words.
+`CALL`/`GOTO` targets, sequential/skip PCs, pushed return addresses, and popped
+successors normalize to `0x000..0x1ff`; only instruction fetch aliases through
+the low eight bits to physical words `0x00..0xff`. The per-build check runs inside
+`pic320`'s existing incomplete-image trap; an oracle, Python, or analysis failure
+removes that build output. This does not make an artifact immutable after the
+recipe returns. The complete-matrix target and release provenance/reproduction
+gates provide later rechecks at their own use points.
 
 XC8 and the device pack are Microchip downloads, NOT apt packages:
 
