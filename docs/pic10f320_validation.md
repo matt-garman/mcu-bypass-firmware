@@ -126,6 +126,7 @@ variants unless noted.
 | CLI gpsim functional | PASS ×6 (toggle + power-on-held, all variants) |
 | Fail-closed target aggregate | EXIT=0 |
 | Soak (libgpsim) | PASS on all three |
+| Hardware return-stack depth | **3 / 3 / 4 levels of 8** (cd4053-simple / cd4053-mute / tq2-relay), 2 held in reserve |
 | Mutation | see §5 |
 
 Two of these deserve emphasis:
@@ -138,6 +139,47 @@ Two of these deserve emphasis:
 - **Lock-step is the emitted image**, not the source: the actual XC8 output
   running in a simulated PIC10F320, its live `_ctx_` SRAM compared to the model
   after every completed main-loop iteration.
+
+### The hardware return stack, and why it needed its own gate
+
+Added 2026-07-27. This is the one resource bound on this part that nothing
+observed, and three things found while closing it are worth recording.
+
+**It is not the AVR's stack question.** `test-stack-bound` bounds the AVR *data*
+stack in bytes. The PIC14 core has no data stack at all — XC8 allocates locals
+into a static, non-reentrant compiled-stack overlay — so that gate has nothing to
+measure here. What this part has is a fixed **8-level hardware return stack**,
+declared independently by XC8's own device data (`STACKDEPTH=8`) and the device
+pack's `edc:hwstackdepth="8"`. The gate reads the budget from the pack rather
+than hardcoding it.
+
+**"Inlined, so it cannot recurse" would have been the wrong answer.** The
+debounce logic is inlined into `main()`, but the *output stages* are not. The
+relay variant reaches four levels:
+
+```
+_main -> _init -> _hw_set_bypass_state -> _set_relay_coils_low
+      -> _hw_relay_reset_pin_set_low
+```
+
+Measured peak is 3 levels for the CD4053 variants and 4 for the relay — on
+**both** PIC chips, whose figures are identical. Real headroom, but not zero and
+not structural.
+
+**XC8's own estimate is not a safe upper bound, and its overflow check is only a
+warning.** XC8 prints `;; Hardware stack levels required when called: N` per
+function; on the shipping tq2-relay image it reports **3** where the emitted
+instruction stream contains a verified **4**-deep chain of real `fcall`s, each
+confirmed against its enclosing psect. Synthetic chains reproduce correctly, so
+this is a property of the real program rather than of the annotation format. The
+gate therefore computes the depth itself from the instruction stream and uses
+XC8's `callstack` directives — which *do* agree, at 4 — as a cross-check that
+fails on disagreement. Separately, a deliberately 10-deep chain compiled for this
+part yields `warning: (1393) possible hardware stack overflow detected` and
+`xc8-cc` **still exits 0 and writes a HEX**. Overflow is otherwise undetectable
+on this core: no `STKPTR`, no `TOSL`/`TOSH`, no `STKOVF` in `PCON`, and no CONFIG
+`STVREN` bit, so the stack silently wraps and a return goes to the wrong address.
+That is the fail-open `pic320-test-stack-bound` closes.
 
 ## 4. The defensive-layer decision, measured
 

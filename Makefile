@@ -458,6 +458,7 @@ FORCE:
         _test-make-safe-parallel-probe-run _test-make-safe-parallel-probe-a \
         _test-make-safe-parallel-probe-b _test-mutation-policy-probe \
         test-target-matrix test-target-lane-markers test-lockstep-progress \
+        test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
@@ -944,8 +945,67 @@ pic-coverage-check-fw:
 # of `make test`, which is the AVR pre-hardware gate (XC8/gpsim may be absent in
 # CI). Each external-tool sub-target skips cleanly when its tool is missing.
 .PHONY: pic-test
-pic-test: pic-test-config pic-analyze pic-coverage-check-fw pic-test-gpsim
+pic-test: pic-test-config pic-analyze pic-coverage-check-fw pic-test-gpsim \
+          pic-test-stack-bound
 	@echo "=== all PIC10F322 pre-hardware checks complete ==="
+
+# --- PIC hardware return-stack depth (BOTH chips) ----------------------------
+# The PIC counterpart of test-stack-bound, and deliberately a different gate.
+# test-stack-bound bounds the AVR's DATA stack in bytes via -fstack-usage; the
+# PIC14 core has no data stack to bound (XC8 uses a static compiled-stack
+# overlay), but it does have a fixed 8-level HARDWARE RETURN STACK whose
+# overflow is silent -- no STKPTR, no STKOVF, no stack-overflow reset on this
+# part. See test/check_stack_depth_pic.sh for the analysis and for why XC8's own
+# per-function estimate is not used as the measurement.
+#
+# The budget is READ FROM THE DEVICE PACK, never written down here: a hardcoded
+# depth is the same silent-staleness hazard as a hardcoded PIC_FLASH_WORDS
+# (merge plan §5.6). Both parts declare STACKDEPTH=8 independently.
+#
+# The reserve is held back from the budget for two reasons worth stating: an
+# in-circuit debugger consumes a stack level during bench bring-up, and neither
+# shell has an ISR today -- if one is added it costs a level plus its own tree,
+# which the gate accounts for but which should not consume the last of the
+# headroom before anyone notices.
+PIC_DEVICE_INI     ?= $(PIC_DFP)/pic/dat/ini/$(shell printf '%s' '$(PIC_CHIP)' | tr 'A-Z' 'a-z').ini
+PIC320_DEVICE_INI  ?= $(PIC320_DFP)/pic/dat/ini/$(shell printf '%s' '$(PIC320_CHIP)' | tr 'A-Z' 'a-z').ini
+PIC_STACK_RESERVE    ?= 2
+PIC320_STACK_RESERVE ?= 2
+STACK_DEPTH_GATE      = ./test/check_stack_depth_pic.sh
+
+.PHONY: pic-test-stack-bound pic320-test-stack-bound
+pic-test-stack-bound: pic
+	@# One shell: $(SKIP) exits only its own shell, and the sweep below must not
+	@# run -- nor the closing sentinel print -- when XC8 produced nothing.
+	@first="$(PIC_BUILD_DIR)/$(FW_BASE)_$(firstword $(VARIANTS))_$(PIC_TAG).s"; \
+	if [ ! -f "$$first" ]; then \
+		echo "no PIC10F322 assembly in $(PIC_BUILD_DIR)/ (XC8 absent?); skipping stack-depth gate"; \
+		$(SKIP); \
+	fi; \
+	for v in $(VARIANTS); do \
+		$(STACK_DEPTH_GATE) "$(PIC_BUILD_DIR)/$(FW_BASE)_$${v}_$(PIC_TAG).s" \
+			"$(PIC_DEVICE_INI)" "$(PIC_STACK_RESERVE)" "PIC10F322 $$v" || exit 1; \
+	done; \
+	echo "=== PIC10F322 hardware stack bounded for every variant ==="
+
+pic320-test-stack-bound: pic320-variants
+	@first="$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$(firstword $(PIC320_VARIANTS_ALL))_$(PIC320_TAG).s"; \
+	if [ ! -f "$$first" ]; then \
+		echo "no PIC10F320 assembly in $(PIC320_BUILD_DIR)/ (XC8 absent?); skipping stack-depth gate"; \
+		$(SKIP); \
+	fi; \
+	for v in $(PIC320_VARIANTS_ALL); do \
+		$(STACK_DEPTH_GATE) "$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).s" \
+			"$(PIC320_DEVICE_INI)" "$(PIC320_STACK_RESERVE)" "PIC10F320 $$v" || exit 1; \
+	done; \
+	echo "=== PIC10F320 hardware stack bounded for every variant ==="
+
+# Host-only proof that the gate above rejects what it must. Tool-independent by
+# construction (synthetic XC8-shaped fixtures), so it rides in `make test` and
+# cannot become the check that quietly stopped running.
+.PHONY: test-stack-bound-pic-regression
+test-stack-bound-pic-regression:
+	AWK="$(AWK)" ./test/test_stack_depth_pic.sh
 
 # --- PIC long-duration soak test (libgpsim) ----------------------------------
 # The PIC analogue of `test-soak`: drive the real built HEX in gpsim -- via
@@ -1010,7 +1070,21 @@ PIC_SOAK_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.
 # script runs first; like the AVR convenience rule it will not rebuild on a
 # PIC_SOAK_DURATION_MS change alone, so the release script always `make clean`s
 # before a fresh build.
-$(PIC_SOAK_BIN): $(PIC_SOAK_DEPS)
+# FORCE, for the reason stated at its definition: this binary's effective build
+# command includes command-line variables -- PIC_SOAK_{DURATION,LIVENESS_INTERVAL,
+# PROGRESS_INTERVAL}_MS and PIC_SOAK_VARIANT are compiled IN as -D flags -- and a
+# timestamp cannot represent them. Without it,
+#     make test/pic/test_soak_pic PIC_SOAK_DURATION_MS=60000
+#     make test/pic/test_soak_pic PIC_SOAK_DURATION_MS=120000
+# reports "up to date" and leaves the 60000 binary in place. Measured, not
+# theorised. The AVR ELF rules have carried $(AVR_REBUILD_PREREQ) for exactly
+# this since before the merge; these two rules were the omission.
+#
+# No override knob (the AVR's AVR_REBUILD_PREREQ exists so a validated consumer
+# phase can reuse an ELF it just checked). Nothing reuses this binary: the only
+# consumer, pic-test-soak, deletes and recompiles it inline, which is also why
+# the staleness was invisible through the normal lane.
+$(PIC_SOAK_BIN): $(PIC_SOAK_DEPS) FORCE
 	$(PIC_SOAK_COMPILE)
 
 .PHONY: pic-test-soak
@@ -1925,7 +1999,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check coverage-check-core
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -1937,7 +2011,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild coverage-check coverage-check-core
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -2154,6 +2228,12 @@ test-strict-tools:
 # Isolated fake-compiler proof of workload and fuse-configuration rebuilds.
 test-workload-rebuild:
 	./test/test_workload_rebuild.sh
+
+# The PIC counterpart: both chips' soak binaries compile their workload sizing in
+# as -D flags, so their file rules must be unconditionally out of date. Fake
+# compiler, so it needs no gpsim/glib and runs in `make test`.
+test-pic-build-rebuild:
+	./test/test_pic_rebuild.sh
 
 # Build rule for the golden model. Constants come from bypass_config.h (via the
 # host shim) so the model can never drift from the firmware thresholds.
@@ -3532,7 +3612,7 @@ pic320-test-gpsim: pic320
 PIC320_PER_VARIANT_LANES := pic320-analyze pic320-test-gpsim
 
 .PHONY: pic320-test
-pic320-test: pic320-test-host-variants pic320-test-config
+pic320-test: pic320-test-host-variants pic320-test-config pic320-test-stack-bound
 	@for v in $(PIC320_VARIANTS_ALL); do \
 		echo "===================== PIC10F320 ANALYSIS/GPSIM VARIANT $$v ====================="; \
 		$(MAKE) --no-print-directory PIC320_VARIANT=$$v $(PIC320_PER_VARIANT_LANES) || exit 1; \
@@ -3708,7 +3788,9 @@ PIC320_SOAK_COMPILE = $(PIC320_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags g
 # concurrently, which it cannot do through the pic320-test-soak run target.
 # Like the 322 rule it will not rebuild on a PIC320_SOAK_DURATION_MS change
 # alone, so the release script always `make clean`s before a fresh build.
-$(PIC320_SOAK_BIN): $(PIC320_SOAK_DEPS)
+# FORCE -- see the PIC10F322 rule above; the same command-line-variable
+# staleness was measured here first (merge plan §6.12's rebuild-determinism row).
+$(PIC320_SOAK_BIN): $(PIC320_SOAK_DEPS) FORCE
 	$(PIC320_SOAK_COMPILE)
 
 .PHONY: pic320-test-soak
@@ -3938,10 +4020,13 @@ help:
 	@echo "  test-build-serialization  worktree Make/release lock regression"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
 	@echo "  test-target-lane-markers  PIC target aggregates must require each lane's PASS marker"
+	@echo "  test-stack-bound-pic-regression  PIC hardware return-stack gate regression"
+	@echo "  pic-test-stack-bound / pic320-test-stack-bound  8-level HW return-stack depth gate"
 	@echo "  test-lockstep-progress  lock-step simulator-stall propagation checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
+	@echo "  test-pic-build-rebuild  PIC soak binaries rebuild on a workload change"
 	@echo "  test-soak       24-h soak test (standalone; SOAK_VARIANT, SOAK_CHIP, SOAK_DURATION_MS,"
 	@echo "                  SOAK_LIVENESS_INTERVAL_MS, SOAK_PROGRESS_INTERVAL_MS)"
 	@echo "  trace           emit $(AVR_BUILD_DIR)/bypass_trace.vcd for VARIANT (GTKWave)"

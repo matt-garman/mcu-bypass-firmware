@@ -1488,9 +1488,11 @@ than from the phase records: `make test`, `make pic320-test` and
 15 release images. Re-checked 2026-07-27 after §6.15 was decided (§15.13) and the
 first unified tag was renumbered to `v0.9.6` (§10). Re-checked again 2026-07-27
 by a third post-merge audit, which corrected one ticked box that was not true at
-the Make level (the PIC10F320 target aggregate) and closed the KLEE box on a
-premise that turned out to be false (§15.8). **33 of 36 boxes are closed; the
-three that are not are marked OPEN with what remains** — do not read an
+the Make level (the PIC10F320 target aggregate), closed the KLEE box on a
+premise that turned out to be false (§15.8), and then closed §6.12 outright by
+implementing its last two rows — stack bound and rebuild determinism.
+**34 of 36 boxes are closed; the
+two that are not are marked OPEN with what remains** — do not read an
 unticked box as an oversight, each says why. Where a box's own text names a pre-relocation path (`test/fault/…`,
 `test/pic/test_fault_pic.cc`), the work landed at the post-Phase-2 location
 (`test/pic10f320/…`); the box text is left as written so the plan still reads as
@@ -1531,19 +1533,66 @@ the document it was when the requirement was set.
       322's "inside `hw_critical_sfrs_intact`" differ in placement only, not in
       the fault they detect. §6.11's table framed a structural difference as a
       coverage one.)*
-- [ ] **OPEN (2 of 8 rows).** Every §6.12 parent-only gate has a recorded
+- [x] Every §6.12 parent-only gate has a recorded
       PIC10F320 decision: mutation
       policy, flash budget, strict-tools inventory, ci-local routing, release
       provenance, rebuild determinism, stack bound, and firmware-coverage /
       `xc.h` convergence.
-      *(Six are decided and implemented — central mutation policy extended,
-      inline 256-word budget, strict-tools inventory at 18 checks, two-chip
-      ci-local routing, provenance verified target-agnostic, and the deliberate
-      two-mechanism firmware-coverage split. **Rebuild determinism** and **stack
-      bound** closed with neither an implementation nor a "no, because", as §15.9
-      states. Both are now tracked as `TODO.md` Tier 2.5 items rather than living
-      only in this plan; the stack-bound one is the substantive gap — the 14-bit
-      core's 8-level hardware return stack is observed by no current gate.)*
+      *(Six were decided and implemented at merge time — central mutation policy
+      extended, inline 256-word budget, strict-tools inventory at 18 checks,
+      two-chip ci-local routing, provenance verified target-agnostic, and the
+      deliberate two-mechanism firmware-coverage split. **Rebuild determinism**
+      and **stack bound** closed with neither an implementation nor a
+      "no, because", as §15.9 states, and were tracked as `TODO.md` Tier 2.5
+      items rather than living only in this plan.*
+
+      ***Stack bound implemented 2026-07-27 (third post-merge audit), leaving one
+      row open.*** It was the substantive gap, and this row's own framing
+      understated it: "the 14-bit core's 8-level hardware return stack is observed
+      by no current gate" was true of **both** PIC chips, not only the 320 — a
+      Principle 8 case that §6.12 had filed as PIC10F320-only.
+      `test/check_stack_depth_pic.sh` now gates both chips
+      (`pic-test-stack-bound`, `pic320-test-stack-bound`, each inside its own
+      pre-hardware aggregate), with a toolchain-free fixture regression
+      (`test-stack-bound-pic-regression`, 15 checks) in `make test`. Measured peak
+      is 3 levels for the CD4053 variants and 4 for the relay — identical on both
+      chips — against a budget read from the device pack rather than hardcoded.
+      Two findings are recorded in `docs/pic10f320_validation.md` §3 because they
+      outlive this plan: XC8's own per-function estimate understates the real
+      chain by one on the shipping relay image, and XC8's genuine overflow
+      detection is only a **warning** that still exits 0 and emits a HEX.
+
+      ***Rebuild determinism implemented 2026-07-27, closing the box.*** The row
+      offered two acceptable answers — write a probe, or record why the `pic320`
+      recipes make one unnecessary — and predicted the second would likely be
+      right, "since the recipes rebuild unconditionally, having no intermediate
+      object targets". Checking rather than assuming that found it **false in one
+      place, on both chips.** Each lane has exactly one file-target rule,
+      `$(PIC{,320}_SOAK_BIN)`, and its effective build command compiles the
+      workload sizing in as `-D` flags. Measured before the fix:
+
+      ```
+      make build_pic10f320/test_soak_pic PIC320_SOAK_DURATION_MS=60000
+      make build_pic10f320/test_soak_pic PIC320_SOAK_DURATION_MS=120000
+        -> "'build_pic10f320/test_soak_pic' is up to date."   (60000 binary kept)
+      ```
+
+      This is precisely the artifact class the Makefile's own `FORCE` definition
+      describes — "whose effective build command includes command-line variables
+      that timestamps cannot represent" — and which the AVR ELF rules have
+      carried since before the merge. Both soak rules now take `FORCE`; the
+      contract is held by `test/test_pic_rebuild.sh`
+      (`make test-pic-build-rebuild`, 9 checks, in `make test`), which asserts a
+      changed duration recompiles with the new value *and* that an identical
+      rerun recompiles too — the signature that distinguishes a real
+      always-out-of-date prerequisite from a rebuild that merely followed a
+      timestamp. It was confirmed to fail against the pre-fix rules.
+
+      Worth recording why it hid: nothing consumes the file rule. The only
+      consumer, `pic{,320}-test-soak`, deletes and recompiles the binary inline,
+      so the whole normal lane is deterministic and the staleness is reachable
+      only by naming the artifact directly — which is what a hand-run soak at a
+      shortened duration does. **All 8 rows are now decided and implemented.**)*
 - [x] The strict-tools inventory covers optional-tool recipes for **both** PIC
       chips, not only the newly added ones (§6.12), and the flash-budget
       disposition — inline for both chips, or the shared script for both — is
@@ -2621,6 +2670,14 @@ phase's nor blockers for Phase 6: rebuild determinism
 (`test_workload_rebuild.sh`, `test_avr_build_rebuild.sh`) and stack bound
 (`test_stack_bound.sh`), the latter arguably the most relevant of all to a fully
 inlined `main()`.
+
+*(Both closed 2026-07-27 by the third post-merge audit — see §12's §6.12 box for
+what each turned out to be. Both guesses recorded here were wrong in the same
+direction: the "fully inlined `main()`" framing suggested the stack question was
+PIC10F320-specific, and it is identical on both chips; and the expectation that
+the `pic320` recipes rebuild unconditionally held everywhere except the one file
+rule where it mattered. Left as written, with this note, because the phase record
+should read as what was believed at the time.)*
 
 **Not in this phase, by design.** `release.yml` is untouched — release
 integration is Phase 6, and §7's warning stands: after Phase 6 is the one bad
