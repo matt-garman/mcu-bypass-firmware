@@ -968,8 +968,9 @@ PIC_SOAK_VARIANT     ?= cd4053
 PIC_SOAK_DURATION_MS ?= 3600000
 PIC_SOAK_LIVENESS_INTERVAL_MS ?= 60000
 PIC_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
+PIC_PIN_LOOKUP_HDR = test/pic/find_pin_exact.h
 PIC_SOAK_SRC = test/pic/test_soak_pic.cc
-PIC_SOAK_DEPS = $(PIC_SOAK_SRC) test/soak_timing_config.h
+PIC_SOAK_DEPS = $(PIC_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) test/soak_timing_config.h
 PIC_SOAK_BIN = test/pic/test_soak_pic
 PIC_SOAK_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_SOAK_VARIANT)_$(PIC_TAG).hex
 
@@ -1075,7 +1076,7 @@ PIC_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2
 		-DF_CPU_HZ=$(PIC_XTAL) -D$(macro_$(PIC_FAULT_VARIANT)) $(PIC_FAULT_CTX_DEF) \
 		$(PIC_FAULT_SRC) -o $(PIC_FAULT_BIN) -lgpsim
 
-$(PIC_FAULT_BIN): $(PIC_FAULT_SRC)
+$(PIC_FAULT_BIN): $(PIC_FAULT_SRC) $(PIC_PIN_LOOKUP_HDR)
 	$(PIC_FAULT_COMPILE)
 
 .PHONY: pic-test-fault
@@ -1136,7 +1137,7 @@ PIC_LOCKSTEP_COMPILE = \
 			-DF_CPU_HZ=$(PIC_XTAL) $(PIC_LOCKSTEP_CTX_DEF) \
 			$(PIC_LOCKSTEP_SRC) $(PIC_LOCKSTEP_MODEL_OBJ) -o $(PIC_LOCKSTEP_BIN) -lgpsim
 
-$(PIC_LOCKSTEP_BIN): $(PIC_LOCKSTEP_SRC) $(PURE_HOST_DEP)
+$(PIC_LOCKSTEP_BIN): $(PIC_LOCKSTEP_SRC) $(PIC_PIN_LOOKUP_HDR) $(PURE_HOST_DEP)
 	$(PIC_LOCKSTEP_COMPILE)
 
 .PHONY: pic-test-lockstep
@@ -1185,7 +1186,7 @@ PIC_IO_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0)
 		-DF_CPU_HZ=$(PIC_XTAL) -D$(macro_$(PIC_IO_VARIANT)) \
 		$(PIC_IO_SRC) -o $(PIC_IO_BIN) -lgpsim
 
-$(PIC_IO_BIN): $(PIC_IO_SRC)
+$(PIC_IO_BIN): $(PIC_IO_SRC) $(PIC_PIN_LOOKUP_HDR)
 	$(PIC_IO_COMPILE)
 
 .PHONY: pic-test-io
@@ -2127,7 +2128,8 @@ test-target-matrix:
 	TM_CHECK_SENTINELS=0 \
 		./test/test_target_matrix.sh
 
-# Compile both real PIC lock-step drivers against a fake core and inject stalls.
+# Compile both real PIC lock-step drivers against a fake core; exercise exact pin
+# resolution and inject progress stalls at every run phase.
 test-lockstep-progress:
 	PIC_SOAK_CXX="$(PIC_SOAK_CXX)" ./test/test_lockstep_progress.sh
 
@@ -3658,7 +3660,7 @@ PIC320_SOAK_DURATION_MS          ?= 3600000
 PIC320_SOAK_LIVENESS_INTERVAL_MS ?= 60000
 PIC320_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
 PIC320_SOAK_SRC  = $(PIC_SOAK_SRC)
-PIC320_SOAK_DEPS = $(PIC320_SOAK_SRC) test/soak_timing_config.h
+PIC320_SOAK_DEPS = $(PIC320_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) test/soak_timing_config.h
 PIC320_SOAK_BIN  = $(PIC320_BUILD_DIR)/test_soak_pic
 PIC320_SOAK_HEX  = $(call pic320_hex_of,$(PIC320_SOAK_VARIANT))
 
@@ -3910,7 +3912,7 @@ help:
 	@echo "  test-release-provenance  final release source HEAD/cleanliness checks"
 	@echo "  test-build-serialization  worktree Make/release lock regression"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
-	@echo "  test-lockstep-progress  both PIC lock-step simulator-stall propagation checks"
+	@echo "  test-lockstep-progress  both PIC exact-pin/stall-propagation checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"

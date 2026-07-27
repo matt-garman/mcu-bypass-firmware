@@ -54,17 +54,21 @@ public:
 
 class IOPIN {};
 
+inline IOPIN *fake_pin(unsigned index) {
+    static IOPIN pins[4];
+    return index >= 1u && index <= 3u ? &pins[index] : nullptr;
+}
+
 class Module {
 public:
-    int get_pin_count() const { return 1; }
-    std::string &get_pin_name(unsigned) {
-        static std::string name("ra3");
-        return name;
+    int get_pin_count() const { return 3; }
+    std::string &get_pin_name(unsigned index) {
+        static std::string names[] = { "", "ra30", "xra3", "ra3" };
+        static std::string hidden("ra3_missing");
+        if (index == 3u && std::getenv("FAKE_GPSIM_HIDE_RA3") != nullptr) return hidden;
+        return names[index <= 3u ? index : 0u];
     }
-    IOPIN *get_pin(unsigned) {
-        static IOPIN pin;
-        return &pin;
-    }
+    IOPIN *get_pin(unsigned index) { return fake_pin(index); }
 };
 
 class Processor {
@@ -153,7 +157,13 @@ public:
 class Stimulus_Node {
 public:
     explicit Stimulus_Node(const char *) {}
-    template <typename T> void attach_stimulus(T *) {}
+    void attach_stimulus(source_stimulus *) {}
+    void attach_stimulus(IOPIN *pin) {
+        if (pin != fake_pin(3u)) {
+            std::fprintf(stderr, "FATAL: footswitch stimulus was not attached to exact ra3\n");
+            std::exit(1);
+        }
+    }
     void update() {}
 };
 
@@ -252,11 +262,28 @@ run_wedge() {
 	checks=$((checks + 1))
 }
 
+run_missing_pin() {
+	local label=$1 processor=$2 bin=$3 output status
+	set +e
+	output=$(FAKE_GPSIM_HIDE_RA3=1 timeout 5 "$bin" 2>&1)
+	status=$?
+	set -e
+	[ "$status" -eq 1 ] \
+		|| { printf 'FAIL: %s missing-ra3 probe exited %d instead of 1: %s\n' \
+			"$label" "$status" "$output" >&2; exit 1; }
+	[[ "$output" == *"proc=$processor "* && "$output" == *"FATAL: pin ra3 not found"* ]] \
+		|| { printf 'FAIL: %s did not reject decoys when exact ra3 was absent: %s\n' \
+			"$label" "$output" >&2; exit 1; }
+	checks=$((checks + 1))
+}
+
 run_adapter() {
 	local label=$1 source=$2 processor=$3
 	local bin="$work/test_lockstep_progress_$processor"
-	"$CXX" -std=c++17 -O0 -I"$fake" -DCTX_ADDR=0x20 -DF_CPU_HZ=2000000UL \
+	"$CXX" -std=c++17 -O0 -I"$fake" -I"$ROOT/test" \
+		-DCTX_ADDR=0x20 -DF_CPU_HZ=2000000UL \
 		-DLOCKSTEP_ITERS=8 "$ROOT/$source" -o "$bin"
+	run_missing_pin "$label" "$processor" "$bin"
 	run_wedge "$label" "$processor" "$bin" settle
 	run_wedge "$label" "$processor" "$bin" calibration
 	run_wedge "$label" "$processor" "$bin" lockstep

@@ -67,6 +67,9 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- PIC gpsim validation now shares one exact pin-name resolver across all
+  libgpsim harnesses and tests RA3 against substring decoys; fake CLI gpsim also
+  rejects stimuli not attached exactly once to `ra3`.
 - The host lock-step progress regression now compiles and stalls both PIC
   adapters. Dropping the byte-identical child script had accidentally retained
   only the PIC10F322 source path and left PIC10F320 stall handling untested.

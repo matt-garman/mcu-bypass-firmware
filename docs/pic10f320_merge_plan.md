@@ -2328,8 +2328,8 @@ per concern now covers both chips:
 | --- | --- | --- |
 | `test_pic_build.sh` | `PB_*` knobs (target, build dir, image naming, budget, matrix, size probe) | 28 PIC10F322 + 46 PIC10F320 checks |
 | `test_target_matrix.sh` | `TM_*` knobs (target, variants variable, supported set) | 5 checks × 2 chips |
-| `test_gpsim_wrappers.sh` | *no folding needed* — see below | 35 checks (was 25) |
-| `test_lockstep_progress.sh` | compile and execute both chip-specific adapters against one fake gpsim API | 3 stalls × 2 chips |
+| `test_gpsim_wrappers.sh` | *no folding needed* — see below | 37 checks (was 25) |
+| `test_lockstep_progress.sh` | compile and execute both chip-specific adapters against one fake gpsim API | 4 failure modes × 2 chips |
 
 `test_gpsim_wrappers.sh` is the interesting one: it is already chip-agnostic
 (it unsets the PIC overrides and drives the wrappers through a fake gpsim), and

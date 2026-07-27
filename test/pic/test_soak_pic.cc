@@ -47,6 +47,7 @@
 #include "breakpoints.h"          // get_bp(), set_notify_break
 #include "trigger.h"              // TriggerObject
 #include "registers.h"            // Register::get_value()
+#include "pic/find_pin_exact.h"
 
 // gpsim narrates breakpoint/load activity on std::cout; a null streambuf
 // silences it (our own output uses C stdio, so printf is unaffected).
@@ -140,14 +141,6 @@ public:
 static ResetNotifier g_reset_notifier;
 
 // ---- Helpers ----------------------------------------------------------------
-static IOPIN *find_pin(Module *m, const char *name) {
-    for (int i = 1; i <= m->get_pin_count(); ++i) {
-        std::string &pn = m->get_pin_name((unsigned)i);
-        if (pn == name) return m->get_pin((unsigned)i);
-    }
-    return nullptr;
-}
-
 // Drive the footswitch input: 1 = released (high), 0 = pressed (low).
 // A bare source_stimulus presents a constant get_Vth(), so we modulate the
 // driven level directly via set_Vth (NOT putState, which only flips an unused
@@ -241,7 +234,7 @@ int main() {
     }
     g_cpu = static_cast<pic_processor *>(p);
 
-    IOPIN *ra3 = find_pin(g_cpu, FOOTSW_PIN_NAME);
+    IOPIN *ra3 = find_pin_exact(g_cpu, FOOTSW_PIN_NAME);
     if (ra3 == nullptr) {
         fprintf(stderr, "FATAL: pin %s not found on %s\n", FOOTSW_PIN_NAME, PROC_NAME);
         return 1;

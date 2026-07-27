@@ -25,6 +25,7 @@
 #include "stimuli.h"
 #include "gpsim_time.h"
 #include "registers.h"
+#include "pic/find_pin_exact.h"
 
 #ifndef FW_PATH
 #  define FW_PATH "build_pic10f320/bypass_mcu_cd4053-simple_pic10f320.hex"
@@ -90,14 +91,6 @@ static void check(bool condition, const char *message) {
         g_fails++;
         fprintf(stderr, "FAIL: %s\n", message);
     }
-}
-
-static IOPIN *find_pin(Module *m, const char *name) {
-    for (int i = 1; i <= m->get_pin_count(); ++i) {
-        std::string &pin_name = m->get_pin_name((unsigned)i);
-        if (pin_name == name) return m->get_pin((unsigned)i);
-    }
-    return nullptr;
 }
 
 static unsigned reg8(Register *r) {
@@ -247,7 +240,7 @@ int main(void) {
         return 1;
     }
 
-    IOPIN *ra3 = find_pin(g_cpu, "ra3");
+    IOPIN *ra3 = find_pin_exact(g_cpu, "ra3");
     if (ra3 == nullptr) {
         fprintf(stderr, "FATAL: pin ra3 not found on %s\n", PROC_NAME);
         return 1;

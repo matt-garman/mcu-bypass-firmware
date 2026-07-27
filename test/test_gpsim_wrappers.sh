@@ -31,6 +31,17 @@ script=
 while [ "$#" -gt 0 ]; do
 	if [ "$1" = -c ]; then script=$2; shift 2; else shift; fi
 done
+if [ ! -f "$script" ]; then
+	printf 'gpsim command script not found: %s\n' "$script" >&2
+	exit 65
+fi
+fsw_attach_count=$(awk '$1 == "attach" && $2 == "n1" && $3 == "fsw" { count++ } END { print count + 0 }' "$script")
+ra3_attach_count=$(awk '$1 == "attach" && $2 == "n1" && $3 == "fsw" && $4 == "ra3" && NF == 4 { count++ } END { print count + 0 }' "$script")
+if [ "$fsw_attach_count" -ne 1 ] || [ "$ra3_attach_count" -ne 1 ]; then
+	printf 'invalid footswitch attachment: expected exactly one attach n1 fsw ra3 in %s\n' \
+		"$script" >&2
+	exit 65
+fi
 case "$script" in
 	*power_on_pressed.stc)
 		printf '%s\n' \
@@ -152,6 +163,24 @@ for wrapper in run_toggle run_power_on; do
 	[[ "$output" == *"gpsim not installed"* && "$output" == *"::error::STRICT_TOOLS=1:"* ]] \
 		|| { printf 'FAIL: %s reported the wrong strict missing-gpsim failure: %s\n' \
 			"$wrapper" "$output" >&2; exit 1; }
+	checks=$((checks + 1))
+done
+
+# Same-basename malformed stimuli used to receive canned passing snapshots
+# because fake gpsim inspected only the filename. Require an exact ra3 token,
+# not merely another pin or a name containing ra3 as a prefix.
+for bad_pin in ra2 ra30; do
+	bad_dir="$work/bad-$bad_pin"
+	mkdir -p "$bad_dir"
+	printf 'node n1\nattach n1 fsw %s\n' "$bad_pin" > "$bad_dir/footswitch_toggle.stc"
+	if output=$(export PIC_GPSIM_STC="$bad_dir/footswitch_toggle.stc"; run_toggle 2>&1); then
+		printf 'FAIL: toggle wrapper accepted footswitch attachment %s\n' "$bad_pin" >&2
+		exit 1
+	fi
+	[[ "$output" == *"gpsim exited with status 65"* \
+		&& "$output" == *"expected exactly one attach n1 fsw ra3"* ]] \
+		|| { printf 'FAIL: wrong %s attachment produced the wrong failure: %s\n' \
+			"$bad_pin" "$output" >&2; exit 1; }
 	checks=$((checks + 1))
 done
 

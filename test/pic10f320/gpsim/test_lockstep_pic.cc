@@ -74,6 +74,7 @@
 #include "breakpoints.h"          // get_bp(), set_notify_break
 #include "trigger.h"              // TriggerObject
 #include "registers.h"            // Register::get_value()
+#include "pic/find_pin_exact.h"
 
 // The reference model (shared with test-equiv / the formal proofs). C linkage:
 // bypass_pure.c is compiled as C and linked in by the Makefile.
@@ -177,13 +178,6 @@ static int reachable_states_unvisited(void) {
 }
 
 // ---- Helpers ----------------------------------------------------------------
-static IOPIN *find_pin(Module *m, const char *name) {
-    for (int i = 1; i <= m->get_pin_count(); ++i) {
-        std::string &pn = m->get_pin_name((unsigned)i);
-        if (pn == name) return m->get_pin((unsigned)i);
-    }
-    return nullptr;
-}
 static void footsw_set(int pressed) {  // 1 = pressed (RA3 low), 0 = released (high)
     g_fsw_src->set_Vth(pressed ? 0.0 : 5.0);
     g_fsw_node->update();
@@ -334,7 +328,7 @@ int main() {
     fflush(stdout);
 
     // Footswitch stimulus source on RA3.
-    IOPIN *ra3 = find_pin(g_cpu, FOOTSW_PIN_NAME);
+    IOPIN *ra3 = find_pin_exact(g_cpu, FOOTSW_PIN_NAME);
     if (ra3 == nullptr) { fprintf(stderr, "FATAL: pin %s not found\n", FOOTSW_PIN_NAME); return 1; }
     g_fsw_src = new source_stimulus();
     g_fsw_src->set_digital();
