@@ -2328,7 +2328,7 @@ per concern now covers both chips:
 | --- | --- | --- |
 | `test_pic_build.sh` | `PB_*` knobs (target, build dir, image naming, budget, matrix) | 28 checks × 2 chips |
 | `test_target_matrix.sh` | `TM_*` knobs (target, variants variable, supported set) | 5 checks × 2 chips |
-| `test_gpsim_wrappers.sh` | *no folding needed* — see below | 29 checks (was 25) |
+| `test_gpsim_wrappers.sh` | *no folding needed* — see below | 35 checks (was 25) |
 
 `test_gpsim_wrappers.sh` is the interesting one: it is already chip-agnostic
 (it unsets the PIC overrides and drives the wrappers through a fake gpsim), and

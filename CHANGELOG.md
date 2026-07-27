@@ -67,6 +67,8 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- The shared gpsim wrappers and both public PIC functional targets now honor
+  `STRICT_TOOLS=1`; a missing simulator cannot become a successful strict run.
 - Standalone PIC10F320 target and soak selectors now rebuild the selected
   variant instead of potentially consuming a stale image while rebuilding the
   default `PIC320_VARIANT`.

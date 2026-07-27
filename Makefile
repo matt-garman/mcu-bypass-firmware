@@ -924,9 +924,9 @@ pic-test-gpsim: pic
 			echo "no $$hex (XC8 absent?); skipping gpsim test for $$v"; continue; \
 		fi; \
 		echo "--- gpsim register-level test: variant $$v ---"; \
-		GPSIM=$(GPSIM) PIC_GPSIM_PROC=$(PIC_GPSIM_PROC) \
+		GPSIM=$(GPSIM) PIC_GPSIM_PROC=$(PIC_GPSIM_PROC) STRICT_TOOLS="$(STRICT_TOOLS)" \
 			test/pic/run_gpsim_test.sh $$hex $$el || fail=1; \
-		GPSIM=$(GPSIM) PIC_GPSIM_PROC=$(PIC_GPSIM_PROC) \
+		GPSIM=$(GPSIM) PIC_GPSIM_PROC=$(PIC_GPSIM_PROC) STRICT_TOOLS="$(STRICT_TOOLS)" \
 			test/pic/run_gpsim_power_on_pressed.sh $$hex || fail=1; \
 	done; \
 	exit $$fail
@@ -3438,10 +3438,11 @@ pic320-test-config: pic320-variants
 pic320-test-gpsim: pic320
 	@PIC_GPSIM_PROC=$(PIC320_GPSIM_PROC) \
 		PIC_GPSIM_STC="$(CURDIR)/$(PIC320_GPSIM_TOGGLE_STC)" \
+		STRICT_TOOLS="$(STRICT_TOOLS)" \
 		test/pic/run_gpsim_test.sh $(PIC320_HEX) \
 		$(call pic320_engaged_lata_of,$(PIC320_VARIANT)) \
 		$(call pic320_bypass_lata_of,$(PIC320_VARIANT))
-	@PIC_GPSIM_PROC=$(PIC320_GPSIM_PROC) \
+	@PIC_GPSIM_PROC=$(PIC320_GPSIM_PROC) STRICT_TOOLS="$(STRICT_TOOLS)" \
 		test/pic/run_gpsim_power_on_pressed.sh $(PIC320_HEX)
 
 # Aggregate: every PIC10F320 pre-hardware check -- host equivalence, actuation,

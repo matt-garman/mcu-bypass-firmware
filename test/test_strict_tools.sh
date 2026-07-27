@@ -11,15 +11,12 @@ set -euo pipefail
 # would have passed review. It now covers both chips' XC8 and cppcheck/MISRA
 # recipes as well.
 #
-# What it deliberately does NOT cover, and why: the gpsim, libgpsim and soak
-# recipes (pic-test-gpsim, pic320-test-gpsim, pic320-test-fault-target,
-# pic{,320}-test-soak, ...) all sit behind a BUILD prerequisite. Driving them
-# here would make the result depend on whether XC8 happens to be installed on
-# the runner -- with XC8 the prerequisite builds and the intended guard fires,
-# without it the prerequisite itself skips or (under STRICT_TOOLS=1) fails with
-# a different message. A regression whose verdict changes with the runner's
-# toolchain is worse than a stated gap, so this is a stated gap. Those recipes
-# use the same $(SKIP) mechanism; what is unproven is only that they still will.
+# What it deliberately does NOT cover, and why: the libgpsim and soak recipes
+# (pic320-test-fault-target, pic{,320}-test-soak, ...) sit behind a BUILD
+# prerequisite. Driving them here would make the result depend on whether XC8
+# happens to be installed on the runner. CLI gpsim is the exception:
+# test_gpsim_wrappers.sh bypasses the build and behaviorally proves both public
+# PIC targets skip by default and fail under STRICT_TOOLS=1.
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-strict-tools.XXXXXX")

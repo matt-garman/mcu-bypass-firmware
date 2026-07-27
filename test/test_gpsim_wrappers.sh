@@ -8,7 +8,8 @@ tools="$work/tools"
 hex="$work/firmware.hex"
 checks=0
 unset FAKE_GPSIM_MODE FAKE_GPSIM_EXIT FAKE_GPSIM_MARKER FAKE_GPSIM_STC_LOG \
-	FAKE_TIMEOUT_MARKER GPSIM GPSIM_TIMEOUT_SECONDS PIC_GPSIM_PROC PIC_GPSIM_STC
+	FAKE_TIMEOUT_MARKER GPSIM GPSIM_TIMEOUT_SECONDS PIC_GPSIM_PROC PIC_GPSIM_STC \
+	STRICT_TOOLS
 mkdir -p "$tools"
 printf ':00000001FF\n' > "$hex"
 REAL_TIMEOUT=$(command -v timeout)
@@ -133,6 +134,25 @@ for wrapper in run_toggle run_power_on; do
 		&& "$output" != *"gpsim not installed"* ]] \
 		|| { printf 'FAIL: %s validated gpsim before its timeout: %s\n' "$wrapper" "$output" >&2; exit 1; }
 	checks=$((checks + 1))
+
+	output=$(export GPSIM="$tools/missing-gpsim" GPSIM_TIMEOUT_SECONDS=2 \
+		STRICT_TOOLS=; "$wrapper" 2>&1) \
+		|| { printf 'FAIL: %s did not skip missing gpsim by default: %s\n' \
+			"$wrapper" "$output" >&2; exit 1; }
+	[[ "$output" == *"gpsim not installed"* && "$output" != *"STRICT_TOOLS=1:"* ]] \
+		|| { printf 'FAIL: %s reported the wrong missing-gpsim skip: %s\n' \
+			"$wrapper" "$output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	if output=$(export GPSIM="$tools/missing-gpsim" GPSIM_TIMEOUT_SECONDS=2 \
+			STRICT_TOOLS=1; "$wrapper" 2>&1); then
+		printf 'FAIL: %s accepted missing gpsim under STRICT_TOOLS=1\n' "$wrapper" >&2
+		exit 1
+	fi
+	[[ "$output" == *"gpsim not installed"* && "$output" == *"::error::STRICT_TOOLS=1:"* ]] \
+		|| { printf 'FAIL: %s reported the wrong strict missing-gpsim failure: %s\n' \
+			"$wrapper" "$output" >&2; exit 1; }
+	checks=$((checks + 1))
 done
 
 # The public Make target must validate configuration before its optional-tool
@@ -150,6 +170,19 @@ fi
 [[ "$output" == *"GPSIM_TIMEOUT_SECONDS must be a positive decimal number"* \
 	&& "$output" != *"gpsim not installed"* ]] \
 	|| { printf 'FAIL: pic-test-gpsim validated gpsim before its timeout: %s\n' "$output" >&2; exit 1; }
+checks=$((checks + 1))
+
+if output=$(
+	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL
+	_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" "${MAKE_CMD[@]}" --no-print-directory \
+		-C "$ROOT" --old-file=pic pic-test-gpsim STRICT_TOOLS=1 \
+		GPSIM="$tools/missing-gpsim" GPSIM_TIMEOUT_SECONDS=2 2>&1
+); then
+	printf 'FAIL: pic-test-gpsim accepted missing gpsim under STRICT_TOOLS=1\n' >&2
+	exit 1
+fi
+[[ "$output" == *"gpsim not installed"* && "$output" == *"::error::STRICT_TOOLS=1:"* ]] \
+	|| { printf 'FAIL: pic-test-gpsim reported the wrong strict missing-gpsim failure: %s\n' "$output" >&2; exit 1; }
 checks=$((checks + 1))
 
 # Same for the PIC10F320 lane's public target. The wrappers themselves are
@@ -170,6 +203,19 @@ fi
 [[ "$output" == *"GPSIM_TIMEOUT_SECONDS must be a positive decimal number"* \
 	&& "$output" != *"gpsim not installed"* ]] \
 	|| { printf 'FAIL: pic320-test-gpsim validated gpsim before its timeout: %s\n' "$output" >&2; exit 1; }
+checks=$((checks + 1))
+
+if output=$(
+	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL
+	_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" "${MAKE_CMD[@]}" --no-print-directory \
+		-C "$ROOT" --old-file=pic320 pic320-test-gpsim STRICT_TOOLS=1 \
+		GPSIM="$tools/missing-gpsim" GPSIM_TIMEOUT_SECONDS=2 2>&1
+); then
+	printf 'FAIL: pic320-test-gpsim accepted missing gpsim under STRICT_TOOLS=1\n' >&2
+	exit 1
+fi
+[[ "$output" == *"gpsim not installed"* && "$output" == *"::error::STRICT_TOOLS=1:"* ]] \
+	|| { printf 'FAIL: pic320-test-gpsim reported the wrong strict missing-gpsim failure: %s\n' "$output" >&2; exit 1; }
 checks=$((checks + 1))
 
 # The PIC10F320 lane reaches the SHARED wrappers with its own processor.
