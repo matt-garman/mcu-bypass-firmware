@@ -67,6 +67,9 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- The PIC10F320 real-HEX target aggregate now requires explicit fault-injection,
+  lock-step, and target-I/O completion markers, so a skipped or incomplete lane
+  cannot be reported as a successful CI/release gate.
 - **`pic320` and `pic320-size` printed "skipping" and then built anyway.**
   `$(SKIP)` is `exit 0` in non-strict mode and exits only its own shell, so a
   guard on its own recipe line skipped nothing. An audit found no other instance

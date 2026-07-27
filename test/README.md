@@ -146,7 +146,7 @@ below so a green gate means every PIC layer actually ran.
 | Lock-step progress regression | `test-lockstep-progress` | Simulator stalls during settle, calibration, or completion abort immediately; the completion loop cannot spin forever on a frozen cycle counter. | host C++ + fake gpsim API |
 | Target I/O timing | `pic-test-io` | TRISA/ANSELA/LATA/PORTA transitions, relay coil exclusion, and mute/relay pulse widths match the design. | libgpsim |
 | Fail-closed aggregate | `pic-test-target-variants` | Rejects empty, duplicate, or unsupported matrices, then runs fault recovery, lock-step, and target-I/O for every selected PIC variant and requires each PASS sentinel. | Makefile wrapper |
-| Aggregate regression | `test-target-matrix` | Proves valid matrices run exactly once per variant and invalid matrices fail before any target invocation. | Bash + fake recursive Make |
+| Aggregate regression | `test-target-matrix` | Proves valid matrices run exactly once per variant, invalid matrices fail before any target invocation, and both PIC target aggregates require explicit fault, lock-step, and I/O completion markers. | Bash + fake recursive Make |
 | Soak timing contract | `test-soak-timing` | Native Classic AVR/PIC soaks require the liveness interval within the total duration; short release rehearsals clamp it so every passing run completes a responsiveness round-trip. | host C/C++ compilers + release CLI |
 
 `pic-test-gpsim` now samples one non-settled point, `PRESS1_EARLY`, roughly

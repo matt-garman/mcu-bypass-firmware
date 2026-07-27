@@ -2098,6 +2098,12 @@ test-target-matrix:
 	TM_SUPPORTED='cd4053-simple cd4053-mute tq2-relay' \
 	TM_SUBSET='cd4053-mute' \
 	TM_UNSUPPORTED='tmux4053-simple' \
+	TM_FAULT_TARGET='pic320-test-fault-target' \
+	TM_FAULT_VARIANT_ARG='PIC320_FAULT_VARIANT' \
+	TM_LOCKSTEP_TARGET='pic320-test-lockstep' \
+	TM_LOCKSTEP_VARIANT_ARG='PIC320_LOCKSTEP_VARIANT' \
+	TM_IO_TARGET='pic320-test-io' \
+	TM_IO_VARIANT_ARG='PIC320_IO_VARIANT' \
 		./test/test_target_matrix.sh
 	@# ...and the PIC10F320 HOST aggregate, which carries the same guard and is
 	@# what `make test` actually wires in -- so a bad matrix there would silently
@@ -2112,6 +2118,7 @@ test-target-matrix:
 	TM_SUPPORTED='cd4053-simple cd4053-mute tq2-relay' \
 	TM_SUBSET='cd4053-mute' \
 	TM_UNSUPPORTED='tmux4053-simple' \
+	TM_CHECK_SENTINELS=0 \
 		./test/test_target_matrix.sh
 
 # Compile the real lock-step driver against a fake core and inject progress stalls.
@@ -3531,9 +3538,27 @@ pic320-test-fault-variants:
 	done
 	@echo "=== all PIC10F320 host fault variants validated ==="
 
-# Fail-closed target aggregate for ONE variant.
-pic320-test-target: pic320-test-fault-target pic320-test-lockstep pic320-test-io
-	@echo "=== PIC10F320 target lanes passed (variant $(PIC320_TARGET_VARIANT)) ==="
+# Fail-closed target aggregate for ONE variant. Individual targets remain
+# convenient skip-clean development commands; this wrapper requires explicit
+# completion markers so a skip or partial run cannot masquerade as green.
+pic320-test-target:
+	@set -e; \
+	for spec in \
+		"pic320-test-fault-target PIC320_FAULT_VARIANT=$(PIC320_TARGET_VARIANT)|FAULT-INJECT PASS" \
+		"pic320-test-lockstep PIC320_LOCKSTEP_VARIANT=$(PIC320_TARGET_VARIANT)|LOCK-STEP PASS" \
+		"pic320-test-io PIC320_IO_VARIANT=$(PIC320_TARGET_VARIANT)|TARGET-IO PASS"; do \
+		target=$${spec%%|*}; marker=$${spec#*|}; log=`mktemp`; \
+		if ! $(MAKE) --no-print-directory $$target >$$log 2>&1; then \
+			cat $$log; rm -f $$log; exit 1; \
+		fi; \
+		cat $$log; \
+		if ! grep -q "$$marker" $$log; then \
+			echo "FAIL: $$target did not report '$$marker' (skipped or incomplete?)"; \
+			rm -f $$log; exit 1; \
+		fi; \
+		rm -f $$log; \
+	done
+	@echo "=== PIC10F320 target fault/lock-step/I-O PASS (variant $(PIC320_TARGET_VARIANT)) ==="
 
 # ...and for ALL of them. Rejects an empty or duplicated matrix before running,
 # so "all variants passed" can never mean "no variant ran" (§6.5).
