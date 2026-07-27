@@ -442,7 +442,7 @@ plan must respect:
    | stage tokens | `cd4053`, `mute`, `relay` (`VARIANTS`, `:142`) | `cd4053-simple`, `cd4053-mute`, `tq2-relay` |
    | part suffix | `_pic10f322`, `_t45`, `_t85`, **or none** (bare = ATtiny13A) | `_pic10f320` |
 
-   So a merged `release/v0.10.0/` carries **three** conventions at once, and
+   So a merged `release/v0.9.6/` carries **three** conventions at once, and
    `bypass_mute_pic10f322.hex` and `bypass_mcu_cd4053-mute_pic10f320.hex` name the
    *same output stage on two PIC chips*. `FW_BASE` is the mechanism, and it is one
    of the §5.6 colliding variables. Decide in Phase 0:
@@ -451,7 +451,7 @@ plan must respect:
      release `README.md`/`MANIFEST.md` must state the asymmetry explicitly, and
      the image→MCU classifier in `scripts/make-release.sh` must handle both
      prefixes — a `bypass_mcu_*` name must not fall through to AVR metadata (§10).
-   - **Migrate** to one scheme at `v0.10.0`. This breaks three published
+   - **Migrate** to one scheme at `v0.9.6`. This breaks three published
      basenames, needs a redirect note in the child archival pointer (§6.15), and
      forces §6.13's comparison to key on **content, not filename**.
 
@@ -459,7 +459,7 @@ plan must respect:
    *is* the ATtiny13A image); unifying that is out of scope here, but a canonical
    set (§10) that encodes three conventions should say why.
 
-   **Decided (§15, D2): keep the child basenames.** No migration at `v0.10.0`, so
+   **Decided (§15, D2): keep the child basenames.** No migration at `v0.9.6`, so
    both obligations of the first option are now required work — the
    `bypass_mcu_` prefix in `scripts/make-release.sh`'s image→MCU classifier, and
    an explicit statement of the asymmetry in the release `README.md`/`MANIFEST.md`.
@@ -737,7 +737,7 @@ plan must respect:
    version. Note the parent has since released **v0.9.5** (`eec7b9f`,
    2026-07-18), so *both* lines now stop at v0.9.5 and the earlier
    "greater than the parent's v0.9.4" framing is obsolete: the first unified
-   release must exceed both. `v0.10.0` remains the recommendation; never reuse
+   release must exceed both. `v0.9.6` remains the recommendation; never reuse
    `v0.9.5` from either line.
 9. **Snapshot clean green baselines.** From clean checkouts/build directories,
    capture parent host/full-tool results and child host, all-variant, target,
@@ -1022,6 +1022,10 @@ plan must respect:
     - **Inbound references.** Anything pinning the child URL — external build
       scripts, forks, and the parent's own stale links catalogued in §4 — needs
       the redirect at archival time.
+
+    **All four decided 2026-07-27 — see §15.13** for the dispositions, the
+    verified signing-key fingerprint, and the two ordering constraints that only
+    bite if the archive flip happens first.
 16. **Verified clean — recorded so it is not re-derived.** *(New — second
     2026-07-26 pass, against parent `ed6ddab` / child `f58d2d5`.)* Each of these
     looked like work and is not. Re-verify only if the named file changes.
@@ -1233,7 +1237,7 @@ remains. Historical release trees remain available through imported history
 and namespaced tags.
 
 **Phase 8 — Unified release and child archival.** Cut and independently verify
-the first unified release, preferably `v0.10.0`. Then update the child README
+the first unified release, preferably `v0.9.6`. Then update the child README
 with a stable pointer to the merged project and archive the child repository.
 Do not archive it before the unified release succeeds; until then it remains
 the operational fallback.
@@ -1338,7 +1342,7 @@ the assurance comparison rather than restating it.
 
 *Implemented 2026-07-27 — see §15.10. The canonical-set, image-naming,
 classifier, soak and reproduction bullets have landed; the `CHANGELOG.md`
-repair, the child `release/v0.9.*` disposition and the `v0.10.0` tag itself are
+repair, the child `release/v0.9.*` disposition and the `v0.9.6` tag itself are
 Phases 7 and 8.*
 
 - Parent `release/<ver>/` already mixes MCU images. Exactly **three**
@@ -1393,11 +1397,29 @@ Phases 7 and 8.*
   collision, and they predate unification). Delete them from the merged tip
   after disposition while preserving them in imported history and namespaced
   signed tags.
-- The first unified tag is preferably **`v0.10.0`**. Both lines now stop at
+- The first unified tag is **`v0.9.6`**. Both lines now stop at
   v0.9.5 (parent `eec7b9f`, 2026-07-18; child signed tag `915ee03`), so the
   unified tag must exceed v0.9.5, not v0.9.4. Its changelog records imported
   child HEAD `f58d2d5...`, the `v0.9.5` tag commit `915ee03...`, and source tip
   `331f90f...`.
+
+  **Changed from `v0.10.0` to `v0.9.6` on 2026-07-27, by the maintainer, and the
+  rationale is recorded here because it is a project rule rather than a merge
+  decision.** This plan recommended `v0.10.0` throughout on the reasoning that
+  absorbing a whole additional MCU target is a minor-version-shaped change. That
+  reasoning imported a semver instinct the project does not actually follow: the
+  criterion for leaving `0.9.x` is **validation on real hardware**, not feature
+  size, and none of these designs has run on a part yet. A `0.10.0` would have
+  signalled a maturity step the evidence does not support, which is the same
+  species of overclaim §8 and §14.1 exist to prevent — so `0.9.6`, with `1.x.y`
+  once bench validation lands. `CHANGELOG.md`'s header now states that criterion
+  explicitly so the next release does not have to re-derive it.
+
+  The constraint the `v0.10.0` recommendation existed to satisfy is untouched
+  and still met: `v0.9.6` is greater than both historical lines, reuses neither,
+  and was confirmed free locally and on `origin` before renumbering. Nothing
+  mechanical depended on the number — `make-release.sh` and `release.yml` both
+  match `v[0-9]+.[0-9]+.[0-9]+`, and no gate compares version ordering.
 - `CHANGELOG.md`: one file, one timeline; use a clear "PIC10F320
   (constrained target)" sub-lane within each entry rather than a
   separate changelog. First repair both existing timelines so historical
@@ -1463,9 +1485,10 @@ than from the phase records: `make test`, `make pic320-test` and
 `make pic-test`/`-target-variants` under `STRICT_TOOLS=1`,
 `make test-mutation MUTATION_ALLOW_SKIP=0` (74 killed / 0 survived / 0 errored /
 0 skipped), a full `make-release.sh --dry-run` at this tip, and a rebuild of all
-15 release images. **31 of 36 boxes are closed; the five that are not are marked
-OPEN with what remains** — do not read an unticked box as an oversight, each says
-why. Where a box's own text names a pre-relocation path (`test/fault/…`,
+15 release images. Re-checked 2026-07-27 after §6.15 was decided (§15.13) and the
+first unified tag was renumbered to `v0.9.6` (§10). **32 of 36 boxes are closed;
+the four that are not are marked OPEN with what remains** — do not read an
+unticked box as an oversight, each says why. Where a box's own text names a pre-relocation path (`test/fault/…`,
 `test/pic/test_fault_pic.cc`), the work landed at the post-Phase-2 location
 (`test/pic10f320/…`); the box text is left as written so the plan still reads as
 the document it was when the requirement was set.
@@ -1564,7 +1587,7 @@ the document it was when the requirement was set.
       has no descendant. Verified by sentinel file, not inspection.)*
 - [x] The release-image naming decision of §5.3 is recorded — keep the child
       basenames and document the three-convention asymmetry, or migrate at
-      `v0.10.0` — and `scripts/make-release.sh`'s image→MCU classifier recognizes
+      `v0.9.6` — and `scripts/make-release.sh`'s image→MCU classifier recognizes
       whichever prefixes survive.
       *(D2, keep. The `*_${PIC320_TAG}.hex` arm is placed **first**, ahead of the
       bare `*.hex` ATtiny13a fallback; confirmed in a staged manifest, where all
@@ -1690,7 +1713,7 @@ the document it was when the requirement was set.
       output. **Caveat worth carrying into the release run:** `release.yml` is
       written, parses, and asserts both device headers, but has never executed —
       no tag has been pushed, so the tag-CI half is implemented rather than
-      exercised. The first `v0.10.0` push is its first run.)*
+      exercised. The first `v0.9.6` push is its first run.)*
 - [x] `make clean` and `clean-tests` remove every PIC10F320 build/test/coverage
       artifact; concurrent variant invocations use private outputs and pass.
       *(`make clean` leaves no `build_pic10f320/` and a clean `git status` after a
@@ -1706,11 +1729,11 @@ the document it was when the requirement was set.
       the waiver the child suppressed globally.)*
 - [ ] **OPEN (the release half).** The first unified release version is greater
       than both historical lines
-      (preferably `v0.10.0`), and parent/child changelogs accurately classify
+      (preferably `v0.9.6`), and parent/child changelogs accurately classify
       all v0.9.x work before the unified entry.
-      *(Changelog half done: `## [0.10.0] - 2026-07-27` is cut, and the header
+      *(Changelog half done: `## [0.9.6] - 2026-07-27` is cut, and the header
       note explains why the child's colliding `v0.9.0`–`v0.9.5` entries are
-      deliberately not back-filled. `v0.10.0` is confirmed free on the remote and
+      deliberately not back-filled. `v0.9.6` is confirmed free on the remote and
       exceeds both lines. What remains is cutting it — see the last box. Correct
       the changelog date if the release lands on a different day; nothing enforces
       it, because `make-release.sh` does not read the changelog.)*
@@ -1740,20 +1763,18 @@ the document it was when the requirement was set.
       repointed to `src/` and the claim **strengthened**: the sync is manual but
       now enforced by `pic320-test-equiv`, which the vendored-copy arrangement
       could not do. The two gaps it still cannot see are named there.)*
-- [ ] **OPEN — and it is the archival gate.** The child's non-git GitHub assets
-      have recorded dispositions (§6.15): open
+- [x] The child's non-git GitHub assets have recorded dispositions (§6.15): open
       issues and pull requests, published release pages and their assets, the
       release signing key's continuity, and inbound URL references.
-      *(The one Phase-0 checkpoint with no entry in §15 — Phase 0 asked for the
-      signing-key answer specifically so it would not be discovered here, and it
-      was not answered. All four are decisions rather than work, but they are the
-      decisions archival makes irreversible: archiving freezes issues and PRs
-      read-only in a repository this project cannot search, the six published
-      release pages and their uploaded assets do **not** migrate with the
-      namespaced tags, and a `v0.10.0` signed under a different key than the
-      archived child releases is a trust-continuity break a user verifying an
-      older image can actually observe. If the keys differ, say so in the release
-      notes rather than leaving it to be found.)*
+      *(Decided 2026-07-27 and recorded in **§15.13**: migrate issues, leave the
+      published releases in the archived child, archive rather than delete or
+      rename. The signing-key question is closed by measurement rather than
+      intent — one EdDSA key, `6184219C…149F042FCC3D3AEC`, signs all twelve
+      `SHA256SUMS.asc` across both release lines and both tag lines, so there is
+      no key transition to disclose. **One action carries an ordering constraint
+      into the archival step:** issue transfer needs a writable source, so it must
+      precede the archive flip — and pull requests cannot be transferred at all,
+      only merged, closed with a pointer, or re-created.)*
 - [x] No tracked `_incoming_pic10f320/` path or obsolete child badge/link
       remains at the merged tip; all intentionally discarded material remains
       recoverable through imported history/tags.
@@ -1765,7 +1786,7 @@ the document it was when the requirement was set.
 - [ ] **OPEN — the remaining user action.** A green unified release has been
       independently verified before the child
       repository receives its pointer and is archived.
-      *(`make release VERSION=v0.10.0` with the real 24-hour soak of all 12
+      *(`make release VERSION=v0.9.6` with the real 24-hour soak of all 12
       combos, then tagging and signing, then the child pointer and archival — in
       that order, per §7. Archive rather than delete: the annotated changelog
       entry and this plan both link the child URL, and archived repositories stay
@@ -1904,7 +1925,7 @@ because a partial unification is worse than either endpoint.
 | # | Question | Decision | Consequences to implement |
 | --- | --- | --- | --- |
 | D1 | §5.1/§5.6 lane prefix | **Keep `pic-` = PIC10F322**; new lane is `pic320-` with `PIC320_*` variables. The 322 lane is not renamed. | No churn on known-good 322 targets and no interface break for existing `make print-PIC_*` consumers. Accepts the asymmetry §5.1 flags: `pic-` silently means "the other PIC". Because `PIC_*` stays 322, §5.6's rule reads "anything chip-specific and new gets `PIC320_`", and the shared-tool allowlist in §5.6 stays exactly as written. |
-| D2 | §5.3 release image basenames | **Keep the child basenames** (`bypass_mcu_{cd4053-simple,cd4053-mute,tq2-relay}_pic10f320.hex`). No migration at `v0.10.0`. | No published-name break, and §6.13's comparison can key on filename. Two obligations follow and are not optional: (a) `scripts/make-release.sh`'s image→MCU classifier must recognize the `bypass_mcu_` prefix explicitly, or a PIC10F320 image falls through to generic AVR metadata (§10); (b) the release `README.md`/`MANIFEST.md` must state the three-convention asymmetry rather than leave it to be inferred. |
+| D2 | §5.3 release image basenames | **Keep the child basenames** (`bypass_mcu_{cd4053-simple,cd4053-mute,tq2-relay}_pic10f320.hex`). No migration at `v0.9.6`. | No published-name break, and §6.13's comparison can key on filename. Two obligations follow and are not optional: (a) `scripts/make-release.sh`'s image→MCU classifier must recognize the `bypass_mcu_` prefix explicitly, or a PIC10F320 image falls through to generic AVR metadata (§10); (b) the release `README.md`/`MANIFEST.md` must state the three-convention asymmetry rather than leave it to be inferred. |
 | D3 | §11 CI job graph | **Extend the existing `pic` job** to build and validate both chips serially. No sibling job, no `needs` edits. | Simplest DAG, one XC8 install/cache restore, and `verify`/`attiny202`/`build-matrix`/`stress` keep gating on PIC10F320 for free because they already declare `needs: pic`. Cost: the full PIC10F320 lane lands on the critical path of all four dependents. Revisit only if CI wall-clock becomes the binding constraint — splitting later is a mechanical change, whereas choosing the split now would force the gating question in §11 immediately. |
 | D4 | §6.13 gate lifetime | **One-shot migration check.** Run the byte-identity comparison at the Phase-2 exit gate and again in Phase 4, record the compared hashes in both phase commit messages and in `docs/pic10f320_validation.md`, then retire it. No checked-in expected-hash file. | Nothing new to maintain, and the gate's *purpose* — proving the ported XC8 recipe reproduces the child's shipped bytes — is fully served. **This is the one place the simplest option costs assurance, and the cost is named in §14.2:** the equivalence and lockstep lanes are blind to the hardware-integrity checks, so after retirement nothing at the merged tip watches emitted bytes. Recorded as a deliberate, revisitable trade; promoting it to the standing regression later is one file plus one `pic320-test-build` prerequisite. |
 
@@ -2812,13 +2833,13 @@ removal alone.
 
 ### 15.12 Phase 8 — unified release preparation (COMPLETE up to the release run, which is the user's)
 
-**Prepared 2026-07-27.** Phase 8's deliverable is a released `v0.10.0` and an
+**Prepared 2026-07-27.** Phase 8's deliverable is a released `v0.9.6` and an
 archived child repository. Both end in actions only the user can take — a
 24-hour soak run, `git tag -s`, and an operation on a different repository — so
 this record is what was *made ready*, what was *checked*, and what remains.
 
 **Post-removal state verified.** `git ls-files -- _incoming_pic10f320` returns
-zero paths, the directory is gone, the worktree is clean, and `v0.10.0` is free
+zero paths, the directory is gone, the worktree is clean, and `v0.9.6` is free
 and greater than both historical lines (parent v0.9.5, child v0.9.5).
 
 **The firmware comment sweep changed no emitted bytes — checked, not assumed.**
@@ -2882,14 +2903,20 @@ bringing the PIC10F322 shell to parity with "the sibling child project", is
 preserved as written — it was true at v0.9.2 — with a dated annotation noting
 that project is no longer separate.
 
-**`CHANGELOG.md` cut to `## [0.10.0] - 2026-07-27`.** The date must be corrected
+**`CHANGELOG.md` cut to `## [0.9.6] - 2026-07-27`.** The date must be corrected
 if the release lands on a different day; nothing enforces it, because
 `make-release.sh` does not read the changelog.
 
+*(Phase 8 originally cut this entry as `## [0.10.0]`, on this plan's long-standing
+`v0.10.0` recommendation. **Renumbered to `v0.9.6` on 2026-07-27** — see §10 for
+the versioning rule that produced it. The requirement `v0.10.0` was chosen to
+satisfy is unchanged and still met: `v0.9.6` exceeds both historical `v0.9.5`
+lines and reuses neither.)*
+
 **What remains, and why it is not mine to do:**
 
-1. **The release run.** `make release VERSION=v0.10.0` runs a 24-hour parallel
-   soak of all **12** combos and stages `release/v0.10.0/`. It requires a clean
+1. **The release run.** `make release VERSION=v0.9.6` runs a 24-hour parallel
+   soak of all **12** combos and stages `release/v0.9.6/`. It requires a clean
    tree, so the Phase-8 preparation above must be committed first. The script
    stops before every git operation and prints the exact `git add` / `git commit`
    / `git tag -s` / checksum-signing commands.
@@ -2903,3 +2930,90 @@ A dry run of the full pipeline already passed end to end in Phase 6 (§15.10):
 15 images matched to the canonical set, five validation gates, 12/12 soak combos,
 and the verifier re-run against the staged output. The only difference in the
 real run is soak duration.
+
+### 15.13 §6.15 — the child's non-git GitHub assets, decided 2026-07-27
+
+The one Phase-0 checkpoint that reached Phase 8 undecided. §6.15 required a
+recorded disposition for each of the four asset classes that live outside the git
+graph and therefore survive neither the subtree import nor the namespaced tags.
+Decisions by the maintainer; the verification under each is this record's part.
+
+**1. Open issues and pull requests — migrate to this repository.**
+
+Two mechanical constraints shape *when* and *how*, and both cut the wrong way if
+discovered late:
+
+- **Transfer requires a writable source.** Archiving makes a repository
+  read-only, so the transfer must happen **before** the archive flip, not after.
+  Archiving first turns a two-click operation into manual re-creation.
+- **GitHub can transfer issues; it cannot transfer pull requests.** Any open PR
+  has to be merged, or closed with a pointer to its replacement here, or
+  re-created as an issue. Transferred *issues* leave a redirect at their old URL,
+  so inbound links to them keep resolving; a closed PR does not.
+
+Not enumerated in this record: the execution host has no authenticated `gh`, so
+the actual open counts were not read. Check both lists before archiving rather
+than assuming they are empty — an empty list is a fine answer, but it should be
+an observed one.
+
+**2. Published GitHub Releases and their assets — left in the archived child.**
+
+Not recreated here. The six release pages, their generated notes and their
+uploaded binaries stay where they are, reachable read-only after archival
+(archiving preserves release assets and their download URLs). This repository
+gets its own prebuilt PIC10F320 binaries at `v0.9.6`, which is the point at which
+a user has a current, in-repository source for them.
+
+This is consistent with §10's decision not to back-fill the child's
+`release/v0.9.*` trees: the version numbers collide with this project's own line,
+and four of the six contain `tmux4053-*` images that §1 says must never reappear
+in a release set. Recreating the *pages* while refusing the *trees* would have
+been the same mistake at a different layer.
+
+Consequence to accept knowingly: for the window between archival and the `v0.9.6`
+release there is no in-repository prebuilt PIC10F320 image, only buildable
+source. §7's ordering already prevents that window — archival happens after the
+unified release succeeds — so this costs nothing as long as that ordering holds.
+
+**3. The release signing key — one key, and this is now checked rather than
+assumed.**
+
+The maintainer does not intend to change keys, which makes the trust-continuity
+break §6.15 warned about a non-issue. Verified rather than accepted, because
+"I did not change it" and "it is the same key" are different claims and the whole
+point of the checkpoint was that a user verifying an older image can observe the
+difference:
+
+```
+6184219C6670945D7174F2B0149F042FCC3D3AEC   (EdDSA)
+```
+
+That fingerprint signs **all twelve** `SHA256SUMS.asc` files — the child's
+`v0.9.0`–`v0.9.5` and this project's `v0.9.0`–`v0.9.5` — and both lines' annotated
+tags. So there is no key transition to disclose in the `v0.9.6` notes, and a user
+who verified any historical PIC10F320 image already trusts the key that will sign
+the unified release. If the key is ever rotated, that *is* disclosable, and this
+fingerprint is the baseline to state it against.
+
+**4. Inbound references — archive, do not delete or rename.**
+
+The decision is mostly to take the safe default deliberately rather than by
+accident, because two of the alternatives are quietly destructive:
+
+- **Archiving** keeps every child URL resolving: the repository, its commits, its
+  issues, its release pages and assets. Inbound links from forks, external build
+  scripts and bookmarks keep working, and no redirect is needed.
+- **Deleting** breaks all of them, including this repository's own two
+  deliberate references — `CHANGELOG.md`'s annotated v0.9.2 entry and the
+  `Makefile` comment recording the retired byte-identity gate's baseline — plus
+  every historical binary download.
+- **Renaming** breaks anything pinning the old name that GitHub's redirect does
+  not cover (it covers repository URLs; it does not cover a fork's remote that
+  someone re-pointed, or a raw-content URL cached elsewhere).
+
+Actions at archival time: put the pointer to this repository in the child's
+`README.md` **and** in its repository description, since the description is what
+appears in search results and in the archived-repository banner context while the
+README is not. Leave this repository's two child references as they are — both
+are historical statements that were true when written, and both keep resolving
+against an archived repository.

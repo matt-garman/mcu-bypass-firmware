@@ -31,6 +31,15 @@ The import commit is `a15d7b6`, importing child HEAD
 the moved file was confirmed byte-identical to the child original — a checked
 fact, not a review claim.
 
+Both release lines — that project's `v0.9.0`–`v0.9.5` and this one's — are signed
+with the same key, `6184219C6670945D7174F2B0149F042FCC3D3AEC`, so verifying a
+pre-merge PIC10F320 image and verifying a current one trust the same signature.
+The historical PIC10F320 binaries themselves were deliberately not copied into
+this repository (their version numbers collide with this project's own line, and
+the older ones contain retired `tmux4053-*` images); they remain downloadable
+from the predecessor repository's release pages, and prebuilt PIC10F320 images
+ship here from `v0.9.6` onward.
+
 **Querying that history.** The import is a merge commit, so ordinary
 `git log --follow` stops at it: by default `git log` does not descend into a
 merge's second parent, and `--follow`'s rename detection does not survive the
