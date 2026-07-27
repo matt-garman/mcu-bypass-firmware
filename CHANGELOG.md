@@ -67,6 +67,8 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- `pic320-variants` now requires the complete supported build matrix, and the
+  canonical release set no longer shrinks with a `PIC320_VARIANTS_ALL` override.
 - Release provenance now probes both selected XC8 compilers fail-closed and
   records target-qualified compiler paths and versions instead of attributing
   both PIC image families to `PIC_CC`.

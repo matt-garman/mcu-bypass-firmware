@@ -2016,6 +2016,7 @@ test-pic-build:
 	PB_MATRIX_VARIANTS='cd4053-simple cd4053-mute tq2-relay' \
 	PB_MATRIX_IMAGES='bypass_mcu_cd4053-simple_pic10f320.hex bypass_mcu_cd4053-mute_pic10f320.hex bypass_mcu_tq2-relay_pic10f320.hex' \
 	PB_MATRIX_FAIL_IMAGE='bypass_mcu_tq2-relay_pic10f320.hex' \
+	PB_MATRIX_REQUIRE_COMPLETE=1 PB_MATRIX_UNSUPPORTED='tmux4053-simple' \
 	PB_SELECTOR_ROUTING=1 PB_SIZE_TARGET='pic320-size' \
 		./test/test_pic_build.sh
 
@@ -3243,6 +3244,12 @@ pic320-variants:
 	if [ $$# -eq 0 ]; then echo "FAIL: PIC320_VARIANTS_ALL must not be empty"; exit 1; fi; \
 	uniq=`printf '%s\n' "$$@" | sort -u | wc -l`; \
 	if [ "$$uniq" -ne $$# ]; then echo "FAIL: PIC320_VARIANTS_ALL must not contain duplicate names"; exit 1; fi; \
+	if [ "$(if $(filter-out $(PIC320_VARIANTS_SUPPORTED),$(PIC320_VARIANTS_ALL)),yes,no)" = yes ]; then \
+		echo "FAIL: PIC320_VARIANTS_ALL contains unsupported names; supported: $(PIC320_VARIANTS_SUPPORTED)"; exit 1; \
+	fi; \
+	if [ "$(if $(filter-out $(PIC320_VARIANTS_ALL),$(PIC320_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
+		echo "FAIL: PIC320_VARIANTS_ALL must contain every supported name; required: $(PIC320_VARIANTS_SUPPORTED)"; exit 1; \
+	fi; \
 	rc=0; \
 	for v in "$$@"; do \
 		$(MAKE) --no-print-directory PIC320_VARIANT=$$v pic320 || { rc=1; break; }; \
@@ -3795,6 +3802,10 @@ print-%:
 # directory, the SHA256SUMS entries, and the fresh build output each equal it
 # EXACTLY.
 #
+# The PIC10F320 entries use the immutable supported set, not the caller's
+# PIC320_VARIANTS_ALL request, so an abbreviated build override cannot shorten
+# this independent release contract along with the build.
+#
 # Note the three surviving basename conventions (merge plan §5.3, decision D2):
 #   bypass_<variant>.hex               ATtiny13a  (implicit part)
 #   bypass_<variant>_t<n>.hex          ATtiny45/85
@@ -3810,7 +3821,7 @@ RELEASE_IMAGES := \
 	$(foreach v,$(VARIANTS),$(FW_BASE)_$(v).hex) \
 	$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(FW_BASE)_$(v)_t$(n).hex)) \
 	$(foreach v,$(VARIANTS),$(FW_BASE)_$(v)_$(PIC_TAG).hex) \
-	$(foreach v,$(PIC320_VARIANTS_ALL),$(PIC320_FW_BASE)_$(v)_$(PIC320_TAG).hex)
+	$(foreach v,$(PIC320_VARIANTS_SUPPORTED),$(PIC320_FW_BASE)_$(v)_$(PIC320_TAG).hex)
 
 # The build directories those images are produced into, in the order a
 # reproduction run should pass them to scripts/verify-release-images.sh. Kept

@@ -2326,7 +2326,7 @@ per concern now covers both chips:
 
 | Script | Mechanism | Result |
 | --- | --- | --- |
-| `test_pic_build.sh` | `PB_*` knobs (target, build dir, image naming, budget, matrix, size probe) | 28 PIC10F322 + 46 PIC10F320 checks |
+| `test_pic_build.sh` | `PB_*` knobs (target, build dir, image naming, budget, matrix, size probe) | 28 PIC10F322 + 50 PIC10F320 checks |
 | `test_target_matrix.sh` | `TM_*` knobs (target, variants variable, supported set) | 5 matrix checks × 3 aggregates + 4 sentinel checks × 2 target aggregates |
 | `test_gpsim_wrappers.sh` | *no folding needed* — see below | 37 checks (was 25) |
 | `test_lockstep_progress.sh` | compile and execute both chip-specific adapters against one fake gpsim API | 4 failure modes × 2 chips |
@@ -2595,9 +2595,11 @@ MCU and every check agrees on the shortened set — which is exactly the mistake
 adding a second PIC part invites.
 
 `RELEASE_IMAGES` in the Makefile is the independent fourth opinion: **15 image
-basenames**, derived from the variant matrices so it cannot drift from the build
-rules, but derived from nothing on disk so no build, copy or publish step can
-influence it. It is consumed through `make -s print-RELEASE_IMAGES` by
+basenames**, derived from Makefile-supported variants but from nothing on disk,
+so no build, copy or publish step can influence it. Its PIC10F320 entries use the
+immutable `PIC320_VARIANTS_SUPPORTED`, not caller-overridable
+`PIC320_VARIANTS_ALL`, so the build request and canonical set cannot shrink
+together. It is consumed through `make -s print-RELEASE_IMAGES` by
 `scripts/make-release.sh`, `scripts/verify-release-images.sh` and
 `test/test_release_images.sh` alike — the delivery mechanism §10 said already
 existed and should not be reinvented. `RELEASE_IMAGE_DIRS` accompanies it so the

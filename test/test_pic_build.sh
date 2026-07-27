@@ -31,6 +31,8 @@ PB_MATRIX_VARIANTS_VAR=${PB_MATRIX_VARIANTS_VAR:-VARIANTS}
 PB_MATRIX_VARIANTS=${PB_MATRIX_VARIANTS:-cd4053 mute relay}
 PB_MATRIX_IMAGES=${PB_MATRIX_IMAGES:-bypass_cd4053_pic10f322.hex bypass_mute_pic10f322.hex bypass_relay_pic10f322.hex}
 PB_MATRIX_FAIL_IMAGE=${PB_MATRIX_FAIL_IMAGE:-bypass_relay_pic10f322.hex}
+PB_MATRIX_REQUIRE_COMPLETE=${PB_MATRIX_REQUIRE_COMPLETE:-0}
+PB_MATRIX_UNSUPPORTED=${PB_MATRIX_UNSUPPORTED:-unknown}
 PB_SELECTOR_ROUTING=${PB_SELECTOR_ROUTING:-0}
 PB_SIZE_TARGET=${PB_SIZE_TARGET:-}
 hex="$repo/$PB_BUILD_DIR/${PB_FW_BASE}_${PB_VARIANT}_${PB_TAG}.hex"
@@ -147,6 +149,36 @@ run_matrix_make() {
 		CC=true HOSTCC=true "$PB_CC_VAR=$tools/xc8" "$PB_BUILD_DIR_VAR=$PB_BUILD_DIR" \
 		"$PB_FW_BASE_VAR=$PB_FW_BASE" "$PB_TAG_VAR=$PB_TAG" \
 		"$PB_FLASH_VAR=$PB_FLASH_WORDS" STRICT_TOOLS=1 AWK=awk "$@"
+}
+
+remove_matrix_images() {
+	local image
+	for image in $PB_MATRIX_IMAGES; do
+		rm -f "$repo/$PB_BUILD_DIR/$image"
+	done
+}
+
+assert_no_matrix_images() {
+	local image
+	for image in $PB_MATRIX_IMAGES; do
+		[[ ! -e "$repo/$PB_BUILD_DIR/$image" && ! -L "$repo/$PB_BUILD_DIR/$image" ]] \
+			|| { printf 'FAIL: rejected %s matrix left image %s\n' \
+				"$PB_LABEL" "$image" >&2; exit 1; }
+	done
+}
+
+expect_build_matrix_rejected() {
+	local label=$1 matrix=$2 marker=$3 output
+	remove_matrix_images
+	if output=$(run_matrix_make "$PB_MATRIX_VARIANTS_VAR=$matrix" 2>&1); then
+		printf 'FAIL: %s build matrix accepted %s\n' "$PB_LABEL" "$label" >&2
+		exit 1
+	fi
+	[[ "$output" == *"$marker"* ]] \
+		|| { printf 'FAIL: %s build matrix reported the wrong %s error: %s\n' \
+			"$PB_LABEL" "$label" "$output" >&2; exit 1; }
+	assert_no_matrix_images
+	checks=$((checks + 1))
 }
 
 run_size_make() {
@@ -286,15 +318,29 @@ if run_matrix_make "$PB_MATRIX_VARIANTS_VAR=" >/dev/null 2>&1; then
 fi
 checks=$((checks + 1))
 
+if [ "$PB_MATRIX_REQUIRE_COMPLETE" -eq 1 ]; then
+	remove_matrix_images
+	run_matrix_make "$PB_MATRIX_VARIANTS_VAR=$PB_MATRIX_VARIANTS" >/dev/null
+	for image in $PB_MATRIX_IMAGES; do
+		"$repo/scripts/validate-ihex.sh" "$repo/$PB_BUILD_DIR/$image"
+	done
+	checks=$((checks + 1))
+
+	expect_build_matrix_rejected "an incomplete set" "$PB_VARIANT" \
+		"$PB_MATRIX_VARIANTS_VAR must contain every supported name"
+	expect_build_matrix_rejected "duplicate names" \
+		"$PB_MATRIX_VARIANTS $PB_VARIANT" \
+		"$PB_MATRIX_VARIANTS_VAR must not contain duplicate names"
+	expect_build_matrix_rejected "an unsupported name" "$PB_MATRIX_UNSUPPORTED" \
+		"$PB_MATRIX_VARIANTS_VAR contains unsupported names"
+fi
+
 if (export FAKE_XC8_FAIL_NAME="$PB_MATRIX_FAIL_IMAGE"; \
 		run_matrix_make "$PB_MATRIX_VARIANTS_VAR=$PB_MATRIX_VARIANTS") >/dev/null 2>&1; then
 	printf 'FAIL: late %s variant compiler failure was accepted\n' "$PB_LABEL" >&2
 	exit 1
 fi
-for image in $PB_MATRIX_IMAGES; do
-	[[ ! -e "$repo/$PB_BUILD_DIR/$image" ]] \
-		|| { printf 'FAIL: late variant failure left partial PIC image matrix\n' >&2; exit 1; }
-done
+assert_no_matrix_images
 checks=$((checks + 1))
 
 # PIC10F320's target/soak lanes have selectors separate from PIC320_VARIANT.
