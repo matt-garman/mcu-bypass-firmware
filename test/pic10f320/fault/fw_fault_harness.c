@@ -7,7 +7,7 @@
 // the corrupt-state default: case, and hw_force_wdt_reset() itself.
 //
 // WHY THIS EXISTS
-//   The firmware<->model equivalence test (test/equiv) proves the SHIPPING code
+//   The firmware<->model equivalence test (test/pic10f320/equiv) proves the SHIPPING code
 //   matches the verified model for VALID stimulus -- but by construction it never
 //   presents a corrupted state, so the firmware's fault-recovery layer (the
 //   project's cosmic-ray/EMI reliability story) is never reached. Disabling those
@@ -15,8 +15,8 @@
 //   mutation testing). This harness closes that gap.
 //
 // HOW IT WORKS
-//   Like test/equiv/fw_harness.c, the mock <xc.h> (test/equiv/xc.h, via
-//   -Itest/equiv) turns the firmware's SFR accesses into plain host storage
+//   Like test/pic10f320/equiv/fw_harness.c, the mock <xc.h> (test/pic10f320/equiv/xc.h, via
+//   -Itest/pic10f320/equiv) turns the firmware's SFR accesses into plain host storage
 //   (defined here) and CLRWDT() into a per-tick hook. This file #includes the
 //   firmware verbatim (-Dmain=fw_main), so its static functions and file-global
 //   ctx_ are reachable in this translation unit.
@@ -70,7 +70,7 @@ PIR1bits_t *bypass_pir1(void) {
 // The mute/relay drivers call __delay_ms() mid-actuation (routed here by the mock
 // <xc.h>). The fault harness only cares about the sanity gate / reset behaviour,
 // not the output-pin timing, so it elides the delay. (The actuation pin pattern is
-// verified separately by test/actuation.)
+// verified separately by test/pic10f320/actuation.)
 void bypass_on_delay_ms(unsigned ms) { (void)ms; }
 
 // --- harness state ----------------------------------------------------------

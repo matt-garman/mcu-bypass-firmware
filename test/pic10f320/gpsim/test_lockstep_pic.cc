@@ -33,7 +33,7 @@
 //   loop's CLRWDT (the end-of-loop "pet the dog"): it fires once per completed loop
 //   iteration, with ctx_ fully settled (post state-machine, post hw_set_*_state()).
 //   That callback is the exact analogue of the host harness's CLRWDT hook
-//   (test/equiv/fw_harness.c :: bypass_equiv_on_clrwdt): after the first callback
+//   (test/pic10f320/equiv/fw_harness.c :: bypass_equiv_on_clrwdt): after the first callback
 //   primes the pin, each callback reads ctx_, steps the model with the input just
 //   consumed, compares, and presents the level the NEXT iteration will read.
 //
@@ -129,7 +129,7 @@ static source_stimulus *g_fsw_src  = nullptr;
 static unsigned  g_checks  = 0;
 static unsigned  g_fails   = 0;
 
-// ---- Model-state coverage (BFS, ported from test/equiv/test_equiv.c) ---------
+// ---- Model-state coverage (BFS, ported from test/pic10f320/equiv/test_equiv.c) ---------
 #define COUNTER_VALUES ((int)RELEASE_THRESH + 1)
 #define NUM_STATES     (2 * 2 * COUNTER_VALUES)
 static uint8_t g_state_seen[NUM_STATES];

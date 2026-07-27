@@ -256,6 +256,11 @@ user.  The release-debounce, or lock-out period, is longer so as to
 ....
 
 
+The PIC10F320 is pin-compatible with the PIC10F322 in this design — same
+package, same pin functions, same footswitch/LED/control assignment — so the
+pinout above applies unchanged. The parts differ in flash size, not in wiring.
+
+
 == Optimal Footswitch-GPIO Wiring for EMI/RFI resiliency
 
 The GPIO pin tied to the footswitch (normally high) will have some
@@ -632,9 +637,72 @@ The 34-byte data figure is XC8's total reservation, not just the firmware's
 state: the single live global is `ctx_` (the 3-byte `debounce_context_t`; the
 PIC's polled Model-B loop has no `timer_isr_called_` handshake, unlike the
 AVR ISR design), and the remainder is the XC8 runtime's scratch and temporaries.
-The PIC10F322 is the most flash-constrained supported part (the mute variant's
-84.8% is the tightest fit in the whole matrix) yet still leaves headroom
-against the 512-word limit, which `make pic` gates on every build.
+The PIC10F322 leaves comfortable headroom against its 512-word limit, which
+`make pic` gates on every build.
+
+=== PIC10F320 (XC8 build)
+
+The PIC10F320 is the same silicon family with **half** the flash: 256 fourteen-bit
+program words. It is the most flash-constrained supported part by a wide margin,
+and it is the reason its firmware is structured differently from every other
+target (see "The one target that does not follow this rule" below, and
+`docs/pic10f320_special_case.md`). `make pic320` enforces the 256-word budget per
+variant and fails the build on any overshoot.
+
+.Table PIC10F320 Utilization by Variant (measured, XC8 V3.10)
+|===
+| Variant | Program (flash) | of 256 words | Free
+
+| cd4053-simple | 220 words | 85.9% | 36 words
+| cd4053-mute   | 241 words | 94.1% | 15 words
+| tq2-relay     | 244 words | 95.3% | 12 words
+|===
+
+Data (RAM) use is 10 bytes of 64 (15.6%); the single live global is the same
+3-byte `ctx_`, with the remainder XC8 runtime scratch.
+
+Those margins are the whole story of this target. **12 free words** on tq2-relay
+is why the output-latch integrity check the PIC10F322 shell carries could not be
+ported — it overshoots by 3 words on that variant and 5 on cd4053-mute — and why
+the exact-`TRISA` check, which costs exactly 1 word, was worth porting. Both
+decisions are recorded in `docs/pic10f320_special_case.md`.
+
+
+== PIC Power / Current Draw
+
+Applies to both PIC parts: they share a datasheet family, a clock choice and a
+main-loop model.
+
+The PIC core runs at **2 MHz** (HFINTOSC) on a **polled 1 ms tick** — a busy-wait
+on `TMR2IF`, never asleep. This is the opposite of the AVR Classic design, which
+sleeps between ISR-driven samples, and it is deliberate. The PIC10F320/322 has no
+idle mode, and its only Sleep-capable periodic wake is the coarse WDT (TMR0/TMR2
+are FOSC/4-clocked and stop in Sleep), so a *precise* 1 ms tick necessarily means
+staying awake. The design spends that power to buy a precise tick and a
+high-margin, independent watchdog; a deep-sleep scheme would have to give up one
+or both.
+
+Because the loop is always awake, the clock frequency sets the current draw. The
+core is clocked at 2 MHz rather than the part's 16 MHz maximum: the debounce plus
+per-tick sanity work is only ~210 instruction cycles, so 2 MHz (500 cycles/ms)
+runs it at ~42% utilisation — comfortable headroom — while roughly *halving* the
+supply current.
+
+|===
+| FOSC | active IDD @ 5 V (typ) | ~ power | per-tick headroom
+
+| 16 MHz   | ~0.85 mA | ~4.25 mW | 19x
+| *2 MHz*  | *~0.43 mA* | *~2.1 mW* | *2.4x*
+|===
+
+(IDD interpolated from DS40001585 D017–D019; the 16 MHz row is the tabulated
+figure.) A lower clock also emits less high-frequency switching noise into the
+analog audio path.
+
+This firmware is **not** battery-optimised, and the table should not be read as
+if it were: in a typical pedal the always-on status LED and the analog signal
+path dominate the supply, so the MCU's sub-milliamp draw is usually negligible.
+The 2 MHz choice is simply "no reason to burn 4 mW when 2 does the same job."
 
 
 == Multi-MCU Architecture: Shared Core, Per-MCU Shell
@@ -683,9 +751,32 @@ Everything else — footswitch read, watchdog arm and pet, clock and peripheral
 bring-up, wait-for-tick, the forced-reset path, and the SFR integrity checks —
 is shell-private and rewritten per shell. That is not an oversight: MISRA
 Rule 8.7 flagged the earlier arrangement, since each of those helpers is
-referenced only within its own translation unit. Adding a fourth target means
-adding a fourth shell plus a pin map, and reusing the core and all three output
+referenced only within its own translation unit. Adding a target normally means
+adding a shell plus a pin map, and reusing the core and all three output
 drivers unchanged. No existing shell needs to be refactored.
+
+=== The one target that does not follow this rule
+
+The PIC10F320 is the exception, and it is worth naming here rather than leaving
+the paragraph above to be read as universal. It has **256 words of flash, half
+the PIC10F322's**, and the shared-core-plus-shell arrangement does not fit —
+measured, not assumed: the modular firmware overshoots by roughly 100 words
+(`docs/pic10f320_feasibility.md`).
+
+Its firmware, `src/bypass_mcu_pic10f320.c`, therefore reuses *neither* the core
+nor the output drivers as linked code. It is a single self-contained file with
+the integrator, the state machine, the power-on initialisation and the three
+output stages hand-inlined into `main()` and `#if defined(OUTPUT_*)` blocks. So
+the count is five release-supported targets implemented by four shells plus one
+inlined implementation.
+
+That trades the compile-the-verified-core property for a behavioural
+equivalence argument against the same core — host equivalence tick-for-tick,
+real-HEX lock-step in gpsim, host and target fault injection, and an exact-line
+firmware coverage gate. It is a supported, release-gated target.
+**`docs/pic10f320_special_case.md` is the single authoritative statement of what
+that difference does and does not buy**; this section deliberately does not
+restate the assurance argument.
 
 == AVR Classic Program Flow
 

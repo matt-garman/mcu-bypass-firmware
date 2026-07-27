@@ -4,13 +4,13 @@
 // Host harness API for exercising the REAL PIC10F320 firmware's defensive /
 // fault-detection paths -- the SEU/EMI sanity gate, the pull-up and output-pin
 // checks, and hw_force_wdt_reset() -- which the firmware<->model equivalence
-// test (test/equiv) deliberately never reaches (a faithful mock keeps every
+// test (test/pic10f320/equiv) deliberately never reaches (a faithful mock keeps every
 // state valid, so a check that only fires on CORRUPTED state is invisible to it).
 //
 // The implementation (fw_fault_harness.c) #includes the firmware verbatim, so it
 // can drive the real main() loop, corrupt the firmware's live state between
 // ticks, and observe whether the firmware forces a watchdog reset. See that file
-// for the technique. The driver (test/fault/test_fault.c) consumes this API.
+// for the technique. The driver (test/pic10f320/fault/test_fault.c) consumes this API.
 
 #ifndef FW_FAULT_HARNESS_H
 #define FW_FAULT_HARNESS_H

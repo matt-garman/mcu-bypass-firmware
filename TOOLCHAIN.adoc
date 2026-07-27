@@ -30,7 +30,13 @@ tool, re-run `make clean && make test` before relying on its output.
   Minimum avr-gcc version: 4.9 (for _Static_assert / C11 support with -std=gnu11)
   Recommended: 7.x or later (best -fshort-enums / LTO support for tiny parts)
 
-== PIC toolchain (PIC10F322, optional second target)
+== PIC toolchain (PIC10F322 and PIC10F320, optional second toolchain)
+
+ONE XC8 + device-pack installation serves BOTH PIC parts. They are kept on
+separate Makefile variable pairs (`PIC_CC`/`PIC_DFP` for the 10F322,
+`PIC320_CC`/`PIC320_DFP` for the 10F320) so either chip can be re-pinned to a
+different compiler or pack without silently moving the other; by default the
+320's variables track the 322's.
 
 The PIC10F322 port (`make pic`, `make pic-test`,
 `make pic-test-target-variants`) is a SEPARATE, optional toolchain, entirely
@@ -46,8 +52,11 @@ aggregate so missing PIC tooling cannot produce a false green release gate.
                 override the path with PIC_CC=... on the make command line.
 
   Device pack:  PIC10-12Fxxx_DFP  v1.9.189  (Microchip device family pack)
-                Supplies the PIC10F322 device-support + register headers
-                (proc/pic10f322.h) that the XC8 base install does NOT include.
+                Supplies the device-support + register headers for BOTH parts
+                (proc/pic10f322.h and proc/pic10f320.h) that the XC8 base
+                install does NOT include.  CI and the release script assert
+                BOTH headers: one pack ships both, so a truncated unpack would
+                otherwise let a whole chip's lane skip silently.
                 install dir: /opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189
                 NOTE: -mdfp must point at the pack's xc8/ SUBDIR, not the pack
                 root (pointing at the root gives XC8 error 2104):
@@ -60,6 +69,9 @@ aggregate so missing PIC tooling cannot produce a false green release gate.
                 below add the PIC lock-step, fault-injection, and target-I/O
                 gates.
                 install: apt install gpsim
+                note: gpsim 0.32.1 supports p10f320 natively too; the
+                PIC10F320 lane reuses these exact wrapper scripts with only the
+                processor overridden (PIC320_GPSIM_PROC=p10f320).
                 note: gpsim 0.32.1 DOES support the p10f322; its I/O pins are
                 named ra0..ra3 (lower-case) in stimulus/attach scripts.
 
@@ -111,9 +123,29 @@ XC8 / device-pack behaviours relied on (proven against V3.10 + DFP v1.9.189):
   - _XTAL_FREQ (for the drivers' __delay_ms) is supplied via -D in the Makefile,
     parallel to the AVR's -DF_CPU.
 
-Device budget (PIC10F322): 512 words of flash, 64 bytes of RAM.  `make pic`
-enforces the flash-word budget per variant; see "Resource Utilization" in
-DESIGN_DOCUMENTATION.adoc for the measured figures.
+Device budgets, both gated per variant on every build:
+
+  PIC10F322:  512 words of flash, 64 bytes of RAM   (`make pic`)
+  PIC10F320:  256 words of flash, 64 bytes of RAM   (`make pic320`)
+
+See "Resource Utilization" in DESIGN_DOCUMENTATION.adoc for the measured
+figures.  The 320's margins are tight enough to be a design input rather than a
+footnote -- 12 free words on the tightest variant -- which is why one of the
+PIC10F322 shell's defensive checks could not be ported to it; see
+docs/pic10f320_special_case.md.
+
+PIC10F320 commands, for reference (same toolchain, `pic320-` targets):
+
+  make pic320-variants             build all three variants + 256-word gate
+  make pic320-size                 XC8 program/data memory summary
+  make pic320-test                 host equivalence/actuation/fault/coverage,
+                                     CONFIG word, cppcheck+MISRA, and CLI gpsim,
+                                     swept across all three variants
+  make pic320-test-target-variants fail-closed libgpsim fault/lock-step/I-O
+  make pic320-test-soak            long-duration libgpsim soak
+
+Its build output goes to build_pic10f320/ (build and coverage artifacts alike),
+kept separate from the 322's build_pic/ and from the shared top-level coverage/.
 
 XC8 and the device pack are Microchip downloads, NOT apt packages:
 

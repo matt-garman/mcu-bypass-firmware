@@ -3694,7 +3694,7 @@ help:
 	@echo "  pic-test-target fail-closed fault + lock-step + target-I/O for one PIC variant"
 	@echo "                  (PIC_TARGET_VARIANT); pic-test-target-variants runs all variants"
 	@echo "  program-pic     flash one PIC variant to hardware (VARIANT=, PIC_PROG=pk2cmd|ipecmd)"
-	@echo "PIC10F320 (the constrained 256-word target: the core is inlined, not called):"
+	@echo "PIC10F320 (constrained 256-word target; docs/pic10f320_special_case.md):"
 	@echo "  pic320          build one variant for PIC10F320 (XC8) + 256-word budget gate"
 	@echo "                  (PIC320_VARIANT=cd4053-simple|cd4053-mute|tq2-relay)"
 	@echo "  pic320-variants build every variant; removes the whole set if any one fails"

@@ -2530,3 +2530,102 @@ itself, the child-README rewrite and the `_incoming_pic10f320/` prefix removal
 are all Phase 7. §7's warning about stopping here is now the operative one: the
 release machinery names PIC10F320 images and CI produces them, so the dangerous
 gap is closed — but the documentation still describes two projects.
+
+### 15.11 Phase 7 — documentation and incoming-tree cleanup (COMPLETE except the firmware comment sweep and the prefix removal, both user actions)
+
+**Landed 2026-07-27.** Phases 5 and 6 made the PIC10F320 a real, gated, shipped
+target. Phase 7 makes the *documentation* describe one project instead of two.
+
+**`docs/pic10f320_special_case.md` exists, and it is the only place the caveat is
+argued.** Seven sections: why 256 words forces the difference; the seam stated
+plainly; the eleven lanes that mitigate it and what they do *not* do; the
+recorded output-latch omission; the shared-surface sync table; a plain
+recommendation ("prefer another part when the choice is yours"); and a pointer
+table for everything that deliberately lives elsewhere. §8's failure mode —
+half-caveats sprinkled across many files, one of which drifts — is met by every
+other document *linking* here.
+
+**The sync contract got stronger in the move, and the document says so with
+evidence.** The child's "Manual-sync contract" is promoted rather than folded
+away (§4, Principle 8), but its claim has changed: that project held a *vendored
+copy* of the core pinned to `bf6a6c1`, so the parent could advance and nothing
+would notice. Here `pic320-test-equiv` compiles the real firmware against the
+real `src/bypass_pure.c`, taking thresholds from `src/bypass_config.h`. Verified
+by changing `PRESSED_THRESH` 8→9 in the core alone:
+
+```
+equivalence: 511 sequences compared, 1 divergence(s)
+make: *** [pic320-test-equiv] Error 1
+```
+
+So the sync is manual but **enforced**. The document is careful about the two
+things the lane still cannot see — output-stage changes (covered instead by
+`pic320-test-actuation`) and defensive-layer drift against the PIC10F322 shell
+(§4's deliberate divergence, watched by nothing automatic).
+
+**A dangling reference Phase 4 created, found and closed.**
+`test/misra_suppressions.txt` has said "See MISRA_COMPLIANCE.md D-4" since Phase 4
+— and that document's own header says *"a suppression here without a matching
+D-record is a defect."* There was no D-4. It exists now, recording both entries
+(`misra-config` on the device SFRs, Rule 2.5 on the two macros consumed only
+inside `static_assert`), the bisection that proved it an analyzer limitation
+rather than a code defect, and the fact that scoping it per-file **narrowed** the
+waiver the child suppressed globally. `MISRA_COMPLIANCE.md` also stops arguing by
+comparison with another project — self-referential once merged — and states the
+posture per target instead, with the `STRICT_TOOLS=1` caveat attached to the
+claim rather than left implicit.
+
+**Documents updated, and what each needed:**
+
+| Document | Change |
+| --- | --- |
+| `README.md` | The "see the child project" NOTE is gone. A **Targets table** replaces it: five release-supported parts, PIC10F320 flagged as the constrained exception with the link, ATtiny202 marked development-only. `pic320-*` quickstart added. |
+| `DESIGN_DOCUMENTATION.adoc` | Went from **zero** PIC10F320 mentions to five. Fixed the direct contradiction at `:686-688` ("adding a fourth target … reusing the core and all three output drivers unchanged") — the count is now five targets, four shells plus one inlined implementation, with a subsection naming the exception. Added measured PIC10F320 resource use (220/241/244 of 256; 10 of 64 bytes RAM, all three variants) and corrected the now-false claim that the PIC10F322 is the most flash-constrained part. Added the pin-compatibility note and a new **PIC Power / Current Draw** section merged from the child (the 2 MHz-vs-16 MHz IDD table and *why* the polled loop never sleeps). |
+| `TOOLCHAIN.adoc` | One XC8 install, two variable pairs, and why they are separate; both device headers asserted; gpsim's native `p10f320`; both flash budgets; the `pic320-*` command list; `build_pic10f320/`. |
+| `MISRA_COMPLIANCE.md` | Per-target posture, both PIC shells in the analysis table, D-4 added, the child's "Notes on specific constructs" rehomed so the firmware's `MISRA_COMPLIANCE.md` citation resolves, maintenance step 1 lists all four analysis lanes and the `STRICT_TOOLS=1` requirement. |
+| `test/README.md` | `test/pic10f320/` in the tree listing with per-file annotations, a full **PIC10F320 target validation layers** table (14 layers, marking which four are host-only and therefore inside `make test`), the mutation need-based split, and the `copy_tree` lesson. "Known gaps" was already promoted to shared PIC content in an earlier phase. |
+| `CHANGELOG.md` | An `[Unreleased]` entry for the merge, and — the part §10 actually asked for — a note explaining that the child ran its *own* colliding `v0.9.0`–`v0.9.5` line with different content and dates (its 0.9.5 is 2026-07-10, this project's 2026-07-18), that those entries are deliberately **not** back-filled, and that the timeline stays reachable through the imported graph and the `pic10f320/v0.9.*` signed tags. |
+| `release/README.md`, generated `MANIFEST.md` | Covered in Phase 6 (§15.10). |
+| `.gitignore` | Merged the child's stray-gcov and root `commit_msg.txt` entries, the latter anchored so `release/<ver>/commit_msg.txt` stays tracked. |
+| `Makefile` help | Restores the `docs/pic10f320_special_case.md` pointer that Phase 5 deliberately withheld while the file did not exist. |
+
+**The pre-move path sweep is done.** 17 comment lines across all eight relocated
+files still said `test/equiv/`, `test/fault/`, `test/actuation/`. Verified by
+diff that only comments changed, plus one runtime diagnostic string that told a
+developer to edit a file at a path that no longer existed.
+
+**Disposition of `_incoming_pic10f320/` — all 154 tracked paths.**
+
+| Group | Disposition |
+| --- | --- |
+| `Makefile`, `scripts/*`, `.github/workflows/*`, `.gitignore`, `LICENSE`, `AGENTS.md`, `CLAUDE.md` | **Superseded.** Every capability lives in the parent's copy; `.gitignore`'s two useful lines were merged. |
+| `test/run_mutation_tests.sh`, `test_make_serialization.sh`, `test_release_images.sh`, `test_soak_timing.sh` | **Superseded** — the parent copy was ahead in every case (§15.10's FOLD table); the mutants live in the parent driver. |
+| `README.md` | **Split and rehomed:** "Relationship to the parent project" → the caveat doc; "Manual-sync contract" → caveat doc §5, strengthened; "Power / current draw" → `DESIGN_DOCUMENTATION.adoc`; "Provenance" → obsolete the moment the vendored copy died, replaced by the CHANGELOG note. |
+| `TOOLCHAIN.adoc`, `MISRA_COMPLIANCE.md`, `test/README.md`, `release/README.md` | **Merged** into the parent equivalents, per the table above. |
+| `test/model/README.md` | **Dropped.** It documents the vendored copy Phase 3 deleted; the caveat doc answers its "Why a copy" question with a better answer — there is no copy. |
+| `CHANGELOG.md` | **Not back-filled** (§10). Reachable through imported history and the namespaced tags. |
+| `release/v0.9.0` … `v0.9.5` (six trees, 5 images each for the first four) | **Not back-filled and removed from the merged tip** (§10): the version numbers collide with this project's own, and they predate unification. All six signed tags `pic10f320/v0.9.*` verify, and the trees remain reachable through them and through the import commit `a15d7b6`. Note four of them contain `tmux4053-*` images, a variant §1 says must never reappear in the release set — another reason not to fold them into `release/`. |
+
+**Two items are the user's, by project rule, and are the only reason this phase
+is not fully closed:**
+
+1. **Firmware comment edits** (`src/*.c` — assistant may describe, not edit):
+   - `src/bypass_mcu_avr_xt.c:16-17` still routes the reader to
+     "child project pic10f320-bypass-firmware" with a GitHub URL for PIC10F320
+     support. That is now **false**: the sibling shell list should read
+     `- PIC10F320: bypass_mcu_pic10f320.c (constrained; core inlined, see
+     docs/pic10f320_special_case.md)`.
+   - `src/bypass_mcu_pic10f320.c:5-9`'s header block explains that the file
+     "makes numerous references to the parent project, mcu-bypass-firmware" and
+     links it. Inside this repository there is no parent project. The block
+     should say the file's numerous "parent project" references now mean *this*
+     project's shared core and drivers, or the individual references (`:68`,
+     `:74`, `:324`, `:643`, `:660`) should be reworded and the block dropped.
+   These are comment-only and change no emitted byte, so they do not disturb the
+   §6.13 hashes.
+2. **`git rm -r --cached`/`git rm -r _incoming_pic10f320`** — the prefix removal
+   itself, per the project's "user does all modifying git operations" rule.
+
+Everything else in Phase 7 has landed. `make test` was green immediately before
+the prefix removal was handed over, so a failure after it is attributable to the
+removal alone.

@@ -11,6 +11,67 @@ Per-release provenance (source commit, pinned toolchain, image hashes, flash
 usage, and validation evidence) lives in `release/<version>/MANIFEST.md`; this
 file is the human-readable summary of *what changed*.
 
+> **On the PIC10F320's version history.** The PIC10F320 target was developed in a
+> separate repository and merged into this one (see *Unreleased* below). That
+> project ran its own `v0.9.0`–`v0.9.5` series with **different content and
+> different dates** from the identically numbered releases in this file — its
+> `0.9.5` is dated 2026-07-10, this project's 2026-07-18. Those entries are
+> therefore **not** back-filled here: doing so would collide two unrelated
+> numbering lines and misreport each project's history as the other's. The child
+> timeline remains reachable in full through the imported commit graph and the
+> namespaced signed tags `pic10f320/v0.9.0` … `pic10f320/v0.9.5`. From the first
+> unified release onward there is one timeline, with PIC10F320 changes recorded
+> as a sub-lane inside each entry.
+
+## [Unreleased]
+
+### Added
+- **PIC10F320 as a release-supported target** — the fifth part, and the first
+  whose firmware does not compile the verified core but hand-inlines it, because
+  256 words of flash cannot hold the shared-core architecture. Merged from a
+  separate repository with its full history preserved. See
+  [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md) for what that
+  difference does and does not buy, and `docs/pic10f320_merge_plan.md` for every
+  decision taken.
+- PIC10F320 validation lanes: firmware-to-core equivalence against
+  `src/bypass_pure.c` itself (266,144 sequences, all 66 reachable model states),
+  per-variant actuation-sequence checks, host fault injection, an exact-line
+  firmware coverage gate, real-HEX lock-step, target fault injection, target I/O
+  timing, CONFIG-word verification, cppcheck + MISRA across all three variants,
+  and a libgpsim soak. The host subset needs only a C compiler and gcov, so it
+  runs inside `make test` on every push.
+- A **canonical release product set** (`RELEASE_IMAGES` in the Makefile),
+  enforced by the release script, the image verifier and its regression alike.
+  Previously the committed directory, the `SHA256SUMS` entries and the fresh
+  build were all derived by globbing, so three "independent" checks agreed
+  perfectly on a release with an entire MCU missing. They no longer can.
+- Three PIC10F320 release soak combinations at full duration, and PIC10F320
+  images in every release, uploaded as their own CI artifact.
+- `make pic320-*` targets, `make help` entries for them, and a
+  `docs/pic10f320_special_case.md` linked from the README, the design
+  documentation, the release documentation and the generated release manifest.
+
+### Changed
+- The strict-tools inventory now covers optional-tool recipes for **both** PIC
+  chips, not just the two host analyzers it started with.
+- MISRA documentation is now a per-target statement rather than a comparison
+  against another project, and records deviation **D-4** (the PIC10F320
+  analyzer symbol-resolution waiver) that the suppressions file already cited.
+- The `pic` CI job covers both PIC parts; `scripts/ci-local.sh` mirrors it and
+  documents that `--skip-pic` skips both chips.
+- Simulator "known gaps" documentation is now shared PIC content covering both
+  parts, rather than two per-repository copies that had already drifted.
+
+### Fixed
+- **`pic320` and `pic320-size` printed "skipping" and then built anyway.**
+  `$(SKIP)` is `exit 0` in non-strict mode and exits only its own shell, so a
+  guard on its own recipe line skipped nothing. An audit found no other instance
+  in the Makefile.
+- **The PIC10F320 build left a partial image set** when one variant failed; it
+  now removes the whole set.
+- The ported flash-budget comparison was weaker than this project's own and
+  conflated "not over budget" with "the comparison tool failed".
+
 ## [0.9.5] - 2026-07-18
 
 ### Added

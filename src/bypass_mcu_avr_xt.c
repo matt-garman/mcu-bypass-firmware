@@ -13,8 +13,7 @@
 // Other hardware-specific shell implementations in this project:
 //   - AVR Classic (ATtiny13a, ATtinyX5): bypass_mcu_avr_classic.c
 //   - PIC10F322: bypass_mcu_pic10f322.c
-//   - PIC10F320: see child project pic10f320-bypass-firmware
-//     (https://github.com/matt-garman/pic10f320-bypass-firmware)
+//   - PIC10F320: bypass_mcu_pic10f320.c
 // Uses the pure debounce core (bypass_pure.c) for debounce logic, and also
 // supports the same output drivers as the other projects.
 //

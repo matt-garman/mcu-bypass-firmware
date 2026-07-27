@@ -3,7 +3,7 @@
 
 // Silicon-level fault-injection test for the PIC10F320 firmware's per-tick
 // sanity gate -- the on-simulated-core companion to the host fault harness
-// (test/fault/). It links libgpsim, drives the real built HEX, corrupts a
+// (test/pic10f320/fault/). It links libgpsim, drives the real built HEX, corrupts a
 // guarded location at runtime (an SEU/EMI single-event-upset model), and asserts
 // the firmware DETECTS the corruption and RECOVERS via a watchdog reset --
 // exactly what the main-loop gate + hw_force_wdt_reset() promise, but on a real

@@ -9,7 +9,7 @@
 // per-variant LATA pattern is asserted on real silicon by the gpsim test).
 //
 // HOW IT WORKS
-//   - The mock <xc.h> (test/equiv/xc.h) turns the firmware's SFR accesses into
+//   - The mock <xc.h> (test/pic10f320/equiv/xc.h) turns the firmware's SFR accesses into
 //     plain host storage (defined here) and CLRWDT() into bypass_equiv_on_clrwdt().
 //   - This file #includes the firmware verbatim, compiled with -Dmain=fw_main so
 //     the firmware's main() becomes a callable fw_main().
@@ -84,8 +84,8 @@ static int            g_clrwdt_calls;
 // The mute/relay drivers call __delay_ms() once per actuation, AFTER asserting the
 // mute / energising the coil and BEFORE releasing it -- so LATA at that instant is
 // the firmware's transient (mid-pulse) output. The mock routes __delay_ms() here
-// (test/equiv/xc.h); we record LATA + the requested delay for each call so
-// test/actuation can assert the per-variant mid-actuation pin pattern -- the part
+// (test/pic10f320/equiv/xc.h); we record LATA + the requested delay for each call so
+// test/pic10f320/actuation can assert the per-variant mid-actuation pin pattern -- the part
 // the equivalence (RA0-only) and gpsim (settled-state-only) tests cannot see.
 // The equivalence run itself ignores these; cd4053-simple never calls __delay_ms.
 #define FW_ACTUATION_MAX 64
@@ -116,13 +116,13 @@ uint8_t  fw_init_lata_transition(int i) {
 // hook fires at the END of each main-loop iteration -- AFTER hw_set_*_state() has
 // run to completion (including any blocking __delay_ms pulse) -- so LATA is fully
 // SETTLED there for every tick, never mid-pulse. Recording the whole byte lets
-// test/actuation assert each variant's per-variant control pins (RA1/RA2) at every
+// test/pic10f320/actuation assert each variant's per-variant control pins (RA1/RA2) at every
 // settled tick, not just RA0. That closes the one hole the RA0-only equivalence
 // test leaves on the host: a mis-routed / stuck control pin on the NON-blocking
 // cd4053-simple variant (which has no __delay_ms for the actuation-snapshot path
 // to catch) -- previously verified only on the simulated core. The equivalence run
 // fills this too (and compares the per-tick internal state below). The buffer is
-// sized to span the equivalence test's longest stimulus (test/equiv/test_equiv.c
+// sized to span the equivalence test's longest stimulus (test/pic10f320/equiv/test_equiv.c
 // EQUIV_RANDOM_MAXLEN, currently 1200), so both the settled-LATA and the internal-
 // state captures cover EVERY tick rather than a truncated prefix. If a still-longer
 // stimulus is ever run the excess ticks are simply not recorded (graceful
@@ -137,7 +137,7 @@ uint8_t fw_tick_lata(int i) { return (i >= 0 && i < g_tick_lata_n) ? g_tick_lata
 
 // --- per-tick internal-state capture -----------------------------------------
 // The equivalence test originally compared only the LED output (RA0). But the
-// parent project's simavr lock-step test compares the firmware's INTERNAL state
+// AVR simavr lock-step test compares the firmware's INTERNAL state
 // (program_state, effect_state, debounce_counter) against the reference model every
 // tick -- a strictly stronger proof, since an internal-state divergence that does
 // not yet manifest on the LED would go undetected by an output-only comparison.

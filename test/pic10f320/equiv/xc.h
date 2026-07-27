@@ -62,7 +62,7 @@ void bypass_equiv_on_clrwdt(void);
 // it again -- so it is the one seam at which the firmware's transient (mid-pulse)
 // output state is observable on the host. Routing it through a hook lets a harness
 // snapshot LATA there: the equiv/fault harnesses make it a no-op (they only watch
-// RA0 / the sanity gate), while test/actuation captures the snapshot to verify the
+// RA0 / the sanity gate), while test/pic10f320/actuation captures the snapshot to verify the
 // variant's mute/coil pin pattern. cd4053-simple never calls __delay_ms.
 void bypass_on_delay_ms(unsigned ms);
 #define __delay_ms(x) bypass_on_delay_ms((unsigned)(x))

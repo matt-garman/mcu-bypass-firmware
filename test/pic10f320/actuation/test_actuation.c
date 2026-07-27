@@ -40,7 +40,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-// Provided by test/equiv/fw_harness.c (the REAL firmware on the host).
+// Provided by test/pic10f320/equiv/fw_harness.c (the REAL firmware on the host).
 extern void     fw_run(const uint8_t *fsw, int n, uint8_t *trace);
 extern int      fw_actuation_count(void);
 extern uint8_t  fw_actuation_lata(int i);

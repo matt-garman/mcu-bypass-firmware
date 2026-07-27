@@ -2,13 +2,6 @@
 // Copyright (c) Matthew Garman
 
 
-/*****************************************************************************
- * NOTE: this source code makes numerous references to the parent project,
- *       mcu-bypass-firmware:
- *       https://github.com/matt-garman/mcu-bypass-firmware
- *****************************************************************************/
-
-
 //
 // PIC10F320 DIP-8 Pinout
 //                                                     +----+
@@ -58,20 +51,19 @@
 
 
 
-// Analog-switch control-pin drive polarity (CD4053 / TMUX4053): see parent
-// project code/git history and also parent DESIGN_DOCUMENTATION.adoc:
-// previous code had a polarity-inversion bug for the TMUX4053.  This is now
-// fixed.
+// Analog-switch control-pin drive polarity (CD4053 / TMUX4053): see
+// DESIGN_DOCUMENTATION.adoc: previous code had a polarity-inversion bug for
+// the TMUX4053.  This is now fixed.
 
 // Bits that must be OUTPUTS (RA0|RA1|RA2).
 //
-// Macro name ("DDR") is the AVR Classic convention from the parent project;
+// Macro name ("DDR") is the AVR Classic convention
 // we keep the DDR naming here to try to maintain conventions between
-// projects.
+// MCUs.
 //
 // Macro value is the output-bit set, interpreted by
 // the inline TRISA/LATA setup in init(); on PIC: TRISA bit 0 = output
-// (hw_configure_output_pins() in the parent project)
+// see also hw_configure_output_pins()
 //
 // All output schemes use RA0..RA2:
 //    relay = LED(RA0), RESET(RA1), SET(RA2)
@@ -321,8 +313,7 @@ static void hw_x4053_ctl1_low(void)  { LATA |=  (uint8_t)(1U << CD4053_CTL1); }
 static void hw_x4053_ctl2_high(void) { LATA &= (uint8_t)~(1U << CD4053_CTL2); }
 static void hw_x4053_ctl2_low(void)  { LATA |=  (uint8_t)(1U << CD4053_CTL2); }
 
-// See "Improved Scheme With Muting" in parent project
-// DESIGN_DOCUMENTATION.adoc
+// See "Improved Scheme With Muting" in DESIGN_DOCUMENTATION.adoc
 static void hw_set_bypass_state(void) {
     hw_led_pin_set_low(); // dark status LED
 
@@ -640,7 +631,7 @@ void main(void) {
 
 
 
-        // inline version of parent project's pure debounce_integrate()
+        // inline version of other MCU's pure debounce_integrate()
         //
         // sample + integrate this tick (in the main loop, not an ISR)
         //
@@ -657,7 +648,7 @@ void main(void) {
 
 
 
-        // inline version of parent project's pure debounce_step()
+        // inline version of other MCU's pure debounce_step()
         //
         // advance the debounce state machine
         switch (ctx_.program_state) {

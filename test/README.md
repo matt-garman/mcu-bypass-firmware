@@ -71,7 +71,38 @@ test/
             test_io_pic.cc       libgpsim GPIO/pulse timing
                                                        (make pic-test-io)
             test_soak_pic.cc     libgpsim soak         (make pic-test-soak)
+                                 shared with the PIC10F320 lane
+
+  pic10f320/  PIC10F320-specific tests. Separate from pic/ because this target's
+              firmware is a single hand-inlined translation unit rather than a
+              shell over the shared core, so its harnesses have no counterpart
+              on any other target (docs/pic10f320_special_case.md).
+            equiv/     fw_harness.c   the real firmware #included, host-compiled
+                       test_equiv.c   tick-for-tick vs src/bypass_pure.c
+                                                       (make pic320-test-equiv)
+                       xc.h           mock <xc.h>: SFR accesses become host storage
+            actuation/ test_actuation.c  settled + mid-actuation LATA per variant
+                                                       (make pic320-test-actuation)
+            fault/     fw_fault_harness.{c,h}  fault-injection API over the firmware
+                       test_fault.c            defensive-layer driver
+                                                       (make pic320-test-fault-host)
+                       check_fw_coverage.sh    exact-line firmware coverage gate
+                                                       (make pic320-coverage-check-fw)
+            gpsim/     test_fault_pic.cc     libgpsim fault-inject
+                                                       (make pic320-test-fault-target)
+                       test_lockstep_pic.cc  libgpsim HEX/model ctx lock-step
+                                                       (make pic320-test-lockstep)
+                       test_io_pic.cc        libgpsim GPIO/pulse timing
+                                                       (make pic320-test-io)
+                       footswitch_toggle.stc gpsim stimulus
 ```
+
+The PIC10F320 lane reuses, rather than forks, everything it can: the CONFIG-word
+checker (`pic/test_config_pic.c`, parameterised on `PIC_DEVICE_NAME`), both gpsim
+CLI wrappers (parameterised on the processor), the soak driver
+(`pic/test_soak_pic.cc`), and — most importantly — `src/bypass_pure.c` itself. Its
+`gpsim/` harnesses are forked because they are genuinely chip-specific: different
+SRAM offsets, different expected check counts, a different processor model.
 
 Build artifacts (compiled binaries, `*.bc`) are written next to their sources in
 each subdirectory and are git-ignored; see `.gitignore`. KLEE output directories
@@ -150,6 +181,43 @@ identity, injection readback, and the expected per-variant check count are all
 fail-closed test invariants.
 
 
+## PIC10F320 target validation layers
+
+The PIC10F320 is the one target whose verified core is *hand-inlined* into the
+firmware instead of compiled in, so it carries validation layers no other target
+needs. `docs/pic10f320_special_case.md` is the authoritative statement of why;
+this section is what the test suite does about it.
+
+The split that matters here: **the first four layers need only a host C compiler
+and gcov**, so they are members of `make test` and run on every push regardless
+of whether XC8 is installed. The rest need the PIC toolchain and behave like the
+PIC10F322 layers above — skip-clean standalone, fail-closed under the aggregate.
+
+| layer | target | what it proves | substrate |
+|---|---|---|---|
+| Firmware↔core equivalence | `pic320-test-equiv` | The real firmware, host-compiled, stepped tick-for-tick against `src/bypass_pure.c` over 266,144 stimulus sequences, visiting all 66 reachable model states, with zero divergence. This is the layer that closes the inlining seam. | host C |
+| Actuation sequence | `pic320-test-actuation` | Each variant's full *settled* `LATA` at every tick, plus the mute/relay *mid-actuation* sequencing and pulse width that a settled snapshot cannot see. | host C |
+| Host fault injection | `pic320-test-fault-host` | Corrupting a guarded SFR or the debounce context forces the sanity gate to take the watchdog-reset path — the defensive layer valid stimulus never reaches. | host C |
+| Shipping-source coverage | `pic320-coverage-check-fw` | An **exact** property, not a percentage floor: every line of the real firmware is host-executed except an enumerated, justified watchdog-reset path. Run per variant, because the three output stages give 84 / 95 / 99 executable lines. | host gcov with the mock `xc.h` |
+| All-variant host aggregate | `pic320-test-host-variants` | The four layers above across all three variants, with the matrix itself validated first. **This is the member of `make test`.** | Makefile wrapper |
+| Image generation | `test-pic-build` | Same fail-closed XC8-output regression as the 322, re-run with `PB_*` overrides for this chip's target, build directory, image naming and 256-word budget. | host fake-XC8 regression |
+| CONFIG word | `pic320-test-config` | The emitted CONFIG word matches design intent, over every built image. Uses the shared checker with a device-accurate label. | host parser over HEX |
+| Static analysis | `pic320-analyze` | cppcheck + MISRA over the shell, **swept across all three variants** — each compiles a different `#if defined(OUTPUT_*)` branch, so one run would leave two thirds unanalyzed. | host tools |
+| Register-level functional | `pic320-test-gpsim` | Real HEX toggles on press and handles a power-on-held switch, via the *shared* wrappers with only the processor overridden. | gpsim CLI |
+| Fault recovery | `pic320-test-fault-target` | The host fault argument re-made on the real emitted image: every guarded SFR/SRAM location and the required `TRISA` directions, 22 checks per variant. | libgpsim |
+| HEX/model lock-step | `pic320-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches `src/bypass_pure.c` after every completed main-loop iteration — 3,005 checks per variant, 66/66 states. | libgpsim |
+| Target I/O timing | `pic320-test-io` | Exact `TRISA`, physical `PORTA` following every `LATA` transition, each variant's complete transition sequence, and mute/relay pulse widths from simulator cycles. | libgpsim |
+| Fail-closed aggregate | `pic320-test-target-variants` | Rejects empty, duplicate, or unsupported matrices, then requires fault, lock-step and target-I/O PASS sentinels for every variant. | Makefile wrapper |
+| Pre-hardware aggregate | `pic320-test` | The single target CI and the release script invoke: the host aggregate, CONFIG over all images, and analysis + gpsim per variant. | Makefile wrapper |
+| Soak | `pic320-test-soak` | Long-duration libgpsim soak per output stage; three combos at full duration are part of release qualification. | libgpsim |
+
+Note what `pic320-test-equiv` and `pic320-test-lockstep` run *against*. Both
+compile and link `src/bypass_pure.c` — the same file every other target compiles
+into its shipping image, not a vendored snapshot of it. The project this target
+was merged from could only manage the weaker claim, because it held a pinned
+copy; that copy is gone.
+
+
 ## Mutation testing and skipped PIC tools
 
 `make test-mutation` includes PIC mutants whose kill targets need XC8, gpsim, and
@@ -164,6 +232,21 @@ The PIC mutation set includes target-level faults for the new coverage: collapse
 TMR2IF cadence, exact-TRISA predicate removal, output-latch mask narrowing,
 exact WPUA pull-up state, ANSELA mask narrowing, muted-CD4053 startup
 reassertion, mute-window shortening, and relay pulse shortening.
+
+**PIC10F320 mutants are split by what they NEED, not by what they test.** 27 of
+them are killed by the host lanes and require only a C compiler, so they ride
+with the unskippable core batch; 9 need XC8 + gpsim + libgpsim and sit behind
+their own tool probe, which first verifies that the *unmutated* tree genuinely
+passes. Without that split they would "survive" on any host lacking the PIC
+toolchain — a false pass, and the exact hazard the existing PIC probe was written
+to prevent. Skip accounting is wired through the same policy resolver, so a
+partial run cannot be mistaken for full PIC10F320 coverage.
+
+One further note on the driver, learned the hard way: its sandbox tree copy has
+to reach `test/pic10f320/{equiv,actuation,fault,gpsim}/` and to carry `.stc` and
+`.sh` files. A PIC10F320 mutant built against a sandbox missing its own harness
+dies for the wrong reason — an *error* rather than a kill, which is an equally
+misleading green.
 
 
 ## Known gaps (PIC — hardware-bench only)

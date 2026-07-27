@@ -251,7 +251,7 @@ int main(void) {
             fprintf(stderr,
                 "FAIL: harness internal-state capture (%d ticks) < equivalence horizon "
                 "(%d); long sequences would compare LED only. Raise FW_TICK_TRACE_MAX "
-                "in test/equiv/fw_harness.c to >= EQUIV_RANDOM_MAXLEN.\n",
+                "in test/pic10f320/equiv/fw_harness.c to >= EQUIV_RANDOM_MAXLEN.\n",
                 fw_tick_state_count(), EQUIV_RANDOM_MAXLEN);
             return 1;
         }

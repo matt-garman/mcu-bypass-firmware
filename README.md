@@ -3,19 +3,30 @@
 
 [![CI](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml)
 
-**NOTE:** for PIC10F320 support, see the child project
-[pic10f320-bypass-firmware](https://github.com/matt-garman/pic10f320-bypass-firmware).
-This project's release-supported targets are PIC10F322 and AVR Classic. It also
-contains a development-only ATtiny202 port that is built and exercised in
-normal CI but is not included in prebuilt releases. This is the preferred
-project unless the PIC10F320 is a hard requirement.
+The release-supported firmware covers five parts across three microcontroller
+families: the "AVR Classic" parts (ATtiny13a, ATtiny45, ATtiny85) and the
+Microchip PIC10F322 and PIC10F320. The development-only AVR-XT lane currently
+targets ATtiny202. A shared, hardware-independent debounce core and the output
+drivers are common to all targets; only a small per-MCU hardware shell differs.
 
-The release-supported firmware covers two microcontroller families: the
-"AVR Classic" parts (ATtiny13a, ATtiny45, ATtiny85) and the Microchip
-PIC10F322. The development-only AVR-XT lane currently targets ATtiny202.
-A shared, hardware-independent debounce core and the output drivers are
-common to all targets; only a small per-MCU hardware shell differs. The
-firmware is intended to be used for electric instrument
+## Targets
+
+| Target | Status | Notes |
+|---|---|---|
+| ATtiny13a | release-supported | the primary/default target |
+| ATtiny45 / ATtiny85 | release-supported | tinyx5 family |
+| PIC10F322 | release-supported | 512 words |
+| **PIC10F320** | release-supported | **the constrained exception: 256 words, so the verified core is hand-inlined rather than compiled in — see [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md)** |
+| ATtiny202 (AVR-XT) | development-only | built and exercised in normal CI; **not** in prebuilt releases |
+
+Every release-supported target except the PIC10F320 compiles the verified core
+(`src/bypass_pure.c`) directly into its shipping image. The PIC10F320 cannot —
+its flash is half the PIC10F322's — so it carries an inlining seam that
+equivalence, real-HEX lock-step and fault injection against that same core
+mitigate but do not eliminate. Prefer another part when the choice is yours;
+the caveat document explains the trade in full.
+
+The firmware is intended to be used for electric instrument
 effects (e.g. guitar effect pedals) bypass switching.  The firmware
 has four responsibilities:
 
@@ -62,7 +73,9 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
   - Built-image simulator validation: simavr for AVR Classic and gpsim/libgpsim
     for PIC10F322 provide functional, fault-injection, lock-step, target-I/O,
     and soak tests; yasimavr for AVR-XT (ATtiny202) provides functional,
-    fault-injection, physical target-output timing, and soak tests
+    fault-injection, physical target-output timing, and soak tests. The
+    PIC10F320 additionally proves its hand-inlined firmware equivalent to the
+    verified core, tick for tick, on the host and on the real emitted image
   - Mutation tests (deliberately break code to prove tests catch
     firmware errors)
   - Simulated fault-injection tests to verify WDT functioning
@@ -79,7 +92,7 @@ make
 make program
 ```
 
-To build and validate the PIC10F322 port instead requires a host C compiler,
+To build and validate the PIC ports instead requires a host C compiler,
 matching `gcov`, and Bash for source coverage, plus the Microchip XC8 compiler,
 PIC10-12Fxxx device pack, `gpsim`, and `gpsim-dev` for the target-level gates:
 
@@ -87,6 +100,16 @@ PIC10-12Fxxx device pack, `gpsim`, and `gpsim-dev` for the target-level gates:
 make pic                         # build all variants + 512-word flash-budget gate
 make pic-test                    # CONFIG, analysis, source coverage, and gpsim checks
 make pic-test-target-variants    # fail-closed libgpsim fault/lock-step/I/O gates
+```
+
+The PIC10F320 has its own lane, using the same toolchain (`pic320-*` targets,
+`PIC320_*` variables):
+
+```
+make pic320-variants             # build all variants + 256-word flash-budget gate
+make pic320-test                 # host equivalence/actuation/fault/coverage,
+                                 #   CONFIG, analysis, and gpsim, all variants
+make pic320-test-target-variants # fail-closed libgpsim fault/lock-step/I/O gates
 ```
 
 These targets are independent of the AVR build. External PIC tool targets skip
