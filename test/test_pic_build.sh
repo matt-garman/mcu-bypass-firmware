@@ -32,9 +32,12 @@ PB_MATRIX_VARIANTS=${PB_MATRIX_VARIANTS:-cd4053 mute relay}
 PB_MATRIX_IMAGES=${PB_MATRIX_IMAGES:-bypass_cd4053_pic10f322.hex bypass_mute_pic10f322.hex bypass_relay_pic10f322.hex}
 PB_MATRIX_FAIL_IMAGE=${PB_MATRIX_FAIL_IMAGE:-bypass_relay_pic10f322.hex}
 PB_SELECTOR_ROUTING=${PB_SELECTOR_ROUTING:-0}
+PB_SIZE_TARGET=${PB_SIZE_TARGET:-}
 hex="$repo/$PB_BUILD_DIR/${PB_FW_BASE}_${PB_VARIANT}_${PB_TAG}.hex"
+size_probe_stem="$repo/$PB_BUILD_DIR/size_probe_$PB_VARIANT"
 checks=0
-unset FAKE_XC8_MODE FAKE_XC8_FAIL_NAME MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES
+unset FAKE_XC8_MODE FAKE_XC8_FAIL_NAME FAKE_XC8_SIGNAL_MARKER \
+	MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES
 mkdir -p "$repo/src" "$repo/scripts" "$repo/build_pic" "$tools"
 cp "$ROOT/Makefile" "$repo/Makefile"
 cp "$ROOT/scripts/validate-ihex.sh" "$repo/scripts/validate-ihex.sh"
@@ -71,7 +74,11 @@ case "$mode" in
 	empty) : > "$out" ;;
 	signal)
 		write_valid_hex > "$out"
-		kill -TERM "${PIC_RECIPE_PID:?}"
+		builtin kill -TERM "${PIC_RECIPE_PID:?}"
+		if [ -n "${FAKE_XC8_SIGNAL_MARKER:-}" ]; then
+			printf 'delivered\n' > "$FAKE_XC8_SIGNAL_MARKER"
+		fi
+		sleep 1
 		;;
 	bad-checksum) printf ':0100000001FF\n:00000001FF\n' > "$out" ;;
 	eof-only) printf ':00000001FF\n' > "$out" ;;
@@ -80,7 +87,11 @@ case "$mode" in
 		write_valid_hex > valid.hex
 		ln -s valid.hex "$out"
 		;;
+	directory) mkdir "$out" ;;
 	*) write_valid_hex > "$out" ;;
+esac
+case "$out" in
+	size_probe_*.hex) printf 'temporary companion\n' > "${out%.hex}.elf" ;;
 esac
 EOF
 chmod 750 "$tools/xc8" "$repo/scripts/validate-ihex.sh"
@@ -136,6 +147,33 @@ run_matrix_make() {
 		CC=true HOSTCC=true "$PB_CC_VAR=$tools/xc8" "$PB_BUILD_DIR_VAR=$PB_BUILD_DIR" \
 		"$PB_FW_BASE_VAR=$PB_FW_BASE" "$PB_TAG_VAR=$PB_TAG" \
 		"$PB_FLASH_VAR=$PB_FLASH_WORDS" STRICT_TOOLS=1 AWK=awk "$@"
+}
+
+run_size_make() {
+	make --no-print-directory -C "$repo" "$PB_SIZE_TARGET" \
+		CC=true HOSTCC=true "$PB_CC_VAR=$tools/xc8" "$PB_BUILD_DIR_VAR=$PB_BUILD_DIR" \
+		"$PB_FW_BASE_VAR=$PB_FW_BASE" "$PB_TAG_VAR=$PB_TAG" \
+		"$PB_FLASH_VAR=$PB_FLASH_WORDS" \
+		"$PB_VARIANT_VAR=$PB_VARIANT" STRICT_TOOLS=1 AWK=awk "$@"
+}
+
+assert_no_size_probe() {
+	local path
+	for path in "$size_probe_stem".*; do
+		[[ ! -e "$path" && ! -L "$path" ]] \
+			|| { printf 'FAIL: size target left temporary artifact %s\n' "$path" >&2; exit 1; }
+	done
+}
+
+expect_size_mode_rejected() {
+	local mode=$1
+	printf 'stale probe\n' > "$size_probe_stem.hex"
+	if (export FAKE_XC8_MODE="$mode"; run_size_make) >/dev/null 2>&1; then
+		printf 'FAIL: PIC size target accepted XC8 mode %s\n' "$mode" >&2
+		exit 1
+	fi
+	assert_no_size_probe
+	checks=$((checks + 1))
 }
 
 expect_override_rejected() {
@@ -285,6 +323,59 @@ if [ "$PB_SELECTOR_ROUTING" -eq 1 ]; then
 				"$target" "$hex" "$selected_hex" >&2; exit 1; }
 		checks=$((checks + 1))
 	done
+fi
+
+if [ -n "$PB_SIZE_TARGET" ]; then
+	size_output=$(run_size_make)
+	[[ "$size_output" == *"Program space"* ]] \
+		|| { printf 'FAIL: PIC size target did not print its memory summary\n' >&2; exit 1; }
+	assert_no_size_probe
+	checks=$((checks + 1))
+
+	for mode in fail missing empty bad-checksum eof-only trailing symlink directory no-summary; do
+		expect_size_mode_rejected "$mode"
+	done
+
+	marker="$work/size.signal-delivered"
+	rm -f "$marker"
+	printf 'stale probe\n' > "$size_probe_stem.hex"
+	if (export FAKE_XC8_MODE=signal FAKE_XC8_SIGNAL_MARKER="$marker"; \
+			run_size_make) >/dev/null 2>&1; then
+		printf 'FAIL: interrupted PIC size target exited successfully\n' >&2
+		exit 1
+	fi
+	[[ -f "$marker" ]] \
+		|| { printf 'FAIL: size signal fixture did not deliver SIGTERM\n' >&2; exit 1; }
+	assert_no_size_probe
+	checks=$((checks + 1))
+
+	printf 'stale probe\n' > "$size_probe_stem.hex"
+	if run_size_make IHEX_VALIDATOR="$repo/scripts/missing-validator" >/dev/null 2>&1; then
+		printf 'FAIL: PIC size target accepted a missing Intel HEX validator\n' >&2
+		exit 1
+	fi
+	assert_no_size_probe
+	checks=$((checks + 1))
+
+	printf 'stale probe\n' > "$size_probe_stem.hex"
+	if ! size_output=$(run_size_make STRICT_TOOLS= \
+			"$PB_CC_VAR=$tools/missing-xc8" 2>&1); then
+		printf 'FAIL: PIC size target did not skip missing XC8 by default: %s\n' \
+			"$size_output" >&2
+		exit 1
+	fi
+	[[ "$size_output" == *"XC8 not found"* && "$size_output" != *"STRICT_TOOLS=1:"* ]] \
+		|| { printf 'FAIL: PIC size target reported the wrong missing-XC8 skip\n' >&2; exit 1; }
+	assert_no_size_probe
+	checks=$((checks + 1))
+
+	printf 'stale probe\n' > "$size_probe_stem.hex"
+	if run_size_make "$PB_CC_VAR=$tools/missing-xc8" >/dev/null 2>&1; then
+		printf 'FAIL: PIC size target accepted missing XC8 under STRICT_TOOLS=1\n' >&2
+		exit 1
+	fi
+	assert_no_size_probe
+	checks=$((checks + 1))
 fi
 
 printf '%s build validation: %d checks, 0 failures\n' "$PB_LABEL" "$checks"

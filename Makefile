@@ -2012,7 +2012,7 @@ test-pic-build:
 	PB_MATRIX_VARIANTS='cd4053-simple cd4053-mute tq2-relay' \
 	PB_MATRIX_IMAGES='bypass_mcu_cd4053-simple_pic10f320.hex bypass_mcu_cd4053-mute_pic10f320.hex bypass_mcu_tq2-relay_pic10f320.hex' \
 	PB_MATRIX_FAIL_IMAGE='bypass_mcu_tq2-relay_pic10f320.hex' \
-	PB_SELECTOR_ROUTING=1 \
+	PB_SELECTOR_ROUTING=1 PB_SIZE_TARGET='pic320-size' \
 		./test/test_pic_build.sh
 
 # Exact-set and hash checks for the tag workflow's committed/listed/fresh images.
@@ -3251,21 +3251,54 @@ pic320-variants:
 pic320-size: $(PIC320_SRC)
 	@# One shell, for the same reason as `pic320` above: $(SKIP) is `exit 0` in
 	@# non-strict mode and would otherwise skip only its own recipe line.
-	@if [ ! -x "$(PIC320_CC)" ] && ! command -v $(PIC320_CC) >/dev/null 2>&1; then \
+	@mkdir -p "$(PIC320_BUILD_DIR)"; \
+	probe_stem="$(PIC320_BUILD_DIR)/size_probe_$(PIC320_VARIANT)"; \
+	probe="$$probe_stem.hex"; probe_complete=0; \
+	remove_probe() { \
+		for path in "$$probe_stem".*; do \
+			if [ ! -e "$$path" ] && [ ! -L "$$path" ]; then continue; fi; \
+			if [ -d "$$path" ] && [ ! -L "$$path" ]; then \
+				rmdir "$$path" || return 1; \
+			else \
+				rm -f "$$path" || return 1; \
+			fi; \
+		done; \
+	}; \
+	remove_probe || exit 1; \
+	if [ ! -x "$(PIC320_CC)" ] && ! command -v "$(PIC320_CC)" >/dev/null 2>&1; then \
 		echo "XC8 not found at $(PIC320_CC) (override with PIC320_CC=...)"; $(SKIP); \
 	fi; \
-	mkdir -p $(PIC320_BUILD_DIR); \
-	( cd $(PIC320_BUILD_DIR) && $(PIC320_CC) $(PIC320_CFLAGS) $(CURDIR)/$(PIC320_SRC) \
-		-o size_probe_$(PIC320_VARIANT).hex 2>&1 | grep -A6 -E 'Memory Summary|Program space' || true ); \
-	rm -f $(PIC320_BUILD_DIR)/size_probe_$(PIC320_VARIANT).*
-	@# A SUBSHELL for the cd, not a brace group -- `{ cd x && ...; }` leaves the
-	@# whole recipe shell inside x, so the cleanup below used to resolve to
-	@# build_pic10f320/build_pic10f320/... and silently delete nothing. The
-	@# leftovers were not cosmetic: a stray size_probe_*.hex sitting in the build
-	@# directory is picked up by scripts/verify-release-images.sh's fresh-image
-	@# glob and fails the release reproduction gate with a set mismatch.
-	@# The wildcard also removes XC8's .elf/.cmf/.s/.sdb/.sym/.hxl companions,
-	@# which the old .hex-only cleanup left behind even when it did run.
+	if [ ! -x "$(IHEX_VALIDATOR)" ] && ! command -v "$(IHEX_VALIDATOR)" >/dev/null 2>&1; then \
+		echo "FAIL: Intel HEX validator not found at $(IHEX_VALIDATOR)"; exit 1; \
+	fi; \
+	cleanup_probe() { \
+		rc=$$?; \
+		remove_probe || rc=1; \
+		if [ $$rc -eq 0 ] && [ $$probe_complete -ne 1 ]; then rc=1; fi; \
+		trap - 0 1 2 15; exit $$rc; \
+	}; \
+	trap cleanup_probe 0 1 2 15; \
+	export PIC_RECIPE_PID=$$$$; \
+	out=`cd "$(PIC320_BUILD_DIR)" && $(PIC320_CC) $(PIC320_CFLAGS) $(CURDIR)/$(PIC320_SRC) \
+		-o "size_probe_$(PIC320_VARIANT).hex" 2>&1` \
+		|| { printf '%s\n' "$$out"; echo "FAIL: size probe did not compile for PIC10F320"; exit 1; }; \
+	if [ ! -s "$$probe" ]; then \
+		echo "FAIL: XC8 reported success but did not produce a nonempty $$probe"; \
+		printf '%s\n' "$$out"; exit 1; \
+	fi; \
+	if ! $(IHEX_VALIDATOR) "$$probe"; then \
+		echo "FAIL: XC8 produced an invalid Intel HEX size probe: $$probe"; exit 1; \
+	fi; \
+	if ! printf '%s\n' "$$out" | grep -qE 'Program space'; then \
+		echo "FAIL: XC8 output contained no parseable program-space summary:"; \
+		printf '%s\n' "$$out"; exit 1; \
+	fi; \
+	summary=`printf '%s\n' "$$out" | grep -iE 'space|memory summary'`; \
+	if [ -z "$$summary" ]; then echo "FAIL: XC8 memory summary was empty"; exit 1; fi; \
+	printf '%s\n' "$$summary"; \
+	probe_complete=1
+	@# The temporary HEX and all XC8 companions are removed by the EXIT trap.
+	@# Leaving any size_probe_* artifact can poison release-image set validation.
 
 # Two analyzers over the PIC10F320 shell, parallel to the AVR analyze-cppcheck /
 # analyze-misra and the PIC10F322 pic-analyze-*. STANDALONE (XC8/DFP headers may

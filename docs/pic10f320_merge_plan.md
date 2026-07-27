@@ -2326,7 +2326,7 @@ per concern now covers both chips:
 
 | Script | Mechanism | Result |
 | --- | --- | --- |
-| `test_pic_build.sh` | `PB_*` knobs (target, build dir, image naming, budget, matrix) | 28 checks × 2 chips |
+| `test_pic_build.sh` | `PB_*` knobs (target, build dir, image naming, budget, matrix, size probe) | 28 PIC10F322 + 46 PIC10F320 checks |
 | `test_target_matrix.sh` | `TM_*` knobs (target, variants variable, supported set) | 5 checks × 2 chips |
 | `test_gpsim_wrappers.sh` | *no folding needed* — see below | 35 checks (was 25) |
 
