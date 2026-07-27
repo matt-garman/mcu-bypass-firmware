@@ -257,12 +257,17 @@ for mode in fail missing empty bad-checksum eof-only trailing symlink; do
 	checks=$((checks + 1))
 done
 
+marker="$work/build.signal-delivered"
+rm -f "$marker"
 printf 'stale image\n' > "$hex"
-if (export FAKE_XC8_MODE=signal; run_make) >/dev/null 2>&1; then
+if (export FAKE_XC8_MODE=signal FAKE_XC8_SIGNAL_MARKER="$marker"; \
+		run_make) >/dev/null 2>&1; then
 	printf 'FAIL: interrupted PIC build exited successfully\n' >&2
 	exit 1
 fi
-[[ ! -e "$hex" ]] \
+[[ -f "$marker" ]] \
+	|| { printf 'FAIL: PIC build signal fixture did not deliver SIGTERM\n' >&2; exit 1; }
+[[ ! -e "$hex" && ! -L "$hex" ]] \
 	|| { printf 'FAIL: interrupted PIC build left a partial image\n' >&2; exit 1; }
 checks=$((checks + 1))
 

@@ -3175,6 +3175,7 @@ pic320: $(PIC320_SRC)
 		trap - 0 1 2 15; exit $$rc; \
 	}; \
 	trap cleanup_image 0 1 2 15; \
+	export PIC_RECIPE_PID=$$$$; \
 	LC_ALL=C; export LC_ALL; \
 	budget="$(PIC320_FLASH_WORDS)"; \
 	case "$$budget" in ''|*[!0-9]*) echo "FAIL: PIC320_FLASH_WORDS must be a positive decimal integer"; exit 1 ;; esac; \

@@ -67,6 +67,9 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- The shared fake-XC8 interruption regression now requires proof that SIGTERM
+  reached each PIC build recipe; `pic320` exports its recipe PID so a missing
+  variable can no longer masquerade as successful cleanup validation.
 - `pic320-size` now fails closed on compiler, image-validation, and summary
   failures and removes every temporary XC8 artifact after success, failure, or
   interruption instead of suppressing the probe pipeline's exit status.
