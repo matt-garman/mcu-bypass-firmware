@@ -67,6 +67,9 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- PIC host and real-target "all variants" aggregates now reject proper subsets
+  of the supported matrix instead of running one variant and reporting that all
+  variants passed.
 - PIC gpsim validation now shares one exact pin-name resolver across all
   libgpsim harnesses and tests RA3 against substring decoys; fake CLI gpsim also
   rejects stimuli not attached exactly once to `ra3`.

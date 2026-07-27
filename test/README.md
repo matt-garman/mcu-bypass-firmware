@@ -145,8 +145,8 @@ below so a green gate means every PIC layer actually ran.
 | HEX/model lock-step | `pic-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches the shared pure model after every completed main-loop iteration. | libgpsim |
 | Lock-step progress regression | `test-lockstep-progress` | Both chip-specific adapters bind the exact RA3 pin despite substring decoys and abort simulator stalls during settle, calibration, or completion immediately. | host C++ + fake gpsim API |
 | Target I/O timing | `pic-test-io` | TRISA/ANSELA/LATA/PORTA transitions, relay coil exclusion, and mute/relay pulse widths match the design. | libgpsim |
-| Fail-closed aggregate | `pic-test-target-variants` | Rejects empty, duplicate, or unsupported matrices, then runs fault recovery, lock-step, and target-I/O for every selected PIC variant and requires each PASS sentinel. | Makefile wrapper |
-| Aggregate regression | `test-target-matrix` | Proves valid matrices run exactly once per variant, invalid matrices fail before any target invocation, and both PIC target aggregates require explicit fault, lock-step, and I/O completion markers. | Bash + fake recursive Make |
+| Fail-closed aggregate | `pic-test-target-variants` | Requires the complete supported matrix, then runs fault recovery, lock-step, and target-I/O for every PIC variant and requires each PASS sentinel. | Makefile wrapper |
+| Aggregate regression | `test-target-matrix` | Proves complete matrices run exactly once per variant, empty, duplicate, unsupported, and incomplete matrices fail before any target invocation, and both PIC target aggregates require explicit fault, lock-step, and I/O completion markers. | Bash + fake recursive Make |
 | Soak timing contract | `test-soak-timing` | Native Classic AVR/PIC soaks require the liveness interval within the total duration; short release rehearsals clamp it so every passing run completes a responsiveness round-trip. | host C/C++ compilers + release CLI |
 
 `pic-test-gpsim` now samples one non-settled point, `PRESS1_EARLY`, roughly
@@ -161,9 +161,9 @@ control pins are checked in both settled directions, not just the LED bit.
 `pic-test-target-variants` is the gate to use when a PIC result must be
 authoritative. The component libgpsim targets remain useful standalone commands,
 but they are allowed to skip for missing tools; the aggregate turns any skip or
-missing PASS marker into a failure. It also validates the complete variant matrix
-before starting its first target, so an empty or malformed matrix cannot report
-an all-variants PASS or leave a misleading partial run.
+missing PASS marker into a failure. It also requires the complete supported
+variant matrix before starting its first target, so an empty, malformed, or
+incomplete matrix cannot report an all-variants PASS or leave a partial run.
 
 Debounce thresholds define a 33-sample pure-model minimum between press onsets.
 That is also the nominal 33 ms physical minimum on ISR-driven AVR targets and the
@@ -199,7 +199,7 @@ PIC10F322 layers above — skip-clean standalone, fail-closed under the aggregat
 | Actuation sequence | `pic320-test-actuation` | Each variant's full *settled* `LATA` at every tick, plus the mute/relay *mid-actuation* sequencing and pulse width that a settled snapshot cannot see. | host C |
 | Host fault injection | `pic320-test-fault-host` | Corrupting a guarded SFR or the debounce context forces the sanity gate to take the watchdog-reset path — the defensive layer valid stimulus never reaches. | host C |
 | Shipping-source coverage | `pic320-coverage-check-fw` | An **exact** property, not a percentage floor: every line of the real firmware is host-executed except an enumerated, justified watchdog-reset path. Run per variant, because the three output stages give 84 / 95 / 99 executable lines. | host gcov with the mock `xc.h` |
-| All-variant host aggregate | `pic320-test-host-variants` | The four layers above across all three variants, with the matrix itself validated first. **This is the member of `make test`.** | Makefile wrapper |
+| All-variant host aggregate | `pic320-test-host-variants` | The four layers above across all three variants, with the complete supported matrix required first. **This is the member of `make test`.** | Makefile wrapper |
 | Image generation | `test-pic-build` | Same fail-closed XC8-output regression as the 322, re-run with `PB_*` overrides for this chip's target, build directory, image naming and 256-word budget; also proves each target/soak selector rebuilds its selected image rather than the default variant. | host fake-XC8 regression |
 | CONFIG word | `pic320-test-config` | The emitted CONFIG word matches design intent, over every built image. Uses the shared checker with a device-accurate label. | host parser over HEX |
 | Static analysis | `pic320-analyze` | cppcheck + MISRA over the shell, **swept across all three variants** — each compiles a different `#if defined(OUTPUT_*)` branch, so one run would leave two thirds unanalyzed. | host tools |
@@ -207,7 +207,7 @@ PIC10F322 layers above — skip-clean standalone, fail-closed under the aggregat
 | Fault recovery | `pic320-test-fault-target` | The host fault argument re-made on the real emitted image: every guarded SFR/SRAM location and the required `TRISA` directions, 22 checks per variant. | libgpsim |
 | HEX/model lock-step | `pic320-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches `src/bypass_pure.c` after every completed main-loop iteration — 3,005 checks per variant, 66/66 states. | libgpsim |
 | Target I/O timing | `pic320-test-io` | Exact `TRISA`, physical `PORTA` following every `LATA` transition, each variant's complete transition sequence, and mute/relay pulse widths from simulator cycles. | libgpsim |
-| Fail-closed aggregate | `pic320-test-target-variants` | Rejects empty, duplicate, or unsupported matrices, then requires fault, lock-step and target-I/O PASS sentinels for every variant. | Makefile wrapper |
+| Fail-closed aggregate | `pic320-test-target-variants` | Rejects any matrix other than the complete supported set, then requires fault, lock-step and target-I/O PASS sentinels for every variant. | Makefile wrapper |
 | Pre-hardware aggregate | `pic320-test` | The single target CI and the release script invoke: the host aggregate, CONFIG over all images, and analysis + gpsim per variant. | Makefile wrapper |
 | Soak | `pic320-test-soak` | Long-duration libgpsim soak per output stage; three combos at full duration are part of release qualification. | libgpsim |
 

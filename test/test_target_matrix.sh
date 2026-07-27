@@ -8,9 +8,10 @@ fake_make="$work/fake-make"
 log="$work/make.log"
 checks=0
 # Parameterized so ONE regression covers both PIC targets (merge plan §4: FOLD
-# the shared-name harnesses rather than forking them). In addition to the matrix
-# guard, each real-target invocation must require explicit fault, lock-step, and
-# I/O completion markers. The host-only PIC10F320 invocation disables that part.
+# the shared-name harnesses rather than forking them). The matrix guard requires
+# the complete supported set, and each real-target invocation must require
+# explicit fault, lock-step, and I/O completion markers. The host-only PIC10F320
+# invocation disables the sentinel part.
 TM_LABEL=${TM_LABEL:-PIC}
 TM_TARGET=${TM_TARGET:-pic-test-target-variants}
 TM_PER_VARIANT_TARGET=${TM_PER_VARIANT_TARGET:-pic-test-target}
@@ -161,7 +162,8 @@ expect_sentinels() {
 }
 
 expect_accept default __DEFAULT__ "${supported[@]}"
-expect_accept subset "$TM_SUBSET" "$TM_SUBSET"
+expect_reject incomplete "$TM_SUBSET" \
+	"$TM_VARIANTS_VAR must contain every supported name"
 expect_reject empty "" "$TM_VARIANTS_VAR must not be empty"
 expect_reject duplicate "${supported[0]} $TM_SUBSET ${supported[0]}" \
 	"$TM_VARIANTS_VAR must not contain duplicate names"

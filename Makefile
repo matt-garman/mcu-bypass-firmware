@@ -1243,6 +1243,9 @@ pic-test-target-variants:
 	fi; \
 	if [ "$(if $(filter-out $(PIC_TARGET_VARIANTS_SUPPORTED),$(VARIANTS)),yes,no)" = yes ]; then \
 		echo "FAIL: VARIANTS contains unsupported names; supported: $(PIC_TARGET_VARIANTS_SUPPORTED)" >&2; exit 2; \
+	fi; \
+	if [ "$(if $(filter-out $(VARIANTS),$(PIC_TARGET_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
+		echo "FAIL: VARIANTS must contain every supported name; required: $(PIC_TARGET_VARIANTS_SUPPORTED)" >&2; exit 2; \
 	fi
 	@for v in $(VARIANTS); do \
 		echo "===================== PIC TARGET VARIANT $$v ====================="; \
@@ -3079,10 +3082,10 @@ pic320-test-host: pic320-test-equiv pic320-test-actuation pic320-test-fault-host
 # ...and the all-variant sweep, which is what `test`/`test-long` actually wire in:
 # every host lane above is compiled against a variant-specific firmware, so one
 # variant is one third of the evidence. Uses the same Make-function matrix guard
-# as pic320-test-target-variants -- empty, duplicated AND unsupported matrices are
-# rejected on stderr before any variant runs, so "all variants passed" can never
-# mean "no variant ran" (§6.5). Registered in test/test_target_matrix.sh, which
-# proves the guard by feeding it each bad matrix.
+# as pic320-test-target-variants -- empty, duplicated, unsupported, and incomplete
+# matrices are rejected on stderr before any variant runs, so "all variants
+# passed" always means the complete supported set ran (§6.5). Registered in
+# test/test_target_matrix.sh, which proves the guard by feeding it each bad matrix.
 pic320-test-host-variants:
 	@if [ "$(if $(strip $(PIC320_VARIANTS_ALL)),yes,no)" != yes ]; then \
 		echo "FAIL: PIC320_VARIANTS_ALL must not be empty" >&2; exit 2; \
@@ -3092,6 +3095,9 @@ pic320-test-host-variants:
 	fi; \
 	if [ "$(if $(filter-out $(PIC320_VARIANTS_SUPPORTED),$(PIC320_VARIANTS_ALL)),yes,no)" = yes ]; then \
 		echo "FAIL: PIC320_VARIANTS_ALL contains unsupported names; supported: $(PIC320_VARIANTS_SUPPORTED)" >&2; exit 2; \
+	fi; \
+	if [ "$(if $(filter-out $(PIC320_VARIANTS_ALL),$(PIC320_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
+		echo "FAIL: PIC320_VARIANTS_ALL must contain every supported name; required: $(PIC320_VARIANTS_SUPPORTED)" >&2; exit 2; \
 	fi
 	@for v in $(PIC320_VARIANTS_ALL); do \
 		echo "===================== PIC10F320 HOST VARIANT $$v ====================="; \
@@ -3498,8 +3504,8 @@ pic320-test-gpsim: pic320
 #
 # The matrix guard is NOT repeated here, and that is deliberate rather than an
 # omission: pic320-test-host-variants is a prerequisite, it carries the guard, and
-# Make will not start this recipe until it has succeeded. So an empty, duplicated
-# or unsupported PIC320_VARIANTS_ALL fails the build before the loop below is
+# Make will not start this recipe until it has succeeded. So an empty, duplicated,
+# unsupported, or incomplete PIC320_VARIANTS_ALL fails before the loop below is
 # reached, and the guard that protects this target is the one covered by
 # test/test_target_matrix.sh (§6.5). A second copy here would be untested
 # duplication, since the harness cannot drive a target whose prerequisites
@@ -3623,8 +3629,8 @@ pic320-test-target:
 	done
 	@echo "=== PIC10F320 target fault/lock-step/I-O PASS (variant $(PIC320_TARGET_VARIANT)) ==="
 
-# ...and for ALL of them. Rejects an empty or duplicated matrix before running,
-# so "all variants passed" can never mean "no variant ran" (§6.5).
+# ...and for ALL of them. Requires the exact supported set before running, so
+# "all variants passed" cannot hide an empty or incomplete matrix (§6.5).
 pic320-test-target-variants:
 	@if [ "$(if $(strip $(PIC320_VARIANTS_ALL)),yes,no)" != yes ]; then \
 		echo "FAIL: PIC320_VARIANTS_ALL must not be empty" >&2; exit 2; \
@@ -3634,6 +3640,9 @@ pic320-test-target-variants:
 	fi; \
 	if [ "$(if $(filter-out $(PIC320_VARIANTS_SUPPORTED),$(PIC320_VARIANTS_ALL)),yes,no)" = yes ]; then \
 		echo "FAIL: PIC320_VARIANTS_ALL contains unsupported names; supported: $(PIC320_VARIANTS_SUPPORTED)" >&2; exit 2; \
+	fi; \
+	if [ "$(if $(filter-out $(PIC320_VARIANTS_ALL),$(PIC320_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
+		echo "FAIL: PIC320_VARIANTS_ALL must contain every supported name; required: $(PIC320_VARIANTS_SUPPORTED)" >&2; exit 2; \
 	fi
 	@for v in $(PIC320_VARIANTS_ALL); do \
 		echo "===================== PIC10F320 TARGET VARIANT $$v ====================="; \
