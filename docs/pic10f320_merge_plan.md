@@ -2629,3 +2629,97 @@ is not fully closed:**
 Everything else in Phase 7 has landed. `make test` was green immediately before
 the prefix removal was handed over, so a failure after it is attributable to the
 removal alone.
+
+### 15.12 Phase 8 — unified release preparation (COMPLETE up to the release run, which is the user's)
+
+**Prepared 2026-07-27.** Phase 8's deliverable is a released `v0.10.0` and an
+archived child repository. Both end in actions only the user can take — a
+24-hour soak run, `git tag -s`, and an operation on a different repository — so
+this record is what was *made ready*, what was *checked*, and what remains.
+
+**Post-removal state verified.** `git ls-files -- _incoming_pic10f320` returns
+zero paths, the directory is gone, the worktree is clean, and `v0.10.0` is free
+and greater than both historical lines (parent v0.9.5, child v0.9.5).
+
+**The firmware comment sweep changed no emitted bytes — checked, not assumed.**
+The user's Phase-7 firmware edits (removing `bypass_mcu_pic10f320.c`'s
+"parent project" header block and repointing `bypass_mcu_avr_xt.c`'s sibling
+list) were comment-only, so the images *must* be unchanged. Rebuilt and compared
+against the §15.5 rebaselined hashes: **MATCH on all three.** This is the third
+and final use of the byte-identity evidence, and the one occasion where the
+retired §6.13 gate's *reasoning* still paid off after the gate itself was gone.
+
+**A real defect found by pre-flight, in Phase 5's own work.** `make pic320-size`
+left `size_probe_*.hex` in `build_pic10f320/`. Cause: the Phase-5 rewrite that
+joined the recipe into one shell used a **brace group** for the `cd`
+(`{ cd x && …; }`), which does not create a subshell — so the whole recipe shell
+stayed inside the build directory and the cleanup resolved to
+`build_pic10f320/build_pic10f320/…` and deleted nothing.
+
+Not cosmetic. `scripts/verify-release-images.sh` globs `*.hex` from each fresh
+build directory, so a stray probe image makes the **documented release
+reproduction fail**:
+
+```
++size_probe_cd4053-mute.hex
++size_probe_cd4053-simple.hex
++size_probe_tq2-relay.hex
+ERROR: fresh build image set does not exactly match the canonical release product set
+```
+
+Fixed with a subshell, and the cleanup widened to XC8's `.elf/.cmf/.s/.sdb/.sym/
+.hxl` companions, which the old `.hex`-only form left behind even when it ran.
+Verified in both directions. Note the release *script* was never exposed — it
+`make clean`s first — so only a hand-run reproduction from a tag could have hit
+this. That is precisely the path a third party uses to check the project's central
+claim, which makes it worse rather than better. No regression was added: the
+verifier already catches the consequence class, the cause is a one-character
+recipe bug with the hazard now written beside it, and an XC8-dependent test for a
+recipe-local cleanup would be disproportionate. Recorded here instead.
+
+**`clean-tests` extended.** It removed every other target's test binaries but not
+the PIC10F320's, because those live under the chip's build directory (§5.7)
+rather than beside their sources — so the next run could silently reuse binaries
+built with the previous workload sizing, the exact failure that target exists to
+prevent. Now removes the host binaries, objects and the coverage subtree, and
+deliberately *not* the `.hex` images, which are build output that `make clean`
+owns.
+
+**`docs/pic10f320_validation.md` created**, closing the §12 box on §6.13's
+retired-gate lifetime, which names that file as where the compared hashes must
+survive. It is the durable evidence record — provenance and namespaced tags, all
+three byte-identity runs with their hashes, every lane's returned counts, the
+priced defensive-layer decision, the mutation topology with its two
+false-green cautions, and an explicit "what is *not* validated here" section. It
+exists separately from this plan because this plan is process documentation with
+a shelf life, and one piece of that evidence came from a gate whose baseline was
+deliberately deleted.
+
+**Remaining stale-reference sweep completed.** `TODO.md`'s embedded-URL item
+still quoted the pre-exact-TRISA figures (219/240/243, 37/16/13 free); corrected
+to 220/241/244 and 36/15/12. `CHANGELOG.md`'s v0.9.2 entry, which describes
+bringing the PIC10F322 shell to parity with "the sibling child project", is
+preserved as written — it was true at v0.9.2 — with a dated annotation noting
+that project is no longer separate.
+
+**`CHANGELOG.md` cut to `## [0.10.0] - 2026-07-27`.** The date must be corrected
+if the release lands on a different day; nothing enforces it, because
+`make-release.sh` does not read the changelog.
+
+**What remains, and why it is not mine to do:**
+
+1. **The release run.** `make release VERSION=v0.10.0` runs a 24-hour parallel
+   soak of all **12** combos and stages `release/v0.10.0/`. It requires a clean
+   tree, so the Phase-8 preparation above must be committed first. The script
+   stops before every git operation and prints the exact `git add` / `git commit`
+   / `git tag -s` / checksum-signing commands.
+2. **Tagging and signing** — modifying git operations, user-only by project rule.
+3. **Child README pointer and archival** — an operation on a *different*
+   repository, and an outward-facing one. §7 is explicit that the child is not
+   archived until the unified release succeeds; until then it remains the
+   operational fallback.
+
+A dry run of the full pipeline already passed end to end in Phase 6 (§15.10):
+15 images matched to the canonical set, five validation gates, 12/12 soak combos,
+and the verifier re-run against the staged output. The only difference in the
+real run is soak duration.

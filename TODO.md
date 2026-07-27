@@ -431,7 +431,7 @@ Key constraints (so it actually works for the read-off-the-chip scenario):
   carry it, and/or use a compact form (bare host/path, no scheme). Consider a
   recognizable leading marker so it is greppable in a dump.
 - **PIC10F320 cannot carry a full URL** and likely never will: its three variants
-  currently sit at 219/240/243 of 256 words, leaving 37/16/13 free against a
+  currently sit at 220/241/244 of 256 words, leaving 36/15/12 free against a
   ~48-character minimum for even a scheme-less repo URL. If the feature ships,
   scope it to the parts with real headroom rather than shortening the URL to
   something that rots. (A third-party shortener trades a space problem for a

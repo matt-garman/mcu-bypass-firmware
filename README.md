@@ -24,7 +24,9 @@ Every release-supported target except the PIC10F320 compiles the verified core
 its flash is half the PIC10F322's — so it carries an inlining seam that
 equivalence, real-HEX lock-step and fault injection against that same core
 mitigate but do not eliminate. Prefer another part when the choice is yours;
-the caveat document explains the trade in full.
+the caveat document explains the trade in full, and
+[docs/pic10f320_validation.md](docs/pic10f320_validation.md) records what was
+actually run and what it returned.
 
 The firmware is intended to be used for electric instrument
 effects (e.g. guitar effect pedals) bypass switching.  The firmware

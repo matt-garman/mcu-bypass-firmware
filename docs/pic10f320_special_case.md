@@ -180,6 +180,7 @@ lives here; the engineering detail stays where it belongs:
 
 | Topic | Document |
 | --- | --- |
+| What was actually run, and what it returned | `docs/pic10f320_validation.md` |
 | Why the modular architecture does not fit — the measurement | `docs/pic10f320_feasibility.md` |
 | Pin map, CONFIG word, clock/timer/WDT, resource use | `DESIGN_DOCUMENTATION.adoc` |
 | Toolchain versions, build commands, flash budget gate | `TOOLCHAIN.adoc` |

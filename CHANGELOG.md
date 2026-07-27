@@ -23,7 +23,7 @@ file is the human-readable summary of *what changed*.
 > unified release onward there is one timeline, with PIC10F320 changes recorded
 > as a sub-lane inside each entry.
 
-## [Unreleased]
+## [0.10.0] - 2026-07-27
 
 ### Added
 - **PIC10F320 as a release-supported target** — the fifth part, and the first
@@ -295,6 +295,10 @@ file is the human-readable summary of *what changed*.
 > child project, which landed the same TMR2 / 2 MHz / `ANSELA` work after the
 > fork. The pure debounce core and the output drivers are unchanged; the AVR
 > targets are unaffected.
+>
+> *(Historical note, added at the merge: that project is no longer separate — the
+> PIC10F320 target now lives in this repository. This entry is preserved as
+> written because it describes the state of the world at v0.9.2.)*
 
 ## [0.9.1] - 2026-07-04
 

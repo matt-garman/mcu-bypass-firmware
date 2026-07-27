@@ -1948,6 +1948,18 @@ clean-tests:
 	      test/avr/test_fuses \
 	      $(foreach v,$(VARIANTS),test/avr/test_sim_$(v) test/avr/test_trace_$(v)) \
 	      $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_sim_$(v)_t$(n)))
+	@# PIC10F320 host test artifacts. Unlike every other target's, these are
+	@# written into the chip's build directory rather than next to their sources
+	@# (§5.7), so the rm above cannot reach them -- and leaving them behind would
+	@# mean the next run silently reuses binaries built with the previous
+	@# workload sizing, which is the exact failure this target exists to prevent.
+	@# The .hex images are deliberately NOT removed: they are build output, not
+	@# test output, and `make clean` owns them.
+	rm -rf $(PIC320_COVERAGE_DIR)
+	rm -f $(PIC320_BUILD_DIR)/test_equiv $(PIC320_BUILD_DIR)/test_fault \
+	      $(PIC320_BUILD_DIR)/test_config_pic \
+	      $(foreach v,$(PIC320_VARIANTS_ALL),$(PIC320_BUILD_DIR)/test_actuation_$(v)) \
+	      $(PIC320_BUILD_DIR)/*.o
 
 # Golden-model unit tests: an INDEPENDENT host (PC) re-implementation of the
 # debounce algorithm. No AVR involved -- fast logic verification that the
@@ -3221,9 +3233,17 @@ pic320-size: $(PIC320_SRC)
 		echo "XC8 not found at $(PIC320_CC) (override with PIC320_CC=...)"; $(SKIP); \
 	fi; \
 	mkdir -p $(PIC320_BUILD_DIR); \
-	{ cd $(PIC320_BUILD_DIR) && $(PIC320_CC) $(PIC320_CFLAGS) $(CURDIR)/$(PIC320_SRC) \
-		-o size_probe_$(PIC320_VARIANT).hex 2>&1 | grep -A6 -E 'Memory Summary|Program space' || true; }; \
-	rm -f $(PIC320_BUILD_DIR)/size_probe_$(PIC320_VARIANT).hex
+	( cd $(PIC320_BUILD_DIR) && $(PIC320_CC) $(PIC320_CFLAGS) $(CURDIR)/$(PIC320_SRC) \
+		-o size_probe_$(PIC320_VARIANT).hex 2>&1 | grep -A6 -E 'Memory Summary|Program space' || true ); \
+	rm -f $(PIC320_BUILD_DIR)/size_probe_$(PIC320_VARIANT).*
+	@# A SUBSHELL for the cd, not a brace group -- `{ cd x && ...; }` leaves the
+	@# whole recipe shell inside x, so the cleanup below used to resolve to
+	@# build_pic10f320/build_pic10f320/... and silently delete nothing. The
+	@# leftovers were not cosmetic: a stray size_probe_*.hex sitting in the build
+	@# directory is picked up by scripts/verify-release-images.sh's fresh-image
+	@# glob and fails the release reproduction gate with a set mismatch.
+	@# The wildcard also removes XC8's .elf/.cmf/.s/.sdb/.sym/.hxl companions,
+	@# which the old .hex-only cleanup left behind even when it did run.
 
 # Two analyzers over the PIC10F320 shell, parallel to the AVR analyze-cppcheck /
 # analyze-misra and the PIC10F322 pic-analyze-*. STANDALONE (XC8/DFP headers may
