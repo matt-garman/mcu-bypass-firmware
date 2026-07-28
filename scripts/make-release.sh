@@ -13,8 +13,8 @@
 #   The trust model rests on two legs:
 #     1. PROVENANCE -- every released image carries a MANIFEST recording the git
 #        commit, the exact toolchain versions, the per-image fuse bytes / CONFIG
-#        word, and the validation evidence (test-long + pic-test + PIC target
-#        aggregate + 24-h soak).
+#        word, and the validation evidence (test-long + both pre-hardware and
+#        real-target PIC aggregates + 12-combination 24-h soak).
 #     2. REPRODUCIBILITY -- the Intel-HEX images are byte-deterministic for a
 #        fixed toolchain (objcopy ihex carries only code/data bytes, no
 #        timestamps/paths). SHA256SUMS pins those bytes; the tag-triggered CI
@@ -440,7 +440,7 @@ hash_pic_image_set() {
 # ============================================================================
 # 2. FULL PRE-HARDWARE GATES
 # ============================================================================
-section "2. validation: make test-long + make pic-test + PIC target aggregate"
+section "2. validation: test-long + both PIC chips' pre-hardware/target gates"
 log "running make test-long (exhaustive AVR suite + mutation)..."
 make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 >"$EVID/test-long.log" 2>&1 || { tail -40 "$EVID/test-long.log" >&2; die "make test-long FAILED."; }
 ok "test-long passed."

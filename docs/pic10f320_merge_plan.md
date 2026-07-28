@@ -10,16 +10,24 @@ phases, each of which leaves the tree green. Firmware source edits are
 the user's to make; the phases below call out which steps touch
 firmware vs. test/Makefile/docs.
 
-**Current status / erratum (2026-07-27).** Integration and release wiring are
-implemented, but the first unified release has **not** been cut. The most recent
-complete toolchain run, recorded at `0536615`, is historical: this branch's audit
-proved one of its reported 74 mutation kills came from a missing sandbox harness.
-The corrected topology therefore requires a fresh fail-closed 74/74 run and
-release rehearsal before `v0.9.6`. Later uses of “shipped”, “all killed”, or
-completed qualification in this working plan describe the phase checkpoint at
-its cited tip and are superseded by this status and
-`docs/pic10f320_validation.md`. The §6.12 hardware return-stack and rebuild-
-trigger rows have since been implemented; all eight parent-gate rows are closed.
+**Current status / erratum (2026-07-28).** Integration and release wiring are
+implemented, but the first unified release has **not** been cut. The original
+`0536615` mutation tally was invalidated by a missing sandbox harness. After the
+missing wrapper was restored, a later run exposed two additional sandbox
+gaps that skipped 18 PIC mutants. Repairing those two gaps re-earned a full
+74/74 run, and a clean full-tool `--dry-run` at `4b28210` built 15 images, passed
+all five gates, and passed all 12 soak combinations at the 60-second rehearsal
+duration. That closes the old “never rehearsed” claim, not production
+qualification.
+
+Substantial release and mutation-accounting hardening landed after that run. No
+exact-final-source production `QUALIFICATION`, 12-by-24-hour soak set, committed
+`release/v0.9.6/`, or unified tag-workflow publication exists. Later uses of
+“shipped”, “current tip”, “all killed”, or completed qualification in this
+working plan describe their cited historical phase checkpoint and are
+superseded by this status and `docs/pic10f320_validation.md`. The §6.12 hardware
+return-stack and rebuild-trigger rows are implemented; all eight parent-gate
+rows are closed.
 
 **Decision.** Consolidation is the right direction. The repositories have
 the same maintainer, product domain, toolchain family, behaviour contract,
@@ -1888,7 +1896,7 @@ the document it was when the requirement was set.
 - [x] Local release creation and tag CI handle PIC10F320 build prerequisites,
       validation, evidence, image metadata/programmer commands, reproduction,
       checksums, caveat links, and publication without generic-AVR fallthrough.
-      *(**Re-rehearsed green at the merged tip, 2026-07-28:** a full `--dry-run`
+      *(**Re-rehearsed green at the then-current merged tip, 2026-07-28:** a full `--dry-run`
       at `4b28210`, EXIT=0, against a clean tree — so the staged provenance SHA
       is the tip itself and not an approximation of it. 15 images matched to the
       canonical `RELEASE_IMAGES` set with 15/15 checksums, five gates, 12/12
@@ -1908,12 +1916,13 @@ the document it was when the requirement was set.
       Historical local run, retained for the record: a full `--dry-run` at
       `6c475ba`, EXIT=0 — 15 images matched to the canonical set, five gates,
       12/12 soaks, verifier re-run against the staged output.
-      **Caveat worth carrying into the release run:** `release.yml` is
-      written, parses, and asserts both device headers, but has never executed —
-      no tag has been pushed, so the tag-CI half is implemented rather than
-      exercised. The first `v0.9.6` push is its first run. The local rehearsal
-      cannot stand in for it: it exercises `make-release.sh`, not the tag
-      workflow that rebuilds on a clean runner and enforces hash reproduction.)*
+      **Caveat worth carrying into the release run:** the unified `release.yml`
+      contract — PIC10F320, retained `QUALIFICATION`, history/signature binding,
+      and current reproduction gates together — has never executed, because no
+      unified tag has been pushed. Historical tags exercised earlier revisions
+      of the workflow. The first `v0.9.6` push is the first run of this contract.
+      The local rehearsal cannot stand in for it: it exercises
+      `make-release.sh`, not the tag workflow on a clean runner.)*
 - [x] `make clean` and `clean-tests` remove every PIC10F320 build/test/coverage
       artifact; concurrent variant invocations use private outputs and pass.
       *(`make clean` leaves no `build_pic10f320/` and a clean `git status` after a
@@ -1933,8 +1942,12 @@ the document it was when the requirement was set.
       all v0.9.x work before the unified entry.
       *(The `Unreleased` section is prepared for `v0.9.6`, and the header note
       explains why the child's colliding `v0.9.0`–`v0.9.5` entries are deliberately
-      not back-filled. Add the release date and comparison link only when the
-      qualification and release run succeed.)*
+      not back-filled. Finalize release metadata and every pre-release status
+      statement intended to be in the tagged source **before** production
+      qualification. Any such edit between qualification and the artifact-only
+      release commit changes its required parent and forces a rerun. A separate
+      post-publication status update is outside the signed release ancestry and
+      does not retroactively invalidate it.)*
 - [x] ATtiny202's development-only/non-release status is explicit and
       implementation, canonical image set, soak claims, and documentation agree.
 - [x] `docs/pic10f320_special_case.md` is the sole assurance-caveat narrative;
@@ -1990,11 +2003,11 @@ the document it was when the requirement was set.
       entry and this plan both link the child URL, and archived repositories stay
       readable.
       **Rehearsed first, deliberately.** The `--dry-run` at `4b28210` (box above)
-      is green at the exact commit this release would tag, so the 24-hour run
-      starts from a documented predecessor rather than from confidence. What the
-      rehearsal does **not** cover is the part that only a real run reaches: the
-      full-duration soak, and `release.yml` on the pushed tag. Expect the first
-      `v0.9.6` push to be the tag workflow's first execution ever.)*
+      was green at its then-current clean source commit. It is now a documented
+      predecessor, not the commit production would qualify or tag: qualification,
+      history, build-matrix, mutation-accounting, and signature hardening landed
+      later. What the rehearsal does **not** cover is the full-duration soak or
+      the current unified `release.yml` contract on the pushed tag.)*
 
 ---
 
@@ -2787,11 +2800,12 @@ determinism (`test_workload_rebuild.sh`, `test_avr_build_rebuild.sh`) and stack
 bound (`test_stack_bound.sh`) were still open, the latter arguably the most
 relevant of all to a fully inlined `main()`.
 
-Subsequent status (2026-07-27): the final-HEX return-stack oracle described in
+Subsequent status (updated 2026-07-28): the final-HEX return-stack oracle described in
 §15.14 closes the stack-bound implementation gap, and §15.15's parameterized
 fake-tool regression closes rebuild triggering. All eight §6.12 rows now have
-implemented decisions. Current real-image return-stack and full-tool
-qualification evidence remain pending.
+implemented decisions. The three then-current real images passed the mandatory
+oracle during the `4b28210` dry rehearsal; exact-final-source real-image evidence
+and production qualification remain pending.
 
 *(Both closed 2026-07-27 by the third post-merge audit — see §12's §6.12 box for
 what each turned out to be. Both guesses recorded here were wrong in the same
@@ -3145,10 +3159,15 @@ bringing the PIC10F322 shell to parity with "the sibling child project", is
 preserved as written — it was true at v0.9.2 — with a dated annotation noting
 that project is no longer separate.
 
-**`CHANGELOG.md` prepared under `## [Unreleased]` for candidate `v0.9.6`.** Add
-the actual date and tag comparison link only after fresh qualification and the
-release run succeed; `make-release.sh` deliberately does not rewrite the
-changelog.
+**`CHANGELOG.md` prepared under `## [Unreleased]` for candidate `v0.9.6`.** The
+actual date, release header, comparison link, and status wording must be finalized
+and committed **before** fresh production qualification. `make-release.sh`
+deliberately does not rewrite the changelog, and current history binding requires
+the release-artifact commit to be an artifact-only child of the exact qualified
+source. A source/documentation edit inserted after qualification but before that
+artifact commit invalidates the relationship and requires a rerun. A later commit
+that merely records completed publication is not part of the signed release
+ancestry and does not alter the already-qualified/tagged commits.
 
 *(Phase 8 originally cut this entry as `## [0.10.0]`, on this plan's long-standing
 `v0.10.0` recommendation. **Renumbered to `v0.9.6` on 2026-07-27** — see §10 for
@@ -3263,14 +3282,15 @@ README is not. Leave this repository's two child references as they are — both
 are historical statements that were true when written, and both keep resolving
 against an archived repository.
 
-### 15.14 §6.12 hardware return stack — gate implemented, current evidence pending
+### 15.14 §6.12 hardware return stack — gate implemented; final evidence pending
 
 The stack-bound implementation gap is closed by
 `test/pic10f320/return_stack_oracle.py`, not by interpreting XC8's compiled-stack
 report. That distinction matters: the PIC10F320 resource at issue is its separate
 eight-entry hardware return stack, so the final instruction image is the direct
-evidence. Because current XC8 images have not run through it on this host, this
-does not close current-image qualification evidence.
+evidence. The three current-at-the-time images passed it during the `4b28210`
+dry rehearsal. That result predates later release hardening and was not retained
+as exact depth output, so it does not close final-source production evidence.
 
 The dependency-free oracle strictly parses Intel HEX and traverses every
 reachable `(PC, exact return-address stack)` state from reset. It models the
@@ -3302,9 +3322,9 @@ bypass the base build gate.
 
 The historical signed child `v0.9.5` images were inspected as decoder context and
 produce 3 / 3 / 4. They predate the merged-tree exact-TRISA firmware edit and do
-not attest the current images. XC8 is unavailable on the implementation host, so
-the first current-tip real-image result remains part of fresh qualification, not
-an outcome claimed by this closure.
+not attest the final release images. The `4b28210` images later passed the gate,
+but production qualification must rebuild and record the exact final-source
+images; no numeric depth from the rehearsal is claimed by this closure.
 
 ### 15.15 §6.12 rebuild triggering — gate implemented
 

@@ -69,8 +69,9 @@ file is the human-readable summary of *what changed*.
   build were all derived by globbing, so three "independent" checks agreed
   perfectly on a release with an entire MCU missing. They no longer can.
 - Three PIC10F320 full-duration soak combinations are required by the release
-  pipeline, which will add PIC10F320 images and their own CI artifact beginning
-  with the first successfully qualified unified release.
+  pipeline, which will add PIC10F320 images as release assets beginning with the
+  first successfully qualified unified release. Normal CI already publishes its
+  separate development artifact.
 - `make pic320-*` targets, `make help` entries for them, and a
   `docs/pic10f320_special_case.md` linked from the README, the design
   documentation, the release documentation and the generated release manifest.
@@ -97,6 +98,12 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- Qualification documentation now distinguishes historical phase evidence, the
+  clean but non-publishable `4b28210` full-tool rehearsal, and the still-missing
+  final-source production run. It no longer claims that corrected 74/74 mutation
+  execution and real-image stack gating never occurred, and the release guide
+  scopes the 12-soak/22-file `QUALIFICATION` contract to unified releases rather
+  than directing `v0.9.0` through `v0.9.5` to files and targets they predate.
 - Release publication now requires both cryptographic signatures promised by the
   trust model. CI verifies `SHA256SUMS.asc` and the exact remote annotated tag
   object against the checked-in public key and pinned full fingerprint before

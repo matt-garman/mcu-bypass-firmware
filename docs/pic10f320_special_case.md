@@ -1,10 +1,12 @@
 # PIC10F320 — the constrained target
 
 **Status:** integrated and wired into fail-closed release gates, but its first
-unified release is pending fresh full-tool qualification. It is architecturally
-different from every other target in this repository. This document is the
-single authoritative statement of that difference; current execution evidence
-lives in `docs/pic10f320_validation.md`.
+unified release is pending production qualification on the final source. A
+clean full-tool dry rehearsal passed at an earlier tip; it was non-publishable
+and predates later release hardening. It is architecturally different from every
+other target in this repository. This document is the single authoritative
+statement of that difference; execution evidence and its exact scope live in
+`docs/pic10f320_validation.md`.
 
 **Read this if** you are choosing an MCU, reviewing the assurance argument, or
 wondering why one firmware file looks unlike the rest of `src/`.
@@ -78,8 +80,11 @@ release gates and both run in CI on every push.
 behavioural equivalence argument, however thorough, is a different kind of
 statement from "the verified code is the shipped code". The honest summary is:
 *the PIC10F320's qualification design targets the same standard by a different
-and more elaborate route.* Historical runs exercised that route; the fresh
-full-tool run required for its first unified release is still pending.
+and more elaborate route.* Historical runs and the `4b28210` full-tool dry
+rehearsal exercised that route. Production qualification of the final source,
+including all 12 full-duration soaks, is still pending; checksum signing, the
+artifact-only release commit, and the unified signed-tag workflow follow that
+qualification and decide whether it is published.
 
 ## 4. One recorded omission: the output-latch match
 
@@ -190,8 +195,8 @@ carries the full defensive layer.
 **Use the PIC10F320 when it is a hard requirement** — cost, existing inventory,
 or an established board. It is an integrated, release-gated candidate held to
 the same robustness goal by the different route described above. Its images are
-planned to join prebuilt releases only after the pending qualification and first
-unified release succeed.
+planned to join prebuilt releases only after final-source production
+qualification and the first unified release succeed.
 
 ## 7. Where the rest of it lives
 

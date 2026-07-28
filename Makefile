@@ -4229,7 +4229,8 @@ print-%:
 #      is present (the inverse of the dev-time "skip cleanly" behaviour -- a
 #      release must never green-light on a tool that silently did nothing);
 #   2. clean-builds all AVR + PIC variant images;
-#   3. runs `make test-long` + `make pic-test` and ALL soak combos in parallel;
+#   3. runs `make test-long` plus both pre-hardware and real-target aggregates for
+#      PIC10F322 and PIC10F320, then ALL 12 soak combos in parallel;
 #   4. rechecks source HEAD + worktree cleanliness, then stages
 #      release/<VERSION>/ with the .hex images, SHA256SUMS, a provenance MANIFEST
 #      (toolchain versions, per-image fuse bytes / CONFIG word, flashing command,

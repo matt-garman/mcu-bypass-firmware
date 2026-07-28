@@ -240,7 +240,7 @@ expect_fail "canonical set read from the Makefile by default" \
 
 # Finally, the content of the real canonical set. Every check above works
 # equally well on a set that has quietly lost a whole MCU, so assert what the
-# Makefile actually declares: all four release-supported parts present, in the
+# Makefile actually declares: all five release-supported MCU parts present, in the
 # quantity the variant matrix implies, and ATtiny202 absent because it is
 # development-only (§10).
 canonical=$(cd "$ROOT" && make -s print-RELEASE_IMAGES) \

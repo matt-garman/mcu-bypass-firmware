@@ -6,8 +6,9 @@
 The source tree covers five intended release parts across three microcontroller
 families: the "AVR Classic" parts (ATtiny13a, ATtiny45, ATtiny85) and the
 Microchip PIC10F322 and PIC10F320. Published releases through `v0.9.5` predate
-the PIC10F320 merge; its first unified release remains pending fresh full-tool
-qualification. The development-only AVR-XT lane currently targets ATtiny202.
+the PIC10F320 merge; its first unified release remains pending production
+qualification on the final source (a prior full-tool dry rehearsal passed but is
+not publishable). The development-only AVR-XT lane currently targets ATtiny202.
 
 ## Targets
 
