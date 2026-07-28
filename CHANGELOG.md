@@ -127,6 +127,24 @@ file is the human-readable summary of *what changed*.
 - PIC10F320 mutation sandboxes now include the folded gpsim wrappers and stimuli,
   and the tool probe baselines every distinct kill command. A missing harness can
   no longer make the TMR2IF cadence mutant falsely count as killed.
+- The mutation sandbox now mirrors every test source at any depth instead of
+  four extensions one level down, restoring 18 PIC mutants that had been silently
+  skipped: `test/pic/find_pin_exact.h` never reached the sandbox, and it is a
+  prerequisite of both chips' soak binaries and all three target lanes. The
+  sandbox validator requires that header, and the self-test proves the copy
+  reaches three levels deep. The copy stays an extension allowlist by design —
+  `test/` also holds build products, and mirroring them with preserved mtimes
+  could make Make skip a rebuild and score a mutant against unmutated source.
+- The shared PIC gpsim preflight no longer consults the git index outside a work
+  tree, where `git ls-files` reports an empty mode that the guard read as a
+  failure. This made `pic320-test-gpsim` unrunnable inside the mutation sandbox;
+  the PIC10F322 lane had routed around the same obstacle, so only one chip was
+  affected. The local executable-bit check is unchanged and still unconditional.
+- Mutation skips now report whether a lane was disabled because a tool was
+  absent or because its baseline FAILED, and the closing advice no longer tells
+  the reader to install a toolchain that is already complete. With both sandbox
+  gaps closed, `make test-mutation MUTATION_ALLOW_SKIP=0` completes all 74
+  mutants — 74 killed, 0 survived, 0 errored, 0 skipped.
 - The PIC10F320 real-HEX target aggregate now requires explicit fault-injection,
   lock-step, and target-I/O completion markers, so a skipped or incomplete lane
   cannot be reported as a successful CI/release gate.

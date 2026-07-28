@@ -892,6 +892,20 @@ pic-analyze-misra: src/bypass_mcu_pic10f322.c $(PIC_HEADERS) $(MISRA_ADDON) $(MI
 # zero of its six scenarios (the wrappers exit 0 on a missing gpsim by design, so
 # nothing below the Make level could catch it). One definition, two callers.
 #
+# The two wrapper checks answer DIFFERENT questions and are therefore both
+# unconditional-where-meaningful rather than chained: `-x` asks whether this
+# checkout can run the script now, and the git-index mode asks whether CI's
+# checkout will be able to. Only the second needs a repository, so it is gated on
+# one -- an ungated `git ls-files` reports an empty mode outside a work tree,
+# which the guard then reads as "not 100755" and fails a tree that is perfectly
+# fine. That is not hypothetical either: the mutation harness copies the source
+# into a bare mktemp sandbox with no .git, so this lane failed its baseline
+# there, was scored as a skip, and surfaced to the user as "toolchain absent" on
+# a host whose toolchain was complete. A guard that cannot tell a broken tree
+# from a git-less one is worse than no guard, because it spends the reader's
+# trust. Outside a work tree there is no index to disagree with, so there is
+# nothing to check.
+#
 # $(1) is the chip label used in the skip diagnostic. Expands INSIDE the caller's
 # single shell -- like $(yasimavr_skip_if_absent) above -- so $(SKIP)'s `exit 0`
 # leaves the whole recipe rather than a sub-shell.
@@ -910,19 +924,22 @@ if ! command -v $(GPSIM) >/dev/null 2>&1; then \
 	echo "gpsim not installed; skipping $(1) gpsim register-level test"; $(SKIP); \
 fi; \
 guard=0; \
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then in_repo=1; else in_repo=0; fi; \
 for s in test/pic/run_gpsim_test.sh test/pic/run_gpsim_power_on_pressed.sh; do \
+	if [ ! -x "$$s" ]; then \
+		echo "ERROR: $$s lacks its local exec bit"; \
+		echo "       (e.g. a clone onto NFS that didn't honor the mode)."; \
+		echo "       CI is unaffected; this only blocks the local run."; \
+		echo "       Fix: chmod +x $$s"; \
+		guard=1; \
+	fi; \
+	[ $$in_repo -eq 1 ] || continue; \
 	mode=`git ls-files --stage -- "$$s" | cut -d' ' -f1`; \
 	if [ "$$mode" != "100755" ]; then \
 		echo "ERROR: $$s is not mode 100755 in git (found '$$mode')."; \
 		echo "       CI checks out git's mode, so a non-exec script fails as"; \
 		echo "       '/bin/sh: ...: Permission denied'."; \
 		echo "       Fix: git update-index --chmod=+x $$s   (then commit)"; \
-		guard=1; \
-	elif [ ! -x "$$s" ]; then \
-		echo "ERROR: $$s is 100755 in git but lacks its local exec bit"; \
-		echo "       (e.g. a clone onto NFS that didn't honor the mode)."; \
-		echo "       CI is unaffected; this only blocks the local run."; \
-		echo "       Fix: chmod +x $$s"; \
 		guard=1; \
 	fi; \
 done; \

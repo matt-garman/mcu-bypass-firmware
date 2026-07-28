@@ -1505,10 +1505,13 @@ premise that turned out to be false (§15.8), and then closed §6.12 outright by
 implementing its last two rows — stack bound and rebuild determinism.
 
 **A later audit invalidated the mutation tally quoted above as *current*
-evidence**; §5 of the validation record gives the failure mechanism. Treat the
-checkboxes below as an implementation ledger, not present release qualification.
-**33 of 36 boxes are closed; the
-three that are not are marked OPEN with what remains** — do not read an
+evidence**; §5 of the validation record gives the failure mechanism. That tally
+has since been **re-earned at the merged tip** — 74 killed / 0 survived / 0
+errored / 0 skipped — after two sandbox gaps that suppressed 18 PIC mutants were
+closed; the mutation box below records both. Treat the remaining checkboxes as an
+implementation ledger, not present release qualification.
+**34 of 36 boxes are closed; the
+two that are not are marked OPEN with what remains** — do not read an
 unticked box as an oversight, each says why. Where a box's own text names a pre-relocation path (`test/fault/…`,
 `test/pic/test_fault_pic.cc`), the work landed at the post-Phase-2 location
 (`test/pic10f320/…`); the box text is left as written so the plan still reads as
@@ -1818,15 +1821,36 @@ the document it was when the requirement was set.
       `pic320-variants` printed "all PIC10F320 variants built within budget"
       after building nothing, and now asserts the postcondition (every expected
       image present) instead of the loop's exit status.
-- [ ] **OPEN (fresh qualification).** `pic320-test-host`, selected/all-variant development tests,
-      `pic320-test-target-variants`, coverage, analysis, soak, build regression,
-      and mutation targets must pass under the documented tool policy at the
-      corrected tip.
+- [x] **Mutation lane re-qualified at the merged tip.**
+      `make test-mutation MUTATION_ALLOW_SKIP=0` now reports **74 killed / 0
+      survived / 0 errored / 0 skipped**, matching the historical tally at
+      `6c475ba` but re-earned under the corrected topology rather than inherited
+      from it.
+      The first post-merge run did **not** reach that: it stopped at 56 killed
+      with 18 PIC mutants skipped, reported as "toolchain absent" on a host whose
+      toolchain was complete. Both causes were merge-integration gaps in the
+      SANDBOX, not defects in the tree — every one of the seven probe baselines
+      passed in the real repository and failed inside the mutation sandbox.
+      1. `copy_tree` copied `c/cc/sh/stc` one level deep, so
+         `test/pic/find_pin_exact.h` — made a prerequisite of both chips' soak
+         binaries and all three `*-test-target` legs by `b4da21c` — never reached
+         the sandbox. This is the same omission fixed in `test_pic_rebuild.sh`
+         during the merge; there are two scratch-tree builders and only one was
+         updated. `copy_tree` is now a single `find` walk over an extension
+         allowlist at any depth, and the sandbox validator requires the header.
+      2. The shared gpsim preflight (`52d5751`) consulted the git index, which a
+         bare `mktemp` sandbox cannot satisfy, so `pic320-test-gpsim` failed its
+         baseline. The 322 lane had already met this and routed around it in
+         `pic_gpsim_run`; the workaround was applied to one chip and the other
+         quietly lost its lane. The index check is now gated on being inside a
+         work tree, with the `-x` check unconditional.
+      The 18 recovered mutants are not filler: they are the WPUA/TRISA/ANSELA SEU
+      guards, the relay 4 ms datasheet minimum, the mute window, and the un-pet
+      watchdog — all silently unenforced on this host while the summary reported
+      a clean sweep of what did run.
       *(Historical run at `6c475ba`: `pic320-test` EXIT=0,
       `pic320-test-target-variants` EXIT=0 — fault 22/22/22, lock-step 3005×3,
-      I/O 25/26/36 — and `test-mutation MUTATION_ALLOW_SKIP=0` at 74 killed / 0
-      survived / 0 errored / 0 skipped. The mutation tally was later invalidated;
-      rerun all real-tool lanes and the corrected mutation topology.)*
+      I/O 25/26/36.)*
 - [x] Default `test` / `test-long` remain compatible with their documented
       tool-independent semantics. Any full-tool all-target aggregate is
       explicitly named and documented.

@@ -152,42 +152,59 @@ copy_tree() {
     # whole dir so a sandbox build behaves exactly like the real tree; -a
     # preserves the executable bit the validator-present check relies on.
     cp -a "$PROJ_DIR/scripts" "$dst/"
-    # Shared shims/config live at the test root; the test programs themselves
-    # live in per-substrate subdirectories (host/ formal/ avr/ pic/). Recreate
-    # that tree so the Makefile's test/<sub>/test_*.c paths resolve in the
-    # sandbox. Iterating over the subdirs keeps this robust as substrates are
-    # added or renamed.
-    cp "$PROJ_DIR"/test/*.h "$dst/test/"
-    # PIC10F320's harnesses nest TWO levels deep (test/pic10f320/{equiv,actuation,
-    # fault,gpsim}/), which the single-level loop below cannot reach, and they
-    # include .stc gpsim scripts and .sh helpers that it does not copy either.
-    # Mirror that subtree wholesale; -a keeps the executable bit on
-    # check_fw_coverage.sh. Without this a PIC10F320 mutant builds against a
-    # sandbox missing its own harness and "dies" for the wrong reason -- an
-    # error, not a kill, but an equally misleading one.
-    if [ -d "$PROJ_DIR/test/pic10f320" ]; then
-        cp -a "$PROJ_DIR/test/pic10f320" "$dst/test/"
-    fi
-    for sub in "$PROJ_DIR"/test/*/; do
-        local name ext; name="$(basename "$sub")"
-        # C/C++ sources cover the compiled harnesses. Shell wrappers and .stc
-        # stimuli are equally load-bearing now that PIC10F320 reuses the shared
-        # test/pic gpsim entry points; omitting them makes a mutant die from a
-        # missing harness and falsely score as killed.
-        for ext in c cc sh stc; do
-            if compgen -G "$sub"*."$ext" >/dev/null 2>&1; then
-                mkdir -p "$dst/test/$name"
-                cp -a "$sub"*."$ext" "$dst/test/$name/"
-            fi
-        done
-    done
+    # Mirror every source file under test/, at ANY depth, filtered by extension.
+    # The allowlist is deliberate and must stay one: test/ also holds BUILD
+    # PRODUCTS (test/avr/test_sim_*, test/formal/klee-out/, __pycache__), and
+    # `cp -a` preserves mtimes -- a stale binary copied in newer than the source
+    # beside it makes Make skip the rebuild, so the mutant is scored against
+    # unmutated code. That is a silently WRONG answer, not a loud failure, which
+    # is the one outcome a mutation harness must never produce. A wholesale
+    # `cp -a test/` would buy convenience at exactly that price.
+    #
+    # Depth is what actually bit. The previous form copied test/*.h at the root
+    # and then looped over test/<sub>/ taking only c/cc/sh/stc, which left two
+    # whole classes invisible to every sandbox: headers in a subdirectory, and
+    # anything three levels down (test/pic/fw_coverage/). The casualty was
+    # test/pic/find_pin_exact.h -- a prerequisite of BOTH chips' soak binaries
+    # and all three pic*-test-target legs -- whose absence failed every PIC
+    # baseline. The probe reports a failed baseline as a skip, and the summary
+    # then blamed a "toolchain absent" on a host that had every tool.
+    #
+    # One find(1) walk covers root and subdirectories uniformly, so adding a
+    # substrate or nesting a harness needs no edit here -- the failure above was
+    # a maintenance burden coming due, not a one-off omission. It also subsumes
+    # the former test/pic10f320 wholesale special case (that subtree is
+    # c/cc/h/py/sh/stc throughout) while, unlike `cp -a` of a directory,
+    # declining to drag a stale __pycache__ in with it. -a still preserves the
+    # executable bit the gpsim wrappers and check_fw_coverage.sh depend on.
+    #
+    # Non-source data (test/misra*.{json,txt}, README.md) stays out: no mutation
+    # kill target reads it. Add the extension here if that ever changes.
+    while IFS= read -r -d '' src; do
+        local rel="${src#"$PROJ_DIR"/}"
+        mkdir -p "$dst/${rel%/*}"
+        cp -a "$src" "$dst/$rel"
+    done < <(find "$PROJ_DIR/test" -type f \
+        \( -name '*.c' -o -name '*.cc' -o -name '*.h' \
+           -o -name '*.sh' -o -name '*.stc' -o -name '*.py' \) \
+        -not -path '*/__pycache__/*' -not -path '*/klee-out/*' -print0)
 }
 
+# Fail CLOSED on an incomplete sandbox. Every entry here is a file whose absence
+# does not announce itself: the sandbox still builds, the baseline still runs,
+# and the probe records a plain FAIL that the summary reports as a skip -- so the
+# gate silently shrinks instead of breaking. find_pin_exact.h is on this list
+# because that is precisely what it did (see copy_tree), and it is worth being
+# blunt about why the list did not save us: it is hand-maintained, so it protects
+# only against gaps someone already thought of. The copy_tree walk above is the
+# real fix; this is the check that turns a future omission into one obvious line
+# instead of a misattributed toolchain complaint.
 validate_pic320_sandbox() {
     local root="$1" required ok=1
     for required in \
         test/pic/footswitch_toggle.stc \
         test/pic/power_on_pressed.stc \
+        test/pic/find_pin_exact.h \
         test/pic/test_soak_pic.cc; do
         if [ ! -f "$root/$required" ]; then
             echo "ERROR: PIC10F320 mutation sandbox is missing $required" >&2
@@ -227,17 +244,49 @@ if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
         exit 1
     fi
 
+    copy_tree "$SELFTEST_DIR"
+    rm -f "$SELFTEST_DIR/test/pic/find_pin_exact.h"
+    if validate_pic320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
+        echo "ERROR: mutation sandbox validator accepted a missing find_pin_exact.h" >&2
+        rm -rf "$SELFTEST_DIR"
+        exit 1
+    fi
+
+    # Depth regression, and the one check that would have caught the original
+    # defect. Everything above passes against a single-level copy: the files it
+    # asserts all sit at test/pic/. These two do not -- find_pin_exact.h needs a
+    # walk that takes headers from a subdirectory, fw_coverage_harness.h needs
+    # one that descends three levels -- so a copy_tree that regresses on either
+    # axis fails here rather than in a baseline, ten minutes later, wearing a
+    # "toolchain absent" label.
+    copy_tree "$SELFTEST_DIR"
+    for required in test/pic/find_pin_exact.h \
+                    test/pic/fw_coverage/fw_coverage_harness.h; do
+        if [ ! -f "$SELFTEST_DIR/$required" ]; then
+            echo "ERROR: mutation sandbox copy did not reach $required" >&2
+            rm -rf "$SELFTEST_DIR"
+            exit 1
+        fi
+    done
+
     rm -rf "$SELFTEST_DIR"
-    echo "mutation sandbox copy validation: 3 checks, 0 failures"
+    echo "mutation sandbox copy validation: 5 checks, 0 failures"
     exit 0
 fi
 
 # Run one PIC gpsim register-level check against a freshly built (mutated) HEX.
-# We build + drive the wrapper DIRECTLY rather than via `make pic-test-gpsim`,
-# because that target has a git-mode guard on its wrapper scripts that cannot
-# pass inside a non-git mktemp sandbox; the wrapper itself has no such guard. The
-# cd4053 variant with its full ENGAGED LATA (0x3) exercises the LED (RA0), the
-# footswitch read (RA3) and a control pin (RA1) in one run -- enough to kill
+# We build + drive the wrapper DIRECTLY rather than via `make pic-test-gpsim`.
+# That began as a workaround: the target's preflight checked its wrapper scripts'
+# mode in the git index, which no mktemp sandbox can satisfy. The workaround was
+# applied HERE and nowhere else, so the PIC10F320 lane -- which does go through
+# Make -- kept failing its baseline for a reason nobody could see from the
+# summary. The preflight now skips the index check outside a work tree, so both
+# routes work and this one is a deliberate choice rather than a dodge: it is one
+# process instead of a Make invocation per mutant, and it is the same call the
+# 322 probe makes, so probe and mutant cannot diverge.
+#
+# The cd4053 variant with its full ENGAGED LATA (0x3) exercises the LED (RA0),
+# the footswitch read (RA3) and a control pin (RA1) in one run -- enough to kill
 # every PIC gpsim mutant below. Returns nonzero (killed) on a build break or a
 # failed gpsim assertion.
 pic_gpsim_run() {
@@ -473,6 +522,16 @@ done
 PIC_GPSIM_OK=0
 PIC_SOAK_OK=0
 PIC_TARGET_OK=0
+# Why a lane ended up disabled, carried to the summary. "tools absent" and
+# "baseline FAILED" demand opposite responses from the reader -- install
+# something, versus go debug something -- and the summary used to assert the
+# former unconditionally, which is how a complete toolchain got blamed for a
+# sandbox bug. MUT_BASELINE_FAILED latches if ANY lane failed for the second
+# reason, so the closing advice can stop recommending a package install.
+PIC_SOAK_WHY="tools absent"
+PIC_TARGET_WHY="tools absent"
+PIC320_TOOL_WHY="tools absent"
+MUT_BASELINE_FAILED=0
 echo
 echo "=== PIC toolchain probe (gates the PIC-shell mutants) ==="
 PIC_BASE="$(mktemp -d)"
@@ -494,12 +553,16 @@ if command -v "$GPSIM" >/dev/null 2>&1 && [ -f "$PIC_BASE_HEX" ]; then
                 PIC_SOAK_OK=1
                 echo "gpsim-dev + glib + c++ present, soak baseline PASS -> WDT mutant ENABLED"
             else
+                PIC_SOAK_WHY="baseline FAILED"
+                MUT_BASELINE_FAILED=1
                 echo "soak baseline did not pass cleanly -> WDT (soak) mutant SKIPPED"
             fi
             if make -C "$PIC_BASE" pic-test-target-variants >/dev/null 2>&1; then
                 PIC_TARGET_OK=1
                 echo "target aggregate baseline PASS -> PIC target mutants ENABLED"
             else
+                PIC_TARGET_WHY="baseline FAILED"
+                MUT_BASELINE_FAILED=1
                 echo "target aggregate baseline did not pass cleanly -> PIC target mutants SKIPPED"
             fi
         else
@@ -552,6 +615,8 @@ if make -C "$P320_BASE" pic320-variants >/dev/null 2>&1 \
         PIC320_TOOL_OK=1
         echo "XC8 + gpsim + libgpsim present, all baselines PASS -> PIC10F320 tool mutants ENABLED"
     else
+        PIC320_TOOL_WHY="baseline FAILED"
+        MUT_BASELINE_FAILED=1
         echo "a PIC10F320 kill-target baseline failed -> its tool mutants SKIPPED"
     fi
 else
@@ -648,13 +713,13 @@ if [ "$PIC_GPSIM_OK" -eq 1 ]; then
     if [ "$PIC_SOAK_OK" -eq 1 ]; then
         msg="$msg + libgpsim soak WDT"
     else
-        msg="$msg; soak WDT skipped"
+        msg="$msg; soak WDT skipped ($PIC_SOAK_WHY)"
         pic_skipped=$((pic_skipped + ${#PIC_SOAK_MUTATIONS[@]}))
     fi
     if [ "$PIC_TARGET_OK" -eq 1 ]; then
         msg="$msg + target aggregate"
     else
-        msg="$msg; target aggregate skipped"
+        msg="$msg; target aggregate skipped ($PIC_TARGET_WHY)"
         pic_skipped=$((pic_skipped + ${#PIC_TARGET_MUTATIONS[@]}))
     fi
     echo "$msg)"
@@ -665,7 +730,7 @@ fi
 if [ "$PIC320_TOOL_OK" -eq 1 ]; then
     echo "PIC10F320 mutants: RAN (host lanes + gpsim/libgpsim/soak)"
 else
-    echo "PIC10F320 mutants: host lanes RAN; target/soak SKIPPED (toolchain absent)"
+    echo "PIC10F320 mutants: host lanes RAN; target/soak SKIPPED ($PIC320_TOOL_WHY)"
     pic_skipped=$((pic_skipped + ${#PIC320_TOOL_MUTATIONS[@]}))
 fi
 echo "=== mutation summary: $killed killed, $survived survived, $errored errored, $pic_skipped PIC skipped ==="
@@ -678,7 +743,16 @@ if [ "$survived" -ne 0 ] || [ "$errored" -ne 0 ]; then
 fi
 if [ "$pic_skipped" -ne 0 ] && [ "$MUTATION_ALLOW_SKIP" -ne 1 ]; then
     echo "ERROR: $pic_skipped PIC mutant(s) skipped; complete mutation gate did not run." >&2
-    echo "       Install the PIC toolchain/libgpsim stack, or set MUTATION_ALLOW_SKIP=1 for an explicitly partial local run." >&2
+    if [ "$MUT_BASELINE_FAILED" -eq 1 ]; then
+        echo "       At least one lane skipped because its BASELINE FAILED, not because a" >&2
+        echo "       tool is missing: the UNMUTATED tree did not pass a kill target. Do not" >&2
+        echo "       install anything -- re-run the target named above by hand, since the" >&2
+        echo "       probe discards its output. Note it may fail only INSIDE the mktemp" >&2
+        echo "       sandbox, which is a copy_tree gap rather than a defect in the tree." >&2
+    else
+        echo "       Install the PIC toolchain/libgpsim stack, or set MUTATION_ALLOW_SKIP=1" >&2
+        echo "       for an explicitly partial local run." >&2
+    fi
     exit 1
 fi
 if [ "$pic_skipped" -ne 0 ]; then
