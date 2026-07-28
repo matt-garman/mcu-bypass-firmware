@@ -1871,8 +1871,11 @@ the document it was when the requirement was set.
       *(`test_soak_timing.sh` 40 checks, 0 failures, including that the liveness
       interval reaches all three lanes and that the 320 combos exist at all — the
       grep alone would pass vacuously if the loop building them were deleted.
-      12/12 combos PASS in the dry run, the three PIC10F320 ones at full duration
-      rather than a shortened smoke.)*
+      12/12 combos PASS in the `6c475ba` dry run, the three PIC10F320 ones at
+      full duration rather than a shortened smoke. Named by commit because there
+      are now two rehearsals and only that one ran the 320 lanes long: the
+      `4b28210` re-rehearsal took the `--dry-run` default of 60 s for every
+      combo, so it re-proves the routing, not the duration.)*
 - [x] One canonical expected-product set requires all three PIC10F320 images.
       Removing them from committed files, checksums, and fresh builds still
       fails a regression test.
@@ -1884,12 +1887,32 @@ the document it was when the requirement was set.
 - [x] Local release creation and tag CI handle PIC10F320 build prerequisites,
       validation, evidence, image metadata/programmer commands, reproduction,
       checksums, caveat links, and publication without generic-AVR fallthrough.
-      *(Historical local run: a full `--dry-run` at `6c475ba`, EXIT=0 — 15 images
-      matched to the canonical set, five gates, 12/12 soaks, verifier re-run
-      against the staged output. **Caveat worth carrying into the release run:** `release.yml` is
+      *(**Re-rehearsed green at the merged tip, 2026-07-28:** a full `--dry-run`
+      at `4b28210`, EXIT=0, against a clean tree — so the staged provenance SHA
+      is the tip itself and not an approximation of it. 15 images matched to the
+      canonical `RELEASE_IMAGES` set with 15/15 checksums, five gates, 12/12
+      soak combos PASS **at the 60 s rehearsal duration** (`wdt_resets=0
+      liveness_fails=0` on all six PIC lanes) — a routing and plumbing result,
+      explicitly not a duration result — the MANIFEST carrying its
+      `DRY RUN -- NOT A VALIDATED RELEASE` banner, and nothing written into
+      `release/`. `scripts/ci-local.sh` ran green in the same pass.
+      This run is the **first execution of the dual-compiler provenance** the
+      merge added: the manifest records `PIC10F322 XC8 (PIC_CC=…)` and
+      `PIC10F320 XC8 (PIC320_CC=…)` as separate target-qualified rows, both
+      V3.10, rather than attributing both PIC image families to `PIC_CC`. That
+      matters for what the earlier evidence can be asked to support —
+      `59260fc` is **not** an ancestor of `6c475ba`, so the historical
+      `--dry-run` below proved the release *shape* but ran the single-compiler
+      code path. It is superseded here rather than relied on.
+      Historical local run, retained for the record: a full `--dry-run` at
+      `6c475ba`, EXIT=0 — 15 images matched to the canonical set, five gates,
+      12/12 soaks, verifier re-run against the staged output.
+      **Caveat worth carrying into the release run:** `release.yml` is
       written, parses, and asserts both device headers, but has never executed —
       no tag has been pushed, so the tag-CI half is implemented rather than
-      exercised. The first `v0.9.6` push is its first run.)*
+      exercised. The first `v0.9.6` push is its first run. The local rehearsal
+      cannot stand in for it: it exercises `make-release.sh`, not the tag
+      workflow that rebuilds on a clean runner and enforces hash reproduction.)*
 - [x] `make clean` and `clean-tests` remove every PIC10F320 build/test/coverage
       artifact; concurrent variant invocations use private outputs and pass.
       *(`make clean` leaves no `build_pic10f320/` and a clean `git status` after a
@@ -1964,7 +1987,13 @@ the document it was when the requirement was set.
       combos, then tagging and signing, then the child pointer and archival — in
       that order, per §7. Archive rather than delete: the annotated changelog
       entry and this plan both link the child URL, and archived repositories stay
-      readable.)*
+      readable.
+      **Rehearsed first, deliberately.** The `--dry-run` at `4b28210` (box above)
+      is green at the exact commit this release would tag, so the 24-hour run
+      starts from a documented predecessor rather than from confidence. What the
+      rehearsal does **not** cover is the part that only a real run reaches: the
+      full-duration soak, and `release.yml` on the pushed tag. Expect the first
+      `v0.9.6` push to be the tag workflow's first execution ever.)*
 
 ---
 
