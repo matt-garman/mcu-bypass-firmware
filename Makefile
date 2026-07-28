@@ -8,12 +8,74 @@ _MAKE_SERIAL_WORKTREE_ID := $(shell stat -Lc '%d:%i' . 2>/dev/null)
 ifeq ($(_MAKE_SERIAL_WORKTREE_ID),)
 $(error ERROR: stat is required to identify the worktree serialization lock)
 endif
+# Matrix requests can arrive as recursive command-line variables. Preserve their
+# literal words without expanding embedded GNU Make functions, expose only known
+# names to rule generation, and forward safe metadata through the serialization
+# submake so inner recipes can still distinguish empty/duplicate/unknown input.
+override CLASSIC_VARIANTS_SUPPORTED := cd4053 mute relay
+override PIC320_VARIANTS_SUPPORTED := cd4053-simple cd4053-mute tq2-relay
+
+_MAKE_SERIAL_VARIANTS_ORIGIN := $(origin VARIANTS)
+ifeq ($(_MAKE_SERIAL_VARIANTS_ORIGIN),undefined)
+_MAKE_SERIAL_VARIANTS_REQUESTED := $(CLASSIC_VARIANTS_SUPPORTED)
+else
+_MAKE_SERIAL_VARIANTS_REQUESTED := $(value VARIANTS)
+endif
+_MAKE_SERIAL_VARIANTS_SAFE := $(filter $(CLASSIC_VARIANTS_SUPPORTED),$(_MAKE_SERIAL_VARIANTS_REQUESTED))
+_MAKE_SERIAL_CLASSIC_EMPTY_COMPUTED := $(if $(strip $(_MAKE_SERIAL_VARIANTS_REQUESTED)),0,1)
+_MAKE_SERIAL_CLASSIC_UNKNOWN_COMPUTED := $(if $(filter-out $(CLASSIC_VARIANTS_SUPPORTED),$(_MAKE_SERIAL_VARIANTS_REQUESTED)),1,0)
+ifneq ($(words $(_MAKE_SERIAL_VARIANTS_REQUESTED)),$(words $(sort $(_MAKE_SERIAL_VARIANTS_REQUESTED))))
+_MAKE_SERIAL_CLASSIC_DUPLICATE_COMPUTED := 1
+else
+_MAKE_SERIAL_CLASSIC_DUPLICATE_COMPUTED := 0
+endif
+
+_MAKE_SERIAL_PIC320_VARIANTS_ORIGIN := $(origin PIC320_VARIANTS_ALL)
+ifeq ($(_MAKE_SERIAL_PIC320_VARIANTS_ORIGIN),undefined)
+_MAKE_SERIAL_PIC320_VARIANTS_REQUESTED := $(PIC320_VARIANTS_SUPPORTED)
+else
+_MAKE_SERIAL_PIC320_VARIANTS_REQUESTED := $(value PIC320_VARIANTS_ALL)
+endif
+_MAKE_SERIAL_PIC320_VARIANTS_SAFE := $(filter $(PIC320_VARIANTS_SUPPORTED),$(_MAKE_SERIAL_PIC320_VARIANTS_REQUESTED))
+_MAKE_SERIAL_PIC320_EMPTY_COMPUTED := $(if $(strip $(_MAKE_SERIAL_PIC320_VARIANTS_REQUESTED)),0,1)
+_MAKE_SERIAL_PIC320_UNKNOWN_COMPUTED := $(if $(filter-out $(PIC320_VARIANTS_SUPPORTED),$(_MAKE_SERIAL_PIC320_VARIANTS_REQUESTED)),1,0)
+ifneq ($(words $(_MAKE_SERIAL_PIC320_VARIANTS_REQUESTED)),$(words $(sort $(_MAKE_SERIAL_PIC320_VARIANTS_REQUESTED))))
+_MAKE_SERIAL_PIC320_DUPLICATE_COMPUTED := 1
+else
+_MAKE_SERIAL_PIC320_DUPLICATE_COMPUTED := 0
+endif
+
+ifeq ($(origin _MAKE_SERIAL_CLASSIC_EMPTY),environment)
+override CLASSIC_VARIANTS_REQUEST_EMPTY := $(value _MAKE_SERIAL_CLASSIC_EMPTY)
+override CLASSIC_VARIANTS_REQUEST_DUPLICATE := $(value _MAKE_SERIAL_CLASSIC_DUPLICATE)
+override CLASSIC_VARIANTS_REQUEST_UNKNOWN := $(value _MAKE_SERIAL_CLASSIC_UNKNOWN)
+else
+override CLASSIC_VARIANTS_REQUEST_EMPTY := $(_MAKE_SERIAL_CLASSIC_EMPTY_COMPUTED)
+override CLASSIC_VARIANTS_REQUEST_DUPLICATE := $(_MAKE_SERIAL_CLASSIC_DUPLICATE_COMPUTED)
+override CLASSIC_VARIANTS_REQUEST_UNKNOWN := $(_MAKE_SERIAL_CLASSIC_UNKNOWN_COMPUTED)
+endif
+ifeq ($(origin _MAKE_SERIAL_PIC320_EMPTY),environment)
+override PIC320_VARIANTS_REQUEST_EMPTY := $(value _MAKE_SERIAL_PIC320_EMPTY)
+override PIC320_VARIANTS_REQUEST_DUPLICATE := $(value _MAKE_SERIAL_PIC320_DUPLICATE)
+override PIC320_VARIANTS_REQUEST_UNKNOWN := $(value _MAKE_SERIAL_PIC320_UNKNOWN)
+else
+override PIC320_VARIANTS_REQUEST_EMPTY := $(_MAKE_SERIAL_PIC320_EMPTY_COMPUTED)
+override PIC320_VARIANTS_REQUEST_DUPLICATE := $(_MAKE_SERIAL_PIC320_DUPLICATE_COMPUTED)
+override PIC320_VARIANTS_REQUEST_UNKNOWN := $(_MAKE_SERIAL_PIC320_UNKNOWN_COMPUTED)
+endif
+override VARIANTS := $(_MAKE_SERIAL_VARIANTS_SAFE)
+override PIC320_VARIANTS_ALL := $(_MAKE_SERIAL_PIC320_VARIANTS_SAFE)
+
+_make_shell_quote = '$(subst ','"'"',$(1))'
 ifneq ($(findstring q,$(firstword $(MAKEFLAGS))),)
 override _MAKE_SERIAL_LOCK_HELD := $(_MAKE_SERIAL_WORKTREE_ID)
 endif
 
 ifeq ($(_MAKE_SERIAL_LOCK_HELD),$(_MAKE_SERIAL_WORKTREE_ID))
 export _MAKE_SERIAL_LOCK_HELD
+unexport _MAKE_SERIAL_CLASSIC_EMPTY _MAKE_SERIAL_CLASSIC_DUPLICATE \
+         _MAKE_SERIAL_CLASSIC_UNKNOWN _MAKE_SERIAL_PIC320_EMPTY \
+         _MAKE_SERIAL_PIC320_DUPLICATE _MAKE_SERIAL_PIC320_UNKNOWN
 
 ################################################################################
 # bypass -- build / test / flash Makefile
@@ -137,9 +199,11 @@ F_CPU_X5   = 1000000UL
 # The hardware-agnostic core (bypass_mcu_avr_classic.c) links against exactly one output
 # driver. A variant is identified by a short name; each maps to the -D selector
 # macro the firmware/tests compile with and to its driver source file. To add a
-# variant: add its short name here and define macro_<name>/src_<name> below.
+# variant: add its short name to the immutable supported set and define
+# macro_<name>/src_<name> below. VARIANTS remains caller-selectable for
+# development targets; production matrix gates compare it with the supported set.
 CORE_SRC = src/bypass_mcu_avr_classic.c src/bypass_pure.c
-VARIANTS = cd4053 mute relay
+override CLASSIC_VARIANTS_UNKNOWN := $(if $(filter 1,$(CLASSIC_VARIANTS_REQUEST_UNKNOWN)),invalid,)
 
 # variant short name -> firmware -D selector macro
 macro_cd4053      = CD4053_SIMPLE
@@ -232,8 +296,8 @@ override STACK_SOURCES := src/bypass_mcu_avr_classic.c src/bypass_pure.c \
 FLASH_T13_BUDGET ?= 90
 override FLASH_T13_MCU := attiny13a
 override FLASH_T13_BYTES := 1024
-override FLASH_T13_VARIANTS := cd4053 mute relay
-override FLASH_T13_UNKNOWN := $(filter-out $(FLASH_T13_VARIANTS),$(VARIANTS))
+override FLASH_T13_VARIANTS := $(CLASSIC_VARIANTS_SUPPORTED)
+override FLASH_T13_UNKNOWN := $(CLASSIC_VARIANTS_UNKNOWN)
 override FLASH_T13_ELFS := $(AVR_BUILD_DIR)/bypass_cd4053.elf \
                           $(AVR_BUILD_DIR)/bypass_mute.elf \
                           $(AVR_BUILD_DIR)/bypass_relay.elf
@@ -564,19 +628,34 @@ $(foreach n,$(TINYX5),$(eval HEX_t$(n) := $(foreach v,$(VARIANTS),$(AVR_FW)_$(v)
 # Default goal: build every ATtiny13a variant image and print sizes.
 all: all13
 
+# Reject malformed classic-output requests before an aggregate can report a
+# successful empty or filtered build. Individual recognized subsets remain valid
+# development requests; release and PIC producers impose their stricter matrices.
+.PHONY: classic-variant-request-valid
+classic-variant-request-valid:
+	@if [ "$(CLASSIC_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS must not be empty"; exit 2; \
+	fi; \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_UNKNOWN)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS contains unsupported names; supported: $(CLASSIC_VARIANTS_SUPPORTED)"; exit 2; \
+	fi; \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_DUPLICATE)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS must not contain duplicate names"; exit 2; \
+	fi
+
 # Build all ATtiny13a variant firmwares (.hex) + print sizes.
-all13: $(ALL_HEX13) size
+all13: classic-variant-request-valid $(ALL_HEX13) size
 
 # Report flash/RAM usage of every ATtiny13a variant build.
-size: $(ALL_ELF13)
+size: classic-variant-request-valid $(ALL_ELF13)
 	@for e in $(ALL_ELF13); do echo "== $$e =="; $(SIZE) --mcu=$(MCU) -C $$e; done
 
 # Per-tinyx5-chip build + size targets: all85/size85, all45/size45, ...
 # $(call MCU_X5_BUILD_TARGETS,chip-number)
 define MCU_X5_BUILD_TARGETS
 .PHONY: all$(1) size$(1)
-all$(1): $$(HEX_t$(1)) size$(1)
-size$(1): $$(ELF_t$(1))
+all$(1): classic-variant-request-valid $$(HEX_t$(1)) size$(1)
+size$(1): classic-variant-request-valid $$(ELF_t$(1))
 	@for e in $$(ELF_t$(1)); do echo "== $$$$e =="; $$(SIZE) --mcu=$$(mmcu_$(1)) -C $$$$e; done
 endef
 $(foreach n,$(TINYX5),$(eval $(call MCU_X5_BUILD_TARGETS,$(n))))
@@ -612,10 +691,10 @@ PIC_CHIP  ?= 10F322
 PIC_TAG   ?= pic10f322
 PIC_XTAL  ?= 2000000UL
 PIC_BUILD_DIR ?= build_pic
-PIC_HEXES = $(foreach v,$(VARIANTS),$(PIC_BUILD_DIR)/$(FW_BASE)_$(v)_$(PIC_TAG).hex)
-PIC_ASSEMBLIES = $(PIC_HEXES:.hex=.s)
-PIC_SYMBOLS = $(PIC_HEXES:.hex=.sym)
-PIC_BUILD_PRODUCTS = $(PIC_HEXES) $(PIC_ASSEMBLIES) $(PIC_SYMBOLS)
+override PIC_HEXES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(PIC_BUILD_DIR)/$(FW_BASE)_$(v)_$(PIC_TAG).hex)
+override PIC_ASSEMBLIES := $(PIC_HEXES:.hex=.s)
+override PIC_SYMBOLS := $(PIC_HEXES:.hex=.sym)
+override PIC_BUILD_PRODUCTS := $(PIC_HEXES) $(PIC_ASSEMBLIES) $(PIC_SYMBOLS)
 # PIC10F322 device budget: 512 words flash / 64 B RAM.
 PIC_FLASH_WORDS ?= 512
 # gpsim simulator + processor name for the register-level functional test.
@@ -692,7 +771,19 @@ PIC_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 --platform=pic8-enh
 # a shell loop). Sources are passed as make-time absolute paths so the compiler
 # can run with its cwd in PIC_BUILD_DIR.
 .PHONY: pic
-pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v)))
+pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(src_$(v)))
+	@if [ "$(CLASSIC_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS must not be empty"; exit 2; \
+	fi; \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_DUPLICATE)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS must not contain duplicate names"; exit 2; \
+	fi; \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_UNKNOWN)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS contains unsupported names; supported: $(CLASSIC_VARIANTS_SUPPORTED)"; exit 2; \
+	fi; \
+	if [ "$(if $(filter-out $(VARIANTS),$(CLASSIC_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
+		echo "FAIL: VARIANTS must contain every supported name; required: $(CLASSIC_VARIANTS_SUPPORTED)"; exit 2; \
+	fi
 	@rm -f $(PIC_BUILD_PRODUCTS)
 	@if [ ! -x "$(PIC_CC)" ] && ! command -v $(PIC_CC) >/dev/null 2>&1; then \
 		echo "XC8 not found at $(PIC_CC); skipping PIC build (override with PIC_CC=...)"; \
@@ -724,12 +815,9 @@ pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v)))
 	if [ "$$budget" = 0 ]; then \
 		echo "FAIL: PIC_FLASH_WORDS must be a positive decimal integer"; exit 1; \
 	fi; \
-	if [ "$(words $(strip $(VARIANTS)))" -eq 0 ]; then \
-		echo "FAIL: VARIANTS is empty; no PIC images requested"; exit 2; \
-	fi; \
 	echo "=== PIC10F322 build + flash-budget ($$budget words) ==="; \
 	fail=0; \
-	for v in $(VARIANTS); do \
+	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
 		case $$v in \
 			*mute)  m=CD4053_WITH_MUTE; drv=src/bypass_output_cd4053_with_mute.c ;; \
 			*relay) m=TQ2_L2_5V_RELAY;  drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
@@ -953,7 +1041,7 @@ endef
 pic-test-gpsim: pic
 	@$(call gpsim_wrapper_preflight,PIC10F322); \
 	fail=0; \
-	for v in $(VARIANTS); do \
+	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
 		case $$v in \
 			*mute)  el=0x7 ;; \
 			*relay) el=0x1 ;; \
@@ -1017,7 +1105,7 @@ pic-test-stack-bound: pic
 	@# One shell: skip only when the build produced no HEX. A current HEX without
 	@# its freshly generated assembly is a failed gate, never an absent-tool skip.
 	@have_hex=0; \
-	for v in $(VARIANTS); do \
+	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
 		hex="$(PIC_BUILD_DIR)/$(FW_BASE)_$${v}_$(PIC_TAG).hex"; \
 		if [ -e "$$hex" ] || [ -L "$$hex" ]; then have_hex=1; fi; \
 	done; \
@@ -1025,7 +1113,7 @@ pic-test-stack-bound: pic
 		echo "no PIC10F322 HEX in $(PIC_BUILD_DIR)/ (XC8 absent?); skipping stack-depth gate"; \
 		$(SKIP); \
 	fi; \
-	for v in $(VARIANTS); do \
+	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
 		hex="$(PIC_BUILD_DIR)/$(FW_BASE)_$${v}_$(PIC_TAG).hex"; \
 		asm="$(PIC_BUILD_DIR)/$(FW_BASE)_$${v}_$(PIC_TAG).s"; \
 		if [ ! -f "$$hex" ] || [ -L "$$hex" ] || [ ! -s "$$hex" ]; then \
@@ -1350,7 +1438,7 @@ pic-test-io: pic
 # markers, so a missing compiler/header, missing ctx_ symbol, or partial run fails
 # CI/release instead of masquerading as green.
 PIC_TARGET_VARIANT ?= cd4053
-override PIC_TARGET_VARIANTS_SUPPORTED := cd4053 mute relay
+override PIC_TARGET_VARIANTS_SUPPORTED := $(CLASSIC_VARIANTS_SUPPORTED)
 .PHONY: pic-test-target pic-test-target-variants
 pic-test-target:
 	@set -e; \
@@ -1372,19 +1460,19 @@ pic-test-target:
 	@echo "=== PIC target fault/lock-step/I-O PASS (variant $(PIC_TARGET_VARIANT)) ==="
 
 pic-test-target-variants:
-	@if [ "$(if $(strip $(VARIANTS)),yes,no)" != yes ]; then \
+	@if [ "$(CLASSIC_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
 		echo "FAIL: VARIANTS must not be empty" >&2; exit 2; \
 	fi; \
-	if [ "$(words $(VARIANTS))" -ne "$(words $(sort $(VARIANTS)))" ]; then \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_DUPLICATE)" -eq 1 ]; then \
 		echo "FAIL: VARIANTS must not contain duplicate names" >&2; exit 2; \
 	fi; \
-	if [ "$(if $(filter-out $(PIC_TARGET_VARIANTS_SUPPORTED),$(VARIANTS)),yes,no)" = yes ]; then \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_UNKNOWN)" -eq 1 ]; then \
 		echo "FAIL: VARIANTS contains unsupported names; supported: $(PIC_TARGET_VARIANTS_SUPPORTED)" >&2; exit 2; \
 	fi; \
 	if [ "$(if $(filter-out $(VARIANTS),$(PIC_TARGET_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
 		echo "FAIL: VARIANTS must contain every supported name; required: $(PIC_TARGET_VARIANTS_SUPPORTED)" >&2; exit 2; \
 	fi
-	@for v in $(VARIANTS); do \
+	@for v in $(PIC_TARGET_VARIANTS_SUPPORTED); do \
 		echo "===================== PIC TARGET VARIANT $$v ====================="; \
 		$(MAKE) --no-print-directory PIC_TARGET_VARIANT=$$v pic-test-target || exit 1; \
 	done
@@ -1530,7 +1618,7 @@ XT_TAG       ?= attiny202
 XT_F_CPU     ?= 2000000UL
 override XT_VARIANTS_SUPPORTED := cd4053 mute relay
 override XT_VARIANTS_REQUESTED := $(filter $(XT_VARIANTS_SUPPORTED),$(VARIANTS))
-override XT_VARIANTS_UNKNOWN := $(filter-out $(XT_VARIANTS_SUPPORTED),$(VARIANTS))
+override XT_VARIANTS_UNKNOWN := $(CLASSIC_VARIANTS_UNKNOWN)
 # The shell + the unchanged pure core (the AVR-classic counterpart is CORE_SRC).
 XT_CORE_SRC = src/bypass_mcu_avr_xt.c src/bypass_pure.c
 # Headers that, if changed, should rebuild the XT images: the FW_HEADERS set with
@@ -1575,13 +1663,13 @@ attiny202: | $(XT_BUILD_DIR)
 	if ! awk -v t="$(XT_FLASH_BYTES)" 'BEGIN {exit !(t ~ /^[0-9]+$$/ && t ~ /[1-9]/)}'; then \
 		echo "FAIL: XT_FLASH_BYTES must be a positive decimal integer"; exit 2; \
 	fi; \
-	if [ "$(words $(strip $(VARIANTS)))" -eq 0 ]; then \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
 		echo "FAIL: VARIANTS is empty; no ATtiny202 images requested"; exit 2; \
 	fi; \
 	if [ "$(words $(XT_VARIANTS_UNKNOWN))" -ne 0 ]; then \
 		echo "FAIL: VARIANTS contains an unsupported ATtiny202 variant"; exit 2; \
 	fi; \
-	if [ "$(words $(strip $(VARIANTS)))" -ne "$(words $(sort $(VARIANTS)))" ]; then \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_DUPLICATE)" -eq 1 ]; then \
 		echo "FAIL: VARIANTS contains a duplicate ATtiny202 variant"; exit 2; \
 	fi; \
 	set -- $(XT_VARIANTS_REQUESTED); \
@@ -2134,7 +2222,7 @@ test-gpsim-wrappers:
 	./test/test_gpsim_wrappers.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 30/70 counts,
+# image/host rebuild triggering. The script enforces the canonical 36/71 counts,
 # so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
@@ -3108,11 +3196,8 @@ PIC320_COVERAGE_DIR := $(PIC320_BUILD_DIR)/coverage
 
 # --- output variant ----------------------------------------------------------
 PIC320_VARIANT      ?= cd4053-simple
-PIC320_VARIANTS_ALL := cd4053-simple cd4053-mute tq2-relay
-# The authoritative supported set, `override` so a command-line
-# PIC320_VARIANTS_ALL cannot also redefine what counts as supported --
-# otherwise an unsupported-name matrix could whitelist itself.
-override PIC320_VARIANTS_SUPPORTED := cd4053-simple cd4053-mute tq2-relay
+# The authoritative supported set and sanitized request are established before
+# serialization so command-line matrix text cannot execute during recursive Make.
 
 ifeq ($(PIC320_VARIANT),cd4053-simple)
   PIC320_OUTPUT_MACRO := OUTPUT_CD4053_SIMPLE
@@ -3127,10 +3212,10 @@ PIC320_OUTPUT_DEF := -D$(PIC320_OUTPUT_MACRO)
 
 PIC320_CFLAGS := -mcpu=$(PIC320_CHIP) -mdfp=$(PIC320_DFP) -std=c99 -O2 \
                  -D_XTAL_FREQ=$(PIC320_XTAL) $(PIC320_OUTPUT_DEF)
-PIC320_HEX    := $(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$(PIC320_VARIANT)_$(PIC320_TAG).hex
-PIC320_ASM    := $(PIC320_HEX:.hex=.s)
-PIC320_SYM    := $(PIC320_HEX:.hex=.sym)
-PIC320_BUILD_PRODUCTS := $(PIC320_HEX) $(PIC320_ASM) $(PIC320_SYM)
+override PIC320_HEX    := $(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$(PIC320_VARIANT)_$(PIC320_TAG).hex
+override PIC320_ASM    := $(PIC320_HEX:.hex=.s)
+override PIC320_SYM    := $(PIC320_HEX:.hex=.sym)
+override PIC320_BUILD_PRODUCTS := $(PIC320_HEX) $(PIC320_ASM) $(PIC320_SYM)
 
 # Final-HEX hardware return-stack oracle. Expand the real-image list from the
 # immutable supported set, never from a glob or the caller's PIC320_VARIANTS_ALL
@@ -3306,19 +3391,19 @@ pic320-test-host: pic320-test-equiv pic320-test-actuation pic320-test-fault-host
 # passed" always means the complete supported set ran (§6.5). Registered in
 # test/test_target_matrix.sh, which proves the guard by feeding it each bad matrix.
 pic320-test-host-variants:
-	@if [ "$(if $(strip $(PIC320_VARIANTS_ALL)),yes,no)" != yes ]; then \
+	@if [ "$(PIC320_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
 		echo "FAIL: PIC320_VARIANTS_ALL must not be empty" >&2; exit 2; \
 	fi; \
-	if [ "$(words $(PIC320_VARIANTS_ALL))" -ne "$(words $(sort $(PIC320_VARIANTS_ALL)))" ]; then \
+	if [ "$(PIC320_VARIANTS_REQUEST_DUPLICATE)" -eq 1 ]; then \
 		echo "FAIL: PIC320_VARIANTS_ALL must not contain duplicate names" >&2; exit 2; \
 	fi; \
-	if [ "$(if $(filter-out $(PIC320_VARIANTS_SUPPORTED),$(PIC320_VARIANTS_ALL)),yes,no)" = yes ]; then \
+	if [ "$(PIC320_VARIANTS_REQUEST_UNKNOWN)" -eq 1 ]; then \
 		echo "FAIL: PIC320_VARIANTS_ALL contains unsupported names; supported: $(PIC320_VARIANTS_SUPPORTED)" >&2; exit 2; \
 	fi; \
 	if [ "$(if $(filter-out $(PIC320_VARIANTS_ALL),$(PIC320_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
 		echo "FAIL: PIC320_VARIANTS_ALL must contain every supported name; required: $(PIC320_VARIANTS_SUPPORTED)" >&2; exit 2; \
 	fi
-	@for v in $(PIC320_VARIANTS_ALL); do \
+	@for v in $(PIC320_VARIANTS_SUPPORTED); do \
 		echo "===================== PIC10F320 HOST VARIANT $$v ====================="; \
 		$(MAKE) --no-print-directory PIC320_VARIANT=$$v pic320-test-host || exit 1; \
 	done
@@ -3495,11 +3580,14 @@ pic320: $(PIC320_SRC)
 # recipe above documents.
 .PHONY: pic320-variants
 pic320-variants:
-	@set -- $(PIC320_VARIANTS_ALL); \
-	if [ $$# -eq 0 ]; then echo "FAIL: PIC320_VARIANTS_ALL must not be empty"; exit 1; fi; \
-	uniq=`printf '%s\n' "$$@" | sort -u | wc -l`; \
-	if [ "$$uniq" -ne $$# ]; then echo "FAIL: PIC320_VARIANTS_ALL must not contain duplicate names"; exit 1; fi; \
-	if [ "$(if $(filter-out $(PIC320_VARIANTS_SUPPORTED),$(PIC320_VARIANTS_ALL)),yes,no)" = yes ]; then \
+	@set -- $(PIC320_VARIANTS_SUPPORTED); \
+	if [ "$(PIC320_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
+		echo "FAIL: PIC320_VARIANTS_ALL must not be empty"; exit 1; \
+	fi; \
+	if [ "$(PIC320_VARIANTS_REQUEST_DUPLICATE)" -eq 1 ]; then \
+		echo "FAIL: PIC320_VARIANTS_ALL must not contain duplicate names"; exit 1; \
+	fi; \
+	if [ "$(PIC320_VARIANTS_REQUEST_UNKNOWN)" -eq 1 ]; then \
 		echo "FAIL: PIC320_VARIANTS_ALL contains unsupported names; supported: $(PIC320_VARIANTS_SUPPORTED)"; exit 1; \
 	fi; \
 	if [ "$(if $(filter-out $(PIC320_VARIANTS_ALL),$(PIC320_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
@@ -3948,10 +4036,19 @@ pic320-test-lockstep: _pic320-build-lockstep
 # mean "no variant ran".
 .PHONY: pic320-test-fault-variants
 pic320-test-fault-variants:
-	@set -- $(PIC320_VARIANTS_ALL); \
-	if [ $$# -eq 0 ]; then echo "FAIL: PIC320_VARIANTS_ALL must not be empty"; exit 1; fi; \
-	uniq=`printf '%s\n' "$$@" | sort -u | wc -l`; \
-	if [ "$$uniq" -ne $$# ]; then echo "FAIL: PIC320_VARIANTS_ALL must not contain duplicate names"; exit 1; fi; \
+	@set -- $(PIC320_VARIANTS_SUPPORTED); \
+	if [ "$(PIC320_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
+		echo "FAIL: PIC320_VARIANTS_ALL must not be empty"; exit 1; \
+	fi; \
+	if [ "$(PIC320_VARIANTS_REQUEST_DUPLICATE)" -eq 1 ]; then \
+		echo "FAIL: PIC320_VARIANTS_ALL must not contain duplicate names"; exit 1; \
+	fi; \
+	if [ "$(PIC320_VARIANTS_REQUEST_UNKNOWN)" -eq 1 ]; then \
+		echo "FAIL: PIC320_VARIANTS_ALL contains unsupported names; supported: $(PIC320_VARIANTS_SUPPORTED)"; exit 1; \
+	fi; \
+	if [ "$(if $(filter-out $(PIC320_VARIANTS_ALL),$(PIC320_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
+		echo "FAIL: PIC320_VARIANTS_ALL must contain every supported name; required: $(PIC320_VARIANTS_SUPPORTED)"; exit 1; \
+	fi; \
 	for v in "$$@"; do \
 		echo "===================== FAULT VARIANT $$v ====================="; \
 		$(MAKE) --no-print-directory PIC320_VARIANT=$$v pic320-test-fault-host || exit 1; \
@@ -4004,19 +4101,19 @@ pic320-test-target:
 # ...and for ALL of them. Requires the exact supported set before running, so
 # "all variants passed" cannot hide an empty or incomplete matrix (§6.5).
 pic320-test-target-variants:
-	@if [ "$(if $(strip $(PIC320_VARIANTS_ALL)),yes,no)" != yes ]; then \
+	@if [ "$(PIC320_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
 		echo "FAIL: PIC320_VARIANTS_ALL must not be empty" >&2; exit 2; \
 	fi; \
-	if [ "$(words $(PIC320_VARIANTS_ALL))" -ne "$(words $(sort $(PIC320_VARIANTS_ALL)))" ]; then \
+	if [ "$(PIC320_VARIANTS_REQUEST_DUPLICATE)" -eq 1 ]; then \
 		echo "FAIL: PIC320_VARIANTS_ALL must not contain duplicate names" >&2; exit 2; \
 	fi; \
-	if [ "$(if $(filter-out $(PIC320_VARIANTS_SUPPORTED),$(PIC320_VARIANTS_ALL)),yes,no)" = yes ]; then \
+	if [ "$(PIC320_VARIANTS_REQUEST_UNKNOWN)" -eq 1 ]; then \
 		echo "FAIL: PIC320_VARIANTS_ALL contains unsupported names; supported: $(PIC320_VARIANTS_SUPPORTED)" >&2; exit 2; \
 	fi; \
 	if [ "$(if $(filter-out $(PIC320_VARIANTS_ALL),$(PIC320_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
 		echo "FAIL: PIC320_VARIANTS_ALL must contain every supported name; required: $(PIC320_VARIANTS_SUPPORTED)" >&2; exit 2; \
 	fi
-	@for v in $(PIC320_VARIANTS_ALL); do \
+	@for v in $(PIC320_VARIANTS_SUPPORTED); do \
 		echo "===================== PIC10F320 TARGET VARIANT $$v ====================="; \
 		$(MAKE) --no-print-directory PIC320_TARGET_VARIANT=$$v PIC320_VARIANT=$$v \
 			pic320-test-target || exit 1; \
@@ -4169,9 +4266,9 @@ print-%:
 # directory, the SHA256SUMS entries, and the fresh build output each equal it
 # EXACTLY.
 #
-# The PIC10F320 entries use the immutable supported set, not the caller's
-# PIC320_VARIANTS_ALL request, so an abbreviated build override cannot shorten
-# this independent release contract along with the build.
+# The classic AVR/PIC10F322 and PIC10F320 entries use their immutable supported
+# sets, not the caller's VARIANTS or PIC320_VARIANTS_ALL request, so an abbreviated
+# build override cannot shorten this independent release contract with the build.
 #
 # Note the three surviving basename conventions (merge plan §5.3, decision D2):
 #   bypass_<variant>.hex               ATtiny13a  (implicit part)
@@ -4185,9 +4282,9 @@ print-%:
 # but no release images and no release soak evidence (§10, and the same reason
 # `make clean` in the release script does not recreate build_avr_xt/).
 RELEASE_IMAGES := \
-	$(foreach v,$(VARIANTS),$(FW_BASE)_$(v).hex) \
-	$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(FW_BASE)_$(v)_t$(n).hex)) \
-	$(foreach v,$(VARIANTS),$(FW_BASE)_$(v)_$(PIC_TAG).hex) \
+	$(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(FW_BASE)_$(v).hex) \
+	$(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(foreach n,$(TINYX5),$(FW_BASE)_$(v)_t$(n).hex)) \
+	$(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(FW_BASE)_$(v)_$(PIC_TAG).hex) \
 	$(foreach v,$(PIC320_VARIANTS_SUPPORTED),$(PIC320_FW_BASE)_$(v)_$(PIC320_TAG).hex)
 
 # The build directories those images are produced into, in the order a
@@ -4371,10 +4468,20 @@ $(_MAKE_REQUESTED_GOALS): _make-serialized-invocation
 _make-serialized-invocation:
 	@command -v flock >/dev/null 2>&1 \
 		|| { echo "ERROR: flock is required to serialize shared build artifacts" >&2; exit 1; }
-	@flock ".make.lock" $(MAKE_COMMAND) \
+	@env \
+		_MAKE_SERIAL_CLASSIC_EMPTY='$(_MAKE_SERIAL_CLASSIC_EMPTY_COMPUTED)' \
+		_MAKE_SERIAL_CLASSIC_DUPLICATE='$(_MAKE_SERIAL_CLASSIC_DUPLICATE_COMPUTED)' \
+		_MAKE_SERIAL_CLASSIC_UNKNOWN='$(_MAKE_SERIAL_CLASSIC_UNKNOWN_COMPUTED)' \
+		_MAKE_SERIAL_PIC320_EMPTY='$(_MAKE_SERIAL_PIC320_EMPTY_COMPUTED)' \
+		_MAKE_SERIAL_PIC320_DUPLICATE='$(_MAKE_SERIAL_PIC320_DUPLICATE_COMPUTED)' \
+		_MAKE_SERIAL_PIC320_UNKNOWN='$(_MAKE_SERIAL_PIC320_UNKNOWN_COMPUTED)' \
+		flock ".make.lock" $(MAKE_COMMAND) \
 		--no-print-directory -j1 \
 		_MAKE_SERIAL_LOCK_HELD='$(_MAKE_SERIAL_WORKTREE_ID)' \
-		MAKE='$(MAKE)' $(_MAKE_REQUESTED_GOALS)
+		MAKE='$(MAKE)' \
+		$(if $(filter command line,$(_MAKE_SERIAL_VARIANTS_ORIGIN)),VARIANTS=$(call _make_shell_quote,$(_MAKE_SERIAL_VARIANTS_SAFE))) \
+		$(if $(filter command line,$(_MAKE_SERIAL_PIC320_VARIANTS_ORIGIN)),PIC320_VARIANTS_ALL=$(call _make_shell_quote,$(_MAKE_SERIAL_PIC320_VARIANTS_SAFE))) \
+		$(_MAKE_REQUESTED_GOALS)
 
 endif
 

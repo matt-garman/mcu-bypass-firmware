@@ -97,6 +97,14 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- The PIC10F322 `pic` producer now requires the complete immutable output-variant
+  matrix before invoking XC8, rejecting empty, duplicate, unsupported, and
+  incomplete requests. Classic AVR and PIC10F322 entries in `RELEASE_IMAGES` now
+  derive from that immutable set, so a `VARIANTS` override cannot weaken the
+  independent release contract along with the requested build. Both PIC matrix
+  requests are sanitized before recursive Make or shell expansion, and their
+  HEX/assembly/symbol cleanup inventories cannot be disabled by command-line
+  overrides.
 - PIC builds now invalidate XC8's generated `.s` and `.sym` sidecars together
   with each HEX before compiling and remove the same complete product set after
   failure or interruption. The hardware-stack targets skip only when no current

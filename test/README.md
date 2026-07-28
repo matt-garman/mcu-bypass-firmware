@@ -141,7 +141,7 @@ below so a green gate means every PIC layer actually ran.
 
 | layer | target | what it proves | substrate |
 |---|---|---|---|
-| Image generation | `test-pic-build` | Missing, partial, malformed, or non-regular XC8 output cannot become a PIC firmware image; malformed/zero budgets, huge usage counts, and arithmetic-tool failures are rejected. Same-stem `.s`/`.sym` are invalidated with the HEX, and a current HEX without fresh assembly fails the stack target rather than skipping. | host fake-XC8 regression |
+| Image generation | `test-pic-build` | Missing, partial, malformed, or non-regular XC8 output cannot become a PIC firmware image; malformed/zero budgets, huge usage counts, and arithmetic-tool failures are rejected. The PIC10F322 producer requires its immutable complete matrix. Same-stem `.s`/`.sym` are invalidated with the HEX, and a current HEX without fresh assembly fails the stack target rather than skipping. | host fake-XC8 regression |
 | CONFIG word | `pic-test-config` | The XC8-emitted CONFIG word matches the documented oscillator/WDT/BOR/MCLR/LVP design intent. | host parser over HEX |
 | Static analysis | `pic-analyze` | cppcheck + MISRA pass over the PIC shell with real XC8/DFP register headers. | host tools |
 | Shipping-source coverage | `pic-coverage-check-fw` | Every executable line in the real PIC shell, shared pure core, and all three output drivers is host-executed except the documented non-returning reset path. | host gcov with PIC SFR mock |
@@ -216,7 +216,7 @@ fail-closed rather than skip-clean.
 | Shipping-source coverage | `pic320-coverage-check-fw` | An **exact** property, not a percentage floor: every line of the real firmware is host-executed except an enumerated, justified watchdog-reset path. Run per variant, because the three output stages give 84 / 95 / 99 executable lines. | host gcov with the mock `xc.h` |
 | All-variant host aggregate | `pic320-test-host-variants` | The four layers above across all three variants, with the complete supported matrix required first. **This is the member of `make test`.** | Makefile wrapper |
 | Return-stack oracle regression | `test-pic320-return-stack-oracle` | 149 deterministic checks: passing depths through 8, recursion/depth-9 rejection, independently required skip edges and operand boundaries, classic alias ranges, all 16,384 legality decisions, every destination writer against PCL/INDF/INTCON, 9-bit PC/physical-fetch aliasing, literal HEX layout, and fail-closed parser/file cases. Includes ten device-geometry checks: `--program-words` is validated as a power of two inside the 9-bit PC space, and fixtures whose verdict *differs* between the 256- and 512-word geometries pin the fetch alias in both directions — an image with code above word `0x0FF` is rejected when 256 words are declared, and one that relies on the fold is rejected when 512 are. **This is also a member of `make test`.** | dependency-free Python 3 |
-| Image generation | `test-pic-build` | 30 PIC10F322 and 70 PIC10F320 checks. Both runs prove missing-XC8 skips remove the complete product matrix and stale assembly/symbol sidecars cannot survive a current-HEX-only build; the 320 run also covers its image naming/budget, complete matrix and selector rebuilds, deletion of reachable-RETFIE and depth-9 images despite attempted command-line oracle/limit overrides, and exact per-output XC8/host-compiler rebuild invocations with current clock, variant and host flags. | host fake-XC8/fake-CC regression |
+| Image generation | `test-pic-build` | 36 PIC10F322 and 71 PIC10F320 checks. Both runs prove missing-XC8 skips remove the complete product matrix despite attempted inventory overrides, stale assembly/symbol sidecars cannot survive a current-HEX-only build, and shell syntax in matrix text is rejected without execution. The 322 run additionally rejects recursively self-whitelisting GNU Make input; the 320 run covers selector rebuilds, deletion of reachable-RETFIE and depth-9 images despite attempted oracle/limit overrides, and exact per-output XC8/host-compiler rebuild invocations with current clock, variant, and host flags. | host fake-XC8/fake-CC regression |
 | CONFIG word | `pic320-test-config` | The emitted CONFIG word matches design intent, over every built image. Uses the shared checker with a device-accurate label. | host parser over HEX |
 | Hardware return stack | every `pic320` build; `pic320-test-return-stack` | The base build strictly parses and traverses its final HEX before marking that image complete, so gpsim/target/soak/release rebuilds use the same fail-closed gate. The explicit target rebuilds the supported matrix and rechecks all three together, reporting each maximum and witness. | dependency-free Python 3 over final HEX |
 | Static analysis | `pic320-analyze` | cppcheck + MISRA over the shell, **swept across all three variants** — each compiles a different `#if defined(OUTPUT_*)` branch, so one run would leave two thirds unanalyzed. | host tools |
@@ -228,11 +228,12 @@ fail-closed rather than skip-clean.
 | Pre-hardware aggregate | `pic320-test` | The single target CI and the release script invoke: the host aggregate, CONFIG and return-stack proof over all images, and analysis + gpsim per variant. | Makefile wrapper |
 | Soak | `pic320-test-soak` | Long-duration libgpsim soak per output stage; three combos at full duration are part of release qualification. | libgpsim |
 
-The stale-sidecar case runs in both parameterized `test-pic-build` invocations;
-the PIC10F320 rebuild cases run only in the second. The script itself requires
-`PB_REBUILD_REQUIRED=1` for canonical `PB_TARGET=pic320` and enforces exactly 70
-final checks; canonical `PB_TARGET=pic` enforces 30. A missing or misspelled
-rebuild-arm assignment therefore fails instead of reporting a 56-check subset as
+The shared stale-sidecar and matrix cases run in both parameterized
+`test-pic-build` invocations; the PIC10F320 rebuild cases run only in the second.
+The script itself requires
+`PB_REBUILD_REQUIRED=1` for canonical `PB_TARGET=pic320` and enforces exactly 71
+final checks; canonical `PB_TARGET=pic` enforces 36. A missing or misspelled
+rebuild-arm assignment therefore fails instead of reporting a 57-check subset as
 green.
 
 In a fresh temporary repository the arm proves that identical requests reinvoke

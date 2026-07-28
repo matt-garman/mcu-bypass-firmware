@@ -34,28 +34,34 @@ PB_MATRIX_VARIANTS_VAR=${PB_MATRIX_VARIANTS_VAR:-VARIANTS}
 PB_MATRIX_VARIANTS=${PB_MATRIX_VARIANTS:-cd4053 mute relay}
 PB_MATRIX_IMAGES=${PB_MATRIX_IMAGES:-bypass_cd4053_pic10f322.hex bypass_mute_pic10f322.hex bypass_relay_pic10f322.hex}
 PB_MATRIX_FAIL_IMAGE=${PB_MATRIX_FAIL_IMAGE:-bypass_relay_pic10f322.hex}
-PB_MATRIX_REQUIRE_COMPLETE=${PB_MATRIX_REQUIRE_COMPLETE:-0}
+PB_MATRIX_REQUIRE_COMPLETE=${PB_MATRIX_REQUIRE_COMPLETE:-1}
 PB_MATRIX_UNSUPPORTED=${PB_MATRIX_UNSUPPORTED:-unknown}
+PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-}
 PB_SELECTOR_ROUTING=${PB_SELECTOR_ROUTING:-0}
 PB_SIZE_TARGET=${PB_SIZE_TARGET:-}
 PB_STACK_TARGET=${PB_STACK_TARGET:-pic-test-stack-bound}
 PB_STACK_DEVICE_VAR=${PB_STACK_DEVICE_VAR:-PIC_DEVICE_INI}
 PB_RETURN_STACK_REQUIRED=${PB_RETURN_STACK_REQUIRED:-0}
 PB_REBUILD_REQUIRED=${PB_REBUILD_REQUIRED:-0}
+product_override_args=()
 case "$PB_TARGET" in
 	pic)
 		[ "$PB_LABEL" = PIC ] \
 			|| { printf 'FAIL: canonical pic build validation requires PB_LABEL=PIC\n' >&2; exit 1; }
-		expected_checks=30
+		PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_MATRIX_VARIANTS}
+		product_override_args=(PIC_HEXES= PIC_ASSEMBLIES= PIC_SYMBOLS= PIC_BUILD_PRODUCTS=)
+		expected_checks=36
 		;;
 	pic320)
 		[ "$PB_LABEL" = PIC10F320 ] \
 			|| { printf 'FAIL: canonical pic320 build validation requires PB_LABEL=PIC10F320\n' >&2; exit 1; }
 		[ "$PB_REBUILD_REQUIRED" = 1 ] \
 			|| { printf 'FAIL: canonical pic320 build validation requires PB_REBUILD_REQUIRED=1\n' >&2; exit 1; }
-		expected_checks=70
+		PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}
+		product_override_args=(PIC320_HEX= PIC320_ASM= PIC320_SYM= PIC320_BUILD_PRODUCTS=)
+		expected_checks=71
 		;;
-	*) expected_checks= ;;
+	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; expected_checks= ;;
 esac
 hex="$repo/$PB_BUILD_DIR/${PB_FW_BASE}_${PB_VARIANT}_${PB_TAG}.hex"
 asm=${hex%.hex}.s
@@ -244,7 +250,7 @@ run_make() {
 		CC=true HOSTCC=true "$PB_CC_VAR=$tools/xc8" "$PB_BUILD_DIR_VAR=$PB_BUILD_DIR" \
 		"$PB_FW_BASE_VAR=$PB_FW_BASE" "$PB_TAG_VAR=$PB_TAG" \
 		"$PB_FLASH_VAR=$PB_FLASH_WORDS" \
-		"$PB_VARIANT_VAR=$PB_VARIANT" STRICT_TOOLS=1 AWK=awk "$@"
+		"$PB_VARIANT_VAR=$PB_BUILD_VARIANTS" STRICT_TOOLS=1 AWK=awk "$@"
 }
 
 run_pic320_host_make() {
@@ -367,8 +373,9 @@ assert_no_matrix_sidecars() {
 
 expect_build_matrix_rejected() {
 	local label=$1 matrix=$2 marker=$3 output
+	shift 3
 	remove_matrix_images
-	if output=$(run_matrix_make "$PB_MATRIX_VARIANTS_VAR=$matrix" 2>&1); then
+	if output=$(run_matrix_make "$PB_MATRIX_VARIANTS_VAR=$matrix" "$@" 2>&1); then
 		printf 'FAIL: %s build matrix accepted %s\n' "$PB_LABEL" "$label" >&2
 		exit 1
 	fi
@@ -445,7 +452,8 @@ checks=$((checks + 1))
 # product has been removed. Exercise the public stack target so a stale HEX
 # cannot convert that skip into a later false gate attempt.
 run_matrix_make "$PB_MATRIX_VARIANTS_VAR=$PB_MATRIX_VARIANTS" >/dev/null
-if ! output=$(run_stack_make "$PB_CC_VAR=$tools/missing-xc8" STRICT_TOOLS= 2>&1); then
+if ! output=$(run_stack_make "$PB_CC_VAR=$tools/missing-xc8" STRICT_TOOLS= \
+		"${product_override_args[@]}" 2>&1); then
 	printf 'FAIL: %s stack target did not skip a missing XC8: %s\n' \
 		"$PB_LABEL" "$output" >&2
 	exit 1
@@ -604,6 +612,25 @@ if [ "$PB_MATRIX_REQUIRE_COMPLETE" -eq 1 ]; then
 		"$PB_MATRIX_VARIANTS_VAR must not contain duplicate names"
 	expect_build_matrix_rejected "an unsupported name" "$PB_MATRIX_UNSUPPORTED" \
 		"$PB_MATRIX_VARIANTS_VAR contains unsupported names"
+	injection_marker="$work/$PB_TARGET-matrix-injected"
+	rm -f "$injection_marker"
+	injected_matrix="$PB_MATRIX_UNSUPPORTED; touch $injection_marker; exit 0"
+	expect_build_matrix_rejected "shell syntax in a variant name" \
+		"$injected_matrix" \
+		"$PB_MATRIX_VARIANTS_VAR contains unsupported names"
+	[[ ! -e "$injection_marker" ]] \
+		|| { printf 'FAIL: %s matrix text executed shell syntax\n' "$PB_LABEL" >&2; exit 1; }
+	if [ "$PB_TARGET" = pic ]; then
+		eval_marker="$work/pic-matrix-make-function-executed"
+		rm -f "$eval_marker"
+		malicious_matrix='$(eval override CLASSIC_VARIANTS_SUPPORTED:=unknown)$(shell touch '"$eval_marker"')unknown'
+		expect_build_matrix_rejected \
+			"a recursively self-whitelisting unsupported name" \
+			"$malicious_matrix" \
+			"$PB_MATRIX_VARIANTS_VAR contains unsupported names"
+		[[ ! -e "$eval_marker" ]] \
+			|| { printf 'FAIL: PIC matrix text executed a GNU Make function\n' >&2; exit 1; }
+	fi
 fi
 
 if (export FAKE_XC8_FAIL_NAME="$PB_MATRIX_FAIL_IMAGE"; \

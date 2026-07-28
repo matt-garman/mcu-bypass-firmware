@@ -1881,7 +1881,8 @@ the document it was when the requirement was set.
       fails a regression test.
       *(`RELEASE_IMAGES` = 15 basenames, consumed by all three of the release
       script, the verifier and its regression through `make -s print-`.
-      `test_release_images.sh` 41 checks; the global-omission negative test was
+      `test_release_images.sh` 42 checks, including request-override independence;
+      the global-omission negative test was
       demonstrated in **both** directions on real staged release data, per
       §15.10.)*
 - [x] Local release creation and tag CI handle PIC10F320 build prerequisites,
@@ -2532,7 +2533,7 @@ per concern now covers both chips:
 
 | Script | Mechanism | Result |
 | --- | --- | --- |
-| `test_pic_build.sh` | `PB_*` knobs (target, build dir, image naming, budget, sidecar/stack gate, matrix, size probe, PIC10F320 rebuild arm) | 30 PIC10F322 + 70 PIC10F320 checks |
+| `test_pic_build.sh` | `PB_*` knobs (target, build dir, image naming, budget, sidecar/stack gate, matrix, size probe, PIC10F320 rebuild arm) | 36 PIC10F322 + 71 PIC10F320 checks |
 | `test_target_matrix.sh` | `TM_*` knobs (target, variants variable, supported set) | 5 matrix checks × 3 aggregates + 4 sentinel checks × 2 target aggregates |
 | `test_gpsim_wrappers.sh` | *no folding needed* — see below | 37 checks (was 25) |
 | `test_lockstep_progress.sh` | compile and execute both chip-specific adapters against one fake gpsim API | 4 failure modes × 2 chips |
@@ -3310,9 +3311,10 @@ an outcome claimed by this closure.
 The rebuild row is closed inside the folded `test/test_pic_build.sh`, not with a
 duplicate sandbox. Makefile's second invocation sets `PB_REBUILD_REQUIRED=1`;
 the script independently requires that setting for canonical `PB_TARGET=pic320`
-and enforces exactly 70 final checks. Canonical `PB_TARGET=pic` enforces 30 after
-the shared stale-sidecar/stack-gate regression, so lost PIC10F320 activation
-cannot silently pass at 56. The fresh temporary repository's existing fake XC8
+and enforces exactly 71 final checks. Canonical `PB_TARGET=pic` enforces 36 after
+the shared stale-sidecar/stack-gate and producer-matrix regressions, so lost
+PIC10F320 activation
+cannot silently pass at 57. The fresh temporary repository's existing fake XC8
 gains
 command logging, and a fake host compiler is used only for the PIC10F320 rebuild
 assertions. The host compiler writes nonempty fake objects and executable
