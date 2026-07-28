@@ -881,38 +881,56 @@ pic-analyze-misra: src/bypass_mcu_pic10f322.c $(PIC_HEADERS) $(MISRA_ADDON) $(MI
 # never hits: the footswitch HELD at power-on must come up BYPASS and must NOT
 # engage until a genuine release + fresh press. Both run per variant. Depends on
 # `pic` to build the HEX; skips cleanly when gpsim or the HEX is absent.
+
+# Preflight shared by the CLI-gpsim lanes of BOTH PIC chips, and shared
+# deliberately: the two lanes drive the SAME two wrapper scripts and the SAME
+# $(GPSIM) binary, so a guard that lives in only one of them is not a guard.
+# That is not hypothetical -- it is how the PIC10F320 lane shipped from the merge
+# with no tool probe at all, where `make pic320-test STRICT_TOOLS=1` printed
+# "all PIC10F320 pre-hardware checks complete" on a host without gpsim having run
+# zero of its six scenarios (the wrappers exit 0 on a missing gpsim by design, so
+# nothing below the Make level could catch it). One definition, two callers.
+#
+# $(1) is the chip label used in the skip diagnostic. Expands INSIDE the caller's
+# single shell -- like $(yasimavr_skip_if_absent) above -- so $(SKIP)'s `exit 0`
+# leaves the whole recipe rather than a sub-shell.
+# Usage: `$(call gpsim_wrapper_preflight,PIC10F322); \` as the first recipe line.
+define gpsim_wrapper_preflight
+timeout_seconds="$${GPSIM_TIMEOUT_SECONDS:-60}"; \
+case "$$timeout_seconds" in \
+	''|*[!0-9.]*|*.*.*|.*|*.) \
+		echo "FAIL: GPSIM_TIMEOUT_SECONDS must be a positive decimal number of seconds"; exit 1 ;; \
+esac; \
+case "$$timeout_seconds" in \
+	*[1-9]*) ;; \
+	*) echo "FAIL: GPSIM_TIMEOUT_SECONDS must be a positive decimal number of seconds"; exit 1 ;; \
+esac; \
+if ! command -v $(GPSIM) >/dev/null 2>&1; then \
+	echo "gpsim not installed; skipping $(1) gpsim register-level test"; $(SKIP); \
+fi; \
+guard=0; \
+for s in test/pic/run_gpsim_test.sh test/pic/run_gpsim_power_on_pressed.sh; do \
+	mode=`git ls-files --stage -- "$$s" | cut -d' ' -f1`; \
+	if [ "$$mode" != "100755" ]; then \
+		echo "ERROR: $$s is not mode 100755 in git (found '$$mode')."; \
+		echo "       CI checks out git's mode, so a non-exec script fails as"; \
+		echo "       '/bin/sh: ...: Permission denied'."; \
+		echo "       Fix: git update-index --chmod=+x $$s   (then commit)"; \
+		guard=1; \
+	elif [ ! -x "$$s" ]; then \
+		echo "ERROR: $$s is 100755 in git but lacks its local exec bit"; \
+		echo "       (e.g. a clone onto NFS that didn't honor the mode)."; \
+		echo "       CI is unaffected; this only blocks the local run."; \
+		echo "       Fix: chmod +x $$s"; \
+		guard=1; \
+	fi; \
+done; \
+[ $$guard -eq 0 ] || exit 1
+endef
+
 .PHONY: pic-test-gpsim
 pic-test-gpsim: pic
-	@timeout_seconds="$${GPSIM_TIMEOUT_SECONDS:-60}"; \
-	case "$$timeout_seconds" in \
-		''|*[!0-9.]*|*.*.*|.*|*.) \
-			echo "FAIL: GPSIM_TIMEOUT_SECONDS must be a positive decimal number of seconds"; exit 1 ;; \
-	esac; \
-	case "$$timeout_seconds" in \
-		*[1-9]*) ;; \
-		*) echo "FAIL: GPSIM_TIMEOUT_SECONDS must be a positive decimal number of seconds"; exit 1 ;; \
-	esac; \
-	if ! command -v $(GPSIM) >/dev/null 2>&1; then \
-		echo "gpsim not installed; skipping PIC gpsim register-level test"; $(SKIP); \
-	fi; \
-	guard=0; \
-	for s in test/pic/run_gpsim_test.sh test/pic/run_gpsim_power_on_pressed.sh; do \
-		mode=`git ls-files --stage -- "$$s" | cut -d' ' -f1`; \
-		if [ "$$mode" != "100755" ]; then \
-			echo "ERROR: $$s is not mode 100755 in git (found '$$mode')."; \
-			echo "       CI checks out git's mode, so a non-exec script fails as"; \
-			echo "       '/bin/sh: ...: Permission denied'."; \
-			echo "       Fix: git update-index --chmod=+x $$s   (then commit)"; \
-			guard=1; \
-		elif [ ! -x "$$s" ]; then \
-			echo "ERROR: $$s is 100755 in git but lacks its local exec bit"; \
-			echo "       (e.g. a clone onto NFS that didn't honor the mode)."; \
-			echo "       CI is unaffected; this only blocks the local run."; \
-			echo "       Fix: chmod +x $$s"; \
-			guard=1; \
-		fi; \
-	done; \
-	[ $$guard -eq 0 ] || exit 1; \
+	@$(call gpsim_wrapper_preflight,PIC10F322); \
 	fail=0; \
 	for v in $(VARIANTS); do \
 		case $$v in \
@@ -1067,9 +1085,7 @@ PIC_SOAK_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.
 # AVR $(SOAK_BIN) build rule). Used by scripts/make-release.sh, which builds one
 # binary per variant under unique PIC_SOAK_BIN names and then runs them
 # concurrently. The HEX it embeds is produced by `make pic`, which the release
-# script runs first; like the AVR convenience rule it will not rebuild on a
-# PIC_SOAK_DURATION_MS change alone, so the release script always `make clean`s
-# before a fresh build.
+# script runs first.
 # FORCE, for the reason stated at its definition: this binary's effective build
 # command includes command-line variables -- PIC_SOAK_{DURATION,LIVENESS_INTERVAL,
 # PROGRESS_INTERVAL}_MS and PIC_SOAK_VARIANT are compiled IN as -D flags -- and a
@@ -3565,22 +3581,50 @@ PIC320_LOCKSTEP_COMPILE = \
 
 # Emitted CONFIG word, from the built HEX. Uses the SHARED checker with a
 # device-accurate label (§4's FOLD/PARAMETERIZE), run over every built image.
+#
+# The no-image guard mirrors pic-test-config's. Without it this recipe passed an
+# UNEXPANDED glob to the checker when XC8 was absent, which reported "cannot open
+# HEX file '.../bypass_mcu_*_pic10f320.hex'" and failed -- so `make pic320-test`
+# died on a host where `make pic-test` skipped cleanly, contradicting the
+# skip-clean contract stated at `pic320-test` below. One shell, because $(SKIP)
+# exits only its own.
 pic320-test-config: pic320-variants
-	@mkdir -p $(PIC320_BUILD_DIR)
-	@$(HOSTCC) $(HOST_CFLAGS) -DPIC_DEVICE_NAME='"PIC10F320"' \
-		test/pic/test_config_pic.c -o $(PIC320_BUILD_DIR)/test_config_pic
-	@$(PIC320_BUILD_DIR)/test_config_pic $(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_*_$(PIC320_TAG).hex
+	@mkdir -p $(PIC320_BUILD_DIR) || exit 1; \
+	hexes=`ls $(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_*_$(PIC320_TAG).hex 2>/dev/null`; \
+	if [ -z "$$hexes" ]; then \
+		echo "no PIC10F320 HEX in $(PIC320_BUILD_DIR)/ (XC8 absent?); skipping CONFIG-word check"; \
+		$(SKIP); \
+	fi; \
+	$(HOSTCC) $(HOST_CFLAGS) -DPIC_DEVICE_NAME='"PIC10F320"' \
+		test/pic/test_config_pic.c -o $(PIC320_BUILD_DIR)/test_config_pic || exit 1; \
+	$(PIC320_BUILD_DIR)/test_config_pic $$hexes
 
 # CLI gpsim: drive the footswitch, assert PORTA/LATA transitions. Reuses the
-# parent's hardened wrappers (timeout + nonzero status are never discarded)
-# with only the processor overridden.
+# parent's hardened wrappers (timeout + nonzero status are never discarded) and
+# the shared preflight above, so this lane and the PIC10F322's agree on when a
+# missing gpsim is a skip and when it is a failure.
+#
+# Single image, unlike the 322's loop: `pic320` builds exactly ONE variant,
+# selected by PIC320_VARIANT, and `pic320-test` sweeps the matrix by re-invoking
+# this target per variant.
+#
+# GPSIM is threaded through explicitly. Without it the wrappers fall back to
+# their own `${GPSIM:-gpsim}` default, so a `make ... GPSIM=<other>` override was
+# silently ignored on this chip and the lane tested whatever gpsim was on PATH.
 pic320-test-gpsim: pic320
-	@PIC_GPSIM_PROC=$(PIC320_GPSIM_PROC) \
+	@$(call gpsim_wrapper_preflight,PIC10F320); \
+	if [ ! -f "$(PIC320_HEX)" ]; then \
+		echo "no $(PIC320_HEX) (XC8 absent?); skipping PIC10F320 gpsim test"; $(SKIP); \
+	fi; \
+	fail=0; \
+	echo "--- gpsim register-level test: PIC10F320 variant $(PIC320_VARIANT) ---"; \
+	GPSIM=$(GPSIM) PIC_GPSIM_PROC=$(PIC320_GPSIM_PROC) \
 		test/pic/run_gpsim_test.sh $(PIC320_HEX) \
 		$(call pic320_engaged_lata_of,$(PIC320_VARIANT)) \
-		$(call pic320_bypass_lata_of,$(PIC320_VARIANT))
-	@PIC_GPSIM_PROC=$(PIC320_GPSIM_PROC) \
-		test/pic/run_gpsim_power_on_pressed.sh $(PIC320_HEX)
+		$(call pic320_bypass_lata_of,$(PIC320_VARIANT)) || fail=1; \
+	GPSIM=$(GPSIM) PIC_GPSIM_PROC=$(PIC320_GPSIM_PROC) \
+		test/pic/run_gpsim_power_on_pressed.sh $(PIC320_HEX) || fail=1; \
+	exit $$fail
 
 # Aggregate: every PIC10F320 pre-hardware check -- host equivalence, actuation,
 # host fault, firmware coverage, build+budget, CONFIG word, static analysis and
@@ -3786,8 +3830,6 @@ PIC320_SOAK_COMPILE = $(PIC320_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags g
 # scripts/make-release.sh needs this -- it builds one binary per variant under
 # unique PIC320_SOAK_BIN names and then runs all release soak combos
 # concurrently, which it cannot do through the pic320-test-soak run target.
-# Like the 322 rule it will not rebuild on a PIC320_SOAK_DURATION_MS change
-# alone, so the release script always `make clean`s before a fresh build.
 # FORCE -- see the PIC10F322 rule above; the same command-line-variable
 # staleness was measured here first (merge plan §6.12's rebuild-determinism row).
 $(PIC320_SOAK_BIN): $(PIC320_SOAK_DEPS) FORCE

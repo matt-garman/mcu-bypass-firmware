@@ -36,7 +36,7 @@ test/
   test_release_provenance.sh shared: final release source-identity regression
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
   test_stack_bound.sh       shared: fail-closed stack evidence checks
-  test_strict_tools.sh      shared: CBMC/cppcheck skip/strict policy
+  test_strict_tools.sh      shared: skip/strict policy for host + both PIC chips
   test_workload_rebuild.sh  shared: workload/fuse rebuild checks
 
   host/    MCU-independent golden-model tests, compiled and run natively.

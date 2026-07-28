@@ -1539,7 +1539,8 @@ the document it was when the requirement was set.
       provenance, rebuild determinism, stack bound, and firmware-coverage /
       `xc.h` convergence.
       *(Six were decided and implemented at merge time — central mutation policy
-      extended, inline 256-word budget, strict-tools inventory at 18 checks,
+      extended, inline 256-word budget, strict-tools inventory at 18 checks
+      (widened to 22 on 2026-07-27 — see the strict-tools box below),
       two-chip ci-local routing, provenance verified target-agnostic, and the
       deliberate two-mechanism firmware-coverage split. **Rebuild determinism**
       and **stack bound** closed with neither an implementation nor a
@@ -1600,7 +1601,25 @@ the document it was when the requirement was set.
       *(8 recipes / 18 checks, up from 2 / 6; it found the real `$(SKIP)`
       line-continuation defect on its first run, per §15.9. Both PIC budgets are
       inline Makefile arithmetic; `test/check_flash_budget.sh` stays
-      ELF/`$(SIZE)`-shaped and the 322 lane was not churned.)*
+      ELF/`$(SIZE)`-shaped and the 322 lane was not churned.*
+
+      ***Widened to 10 recipes / 22 checks on 2026-07-27 (fourth post-merge
+      audit), because the inventory's own stated gap was hiding a live
+      fail-open.*** The excluded-recipe note asserted that the gpsim/libgpsim
+      lanes "use the same `$(SKIP)` mechanism; what is unproven is only that they
+      still will". `pic320-test-gpsim` did not use it — the merge dropped the
+      child's `command -v $(GPSIM)` guard (`f58d2d5:Makefile:395-402`) instead of
+      routing it through `$(SKIP)`, so `make pic320-test STRICT_TOOLS=1` on a
+      host without gpsim reported "all PIC10F320 pre-hardware checks complete"
+      having run **zero** of its six scenarios. The same commit dropped the
+      `GPSIM=$(GPSIM)` passthrough, so that override was silently ignored on this
+      chip and the lane tested whatever `gpsim` was on `PATH`.
+      Both chips' preflights are now ONE `define` in the Makefile, and `-o
+      <build-target>` (`--old-file`) makes them testable without the verdict
+      depending on whether XC8 is installed — which is what the stated gap
+      existed to avoid, and why it can now be narrowed to the libgpsim/soak
+      recipes alone. Confirmed to **fail** against the pre-fix recipe before being
+      accepted.)*
 - [x] The CI job-graph decision is recorded and implemented: `pic320` extends the
       existing `pic` job or is a sibling, and whether `verify`, `attiny202`,
       `build-matrix`, and `stress` gate on it (§11).

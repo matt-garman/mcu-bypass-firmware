@@ -75,6 +75,17 @@ file is the human-readable summary of *what changed*.
   now removes the whole set.
 - The ported flash-budget comparison was weaker than this project's own and
   conflated "not over budget" with "the comparison tool failed".
+- **`pic320-test-gpsim` had no gpsim probe at all**, so `make pic320-test
+  STRICT_TOOLS=1` on a host without gpsim reported "all PIC10F320 pre-hardware
+  checks complete" having run none of its six scenarios — the wrappers exit 0 on
+  a missing simulator by design, and nothing above them looked. The port also
+  dropped the `GPSIM=` passthrough, so that override was silently ignored on this
+  chip and the lane tested whatever `gpsim` was on `PATH`. Both chips' lanes now
+  share one preflight definition, and both are registered in the strict-tools
+  inventory (18 → 22 checks) rather than excluded from it.
+- `pic320-test-config` now skips cleanly when no image was built, instead of
+  handing an unexpanded glob to the CONFIG checker and failing where the
+  PIC10F322 lane skipped.
 
 ## [0.9.5] - 2026-07-18
 

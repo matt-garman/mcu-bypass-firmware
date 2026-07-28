@@ -11,15 +11,31 @@ set -euo pipefail
 # would have passed review. It now covers both chips' XC8 and cppcheck/MISRA
 # recipes as well.
 #
-# What it deliberately does NOT cover, and why: the gpsim, libgpsim and soak
-# recipes (pic-test-gpsim, pic320-test-gpsim, pic320-test-fault-target,
-# pic{,320}-test-soak, ...) all sit behind a BUILD prerequisite. Driving them
-# here would make the result depend on whether XC8 happens to be installed on
-# the runner -- with XC8 the prerequisite builds and the intended guard fires,
-# without it the prerequisite itself skips or (under STRICT_TOOLS=1) fails with
-# a different message. A regression whose verdict changes with the runner's
-# toolchain is worse than a stated gap, so this is a stated gap. Those recipes
-# use the same $(SKIP) mechanism; what is unproven is only that they still will.
+# It also covers both chips' CLI-gpsim recipes, which used to be a stated gap --
+# and the reason that gap is gone is worth recording, because the sentence that
+# justified it was WRONG in the one place it mattered. It read: "Those recipes
+# use the same $(SKIP) mechanism; what is unproven is only that they still will."
+# pic320-test-gpsim did not use it. It had no tool probe at all, so
+# `make pic320-test STRICT_TOOLS=1` on a host without gpsim printed "all
+# PIC10F320 pre-hardware checks complete" having run zero of its six scenarios
+# (the wrappers exit 0 on a missing gpsim by design). An assumed mechanism is not
+# a mechanism, which is the whole argument for enumerating recipes here.
+#
+# The obstacle was real, though: these recipes sit behind a BUILD prerequisite,
+# so driving them normally makes the verdict depend on whether XC8 happens to be
+# installed -- with XC8 the guard fires, without it the prerequisite answers
+# first, with a different message. `-o <build-target>` (--old-file) removes the
+# dependence: Make is told not to remake that prerequisite, so the recipe body is
+# entered directly and only $(GPSIM) decides the outcome. Same verdict on any
+# runner, XC8 or not.
+#
+# Still NOT covered, same prerequisite problem and no equivalent lever: the
+# libgpsim and soak recipes (pic320-test-fault-target, pic{,320}-test-soak, ...),
+# whose guards check headers, glib and a C++ compiler rather than one binary, and
+# which -o would strand mid-way (the harness still has to compile and link). That
+# remains a stated gap -- but a narrower one, and both chips' gpsim lanes now
+# share ONE preflight definition in the Makefile, so the specific failure above
+# (a probe present on one chip, absent on the other) is no longer expressible.
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-strict-tools.XXXXXX")
@@ -38,7 +54,7 @@ command -v "${MAKE_CMD[0]}" >/dev/null 2>&1 \
 
 run_make() {
 	(
-		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKE STRICT_TOOLS CBMC CPPCHECK
+		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKE STRICT_TOOLS CBMC CPPCHECK GPSIM
 		[ -z "${FAKE_TOOL_LOG:-}" ] || export FAKE_TOOL_LOG
 		"${MAKE_CMD[@]}" --no-print-directory -C "$ROOT" "$@"
 	)
@@ -77,6 +93,7 @@ expect_both() {
 missing_cbmc="$work/missing-cbmc"
 missing_cppcheck="$work/missing-cppcheck"
 missing_xc8="$work/missing-xc8"
+missing_gpsim="$work/missing-gpsim"
 
 expect_both test-cbmc "cbmc not installed" "CBMC=$missing_cbmc"
 expect_both analyze-cppcheck "cppcheck not installed" "CPPCHECK=$missing_cppcheck"
@@ -105,6 +122,18 @@ expect_both pic-analyze-misra "cppcheck and/or python3 not available" \
 	"CPPCHECK=$missing_cppcheck"
 expect_both pic320-analyze-misra "cppcheck and/or python3 not available" \
 	"CPPCHECK=$missing_cppcheck"
+
+# Both chips' CLI-gpsim lanes. `-o pic` / `-o pic320` suppresses the build
+# prerequisite (see the header), so these run identically with or without XC8.
+# The reason strings are chip-specific on purpose: they also pin that the shared
+# preflight's label argument is threaded per chip, so the two lanes cannot
+# collapse into one indistinguishable diagnostic.
+expect_both pic-test-gpsim \
+	"gpsim not installed; skipping PIC10F322 gpsim register-level test" \
+	"GPSIM=$missing_gpsim" -o pic
+expect_both pic320-test-gpsim \
+	"gpsim not installed; skipping PIC10F320 gpsim register-level test" \
+	"GPSIM=$missing_gpsim" -o pic320
 
 fake_cbmc="$work/fake-cbmc"
 fake_cppcheck="$work/fake-cppcheck"
