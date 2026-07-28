@@ -44,15 +44,17 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 read -r -a MAKE_CMD <<<"${PROJECT_MAKE:-make}"
 [ "${#MAKE_CMD[@]}" -gt 0 ] || fail "PROJECT_MAKE must name a Make command"
 
-mkdir -p "$repo/test/pic" "$repo/test/pic10f320/gpsim" "$repo/build_pic" \
-	"$repo/build_pic10f320" "$tools"
+mkdir -p "$repo/test/pic" "$repo/build_pic" "$repo/build_pic10f320" "$tools"
 cp "$ROOT/Makefile" "$repo/Makefile"
 # The file rules' real prerequisites. Contents are irrelevant -- the fake
 # compiler never reads them -- but they must exist, or Make would fail for a
 # reason unrelated to the property under test.
+#
+# ONE soak source, not two: PIC320_SOAK_SRC = $(PIC_SOAK_SRC) (merge plan §4
+# FOLD), so both chips' rules name test/pic/test_soak_pic.cc. Creating a
+# test/pic10f320/ counterpart would fabricate a prerequisite no rule has.
 : > "$repo/test/soak_timing_config.h"
 : > "$repo/test/pic/test_soak_pic.cc"
-: > "$repo/test/pic10f320/gpsim/test_soak_pic.cc"
 # $(PIC_PIN_LOOKUP_HDR) -- the exact-pin lookup helper is a prerequisite of BOTH
 # chips' soak rules, so the scratch repo needs it or Make stops before reaching
 # the property under test.
@@ -144,8 +146,10 @@ check_chip "PIC10F320" "build_pic10f320/test_soak_pic" \
 	PIC320_SOAK_CXX PIC320_SOAK_DURATION_MS ""
 
 # --- the two chips must not share one binary ---------------------------------
-# They compile from different sources into different directories; a single
-# shared output would make one chip's soak silently run the other's image.
+# Since the §4 FOLD they compile from the SAME source, differing only in the -D
+# flags and the output path -- which is exactly what makes a shared output path
+# the live hazard here: it would leave one chip's soak silently running the
+# other chip's image.
 [ -f "$repo/test/pic/test_soak_pic" ] && [ -f "$repo/build_pic10f320/test_soak_pic" ] \
 	|| fail "expected a separate soak binary per chip"
 checks=$((checks + 1))
