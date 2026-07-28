@@ -136,6 +136,10 @@ jobs:
       XC8_DIR: /opt/microchip/xc8/v3.10
       # .atpack unzips here so PIC_DFP = $XC8_DFP_ROOT/xc8 (its xc8/ subtree).
       XC8_DFP_ROOT: /opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189
+      # The mutation gate below is the ONE fail-closed mutation run, so it needs
+      # every substrate's toolchain -- including the ATtiny202 lane's. Keep this
+      # in step with the attiny202 job's pinned value (both key the same cache).
+      ATTINY_DFP_VER: "3.1.260"
     steps:
       - uses: actions/checkout@v4
 
@@ -242,8 +246,11 @@ jobs:
             PIC320_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC320_DFP="${XC8_DFP_ROOT}/xc8"
 
-      # The mutation driver also runs its core AVR mutants. Keep their extra
-      # toolchain and the minutes-long gate off the pull-request hot path.
+      # The mutation driver also runs its core AVR and ATtiny202 mutants. Keep
+      # their extra toolchain and the minutes-long gate off the pull-request hot
+      # path. binutils-avr supplies avr-nm/avr-objdump, which the ATtiny202
+      # harness needs to resolve ctx_ and to read coil-pulse widths back out of
+      # the built image; python3-venv/python3-dev/g++ compile yasimavr.
       - name: Install AVR mutation dependencies (apt)
         if: >-
           github.event_name == 'push' ||
@@ -251,12 +258,79 @@ jobs:
           github.event_name == 'workflow_dispatch'
         run: |
           sudo apt-get install -y \
-            gcc-avr avr-libc simavr libsimavr-dev libelf-dev
+            gcc-avr avr-libc binutils-avr simavr libsimavr-dev libelf-dev \
+            python3-venv python3-dev curl patch
 
-      # MUTATION_ALLOW_SKIP=0 covers BOTH chips' mutants: the driver's PIC10F320
-      # subset sits behind its own tool probe, so without fail-closed mode a
-      # missing 320 toolchain would report those mutants "skipped" and still exit
-      # green. This job asserted the toolchain above, so nothing may skip.
+      # The ATtiny202 mutation lane needs the same two out-of-apt inputs the
+      # attiny202 job fetches, and for the same fail-closed reason: every
+      # attiny202-* target exits 0 when one is missing, so without them the whole
+      # lane reports as skipped -- which MUTATION_ALLOW_SKIP=0 then (correctly)
+      # fails on. Both are version-pinned, cached, and shared with that job's
+      # cache keys, so this costs a restore rather than a rebuild in the common
+      # case.
+      - name: Restore cached ATtiny_DFP (mutation lane)
+        id: cache-dfp-mut
+        if: >-
+          github.event_name == 'push' ||
+          github.event_name == 'schedule' ||
+          github.event_name == 'workflow_dispatch'
+        uses: actions/cache/restore@v4
+        with:
+          path: third_party/attiny_dfp
+          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}
+
+      - name: Restore cached patched yasimavr venv (mutation lane)
+        id: cache-yasimavr-mut
+        if: >-
+          github.event_name == 'push' ||
+          github.event_name == 'schedule' ||
+          github.event_name == 'workflow_dispatch'
+        uses: actions/cache/restore@v4
+        with:
+          path: third_party/yasimavr/venv
+          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'third_party/yasimavr/patches/**') }}
+
+      - name: Fetch ATtiny202 mutation-lane inputs
+        if: >-
+          github.event_name == 'push' ||
+          github.event_name == 'schedule' ||
+          github.event_name == 'workflow_dispatch'
+        run: |
+          scripts/fetch_attiny_dfp.sh
+          scripts/fetch_yasimavr.sh
+
+      - name: Assert ATtiny202 mutation inputs present (fail loud, do NOT skip)
+        if: >-
+          github.event_name == 'push' ||
+          github.event_name == 'schedule' ||
+          github.event_name == 'workflow_dispatch'
+        run: |
+          test -f third_party/attiny_dfp/gcc/dev/attiny202/device-specs/specs-attiny202 \
+            || { echo "::error::ATtiny202 device specs missing; its mutation lane would skip"; exit 1; }
+          py=third_party/yasimavr/venv/bin/python
+          test -x "$py" || { echo "::error::yasimavr venv missing ($py)"; exit 1; }
+          "$py" -c "import yasimavr" \
+            || { echo "::error::yasimavr import broken; the ATtiny202 mutation lane would skip"; exit 1; }
+
+      - name: Save ATtiny_DFP cache (mutation lane)
+        if: steps.cache-dfp-mut.outcome == 'success' && steps.cache-dfp-mut.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: third_party/attiny_dfp
+          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}
+
+      - name: Save yasimavr venv cache (mutation lane)
+        if: steps.cache-yasimavr-mut.outcome == 'success' && steps.cache-yasimavr-mut.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: third_party/yasimavr/venv
+          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'third_party/yasimavr/patches/**') }}
+
+      # MUTATION_ALLOW_SKIP=0 covers EVERY substrate's mutants: the driver's
+      # PIC10F320 and ATtiny202 subsets each sit behind their own tool probe, so
+      # without fail-closed mode a missing toolchain would report those mutants
+      # "skipped" and still exit green. This job asserted all of them above, so
+      # nothing may skip.
       - name: Fail-closed mutation gate (make test-mutation)
         if: >-
           github.event_name == 'push' ||
@@ -537,11 +611,12 @@ jobs:
             clang clang-tidy cppcheck cbmc
 
       # MUTATION_ALLOW_SKIP=1 is stated explicitly rather than left to the
-      # default. This job installs no XC8/gpsim, so BOTH chips' PIC mutants are
-      # unavailable here and must be allowed to report skipped -- but that makes
-      # this job's PIC mutation output diagnostic only. The authoritative,
-      # fail-closed PIC mutation evidence comes from the `pic` job, which
-      # asserted the toolchain first and runs MUTATION_ALLOW_SKIP=0 (§11).
+      # default. This job installs no XC8/gpsim and neither ATtiny202 input, so
+      # both chips' PIC mutants AND the ATtiny202 lane are unavailable here and
+      # must be allowed to report skipped -- but that makes this job's mutation
+      # output for those substrates diagnostic only. The authoritative,
+      # fail-closed evidence for all of them comes from the `pic` job, which
+      # asserts every toolchain first and runs MUTATION_ALLOW_SKIP=0 (§11).
       # Saying so on the command line means a future change to the default
       # cannot silently turn this into either a false pass or a spurious failure.
       - name: Exhaustive + mutation suite

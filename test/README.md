@@ -291,15 +291,19 @@ time enforcement, not a claim that a later staged/copied artifact cannot be
 modified; release provenance and reproduction checks remain separate controls.
 
 
-## Mutation testing and skipped PIC tools
+## Mutation testing and skipped optional tools
 
 `make test-mutation` includes PIC mutants whose kill targets need XC8, gpsim, and
-libgpsim. A local host without those tools may run an explicitly partial mutation
-suite with `MUTATION_ALLOW_SKIP=1`; that is the non-strict default so AVR-only
-development stays practical. `STRICT_TOOLS=1` changes the default to fail closed,
-and full-tool CI also pins `MUTATION_ALLOW_SKIP=0`. An explicit
-`MUTATION_ALLOW_SKIP` value takes precedence: `ci-local.sh --skip-pic` retains
-strict host/AVR gates but deliberately passes `1` for its partial mutation run.
+libgpsim, plus ATtiny202 mutants whose kill targets need the vendored ATtiny_DFP
+and the patched yasimavr venv. A local host without those tools may run an
+explicitly partial mutation suite with `MUTATION_ALLOW_SKIP=1`; that is the
+non-strict default so development on one substrate stays practical.
+`STRICT_TOOLS=1` changes the default to fail closed, and full-tool CI also pins
+`MUTATION_ALLOW_SKIP=0`. An explicit `MUTATION_ALLOW_SKIP` value takes
+precedence: `ci-local.sh --skip-pic` retains strict host/AVR gates but
+deliberately passes `1` for its partial mutation run. The summary counts PIC and
+ATtiny202 skips separately, so a partial run always says which substrate went
+unexercised rather than reporting one anonymous number.
 
 The PIC mutation set includes target-level faults for the new coverage: collapsed
 TMR2IF cadence, exact-TRISA predicate removal, output-latch mask narrowing,
@@ -322,6 +326,23 @@ to reach `test/pic10f320/{equiv,actuation,fault,gpsim}/` and the folded `.sh` an
 can enable the tool-dependent PIC10F320 mutants. The host-only
 `test-mutation-sandbox` regression exercises the same copy routine in `make test`,
 including the wrappers' executable mode.
+
+**The ATtiny202 lane is gated the same way, with one extra hazard.** `XT_DFP` and
+`YASIMAVR_VENV` both default to paths *relative* to the tree, which is exactly
+wrong inside a `mktemp` sandbox: `make -C "$work"` would resolve them under
+`$work`, find nothing, and every `attiny202-*` target would skip cleanly with
+status 0 — scored as a survivor for every mutant in the lane. The driver
+therefore passes both in as absolute paths, sharing the read-only toolchain while
+keeping sources sandboxed, and the probe refuses to enable the lane unless both
+resolve *and* each distinct kill target passes on the unmutated sandbox.
+
+Its mutants are mapped by what the fault actually perturbs: an inverted LED or
+control pin to `attiny202-sim`, a dropped `ctx_` write-back to
+`attiny202-lockstep`, a defeated SFR/direction/pull-up guard to
+`attiny202-fault`, a missing WDT pet or broken ISR handshake to
+`attiny202-soak`, and a shortened coil pulse to `attiny202-delay-oracle` — the
+AVR-XT's only route to an absolute pulse width, since yasimavr's flat
+instruction timing cannot measure a busy-wait loop.
 
 
 ## Known gaps (PIC — hardware-bench only)
