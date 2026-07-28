@@ -321,6 +321,61 @@ the review rule attached.
 Effort: ~1 h. Impact: Medium — restores the only gate that notices *any* change
 to emitted bytes, including the defensive-layer class no differential lane sees.
 
+**Converge the two scratch-tree builders.** Added 2026-07-27, after the same
+omission caused two separate defects in two sessions.
+
+Two harnesses build a throwaway copy of the repository and run Make inside it,
+and they learn about a new file by different means:
+
+- `test/run_mutation_tests.sh` → `copy_tree()`, now a single `find` walk over an
+  extension allowlist (`c cc h sh stc py`) at any depth. **Picks up new files
+  automatically.**
+- `test/test_pic_rebuild.sh` → still **enumerates every file by hand**
+  (`: > "$repo/test/pic/find_pin_exact.h"`, `: > "$repo/test/soak_timing_config.h"`,
+  …). Needs a manual edit whenever a target gains a prerequisite.
+
+`test/pic/find_pin_exact.h` — made a prerequisite of both chips' soak binaries
+and all three `*-test-target` legs by `b4da21c` — broke each builder in turn:
+`test_pic_rebuild.sh` during the `pic10f320-merge-fixes` merge, then
+`run_mutation_tests.sh` immediately after. Both are fixed; what is *not* fixed is
+that one builder still has to be told.
+
+The failure mode is what makes this worth doing rather than tolerating. A missing
+sandbox file does not surface as an error: the mutation probe treats a failed
+baseline as a **skip**, so the gate silently shrinks and the summary reported
+"toolchain absent" on a fully-provisioned host. 18 mutants — the WPUA/TRISA/ANSELA
+SEU guards, the relay 4 ms datasheet minimum, the mute window, the un-pet
+watchdog — were unenforced while the run reported every mutant it did evaluate as
+killed. A green result that quietly measures less than it claims is the exact
+outcome this project's validation suite exists to prevent.
+
+Shape: lift `copy_tree` into a shared helper (e.g. `test/lib/scratch_tree.sh`)
+that both source, with `test_pic_rebuild.sh` keeping only the genuinely
+rebuild-specific steps — the empty-file truncation is its *point*, so it needs
+the allowlist walk to populate the tree and its own logic to blank the
+prerequisites under test. Two constraints must survive the merge:
+
+1. **The copy stays an allowlist, never a wholesale mirror.** `test/` also holds
+   build products (`test/avr/test_sim_*`, `test/formal/klee-out/`,
+   `__pycache__`), and `cp -a` preserves mtimes — a stale binary copied in newer
+   than the source beside it makes Make skip the rebuild and score a mutant
+   against unmutated code. That is a silently wrong answer, the one outcome a
+   mutation harness must never produce.
+2. **Anything the shared helper runs must tolerate a non-repo sandbox.** These
+   trees have no `.git`; a `git ls-files` mode check in a Make recipe already
+   failed closed there once (fixed by gating on `git rev-parse
+   --is-inside-work-tree`).
+
+Keep the fail-closed self-tests either way: `MUTATION_SANDBOX_SELFTEST=1` (5
+checks, including the depth regression that reaches `test/pic/fw_coverage/`) and
+`validate_pic320_sandbox`'s required-file list. The hand-maintained list only
+catches gaps someone already thought of, but it converts a future omission into
+one obvious line instead of a misattributed toolchain complaint.
+
+Effort: ~2–3 h. Impact: Medium — removes the last hand-maintained sandbox
+inventory, and with it a defect class that degrades a gate silently rather than
+breaking it.
+
 ---
 
 ## Tier 3 — platinum-level / nice-to-have
@@ -685,6 +740,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Item | Tier | Effort | Impact |
 |---|---|---|---|
 | Design doc: datasheet citations | 2 | 2 h | High — completeness/rigor |
+| Return-stack oracle: extend to PIC10F322 | 2.5 | High | Low-Medium — second witness on a chip the assembly gate already bounds |
 | Formal verification of output drivers | 2.5 | 3–4 h | Medium — driver correctness |
 | Formal verification of blocking-delay safety | 2.5 | 1–2 h | Medium — makes the argument explicit |
 | Golden-model vs `model_step` cross-validation | 2.5 | 1–2 h | Medium — fourth oracle path |
@@ -702,6 +758,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Power-on-pressed simulation gap | 2.5 | 1–2 h | Low — simulator fidelity, not coverage |
 | Power-supply ramp-up analysis | 2.5 | 2–3 h | Medium — real-world robustness |
 | PIC10F320 expected-image-hash regression | 2.5 | 1 h | Medium — restores the only gate watching emitted bytes |
+| Converge the two scratch-tree builders | 2.5 | 2–3 h | Medium — removes a defect class that shrinks a gate silently |
 | Hardware-validation procedure doc | 3 | 2–3 h | High — primary-part WDT gap |
 | HIL rig: behavioural + register introspection | 3 | 5–8 d | High — silicon-level model validation |
 | Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |
