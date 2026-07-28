@@ -53,6 +53,18 @@ EOF
 cat > "$fakebin/make" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+# A `make -s print-FOO ...` is a VARIABLE QUERY, not job routing: the host/AVR
+# preflight reads every tool name from the Makefile through one such call rather
+# than hardcoding names that could drift. Delegate those to the real make (so
+# the preflight sees real values, and any env override is honored) and keep them
+# OUT of the log, so the counts below keep asserting exactly which JOBS ran.
+# Scan every argument, not just $1: the query arrives as `make -s print-CC
+# print-HOSTCC ...`, so $1 is the -s flag.
+for arg in "$@"; do
+	case "$arg" in
+	print-*) exec "${REAL_MAKE:?}" -s --no-print-directory -C "${FAKE_REPO_ROOT:?}" "$@" ;;
+	esac
+done
 printf 'STRICT_TOOLS=%s' "${STRICT_TOOLS-}" >> "${FAKE_MAKE_LOG:?}"
 for arg in "$@"; do printf '\t%s' "$arg" >> "$FAKE_MAKE_LOG"; done
 printf '\n' >> "$FAKE_MAKE_LOG"
@@ -72,18 +84,33 @@ if [ "${1:-}" = test-long ]; then
 fi
 EOF
 
-for tool in gpsim cppcheck pkg-config; do
+# cc/clang/clang-tidy/cbmc/gcov/python3 join the original three so the host/AVR
+# preflight resolves entirely inside this fixture. Without them the routing
+# regression would start depending on which analyzers happen to be installed on
+# the box running it, and would fail on a machine that legitimately lacks, say,
+# cbmc -- turning a routing test into a toolchain test.
+for tool in gpsim cppcheck pkg-config cc clang clang-tidy cbmc gcov python3; do
 	cat > "$fakebin/$tool" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
 done
+# avr-gcc exits NON-zero so the preflight's `-fanalyzer` probe reports the
+# fallback as unavailable, which is what drives it down the clang/clang-tidy
+# branch. That is the branch worth covering here: the alternative (a fake that
+# claims -fanalyzer support) would skip those two checks entirely.
+cat > "$fakebin/avr-gcc" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+# simavr headers are probed by path, not by PATH lookup.
+mkdir -p "$work/simavr-inc"
+: > "$work/simavr-inc/sim_avr.h"
 cat > "$work/xc8" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-chmod 750 "$fakebin/git" "$fakebin/make" "$fakebin/gpsim" \
-	"$fakebin/cppcheck" "$fakebin/pkg-config" "$work/xc8"
+chmod 750 "$fakebin"/* "$work/xc8"
 
 run_ci() {
 	: > "$log"
@@ -92,6 +119,7 @@ run_ci() {
 		PIC_CC="$work/xc8" PIC_DFP="$work/dfp" \
 		PIC320_CC="$work/xc8" PIC320_DFP="$work/dfp" \
 		PIC_SOAK_GPSIM_INC="$work/gpsim-inc" \
+		SIMAVR_INC="$work/simavr-inc" \
 		"$CI_LOCAL" --no-clean --skip-attiny202 "$@" 2>&1
 }
 
