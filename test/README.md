@@ -59,7 +59,7 @@ test/
            test_sim_attiny202.py   functional + PA2/PA3 transition/timing checks
            test_attiny202_output_oracle.py  host regression for output checks
            test_attiny202_fault_oracle.py   host fault-run accounting regression
-           test_fault_attiny202.py critical-SFR/state fault injection
+            test_fault_attiny202.py  critical-SFR/state/pin-polarity fault injection
            test_soak_attiny202.py  long-duration liveness soak
 
   pic/     PIC10F322-specific host and gpsim tests.

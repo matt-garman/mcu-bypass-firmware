@@ -36,7 +36,7 @@
 #
 # Usage:   make attiny202-fault  (supplies the ELF and required production fuses)
 # Exit:    0 = PASS, 1 = a case failed, 2 = bad invocation / missing image.
-# Completeness: exactly 17 independently pinned injections plus one long healthy
+# Completeness: exactly 22 independently pinned injections plus one long healthy
 # negative control must finish; any rejected/re-latched injection is a failure.
 
 import sys
@@ -50,7 +50,7 @@ NEG_CONTROL_MS = 650     # >2x WDT period: healthy firmware must keep petting it
 LIVE_STEP_MS = 5
 RETRY_GATE_MS = 50
 RETRY_GATE_STEP_CYCLES = 137  # coprime with the 2,000-cycle tick
-EXPECTED_FAULT_CASES = 17
+EXPECTED_FAULT_CASES = 22
 EXPECTED_TOTAL_RESULTS = EXPECTED_FAULT_CASES + 1  # injections + negative control
 RESET_SENTINEL = 0xA5
 
@@ -82,6 +82,12 @@ def _fault_cases(sim):
         # --- caught by the per-tick sanity gate (tick stays alive) ---
         ("CLKCTRL.MCLKCTRLB",     REG,   S.REG_CLKCTRL_MCLKCTRLB, 0x00,   GATE),
         ("PORTA.PIN7CTRL(pullup)", REG,  S.REG_PORTA_PIN7CTRL,    0x00,   GATE),
+        ("PORTA.PIN1CTRL(INVEN)",  REG,  S.REG_PORTA_PIN1CTRL,    S.PORT_INVEN_bm, GATE),
+        ("PORTA.PIN2CTRL(INVEN)",  REG,  S.REG_PORTA_PIN2CTRL,    S.PORT_INVEN_bm, GATE),
+        ("PORTA.PIN3CTRL(INVEN)",  REG,  S.REG_PORTA_PIN3CTRL,    S.PORT_INVEN_bm, GATE),
+        ("PORTA.PIN6CTRL(INVEN)",  REG,  S.REG_PORTA_PIN6CTRL,    S.PORT_INVEN_bm, GATE),
+        ("PORTA.PIN7CTRL(INVEN)",  REG,  S.REG_PORTA_PIN7CTRL,
+         S.PORT_PULLUPEN_bm | S.PORT_INVEN_bm, GATE),
         ("PORTA.DIR(outputs)",     REG,  S.REG_PORTA_DIR,         0x00,   GATE),
         ("PORTA.DIR(footswitch)",  REG,  S.REG_PORTA_DIR,         0xCE,   GATE),
         ("PORTA.DIR(spare PA6)",   REG,  S.REG_PORTA_DIR,         0x0E,   GATE),

@@ -104,7 +104,7 @@ projects or parts.
 |---|---|
 | **Rules** | 11.4 (pointer ↔ integer conversion, Advisory); 10.1 (inappropriate essential type, Required); 10.8 (composite-expression cast, Required) |
 | **Files** | `bypass_mcu_avr_classic.c`, `bypass_output_cd4053_simple.c`, `bypass_output_cd4053_with_mute.c`, `bypass_output_tq2_l2_5v_relay.c`, `bypass_mcu_avr_xt.c` (avrxmega3 shell) |
-| **Instances** | classic AVR: 11.4 ×28, 10.1 ×26, 10.8 ×6. ATtiny202 shell: 11.4 ×29, 10.8 ×4, 10.1 ×1 |
+| **Instances** | classic AVR: 11.4 ×28, 10.1 ×26, 10.8 ×6. ATtiny202 shell: 11.4 ×33, 10.8 ×4, 10.1 ×1 |
 
 **Rationale.** Direct manipulation of AVR I/O registers is unavoidable in
 bare-metal firmware, and avr-libc exposes every register through the `_SFR_*`

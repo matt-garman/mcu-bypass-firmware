@@ -87,8 +87,13 @@ REG_TCB0_CCMP_H = 0x0A4D
 REG_PORTA_DIR = 0x0400
 REG_PORTA_OUT = 0x0404
 PORTA_DIR_EXPECTED = 0x4E       # PA1|PA2|PA3|PA6 outputs; PA0/PA4/PA5/PA7 inputs
+REG_PORTA_PIN1CTRL = 0x0411
+REG_PORTA_PIN2CTRL = 0x0412
+REG_PORTA_PIN3CTRL = 0x0413
+REG_PORTA_PIN6CTRL = 0x0416
 REG_PORTA_PIN7CTRL = 0x0417
 PORT_PULLUPEN_bm = 0x08
+PORT_INVEN_bm = 0x80
 
 # General-purpose I/O register GPR0 (0x001C). The firmware never touches the GPRs,
 # so a sentinel written here survives normal operation and is cleared to 0 only by

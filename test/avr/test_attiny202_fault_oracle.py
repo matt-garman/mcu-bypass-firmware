@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Host-only regression for fail-closed ATtiny202 fault-run accounting."""
 
+import ast
 import contextlib
 import importlib.util
 import io
@@ -14,7 +15,13 @@ previous_sim_module = sys.modules.get("sim_attiny202")
 sim_stub = types.ModuleType("sim_attiny202")
 sim_stub.F_CPU_HZ = 2_000_000
 sim_stub.REG_CLKCTRL_MCLKCTRLB = 0x0061
+sim_stub.REG_PORTA_PIN1CTRL = 0x0411
+sim_stub.REG_PORTA_PIN2CTRL = 0x0412
+sim_stub.REG_PORTA_PIN3CTRL = 0x0413
+sim_stub.REG_PORTA_PIN6CTRL = 0x0416
 sim_stub.REG_PORTA_PIN7CTRL = 0x0417
+sim_stub.PORT_PULLUPEN_bm = 0x08
+sim_stub.PORT_INVEN_bm = 0x80
 sim_stub.REG_PORTA_DIR = 0x0400
 sim_stub.REG_PORTA_OUT = 0x0404
 sim_stub.REG_TCB0_CTRLA = 0x0A40
@@ -41,7 +48,7 @@ def check(condition, message):
         sys.stderr.write("FAIL: %s\n" % message)
 
 
-def finalize(declared, results=18, injections=17, skips=0):
+def finalize(declared, results=23, injections=22, skips=0):
     checker = driver.Checker()
     checker.results = results
     checker.injections = injections
@@ -59,6 +66,11 @@ class Probe:
 expected_cases = (
     ("CLKCTRL.MCLKCTRLB",      "reg", 0x0061, 0x00, "gate"),
     ("PORTA.PIN7CTRL(pullup)", "reg", 0x0417, 0x00, "gate"),
+    ("PORTA.PIN1CTRL(INVEN)",  "reg", 0x0411, 0x80, "gate"),
+    ("PORTA.PIN2CTRL(INVEN)",  "reg", 0x0412, 0x80, "gate"),
+    ("PORTA.PIN3CTRL(INVEN)",  "reg", 0x0413, 0x80, "gate"),
+    ("PORTA.PIN6CTRL(INVEN)",  "reg", 0x0416, 0x80, "gate"),
+    ("PORTA.PIN7CTRL(INVEN)",  "reg", 0x0417, 0x88, "gate"),
     ("PORTA.DIR(outputs)",      "reg", 0x0400, 0x00, "gate"),
     ("PORTA.DIR(footswitch)",   "reg", 0x0400, 0xCE, "gate"),
     ("PORTA.DIR(spare PA6)",    "reg", 0x0400, 0x0E, "gate"),
@@ -78,6 +90,24 @@ expected_cases = (
 cases = driver._fault_cases(Probe())
 check(tuple(cases) == expected_cases,
       "fault kind/address/value/mechanism must match the independent contract")
+sim_path = Path(__file__).with_name("sim_attiny202.py")
+expected_sim_constants = {
+    "REG_PORTA_PIN1CTRL": 0x0411,
+    "REG_PORTA_PIN2CTRL": 0x0412,
+    "REG_PORTA_PIN3CTRL": 0x0413,
+    "REG_PORTA_PIN6CTRL": 0x0416,
+    "REG_PORTA_PIN7CTRL": 0x0417,
+    "PORT_PULLUPEN_bm": 0x08,
+    "PORT_INVEN_bm": 0x80,
+}
+actual_sim_constants = {}
+for node in ast.parse(sim_path.read_text(encoding="utf-8"), filename=str(sim_path)).body:
+    if (isinstance(node, ast.Assign) and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id in expected_sim_constants):
+        actual_sim_constants[node.targets[0].id] = ast.literal_eval(node.value)
+check(actual_sim_constants == expected_sim_constants,
+      "production simulator pin-control addresses/masks must match the datasheet")
 check(len({case[0] for case in cases}) == driver.EXPECTED_FAULT_CASES,
       "fault case names must be unique")
 direction_values = {
@@ -87,17 +117,17 @@ check((direction_values["PORTA.DIR(footswitch)"] & 0x0E) == 0x0E
       and (direction_values["PORTA.DIR(spare PA6)"] & 0x0E) == 0x0E,
       "exact-direction faults must preserve every caller-requested output bit")
 
-check(driver.EXPECTED_FAULT_CASES == 17 and driver.EXPECTED_TOTAL_RESULTS == 18,
-      "driver must pin seventeen injections plus one negative control")
-check(finalize(17) == 0, "complete seventeen-injection plus control run must pass")
-check(finalize(16) == 1, "short declared case list must fail")
-check(finalize(18) == 1, "long declared case list must fail")
-check(finalize(17, results=17) == 1, "missing result must fail")
-check(finalize(17, results=19) == 1, "extra result must fail")
-check(finalize(17, injections=16) == 1, "missing successful injection must fail")
-check(finalize(17, injections=18) == 1, "extra successful injection must fail")
-check(finalize(17, skips=1) == 1, "any skipped injection must fail")
-check(finalize(17, injections=0, skips=17) == 2,
+check(driver.EXPECTED_FAULT_CASES == 22 and driver.EXPECTED_TOTAL_RESULTS == 23,
+      "driver must pin twenty-two injections plus one negative control")
+check(finalize(22) == 0, "complete twenty-two-injection plus control run must pass")
+check(finalize(21) == 1, "short declared case list must fail")
+check(finalize(23) == 1, "long declared case list must fail")
+check(finalize(22, results=22) == 1, "missing result must fail")
+check(finalize(22, results=24) == 1, "extra result must fail")
+check(finalize(22, injections=21) == 1, "missing successful injection must fail")
+check(finalize(22, injections=23) == 1, "extra successful injection must fail")
+check(finalize(22, skips=1) == 1, "any skipped injection must fail")
+check(finalize(22, injections=0, skips=22) == 2,
       "all-skipped run must fail both injection and skip invariants")
 
 checker = driver.Checker()

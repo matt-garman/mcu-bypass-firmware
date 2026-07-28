@@ -98,6 +98,12 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- The ATtiny202 fault matrix now covers `PORTA.PINnCTRL.INVEN` on the LED,
+  control/relay, parked-spare, and footswitch pins. The PA7 case preserves its
+  pull-up while reversing input polarity, proving the firmware's exact PA7
+  control check rather than the old pull-up-only predicate. Exact zero control
+  checks similarly protect the four output pins, and the per-variant matrix
+  expands from 17 injections / 18 results to 22 / 23.
 - Qualification documentation now distinguishes historical phase evidence, the
   clean but non-publishable `4b28210` full-tool rehearsal, and the still-missing
   final-source production run. It no longer claims that corrected 74/74 mutation
