@@ -454,7 +454,7 @@ FORCE:
         test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle \
         test-pic320-return-stack-oracle \
         test-attiny202-build test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build \
-        test-pic-build test-release-images test-release-provenance test-build-serialization \
+        test-pic-build test-release-images test-release-provenance test-release-qualification test-build-serialization \
         test-make-lock-probe test-make-safe-parallel-probe \
         _test-make-safe-parallel-probe-run _test-make-safe-parallel-probe-a \
         _test-make-safe-parallel-probe-b _test-mutation-policy-probe \
@@ -1064,6 +1064,7 @@ PIC_SOAK_VARIANT     ?= cd4053
 PIC_SOAK_DURATION_MS ?= 3600000
 PIC_SOAK_LIVENESS_INTERVAL_MS ?= 60000
 PIC_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
+PIC_SOAK_COMBINATION_NAME ?= standalone
 PIC_PIN_LOOKUP_HDR = test/pic/find_pin_exact.h
 PIC_SOAK_SRC = test/pic/test_soak_pic.cc
 PIC_SOAK_DEPS = $(PIC_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) test/soak_timing_config.h
@@ -1096,6 +1097,7 @@ PIC_SOAK_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.
 		-DSOAK_DURATION_MS=$(PIC_SOAK_DURATION_MS) \
 		-DSOAK_LIVENESS_INTERVAL_MS=$(PIC_SOAK_LIVENESS_INTERVAL_MS) \
 		-DSOAK_PROGRESS_INTERVAL_MS=$(PIC_SOAK_PROGRESS_INTERVAL_MS) \
+		-DSOAK_COMBINATION_NAME='"$(PIC_SOAK_COMBINATION_NAME)"' \
 		-DSOAK_ACTUATION_BLOCK_MS=$(pic_soak_block_$(PIC_SOAK_VARIANT))u \
 		$(PIC_SOAK_SRC) -o $(PIC_SOAK_BIN) -lgpsim
 
@@ -2037,7 +2039,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -2049,7 +2051,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -2142,6 +2144,11 @@ test-release-images:
 # Isolated proof of final source identity and per-PIC compiler attribution.
 test-release-provenance:
 	./test/test_release_provenance.sh
+
+# Host-only proof that publication requires exact clean qualification metadata,
+# the canonical retained-evidence set, and one complete result per release soak.
+test-release-qualification:
+	./test/test_release_qualification.sh
 
 # Internal probes used only by test/test_make_serialization.sh.
 SERIAL_PROBE_DIR ?= $(AVR_BUILD_DIR)
@@ -2716,6 +2723,7 @@ test-mutation:
 SOAK_VARIANT     ?= cd4053
 SOAK_CHIP        ?= 85
 SOAK_DURATION_MS ?= 86400000
+SOAK_COMBINATION_NAME ?= standalone
 SOAK_BIN  = test/avr/test_soak_$(SOAK_VARIANT)_t$(SOAK_CHIP)
 SOAK_DEPS = test/avr/test_soak.c test/bypass_output_host.h test/bypass_config_host.h \
             test/soak_timing_config.h src/bypass_config.h $(FW_HEADERS)
@@ -2736,6 +2744,7 @@ SOAK_COMPILE = $(HOSTCC) $(SIM_CFLAGS) $(PURE_HOST_CFLAGS) \
 	-DSOAK_DURATION_MS=$(SOAK_DURATION_MS) \
 	-DSOAK_LIVENESS_INTERVAL_MS=$(SOAK_LIVENESS_INTERVAL_MS) \
 	-DSOAK_PROGRESS_INTERVAL_MS=$(SOAK_PROGRESS_INTERVAL_MS) \
+	-DSOAK_COMBINATION_NAME='"$(SOAK_COMBINATION_NAME)"' \
 	test/avr/test_soak.c -o $(SOAK_BIN) $(SIM_LIBS)
 
 # Optional build-only convenience: build without running (Make's normal
@@ -3981,6 +3990,7 @@ pic320_soak_block_tq2-relay     = 12
 PIC320_SOAK_DURATION_MS          ?= 3600000
 PIC320_SOAK_LIVENESS_INTERVAL_MS ?= 60000
 PIC320_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
+PIC320_SOAK_COMBINATION_NAME     ?= standalone
 PIC320_SOAK_SRC  = $(PIC_SOAK_SRC)
 PIC320_SOAK_DEPS = $(PIC320_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) test/soak_timing_config.h
 PIC320_SOAK_BIN  = $(PIC320_BUILD_DIR)/test_soak_pic
@@ -3993,6 +4003,7 @@ PIC320_SOAK_COMPILE = $(PIC320_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags g
 		-DSOAK_DURATION_MS=$(PIC320_SOAK_DURATION_MS) \
 		-DSOAK_LIVENESS_INTERVAL_MS=$(PIC320_SOAK_LIVENESS_INTERVAL_MS) \
 		-DSOAK_PROGRESS_INTERVAL_MS=$(PIC320_SOAK_PROGRESS_INTERVAL_MS) \
+		-DSOAK_COMBINATION_NAME='"$(PIC320_SOAK_COMBINATION_NAME)"' \
 		-DSOAK_ACTUATION_BLOCK_MS=$(pic320_soak_block_$(PIC320_SOAK_VARIANT))u \
 		$(PIC320_SOAK_SRC) -o $(PIC320_SOAK_BIN) -lgpsim
 
@@ -4135,6 +4146,26 @@ RELEASE_IMAGES := \
 # they come from.
 RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(PIC_BUILD_DIR) $(PIC320_BUILD_DIR)
 
+# Canonical release-soak and retained-evidence inventories. These are explicit,
+# immutable publication contracts rather than observations of whichever loops or
+# files happened to exist during a run. The release orchestrator rejects any
+# actual soak-name set that differs before starting the 24-hour phase, and the
+# qualification verifier requires the exact evidence set afterward.
+override RELEASE_SOAK_NAMES := \
+	avr_cd4053_t85 avr_cd4053_t45 \
+	avr_mute_t85 avr_mute_t45 \
+	avr_relay_t85 avr_relay_t45 \
+	pic_cd4053 pic_mute pic_relay \
+	pic320_cd4053-simple pic320_cd4053-mute pic320_tq2-relay
+
+override RELEASE_FIXED_EVIDENCE_FILES := \
+	build-avr.log build-pic.log build-pic320.log final-image-build.log \
+	pic-test.log pic-test-target-variants.log \
+	pic320-test.log pic320-test-target-variants.log \
+	soak-build.log test-long.summary.txt
+override RELEASE_EVIDENCE_FILES := $(RELEASE_FIXED_EVIDENCE_FILES) \
+	$(addprefix soak-,$(addsuffix .log,$(RELEASE_SOAK_NAMES)))
+
 .PHONY: release
 release:
 	@if [ -z "$(VERSION)" ]; then \
@@ -4238,6 +4269,7 @@ help:
 	@echo "  test-pic-build  PIC image validation + PIC10F320 rebuild-trigger checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
 	@echo "  test-release-provenance  release source/compiler provenance checks"
+	@echo "  test-release-qualification  exact release evidence + 12-soak publication checks"
 	@echo "  test-build-serialization  worktree Make/release lock regression"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
 	@echo "  test-target-lane-markers  PIC target aggregates must require each lane's PASS marker"

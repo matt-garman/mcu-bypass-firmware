@@ -280,9 +280,19 @@ int main() {
     }
 
     int pass = (g_total_failures == 0);
-    printf("\nSOAK %s: %.2f h simulated. wdt_resets=%" G_GUINT64_FORMAT
+    printf("\nSOAK %s: %u ms (%.2f h) simulated. wdt_resets=%" G_GUINT64_FORMAT
            " liveness_fails=%" G_GUINT64_FORMAT " checks=%" G_GUINT64_FORMAT "\n",
-           pass ? "PASS" : "FAIL", (double)SOAK_DURATION_MS / 3600000.0,
+           pass ? "PASS" : "FAIL", (unsigned int)SOAK_DURATION_MS,
+           (double)SOAK_DURATION_MS / 3600000.0,
            g_wdt_resets, g_liveness_fails, g_total_checks);
+    printf("SOAK_RESULT format=1 status=%s combination=%s duration_ms=%u"
+           " liveness_interval_ms=%u checks=%" G_GUINT64_FORMAT
+           " failures=%" G_GUINT64_FORMAT " watchdog_failures=%" G_GUINT64_FORMAT
+           " liveness_failures=%" G_GUINT64_FORMAT "\n",
+           pass ? "pass" : "fail", SOAK_COMBINATION_NAME,
+           (unsigned int)SOAK_DURATION_MS,
+           (unsigned int)SOAK_LIVENESS_INTERVAL_MS,
+           g_total_checks, g_total_failures, g_wdt_resets,
+           g_liveness_fails);
     return pass ? 0 : 1;
 }

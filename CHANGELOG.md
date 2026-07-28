@@ -97,6 +97,12 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- Release qualification is now machine-verifiable before publication: an
+  immutable 12-combination inventory, exact retained-evidence set, strict
+  `QUALIFICATION` schema, and one identity/timing/counter-bearing `SOAK_RESULT`
+  per log must agree. Tag CI verifies a private snapshot before installing tools
+  and publishes the qualification record; PIC images are hash-pinned across soak
+  compilation, execution, and staging just like validated AVR ELFs.
 - Dry-run release artifacts cannot be staged under the repository's release tree,
   and tag CI requires an explicit production-mode manifest while independently
   rejecting the dry-run banner before any release can be published. The output

@@ -48,7 +48,11 @@ validation suite — backs these binaries, through two mechanisms:
 
 1. **Provenance.** Every release carries a `MANIFEST.md` recording the exact
    source commit, pinned toolchain versions, per-image fuse bytes / CONFIG word,
-   and its validation evidence. The current unified pipeline requires
+   and its validation evidence. A machine-readable `QUALIFICATION` record is
+   checked against the exact retained-evidence inventory and every soak log
+   before publication; each log must identify its canonical combination and
+   report the configured duration, expected nonzero liveness-check count, and
+   zero failure counters. The current unified pipeline requires
    `make test-long`, both PIC10F322 gates (`make pic-test` and
    `make pic-test-target-variants`), both PIC10F320 gates (`make pic320-test` and
    `make pic320-test-target-variants`), and a **24-hour soak of every release
@@ -161,11 +165,13 @@ ATtiny202 is not release-supported.
 ```sh
 git checkout vX.Y.Z
 # install the pinned toolchain (see TOOLCHAIN.adoc), then:
+scripts/verify-release-qualification.sh release/vX.Y.Z vX.Y.Z
 make clean && make all13 all85 all45 && make pic && make pic320-variants
 scripts/verify-release-images.sh release/vX.Y.Z $(make -s print-RELEASE_IMAGE_DIRS)
 ```
 
-The verifier resolves symlink aliases to physical directory paths and rejects
+The qualification verifier checks the retained local validation and 24-hour
+soak evidence. The image verifier resolves symlink aliases to physical directory paths and rejects
 both committed-as-fresh reuse and duplicate fresh directories. It copies
 `SHA256SUMS`, the committed images, and all fresh images into private storage
 before comparing sets or bytes, so later source mutations cannot contaminate

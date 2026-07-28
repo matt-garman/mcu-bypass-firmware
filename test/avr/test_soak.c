@@ -321,6 +321,14 @@ int main(void) {
     printf("  Liveness failures: %" PRIu64 "\n", g_liveness_fails);
     printf("  Total checks:      %" PRIu64 "\n", g_total_checks);
     printf("  Total failures:    %" PRIu64 "\n", g_total_failures);
+    printf("SOAK_RESULT format=1 status=%s combination=%s duration_ms=%" PRIu32
+           " liveness_interval_ms=%" PRIu32 " checks=%" PRIu64
+           " failures=%" PRIu64 " watchdog_failures=%" PRIu64
+           " liveness_failures=%" PRIu64 "\n",
+           pass ? "pass" : "fail", SOAK_COMBINATION_NAME,
+           (uint32_t)SOAK_DURATION_MS, (uint32_t)SOAK_LIVENESS_INTERVAL_MS,
+           g_total_checks, g_total_failures, g_wdt_crashes,
+           g_liveness_fails);
 
     if (g_avr) { avr_terminate(g_avr); free(g_avr); }
     return pass ? 0 : 1;

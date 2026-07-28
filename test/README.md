@@ -34,6 +34,7 @@ test/
   test_pic_build.sh         shared: PIC image/size/rebuild-trigger checks
   test_release_images.sh    shared: isolated exact release artifact verification
   test_release_provenance.sh shared: source/compiler/output release-provenance regression
+  test_release_qualification.sh shared: release soak/evidence publication contract
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
   test_stack_bound.sh       shared: fail-closed stack evidence checks
   test_strict_tools.sh      shared: skip/strict policy for host + both PIC chips
@@ -157,6 +158,7 @@ below so a green gate means every PIC layer actually ran.
 | Soak rebuild determinism | `test-pic-build-rebuild` | Both chips' soak binaries compile their workload sizing in as `-D` flags, so their file rules must be *unconditionally* out of date. Asserts a changed duration recompiles with the new value, and that an identical rerun recompiles too — the signature of `FORCE`, as opposed to a rebuild that merely followed a timestamp. | Bash + fake c++ |
 
 | Soak timing contract | `test-soak-timing` | Native Classic AVR/PIC soaks require the liveness interval within the total duration; short release rehearsals clamp it so every passing run completes a responsiveness round-trip. | host C/C++ compilers + release CLI |
+| Release qualification contract | `test-release-qualification` | Publication requires clean production metadata, the exact canonical 22-file evidence set, and one identity-, duration-, and counter-bearing result for each of 12 release soak combinations. | Bash + synthetic retained evidence |
 
 `pic-test-gpsim` now samples one non-settled point, `PRESS1_EARLY`, roughly
 6 ms (3,000 instruction cycles) after the first press edge. A correct 1 ms tick

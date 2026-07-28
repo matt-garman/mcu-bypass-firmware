@@ -216,6 +216,12 @@ RELEASE_IMAGES=$(mkv RELEASE_IMAGES)
 RELEASE_IMAGE_DIRS=$(mkv RELEASE_IMAGE_DIRS)
 [ -n "${RELEASE_IMAGE_DIRS// /}" ] \
 	|| die "Makefile RELEASE_IMAGE_DIRS is empty"
+RELEASE_SOAK_NAMES=$(mkv RELEASE_SOAK_NAMES)
+[ -n "${RELEASE_SOAK_NAMES// /}" ] \
+	|| die "Makefile RELEASE_SOAK_NAMES is empty"
+RELEASE_EVIDENCE_FILES=$(mkv RELEASE_EVIDENCE_FILES)
+[ -n "${RELEASE_EVIDENCE_FILES// /}" ] \
+	|| die "Makefile RELEASE_EVIDENCE_FILES is empty"
 
 # Scratch area for evidence + per-combo soak run dirs. Preserved on failure so a
 # crashed/failed run can be inspected; folded into the release on success.
@@ -359,6 +365,7 @@ make pic320-variants PIC320_CC="$PIC320_CC" PIC320_DFP="$PIC320_DFP" \
 IMAGES=()
 AVR_IMAGES=()
 AVR_ELFS=()
+PIC_IMAGES=()
 PIC320_IMAGES=()
 for v in $VARIANTS; do
 	img="$AVR_BUILD_DIR/${FW_BASE}_${v}.hex"
@@ -370,10 +377,13 @@ for v in $VARIANTS; do for n in $TINYX5; do
 	elf="${img%.hex}.elf"
 	IMAGES+=("$img"); AVR_IMAGES+=("$img"); AVR_ELFS+=("$elf")
 done; done
-for v in $VARIANTS; do IMAGES+=("$PIC_BUILD_DIR/${FW_BASE}_${v}_${PIC_TAG}.hex"); done
+for v in $VARIANTS; do
+	img="$PIC_BUILD_DIR/${FW_BASE}_${v}_${PIC_TAG}.hex"
+	IMAGES+=("$img"); PIC_IMAGES+=("$img")
+done
 for v in $PIC320_VARIANTS; do
 	img="$PIC320_BUILD_DIR/${PIC320_FW_BASE}_${v}_${PIC320_TAG}.hex"
-	IMAGES+=("$img"); PIC320_IMAGES+=("$img")
+	IMAGES+=("$img"); PIC_IMAGES+=("$img"); PIC320_IMAGES+=("$img")
 done
 for img in "${IMAGES[@]}"; do [ -f "$img" ] || die "expected image not produced: $img"; done
 
@@ -408,6 +418,17 @@ hash_avr_elf_set() {
 			|| die "validated classic AVR ELF missing, empty, or not regular: $elf"
 	done
 	sha256sum -- "$@"
+}
+
+hash_pic_image_set() {
+	local image result hash
+	for image in "$@"; do
+		[ -f "$image" ] && [ ! -L "$image" ] && [ -s "$image" ] \
+			|| die "validated PIC image missing, empty, or not regular: $image"
+		result=$(sha256sum -- "$image") || return 1
+		hash=${result%% *}
+		printf '%s  %s\n' "$hash" "${image##*/}"
+	done
 }
 
 # ============================================================================
@@ -445,6 +466,7 @@ make pic320-test-target-variants STRICT_TOOLS=1 \
 	>"$EVID/pic320-test-target-variants.log" 2>&1 \
 	|| { tail -60 "$EVID/pic320-test-target-variants.log" >&2; die "make pic320-test-target-variants FAILED."; }
 ok "pic320-test-target-variants passed."
+validated_pic_image_hashes=$(hash_pic_image_set "${PIC_IMAGES[@]}")
 
 # ============================================================================
 # 3. PARALLEL SOAK -- every release combo, full duration
@@ -462,6 +484,7 @@ for v in $VARIANTS; do for n in $TINYX5; do
 	make --old-file="$elf" "$bin" AVR_REBUILD_PREREQ= \
 		SOAK_VARIANT="$v" SOAK_CHIP="$n" SOAK_DURATION_MS="$SOAK_DURATION_MS" \
 		SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
+		SOAK_COMBINATION_NAME="$name" \
 		>>"$EVID/soak-build.log" 2>&1 || die "failed to build AVR soak $name"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$REPO_ROOT/$bin"
 	SOAK_CWD[$name]="$REPO_ROOT"   # relative FW_PATH; the binary writes no files
@@ -471,6 +494,7 @@ for v in $VARIANTS; do
 	name="pic_${v}"; bin="$SOAKDIR/test_soak_pic_${v}"
 	make "$bin" PIC_SOAK_BIN="$bin" PIC_SOAK_VARIANT="$v" PIC_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
 		PIC_SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
+		PIC_SOAK_COMBINATION_NAME="$name" \
 		>>"$EVID/soak-build.log" 2>&1 || die "failed to build PIC soak $name"
 	rundir="$SOAKDIR/run-$name"; mkdir -p "$rundir"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
@@ -486,6 +510,7 @@ for v in $PIC320_VARIANTS; do
 	make "$bin" PIC320_SOAK_BIN="$bin" PIC320_SOAK_VARIANT="$v" \
 		PIC320_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
 		PIC320_SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
+		PIC320_SOAK_COMBINATION_NAME="$name" \
 		>>"$EVID/soak-build.log" 2>&1 || die "failed to build PIC10F320 soak $name"
 	rundir="$SOAKDIR/run-$name"; mkdir -p "$rundir"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
@@ -497,8 +522,17 @@ done
 current_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
 [ "$current_avr_elf_hashes" = "$validated_avr_elf_hashes" ] \
 	|| die "a classic AVR ELF changed while compiling its soak harness"
+current_pic_image_hashes=$(hash_pic_image_set "${PIC_IMAGES[@]}")
+[ "$current_pic_image_hashes" = "$validated_pic_image_hashes" ] \
+	|| die "a PIC image changed while compiling its soak harness"
 
 NCOMBOS=${#SOAK_NAMES[@]}
+actual_soaks=$(printf '%s\n' "${SOAK_NAMES[@]}" | LC_ALL=C sort)
+canonical_soaks=$(printf '%s\n' $RELEASE_SOAK_NAMES | LC_ALL=C sort)
+if [ "$actual_soaks" != "$canonical_soaks" ]; then
+	diff -u <(printf '%s\n' "$canonical_soaks") <(printf '%s\n' "$actual_soaks") >&2 || true
+	die "release soak combinations do not match canonical RELEASE_SOAK_NAMES"
+fi
 [ "$JOBS" -gt 0 ] 2>/dev/null || JOBS=$NCOMBOS
 hours=$(awk -v ms="$SOAK_DURATION_MS" 'BEGIN{printf "%.1f", ms/3600000}')
 ncpu=$(nproc 2>/dev/null || echo "?")
@@ -515,12 +549,29 @@ for name in "${SOAK_NAMES[@]}"; do
 	log "  started $name (pid ${SOAK_PID[$name]})"
 done
 
-# Wait for all and collect verdicts. Both soak harnesses exit non-zero on any
-# recorded failure AND print a 'SOAK PASS'/'SOAK FAIL' summary line.
+# One exact terminal record is the machine contract shared by both harnesses.
+# It binds the log to its combination and compile-time timing, requires the
+# expected nonzero liveness-check count, and reports every failure counter.
+expected_soak_checks=$((SOAK_DURATION_MS / SOAK_LIVENESS_INTERVAL_MS))
+validate_soak_result() {
+	local name=$1 log=$2 expected
+	local -a records pass_lines
+	mapfile -t records < <(grep '^SOAK_RESULT ' "$log" || true)
+	[ "${#records[@]}" -eq 1 ] || return 1
+	expected="SOAK_RESULT format=1 status=pass combination=$name duration_ms=$SOAK_DURATION_MS liveness_interval_ms=$SOAK_LIVENESS_INTERVAL_MS checks=$expected_soak_checks failures=0 watchdog_failures=0 liveness_failures=0"
+	[ "${records[0]}" = "$expected" ] || return 1
+	mapfile -t pass_lines < <(grep "^SOAK PASS: $SOAK_DURATION_MS ms " "$log" || true)
+	[ "${#pass_lines[@]}" -eq 1 ] || return 1
+	! grep -q '^SOAK FAIL' "$log"
+}
+
+# Wait for all and collect verdicts. Exit status and the complete machine record
+# must agree; either one alone is insufficient evidence.
 SOAK_FAILS=0
 for name in "${SOAK_NAMES[@]}"; do
 	if wait "${SOAK_PID[$name]}"; then SOAK_RC[$name]=0; else SOAK_RC[$name]=$?; fi
-	if [ "${SOAK_RC[$name]}" -eq 0 ] && grep -q "SOAK PASS" "${SOAK_LOG[$name]}"; then
+	if [ "${SOAK_RC[$name]}" -eq 0 ] \
+			&& validate_soak_result "$name" "${SOAK_LOG[$name]}"; then
 		ok "soak $name: PASS"
 	else
 		warn "soak $name: FAIL (exit ${SOAK_RC[$name]})  -- see ${SOAK_LOG[$name]}"
@@ -537,6 +588,9 @@ ok "all $NCOMBOS soak combos passed (wall-clock ${SOAK_WALL}s)."
 current_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
 [ "$current_avr_elf_hashes" = "$validated_avr_elf_hashes" ] \
 	|| die "a classic AVR ELF changed after its final validation began"
+current_pic_image_hashes=$(hash_pic_image_set "${PIC_IMAGES[@]}")
+[ "$current_pic_image_hashes" = "$validated_pic_image_hashes" ] \
+	|| die "a PIC image changed while its soak was running"
 
 # Validation and soak rebuild classic ELFs, invalidating their paired HEX files.
 # Re-materialize HEX from those exact, just-tested ELFs without compiling again.
@@ -555,6 +609,9 @@ for img in "${IMAGES[@]}"; do
 	[ -f "$img" ] && [ ! -L "$img" ] && [ -s "$img" ] \
 		|| die "validated release image missing, empty, or not regular after final regeneration: $img"
 done
+current_pic_image_hashes=$(hash_pic_image_set "${PIC_IMAGES[@]}")
+[ "$current_pic_image_hashes" = "$validated_pic_image_hashes" ] \
+	|| die "a validated PIC image changed before staging"
 ok "all validated release images are present and nonempty."
 
 # Builds and parallel soaks can run for 24 hours. The Make lock protects shared
@@ -588,6 +645,11 @@ release_basenames=()
 for img in "${IMAGES[@]}"; do release_basenames+=("$(basename "$img")"); done
 ( cd "$OUTPUT_DIR" && sha256sum -- "${release_basenames[@]}" > SHA256SUMS ) \
 	|| die "could not checksum the staged release images"
+STAGED_PIC_IMAGES=()
+for img in "${PIC_IMAGES[@]}"; do STAGED_PIC_IMAGES+=("$OUTPUT_DIR/$(basename "$img")"); done
+staged_pic_image_hashes=$(hash_pic_image_set "${STAGED_PIC_IMAGES[@]}")
+[ "$staged_pic_image_hashes" = "$validated_pic_image_hashes" ] \
+	|| die "a staged PIC image differs from the image exercised by the soak"
 
 # ...and assert the staging directory holds exactly that set and nothing else,
 # because publication (.github/workflows/release.yml) uploads by glob.
@@ -617,6 +679,20 @@ for f in "$EVID"/*.log; do
 		*) cp -p "$f" "$OUTPUT_DIR/evidence/" ;;
 	esac
 done
+
+# Compact machine-readable attestation. The verifier parses this as data (never
+# sources it), then cross-checks it against the canonical evidence inventory,
+# every terminal soak record, and the human-readable manifest.
+{
+	printf 'format=1\n'
+	printf 'version=%s\n' "$VERSION"
+	printf 'release_mode=%s\n' "$RELEASE_MODE"
+	printf 'source_commit=%s\n' "$GIT_SHA"
+	printf 'source_dirty=%s\n' "$GIT_DIRTY"
+	printf 'soak_duration_ms=%s\n' "$SOAK_DURATION_MS"
+	printf 'soak_liveness_interval_ms=%s\n' "$SOAK_LIVENESS_INTERVAL_MS"
+	printf 'soak_combination_count=%s\n' "$NCOMBOS"
+} > "$OUTPUT_DIR/QUALIFICATION"
 
 # --- per-image facts for the manifest (target, clock, fuses, flashing cmd) ----
 # Echoes a markdown table row for one image path.
@@ -665,10 +741,13 @@ img_row() {
 # Soak evidence summary table.
 soak_table() {
 	local name f
+	local -a lines
 	for name in "${SOAK_NAMES[@]}"; do
 		f="$OUTPUT_DIR/evidence/soak-$name.log"
-		local line; line=$(grep -E "^SOAK (PASS|FAIL)" "$f" 2>/dev/null | tail -1)
-		printf '| %s | %s |\n' "$name" "${line:-PASS}"
+		mapfile -t lines < <(grep "^SOAK PASS: $SOAK_DURATION_MS ms " "$f" || true)
+		[ "${#lines[@]}" -eq 1 ] \
+			|| die "cannot render one exact soak summary for $name"
+		printf '| %s | %s |\n' "$name" "${lines[0]}"
 	done
 }
 
@@ -707,6 +786,8 @@ REL_BANNER=""
 	printf -- '- **Version / tag:** %s\n' "$VERSION"
 	printf -- '- **Release mode:** %s\n' "$RELEASE_MODE"
 	printf -- '- **Source commit:** `%s`\n' "$GIT_SHA"
+	printf -- '- **Soak duration per combination:** %s ms\n' "$SOAK_DURATION_MS"
+	printf -- '- **Soak combinations:** %s\n' "$NCOMBOS"
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
 	printf -- '- **Validation:** `make test-long` + `make pic-test` + `make pic-test-target-variants` + `make pic320-test` + `make pic320-test-target-variants` (real-HEX SFR/SRAM fault recovery, firmware/model ctx_ lock-step, and GPIO transition/pulse timing on BOTH PIC parts) + %s-h parallel soak of every release soak combination (see evidence/).\n' "$hours"
@@ -778,12 +859,18 @@ ok "wrote MANIFEST.md"
 	printf '# %s\n\n' "$VERSION"
 	[ -n "$REL_BANNER" ] && printf '%s\n' "$REL_BANNER"
 	printf 'Prebuilt firmware for %s. See **MANIFEST.md** for provenance, the per-image\n' "$VERSION"
-	printf 'fuse bytes / flashing commands, and the soak evidence. See the top-level\n'
+	printf 'fuse bytes / flashing commands, **QUALIFICATION** for the machine-verified\n'
+	printf 'release gate, and evidence/ for the retained logs. See the top-level\n'
 	printf '[release/README.md](../README.md) for the trust model and verification steps.\n\n'
 	printf 'Quick verify:\n```\ncd release/%s && sha256sum -c SHA256SUMS\n```\n' "$VERSION"
 	printf '\nIf SHA256SUMS.asc is present, verify the signature first:\n'
 	printf '```\ngpg --verify SHA256SUMS.asc SHA256SUMS\n```\n'
 } > "$OUTPUT_DIR/README.md"
+
+if [ "$DRY_RUN" -eq 1 ]; then qualification_args=(--allow-dry-run); else qualification_args=(); fi
+scripts/verify-release-qualification.sh "${qualification_args[@]}" "$OUTPUT_DIR" "$VERSION" \
+	|| die "staged release qualification failed verification"
+ok "release qualification metadata and evidence verified."
 
 # Commit message for the human to use verbatim (git commit -F ...).
 {
