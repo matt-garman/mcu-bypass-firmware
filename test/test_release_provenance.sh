@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 RELEASE="$ROOT/scripts/make-release.sh"
+RELEASE_WORKFLOW="$ROOT/.github/workflows/release.yml"
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-provenance.XXXXXX")
 repo="$work/repo with spaces"
 log="$work/check.log"
@@ -24,6 +25,47 @@ declare -F release_source_is_unchanged >/dev/null \
 	|| fail "release provenance helper was not defined"
 declare -F release_tool_version_line >/dev/null \
 	|| fail "release tool-version helper was not defined"
+declare -F release_output_path_is_safe >/dev/null \
+	|| fail "release output-path helper was not defined"
+
+expect_output_path_pass() {
+	local label=$1 output_dir=$2 mode=$3
+	if ! (cd "$ROOT" && release_output_path_is_safe "$ROOT" "$output_dir" "$mode") \
+			>"$log" 2>&1; then
+		fail "$label unexpectedly failed: $(<"$log")"
+	fi
+	checks=$((checks + 1))
+}
+
+expect_output_path_fail() {
+	local label=$1 output_dir=$2 mode=$3 needle=$4
+	if (cd "$ROOT" && release_output_path_is_safe "$ROOT" "$output_dir" "$mode") \
+			>"$log" 2>&1; then
+		fail "$label unexpectedly passed"
+	fi
+	grep -Fq "$needle" "$log" \
+		|| fail "$label failed without '$needle': $(<"$log")"
+	checks=$((checks + 1))
+}
+
+# A production release belongs under release/<version>; a rehearsal never does.
+# Canonicalization matters because --output-dir accepts arbitrary paths, including
+# `..` components and aliases through an existing symlink.
+expect_output_path_pass "production release tree" "$ROOT/release/v99.0.0" production
+expect_output_path_pass "external dry-run tree" "$work/dry-run/v99.0.0" dry-run
+expect_output_path_fail "dry-run release root" "$ROOT/release" dry-run \
+	"dry-run output must not be staged under the repository release tree"
+expect_output_path_fail "dry-run release child" "$ROOT/release/v99.0.0" dry-run \
+	"dry-run output must not be staged under the repository release tree"
+expect_output_path_fail "normalized dry-run release child" \
+	"release/../release/v99.0.0" dry-run \
+	"dry-run output must not be staged under the repository release tree"
+ln -s "$ROOT/release" "$work/release-link"
+expect_output_path_fail "symlinked dry-run release child" \
+	"$work/release-link/v99.0.0" dry-run \
+	"dry-run output must not be staged under the repository release tree"
+expect_output_path_fail "invalid release mode" "$work/output" invalid \
+	"invalid release output mode"
 
 tools="$work/tools"
 mkdir -p "$tools"
@@ -188,6 +230,55 @@ grep -Fq '"$PIC320_CC" "$TC_XC8_320"' "$RELEASE" \
 	|| fail "PIC10F320 manifest row does not use its selected compiler and version"
 if grep -Fq "printf -- '| XC8 |" "$RELEASE"; then
 	fail "release manifest still contains an ambiguous generic XC8 row"
+fi
+checks=$((checks + 1))
+
+# The producer guard must run after the output path is selected and again between
+# the final source check and staging. The second check closes the long window in
+# which an external output-path component could be replaced with a symlink.
+mapfile -t output_guard_lines < <(grep -nF \
+	'release_output_path_is_safe "$REPO_ROOT" "$OUTPUT_DIR" "$RELEASE_MODE"' "$RELEASE")
+mapfile -t precondition_lines < <(grep -nF 'section "0. preconditions"' "$RELEASE")
+mapfile -t source_check_lines < <(grep -nF \
+	'release_source_is_unchanged "$GIT_SHA" "$DRY_RUN"' "$RELEASE")
+mapfile -t release_stage_lines < <(grep -nF 'section "4. stage $OUTPUT_DIR"' "$RELEASE")
+[ "${#output_guard_lines[@]}" -eq 2 ] \
+	&& [ "${#precondition_lines[@]}" -eq 1 ] \
+	&& [ "${#source_check_lines[@]}" -eq 1 ] \
+	&& [ "${#release_stage_lines[@]}" -eq 1 ] \
+	|| fail "release output guard/precondition wiring is missing or ambiguous"
+first_output_guard_line=${output_guard_lines[0]%%:*}
+final_output_guard_line=${output_guard_lines[1]%%:*}
+precondition_line=${precondition_lines[0]%%:*}
+source_check_line=${source_check_lines[0]%%:*}
+release_stage_line=${release_stage_lines[0]%%:*}
+[ "$first_output_guard_line" -lt "$precondition_line" ] \
+	&& [ "$source_check_line" -lt "$final_output_guard_line" ] \
+	&& [ "$final_output_guard_line" -lt "$release_stage_line" ] \
+	|| fail "release output guards do not bracket validation and staging"
+grep -Fq "printf -- '- **Release mode:** %s\\n' \"\$RELEASE_MODE\"" "$RELEASE" \
+	|| fail "release manifest does not record its release mode"
+checks=$((checks + 1))
+
+# The generated manifest carries the mode tag CI requires, and the workflow also
+# rejects the human-readable dry-run banner. Context values enter shell through
+# the environment, never by interpolation into executable shell source: release
+# tags permit punctuation that is meaningful to a shell.
+grep -Fq "grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE'" "$RELEASE_WORKFLOW" \
+	|| fail "tag workflow does not reject the dry-run manifest banner"
+grep -Fq "grep -Fxq -- '- **Release mode:** production'" "$RELEASE_WORKFLOW" \
+	|| fail "tag workflow does not require an explicit production release mode"
+checks=$((checks + 1))
+
+for assignment in \
+	'RELEASE_TAG: ${{ github.ref_name }}' \
+	'RELEASE_DIR: ${{ steps.rel.outputs.dir }}' \
+	'RELEASE_DIR: ${{ steps.repro.outputs.dir }}'; do
+	grep -Fq "$assignment" "$RELEASE_WORKFLOW" \
+		|| fail "tag workflow is missing safe context routing: $assignment"
+done
+if grep -Eq "^[[:space:]]+(tag|dir)='?\\\$\\{\\{" "$RELEASE_WORKFLOW"; then
+	fail "tag workflow interpolates a context value directly into shell source"
 fi
 checks=$((checks + 1))
 

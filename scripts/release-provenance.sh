@@ -33,6 +33,51 @@ release_tool_version_line() {
 	printf '%s\n' "$first_line"
 }
 
+release_output_path_is_safe() {
+	if [ "$#" -ne 3 ]; then
+		printf 'FATAL: release_output_path_is_safe requires repo root, output path, and release mode\n' >&2
+		return 2
+	fi
+	local repo_root=$1
+	local output_dir=$2
+	local release_mode=$3
+	local release_root output_abs
+
+	case "$release_mode" in
+		production) return 0 ;;
+		dry-run) ;;
+		*)
+			printf 'FATAL: invalid release output mode: %s\n' "$release_mode" >&2
+			return 1
+			;;
+	esac
+
+	command -v realpath >/dev/null 2>&1 || {
+		printf 'FATAL: realpath is required to validate a dry-run output path\n' >&2
+		return 1
+	}
+	release_root=$(realpath -m -- "$repo_root/release") || {
+		printf 'FATAL: cannot resolve the repository release directory\n' >&2
+		return 1
+	}
+	case "$output_dir" in
+		/*) ;;
+		*) output_dir="$repo_root/$output_dir" ;;
+	esac
+	output_abs=$(realpath -m -- "$output_dir") || {
+		printf 'FATAL: cannot resolve dry-run output path: %s\n' "$output_dir" >&2
+		return 1
+	}
+
+	case "$output_abs" in
+		"$release_root"|"$release_root"/*)
+			printf 'FATAL: dry-run output must not be staged under the repository release tree: %s\n' \
+				"$output_abs" >&2
+			return 1
+			;;
+	esac
+}
+
 release_source_is_unchanged() {
 	local expected_sha=$1
 	local permit_dirty=$2

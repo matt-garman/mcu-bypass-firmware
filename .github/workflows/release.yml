@@ -51,12 +51,22 @@ jobs:
 
       - name: Locate the committed release directory
         id: rel
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          tag='${{ github.ref_name }}'
+          tag=$RELEASE_TAG
           dir="release/${tag}"
           test -d "$dir"               || { echo "::error::no committed $dir/ -- run scripts/make-release.sh and commit it before tagging"; exit 1; }
           test -f "$dir/SHA256SUMS"    || { echo "::error::$dir/SHA256SUMS missing"; exit 1; }
+          test -f "$dir/MANIFEST.md" && test ! -L "$dir/MANIFEST.md" \
+            || { echo "::error::$dir/MANIFEST.md is missing or not a regular file"; exit 1; }
+          if grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$dir/MANIFEST.md"; then
+            echo "::error::$dir was produced by a dry run and must not be published"
+            exit 1
+          fi
+          grep -Fxq -- '- **Release mode:** production' "$dir/MANIFEST.md" \
+            || { echo "::error::$dir/MANIFEST.md does not identify a production release"; exit 1; }
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
 
       # --- toolchains: AVR + host analyzers (apt) ---------------------------
@@ -144,9 +154,11 @@ jobs:
       # --- THE reproducibility gate ----------------------------------------
       - name: Verify committed images reproduce bit-for-bit
         id: repro
+        env:
+          RELEASE_DIR: ${{ steps.rel.outputs.dir }}
         run: |
           set -euo pipefail
-          dir='${{ steps.rel.outputs.dir }}'
+          dir=$RELEASE_DIR
 
           # Enforce FOUR-way equality for release images: the canonical
           # RELEASE_IMAGES set, the actual committed .hex files, the checksum
@@ -212,10 +224,12 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_DIR: ${{ steps.repro.outputs.dir }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          dir='${{ steps.repro.outputs.dir }}'
-          tag='${{ github.ref_name }}'
+          dir=$RELEASE_DIR
+          tag=$RELEASE_TAG
           assets=( "$dir"/*.hex "$dir/SHA256SUMS" "$dir/MANIFEST.md" )
           [ -f "$dir/SHA256SUMS.asc" ] && assets+=( "$dir/SHA256SUMS.asc" )
           notes="$dir/MANIFEST.md"; [ -f "$notes" ] || notes=/dev/null

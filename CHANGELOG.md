@@ -97,6 +97,12 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- Dry-run release artifacts cannot be staged under the repository's release tree,
+  and tag CI requires an explicit production-mode manifest while independently
+  rejecting the dry-run banner before any release can be published. The output
+  path is revalidated immediately before staging, and tag-derived values reach
+  privileged workflow shells through the environment rather than source-text
+  interpolation.
 - `pic320-variants` now requires the complete supported build matrix, and the
   canonical release set no longer shrinks with a `PIC320_VARIANTS_ALL` override.
 - Release provenance now probes both selected XC8 compilers fail-closed and

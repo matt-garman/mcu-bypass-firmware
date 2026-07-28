@@ -96,6 +96,7 @@ die()     { printf '%sFATAL%s %s\n' "$RED" "$RST" "$*" >&2; exit 1; }
 # ----------------------------------------------------------------------------
 VERSION=""
 DRY_RUN=0
+RELEASE_MODE=production
 MIN_RELEASE_SOAK_MS=86400000
 MAX_SOAK_DURATION_MS=4294967294    # uint32_t loop bound; preserve t + 1
 SOAK_DURATION_MS=$MIN_RELEASE_SOAK_MS
@@ -136,6 +137,7 @@ if [ "$DRY_RUN" -eq 0 ] && [ "$SOAK_DURATION_MS" -lt "$MIN_RELEASE_SOAK_MS" ]; t
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
+	RELEASE_MODE=dry-run
 	# A dry run is an explicit rehearsal: shorten the soak so the whole pipeline
 	# finishes quickly, and tolerate an uncommitted tree (you typically rehearse
 	# BEFORE committing the release scaffolding itself).
@@ -160,6 +162,8 @@ declare -F release_source_is_unchanged >/dev/null \
 	|| die "release provenance checker did not define its required function"
 declare -F release_tool_version_line >/dev/null \
 	|| die "release provenance checker did not define its tool-version function"
+declare -F release_output_path_is_safe >/dev/null \
+	|| die "release provenance checker did not define its output-path function"
 
 mkv() { make -s print-"$1"; }      # echo one Makefile variable
 
@@ -228,6 +232,7 @@ if [ -n "$OUTPUT_DIR" ]; then :;
 elif [ "$DRY_RUN" -eq 1 ]; then OUTPUT_DIR="$WORK/release/$VERSION"; KEEP_WORK=1
 else OUTPUT_DIR="release/$VERSION"
 fi
+release_output_path_is_safe "$REPO_ROOT" "$OUTPUT_DIR" "$RELEASE_MODE"
 
 # ============================================================================
 # 0. PRECONDITIONS
@@ -561,6 +566,10 @@ if ! release_source_is_unchanged "$GIT_SHA" "$DRY_RUN"; then
 	die "source provenance changed after validation. No release staged."
 fi
 ok "source provenance still matches $GIT_SHORT immediately before staging."
+# An explicit dry-run output may live under a path controlled outside this
+# worktree. Resolve it again after the long-running gates so replacing a parent
+# with a symlink cannot redirect rehearsal artifacts into release/<version>.
+release_output_path_is_safe "$REPO_ROOT" "$OUTPUT_DIR" "$RELEASE_MODE"
 
 # ============================================================================
 # 4. STAGE THE RELEASE
@@ -696,6 +705,7 @@ REL_BANNER=""
 
 	printf '## Provenance\n\n'
 	printf -- '- **Version / tag:** %s\n' "$VERSION"
+	printf -- '- **Release mode:** %s\n' "$RELEASE_MODE"
 	printf -- '- **Source commit:** `%s`\n' "$GIT_SHA"
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"

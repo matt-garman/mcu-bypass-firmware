@@ -33,7 +33,7 @@ test/
   test_make_serialization.sh shared: worktree Make/release lock regression
   test_pic_build.sh         shared: PIC image/size/rebuild-trigger checks
   test_release_images.sh    shared: isolated exact release artifact verification
-  test_release_provenance.sh shared: source/compiler release-provenance regression
+  test_release_provenance.sh shared: source/compiler/output release-provenance regression
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
   test_stack_bound.sh       shared: fail-closed stack evidence checks
   test_strict_tools.sh      shared: skip/strict policy for host + both PIC chips
