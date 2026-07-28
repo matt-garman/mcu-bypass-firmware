@@ -38,24 +38,28 @@ PB_MATRIX_REQUIRE_COMPLETE=${PB_MATRIX_REQUIRE_COMPLETE:-0}
 PB_MATRIX_UNSUPPORTED=${PB_MATRIX_UNSUPPORTED:-unknown}
 PB_SELECTOR_ROUTING=${PB_SELECTOR_ROUTING:-0}
 PB_SIZE_TARGET=${PB_SIZE_TARGET:-}
+PB_STACK_TARGET=${PB_STACK_TARGET:-pic-test-stack-bound}
+PB_STACK_DEVICE_VAR=${PB_STACK_DEVICE_VAR:-PIC_DEVICE_INI}
 PB_RETURN_STACK_REQUIRED=${PB_RETURN_STACK_REQUIRED:-0}
 PB_REBUILD_REQUIRED=${PB_REBUILD_REQUIRED:-0}
 case "$PB_TARGET" in
 	pic)
 		[ "$PB_LABEL" = PIC ] \
 			|| { printf 'FAIL: canonical pic build validation requires PB_LABEL=PIC\n' >&2; exit 1; }
-		expected_checks=28
+		expected_checks=30
 		;;
 	pic320)
 		[ "$PB_LABEL" = PIC10F320 ] \
 			|| { printf 'FAIL: canonical pic320 build validation requires PB_LABEL=PIC10F320\n' >&2; exit 1; }
 		[ "$PB_REBUILD_REQUIRED" = 1 ] \
 			|| { printf 'FAIL: canonical pic320 build validation requires PB_REBUILD_REQUIRED=1\n' >&2; exit 1; }
-		expected_checks=68
+		expected_checks=70
 		;;
 	*) expected_checks= ;;
 esac
 hex="$repo/$PB_BUILD_DIR/${PB_FW_BASE}_${PB_VARIANT}_${PB_TAG}.hex"
+asm=${hex%.hex}.s
+sym=${hex%.hex}.sym
 size_probe_stem="$repo/$PB_BUILD_DIR/size_probe_$PB_VARIANT"
 checks=0
 unset FAKE_XC8_MODE FAKE_XC8_FAIL_NAME FAKE_XC8_SIGNAL_MARKER \
@@ -65,6 +69,7 @@ mkdir -p "$repo/src" "$repo/scripts" "$repo/test/pic10f320/equiv" \
 	"$repo/build_pic" "$tools"
 cp "$ROOT/Makefile" "$repo/Makefile"
 cp "$ROOT/scripts/validate-ihex.sh" "$repo/scripts/validate-ihex.sh"
+cp "$ROOT/test/check_stack_depth_pic.sh" "$repo/test/check_stack_depth_pic.sh"
 cp "$ROOT/test/pic10f320/return_stack_oracle.py" \
 	"$repo/test/pic10f320/return_stack_oracle.py"
 : > "$xc8_log"
@@ -96,6 +101,22 @@ write_bad_depth_hex() {
 		':0600200012200800080098' \
 		':00000001FF'
 }
+write_sidecars() {
+	cat > "${out%.hex}.s" <<'ASM'
+;; *************** function _main *****************
+;; This function is called by:
+;;	Startup code after reset
+;; This function calls:
+;;	Nothing
+
+__ptext_main:	;psect for function _main
+	return
+	callstack 8
+_ctx_:
+	ds 3
+ASM
+	printf '_ctx_ 005D\n' > "${out%.hex}.sym"
+}
 out=
 args=$*
 while [ "$#" -gt 0 ]; do
@@ -115,8 +136,13 @@ if [ -n "${FAKE_XC8_FAIL_NAME:-}" ] && [ "$out" = "$FAKE_XC8_FAIL_NAME" ]; then
 	mode=fail
 fi
 case "$mode" in
+	missing|no-sidecars) ;;
+	*) write_sidecars ;;
+esac
+case "$mode" in
 	fail) printf 'partial image\n' > "$out"; exit 1 ;;
 	missing) : ;;
+	no-sidecars) write_valid_hex > "$out" ;;
 	empty) : > "$out" ;;
 	signal)
 		write_valid_hex > "$out"
@@ -280,19 +306,62 @@ run_matrix_make() {
 		"$PB_FLASH_VAR=$PB_FLASH_WORDS" STRICT_TOOLS=1 AWK=awk "$@"
 }
 
-remove_matrix_images() {
-	local image
-	for image in $PB_MATRIX_IMAGES; do
-		rm -f "$repo/$PB_BUILD_DIR/$image"
+run_stack_make() {
+	make --no-print-directory -C "$repo" "$PB_STACK_TARGET" \
+		CC=true HOSTCC=true "$PB_CC_VAR=$tools/xc8" "$PB_BUILD_DIR_VAR=$PB_BUILD_DIR" \
+		"$PB_FW_BASE_VAR=$PB_FW_BASE" "$PB_TAG_VAR=$PB_TAG" \
+		"$PB_FLASH_VAR=$PB_FLASH_WORDS" \
+		"$PB_VARIANT_VAR=$PB_VARIANT" \
+		"$PB_MATRIX_VARIANTS_VAR=$PB_MATRIX_VARIANTS" \
+		"$PB_STACK_DEVICE_VAR=8" STACK_DEPTH_GATE=./test/check_stack_depth_pic.sh \
+		STRICT_TOOLS=1 AWK=awk "$@"
+}
+
+seed_stale_final_products() {
+	printf 'stale image\n' > "$hex"
+	printf 'stale assembly\n' > "$asm"
+	printf 'stale symbols\n' > "$sym"
+}
+
+assert_no_final_products() {
+	local label=$1 path
+	for path in "$hex" "$asm" "$sym"; do
+		[[ ! -e "$path" && ! -L "$path" ]] \
+			|| { printf 'FAIL: %s left stale PIC product %s\n' "$label" "$path" >&2; exit 1; }
 	done
 }
 
-assert_no_matrix_images() {
-	local image
+remove_matrix_images() {
+	local image ext path
 	for image in $PB_MATRIX_IMAGES; do
-		[[ ! -e "$repo/$PB_BUILD_DIR/$image" && ! -L "$repo/$PB_BUILD_DIR/$image" ]] \
-			|| { printf 'FAIL: rejected %s matrix left image %s\n' \
-				"$PB_LABEL" "$image" >&2; exit 1; }
+		for ext in hex s sym; do
+			path="$repo/$PB_BUILD_DIR/${image%.hex}.$ext"
+			rm -f "$path"
+		done
+	done
+}
+
+assert_no_matrix_products() {
+	local label=$1 image ext path
+	for image in $PB_MATRIX_IMAGES; do
+		for ext in hex s sym; do
+			path="$repo/$PB_BUILD_DIR/${image%.hex}.$ext"
+			[[ ! -e "$path" && ! -L "$path" ]] \
+				|| { printf 'FAIL: %s left PIC product %s\n' \
+					"$label" "$path" >&2; exit 1; }
+		done
+	done
+}
+
+assert_no_matrix_sidecars() {
+	local label=$1 image ext path
+	for image in $PB_MATRIX_IMAGES; do
+		for ext in s sym; do
+			path="$repo/$PB_BUILD_DIR/${image%.hex}.$ext"
+			[[ ! -e "$path" && ! -L "$path" ]] \
+				|| { printf 'FAIL: %s left PIC sidecar %s\n' \
+					"$label" "$path" >&2; exit 1; }
+		done
 	done
 }
 
@@ -306,7 +375,7 @@ expect_build_matrix_rejected() {
 	[[ "$output" == *"$marker"* ]] \
 		|| { printf 'FAIL: %s build matrix reported the wrong %s error: %s\n' \
 			"$PB_LABEL" "$label" "$output" >&2; exit 1; }
-	assert_no_matrix_images
+	assert_no_matrix_products "rejected $PB_LABEL matrix"
 	checks=$((checks + 1))
 }
 
@@ -365,6 +434,44 @@ expect_oracle_image_rejected() {
 
 run_make >/dev/null
 "$repo/scripts/validate-ihex.sh" "$hex"
+for sidecar in "$asm" "$sym"; do
+	[[ -f "$sidecar" && ! -L "$sidecar" && -s "$sidecar" ]] \
+		|| { printf 'FAIL: successful %s build did not retain fresh sidecar %s\n' \
+			"$PB_LABEL" "$sidecar" >&2; exit 1; }
+done
+checks=$((checks + 1))
+
+# Missing XC8 is a valid development-time skip, but only after every stale
+# product has been removed. Exercise the public stack target so a stale HEX
+# cannot convert that skip into a later false gate attempt.
+run_matrix_make "$PB_MATRIX_VARIANTS_VAR=$PB_MATRIX_VARIANTS" >/dev/null
+if ! output=$(run_stack_make "$PB_CC_VAR=$tools/missing-xc8" STRICT_TOOLS= 2>&1); then
+	printf 'FAIL: %s stack target did not skip a missing XC8: %s\n' \
+		"$PB_LABEL" "$output" >&2
+	exit 1
+fi
+[[ "$output" == *"skipping stack-depth gate"* ]] \
+	|| { printf 'FAIL: %s missing-XC8 stack target reported the wrong result: %s\n' \
+		"$PB_LABEL" "$output" >&2; exit 1; }
+assert_no_matrix_products "$PB_LABEL missing-XC8 skip"
+checks=$((checks + 1))
+
+# A successful compiler can produce a current HEX without the optional outputs
+# consumed by later gates. The build must first remove the prior valid sidecars,
+# and the stack target must fail rather than treating their absence as no XC8.
+run_matrix_make "$PB_MATRIX_VARIANTS_VAR=$PB_MATRIX_VARIANTS" >/dev/null
+if output=$(export FAKE_XC8_MODE=no-sidecars; run_stack_make 2>&1); then
+	printf 'FAIL: %s stack gate accepted current HEX images without fresh assembly\n' \
+		"$PB_LABEL" >&2
+	exit 1
+fi
+[[ "$output" == *"generated assembly is missing, empty, or not regular"* ]] \
+	|| { printf 'FAIL: %s missing-assembly gate failed for the wrong reason: %s\n' \
+		"$PB_LABEL" "$output" >&2; exit 1; }
+[[ -s "$hex" ]] \
+	|| { printf 'FAIL: %s missing-assembly fixture did not retain its current HEX\n' \
+		"$PB_LABEL" >&2; exit 1; }
+assert_no_matrix_sidecars "$PB_LABEL current-HEX-only build"
 checks=$((checks + 1))
 
 if [ "$PB_RETURN_STACK_REQUIRED" -eq 1 ]; then
@@ -445,19 +552,18 @@ fi
 checks=$((checks + 1))
 
 for mode in fail missing empty bad-checksum eof-only trailing symlink; do
-	printf 'stale image\n' > "$hex"
+	seed_stale_final_products
 	if (export FAKE_XC8_MODE="$mode"; run_make) >/dev/null 2>&1; then
 		printf 'FAIL: XC8 mode %s was accepted\n' "$mode" >&2
 		exit 1
 	fi
-	[[ ! -e "$hex" && ! -L "$hex" ]] \
-		|| { printf 'FAIL: XC8 mode %s left a stale or invalid image\n' "$mode" >&2; exit 1; }
+	assert_no_final_products "XC8 mode $mode"
 	checks=$((checks + 1))
 done
 
 marker="$work/build.signal-delivered"
 rm -f "$marker"
-printf 'stale image\n' > "$hex"
+seed_stale_final_products
 if (export FAKE_XC8_MODE=signal FAKE_XC8_SIGNAL_MARKER="$marker"; \
 		run_make) >/dev/null 2>&1; then
 	printf 'FAIL: interrupted PIC build exited successfully\n' >&2
@@ -465,8 +571,7 @@ if (export FAKE_XC8_MODE=signal FAKE_XC8_SIGNAL_MARKER="$marker"; \
 fi
 [[ -f "$marker" ]] \
 	|| { printf 'FAIL: PIC build signal fixture did not deliver SIGTERM\n' >&2; exit 1; }
-[[ ! -e "$hex" && ! -L "$hex" ]] \
-	|| { printf 'FAIL: interrupted PIC build left a partial image\n' >&2; exit 1; }
+assert_no_final_products "interrupted PIC build"
 checks=$((checks + 1))
 
 printf 'stale image\n' > "$hex"
@@ -506,7 +611,7 @@ if (export FAKE_XC8_FAIL_NAME="$PB_MATRIX_FAIL_IMAGE"; \
 	printf 'FAIL: late %s variant compiler failure was accepted\n' "$PB_LABEL" >&2
 	exit 1
 fi
-assert_no_matrix_images
+assert_no_matrix_products "late $PB_LABEL matrix compiler failure"
 checks=$((checks + 1))
 
 # PIC10F320's target/soak lanes have selectors separate from PIC320_VARIANT.

@@ -613,6 +613,9 @@ PIC_TAG   ?= pic10f322
 PIC_XTAL  ?= 2000000UL
 PIC_BUILD_DIR ?= build_pic
 PIC_HEXES = $(foreach v,$(VARIANTS),$(PIC_BUILD_DIR)/$(FW_BASE)_$(v)_$(PIC_TAG).hex)
+PIC_ASSEMBLIES = $(PIC_HEXES:.hex=.s)
+PIC_SYMBOLS = $(PIC_HEXES:.hex=.sym)
+PIC_BUILD_PRODUCTS = $(PIC_HEXES) $(PIC_ASSEMBLIES) $(PIC_SYMBOLS)
 # PIC10F322 device budget: 512 words flash / 64 B RAM.
 PIC_FLASH_WORDS ?= 512
 # gpsim simulator + processor name for the register-level functional test.
@@ -690,7 +693,7 @@ PIC_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 --platform=pic8-enh
 # can run with its cwd in PIC_BUILD_DIR.
 .PHONY: pic
 pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v)))
-	@rm -f $(PIC_HEXES)
+	@rm -f $(PIC_BUILD_PRODUCTS)
 	@if [ ! -x "$(PIC_CC)" ] && ! command -v $(PIC_CC) >/dev/null 2>&1; then \
 		echo "XC8 not found at $(PIC_CC); skipping PIC build (override with PIC_CC=...)"; \
 		$(SKIP); \
@@ -700,15 +703,15 @@ pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v)))
 	fi; \
 	mkdir -p $(PIC_BUILD_DIR); \
 	pic_complete=0; \
-	cleanup_pic_images() { \
+	cleanup_pic_products() { \
 		rc=$$?; \
 		if [ $$rc -ne 0 ] || [ $$pic_complete -ne 1 ]; then \
-			rm -f $(PIC_HEXES) || rc=1; \
+			rm -f $(PIC_BUILD_PRODUCTS) || rc=1; \
 			[ $$rc -ne 0 ] || rc=1; \
 		fi; \
 		trap - 0 1 2 15; exit $$rc; \
 	}; \
-	trap cleanup_pic_images 0 1 2 15; \
+	trap cleanup_pic_products 0 1 2 15; \
 	export PIC_RECIPE_PID=$$$$; \
 	LC_ALL=C; export LC_ALL; \
 	budget="$(PIC_FLASH_WORDS)"; \
@@ -732,10 +735,10 @@ pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(VARIANTS),$(src_$(v)))
 			*relay) m=TQ2_L2_5V_RELAY;  drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
 			*)      m=CD4053_SIMPLE;    drv=src/bypass_output_cd4053_simple.c ;; \
 		esac; \
-		name=$(FW_BASE)_$${v}_$(PIC_TAG).hex; \
-		hex=$(PIC_BUILD_DIR)/$$name; \
-		if ! rm -f "$$hex"; then \
-			echo "FAIL: could not remove stale $$hex before compiling"; fail=1; continue; \
+		stem=$(FW_BASE)_$${v}_$(PIC_TAG); name=$$stem.hex; \
+		hex=$(PIC_BUILD_DIR)/$$name; asm=$(PIC_BUILD_DIR)/$$stem.s; sym=$(PIC_BUILD_DIR)/$$stem.sym; \
+		if ! rm -f "$$hex" "$$asm" "$$sym"; then \
+			echo "FAIL: could not remove stale PIC10F322 products for variant $$v before compiling"; fail=1; continue; \
 		fi; \
 		out=`cd $(PIC_BUILD_DIR) && $(PIC_CC) $(PIC_CFLAGS) -D$$m \
 			$(addprefix $(CURDIR)/,$(PIC_CORE_SRC)) $(CURDIR)/$$drv \
@@ -1011,27 +1014,51 @@ STACK_DEPTH_GATE      = ./test/check_stack_depth_pic.sh
 
 .PHONY: pic-test-stack-bound pic320-test-stack-bound
 pic-test-stack-bound: pic
-	@# One shell: $(SKIP) exits only its own shell, and the sweep below must not
-	@# run -- nor the closing sentinel print -- when XC8 produced nothing.
-	@first="$(PIC_BUILD_DIR)/$(FW_BASE)_$(firstword $(VARIANTS))_$(PIC_TAG).s"; \
-	if [ ! -f "$$first" ]; then \
-		echo "no PIC10F322 assembly in $(PIC_BUILD_DIR)/ (XC8 absent?); skipping stack-depth gate"; \
+	@# One shell: skip only when the build produced no HEX. A current HEX without
+	@# its freshly generated assembly is a failed gate, never an absent-tool skip.
+	@have_hex=0; \
+	for v in $(VARIANTS); do \
+		hex="$(PIC_BUILD_DIR)/$(FW_BASE)_$${v}_$(PIC_TAG).hex"; \
+		if [ -e "$$hex" ] || [ -L "$$hex" ]; then have_hex=1; fi; \
+	done; \
+	if [ $$have_hex -eq 0 ]; then \
+		echo "no PIC10F322 HEX in $(PIC_BUILD_DIR)/ (XC8 absent?); skipping stack-depth gate"; \
 		$(SKIP); \
 	fi; \
 	for v in $(VARIANTS); do \
-		$(STACK_DEPTH_GATE) "$(PIC_BUILD_DIR)/$(FW_BASE)_$${v}_$(PIC_TAG).s" \
+		hex="$(PIC_BUILD_DIR)/$(FW_BASE)_$${v}_$(PIC_TAG).hex"; \
+		asm="$(PIC_BUILD_DIR)/$(FW_BASE)_$${v}_$(PIC_TAG).s"; \
+		if [ ! -f "$$hex" ] || [ -L "$$hex" ] || [ ! -s "$$hex" ]; then \
+			echo "FAIL: current PIC10F322 image is missing, empty, or not regular: $$hex"; exit 1; \
+		fi; \
+		if [ ! -f "$$asm" ] || [ -L "$$asm" ] || [ ! -s "$$asm" ]; then \
+			echo "FAIL: current PIC10F322 HEX exists but generated assembly is missing, empty, or not regular: $$asm"; exit 1; \
+		fi; \
+		$(STACK_DEPTH_GATE) "$$asm" \
 			"$(PIC_DEVICE_INI)" "$(PIC_STACK_RESERVE)" "PIC10F322 $$v" || exit 1; \
 	done; \
 	echo "=== PIC10F322 hardware stack bounded for every variant ==="
 
 pic320-test-stack-bound: pic320-variants
-	@first="$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$(firstword $(PIC320_VARIANTS_ALL))_$(PIC320_TAG).s"; \
-	if [ ! -f "$$first" ]; then \
-		echo "no PIC10F320 assembly in $(PIC320_BUILD_DIR)/ (XC8 absent?); skipping stack-depth gate"; \
+	@have_hex=0; \
+	for v in $(PIC320_VARIANTS_ALL); do \
+		hex="$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).hex"; \
+		if [ -e "$$hex" ] || [ -L "$$hex" ]; then have_hex=1; fi; \
+	done; \
+	if [ $$have_hex -eq 0 ]; then \
+		echo "no PIC10F320 HEX in $(PIC320_BUILD_DIR)/ (XC8 absent?); skipping stack-depth gate"; \
 		$(SKIP); \
 	fi; \
 	for v in $(PIC320_VARIANTS_ALL); do \
-		$(STACK_DEPTH_GATE) "$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).s" \
+		hex="$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).hex"; \
+		asm="$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).s"; \
+		if [ ! -f "$$hex" ] || [ -L "$$hex" ] || [ ! -s "$$hex" ]; then \
+			echo "FAIL: current PIC10F320 image is missing, empty, or not regular: $$hex"; exit 1; \
+		fi; \
+		if [ ! -f "$$asm" ] || [ -L "$$asm" ] || [ ! -s "$$asm" ]; then \
+			echo "FAIL: current PIC10F320 HEX exists but generated assembly is missing, empty, or not regular: $$asm"; exit 1; \
+		fi; \
+		$(STACK_DEPTH_GATE) "$$asm" \
 			"$(PIC320_DEVICE_INI)" "$(PIC320_STACK_RESERVE)" "PIC10F320 $$v" || exit 1; \
 	done; \
 	echo "=== PIC10F320 hardware stack bounded for every variant ==="
@@ -2107,7 +2134,7 @@ test-gpsim-wrappers:
 	./test/test_gpsim_wrappers.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 28/68 counts,
+# image/host rebuild triggering. The script enforces the canonical 30/70 counts,
 # so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
@@ -2132,6 +2159,8 @@ test-pic-build:
 	PB_MATRIX_IMAGES='bypass_mcu_cd4053-simple_pic10f320.hex bypass_mcu_cd4053-mute_pic10f320.hex bypass_mcu_tq2-relay_pic10f320.hex' \
 	PB_MATRIX_FAIL_IMAGE='bypass_mcu_tq2-relay_pic10f320.hex' \
 	PB_MATRIX_REQUIRE_COMPLETE=1 PB_MATRIX_UNSUPPORTED='tmux4053-simple' \
+	PB_STACK_TARGET='pic320-test-stack-bound' \
+	PB_STACK_DEVICE_VAR='PIC320_DEVICE_INI' \
 	PB_RETURN_STACK_REQUIRED=1 \
 	PB_SELECTOR_ROUTING=1 PB_SIZE_TARGET='pic320-size' \
 	PB_REBUILD_REQUIRED=1 \
@@ -3099,6 +3128,9 @@ PIC320_OUTPUT_DEF := -D$(PIC320_OUTPUT_MACRO)
 PIC320_CFLAGS := -mcpu=$(PIC320_CHIP) -mdfp=$(PIC320_DFP) -std=c99 -O2 \
                  -D_XTAL_FREQ=$(PIC320_XTAL) $(PIC320_OUTPUT_DEF)
 PIC320_HEX    := $(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$(PIC320_VARIANT)_$(PIC320_TAG).hex
+PIC320_ASM    := $(PIC320_HEX:.hex=.s)
+PIC320_SYM    := $(PIC320_HEX:.hex=.sym)
+PIC320_BUILD_PRODUCTS := $(PIC320_HEX) $(PIC320_ASM) $(PIC320_SYM)
 
 # Final-HEX hardware return-stack oracle. Expand the real-image list from the
 # immutable supported set, never from a glob or the caller's PIC320_VARIANTS_ALL
@@ -3333,11 +3365,11 @@ PIC320_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 \
 # Every failure mode here is one the child project hardened against and proved
 # with fake-XC8 regressions (merge plan §6.4, commit ec6fa48), so this is a port
 # of tested logic, not a fresh attempt:
-#   - the output path is removed FIRST, and removal is symlink/directory safe,
-#     so a stale or hostile $(PIC320_HEX) cannot be mistaken for fresh output;
-#   - an EXIT trap deletes the image unless the recipe reached the end, so a
-#     failed or interrupted build never leaves a plausible-looking HEX behind
-#     for a later lane to consume;
+#   - the HEX, assembly, and symbol paths are removed FIRST, and removal is
+#     symlink/directory safe, so stale output cannot be mistaken for fresh;
+#   - an EXIT trap deletes all three products unless the recipe reached the end,
+#     so a failed or interrupted build never leaves plausible-looking evidence
+#     behind for a later lane to consume;
 #   - XC8's exit status, a nonempty image, structural Intel HEX validity, and a
 #     parseable word count are each checked separately -- XC8 can report success
 #     and still not produce a usable image;
@@ -3348,8 +3380,10 @@ PIC320_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 \
 #     completion flag is set, so any oracle/tool failure reaches the same cleanup
 #     trap and removes the rejected image.
 pic320: $(PIC320_SRC)
-	@if [ -d "$(PIC320_HEX)" ] && [ ! -L "$(PIC320_HEX)" ]; then rmdir "$(PIC320_HEX)"; \
-	 else rm -f "$(PIC320_HEX)"; fi
+	@for path in $(PIC320_BUILD_PRODUCTS); do \
+		if [ -d "$$path" ] && [ ! -L "$$path" ]; then rmdir "$$path"; \
+		else rm -f "$$path"; fi || exit 1; \
+	done
 	@# ONE shell from here down, deliberately. $(SKIP) is `exit 0` in non-strict
 	@# mode, which exits only the shell running it -- so if this guard stood on its
 	@# own recipe line, a missing XC8 would print "skipping" and then Make would
@@ -3360,14 +3394,17 @@ pic320: $(PIC320_SRC)
 	fi; \
 	mkdir -p $(PIC320_BUILD_DIR); \
 	echo "=== PIC10F320 build + flash-budget ($(PIC320_FLASH_WORDS) words, variant $(PIC320_VARIANT)) ==="; \
-	hex="$(PIC320_HEX)"; image_complete=0; \
-	remove_image() { \
-		if [ -d "$$hex" ] && [ ! -L "$$hex" ]; then rmdir "$$hex"; else rm -f "$$hex"; fi; \
+	hex="$(PIC320_HEX)"; asm="$(PIC320_ASM)"; sym="$(PIC320_SYM)"; image_complete=0; \
+	remove_products() { \
+		for path in "$$hex" "$$asm" "$$sym"; do \
+			if [ -d "$$path" ] && [ ! -L "$$path" ]; then rmdir "$$path"; else rm -f "$$path"; fi \
+				|| return 1; \
+		done; \
 	}; \
 	cleanup_image() { \
 		rc=$$?; \
 		if [ $$rc -ne 0 ] || [ $$image_complete -ne 1 ]; then \
-			remove_image || rc=1; \
+			remove_products || rc=1; \
 			[ $$rc -ne 0 ] || rc=1; \
 		fi; \
 		trap - 0 1 2 15; exit $$rc; \
@@ -3472,14 +3509,21 @@ pic320-variants:
 	for v in "$$@"; do \
 		$(MAKE) --no-print-directory PIC320_VARIANT=$$v pic320 || { rc=1; break; }; \
 	done; \
-	remove_image_set() { \
+	remove_product_set() { \
+		cleanup_rc=0; \
 		for v in "$$@"; do \
-			rm -f "$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).hex"; \
+			stem="$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG)"; \
+			for path in "$$stem.hex" "$$stem.s" "$$stem.sym"; do \
+				if [ -d "$$path" ] && [ ! -L "$$path" ]; then rmdir "$$path"; \
+				else rm -f "$$path"; fi || cleanup_rc=1; \
+			done; \
 		done; \
+		return $$cleanup_rc; \
 	}; \
 	if [ $$rc -ne 0 ]; then \
 		echo "FAIL: a PIC10F320 variant did not build; removing the partial image set"; \
-		remove_image_set "$$@"; \
+		remove_product_set "$$@" \
+			|| echo "FAIL: could not completely remove the partial PIC10F320 product set"; \
 		exit 1; \
 	fi; \
 	built=0; \
@@ -3493,7 +3537,8 @@ pic320-variants:
 	fi; \
 	if [ $$built -ne $$# ]; then \
 		echo "FAIL: only $$built of $$# PIC10F320 images exist after a reported-successful build; removing the partial image set"; \
-		remove_image_set "$$@"; \
+		remove_product_set "$$@" \
+			|| echo "FAIL: could not completely remove the partial PIC10F320 product set"; \
 		exit 1; \
 	fi; \
 	echo "=== all PIC10F320 variants built within budget ==="

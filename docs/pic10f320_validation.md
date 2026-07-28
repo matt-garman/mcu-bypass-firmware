@@ -237,8 +237,11 @@ three together as part of `pic320-test`. This is not a claim that a file cannot
 be modified after a successful recipe; release provenance and reproduction
 checks remain separate evidence.
 
-The fake-XC8 build regression reports 28 PIC10F322 checks and 68 PIC10F320
-checks. The 320-specific cases prove the base build deletes structurally valid
+The fake-XC8 build regression reports 30 PIC10F322 checks and 70 PIC10F320
+checks. Both arms prove a missing-XC8 skip removes the complete product matrix,
+and that a current-HEX-only compiler result cannot reuse stale `.s`/`.sym`
+sidecars or turn the hardware-stack gate into an absent-tool skip.
+The 320-specific cases prove the base build deletes structurally valid
 reachable-RETFIE and depth-9 images, and that nonempty successful-oracle and
 limit-99 command-line overrides cannot bypass the immutable Makefile settings.
 
@@ -257,9 +260,9 @@ name. Assertions count only invocations for that output and inspect the latest
 applicable command, so an old matching flag cannot mask stale reuse.
 
 Activation and accounting fail closed: canonical `PB_TARGET=pic320` requires
-`PB_REBUILD_REQUIRED=1` and exactly 68 checks at exit, while canonical
-`PB_TARGET=pic` requires exactly 28. Removing or misspelling the Makefile's
-PIC10F320 rebuild-arm assignment cannot leave a green 54-check run.
+`PB_REBUILD_REQUIRED=1` and exactly 70 checks at exit, while canonical
+`PB_TARGET=pic` requires exactly 30. Removing or misspelling the Makefile's
+PIC10F320 rebuild-arm assignment cannot leave a green 56-check run.
 
 The regression proves all of the following without timestamps:
 

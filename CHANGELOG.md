@@ -97,6 +97,11 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- PIC builds now invalidate XC8's generated `.s` and `.sym` sidecars together
+  with each HEX before compiling and remove the same complete product set after
+  failure or interruption. The hardware-stack targets skip only when no current
+  HEX exists; a current image without fresh, regular, nonempty assembly now fails
+  instead of allowing stale evidence or an absent-tool skip.
 - Tag CI now binds retained 24-hour qualification to Git history: the tagged
   release commit must be a single-parent, artifact-only child of the exact source
   commit named by `QUALIFICATION`. A scratch-repository regression rejects wrong

@@ -141,7 +141,7 @@ below so a green gate means every PIC layer actually ran.
 
 | layer | target | what it proves | substrate |
 |---|---|---|---|
-| Image generation | `test-pic-build` | Missing, partial, malformed, or non-regular XC8 output cannot become a PIC firmware image; malformed/zero budgets, huge usage counts, and arithmetic-tool failures are rejected. | host fake-XC8 regression |
+| Image generation | `test-pic-build` | Missing, partial, malformed, or non-regular XC8 output cannot become a PIC firmware image; malformed/zero budgets, huge usage counts, and arithmetic-tool failures are rejected. Same-stem `.s`/`.sym` are invalidated with the HEX, and a current HEX without fresh assembly fails the stack target rather than skipping. | host fake-XC8 regression |
 | CONFIG word | `pic-test-config` | The XC8-emitted CONFIG word matches the documented oscillator/WDT/BOR/MCLR/LVP design intent. | host parser over HEX |
 | Static analysis | `pic-analyze` | cppcheck + MISRA pass over the PIC shell with real XC8/DFP register headers. | host tools |
 | Shipping-source coverage | `pic-coverage-check-fw` | Every executable line in the real PIC shell, shared pure core, and all three output drivers is host-executed except the documented non-returning reset path. | host gcov with PIC SFR mock |
@@ -154,7 +154,7 @@ below so a green gate means every PIC layer actually ran.
 | Fail-closed aggregate | `pic-test-target-variants` | Requires the complete supported matrix — empty, duplicate, unsupported, and incomplete requests are all rejected — then runs fault recovery, lock-step, and target-I/O for every PIC variant and requires each PASS sentinel. | Makefile wrapper |
 | Aggregate regression | `test-target-matrix` | Proves complete matrices run exactly once per variant, that empty, duplicate, unsupported, and incomplete matrices fail before any target invocation, and that both PIC target aggregates require explicit fault, lock-step, and I/O completion markers. | Bash + fake recursive Make |
 | Aggregate fail-closed regression | `test-target-lane-markers` | Proves the per-variant aggregate requires each lane's explicit `PASS` marker, not just its exit status: a skipped, crashed, or failing-but-zero-exit lane is rejected and the aggregate's own success line is withheld. Covers both PIC chips. | Bash + fake recursive Make |
-| Hardware return-stack depth | `pic-test-stack-bound`, `pic320-test-stack-bound` | Bounds the **8-level hardware return stack** — the PIC counterpart of the AVR's byte-valued `test-stack-bound`, and a different quantity: the PIC14 core has no data stack, and hardware-stack overflow on this part is silent (no `STKPTR`, no `STKOVF`, no overflow reset). Computes the deepest call chain from the emitted instruction stream, cross-checks it against XC8's own `callstack` directives, and rejects recursion, indirect calls, and an over-budget build. Every variant, both chips. | XC8-generated `.s` + awk |
+| Hardware return-stack depth | `pic-test-stack-bound`, `pic320-test-stack-bound` | Bounds the **8-level hardware return stack** — the PIC counterpart of the AVR's byte-valued `test-stack-bound`, and a different quantity: the PIC14 core has no data stack, and hardware-stack overflow on this part is silent (no `STKPTR`, no `STKOVF`, no overflow reset). Computes the deepest call chain from the freshly generated instruction stream, cross-checks it against XC8's own `callstack` directives, and rejects missing/current-image assembly, recursion, indirect calls, and an over-budget build. Every variant, both chips. | XC8-generated `.s` + awk |
 | Stack-depth gate regression | `test-stack-bound-pic-regression` | Proves that gate rejects each way the analysis can be wrong — over budget, recursion, an overflowing build, the two oracles disagreeing, an unresolvable or indirect call, no entry point, and a device pack declaring no depth. Synthetic fixtures, so it needs no toolchain. | Bash + awk |
 | Soak rebuild determinism | `test-pic-build-rebuild` | Both chips' soak binaries compile their workload sizing in as `-D` flags, so their file rules must be *unconditionally* out of date. Asserts a changed duration recompiles with the new value, and that an identical rerun recompiles too — the signature of `FORCE`, as opposed to a rebuild that merely followed a timestamp. | Bash + fake c++ |
 
@@ -216,7 +216,7 @@ fail-closed rather than skip-clean.
 | Shipping-source coverage | `pic320-coverage-check-fw` | An **exact** property, not a percentage floor: every line of the real firmware is host-executed except an enumerated, justified watchdog-reset path. Run per variant, because the three output stages give 84 / 95 / 99 executable lines. | host gcov with the mock `xc.h` |
 | All-variant host aggregate | `pic320-test-host-variants` | The four layers above across all three variants, with the complete supported matrix required first. **This is the member of `make test`.** | Makefile wrapper |
 | Return-stack oracle regression | `test-pic320-return-stack-oracle` | 149 deterministic checks: passing depths through 8, recursion/depth-9 rejection, independently required skip edges and operand boundaries, classic alias ranges, all 16,384 legality decisions, every destination writer against PCL/INDF/INTCON, 9-bit PC/physical-fetch aliasing, literal HEX layout, and fail-closed parser/file cases. Includes ten device-geometry checks: `--program-words` is validated as a power of two inside the 9-bit PC space, and fixtures whose verdict *differs* between the 256- and 512-word geometries pin the fetch alias in both directions — an image with code above word `0x0FF` is rejected when 256 words are declared, and one that relies on the fold is rejected when 512 are. **This is also a member of `make test`.** | dependency-free Python 3 |
-| Image generation | `test-pic-build` | 28 PIC10F322 and 68 PIC10F320 checks. The 320 run covers its image naming/budget, complete matrix and selector rebuilds, deletion of reachable-RETFIE and depth-9 images despite attempted command-line oracle/limit overrides, and exact per-output XC8/host-compiler rebuild invocations with current clock, variant and host flags. | host fake-XC8/fake-CC regression |
+| Image generation | `test-pic-build` | 30 PIC10F322 and 70 PIC10F320 checks. Both runs prove missing-XC8 skips remove the complete product matrix and stale assembly/symbol sidecars cannot survive a current-HEX-only build; the 320 run also covers its image naming/budget, complete matrix and selector rebuilds, deletion of reachable-RETFIE and depth-9 images despite attempted command-line oracle/limit overrides, and exact per-output XC8/host-compiler rebuild invocations with current clock, variant and host flags. | host fake-XC8/fake-CC regression |
 | CONFIG word | `pic320-test-config` | The emitted CONFIG word matches design intent, over every built image. Uses the shared checker with a device-accurate label. | host parser over HEX |
 | Hardware return stack | every `pic320` build; `pic320-test-return-stack` | The base build strictly parses and traverses its final HEX before marking that image complete, so gpsim/target/soak/release rebuilds use the same fail-closed gate. The explicit target rebuilds the supported matrix and rechecks all three together, reporting each maximum and witness. | dependency-free Python 3 over final HEX |
 | Static analysis | `pic320-analyze` | cppcheck + MISRA over the shell, **swept across all three variants** — each compiles a different `#if defined(OUTPUT_*)` branch, so one run would leave two thirds unanalyzed. | host tools |
@@ -228,12 +228,12 @@ fail-closed rather than skip-clean.
 | Pre-hardware aggregate | `pic320-test` | The single target CI and the release script invoke: the host aggregate, CONFIG and return-stack proof over all images, and analysis + gpsim per variant. | Makefile wrapper |
 | Soak | `pic320-test-soak` | Long-duration libgpsim soak per output stage; three combos at full duration are part of release qualification. | libgpsim |
 
-The PIC10F320 rebuild cases run only in the second, explicitly parameterized
-`test-pic-build` invocation; the PIC10F322 run and its 28-check count are
-unchanged. The script itself requires `PB_REBUILD_REQUIRED=1` for canonical
-`PB_TARGET=pic320` and enforces exactly 68 final checks; canonical
-`PB_TARGET=pic` enforces 28. A missing or misspelled rebuild-arm assignment
-therefore fails instead of reporting the old 54-check subset as green.
+The stale-sidecar case runs in both parameterized `test-pic-build` invocations;
+the PIC10F320 rebuild cases run only in the second. The script itself requires
+`PB_REBUILD_REQUIRED=1` for canonical `PB_TARGET=pic320` and enforces exactly 70
+final checks; canonical `PB_TARGET=pic` enforces 30. A missing or misspelled
+rebuild-arm assignment therefore fails instead of reporting a 56-check subset as
+green.
 
 In a fresh temporary repository the arm proves that identical requests reinvoke
 the compiler for `pic320`, `pic320-test-equiv`, `pic320-test-actuation`, and
