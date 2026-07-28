@@ -911,6 +911,13 @@ Review the staging dir, then sign + commit + tag + push. The pushed tag triggers
 .github/workflows/release.yml, which reproduces the image hashes on a clean
 runner and publishes the GitHub Release.
 
+The release commit must contain ONLY $OUTPUT_DIR. Tag CI requires its sole
+parent to be the source commit qualified above and rejects every changed path
+outside release/$VERSION/. Finalize changelog/status documentation before
+starting the production run. Ensure the remote protects v* tags from update and
+deletion; CI rechecks the remote target immediately before publication, but no
+workflow can make two separate GitHub API operations atomic.
+
   # 1. review
   git status
   less $OUTPUT_DIR/MANIFEST.md

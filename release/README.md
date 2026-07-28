@@ -63,6 +63,18 @@ validation suite — backs these binaries, through two mechanisms:
    before staging artifacts. Only explicitly non-publishable dry runs may proceed
    from a dirty tree.
 
+   The signed version tag points to a dedicated release-artifact commit. Tag CI
+   requires that commit to have exactly one parent, equal to the source commit in
+   `QUALIFICATION`, and to change only `release/<version>/`. Changelog and status
+   documentation must therefore be finalized and committed before starting the
+   production qualification run.
+
+   Release tags must be protected from update and deletion by the repository's
+   tag rules. The workflow compares the remote tag's peeled target with the
+   verified release commit immediately before publication; protection closes the
+   unavoidable interval between that check and GitHub's separate create-release
+   API operation.
+
 2. **Reproducibility.** The Intel-HEX images are byte-deterministic for a fixed
    toolchain — `objcopy` ihex output contains only the program's code/data
    bytes, with no embedded timestamps or build paths. `SHA256SUMS` pins those

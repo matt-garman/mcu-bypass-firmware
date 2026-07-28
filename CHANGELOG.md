@@ -97,6 +97,12 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- Tag CI now binds retained 24-hour qualification to Git history: the tagged
+  release commit must be a single-parent, artifact-only child of the exact source
+  commit named by `QUALIFICATION`. A scratch-repository regression rejects wrong
+  parents, merge commits, mixed source/release changes, sibling-release changes,
+  checkout drift, a snapshot differing from the tagged record, and a remote tag
+  that moved before publication.
 - Release qualification is now machine-verifiable before publication: an
   immutable 12-combination inventory, exact retained-evidence set, strict
   `QUALIFICATION` schema, and one identity/timing/counter-bearing `SOAK_RESULT`

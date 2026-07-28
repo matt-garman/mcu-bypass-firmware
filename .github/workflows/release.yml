@@ -9,18 +9,21 @@ name: Release
 # release/<tag>/ with a SHA256SUMS manifest.
 #
 # When the tag lands here, this workflow:
-#   1. rebuilds every release image from the TAGGED source on a clean, pinned
+#   1. verifies the retained qualification belongs to the tag event's commit:
+#      an artifact-only child whose sole parent is the qualified source;
+#   2. rebuilds every release image from the TAGGED source on a clean, pinned
 #      runner (AVR Classic + PIC10F322 + PIC10F320; ATtiny202 is development-only);
-#   2. REPRODUCIBILITY GATE: asserts the committed files, SHA256SUMS entries,
+#   3. REPRODUCIBILITY GATE: asserts the committed files, SHA256SUMS entries,
 #      freshly built files, AND the canonical RELEASE_IMAGES set the Makefile
 #      declares are all the same complete set with byte-identical contents
 #      (fails the release if not). The fourth set is what makes the other three
 #      mean anything: three sets derived by globbing the same directories agree
 #      perfectly on a release that is missing an entire MCU (merge plan §10);
-#   3. re-runs `make test-long` + `make pic-test` + `make pic-test-target-variants`
+#   4. re-runs `make test-long` + `make pic-test` + `make pic-test-target-variants`
 #      + `make pic320-test` + `make pic320-test-target-variants` on the clean
 #      runner -- the same gates the MANIFEST claims;
-#   4. publishes a GitHub Release with the images, SHA256SUMS(.asc), MANIFEST,
+#   5. rechecks the protected remote tag target, then publishes a GitHub Release
+#      with the images, SHA256SUMS(.asc), MANIFEST,
 #      and the machine-verified QUALIFICATION record.
 #
 # The runner is pinned to ubuntu-24.04 so the toolchain matches TOOLCHAIN.adoc;
@@ -49,11 +52,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The qualified source must be the release commit's sole parent.
+          fetch-depth: 2
 
       - name: Locate the committed release directory
         id: rel
         env:
           RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_OBJECT: ${{ github.sha }}
         run: |
           set -euo pipefail
           tag=$RELEASE_TAG
@@ -73,7 +80,10 @@ jobs:
             || { echo "::error::$dir/MANIFEST.md does not identify a production release"; exit 1; }
           command -v make >/dev/null || { echo "::error::make is required by qualification verification"; exit 1; }
           scripts/verify-release-qualification.sh "$dir" "$tag"
+          scripts/verify-release-history.sh "$dir" "$tag" "$RELEASE_OBJECT"
+          release_commit=$(git rev-parse "$RELEASE_OBJECT^{commit}")
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          echo "commit=$release_commit" >> "$GITHUB_OUTPUT"
 
       # --- toolchains: AVR + host analyzers (apt) ---------------------------
       - name: Install AVR + analysis toolchain
@@ -233,6 +243,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_DIR: ${{ steps.repro.outputs.dir }}
           RELEASE_TAG: ${{ github.ref_name }}
+          VERIFIED_RELEASE_COMMIT: ${{ steps.rel.outputs.commit }}
         run: |
           set -euo pipefail
           dir=$RELEASE_DIR
@@ -240,6 +251,7 @@ jobs:
           assets=( "$dir"/*.hex "$dir/SHA256SUMS" "$dir/MANIFEST.md" "$dir/QUALIFICATION" )
           [ -f "$dir/SHA256SUMS.asc" ] && assets+=( "$dir/SHA256SUMS.asc" )
           notes="$dir/MANIFEST.md"; [ -f "$notes" ] || notes=/dev/null
+          scripts/verify-release-tag-target.sh origin "$tag" "$VERIFIED_RELEASE_COMMIT"
           gh release create "$tag" \
             --title "Firmware $tag" \
             --notes-file "$notes" \
