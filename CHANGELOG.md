@@ -97,6 +97,12 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- Mutation results now conserve an immutable 74-mutant inventory across six
+  pinned categories: dispatched plus skipped must equal 74, and killed plus
+  survived plus errored must equal dispatched. Inventory records, baseline Make
+  commands, worker exits, sandbox setup, atomic result pairs, exact status/output
+  grammar, and unexpected artifacts all fail closed instead of allowing a
+  shortened or partially published run to report "all mutants killed."
 - The PIC10F322 `pic` producer now requires the complete immutable output-variant
   matrix before invoking XC8, rejecting empty, duplicate, unsupported, and
   incomplete requests. Classic AVR and PIC10F322 entries in `RELEASE_IMAGES` now

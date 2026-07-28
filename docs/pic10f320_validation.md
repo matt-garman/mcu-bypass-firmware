@@ -341,6 +341,14 @@ libgpsim and sit behind a tool probe that first verifies the *unmutated* tree
 genuinely passes. Without that split they would "survive" on any host lacking the
 PIC toolchain — a false pass.
 
+The accounting contract is independent of the arrays it measures: exact category
+counts pin the complete 74-mutant inventory, dispatched plus skipped must equal
+74, and killed plus survived plus errored must equal dispatched. A worker failure,
+sandbox-copy failure, malformed inventory/baseline command, partial result pair,
+noncanonical status/output, or unexpected result artifact is an error rather than
+a kill. The host-only sandbox/accounting selftest exercises this contract in
+`make test` without requiring XC8 or a simulator.
+
 Two cautions learned while building this set, recorded because both produce
 misleading greens:
 

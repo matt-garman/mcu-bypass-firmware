@@ -307,12 +307,21 @@ harness could make them die for an infrastructure reason and falsely count as
 killed. Skip accounting is wired through the same policy resolver, so a partial
 run cannot be mistaken for full PIC10F320 coverage.
 
+The driver independently pins the six mutation categories at **23 core/AVR + 27
+PIC10F320 host + 9 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 8 PIC target = 74**.
+It rejects category drift before probing, then requires dispatched + skipped = 74
+and killed + survived + errored = dispatched. Every worker status is checked;
+result status/output pairs are atomically published and accepted only with exact
+text grammar and no missing, hidden, or extra artifacts.
+
 One further note on the driver, learned the hard way: its sandbox tree copy has
 to reach `test/pic10f320/{equiv,actuation,fault,gpsim}/` and the folded `.sh` and
 `.stc` assets under `test/pic/`. The probe checks those shared helpers before it
 can enable the tool-dependent PIC10F320 mutants. The host-only
 `test-mutation-sandbox` regression exercises the same copy routine in `make test`,
-including the wrappers' executable mode.
+including the wrappers' executable mode, and covers inventory, conservation,
+record/command parsing, atomic publication, checker-status classification, and
+result grammar in 24 checks.
 
 
 ## Known gaps (PIC — hardware-bench only)

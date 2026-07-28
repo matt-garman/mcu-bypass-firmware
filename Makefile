@@ -2336,8 +2336,8 @@ test-klee-build:
 _test-mutation-policy-probe:
 	@bash -c '. ./test/mutation_policy.sh; resolve_mutation_allow_skip'
 
-# Host-only proof that mutation sandboxes include every folded PIC helper used by
-# a kill target, preserving executable mode for the gpsim wrappers.
+# Host-only proof of mutation sandbox completeness and fail-closed inventory,
+# command, worker/result, and conservation accounting.
 test-mutation-sandbox:
 	MUTATION_SANDBOX_SELFTEST=1 ./test/run_mutation_tests.sh
 
@@ -4407,7 +4407,7 @@ help:
 	@echo "  test-sim-<v>[-t<n>]  single variant, e.g. test-sim-relay / test-sim-relay-t45"
 	@echo "  test-fault-inject  corrupt state, verify WDT recovery (all variants x tinyx5)"
 	@echo "  test-mutation   inject firmware faults, verify the suite kills them"
-	@echo "  test-mutation-sandbox  verify mutation copies include executable shared PIC helpers"
+	@echo "  test-mutation-sandbox  verify mutation sandbox + inventory/result accounting"
 	@echo "  test-attiny202-build  fail-closed AVR-XT image-generation checks"
 	@echo "  test-avr-build-rebuild  classic AVR stale/config/partial-output checks"
 	@echo "  test-gpsim-wrappers  fail-closed gpsim process-status checks"

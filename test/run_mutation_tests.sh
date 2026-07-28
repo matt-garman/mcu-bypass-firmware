@@ -43,12 +43,22 @@ source "$SCRIPT_DIR/mutation_policy.sh"
 MUTATION_ALLOW_SKIP=$(resolve_mutation_allow_skip)
 policy_rc=$?
 [ "$policy_rc" -eq 0 ] || exit "$policy_rc"
+source "$SCRIPT_DIR/mutation_accounting.sh"
+
+readonly MUTATION_EXPECTED_CORE=23
+readonly MUTATION_EXPECTED_PIC_GPSIM=6
+readonly MUTATION_EXPECTED_PIC_TARGET=8
+readonly MUTATION_EXPECTED_PIC_SOAK=1
+readonly MUTATION_EXPECTED_PIC320_HOST=27
+readonly MUTATION_EXPECTED_PIC320_TOOL=9
+readonly MUTATION_EXPECTED_TOTAL=74
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
 FW_BASE="${FW_BASE:-bypass}"
 PIC_TAG="${PIC_TAG:-pic10f322}"
 GPSIM="${GPSIM:-gpsim}"
+MUTATION_MAKE="${MUTATION_MAKE:-make}"
 PIC_SOAK_GPSIM_INC="${PIC_SOAK_GPSIM_INC:-/usr/include/gpsim}"
 # Short soak window for the WDT-liveness mutant: must exceed one gpsim WDT period
 # (~1.057s at WDTPS=0x08, per the soak's own note) so an un-pet dog actually
@@ -76,20 +86,82 @@ esac
 
 # Per-mutant result sink (one $idx.status + $idx.out file per mutant). Cleaned on
 # exit so an interrupted run leaves nothing behind.
-RESULT_DIR="$(mktemp -d)"
-trap 'rm -rf "$RESULT_DIR"' EXIT
+if ! RESULT_DIR="$(mktemp -d)"; then
+    echo "ERROR: could not create mutation result directory" >&2
+    exit 2
+fi
+active_pids=()
+launching_pid=0
+cleanup_mutation_run() {
+    local pid attempt alive
+    local -a groups=()
+    local -A seen_groups=()
+    for pid in "${active_pids[@]}" "$launching_pid"; do
+        [ "$pid" -eq 0 ] && continue
+        if [[ -z ${seen_groups["$pid"]+x} ]]; then
+            seen_groups["$pid"]=1
+            groups+=("$pid")
+        fi
+    done
+    # `jobs -pr` closes the signal window between `run_mutant &` and assigning
+    # `$!` to launching_pid: every unreaped worker group is still discoverable.
+    while read -r pid; do
+        [ -n "$pid" ] || continue
+        if [[ -z ${seen_groups["$pid"]+x} ]]; then
+            seen_groups["$pid"]=1
+            groups+=("$pid")
+        fi
+    done < <(jobs -pr)
+    for pid in "${groups[@]}"; do kill -TERM -- "-$pid" 2>/dev/null || true; done
+    for ((attempt = 0; attempt < 20; attempt++)); do
+        alive=0
+        for pid in "${groups[@]}"; do
+            if kill -0 -- "-$pid" 2>/dev/null; then alive=1; break; fi
+        done
+        [ "$alive" -eq 1 ] || break
+        sleep 0.05
+    done
+    for pid in "${groups[@]}"; do kill -KILL -- "-$pid" 2>/dev/null || true; done
+    for pid in "${groups[@]}"; do wait "$pid" 2>/dev/null || true; done
+    rm -rf "$RESULT_DIR"
+}
+mutation_signal_exit() {
+    local code=$1
+    trap - HUP INT TERM
+    exit "$code"
+}
+trap cleanup_mutation_run EXIT
+trap 'mutation_signal_exit 129' HUP
+trap 'mutation_signal_exit 130' INT
+trap 'mutation_signal_exit 143' TERM
 
-# Bounded-concurrency dispatch: launch a mutant in the background, and once
-# MUTATION_JOBS are in flight, block (`wait -n`) for one to finish before
-# launching the next. A final `wait` (at the call site) drains the pool.
-_active=0
+# Bounded-concurrency dispatch. Keep every PID so every worker status is checked;
+# an unchecked `wait -n` can lose a worker that died after publishing half a
+# result and let its stale status be credited as a kill.
+dispatched=0
+worker_failures=0
+wait_oldest_worker() {
+    local pid=${active_pids[0]}
+    if ! wait "$pid"; then worker_failures=$((worker_failures + 1)); fi
+    active_pids=("${active_pids[@]:1}")
+}
 dispatch() {
+    # Briefly enable job control so this worker and every descendant Make process
+    # receive their own process group. Disable it before waiting to suppress job
+    # notifications in the deterministic mutation log.
+    set -m
     run_mutant "$@" &
-    _active=$((_active + 1))
-    if [ "$_active" -ge "$MUTATION_JOBS" ]; then
-        wait -n
-        _active=$((_active - 1))
+    launching_pid=$!
+    set +m
+    active_pids+=("$launching_pid")
+    launching_pid=0
+    dispatched=$((dispatched + 1))
+    if [ "${#active_pids[@]}" -ge "$MUTATION_JOBS" ]; then
+        wait_oldest_worker
     fi
+}
+drain_workers() {
+    while [ "${#active_pids[@]}" -ne 0 ]; do wait_oldest_worker; done
 }
 
 # Each entry: file<TAB>sed-expression<TAB>make-target<TAB>description
@@ -142,16 +214,16 @@ MUTATIONS=(
 # Makefile). Copying the whole source set keeps this robust as variants are
 # added or renamed.
 copy_tree() {
-    local dst="$1"
-    mkdir -p "$dst/src" "$dst/test"
-    cp "$PROJ_DIR"/src/*.c "$PROJ_DIR"/src/*.h "$dst/src/"
-    cp "$PROJ_DIR/Makefile" "$dst/"
+    local dst="$1" manifest src rel
+    mkdir -p "$dst/src" "$dst/test" || return 1
+    cp "$PROJ_DIR"/src/*.c "$PROJ_DIR"/src/*.h "$dst/src/" || return 1
+    cp "$PROJ_DIR/Makefile" "$dst/" || return 1
     # The Makefile's build/validate recipes invoke helper scripts under
     # scripts/ -- notably IHEX_VALIDATOR (scripts/validate-ihex.sh), which
     # `make pic` and the .hex rules REQUIRE and fail closed without. Mirror the
     # whole dir so a sandbox build behaves exactly like the real tree; -a
     # preserves the executable bit the validator-present check relies on.
-    cp -a "$PROJ_DIR/scripts" "$dst/"
+    cp -a "$PROJ_DIR/scripts" "$dst/" || return 1
     # Mirror every source file under test/, at ANY depth, filtered by extension.
     # The allowlist is deliberate and must stay one: test/ also holds BUILD
     # PRODUCTS (test/avr/test_sim_*, test/formal/klee-out/, __pycache__), and
@@ -180,14 +252,23 @@ copy_tree() {
     #
     # Non-source data (test/misra*.{json,txt}, README.md) stays out: no mutation
     # kill target reads it. Add the extension here if that ever changes.
-    while IFS= read -r -d '' src; do
-        local rel="${src#"$PROJ_DIR"/}"
-        mkdir -p "$dst/${rel%/*}"
-        cp -a "$src" "$dst/$rel"
-    done < <(find "$PROJ_DIR/test" -type f \
+    manifest=$(mktemp "$dst/.mutation-sources.XXXXXX") || return 1
+    if ! find "$PROJ_DIR/test" -type f \
         \( -name '*.c' -o -name '*.cc' -o -name '*.h' \
            -o -name '*.sh' -o -name '*.stc' -o -name '*.py' \) \
-        -not -path '*/__pycache__/*' -not -path '*/klee-out/*' -print0)
+        -not -path '*/__pycache__/*' -not -path '*/klee-out/*' -print0 \
+        > "$manifest"; then
+        rm -f "$manifest"
+        return 1
+    fi
+    while IFS= read -r -d '' src; do
+        rel="${src#"$PROJ_DIR"/}"
+        if ! mkdir -p "$dst/${rel%/*}" || ! cp -a "$src" "$dst/$rel"; then
+            rm -f "$manifest"
+            return 1
+        fi
+    done < "$manifest"
+    rm -f "$manifest" || return 1
 }
 
 # Fail CLOSED on an incomplete sandbox. Every entry here is a file whose absence
@@ -222,8 +303,12 @@ validate_pic320_sandbox() {
     [ "$ok" -eq 1 ]
 }
 
+SANDBOX_SELFTEST_DONE=0
 if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
-    SELFTEST_DIR="$(mktemp -d)"
+    if ! SELFTEST_DIR="$(mktemp -d)"; then
+        echo "ERROR: could not create mutation self-test sandbox" >&2
+        exit 1
+    fi
     if ! copy_tree "$SELFTEST_DIR" || ! validate_pic320_sandbox "$SELFTEST_DIR"; then
         rm -rf "$SELFTEST_DIR"
         exit 1
@@ -236,7 +321,10 @@ if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
         exit 1
     fi
 
-    copy_tree "$SELFTEST_DIR"
+    if ! copy_tree "$SELFTEST_DIR"; then
+        echo "ERROR: could not restore mutation self-test sandbox" >&2
+        rm -rf "$SELFTEST_DIR"; exit 1
+    fi
     chmod -x "$SELFTEST_DIR/test/pic/run_gpsim_power_on_pressed.sh"
     if validate_pic320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
         echo "ERROR: mutation sandbox validator accepted a non-executable gpsim wrapper" >&2
@@ -244,7 +332,10 @@ if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
         exit 1
     fi
 
-    copy_tree "$SELFTEST_DIR"
+    if ! copy_tree "$SELFTEST_DIR"; then
+        echo "ERROR: could not restore mutation self-test sandbox" >&2
+        rm -rf "$SELFTEST_DIR"; exit 1
+    fi
     rm -f "$SELFTEST_DIR/test/pic/find_pin_exact.h"
     if validate_pic320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
         echo "ERROR: mutation sandbox validator accepted a missing find_pin_exact.h" >&2
@@ -259,7 +350,10 @@ if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
     # one that descends three levels -- so a copy_tree that regresses on either
     # axis fails here rather than in a baseline, ten minutes later, wearing a
     # "toolchain absent" label.
-    copy_tree "$SELFTEST_DIR"
+    if ! copy_tree "$SELFTEST_DIR"; then
+        echo "ERROR: could not restore mutation self-test sandbox" >&2
+        rm -rf "$SELFTEST_DIR"; exit 1
+    fi
     for required in test/pic/find_pin_exact.h \
                     test/pic/fw_coverage/fw_coverage_harness.h; do
         if [ ! -f "$SELFTEST_DIR/$required" ]; then
@@ -270,8 +364,7 @@ if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
     done
 
     rm -rf "$SELFTEST_DIR"
-    echo "mutation sandbox copy validation: 5 checks, 0 failures"
-    exit 0
+    SANDBOX_SELFTEST_DONE=1
 fi
 
 # Run one PIC gpsim register-level check against a freshly built (mutated) HEX.
@@ -290,11 +383,98 @@ fi
 # every PIC gpsim mutant below. Returns nonzero (killed) on a build break or a
 # failed gpsim assertion.
 pic_gpsim_run() {
-    local work="$1"
-    make -C "$work" pic >/dev/null 2>&1 || return 1
+    local work="$1" rc
+    make -C "$work" pic >/dev/null 2>&1
+    rc=$?
+    [ "$rc" -eq 0 ] || return "$rc"
     local hex="$work/build_pic/${FW_BASE}_cd4053_${PIC_TAG}.hex"
-    [ -f "$hex" ] || return 1
+    [ -f "$hex" ] || return 125
     GPSIM="$GPSIM" "$PROJ_DIR/test/pic/run_gpsim_test.sh" "$hex" 0x3 >/dev/null 2>&1
+}
+
+split_mutation_make_command() {
+    local label=$1 command=$2 i last
+    MUTATION_MAKE_ARGS=()
+    read -r -a MUTATION_MAKE_ARGS <<< "$command"
+    if [ "${#MUTATION_MAKE_ARGS[@]}" -eq 0 ]; then
+        echo "ERROR: mutation make command $label is empty" >&2
+        return 1
+    fi
+    last=$((${#MUTATION_MAKE_ARGS[@]} - 1))
+    for ((i = 0; i < last; i++)); do
+        if ! [[ ${MUTATION_MAKE_ARGS[i]} =~ ^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+$ ]]; then
+            echo "ERROR: mutation make command $label has an invalid assignment" >&2
+            return 1
+        fi
+    done
+    if ! [[ ${MUTATION_MAKE_ARGS[last]} =~ ^[A-Za-z0-9_.-]+$ ]]; then
+        echo "ERROR: mutation make command $label has an invalid target" >&2
+        return 1
+    fi
+}
+
+run_mutation_make_command() {
+    local root=$1 command=$2
+    shift 2
+    split_mutation_make_command runtime "$command" || return 2
+    "$MUTATION_MAKE" -C "$root" "$@" "${MUTATION_MAKE_ARGS[@]}"
+}
+
+unpack_mutation_job_spec() {
+    local spec=$1 rest field
+    local -a fields=()
+    rest=$spec
+    while [[ $rest == *"$US"* ]]; do
+        field=${rest%%"$US"*}
+        fields+=("$field")
+        rest=${rest#*"$US"}
+    done
+    fields+=("$rest")
+    if [ "${#fields[@]}" -ne 6 ] || [ -z "${fields[0]}" ] \
+            || [ -z "${fields[1]}" ] || [ -z "${fields[3]}" ] \
+            || [ -z "${fields[4]}" ] || [ -z "${fields[5]}" ]; then
+        echo "ERROR: packed mutation job has a malformed field set" >&2
+        return 1
+    fi
+    category=${fields[0]}; kind=${fields[1]}; arg=${fields[2]}
+    file=${fields[3]}; sed_expr=${fields[4]}; desc=${fields[5]}
+    case "$kind" in
+        make|pictarget) [ -n "$arg" ] ;;
+        picgpsim|picsoak) [ -z "$arg" ] ;;
+        *) return 1 ;;
+    esac || {
+        echo "ERROR: packed mutation job has an invalid kind/argument pair" >&2
+        return 1
+    }
+}
+
+publish_mutation_result() {
+    local stem=$1 status=$2 output=$3 survivor=${4-}
+    local out_tmp="$stem.out.tmp.$$" status_tmp="$stem.status.tmp.$$"
+    if ! printf '%s\n' "$output" > "$out_tmp"; then return 1; fi
+    case "$status" in
+        survived)
+            if [ -z "$survivor" ] \
+                    || ! printf 'survived\n%s\n' "$survivor" > "$status_tmp"; then
+                rm -f "$out_tmp" "$status_tmp"
+                return 1
+            fi
+            ;;
+        killed|errored)
+            if ! printf '%s\n' "$status" > "$status_tmp"; then
+                rm -f "$out_tmp" "$status_tmp"
+                return 1
+            fi
+            ;;
+        *)
+            rm -f "$out_tmp" "$status_tmp"
+            return 1
+            ;;
+    esac
+    if ! mv "$out_tmp" "$stem.out" || ! mv "$status_tmp" "$stem.status"; then
+        rm -f "$out_tmp" "$status_tmp"
+        return 1
+    fi
 }
 
 # Apply one mutation in a throwaway sandbox and run the mapped checker.
@@ -315,20 +495,47 @@ run_mutant() {
     local idx="$1" kind="$2" arg="$3" file="$4" sed_expr="$5" desc="$6"
     local stem; stem="$RESULT_DIR/$(printf '%04d' "$idx")"
 
-    local work; work="$(mktemp -d)"
-    copy_tree "$work"
+    local work
+    if ! work="$(mktemp -d)"; then
+        publish_mutation_result "$stem" errored \
+            "[$idx] ERROR  could not create mutation sandbox: $desc"
+        return $?
+    fi
+    if ! copy_tree "$work"; then
+        publish_mutation_result "$stem" errored \
+            "[$idx] ERROR  could not populate mutation sandbox: $desc"
+        local publish_rc=$?
+        rm -rf "$work" || true
+        return "$publish_rc"
+    fi
 
     # Apply the mutation; confirm it actually changed the file.
     if ! sed -i "$sed_expr" "$work/$file"; then
-        printf 'errored\n' > "$stem.status"
-        printf '[%s] ERROR  applying sed to %s: %s\n' "$idx" "$file" "$desc" > "$stem.out"
-        rm -rf "$work"; return
+        publish_mutation_result "$stem" errored \
+            "[$idx] ERROR  applying sed to $file: $desc"
+        local publish_rc=$?
+        rm -rf "$work" || true
+        return "$publish_rc"
     fi
-    if cmp -s "$work/$file" "$PROJ_DIR/$file"; then
-        printf 'errored\n' > "$stem.status"
-        printf '[%s] ERROR  mutation did not change %s (pattern stale?): %s\n' "$idx" "$file" "$desc" > "$stem.out"
-        rm -rf "$work"; return
-    fi
+    cmp -s "$work/$file" "$PROJ_DIR/$file"
+    local cmp_rc=$?
+    case "$cmp_rc" in
+        0)
+            publish_mutation_result "$stem" errored \
+                "[$idx] ERROR  mutation did not change $file (pattern stale?): $desc"
+            local publish_rc=$?
+            rm -rf "$work" || true
+            return "$publish_rc"
+            ;;
+        1) ;;
+        *)
+            publish_mutation_result "$stem" errored \
+                "[$idx] ERROR  could not compare mutated source $file: $desc"
+            local publish_rc=$?
+            rm -rf "$work" || true
+            return "$publish_rc"
+            ;;
+    esac
 
     # Run the mapped checker. Killed == nonzero exit (a build OR a test failure
     # both count as "the suite did not silently accept the fault").
@@ -336,7 +543,7 @@ run_mutant() {
     case "$kind" in
         make)
             label="$arg"
-            make -C "$work" $arg >/dev/null 2>&1; rc=$?
+            run_mutation_make_command "$work" "$arg" >/dev/null 2>&1; rc=$?
             ;;
         picgpsim)
             label="pic-test-gpsim"
@@ -355,18 +562,31 @@ run_mutant() {
             make -C "$work" PIC_TARGET_VARIANT="$arg" pic-test-target >/dev/null 2>&1; rc=$?
             ;;
         *)
-            label="$kind"; rc=0
+            publish_mutation_result "$stem" errored \
+                "[$idx] ERROR  unknown mutation checker kind '$kind': $desc"
+            local publish_rc=$?
+            rm -rf "$work" || true
+            return "$publish_rc"
             ;;
     esac
 
-    if [ "$rc" -eq 0 ]; then
-        printf 'survived\n%s\n' "$file: $desc" > "$stem.status"
-        printf '[%s] SURVIVED (%s): %s\n' "$idx" "$label" "$desc" > "$stem.out"
-    else
-        printf 'killed\n' > "$stem.status"
-        printf '[%s] killed   (%s): %s\n' "$idx" "$label" "$desc" > "$stem.out"
+    if mutation_checker_status_is_infrastructure_error "$rc"; then
+        publish_mutation_result "$stem" errored \
+            "[$idx] ERROR  checker infrastructure status $rc ($label): $desc"
+        local publish_rc=$?
+        rm -rf "$work" || true
+        return "$publish_rc"
     fi
-    rm -rf "$work"
+    if [ "$rc" -eq 0 ]; then
+        publish_mutation_result "$stem" survived \
+            "[$idx] SURVIVED ($label): $desc" "$file: $desc"
+    else
+        publish_mutation_result "$stem" killed \
+            "[$idx] killed   ($label): $desc"
+    fi
+    local publish_rc=$?
+    rm -rf "$work" || true
+    return "$publish_rc"
 }
 
 # --- PIC shell mutants (src/bypass_mcu_pic10f322.c) ----------------------------
@@ -472,6 +692,164 @@ PIC_SOAK_MUTATIONS=(
 US=$'\x1f'
 job_specs=()
 
+declare -A mutation_inventory_seen=()
+validate_mutation_inventory() {
+    local array_name=$1 label=$2 expected=$3 field_count=$4 i entry key
+    local -n entries=$array_name
+    mutation_require_count "$label" "$expected" "${#entries[@]}" || return 1
+    for i in "${!entries[@]}"; do
+        entry=${entries[i]}
+        mutation_parse_record "$label[$i]" "$field_count" "$entry" || return 1
+        key=$entry
+        if [[ -n ${mutation_inventory_seen["$key"]+x} ]]; then
+            printf 'ERROR: duplicate mutation inventory record in %s[%d]\n' \
+                "$label" "$i" >&2
+            return 1
+        fi
+        mutation_inventory_seen["$key"]=1
+    done
+}
+
+validate_mutation_inventory MUTATIONS core/AVR "$MUTATION_EXPECTED_CORE" 4 || exit 2
+validate_mutation_inventory PIC_GPSIM_MUTATIONS PIC-gpsim \
+    "$MUTATION_EXPECTED_PIC_GPSIM" 3 || exit 2
+validate_mutation_inventory PIC_TARGET_MUTATIONS PIC-target \
+    "$MUTATION_EXPECTED_PIC_TARGET" 4 || exit 2
+validate_mutation_inventory PIC_SOAK_MUTATIONS PIC-soak \
+    "$MUTATION_EXPECTED_PIC_SOAK" 3 || exit 2
+validate_mutation_inventory PIC320_HOST_MUTATIONS PIC10F320-host \
+    "$MUTATION_EXPECTED_PIC320_HOST" 4 || exit 2
+validate_mutation_inventory PIC320_TOOL_MUTATIONS PIC10F320-tool \
+    "$MUTATION_EXPECTED_PIC320_TOOL" 4 || exit 2
+inventory_total=$((${#MUTATIONS[@]} + ${#PIC_GPSIM_MUTATIONS[@]} \
+    + ${#PIC_TARGET_MUTATIONS[@]} + ${#PIC_SOAK_MUTATIONS[@]} \
+    + ${#PIC320_HOST_MUTATIONS[@]} + ${#PIC320_TOOL_MUTATIONS[@]}))
+mutation_require_count total "$MUTATION_EXPECTED_TOTAL" "$inventory_total" || exit 2
+
+collect_baseline_targets() {
+    local array_name=$1 label=$2 field_count=$3 target_index=$4 output_name=$5
+    local entry target
+    local -n entries=$array_name output=$output_name
+    local -A seen=()
+    output=()
+    for entry in "${entries[@]}"; do
+        mutation_parse_record "$label baseline" "$field_count" "$entry" || return 1
+        target=${MUTATION_RECORD_FIELDS[target_index]}
+        split_mutation_make_command "$label baseline" "$target" || return 1
+        if [[ -z ${seen["$target"]+x} ]]; then
+            seen["$target"]=1
+            output+=("$target")
+        fi
+    done
+}
+
+CORE_BASE_TARGETS=()
+PIC320_HOST_BASE_TARGETS=()
+PIC320_BASE_TARGETS=()
+collect_baseline_targets MUTATIONS core/AVR 4 2 CORE_BASE_TARGETS || exit 2
+collect_baseline_targets PIC320_HOST_MUTATIONS PIC10F320-host 4 2 \
+    PIC320_HOST_BASE_TARGETS || exit 2
+collect_baseline_targets PIC320_TOOL_MUTATIONS PIC10F320-tool 4 2 \
+    PIC320_BASE_TARGETS || exit 2
+
+HOST_BASE_TARGETS=()
+declare -A host_baseline_seen=()
+for target in "${CORE_BASE_TARGETS[@]}" "${PIC320_HOST_BASE_TARGETS[@]}"; do
+    if [[ -z ${host_baseline_seen["$target"]+x} ]]; then
+        host_baseline_seen["$target"]=1
+        HOST_BASE_TARGETS+=("$target")
+    fi
+done
+
+if [ "$SANDBOX_SELFTEST_DONE" -eq 1 ]; then
+    mutation_validate_totals 74 74 0 74 0 0 0 0 || exit 1
+    mutation_validate_totals 74 50 24 50 0 0 0 0 || exit 1
+    if mutation_validate_totals 74 49 24 49 0 0 0 0 >/dev/null 2>&1; then
+        echo "ERROR: mutation accounting accepted a dropped dispatch" >&2; exit 1
+    fi
+    if mutation_validate_totals 74 50 24 49 0 0 0 0 >/dev/null 2>&1; then
+        echo "ERROR: mutation accounting accepted a missing result" >&2; exit 1
+    fi
+    if mutation_validate_totals 74 50 24 50 0 0 1 0 >/dev/null 2>&1; then
+        echo "ERROR: mutation accounting accepted a failed worker" >&2; exit 1
+    fi
+    for checker_rc in 125 126 127 143; do
+        mutation_checker_status_is_infrastructure_error "$checker_rc" || {
+            echo "ERROR: mutation accounting accepted checker infrastructure status $checker_rc" >&2
+            exit 1
+        }
+    done
+    if mutation_checker_status_is_infrastructure_error 1; then
+        echo "ERROR: mutation accounting rejected an ordinary mutation kill status" >&2
+        exit 1
+    fi
+    if mutation_parse_record selftest 4 $'a\tb\t\td' >/dev/null 2>&1; then
+        echo "ERROR: mutation accounting accepted an empty record field" >&2; exit 1
+    fi
+    if mutation_parse_record selftest 4 $'a\tb\tc\td\nextra' >/dev/null 2>&1; then
+        echo "ERROR: mutation accounting accepted a newline in a record" >&2; exit 1
+    fi
+    if mutation_parse_record selftest 4 $'a\tb\tc\td\x1fextra' >/dev/null 2>&1; then
+        echo "ERROR: mutation accounting accepted its packed-record delimiter" >&2; exit 1
+    fi
+    split_mutation_make_command selftest 'test-model-check' || exit 1
+    [ "${MUTATION_MAKE_ARGS[*]}" = 'test-model-check' ] || {
+        echo "ERROR: mutation accounting split a plain Make target incorrectly" >&2; exit 1
+    }
+    split_mutation_make_command selftest \
+        'PIC320_VARIANT=cd4053-simple pic320-test-actuation' || exit 1
+    [ "${MUTATION_MAKE_ARGS[0]}" = 'PIC320_VARIANT=cd4053-simple' ] \
+        && [ "${MUTATION_MAKE_ARGS[1]}" = 'pic320-test-actuation' ] || {
+        echo "ERROR: mutation accounting split an assignment target incorrectly" >&2; exit 1
+    }
+    fake_make="$RESULT_DIR/fake-make"
+    make_log="$RESULT_DIR/fake-make.log"
+    cat > "$fake_make" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "${MUTATION_MAKE_LOG:?}"
+EOF
+    chmod 750 "$fake_make"
+    real_mutation_make=$MUTATION_MAKE
+    MUTATION_MAKE=$fake_make MUTATION_MAKE_LOG=$make_log \
+        run_mutation_make_command /fixture \
+            'PIC320_VARIANT=cd4053-simple pic320-test-actuation' \
+            GPSIM=fake || exit 1
+    MUTATION_MAKE=$real_mutation_make
+    mapfile -t make_argv < "$make_log"
+    expected_make_argv=(-C /fixture GPSIM=fake \
+        PIC320_VARIANT=cd4053-simple pic320-test-actuation)
+    [ "${make_argv[*]}" = "${expected_make_argv[*]}" ] || {
+        echo "ERROR: mutation Make runner forwarded incorrect argv" >&2; exit 1
+    }
+    unpack_mutation_job_spec \
+        "fixture$US""picgpsim$US$US""src/file.c$US""s@a@b@$US""description" \
+        || exit 1
+    [ "$kind" = picgpsim ] && [ -z "$arg" ] && [ "$file" = src/file.c ] || {
+        echo "ERROR: mutation accounting unpacked a valid job incorrectly" >&2; exit 1
+    }
+    if unpack_mutation_job_spec \
+            "fixture$US""picgpsim$US$US""src/file.c$US""sed$US""desc$US""extra" \
+            >/dev/null 2>&1; then
+        echo "ERROR: mutation accounting accepted an overlong packed job" >&2; exit 1
+    fi
+    publish_mutation_result "$RESULT_DIR/selftest-valid" killed \
+        '[selftest-valid] killed   (fixture): valid result' || exit 1
+    mutation_read_status selftest-valid "$RESULT_DIR/selftest-valid.status" || exit 1
+    mutation_validate_output selftest-valid "$RESULT_DIR/selftest-valid.out" \
+        "$MUTATION_STATUS" || exit 1
+    printf 'killed\ntrailing\n' > "$RESULT_DIR/selftest.status"
+    if mutation_read_status selftest "$RESULT_DIR/selftest.status" >/dev/null 2>&1; then
+        echo "ERROR: mutation accounting accepted trailing status data" >&2; exit 1
+    fi
+    printf 'killed' > "$RESULT_DIR/selftest-no-newline.status"
+    if mutation_read_status selftest-no-newline \
+            "$RESULT_DIR/selftest-no-newline.status" >/dev/null 2>&1; then
+        echo "ERROR: mutation accounting accepted an unterminated status" >&2; exit 1
+    fi
+    echo "mutation sandbox/accounting validation: 24 checks, 0 failures"
+    exit 0
+fi
+
 # Sanity: the unmutated tree must PASS every target we rely on, otherwise a
 # "killed" result is meaningless (it would just mean the baseline is broken).
 # Baseline-check EVERY distinct kill target the MUTATIONS list uses -- not just
@@ -479,15 +857,21 @@ job_specs=()
 # kill against a baseline that was never verified. (The PIC-shell mutants have
 # their own baseline probe below, since their tools may be absent.)
 echo "=== mutation testing: baseline sanity check ==="
-BASE_DIR="$(mktemp -d)"
-copy_tree "$BASE_DIR"
+if ! BASE_DIR="$(mktemp -d)"; then
+    echo "ERROR: could not create mutation baseline sandbox" >&2
+    exit 2
+fi
+if ! copy_tree "$BASE_DIR"; then
+    echo "ERROR: could not populate mutation baseline sandbox" >&2
+    rm -rf "$BASE_DIR"
+    exit 2
+fi
 if ! validate_pic320_sandbox "$BASE_DIR"; then
     rm -rf "$BASE_DIR"
     exit 2
 fi
-BASE_TARGETS=$(printf '%s\n' "${MUTATIONS[@]}" | cut -f3 | sort -u)
-for t in $BASE_TARGETS; do
-    if make -C "$BASE_DIR" "$t" >/dev/null 2>&1; then
+for t in "${HOST_BASE_TARGETS[@]}"; do
+    if run_mutation_make_command "$BASE_DIR" "$t" >/dev/null 2>&1; then
         echo "baseline $t: PASS"
     else
         echo "ERROR: baseline $t FAILS on unmutated tree; aborting." >&2
@@ -502,7 +886,9 @@ echo
 # probe below has decided which PIC subsets are eligible.
 core_cat="${#MUTATIONS[@]} core/AVR mutants"
 for entry in "${MUTATIONS[@]}"; do
-    IFS=$'\t' read -r file sed_expr target desc <<< "$entry"
+    mutation_parse_record "core/AVR collection" 4 "$entry" || exit 2
+    file=${MUTATION_RECORD_FIELDS[0]}; sed_expr=${MUTATION_RECORD_FIELDS[1]}
+    target=${MUTATION_RECORD_FIELDS[2]}; desc=${MUTATION_RECORD_FIELDS[3]}
     job_specs+=("$core_cat$US""make$US$target$US$file$US$sed_expr$US$desc")
 done
 
@@ -510,7 +896,9 @@ done
 # the core batch and are never skipped.
 p320_host_cat="${#PIC320_HOST_MUTATIONS[@]} PIC10F320 host mutants (equiv/actuation/fault)"
 for entry in "${PIC320_HOST_MUTATIONS[@]}"; do
-    IFS=$'\t' read -r file sed_expr target desc <<< "$entry"
+    mutation_parse_record "PIC10F320 host collection" 4 "$entry" || exit 2
+    file=${MUTATION_RECORD_FIELDS[0]}; sed_expr=${MUTATION_RECORD_FIELDS[1]}
+    target=${MUTATION_RECORD_FIELDS[2]}; desc=${MUTATION_RECORD_FIELDS[3]}
     job_specs+=("$p320_host_cat$US""make$US$target$US$file$US$sed_expr$US$desc")
 done
 
@@ -534,8 +922,15 @@ PIC320_TOOL_WHY="tools absent"
 MUT_BASELINE_FAILED=0
 echo
 echo "=== PIC toolchain probe (gates the PIC-shell mutants) ==="
-PIC_BASE="$(mktemp -d)"
-copy_tree "$PIC_BASE"
+if ! PIC_BASE="$(mktemp -d)"; then
+    echo "ERROR: could not create PIC mutation probe sandbox" >&2
+    exit 2
+fi
+if ! copy_tree "$PIC_BASE"; then
+    echo "ERROR: could not populate PIC mutation probe sandbox" >&2
+    rm -rf "$PIC_BASE"
+    exit 2
+fi
 make -C "$PIC_BASE" pic >/dev/null 2>&1
 PIC_BASE_HEX="$PIC_BASE/build_pic/${FW_BASE}_cd4053_${PIC_TAG}.hex"
 if command -v "$GPSIM" >/dev/null 2>&1 && [ -f "$PIC_BASE_HEX" ]; then
@@ -587,8 +982,15 @@ rm -rf "$PIC_BASE"
 PIC320_TOOL_OK=0
 echo
 echo "=== PIC10F320 toolchain probe (gates its tool-dependent mutants) ==="
-P320_BASE="$(mktemp -d)"
-copy_tree "$P320_BASE"
+if ! P320_BASE="$(mktemp -d)"; then
+    echo "ERROR: could not create PIC10F320 mutation probe sandbox" >&2
+    exit 2
+fi
+if ! copy_tree "$P320_BASE"; then
+    echo "ERROR: could not populate PIC10F320 mutation probe sandbox" >&2
+    rm -rf "$P320_BASE"
+    exit 2
+fi
 if ! validate_pic320_sandbox "$P320_BASE"; then
     rm -rf "$P320_BASE"
     exit 2
@@ -601,16 +1003,18 @@ if make -C "$P320_BASE" pic320-variants >/dev/null 2>&1 \
    && [ -f "$PIC_SOAK_GPSIM_INC/sim_context.h" ] \
    && pkg-config --exists glib-2.0 2>/dev/null; then
     P320_BASELINES_OK=1
-    while IFS= read -r target; do
+    for target in "${PIC320_BASE_TARGETS[@]}"; do
         # Intentional word splitting: each field contains optional VAR=value
-        # assignments followed by one Make target, never shell metacharacters.
-        if make -C "$P320_BASE" GPSIM="$GPSIM" $target >/dev/null 2>&1; then
+        # assignments followed by one Make target, validated and tokenized by
+        # the same helper used for mutant execution.
+        if run_mutation_make_command "$P320_BASE" "$target" \
+                "GPSIM=$GPSIM" >/dev/null 2>&1; then
             echo "baseline $target: PASS"
         else
             echo "baseline $target: FAIL"
             P320_BASELINES_OK=0
         fi
-    done < <(printf '%s\n' "${PIC320_TOOL_MUTATIONS[@]}" | cut -f3 | sort -u)
+    done
     if [ "$P320_BASELINES_OK" -eq 1 ]; then
         PIC320_TOOL_OK=1
         echo "XC8 + gpsim + libgpsim present, all baselines PASS -> PIC10F320 tool mutants ENABLED"
@@ -628,7 +1032,9 @@ rm -rf "$P320_BASE"
 if [ "$PIC320_TOOL_OK" -eq 1 ]; then
     p320_tool_cat="${#PIC320_TOOL_MUTATIONS[@]} PIC10F320 target mutants (gpsim/libgpsim/soak)"
     for entry in "${PIC320_TOOL_MUTATIONS[@]}"; do
-        IFS=$'\t' read -r file sed_expr target desc <<< "$entry"
+        mutation_parse_record "PIC10F320 tool collection" 4 "$entry" || exit 2
+        file=${MUTATION_RECORD_FIELDS[0]}; sed_expr=${MUTATION_RECORD_FIELDS[1]}
+        target=${MUTATION_RECORD_FIELDS[2]}; desc=${MUTATION_RECORD_FIELDS[3]}
         job_specs+=("$p320_tool_cat$US""make$US$target$US$file$US$sed_expr$US$desc")
     done
 fi
@@ -636,7 +1042,9 @@ fi
 if [ "$PIC_GPSIM_OK" -eq 1 ]; then
     gpsim_cat="${#PIC_GPSIM_MUTATIONS[@]} PIC-shell mutants (gpsim register-level)"
     for entry in "${PIC_GPSIM_MUTATIONS[@]}"; do
-        IFS=$'\t' read -r file sed_expr desc <<< "$entry"
+        mutation_parse_record "PIC gpsim collection" 3 "$entry" || exit 2
+        file=${MUTATION_RECORD_FIELDS[0]}; sed_expr=${MUTATION_RECORD_FIELDS[1]}
+        desc=${MUTATION_RECORD_FIELDS[2]}
         job_specs+=("$gpsim_cat$US""picgpsim$US$US$file$US$sed_expr$US$desc")
     done
 fi
@@ -644,7 +1052,9 @@ fi
 if [ "$PIC_SOAK_OK" -eq 1 ]; then
     soak_cat="${#PIC_SOAK_MUTATIONS[@]} PIC-shell mutant (WDT liveness, libgpsim soak ${PIC_SOAK_MUT_MS}ms)"
     for entry in "${PIC_SOAK_MUTATIONS[@]}"; do
-        IFS=$'\t' read -r file sed_expr desc <<< "$entry"
+        mutation_parse_record "PIC soak collection" 3 "$entry" || exit 2
+        file=${MUTATION_RECORD_FIELDS[0]}; sed_expr=${MUTATION_RECORD_FIELDS[1]}
+        desc=${MUTATION_RECORD_FIELDS[2]}
         job_specs+=("$soak_cat$US""picsoak$US$US$file$US$sed_expr$US$desc")
     done
 fi
@@ -652,7 +1062,9 @@ fi
 if [ "$PIC_TARGET_OK" -eq 1 ]; then
     target_cat="${#PIC_TARGET_MUTATIONS[@]} PIC target mutants (fault + lock-step + target I/O)"
     for entry in "${PIC_TARGET_MUTATIONS[@]}"; do
-        IFS=$'\t' read -r file sed_expr variant desc <<< "$entry"
+        mutation_parse_record "PIC target collection" 4 "$entry" || exit 2
+        file=${MUTATION_RECORD_FIELDS[0]}; sed_expr=${MUTATION_RECORD_FIELDS[1]}
+        variant=${MUTATION_RECORD_FIELDS[2]}; desc=${MUTATION_RECORD_FIELDS[3]}
         job_specs+=("$target_cat$US""pictarget$US$variant$US$file$US$sed_expr$US$desc")
     done
 fi
@@ -666,11 +1078,11 @@ job_cat=("")   # 1-based; index 0 unused
 idx=0
 for spec in "${job_specs[@]}"; do
     idx=$((idx + 1))
-    IFS="$US" read -r category kind arg file sed_expr desc <<< "$spec"
+    unpack_mutation_job_spec "$spec" || exit 2
     job_cat[idx]="$category"
     dispatch "$idx" "$kind" "$arg" "$file" "$sed_expr" "$desc"
 done
-wait   # drain the pool: every mutant has now written its result files
+drain_workers
 
 # --- tally + ordered replay ---------------------------------------------------
 # Read the per-mutant result files in index order so the log and the survivor
@@ -678,29 +1090,49 @@ wait   # drain the pool: every mutant has now written its result files
 killed=0
 survived=0
 errored=0
+artifact_errors=0
 SURVIVORS=()
 prev_cat=""
-for idx in $(seq 1 "${#job_specs[@]}"); do
+for ((idx = 1; idx <= dispatched; idx++)); do
     stem="$RESULT_DIR/$(printf '%04d' "$idx")"
     if [ "${job_cat[idx]}" != "$prev_cat" ]; then
         echo
         echo "=== ${job_cat[idx]} ==="
         prev_cat="${job_cat[idx]}"
     fi
-    if [ ! -f "$stem.status" ]; then
-        # A mutant that produced no result file never ran to completion (killed
-        # background job, disk error): fail closed rather than silently drop it.
-        echo "[$idx] ERROR  no result recorded (mutant did not complete)"
+    result_valid=1
+    if ! mutation_read_status "$idx" "$stem.status"; then
+        artifact_errors=$((artifact_errors + 1))
+        result_valid=0
+    elif ! mutation_validate_output "$idx" "$stem.out" "$MUTATION_STATUS"; then
+        artifact_errors=$((artifact_errors + 1))
+        result_valid=0
+    fi
+    if [ "$result_valid" -ne 1 ]; then
         errored=$((errored + 1))
         continue
     fi
     cat "$stem.out"
-    case "$(sed -n 1p "$stem.status")" in
+    case "$MUTATION_STATUS" in
         killed)   killed=$((killed + 1)) ;;
-        survived) survived=$((survived + 1)); SURVIVORS+=("$(sed -n 2p "$stem.status")") ;;
+        survived) survived=$((survived + 1)); SURVIVORS+=("$MUTATION_SURVIVOR") ;;
         errored)  errored=$((errored + 1)) ;;
-        *)        echo "[$idx] ERROR  unrecognized result status" ; errored=$((errored + 1)) ;;
     esac
+done
+
+shopt -s nullglob dotglob
+result_artifacts=("$RESULT_DIR"/*)
+shopt -u nullglob dotglob
+for artifact in "${result_artifacts[@]}"; do
+    base=${artifact##*/}
+    if [[ $base =~ ^([0-9]{4})\.(status|out)$ ]]; then
+        artifact_idx=$((10#${BASH_REMATCH[1]}))
+        if [ "$artifact_idx" -ge 1 ] && [ "$artifact_idx" -le "$dispatched" ]; then
+            continue
+        fi
+    fi
+    echo "ERROR: unexpected mutation result artifact: $base" >&2
+    artifact_errors=$((artifact_errors + 1))
 done
 
 echo
@@ -733,12 +1165,19 @@ else
     echo "PIC10F320 mutants: host lanes RAN; target/soak SKIPPED ($PIC320_TOOL_WHY)"
     pic_skipped=$((pic_skipped + ${#PIC320_TOOL_MUTATIONS[@]}))
 fi
+accounting_failed=0
+if ! mutation_validate_totals "$MUTATION_EXPECTED_TOTAL" "$dispatched" \
+        "$pic_skipped" "$killed" "$survived" "$errored" \
+        "$worker_failures" "$artifact_errors"; then
+    accounting_failed=1
+fi
 echo "=== mutation summary: $killed killed, $survived survived, $errored errored, $pic_skipped PIC skipped ==="
 if [ "$survived" -ne 0 ]; then
     echo "SURVIVING MUTANTS (test suite gap -- a real fault went undetected):"
     for s in "${SURVIVORS[@]}"; do echo "  - $s"; done
 fi
-if [ "$survived" -ne 0 ] || [ "$errored" -ne 0 ]; then
+if [ "$survived" -ne 0 ] || [ "$errored" -ne 0 ] \
+        || [ "$accounting_failed" -ne 0 ]; then
     exit 1
 fi
 if [ "$pic_skipped" -ne 0 ] && [ "$MUTATION_ALLOW_SKIP" -ne 1 ]; then
