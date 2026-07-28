@@ -211,7 +211,10 @@ assert_attiny202_toolchain() {
 	venv="${YASIMAVR_VENV:-$(make -s print-YASIMAVR_VENV)}"
 	objdump="${OBJDUMP:-$(make -s print-OBJDUMP)}"
 	py="$venv/bin/python"
-	local missing=()
+	# need_dfp / need_yasimavr: which of the two FETCH-ON-DEMAND artifacts is
+	# absent, tracked separately from the flat `missing` list so the failure can
+	# name the one command that provisions each (see the hint block below).
+	local missing=() need_dfp=0 need_yasimavr=0
 	command -v avr-gcc >/dev/null 2>&1 \
 		|| missing+=("avr-gcc  (apt: gcc-avr avr-libc)")
 	command -v "$objdump" >/dev/null 2>&1 \
@@ -219,21 +222,39 @@ assert_attiny202_toolchain() {
 	command -v cppcheck >/dev/null 2>&1 \
 		|| missing+=("cppcheck  (apt: cppcheck; attiny202-analyze)")
 	[ -f "$xt_dfp/gcc/dev/attiny202/device-specs/specs-attiny202" ] \
-		|| missing+=("ATtiny_DFP at $xt_dfp  (scripts/fetch_attiny_dfp.sh; export XT_DFP=...)")
+		|| { missing+=("ATtiny_DFP at $xt_dfp  (scripts/fetch_attiny_dfp.sh; export XT_DFP=...)"); need_dfp=1; }
 	[ -f "$xt_dfp/include/avr/iotn202.h" ] \
-		|| missing+=("ATtiny_DFP header iotn202.h at $xt_dfp  (scripts/fetch_attiny_dfp.sh)")
+		|| { missing+=("ATtiny_DFP header iotn202.h at $xt_dfp  (scripts/fetch_attiny_dfp.sh)"); need_dfp=1; }
 	if [ -x "$py" ] && "$py" -c "import yasimavr" >/dev/null 2>&1; then
 		"$py" - >/dev/null 2>&1 <<-'PY' \
-			|| missing+=("patched yasimavr (WDT model) in $venv  (scripts/fetch_yasimavr.sh)")
+			|| { missing+=("patched yasimavr (WDT model) in $venv  (scripts/fetch_yasimavr.sh)"); need_yasimavr=1; }
 		from yasimavr.device_library import load_device
 		assert load_device('attiny202').find_peripheral('WDT') is not None
 		PY
 	else
 		missing+=("patched yasimavr venv at $venv  (scripts/fetch_yasimavr.sh; export YASIMAVR_VENV=...)")
+		need_yasimavr=1
 	fi
 	if [ "${#missing[@]}" -gt 0 ]; then
 		log "ATtiny202 toolchain incomplete -- the attiny202 targets would silently SKIP, not fail:"
 		for m in "${missing[@]}"; do log "  - $m"; done
+		# The DFP and the yasimavr venv are gitignored, fetch-on-demand artifacts
+		# under third_party/ (only the yasimavr PATCHES are tracked), so a fresh
+		# clone never has them and `make clean` never removes them. Without this
+		# note the list above reads as N independent breakages -- or as a
+		# regression from a recent commit -- when it is really one unprovisioned
+		# checkout. Name the exact command(s) that fix it.
+		if [ "$need_dfp" -eq 1 ] || [ "$need_yasimavr" -eq 1 ]; then
+			log ""
+			log "NOTE: those are gitignored, fetch-on-demand artifacts under third_party/."
+			log "      A fresh clone never has them (and 'make clean' never removes them),"
+			log "      so this is most likely an unprovisioned checkout, not a regression."
+			log "      Provision it with:"
+			[ "$need_dfp" -eq 1 ]      && log "        ./scripts/fetch_attiny_dfp.sh"
+			[ "$need_yasimavr" -eq 1 ] && log "        ./scripts/fetch_yasimavr.sh"
+			log "      Each pins its download by version + SHA-256, and is idempotent"
+			log "      (a re-run is a no-op once the artifact is present)."
+		fi
 		die "provide the above (see TOOLCHAIN.adoc), or --skip-attiny202 (no longer mirrors CI)."
 	fi
 	ok "ATtiny202 toolchain present (avr-gcc + binutils-avr + cppcheck + ATtiny_DFP + patched yasimavr)."
