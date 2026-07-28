@@ -516,6 +516,7 @@ FORCE:
         test-host test-sim test-sim-secondary \
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation test-mutation-sandbox \
         test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle \
+        test-attiny202-model-ffi \
         test-pic320-return-stack-oracle \
         test-attiny202-build test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build \
         test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization \
@@ -1928,6 +1929,71 @@ attiny202-soak: test-fuses attiny202
 	if [ "$$ran" = 0 ]; then echo "no ATtiny202 images built; nothing to soak."; fi; \
 	exit $$fail
 
+# Firmware/model LOCK-STEP co-simulation -- the AVR-XT counterpart of the
+# AVR-classic test_lockstep_cosim() (test/avr/test_sim.c) and the PIC
+# pic-test-lockstep. After every settled 1ms tick it reads the shell's `ctx_`
+# out of simulated SRAM and requires all three bytes to equal the golden model's
+# state after the same tick and the same input, so a shell defect surfaces as a
+# mismatched byte on the tick it occurs rather than as a wrong LED later (or not
+# at all). The other harness targets check observable behaviour; this one checks
+# that the behaviour comes from the intended internal trajectory.
+#
+# The "golden model" is the SHIPPING pure core: XT_LOCKSTEP_FFI_LIB compiles
+# test/avr/model_step_ffi.c against test/model_step.h and links the real
+# src/bypass_pure.c into a host shared object, which the Python driver calls
+# through ctypes. Nothing about the algorithm is re-implemented in Python -- the
+# same discipline that makes model_step.h the single source of truth for the
+# model checker, the symbolic test and the classic simavr oracle.
+#
+# The library is a HOST artifact (HOSTCC, never cross-compiled) and is built
+# with the same PURE_HOST_CFLAGS shim test/formal/test_model_check uses, so it
+# resolves the firmware's own thresholds out of src/bypass_config.h.
+XT_LOCKSTEP_DRIVER  = test/avr/test_lockstep_attiny202.py
+XT_LOCKSTEP_FFI_SRC = test/avr/model_step_ffi.c
+XT_LOCKSTEP_FFI_LIB = $(XT_BUILD_DIR)/libbypass_model.so
+# Ticks of pseudo-random stimulus per boot scenario, per variant (the driver
+# runs both released-at-boot and pressed-at-boot). 5000 matches the classic
+# lock-step's full-run SIM_LOCKSTEP_ITERS; the whole matrix -- 3 variants x 2
+# boot scenarios x 5000 ticks -- costs about 5 s, so there is no fast-mode
+# reduction to make here.
+XT_LOCKSTEP_ITERS ?= 5000
+
+$(XT_LOCKSTEP_FFI_LIB): $(XT_LOCKSTEP_FFI_SRC) test/model_step.h \
+		test/bypass_config_host.h src/bypass_config.h $(PURE_HOST_DEP) \
+		| $(XT_BUILD_DIR)
+	$(HOSTCC) $(HOST_CFLAGS) $(PURE_HOST_CFLAGS) -Itest -Isrc -fPIC -shared \
+		$(XT_LOCKSTEP_FFI_SRC) $(PURE_HOST_SRC) -o $@
+
+.PHONY: attiny202-lockstep
+attiny202-lockstep: test-fuses attiny202 $(XT_LOCKSTEP_FFI_LIB)
+	@selected="$(XT_SIM_VARIANT)"; \
+	if [ -n "$$selected" ]; then \
+		case "$$selected" in cd4053|mute|relay) ;; \
+			*) echo "FAIL: XT_SIM_VARIANT must be one supported variant"; exit 2 ;; esac; \
+		case " $(VARIANTS) " in *" $$selected "*) ;; \
+			*) echo "FAIL: XT_SIM_VARIANT=$$selected is not in VARIANTS=$(VARIANTS)"; exit 2 ;; esac; \
+	fi; \
+	if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
+		echo "ATtiny_DFP device files not found; skipping ATtiny202 lock-step."; $(SKIP); \
+	fi; \
+	$(yasimavr_skip_if_absent); \
+	vars="$$selected"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
+	fail=0; ran=0; \
+	for v in $$vars; do \
+		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
+		if [ ! -f "$$elf" ]; then \
+			echo "FAIL: expected ATtiny202 image missing: $$elf"; fail=1; continue; \
+		fi; \
+		echo "--- ATtiny202 lock-step: variant=$$v ticks=$(XT_LOCKSTEP_ITERS) ---"; \
+		ran=1; \
+		PYTHONPATH=test/avr ATTINY202_VARIANT=$$v $(XT_FUSE_ENV) \
+		ATTINY202_LOCKSTEP_ITERS=$(XT_LOCKSTEP_ITERS) \
+		BYPASS_MODEL_FFI=$(XT_LOCKSTEP_FFI_LIB) \
+		$(YASIMAVR_PY) $(XT_LOCKSTEP_DRIVER) "$$elf" || fail=1; \
+	done; \
+	if [ "$$ran" = 0 ]; then echo "FAIL: no ATtiny202 images were co-simulated"; fail=1; fi; \
+	exit $$fail
+
 # --- ATtiny202 fuses + UPDI programming --------------------------------------
 # Programmed over UPDI (single wire). The default uses avrdude's open-source
 # serialupdi (a plain USB-serial adapter + a series resistor -- the cheapest,
@@ -2154,7 +2220,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-attiny202-model-ffi test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -2166,7 +2232,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-attiny202-model-ffi test-avr-build-rebuild test-ci-local-routing test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -2586,6 +2652,21 @@ test-attiny202-delay-oracle:
 # corruption/recovery behavior remains covered by the built-image yasimavr job.
 test-attiny202-fault-oracle:
 	PYTHONPATH=test/avr python3 test/avr/test_attiny202_fault_oracle.py
+
+# Host regression for the golden-model ctypes bridge the ATtiny202 lock-step
+# driver reaches the shipping debounce core through. `attiny202-lockstep` needs
+# the DFP and the yasimavr venv and skips cleanly without them, so without this
+# the bridge would be uncovered on a host that lacks those tools. Needs only
+# HOSTCC, hence a hard gate here.
+#
+# Its checks are deliberately INDEPENDENT hard-coded expectations (threshold
+# values re-read from src/bypass_config.h, the >= press-threshold boundary,
+# saturation bounds, lock-out and round-trip behaviour) rather than another
+# comparison against the model -- lock-step mutates model and firmware together,
+# so only an independent oracle can break that symmetry.
+test-attiny202-model-ffi: $(XT_LOCKSTEP_FFI_LIB)
+	PYTHONPATH=test/avr BYPASS_MODEL_FFI=$(XT_LOCKSTEP_FFI_LIB) \
+		python3 test/avr/test_model_ffi.py
 
 # Build rule for the fuse checker. Fuse byte values are injected from the
 # Makefile variables (single source of truth) via -D. FORCE makes command-line
@@ -4382,6 +4463,8 @@ help:
 	@echo "                   zero skips, exact completion (standalone; XT_SIM_VARIANT=)"
 	@echo "  attiny202-soak   yasimavr soak: long run, assert no WDT reset + stays responsive"
 	@echo "                   (standalone; XT_SOAK_DURATION_MS=, XT_SIM_VARIANT=)"
+	@echo "  attiny202-lockstep  yasimavr ctx_-vs-model lock-step every settled tick"
+	@echo "                   (standalone; XT_LOCKSTEP_ITERS=, XT_SIM_VARIANT=)"
 	@echo "  attiny202-program  set fuses + flash one variant over UPDI (VARIANT=, XT_UPDI_PORT=)"
 	@echo "Test (each runs across ALL variants):"
 	@echo "  test            FAST full suite -- analyze, model, sim (all MCUs), coverage"
@@ -4396,6 +4479,7 @@ help:
 	@echo "  test-attiny202-output-oracle  host regression for PA2/PA3 sequence/pulse-presence checks"
 	@echo "  test-attiny202-delay-oracle  host regression for the coil-pulse width parser (--selftest)"
 	@echo "  test-attiny202-fault-oracle  host regression for exact fault-run accounting"
+	@echo "  test-attiny202-model-ffi  host gate for the golden-model ctypes bridge"
 	@echo "  test-pic320-return-stack-oracle  host Intel-HEX/control-flow oracle selftest"
 	@echo "  test-stack-bound  -fstack-usage static frame bound (limit: STACK_MAX_FRAME=$(STACK_MAX_FRAME) B)"
 	@echo "  test-stack-bound-regression  fail-closed stack-evidence checks"

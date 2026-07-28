@@ -61,6 +61,15 @@ test/
            test_attiny202_fault_oracle.py   host fault-run accounting regression
            test_fault_attiny202.py critical-SFR/state fault injection
            test_soak_attiny202.py  long-duration liveness soak
+           test_lockstep_attiny202.py  ctx_-vs-golden-model co-simulation
+                                                        (make attiny202-lockstep)
+           model_step_ffi.c/.py  ctypes bridge letting the Python drivers call
+                                 the SHIPPING pure core through model_step.h,
+                                 so no part of the algorithm is re-implemented
+                                 in Python
+           test_model_ffi.py    host gate for that bridge, with independent
+                                hard-coded algorithm expectations
+                                                        (make test-attiny202-model-ffi)
 
   pic/     PIC10F322-specific host and gpsim tests.
              fw_coverage/         real PIC source via host SFR mock + gcov

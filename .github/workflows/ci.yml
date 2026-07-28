@@ -429,6 +429,22 @@ jobs:
           p=$(grep -c "FAULT PASS" fault.log || true)
           [ "$p" -eq "$n" ] || { echo "::error::attiny202-fault: $p/$n variants PASSed (skip or fail)"; exit 1; }
 
+      # Internal-state gate: `ctx_` in simulated SRAM must equal the shipping
+      # pure core's state after every settled tick. The AVR-XT counterpart of
+      # the classic lock-step co-sim and pic-test-lockstep. One PASS per variant,
+      # and -- because each variant co-simulates BOTH boot scenarios -- two
+      # co-simulation summaries per variant, so a scenario that bailed out early
+      # cannot hide behind a green verdict.
+      - name: Lock-step gate (make attiny202-lockstep)
+        run: |
+          set -o pipefail
+          n=$(make -s print-VARIANTS | wc -w)
+          make attiny202-lockstep 2>&1 | tee lockstep.log
+          p=$(grep -c "LOCKSTEP PASS" lockstep.log || true)
+          [ "$p" -eq "$n" ] || { echo "::error::attiny202-lockstep: $p/$n variants PASSed (skip or fail)"; exit 1; }
+          r=$(grep -c "co-simulated" lockstep.log || true)
+          [ "$r" -eq "$((n * 2))" ] || { echo "::error::attiny202-lockstep: $r/$((n * 2)) boot scenarios co-simulated"; exit 1; }
+
       # Short soak smoke (5 min simulated ~= 2 s/variant) -- proves the soak
       # harness + liveness path work on every variant. Longer soaks remain an
       # optional local development run via XT_SOAK_DURATION_MS; they are not
