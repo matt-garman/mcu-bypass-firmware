@@ -97,6 +97,15 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- Release publication now requires both cryptographic signatures promised by the
+  trust model. CI verifies `SHA256SUMS.asc` and the exact remote annotated tag
+  object against the checked-in public key and pinned full fingerprint before
+  publishing; missing, empty, malformed, wrong-key, lightweight, unsigned,
+  same-target-replaced, and moved tags all fail closed. Signing instructions pin
+  the same key explicitly instead of relying on the operator's GPG default.
+  Producer and verifier version validation now matches the workflow's optional
+  hyphen-suffix trigger and rejects malformed or invalid Git tag names before a
+  production qualification run.
 - Mutation results now conserve an immutable 74-mutant inventory across six
   pinned categories: dispatched plus skipped must equal 74, and killed plus
   survived plus errored must equal dispatched. Inventory records, baseline Make

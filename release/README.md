@@ -64,7 +64,10 @@ validation suite — backs these binaries, through two mechanisms:
    from a dirty tree.
 
    The signed version tag points to a dedicated release-artifact commit. Tag CI
-   requires that commit to have exactly one parent, equal to the source commit in
+   fetches the exact remote annotated-tag object and verifies its OpenPGP
+   signature against [`release/signing-key.asc`](signing-key.asc) and the pinned
+   full fingerprint `6184219C6670945D7174F2B0149F042FCC3D3AEC`. It also requires
+   that commit to have exactly one parent, equal to the source commit in
    `QUALIFICATION`, and to change only `release/<version>/`. Changelog and status
    documentation must therefore be finalized and committed before starting the
    production qualification run.
@@ -88,6 +91,9 @@ validation suite — backs these binaries, through two mechanisms:
 
 `SHA256SUMS` is also signed (`SHA256SUMS.asc`), and the release tag is a signed
 git tag, so you can additionally verify the maintainer vouched for the bytes.
+Publication fails if either signature is absent, invalid, or made by another
+key; verification uses an isolated keyring containing only the pinned key rather
+than trusting whatever keys happen to be installed on the CI runner.
 
 ## Which image do I want?
 
@@ -123,6 +129,15 @@ usage, fuse bytes, and exact flashing command.
 ## Verify a download
 
 ```sh
+# import the checked-in key, then compare the full fingerprint with the value
+# printed above through an independently trusted copy of this documentation
+gpg --import release/signing-key.asc
+gpg --fingerprint 6184219C6670945D7174F2B0149F042FCC3D3AEC
+
+# from the repository root, enforce the same pinned-key policy as release CI
+scripts/verify-release-signature.sh detached \
+    release/vX.Y.Z/SHA256SUMS.asc release/vX.Y.Z/SHA256SUMS
+
 cd release/vX.Y.Z
 
 # (recommended) verify the maintainer's signature over the checksums

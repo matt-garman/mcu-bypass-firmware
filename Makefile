@@ -4417,7 +4417,7 @@ help:
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
 	@echo "  test-release-provenance  release source/compiler provenance checks"
 	@echo "  test-release-qualification  exact release evidence + 12-soak publication checks"
-	@echo "  test-release-history  bind tag artifact commit to its qualified source parent"
+	@echo "  test-release-history  bind release history + checksum/tag signatures"
 	@echo "  test-build-serialization  worktree Make/release lock regression"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
 	@echo "  test-target-lane-markers  PIC target aggregates must require each lane's PASS marker"

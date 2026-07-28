@@ -119,8 +119,10 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$VERSION" ] || die "no <version> given (e.g. v1.0.0). Try --help."
-[[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]] \
+[[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
 	|| die "version '$VERSION' is not vX.Y.Z (optionally -suffix)"
+git check-ref-format "refs/tags/$VERSION" >/dev/null 2>&1 \
+	|| die "version '$VERSION' is not a valid Git tag name"
 
 # The C/C++ soak loops use uint32_t millisecond counters. Validate before any
 # preconditions or builds so a bad value cannot wrap to a short/empty passing
@@ -164,6 +166,9 @@ declare -F release_tool_version_line >/dev/null \
 	|| die "release provenance checker did not define its tool-version function"
 declare -F release_output_path_is_safe >/dev/null \
 	|| die "release provenance checker did not define its output-path function"
+# shellcheck source=release-signing-policy.sh
+source "$REPO_ROOT/scripts/release-signing-policy.sh" \
+	|| die "release signing policy could not be loaded"
 
 mkv() { make -s print-"$1"; }      # echo one Makefile variable
 
@@ -290,6 +295,7 @@ req_cmd clang-tidy     "apt: clang-tidy (analyze)"
 req_cmd cppcheck       "apt: cppcheck (analyze + MISRA)"
 req_cmd cbmc           "apt: cbmc (formal proof in test-long)"
 req_cmd python3        "MISRA addon"
+req_cmd gpg            "release checksum/tag signing and signature regressions"
 # PIC toolchain (paths come from the Makefile defaults / PIC_CC, PIC_DFP).
 req_file "$PIC_CC"                                  "XC8 (PIC_CC=)"
 req_file "$PIC_DFP/pic/include/proc/pic10f322.h"    "PIC10-12Fxxx DFP (PIC_DFP=)"
@@ -863,7 +869,7 @@ ok "wrote MANIFEST.md"
 	printf 'release gate, and evidence/ for the retained logs. See the top-level\n'
 	printf '[release/README.md](../README.md) for the trust model and verification steps.\n\n'
 	printf 'Quick verify:\n```\ncd release/%s && sha256sum -c SHA256SUMS\n```\n' "$VERSION"
-	printf '\nIf SHA256SUMS.asc is present, verify the signature first:\n'
+	printf '\nVerify the required checksum signature first:\n'
 	printf '```\ngpg --verify SHA256SUMS.asc SHA256SUMS\n```\n'
 } > "$OUTPUT_DIR/README.md"
 
@@ -923,15 +929,13 @@ workflow can make two separate GitHub API operations atomic.
   less $OUTPUT_DIR/MANIFEST.md
 
   # 2. sign the checksums (detached, ASCII-armored) -- adds SHA256SUMS.asc
-  gpg --armor --detach-sign $OUTPUT_DIR/SHA256SUMS
-  #    (minisign alternative: minisign -Sm $OUTPUT_DIR/SHA256SUMS)
-
+  gpg --local-user $RELEASE_SIGNING_FINGERPRINT --armor --detach-sign $OUTPUT_DIR/SHA256SUMS
   # 3. commit the whole release dir (uses the generated message)
   git add $OUTPUT_DIR
   git commit -F $OUTPUT_DIR/commit_msg.txt
 
   # 4. create a SIGNED, annotated tag on that commit
-  git tag -s $VERSION -m "Firmware release $VERSION"
+  git tag -s -u $RELEASE_SIGNING_FINGERPRINT $VERSION -m "Firmware release $VERSION"
 
   # 5. push the commit and the tag
   git push
