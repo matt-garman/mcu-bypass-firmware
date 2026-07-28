@@ -27,20 +27,40 @@ RETFIE (0x0009) is legal but rejected because asynchronous entry is outside the
 regular direct-call model. Direct PCL writes and writes through classic INDF,
 whose FSR-selected destination could be PCL, are rejected for the same reason.
 
-The PIC10F320 architectural program counter is nine bits even though only 256
-physical words are implemented. Traversal states, direct targets, sequential and
-skip successors, and pushed/popped return addresses stay normalized to
-0x000..0x1ff. Only instruction fetch aliases through the low eight bits into
-physical words 0x00..0xff. `_word_at` remains strict about receiving a normalized
+The architectural program counter is nine bits on both supported parts (the
+device pack declares PCBITS=0x9 for each), but the implemented program memory
+differs: 256 words on the PIC10F320, 512 on the PIC10F322. Traversal states,
+direct targets, sequential and skip successors, and pushed/popped return
+addresses stay normalized to 0x000..0x1ff. Only instruction fetch aliases
+through the low bits into the implemented words, so on a 512-word part that
+alias is the identity. `_word_at` remains strict about receiving a normalized
 nine-bit architectural PC.
+
+`--program-words` selects the device geometry and is checked rather than
+trusted. UNDER-declaring is the dangerous direction: the fetch alias would fold
+a reachable high PC down onto a different instruction, which can report a LOWER
+depth than the truth. So an image carrying program data above the declared size
+is rejected outright. Over-declaring is already fail-closed, because the words
+above the real device read as reachable holes.
 
 Interrupts would push asynchronously, outside this control-flow traversal.
 Reset starts with GIE clear, so BCF INTCON,GIE and CLRF INTCON are safe; a
 reachable BSF INTCON,GIE or any other whole-register write that could set GIE is
 rejected.  Thus every possible hardware-stack push is represented explicitly.
 
+SCOPE -- this covers the PIC10F320 only, and the reason is not the geometry
+above. The PIC10F322's XC8 startup calls `clear_ram0`, which clears BSS through
+`CLRF INDF` in a loop (entered with FSR = base and W = last address + 1). INDF
+writes are rejected here because the FSR-selected destination could be PCL or
+INTCON, and establishing that it is neither would require interprocedural
+constant tracking of BOTH FSR and W -- the loop's exit compares FSR against the
+caller's W, and without that bound FSR wraps 0xFF -> 0x00 and reaches PCL. The
+PIC10F320 image contains no `CLRF INDF` at all (its BSS is small enough that XC8
+does not emit the loop), which is why it is analysable and the 322 is not.
+See TODO.md; the PIC10F322 is covered by test/check_stack_depth_pic.sh instead.
+
 Usage:
-    return_stack_oracle.py [--limit N] IMAGE.hex [IMAGE.hex ...]
+    return_stack_oracle.py [--limit N] [--program-words N] IMAGE.hex [IMAGE.hex ...]
     return_stack_oracle.py --selftest
 """
 
@@ -57,8 +77,11 @@ import tempfile
 DEFAULT_STACK_LIMIT = 8
 ARCH_PC_WORDS = 512
 ARCH_PC_MASK = ARCH_PC_WORDS - 1
-PHYSICAL_PROGRAM_WORDS = 256
-PHYSICAL_PROGRAM_MASK = PHYSICAL_PROGRAM_WORDS - 1
+# Physical program words is per-DEVICE and must be supplied by the caller; the
+# default is the smaller supported part. Both parts declare their size in the
+# device pack (ROMSIZE, in hex words: 0x100 for the PIC10F320, 0x200 for the
+# PIC10F322) alongside the PCBITS=0x9 that fixes ARCH_PC_WORDS above for both.
+DEFAULT_PROGRAM_WORDS = 256
 MAX_HEX_BYTES = 1024 * 1024
 MAX_CONTROL_STATES = 1_000_000
 
@@ -265,13 +288,43 @@ def parse_ihex(path):
     return _parse_ihex_bytes(_read_regular_file(path))
 
 
-def _word_at(memory, pc):
+def _validate_program_words(program_words):
+    """Reject a device geometry the fetch alias cannot represent."""
+    if isinstance(program_words, bool) or not isinstance(program_words, int):
+        raise ValueError("program words must be a positive integer")
+    if program_words <= 0 or program_words > ARCH_PC_WORDS:
+        raise ValueError("program words must be in 1..%d" % ARCH_PC_WORDS)
+    # The hardware alias is a bit mask, so a non-power-of-two size could not be
+    # modelled by one and is refused rather than approximated.
+    if program_words & (program_words - 1):
+        raise ValueError("program words must be a power of two")
+    return program_words
+
+
+def _check_program_extent(memory, program_words):
+    """Reject program data above the declared physical size.
+
+    This is what makes --program-words self-checking. Only the 9-bit PC space is
+    examined: real PIC HEX also carries CONFIG and user-ID words far above it,
+    which are not fetchable and are deliberately left alone.
+    """
+    first_unimplemented_byte = program_words * 2
+    arch_end_byte = ARCH_PC_WORDS * 2
+    for byte_address in sorted(memory):
+        if first_unimplemented_byte <= byte_address < arch_end_byte:
+            raise ImageError(
+                "program data at byte 0x%04X (word 0x%03X) lies above the declared "
+                "%d-word program memory; --program-words is wrong for this device"
+                % (byte_address, byte_address // 2, program_words))
+
+
+def _word_at(memory, pc, program_words):
     # All architectural successors are normalized before enqueue. A value outside
     # the 9-bit PC here is an oracle bug. Only fetch applies the physical alias.
     if not 0 <= pc < ARCH_PC_WORDS:
         raise ImageError("reachable PC 0x%03X is outside the 9-bit architectural range"
                          % pc)
-    physical_pc = pc & PHYSICAL_PROGRAM_MASK
+    physical_pc = pc & (program_words - 1)
     byte_address = physical_pc * 2
     low = memory.get(byte_address)
     high = memory.get(byte_address + 1)
@@ -377,10 +430,12 @@ def _mnemonic(word):
     return "instruction 0x%04X" % word
 
 
-def analyze(memory, limit=DEFAULT_STACK_LIMIT):
+def analyze(memory, limit=DEFAULT_STACK_LIMIT, program_words=DEFAULT_PROGRAM_WORDS):
     """Traverse reachable control flow while carrying the exact return stack."""
     if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
         raise ValueError("return-stack limit must be a positive integer")
+    _validate_program_words(program_words)
+    _check_program_extent(memory, program_words)
 
     initial_witness = ("reset@0x000",)
     queue = deque([(0, (), initial_witness)])
@@ -407,7 +462,7 @@ def analyze(memory, limit=DEFAULT_STACK_LIMIT):
     while queue:
         pc, stack, witness = queue.popleft()
         try:
-            word = _word_at(memory, pc)
+            word = _word_at(memory, pc, program_words)
         except ImageError as exc:
             fail(str(exc), witness + ("hole@0x%03X" % pc,))
         name = _mnemonic(word)
@@ -483,12 +538,12 @@ def _format_witness(witness):
     return " -> ".join(witness)
 
 
-def verify_images(paths, limit):
+def verify_images(paths, limit, program_words=DEFAULT_PROGRAM_WORDS):
     failures = 0
     for path in paths:
         try:
             memory = parse_ihex(path)
-            result = analyze(memory, limit)
+            result = analyze(memory, limit, program_words)
         except FlowError as exc:
             failures += 1
             print("FAIL: %s: %s" % (path, exc), file=sys.stderr)
@@ -502,8 +557,10 @@ def verify_images(paths, limit):
                   file=sys.stderr)
             print("  witness: input validation", file=sys.stderr)
         else:
-            print("PASS: %s: max return-stack depth %d/%d (%d reachable states)"
-                  % (path, result.max_depth, limit, result.state_count))
+            print("PASS: %s: max return-stack depth %d/%d "
+                  "(%d reachable states, %d-word program memory)"
+                  % (path, result.max_depth, limit, result.state_count,
+                     program_words))
             print("  witness: %s" % _format_witness(result.witness))
     return 1 if failures else 0
 
@@ -661,6 +718,71 @@ def selftest():
         expect_flow_reject("failing-depth-9", _chain(9), "exceeds architectural limit")
         expect_pass("configured-limit-2", _chain(2), 2, limit=2)
         expect_flow_reject("configured-limit-1", _chain(2), "architectural limit 1", limit=1)
+
+        # --- device geometry (--program-words) --------------------------------
+        # The fetch alias is the ONLY thing program_words changes, so each case
+        # below is a fixture whose verdict differs between the two supported
+        # geometries. A shared fixture that behaved identically would prove
+        # nothing about the parameter.
+        def geometry(name, words, program_words, limit=DEFAULT_STACK_LIMIT):
+            path = write(name + ".hex", _image_bytes(words))
+            return analyze(parse_ihex(path), limit, program_words)
+
+        def expect_geometry_pass(name, words, program_words, depth):
+            try:
+                result = geometry(name, words, program_words)
+            except OracleError as exc:
+                checker.check(False, "%s should pass at %d words, rejected: %s"
+                                     % (name, program_words, exc))
+                return
+            checker.check(result.max_depth == depth,
+                          "%s passes at %d-word geometry, depth %d (got %d)"
+                          % (name, program_words, depth, result.max_depth))
+
+        def expect_geometry_reject(name, words, program_words, fragment):
+            try:
+                geometry(name, words, program_words)
+            except OracleError as exc:
+                checker.check(fragment in str(exc),
+                              "%s at %d words rejects with %r (%s)"
+                              % (name, program_words, fragment, exc))
+            else:
+                checker.check(False, "%s should be rejected at %d words"
+                                     % (name, program_words))
+
+        # Code genuinely living above word 0x0FF: only the 512-word part can
+        # execute it, and the 256-word declaration must refuse the image rather
+        # than fold it down.
+        high_words = {0x000: _goto(0x100), 0x100: _call(0x102),
+                      0x101: _goto(0x101), 0x102: 0x0008}
+        expect_geometry_pass("high-code-512", high_words, 512, 1)
+        expect_geometry_reject("high-code-256", high_words, 256,
+                               "above the declared")
+
+        # The mirror image: data only below 0x100, but control flow reaching
+        # 0x100. At 256 words that aliases onto word 0x000 and runs; at 512 it is
+        # a genuine hole. Same bytes, opposite verdicts -- which is exactly why
+        # under-declaring is the dangerous direction.
+        alias_words = {0x000: _goto(0x100)}
+        expect_geometry_pass("alias-fold-256", alias_words, 256, 0)
+        expect_geometry_reject("alias-fold-512", alias_words, 512,
+                               "reachable instruction hole")
+
+        # Over-declaring is safe when the extra words are never reached.
+        expect_geometry_pass("unreached-headroom-512", _chain(2), 512, 2)
+
+        for bad, why in ((0, "zero"), (300, "non-power-of-two"),
+                         (1024, "beyond the 9-bit PC"), (-256, "negative")):
+            try:
+                _validate_program_words(bad)
+            except ValueError:
+                checker.check(True, "program-words %s (%s) rejected" % (bad, why))
+            else:
+                checker.check(False, "program-words %s (%s) should be rejected"
+                                     % (bad, why))
+        checker.check(_validate_program_words(256) == 256
+                      and _validate_program_words(512) == 512,
+                      "both supported geometries accepted (256, 512)")
 
         expect_flow_reject("self-recursion", {0: _call(0), 1: _goto(1)}, "recursive CALL")
         expect_flow_reject(
@@ -916,8 +1038,8 @@ def selftest():
         try:
             literal_memory = parse_ihex(literal_hex)
             literal_result = analyze(literal_memory)
-            literal_ok = (_word_at(literal_memory, 2) == 0x2004
-                          and _word_at(literal_memory, 4) == 0x34A5
+            literal_ok = (_word_at(literal_memory, 2, DEFAULT_PROGRAM_WORDS) == 0x2004
+                          and _word_at(literal_memory, 4, DEFAULT_PROGRAM_WORDS) == 0x34A5
                           and literal_result.max_depth == 1)
         except OracleError:
             literal_ok = False
@@ -1026,10 +1148,26 @@ def _positive_limit(text):
     return value
 
 
+def _program_words_arg(text):
+    try:
+        value = int(text, 10)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "program words must be a positive decimal integer") from exc
+    try:
+        return _validate_program_words(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--limit", type=_positive_limit, default=DEFAULT_STACK_LIMIT,
                         help="architectural return-stack limit (default: %(default)s)")
+    parser.add_argument("--program-words", type=_program_words_arg,
+                        default=DEFAULT_PROGRAM_WORDS,
+                        help="implemented program memory in words, from the device "
+                             "pack's ROMSIZE (default: %(default)s)")
     parser.add_argument("--selftest", action="store_true",
                         help="run deterministic dependency-free fixtures")
     parser.add_argument("images", metavar="IMAGE.hex", nargs="*")
@@ -1039,10 +1177,12 @@ def main(argv=None):
             parser.error("--selftest does not accept image paths")
         if args.limit != DEFAULT_STACK_LIMIT:
             parser.error("--selftest uses the architectural default limit")
+        if args.program_words != DEFAULT_PROGRAM_WORDS:
+            parser.error("--selftest covers every supported geometry itself")
         return selftest()
     if not args.images:
         parser.error("at least one IMAGE.hex is required")
-    return verify_images(args.images, args.limit)
+    return verify_images(args.images, args.limit, args.program_words)
 
 
 if __name__ == "__main__":

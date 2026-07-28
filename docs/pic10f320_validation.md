@@ -222,7 +222,7 @@ at that boundary: reserved/non-classic words, `RETFIE`, computed PCL writes,
 data-dependent writes through classic `INDF`, and any path that could enable GIE
 are rejected because they can create an unmodelled successor or asynchronous
 push. The command-line default is eight and the Makefile limit is immutably
-eight. `test-pic320-return-stack-oracle` runs 139 deterministic checks in
+eight. `test-pic320-return-stack-oracle` runs 149 deterministic checks in
 `make test` and `test-long`, including an exhaustive independent legality map,
 every destination-writer class, operand-boundary skip cases, wrap behavior,
 nested LIFO returns, and a literal precomputed HEX layout fixture.

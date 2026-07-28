@@ -1582,7 +1582,7 @@ the document it was when the requirement was set.
       A **second, independent witness** on the same bound landed in parallel and
       was kept: `test/pic10f320/return_stack_oracle.py` re-derives the depth from
       the **shipped HEX** rather than the emitted assembly, by exploring the exact
-      `(PC, return stack)` state space from reset. Its 139-check selftest
+      `(PC, return stack)` state space from reset. Its 149-check selftest
       (`test-pic320-return-stack-oracle`) is in `make test` and needs no
       toolchain; every `pic320` build runs it against the generated image inside
       the incomplete-image trap, so a rejected image is deleted rather than
@@ -3232,7 +3232,7 @@ range; instruction fetch alone aliases through the low eight bits into the 256
 implemented physical words. The file documents the exact classic PIC14 masks.
 
 `test-pic320-return-stack-oracle` is wired into `make test` and `test-long` with
-139 deterministic checks. Every `pic320` recipe runs the immutable oracle before
+149 deterministic checks. Every `pic320` recipe runs the immutable oracle before
 marking its output complete, so its existing trap removes an image on Python,
 oracle, or analysis failure. `pic320-test-return-stack` depends on fresh
 `pic320-variants`, derives the three explicit image paths from the immutable

@@ -53,19 +53,59 @@ doc, and test suite (2026-06-18) and re-verified as open on 2026-07-26. All
 close residual verification gaps that can be addressed in software.
 
 **Extend the final-HEX return-stack oracle to the PIC10F322.** Added 2026-07-27
-during the `pic10f320-merge-fixes` merge. `test/pic10f320/return_stack_oracle.py`
-is the stronger of the two hardware-return-stack witnesses — it measures the
-shipped HEX rather than XC8's emitted assembly, decodes every reachable word so
-it cannot miss a call, and needs no toolchain annotations — but it is PIC10F320
-only: `PHYSICAL_PROGRAM_WORDS` is a module constant of 256 and the PIC10F322 has
-512 words. The 322 is currently covered by `check_stack_depth_pic.sh` alone,
-which is the weaker instrument (it trusts XC8's `;;` annotation format and
-regex-matches the call opcodes). Parameterizing the physical program size and
-relocating the oracle to a shared path would give both chips two independent
-witnesses, as the 320 has now. Note the two gates deliberately differ in what
-they enforce — the assembly gate owns the policy budget (peak + reserve, depth
-read from the device pack), the oracle owns the architectural limit — so this is
-an extension of coverage, not a consolidation. Medium effort; no firmware change.
+during the `pic10f320-merge-fixes` merge; **re-scoped the same day after the
+device-geometry half was implemented and the real blocker was measured.**
+
+`test/pic10f320/return_stack_oracle.py` is the stronger of the two
+hardware-return-stack witnesses — it measures the shipped HEX rather than XC8's
+emitted assembly, decodes every reachable word so it cannot miss a call, and
+needs no toolchain annotations — but it covers the PIC10F320 only. The PIC10F322
+has `check_stack_depth_pic.sh` alone, which is the weaker instrument (it trusts
+XC8's `;;` annotation format and regex-matches the call opcodes).
+
+*Done already:* the geometry is no longer hardcoded. `--program-words` is read
+from the device pack's `ROMSIZE` (0x100 / 0x200 words; both parts declare
+`PCBITS=0x9`, so the 9-bit architectural PC was already correct for both), it is
+validated as a power of two within the PC space, and an image carrying program
+data above the declared size is rejected outright — under-declaring is the
+dangerous direction, because the fetch alias would fold a high PC onto a
+different instruction and could report a *lower* depth than the truth. Ten
+selftest checks cover both geometries.
+
+*What actually blocks the 322,* which the original framing of this item missed:
+its XC8 startup calls `clear_ram0`, clearing BSS through `CLRF INDF` in a loop
+entered with FSR = base and W = last address + 1:
+
+```
+clear_ram0:  clrwdt
+clrloop0:    clrf  indf        ; <-- rejected: FSR could select PCL or INTCON
+             incf  fsr,f
+             xorwf fsr,w       ; exit compares FSR against the CALLER's W
+             btfsc status,z
+             retlw 0
+             xorwf fsr,w
+             goto  clrloop0
+```
+
+The oracle rejects INDF writes because the FSR-selected destination could be
+`PCL` (unmodelled computed control flow) or `INTCON` (asynchronous push). Making
+this provably safe needs interprocedural constant tracking of **both** FSR and W:
+FSR tracking alone is not enough, because the loop's exit depends on the caller's
+W, and without that bound FSR wraps `0xFF -> 0x00` and reaches `PCL` (0x02), so
+the rejection stands. The PIC10F320 image contains no `CLRF INDF` at all — its
+BSS is small enough that XC8 does not emit the loop — which is exactly why the
+asymmetry exists and why it is a toolchain/firmware property rather than
+something the test side can adjust.
+
+So this is a **dataflow-analysis project, not a parameterization task**: add an
+abstract FSR/W domain to the traversal state and prove the clear loop's range
+excludes the SFRs. Worth doing only if the second witness on the 322 is judged
+worth that machinery — and it must be *sound*, since an approximate version
+would be worse than the honest gap. High effort. No firmware change either way.
+Note the two gates deliberately differ in what they enforce — the assembly gate
+owns the policy budget (peak + reserve, depth read from the device pack), the
+oracle owns the architectural limit — so this remains an extension of coverage,
+not a consolidation.
 
 **Formal verification of output drivers.** The output drivers (relay, mute,
 CD4053) contain blocking delays and multi-step pin sequences. They are tested by

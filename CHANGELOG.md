@@ -76,6 +76,16 @@ file is the human-readable summary of *what changed*.
   documentation, the release documentation and the generated release manifest.
 
 ### Changed
+- The final-HEX return-stack oracle no longer hardcodes the device geometry.
+  `--program-words` supplies the implemented program memory from the device
+  pack's `ROMSIZE`, is validated as a power of two inside the 9-bit PC space
+  (both supported parts declare `PCBITS=0x9`), and an image carrying program
+  data above the declared size is now **rejected outright**. Under-declaring was
+  the dangerous direction — the fetch alias would fold a high PC onto a
+  different instruction and could report a *lower* depth than the truth — and it
+  previously surfaced only as a confusing downstream error about a computed
+  `PCL` write at an aliased address. Ten selftest checks pin the alias in both
+  directions; the regression is now 149 checks.
 - The strict-tools inventory now covers optional-tool recipes for **both** PIC
   chips, not just the two host analyzers it started with.
 - MISRA documentation is now a per-target statement rather than a comparison
