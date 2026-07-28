@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# Drive the PIC10F322 footswitch in gpsim and assert PORTA/LATA at five
-# checkpoints (four settled + one mid-debounce tick-cadence check). The companion
-# script test/pic/footswitch_toggle.stc contains the gpsim stimulus + register
-# snapshots; this wrapper runs it against a built HEX, parses the snapshots, and
-# turns them into PASS/FAIL.
+# Drive a PIC10F32x footswitch in gpsim and assert PORTA/LATA at five checkpoints
+# (four settled + one mid-debounce tick-cadence check). The default companion
+# script is test/pic/footswitch_toggle.stc; PIC_GPSIM_STC selects a chip-specific
+# stimulus when instruction cadence differs. This wrapper runs it against a
+# built HEX, parses the snapshots, and turns them into PASS/FAIL.
 #
 # Usage:
 #   run_gpsim_test.sh <hexfile> [expected_engaged_lata_hex] [expected_bypass_lata_hex]
@@ -35,7 +35,7 @@ EXP_BYPASS_LATA="${3:-0x0}"
 GPSIM="${GPSIM:-gpsim}"
 GPSIM_TIMEOUT_SECONDS="${GPSIM_TIMEOUT_SECONDS:-60}"
 PROC="${PIC_GPSIM_PROC:-p10f322}"
-STC="$(dirname "$0")/footswitch_toggle.stc"
+STC="${PIC_GPSIM_STC:-$(dirname "$0")/footswitch_toggle.stc}"
 
 if ! [[ "$GPSIM_TIMEOUT_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] \
 		|| ! [[ "$GPSIM_TIMEOUT_SECONDS" =~ [1-9] ]]; then
@@ -44,6 +44,10 @@ if ! [[ "$GPSIM_TIMEOUT_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] \
 fi
 if ! command -v "$GPSIM" >/dev/null 2>&1; then
     echo "gpsim not installed; skipping gpsim register-level test for $HEX"
+    if [ -n "${STRICT_TOOLS:-}" ]; then
+        echo "::error::STRICT_TOOLS=1: gpsim is required and must not be skipped"
+        exit 1
+    fi
     exit 0
 fi
 if [ ! -f "$HEX" ]; then

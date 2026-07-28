@@ -53,6 +53,10 @@ cp "$ROOT/Makefile" "$repo/Makefile"
 : > "$repo/test/soak_timing_config.h"
 : > "$repo/test/pic/test_soak_pic.cc"
 : > "$repo/test/pic10f320/gpsim/test_soak_pic.cc"
+# $(PIC_PIN_LOOKUP_HDR) -- the exact-pin lookup helper is a prerequisite of BOTH
+# chips' soak rules, so the scratch repo needs it or Make stops before reaching
+# the property under test.
+: > "$repo/test/pic/find_pin_exact.h"
 
 # Records the full argv, then writes the -o target so Make sees a fresh artifact.
 cat > "$tools/cxx" <<'EOF'

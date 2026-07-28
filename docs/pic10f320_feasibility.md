@@ -11,13 +11,14 @@ unchanged and is why the PIC10F322 (512 words) is the PIC target for the
 reference architecture.
 
 **What this document does *not* prove:** that the PIC10F320 is unbuildable. It
-is a **supported, release-gated target**, implemented differently: a single
-self-contained source file with the debounce logic inlined into `main()`,
+is an **integrated, release-gated candidate**, implemented differently: a
+single self-contained source file with the debounce logic inlined into `main()`,
 which is exactly the architecture this document concluded was necessary if the
 part were ever to be supported (see §3b — "a preprocessor macro would force
-textual inlining the compiler cannot skip"). That implementation trades the
-compile-the-verified-core property for an equivalence-and-lockstep argument
-against the same core. See `pic10f320_merge_plan.md` for the integration and
+textual inlining the compiler cannot skip"). Its first unified release remains
+pending. That implementation trades the compile-the-verified-core property for
+an equivalence-and-lockstep argument against the same core. See
+`pic10f320_merge_plan.md` for the integration and
 `pic10f320_special_case.md` for the assurance caveat.
 
 So: the 320 is the constrained exception, not evidence that the reference
@@ -243,8 +244,9 @@ The decision as taken in 2026-06-26, and what became of each part of it:
   abstractions that are the project's reason for being. **Still true.** What
   changed is the conclusion drawn from it: rather than dropping the part, a
   separate inlined implementation was written for it — the option §3b identified
-  and priced. It is now a supported, release-gated target under the caveat
-  described in `pic10f320_special_case.md`.
+  and priced. It is now an integrated, release-gated candidate under the caveat
+  described in `pic10f320_special_case.md`; first-release qualification remains
+  pending.
 - **PIC10F322: the supported PIC target for the reference architecture** — all
   three variants fit with comfortable headroom. **Still true.**
 - **Keep `debounce_context_t`, the enum types, and the pure

@@ -38,6 +38,10 @@ if ! [[ "$GPSIM_TIMEOUT_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] \
 fi
 if ! command -v "$GPSIM" >/dev/null 2>&1; then
     echo "gpsim not installed; skipping power-on-pressed gpsim test for $HEX"
+    if [ -n "${STRICT_TOOLS:-}" ]; then
+        echo "::error::STRICT_TOOLS=1: gpsim is required and must not be skipped"
+        exit 1
+    fi
     exit 0
 fi
 if [ ! -f "$HEX" ]; then

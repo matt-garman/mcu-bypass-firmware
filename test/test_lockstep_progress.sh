@@ -5,7 +5,6 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-lockstep-progress.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 fake="$work/include"
-bin="$work/test_lockstep_progress"
 checks=0
 CXX=${PIC_SOAK_CXX:-${CXX:-c++}}
 
@@ -55,17 +54,21 @@ public:
 
 class IOPIN {};
 
+inline IOPIN *fake_pin(unsigned index) {
+    static IOPIN pins[4];
+    return index >= 1u && index <= 3u ? &pins[index] : nullptr;
+}
+
 class Module {
 public:
-    int get_pin_count() const { return 1; }
-    std::string &get_pin_name(unsigned) {
-        static std::string name("ra3");
-        return name;
+    int get_pin_count() const { return 3; }
+    std::string &get_pin_name(unsigned index) {
+        static std::string names[] = { "", "ra30", "xra3", "ra3" };
+        static std::string hidden("ra3_missing");
+        if (index == 3u && std::getenv("FAKE_GPSIM_HIDE_RA3") != nullptr) return hidden;
+        return names[index <= 3u ? index : 0u];
     }
-    IOPIN *get_pin(unsigned) {
-        static IOPIN pin;
-        return &pin;
-    }
+    IOPIN *get_pin(unsigned index) { return fake_pin(index); }
 };
 
 class Processor {
@@ -154,7 +157,13 @@ public:
 class Stimulus_Node {
 public:
     explicit Stimulus_Node(const char *) {}
-    template <typename T> void attach_stimulus(T *) {}
+    void attach_stimulus(source_stimulus *) {}
+    void attach_stimulus(IOPIN *pin) {
+        if (pin != fake_pin(3u)) {
+            std::fprintf(stderr, "FATAL: footswitch stimulus was not attached to exact ra3\n");
+            std::exit(1);
+        }
+    }
     void update() {}
 };
 
@@ -219,36 +228,68 @@ static step_result_t step(state_t state, int) {
 #endif
 EOF
 
-"$CXX" -std=c++17 -O0 -I"$fake" -DCTX_ADDR=0x20 -DF_CPU_HZ=2000000UL \
-	-DLOCKSTEP_ITERS=8 "$ROOT/test/pic/test_lockstep_pic.cc" -o "$bin"
-
 run_wedge() {
-	local stage=$1 output status fatal_count
+	local label=$1 processor=$2 bin=$3 stage=$4 output status fatal_count
 	set +e
 	output=$(FAKE_GPSIM_WEDGE_AT="$stage" timeout 5 "$bin" 2>&1)
 	status=$?
 	set -e
 	[ "$status" -eq 1 ] \
-		|| { printf 'FAIL: %s wedge exited %d instead of 1: %s\n' "$stage" "$status" "$output" >&2; exit 1; }
+		|| { printf 'FAIL: %s %s wedge exited %d instead of 1: %s\n' \
+			"$label" "$stage" "$status" "$output" >&2; exit 1; }
+	[[ "$output" == *"proc=$processor "* ]] \
+		|| { printf 'FAIL: %s %s wedge did not run the %s adapter\n' \
+			"$label" "$stage" "$processor" >&2; exit 1; }
 	[[ "$output" == *"FATAL: core not advancing"* ]] \
-		|| { printf 'FAIL: %s wedge omitted the fatal progress error\n' "$stage" >&2; exit 1; }
+		|| { printf 'FAIL: %s %s wedge omitted the fatal progress error\n' \
+			"$label" "$stage" >&2; exit 1; }
 	fatal_count=$(grep -c 'FATAL: core not advancing' <<<"$output")
 	[ "$fatal_count" -eq 1 ] \
-		|| { printf 'FAIL: %s wedge reported %d fatal errors\n' "$stage" "$fatal_count" >&2; exit 1; }
+		|| { printf 'FAIL: %s %s wedge reported %d fatal errors\n' \
+			"$label" "$stage" "$fatal_count" >&2; exit 1; }
 	[[ "$output" != *"LOCK-STEP PASS"* && "$output" != *"LOCK-STEP FAIL"* ]] \
-		|| { printf 'FAIL: %s wedge reached a lock-step summary\n' "$stage" >&2; exit 1; }
+		|| { printf 'FAIL: %s %s wedge reached a lock-step summary\n' \
+			"$label" "$stage" >&2; exit 1; }
 	if [ "$stage" = lockstep ]; then
 		[[ "$output" == *"loop CLRWDT identified"* ]] \
-			|| { printf 'FAIL: lockstep wedge did not reach the completion phase\n' >&2; exit 1; }
+			|| { printf 'FAIL: %s lockstep wedge did not reach the completion phase\n' \
+				"$label" >&2; exit 1; }
 	else
 		[[ "$output" != *"loop CLRWDT identified"* ]] \
-			|| { printf 'FAIL: %s wedge continued after the failed run\n' "$stage" >&2; exit 1; }
+			|| { printf 'FAIL: %s %s wedge continued after the failed run\n' \
+				"$label" "$stage" >&2; exit 1; }
 	fi
 	checks=$((checks + 1))
 }
 
-run_wedge settle
-run_wedge calibration
-run_wedge lockstep
+run_missing_pin() {
+	local label=$1 processor=$2 bin=$3 output status
+	set +e
+	output=$(FAKE_GPSIM_HIDE_RA3=1 timeout 5 "$bin" 2>&1)
+	status=$?
+	set -e
+	[ "$status" -eq 1 ] \
+		|| { printf 'FAIL: %s missing-ra3 probe exited %d instead of 1: %s\n' \
+			"$label" "$status" "$output" >&2; exit 1; }
+	[[ "$output" == *"proc=$processor "* && "$output" == *"FATAL: pin ra3 not found"* ]] \
+		|| { printf 'FAIL: %s did not reject decoys when exact ra3 was absent: %s\n' \
+			"$label" "$output" >&2; exit 1; }
+	checks=$((checks + 1))
+}
+
+run_adapter() {
+	local label=$1 source=$2 processor=$3
+	local bin="$work/test_lockstep_progress_$processor"
+	"$CXX" -std=c++17 -O0 -I"$fake" -I"$ROOT/test" \
+		-DCTX_ADDR=0x20 -DF_CPU_HZ=2000000UL \
+		-DLOCKSTEP_ITERS=8 "$ROOT/$source" -o "$bin"
+	run_missing_pin "$label" "$processor" "$bin"
+	run_wedge "$label" "$processor" "$bin" settle
+	run_wedge "$label" "$processor" "$bin" calibration
+	run_wedge "$label" "$processor" "$bin" lockstep
+}
+
+run_adapter PIC10F322 test/pic/test_lockstep_pic.cc p10f322
+run_adapter PIC10F320 test/pic10f320/gpsim/test_lockstep_pic.cc p10f320
 
 printf 'lock-step progress failure validation: %d checks, 0 failures\n' "$checks"

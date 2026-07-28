@@ -1,8 +1,38 @@
 #!/usr/bin/env bash
 
-# Recheck the source identity captured before a long release run. This file is
+# Fail-closed provenance helpers for the release orchestrator. This file is
 # sourced at startup so the running script retains the original check logic even
 # if the worktree is edited while validation is in progress.
+release_tool_version_line() {
+	if [ "$#" -ne 2 ]; then
+		printf 'FATAL: release_tool_version_line requires a label and executable\n' >&2
+		return 2
+	fi
+	local label=$1
+	local tool=$2
+	local output status first_line
+
+	if output=$("$tool" --version 2>&1); then
+		status=0
+	else
+		status=$?
+	fi
+	if [ "$status" -ne 0 ]; then
+		printf 'FATAL: cannot identify %s: %s --version exited %d\n' \
+			"$label" "$tool" "$status" >&2
+		[ -z "$output" ] || printf '%s\n' "$output" >&2
+		return 1
+	fi
+
+	first_line=${output%%$'\n'*}
+	if [ -z "${first_line//[[:space:]]/}" ]; then
+		printf 'FATAL: cannot identify %s: %s --version returned no version line\n' \
+			"$label" "$tool" >&2
+		return 1
+	fi
+	printf '%s\n' "$first_line"
+}
+
 release_source_is_unchanged() {
 	local expected_sha=$1
 	local permit_dirty=$2

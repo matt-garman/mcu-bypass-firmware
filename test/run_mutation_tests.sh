@@ -169,17 +169,68 @@ copy_tree() {
         cp -a "$PROJ_DIR/test/pic10f320" "$dst/test/"
     fi
     for sub in "$PROJ_DIR"/test/*/; do
-        local name; name="$(basename "$sub")"
-        # .c covers most substrates; .cc is the libgpsim PIC soak driver
-        # (test/pic/test_soak_pic.cc), which the WDT-liveness mutant compiles.
-        if compgen -G "$sub"*.c >/dev/null 2>&1; then
-            mkdir -p "$dst/test/$name"; cp "$sub"*.c "$dst/test/$name/"
-        fi
-        if compgen -G "$sub"*.cc >/dev/null 2>&1; then
-            mkdir -p "$dst/test/$name"; cp "$sub"*.cc "$dst/test/$name/"
-        fi
+        local name ext; name="$(basename "$sub")"
+        # C/C++ sources cover the compiled harnesses. Shell wrappers and .stc
+        # stimuli are equally load-bearing now that PIC10F320 reuses the shared
+        # test/pic gpsim entry points; omitting them makes a mutant die from a
+        # missing harness and falsely score as killed.
+        for ext in c cc sh stc; do
+            if compgen -G "$sub"*."$ext" >/dev/null 2>&1; then
+                mkdir -p "$dst/test/$name"
+                cp -a "$sub"*."$ext" "$dst/test/$name/"
+            fi
+        done
     done
 }
+
+validate_pic320_sandbox() {
+    local root="$1" required ok=1
+    for required in \
+        test/pic/footswitch_toggle.stc \
+        test/pic/power_on_pressed.stc \
+        test/pic/test_soak_pic.cc; do
+        if [ ! -f "$root/$required" ]; then
+            echo "ERROR: PIC10F320 mutation sandbox is missing $required" >&2
+            ok=0
+        fi
+    done
+    for required in \
+        test/pic/run_gpsim_test.sh \
+        test/pic/run_gpsim_power_on_pressed.sh; do
+        if [ ! -x "$root/$required" ]; then
+            echo "ERROR: PIC10F320 mutation sandbox helper is missing or not executable: $required" >&2
+            ok=0
+        fi
+    done
+    [ "$ok" -eq 1 ]
+}
+
+if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
+    SELFTEST_DIR="$(mktemp -d)"
+    if ! copy_tree "$SELFTEST_DIR" || ! validate_pic320_sandbox "$SELFTEST_DIR"; then
+        rm -rf "$SELFTEST_DIR"
+        exit 1
+    fi
+
+    rm -f "$SELFTEST_DIR/test/pic/run_gpsim_test.sh"
+    if validate_pic320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
+        echo "ERROR: mutation sandbox validator accepted a missing gpsim wrapper" >&2
+        rm -rf "$SELFTEST_DIR"
+        exit 1
+    fi
+
+    copy_tree "$SELFTEST_DIR"
+    chmod -x "$SELFTEST_DIR/test/pic/run_gpsim_power_on_pressed.sh"
+    if validate_pic320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
+        echo "ERROR: mutation sandbox validator accepted a non-executable gpsim wrapper" >&2
+        rm -rf "$SELFTEST_DIR"
+        exit 1
+    fi
+
+    rm -rf "$SELFTEST_DIR"
+    echo "mutation sandbox copy validation: 3 checks, 0 failures"
+    exit 0
+fi
 
 # Run one PIC gpsim register-level check against a freshly built (mutated) HEX.
 # We build + drive the wrapper DIRECTLY rather than via `make pic-test-gpsim`,
@@ -381,6 +432,10 @@ job_specs=()
 echo "=== mutation testing: baseline sanity check ==="
 BASE_DIR="$(mktemp -d)"
 copy_tree "$BASE_DIR"
+if ! validate_pic320_sandbox "$BASE_DIR"; then
+    rm -rf "$BASE_DIR"
+    exit 2
+fi
 BASE_TARGETS=$(printf '%s\n' "${MUTATIONS[@]}" | cut -f3 | sort -u)
 for t in $BASE_TARGETS; do
     if make -C "$BASE_DIR" "$t" >/dev/null 2>&1; then
@@ -460,25 +515,44 @@ rm -rf "$PIC_BASE"
 
 # --- PIC10F320 toolchain probe -----------------------------------------------
 # Same discipline as the PIC10F322 probe above: the tool-dependent PIC10F320
-# mutants are enabled only when the tools exist AND the UNMUTATED tree genuinely
-# passes. pic320-test-{gpsim,target,soak} all exit 0 when their tools are absent
-# (the $(SKIP) contract), so without this an unguarded mutant is a false
-# "survivor" on any host without XC8/gpsim/libgpsim.
+# mutants are enabled only when the tools exist AND every DISTINCT kill command
+# passes on the unmutated sandbox. Testing only pic320-test-target-variants does
+# not baseline pic320-test-gpsim or pic320-test-soak; worse, a missing wrapper in
+# either mutant sandbox then produces a nonzero status that is falsely scored as
+# a kill. pic320-test-{gpsim,target,soak} can all skip with status 0, so the outer
+# tool checks and exact per-command baselines are both required.
 PIC320_TOOL_OK=0
 echo
 echo "=== PIC10F320 toolchain probe (gates its tool-dependent mutants) ==="
 P320_BASE="$(mktemp -d)"
 copy_tree "$P320_BASE"
+if ! validate_pic320_sandbox "$P320_BASE"; then
+    rm -rf "$P320_BASE"
+    exit 2
+fi
+echo "PIC10F320 mutation sandbox helpers: PASS"
+
 if make -C "$P320_BASE" pic320-variants >/dev/null 2>&1 \
    && command -v "$GPSIM" >/dev/null 2>&1 \
    && command -v c++ >/dev/null 2>&1 \
    && [ -f "$PIC_SOAK_GPSIM_INC/sim_context.h" ] \
    && pkg-config --exists glib-2.0 2>/dev/null; then
-    if make -C "$P320_BASE" pic320-test-target-variants >/dev/null 2>&1; then
+    P320_BASELINES_OK=1
+    while IFS= read -r target; do
+        # Intentional word splitting: each field contains optional VAR=value
+        # assignments followed by one Make target, never shell metacharacters.
+        if make -C "$P320_BASE" GPSIM="$GPSIM" $target >/dev/null 2>&1; then
+            echo "baseline $target: PASS"
+        else
+            echo "baseline $target: FAIL"
+            P320_BASELINES_OK=0
+        fi
+    done < <(printf '%s\n' "${PIC320_TOOL_MUTATIONS[@]}" | cut -f3 | sort -u)
+    if [ "$P320_BASELINES_OK" -eq 1 ]; then
         PIC320_TOOL_OK=1
-        echo "XC8 + gpsim + libgpsim present, baseline PASS -> PIC10F320 tool mutants ENABLED"
+        echo "XC8 + gpsim + libgpsim present, all baselines PASS -> PIC10F320 tool mutants ENABLED"
     else
-        echo "PIC10F320 target baseline did not pass cleanly -> its tool mutants SKIPPED"
+        echo "a PIC10F320 kill-target baseline failed -> its tool mutants SKIPPED"
     fi
 else
     echo "XC8/gpsim/libgpsim absent -> PIC10F320 tool mutants SKIPPED"

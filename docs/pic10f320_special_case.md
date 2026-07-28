@@ -1,10 +1,10 @@
 # PIC10F320 — the constrained target
 
-**Status:** supported, release-gated, and architecturally different from every
-other target in this repository. This document is the single authoritative
-statement of that difference. Other documents link here rather than restating
-it; if you find a second explanation of the assurance caveat anywhere in this
-project, that copy is the bug.
+**Status:** integrated and wired into fail-closed release gates, but its first
+unified release is pending fresh full-tool qualification. It is architecturally
+different from every other target in this repository. This document is the
+single authoritative statement of that difference; current execution evidence
+lives in `docs/pic10f320_validation.md`.
 
 **Read this if** you are choosing an MCU, reviewing the assurance argument, or
 wondering why one firmware file looks unlike the rest of `src/`.
@@ -77,8 +77,9 @@ release gates and both run in CI on every push.
 **What this does not do.** It does not make the architecture identical. A
 behavioural equivalence argument, however thorough, is a different kind of
 statement from "the verified code is the shipped code". The honest summary is:
-*the PIC10F320 is validated to the same standard by a different and more
-elaborate route.*
+*the PIC10F320's qualification design targets the same standard by a different
+and more elaborate route.* Historical runs exercised that route; the fresh
+full-tool run required for its first unified release is still pending.
 
 ## 4. One recorded omission: the output-latch match
 
@@ -187,9 +188,10 @@ pin-compatible with the PIC10F320 in this design, has double the flash, and
 carries the full defensive layer.
 
 **Use the PIC10F320 when it is a hard requirement** — cost, existing inventory,
-or an established board. It is a supported, release-gated target held to the same
-robustness goal by the different route described above, and its images ship in
-every release with the same reproducibility guarantee as any other.
+or an established board. It is an integrated, release-gated candidate held to
+the same robustness goal by the different route described above. Its images are
+planned to join prebuilt releases only after the pending qualification and first
+unified release succeed.
 
 ## 7. Where the rest of it lives
 

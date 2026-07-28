@@ -52,6 +52,21 @@ These items were identified during a full meta-review of the firmware, design
 doc, and test suite (2026-06-18) and re-verified as open on 2026-07-26. All
 close residual verification gaps that can be addressed in software.
 
+**Extend the final-HEX return-stack oracle to the PIC10F322.** Added 2026-07-27
+during the `pic10f320-merge-fixes` merge. `test/pic10f320/return_stack_oracle.py`
+is the stronger of the two hardware-return-stack witnesses — it measures the
+shipped HEX rather than XC8's emitted assembly, decodes every reachable word so
+it cannot miss a call, and needs no toolchain annotations — but it is PIC10F320
+only: `PHYSICAL_PROGRAM_WORDS` is a module constant of 256 and the PIC10F322 has
+512 words. The 322 is currently covered by `check_stack_depth_pic.sh` alone,
+which is the weaker instrument (it trusts XC8's `;;` annotation format and
+regex-matches the call opcodes). Parameterizing the physical program size and
+relocating the oracle to a shared path would give both chips two independent
+witnesses, as the 320 has now. Note the two gates deliberately differ in what
+they enforce — the assembly gate owns the policy budget (peak + reserve, depth
+read from the device pack), the oracle owns the architectural limit — so this is
+an extension of coverage, not a consolidation. Medium effort; no firmware change.
+
 **Formal verification of output drivers.** The output drivers (relay, mute,
 CD4053) contain blocking delays and multi-step pin sequences. They are tested by
 scenario-based simulation tests but are not formally verified — `test_cbmc.c`

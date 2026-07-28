@@ -9,14 +9,16 @@ begins once these designs are validated on real hardware.** Everything shipped
 so far is validated by simulation, formal proof and static analysis — thorough,
 and not the same claim as "it has run on the part". Until that changes, new
 work lands as `0.9.x` however large it is; the merge of a whole additional MCU
-target as `0.9.6` rather than `0.10.0` is that rule applied, not an oversight.
+target planned for `0.9.6` rather than `0.10.0` is that rule applied, not an
+oversight.
 
 Per-release provenance (source commit, pinned toolchain, image hashes, flash
 usage, and validation evidence) lives in `release/<version>/MANIFEST.md`; this
 file is the human-readable summary of *what changed*.
 
 > **On the PIC10F320's version history.** The PIC10F320 target was developed in a
-> separate repository and merged into this one (see `0.9.6` below). That
+> separate repository and merged into this one (see **Unreleased** below, planned
+> for `0.9.6`). That
 > project ran its own `v0.9.0`–`v0.9.5` series with **different content and
 > different dates** from the identically numbered releases in this file — its
 > `0.9.5` is dated 2026-07-10, this project's 2026-07-18. Those entries are
@@ -27,10 +29,10 @@ file is the human-readable summary of *what changed*.
 > unified release onward there is one timeline, with PIC10F320 changes recorded
 > as a sub-lane inside each entry.
 
-## [0.9.6] - 2026-07-27
+## [Unreleased]
 
 ### Added
-- **PIC10F320 as a release-supported target** — the fifth part, and the first
+- **PIC10F320 integrated as the planned fifth release target** — the first
   whose firmware does not compile the verified core but hand-inlines it, because
   256 words of flash cannot hold the shared-core architecture. Merged from a
   separate repository with its full history preserved. See
@@ -44,13 +46,31 @@ file is the human-readable summary of *what changed*.
   timing, CONFIG-word verification, cppcheck + MISRA across all three variants,
   and a libgpsim soak. The host subset needs only a C compiler and gcov, so it
   runs inside `make test` on every push.
+- A dependency-free PIC10F320 final-HEX return-stack oracle now strictly parses
+  Intel HEX and explores reachable classic mid-range PIC14 control flow with the
+  exact abstract hardware stack. Its host fixtures are in `make test`; the
+  fail-closed base `pic320` recipe checks every generated image before marking it
+  complete, while `pic320-test-return-stack` rebuilds and rechecks the supported
+  three-image matrix against the architectural eight-entry limit as part of
+  `pic320-test`.
+  Its state and return stack preserve the 9-bit architectural PC; instruction
+  fetch alone aliases through the low eight bits to 256 physical words.
+- The shared fake-tool PIC build regression now has a PIC10F320-only
+  rebuild-trigger lane. Exact output-specific compiler logs prove identical
+  `pic320` and host-test requests rebuild, and that changed/restored clock,
+  output-variant and host flags reach the current invocation. Canonical target
+  counts make activation fail closed; same-name target sentinels enforce
+  `.PHONY`, and exact fake-binary execution counts enforce each host run recipe.
+  This proves fresh triggering, not byte-for-byte XC8 reproducibility; the
+  standing expected-image hash regression remains an open follow-up.
 - A **canonical release product set** (`RELEASE_IMAGES` in the Makefile),
   enforced by the release script, the image verifier and its regression alike.
   Previously the committed directory, the `SHA256SUMS` entries and the fresh
   build were all derived by globbing, so three "independent" checks agreed
   perfectly on a release with an entire MCU missing. They no longer can.
-- Three PIC10F320 release soak combinations at full duration, and PIC10F320
-  images in every release, uploaded as their own CI artifact.
+- Three PIC10F320 full-duration soak combinations are required by the release
+  pipeline, which will add PIC10F320 images and their own CI artifact beginning
+  with the first successfully qualified unified release.
 - `make pic320-*` targets, `make help` entries for them, and a
   `docs/pic10f320_special_case.md` linked from the README, the design
   documentation, the release documentation and the generated release manifest.
@@ -67,6 +87,39 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- `pic320-variants` now requires the complete supported build matrix, and the
+  canonical release set no longer shrinks with a `PIC320_VARIANTS_ALL` override.
+- Release provenance now probes both selected XC8 compilers fail-closed and
+  records target-qualified compiler paths and versions instead of attributing
+  both PIC image families to `PIC_CC`.
+- PIC host and real-target "all variants" aggregates now reject proper subsets
+  of the supported matrix instead of running one variant and reporting that all
+  variants passed.
+- PIC gpsim validation now shares one exact pin-name resolver across all
+  libgpsim harnesses and tests RA3 against substring decoys; fake CLI gpsim also
+  rejects stimuli not attached exactly once to `ra3`.
+- The host lock-step progress regression now compiles and stalls both PIC
+  adapters. Dropping the byte-identical child script had accidentally retained
+  only the PIC10F322 source path and left PIC10F320 stall handling untested.
+- The shared fake-XC8 interruption regression now requires proof that SIGTERM
+  reached each PIC build recipe; `pic320` exports its recipe PID so a missing
+  variable can no longer masquerade as successful cleanup validation.
+- `pic320-size` now fails closed on compiler, image-validation, and summary
+  failures and removes every temporary XC8 artifact after success, failure, or
+  interruption instead of suppressing the probe pipeline's exit status.
+- The shared gpsim wrappers and both public PIC functional targets now honor
+  `STRICT_TOOLS=1`; a missing simulator cannot become a successful strict run.
+- Standalone PIC10F320 target and soak selectors now rebuild the selected
+  variant instead of potentially consuming a stale image while rebuilding the
+  default `PIC320_VARIANT`.
+- `pic320-test-gpsim` now runs the forked PIC10F320 toggle stimulus instead of
+  silently using the PIC10F322 cadence checkpoints through the shared wrapper.
+- PIC10F320 mutation sandboxes now include the folded gpsim wrappers and stimuli,
+  and the tool probe baselines every distinct kill command. A missing harness can
+  no longer make the TMR2IF cadence mutant falsely count as killed.
+- The PIC10F320 real-HEX target aggregate now requires explicit fault-injection,
+  lock-step, and target-I/O completion markers, so a skipped or incomplete lane
+  cannot be reported as a successful CI/release gate.
 - **`pic320` and `pic320-size` printed "skipping" and then built anyway.**
   `$(SKIP)` is `exit 0` in non-strict mode and exits only its own shell, so a
   guard on its own recipe line skipped nothing. An audit found no other instance
@@ -366,7 +419,7 @@ file is the human-readable summary of *what changed*.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[0.9.6]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.5...v0.9.6
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.5...HEAD
 [0.9.5]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.2...v0.9.3

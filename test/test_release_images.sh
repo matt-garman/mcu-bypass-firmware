@@ -250,6 +250,13 @@ read -r -a canonical_arr <<<"$canonical"
 	|| fail "canonical release set has ${#canonical_arr[@]} images, expected 15"
 checks=$((checks + 1))
 
+subset_canonical=$(cd "$ROOT" && \
+	make -s PIC320_VARIANTS_ALL=cd4053-mute print-RELEASE_IMAGES) \
+	|| fail "could not read RELEASE_IMAGES with a PIC10F320 subset override"
+[ "$subset_canonical" = "$canonical" ] \
+	|| fail "PIC320_VARIANTS_ALL override changed the canonical release set"
+checks=$((checks + 1))
+
 count_matching() {
 	local pattern=$1 n=0 base
 	for base in "${canonical_arr[@]}"; do

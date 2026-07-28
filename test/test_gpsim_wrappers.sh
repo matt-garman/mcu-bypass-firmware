@@ -7,8 +7,9 @@ trap 'rm -rf "$work"' EXIT
 tools="$work/tools"
 hex="$work/firmware.hex"
 checks=0
-unset FAKE_GPSIM_MODE FAKE_GPSIM_EXIT FAKE_GPSIM_MARKER FAKE_TIMEOUT_MARKER \
-	GPSIM GPSIM_TIMEOUT_SECONDS PIC_GPSIM_PROC
+unset FAKE_GPSIM_MODE FAKE_GPSIM_EXIT FAKE_GPSIM_MARKER FAKE_GPSIM_STC_LOG \
+	FAKE_TIMEOUT_MARKER GPSIM GPSIM_TIMEOUT_SECONDS PIC_GPSIM_PROC PIC_GPSIM_STC \
+	STRICT_TOOLS
 mkdir -p "$tools"
 printf ':00000001FF\n' > "$hex"
 REAL_TIMEOUT=$(command -v timeout)
@@ -30,6 +31,17 @@ script=
 while [ "$#" -gt 0 ]; do
 	if [ "$1" = -c ]; then script=$2; shift 2; else shift; fi
 done
+if [ ! -f "$script" ]; then
+	printf 'gpsim command script not found: %s\n' "$script" >&2
+	exit 65
+fi
+fsw_attach_count=$(awk '$1 == "attach" && $2 == "n1" && $3 == "fsw" { count++ } END { print count + 0 }' "$script")
+ra3_attach_count=$(awk '$1 == "attach" && $2 == "n1" && $3 == "fsw" && $4 == "ra3" && NF == 4 { count++ } END { print count + 0 }' "$script")
+if [ "$fsw_attach_count" -ne 1 ] || [ "$ra3_attach_count" -ne 1 ]; then
+	printf 'invalid footswitch attachment: expected exactly one attach n1 fsw ra3 in %s\n' \
+		"$script" >&2
+	exit 65
+fi
 case "$script" in
 	*power_on_pressed.stc)
 		printf '%s\n' \
@@ -50,6 +62,7 @@ case "$script" in
 		exit 64
 		;;
 esac
+[ -z "${FAKE_GPSIM_STC_LOG:-}" ] || printf '%s\n' "$script" >> "$FAKE_GPSIM_STC_LOG"
 [ -z "${FAKE_GPSIM_MARKER:-}" ] || : > "$FAKE_GPSIM_MARKER"
 printf 'FAKE_GPSIM_SNAPSHOTS_COMPLETE\n'
 case "${FAKE_GPSIM_MODE:-pass}" in
@@ -132,6 +145,43 @@ for wrapper in run_toggle run_power_on; do
 		&& "$output" != *"gpsim not installed"* ]] \
 		|| { printf 'FAIL: %s validated gpsim before its timeout: %s\n' "$wrapper" "$output" >&2; exit 1; }
 	checks=$((checks + 1))
+
+	output=$(export GPSIM="$tools/missing-gpsim" GPSIM_TIMEOUT_SECONDS=2 \
+		STRICT_TOOLS=; "$wrapper" 2>&1) \
+		|| { printf 'FAIL: %s did not skip missing gpsim by default: %s\n' \
+			"$wrapper" "$output" >&2; exit 1; }
+	[[ "$output" == *"gpsim not installed"* && "$output" != *"STRICT_TOOLS=1:"* ]] \
+		|| { printf 'FAIL: %s reported the wrong missing-gpsim skip: %s\n' \
+			"$wrapper" "$output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	if output=$(export GPSIM="$tools/missing-gpsim" GPSIM_TIMEOUT_SECONDS=2 \
+			STRICT_TOOLS=1; "$wrapper" 2>&1); then
+		printf 'FAIL: %s accepted missing gpsim under STRICT_TOOLS=1\n' "$wrapper" >&2
+		exit 1
+	fi
+	[[ "$output" == *"gpsim not installed"* && "$output" == *"::error::STRICT_TOOLS=1:"* ]] \
+		|| { printf 'FAIL: %s reported the wrong strict missing-gpsim failure: %s\n' \
+			"$wrapper" "$output" >&2; exit 1; }
+	checks=$((checks + 1))
+done
+
+# Same-basename malformed stimuli used to receive canned passing snapshots
+# because fake gpsim inspected only the filename. Require an exact ra3 token,
+# not merely another pin or a name containing ra3 as a prefix.
+for bad_pin in ra2 ra30; do
+	bad_dir="$work/bad-$bad_pin"
+	mkdir -p "$bad_dir"
+	printf 'node n1\nattach n1 fsw %s\n' "$bad_pin" > "$bad_dir/footswitch_toggle.stc"
+	if output=$(export PIC_GPSIM_STC="$bad_dir/footswitch_toggle.stc"; run_toggle 2>&1); then
+		printf 'FAIL: toggle wrapper accepted footswitch attachment %s\n' "$bad_pin" >&2
+		exit 1
+	fi
+	[[ "$output" == *"gpsim exited with status 65"* \
+		&& "$output" == *"expected exactly one attach n1 fsw ra3"* ]] \
+		|| { printf 'FAIL: wrong %s attachment produced the wrong failure: %s\n' \
+			"$bad_pin" "$output" >&2; exit 1; }
+	checks=$((checks + 1))
 done
 
 # The public Make target must validate configuration before its optional-tool
@@ -151,12 +201,25 @@ fi
 	|| { printf 'FAIL: pic-test-gpsim validated gpsim before its timeout: %s\n' "$output" >&2; exit 1; }
 checks=$((checks + 1))
 
+if output=$(
+	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL
+	_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" "${MAKE_CMD[@]}" --no-print-directory \
+		-C "$ROOT" --old-file=pic pic-test-gpsim STRICT_TOOLS=1 \
+		GPSIM="$tools/missing-gpsim" GPSIM_TIMEOUT_SECONDS=2 2>&1
+); then
+	printf 'FAIL: pic-test-gpsim accepted missing gpsim under STRICT_TOOLS=1\n' >&2
+	exit 1
+fi
+[[ "$output" == *"gpsim not installed"* && "$output" == *"::error::STRICT_TOOLS=1:"* ]] \
+	|| { printf 'FAIL: pic-test-gpsim reported the wrong strict missing-gpsim failure: %s\n' "$output" >&2; exit 1; }
+checks=$((checks + 1))
+
 # Same for the PIC10F320 lane's public target. The wrappers themselves are
 # SHARED -- the PIC10F320 merge folded onto these exact scripts rather than
 # forking them (§4), so every check above already covers both chips. What is NOT
-# otherwise covered is the mechanism that makes sharing possible: pic320-test-gpsim
-# must reach the wrappers with PIC_GPSIM_PROC overridden to the 320, and must
-# still validate its timeout before the optional-tool skip.
+# otherwise covered is the mechanism that makes sharing possible:
+# pic320-test-gpsim must override both PIC_GPSIM_PROC and the toggle stimulus,
+# and must still validate its timeout before the optional-tool skip.
 if output=$(
 	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL
 	_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" "${MAKE_CMD[@]}" --no-print-directory \
@@ -169,6 +232,19 @@ fi
 [[ "$output" == *"GPSIM_TIMEOUT_SECONDS must be a positive decimal number"* \
 	&& "$output" != *"gpsim not installed"* ]] \
 	|| { printf 'FAIL: pic320-test-gpsim validated gpsim before its timeout: %s\n' "$output" >&2; exit 1; }
+checks=$((checks + 1))
+
+if output=$(
+	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL
+	_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" "${MAKE_CMD[@]}" --no-print-directory \
+		-C "$ROOT" --old-file=pic320 pic320-test-gpsim STRICT_TOOLS=1 \
+		GPSIM="$tools/missing-gpsim" GPSIM_TIMEOUT_SECONDS=2 2>&1
+); then
+	printf 'FAIL: pic320-test-gpsim accepted missing gpsim under STRICT_TOOLS=1\n' >&2
+	exit 1
+fi
+[[ "$output" == *"gpsim not installed"* && "$output" == *"::error::STRICT_TOOLS=1:"* ]] \
+	|| { printf 'FAIL: pic320-test-gpsim reported the wrong strict missing-gpsim failure: %s\n' "$output" >&2; exit 1; }
 checks=$((checks + 1))
 
 # The PIC10F320 lane reaches the SHARED wrappers with its own processor.
@@ -201,5 +277,34 @@ for probe_proc in p10f320 p10f322; do
 			"$probe_proc" "$(tr '\n' ' ' < "$proc_log")" >&2; exit 1; }
 	checks=$((checks + 1))
 done
+
+# Exercise the PUBLIC PIC10F320 target and record both scripts handed to gpsim.
+# The toggle stimulus is chip-specific because its cadence checkpoint differs;
+# power-on-pressed is byte-identical and remains shared under test/pic/.
+pic320_build="$work/build_pic10f320"
+mkdir -p "$pic320_build"
+: > "$pic320_build/bypass_mcu_tq2-relay_pic10f320.hex"
+stc_log="$work/pic320.stc.log"
+: > "$stc_log"
+if ! output=$(
+	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL
+	FAKE_GPSIM_STC_LOG="$stc_log" \
+	_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" "${MAKE_CMD[@]}" --no-print-directory \
+		-C "$ROOT" --old-file=pic320 pic320-test-gpsim STRICT_TOOLS= \
+		PIC320_VARIANT=tq2-relay PIC320_BUILD_DIR="$pic320_build" \
+		GPSIM="$tools/gpsim" GPSIM_TIMEOUT_SECONDS=2 2>&1
+); then
+	printf 'FAIL: pic320-test-gpsim rejected the fake-gpsim routing probe: %s\n' "$output" >&2
+	exit 1
+fi
+mapfile -t routed_stc < "$stc_log"
+if [ "${#routed_stc[@]}" -ne 2 ] \
+		|| [ "${routed_stc[0]:-}" != "$ROOT/test/pic10f320/gpsim/footswitch_toggle.stc" ] \
+		|| [ "${routed_stc[1]:-}" != "test/pic/power_on_pressed.stc" ]; then
+	printf 'FAIL: pic320-test-gpsim routed the wrong stimuli: %s\n' \
+		"$(tr '\n' ' ' < "$stc_log")" >&2
+	exit 1
+fi
+checks=$((checks + 1))
 
 printf 'gpsim wrapper validation: %d checks, 0 failures\n' "$checks"

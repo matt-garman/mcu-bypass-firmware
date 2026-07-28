@@ -158,6 +158,8 @@ cd "$REPO_ROOT"
 source "$REPO_ROOT/scripts/release-provenance.sh"
 declare -F release_source_is_unchanged >/dev/null \
 	|| die "release provenance checker did not define its required function"
+declare -F release_tool_version_line >/dev/null \
+	|| die "release provenance checker did not define its tool-version function"
 
 mkv() { make -s print-"$1"; }      # echo one Makefile variable
 
@@ -309,7 +311,10 @@ TC_AVR_GCC=$(v1 avr-gcc --version)
 TC_AVR_BU=$(v1 avr-objcopy --version)
 TC_AVR_LIBC=$(pkgver avr-libc)
 TC_HOST_CC=$(v1 cc --version)
-TC_XC8=$(v1 "$PIC_CC" --version)
+TC_XC8_322=$(release_tool_version_line "PIC10F322 XC8 (PIC_CC=$PIC_CC)" "$PIC_CC") \
+	|| die "could not record the PIC10F322 compiler provenance"
+TC_XC8_320=$(release_tool_version_line "PIC10F320 XC8 (PIC320_CC=$PIC320_CC)" "$PIC320_CC") \
+	|| die "could not record the PIC10F320 compiler provenance"
 TC_GPSIM=$(v1 gpsim --version)
 TC_SIMAVR=$(pkgver libsimavr-dev)
 TC_CPPCHECK=$(v1 cppcheck --version)
@@ -320,6 +325,14 @@ TC_PY=$(v1 python3 --version)
 case "$TC_AVR_GCC" in
 	*7.3.0*) : ;;
 	*) warn "avr-gcc is not the pinned 7.3.0 ($TC_AVR_GCC). Images may not reproduce the CI build; the release.yml repro-verify will catch a mismatch." ;;
+esac
+case "$TC_XC8_322" in
+	*V3.10*|*v3.10*) : ;;
+	*) warn "PIC10F322 XC8 is not the pinned V3.10 ($TC_XC8_322). Images may not reproduce the CI build; the release.yml repro-verify will catch a mismatch." ;;
+esac
+case "$TC_XC8_320" in
+	*V3.10*|*v3.10*) : ;;
+	*) warn "PIC10F320 XC8 is not the pinned V3.10 ($TC_XC8_320). Images may not reproduce the CI build; the release.yml repro-verify will catch a mismatch." ;;
 esac
 
 # ============================================================================
@@ -695,7 +708,8 @@ REL_BANNER=""
 	printf -- '| binutils-avr (objcopy) | %s |\n' "$TC_AVR_BU"
 	printf -- '| avr-libc (pkg) | %s |\n' "$TC_AVR_LIBC"
 	printf -- '| host cc | %s |\n' "$TC_HOST_CC"
-	printf -- '| XC8 | %s |\n' "$TC_XC8"
+	printf -- '| PIC10F322 XC8 (`PIC_CC=%s`) | %s |\n' "$PIC_CC" "$TC_XC8_322"
+	printf -- '| PIC10F320 XC8 (`PIC320_CC=%s`) | %s |\n' "$PIC320_CC" "$TC_XC8_320"
 	printf -- '| PIC10F322 DFP | %s |\n' "$PIC_DFP"
 	printf -- '| PIC10F320 DFP | %s |\n' "$PIC320_DFP"
 	printf -- '| gpsim | %s |\n' "$TC_GPSIM"

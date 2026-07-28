@@ -36,6 +36,11 @@ set -euo pipefail
 # remains a stated gap -- but a narrower one, and both chips' gpsim lanes now
 # share ONE preflight definition in the Makefile, so the specific failure above
 # (a probe present on one chip, absent on the other) is no longer expressible.
+#
+# test_gpsim_wrappers.sh covers the same two public targets behaviourally --
+# which processor and which stimulus each hands to gpsim -- so the two files are
+# complementary rather than redundant: this one proves the SKIP routing, that one
+# proves the arguments.
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-strict-tools.XXXXXX")
