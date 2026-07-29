@@ -1922,17 +1922,36 @@ attiny202-fault: test-fuses attiny202
 # Long-duration soak: run the healthy image for XT_SOAK_DURATION_MS of simulated
 # time and assert liveness holds throughout -- the watchdog never resets (a GPR0
 # reset-witness stays armed) and a periodic 2-press round-trip still toggles the
-# LED. Mirror image of the fault test: a reset is a FAILURE. Non-fatal, logged,
-# cumulative. Standalone; same guard / skip / variant-selection as the others.
+# LED. Mirror image of the fault test: a reset is a FAILURE. An individual
+# liveness failure is non-fatal WITHIN a run -- the driver logs it and reports a
+# cumulative count -- but any nonzero count still fails the run, and so does a
+# run that covered no image. Standalone; same guard / skip / variant-selection
+# as the others.
+#
+# Fail-closed like its three siblings, and for the same reason: this target is a
+# release-qualification input (RELEASE_SOAK_NAMES carries attiny202_relay), so
+# "soaked nothing" must never read as "soak passed". An unsupported
+# XT_SIM_VARIANT, absent DFP device files, a missing image, and an empty variant
+# set are each reported rather than skipped past.
 .PHONY: attiny202-soak
 attiny202-soak: test-fuses attiny202
-	@$(yasimavr_skip_if_absent); \
-	vars="$(XT_SIM_VARIANT)"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
+	@selected="$(XT_SIM_VARIANT)"; \
+	if [ -n "$$selected" ]; then \
+		case "$$selected" in cd4053|mute|relay) ;; \
+			*) echo "FAIL: XT_SIM_VARIANT must be one supported variant"; exit 2 ;; esac; \
+		case " $(VARIANTS) " in *" $$selected "*) ;; \
+			*) echo "FAIL: XT_SIM_VARIANT=$$selected is not in VARIANTS=$(VARIANTS)"; exit 2 ;; esac; \
+	fi; \
+	if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
+		echo "ATtiny_DFP device files not found; skipping ATtiny202 soak."; $(SKIP); \
+	fi; \
+	$(yasimavr_skip_if_absent); \
+	vars="$$selected"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
 	fail=0; ran=0; \
 	for v in $$vars; do \
 		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
 		if [ ! -f "$$elf" ]; then \
-			echo "no $$elf (DFP absent?); skipping ATtiny202 soak for variant $$v"; continue; \
+			echo "FAIL: expected ATtiny202 image missing: $$elf"; fail=1; continue; \
 		fi; \
 		echo "--- ATtiny202 soak: variant=$$v duration=$(XT_SOAK_DURATION_MS) ms ---"; \
 		ran=1; \
@@ -1946,7 +1965,7 @@ attiny202-soak: test-fuses attiny202
 		ATTINY202_SOAK_COMBINATION_NAME="$$combo" \
 		$(YASIMAVR_PY) $(XT_SOAK_DRIVER) "$$elf" || fail=1; \
 	done; \
-	if [ "$$ran" = 0 ]; then echo "no ATtiny202 images built; nothing to soak."; fi; \
+	if [ "$$ran" = 0 ]; then echo "FAIL: no ATtiny202 images were soaked"; fail=1; fi; \
 	exit $$fail
 
 # Firmware/model LOCK-STEP co-simulation -- the AVR-XT counterpart of the
