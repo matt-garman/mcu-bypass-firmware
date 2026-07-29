@@ -107,7 +107,10 @@ aggregate so missing PIC tooling cannot produce a false green release gate.
                 before its image is marked complete. `make
                 pic320-test-return-stack` rebuilds and rechecks all three XC8
                 HEX images together and never skips for a missing interpreter
-                or image.
+                or image. `make test-pic320-expected-images` independently
+                validates the strict three-record SHA-256 contract without XC8;
+                `make pic320-test-build` rebuilds the complete image matrix and
+                fails unless every raw HEX file matches that reviewed baseline.
 
   cppcheck:     2.13.0  (the SAME binary as the AVR analysis, below)
                 `make pic-analyze` runs it with --platform=pic8-enhanced over the
@@ -153,10 +156,11 @@ PIC10F320 commands, for reference (same toolchain, `pic320-` targets):
 
   make pic320-variants             build all three variants + 256-word gate
   make pic320-size                 XC8 program/data memory summary
+  make pic320-test-build           reviewed SHA-256 baseline (all images)
   make pic320-test-return-stack    final-HEX reachable return-stack proof (all images)
   make pic320-test                 host equivalence/actuation/fault/coverage,
-                                     CONFIG/return stack, cppcheck+MISRA, and
-                                     CLI gpsim, swept across all three variants
+                                     hashes/CONFIG/return stack, cppcheck+MISRA,
+                                     and CLI gpsim, swept across all variants
   make pic320-test-target-variants fail-closed libgpsim fault/lock-step/I-O
   make pic320-test-soak            long-duration libgpsim soak
 

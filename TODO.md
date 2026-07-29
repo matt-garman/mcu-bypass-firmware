@@ -298,30 +298,6 @@ analysis that the 64 ms SUT delay covers the LDO ramp (check the LP2950/AP7375
 datasheet startup time against 64 ms). Item (b) is a documentation task and pairs
 naturally with the Tier 2 datasheet-citation item.
 
-**Standing expected-image-hash regression for PIC10F320.** The merge's
-byte-identity gate (`docs/pic10f320_merge_plan.md` §6.13, decision D4) was
-deliberately one-shot: it proved twice that the ported XC8 recipe emits the
-child project's exact signed bytes, then retired because its baseline lived under
-the deleted import prefix. The cost was named at the time and stands:
-**nothing at the current tip watches emitted bytes.** The equivalence, lock-step
-and actuation lanes assert *behaviour*, and merge-plan §14.2 records the class
-they are blind to — the firmware's hardware-integrity checks, where a change is
-invisible to every differential lane. Promotion is small and mechanical: check in
-`test/pic10f320/expected_images.sha256`, wire it as a `pic320` / `pic320-test-build`
-prerequisite, and require any change that moves the hashes to rebaseline it in
-the same reviewed commit. The current values are recorded in
-`docs/pic10f320_validation.md` §2 (run 2, re-confirmed by the run-3 comment sweep
-and by the documented merged-tree dry rehearsals; no unified release manifest
-exists yet).
-
-Design note: the value is entirely in the *rebaselining discipline*, not the
-hashes. A file that gets updated reflexively whenever it fails is worse than
-nothing, because it converts a real signal into a chore. Only take this on with
-the review rule attached.
-
-Effort: ~1 h. Impact: Medium — restores the only gate that notices *any* change
-to emitted bytes, including the defensive-layer class no differential lane sees.
-
 **Converge the two scratch-tree builders.** Added 2026-07-27, after the same
 omission caused two separate defects in two sessions.
 
@@ -759,7 +735,6 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Multi-press boundary cases | 2.5 | 3–4 h | Medium — tick-boundary edge cases |
 | Power-on-pressed simulation gap | 2.5 | 1–2 h | Low — simulator fidelity, not coverage |
 | Power-supply ramp-up analysis | 2.5 | 2–3 h | Medium — real-world robustness |
-| PIC10F320 expected-image-hash regression | 2.5 | 1 h | Medium — restores the only gate watching emitted bytes |
 | Converge the two scratch-tree builders | 2.5 | 2–3 h | Medium — removes a defect class that shrinks a gate silently |
 | Hardware-validation procedure doc | 3 | 2–3 h | High — primary-part WDT gap |
 | HIL rig: behavioural + register introspection | 3 | 5–8 d | High — silicon-level model validation |

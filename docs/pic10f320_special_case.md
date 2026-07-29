@@ -64,6 +64,7 @@ weaker claim than "verified against the core".
 | **Actuation sequence** | Each variant's full settled `LATA` at every tick, plus the mute/relay *mid-actuation* pin sequencing and pulse width that a settled snapshot cannot see | `pic320-test-actuation` |
 | **Host fault injection** | The defensive layer valid stimulus never reaches: corrupt a guarded SFR or the debounce context and the sanity gate must force a watchdog reset | `pic320-test-fault-host` |
 | **Firmware line coverage** | An *exact* property, not a percentage floor: every line of the shipping firmware is exercised except an enumerated, justified watchdog-reset path | `pic320-coverage-check-fw` |
+| **Expected image bytes** | The complete three-image matrix exactly matches the reviewed SHA-256 baseline from the pinned XC8/DFP build; unreviewed code-generation drift fails qualification | `pic320-test-build` |
 | **Real-HEX lock-step** | The actual emitted image, running in a simulated PIC10F320, tracked against the verified core for 3,000 iterations per variant with zero divergence | `pic320-test-lockstep` |
 | **Target fault injection** | The same defensive-layer argument on the real image in libgpsim: corrupting every guarded SFR/SRAM location and the required `TRISA` directions forces exactly one real watchdog reset | `pic320-test-fault-target` |
 | **Target I/O** | Exact `TRISA`, physical `PORTA` following every `LATA` transition, each variant's complete startup/engage/bypass sequence, and mute/relay pulse widths measured from simulator cycles | `pic320-test-io` |

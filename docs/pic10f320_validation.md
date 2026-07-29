@@ -82,7 +82,8 @@ signed tags above. That trade was declined deliberately.
 
 ## 2. Byte identity: the ported build recipe emits the same bytes
 
-This is the evidence with no live gate behind it, so it is recorded in full.
+This historical evidence now supplies the reviewed baseline for the standing
+`pic320-test-build` gate, so its provenance is recorded in full.
 
 The concern the check existed to answer: the build recipe was *rewritten* during
 the merge — new variable names, a different Makefile, a different flash-budget
@@ -117,13 +118,20 @@ b30783d20e1ef088b3fa612cb7c41755b48ba1060395e01cf7360ea664d1e50f  bypass_mcu_tq2
 re-checked against the run-2 hashes: **MATCH on all three**. Comments cannot
 change codegen, but "cannot" and "did not" are different claims.
 
-**The gate is retired, deliberately.** It was a one-shot *migration* check, and
-its reference — the child's committed release images — was deleted with the
-import prefix. A gate whose baseline has disappeared is worse than no gate. The
-cost is stated plainly: **nothing at the current tip watches emitted bytes**
-across a source change; the equivalence and lock-step lanes assert behaviour.
-Promoting this to a standing expected-image-hash regression is one file plus one
-`pic320` prerequisite if that trade is ever judged wrong.
+**Standing regression added after the merge audit.** The original gate was
+deliberately retired as a one-shot migration check because its reference images
+lived under the deleted import prefix. The reviewed run-2/run-3 digests above now
+live in `test/pic10f320/expected_images.sha256`. `pic320-test-build` rebuilds the
+complete immutable variant matrix and requires all three raw HEX files to match;
+it runs through `pic320-test` in CI and release qualification. The checker and
+manifest parser also run without XC8 inside `make test`.
+
+The hash target intentionally remains separate from the per-variant `pic320`
+build used by mutation tests. Otherwise every code-generating mutant would die
+at the broad byte check before reaching the behavioural lane whose sensitivity
+the mutation inventory is meant to prove. A hash change therefore fails normal
+qualification while preserving mutation-test attribution. Rebaseline only with
+an intentional, reviewed firmware/toolchain change in the same commit.
 
 ## 3. Historical verification results
 
@@ -134,6 +142,7 @@ lanes and historical baseline; the status note above governs release readiness.
 | Lane | Result |
 | --- | --- |
 | Build + 256-word budget | 220 / 241 / 244 words of 256; Intel-HEX validated |
+| Expected image bytes | Three reviewed SHA-256 records; complete matrix enforced by `pic320-test-build` |
 | Static analysis (cppcheck + MISRA-C:2012) | clean on all three variants, **zero unwaived findings** |
 | CONFIG word | 45 checks, 0 failures — `0x389E` on all three |
 | Firmware↔core equivalence | **266,144 sequences, 0 divergences**, 66/66 reachable model states |
@@ -242,7 +251,7 @@ three together as part of `pic320-test`. This is not a claim that a file cannot
 be modified after a successful recipe; release provenance and reproduction
 checks remain separate evidence.
 
-The fake-XC8 build regression reports 36 PIC10F322 checks and 71 PIC10F320
+The fake-XC8 build regression reports 36 PIC10F322 checks and 75 PIC10F320
 checks. Both arms prove a missing-XC8 skip removes the complete product matrix,
 and that a current-HEX-only compiler result cannot reuse stale `.s`/`.sym`
 sidecars or turn the hardware-stack gate into an absent-tool skip. They also
@@ -252,6 +261,8 @@ matrix against recursively self-whitelisting GNU Make input.
 The 320-specific cases prove the base build deletes structurally valid
 reachable-RETFIE and depth-9 images, and that nonempty successful-oracle and
 limit-99 command-line overrides cannot bypass the immutable Makefile settings.
+They also require a matching complete hash matrix, reject changed image bytes
+and malformed baseline data, and fail if the checker is absent.
 
 As retrospective parser/decoder context only, the predecessor project's signed
 `v0.9.5` images measure 3 / 3 / 4 entries for simple / mute / relay. Those files
@@ -270,9 +281,9 @@ name. Assertions count only invocations for that output and inspect the latest
 applicable command, so an old matching flag cannot mask stale reuse.
 
 Activation and accounting fail closed: canonical `PB_TARGET=pic320` requires
-`PB_REBUILD_REQUIRED=1` and exactly 71 checks at exit, while canonical
+`PB_REBUILD_REQUIRED=1` and exactly 75 checks at exit, while canonical
 `PB_TARGET=pic` requires exactly 36. Removing or misspelling the Makefile's
-PIC10F320 rebuild-arm assignment cannot leave a green 57-check run.
+PIC10F320 rebuild-arm assignment cannot leave a green 61-check run.
 
 The regression proves all of the following without timestamps:
 
@@ -301,10 +312,10 @@ the recipe to rerun; removing one leaves compiler and execution counts unchanged
 and fails the existing check. No assertion relies on timestamps.
 
 This evidence is narrowly **deterministic rebuild triggering and current-option
-propagation**. It does not compare generated bytes, does not establish
-byte-for-byte reproducibility of real XC8, and does not qualify exact-final-source
-PIC10F320 images. The standing expected-image-hash TODO remains open, and the
-current qualification status at the top of this record is unchanged.
+propagation**. The separate `pic320-test-build` gate now owns byte-for-byte XC8
+output comparison; this fake-tool lane still does not establish real-XC8
+reproducibility or qualify exact-final-source PIC10F320 images. The current
+qualification status at the top of this record is unchanged.
 
 ## 4. The defensive-layer decision, measured
 

@@ -115,10 +115,10 @@ jobs:
   # gpsim-dev + libglib2.0-dev + g++ (the libgpsim fault-inject build), cppcheck,
   # python3 come from apt.
   #
-  # CRITICAL: the `make pic-test` / `make pic320-test` sub-targets SKIP CLEANLY
-  # when a tool/header is absent -- fatal for a gate (a failed XC8 fetch would make
-  # every check "skip" and the job go green on nothing). The "Assert PIC toolchain
-  # present" step fails loud so a broken install can never masquerade as a pass;
+  # CRITICAL: optional simulator/analyzer sub-targets SKIP CLEANLY when a
+  # tool/header is absent -- fatal for a gate even though pic320-test's hash and
+  # return-stack prerequisites fail closed. The "Assert PIC toolchain present"
+  # step fails loud so a broken install can never masquerade as a pass;
   # the cache is only SAVED after that assert, so a half-baked install is never
   # cached. Both device headers are asserted: the DFP ships both parts, but a
   # truncated unzip could leave one behind.
@@ -228,9 +228,10 @@ jobs:
       # PIC10F320 pre-hardware gate. Covers every validation layer the child
       # project had: host equivalence against src/bypass_pure.c, per-variant
       # actuation sequence, host fault injection, the exact-line firmware
-      # coverage gate, build + 256-word budget, CONFIG word, cppcheck + MISRA,
-      # and the CLI-gpsim register-level test -- the last two swept across all
-      # three variants, because each compiles a different output stage.
+      # coverage gate, build + 256-word budget, reviewed image hashes, CONFIG and
+      # final-HEX return-stack checks, cppcheck + MISRA, and the CLI-gpsim
+      # register-level test -- the last two swept across all three variants,
+      # because each compiles a different output stage.
       - name: PIC10F320 pre-hardware gate (make pic320-test)
         run: |
           make pic320-test STRICT_TOOLS=1 \

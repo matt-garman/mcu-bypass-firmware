@@ -111,20 +111,23 @@ The PIC10F320 has its own lane, using the same toolchain (`pic320-*` targets,
 
 ```
 make pic320-variants             # build all variants + flash-budget/return-stack gates
+make pic320-test-build           # rebuild + enforce reviewed SHA-256 image baseline
 make pic320-test-return-stack    # rebuild + recheck/report all three final HEX images
 make pic320-test                 # host equivalence/actuation/fault/coverage,
-                                 #   CONFIG, return stack, analysis, gpsim, all variants
+                                 #   hashes, CONFIG, return stack, analysis/gpsim
 make pic320-test-target-variants # fail-closed libgpsim fault/lock-step/I/O gates
 ```
 
 These targets are independent of the AVR build. Individual optional-tool targets
 generally skip cleanly if their primary compiler/simulator is absent. The
 PIC10F320 exception is deliberate: every generated `pic320` image must pass the
-Python return-stack oracle, and `pic320-test-return-stack` (therefore
-`pic320-test`) fails closed if Python or any rebuilt image is missing. Host source
-coverage is mandatory when `pic-test` runs. The target aggregates are the
-authoritative simulator gates and fail closed on any missing/skipped libgpsim
-layer.
+Python return-stack oracle. `pic320-test-build` additionally requires the
+complete rebuilt matrix to match the reviewed XC8/DFP SHA-256 baseline, and
+`pic320-test-return-stack` rechecks all three images. These targets feed
+`pic320-test` and fail closed if Python, the baseline, or an image is missing.
+Host source coverage is mandatory when `pic-test` runs. The target aggregates
+are the authoritative simulator gates and fail closed on any missing/skipped
+libgpsim layer.
 
 To build and validate the ATtiny202 (AVR-XT) port (uses the open-source avr-gcc
 toolchain plus the fetched-on-demand Microchip device files and a patched

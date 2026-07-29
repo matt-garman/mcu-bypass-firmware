@@ -624,7 +624,7 @@ make pic-test-target-variants STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP"
 	|| { tail -60 "$EVID/pic-test-target-variants.log" >&2; die "make pic-test-target-variants FAILED."; }
 ok "pic-test-target-variants passed."
 
-log "running make pic320-test (PIC10F320 host lanes + CONFIG + analysis + gpsim, all variants)..."
+log "running make pic320-test (PIC10F320 host lanes + hashes + CONFIG + stack + analysis + gpsim, all variants)..."
 make pic320-test STRICT_TOOLS=1 PIC320_CC="$PIC320_CC" PIC320_DFP="$PIC320_DFP" \
 	>"$EVID/pic320-test.log" 2>&1 \
 	|| { tail -60 "$EVID/pic320-test.log" >&2; die "make pic320-test FAILED."; }

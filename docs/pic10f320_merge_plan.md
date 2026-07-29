@@ -1652,8 +1652,9 @@ the document it was when the requirement was set.
       flag checks across repeated and changed/restored requests. It covers the
       *build* rules where `test-pic-build-rebuild` covers the *soak* file rules,
       so the two do not overlap. Both prove deterministic triggering and
-      current-option propagation only — not byte-for-byte XC8 output; the
-      standing expected-image-hash TODO remains open.
+      current-option propagation only — not byte-for-byte XC8 output. The
+      standing expected-image-hash gate was subsequently implemented as
+      `pic320-test-build`; it remains separate from this rebuild evidence.
       **All 8 rows are now decided and implemented.**)*
 - [x] The strict-tools inventory covers optional-tool recipes for **both** PIC
       chips, not only the newly added ones (§6.12), and the flash-budget
@@ -1789,10 +1790,9 @@ the document it was when the requirement was set.
       the compared hashes preserved in the phase commits and
       `docs/pic10f320_validation.md`, or kept as a standing expected-image-hash
       regression that survives Phase 7's deletion of the imported baseline.
-      *(D4: retired, hashes preserved. The cost — nothing at the tip watches
-      emitted bytes — is stated in `docs/pic10f320_validation.md` §2 and §6, and
-      promotion to the standing regression is now a `TODO.md` Tier 2.5 item so the
-      trade stays revisitable rather than merely recorded here.)*
+      *(D4 originally chose retirement and preserved the hashes. The later merge
+      audit revisited that trade: `pic320-test-build` now enforces the reviewed
+      final set as a standing regression, while §2 retains the decision history.)*
 - [x] The moved firmware's self-referential comments are swept in one reviewed,
       comment-only commit (§4: `:6-8` header note plus `:68`, `:74`, `:321`,
       `:640`, `:657`), separately from §6.11's rebaselining edit, and the images
@@ -2155,7 +2155,7 @@ because a partial unification is worse than either endpoint.
 | D1 | §5.1/§5.6 lane prefix | **Keep `pic-` = PIC10F322**; new lane is `pic320-` with `PIC320_*` variables. The 322 lane is not renamed. | No churn on known-good 322 targets and no interface break for existing `make print-PIC_*` consumers. Accepts the asymmetry §5.1 flags: `pic-` silently means "the other PIC". Because `PIC_*` stays 322, §5.6's rule reads "anything chip-specific and new gets `PIC320_`", and the shared-tool allowlist in §5.6 stays exactly as written. |
 | D2 | §5.3 release image basenames | **Keep the child basenames** (`bypass_mcu_{cd4053-simple,cd4053-mute,tq2-relay}_pic10f320.hex`). No migration at `v0.9.6`. | No published-name break, and §6.13's comparison can key on filename. Two obligations follow and are not optional: (a) `scripts/make-release.sh`'s image→MCU classifier must recognize the `bypass_mcu_` prefix explicitly, or a PIC10F320 image falls through to generic AVR metadata (§10); (b) the release `README.md`/`MANIFEST.md` must state the three-convention asymmetry rather than leave it to be inferred. |
 | D3 | §11 CI job graph | **Extend the existing `pic` job** to build and validate both chips serially. No sibling job, no `needs` edits. | Simplest DAG, one XC8 install/cache restore, and `verify`/`attiny202`/`build-matrix`/`stress` keep gating on PIC10F320 for free because they already declare `needs: pic`. Cost: the full PIC10F320 lane lands on the critical path of all four dependents. Revisit only if CI wall-clock becomes the binding constraint — splitting later is a mechanical change, whereas choosing the split now would force the gating question in §11 immediately. |
-| D4 | §6.13 gate lifetime | **One-shot migration check.** Run the byte-identity comparison at the Phase-2 exit gate and again in Phase 4, record the compared hashes in both phase commit messages and in `docs/pic10f320_validation.md`, then retire it. No checked-in expected-hash file. | Nothing new to maintain, and the gate's *purpose* — proving the ported XC8 recipe reproduces the child's shipped bytes — is fully served. **This is the one place the simplest option costs assurance, and the cost is named in §14.2:** the equivalence and lockstep lanes are blind to the hardware-integrity checks, so after retirement nothing at the merged tip watches emitted bytes. Recorded as a deliberate, revisitable trade; promoting it to the standing regression later is one file plus one `pic320-test-build` prerequisite. |
+| D4 | §6.13 gate lifetime | **One-shot migration check.** Run the byte-identity comparison at the Phase-2 exit gate and again in Phase 4, record the compared hashes in both phase commit messages and in `docs/pic10f320_validation.md`, then retire it. No checked-in expected-hash file. **Superseded after the merge audit:** the revisitable trade was revisited and `pic320-test-build` now enforces the preserved final hashes as a standing gate. | The original decision minimized maintenance after the migration proof. The later gate restores the byte-level witness for hardware-integrity checks that equivalence and lock-step cannot see, with explicit reviewed rebaselining discipline. |
 
 Defaults taken without a separate question, on the same simplest-option rule.
 Each is cheap to reverse and none changes a name outside PIC10F320:
@@ -2557,7 +2557,7 @@ per concern now covers both chips:
 
 | Script | Mechanism | Result |
 | --- | --- | --- |
-| `test_pic_build.sh` | `PB_*` knobs (target, build dir, image naming, budget, sidecar/stack gate, matrix, size probe, PIC10F320 rebuild arm) | 36 PIC10F322 + 71 PIC10F320 checks |
+| `test_pic_build.sh` | `PB_*` knobs (target, build dir, image naming, budget, sidecar/stack/hash gates, matrix, size probe, PIC10F320 rebuild arm) | 36 PIC10F322 + 75 PIC10F320 checks |
 | `test_target_matrix.sh` | `TM_*` knobs (target, variants variable, supported set) | 5 matrix checks × 3 aggregates + 4 sentinel checks × 2 target aggregates |
 | `test_gpsim_wrappers.sh` | *no folding needed* — see below | 37 checks (was 25) |
 | `test_lockstep_progress.sh` | compile and execute both chip-specific adapters against one fake gpsim API | 4 failure modes × 2 chips |
@@ -3342,10 +3342,10 @@ images; no numeric depth from the rehearsal is claimed by this closure.
 The rebuild row is closed inside the folded `test/test_pic_build.sh`, not with a
 duplicate sandbox. Makefile's second invocation sets `PB_REBUILD_REQUIRED=1`;
 the script independently requires that setting for canonical `PB_TARGET=pic320`
-and enforces exactly 71 final checks. Canonical `PB_TARGET=pic` enforces 36 after
+and enforces exactly 75 final checks. Canonical `PB_TARGET=pic` enforces 36 after
 the shared stale-sidecar/stack-gate and producer-matrix regressions, so lost
 PIC10F320 activation
-cannot silently pass at 57. The fresh temporary repository's existing fake XC8
+cannot silently pass at 61. The fresh temporary repository's existing fake XC8
 gains
 command logging, and a fake host compiler is used only for the PIC10F320 rebuild
 assertions. The host compiler writes nonempty fake objects and executable
@@ -3375,6 +3375,6 @@ requests without duplicating the coverage lane's existing freshness checks.
 
 This closes deterministic **rebuild triggering and current-flag propagation**.
 It does not run real XC8, compare two generated images, or establish
-byte-for-byte compiler reproducibility. The expected-image-hash regression in
-`TODO.md` therefore remains open, and this host-only result does not change the
-pending current-XC8/full-tool qualification status.
+byte-for-byte compiler reproducibility. That separate concern is now enforced by
+`pic320-test-build`; this host-only result still does not change the pending
+current-XC8/full-tool qualification status.

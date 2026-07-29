@@ -113,8 +113,13 @@ file is the human-readable summary of *what changed*.
   output-variant and host flags reach the current invocation. Canonical target
   counts make activation fail closed; same-name target sentinels enforce
   `.PHONY`, and exact fake-binary execution counts enforce each host run recipe.
-  This proves fresh triggering, not byte-for-byte XC8 reproducibility; the
-  standing expected-image hash regression remains an open follow-up.
+  This proves fresh triggering, not byte-for-byte XC8 reproducibility.
+- A standing PIC10F320 expected-image regression now pins the complete
+  three-variant HEX matrix to the reviewed XC8 V3.10 / DFP 1.9.189 SHA-256
+  baseline. Its dependency-free parser and fixtures run in `make test`, while
+  `pic320-test-build` performs the real comparison through CI/release
+  qualification. The hash gate stays outside mutation kill targets so byte drift
+  cannot mask whether each behavioural lane catches its assigned defect.
 - A **canonical release product set** (`RELEASE_IMAGES` in the Makefile),
   enforced by the release script, the image verifier and its regression alike.
   Previously the committed directory, the `SHA256SUMS` entries and the fresh

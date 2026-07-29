@@ -107,10 +107,14 @@ test/
                         test_io_pic.cc        libgpsim GPIO/pulse timing
                                                         (make pic320-test-io)
                         footswitch_toggle.stc gpsim stimulus
-             return_stack_oracle.py  strict final-HEX control-flow/return-stack
-                                     proof + fixtures
-                              (make test-pic320-return-stack-oracle;
-                               make pic320-test-return-stack for real images)
+              return_stack_oracle.py  strict final-HEX control-flow/return-stack
+                                      proof + fixtures
+                               (make test-pic320-return-stack-oracle;
+                                make pic320-test-return-stack for real images)
+              check_expected_images.py  strict SHA-256 manifest/image checker
+              expected_images.sha256    reviewed XC8/DFP three-image baseline
+                               (make test-pic320-expected-images;
+                                make pic320-test-build for real images)
 ```
 
 The PIC10F320 lane reuses, rather than forks, everything it can: the CONFIG-word
@@ -276,10 +280,11 @@ this section is what the test suite does about it.
 
 The split that matters here: **the first four layers need only a host C compiler
 and gcov**, so they are members of `make test` and run on every push regardless
-of whether XC8 is installed. The return-stack oracle's dependency-free Python 3
-selftest is there too. The real-image layers need the PIC toolchain and behave
-like the PIC10F322 layers above, except that the return-stack target is always
-fail-closed rather than skip-clean.
+of whether XC8 is installed. The return-stack oracle and expected-image
+checker's dependency-free Python 3 selftests are there too. The real-image
+layers need the PIC toolchain and behave
+like the PIC10F322 layers above, except that the expected-image and return-stack
+targets are always fail-closed rather than skip-clean.
 
 | layer | target | what it proves | substrate |
 |---|---|---|---|
@@ -289,7 +294,8 @@ fail-closed rather than skip-clean.
 | Shipping-source coverage | `pic320-coverage-check-fw` | An **exact** property, not a percentage floor: every line of the real firmware is host-executed except an enumerated, justified watchdog-reset path. Run per variant, because the three output stages give 84 / 95 / 99 executable lines. | host gcov with the mock `xc.h` |
 | All-variant host aggregate | `pic320-test-host-variants` | The four layers above across all three variants, with the complete supported matrix required first. **This is the member of `make test`.** | Makefile wrapper |
 | Return-stack oracle regression | `test-pic320-return-stack-oracle` | 149 deterministic checks: passing depths through 8, recursion/depth-9 rejection, independently required skip edges and operand boundaries, classic alias ranges, all 16,384 legality decisions, every destination writer against PCL/INDF/INTCON, 9-bit PC/physical-fetch aliasing, literal HEX layout, and fail-closed parser/file cases. Includes ten device-geometry checks: `--program-words` is validated as a power of two inside the 9-bit PC space, and fixtures whose verdict *differs* between the 256- and 512-word geometries pin the fetch alias in both directions — an image with code above word `0x0FF` is rejected when 256 words are declared, and one that relies on the fold is rejected when 512 are. **This is also a member of `make test`.** | dependency-free Python 3 |
-| Image generation | `test-pic-build` | 36 PIC10F322 and 71 PIC10F320 checks. Both runs prove missing-XC8 skips remove the complete product matrix despite attempted inventory overrides, stale assembly/symbol sidecars cannot survive a current-HEX-only build, and shell syntax in matrix text is rejected without execution. The 322 run additionally rejects recursively self-whitelisting GNU Make input; the 320 run covers selector rebuilds, deletion of reachable-RETFIE and depth-9 images despite attempted oracle/limit overrides, and exact per-output XC8/host-compiler rebuild invocations with current clock, variant, and host flags. | host fake-XC8/fake-CC regression |
+| Image generation | `test-pic-build` | 36 PIC10F322 and 75 PIC10F320 checks. Both runs prove missing-XC8 skips remove the complete product matrix despite attempted inventory overrides, stale assembly/symbol sidecars cannot survive a current-HEX-only build, and shell syntax in matrix text is rejected without execution. The 322 run additionally rejects recursively self-whitelisting GNU Make input; the 320 run covers selector rebuilds, deletion of reachable-RETFIE and depth-9 images despite attempted oracle/limit overrides, exact per-output XC8/host-compiler rebuild invocations with current clock/variant/host flags, and matching/mismatching/malformed/missing expected-image gate inputs. | host fake-XC8/fake-CC regression |
+| Expected image bytes | `test-pic320-expected-images`; `pic320-test-build` | The dependency-free checker pins exact manifest grammar and fail-closed file handling in `make test`; the full-tool target rebuilds the immutable three-variant matrix and compares each raw HEX file with the reviewed XC8 V3.10 / DFP 1.9.189 SHA-256 baseline. Kept out of mutation kill targets so a broad byte mismatch cannot mask a weak behavioural oracle. | Python 3; pinned XC8/DFP for the real-image comparison |
 | CONFIG word | `pic320-test-config` | The emitted CONFIG word matches design intent, over every built image. Uses the shared checker with a device-accurate label. | host parser over HEX |
 | Hardware return stack | every `pic320` build; `pic320-test-return-stack` | The base build strictly parses and traverses its final HEX before marking that image complete, so gpsim/target/soak/release rebuilds use the same fail-closed gate. The explicit target rebuilds the supported matrix and rechecks all three together, reporting each maximum and witness. | dependency-free Python 3 over final HEX |
 | Static analysis | `pic320-analyze` | cppcheck + MISRA over the shell, **swept across all three variants** — each compiles a different `#if defined(OUTPUT_*)` branch, so one run would leave two thirds unanalyzed. | host tools |
@@ -298,15 +304,15 @@ fail-closed rather than skip-clean.
 | HEX/model lock-step | `pic320-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches `src/bypass_pure.c` after every completed main-loop iteration — 3,005 checks per variant, 66/66 states. | libgpsim |
 | Target I/O timing | `pic320-test-io` | Exact `TRISA`, physical `PORTA` following every `LATA` transition, each variant's complete transition sequence, and mute/relay pulse widths from simulator cycles. | libgpsim |
 | Fail-closed aggregate | `pic320-test-target-variants` | Rejects any matrix other than the complete supported set, then requires fault, lock-step and target-I/O PASS sentinels for every variant. | Makefile wrapper |
-| Pre-hardware aggregate | `pic320-test` | The single target CI and the release script invoke: the host aggregate, CONFIG and return-stack proof over all images, and analysis + gpsim per variant. | Makefile wrapper |
+| Pre-hardware aggregate | `pic320-test` | The single target CI and the release script invoke: the host aggregate, expected-image hash, CONFIG and return-stack proof over all images, and analysis + gpsim per variant. | Makefile wrapper |
 | Soak | `pic320-test-soak` | Long-duration libgpsim soak per output stage; three combos at full duration are part of release qualification. | libgpsim |
 
 The shared stale-sidecar and matrix cases run in both parameterized
 `test-pic-build` invocations; the PIC10F320 rebuild cases run only in the second.
 The script itself requires
-`PB_REBUILD_REQUIRED=1` for canonical `PB_TARGET=pic320` and enforces exactly 71
+`PB_REBUILD_REQUIRED=1` for canonical `PB_TARGET=pic320` and enforces exactly 75
 final checks; canonical `PB_TARGET=pic` enforces 36. A missing or misspelled
-rebuild-arm assignment therefore fails instead of reporting a 57-check subset as
+rebuild-arm assignment therefore fails instead of reporting a 61-check subset as
 green.
 
 In a fresh temporary repository the arm proves that identical requests reinvoke
@@ -319,8 +325,8 @@ must advance with compile/link counts, catching a removed binary-run recipe.
 Variant/clock/host-flag changes and restorations are checked against the latest
 applicable command, not any historical log entry. This is deterministic
 **rebuild triggering with the current flags**, not byte-for-byte XC8
-reproducibility. The standing PIC10F320 expected-image-hash regression remains
-open in `TODO.md`. The coverage lane needs no stable-output probe: every request
+reproducibility. Byte identity is enforced separately by `pic320-test-build`.
+The coverage lane needs no stable-output probe: every request
 uses a new `mktemp` directory and requires fresh `.gcda` and `.gcov` evidence
 before that directory is removed.
 

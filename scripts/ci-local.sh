@@ -24,8 +24,9 @@
 #                                            and target I/O, every variant)
 #                    make pic320-test       (10F320: host equivalence/actuation/
 #                                            fault/firmware-coverage + build,
-#                                            budget, CONFIG, cppcheck/MISRA and
-#                                            CLI gpsim across all variants)
+#                                            budget, reviewed hashes, CONFIG,
+#                                            return stack, cppcheck/MISRA and CLI
+#                                            gpsim across all variants)
 #                    make pic320-test-target-variants
 #                                           (10F320: the same fail-closed
 #                                            libgpsim aggregate)
@@ -172,10 +173,10 @@ trap on_exit EXIT
 # "Assert PIC toolchain present" step).
 # ----------------------------------------------------------------------------
 
-# Fail loud if any PIC tool/header is missing, for BOTH chips. Every pic-test /
-# pic320-test / libgpsim PIC sub-target SKIPS CLEANLY when its tool is absent --
-# fatal for a gate, since a missing toolchain would otherwise read as a local
-# PASS while CI still runs the real checks. Paths come from the Makefile
+# Fail loud if any PIC tool/header is missing, for BOTH chips. Optional simulator
+# and analyzer sub-targets skip cleanly when their tools are absent; pic320-test's
+# expected-image and stack prerequisites fail closed, but they do not replace
+# this complete preflight. Paths come from the Makefile
 # defaults; an exported PIC_CC / PIC_DFP / PIC320_CC / PIC320_DFP /
 # PIC_SOAK_GPSIM_INC wins (they are ?= in the Makefile).
 #

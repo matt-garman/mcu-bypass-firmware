@@ -517,7 +517,7 @@ FORCE:
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation test-mutation-sandbox \
         test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle \
         test-attiny202-model-ffi \
-        test-pic320-return-stack-oracle \
+        test-pic320-return-stack-oracle test-pic320-expected-images \
         test-attiny202-build test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-klee-build \
         test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization \
         test-make-lock-probe test-make-safe-parallel-probe \
@@ -2243,7 +2243,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-attiny202-model-ffi test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-pic320-expected-images test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-attiny202-model-ffi test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -2255,7 +2255,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-attiny202-model-ffi test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-pic320-expected-images test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-attiny202-model-ffi test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -2311,7 +2311,7 @@ test-gpsim-wrappers:
 	./test/test_gpsim_wrappers.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 36/71 counts,
+# image/host rebuild triggering. The script enforces the canonical 36/75 counts,
 # so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
@@ -3335,6 +3335,13 @@ override PIC320_RETURN_STACK_ORACLE := test/pic10f320/return_stack_oracle.py
 override PIC320_RETURN_STACK_LIMIT := 8
 override PIC320_RETURN_STACK_IMAGES := $(foreach v,$(PIC320_VARIANTS_SUPPORTED),$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$(v)_$(PIC320_TAG).hex)
 
+# Standing byte-identity regression. These hashes deliberately pin the exact
+# XC8 V3.10 + PIC10-12Fxxx DFP 1.9.189 output. A reviewed firmware/toolchain
+# change may rebaseline them, but a normal build must never rewrite the file.
+override PIC320_EXPECTED_IMAGE_CHECKER := test/pic10f320/check_expected_images.py
+override PIC320_EXPECTED_IMAGE_MANIFEST := test/pic10f320/expected_images.sha256
+override PIC320_EXPECTED_IMAGE_PATHS := $(foreach v,$(PIC320_VARIANTS_SUPPORTED),$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$(v)_$(PIC320_TAG).hex)
+
 # --- host lanes --------------------------------------------------------------
 # HOST_CFLAGS here intentionally mirrors the IMPORTED build contract (no
 # -Wconversion) rather than the parent's stricter host flags: the relocated
@@ -3381,6 +3388,15 @@ test-pic320-return-stack-oracle: $(PIC320_RETURN_STACK_ORACLE)
 		echo "FAIL: python3 is required by the PIC10F320 return-stack oracle"; exit 1; \
 	fi
 	@python3 $(PIC320_RETURN_STACK_ORACLE) --selftest
+
+# Tool-independent checker/manifest regression. The full image comparison lives
+# in pic320-test-build because make test does not require XC8.
+test-pic320-expected-images:
+	@if ! command -v python3 >/dev/null 2>&1; then \
+		echo "FAIL: python3 is required by the PIC10F320 expected-image checker"; exit 1; \
+	fi
+	@python3 $(PIC320_EXPECTED_IMAGE_CHECKER) --selftest
+	@python3 $(PIC320_EXPECTED_IMAGE_CHECKER) $(PIC320_EXPECTED_IMAGE_MANIFEST)
 
 # Firmware<->core equivalence: the real firmware, host-compiled, stepped tick for
 # tick against src/bypass_pure.c on the same stimulus.
@@ -3946,11 +3962,33 @@ PIC320_LOCKSTEP_COMPILE = \
 			$(PIC320_LOCKSTEP_SRC) $(PIC320_LOCKSTEP_MODEL_OBJ) \
 			-o $(PIC320_LOCKSTEP_BIN) -lgpsim
 
-.PHONY: pic320-test-config pic320-test-gpsim pic320-test-fault-target \
+.PHONY: pic320-test-build pic320-test-config pic320-test-gpsim pic320-test-fault-target \
         pic320-test-io pic320-test-lockstep pic320-test-target \
         pic320-test-target-variants _pic320-build-fault-target \
         _pic320-build-io _pic320-build-lockstep _pic320-build-soak \
         pic320-test-return-stack
+
+# Rebuild and compare the complete three-image matrix with the reviewed baseline.
+# Keep this separate from `pic320`: mutation targets must reach their intended
+# behavioural oracle rather than being killed incidentally by this broad byte
+# check. CI and release qualification run it through the `pic320-test` aggregate.
+pic320-test-build: pic320-variants
+	@if ! command -v python3 >/dev/null 2>&1; then \
+		echo "FAIL: python3 is required by the PIC10F320 expected-image gate"; exit 1; \
+	fi
+	@if [ ! -f "$(PIC320_EXPECTED_IMAGE_CHECKER)" ] || \
+	    [ -L "$(PIC320_EXPECTED_IMAGE_CHECKER)" ] || \
+	    [ ! -s "$(PIC320_EXPECTED_IMAGE_CHECKER)" ]; then \
+		echo "FAIL: PIC10F320 expected-image checker is missing or invalid: $(PIC320_EXPECTED_IMAGE_CHECKER)"; \
+		exit 1; \
+	fi
+	@python3 $(PIC320_EXPECTED_IMAGE_CHECKER) --require-all \
+		$(PIC320_EXPECTED_IMAGE_MANIFEST) $(PIC320_EXPECTED_IMAGE_PATHS) || { \
+		echo "FAIL: PIC10F320 image bytes differ from the reviewed XC8/DFP baseline."; \
+		echo "      Investigate the source, flags, compiler, and DFP; do not reflexively rebaseline."; \
+		exit 1; \
+	}
+	@echo "=== PIC10F320 expected-image hashes match all three variants ==="
 
 # Rebuild the complete image matrix (each pic320 recipe checks its own output),
 # then re-run one explicit reporting pass over all three final HEX paths. Unlike
@@ -4030,10 +4068,10 @@ pic320-test-gpsim: pic320
 	exit $$fail
 
 # Aggregate: every PIC10F320 pre-hardware check -- host equivalence, actuation,
-# host fault, firmware coverage, build+budget, CONFIG word, final-HEX return-stack
-# proof, static analysis and the CLI-gpsim register-level test. The PIC10F320
-# counterpart of `pic-test`, and the single target the CI `pic` job invokes for
-# this chip (merge plan §11, D3).
+# host fault, firmware coverage, build+budget, expected-image hashes, CONFIG word,
+# final-HEX return-stack proof, static analysis and the CLI-gpsim register-level
+# test. The PIC10F320 counterpart of `pic-test`, and the single target the CI
+# `pic` job invokes for this chip (merge plan §11, D3).
 #
 # It sweeps all three variants, because the per-variant lanes are per-variant for
 # real reasons and not one of them is representative:
@@ -4041,10 +4079,10 @@ pic320-test-gpsim: pic320
 #     the default variant leaves the mute and relay code paths -- roughly a fifth
 #     of the shipping source -- with no cppcheck or MISRA coverage at all;
 #   - pic320-test-gpsim asserts a variant-specific settled LATA pattern.
-# The other three lanes already cover the matrix on their own
-# (pic320-test-config and pic320-test-return-stack check every built image in one
-# run; pic320-test-host-variants does its own sweep), so they are prerequisites
-# rather than loop bodies.
+# The other four lanes already cover the matrix on their own
+# (pic320-test-build, pic320-test-config and pic320-test-return-stack check every
+# built image in one run; pic320-test-host-variants does its own sweep), so they
+# are prerequisites rather than loop bodies.
 #
 # The matrix guard is NOT repeated here, and that is deliberate rather than an
 # omission: pic320-test-host-variants is a prerequisite, it carries the guard, and
@@ -4058,7 +4096,8 @@ pic320-test-gpsim: pic320
 # STANDALONE -- deliberately NOT part of `make test`, which is the
 # tool-independent gate (XC8/gpsim may be absent in CI). Optional simulator and
 # analyzer sub-targets skip cleanly when their tools are missing, which is why CI
-# passes STRICT_TOOLS=1; the return-stack prerequisite itself always fails closed.
+# passes STRICT_TOOLS=1. The expected-image and return-stack prerequisites always
+# fail closed when XC8, Python, their contracts, or rebuilt images are absent.
 PIC320_PER_VARIANT_LANES := pic320-analyze pic320-test-gpsim
 
 .PHONY: pic320-test
@@ -4066,7 +4105,7 @@ PIC320_PER_VARIANT_LANES := pic320-analyze pic320-test-gpsim
 # -stack-bound gate walks XC8's emitted call graph and enforces the policy
 # budget (peak + reserve), the -return-stack oracle re-derives the depth from
 # the shipped HEX. A disagreement between them is itself the signal.
-pic320-test: pic320-test-host-variants pic320-test-config \
+pic320-test: pic320-test-host-variants pic320-test-build pic320-test-config \
              pic320-test-stack-bound pic320-test-return-stack
 	@for v in $(PIC320_VARIANTS_ALL); do \
 		echo "===================== PIC10F320 ANALYSIS/GPSIM VARIANT $$v ====================="; \
@@ -4291,10 +4330,9 @@ pic320-test-soak: _pic320-build-soak
 	$(PIC320_SOAK_COMPILE) && \
 	./$(PIC320_SOAK_BIN)
 
-# --- §6.13 byte-identity gate: RETIRED 2026-07-26 ----------------------------
-# This was a one-shot MIGRATION gate (merge plan §15, D4), not a standing
-# regression, and it has served its purpose. It ran twice, exactly as §6.13
-# required:
+# --- §6.13 byte-identity gate ------------------------------------------------
+# This began as a one-shot MIGRATION gate (merge plan §15, D4). It ran twice,
+# exactly as §6.13 required:
 #
 #   Phase 2, vs the child project's signed release/v0.9.5 images -- PASSED 3/3.
 #     Proved the relocated firmware, built by the ported recipe under new
@@ -4303,14 +4341,12 @@ pic320-test-soak: _pic320-build-soak
 #     3/3, with the HARDENED build rule (budget gate, IHEX validation, cleanup
 #     traps), proving that hardening changed no emitted bytes either.
 #
-# Both hash sets are recorded in docs/pic10f320_merge_plan.md §15.4 and §15.5 and
-# in the phase commit messages. It is retired rather than kept because its
-# baseline lives in _incoming_pic10f320/, which Phase 7 deletes -- a gate whose
-# reference disappears is worse than no gate. What it can no longer catch is
-# stated plainly in §14.2: nothing at the merged tip now watches emitted bytes,
-# so a change to the hardware-integrity checks is invisible to the differential
-# lanes. Promoting it to a standing expected-image-hash regression is one file
-# plus one pic320-test-build prerequisite if that trade is later judged wrong.
+# Both historical hash sets remain recorded in the merge plan and validation
+# record. The post-audit standing gate moves the reviewed final set into
+# test/pic10f320/expected_images.sha256, where Phase 7 cannot delete it, and
+# `pic320-test-build` enforces it through CI/release qualification. This is the
+# byte-level witness for hardware-integrity changes the differential lanes cannot
+# see; rebaselining must be an explicit reviewed firmware/toolchain change.
 
 # --- cleanup -----------------------------------------------------------------
 # §5.7: scoped to PIC10F320 paths ONLY. The imported child recipe did
@@ -4470,7 +4506,8 @@ help:
 	@echo "  pic320-variants build every variant; removes the whole set if any one fails"
 	@echo "  pic320-size     XC8 program + data memory summary for one variant"
 	@echo "  pic320-test     ALL PIC10F320 pre-hardware checks: host lanes (all variants) +"
-	@echo "                  CONFIG + final-HEX return stack + analysis/gpsim per variant"
+	@echo "                  expected hashes + CONFIG + final-HEX stack + analysis/gpsim"
+	@echo "  pic320-test-build  rebuild all variants and enforce reviewed image hashes"
 	@echo "  pic320-test-host  host lanes for ONE variant: firmware<->core equivalence,"
 	@echo "                  actuation sequence, host fault injection, firmware coverage"
 	@echo "  pic320-test-host-variants  the same for all three (this is what \`make test\` runs;"
@@ -4516,6 +4553,7 @@ help:
 	@echo "  test-attiny202-fault-oracle  host regression for exact fault-run accounting"
 	@echo "  test-attiny202-model-ffi  host gate for the golden-model ctypes bridge"
 	@echo "  test-pic320-return-stack-oracle  host Intel-HEX/control-flow oracle selftest"
+	@echo "  test-pic320-expected-images  validate the pinned PIC10F320 image-hash contract"
 	@echo "  test-stack-bound  -fstack-usage static frame bound (limit: STACK_MAX_FRAME=$(STACK_MAX_FRAME) B)"
 	@echo "  test-stack-bound-regression  fail-closed stack-evidence checks"
 	@echo "  test-flash-budget  exact ATtiny13a gate (<= FLASH_T13_BUDGET=$(FLASH_T13_BUDGET)% of 1 KB)"

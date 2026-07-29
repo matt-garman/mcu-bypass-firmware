@@ -59,7 +59,7 @@ case "$PB_TARGET" in
 			|| { printf 'FAIL: canonical pic320 build validation requires PB_REBUILD_REQUIRED=1\n' >&2; exit 1; }
 		PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}
 		product_override_args=(PIC320_HEX= PIC320_ASM= PIC320_SYM= PIC320_BUILD_PRODUCTS=)
-		expected_checks=71
+		expected_checks=75
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; expected_checks= ;;
 esac
@@ -78,6 +78,8 @@ cp "$ROOT/scripts/validate-ihex.sh" "$repo/scripts/validate-ihex.sh"
 cp "$ROOT/test/check_stack_depth_pic.sh" "$repo/test/check_stack_depth_pic.sh"
 cp "$ROOT/test/pic10f320/return_stack_oracle.py" \
 	"$repo/test/pic10f320/return_stack_oracle.py"
+cp "$ROOT/test/pic10f320/check_expected_images.py" \
+	"$repo/test/pic10f320/check_expected_images.py"
 : > "$xc8_log"
 : > "$host_cc_log"
 : > "$host_run_log"
@@ -105,6 +107,13 @@ write_bad_depth_hex() {
 		':10000000022001280420080006200800082008001B' \
 		':100010000A2008000C2008000E200800102008000C' \
 		':0600200012200800080098' \
+		':00000001FF'
+}
+write_hash_mismatch_hex() {
+	# Structurally valid, safe PIC14 image with different bytes from write_valid_hex.
+	printf '%s\n' \
+		':0400000001280128AA' \
+		':02400E009E38DA' \
 		':00000001FF'
 }
 write_sidecars() {
@@ -161,6 +170,7 @@ case "$mode" in
 	bad-checksum) printf ':0100000001FF\n:00000001FF\n' > "$out" ;;
 	bad-stack) write_bad_stack_hex > "$out" ;;
 	bad-depth) write_bad_depth_hex > "$out" ;;
+	hash-mismatch) write_hash_mismatch_hex > "$out" ;;
 	eof-only) printf ':00000001FF\n' > "$out" ;;
 	trailing) printf ':0100000001FE\n:00000001FF\ntrailing garbage\n' > "$out" ;;
 	symlink)
@@ -202,6 +212,15 @@ cat > "$tools/noop-oracle.py" <<'EOF'
 raise SystemExit(0)
 EOF
 chmod 640 "$tools/noop-oracle.py"
+
+# The PIC10F320 byte-identity target must compare the fake compiler's canonical
+# output with a sandbox-local baseline rather than the production XC8 hashes.
+if [ "$PB_TARGET" = pic320 ]; then
+	fake_hash=390b76d89cfb079a761cb76c4688d48e7c0b486523b9e2d5acb203d909d9b259
+	for image in $PB_MATRIX_IMAGES; do
+		printf '%s  %s\n' "$fake_hash" "$image"
+	done > "$repo/test/pic10f320/expected_images.sha256"
+fi
 printf '#!/usr/bin/env sh\nexit 2\n' > "$tools/failing-awk"
 printf '#!/usr/bin/env sh\nexit 0\n' > "$tools/empty-awk"
 cat > "$tools/status1-comparison-awk" <<'EOF'
@@ -310,6 +329,14 @@ run_matrix_make() {
 		CC=true HOSTCC=true "$PB_CC_VAR=$tools/xc8" "$PB_BUILD_DIR_VAR=$PB_BUILD_DIR" \
 		"$PB_FW_BASE_VAR=$PB_FW_BASE" "$PB_TAG_VAR=$PB_TAG" \
 		"$PB_FLASH_VAR=$PB_FLASH_WORDS" STRICT_TOOLS=1 AWK=awk "$@"
+}
+
+run_expected_hash_make() {
+	make --no-print-directory -C "$repo" pic320-test-build \
+		CC=true HOSTCC=true PIC320_CC="$tools/xc8" PIC320_BUILD_DIR="$PB_BUILD_DIR" \
+		PIC320_FW_BASE="$PB_FW_BASE" PIC320_TAG="$PB_TAG" \
+		PIC320_FLASH_WORDS="$PB_FLASH_WORDS" \
+		PIC320_VARIANTS_ALL="$PB_MATRIX_VARIANTS" STRICT_TOOLS=1 AWK=awk "$@"
 }
 
 run_stack_make() {
@@ -604,6 +631,50 @@ if [ "$PB_MATRIX_REQUIRE_COMPLETE" -eq 1 ]; then
 		"$repo/scripts/validate-ihex.sh" "$repo/$PB_BUILD_DIR/$image"
 	done
 	checks=$((checks + 1))
+
+	if [ "$PB_TARGET" = pic320 ]; then
+		run_expected_hash_make >/dev/null
+		checks=$((checks + 1))
+
+		if output=$(export FAKE_XC8_MODE=hash-mismatch; run_expected_hash_make 2>&1); then
+			printf 'FAIL: PIC10F320 expected-image gate accepted changed image bytes\n' >&2
+			exit 1
+		fi
+		[[ "$output" == *"SHA-256 mismatch"* ]] \
+			|| { printf 'FAIL: changed PIC10F320 image failed for the wrong reason: %s\n' \
+				"$output" >&2; exit 1; }
+		for image in $PB_MATRIX_IMAGES; do
+			[[ -s "$repo/$PB_BUILD_DIR/$image" ]] \
+				|| { printf 'FAIL: hash mismatch removed inspectable image %s\n' \
+					"$image" >&2; exit 1; }
+		done
+		checks=$((checks + 1))
+
+		baseline="$repo/test/pic10f320/expected_images.sha256"
+		cp "$baseline" "$work/expected_images.sha256"
+		printf 'malformed baseline\n' > "$baseline"
+		if output=$(run_expected_hash_make 2>&1); then
+			printf 'FAIL: PIC10F320 expected-image gate accepted a malformed baseline\n' >&2
+			exit 1
+		fi
+		[[ "$output" == *"manifest"* ]] \
+			|| { printf 'FAIL: malformed PIC10F320 baseline failed for the wrong reason: %s\n' \
+				"$output" >&2; exit 1; }
+		cp "$work/expected_images.sha256" "$baseline"
+		checks=$((checks + 1))
+
+		checker="$repo/test/pic10f320/check_expected_images.py"
+		mv "$checker" "$work/check_expected_images.py"
+		if output=$(run_expected_hash_make 2>&1); then
+			printf 'FAIL: PIC10F320 expected-image gate accepted a missing checker\n' >&2
+			exit 1
+		fi
+		[[ "$output" == *"checker is missing or invalid"* ]] \
+			|| { printf 'FAIL: missing PIC10F320 checker failed for the wrong reason: %s\n' \
+				"$output" >&2; exit 1; }
+		mv "$work/check_expected_images.py" "$checker"
+		checks=$((checks + 1))
+	fi
 
 	expect_build_matrix_rejected "an incomplete set" "$PB_VARIANT" \
 		"$PB_MATRIX_VARIANTS_VAR must contain every supported name"
