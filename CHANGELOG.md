@@ -153,6 +153,11 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- Current release documentation, Make help, source comments, and generated
+  manifest wording now consistently describe ATtiny202 as release-supported and
+  use the 18-image, 15-soak, 28-evidence-file, 93-mutant contract. Dated
+  rehearsal records retain their historical 15-image, 12-soak, and 74-mutant
+  results.
 - The Classic AVR `timer_isr_called_` fault injection no longer treats an
   already-dark BYPASS LED after roughly 7 ms as proof of watchdog recovery. It
   starts ENGAGED, single-steps to the ISR's handshake write, corrupts it before

@@ -13,8 +13,9 @@
 #   The trust model rests on two legs:
 #     1. PROVENANCE -- every released image carries a MANIFEST recording the git
 #        commit, the exact toolchain versions, the per-image fuse bytes / CONFIG
-#        word, and the validation evidence (test-long + both pre-hardware and
-#        real-target PIC aggregates + 12-combination 24-h soak).
+#        word, and the validation evidence (test-long + both ATtiny202 gates +
+#        both pre-hardware and real-target PIC aggregates + 15-combination 24-h
+#        soak).
 #     2. REPRODUCIBILITY -- the Intel-HEX images are byte-deterministic for a
 #        fixed toolchain (objcopy ihex carries only code/data bytes, no
 #        timestamps/paths). SHA256SUMS pins those bytes; the tag-triggered CI
@@ -28,18 +29,20 @@
 #      EVERY required tool present. Unlike the dev-time targets (which skip
 #      cleanly when a tool is missing), a release FAILS LOUD on any absence -- a
 #      gate must never go green on a check that silently did nothing.
-#   1. Clean-build every release-supported image: AVR Classic, PIC10F322 and
-#      PIC10F320. The built set is then cross-checked against the CANONICAL set
-#      the Makefile declares (RELEASE_IMAGES), which is the only check here that
-#      can catch a forgotten build step -- an enumeration derived from the same
+#   1. Clean-build every release-supported image: AVR Classic, ATtiny202,
+#      PIC10F322 and PIC10F320. The built set is then cross-checked against the
+#      CANONICAL set the Makefile declares (RELEASE_IMAGES). This independent
+#      check catches a forgotten build step -- an enumeration derived from the same
 #      variant matrices as the build commands shrinks in lock-step with an
 #      omission and agrees with itself (merge plan §10, §14.8).
-#   2. Run `make test-long`, `make pic-test`, `make pic-test-target-variants`,
-#      `make pic320-test`, and `make pic320-test-target-variants` (the full
-#      pre-hardware gates for both PIC parts).
+#   2. Run `make test-long`, `make attiny202-test`,
+#      `make attiny202-test-target`, `make pic-test`,
+#      `make pic-test-target-variants`, `make pic320-test`, and
+#      `make pic320-test-target-variants` (the full qualification gates for
+#      every release-supported target).
 #   3. Run ALL release soak combinations IN PARALLEL for the full
 #      duration, collecting a pass/fail verdict and evidence from each. That is
-#      6 AVR + 3 PIC10F322 + 3 PIC10F320 = 12 combos.
+#      6 AVR Classic + 3 AVR-XT + 3 PIC10F322 + 3 PIC10F320 = 15 combos.
 #   4. Recheck source HEAD + cleanliness, then stage release/<VERSION>/ : the
 #      .hex images, SHA256SUMS, a provenance MANIFEST, a README, the
 #      soak/validation evidence, and a commit message.
@@ -359,8 +362,8 @@ req_file "$PIC_DFP/pic/include/proc/pic10f322.h"    "PIC10-12Fxxx DFP (PIC_DFP=)
 # ...and the PIC10F320's, asserted through its own pair. One DFP ships both
 # device headers, so this normally passes with the line above -- but a truncated
 # unpack, or a deliberately re-pinned PIC320_DFP, is exactly the case where the
-# 320 lane would otherwise skip cleanly and the release would ship 12 images
-# while claiming 15.
+# 320 lane would otherwise skip cleanly and the release would ship 15 images
+# while claiming 18.
 req_file "$PIC320_CC"                                "XC8 (PIC320_CC=)"
 req_file "$PIC320_DFP/pic/include/proc/pic10f320.h"  "PIC10F320 device header (PIC320_DFP=)"
 req_cmd "$GPSIM"       "apt: gpsim (pic-test-gpsim, pic320-test-gpsim)"
@@ -998,7 +1001,11 @@ REL_BANNER=""
 {
 	printf '# Firmware release %s\n\n' "$VERSION"
 	[ -n "$REL_BANNER" ] && printf '%s\n' "$REL_BANNER"
-	printf 'Prebuilt, fully-validated firmware images. Verify integrity with\n'
+	if [ "$DRY_RUN" -eq 1 ]; then
+		printf 'Prebuilt firmware rehearsal images; not fully validated. Verify integrity with\n'
+	else
+		printf 'Prebuilt, fully-validated firmware images. Verify integrity with\n'
+	fi
 	printf '`sha256sum -c SHA256SUMS`; reproduce from source per "Reproducing" below.\n\n'
 	printf 'Release scope: AVR Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT),\n'
 	printf 'PIC10F322 and PIC10F320.\n\n'
@@ -1029,7 +1036,7 @@ REL_BANNER=""
 	printf -- '- **Soak combinations:** %s\n' "$NCOMBOS"
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
-	printf -- '- **Validation:** `make test-long` + `make pic-test` + `make pic-test-target-variants` + `make pic320-test` + `make pic320-test-target-variants` (real-HEX SFR/SRAM fault recovery, firmware/model ctx_ lock-step, and GPIO transition/pulse timing on BOTH PIC parts) + %s-h parallel soak of every release soak combination (see evidence/).\n' "$hours"
+	printf -- '- **Validation:** `make test-long` + `make attiny202-test` + `make attiny202-test-target` + `make pic-test` + `make pic-test-target-variants` + `make pic320-test` + `make pic320-test-target-variants` (real-image fault handling, firmware/model ctx_ lock-step, and physical-output checks across AVR-XT and both PIC parts) + %s-h parallel soak of every release soak combination (see evidence/).\n' "$hours"
 	printf -- '- **Release set:** %d images, checked against the canonical `RELEASE_IMAGES` set declared in the Makefile -- not against whatever the build happened to produce.\n\n' "${#IMAGES[@]}"
 
 	printf '## Toolchain\n\n'
@@ -1114,7 +1121,11 @@ ok "release qualification metadata and evidence verified."
 # Commit message for the human to use verbatim (git commit -F ...).
 {
 	printf 'release: firmware %s\n\n' "$VERSION"
-	printf 'Prebuilt, fully-validated firmware images for %s.\n\n' "$VERSION"
+	if [ "$DRY_RUN" -eq 1 ]; then
+		printf 'Non-publishable dry-run rehearsal images for %s.\n\n' "$VERSION"
+	else
+		printf 'Prebuilt, fully-validated firmware images for %s.\n\n' "$VERSION"
+	fi
 	printf 'Built from %s with the toolchain pinned in TOOLCHAIN.adoc.\n' "$GIT_SHORT"
 	printf 'Scope: AVR Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT), PIC10F322 and\n'
 	printf 'PIC10F320 -- %d images, checked against the canonical RELEASE_IMAGES set the\n' "${#IMAGES[@]}"

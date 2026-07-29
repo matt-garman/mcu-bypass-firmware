@@ -82,7 +82,7 @@ statement from "the verified code is the shipped code". The honest summary is:
 *the PIC10F320's qualification design targets the same standard by a different
 and more elaborate route.* Historical runs and the `4b28210` full-tool dry
 rehearsal exercised that route. Production qualification of the final source,
-including all 12 full-duration soaks, is still pending; checksum signing, the
+including all 15 full-duration soaks, is still pending; checksum signing, the
 artifact-only release commit, and the unified signed-tag workflow follow that
 qualification and decide whether it is published.
 

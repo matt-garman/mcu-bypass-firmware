@@ -33,7 +33,7 @@ rows are closed.
 to a release-supported target after the status above was written, which changes
 every release-scope number in this plan: the canonical image set is **18**, not
 15; the soak set is **15** combinations, not 12; and the mutation inventory is
-**92**, not 74. Statements in this plan that ATtiny202 is development-only or
+**93**, not 74. Statements in this plan that ATtiny202 is development-only or
 absent from the release set — including §10 and the checklist row asserting that
 status — recorded the scope at their cited checkpoint and are superseded here.
 The PIC10F320 reasoning they support is unaffected: the exclusion argument was
@@ -2008,7 +2008,7 @@ the document it was when the requirement was set.
 - [ ] **OPEN — the remaining user action.** A green unified release has been
       independently verified before the child
       repository receives its pointer and is archived.
-      *(`make release VERSION=v0.9.6` with the real 24-hour soak of all 12
+      *(`make release VERSION=v0.9.6` with the real 24-hour soak of all 15
       combos, then tagging and signing, then the child pointer and archival — in
       that order, per §7. Archive rather than delete: the annotated changelog
       entry and this plan both link the child URL, and archived repositories stay
@@ -3189,7 +3189,7 @@ lines and reuses neither.)*
 **What remains, and why it is not mine to do:**
 
 1. **The release run.** `make release VERSION=v0.9.6` runs a 24-hour parallel
-   soak of all **12** combos and stages `release/v0.9.6/`. It requires a clean
+   soak of all **15** combos and stages `release/v0.9.6/`. It requires a clean
    tree, so the Phase-8 preparation above must be committed first. The script
    stops before every git operation and prints the exact `git add` / `git commit`
    / `git tag -s` / checksum-signing commands.

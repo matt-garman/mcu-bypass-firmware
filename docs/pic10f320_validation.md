@@ -21,10 +21,10 @@ end-to-end routing evidence, but it was explicitly non-publishable and is not a
 24-hour qualification.
 
 The rehearsal also predates the current production contract: dry-run rejection,
-the exact 12-soak/22-file `QUALIFICATION` verifier, release-history binding,
+the exact 15-soak/28-file `QUALIFICATION` verifier, release-history binding,
 immutable PIC matrices and sidecars, conserved mutation-result accounting, and
 pinned checksum/tag signature enforcement all landed afterward. Therefore no
-exact-final-source production `QUALIFICATION` exists, the 12 combinations have
+exact-final-source production `QUALIFICATION` exists, the 15 combinations have
 not run for 24 hours under the current pipeline, `release/v0.9.6/` does not
 exist, and the unified tag workflow has not published a release. Numeric results
 below are historical evidence at their recorded tips, not a current release
@@ -347,19 +347,19 @@ That corrected execution is historical rather than final-source production
 evidence. The mutation driver has since gained immutable category counts,
 conservation equations, checked workers and process groups, atomic exact result
 records, and fail-closed infrastructure-status classification. Production must
-rerun all 74 mutants through that current accounting contract.
+rerun all 93 mutants through that current accounting contract.
 
 The 36 PIC10F320 mutants are split by what they **need**, not by what they test:
 27 require only a host C compiler and ride with the unskippable core batch; 9
 require XC8 + gpsim + libgpsim and sit behind a tool probe that first verifies
-the *unmutated* tree genuinely passes. The other categories are 23 core/AVR, 6
-PIC10F322 gpsim, 1 PIC10F322 soak, and 8 PIC10F322 target mutants, for the pinned
-total of 74. Without the tool split, PIC10F320 mutants would "survive" on any
-host lacking the PIC toolchain — a false pass.
+the *unmutated* tree genuinely passes. The other categories are 23 core/AVR
+Classic, 19 AVR-XT, 6 PIC10F322 gpsim, 1 PIC10F322 soak, and 8 PIC10F322 target
+mutants, for the pinned total of 93. Without the tool split, PIC10F320 mutants
+would "survive" on any host lacking the PIC toolchain — a false pass.
 
 The accounting contract is independent of the arrays it measures: exact category
-counts pin the complete 74-mutant inventory, dispatched plus skipped must equal
-74, and killed plus survived plus errored must equal dispatched. A worker failure,
+counts pin the complete 93-mutant inventory, dispatched plus skipped must equal
+93, and killed plus survived plus errored must equal dispatched. A worker failure,
 sandbox-copy failure, malformed inventory/baseline command, partial result pair,
 noncanonical status/output, or unexpected result artifact is an error rather than
 a kill. The host-only sandbox/accounting selftest exercises this contract in

@@ -367,7 +367,7 @@ prerequisites under test. Two constraints must survive the merge:
    failed closed there once (fixed by gating on `git rev-parse
    --is-inside-work-tree`).
 
-Keep the fail-closed self-tests either way: `MUTATION_SANDBOX_SELFTEST=1` (24
+Keep the fail-closed self-tests either way: `MUTATION_SANDBOX_SELFTEST=1` (29
 checks, including the depth regression that reaches `test/pic/fw_coverage/` and
 the immutable inventory/result-accounting contract) and
 `validate_pic320_sandbox`'s required-file list. The hand-maintained list only

@@ -1527,7 +1527,7 @@ program-pic: pic
 	$(PIC_PROG_CMD)
 
 # ============================================================================
-# BUILD -- ATtiny202 (AVR-XT / avrxmega3) toolchain smoke gate  [Phase 0]
+# BUILD -- ATtiny202 (AVR-XT / avrxmega3) toolchain/device-pack smoke gate
 # ============================================================================
 #
 # A THIRD toolchain path -- but, unlike the PIC's closed XC8, the compiler here
@@ -1539,25 +1539,25 @@ program-pic: pic
 # (third_party/ is gitignored), exactly mirroring how the PIC build consumes an
 # uncommitted PIC_DFP.
 #
-# `make attiny202-smoke` is a COMPILE/LINK gate only: there is no firmware shell
-# yet (src/bypass_mcu_avr_xt.c is Increment 2). It builds test/avr/attiny202_smoke.c
-# -- which exercises every peripheral group the shell will drive (PORTA GPIO +
-# PINnCTRL pull-up, CCP-protected CLKCTRL + WDT, TCB0 tick ISR, SLPCTRL idle,
-# RSTCTRL) -- with the project's exact strict CFLAGS, then asserts the emitted
-# image is avrxmega3 and fits the 2 KB flash budget. STANDALONE (NOT part of
-# `make test`, since the DFP may be absent in CI); skips cleanly when the
-# vendored device files are missing. There is no instruction-level simulator for
-# AVR8X (simavr/QEMU do not model it), so the eventual shell is validated by
-# static analysis + real hardware; the pure core keeps full formal coverage.
+# `make attiny202-smoke` is a COMPILE/LINK gate independent of the shipping
+# firmware build below. It builds test/avr/attiny202_smoke.c -- which exercises
+# every peripheral group the shell drives (PORTA GPIO + PINnCTRL pull-up,
+# CCP-protected CLKCTRL + WDT, TCB0 tick ISR, SLPCTRL idle, RSTCTRL) -- with the
+# project's exact strict CFLAGS, then asserts the emitted image is avrxmega3 and
+# fits the 2 KB flash budget. It is a standalone developer target because the DFP
+# may be absent; release qualification runs it through `attiny202-test` with
+# STRICT_TOOLS=1. Missing vendored device files therefore skip locally and fail
+# closed for release.
 XT_MCU   ?= attiny202
 XT_DEVLIB ?= tn202
 XT_DFP   ?= third_party/attiny_dfp
 XT_SPEC_DIR = $(XT_DFP)/gcc/dev/$(XT_MCU)
 XT_INC      = $(XT_DFP)/include
-# ATtiny202: 2 KB flash / 128 B SRAM. Budget the smoke against the full 2 KB (the
-# shell's own budget gate lands in Increment 2). NOTE: avr-size --mcu=attiny202
-# prints "Device: Unknown" under binutils 2.26 but STILL reports the Program:
-# byte count, so the awk parse below works (same tactic as the PIC word parse).
+# ATtiny202: 2 KB flash / 128 B SRAM. Budget the smoke against the full 2 KB;
+# the shipping build below enforces the same limit independently. NOTE:
+# avr-size --mcu=attiny202 prints "Device: Unknown" under binutils 2.26 but STILL
+# reports the Program: byte count, so the awk parse below works (same tactic as
+# the PIC word parse).
 XT_FLASH_BYTES ?= 2048
 # The vendored device files that must exist for the build (the fetch script's
 # output); their absence -> skip cleanly with a fetch hint.
@@ -1596,24 +1596,25 @@ attiny202-smoke: $(XT_SMOKE_SRC) | $(AVR_BUILD_DIR)
 	echo "OK:   avrxmega3, $(XT_SMOKE_ELF) uses $$used B ($${pct}%) of $(XT_FLASH_BYTES) B"
 
 # ============================================================================
-# BUILD -- ATtiny202 (AVR-XT / avrxmega3) development firmware  [non-release]
+# BUILD -- ATtiny202 (AVR-XT / avrxmega3) release-supported firmware
 # ============================================================================
 #
 # The real firmware build (the smoke gate above only proves the toolchain). The
 # ATtiny202 shell (src/bypass_mcu_avr_xt.c) implements the same bypass_hw_iface.h
 # contract as the classic-AVR and PIC shells and links the UNCHANGED pure core
 # (bypass_pure.c) + one output driver -- exactly like `all13` / `pic`. Like the
-# PIC build it is STANDALONE (the vendored DFP may be absent in CI, and there is
-# NO AVR8X simulator) and gates every variant on the device's 2 KB flash budget;
-# it skips cleanly when the DFP or the shell source is absent.
+# PIC build it consumes a vendored DFP and gates every variant on the device's
+# 2 KB flash budget. Developer invocations skip cleanly when the DFP is absent;
+# CI/release gates use STRICT_TOOLS=1 so missing prerequisites fail closed.
 #
 # simavr/QEMU do not model AVR8X, but yasimavr DOES: the `attiny202-sim` /
 # -soak / -fault targets below run the real built image on a patched yasimavr
 # (scripts/fetch_yasimavr.sh), giving the shell register-level dynamic coverage
 # close to the classic simavr harness. The shell is thus validated by (1) this
 # strict-flag cross-build, (2) the flash-budget gate, (3) cppcheck + MISRA
-# static analysis (attiny202-analyze), (4) the yasimavr harness, and (5) real
-# hardware. The pure core keeps full host + formal coverage via `make test`.
+# static analysis (attiny202-analyze), and (4) the yasimavr harness. Real
+# hardware-bench validation remains a documented gap. The pure core keeps full
+# host + formal coverage via `make test`.
 XT_BUILD_DIR ?= build_avr_xt
 XT_TAG       ?= attiny202
 XT_F_CPU     ?= 2000000UL
@@ -2141,9 +2142,9 @@ attiny202-delay-oracle: attiny202
 	OBJDUMP=$(OBJDUMP) python3 test/avr/test_attiny202_delay_oracle.py $$elves
 
 # Aggregate: every ATtiny202 pre-hardware check (fuses + smoke + build/budget +
-# analysis + coil-pulse width oracle).
-# STANDALONE -- NOT part of `make test` (no AVR8X simulator; DFP may be absent in
-# CI). Each sub-target skips cleanly when its tool/DFP is missing.
+# analysis + coil-pulse width oracle). It is not part of `make test` because the
+# vendored DFP may be absent; each sub-target skips cleanly for developers, while
+# release qualification invokes this aggregate with STRICT_TOOLS=1.
 .PHONY: attiny202-test
 attiny202-test: test-fuses attiny202-smoke attiny202 attiny202-analyze attiny202-delay-oracle
 	@echo "=== all ATtiny202 pre-hardware checks complete ==="
@@ -4332,8 +4333,9 @@ print-%:
 #      is present (the inverse of the dev-time "skip cleanly" behaviour -- a
 #      release must never green-light on a tool that silently did nothing);
 #   2. clean-builds all AVR + PIC variant images;
-#   3. runs `make test-long` plus both pre-hardware and real-target aggregates for
-#      PIC10F322 and PIC10F320, then ALL 12 soak combos in parallel;
+#   3. runs `make test-long`, both ATtiny202 qualification aggregates, and both
+#      pre-hardware and real-target aggregates for PIC10F322 and PIC10F320, then
+#      ALL 15 soak combos in parallel;
 #   4. rechecks source HEAD + worktree cleanliness, then stages
 #      release/<VERSION>/ with the .hex images, SHA256SUMS, a provenance MANIFEST
 #      (toolchain versions, per-image fuse bytes / CONFIG word, flashing command,
@@ -4433,7 +4435,7 @@ release:
 # One-line summary of the most useful targets.
 help:
 	@echo "Variants: $(VARIANTS)  (select with VARIANT=<name>; default $(VARIANT))"
-	@echo "MCUs: ATtiny13a (primary) + tinyx5 family t$(TINYX5)"
+	@echo "MCUs: ATtiny13a/45/85 + ATtiny202 + PIC10F322 + PIC10F320"
 	@echo "Build:"
 	@echo "  all (default)   build ALL ATtiny13a variant firmwares (.hex) + sizes"
 	@echo "  all13           build all variant firmwares for ATtiny13a"
@@ -4473,9 +4475,9 @@ help:
 	@echo "                  (PIC320_TARGET_VARIANT); pic320-test-target-variants runs all"
 	@echo "  pic320-test-soak  libgpsim soak (PIC320_SOAK_VARIANT, PIC320_SOAK_DURATION_MS)"
 	@echo "  pic320-clean    remove build_pic10f320/ (build + coverage artifacts)"
-	@echo "ATtiny202 DEVELOPMENT-ONLY / NON-RELEASE (AVR-XT / avrxmega3):"
+	@echo "ATtiny202 release-supported target (AVR-XT / avrxmega3):"
 	@echo "  scripts/fetch_attiny_dfp.sh [DIR]  vendor the pinned device files (default XT_DFP=$(XT_DFP))"
-	@echo "  attiny202-smoke  Phase-0 gate: compile/link test/avr/attiny202_smoke.c, assert"
+	@echo "  attiny202-smoke  toolchain/device-pack gate: compile/link the peripheral smoke image, assert"
 	@echo "                   avrxmega3 + $(XT_FLASH_BYTES) B budget (standalone; skips if XT_DFP absent)"
 	@echo "  attiny202        build all variants for ATtiny202 + 2 KB flash-budget gate"
 	@echo "  attiny202-analyze  cppcheck + MISRA on the AVR-XT shell (DFP+avr-libc; standalone)"
@@ -4489,9 +4491,11 @@ help:
 	@echo "                   (standalone; XT_SOAK_DURATION_MS=, XT_SIM_VARIANT=)"
 	@echo "  attiny202-lockstep  yasimavr ctx_-vs-model lock-step every settled tick"
 	@echo "                   (standalone; XT_LOCKSTEP_ITERS=, XT_SIM_VARIANT=)"
+	@echo "  attiny202-test-target  sim + fault + lock-step across all variants"
+	@echo "                   (release uses STRICT_TOOLS=1 so missing prerequisites fail closed)"
 	@echo "  attiny202-program  set fuses + flash one variant over UPDI (VARIANT=, XT_UPDI_PORT=)"
 	@echo "Test (each runs across ALL variants):"
-	@echo "  test            FAST full suite -- analyze, model, sim (all MCUs), coverage"
+	@echo "  test            FAST full suite -- analysis, model, Classic sim, host regressions, coverage"
 	@echo "  test-long       FULL exhaustive suite (minutes); alias: stress"
 	@echo "  scripts/ci-local.sh  reproduce the GitHub CI suite locally before pushing (--pr, --help)"
 	@echo "  test-host       golden-model algorithm tests (host, variant-agnostic)"
@@ -4524,7 +4528,7 @@ help:
 	@echo "  test-pic-build  PIC image validation + PIC10F320 rebuild-trigger checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
 	@echo "  test-release-provenance  release source/compiler provenance checks"
-	@echo "  test-release-qualification  exact release evidence + 12-soak publication checks"
+	@echo "  test-release-qualification  exact release evidence + 15-soak publication checks"
 	@echo "  test-release-history  bind release history + checksum/tag signatures"
 	@echo "  test-build-serialization  worktree Make/release lock regression"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"

@@ -7,11 +7,12 @@ documentation marks them as superseded. Each release lives in its own
 `vX.Y.Z/` subdirectory and is also published as a
 [GitHub Release](../../releases).
 
-> **Current availability:** committed releases stop at `v0.9.5` and contain no
-> PIC10F320 image. The PIC10F320 is integrated in the source tree, but its first
-> unified prebuilt release remains pending production qualification on the final
-> source. A prior full-tool dry rehearsal passed, but was explicitly
-> non-publishable and predates the current release contract.
+> **Current availability:** committed releases stop at `v0.9.5` and contain
+> neither PIC10F320 nor ATtiny202 images. Both targets are release-supported in
+> the source tree, but their first unified prebuilt release remains pending
+> production qualification on the final source. A prior full-tool dry rehearsal
+> passed, but was explicitly non-publishable and predates the current release
+> contract.
 
 ## Safety warning: v0.9.0-v0.9.2 TMUX images
 
@@ -49,16 +50,17 @@ validation suite — backs these binaries, through two mechanisms:
    source commit, pinned toolchain versions, per-image fuse bytes / CONFIG word,
    and its validation evidence. Beginning with the first unified release
    (`v0.9.6` or later), a machine-readable `QUALIFICATION` record is checked
-   against the exact 22-file retained-evidence inventory and every one of the 12
+   against the exact 28-file retained-evidence inventory and every one of the 15
    soak logs before publication; each log must identify its canonical
    combination and report the configured duration, expected nonzero
-   liveness-check count, and zero failure counters. The current unified pipeline requires
-   `make test-long`, both PIC10F322 gates (`make pic-test` and
+   liveness-check count, and zero failure counters. The current unified pipeline
+   requires `make test-long`, both ATtiny202 gates (`make attiny202-test` and
+   `make attiny202-test-target`), both PIC10F322 gates (`make pic-test` and
    `make pic-test-target-variants`), both PIC10F320 gates (`make pic320-test` and
    `make pic320-test-target-variants`), and a **24-hour soak of every release
    soak combination**. Releases `v0.9.0` through `v0.9.5` predate
    `QUALIFICATION` and use the manifest/evidence contract recorded in their own
-   tags; they must not be judged against the later 12-soak/22-file inventory.
+   tags; they must not be judged against the later 15-soak/28-file inventory.
    Because the gates are long-running, release orchestration
    rechecks both the recorded source `HEAD` and worktree cleanliness immediately
    before staging artifacts. Only explicitly non-publishable dry runs may proceed
@@ -221,7 +223,7 @@ byte-identical images.
 ### Historical releases (v0.9.0 through v0.9.5)
 
 These releases have no `QUALIFICATION`, and their image matrices and Make targets
-predate the unified 15-image command above. Do not run the current qualification
+predate the unified 18-image command above. Do not run the current qualification
 verifier or append `pic320-variants` to a historical build command. For
 `v0.9.3` through `v0.9.5`, check out the release's own tag and follow the
 **Reproducing these images** section in that release's `MANIFEST.md`. Running the
