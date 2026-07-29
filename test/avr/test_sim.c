@@ -208,7 +208,18 @@ static avr_t      *g_avr = NULL;
 static int         g_led_level    = 0; // current PB1 level
 static uint32_t    g_led_changes  = 0; // count of PB1 transitions
 static int         g_saw_sleep    = 0; // set if CPU ever entered cpu_Sleeping
-static int         g_saw_crash    = 0; // set if CPU ever hit cpu_Crashed (WDT)
+static int         g_saw_crash    = 0; // set if CPU ever hit cpu_Crashed
+static uint32_t    g_resets       = 0; // count of device resets (see reset_hook)
+
+// simavr calls avr->reset from avr_reset(). A watchdog timeout reaches
+// avr_reset() through avr_watchdog_run_callback_software_reset(), so this hook
+// is a direct, positive witness that the WDT actually reset the device.
+//
+// Do NOT use cpu_Crashed for this: simavr 1.6 sets that state only from
+// avr_sadly_crashed() (illegal opcode / stack crash). Its watchdog reset path
+// leaves the core in cpu_Running, and a core parked in cli()+busy-loop is
+// simply "running" as far as the simulator is concerned.
+static void reset_hook(avr_t *avr) { (void)avr; g_resets++; }
 
 // Control-output watchers. PB2 and PB3 are watched generically; their meaning
 // is variant-specific (see the pin-mapping comment at the top of the file).
@@ -310,8 +321,9 @@ static void run_ms(unsigned ms) {
         if (st == cpu_Sleeping)  { g_saw_sleep = 1; }
         if (st == cpu_Crashed)   { g_saw_crash = 1; }
         if (st == cpu_Done || st == cpu_Crashed) {
-            // cpu_Crashed is how simavr reports a watchdog reset; some tests
-            // expect this, so don't spam unless it's a surprise Done.
+            // Either state is terminal for avr_run(), so stop rather than spin.
+            // Note a watchdog reset produces NEITHER: simavr resets the core in
+            // place and keeps running (see reset_hook / g_resets).
             break;
         }
     }
@@ -419,11 +431,16 @@ static int sim_reset_raw(int footsw_pressed_at_power_on, int settle) {
     }
 #endif
 
+    // Witness every subsequent device reset. Installed after avr_init()/
+    // avr_load_firmware() so the power-on reset they perform is not counted.
+    g_avr->reset = reset_hook;
+
     // reset instrumentation
     g_led_level = 0;
     g_led_changes = 0;
     g_saw_sleep = 0;
     g_saw_crash = 0;
+    g_resets = 0;
     g_last_led_change_cycle = 0;
     for (int i = 0; i < N_CTL; ++i) {
         g_ctl_level[i] = 0;
@@ -1435,7 +1452,8 @@ static void test_fault_inject_effect_state(void) {
 // NOTE: the timer ISR rewrites this flag to TIMER_ISR_CALLED every 1ms. Settle
 // at IDLE with the flag at NOT_CALLED, single-step until the ISR writes CALLED,
 // then replace that value before main() can execute its sanity check. On tinyx5,
-// the modeled WDT reset is an unambiguous witness that the guard caught it. This
+// the modeled WDT reset is an unambiguous witness that the guard caught it: the
+// reset_hook() count rises, and the LED returns dark from ENGAGED. This
 // particular injection remains tinyx5-only because ATtiny13a has no modeled WDT
 // reset to provide the same positive witness.
 #ifdef TARGET_TINYX5
@@ -1474,10 +1492,10 @@ static void test_fault_inject_timer_isr_flag(void) {
           "fault-inject [timer_isr_called_]: could not inject after ISR write");
     if (injected == 0) return;
 
-    g_saw_crash = 0;
+    g_resets = 0;
     run_ms(500);
-    CHECK(g_saw_crash != 0,
-          "fault-inject [timer_isr_called_]: WDT reset was not observed");
+    CHECK(g_resets != 0,
+          "fault-inject [timer_isr_called_]: WDT system reset was not observed");
     CHECK(g_led_level == 0,
           "fault-inject [timer_isr_called_]: reset returned LED output dark");
 }

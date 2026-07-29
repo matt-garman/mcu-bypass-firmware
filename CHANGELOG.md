@@ -156,9 +156,9 @@ file is the human-readable summary of *what changed*.
 - The Classic AVR `timer_isr_called_` fault injection no longer treats an
   already-dark BYPASS LED after roughly 7 ms as proof of watchdog recovery. It
   starts ENGAGED, single-steps to the ISR's handshake write, corrupts it before
-  main can read it, and requires both simavr's crash/reset witness and
-  fail-safe dark output after reset. A dedicated mutant removes only that sanity
-  term.
+  main can read it, and requires both a device-reset witness (simavr's
+  `avr->reset` hook, which its watchdog reset path calls) and fail-safe dark
+  output after reset. A dedicated mutant removes only that sanity term.
 - The ATtiny202 fault matrix now covers `PORTA.PINnCTRL.INVEN` on the LED,
   control/relay, parked-spare, and footswitch pins. The PA7 case preserves its
   pull-up while reversing input polarity, proving the firmware's exact PA7
