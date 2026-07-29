@@ -1182,6 +1182,9 @@ PIC_SOAK_LIVENESS_INTERVAL_MS ?= 60000
 PIC_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
 PIC_SOAK_COMBINATION_NAME ?= standalone
 PIC_PIN_LOOKUP_HDR = test/pic/find_pin_exact.h
+PIC_FAULT_CORE_HDR = test/pic/test_fault_pic_core.h
+PIC_IO_CORE_HDR = test/pic/test_io_pic_core.h
+PIC_LOCKSTEP_CORE_HDR = test/pic/test_lockstep_pic_core.h
 PIC_SOAK_SRC = test/pic/test_soak_pic.cc
 PIC_SOAK_DEPS = $(PIC_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) test/soak_timing_config.h
 PIC_SOAK_BIN = test/pic/test_soak_pic
@@ -1302,7 +1305,7 @@ PIC_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2
 		-DF_CPU_HZ=$(PIC_XTAL) -D$(macro_$(PIC_FAULT_VARIANT)) $(PIC_FAULT_CTX_DEF) \
 		$(PIC_FAULT_SRC) -o $(PIC_FAULT_BIN) -lgpsim
 
-$(PIC_FAULT_BIN): $(PIC_FAULT_SRC) $(PIC_PIN_LOOKUP_HDR)
+$(PIC_FAULT_BIN): $(PIC_FAULT_SRC) $(PIC_FAULT_CORE_HDR) $(PIC_PIN_LOOKUP_HDR)
 	$(PIC_FAULT_COMPILE)
 
 .PHONY: pic-test-fault
@@ -1363,7 +1366,8 @@ PIC_LOCKSTEP_COMPILE = \
 			-DF_CPU_HZ=$(PIC_XTAL) $(PIC_LOCKSTEP_CTX_DEF) \
 			$(PIC_LOCKSTEP_SRC) $(PIC_LOCKSTEP_MODEL_OBJ) -o $(PIC_LOCKSTEP_BIN) -lgpsim
 
-$(PIC_LOCKSTEP_BIN): $(PIC_LOCKSTEP_SRC) $(PIC_PIN_LOOKUP_HDR) $(PURE_HOST_DEP)
+$(PIC_LOCKSTEP_BIN): $(PIC_LOCKSTEP_SRC) $(PIC_LOCKSTEP_CORE_HDR) \
+                     $(PIC_PIN_LOOKUP_HDR) $(PURE_HOST_DEP)
 	$(PIC_LOCKSTEP_COMPILE)
 
 .PHONY: pic-test-lockstep
@@ -1412,7 +1416,7 @@ PIC_IO_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0)
 		-DF_CPU_HZ=$(PIC_XTAL) -D$(macro_$(PIC_IO_VARIANT)) \
 		$(PIC_IO_SRC) -o $(PIC_IO_BIN) -lgpsim
 
-$(PIC_IO_BIN): $(PIC_IO_SRC) $(PIC_PIN_LOOKUP_HDR)
+$(PIC_IO_BIN): $(PIC_IO_SRC) $(PIC_IO_CORE_HDR) $(PIC_PIN_LOOKUP_HDR)
 	$(PIC_IO_COMPILE)
 
 .PHONY: pic-test-io
@@ -3859,16 +3863,18 @@ pic320-analyze-misra: $(PIC320_SRC) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRE
 # run the REAL built HEX in a simulated PIC10F320, so they are the only lanes
 # that see the emitted image rather than host-compiled source.
 #
-# FOLD/FORK dispositions actually taken (merge plan §4), each decided from a
-# non-comment diff rather than assumed:
+# Current FOLD/PARAM/FORK dispositions (merge plan §4 plus post-merge
+# reconciliation), each decided from a non-comment diff rather than assumed:
 #   FOLD   power_on_pressed.stc     -- executable stimulus byte-identical
 #   FOLD   run_gpsim*.sh            -- differed only in the default PROC, and
 #                                      they already parameterize on
 #                                      PIC_GPSIM_PROC, so the 320 just overrides
 #   FOLD   test_soak_pic.cc         -- the parent copy is AHEAD (SOAK_LIVENESS_DUE)
 #   PARAM  test_config_pic.c        -- one printf label; now PIC_DEVICE_NAME
-#   FORK   test_{fault,io,lockstep}_pic.cc, footswitch_toggle.stc
-#                                   -- genuinely chip-specific, in test/pic10f320/gpsim/
+#   PARAM  test_{fault,io,lockstep}_pic.cc
+#                                   -- thin per-part adapters include shared cores
+#                                      in test/pic/; fault policy/counts stay explicit
+#   FORK   footswitch_toggle.stc    -- chip-specific gpsim command script
 PIC320_GPSIM_PROC ?= p10f320
 PIC320_GPSIM_DIR   = test/pic10f320/gpsim
 PIC320_GPSIM_TOGGLE_STC := $(PIC320_GPSIM_DIR)/footswitch_toggle.stc
