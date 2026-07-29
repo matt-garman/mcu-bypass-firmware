@@ -47,11 +47,12 @@
 //        iteration afterward. Driving one input per CLRWDT firing handles both for
 //        free -- exactly as the host harness (one input per loop iteration) does.
 //
-// Build/run via the Makefile:  `make test-lockstep-gpsim`
+// Build/run via the Makefile:  `make pic320-test-lockstep`
 //   Links libgpsim (needs gpsim-dev + libglib2.0-dev) and the reference model.
 //   It is not part of development `make test`; individual invocation is
-//   skip-clean, while regular CI's fail-closed `make test-target-variants`
-//   aggregate runs it for every variant and requires its PASS marker.
+//   skip-clean, while regular CI's fail-closed
+//   `make pic320-test-target-variants` aggregate runs it for every variant and
+//   requires its PASS marker.
 
 #include <cstdio>
 #include <cstdint>
