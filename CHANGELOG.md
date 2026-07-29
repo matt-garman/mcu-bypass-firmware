@@ -52,13 +52,17 @@ file is the human-readable summary of *what changed*.
   recreate exactly the drift hazard `model_step.h` exists to eliminate. Its own
   host gate (`make test-attiny202-model-ffi`) asserts independent hard-coded
   algorithm properties, since lock-step mutates model and firmware together.
-- An **ATtiny202 mutation lane**: 18 mutants against the AVR-XT shell and the two
+- An **ATtiny202 mutation lane**: 19 mutants against the AVR-XT shell and the two
   shared coil-pulse widths, each mapped to the gate that observes what the fault
   actually perturbs. Nothing previously established that this lane's suite would
-  fail on a defect in the shell it exists to test. Gated on the ATtiny_DFP and the
-  patched yasimavr venv both resolving *and* every kill target passing on the
-  unmutated tree, since each `attiny202-*` target exits 0 on a missing input and
-  would otherwise report 18 survivors as a clean run.
+  fail on a defect in the shell it exists to test. One mutant weakens the PA7
+  pin-control guard to its pre-hardening bit test rather than defeating it, which
+  is what proves the fault matrix's `PIN7CTRL=0x88` injection is load-bearing:
+  that value keeps `PULLUPEN` set, so only the exact comparison can reject it.
+  Gated on the ATtiny_DFP and the patched yasimavr venv both resolving *and*
+  every kill target passing on the unmutated tree, since each `attiny202-*`
+  target exits 0 on a missing input and would otherwise report 19 survivors as a
+  clean run.
 - `make attiny202-test-target`, the fail-closed AVR-XT aggregate (sim + fault +
   lock-step, every variant) that release qualification and release CI run with
   `STRICT_TOOLS=1`.
@@ -170,8 +174,8 @@ file is the human-readable summary of *what changed*.
   Producer and verifier version validation now matches the workflow's optional
   hyphen-suffix trigger and rejects malformed or invalid Git tag names before a
   production qualification run.
-- Mutation results now conserve an immutable 92-mutant inventory across seven
-  pinned categories: dispatched plus skipped must equal 92, and killed plus
+- Mutation results now conserve an immutable 93-mutant inventory across seven
+  pinned categories: dispatched plus skipped must equal 93, and killed plus
   survived plus errored must equal dispatched. Inventory records, baseline Make
   commands, worker exits, sandbox setup, atomic result pairs, exact status/output
   grammar, and unexpected artifacts all fail closed instead of allowing a
@@ -253,8 +257,8 @@ file is the human-readable summary of *what changed*.
 - Mutation skips now report whether a lane was disabled because a tool was
   absent or because its baseline FAILED, and the closing advice no longer tells
   the reader to install a toolchain that is already complete. With both sandbox
-  gaps closed, `make test-mutation MUTATION_ALLOW_SKIP=0` completes all 92
-  mutants — 92 killed, 0 survived, 0 errored, 0 skipped.
+  gaps closed, `make test-mutation MUTATION_ALLOW_SKIP=0` completes all 93
+  mutants — 93 killed, 0 survived, 0 errored, 0 skipped.
 - The PIC10F320 real-HEX target aggregate now requires explicit fault-injection,
   lock-step, and target-I/O completion markers, so a skipped or incomplete lane
   cannot be reported as a successful CI/release gate.

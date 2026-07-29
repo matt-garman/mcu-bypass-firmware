@@ -47,13 +47,13 @@ policy_rc=$?
 source "$SCRIPT_DIR/mutation_accounting.sh"
 
 readonly MUTATION_EXPECTED_CORE=23
-readonly MUTATION_EXPECTED_XT=18
+readonly MUTATION_EXPECTED_XT=19
 readonly MUTATION_EXPECTED_PIC_GPSIM=6
 readonly MUTATION_EXPECTED_PIC_TARGET=8
 readonly MUTATION_EXPECTED_PIC_SOAK=1
 readonly MUTATION_EXPECTED_PIC320_HOST=27
 readonly MUTATION_EXPECTED_PIC320_TOOL=9
-readonly MUTATION_EXPECTED_TOTAL=92
+readonly MUTATION_EXPECTED_TOTAL=93
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
@@ -793,6 +793,12 @@ XT_MUTATIONS=(
 "src/bypass_mcu_avr_xt.c	s@((uint8_t)WDT_LOCK_bm  == wdt_locked)  &&@(1U != 0U) \&\&@	XT_SIM_VARIANT=cd4053 attiny202-fault	XT WDT hardware-lock guard defeated; an unlocked watchdog never forces reset"
 "src/bypass_mcu_avr_xt.c	s@((uint16_t)TCB0_CCMP_1MS == tcb0_ccmp) ;@(1U != 0U) ;@	XT_SIM_VARIANT=cd4053 attiny202-fault	XT tick-period (TCB0.CCMP) guard defeated; a corrupt 1 ms reload never forces reset"
 "src/bypass_mcu_avr_xt.c	s@return (PORTA.PIN7CTRL == (uint8_t)PORT_PULLUPEN_bm);@return 1U;@	XT_SIM_VARIANT=cd4053 attiny202-fault	XT footswitch pin-control guard defeated; a cleared PA7 PULLUPEN (floating input) never forces reset"
+# Not a defeated guard but a WEAKENED one: this is the exact pre-hardening
+# predicate, so it still catches a cleared pull-up and only stops catching
+# INVEN. It is the mutant that proves the fault matrix's PIN7CTRL=0x88 case is
+# load-bearing -- 0x88 keeps PULLUPEN set, so the bit test below is satisfied
+# and only the exact comparison can reject it.
+"src/bypass_mcu_avr_xt.c	s@return (PORTA.PIN7CTRL == (uint8_t)PORT_PULLUPEN_bm);@return (PORTA.PIN7CTRL \& (uint8_t)PORT_PULLUPEN_bm) != 0U;@	XT_SIM_VARIANT=cd4053 attiny202-fault	XT footswitch pin-control guard weakened to a PULLUPEN bit test; an INVEN upset preserving the pull-up reverses the active-low PA7 sense undetected"
 # -- liveness: killed by the soak's reset witness ------------------------------
 "src/bypass_mcu_avr_xt.c	s@            hw_wdt_pet();@            (void)0; /* MUTANT: no WDT pet */@	XT_SIM_VARIANT=cd4053 XT_SOAK_DURATION_MS=$XT_SOAK_MUT_MS XT_SOAK_LIVENESS_INTERVAL_MS=$XT_SOAK_MUT_MS XT_SOAK_PROGRESS_INTERVAL_MS=$XT_SOAK_MUT_MS attiny202-soak	XT main-loop WDT pet removed; the soak's GPR0 reset witness trips within one ~256 ms WDT period"
 "src/bypass_mcu_avr_xt.c	s@    timer_isr_called_ = TIMER_ISR_CALLED;@    timer_isr_called_ = TIMER_ISR_NOT_CALLED;@	XT_SIM_VARIANT=cd4053 XT_SOAK_DURATION_MS=$XT_SOAK_MUT_MS XT_SOAK_LIVENESS_INTERVAL_MS=$XT_SOAK_MUT_MS XT_SOAK_PROGRESS_INTERVAL_MS=$XT_SOAK_MUT_MS attiny202-soak	XT ISR/main liveness handshake broken (ISR clears its own flag); main never pets, so the WDT resets"
@@ -896,16 +902,16 @@ if [ "$SANDBOX_SELFTEST_DONE" -eq 1 ]; then
     # the ATtiny202 lane alone absent. The second is the case this file's
     # combined `skipped` exists for -- a box with the PIC stack but no vendored
     # DFP/yasimavr -- so the totals check must accept a skip that is not PIC's.
-    mutation_validate_totals 92 92 0 92 0 0 0 0 || exit 1
-    mutation_validate_totals 92 50 42 50 0 0 0 0 || exit 1
-    mutation_validate_totals 92 74 18 74 0 0 0 0 || exit 1
-    if mutation_validate_totals 92 49 42 49 0 0 0 0 >/dev/null 2>&1; then
+    mutation_validate_totals 93 93 0 93 0 0 0 0 || exit 1
+    mutation_validate_totals 93 50 43 50 0 0 0 0 || exit 1
+    mutation_validate_totals 93 74 19 74 0 0 0 0 || exit 1
+    if mutation_validate_totals 93 49 43 49 0 0 0 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a dropped dispatch" >&2; exit 1
     fi
-    if mutation_validate_totals 92 50 42 49 0 0 0 0 >/dev/null 2>&1; then
+    if mutation_validate_totals 93 50 43 49 0 0 0 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a missing result" >&2; exit 1
     fi
-    if mutation_validate_totals 92 50 42 50 0 0 1 0 >/dev/null 2>&1; then
+    if mutation_validate_totals 93 50 43 50 0 0 1 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a failed worker" >&2; exit 1
     fi
     for checker_rc in 125 126 127 143; do
