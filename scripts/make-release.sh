@@ -207,6 +207,27 @@ PIC320_FLASH_WORDS=$(mkv PIC320_FLASH_WORDS) # 256
 PIC320_CC=$(mkv PIC320_CC)
 PIC320_DFP=$(mkv PIC320_DFP)
 
+# --- host / AVR / analysis tools, read through their Makefile variables -------
+# The preconditions below assert these, and the manifest records their versions.
+# Both must name the tool the BUILD will actually run: every one of these is a
+# Makefile variable (`?=` for most, so the environment wins), so a hardcoded
+# `clang` here would assert one binary while `make` used another -- passing a
+# release whose analysis never ran, or failing one whose toolchain is merely
+# installed elsewhere. This is the reasoning the PIC pairs above already embody.
+HOST_CC=$(mkv HOSTCC)
+AVR_CC=$(mkv CC)
+AVR_OBJCOPY=$(mkv OBJCOPY)
+AVR_SIZE=$(mkv SIZE)
+CLANG=$(mkv CLANG)
+CLANG_TIDY=$(mkv CLANG_TIDY)
+CPPCHECK=$(mkv CPPCHECK)
+CBMC=$(mkv CBMC)
+GCOV=$(mkv GCOV)
+GPSIM=$(mkv GPSIM)
+SIMAVR_INC=$(mkv SIMAVR_INC)
+PIC_SOAK_GPSIM_INC=$(mkv PIC_SOAK_GPSIM_INC)
+PIC320_SOAK_GPSIM_INC=$(mkv PIC320_SOAK_GPSIM_INC)
+
 # The canonical release product set (merge plan §10). This script ENUMERATES the
 # images it expects to build from the variant matrices below; RELEASE_IMAGES is
 # the independent statement of what a complete release contains, and the two are
@@ -285,17 +306,24 @@ req_file()  { [ -e "$1" ] || MISSING+=("$1${2:+  ($2)}"); }
 
 req_cmd make
 req_cmd flock          "apt: util-linux (whole-worktree serialization)"
-req_cmd avr-gcc        "apt: gcc-avr"
-req_cmd avr-objcopy    "apt: binutils-avr (HEX bytes + reproducibility)"
-req_cmd avr-size       "apt: binutils-avr"
-req_cmd cc             "host C compiler"
-req_file /usr/include/simavr/sim_avr.h "apt: libsimavr-dev"
-req_cmd clang          "apt: clang (analyze-deep)"
-req_cmd clang-tidy     "apt: clang-tidy (analyze)"
-req_cmd cppcheck       "apt: cppcheck (analyze + MISRA)"
-req_cmd cbmc           "apt: cbmc (formal proof in test-long)"
+req_cmd "$AVR_CC"      "apt: gcc-avr"
+req_cmd "$AVR_OBJCOPY" "apt: binutils-avr (HEX bytes + reproducibility)"
+req_cmd "$AVR_SIZE"    "apt: binutils-avr"
+req_cmd "$HOST_CC"     "host C compiler (HOSTCC=)"
+req_file "$SIMAVR_INC/sim_avr.h" "apt: libsimavr-dev (SIMAVR_INC=)"
+req_cmd "$CLANG"       "apt: clang (analyze-deep)"
+req_cmd "$CLANG_TIDY"  "apt: clang-tidy (analyze)"
+req_cmd "$CPPCHECK"    "apt: cppcheck (analyze + MISRA)"
+req_cmd "$CBMC"        "apt: cbmc (formal proof in test-long)"
 req_cmd python3        "MISRA addon"
 req_cmd gpg            "release checksum/tag signing and signature regressions"
+# gcov backs coverage-check / coverage-check-core, which run inside the
+# `make test-long` at step 2. Absent, that gate fails AFTER the clean build.
+req_cmd "$GCOV"        "ships with gcc (coverage-check in test-long)"
+# sha256sum is the release's trust anchor: it hashes the validated image set and
+# writes SHA256SUMS during STAGING -- i.e. on the far side of the 24-hour soak.
+# Nothing before that point would notice its absence.
+req_cmd sha256sum      "coreutils (SHA256SUMS; the reproducibility anchor)"
 # PIC toolchain (paths come from the Makefile defaults / PIC_CC, PIC_DFP).
 req_file "$PIC_CC"                                  "XC8 (PIC_CC=)"
 req_file "$PIC_DFP/pic/include/proc/pic10f322.h"    "PIC10-12Fxxx DFP (PIC_DFP=)"
@@ -306,17 +334,53 @@ req_file "$PIC_DFP/pic/include/proc/pic10f322.h"    "PIC10-12Fxxx DFP (PIC_DFP=)
 # while claiming 15.
 req_file "$PIC320_CC"                                "XC8 (PIC320_CC=)"
 req_file "$PIC320_DFP/pic/include/proc/pic10f320.h"  "PIC10F320 device header (PIC320_DFP=)"
-req_cmd gpsim          "apt: gpsim (pic-test-gpsim, pic320-test-gpsim)"
+req_cmd "$GPSIM"       "apt: gpsim (pic-test-gpsim, pic320-test-gpsim)"
 req_cmd c++            "host C++ compiler (PIC soaks)"
-req_file /usr/include/gpsim/sim_context.h           "apt: gpsim-dev (PIC soaks)"
+# Each chip's libgpsim headers through its OWN variable, for the same reason the
+# CC/DFP pairs above are: one gpsim-dev install serves both today, but the two
+# variables exist so one lane can be re-pinned, and a single hardcoded path
+# would assert the wrong install and let the other lane skip.
+req_file "$PIC_SOAK_GPSIM_INC/sim_context.h"        "apt: gpsim-dev (PIC10F322 soaks; PIC_SOAK_GPSIM_INC=)"
+req_file "$PIC320_SOAK_GPSIM_INC/sim_context.h"     "apt: gpsim-dev (PIC10F320 soaks; PIC320_SOAK_GPSIM_INC=)"
 pkg-config --exists glib-2.0 2>/dev/null || MISSING+=("glib-2.0  (apt: libglib2.0-dev, PIC soaks)")
 
+# Staging (step 4) runs on the far side of the ~24-hour soak, so a destination
+# that cannot be written there costs the whole run. OUTPUT_DIR itself must not
+# exist (asserted above), so walk up to the nearest EXISTING ancestor and
+# require that it be a writable directory NOW.
+STAGE_ANCHOR="$OUTPUT_DIR"
+while [ ! -e "$STAGE_ANCHOR" ]; do
+	stage_up=$(dirname "$STAGE_ANCHOR")
+	[ "$stage_up" = "$STAGE_ANCHOR" ] && break
+	STAGE_ANCHOR="$stage_up"
+done
+if [ ! -d "$STAGE_ANCHOR" ]; then
+	MISSING+=("$STAGE_ANCHOR  (staging path's nearest existing ancestor is not a directory)")
+elif [ ! -w "$STAGE_ANCHOR" ]; then
+	MISSING+=("$STAGE_ANCHOR  (not writable; step 4 stages $OUTPUT_DIR under it)")
+fi
+
 if [ "${#MISSING[@]}" -gt 0 ]; then
-	log "Required tools/headers MISSING (a release needs the full toolchain):"
+	log "Release preconditions NOT met (a release fails loud here, never mid-run):"
 	for m in "${MISSING[@]}"; do log "  - $m"; done
-	die "install the above (see TOOLCHAIN.adoc) and re-run."
+	die "resolve the above (see TOOLCHAIN.adoc) and re-run."
 fi
 ok "working tree clean @ $GIT_SHORT; tag $VERSION free; all tools present."
+
+# The release is signed BY HAND at step 5 with the pinned release key -- roughly
+# 24 hours after this point. An operator whose keyring lacks that secret key
+# would not find out until the soak had already cost a day, so surface it now.
+#
+# WARN, never fail: this script signs nothing itself (all modifying git/signing
+# operations are the human's), and keeping the release secret key on a separate
+# or air-gapped machine is a legitimate -- arguably better -- workflow. A dry run
+# emits no git commands at all, so it says nothing.
+if [ "$DRY_RUN" -eq 0 ] \
+		&& ! gpg --list-secret-keys "$RELEASE_SIGNING_FINGERPRINT" >/dev/null 2>&1; then
+	warn "no SECRET key for the pinned release signer $RELEASE_SIGNING_FINGERPRINT in this keyring."
+	warn "  Step 5 signs SHA256SUMS and the annotated tag with exactly that key."
+	warn "  Fine if you sign on another machine; otherwise import it BEFORE the ~24 h soak."
+fi
 
 # ----------------------------------------------------------------------------
 # Record toolchain versions (for the manifest) and warn on drift from the pins.
@@ -324,19 +388,22 @@ ok "working tree clean @ $GIT_SHORT; tag $VERSION free; all tools present."
 v1() { "$@" 2>&1 | head -1 || true; }
 pkgver() { dpkg-query -W -f='${Version}' "$1" 2>/dev/null || echo "n/a"; }
 
-TC_AVR_GCC=$(v1 avr-gcc --version)
-TC_AVR_BU=$(v1 avr-objcopy --version)
+# Record the SAME binaries the preconditions asserted and the build will run --
+# not their default names -- so an overridden toolchain cannot be validated here
+# while the manifest attests to a different one.
+TC_AVR_GCC=$(v1 "$AVR_CC" --version)
+TC_AVR_BU=$(v1 "$AVR_OBJCOPY" --version)
 TC_AVR_LIBC=$(pkgver avr-libc)
-TC_HOST_CC=$(v1 cc --version)
+TC_HOST_CC=$(v1 "$HOST_CC" --version)
 TC_XC8_322=$(release_tool_version_line "PIC10F322 XC8 (PIC_CC=$PIC_CC)" "$PIC_CC") \
 	|| die "could not record the PIC10F322 compiler provenance"
 TC_XC8_320=$(release_tool_version_line "PIC10F320 XC8 (PIC320_CC=$PIC320_CC)" "$PIC320_CC") \
 	|| die "could not record the PIC10F320 compiler provenance"
-TC_GPSIM=$(v1 gpsim --version)
+TC_GPSIM=$(v1 "$GPSIM" --version)
 TC_SIMAVR=$(pkgver libsimavr-dev)
-TC_CPPCHECK=$(v1 cppcheck --version)
-TC_CBMC=$(v1 cbmc --version)
-TC_CLANG=$(v1 clang --version)
+TC_CPPCHECK=$(v1 "$CPPCHECK" --version)
+TC_CBMC=$(v1 "$CBMC" --version)
+TC_CLANG=$(v1 "$CLANG" --version)
 TC_PY=$(v1 python3 --version)
 
 case "$TC_AVR_GCC" in
