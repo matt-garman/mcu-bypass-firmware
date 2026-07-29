@@ -76,7 +76,7 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
   - Built-image simulator validation: simavr for AVR Classic and gpsim/libgpsim
     for PIC10F322 provide functional, fault-injection, lock-step, target-I/O,
     and soak tests; yasimavr for AVR-XT (ATtiny202) provides functional,
-    fault-injection, physical target-output timing, and soak tests. The
+    fault-injection, lock-step, physical target-output timing, and soak tests. The
     PIC10F320 additionally proves its hand-inlined firmware equivalent to the
     verified core, tick for tick, on the host and on the real emitted image
   - Mutation tests (deliberately break code to prove tests catch
