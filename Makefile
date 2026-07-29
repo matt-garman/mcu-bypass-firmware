@@ -281,8 +281,12 @@ SANITIZE    ?= -fsanitize=undefined,address -fno-sanitize-recover=all
 
 # --- Resource-budget gate thresholds -----------------------------------------
 # Per-function stack-frame ceiling for test-stack-bound (-fstack-usage).
-# The firmware's full-path runtime HWM is ~10 B; any individual frame above
-# this threshold signals unintended bloat (e.g. an accidental local array).
+# This gates individual frames, not total depth.  The largest frame today is
+# the 19 B timer ISR (__vector_6); the whole-program runtime high-water mark
+# is 29 B (cd4053) / 31 B (relay, mute), measured separately by test-sim.
+# Run `make test-stack-bound` to re-measure every frame.  Any individual frame
+# above this threshold signals unintended bloat (e.g. an accidental local
+# array).
 STACK_MAX_FRAME ?= 32
 STACK_BUILD_DIR ?=
 override STACK_SOURCES := src/bypass_mcu_avr_classic.c src/bypass_pure.c \
@@ -291,8 +295,11 @@ override STACK_SOURCES := src/bypass_mcu_avr_classic.c src/bypass_pure.c \
                           src/bypass_output_tq2_l2_5v_relay.c
 
 # ATtiny13a flash-budget ceiling for test-flash-budget (percentage of 1 KB).
-# Firmware is ~46% today; a future accidental bloat passes silently without
-# this gate.
+# Firmware is at 73.8% today (relay and mute; cd4053 is 69.9%), so the 90%
+# ceiling leaves 16.2 points of margin.  Run `make test-flash-budget` to
+# re-measure -- it prints the per-variant percentages, so this comment can be
+# checked rather than trusted.  A future accidental bloat passes silently
+# without this gate.
 FLASH_T13_BUDGET ?= 90
 override FLASH_T13_MCU := attiny13a
 override FLASH_T13_BYTES := 1024
@@ -2731,7 +2738,9 @@ test/avr/test_fuses: test/avr/test_fuses.c Makefile FORCE
 # the flag, collect the per-function .su files, and fail if any single frame
 # exceeds STACK_MAX_FRAME bytes.  Complements the runtime HWM test (test-sim)
 # with a compile-time structural upper bound that does not depend on exercising
-# the deepest call path.  Override: make test-stack-bound STACK_MAX_FRAME=16
+# the deepest call path.  Override: make test-stack-bound STACK_MAX_FRAME=24
+# (24 is the tightest round ceiling the current 19 B ISR frame still clears;
+# the previous 16 example no longer passes).
 test-stack-bound:
 	@stack_dir="$(STACK_BUILD_DIR)"; remove_dir=0; \
 	if [ -z "$$stack_dir" ]; then \
@@ -2814,8 +2823,11 @@ test-stack-bound-regression:
 
 # Flash-utilization budget assertion: run avr-size on every ATtiny13a variant
 # ELF and fail if flash (Program bytes) exceeds FLASH_T13_BUDGET% of 1024 B.
-# Firmware is ~46% today; a future accidental bloat would otherwise pass
-# silently.  Override: make test-flash-budget FLASH_T13_BUDGET=80
+# Firmware is at 73.8% today (relay and mute; cd4053 is 69.9%), inside the 90%
+# default ceiling by 16.2 points.  The target prints the measured per-variant
+# percentages, so this figure can be re-checked by running it.  A future
+# accidental bloat would otherwise pass silently.
+# Override: make test-flash-budget FLASH_T13_BUDGET=80
 test-flash-budget:
 	@if [ "$(MCU)" != "$(FLASH_T13_MCU)" ] || [ "$(FW_BASE)" != "bypass" ] \
 			|| [ "$(AVR_FW)" != "$(AVR_BUILD_DIR)/bypass" ]; then \
