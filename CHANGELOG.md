@@ -32,6 +32,18 @@ file is the human-readable summary of *what changed*.
 ## [Unreleased]
 
 ### Added
+- **The GitHub workflow files are now validated locally** (`make
+  test-workflow-syntax`, and a `ci-local.sh` preflight that runs it first).
+  Nothing in the repo had ever parsed them: the release regressions `grep`
+  `release.yml` for fixed strings, which succeeds on a file GitHub cannot load,
+  and `ci-local.sh` reproduces the job order from a comment header rather than
+  from `ci.yml`. An unquoted job `name:` containing `": "` therefore took the
+  entire CI matrix down with "Invalid workflow file" after a full clean
+  `ci-local.sh` pass. Both workflows must now parse, every job must have a
+  runner and steps, every `needs:` must resolve to a declared job, every action
+  must be version-pinned, and `ci.yml`'s job list must agree with
+  `ci-local.sh`'s CI-JOB MAPPING in both directions -- so a job added, renamed
+  or dropped can no longer silently stop being mirrored locally.
 - **ATtiny202 (AVR-XT) promoted from development-only to a release-supported
   target**, bringing the release product set to six parts and 18 images. It was
   classified development-only on 2026-07-14, in the middle of the week its

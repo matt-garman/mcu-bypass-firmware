@@ -385,7 +385,7 @@ jobs:
   # on nothing, and each run step greps for the expected number of PASS lines as
   # belt-and-suspenders against a partial (per-variant) skip.
   attiny202:
-    name: attiny202 (AVR-XT: analyze/sim/fault/soak)
+    name: "attiny202 (AVR-XT: analyze/sim/fault/soak)"
     runs-on: ubuntu-24.04
     needs: pic   # gate behind the fast PIC job (see `verify`)
     env:
