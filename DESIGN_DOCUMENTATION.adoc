@@ -304,11 +304,17 @@ The ATtiny202 is **not available in a through-hole DIP package** — SOIC-8 and
 UDFN-8 only. Of its eight pins, six are I/O: PA4 and PA5 exist in the die's
 PORTA register but are not bonded out on the 8-pin package.
 
+Physical pin numbering below is taken from the `SOIC8` pinout in Microchip's own
+`ATtiny202.atdf` device file, as shipped in the pinned ATtiny_DFP the build uses
+(see `TOOLCHAIN.adoc`) — not from a redrawn diagram. The vendored four-file DFP
+subset does not include the `.atdf`, so re-checking this means reading it out of
+the full atpack.
+
 ....
                                         +----+
                                VDD pin1-|    |-pin8 GND
-               (AIN6/spare)    PA6 pin2-|    |-pin7 PA0 (UPDI/~RESET)
-       (AIN7/footswitch input) PA7 pin3-|    |-pin6 PA3 (AIN3/EXTCLK/CTL2/relay SET)
+               (AIN6/spare)    PA6 pin2-|    |-pin7 PA3 (AIN3/EXTCLK/CTL2/relay SET)
+       (AIN7/footswitch input) PA7 pin3-|    |-pin6 PA0 (UPDI/~RESET)
              (AIN1/status LED) PA1 pin4-|    |-pin5 PA2 (AIN2/CTL1/relay RESET)
                                         +----+
 ....
