@@ -1825,6 +1825,11 @@ XT_SOAK_DRIVER  = test/avr/test_soak_attiny202.py
 XT_SOAK_DURATION_MS ?= 3600000
 XT_SOAK_LIVENESS_INTERVAL_MS ?= 60000
 XT_SOAK_PROGRESS_INTERVAL_MS ?= 600000
+# Combination label bound into the driver's SOAK_RESULT record (the shared
+# release contract). Empty means "derive it per variant" -- attiny202_<variant>,
+# which is exactly what RELEASE_SOAK_NAMES declares. The release orchestrator
+# pins it explicitly, one combination per run, as it does for both PIC soaks.
+XT_SOAK_COMBINATION_NAME ?=
 
 # Shell guard shared by every harness target: skip cleanly (exit 0 out of the
 # whole recipe via the caller) when the patched venv is missing or non-importable.
@@ -1919,11 +1924,14 @@ attiny202-soak: test-fuses attiny202
 		fi; \
 		echo "--- ATtiny202 soak: variant=$$v duration=$(XT_SOAK_DURATION_MS) ms ---"; \
 		ran=1; \
+		combo="$(XT_SOAK_COMBINATION_NAME)"; \
+		[ -n "$$combo" ] || combo="attiny202_$$v"; \
 		PYTHONPATH=test/avr \
 		$(XT_FUSE_ENV) \
 		ATTINY202_SOAK_DURATION_MS=$(XT_SOAK_DURATION_MS) \
 		ATTINY202_SOAK_LIVENESS_INTERVAL_MS=$(XT_SOAK_LIVENESS_INTERVAL_MS) \
 		ATTINY202_SOAK_PROGRESS_INTERVAL_MS=$(XT_SOAK_PROGRESS_INTERVAL_MS) \
+		ATTINY202_SOAK_COMBINATION_NAME="$$combo" \
 		$(YASIMAVR_PY) $(XT_SOAK_DRIVER) "$$elf" || fail=1; \
 	done; \
 	if [ "$$ran" = 0 ]; then echo "no ATtiny202 images built; nothing to soak."; fi; \
@@ -2139,6 +2147,20 @@ attiny202-delay-oracle: attiny202
 .PHONY: attiny202-test
 attiny202-test: test-fuses attiny202-smoke attiny202 attiny202-analyze attiny202-delay-oracle
 	@echo "=== all ATtiny202 pre-hardware checks complete ==="
+
+# The yasimavr target-level aggregate, over EVERY variant: functional + physical
+# output trace, fault injection, and ctx_-vs-model lock-step. The AVR-XT
+# counterpart of pic-test-target-variants / pic320-test-target-variants, and what
+# release qualification runs (with STRICT_TOOLS=1, which turns each sub-target's
+# clean skip into a hard failure -- a release must never accept "the simulator
+# was missing" as evidence).
+#
+# Deliberately excludes the soak: the release drives that separately, one
+# combination per output stage at the full release duration, alongside every
+# other target's soak.
+.PHONY: attiny202-test-target
+attiny202-test-target: attiny202-sim attiny202-fault attiny202-lockstep
+	@echo "=== ATtiny202 target-level checks complete (sim + fault + lock-step) ==="
 
 # ============================================================================
 # CLEAN
@@ -4351,20 +4373,18 @@ print-%:
 # sets, not the caller's VARIANTS or PIC320_VARIANTS_ALL request, so an abbreviated
 # build override cannot shorten this independent release contract with the build.
 #
-# Note the three surviving basename conventions (merge plan §5.3, decision D2):
+# Note the surviving basename conventions (merge plan §5.3, decision D2):
 #   bypass_<variant>.hex               ATtiny13a  (implicit part)
 #   bypass_<variant>_t<n>.hex          ATtiny45/85
+#   bypass_<variant>_attiny202.hex     ATtiny202  (AVR-XT; explicit part tag)
 #   bypass_<variant>_<pic-tag>.hex     PIC10F322
 #   bypass_mcu_<variant>_<pic-tag>.hex PIC10F320  (imported, kept unmigrated)
 # Reconciling them is the TODO.md "Unified naming scheme" item; until then the
 # asymmetry lives HERE, in one list, rather than being re-derived per consumer.
-#
-# ATtiny202 is deliberately absent: it is development-only, so it has CI coverage
-# but no release images and no release soak evidence (§10, and the same reason
-# `make clean` in the release script does not recreate build_avr_xt/).
 RELEASE_IMAGES := \
 	$(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(FW_BASE)_$(v).hex) \
 	$(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(foreach n,$(TINYX5),$(FW_BASE)_$(v)_t$(n).hex)) \
+	$(foreach v,$(XT_VARIANTS_SUPPORTED),$(FW_BASE)_$(v)_$(XT_TAG).hex) \
 	$(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(FW_BASE)_$(v)_$(PIC_TAG).hex) \
 	$(foreach v,$(PIC320_VARIANTS_SUPPORTED),$(PIC320_FW_BASE)_$(v)_$(PIC320_TAG).hex)
 
@@ -4372,7 +4392,7 @@ RELEASE_IMAGES := \
 # reproduction run should pass them to scripts/verify-release-images.sh. Kept
 # beside the set so a new target cannot add images without also declaring where
 # they come from.
-RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(PIC_BUILD_DIR) $(PIC320_BUILD_DIR)
+RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(XT_BUILD_DIR) $(PIC_BUILD_DIR) $(PIC320_BUILD_DIR)
 
 # Canonical release-soak and retained-evidence inventories. These are explicit,
 # immutable publication contracts rather than observations of whichever loops or
@@ -4383,11 +4403,14 @@ override RELEASE_SOAK_NAMES := \
 	avr_cd4053_t85 avr_cd4053_t45 \
 	avr_mute_t85 avr_mute_t45 \
 	avr_relay_t85 avr_relay_t45 \
+	attiny202_cd4053 attiny202_mute attiny202_relay \
 	pic_cd4053 pic_mute pic_relay \
 	pic320_cd4053-simple pic320_cd4053-mute pic320_tq2-relay
 
 override RELEASE_FIXED_EVIDENCE_FILES := \
-	build-avr.log build-pic.log build-pic320.log final-image-build.log \
+	build-avr.log build-avr-xt.log build-pic.log build-pic320.log \
+	final-image-build.log \
+	attiny202-test.log attiny202-test-target.log \
 	pic-test.log pic-test-target-variants.log \
 	pic320-test.log pic320-test-target-variants.log \
 	soak-build.log test-long.summary.txt

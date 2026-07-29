@@ -240,14 +240,13 @@ expect_fail "canonical set read from the Makefile by default" \
 
 # Finally, the content of the real canonical set. Every check above works
 # equally well on a set that has quietly lost a whole MCU, so assert what the
-# Makefile actually declares: all four release-supported parts present, in the
-# quantity the variant matrix implies, and ATtiny202 absent because it is
-# development-only (§10).
+# Makefile actually declares: every release-supported part present, in the
+# quantity its variant matrix implies.
 canonical=$(cd "$ROOT" && make -s print-RELEASE_IMAGES) \
 	|| fail "could not read RELEASE_IMAGES from the Makefile"
 read -r -a canonical_arr <<<"$canonical"
-[ "${#canonical_arr[@]}" -eq 15 ] \
-	|| fail "canonical release set has ${#canonical_arr[@]} images, expected 15"
+[ "${#canonical_arr[@]}" -eq 18 ] \
+	|| fail "canonical release set has ${#canonical_arr[@]} images, expected 18"
 checks=$((checks + 1))
 
 subset_canonical=$(cd "$ROOT" && \
@@ -284,11 +283,19 @@ expect_count "PIC10F320"  '*_pic10f320.hex' 3
 expect_count "PIC10F322"  '*_pic10f322.hex' 3
 expect_count "ATtiny85"   '*_t85.hex'       3
 expect_count "ATtiny45"   '*_t45.hex'       3
-expect_count "ATtiny202"  '*attiny202*'     0
+expect_count "ATtiny202"  '*_attiny202.hex' 3
 
 # Name the three PIC10F320 images explicitly. A count alone would survive a
 # rename, and these basenames are a published interface (decision D2: the child's
 # names are kept, not migrated).
+for base in bypass_cd4053_attiny202.hex \
+		bypass_mute_attiny202.hex \
+		bypass_relay_attiny202.hex; do
+	[[ " $canonical " == *" $base "* ]] \
+		|| fail "canonical release set is missing $base"
+	checks=$((checks + 1))
+done
+
 for base in bypass_mcu_cd4053-simple_pic10f320.hex \
 		bypass_mcu_cd4053-mute_pic10f320.hex \
 		bypass_mcu_tq2-relay_pic10f320.hex; do

@@ -186,6 +186,35 @@ AVRDUDE_PART=$(mkv AVRDUDE_PART)   # t13
 declare -A AVRDUDE_PART_X5
 for n in $TINYX5; do AVRDUDE_PART_X5[$n]=$(mkv part_"$n"); done
 
+# --- ATtiny202 (AVR-XT) ------------------------------------------------------
+# Read through its own variables for the same reason the PIC pair below does:
+# the AVR-XT shares avr-gcc with the classic parts but nothing else -- its own
+# device pack, its own clock, its own fuse model (seven named AVR8X memories
+# rather than lfuse/hfuse), and a simulator that is neither simavr nor gpsim.
+XT_BUILD_DIR=$(mkv XT_BUILD_DIR)   # build_avr_xt
+XT_TAG=$(mkv XT_TAG)               # attiny202
+XT_MCU=$(mkv XT_MCU)               # attiny202
+XT_DFP=$(mkv XT_DFP)               # third_party/attiny_dfp
+XT_F_CPU=$(mkv XT_F_CPU)           # 2000000UL
+XT_CLK_MHZ=$(awk -v h="${XT_F_CPU//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
+XT_FLASH_BYTES=$(mkv XT_FLASH_BYTES)
+XT_VARIANTS=$(mkv XT_VARIANTS_SUPPORTED)     # cd4053 mute relay
+YASIMAVR_PY=$(mkv YASIMAVR_PY)     # third_party/yasimavr/venv/bin/python
+XT_AVRDUDE_PART=$(mkv XT_AVRDUDE_PART)       # t202
+XT_PROGRAMMER=$(mkv XT_PROGRAMMER)           # serialupdi
+# The seven AVR8X fuse bytes, in the datasheet's memory order. Unlike the classic
+# parts' lfuse/hfuse pair these are individually named avrdude memories, so the
+# manifest and the flashing recipe both have to enumerate them.
+XT_FUSE_NAMES="wdtcfg bodcfg osccfg syscfg0 syscfg1 append bootend"
+declare -A XT_FUSE
+XT_FUSE[wdtcfg]=$(mkv XT_FUSE_WDTCFG)
+XT_FUSE[bodcfg]=$(mkv XT_FUSE_BODCFG)
+XT_FUSE[osccfg]=$(mkv XT_FUSE_OSCCFG)
+XT_FUSE[syscfg0]=$(mkv XT_FUSE_SYSCFG0)
+XT_FUSE[syscfg1]=$(mkv XT_FUSE_SYSCFG1)
+XT_FUSE[append]=$(mkv XT_FUSE_APPEND)
+XT_FUSE[bootend]=$(mkv XT_FUSE_BOOTEND)
+
 # --- PIC10F320, the constrained release target -------------------------------
 # Read through its OWN variables, never by deriving from the PIC10F322's. The
 # two chips share one XC8 + DFP installation today, but the separate variable
@@ -304,6 +333,19 @@ req_cmd gpsim          "apt: gpsim (pic-test-gpsim, pic320-test-gpsim)"
 req_cmd c++            "host C++ compiler (PIC soaks)"
 req_file /usr/include/gpsim/sim_context.h           "apt: gpsim-dev (PIC soaks)"
 pkg-config --exists glib-2.0 2>/dev/null || MISSING+=("glib-2.0  (apt: libglib2.0-dev, PIC soaks)")
+# ATtiny202 (AVR-XT). Both inputs are fetched on demand and NOT committed, and
+# every attiny202-* target skips cleanly without them -- so a release that did
+# not assert them here would quietly ship three unqualified images. avr-nm and
+# avr-objdump are the harness's own tools: the drivers resolve ctx_ with the
+# former and read coil-pulse widths back out of the image with the latter.
+req_cmd avr-nm         "apt: binutils-avr (ATtiny202 symbol resolution)"
+req_cmd avr-objdump    "apt: binutils-avr (ATtiny202 coil-pulse width oracle)"
+req_file "$XT_DFP/gcc/dev/$XT_MCU/device-specs/specs-$XT_MCU" \
+	"ATtiny_DFP (scripts/fetch_attiny_dfp.sh; XT_DFP=)"
+req_file "$YASIMAVR_PY" "patched yasimavr (scripts/fetch_yasimavr.sh; YASIMAVR_VENV=)"
+if [ -x "$YASIMAVR_PY" ] && ! "$YASIMAVR_PY" -c "import yasimavr" >/dev/null 2>&1; then
+	MISSING+=("yasimavr import  (rebuild: scripts/fetch_yasimavr.sh)")
+fi
 
 if [ "${#MISSING[@]}" -gt 0 ]; then
 	log "Required tools/headers MISSING (a release needs the full toolchain):"
@@ -351,9 +393,12 @@ esac
 # ============================================================================
 section "1. clean build (all variants x release-supported MCUs)"
 make clean >/dev/null
-# ATtiny202 is development-only: clean removes build_avr_xt/ and this release
-# build intentionally does not recreate it.
 make all13 all85 all45 >"$EVID/build-avr.log" 2>&1 || { cat "$EVID/build-avr.log" >&2; die "AVR build failed."; }
+# ATtiny202: STRICT_TOOLS=1 so an absent ATtiny_DFP is a hard failure here rather
+# than a clean skip that would leave build_avr_xt/ empty and be caught much later
+# as three missing images.
+make attiny202 STRICT_TOOLS=1 XT_DFP="$XT_DFP" >"$EVID/build-avr-xt.log" 2>&1 \
+	|| { cat "$EVID/build-avr-xt.log" >&2; die "ATtiny202 build failed."; }
 make pic PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/build-pic.log" 2>&1 || { cat "$EVID/build-pic.log" >&2; die "PIC build failed."; }
 # pic320-variants builds all three and, on any failure, removes the WHOLE image
 # set rather than leaving a partial matrix behind for a later step to stage.
@@ -365,6 +410,8 @@ make pic320-variants PIC320_CC="$PIC320_CC" PIC320_DFP="$PIC320_DFP" \
 IMAGES=()
 AVR_IMAGES=()
 AVR_ELFS=()
+XT_IMAGES=()
+XT_ELFS=()
 PIC_IMAGES=()
 PIC320_IMAGES=()
 for v in $VARIANTS; do
@@ -377,6 +424,14 @@ for v in $VARIANTS; do for n in $TINYX5; do
 	elf="${img%.hex}.elf"
 	IMAGES+=("$img"); AVR_IMAGES+=("$img"); AVR_ELFS+=("$elf")
 done; done
+# ATtiny202 is kept in its own arrays rather than folded into AVR_IMAGES: the
+# classic lane's final step regenerates HEX from validated ELFs with
+# `make all13 all85 all45`, which knows nothing about the AVR-XT build.
+for v in $XT_VARIANTS; do
+	img="$XT_BUILD_DIR/${FW_BASE}_${v}_${XT_TAG}.hex"
+	elf="${img%.hex}.elf"
+	IMAGES+=("$img"); XT_IMAGES+=("$img"); XT_ELFS+=("$elf")
+done
 for v in $VARIANTS; do
 	img="$PIC_BUILD_DIR/${FW_BASE}_${v}_${PIC_TAG}.hex"
 	IMAGES+=("$img"); PIC_IMAGES+=("$img")
@@ -431,14 +486,53 @@ hash_pic_image_set() {
 	done
 }
 
+# The AVR-XT equivalent, over HEX *and* ELF. Both matter: the staged artifact is
+# the HEX, but every yasimavr gate and the whole soak phase drive the ELF, so
+# evidence is only bound to the shipped image while the pair stays in step.
+# `make attiny202` rebuilds unconditionally (its recipe removes its outputs
+# first), so this is also the check that the build is actually reproducible
+# across the several times validation re-enters it.
+hash_xt_image_set() {
+	local f result hash
+	for f in "$@"; do
+		[ -f "$f" ] && [ ! -L "$f" ] && [ -s "$f" ] \
+			|| die "validated ATtiny202 artifact missing, empty, or not regular: $f"
+		result=$(sha256sum -- "$f") || return 1
+		hash=${result%% *}
+		printf '%s  %s\n' "$hash" "${f##*/}"
+	done
+}
+
 # ============================================================================
 # 2. FULL PRE-HARDWARE GATES
 # ============================================================================
-section "2. validation: make test-long + make pic-test + PIC target aggregate"
+section "2. validation: make test-long + ATtiny202 + PIC pre-hardware and target aggregates"
 log "running make test-long (exhaustive AVR suite + mutation)..."
 make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 >"$EVID/test-long.log" 2>&1 || { tail -40 "$EVID/test-long.log" >&2; die "make test-long FAILED."; }
 ok "test-long passed."
 validated_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
+
+# ATtiny202 pre-hardware gates: fuses, smoke, build + 2 KB budget, cppcheck +
+# MISRA, and the coil-pulse width oracle read back out of the built image.
+log "running make attiny202-test (fuses + build/budget + analysis + delay oracle)..."
+make attiny202-test STRICT_TOOLS=1 XT_DFP="$XT_DFP" \
+	>"$EVID/attiny202-test.log" 2>&1 \
+	|| { tail -40 "$EVID/attiny202-test.log" >&2; die "make attiny202-test FAILED."; }
+ok "attiny202-test passed."
+
+# Fail-closed AVR-XT target aggregate (yasimavr), the counterpart of the two PIC
+# target aggregates below: per variant, functional + physical PA2/PA3 output
+# trace, critical-SFR/state fault injection, and firmware/model ctx_ lock-step.
+# STRICT_TOOLS=1 converts each driver's clean skip into a hard failure.
+log "running make attiny202-test-target (sim + fault + lock-step on the real image)..."
+make attiny202-test-target STRICT_TOOLS=1 XT_DFP="$XT_DFP" \
+	YASIMAVR_VENV="$(dirname "$(dirname "$YASIMAVR_PY")")" \
+	>"$EVID/attiny202-test-target.log" 2>&1 \
+	|| { tail -60 "$EVID/attiny202-test-target.log" >&2; die "make attiny202-test-target FAILED."; }
+ok "attiny202-test-target passed."
+validated_xt_image_hashes=$(hash_xt_image_set "${XT_IMAGES[@]}")
+validated_xt_elf_hashes=$(hash_xt_image_set "${XT_ELFS[@]}")
+
 log "running make pic-test (PIC CONFIG word + analyze + gpsim)..."
 make pic-test STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/pic-test.log" 2>&1 || { tail -40 "$EVID/pic-test.log" >&2; die "make pic-test FAILED."; }
 ok "pic-test passed."
@@ -490,6 +584,43 @@ for v in $VARIANTS; do for n in $TINYX5; do
 	SOAK_CWD[$name]="$REPO_ROOT"   # relative FW_PATH; the binary writes no files
 	SOAK_LOG[$name]="$EVID/soak-$name.log"
 done; done
+# ATtiny202: three more combos, one per output stage, at the same full duration
+# as every other release combo. The driver is a Python script rather than a
+# compiled binary, so each combo gets a tiny generated wrapper -- the soak
+# launcher below execs one argument-less program per combination, and threading
+# per-combo argv/env through it would complicate the one piece of this phase that
+# must stay obviously correct. The wrapper pins the combination name that the
+# driver binds into its SOAK_RESULT record, which validate_soak_result() then
+# matches exactly, so a wrapper pointing at the wrong image cannot pass.
+XT_FUSE_ENV_ARGS=()
+for f in $XT_FUSE_NAMES; do
+	XT_FUSE_ENV_ARGS+=("ATTINY202_FUSE_$(printf '%s' "$f" | tr '[:lower:]' '[:upper:]')=${XT_FUSE[$f]}")
+done
+for v in $XT_VARIANTS; do
+	name="attiny202_${v}"; bin="$SOAKDIR/soak_attiny202_${v}.sh"
+	elf="$REPO_ROOT/$XT_BUILD_DIR/${FW_BASE}_${v}_${XT_TAG}.elf"
+	[ -f "$elf" ] || die "ATtiny202 soak ELF missing: $elf"
+	{
+		printf '#!/bin/sh\n'
+		printf '# generated by make-release.sh -- ATtiny202 release soak combo %s\n' "$name"
+		printf 'set -e\n'
+		printf 'cd %q\n' "$REPO_ROOT"
+		printf 'exec env PYTHONPATH=test/avr \\\n'
+		for e in "${XT_FUSE_ENV_ARGS[@]}"; do printf '  %q \\\n' "$e"; done
+		printf '  ATTINY202_SOAK_DURATION_MS=%q \\\n' "$SOAK_DURATION_MS"
+		printf '  ATTINY202_SOAK_LIVENESS_INTERVAL_MS=%q \\\n' "$SOAK_LIVENESS_INTERVAL_MS"
+		printf '  ATTINY202_SOAK_PROGRESS_INTERVAL_MS=%q \\\n' "$SOAK_LIVENESS_INTERVAL_MS"
+		printf '  ATTINY202_SOAK_COMBINATION_NAME=%q \\\n' "$name"
+		printf '  %q %q %q\n' "$REPO_ROOT/$YASIMAVR_PY" \
+			"$REPO_ROOT/test/avr/test_soak_attiny202.py" "$elf"
+	} > "$bin" || die "could not write ATtiny202 soak wrapper $bin"
+	chmod +x "$bin" || die "could not make $bin executable"
+	printf 'generated ATtiny202 soak wrapper: %s -> %s\n' "$name" "$elf" \
+		>>"$EVID/soak-build.log"
+	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
+	SOAK_CWD[$name]="$REPO_ROOT"   # the wrapper cd's itself; nothing is written here
+	SOAK_LOG[$name]="$EVID/soak-$name.log"
+done
 for v in $VARIANTS; do
 	name="pic_${v}"; bin="$SOAKDIR/test_soak_pic_${v}"
 	make "$bin" PIC_SOAK_BIN="$bin" PIC_SOAK_VARIANT="$v" PIC_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
@@ -525,6 +656,11 @@ current_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
 current_pic_image_hashes=$(hash_pic_image_set "${PIC_IMAGES[@]}")
 [ "$current_pic_image_hashes" = "$validated_pic_image_hashes" ] \
 	|| die "a PIC image changed while compiling its soak harness"
+current_xt_image_hashes=$(hash_xt_image_set "${XT_IMAGES[@]}")
+current_xt_elf_hashes=$(hash_xt_image_set "${XT_ELFS[@]}")
+{ [ "$current_xt_image_hashes" = "$validated_xt_image_hashes" ] \
+	&& [ "$current_xt_elf_hashes" = "$validated_xt_elf_hashes" ]; } \
+	|| die "an ATtiny202 image or ELF changed while preparing its soak wrappers"
 
 NCOMBOS=${#SOAK_NAMES[@]}
 actual_soaks=$(printf '%s\n' "${SOAK_NAMES[@]}" | LC_ALL=C sort)
@@ -591,6 +727,11 @@ current_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
 current_pic_image_hashes=$(hash_pic_image_set "${PIC_IMAGES[@]}")
 [ "$current_pic_image_hashes" = "$validated_pic_image_hashes" ] \
 	|| die "a PIC image changed while its soak was running"
+current_xt_image_hashes=$(hash_xt_image_set "${XT_IMAGES[@]}")
+current_xt_elf_hashes=$(hash_xt_image_set "${XT_ELFS[@]}")
+{ [ "$current_xt_image_hashes" = "$validated_xt_image_hashes" ] \
+	&& [ "$current_xt_elf_hashes" = "$validated_xt_elf_hashes" ]; } \
+	|| die "an ATtiny202 image or ELF changed while its soak was running"
 
 # Validation and soak rebuild classic ELFs, invalidating their paired HEX files.
 # Re-materialize HEX from those exact, just-tested ELFs without compiling again.
@@ -650,6 +791,11 @@ for img in "${PIC_IMAGES[@]}"; do STAGED_PIC_IMAGES+=("$OUTPUT_DIR/$(basename "$
 staged_pic_image_hashes=$(hash_pic_image_set "${STAGED_PIC_IMAGES[@]}")
 [ "$staged_pic_image_hashes" = "$validated_pic_image_hashes" ] \
 	|| die "a staged PIC image differs from the image exercised by the soak"
+STAGED_XT_IMAGES=()
+for img in "${XT_IMAGES[@]}"; do STAGED_XT_IMAGES+=("$OUTPUT_DIR/$(basename "$img")"); done
+staged_xt_image_hashes=$(hash_xt_image_set "${STAGED_XT_IMAGES[@]}")
+[ "$staged_xt_image_hashes" = "$validated_xt_image_hashes" ] \
+	|| die "a staged ATtiny202 image differs from the image exercised by its gates and soak"
 
 # ...and assert the staging directory holds exactly that set and nothing else,
 # because publication (.github/workflows/release.yml) uploads by glob.
@@ -721,6 +867,27 @@ img_row() {
 		*_${PIC_TAG}.hex)
 			mcu="PIC10F322"; clk="${PIC_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
 			flashcmd="pk2cmd -PPIC10F322 -F$base -M -Y -R   (or: make program-pic VARIANT=<v>)" ;;
+		# ATtiny202 must also precede the `*.hex` fallback: its basenames end in
+		# `_attiny202.hex`, which that arm would otherwise label ATtiny13a and
+		# hand the reader classic lfuse/hfuse bytes for a part that has neither.
+		*_${XT_TAG}.hex)
+			mcu="ATtiny202"; clk="${XT_CLK_MHZ} MHz (internal, OSCCFG 16 MHz / 8)"
+			# AVR8X replaces lfuse/hfuse with seven individually named memories;
+			# enumerate them rather than inventing a two-byte summary.
+			fuses=""
+			for f in $XT_FUSE_NAMES; do
+				fuses="${fuses}${fuses:+ }$f=${XT_FUSE[$f]}"
+			done
+			# From this run's own build log, like the PIC10F320 arm: the figure is
+			# never a stale hand-copied number, and avr-size cannot total it here
+			# (binutils 2.26 reports "Device: Unknown" for avrxmega3 parts).
+			used=$(awk -v f="$base" '$0 ~ ("/" f " :") { for (i = 1; i <= NF; i++) if ($i == "B") { print $(i-1) " B"; exit } }' \
+				"$EVID/build-avr-xt.log" 2>/dev/null)
+			flashcmd="avrdude -c $XT_PROGRAMMER -P <port> -p $XT_AVRDUDE_PART"
+			for f in $XT_FUSE_NAMES; do
+				flashcmd="$flashcmd -U $f:w:${XT_FUSE[$f]}:m"
+			done
+			flashcmd="$flashcmd -U flash:w:$base:i   (or: make attiny202-program VARIANT=<v> XT_UPDI_PORT=<port>)" ;;
 		*_t85.hex|*_t45.hex)
 			case "$base" in
 				*_t85.hex) mcu="ATtiny85"; amcu="attiny85"; prog="t85" ;;
@@ -760,9 +927,8 @@ REL_BANNER=""
 	[ -n "$REL_BANNER" ] && printf '%s\n' "$REL_BANNER"
 	printf 'Prebuilt, fully-validated firmware images. Verify integrity with\n'
 	printf '`sha256sum -c SHA256SUMS`; reproduce from source per "Reproducing" below.\n\n'
-	printf 'Release scope: AVR Classic (ATtiny13a/45/85), PIC10F322 and PIC10F320.\n'
-	printf 'ATtiny202 is development-only and is intentionally excluded from this\n'
-	printf 'release: it has CI coverage but no release images and no soak evidence.\n\n'
+	printf 'Release scope: AVR Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT),\n'
+	printf 'PIC10F322 and PIC10F320.\n\n'
 
 	printf '## PIC10F320 -- the constrained target\n\n'
 	printf 'The PIC10F320 has 256 words of flash, half the PIC10F322. The pure/result-struct\n'
@@ -836,12 +1002,12 @@ REL_BANNER=""
 		"$(printf '%s\n' $RELEASE_IMAGE_DIRS | sed 's#^#`#; s#$#/`#' | paste -sd' ' -)"
 	printf 'in this release directory, so the checksum list must be run against those\n'
 	printf 'fresh bytes (running it from the repo root would just re-verify the\n'
-	printf 'committed copies against themselves). `build_avr_xt/` is intentionally\n'
-	printf 'absent because ATtiny202 is not release-supported.\n\n'
+	printf 'committed copies against themselves).\n\n'
 	printf '```\n'
 	printf 'git checkout %s\n' "$VERSION"
 	printf '# install the pinned toolchain (see TOOLCHAIN.adoc), then:\n'
-	printf 'make clean && make all13 all85 all45 && make pic && make pic320-variants\n'
+	printf 'make clean && make all13 all85 all45 && make attiny202\n'
+	printf 'make pic && make pic320-variants\n'
 	printf 'scripts/verify-release-images.sh release/%s %s\n' "$VERSION" "$RELEASE_IMAGE_DIRS"
 	printf '```\n'
 	printf 'A passing verifier proves four things agree: the committed files, the checksum\n'
@@ -877,11 +1043,11 @@ ok "release qualification metadata and evidence verified."
 	printf 'release: firmware %s\n\n' "$VERSION"
 	printf 'Prebuilt, fully-validated firmware images for %s.\n\n' "$VERSION"
 	printf 'Built from %s with the toolchain pinned in TOOLCHAIN.adoc.\n' "$GIT_SHORT"
-	printf 'Scope: AVR Classic (ATtiny13a/45/85), PIC10F322 and PIC10F320 --\n'
-	printf '%d images, checked against the canonical RELEASE_IMAGES set the Makefile\n' "${#IMAGES[@]}"
-	printf 'declares rather than against whatever the build produced. ATtiny202 is\n'
-	printf 'development-only and is excluded.\n\n'
-	printf 'Validation: make test-long + make pic-test + make pic-test-target-variants\n'
+	printf 'Scope: AVR Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT), PIC10F322 and\n'
+	printf 'PIC10F320 -- %d images, checked against the canonical RELEASE_IMAGES set the\n' "${#IMAGES[@]}"
+	printf 'Makefile declares rather than against whatever the build produced.\n\n'
+	printf 'Validation: make test-long + make attiny202-test + make attiny202-test-target\n'
+	printf '+ make pic-test + make pic-test-target-variants\n'
 	printf '+ make pic320-test + make pic320-test-target-variants\n'
 	printf '+ %s-h parallel soak of every release soak combination (evidence under\n' "$hours"
 	printf 'release/%s/evidence/).\n\n' "$VERSION"

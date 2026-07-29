@@ -19,9 +19,11 @@ name: Release
 #      (fails the release if not). The fourth set is what makes the other three
 #      mean anything: three sets derived by globbing the same directories agree
 #      perfectly on a release that is missing an entire MCU (merge plan §10);
-#   4. re-runs `make test-long` + `make pic-test` + `make pic-test-target-variants`
-#      + `make pic320-test` + `make pic320-test-target-variants` on the clean
-#      runner -- the same gates the MANIFEST claims;
+#   4. re-runs `make test-long` + `make attiny202-test` +
+#      `make attiny202-test-target` + `make pic-test` +
+#      `make pic-test-target-variants` + `make pic320-test` +
+#      `make pic320-test-target-variants` on the clean runner -- the same gates
+#      the MANIFEST claims;
 #   5. rechecks the protected remote tag target, then publishes a GitHub Release
 #      with the images, SHA256SUMS(.asc), MANIFEST,
 #      and the machine-verified QUALIFICATION record.
@@ -43,6 +45,9 @@ env:
   # Pin to the versions in TOOLCHAIN.adoc; bump compiler + DFP together.
   XC8_VERSION: "3.10"
   DFP_VERSION: "1.9.189"
+  # ATtiny202 device pack; keep in step with scripts/fetch_attiny_dfp.sh's pin
+  # and with the ci.yml jobs that share this cache key.
+  ATTINY_DFP_VER: "3.1.260"
   XC8_DIR: /opt/microchip/xc8/v3.10
   XC8_DFP_ROOT: /opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189
 
@@ -123,6 +128,57 @@ jobs:
           wget -q "https://packs.download.microchip.com/${dfp_pack}" -O /tmp/dfp.atpack
           sudo unzip -q -o /tmp/dfp.atpack -d "${XC8_DFP_ROOT}"
 
+      # --- toolchain: ATtiny_DFP + patched yasimavr (ATtiny202 lane) --------
+      # The DFP is needed to BUILD the three ATtiny202 images the reproducibility
+      # gate compares; the patched yasimavr venv is needed to RUN the target
+      # gates this workflow re-executes. Both are version-pinned, fetched by repo
+      # scripts, and cached on the same keys ci.yml uses.
+      - name: Install ATtiny202 harness deps (apt)
+        run: sudo apt-get install -y python3-venv python3-dev curl patch
+
+      - name: Restore cached ATtiny_DFP
+        id: cache-dfp
+        uses: actions/cache/restore@v4
+        with:
+          path: third_party/attiny_dfp
+          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}
+
+      - name: Restore cached patched yasimavr venv
+        id: cache-yasimavr
+        uses: actions/cache/restore@v4
+        with:
+          path: third_party/yasimavr/venv
+          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'third_party/yasimavr/patches/**') }}
+
+      - name: Fetch ATtiny202 device pack + patched simulator
+        run: |
+          scripts/fetch_attiny_dfp.sh
+          scripts/fetch_yasimavr.sh
+
+      - name: Save ATtiny_DFP cache
+        if: steps.cache-dfp.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: third_party/attiny_dfp
+          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}
+
+      - name: Save yasimavr venv cache
+        if: steps.cache-yasimavr.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: third_party/yasimavr/venv
+          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'third_party/yasimavr/patches/**') }}
+
+      - name: Assert ATtiny202 toolchain present (fail loud, do NOT skip)
+        run: |
+          test -f third_party/attiny_dfp/gcc/dev/attiny202/device-specs/specs-attiny202 \
+            || { echo "::error::ATtiny202 device specs missing"; exit 1; }
+          py=third_party/yasimavr/venv/bin/python
+          test -x "$py" || { echo "::error::yasimavr venv missing ($py)"; exit 1; }
+          "$py" -c "import yasimavr" || { echo "::error::yasimavr import broken"; exit 1; }
+          command -v avr-nm >/dev/null || { echo "::error::avr-nm missing"; exit 1; }
+          command -v avr-objdump >/dev/null || { echo "::error::avr-objdump missing"; exit 1; }
+
       - name: Assert PIC toolchain present (fail loud, do NOT skip)
         run: |
           test -x "${XC8_DIR}/bin/xc8-cc" || { echo "::error::XC8 missing"; exit 1; }
@@ -154,12 +210,13 @@ jobs:
           echo "== cbmc ==" && cbmc --version
 
       # --- rebuild from the tag --------------------------------------------
-      # build_avr_xt is intentionally absent: ATtiny202 is development-only and
-      # not part of the release image set or release qualification.
       - name: Rebuild all release images from the tagged source
         run: |
           make clean
           make all13 all85 all45
+          # STRICT_TOOLS=1: an absent ATtiny_DFP must fail the reproducibility
+          # gate, never skip it into an image set that is short three files.
+          make attiny202 STRICT_TOOLS=1
           make pic PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
           # pic320-variants, not pic: it builds all three output stages and
           # removes the whole image set if any one of them fails, so a partial
@@ -208,6 +265,14 @@ jobs:
       # must actually run -- a silently-skipped tool must fail the release.
       - name: Re-run make test-long
         run: make test-long STRICT_TOOLS=1
+
+      - name: Re-run make attiny202-test
+        run: make attiny202-test STRICT_TOOLS=1
+
+      # The AVR-XT target aggregate: functional + physical output trace, fault
+      # injection, and firmware/model ctx_ lock-step on the real built image.
+      - name: Re-run make attiny202-test-target (yasimavr, every variant)
+        run: make attiny202-test-target STRICT_TOOLS=1
 
       - name: Re-run make pic-test
         run: make pic-test STRICT_TOOLS=1 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"

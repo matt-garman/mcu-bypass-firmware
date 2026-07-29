@@ -105,6 +105,36 @@ expect_release_pic320_soak_combos() {
 	checks=$((checks + 1))
 }
 
+# The ATtiny202 combos are generated wrappers rather than compiled binaries, so
+# the same "does the combo actually exist to be wired" question is answered by
+# asserting the duration and liveness interval reach the driver's own env names
+# and that the wrapper is written once per supported variant.
+expect_release_avrxt_soak_combos() {
+	grep -q 'ATTINY202_SOAK_DURATION_MS=%q' "$RELEASE" \
+		|| fail "release does not run ATtiny202 soak combos at the release duration"
+	grep -q 'ATTINY202_SOAK_LIVENESS_INTERVAL_MS=%q' "$RELEASE" \
+		|| fail "release does not pass the liveness interval to ATtiny202 soaks"
+	grep -q 'ATTINY202_SOAK_COMBINATION_NAME=%q' "$RELEASE" \
+		|| fail "release does not bind a combination name into the ATtiny202 SOAK_RESULT"
+	grep -Eq '^for v in \$XT_VARIANTS; do' "$RELEASE" \
+		|| fail "release does not select an ATtiny202 soak combo per output variant"
+	checks=$((checks + 1))
+}
+
+# ...and the driver must actually EMIT the shared contract the orchestrator
+# matches on. Without this the greps above pass while every ATtiny202 combo fails
+# validate_soak_result() at the end of a full-length release soak.
+expect_avrxt_soak_contract() {
+	local driver="$ROOT/test/avr/test_soak_attiny202.py"
+	grep -q 'SOAK_RESULT format=1 status=%s combination=%s duration_ms=%d' "$driver" \
+		|| fail "ATtiny202 soak driver does not emit the release SOAK_RESULT record"
+	grep -q 'SOAK %s: %d ms' "$driver" \
+		|| fail "ATtiny202 soak driver does not emit the '<duration> ms' PASS line"
+	grep -q 'self.liveness_checks' "$driver" \
+		|| fail "ATtiny202 soak driver does not count liveness checks separately"
+	checks=$((checks + 1))
+}
+
 for language in c c++; do
 	if [ "$language" = c ]; then compiler=$HOSTCC; else compiler=$HOSTCXX; fi
 	expect_compile_pass "$compiler" "$language" 1 1 1
@@ -156,5 +186,7 @@ expect_release_reject 4294967295 "must not exceed"
 expect_release_reject 9999999999999999999999999999999999999999 "must not exceed"
 expect_release_liveness_wiring
 expect_release_pic320_soak_combos
+expect_release_avrxt_soak_combos
+expect_avrxt_soak_contract
 
 printf 'soak timing validation: %d checks, 0 failures\n' "$checks"
