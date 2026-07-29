@@ -214,10 +214,14 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
                 targets are STANDALONE and skip cleanly when the venv is absent,
                 exactly like the PIC gpsim targets, so the AVR `make test` is
                 unaffected if yasimavr is not built.
-  status:       ATtiny202 is a development-only, non-release target. Normal CI
-                builds it, gates cppcheck/MISRA, and runs the yasimavr gates,
-                but release creation and release CI intentionally exclude its
-                images and soak evidence.
+  status:       ATtiny202 is a RELEASE-SUPPORTED target. Normal CI builds it,
+                gates cppcheck/MISRA, and runs the yasimavr gates; release
+                creation and release CI additionally build its three images into
+                the published product set, re-run attiny202-test and
+                attiny202-test-target with STRICT_TOOLS=1, soak one combination
+                per output stage for the full release duration, and reproduce
+                the images bit-for-bit from the tag. Both inputs below are
+                therefore REQUIRED to cut a release, not optional.
   build:        scripts/fetch_yasimavr.sh -- the yasimavr counterpart of
                 scripts/fetch_attiny_dfp.sh.  Builds a PATCHED yasimavr into a
                 project-local, gitignored venv (third_party/yasimavr/venv) from
@@ -304,15 +308,20 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   runs use `MUTATION_ALLOW_SKIP=0` or `STRICT_TOOLS=1`, so a skipped PIC mutant
   is treated as a failed gate.
 
-  Development-only ATtiny202 (AVR-XT) dynamic harness (`make attiny202-sim` /
-  -fault / -soak; run in normal CI and optionally run locally):
-  sudo apt install python3 python3-venv python3-dev g++ curl
+  ATtiny202 (AVR-XT) build + dynamic harness (`make attiny202`,
+  `attiny202-sim` / -fault / -lockstep / -soak; run in normal CI, in release
+  qualification, and optionally locally):
+  sudo apt install python3 python3-venv python3-dev g++ curl binutils-avr
   scripts/fetch_attiny_dfp.sh     # Microchip device files (to build the image)
   scripts/fetch_yasimavr.sh       # patched yasimavr venv (to run it)
   # Both are version-pinned, fetched on demand, and NOT committed.  Without them
-  # the attiny202-{sim,fault,soak} targets skip cleanly and `make test` is
-  # unaffected (see the yasimavr entry under "Simulator" above). These tools
-  # and targets are not consumed by release creation or release CI.
+  # the attiny202-* targets skip cleanly and `make test` is unaffected (see the
+  # yasimavr entry under "Simulator" above) -- EXCEPT under STRICT_TOOLS=1, which
+  # release qualification uses to turn every such skip into a hard failure.
+  # scripts/make-release.sh asserts both up front and refuses to start without
+  # them, so a release can never ship an ATtiny202 image that no simulator saw.
+  # binutils-avr matters here beyond linking: the harness resolves ctx_ with
+  # avr-nm and reads coil-pulse widths back out of the image with avr-objdump.
 
 == Version pinning strategy
 

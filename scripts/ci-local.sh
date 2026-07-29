@@ -34,10 +34,11 @@
 #                                            oracle; STRICT_TOOLS=1)
 #                    make attiny202-sim     (yasimavr functional + output trace)
 #                    make attiny202-fault   (yasimavr fault injection)
+#                    make attiny202-lockstep (yasimavr ctx_-vs-model co-sim)
 #                    make attiny202-soak    (yasimavr 5-min soak smoke)
-#                                           (the development-only AVR-XT lane;
-#                                            needs the vendored ATtiny_DFP + the
-#                                            patched yasimavr venv)
+#                                           (the AVR-XT lane; needs the vendored
+#                                            ATtiny_DFP + the patched yasimavr
+#                                            venv)
 #   verify        -> make test              ) covered together by `make
 #   stress        -> make test-long         ) test-long`, which is a strict
 #                                             superset of `make test`
@@ -402,6 +403,7 @@ else
 	run_step "attiny202 job: make attiny202-test" make attiny202-test
 	run_step "attiny202 job: make attiny202-sim" make attiny202-sim
 	run_step "attiny202 job: make attiny202-fault" make attiny202-fault
+	run_step "attiny202 job: make attiny202-lockstep" make attiny202-lockstep
 	# CI runs a 5-minute simulated soak smoke (XT_SOAK_DURATION_MS=300000).
 	run_step "attiny202 job: make attiny202-soak" make attiny202-soak XT_SOAK_DURATION_MS=300000
 fi

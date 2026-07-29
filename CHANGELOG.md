@@ -32,6 +32,46 @@ file is the human-readable summary of *what changed*.
 ## [Unreleased]
 
 ### Added
+- **ATtiny202 (AVR-XT) promoted from development-only to a release-supported
+  target**, bringing the release product set to six parts and 18 images. It was
+  classified development-only on 2026-07-14, in the middle of the week its
+  harness was being hardened; the classification recorded a scoping decision, not
+  a technical blocker, and the lane has since caught up with its peers. Its three
+  images are now built, qualified, soaked, staged and reproduced exactly as every
+  other target's are.
+- ATtiny202 firmware/model **lock-step co-simulation** (`make attiny202-lockstep`),
+  the AVR-XT counterpart of the classic simavr co-sim and `pic-test-lockstep`.
+  After every settled 1 ms tick it reads the shell's `ctx_` out of simulated SRAM
+  and requires all three bytes to equal the shipping core's state after the same
+  tick, over both power-on scenarios. This closed the last structural verification
+  gap: the harness previously asserted observable behaviour only, so a shell that
+  reached the right LED state by the wrong internal trajectory passed.
+- A ctypes bridge (`test/avr/model_step_ffi.c`/`.py`) letting the Python drivers
+  call the **shipping** `src/bypass_pure.c` through `test/model_step.h`. Python
+  cannot include a C header, and re-implementing the algorithm there would
+  recreate exactly the drift hazard `model_step.h` exists to eliminate. Its own
+  host gate (`make test-attiny202-model-ffi`) asserts independent hard-coded
+  algorithm properties, since lock-step mutates model and firmware together.
+- An **ATtiny202 mutation lane**: 19 mutants against the AVR-XT shell and the two
+  shared coil-pulse widths, each mapped to the gate that observes what the fault
+  actually perturbs. Nothing previously established that this lane's suite would
+  fail on a defect in the shell it exists to test. One mutant weakens the PA7
+  pin-control guard to its pre-hardening bit test rather than defeating it, which
+  is what proves the fault matrix's `PIN7CTRL=0x88` injection is load-bearing:
+  that value keeps `PULLUPEN` set, so only the exact comparison can reject it.
+  Gated on the ATtiny_DFP and the patched yasimavr venv both resolving *and*
+  every kill target passing on the unmutated tree, since each `attiny202-*`
+  target exits 0 on a missing input and would otherwise report 19 survivors as a
+  clean run.
+- `make attiny202-test-target`, the fail-closed AVR-XT aggregate (sim + fault +
+  lock-step, every variant) that release qualification and release CI run with
+  `STRICT_TOOLS=1`.
+- ATtiny202 documentation to match its peers: a rationale section, the SOIC-8
+  pinout and pin roles, resource utilization, its place in the multi-MCU
+  architecture chapter, a full target-validation-layers table, and an explicit
+  "Known gaps (AVR-XT — hardware-bench only)" section covering yasimavr's flat
+  instruction timing, the unobservable force-reset completion, the two vendored
+  simulator patches, the missing shell stack bound, and untested UPDI programming.
 - **PIC10F320 integrated as the planned fifth release target** — the first
   whose firmware does not compile the verified core but hand-inlines it, because
   256 words of flash cannot hold the shared-core architecture. Merged from a
@@ -77,6 +117,21 @@ file is the human-readable summary of *what changed*.
   documentation, the release documentation and the generated release manifest.
 
 ### Changed
+- The ATtiny202 soak now emits the same `SOAK_RESULT format=1 ...` machine record
+  and `SOAK PASS: <duration> ms ...` line the AVR Classic and PIC soaks do, so all
+  three substrates are interchangeable to the release orchestrator. Its schedule
+  moved onto a soak clock that excludes the time a liveness round-trip itself
+  consumes — the classic loop's semantics — because scheduling on raw simulated
+  time lets each round-trip's ~120 ms eat the schedule: invisible over an hour,
+  but enough to silently drop the last two or three checks at the release's 24 h
+  and fail an otherwise perfect run. `checks` in that record means liveness
+  checks, matching the peers; the finer-grained reset-witness sampling is counted
+  and reported separately.
+- The one fail-closed mutation run (the `pic` CI job) now provisions the ATtiny202
+  toolchain too, so a single authoritative run still covers every substrate rather
+  than splitting into partial per-job gates. Skip accounting counts PIC and
+  ATtiny202 separately, so a partial run always names which substrate went
+  unexercised.
 - The final-HEX return-stack oracle no longer hardcodes the device geometry.
   `--program-words` supplies the implemented program memory from the device
   pack's `ROMSIZE`, is validated as a power of two inside the 9-bit PC space
@@ -114,7 +169,7 @@ file is the human-readable summary of *what changed*.
   clean but non-publishable `4b28210` full-tool rehearsal, and the still-missing
   final-source production run. It no longer claims that corrected 74/74 mutation
   execution and real-image stack gating never occurred, and the release guide
-  scopes the 12-soak/22-file `QUALIFICATION` contract to unified releases rather
+  scopes the `QUALIFICATION` soak/evidence contract to unified releases rather
   than directing `v0.9.0` through `v0.9.5` to files and targets they predate.
 - Release publication now requires both cryptographic signatures promised by the
   trust model. CI verifies `SHA256SUMS.asc` and the exact remote annotated tag
@@ -125,8 +180,8 @@ file is the human-readable summary of *what changed*.
   Producer and verifier version validation now matches the workflow's optional
   hyphen-suffix trigger and rejects malformed or invalid Git tag names before a
   production qualification run.
-- Mutation results now conserve an immutable 74-mutant inventory across six
-  pinned categories: dispatched plus skipped must equal 74, and killed plus
+- Mutation results now conserve an immutable 93-mutant inventory across seven
+  pinned categories: dispatched plus skipped must equal 93, and killed plus
   survived plus errored must equal dispatched. Inventory records, baseline Make
   commands, worker exits, sandbox setup, atomic result pairs, exact status/output
   grammar, and unexpected artifacts all fail closed instead of allowing a
@@ -151,7 +206,7 @@ file is the human-readable summary of *what changed*.
   checkout drift, a snapshot differing from the tagged record, and a remote tag
   that moved before publication.
 - Release qualification is now machine-verifiable before publication: an
-  immutable 12-combination inventory, exact retained-evidence set, strict
+  immutable 15-combination inventory, exact retained-evidence set, strict
   `QUALIFICATION` schema, and one identity/timing/counter-bearing `SOAK_RESULT`
   per log must agree. Tag CI verifies a private snapshot before installing tools
   and publishes the qualification record; PIC images are hash-pinned across soak
@@ -208,8 +263,8 @@ file is the human-readable summary of *what changed*.
 - Mutation skips now report whether a lane was disabled because a tool was
   absent or because its baseline FAILED, and the closing advice no longer tells
   the reader to install a toolchain that is already complete. With both sandbox
-  gaps closed, `make test-mutation MUTATION_ALLOW_SKIP=0` completes all 74
-  mutants — 74 killed, 0 survived, 0 errored, 0 skipped.
+  gaps closed, `make test-mutation MUTATION_ALLOW_SKIP=0` completes all 93
+  mutants — 93 killed, 0 survived, 0 errored, 0 skipped.
 - The PIC10F320 real-HEX target aggregate now requires explicit fault-injection,
   lock-step, and target-I/O completion markers, so a skipped or incomplete lane
   cannot be reported as a successful CI/release gate.

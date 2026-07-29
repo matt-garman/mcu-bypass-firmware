@@ -6,11 +6,12 @@
 # ---------------
 # A passing test suite proves the tests PASS on correct code; it does not prove
 # the tests would FAIL on broken code. Mutation testing closes that gap: it
-# injects a small, deliberate fault ("mutant") into the PRODUCTION sources
-# (bypass_mcu_avr_classic.c, the output drivers, or bypass_config.h), rebuilds, and runs a
-# fast test target. A correct, adequate suite must DETECT the fault -- the test
-# target must FAIL (the mutant is "killed"). A mutant that survives (tests still
-# pass) marks a real hole in the suite.
+# injects a small, deliberate fault ("mutant") into the PRODUCTION sources (the
+# pure core, any per-MCU shell -- AVR classic, AVR-XT, either PIC -- the output
+# drivers, or bypass_config.h), rebuilds, and runs a fast test target. A correct,
+# adequate suite must DETECT the fault -- the test target must FAIL (the mutant
+# is "killed"). A mutant that survives (tests still pass) marks a real hole in
+# the suite.
 #
 # Core/config mutants map to the single fast variant target `test-sim-cd4053`
 # (the core debounce/WDT logic is shared by every variant, so one variant
@@ -46,12 +47,13 @@ policy_rc=$?
 source "$SCRIPT_DIR/mutation_accounting.sh"
 
 readonly MUTATION_EXPECTED_CORE=23
+readonly MUTATION_EXPECTED_XT=19
 readonly MUTATION_EXPECTED_PIC_GPSIM=6
 readonly MUTATION_EXPECTED_PIC_TARGET=8
 readonly MUTATION_EXPECTED_PIC_SOAK=1
 readonly MUTATION_EXPECTED_PIC320_HOST=27
 readonly MUTATION_EXPECTED_PIC320_TOOL=9
-readonly MUTATION_EXPECTED_TOTAL=74
+readonly MUTATION_EXPECTED_TOTAL=93
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
@@ -71,6 +73,24 @@ PIC_SOAK_MUT_MS="${PIC_SOAK_MUT_MS:-2500}"
 # real press/release round-trip instead of a vacuous zero-check pass. Must stay
 # <= PIC_SOAK_MUT_MS.
 PIC_SOAK_MUT_LIVENESS_MS="${PIC_SOAK_MUT_LIVENESS_MS:-1000}"
+
+# --- AVR-XT (ATtiny202) knobs -------------------------------------------------
+# The two out-of-tree inputs the ATtiny202 lane needs, as ABSOLUTE paths. Both
+# default to a path RELATIVE to the tree in the Makefile (XT_DFP,
+# YASIMAVR_VENV), which is exactly wrong for a mktemp sandbox: `make -C "$work"`
+# would resolve them under $work, find nothing, and every attiny202-* target
+# would SKIP CLEANLY with status 0 -- scored as a survivor for every mutant in
+# the lane. Passing them in absolutely keeps the sandbox self-contained for
+# SOURCES while sharing the read-only toolchain, and the probe below refuses to
+# enable the lane unless both actually resolve.
+XT_DFP_ABS="${XT_DFP_ABS:-$PROJ_DIR/third_party/attiny_dfp}"
+XT_YASIMAVR_VENV_ABS="${XT_YASIMAVR_VENV_ABS:-$PROJ_DIR/third_party/yasimavr/venv}"
+XT_MCU="${XT_MCU:-attiny202}"
+# Soak window for the WDT-liveness mutant. The ATtiny202's fuse-locked WDT
+# period is ~256 ms (WDTCFG=0x06), so this is many periods: an un-pet dog resets
+# well inside it while the baseline (pet) run stays quick. Simulated time, and
+# yasimavr runs it far faster than real time.
+XT_SOAK_MUT_MS="${XT_SOAK_MUT_MS:-2000}"
 
 # Parallelism. Every mutant runs in its own throwaway mktemp sandbox with its own
 # build dirs (copy_tree + `make -C "$work"`), so mutants share nothing and can run
@@ -303,6 +323,33 @@ validate_pic320_sandbox() {
     [ "$ok" -eq 1 ]
 }
 
+# The AVR-XT counterpart, and for the same reason: every attiny202-* target
+# skips cleanly on a missing input, so a file that copy_tree failed to bring
+# across turns the whole lane into silent survivors rather than a loud error.
+# The Python drivers and the golden-model bridge are the pieces that would go
+# missing without announcing it -- the sandbox still builds an image, and the
+# harness still "runs".
+validate_avr_xt_sandbox() {
+    local root="$1" required ok=1
+    for required in \
+        test/avr/sim_attiny202.py \
+        test/avr/attiny202_fuses.py \
+        test/avr/test_sim_attiny202.py \
+        test/avr/test_fault_attiny202.py \
+        test/avr/test_soak_attiny202.py \
+        test/avr/test_lockstep_attiny202.py \
+        test/avr/test_attiny202_delay_oracle.py \
+        test/avr/model_step_ffi.c \
+        test/avr/model_step_ffi.py \
+        test/model_step.h; do
+        if [ ! -f "$root/$required" ]; then
+            echo "ERROR: AVR-XT mutation sandbox is missing $required" >&2
+            ok=0
+        fi
+    done
+    [ "$ok" -eq 1 ]
+}
+
 SANDBOX_SELFTEST_DONE=0
 if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
     if ! SELFTEST_DIR="$(mktemp -d)"; then
@@ -362,6 +409,23 @@ if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
             exit 1
         fi
     done
+
+    # Same discipline for the AVR-XT lane. model_step.h sits at test/ root while
+    # its bridge sits at test/avr/, so this also re-checks that the walk takes
+    # BOTH levels -- and .c alongside .py, since the golden-model bridge is one
+    # of each and a lane missing either silently degrades to survivors.
+    copy_tree "$SELFTEST_DIR"
+    if ! validate_avr_xt_sandbox "$SELFTEST_DIR"; then
+        rm -rf "$SELFTEST_DIR"
+        exit 1
+    fi
+
+    rm -f "$SELFTEST_DIR/test/avr/model_step_ffi.py"
+    if validate_avr_xt_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
+        echo "ERROR: mutation sandbox validator accepted a missing AVR-XT model bridge" >&2
+        rm -rf "$SELFTEST_DIR"
+        exit 1
+    fi
 
     rm -rf "$SELFTEST_DIR"
     SANDBOX_SELFTEST_DONE=1
@@ -438,10 +502,15 @@ unpack_mutation_job_spec() {
     fi
     category=${fields[0]}; kind=${fields[1]}; arg=${fields[2]}
     file=${fields[3]}; sed_expr=${fields[4]}; desc=${fields[5]}
+    # An unknown kind gets its own message rather than falling into the pair
+    # check below: `*) return 1` leaves the function before the `||` runs, so a
+    # kind this validator has never heard of would abort the whole run with no
+    # diagnostic at all. That is exactly what a newly added lane looks like.
     case "$kind" in
-        make|pictarget) [ -n "$arg" ] ;;
+        make|pictarget|avrxt) [ -n "$arg" ] ;;
         picgpsim|picsoak) [ -z "$arg" ] ;;
-        *) return 1 ;;
+        *)  echo "ERROR: packed mutation job has an unknown kind: $kind" >&2
+            return 1 ;;
     esac || {
         echo "ERROR: packed mutation job has an invalid kind/argument pair" >&2
         return 1
@@ -560,6 +629,16 @@ run_mutant() {
         pictarget)
             label="pic-test-target($arg)"
             make -C "$work" PIC_TARGET_VARIANT="$arg" pic-test-target >/dev/null 2>&1; rc=$?
+            ;;
+        avrxt)
+            # Same shape as `make`, plus the two absolute tool paths the sandbox
+            # cannot supply itself (see the XT knobs at the top). Intentional
+            # word splitting on $arg: each entry is optional VAR=value
+            # assignments followed by one Make target, never shell metacharacters.
+            label="$arg"
+            make -C "$work" $arg \
+                XT_DFP="$XT_DFP_ABS" \
+                YASIMAVR_VENV="$XT_YASIMAVR_VENV_ABS" >/dev/null 2>&1; rc=$?
             ;;
         *)
             publish_mutation_result "$stem" errored \
@@ -680,8 +759,62 @@ PIC_SOAK_MUTATIONS=(
 "src/bypass_mcu_pic10f322.c	s@{ CLRWDT(); }@{ (void)0; /* MUTANT: no WDT pet */ }@	PIC WDT pet (CLRWDT) removed; soak reset counter trips within ~1s of an un-pet WDT"
 )
 
-# Combined work list, filled in mutant order (core/AVR first, then any enabled PIC
-# subsets). Each element packs: category<US>kind<US>arg<US>file<US>sed<US>desc,
+# --- AVR-XT shell mutants (src/bypass_mcu_avr_xt.c) ---------------------------
+# The ATtiny202 counterpart of the classic-AVR shell mutants above and the PIC
+# ones below them. Every entry is killed by driving the REAL avr-gcc-built image
+# in yasimavr, so the whole lane is gated on the ATtiny_DFP and the patched venv
+# both being present AND the unmutated tree passing each kill target (probe
+# below): every attiny202-* target exits 0 when an input is missing, which
+# without the gate would read as a lane full of survivors.
+#
+# Kill targets are chosen for what each fault actually perturbs, not for
+# convenience -- an inverted LED shows up in the functional trace, a defeated
+# SFR guard only in fault injection, a dropped state write-back only in
+# lock-step, a missing WDT pet only in the soak, and a shortened coil pulse only
+# in the disassembly oracle. Where one variant suffices the entry pins it with
+# XT_SIM_VARIANT so the mutant does not pay for all three.
+#
+# Each entry: file<TAB>sed-expression<TAB>make-args<TAB>description.
+XT_MUTATIONS=(
+# -- observable behaviour: killed by the functional + output-trace driver ------
+"src/bypass_mcu_avr_xt.c	s@void hw_led_pin_set_high(void) { PORTA.OUTSET = (uint8_t)(1U << LED_PIN); }@void hw_led_pin_set_high(void) { PORTA.OUTCLR = (uint8_t)(1U << LED_PIN); }@	XT_SIM_VARIANT=cd4053 attiny202-sim	XT set_engaged LED inverted (OUTSET becomes OUTCLR; PA1 never lights); toggle assertions catch it"
+"src/bypass_mcu_avr_xt.c	s@void hw_led_pin_set_low(void)  { PORTA.OUTCLR = (uint8_t)(1U << LED_PIN); }@void hw_led_pin_set_low(void)  { PORTA.OUTSET = (uint8_t)(1U << LED_PIN); }@	XT_SIM_VARIANT=cd4053 attiny202-sim	XT set_bypass LED clear inverted (PA1 stuck lit); boot-dark and alternating-toggle checks catch it"
+"src/bypass_mcu_avr_xt.c	s@(0U == (PORTA.IN & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (PORTA.IN \& (uint8_t)(1U << FOOTSW_PIN)))@	XT_SIM_VARIANT=cd4053 attiny202-sim	XT footswitch read polarity inverted (PA7 sense flipped -> toggles on release, not press)"
+"src/bypass_mcu_avr_xt.c	s@void hw_pin_set_high(uint8_t const pin) { PORTA.OUTSET = (uint8_t)(1U << pin); }@void hw_pin_set_high(uint8_t const pin) { PORTA.OUTCLR = (uint8_t)(1U << pin); }@	XT_SIM_VARIANT=relay attiny202-sim	XT control-pin drive inverted (coil/CTL bit never set); PA2/PA3 transition trace catches it"
+"src/bypass_mcu_avr_xt.c	s@    PORTA.OUTCLR = output_mask; // selected outputs -> low latch@    PORTA.OUTSET = output_mask; // MUTANT: outputs latched HIGH before DIR@	XT_SIM_VARIANT=relay attiny202-sim	XT output pins latched high before the DIR write (glitch: both relay coils driven at startup); startup trace catches the unsafe pre-config high"
+# -- internal trajectory: killed by the ctx_-vs-model lock-step co-simulation --
+"src/bypass_mcu_avr_xt.c	s@ctx_.debounce_counter = res.lockout_value;@(void)0; /* MUTANT: lockout reload dropped */@	XT_SIM_VARIANT=cd4053 attiny202-lockstep	XT anti-retrigger lockout reload dropped; counter keeps its integrated value instead of RELEASE_THRESH"
+"src/bypass_mcu_avr_xt.c	s@ctx_.program_state = res.program_state;@(void)0; /* MUTANT: program_state write-back dropped */@	XT_SIM_VARIANT=cd4053 attiny202-lockstep	XT program_state write-back dropped; the state machine never advances out of PRESS_DEBOUNCE_WAIT"
+"src/bypass_mcu_avr_xt.c	s@ctx_.effect_state  = res.effect_state;@(void)0; /* MUTANT: effect_state write-back dropped */@	XT_SIM_VARIANT=cd4053 attiny202-lockstep	XT effect_state write-back dropped; ctx_ diverges from the model even where the LED briefly agrees"
+# -- guards: killed by fault injection into the running image ------------------
+"src/bypass_mcu_avr_xt.c	s@if ( (ctx_.program_state > RELEASE_DEBOUNCE_WAIT)@if ( 0 \&\& (ctx_.program_state > RELEASE_DEBOUNCE_WAIT)@	XT_SIM_VARIANT=cd4053 attiny202-fault	XT per-tick sanity gate disabled wholesale; no corruption ever forces the reset path"
+"src/bypass_mcu_avr_xt.c	s@(actual_direction_mask == (uint8_t)BYPASS_OUTPUT_DDR_MASK) &&@(1U != 0U) \&\&@	XT_SIM_VARIANT=cd4053 attiny202-fault	XT exact PORTA.DIR predicate removed; a footswitch pin turned output (or a spare turned input) evades the required-subset check"
+"src/bypass_mcu_avr_xt.c	s@(uint8_t)(PORTA.OUT & (uint8_t)BYPASS_OUTPUT_DDR_MASK)@(uint8_t)(PORTA.OUT \& (uint8_t)0x0EU)@	XT_SIM_VARIANT=cd4053 attiny202-fault	XT output-latch mask omits spare PA6; an unexpected high latch there goes undetected"
+"src/bypass_mcu_avr_xt.c	s@((uint8_t)WDT_LOCK_bm  == wdt_locked)  &&@(1U != 0U) \&\&@	XT_SIM_VARIANT=cd4053 attiny202-fault	XT WDT hardware-lock guard defeated; an unlocked watchdog never forces reset"
+"src/bypass_mcu_avr_xt.c	s@((uint16_t)TCB0_CCMP_1MS == tcb0_ccmp) ;@(1U != 0U) ;@	XT_SIM_VARIANT=cd4053 attiny202-fault	XT tick-period (TCB0.CCMP) guard defeated; a corrupt 1 ms reload never forces reset"
+"src/bypass_mcu_avr_xt.c	s@return (PORTA.PIN7CTRL == (uint8_t)PORT_PULLUPEN_bm);@return 1U;@	XT_SIM_VARIANT=cd4053 attiny202-fault	XT footswitch pin-control guard defeated; a cleared PA7 PULLUPEN (floating input) never forces reset"
+# Not a defeated guard but a WEAKENED one: this is the exact pre-hardening
+# predicate, so it still catches a cleared pull-up and only stops catching
+# INVEN. It is the mutant that proves the fault matrix's PIN7CTRL=0x88 case is
+# load-bearing -- 0x88 keeps PULLUPEN set, so the bit test below is satisfied
+# and only the exact comparison can reject it.
+"src/bypass_mcu_avr_xt.c	s@return (PORTA.PIN7CTRL == (uint8_t)PORT_PULLUPEN_bm);@return (PORTA.PIN7CTRL \& (uint8_t)PORT_PULLUPEN_bm) != 0U;@	XT_SIM_VARIANT=cd4053 attiny202-fault	XT footswitch pin-control guard weakened to a PULLUPEN bit test; an INVEN upset preserving the pull-up reverses the active-low PA7 sense undetected"
+# -- liveness: killed by the soak's reset witness ------------------------------
+"src/bypass_mcu_avr_xt.c	s@            hw_wdt_pet();@            (void)0; /* MUTANT: no WDT pet */@	XT_SIM_VARIANT=cd4053 XT_SOAK_DURATION_MS=$XT_SOAK_MUT_MS XT_SOAK_LIVENESS_INTERVAL_MS=$XT_SOAK_MUT_MS XT_SOAK_PROGRESS_INTERVAL_MS=$XT_SOAK_MUT_MS attiny202-soak	XT main-loop WDT pet removed; the soak's GPR0 reset witness trips within one ~256 ms WDT period"
+"src/bypass_mcu_avr_xt.c	s@    timer_isr_called_ = TIMER_ISR_CALLED;@    timer_isr_called_ = TIMER_ISR_NOT_CALLED;@	XT_SIM_VARIANT=cd4053 XT_SOAK_DURATION_MS=$XT_SOAK_MUT_MS XT_SOAK_LIVENESS_INTERVAL_MS=$XT_SOAK_MUT_MS XT_SOAK_PROGRESS_INTERVAL_MS=$XT_SOAK_MUT_MS attiny202-soak	XT ISR/main liveness handshake broken (ISR clears its own flag); main never pets, so the WDT resets"
+# -- absolute pulse width: killed by the disassembly oracle --------------------
+# These two live in the SHARED output drivers rather than the XT shell. The PIC
+# lane mutates the same lines against its own cycle-exact target I/O check; here
+# they gate the AVR-XT's only route to an absolute width -- the _delay_ms loop
+# read back out of the built image -- which exists precisely because yasimavr's
+# flat instruction timing cannot measure a busy-wait pulse.
+"src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	attiny202-delay-oracle	XT relay coil pulse shortened below the 4 ms datasheet minimum; the image's _delay_ms loop no longer matches the 12 ms design"
+"src/bypass_output_cd4053_with_mute.c	s@BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS)@BYPASS_DELAY_MS(1)@g	attiny202-delay-oracle	XT cd4053-mute pre-switch mute window shortened from 5 ms; the disassembled delay loop no longer matches the design"
+)
+
+# Combined work list, filled in mutant order (core/AVR first, then any enabled
+# PIC subsets, then the ATtiny202 lane). Each element packs:
+# category<US>kind<US>arg<US>file<US>sed<US>desc,
 # where <US> is the ASCII unit-separator (\x1f). A NON-whitespace separator is
 # required: the `arg` field is empty for the PIC gpsim/soak kinds, and `read`
 # with an IFS-whitespace delimiter (space/tab/newline) COLLAPSES the adjacent
@@ -721,7 +854,9 @@ validate_mutation_inventory PIC320_HOST_MUTATIONS PIC10F320-host \
     "$MUTATION_EXPECTED_PIC320_HOST" 4 || exit 2
 validate_mutation_inventory PIC320_TOOL_MUTATIONS PIC10F320-tool \
     "$MUTATION_EXPECTED_PIC320_TOOL" 4 || exit 2
-inventory_total=$((${#MUTATIONS[@]} + ${#PIC_GPSIM_MUTATIONS[@]} \
+validate_mutation_inventory XT_MUTATIONS ATtiny202 "$MUTATION_EXPECTED_XT" 4 || exit 2
+inventory_total=$((${#MUTATIONS[@]} + ${#XT_MUTATIONS[@]} \
+    + ${#PIC_GPSIM_MUTATIONS[@]} \
     + ${#PIC_TARGET_MUTATIONS[@]} + ${#PIC_SOAK_MUTATIONS[@]} \
     + ${#PIC320_HOST_MUTATIONS[@]} + ${#PIC320_TOOL_MUTATIONS[@]}))
 mutation_require_count total "$MUTATION_EXPECTED_TOTAL" "$inventory_total" || exit 2
@@ -762,15 +897,21 @@ for target in "${CORE_BASE_TARGETS[@]}" "${PIC320_HOST_BASE_TARGETS[@]}"; do
 done
 
 if [ "$SANDBOX_SELFTEST_DONE" -eq 1 ]; then
-    mutation_validate_totals 74 74 0 74 0 0 0 0 || exit 1
-    mutation_validate_totals 74 50 24 50 0 0 0 0 || exit 1
-    if mutation_validate_totals 74 49 24 49 0 0 0 0 >/dev/null 2>&1; then
+    # Fully provisioned, then the two partial shapes the skip accounting can
+    # produce: every simulator absent (only the 50 host mutants dispatch), and
+    # the ATtiny202 lane alone absent. The second is the case this file's
+    # combined `skipped` exists for -- a box with the PIC stack but no vendored
+    # DFP/yasimavr -- so the totals check must accept a skip that is not PIC's.
+    mutation_validate_totals 93 93 0 93 0 0 0 0 || exit 1
+    mutation_validate_totals 93 50 43 50 0 0 0 0 || exit 1
+    mutation_validate_totals 93 74 19 74 0 0 0 0 || exit 1
+    if mutation_validate_totals 93 49 43 49 0 0 0 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a dropped dispatch" >&2; exit 1
     fi
-    if mutation_validate_totals 74 50 24 49 0 0 0 0 >/dev/null 2>&1; then
+    if mutation_validate_totals 93 50 43 49 0 0 0 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a missing result" >&2; exit 1
     fi
-    if mutation_validate_totals 74 50 24 50 0 0 1 0 >/dev/null 2>&1; then
+    if mutation_validate_totals 93 50 43 50 0 0 1 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a failed worker" >&2; exit 1
     fi
     for checker_rc in 125 126 127 143; do
@@ -832,6 +973,20 @@ EOF
             >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted an overlong packed job" >&2; exit 1
     fi
+    # Every dispatchable kind must round-trip. `avrxt` is here because it was
+    # added by one branch while this validator was added by another: the kinds
+    # the pool can emit and the kinds it will accept are two lists that must be
+    # kept in step, and nothing else in the suite compares them.
+    unpack_mutation_job_spec \
+        "fixture$US""avrxt$US""XT_SIM_VARIANT=cd4053 attiny202-sim$US""src/f.c$US""s@a@b@$US""d" \
+        || exit 1
+    [ "$kind" = avrxt ] && [ "$arg" = 'XT_SIM_VARIANT=cd4053 attiny202-sim' ] || {
+        echo "ERROR: mutation accounting unpacked an ATtiny202 job incorrectly" >&2; exit 1
+    }
+    if unpack_mutation_job_spec \
+            "fixture$US""notakind$US""t$US""src/f.c$US""s@a@b@$US""d" >/dev/null 2>&1; then
+        echo "ERROR: mutation accounting accepted an unknown job kind" >&2; exit 1
+    fi
     publish_mutation_result "$RESULT_DIR/selftest-valid" killed \
         '[selftest-valid] killed   (fixture): valid result' || exit 1
     mutation_read_status selftest-valid "$RESULT_DIR/selftest-valid.status" || exit 1
@@ -846,7 +1001,7 @@ EOF
             "$RESULT_DIR/selftest-no-newline.status" >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted an unterminated status" >&2; exit 1
     fi
-    echo "mutation sandbox/accounting validation: 24 checks, 0 failures"
+    echo "mutation sandbox/accounting validation: 29 checks, 0 failures"
     exit 0
 fi
 
@@ -1028,6 +1183,54 @@ else
 fi
 rm -rf "$P320_BASE"
 
+# --- AVR-XT toolchain probe ---------------------------------------------------
+# Same discipline as both PIC probes: enable the ATtiny202 mutants only when the
+# ATtiny_DFP and the patched yasimavr venv both resolve AND every DISTINCT kill
+# command passes on the unmutated sandbox. Every attiny202-* target exits 0 on a
+# missing input, so the outer tool checks and the per-command baselines are both
+# required -- either alone leaves a way for the whole lane to read as survivors
+# on a host that simply lacks the tools.
+XT_OK=0
+XT_WHY="tools absent"
+echo
+echo "=== AVR-XT toolchain probe (gates the ATtiny202 mutants) ==="
+XT_BASE="$(mktemp -d)"
+copy_tree "$XT_BASE"
+if ! validate_avr_xt_sandbox "$XT_BASE"; then
+    rm -rf "$XT_BASE"
+    exit 2
+fi
+echo "AVR-XT mutation sandbox files: PASS"
+
+if [ -f "$XT_DFP_ABS/gcc/dev/$XT_MCU/device-specs/specs-$XT_MCU" ] \
+   && [ -x "$XT_YASIMAVR_VENV_ABS/bin/python" ] \
+   && "$XT_YASIMAVR_VENV_ABS/bin/python" -c "import yasimavr" >/dev/null 2>&1; then
+    XT_BASELINES_OK=1
+    while IFS= read -r target; do
+        # Intentional word splitting: each field is optional VAR=value
+        # assignments followed by one Make target, never shell metacharacters.
+        if make -C "$XT_BASE" $target \
+                XT_DFP="$XT_DFP_ABS" \
+                YASIMAVR_VENV="$XT_YASIMAVR_VENV_ABS" >/dev/null 2>&1; then
+            echo "baseline $target: PASS"
+        else
+            echo "baseline $target: FAIL"
+            XT_BASELINES_OK=0
+        fi
+    done < <(printf '%s\n' "${XT_MUTATIONS[@]}" | cut -f3 | sort -u)
+    if [ "$XT_BASELINES_OK" -eq 1 ]; then
+        XT_OK=1
+        echo "ATtiny_DFP + patched yasimavr present, all baselines PASS -> ATtiny202 mutants ENABLED"
+    else
+        XT_WHY="baseline FAILED"
+        MUT_BASELINE_FAILED=1
+        echo "an ATtiny202 kill-target baseline failed -> its mutants SKIPPED"
+    fi
+else
+    echo "ATtiny_DFP and/or patched yasimavr absent -> ATtiny202 mutants SKIPPED"
+fi
+rm -rf "$XT_BASE"
+
 # Collect the enabled PIC subsets onto the same work list.
 if [ "$PIC320_TOOL_OK" -eq 1 ]; then
     p320_tool_cat="${#PIC320_TOOL_MUTATIONS[@]} PIC10F320 target mutants (gpsim/libgpsim/soak)"
@@ -1066,6 +1269,16 @@ if [ "$PIC_TARGET_OK" -eq 1 ]; then
         file=${MUTATION_RECORD_FIELDS[0]}; sed_expr=${MUTATION_RECORD_FIELDS[1]}
         variant=${MUTATION_RECORD_FIELDS[2]}; desc=${MUTATION_RECORD_FIELDS[3]}
         job_specs+=("$target_cat$US""pictarget$US$variant$US$file$US$sed_expr$US$desc")
+    done
+fi
+
+if [ "$XT_OK" -eq 1 ]; then
+    xt_cat="${#XT_MUTATIONS[@]} ATtiny202 shell mutants (yasimavr sim/lock-step/fault/soak + delay oracle)"
+    for entry in "${XT_MUTATIONS[@]}"; do
+        mutation_parse_record "ATtiny202 collection" 4 "$entry" || exit 2
+        file=${MUTATION_RECORD_FIELDS[0]}; sed_expr=${MUTATION_RECORD_FIELDS[1]}
+        target=${MUTATION_RECORD_FIELDS[2]}; desc=${MUTATION_RECORD_FIELDS[3]}
+        job_specs+=("$xt_cat$US""avrxt$US$target$US$file$US$sed_expr$US$desc")
     done
 fi
 
@@ -1165,13 +1378,26 @@ else
     echo "PIC10F320 mutants: host lanes RAN; target/soak SKIPPED ($PIC320_TOOL_WHY)"
     pic_skipped=$((pic_skipped + ${#PIC320_TOOL_MUTATIONS[@]}))
 fi
+# The ATtiny202 lane is all-or-nothing (one probe, one toolchain) and is counted
+# separately from the PIC total so the summary keeps saying which substrate went
+# unexercised rather than merging them into one anonymous number. The totals
+# check below takes the COMBINED figure, since its invariant is over the whole
+# inventory: every planned mutant was either dispatched or explicitly skipped.
+xt_skipped=0
+if [ "$XT_OK" -eq 1 ]; then
+    echo "ATtiny202 mutants: RAN (yasimavr sim/lock-step/fault/soak + delay oracle)"
+else
+    echo "ATtiny202 mutants: SKIPPED ($XT_WHY)"
+    xt_skipped=${#XT_MUTATIONS[@]}
+fi
+skipped=$((pic_skipped + xt_skipped))
 accounting_failed=0
 if ! mutation_validate_totals "$MUTATION_EXPECTED_TOTAL" "$dispatched" \
-        "$pic_skipped" "$killed" "$survived" "$errored" \
+        "$skipped" "$killed" "$survived" "$errored" \
         "$worker_failures" "$artifact_errors"; then
     accounting_failed=1
 fi
-echo "=== mutation summary: $killed killed, $survived survived, $errored errored, $pic_skipped PIC skipped ==="
+echo "=== mutation summary: $killed killed, $survived survived, $errored errored, $pic_skipped PIC skipped, $xt_skipped ATtiny202 skipped ==="
 if [ "$survived" -ne 0 ]; then
     echo "SURVIVING MUTANTS (test suite gap -- a real fault went undetected):"
     for s in "${SURVIVORS[@]}"; do echo "  - $s"; done
@@ -1180,8 +1406,8 @@ if [ "$survived" -ne 0 ] || [ "$errored" -ne 0 ] \
         || [ "$accounting_failed" -ne 0 ]; then
     exit 1
 fi
-if [ "$pic_skipped" -ne 0 ] && [ "$MUTATION_ALLOW_SKIP" -ne 1 ]; then
-    echo "ERROR: $pic_skipped PIC mutant(s) skipped; complete mutation gate did not run." >&2
+if [ "$skipped" -ne 0 ] && [ "$MUTATION_ALLOW_SKIP" -ne 1 ]; then
+    echo "ERROR: $skipped mutant(s) skipped; complete mutation gate did not run." >&2
     if [ "$MUT_BASELINE_FAILED" -eq 1 ]; then
         echo "       At least one lane skipped because its BASELINE FAILED, not because a" >&2
         echo "       tool is missing: the UNMUTATED tree did not pass a kill target. Do not" >&2
@@ -1189,13 +1415,14 @@ if [ "$pic_skipped" -ne 0 ] && [ "$MUTATION_ALLOW_SKIP" -ne 1 ]; then
         echo "       probe discards its output. Note it may fail only INSIDE the mktemp" >&2
         echo "       sandbox, which is a copy_tree gap rather than a defect in the tree." >&2
     else
-        echo "       Install the PIC toolchain/libgpsim stack, or set MUTATION_ALLOW_SKIP=1" >&2
-        echo "       for an explicitly partial local run." >&2
+        echo "       Install the PIC toolchain/libgpsim stack (PIC lanes) and/or run" >&2
+        echo "       scripts/fetch_attiny_dfp.sh + scripts/fetch_yasimavr.sh (ATtiny202" >&2
+        echo "       lane), or set MUTATION_ALLOW_SKIP=1 for an explicitly partial run." >&2
     fi
     exit 1
 fi
-if [ "$pic_skipped" -ne 0 ]; then
-    echo "PARTIAL: all evaluated mutants killed, but $pic_skipped PIC mutant(s) were explicitly allowed to skip."
+if [ "$skipped" -ne 0 ]; then
+    echo "PARTIAL: all evaluated mutants killed, but $skipped mutant(s) were explicitly allowed to skip."
     exit 0
 fi
 echo "all mutants killed: the suite detects every injected fault."

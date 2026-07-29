@@ -29,9 +29,7 @@ support both CD4053 and TMUX4053 boards with fail-safe BYPASS polarity. See the
 [`v0.9.3` correction](../CHANGELOG.md#093---2026-07-11).
 
 The current Makefile's product set for the pending unified release covers AVR
-Classic (ATtiny13a/45/85), PIC10F322 and PIC10F320. ATtiny202 is a
-development-only target: its normal CI artifacts are not ready-to-flash release
-assets and are intentionally absent here.
+Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT), PIC10F322 and PIC10F320.
 
 That set is not a description of whatever a build happened to produce — it is
 declared once in the Makefile as `RELEASE_IMAGES` and enforced. The verifier
@@ -123,8 +121,11 @@ inherited from the separate project that target was merged from and were kept
 deliberately, so previously published image names stay valid. **Match images to
 MCUs by the suffix table and by `MANIFEST.md`, never by prefix.**
 
-There is no ATtiny202 suffix because that development-only target is not part
-of the prebuilt release set.
+ATtiny202 images use the `_attiny202` suffix on the standard `bypass_` prefix.
+They are the only AVR images that are **not** programmed over ISP: the ATtiny202
+uses UPDI, and its fuses are seven individually named AVR8X memories rather than
+the classic `lfuse`/`hfuse` pair. `MANIFEST.md` lists all seven per image and
+gives the exact `avrdude` command.
 
 The per-release `MANIFEST.md` lists every image with its MCU, clock, flash
 usage, fuse bytes, and exact flashing command.
@@ -188,17 +189,17 @@ programmer command above.
 
 ### Unified releases (v0.9.6 or later)
 
-A freshly built release HEX lands under `build_avr_classic/`, `build_pic/` and
-`build_pic10f320/`, not in the release directory, so run the checksum list
-against those fresh bytes — running it from the repo root would only re-verify the committed copies
-against themselves. The omission of `build_avr_xt/` is intentional because
-ATtiny202 is not release-supported.
+A freshly built release HEX lands under `build_avr_classic/`, `build_avr_xt/`,
+`build_pic/` and `build_pic10f320/`, not in the release directory, so run the
+checksum list against those fresh bytes — running it from the repo root would only
+re-verify the committed copies against themselves.
 
 ```sh
 git checkout vX.Y.Z
 # install the pinned toolchain (see TOOLCHAIN.adoc), then:
 scripts/verify-release-qualification.sh release/vX.Y.Z vX.Y.Z
-make clean && make all13 all85 all45 && make pic && make pic320-variants
+make clean && make all13 all85 all45 && make attiny202
+make pic && make pic320-variants
 scripts/verify-release-images.sh release/vX.Y.Z $(make -s print-RELEASE_IMAGE_DIRS)
 ```
 

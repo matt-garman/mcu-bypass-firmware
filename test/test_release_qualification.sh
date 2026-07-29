@@ -189,19 +189,19 @@ sed -i 's/^- \*\*Soak combinations:\*\*.*/- **Soak combinations:** 11/' \
 	"$release/MANIFEST.md"
 expect_fail "manifest soak-count mismatch" "soak count does not match"
 
-[ "${#soak_names[@]}" -eq 12 ] \
-	|| fail "canonical release soak set has ${#soak_names[@]} entries, expected 12"
+[ "${#soak_names[@]}" -eq 15 ] \
+	|| fail "canonical release soak set has ${#soak_names[@]} entries, expected 15"
 overridden=$(make -s -C "$ROOT" RELEASE_SOAK_NAMES=bad print-RELEASE_SOAK_NAMES)
 [ "$overridden" = "${soak_names[*]}" ] \
 	|| fail "command-line override changed canonical RELEASE_SOAK_NAMES"
-for required in avr_cd4053_t85 pic_relay pic320_tq2-relay; do
+for required in avr_cd4053_t85 attiny202_relay pic_relay pic320_tq2-relay; do
 	[[ " ${soak_names[*]} " == *" $required "* ]] \
 		|| fail "canonical release soak set is missing $required"
 done
 checks=$((checks + 1))
 
-[ "${#evidence_names[@]}" -eq 22 ] \
-	|| fail "canonical release evidence set has ${#evidence_names[@]} entries, expected 22"
+[ "${#evidence_names[@]}" -eq 28 ] \
+	|| fail "canonical release evidence set has ${#evidence_names[@]} entries, expected 28"
 overridden=$(make -s -C "$ROOT" RELEASE_EVIDENCE_FILES=bad print-RELEASE_EVIDENCE_FILES)
 [ "$overridden" = "${evidence_names[*]}" ] \
 	|| fail "command-line override changed canonical RELEASE_EVIDENCE_FILES"
@@ -210,7 +210,8 @@ checks=$((checks + 1))
 for wiring in \
 	'SOAK_COMBINATION_NAME="$name"' \
 	'PIC_SOAK_COMBINATION_NAME="$name"' \
-	'PIC320_SOAK_COMBINATION_NAME="$name"'; do
+	'PIC320_SOAK_COMBINATION_NAME="$name"' \
+	'ATTINY202_SOAK_COMBINATION_NAME=%q'; do
 	grep -Fq "$wiring" "$ROOT/scripts/make-release.sh" \
 		|| fail "release producer is missing soak identity wiring: $wiring"
 done
@@ -225,6 +226,9 @@ grep -Fq '"$dir/QUALIFICATION"' "$ROOT/.github/workflows/release.yml" \
 grep -Fq 'a staged PIC image differs from the image exercised by the soak' \
 	"$ROOT/scripts/make-release.sh" \
 	|| fail "release producer does not bind staged PIC images to soak inputs"
+grep -Fq 'a staged ATtiny202 image differs from the image exercised by its gates and soak' \
+	"$ROOT/scripts/make-release.sh" \
+	|| fail "release producer does not bind staged ATtiny202 images to soak inputs"
 checks=$((checks + 1))
 
 printf 'release qualification validation: %d checks, 0 failures\n' "$checks"

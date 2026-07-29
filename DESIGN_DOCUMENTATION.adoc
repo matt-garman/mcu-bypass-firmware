@@ -19,6 +19,43 @@ although Microchip does offer a limited free version of this compiler.  The
 free tier XC8 restricts the options that are available.
 
 
+== Why ATtiny202 (AVR-XT):
+
+The ATtiny202 is a tinyAVR 0-series part: same vendor as AVR Classic, but a
+different core generation (`avrxmega3`) with an entirely different peripheral
+set.  It is the modern-silicon member of the supported set.
+
+    * Still built by the same free/open avr-gcc + avr-libc toolchain, so the
+      open-tooling property that motivates AVR Classic is preserved
+    * Current production part rather than a mature/legacy one, with a
+      correspondingly long expected availability horizon
+    * 2 KB flash and 128 bytes SRAM: roughly double the ATtiny13a's flash and
+      SRAM, so the firmware sits at ~40% of flash instead of ~70%
+    * An **AEC-Q100 automotive-qualified** variant of this family exists
+      (125 °C), which is a meaningfully stronger environmental rating than any
+      other supported part carries
+    * A genuinely fuse-locked watchdog: once `WDTCFG` is programmed, the WDT
+      cannot be disabled by software at all (see Failsafe Mechanisms), which is
+      a stronger guarantee than the classic parts' WDTON fuse
+    * Programmed over UPDI, a single-wire interface that does not consume the
+      RESET pin the way debugWIRE does
+
+The trade-offs are honest ones and are recorded where they bite:
+
+    * **Packaging.** The ATtiny202 is SOIC-8 / UDFN-8 only — there is no
+      through-hole DIP version.  For hand-built one-offs the ATtiny13a or
+      PIC10F322 remain the friendlier choice.
+    * **Device pack.** Building for it needs Microchip's ATtiny_DFP device
+      files, which the packaged avr-gcc 7.3.0 does not carry.  That is a
+      Microchip download (no account or EULA), fetched on demand and version
+      pinned; see TOOLCHAIN.adoc.  A modern from-source avr-libc (>= 2.2.0) has
+      native ATtiny202 support and would remove this dependency.
+    * **Simulation.** Neither simavr nor QEMU models the AVR8X core.  The
+      dynamic harness runs on yasimavr instead, which is a genuine behavioural
+      simulator but is not cycle-accurate; see "Known simulator gaps" in
+      test/README.md for exactly what that does and does not cover.
+
+
 == High-Level Functional Description
 
 The microcontroller will be used with a physical human-operated
@@ -259,6 +296,51 @@ user.  The release-debounce, or lock-out period, is longer so as to
 The PIC10F320 is pin-compatible with the PIC10F322 in this design — same
 package, same pin functions, same footswitch/LED/control assignment — so the
 pinout above applies unchanged. The parts differ in flash size, not in wiring.
+
+
+== ATtiny202 SOIC-8 Package Pinout
+
+The ATtiny202 is **not available in a through-hole DIP package** — SOIC-8 and
+UDFN-8 only. Of its eight pins, six are I/O: PA4 and PA5 exist in the die's
+PORTA register but are not bonded out on the 8-pin package.
+
+Physical pin numbering below is taken from the `SOIC8` pinout in Microchip's own
+`ATtiny202.atdf` device file, as shipped in the pinned ATtiny_DFP the build uses
+(see `TOOLCHAIN.adoc`) — not from a redrawn diagram. The vendored four-file DFP
+subset does not include the `.atdf`, so re-checking this means reading it out of
+the full atpack.
+
+....
+                                        +----+
+                               VDD pin1-|    |-pin8 GND
+               (AIN6/spare)    PA6 pin2-|    |-pin7 PA3 (AIN3/EXTCLK/CTL2/relay SET)
+       (AIN7/footswitch input) PA7 pin3-|    |-pin6 PA0 (UPDI/~RESET)
+             (AIN1/status LED) PA1 pin4-|    |-pin5 PA2 (AIN2/CTL1/relay RESET)
+                                        +----+
+....
+
+Pin roles in this design map one-for-one onto the AVR Classic assignment above:
+
+    * PA7: input; footswitch, internal pull-up, normally high, pulled low when
+      pressed (the classic shell's PB0)
+    * PA1: output; status LED, high when engaged (PB1)
+    * PA2: output; x4053 control / relay RESET coil (PB2)
+    * PA3: output; x4053 second control / relay SET coil (PB3)
+    * PA6: output driven low.  It is otherwise unused; driving it low rather
+      than leaving it an input keeps it from floating, and it is included in the
+      exact-direction and output-latch integrity checks (see Failsafe
+      Mechanisms) so a corrupted PORTA is still detected on that bit.
+    * PA0: left as UPDI (the `RSTPINCFG` field of `SYSCFG0` keeps it as the
+      programming pin).  It is never used as GPIO, which is why the design fits
+      an 8-pin part without sacrificing the programming interface.
+
+`src/bypass_pins_avr_xt.h` is the single source of truth for these assignments;
+`bypass_mcu_avr_xt.c` pins each of them to `<avr/io.h>`'s generic `PINn_bp`
+constants with compile-time asserts, so a typo in the map cannot misroute a pin.
+
+NOTE: unlike the classic AVR parts, PA7 here is deliberately placed well clear
+of the UPDI pin.  Putting the footswitch on PA0 would have shared it with the
+programming interface.
 
 
 == Optimal Footswitch-GPIO Wiring for EMI/RFI resiliency
@@ -538,6 +620,11 @@ See TOOLCHAIN.adoc for details.  Summary:
       ** avr tools: avr-gcc, avr-libc, avrdude toolchain
       ** no Arduino
       ** simavr
+    * ATtiny202 (AVR-XT)
+      ** the same avr-gcc/avr-libc/avrdude toolchain
+      ** ATtiny_DFP device pack (avr-libc 7.3.0 predates the part)
+      ** yasimavr (simavr and QEMU do not model the AVR8X core)
+      ** UPDI programming, not ISP
     * PIC10F322
       ** XC8 free-tier compiler
       ** PIC10-12Fxxx_DFP device pack
@@ -617,6 +704,37 @@ This headroom is a deliberate design property: it leaves ample room for future
 features without approaching any resource limit, and it is enforced as a test:
 the stack high-water-mark check fails the build if free SRAM margin drops below
 its floor.
+
+=== ATtiny202 (AVR-XT build)
+
+The ATtiny202 has 2 KB of flash and 128 bytes of SRAM — roughly double the
+ATtiny13a on both — so it is the least constrained AVR part in the set. Flash
+figures are reported by the build itself (`make attiny202`), which gates every
+variant against the 2048-byte device size. They do not come from `avr-size`'s
+device-aware mode: binutils 2.26 does not recognise `avrxmega3` parts, so
+`avr-size -C --mcu=attiny202` reports "Device: Unknown" and no percentage.
+
+.Table ATtiny202 Utilization by Variant (measured, avr-gcc 7.3.0 + ATtiny_DFP)
+|===
+| Variant | Flash     | of 2 KB | Free
+
+| cd4053  | 848 bytes | 41.4%   | 1200 bytes
+| mute    | 888 bytes | 43.4%   | 1160 bytes
+| relay   | 888 bytes | 43.4%   | 1160 bytes
+|===
+
+Static data is 4 bytes, identical to the AVR Classic figure and for the same
+reason: the AVR-XT shell keeps the same two globals, `ctx_` (the 3-byte
+`debounce_context_t`) and the 1-byte `timer_isr_called_` ISR-to-main handshake.
+Against 128 bytes of SRAM that is 3.1%, leaving the whole remainder for stack.
+
+NOTE: the `-fstack-usage` static frame bound (`make test-stack-bound`) covers
+the verified core and all three output drivers — which the AVR-XT build shares
+unchanged — but not `bypass_mcu_avr_xt.c` itself, whose own frames are not yet
+measured. The margin here is large enough that this is a completeness gap rather
+than a risk (the ATtiny13a, with half the SRAM and a measured 31-byte peak,
+still leaves ~29 bytes free), but it is a real difference from the classic lane
+and is tracked as such.
 
 === PIC10F322 (XC8 build)
 
@@ -707,8 +825,9 @@ The 2 MHz choice is simply "no reason to burn 4 mW when 2 does the same job."
 
 == Multi-MCU Architecture: Shared Core, Per-MCU Shell
 
-The firmware targets three unrelated MCU families that share the debounce
-algorithm but differ completely at the register level. The split that makes
+The firmware targets three MCU core generations -- AVR Classic, AVR-XT and
+PIC10F32x -- that share the debounce algorithm but differ completely at the
+register level. The split that makes
 this work has two rules.
 
 **The algorithm is shared, exactly once.** `src/bypass_pure.c` is the
@@ -732,6 +851,18 @@ shared `main()` cannot express both without changing AVR's ISR-sampling
 behaviour, which would invalidate the documented design and the tests built on
 it — lock-step co-simulation, ISR-jitter, and the handshake mutants.
 
+The ATtiny202 follows the AVR Classic model rather than the PIC one, but on
+entirely different peripherals: the tick is TCB0 in periodic-interrupt mode
+(`CCMP` = 1999 at 2 MHz) instead of Timer0 compare-match, the sleep is AVR-XT
+IDLE via `SLPCTRL`, and the watchdog is fuse-locked by `WDTCFG` so `hw_wdt_pet()`
+is a bare `wdr` with nothing to arm. Because it integrates in the ISR, it
+inherits the classic lane's timing properties exactly — including the one that
+matters most for actuation: the ISR keeps sampling through a blocking relay or
+mute pulse, so no ticks are lost, which is why the AVR shells and the polled PIC
+shell qualify press timing differently (see Asymmetric Debounce Timing). This is
+the clearest illustration of why the shells are separate: the AVR-XT and AVR
+Classic shells share a *model* and share none of their register code.
+
 So `main()`, the tick source, `init()` as orchestrator, and the reset path stay
 file-static inside each shell. The consequences are visible elsewhere in this
 document: the polled PIC shell qualifies press timing differently than the
@@ -744,8 +875,8 @@ driver (`hw_pin_set_*`, `hw_led_pin_set_*`, `hw_configure_output_pins`,
 `hw_output_state_intact`) and the operations a driver provides back
 (`hw_set_bypass_state`, `hw_set_engaged_state`, `hw_is_sanity_check_failed`,
 `hw_init_output_pins`). The pin-direction API is mask-based so one driver body
-serves all targets: the AVR implementation writes `DDRB`, the PIC maps the mask
-onto `TRISA`.
+serves all targets: the AVR Classic implementation writes `DDRB`, the AVR-XT
+one writes `PORTA.DIR`, and the PIC maps the mask onto `TRISA`.
 
 Everything else — footswitch read, watchdog arm and pet, clock and peripheral
 bring-up, wait-for-tick, the forced-reset path, and the SFR integrity checks —
@@ -767,7 +898,7 @@ Its firmware, `src/bypass_mcu_pic10f320.c`, therefore reuses *neither* the core
 nor the output drivers as linked code. It is a single self-contained file with
 the integrator, the state machine, the power-on initialisation and the three
 output stages hand-inlined into `main()` and `#if defined(OUTPUT_*)` blocks. The
-source tree therefore has five intended release targets implemented by four
+source tree therefore has six release targets implemented by four
 shells plus one inlined implementation; the PIC10F320's first unified release is
 still pending qualification.
 

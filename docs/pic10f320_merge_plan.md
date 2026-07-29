@@ -29,6 +29,17 @@ superseded by this status and `docs/pic10f320_validation.md`. The §6.12 hardwar
 return-stack and rebuild-trigger rows are implemented; all eight parent-gate
 rows are closed.
 
+**Scope erratum (2026-07-29).** The ATtiny202 was promoted from development-only
+to a release-supported target after the status above was written, which changes
+every release-scope number in this plan: the canonical image set is **18**, not
+15; the soak set is **15** combinations, not 12; and the mutation inventory is
+**92**, not 74. Statements in this plan that ATtiny202 is development-only or
+absent from the release set — including §10 and the checklist row asserting that
+status — recorded the scope at their cited checkpoint and are superseded here.
+The PIC10F320 reasoning they support is unaffected: the exclusion argument was
+about scope discipline, not about the 202. `README.md`, `CHANGELOG.md` and
+`test/README.md` carry the current classification.
+
 **Decision.** Consolidation is the right direction. The repositories have
 the same maintainer, product domain, toolchain family, behaviour contract,
 and output stages; the child intentionally derives from the parent and
