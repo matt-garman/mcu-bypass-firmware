@@ -138,6 +138,69 @@ invalid program state; C7 proves integrator contraction and released-input
 recovery for an out-of-range counter.
 
 
+## ATtiny202 (AVR-XT) target validation layers
+
+The AVR-XT lane needs two inputs a normal AVR machine does not have: Microchip's
+ATtiny_DFP device files to *build* the image (packaged avr-gcc 7.3.0 predates the
+part) and a patched `yasimavr` venv to *run* it (neither simavr nor QEMU models
+the AVR8X core). Both are fetched on demand and version pinned, and every
+`attiny202-*` target skips cleanly without them — which is correct for local
+development and fatal for a gate, so CI and release qualification use
+`STRICT_TOOLS=1` to turn each skip into a hard failure.
+
+The split mirrors the PIC lanes: **the host-only rows below are members of
+`make test`** and run everywhere; the simulator rows need the fetched inputs.
+
+| layer | target | what it proves | substrate |
+|---|---|---|---|
+| Image generation | `test-attiny202-build` | Missing, partial, or malformed avr-gcc output cannot become an ATtiny202 image; the flash budget is enforced per variant. | host fake-compiler regression |
+| Fuse configuration | `test-fuses` | All seven AVR8X fuse bytes match design intent, and the simulator's descriptor is patched to those exact production values rather than falling back to defaults. | host parser |
+| Golden-model bridge | `test-attiny202-model-ffi` | The ctypes bridge reaches the shipping pure core and behaves correctly at the `>=` press-threshold boundary, both saturation bounds, the lock-out, and a full round trip — independent hard-coded expectations, not another comparison against the model. | host |
+| Output-sequence oracle | `test-attiny202-output-oracle` | The PA2/PA3 transition, ordering and pulse-presence checker itself is correct. | host |
+| Fault accounting oracle | `test-attiny202-fault-oracle` | The fault driver's run accounting cannot silently under-count injections. | host |
+| Coil-pulse width | `attiny202-delay-oracle` | Absolute relay (12 ms) and mute (5 ms) pulse widths, recovered from the disassembled `_delay_ms` loop in the built image, match design and clear the 4 ms datasheet minimum. | host, over real image |
+| Static analysis | `attiny202-analyze` | cppcheck + MISRA pass over the AVR-XT shell with real DFP/avr-libc headers. | host tools |
+| Register-level functional | `attiny202-sim` | The real image toggles on debounced press, boots dark with the WDT locked and `PORTA.DIR` exact, stays stable at idle, handles a switch held through power-on, and drives the correct PA2/PA3 sequence per variant. | yasimavr |
+| Fault recovery | `attiny202-fault` | 17 guarded SFR/latch/state corruptions each produce the correct response — the sanity gate's force-reset path, or a witnessed watchdog reset for the tick timer itself. Zero skips, exact completion accounting. | yasimavr |
+| Firmware/model lock-step | `attiny202-lockstep` | `ctx_` in simulated SRAM equals the shipping core's state after **every settled tick**, over both boot scenarios, plus LED and settled control-line agreement. Catches a shell defect on the tick it happens rather than as a wrong output later. | yasimavr + host core via ctypes |
+| Liveness soak | `attiny202-soak` | Over a long run the watchdog never resets the device (GPR0 reset witness), the sanity gate never force-resets, and a periodic 2-press round-trip still toggles. Emits the shared `SOAK_RESULT` release contract. | yasimavr |
+| Fail-closed aggregate | `attiny202-test-target` | sim + fault + lock-step across every variant, with no skip permitted. This is what release qualification runs. | yasimavr |
+
+Mutation coverage for this lane is described under "Mutation testing" below; it
+is gated on the same two inputs and by the same probe discipline as the PIC ones.
+
+### Known gaps (AVR-XT — hardware-bench only)
+
+These are properties of the AVR-XT *environment*, not of the firmware, and are
+ultimately validated on a real part at the bench.
+
+- **yasimavr is not cycle-accurate.** It charges roughly one cycle per
+  instruction with no multi-cycle timing model, so a busy-wait `_delay_ms` loop
+  runs at about half its real duration (a 12 ms coil pulse traces as ~6 ms). This
+  is why `attiny202-sim` asserts pulse *ordering, polarity, exclusion and
+  presence* but never wall-clock width, and why absolute width is recovered
+  separately from the disassembled image by `attiny202-delay-oracle`. TCB0 tick
+  timing is unaffected, so the debounce, LED and lock-step results stay accurate.
+- **The force-reset spin cannot be observed completing.** The shell's
+  unrecoverable path is `cli; for(;;){}`, and yasimavr treats an interrupts-off
+  infinite loop as a terminal halt, stopping before the ~256 ms watchdog would
+  fire. The fault test therefore asserts the gate *entering* that path (halted
+  with PC at the `rjmp .-0` signature); the watchdog physically completing it is
+  a hardware guarantee. The liveness-path reset out of sleep *is* observed
+  directly.
+- **The simulator is patched.** Two upstream yasimavr bugs block this firmware —
+  the tinyAVR 0-series builder omits the WDT peripheral entirely, and
+  `ArchXT_WDT` maps `WINDOW=OFF` to a 4-clock window, resetting a correctly-petted
+  watchdog. Both are carried as vendored patches (reported upstream), so AVR-XT
+  dynamic evidence rests on a project-local build rather than a stock tool. The
+  functional test doubles as the in-harness regression for the second bug.
+- **No stack bound for the shell.** `make test-stack-bound` covers the pure core
+  and all three output drivers, which this build shares unchanged, but not
+  `bypass_mcu_avr_xt.c` itself.
+- **UPDI programming is untested on silicon.** The `attiny202-program` recipe and
+  its fuse writes have not been exercised against a real part.
+
+
 ## PIC10F322 target validation layers
 
 Real-tool PIC targets are intentionally outside the default AVR `make test` path:

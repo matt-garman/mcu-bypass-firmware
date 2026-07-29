@@ -532,10 +532,10 @@ jobs:
           p=$(grep -c "SOAK PASS" soak.log || true)
           [ "$p" -eq "$n" ] || { echo "::error::attiny202-soak: $p/$n variants PASSed (skip or fail)"; exit 1; }
 
-      - name: Upload development-only ATtiny202 images
+      - name: Upload ATtiny202 firmware images
         uses: actions/upload-artifact@v4
         with:
-          name: development-attiny202
+          name: firmware-attiny202
           path: build_avr_xt/*.hex
           if-no-files-found: error
 

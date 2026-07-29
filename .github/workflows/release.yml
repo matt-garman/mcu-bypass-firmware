@@ -12,7 +12,7 @@ name: Release
 #   1. verifies the retained qualification belongs to the tag event's commit:
 #      an artifact-only child whose sole parent is the qualified source;
 #   2. rebuilds every release image from the TAGGED source on a clean, pinned
-#      runner (AVR Classic + PIC10F322 + PIC10F320; ATtiny202 is development-only);
+#      runner (AVR Classic + ATtiny202 + PIC10F322 + PIC10F320);
 #   3. REPRODUCIBILITY GATE: asserts the committed files, SHA256SUMS entries,
 #      freshly built files, AND the canonical RELEASE_IMAGES set the Makefile
 #      declares are all the same complete set with byte-identical contents

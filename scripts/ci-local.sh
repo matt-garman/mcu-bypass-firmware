@@ -32,9 +32,9 @@
 #                    make attiny202-fault   (yasimavr fault injection)
 #                    make attiny202-lockstep (yasimavr ctx_-vs-model co-sim)
 #                    make attiny202-soak    (yasimavr 5-min soak smoke)
-#                                           (the development-only AVR-XT lane;
-#                                            needs the vendored ATtiny_DFP + the
-#                                            patched yasimavr venv)
+#                                           (the AVR-XT lane; needs the vendored
+#                                            ATtiny_DFP + the patched yasimavr
+#                                            venv)
 #   verify        -> make test              ) covered together by `make
 #   stress        -> make test-long         ) test-long`, which is a strict
 #                                             superset of `make test`

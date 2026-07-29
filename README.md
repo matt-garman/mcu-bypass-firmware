@@ -3,11 +3,11 @@
 
 [![CI](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml)
 
-The source tree covers five intended release parts across three microcontroller
-families: the "AVR Classic" parts (ATtiny13a, ATtiny45, ATtiny85) and the
-Microchip PIC10F322 and PIC10F320. Published releases through `v0.9.5` predate
-the PIC10F320 merge; its first unified release remains pending fresh full-tool
-qualification. The development-only AVR-XT lane currently targets ATtiny202.
+The source tree covers six release parts across three microcontroller core
+generations: the "AVR Classic" parts (ATtiny13a, ATtiny45, ATtiny85), the AVR-XT
+ATtiny202, and the Microchip PIC10F322 and PIC10F320. Published releases through
+`v0.9.5` predate both the PIC10F320 merge and the ATtiny202 promotion; the first
+unified release covering all six remains pending fresh full-tool qualification.
 
 ## Targets
 
@@ -15,11 +15,11 @@ qualification. The development-only AVR-XT lane currently targets ATtiny202.
 |---|---|---|
 | ATtiny13a | release-supported | the primary/default target |
 | ATtiny45 / ATtiny85 | release-supported | tinyx5 family |
+| **ATtiny202 (AVR-XT)** | release-supported | **first release pending**; 2 KB flash, SOIC-8 only (no DIP), UPDI programming |
 | PIC10F322 | release-supported | 512 words |
 | **PIC10F320** | integrated release candidate | **first unified release pending; constrained exception: 256 words, so the verified core is hand-inlined rather than compiled in — see [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md)** |
-| ATtiny202 (AVR-XT) | development-only | built and exercised in normal CI; **not** in prebuilt releases |
 
-Every established release target compiles the verified core (`src/bypass_pure.c`)
+Every release target except one compiles the verified core (`src/bypass_pure.c`)
 directly into its shipping image. The integrated PIC10F320 candidate cannot — its
 flash is half the PIC10F322's — so it carries an inlining seam that
 equivalence, real-HEX lock-step and fault injection against that same core
@@ -125,20 +125,28 @@ coverage is mandatory when `pic-test` runs. The target aggregates are the
 authoritative simulator gates and fail closed on any missing/skipped libgpsim
 layer.
 
-To build and validate the development-only ATtiny202 (AVR-XT) port (uses the
-open-source avr-gcc toolchain plus the fetched-on-demand Microchip device files
-and a patched `yasimavr` simulator built by `scripts/fetch_yasimavr.sh`):
+To build and validate the ATtiny202 (AVR-XT) port (uses the open-source avr-gcc
+toolchain plus the fetched-on-demand Microchip device files and a patched
+`yasimavr` simulator built by `scripts/fetch_yasimavr.sh`):
 
 ```
-make attiny202        # build all variants + 2 KB flash-budget gate
-make attiny202-sim    # yasimavr functional + PA2/PA3 transition/timing test
-make attiny202-fault  # fault-injection: corrupt a guarded SFR/state, assert recovery
-make attiny202-soak   # long-duration liveness soak (XT_SOAK_DURATION_MS=)
+make attiny202             # build all variants + 2 KB flash-budget gate
+make attiny202-test        # all pre-hardware checks (fuses, budget, analysis, pulse widths)
+make attiny202-sim         # yasimavr functional + PA2/PA3 transition/timing test
+make attiny202-fault       # fault-injection: corrupt a guarded SFR/state, assert recovery
+make attiny202-lockstep    # ctx_-vs-verified-core co-simulation, every settled tick
+make attiny202-soak        # long-duration liveness soak (XT_SOAK_DURATION_MS=)
+make attiny202-test-target # the fail-closed aggregate release qualification runs
 ```
 
-These targets are also independent of the AVR build and skip cleanly if the
-device pack or the `yasimavr` venv is not present. Normal CI builds and runs
-the dynamic gates for this lane, but ATtiny202 images and long-soak evidence are
-not part of the release product set or release qualification.
+Programming is over UPDI rather than ISP. `make attiny202-program VARIANT=<v>
+XT_UPDI_PORT=<port>` writes the seven AVR8X fuse bytes and the flash image; it
+defaults to avrdude's `serialupdi`, which needs only a USB-serial adapter and a
+series resistor.
+
+These targets are also independent of the AVR Classic build and skip cleanly if
+the device pack or the `yasimavr` venv is not present — everywhere except release
+qualification, which runs them with `STRICT_TOOLS=1` so a missing simulator is a
+hard failure rather than silent evidence of nothing.
 
 See [TOOLCHAIN](TOOLCHAIN.adoc) for full environmental details.  
