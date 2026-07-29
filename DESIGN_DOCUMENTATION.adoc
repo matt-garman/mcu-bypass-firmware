@@ -674,8 +674,14 @@ Specific tests verify specific requirements, as shown in the following table:
 
 == Resource Utilization
 
-The firmware is deliberately tiny, leaving large headroom on every supported
-part. Measured figures per MCU family follow.
+Resource use spans a wide range across the supported parts: the same behaviour
+occupies 9.1% of an ATtiny85's flash and 95.3% of a PIC10F320's. Headroom is
+generous on the roomier parts and deliberately tight at the bottom of that
+range -- the 256-word PIC10F320 leaves 12 words free on its largest variant,
+which is why that target is built differently from every other one and is
+documented as a special case (see `docs/pic10f320_special_case.md`). Every
+family carries a build-time flash-budget gate, so an overshoot fails the build
+rather than reaching hardware. Measured figures per MCU family follow.
 
 === AVR Classic family
 
