@@ -42,6 +42,10 @@
 #                                           (the AVR-XT lane; needs the vendored
 #                                            ATtiny_DFP + the patched yasimavr
 #                                            venv)
+#                    Those four are COUNTED, not just run: CI asserts one PASS
+#                    line per variant on each, because a per-variant skip
+#                    returns 0. See xt_gate() below; a bare `make` exit status
+#                    is a weaker check than the CI step it stands in for.
 #   verify        -> make test              ) covered together by `make
 #   stress        -> make test-long         ) test-long`, which is a strict
 #                                             superset of `make test`
@@ -157,13 +161,72 @@ run_step() {
 	CURRENT=""
 }
 
+# ----------------------------------------------------------------------------
+# ATtiny202 harness gates: run the target AND count its per-variant PASS lines.
+#
+# WHY THIS IS NOT JUST `run_step make attiny202-<x>`
+#   CI deliberately does not trust these targets' exit status. Each attiny202-*
+#   harness target iterates VARIANTS, and a variant that is skipped rather than
+#   run still leaves the target at exit 0 -- so `make` returning 0 does not mean
+#   the matrix was covered. ci.yml therefore greps one PASS marker per variant
+#   and fails the step on a short count. Without the same assertion here, a tree
+#   that covers fewer variants than it claims passes locally and fails in CI,
+#   which is precisely the outcome this script exists to prevent.
+#
+#   The expected count comes from XT_VARIANTS_SUPPORTED (declared `override` in
+#   the Makefile, so it cannot be shrunk from the command line) rather than from
+#   VARIANTS, which can. The fault gate keeps ci.yml's hardcoded 3 as an
+#   independent cross-check on that variable: if both the Makefile's supported
+#   list and this expectation were sourced the same way, a wrong list would
+#   agree with itself and the gate would go green having tested less.
+#
+# Usage: xt_gate <marker> <count> [<marker> <count>...] -- <command...>
+# ----------------------------------------------------------------------------
+XT_LOG_DIR=""
+
+xt_gate() {
+	local -a specs=()
+	while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+		specs+=("$1"); shift
+	done
+	[ "${1-}" = "--" ] || die "xt_gate: missing -- before the command"
+	shift
+	[ "$#" -gt 0 ] || die "xt_gate: no command given"
+	[ "${#specs[@]}" -gt 0 ] && [ $(( ${#specs[@]} % 2 )) -eq 0 ] \
+		|| die "xt_gate: expected <marker> <count> pairs"
+
+	[ -n "$XT_LOG_DIR" ] \
+		|| XT_LOG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ci-local-attiny202.XXXXXX")
+	local logfile
+	logfile=$(mktemp "$XT_LOG_DIR/gate.XXXXXX")
+
+	# pipefail is already set; a failing make aborts here exactly as before,
+	# before any count is consulted.
+	"$@" 2>&1 | tee "$logfile"
+
+	local i marker want got
+	for (( i = 0; i < ${#specs[@]}; i += 2 )); do
+		marker=${specs[i]}
+		want=${specs[i + 1]}
+		got=$(grep -c "$marker" "$logfile" || true)
+		[ "$got" -eq "$want" ] \
+			|| die "$CURRENT: '$marker' appeared $got time(s), expected $want (a variant was skipped or did not report)"
+		ok "  '$marker' x$got (expected $want)"
+	done
+}
+
 on_exit() {
 	local rc=$?
-	[ "$rc" -eq 0 ] && return 0
+	if [ "$rc" -eq 0 ]; then
+		[ -z "$XT_LOG_DIR" ] || rm -rf "$XT_LOG_DIR"
+		return 0
+	fi
 	if [ -n "$CURRENT" ]; then
 		printf '\n%sFAILED%s during: %s (exit %d)\n' "$RED" "$RST" "$CURRENT" "$rc" >&2
 		log "CI would be RED. Fix the above and re-run."
 	fi
+	# Kept on failure only: the gate output is what a short count needs read.
+	[ -z "$XT_LOG_DIR" ] || log "ATtiny202 gate logs kept in: $XT_LOG_DIR"
 	return 0   # preserve original exit code
 }
 trap on_exit EXIT
@@ -412,12 +475,31 @@ if [ "$SKIP_ATTINY202" -eq 1 ]; then
 	warn "--skip-attiny202: NOT running the ATtiny202 job; this does not mirror CI."
 else
 	# Toolchain asserted in PREFLIGHT above.
+	#
+	# XT_N is read once, before any gate runs: a complete Make invocation holds
+	# the worktree lock, so `make print-...` issued while another make is in
+	# flight would block rather than answer.
+	XT_N=$(make -s print-XT_VARIANTS_SUPPORTED | wc -w)
+	[ "$XT_N" -gt 0 ] || die "XT_VARIANTS_SUPPORTED is empty; nothing would be gated"
+
 	run_step "attiny202 job: make attiny202-test" make attiny202-test
-	run_step "attiny202 job: make attiny202-sim" make attiny202-sim
-	run_step "attiny202 job: make attiny202-fault" make attiny202-fault
-	run_step "attiny202 job: make attiny202-lockstep" make attiny202-lockstep
-	# CI runs a 5-minute simulated soak smoke (XT_SOAK_DURATION_MS=300000).
-	run_step "attiny202 job: make attiny202-soak" make attiny202-soak XT_SOAK_DURATION_MS=300000
+	run_step "attiny202 job: make attiny202-sim" \
+		xt_gate "SIM PASS" "$XT_N" -- make attiny202-sim
+	# Hardcoded 3, exactly as ci.yml does: an independent cross-check on
+	# XT_VARIANTS_SUPPORTED rather than a second reading of it.
+	run_step "attiny202 job: make attiny202-fault" \
+		xt_gate "FAULT PASS" 3 -- make attiny202-fault
+	# Each variant co-simulates BOTH boot scenarios, so a scenario that bailed
+	# out early cannot hide behind a green per-variant verdict.
+	run_step "attiny202 job: make attiny202-lockstep" \
+		xt_gate "LOCKSTEP PASS" "$XT_N" "co-simulated" "$(( XT_N * 2 ))" \
+		-- make attiny202-lockstep
+	# CI runs a 5-minute simulated soak smoke, with the progress interval set to
+	# the full duration so the log carries one progress line per variant.
+	run_step "attiny202 job: make attiny202-soak" \
+		xt_gate "SOAK PASS" "$XT_N" -- \
+		make attiny202-soak XT_SOAK_DURATION_MS=300000 \
+			XT_SOAK_PROGRESS_INTERVAL_MS=300000
 fi
 
 if [ "$PR_MODE" -eq 1 ]; then
