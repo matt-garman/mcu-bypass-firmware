@@ -3,7 +3,9 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SOURCE_VERIFY="$ROOT/scripts/verify-release-history.sh"
-TAG_VERIFY="$ROOT/scripts/verify-release-tag-target.sh"
+TAG_VERIFY_SOURCE="$ROOT/scripts/verify-release-tag-target.sh"
+SIGNATURE_VERIFY_SOURCE="$ROOT/scripts/verify-release-signature.sh"
+PINNED_SIGNATURE_VERIFY="$SIGNATURE_VERIFY_SOURCE"
 WORKFLOW="$ROOT/.github/workflows/release.yml"
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-history.XXXXXX")
 repo="$work/repo"
@@ -16,6 +18,86 @@ fail() {
 	printf 'FAIL: %s\n' "$*" >&2
 	exit 1
 }
+
+create_signing_key() {
+	local home=$1 uid=$2 public_key=$3 result_var=$4 fingerprint
+	install -d -m 700 "$home"
+	gpg --batch --no-options --homedir "$home" --pinentry-mode loopback \
+		--passphrase '' --quick-generate-key "$uid" ed25519 sign 1d \
+		>/dev/null 2>&1 || fail "could not generate $uid signing fixture"
+	fingerprint=$(gpg --batch --no-options --homedir "$home" --with-colons \
+		--fingerprint --list-secret-keys 2>/dev/null \
+		| awk -F: '$1 == "fpr" { print $10; exit }')
+	[[ "$fingerprint" =~ ^[0-9A-F]{40}$ ]] \
+		|| fail "could not read $uid fixture fingerprint"
+	gpg --batch --no-options --homedir "$home" --armor \
+		--export "$fingerprint" > "$public_key" \
+		|| fail "could not export $uid public key"
+	printf -v "$result_var" '%s' "$fingerprint"
+}
+
+run_signature_verify() {
+	"$SIGNATURE_VERIFY" "$@"
+}
+
+expect_signature_fail() {
+	local label=$1 expected=$2 output
+	shift 2
+	if output=$(run_signature_verify "$@" 2>&1); then
+		fail "$label: invalid release signature was accepted"
+	fi
+	[[ "$output" == *"$expected"* ]] \
+		|| fail "$label: failed for the wrong reason: $output"
+	checks=$((checks + 1))
+}
+
+run_tag_verify() {
+	"$TAG_VERIFY" "$@"
+}
+
+status_policy_accepts() (
+	# shellcheck source=/dev/null
+	source "$verifier_fixture/scripts/release-signing-policy.sh"
+	release_signature_status_matches_policy "$1"
+)
+
+expect_tag_fail() {
+	local label=$1 expected=$2 output
+	if output=$(run_tag_verify "$remote" "$version" "$release_sha" 2>&1); then
+		fail "$label: invalid remote release tag was accepted"
+	fi
+	[[ "$output" == *"$expected"* ]] \
+		|| fail "$label: failed for the wrong reason: $output"
+	checks=$((checks + 1))
+}
+
+push_release_tag() {
+	git -C "$repo" push -q --force "$remote" "refs/tags/$version"
+}
+
+expected_home="$work/expected-gnupg"
+wrong_home="$work/wrong-gnupg"
+expected_public_key="$work/expected-signing-key.asc"
+wrong_public_key="$work/wrong-signing-key.asc"
+create_signing_key "$expected_home" "Expected Release Signer <expected@example.invalid>" \
+	"$expected_public_key" expected_fingerprint
+create_signing_key "$wrong_home" "Wrong Release Signer <wrong@example.invalid>" \
+	"$wrong_public_key" wrong_fingerprint
+
+# Exercise the production verifier code with disposable fixture keys without
+# making the production trust root overrideable through ambient variables.
+verifier_fixture="$work/verifier"
+mkdir -p "$verifier_fixture/scripts" "$verifier_fixture/release"
+cp "$TAG_VERIFY_SOURCE" "$SIGNATURE_VERIFY_SOURCE" "$verifier_fixture/scripts/"
+cp "$expected_public_key" "$verifier_fixture/release/signing-key.asc"
+while IFS= read -r line || [ -n "$line" ]; do
+	printf '%s\n' "${line//6184219C6670945D7174F2B0149F042FCC3D3AEC/$expected_fingerprint}"
+done < "$ROOT/scripts/release-signing-policy.sh" \
+	> "$verifier_fixture/scripts/release-signing-policy.sh"
+chmod 755 "$verifier_fixture/scripts/verify-release-signature.sh" \
+	"$verifier_fixture/scripts/verify-release-tag-target.sh"
+TAG_VERIFY="$verifier_fixture/scripts/verify-release-tag-target.sh"
+SIGNATURE_VERIFY="$verifier_fixture/scripts/verify-release-signature.sh"
 
 setup_fixture() {
 	local source_mode=${1:-source}
@@ -151,6 +233,10 @@ setup_fixture
 expect_fail "malformed release object" "not a full lowercase SHA-1" \
 	"$snapshot" "$version" not-a-sha
 
+setup_fixture
+expect_fail "non-triggering dotted release suffix" "invalid expected release version" \
+	"$snapshot" v99.0.0.rc1 "$release_sha"
+
 grep -Fq 'fetch-depth: 2' "$WORKFLOW" \
 	|| fail "release workflow does not fetch the qualified source parent"
 grep -Fq 'RELEASE_OBJECT: ${{ github.sha }}' "$WORKFLOW" \
@@ -159,39 +245,181 @@ grep -Fq 'scripts/verify-release-history.sh "$dir" "$tag" "$RELEASE_OBJECT"' "$W
 	|| fail "release workflow does not bind qualification to tag history"
 grep -Fq 'scripts/verify-release-tag-target.sh origin "$tag" "$VERIFIED_RELEASE_COMMIT"' "$WORKFLOW" \
 	|| fail "release workflow does not recheck the remote tag before publication"
+grep -Fq 'scripts/verify-release-signature.sh detached \' "$WORKFLOW" \
+	|| fail "release workflow does not verify the checksum signature"
+grep -Fq 'cp -p -- "$dir"/*.hex "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \' "$WORKFLOW" \
+	|| fail "release workflow does not snapshot the verified checksum signature"
+grep -Fq 'assets=( "$dir"/*.hex "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \' "$WORKFLOW" \
+	|| fail "release workflow does not publish the verified checksum signature"
+checksum_verify_line=$(grep -nF 'scripts/verify-release-signature.sh detached \' "$WORKFLOW" | cut -d: -f1)
+snapshot_line=$(grep -nF 'cp -p -- "$dir"/*.hex' "$WORKFLOW" | cut -d: -f1)
+tag_verify_line=$(grep -nF 'scripts/verify-release-tag-target.sh origin' "$WORKFLOW" | cut -d: -f1)
+publish_line=$(grep -nF 'gh release create "$tag"' "$WORKFLOW" | cut -d: -f1)
+[ "$checksum_verify_line" -lt "$snapshot_line" ] \
+	&& [ "$snapshot_line" -lt "$tag_verify_line" ] \
+	&& [ "$tag_verify_line" -lt "$publish_line" ] \
+	|| fail "release signature verification does not precede snapshot/publication"
+locate_block=$(awk '/- name: Locate the committed release directory/ { in_block=1 }
+	/# --- toolchains/ { in_block=0 }
+	in_block { print }' "$WORKFLOW")
+publish_block=$(awk '/- name: Publish GitHub Release/ { in_block=1 }
+	in_block { print }' "$WORKFLOW")
+[[ "$locate_block" == *'set -euo pipefail'* ]] \
+	&& [[ "$locate_block" != *'verify-release-signature.sh detached'*'|| true'* ]] \
+	|| fail "checksum-signature workflow verification is not fail-closed"
+[[ "$publish_block" == *'set -euo pipefail'* ]] \
+	&& [[ "$publish_block" != *'verify-release-tag-target.sh'*'|| true'* ]] \
+	|| fail "tag-signature workflow verification is not fail-closed"
 checks=$((checks + 1))
 
-# Remote resolution accepts both lightweight and annotated tags, but not a moved
-# or missing one. A local bare remote makes this deterministic and network-free.
+# The checked-in trust root must still verify the latest historical release. This
+# also catches an accidental key replacement independently of the fixture keys.
+"$PINNED_SIGNATURE_VERIFY" detached "$ROOT/release/v0.9.5/SHA256SUMS.asc" \
+	"$ROOT/release/v0.9.5/SHA256SUMS" >/dev/null \
+	|| fail "pinned key did not verify the historical v0.9.5 checksums"
+checks=$((checks + 1))
+RELEASE_SIGNING_FINGERPRINT=$wrong_fingerprint \
+RELEASE_SIGNING_PUBLIC_KEY=$wrong_public_key \
+	"$PINNED_SIGNATURE_VERIFY" detached "$ROOT/release/v0.9.5/SHA256SUMS.asc" \
+	"$ROOT/release/v0.9.5/SHA256SUMS" >/dev/null \
+	|| fail "ambient environment replaced the production signing policy"
+checks=$((checks + 1))
+
+signed_file="$work/SHA256SUMS"
+valid_signature="$work/SHA256SUMS.asc"
+wrong_signature="$work/SHA256SUMS.wrong.asc"
+printf '%064d  firmware.hex\n' 0 > "$signed_file"
+gpg --batch --no-options --homedir "$expected_home" --local-user "$expected_fingerprint" \
+	--armor --detach-sign --output "$valid_signature" "$signed_file" \
+	|| fail "could not sign detached-signature fixture"
+run_signature_verify detached "$valid_signature" "$signed_file" >/dev/null \
+	|| fail "valid pinned-key checksum signature was rejected"
+checks=$((checks + 1))
+
+printf 'changed\n' >> "$signed_file"
+expect_signature_fail "signature over different bytes" "signature is invalid" \
+	detached "$valid_signature" "$signed_file"
+printf '%064d  firmware.hex\n' 0 > "$signed_file"
+
+gpg --batch --no-options --homedir "$wrong_home" --local-user "$wrong_fingerprint" \
+	--armor --detach-sign --output "$wrong_signature" "$signed_file" \
+	|| fail "could not create wrong-key signature fixture"
+expect_signature_fail "signature from wrong key" "signature is invalid" \
+	detached "$wrong_signature" "$signed_file"
+
+empty_signature="$work/empty.asc"
+: > "$empty_signature"
+expect_signature_fail "empty detached signature" "missing, empty, or not a regular file" \
+	detached "$empty_signature" "$signed_file"
+signature_symlink="$work/signature-link.asc"
+ln -s "$valid_signature" "$signature_symlink"
+expect_signature_fail "symlink detached signature" "missing, empty, or not a regular file" \
+	detached "$signature_symlink" "$signed_file"
+expect_signature_fail "missing detached signature" "missing, empty, or not a regular file" \
+	detached "$work/missing.asc" "$signed_file"
+
+valid_status="$work/valid.status"
+{
+	printf '[GNUPG:] NEWSIG\n'
+	printf '[GNUPG:] GOODSIG %s Expected Release Signer\n' "${expected_fingerprint:24}"
+	printf '[GNUPG:] VALIDSIG %s 2026-07-28 1 0 4 0 22 10 00 %s\n' \
+		"$expected_fingerprint" "$expected_fingerprint"
+} > "$valid_status"
+status_policy_accepts "$valid_status" \
+	|| fail "valid GnuPG machine status was rejected"
+checks=$((checks + 1))
+for rejected_status in EXPSIG EXPKEYSIG REVKEYSIG KEYEXPIRED SIGEXPIRED KEYREVOKED; do
+	status_fixture="$work/$rejected_status.status"
+	{
+		printf '[GNUPG:] NEWSIG\n'
+		printf '[GNUPG:] GOODSIG %s Expected Release Signer\n' "${expected_fingerprint:24}"
+		printf '[GNUPG:] %s %s rejected-status fixture\n' \
+			"$rejected_status" "${expected_fingerprint:24}"
+		printf '[GNUPG:] VALIDSIG %s 2026-07-28 1 0 4 0 22 10 00 %s\n' \
+			"$expected_fingerprint" "$expected_fingerprint"
+	} > "$status_fixture"
+	if status_policy_accepts "$status_fixture"; then
+		fail "$rejected_status GnuPG status was accepted"
+	fi
+	checks=$((checks + 1))
+done
+for status_record in NEWSIG GOODSIG VALIDSIG; do
+	missing_status="$work/missing-$status_record.status"
+	awk -v record="$status_record" \
+		'!($1 == "[GNUPG:]" && $2 == record)' "$valid_status" > "$missing_status"
+	if status_policy_accepts "$missing_status"; then
+		fail "missing $status_record GnuPG status was accepted"
+	fi
+	checks=$((checks + 1))
+
+	duplicate_status="$work/duplicate-$status_record.status"
+	cp "$valid_status" "$duplicate_status"
+	awk -v record="$status_record" \
+		'$1 == "[GNUPG:]" && $2 == record { print }' "$valid_status" \
+		>> "$duplicate_status"
+	if status_policy_accepts "$duplicate_status"; then
+		fail "duplicate $status_record GnuPG status was accepted"
+	fi
+	checks=$((checks + 1))
+done
+
+# A local bare remote makes signed-tag enforcement deterministic and network-free.
 setup_fixture
 remote="$work/remote.git"
 git init -q --bare "$remote"
 git -C "$repo" tag "$version" "$release_sha"
-git -C "$repo" push -q "$remote" "refs/tags/$version"
-"$TAG_VERIFY" "$remote" "$version" "$release_sha" >/dev/null \
-	|| fail "remote lightweight release tag was rejected"
+push_release_tag
+expect_tag_fail "remote lightweight release tag" "must be one annotated tag"
+
+git -C "$repo" tag -fa "$version" -m "unsigned release" "$release_sha" >/dev/null
+push_release_tag
+expect_tag_fail "unsigned annotated release tag" "required signature"
+
+GNUPGHOME="$wrong_home" git -C "$repo" -c user.signingkey="$wrong_fingerprint" \
+	-c gpg.format=openpgp -c gpg.openpgp.program=gpg \
+	tag -sf "$version" -m "wrong-key release" "$release_sha" >/dev/null
+push_release_tag
+expect_tag_fail "wrong-key signed release tag" "required signature"
+
+GNUPGHOME="$expected_home" git -C "$repo" -c user.signingkey="$expected_fingerprint" \
+	-c gpg.format=openpgp -c gpg.openpgp.program=gpg \
+	tag -sf "$version" -m "signed release" "$release_sha" >/dev/null
+push_release_tag
+run_tag_verify "$remote" "$version" "$release_sha" >/dev/null \
+	|| fail "valid pinned-key signed release tag was rejected"
 checks=$((checks + 1))
 
-git -C "$repo" tag -f "$version" "$source_sha" >/dev/null
-git -C "$repo" push -q --force "$remote" "refs/tags/$version"
-if output=$("$TAG_VERIFY" "$remote" "$version" "$release_sha" 2>&1); then
-	fail "moved remote release tag was accepted"
-fi
-[[ "$output" == *"remote tag $version moved"* ]] \
-	|| fail "moved remote tag failed for the wrong reason: $output"
-checks=$((checks + 1))
+other_version=v99.0.1
+GNUPGHOME="$expected_home" git -C "$repo" -c user.signingkey="$expected_fingerprint" \
+	-c gpg.format=openpgp -c gpg.openpgp.program=gpg \
+	tag -sf "$other_version" -m "different signed release name" "$release_sha" >/dev/null
+aliased_tag_object=$(git -C "$repo" rev-parse "refs/tags/$other_version")
+git -C "$repo" update-ref "refs/tags/$version" "$aliased_tag_object"
+push_release_tag
+expect_tag_fail "differently named signed tag object" "signed tag object named $other_version"
 
-git -C "$repo" tag -fa "$version" -m "annotated release" "$release_sha" >/dev/null
-git -C "$repo" push -q --force "$remote" "refs/tags/$version"
-"$TAG_VERIFY" "$remote" "$version" "$release_sha" >/dev/null \
-	|| fail "remote annotated release tag did not peel to the verified commit"
-checks=$((checks + 1))
+git -C "$repo" tag -fa "$version" -m "unsigned replacement" "$release_sha" >/dev/null
+push_release_tag
+expect_tag_fail "same-target unsigned tag replacement" "required signature"
 
-if output=$("$TAG_VERIFY" "$remote" v99.0.1 "$release_sha" 2>&1); then
+GNUPGHOME="$expected_home" git -C "$repo" -c user.signingkey="$expected_fingerprint" \
+	-c gpg.format=openpgp -c gpg.openpgp.program=gpg \
+	tag -sf "$version" -m "moved signed release" "$source_sha" >/dev/null
+push_release_tag
+expect_tag_fail "moved signed release tag" "remote tag $version moved"
+
+if output=$(run_tag_verify "$remote" v99.0.1 "$release_sha" 2>&1); then
 	fail "missing remote release tag was accepted"
 fi
 [[ "$output" == *"missing or ambiguous"* ]] \
 	|| fail "missing remote tag failed for the wrong reason: $output"
+checks=$((checks + 1))
+
+if output=$(run_tag_verify "$remote" v99.0.0.rc1 "$release_sha" 2>&1); then
+	fail "remote verifier accepted a tag name the release workflow does not trigger"
+fi
+[[ "$output" == *"invalid release tag"* ]] \
+	|| fail "invalid remote tag name failed for the wrong reason: $output"
 checks=$((checks + 1))
 
 printf 'release history validation: %d checks, 0 failures\n' "$checks"

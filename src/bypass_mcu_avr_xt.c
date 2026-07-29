@@ -145,24 +145,36 @@ void hw_configure_output_pins(uint8_t const output_mask) {
     PORTA.DIR    = output_mask; // exactly these = output, all others = input
 }
 
-// sanity check utility function: return non-zero IFF the complete direction
-// configuration still matches initialization, every caller-requested output
-// remains an output, and the complete output latch matches the expected state.
+// sanity check utility function: return non-zero IFF the complete direction,
+// output PINnCTRL reset values, and output latch still match the configured state,
+// and every caller-requested output remains an output.
 //
-// Exact DIR protects PA7 as the footswitch input, PA1/PA2/PA3/PA6 as
+// exact DIR protects PA7 as the footswitch input, PA1/PA2/PA3/PA6 as
 // outputs, PA0 as UPDI, and unbonded PA4/PA5 as inputs.
+//
+// exact output PINnCTRL reset values protect physical pad polarity; OUT
+// readback alone cannot detect INVEN.
 uint8_t hw_output_state_intact(
         uint8_t const required_output_mask,
         uint8_t const expected_high_mask) {
+
     uint8_t const actual_direction_mask = PORTA.DIR;
     uint8_t const actual_high_mask =
         (uint8_t)(PORTA.OUT & (uint8_t)BYPASS_OUTPUT_DDR_MASK);
+    uint8_t const pin1ctrl = PORTA.PIN1CTRL;
+    uint8_t const pin2ctrl = PORTA.PIN2CTRL;
+    uint8_t const pin3ctrl = PORTA.PIN3CTRL;
+    uint8_t const pin6ctrl = PORTA.PIN6CTRL;
 
     return
         (actual_direction_mask == (uint8_t)BYPASS_OUTPUT_DDR_MASK) &&
         ((actual_direction_mask & required_output_mask) ==
-            required_output_mask) &&
-        (actual_high_mask == expected_high_mask);
+         required_output_mask) &&
+        (actual_high_mask == expected_high_mask) &&
+        (pin1ctrl == (uint8_t)0U) &&
+        (pin2ctrl == (uint8_t)0U) &&
+        (pin3ctrl == (uint8_t)0U) &&
+        (pin6ctrl == (uint8_t)0U);
 }
 
 
@@ -198,11 +210,14 @@ static pin_state_t hw_read_footswitch(void) {
         PIN_STATE_HIGH;
 }
 
-// non-zero IFF the footswitch input pull-up is still enabled.  On AVR-XT the
-// pull-up lives in the per-pin PORTA.PINnCTRL PULLUPEN bit (single enable, like
-// the classic PORTB latch bit -- unlike the PIC's two-part WPUA/nWPUEN).
+// non-zero IFF the complete footswitch pin control remains configured:
+// pull-up enabled, with inversion and input-sense configuration clear.
+//
+// on AVR-XT the pull-up lives in the per-pin PORTA.PINnCTRL PULLUPEN bit
+// (single enable, like the classic PORTB latch bit - unlike the PIC's
+// two-part WPUA/nWPUEN).
 static uint8_t hw_footswitch_pullup_intact(void) {
-    return (PORTA.PIN7CTRL & (uint8_t)PORT_PULLUPEN_bm) != 0U;
+    return (PORTA.PIN7CTRL == (uint8_t)PORT_PULLUPEN_bm);
 }
 
 

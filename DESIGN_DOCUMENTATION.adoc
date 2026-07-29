@@ -704,17 +704,17 @@ its floor.
 The ATtiny202 has 2 KB of flash and 128 bytes of SRAM — roughly double the
 ATtiny13a on both — so it is the least constrained AVR part in the set. Flash
 figures are reported by the build itself (`make attiny202`), which gates every
-variant against the 2048-byte device size; `avr-size` cannot total them, since
-binutils 2.26 does not recognise `avrxmega3` devices and reports
-"Device: Unknown".
+variant against the 2048-byte device size. They do not come from `avr-size`'s
+device-aware mode: binutils 2.26 does not recognise `avrxmega3` parts, so
+`avr-size -C --mcu=attiny202` reports "Device: Unknown" and no percentage.
 
 .Table ATtiny202 Utilization by Variant (measured, avr-gcc 7.3.0 + ATtiny_DFP)
 |===
 | Variant | Flash     | of 2 KB | Free
 
-| cd4053  | 816 bytes | 39.8%   | 1232 bytes
-| mute    | 856 bytes | 41.8%   | 1192 bytes
-| relay   | 856 bytes | 41.8%   | 1192 bytes
+| cd4053  | 848 bytes | 41.4%   | 1200 bytes
+| mute    | 888 bytes | 43.4%   | 1160 bytes
+| relay   | 888 bytes | 43.4%   | 1160 bytes
 |===
 
 Static data is 4 bytes, identical to the AVR Classic figure and for the same

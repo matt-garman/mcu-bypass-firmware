@@ -9,7 +9,8 @@ name: Release
 # release/<tag>/ with a SHA256SUMS manifest.
 #
 # When the tag lands here, this workflow:
-#   1. verifies the retained qualification belongs to the tag event's commit:
+#   1. verifies the checksum signature against the pinned maintainer key, then
+#      verifies the retained qualification belongs to the tag event's commit:
 #      an artifact-only child whose sole parent is the qualified source;
 #   2. rebuilds every release image from the TAGGED source on a clean, pinned
 #      runner (AVR Classic + ATtiny202 + PIC10F322 + PIC10F320);
@@ -24,8 +25,9 @@ name: Release
 #      `make pic-test-target-variants` + `make pic320-test` +
 #      `make pic320-test-target-variants` on the clean runner -- the same gates
 #      the MANIFEST claims;
-#   5. rechecks the protected remote tag target, then publishes a GitHub Release
-#      with the images, SHA256SUMS(.asc), MANIFEST,
+#   5. rechecks the protected remote tag's object, pinned-key signature and
+#      target, then publishes a GitHub Release with the images, SHA256SUMS.asc,
+#      MANIFEST,
 #      and the machine-verified QUALIFICATION record.
 #
 # The runner is pinned to ubuntu-24.04 so the toolchain matches TOOLCHAIN.adoc;
@@ -74,7 +76,11 @@ jobs:
           dir="${RUNNER_TEMP}/committed-release"
           rm -rf "$dir"
           cp -a -- "$source_dir" "$dir"
-          test -f "$dir/SHA256SUMS"    || { echo "::error::$dir/SHA256SUMS missing"; exit 1; }
+          test -f "$dir/SHA256SUMS" && test ! -L "$dir/SHA256SUMS" \
+            && test -s "$dir/SHA256SUMS" \
+            || { echo "::error::$dir/SHA256SUMS is missing, empty, or not a regular file"; exit 1; }
+          scripts/verify-release-signature.sh detached \
+            "$dir/SHA256SUMS.asc" "$dir/SHA256SUMS"
           test -f "$dir/MANIFEST.md" && test ! -L "$dir/MANIFEST.md" \
             || { echo "::error::$dir/MANIFEST.md is missing or not a regular file"; exit 1; }
           if grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$dir/MANIFEST.md"; then
@@ -251,13 +257,8 @@ jobs:
           publish="${RUNNER_TEMP}/verified-release"
           rm -rf "$publish"
           mkdir -p "$publish"
-          cp -p -- "$dir"/*.hex "$dir/SHA256SUMS" "$dir/MANIFEST.md" \
-            "$dir/QUALIFICATION" "$publish"/
-          if [ -e "$dir/SHA256SUMS.asc" ]; then
-            test -f "$dir/SHA256SUMS.asc" && test ! -L "$dir/SHA256SUMS.asc" \
-              || { echo "::error::$dir/SHA256SUMS.asc is not a regular file"; exit 1; }
-            cp -p -- "$dir/SHA256SUMS.asc" "$publish"/
-          fi
+          cp -p -- "$dir"/*.hex "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \
+            "$dir/MANIFEST.md" "$dir/QUALIFICATION" "$publish"/
           echo "dir=$publish" >> "$GITHUB_OUTPUT"
 
       # --- re-run the gates on the clean runner -----------------------------
@@ -313,8 +314,8 @@ jobs:
           set -euo pipefail
           dir=$RELEASE_DIR
           tag=$RELEASE_TAG
-          assets=( "$dir"/*.hex "$dir/SHA256SUMS" "$dir/MANIFEST.md" "$dir/QUALIFICATION" )
-          [ -f "$dir/SHA256SUMS.asc" ] && assets+=( "$dir/SHA256SUMS.asc" )
+          assets=( "$dir"/*.hex "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \
+            "$dir/MANIFEST.md" "$dir/QUALIFICATION" )
           notes="$dir/MANIFEST.md"; [ -f "$notes" ] || notes=/dev/null
           scripts/verify-release-tag-target.sh origin "$tag" "$VERIFIED_RELEASE_COMMIT"
           gh release create "$tag" \

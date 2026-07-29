@@ -9,8 +9,9 @@ documentation marks them as superseded. Each release lives in its own
 
 > **Current availability:** committed releases stop at `v0.9.5` and contain no
 > PIC10F320 image. The PIC10F320 is integrated in the source tree, but its first
-> unified prebuilt release remains pending fresh full-tool qualification and the
-> release run.
+> unified prebuilt release remains pending production qualification on the final
+> source. A prior full-tool dry rehearsal passed, but was explicitly
+> non-publishable and predates the current release contract.
 
 ## Safety warning: v0.9.0-v0.9.2 TMUX images
 
@@ -46,23 +47,28 @@ validation suite — backs these binaries, through two mechanisms:
 
 1. **Provenance.** Every release carries a `MANIFEST.md` recording the exact
    source commit, pinned toolchain versions, per-image fuse bytes / CONFIG word,
-   and its validation evidence. A machine-readable `QUALIFICATION` record is
-   checked against the exact retained-evidence inventory and every soak log
-   before publication; each log must identify its canonical combination and
-   report the configured duration, expected nonzero liveness-check count, and
-   zero failure counters. The current unified pipeline requires
+   and its validation evidence. Beginning with the first unified release
+   (`v0.9.6` or later), a machine-readable `QUALIFICATION` record is checked
+   against the exact 22-file retained-evidence inventory and every one of the 12
+   soak logs before publication; each log must identify its canonical
+   combination and report the configured duration, expected nonzero
+   liveness-check count, and zero failure counters. The current unified pipeline requires
    `make test-long`, both PIC10F322 gates (`make pic-test` and
    `make pic-test-target-variants`), both PIC10F320 gates (`make pic320-test` and
    `make pic320-test-target-variants`), and a **24-hour soak of every release
-   soak combination**. Those PIC10F320 requirements begin with its pending first
-   unified release; historical manifests describe the smaller target set they
-   actually shipped. Because the gates are long-running, release orchestration
+   soak combination**. Releases `v0.9.0` through `v0.9.5` predate
+   `QUALIFICATION` and use the manifest/evidence contract recorded in their own
+   tags; they must not be judged against the later 12-soak/22-file inventory.
+   Because the gates are long-running, release orchestration
    rechecks both the recorded source `HEAD` and worktree cleanliness immediately
    before staging artifacts. Only explicitly non-publishable dry runs may proceed
    from a dirty tree.
 
    The signed version tag points to a dedicated release-artifact commit. Tag CI
-   requires that commit to have exactly one parent, equal to the source commit in
+   fetches the exact remote annotated-tag object and verifies its OpenPGP
+   signature against [`release/signing-key.asc`](signing-key.asc) and the pinned
+   full fingerprint `6184219C6670945D7174F2B0149F042FCC3D3AEC`. It also requires
+   that commit to have exactly one parent, equal to the source commit in
    `QUALIFICATION`, and to change only `release/<version>/`. Changelog and status
    documentation must therefore be finalized and committed before starting the
    production qualification run.
@@ -86,6 +92,9 @@ validation suite — backs these binaries, through two mechanisms:
 
 `SHA256SUMS` is also signed (`SHA256SUMS.asc`), and the release tag is a signed
 git tag, so you can additionally verify the maintainer vouched for the bytes.
+Publication fails if either signature is absent, invalid, or made by another
+key; verification uses an isolated keyring containing only the pinned key rather
+than trusting whatever keys happen to be installed on the CI runner.
 
 ## Which image do I want?
 
@@ -124,6 +133,15 @@ usage, fuse bytes, and exact flashing command.
 ## Verify a download
 
 ```sh
+# import the checked-in key, then compare the full fingerprint with the value
+# printed above through an independently trusted copy of this documentation
+gpg --import release/signing-key.asc
+gpg --fingerprint 6184219C6670945D7174F2B0149F042FCC3D3AEC
+
+# from the repository root, enforce the same pinned-key policy as release CI
+scripts/verify-release-signature.sh detached \
+    release/vX.Y.Z/SHA256SUMS.asc release/vX.Y.Z/SHA256SUMS
+
 cd release/vX.Y.Z
 
 # (recommended) verify the maintainer's signature over the checksums
@@ -169,6 +187,8 @@ programmer command above.
 
 ## Reproduce the images bit-for-bit
 
+### Unified releases (v0.9.6 or later)
+
 A freshly built release HEX lands under `build_avr_classic/`, `build_avr_xt/`,
 `build_pic/` and `build_pic10f320/`, not in the release directory, so run the
 checksum list against those fresh bytes — running it from the repo root would only
@@ -198,15 +218,21 @@ plus the target-qualified XC8 compiler and DFP recorded for each PIC family in
 the manifest. A different toolchain may produce functionally identical but not
 byte-identical images.
 
-Note that the canonical set describes **the release you checked out**. Verify an
-older release from its own tag, as the block above does — running the current
-verifier against, say, `release/v0.9.4/` from a newer checkout correctly reports
-a mismatch, because that release predates targets the current set includes. That
-is a statement about which release you are looking at, not a defect in the old
-one.
+### Historical releases (v0.9.0 through v0.9.5)
 
-For tags predating `scripts/verify-release-images.sh`, use their original
-hash-only check with an absolute checksum path:
+These releases have no `QUALIFICATION`, and their image matrices and Make targets
+predate the unified 15-image command above. Do not run the current qualification
+verifier or append `pic320-variants` to a historical build command. For
+`v0.9.3` through `v0.9.5`, check out the release's own tag and follow the
+**Reproducing these images** section in that release's `MANIFEST.md`. Running the
+current verifier against, for example, `release/v0.9.4/` correctly reports a
+mismatch. That describes which contract the release used, not a defect in the
+old release.
+
+The `v0.9.0` through `v0.9.2` manifests predate
+`scripts/verify-release-images.sh`, and their final checksum command has a broken
+repository-root-relative path. Use their documented build command, then replace
+their checksum command with this corrected isolated check:
 
 ```sh
 repo=$PWD

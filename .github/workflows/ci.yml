@@ -363,13 +363,14 @@ jobs:
           if-no-files-found: error
 
   # -------------------------------------------------------------------------
-  # Development-only ATtiny202 (AVR-XT) gate: the AVR-XT counterpart of the
-  # `pic` job. It is the ONLY place the ATtiny202 is built in CI (build-matrix
-  # covers the release-supported classic parts), so it runs the 202 fuse,
-  # smoke/build-budget, cppcheck, and MISRA gates before the yasimavr harness --
-  # functional + physical output timing (attiny202-sim), fault injection
-  # (attiny202-fault), and a short soak smoke (attiny202-soak). This lane is not
-  # release qualification.
+  # ATtiny202 (AVR-XT) gate: the AVR-XT counterpart of the `pic` job. It is the
+  # ONLY place the ATtiny202 is built in CI (build-matrix covers the classic
+  # parts), so it runs the 202 fuse, smoke/build-budget, cppcheck, and MISRA
+  # gates before the yasimavr harness -- functional + physical output timing
+  # (attiny202-sim), fault injection (attiny202-fault), and a short soak smoke
+  # (attiny202-soak). Like every CI lane, this is a gate on the branch, NOT
+  # release qualification: the 24-hour soaks and the fail-closed target
+  # aggregate belong to scripts/make-release.sh.
   #
   # Two out-of-apt inputs, both fetched + version-pinned by repo scripts and
   # cached: the ATtiny_DFP device files (scripts/fetch_attiny_dfp.sh -- a static
@@ -384,7 +385,7 @@ jobs:
   # on nothing, and each run step greps for the expected number of PASS lines as
   # belt-and-suspenders against a partial (per-variant) skip.
   attiny202:
-    name: attiny202 development (analyze/sim/fault/soak)
+    name: attiny202 (AVR-XT: analyze/sim/fault/soak)
     runs-on: ubuntu-24.04
     needs: pic   # gate behind the fast PIC job (see `verify`)
     env:
@@ -497,7 +498,7 @@ jobs:
         run: |
           set -o pipefail
           # Pin the complete development matrix independently of Make defaults;
-          # each FAULT PASS also requires 17/17 injections, 18/18 results, no skips.
+          # each FAULT PASS also requires 22/22 injections, 23/23 results, no skips.
           n=3
           make attiny202-fault 2>&1 | tee fault.log
           p=$(grep -c "FAULT PASS" fault.log || true)

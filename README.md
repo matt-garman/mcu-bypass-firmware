@@ -7,7 +7,8 @@ The source tree covers six release parts across three microcontroller core
 generations: the "AVR Classic" parts (ATtiny13a, ATtiny45, ATtiny85), the AVR-XT
 ATtiny202, and the Microchip PIC10F322 and PIC10F320. Published releases through
 `v0.9.5` predate both the PIC10F320 merge and the ATtiny202 promotion; the first
-unified release covering all six remains pending fresh full-tool qualification.
+unified release covering all six remains pending production qualification on the
+final source (a prior full-tool dry rehearsal passed but is not publishable).
 
 ## Targets
 

@@ -35,7 +35,7 @@ test/
   test_release_images.sh    shared: isolated exact release artifact verification
   test_release_provenance.sh shared: source/compiler/output release-provenance regression
   test_release_qualification.sh shared: release soak/evidence publication contract
-  test_release_history.sh     shared: qualified-source/tag history binding
+  test_release_history.sh     shared: release history + pinned-signature binding
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
   test_stack_bound.sh       shared: fail-closed stack evidence checks
   test_strict_tools.sh      shared: skip/strict policy for host + both PIC chips
@@ -59,7 +59,7 @@ test/
            test_sim_attiny202.py   functional + PA2/PA3 transition/timing checks
            test_attiny202_output_oracle.py  host regression for output checks
            test_attiny202_fault_oracle.py   host fault-run accounting regression
-           test_fault_attiny202.py critical-SFR/state fault injection
+            test_fault_attiny202.py  critical-SFR/state/pin-polarity fault injection
            test_soak_attiny202.py  long-duration liveness soak
            test_lockstep_attiny202.py  ctx_-vs-golden-model co-simulation
                                                         (make attiny202-lockstep)
@@ -161,7 +161,7 @@ The split mirrors the PIC lanes: **the host-only rows below are members of
 | Coil-pulse width | `attiny202-delay-oracle` | Absolute relay (12 ms) and mute (5 ms) pulse widths, recovered from the disassembled `_delay_ms` loop in the built image, match design and clear the 4 ms datasheet minimum. | host, over real image |
 | Static analysis | `attiny202-analyze` | cppcheck + MISRA pass over the AVR-XT shell with real DFP/avr-libc headers. | host tools |
 | Register-level functional | `attiny202-sim` | The real image toggles on debounced press, boots dark with the WDT locked and `PORTA.DIR` exact, stays stable at idle, handles a switch held through power-on, and drives the correct PA2/PA3 sequence per variant. | yasimavr |
-| Fault recovery | `attiny202-fault` | 17 guarded SFR/latch/state corruptions each produce the correct response — the sanity gate's force-reset path, or a witnessed watchdog reset for the tick timer itself. Zero skips, exact completion accounting. | yasimavr |
+| Fault recovery | `attiny202-fault` | 22 guarded SFR/latch/state/pin-polarity corruptions each produce the correct response — the sanity gate's force-reset path, or a witnessed watchdog reset for the tick timer itself. Includes an independent `INVEN` injection on all five bonded application pins, which `OUT` readback alone cannot see. Zero skips, exact completion accounting over 23 results. | yasimavr |
 | Firmware/model lock-step | `attiny202-lockstep` | `ctx_` in simulated SRAM equals the shipping core's state after **every settled tick**, over both boot scenarios, plus LED and settled control-line agreement. Catches a shell defect on the tick it happens rather than as a wrong output later. | yasimavr + host core via ctypes |
 | Liveness soak | `attiny202-soak` | Over a long run the watchdog never resets the device (GPR0 reset witness), the sanity gate never force-resets, and a periodic 2-press round-trip still toggles. Emits the shared `SOAK_RESULT` release contract. | yasimavr |
 | Fail-closed aggregate | `attiny202-test-target` | sim + fault + lock-step across every variant, with no skip permitted. This is what release qualification runs. | yasimavr |
@@ -231,8 +231,8 @@ below so a green gate means every PIC layer actually ran.
 | Soak rebuild determinism | `test-pic-build-rebuild` | Both chips' soak binaries compile their workload sizing in as `-D` flags, so their file rules must be *unconditionally* out of date. Asserts a changed duration recompiles with the new value, and that an identical rerun recompiles too — the signature of `FORCE`, as opposed to a rebuild that merely followed a timestamp. | Bash + fake c++ |
 
 | Soak timing contract | `test-soak-timing` | Native Classic AVR/PIC soaks require the liveness interval within the total duration; short release rehearsals clamp it so every passing run completes a responsiveness round-trip. | host C/C++ compilers + release CLI |
-| Release qualification contract | `test-release-qualification` | Publication requires clean production metadata, the exact canonical 22-file evidence set, and one identity-, duration-, and counter-bearing result for each of 12 release soak combinations. | Bash + synthetic retained evidence |
-| Release history contract | `test-release-history` | The tag event must peel to an artifact-only, single-parent child of the exact qualified source; remote lightweight/annotated tags must still target that commit immediately before publication. | Bash + scratch Git repositories |
+| Release qualification contract | `test-release-qualification` | Publication requires clean production metadata, the exact canonical 28-file evidence set, and one identity-, duration-, and counter-bearing result for each of 15 release soak combinations. | Bash + synthetic retained evidence |
+| Release history/signature contract | `test-release-history` | The tag event must peel to an artifact-only, single-parent child of the exact qualified source. `SHA256SUMS.asc` and the exact remote annotated tag must verify against the pinned full-fingerprint key in an isolated keyring; altered bytes, missing/malformed/wrong-key signatures, lightweight/unsigned/same-target-replaced tags, and moved tags are rejected immediately before publication. | Bash + GnuPG + scratch Git repositories |
 
 `pic-test-gpsim` now samples one non-settled point, `PRESS1_EARLY`, roughly
 6 ms (3,000 instruction cycles) after the first press edge. A correct 1 ms tick
@@ -383,12 +383,21 @@ harness could make them die for an infrastructure reason and falsely count as
 killed. Skip accounting is wired through the same policy resolver, so a partial
 run cannot be mistaken for full PIC10F320 coverage.
 
+The driver independently pins the six mutation categories at **23 core/AVR + 27
+PIC10F320 host + 9 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 8 PIC target = 74**.
+It rejects category drift before probing, then requires dispatched + skipped = 74
+and killed + survived + errored = dispatched. Every worker status is checked;
+result status/output pairs are atomically published and accepted only with exact
+text grammar and no missing, hidden, or extra artifacts.
+
 One further note on the driver, learned the hard way: its sandbox tree copy has
 to reach `test/pic10f320/{equiv,actuation,fault,gpsim}/` and the folded `.sh` and
 `.stc` assets under `test/pic/`. The probe checks those shared helpers before it
 can enable the tool-dependent PIC10F320 mutants. The host-only
 `test-mutation-sandbox` regression exercises the same copy routine in `make test`,
-including the wrappers' executable mode.
+including the wrappers' executable mode, and covers inventory, conservation,
+record/command parsing, atomic publication, checker-status classification, and
+result grammar in 24 checks.
 
 **The ATtiny202 lane is gated the same way, with one extra hazard.** `XT_DFP` and
 `YASIMAVR_VENV` both default to paths *relative* to the tree, which is exactly

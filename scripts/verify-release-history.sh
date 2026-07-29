@@ -18,7 +18,9 @@ fi
 release_dir=$1
 expected_version=$2
 release_object=$3
-[[ "$expected_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]] \
+[[ "$expected_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
+	|| die "invalid expected release version: $expected_version"
+git check-ref-format "refs/tags/$expected_version" >/dev/null 2>&1 \
 	|| die "invalid expected release version: $expected_version"
 [[ "$release_object" =~ ^[0-9a-f]{40}$ ]] \
 	|| die "release object is not a full lowercase SHA-1"

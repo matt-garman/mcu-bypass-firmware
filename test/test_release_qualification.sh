@@ -80,6 +80,13 @@ expect_fail() {
 reset_fixture
 expect_pass "complete production qualification"
 
+if output=$("$VERIFY" "$release" v99.0.0.rc1 2>&1); then
+	fail "qualification verifier accepted a version the release workflow does not trigger"
+fi
+[[ "$output" == *"invalid expected release version"* ]] \
+	|| fail "invalid expected version failed for the wrong reason: $output"
+checks=$((checks + 1))
+
 reset_fixture
 rm "$release/QUALIFICATION"
 expect_fail "missing qualification" "QUALIFICATION is missing"

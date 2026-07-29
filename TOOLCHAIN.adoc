@@ -250,8 +250,11 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
                 halt, so it cannot show the watchdog PHYSICALLY completing that
                 reset (a hardware guarantee); the fault test asserts the sanity
                 gate ENTERING the force-reset path instead, and the watchdog
-                liveness reset (out of SLEEP) is observed directly.  The pure
-                debounce core keeps its full host + formal coverage regardless.
+                liveness reset (out of SLEEP) is observed directly.  The fault
+                matrix also corrupts each application pin's PORTA.PINnCTRL.INVEN
+                bit, including PA7 with its pull-up preserved, so polarity faults
+                cannot pass through latch/direction checks.  The pure debounce
+                core keeps its full host + formal coverage regardless.
                 See test/avr/sim_attiny202.py.
   builds on:    the ATtiny_DFP device files (scripts/fetch_attiny_dfp.sh, pinned
                 atpack) that `make attiny202` needs to COMPILE the image; those

@@ -240,8 +240,8 @@ expect_fail "canonical set read from the Makefile by default" \
 
 # Finally, the content of the real canonical set. Every check above works
 # equally well on a set that has quietly lost a whole MCU, so assert what the
-# Makefile actually declares: every release-supported part present, in the
-# quantity its variant matrix implies.
+# Makefile actually declares: all six release-supported MCU parts present, in the
+# quantity each part's variant matrix implies.
 canonical=$(cd "$ROOT" && make -s print-RELEASE_IMAGES) \
 	|| fail "could not read RELEASE_IMAGES from the Makefile"
 read -r -a canonical_arr <<<"$canonical"

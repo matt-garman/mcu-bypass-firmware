@@ -311,7 +311,8 @@ invisible to every differential lane. Promotion is small and mechanical: check i
 prerequisite, and require any change that moves the hashes to rebaseline it in
 the same reviewed commit. The current values are recorded in
 `docs/pic10f320_validation.md` §2 (run 2, re-confirmed by the run-3 comment sweep
-and by every release manifest since).
+and by the documented merged-tree dry rehearsals; no unified release manifest
+exists yet).
 
 Design note: the value is entirely in the *rebaselining discipline*, not the
 hashes. A file that gets updated reflexively whenever it fails is worse than
@@ -366,8 +367,9 @@ prerequisites under test. Two constraints must survive the merge:
    failed closed there once (fixed by gating on `git rev-parse
    --is-inside-work-tree`).
 
-Keep the fail-closed self-tests either way: `MUTATION_SANDBOX_SELFTEST=1` (5
-checks, including the depth regression that reaches `test/pic/fw_coverage/`) and
+Keep the fail-closed self-tests either way: `MUTATION_SANDBOX_SELFTEST=1` (24
+checks, including the depth regression that reaches `test/pic/fw_coverage/` and
+the immutable inventory/result-accounting contract) and
 `validate_pic320_sandbox`'s required-file list. The hand-maintained list only
 catches gaps someone already thought of, but it converts a future omission into
 one obvious line instead of a misattributed toolchain complaint.

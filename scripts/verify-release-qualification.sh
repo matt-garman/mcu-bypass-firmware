@@ -27,7 +27,9 @@ fi
 
 release_dir=$1
 expected_version=$2
-[[ "$expected_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]] \
+[[ "$expected_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
+	|| die "invalid expected release version: $expected_version"
+git check-ref-format "refs/tags/$expected_version" >/dev/null 2>&1 \
 	|| die "invalid expected release version: $expected_version"
 [ -d "$release_dir" ] || die "release directory not found: $release_dir"
 release_dir=$(cd "$release_dir" && pwd -P) \

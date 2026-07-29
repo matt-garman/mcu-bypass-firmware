@@ -2424,8 +2424,8 @@ test-klee-build:
 _test-mutation-policy-probe:
 	@bash -c '. ./test/mutation_policy.sh; resolve_mutation_allow_skip'
 
-# Host-only proof that mutation sandboxes include every folded PIC helper used by
-# a kill target, preserving executable mode for the gpsim wrappers.
+# Host-only proof of mutation sandbox completeness and fail-closed inventory,
+# command, worker/result, and conservation accounting.
 test-mutation-sandbox:
 	MUTATION_SANDBOX_SELFTEST=1 ./test/run_mutation_tests.sh
 
@@ -4332,7 +4332,8 @@ print-%:
 #      is present (the inverse of the dev-time "skip cleanly" behaviour -- a
 #      release must never green-light on a tool that silently did nothing);
 #   2. clean-builds all AVR + PIC variant images;
-#   3. runs `make test-long` + `make pic-test` and ALL soak combos in parallel;
+#   3. runs `make test-long` plus both pre-hardware and real-target aggregates for
+#      PIC10F322 and PIC10F320, then ALL 12 soak combos in parallel;
 #   4. rechecks source HEAD + worktree cleanliness, then stages
 #      release/<VERSION>/ with the .hex images, SHA256SUMS, a provenance MANIFEST
 #      (toolchain versions, per-image fuse bytes / CONFIG word, flashing command,
@@ -4482,7 +4483,7 @@ help:
 	@echo "  attiny202-test   all ATtiny202 pre-hardware checks (fuses + smoke + build + analyze + delay)"
 	@echo "  attiny202-sim    yasimavr functional + PA2/PA3 transition/pulse-presence test"
 	@echo "                   (standalone; needs scripts/fetch_yasimavr.sh; XT_SIM_VARIANT=)"
-	@echo "  attiny202-fault  yasimavr fault-inject: 17 guarded SFR/latch/state corruptions,"
+	@echo "  attiny202-fault  yasimavr fault-inject: 22 guarded SFR/latch/state corruptions,"
 	@echo "                   zero skips, exact completion (standalone; XT_SIM_VARIANT=)"
 	@echo "  attiny202-soak   yasimavr soak: long run, assert no WDT reset + stays responsive"
 	@echo "                   (standalone; XT_SOAK_DURATION_MS=, XT_SIM_VARIANT=)"
@@ -4514,7 +4515,7 @@ help:
 	@echo "  test-sim-<v>[-t<n>]  single variant, e.g. test-sim-relay / test-sim-relay-t45"
 	@echo "  test-fault-inject  corrupt state, verify WDT recovery (all variants x tinyx5)"
 	@echo "  test-mutation   inject firmware faults, verify the suite kills them"
-	@echo "  test-mutation-sandbox  verify mutation copies include executable shared PIC helpers"
+	@echo "  test-mutation-sandbox  verify mutation sandbox + inventory/result accounting"
 	@echo "  test-attiny202-build  fail-closed AVR-XT image-generation checks"
 	@echo "  test-avr-build-rebuild  classic AVR stale/config/partial-output checks"
 	@echo "  test-gpsim-wrappers  fail-closed gpsim process-status checks"
@@ -4524,7 +4525,7 @@ help:
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
 	@echo "  test-release-provenance  release source/compiler provenance checks"
 	@echo "  test-release-qualification  exact release evidence + 12-soak publication checks"
-	@echo "  test-release-history  bind tag artifact commit to its qualified source parent"
+	@echo "  test-release-history  bind release history + checksum/tag signatures"
 	@echo "  test-build-serialization  worktree Make/release lock regression"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
 	@echo "  test-target-lane-markers  PIC target aggregates must require each lane's PASS marker"

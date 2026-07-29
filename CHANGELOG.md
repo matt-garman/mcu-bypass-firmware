@@ -105,8 +105,9 @@ file is the human-readable summary of *what changed*.
   build were all derived by globbing, so three "independent" checks agreed
   perfectly on a release with an entire MCU missing. They no longer can.
 - Three PIC10F320 full-duration soak combinations are required by the release
-  pipeline, which will add PIC10F320 images and their own CI artifact beginning
-  with the first successfully qualified unified release.
+  pipeline, which will add PIC10F320 images as release assets beginning with the
+  first successfully qualified unified release. Normal CI already publishes its
+  separate development artifact.
 - `make pic320-*` targets, `make help` entries for them, and a
   `docs/pic10f320_special_case.md` linked from the README, the design
   documentation, the release documentation and the generated release manifest.
@@ -148,6 +149,33 @@ file is the human-readable summary of *what changed*.
   parts, rather than two per-repository copies that had already drifted.
 
 ### Fixed
+- The ATtiny202 fault matrix now covers `PORTA.PINnCTRL.INVEN` on the LED,
+  control/relay, parked-spare, and footswitch pins. The PA7 case preserves its
+  pull-up while reversing input polarity, proving the firmware's exact PA7
+  control check rather than the old pull-up-only predicate. Exact zero control
+  checks similarly protect the four output pins, and the per-variant matrix
+  expands from 17 injections / 18 results to 22 / 23.
+- Qualification documentation now distinguishes historical phase evidence, the
+  clean but non-publishable `4b28210` full-tool rehearsal, and the still-missing
+  final-source production run. It no longer claims that corrected 74/74 mutation
+  execution and real-image stack gating never occurred, and the release guide
+  scopes the `QUALIFICATION` soak/evidence contract to unified releases rather
+  than directing `v0.9.0` through `v0.9.5` to files and targets they predate.
+- Release publication now requires both cryptographic signatures promised by the
+  trust model. CI verifies `SHA256SUMS.asc` and the exact remote annotated tag
+  object against the checked-in public key and pinned full fingerprint before
+  publishing; missing, empty, malformed, wrong-key, lightweight, unsigned,
+  same-target-replaced, and moved tags all fail closed. Signing instructions pin
+  the same key explicitly instead of relying on the operator's GPG default.
+  Producer and verifier version validation now matches the workflow's optional
+  hyphen-suffix trigger and rejects malformed or invalid Git tag names before a
+  production qualification run.
+- Mutation results now conserve an immutable 92-mutant inventory across seven
+  pinned categories: dispatched plus skipped must equal 92, and killed plus
+  survived plus errored must equal dispatched. Inventory records, baseline Make
+  commands, worker exits, sandbox setup, atomic result pairs, exact status/output
+  grammar, and unexpected artifacts all fail closed instead of allowing a
+  shortened or partially published run to report "all mutants killed."
 - The PIC10F322 `pic` producer now requires the complete immutable output-variant
   matrix before invoking XC8, rejecting empty, duplicate, unsupported, and
   incomplete requests. Classic AVR and PIC10F322 entries in `RELEASE_IMAGES` now
@@ -168,7 +196,7 @@ file is the human-readable summary of *what changed*.
   checkout drift, a snapshot differing from the tagged record, and a remote tag
   that moved before publication.
 - Release qualification is now machine-verifiable before publication: an
-  immutable 12-combination inventory, exact retained-evidence set, strict
+  immutable 15-combination inventory, exact retained-evidence set, strict
   `QUALIFICATION` schema, and one identity/timing/counter-bearing `SOAK_RESULT`
   per log must agree. Tag CI verifies a private snapshot before installing tools
   and publishes the qualification record; PIC images are hash-pinned across soak
@@ -225,8 +253,8 @@ file is the human-readable summary of *what changed*.
 - Mutation skips now report whether a lane was disabled because a tool was
   absent or because its baseline FAILED, and the closing advice no longer tells
   the reader to install a toolchain that is already complete. With both sandbox
-  gaps closed, `make test-mutation MUTATION_ALLOW_SKIP=0` completes all 74
-  mutants — 74 killed, 0 survived, 0 errored, 0 skipped.
+  gaps closed, `make test-mutation MUTATION_ALLOW_SKIP=0` completes all 92
+  mutants — 92 killed, 0 survived, 0 errored, 0 skipped.
 - The PIC10F320 real-HEX target aggregate now requires explicit fault-injection,
   lock-step, and target-I/O completion markers, so a skipped or incomplete lane
   cannot be reported as a successful CI/release gate.
