@@ -218,6 +218,9 @@ done
 grep -Fq 'scripts/verify-release-qualification.sh "${qualification_args[@]}" "$OUTPUT_DIR" "$VERSION"' \
 	"$ROOT/scripts/make-release.sh" \
 	|| fail "release producer does not self-verify staged qualification"
+grep -Fq "printf 'Full detail: [docs/pic10f320_special_case.md](https://github.com/matt-garman/mcu-bypass-firmware/blob/%s/docs/pic10f320_special_case.md).\\n\\n' \"\$VERSION\"" \
+	"$ROOT/scripts/make-release.sh" \
+	|| fail "release manifest special-case link is not pinned to its version tag"
 grep -Fq 'scripts/verify-release-qualification.sh "$dir" "$tag"' \
 	"$ROOT/.github/workflows/release.yml" \
 	|| fail "tag workflow does not verify committed release qualification"

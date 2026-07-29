@@ -1021,7 +1021,7 @@ REL_BANNER=""
 	printf 'It is the constrained exception, not evidence that the reference architecture\n'
 	printf 'fits 256 words.\n\n'
 	if [ -f "$REPO_ROOT/docs/pic10f320_special_case.md" ]; then
-		printf 'Full detail: [docs/pic10f320_special_case.md](../../docs/pic10f320_special_case.md).\n\n'
+		printf 'Full detail: [docs/pic10f320_special_case.md](https://github.com/matt-garman/mcu-bypass-firmware/blob/%s/docs/pic10f320_special_case.md).\n\n' "$VERSION"
 	fi
 	printf 'Its images use a different basename prefix from every other target\n'
 	printf '(`bypass_mcu_<variant>_%s.hex`), inherited from the project it was merged\n' "$PIC320_TAG"
