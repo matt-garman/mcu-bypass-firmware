@@ -30,7 +30,7 @@ set.  It is the modern-silicon member of the supported set.
     * Current production part rather than a mature/legacy one, with a
       correspondingly long expected availability horizon
     * 2 KB flash and 128 bytes SRAM: roughly double the ATtiny13a's flash and
-      SRAM, so the firmware sits at ~40% of flash instead of ~70%
+      SRAM, so the firmware sits at 41-43% of flash instead of 70-74%
     * An **AEC-Q100 automotive-qualified** variant of this family exists
       (125 °C), which is a meaningfully stronger environmental rating than any
       other supported part carries
@@ -714,10 +714,19 @@ the ATtiny13a, with 64 bytes of SRAM: worst-case consumption is 35 bytes
 family has far more of both flash and SRAM (the ATtiny85 uses approximately
 9% of flash and approximately 7% of its 512 bytes of SRAM).
 
-This headroom is a deliberate design property: it leaves ample room for future
-features without approaching any resource limit, and it is enforced as a test:
-the stack high-water-mark check fails the build if free SRAM margin drops below
-its floor.
+That SRAM headroom is a deliberate design property, and it is gated rather
+than merely stated: `test_stack_high_water_mark()` in `test/avr/test_sim.c`
+paints SRAM with a canary, exercises the deepest call paths, and fails
+`make test-sim` if fewer than 8 bytes separate the deepest stack pointer from
+the first SRAM byte. Measured today: 33 bytes on relay and mute, 35 on cd4053.
+Both the floor and the measurement span the 4 static bytes at the bottom of
+SRAM, so the 33 measured is the 29 free bytes above plus those 4, and the
+8-byte floor admits 4 genuinely free bytes.
+
+Flash, not SRAM, is the tighter resource on the ATtiny13a, and it has its own
+gate: 73.8% of 1 KB against the 90% ceiling enforced by
+`make test-flash-budget`. Both are comfortable margins on this part; neither
+is unlimited.
 
 === ATtiny202 (AVR-XT build)
 
