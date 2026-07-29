@@ -9,7 +9,9 @@
 #   clean pass here means the CI matrix will be green.
 #
 # CI-JOB MAPPING (.github/workflows/ci.yml)
-#   preflight     -> assert EVERY toolchain present before any job runs: the
+#   preflight     -> validate the workflow FILES (an unparseable ci.yml fails
+#                    the whole matrix before any job starts, and no local job
+#                    can show that), then assert EVERY toolchain present: the
 #                    host/AVR tools (unconditional -- no --skip covers them),
 #                    then the PIC and ATtiny202 toolchains. See PREFLIGHT below.
 #                    CI asserts inside each job, but CI's jobs run in PARALLEL;
@@ -374,6 +376,15 @@ export STRICT_TOOLS=1
 # the same strictness, and each remains individually suppressed by its own
 # --skip-* flag. It only moves the whole diagnosis into the first seconds.
 # ----------------------------------------------------------------------------
+# The workflow files themselves are a gate input: an unparseable ci.yml stops
+# the ENTIRE matrix with "Invalid workflow file" before a single job starts, and
+# no amount of green local jobs predicts that. Run it first -- it costs
+# milliseconds, and finding it here beats finding it after the full suite.
+# STRICT_TOOLS=1 (exported below for every job) turns a missing PyYAML into a
+# hard failure rather than a silent skip.
+run_step "preflight: validate GitHub workflow files" \
+	env STRICT_TOOLS=1 "$REPO_ROOT/test/test_workflow_syntax.sh"
+
 run_step "preflight: assert host/AVR toolchain present" assert_host_toolchain
 if [ "$SKIP_PIC" -eq 0 ]; then
 	run_step "preflight: assert PIC toolchain present (both chips)" assert_pic_toolchain

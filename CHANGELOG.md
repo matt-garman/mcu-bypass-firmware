@@ -32,6 +32,18 @@ file is the human-readable summary of *what changed*.
 ## [Unreleased]
 
 ### Added
+- **The GitHub workflow files are now validated locally** (`make
+  test-workflow-syntax`, and a `ci-local.sh` preflight that runs it first).
+  Nothing in the repo had ever parsed them: the release regressions `grep`
+  `release.yml` for fixed strings, which succeeds on a file GitHub cannot load,
+  and `ci-local.sh` reproduces the job order from a comment header rather than
+  from `ci.yml`. An unquoted job `name:` containing `": "` therefore took the
+  entire CI matrix down with "Invalid workflow file" after a full clean
+  `ci-local.sh` pass. Both workflows must now parse, every job must have a
+  runner and steps, every `needs:` must resolve to a declared job, every action
+  must be version-pinned, and `ci.yml`'s job list must agree with
+  `ci-local.sh`'s CI-JOB MAPPING in both directions -- so a job added, renamed
+  or dropped can no longer silently stop being mirrored locally.
 - **ATtiny202 (AVR-XT) promoted from development-only to a release-supported
   target**, bringing the release product set to six parts and 18 images. It was
   classified development-only on 2026-07-14, in the middle of the week its
@@ -161,9 +173,9 @@ file is the human-readable summary of *what changed*.
 - The Classic AVR `timer_isr_called_` fault injection no longer treats an
   already-dark BYPASS LED after roughly 7 ms as proof of watchdog recovery. It
   starts ENGAGED, single-steps to the ISR's handshake write, corrupts it before
-  main can read it, and requires both simavr's crash/reset witness and
-  fail-safe dark output after reset. A dedicated mutant removes only that sanity
-  term.
+  main can read it, and requires both a device-reset witness (simavr's
+  `avr->reset` hook, which its watchdog reset path calls) and fail-safe dark
+  output after reset. A dedicated mutant removes only that sanity term.
 - The ATtiny202 fault matrix now covers `PORTA.PINnCTRL.INVEN` on the LED,
   control/relay, parked-spare, and footswitch pins. The PA7 case preserves its
   pull-up while reversing input polarity, proving the firmware's exact PA7

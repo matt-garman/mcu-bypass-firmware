@@ -27,6 +27,7 @@ test/
   test_attiny202_build.sh   shared: fail-closed AVR-XT build checks
   test_avr_build_rebuild.sh shared: classic AVR rebuild/partial-output checks
   test_ci_local_routing.sh  shared: local-CI skip-option command routing
+  test_workflow_syntax.sh   shared: GitHub workflow YAML + ci-local job-map checks
   test_flash_budget.sh      shared: fail-closed flash measurement checks
   test_gpsim_wrappers.sh    shared: fail-closed gpsim wrapper checks
   test_klee_build.sh        shared: linked KLEE bitcode build regression
