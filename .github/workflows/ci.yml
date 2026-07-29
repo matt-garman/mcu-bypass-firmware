@@ -436,7 +436,7 @@ jobs:
 
       - name: Assert ATtiny202 images built (fail loud, do NOT skip)
         run: |
-          for v in $(make -s print-VARIANTS); do
+          for v in $(make -s print-XT_VARIANTS_SUPPORTED); do
             hex="build_avr_xt/bypass_${v}_attiny202.hex"
             test -f "$hex" || { echo "::error::missing $hex (DFP fetch or build failed)"; exit 1; }
           done
@@ -487,10 +487,18 @@ jobs:
 
       # Each gate greps for one PASS line per variant, so a per-variant skip
       # (e.g. a missing image) fails the step even though make returned 0.
+      #
+      # The expected count comes from XT_VARIANTS_SUPPORTED, not VARIANTS.
+      # VARIANTS is the classic-AVR list and is user-overridable, so a
+      # `VARIANTS=cd4053` invocation would shrink both the build and the
+      # expectation together and let these gates go green having exercised a
+      # third of the matrix. XT_VARIANTS_SUPPORTED is declared `override` and
+      # cannot be shrunk that way. The fault gate below deliberately keeps a
+      # hardcoded n=3 as an independent cross-check on this variable.
       - name: Functional + target-output gate (make attiny202-sim)
         run: |
           set -o pipefail
-          n=$(make -s print-VARIANTS | wc -w)
+          n=$(make -s print-XT_VARIANTS_SUPPORTED | wc -w)
           make attiny202-sim 2>&1 | tee sim.log
           p=$(grep -c "SIM PASS" sim.log || true)
           [ "$p" -eq "$n" ] || { echo "::error::attiny202-sim: $p/$n variants PASSed (skip or fail)"; exit 1; }
@@ -514,7 +522,7 @@ jobs:
       - name: Lock-step gate (make attiny202-lockstep)
         run: |
           set -o pipefail
-          n=$(make -s print-VARIANTS | wc -w)
+          n=$(make -s print-XT_VARIANTS_SUPPORTED | wc -w)
           make attiny202-lockstep 2>&1 | tee lockstep.log
           p=$(grep -c "LOCKSTEP PASS" lockstep.log || true)
           [ "$p" -eq "$n" ] || { echo "::error::attiny202-lockstep: $p/$n variants PASSed (skip or fail)"; exit 1; }
@@ -528,7 +536,7 @@ jobs:
       - name: Soak smoke (make attiny202-soak, 5 min simulated)
         run: |
           set -o pipefail
-          n=$(make -s print-VARIANTS | wc -w)
+          n=$(make -s print-XT_VARIANTS_SUPPORTED | wc -w)
           make attiny202-soak XT_SOAK_DURATION_MS=300000 \
                XT_SOAK_PROGRESS_INTERVAL_MS=300000 2>&1 | tee soak.log
           p=$(grep -c "SOAK PASS" soak.log || true)

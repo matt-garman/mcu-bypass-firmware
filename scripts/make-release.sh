@@ -100,6 +100,11 @@ die()     { printf '%sFATAL%s %s\n' "$RED" "$RST" "$*" >&2; exit 1; }
 VERSION=""
 DRY_RUN=0
 RELEASE_MODE=production
+# Canonical project URL. MANIFEST.md is used verbatim as the GitHub Release
+# body, where repo-relative links do not resolve, so any link it carries must
+# be absolute. Not derived from `git remote` on purpose: that would vary with
+# the operator's SSH-vs-HTTPS remote and silently change published notes.
+REPO_URL=https://github.com/matt-garman/mcu-bypass-firmware
 MIN_RELEASE_SOAK_MS=86400000
 MAX_SOAK_DURATION_MS=4294967294    # uint32_t loop bound; preserve t + 1
 SOAK_DURATION_MS=$MIN_RELEASE_SOAK_MS
@@ -1021,7 +1026,15 @@ REL_BANNER=""
 	printf 'It is the constrained exception, not evidence that the reference architecture\n'
 	printf 'fits 256 words.\n\n'
 	if [ -f "$REPO_ROOT/docs/pic10f320_special_case.md" ]; then
-		printf 'Full detail: [docs/pic10f320_special_case.md](../../docs/pic10f320_special_case.md).\n\n'
+		# Absolute and tag-pinned: this file is both committed at
+		# release/<version>/MANIFEST.md and published verbatim as the GitHub
+		# Release body, where '../../' does not resolve. The tag does not exist
+		# yet at generation time -- it is created from this very run -- so the
+		# link goes live when the release is pushed. (Under --dry-run no tag is
+		# ever created, so the link will 404; the dry-run banner already says
+		# the output is not a real release.)
+		printf 'Full detail: [docs/pic10f320_special_case.md](%s/blob/%s/docs/pic10f320_special_case.md).\n\n' \
+			"$REPO_URL" "$VERSION"
 	fi
 	printf 'Its images use a different basename prefix from every other target\n'
 	printf '(`bypass_mcu_<variant>_%s.hex`), inherited from the project it was merged\n' "$PIC320_TAG"
