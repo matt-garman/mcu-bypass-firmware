@@ -199,13 +199,21 @@ supported part can enforce the >4v peripheral-safe threshold:
 [horizontal]
 AVR Classic (ATtiny13a/45/85):: 4.3v BOD fuse -- enforces the >4v
   floor the 5v relay coil / MOSFET peripherals require.
+ATtiny202 (AVR-XT):: BODCFG fuse `LVL=BODLEVEL7` (~4.2v), with BOD
+  enabled in both active and sleep modes. This is the AVR-XT
+  analogue of the classic 4.3v BOD and likewise enforces the >4v
+  peripheral-safe floor.
 PIC10F322:: BOR is enabled at the highest available trip
   (`BORV=HI`), but the PIC10F322's trip points are only ~2.4v (LO) /
   ~2.7v (HI). The PIC therefore *cannot* enforce a >4v floor in
-  firmware -- this is a hardware-design limitation. A PIC build that
-  drives >4v peripherals must guarantee the peripheral-safe supply
-  in hardware (e.g. regulator dropout / supervisor), not rely on the
-  MCU's BOR.
+  firmware -- this is a hardware-design limitation. A build on
+  either PIC part that drives >4v peripherals must guarantee the
+  peripheral-safe supply in hardware (e.g. regulator dropout /
+  supervisor), not rely on the MCU's BOR.
+PIC10F320:: same silicon family and the same BOR configuration as
+  the PIC10F322 (`BOREN=ON`, `LPBOR=OFF`, `BORV=HI`), so the same
+  ~2.4v (LO) / ~2.7v (HI) trip points and *exactly the same caveat*
+  apply.
 
     * Watchdog timeout (WDT): while the program flow has been
       exhaustively tested/simulated, including formal
@@ -682,15 +690,15 @@ stack-canary test (see Testing and Validation above).
 |===
 | Part      | Variant | Flash               | of device flash
 
-| ATtiny13a | cd4053  | 684 bytes           | 67% of 1 KB
-| ATtiny13a | relay   | 724 bytes           | 71% of 1 KB
-| ATtiny13a | mute    | 732 bytes           | 72% of 1 KB
-| ATtiny45  | cd4053  | 710 bytes           | 17% of 4 KB
-| ATtiny45  | relay   | 750 bytes           | 18% of 4 KB
-| ATtiny45  | mute    | 758 bytes           | 19% of 4 KB
-| ATtiny85  | cd4053  | 710 bytes           | 9% of 8 KB
-| ATtiny85  | relay   | 750 bytes           | 9% of 8 KB
-| ATtiny85  | mute    | 758 bytes           | 9% of 8 KB
+| ATtiny13a | cd4053  | 716 bytes           | 69.9% of 1 KB
+| ATtiny13a | relay   | 756 bytes           | 73.8% of 1 KB
+| ATtiny13a | mute    | 756 bytes           | 73.8% of 1 KB
+| ATtiny45  | cd4053  | 742 bytes           | 18.1% of 4 KB
+| ATtiny45  | relay   | 782 bytes           | 19.1% of 4 KB
+| ATtiny45  | mute    | 782 bytes           | 19.1% of 4 KB
+| ATtiny85  | cd4053  | 742 bytes           | 9.1% of 8 KB
+| ATtiny85  | relay   | 782 bytes           | 9.5% of 8 KB
+| ATtiny85  | mute    | 782 bytes           | 9.5% of 8 KB
 |===
 
 SRAM use is dominated by 4 bytes of static data; peak stack measured 31 bytes
@@ -746,17 +754,20 @@ compiler), not bytes. `make pic` enforces the flash-word budget per variant.
 |===
 | Variant | Program (flash) | of 512 words | Data (RAM) | of 64 bytes
 
-| cd4053  | 404 words | 78.9% | 34 bytes | 53.1%
-| relay   | 431 words | 84.2% | 34 bytes | 53.1%
-| mute    | 434 words | 84.8% | 34 bytes | 53.1%
+| cd4053  | 445 words | 86.9% | 34 bytes | 53.1%
+| relay   | 473 words | 92.4% | 34 bytes | 53.1%
+| mute    | 471 words | 92.0% | 34 bytes | 53.1%
 |===
 
 The 34-byte data figure is XC8's total reservation, not just the firmware's
 state: the single live global is `ctx_` (the 3-byte `debounce_context_t`; the
 PIC's polled Model-B loop has no `timer_isr_called_` handshake, unlike the
 AVR ISR design), and the remainder is the XC8 runtime's scratch and temporaries.
-The PIC10F322 leaves comfortable headroom against its 512-word limit, which
-`make pic` gates on every build.
+Against the 512-word limit the margin is real but not generous: the largest
+variant, relay, leaves 39 words free (7.6%), and cd4053 leaves 67 (13.1%). That
+is enough for maintenance work, not for a substantial new feature. `make pic`
+gates every variant against the budget on every build, so an overshoot fails
+the build rather than reaching hardware.
 
 === PIC10F320 (XC8 build)
 

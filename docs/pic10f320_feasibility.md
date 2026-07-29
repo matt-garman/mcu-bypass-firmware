@@ -248,7 +248,9 @@ The decision as taken in 2026-06-26, and what became of each part of it:
   described in `pic10f320_special_case.md`; first-release qualification remains
   pending.
 - **PIC10F322: the supported PIC target for the reference architecture** — all
-  three variants fit with comfortable headroom. **Still true.**
+  three variants fit. **Still true**, though the margin has narrowed since: the
+  largest variant now uses 473 of 512 words (92.4%), leaving 39 free. It fits
+  and is gated on every build, but "comfortable" would overstate it today.
 - **Keep `debounce_context_t`, the enum types, and the pure
   functional-core/imperative-shell split exactly as they are.** They were
   measured to be *not* the blocker, and the abstraction is the project's
