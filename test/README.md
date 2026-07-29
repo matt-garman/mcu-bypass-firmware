@@ -21,9 +21,11 @@ test/
   misra_rules.txt           shared: MISRA rule paraphrases
   misra_suppressions.txt    shared: documented per-file MISRA deviations
   mutation_policy.sh        shared: strict/partial mutation policy resolver
+  mutation_accounting.sh    shared: mutation inventory/result accounting helpers
   run_mutation_tests.sh     shared: mutation-testing driver (make test-mutation)
   soak_timing_config.h      shared: native soak timing bounds
   check_flash_budget.sh     shared: exact flash-budget checker
+  check_stack_depth_pic.sh  shared: PIC hardware return-stack depth gate
   test_attiny202_build.sh   shared: fail-closed AVR-XT build checks
   test_avr_build_rebuild.sh shared: classic AVR rebuild/partial-output checks
   test_ci_local_routing.sh  shared: local-CI skip-option command routing
@@ -31,15 +33,20 @@ test/
   test_flash_budget.sh      shared: fail-closed flash measurement checks
   test_gpsim_wrappers.sh    shared: fail-closed gpsim wrapper checks
   test_klee_build.sh        shared: linked KLEE bitcode build regression
+  test_lockstep_progress.sh shared: PIC libgpsim lock-step progress checks
   test_make_serialization.sh shared: worktree Make/release lock regression
   test_pic_build.sh         shared: PIC image/size/rebuild-trigger checks
+  test_pic_rebuild.sh       shared: PIC soak rebuild determinism
   test_release_images.sh    shared: isolated exact release artifact verification
   test_release_provenance.sh shared: source/compiler/output release-provenance regression
   test_release_qualification.sh shared: release soak/evidence publication contract
   test_release_history.sh     shared: release history + pinned-signature binding
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
   test_stack_bound.sh       shared: fail-closed stack evidence checks
+  test_stack_depth_pic.sh   shared: PIC return-stack gate regression
   test_strict_tools.sh      shared: skip/strict policy for host + both PIC chips
+  test_target_lane_markers.sh shared: PIC aggregate PASS-marker regression
+  test_target_matrix.sh     shared: fail-closed PIC variant-matrix regression
   test_workload_rebuild.sh  shared: workload/fuse rebuild checks
 
   host/    MCU-independent golden-model tests, compiled and run natively.
@@ -51,6 +58,7 @@ test/
            test_symbolic.c      KLEE / host enumerator (make test-symbolic[-klee])
 
   avr/     ATtiny-specific tests: the real firmware ELF in simavr, plus fuses.
+           attiny202_smoke.c    AVR-XT peripheral compile/link smoke image
            test_sim.c           simavr integration    (make test-sim-<variant>)
            test_soak.c          long-duration soak    (make test-soak)
            test_fuses.c         all-target fuse bytes (make test-fuses)
@@ -64,6 +72,7 @@ test/
            test_soak_attiny202.py  long-duration liveness soak
            test_lockstep_attiny202.py  ctx_-vs-golden-model co-simulation
                                                         (make attiny202-lockstep)
+           test_attiny202_delay_oracle.py  compiled-image pulse-width oracle
            model_step_ffi.c/.py  ctypes bridge letting the Python drivers call
                                  the SHIPPING pure core through model_step.h,
                                  so no part of the algorithm is re-implemented
@@ -77,6 +86,7 @@ test/
                                                         (make pic-coverage-check-fw)
             test_config_pic.c    CONFIG-word check     (make pic-test-config)
             *.stc + run_gpsim_*  register-level gpsim  (make pic-test-gpsim)
+            find_pin_exact.h     shared exact gpsim pin-name lookup
             test_fault_pic.cc    PIC10F322 fault adapter (make pic-test-fault)
             test_lockstep_pic.cc PIC10F322 HEX/model lock-step adapter
                                                         (make pic-test-lockstep)
