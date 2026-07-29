@@ -73,11 +73,11 @@
 // depth), not a pure gate discriminator. All three still yield exactly one
 // reset, which is the assertion.
 //
-// Build/run via the Makefile:  `make test-fault-gpsim`
+// Build/run via the Makefile:  `make pic320-test-fault-target`
 //   It links libgpsim (needs gpsim-dev + libglib2.0-dev) and is not part of the
 //   development `make test`. Individual invocation skips cleanly if those tools
-//   are absent; regular CI's `make test-target-variants` aggregate rejects any
-//   skip and runs this for all three output variants.
+//   are absent; regular CI's `make pic320-test-target-variants` aggregate
+//   rejects any skip and runs this for all three output variants.
 //
 // IMPORTANT (gpsim WDT calibration; see test_soak_pic.cc): gpsim honors
 // WDTCON.WDTPS but does NOT match the datasheet -- at the firmware's WDTPS=0x08
