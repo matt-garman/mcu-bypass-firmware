@@ -104,6 +104,9 @@
 
 
 // CONFIG (configuration word)
+//
+// same as pic10f322: see "CONFIG / fuse rationale" in bypass_mcu_pic10f322.c
+// for details of these config values
 #pragma config FOSC  = INTOSC
 #pragma config BOREN = ON
 #pragma config WDTE  = ON

@@ -38,10 +38,12 @@
 //            |                               | post-reset short-window reset hazard.
 //   BODCFG   | LVL=BODLEVEL7 (~4.2V),        | Peripheral-safe floor: relay/MOSFET need
 //            | ACTIVE=ENABLED, SLEEP=ENABLED | >4V. ~4.2V is the AVR-XT analogue of the
-//            |                               | classic 4.3V BOD.  CONFIRM the level
-//            |                               | encoding + that it is a characterised
-//            |                               | (non-reserved) level in the ATtiny202
-//            |                               | datasheet Electrical Characteristics.
+//            |                               | classic 4.3V BOD.  Encoding verified
+//            |                               | against the pinned ATtiny_DFP
+//            |                               | (iotn202.h LVL_enum, FUSE_LVL_gp=5):
+//            |                               | BODLEVEL0/2/7 = 1.8/2.6/4.2V are the
+//            |                               | only characterised levels; 7 is the
+//            |                               | highest and is not reserved.
 //   OSCCFG   | FREQSEL=16MHz (0x01)          | 16MHz base / MCLKCTRLB PDIV 8 = 2MHz.
 //   SYSCFG0  | RSTPINCFG=UPDI, CRCSRC=NONE   | Keep PA0 as UPDI so the part stays
 //            | (device default, 0xF6)        | reprogrammable. (CRCSRC=boot flash CRC
