@@ -191,7 +191,7 @@ MUTATIONS=(
 # --- main-loop sanity guard / toggle dispatch (bypass_mcu_avr_classic.c) -------------------
 "src/bypass_mcu_avr_classic.c	s@(actual_direction_mask == (uint8_t)BYPASS_OUTPUT_DDR_MASK)@(1U != 0U)@	test-sim-cd4053	DDRB exact-mask predicate removed: PB0 output and PB4 input corruptions evade the former caller-output subset check"
 "src/bypass_mcu_avr_classic.c	s@PORTB & (uint8_t)BYPASS_OUTPUT_DDR_MASK@PORTB \& (uint8_t)0x0EU@	test-sim-cd4053	output-latch mask omits spare PB4; PB4 corruption must still force watchdog recovery"
-"src/bypass_mcu_avr_classic.c	s@if ( (ctx_.program_state > RELEASE_DEBOUNCE_WAIT)@if ( 0 \&\& (ctx_.program_state > RELEASE_DEBOUNCE_WAIT)@	test-sim-cd4053	sanity guard disabled: DDRB/state corruption goes undetected; corruption test catches it"
+"src/bypass_mcu_avr_classic.c	s@(timer_isr_called_ > TIMER_ISR_NOT_CALLED)@(0U != 0U)@	test-fault-inject-cd4053-t85	invalid ISR/main handshake-value guard removed; ISR-write-synchronized corruption must still force and witness a WDT reset"
 "src/bypass_pure.c	s@res.effect_state = BYPASS;@res.effect_state = ENGAGED;@	test-sim-cd4053	toggle: always sets ENGAGED (never returns to BYPASS); round-trip and lock-step tests catch it"
 # --- CD4053 simple output driver -----------------------------------------------
 "src/bypass_output_cd4053_simple.c	s@hw_pin_set_low(CD4053_PIN)@hw_pin_set_high(CD4053_PIN)@	test-sim-cd4053	bypass routes CD4053 the wrong way (PB2 stuck high); power-on control-output test catches it"

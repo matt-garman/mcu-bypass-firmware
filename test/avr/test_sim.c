@@ -187,6 +187,8 @@
 #define SPL_MEM_ADDR   0x5D  // SPL I/O addr 0x3D + SFR offset 0x20
 #define SPH_MEM_ADDR   0x5E  // SPH I/O addr 0x3E + SFR offset 0x20 (not present on ATtiny13a)
 #define WDTCSR_MEM_ADDR 0x41 // WDTCR I/O addr 0x21 + SFR offset 0x20 (same on t13a and tinyx5)
+#define TIMER_ISR_CALLED_VALUE     0x00U // timer_isr_called_t values in firmware
+#define TIMER_ISR_NOT_CALLED_VALUE 0x01U
 // Config SFRs re-checked by the firmware's per-tick SFR-integrity gate. CLKPR
 // and TCCR0B share the same I/O address on both families, but TCCR0A and OCR0A
 // do NOT (verified against avr-libc iotn13a.h vs iotn85.h), so they are selected
@@ -1430,13 +1432,12 @@ static void test_fault_inject_effect_state(void) {
 // Corrupt timer_isr_called_ to an out-of-range value
 // (> TIMER_ISR_NOT_CALLED).
 //
-// NOTE: the timer ISR rewrites this flag to TIMER_ISR_CALLED every 1ms, so a
-// corrupted value only survives long enough to be seen by main() if main()
-// happens to read it within that window. On the tinyx5 build the WDT reset
-// gives us a deterministic signal once main() catches it, so we retry across
-// several ticks. On the ATtiny13a build (no modeled WDT reset) the catch is a
-// tight, non-deterministic race that we cannot reliably win from the test
-// harness, so this particular injection is tinyx5-only.
+// NOTE: the timer ISR rewrites this flag to TIMER_ISR_CALLED every 1ms. Settle
+// at IDLE with the flag at NOT_CALLED, single-step until the ISR writes CALLED,
+// then replace that value before main() can execute its sanity check. On tinyx5,
+// the modeled WDT reset is an unambiguous witness that the guard caught it. This
+// particular injection remains tinyx5-only because ATtiny13a has no modeled WDT
+// reset to provide the same positive witness.
 #ifdef TARGET_TINYX5
 static void test_fault_inject_timer_isr_flag(void) {
     if (sim_reset(0) != 0) { g_failures++; return; }
@@ -1444,20 +1445,41 @@ static void test_fault_inject_timer_isr_flag(void) {
           "fault-inject: could not resolve timer_isr_called_ address");
     if (g_addr_timer_isr == 0) return;
 
-    footsw_set(0); run_ms(20);
+    // Begin ENGAGED so a dark LED after the crash is an independent reset witness.
+    footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
+    CHECK(g_led_level == 1,
+          "fault-inject [timer_isr_called_]: normal press engages");
+    if (g_led_level != 1) return;
 
-    // Poke the corrupted value once per tick over a window; the WDT reset will
-    // fire the first time main() observes a >1 value before being overwritten.
-    for (int i = 0; i < 300; ++i) {
-        avr_core_watch_write(g_avr, g_addr_timer_isr, 0x55);
-        run_ms(1);
-        if (g_led_level == 0 && i > 5) {
-            break; // already reset; stop poking
+    CHECK(run_one_tick_settled(0) == 0,
+          "fault-inject [timer_isr_called_]: could not settle at tick boundary");
+    CHECK(g_avr->data[g_addr_timer_isr] == TIMER_ISR_NOT_CALLED_VALUE,
+          "fault-inject [timer_isr_called_]: flag not NOT_CALLED at IDLE");
+    if (g_avr->data[g_addr_timer_isr] != TIMER_ISR_NOT_CALLED_VALUE) return;
+
+    int injected = 0;
+    avr_cycle_count_t const deadline =
+        g_avr->cycle + (avr_cycle_count_t)(2UL * CYCLES_PER_MS);
+    while (g_avr->cycle < deadline) {
+        int const st = avr_run(g_avr);
+        if (st == cpu_Crashed) { g_saw_crash = 1; break; }
+        if (st == cpu_Done) break;
+        if (g_avr->data[g_addr_timer_isr] == TIMER_ISR_CALLED_VALUE) {
+            avr_core_watch_write(g_avr, g_addr_timer_isr, 0x55);
+            injected = (g_avr->data[g_addr_timer_isr] == 0x55U);
+            break;
         }
     }
-    // > WDT timeout window has elapsed within the loop above; confirm BYPASS.
+    CHECK(injected != 0,
+          "fault-inject [timer_isr_called_]: could not inject after ISR write");
+    if (injected == 0) return;
+
+    g_saw_crash = 0;
+    run_ms(500);
+    CHECK(g_saw_crash != 0,
+          "fault-inject [timer_isr_called_]: WDT reset was not observed");
     CHECK(g_led_level == 0,
-          "fault-inject [timer_isr_called_]: WDT reset recovered, LED dark");
+          "fault-inject [timer_isr_called_]: reset returned LED output dark");
 }
 #endif
 
