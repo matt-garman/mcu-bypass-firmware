@@ -1,5 +1,18 @@
 # PIC10F320 merge plan
 
+> **Historical decision record — merge complete; retained intentionally.**
+> The repository integration described below has been completed. This document
+> remains in the tree because it records the rationale and section-numbered
+> decisions cited by the implementation.
+>
+> Do **not** use the plan body for current support, release, qualification, path,
+> or Make-target status. See [PIC10F320 — the constrained target](pic10f320_special_case.md)
+> for the current architecture and support contract, and the
+> [PIC10F320 validation record](pic10f320_validation.md) for current and historical
+> execution evidence. The body below is preserved as an execution-era record and
+> intentionally contains superseded paths, targets, scope assumptions, and status
+> statements; its existing errata identify the largest scope changes.
+
 Fold the standalone `pic10f320-bypass-firmware` child repository into
 this parent as a first-class-but-explicitly-constrained build target,
 eliminating the duplicated validation ecosystem and the hand-vendored
