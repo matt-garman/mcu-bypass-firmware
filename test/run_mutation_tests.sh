@@ -306,6 +306,9 @@ validate_pic320_sandbox() {
         test/pic/footswitch_toggle.stc \
         test/pic/power_on_pressed.stc \
         test/pic/find_pin_exact.h \
+        test/pic/test_fault_pic_core.h \
+        test/pic/test_io_pic_core.h \
+        test/pic/test_lockstep_pic_core.h \
         test/pic/test_soak_pic.cc; do
         if [ ! -f "$root/$required" ]; then
             echo "ERROR: PIC10F320 mutation sandbox is missing $required" >&2
@@ -386,6 +389,17 @@ if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
     rm -f "$SELFTEST_DIR/test/pic/find_pin_exact.h"
     if validate_pic320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
         echo "ERROR: mutation sandbox validator accepted a missing find_pin_exact.h" >&2
+        rm -rf "$SELFTEST_DIR"
+        exit 1
+    fi
+
+    if ! copy_tree "$SELFTEST_DIR"; then
+        echo "ERROR: could not restore mutation self-test sandbox" >&2
+        rm -rf "$SELFTEST_DIR"; exit 1
+    fi
+    rm -f "$SELFTEST_DIR/test/pic/test_fault_pic_core.h"
+    if validate_pic320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
+        echo "ERROR: mutation sandbox validator accepted a missing shared PIC harness core" >&2
         rm -rf "$SELFTEST_DIR"
         exit 1
     fi
@@ -1001,7 +1015,7 @@ EOF
             "$RESULT_DIR/selftest-no-newline.status" >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted an unterminated status" >&2; exit 1
     fi
-    echo "mutation sandbox/accounting validation: 29 checks, 0 failures"
+    echo "mutation sandbox/accounting validation: 30 checks, 0 failures"
     exit 0
 fi
 

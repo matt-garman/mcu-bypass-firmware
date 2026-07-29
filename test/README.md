@@ -72,23 +72,25 @@ test/
                                 hard-coded algorithm expectations
                                                         (make test-attiny202-model-ffi)
 
-  pic/     PIC10F322-specific host and gpsim tests.
+  pic/     PIC10F322-specific tests plus shared PIC gpsim harness code.
              fw_coverage/         real PIC source via host SFR mock + gcov
                                                         (make pic-coverage-check-fw)
             test_config_pic.c    CONFIG-word check     (make pic-test-config)
             *.stc + run_gpsim_*  register-level gpsim  (make pic-test-gpsim)
-            test_fault_pic.cc    libgpsim fault-inject (make pic-test-fault)
-            test_lockstep_pic.cc libgpsim HEX/model ctx lock-step
-                                                       (make pic-test-lockstep)
-            test_io_pic.cc       libgpsim GPIO/pulse timing
-                                                       (make pic-test-io)
+            test_fault_pic.cc    PIC10F322 fault adapter (make pic-test-fault)
+            test_lockstep_pic.cc PIC10F322 HEX/model lock-step adapter
+                                                        (make pic-test-lockstep)
+            test_io_pic.cc       PIC10F322 GPIO/pulse-timing adapter
+                                                        (make pic-test-io)
+            test_{fault,lockstep,io}_pic_core.h
+                                  shared libgpsim harness implementations
             test_soak_pic.cc     libgpsim soak         (make pic-test-soak)
-                                 shared with the PIC10F320 lane
+                                  shared with the PIC10F320 lane
 
   pic10f320/  PIC10F320-specific tests. Separate from pic/ because this target's
-              firmware is a single hand-inlined translation unit rather than a
-              shell over the shared core, so its harnesses have no counterpart
-              on any other target (docs/pic10f320_special_case.md).
+               firmware is a single hand-inlined translation unit rather than a
+               shell over the shared core, requiring dedicated host harnesses and
+               thin target-simulator adapters (docs/pic10f320_special_case.md).
             equiv/     fw_harness.c   the real firmware #included, host-compiled
                        test_equiv.c   tick-for-tick vs src/bypass_pure.c
                                                        (make pic320-test-equiv)
@@ -100,12 +102,12 @@ test/
                                                        (make pic320-test-fault-host)
                        check_fw_coverage.sh    exact-line firmware coverage gate
                                                        (make pic320-coverage-check-fw)
-             gpsim/     test_fault_pic.cc     libgpsim fault-inject
-                                                        (make pic320-test-fault-target)
-                        test_lockstep_pic.cc  libgpsim HEX/model ctx lock-step
-                                                        (make pic320-test-lockstep)
-                        test_io_pic.cc        libgpsim GPIO/pulse timing
-                                                        (make pic320-test-io)
+            gpsim/     test_fault_pic.cc     libgpsim fault adapter
+                                                         (make pic320-test-fault-target)
+                         test_lockstep_pic.cc  libgpsim lock-step adapter
+                                                         (make pic320-test-lockstep)
+                         test_io_pic.cc        libgpsim GPIO/timing adapter
+                                                         (make pic320-test-io)
                         footswitch_toggle.stc gpsim stimulus
               return_stack_oracle.py  strict final-HEX control-flow/return-stack
                                       proof + fixtures
@@ -119,10 +121,12 @@ test/
 
 The PIC10F320 lane reuses, rather than forks, everything it can: the CONFIG-word
 checker (`pic/test_config_pic.c`, parameterised on `PIC_DEVICE_NAME`), both gpsim
-CLI wrappers (parameterised on the processor), the soak driver
-(`pic/test_soak_pic.cc`), and — most importantly — `src/bypass_pure.c` itself. Its
-`gpsim/` harnesses are forked because they are genuinely chip-specific: different
-SRAM offsets, different expected check counts, a different processor model.
+CLI wrappers, the soak driver (`pic/test_soak_pic.cc`), the three libgpsim harness
+cores, and — most importantly — `src/bypass_pure.c` itself. Thin per-part adapters
+keep processor/image defaults and output-macro vocabularies explicit. The fault
+adapters additionally pin each part's program-space limit, independent expected
+check count, and output-latch policy: PIC10F322 runs three LATA injections that
+PIC10F320 deliberately omits because its firmware has no latch-integrity guard.
 
 Build artifacts (compiled binaries, `*.bc`) are written next to their sources in
 each subdirectory and are git-ignored; see `.gitignore`. KLEE output directories
@@ -405,7 +409,7 @@ can enable the tool-dependent PIC10F320 mutants. The host-only
 `test-mutation-sandbox` regression exercises the same copy routine in `make test`,
 including the wrappers' executable mode, and covers inventory, conservation,
 record/command parsing, atomic publication, checker-status classification, and
-result grammar in 29 checks.
+result grammar in 30 checks.
 
 **The ATtiny202 lane is gated the same way, with one extra hazard.** `XT_DFP` and
 `YASIMAVR_VENV` both default to paths *relative* to the tree, which is exactly
