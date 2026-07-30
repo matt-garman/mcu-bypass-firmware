@@ -291,12 +291,31 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
 
 == Optional (symbolic execution)
 
-  KLEE:         not installed; test/formal/test_symbolic.c compiles and runs under
-                the host gcc as an exhaustive enumerator when USE_KLEE is not
-                defined.  `make test-symbolic-klee` requires KLEE plus matching
-                clang/llvm-link versions. It compiles test_symbolic.c and the
-                shipping src/bypass_pure.c separately, links both bitcode modules,
-                and executes the linked module so core calls are fully defined.
+  KLEE:         3.2 (Homebrew/Linuxbrew formula revision 3; keg 3.2_3)
+  LLVM:         16.0.6 (Homebrew llvm@16; matching clang and llvm-link)
+  source:       Homebrew's `klee` formula, installed under
+                /home/linuxbrew/.linuxbrew.  The Makefile defaults name the
+                installation explicitly so a non-interactive /bin/sh does not
+                need Linuxbrew on PATH:
+                  KLEE=/home/linuxbrew/.linuxbrew/bin/klee
+                  KLEE_CLANG=/home/linuxbrew/.linuxbrew/opt/llvm@16/bin/clang
+                  KLEE_LLVMLINK=/home/linuxbrew/.linuxbrew/opt/llvm@16/bin/llvm-link
+                  KLEE_INC=/home/linuxbrew/.linuxbrew/Cellar/klee/3.2_3/include
+  measured:     `make test-symbolic-klee STRICT_TOOLS=1` passed on 2026-07-27:
+                5,918 instructions, 14 completed paths, 0 partially completed,
+                exit 0.  The target compiles test/formal/test_symbolic.c and the
+                shipping src/bypass_pure.c separately with the matching LLVM 16
+                clang, links both modules with LLVM 16 llvm-link, and executes the
+                linked module, so the solver runs the shipping core rather than
+                an undefined call or re-implementation.
+  fallback:     Without USE_KLEE, test/formal/test_symbolic.c compiles and runs
+                under the host gcc as an exhaustive enumerator over the same
+                invariant-valid domain.
+  CI status:    KLEE execution is not hosted in CI.  The default `make test`
+                aggregate runs `test-klee-build`, which checks the two-module
+                compile/link recipe but does not execute the solver.  No CI job
+                installs KLEE or invokes `test-symbolic-klee`; adding that lane
+                remains an open item in TODO.md.
 
 == Reproducing the environment (Ubuntu 24.04)
 
