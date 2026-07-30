@@ -1,0 +1,13 @@
+=== PIC10F320 build + flash-budget (256 words, variant cd4053-simple) ===
+PASS: build_pic10f320/bypass_mcu_cd4053-simple_pic10f320.hex: max return-stack depth 3/8 (236 reachable states, 256-word program memory)
+  witness: reset@0x000 -> GOTO@0x000 -> 0x001 -> GOTO@0x005 -> 0x006 -> CALL@0x006 -> 0x05F (return 0x007, depth 1) -> CALL@0x070 -> 0x0CA (return 0x071, depth 2) -> CALL@0x0CA -> 0x0D0 (return 0x0CB, depth 3)
+OK:   build_pic10f320/bypass_mcu_cd4053-simple_pic10f320.hex : 220 words (85.9%) of 256; return stack validated
+=== PIC10F320 build + flash-budget (256 words, variant cd4053-mute) ===
+PASS: build_pic10f320/bypass_mcu_cd4053-mute_pic10f320.hex: max return-stack depth 3/8 (288 reachable states, 256-word program memory)
+  witness: reset@0x000 -> GOTO@0x000 -> 0x001 -> GOTO@0x005 -> 0x006 -> CALL@0x006 -> 0x05F (return 0x007, depth 1) -> CALL@0x070 -> 0x0DB (return 0x071, depth 2) -> CALL@0x0DB -> 0x0E0 (return 0x0DC, depth 3)
+OK:   build_pic10f320/bypass_mcu_cd4053-mute_pic10f320.hex : 241 words (94.1%) of 256; return stack validated
+=== PIC10F320 build + flash-budget (256 words, variant tq2-relay) ===
+PASS: build_pic10f320/bypass_mcu_tq2-relay_pic10f320.hex: max return-stack depth 4/8 (327 reachable states, 256-word program memory)
+  witness: reset@0x000 -> GOTO@0x000 -> 0x001 -> GOTO@0x005 -> 0x006 -> CALL@0x006 -> 0x05F (return 0x007, depth 1) -> CALL@0x070 -> 0x0CE (return 0x071, depth 2) -> CALL@0x0CE -> 0x0E3 (return 0x0CF, depth 3) -> CALL@0x0E3 -> 0x0E9 (return 0x0E4, depth 4)
+OK:   build_pic10f320/bypass_mcu_tq2-relay_pic10f320.hex : 244 words (95.3%) of 256; return stack validated
+=== all PIC10F320 variants built within budget ===

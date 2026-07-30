@@ -1,0 +1,4 @@
+=== ATtiny202 (avrxmega3) build + flash-budget (2048 B) ===
+OK:   cd4053 -> build_avr_xt/bypass_cd4053_attiny202.hex : 848 B (41.4%) of 2048 B
+OK:   mute -> build_avr_xt/bypass_mute_attiny202.hex : 888 B (43.4%) of 2048 B
+OK:   relay -> build_avr_xt/bypass_relay_attiny202.hex : 888 B (43.4%) of 2048 B

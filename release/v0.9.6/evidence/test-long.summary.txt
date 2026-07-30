@@ -1,0 +1,84 @@
+# test-long summary -- the full log is in the release CI run.
+
+42:MISRA-C:2012 analysis (cppcheck + misra addon)
+53:MISRA-C:2012: clean (documented deviations waived per MISRA_COMPLIANCE.md)
+54:=== static analysis (clang-tidy + cppcheck + clang-analyzer + MISRA) clean ===
+70:cbmc: prove_integrate
+185:cbmc: prove_debounce_step
+300:cbmc: prove_corrupt_state_faults
+415:cbmc: prove_init_context
+530:cbmc: prove_step_transition
+645:cbmc: prove_oor_recovery_step
+760:cbmc: prove_press_liveness (--unwind 50)
+901:cbmc: prove_release_liveness (--unwind 50)
+1045:cbmc: prove_oor_recovery_bounded (--unwind 257)
+1416:=== CBMC: all debounce-core proofs SUCCESSFUL ===
+1425:=== -fstack-usage static bound (limit: 32 B/frame) ===
+1451:OK: 5 fresh reports; all frames <= 32 B
+1464:--- fault-injection (ATtiny45) variant: cd4053 ---
+1466:--- fault-injection (ATtiny85) variant: cd4053 ---
+1468:--- fault-injection (ATtiny85) variant: mute ---
+1470:--- fault-injection (ATtiny45) variant: relay ---
+1472:--- fault-injection (ATtiny85) variant: relay ---
+1474:--- fault-injection (ATtiny45) variant: mute ---
+1716:===================== PIC10F320 HOST VARIANT cd4053-simple =====================
+1733:OK: every firmware line is covered except the allowlisted watchdog-reset fault path.
+1734:=== all PIC10F320 host lanes passed (variant cd4053-simple) ===
+1735:===================== PIC10F320 HOST VARIANT cd4053-mute =====================
+1752:OK: every firmware line is covered except the allowlisted watchdog-reset fault path.
+1753:=== all PIC10F320 host lanes passed (variant cd4053-mute) ===
+1754:===================== PIC10F320 HOST VARIANT tq2-relay =====================
+1771:OK: every firmware line is covered except the allowlisted watchdog-reset fault path.
+1772:=== all PIC10F320 host lanes passed (variant tq2-relay) ===
+1773:=== PIC10F320 host equivalence/actuation/fault/coverage validated for all variants ===
+1927:=== mutation testing: baseline sanity check ===
+1940:=== PIC toolchain probe (gates the PIC-shell mutants) ===
+1945:=== PIC10F320 toolchain probe (gates its tool-dependent mutants) ===
+1954:=== AVR-XT toolchain probe (gates the ATtiny202 mutants) ===
+1964:=== running 93 mutants across up to 16 parallel job(s) ===
+1966:=== 23 core/AVR mutants ===
+1991:=== 27 PIC10F320 host mutants (equiv/actuation/fault) ===
+2020:=== 9 PIC10F320 target mutants (gpsim/libgpsim/soak) ===
+2031:=== 6 PIC-shell mutants (gpsim register-level) ===
+2039:=== 1 PIC-shell mutant (WDT liveness, libgpsim soak 2500ms) ===
+2042:=== 8 PIC target mutants (fault + lock-step + target I/O) ===
+2052:=== 19 ATtiny202 shell mutants (yasimavr sim/lock-step/fault/soak + delay oracle) ===
+2076:=== mutation summary: 93 killed, 0 survived, 0 errored, 0 PIC skipped, 0 ATtiny202 skipped ===
+2081:=== flash-utilization budget (attiny13a: 90% of 1024 B = 921 B) ===
+2082:OK:   build_avr_classic/bypass_cd4053.elf uses 716 B (69.9%) of 1024 B
+2083:OK:   build_avr_classic/bypass_mute.elf uses 756 B (73.8%) of 1024 B
+2084:OK:   build_avr_classic/bypass_relay.elf uses 756 B (73.8%) of 1024 B
+2085:OK: measured all 3 firmware images; each is within the 921 B limit.
+2089:--- sim (ATtiny13a) variant: relay ---
+2091:--- sim (ATtiny13a) variant: cd4053 ---
+2093:--- sim (ATtiny13a) variant: mute ---
+2633:--- sim (ATtiny45) variant: cd4053 ---
+2635:--- sim (ATtiny85) variant: relay ---
+2637:--- sim (ATtiny45) variant: mute ---
+2639:--- sim (ATtiny85) variant: cd4053 ---
+2641:--- sim (ATtiny45) variant: relay ---
+3487:--- sim (ATtiny85) variant: mute ---
+3912:golden-model line coverage: 99.35% (floor 90%)
+3914:=== all FULL (exhaustive) pre-hardware tests passed ===
+
+# --- last 20 lines ---
+LM_VARIANT_ARG='PIC320_TARGET_VARIANT' \
+LM_VARIANT='cd4053-mute' \
+LM_REQUIRE_ARG='PIC320_VARIANT=cd4053-mute' \
+	./test/test_target_lane_markers.sh
+PIC10F320 target-lane PASS-marker validation: 6 checks, 0 failures
+PIC_SOAK_CXX="c++" ./test/test_lockstep_progress.sh
+lock-step progress failure validation: 8 checks, 0 failures
+HOSTCC="cc" HOSTCXX="c++" ./test/test_soak_timing.sh
+soak timing validation: 45 checks, 0 failures
+./test/test_strict_tools.sh
+strict optional-tool validation (host + both PIC chips): 22 checks, 0 failures
+./test/test_workload_rebuild.sh
+make[4]: warning: -j1 forced in submake: resetting jobserver mode.
+make[4]: warning: -j1 forced in submake: resetting jobserver mode.
+workload rebuild validation: 22 checks, 0 failures
+./test/test_pic_rebuild.sh
+PIC soak rebuild determinism: 9 checks, 0 failures
+golden-model line coverage: 99.35% (floor 90%)
+verified-core line coverage (src/bypass_pure.c): 100.00% (floor 95%)
+=== all FULL (exhaustive) pre-hardware tests passed ===

@@ -1,0 +1,8 @@
+format=1
+version=v0.9.6
+release_mode=production
+source_commit=d3ba04061830e43b5cf3574fd71746ca8cf10814
+source_dirty=0
+soak_duration_ms=86400000
+soak_liveness_interval_ms=60000
+soak_combination_count=15
