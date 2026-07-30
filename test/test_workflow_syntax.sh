@@ -39,6 +39,7 @@ fi
 ROOT="$ROOT" python3 - <<'PY'
 import os
 import re
+import shlex
 import sys
 
 import yaml
@@ -258,6 +259,136 @@ if check(os.path.isfile(release_source), "release.yml: missing for token-scope c
     check(
         release_text.count("${{ github.token }}") == 1,
         "release.yml must reference github.token exactly once",
+    )
+
+
+def logical_shell_commands(run):
+    commands = []
+    pending = ""
+    for raw in run.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        pending = f"{pending} {line}".strip()
+        if pending.endswith("\\"):
+            pending = pending[:-1].rstrip()
+            continue
+        commands.append(pending)
+        pending = ""
+    if pending:
+        commands.append(pending)
+    return commands
+
+
+def shell_tokens(run):
+    parsed = []
+    for command in logical_shell_commands(run):
+        try:
+            parsed.append(shlex.split(command, comments=True, posix=True))
+        except ValueError:
+            continue
+    return parsed
+
+
+def apt_packages(step):
+    run = step.get("run") if isinstance(step, dict) else None
+    packages = set()
+    if not isinstance(run, str):
+        return packages
+    for tokens in shell_tokens(run):
+        if tokens[:1] == ["sudo"]:
+            tokens = tokens[1:]
+        if tokens[:2] != ["apt-get", "install"]:
+            continue
+        try:
+            yes = tokens.index("-y", 2)
+        except ValueError:
+            continue
+        for token in tokens[yes + 1:]:
+            if token in {"&&", "||", ";"}:
+                break
+            if not token.startswith("-"):
+                packages.add(token)
+    return packages
+
+
+def run_step_asserts(step, requirement):
+    run = step.get("run") if isinstance(step, dict) else None
+    if not isinstance(run, str):
+        return False
+    for tokens in shell_tokens(run):
+        if requirement == "PyYAML":
+            if tokens[:3] == ["python3", "-c", "import yaml"]:
+                return True
+        elif tokens[:3] == ["command", "-v", requirement]:
+            return True
+    return False
+
+
+def prior_steps(workflow_name, job_id, first_use, description):
+    doc = docs.get(workflow_name)
+    jobs = doc.get("jobs") if isinstance(doc, dict) else None
+    job = jobs.get(job_id) if isinstance(jobs, dict) else None
+    steps = job.get("steps") if isinstance(job, dict) else None
+    if not check(isinstance(steps, list), f"{workflow_name}: job '{job_id}' has no step list"):
+        return []
+    matches = []
+    for idx, step in enumerate(steps):
+        run = step.get("run") if isinstance(step, dict) else None
+        if isinstance(run, str) and any(first_use(tokens) for tokens in shell_tokens(run)):
+            matches.append(idx)
+    if not check(
+        bool(matches),
+        f"{workflow_name}: job '{job_id}' has no {description} invocation",
+    ):
+        return []
+    return steps[:min(matches)]
+
+
+# Strict host suites consume Git history, GnuPG fixtures, and PyYAML. Hosted
+# runners happen to carry some of them, but the workflow contract must install
+# and assert them before the first make test/test-long invocation.
+for job_id, gate_name in (
+    ("verify", "test"),
+    ("stress", "test-long"),
+):
+    before = prior_steps(
+        "ci.yml",
+        job_id,
+        lambda tokens, target=gate_name: tokens[:2] == ["make", target],
+        "strict suite",
+    )
+    for package in ("git", "gnupg", "python3-yaml"):
+        check(
+            any(package in apt_packages(step) for step in before),
+            f"ci.yml: job '{job_id}' does not install {package} before its strict suite",
+        )
+    for command in ("git", "gpg", "PyYAML"):
+        check(
+            any(run_step_asserts(step, command) for step in before),
+            f"ci.yml: job '{job_id}' does not assert {command} before its strict suite",
+        )
+
+# Release signature/history/qualification verification occurs near the top of
+# the job. Its small prerequisite install must precede that first use rather
+# than relying on the larger compiler installation later in the workflow.
+before_release_verify = prior_steps(
+    "release.yml",
+    "release",
+    lambda tokens: bool(tokens) and re.fullmatch(
+        r"scripts/verify-release-(?:signature|qualification|history)\.sh", tokens[0]
+    ) is not None,
+    "release signature/history/qualification verifier",
+)
+for package in ("make", "git", "gnupg", "python3", "python3-yaml"):
+    check(
+        any(package in apt_packages(step) for step in before_release_verify),
+        f"release.yml: release verification does not install {package} before first use",
+    )
+for command in ("make", "git", "gpg", "PyYAML"):
+    check(
+        any(run_step_asserts(step, command) for step in before_release_verify),
+        f"release.yml: release verification does not assert {command} before first use",
     )
 
 # --- ci-local.sh must stay in step with ci.yml's job list --------------------

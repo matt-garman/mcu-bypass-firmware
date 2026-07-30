@@ -62,9 +62,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            make util-linux gcc-avr avr-libc \
+            make util-linux git gnupg python3 python3-yaml \
+            gcc-avr avr-libc \
             simavr libsimavr-dev libelf-dev \
             clang clang-tidy cppcheck cbmc
+          command -v git >/dev/null || { echo "::error::git missing"; exit 1; }
+          command -v gpg >/dev/null || { echo "::error::gpg missing"; exit 1; }
+          python3 -c 'import yaml' \
+            || { echo "::error::PyYAML missing"; exit 1; }
 
       - name: Record toolchain versions
         run: |
@@ -611,9 +616,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            make util-linux gcc-avr avr-libc \
+            make util-linux git gnupg python3 python3-yaml \
+            gcc-avr avr-libc \
             simavr libsimavr-dev libelf-dev \
             clang clang-tidy cppcheck cbmc
+          command -v git >/dev/null || { echo "::error::git missing"; exit 1; }
+          command -v gpg >/dev/null || { echo "::error::gpg missing"; exit 1; }
+          python3 -c 'import yaml' \
+            || { echo "::error::PyYAML missing"; exit 1; }
 
       # MUTATION_ALLOW_SKIP=1 is stated explicitly rather than left to the
       # default. This job installs no XC8/gpsim and neither ATtiny202 input, so

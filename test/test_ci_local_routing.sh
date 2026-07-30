@@ -110,7 +110,7 @@ EOF
 # regression would start depending on which analyzers happen to be installed on
 # the box running it, and would fail on a machine that legitimately lacks, say,
 # cbmc -- turning a routing test into a toolchain test.
-for tool in gpsim cppcheck pkg-config cc clang clang-tidy cbmc gcov python3 avr-objdump; do
+for tool in gpsim cppcheck pkg-config cc clang clang-tidy cbmc gcov python3 gpg avr-objdump; do
 	cat > "$fakebin/$tool" <<'EOF'
 #!/usr/bin/env bash
 exit 0

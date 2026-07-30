@@ -23,6 +23,15 @@ tool, re-run `make clean && make test` before relying on its output.
                 invocations use one worktree-local advisory lock because build,
                 test, coverage, and simulator artifacts are intentionally shared.
 
+  Git:          git (required). Release-history/signature tests construct and
+                inspect temporary repositories; ci-local also requires a real
+                worktree before reproducing CI.
+  GnuPG:        gnupg / `gpg` (required). Release-history regressions generate
+                ephemeral signing keys and verify detached/tag signatures.
+  PyYAML:       python3-yaml (required for strict runs). Workflow syntax and
+                job-structure validation imports `yaml`; `STRICT_TOOLS=1` turns
+                an absent module into a hard failure.
+
 == AVR toolchain (cross-compile to MCU target)
 
   avr-gcc:      7.3.0  (package: gcc-avr)
@@ -291,7 +300,8 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
 
 == Reproducing the environment (Ubuntu 24.04)
 
-  sudo apt install make util-linux gcc-avr avr-libc simavr libsimavr-dev libelf-dev \
+  sudo apt install make util-linux git gnupg python3 python3-yaml \
+                   gcc-avr avr-libc simavr libsimavr-dev libelf-dev \
                    gcc clang clang-tidy cppcheck
 
   Optional analysis tools:
@@ -342,12 +352,21 @@ For CI reproducibility, prefer Ubuntu 24.04 LTS Docker image:
     docker run --rm -v $(pwd):/src ubuntu:24.04 bash -c \
       "apt-get update && \
        apt-get install -y make util-linux gcc-avr avr-libc simavr libsimavr-dev libelf-dev \
-                          gcc clang clang-tidy cppcheck cbmc python3 && \
-       cd /src && make test"
+                          gcc clang clang-tidy cppcheck cbmc \
+                          git gnupg python3 python3-yaml && \
+       cd /src && \
+       GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/src \
+         make test STRICT_TOOLS=1"
 
 The image is minimal: `apt-get update` and `make` itself are required, and
 `make test` runs the analyzers (clang-tidy, cppcheck), the MISRA addon (needs
-`python3`), and CBMC (`cbmc`) -- omitting any of these makes the corresponding
-gate skip silently (or fail under `STRICT_TOOLS=1`). For the authoritative,
-tested command set, use `scripts/ci-local.sh` (it mirrors the CI job order).
+`python3`), workflow parser (`python3-yaml`), release history/signature fixtures
+(`git` + `gnupg`), and CBMC (`cbmc`) -- omitting any of these makes the
+corresponding gate skip or fail. The command pins `STRICT_TOOLS=1` so an optional
+strict gate cannot validate nothing. The process-local Git override trusts only
+the `/src` bind mount for this invocation; Docker runs as root while the mounted
+repository is normally owned by the host user, so modern Git otherwise rejects
+it as dubious ownership. It does not write Git configuration. For the
+authoritative, tested command set, use `scripts/ci-local.sh` (it mirrors the CI
+job order).
 ....

@@ -138,6 +138,8 @@ done
 # ----------------------------------------------------------------------------
 # Run from the repo root so relative paths in the Makefile resolve
 # ----------------------------------------------------------------------------
+command -v git >/dev/null 2>&1 \
+	|| die "git is required by release history, signatures, and source-tree checks"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repo"
 cd "$REPO_ROOT"
 
@@ -384,8 +386,14 @@ assert_host_toolchain() {
 		|| missing+=("$gcov  (ships with gcc; coverage-check)")
 	command -v "$cppcheck_bin" >/dev/null 2>&1 \
 		|| missing+=("$cppcheck_bin  (apt: cppcheck; analyze-cppcheck + MISRA)")
-	command -v python3 >/dev/null 2>&1 \
-		|| missing+=("python3  (apt: python3; the cppcheck misra addon)")
+	if command -v python3 >/dev/null 2>&1; then
+		python3 -c 'import yaml' >/dev/null 2>&1 \
+			|| missing+=("PyYAML  (apt: python3-yaml; strict workflow syntax validation)")
+	else
+		missing+=("python3  (apt: python3; MISRA addon + workflow validation)")
+	fi
+	command -v gpg >/dev/null 2>&1 \
+		|| missing+=("gpg  (apt: gnupg; release-history signature fixtures)")
 	command -v "$cbmc" >/dev/null 2>&1 \
 		|| missing+=("$cbmc  (apt: cbmc; test-cbmc)")
 	# analyze-tidy and analyze-deep each accept their clang tool OR an avr-gcc new
@@ -404,7 +412,7 @@ assert_host_toolchain() {
 		die "install the above (see TOOLCHAIN.adoc). There is no --skip for these:
       the build matrix and \`make test\`/\`test-long\` run unconditionally."
 	fi
-	ok "Host/AVR toolchain present ($cc + $hostcc + simavr + $cppcheck_bin + python3 + $cbmc + analyzer + $gcov)."
+	ok "Host/AVR toolchain present ($cc + $hostcc + simavr + $cppcheck_bin + Python/PyYAML + gpg + $cbmc + analyzer + $gcov)."
 }
 
 # ----------------------------------------------------------------------------
