@@ -145,7 +145,8 @@ mkdir -p "$fakebin"
 printf '%s\n' \
 	'#!/usr/bin/env bash' \
 	'set -euo pipefail' \
-	'[ "$1" = "$EXPECTED_LOCK" ] || { printf "wrong lock path: %s\\n" "$1" >&2; exit 97; }' \
+	'[ "$1" = --no-fork ] || { printf "release flock is not signal-transparent\\n" >&2; exit 97; }' \
+	'[ "$2" = "$EXPECTED_LOCK" ] || { printf "wrong lock path: %s\\n" "$2" >&2; exit 97; }' \
 	': > "$LOCK_ATTEMPT"' \
 	'exec "$REAL_FLOCK" "$@"' \
 	> "$fakebin/flock"

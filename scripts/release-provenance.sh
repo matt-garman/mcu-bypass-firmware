@@ -34,18 +34,18 @@ release_tool_version_line() {
 }
 
 release_output_path_is_safe() {
-	if [ "$#" -ne 3 ]; then
-		printf 'FATAL: release_output_path_is_safe requires repo root, output path, and release mode\n' >&2
+	if [ "$#" -ne 4 ]; then
+		printf 'FATAL: release_output_path_is_safe requires repo root, output path, release mode, and version\n' >&2
 		return 2
 	fi
 	local repo_root=$1
 	local output_dir=$2
 	local release_mode=$3
-	local release_root output_abs
+	local version=$4
+	local release_root output_abs expected_output
 
 	case "$release_mode" in
-		production) return 0 ;;
-		dry-run) ;;
+		production|dry-run) ;;
 		*)
 			printf 'FATAL: invalid release output mode: %s\n' "$release_mode" >&2
 			return 1
@@ -53,7 +53,7 @@ release_output_path_is_safe() {
 	esac
 
 	command -v realpath >/dev/null 2>&1 || {
-		printf 'FATAL: realpath is required to validate a dry-run output path\n' >&2
+		printf 'FATAL: realpath is required to validate a release output path\n' >&2
 		return 1
 	}
 	release_root=$(realpath -m -- "$repo_root/release") || {
@@ -65,9 +65,19 @@ release_output_path_is_safe() {
 		*) output_dir="$repo_root/$output_dir" ;;
 	esac
 	output_abs=$(realpath -m -- "$output_dir") || {
-		printf 'FATAL: cannot resolve dry-run output path: %s\n' "$output_dir" >&2
+		printf 'FATAL: cannot resolve release output path: %s\n' "$output_dir" >&2
 		return 1
 	}
+	expected_output="$release_root/$version"
+
+	if [ "$release_mode" = production ]; then
+		if [ "$output_abs" != "$expected_output" ]; then
+			printf 'FATAL: production output must be exactly %s (found %s)\n' \
+				"$expected_output" "$output_abs" >&2
+			return 1
+		fi
+		return 0
+	fi
 
 	case "$output_abs" in
 		"$release_root"|"$release_root"/*)
@@ -76,6 +86,74 @@ release_output_path_is_safe() {
 			return 1
 			;;
 	esac
+}
+
+release_terminate_workers() {
+	local pid running
+	local -a pids=("$@")
+	local -a active=()
+
+	for pid in "${pids[@]}"; do
+		case "$pid" in
+			''|*[!0-9]*)
+				printf 'FATAL: invalid release worker PID: %s\n' "$pid" >&2
+				return 2
+				;;
+		esac
+	done
+	[ "${#pids[@]}" -gt 0 ] || return 0
+
+	# Consult Bash's live job table before signaling. Completed children may have
+	# been reaped asynchronously and their numeric PIDs reused during a 24-hour
+	# run; only a PID that is both tracked and still our running job is safe.
+	while IFS= read -r running; do
+		for pid in "${pids[@]}"; do
+			[ "$running" != "$pid" ] || active+=("$pid")
+		done
+	done < <(jobs -pr)
+	for pid in "${active[@]}"; do
+		# Every soak is launched under setsid with PID == process-group ID.
+		kill -TERM -- "-$pid" 2>/dev/null || true
+	done
+	sleep 1
+	# Keep the initial group set for KILL. A cooperative leader can exit on TERM
+	# while one of its descendants ignores the signal; that descendant preserves
+	# the original process group even after Bash drops the leader from jobs -pr.
+	for pid in "${active[@]}"; do
+		kill -KILL -- "-$pid" 2>/dev/null || true
+	done
+	for pid in "${pids[@]}"; do
+		wait "$pid" 2>/dev/null || true
+	done
+}
+
+release_jobs_cap() {
+	if [ "$#" -ne 2 ]; then
+		printf 'FATAL: release_jobs_cap requires requested jobs and combination count\n' >&2
+		return 2
+	fi
+	local requested=$1
+	local combinations=$2
+
+	[[ "$combinations" =~ ^[1-9][0-9]*$ ]] || {
+		printf 'FATAL: invalid release combination count: %s\n' "$combinations" >&2
+		return 2
+	}
+	if [ -z "$requested" ]; then
+		printf '%s\n' "$combinations"
+		return 0
+	fi
+	[[ "$requested" =~ ^[1-9][0-9]*$ ]] || {
+		printf 'FATAL: invalid requested release jobs: %s\n' "$requested" >&2
+		return 2
+	}
+	if [ "${#requested}" -gt "${#combinations}" ] \
+			|| { [ "${#requested}" -eq "${#combinations}" ] \
+				&& [[ "$requested" > "$combinations" ]]; }; then
+		printf '%s\n' "$combinations"
+	else
+		printf '%s\n' "$requested"
+	fi
 }
 
 release_source_is_unchanged() {

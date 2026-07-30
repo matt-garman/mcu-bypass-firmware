@@ -78,7 +78,9 @@ REPO_LOCK_ID=$(stat -Lc '%d:%i' "$REPO_HINT" 2>/dev/null) \
 if [ "${_MAKE_SERIAL_LOCK_HELD:-}" != "$REPO_LOCK_ID" ]; then
 	command -v flock >/dev/null 2>&1 \
 		|| { printf 'FATAL: flock is required to serialize release artifacts\n' >&2; exit 1; }
-	exec flock "$REPO_HINT/.make.lock" env _MAKE_SERIAL_LOCK_HELD="$REPO_LOCK_ID" \
+	# --no-fork keeps this process as the release orchestrator, so HUP/INT/TERM
+	# reach its worker-cleanup traps instead of stopping a parent flock process.
+	exec flock --no-fork "$REPO_HINT/.make.lock" env _MAKE_SERIAL_LOCK_HELD="$REPO_LOCK_ID" \
 		"$REPO_HINT/scripts/make-release.sh" "$@"
 fi
 
@@ -109,7 +111,7 @@ MIN_RELEASE_SOAK_MS=86400000
 MAX_SOAK_DURATION_MS=4294967294    # uint32_t loop bound; preserve t + 1
 SOAK_DURATION_MS=$MIN_RELEASE_SOAK_MS
 SOAK_LIVENESS_INTERVAL_MS=60000
-JOBS=0                             # 0 => "all combos"
+JOBS=""                            # empty => all combinations
 OUTPUT_DIR=""
 
 usage() { sed -n '2,200p' "$0" | sed -n '/^# USAGE/,/^$/p' | sed 's/^# \{0,1\}//'; }
@@ -141,6 +143,9 @@ if [ "${#SOAK_DURATION_MS}" -gt "${#MAX_SOAK_DURATION_MS}" ] \
 		|| { [ "${#SOAK_DURATION_MS}" -eq "${#MAX_SOAK_DURATION_MS}" ] \
 			&& [[ "$SOAK_DURATION_MS" > "$MAX_SOAK_DURATION_MS" ]]; }; then
 	die "--soak-duration-ms must not exceed $MAX_SOAK_DURATION_MS"
+fi
+if [ -n "$JOBS" ] && ! [[ "$JOBS" =~ ^[1-9][0-9]*$ ]]; then
+	die "--jobs must be a positive base-10 integer"
 fi
 if [ "$DRY_RUN" -eq 0 ] && [ "$SOAK_DURATION_MS" -lt "$MIN_RELEASE_SOAK_MS" ]; then
 	die "real releases require --soak-duration-ms >= $MIN_RELEASE_SOAK_MS (24 h); use --dry-run for a short rehearsal"
@@ -174,6 +179,10 @@ declare -F release_tool_version_line >/dev/null \
 	|| die "release provenance checker did not define its tool-version function"
 declare -F release_output_path_is_safe >/dev/null \
 	|| die "release provenance checker did not define its output-path function"
+declare -F release_terminate_workers >/dev/null \
+	|| die "release provenance checker did not define its worker-cleanup function"
+declare -F release_jobs_cap >/dev/null \
+	|| die "release provenance checker did not define its jobs-cap function"
 # shellcheck source=release-signing-policy.sh
 source "$REPO_ROOT/scripts/release-signing-policy.sh" \
 	|| die "release signing policy could not be loaded"
@@ -292,8 +301,40 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/mcu-release.XXXXXX")"
 EVID="$WORK/evidence"; SOAKDIR="$WORK/soak"
 mkdir -p "$EVID" "$SOAKDIR"
 KEEP_WORK=0
+SOAK_PIDS=()
+TRACKING_WORKER=0
+PENDING_SIGNAL_STATUS=0
 cleanup() { [ "${KEEP_WORK:-0}" = 1 ] || rm -rf "$WORK"; }
-trap 'rc=$?; if [ $rc -ne 0 ]; then KEEP_WORK=1; warn "left working dir for inspection: $WORK"; fi; cleanup' EXIT
+on_exit() {
+	local rc=$?
+	trap - EXIT
+	# Cleanup is now the only path to a safe exit. Ignore repeated signals until
+	# every isolated worker group has been killed and its direct child reaped.
+	trap '' HUP INT TERM
+	if ! release_terminate_workers "${SOAK_PIDS[@]}"; then
+		rc=1
+		warn "could not terminate every release soak worker cleanly"
+	fi
+	SOAK_PIDS=()
+	if [ "$rc" -ne 0 ]; then
+		KEEP_WORK=1
+		warn "left working dir for inspection: $WORK"
+	fi
+	cleanup
+	exit "$rc"
+}
+on_signal() {
+	local status=$1
+	if [ "${TRACKING_WORKER:-0}" -eq 1 ]; then
+		PENDING_SIGNAL_STATUS=$status
+		return
+	fi
+	exit "$status"
+}
+trap on_exit EXIT
+trap 'on_signal 129' HUP
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 # Where to stage. A real release lands in the repo at release/<version>; a dry
 # run lands in the auto-scratch WORK (kept, never littering the repo).
@@ -301,7 +342,7 @@ if [ -n "$OUTPUT_DIR" ]; then :;
 elif [ "$DRY_RUN" -eq 1 ]; then OUTPUT_DIR="$WORK/release/$VERSION"; KEEP_WORK=1
 else OUTPUT_DIR="release/$VERSION"
 fi
-release_output_path_is_safe "$REPO_ROOT" "$OUTPUT_DIR" "$RELEASE_MODE"
+release_output_path_is_safe "$REPO_ROOT" "$OUTPUT_DIR" "$RELEASE_MODE" "$VERSION"
 
 # ============================================================================
 # 0. PRECONDITIONS
@@ -343,6 +384,7 @@ req_file()  { [ -e "$1" ] || MISSING+=("$1${2:+  ($2)}"); }
 
 req_cmd make
 req_cmd flock          "apt: util-linux (whole-worktree serialization)"
+req_cmd setsid         "apt: util-linux (isolated release-soak process groups)"
 req_cmd "$AVR_CC"      "apt: gcc-avr"
 req_cmd "$AVR_OBJCOPY" "apt: binutils-avr (HEX bytes + reproducibility)"
 req_cmd "$AVR_SIZE"    "apt: binutils-avr"
@@ -435,26 +477,33 @@ fi
 # ----------------------------------------------------------------------------
 # Record toolchain versions (for the manifest) and warn on drift from the pins.
 # ----------------------------------------------------------------------------
-v1() { "$@" 2>&1 | head -1 || true; }
 pkgver() { dpkg-query -W -f='${Version}' "$1" 2>/dev/null || echo "n/a"; }
 
 # Record the SAME binaries the preconditions asserted and the build will run --
 # not their default names -- so an overridden toolchain cannot be validated here
 # while the manifest attests to a different one.
-TC_AVR_GCC=$(v1 "$AVR_CC" --version)
-TC_AVR_BU=$(v1 "$AVR_OBJCOPY" --version)
+TC_AVR_GCC=$(release_tool_version_line "AVR GCC (CC=$AVR_CC)" "$AVR_CC") \
+	|| die "could not record the AVR compiler provenance"
+TC_AVR_BU=$(release_tool_version_line "AVR objcopy (OBJCOPY=$AVR_OBJCOPY)" "$AVR_OBJCOPY") \
+	|| die "could not record the AVR binutils provenance"
 TC_AVR_LIBC=$(pkgver avr-libc)
-TC_HOST_CC=$(v1 "$HOST_CC" --version)
+TC_HOST_CC=$(release_tool_version_line "host C compiler (HOSTCC=$HOST_CC)" "$HOST_CC") \
+	|| die "could not record the host compiler provenance"
 TC_XC8_322=$(release_tool_version_line "PIC10F322 XC8 (PIC_CC=$PIC_CC)" "$PIC_CC") \
 	|| die "could not record the PIC10F322 compiler provenance"
 TC_XC8_320=$(release_tool_version_line "PIC10F320 XC8 (PIC320_CC=$PIC320_CC)" "$PIC320_CC") \
 	|| die "could not record the PIC10F320 compiler provenance"
-TC_GPSIM=$(v1 "$GPSIM" --version)
+TC_GPSIM=$(release_tool_version_line "gpsim (GPSIM=$GPSIM)" "$GPSIM") \
+	|| die "could not record the gpsim provenance"
 TC_SIMAVR=$(pkgver libsimavr-dev)
-TC_CPPCHECK=$(v1 "$CPPCHECK" --version)
-TC_CBMC=$(v1 "$CBMC" --version)
-TC_CLANG=$(v1 "$CLANG" --version)
-TC_PY=$(v1 python3 --version)
+TC_CPPCHECK=$(release_tool_version_line "cppcheck (CPPCHECK=$CPPCHECK)" "$CPPCHECK") \
+	|| die "could not record the cppcheck provenance"
+TC_CBMC=$(release_tool_version_line "CBMC (CBMC=$CBMC)" "$CBMC") \
+	|| die "could not record the CBMC provenance"
+TC_CLANG=$(release_tool_version_line "Clang (CLANG=$CLANG)" "$CLANG") \
+	|| die "could not record the Clang provenance"
+TC_PY=$(release_tool_version_line "Python" python3) \
+	|| die "could not record the Python provenance"
 
 case "$TC_AVR_GCC" in
 	*7.3.0*) : ;;
@@ -750,7 +799,8 @@ if [ "$actual_soaks" != "$canonical_soaks" ]; then
 	diff -u <(printf '%s\n' "$canonical_soaks") <(printf '%s\n' "$actual_soaks") >&2 || true
 	die "release soak combinations do not match canonical RELEASE_SOAK_NAMES"
 fi
-[ "$JOBS" -gt 0 ] 2>/dev/null || JOBS=$NCOMBOS
+JOBS=$(release_jobs_cap "$JOBS" "$NCOMBOS") \
+	|| die "could not resolve the release soak concurrency limit"
 hours=$(awk -v ms="$SOAK_DURATION_MS" 'BEGIN{printf "%.1f", ms/3600000}')
 ncpu=$(nproc 2>/dev/null || echo "?")
 log "launching $NCOMBOS soak combos, up to $JOBS at once (~${hours} h each; this box has $ncpu logical CPUs)."
@@ -761,10 +811,29 @@ declare -A SOAK_PID
 for name in "${SOAK_NAMES[@]}"; do
 	# Throttle to JOBS concurrent runs.
 	while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do sleep 5; done
-	( cd "${SOAK_CWD[$name]}" && exec "${SOAK_BIN[$name]}" ) >"${SOAK_LOG[$name]}" 2>&1 &
+	# Defer a signal only across this launch-and-track critical section. The
+	# pending status is replayed immediately after the PID/process-group ID is in
+	# SOAK_PIDS, so no child can escape cleanup in the `$!` assignment gap.
+	TRACKING_WORKER=1
+	( cd "${SOAK_CWD[$name]}" && exec setsid "${SOAK_BIN[$name]}" ) \
+		>"${SOAK_LOG[$name]}" 2>&1 &
 	SOAK_PID[$name]=$!
+	SOAK_PIDS+=("${SOAK_PID[$name]}")
+	TRACKING_WORKER=0
+	if [ "$PENDING_SIGNAL_STATUS" -ne 0 ]; then
+		pending=$PENDING_SIGNAL_STATUS
+		PENDING_SIGNAL_STATUS=0
+		exit "$pending"
+	fi
 	log "  started $name (pid ${SOAK_PID[$name]})"
 done
+
+forget_soak_pid() {
+	local target=$1 index
+	for index in "${!SOAK_PIDS[@]}"; do
+		[ "${SOAK_PIDS[$index]}" != "$target" ] || unset "SOAK_PIDS[$index]"
+	done
+}
 
 # One exact terminal record is the machine contract shared by both harnesses.
 # It binds the log to its combination and compile-time timing, requires the
@@ -787,6 +856,8 @@ validate_soak_result() {
 SOAK_FAILS=0
 for name in "${SOAK_NAMES[@]}"; do
 	if wait "${SOAK_PID[$name]}"; then SOAK_RC[$name]=0; else SOAK_RC[$name]=$?; fi
+	forget_soak_pid "${SOAK_PID[$name]}"
+	unset "SOAK_PID[$name]"
 	if [ "${SOAK_RC[$name]}" -eq 0 ] \
 			&& validate_soak_result "$name" "${SOAK_LOG[$name]}"; then
 		ok "soak $name: PASS"
@@ -795,6 +866,7 @@ for name in "${SOAK_NAMES[@]}"; do
 		SOAK_FAILS=$((SOAK_FAILS+1))
 	fi
 done
+SOAK_PIDS=()
 SOAK_WALL=$(( $(date +%s) - START_EPOCH ))
 
 if [ "$SOAK_FAILS" -ne 0 ]; then
@@ -848,7 +920,7 @@ ok "source provenance still matches $GIT_SHORT immediately before staging."
 # An explicit dry-run output may live under a path controlled outside this
 # worktree. Resolve it again after the long-running gates so replacing a parent
 # with a symlink cannot redirect rehearsal artifacts into release/<version>.
-release_output_path_is_safe "$REPO_ROOT" "$OUTPUT_DIR" "$RELEASE_MODE"
+release_output_path_is_safe "$REPO_ROOT" "$OUTPUT_DIR" "$RELEASE_MODE" "$VERSION"
 
 # ============================================================================
 # 4. STAGE THE RELEASE

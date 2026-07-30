@@ -60,6 +60,16 @@ expect_release_version_reject() {
 	checks=$((checks + 1))
 }
 
+expect_release_jobs_reject() {
+	local value=$1 output
+	if output=$("$RELEASE" --jobs "$value" v99.0.0 2>&1); then
+		fail "release accepted invalid jobs value: $value"
+	fi
+	[[ "$output" == *"--jobs must be a positive base-10 integer"* ]] \
+		|| fail "release rejected --jobs '$value' for the wrong reason: $output"
+	checks=$((checks + 1))
+}
+
 expect_release_range_pass() {
 	local mode=$1 value=$2 output tmp
 	tmp=$(mktemp -d "${TMPDIR:-/tmp}/soak-timing.XXXXXX")
@@ -356,6 +366,9 @@ expect_release_reject 9999999999999999999999999999999999999999 "must not exceed"
 expect_release_version_reject v99.0.0.rc1
 expect_release_version_reject v99.0.0-.
 expect_release_version_reject v99.0.0-foo.lock "is not a valid Git tag name"
+for jobs in 0 -1 1.5 malformed 01; do
+	expect_release_jobs_reject "$jobs"
+done
 expect_release_liveness_wiring
 expect_release_pic320_soak_combos
 expect_release_avrxt_soak_combos
