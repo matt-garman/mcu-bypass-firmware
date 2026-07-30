@@ -47,6 +47,7 @@
 // g_cpu / g_fsw_node / g_fsw_src, FOOTSW_PIN_NAME, gpsim_bootstrap_cpu(),
 // gpsim_attach_footswitch() and footsw_set().
 #include "pic/gpsim_bootstrap.h"
+#include "pic/soak_sampling.h"
 
 // ---- Firmware / MCU parameters (injected by the Makefile build rule) --------
 #ifndef FW_PATH
@@ -144,11 +145,10 @@ static void sample_led() {
     g_led_level = v;
 }
 
-// Advance the simulation by `ms` ms of simulated time. Cycle break at the
-// target; resume run() until the target cycle is reached (a WDT reset may halt
-// run() early and/or fire the notify callback -- either way we resume).
-static void soak_run_ms(unsigned ms) {
-    guint64 target = get_cycles().get() + (guint64)ms * CYCLES_PER_MS;
+// Advance exactly one ms. A WDT reset may halt run() early and/or fire the
+// notify callback, so resume until this millisecond's target is reached.
+static bool soak_run_one_ms() {
+    guint64 target = get_cycles().get() + CYCLES_PER_MS;
     get_cycles().set_break(target);
     int resumes = 0;
     while (get_cycles().get() < target) {
@@ -159,10 +159,16 @@ static void soak_run_ms(unsigned ms) {
                     sim_hours());
             fflush(stderr);
             get_cycles().clear_break(target);
-            return;
+            return false;
         }
     }
-    sample_led();   // track LED edges at each ms boundary
+    return true;
+}
+
+// Multi-ms switch holds must remain observable at every millisecond boundary;
+// sampling only their endpoint can hide an even number of unintended toggles.
+static void soak_run_ms(unsigned ms) {
+    (void)soak_run_each_ms(ms, soak_run_one_ms, sample_led);
 }
 
 // ---- 2-press round-trip liveness check --------------------------------------

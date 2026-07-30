@@ -62,6 +62,9 @@ cp "$ROOT/Makefile" "$repo/Makefile"
 # $(PIC_GPSIM_BOOTSTRAP_HDR) -- likewise: the shared libgpsim bring-up is a
 # prerequisite of both chips' soak rules (and of the io/lock-step/fault rules).
 : > "$repo/test/pic/gpsim_bootstrap.h"
+# $(PIC_SOAK_SAMPLING_HDR) keeps multi-ms LED observation at one sample per ms.
+# Both chip-specific soak rules consume it through their shared source.
+: > "$repo/test/pic/soak_sampling.h"
 
 # Records the full argv, then writes the -o target so Make sees a fresh artifact.
 cat > "$tools/cxx" <<'EOF'

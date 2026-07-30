@@ -145,6 +145,63 @@ expect_avrxt_soak_contract() {
 	checks=$((checks + 1))
 }
 
+expect_pic_per_ms_transition_sampling() {
+	local tmp source="$ROOT/test/pic/test_soak_pic.cc"
+	local -a compiler
+	read -r -a compiler <<<"$HOSTCXX"
+	[ "${#compiler[@]}" -gt 0 ] || fail "empty C++ compiler command"
+	tmp=$(mktemp "${TMPDIR:-/tmp}/soak-sampling.XXXXXX")
+	if ! "${compiler[@]}" -std=c++17 -Wall -Wextra -Werror -I"$ROOT/test" \
+			-x c++ -o "$tmp" - <<'CPP'
+#include "pic/soak_sampling.h"
+
+int main() {
+    // A held-switch fault toggles four times but ends at its initial level.
+    // Endpoint-only observation sees zero; per-ms observation must see all four.
+    const int levels[] = {1, 0, 1, 0};
+    unsigned index = 0;
+    int prior = 0;
+    unsigned changes = 0;
+    bool complete = soak_run_each_ms(4,
+        []() { return true; },
+        [&]() {
+            int current = levels[index++];
+            if (current != prior) ++changes;
+            prior = current;
+        });
+    if (!complete || index != 4 || changes != 4 || prior != 0) return 1;
+
+    unsigned attempts = 0;
+    unsigned samples = 0;
+    complete = soak_run_each_ms(5,
+        [&]() { return ++attempts < 3; },
+        [&]() { ++samples; });
+    return (!complete && attempts == 3 && samples == 2) ? 0 : 2;
+}
+CPP
+	then
+		rm -f "$tmp"
+		fail "could not compile PIC per-ms soak-sampling fixture"
+	fi
+	"$tmp" || { rm -f "$tmp"; fail "PIC per-ms soak-sampling fixture failed"; }
+	rm -f "$tmp"
+	python3 - "$source" <<'PY'
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source_file:
+    source = source_file.read()
+source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+source = re.sub(r"//[^\n]*", "", source)
+match = re.search(r"static\s+void\s+soak_run_ms\s*\(unsigned\s+ms\)\s*"
+                  r"\{([^{}]*)\}", source)
+if not match or match.group(1).count(
+        "soak_run_each_ms(ms, soak_run_one_ms, sample_led)") != 1:
+    raise SystemExit("PIC soak_run_ms is not wired to per-ms sampling")
+PY
+	checks=$((checks + 2))
+}
+
 for language in c c++; do
 	if [ "$language" = c ]; then compiler=$HOSTCC; else compiler=$HOSTCXX; fi
 	expect_compile_pass "$compiler" "$language" 1 1 1
@@ -165,8 +222,11 @@ import runpy
 import sys
 import types
 
-sys.modules["sim_attiny202"] = types.ModuleType("sim_attiny202")
-env_ms = runpy.run_path(sys.argv[1])["_env_ms"]
+fake_module = types.ModuleType("sim_attiny202")
+fake_module.REG_GPR0 = 0x1c
+sys.modules["sim_attiny202"] = fake_module
+namespace = runpy.run_path(sys.argv[1])
+env_ms = namespace["_env_ms"]
 
 for value in ("1", "4294967294"):
     os.environ["SOAK_TEST_MS"] = value
@@ -181,8 +241,107 @@ for value in ("", "0", "-1", "1.5", "abc", "4294967295"):
     except ValueError:
         continue
     raise AssertionError("accepted invalid timing: %r" % value)
+
+
+class FakeLoop:
+    def __init__(self):
+        self.cycles = 0
+
+    def cycle(self):
+        return self.cycles
+
+
+class FinalRoundTripFailureSim:
+    def __init__(self, mode):
+        self.loop = FakeLoop()
+        self.f_cpu = 1000
+        self.register = namespace["SENTINEL"]
+        self.pressed = False
+        self.led = False
+        self.runs = 0
+        self.mode = mode
+        self.done = False
+
+    def press(self):
+        self.pressed = True
+
+    def release(self):
+        self.pressed = False
+
+    def run_ms(self, duration):
+        self.runs += 1
+        self.loop.cycles += duration
+        if self.pressed:
+            self.led = not self.led
+        if self.runs == 4:
+            if self.mode == "reset":
+                self.register = 0  # reset during the final release hold
+            elif self.mode == "force-reset":
+                self.done = True   # trap before the watchdog clears GPR0
+
+    def led_on(self):
+        return self.led
+
+    def read_ioreg(self, _address):
+        return self.register
+
+    def write_ioreg(self, _address, value):
+        self.register = value
+
+    def is_done(self):
+        return self.done
+
+
+soak_type = namespace["Soak"]
+
+
+def new_soak(mode):
+    soak = soak_type.__new__(soak_type)
+    soak.sim = FinalRoundTripFailureSim(mode)
+    soak.combination = "fixture"
+    soak.checks = 0
+    soak.liveness_checks = 0
+    soak.failures = 0
+    soak.resets = 0
+    soak.liveness_fails = 0
+    soak.clock_base_ms = 0
+    soak.liveness_ms_consumed = 0
+    return soak
+
+import contextlib
+import io
+
+soak = new_soak("reset")
+with contextlib.redirect_stderr(io.StringIO()):
+    completed = soak._liveness_check()
+if (soak.resets != 1 or soak.failures != 1 or soak.liveness_fails != 0
+        or soak.checks != 5 or soak.liveness_checks != 1
+        or soak.liveness_ms_consumed != 120 or not completed
+        or soak.sim.register != namespace["SENTINEL"]):
+    raise AssertionError("final liveness reset escaped: resets=%d failures=%d "
+                         "liveness=%d checks=%d liveness_checks=%d elapsed=%d "
+                         "completed=%r witness=%#x"
+                         % (soak.resets, soak.failures, soak.liveness_fails,
+                            soak.checks, soak.liveness_checks,
+                            soak.liveness_ms_consumed, completed,
+                            soak.sim.register))
+
+soak = new_soak("force-reset")
+with contextlib.redirect_stderr(io.StringIO()):
+    completed = soak._liveness_check()
+if (soak.resets != 0 or soak.failures != 1 or soak.liveness_fails != 0
+        or soak.checks != 4 or soak.liveness_checks != 1
+        or soak.liveness_ms_consumed != 120 or completed
+        or not soak.sim.is_done()):
+    raise AssertionError("final liveness force-reset escaped: resets=%d "
+                         "failures=%d liveness=%d checks=%d "
+                         "liveness_checks=%d elapsed=%d completed=%r done=%r"
+                         % (soak.resets, soak.failures, soak.liveness_fails,
+                            soak.checks, soak.liveness_checks,
+                            soak.liveness_ms_consumed, completed,
+                            soak.sim.is_done()))
 PY
-checks=$((checks + 8))
+checks=$((checks + 10))
 
 expect_default_dry_run_shortened
 expect_release_range_pass dry 1
@@ -201,5 +360,6 @@ expect_release_liveness_wiring
 expect_release_pic320_soak_combos
 expect_release_avrxt_soak_combos
 expect_avrxt_soak_contract
+expect_pic_per_ms_transition_sampling
 
 printf 'soak timing validation: %d checks, 0 failures\n' "$checks"

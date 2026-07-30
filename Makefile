@@ -1197,8 +1197,9 @@ PIC_FAULT_CORE_HDR = test/pic/test_fault_pic_core.h
 PIC_IO_CORE_HDR = test/pic/test_io_pic_core.h
 PIC_LOCKSTEP_CORE_HDR = test/pic/test_lockstep_pic_core.h
 PIC_SOAK_SRC = test/pic/test_soak_pic.cc
+PIC_SOAK_SAMPLING_HDR = test/pic/soak_sampling.h
 PIC_SOAK_DEPS = $(PIC_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
-                test/soak_timing_config.h
+                $(PIC_SOAK_SAMPLING_HDR) test/soak_timing_config.h
 PIC_SOAK_BIN = test/pic/test_soak_pic
 PIC_SOAK_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_SOAK_VARIANT)_$(PIC_TAG).hex
 
@@ -4343,7 +4344,8 @@ PIC320_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
 PIC320_SOAK_COMBINATION_NAME     ?= standalone
 PIC320_SOAK_SRC  = $(PIC_SOAK_SRC)
 PIC320_SOAK_DEPS = $(PIC320_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) \
-                   $(PIC_GPSIM_BOOTSTRAP_HDR) test/soak_timing_config.h
+                   $(PIC_GPSIM_BOOTSTRAP_HDR) $(PIC_SOAK_SAMPLING_HDR) \
+                   test/soak_timing_config.h
 PIC320_SOAK_BIN  = $(PIC320_BUILD_DIR)/test_soak_pic
 PIC320_SOAK_HEX  = $(call pic320_hex_of,$(PIC320_SOAK_VARIANT))
 
