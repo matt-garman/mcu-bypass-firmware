@@ -1,28 +1,30 @@
-# cppcheck suppressions for the MISRA-C:2012 analysis (make analyze-misra).
+# cppcheck suppressions shared by the project's four MISRA-C:2012 analysis lanes.
 
-# This file holds DOCUMENTED, PROJECT-SPECIFIC deviations: MISRA rules we
-# knowingly do not satisfy in our own source. Every entry maps to a numbered
-# deviation record ("D-n") in MISRA_COMPLIANCE.md, which carries the rationale.
-# A suppression here without a matching D-record in that document is a defect --
-# the whole point of MISRA compliance is that every deviation is justified.
+# This file holds DOCUMENTED, PROJECT-SPECIFIC finding suppressions. D-1 records
+# actual MISRA deviations; D-2/D-3 are advisory analyzer artifacts for
+# declarations used elsewhere in the project; D-4 contains analyzer
+# accommodations, including one diagnostic that is not a MISRA rule. Every entry
+# maps to a classified D-n record in MISRA_COMPLIANCE.md with its rationale. An
+# entry without a matching record is a compliance defect.
 
 # Scope: suppressions are PER FILE (errorId:filename), not project-wide. A new
 # instance of one of these rules in a NEW file therefore still surfaces and
-# fails `make analyze-misra`, forcing a conscious review + a new deviation
-# rather than silently inheriting a blanket waiver.
+# fails its MISRA lane. Another finding with the same ID in an already-listed
+# file is covered, so suppression changes also require an unsuppressed review.
 
-# Out of scope (handled on the cppcheck command line in the Makefile, not here):
-# violations inside the avr-libc / avr-gcc system headers -- the toolchain
-# library is outside this project's compliance boundary.
+# Out of scope (handled on cppcheck command lines in the Makefile, not here):
+# findings located in adopted avr-libc/avr-gcc, ATtiny DFP, XC8/PIC DFP, and
+# C-library headers.
 
 # (cppcheck parses a line that is exactly "#" as a malformed suppression, so
 # blank separator lines below are left empty rather than commented.)
 
 # --- D-1: hardware register access (Rules 11.4, 10.1, 10.8) ------------------
-# Reading/writing AVR I/O registers through avr-libc's _SFR_* macros inherently
-# converts an integer address to a volatile pointer (11.4) and performs bit
-# operations / composite casts in register read-modify-write (10.1, 10.8).
-# Unavoidable for bare-metal AVR. See MISRA_COMPLIANCE.md D-1.
+# AVR I/O access through avr-libc's _SFR_* macros expands integer addresses to
+# volatile pointers (11.4); authored bit operations and composite casts produce
+# the related 10.1/10.8 findings. The rule:file entries below are the suppression
+# policy scope, not a claim that each file currently emits every listed rule;
+# `make analyze-misra-report` is the current Classic/shared inventory. See D-1.
 misra-c2012-11.4:src/bypass_mcu_avr_classic.c
 misra-c2012-11.4:src/bypass_output_cd4053_simple.c
 misra-c2012-11.4:src/bypass_output_cd4053_with_mute.c
@@ -42,21 +44,13 @@ misra-c2012-10.1:src/bypass_mcu_avr_xt.c
 misra-c2012-10.8:src/bypass_mcu_avr_xt.c
 
 # --- D-2: cross-translation-unit shared pin macros (Rule 2.5) ----------------
-# The per-MCU pin map (bypass_pins_avr_classic.h / bypass_pins_pic10f322.h) is
-# the single source of truth for every variant's pin assignment: FOOTSW_PIN /
-# LED_PIN (used by the core), each variant's control pins (CD4053_PIN;
-# RELAY_SET/RESET_PIN; CD4053_CTL1/2 -- each used only by its own driver), and
-# BYPASS_OUTPUT_DDR_MASK. cppcheck analyzes each TU independently, so any pin a
-# given TU does not reference is reported as "unused". They are not dead code --
-# each is used by some build. See D-2.
-# PRESSED_THRESH / RELEASE_THRESH are defined in bypass_config.h and used by
-# bypass_pure.c and bypass_mcu_avr_classic.c, but not by the output driver TUs that
-# nonetheless include bypass_config.h for their static_assert guards.
-# The PIC pin map (bypass_pins_pic10f322.h) is flagged for the SAME reason in the
-# PIC MISRA run (make pic-analyze-misra); additionally, the unselected AVR pin map
-# is reachable via bypass_output_common.h's #elif, so cppcheck records ITS macros
-# in the cross-config directive list and reports them "unused" too -- already
-# covered by the bypass_pins_avr_classic.h entry above.
+# The per-MCU pin maps are project-wide sources of truth. Modular shells consume
+# each active map, while individual driver TUs use variant-specific subsets;
+# cppcheck's TU-local and cross-configuration processing can report declarations
+# used elsewhere, including directives from inactive maps. `bypass_config.h` has
+# the same split: the shared core and three modular shells consume both
+# thresholds, while mute/relay driver assertions consume RELEASE_THRESH but not
+# PRESSED_THRESH. See D-2.
 misra-c2012-2.5:src/bypass_pins_avr_classic.h
 misra-c2012-2.5:src/bypass_pins_pic10f322.h
 misra-c2012-2.5:src/bypass_config.h
@@ -81,19 +75,13 @@ misra-c2012-2.4:src/bypass_types.h
 # --- D-4: PIC10F320 device-SFR symbol resolution (misra-config) --------------
 # NOT a MISRA rule deviation. `misra-config` is cppcheck's own diagnostic for
 # "the addon could not resolve this symbol" -- here `PIR1bits`/`TMR2IF` in the
-# 1 ms tick wait. The declaration is present and correct: the identical
-# statement against the identical DFP header analyses clean in
-# src/bypass_mcu_pic10f322.c. The addon loses the device symbol table on this
-# file specifically, bisected to its heavy in-function `static_assert` use --
-# stripping those lines makes the diagnostic vanish with every other flag
-# unchanged.
-# .
-# Scoped to the one file, deliberately. The PIC10F320 project suppressed
-# `misra-config` GLOBALLY via a cppcheck flag, which would also blind the AVR
-# shells and the PIC10F322 to genuine unresolved-symbol problems; this project
-# scopes every suppression to a file, so the merge NARROWS the waiver instead of
-# importing it. Real MISRA rule findings in this file are still reported --
-# verified by injecting a Rule 14.4 violation and confirming the lane fails.
+# 1 ms tick wait. The declaration is present and correct: the analogous
+# statement against the sibling PIC10F322 header from the same DFP
+# pack analyzes clean. The addon loses the device symbol table on this file,
+# bisected to its heavy in-function `static_assert` use.
+# Scoped to this file deliberately. All other finding IDs remain visible, but
+# this entry covers every `misra-config` diagnostic attributed to the file;
+# Rule 14.4 injection was used to confirm an unrelated MISRA finding still fails.
 # See MISRA_COMPLIANCE.md D-4.
 misra-config:src/bypass_mcu_pic10f320.c
 # Same root cause, rule side: TICK_PERIOD_MS and WDT_MIN_PERIOD_MS are consumed
