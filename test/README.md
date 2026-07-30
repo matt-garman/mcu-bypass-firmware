@@ -37,6 +37,7 @@ test/
   test_lockstep_progress.sh shared: PIC libgpsim lock-step progress checks
   test_make_serialization.sh shared: worktree Make/release lock regression
   test_pic_build.sh         shared: PIC image/size/rebuild-trigger checks
+  test_pic320_coverage_archive.sh shared: coverage-gate source-archive mode checks
   test_pic_rebuild.sh       shared: PIC soak rebuild determinism
   test_release_images.sh    shared: isolated exact release artifact verification
   test_release_provenance.sh shared: source/compiler/output release-provenance regression
