@@ -51,18 +51,18 @@
 #   scripts/fetch_yasimavr.sh [VENV_DIR]
 #     VENV_DIR  where to create the venv (default: ./third_party/yasimavr/venv).
 #               The Makefile's YASIMAVR_VENV defaults to the same path.
-#   Env overrides: YASIMAVR_VER, YASIMAVR_SDIST_SHA256, PIP_INDEX_URL,
-#                  GET_PIP_URL.
+#   Env overrides: YASIMAVR_VER, YASIMAVR_SDIST_SHA256, PIP_INDEX_URL.
 #
 # PREREQUISITES (hard -- the script fails loud, it does not silently skip; the
 # Makefile harness targets are the ones that skip cleanly when the venv is
 # absent, exactly as `make attiny202` skips without the DFP):
-#   * python3 with the venv module          (apt: python3 python3-venv)
+#   * CPython 3.9-3.13 on glibc Linux x86_64/aarch64, with the venv module
+#                                              (apt: python3 python3-venv)
 #   * the CPython development headers        (apt: python3-dev)  -- to compile
 #                                            yasimavr's C++/SIP extension modules
-#   * a C++ compiler (c++ / g++)
+#   * a C++20 compiler and libelf headers      (apt: g++ libelf-dev)
 #   * curl or wget, sha256sum, and either `patch` or `git`
-#   * network access to PyPI (sdist + the sip build backend)
+#   * network access to PyPI (hash-locked wheels + the pinned yasimavr sdist)
 #
 # EXIT STATUS
 #   0  the patched venv is present and verified (freshly built or already cached)
@@ -86,7 +86,6 @@ normalize_physical_path() {
 # --- pinned upstream release (bump VER + SHA together, from a trusted run) ------
 VER="${YASIMAVR_VER:-0.1.6}"
 SDIST_SHA256="${YASIMAVR_SDIST_SHA256:-3742dae364a8d65ff7d4180d00b40c0901656dafcea6e53e94db1127b7ec6285}"
-GET_PIP_URL="${GET_PIP_URL:-https://bootstrap.pypa.io/get-pip.py}"
 
 # Resolve paths relative to the repo root (this script's parent's parent), so it
 # works regardless of the caller's cwd.
@@ -138,7 +137,8 @@ VENV=$(normalize_physical_path "$VENV")
 VENV_PARENT="$(dirname -- "$VENV")"
 VENV_NAME="$(basename -- "$VENV")"
 PATCH_DIR="${REPO_ROOT}/third_party/yasimavr/patches"
-VENV_STAMP="${VENV}/.yasimavr.stamp" # records "VER SDIST_SHA256 PATCHSET_SHA256"
+BUILD_REQUIREMENTS="${REPO_ROOT}/scripts/yasimavr-build-requirements.txt"
+VENV_STAMP="${VENV}/.yasimavr.stamp" # records VER + sdist/patch/requirements hashes
 VENV_PY="${VENV}/bin/python"
 
 is_sha256() {
@@ -162,12 +162,18 @@ has_yasimavr_stamp() {
         *[!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz._+-]*) return 1 ;;
     esac
     stamp_sdist=${stamp_hashes%% *}
-    stamp_patchset=${stamp_hashes#* }
-    [ "$stamp_patchset" != "$stamp_hashes" ] || return 1
-    case "$stamp_patchset" in
+    stamp_remainder=${stamp_hashes#* }
+    [ "$stamp_remainder" != "$stamp_hashes" ] || return 1
+    stamp_patchset=${stamp_remainder%% *}
+    stamp_requirements=${stamp_remainder#* }
+    if [ "$stamp_requirements" = "$stamp_remainder" ]; then
+        stamp_requirements=
+    fi
+    case "$stamp_requirements" in
         *' '*) return 1 ;;
     esac
-    is_sha256 "$stamp_sdist" && is_sha256 "$stamp_patchset"
+    is_sha256 "$stamp_sdist" && is_sha256 "$stamp_patchset" \
+        && { [ -z "$stamp_requirements" ] || is_sha256 "$stamp_requirements"; }
 }
 
 DESTINATION_EXISTS=0
@@ -180,11 +186,13 @@ elif [ -e "$VENV" ] || [ -L "$VENV" ]; then
 fi
 
 [ -d "$PATCH_DIR" ] || die "patch dir not found: ${PATCH_DIR}"
+[ -f "$BUILD_REQUIREMENTS" ] || die "build-requirements lock not found: ${BUILD_REQUIREMENTS}"
 
 # Build signature = pinned release + a hash of the exact patch set. Changing a
 # patch (or the version/SHA) changes the signature and forces a rebuild.
 PATCHSET_SHA256="$(cat "$PATCH_DIR"/*.patch | sha256sum | cut -d' ' -f1)"
-SIG="${VER} ${SDIST_SHA256} ${PATCHSET_SHA256}"
+REQUIREMENTS_SHA256="$(sha256sum "$BUILD_REQUIREMENTS" | cut -d' ' -f1)"
+SIG="${VER} ${SDIST_SHA256} ${PATCHSET_SHA256} ${REQUIREMENTS_SHA256}"
 
 # --- idempotence: already built at this exact signature, and still importable? --
 already_built() {
@@ -209,7 +217,34 @@ fi
 
 # --- tool checks ----------------------------------------------------------------
 have python3   || die "python3 not found (install 'python3')."
-have c++ || have g++ || die "no C++ compiler (install 'g++')."
+python3 -c 'import platform, struct, sys, sysconfig
+libc_name, libc_version = platform.libc_ver()
+try:
+    libc_parts = tuple(int(part) for part in libc_version.split(".")[:2])
+except ValueError:
+    libc_parts = ()
+ok = ((3, 9) <= sys.version_info[:2] < (3, 14)
+      and platform.python_implementation() == "CPython"
+      and struct.calcsize("P") == 8
+      and sys.abiflags == ""
+      and not sysconfig.get_config_var("Py_DEBUG")
+      and not sysconfig.get_config_var("Py_GIL_DISABLED")
+      and sys.platform == "linux"
+      and platform.machine() in ("x86_64", "aarch64")
+      and libc_name == "glibc" and libc_parts >= (2, 17))
+raise SystemExit(0 if ok else 1)' \
+    || die "the lock supports standard 64-bit CPython 3.9-3.13 on glibc 2.17+ Linux x86_64/aarch64 only."
+if have c++; then CXX=c++
+elif have g++; then CXX=g++
+else die "no C++ compiler (install 'g++')."
+fi
+export CXX
+printf '#include <span>\nint main() { int value = 0; std::span<int> s(&value, 1); return s[0]; }\n' \
+    | "$CXX" -std=c++20 -x c++ -fsyntax-only - >/dev/null 2>&1 \
+    || die "the C++ compiler does not support C++20."
+printf '#include <libelf.h>\n#include <gelf.h>\nint main() { return elf_version(EV_CURRENT) == EV_NONE; }\n' \
+    | "$CXX" -x c++ - -lelf -o /dev/null >/dev/null 2>&1 \
+    || die "libelf headers/library not usable (install 'libelf-dev')."
 have sha256sum || die "sha256sum not found (install 'coreutils')."
 have patch || have git || die "need 'patch' or 'git' to apply the vendored patches."
 if   have curl; then DL="curl -fsSL --max-time 300 -o"
@@ -303,29 +338,28 @@ for p in "$PATCH_DIR"/*.patch; do
     fi
 done
 
-# --- create the venv (portable: some distros ship python3 without a working ------
-# ensurepip, e.g. Debian strips it; create --without-pip then bootstrap get-pip) -
+# --- create the venv and install only hash-locked dependency wheels --------------
 log "Creating virtualenv for ${VENV}"
-if python3 -m venv "$BUILD_VENV" 2>/dev/null && "$BUILD_PY" -m pip --version >/dev/null 2>&1; then
-    : # venv came with a working pip
-else
-    log "  ensurepip unavailable; creating --without-pip and bootstrapping get-pip"
-    rm -rf -- "$BUILD_VENV"
-    mkdir -m 700 -- "$BUILD_VENV" \
-        || die "could not reset temporary virtualenv directory"
-    python3 -m venv --without-pip "$BUILD_VENV" || die "python3 -m venv failed (install 'python3-venv')."
-    GETPIP="${TMP}/get-pip.py"
-    # shellcheck disable=SC2086
-    $DL "$GETPIP" "$GET_PIP_URL" || die "failed to download get-pip.py from ${GET_PIP_URL}"
-    "$BUILD_PY" "$GETPIP" >&2 || die "get-pip.py bootstrap failed."
+python3 -m venv "$BUILD_VENV" \
+    || die "python3 -m venv failed (install 'python3-venv')."
+"$BUILD_PY" -m pip --version >/dev/null 2>&1 \
+    || die "pip is not available in the venv (install 'python3-venv')."
+if ! "$BUILD_PY" -m pip install --disable-pip-version-check --no-input \
+        --require-hashes --only-binary=:all: -r "$BUILD_REQUIREMENTS" \
+        >"${TMP}/pip.log" 2>&1; then
+    log "--- hash-locked dependency install log (tail) ---"
+    tail -n 40 "${TMP}/pip.log" >&2 || true
+    die "installation of hash-locked yasimavr dependencies failed."
 fi
-"$BUILD_PY" -m pip --version >/dev/null 2>&1 || die "pip is not available in the venv after bootstrap."
 
 # --- build + install the patched tree into the venv -----------------------------
-# PEP 517 build pulls the sip backend from PyPI and compiles the C++/SIP modules
-# (this is the slow step -- a minute or two). Keep the build quiet unless it fails.
+# The complete backend/runtime set is already installed from the hash lock.
+# --no-index/--no-build-isolation/--no-deps make this local source build unable
+# to resolve or download another package.
 log "Building + installing patched yasimavr ${VER} (compiling C++/SIP extensions; this may take a minute)"
-if ! "$BUILD_PY" -m pip install --no-input "$SRC" >"${TMP}/pip.log" 2>&1; then
+if ! "$BUILD_PY" -m pip install --disable-pip-version-check --no-input \
+        --no-index --no-build-isolation --no-deps "$SRC" \
+        >"${TMP}/pip.log" 2>&1; then
     log "--- pip build log (tail) ---"
     tail -n 40 "${TMP}/pip.log" >&2 || true
     die "pip install of the patched yasimavr failed."

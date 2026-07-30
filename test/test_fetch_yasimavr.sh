@@ -104,6 +104,12 @@ mkdir "$fakebin"
 real_mv=$(command -v mv) || fail "mv is required"
 cat > "$fakebin/c++" <<'EOF'
 #!/bin/sh
+set -eu
+source_text=$(cat)
+case "$source_text" in
+	*'<span>'*) [ "${FAKE_CXX20_FAIL:-0}" -eq 0 ] || exit 41 ;;
+	*'<libelf.h>'*) [ "${FAKE_LIBELF_FAIL:-0}" -eq 0 ] || exit 42 ;;
+esac
 exit 0
 EOF
 cat > "$fakebin/curl" <<'EOF'
@@ -177,6 +183,15 @@ if [ "${FAKE_PIP_INSTALL_FAIL:-0}" -eq 1 ] \
 		&& [ "${3:-}" = install ]; then
 	exit 23
 fi
+if [ "${1:-}" = -m ] && [ "${2:-}" = pip ] \
+		&& [ "${3:-}" = install ] && [ -n "${FAKE_PIP_LOG:-}" ]; then
+	printf '%s\n' "$*" >> "$FAKE_PIP_LOG"
+fi
+if [ "${1:-}" = -m ] && [ "${2:-}" = pip ] \
+		&& [ "${3:-}" = install ] && [ "${FAKE_REQUIRE_CXX:-0}" -eq 1 ] \
+		&& [ -z "${CXX:-}" ]; then
+	exit 25
+fi
 exit 0
 EOF
 cat > "$fakebin/python3" <<'EOF'
@@ -184,6 +199,10 @@ cat > "$fakebin/python3" <<'EOF'
 set -eu
 if [ "${1:-}" = - ]; then
 	cat >/dev/null
+	exit 0
+fi
+if [ "${1:-}" = -c ]; then
+	[ "${FAKE_PYTHON_PLATFORM_FAIL:-0}" -eq 0 ] || exit 40
 	exit 0
 fi
 if [ "${1:-}" = -m ] && [ "${2:-}" = venv ]; then
@@ -203,9 +222,21 @@ empty_sha=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 run_fake() {
 	env PATH="$fakebin:$PATH" \
 		FAKE_VENV_PY_TEMPLATE="$work/venv-python" \
+		FAKE_PIP_LOG="$work/pip-install.log" \
+		FAKE_REQUIRE_CXX=1 \
 		REAL_MV="$real_mv" \
 		YASIMAVR_SDIST_SHA256="$empty_sha" "$FETCH" "$@"
 }
+
+expect_fail "unsupported Python platform" "lock supports standard 64-bit CPython" \
+	env PATH="$fakebin:$PATH" FAKE_PYTHON_PLATFORM_FAIL=1 \
+		YASIMAVR_SDIST_SHA256="$empty_sha" "$FETCH" "$work/python-platform-venv"
+expect_fail "missing C++20 feature" "does not support C++20" \
+	env PATH="$fakebin:$PATH" FAKE_CXX20_FAIL=1 \
+		YASIMAVR_SDIST_SHA256="$empty_sha" "$FETCH" "$work/cxx20-venv"
+expect_fail "missing libelf development files" "libelf headers/library not usable" \
+	env PATH="$fakebin:$PATH" FAKE_LIBELF_FAIL=1 \
+		YASIMAVR_SDIST_SHA256="$empty_sha" "$FETCH" "$work/libelf-venv"
 
 space_parent="$work/path with spaces"
 mkdir "$space_parent"
@@ -216,6 +247,12 @@ output=$(run_fake "$new_venv" 2>&1) \
 	|| fail "fresh build did not report its canonical destination: $output"
 [ -x "$new_venv/bin/python" ] && [ -f "$new_venv/.yasimavr.stamp" ] \
 	|| fail "fresh build did not install a complete stamped venv"
+grep -Fq -- '--require-hashes --only-binary=:all: -r ' "$work/pip-install.log" \
+	|| fail "yasimavr dependencies were not installed from the hash lock"
+grep -Fq -- '--no-index --no-build-isolation --no-deps ' "$work/pip-install.log" \
+	|| fail "yasimavr source build could still resolve external dependencies"
+! grep -Fq 'get-pip.py' "$FETCH" \
+	|| fail "yasimavr fetcher still contains the unhashed get-pip fallback"
 checks=$((checks + 1))
 
 printf 'cached tree\n' > "$new_venv/cached-sentinel"
@@ -243,7 +280,7 @@ failed_venv="$work/failed-rebuild-venv"
 mkdir "$failed_venv"
 printf '%s' "$valid_stamp" > "$failed_venv/.yasimavr.stamp"
 printf 'must survive failed rebuild\n' > "$failed_venv/sentinel"
-expect_fail "failed rebuild" "pip install of the patched yasimavr failed" \
+expect_fail "failed rebuild" "installation of hash-locked yasimavr dependencies failed" \
 	env PATH="$fakebin:$PATH" FAKE_VENV_PY_TEMPLATE="$work/venv-python" \
 		REAL_MV="$real_mv" FAKE_PIP_INSTALL_FAIL=1 \
 		YASIMAVR_SDIST_SHA256="$empty_sha" \

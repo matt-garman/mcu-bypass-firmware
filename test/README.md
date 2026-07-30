@@ -46,6 +46,7 @@ test/
   test_stack_bound.sh       shared: fail-closed stack evidence checks
   test_stack_depth_pic.sh   shared: PIC return-stack gate regression
   test_strict_tools.sh      shared: skip/strict policy for host + both PIC chips
+  test_supply_chain.sh      shared: external download/cache/action pin checks
   test_target_lane_markers.sh shared: PIC aggregate PASS-marker regression
   test_target_matrix.sh     shared: fail-closed PIC variant-matrix regression
   test_workload_rebuild.sh  shared: workload/fuse rebuild checks
@@ -259,6 +260,7 @@ below so a green gate means every PIC layer actually ran.
 | Release qualification contract | `test-release-qualification` | Publication requires clean production metadata, the exact canonical 28-file evidence set, and one identity-, duration-, and counter-bearing result for each of 15 release soak combinations. | Bash + synthetic retained evidence |
 | Release history/signature contract | `test-release-history` | The tag event must peel to an artifact-only, single-parent child of the exact qualified source. `SHA256SUMS.asc` and the exact remote annotated tag must verify against the pinned full-fingerprint key in an isolated keyring; altered bytes, missing/malformed/wrong-key signatures, lightweight/unsigned/same-target-replaced tags, and moved tags are rejected immediately before publication. | Bash + GnuPG + scratch Git repositories |
 | yasimavr venv fetch safety | `test-fetch-yasimavr` | Caller-selected destinations are canonicalized and cannot name roots, symlinks, files, or unstamped directories. Offline fake tools prove failed builds preserve the old owned venv and only a fully verified sibling tree is renamed into place. | Bash + synthetic toolchain |
+| External supply-chain integrity | `test-supply-chain` | XC8 and PIC DFP bytes must match reviewed hashes before `sudo`; restored ATtiny_DFP files are re-hashed; yasimavr dependencies are wheel/hash-locked and built without dependency resolution; both workflows use one installer and hash-sensitive cache keys. | Bash + synthetic downloads/toolchains |
 
 `pic-test-gpsim` now samples one non-settled point, `PRESS1_EARLY`, roughly
 6 ms (3,000 instruction cycles) after the first press edge. A correct 1 ms tick

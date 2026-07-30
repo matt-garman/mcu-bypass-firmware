@@ -54,7 +54,9 @@ jobs:
     # the run -- the slow AVR jobs are skipped instead of running in parallel.
     needs: pic
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Install toolchain
         run: |
@@ -141,7 +143,9 @@ jobs:
       # in step with the attiny202 job's pinned value (both key the same cache).
       ATTINY_DFP_VER: "3.1.260"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Install gpsim + analyzers (apt)
         run: |
@@ -151,29 +155,14 @@ jobs:
 
       - name: Restore cached XC8 + DFP
         id: cache-xc8
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: /opt/microchip
-          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}
+          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}-${{ hashFiles('scripts/install_pic_toolchain.sh') }}
 
       - name: Install XC8 (free tier) + PIC10-12Fxxx DFP
         if: steps.cache-xc8.outputs.cache-hit != 'true'
-        run: |
-          set -euo pipefail
-          # --- XC8 compiler ---
-          xc8_run="xc8-v${XC8_VERSION}-full-install-linux-x64-installer.run"
-          xc8_base="https://ww1.microchip.com/downloads/aemDocuments/documents"
-          xc8_base="${xc8_base}/DEV/ProductDocuments/SoftwareTools"
-          wget -q "${xc8_base}/${xc8_run}" -O /tmp/xc8.run
-          chmod +x /tmp/xc8.run
-          sudo /tmp/xc8.run --mode unattended --unattendedmodeui none \
-            --netservername '' --LicenseType FreeMode --prefix "${XC8_DIR}"
-          # --- PIC10-12Fxxx Device Family Pack (.atpack == a zip) ---
-          sudo mkdir -p "${XC8_DFP_ROOT}"
-          dfp_pack="Microchip.PIC10-12Fxxx_DFP.${DFP_VERSION}.atpack"
-          wget -q "https://packs.download.microchip.com/${dfp_pack}" \
-            -O /tmp/dfp.atpack
-          sudo unzip -q -o /tmp/dfp.atpack -d "${XC8_DFP_ROOT}"
+        run: scripts/install_pic_toolchain.sh
 
       - name: Assert PIC toolchain present (fail loud, do NOT skip)
         run: |
@@ -197,10 +186,10 @@ jobs:
       # Save only after the assert passed, so a partial install is never cached.
       - name: Save XC8 + DFP cache
         if: steps.cache-xc8.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: /opt/microchip
-          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}
+          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}-${{ hashFiles('scripts/install_pic_toolchain.sh') }}
 
       - name: Record toolchain versions
         run: |
@@ -275,10 +264,10 @@ jobs:
           github.event_name == 'push' ||
           github.event_name == 'schedule' ||
           github.event_name == 'workflow_dispatch'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: third_party/attiny_dfp
-          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}
+          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
 
       - name: Restore cached patched yasimavr venv (mutation lane)
         id: cache-yasimavr-mut
@@ -286,10 +275,10 @@ jobs:
           github.event_name == 'push' ||
           github.event_name == 'schedule' ||
           github.event_name == 'workflow_dispatch'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: third_party/yasimavr/venv
-          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'third_party/yasimavr/patches/**') }}
+          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'scripts/yasimavr-build-requirements.txt', 'third_party/yasimavr/patches/**') }}
 
       - name: Fetch ATtiny202 mutation-lane inputs
         if: >-
@@ -315,17 +304,17 @@ jobs:
 
       - name: Save ATtiny_DFP cache (mutation lane)
         if: steps.cache-dfp-mut.outcome == 'success' && steps.cache-dfp-mut.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: third_party/attiny_dfp
-          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}
+          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
 
       - name: Save yasimavr venv cache (mutation lane)
         if: steps.cache-yasimavr-mut.outcome == 'success' && steps.cache-yasimavr-mut.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: third_party/yasimavr/venv
-          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'third_party/yasimavr/patches/**') }}
+          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'scripts/yasimavr-build-requirements.txt', 'third_party/yasimavr/patches/**') }}
 
       # MUTATION_ALLOW_SKIP=0 covers EVERY substrate's mutants: the driver's
       # PIC10F320 and ATtiny202 subsets each sit behind their own tool probe, so
@@ -350,14 +339,14 @@ jobs:
       # them into one artifact would be the first step toward shipping a 322
       # image under a 320 name.
       - name: Upload PIC10F322 firmware images
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: firmware-pic10f322
           path: build_pic/*.hex
           if-no-files-found: error
 
       - name: Upload PIC10F320 firmware images
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: firmware-pic10f320
           path: build_pic10f320/*.hex
@@ -394,7 +383,9 @@ jobs:
       # in step). The venv cache keys on the patch set + fetch script instead.
       ATTINY_DFP_VER: "3.1.260"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Install toolchain (apt)
         run: |
@@ -412,10 +403,10 @@ jobs:
 
       - name: Restore cached ATtiny_DFP
         id: cache-dfp
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: third_party/attiny_dfp
-          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}
+          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
 
       - name: Fetch ATtiny_DFP device files
         run: scripts/fetch_attiny_dfp.sh
@@ -443,20 +434,20 @@ jobs:
 
       - name: Save ATtiny_DFP cache
         if: steps.cache-dfp.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: third_party/attiny_dfp
-          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}
+          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
 
       - name: Restore cached patched yasimavr venv
         id: cache-yasimavr
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: third_party/yasimavr/venv
           # Rebuild when the pinned release, the patches, or the build script
           # change. fetch_yasimavr.sh re-verifies the venv on a hit and rebuilds
           # it if the interpreter/import is broken, so a stale cache self-heals.
-          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'third_party/yasimavr/patches/**') }}
+          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'scripts/yasimavr-build-requirements.txt', 'third_party/yasimavr/patches/**') }}
 
       - name: Build patched yasimavr (pinned sdist + vendored patches)
         run: scripts/fetch_yasimavr.sh
@@ -472,10 +463,10 @@ jobs:
 
       - name: Save yasimavr venv cache
         if: steps.cache-yasimavr.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: third_party/yasimavr/venv
-          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'third_party/yasimavr/patches/**') }}
+          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'scripts/yasimavr-build-requirements.txt', 'third_party/yasimavr/patches/**') }}
 
       - name: Record versions
         run: |
@@ -543,7 +534,7 @@ jobs:
           [ "$p" -eq "$n" ] || { echo "::error::attiny202-soak: $p/$n variants PASSed (skip or fail)"; exit 1; }
 
       - name: Upload ATtiny202 firmware images
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: firmware-attiny202
           path: build_avr_xt/*.hex
@@ -573,7 +564,9 @@ jobs:
             build: all45
             size: size45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Install AVR toolchain
         run: |
@@ -587,7 +580,7 @@ jobs:
         run: make ${{ matrix.size }} AVR_REBUILD_PREREQ= | tee size-${{ matrix.mcu }}.txt
 
       - name: Upload firmware images
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: firmware-${{ matrix.mcu }}
           path: |
@@ -610,7 +603,9 @@ jobs:
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Install toolchain
         run: |
