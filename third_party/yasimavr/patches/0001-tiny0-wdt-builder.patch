@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Modified for mcu-bypass-firmware on 2026-07-09.
+# Upstream file copyright 2024-2025 Clement Savergne <csavergne@yahoo.com>.
+#
 # yasimavr 0.1.6 -- add the WDT peripheral to the tinyAVR 0-series device builder.
 #
 # UPSTREAM BUG #1 (filed at github.com/clesav/yasimavr):
