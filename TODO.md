@@ -672,6 +672,36 @@ should not gate firmware releases.
 Recorded so these do not get re-proposed. None are refusals on grounds of
 difficulty — each was judged to cost more than it returns *for this project*.
 
+**PIC10F320 firmware on PIC10F322 hardware (low priority / academic
+curiosity).** The two parts have the same software-visible core, pin map, RAM,
+relevant SFR/peripheral layout and CONFIG-word layout; their material difference
+for this firmware is 256 versus 512 implemented program words. A native
+PIC10F320 image whose execution remains within its implemented address range is
+therefore expected to run unchanged on a PIC10F322. The strongest experiment
+would execute the exact native, hash-gated PIC10F320 HEX under both `p10f320` and
+`p10f322`, compare traces through the shared target-I/O and lock-step harnesses,
+then confirm it on real PIC10F322 hardware. Recompiling the source with
+`-mcpu=10F322` would be a weaker compatibility proof because it creates a third
+artifact whose startup, placement or bytes may differ.
+
+This would not make all PIC10F322 qualification claims applicable. The
+PIC10F320 firmware deliberately omits the PIC10F322 firmware's settled-`LATA`
+integrity guard, so the three PIC10F322 output-latch fault injections must not be
+expected to pass; native build, image-hash, program-geometry, source-coverage and
+release-provenance gates also remain device/implementation specific. Most useful
+mechanism reuse already exists: both parts share the CONFIG checker, gpsim
+wrappers, libgpsim I/O/lock-step/fault cores, soak implementation and assembly
+stack checker, with thin adapters preserving their different policies.
+
+Declined as a maintained target or release gate: when PIC10F322 hardware is
+available, its native modular firmware should be used because it compiles the
+verified pure core directly and retains the stronger output-latch defence. A
+cross-device lane would mostly validate an intentionally inferior firmware
+choice while adding a third build/simulator profile and more fail-closed
+orchestration. Reconsider only for a concrete universal-image, component-
+substitution or manufacturing-SKU requirement; otherwise it remains an academic
+differential-simulator exercise.
+
 **Formal ISR/main interleaving model (TLA+ or SPIN).** Would formalize the
 AVR ISR/main interleaving at the byte level, modeling each byte read/write as a
 separate step, to prove all interleavings preserve the safety invariants — the
