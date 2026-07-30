@@ -118,12 +118,12 @@ STAMP_TMP=
 TMP="$(mktemp -d)"
 cleanup() {
     status=$?
-    trap - EXIT HUP INT TERM
+    trap - 0 HUP INT TERM
     [ -z "$STAMP_TMP" ] || rm -f -- "$STAMP_TMP"
     rm -rf "$TMP"
     exit "$status"
 }
-trap cleanup EXIT
+trap cleanup 0
 trap 'exit 1' HUP INT TERM
 PACK="${TMP}/ATtiny_DFP.${VER}.atpack"
 

@@ -614,11 +614,11 @@ Design notes if picked up:
 Effort: ~4–8 h, most of it consumer updates and release-documentation redirects
 rather than the renames themselves. Impact: Medium — no behavioural change and no
 new assurance, but it removes a class of silent-misconfiguration hazard that
-grows with every added target, and it is the difference between "five targets in
+grows with every added target, and it is the difference between "six targets in
 one repository" and "four projects sharing a Makefile".
 
 **`make program-pic320` convenience target.** Added 2026-07-27. The PIC10F322
-has `make program-pic` (`Makefile:1282`, with `PIC_PROG=pk2cmd|ipecmd`,
+has `make program-pic` (with `PIC_PROG=pk2cmd|ipecmd`,
 `PIC_PROG_TOOL`, `PIC_PROG_CMD` overrides); the PIC10F320 has no equivalent, so
 `release/README.md` and the generated `MANIFEST.md` print the bare
 `pk2cmd -PPIC10F320 -F<image> -M -Y -R` instead. The merge recorded this as a
@@ -631,8 +631,9 @@ the wrong device is worse than an honest absence.
 Design notes if picked up: mirror `program-pic` exactly rather than inventing a
 second idiom, add `PIC320_PROG*` variables under the §5.6 prefix rule (the whole
 point of the separate pair is that one chip can be re-pinned without moving the
-other), and update the `make help` Hardware block, `release/README.md:145` and
-the manifest's flashing command in the same change. Verify against real silicon
+other), and update the `make help` Hardware block, the PIC10F320 flashing section
+in `release/README.md`, and the manifest's flashing command in the same change.
+Verify against real silicon
 before removing the "no convenience target yet" note — the note is currently
 correct, and a target that has never driven a programmer is not an improvement
 over a command the user can read.

@@ -5,7 +5,7 @@ without installing a cross-compiler or building anything. Images are
 ready-to-flash unless a historical safety warning here or in their per-release
 documentation marks them as superseded. Each release lives in its own
 `vX.Y.Z/` subdirectory and is also published as a
-[GitHub Release](../../releases).
+[GitHub Release](https://github.com/matt-garman/mcu-bypass-firmware/releases).
 
 > **Current availability:** `v0.9.6` is the first unified 18-image release. It
 > includes prebuilt firmware for all six release targets and introduces the first

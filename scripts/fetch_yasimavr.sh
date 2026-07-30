@@ -89,8 +89,8 @@ SDIST_SHA256="${YASIMAVR_SDIST_SHA256:-3742dae364a8d65ff7d4180d00b40c0901656dafc
 
 # Resolve paths relative to the repo root (this script's parent's parent), so it
 # works regardless of the caller's cwd.
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
-REPO_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)"
+REPO_ROOT="$(CDPATH='' cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 SCRIPT_DIR=$(normalize_physical_path "$SCRIPT_DIR")
 REPO_ROOT=$(normalize_physical_path "$REPO_ROOT")
 
@@ -116,7 +116,7 @@ while [ "$VENV_REQUESTED" != / ] \
 done
 [ ! -L "$VENV_REQUESTED" ] || die "VENV_DIR must not be a symlink: ${VENV_REQUESTED}"
 if [ -d "$VENV_REQUESTED" ]; then
-    VENV="$(CDPATH= cd -- "$VENV_REQUESTED" && pwd -P)" \
+    VENV="$(CDPATH='' cd -- "$VENV_REQUESTED" && pwd -P)" \
         || die "cannot resolve VENV_DIR: ${VENV_REQUESTED}"
 elif [ -e "$VENV_REQUESTED" ]; then
     die "VENV_DIR exists but is not a directory: ${VENV_REQUESTED}"
@@ -125,7 +125,7 @@ else
     VENV_PARENT_REQUESTED="$(dirname -- "$VENV_REQUESTED")"
     [ -d "$VENV_PARENT_REQUESTED" ] \
         || die "VENV_DIR parent does not exist: ${VENV_PARENT_REQUESTED}"
-    VENV_PARENT="$(CDPATH= cd -- "$VENV_PARENT_REQUESTED" && pwd -P)" \
+    VENV_PARENT="$(CDPATH='' cd -- "$VENV_PARENT_REQUESTED" && pwd -P)" \
         || die "cannot resolve VENV_DIR parent: ${VENV_PARENT_REQUESTED}"
     VENV="${VENV_PARENT}/${VENV_NAME}"
 fi
@@ -280,7 +280,7 @@ restore_previous_venv() {
 }
 cleanup() {
     status=$?
-    trap - EXIT HUP INT TERM
+    trap - 0 HUP INT TERM
     if [ -n "${OLD_VENV:-}" ] \
             && { [ -e "$OLD_VENV" ] || [ -L "$OLD_VENV" ]; }; then
         if [ "${OLD_VENV_MOVED:-0}" -eq 1 ]; then
@@ -299,7 +299,7 @@ cleanup() {
         || log "WARNING: temporary download directory preserved at ${TMP}"
     exit "$status"
 }
-trap cleanup EXIT
+trap cleanup 0
 trap 'exit 1' HUP INT TERM
 
 BUILD_VENV="$(mktemp -d "${VENV_PARENT}/.${VENV_NAME}.build.XXXXXX")" \
@@ -377,8 +377,10 @@ printf '%s' "$SIG" > "$BUILD_STAMP"
 # Install only the fully verified tree. For a replacement, first rename the
 # owned old venv aside; cleanup restores it if the second rename cannot finish.
 if [ "$DESTINATION_EXISTS" -eq 1 ]; then
-    [ -d "$VENV" ] && [ ! -L "$VENV" ] && has_yasimavr_stamp "$VENV_STAMP" \
-        || die "VENV_DIR changed while yasimavr was being built: ${VENV}"
+    if [ ! -d "$VENV" ] || [ -L "$VENV" ] \
+            || ! has_yasimavr_stamp "$VENV_STAMP"; then
+        die "VENV_DIR changed while yasimavr was being built: ${VENV}"
+    fi
     OLD_VENV="$(mktemp -d "${VENV_PARENT}/.${VENV_NAME}.old.XXXXXX")" \
         || die "could not reserve a backup path for VENV_DIR"
     rmdir -- "$OLD_VENV" || die "could not prepare the VENV_DIR backup path"
@@ -393,8 +395,9 @@ if [ "$DESTINATION_EXISTS" -eq 1 ]; then
         die "VENV_DIR changed before it could be moved safely"
     fi
 else
-    [ ! -e "$VENV" ] && [ ! -L "$VENV" ] \
-        || die "VENV_DIR appeared while yasimavr was being built: ${VENV}"
+    if [ -e "$VENV" ] || [ -L "$VENV" ]; then
+        die "VENV_DIR appeared while yasimavr was being built: ${VENV}"
+    fi
 fi
 
 # `-T` forbids nesting into a directory that appeared late; `-n` also refuses

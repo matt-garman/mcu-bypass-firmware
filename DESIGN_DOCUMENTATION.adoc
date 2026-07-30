@@ -661,7 +661,7 @@ See TOOLCHAIN.adoc for details.  Summary:
       ** simavr
     * ATtiny202 (AVR-XT)
       ** the same avr-gcc/avr-libc/avrdude toolchain
-      ** ATtiny_DFP device pack (avr-libc 7.3.0 predates the part)
+      ** ATtiny_DFP device pack (avr-gcc 7.3.0 predates the part)
       ** yasimavr (simavr and QEMU do not model the AVR8X core)
       ** UPDI programming, not ISP
     * PIC10F322 and PIC10F320

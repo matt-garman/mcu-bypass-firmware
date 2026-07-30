@@ -295,7 +295,7 @@ recorded here because the source comments reference this document by name, and a
 citation that leads nowhere is worse than no citation.
 
 - **`DEBOUNCE_COUNTER_MAX` as `(255U)` rather than `<stdint.h>`'s `UINT8_MAX`**
-  (`src/bypass_mcu_pic10f320.c:102-110`). By C integer-promotion rules a
+  in `src/bypass_mcu_pic10f320.c`. By C integer-promotion rules a
   `uint8_t` promotes to signed `int`, so `UINT8_MAX` has type `int`; comparing it
   against the project's unsigned debounce thresholds would be an
   essential-type-category mix (Rule 10.4), and its expansion `0x7f*2+1` also
