@@ -48,7 +48,7 @@ test/
   test_strict_tools.sh      shared: skip/strict policy for host + both PIC chips
   test_supply_chain.sh      shared: external download/cache/action pin checks
   test_target_lane_markers.sh shared: PIC aggregate PASS-marker regression
-  test_target_matrix.sh     shared: fail-closed PIC variant-matrix regression
+  test_target_matrix.sh     shared: fail-closed PIC/AVR-XT target-matrix regression
   test_workload_rebuild.sh  shared: workload/fuse rebuild checks
 
   host/    MCU-independent golden-model tests, compiled and run natively.

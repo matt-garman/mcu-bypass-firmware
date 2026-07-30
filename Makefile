@@ -2198,8 +2198,45 @@ attiny202-test: test-fuses attiny202-smoke attiny202 attiny202-analyze attiny202
 # combination per output stage at the full release duration, alongside every
 # other target's soak.
 .PHONY: attiny202-test-target
-attiny202-test-target: attiny202-sim attiny202-fault attiny202-lockstep
-	@echo "=== ATtiny202 target-level checks complete (sim + fault + lock-step) ==="
+attiny202-test-target:
+	@if [ "$(CLASSIC_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS must not be empty" >&2; exit 2; \
+	fi; \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_DUPLICATE)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS must not contain duplicate names" >&2; exit 2; \
+	fi; \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_UNKNOWN)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS contains unsupported names; supported: $(XT_VARIANTS_SUPPORTED)" >&2; exit 2; \
+	fi; \
+	if [ "$(if $(filter-out $(VARIANTS),$(XT_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
+		echo "FAIL: VARIANTS must contain every supported name; required: $(XT_VARIANTS_SUPPORTED)" >&2; exit 2; \
+	fi
+	@set -e; \
+	want=$(words $(XT_VARIANTS_SUPPORTED)); \
+	for spec in \
+		"attiny202-sim|SIM PASS" \
+		"attiny202-fault|FAULT PASS" \
+		"attiny202-lockstep|LOCKSTEP PASS"; do \
+		target=$${spec%%|*}; marker=$${spec#*|}; log=`mktemp`; \
+		if ! $(MAKE) --no-print-directory $$target >"$$log" 2>&1; then \
+			cat "$$log"; rm -f "$$log"; exit 1; \
+		fi; \
+		cat "$$log"; \
+		got=`grep -cF "$$marker" "$$log" || true`; \
+		if [ "$$got" -ne "$$want" ]; then \
+			echo "FAIL: $$target did not report '$$marker' exactly $$want time(s) (got $$got; skipped or incomplete?)"; \
+			rm -f "$$log"; exit 1; \
+		fi; \
+		if [ "$$target" = attiny202-lockstep ]; then \
+			scenarios=`grep -cF "co-simulated" "$$log" || true`; expected=$$((want * 2)); \
+			if [ "$$scenarios" -ne "$$expected" ]; then \
+				echo "FAIL: $$target did not report 'co-simulated' exactly $$expected time(s) (got $$scenarios; boot scenario skipped?)"; \
+				rm -f "$$log"; exit 1; \
+			fi; \
+		fi; \
+		rm -f "$$log"; \
+	done
+	@echo "=== ATtiny202 target sim/fault/lock-step validated for all variants ==="
 
 # ============================================================================
 # CLEAN
@@ -2484,7 +2521,8 @@ _test-mutation-policy-probe:
 test-mutation-sandbox:
 	MUTATION_SANDBOX_SELFTEST=1 ./test/run_mutation_tests.sh
 
-# Host-only proof that the authoritative PIC target aggregate rejects bad matrices.
+# Host-only proof that authoritative target aggregates reject bad matrices and
+# skipped/incomplete target-level lanes.
 test-target-matrix:
 	./test/test_target_matrix.sh
 	@# Same regression, PIC10F320 contract. One script, two chips (§4 FOLD).
@@ -2517,6 +2555,28 @@ test-target-matrix:
 	TM_SUBSET='cd4053-mute' \
 	TM_UNSUPPORTED='tmux4053-simple' \
 	TM_CHECK_SENTINELS=0 \
+		./test/test_target_matrix.sh
+	@# AVR-XT's three aggregate lanes each run the complete matrix themselves,
+	@# so this mode checks one recursive call per lane and exact per-variant PASS
+	@# counts (plus both lock-step boot scenarios) rather than a per-variant wrapper.
+	TM_LABEL='ATtiny202' \
+	TM_TARGET='attiny202-test-target' \
+	TM_VARIANTS_VAR='VARIANTS' \
+	TM_SUPPORTED='cd4053 mute relay' \
+	TM_SUBSET='mute' \
+	TM_UNSUPPORTED='unknown' \
+	TM_FAULT_TARGET='attiny202-sim' \
+	TM_LOCKSTEP_TARGET='attiny202-fault' \
+	TM_IO_TARGET='attiny202-lockstep' \
+	TM_FAULT_MARKER='SIM PASS' \
+	TM_LOCKSTEP_MARKER='FAULT PASS' \
+	TM_IO_MARKER='LOCKSTEP PASS' \
+	TM_FAULT_MARKER_COUNT=3 \
+	TM_LOCKSTEP_MARKER_COUNT=3 \
+	TM_IO_MARKER_COUNT=3 \
+	TM_IO_EXTRA_MARKER='co-simulated' \
+	TM_IO_EXTRA_MARKER_COUNT=6 \
+	TM_AGGREGATE_LANES=1 \
 		./test/test_target_matrix.sh
 
 # Host-only proof that the PIC target aggregates are fail-CLOSED, which the

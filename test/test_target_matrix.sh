@@ -7,11 +7,10 @@ trap 'rm -rf "$work"' EXIT
 fake_make="$work/fake-make"
 log="$work/make.log"
 checks=0
-# Parameterized so ONE regression covers both PIC targets (merge plan §4: FOLD
-# the shared-name harnesses rather than forking them). The matrix guard requires
-# the complete supported set, and each real-target invocation must require
-# explicit fault, lock-step, and I/O completion markers. The host-only PIC10F320
-# invocation disables the sentinel part.
+# Parameterized so one regression covers both PIC target aggregates, the
+# PIC10F320 host aggregate, and AVR-XT's whole-matrix lane aggregate. Every mode
+# requires the complete supported set; target modes also require explicit lane
+# completion markers. The host-only PIC10F320 invocation disables sentinels.
 TM_LABEL=${TM_LABEL:-PIC}
 TM_TARGET=${TM_TARGET:-pic-test-target-variants}
 TM_PER_VARIANT_TARGET=${TM_PER_VARIANT_TARGET:-pic-test-target}
@@ -27,6 +26,15 @@ TM_LOCKSTEP_TARGET=${TM_LOCKSTEP_TARGET:-pic-test-lockstep}
 TM_LOCKSTEP_VARIANT_ARG=${TM_LOCKSTEP_VARIANT_ARG:-PIC_LOCKSTEP_VARIANT}
 TM_IO_TARGET=${TM_IO_TARGET:-pic-test-io}
 TM_IO_VARIANT_ARG=${TM_IO_VARIANT_ARG:-PIC_IO_VARIANT}
+TM_FAULT_MARKER=${TM_FAULT_MARKER:-FAULT-INJECT PASS}
+TM_LOCKSTEP_MARKER=${TM_LOCKSTEP_MARKER:-LOCK-STEP PASS}
+TM_IO_MARKER=${TM_IO_MARKER:-TARGET-IO PASS}
+TM_FAULT_MARKER_COUNT=${TM_FAULT_MARKER_COUNT:-1}
+TM_LOCKSTEP_MARKER_COUNT=${TM_LOCKSTEP_MARKER_COUNT:-1}
+TM_IO_MARKER_COUNT=${TM_IO_MARKER_COUNT:-1}
+TM_IO_EXTRA_MARKER=${TM_IO_EXTRA_MARKER:-}
+TM_IO_EXTRA_MARKER_COUNT=${TM_IO_EXTRA_MARKER_COUNT:-0}
+TM_AGGREGATE_LANES=${TM_AGGREGATE_LANES:-0}
 read -r -a supported <<<"$TM_SUPPORTED"
 read -r -a MAKE_CMD <<<"${PROJECT_MAKE:-make}"
 [ "${#MAKE_CMD[@]}" -gt 0 ] \
@@ -41,21 +49,33 @@ printf '\n' >> "$FAKE_MAKE_LOG"
 
 target=
 marker=
+count=0
 for arg in "$@"; do
 	case "$arg" in
-		"${FAKE_FAULT_TARGET:?}") target=$arg; marker='FAULT-INJECT PASS' ;;
-		"${FAKE_LOCKSTEP_TARGET:?}") target=$arg; marker='LOCK-STEP PASS' ;;
-		"${FAKE_IO_TARGET:?}") target=$arg; marker='TARGET-IO PASS' ;;
+		"${FAKE_FAULT_TARGET:?}") target=$arg; marker=${FAKE_FAULT_MARKER:?}; count=${FAKE_FAULT_MARKER_COUNT:?} ;;
+		"${FAKE_LOCKSTEP_TARGET:?}") target=$arg; marker=${FAKE_LOCKSTEP_MARKER:?}; count=${FAKE_LOCKSTEP_MARKER_COUNT:?} ;;
+		"${FAKE_IO_TARGET:?}") target=$arg; marker=${FAKE_IO_MARKER:?}; count=${FAKE_IO_MARKER_COUNT:?} ;;
 	esac
 done
 if [ -n "$target" ] && [ "${FAKE_OMIT_MARKER:-}" != "$target" ]; then
-	printf '%s\n' "$marker"
+	i=0
+	while [ "$i" -lt "$count" ]; do printf '%s\n' "$marker"; i=$((i + 1)); done
+	if [ "$target" = "$FAKE_IO_TARGET" ] && [ -n "${FAKE_IO_EXTRA_MARKER:-}" ] \
+			&& [ "${FAKE_OMIT_EXTRA:-0}" -ne 1 ]; then
+		i=0
+		while [ "$i" -lt "${FAKE_IO_EXTRA_MARKER_COUNT:?}" ]; do
+			printf '%s\n' "$FAKE_IO_EXTRA_MARKER"
+			i=$((i + 1))
+		done
+	fi
 fi
 EOF
 chmod 750 "$fake_make"
 
 run_matrix() {
 	local matrix=$1
+	local omit_marker=${2:-}
+	local omit_extra=${3:-0}
 	local matrix_arg=()
 	if [ "$matrix" != __DEFAULT__ ]; then
 		matrix_arg+=("$TM_VARIANTS_VAR=$matrix")
@@ -67,6 +87,16 @@ run_matrix() {
 		FAKE_FAULT_TARGET="$TM_FAULT_TARGET" \
 		FAKE_LOCKSTEP_TARGET="$TM_LOCKSTEP_TARGET" \
 		FAKE_IO_TARGET="$TM_IO_TARGET" \
+		FAKE_FAULT_MARKER="$TM_FAULT_MARKER" \
+		FAKE_LOCKSTEP_MARKER="$TM_LOCKSTEP_MARKER" \
+		FAKE_IO_MARKER="$TM_IO_MARKER" \
+		FAKE_FAULT_MARKER_COUNT="$TM_FAULT_MARKER_COUNT" \
+		FAKE_LOCKSTEP_MARKER_COUNT="$TM_LOCKSTEP_MARKER_COUNT" \
+		FAKE_IO_MARKER_COUNT="$TM_IO_MARKER_COUNT" \
+		FAKE_IO_EXTRA_MARKER="$TM_IO_EXTRA_MARKER" \
+		FAKE_IO_EXTRA_MARKER_COUNT="$TM_IO_EXTRA_MARKER_COUNT" \
+		FAKE_OMIT_MARKER="$omit_marker" \
+		FAKE_OMIT_EXTRA="$omit_extra" \
 		"${MAKE_CMD[@]}" --no-print-directory -C "$ROOT" \
 			MAKE="$fake_make" "${matrix_arg[@]}" "$TM_TARGET"
 	)
@@ -81,6 +111,14 @@ run_target() {
 		FAKE_FAULT_TARGET="$TM_FAULT_TARGET" \
 		FAKE_LOCKSTEP_TARGET="$TM_LOCKSTEP_TARGET" \
 		FAKE_IO_TARGET="$TM_IO_TARGET" \
+		FAKE_FAULT_MARKER="$TM_FAULT_MARKER" \
+		FAKE_LOCKSTEP_MARKER="$TM_LOCKSTEP_MARKER" \
+		FAKE_IO_MARKER="$TM_IO_MARKER" \
+		FAKE_FAULT_MARKER_COUNT="$TM_FAULT_MARKER_COUNT" \
+		FAKE_LOCKSTEP_MARKER_COUNT="$TM_LOCKSTEP_MARKER_COUNT" \
+		FAKE_IO_MARKER_COUNT="$TM_IO_MARKER_COUNT" \
+		FAKE_IO_EXTRA_MARKER="$TM_IO_EXTRA_MARKER" \
+		FAKE_IO_EXTRA_MARKER_COUNT="$TM_IO_EXTRA_MARKER_COUNT" \
 		FAKE_OMIT_MARKER="$omit_marker" \
 		"${MAKE_CMD[@]}" --no-print-directory -C "$ROOT" \
 			MAKE="$fake_make" "$TM_VARIANT_ARG=$TM_SUBSET" \
@@ -103,10 +141,16 @@ expect_accept() {
 		|| { printf 'FAIL: %s matrix ran %d variants, expected %d\n' \
 			"$label" "${#calls[@]}" "${#expected[@]}" >&2; exit 1; }
 	for i in "${!expected[@]}"; do
-		[[ "${calls[$i]}" == *"<$TM_VARIANT_ARG=${expected[$i]}>"* \
-			&& "${calls[$i]}" == *"<$TM_PER_VARIANT_TARGET>"* ]] \
-			|| { printf 'FAIL: %s matrix call %d was wrong: %s\n' \
-				"$label" "$i" "${calls[$i]}" >&2; exit 1; }
+		if [ "$TM_AGGREGATE_LANES" -eq 1 ]; then
+			[[ "${calls[$i]}" == *"<${expected[$i]}>"* ]] \
+				|| { printf 'FAIL: %s matrix lane %d was wrong: %s\n' \
+					"$label" "$i" "${calls[$i]}" >&2; exit 1; }
+		else
+			[[ "${calls[$i]}" == *"<$TM_VARIANT_ARG=${expected[$i]}>"* \
+				&& "${calls[$i]}" == *"<$TM_PER_VARIANT_TARGET>"* ]] \
+				|| { printf 'FAIL: %s matrix call %d was wrong: %s\n' \
+					"$label" "$i" "${calls[$i]}" >&2; exit 1; }
+		fi
 	done
 	checks=$((checks + 1))
 }
@@ -128,7 +172,33 @@ expect_sentinels() {
 	local output i
 	local targets=("$TM_FAULT_TARGET" "$TM_LOCKSTEP_TARGET" "$TM_IO_TARGET")
 	local variant_args=("$TM_FAULT_VARIANT_ARG" "$TM_LOCKSTEP_VARIANT_ARG" "$TM_IO_VARIANT_ARG")
-	local markers=('FAULT-INJECT PASS' 'LOCK-STEP PASS' 'TARGET-IO PASS')
+	local markers=("$TM_FAULT_MARKER" "$TM_LOCKSTEP_MARKER" "$TM_IO_MARKER")
+
+	if [ "$TM_AGGREGATE_LANES" -eq 1 ]; then
+		for i in "${!targets[@]}"; do
+			if output=$(run_matrix __DEFAULT__ "${targets[$i]}" 2>&1); then
+				printf 'FAIL: %s matrix accepted missing %s\n' \
+					"$TM_LABEL" "${markers[$i]}" >&2
+				exit 1
+			fi
+			[[ "$output" == *"did not report '${markers[$i]}'"* ]] \
+				|| { printf 'FAIL: %s matrix reported the wrong missing-marker error: %s\n' \
+					"$TM_LABEL" "$output" >&2; exit 1; }
+			checks=$((checks + 1))
+		done
+		if [ -n "$TM_IO_EXTRA_MARKER" ]; then
+			if output=$(run_matrix __DEFAULT__ "" 1 2>&1); then
+				printf 'FAIL: %s matrix accepted missing %s\n' \
+					"$TM_LABEL" "$TM_IO_EXTRA_MARKER" >&2
+				exit 1
+			fi
+			[[ "$output" == *"did not report '$TM_IO_EXTRA_MARKER'"* ]] \
+				|| { printf 'FAIL: %s matrix reported the wrong extra-marker error: %s\n' \
+					"$TM_LABEL" "$output" >&2; exit 1; }
+			checks=$((checks + 1))
+		fi
+		return
+	fi
 
 	if ! output=$(run_target 2>&1); then
 		printf 'FAIL: %s complete target aggregate was rejected: %s\n' "$TM_LABEL" "$output" >&2
@@ -161,7 +231,11 @@ expect_sentinels() {
 	done
 }
 
-expect_accept default __DEFAULT__ "${supported[@]}"
+if [ "$TM_AGGREGATE_LANES" -eq 1 ]; then
+	expect_accept default __DEFAULT__ "$TM_FAULT_TARGET" "$TM_LOCKSTEP_TARGET" "$TM_IO_TARGET"
+else
+	expect_accept default __DEFAULT__ "${supported[@]}"
+fi
 expect_reject incomplete "$TM_SUBSET" \
 	"$TM_VARIANTS_VAR must contain every supported name"
 expect_reject empty "" "$TM_VARIANTS_VAR must not be empty"
