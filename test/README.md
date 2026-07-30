@@ -395,9 +395,11 @@ non-strict default so development on one substrate stays practical.
 `STRICT_TOOLS=1` changes the default to fail closed, and full-tool CI also pins
 `MUTATION_ALLOW_SKIP=0`. An explicit `MUTATION_ALLOW_SKIP` value takes
 precedence: `ci-local.sh --skip-pic` retains strict host/AVR gates but
-deliberately passes `1` for its partial mutation run. The summary counts PIC and
-ATtiny202 skips separately, so a partial run always says which substrate went
-unexercised rather than reporting one anonymous number.
+deliberately passes `1` for its partial mutation run, as does
+`--skip-attiny202`; specifying either or both target-toolchain skips must not
+make the intentionally partial `test-long` fail closed. The summary counts PIC
+and ATtiny202 skips separately, so a partial run always says which substrate
+went unexercised rather than reporting one anonymous number.
 
 The PIC mutation set includes target-level faults for the new coverage: collapsed
 TMR2IF cadence, exact-TRISA predicate removal, output-latch mask narrowing,

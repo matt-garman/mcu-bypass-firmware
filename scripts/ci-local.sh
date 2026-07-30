@@ -506,10 +506,11 @@ if [ "$PR_MODE" -eq 1 ]; then
 	run_step "verify job: make test" make test
 else
 	# test-long contains mutation testing. Keep every host/AVR optional gate under
-	# STRICT_TOOLS=1, but honor --skip-pic by explicitly allowing only the
-	# unavailable PIC mutation subset to be reported as skipped.
-	if [ "$SKIP_PIC" -eq 1 ]; then
-		run_step "verify + stress: make test-long (PIC mutations may skip)" \
+	# STRICT_TOOLS=1, but honor either explicit target-toolchain skip by selecting
+	# the mutation driver's explicitly partial mode; its summary still reports
+	# PIC and ATtiny202 skips separately.
+	if [ "$SKIP_PIC" -eq 1 ] || [ "$SKIP_ATTINY202" -eq 1 ]; then
+		run_step "verify + stress: make test-long (skipped-target mutations may skip)" \
 			make test-long MUTATION_ALLOW_SKIP=1
 	else
 		run_step "verify + stress: make test-long" \

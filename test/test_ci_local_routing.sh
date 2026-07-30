@@ -31,13 +31,17 @@ fail() {
 	exit 1
 }
 
-mkdir -p "$fakebin" "$work/dfp/pic/include/proc" "$work/gpsim-inc"
+mkdir -p "$fakebin" "$work/dfp/pic/include/proc" "$work/gpsim-inc" \
+	"$work/xt-dfp/gcc/dev/attiny202/device-specs" \
+	"$work/xt-dfp/include/avr" "$work/yasimavr-venv/bin"
 # Both device headers: assert_pic_toolchain checks each chip through its own
 # PIC_*/PIC320_* pair, so a fake DFP with only one of them would fail the assert
 # before any routing was exercised.
 : > "$work/dfp/pic/include/proc/pic10f322.h"
 : > "$work/dfp/pic/include/proc/pic10f320.h"
 : > "$work/gpsim-inc/sim_context.h"
+: > "$work/xt-dfp/gcc/dev/attiny202/device-specs/specs-attiny202"
+: > "$work/xt-dfp/include/avr/iotn202.h"
 
 cat > "$fakebin/git" <<'EOF'
 #!/usr/bin/env bash
@@ -82,6 +86,23 @@ if [ "${1:-}" = test-long ]; then
 	[ "$resolved" = "$requested" ] \
 		|| { printf 'mutation policy resolved incorrectly: %s\n' "$resolved" >&2; exit 66; }
 fi
+
+case "${1:-}" in
+	attiny202-sim)
+		for _ in 1 2 3; do printf 'SIM PASS\n'; done
+		;;
+	attiny202-fault)
+		for _ in 1 2 3; do printf 'FAULT PASS\n'; done
+		;;
+	attiny202-lockstep)
+		for _ in 1 2 3; do
+			printf 'LOCKSTEP PASS\nco-simulated\nco-simulated\n'
+		done
+		;;
+	attiny202-soak)
+		for _ in 1 2 3; do printf 'SOAK PASS\n'; done
+		;;
+esac
 EOF
 
 # cc/clang/clang-tidy/cbmc/gcov/python3 join the original three so the host/AVR
@@ -89,7 +110,7 @@ EOF
 # regression would start depending on which analyzers happen to be installed on
 # the box running it, and would fail on a machine that legitimately lacks, say,
 # cbmc -- turning a routing test into a toolchain test.
-for tool in gpsim cppcheck pkg-config cc clang clang-tidy cbmc gcov python3; do
+for tool in gpsim cppcheck pkg-config cc clang clang-tidy cbmc gcov python3 avr-objdump; do
 	cat > "$fakebin/$tool" <<'EOF'
 #!/usr/bin/env bash
 exit 0
@@ -110,7 +131,11 @@ cat > "$work/xc8" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-chmod 750 "$fakebin"/* "$work/xc8"
+cat > "$work/yasimavr-venv/bin/python" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod 750 "$fakebin"/* "$work/xc8" "$work/yasimavr-venv/bin/python"
 
 run_ci() {
 	: > "$log"
@@ -120,57 +145,85 @@ run_ci() {
 		PIC320_CC="$work/xc8" PIC320_DFP="$work/dfp" \
 		PIC_SOAK_GPSIM_INC="$work/gpsim-inc" \
 		SIMAVR_INC="$work/simavr-inc" \
-		"$CI_LOCAL" --no-clean --skip-attiny202 "$@" 2>&1
+		XT_DFP="$work/xt-dfp" YASIMAVR_VENV="$work/yasimavr-venv" \
+		"$CI_LOCAL" --no-clean "$@" 2>&1
 }
+
+expect_calls() {
+	local label=$1 index=0
+	shift
+	[ "${#calls[@]}" -eq "$#" ] \
+		|| fail "$label executed ${#calls[@]} Make commands, expected $#"
+	for expected in "$@"; do
+		[ "${calls[$index]}" = "$expected" ] \
+			|| fail "$label command $((index + 1)) was '${calls[$index]}', expected '$expected'"
+		index=$((index + 1))
+	done
+}
+
+pic_calls=(
+	$'STRICT_TOOLS=1\tpic-test'
+	$'STRICT_TOOLS=1\tpic-test-target-variants'
+	$'STRICT_TOOLS=1\tpic320-test'
+	$'STRICT_TOOLS=1\tpic320-test-target-variants'
+)
+xt_calls=(
+	$'STRICT_TOOLS=1\tattiny202-test'
+	$'STRICT_TOOLS=1\tattiny202-sim'
+	$'STRICT_TOOLS=1\tattiny202-fault'
+	$'STRICT_TOOLS=1\tattiny202-lockstep'
+	$'STRICT_TOOLS=1\tattiny202-soak\tXT_SOAK_DURATION_MS=300000\tXT_SOAK_PROGRESS_INTERVAL_MS=300000'
+)
+build_call=$'STRICT_TOOLS=1\tall13\tall85\tall45'
+strict_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=0'
+partial_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=1'
+
+if ! output=$(run_ci); then
+	fail "push without skips failed: $output"
+fi
+mapfile -t calls < "$log"
+expect_calls "push without skips" "${pic_calls[@]}" "$build_call" \
+	"${xt_calls[@]}" "$strict_stress"
+[[ "$output" != *"job was skipped"* ]] \
+	|| fail "push without skips emitted a skipped-job warning"
+checks=$((checks + 1))
 
 if ! output=$(run_ci --skip-pic); then
 	fail "push --skip-pic failed: $output"
 fi
-mapfile -t lines <<<"$output"
 mapfile -t calls < "$log"
-[ "${#calls[@]}" -eq 2 ] \
-	|| fail "push --skip-pic executed ${#calls[@]} Make commands, expected 2"
-[ "${calls[0]}" = $'STRICT_TOOLS=1\tall13\tall85\tall45' ] \
-	|| fail "push --skip-pic routed the build matrix incorrectly: ${calls[0]}"
-[ "${calls[1]}" = $'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=1' ] \
-	|| fail "push --skip-pic did not allow only the partial mutation run: ${calls[1]}"
-[[ "${lines[*]}" == *"PIC job was skipped"* ]] \
-	|| fail "push --skip-pic omitted its non-CI warning"
+expect_calls "push --skip-pic" "$build_call" "${xt_calls[@]}" "$partial_stress"
+[[ "$output" == *"PIC job was skipped"* && "$output" != *"ATtiny202 job was skipped"* ]] \
+	|| fail "push --skip-pic emitted the wrong skipped-job warnings"
 checks=$((checks + 1))
 
-if ! output=$(run_ci); then
-	fail "full push routing failed: $output"
+if ! output=$(run_ci --skip-attiny202); then
+	fail "push --skip-attiny202 failed: $output"
 fi
-mapfile -t lines <<<"$output"
 mapfile -t calls < "$log"
-# Six, not four: the pic job covers BOTH chips (merge plan §11/D3 -- one job, one
-# XC8 install), so the 10F320 pre-hardware and target aggregates must appear here
-# too. Asserting the exact count is what makes a silently dropped chip a failure
-# rather than a shorter, greener run.
-[ "${#calls[@]}" -eq 6 ] \
-	|| fail "full push executed ${#calls[@]} Make commands, expected 6"
-[ "${calls[0]}" = $'STRICT_TOOLS=1\tpic-test' ] \
-	&& [ "${calls[1]}" = $'STRICT_TOOLS=1\tpic-test-target-variants' ] \
-	|| fail "full push omitted or reordered the PIC10F322 gates"
-[ "${calls[2]}" = $'STRICT_TOOLS=1\tpic320-test' ] \
-	&& [ "${calls[3]}" = $'STRICT_TOOLS=1\tpic320-test-target-variants' ] \
-	|| fail "full push omitted or reordered the PIC10F320 gates"
-[ "${calls[4]}" = $'STRICT_TOOLS=1\tall13\tall85\tall45' ] \
-	|| fail "full push routed the build matrix incorrectly: ${calls[4]}"
-[ "${calls[5]}" = $'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=0' ] \
-	|| fail "full push did not keep mutation fail-closed: ${calls[5]}"
+expect_calls "push --skip-attiny202" "${pic_calls[@]}" "$build_call" "$partial_stress"
+[[ "$output" == *"ATtiny202 job was skipped"* && "$output" != *"PIC job was skipped"* ]] \
+	|| fail "push --skip-attiny202 emitted the wrong skipped-job warnings"
 checks=$((checks + 1))
 
-if ! output=$(run_ci --pr --skip-pic); then
-	fail "PR --skip-pic routing failed: $output"
+if ! output=$(run_ci --skip-pic --skip-attiny202); then
+	fail "push with both target toolchains skipped failed: $output"
 fi
-mapfile -t lines <<<"$output"
+mapfile -t calls < "$log"
+expect_calls "push with both skips" "$build_call" "$partial_stress"
+[[ "$output" == *"PIC job was skipped"* && "$output" == *"ATtiny202 job was skipped"* ]] \
+	|| fail "push with both skips omitted a skipped-job warning"
+checks=$((checks + 1))
+
+if ! output=$(run_ci --pr --skip-pic --skip-attiny202); then
+	fail "PR with both skips routing failed: $output"
+fi
 mapfile -t calls < "$log"
 [ "${#calls[@]}" -eq 2 ] \
-	|| fail "PR --skip-pic executed ${#calls[@]} Make commands, expected 2"
+	|| fail "PR with both skips executed ${#calls[@]} Make commands, expected 2"
 [ "${calls[0]}" = $'STRICT_TOOLS=1\tall13\tall85\tall45' ] \
 	&& [ "${calls[1]}" = $'STRICT_TOOLS=1\ttest' ] \
-	|| fail "PR --skip-pic did not route the strict non-mutation suite"
+	|| fail "PR with both skips did not route the strict non-mutation suite"
 [[ "${calls[1]}" != *"MUTATION_ALLOW_SKIP"* ]] \
 	|| fail "PR mode unexpectedly configured mutation testing"
 checks=$((checks + 1))
