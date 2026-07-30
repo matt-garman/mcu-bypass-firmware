@@ -71,7 +71,7 @@ described as core-equivalence comparisons.
 | **Target fault injection** | The same defensive-layer argument on the real image in libgpsim: corrupting every guarded SFR/SRAM location and the required `TRISA` directions forces exactly one real watchdog reset | `pic320-test-fault-target` |
 | **Target I/O** | Exact `TRISA`, physical `PORTA` following every `LATA` transition, each variant's complete startup/engage/bypass sequence, and mute/relay pulse widths measured from simulator cycles | `pic320-test-io` |
 | **CONFIG word** | The emitted CONFIG word matches design intent — a wrong bit is invisible to every other test and would only bite on silicon | `pic320-test-config` |
-| **Static analysis** | cppcheck + MISRA-C:2012, across all three output variants | `pic320-analyze` |
+| **Static analysis** | cppcheck + MISRA-C:2012 for one selected output branch; the canonical aggregate sweeps all three | `pic320-analyze` (selected), `pic320-test` (all) |
 | **Soak** | 24-hour-equivalent libgpsim soak per output stage, as part of release qualification | `pic320-test-soak` |
 | **Mutation** | Deliberate firmware faults injected and required to be *killed* — proof the lanes above fail on broken code, not merely pass on correct code | `test-mutation` |
 
@@ -210,5 +210,5 @@ lives here; the engineering detail stays where it belongs:
 | Toolchain versions, build commands, flash budget gate | `TOOLCHAIN.adoc` |
 | Test-suite structure, per-lane rationale, simulator gaps | `test/README.md` |
 | Flashing, image naming, release reproduction | `release/README.md` |
-| MISRA-C:2012 status and the two documented deviations | `MISRA_COMPLIANCE.md` |
+| MISRA-C:2012 status, suppression rationale and analyzer accommodations | `MISRA_COMPLIANCE.md` |
 | How this target was merged in, and every decision made | `docs/pic10f320_merge_plan.md` |
