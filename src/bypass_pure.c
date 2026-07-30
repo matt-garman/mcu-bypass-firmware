@@ -57,7 +57,7 @@ debounce_step_result_t debounce_step(debounce_context_t const ctx) {
                     if (BYPASS == ctx.effect_state)
                     {
                         res.effect_state = ENGAGED;
-                    } else { // ENGAGED == res.ctx.effect_state
+                    } else { // ENGAGED == ctx.effect_state
                         res.effect_state = BYPASS;
                     }
                 }

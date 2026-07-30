@@ -269,12 +269,12 @@ static void hw_x4053_ctl_low(void)  { LATA |=  (uint8_t)(1U << CD4053_PIN); }
 
 static void hw_set_bypass_state(void) {
     hw_led_pin_set_low(); // dark status LED
-    hw_x4053_ctl_high(); // set CD4053 pin high
+    hw_x4053_ctl_high(); // drive MCU CD4053_PIN low
 }
 
 static void hw_set_engaged_state(void) {
     hw_led_pin_set_high(); // light status LED
-    hw_x4053_ctl_low();   // set CD4053 pin low
+    hw_x4053_ctl_low();   // drive MCU CD4053_PIN high
 }
 
 //////////////////////////////////////////////////////////////////////////////
