@@ -1189,11 +1189,16 @@ PIC_SOAK_LIVENESS_INTERVAL_MS ?= 60000
 PIC_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
 PIC_SOAK_COMBINATION_NAME ?= standalone
 PIC_PIN_LOOKUP_HDR = test/pic/find_pin_exact.h
+# Shared libgpsim bring-up consumed by ALL FOUR harnesses (io, lock-step, fault,
+# soak) on BOTH parts. It is a prerequisite of every one of them below: an edit
+# here changes what every PIC gpsim binary does, so none may be stale for it.
+PIC_GPSIM_BOOTSTRAP_HDR = test/pic/gpsim_bootstrap.h
 PIC_FAULT_CORE_HDR = test/pic/test_fault_pic_core.h
 PIC_IO_CORE_HDR = test/pic/test_io_pic_core.h
 PIC_LOCKSTEP_CORE_HDR = test/pic/test_lockstep_pic_core.h
 PIC_SOAK_SRC = test/pic/test_soak_pic.cc
-PIC_SOAK_DEPS = $(PIC_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) test/soak_timing_config.h
+PIC_SOAK_DEPS = $(PIC_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
+                test/soak_timing_config.h
 PIC_SOAK_BIN = test/pic/test_soak_pic
 PIC_SOAK_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_SOAK_VARIANT)_$(PIC_TAG).hex
 
@@ -1312,7 +1317,8 @@ PIC_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2
 		-DF_CPU_HZ=$(PIC_XTAL) -D$(macro_$(PIC_FAULT_VARIANT)) $(PIC_FAULT_CTX_DEF) \
 		$(PIC_FAULT_SRC) -o $(PIC_FAULT_BIN) -lgpsim
 
-$(PIC_FAULT_BIN): $(PIC_FAULT_SRC) $(PIC_FAULT_CORE_HDR) $(PIC_PIN_LOOKUP_HDR)
+$(PIC_FAULT_BIN): $(PIC_FAULT_SRC) $(PIC_FAULT_CORE_HDR) $(PIC_PIN_LOOKUP_HDR) \
+                  $(PIC_GPSIM_BOOTSTRAP_HDR)
 	$(PIC_FAULT_COMPILE)
 
 .PHONY: pic-test-fault
@@ -1374,7 +1380,7 @@ PIC_LOCKSTEP_COMPILE = \
 			$(PIC_LOCKSTEP_SRC) $(PIC_LOCKSTEP_MODEL_OBJ) -o $(PIC_LOCKSTEP_BIN) -lgpsim
 
 $(PIC_LOCKSTEP_BIN): $(PIC_LOCKSTEP_SRC) $(PIC_LOCKSTEP_CORE_HDR) \
-                     $(PIC_PIN_LOOKUP_HDR) $(PURE_HOST_DEP)
+                     $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) $(PURE_HOST_DEP)
 	$(PIC_LOCKSTEP_COMPILE)
 
 .PHONY: pic-test-lockstep
@@ -1423,7 +1429,8 @@ PIC_IO_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0)
 		-DF_CPU_HZ=$(PIC_XTAL) -D$(macro_$(PIC_IO_VARIANT)) \
 		$(PIC_IO_SRC) -o $(PIC_IO_BIN) -lgpsim
 
-$(PIC_IO_BIN): $(PIC_IO_SRC) $(PIC_IO_CORE_HDR) $(PIC_PIN_LOOKUP_HDR)
+$(PIC_IO_BIN): $(PIC_IO_SRC) $(PIC_IO_CORE_HDR) $(PIC_PIN_LOOKUP_HDR) \
+               $(PIC_GPSIM_BOOTSTRAP_HDR)
 	$(PIC_IO_COMPILE)
 
 .PHONY: pic-test-io
@@ -4326,7 +4333,8 @@ PIC320_SOAK_LIVENESS_INTERVAL_MS ?= 60000
 PIC320_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
 PIC320_SOAK_COMBINATION_NAME     ?= standalone
 PIC320_SOAK_SRC  = $(PIC_SOAK_SRC)
-PIC320_SOAK_DEPS = $(PIC320_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) test/soak_timing_config.h
+PIC320_SOAK_DEPS = $(PIC320_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) \
+                   $(PIC_GPSIM_BOOTSTRAP_HDR) test/soak_timing_config.h
 PIC320_SOAK_BIN  = $(PIC320_BUILD_DIR)/test_soak_pic
 PIC320_SOAK_HEX  = $(call pic320_hex_of,$(PIC320_SOAK_VARIANT))
 

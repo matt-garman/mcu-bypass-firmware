@@ -306,6 +306,8 @@ validate_pic320_sandbox() {
         test/pic/footswitch_toggle.stc \
         test/pic/power_on_pressed.stc \
         test/pic/find_pin_exact.h \
+        test/pic/gpsim_bootstrap.h \
+        test/pic/gpsim_wrapper_common.sh \
         test/pic/test_fault_pic_core.h \
         test/pic/test_io_pic_core.h \
         test/pic/test_lockstep_pic_core.h \

@@ -59,6 +59,9 @@ cp "$ROOT/Makefile" "$repo/Makefile"
 # chips' soak rules, so the scratch repo needs it or Make stops before reaching
 # the property under test.
 : > "$repo/test/pic/find_pin_exact.h"
+# $(PIC_GPSIM_BOOTSTRAP_HDR) -- likewise: the shared libgpsim bring-up is a
+# prerequisite of both chips' soak rules (and of the io/lock-step/fault rules).
+: > "$repo/test/pic/gpsim_bootstrap.h"
 
 # Records the full argv, then writes the -o target so Make sees a fresh artifact.
 cat > "$tools/cxx" <<'EOF'

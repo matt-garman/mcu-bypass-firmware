@@ -55,18 +55,17 @@
 #include <stdint.h>
 
 #include <glib.h>                 // guint64
-#include "interface.h"            // initialize_gpsim_core(), gpsim_set_bulk_mode()
-#include "sim_context.h"          // CSimulationContext
 #include "processor.h"            // Processor (pma, rma, run)
 #include "pic-processor.h"        // pic_processor
-#include "modules.h"              // Module::get_pin/get_pin_name/get_pin_count
-#include "ioports.h"              // IOPIN
-#include "stimuli.h"              // Stimulus_Node, source_stimulus
 #include "gpsim_time.h"           // get_cycles()
 #include "breakpoints.h"          // get_bp(), set_notify_break
 #include "trigger.h"              // TriggerObject
 #include "registers.h"            // Register::get_value()
-#include "pic/find_pin_exact.h"
+
+// gpsim bring-up shared with the io / fault / soak harnesses: NullBuf,
+// g_cpu / g_fsw_node / g_fsw_src, FOOTSW_PIN_NAME, gpsim_bootstrap_cpu(),
+// gpsim_attach_footswitch() and footsw_set().
+#include "pic/gpsim_bootstrap.h"
 
 // The reference model (shared with test-equiv / the formal proofs). C linkage:
 // bypass_pure.c is compiled as C and linked in by the Makefile.
@@ -97,7 +96,6 @@ extern "C" {
 #endif
 #define CYCLES_PER_MS  ((F_CPU_HZ / 4UL) / 1000UL)   // 500 @ 2 MHz
 #define CLRWDT_OPCODE  0x0064u                        // 14-bit classic mid-range CLRWDT
-#define FOOTSW_PIN_NAME "ra3"
 
 // ctx_ field offsets (struct order; each a 1-byte object -- the Makefile asserts
 // `_ctx_: ds 3` in the .s, so these offsets are pinned).
@@ -119,12 +117,8 @@ extern "C" {
 #endif
 
 // ---- Sim globals ------------------------------------------------------------
-struct NullBuf : std::streambuf { int overflow(int c) override { return c; } };
-static NullBuf g_nullbuf;
-
-static pic_processor   *g_cpu      = nullptr;
-static Stimulus_Node   *g_fsw_node = nullptr;
-static source_stimulus *g_fsw_src  = nullptr;
+// NullBuf/g_nullbuf and g_cpu / g_fsw_node / g_fsw_src come from
+// pic/gpsim_bootstrap.h.
 static unsigned  g_checks  = 0;
 static unsigned  g_fails   = 0;
 
@@ -176,10 +170,7 @@ static int reachable_states_unvisited(void) {
 }
 
 // ---- Helpers ----------------------------------------------------------------
-static void footsw_set(int pressed) {  // 1 = pressed (RA3 low), 0 = released (high)
-    g_fsw_src->set_Vth(pressed ? 0.0 : 5.0);
-    g_fsw_node->update();
-}
+// footsw_set() comes from pic/gpsim_bootstrap.h.
 static uint8_t rd(unsigned addr) {
     Register *r = g_cpu->rma.get_register(addr);
     return r ? (uint8_t)r->get_value() : 0xFFu;
@@ -310,31 +301,14 @@ static void build_stimulus(void) {
 }
 
 int main() {
-    std::cout.rdbuf(&g_nullbuf);                 // silence gpsim console chatter
-    initialize_gpsim_core();
-    gpsim_set_bulk_mode(1);
-    CSimulationContext *ctx = CSimulationContext::GetContext();
-
-    Processor *p = nullptr;
-    ctx->LoadProgram(FW_PATH, PROC_NAME, &p, "u1");
-    if (p == nullptr) p = ctx->GetActiveCPU();
-    if (p == nullptr) { fprintf(stderr, "FATAL: could not load %s on %s\n", FW_PATH, PROC_NAME); return 1; }
-    g_cpu = static_cast<pic_processor *>(p);
+    if (!gpsim_bootstrap_cpu(FW_PATH, PROC_NAME)) return 1;
 
     printf("LOCK-STEP START: fw=%s proc=%s FOSC=%lu ctx_=0x%03x iters=%u\n",
            FW_PATH, PROC_NAME, (unsigned long)F_CPU_HZ, (unsigned)CTX_ADDR, (unsigned)LOCKSTEP_ITERS);
     fflush(stdout);
 
     // Footswitch stimulus source on RA3.
-    IOPIN *ra3 = find_pin_exact(g_cpu, FOOTSW_PIN_NAME);
-    if (ra3 == nullptr) { fprintf(stderr, "FATAL: pin %s not found\n", FOOTSW_PIN_NAME); return 1; }
-    g_fsw_src = new source_stimulus();
-    g_fsw_src->set_digital();
-    g_fsw_src->set_Zth(250.0);                   // dominate RA3's weak pull-up
-    g_fsw_src->set_Vth(5.0);                     // released at power-on
-    g_fsw_node = new Stimulus_Node("fsw");
-    g_fsw_node->attach_stimulus(g_fsw_src);
-    g_fsw_node->attach_stimulus(ra3);
+    if (!gpsim_attach_footswitch(FOOTSW_PIN_NAME, PROC_NAME)) return 1;
 
     // Power-on RELEASED + settle, so the anchor is the stable released init state.
     footsw_set(0);

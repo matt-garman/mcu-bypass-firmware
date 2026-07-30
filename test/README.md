@@ -86,7 +86,12 @@ test/
                                                         (make pic-coverage-check-fw)
             test_config_pic.c    CONFIG-word check     (make pic-test-config)
             *.stc + run_gpsim_*  register-level gpsim  (make pic-test-gpsim)
+            gpsim_wrapper_common.sh
+                                  scaffolding both run_gpsim_* wrappers source
+                                  (sourced, not executable)
             find_pin_exact.h     shared exact gpsim pin-name lookup
+            gpsim_bootstrap.h    shared libgpsim bring-up: core init, image
+                                  load, footswitch stimulus, footsw_set()
             test_fault_pic.cc    PIC10F322 fault adapter (make pic-test-fault)
             test_lockstep_pic.cc PIC10F322 HEX/model lock-step adapter
                                                         (make pic-test-lockstep)

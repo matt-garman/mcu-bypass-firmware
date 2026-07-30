@@ -19,16 +19,15 @@
 #include <iostream>
 
 #include <glib.h>
-#include "interface.h"
-#include "sim_context.h"
 #include "processor.h"
 #include "pic-processor.h"
-#include "modules.h"
-#include "ioports.h"
-#include "stimuli.h"
 #include "gpsim_time.h"
 #include "registers.h"
-#include "pic/find_pin_exact.h"
+
+// gpsim bring-up shared with the lock-step / fault / soak harnesses: NullBuf,
+// g_cpu / g_fsw_node / g_fsw_src, FOOTSW_PIN_NAME, gpsim_bootstrap_cpu(),
+// gpsim_attach_footswitch() and footsw_set().
+#include "pic/gpsim_bootstrap.h"
 
 #ifndef PIC_IO_DEFAULT_FW_PATH
 #  error "PIC_IO_DEFAULT_FW_PATH must be defined by the part adapter"
@@ -67,9 +66,6 @@
 #define MAX_RESUMES_PER_CYCLE 64
 #define PULSE_TOLERANCE_CYCLES (CYCLES_PER_MS / 5u)  // +/-0.2 ms
 
-struct NullBuf : std::streambuf { int overflow(int c) override { return c; } };
-static NullBuf g_nullbuf;
-
 struct Transition {
     unsigned lata;
     guint64 cycle;
@@ -87,9 +83,7 @@ struct IoTrace {
     explicit IoTrace(const char *trace_name) : name(trace_name) {}
 };
 
-static pic_processor *g_cpu = nullptr;
-static Stimulus_Node *g_fsw_node = nullptr;
-static source_stimulus *g_fsw_src = nullptr;
+// g_cpu / g_fsw_node / g_fsw_src come from pic/gpsim_bootstrap.h.
 static Register *g_porta = nullptr;
 static Register *g_trisa = nullptr;
 static Register *g_lata = nullptr;
@@ -109,10 +103,7 @@ static unsigned reg8(Register *r) {
     return r->get_value() & 0xFFu;
 }
 
-static void footsw_set(bool pressed) {
-    g_fsw_src->set_Vth(pressed ? 0.0 : 5.0);
-    g_fsw_node->update();
-}
+// footsw_set() comes from pic/gpsim_bootstrap.h.
 
 // Advance one instruction cycle. A cycle breakpoint, unlike step_one(), keeps
 // gpsim peripherals active while still allowing every output state to be seen.
@@ -229,19 +220,7 @@ static void check_pulse(const IoTrace &trace, unsigned pulse_state,
 }
 
 int main(void) {
-    std::cout.rdbuf(&g_nullbuf);
-    initialize_gpsim_core();
-    gpsim_set_bulk_mode(1);
-    CSimulationContext *context = CSimulationContext::GetContext();
-
-    Processor *processor = nullptr;
-    context->LoadProgram(FW_PATH, PROC_NAME, &processor, "u1");
-    if (processor == nullptr) processor = context->GetActiveCPU();
-    if (processor == nullptr) {
-        fprintf(stderr, "FATAL: gpsim could not load %s on %s\n", FW_PATH, PROC_NAME);
-        return 1;
-    }
-    g_cpu = static_cast<pic_processor *>(processor);
+    if (!gpsim_bootstrap_cpu(FW_PATH, PROC_NAME)) return 1;
 
     g_porta = g_cpu->rma.get_register(PORTA_ADDR);
     g_trisa = g_cpu->rma.get_register(TRISA_ADDR);
@@ -252,19 +231,8 @@ int main(void) {
         return 1;
     }
 
-    IOPIN *ra3 = find_pin_exact(g_cpu, "ra3");
-    if (ra3 == nullptr) {
-        fprintf(stderr, "FATAL: pin ra3 not found on %s\n", PROC_NAME);
-        return 1;
-    }
-    g_fsw_src = new source_stimulus();
-    g_fsw_src->set_digital();
-    g_fsw_src->set_Zth(250.0);
-    g_fsw_src->set_Vth(5.0);
-    g_fsw_node = new Stimulus_Node("fsw");
-    g_fsw_node->attach_stimulus(g_fsw_src);
-    g_fsw_node->attach_stimulus(ra3);
-    footsw_set(false);
+    if (!gpsim_attach_footswitch(FOOTSW_PIN_NAME, PROC_NAME)) return 1;
+    footsw_set(0);
 
     printf("TARGET-IO START: fw=%s proc=%s FOSC=%lu\n",
            FW_PATH, PROC_NAME, (unsigned long)F_CPU_HZ);

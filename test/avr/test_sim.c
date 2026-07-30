@@ -247,6 +247,12 @@ static uint32_t    g_addr_debounce      = 0;
 // state as a single file-scope context object (`ctx`) instead of three separate
 // globals. The per-field addresses above are then derived from this base.
 static uint32_t    g_addr_ctx           = 0;
+// First SRAM byte ABOVE the static data (.data + .bss), from the linker's
+// __bss_end / _end. This is the ceiling the stack must not reach, and it is the
+// reference point for the stack high-water-mark margin. Taken from the ELF
+// rather than computed from the globals above so that a future static grows the
+// floor automatically instead of silently loosening the gate.
+static uint32_t    g_addr_bss_end       = 0;
 
 // --- test bookkeeping ------------------------------------------------------
 // (unused in the TRACE build, which only generates a VCD waveform)
@@ -407,7 +413,9 @@ static int sim_reset_raw(int footsw_pressed_at_power_on, int settle) {
     // SRAM index used by g_avr->data[].
     g_addr_program_state = g_addr_effect_state = 0;
     g_addr_timer_isr = g_addr_debounce = g_addr_ctx = 0;
+    g_addr_bss_end = 0;
 #if defined(ELF_SYMBOLS) && ELF_SYMBOLS
+    uint32_t addr_end_fallback = 0;
     for (uint32_t i = 0; i < fw.symbolcount; ++i) {
         const char *name = fw.symbol[i]->symbol;
         uint32_t    a    = fw.symbol[i]->addr & 0xFFFFu;
@@ -417,7 +425,13 @@ static int sim_reset_raw(int footsw_pressed_at_power_on, int settle) {
         else if (strcmp(name, "debounce_counter_") == 0) g_addr_debounce      = a;
         else if (strcmp(name, "ctx")               == 0) g_addr_ctx           = a;
         else if (strcmp(name, "ctx_")              == 0) g_addr_ctx           = a;
+        // Top of the static data. avr-libc's linker script emits both; prefer
+        // __bss_end and keep _end only as a fallback, since _end also moves with
+        // the (unused here) heap base on parts that have one.
+        else if (strcmp(name, "__bss_end")         == 0) g_addr_bss_end       = a;
+        else if (strcmp(name, "_end")              == 0) addr_end_fallback    = a;
     }
+    if (g_addr_bss_end == 0) g_addr_bss_end = addr_end_fallback;
     // If the firmware keeps its debounce state in one file-scope context struct
     // (debounce_context_t ctx) rather than three separate globals, derive the
     // per-field addresses from the struct base. The firmware builds with
@@ -1956,6 +1970,12 @@ static void test_clean_press_phase_jitter(void) {
 // deepest stack address. Asserts adequate margin between the stack bottom and
 // the BSS region.
 //
+// The margin is measured against __bss_end (the first byte above the static
+// data), NOT against the bottom of SRAM: the static data sits at the bottom, so
+// measuring to 0x60 would count those bytes as free and report a margin larger
+// than the stack actually has. The reported number is the count of genuinely
+// free bytes between the two.
+//
 // Limitation: a register or local variable that coincidentally holds 0xAA
 // during a stack frame produces a false-clean canary byte, making the result
 // a conservative (optimistic) estimate. For a small MCU with ~4 bytes of BSS
@@ -1967,6 +1987,15 @@ static void test_stack_high_water_mark(void) {
 
     const uint32_t sram_bot = 0x60u;         // first SRAM byte on AVR (data space)
     const uint32_t sram_top = g_avr->ramend; // last  SRAM byte (0x9F t13a, 0x25F t85)
+
+    // Fail closed: without __bss_end there is no reference point for the margin,
+    // and falling back to sram_bot would silently loosen the gate by the size of
+    // the static data.
+    CHECK(g_addr_bss_end > sram_bot && g_addr_bss_end <= sram_top,
+          "stack HWM: could not resolve __bss_end (got 0x%03X; need ELF symbols)",
+          g_addr_bss_end);
+    if (g_addr_bss_end <= sram_bot || g_addr_bss_end > sram_top) return;
+    const uint32_t bss_end = g_addr_bss_end;
 
     // Paint the entire SRAM with 0xAA before any firmware code runs.
     for (uint32_t a = sram_bot; a <= sram_top; ++a) {
@@ -1990,17 +2019,21 @@ static void test_stack_high_water_mark(void) {
     uint32_t deepest_sp   = hwm + 1u;
     uint32_t stack_used   = sram_top - deepest_sp + 1u;
     uint32_t sram_size    = sram_top - sram_bot + 1u;
-    uint32_t margin_bytes = (deepest_sp > sram_bot) ? (deepest_sp - sram_bot) : 0u;
+    uint32_t static_bytes = bss_end - sram_bot;
+    // Free bytes between the deepest stack push and the top of the static data.
+    // 0 means the stack reached into (or past) BSS.
+    uint32_t margin_bytes = (deepest_sp > bss_end) ? (deepest_sp - bss_end) : 0u;
 
-    printf("  stack HWM: deepest SP=0x%03X, used=%u B, margin=%u B "
-           "(SRAM 0x%03X-0x%03X, %u B total)\n",
+    printf("  stack HWM: deepest SP=0x%03X, used=%u B, margin=%u B free "
+           "(SRAM 0x%03X-0x%03X, %u B total; static 0x%03X-0x%03X, %u B)\n",
            deepest_sp, stack_used, margin_bytes,
-           sram_bot, sram_top, sram_size);
+           sram_bot, sram_top, sram_size,
+           sram_bot, bss_end - 1u, static_bytes);
 
     CHECK(margin_bytes >= 8u,
-          "stack leaves only %u bytes between deepest SP (0x%03X) and BSS; "
-          "expected >=8 bytes margin",
-          margin_bytes, deepest_sp);
+          "stack leaves only %u free bytes between deepest SP (0x%03X) and the "
+          "top of static data (0x%03X); expected >=8 bytes margin",
+          margin_bytes, deepest_sp, bss_end);
 }
 
 

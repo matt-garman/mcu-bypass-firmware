@@ -95,23 +95,17 @@
 #include <iostream>
 
 #include <glib.h>                 // guint64, G_GUINT64_FORMAT
-#include "interface.h"            // initialize_gpsim_core(), gpsim_set_bulk_mode()
-#include "sim_context.h"          // CSimulationContext
 #include "processor.h"            // Processor (rma, run)
 #include "pic-processor.h"        // pic_processor
-#include "modules.h"              // Module::get_pin/get_pin_name/get_pin_count
-#include "ioports.h"              // IOPIN
-#include "stimuli.h"              // Stimulus_Node, source_stimulus
 #include "gpsim_time.h"           // get_cycles(), Cycle_Counter
 #include "breakpoints.h"          // get_bp(), set_notify_break
 #include "trigger.h"              // TriggerObject
 #include "registers.h"            // Register::get_value()/put_value()/name()
-#include "pic/find_pin_exact.h"
 
-// gpsim narrates breakpoint/load activity on std::cout; a null streambuf
-// silences it (our own output uses C stdio, so printf is unaffected).
-struct NullBuf : std::streambuf { int overflow(int c) override { return c; } };
-static NullBuf g_nullbuf;
+// gpsim bring-up shared with the io / lock-step / soak harnesses: NullBuf,
+// g_cpu / g_fsw_node / g_fsw_src, FOOTSW_PIN_NAME, gpsim_bootstrap_cpu(),
+// gpsim_attach_footswitch() and footsw_set().
+#include "pic/gpsim_bootstrap.h"
 
 // ---- Firmware / MCU parameters (provided by the part adapter / Makefile) -----
 #ifndef PIC_FAULT_DEFAULT_FW_PATH
@@ -144,8 +138,8 @@ static NullBuf g_nullbuf;
 #define CYCLES_PER_MS  ((F_CPU_HZ / 4UL) / 1000UL)   // 500 @ 2 MHz
 #define CLRWDT_OPCODE  0x0064u
 
-// Shared pin map: RA3 footswitch (1=released, 0=pressed), RA0 LED on LATA bit 0.
-#define FOOTSW_PIN_NAME "ra3"
+// Shared pin map: RA3 footswitch (driven by footsw_set(), see gpsim_bootstrap.h),
+// RA0 LED on LATA bit 0. FOOTSW_PIN_NAME is defined there.
 
 // ---- SFR addresses shared by the PIC10F320/PIC10F322 DFP headers ------------
 // Each is cross-checked against the register's gpsim name at runtime so an
@@ -196,9 +190,7 @@ static NullBuf g_nullbuf;
 #define EXPECTED_CHECKS PIC_FAULT_EXPECTED_CHECKS
 
 // ---- Sim globals ------------------------------------------------------------
-static pic_processor   *g_cpu      = nullptr;
-static Stimulus_Node   *g_fsw_node = nullptr;
-static source_stimulus *g_fsw_src  = nullptr;
+// g_cpu / g_fsw_node / g_fsw_src come from pic/gpsim_bootstrap.h.
 static guint64   g_resets  = 0;   // incremented by ResetNotifier at 0x000
 static unsigned  g_checks  = 0;
 static unsigned  g_fails   = 0;
@@ -215,12 +207,7 @@ public:
 static ResetNotifier g_reset_notifier;
 
 // ---- Helpers ----------------------------------------------------------------
-// Drive the footswitch input: 1 = released (high), 0 = pressed (low). See the
-// soak for why set_Vth (not putState) and the low Zth (dominate RA3's pull-up).
-static void footsw_set(int pressed) {
-    g_fsw_src->set_Vth(pressed ? 0.0 : 5.0);
-    g_fsw_node->update();
-}
+// footsw_set() comes from pic/gpsim_bootstrap.h.
 
 // Fetch a register by file address and (for named SFRs) require that its gpsim
 // name contains the expected token (lowercase). A mismatch is fatal: injecting
@@ -458,32 +445,8 @@ static void check_startup_trisa(void) {
 }
 
 int main() {
-    std::cout.rdbuf(&g_nullbuf);                 // silence gpsim's console chatter
-    initialize_gpsim_core();
-    gpsim_set_bulk_mode(1);
-    CSimulationContext *ctx = CSimulationContext::GetContext();
-
-    Processor *p = nullptr;
-    ctx->LoadProgram(FW_PATH, PROC_NAME, &p, "u1");
-    if (p == nullptr) p = ctx->GetActiveCPU();
-    if (p == nullptr) {
-        fprintf(stderr, "FATAL: gpsim could not load %s on %s\n", FW_PATH, PROC_NAME);
-        return 1;
-    }
-    g_cpu = static_cast<pic_processor *>(p);
-
-    IOPIN *ra3 = find_pin_exact(g_cpu, FOOTSW_PIN_NAME);
-    if (ra3 == nullptr) {
-        fprintf(stderr, "FATAL: pin %s not found on %s\n", FOOTSW_PIN_NAME, PROC_NAME);
-        return 1;
-    }
-    g_fsw_src = new source_stimulus();
-    g_fsw_src->set_digital();
-    g_fsw_src->set_Zth(250.0);                   // dominate RA3's weak pull-up
-    g_fsw_src->set_Vth(5.0);                     // released at power-on
-    g_fsw_node = new Stimulus_Node("fsw");
-    g_fsw_node->attach_stimulus(g_fsw_src);
-    g_fsw_node->attach_stimulus(ra3);
+    if (!gpsim_bootstrap_cpu(FW_PATH, PROC_NAME))            return 1;
+    if (!gpsim_attach_footswitch(FOOTSW_PIN_NAME, PROC_NAME)) return 1;
 
     footsw_set(0);                              // released at power-on
     if (!run_ms(SETTLE_MS)) {                   // let init() settle, reach main loop

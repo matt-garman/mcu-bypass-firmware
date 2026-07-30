@@ -710,18 +710,19 @@ stack-canary test (see Testing and Validation above).
 SRAM use is dominated by 4 bytes of static data; peak stack measured 31 bytes
 (relay and mute variants) and 29 bytes (cd4053). On the most constrained part,
 the ATtiny13a, with 64 bytes of SRAM: worst-case consumption is 35 bytes
-(4 static + 31 stack), leaving roughly 29 bytes of free headroom. The tinyx5
+(4 static + 31 stack), leaving 29 bytes of free headroom. The tinyx5
 family has far more of both flash and SRAM (the ATtiny85 uses approximately
 9% of flash and approximately 7% of its 512 bytes of SRAM).
 
 That SRAM headroom is a deliberate design property, and it is gated rather
 than merely stated: `test_stack_high_water_mark()` in `test/avr/test_sim.c`
 paints SRAM with a canary, exercises the deepest call paths, and fails
-`make test-sim` if fewer than 8 bytes separate the deepest stack pointer from
-the first SRAM byte. Measured today: 33 bytes on relay and mute, 35 on cd4053.
-Both the floor and the measurement span the 4 static bytes at the bottom of
-SRAM, so the 33 measured is the 29 free bytes above plus those 4, and the
-8-byte floor admits 4 genuinely free bytes.
+`make test-sim` if fewer than 8 free bytes separate the deepest stack pointer
+from the top of the static data. Measured today: 29 free bytes on relay and
+mute, 31 on cd4053 — the same figures as above. The top of static data is read
+from the firmware ELF's `__bss_end` rather than assumed, so a future static
+variable tightens the gate on its own; if that symbol cannot be resolved the
+test fails rather than falling back to a looser reference point.
 
 Flash, not SRAM, is the tighter resource on the ATtiny13a, and it has its own
 gate: 73.8% of 1 KB against the 90% ceiling enforced by

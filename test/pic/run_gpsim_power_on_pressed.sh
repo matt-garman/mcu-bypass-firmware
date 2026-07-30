@@ -26,63 +26,32 @@ set -u
 
 HEX="${1:?usage: run_gpsim_power_on_pressed.sh <hexfile>}"
 
-GPSIM="${GPSIM:-gpsim}"
-GPSIM_TIMEOUT_SECONDS="${GPSIM_TIMEOUT_SECONDS:-60}"
-PROC="${PIC_GPSIM_PROC:-p10f322}"
+# Scaffolding shared with run_gpsim_test.sh. Checked before sourcing: `.` on a
+# missing file returns non-zero but does NOT abort a script without `set -e`, so
+# an unguarded source runs on with every helper undefined. Today `set -u` would
+# stop it a few lines later on an unbound $PROC -- but only because the next line
+# happens to use a variable this helper defines, which is an accident of line
+# order, not a contract. Check explicitly, and say what is actually wrong instead
+# of emitting "command not found" for gpsim_run.
+COMMON="$(dirname "$0")/gpsim_wrapper_common.sh"
+if [ ! -r "$COMMON" ]; then
+	echo "FAIL: missing shared gpsim wrapper helper: $COMMON"
+	exit 1
+fi
+# shellcheck source=test/pic/gpsim_wrapper_common.sh
+. "$COMMON" || { echo "FAIL: could not source $COMMON"; exit 1; }
+
+# Unlike run_gpsim_test.sh there is deliberately no PIC_GPSIM_STC override here:
+# the two-press toggle needs a chip-specific stimulus because its mid-debounce
+# cadence checkpoint depends on instruction timing, whereas this scenario's
+# stimulus is byte-identical for the PIC10F320 and PIC10F322 and is therefore
+# shared. PIC_GPSIM_PROC is still honoured (via the shared helper), so the same
+# stimulus runs on either chip. See the pic320-test-gpsim recipe in the Makefile,
+# which asserts this routing, and test/test_gpsim_wrappers.sh, which checks it
+# behaviourally.
 STC="$(dirname "$0")/power_on_pressed.stc"
 
-if ! [[ "$GPSIM_TIMEOUT_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] \
-		|| ! [[ "$GPSIM_TIMEOUT_SECONDS" =~ [1-9] ]]; then
-	echo "FAIL: GPSIM_TIMEOUT_SECONDS must be a positive decimal number of seconds"
-	exit 1
-fi
-if ! command -v "$GPSIM" >/dev/null 2>&1; then
-    echo "gpsim not installed; skipping power-on-pressed gpsim test for $HEX"
-    if [ -n "${STRICT_TOOLS:-}" ]; then
-        echo "::error::STRICT_TOOLS=1: gpsim is required and must not be skipped"
-        exit 1
-    fi
-    exit 0
-fi
-if [ ! -f "$HEX" ]; then
-    echo "FAIL: hex not found: $HEX"
-    exit 1
-fi
-if [ ! -f "$STC" ]; then
-    echo "FAIL: gpsim script not found: $STC"
-    exit 1
-fi
-
-if out=$(timeout -s KILL "$GPSIM_TIMEOUT_SECONDS" \
-		"$GPSIM" -i -p"$PROC" "$HEX" -c "$STC" </dev/null 2>&1); then
-	:
-else
-	rc=$?
-	echo "FAIL: gpsim exited with status $rc for $HEX. Output was:"
-	printf '%s\n' "$out"
-	exit 1
-fi
-
-# Pull the value of register $2 at the checkpoint labelled $1 out of gpsim's
-# output (lines look like "lata = 0x3", possibly behind a "**gpsim> " prompt).
-parse() {
-    printf '%s\n' "$out" | awk -v lbl="$1" -v reg="$2" '
-        index($0, "===" lbl "===") { active = 1; next }
-        active && index($0, "===")  { active = 0 }
-        active && match($0, reg " = 0x[0-9a-fA-F]+") {
-            s = substr($0, RSTART, RLENGTH); sub(reg " = ", "", s);
-            print s; exit
-        }
-    '
-}
-
-fails=0
-note() { printf '  %-14s %s\n' "$1" "$2"; }
-fail() { echo "  FAIL: $1"; fails=$((fails + 1)); }
-pass() { echo "  ok:   $1"; }
-
-# Helper: bit test on a hex value. $1=hexval $2=bitmask(hex) -> echoes 1 if set.
-bit() { echo $(( ( $1 & $2 ) != 0 )); }
+gpsim_run "$HEX" "$STC" "power-on-pressed gpsim test"
 
 echo "gpsim power-on-pressed test: $HEX (proc $PROC)"
 
@@ -92,12 +61,8 @@ rl_porta=$(parse PON_RELEASED porta);  rl_lata=$(parse PON_RELEASED lata)
 en_porta=$(parse PON_ENGAGED  porta);  en_lata=$(parse PON_ENGAGED  lata)
 
 # Guard: did gpsim actually produce all the snapshots?
-if [ -z "$hd_lata" ] || [ -z "$rl_lata" ] || [ -z "$en_lata" ] || \
-   [ -z "$hd_porta" ] || [ -z "$rl_porta" ] || [ -z "$en_porta" ]; then
-    echo "FAIL: could not parse gpsim snapshots (gpsim run incomplete). Output was:"
-    printf '%s\n' "$out"
-    exit 1
-fi
+gpsim_require_snapshots "$hd_porta" "$hd_lata" "$rl_porta" "$rl_lata" \
+	"$en_porta" "$en_lata"
 
 note "PON_HELD"     "porta=$hd_porta lata=$hd_lata"
 note "PON_RELEASED" "porta=$rl_porta lata=$rl_lata"
@@ -120,9 +85,4 @@ note "PON_ENGAGED"  "porta=$en_porta lata=$en_lata"
 [ "$(bit "$en_lata" 0x1)"  = 1 ] && pass "PON_ENGAGED: LED on (fresh press toggled, latched)" || fail "PON_ENGAGED: LED (RA0) should be on, lata=$en_lata"
 [ "$(bit "$en_porta" 0x8)" = 1 ] && pass "PON_ENGAGED: footswitch released (RA3=1)"           || fail "PON_ENGAGED: RA3 should read released (high), porta=$en_porta"
 
-if [ "$fails" -ne 0 ]; then
-    echo "RESULT: $fails check(s) FAILED for $HEX"
-    exit 1
-fi
-echo "RESULT: PASS ($HEX)"
-exit 0
+gpsim_verdict "$HEX"
