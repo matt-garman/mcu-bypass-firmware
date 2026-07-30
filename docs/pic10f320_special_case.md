@@ -18,13 +18,14 @@ wondering why one firmware file looks unlike the rest of `src/`.
 The PIC10F320 has **256 words of program flash — exactly half the PIC10F322's
 512**. Everything below follows from that one number.
 
-Every other target in this project is built the same way: a small hardware
-shell (`src/bypass_mcu_*.c`) calls into `src/bypass_pure.c`, the pure,
-side-effect-free debounce core that the host, property, exhaustive, symbolic and
-CBMC suites all verify. The shell handles pins, timers and the watchdog; the
-core decides. That separation is the reference architecture and it is what makes
-the verification argument simple: **the code that is proven is the code that
-ships**, in the same translation unit.
+The other five release targets use one modular architecture through three shell
+source files. `src/bypass_mcu_avr_classic.c` serves ATtiny13a/45/85,
+`src/bypass_mcu_avr_xt.c` serves ATtiny202, and
+`src/bypass_mcu_pic10f322.c` serves PIC10F322. Each shell handles pins, timers and
+the watchdog and calls `src/bypass_pure.c`, the pure, side-effect-free debounce
+core that the host, property, exhaustive, symbolic and CBMC suites verify. The
+same reviewed core implementation is compiled and linked directly into all five
+shipping image sets; it is not a vendored copy or a reimplementation.
 
 That architecture does not fit in 256 words. This is measured, not assumed:
 `docs/pic10f320_feasibility.md` records the full analysis — the modular firmware
@@ -32,11 +33,11 @@ overshoots by roughly 100 words under free-tier XC8, and no correctness-preservi
 source change closes the gap.
 
 So the PIC10F320's firmware, `src/bypass_mcu_pic10f320.c`, is a single
-self-contained file with the debounce algorithm **hand-inlined into `main()`**:
-the saturating integrator, the state machine and the power-on initialisation are
-written out in the main loop rather than called. The three output stages are
-inlined the same way, as `#if defined(OUTPUT_*)` blocks, instead of linking
-`src/bypass_output_*.c`.
+self-contained file. The saturating integrator and state machine are written
+directly in `main()`, and debounce initialization is written directly in
+`init()`. Its three output variants use source-local static functions selected
+by `#if defined(OUTPUT_*)`, instead of linking the modular
+`src/bypass_output_*.c` drivers.
 
 ## 2. The seam, stated plainly
 
@@ -52,20 +53,22 @@ imply a parity it has not earned.
 
 ## 3. What closes the gap, and how far
 
-Every one of these runs against **`src/bypass_pure.c` itself** — the same file
-every other target compiles into its shipping image, not a vendored copy of it.
-That property is worth stating explicitly, because the predecessor project *did*
-vendor a copy, and "verified against a snapshot of the core" is a materially
-weaker claim than "verified against the core".
+The host equivalence and real-HEX lock-step lanes compare against
+**`src/bypass_pure.c` itself** — the same file every modular target compiles into
+its shipping image, not a vendored copy. That property is worth stating
+explicitly because the predecessor project *did* vendor a copy. The remaining
+lanes below provide orthogonal evidence about actuation, fault handling, source
+coverage, emitted bytes, configuration, stack depth and analysis; they are not
+described as core-equivalence comparisons.
 
 | Lane | What it proves | Make target |
 | --- | --- | --- |
-| **Firmware↔core equivalence** | The real firmware, host-compiled, stepped tick-for-tick against the verified core on 266,144 stimulus sequences, covering all 66 reachable model states, with zero divergence | `pic320-test-equiv` |
+| **Firmware↔core equivalence** | The real firmware, host-compiled, must track the verified core tick-for-tick across the configured stimulus set and reachable model states; any divergence fails | `pic320-test-equiv` |
 | **Actuation sequence** | Each variant's full settled `LATA` at every tick, plus the mute/relay *mid-actuation* pin sequencing and pulse width that a settled snapshot cannot see | `pic320-test-actuation` |
 | **Host fault injection** | The defensive layer valid stimulus never reaches: corrupt a guarded SFR or the debounce context and the sanity gate must force a watchdog reset | `pic320-test-fault-host` |
 | **Firmware line coverage** | An *exact* property, not a percentage floor: every line of the shipping firmware is exercised except an enumerated, justified watchdog-reset path | `pic320-coverage-check-fw` |
-| **Expected image bytes** | The complete three-image matrix exactly matches the reviewed SHA-256 baseline from the pinned XC8/DFP build; unreviewed code-generation drift fails qualification | `pic320-test-build` |
-| **Real-HEX lock-step** | The actual emitted image, running in a simulated PIC10F320, tracked against the verified core for 3,000 iterations per variant with zero divergence | `pic320-test-lockstep` |
+| **Expected image bytes** | The complete three-image matrix must exactly match the committed, reviewed SHA-256 baseline from the pinned XC8/DFP build; byte drift fails until an intentional rebaseline | `pic320-test-build` |
+| **Real-HEX lock-step** | The actual emitted image, running in a simulated PIC10F320, must track the verified core for the configured sequence; any divergence fails | `pic320-test-lockstep` |
 | **Target fault injection** | The same defensive-layer argument on the real image in libgpsim: corrupting every guarded SFR/SRAM location and the required `TRISA` directions forces exactly one real watchdog reset | `pic320-test-fault-target` |
 | **Target I/O** | Exact `TRISA`, physical `PORTA` following every `LATA` transition, each variant's complete startup/engage/bypass sequence, and mute/relay pulse widths measured from simulator cycles | `pic320-test-io` |
 | **CONFIG word** | The emitted CONFIG word matches design intent — a wrong bit is invisible to every other test and would only bite on silicon | `pic320-test-config` |
@@ -75,7 +78,8 @@ weaker claim than "verified against the core".
 
 `make pic320-test` runs the pre-hardware set; `make pic320-test-target-variants`
 runs the fail-closed real-HEX aggregate across all three variants. Both are
-release gates and both run in CI on every push.
+release gates and run in the PIC CI job on pushes to `main`, pull requests,
+scheduled runs and manual dispatches.
 
 **What this does not do.** It does not make the architecture identical. A
 behavioural equivalence argument, however thorough, is a different kind of
@@ -152,11 +156,11 @@ is small, finite and auditable — this is all of it:
 | --- | --- | --- |
 | Press threshold | `PRESSED_THRESH` in `src/bypass_config.h` | its own `#define PRESSED_THRESH` |
 | Release/lock-out threshold | `RELEASE_THRESH` in `src/bypass_config.h` | its own `#define RELEASE_THRESH` |
-| Saturating integrator | `debounce_integrate()` in `src/bypass_pure.c` | inlined in the `main()` loop |
-| State machine | `debounce_step()` in `src/bypass_pure.c` | inlined `switch` in `main()` |
-| Power-on init | `debounce_init_context()` in `src/bypass_pure.c` | inlined in `init()` |
-| Output stages | `src/bypass_output_{cd4053_simple,cd4053_with_mute,tq2_l2_5v_relay}.c` | inlined `#if defined(OUTPUT_*)` blocks |
-| Analog-switch polarity | unified drive in the two CD4053 drivers (BYPASS = pin low, ENGAGE = high) | inlined `hw_x4053_ctl_high/low` |
+| Saturating integrator | `debounce_integrate()` in `src/bypass_pure.c` | written directly in the `main()` loop |
+| State machine | `debounce_step()` in `src/bypass_pure.c` | `switch` written directly in `main()` |
+| Power-on init | `debounce_init_context()` in `src/bypass_pure.c` | written directly in `init()` |
+| Output stages | `src/bypass_output_{cd4053_simple,cd4053_with_mute,tq2_l2_5v_relay}.c` | source-local static functions selected by `#if defined(OUTPUT_*)` |
+| Analog-switch polarity | unified drive in the two CD4053 drivers (BYPASS = pin low, ENGAGE = high) | source-local `hw_x4053_ctl_high/low` helpers |
 
 The pin map (RA3 footswitch, RA0 LED, RA1/RA2 control) and the CONFIG word are
 PIC-local and shared with nothing.
@@ -167,13 +171,8 @@ rather than just relocating it. `pic320-test-equiv` compiles the *real* firmware
 and the *real* `src/bypass_pure.c` into one host binary and steps them together,
 taking its thresholds from `src/bypass_config.h` through the host shim. So a
 change to the core that this firmware does not mirror produces a divergence, and
-the divergence fails `make test`. Verified by deliberately changing
-`PRESSED_THRESH` from 8 to 9 in `src/bypass_config.h` alone:
-
-```
-equivalence: 511 sequences compared, 1 divergence(s)
-make: *** [pic320-test-equiv] Error 1
-```
+the divergence fails `make test`. The deliberate threshold-mismatch sensitivity
+check and its result are recorded in `docs/pic10f320_validation.md` §3.
 
 The predecessor project could not make that claim: it held a *vendored copy* of
 the core pinned to an old commit, so the parent could advance freely and nothing
@@ -188,10 +187,10 @@ against the PIC10F322 shell — §4 above is the current, deliberate divergence.
 
 ## 6. So: should you use it?
 
-**Prefer another target when you can choose the part.** The AVR Classic parts and
-the PIC10F322 all compile the verified core directly, and the PIC10F322 is
-pin-compatible with the PIC10F320 in this design, has double the flash, and
-carries the full defensive layer.
+**Prefer another target when you can choose the part.** The AVR Classic parts,
+ATtiny202 and PIC10F322 all compile the verified core directly. PIC10F322 is
+pin-compatible with PIC10F320 in this design, has double the flash, and carries
+the full defensive layer.
 
 **Use the PIC10F320 when it is a hard requirement** — cost, existing inventory,
 or an established board. It is an integrated, release-gated candidate held to

@@ -12,11 +12,13 @@
     * Trivial hardware implementation
     * Schmitt trigger GPIO pins
 
-Note this project also supports the Microchip PIC10F322, which has _some_ of
-the same benefits as AVR Classic, but the tooling is decidedly less compelling.
-Compilation requires Microchip's XC8 compiler, which is not open source,
-although Microchip does offer a limited free version of this compiler.  The
-free tier XC8 restricts the options that are available.
+This project also supports the Microchip PIC10F322 and PIC10F320, which have
+_some_ of the same benefits as AVR Classic, but the tooling is decidedly less
+compelling. Both use Microchip's XC8 compiler and PIC10-12Fxxx_DFP device pack.
+XC8 is not open source, although Microchip offers a limited free version; that
+free tier restricts the options that are available. PIC10F320's 256-word flash
+also requires the self-contained architecture documented in
+`docs/pic10f320_special_case.md`.
 
 
 == Why ATtiny202 (AVR-XT):
@@ -114,12 +116,12 @@ adverse conditions:
 
 
 == Caveats and Limitations
-    * The footswitch polling loop is based on a 1ms timer, driven by
-      the AVR's builtin oscillator; this oscillator can drift
-      +/- 10% (e.g. voltage fluctuations, temperature), which means
-      actual sampling is roughly 0.9-1.1ms.  The algorithm still
-      holds, and timing variations of this magnitude will not be
-      perceptible to the user and are therefore acceptable.
+    * All targets use a nominal 1ms timer-derived sample cadence: the two AVR
+      generations sample in timer ISRs, while both PIC implementations poll the
+      timer flag. Internal-oscillator tolerance can move the actual period; the
+      conservative +/-10% timing envelope used here gives roughly 0.9-1.1ms.
+      The algorithm still holds, and variation of this magnitude is not
+      perceptible to the user.
     * Pop/click suppression is provided by the "4053 with muting"
       variant; the other two schemes (simple 4053, relay) do not
       have explicit pop/click suppression
@@ -135,17 +137,18 @@ adverse conditions:
       1ms tick this is called a 33ms qualification budget, not an exact physical
       minimum: the first through last sample span one fewer interval, and the
       first sample's phase puts ideal press-onset-to-re-arm time at roughly
-      32-33ms. The polled PIC10F322 simple/mute/relay variants use conservative
-      nominal budgets of 33ms/38ms/45ms because mute and relay actuation block
-      sampling for 5ms/12ms after the toggle. The latched timer flag normally
+      32-33ms. Both polled PIC implementations use conservative nominal
+      simple/mute/relay budgets of 33ms/38ms/45ms because mute and relay
+      actuation block sampling for 5ms/12ms after the toggle. The latched timer
+      flag normally
       preserves one pending sample after a block, so an ideal simulated
       mute/relay path can re-arm roughly one tick sooner than those conservative
       budgets (pending-aware upper-end nominal budgets of about 37ms/44ms);
       instruction overhead and sample phase make the exact physical minimum
       non-integral. Noise and old switches lengthen recognition, while oscillator
       tolerance moves wall time in either direction.
-    * On the PIC10F322 port specifically: the footswitch loop is
-      polled (Model B, no timer interrupt), so while a blocking
+    * On both PIC parts, the footswitch loop is polled (Model B, no timer
+      interrupt), so while a blocking
       output actuation runs - the relay coil pulse (12ms) or the
       CD4053 mute (5ms), a busy delay inside the state change -
       the loop pauses and the footswitch is not sampled.  The
@@ -162,9 +165,9 @@ adverse conditions:
       onset to the next, use PRESSED_THRESH + block + RELEASE_THRESH as the
       conservative nominal qualification budget: 33ms simple, 38ms mute, and
       45ms relay. These are sample-count-derived budgets, not exact physical
-      minima. A normal physical tap clears them comfortably. AVR Classic is
-      unaffected because its timer ISR keeps integrating through the blocking
-      pulse. The driver
+      minima. A normal physical tap clears them comfortably. AVR Classic and
+      AVR-XT are unaffected because their timer ISRs keep integrating through
+      the blocking pulse. The driver
       compile-time assertions bound block < RELEASE_THRESH, which keeps the
       conservative PIC release/re-arm wall-time budget below
       2 * RELEASE_THRESH; they do not make the block disappear from that budget.
@@ -281,11 +284,12 @@ user.  The release-debounce, or lock-out period, is longer so as to
     * RELEASE_THRESH (minimum lockout before next press):
       At the pure-algorithm sample level, a clean press followed by immediate
       release consumes `PRESSED_THRESH + RELEASE_THRESH = 33` accepted sample
-      updates. On ISR-driven AVR shells this is a conservative nominal 33ms
+      updates. On the ISR-driven AVR implementations this is a conservative
+      nominal 33ms
       qualification budget; physical press-onset-to-re-arm timing is roughly
       32-33 tick periods because 33 sample instants span 32 intervals and the
-      first sample has arbitrary phase. For the polled PIC shell, conservative
-      qualification adds the full blocking output actuation after the toggle:
+      first sample has arbitrary phase. For both polled PIC implementations,
+      conservative qualification adds the full blocking output actuation after the toggle:
       33ms simple, 38ms mute, 45ms relay at nominal timing. A pending TMR2 flag
       can make the ideal mute/relay path roughly one tick shorter, so these are
       robust sample-count budgets rather than exact physical minima.
@@ -649,9 +653,10 @@ See TOOLCHAIN.adoc for details.  Summary:
 
     * Common
       ** cppcheck
-      ** clang/clang-tidy
+      ** cppcheck MISRA addon
     * AVR Classic
       ** avr tools: avr-gcc, avr-libc, avrdude toolchain
+      ** clang/clang-tidy static-analysis lanes
       ** no Arduino
       ** simavr
     * ATtiny202 (AVR-XT)
@@ -659,12 +664,13 @@ See TOOLCHAIN.adoc for details.  Summary:
       ** ATtiny_DFP device pack (avr-libc 7.3.0 predates the part)
       ** yasimavr (simavr and QEMU do not model the AVR8X core)
       ** UPDI programming, not ISP
-    * PIC10F322
+    * PIC10F322 and PIC10F320
       ** XC8 free-tier compiler
       ** PIC10-12Fxxx_DFP device pack
       ** gpsim/libgpsim
+      ** PIC10F320 uses its self-contained constrained-target implementation
 
-== Compilation Flags
+== AVR Classic and AVR-XT Compilation Flags
 
     -fshort-enums // so that typedef'ed enums below are 8-bit ints
     -funsigned-char
@@ -674,6 +680,9 @@ See TOOLCHAIN.adoc for details.  Summary:
     -Werror
     -Wall
     -Wextra
+
+The PIC builds instead use XC8's C99 mode and `-O2`; see `TOOLCHAIN.adoc` for
+the complete target-specific compiler and device-pack commands.
 
 
 == Testing and Validation
@@ -878,49 +887,57 @@ The 2 MHz choice is simply "no reason to burn 4 mW when 2 does the same job."
 
 == Multi-MCU Architecture: Shared Core, Per-MCU Shell
 
-The firmware targets three MCU core generations -- AVR Classic, AVR-XT and
-PIC10F32x -- that share the debounce algorithm but differ completely at the
-register level. The split that makes
-this work has two rules.
+The firmware has six MCU release targets across three core generations -- AVR
+Classic, AVR-XT and PIC10F32x -- that share one debounce design but differ at
+the register level. Five targets use the modular architecture through three
+shell source files: `src/bypass_mcu_avr_classic.c` serves ATtiny13a/45/85,
+`src/bypass_mcu_avr_xt.c` serves ATtiny202, and
+`src/bypass_mcu_pic10f322.c` serves PIC10F322. PIC10F320 is the sixth,
+self-contained implementation described below. The modular split has two
+rules.
 
-**The algorithm is shared, exactly once.** `src/bypass_pure.c` is the
-functional core: no hardware access, no globals, no side effects. Every
-target compiles the same file, and it is the sole subject of the host tests
-and the formal proofs. Nothing about it is per-MCU.
+**The five modular targets share one compiled core.** `src/bypass_pure.c` is
+the functional core: no hardware access, no globals, no side effects. Every
+modular target compiles and links that same file, and the core host tests and
+formal proofs exercise it directly. Nothing about it is per-MCU. PIC10F320 does
+not compile it into its image; equivalence and lock-step compare the
+self-contained firmware with this same core.
 
-**The main loop is NOT shared.** Each MCU shell owns its own `main()`, tick
-mechanism, and watchdog-liveness model; only the leaf hardware operations are
-abstracted. This is a deliberate decision, revisited when the second and third
-shells were written, and it is worth recording why — the alternative (one
-portable `main()` parameterized by an interface) looks cleaner and is wrong
-here.
+**The main loop is NOT shared.** Each of the three modular shell files owns its
+own `main()`, tick mechanism and watchdog-liveness model; the self-contained
+PIC10F320 file owns a fourth. Only the modular output-driver leaf operations are
+abstracted. This is deliberate: one portable `main()` parameterized by an
+interface looks cleaner and is wrong here.
 
 The AVR Classic design samples the footswitch *inside* the 1 ms Timer0 ISR
 while `main()` sleeps, and proves liveness through the `timer_isr_called_`
-ISR-to-main handshake. The PIC10F322 uses a fundamentally different model: no
-tick ISR at all, a single polled loop that waits on `TMR2IF`, samples, updates,
-and pets the watchdog, where reaching `CLRWDT` *is* the liveness proof. A single
-shared `main()` cannot express both without changing AVR's ISR-sampling
-behaviour, which would invalidate the documented design and the tests built on
-it — lock-step co-simulation, ISR-jitter, and the handshake mutants.
+ISR-to-main handshake. Both PIC implementations use a fundamentally different
+model: no tick ISR, but a polled loop that waits on `TMR2IF`, samples, updates
+and pets the watchdog, where reaching `CLRWDT` *is* the liveness proof. The
+PIC10F322 version is the modular shell; PIC10F320 writes the same model into its
+self-contained source. A single shared `main()` cannot express both timing
+models without changing AVR's ISR sampling and invalidating lock-step,
+ISR-jitter and handshake tests.
 
 The ATtiny202 follows the AVR Classic model rather than the PIC one, but on
 entirely different peripherals: the tick is TCB0 in periodic-interrupt mode
 (`CCMP` = 1999 at 2 MHz) instead of Timer0 compare-match, the sleep is AVR-XT
 IDLE via `SLPCTRL`, and the watchdog is fuse-locked by `WDTCFG` so `hw_wdt_pet()`
 is a bare `wdr` with nothing to arm. Because it integrates in the ISR, it
-inherits the classic lane's timing properties exactly — including the one that
-matters most for actuation: the ISR keeps sampling through a blocking relay or
-mute pulse, so no ticks are lost, which is why the AVR shells and the polled PIC
-shell qualify press timing differently (see Asymmetric Debounce Timing). This is
-the clearest illustration of why the shells are separate: the AVR-XT and AVR
-Classic shells share a *model* and share none of their register code.
+shares the classic lane's blocking-actuation timing property: the ISR keeps
+sampling through a blocking relay or mute pulse, so no ticks are lost. The two
+AVR generations and two polled PIC
+implementations therefore qualify press timing differently (see Asymmetric
+Debounce Timing). This is the clearest illustration of why the modular shells
+are separate: AVR-XT and AVR Classic share a *model* and none of their register
+code.
 
-So `main()`, the tick source, `init()` as orchestrator, and the reset path stay
-file-static inside each shell. The consequences are visible elsewhere in this
-document: the polled PIC shell qualifies press timing differently than the
-ISR-driven AVR shells (see Asymmetric Debounce Timing), and it carries no
-`timer_isr_called_` byte (see Resource Utilization).
+So `main()`, the tick source, `init()` as orchestrator and the reset path stay
+file-static inside each implementation. The consequences are visible elsewhere
+in this document: both polled PIC implementations qualify press timing
+differently from both ISR-driven AVR generations (see Asymmetric Debounce
+Timing), and neither PIC carries a `timer_isr_called_` byte (see Resource
+Utilization).
 
 **What the shared interface does cover.** `src/bypass_hw_iface.h` is the
 *output-driver* boundary only: the GPIO leaf operations a shell provides to a
@@ -928,12 +945,14 @@ driver (`hw_pin_set_*`, `hw_led_pin_set_*`, `hw_configure_output_pins`,
 `hw_output_state_intact`) and the operations a driver provides back
 (`hw_set_bypass_state`, `hw_set_engaged_state`, `hw_is_sanity_check_failed`,
 `hw_init_output_pins`). The pin-direction API is mask-based so one driver body
-serves all targets: the AVR Classic implementation writes `DDRB`, the AVR-XT
-one writes `PORTA.DIR`, and the PIC maps the mask onto `TRISA`.
+serves all five modular targets: the AVR Classic implementation writes `DDRB`,
+the AVR-XT one writes `PORTA.DIR`, and the PIC10F322 shell maps the mask onto
+`TRISA`. PIC10F320 does not consume this interface or the modular drivers.
 
-Everything else — footswitch read, watchdog arm and pet, clock and peripheral
-bring-up, wait-for-tick, the forced-reset path, and the SFR integrity checks —
-is shell-private and rewritten per shell. That is not an oversight: MISRA
+In the modular architecture, everything else — footswitch read, watchdog arm
+and pet, clock and peripheral bring-up, wait-for-tick, the forced-reset path,
+and the SFR integrity checks — is shell-private and rewritten per shell. That
+is not an oversight: MISRA
 Rule 8.7 flagged the earlier arrangement, since each of those helpers is
 referenced only within its own translation unit. Adding a target normally means
 adding a shell plus a pin map, and reusing the core and all three output
@@ -948,21 +967,20 @@ measured, not assumed: the modular firmware overshoots by roughly 100 words
 (`docs/pic10f320_feasibility.md`).
 
 Its firmware, `src/bypass_mcu_pic10f320.c`, therefore reuses *neither* the core
-nor the output drivers as linked code. It is a single self-contained file with
-the integrator, the state machine, the power-on initialisation and the three
-output stages hand-inlined into `main()` and `#if defined(OUTPUT_*)` blocks. The
-source tree therefore has six release targets implemented by four
-shells plus one inlined implementation; the PIC10F320's first unified release is
+nor the output drivers as linked code. It is a single self-contained file: the
+integrator and state machine are written directly in `main()`, debounce
+initialization is written directly in `init()`, and source-local static output
+functions are selected by `#if defined(OUTPUT_*)`. Its first unified release is
 still pending qualification.
 
-That trades the compile-the-verified-core property for a behavioural
-equivalence argument against the same core — host equivalence tick-for-tick,
-real-HEX lock-step in gpsim, host and target fault injection, and an exact-line
-firmware coverage gate. It is integrated and wired into the release gates, but
-is not present in a published unified release yet.
-**`docs/pic10f320_special_case.md` is the single authoritative statement of what
-that difference does and does not buy**; this section deliberately does not
-restate the assurance argument.
+That trades the compile-the-verified-core property for direct behavioural
+comparison in the host-equivalence and real-HEX lock-step lanes, plus orthogonal
+fault, actuation, coverage, static-analysis, byte-identity and soak evidence. It
+is integrated and wired into release gates, but is not present in a published
+unified release yet. **`docs/pic10f320_special_case.md` is the single
+authoritative statement of the architectural difference and assurance
+comparison; `docs/pic10f320_validation.md` owns execution evidence, current
+qualification status and exact lane scope.**
 
 == AVR Classic Program Flow
 

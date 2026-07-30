@@ -3,14 +3,15 @@
 **What this is:** the durable evidence that the PIC10F320 target is what it
 claims to be. `docs/pic10f320_special_case.md` argues *why* this target needs a
 different assurance route; this document records *what was actually run and what
-it returned*, including two pieces of evidence produced by gates that no longer
-exist.
+it returned*, including historical evidence from retired migration gates and
+the provenance behind their standing successors.
 
 **Why it is separate from the merge plan.** `docs/pic10f320_merge_plan.md` is
 process documentation — it will read as history soon and is long. The facts
 below outlive it, and one of them (the byte-identity proof) came from a
-deliberately one-shot gate whose baseline was deleted, so if it is not written
-down here it is not written down anywhere durable.
+deliberately one-shot gate whose original child-tree baseline was deleted. Its
+reviewed successor digests now drive a standing gate, while the migration proof
+and its provenance remain durable only here.
 
 **Current qualification status (2026-07-28): production pending.** A clean-tree,
 full-tool `--dry-run` completed at `4b28210`: all 15 canonical images built, all
@@ -168,6 +169,14 @@ Two of these deserve emphasis:
 - **Lock-step is the emitted image**, not the source: the actual XC8 output
   running in a simulated PIC10F320, its live `_ctx_` SRAM compared to the model
   after every completed main-loop iteration.
+- **The equivalence lane was sensitivity-checked**, not merely observed passing.
+  Deliberately changing `PRESSED_THRESH` from 8 to 9 in
+  `src/bypass_config.h` alone produced the expected failure:
+
+  ```
+  equivalence: 511 sequences compared, 1 divergence(s)
+  make: *** [pic320-test-equiv] Error 1
+  ```
 
 ### 3a. The hardware return stack, and why it needed its own gate
 
@@ -393,12 +402,16 @@ misleading greens:
 Stated so nobody has to infer it:
 
 - **The inlining seam remains a seam.** Everything above is a behavioural
-  equivalence argument. It is not the same kind of statement as "the verified
-  code is the shipped code", which is what every other target gets for free.
-- **Emitted bytes are no longer watched** across source changes (§2).
-- **Rebuild triggering is not compiler reproducibility.** The host fake-tool
-  regression proves current commands run with current flags; it cannot establish
-  that real XC8 emits identical bytes across runs or environments.
+  assurance package. The host equivalence and real-HEX lock-step lanes compare
+  directly with `src/bypass_pure.c`; the other lanes provide orthogonal evidence.
+  Together they are still not the same kind of statement as "the verified code
+  is the shipped code", which is what every other target gets for free.
+- **The standing expected-image gate is not universal compiler
+  reproducibility.** `pic320-test-build` watches all three emitted images against
+  the committed, reviewed SHA-256 baseline from the pinned XC8/DFP build, so byte
+  drift fails qualification until an intentional rebaseline. The host fake-tool
+  regression separately proves current commands run with current flags. Neither
+  establishes that arbitrary XC8 versions or environments emit identical bytes.
 - **The output-latch integrity check is absent** (§4).
 - **No exact-final-source real-image return-stack result is retained.** All three
   current-at-the-time images passed the mandatory gate during the `4b28210` dry
