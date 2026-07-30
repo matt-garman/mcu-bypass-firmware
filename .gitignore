@@ -26,6 +26,9 @@ third_party/*
 # produces IS a generated artifact and stays ignored. Same escape as release/**.
 !third_party/yasimavr/
 third_party/yasimavr/venv/
+# A verified replacement keeps the prior stamped venv as a randomized sibling
+# rollback point rather than recursively deleting a caller-derived path.
+third_party/yasimavr/.venv.old.*/
 
 # ...EXCEPT the prebuilt release images, which ARE tracked: committing them is
 # the whole point of release/ (scripts/make-release.sh stages them there). The
