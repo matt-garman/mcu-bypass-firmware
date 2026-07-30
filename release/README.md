@@ -26,6 +26,21 @@ image for the target MCU, without `_tmux` in the filename. Those unified images
 support both CD4053 and TMUX4053 boards with fail-safe BYPASS polarity. See the
 [`v0.9.3` correction](../CHANGELOG.md#093---2026-07-11).
 
+## Historical soak wording erratum: v0.9.0-v0.9.4
+
+The provenance summary in each of these historical manifests says "24.0-h
+parallel soak of every variant x MCU." That wording is broader than the retained
+evidence and should be read as "24.0-h parallel soak of every release soak
+combination." The historical release snapshots remain unchanged.
+
+In particular, the ATtiny13a images were not soaked directly because simavr
+cannot model their watchdog reset. They were covered by `make test-long` and the
+soaks of the core-identical tinyx5 family, as each manifest's limitation note
+below its image table explains: [`v0.9.0`](v0.9.0/MANIFEST.md#images),
+[`v0.9.1`](v0.9.1/MANIFEST.md#images), [`v0.9.2`](v0.9.2/MANIFEST.md#images),
+[`v0.9.3`](v0.9.3/MANIFEST.md#images), and
+[`v0.9.4`](v0.9.4/MANIFEST.md#images).
+
 The current Makefile's canonical product set matches the unified `v0.9.6`
 release: AVR Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT), PIC10F322 and
 PIC10F320.

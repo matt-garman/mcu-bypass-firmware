@@ -50,8 +50,8 @@ file is the human-readable summary of *what changed*.
   classified development-only on 2026-07-14, in the middle of the week its
   harness was being hardened; the classification recorded a scoping decision, not
   a technical blocker, and the lane has since caught up with its peers. Its three
-  images are now built, qualified, soaked, staged and reproduced exactly as every
-  other target's are.
+  images are now built, qualified, staged and reproduced, and all three ATtiny202
+  release soak combinations are run directly.
 - ATtiny202 firmware/model **lock-step co-simulation** (`make attiny202-lockstep`),
   the AVR-XT counterpart of the classic simavr co-sim and `pic-test-lockstep`.
   After every settled 1 ms tick it reads the shell's `ctx_` out of simulated SRAM
@@ -583,9 +583,12 @@ file is the human-readable summary of *what changed*.
 - Formal verification (bounded model check, symbolic single-step, and CBMC),
   a fault-injection harness with a firmware line-coverage gate, per-variant
   actuation-sequence checks, mutation testing, and a clean MISRA-C:2012 posture.
-- Simulation soak testing: 24-hour parallel soaks of every variant × MCU —
-  simavr for the AVR targets, gpsim / libgpsim for the PIC — plus a PIC
-  CONFIG-word check.
+- Simulation soak testing: 24-hour parallel soaks of every release soak
+  combination — simavr for the ATtiny45/85 combinations, gpsim / libgpsim for
+  the PIC combinations — plus a PIC CONFIG-word check. The ATtiny13a images were
+  covered by the full test suite and the core-identical tinyx5 soaks, but were
+  not soaked directly because simavr cannot model their watchdog reset; see the
+  [historical soak wording erratum](release/README.md#historical-soak-wording-erratum-v090-v094).
 - Reproducible, fully-validated prebuilt-firmware release pipeline: pinned
   toolchain, SHA256-checksummed images, per-release `MANIFEST.md` provenance and
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
