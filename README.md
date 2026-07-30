@@ -5,10 +5,9 @@
 
 The source tree covers six release parts across three microcontroller core
 generations: the "AVR Classic" parts (ATtiny13a, ATtiny45, ATtiny85), the AVR-XT
-ATtiny202, and the Microchip PIC10F322 and PIC10F320. Published releases through
-`v0.9.5` predate both the PIC10F320 merge and the ATtiny202 promotion; the first
-unified release covering all six remains pending production qualification on the
-final source (a prior full-tool dry rehearsal passed but is not publishable).
+ATtiny202, and the Microchip PIC10F322 and PIC10F320. Release `v0.9.6` is the
+first unified release covering all six: 18 prebuilt images qualified from the
+final source, including ATtiny202 and PIC10F320 for the first time.
 
 ## Targets
 
@@ -16,14 +15,14 @@ final source (a prior full-tool dry rehearsal passed but is not publishable).
 |---|---|---|
 | ATtiny13a | release-supported | the primary/default target |
 | ATtiny45 / ATtiny85 | release-supported | tinyx5 family |
-| **ATtiny202 (AVR-XT)** | release-supported | **first release pending**; 2 KB flash, SOIC-8 only (no DIP), UPDI programming |
+| **ATtiny202 (AVR-XT)** | release-supported | first released in `v0.9.6`; 2 KB flash, SOIC-8 only (no DIP), UPDI programming |
 | PIC10F322 | release-supported | 512 words |
-| **PIC10F320** | integrated release candidate | **first unified release pending; constrained exception: 256 words, so the verified core is hand-inlined rather than compiled in — see [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md)** |
+| **PIC10F320** | release-supported | **first released here in `v0.9.6`; constrained exception: 256 words, so the debounce algorithm is implemented directly rather than by compiling the verified core — see [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md)** |
 
 Every release target except one compiles the verified core (`src/bypass_pure.c`)
-directly into its shipping image. The integrated PIC10F320 candidate cannot — its
-flash is half the PIC10F322's — so it carries an inlining seam that
-equivalence, real-HEX lock-step and fault injection against that same core
+directly into its shipping image. The release-supported PIC10F320 cannot — its
+flash is half the PIC10F322's — so it carries an inlining seam that equivalence
+and real-HEX lock-step against that same core, plus independent fault injection,
 mitigate but do not eliminate. Prefer another part when the choice is yours;
 the caveat document explains the trade in full, and
 [docs/pic10f320_validation.md](docs/pic10f320_validation.md) records what was
@@ -77,8 +76,8 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
     for PIC10F322 provide functional, fault-injection, lock-step, target-I/O,
     and soak tests; yasimavr for AVR-XT (ATtiny202) provides functional,
     fault-injection, lock-step, physical target-output timing, and soak tests. The
-    PIC10F320 additionally proves its hand-inlined firmware equivalent to the
-    verified core, tick for tick, on the host and on the real emitted image
+    PIC10F320's directly implemented algorithm is additionally compared with the
+    verified core, tick for tick, by scoped host and real-image lock-step lanes
   - Mutation tests (deliberately break code to prove tests catch
     firmware errors)
   - Simulated fault-injection tests to verify WDT functioning

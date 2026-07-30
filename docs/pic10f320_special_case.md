@@ -1,11 +1,10 @@
 # PIC10F320 — the constrained target
 
-**Status:** integrated and wired into fail-closed release gates, but its first
-unified release is pending production qualification on the final source. A
-clean full-tool dry rehearsal passed at an earlier tip; it was non-publishable
-and predates later release hardening. It is architecturally different from every
-other target in this repository. This document is the single authoritative
-statement of that difference; execution evidence and its exact scope live in
+**Status:** release-supported since `v0.9.6`, whose production qualification ran
+the final source through all release gates and 15 full-duration soak
+combinations. It remains architecturally different from every other target in
+this repository. This document is the single authoritative statement of that
+difference; execution evidence and its exact scope live in
 `docs/pic10f320_validation.md`.
 
 **Read this if** you are choosing an MCU, reviewing the assurance argument, or
@@ -86,10 +85,11 @@ behavioural equivalence argument, however thorough, is a different kind of
 statement from "the verified code is the shipped code". The honest summary is:
 *the PIC10F320's qualification design targets the same standard by a different
 and more elaborate route.* Historical runs and the `4b28210` full-tool dry
-rehearsal exercised that route. Production qualification of the final source,
-including all 15 full-duration soaks, is still pending; checksum signing, the
-artifact-only release commit, and the unified signed-tag workflow follow that
-qualification and decide whether it is published.
+rehearsal first exercised that route. Production qualification then completed
+it for `v0.9.6`: the final source passed the release gates and all 15
+full-duration soaks before the checksummed artifact-only release commit and
+unified tag were published. The retained record is
+`release/v0.9.6/MANIFEST.md`.
 
 ## 4. One recorded omission: the output-latch match
 
@@ -193,10 +193,9 @@ pin-compatible with PIC10F320 in this design, has double the flash, and carries
 the full defensive layer.
 
 **Use the PIC10F320 when it is a hard requirement** — cost, existing inventory,
-or an established board. It is an integrated, release-gated candidate held to
-the same robustness goal by the different route described above. Its images are
-planned to join prebuilt releases only after final-source production
-qualification and the first unified release succeed.
+or an established board. It is a release-supported constrained target held to
+the same robustness goal by the different route described above. Its prebuilt
+images have shipped in unified releases since `v0.9.6`.
 
 ## 7. Where the rest of it lives
 

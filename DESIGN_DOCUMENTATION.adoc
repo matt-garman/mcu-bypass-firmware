@@ -970,14 +970,14 @@ Its firmware, `src/bypass_mcu_pic10f320.c`, therefore reuses *neither* the core
 nor the output drivers as linked code. It is a single self-contained file: the
 integrator and state machine are written directly in `main()`, debounce
 initialization is written directly in `init()`, and source-local static output
-functions are selected by `#if defined(OUTPUT_*)`. Its first unified release is
-still pending qualification.
+functions are selected by `#if defined(OUTPUT_*)`. It first shipped in the
+unified `v0.9.6` release.
 
 That trades the compile-the-verified-core property for direct behavioural
 comparison in the host-equivalence and real-HEX lock-step lanes, plus orthogonal
 fault, actuation, coverage, static-analysis, byte-identity and soak evidence. It
-is integrated and wired into release gates, but is not present in a published
-unified release yet. **`docs/pic10f320_special_case.md` is the single
+is release-supported and has published prebuilt images beginning with `v0.9.6`.
+**`docs/pic10f320_special_case.md` is the single
 authoritative statement of the architectural difference and assurance
 comparison; `docs/pic10f320_validation.md` owns execution evidence, current
 qualification status and exact lane scope.**

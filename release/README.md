@@ -7,12 +7,9 @@ documentation marks them as superseded. Each release lives in its own
 `vX.Y.Z/` subdirectory and is also published as a
 [GitHub Release](../../releases).
 
-> **Current availability:** committed releases stop at `v0.9.5` and contain
-> neither PIC10F320 nor ATtiny202 images. Both targets are release-supported in
-> the source tree, but their first unified prebuilt release remains pending
-> production qualification on the final source. A prior full-tool dry rehearsal
-> passed, but was explicitly non-publishable and predates the current release
-> contract.
+> **Current availability:** `v0.9.6` is the first unified 18-image release. It
+> includes prebuilt firmware for all six release targets and introduces the first
+> images in this release line for ATtiny202 and PIC10F320.
 
 ## Safety warning: v0.9.0-v0.9.2 TMUX images
 
@@ -29,8 +26,9 @@ image for the target MCU, without `_tmux` in the filename. Those unified images
 support both CD4053 and TMUX4053 boards with fail-safe BYPASS polarity. See the
 [`v0.9.3` correction](../CHANGELOG.md#093---2026-07-11).
 
-The current Makefile's product set for the pending unified release covers AVR
-Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT), PIC10F322 and PIC10F320.
+The current Makefile's canonical product set matches the unified `v0.9.6`
+release: AVR Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT), PIC10F322 and
+PIC10F320.
 
 That set is not a description of whatever a build happened to produce — it is
 declared once in the Makefile as `RELEASE_IMAGES` and enforced. The verifier
@@ -48,8 +46,8 @@ validation suite — backs these binaries, through two mechanisms:
 
 1. **Provenance.** Every release carries a `MANIFEST.md` recording the exact
    source commit, pinned toolchain versions, per-image fuse bytes / CONFIG word,
-   and its validation evidence. Beginning with the first unified release
-   (`v0.9.6` or later), a machine-readable `QUALIFICATION` record is checked
+   and its validation evidence. Beginning with `v0.9.6`, a machine-readable
+   `QUALIFICATION` record is checked
    against the exact 28-file retained-evidence inventory and every one of the 15
    soak logs before publication; each log must identify its canonical
    combination and report the configured duration, expected nonzero

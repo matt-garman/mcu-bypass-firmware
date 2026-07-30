@@ -13,23 +13,21 @@ deliberately one-shot gate whose original child-tree baseline was deleted. Its
 reviewed successor digests now drive a standing gate, while the migration proof
 and its provenance remain durable only here.
 
-**Current qualification status (2026-07-28): production pending.** A clean-tree,
-full-tool `--dry-run` completed at `4b28210`: all 15 canonical images built, all
-five release gates passed (including the corrected 74/74 mutation run), and all
-12 soak combinations passed at the rehearsal duration of 60 seconds. It also
-exercised the separate PIC10F322/PIC10F320 compiler-provenance path. That is real
-end-to-end routing evidence, but it was explicitly non-publishable and is not a
-24-hour qualification.
+**Current qualification status (2026-07-30): production-qualified and released.**
+Release `v0.9.6` qualified final source commit `d3ba040`: all 18 canonical images
+built, the required AVR-XT and PIC host/target aggregates passed, and all 15
+release soak combinations completed their full 24-hour simulated durations. The
+retained `QUALIFICATION`, manifest, image checksums and lane/soak evidence live
+under `release/v0.9.6/`; artifact commit `4f4b085` is published under the unified
+`v0.9.6` tag.
 
-The rehearsal also predates the current production contract: dry-run rejection,
-the exact 15-soak/28-file `QUALIFICATION` verifier, release-history binding,
-immutable PIC matrices and sidecars, conserved mutation-result accounting, and
-pinned checksum/tag signature enforcement all landed afterward. Therefore no
-exact-final-source production `QUALIFICATION` exists, the 15 combinations have
-not run for 24 hours under the current pipeline, `release/v0.9.6/` does not
-exist, and the unified tag workflow has not published a release. Numeric results
-below are historical evidence at their recorded tips, not a current release
-attestation.
+The earlier clean-tree, full-tool `--dry-run` at `4b28210` remains useful
+historical routing evidence: it built the then-current 15-image set, passed five
+release gates including the corrected 74/74 mutation run, and ran all 12
+then-canonical soak combinations for 60 seconds. It was explicitly
+non-publishable and predates the final production contract. Numeric results below
+remain historical evidence at their recorded tips unless they explicitly cite
+the retained `v0.9.6` production record.
 
 ---
 
@@ -51,14 +49,13 @@ the moved file was confirmed byte-identical to the child original — a checked
 fact, not a review claim.
 
 Both historical release lines are signed with the same key,
-`6184219C6670945D7174F2B0149F042FCC3D3AEC`; the planned unified release uses that
-same signing identity, so there is no intended key transition.
+`6184219C6670945D7174F2B0149F042FCC3D3AEC`; the unified `v0.9.6` release uses
+that same signing identity, so there was no key transition.
 The historical PIC10F320 binaries themselves were deliberately not copied into
 this repository (their version numbers collide with this project's own line, and
 the older ones contain retired `tmux4053-*` images); they remain downloadable
-from the predecessor repository's release pages. Prebuilt images are planned to
-start with the first successfully qualified unified release (`v0.9.6` is the
-current candidate); no such release exists yet.
+from the predecessor repository's release pages. Unified prebuilt PIC10F320
+images begin with this repository's `v0.9.6` release.
 
 **Querying that history.** The import is a merge commit, so ordinary
 `git log --follow` stops at it: by default `git log` does not descend into a
@@ -138,7 +135,8 @@ an intentional, reviewed firmware/toolchain change in the same commit.
 
 Measured during the merge on XC8 V3.10 + PIC10-12Fxxx DFP 1.9.189, gpsim 0.32.1,
 all three output variants unless noted. These results establish the implemented
-lanes and historical baseline; the status note above governs release readiness.
+lanes and historical baseline; the status note above links the current production
+evidence.
 
 | Lane | Result |
 | --- | --- |
@@ -278,8 +276,10 @@ As retrospective parser/decoder context only, the predecessor project's signed
 predate the merged-tree exact-TRISA firmware change and are not current-image
 qualification evidence. The three current-at-the-time images passed the oracle
 inside the `4b28210` rehearsal, but its exact depth output was not retained in
-the repository and it predates later build/release hardening. Exact-final-source
-real-image results remain part of production qualification.
+the repository and it predates later build/release hardening. The `v0.9.6`
+production run retained exact-final-source depths and witnesses in
+`release/v0.9.6/evidence/pic320-test.log`: 3 / 3 / 4 entries, with at least two
+of the eight hardware levels held in reserve for every variant.
 
 ### 3c. Rebuild-trigger regression
 
@@ -323,8 +323,9 @@ and fails the existing check. No assertion relies on timestamps.
 This evidence is narrowly **deterministic rebuild triggering and current-option
 propagation**. The separate `pic320-test-build` gate now owns byte-for-byte XC8
 output comparison; this fake-tool lane still does not establish real-XC8
-reproducibility or qualify exact-final-source PIC10F320 images. The current
-qualification status at the top of this record is unchanged.
+reproducibility or by itself qualify exact-final-source PIC10F320 images. The
+production aggregates and retained evidence named in the status section own
+that claim.
 
 ## 4. The defensive-layer decision, measured
 
@@ -413,11 +414,6 @@ Stated so nobody has to infer it:
   regression separately proves current commands run with current flags. Neither
   establishes that arbitrary XC8 versions or environments emit identical bytes.
 - **The output-latch integrity check is absent** (§4).
-- **No exact-final-source real-image return-stack result is retained.** All three
-  current-at-the-time images passed the mandatory gate during the `4b28210` dry
-  rehearsal, while the synthetic fail-closed fixtures remain in `make test`.
-  Later build/release changes mean production qualification must rebuild and
-  record the final images; this is not an unimplemented bound.
 - **Hardware-bench properties are simulated, not proven**: WDT timing and
   brown-out behaviour, absolute tick period, and real-silicon pulse timing. These
   are shared with the PIC10F322 build, since both are validated in the same gpsim

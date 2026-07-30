@@ -9,7 +9,7 @@ begins once these designs are validated on real hardware.** Everything shipped
 so far is validated by simulation, formal proof and static analysis — thorough,
 and not the same claim as "it has run on the part". Until that changes, new
 work lands as `0.9.x` however large it is; the merge of a whole additional MCU
-target planned for `0.9.6` rather than `0.10.0` is that rule applied, not an
+target in `0.9.6` rather than `0.10.0` is that rule applied, not an
 oversight.
 
 Per-release provenance (source commit, pinned toolchain, image hashes, flash
@@ -17,8 +17,7 @@ usage, and validation evidence) lives in `release/<version>/MANIFEST.md`; this
 file is the human-readable summary of *what changed*.
 
 > **On the PIC10F320's version history.** The PIC10F320 target was developed in a
-> separate repository and merged into this one (see **Unreleased** below, planned
-> for `0.9.6`). That
+> separate repository and merged into this one in `v0.9.6` below. That
 > project ran its own `v0.9.0`–`v0.9.5` series with **different content and
 > different dates** from the identically numbered releases in this file — its
 > `0.9.5` is dated 2026-07-10, this project's 2026-07-18. Those entries are
@@ -30,6 +29,8 @@ file is the human-readable summary of *what changed*.
 > as a sub-lane inside each entry.
 
 ## [Unreleased]
+
+## [0.9.6] - 2026-07-30
 
 ### Added
 - **The GitHub workflow files are now validated locally** (`make
@@ -84,10 +85,11 @@ file is the human-readable summary of *what changed*.
   "Known gaps (AVR-XT — hardware-bench only)" section covering yasimavr's flat
   instruction timing, the unobservable force-reset completion, the two vendored
   simulator patches, the missing shell stack bound, and untested UPDI programming.
-- **PIC10F320 integrated as the planned fifth release target** — the first
-  whose firmware does not compile the verified core but hand-inlines it, because
-  256 words of flash cannot hold the shared-core architecture. Merged from a
-  separate repository with its full history preserved. See
+- **PIC10F320 integrated as a release-supported target** — the first whose
+  firmware does not compile the verified core but implements the debounce
+  algorithm directly, because 256 words of flash cannot hold the shared-core
+  architecture. Merged from a separate repository with its full history
+  preserved. See
   [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md) for what that
   difference does and does not buy, and `docs/pic10f320_merge_plan.md` for every
   decision taken.
@@ -126,9 +128,8 @@ file is the human-readable summary of *what changed*.
   build were all derived by globbing, so three "independent" checks agreed
   perfectly on a release with an entire MCU missing. They no longer can.
 - Three PIC10F320 full-duration soak combinations are required by the release
-  pipeline, which will add PIC10F320 images as release assets beginning with the
-  first successfully qualified unified release. Normal CI already publishes its
-  separate development artifact.
+  pipeline. `v0.9.6` is the first unified release to publish those images as
+  release assets; normal CI also publishes its separate development artifact.
 - `make pic320-*` targets, `make help` entries for them, and a
   `docs/pic10f320_special_case.md` linked from the README, the design
   documentation, the release documentation and the generated release manifest.
@@ -188,11 +189,12 @@ file is the human-readable summary of *what changed*.
   checks similarly protect the four output pins, and the per-variant matrix
   expands from 17 injections / 18 results to 22 / 23.
 - Qualification documentation now distinguishes historical phase evidence, the
-  clean but non-publishable `4b28210` full-tool rehearsal, and the still-missing
-  final-source production run. It no longer claims that corrected 74/74 mutation
-  execution and real-image stack gating never occurred, and the release guide
-  scopes the `QUALIFICATION` soak/evidence contract to unified releases rather
-  than directing `v0.9.0` through `v0.9.5` to files and targets they predate.
+  clean but non-publishable `4b28210` full-tool rehearsal, and retained
+  final-source production evidence. It no longer claims that corrected 74/74
+  mutation execution and real-image stack gating never occurred, and the release
+  guide scopes the `QUALIFICATION` soak/evidence contract to unified releases
+  rather than directing `v0.9.0` through `v0.9.5` to files and targets they
+  predate.
 - Release publication now requires both cryptographic signatures promised by the
   trust model. CI verifies `SHA256SUMS.asc` and the exact remote annotated tag
   object against the checked-in public key and pinned full fingerprint before
@@ -589,7 +591,8 @@ file is the human-readable summary of *what changed*.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.5...HEAD
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.6...HEAD
+[0.9.6]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.2...v0.9.3

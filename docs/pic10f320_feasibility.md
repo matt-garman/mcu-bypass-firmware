@@ -11,13 +11,13 @@ unchanged and is why the PIC10F322 (512 words) is the PIC target for the
 reference architecture.
 
 **What this document does *not* prove:** that the PIC10F320 is unbuildable. It
-is an **integrated, release-gated candidate**, implemented differently: a
+is a **release-supported constrained target**, implemented differently: a
 single self-contained source file with the debounce logic inlined into `main()`,
 which is exactly the architecture this document concluded was necessary if the
 part were ever to be supported (see §3b — "a preprocessor macro would force
-textual inlining the compiler cannot skip"). Its first unified release remains
-pending. That implementation trades the compile-the-verified-core property for
-an equivalence-and-lockstep argument against the same core. See
+textual inlining the compiler cannot skip"). It first shipped in the unified
+`v0.9.6` release. That implementation trades the compile-the-verified-core
+property for an equivalence-and-lockstep argument against the same core. See
 `pic10f320_merge_plan.md` for the integration and
 `pic10f320_special_case.md` for the assurance caveat.
 
@@ -242,21 +242,22 @@ The decision as taken in 2026-06-26, and what became of each part of it:
   cannot host it under free-tier XC8, and the only source changes that would help
   enough either don't exist (the optimizer is capped) or sacrifice the robustness
   abstractions that are the project's reason for being. **Still true.** What
-  changed is the conclusion drawn from it: rather than dropping the part, a
-  separate inlined implementation was written for it — the option §3b identified
-  and priced. It is now an integrated, release-gated candidate under the caveat
-  described in `pic10f320_special_case.md`; first-release qualification remains
-  pending.
+   changed is the conclusion drawn from it: rather than dropping the part, a
+   separate inlined implementation was written for it — the option §3b identified
+   and priced. It is now release-supported under the caveat described in
+   `pic10f320_special_case.md`; production qualification completed for its first
+   unified release, `v0.9.6`.
 - **PIC10F322: the supported PIC target for the reference architecture** — all
   three variants fit. **Still true**, though the margin has narrowed since: the
   largest variant now uses 473 of 512 words (92.4%), leaving 39 free. It fits
   and is gated on every build, but "comfortable" would overstate it today.
 - **Keep `debounce_context_t`, the enum types, and the pure
-  functional-core/imperative-shell split exactly as they are.** They were
-  measured to be *not* the blocker, and the abstraction is the project's
-  strongest correctness asset. **Still true, and load-bearing:** the 320's
-  inlined firmware is proved equivalent against this same unmodified core, so
-  the core had to stay verifiable for that argument to exist at all.
+   functional-core/imperative-shell split exactly as they are.** They were
+   measured to be *not* the blocker, and the abstraction is the project's
+   strongest correctness asset. **Still true, and load-bearing:** the 320's
+   directly implemented firmware is compared against this same unmodified core
+   by the scoped equivalence and lock-step lanes, so the core had to stay
+   verifiable for that argument to exist at all.
 - The family naming (`bypass_mcu_pic10f32x.c`, `bypass_pins_pic10f32x.h`,
   `BYPASS_MCU_PIC10F32X`) was retained at the time as a register-family label.
   **Superseded:** those were renamed to `pic10f322` once a genuinely separate
@@ -299,5 +300,5 @@ DFP=/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8
   -o /tmp/os.hex
 ```
 
-`make pic` builds and budget-checks all three variants for the 322 (the supported
-PIC target).
+`make pic` builds and budget-checks all three variants for the 322 (the
+reference-architecture PIC target).
