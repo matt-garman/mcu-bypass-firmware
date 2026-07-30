@@ -1,0 +1,16 @@
+# Source and executable text must retain Unix line endings.
+.gitattributes text eol=lf
+Makefile text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# These artifacts are byte-exact inputs to release and qualification checks.
+*.asc -text
+*.hex -text
+*.sha256 -text
+SHA256SUMS -text
+QUALIFICATION -text
