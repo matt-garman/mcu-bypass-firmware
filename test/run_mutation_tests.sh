@@ -45,6 +45,12 @@ MUTATION_ALLOW_SKIP=$(resolve_mutation_allow_skip)
 policy_rc=$?
 [ "$policy_rc" -eq 0 ] || exit "$policy_rc"
 source "$SCRIPT_DIR/mutation_accounting.sh"
+# The sandbox builder, shared with test/test_pic_rebuild.sh -- the other harness
+# that copies the repo into a mktemp tree and runs Make inside it. It used to
+# enumerate its prerequisites by hand, so a new one had to be added twice; the
+# allowlist walk now serves both. See test/scratch_tree.sh for the two
+# constraints (allowlist, no Git) that any edit to it must preserve.
+source "$SCRIPT_DIR/scratch_tree.sh"
 
 readonly MUTATION_EXPECTED_CORE=24
 readonly MUTATION_EXPECTED_XT=19
@@ -249,76 +255,25 @@ MUTATIONS=(
 "src/bypass_pure.c	s@res.fault = true;@res.fault = false;@	test-model-check	MODEL corrupt-state fault suppressed (verify_corrupt_state_faults catches it)"
 )
 
-# Files copied into each sandbox (all firmware sources + headers + harness +
-# Makefile). Copying the whole source set keeps this robust as variants are
-# added or renamed.
+# Files copied into each sandbox: all firmware sources + headers, the Makefile,
+# scripts/, and every source file under test/ at any depth. The walk itself, and
+# the rationale for every part of it, lives in test/scratch_tree.sh so that this
+# runner and test/test_pic_rebuild.sh cannot drift apart again. This binds it to
+# the real tree; the name stays because the sandbox self-tests, the survivor
+# diagnostics and the merge-plan record all speak of copy_tree.
 copy_tree() {
-    local dst="$1" manifest src rel
-    mkdir -p "$dst/src" "$dst/test" || return 1
-    cp "$PROJ_DIR"/src/*.c "$PROJ_DIR"/src/*.h "$dst/src/" || return 1
-    cp "$PROJ_DIR/Makefile" "$dst/" || return 1
-    # The Makefile's build/validate recipes invoke helper scripts under
-    # scripts/ -- notably IHEX_VALIDATOR (scripts/validate-ihex.sh), which
-    # `make pic` and the .hex rules REQUIRE and fail closed without. Mirror the
-    # whole dir so a sandbox build behaves exactly like the real tree; -a
-    # preserves the executable bit the validator-present check relies on.
-    cp -a "$PROJ_DIR/scripts" "$dst/" || return 1
-    # Mirror every source file under test/, at ANY depth, filtered by extension.
-    # The allowlist is deliberate and must stay one: test/ also holds BUILD
-    # PRODUCTS (test/avr/test_sim_*, test/formal/klee-out/, __pycache__), and
-    # `cp -a` preserves mtimes -- a stale binary copied in newer than the source
-    # beside it makes Make skip the rebuild, so the mutant is scored against
-    # unmutated code. That is a silently WRONG answer, not a loud failure, which
-    # is the one outcome a mutation harness must never produce. A wholesale
-    # `cp -a test/` would buy convenience at exactly that price.
-    #
-    # Depth is what actually bit. The previous form copied test/*.h at the root
-    # and then looped over test/<sub>/ taking only c/cc/sh/stc, which left two
-    # whole classes invisible to every sandbox: headers in a subdirectory, and
-    # anything three levels down (test/pic/fw_coverage/). The casualty was
-    # test/pic/find_pin_exact.h -- a prerequisite of BOTH chips' soak binaries
-    # and all three pic*-test-target legs -- whose absence failed every PIC
-    # baseline. The probe reports a failed baseline as a skip, and the summary
-    # then blamed a "toolchain absent" on a host that had every tool.
-    #
-    # One find(1) walk covers root and subdirectories uniformly, so adding a
-    # substrate or nesting a harness needs no edit here -- the failure above was
-    # a maintenance burden coming due, not a one-off omission. It also subsumes
-    # the former test/pic10f320 wholesale special case (that subtree is
-    # c/cc/h/py/sh/stc throughout) while, unlike `cp -a` of a directory,
-    # declining to drag a stale __pycache__ in with it. -a still preserves the
-    # executable bit the gpsim wrappers and check_fw_coverage.sh depend on.
-    #
-    # Non-source data (test/misra*.{json,txt}, README.md) stays out: no mutation
-    # kill target reads it. Add the extension here if that ever changes.
-    manifest=$(mktemp "$dst/.mutation-sources.XXXXXX") || return 1
-    if ! find "$PROJ_DIR/test" -type f \
-        \( -name '*.c' -o -name '*.cc' -o -name '*.h' \
-           -o -name '*.sh' -o -name '*.stc' -o -name '*.py' \) \
-        -not -path '*/__pycache__/*' -not -path '*/klee-out/*' -print0 \
-        > "$manifest"; then
-        rm -f "$manifest"
-        return 1
-    fi
-    while IFS= read -r -d '' src; do
-        rel="${src#"$PROJ_DIR"/}"
-        if ! mkdir -p "$dst/${rel%/*}" || ! cp -a "$src" "$dst/$rel"; then
-            rm -f "$manifest"
-            return 1
-        fi
-    done < "$manifest"
-    rm -f "$manifest" || return 1
+    scratch_tree_copy "$PROJ_DIR" "$1"
 }
 
 # Fail CLOSED on an incomplete sandbox. Every entry here is a file whose absence
 # does not announce itself: the sandbox still builds, the baseline still runs,
 # and the probe records a plain FAIL that the summary reports as a skip -- so the
 # gate silently shrinks instead of breaking. find_pin_exact.h is on this list
-# because that is precisely what it did (see copy_tree), and it is worth being
-# blunt about why the list did not save us: it is hand-maintained, so it protects
-# only against gaps someone already thought of. The copy_tree walk above is the
-# real fix; this is the check that turns a future omission into one obvious line
-# instead of a misattributed toolchain complaint.
+# because that is precisely what it did (see test/scratch_tree.sh), and it is
+# worth being blunt about why the list did not save us: it is hand-maintained, so
+# it protects only against gaps someone already thought of. The allowlist walk in
+# test/scratch_tree.sh is the real fix; this is the check that turns a future
+# omission into one obvious line instead of a misattributed toolchain complaint.
 validate_pic320_sandbox() {
     local root="$1" required ok=1
     for required in \

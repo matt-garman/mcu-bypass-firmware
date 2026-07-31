@@ -70,6 +70,24 @@ file is the human-readable summary of *what changed*.
   HEX parser is likewise gone, replaced by the `scripts/validate-ihex.sh` that
   the Classic AVR `.hex` rules and both PIC builds already use — with all six
   ATtiny202 images verified byte-identical across the swap.
+- **The two throwaway-repository builders now share one walk.**
+  `make test-mutation` builds a sandbox per mutant and `test-pic-build-rebuild`
+  builds one for the PIC soak file rules; both copy the tree into a `mktemp`
+  directory and run Make inside it, but they learned about a new file by
+  different means — an extension-allowlist `find` walk versus a hand-enumerated
+  prerequisite list. `test/pic/find_pin_exact.h`, made a prerequisite of both
+  chips' soak binaries by `b4da21c`, broke each of them in turn. The mutation
+  runner is where that costs most, because there the omission is silent: a
+  missing file fails the baseline probe, a failed baseline is recorded as a
+  *skip*, and 18 mutants went unenforced while the run reported every mutant it
+  did evaluate as killed. Both harnesses now source `test/scratch_tree.sh`. The
+  walk itself is unchanged — the sandbox it produces is byte-identical to the
+  one the mutation runner built before — and `test_pic_rebuild.sh` keeps only
+  its own step, blanking the named prerequisites, since the property under test
+  is Make's staleness decision and not compilation. That list can no longer omit
+  a file and stop Make short of the property; what it still does is assert those
+  files *are* prerequisites, so a rename is reported in one line instead of
+  quietly shrinking the fixture (9 → 14 checks).
 
 ### Added
 - **Two ATtiny202 build regressions** covering an absent and a non-executable

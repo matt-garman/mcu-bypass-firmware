@@ -23,6 +23,7 @@ test/
   mutation_policy.sh        shared: strict/partial mutation policy resolver
   mutation_accounting.sh    shared: mutation inventory/result accounting helpers
   run_mutation_tests.sh     shared: mutation-testing driver (make test-mutation)
+  scratch_tree.sh           shared: throwaway repo-copy builder for sandbox harnesses
   soak_timing_config.h      shared: native soak timing bounds
   check_flash_budget.sh     shared: exact flash-budget checker
   check_stack_depth_pic.sh  shared: PIC hardware return-stack depth gate
@@ -258,7 +259,7 @@ below so a green gate means every PIC layer actually ran.
 | Aggregate fail-closed regression | `test-target-lane-markers` | Proves the per-variant aggregate requires each lane's explicit `PASS` marker, not just its exit status: a skipped, crashed, or failing-but-zero-exit lane is rejected and the aggregate's own success line is withheld. Covers both PIC chips. | Bash + fake recursive Make |
 | Hardware return-stack depth | `pic-test-stack-bound`, `pic320-test-stack-bound` | Bounds the **8-level hardware return stack** — the PIC counterpart of the AVR's byte-valued `test-stack-bound`, and a different quantity: the PIC14 core has no data stack, and hardware-stack overflow on this part is silent (no `STKPTR`, no `STKOVF`, no overflow reset). Computes the deepest call chain from the freshly generated instruction stream, cross-checks it against XC8's own `callstack` directives, and rejects missing/current-image assembly, recursion, indirect calls, and an over-budget build. Every variant, both chips. | XC8-generated `.s` + awk |
 | Stack-depth gate regression | `test-stack-bound-pic-regression` | Proves that gate rejects each way the analysis can be wrong — over budget, recursion, an overflowing build, the two oracles disagreeing, an unresolvable or indirect call, no entry point, and a device pack declaring no depth. Synthetic fixtures, so it needs no toolchain. | Bash + awk |
-| Soak rebuild determinism | `test-pic-build-rebuild` | Both chips' soak binaries compile their workload sizing in as `-D` flags, so their file rules must be *unconditionally* out of date. Asserts a changed duration recompiles with the new value, and that an identical rerun recompiles too — the signature of `FORCE`, as opposed to a rebuild that merely followed a timestamp. | Bash + fake c++ |
+| Soak rebuild determinism | `test-pic-build-rebuild` | Both chips' soak binaries compile their workload sizing in as `-D` flags, so their file rules must be *unconditionally* out of date. Asserts a changed duration recompiles with the new value, and that an identical rerun recompiles too — the signature of `FORCE`, as opposed to a rebuild that merely followed a timestamp. Populates its scratch repository with the shared `test/scratch_tree.sh` walk, then blanks each named prerequisite: contents cannot matter to a staleness decision, and a prerequisite that has been renamed or dropped is reported instead of silently shrinking the fixture. | Bash + fake c++ |
 | Soak timing/liveness contract | `test-soak-timing` | Native Classic AVR/PIC soaks require the liveness interval within the total duration; short release rehearsals clamp it so every passing run completes a responsiveness round-trip. A rapid PIC retrigger fixture proves multi-ms holds are sampled every millisecond, and a fake AVR-XT simulator resets during the final round-trip hold to prove the witness is checked before verdict. | host C/C++ compilers + release CLI + fake simulator |
 | Soak watchdog witness | `test-soak-reset-witness` | The Classic AVR soak's `watchdog_failures` counter is release evidence, so a real watchdog reset must be able to reach it. Builds the soak driver twice against the same healthy ATtiny85 image — untouched, and with a fixture that disables the timer interrupt mid-run — and requires the first to pass with `watchdog_failures=0` and the second to fail with a nonzero one. The control half is what stops a permanently broken soak from satisfying the failing half on its own. | simavr + host C compiler |
 | Release qualification contract | `test-release-qualification` | Publication requires clean production metadata, the exact canonical 28-file evidence set, and one identity-, duration-, and counter-bearing result for each of 15 release soak combinations. | Bash + synthetic retained evidence |
@@ -450,6 +451,19 @@ can enable the tool-dependent PIC10F320 mutants. The host-only
 including the wrappers' executable mode, and covers inventory, conservation,
 record/command parsing, atomic publication, checker-status classification, and
 result grammar in 30 checks.
+
+That copy routine is **`test/scratch_tree.sh`**, shared with the other harness
+that builds a throwaway repository and runs Make inside it,
+`test/test_pic_rebuild.sh`. The two used to learn about a new file by different
+means — this extension allowlist walk versus a hand-enumerated prerequisite list
+— and one prerequisite added to the PIC soak rules broke each of them in turn.
+The walk is now the single mechanism, so a new substrate, a nested harness, or a
+target that gains a prerequisite needs no edit in either. Two properties of the
+walk are load-bearing and documented at length in the file: it stays an
+**allowlist** (a wholesale `cp -a test/` would drag in build products, and `cp -a`
+preserves mtimes, so a stale binary copied in newer than its source makes Make
+skip the rebuild and score a mutant against unmutated code), and it must never
+require a **Git repository**, because these sandboxes have no `.git`.
 
 **The ATtiny202 lane is gated the same way, with one extra hazard.** `XT_DFP` and
 `YASIMAVR_VENV` both default to paths *relative* to the tree, which is exactly
