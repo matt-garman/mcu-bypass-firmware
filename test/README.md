@@ -74,7 +74,7 @@ test/
            test_sim_attiny202.py   functional + PA2/PA3 transition/timing checks
            test_attiny202_output_oracle.py  host regression for output checks
            test_attiny202_fault_oracle.py   host fault-run accounting regression
-            test_fault_attiny202.py  critical-SFR/state/pin-polarity fault injection
+           test_fault_attiny202.py  critical-SFR/state/pin-polarity fault injection
            test_soak_attiny202.py  long-duration liveness soak
            test_lockstep_attiny202.py  ctx_-vs-golden-model co-simulation
                                                         (make attiny202-lockstep)
@@ -88,7 +88,7 @@ test/
                                                         (make test-attiny202-model-ffi)
 
   pic/     PIC10F322-specific tests plus shared PIC gpsim harness code.
-             fw_coverage/         real PIC source via host SFR mock + gcov
+            fw_coverage/         real PIC source via host SFR mock + gcov
                                                         (make pic-coverage-check-fw)
             test_config_pic.c    CONFIG-word check     (make pic-test-config)
             *.stc + run_gpsim_*  register-level gpsim  (make pic-test-gpsim)
@@ -125,20 +125,20 @@ test/
                        check_fw_coverage.sh    exact-line firmware coverage gate
                                                        (make pic320-coverage-check-fw)
             gpsim/     test_fault_pic.cc     libgpsim fault adapter
-                                                         (make pic320-test-fault-target)
-                         test_lockstep_pic.cc  libgpsim lock-step adapter
-                                                         (make pic320-test-lockstep)
-                         test_io_pic.cc        libgpsim GPIO/timing adapter
-                                                         (make pic320-test-io)
-                        footswitch_toggle.stc gpsim stimulus
-              return_stack_oracle.py  strict final-HEX control-flow/return-stack
-                                      proof + fixtures
-                               (make test-pic320-return-stack-oracle;
-                                make pic320-test-return-stack for real images)
-              check_expected_images.py  strict SHA-256 manifest/image checker
-              expected_images.sha256    reviewed XC8/DFP three-image baseline
-                               (make test-pic320-expected-images;
-                                make pic320-test-build for real images)
+                                                       (make pic320-test-fault-target)
+                       test_lockstep_pic.cc  libgpsim lock-step adapter
+                                                       (make pic320-test-lockstep)
+                       test_io_pic.cc        libgpsim GPIO/timing adapter
+                                                       (make pic320-test-io)
+                       footswitch_toggle.stc gpsim stimulus
+            return_stack_oracle.py  strict final-HEX control-flow/return-stack
+                                    proof + fixtures
+                             (make test-pic320-return-stack-oracle;
+                              make pic320-test-return-stack for real images)
+            check_expected_images.py  strict SHA-256 manifest/image checker
+            expected_images.sha256    reviewed XC8/DFP three-image baseline
+                             (make test-pic320-expected-images;
+                              make pic320-test-build for real images)
 ```
 
 The PIC10F320 lane reuses, rather than forks, everything it can: the CONFIG-word

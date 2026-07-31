@@ -147,8 +147,10 @@ adverse conditions:
       instruction overhead and sample phase make the exact physical minimum
       non-integral. Noise and old switches lengthen recognition, while oscillator
       tolerance moves wall time in either direction.
-    * On both PIC parts, the footswitch loop is polled (Model B, no timer
-      interrupt), so while a blocking
+    * On both PIC parts, the footswitch loop is polled (Model B: a polled
+      hardware timer tick with the watchdog kept as a pure fault watchdog,
+      no timer interrupt; the decision and its alternatives are recorded in
+      `docs/phase2_pic_shell.md` §1), so while a blocking
       output actuation runs - the relay coil pulse (12ms) or the
       CD4053 mute (5ms), a busy delay inside the state change -
       the loop pauses and the footswitch is not sampled.  The

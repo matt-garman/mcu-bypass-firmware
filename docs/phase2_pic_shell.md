@@ -8,8 +8,11 @@ always the authority on *what* the shell does; this file records *why*.
 Scope note: these notes describe the **PIC10F322** shell only. The PIC10F320 is
 a separate, deliberately different implementation — its 256-word flash cannot
 hold the modular architecture, so its logic is inlined into `main()`. See
-`pic10f320_feasibility.md` for the measurements and `pic10f320_merge_plan.md`
-for how that target is integrated and what its assurance story is.
+`pic10f320_feasibility.md` for the measurements, `pic10f320_special_case.md` for
+its assurance argument and support contract, and `pic10f320_validation.md` for
+what was run and what it returned. `pic10f320_merge_plan.md` records how that
+target was integrated, but it is a historical decision record — do not read it
+for current status.
 
 The general architecture argument — why the algorithm is shared but the main
 loop is not — lives in `DESIGN_DOCUMENTATION.adoc`, "Multi-MCU Architecture".
