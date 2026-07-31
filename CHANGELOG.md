@@ -30,6 +30,47 @@ file is the human-readable summary of *what changed*.
 
 ## [Unreleased]
 
+### Fixed
+- **The Classic AVR soak was watching a signal simavr never raises for a
+  watchdog reset.** `test/avr/test_soak.c` recorded a watchdog failure only when
+  `avr_run()` returned `cpu_Crashed`, but simavr 1.6 sets that state solely from
+  `avr_sadly_crashed()` (illegal opcode / stack crash); its watchdog path resets
+  the core in place and leaves it `cpu_Running`. The six Classic AVR release
+  soak combinations could therefore run a full 24 h and report
+  `watchdog_failures=0` without ever having been able to observe one. The soak
+  now installs simavr's `avr->reset` callback — the same positive witness
+  `test/avr/test_sim.c` has used since `9957a00` — counts every invocation, and
+  charges each reset to `watchdog_failures`. A `cpu_Crashed` remains tracked as
+  its own separate anomaly. `test_watchdog_not_tripped_normally` in
+  `test_sim.c` now asserts the reset count rather than the crash flag, which is
+  the only one of the two that can witness the fault the test is named for.
+  Both harnesses chain the MCU model's own reset callback instead of replacing
+  it.
+
+### Added
+- **`make test-soak-reset-witness`** proves that fix stays true. It builds the
+  soak driver twice against the same healthy ATtiny85 image — untouched, and
+  with a compile-time fixture that disables the timer interrupt mid-run so the
+  main loop stops petting the dog — and requires the first to pass with
+  `watchdog_failures=0` and the second to fail with a nonzero one. The control
+  half is what stops a permanently broken soak from satisfying the failing half
+  on its own. Part of `make test` and `make test-long`.
+- **A Classic AVR soak-lane mutant**, giving that family the coverage the
+  PIC10F322, PIC10F320 and ATtiny202 families already had. It empties
+  `hw_wdt_pet()` at its definition — so the call site remains and the build
+  stays clean — and is killed by the soak's reset witness. This raises the
+  pinned mutation inventory from **93 to 94** (24 core/AVR, was 23); the counts
+  quoted in the `0.9.6` entries below are the historical figures for that
+  release and are unchanged.
+
+  The two pre-existing watchdog-handshake mutants keep their kill targets but
+  had their descriptions corrected: both run on the ATtiny13a lane, where simavr
+  models no WDT system reset at all, so neither was killed by the watchdog.
+  Deleting the `hw_wdt_pet()` call site leaves the function unused and fails the
+  build under `-Werror=unused-function`; breaking the ISR handshake stops the
+  debounce state machine and fails the functional, noise-count and lock-step
+  assertions.
+
 ## [0.9.6] - 2026-07-30
 
 ### Added

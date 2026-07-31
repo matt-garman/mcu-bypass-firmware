@@ -46,14 +46,14 @@ policy_rc=$?
 [ "$policy_rc" -eq 0 ] || exit "$policy_rc"
 source "$SCRIPT_DIR/mutation_accounting.sh"
 
-readonly MUTATION_EXPECTED_CORE=23
+readonly MUTATION_EXPECTED_CORE=24
 readonly MUTATION_EXPECTED_XT=19
 readonly MUTATION_EXPECTED_PIC_GPSIM=6
 readonly MUTATION_EXPECTED_PIC_TARGET=8
 readonly MUTATION_EXPECTED_PIC_SOAK=1
 readonly MUTATION_EXPECTED_PIC320_HOST=27
 readonly MUTATION_EXPECTED_PIC320_TOOL=9
-readonly MUTATION_EXPECTED_TOTAL=93
+readonly MUTATION_EXPECTED_TOTAL=94
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
@@ -73,6 +73,17 @@ PIC_SOAK_MUT_MS="${PIC_SOAK_MUT_MS:-2500}"
 # real press/release round-trip instead of a vacuous zero-check pass. Must stay
 # <= PIC_SOAK_MUT_MS.
 PIC_SOAK_MUT_LIVENESS_MS="${PIC_SOAK_MUT_LIVENESS_MS:-1000}"
+
+# --- Classic AVR (simavr) knobs -----------------------------------------------
+# Short soak window for the Classic AVR WDT-liveness mutant. The ATtiny85 arms
+# its watchdog at WDTO_250MS, so this is several periods: an un-pet dog resets
+# well inside it while the baseline (pet) run stays quick. Simulated time, and
+# simavr runs it far faster than real time. The liveness interval must stay
+# <= the duration -- the shared soak timing contract static_asserts it -- and
+# small enough that the baseline performs a real press/release round-trip
+# instead of a vacuous zero-check pass.
+AVR_SOAK_MUT_MS="${AVR_SOAK_MUT_MS:-2000}"
+AVR_SOAK_MUT_LIVENESS_MS="${AVR_SOAK_MUT_LIVENESS_MS:-1000}"
 
 # --- AVR-XT (ATtiny202) knobs -------------------------------------------------
 # The two out-of-tree inputs the ATtiny202 lane needs, as ABSOLUTE paths. Both
@@ -206,8 +217,16 @@ MUTATIONS=(
 "src/bypass_pure.c	s@res.lockout_value = RELEASE_THRESH;@res.lockout_value = 0;@g	test-sim-cd4053	toggle lockout: counter reset to 0 instead of RELEASE_THRESH (immediate re-arm, no hold lockout)"
 "src/bypass_pure.c	s@res.program_state = RELEASE_DEBOUNCE_WAIT;@res.program_state = PRESS_DEBOUNCE_WAIT;@g	test-sim-cd4053	toggle lockout: stays in PRESS_DEBOUNCE_WAIT after toggle (counter=25 >= 8 -> immediate re-toggle cascade)"
 # --- watchdog handshake (bypass_mcu_avr_classic.c) ----------------------------------------
-"src/bypass_mcu_avr_classic.c	s@hw_wdt_pet();@(void)0; /* MUTANT: no WDT pet */@	test-sim-cd4053	WDT pet removed from main loop: watchdog fires within ~250ms; test_watchdog_not_tripped_normally catches it"
-"src/bypass_mcu_avr_classic.c	s@timer_isr_called_ = TIMER_ISR_CALLED;@timer_isr_called_ = TIMER_ISR_NOT_CALLED;@	test-sim-cd4053	WDT handshake: ISR clears its own flag -> main never sees CALLED -> WDT fires within timeout"
+# Note what kills each of these, because it is NOT the watchdog on the first
+# two. `test-sim-cd4053` is the ATtiny13a build, and simavr 1.6 does not model
+# the ATtiny13a WDT system reset at all (see test_sim.c's
+# test_watchdog_backstop_documented) -- so no assertion on that lane can observe
+# a watchdog reset. The third entry is the one that actually exercises the
+# watchdog: it runs on the tinyx5, where simavr does model the reset, and is
+# killed by the soak's reset witness.
+"src/bypass_mcu_avr_classic.c	s@hw_wdt_pet();@(void)0; /* MUTANT: no WDT pet */@	test-sim-cd4053	WDT pet call site removed from the main loop: it is the only caller, so hw_wdt_pet goes unused and the build fails under -Werror=unused-function before any test runs. Kept because that compiler guard is real coverage; the BEHAVIOURAL form of this fault is the soak mutant below"
+"src/bypass_mcu_avr_classic.c	s@timer_isr_called_ = TIMER_ISR_CALLED;@timer_isr_called_ = TIMER_ISR_NOT_CALLED;@	test-sim-cd4053	WDT handshake: ISR clears its own flag -> main never sees CALLED -> the debounce state machine never advances, so the LED never toggles; the functional, noise-count and lock-step assertions all fail (the ATtiny13a watchdog is not what catches it)"
+"src/bypass_mcu_avr_classic.c	s@static void hw_wdt_pet(void) { wdt_reset(); }@static void hw_wdt_pet(void) { /* MUTANT: no WDT pet */ }@	SOAK_VARIANT=cd4053 SOAK_CHIP=85 SOAK_DURATION_MS=$AVR_SOAK_MUT_MS SOAK_LIVENESS_INTERVAL_MS=$AVR_SOAK_MUT_LIVENESS_MS test-soak	SOAK main-loop WDT pet defeated at the definition, so the call site remains and the build stays clean; the tinyx5 soak's reset witness records the un-pet watchdog in watchdog_failures within the short mutation window"
 # --- main-loop sanity guard / toggle dispatch (bypass_mcu_avr_classic.c) -------------------
 "src/bypass_mcu_avr_classic.c	s@(actual_direction_mask == (uint8_t)BYPASS_OUTPUT_DDR_MASK)@(1U != 0U)@	test-sim-cd4053	DDRB exact-mask predicate removed: PB0 output and PB4 input corruptions evade the former caller-output subset check"
 "src/bypass_mcu_avr_classic.c	s@PORTB & (uint8_t)BYPASS_OUTPUT_DDR_MASK@PORTB \& (uint8_t)0x0EU@	test-sim-cd4053	output-latch mask omits spare PB4; PB4 corruption must still force watchdog recovery"
@@ -915,20 +934,20 @@ done
 
 if [ "$SANDBOX_SELFTEST_DONE" -eq 1 ]; then
     # Fully provisioned, then the two partial shapes the skip accounting can
-    # produce: every simulator absent (only the 50 host mutants dispatch), and
+    # produce: every simulator absent (only the 51 host mutants dispatch), and
     # the ATtiny202 lane alone absent. The second is the case this file's
     # combined `skipped` exists for -- a box with the PIC stack but no vendored
     # DFP/yasimavr -- so the totals check must accept a skip that is not PIC's.
-    mutation_validate_totals 93 93 0 93 0 0 0 0 || exit 1
-    mutation_validate_totals 93 50 43 50 0 0 0 0 || exit 1
-    mutation_validate_totals 93 74 19 74 0 0 0 0 || exit 1
-    if mutation_validate_totals 93 49 43 49 0 0 0 0 >/dev/null 2>&1; then
+    mutation_validate_totals 94 94 0 94 0 0 0 0 || exit 1
+    mutation_validate_totals 94 51 43 51 0 0 0 0 || exit 1
+    mutation_validate_totals 94 75 19 75 0 0 0 0 || exit 1
+    if mutation_validate_totals 94 50 43 50 0 0 0 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a dropped dispatch" >&2; exit 1
     fi
-    if mutation_validate_totals 93 50 43 49 0 0 0 0 >/dev/null 2>&1; then
+    if mutation_validate_totals 94 51 43 50 0 0 0 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a missing result" >&2; exit 1
     fi
-    if mutation_validate_totals 93 50 43 50 0 0 1 0 >/dev/null 2>&1; then
+    if mutation_validate_totals 94 51 43 51 0 0 1 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a failed worker" >&2; exit 1
     fi
     for checker_rc in 125 126 127 143; do

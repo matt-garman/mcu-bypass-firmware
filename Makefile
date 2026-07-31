@@ -536,7 +536,7 @@ FORCE:
         test-soak-timing test-strict-tools test-workload-rebuild \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
-        test-flash-budget-regression test-soak \
+        test-flash-budget-regression test-soak test-soak-reset-witness \
         analyze analyze-tidy analyze-cppcheck analyze-deep \
         trace coverage coverage-check coverage-clean
 
@@ -2319,7 +2319,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-pic320-expected-images test-pic320-coverage-archive test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-attiny202-model-ffi test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-fetch-yasimavr test-supply-chain test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
+test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-pic320-expected-images test-pic320-coverage-archive test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-attiny202-model-ffi test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-fetch-yasimavr test-supply-chain test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-soak-reset-witness test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -2331,7 +2331,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-pic320-expected-images test-pic320-coverage-archive test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-attiny202-model-ffi test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-fetch-yasimavr test-supply-chain test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
+test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-pic320-expected-images test-pic320-coverage-archive test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-attiny202-model-ffi test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-fetch-yasimavr test-supply-chain test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-soak-reset-witness test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -3103,6 +3103,40 @@ test-soak: $(SOAK_DEPS) $(AVR_FW)_$(SOAK_VARIANT)_t$(SOAK_CHIP).elf
 	$(SOAK_COMPILE)
 	@echo "--- soak test: variant=$(SOAK_VARIANT)  MCU=ATtiny$(SOAK_CHIP)  duration=$(SOAK_DURATION_MS) ms ---"
 	./$(SOAK_BIN)
+
+# The soak's `watchdog_failures` counter is release evidence, so prove a real
+# watchdog reset can actually reach it. This builds the SAME soak driver against
+# the SAME healthy image twice -- untouched, and with the fixture that disables
+# the timer interrupt mid-run -- and requires the first to pass with
+# watchdog_failures=0 and the second to fail with a nonzero one. A soak that has
+# merely stopped being able to observe a reset passes the first half and fails
+# the second, which is precisely the drift this gate exists to catch.
+#
+# Short by construction: the numbers below are one WDT window plus slack, not a
+# scaled-down release soak. tinyx5 only -- simavr models the WDT system reset
+# for the ATtiny25/45/85 family and not for the ATtiny13a.
+SOAK_WITNESS_VARIANT       ?= cd4053
+SOAK_WITNESS_CHIP          ?= 85
+SOAK_WITNESS_DURATION_MS   ?= 3000
+SOAK_WITNESS_LIVENESS_MS   ?= 1000
+# Kill the tick with a full WDT window (nominal 250 ms, RC tolerance to ~350 ms)
+# plus margin left in the run, so the reset lands inside the soak rather than
+# after its last millisecond.
+SOAK_WITNESS_KILL_TIMER_MS ?= 1500
+test-soak-reset-witness: $(SOAK_DEPS) \
+                         $(AVR_FW)_$(SOAK_WITNESS_VARIANT)_t$(SOAK_WITNESS_CHIP).elf
+	@echo "--- soak reset witness: variant=$(SOAK_WITNESS_VARIANT)  MCU=ATtiny$(SOAK_WITNESS_CHIP) ---"
+	HOSTCC="$(HOSTCC)" \
+	SOAK_WITNESS_CFLAGS="$(SIM_CFLAGS) $(PURE_HOST_CFLAGS)" \
+	SOAK_WITNESS_LIBS="$(SIM_LIBS)" \
+	SOAK_WITNESS_MACRO="$(macro_$(SOAK_WITNESS_VARIANT))" \
+	SOAK_WITNESS_FW="$(AVR_FW)_$(SOAK_WITNESS_VARIANT)_t$(SOAK_WITNESS_CHIP).elf" \
+	SOAK_WITNESS_MCU="$(mmcu_$(SOAK_WITNESS_CHIP))" \
+	SOAK_WITNESS_F_CPU="$(F_CPU_X5)" \
+	SOAK_WITNESS_DURATION_MS="$(SOAK_WITNESS_DURATION_MS)" \
+	SOAK_WITNESS_LIVENESS_MS="$(SOAK_WITNESS_LIVENESS_MS)" \
+	SOAK_WITNESS_KILL_TIMER_MS="$(SOAK_WITNESS_KILL_TIMER_MS)" \
+	./test/test_soak_reset_witness.sh
 
 # Generate a GTKWave-viewable waveform of PB0/PB1/PB2/PB3 over a representative
 # press/release sequence for the selected VARIANT. Writes

@@ -43,6 +43,8 @@ test/
   test_release_provenance.sh shared: source/compiler/output release-provenance regression
   test_release_qualification.sh shared: release soak/evidence publication contract
   test_release_history.sh     shared: release history + pinned-signature binding
+  test_soak_reset_witness.sh shared: Classic AVR soak watchdog-witness proof
+                                     (make test-soak-reset-witness)
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
   test_stack_bound.sh       shared: fail-closed stack evidence checks
   test_stack_depth_pic.sh   shared: PIC return-stack gate regression
@@ -258,6 +260,7 @@ below so a green gate means every PIC layer actually ran.
 | Stack-depth gate regression | `test-stack-bound-pic-regression` | Proves that gate rejects each way the analysis can be wrong — over budget, recursion, an overflowing build, the two oracles disagreeing, an unresolvable or indirect call, no entry point, and a device pack declaring no depth. Synthetic fixtures, so it needs no toolchain. | Bash + awk |
 | Soak rebuild determinism | `test-pic-build-rebuild` | Both chips' soak binaries compile their workload sizing in as `-D` flags, so their file rules must be *unconditionally* out of date. Asserts a changed duration recompiles with the new value, and that an identical rerun recompiles too — the signature of `FORCE`, as opposed to a rebuild that merely followed a timestamp. | Bash + fake c++ |
 | Soak timing/liveness contract | `test-soak-timing` | Native Classic AVR/PIC soaks require the liveness interval within the total duration; short release rehearsals clamp it so every passing run completes a responsiveness round-trip. A rapid PIC retrigger fixture proves multi-ms holds are sampled every millisecond, and a fake AVR-XT simulator resets during the final round-trip hold to prove the witness is checked before verdict. | host C/C++ compilers + release CLI + fake simulator |
+| Soak watchdog witness | `test-soak-reset-witness` | The Classic AVR soak's `watchdog_failures` counter is release evidence, so a real watchdog reset must be able to reach it. Builds the soak driver twice against the same healthy ATtiny85 image — untouched, and with a fixture that disables the timer interrupt mid-run — and requires the first to pass with `watchdog_failures=0` and the second to fail with a nonzero one. The control half is what stops a permanently broken soak from satisfying the failing half on its own. | simavr + host C compiler |
 | Release qualification contract | `test-release-qualification` | Publication requires clean production metadata, the exact canonical 28-file evidence set, and one identity-, duration-, and counter-bearing result for each of 15 release soak combinations. | Bash + synthetic retained evidence |
 | Release history/signature contract | `test-release-history` | The tag event must peel to an artifact-only, single-parent child of the exact qualified source. `SHA256SUMS.asc` and the exact remote annotated tag must verify against the pinned full-fingerprint key in an isolated keyring; altered bytes, missing/malformed/wrong-key signatures, lightweight/unsigned/same-target-replaced tags, and moved tags are rejected immediately before publication. | Bash + GnuPG + scratch Git repositories |
 | yasimavr venv fetch safety | `test-fetch-yasimavr` | Caller-selected destinations are canonicalized and cannot name roots, symlinks, files, or unstamped directories. Offline fake tools prove failed builds preserve the old owned venv and only a fully verified sibling tree is renamed into place. | Bash + synthetic toolchain |
@@ -406,6 +409,21 @@ TMR2IF cadence, exact-TRISA predicate removal, output-latch mask narrowing,
 exact WPUA pull-up state, ANSELA mask narrowing, muted-CD4053 startup
 reassertion, mute-window shortening, and relay pulse shortening.
 
+**Which lane owns the Classic AVR watchdog matters, and is easy to get wrong.**
+The two long-standing watchdog-handshake mutants both run on `test-sim-cd4053`,
+which is the ATtiny13a build — and simavr 1.6 does not model the ATtiny13a WDT
+system reset at all, so no assertion on that lane can witness one. They are
+still killed, but not by the watchdog: deleting the `hw_wdt_pet()` call site
+leaves the function unused and fails the build under
+`-Werror=unused-function`, and breaking the ISR handshake stops the debounce
+state machine so the functional, noise-count and lock-step assertions all fail.
+The behavioural watchdog fault therefore has its own mutant, which empties
+`hw_wdt_pet()` at its definition (so the call site remains and the build stays
+clean) and runs a short `test-soak` on the ATtiny85, where simavr *does* model
+the reset. The soak's reset witness records it in `watchdog_failures`. This
+gives the Classic AVR the soak-lane mutant the PIC and ATtiny202 families
+already had.
+
 **PIC10F320 mutants are split by what they NEED, not by what they test.** 27 of
 them are killed by the host lanes and require only a C compiler, so they ride
 with the unskippable core batch; 9 need XC8 + gpsim + libgpsim and sit behind
@@ -416,10 +434,10 @@ harness could make them die for an infrastructure reason and falsely count as
 killed. Skip accounting is wired through the same policy resolver, so a partial
 run cannot be mistaken for full PIC10F320 coverage.
 
-The driver independently pins the seven mutation categories at **23 core/AVR +
+The driver independently pins the seven mutation categories at **24 core/AVR +
 19 AVR-XT + 27 PIC10F320 host + 9 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 8
-PIC target = 93**. It rejects category drift before probing, then requires
-dispatched + skipped = 93 and killed + survived + errored = dispatched. Every
+PIC target = 94**. It rejects category drift before probing, then requires
+dispatched + skipped = 94 and killed + survived + errored = dispatched. Every
 worker status is checked; result status/output pairs are atomically published
 and accepted only with exact text grammar and no missing, hidden, or extra
 artifacts.

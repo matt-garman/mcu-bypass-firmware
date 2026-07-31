@@ -219,7 +219,15 @@ static uint32_t    g_resets       = 0; // count of device resets (see reset_hook
 // avr_sadly_crashed() (illegal opcode / stack crash). Its watchdog reset path
 // leaves the core in cpu_Running, and a core parked in cli()+busy-loop is
 // simply "running" as far as the simulator is concerned.
-static void reset_hook(avr_t *avr) { (void)avr; g_resets++; }
+//
+// The MCU model's own reset callback is chained rather than replaced. On the
+// tinyx5 it is currently empty (simavr's tx5_reset), but a harness that
+// silently drops a part's reset work would be wrong the moment that changes.
+static void (*g_mcu_reset)(struct avr_t *avr) = NULL;
+static void reset_hook(avr_t *avr) {
+    g_resets++;
+    if (g_mcu_reset != NULL) { g_mcu_reset(avr); }
+}
 
 // Control-output watchers. PB2 and PB3 are watched generically; their meaning
 // is variant-specific (see the pin-mapping comment at the top of the file).
@@ -447,6 +455,7 @@ static int sim_reset_raw(int footsw_pressed_at_power_on, int settle) {
 
     // Witness every subsequent device reset. Installed after avr_init()/
     // avr_load_firmware() so the power-on reset they perform is not counted.
+    g_mcu_reset  = g_avr->reset;
     g_avr->reset = reset_hook;
 
     // reset instrumentation
@@ -1226,12 +1235,19 @@ static void test_enters_idle_sleep(void) {
 
 // Watchdog must NOT fire during normal operation: the timer ISR pets the dog
 // every tick. Run a long idle period and confirm no crash/reset.
+//
+// g_resets is the load-bearing assertion here: a watchdog timeout resets the
+// core in place and never sets cpu_Crashed (see reset_hook), so a check written
+// only against g_saw_crash cannot observe the very fault this test names. The
+// crash flag is still asserted, as an independent anomaly.
 static void test_watchdog_not_tripped_normally(void) {
     if (sim_reset(0) != 0) { g_failures++; return; }
     g_saw_crash = 0;
+    g_resets = 0;
     footsw_set(0);
     run_ms(1000);       // 1s, well beyond the 250ms WDT window
-    CHECK(g_saw_crash == 0, "watchdog must not reset during normal idle operation");
+    CHECK(g_resets == 0, "watchdog must not reset during normal idle operation");
+    CHECK(g_saw_crash == 0, "CPU must not crash during normal idle operation");
     // and the device should still respond afterwards
     uint32_t before = g_led_changes;
     footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);

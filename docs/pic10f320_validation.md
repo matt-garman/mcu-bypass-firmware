@@ -368,19 +368,19 @@ That corrected execution is historical rather than final-source production
 evidence. The mutation driver has since gained immutable category counts,
 conservation equations, checked workers and process groups, atomic exact result
 records, and fail-closed infrastructure-status classification. Production must
-rerun all 93 mutants through that current accounting contract.
+rerun all 94 mutants through that current accounting contract.
 
 The 36 PIC10F320 mutants are split by what they **need**, not by what they test:
 27 require only a host C compiler and ride with the unskippable core batch; 9
 require XC8 + gpsim + libgpsim and sit behind a tool probe that first verifies
-the *unmutated* tree genuinely passes. The other categories are 23 core/AVR
+the *unmutated* tree genuinely passes. The other categories are 24 core/AVR
 Classic, 19 AVR-XT, 6 PIC10F322 gpsim, 1 PIC10F322 soak, and 8 PIC10F322 target
-mutants, for the pinned total of 93. Without the tool split, PIC10F320 mutants
+mutants, for the pinned total of 94. Without the tool split, PIC10F320 mutants
 would "survive" on any host lacking the PIC toolchain — a false pass.
 
 The accounting contract is independent of the arrays it measures: exact category
-counts pin the complete 93-mutant inventory, dispatched plus skipped must equal
-93, and killed plus survived plus errored must equal dispatched. A worker failure,
+counts pin the complete 94-mutant inventory, dispatched plus skipped must equal
+94, and killed plus survived plus errored must equal dispatched. A worker failure,
 sandbox-copy failure, malformed inventory/baseline command, partial result pair,
 noncanonical status/output, or unexpected result artifact is an error rather than
 a kill. The host-only sandbox/accounting selftest exercises this contract in
