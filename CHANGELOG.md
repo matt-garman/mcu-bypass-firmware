@@ -105,6 +105,18 @@ file is the human-readable summary of *what changed*.
   measurements and scope caveats that are its own. No count moved; the two
   mechanics details that existed only in the validation record moved to
   `test/README.md` rather than being dropped.
+- **The copyright notice names one holder.** `LICENSE` read
+  `Copyright (c) 2026 matt-garman` while all 55 project-authored source headers
+  read `Copyright (c) Matthew Garman`, and the release signing key carried a
+  third form. MIT grants *from* the named holder, so the notice is what a
+  downstream license review reads to identify who could grant a relicense or be
+  party to an assignment — a role a GitHub handle does not fill. `LICENSE` now
+  reads `Copyright (c) 2026 Matthew Garman <matthew.garman@gmail.com>`, matching
+  the source headers and adding a contact path that travels with the notice into
+  every downstream copy. `2026` is confirmed as the year of first publication.
+  Source headers are unchanged, and published releases are untouched: they ship
+  `.hex` images and provenance records, not `LICENSE`, so no signed artifact
+  contains the superseded string.
 
 ### Added
 - **Two ATtiny202 build regressions** covering an absent and a non-executable
