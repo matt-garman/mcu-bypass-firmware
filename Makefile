@@ -168,6 +168,19 @@ OBJDUMP  ?= avr-objdump
 SIZE     = avr-size
 READELF  ?= readelf
 IHEX_VALIDATOR ?= scripts/validate-ihex.sh
+# Presence check for IHEX_VALIDATOR, shared by every phony recipe that runs it
+# (`pic`, `attiny202`, `pic320-size`). The .hex FILE rules do not need it: they
+# carry $(IHEX_VALIDATOR) as a real prerequisite, so Make refuses to run them if
+# it is missing. A phony recipe gets no such protection, and it must not build an
+# image it then cannot validate.
+#
+# `command -v` alone is NOT sufficient. For a value containing a slash, dash's
+# `command -v` succeeds on a file that merely EXISTS -- a non-executable
+# validator therefore passed the old check and failed later with "Permission
+# denied", after objcopy had already produced the unvalidated image. Require -x
+# whenever the value names a path, and fall back to a PATH lookup only for a
+# bare command name.
+IHEX_VALIDATOR_CHECK = case "$(IHEX_VALIDATOR)" in */*) [ -x "$(IHEX_VALIDATOR)" ] ;; *) command -v "$(IHEX_VALIDATOR)" >/dev/null 2>&1 ;; esac || { echo "FAIL: Intel HEX validator not found or not executable at $(IHEX_VALIDATOR)"; exit 1; }
 AVRDUDE  = avrdude
 AVR_ELF_ARCH ?= avr:25
 
@@ -798,9 +811,7 @@ pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(
 		echo "XC8 not found at $(PIC_CC); skipping PIC build (override with PIC_CC=...)"; \
 		$(SKIP); \
 	fi; \
-	if [ ! -x "$(IHEX_VALIDATOR)" ] && ! command -v $(IHEX_VALIDATOR) >/dev/null 2>&1; then \
-		echo "FAIL: Intel HEX validator not found at $(IHEX_VALIDATOR)"; exit 1; \
-	fi; \
+	$(IHEX_VALIDATOR_CHECK); \
 	mkdir -p $(PIC_BUILD_DIR); \
 	pic_complete=0; \
 	cleanup_pic_products() { \
@@ -1681,6 +1692,7 @@ attiny202: | $(XT_BUILD_DIR)
 		echo "src/bypass_mcu_avr_xt.c not present (Increment 2 shell); skipping ATtiny202 build."; \
 		$(SKIP); \
 	fi; \
+	$(IHEX_VALIDATOR_CHECK); \
 	echo "=== ATtiny202 (avrxmega3) build + flash-budget ($(XT_FLASH_BYTES) B) ==="; \
 	if ! awk -v t="$(XT_FLASH_BYTES)" 'BEGIN {exit !(t ~ /^[0-9]+$$/ && t ~ /[1-9]/)}'; then \
 		echo "FAIL: XT_FLASH_BYTES must be a positive decimal integer"; exit 2; \
@@ -1754,34 +1766,7 @@ attiny202: | $(XT_BUILD_DIR)
 			echo "FAIL: could not generate HEX for ATtiny202 variant $$v"; \
 			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
 		fi; \
-		if [ ! -s "$$hex_tmp" ] || ! awk ' \
-			function nibble(c) { return index("0123456789ABCDEF", c) - 1 } \
-			function byte_at(s, p) { return nibble(substr(s, p, 1)) * 16 + nibble(substr(s, p + 1, 1)) } \
-			BEGIN { valid = 1 } \
-			{ sub(/\r$$/, ""); line = toupper($$0); \
-			  if (eof_count || line !~ /^:[[:xdigit:]]+$$/) { valid = 0; next } \
-			  record = substr(line, 2); record_len = length(record); \
-			  if (record_len < 10 || record_len % 2) { valid = 0; next } \
-			  byte_count = byte_at(record, 1); \
-			  if (record_len != 10 + byte_count * 2) { valid = 0; next } \
-			  sum = 0; for (i = 1; i <= record_len; i += 2) sum += byte_at(record, i); \
-			  if (sum % 256 != 0) { valid = 0; next } \
-			  address = substr(record, 3, 4); record_type = substr(record, 7, 2); \
-			  if (record_type == "00") { \
-			    if (byte_count == 0) { valid = 0; next } \
-			    data_bytes += byte_count \
-			  } else if (record_type == "01") { \
-			    if (record != "00000001FF") { valid = 0; next } \
-			    eof_count++ \
-			  } else if (record_type == "02" || record_type == "04") { \
-			    if (byte_count != 2 || address != "0000") { valid = 0; next } \
-			  } else if (record_type == "03" || record_type == "05") { \
-			    if (byte_count != 4 || address != "0000") { valid = 0; next } \
-			  } else { \
-			    valid = 0; next \
-			  } \
-			} \
-			END { exit !(valid && NR > 0 && data_bytes > 0 && eof_count == 1) }' "$$hex_tmp"; then \
+		if ! $(IHEX_VALIDATOR) "$$hex_tmp"; then \
 			echo "FAIL: objcopy produced an empty or invalid HEX for ATtiny202 variant $$v"; \
 			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
 		fi; \
@@ -2314,12 +2299,49 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # TESTS
 # ============================================================================
 
+# --- Shared gate inventory ---------------------------------------------------
+# `test` and `test-long` run the SAME gates in the SAME order. They differ only
+# in workload sizing (HOST_DEFS / SIM_DEFS, set on test-long below) and in
+# test-long additionally running test-mutation.
+#
+# Listing the inventory ONCE is what keeps that true. Two hand-maintained
+# 46-target prerequisite lines invite a new gate landing in only one aggregate,
+# and the aggregate it misses is usually test-long -- the release gate, where
+# the omission surfaces as a green run rather than as a failure.
+#
+# The EARLY/LATE split exists only so test-mutation keeps its position between
+# the PIC10F320 host lanes and the simulator lanes; run order affects when a
+# failure is reported, not whether it is caught. A new gate may go in either
+# half, and lands in both aggregates either way.
+TEST_GATES_EARLY = \
+        analyze test-host test-model-check test-symbolic test-cbmc \
+        test-fuses test-stack-bound test-stack-bound-regression \
+        test-stack-bound-pic-regression test-flash-budget-regression \
+        test-fault-inject pic320-test-host-variants \
+        test-pic320-return-stack-oracle test-pic320-expected-images \
+        test-pic320-coverage-archive
+TEST_GATES_LATE = \
+        test-sim test-sim-secondary test-attiny202-build \
+        test-attiny202-output-oracle test-attiny202-delay-oracle \
+        test-attiny202-fault-oracle test-attiny202-model-ffi \
+        test-avr-build-rebuild test-ci-local-routing test-workflow-syntax \
+        test-gpsim-wrappers test-fetch-yasimavr test-supply-chain \
+        test-klee-build test-mutation-sandbox test-pic-build \
+        test-release-images test-release-provenance \
+        test-release-qualification test-release-history \
+        test-build-serialization test-target-matrix \
+        test-target-lane-markers test-lockstep-progress test-soak-timing \
+        test-soak-reset-witness test-strict-tools test-workload-rebuild \
+        test-pic-build-rebuild coverage-check coverage-check-core
+TEST_GATES = $(TEST_GATES_EARLY) $(TEST_GATES_LATE)
+TEST_LONG_GATES = $(TEST_GATES_EARLY) test-mutation $(TEST_GATES_LATE)
+
 # Default `make test`: FAST workload. Runs static analysis, the host golden
 # model, the exhaustive state-space model check, the symbolic single-step proof,
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-pic320-expected-images test-pic320-coverage-archive test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-attiny202-model-ffi test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-fetch-yasimavr test-supply-chain test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-soak-reset-witness test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
+test: $(TEST_GATES)
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -2331,7 +2353,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-pic320-expected-images test-pic320-coverage-archive test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-attiny202-model-ffi test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-fetch-yasimavr test-supply-chain test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-soak-reset-witness test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
+test-long: $(TEST_LONG_GATES)
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -3930,9 +3952,7 @@ pic320-size: $(PIC320_SRC)
 	if [ ! -x "$(PIC320_CC)" ] && ! command -v "$(PIC320_CC)" >/dev/null 2>&1; then \
 		echo "XC8 not found at $(PIC320_CC) (override with PIC320_CC=...)"; $(SKIP); \
 	fi; \
-	if [ ! -x "$(IHEX_VALIDATOR)" ] && ! command -v "$(IHEX_VALIDATOR)" >/dev/null 2>&1; then \
-		echo "FAIL: Intel HEX validator not found at $(IHEX_VALIDATOR)"; exit 1; \
-	fi; \
+	$(IHEX_VALIDATOR_CHECK); \
 	cleanup_probe() { \
 		rc=$$?; \
 		remove_probe || rc=1; \

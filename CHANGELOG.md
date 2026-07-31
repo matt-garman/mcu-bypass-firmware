@@ -31,6 +31,17 @@ file is the human-readable summary of *what changed*.
 ## [Unreleased]
 
 ### Fixed
+- **A non-executable Intel HEX validator passed the build's presence check.**
+  `make pic`, `make attiny202` and `make pic320-size` guarded
+  `IHEX_VALIDATOR` with `[ ! -x "$V" ] && ! command -v "$V"`, and for a value
+  containing a slash dash's `command -v` succeeds on a file that merely
+  *exists*. A validator present but not executable therefore passed the guard
+  and failed later with "Permission denied" — after the compiler had already
+  produced the image the validator was supposed to check. The guard now requires
+  the executable bit whenever the value names a path and falls back to a `PATH`
+  lookup only for a bare command name, and it is defined once
+  (`IHEX_VALIDATOR_CHECK`) instead of copied into each recipe. Found by the new
+  ATtiny202 regression below rather than in the field.
 - **The Classic AVR soak was watching a signal simavr never raises for a
   watchdog reset.** `test/avr/test_soak.c` recorded a watchdog failure only when
   `avr_run()` returned `cpu_Crashed`, but simavr 1.6 sets that state solely from
@@ -47,7 +58,27 @@ file is the human-readable summary of *what changed*.
   Both harnesses chain the MCU model's own reset callback instead of replacing
   it.
 
+### Changed
+- **`test` and `test-long` now share one gate inventory.** The two aggregates
+  ran the same 46 gates in the same order, differing only in workload sizing and
+  in `test-long` additionally running `test-mutation` — but each carried its own
+  hand-maintained prerequisite line, so a new gate could land in only one of
+  them, and the one it would miss is `test-long`, the release gate. Both are now
+  built from a single `TEST_GATES_EARLY`/`TEST_GATES_LATE` inventory
+  (`TEST_GATES` and `TEST_LONG_GATES`); the expansions are byte-identical to the
+  lines they replace, order included. The ATtiny202 build's own 30-line Intel
+  HEX parser is likewise gone, replaced by the `scripts/validate-ihex.sh` that
+  the Classic AVR `.hex` rules and both PIC builds already use — with all six
+  ATtiny202 images verified byte-identical across the swap.
+
 ### Added
+- **Two ATtiny202 build regressions** covering an absent and a non-executable
+  Intel HEX validator; the second is what exposed the guard hole fixed above.
+  `test-workload-rebuild`'s "no `clean-tests` in `test-long`" check now reads
+  the aggregate's real prerequisites through `make print-TEST_LONG_GATES`
+  instead of grepping the recipe line, which the shared inventory would
+  otherwise have made blind, plus a check that the query itself resolves so it
+  cannot pass vacuously.
 - **`make test-soak-reset-witness`** proves that fix stays true. It builds the
   soak driver twice against the same healthy ATtiny85 image — untouched, and
   with a compile-time fixture that disables the timer interrupt mid-run so the

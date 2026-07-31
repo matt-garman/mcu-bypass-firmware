@@ -144,6 +144,36 @@ expect_failure "undefined HEX record type" "empty or invalid HEX" FAKE_OBJCOPY_M
 expect_failure "invalid extended-address record" "empty or invalid HEX" FAKE_OBJCOPY_MODE=bad_extended
 expect_failure "EOF-only HEX" "empty or invalid HEX" FAKE_OBJCOPY_MODE=eof_only
 expect_failure "trailing HEX content" "empty or invalid HEX" FAKE_OBJCOPY_MODE=trailing
+
+# Every HEX case above is decided by scripts/validate-ihex.sh, the one validator
+# the Classic AVR .hex rules and both PIC builds also use. Because it is an
+# external file rather than an inline parser, its PRESENCE has to be checked
+# rather than assumed -- an absent or non-executable validator must fail the
+# build loudly, not wave an unvalidated image through. The counterpart of
+# test_pic_build.sh's missing-validator check.
+#
+# The guard deliberately lives inside the recipe rather than as a Make
+# prerequisite: the recipe removes stale artifacts as its FIRST action, so a
+# validator failure still leaves nothing behind, which assert_no_artifacts pins.
+expect_missing_validator() {
+	local label=$1 path=$2 output
+	seed_stale
+	if output=$(run_build IHEX_VALIDATOR="$path" 2>&1); then
+		printf 'FAIL: %s was accepted\n' "$label" >&2
+		exit 1
+	fi
+	[[ "$output" == *"Intel HEX validator not found"* ]] \
+		|| { printf 'FAIL: %s failed for the wrong reason: %s\n' "$label" "$output" >&2; exit 1; }
+	assert_no_artifacts "$label"
+	checks=$((checks + 1))
+}
+
+printf 'not executable\n' > "$work/unexecutable-validator"
+chmod 640 "$work/unexecutable-validator"
+expect_missing_validator "absent Intel HEX validator" "$work/missing-validator"
+expect_missing_validator "non-executable Intel HEX validator" \
+	"$work/unexecutable-validator"
+
 expect_failure "zero flash budget" "positive decimal integer" XT_FLASH_BYTES=0
 expect_failure "malformed flash budget" "positive decimal integer" XT_FLASH_BYTES=invalid
 expect_failure "unsupported variant" "unsupported ATtiny202 variant" TEST_VARIANTS=bogus

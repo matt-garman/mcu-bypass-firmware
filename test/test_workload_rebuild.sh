@@ -248,11 +248,24 @@ run_make test/avr/test_trace_cd4053 SIM_DEFS= >/dev/null
 	|| { printf 'FAIL: trace workload reused a stale binary\n' >&2; exit 1; }
 checks=$((checks + 1))
 
-if grep -Eq '^test-long:.*(^|[[:space:]])clean-tests([[:space:]]|$$)' "$repo/Makefile"; then
-	printf 'FAIL: test-long reintroduced the parallel clean-tests race\n' >&2
-	exit 1
-fi
-checks=$((checks + 1))
+# The parallel clean-tests race must not come back. Ask Make for the aggregate's
+# ACTUAL prerequisite set rather than grepping its recipe line: `test` and
+# `test-long` share one gate inventory, so a clean-tests added to it would never
+# appear on the `test-long:` line at all and a textual check would miss it.
+long_gates=" $(run_make -s print-TEST_LONG_GATES | tr '\n' ' ') "
+case "$long_gates" in
+	*" clean-tests "*)
+		printf 'FAIL: test-long reintroduced the parallel clean-tests race\n' >&2
+		exit 1 ;;
+esac
+# ...and the query itself has to be load-bearing: an empty or unresolved
+# variable would make the check above pass vacuously forever.
+case "$long_gates" in
+	*" test-mutation "*) ;;
+	*) printf 'FAIL: could not read test-long prerequisites from Make\n' >&2
+		exit 1 ;;
+esac
+checks=$((checks + 2))
 
 outside="$work/external-build"
 run_make test-sim-cd4053 AVR_BUILD_DIR="$outside" SIM_DEFS=-DISOLATED=1 >/dev/null
