@@ -30,6 +30,12 @@ file is the human-readable summary of *what changed*.
 
 ## [Unreleased]
 
+> **Where the detail lives.** This entry is a post-release cleanup pass whose
+> 44 items were tracked individually, most of them compressed to a sentence
+> below. The per-item evidence — measured figures with the commands that
+> reproduce them, and the alternatives considered and rejected — is recorded in
+> [docs/v0.9.6_post_release_polish.md](docs/v0.9.6_post_release_polish.md).
+
 ### Fixed
 - **A non-executable Intel HEX validator passed the build's presence check.**
   `make pic`, `make attiny202` and `make pic320-size` guarded
