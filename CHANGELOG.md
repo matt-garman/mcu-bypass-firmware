@@ -88,6 +88,23 @@ file is the human-readable summary of *what changed*.
   a file and stop Make short of the property; what it still does is assert those
   files *are* prerequisites, so a rename is reported in one line instead of
   quietly shrinking the fixture (9 → 14 checks).
+- **The PIC10F320 documentation set now has one owner per kind of claim.** Its
+  lane inventory, assurance argument and mutation mechanics were repeated across
+  `docs/pic10f320_special_case.md`, `docs/pic10f320_validation.md` and
+  `test/README.md`, with every change-prone count living in two places at once.
+  They agreed at the time of writing, but a stale emitted-byte statement fixed
+  earlier in this cycle shows what that costs. The split is now explicit and
+  stated in `DESIGN_DOCUMENTATION.adoc`: `special_case` owns the architectural
+  difference and the assurance argument, `validation` owns execution evidence and
+  the scope of what each result does and does not establish, and `test/README.md`
+  owns the current inventory — Make targets, substrates, mechanics and check
+  counts. Duplicated inventories became links: the assurance table dropped its
+  Make-target column, and the validation record's copies of the return-stack
+  oracle's decoder rules, the rebuild regression's assertions and the mutation
+  category/accounting contract were replaced by pointers, keeping the historical
+  measurements and scope caveats that are its own. No count moved; the two
+  mechanics details that existed only in the validation record moved to
+  `test/README.md` rather than being dropped.
 
 ### Added
 - **Two ATtiny202 build regressions** covering an absent and a non-executable

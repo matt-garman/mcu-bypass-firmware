@@ -980,7 +980,10 @@ is release-supported and has published prebuilt images beginning with `v0.9.6`.
 **`docs/pic10f320_special_case.md` is the single
 authoritative statement of the architectural difference and assurance
 comparison; `docs/pic10f320_validation.md` owns execution evidence, current
-qualification status and exact lane scope.**
+qualification status and the scope of what each result does and does not
+establish; `test/README.md` owns the current lane inventory — Make targets,
+substrates, mechanics and check counts. Counts and command lists are kept in
+that one place so the other two cannot go stale against the suite.**
 
 == AVR Classic Program Flow
 

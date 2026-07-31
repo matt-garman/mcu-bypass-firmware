@@ -157,13 +157,12 @@ evidence.
 | Hardware return-stack depth | **3 / 3 / 4 levels of 8** (cd4053-simple / cd4053-mute / tq2-relay), 2 held in reserve |
 | Mutation | see §5 |
 
-Two of these deserve emphasis:
+The equivalence and lock-step rows carry the weight here, because both run
+against `src/bypass_pure.c` itself rather than a vendored copy;
+`docs/pic10f320_special_case.md` §3 states why that distinction is the crux of
+the assurance argument. Two properties of those two rows are measurement facts,
+so they are recorded here:
 
-- **Equivalence and lock-step both run against `src/bypass_pure.c` itself** — the
-  same file every other target compiles into its shipping image, linked into the
-  test binary. The predecessor project could only compare against a *vendored
-  copy* pinned to an old commit. That copy no longer exists anywhere in this
-  repository.
 - **Lock-step is the emitted image**, not the source: the actual XC8 output
   running in a simulated PIC10F320, its live `_ctx_` SRAM compared to the model
   after every completed main-loop iteration.
@@ -226,50 +225,28 @@ between them would itself be the finding.
 ### 3b. Final-HEX hardware return-stack gate
 
 `test/pic10f320/return_stack_oracle.py` is the second, independent witness on the
-8-level hardware return-stack bound, and the only one that measures the bytes
-that actually ship. It relies on neither XC8's listing format nor an external
-disassembler. It strictly validates Intel
-HEX, reconstructs the PIC10F320's little-endian 14-bit words, and traverses
-reachable control flow from reset with the exact abstract return-address stack.
-Every direct `CALL` pushes, `RETURN` and every classic `RETLW` alias pop, and all
-four skip instructions fork along both independently tested edges. The classic
-`MOVLW` aliases all fall through. Control states and return addresses preserve
-the 9-bit architectural PC (`0x000..0x1ff`); only instruction fetch aliases
-through the low eight bits into the 256 implemented physical words. Reachable
-holes and empty returns fail.
+8-level bound, and the only one that measures the bytes that actually ship. Two
+things about it are durable and belong here rather than with the mechanics.
 
-The proof is deliberately narrower than a general PIC emulator and fails closed
-at that boundary: reserved/non-classic words, `RETFIE`, computed PCL writes,
-data-dependent writes through classic `INDF`, and any path that could enable GIE
-are rejected because they can create an unmodelled successor or asynchronous
-push. The command-line default is eight and the Makefile limit is immutably
-eight. `test-pic320-return-stack-oracle` runs 149 deterministic checks in
-`make test` and `test-long`, including an exhaustive independent legality map,
-every destination-writer class, operand-boundary skip cases, wrap behavior,
-nested LIFO returns, and a literal precomputed HEX layout fixture.
+**Why a second witness at all.** §3a establishes that XC8's own estimate is not
+a safe upper bound and that its overflow check is only a warning. A gate built on
+the compiler's listing would inherit both problems, so this one reads the emitted
+HEX and reconstructs control flow itself, trusting neither the listing format nor
+an external disassembler.
 
-Every `pic320` build invokes the immutable oracle before setting
-`image_complete=1`, inside the existing cleanup trap. This covers later
-gpsim/target/soak/release rebuilds as well as direct builds; Python, oracle, or
-analysis failure deletes that generated image. `pic320-test-return-stack` remains
-the complete-matrix reporting target: it depends on fresh `pic320-variants`,
-expands all three image names from the immutable supported set, then rechecks all
-three together as part of `pic320-test`. This is not a claim that a file cannot
-be modified after a successful recipe; release provenance and reproduction
-checks remain separate evidence.
+**Where it deliberately stops.** The proof is narrower than a general PIC
+emulator and fails closed at that boundary rather than guessing: anything that
+could create an unmodelled successor or an asynchronous push — reserved words,
+`RETFIE`, computed PCL writes, data-dependent writes through `INDF`, any path
+that could enable GIE — is rejected. That boundary is a design decision, not an
+implementation detail, which is why it is recorded as evidence.
 
-The fake-XC8 build regression reports 36 PIC10F322 checks and 75 PIC10F320
-checks. Both arms prove a missing-XC8 skip removes the complete product matrix,
-and that a current-HEX-only compiler result cannot reuse stale `.s`/`.sym`
-sidecars or turn the hardware-stack gate into an absent-tool skip. They also
-reject shell syntax without executing it despite attempted product-inventory
-overrides. The PIC10F322 arm additionally pins the producer's complete immutable
-matrix against recursively self-whitelisting GNU Make input.
-The 320-specific cases prove the base build deletes structurally valid
-reachable-RETFIE and depth-9 images, and that nonempty successful-oracle and
-limit-99 command-line overrides cannot bypass the immutable Makefile settings.
-They also require a matching complete hash matrix, reject changed image bytes
-and malformed baseline data, and fail if the checker is absent.
+The decoder rules, the check inventory, the 9-bit PC/physical-fetch aliasing and
+the build-time enforcement path are current mechanics, and live in
+*PIC10F320 target validation layers* in `test/README.md`. One limit of that
+enforcement belongs here rather than there: running the oracle inside every
+build proves what the recipe produced, not that the file cannot be modified
+afterwards. Release provenance and reproduction checks remain separate evidence.
 
 As retrospective parser/decoder context only, the predecessor project's signed
 `v0.9.5` images measure 3 / 3 / 4 entries for simple / mute / relay. Those files
@@ -284,48 +261,25 @@ of the eight hardware levels held in reserve for every variant.
 ### 3c. Rebuild-trigger regression
 
 The PIC10F320-only arm of `test/test_pic_build.sh` closes merge-plan §6.12's
-rebuild row in the existing fresh `mktemp` repository rather than creating a
-second sandbox. Its fake XC8 and host compiler log every command by exact output
-name. Assertions count only invocations for that output and inspect the latest
-applicable command, so an old matching flag cannot mask stale reuse.
+rebuild row, in the existing fresh `mktemp` repository rather than a second
+sandbox. Its assertions, check counts and fail-closed activation are current
+mechanics and live in `test/README.md`; what belongs in the record is the exact
+scope of what it does and does not establish, because that is the part most
+easily overread.
 
-Activation and accounting fail closed: canonical `PB_TARGET=pic320` requires
-`PB_REBUILD_REQUIRED=1` and exactly 75 checks at exit, while canonical
-`PB_TARGET=pic` requires exactly 36. Removing or misspelling the Makefile's
-PIC10F320 rebuild-arm assignment cannot leave a green 61-check run.
+The evidence is narrowly **deterministic rebuild triggering and current-option
+propagation**: identical requests reinvoke the compiler, and changed build
+options reach the command actually run. Two deliberate design points make it
+worth trusting — nothing rests on timestamps, and the fake linked tests log their
+executed path so a removed binary-run recipe cannot pass on compile counts alone.
 
-The regression proves all of the following without timestamps:
-
-- an identical repeated `pic320` request invokes XC8 again;
-- changing and restoring `PIC320_XTAL` each invoke XC8 with the current clock;
-- every object and linked output of `pic320-test-equiv` rebuilds on an identical
-  repeat, on a variant change and restoration, and on a
-  `PIC320_HOST_CFLAGS` change and restoration;
-- the unqualified shared equivalence harness is compiled with the current output
-  macro after both variant transitions; and
-- every object and linked output of `pic320-test-actuation` and
-  `pic320-test-fault-host` rebuilds on identical repeats.
-
-`pic320-coverage-check-fw` is deliberately outside this stable-output probe. It
-creates a unique `mktemp` work directory on every invocation, requires fresh
-`.gcda` and `.gcov` files before passing, and removes the directory on exit; it
-has no prior binary or profile that a later request can reuse.
-
-The fake host compiler writes nonempty objects and executable success stubs for
-the linked tests. Those stubs append their invoked path to a fresh execution log,
-and every equivalence, actuation, and fault-host stage requires the exact current
-execution count as well as exact compile/link counts. After each target's first
-successful request, the regression creates a same-name regular file at the
-sandbox root before the identical repeat. Correct `.PHONY` declarations force
-the recipe to rerun; removing one leaves compiler and execution counts unchanged
-and fails the existing check. No assertion relies on timestamps.
-
-This evidence is narrowly **deterministic rebuild triggering and current-option
-propagation**. The separate `pic320-test-build` gate now owns byte-for-byte XC8
-output comparison; this fake-tool lane still does not establish real-XC8
-reproducibility or by itself qualify exact-final-source PIC10F320 images. The
-production aggregates and retained evidence named in the status section own
-that claim.
+It is **not** byte-for-byte XC8 reproducibility, and it does not by itself
+qualify exact-final-source PIC10F320 images. The separate `pic320-test-build`
+gate owns emitted-byte comparison (§2); the production aggregates and retained
+evidence named in the status section own the qualification claim.
+`pic320-coverage-check-fw` is deliberately outside the probe altogether: every
+invocation uses a new `mktemp` directory and requires fresh `.gcda`/`.gcov`
+evidence, so it has no prior artifact a later request could reuse.
 
 ## 4. The defensive-layer decision, measured
 
@@ -368,23 +322,17 @@ That corrected execution is historical rather than final-source production
 evidence. The mutation driver has since gained immutable category counts,
 conservation equations, checked workers and process groups, atomic exact result
 records, and fail-closed infrastructure-status classification. Production must
-rerun all 94 mutants through that current accounting contract.
+rerun the complete pinned inventory through that current accounting contract.
 
-The 36 PIC10F320 mutants are split by what they **need**, not by what they test:
-27 require only a host C compiler and ride with the unskippable core batch; 9
-require XC8 + gpsim + libgpsim and sit behind a tool probe that first verifies
-the *unmutated* tree genuinely passes. The other categories are 24 core/AVR
-Classic, 19 AVR-XT, 6 PIC10F322 gpsim, 1 PIC10F322 soak, and 8 PIC10F322 target
-mutants, for the pinned total of 94. Without the tool split, PIC10F320 mutants
-would "survive" on any host lacking the PIC toolchain — a false pass.
-
-The accounting contract is independent of the arrays it measures: exact category
-counts pin the complete 94-mutant inventory, dispatched plus skipped must equal
-94, and killed plus survived plus errored must equal dispatched. A worker failure,
-sandbox-copy failure, malformed inventory/baseline command, partial result pair,
-noncanonical status/output, or unexpected result artifact is an error rather than
-a kill. The host-only sandbox/accounting selftest exercises this contract in
-`make test` without requiring XC8 or a simulator.
+The current category split, the pinned totals and the accounting equations are
+live mechanics and live under *Mutation testing and skipped optional tools* in
+`test/README.md`. One structural point is worth stating as evidence rather than
+mechanics: **PIC10F320 mutants are split by what they need, not by what they
+test.** The host-only majority rides with the unskippable core batch, and the
+tool-dependent remainder sits behind a probe that first verifies the *unmutated*
+tree genuinely passes. Without that split those mutants would "survive" on any
+host lacking the PIC toolchain — a false pass, and the failure mode the whole
+skip-accounting design exists to prevent.
 
 Two cautions learned while building this set, recorded because both produce
 misleading greens:
@@ -393,10 +341,11 @@ misleading greens:
   it scores as "killed". Confirm any new firmware mutant builds before accepting
   its kill.
 - **A mutant built against a sandbox missing its harness dies for the wrong
-  reason.** The driver's tree copy must reach both
-  `test/pic10f320/{equiv,actuation,fault,gpsim}/` and the folded wrappers and
-  stimuli under `test/pic/`. The tool probe now checks those files before
-  authorizing any PIC10F320 tool-dependent mutant.
+  reason.** This is the defect that cost the 74→56 regression above. Both sandbox
+  builders now share one allowlist walk (`test/scratch_tree.sh`), and the tool
+  probe checks the required PIC10F320 helpers before authorizing any
+  tool-dependent mutant, so a future omission fails loudly instead of shrinking
+  the gate.
 
 ## 6. What is *not* validated here
 

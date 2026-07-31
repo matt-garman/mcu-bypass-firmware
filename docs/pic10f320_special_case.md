@@ -1,11 +1,11 @@
 # PIC10F320 — the constrained target
 
 **Status:** release-supported since `v0.9.6`, whose production qualification ran
-the final source through all release gates and 15 full-duration soak
-combinations. It remains architecturally different from every other target in
-this repository. This document is the single authoritative statement of that
-difference; execution evidence and its exact scope live in
-`docs/pic10f320_validation.md`.
+the final source through the release gates and the full-duration release soak
+matrix. It remains architecturally different from every other target in this
+repository. This document is the single authoritative statement of that
+difference; execution evidence, its exact scope and the combination counts live
+in `docs/pic10f320_validation.md`.
 
 **Read this if** you are choosing an MCU, reviewing the assurance argument, or
 wondering why one firmware file looks unlike the rest of `src/`.
@@ -60,35 +60,43 @@ lanes below provide orthogonal evidence about actuation, fault handling, source
 coverage, emitted bytes, configuration, stack depth and analysis; they are not
 described as core-equivalence comparisons.
 
-| Lane | What it proves | Make target |
-| --- | --- | --- |
-| **Firmware↔core equivalence** | The real firmware, host-compiled, must track the verified core tick-for-tick across the configured stimulus set and reachable model states; any divergence fails | `pic320-test-equiv` |
-| **Actuation sequence** | Each variant's full settled `LATA` at every tick, plus the mute/relay *mid-actuation* pin sequencing and pulse width that a settled snapshot cannot see | `pic320-test-actuation` |
-| **Host fault injection** | The defensive layer valid stimulus never reaches: corrupt a guarded SFR or the debounce context and the sanity gate must force a watchdog reset | `pic320-test-fault-host` |
-| **Firmware line coverage** | An *exact* property, not a percentage floor: every line of the shipping firmware is exercised except an enumerated, justified watchdog-reset path | `pic320-coverage-check-fw` |
-| **Expected image bytes** | The complete three-image matrix must exactly match the committed, reviewed SHA-256 baseline from the pinned XC8/DFP build; byte drift fails until an intentional rebaseline | `pic320-test-build` |
-| **Real-HEX lock-step** | The actual emitted image, running in a simulated PIC10F320, must track the verified core for the configured sequence; any divergence fails | `pic320-test-lockstep` |
-| **Target fault injection** | The same defensive-layer argument on the real image in libgpsim: corrupting every guarded SFR/SRAM location and the required `TRISA` directions forces exactly one real watchdog reset | `pic320-test-fault-target` |
-| **Target I/O** | Exact `TRISA`, physical `PORTA` following every `LATA` transition, each variant's complete startup/engage/bypass sequence, and mute/relay pulse widths measured from simulator cycles | `pic320-test-io` |
-| **CONFIG word** | The emitted CONFIG word matches design intent — a wrong bit is invisible to every other test and would only bite on silicon | `pic320-test-config` |
-| **Static analysis** | cppcheck + MISRA-C:2012 for one selected output branch; the canonical aggregate sweeps all three | `pic320-analyze` (selected), `pic320-test` (all) |
-| **Soak** | 24-hour-equivalent libgpsim soak per output stage, as part of release qualification | `pic320-test-soak` |
-| **Mutation** | Deliberate firmware faults injected and required to be *killed* — proof the lanes above fail on broken code, not merely pass on correct code | `test-mutation` |
+| Lane | What it proves |
+| --- | --- |
+| **Firmware↔core equivalence** | The real firmware, host-compiled, must track the verified core tick-for-tick across the configured stimulus set and reachable model states; any divergence fails |
+| **Actuation sequence** | Each variant's full settled `LATA` at every tick, plus the mute/relay *mid-actuation* pin sequencing and pulse width that a settled snapshot cannot see |
+| **Host fault injection** | The defensive layer valid stimulus never reaches: corrupt a guarded SFR or the debounce context and the sanity gate must force a watchdog reset |
+| **Firmware line coverage** | An *exact* property, not a percentage floor: every line of the shipping firmware is exercised except an enumerated, justified watchdog-reset path |
+| **Expected image bytes** | The complete three-image matrix must exactly match the committed, reviewed SHA-256 baseline from the pinned XC8/DFP build; byte drift fails until an intentional rebaseline |
+| **Real-HEX lock-step** | The actual emitted image, running in a simulated PIC10F320, must track the verified core for the configured sequence; any divergence fails |
+| **Target fault injection** | The same defensive-layer argument on the real image in libgpsim: corrupting every guarded SFR/SRAM location and the required `TRISA` directions forces exactly one real watchdog reset |
+| **Target I/O** | Exact `TRISA`, physical `PORTA` following every `LATA` transition, each variant's complete startup/engage/bypass sequence, and mute/relay pulse widths measured from simulator cycles |
+| **CONFIG word** | The emitted CONFIG word matches design intent — a wrong bit is invisible to every other test and would only bite on silicon |
+| **Hardware return stack** | The 8-level return stack is bounded by two independent witnesses — the emitted assembly and the shipped HEX — because overflow is silent on this core |
+| **Static analysis** | cppcheck + MISRA-C:2012 swept across all three output branches |
+| **Soak** | 24-hour-equivalent libgpsim soak per output stage, as part of release qualification |
+| **Mutation** | Deliberate firmware faults injected and required to be *killed* — proof the lanes above fail on broken code, not merely pass on correct code |
 
-`make pic320-test` runs the pre-hardware set; `make pic320-test-target-variants`
-runs the fail-closed real-HEX aggregate across all three variants. Both are
-release gates and run in the PIC CI job on pushes to `main`, pull requests,
-scheduled runs and manual dispatches.
+This table groups the evidence by what it contributes to the argument above. It
+is deliberately not the run list: the **authoritative current inventory** — Make
+target, substrate, per-lane mechanics and check counts — is *PIC10F320 target
+validation layers* in `test/README.md`, and measured results live in
+`docs/pic10f320_validation.md` §3. Keeping per-lane targets and counts in one
+place is why this table carries neither; individual targets are still named in
+the prose below where the argument turns on which lane covers what.
+
+To run the set: `make pic320-test` covers the pre-hardware lanes and
+`make pic320-test-target-variants` the fail-closed real-HEX aggregate across all
+three variants. Both are release gates and run in the PIC CI job on pushes to
+`main`, pull requests, scheduled runs and manual dispatches.
 
 **What this does not do.** It does not make the architecture identical. A
 behavioural equivalence argument, however thorough, is a different kind of
 statement from "the verified code is the shipped code". The honest summary is:
 *the PIC10F320's qualification design targets the same standard by a different
-and more elaborate route.* Historical runs and the `4b28210` full-tool dry
-rehearsal first exercised that route. Production qualification then completed
-it for `v0.9.6`: the final source passed the release gates and all 15
-full-duration soaks before the checksummed artifact-only release commit and
-unified tag were published. The retained record is
+and more elaborate route.* That route was first exercised by historical runs and
+a full-tool dry rehearsal, then completed by production qualification for
+`v0.9.6`. What was run, at which commits, and what it returned is recorded in
+`docs/pic10f320_validation.md`; the retained release record is
 `release/v0.9.6/MANIFEST.md`.
 
 ## 4. One recorded omission: the output-latch match
@@ -103,15 +111,16 @@ only one of:
 | Full output-**latch** match against the expected mask | yes | **no — omitted, see below** |
 | `ANSELA` integrity of the output pins | yes | yes |
 
-Exact `TRISA` was ported because it turned out to cost **one word** per variant
-(219→220, 240→241, 243→244 of 256). It also *subsumes* the older per-pin check,
-which is why it was nearly free — and it closed a real blind spot, cd4053-simple's
-spare RA2 pin, which the previous per-variant mask did not cover.
+Exact `TRISA` was ported because it turned out to cost **one word** per variant.
+It also *subsumes* the older per-pin check, which is why it was nearly free — and
+it closed a real blind spot, cd4053-simple's spare RA2 pin, which the previous
+per-variant mask did not cover.
 
-The output-latch match **does not fit and is deliberately omitted**. Measured
-cost, in the leanest formulation that preserves the check's meaning:
-cd4053-mute overshoots 256 words by **5**, tq2-relay by **3**. Only
-cd4053-simple would fit, at 240/256.
+The output-latch match **does not fit and is deliberately omitted**. Even in the
+leanest formulation that preserves the check's meaning it overruns 256 words on
+two of the three variants; only cd4053-simple would fit. Both options were priced
+on the real toolchain before the decision was taken, and the per-variant word
+counts are tabulated in `docs/pic10f320_validation.md` §4.
 
 Taking it on cd4053-simple alone was considered and rejected. A defensive layer
 that differs *between variants of the same firmware* is worse than a uniform,

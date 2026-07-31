@@ -303,8 +303,12 @@ fail-closed test invariants.
 
 The PIC10F320 is the one target whose verified core is *hand-inlined* into the
 firmware instead of compiled in, so it carries validation layers no other target
-needs. `docs/pic10f320_special_case.md` is the authoritative statement of why;
-this section is what the test suite does about it.
+needs. Three documents divide this target between them, and each owns one thing:
+`docs/pic10f320_special_case.md` is the authoritative statement of *why* the
+target needs a different assurance route, `docs/pic10f320_validation.md` records
+*what was actually run and what it returned*, and this section is the current
+inventory — targets, substrates, mechanics and check counts. Counts and command
+lists are kept here alone so the other two cannot go stale against the suite.
 
 The split that matters here: **the first four layers need only a host C compiler
 and gcov**, so they are members of `make test` and run on every push regardless
@@ -351,7 +355,9 @@ same-name file in the sandbox root before repeating, so removing the target's
 count. Every fake linked host test also logs its executed path; execution counts
 must advance with compile/link counts, catching a removed binary-run recipe.
 Variant/clock/host-flag changes and restorations are checked against the latest
-applicable command, not any historical log entry. This is deterministic
+applicable command, not any historical log entry, and the unqualified shared
+equivalence harness must be recompiled with the current output macro after both
+variant transitions. This is deterministic
 **rebuild triggering with the current flags**, not byte-for-byte XC8
 reproducibility. Byte identity is enforced separately by `pic320-test-build`.
 The coverage lane needs no stable-output probe: every request
@@ -360,15 +366,16 @@ before that directory is removed.
 
 Note what `pic320-test-equiv` and `pic320-test-lockstep` run *against*. Both
 compile and link `src/bypass_pure.c` — the same file every other target compiles
-into its shipping image, not a vendored snapshot of it. The project this target
-was merged from could only manage the weaker claim, because it held a pinned
-copy; that copy is gone.
+into its shipping image, not a vendored snapshot of it. That is the property the
+whole layer stack rests on; `docs/pic10f320_special_case.md` §3 argues why.
 
 `return_stack_oracle.py` does not consume a compiler listing or trust a
 disassembler. It requires a nonempty, non-symlink regular file; validates every
 Intel HEX count, checksum, record type, address, overlap and unique EOF; then
 forms PIC14 words little-endian. CONFIG and other unreachable data are ignored,
-but an absent byte on a reachable instruction is a hard failure. Its documented
+but an absent byte on a reachable instruction is a hard failure, as is a return
+taken with an empty stack. Its command-line depth default is eight and the
+Makefile limit is immutably eight. Its documented
 classic mid-range masks cover direct `CALL`/`GOTO`, all four required skip
 opcodes, `RETURN`, and the full `RETLW` alias range. The full classic
 35-instruction legality check also recognizes `MOVLW` at `0x3000..0x33ff` as
@@ -434,6 +441,11 @@ the PIC toolchain; without the per-command baselines, a broken gpsim or soak
 harness could make them die for an infrastructure reason and falsely count as
 killed. Skip accounting is wired through the same policy resolver, so a partial
 run cannot be mistaken for full PIC10F320 coverage.
+
+These counts are pinned here and nowhere else; how the inventory reached its
+current shape — the merge-time 74-mutant run, the audit that invalidated one
+kill, and the sandbox gaps that briefly cut it to 56 — is recorded in
+`docs/pic10f320_validation.md` §5.
 
 The driver independently pins the seven mutation categories at **24 core/AVR +
 19 AVR-XT + 27 PIC10F320 host + 9 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 8
