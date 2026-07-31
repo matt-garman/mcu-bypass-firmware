@@ -168,6 +168,19 @@ OBJDUMP  ?= avr-objdump
 SIZE     = avr-size
 READELF  ?= readelf
 IHEX_VALIDATOR ?= scripts/validate-ihex.sh
+# Presence check for IHEX_VALIDATOR, shared by every phony recipe that runs it
+# (`pic`, `attiny202`, `pic320-size`). The .hex FILE rules do not need it: they
+# carry $(IHEX_VALIDATOR) as a real prerequisite, so Make refuses to run them if
+# it is missing. A phony recipe gets no such protection, and it must not build an
+# image it then cannot validate.
+#
+# `command -v` alone is NOT sufficient. For a value containing a slash, dash's
+# `command -v` succeeds on a file that merely EXISTS -- a non-executable
+# validator therefore passed the old check and failed later with "Permission
+# denied", after objcopy had already produced the unvalidated image. Require -x
+# whenever the value names a path, and fall back to a PATH lookup only for a
+# bare command name.
+IHEX_VALIDATOR_CHECK = case "$(IHEX_VALIDATOR)" in */*) [ -x "$(IHEX_VALIDATOR)" ] ;; *) command -v "$(IHEX_VALIDATOR)" >/dev/null 2>&1 ;; esac || { echo "FAIL: Intel HEX validator not found or not executable at $(IHEX_VALIDATOR)"; exit 1; }
 AVRDUDE  = avrdude
 AVR_ELF_ARCH ?= avr:25
 
@@ -281,8 +294,12 @@ SANITIZE    ?= -fsanitize=undefined,address -fno-sanitize-recover=all
 
 # --- Resource-budget gate thresholds -----------------------------------------
 # Per-function stack-frame ceiling for test-stack-bound (-fstack-usage).
-# The firmware's full-path runtime HWM is ~10 B; any individual frame above
-# this threshold signals unintended bloat (e.g. an accidental local array).
+# This gates individual frames, not total depth.  The largest frame today is
+# the 19 B timer ISR (__vector_6); the whole-program runtime high-water mark
+# is 29 B (cd4053) / 31 B (relay, mute), measured separately by test-sim.
+# Run `make test-stack-bound` to re-measure every frame.  Any individual frame
+# above this threshold signals unintended bloat (e.g. an accidental local
+# array).
 STACK_MAX_FRAME ?= 32
 STACK_BUILD_DIR ?=
 override STACK_SOURCES := src/bypass_mcu_avr_classic.c src/bypass_pure.c \
@@ -291,8 +308,11 @@ override STACK_SOURCES := src/bypass_mcu_avr_classic.c src/bypass_pure.c \
                           src/bypass_output_tq2_l2_5v_relay.c
 
 # ATtiny13a flash-budget ceiling for test-flash-budget (percentage of 1 KB).
-# Firmware is ~46% today; a future accidental bloat passes silently without
-# this gate.
+# Firmware is at 73.8% today (relay and mute; cd4053 is 69.9%), so the 90%
+# ceiling leaves 16.2 points of margin.  Run `make test-flash-budget` to
+# re-measure -- it prints the per-variant percentages, so this comment can be
+# checked rather than trusted.  A future accidental bloat passes silently
+# without this gate.
 FLASH_T13_BUDGET ?= 90
 override FLASH_T13_MCU := attiny13a
 override FLASH_T13_BYTES := 1024
@@ -518,7 +538,8 @@ FORCE:
         test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle \
         test-attiny202-model-ffi \
         test-pic320-return-stack-oracle test-pic320-expected-images \
-        test-attiny202-build test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-klee-build \
+        test-pic320-coverage-archive \
+        test-attiny202-build test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-fetch-yasimavr test-supply-chain test-klee-build \
         test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization \
         test-make-lock-probe test-make-safe-parallel-probe \
         _test-make-safe-parallel-probe-run _test-make-safe-parallel-probe-a \
@@ -528,7 +549,7 @@ FORCE:
         test-soak-timing test-strict-tools test-workload-rebuild \
         pic-test-target pic-test-target-variants pic-test-io pic-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
-        test-flash-budget-regression test-soak \
+        test-flash-budget-regression test-soak test-soak-reset-witness \
         analyze analyze-tidy analyze-cppcheck analyze-deep \
         trace coverage coverage-check coverage-clean
 
@@ -790,9 +811,7 @@ pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(
 		echo "XC8 not found at $(PIC_CC); skipping PIC build (override with PIC_CC=...)"; \
 		$(SKIP); \
 	fi; \
-	if [ ! -x "$(IHEX_VALIDATOR)" ] && ! command -v $(IHEX_VALIDATOR) >/dev/null 2>&1; then \
-		echo "FAIL: Intel HEX validator not found at $(IHEX_VALIDATOR)"; exit 1; \
-	fi; \
+	$(IHEX_VALIDATOR_CHECK); \
 	mkdir -p $(PIC_BUILD_DIR); \
 	pic_complete=0; \
 	cleanup_pic_products() { \
@@ -1182,8 +1201,17 @@ PIC_SOAK_LIVENESS_INTERVAL_MS ?= 60000
 PIC_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
 PIC_SOAK_COMBINATION_NAME ?= standalone
 PIC_PIN_LOOKUP_HDR = test/pic/find_pin_exact.h
+# Shared libgpsim bring-up consumed by ALL FOUR harnesses (io, lock-step, fault,
+# soak) on BOTH parts. It is a prerequisite of every one of them below: an edit
+# here changes what every PIC gpsim binary does, so none may be stale for it.
+PIC_GPSIM_BOOTSTRAP_HDR = test/pic/gpsim_bootstrap.h
+PIC_FAULT_CORE_HDR = test/pic/test_fault_pic_core.h
+PIC_IO_CORE_HDR = test/pic/test_io_pic_core.h
+PIC_LOCKSTEP_CORE_HDR = test/pic/test_lockstep_pic_core.h
 PIC_SOAK_SRC = test/pic/test_soak_pic.cc
-PIC_SOAK_DEPS = $(PIC_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) test/soak_timing_config.h
+PIC_SOAK_SAMPLING_HDR = test/pic/soak_sampling.h
+PIC_SOAK_DEPS = $(PIC_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
+                $(PIC_SOAK_SAMPLING_HDR) test/soak_timing_config.h
 PIC_SOAK_BIN = test/pic/test_soak_pic
 PIC_SOAK_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_SOAK_VARIANT)_$(PIC_TAG).hex
 
@@ -1302,7 +1330,8 @@ PIC_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2
 		-DF_CPU_HZ=$(PIC_XTAL) -D$(macro_$(PIC_FAULT_VARIANT)) $(PIC_FAULT_CTX_DEF) \
 		$(PIC_FAULT_SRC) -o $(PIC_FAULT_BIN) -lgpsim
 
-$(PIC_FAULT_BIN): $(PIC_FAULT_SRC) $(PIC_PIN_LOOKUP_HDR)
+$(PIC_FAULT_BIN): $(PIC_FAULT_SRC) $(PIC_FAULT_CORE_HDR) $(PIC_PIN_LOOKUP_HDR) \
+                  $(PIC_GPSIM_BOOTSTRAP_HDR)
 	$(PIC_FAULT_COMPILE)
 
 .PHONY: pic-test-fault
@@ -1363,7 +1392,8 @@ PIC_LOCKSTEP_COMPILE = \
 			-DF_CPU_HZ=$(PIC_XTAL) $(PIC_LOCKSTEP_CTX_DEF) \
 			$(PIC_LOCKSTEP_SRC) $(PIC_LOCKSTEP_MODEL_OBJ) -o $(PIC_LOCKSTEP_BIN) -lgpsim
 
-$(PIC_LOCKSTEP_BIN): $(PIC_LOCKSTEP_SRC) $(PIC_PIN_LOOKUP_HDR) $(PURE_HOST_DEP)
+$(PIC_LOCKSTEP_BIN): $(PIC_LOCKSTEP_SRC) $(PIC_LOCKSTEP_CORE_HDR) \
+                     $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) $(PURE_HOST_DEP)
 	$(PIC_LOCKSTEP_COMPILE)
 
 .PHONY: pic-test-lockstep
@@ -1412,7 +1442,8 @@ PIC_IO_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0)
 		-DF_CPU_HZ=$(PIC_XTAL) -D$(macro_$(PIC_IO_VARIANT)) \
 		$(PIC_IO_SRC) -o $(PIC_IO_BIN) -lgpsim
 
-$(PIC_IO_BIN): $(PIC_IO_SRC) $(PIC_PIN_LOOKUP_HDR)
+$(PIC_IO_BIN): $(PIC_IO_SRC) $(PIC_IO_CORE_HDR) $(PIC_PIN_LOOKUP_HDR) \
+               $(PIC_GPSIM_BOOTSTRAP_HDR)
 	$(PIC_IO_COMPILE)
 
 .PHONY: pic-test-io
@@ -1661,6 +1692,7 @@ attiny202: | $(XT_BUILD_DIR)
 		echo "src/bypass_mcu_avr_xt.c not present (Increment 2 shell); skipping ATtiny202 build."; \
 		$(SKIP); \
 	fi; \
+	$(IHEX_VALIDATOR_CHECK); \
 	echo "=== ATtiny202 (avrxmega3) build + flash-budget ($(XT_FLASH_BYTES) B) ==="; \
 	if ! awk -v t="$(XT_FLASH_BYTES)" 'BEGIN {exit !(t ~ /^[0-9]+$$/ && t ~ /[1-9]/)}'; then \
 		echo "FAIL: XT_FLASH_BYTES must be a positive decimal integer"; exit 2; \
@@ -1734,34 +1766,7 @@ attiny202: | $(XT_BUILD_DIR)
 			echo "FAIL: could not generate HEX for ATtiny202 variant $$v"; \
 			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
 		fi; \
-		if [ ! -s "$$hex_tmp" ] || ! awk ' \
-			function nibble(c) { return index("0123456789ABCDEF", c) - 1 } \
-			function byte_at(s, p) { return nibble(substr(s, p, 1)) * 16 + nibble(substr(s, p + 1, 1)) } \
-			BEGIN { valid = 1 } \
-			{ sub(/\r$$/, ""); line = toupper($$0); \
-			  if (eof_count || line !~ /^:[[:xdigit:]]+$$/) { valid = 0; next } \
-			  record = substr(line, 2); record_len = length(record); \
-			  if (record_len < 10 || record_len % 2) { valid = 0; next } \
-			  byte_count = byte_at(record, 1); \
-			  if (record_len != 10 + byte_count * 2) { valid = 0; next } \
-			  sum = 0; for (i = 1; i <= record_len; i += 2) sum += byte_at(record, i); \
-			  if (sum % 256 != 0) { valid = 0; next } \
-			  address = substr(record, 3, 4); record_type = substr(record, 7, 2); \
-			  if (record_type == "00") { \
-			    if (byte_count == 0) { valid = 0; next } \
-			    data_bytes += byte_count \
-			  } else if (record_type == "01") { \
-			    if (record != "00000001FF") { valid = 0; next } \
-			    eof_count++ \
-			  } else if (record_type == "02" || record_type == "04") { \
-			    if (byte_count != 2 || address != "0000") { valid = 0; next } \
-			  } else if (record_type == "03" || record_type == "05") { \
-			    if (byte_count != 4 || address != "0000") { valid = 0; next } \
-			  } else { \
-			    valid = 0; next \
-			  } \
-			} \
-			END { exit !(valid && NR > 0 && data_bytes > 0 && eof_count == 1) }' "$$hex_tmp"; then \
+		if ! $(IHEX_VALIDATOR) "$$hex_tmp"; then \
 			echo "FAIL: objcopy produced an empty or invalid HEX for ATtiny202 variant $$v"; \
 			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
 		fi; \
@@ -1911,17 +1916,36 @@ attiny202-fault: test-fuses attiny202
 # Long-duration soak: run the healthy image for XT_SOAK_DURATION_MS of simulated
 # time and assert liveness holds throughout -- the watchdog never resets (a GPR0
 # reset-witness stays armed) and a periodic 2-press round-trip still toggles the
-# LED. Mirror image of the fault test: a reset is a FAILURE. Non-fatal, logged,
-# cumulative. Standalone; same guard / skip / variant-selection as the others.
+# LED. Mirror image of the fault test: a reset is a FAILURE. An individual
+# liveness failure is non-fatal WITHIN a run -- the driver logs it and reports a
+# cumulative count -- but any nonzero count still fails the run, and so does a
+# run that covered no image. Standalone; same guard / skip / variant-selection
+# as the others.
+#
+# Fail-closed like its three siblings, and for the same reason: this target is a
+# release-qualification input (RELEASE_SOAK_NAMES carries attiny202_relay), so
+# "soaked nothing" must never read as "soak passed". An unsupported
+# XT_SIM_VARIANT, absent DFP device files, a missing image, and an empty variant
+# set are each reported rather than skipped past.
 .PHONY: attiny202-soak
 attiny202-soak: test-fuses attiny202
-	@$(yasimavr_skip_if_absent); \
-	vars="$(XT_SIM_VARIANT)"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
+	@selected="$(XT_SIM_VARIANT)"; \
+	if [ -n "$$selected" ]; then \
+		case "$$selected" in cd4053|mute|relay) ;; \
+			*) echo "FAIL: XT_SIM_VARIANT must be one supported variant"; exit 2 ;; esac; \
+		case " $(VARIANTS) " in *" $$selected "*) ;; \
+			*) echo "FAIL: XT_SIM_VARIANT=$$selected is not in VARIANTS=$(VARIANTS)"; exit 2 ;; esac; \
+	fi; \
+	if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
+		echo "ATtiny_DFP device files not found; skipping ATtiny202 soak."; $(SKIP); \
+	fi; \
+	$(yasimavr_skip_if_absent); \
+	vars="$$selected"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
 	fail=0; ran=0; \
 	for v in $$vars; do \
 		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
 		if [ ! -f "$$elf" ]; then \
-			echo "no $$elf (DFP absent?); skipping ATtiny202 soak for variant $$v"; continue; \
+			echo "FAIL: expected ATtiny202 image missing: $$elf"; fail=1; continue; \
 		fi; \
 		echo "--- ATtiny202 soak: variant=$$v duration=$(XT_SOAK_DURATION_MS) ms ---"; \
 		ran=1; \
@@ -1935,7 +1959,7 @@ attiny202-soak: test-fuses attiny202
 		ATTINY202_SOAK_COMBINATION_NAME="$$combo" \
 		$(YASIMAVR_PY) $(XT_SOAK_DRIVER) "$$elf" || fail=1; \
 	done; \
-	if [ "$$ran" = 0 ]; then echo "no ATtiny202 images built; nothing to soak."; fi; \
+	if [ "$$ran" = 0 ]; then echo "FAIL: no ATtiny202 images were soaked"; fail=1; fi; \
 	exit $$fail
 
 # Firmware/model LOCK-STEP co-simulation -- the AVR-XT counterpart of the
@@ -2160,8 +2184,45 @@ attiny202-test: test-fuses attiny202-smoke attiny202 attiny202-analyze attiny202
 # combination per output stage at the full release duration, alongside every
 # other target's soak.
 .PHONY: attiny202-test-target
-attiny202-test-target: attiny202-sim attiny202-fault attiny202-lockstep
-	@echo "=== ATtiny202 target-level checks complete (sim + fault + lock-step) ==="
+attiny202-test-target:
+	@if [ "$(CLASSIC_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS must not be empty" >&2; exit 2; \
+	fi; \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_DUPLICATE)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS must not contain duplicate names" >&2; exit 2; \
+	fi; \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_UNKNOWN)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS contains unsupported names; supported: $(XT_VARIANTS_SUPPORTED)" >&2; exit 2; \
+	fi; \
+	if [ "$(if $(filter-out $(VARIANTS),$(XT_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
+		echo "FAIL: VARIANTS must contain every supported name; required: $(XT_VARIANTS_SUPPORTED)" >&2; exit 2; \
+	fi
+	@set -e; \
+	want=$(words $(XT_VARIANTS_SUPPORTED)); \
+	for spec in \
+		"attiny202-sim|SIM PASS" \
+		"attiny202-fault|FAULT PASS" \
+		"attiny202-lockstep|LOCKSTEP PASS"; do \
+		target=$${spec%%|*}; marker=$${spec#*|}; log=`mktemp`; \
+		if ! $(MAKE) --no-print-directory $$target >"$$log" 2>&1; then \
+			cat "$$log"; rm -f "$$log"; exit 1; \
+		fi; \
+		cat "$$log"; \
+		got=`grep -cF "$$marker" "$$log" || true`; \
+		if [ "$$got" -ne "$$want" ]; then \
+			echo "FAIL: $$target did not report '$$marker' exactly $$want time(s) (got $$got; skipped or incomplete?)"; \
+			rm -f "$$log"; exit 1; \
+		fi; \
+		if [ "$$target" = attiny202-lockstep ]; then \
+			scenarios=`grep -cF "co-simulated" "$$log" || true`; expected=$$((want * 2)); \
+			if [ "$$scenarios" -ne "$$expected" ]; then \
+				echo "FAIL: $$target did not report 'co-simulated' exactly $$expected time(s) (got $$scenarios; boot scenario skipped?)"; \
+				rm -f "$$log"; exit 1; \
+			fi; \
+		fi; \
+		rm -f "$$log"; \
+	done
+	@echo "=== ATtiny202 target sim/fault/lock-step validated for all variants ==="
 
 # ============================================================================
 # CLEAN
@@ -2238,12 +2299,49 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # TESTS
 # ============================================================================
 
+# --- Shared gate inventory ---------------------------------------------------
+# `test` and `test-long` run the SAME gates in the SAME order. They differ only
+# in workload sizing (HOST_DEFS / SIM_DEFS, set on test-long below) and in
+# test-long additionally running test-mutation.
+#
+# Listing the inventory ONCE is what keeps that true. Two hand-maintained
+# 46-target prerequisite lines invite a new gate landing in only one aggregate,
+# and the aggregate it misses is usually test-long -- the release gate, where
+# the omission surfaces as a green run rather than as a failure.
+#
+# The EARLY/LATE split exists only so test-mutation keeps its position between
+# the PIC10F320 host lanes and the simulator lanes; run order affects when a
+# failure is reported, not whether it is caught. A new gate may go in either
+# half, and lands in both aggregates either way.
+TEST_GATES_EARLY = \
+        analyze test-host test-model-check test-symbolic test-cbmc \
+        test-fuses test-stack-bound test-stack-bound-regression \
+        test-stack-bound-pic-regression test-flash-budget-regression \
+        test-fault-inject pic320-test-host-variants \
+        test-pic320-return-stack-oracle test-pic320-expected-images \
+        test-pic320-coverage-archive
+TEST_GATES_LATE = \
+        test-sim test-sim-secondary test-attiny202-build \
+        test-attiny202-output-oracle test-attiny202-delay-oracle \
+        test-attiny202-fault-oracle test-attiny202-model-ffi \
+        test-avr-build-rebuild test-ci-local-routing test-workflow-syntax \
+        test-gpsim-wrappers test-fetch-yasimavr test-supply-chain \
+        test-klee-build test-mutation-sandbox test-pic-build \
+        test-release-images test-release-provenance \
+        test-release-qualification test-release-history \
+        test-build-serialization test-target-matrix \
+        test-target-lane-markers test-lockstep-progress test-soak-timing \
+        test-soak-reset-witness test-strict-tools test-workload-rebuild \
+        test-pic-build-rebuild coverage-check coverage-check-core
+TEST_GATES = $(TEST_GATES_EARLY) $(TEST_GATES_LATE)
+TEST_LONG_GATES = $(TEST_GATES_EARLY) test-mutation $(TEST_GATES_LATE)
+
 # Default `make test`: FAST workload. Runs static analysis, the host golden
 # model, the exhaustive state-space model check, the symbolic single-step proof,
 # the fuse-byte check, the fault-injection sim tests, both simavr firmware
 # suites, and enforces a coverage floor on the model. Designed to finish in
 # ~1 minute for quick edit/build/test loops and CI.
-test: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-pic320-expected-images test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-attiny202-model-ffi test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
+test: $(TEST_GATES)
 	@echo "=== all fast pre-hardware tests passed ==="
 
 # Explicit alias for the fast suite (same as `make test`).
@@ -2255,7 +2353,7 @@ test-fast: test
 # does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
-test-long: analyze test-host test-model-check test-symbolic test-cbmc test-fuses test-stack-bound test-stack-bound-regression test-stack-bound-pic-regression test-flash-budget-regression test-fault-inject pic320-test-host-variants test-pic320-return-stack-oracle test-pic320-expected-images test-mutation test-sim test-sim-secondary test-attiny202-build test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle test-attiny202-model-ffi test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-klee-build test-mutation-sandbox test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization test-target-matrix test-target-lane-markers test-lockstep-progress test-soak-timing test-strict-tools test-workload-rebuild test-pic-build-rebuild coverage-check coverage-check-core
+test-long: $(TEST_LONG_GATES)
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
 
 # Friendly alias for the exhaustive suite (same as `make test-long`).
@@ -2309,6 +2407,15 @@ test-avr-build-rebuild:
 # Fake-gpsim proof that complete snapshots cannot hide process failure/timeout.
 test-gpsim-wrappers:
 	./test/test_gpsim_wrappers.sh
+
+# Offline fake-tool proof that the yasimavr fetcher cannot replace unowned paths
+# and installs only a completely built and verified sibling venv.
+test-fetch-yasimavr:
+	./test/test_fetch_yasimavr.sh
+
+# Corrupted-download/cache fixtures plus workflow/action/credential pin checks.
+test-supply-chain:
+	./test/test_supply_chain.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
 # image/host rebuild triggering. The script enforces the canonical 36/75 counts,
@@ -2437,7 +2544,8 @@ _test-mutation-policy-probe:
 test-mutation-sandbox:
 	MUTATION_SANDBOX_SELFTEST=1 ./test/run_mutation_tests.sh
 
-# Host-only proof that the authoritative PIC target aggregate rejects bad matrices.
+# Host-only proof that authoritative target aggregates reject bad matrices and
+# skipped/incomplete target-level lanes.
 test-target-matrix:
 	./test/test_target_matrix.sh
 	@# Same regression, PIC10F320 contract. One script, two chips (§4 FOLD).
@@ -2470,6 +2578,28 @@ test-target-matrix:
 	TM_SUBSET='cd4053-mute' \
 	TM_UNSUPPORTED='tmux4053-simple' \
 	TM_CHECK_SENTINELS=0 \
+		./test/test_target_matrix.sh
+	@# AVR-XT's three aggregate lanes each run the complete matrix themselves,
+	@# so this mode checks one recursive call per lane and exact per-variant PASS
+	@# counts (plus both lock-step boot scenarios) rather than a per-variant wrapper.
+	TM_LABEL='ATtiny202' \
+	TM_TARGET='attiny202-test-target' \
+	TM_VARIANTS_VAR='VARIANTS' \
+	TM_SUPPORTED='cd4053 mute relay' \
+	TM_SUBSET='mute' \
+	TM_UNSUPPORTED='unknown' \
+	TM_FAULT_TARGET='attiny202-sim' \
+	TM_LOCKSTEP_TARGET='attiny202-fault' \
+	TM_IO_TARGET='attiny202-lockstep' \
+	TM_FAULT_MARKER='SIM PASS' \
+	TM_LOCKSTEP_MARKER='FAULT PASS' \
+	TM_IO_MARKER='LOCKSTEP PASS' \
+	TM_FAULT_MARKER_COUNT=3 \
+	TM_LOCKSTEP_MARKER_COUNT=3 \
+	TM_IO_MARKER_COUNT=3 \
+	TM_IO_EXTRA_MARKER='co-simulated' \
+	TM_IO_EXTRA_MARKER_COUNT=6 \
+	TM_AGGREGATE_LANES=1 \
 		./test/test_target_matrix.sh
 
 # Host-only proof that the PIC target aggregates are fail-CLOSED, which the
@@ -2727,7 +2857,9 @@ test/avr/test_fuses: test/avr/test_fuses.c Makefile FORCE
 # the flag, collect the per-function .su files, and fail if any single frame
 # exceeds STACK_MAX_FRAME bytes.  Complements the runtime HWM test (test-sim)
 # with a compile-time structural upper bound that does not depend on exercising
-# the deepest call path.  Override: make test-stack-bound STACK_MAX_FRAME=16
+# the deepest call path.  Override: make test-stack-bound STACK_MAX_FRAME=24
+# (24 is the tightest round ceiling the current 19 B ISR frame still clears;
+# the previous 16 example no longer passes).
 test-stack-bound:
 	@stack_dir="$(STACK_BUILD_DIR)"; remove_dir=0; \
 	if [ -z "$$stack_dir" ]; then \
@@ -2810,8 +2942,11 @@ test-stack-bound-regression:
 
 # Flash-utilization budget assertion: run avr-size on every ATtiny13a variant
 # ELF and fail if flash (Program bytes) exceeds FLASH_T13_BUDGET% of 1024 B.
-# Firmware is ~46% today; a future accidental bloat would otherwise pass
-# silently.  Override: make test-flash-budget FLASH_T13_BUDGET=80
+# Firmware is at 73.8% today (relay and mute; cd4053 is 69.9%), inside the 90%
+# default ceiling by 16.2 points.  The target prints the measured per-variant
+# percentages, so this figure can be re-checked by running it.  A future
+# accidental bloat would otherwise pass silently.
+# Override: make test-flash-budget FLASH_T13_BUDGET=80
 test-flash-budget:
 	@if [ "$(MCU)" != "$(FLASH_T13_MCU)" ] || [ "$(FW_BASE)" != "bypass" ] \
 			|| [ "$(AVR_FW)" != "$(AVR_BUILD_DIR)/bypass" ]; then \
@@ -2990,6 +3125,40 @@ test-soak: $(SOAK_DEPS) $(AVR_FW)_$(SOAK_VARIANT)_t$(SOAK_CHIP).elf
 	$(SOAK_COMPILE)
 	@echo "--- soak test: variant=$(SOAK_VARIANT)  MCU=ATtiny$(SOAK_CHIP)  duration=$(SOAK_DURATION_MS) ms ---"
 	./$(SOAK_BIN)
+
+# The soak's `watchdog_failures` counter is release evidence, so prove a real
+# watchdog reset can actually reach it. This builds the SAME soak driver against
+# the SAME healthy image twice -- untouched, and with the fixture that disables
+# the timer interrupt mid-run -- and requires the first to pass with
+# watchdog_failures=0 and the second to fail with a nonzero one. A soak that has
+# merely stopped being able to observe a reset passes the first half and fails
+# the second, which is precisely the drift this gate exists to catch.
+#
+# Short by construction: the numbers below are one WDT window plus slack, not a
+# scaled-down release soak. tinyx5 only -- simavr models the WDT system reset
+# for the ATtiny25/45/85 family and not for the ATtiny13a.
+SOAK_WITNESS_VARIANT       ?= cd4053
+SOAK_WITNESS_CHIP          ?= 85
+SOAK_WITNESS_DURATION_MS   ?= 3000
+SOAK_WITNESS_LIVENESS_MS   ?= 1000
+# Kill the tick with a full WDT window (nominal 250 ms, RC tolerance to ~350 ms)
+# plus margin left in the run, so the reset lands inside the soak rather than
+# after its last millisecond.
+SOAK_WITNESS_KILL_TIMER_MS ?= 1500
+test-soak-reset-witness: $(SOAK_DEPS) \
+                         $(AVR_FW)_$(SOAK_WITNESS_VARIANT)_t$(SOAK_WITNESS_CHIP).elf
+	@echo "--- soak reset witness: variant=$(SOAK_WITNESS_VARIANT)  MCU=ATtiny$(SOAK_WITNESS_CHIP) ---"
+	HOSTCC="$(HOSTCC)" \
+	SOAK_WITNESS_CFLAGS="$(SIM_CFLAGS) $(PURE_HOST_CFLAGS)" \
+	SOAK_WITNESS_LIBS="$(SIM_LIBS)" \
+	SOAK_WITNESS_MACRO="$(macro_$(SOAK_WITNESS_VARIANT))" \
+	SOAK_WITNESS_FW="$(AVR_FW)_$(SOAK_WITNESS_VARIANT)_t$(SOAK_WITNESS_CHIP).elf" \
+	SOAK_WITNESS_MCU="$(mmcu_$(SOAK_WITNESS_CHIP))" \
+	SOAK_WITNESS_F_CPU="$(F_CPU_X5)" \
+	SOAK_WITNESS_DURATION_MS="$(SOAK_WITNESS_DURATION_MS)" \
+	SOAK_WITNESS_LIVENESS_MS="$(SOAK_WITNESS_LIVENESS_MS)" \
+	SOAK_WITNESS_KILL_TIMER_MS="$(SOAK_WITNESS_KILL_TIMER_MS)" \
+	./test/test_soak_reset_witness.sh
 
 # Generate a GTKWave-viewable waveform of PB0/PB1/PB2/PB3 over a representative
 # press/release sequence for the selected VARIANT. Writes
@@ -3398,6 +3567,9 @@ test-pic320-expected-images:
 	@python3 $(PIC320_EXPECTED_IMAGE_CHECKER) --selftest
 	@python3 $(PIC320_EXPECTED_IMAGE_CHECKER) $(PIC320_EXPECTED_IMAGE_MANIFEST)
 
+test-pic320-coverage-archive:
+	@./test/test_pic320_coverage_archive.sh
+
 # Firmware<->core equivalence: the real firmware, host-compiled, stepped tick for
 # tick against src/bypass_pure.c on the same stimulus.
 pic320-test-equiv:
@@ -3464,19 +3636,20 @@ pic320-test-fault-host:
 # 84 / 95 / 99 executable lines, so a single-variant run would leave real
 # firmware logic unmeasured. pic320-test-host-variants sweeps all three.
 pic320-coverage-check-fw:
-	@# CI checks out git's mode, so a script that is 100755 in the index but not
-	@# locally executable (or the reverse) fails in exactly one of the two places.
-	@# Check both, as pic-test-gpsim does for the gpsim wrappers.
-	@mode=`git ls-files --stage -- "$(PIC320_COVERAGE_FW_GATE)" | cut -d' ' -f1`; \
-	if [ "$$mode" != "100755" ]; then \
-		echo "ERROR: $(PIC320_COVERAGE_FW_GATE) is not mode 100755 in git (found '$$mode')."; \
-		echo "       Fix: git update-index --chmod=+x $(PIC320_COVERAGE_FW_GATE)"; \
-		exit 1; \
-	fi; \
-	if [ ! -x "$(PIC320_COVERAGE_FW_GATE)" ]; then \
-		echo "ERROR: $(PIC320_COVERAGE_FW_GATE) is 100755 in git but lacks its local exec bit."; \
+	@# Local executability is required everywhere, including source archives.
+	@# Inside a worktree, also verify what CI will receive from the Git index.
+	@if [ ! -x "$(PIC320_COVERAGE_FW_GATE)" ]; then \
+		echo "ERROR: $(PIC320_COVERAGE_FW_GATE) lacks its local exec bit."; \
 		echo "       Fix: chmod +x $(PIC320_COVERAGE_FW_GATE)"; \
 		exit 1; \
+	fi; \
+	if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
+		mode=`git ls-files --stage -- "$(PIC320_COVERAGE_FW_GATE)" | cut -d' ' -f1`; \
+		if [ "$$mode" != "100755" ]; then \
+			echo "ERROR: $(PIC320_COVERAGE_FW_GATE) is not mode 100755 in git (found '$$mode')."; \
+			echo "       Fix: git update-index --chmod=+x $(PIC320_COVERAGE_FW_GATE)"; \
+			exit 1; \
+		fi; \
 	fi
 	@mkdir -p "$(PIC320_COVERAGE_DIR)" || exit 1; \
 	work=`mktemp -d "$(PIC320_COVERAGE_DIR)/fw.XXXXXX"` || exit 1; \
@@ -3779,9 +3952,7 @@ pic320-size: $(PIC320_SRC)
 	if [ ! -x "$(PIC320_CC)" ] && ! command -v "$(PIC320_CC)" >/dev/null 2>&1; then \
 		echo "XC8 not found at $(PIC320_CC) (override with PIC320_CC=...)"; $(SKIP); \
 	fi; \
-	if [ ! -x "$(IHEX_VALIDATOR)" ] && ! command -v "$(IHEX_VALIDATOR)" >/dev/null 2>&1; then \
-		echo "FAIL: Intel HEX validator not found at $(IHEX_VALIDATOR)"; exit 1; \
-	fi; \
+	$(IHEX_VALIDATOR_CHECK); \
 	cleanup_probe() { \
 		rc=$$?; \
 		remove_probe || rc=1; \
@@ -3859,16 +4030,18 @@ pic320-analyze-misra: $(PIC320_SRC) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRE
 # run the REAL built HEX in a simulated PIC10F320, so they are the only lanes
 # that see the emitted image rather than host-compiled source.
 #
-# FOLD/FORK dispositions actually taken (merge plan §4), each decided from a
-# non-comment diff rather than assumed:
+# Current FOLD/PARAM/FORK dispositions (merge plan §4 plus post-merge
+# reconciliation), each decided from a non-comment diff rather than assumed:
 #   FOLD   power_on_pressed.stc     -- executable stimulus byte-identical
 #   FOLD   run_gpsim*.sh            -- differed only in the default PROC, and
 #                                      they already parameterize on
 #                                      PIC_GPSIM_PROC, so the 320 just overrides
 #   FOLD   test_soak_pic.cc         -- the parent copy is AHEAD (SOAK_LIVENESS_DUE)
 #   PARAM  test_config_pic.c        -- one printf label; now PIC_DEVICE_NAME
-#   FORK   test_{fault,io,lockstep}_pic.cc, footswitch_toggle.stc
-#                                   -- genuinely chip-specific, in test/pic10f320/gpsim/
+#   PARAM  test_{fault,io,lockstep}_pic.cc
+#                                   -- thin per-part adapters include shared cores
+#                                      in test/pic/; fault policy/counts stay explicit
+#   FORK   footswitch_toggle.stc    -- chip-specific gpsim command script
 PIC320_GPSIM_PROC ?= p10f320
 PIC320_GPSIM_DIR   = test/pic10f320/gpsim
 PIC320_GPSIM_TOGGLE_STC := $(PIC320_GPSIM_DIR)/footswitch_toggle.stc
@@ -4289,7 +4462,9 @@ PIC320_SOAK_LIVENESS_INTERVAL_MS ?= 60000
 PIC320_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
 PIC320_SOAK_COMBINATION_NAME     ?= standalone
 PIC320_SOAK_SRC  = $(PIC_SOAK_SRC)
-PIC320_SOAK_DEPS = $(PIC320_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) test/soak_timing_config.h
+PIC320_SOAK_DEPS = $(PIC320_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) \
+                   $(PIC_GPSIM_BOOTSTRAP_HDR) $(PIC_SOAK_SAMPLING_HDR) \
+                   test/soak_timing_config.h
 PIC320_SOAK_BIN  = $(PIC320_BUILD_DIR)/test_soak_pic
 PIC320_SOAK_HEX  = $(call pic320_hex_of,$(PIC320_SOAK_VARIANT))
 
@@ -4554,6 +4729,7 @@ help:
 	@echo "  test-attiny202-model-ffi  host gate for the golden-model ctypes bridge"
 	@echo "  test-pic320-return-stack-oracle  host Intel-HEX/control-flow oracle selftest"
 	@echo "  test-pic320-expected-images  validate the pinned PIC10F320 image-hash contract"
+	@echo "  test-pic320-coverage-archive  coverage-gate executable checks without a Git index"
 	@echo "  test-stack-bound  -fstack-usage static frame bound (limit: STACK_MAX_FRAME=$(STACK_MAX_FRAME) B)"
 	@echo "  test-stack-bound-regression  fail-closed stack-evidence checks"
 	@echo "  test-flash-budget  exact ATtiny13a gate (<= FLASH_T13_BUDGET=$(FLASH_T13_BUDGET)% of 1 KB)"
@@ -4568,6 +4744,8 @@ help:
 	@echo "  test-attiny202-build  fail-closed AVR-XT image-generation checks"
 	@echo "  test-avr-build-rebuild  classic AVR stale/config/partial-output checks"
 	@echo "  test-gpsim-wrappers  fail-closed gpsim process-status checks"
+	@echo "  test-fetch-yasimavr  safe destination/rebuild/install checks for the yasimavr venv"
+	@echo "  test-supply-chain  external download, cache, dependency and action pin checks"
 	@echo "  test-ci-local-routing  local-CI skip-option command routing checks"
 	@echo "  test-workflow-syntax  GitHub workflow YAML + ci-local job-map checks"
 	@echo "  test-klee-build  linked harness/pure-core KLEE bitcode regression"

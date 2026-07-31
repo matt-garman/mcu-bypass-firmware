@@ -12,11 +12,13 @@
     * Trivial hardware implementation
     * Schmitt trigger GPIO pins
 
-Note this project also supports the Microchip PIC10F322, which has _some_ of
-the same benefits as AVR Classic, but the tooling is decidedly less compelling.
-Compilation requires Microchip's XC8 compiler, which is not open source,
-although Microchip does offer a limited free version of this compiler.  The
-free tier XC8 restricts the options that are available.
+This project also supports the Microchip PIC10F322 and PIC10F320, which have
+_some_ of the same benefits as AVR Classic, but the tooling is decidedly less
+compelling. Both use Microchip's XC8 compiler and PIC10-12Fxxx_DFP device pack.
+XC8 is not open source, although Microchip offers a limited free version; that
+free tier restricts the options that are available. PIC10F320's 256-word flash
+also requires the self-contained architecture documented in
+`docs/pic10f320_special_case.md`.
 
 
 == Why ATtiny202 (AVR-XT):
@@ -30,7 +32,7 @@ set.  It is the modern-silicon member of the supported set.
     * Current production part rather than a mature/legacy one, with a
       correspondingly long expected availability horizon
     * 2 KB flash and 128 bytes SRAM: roughly double the ATtiny13a's flash and
-      SRAM, so the firmware sits at ~40% of flash instead of ~70%
+      SRAM, so the firmware sits at 41-43% of flash instead of 70-74%
     * An **AEC-Q100 automotive-qualified** variant of this family exists
       (125 °C), which is a meaningfully stronger environmental rating than any
       other supported part carries
@@ -114,12 +116,12 @@ adverse conditions:
 
 
 == Caveats and Limitations
-    * The footswitch polling loop is based on a 1ms timer, driven by
-      the AVR's builtin oscillator; this oscillator can drift
-      +/- 10% (e.g. voltage fluctuations, temperature), which means
-      actual sampling is roughly 0.9-1.1ms.  The algorithm still
-      holds, and timing variations of this magnitude will not be
-      perceptible to the user and are therefore acceptable.
+    * All targets use a nominal 1ms timer-derived sample cadence: the two AVR
+      generations sample in timer ISRs, while both PIC implementations poll the
+      timer flag. Internal-oscillator tolerance can move the actual period; the
+      conservative +/-10% timing envelope used here gives roughly 0.9-1.1ms.
+      The algorithm still holds, and variation of this magnitude is not
+      perceptible to the user.
     * Pop/click suppression is provided by the "4053 with muting"
       variant; the other two schemes (simple 4053, relay) do not
       have explicit pop/click suppression
@@ -129,18 +131,26 @@ adverse conditions:
       design bias is towards simplicity and verifiability
     * By design, no recovery is currently provided for a
       mechanically stuck switch
-    * "Fast repeated taps": under ideal conditions, the pure debounce model
-      and ISR-driven AVR shells can re-arm 33ms after a press begins. The
-      polled PIC10F322 simple/mute/relay variants use conservative nominal
-      press-onset budgets of 33ms/38ms/45ms respectively because mute and
-      relay actuation block sampling for 5ms/12ms after the toggle. The latched
-      timer flag normally preserves one pending sample after a block, so an
-      ideal simulated mute/relay path can re-arm roughly one tick sooner
-      (about 37ms/44ms); instruction overhead and sample phase make the exact
-      physical minimum non-integral. Noise and old switches lengthen recognition,
-      while oscillator tolerance can move nominal wall time in either direction.
-    * On the PIC10F322 port specifically: the footswitch loop is
-      polled (Model B, no timer interrupt), so while a blocking
+    * "Fast repeated taps": the pure debounce model and ISR-driven AVR shells
+      schedule a conservative budget of 33 sample updates for a clean press followed by
+      immediate release (8 accepted low samples + 25 high samples). At a nominal
+      1ms tick this is called a 33ms qualification budget, not an exact physical
+      minimum: the first through last sample span one fewer interval, and the
+      first sample's phase puts ideal press-onset-to-re-arm time at roughly
+      32-33ms. Both polled PIC implementations use conservative nominal
+      simple/mute/relay budgets of 33ms/38ms/45ms because mute and relay
+      actuation block sampling for 5ms/12ms after the toggle. The latched timer
+      flag normally
+      preserves one pending sample after a block, so an ideal simulated
+      mute/relay path can re-arm roughly one tick sooner than those conservative
+      budgets (pending-aware upper-end nominal budgets of about 37ms/44ms);
+      instruction overhead and sample phase make the exact physical minimum
+      non-integral. Noise and old switches lengthen recognition, while oscillator
+      tolerance moves wall time in either direction.
+    * On both PIC parts, the footswitch loop is polled (Model B: a polled
+      hardware timer tick with the watchdog kept as a pure fault watchdog,
+      no timer interrupt; the decision and its alternatives are recorded in
+      `docs/phase2_pic_shell.md` §1), so while a blocking
       output actuation runs - the relay coil pulse (12ms) or the
       CD4053 mute (5ms), a busy delay inside the state change -
       the loop pauses and the footswitch is not sampled.  The
@@ -150,14 +160,16 @@ adverse conditions:
       immediately, those first 5ms/12ms of physical release occur while the
       mute/relay routine is still blocking and cannot drain the counter. The
       conservative release hold budget is therefore block + RELEASE_THRESH
-      wall-time milliseconds before re-arm. TMR2 continues during the block and
+      nominal sample periods before re-arm. TMR2 continues during the block and
       its latched flag normally supplies one immediate post-block sample, so the
       ideal earliest path can be about one tick shorter; the full-block budget
       remains robust to instruction overhead and sample phase. From one press
-      onset to the next, use PRESSED_THRESH + block + RELEASE_THRESH for
-      qualification: 33ms simple, 38ms mute, and 45ms relay. A normal physical
-      tap clears these budgets comfortably. AVR Classic is unaffected because
-      its timer ISR keeps integrating through the blocking pulse. The driver
+      onset to the next, use PRESSED_THRESH + block + RELEASE_THRESH as the
+      conservative nominal qualification budget: 33ms simple, 38ms mute, and
+      45ms relay. These are sample-count-derived budgets, not exact physical
+      minima. A normal physical tap clears them comfortably. AVR Classic and
+      AVR-XT are unaffected because their timer ISRs keep integrating through
+      the blocking pulse. The driver
       compile-time assertions bound block < RELEASE_THRESH, which keeps the
       conservative PIC release/re-arm wall-time budget below
       2 * RELEASE_THRESH; they do not make the block disappear from that budget.
@@ -199,13 +211,21 @@ supported part can enforce the >4v peripheral-safe threshold:
 [horizontal]
 AVR Classic (ATtiny13a/45/85):: 4.3v BOD fuse -- enforces the >4v
   floor the 5v relay coil / MOSFET peripherals require.
+ATtiny202 (AVR-XT):: BODCFG fuse `LVL=BODLEVEL7` (~4.2v), with BOD
+  enabled in both active and sleep modes. This is the AVR-XT
+  analogue of the classic 4.3v BOD and likewise enforces the >4v
+  peripheral-safe floor.
 PIC10F322:: BOR is enabled at the highest available trip
   (`BORV=HI`), but the PIC10F322's trip points are only ~2.4v (LO) /
   ~2.7v (HI). The PIC therefore *cannot* enforce a >4v floor in
-  firmware -- this is a hardware-design limitation. A PIC build that
-  drives >4v peripherals must guarantee the peripheral-safe supply
-  in hardware (e.g. regulator dropout / supervisor), not rely on the
-  MCU's BOR.
+  firmware -- this is a hardware-design limitation. A build on
+  either PIC part that drives >4v peripherals must guarantee the
+  peripheral-safe supply in hardware (e.g. regulator dropout /
+  supervisor), not rely on the MCU's BOR.
+PIC10F320:: same silicon family and the same BOR configuration as
+  the PIC10F322 (`BOREN=ON`, `LPBOR=OFF`, `BORV=HI`), so the same
+  ~2.4v (LO) / ~2.7v (HI) trip points and *exactly the same caveat*
+  apply.
 
     * Watchdog timeout (WDT): while the program flow has been
       exhaustively tested/simulated, including formal
@@ -230,31 +250,51 @@ user.  The release-debounce, or lock-out period, is longer so as to
 "hide" additional debounce latency from the user.
 
     * PRESSED_THRESH upper bound (latency constraint):
-      At worst-case clock (+10% RC drift), one tick = 1.111ms. For
-      <10ms press latency: PRESSED_THRESH = floor(10 / 1.111) = 9.
-      Current value 8 has a 1-tick margin.  Note that changing to 10
-      10 would violate the "<10ms press latency" goal.  Also note
-      that a highly bouncy switch, or significant EMI/RFI _will_
-      cause the press latency to exceed 10ms.
+      The slow-clock extreme is -10% frequency, so one nominal 1ms tick can
+      last 1/0.9 = 1.111ms. (+10% frequency shortens the tick to 1/1.1 =
+      0.909ms; it is the favorable latency extreme, not the worst case.) If
+      `N` accepted samples are required, their sample instants span `N-1`
+      intervals and an arbitrarily phased physical edge adds less than one
+      interval. Ignoring sub-tick instruction overhead, clean edge-to-toggle
+      latency is therefore from about `(N-1)*T` to less than `N*T`.
+      `PRESSED_THRESH=8` gives a worst-phase, -10%-frequency upper bound below
+      8 * 1.111ms = 8.89ms. A threshold of 9 would approach 10ms with no
+      oscillator/sample-period margin; 10 would violate the <10ms goal.
+      Bounce or EMI/RFI can subtract counter progress and make recognition take
+      longer than this clean-input bound.
 
     * PRESSED_THRESH lower bound (EMI rejection):
       The RC filter (1k series + 22nF to ground + approx. 7.5k pullup
       effective) has a time constant 22nF × (1k || 7.5k) =
       approx. 18µs. EMI spikes shorter than a few RC time constants are
       attenuated below the Schmitt threshold. The filter provides
-      hardware-level rejection of spikes shorter than roughly 100µs. The
-      1ms timer tick plus PRESSED_THRESH=8 means a spurious low must
-      persist for 8ms (contiguous or accumulating) to register
-      roughly 80× the hardware filter's corner.
+      hardware-level rejection of spikes shorter than roughly 100µs.
+      `PRESSED_THRESH=8` is a sample-count threshold, not an 8ms persistence
+      threshold. Eight low sample instants span seven tick intervals. At the
+      +10%-frequency extreme, a favorably phased continuous low pulse just over
+      7 * 0.909ms = 6.36ms can therefore be sampled low eight times and
+      register. Starting from counter zero, any isolated low pulse at the MCU
+      digital input shorter than 6.36ms is guaranteed not to register under the
+      stated clock tolerance; between that bound and the
+      worst-phase recognition bound (less than 8.89ms), the outcome depends on
+      sample phase and oscillator frequency. Noncontiguous low samples can also
+      accumulate if intervening high samples do not fully drain the integrator,
+      so there is no universal physical "must persist" duration for arbitrary
+      noise. Even the guaranteed single-pulse bound is more than 60 times the
+      roughly 100us hardware-filter scale.
 
     * RELEASE_THRESH (minimum lockout before next press):
-      At the pure-algorithm sample level, and on ISR-driven AVR shells, the
-      minimum press-onset interval is PRESSED_THRESH + RELEASE_THRESH = 33ms
-      at nominal clock. For the polled PIC shell, conservative qualification
-      adds the full blocking output actuation after the toggle: 33ms simple,
-      38ms mute, 45ms relay. A pending TMR2 flag can make the ideal mute/relay
-      path roughly one tick shorter, so these are robust budgets rather than
-      claims of exact physical minima.
+      At the pure-algorithm sample level, a clean press followed by immediate
+      release consumes `PRESSED_THRESH + RELEASE_THRESH = 33` accepted sample
+      updates. On the ISR-driven AVR implementations this is a conservative
+      nominal 33ms
+      qualification budget; physical press-onset-to-re-arm timing is roughly
+      32-33 tick periods because 33 sample instants span 32 intervals and the
+      first sample has arbitrary phase. For both polled PIC implementations,
+      conservative qualification adds the full blocking output actuation after the toggle:
+      33ms simple, 38ms mute, 45ms relay at nominal timing. A pending TMR2 flag
+      can make the ideal mute/relay path roughly one tick shorter, so these are
+      robust sample-count budgets rather than exact physical minima.
 
 
 == GPIO Pin Assignment, Simple CD4053 Scheme
@@ -615,22 +655,24 @@ See TOOLCHAIN.adoc for details.  Summary:
 
     * Common
       ** cppcheck
-      ** clang/clang-tidy
+      ** cppcheck MISRA addon
     * AVR Classic
       ** avr tools: avr-gcc, avr-libc, avrdude toolchain
+      ** clang/clang-tidy static-analysis lanes
       ** no Arduino
       ** simavr
     * ATtiny202 (AVR-XT)
       ** the same avr-gcc/avr-libc/avrdude toolchain
-      ** ATtiny_DFP device pack (avr-libc 7.3.0 predates the part)
+      ** ATtiny_DFP device pack (avr-gcc 7.3.0 predates the part)
       ** yasimavr (simavr and QEMU do not model the AVR8X core)
       ** UPDI programming, not ISP
-    * PIC10F322
+    * PIC10F322 and PIC10F320
       ** XC8 free-tier compiler
       ** PIC10-12Fxxx_DFP device pack
       ** gpsim/libgpsim
+      ** PIC10F320 uses its self-contained constrained-target implementation
 
-== Compilation Flags
+== AVR Classic and AVR-XT Compilation Flags
 
     -fshort-enums // so that typedef'ed enums below are 8-bit ints
     -funsigned-char
@@ -640,6 +682,9 @@ See TOOLCHAIN.adoc for details.  Summary:
     -Werror
     -Wall
     -Wextra
+
+The PIC builds instead use XC8's C99 mode and `-O2`; see `TOOLCHAIN.adoc` for
+the complete target-specific compiler and device-pack commands.
 
 
 == Testing and Validation
@@ -666,8 +711,14 @@ Specific tests verify specific requirements, as shown in the following table:
 
 == Resource Utilization
 
-The firmware is deliberately tiny, leaving large headroom on every supported
-part. Measured figures per MCU family follow.
+Resource use spans a wide range across the supported parts: the same behaviour
+occupies 9.1% of an ATtiny85's flash and 95.3% of a PIC10F320's. Headroom is
+generous on the roomier parts and deliberately tight at the bottom of that
+range -- the 256-word PIC10F320 leaves 12 words free on its largest variant,
+which is why that target is built differently from every other one and is
+documented as a special case (see `docs/pic10f320_special_case.md`). Every
+family carries a build-time flash-budget gate, so an overshoot fails the build
+rather than reaching hardware. Measured figures per MCU family follow.
 
 === AVR Classic family
 
@@ -682,28 +733,38 @@ stack-canary test (see Testing and Validation above).
 |===
 | Part      | Variant | Flash               | of device flash
 
-| ATtiny13a | cd4053  | 684 bytes           | 67% of 1 KB
-| ATtiny13a | relay   | 724 bytes           | 71% of 1 KB
-| ATtiny13a | mute    | 732 bytes           | 72% of 1 KB
-| ATtiny45  | cd4053  | 710 bytes           | 17% of 4 KB
-| ATtiny45  | relay   | 750 bytes           | 18% of 4 KB
-| ATtiny45  | mute    | 758 bytes           | 19% of 4 KB
-| ATtiny85  | cd4053  | 710 bytes           | 9% of 8 KB
-| ATtiny85  | relay   | 750 bytes           | 9% of 8 KB
-| ATtiny85  | mute    | 758 bytes           | 9% of 8 KB
+| ATtiny13a | cd4053  | 716 bytes           | 69.9% of 1 KB
+| ATtiny13a | relay   | 756 bytes           | 73.8% of 1 KB
+| ATtiny13a | mute    | 756 bytes           | 73.8% of 1 KB
+| ATtiny45  | cd4053  | 742 bytes           | 18.1% of 4 KB
+| ATtiny45  | relay   | 782 bytes           | 19.1% of 4 KB
+| ATtiny45  | mute    | 782 bytes           | 19.1% of 4 KB
+| ATtiny85  | cd4053  | 742 bytes           | 9.1% of 8 KB
+| ATtiny85  | relay   | 782 bytes           | 9.5% of 8 KB
+| ATtiny85  | mute    | 782 bytes           | 9.5% of 8 KB
 |===
 
 SRAM use is dominated by 4 bytes of static data; peak stack measured 31 bytes
 (relay and mute variants) and 29 bytes (cd4053). On the most constrained part,
 the ATtiny13a, with 64 bytes of SRAM: worst-case consumption is 35 bytes
-(4 static + 31 stack), leaving roughly 29 bytes of free headroom. The tinyx5
+(4 static + 31 stack), leaving 29 bytes of free headroom. The tinyx5
 family has far more of both flash and SRAM (the ATtiny85 uses approximately
 9% of flash and approximately 7% of its 512 bytes of SRAM).
 
-This headroom is a deliberate design property: it leaves ample room for future
-features without approaching any resource limit, and it is enforced as a test:
-the stack high-water-mark check fails the build if free SRAM margin drops below
-its floor.
+That SRAM headroom is a deliberate design property, and it is gated rather
+than merely stated: `test_stack_high_water_mark()` in `test/avr/test_sim.c`
+paints SRAM with a canary, exercises the deepest call paths, and fails
+`make test-sim` if fewer than 8 free bytes separate the deepest stack pointer
+from the top of the static data. Measured today: 29 free bytes on relay and
+mute, 31 on cd4053 — the same figures as above. The top of static data is read
+from the firmware ELF's `__bss_end` rather than assumed, so a future static
+variable tightens the gate on its own; if that symbol cannot be resolved the
+test fails rather than falling back to a looser reference point.
+
+Flash, not SRAM, is the tighter resource on the ATtiny13a, and it has its own
+gate: 73.8% of 1 KB against the 90% ceiling enforced by
+`make test-flash-budget`. Both are comfortable margins on this part; neither
+is unlimited.
 
 === ATtiny202 (AVR-XT build)
 
@@ -746,17 +807,20 @@ compiler), not bytes. `make pic` enforces the flash-word budget per variant.
 |===
 | Variant | Program (flash) | of 512 words | Data (RAM) | of 64 bytes
 
-| cd4053  | 404 words | 78.9% | 34 bytes | 53.1%
-| relay   | 431 words | 84.2% | 34 bytes | 53.1%
-| mute    | 434 words | 84.8% | 34 bytes | 53.1%
+| cd4053  | 445 words | 86.9% | 34 bytes | 53.1%
+| relay   | 473 words | 92.4% | 34 bytes | 53.1%
+| mute    | 471 words | 92.0% | 34 bytes | 53.1%
 |===
 
 The 34-byte data figure is XC8's total reservation, not just the firmware's
 state: the single live global is `ctx_` (the 3-byte `debounce_context_t`; the
 PIC's polled Model-B loop has no `timer_isr_called_` handshake, unlike the
 AVR ISR design), and the remainder is the XC8 runtime's scratch and temporaries.
-The PIC10F322 leaves comfortable headroom against its 512-word limit, which
-`make pic` gates on every build.
+Against the 512-word limit the margin is real but not generous: the largest
+variant, relay, leaves 39 words free (7.6%), and cd4053 leaves 67 (13.1%). That
+is enough for maintenance work, not for a substantial new feature. `make pic`
+gates every variant against the budget on every build, so an overshoot fails
+the build rather than reaching hardware.
 
 === PIC10F320 (XC8 build)
 
@@ -795,10 +859,10 @@ The PIC core runs at **2 MHz** (HFINTOSC) on a **polled 1 ms tick** — a busy-w
 on `TMR2IF`, never asleep. This is the opposite of the AVR Classic design, which
 sleeps between ISR-driven samples, and it is deliberate. The PIC10F320/322 has no
 idle mode, and its only Sleep-capable periodic wake is the coarse WDT (TMR0/TMR2
-are FOSC/4-clocked and stop in Sleep), so a *precise* 1 ms tick necessarily means
-staying awake. The design spends that power to buy a precise tick and a
-high-margin, independent watchdog; a deep-sleep scheme would have to give up one
-or both.
+are FOSC/4-clocked and stop in Sleep), so a *precise nominal* 1 ms cadence
+necessarily means staying awake. The design spends that power to buy a
+timer-derived nominal cadence and a high-margin, independent watchdog; a
+deep-sleep scheme would have to give up one or both.
 
 Because the loop is always awake, the clock frequency sets the current draw. The
 core is clocked at 2 MHz rather than the part's 16 MHz maximum: the debounce plus
@@ -825,49 +889,57 @@ The 2 MHz choice is simply "no reason to burn 4 mW when 2 does the same job."
 
 == Multi-MCU Architecture: Shared Core, Per-MCU Shell
 
-The firmware targets three MCU core generations -- AVR Classic, AVR-XT and
-PIC10F32x -- that share the debounce algorithm but differ completely at the
-register level. The split that makes
-this work has two rules.
+The firmware has six MCU release targets across three core generations -- AVR
+Classic, AVR-XT and PIC10F32x -- that share one debounce design but differ at
+the register level. Five targets use the modular architecture through three
+shell source files: `src/bypass_mcu_avr_classic.c` serves ATtiny13a/45/85,
+`src/bypass_mcu_avr_xt.c` serves ATtiny202, and
+`src/bypass_mcu_pic10f322.c` serves PIC10F322. PIC10F320 is the sixth,
+self-contained implementation described below. The modular split has two
+rules.
 
-**The algorithm is shared, exactly once.** `src/bypass_pure.c` is the
-functional core: no hardware access, no globals, no side effects. Every
-target compiles the same file, and it is the sole subject of the host tests
-and the formal proofs. Nothing about it is per-MCU.
+**The five modular targets share one compiled core.** `src/bypass_pure.c` is
+the functional core: no hardware access, no globals, no side effects. Every
+modular target compiles and links that same file, and the core host tests and
+formal proofs exercise it directly. Nothing about it is per-MCU. PIC10F320 does
+not compile it into its image; equivalence and lock-step compare the
+self-contained firmware with this same core.
 
-**The main loop is NOT shared.** Each MCU shell owns its own `main()`, tick
-mechanism, and watchdog-liveness model; only the leaf hardware operations are
-abstracted. This is a deliberate decision, revisited when the second and third
-shells were written, and it is worth recording why — the alternative (one
-portable `main()` parameterized by an interface) looks cleaner and is wrong
-here.
+**The main loop is NOT shared.** Each of the three modular shell files owns its
+own `main()`, tick mechanism and watchdog-liveness model; the self-contained
+PIC10F320 file owns a fourth. Only the modular output-driver leaf operations are
+abstracted. This is deliberate: one portable `main()` parameterized by an
+interface looks cleaner and is wrong here.
 
 The AVR Classic design samples the footswitch *inside* the 1 ms Timer0 ISR
 while `main()` sleeps, and proves liveness through the `timer_isr_called_`
-ISR-to-main handshake. The PIC10F322 uses a fundamentally different model: no
-tick ISR at all, a single polled loop that waits on `TMR2IF`, samples, updates,
-and pets the watchdog, where reaching `CLRWDT` *is* the liveness proof. A single
-shared `main()` cannot express both without changing AVR's ISR-sampling
-behaviour, which would invalidate the documented design and the tests built on
-it — lock-step co-simulation, ISR-jitter, and the handshake mutants.
+ISR-to-main handshake. Both PIC implementations use a fundamentally different
+model: no tick ISR, but a polled loop that waits on `TMR2IF`, samples, updates
+and pets the watchdog, where reaching `CLRWDT` *is* the liveness proof. The
+PIC10F322 version is the modular shell; PIC10F320 writes the same model into its
+self-contained source. A single shared `main()` cannot express both timing
+models without changing AVR's ISR sampling and invalidating lock-step,
+ISR-jitter and handshake tests.
 
 The ATtiny202 follows the AVR Classic model rather than the PIC one, but on
 entirely different peripherals: the tick is TCB0 in periodic-interrupt mode
 (`CCMP` = 1999 at 2 MHz) instead of Timer0 compare-match, the sleep is AVR-XT
 IDLE via `SLPCTRL`, and the watchdog is fuse-locked by `WDTCFG` so `hw_wdt_pet()`
 is a bare `wdr` with nothing to arm. Because it integrates in the ISR, it
-inherits the classic lane's timing properties exactly — including the one that
-matters most for actuation: the ISR keeps sampling through a blocking relay or
-mute pulse, so no ticks are lost, which is why the AVR shells and the polled PIC
-shell qualify press timing differently (see Asymmetric Debounce Timing). This is
-the clearest illustration of why the shells are separate: the AVR-XT and AVR
-Classic shells share a *model* and share none of their register code.
+shares the classic lane's blocking-actuation timing property: the ISR keeps
+sampling through a blocking relay or mute pulse, so no ticks are lost. The two
+AVR generations and two polled PIC
+implementations therefore qualify press timing differently (see Asymmetric
+Debounce Timing). This is the clearest illustration of why the modular shells
+are separate: AVR-XT and AVR Classic share a *model* and none of their register
+code.
 
-So `main()`, the tick source, `init()` as orchestrator, and the reset path stay
-file-static inside each shell. The consequences are visible elsewhere in this
-document: the polled PIC shell qualifies press timing differently than the
-ISR-driven AVR shells (see Asymmetric Debounce Timing), and it carries no
-`timer_isr_called_` byte (see Resource Utilization).
+So `main()`, the tick source, `init()` as orchestrator and the reset path stay
+file-static inside each implementation. The consequences are visible elsewhere
+in this document: both polled PIC implementations qualify press timing
+differently from both ISR-driven AVR generations (see Asymmetric Debounce
+Timing), and neither PIC carries a `timer_isr_called_` byte (see Resource
+Utilization).
 
 **What the shared interface does cover.** `src/bypass_hw_iface.h` is the
 *output-driver* boundary only: the GPIO leaf operations a shell provides to a
@@ -875,12 +947,14 @@ driver (`hw_pin_set_*`, `hw_led_pin_set_*`, `hw_configure_output_pins`,
 `hw_output_state_intact`) and the operations a driver provides back
 (`hw_set_bypass_state`, `hw_set_engaged_state`, `hw_is_sanity_check_failed`,
 `hw_init_output_pins`). The pin-direction API is mask-based so one driver body
-serves all targets: the AVR Classic implementation writes `DDRB`, the AVR-XT
-one writes `PORTA.DIR`, and the PIC maps the mask onto `TRISA`.
+serves all five modular targets: the AVR Classic implementation writes `DDRB`,
+the AVR-XT one writes `PORTA.DIR`, and the PIC10F322 shell maps the mask onto
+`TRISA`. PIC10F320 does not consume this interface or the modular drivers.
 
-Everything else — footswitch read, watchdog arm and pet, clock and peripheral
-bring-up, wait-for-tick, the forced-reset path, and the SFR integrity checks —
-is shell-private and rewritten per shell. That is not an oversight: MISRA
+In the modular architecture, everything else — footswitch read, watchdog arm
+and pet, clock and peripheral bring-up, wait-for-tick, the forced-reset path,
+and the SFR integrity checks — is shell-private and rewritten per shell. That
+is not an oversight: MISRA
 Rule 8.7 flagged the earlier arrangement, since each of those helpers is
 referenced only within its own translation unit. Adding a target normally means
 adding a shell plus a pin map, and reusing the core and all three output
@@ -895,21 +969,23 @@ measured, not assumed: the modular firmware overshoots by roughly 100 words
 (`docs/pic10f320_feasibility.md`).
 
 Its firmware, `src/bypass_mcu_pic10f320.c`, therefore reuses *neither* the core
-nor the output drivers as linked code. It is a single self-contained file with
-the integrator, the state machine, the power-on initialisation and the three
-output stages hand-inlined into `main()` and `#if defined(OUTPUT_*)` blocks. The
-source tree therefore has six release targets implemented by four
-shells plus one inlined implementation; the PIC10F320's first unified release is
-still pending qualification.
+nor the output drivers as linked code. It is a single self-contained file: the
+integrator and state machine are written directly in `main()`, debounce
+initialization is written directly in `init()`, and source-local static output
+functions are selected by `#if defined(OUTPUT_*)`. It first shipped in the
+unified `v0.9.6` release.
 
-That trades the compile-the-verified-core property for a behavioural
-equivalence argument against the same core — host equivalence tick-for-tick,
-real-HEX lock-step in gpsim, host and target fault injection, and an exact-line
-firmware coverage gate. It is integrated and wired into the release gates, but
-is not present in a published unified release yet.
-**`docs/pic10f320_special_case.md` is the single authoritative statement of what
-that difference does and does not buy**; this section deliberately does not
-restate the assurance argument.
+That trades the compile-the-verified-core property for direct behavioural
+comparison in the host-equivalence and real-HEX lock-step lanes, plus orthogonal
+fault, actuation, coverage, static-analysis, byte-identity and soak evidence. It
+is release-supported and has published prebuilt images beginning with `v0.9.6`.
+**`docs/pic10f320_special_case.md` is the single
+authoritative statement of the architectural difference and assurance
+comparison; `docs/pic10f320_validation.md` owns execution evidence, current
+qualification status and the scope of what each result does and does not
+establish; `test/README.md` owns the current lane inventory — Make targets,
+substrates, mechanics and check counts. Counts and command lists are kept in
+that one place so the other two cannot go stale against the suite.**
 
 == AVR Classic Program Flow
 
@@ -922,14 +998,18 @@ Define constants (see "Asymmetric Debounce Timing" above for rationale)
     * PRESSED_THRESH = 8
 
 The core mechanism is a saturating integrator: a counter that
-increments by one per millisecond when the footswitch reads closed,
-and decrements by one per millisecond when it reads open, bounded
+increments by one per sample when the footswitch reads closed,
+and decrements by one per sample when it reads open, bounded
 between 0 and RELEASE_THRESH. A simple debounce timer resets on any
 noise sample; the integrator tolerates noise, requiring only that
 the majority of samples over a window indicate the intended state. A
-spike shorter than PRESSED_THRESH milliseconds cannot reach the
-threshold even if perfectly timed. A real press, even through
-moderate contact bounce or EMI, accumulates reliably because each
+single pulse that cannot cover PRESSED_THRESH sample instants cannot reach the
+threshold. Starting from counter zero, and measuring low duration at the MCU
+digital input, the stated +/-10% clock tolerance guarantees that any pulse
+shorter than about 6.36ms is too short; longer pulses can register depending on
+sample phase, and noncontiguous lows can accumulate if high samples do not
+cancel them. A real press, even through moderate contact bounce or EMI,
+accumulates reliably because each
 clean low sample contributes persistently.
 
 The state machine has two states. In PRESS_DEBOUNCE_WAIT, the
@@ -942,13 +1022,15 @@ re-arm for the next press. This lockout prevents switch bounce on
 release from generating a second event, and prevents a held switch
 from re-triggering.
 
-The thresholds are asymmetric by design. PRESSED_THRESH (8ms) is
-kept low for fast response; it is the minimum sustained press
-needed to register, and sets the best-case latency. RELEASE_THRESH
-(25ms) is larger, providing robust lockout against release bounce
-while still allowing fast repeated taps (minimum tap interval =
-PRESSED_THRESH + RELEASE_THRESH = 33ms). See "Asymmetric Debounce
-Timing" for details.
+The thresholds are asymmetric by design. `PRESSED_THRESH` is eight accepted low
+samples (often given the nominal shorthand "8ms", but not a fixed physical
+duration) and is kept low for fast response. Under clean input, edge-to-toggle
+latency is about 7 to less than 8 tick periods depending on sample phase.
+`RELEASE_THRESH` is 25 accepted high samples, providing robust lockout against
+release bounce while still allowing fast repeated taps. The conservative
+algorithmic qualification budget is 8 + 25 = 33 sample updates; at a nominal
+1ms tick it is labeled 33ms, but it is not an exact physical minimum. See
+"Asymmetric Debounce Timing" for the phase and oscillator bounds.
 
 Additionally, the MCU's watchdog feature is used to reset the
 device to the default state (bypass, status LED dark) in the event
@@ -957,14 +1039,14 @@ of unexpected error, bit flip, etc.
 
 === State Machine
 
-Saturating integrator (ISR, every 1ms, runs in both states):
+Saturating integrator (one update per nominal 1ms sample, runs in both states):
 
   if footswitch pin low  (switch closed):  if counter < RELEASE_THRESH: counter++
   if footswitch pin high (switch open):    if counter > 0             : counter--
 
 
 
-.Table Program state machine (main loop, evaluated after each ISR wake)
+.Table Program state machine (evaluated after each sample update)
 |===
 | Current State        | Condition                   | Effect action                                    | Next State
 
@@ -978,33 +1060,48 @@ Saturating integrator (ISR, every 1ms, runs in both states):
 
 === Timing Diagram
 
-Diagram 1: Typical Case
+Diagram 1: Typical Clean Case
 
-                        |<-- PRESSED_THRESH -->|                  |
-                        |        (8ms)         |                  |
-   counter:  0  1  2  3  4  5  6  7 [8→25] 24 23 22 ... 2  1  0
-                                          ↑ toggle fires;         ↑ re-arm
-                                            counter jumps
-                                            to RELEASE_THRESH
+Eight accepted low samples span seven intervals; the physical edge can occur
+anywhere in the one interval before low sample 1. `T` is the actual tick period.
 
-   PB0:      ‾‾‾‾|___________________________________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
-                   ← switch pressed →                 ← released →
+   low sample number:       1   2   3   4   5   6   7      8
+   elapsed from sample 1:  0T  1T  2T  3T  4T  5T  6T     7T
+   counter after sample:    1   2   3   4   5   6   7  [8 -> 25]
+                                                            ^ toggle fires;
+                                                              lockout loads
 
-   State:    |<-- PRESS_DEBOUNCE_WAIT -->|<-- RELEASE_DEBOUNCE_WAIT -->|<-- PRESS_DEBOUNCE_WAIT
+   clean physical edge-to-toggle latency: approximately 7T to less than 8T
+   nominal T=1ms:                            approximately 7ms to less than 8ms
+   T with +/-10% frequency tolerance:        approximately 6.36ms to less than 8.89ms
 
-   LED/4053: dark                        lit                                 (ready for next press)
+These are ideal sample-qualification bounds; physical edge-to-output latency
+also includes the small, sub-tick instruction path that processes the final
+sample and updates the output.
+
+After an immediate release, 25 accepted high samples drain the lockout. Those
+25 sample instants span 24 intervals after the first high sample:
+
+   high sample number:       1   2   3  ... 23  24  25
+   counter after sample:    24  23  22  ...  2   1   0
+                                                     ^ re-arm
+
+The commonly quoted 8ms press and 33ms press/release figures are nominal
+sample-count labels and conservative scheduling budgets, not fixed physical
+durations.
 
 
 Diagram 2: EMI/Noise Rejection Case
 
-The following diagram shows the noise-rejection case: the counter climbs to 7,
-then noise interrupts and it falls back, never reaching the threshold of 8.
+The following diagram shows the noise-rejection case: seven accepted low samples
+raise the counter to 7, then high samples drain it, so no eighth low sample is
+accepted and the threshold is never reached.
 
    counter:  0  1  2  3  4  5  6  7  6  5  4  3  2  1  0  0  0  0 ...
                                                                  (threshold never reached)
 
    PB0:      ‾‾‾‾|___________________________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
-                   ← spike / noise burst →
+                   ← sampled-low noise burst →
 
    State:    |<----------------- PRESS_DEBOUNCE_WAIT (no toggle) ----------------->|
 

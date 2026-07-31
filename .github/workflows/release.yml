@@ -58,10 +58,23 @@ jobs:
     name: reproduce + publish ${{ github.ref_name }}
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           # The qualified source must be the release commit's sole parent.
           fetch-depth: 2
+          # This job has contents:write for publication, but no earlier build or
+          # verification step should receive a reusable Git credential.
+          persist-credentials: false
+
+      - name: Install and assert release verification prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make git gnupg python3 python3-yaml
+          command -v make >/dev/null || { echo "::error::make missing"; exit 1; }
+          command -v git >/dev/null || { echo "::error::git missing"; exit 1; }
+          command -v gpg >/dev/null || { echo "::error::gpg missing"; exit 1; }
+          python3 -c 'import yaml' \
+            || { echo "::error::PyYAML missing"; exit 1; }
 
       - name: Locate the committed release directory
         id: rel
@@ -113,26 +126,14 @@ jobs:
 
       - name: Restore cached XC8 + DFP
         id: cache-xc8
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: /opt/microchip
-          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}
+          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}-${{ hashFiles('scripts/install_pic_toolchain.sh') }}
 
       - name: Install XC8 (free tier) + DFP
         if: steps.cache-xc8.outputs.cache-hit != 'true'
-        run: |
-          set -euo pipefail
-          xc8_run="xc8-v${XC8_VERSION}-full-install-linux-x64-installer.run"
-          xc8_base="https://ww1.microchip.com/downloads/aemDocuments/documents"
-          xc8_base="${xc8_base}/DEV/ProductDocuments/SoftwareTools"
-          wget -q "${xc8_base}/${xc8_run}" -O /tmp/xc8.run
-          chmod +x /tmp/xc8.run
-          sudo /tmp/xc8.run --mode unattended --unattendedmodeui none \
-            --netservername '' --LicenseType FreeMode --prefix "${XC8_DIR}"
-          sudo mkdir -p "${XC8_DFP_ROOT}"
-          dfp_pack="Microchip.PIC10-12Fxxx_DFP.${DFP_VERSION}.atpack"
-          wget -q "https://packs.download.microchip.com/${dfp_pack}" -O /tmp/dfp.atpack
-          sudo unzip -q -o /tmp/dfp.atpack -d "${XC8_DFP_ROOT}"
+        run: scripts/install_pic_toolchain.sh
 
       # --- toolchain: ATtiny_DFP + patched yasimavr (ATtiny202 lane) --------
       # The DFP is needed to BUILD the three ATtiny202 images the reproducibility
@@ -144,17 +145,17 @@ jobs:
 
       - name: Restore cached ATtiny_DFP
         id: cache-dfp
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: third_party/attiny_dfp
-          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}
+          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
 
       - name: Restore cached patched yasimavr venv
         id: cache-yasimavr
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: third_party/yasimavr/venv
-          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'third_party/yasimavr/patches/**') }}
+          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'scripts/yasimavr-build-requirements.txt', 'third_party/yasimavr/patches/**') }}
 
       - name: Fetch ATtiny202 device pack + patched simulator
         run: |
@@ -163,17 +164,17 @@ jobs:
 
       - name: Save ATtiny_DFP cache
         if: steps.cache-dfp.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: third_party/attiny_dfp
-          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}
+          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
 
       - name: Save yasimavr venv cache
         if: steps.cache-yasimavr.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: third_party/yasimavr/venv
-          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'third_party/yasimavr/patches/**') }}
+          key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'scripts/yasimavr-build-requirements.txt', 'third_party/yasimavr/patches/**') }}
 
       - name: Assert ATtiny202 toolchain present (fail loud, do NOT skip)
         run: |
@@ -202,10 +203,10 @@ jobs:
 
       - name: Save XC8 + DFP cache
         if: steps.cache-xc8.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: /opt/microchip
-          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}
+          key: microchip-xc8-${{ env.XC8_VERSION }}-dfp-${{ env.DFP_VERSION }}-${{ hashFiles('scripts/install_pic_toolchain.sh') }}
 
       - name: Record toolchain versions
         run: |

@@ -104,6 +104,9 @@
 
 
 // CONFIG (configuration word)
+//
+// same as pic10f322: see "CONFIG / fuse rationale" in bypass_mcu_pic10f322.c
+// for details of these config values
 #pragma config FOSC  = INTOSC
 #pragma config BOREN = ON
 #pragma config WDTE  = ON
@@ -266,12 +269,12 @@ static void hw_x4053_ctl_low(void)  { LATA |=  (uint8_t)(1U << CD4053_PIN); }
 
 static void hw_set_bypass_state(void) {
     hw_led_pin_set_low(); // dark status LED
-    hw_x4053_ctl_high(); // set CD4053 pin high
+    hw_x4053_ctl_high(); // drive MCU CD4053_PIN low
 }
 
 static void hw_set_engaged_state(void) {
     hw_led_pin_set_high(); // light status LED
-    hw_x4053_ctl_low();   // set CD4053 pin low
+    hw_x4053_ctl_low();   // drive MCU CD4053_PIN high
 }
 
 //////////////////////////////////////////////////////////////////////////////

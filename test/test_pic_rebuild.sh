@@ -44,21 +44,53 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 read -r -a MAKE_CMD <<<"${PROJECT_MAKE:-make}"
 [ "${#MAKE_CMD[@]}" -gt 0 ] || fail "PROJECT_MAKE must name a Make command"
 
-mkdir -p "$repo/test/pic" "$repo/build_pic" "$repo/build_pic10f320" "$tools"
-cp "$ROOT/Makefile" "$repo/Makefile"
-# The file rules' real prerequisites. Contents are irrelevant -- the fake
-# compiler never reads them -- but they must exist, or Make would fail for a
-# reason unrelated to the property under test.
+# shellcheck source=test/scratch_tree.sh
+. "$ROOT/test/scratch_tree.sh" || fail "could not load test/scratch_tree.sh"
+
+# Populate the scratch repo with the SHARED allowlist walk -- the same one the
+# mutation runner uses (test/scratch_tree.sh). This fixture used to enumerate the
+# file rules' prerequisites by hand, which meant a target that gained one broke
+# both sandbox builders in turn, this one first. The walk takes every source
+# under test/ at any depth, so a new prerequisite arrives without an edit here.
+mkdir -p "$tools"
+scratch_tree_copy "$ROOT" "$repo" \
+	|| fail "could not populate the scratch repo (see test/scratch_tree.sh)"
+mkdir -p "$repo/build_pic" "$repo/build_pic10f320"
+
+# Blank the prerequisites of the rules under test, which is this fixture's whole
+# point: the property is Make's staleness decision, not compilation, and the fake
+# compiler below never opens them. Emptying them makes that impossible to depend
+# on by accident.
 #
+# The list is no longer how these files GET here -- the walk above brings them --
+# so it can no longer omit one and stop Make short of the property. What it still
+# does is assert that these specific files are prerequisites of the soak rules:
+# if one is renamed or dropped, this fixture says so in one line instead of
+# quietly measuring something smaller.
+blank_prereq() {
+	[ -f "$repo/$1" ] \
+		|| fail "scratch repo is missing $1 -- either the allowlist walk in" \
+			"test/scratch_tree.sh no longer reaches it, or the soak rules'" \
+			"prerequisites have moved"
+	: > "$repo/$1" || fail "could not blank $1"
+	checks=$((checks + 1))
+}
+
 # ONE soak source, not two: PIC320_SOAK_SRC = $(PIC_SOAK_SRC) (merge plan §4
-# FOLD), so both chips' rules name test/pic/test_soak_pic.cc. Creating a
+# FOLD), so both chips' rules name test/pic/test_soak_pic.cc. A
 # test/pic10f320/ counterpart would fabricate a prerequisite no rule has.
-: > "$repo/test/soak_timing_config.h"
-: > "$repo/test/pic/test_soak_pic.cc"
+blank_prereq test/soak_timing_config.h
+blank_prereq test/pic/test_soak_pic.cc
 # $(PIC_PIN_LOOKUP_HDR) -- the exact-pin lookup helper is a prerequisite of BOTH
-# chips' soak rules, so the scratch repo needs it or Make stops before reaching
-# the property under test.
-: > "$repo/test/pic/find_pin_exact.h"
+# chips' soak rules. Its absence is what broke this fixture, and then the
+# mutation sandbox, before the two builders were converged.
+blank_prereq test/pic/find_pin_exact.h
+# $(PIC_GPSIM_BOOTSTRAP_HDR) -- likewise: the shared libgpsim bring-up is a
+# prerequisite of both chips' soak rules (and of the io/lock-step/fault rules).
+blank_prereq test/pic/gpsim_bootstrap.h
+# $(PIC_SOAK_SAMPLING_HDR) keeps multi-ms LED observation at one sample per ms.
+# Both chip-specific soak rules consume it through their shared source.
+blank_prereq test/pic/soak_sampling.h
 
 # Records the full argv, then writes the -o target so Make sees a fresh artifact.
 cat > "$tools/cxx" <<'EOF'

@@ -218,6 +218,22 @@ done
 grep -Fq 'scripts/verify-release-qualification.sh "${qualification_args[@]}" "$OUTPUT_DIR" "$VERSION"' \
 	"$ROOT/scripts/make-release.sh" \
 	|| fail "release producer does not self-verify staged qualification"
+# MANIFEST.md is published verbatim as the GitHub Release body, where a
+# repo-relative link does not resolve. Pin all three properties of the fix --
+# absolute base, tag-pinned path, and the absence of the old relative form --
+# rather than one exact source line, so reformatting the generator cannot
+# silently drop the assertion.
+grep -Eq '^REPO_URL=https://github\.com/matt-garman/mcu-bypass-firmware$' \
+	"$ROOT/scripts/make-release.sh" \
+	|| fail "release manifest link base REPO_URL is not the canonical absolute project URL"
+grep -Fq 'Full detail: [docs/pic10f320_special_case.md](%s/blob/%s/docs/pic10f320_special_case.md)' \
+	"$ROOT/scripts/make-release.sh" \
+	|| fail "release manifest special-case link is not pinned to its version tag"
+grep -Fq '"$REPO_URL" "$VERSION"' \
+	"$ROOT/scripts/make-release.sh" \
+	|| fail "release manifest special-case link does not interpolate REPO_URL and VERSION"
+! grep -Fq '](../../docs/pic10f320_special_case.md)' "$ROOT/scripts/make-release.sh" \
+	|| fail "release manifest special-case link regressed to a repo-relative path"
 grep -Fq 'scripts/verify-release-qualification.sh "$dir" "$tag"' \
 	"$ROOT/.github/workflows/release.yml" \
 	|| fail "tag workflow does not verify committed release qualification"

@@ -5,10 +5,17 @@
 //
 //   1. WDT liveness: the firmware's timer-ISR/main-loop handshake must keep
 //      the watchdog pet continuously.  On the tinyx5 build simavr models the
-//      WDT system reset; any unexpected reset (cpu_Crashed during the noise
-//      stream) is logged as a failure but does NOT stop the run -- the
-//      firmware self-reinitializes on tinyx5, and the soak loop continues
-//      for the remaining simulated time.
+//      WDT system reset; every unexpected reset is logged as a failure but
+//      does NOT stop the run -- the firmware self-reinitializes on tinyx5,
+//      and the soak loop continues for the remaining simulated time.
+//
+//      A reset is witnessed through simavr's `avr->reset` callback (see
+//      reset_hook), NOT through cpu_Crashed.  simavr 1.6 sets cpu_Crashed only
+//      from avr_sadly_crashed() (illegal opcode / stack crash); its watchdog
+//      path resets the core in place and leaves it cpu_Running.  A soak that
+//      watched cpu_Crashed for this could therefore run a full 24 h and report
+//      watchdog_failures=0 having never been able to observe one.  cpu_Crashed
+//      is still tracked, as its own separate anomaly.
 //
 //   2. Periodic responsiveness: every SOAK_LIVENESS_INTERVAL_MS the noise
 //      stream is paused and a 2-press round-trip is performed.  The device
@@ -26,6 +33,8 @@
 //
 // Build:  `make test-soak`
 // This target is intentionally NOT part of `make test` or `make test-long`.
+// `make test-soak-reset-witness` IS, and it proves this file's watchdog witness
+// still fires -- see the SOAK_SELFTEST_KILL_TIMER_MS fixture below.
 //
 // Default configuration: cd4053 variant, ATtiny85 @ 1 MHz (simavr models the
 // WDT system reset for the tinyx5 family).
@@ -98,14 +107,46 @@
 #endif
 #define SETTLE_MS (5u + (unsigned)CTL_DELAY_MS)
 
+// ---- Reset-witness self-test (regression fixture; OFF in every real soak) ----
+//
+// When SOAK_SELFTEST_KILL_TIMER_MS is defined non-zero, the soak disables the
+// Timer0 compare interrupt after that many simulated milliseconds.  The ISR
+// then stops running, the main loop never sees the handshake and never pets the
+// watchdog, and the tinyx5 WDT performs a system reset -- exactly the event the
+// reset witness below exists to catch.  Such a build MUST report a nonzero
+// watchdog_failures and exit non-zero; `make test-soak-reset-witness` (see
+// test/test_soak_reset_witness.sh) asserts that, against a healthy control run
+// of the same firmware and duration.
+//
+// No Makefile soak recipe defines it, so release soak binaries compile with the
+// whole fixture preprocessed away.
+#ifndef SOAK_SELFTEST_KILL_TIMER_MS
+#  define SOAK_SELFTEST_KILL_TIMER_MS 0u
+#endif
+#if SOAK_SELFTEST_KILL_TIMER_MS
+// TIMSK0/TIMSK, SRAM-mapped (I/O addr 0x39 + 0x20 SFR offset); the address is
+// the same on the ATtiny13a and the tinyx5 family.  Mirrors test_sim.c's
+// TIMSK_MEM_ADDR, which the watchdog backstop tests poke the same way.
+#  define SOAK_TIMSK_MEM_ADDR 0x59
+#endif
+
 // ---- Sim globals ------------------------------------------------------------
 static avr_t    *g_avr         = NULL;
 static int       g_led_level   = 0;    // current PB1 output level
 static uint32_t  g_led_changes = 0;    // total LED transitions (monotonic)
 static int       g_saw_crash   = 0;    // set by soak_run_ms() on cpu_Crashed
+static uint64_t  g_resets      = 0;    // resets witnessed by reset_hook()
+static uint64_t  g_resets_logged = 0;  // resets already charged to the counters
+
+// The MCU model's own reset callback, chained by reset_hook() rather than
+// replaced.  On the tinyx5 it is currently empty (simavr's tx5_reset), but a
+// harness that silently drops a part's reset work would be wrong the moment
+// that stops being true.
+static void (*g_mcu_reset)(struct avr_t *avr) = NULL;
 
 // ---- Soak-run counters (all reset only at startup) --------------------------
-static uint64_t  g_wdt_crashes    = 0; // unexpected WDT resets during noise
+static uint64_t  g_wdt_resets     = 0; // unexpected device resets during the run
+static uint64_t  g_crashes        = 0; // cpu_Crashed occurrences (see note below)
 static uint64_t  g_liveness_fails = 0; // liveness check failures
 static uint64_t  g_total_checks   = 0; // total assertions evaluated
 static uint64_t  g_total_failures = 0; // total assertion failures
@@ -116,6 +157,16 @@ static void led_hook(struct avr_irq_t *irq, uint32_t value, void *param) {
     int v = value ? 1 : 0;
     if (v != g_led_level) { g_led_changes++; }
     g_led_level = v;
+}
+
+// simavr calls avr->reset from avr_reset(), and a watchdog timeout reaches
+// avr_reset() through avr_watchdog_run_callback_software_reset(), so this hook
+// is a direct, positive witness that the WDT actually reset the device.  It is
+// the same mechanism test_sim.c uses (its reset_hook / g_resets); see the
+// header note above for why cpu_Crashed cannot serve.
+static void reset_hook(avr_t *avr) {
+    g_resets++;
+    if (g_mcu_reset != NULL) { g_mcu_reset(avr); }
 }
 
 // ---- Helpers ----------------------------------------------------------------
@@ -135,11 +186,15 @@ static void footsw_set(int pressed) {
 
 // Advance the simulation by `ms` milliseconds of simulated time.
 //
-// Unlike test_sim.c's run_ms(), this function does NOT break on cpu_Crashed.
-// On tinyx5, simavr models the WDT system reset: after cpu_Crashed the
-// firmware reinitializes and avr_run() resumes normally from the next call.
-// We want that reinitialization to be part of the simulated run rather than
-// a hard stop, so we note the crash in g_saw_crash and continue the loop.
+// Unlike test_sim.c's run_ms(), this function does NOT break on cpu_Crashed:
+// the firmware reinitializes and avr_run() resumes normally from the next
+// call, and we want that reinitialization to be part of the simulated run
+// rather than a hard stop.  The crash is noted in g_saw_crash and the loop
+// continues.
+//
+// A watchdog reset produces NEITHER cpu_Crashed nor cpu_Done -- simavr resets
+// the core in place and keeps running -- so it is counted by reset_hook()
+// instead, not here.
 static void soak_run_ms(unsigned ms) {
     avr_cycle_count_t target =
         g_avr->cycle + (F_CPU_HZ / 1000UL) * (avr_cycle_count_t)ms;
@@ -172,9 +227,16 @@ static int sim_init(int footsw_pressed_at_power_on) {
     avr_load_firmware(g_avr, &fw);
     g_avr->frequency = F_CPU_HZ;
 
-    g_led_level   = 0;
-    g_led_changes = 0;
-    g_saw_crash   = 0;
+    // Witness every subsequent device reset.  Installed AFTER avr_init() /
+    // avr_load_firmware() so the power-on reset they perform is not counted.
+    g_mcu_reset  = g_avr->reset;
+    g_avr->reset = reset_hook;
+
+    g_led_level     = 0;
+    g_led_changes   = 0;
+    g_saw_crash     = 0;
+    g_resets        = 0;
+    g_resets_logged = 0;
 
     avr_irq_register_notify(
         avr_io_getirq(g_avr, AVR_IOCTL_IOPORT_GETIRQ('B'), LED_PIN),
@@ -185,21 +247,36 @@ static int sim_init(int footsw_pressed_at_power_on) {
     return 0;
 }
 
-// Check g_saw_crash and log any WDT reset observed since the last call.
-// Records the failure in the soak counters and clears the flag so the next
-// call starts clean.  `sim_t` is the current simulated millisecond, used only
-// for the log timestamp.
-static void check_and_log_crash(uint32_t sim_t) {
-    if (!g_saw_crash) { return; }
-    g_wdt_crashes++;
-    g_total_failures++;
-    g_total_checks++;
-    fprintf(stderr,
-            "SOAK FAIL [%.4f h elapsed]: unexpected WDT reset "
-            "(cumulative crash count: %" PRIu64 ")\n",
-            (double)sim_t / 3600000.0, g_wdt_crashes);
-    fflush(stderr);
-    g_saw_crash = 0;
+// Charge every anomaly observed since the last call to the soak counters: each
+// device reset witnessed by reset_hook(), then a cpu_Crashed if avr_run()
+// reported one.  Both are logged to stderr and both leave the run going.  The
+// crash flag is cleared and the reset watermark advanced, so the next call
+// starts clean.  `sim_t` is the current simulated millisecond, used only for
+// the log timestamp.
+static void check_and_log_anomalies(uint32_t sim_t) {
+    uint64_t const new_resets = g_resets - g_resets_logged;
+    if (new_resets != 0u) {
+        g_resets_logged   = g_resets;
+        g_wdt_resets     += new_resets;
+        g_total_failures += new_resets;
+        g_total_checks   += new_resets;
+        fprintf(stderr,
+                "SOAK FAIL [%.4f h elapsed]: %" PRIu64 " unexpected device "
+                "reset(s) (cumulative reset count: %" PRIu64 ")\n",
+                (double)sim_t / 3600000.0, new_resets, g_wdt_resets);
+        fflush(stderr);
+    }
+    if (g_saw_crash) {
+        g_saw_crash = 0;
+        g_crashes++;
+        g_total_failures++;
+        g_total_checks++;
+        fprintf(stderr,
+                "SOAK FAIL [%.4f h elapsed]: CPU entered cpu_Crashed "
+                "(cumulative crash count: %" PRIu64 ")\n",
+                (double)sim_t / 3600000.0, g_crashes);
+        fflush(stderr);
+    }
 }
 
 // 2-press round-trip liveness check.
@@ -214,29 +291,26 @@ static void check_and_log_crash(uint32_t sim_t) {
 static void soak_liveness_check(uint32_t sim_t) {
     // 1. Idle long enough to drain any release-lockout left from the noise
     //    stream; this also establishes a clean starting state for the check.
-    g_saw_crash = 0;
     footsw_set(0);
     soak_run_ms(RELEASE_THRESH + 10u);
-    check_and_log_crash(sim_t);
+    check_and_log_anomalies(sim_t);
 
     uint32_t before    = g_led_changes;
     int      led_start = g_led_level;
 
     // 2. Press 1: hold past PRESSED_THRESH to trigger a toggle.
-    g_saw_crash = 0;
     footsw_set(1);
     soak_run_ms(PRESSED_THRESH + 10u);
     footsw_set(0);
     soak_run_ms(RELEASE_THRESH + 10u);  // drain lockout before press 2
-    check_and_log_crash(sim_t);
+    check_and_log_anomalies(sim_t);
 
     // 3. Press 2: should toggle back to the starting effect state.
-    g_saw_crash = 0;
     footsw_set(1);
     soak_run_ms(PRESSED_THRESH + 10u);
     footsw_set(0);
     soak_run_ms(RELEASE_THRESH + 10u);
-    check_and_log_crash(sim_t);
+    check_and_log_anomalies(sim_t);
 
     uint32_t delta   = g_led_changes - before;
     int      led_end = g_led_level;
@@ -284,12 +358,21 @@ int main(void) {
     uint64_t next_progress_t = SOAK_PROGRESS_INTERVAL_MS;
 
     for (uint32_t t = 0; t < (uint32_t)SOAK_DURATION_MS; ++t) {
+#if SOAK_SELFTEST_KILL_TIMER_MS
+        // Reset-witness fixture only: disable the timer interrupt so the
+        // ISR/main-loop handshake stops and the watchdog is left un-pet.
+        if ((t + 1u) == (uint32_t)SOAK_SELFTEST_KILL_TIMER_MS) {
+            fprintf(stderr, "SOAK SELFTEST: disabling TIMSK at %" PRIu32 " ms\n",
+                    t + 1u);
+            fflush(stderr);
+            avr_core_watch_write(g_avr, SOAK_TIMSK_MEM_ADDR, 0x00);
+        }
+#endif
         // Drive one millisecond of random footswitch noise and run the sim.
         int pressed = ((int)(xorshift32(&rng) & 0xFFu)) < 128;
         footsw_set(pressed);
-        g_saw_crash = 0;
         soak_run_ms(1);
-        check_and_log_crash(t + 1u);
+        check_and_log_anomalies(t + 1u);
 
         // Periodic liveness check: pause noise, do 2-press round-trip.
         if (SOAK_LIVENESS_DUE(t + 1u, next_liveness_t)) {
@@ -301,11 +384,12 @@ int main(void) {
         if (t + 1u >= next_progress_t) {
             printf("SOAK [%.1f / %.1f h]: "
                    "checks=%" PRIu64 "  fails=%" PRIu64
-                   "  (wdt_crashes=%" PRIu64 "  liveness_fails=%" PRIu64 ")\n",
+                   "  (wdt_resets=%" PRIu64 "  crashes=%" PRIu64
+                   "  liveness_fails=%" PRIu64 ")\n",
                    (double)(t + 1u) / 3600000.0,
                    (double)SOAK_DURATION_MS / 3600000.0,
                    g_total_checks, g_total_failures,
-                   g_wdt_crashes, g_liveness_fails);
+                   g_wdt_resets, g_crashes, g_liveness_fails);
             fflush(stdout);
             next_progress_t += SOAK_PROGRESS_INTERVAL_MS;
         }
@@ -317,17 +401,23 @@ int main(void) {
            pass ? "PASS" : "FAIL",
            (uint32_t)SOAK_DURATION_MS,
            (double)SOAK_DURATION_MS / 3600000.0);
-    printf("  WDT crashes:       %" PRIu64 "\n", g_wdt_crashes);
+    printf("  WDT resets:        %" PRIu64 "\n", g_wdt_resets);
+    printf("  CPU crashes:       %" PRIu64 "\n", g_crashes);
     printf("  Liveness failures: %" PRIu64 "\n", g_liveness_fails);
     printf("  Total checks:      %" PRIu64 "\n", g_total_checks);
     printf("  Total failures:    %" PRIu64 "\n", g_total_failures);
+    // The machine record's field set is the shared release contract (see
+    // scripts/verify-release-qualification.sh), so a cpu_Crashed has no column
+    // of its own: it is carried by `failures`, which is what release
+    // qualification requires to be zero.  A run with crashes but no resets
+    // therefore shows failures > watchdog_failures + liveness_failures.
     printf("SOAK_RESULT format=1 status=%s combination=%s duration_ms=%" PRIu32
            " liveness_interval_ms=%" PRIu32 " checks=%" PRIu64
            " failures=%" PRIu64 " watchdog_failures=%" PRIu64
            " liveness_failures=%" PRIu64 "\n",
            pass ? "pass" : "fail", SOAK_COMBINATION_NAME,
            (uint32_t)SOAK_DURATION_MS, (uint32_t)SOAK_LIVENESS_INTERVAL_MS,
-           g_total_checks, g_total_failures, g_wdt_crashes,
+           g_total_checks, g_total_failures, g_wdt_resets,
            g_liveness_fails);
 
     if (g_avr) { avr_terminate(g_avr); free(g_avr); }

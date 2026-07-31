@@ -45,15 +45,21 @@ MUTATION_ALLOW_SKIP=$(resolve_mutation_allow_skip)
 policy_rc=$?
 [ "$policy_rc" -eq 0 ] || exit "$policy_rc"
 source "$SCRIPT_DIR/mutation_accounting.sh"
+# The sandbox builder, shared with test/test_pic_rebuild.sh -- the other harness
+# that copies the repo into a mktemp tree and runs Make inside it. It used to
+# enumerate its prerequisites by hand, so a new one had to be added twice; the
+# allowlist walk now serves both. See test/scratch_tree.sh for the two
+# constraints (allowlist, no Git) that any edit to it must preserve.
+source "$SCRIPT_DIR/scratch_tree.sh"
 
-readonly MUTATION_EXPECTED_CORE=23
+readonly MUTATION_EXPECTED_CORE=24
 readonly MUTATION_EXPECTED_XT=19
 readonly MUTATION_EXPECTED_PIC_GPSIM=6
 readonly MUTATION_EXPECTED_PIC_TARGET=8
 readonly MUTATION_EXPECTED_PIC_SOAK=1
 readonly MUTATION_EXPECTED_PIC320_HOST=27
 readonly MUTATION_EXPECTED_PIC320_TOOL=9
-readonly MUTATION_EXPECTED_TOTAL=93
+readonly MUTATION_EXPECTED_TOTAL=94
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
@@ -73,6 +79,17 @@ PIC_SOAK_MUT_MS="${PIC_SOAK_MUT_MS:-2500}"
 # real press/release round-trip instead of a vacuous zero-check pass. Must stay
 # <= PIC_SOAK_MUT_MS.
 PIC_SOAK_MUT_LIVENESS_MS="${PIC_SOAK_MUT_LIVENESS_MS:-1000}"
+
+# --- Classic AVR (simavr) knobs -----------------------------------------------
+# Short soak window for the Classic AVR WDT-liveness mutant. The ATtiny85 arms
+# its watchdog at WDTO_250MS, so this is several periods: an un-pet dog resets
+# well inside it while the baseline (pet) run stays quick. Simulated time, and
+# simavr runs it far faster than real time. The liveness interval must stay
+# <= the duration -- the shared soak timing contract static_asserts it -- and
+# small enough that the baseline performs a real press/release round-trip
+# instead of a vacuous zero-check pass.
+AVR_SOAK_MUT_MS="${AVR_SOAK_MUT_MS:-2000}"
+AVR_SOAK_MUT_LIVENESS_MS="${AVR_SOAK_MUT_LIVENESS_MS:-1000}"
 
 # --- AVR-XT (ATtiny202) knobs -------------------------------------------------
 # The two out-of-tree inputs the ATtiny202 lane needs, as ABSOLUTE paths. Both
@@ -206,8 +223,16 @@ MUTATIONS=(
 "src/bypass_pure.c	s@res.lockout_value = RELEASE_THRESH;@res.lockout_value = 0;@g	test-sim-cd4053	toggle lockout: counter reset to 0 instead of RELEASE_THRESH (immediate re-arm, no hold lockout)"
 "src/bypass_pure.c	s@res.program_state = RELEASE_DEBOUNCE_WAIT;@res.program_state = PRESS_DEBOUNCE_WAIT;@g	test-sim-cd4053	toggle lockout: stays in PRESS_DEBOUNCE_WAIT after toggle (counter=25 >= 8 -> immediate re-toggle cascade)"
 # --- watchdog handshake (bypass_mcu_avr_classic.c) ----------------------------------------
-"src/bypass_mcu_avr_classic.c	s@hw_wdt_pet();@(void)0; /* MUTANT: no WDT pet */@	test-sim-cd4053	WDT pet removed from main loop: watchdog fires within ~250ms; test_watchdog_not_tripped_normally catches it"
-"src/bypass_mcu_avr_classic.c	s@timer_isr_called_ = TIMER_ISR_CALLED;@timer_isr_called_ = TIMER_ISR_NOT_CALLED;@	test-sim-cd4053	WDT handshake: ISR clears its own flag -> main never sees CALLED -> WDT fires within timeout"
+# Note what kills each of these, because it is NOT the watchdog on the first
+# two. `test-sim-cd4053` is the ATtiny13a build, and simavr 1.6 does not model
+# the ATtiny13a WDT system reset at all (see test_sim.c's
+# test_watchdog_backstop_documented) -- so no assertion on that lane can observe
+# a watchdog reset. The third entry is the one that actually exercises the
+# watchdog: it runs on the tinyx5, where simavr does model the reset, and is
+# killed by the soak's reset witness.
+"src/bypass_mcu_avr_classic.c	s@hw_wdt_pet();@(void)0; /* MUTANT: no WDT pet */@	test-sim-cd4053	WDT pet call site removed from the main loop: it is the only caller, so hw_wdt_pet goes unused and the build fails under -Werror=unused-function before any test runs. Kept because that compiler guard is real coverage; the BEHAVIOURAL form of this fault is the soak mutant below"
+"src/bypass_mcu_avr_classic.c	s@timer_isr_called_ = TIMER_ISR_CALLED;@timer_isr_called_ = TIMER_ISR_NOT_CALLED;@	test-sim-cd4053	WDT handshake: ISR clears its own flag -> main never sees CALLED -> the debounce state machine never advances, so the LED never toggles; the functional, noise-count and lock-step assertions all fail (the ATtiny13a watchdog is not what catches it)"
+"src/bypass_mcu_avr_classic.c	s@static void hw_wdt_pet(void) { wdt_reset(); }@static void hw_wdt_pet(void) { /* MUTANT: no WDT pet */ }@	SOAK_VARIANT=cd4053 SOAK_CHIP=85 SOAK_DURATION_MS=$AVR_SOAK_MUT_MS SOAK_LIVENESS_INTERVAL_MS=$AVR_SOAK_MUT_LIVENESS_MS test-soak	SOAK main-loop WDT pet defeated at the definition, so the call site remains and the build stays clean; the tinyx5 soak's reset witness records the un-pet watchdog in watchdog_failures within the short mutation window"
 # --- main-loop sanity guard / toggle dispatch (bypass_mcu_avr_classic.c) -------------------
 "src/bypass_mcu_avr_classic.c	s@(actual_direction_mask == (uint8_t)BYPASS_OUTPUT_DDR_MASK)@(1U != 0U)@	test-sim-cd4053	DDRB exact-mask predicate removed: PB0 output and PB4 input corruptions evade the former caller-output subset check"
 "src/bypass_mcu_avr_classic.c	s@PORTB & (uint8_t)BYPASS_OUTPUT_DDR_MASK@PORTB \& (uint8_t)0x0EU@	test-sim-cd4053	output-latch mask omits spare PB4; PB4 corruption must still force watchdog recovery"
@@ -230,82 +255,37 @@ MUTATIONS=(
 "src/bypass_pure.c	s@res.fault = true;@res.fault = false;@	test-model-check	MODEL corrupt-state fault suppressed (verify_corrupt_state_faults catches it)"
 )
 
-# Files copied into each sandbox (all firmware sources + headers + harness +
-# Makefile). Copying the whole source set keeps this robust as variants are
-# added or renamed.
+# Files copied into each sandbox: all firmware sources + headers, the Makefile,
+# scripts/, and every source file under test/ at any depth. The walk itself, and
+# the rationale for every part of it, lives in test/scratch_tree.sh so that this
+# runner and test/test_pic_rebuild.sh cannot drift apart again. This binds it to
+# the real tree; the name stays because the sandbox self-tests, the survivor
+# diagnostics and the merge-plan record all speak of copy_tree.
 copy_tree() {
-    local dst="$1" manifest src rel
-    mkdir -p "$dst/src" "$dst/test" || return 1
-    cp "$PROJ_DIR"/src/*.c "$PROJ_DIR"/src/*.h "$dst/src/" || return 1
-    cp "$PROJ_DIR/Makefile" "$dst/" || return 1
-    # The Makefile's build/validate recipes invoke helper scripts under
-    # scripts/ -- notably IHEX_VALIDATOR (scripts/validate-ihex.sh), which
-    # `make pic` and the .hex rules REQUIRE and fail closed without. Mirror the
-    # whole dir so a sandbox build behaves exactly like the real tree; -a
-    # preserves the executable bit the validator-present check relies on.
-    cp -a "$PROJ_DIR/scripts" "$dst/" || return 1
-    # Mirror every source file under test/, at ANY depth, filtered by extension.
-    # The allowlist is deliberate and must stay one: test/ also holds BUILD
-    # PRODUCTS (test/avr/test_sim_*, test/formal/klee-out/, __pycache__), and
-    # `cp -a` preserves mtimes -- a stale binary copied in newer than the source
-    # beside it makes Make skip the rebuild, so the mutant is scored against
-    # unmutated code. That is a silently WRONG answer, not a loud failure, which
-    # is the one outcome a mutation harness must never produce. A wholesale
-    # `cp -a test/` would buy convenience at exactly that price.
-    #
-    # Depth is what actually bit. The previous form copied test/*.h at the root
-    # and then looped over test/<sub>/ taking only c/cc/sh/stc, which left two
-    # whole classes invisible to every sandbox: headers in a subdirectory, and
-    # anything three levels down (test/pic/fw_coverage/). The casualty was
-    # test/pic/find_pin_exact.h -- a prerequisite of BOTH chips' soak binaries
-    # and all three pic*-test-target legs -- whose absence failed every PIC
-    # baseline. The probe reports a failed baseline as a skip, and the summary
-    # then blamed a "toolchain absent" on a host that had every tool.
-    #
-    # One find(1) walk covers root and subdirectories uniformly, so adding a
-    # substrate or nesting a harness needs no edit here -- the failure above was
-    # a maintenance burden coming due, not a one-off omission. It also subsumes
-    # the former test/pic10f320 wholesale special case (that subtree is
-    # c/cc/h/py/sh/stc throughout) while, unlike `cp -a` of a directory,
-    # declining to drag a stale __pycache__ in with it. -a still preserves the
-    # executable bit the gpsim wrappers and check_fw_coverage.sh depend on.
-    #
-    # Non-source data (test/misra*.{json,txt}, README.md) stays out: no mutation
-    # kill target reads it. Add the extension here if that ever changes.
-    manifest=$(mktemp "$dst/.mutation-sources.XXXXXX") || return 1
-    if ! find "$PROJ_DIR/test" -type f \
-        \( -name '*.c' -o -name '*.cc' -o -name '*.h' \
-           -o -name '*.sh' -o -name '*.stc' -o -name '*.py' \) \
-        -not -path '*/__pycache__/*' -not -path '*/klee-out/*' -print0 \
-        > "$manifest"; then
-        rm -f "$manifest"
-        return 1
-    fi
-    while IFS= read -r -d '' src; do
-        rel="${src#"$PROJ_DIR"/}"
-        if ! mkdir -p "$dst/${rel%/*}" || ! cp -a "$src" "$dst/$rel"; then
-            rm -f "$manifest"
-            return 1
-        fi
-    done < "$manifest"
-    rm -f "$manifest" || return 1
+    scratch_tree_copy "$PROJ_DIR" "$1"
 }
 
 # Fail CLOSED on an incomplete sandbox. Every entry here is a file whose absence
 # does not announce itself: the sandbox still builds, the baseline still runs,
 # and the probe records a plain FAIL that the summary reports as a skip -- so the
 # gate silently shrinks instead of breaking. find_pin_exact.h is on this list
-# because that is precisely what it did (see copy_tree), and it is worth being
-# blunt about why the list did not save us: it is hand-maintained, so it protects
-# only against gaps someone already thought of. The copy_tree walk above is the
-# real fix; this is the check that turns a future omission into one obvious line
-# instead of a misattributed toolchain complaint.
+# because that is precisely what it did (see test/scratch_tree.sh), and it is
+# worth being blunt about why the list did not save us: it is hand-maintained, so
+# it protects only against gaps someone already thought of. The allowlist walk in
+# test/scratch_tree.sh is the real fix; this is the check that turns a future
+# omission into one obvious line instead of a misattributed toolchain complaint.
 validate_pic320_sandbox() {
     local root="$1" required ok=1
     for required in \
         test/pic/footswitch_toggle.stc \
         test/pic/power_on_pressed.stc \
         test/pic/find_pin_exact.h \
+        test/pic/gpsim_bootstrap.h \
+        test/pic/soak_sampling.h \
+        test/pic/gpsim_wrapper_common.sh \
+        test/pic/test_fault_pic_core.h \
+        test/pic/test_io_pic_core.h \
+        test/pic/test_lockstep_pic_core.h \
         test/pic/test_soak_pic.cc; do
         if [ ! -f "$root/$required" ]; then
             echo "ERROR: PIC10F320 mutation sandbox is missing $required" >&2
@@ -386,6 +366,17 @@ if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
     rm -f "$SELFTEST_DIR/test/pic/find_pin_exact.h"
     if validate_pic320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
         echo "ERROR: mutation sandbox validator accepted a missing find_pin_exact.h" >&2
+        rm -rf "$SELFTEST_DIR"
+        exit 1
+    fi
+
+    if ! copy_tree "$SELFTEST_DIR"; then
+        echo "ERROR: could not restore mutation self-test sandbox" >&2
+        rm -rf "$SELFTEST_DIR"; exit 1
+    fi
+    rm -f "$SELFTEST_DIR/test/pic/test_fault_pic_core.h"
+    if validate_pic320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
+        echo "ERROR: mutation sandbox validator accepted a missing shared PIC harness core" >&2
         rm -rf "$SELFTEST_DIR"
         exit 1
     fi
@@ -898,20 +889,20 @@ done
 
 if [ "$SANDBOX_SELFTEST_DONE" -eq 1 ]; then
     # Fully provisioned, then the two partial shapes the skip accounting can
-    # produce: every simulator absent (only the 50 host mutants dispatch), and
+    # produce: every simulator absent (only the 51 host mutants dispatch), and
     # the ATtiny202 lane alone absent. The second is the case this file's
     # combined `skipped` exists for -- a box with the PIC stack but no vendored
     # DFP/yasimavr -- so the totals check must accept a skip that is not PIC's.
-    mutation_validate_totals 93 93 0 93 0 0 0 0 || exit 1
-    mutation_validate_totals 93 50 43 50 0 0 0 0 || exit 1
-    mutation_validate_totals 93 74 19 74 0 0 0 0 || exit 1
-    if mutation_validate_totals 93 49 43 49 0 0 0 0 >/dev/null 2>&1; then
+    mutation_validate_totals 94 94 0 94 0 0 0 0 || exit 1
+    mutation_validate_totals 94 51 43 51 0 0 0 0 || exit 1
+    mutation_validate_totals 94 75 19 75 0 0 0 0 || exit 1
+    if mutation_validate_totals 94 50 43 50 0 0 0 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a dropped dispatch" >&2; exit 1
     fi
-    if mutation_validate_totals 93 50 43 49 0 0 0 0 >/dev/null 2>&1; then
+    if mutation_validate_totals 94 51 43 50 0 0 0 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a missing result" >&2; exit 1
     fi
-    if mutation_validate_totals 93 50 43 50 0 0 1 0 >/dev/null 2>&1; then
+    if mutation_validate_totals 94 51 43 51 0 0 1 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a failed worker" >&2; exit 1
     fi
     for checker_rc in 125 126 127 143; do
@@ -1001,7 +992,7 @@ EOF
             "$RESULT_DIR/selftest-no-newline.status" >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted an unterminated status" >&2; exit 1
     fi
-    echo "mutation sandbox/accounting validation: 29 checks, 0 failures"
+    echo "mutation sandbox/accounting validation: 30 checks, 0 failures"
     exit 0
 fi
 

@@ -1,6 +1,16 @@
+Project licensing
+
+Except for separately identified third-party material, this repository's
+original material is licensed under the MIT License below.
+
+The yasimavr-derived patch material under `third_party/yasimavr/` is not covered
+by this MIT grant. It remains under the GNU General Public License, version 3 or
+later, as described in `third_party/yasimavr/README.md`; the complete GPLv3 text
+is in `third_party/yasimavr/COPYING`.
+
 MIT License
 
-Copyright (c) 2026 matt-garman
+Copyright (c) 2026 Matthew Garman <matthew.garman@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

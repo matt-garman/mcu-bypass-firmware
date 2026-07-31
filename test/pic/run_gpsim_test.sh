@@ -32,63 +32,24 @@ HEX="${1:?usage: run_gpsim_test.sh <hexfile> [expected_engaged_lata_hex] [expect
 EXP_ENGAGED_LATA="${2:-}"
 EXP_BYPASS_LATA="${3:-0x0}"
 
-GPSIM="${GPSIM:-gpsim}"
-GPSIM_TIMEOUT_SECONDS="${GPSIM_TIMEOUT_SECONDS:-60}"
-PROC="${PIC_GPSIM_PROC:-p10f322}"
+# Scaffolding shared with run_gpsim_power_on_pressed.sh. Checked before sourcing:
+# `.` on a missing file returns non-zero but does NOT abort a script without
+# `set -e`, so an unguarded source runs on with every helper undefined. Today
+# `set -u` would stop it a few lines later on an unbound $PROC -- but only
+# because the next line happens to use a variable this helper defines, which is
+# an accident of line order, not a contract. Check explicitly, and say what is
+# actually wrong instead of emitting "command not found" for gpsim_run.
+COMMON="$(dirname "$0")/gpsim_wrapper_common.sh"
+if [ ! -r "$COMMON" ]; then
+	echo "FAIL: missing shared gpsim wrapper helper: $COMMON"
+	exit 1
+fi
+# shellcheck source=test/pic/gpsim_wrapper_common.sh
+. "$COMMON" || { echo "FAIL: could not source $COMMON"; exit 1; }
+
 STC="${PIC_GPSIM_STC:-$(dirname "$0")/footswitch_toggle.stc}"
 
-if ! [[ "$GPSIM_TIMEOUT_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] \
-		|| ! [[ "$GPSIM_TIMEOUT_SECONDS" =~ [1-9] ]]; then
-	echo "FAIL: GPSIM_TIMEOUT_SECONDS must be a positive decimal number of seconds"
-	exit 1
-fi
-if ! command -v "$GPSIM" >/dev/null 2>&1; then
-    echo "gpsim not installed; skipping gpsim register-level test for $HEX"
-    if [ -n "${STRICT_TOOLS:-}" ]; then
-        echo "::error::STRICT_TOOLS=1: gpsim is required and must not be skipped"
-        exit 1
-    fi
-    exit 0
-fi
-if [ ! -f "$HEX" ]; then
-    echo "FAIL: hex not found: $HEX"
-    exit 1
-fi
-if [ ! -f "$STC" ]; then
-    echo "FAIL: gpsim script not found: $STC"
-    exit 1
-fi
-
-if out=$(timeout -s KILL "$GPSIM_TIMEOUT_SECONDS" \
-		"$GPSIM" -i -p"$PROC" "$HEX" -c "$STC" </dev/null 2>&1); then
-	:
-else
-	rc=$?
-	echo "FAIL: gpsim exited with status $rc for $HEX. Output was:"
-	printf '%s\n' "$out"
-	exit 1
-fi
-
-# Pull the value of register $2 at the checkpoint labelled $1 out of gpsim's
-# output (lines look like "lata = 0x3", possibly behind a "**gpsim> " prompt).
-parse() {
-    printf '%s\n' "$out" | awk -v lbl="$1" -v reg="$2" '
-        index($0, "===" lbl "===") { active = 1; next }
-        active && index($0, "===")  { active = 0 }
-        active && match($0, reg " = 0x[0-9a-fA-F]+") {
-            s = substr($0, RSTART, RLENGTH); sub(reg " = ", "", s);
-            print s; exit
-        }
-    '
-}
-
-fails=0
-note() { printf '  %-14s %s\n' "$1" "$2"; }
-fail() { echo "  FAIL: $1"; fails=$((fails + 1)); }
-pass() { echo "  ok:   $1"; }
-
-# Helper: bit test on a hex value. $1=hexval $2=bitmask(hex) -> echoes 1 if set.
-bit() { echo $(( ( $1 & $2 ) != 0 )); }
+gpsim_run "$HEX" "$STC" "gpsim register-level test"
 
 echo "gpsim register-level test: $HEX (proc $PROC)"
 
@@ -100,13 +61,8 @@ en_porta=$(parse ENGAGED     porta);  en_lata=$(parse ENGAGED     lata)
 ba_porta=$(parse BYPASS_AGAIN porta); ba_lata=$(parse BYPASS_AGAIN lata)
 
 # Guard: did gpsim actually produce all the snapshots?
-if [ -z "$ib_lata" ] || [ -z "$pe_porta" ] || [ -z "$pe_lata" ] || \
-   [ -z "$p1_porta" ] || [ -z "$p1_lata" ] || [ -z "$en_lata" ] || \
-   [ -z "$ba_lata" ] || [ -z "$ba_porta" ]; then
-    echo "FAIL: could not parse gpsim snapshots (gpsim run incomplete). Output was:"
-    printf '%s\n' "$out"
-    exit 1
-fi
+gpsim_require_snapshots "$ib_porta" "$ib_lata" "$pe_porta" "$pe_lata" \
+	"$p1_porta" "$p1_lata" "$en_porta" "$en_lata" "$ba_porta" "$ba_lata"
 
 note "INIT_BYPASS"  "porta=$ib_porta lata=$ib_lata"
 note "PRESS1_EARLY" "porta=$pe_porta lata=$pe_lata"
@@ -157,9 +113,4 @@ fi
 [ $(( ba_lata )) -eq $(( EXP_BYPASS_LATA )) ] && pass "BYPASS_AGAIN: full LATA == $EXP_BYPASS_LATA (bypass control pins)" || fail "BYPASS_AGAIN: LATA should be $EXP_BYPASS_LATA in bypass, got $ba_lata"
 [ "$(bit "$ba_porta" 0x8)" = 1 ] && pass "BYPASS_AGAIN: footswitch released (RA3=1)" || fail "BYPASS_AGAIN: RA3 should read released (high), porta=$ba_porta"
 
-if [ "$fails" -ne 0 ]; then
-    echo "RESULT: $fails check(s) FAILED for $HEX"
-    exit 1
-fi
-echo "RESULT: PASS ($HEX)"
-exit 0
+gpsim_verdict "$HEX"

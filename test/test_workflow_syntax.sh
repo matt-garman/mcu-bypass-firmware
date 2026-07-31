@@ -39,6 +39,7 @@ fi
 ROOT="$ROOT" python3 - <<'PY'
 import os
 import re
+import shlex
 import sys
 
 import yaml
@@ -69,6 +70,12 @@ def check(ok, msg):
 
 
 docs = {}
+checkout_steps = []
+token_steps = []
+pic_installer_steps = []
+pic_cache_steps = []
+attiny_cache_steps = []
+yasimavr_cache_steps = []
 for name in REQUIRED:
     path = os.path.join(wf_dir, name)
     if not check(os.path.isfile(path), f"{name}: missing from .github/workflows"):
@@ -94,6 +101,12 @@ for name, doc in docs.items():
     if not check(isinstance(jobs, dict) and jobs, f"{name}: no jobs defined"):
         continue
 
+    workflow_env = doc.get("env")
+    check(
+        not isinstance(workflow_env, dict) or "GH_TOKEN" not in workflow_env,
+        f"{name}: GH_TOKEN is exposed at workflow scope",
+    )
+
     for job_id, job in jobs.items():
         if not check(isinstance(job, dict), f"{name}: job '{job_id}' is not a mapping"):
             continue
@@ -101,6 +114,25 @@ for name, doc in docs.items():
             "runs-on" in job or "uses" in job,
             f"{name}: job '{job_id}' has neither runs-on nor uses",
         )
+
+        job_env = job.get("env")
+        check(
+            not isinstance(job_env, dict) or "GH_TOKEN" not in job_env,
+            f"{name}: job '{job_id}' exposes GH_TOKEN to every step",
+        )
+
+        job_action = job.get("uses")
+        if "uses" in job:
+            check(
+                isinstance(job_action, str),
+                f"{name}: job '{job_id}' has a non-string reusable-workflow reference",
+            )
+            if isinstance(job_action, str) and not job_action.startswith("."):
+                check(
+                    re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", job_action) is not None,
+                    f"{name}: job '{job_id}' reusable workflow is not pinned "
+                    f"to a full lowercase commit SHA: '{job_action}'",
+                )
 
         if "uses" not in job:
             steps = job.get("steps")
@@ -117,12 +149,41 @@ for name, doc in docs.items():
                     f"{name}: job '{job_id}' step {idx} has neither run nor uses",
                 )
                 action = step.get("uses")
+                if "uses" in step:
+                    check(
+                        isinstance(action, str),
+                        f"{name}: job '{job_id}' step {idx} has a non-string action reference",
+                    )
                 if isinstance(action, str) and not action.startswith("."):
                     check(
-                        "@" in action,
-                        f"{name}: job '{job_id}' step {idx} uses unpinned action "
+                        re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", action) is not None,
+                        f"{name}: job '{job_id}' step {idx} action is not pinned "
+                        "to a full lowercase commit SHA: "
                         f"'{action}'",
                     )
+                    if action.startswith("actions/checkout@"):
+                        checkout_steps.append((name, job_id, idx, step))
+                    if action.startswith("actions/cache/"):
+                        with_args = step.get("with")
+                        key = with_args.get("key") if isinstance(with_args, dict) else None
+                        check(
+                            isinstance(key, str),
+                            f"{name}: job '{job_id}' cache step {idx} has no string key",
+                        )
+                        if isinstance(key, str) and key.startswith("microchip-xc8-"):
+                            pic_cache_steps.append((name, job_id, idx, key))
+                        if isinstance(key, str) and key.startswith("attiny-dfp-"):
+                            attiny_cache_steps.append((name, job_id, idx, key))
+                        if isinstance(key, str) and key.startswith("yasimavr-venv-"):
+                            yasimavr_cache_steps.append((name, job_id, idx, key))
+
+                run = step.get("run")
+                if run == "scripts/install_pic_toolchain.sh":
+                    pic_installer_steps.append((name, job_id, idx))
+
+                env = step.get("env")
+                if isinstance(env, dict) and "GH_TOKEN" in env:
+                    token_steps.append((name, job_id, idx, step))
 
         # A `needs:` naming a job that does not exist is accepted by the YAML
         # parser and rejected by GitHub at dispatch time -- the same class of
@@ -134,6 +195,201 @@ for name, doc in docs.items():
         for dep in needs:
             check(dep in jobs, f"{name}: job '{job_id}' needs undeclared job '{dep}'")
             check(dep != job_id, f"{name}: job '{job_id}' needs itself")
+
+check(bool(checkout_steps), "workflows contain no actions/checkout steps")
+for name, job_id, idx, step in checkout_steps:
+    with_args = step.get("with")
+    check(
+        isinstance(with_args, dict) and with_args.get("persist-credentials") is False,
+        f"{name}: job '{job_id}' checkout step {idx} persists Git credentials",
+    )
+
+for workflow_name in REQUIRED:
+    count = sum(name == workflow_name for name, _, _ in pic_installer_steps)
+    check(
+        count == 1,
+        f"{workflow_name}: shared PIC installer appears in {count} active steps, expected 1",
+    )
+
+check(len(pic_cache_steps) == 4, f"found {len(pic_cache_steps)} PIC cache steps, expected 4")
+for name, job_id, idx, key in pic_cache_steps:
+    check(
+        "hashFiles('scripts/install_pic_toolchain.sh')" in key,
+        f"{name}: job '{job_id}' PIC cache step {idx} is not keyed by the installer pin",
+    )
+
+check(
+    len(attiny_cache_steps) == 6,
+    f"found {len(attiny_cache_steps)} ATtiny_DFP cache steps, expected 6",
+)
+for name, job_id, idx, key in attiny_cache_steps:
+    check(
+        "hashFiles('scripts/fetch_attiny_dfp.sh')" in key,
+        f"{name}: job '{job_id}' ATtiny_DFP cache step {idx} is not keyed by its pins",
+    )
+
+check(
+    len(yasimavr_cache_steps) == 6,
+    f"found {len(yasimavr_cache_steps)} yasimavr cache steps, expected 6",
+)
+for name, job_id, idx, key in yasimavr_cache_steps:
+    check(
+        "'scripts/fetch_yasimavr.sh'" in key
+        and "'scripts/yasimavr-build-requirements.txt'" in key
+        and "'third_party/yasimavr/patches/**'" in key,
+        f"{name}: job '{job_id}' yasimavr cache step {idx} omits a pinned input",
+    )
+
+check(len(token_steps) == 1, f"GH_TOKEN is exposed to {len(token_steps)} steps, expected 1")
+if len(token_steps) == 1:
+    name, job_id, idx, step = token_steps[0]
+    token_env = step.get("env", {})
+    check(
+        name == "release.yml" and job_id == "release"
+        and step.get("name") == "Publish GitHub Release"
+        and token_env.get("GH_TOKEN") == "${{ github.token }}",
+        f"GH_TOKEN is exposed outside the release publication step: "
+        f"{name} job '{job_id}' step {idx}",
+    )
+
+release_source = os.path.join(wf_dir, "release.yml")
+if check(os.path.isfile(release_source), "release.yml: missing for token-scope check"):
+    with open(release_source, encoding="utf-8") as fh:
+        release_text = fh.read()
+    check(
+        release_text.count("${{ github.token }}") == 1,
+        "release.yml must reference github.token exactly once",
+    )
+
+
+def logical_shell_commands(run):
+    commands = []
+    pending = ""
+    for raw in run.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        pending = f"{pending} {line}".strip()
+        if pending.endswith("\\"):
+            pending = pending[:-1].rstrip()
+            continue
+        commands.append(pending)
+        pending = ""
+    if pending:
+        commands.append(pending)
+    return commands
+
+
+def shell_tokens(run):
+    parsed = []
+    for command in logical_shell_commands(run):
+        try:
+            parsed.append(shlex.split(command, comments=True, posix=True))
+        except ValueError:
+            continue
+    return parsed
+
+
+def apt_packages(step):
+    run = step.get("run") if isinstance(step, dict) else None
+    packages = set()
+    if not isinstance(run, str):
+        return packages
+    for tokens in shell_tokens(run):
+        if tokens[:1] == ["sudo"]:
+            tokens = tokens[1:]
+        if tokens[:2] != ["apt-get", "install"]:
+            continue
+        try:
+            yes = tokens.index("-y", 2)
+        except ValueError:
+            continue
+        for token in tokens[yes + 1:]:
+            if token in {"&&", "||", ";"}:
+                break
+            if not token.startswith("-"):
+                packages.add(token)
+    return packages
+
+
+def run_step_asserts(step, requirement):
+    run = step.get("run") if isinstance(step, dict) else None
+    if not isinstance(run, str):
+        return False
+    for tokens in shell_tokens(run):
+        if requirement == "PyYAML":
+            if tokens[:3] == ["python3", "-c", "import yaml"]:
+                return True
+        elif tokens[:3] == ["command", "-v", requirement]:
+            return True
+    return False
+
+
+def prior_steps(workflow_name, job_id, first_use, description):
+    doc = docs.get(workflow_name)
+    jobs = doc.get("jobs") if isinstance(doc, dict) else None
+    job = jobs.get(job_id) if isinstance(jobs, dict) else None
+    steps = job.get("steps") if isinstance(job, dict) else None
+    if not check(isinstance(steps, list), f"{workflow_name}: job '{job_id}' has no step list"):
+        return []
+    matches = []
+    for idx, step in enumerate(steps):
+        run = step.get("run") if isinstance(step, dict) else None
+        if isinstance(run, str) and any(first_use(tokens) for tokens in shell_tokens(run)):
+            matches.append(idx)
+    if not check(
+        bool(matches),
+        f"{workflow_name}: job '{job_id}' has no {description} invocation",
+    ):
+        return []
+    return steps[:min(matches)]
+
+
+# Strict host suites consume Git history, GnuPG fixtures, and PyYAML. Hosted
+# runners happen to carry some of them, but the workflow contract must install
+# and assert them before the first make test/test-long invocation.
+for job_id, gate_name in (
+    ("verify", "test"),
+    ("stress", "test-long"),
+):
+    before = prior_steps(
+        "ci.yml",
+        job_id,
+        lambda tokens, target=gate_name: tokens[:2] == ["make", target],
+        "strict suite",
+    )
+    for package in ("git", "gnupg", "python3-yaml"):
+        check(
+            any(package in apt_packages(step) for step in before),
+            f"ci.yml: job '{job_id}' does not install {package} before its strict suite",
+        )
+    for command in ("git", "gpg", "PyYAML"):
+        check(
+            any(run_step_asserts(step, command) for step in before),
+            f"ci.yml: job '{job_id}' does not assert {command} before its strict suite",
+        )
+
+# Release signature/history/qualification verification occurs near the top of
+# the job. Its small prerequisite install must precede that first use rather
+# than relying on the larger compiler installation later in the workflow.
+before_release_verify = prior_steps(
+    "release.yml",
+    "release",
+    lambda tokens: bool(tokens) and re.fullmatch(
+        r"scripts/verify-release-(?:signature|qualification|history)\.sh", tokens[0]
+    ) is not None,
+    "release signature/history/qualification verifier",
+)
+for package in ("make", "git", "gnupg", "python3", "python3-yaml"):
+    check(
+        any(package in apt_packages(step) for step in before_release_verify),
+        f"release.yml: release verification does not install {package} before first use",
+    )
+for command in ("make", "git", "gpg", "PyYAML"):
+    check(
+        any(run_step_asserts(step, command) for step in before_release_verify),
+        f"release.yml: release verification does not assert {command} before first use",
+    )
 
 # --- ci-local.sh must stay in step with ci.yml's job list --------------------
 # ci-local.sh reproduces CI by hand, so its CI-JOB MAPPING header is the only

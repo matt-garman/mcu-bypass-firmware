@@ -36,23 +36,18 @@
 #include <iostream>
 
 #include <glib.h>                 // guint64, G_GUINT64_FORMAT
-#include "interface.h"            // initialize_gpsim_core(), gpsim_set_bulk_mode()
-#include "sim_context.h"          // CSimulationContext
 #include "processor.h"            // Processor (rma, pc, run)
 #include "pic-processor.h"        // pic_processor
-#include "modules.h"              // Module::get_pin/get_pin_name/get_pin_count
-#include "ioports.h"              // IOPIN
-#include "stimuli.h"              // Stimulus_Node, source_stimulus
 #include "gpsim_time.h"           // get_cycles(), Cycle_Counter
 #include "breakpoints.h"          // get_bp(), set_notify_break
 #include "trigger.h"              // TriggerObject
 #include "registers.h"            // Register::get_value()
-#include "pic/find_pin_exact.h"
 
-// gpsim narrates breakpoint/load activity on std::cout; a null streambuf
-// silences it (our own output uses C stdio, so printf is unaffected).
-struct NullBuf : std::streambuf { int overflow(int c) override { return c; } };
-static NullBuf g_nullbuf;
+// gpsim bring-up shared with the io / lock-step / fault harnesses: NullBuf,
+// g_cpu / g_fsw_node / g_fsw_src, FOOTSW_PIN_NAME, gpsim_bootstrap_cpu(),
+// gpsim_attach_footswitch() and footsw_set().
+#include "pic/gpsim_bootstrap.h"
+#include "pic/soak_sampling.h"
 
 // ---- Firmware / MCU parameters (injected by the Makefile build rule) --------
 #ifndef FW_PATH
@@ -75,7 +70,6 @@ static NullBuf g_nullbuf;
 // 0=pressed), RA0 = LED on LATA bit0 (1=ENGAGED). LATA is reg 0x07, bank 0.
 #define LATA_ADDR   0x07u
 #define LED_MASK    0x01u              // RA0
-#define FOOTSW_PIN_NAME "ra3"
 
 // ---- Soak configuration (override with -DNAME=value from the Makefile) ------
 // 24 h sim = 3.46e11 instr-cycles; gpsim is slower than simavr, so default to a
@@ -109,9 +103,7 @@ static NullBuf g_nullbuf;
 #define MAX_RESUMES_PER_MS 64
 
 // ---- Sim globals ------------------------------------------------------------
-static pic_processor   *g_cpu      = nullptr;
-static Stimulus_Node   *g_fsw_node = nullptr;
-static source_stimulus *g_fsw_src  = nullptr;
+// g_cpu / g_fsw_node / g_fsw_src come from pic/gpsim_bootstrap.h.
 static int       g_led_level      = 0;
 static guint64   g_led_changes    = 0;
 static guint64   g_wdt_resets     = 0;   // counted by ResetNotifier (non-halting)
@@ -141,15 +133,7 @@ public:
 static ResetNotifier g_reset_notifier;
 
 // ---- Helpers ----------------------------------------------------------------
-// Drive the footswitch input: 1 = released (high), 0 = pressed (low).
-// A bare source_stimulus presents a constant get_Vth(), so we modulate the
-// driven level directly via set_Vth (NOT putState, which only flips an unused
-// digital-state flag on the base class). Zth is set low at init so this source
-// dominates the firmware's internal weak pull-up on RA3.
-static void footsw_set(int pressed) {
-    g_fsw_src->set_Vth(pressed ? 0.0 : 5.0);
-    g_fsw_node->update();
-}
+// footsw_set() comes from pic/gpsim_bootstrap.h.
 
 // Poll LATA bit0 (the LED) once per ms. The LED only changes on debounced edges
 // (>> 1 ms apart), so per-ms sampling never misses a toggle. get_value() reads
@@ -161,11 +145,10 @@ static void sample_led() {
     g_led_level = v;
 }
 
-// Advance the simulation by `ms` ms of simulated time. Cycle break at the
-// target; resume run() until the target cycle is reached (a WDT reset may halt
-// run() early and/or fire the notify callback -- either way we resume).
-static void soak_run_ms(unsigned ms) {
-    guint64 target = get_cycles().get() + (guint64)ms * CYCLES_PER_MS;
+// Advance exactly one ms. A WDT reset may halt run() early and/or fire the
+// notify callback, so resume until this millisecond's target is reached.
+static bool soak_run_one_ms() {
+    guint64 target = get_cycles().get() + CYCLES_PER_MS;
     get_cycles().set_break(target);
     int resumes = 0;
     while (get_cycles().get() < target) {
@@ -176,10 +159,16 @@ static void soak_run_ms(unsigned ms) {
                     sim_hours());
             fflush(stderr);
             get_cycles().clear_break(target);
-            return;
+            return false;
         }
     }
-    sample_led();   // track LED edges at each ms boundary
+    return true;
+}
+
+// Multi-ms switch holds must remain observable at every millisecond boundary;
+// sampling only their endpoint can hide an even number of unintended toggles.
+static void soak_run_ms(unsigned ms) {
+    (void)soak_run_each_ms(ms, soak_run_one_ms, sample_led);
 }
 
 // ---- 2-press round-trip liveness check --------------------------------------
@@ -220,32 +209,8 @@ static void soak_liveness_check(uint32_t sim_ms) {
 static uint32_t xs(uint32_t *s){uint32_t x=*s;x^=x<<13;x^=x>>17;x^=x<<5;return *s=x;}
 
 int main() {
-    std::cout.rdbuf(&g_nullbuf);                 // silence gpsim's console chatter
-    initialize_gpsim_core();
-    gpsim_set_bulk_mode(1);
-    CSimulationContext *ctx = CSimulationContext::GetContext();
-
-    Processor *p = nullptr;
-    ctx->LoadProgram(FW_PATH, PROC_NAME, &p, "u1");
-    if (p == nullptr) p = ctx->GetActiveCPU();
-    if (p == nullptr) {
-        fprintf(stderr, "FATAL: gpsim could not load %s on %s\n", FW_PATH, PROC_NAME);
-        return 1;
-    }
-    g_cpu = static_cast<pic_processor *>(p);
-
-    IOPIN *ra3 = find_pin_exact(g_cpu, FOOTSW_PIN_NAME);
-    if (ra3 == nullptr) {
-        fprintf(stderr, "FATAL: pin %s not found on %s\n", FOOTSW_PIN_NAME, PROC_NAME);
-        return 1;
-    }
-    g_fsw_src = new source_stimulus();
-    g_fsw_src->set_digital();
-    g_fsw_src->set_Zth(250.0);                   // dominate RA3's weak pull-up
-    g_fsw_src->set_Vth(5.0);                     // released at power-on
-    g_fsw_node = new Stimulus_Node("fsw");
-    g_fsw_node->attach_stimulus(g_fsw_src);
-    g_fsw_node->attach_stimulus(ra3);
+    if (!gpsim_bootstrap_cpu(FW_PATH, PROC_NAME))            return 1;
+    if (!gpsim_attach_footswitch(FOOTSW_PIN_NAME, PROC_NAME)) return 1;
 
     footsw_set(0);                              // released at power-on
     soak_run_ms(5);                             // let init() settle, reach main loop

@@ -278,6 +278,76 @@ checks=$((checks + 1))
 	"$ROOT/release/v0.9.5/SHA256SUMS" >/dev/null \
 	|| fail "pinned key did not verify the historical v0.9.5 checksums"
 checks=$((checks + 1))
+
+# Git must not rewrite byte-exact artifacts even when the checkout policy would
+# normally convert text to CRLF. This fixture deliberately includes an AVR HEX
+# with CRLF in the index and PIC/checksum files with LF in the index.
+autocrlf_checkout="$work/autocrlf-checkout"
+mkdir -p "$autocrlf_checkout"
+byte_exact_paths=(
+	release/v0.9.5/bypass_cd4053.hex
+	release/v0.9.5/bypass_cd4053_pic10f322.hex
+	release/v0.9.5/SHA256SUMS
+	release/v0.9.5/SHA256SUMS.asc
+	test/pic10f320/expected_images.sha256
+)
+# These two are text rather than binary, but verification reads them by exact
+# whole-line match -- the MANIFEST.md heading through `grep -Fxq`, each soak
+# log's SOAK_RESULT record through string equality -- so a CRLF checkout makes
+# `verify-release-qualification.sh` reject a correct release. They must survive
+# the same conversion policy as the images, for a different reason.
+line_matched_paths=(
+	release/v0.9.5/MANIFEST.md
+	release/v0.9.5/evidence/soak-avr_cd4053_t45.log
+)
+git -C "$ROOT" -c core.autocrlf=true checkout-index \
+	--prefix="$autocrlf_checkout/" \
+	-- "${byte_exact_paths[@]}" "${line_matched_paths[@]}" \
+	|| fail "could not create autocrlf release-artifact checkout"
+for path in "${byte_exact_paths[@]}" "${line_matched_paths[@]}"; do
+	expected=$(git -C "$ROOT" cat-file blob ":$path" | sha256sum)
+	expected=${expected%% *}
+	actual=$(sha256sum "$autocrlf_checkout/$path")
+	actual=${actual%% *}
+	[ "$actual" = "$expected" ] \
+		|| fail "autocrlf checkout changed byte-exact artifact: $path"
+	checks=$((checks + 1))
+done
+"$PINNED_SIGNATURE_VERIFY" detached \
+	"$autocrlf_checkout/release/v0.9.5/SHA256SUMS.asc" \
+	"$autocrlf_checkout/release/v0.9.5/SHA256SUMS" >/dev/null \
+	|| fail "autocrlf checkout invalidated the historical checksum signature"
+checks=$((checks + 1))
+
+# QUALIFICATION first appears in the next release, so assert its prospective
+# path directly. Also pin the LF policy on each executable/source text class.
+attribute=$(git -C "$ROOT" check-attr text -- release/v99.0.0/QUALIFICATION)
+[ "$attribute" = "release/v99.0.0/QUALIFICATION: text: unset" ] \
+	|| fail "QUALIFICATION is not marked byte-exact: $attribute"
+checks=$((checks + 1))
+for path in Makefile src/bypass_pure.c src/bypass_pure.h \
+		test/avr/sim_attiny202.py test/test_release_history.sh \
+		.github/workflows/release.yml test/pic/test_soak_pic.cc \
+		release/v0.9.5/MANIFEST.md \
+		release/v0.9.5/evidence/soak-avr_cd4053_t45.log; do
+	attribute=$(git -C "$ROOT" check-attr text eol -- "$path")
+	[ "$attribute" = "$path: text: set
+$path: eol: lf" ] \
+		|| fail "$path is not explicitly LF text: $attribute"
+	checks=$((checks + 1))
+done
+
+# The allowlist above is what let MANIFEST.md and the evidence logs stay
+# convertible while the images beside them were pinned, so assert the catch-all
+# that now backstops it: a class nobody has named yet must still resolve to LF
+# instead of inheriting the platform default.
+unlisted=release/v99.0.0/evidence/unlisted.newext
+attribute=$(git -C "$ROOT" check-attr text eol -- "$unlisted")
+[ "$attribute" = "$unlisted: text: auto
+$unlisted: eol: lf" ] \
+	|| fail "unnamed file classes do not default to LF text: $attribute"
+checks=$((checks + 1))
+
 RELEASE_SIGNING_FINGERPRINT=$wrong_fingerprint \
 RELEASE_SIGNING_PUBLIC_KEY=$wrong_public_key \
 	"$PINNED_SIGNATURE_VERIFY" detached "$ROOT/release/v0.9.5/SHA256SUMS.asc" \

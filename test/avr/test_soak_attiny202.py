@@ -137,11 +137,22 @@ class Soak:
             self._arm()          # re-arm to catch further resets
 
     # --- responsiveness ----------------------------------------------------
+    def _check_liveness_hold(self):
+        if self.sim.is_done():
+            self._fail("shell entered force-reset spin during liveness hold "
+                       "(State.Done @ trap)")
+            return False
+        self._check_reset()
+        return True
+
     def _press_release(self):
         self.sim.press()
         self.sim.run_ms(PRESS_HOLD_MS)
+        if not self._check_liveness_hold():
+            return False
         self.sim.release()
         self.sim.run_ms(RELEASE_HOLD_MS)
+        return self._check_liveness_hold()
 
     def _liveness_check(self):
         # Two press/release cycles: the LED must toggle away from its start state
@@ -154,16 +165,21 @@ class Soak:
         self.checks += 1
         self.liveness_checks += 1
         led0 = self.sim.led_on()
-        self._press_release()
+        if not self._press_release():
+            self.liveness_ms_consumed += self._elapsed_ms() - started
+            return False
         after1 = self.sim.led_on()
-        self._press_release()
+        if not self._press_release():
+            self.liveness_ms_consumed += self._elapsed_ms() - started
+            return False
         after2 = self.sim.led_on()
         self.liveness_ms_consumed += self._elapsed_ms() - started
         if not (after1 == (not led0) and after2 == led0):
             self.liveness_fails += 1
             self._fail("responsiveness: LED %d ->(press)-> %d ->(press)-> %d "
-                       "(want %d,%d,%d)"
-                       % (led0, after1, after2, led0, (not led0), led0))
+                        "(want %d,%d,%d)"
+                        % (led0, after1, after2, led0, (not led0), led0))
+        return True
 
     # --- main loop ---------------------------------------------------------
     def run(self, duration_ms, liveness_ms, progress_ms):
@@ -193,7 +209,8 @@ class Soak:
 
             now = self._clock_ms()
             if now >= next_live:
-                self._liveness_check()
+                if not self._liveness_check():
+                    return self._verdict(duration_ms, liveness_ms, wall0)
                 next_live += liveness_ms
             if now >= next_prog:
                 self._progress(now, wall0)

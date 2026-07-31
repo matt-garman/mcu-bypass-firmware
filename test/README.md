@@ -21,25 +21,38 @@ test/
   misra_rules.txt           shared: MISRA rule paraphrases
   misra_suppressions.txt    shared: documented per-file MISRA deviations
   mutation_policy.sh        shared: strict/partial mutation policy resolver
+  mutation_accounting.sh    shared: mutation inventory/result accounting helpers
   run_mutation_tests.sh     shared: mutation-testing driver (make test-mutation)
+  scratch_tree.sh           shared: throwaway repo-copy builder for sandbox harnesses
   soak_timing_config.h      shared: native soak timing bounds
   check_flash_budget.sh     shared: exact flash-budget checker
+  check_stack_depth_pic.sh  shared: PIC hardware return-stack depth gate
   test_attiny202_build.sh   shared: fail-closed AVR-XT build checks
   test_avr_build_rebuild.sh shared: classic AVR rebuild/partial-output checks
   test_ci_local_routing.sh  shared: local-CI skip-option command routing
   test_workflow_syntax.sh   shared: GitHub workflow YAML + ci-local job-map checks
   test_flash_budget.sh      shared: fail-closed flash measurement checks
+  test_fetch_yasimavr.sh    shared: safe yasimavr venv fetch/rebuild checks
   test_gpsim_wrappers.sh    shared: fail-closed gpsim wrapper checks
   test_klee_build.sh        shared: linked KLEE bitcode build regression
+  test_lockstep_progress.sh shared: PIC libgpsim lock-step progress checks
   test_make_serialization.sh shared: worktree Make/release lock regression
   test_pic_build.sh         shared: PIC image/size/rebuild-trigger checks
+  test_pic320_coverage_archive.sh shared: coverage-gate source-archive mode checks
+  test_pic_rebuild.sh       shared: PIC soak rebuild determinism
   test_release_images.sh    shared: isolated exact release artifact verification
   test_release_provenance.sh shared: source/compiler/output release-provenance regression
   test_release_qualification.sh shared: release soak/evidence publication contract
   test_release_history.sh     shared: release history + pinned-signature binding
+  test_soak_reset_witness.sh shared: Classic AVR soak watchdog-witness proof
+                                     (make test-soak-reset-witness)
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
   test_stack_bound.sh       shared: fail-closed stack evidence checks
+  test_stack_depth_pic.sh   shared: PIC return-stack gate regression
   test_strict_tools.sh      shared: skip/strict policy for host + both PIC chips
+  test_supply_chain.sh      shared: external download/cache/action pin checks
+  test_target_lane_markers.sh shared: PIC aggregate PASS-marker regression
+  test_target_matrix.sh     shared: fail-closed PIC/AVR-XT target-matrix regression
   test_workload_rebuild.sh  shared: workload/fuse rebuild checks
 
   host/    MCU-independent golden-model tests, compiled and run natively.
@@ -51,6 +64,7 @@ test/
            test_symbolic.c      KLEE / host enumerator (make test-symbolic[-klee])
 
   avr/     ATtiny-specific tests: the real firmware ELF in simavr, plus fuses.
+           attiny202_smoke.c    AVR-XT peripheral compile/link smoke image
            test_sim.c           simavr integration    (make test-sim-<variant>)
            test_soak.c          long-duration soak    (make test-soak)
            test_fuses.c         all-target fuse bytes (make test-fuses)
@@ -60,10 +74,11 @@ test/
            test_sim_attiny202.py   functional + PA2/PA3 transition/timing checks
            test_attiny202_output_oracle.py  host regression for output checks
            test_attiny202_fault_oracle.py   host fault-run accounting regression
-            test_fault_attiny202.py  critical-SFR/state/pin-polarity fault injection
+           test_fault_attiny202.py  critical-SFR/state/pin-polarity fault injection
            test_soak_attiny202.py  long-duration liveness soak
            test_lockstep_attiny202.py  ctx_-vs-golden-model co-simulation
                                                         (make attiny202-lockstep)
+           test_attiny202_delay_oracle.py  compiled-image pulse-width oracle
            model_step_ffi.c/.py  ctypes bridge letting the Python drivers call
                                  the SHIPPING pure core through model_step.h,
                                  so no part of the algorithm is re-implemented
@@ -72,23 +87,32 @@ test/
                                 hard-coded algorithm expectations
                                                         (make test-attiny202-model-ffi)
 
-  pic/     PIC10F322-specific host and gpsim tests.
-             fw_coverage/         real PIC source via host SFR mock + gcov
+  pic/     PIC10F322-specific tests plus shared PIC gpsim harness code.
+            fw_coverage/         real PIC source via host SFR mock + gcov
                                                         (make pic-coverage-check-fw)
             test_config_pic.c    CONFIG-word check     (make pic-test-config)
             *.stc + run_gpsim_*  register-level gpsim  (make pic-test-gpsim)
-            test_fault_pic.cc    libgpsim fault-inject (make pic-test-fault)
-            test_lockstep_pic.cc libgpsim HEX/model ctx lock-step
-                                                       (make pic-test-lockstep)
-            test_io_pic.cc       libgpsim GPIO/pulse timing
-                                                       (make pic-test-io)
+            gpsim_wrapper_common.sh
+                                  scaffolding both run_gpsim_* wrappers source
+                                  (sourced, not executable)
+            find_pin_exact.h     shared exact gpsim pin-name lookup
+            gpsim_bootstrap.h    shared libgpsim bring-up: core init, image
+                                  load, footswitch stimulus, footsw_set()
+            soak_sampling.h      per-ms observation for multi-ms soak holds
+            test_fault_pic.cc    PIC10F322 fault adapter (make pic-test-fault)
+            test_lockstep_pic.cc PIC10F322 HEX/model lock-step adapter
+                                                        (make pic-test-lockstep)
+            test_io_pic.cc       PIC10F322 GPIO/pulse-timing adapter
+                                                        (make pic-test-io)
+            test_{fault,lockstep,io}_pic_core.h
+                                  shared libgpsim harness implementations
             test_soak_pic.cc     libgpsim soak         (make pic-test-soak)
-                                 shared with the PIC10F320 lane
+                                  shared with the PIC10F320 lane
 
   pic10f320/  PIC10F320-specific tests. Separate from pic/ because this target's
-              firmware is a single hand-inlined translation unit rather than a
-              shell over the shared core, so its harnesses have no counterpart
-              on any other target (docs/pic10f320_special_case.md).
+               firmware is a single hand-inlined translation unit rather than a
+               shell over the shared core, requiring dedicated host harnesses and
+               thin target-simulator adapters (docs/pic10f320_special_case.md).
             equiv/     fw_harness.c   the real firmware #included, host-compiled
                        test_equiv.c   tick-for-tick vs src/bypass_pure.c
                                                        (make pic320-test-equiv)
@@ -100,29 +124,31 @@ test/
                                                        (make pic320-test-fault-host)
                        check_fw_coverage.sh    exact-line firmware coverage gate
                                                        (make pic320-coverage-check-fw)
-             gpsim/     test_fault_pic.cc     libgpsim fault-inject
-                                                        (make pic320-test-fault-target)
-                        test_lockstep_pic.cc  libgpsim HEX/model ctx lock-step
-                                                        (make pic320-test-lockstep)
-                        test_io_pic.cc        libgpsim GPIO/pulse timing
-                                                        (make pic320-test-io)
-                        footswitch_toggle.stc gpsim stimulus
-              return_stack_oracle.py  strict final-HEX control-flow/return-stack
-                                      proof + fixtures
-                               (make test-pic320-return-stack-oracle;
-                                make pic320-test-return-stack for real images)
-              check_expected_images.py  strict SHA-256 manifest/image checker
-              expected_images.sha256    reviewed XC8/DFP three-image baseline
-                               (make test-pic320-expected-images;
-                                make pic320-test-build for real images)
+            gpsim/     test_fault_pic.cc     libgpsim fault adapter
+                                                       (make pic320-test-fault-target)
+                       test_lockstep_pic.cc  libgpsim lock-step adapter
+                                                       (make pic320-test-lockstep)
+                       test_io_pic.cc        libgpsim GPIO/timing adapter
+                                                       (make pic320-test-io)
+                       footswitch_toggle.stc gpsim stimulus
+            return_stack_oracle.py  strict final-HEX control-flow/return-stack
+                                    proof + fixtures
+                             (make test-pic320-return-stack-oracle;
+                              make pic320-test-return-stack for real images)
+            check_expected_images.py  strict SHA-256 manifest/image checker
+            expected_images.sha256    reviewed XC8/DFP three-image baseline
+                             (make test-pic320-expected-images;
+                              make pic320-test-build for real images)
 ```
 
 The PIC10F320 lane reuses, rather than forks, everything it can: the CONFIG-word
 checker (`pic/test_config_pic.c`, parameterised on `PIC_DEVICE_NAME`), both gpsim
-CLI wrappers (parameterised on the processor), the soak driver
-(`pic/test_soak_pic.cc`), and — most importantly — `src/bypass_pure.c` itself. Its
-`gpsim/` harnesses are forked because they are genuinely chip-specific: different
-SRAM offsets, different expected check counts, a different processor model.
+CLI wrappers, the soak driver (`pic/test_soak_pic.cc`), the three libgpsim harness
+cores, and — most importantly — `src/bypass_pure.c` itself. Thin per-part adapters
+keep processor/image defaults and output-macro vocabularies explicit. The fault
+adapters additionally pin each part's program-space limit, independent expected
+check count, and output-latch policy: PIC10F322 runs three LATA injections that
+PIC10F320 deliberately omits because its firmware has no latch-integrity guard.
 
 Build artifacts (compiled binaries, `*.bc`) are written next to their sources in
 each subdirectory and are git-ignored; see `.gitignore`. KLEE output directories
@@ -233,11 +259,13 @@ below so a green gate means every PIC layer actually ran.
 | Aggregate fail-closed regression | `test-target-lane-markers` | Proves the per-variant aggregate requires each lane's explicit `PASS` marker, not just its exit status: a skipped, crashed, or failing-but-zero-exit lane is rejected and the aggregate's own success line is withheld. Covers both PIC chips. | Bash + fake recursive Make |
 | Hardware return-stack depth | `pic-test-stack-bound`, `pic320-test-stack-bound` | Bounds the **8-level hardware return stack** — the PIC counterpart of the AVR's byte-valued `test-stack-bound`, and a different quantity: the PIC14 core has no data stack, and hardware-stack overflow on this part is silent (no `STKPTR`, no `STKOVF`, no overflow reset). Computes the deepest call chain from the freshly generated instruction stream, cross-checks it against XC8's own `callstack` directives, and rejects missing/current-image assembly, recursion, indirect calls, and an over-budget build. Every variant, both chips. | XC8-generated `.s` + awk |
 | Stack-depth gate regression | `test-stack-bound-pic-regression` | Proves that gate rejects each way the analysis can be wrong — over budget, recursion, an overflowing build, the two oracles disagreeing, an unresolvable or indirect call, no entry point, and a device pack declaring no depth. Synthetic fixtures, so it needs no toolchain. | Bash + awk |
-| Soak rebuild determinism | `test-pic-build-rebuild` | Both chips' soak binaries compile their workload sizing in as `-D` flags, so their file rules must be *unconditionally* out of date. Asserts a changed duration recompiles with the new value, and that an identical rerun recompiles too — the signature of `FORCE`, as opposed to a rebuild that merely followed a timestamp. | Bash + fake c++ |
-
-| Soak timing contract | `test-soak-timing` | Native Classic AVR/PIC soaks require the liveness interval within the total duration; short release rehearsals clamp it so every passing run completes a responsiveness round-trip. | host C/C++ compilers + release CLI |
+| Soak rebuild determinism | `test-pic-build-rebuild` | Both chips' soak binaries compile their workload sizing in as `-D` flags, so their file rules must be *unconditionally* out of date. Asserts a changed duration recompiles with the new value, and that an identical rerun recompiles too — the signature of `FORCE`, as opposed to a rebuild that merely followed a timestamp. Populates its scratch repository with the shared `test/scratch_tree.sh` walk, then blanks each named prerequisite: contents cannot matter to a staleness decision, and a prerequisite that has been renamed or dropped is reported instead of silently shrinking the fixture. | Bash + fake c++ |
+| Soak timing/liveness contract | `test-soak-timing` | Native Classic AVR/PIC soaks require the liveness interval within the total duration; short release rehearsals clamp it so every passing run completes a responsiveness round-trip. A rapid PIC retrigger fixture proves multi-ms holds are sampled every millisecond, and a fake AVR-XT simulator resets during the final round-trip hold to prove the witness is checked before verdict. | host C/C++ compilers + release CLI + fake simulator |
+| Soak watchdog witness | `test-soak-reset-witness` | The Classic AVR soak's `watchdog_failures` counter is release evidence, so a real watchdog reset must be able to reach it. Builds the soak driver twice against the same healthy ATtiny85 image — untouched, and with a fixture that disables the timer interrupt mid-run — and requires the first to pass with `watchdog_failures=0` and the second to fail with a nonzero one. The control half is what stops a permanently broken soak from satisfying the failing half on its own. | simavr + host C compiler |
 | Release qualification contract | `test-release-qualification` | Publication requires clean production metadata, the exact canonical 28-file evidence set, and one identity-, duration-, and counter-bearing result for each of 15 release soak combinations. | Bash + synthetic retained evidence |
 | Release history/signature contract | `test-release-history` | The tag event must peel to an artifact-only, single-parent child of the exact qualified source. `SHA256SUMS.asc` and the exact remote annotated tag must verify against the pinned full-fingerprint key in an isolated keyring; altered bytes, missing/malformed/wrong-key signatures, lightweight/unsigned/same-target-replaced tags, and moved tags are rejected immediately before publication. | Bash + GnuPG + scratch Git repositories |
+| yasimavr venv fetch safety | `test-fetch-yasimavr` | Caller-selected destinations are canonicalized and cannot name roots, symlinks, files, or unstamped directories. Offline fake tools prove failed builds preserve the old owned venv and only a fully verified sibling tree is renamed into place. | Bash + synthetic toolchain |
+| External supply-chain integrity | `test-supply-chain` | XC8 and PIC DFP bytes must match reviewed hashes before `sudo`; restored ATtiny_DFP files are re-hashed; yasimavr dependencies are wheel/hash-locked and built without dependency resolution; both workflows use one installer and hash-sensitive cache keys. | Bash + synthetic downloads/toolchains |
 
 `pic-test-gpsim` now samples one non-settled point, `PRESS1_EARLY`, roughly
 6 ms (3,000 instruction cycles) after the first press edge. A correct 1 ms tick
@@ -275,8 +303,12 @@ fail-closed test invariants.
 
 The PIC10F320 is the one target whose verified core is *hand-inlined* into the
 firmware instead of compiled in, so it carries validation layers no other target
-needs. `docs/pic10f320_special_case.md` is the authoritative statement of why;
-this section is what the test suite does about it.
+needs. Three documents divide this target between them, and each owns one thing:
+`docs/pic10f320_special_case.md` is the authoritative statement of *why* the
+target needs a different assurance route, `docs/pic10f320_validation.md` records
+*what was actually run and what it returned*, and this section is the current
+inventory — targets, substrates, mechanics and check counts. Counts and command
+lists are kept here alone so the other two cannot go stale against the suite.
 
 The split that matters here: **the first four layers need only a host C compiler
 and gcov**, so they are members of `make test` and run on every push regardless
@@ -323,7 +355,9 @@ same-name file in the sandbox root before repeating, so removing the target's
 count. Every fake linked host test also logs its executed path; execution counts
 must advance with compile/link counts, catching a removed binary-run recipe.
 Variant/clock/host-flag changes and restorations are checked against the latest
-applicable command, not any historical log entry. This is deterministic
+applicable command, not any historical log entry, and the unqualified shared
+equivalence harness must be recompiled with the current output macro after both
+variant transitions. This is deterministic
 **rebuild triggering with the current flags**, not byte-for-byte XC8
 reproducibility. Byte identity is enforced separately by `pic320-test-build`.
 The coverage lane needs no stable-output probe: every request
@@ -332,15 +366,16 @@ before that directory is removed.
 
 Note what `pic320-test-equiv` and `pic320-test-lockstep` run *against*. Both
 compile and link `src/bypass_pure.c` — the same file every other target compiles
-into its shipping image, not a vendored snapshot of it. The project this target
-was merged from could only manage the weaker claim, because it held a pinned
-copy; that copy is gone.
+into its shipping image, not a vendored snapshot of it. That is the property the
+whole layer stack rests on; `docs/pic10f320_special_case.md` §3 argues why.
 
 `return_stack_oracle.py` does not consume a compiler listing or trust a
 disassembler. It requires a nonempty, non-symlink regular file; validates every
 Intel HEX count, checksum, record type, address, overlap and unique EOF; then
 forms PIC14 words little-endian. CONFIG and other unreachable data are ignored,
-but an absent byte on a reachable instruction is a hard failure. Its documented
+but an absent byte on a reachable instruction is a hard failure, as is a return
+taken with an empty stack. Its command-line depth default is eight and the
+Makefile limit is immutably eight. Its documented
 classic mid-range masks cover direct `CALL`/`GOTO`, all four required skip
 opcodes, `RETURN`, and the full `RETLW` alias range. The full classic
 35-instruction legality check also recognizes `MOVLW` at `0x3000..0x33ff` as
@@ -371,14 +406,31 @@ non-strict default so development on one substrate stays practical.
 `STRICT_TOOLS=1` changes the default to fail closed, and full-tool CI also pins
 `MUTATION_ALLOW_SKIP=0`. An explicit `MUTATION_ALLOW_SKIP` value takes
 precedence: `ci-local.sh --skip-pic` retains strict host/AVR gates but
-deliberately passes `1` for its partial mutation run. The summary counts PIC and
-ATtiny202 skips separately, so a partial run always says which substrate went
-unexercised rather than reporting one anonymous number.
+deliberately passes `1` for its partial mutation run, as does
+`--skip-attiny202`; specifying either or both target-toolchain skips must not
+make the intentionally partial `test-long` fail closed. The summary counts PIC
+and ATtiny202 skips separately, so a partial run always says which substrate
+went unexercised rather than reporting one anonymous number.
 
 The PIC mutation set includes target-level faults for the new coverage: collapsed
 TMR2IF cadence, exact-TRISA predicate removal, output-latch mask narrowing,
 exact WPUA pull-up state, ANSELA mask narrowing, muted-CD4053 startup
 reassertion, mute-window shortening, and relay pulse shortening.
+
+**Which lane owns the Classic AVR watchdog matters, and is easy to get wrong.**
+The two long-standing watchdog-handshake mutants both run on `test-sim-cd4053`,
+which is the ATtiny13a build — and simavr 1.6 does not model the ATtiny13a WDT
+system reset at all, so no assertion on that lane can witness one. They are
+still killed, but not by the watchdog: deleting the `hw_wdt_pet()` call site
+leaves the function unused and fails the build under
+`-Werror=unused-function`, and breaking the ISR handshake stops the debounce
+state machine so the functional, noise-count and lock-step assertions all fail.
+The behavioural watchdog fault therefore has its own mutant, which empties
+`hw_wdt_pet()` at its definition (so the call site remains and the build stays
+clean) and runs a short `test-soak` on the ATtiny85, where simavr *does* model
+the reset. The soak's reset witness records it in `watchdog_failures`. This
+gives the Classic AVR the soak-lane mutant the PIC and ATtiny202 families
+already had.
 
 **PIC10F320 mutants are split by what they NEED, not by what they test.** 27 of
 them are killed by the host lanes and require only a C compiler, so they ride
@@ -390,10 +442,15 @@ harness could make them die for an infrastructure reason and falsely count as
 killed. Skip accounting is wired through the same policy resolver, so a partial
 run cannot be mistaken for full PIC10F320 coverage.
 
-The driver independently pins the seven mutation categories at **23 core/AVR +
+These counts are pinned here and nowhere else; how the inventory reached its
+current shape — the merge-time 74-mutant run, the audit that invalidated one
+kill, and the sandbox gaps that briefly cut it to 56 — is recorded in
+`docs/pic10f320_validation.md` §5.
+
+The driver independently pins the seven mutation categories at **24 core/AVR +
 19 AVR-XT + 27 PIC10F320 host + 9 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 8
-PIC target = 93**. It rejects category drift before probing, then requires
-dispatched + skipped = 93 and killed + survived + errored = dispatched. Every
+PIC target = 94**. It rejects category drift before probing, then requires
+dispatched + skipped = 94 and killed + survived + errored = dispatched. Every
 worker status is checked; result status/output pairs are atomically published
 and accepted only with exact text grammar and no missing, hidden, or extra
 artifacts.
@@ -405,7 +462,20 @@ can enable the tool-dependent PIC10F320 mutants. The host-only
 `test-mutation-sandbox` regression exercises the same copy routine in `make test`,
 including the wrappers' executable mode, and covers inventory, conservation,
 record/command parsing, atomic publication, checker-status classification, and
-result grammar in 29 checks.
+result grammar in 30 checks.
+
+That copy routine is **`test/scratch_tree.sh`**, shared with the other harness
+that builds a throwaway repository and runs Make inside it,
+`test/test_pic_rebuild.sh`. The two used to learn about a new file by different
+means — this extension allowlist walk versus a hand-enumerated prerequisite list
+— and one prerequisite added to the PIC soak rules broke each of them in turn.
+The walk is now the single mechanism, so a new substrate, a nested harness, or a
+target that gains a prerequisite needs no edit in either. Two properties of the
+walk are load-bearing and documented at length in the file: it stays an
+**allowlist** (a wholesale `cp -a test/` would drag in build products, and `cp -a`
+preserves mtimes, so a stale binary copied in newer than its source makes Make
+skip the rebuild and score a mutant against unmutated code), and it must never
+require a **Git repository**, because these sandboxes have no `.git`.
 
 **The ATtiny202 lane is gated the same way, with one extra hazard.** `XT_DFP` and
 `YASIMAVR_VENV` both default to paths *relative* to the tree, which is exactly

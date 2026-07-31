@@ -166,6 +166,31 @@ for wrapper in run_toggle run_power_on; do
 	checks=$((checks + 1))
 done
 
+# Both wrappers source test/pic/gpsim_wrapper_common.sh for their scaffolding.
+# `.` on a missing file returns non-zero but does NOT abort a script that is not
+# under `set -e`, so each wrapper checks the file is readable first and dies with
+# a specific message. Without that check the wrappers still exit non-zero today,
+# but only because `set -u` trips over an unbound $PROC a few lines on -- an
+# accident of line order, and one that reports "unbound variable" rather than the
+# real problem. Pin the explicit guard by running each wrapper from a directory
+# holding the wrapper and the stimuli but NOT the shared helper.
+for wrapper_script in run_gpsim_test.sh run_gpsim_power_on_pressed.sh; do
+	orphan="$work/orphan-$wrapper_script"
+	mkdir -p "$orphan"
+	cp "$ROOT/test/pic/$wrapper_script" "$orphan/"
+	cp "$ROOT/test/pic/footswitch_toggle.stc" "$ROOT/test/pic/power_on_pressed.stc" "$orphan/"
+	if output=$(PATH="$tools:$PATH" REAL_TIMEOUT="$REAL_TIMEOUT" \
+			GPSIM="$tools/gpsim" GPSIM_TIMEOUT_SECONDS=2 \
+			"$orphan/$wrapper_script" "$hex" 0x1 2>&1); then
+		printf 'FAIL: %s passed without its shared helper\n' "$wrapper_script" >&2
+		exit 1
+	fi
+	[[ "$output" == *"missing shared gpsim wrapper helper"* && "$output" != *"RESULT: PASS"* ]] \
+		|| { printf 'FAIL: %s did not report the missing shared helper: %s\n' \
+			"$wrapper_script" "$output" >&2; exit 1; }
+	checks=$((checks + 1))
+done
+
 # Same-basename malformed stimuli used to receive canned passing snapshots
 # because fake gpsim inspected only the filename. Require an exact ra3 token,
 # not merely another pin or a name containing ra3 as a prefix.

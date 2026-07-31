@@ -26,6 +26,9 @@ third_party/*
 # produces IS a generated artifact and stays ignored. Same escape as release/**.
 !third_party/yasimavr/
 third_party/yasimavr/venv/
+# A verified replacement keeps the prior stamped venv as a randomized sibling
+# rollback point rather than recursively deleting a caller-derived path.
+third_party/yasimavr/.venv.old.*/
 
 # ...EXCEPT the prebuilt release images, which ARE tracked: committing them is
 # the whole point of release/ (scripts/make-release.sh stages them there). The
@@ -55,7 +58,8 @@ coverage/
 
 # The commit message the release script and the development workflow generate
 # for the human to use with `git commit -F`. A working note, never an artifact.
-# Anchored to the root: release/<ver>/commit_msg.txt IS tracked, deliberately.
+# Anchored to the root so this rule affects only the development-time copy;
+# release/.gitignore deliberately ignores the per-release copies too.
 /commit_msg.txt
 
 # clade code

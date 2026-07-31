@@ -1,5 +1,18 @@
 # PIC10F320 merge plan
 
+> **Historical decision record — merge complete; retained intentionally.**
+> The repository integration described below has been completed. This document
+> remains in the tree because it records the rationale and section-numbered
+> decisions cited by the implementation.
+>
+> Do **not** use the plan body for current support, release, qualification, path,
+> or Make-target status. See [PIC10F320 — the constrained target](pic10f320_special_case.md)
+> for the current architecture and support contract, and the
+> [PIC10F320 validation record](pic10f320_validation.md) for current and historical
+> execution evidence. The body below is preserved as an execution-era record and
+> intentionally contains superseded paths, targets, scope assumptions, and status
+> statements; its existing errata identify the largest scope changes.
+
 Fold the standalone `pic10f320-bypass-firmware` child repository into
 this parent as a first-class-but-explicitly-constrained build target,
 eliminating the duplicated validation ecosystem and the hand-vendored
@@ -10,8 +23,9 @@ phases, each of which leaves the tree green. Firmware source edits are
 the user's to make; the phases below call out which steps touch
 firmware vs. test/Makefile/docs.
 
-**Current status / erratum (2026-07-28).** Integration and release wiring are
-implemented, but the first unified release has **not** been cut. The original
+**Status at 2026-07-28 (superseded — see the release erratum below).**
+Integration and release wiring are implemented, but the first unified release
+has **not** been cut. The original
 `0536615` mutation tally was invalidated by a missing sandbox harness. After the
 missing wrapper was restored, a later run exposed two additional sandbox
 gaps that skipped 18 PIC mutants. Repairing those two gaps re-earned a full
@@ -39,6 +53,18 @@ status — recorded the scope at their cited checkpoint and are superseded here.
 The PIC10F320 reasoning they support is unaffected: the exclusion argument was
 about scope discipline, not about the 202. `README.md`, `CHANGELOG.md` and
 `test/README.md` carry the current classification.
+
+**Release erratum (2026-07-30).** The first unified release **has since been
+cut**, which reverses the central negative claim of the 2026-07-28 status above.
+Release `v0.9.6` qualified final source commit `d3ba040`: all 18 canonical images
+were built from it and published with a retained `QUALIFICATION`, manifest,
+image checksums, and lane and soak evidence under `release/v0.9.6/`, with
+artifact commit `4f4b085` under the unified `v0.9.6` tag. The PIC10F320 is a
+release-supported target from that release onward. Read the 2026-07-28 block as
+a record of where the work stood two days before the release run, not as the
+project's status. Current status lives in `docs/pic10f320_special_case.md`
+(architecture and support contract) and `docs/pic10f320_validation.md`
+(execution evidence).
 
 **Decision.** Consolidation is the right direction. The repositories have
 the same maintainer, product domain, toolchain family, behaviour contract,

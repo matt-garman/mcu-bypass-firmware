@@ -298,62 +298,6 @@ analysis that the 64 ms SUT delay covers the LDO ramp (check the LP2950/AP7375
 datasheet startup time against 64 ms). Item (b) is a documentation task and pairs
 naturally with the Tier 2 datasheet-citation item.
 
-**Converge the two scratch-tree builders.** Added 2026-07-27, after the same
-omission caused two separate defects in two sessions.
-
-Two harnesses build a throwaway copy of the repository and run Make inside it,
-and they learn about a new file by different means:
-
-- `test/run_mutation_tests.sh` → `copy_tree()`, now a single `find` walk over an
-  extension allowlist (`c cc h sh stc py`) at any depth. **Picks up new files
-  automatically.**
-- `test/test_pic_rebuild.sh` → still **enumerates every file by hand**
-  (`: > "$repo/test/pic/find_pin_exact.h"`, `: > "$repo/test/soak_timing_config.h"`,
-  …). Needs a manual edit whenever a target gains a prerequisite.
-
-`test/pic/find_pin_exact.h` — made a prerequisite of both chips' soak binaries
-and all three `*-test-target` legs by `b4da21c` — broke each builder in turn:
-`test_pic_rebuild.sh` during the `pic10f320-merge-fixes` merge, then
-`run_mutation_tests.sh` immediately after. Both are fixed; what is *not* fixed is
-that one builder still has to be told.
-
-The failure mode is what makes this worth doing rather than tolerating. A missing
-sandbox file does not surface as an error: the mutation probe treats a failed
-baseline as a **skip**, so the gate silently shrinks and the summary reported
-"toolchain absent" on a fully-provisioned host. 18 mutants — the WPUA/TRISA/ANSELA
-SEU guards, the relay 4 ms datasheet minimum, the mute window, the un-pet
-watchdog — were unenforced while the run reported every mutant it did evaluate as
-killed. A green result that quietly measures less than it claims is the exact
-outcome this project's validation suite exists to prevent.
-
-Shape: lift `copy_tree` into a shared helper (e.g. `test/lib/scratch_tree.sh`)
-that both source, with `test_pic_rebuild.sh` keeping only the genuinely
-rebuild-specific steps — the empty-file truncation is its *point*, so it needs
-the allowlist walk to populate the tree and its own logic to blank the
-prerequisites under test. Two constraints must survive the merge:
-
-1. **The copy stays an allowlist, never a wholesale mirror.** `test/` also holds
-   build products (`test/avr/test_sim_*`, `test/formal/klee-out/`,
-   `__pycache__`), and `cp -a` preserves mtimes — a stale binary copied in newer
-   than the source beside it makes Make skip the rebuild and score a mutant
-   against unmutated code. That is a silently wrong answer, the one outcome a
-   mutation harness must never produce.
-2. **Anything the shared helper runs must tolerate a non-repo sandbox.** These
-   trees have no `.git`; a `git ls-files` mode check in a Make recipe already
-   failed closed there once (fixed by gating on `git rev-parse
-   --is-inside-work-tree`).
-
-Keep the fail-closed self-tests either way: `MUTATION_SANDBOX_SELFTEST=1` (29
-checks, including the depth regression that reaches `test/pic/fw_coverage/` and
-the immutable inventory/result-accounting contract) and
-`validate_pic320_sandbox`'s required-file list. The hand-maintained list only
-catches gaps someone already thought of, but it converts a future omission into
-one obvious line instead of a misattributed toolchain complaint.
-
-Effort: ~2–3 h. Impact: Medium — removes the last hand-maintained sandbox
-inventory, and with it a defect class that degrades a gate silently rather than
-breaking it.
-
 ---
 
 ## Tier 3 — platinum-level / nice-to-have
@@ -614,11 +558,11 @@ Design notes if picked up:
 Effort: ~4–8 h, most of it consumer updates and release-documentation redirects
 rather than the renames themselves. Impact: Medium — no behavioural change and no
 new assurance, but it removes a class of silent-misconfiguration hazard that
-grows with every added target, and it is the difference between "five targets in
+grows with every added target, and it is the difference between "six targets in
 one repository" and "four projects sharing a Makefile".
 
 **`make program-pic320` convenience target.** Added 2026-07-27. The PIC10F322
-has `make program-pic` (`Makefile:1282`, with `PIC_PROG=pk2cmd|ipecmd`,
+has `make program-pic` (with `PIC_PROG=pk2cmd|ipecmd`,
 `PIC_PROG_TOOL`, `PIC_PROG_CMD` overrides); the PIC10F320 has no equivalent, so
 `release/README.md` and the generated `MANIFEST.md` print the bare
 `pk2cmd -PPIC10F320 -F<image> -M -Y -R` instead. The merge recorded this as a
@@ -631,8 +575,9 @@ the wrong device is worse than an honest absence.
 Design notes if picked up: mirror `program-pic` exactly rather than inventing a
 second idiom, add `PIC320_PROG*` variables under the §5.6 prefix rule (the whole
 point of the separate pair is that one chip can be re-pinned without moving the
-other), and update the `make help` Hardware block, `release/README.md:145` and
-the manifest's flashing command in the same change. Verify against real silicon
+other), and update the `make help` Hardware block, the PIC10F320 flashing section
+in `release/README.md`, and the manifest's flashing command in the same change.
+Verify against real silicon
 before removing the "no convenience target yet" note — the note is currently
 correct, and a target that has never driven a programmer is not an improvement
 over a command the user can read.
@@ -671,6 +616,36 @@ should not gate firmware releases.
 
 Recorded so these do not get re-proposed. None are refusals on grounds of
 difficulty — each was judged to cost more than it returns *for this project*.
+
+**PIC10F320 firmware on PIC10F322 hardware (low priority / academic
+curiosity).** The two parts have the same software-visible core, pin map, RAM,
+relevant SFR/peripheral layout and CONFIG-word layout; their material difference
+for this firmware is 256 versus 512 implemented program words. A native
+PIC10F320 image whose execution remains within its implemented address range is
+therefore expected to run unchanged on a PIC10F322. The strongest experiment
+would execute the exact native, hash-gated PIC10F320 HEX under both `p10f320` and
+`p10f322`, compare traces through the shared target-I/O and lock-step harnesses,
+then confirm it on real PIC10F322 hardware. Recompiling the source with
+`-mcpu=10F322` would be a weaker compatibility proof because it creates a third
+artifact whose startup, placement or bytes may differ.
+
+This would not make all PIC10F322 qualification claims applicable. The
+PIC10F320 firmware deliberately omits the PIC10F322 firmware's settled-`LATA`
+integrity guard, so the three PIC10F322 output-latch fault injections must not be
+expected to pass; native build, image-hash, program-geometry, source-coverage and
+release-provenance gates also remain device/implementation specific. Most useful
+mechanism reuse already exists: both parts share the CONFIG checker, gpsim
+wrappers, libgpsim I/O/lock-step/fault cores, soak implementation and assembly
+stack checker, with thin adapters preserving their different policies.
+
+Declined as a maintained target or release gate: when PIC10F322 hardware is
+available, its native modular firmware should be used because it compiles the
+verified pure core directly and retains the stronger output-latch defence. A
+cross-device lane would mostly validate an intentionally inferior firmware
+choice while adding a third build/simulator profile and more fail-closed
+orchestration. Reconsider only for a concrete universal-image, component-
+substitution or manufacturing-SKU requirement; otherwise it remains an academic
+differential-simulator exercise.
 
 **Formal ISR/main interleaving model (TLA+ or SPIN).** Would formalize the
 AVR ISR/main interleaving at the byte level, modeling each byte read/write as a
@@ -735,7 +710,6 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Multi-press boundary cases | 2.5 | 3–4 h | Medium — tick-boundary edge cases |
 | Power-on-pressed simulation gap | 2.5 | 1–2 h | Low — simulator fidelity, not coverage |
 | Power-supply ramp-up analysis | 2.5 | 2–3 h | Medium — real-world robustness |
-| Converge the two scratch-tree builders | 2.5 | 2–3 h | Medium — removes a defect class that shrinks a gate silently |
 | Hardware-validation procedure doc | 3 | 2–3 h | High — primary-part WDT gap |
 | HIL rig: behavioural + register introspection | 3 | 5–8 d | High — silicon-level model validation |
 | Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |

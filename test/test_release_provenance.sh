@@ -8,13 +8,19 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-provenance.XXXXXX")
 repo="$work/repo with spaces"
 log="$work/check.log"
 checks=0
+worker_pids=()
 
 fail() {
 	printf 'FAIL: %s\n' "$*" >&2
 	exit 1
 }
 
-cleanup() { rm -rf "$work"; }
+cleanup() {
+	local pid
+	for pid in "${worker_pids[@]}"; do kill -KILL -- "-$pid" 2>/dev/null || true; done
+	for pid in "${worker_pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+	rm -rf "$work"
+}
 trap cleanup EXIT HUP INT TERM
 
 command -v git >/dev/null 2>&1 || fail "git is required"
@@ -27,10 +33,14 @@ declare -F release_tool_version_line >/dev/null \
 	|| fail "release tool-version helper was not defined"
 declare -F release_output_path_is_safe >/dev/null \
 	|| fail "release output-path helper was not defined"
+declare -F release_terminate_workers >/dev/null \
+	|| fail "release worker-cleanup helper was not defined"
+declare -F release_jobs_cap >/dev/null \
+	|| fail "release jobs-cap helper was not defined"
 
 expect_output_path_pass() {
 	local label=$1 output_dir=$2 mode=$3
-	if ! (cd "$ROOT" && release_output_path_is_safe "$ROOT" "$output_dir" "$mode") \
+	if ! (cd "$ROOT" && release_output_path_is_safe "$ROOT" "$output_dir" "$mode" v99.0.0) \
 			>"$log" 2>&1; then
 		fail "$label unexpectedly failed: $(<"$log")"
 	fi
@@ -39,7 +49,7 @@ expect_output_path_pass() {
 
 expect_output_path_fail() {
 	local label=$1 output_dir=$2 mode=$3 needle=$4
-	if (cd "$ROOT" && release_output_path_is_safe "$ROOT" "$output_dir" "$mode") \
+	if (cd "$ROOT" && release_output_path_is_safe "$ROOT" "$output_dir" "$mode" v99.0.0) \
 			>"$log" 2>&1; then
 		fail "$label unexpectedly passed"
 	fi
@@ -52,6 +62,15 @@ expect_output_path_fail() {
 # Canonicalization matters because --output-dir accepts arbitrary paths, including
 # `..` components and aliases through an existing symlink.
 expect_output_path_pass "production release tree" "$ROOT/release/v99.0.0" production
+expect_output_path_pass "relative production release tree" release/v99.0.0 production
+expect_output_path_pass "normalized production release tree" \
+	"release/../release/v99.0.0" production
+expect_output_path_fail "production release root" "$ROOT/release" production \
+	"production output must be exactly"
+expect_output_path_fail "wrong production version" "$ROOT/release/v99.0.1" production \
+	"production output must be exactly"
+expect_output_path_fail "external production tree" "$work/production/v99.0.0" production \
+	"production output must be exactly"
 expect_output_path_pass "external dry-run tree" "$work/dry-run/v99.0.0" dry-run
 expect_output_path_fail "dry-run release root" "$ROOT/release" dry-run \
 	"dry-run output must not be staged under the repository release tree"
@@ -94,6 +113,82 @@ version=$(release_tool_version_line "PIC10F322 XC8" "$tools/xc8-322") \
 	|| fail "PIC10F322 compiler version probe failed"
 [ "$version" = "XC8 322 VERSION" ] \
 	|| fail "PIC10F322 compiler version probe returned: $version"
+checks=$((checks + 1))
+
+# Interrupted release cleanup must terminate and reap every active worker. One
+# fixture exits on TERM; the other ignores TERM and requires the KILL fallback.
+cat > "$tools/term-worker" <<'EOF'
+#!/usr/bin/env bash
+trap 'printf "TERM\n" > "$WORKER_TERM_MARKER"; exit 0' TERM
+bash -c 'trap "" TERM; printf "%s\n" "$BASHPID" > "$WORKER_CHILD_PID"; while :; do sleep 1; done' &
+child=$!
+while [ ! -s "$WORKER_CHILD_PID" ]; do sleep 0.01; done
+: > "$WORKER_READY"
+wait "$child"
+EOF
+cat > "$tools/ignore-worker" <<'EOF'
+#!/usr/bin/env bash
+trap '' TERM
+bash -c 'trap "" TERM; printf "%s\n" "$BASHPID" > "$WORKER_CHILD_PID"; while :; do sleep 1; done' &
+child=$!
+while [ ! -s "$WORKER_CHILD_PID" ]; do sleep 0.01; done
+: > "$WORKER_READY"
+wait "$child"
+EOF
+chmod 750 "$tools/term-worker" "$tools/ignore-worker"
+term_ready="$work/term.ready"
+ignore_ready="$work/ignore.ready"
+term_marker="$work/term.marker"
+term_child_file="$work/term.child"
+ignore_child_file="$work/ignore.child"
+WORKER_READY="$term_ready" WORKER_TERM_MARKER="$term_marker" \
+	WORKER_CHILD_PID="$term_child_file" setsid "$tools/term-worker" &
+term_pid=$!
+worker_pids+=("$term_pid")
+WORKER_READY="$ignore_ready" WORKER_CHILD_PID="$ignore_child_file" \
+	setsid "$tools/ignore-worker" &
+ignore_pid=$!
+worker_pids+=("$ignore_pid")
+for _ in {1..100}; do
+	[ -f "$term_ready" ] && [ -f "$ignore_ready" ] && break
+	sleep 0.01
+done
+[ -f "$term_ready" ] && [ -f "$ignore_ready" ] \
+	|| fail "release worker fixtures did not start"
+term_child=$(<"$term_child_file")
+ignore_child=$(<"$ignore_child_file")
+release_terminate_workers "$term_pid" "$ignore_pid" \
+	|| fail "release worker cleanup failed"
+worker_pids=()
+[ "$(<"$term_marker")" = TERM ] \
+	|| fail "cooperative release worker did not receive TERM"
+! kill -0 "$term_pid" 2>/dev/null \
+	|| fail "cooperative release worker survived cleanup"
+! kill -0 "$ignore_pid" 2>/dev/null \
+	|| fail "TERM-ignoring release worker survived KILL fallback"
+! kill -0 "$term_child" 2>/dev/null \
+	|| fail "cooperative worker descendant survived group cleanup"
+! kill -0 "$ignore_child" 2>/dev/null \
+	|| fail "TERM-ignoring worker descendant survived group cleanup"
+checks=$((checks + 1))
+
+if release_terminate_workers not-a-pid >"$log" 2>&1; then
+	fail "worker cleanup accepted a malformed PID"
+fi
+grep -Fq "invalid release worker PID" "$log" \
+	|| fail "malformed worker PID failed for the wrong reason: $(<"$log")"
+checks=$((checks + 1))
+
+[ "$(release_jobs_cap '' 15)" = 15 ] \
+	|| fail "default release jobs did not select all combinations"
+[ "$(release_jobs_cap 1 15)" = 1 ] \
+	|| fail "release jobs lowered a valid concurrency limit"
+[ "$(release_jobs_cap 15 15)" = 15 ] \
+	|| fail "release jobs changed an exact concurrency limit"
+[ "$(release_jobs_cap 16 15)" = 15 ] \
+	|| fail "release jobs did not cap a larger concurrency limit"
+[ "$(release_jobs_cap 999999999999999999999999999999999999 15)" = 15 ] \
+	|| fail "release jobs did not safely cap an oversized decimal"
 checks=$((checks + 1))
 
 version=$(release_tool_version_line "PIC10F320 XC8" "$tools/xc8-320") \
@@ -233,11 +328,18 @@ if grep -Fq "printf -- '| XC8 |" "$RELEASE"; then
 fi
 checks=$((checks + 1))
 
+version_assignments=$(grep -Ec '^TC_[A-Z0-9_]+=\$\(release_tool_version_line ' "$RELEASE")
+[ "$version_assignments" -eq 10 ] \
+	|| fail "release has $version_assignments fail-closed executable version probes, expected 10"
+! grep -Fq 'v1()' "$RELEASE" \
+	|| fail "release still contains the fail-open v1 tool-version helper"
+checks=$((checks + 1))
+
 # The producer guard must run after the output path is selected and again between
 # the final source check and staging. The second check closes the long window in
 # which an external output-path component could be replaced with a symlink.
 mapfile -t output_guard_lines < <(grep -nF \
-	'release_output_path_is_safe "$REPO_ROOT" "$OUTPUT_DIR" "$RELEASE_MODE"' "$RELEASE")
+	'release_output_path_is_safe "$REPO_ROOT" "$OUTPUT_DIR" "$RELEASE_MODE" "$VERSION"' "$RELEASE")
 mapfile -t precondition_lines < <(grep -nF 'section "0. preconditions"' "$RELEASE")
 mapfile -t source_check_lines < <(grep -nF \
 	'release_source_is_unchanged "$GIT_SHA" "$DRY_RUN"' "$RELEASE")
@@ -258,6 +360,18 @@ release_stage_line=${release_stage_lines[0]%%:*}
 	|| fail "release output guards do not bracket validation and staging"
 grep -Fq "printf -- '- **Release mode:** %s\\n' \"\$RELEASE_MODE\"" "$RELEASE" \
 	|| fail "release manifest does not record its release mode"
+checks=$((checks + 1))
+
+grep -Fq 'release_terminate_workers "${SOAK_PIDS[@]}"' "$RELEASE" \
+	|| fail "release EXIT cleanup does not terminate tracked soak workers"
+grep -Fq "trap '' HUP INT TERM" "$RELEASE" \
+	|| fail "release cleanup remains interruptible by a repeated signal"
+for signal_status in "trap 'on_signal 129' HUP" "trap 'on_signal 130' INT" "trap 'on_signal 143' TERM"; do
+	grep -Fq "$signal_status" "$RELEASE" \
+		|| fail "release is missing signal cleanup route: $signal_status"
+done
+grep -Fq 'exec setsid "${SOAK_BIN[$name]}"' "$RELEASE" \
+	|| fail "release soak workers are not isolated into process groups"
 checks=$((checks + 1))
 
 # The generated manifest carries the mode tag CI requires, and the workflow also

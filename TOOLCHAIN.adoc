@@ -23,6 +23,15 @@ tool, re-run `make clean && make test` before relying on its output.
                 invocations use one worktree-local advisory lock because build,
                 test, coverage, and simulator artifacts are intentionally shared.
 
+  Git:          git (required). Release-history/signature tests construct and
+                inspect temporary repositories; ci-local also requires a real
+                worktree before reproducing CI.
+  GnuPG:        gnupg / `gpg` (required). Release-history regressions generate
+                ephemeral signing keys and verify detached/tag signatures.
+  PyYAML:       python3-yaml (required for strict runs). Workflow syntax and
+                job-structure validation imports `yaml`; `STRICT_TOOLS=1` turns
+                an absent module into a hard failure.
+
 == AVR toolchain (cross-compile to MCU target)
 
   avr-gcc:      7.3.0  (package: gcc-avr)
@@ -147,9 +156,9 @@ Device budgets, both gated per variant on every build:
   PIC10F320:  256 words of flash, 64 bytes of RAM   (`make pic320`)
 
 See "Resource Utilization" in DESIGN_DOCUMENTATION.adoc for the measured
-figures.  The 320's margins are tight enough to be a design input rather than a
-footnote -- 12 free words on the tightest variant -- which is why one of the
-PIC10F322 shell's defensive checks could not be ported to it; see
+figures, which own the per-variant word counts.  The 320's margins there are
+tight enough to be a design input rather than a footnote: they are why one of
+the PIC10F322 shell's defensive checks could not be ported to it; see
 docs/pic10f320_special_case.md.
 
 PIC10F320 commands, for reference (same toolchain, `pic320-` targets):
@@ -282,16 +291,36 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
 
 == Optional (symbolic execution)
 
-  KLEE:         not installed; test/formal/test_symbolic.c compiles and runs under
-                the host gcc as an exhaustive enumerator when USE_KLEE is not
-                defined.  `make test-symbolic-klee` requires KLEE plus matching
-                clang/llvm-link versions. It compiles test_symbolic.c and the
-                shipping src/bypass_pure.c separately, links both bitcode modules,
-                and executes the linked module so core calls are fully defined.
+  KLEE:         3.2 (Homebrew/Linuxbrew formula revision 3; keg 3.2_3)
+  LLVM:         16.0.6 (Homebrew llvm@16; matching clang and llvm-link)
+  source:       Homebrew's `klee` formula, installed under
+                /home/linuxbrew/.linuxbrew.  The Makefile defaults name the
+                installation explicitly so a non-interactive /bin/sh does not
+                need Linuxbrew on PATH:
+                  KLEE=/home/linuxbrew/.linuxbrew/bin/klee
+                  KLEE_CLANG=/home/linuxbrew/.linuxbrew/opt/llvm@16/bin/clang
+                  KLEE_LLVMLINK=/home/linuxbrew/.linuxbrew/opt/llvm@16/bin/llvm-link
+                  KLEE_INC=/home/linuxbrew/.linuxbrew/Cellar/klee/3.2_3/include
+  measured:     `make test-symbolic-klee STRICT_TOOLS=1` passed on 2026-07-27:
+                5,918 instructions, 14 completed paths, 0 partially completed,
+                exit 0.  The target compiles test/formal/test_symbolic.c and the
+                shipping src/bypass_pure.c separately with the matching LLVM 16
+                clang, links both modules with LLVM 16 llvm-link, and executes the
+                linked module, so the solver runs the shipping core rather than
+                an undefined call or re-implementation.
+  fallback:     Without USE_KLEE, test/formal/test_symbolic.c compiles and runs
+                under the host gcc as an exhaustive enumerator over the same
+                invariant-valid domain.
+  CI status:    KLEE execution is not hosted in CI.  The default `make test`
+                aggregate runs `test-klee-build`, which checks the two-module
+                compile/link recipe but does not execute the solver.  No CI job
+                installs KLEE or invokes `test-symbolic-klee`; adding that lane
+                remains an open item in TODO.md.
 
 == Reproducing the environment (Ubuntu 24.04)
 
-  sudo apt install make util-linux gcc-avr avr-libc simavr libsimavr-dev libelf-dev \
+  sudo apt install make util-linux git gnupg python3 python3-yaml \
+                   gcc-avr avr-libc simavr libsimavr-dev libelf-dev \
                    gcc clang clang-tidy cppcheck
 
   Optional analysis tools:
@@ -342,12 +371,21 @@ For CI reproducibility, prefer Ubuntu 24.04 LTS Docker image:
     docker run --rm -v $(pwd):/src ubuntu:24.04 bash -c \
       "apt-get update && \
        apt-get install -y make util-linux gcc-avr avr-libc simavr libsimavr-dev libelf-dev \
-                          gcc clang clang-tidy cppcheck cbmc python3 && \
-       cd /src && make test"
+                          gcc clang clang-tidy cppcheck cbmc \
+                          git gnupg python3 python3-yaml && \
+       cd /src && \
+       GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/src \
+         make test STRICT_TOOLS=1"
 
 The image is minimal: `apt-get update` and `make` itself are required, and
 `make test` runs the analyzers (clang-tidy, cppcheck), the MISRA addon (needs
-`python3`), and CBMC (`cbmc`) -- omitting any of these makes the corresponding
-gate skip silently (or fail under `STRICT_TOOLS=1`). For the authoritative,
-tested command set, use `scripts/ci-local.sh` (it mirrors the CI job order).
+`python3`), workflow parser (`python3-yaml`), release history/signature fixtures
+(`git` + `gnupg`), and CBMC (`cbmc`) -- omitting any of these makes the
+corresponding gate skip or fail. The command pins `STRICT_TOOLS=1` so an optional
+strict gate cannot validate nothing. The process-local Git override trusts only
+the `/src` bind mount for this invocation; Docker runs as root while the mounted
+repository is normally owned by the host user, so modern Git otherwise rejects
+it as dubious ownership. It does not write Git configuration. For the
+authoritative, tested command set, use `scripts/ci-local.sh` (it mirrors the CI
+job order).
 ....
