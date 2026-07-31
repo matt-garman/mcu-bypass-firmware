@@ -57,6 +57,231 @@ file is the human-readable summary of *what changed*.
   the only one of the two that can witness the fault the test is named for.
   Both harnesses chain the MCU model's own reset callback instead of replacing
   it.
+- **`attiny202-soak` could report success having soaked nothing.** It was the
+  only one of the four AVR-XT harness targets missing the guards its three
+  siblings share — `XT_SIM_VARIANT` validated against both the supported list
+  and `VARIANTS`, an ATtiny_DFP device-file guard, a missing image treated as a
+  failure, and a failure when the loop covered zero images — while its own
+  header comment claimed the "same guard / skip / variant-selection as the
+  others". `make attiny202-soak XT_SIM_VARIANT=bogus` exited 0 where all three
+  siblings exit 2, printing "no ATtiny202 images built; nothing to soak" and
+  blaming an absent DFP in a run that had just built and budget-checked all
+  three images. The target is a release-qualification input —
+  `RELEASE_SOAK_NAMES` carries `attiny202_relay`, and each soak log is published
+  evidence — so "soaked nothing" must never read as "soak passed". The recipe
+  now mirrors its siblings verbatim; nothing that passed before behaves
+  differently.
+- **Three layers of the ATtiny202 matrix could go green having exercised part
+  of it.** Every `attiny202-*` harness target iterates `VARIANTS`, and a variant
+  that is skipped rather than run still leaves the target at exit 0, so exit
+  status alone never proved coverage. CI compensated by counting PASS markers
+  but sized the expected count from `make -s print-VARIANTS` — the AVR Classic
+  list, which is user-overridable, so a single override shrank the build and the
+  expectation together: `VARIANTS=cd4053` produced one `SIM PASS`, which the job
+  expected and accepted. The count now comes from `XT_VARIANTS_SUPPORTED`, which
+  is the ATtiny202's own list and is declared `override`. `ci-local.sh` ran the
+  same five targets with none of those assertions, despite opening with the
+  promise that "a clean pass here means the CI matrix will be green"; it now
+  applies all five through an `xt_gate` helper mirroring `ci.yml` step for step.
+  And `attiny202-test-target` did not enforce the matrix itself, so it now
+  rejects incomplete, empty, duplicate and unsupported variant requests before
+  running any simulator lane, and requires exact per-variant PASS counts from
+  sim, fault and lock-step plus both lock-step boot scenarios. The fault gate's
+  hardcoded `n=3` is deliberately left unconverted: if all five counts read one
+  variable, a wrong edit to that variable makes all five agree on the wrong
+  answer at once, so one independently pinned count is a cross-check on the
+  variable itself — the same reasoning that gives `RELEASE_IMAGES` its value.
+- **`ci-local.sh --skip-attiny202` could not pass.** Push mode set
+  `MUTATION_ALLOW_SKIP=1` for `--skip-pic` only, so skipping the ATtiny202
+  toolchain removed its lane and then failed `test-long` for the very mutants
+  the skip had intentionally removed. Either explicit toolchain skip now selects
+  partial mutation mode; only a complete target-toolchain run receives `0`, and
+  PR mode still runs the non-mutation path. The routing regression had codified
+  the defect by supplying `--skip-attiny202` to every invocation while expecting
+  `0`, so it no longer does.
+- **Both soak families could hold a liveness verdict open across the event it
+  was watching for.** The PIC soak sampled LED state only at the endpoints of a
+  multi-millisecond hold, so a rapid even-numbered retrigger sequence collapsed
+  into an unchanged endpoint and read as no activity at all; it now samples
+  after every simulated millisecond. The AVR-XT soak checked its reset and
+  terminal force-reset witnesses on a schedule that could miss the final
+  round-trip before the verdict; it now checks after every liveness hold,
+  including that last one.
+- **The release orchestrator had four fail-open edges.** `scripts/make-release.sh`
+  could stage production output outside the canonical version directory, accepted
+  an unvalidated soak-concurrency value, and proceeded from a failed or empty
+  executable version probe. Soak workers now run in isolated process groups and
+  every exit path terminates and reaps them without stale-PID, launch-window,
+  descendant or repeated-signal gaps; direct `flock` execution stays
+  signal-transparent, and a failed run's evidence is preserved for diagnosis
+  rather than cleaned away.
+- **`scripts/fetch_yasimavr.sh` could recursively delete a caller-named
+  destination.** `VENV_DIR` is documented as caller-selectable and was assigned
+  straight to `VENV`, which `rm -rf "$VENV"` then consumed twice — so a typo, the
+  repository root, a shared directory or any existing non-venv directory could
+  take unrelated data with it. The fetcher now rejects extra and empty
+  arguments, canonicalizes physical paths, and refuses filesystem and repository
+  roots, destination symlinks, non-directories, missing parents and existing
+  directories without a schema-valid private stamp. It builds and verifies in a
+  randomized sibling, installs with a no-clobber rename, and restores the prior
+  stamped venv after an install failure or a signal, retaining it as a rollback
+  backup rather than recursively deleting any caller-derived path.
+- **Git line-ending conversion could invalidate release bytes and signatures.**
+  With no `.gitattributes`, a checkout under `core.autocrlf=true` — the setting
+  Git for Windows recommends — rewrote release artifacts, so images no longer
+  matched `SHA256SUMS` and the detached signature over it no longer verified.
+  Firmware images, checksums, signatures, qualification records and expected
+  hashes are now marked non-text. The same pass then found that the two records
+  `scripts/verify-release-qualification.sh` reads by exact whole-line match were
+  still convertible: it matches the `MANIFEST.md` heading with `grep -Fxq` and
+  compares each soak log's `SOAK_RESULT` record for string equality, so a CRLF
+  checkout made the verifier reject a correct release — fail-closed, but on the
+  command `release/README.md` tells auditors to run. Both classes are now pinned
+  to LF, and because an extension allowlist is what let them be missed in the
+  first place, a `* text=auto eol=lf` default now backstops it so a class nobody
+  has named yet cannot inherit the platform default. `make test-release-history`
+  asserts the policy on a representative path per class, verifies mixed-EOL
+  historical artifacts byte-for-byte under `autocrlf`, and pins the catch-all.
+- **The stack high-water-mark gate overstated free SRAM by four bytes.**
+  `test_stack_high_water_mark()` asserted a margin "between the deepest SP and
+  BSS" but measured down to `0x60`, the first SRAM byte — below BSS, so the four
+  static bytes living there were counted as free. The error ran optimistic
+  inside a gate: at the 8-byte floor the stack could reach within 4 free bytes
+  of BSS while the message announced 8. The floor now comes from the firmware
+  ELF's `__bss_end`, read from the ELF rather than derived, so a static added
+  later tightens the gate by itself; a missing symbol is a failure, not a
+  fallback to the looser reference point. Margins now read 29 B (relay, mute)
+  and 31 B (cd4053), matching the figures `DESIGN_DOCUMENTATION.adoc` already
+  stated and which the gate's own output had contradicted by 4.
+- **The default host suite failed in an extracted source archive.** The
+  PIC10F320 coverage checker's mode validation inspected the file's Git index
+  mode unconditionally, which no source tarball has. It now requires the checker
+  to be locally executable everywhere but inspects the index mode only inside a
+  worktree, keeping clone and CI validation without rejecting archives.
+- **`MANIFEST.md` carried a repo-relative link that does not resolve as release
+  notes.** The file is committed at `release/<version>/MANIFEST.md`, where the
+  relative path to the PIC10F320 special-case document is correct, but
+  `release.yml` also passes it verbatim to `gh release create --notes-file`, and
+  on the release page that path 404s. The link is now absolute and pinned to the
+  release tag, so it is correct in both contexts and points at the matching
+  source revision rather than a moving `main`. The repository URL is a literal
+  constant rather than being read from `git remote`, which varies with the
+  operator's SSH-versus-HTTPS clone and would silently change published notes.
+- **Three resource tables and the BOD/BOR failsafe list had drifted from the
+  build.** The AVR Classic flash table was stale on all nine rows (716/756/756
+  bytes on the ATtiny13a and 742/782/782 on the ATtiny45/85, against
+  684/724/732 and 710/750/758), and the PIC10F322 program-space column on all
+  three (445/473/471 words at 86.9/92.4/92.0%, against 404/431/434). In both
+  cases the relay and mute variants are now byte-identical or reordered, so the
+  tables' implied size ordering was wrong as well. Neither drift originated in
+  the build: `release/v0.9.5/MANIFEST.md` already published the correct AVR
+  figures and that release's `build-pic.log` the correct PIC ones, so the
+  shipped evidence has been right throughout and only the design document was
+  wrong — and nothing in the Makefile, scripts, tests or CI reads these tables,
+  so no gate could have caught it. Percentages now use `avr-size`'s own
+  one-decimal values, making the table reproducible by the command in its
+  caption. Separately, the BOD/BOR failsafe list covered two of the six release
+  parts while its framing promised per-part coverage; the ATtiny202 (BODCFG
+  0xE5 → BODLEVEL7 at 4.2 V, enabled in active and sleep) and PIC10F320
+  (BOREN=ON, LPBOR=OFF, BORV=HI, the same ~2.4/2.7 V trip points as the
+  PIC10F322) entries are added, and the shared hardware-design caveat now names
+  both PIC parts instead of generalising from the 322.
+- **Four resource claims survived their own measurements.** The Resource
+  Utilization section opened by claiming large headroom on every supported part,
+  which the document's own PIC10F320 table contradicts two screens later at
+  95.3% of 256 words and 12 free — the entire reason that target is built
+  differently. It now states the measured span, 9.1% of an ATtiny85's flash
+  through 95.3% of a PIC10F320's. The paragraph under the AVR Classic table
+  still claimed room for future features "without approaching any resource
+  limit" while the ATtiny13a above it sits at 73.8% of a 90% ceiling; it is now
+  split per resource, the SRAM half naming the gate that enforces it
+  (`test_stack_high_water_mark()`, which fails `make test-sim` below an 8-byte
+  floor — never a build failure, as the old text implied). The PIC10F322 prose
+  claim of "comfortable headroom" is replaced with the real 39-of-512-word
+  margin, and corrected again in `docs/pic10f320_feasibility.md`, which asserted
+  it as still true. Both Makefile resource-gate comments were stale in the same
+  way: the ATtiny13a flash comment said ~46% where the firmware is at 73.8%, and
+  the `STACK_MAX_FRAME` comment claimed a ~10 B full-path high-water mark where
+  it is 29–31 B, while conflating per-frame and total-depth bounds. Neither
+  ceiling moved; both comments now name the target that reproduces their
+  figures, and a documented `STACK_MAX_FRAME=16` override example that exits 2
+  against the 19 B timer ISR frame is corrected to 24.
+- **The ATtiny202 shell shipped an unresolved `CONFIRM` note on its BOD fuse.**
+  A bring-up instruction to the reader — confirm the BODCFG level encoding and
+  that the level is characterised rather than reserved — was published on a
+  release-supported part, on the fuse that establishes the peripheral-safe
+  voltage floor. It is answered in place from the pinned device pack so the
+  evidence travels with the code, and the note pins down the trap that makes the
+  question worth asking: the pack carries two BOD level enums, one for `BOD.CTRLB`
+  at bit 0 and one for the fuse at bit 5, and decoding a BODCFG byte with the
+  register enum yields a confident wrong answer. The PIC10F320 shell carried the
+  same ten CONFIG bits as the PIC10F322 with no explanation, so a maintainer
+  reading only the 320 got the safety-relevant configuration without the
+  reasoning; it now points at the 322's rationale block rather than copying it.
+  Both are comment-only: all six images are byte-identical, and no `CONFIRM`,
+  `TODO` or `FIXME` marker remains under `src/`.
+- **The debounce documentation confused eight samples with eight milliseconds.**
+  `PRESSED_THRESH` was described as a fixed 8 ms duration when it counts eight
+  sample instants; clean press latency and isolated-pulse rejection are now
+  derived from those instants, arbitrary edge phase and the stated oscillator
+  tolerance. The timing example is redrawn to show the seven intervals between
+  eight low samples and 24 intervals between 25 high samples.
+- **The live PIC10F320 documentation contradicted itself.** Its expected-image
+  check is now described as the standing SHA-256 gate it is, with its
+  compiler-reproducibility limitation retained; blocking actuation timing is
+  scoped to both polled PIC implementations and both ISR-driven AVR generations
+  rather than one part; the target topology is stated as five shared-core
+  targets through three shell files plus one self-contained target; and direct
+  core comparisons are separated from the other PIC10F320 evidence lanes.
+- **The MISRA compliance record's scope and its deviations disagreed.** Genuine
+  AVR register-access deviations were not distinguished from
+  cross-translation-unit artifacts or PIC10F320 analyzer accommodations. The
+  record now documents the eight-source/fourteen-header analysis boundary, each
+  target's direct cppcheck inputs, the Classic-only report scope and the
+  PIC10F320 variant sweep, with the suppression-file comments aligned to match.
+  No waiver changed.
+- **Historical release provenance overclaimed the soak matrix.** Manifests for
+  `v0.9.0`–`v0.9.4` say "24.0-h parallel soak of every variant × MCU", which is
+  broader than the retained evidence: the ATtiny13a images were not soaked
+  directly, because simavr cannot model their watchdog reset, and were covered
+  by the full suite and the core-identical tinyx5 soaks — as each manifest's own
+  limitation note already said. `release/README.md` now carries a live erratum
+  linking each affected release's note, and this file's claims are narrowed to
+  the canonical release soak combinations. The historical snapshots are
+  unchanged.
+- **The toolchain record said KLEE was absent.** It now names the validated
+  Linuxbrew KLEE 3.2 and matching LLVM 16.0.6 tools with their configured paths
+  and measured real-core result, keeps the host enumerator fallback, and
+  distinguishes that local solver run from the still-absent KLEE execution in
+  CI.
+- **Two firmware comments contradicted the code they describe.** The PIC10F320
+  bypass and engage call sites named the physical MCU pin levels backwards, and
+  an adjacent branch comment cited a pure-core state member that does not exist.
+  Comment-only: pinned before-and-after builds produced all 18 images
+  byte-identically.
+- **Imported PIC10F320 harnesses named the standalone project's make targets.**
+  Comments carried over from the pre-merge repository directed readers to
+  unprefixed targets that do not exist here; they now name the integrated
+  `pic320-*` targets, and the gpsim script's supported output-variant count is
+  corrected from five to three.
+- **Strict CI and release environments omitted prerequisites they assume.** Git,
+  GnuPG and PyYAML are now installed and asserted before the strict suites and
+  before release signature, qualification or history verification, with the same
+  checks in `ci-local.sh`'s unconditional host preflight. The Ubuntu and Docker
+  toolchain recipes are updated to match, and workflow validation now enforces
+  real apt arguments, executable assertions and placement before first use
+  rather than accepting whatever the runner image happens to contain.
+- **Assorted live-documentation and shell defects.** The top-level simulator
+  summary omitted the ATtiny202 lock-step gate; `test/README.md` omitted nine
+  tracked validation scripts and AVR-XT tests, and did not call out the
+  exact-pin helper shared by both PIC harness families; a release link,
+  validation table, tool label, target count and several fragile source-line
+  references were wrong across the live documentation; and the two `.gitignore`
+  files contradicted each other about `commit_msg.txt` — both now state the same
+  working-note policy, under which the root file is ignored while
+  `release/<version>/commit_msg.txt` is deliberately tracked. The yasimavr
+  fetcher now uses POSIX signal 0 for its cleanup trap and passes ShellCheck,
+  with no change to its path or replacement-safety behaviour.
 
 ### Changed
 - **`test` and `test-long` now share one gate inventory.** The two aggregates
@@ -117,6 +342,50 @@ file is the human-readable summary of *what changed*.
   Source headers are unchanged, and published releases are untouched: they ship
   `.hex` images and provenance records, not `LICENSE`, so no signed artifact
   contains the superseded string.
+- **External supply-chain inputs are now pinned and integrity-checked.** The
+  reviewed XC8 and PIC DFP hashes are verified in one shared installer before
+  either download executes; every workflow action is pinned to a full commit
+  SHA; checkout credential persistence is disabled and `GH_TOKEN` scoped to
+  publication; the complete yasimavr build and runtime environment is
+  hash-locked without build isolation or dependency resolution; and the exact
+  ATtiny_DFP cache tree is re-hashed on every use rather than trusted once.
+- **The PIC10F320 lane now reuses the PIC10F322 harnesses instead of duplicating
+  them.** The merge left separate fault, lock-step and target-I/O
+  implementations carrying over a thousand duplicated lines. Each is now an
+  include-only shared core behind a thin per-part adapter, with processor and
+  image defaults, output-macro vocabularies, program-space limits, fault counts
+  and the PIC10F322-only LATA injections kept explicit at the adapter boundary.
+  A second pass removed what that one left: all four harnesses — the soak
+  included, which the first pass did not touch — now share one `gpsim_bootstrap.h`
+  for the ~30-line libgpsim bring-up, and the two gpsim CLI wrappers share the
+  75 byte-identical lines of tool discovery, timeout validation, `STRICT_TOOLS`
+  skip-vs-fail contract, invocation, snapshot extraction and verdict. Bring-up
+  is split across two functions rather than one so that every harness keeps the
+  work it does between loading the processor and attaching the footswitch, and
+  not one simulator operation is reordered in any of the four. Consolidating
+  exposed a real defect: `footsw_set(1)` drives RA3 low — PRESSED — while the
+  fault core and the soak both documented it as "1 = released", so two of the
+  four described their footswitch backwards. One correct comment now lives in
+  the shared header. Because a shared file the mutation sandbox does not require
+  degrades the PIC10F320 lane silently, both new files are required entries in
+  `validate_pic320_sandbox()`.
+- **Post-release status language now reflects what shipped.** ATtiny202 and
+  PIC10F320 are marked released in the unified `v0.9.6` image set, and the
+  PIC10F320 is promoted to release-supported while keeping its constrained-target
+  architecture and assurance caveat; the validation narrative points at the
+  retained production evidence.
+- **The completed PIC10F320 merge plan is marked historical.** It remains useful
+  as a section-numbered decision record and is cited throughout the
+  implementation, but its paths, targets, scope and status describe the merge
+  rather than the tree. A banner now records the merge as complete, preserves
+  the body and section anchors, and directs current architecture and validation
+  questions to the maintained PIC10F320 documents.
+- **The third-party yasimavr patches carry their licensing.** The two
+  modified-source patches now identify the pinned yasimavr 0.1.6 source, its
+  upstream copyright holder and GPL-3.0-or-later terms, alongside upstream's
+  verbatim GPLv3 text, with each patch marked with its license and modification
+  date. The root MIT grant is clarified to exclude third-party material carrying
+  its own license.
 
 ### Added
 - **Two ATtiny202 build regressions** covering an absent and a non-executable
@@ -148,6 +417,25 @@ file is the human-readable summary of *what changed*.
   build under `-Werror=unused-function`; breaking the ISR handshake stops the
   debounce state machine and fails the functional, noise-count and lock-step
   assertions.
+- **`make test-supply-chain`**, pinning the integrity contract for every
+  external input: offline corruption, cache reuse, workflow action pinning and
+  token-scope regressions.
+- **`make test-fetch-yasimavr`**, an offline regression set for the venv
+  fetcher's safety properties — sentinel handling, failed builds and failed
+  verification, rename and signal rollback, path aliases, and destinations that
+  change late.
+- **`make test-pic320-coverage-archive`**, which runs the real coverage target
+  and checker against a source-archive fixture with deterministic tool
+  stand-ins, and proves that local-mode or index-mode failures stop before
+  compilation.
+- **Fail-closed regressions for the gates the fixes above touched.** The shared
+  target-matrix regression gained AVR-XT whole-matrix lane and missing-marker
+  fixtures; `test-ci-local-routing` exercises all four push skip combinations
+  through a complete fake AVR-XT preflight and PASS-count route, so the
+  ATtiny202-only case cannot regress unnoticed; `test-release-history` gained
+  the `autocrlf` artifact fixtures and the line-ending policy assertions; and
+  the PIC soak liveness work added synthetic transition, reset and force-reset
+  fixtures with complete rebuild dependency wiring.
 
 ## [0.9.6] - 2026-07-30
 

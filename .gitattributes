@@ -1,12 +1,28 @@
+# Default: every file Git detects as text is stored and checked out with LF.
+# An extension allowlist cannot express this, because a class absent from it
+# silently inherits the platform default instead of failing. That is how
+# `MANIFEST.md` and the soak evidence logs stayed convertible while the images
+# beside them were pinned. The rules below still name the classes the gates
+# assert; this line covers whatever arrives later.
+* text=auto eol=lf
+
 # Source and executable text must retain Unix line endings.
 .gitattributes text eol=lf
 Makefile text eol=lf
 *.c text eol=lf
+*.cc text eol=lf
 *.h text eol=lf
 *.py text eol=lf
 *.sh text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+
+# Release records that verification parses by exact whole-line match:
+# `verify-release-qualification.sh` matches the MANIFEST.md heading with
+# `grep -Fxq` and compares each soak log's SOAK_RESULT record for string
+# equality, so a CR fails a correct release rather than a bad one.
+*.md text eol=lf
+*.log text eol=lf
 
 # These artifacts are byte-exact inputs to release and qualification checks.
 *.asc -text

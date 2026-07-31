@@ -291,10 +291,20 @@ byte_exact_paths=(
 	release/v0.9.5/SHA256SUMS.asc
 	test/pic10f320/expected_images.sha256
 )
+# These two are text rather than binary, but verification reads them by exact
+# whole-line match -- the MANIFEST.md heading through `grep -Fxq`, each soak
+# log's SOAK_RESULT record through string equality -- so a CRLF checkout makes
+# `verify-release-qualification.sh` reject a correct release. They must survive
+# the same conversion policy as the images, for a different reason.
+line_matched_paths=(
+	release/v0.9.5/MANIFEST.md
+	release/v0.9.5/evidence/soak-avr_cd4053_t45.log
+)
 git -C "$ROOT" -c core.autocrlf=true checkout-index \
-	--prefix="$autocrlf_checkout/" -- "${byte_exact_paths[@]}" \
+	--prefix="$autocrlf_checkout/" \
+	-- "${byte_exact_paths[@]}" "${line_matched_paths[@]}" \
 	|| fail "could not create autocrlf release-artifact checkout"
-for path in "${byte_exact_paths[@]}"; do
+for path in "${byte_exact_paths[@]}" "${line_matched_paths[@]}"; do
 	expected=$(git -C "$ROOT" cat-file blob ":$path" | sha256sum)
 	expected=${expected%% *}
 	actual=$(sha256sum "$autocrlf_checkout/$path")
@@ -317,13 +327,26 @@ attribute=$(git -C "$ROOT" check-attr text -- release/v99.0.0/QUALIFICATION)
 checks=$((checks + 1))
 for path in Makefile src/bypass_pure.c src/bypass_pure.h \
 		test/avr/sim_attiny202.py test/test_release_history.sh \
-		.github/workflows/release.yml; do
+		.github/workflows/release.yml test/pic/test_soak_pic.cc \
+		release/v0.9.5/MANIFEST.md \
+		release/v0.9.5/evidence/soak-avr_cd4053_t45.log; do
 	attribute=$(git -C "$ROOT" check-attr text eol -- "$path")
 	[ "$attribute" = "$path: text: set
 $path: eol: lf" ] \
 		|| fail "$path is not explicitly LF text: $attribute"
 	checks=$((checks + 1))
 done
+
+# The allowlist above is what let MANIFEST.md and the evidence logs stay
+# convertible while the images beside them were pinned, so assert the catch-all
+# that now backstops it: a class nobody has named yet must still resolve to LF
+# instead of inheriting the platform default.
+unlisted=release/v99.0.0/evidence/unlisted.newext
+attribute=$(git -C "$ROOT" check-attr text eol -- "$unlisted")
+[ "$attribute" = "$unlisted: text: auto
+$unlisted: eol: lf" ] \
+	|| fail "unnamed file classes do not default to LF text: $attribute"
+checks=$((checks + 1))
 
 RELEASE_SIGNING_FINGERPRINT=$wrong_fingerprint \
 RELEASE_SIGNING_PUBLIC_KEY=$wrong_public_key \
