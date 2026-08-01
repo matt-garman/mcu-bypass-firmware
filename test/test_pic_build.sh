@@ -32,8 +32,8 @@ PB_VARIANT=${PB_VARIANT:-cd4053}
 PB_MATRIX_TARGET=${PB_MATRIX_TARGET:-pic}
 PB_MATRIX_VARIANTS_VAR=${PB_MATRIX_VARIANTS_VAR:-VARIANTS}
 PB_MATRIX_VARIANTS=${PB_MATRIX_VARIANTS:-cd4053 mute relay}
-PB_MATRIX_IMAGES=${PB_MATRIX_IMAGES:-bypass_cd4053_pic10f322.hex bypass_mute_pic10f322.hex bypass_relay_pic10f322.hex}
-PB_MATRIX_FAIL_IMAGE=${PB_MATRIX_FAIL_IMAGE:-bypass_relay_pic10f322.hex}
+PB_MATRIX_IMAGES=${PB_MATRIX_IMAGES:-bypass-pic10f322-cd4053_simple.hex bypass-pic10f322-cd4053_with_mute.hex bypass-pic10f322-tq2_l2_5v_relay.hex}
+PB_MATRIX_FAIL_IMAGE=${PB_MATRIX_FAIL_IMAGE:-bypass-pic10f322-tq2_l2_5v_relay.hex}
 PB_MATRIX_REQUIRE_COMPLETE=${PB_MATRIX_REQUIRE_COMPLETE:-1}
 PB_MATRIX_UNSUPPORTED=${PB_MATRIX_UNSUPPORTED:-unknown}
 PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-}
@@ -63,7 +63,22 @@ case "$PB_TARGET" in
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; expected_checks= ;;
 esac
-hex="$repo/$PB_BUILD_DIR/${PB_FW_BASE}_${PB_VARIANT}_${PB_TAG}.hex"
+# Local restatement of the Makefile's canonical image basename (see its
+# "canonical firmware image basename" block): <prefix>-<mcu>-<output stage>.
+# Deliberately independent of the Makefile rather than read back from it -- this
+# regression exists to prove the build emits the names the release contract
+# expects, and a name derived from the thing under test could not fail.
+pb_image() {
+	case $1 in
+	cd4053|cd4053-simple) _stage=cd4053_simple ;;
+	mute|cd4053-mute)     _stage=cd4053_with_mute ;;
+	relay|tq2-relay)      _stage=tq2_l2_5v_relay ;;
+	*) printf 'FAIL: no image stage known for variant %s\n' "$1" >&2; exit 1 ;;
+	esac
+	printf '%s/%s/%s-%s-%s.hex' "$repo" "$PB_BUILD_DIR" \
+		"$PB_FW_BASE" "$PB_TAG" "$_stage"
+}
+hex=$(pb_image "$PB_VARIANT")
 asm=${hex%.hex}.s
 sym=${hex%.hex}.sym
 size_probe_stem="$repo/$PB_BUILD_DIR/size_probe_$PB_VARIANT"
@@ -334,7 +349,7 @@ run_matrix_make() {
 run_expected_hash_make() {
 	make --no-print-directory -C "$repo" pic320-test-build \
 		CC=true HOSTCC=true PIC320_CC="$tools/xc8" PIC320_BUILD_DIR="$PB_BUILD_DIR" \
-		PIC320_FW_BASE="$PB_FW_BASE" PIC320_TAG="$PB_TAG" \
+		FW_BASE="$PB_FW_BASE" PIC320_TAG="$PB_TAG" \
 		PIC320_FLASH_WORDS="$PB_FLASH_WORDS" \
 		PIC320_VARIANTS_ALL="$PB_MATRIX_VARIANTS" STRICT_TOOLS=1 AWK=awk "$@"
 }
@@ -717,7 +732,7 @@ checks=$((checks + 1))
 # when a caller supplies a conflicting PIC320_VARIANT that names a stale image.
 if [ "$PB_SELECTOR_ROUTING" -eq 1 ]; then
 	selected=tq2-relay
-	selected_hex="$repo/$PB_BUILD_DIR/${PB_FW_BASE}_${selected}_${PB_TAG}.hex"
+	selected_hex=$(pb_image "$selected")
 	selector_specs=(
 		"pic320-test-fault-target PIC320_FAULT_VARIANT"
 		"pic320-test-lockstep PIC320_LOCKSTEP_VARIANT"
@@ -729,7 +744,7 @@ if [ "$PB_SELECTOR_ROUTING" -eq 1 ]; then
 		rm -f "$hex" "$selected_hex"
 		if ! make --no-print-directory -C "$repo" "$target" \
 				CC=true HOSTCC=true PIC320_CC="$tools/xc8" \
-				PIC320_BUILD_DIR="$PB_BUILD_DIR" PIC320_FW_BASE="$PB_FW_BASE" \
+				PIC320_BUILD_DIR="$PB_BUILD_DIR" FW_BASE="$PB_FW_BASE" \
 				PIC320_TAG="$PB_TAG" PIC320_FLASH_WORDS="$PB_FLASH_WORDS" \
 				PIC320_VARIANT="$PB_VARIANT" "$selector=$selected" \
 				PIC320_SOAK_CXX="$tools/missing-cxx" STRICT_TOOLS= AWK=awk \

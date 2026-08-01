@@ -308,7 +308,7 @@ done
 # power-on-pressed is byte-identical and remains shared under test/pic/.
 pic320_build="$work/build_pic10f320"
 mkdir -p "$pic320_build"
-: > "$pic320_build/bypass_mcu_tq2-relay_pic10f320.hex"
+: > "$pic320_build/bypass-pic10f320-tq2_l2_5v_relay.hex"
 stc_log="$work/pic320.stc.log"
 : > "$stc_log"
 if ! output=$(

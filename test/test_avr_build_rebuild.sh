@@ -97,8 +97,8 @@ run_make() {
 cc_count() { grep -c -F "$1.tmp" "$cc_log" || true; }
 objcopy_count() { grep -c -F "$1.tmp" "$objcopy_log" || true; }
 
-t13=build_avr_classic/bypass_cd4053
-x5=build_avr_classic/bypass_cd4053_t85
+t13=build_avr_classic/bypass-attiny13a-cd4053_simple
+x5=build_avr_classic/bypass-attiny85-cd4053_simple
 
 run_make "$t13.hex" >/dev/null
 [[ "$(cc_count "$t13.elf")" -eq 1 && "$(objcopy_count "$t13.hex")" -eq 1 ]] \

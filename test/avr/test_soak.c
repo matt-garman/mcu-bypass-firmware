@@ -63,7 +63,7 @@
 
 // ---- Firmware / MCU parameters (injected by the Makefile build rule) --------
 #ifndef FW_PATH
-#  define FW_PATH  "bypass_cd4053_t85.elf"
+#  define FW_PATH  "bypass-attiny85-cd4053_simple.elf"
 #endif
 #ifndef MCU_NAME
 #  define MCU_NAME "attiny85"

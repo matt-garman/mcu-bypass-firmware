@@ -339,10 +339,11 @@ jobs:
             PIC320_DFP="${XC8_DFP_ROOT}/xc8"
 
       # Two chips, two separately named artifacts -- never one merged upload.
-      # The release machinery keys on image basename, and both chips build
-      # `bypass_mcu_<variant>_<tag>.hex` into different directories; flattening
-      # them into one artifact would be the first step toward shipping a 322
-      # image under a 320 name.
+      # The release machinery keys on image basename. Those basenames now carry
+      # the MCU (`bypass-pic10f322-<stage>.hex` vs `bypass-pic10f320-<stage>.hex`),
+      # so a flattened upload would no longer silently collide -- but keep them
+      # separate anyway: the directory split is the check that does not depend on
+      # anyone having got the naming right.
       - name: Upload PIC10F322 firmware images
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -432,9 +433,12 @@ jobs:
 
       - name: Assert ATtiny202 images built (fail loud, do NOT skip)
         run: |
-          for v in $(make -s print-XT_VARIANTS_SUPPORTED); do
-            hex="build_avr_xt/bypass_${v}_attiny202.hex"
-            test -f "$hex" || { echo "::error::missing $hex (DFP fetch or build failed)"; exit 1; }
+          # Ask the Makefile for the canonical basenames rather than composing
+          # them here: the image stage token is not the variant token, so a
+          # hand-built name would silently stop matching after a rename.
+          for hex in $(make -s print-XT_RELEASE_IMAGES); do
+            test -f "build_avr_xt/$hex" \
+              || { echo "::error::missing build_avr_xt/$hex (DFP fetch or build failed)"; exit 1; }
           done
 
       - name: Save ATtiny_DFP cache

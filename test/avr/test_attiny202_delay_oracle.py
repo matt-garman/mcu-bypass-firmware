@@ -218,13 +218,29 @@ def check_variant(ck, variant, counts):
             % (variant, RELAY_MIN_MS, pretty))
 
 
+# Image stage token -> the short variant vocabulary this oracle speaks. The two
+# differ on purpose (see the Makefile's "canonical firmware image basename"),
+# so the image name cannot simply be searched for a variant name.
+STAGE_VARIANTS = {
+    "cd4053_simple": "cd4053",
+    "cd4053_with_mute": "mute",
+    "tq2_l2_5v_relay": "relay",
+}
+
+
 def variant_of(elf_path):
-    """Map an image path (bypass_<variant>_attiny202.elf) to its variant."""
-    base = os.path.basename(elf_path)
-    for variant in VARIANTS:
-        if ("_%s_" % variant) in base:
-            return variant
-    return None
+    """Map an image path (bypass-<mcu>-<stage>.elf) to its variant.
+
+    Split on the field delimiter rather than searching for a substring: the
+    stage tokens share prefixes (`cd4053_simple` / `cd4053_with_mute`), and a
+    substring match would also accept a name with the wrong field count. An
+    unrecognized or malformed name returns None and the caller fails it.
+    """
+    stem = os.path.basename(elf_path).rsplit(".", 1)[0]
+    fields = stem.split("-")
+    if len(fields) != 3:
+        return None
+    return STAGE_VARIANTS.get(fields[2])
 
 
 def disassemble(elf_path):

@@ -520,6 +520,15 @@ plan must respect:
    `bypass_mcu_` prefix in `scripts/make-release.sh`'s image→MCU classifier, and
    an explicit statement of the asymmetry in the release `README.md`/`MANIFEST.md`.
    Whole-tree unification is deferred to the `TODO.md` unified-naming item.
+
+   > **Superseded by v0.9.8.** D2's decision held through `v0.9.7`. In
+   > `v0.9.8` the whole tree moved to one scheme,
+   > `bypass-<mcu>-<output stage>.hex`, so the `bypass_mcu_` prefix, the
+   > three-convention asymmetry, and the classifier obligation it created
+   > are all gone. Historical `release/vX.Y.Z/` directories keep their
+   > original names (signed `SHA256SUMS`). This document records the
+   > `v0.9.6` merge as it happened and is not retrofitted.
+
 4. **Build/test output names.** Use `build_pic10f320/` and variant-private
    nested outputs. Never let concurrent variants share an object, executable,
    coverage file, `gpsim.log`, or PASS-evidence path. This item covers
@@ -2179,7 +2188,7 @@ because a partial unification is worse than either endpoint.
 | # | Question | Decision | Consequences to implement |
 | --- | --- | --- | --- |
 | D1 | §5.1/§5.6 lane prefix | **Keep `pic-` = PIC10F322**; new lane is `pic320-` with `PIC320_*` variables. The 322 lane is not renamed. | No churn on known-good 322 targets and no interface break for existing `make print-PIC_*` consumers. Accepts the asymmetry §5.1 flags: `pic-` silently means "the other PIC". Because `PIC_*` stays 322, §5.6's rule reads "anything chip-specific and new gets `PIC320_`", and the shared-tool allowlist in §5.6 stays exactly as written. |
-| D2 | §5.3 release image basenames | **Keep the child basenames** (`bypass_mcu_{cd4053-simple,cd4053-mute,tq2-relay}_pic10f320.hex`). No migration at `v0.9.6`. | No published-name break, and §6.13's comparison can key on filename. Two obligations follow and are not optional: (a) `scripts/make-release.sh`'s image→MCU classifier must recognize the `bypass_mcu_` prefix explicitly, or a PIC10F320 image falls through to generic AVR metadata (§10); (b) the release `README.md`/`MANIFEST.md` must state the three-convention asymmetry rather than leave it to be inferred. |
+| D2 *(superseded in v0.9.8 by the unified `bypass-<mcu>-<stage>.hex` scheme)* | §5.3 release image basenames | **Keep the child basenames** (`bypass_mcu_{cd4053-simple,cd4053-mute,tq2-relay}_pic10f320.hex`). No migration at `v0.9.6`. | No published-name break, and §6.13's comparison can key on filename. Two obligations follow and are not optional: (a) `scripts/make-release.sh`'s image→MCU classifier must recognize the `bypass_mcu_` prefix explicitly, or a PIC10F320 image falls through to generic AVR metadata (§10); (b) the release `README.md`/`MANIFEST.md` must state the three-convention asymmetry rather than leave it to be inferred. |
 | D3 | §11 CI job graph | **Extend the existing `pic` job** to build and validate both chips serially. No sibling job, no `needs` edits. | Simplest DAG, one XC8 install/cache restore, and `verify`/`attiny202`/`build-matrix`/`stress` keep gating on PIC10F320 for free because they already declare `needs: pic`. Cost: the full PIC10F320 lane lands on the critical path of all four dependents. Revisit only if CI wall-clock becomes the binding constraint — splitting later is a mechanical change, whereas choosing the split now would force the gating question in §11 immediately. |
 | D4 | §6.13 gate lifetime | **One-shot migration check.** Run the byte-identity comparison at the Phase-2 exit gate and again in Phase 4, record the compared hashes in both phase commit messages and in `docs/pic10f320_validation.md`, then retire it. No checked-in expected-hash file. **Superseded after the merge audit:** the revisitable trade was revisited and `pic320-test-build` now enforces the preserved final hashes as a standing gate. | The original decision minimized maintenance after the migration proof. The later gate restores the byte-level witness for hardware-integrity checks that equivalence and lock-step cannot see, with explicit reviewed rebaselining discipline. |
 

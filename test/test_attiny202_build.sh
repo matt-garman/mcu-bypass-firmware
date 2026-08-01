@@ -85,14 +85,14 @@ run_build() {
 
 seed_stale() {
 	mkdir -p "$build"
-	printf 'stale ELF\n' > "$build/bypass_cd4053_attiny202.elf"
-	printf ':00000001FF\n' > "$build/bypass_cd4053_attiny202.hex"
+	printf 'stale ELF\n' > "$build/bypass-attiny202-cd4053_simple.elf"
+	printf ':00000001FF\n' > "$build/bypass-attiny202-cd4053_simple.hex"
 }
 
 assert_no_artifacts() {
-	[ ! -e "$build/bypass_cd4053_attiny202.elf" ] \
+	[ ! -e "$build/bypass-attiny202-cd4053_simple.elf" ] \
 		|| { printf 'FAIL: %s left a stale ELF\n' "$1" >&2; exit 1; }
-	[ ! -e "$build/bypass_cd4053_attiny202.hex" ] \
+	[ ! -e "$build/bypass-attiny202-cd4053_simple.hex" ] \
 		|| { printf 'FAIL: %s left a stale HEX\n' "$1" >&2; exit 1; }
 }
 
@@ -112,14 +112,20 @@ expect_failure() {
 
 seed_stale
 (export TEST_VARIANTS="cd4053 mute relay"; run_build) >/dev/null
-for variant in cd4053 mute relay; do
-	[ -s "$build/bypass_${variant}_attiny202.elf" ] \
+# Spelled out per variant rather than composed from the variant name: the
+# canonical basename's stage token is NOT the variant token (`mute` builds
+# `cd4053_with_mute`), and this test's job includes proving the build emits the
+# names the release contract names.
+for spec in "cd4053 cd4053_simple" "mute cd4053_with_mute" "relay tq2_l2_5v_relay"; do
+	read -r variant stage <<<"$spec"
+	stem="$build/bypass-attiny202-${stage}"
+	[ -s "$stem.elf" ] \
 		|| { printf 'FAIL: missing fresh %s ELF\n' "$variant" >&2; exit 1; }
-	grep -q '^fresh ELF$' "$build/bypass_${variant}_attiny202.elf" \
+	grep -q '^fresh ELF$' "$stem.elf" \
 		|| { printf 'FAIL: stale %s ELF survived\n' "$variant" >&2; exit 1; }
-	grep -q '^:0100000001FE$' "$build/bypass_${variant}_attiny202.hex" \
+	grep -q '^:0100000001FE$' "$stem.hex" \
 		|| { printf 'FAIL: stale %s HEX survived\n' "$variant" >&2; exit 1; }
-	grep -Eq '^:00000001[Ff][Ff]\r?$' "$build/bypass_${variant}_attiny202.hex" \
+	grep -Eq '^:00000001[Ff][Ff]\r?$' "$stem.hex" \
 		|| { printf 'FAIL: missing fresh valid %s HEX\n' "$variant" >&2; exit 1; }
 	checks=$((checks + 1))
 done
@@ -227,8 +233,8 @@ assert_no_artifacts "absent DFP strict"
 checks=$((checks + 1))
 
 seed_stale
-rm -f "$build/bypass_cd4053_attiny202.hex"
-mkdir "$build/bypass_cd4053_attiny202.hex"
+rm -f "$build/bypass-attiny202-cd4053_simple.hex"
+mkdir "$build/bypass-attiny202-cd4053_simple.hex"
 if output=$(run_build 2>&1); then
 	printf 'FAIL: unremovable stale output was accepted\n' >&2
 	exit 1

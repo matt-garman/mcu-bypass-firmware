@@ -51,7 +51,7 @@
 
 // ---- Firmware / MCU parameters (injected by the Makefile build rule) --------
 #ifndef FW_PATH
-#  define FW_PATH  "build_pic/bypass_cd4053_pic10f322.hex"
+#  define FW_PATH  "build_pic/bypass-pic10f322-cd4053_simple.hex"
 #endif
 #ifndef PROC_NAME
 #  define PROC_NAME "p10f322"

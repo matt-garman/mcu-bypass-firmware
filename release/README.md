@@ -21,8 +21,10 @@ BYPASS state.
 
 These images are retained only for historical integrity and reproducibility.
 **Do not select or flash them for new TMUX4053 hardware.** Use release `v0.9.3`
-or later and choose the standard `bypass_cd4053*.hex` or `bypass_mute*.hex`
-image for the target MCU, without `_tmux` in the filename. Those unified images
+or later and choose the standard CD4053 image for the target MCU, without
+`_tmux` in the filename (`bypass_cd4053*.hex` / `bypass_mute*.hex` in the
+`v0.9.3`-`v0.9.7` naming; `bypass-<mcu>-cd4053_simple.hex` /
+`bypass-<mcu>-cd4053_with_mute.hex` from `v0.9.8`). Those unified images
 support both CD4053 and TMUX4053 boards with fail-safe BYPASS polarity. See the
 [`v0.9.3` correction](../CHANGELOG.md#093---2026-07-11).
 
@@ -113,34 +115,64 @@ than trusting whatever keys happen to be installed on the CI runner.
 
 ## Which image do I want?
 
-Images are named `bypass_<variant>[_<mcu>].hex`:
+**From `v0.9.8` onward** every image is named the same way, with three
+hyphen-separated fields (words inside a field use underscores):
 
-| variant | switching hardware |
+```
+bypass-<mcu>-<output stage>.hex
+bypass-attiny85-cd4053_with_mute.hex
+```
+
+| `<mcu>` | target MCU |
 |---|---|
-| `cd4053` | CD4053 / TMUX4053 analog switch, simple (2 sections) |
-| `mute`   | CD4053 / TMUX4053 with mute-before-switch (3 sections) |
-| `relay`  | Panasonic TQ2-L2-5V latching relay |
+| `attiny13a` | ATtiny13a (primary), 1.2 MHz |
+| `attiny85` | ATtiny85, 1.0 MHz |
+| `attiny45` | ATtiny45, 1.0 MHz |
+| `attiny202` | ATtiny202, 2 MHz (AVR-XT, UPDI) |
+| `pic10f322` | Microchip PIC10F322, 2 MHz (HFINTOSC) |
+| `pic10f320` | Microchip PIC10F320, 2 MHz (HFINTOSC) |
 
-| name suffix | target MCU |
+| `<output stage>` | switching hardware |
 |---|---|
-| *(none)* | ATtiny13a (primary), 1.2 MHz |
-| `_t85` | ATtiny85, 1.0 MHz |
-| `_t45` | ATtiny45, 1.0 MHz |
-| `_pic10f322` | Microchip PIC10F322, 2 MHz (HFINTOSC) |
-| `_pic10f320` | Microchip PIC10F320, 2 MHz (HFINTOSC) |
+| `cd4053_simple` | CD4053 / TMUX4053 analog switch, simple (2 sections) |
+| `cd4053_with_mute` | CD4053 / TMUX4053 with mute-before-switch (3 sections) |
+| `tq2_l2_5v_relay` | Panasonic TQ2-L2-5V latching relay |
 
-The PIC10F320 images are the one exception to the naming scheme above: they are
-called `bypass_mcu_<variant>_pic10f320.hex`, with a different prefix and the
-variant names `cd4053-simple`, `cd4053-mute` and `tq2-relay`. Those names are
-inherited from the separate project that target was merged from and were kept
-deliberately, so previously published image names stay valid. **Match images to
-MCUs by the suffix table and by `MANIFEST.md`, never by prefix.**
+Every combination exists, so a release is exactly 6 x 3 = 18 images.
 
-ATtiny202 images use the `_attiny202` suffix on the standard `bypass_` prefix.
-They are the only AVR images that are **not** programmed over ISP: the ATtiny202
-uses UPDI, and its fuses are seven individually named AVR8X memories rather than
-the classic `lfuse`/`hfuse` pair. `MANIFEST.md` lists all seven per image and
-gives the exact `avrdude` command.
+ATtiny202 images are the only AVR images **not** programmed over ISP: the
+ATtiny202 uses UPDI, and its fuses are seven individually named AVR8X memories
+rather than the classic `lfuse`/`hfuse` pair. `MANIFEST.md` lists all seven per
+image and gives the exact `avrdude` command.
+
+### Renamed in v0.9.8 (`v0.9.7` and earlier used different names)
+
+Releases up to and including `v0.9.7` used three inconsistent conventions, and
+the ATtiny13a images carried **no MCU field at all** — a bare `bypass_cd4053.hex`
+was the ATtiny13a image. Nothing in that filename stopped it being flashed onto
+an ATtiny85 at the wrong clock. The MCU field is now mandatory on every image.
+
+Historical release directories are **not** renamed: their `SHA256SUMS` names the
+files and is covered by a detached signature, so renaming them would invalidate
+the published signatures. Use this table to map an old name to its replacement.
+
+| up to `v0.9.7` | from `v0.9.8` |
+|---|---|
+| `bypass_cd4053.hex` | `bypass-attiny13a-cd4053_simple.hex` |
+| `bypass_mute.hex` | `bypass-attiny13a-cd4053_with_mute.hex` |
+| `bypass_relay.hex` | `bypass-attiny13a-tq2_l2_5v_relay.hex` |
+| `bypass_<v>_t85.hex` | `bypass-attiny85-<stage>.hex` |
+| `bypass_<v>_t45.hex` | `bypass-attiny45-<stage>.hex` |
+| `bypass_<v>_attiny202.hex` | `bypass-attiny202-<stage>.hex` |
+| `bypass_<v>_pic10f322.hex` | `bypass-pic10f322-<stage>.hex` |
+| `bypass_mcu_cd4053-simple_pic10f320.hex` | `bypass-pic10f320-cd4053_simple.hex` |
+| `bypass_mcu_cd4053-mute_pic10f320.hex` | `bypass-pic10f320-cd4053_with_mute.hex` |
+| `bypass_mcu_tq2-relay_pic10f320.hex` | `bypass-pic10f320-tq2_l2_5v_relay.hex` |
+
+where old `<v>` `cd4053`/`mute`/`relay` maps to `<stage>`
+`cd4053_simple`/`cd4053_with_mute`/`tq2_l2_5v_relay`. The image CONTENTS are
+unchanged by the rename — each `v0.9.8` image is bit-identical to its `v0.9.7`
+counterpart unless the changelog says the firmware itself changed.
 
 The per-release `MANIFEST.md` lists every image with its MCU, clock, flash
 usage, fuse bytes, and exact flashing command.
@@ -176,7 +208,7 @@ programmer (e.g. USBtiny/USBasp) and `avrdude`:
 # ATtiny13a example (fuse bytes from MANIFEST.md): lfuse=0x4a hfuse=0xf9
 avrdude -c usbtiny -p t13 \
         -U lfuse:w:0x4a:m -U hfuse:w:0xf9:m \
-        -U flash:w:bypass_cd4053.hex:i
+        -U flash:w:bypass-attiny13a-cd4053_simple.hex:i
 ```
 
 If you have the source tree, the Makefile does both steps for you:
@@ -187,14 +219,14 @@ If you have the source tree, the Makefile does both steps for you:
 configures the device; there is no separate fuse step:
 
 ```sh
-pk2cmd -PPIC10F322 -Fbypass_cd4053_pic10f322.hex -M -Y -R      # PICkit 2
+pk2cmd -PPIC10F322 -Fbypass-pic10f322-cd4053_simple.hex -M -Y -R   # PICkit 2
 # or, from the source tree: make program-pic VARIANT=<variant>
 ```
 
 **PIC10F320** — same story; the CONFIG word is embedded in the HEX:
 
 ```sh
-pk2cmd -PPIC10F320 -Fbypass_mcu_cd4053-simple_pic10f320.hex -M -Y -R   # PICkit 2
+pk2cmd -PPIC10F320 -Fbypass-pic10f320-cd4053_simple.hex -M -Y -R   # PICkit 2
 ```
 
 There is no `make program-pic320` convenience target yet; flash it with the

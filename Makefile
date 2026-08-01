@@ -102,8 +102,10 @@ unexport _MAKE_SERIAL_CLASSIC_EMPTY _MAKE_SERIAL_CLASSIC_DUPLICATE \
 #                             WDT-reset / fault-injection coverage.
 #
 #   Variant outputs are written under build_avr_classic/ (override with
-#   AVR_BUILD_DIR=...), named bypass_<variant>.elf/.hex (ATtiny13a) and
-#   bypass_<variant>_t<n>.elf/.hex (tinyx5, n in {85,45}). Pick a variant for
+#   AVR_BUILD_DIR=...), named bypass-<mcu>-<output stage>.elf/.hex -- e.g.
+#   bypass-attiny13a-cd4053_simple.elf, bypass-attiny85-tq2_l2_5v_relay.hex.
+#   See "canonical firmware image basename" below; note the stage token is the
+#   driver-source spelling, not the short VARIANT token. Pick a variant for
 #   single-target actions with VARIANT=<name>, e.g. `make VARIANT=relay program`
 #   (ATtiny13a) or `make VARIANT=relay program45` (ATtiny45).
 #
@@ -189,8 +191,10 @@ AVR_ELF_ARCH ?= avr:25
 # keep the repo root clean -- the AVR counterpart of the PIC build's
 # PIC_BUILD_DIR. Override on the command line, e.g. `make AVR_BUILD_DIR=out`.
 AVR_BUILD_DIR ?= build_avr_classic
-# Per-image path stem: $(AVR_BUILD_DIR)/$(FW_BASE). Each variant/chip suffix
-# (_$(v)[.elf|.hex] for t13a, _$(v)_t<n>... for tinyx5) is appended to it.
+# Per-image path stem: $(AVR_BUILD_DIR)/$(FW_BASE). The canonical image tail
+# ($(call fw_image_tail,<variant>,<mcu-tag>) -- see "canonical firmware image
+# basename" below) is appended to it, giving e.g.
+# build_avr_classic/bypass-attiny85-cd4053_with_mute.elf.
 AVR_FW         = $(AVR_BUILD_DIR)/$(FW_BASE)
 
 # --- Secondary targets: the tinyx5 family (ATtiny25/45/85) ------------------
@@ -227,6 +231,92 @@ macro_relay       = TQ2_L2_5V_RELAY
 src_cd4053      = src/bypass_output_cd4053_simple.c
 src_mute        = src/bypass_output_cd4053_with_mute.c
 src_relay       = src/bypass_output_tq2_l2_5v_relay.c
+
+# --- canonical firmware image basename ---------------------------------------
+# THE single spelling rule for every published .elf/.hex basename, on every MCU:
+#
+#     <prefix>-<mcu>-<output stage>
+#     bypass  - attiny85 - cd4053_with_mute
+#
+# Three fields, hyphen-delimited; words WITHIN a field use underscores. The
+# mixed delimiter is deliberate and load-bearing: stage tokens are themselves
+# multi-word, so an all-hyphen name could not be split back into its fields
+# without hardcoding the MCU vocabulary. With this rule the parse is trivial:
+#
+#     IFS=- read -r prefix mcu stage <<< "$${base%.hex}"
+#
+# WHAT THIS REPLACED (TODO.md "Unified naming scheme", axis 3). Three
+# conventions used to coexist: prefix `bypass_` vs `bypass_mcu_`; stage tokens
+# `cd4053`/`mute`/`relay` vs `cd4053-simple`/`cd4053-mute`/`tq2-relay`; and a
+# part suffix that was `_t45`/`_t85`/`_pic10f322`/`_pic10f320` -- or ABSENT,
+# because a bare `bypass_cd4053.hex` silently meant "the ATtiny13a one". That
+# last case was the real hazard: nothing in the filename stopped a builder from
+# flashing the 1.2 MHz ATtiny13a image onto an ATtiny85. The MCU field is now
+# mandatory on every image, so the 6 x 3 product matrix is visible in a plain
+# directory listing and no image is identified by omission.
+#
+# Longest resulting name is 37 characters (bypass-pic10f320-cd4053_with_mute.hex),
+# one SHORTER than the 38-character worst case this scheme replaced, so the
+# verbose spelling costs nothing anywhere in the toolchain.
+#
+# NOTE the deliberate seam. The stage token is NOT the variant token: `VARIANT=`
+# on the command line, the soak names and the make goals all still speak the
+# short vocabulary (`cd4053`/`mute`/`relay`, `cd4053-simple`/...). This map is
+# the ONLY place the two vocabularies meet. Unifying them as well is axis 4 of
+# the same TODO item; when that happens this map collapses to the identity and
+# is deleted, and nothing else has to move.
+
+# variant short name -> image stage token (matches the driver source basename).
+# `override`, like CLASSIC_VARIANTS_SUPPORTED: these feed RELEASE_IMAGES, which
+# is a contract the build is checked AGAINST, so a command-line assignment must
+# not be able to rename a release image.
+override IMAGE_STAGE_cd4053        = cd4053_simple
+override IMAGE_STAGE_mute          = cd4053_with_mute
+override IMAGE_STAGE_relay         = tq2_l2_5v_relay
+# PIC10F320 speaks its own (inherited) variant vocabulary for the same three
+# output stages; it maps onto the identical stage tokens.
+override IMAGE_STAGE_cd4053-simple = cd4053_simple
+override IMAGE_STAGE_cd4053-mute   = cd4053_with_mute
+override IMAGE_STAGE_tq2-relay     = tq2_l2_5v_relay
+
+# $(call fw_image_tail,<variant>,<mcu-tag>) -> `-<mcu>-<stage>`: everything that
+# follows the prefix. Split out from fw_image so a path stem that ALREADY ends in
+# the prefix can append it without re-deriving the prefix -- the AVR lane's
+# AVR_FW is exactly that, and it stays overridable (test-flash-budget asserts it
+# has not been redirected away from where FLASH_T13_ELFS points).
+#
+# An UNMAPPED variant falls back to its own name rather than to a truncated
+# `bypass-attiny85-`. That case is only reachable through a caller-supplied
+# VARIANTS/VARIANT override naming something unsupported, and the existing
+# request gates reject it by name with their own message -- but those gates run
+# at recipe time, long after this has been expanded to build the rule set. The
+# fallback keeps such names distinct (two bogus variants must not collide on one
+# target) and keeps the gate, not this function, the thing that reports the
+# error. Every SUPPORTED variant is guaranteed to have a mapping by the
+# completeness check below, so the fallback never fires on a real image.
+fw_image_tail = -$(strip $(2))-$(or $(IMAGE_STAGE_$(strip $(1))),$(strip $(1)))
+
+# $(call fw_image,<variant>,<mcu-tag>) -> the basename, no directory, no suffix.
+fw_image = $(FW_BASE)$(call fw_image_tail,$(1),$(2))
+
+# The SHELL-side counterpart, for recipe loops that hold the variant in a shell
+# variable (`for v in $$vars`, `for v in "$$@"`) and so cannot index the map with
+# $(IMAGE_STAGE_...). Paste $(fw_image_sh) at the top of such a recipe, then call
+# `fw_image_of <variant> <mcu-tag>`; it prints the same basename $(call fw_image)
+# would, including the same passthrough for an unmapped variant.
+#
+# It is generated FROM the map above rather than restating it, so the two cannot
+# disagree. (The `\#` is a make-level escape for the shell's `$${p#*:}` prefix
+# strip -- without it make would treat the rest of the line as a comment.)
+override IMAGE_VARIANTS_ALL := $(CLASSIC_VARIANTS_SUPPORTED) $(PIC320_VARIANTS_SUPPORTED)
+override IMAGE_STAGE_PAIRS := $(foreach v,$(IMAGE_VARIANTS_ALL),$(v):$(IMAGE_STAGE_$(v)))
+fw_image_sh = fw_image_of() { for _p in $(IMAGE_STAGE_PAIRS); do if [ "$${_p%%:*}" = "$$1" ]; then echo "$(FW_BASE)-$$2-$${_p\#*:}"; return 0; fi; done; echo "$(FW_BASE)-$$2-$$1"; }
+
+# Fail at parse time, not at publish time, if a supported variant has no stage
+# mapping. Without this the omission surfaces as a missing release image after a
+# 24-hour soak has already run.
+$(foreach v,$(IMAGE_VARIANTS_ALL), \
+	$(if $(IMAGE_STAGE_$(v)),,$(error supported variant '$(v)' has no IMAGE_STAGE_$(v) mapping)))
 
 # Headers shared by every firmware build; any change rebuilds all variants.
 FW_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
@@ -318,9 +408,12 @@ override FLASH_T13_MCU := attiny13a
 override FLASH_T13_BYTES := 1024
 override FLASH_T13_VARIANTS := $(CLASSIC_VARIANTS_SUPPORTED)
 override FLASH_T13_UNKNOWN := $(CLASSIC_VARIANTS_UNKNOWN)
-override FLASH_T13_ELFS := $(AVR_BUILD_DIR)/bypass_cd4053.elf \
-                          $(AVR_BUILD_DIR)/bypass_mute.elf \
-                          $(AVR_BUILD_DIR)/bypass_relay.elf
+# Deliberately spelled from AVR_BUILD_DIR and NOT from AVR_FW: test-flash-budget
+# cross-checks that AVR_FW still points here, and a list derived from the value
+# it is checking could not catch a redirect. The basenames come from fw_image so
+# the check cannot drift from what the build actually emits.
+override FLASH_T13_ELFS := $(foreach v,$(FLASH_T13_VARIANTS),\
+                          $(AVR_BUILD_DIR)/$(call fw_image,$(v),$(FLASH_T13_MCU)).elf)
 override FLASH_T13_OLD_FILE_ARGS := $(foreach elf,$(FLASH_T13_ELFS),--old-file=$(elf))
 
 # Missing-tool policy for the optional gates (PIC/XC8, gpsim, cppcheck, python3,
@@ -563,9 +656,11 @@ FORCE:
 # depend on FORCE so every requested graph consumes current flags/tools/headers.
 #
 # Generated per variant <v> (ATtiny13a, 1.2 MHz):
-#   $(AVR_BUILD_DIR)/bypass_<v>.elf / .hex
+#   $(AVR_BUILD_DIR)/bypass-attiny13a-<stage of v>.elf / .hex
 # Generated per variant <v> x tinyx5 chip <n> (1.0 MHz):
-#   $(AVR_BUILD_DIR)/bypass_<v>_t<n>.elf / .hex
+#   $(AVR_BUILD_DIR)/bypass-attiny<n>-<stage of v>.elf / .hex
+# The chip field is the -mmcu name itself ($(MCU) / $(mmcu_<n>)), so the image
+# cannot claim a part the compiler was not aimed at.
 
 # Create the AVR build-output directory on demand. It is an ORDER-ONLY
 # prerequisite of every image rule below (after the '|'), so the dir's mtime
@@ -575,8 +670,8 @@ $(AVR_BUILD_DIR):
 
 # $(call VARIANT_BUILD_T13,variant)
 define VARIANT_BUILD_T13
-$(AVR_FW)_$(1).elf: $$(CORE_SRC) $$(src_$(1)) $$(FW_HEADERS) Makefile $$(AVR_REBUILD_PREREQ) | $$(AVR_BUILD_DIR)
-	@hex="$$(AVR_FW)_$(1).hex"; \
+$(AVR_FW)$(call fw_image_tail,$(1),$(MCU)).elf: $$(CORE_SRC) $$(src_$(1)) $$(FW_HEADERS) Makefile $$(AVR_REBUILD_PREREQ) | $$(AVR_BUILD_DIR)
+	@hex="$$(AVR_FW)$(call fw_image_tail,$(1),$(MCU)).hex"; \
 	if ! rm -f "$$@" "$$$$hex"; then echo "FAIL: could not remove stale artifact for $$@"; exit 1; fi; \
 	tmp=$$$$(mktemp "$$@.tmp.XXXXXX") || exit 1; \
 	if ! $$(CC) $$(CFLAGS) -D$$(macro_$(1)) $$(LDFLAGS) -o "$$$$tmp" $$(CORE_SRC) $$(src_$(1)); then \
@@ -594,7 +689,7 @@ $(AVR_FW)_$(1).elf: $$(CORE_SRC) $$(src_$(1)) $$(FW_HEADERS) Makefile $$(AVR_REB
 	fi; \
 	if ! mv "$$$$tmp" "$$@"; then rm -f "$$$$tmp"; exit 1; fi
 
-$(AVR_FW)_$(1).hex: $(AVR_FW)_$(1).elf $$(IHEX_VALIDATOR)
+$(AVR_FW)$(call fw_image_tail,$(1),$(MCU)).hex: $(AVR_FW)$(call fw_image_tail,$(1),$(MCU)).elf $$(IHEX_VALIDATOR)
 	@if ! rm -f "$$@"; then echo "FAIL: could not remove stale artifact for $$@"; exit 1; fi; \
 	tmp=$$$$(mktemp "$$@.tmp.XXXXXX") || exit 1; \
 	if ! $$(OBJCOPY) -O ihex -R .eeprom "$$<" "$$$$tmp"; then rm -f "$$$$tmp"; exit 1; fi; \
@@ -607,8 +702,8 @@ $(foreach v,$(VARIANTS),$(eval $(call VARIANT_BUILD_T13,$(v))))
 
 # $(call VARIANT_BUILD_X5,variant,chip-number) -- one tinyx5 chip
 define VARIANT_BUILD_X5
-$(AVR_FW)_$(1)_t$(2).elf: $$(CORE_SRC) $$(src_$(1)) $$(FW_HEADERS) Makefile $$(AVR_REBUILD_PREREQ) | $$(AVR_BUILD_DIR)
-	@hex="$$(AVR_FW)_$(1)_t$(2).hex"; \
+$(AVR_FW)$(call fw_image_tail,$(1),$(mmcu_$(2))).elf: $$(CORE_SRC) $$(src_$(1)) $$(FW_HEADERS) Makefile $$(AVR_REBUILD_PREREQ) | $$(AVR_BUILD_DIR)
+	@hex="$$(AVR_FW)$(call fw_image_tail,$(1),$(mmcu_$(2))).hex"; \
 	if ! rm -f "$$@" "$$$$hex"; then echo "FAIL: could not remove stale artifact for $$@"; exit 1; fi; \
 	tmp=$$$$(mktemp "$$@.tmp.XXXXXX") || exit 1; \
 	if ! $$(CC) -mmcu=$$(mmcu_$(2)) -DF_CPU=$$(F_CPU_X5) $$(CFLAGS_COMMON) -Wl,--gc-sections \
@@ -627,7 +722,7 @@ $(AVR_FW)_$(1)_t$(2).elf: $$(CORE_SRC) $$(src_$(1)) $$(FW_HEADERS) Makefile $$(A
 	fi; \
 	if ! mv "$$$$tmp" "$$@"; then rm -f "$$$$tmp"; exit 1; fi
 
-$(AVR_FW)_$(1)_t$(2).hex: $(AVR_FW)_$(1)_t$(2).elf $$(IHEX_VALIDATOR)
+$(AVR_FW)$(call fw_image_tail,$(1),$(mmcu_$(2))).hex: $(AVR_FW)$(call fw_image_tail,$(1),$(mmcu_$(2))).elf $$(IHEX_VALIDATOR)
 	@if ! rm -f "$$@"; then echo "FAIL: could not remove stale artifact for $$@"; exit 1; fi; \
 	tmp=$$$$(mktemp "$$@.tmp.XXXXXX") || exit 1; \
 	if ! $$(OBJCOPY) -O ihex -R .eeprom "$$<" "$$$$tmp"; then rm -f "$$$$tmp"; exit 1; fi; \
@@ -639,13 +734,13 @@ endef
 $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(eval $(call VARIANT_BUILD_X5,$(v),$(n)))))
 
 # Convenience lists of every variant's artifacts (t13a + each tinyx5 chip).
-ALL_ELF13 = $(foreach v,$(VARIANTS),$(AVR_FW)_$(v).elf)
-ALL_HEX13 = $(foreach v,$(VARIANTS),$(AVR_FW)_$(v).hex)
-ALL_ELFX5 = $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(AVR_FW)_$(v)_t$(n).elf))
-ALL_HEXX5 = $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(AVR_FW)_$(v)_t$(n).hex))
+ALL_ELF13 = $(foreach v,$(VARIANTS),$(AVR_FW)$(call fw_image_tail,$(v),$(MCU)).elf)
+ALL_HEX13 = $(foreach v,$(VARIANTS),$(AVR_FW)$(call fw_image_tail,$(v),$(MCU)).hex)
+ALL_ELFX5 = $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(AVR_FW)$(call fw_image_tail,$(v),$(mmcu_$(n))).elf))
+ALL_HEXX5 = $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(AVR_FW)$(call fw_image_tail,$(v),$(mmcu_$(n))).hex))
 # Per-chip ELF/HEX lists (for the size<n>/all<n> targets).
-$(foreach n,$(TINYX5),$(eval ELF_t$(n) := $(foreach v,$(VARIANTS),$(AVR_FW)_$(v)_t$(n).elf)))
-$(foreach n,$(TINYX5),$(eval HEX_t$(n) := $(foreach v,$(VARIANTS),$(AVR_FW)_$(v)_t$(n).hex)))
+$(foreach n,$(TINYX5),$(eval ELF_t$(n) := $(foreach v,$(VARIANTS),$(AVR_FW)$(call fw_image_tail,$(v),$(mmcu_$(n))).elf)))
+$(foreach n,$(TINYX5),$(eval HEX_t$(n) := $(foreach v,$(VARIANTS),$(AVR_FW)$(call fw_image_tail,$(v),$(mmcu_$(n))).hex)))
 
 # Default goal: build every ATtiny13a variant image and print sizes.
 all: all13
@@ -713,7 +808,7 @@ PIC_CHIP  ?= 10F322
 PIC_TAG   ?= pic10f322
 PIC_XTAL  ?= 2000000UL
 PIC_BUILD_DIR ?= build_pic
-override PIC_HEXES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(PIC_BUILD_DIR)/$(FW_BASE)_$(v)_$(PIC_TAG).hex)
+override PIC_HEXES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(PIC_BUILD_DIR)/$(call fw_image,$(v),$(PIC_TAG)).hex)
 override PIC_ASSEMBLIES := $(PIC_HEXES:.hex=.s)
 override PIC_SYMBOLS := $(PIC_HEXES:.hex=.sym)
 override PIC_BUILD_PRODUCTS := $(PIC_HEXES) $(PIC_ASSEMBLIES) $(PIC_SYMBOLS)
@@ -836,6 +931,7 @@ pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(
 		echo "FAIL: PIC_FLASH_WORDS must be a positive decimal integer"; exit 1; \
 	fi; \
 	echo "=== PIC10F322 build + flash-budget ($$budget words) ==="; \
+	$(fw_image_sh); \
 	fail=0; \
 	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
 		case $$v in \
@@ -843,7 +939,7 @@ pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(
 			*relay) m=TQ2_L2_5V_RELAY;  drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
 			*)      m=CD4053_SIMPLE;    drv=src/bypass_output_cd4053_simple.c ;; \
 		esac; \
-		stem=$(FW_BASE)_$${v}_$(PIC_TAG); name=$$stem.hex; \
+		stem=`fw_image_of "$$v" $(PIC_TAG)`; name=$$stem.hex; \
 		hex=$(PIC_BUILD_DIR)/$$name; asm=$(PIC_BUILD_DIR)/$$stem.s; sym=$(PIC_BUILD_DIR)/$$stem.sym; \
 		if ! rm -f "$$hex" "$$asm" "$$sym"; then \
 			echo "FAIL: could not remove stale PIC10F322 products for variant $$v before compiling"; fail=1; continue; \
@@ -922,7 +1018,7 @@ test/pic/test_config_pic: test/pic/test_config_pic.c
 
 .PHONY: pic-test-config
 pic-test-config: pic test/pic/test_config_pic
-	@hexes=`ls $(PIC_BUILD_DIR)/$(FW_BASE)_*_$(PIC_TAG).hex 2>/dev/null`; \
+	@hexes=`ls $(PIC_BUILD_DIR)/$(FW_BASE)-$(PIC_TAG)-*.hex 2>/dev/null`; \
 	if [ -z "$$hexes" ]; then \
 		echo "no PIC HEX in $(PIC_BUILD_DIR)/ (XC8 absent?); skipping CONFIG-word check"; \
 		$(SKIP); \
@@ -1060,6 +1156,7 @@ endef
 .PHONY: pic-test-gpsim
 pic-test-gpsim: pic
 	@$(call gpsim_wrapper_preflight,PIC10F322); \
+	$(fw_image_sh); \
 	fail=0; \
 	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
 		case $$v in \
@@ -1067,7 +1164,7 @@ pic-test-gpsim: pic
 			*relay) el=0x1 ;; \
 			*)      el=0x3 ;; \
 		esac; \
-		hex=$(PIC_BUILD_DIR)/$(FW_BASE)_$${v}_$(PIC_TAG).hex; \
+		hex=$(PIC_BUILD_DIR)/`fw_image_of "$$v" $(PIC_TAG)`.hex; \
 		if [ ! -f "$$hex" ]; then \
 			echo "no $$hex (XC8 absent?); skipping gpsim test for $$v"; continue; \
 		fi; \
@@ -1124,9 +1221,10 @@ STACK_DEPTH_GATE      = ./test/check_stack_depth_pic.sh
 pic-test-stack-bound: pic
 	@# One shell: skip only when the build produced no HEX. A current HEX without
 	@# its freshly generated assembly is a failed gate, never an absent-tool skip.
-	@have_hex=0; \
+	@$(fw_image_sh); \
+	have_hex=0; \
 	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
-		hex="$(PIC_BUILD_DIR)/$(FW_BASE)_$${v}_$(PIC_TAG).hex"; \
+		hex="$(PIC_BUILD_DIR)/`fw_image_of "$$v" $(PIC_TAG)`.hex"; \
 		if [ -e "$$hex" ] || [ -L "$$hex" ]; then have_hex=1; fi; \
 	done; \
 	if [ $$have_hex -eq 0 ]; then \
@@ -1134,8 +1232,9 @@ pic-test-stack-bound: pic
 		$(SKIP); \
 	fi; \
 	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
-		hex="$(PIC_BUILD_DIR)/$(FW_BASE)_$${v}_$(PIC_TAG).hex"; \
-		asm="$(PIC_BUILD_DIR)/$(FW_BASE)_$${v}_$(PIC_TAG).s"; \
+		stem="$(PIC_BUILD_DIR)/`fw_image_of "$$v" $(PIC_TAG)`"; \
+		hex="$$stem.hex"; \
+		asm="$$stem.s"; \
 		if [ ! -f "$$hex" ] || [ -L "$$hex" ] || [ ! -s "$$hex" ]; then \
 			echo "FAIL: current PIC10F322 image is missing, empty, or not regular: $$hex"; exit 1; \
 		fi; \
@@ -1148,9 +1247,10 @@ pic-test-stack-bound: pic
 	echo "=== PIC10F322 hardware stack bounded for every variant ==="
 
 pic320-test-stack-bound: pic320-variants
-	@have_hex=0; \
+	@$(fw_image_sh); \
+	have_hex=0; \
 	for v in $(PIC320_VARIANTS_ALL); do \
-		hex="$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).hex"; \
+		hex="$(PIC320_BUILD_DIR)/`fw_image_of "$$v" $(PIC320_TAG)`.hex"; \
 		if [ -e "$$hex" ] || [ -L "$$hex" ]; then have_hex=1; fi; \
 	done; \
 	if [ $$have_hex -eq 0 ]; then \
@@ -1158,8 +1258,9 @@ pic320-test-stack-bound: pic320-variants
 		$(SKIP); \
 	fi; \
 	for v in $(PIC320_VARIANTS_ALL); do \
-		hex="$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).hex"; \
-		asm="$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).s"; \
+		stem="$(PIC320_BUILD_DIR)/`fw_image_of "$$v" $(PIC320_TAG)`"; \
+		hex="$$stem.hex"; \
+		asm="$$stem.s"; \
 		if [ ! -f "$$hex" ] || [ -L "$$hex" ] || [ ! -s "$$hex" ]; then \
 			echo "FAIL: current PIC10F320 image is missing, empty, or not regular: $$hex"; exit 1; \
 		fi; \
@@ -1213,7 +1314,7 @@ PIC_SOAK_SAMPLING_HDR = test/pic/soak_sampling.h
 PIC_SOAK_DEPS = $(PIC_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
                 $(PIC_SOAK_SAMPLING_HDR) test/soak_timing_config.h
 PIC_SOAK_BIN = test/pic/test_soak_pic
-PIC_SOAK_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_SOAK_VARIANT)_$(PIC_TAG).hex
+PIC_SOAK_HEX = $(PIC_BUILD_DIR)/$(call fw_image,$(PIC_SOAK_VARIANT),$(PIC_TAG)).hex
 
 # Worst-case blocking output actuation (ms) per variant, passed to the soak as
 # -DSOAK_ACTUATION_BLOCK_MS. A relay coil pulse / CD4053 mute busy-blocks the
@@ -1303,7 +1404,7 @@ pic-test-soak: pic
 PIC_FAULT_VARIANT ?= cd4053
 PIC_FAULT_SRC = test/pic/test_fault_pic.cc
 PIC_FAULT_BIN = test/pic/test_fault_pic
-PIC_FAULT_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_FAULT_VARIANT)_$(PIC_TAG).hex
+PIC_FAULT_HEX = $(PIC_BUILD_DIR)/$(call fw_image,$(PIC_FAULT_VARIANT),$(PIC_TAG)).hex
 PIC_FAULT_SYM = $(PIC_FAULT_HEX:.hex=.sym)
 
 # The test's ctx_ field offsets (+0/+1/+2) depend on XC8's code generator
@@ -1380,7 +1481,7 @@ PIC_LOCKSTEP_VARIANT ?= cd4053
 PIC_LOCKSTEP_SRC = test/pic/test_lockstep_pic.cc
 PIC_LOCKSTEP_BIN = test/pic/test_lockstep_pic
 PIC_LOCKSTEP_MODEL_OBJ = $(PIC_BUILD_DIR)/bypass_pure_lockstep.o
-PIC_LOCKSTEP_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_LOCKSTEP_VARIANT)_$(PIC_TAG).hex
+PIC_LOCKSTEP_HEX = $(PIC_BUILD_DIR)/$(call fw_image,$(PIC_LOCKSTEP_VARIANT),$(PIC_TAG)).hex
 PIC_LOCKSTEP_SYM = $(PIC_LOCKSTEP_HEX:.hex=.sym)
 PIC_LOCKSTEP_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC_LOCKSTEP_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DCTX_ADDR=0x$$a)
 PIC_LOCKSTEP_COMPILE = \
@@ -1435,7 +1536,7 @@ pic-test-lockstep: pic
 PIC_IO_VARIANT ?= cd4053
 PIC_IO_SRC = test/pic/test_io_pic.cc
 PIC_IO_BIN = test/pic/test_io_pic
-PIC_IO_HEX = $(PIC_BUILD_DIR)/$(FW_BASE)_$(PIC_IO_VARIANT)_$(PIC_TAG).hex
+PIC_IO_HEX = $(PIC_BUILD_DIR)/$(call fw_image,$(PIC_IO_VARIANT),$(PIC_TAG)).hex
 PIC_IO_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
 		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
 		-DFW_PATH='"$(CURDIR)/$(PIC_IO_HEX)"' -DPROC_NAME='"$(PIC_GPSIM_PROC)"' \
@@ -1527,7 +1628,7 @@ pic-test-target-variants:
 PIC_PART      ?= PIC10F322
 PIC_PROG      ?= pk2cmd
 PIC_PROG_TOOL ?= PK4
-PIC_PROG_HEX   = $(PIC_BUILD_DIR)/$(FW_BASE)_$(VARIANT)_$(PIC_TAG).hex
+PIC_PROG_HEX   = $(PIC_BUILD_DIR)/$(call fw_image,$(VARIANT),$(PIC_TAG)).hex
 ifeq ($(PIC_PROG),ipecmd)
 PIC_PROG_CMD ?= $(PIC_PROG) -TP$(PIC_PROG_TOOL) -P$(PIC_PART) -M -F$(PIC_PROG_HEX)
 else
@@ -1673,13 +1774,13 @@ $(XT_BUILD_DIR):
 # Build every variant for the ATtiny202 and enforce the 2 KB flash-word budget.
 # The variant -D selector + driver source are chosen inline (the same case-
 # pattern the PIC/analyze recipes use, since $(macro_<v>)/$(src_<v>) cannot
-# expand inside a shell loop). Emits bypass_<variant>_attiny202.elf/.hex.
+# expand inside a shell loop). Emits bypass-attiny202-<output stage>.elf/.hex.
 .PHONY: attiny202
 attiny202: | $(XT_BUILD_DIR)
-	@if ! rm -f "$(XT_BUILD_DIR)"/$(FW_BASE)_*_$(XT_TAG).elf \
-			"$(XT_BUILD_DIR)"/$(FW_BASE)_*_$(XT_TAG).hex \
-			"$(XT_BUILD_DIR)"/$(FW_BASE)_*_$(XT_TAG).elf.tmp \
-			"$(XT_BUILD_DIR)"/$(FW_BASE)_*_$(XT_TAG).hex.tmp; then \
+	@if ! rm -f "$(XT_BUILD_DIR)"/$(FW_BASE)-$(XT_TAG)-*.elf \
+			"$(XT_BUILD_DIR)"/$(FW_BASE)-$(XT_TAG)-*.hex \
+			"$(XT_BUILD_DIR)"/$(FW_BASE)-$(XT_TAG)-*.elf.tmp \
+			"$(XT_BUILD_DIR)"/$(FW_BASE)-$(XT_TAG)-*.hex.tmp; then \
 		echo "FAIL: could not remove stale ATtiny202 artifacts"; exit 1; \
 	fi
 	@if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
@@ -1707,6 +1808,7 @@ attiny202: | $(XT_BUILD_DIR)
 		echo "FAIL: VARIANTS contains a duplicate ATtiny202 variant"; exit 2; \
 	fi; \
 	set -- $(XT_VARIANTS_REQUESTED); \
+	$(fw_image_sh); \
 	fail=0; \
 	for v in "$$@"; do \
 		case $$v in \
@@ -1715,8 +1817,9 @@ attiny202: | $(XT_BUILD_DIR)
 			relay)   m=TQ2_L2_5V_RELAY;   drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
 			*) echo "FAIL: unsupported ATtiny202 variant '$$v'"; fail=1; continue ;; \
 		esac; \
-		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
-		hex=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).hex; \
+		stem=$(XT_BUILD_DIR)/`fw_image_of "$$v" $(XT_TAG)`; \
+		elf=$$stem.elf; \
+		hex=$$stem.hex; \
 		elf_tmp=$$elf.tmp; hex_tmp=$$hex.tmp; log=$(XT_BUILD_DIR)/$$v.log; \
 		if ! rm -f "$$elf" "$$hex" "$$elf_tmp" "$$hex_tmp" "$$log"; then \
 			echo "FAIL: could not clean outputs for ATtiny202 variant $$v"; fail=1; continue; \
@@ -1862,10 +1965,11 @@ attiny202-sim: test-fuses attiny202
 		echo "ATtiny_DFP device files not found; skipping ATtiny202 simulation."; $(SKIP); \
 	fi; \
 	$(yasimavr_skip_if_absent); \
+	$(fw_image_sh); \
 	vars="$$selected"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
 	fail=0; ran=0; \
 	for v in $$vars; do \
-		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
+		elf=$(XT_BUILD_DIR)/`fw_image_of "$$v" $(XT_TAG)`.elf; \
 		if [ ! -f "$$elf" ]; then \
 			echo "FAIL: expected ATtiny202 image missing: $$elf"; fail=1; continue; \
 		fi; \
@@ -1898,10 +2002,11 @@ attiny202-fault: test-fuses attiny202
 		echo "src/bypass_mcu_avr_xt.c not found; skipping ATtiny202 fault injection."; $(SKIP); \
 	fi; \
 	$(yasimavr_skip_if_absent); \
+	$(fw_image_sh); \
 	vars="$$selected"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
 	fail=0; ran=0; \
 	for v in $$vars; do \
-		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
+		elf=$(XT_BUILD_DIR)/`fw_image_of "$$v" $(XT_TAG)`.elf; \
 		if [ ! -f "$$elf" ]; then \
 			echo "FAIL: expected ATtiny202 image missing: $$elf"; fail=1; continue; \
 		fi; \
@@ -1940,10 +2045,11 @@ attiny202-soak: test-fuses attiny202
 		echo "ATtiny_DFP device files not found; skipping ATtiny202 soak."; $(SKIP); \
 	fi; \
 	$(yasimavr_skip_if_absent); \
+	$(fw_image_sh); \
 	vars="$$selected"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
 	fail=0; ran=0; \
 	for v in $$vars; do \
-		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
+		elf=$(XT_BUILD_DIR)/`fw_image_of "$$v" $(XT_TAG)`.elf; \
 		if [ ! -f "$$elf" ]; then \
 			echo "FAIL: expected ATtiny202 image missing: $$elf"; fail=1; continue; \
 		fi; \
@@ -2010,10 +2116,11 @@ attiny202-lockstep: test-fuses attiny202 $(XT_LOCKSTEP_FFI_LIB)
 		echo "ATtiny_DFP device files not found; skipping ATtiny202 lock-step."; $(SKIP); \
 	fi; \
 	$(yasimavr_skip_if_absent); \
+	$(fw_image_sh); \
 	vars="$$selected"; [ -n "$$vars" ] || vars="$(VARIANTS)"; \
 	fail=0; ran=0; \
 	for v in $$vars; do \
-		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
+		elf=$(XT_BUILD_DIR)/`fw_image_of "$$v" $(XT_TAG)`.elf; \
 		if [ ! -f "$$elf" ]; then \
 			echo "FAIL: expected ATtiny202 image missing: $$elf"; fail=1; continue; \
 		fi; \
@@ -2051,7 +2158,7 @@ attiny202-fuses:
 # Flash ONE variant image to hardware (select with VARIANT=<name>); builds first.
 attiny202-flash: attiny202
 	$(AVRDUDE) $(XT_AVRDUDE_FLAGS) \
-		-U flash:w:$(XT_BUILD_DIR)/$(FW_BASE)_$(VARIANT)_$(XT_TAG).hex:i
+		-U flash:w:$(XT_BUILD_DIR)/$(call fw_image,$(VARIANT),$(XT_TAG)).hex:i
 
 # Fresh chip: write the fuses, then flash the selected variant.
 attiny202-program: attiny202-fuses attiny202-flash
@@ -2155,9 +2262,10 @@ attiny202-delay-oracle: attiny202
 	fi; \
 	command -v $(OBJDUMP) >/dev/null 2>&1 \
 		|| { echo "$(OBJDUMP) not found (install binutils-avr)"; $(SKIP); }; \
+	$(fw_image_sh); \
 	elves=""; \
 	for v in $(XT_VARIANTS_REQUESTED); do \
-		elf=$(XT_BUILD_DIR)/$(FW_BASE)_$${v}_$(XT_TAG).elf; \
+		elf=$(XT_BUILD_DIR)/`fw_image_of "$$v" $(XT_TAG)`.elf; \
 		if [ ! -f "$$elf" ]; then \
 			echo "FAIL: expected ATtiny202 image missing: $$elf"; exit 1; \
 		fi; \
@@ -2272,8 +2380,8 @@ fuses:
 		-U hfuse:w:$(HFUSE):m
 
 # Flash the selected variant's ATtiny13a image to the MCU.
-flash: $(AVR_FW)_$(VARIANT).hex
-	$(AVRDUDE) $(AVRDUDE_FLAGS) -U flash:w:$(AVR_FW)_$(VARIANT).hex:i
+flash: $(AVR_FW)$(call fw_image_tail,$(VARIANT),$(MCU)).hex
+	$(AVRDUDE) $(AVRDUDE_FLAGS) -U flash:w:$(AVR_FW)$(call fw_image_tail,$(VARIANT),$(MCU)).hex:i
 
 # Convenience: set fuses, then flash firmware. Use for a fresh chip.
 program: fuses flash
@@ -2288,8 +2396,8 @@ fuses$(1):
 	$$(AVRDUDE) -c $$(PROGRAMMER) -p $$(part_$(1)) \
 		-U lfuse:w:$$(LFUSE_X5):m \
 		-U hfuse:w:$$(HFUSE_X5):m
-flash$(1): $(AVR_FW)_$$(VARIANT)_t$(1).hex
-	$$(AVRDUDE) -c $$(PROGRAMMER) -p $$(part_$(1)) -U flash:w:$(AVR_FW)_$$(VARIANT)_t$(1).hex:i
+flash$(1): $(AVR_FW)$$(call fw_image_tail,$$(VARIANT),$$(mmcu_$(1))).hex
+	$$(AVRDUDE) -c $$(PROGRAMMER) -p $$(part_$(1)) -U flash:w:$(AVR_FW)$$(call fw_image_tail,$$(VARIANT),$$(mmcu_$(1))).hex:i
 program$(1): fuses$(1) flash$(1)
 endef
 $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
@@ -2429,8 +2537,8 @@ test-pic-build:
 	PB_CC_VAR='PIC320_CC' \
 	PB_BUILD_DIR_VAR='PIC320_BUILD_DIR' \
 	PB_BUILD_DIR='build_pic10f320' \
-	PB_FW_BASE_VAR='PIC320_FW_BASE' \
-	PB_FW_BASE='bypass_mcu' \
+	PB_FW_BASE_VAR='FW_BASE' \
+	PB_FW_BASE='bypass' \
 	PB_TAG_VAR='PIC320_TAG' \
 	PB_TAG='pic10f320' \
 	PB_FLASH_VAR='PIC320_FLASH_WORDS' \
@@ -2440,8 +2548,8 @@ test-pic-build:
 	PB_MATRIX_TARGET='pic320-variants' \
 	PB_MATRIX_VARIANTS_VAR='PIC320_VARIANTS_ALL' \
 	PB_MATRIX_VARIANTS='cd4053-simple cd4053-mute tq2-relay' \
-	PB_MATRIX_IMAGES='bypass_mcu_cd4053-simple_pic10f320.hex bypass_mcu_cd4053-mute_pic10f320.hex bypass_mcu_tq2-relay_pic10f320.hex' \
-	PB_MATRIX_FAIL_IMAGE='bypass_mcu_tq2-relay_pic10f320.hex' \
+	PB_MATRIX_IMAGES='bypass-pic10f320-cd4053_simple.hex bypass-pic10f320-cd4053_with_mute.hex bypass-pic10f320-tq2_l2_5v_relay.hex' \
+	PB_MATRIX_FAIL_IMAGE='bypass-pic10f320-tq2_l2_5v_relay.hex' \
 	PB_MATRIX_REQUIRE_COMPLETE=1 PB_MATRIX_UNSUPPORTED='tmux4053-simple' \
 	PB_STACK_TARGET='pic320-test-stack-bound' \
 	PB_STACK_DEVICE_VAR='PIC320_DEVICE_INI' \
@@ -2987,14 +3095,14 @@ SIM_DEPS = test/avr/test_sim.c test/model_step.h test/bypass_config_host.h \
 
 # $(call VARIANT_SIM_T13,variant)
 define VARIANT_SIM_T13
-test/avr/test_sim_$(1): $$(SIM_DEPS) $(AVR_FW)_$(1).elf FORCE
+test/avr/test_sim_$(1): $$(SIM_DEPS) $(AVR_FW)$(call fw_image_tail,$(1),$(MCU)).elf FORCE
 	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -Itest \
-		-DFW_PATH=\"$(AVR_FW)_$(1).elf\" \
+		-DFW_PATH=\"$(AVR_FW)$(call fw_image_tail,$(1),$(MCU)).elf\" \
 		test/avr/test_sim.c $$(PURE_HOST_SRC) -o $$@ $$(SIM_LIBS)
 
-test/avr/test_trace_$(1): $$(SIM_DEPS) $(AVR_FW)_$(1).elf FORCE
+test/avr/test_trace_$(1): $$(SIM_DEPS) $(AVR_FW)$(call fw_image_tail,$(1),$(MCU)).elf FORCE
 	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -DTRACE -Itest \
-		-DFW_PATH=\"$(AVR_FW)_$(1).elf\" \
+		-DFW_PATH=\"$(AVR_FW)$(call fw_image_tail,$(1),$(MCU)).elf\" \
 		-DTRACE_VCD_PATH=\"$(AVR_BUILD_DIR)/bypass_trace.vcd\" \
 		test/avr/test_sim.c $$(PURE_HOST_SRC) -o $$@ $$(SIM_LIBS)
 
@@ -3007,9 +3115,9 @@ $(foreach v,$(VARIANTS),$(eval $(call VARIANT_SIM_T13,$(v))))
 
 # $(call VARIANT_SIM_X5,variant,chip-number)
 define VARIANT_SIM_X5
-test/avr/test_sim_$(1)_t$(2): $$(SIM_DEPS) $(AVR_FW)_$(1)_t$(2).elf FORCE
+test/avr/test_sim_$(1)_t$(2): $$(SIM_DEPS) $(AVR_FW)$(call fw_image_tail,$(1),$(mmcu_$(2))).elf FORCE
 	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -Itest \
-		-DFW_PATH=\"$(AVR_FW)_$(1)_t$(2).elf\" \
+		-DFW_PATH=\"$(AVR_FW)$(call fw_image_tail,$(1),$(mmcu_$(2))).elf\" \
 		-DMCU_NAME=\"$$(mmcu_$(2))\" \
 		-DF_CPU_HZ=$$(F_CPU_X5) \
 		-DTARGET_TINYX5 \
@@ -3105,7 +3213,7 @@ SOAK_PROGRESS_INTERVAL_MS  ?= 3600000
 SOAK_COMPILE = $(HOSTCC) $(SIM_CFLAGS) $(PURE_HOST_CFLAGS) \
 	-D$(macro_$(SOAK_VARIANT)) \
 	-Itest \
-	-DFW_PATH=\"$(AVR_FW)_$(SOAK_VARIANT)_t$(SOAK_CHIP).elf\" \
+	-DFW_PATH=\"$(AVR_FW)$(call fw_image_tail,$(SOAK_VARIANT),$(mmcu_$(SOAK_CHIP))).elf\" \
 	-DMCU_NAME=\"$(mmcu_$(SOAK_CHIP))\" \
 	-DF_CPU_HZ=$(F_CPU_X5) \
 	-DTARGET_TINYX5 \
@@ -3117,11 +3225,11 @@ SOAK_COMPILE = $(HOSTCC) $(SIM_CFLAGS) $(PURE_HOST_CFLAGS) \
 
 # Optional build-only convenience: build without running (Make's normal
 # dependency tracking applies; won't rebuild on SOAK_DURATION_MS change alone).
-$(SOAK_BIN): $(SOAK_DEPS) $(AVR_FW)_$(SOAK_VARIANT)_t$(SOAK_CHIP).elf
+$(SOAK_BIN): $(SOAK_DEPS) $(AVR_FW)$(call fw_image_tail,$(SOAK_VARIANT),$(mmcu_$(SOAK_CHIP))).elf
 	$(SOAK_COMPILE)
 
 # Run target: always recompiles (phony) so every SOAK_* override is applied.
-test-soak: $(SOAK_DEPS) $(AVR_FW)_$(SOAK_VARIANT)_t$(SOAK_CHIP).elf
+test-soak: $(SOAK_DEPS) $(AVR_FW)$(call fw_image_tail,$(SOAK_VARIANT),$(mmcu_$(SOAK_CHIP))).elf
 	$(SOAK_COMPILE)
 	@echo "--- soak test: variant=$(SOAK_VARIANT)  MCU=ATtiny$(SOAK_CHIP)  duration=$(SOAK_DURATION_MS) ms ---"
 	./$(SOAK_BIN)
@@ -3146,13 +3254,13 @@ SOAK_WITNESS_LIVENESS_MS   ?= 1000
 # after its last millisecond.
 SOAK_WITNESS_KILL_TIMER_MS ?= 1500
 test-soak-reset-witness: $(SOAK_DEPS) \
-                         $(AVR_FW)_$(SOAK_WITNESS_VARIANT)_t$(SOAK_WITNESS_CHIP).elf
+                         $(AVR_FW)$(call fw_image_tail,$(SOAK_WITNESS_VARIANT),$(mmcu_$(SOAK_WITNESS_CHIP))).elf
 	@echo "--- soak reset witness: variant=$(SOAK_WITNESS_VARIANT)  MCU=ATtiny$(SOAK_WITNESS_CHIP) ---"
 	HOSTCC="$(HOSTCC)" \
 	SOAK_WITNESS_CFLAGS="$(SIM_CFLAGS) $(PURE_HOST_CFLAGS)" \
 	SOAK_WITNESS_LIBS="$(SIM_LIBS)" \
 	SOAK_WITNESS_MACRO="$(macro_$(SOAK_WITNESS_VARIANT))" \
-	SOAK_WITNESS_FW="$(AVR_FW)_$(SOAK_WITNESS_VARIANT)_t$(SOAK_WITNESS_CHIP).elf" \
+	SOAK_WITNESS_FW="$(AVR_FW)$(call fw_image_tail,$(SOAK_WITNESS_VARIANT),$(mmcu_$(SOAK_WITNESS_CHIP))).elf" \
 	SOAK_WITNESS_MCU="$(mmcu_$(SOAK_WITNESS_CHIP))" \
 	SOAK_WITNESS_F_CPU="$(F_CPU_X5)" \
 	SOAK_WITNESS_DURATION_MS="$(SOAK_WITNESS_DURATION_MS)" \
@@ -3465,7 +3573,11 @@ PIC320_TAG         ?= pic10f320
 PIC320_XTAL        ?= 2000000UL
 PIC320_FLASH_WORDS ?= 256
 
-PIC320_FW_BASE     := bypass_mcu
+# PIC320_FW_BASE is GONE. It used to be `bypass_mcu`, a prefix inherited from the
+# archived child repository whose `_mcu_` infix distinguished nothing -- every
+# image in every lane is MCU firmware. This part now shares the one FW_BASE with
+# every other lane and is told apart by the mandatory MCU field. See "canonical
+# firmware image basename" near the top.
 PIC320_SRC         := src/bypass_mcu_pic10f320.c
 PIC320_BUILD_DIR   ?= build_pic10f320
 
@@ -3492,7 +3604,7 @@ PIC320_OUTPUT_DEF := -D$(PIC320_OUTPUT_MACRO)
 
 PIC320_CFLAGS := -mcpu=$(PIC320_CHIP) -mdfp=$(PIC320_DFP) -std=c99 -O2 \
                  -D_XTAL_FREQ=$(PIC320_XTAL) $(PIC320_OUTPUT_DEF)
-override PIC320_HEX    := $(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$(PIC320_VARIANT)_$(PIC320_TAG).hex
+override PIC320_HEX    := $(PIC320_BUILD_DIR)/$(call fw_image,$(PIC320_VARIANT),$(PIC320_TAG)).hex
 override PIC320_ASM    := $(PIC320_HEX:.hex=.s)
 override PIC320_SYM    := $(PIC320_HEX:.hex=.sym)
 override PIC320_BUILD_PRODUCTS := $(PIC320_HEX) $(PIC320_ASM) $(PIC320_SYM)
@@ -3502,14 +3614,14 @@ override PIC320_BUILD_PRODUCTS := $(PIC320_HEX) $(PIC320_ASM) $(PIC320_SYM)
 # request, so the build and gate cannot acquire divergent hard-coded matrices.
 override PIC320_RETURN_STACK_ORACLE := test/pic10f320/return_stack_oracle.py
 override PIC320_RETURN_STACK_LIMIT := 8
-override PIC320_RETURN_STACK_IMAGES := $(foreach v,$(PIC320_VARIANTS_SUPPORTED),$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$(v)_$(PIC320_TAG).hex)
+override PIC320_RETURN_STACK_IMAGES := $(foreach v,$(PIC320_VARIANTS_SUPPORTED),$(PIC320_BUILD_DIR)/$(call fw_image,$(v),$(PIC320_TAG)).hex)
 
 # Standing byte-identity regression. These hashes deliberately pin the exact
 # XC8 V3.10 + PIC10-12Fxxx DFP 1.9.189 output. A reviewed firmware/toolchain
 # change may rebaseline them, but a normal build must never rewrite the file.
 override PIC320_EXPECTED_IMAGE_CHECKER := test/pic10f320/check_expected_images.py
 override PIC320_EXPECTED_IMAGE_MANIFEST := test/pic10f320/expected_images.sha256
-override PIC320_EXPECTED_IMAGE_PATHS := $(foreach v,$(PIC320_VARIANTS_SUPPORTED),$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$(v)_$(PIC320_TAG).hex)
+override PIC320_EXPECTED_IMAGE_PATHS := $(foreach v,$(PIC320_VARIANTS_SUPPORTED),$(PIC320_BUILD_DIR)/$(call fw_image,$(v),$(PIC320_TAG)).hex)
 
 # --- host lanes --------------------------------------------------------------
 # HOST_CFLAGS here intentionally mirrors the IMPORTED build contract (no
@@ -3893,6 +4005,7 @@ pic320-variants:
 	if [ "$(if $(filter-out $(PIC320_VARIANTS_ALL),$(PIC320_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
 		echo "FAIL: PIC320_VARIANTS_ALL must contain every supported name; required: $(PIC320_VARIANTS_SUPPORTED)"; exit 1; \
 	fi; \
+	$(fw_image_sh); \
 	rc=0; \
 	for v in "$$@"; do \
 		$(MAKE) --no-print-directory PIC320_VARIANT=$$v pic320 || { rc=1; break; }; \
@@ -3900,7 +4013,7 @@ pic320-variants:
 	remove_product_set() { \
 		cleanup_rc=0; \
 		for v in "$$@"; do \
-			stem="$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG)"; \
+			stem="$(PIC320_BUILD_DIR)/`fw_image_of "$$v" $(PIC320_TAG)`"; \
 			for path in "$$stem.hex" "$$stem.s" "$$stem.sym"; do \
 				if [ -d "$$path" ] && [ ! -L "$$path" ]; then rmdir "$$path"; \
 				else rm -f "$$path"; fi || cleanup_rc=1; \
@@ -3916,7 +4029,7 @@ pic320-variants:
 	fi; \
 	built=0; \
 	for v in "$$@"; do \
-		if [ -s "$(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$${v}_$(PIC320_TAG).hex" ]; then \
+		if [ -s "$(PIC320_BUILD_DIR)/`fw_image_of "$$v" $(PIC320_TAG)`.hex" ]; then \
 			built=`expr $$built + 1`; \
 		fi; \
 	done; \
@@ -4056,7 +4169,7 @@ PIC320_IO_VARIANT       ?= $(PIC320_TARGET_VARIANT)
 PIC320_LOCKSTEP_VARIANT ?= $(PIC320_TARGET_VARIANT)
 PIC320_SOAK_VARIANT     ?= $(PIC320_TARGET_VARIANT)
 
-pic320_hex_of = $(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_$(1)_$(PIC320_TAG).hex
+pic320_hex_of = $(PIC320_BUILD_DIR)/$(call fw_image,$(1),$(PIC320_TAG)).hex
 
 # Per-variant facts, each with a FAILING default rather than a fall-through.
 #
@@ -4186,13 +4299,13 @@ pic320-test-return-stack: pic320-variants test-pic320-return-stack-oracle
 #
 # The no-image guard mirrors pic-test-config's. Without it this recipe passed an
 # UNEXPANDED glob to the checker when XC8 was absent, which reported "cannot open
-# HEX file '.../bypass_mcu_*_pic10f320.hex'" and failed -- so `make pic320-test`
+# HEX file '.../bypass-pic10f320-*.hex'" and failed -- so `make pic320-test`
 # died on a host where `make pic-test` skipped cleanly, contradicting the
 # skip-clean contract stated at `pic320-test` below. One shell, because $(SKIP)
 # exits only its own.
 pic320-test-config: pic320-variants
 	@mkdir -p $(PIC320_BUILD_DIR) || exit 1; \
-	hexes=`ls $(PIC320_BUILD_DIR)/$(PIC320_FW_BASE)_*_$(PIC320_TAG).hex 2>/dev/null`; \
+	hexes=`ls $(PIC320_BUILD_DIR)/$(FW_BASE)-$(PIC320_TAG)-*.hex 2>/dev/null`; \
 	if [ -z "$$hexes" ]; then \
 		echo "no PIC10F320 HEX in $(PIC320_BUILD_DIR)/ (XC8 absent?); skipping CONFIG-word check"; \
 		$(SKIP); \
@@ -4594,20 +4707,30 @@ print-%:
 # sets, not the caller's VARIANTS or PIC320_VARIANTS_ALL request, so an abbreviated
 # build override cannot shorten this independent release contract with the build.
 #
-# Note the surviving basename conventions (merge plan §5.3, decision D2):
-#   bypass_<variant>.hex               ATtiny13a  (implicit part)
-#   bypass_<variant>_t<n>.hex          ATtiny45/85
-#   bypass_<variant>_attiny202.hex     ATtiny202  (AVR-XT; explicit part tag)
-#   bypass_<variant>_<pic-tag>.hex     PIC10F322
-#   bypass_mcu_<variant>_<pic-tag>.hex PIC10F320  (imported, kept unmigrated)
-# Reconciling them is the TODO.md "Unified naming scheme" item; until then the
-# asymmetry lives HERE, in one list, rather than being re-derived per consumer.
+# Every entry is composed by $(call fw_image,<variant>,<mcu-tag>), so all six
+# parts share ONE basename convention -- bypass-<mcu>-<output stage>.hex -- and
+# this list cannot spell an image differently from the rule that builds it. The
+# five divergent conventions that used to be reconciled here by hand (merge plan
+# §5.3, decision D2) were retired in v0.9.8; see "canonical firmware image
+# basename" near the top for what replaced them and why.
+# Broken out per lane so a consumer that legitimately cares about ONE chip
+# (CI's per-lane "images were actually built" asserts) can name that lane's
+# basenames instead of composing them by hand from a variant list -- a hand-built
+# name silently stops matching after a rename, which is exactly the failure this
+# whole scheme exists to remove. RELEASE_IMAGES stays the single canonical set;
+# these are its parts, not a second opinion.
+T13_RELEASE_IMAGES    := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(call fw_image,$(v),$(MCU)).hex)
+TINYX5_RELEASE_IMAGES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(foreach n,$(TINYX5),$(call fw_image,$(v),$(mmcu_$(n))).hex))
+XT_RELEASE_IMAGES     := $(foreach v,$(XT_VARIANTS_SUPPORTED),$(call fw_image,$(v),$(XT_TAG)).hex)
+PIC_RELEASE_IMAGES    := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(call fw_image,$(v),$(PIC_TAG)).hex)
+PIC320_RELEASE_IMAGES := $(foreach v,$(PIC320_VARIANTS_SUPPORTED),$(call fw_image,$(v),$(PIC320_TAG)).hex)
+
 RELEASE_IMAGES := \
-	$(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(FW_BASE)_$(v).hex) \
-	$(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(foreach n,$(TINYX5),$(FW_BASE)_$(v)_t$(n).hex)) \
-	$(foreach v,$(XT_VARIANTS_SUPPORTED),$(FW_BASE)_$(v)_$(XT_TAG).hex) \
-	$(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(FW_BASE)_$(v)_$(PIC_TAG).hex) \
-	$(foreach v,$(PIC320_VARIANTS_SUPPORTED),$(PIC320_FW_BASE)_$(v)_$(PIC320_TAG).hex)
+	$(T13_RELEASE_IMAGES) \
+	$(TINYX5_RELEASE_IMAGES) \
+	$(XT_RELEASE_IMAGES) \
+	$(PIC_RELEASE_IMAGES) \
+	$(PIC320_RELEASE_IMAGES)
 
 # The build directories those images are produced into, in the order a
 # reproduction run should pass them to scripts/verify-release-images.sh. Kept

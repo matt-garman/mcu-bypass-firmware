@@ -64,7 +64,7 @@
 #endif
 
 #ifndef FW_PATH
-#  define FW_PATH      "bypass_cd4053.elf"
+#  define FW_PATH      "bypass-attiny13a-cd4053_simple.elf"
 #endif
 #ifndef MCU_NAME
 #  define MCU_NAME     "attiny13"

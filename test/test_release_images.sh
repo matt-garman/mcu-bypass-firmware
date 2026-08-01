@@ -279,26 +279,33 @@ expect_count() {
 	checks=$((checks + 1))
 }
 
-expect_count "PIC10F320"  '*_pic10f320.hex' 3
-expect_count "PIC10F322"  '*_pic10f322.hex' 3
-expect_count "ATtiny85"   '*_t85.hex'       3
-expect_count "ATtiny45"   '*_t45.hex'       3
-expect_count "ATtiny202"  '*_attiny202.hex' 3
+# Every image names its MCU in the same field, so one pattern shape covers all
+# six parts -- and an image with NO MCU field (the pre-v0.9.8 bare `bypass_<v>.hex`
+# ATtiny13a spelling) matches none of them, which the total below then catches.
+expect_count "ATtiny13a"  'bypass-attiny13a-*.hex' 3
+expect_count "ATtiny85"   'bypass-attiny85-*.hex'  3
+expect_count "ATtiny45"   'bypass-attiny45-*.hex'  3
+expect_count "ATtiny202"  'bypass-attiny202-*.hex' 3
+expect_count "PIC10F322"  'bypass-pic10f322-*.hex' 3
+expect_count "PIC10F320"  'bypass-pic10f320-*.hex' 3
+expect_count "canonically named" 'bypass-*-*.hex'  18
+[ "${#canonical_arr[@]}" -eq 18 ] \
+	|| fail "canonical release set has ${#canonical_arr[@]} images, expected 18"
+checks=$((checks + 1))
 
-# Name the three PIC10F320 images explicitly. A count alone would survive a
-# rename, and these basenames are a published interface (decision D2: the child's
-# names are kept, not migrated).
-for base in bypass_cd4053_attiny202.hex \
-		bypass_mute_attiny202.hex \
-		bypass_relay_attiny202.hex; do
+# Name the ATtiny202 and PIC10F320 images explicitly. A count alone would survive
+# a rename, and these basenames are a published interface.
+for base in bypass-attiny202-cd4053_simple.hex \
+		bypass-attiny202-cd4053_with_mute.hex \
+		bypass-attiny202-tq2_l2_5v_relay.hex; do
 	[[ " $canonical " == *" $base "* ]] \
 		|| fail "canonical release set is missing $base"
 	checks=$((checks + 1))
 done
 
-for base in bypass_mcu_cd4053-simple_pic10f320.hex \
-		bypass_mcu_cd4053-mute_pic10f320.hex \
-		bypass_mcu_tq2-relay_pic10f320.hex; do
+for base in bypass-pic10f320-cd4053_simple.hex \
+		bypass-pic10f320-cd4053_with_mute.hex \
+		bypass-pic10f320-tq2_l2_5v_relay.hex; do
 	[[ " $canonical " == *" $base "* ]] \
 		|| fail "canonical release set is missing $base"
 	checks=$((checks + 1))

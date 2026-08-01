@@ -86,8 +86,8 @@ for file in "${files[@]}"; do
 done
 cp "$ROOT/test/avr/attiny202_fuses.py" "$ROOT/test/avr/test_attiny202_fuses.py" \
 	"$repo/test/avr/"
-for image in bypass_cd4053.elf bypass_mute.elf bypass_relay.elf \
-	bypass_cd4053_t85.elf; do
+for image in bypass-attiny13a-cd4053_simple.elf bypass-attiny13a-cd4053_with_mute.elf bypass-attiny13a-tq2_l2_5v_relay.elf \
+	bypass-attiny85-cd4053_simple.elf; do
 	printf 'firmware ELF\n' > "$repo/build_avr_classic/$image"
 done
 : > "$log"
@@ -216,17 +216,17 @@ checks=$((checks + 1))
 	export MAKEFLAGS=-B
 	run_make test-sim SIM_DEFS=-DFORCED_SIM=1
 ) >/dev/null
-[[ "$(compile_count build_avr_classic/bypass_cd4053.elf)" -eq 1 \
-	&& "$(compile_count build_avr_classic/bypass_mute.elf)" -eq 1 \
-	&& "$(compile_count build_avr_classic/bypass_relay.elf)" -eq 1 ]] \
+[[ "$(compile_count build_avr_classic/bypass-attiny13a-cd4053_simple.elf)" -eq 1 \
+	&& "$(compile_count build_avr_classic/bypass-attiny13a-cd4053_with_mute.elf)" -eq 1 \
+	&& "$(compile_count build_avr_classic/bypass-attiny13a-tq2_l2_5v_relay.elf)" -eq 1 ]] \
 	|| { printf 'FAIL: inherited -B rebuilt ELFs after flash-budget validation\n' >&2; exit 1; }
 checks=$((checks + 1))
 
 : > "$log"
 run_make -j2 test-sim test-flash-budget SIM_DEFS=-DCOALESCED_SIM=1 >/dev/null
-[[ "$(compile_count build_avr_classic/bypass_cd4053.elf)" -eq 1 \
-	&& "$(compile_count build_avr_classic/bypass_mute.elf)" -eq 1 \
-	&& "$(compile_count build_avr_classic/bypass_relay.elf)" -eq 1 ]] \
+[[ "$(compile_count build_avr_classic/bypass-attiny13a-cd4053_simple.elf)" -eq 1 \
+	&& "$(compile_count build_avr_classic/bypass-attiny13a-cd4053_with_mute.elf)" -eq 1 \
+	&& "$(compile_count build_avr_classic/bypass-attiny13a-tq2_l2_5v_relay.elf)" -eq 1 ]] \
 	|| { printf 'FAIL: parallel simulator and flash gates rebuilt shared ELFs more than once\n' >&2; exit 1; }
 checks=$((checks + 1))
 
@@ -269,7 +269,7 @@ checks=$((checks + 2))
 
 outside="$work/external-build"
 run_make test-sim-cd4053 AVR_BUILD_DIR="$outside" SIM_DEFS=-DISOLATED=1 >/dev/null
-[ ! -e "$outside/bypass_cd4053.elf" ] \
+[ ! -e "$outside/bypass-attiny13a-cd4053_simple.elf" ] \
 	|| { printf 'FAIL: regression escaped its isolated mini-tree build path\n' >&2; exit 1; }
 checks=$((checks + 1))
 

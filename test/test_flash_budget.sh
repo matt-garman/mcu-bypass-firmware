@@ -66,13 +66,15 @@ chmod 750 "$tools/cc" "$tools/size" "$tools/wrapper" "$tools/readelf"
 reset_images() {
 	rm -rf "$images"
 	mkdir -p "$images"
-	for name in cd4053 mute relay; do printf 'ELF %s\n' "$name" > "$images/bypass_$name.elf"; done
+	for stage in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do \
+		printf 'ELF %s\n' "$stage" > "$images/bypass-attiny13a-$stage.elf"; \
+	done
 }
 
 run_check() {
 	"$CHECK" "${TEST_SIZE_COMMAND-$tools/size}" attiny13a \
 		"${TEST_FLASH_BYTES-1024}" "${TEST_BUDGET-90}" 3 \
-		"$images/bypass_cd4053.elf" "$images/bypass_mute.elf" "$images/bypass_relay.elf"
+		"$images/bypass-attiny13a-cd4053_simple.elf" "$images/bypass-attiny13a-cd4053_with_mute.elf" "$images/bypass-attiny13a-tq2_l2_5v_relay.elf"
 }
 
 run_make_gate() {
@@ -114,8 +116,8 @@ expect_pass "one-percent boundary" FAKE_SIZE_MODE=tiny TEST_BUDGET=1
 expect_pass "full-budget endpoint" TEST_BUDGET=100
 expect_pass "UINT32 maximum" FAKE_SIZE_MODE=max TEST_FLASH_BYTES=4294967295 TEST_BUDGET=100
 expect_failure "size command failure" "size command failed" FAKE_SIZE_MODE=fail
-expect_failure "one-image size failure" "size command failed for $images/bypass_mute.elf" \
-	FAKE_SIZE_FAIL_NAME=bypass_mute.elf
+expect_failure "one-image size failure" "size command failed for $images/bypass-attiny13a-cd4053_with_mute.elf" \
+	FAKE_SIZE_FAIL_NAME=bypass-attiny13a-cd4053_with_mute.elf
 expect_failure "missing size output" "expected one Program size" FAKE_SIZE_MODE=empty
 expect_failure "malformed size output" "malformed Program size" FAKE_SIZE_MODE=malformed
 expect_failure "trailing size output" "malformed Program size" FAKE_SIZE_MODE=trailing
@@ -132,22 +134,22 @@ expect_failure "oversized budget" "percentage" TEST_BUDGET=101
 expect_failure "malformed budget" "percentage" TEST_BUDGET=invalid
 
 reset_images
-rm "$images/bypass_mute.elf"
+rm "$images/bypass-attiny13a-cd4053_with_mute.elf"
 if output=$(run_check 2>&1); then printf 'FAIL: missing ELF was accepted\n' >&2; exit 1; fi
 [[ "$output" == *"missing, empty, or not a regular file"* ]] \
 	|| { printf 'FAIL: missing ELF failed for the wrong reason: %s\n' "$output" >&2; exit 1; }
 checks=$((checks + 1))
 
 reset_images
-rm "$images/bypass_mute.elf"
-ln -s bypass_cd4053.elf "$images/bypass_mute.elf"
+rm "$images/bypass-attiny13a-cd4053_with_mute.elf"
+ln -s bypass-attiny13a-cd4053_simple.elf "$images/bypass-attiny13a-cd4053_with_mute.elf"
 if output=$(run_check 2>&1); then printf 'FAIL: symlink ELF was accepted\n' >&2; exit 1; fi
 [[ "$output" == *"missing, empty, or not a regular file"* ]] \
 	|| { printf 'FAIL: symlink ELF failed for the wrong reason: %s\n' "$output" >&2; exit 1; }
 checks=$((checks + 1))
 
 reset_images
-: > "$images/bypass_mute.elf"
+: > "$images/bypass-attiny13a-cd4053_with_mute.elf"
 if output=$(run_check 2>&1); then printf 'FAIL: empty ELF was accepted\n' >&2; exit 1; fi
 [[ "$output" == *"missing, empty, or not a regular file"* ]] \
 	|| { printf 'FAIL: empty ELF failed for the wrong reason: %s\n' "$output" >&2; exit 1; }
@@ -203,7 +205,7 @@ done
 
 reset_images
 if output=$("$CHECK" "$tools/size" attiny13a 1024 90 3 \
-		"$images/bypass_cd4053.elf" 2>&1); then
+		"$images/bypass-attiny13a-cd4053_simple.elf" 2>&1); then
 	printf 'FAIL: incomplete explicit image set was accepted\n' >&2
 	exit 1
 fi

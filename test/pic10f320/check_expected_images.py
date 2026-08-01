@@ -16,9 +16,9 @@ from unittest import mock
 
 
 EXPECTED_NAMES = (
-    "bypass_mcu_cd4053-simple_pic10f320.hex",
-    "bypass_mcu_cd4053-mute_pic10f320.hex",
-    "bypass_mcu_tq2-relay_pic10f320.hex",
+    "bypass-pic10f320-cd4053_simple.hex",
+    "bypass-pic10f320-cd4053_with_mute.hex",
+    "bypass-pic10f320-tq2_l2_5v_relay.hex",
 )
 RECORD_RE = re.compile(r"([0-9a-f]{64})  ([A-Za-z0-9][A-Za-z0-9._-]*)")
 MAX_MANIFEST_BYTES = 1024

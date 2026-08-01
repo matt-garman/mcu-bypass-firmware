@@ -6,7 +6,7 @@
 // to fit its flash budget, so only the 18 common injections apply.
 
 #define PIC_FAULT_DEFAULT_FW_PATH \
-    "build_pic10f320/bypass_mcu_cd4053-simple_pic10f320.hex"
+    "build_pic10f320/bypass-pic10f320-cd4053_simple.hex"
 #define PIC_FAULT_DEFAULT_PROC_NAME "p10f320"
 #define PIC_FAULT_PROGRAM_WORDS 0x100u
 #define PIC_FAULT_EXPECTED_CHECKS 22u

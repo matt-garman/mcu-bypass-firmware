@@ -5,7 +5,7 @@
 // has 512 program words and guards its settled output latch, so the common fault
 // matrix is extended with three LATA injections.
 
-#define PIC_FAULT_DEFAULT_FW_PATH "build_pic/bypass_cd4053_pic10f322.hex"
+#define PIC_FAULT_DEFAULT_FW_PATH "build_pic/bypass-pic10f322-cd4053_simple.hex"
 #define PIC_FAULT_DEFAULT_PROC_NAME "p10f322"
 #define PIC_FAULT_PROGRAM_WORDS 0x200u
 #define PIC_FAULT_EXPECTED_CHECKS 25u

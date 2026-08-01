@@ -28,6 +28,65 @@ file is the human-readable summary of *what changed*.
 > unified release onward there is one timeline, with PIC10F320 changes recorded
 > as a sub-lane inside each entry.
 
+## [0.9.8] — unreleased
+
+### Changed
+- **Every released firmware image is renamed to one consistent scheme.** All
+  eighteen images on all six MCUs are now
+  `bypass-<mcu>-<output stage>.hex` — three hyphen-separated fields, with
+  underscores between words inside a field:
+
+  ```
+  bypass-attiny85-cd4053_with_mute.hex
+  bypass-pic10f320-tq2_l2_5v_relay.hex
+  ```
+
+  `<mcu>` is one of `attiny13a`, `attiny45`, `attiny85`, `attiny202`,
+  `pic10f320`, `pic10f322`; `<output stage>` is one of `cd4053_simple`,
+  `cd4053_with_mute`, `tq2_l2_5v_relay`, matching the driver source basenames.
+  The mixed delimiter is deliberate: stage tokens are multi-word, so an
+  all-hyphen name could not be split back into fields without hardcoding the
+  MCU vocabulary.
+
+  This replaces three coexisting conventions — the `bypass_` vs `bypass_mcu_`
+  prefix split, the `cd4053`/`mute`/`relay` vs
+  `cd4053-simple`/`cd4053-mute`/`tq2-relay` stage-token split, and a part suffix
+  that was `_t45`/`_t85`/`_attiny202`/`_pic10f322`/`_pic10f320` **or absent**.
+  That last case is what motivated the change: a bare `bypass_cd4053.hex` *was*
+  the ATtiny13a image, identified by omission, and nothing in the filename
+  stopped a builder flashing the 1.2 MHz ATtiny13a build onto an ATtiny85. The
+  MCU field is now mandatory on every image, so the 6 × 3 product matrix is
+  visible in a plain directory listing.
+
+  **Image contents are unchanged.** Each image is bit-identical to its `v0.9.7`
+  counterpart; only the filenames moved. `release/README.md` carries the full
+  old→new mapping table.
+
+  Historical `release/vX.Y.Z/` directories are **not** renamed. Their
+  `SHA256SUMS` names the files and is covered by a detached signature, so
+  renaming them would invalidate published signatures.
+
+  Internals: the spelling is composed in exactly one place, the Makefile's
+  `$(call fw_image,<variant>,<mcu-tag>)`, backed by an `IMAGE_STAGE_*` map with
+  a parse-time completeness check over both supported variant sets — a supported
+  variant with no mapping is now a Makefile error rather than a release image
+  that goes missing after a 24-hour soak. `PIC320_FW_BASE` (`bypass_mcu`) is
+  retired; that lane shares the one `FW_BASE` and is told apart by its MCU
+  field. `scripts/make-release.sh` keeps its own independent restatement of the
+  scheme on purpose, because it is cross-checked against the Makefile's
+  `RELEASE_IMAGES` and a derived copy could not disagree.
+
+  The `MANIFEST.md` generator's per-image dispatch was order-dependent and ended
+  in a bare `*.hex` ATtiny13a fallback, so an unrecognized name produced a row
+  confidently labelling foreign firmware as an ATtiny13a with AVR fuse bytes. It
+  now matches on the mandatory MCU field, making the arms mutually exclusive,
+  and an unrecognized image is a hard error.
+
+  The command-line vocabulary is **unchanged**: `VARIANT=relay`, the `make`
+  goals, soak names and evidence log names all still use the short tokens.
+  Unifying those as well remains a TODO item; the `IMAGE_STAGE_*` map is the
+  single seam where the two vocabularies meet.
+
 ## [Unreleased]
 
 > **Where the detail lives.** This entry is a post-release cleanup pass whose

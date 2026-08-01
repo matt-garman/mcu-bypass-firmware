@@ -192,6 +192,25 @@ mkv() { make -s print-"$1"; }      # echo one Makefile variable
 VARIANTS=$(mkv VARIANTS)           # cd4053 mute relay
 TINYX5=$(mkv TINYX5)               # 85 45
 FW_BASE=$(mkv FW_BASE)             # bypass
+MCU=$(mkv MCU)                     # attiny13a
+
+# The canonical image basename: <prefix>-<mcu>-<output stage>. Restated here
+# rather than read back from the Makefile ON PURPOSE. The enumeration below is
+# this script's INDEPENDENT opinion of what a complete release contains, and it
+# is cross-checked against the Makefile's RELEASE_IMAGES a few dozen lines down;
+# deriving the names from the thing being cross-checked would make that check
+# agree with itself. Keep this in step with the Makefile's IMAGE_STAGE_* map --
+# the cross-check is what tells you when it has drifted.
+stage_of() {
+	case $1 in
+	cd4053|cd4053-simple) printf 'cd4053_simple' ;;
+	mute|cd4053-mute)     printf 'cd4053_with_mute' ;;
+	relay|tq2-relay)      printf 'tq2_l2_5v_relay' ;;
+	*) die "no image stage known for output variant '$1'" ;;
+	esac
+}
+# $(fw_image <build dir> <mcu tag> <variant>) -> full path, no suffix
+fw_image() { printf '%s/%s-%s-%s' "$1" "$FW_BASE" "$2" "$(stage_of "$3")"; }
 AVR_BUILD_DIR=$(mkv AVR_BUILD_DIR) # build_avr_classic
 PIC_BUILD_DIR=$(mkv PIC_BUILD_DIR) # build_pic
 PIC_TAG=$(mkv PIC_TAG)             # pic10f322
@@ -245,7 +264,6 @@ XT_FUSE[bootend]=$(mkv XT_FUSE_BOOTEND)
 # toolchain and say nothing.
 PIC320_BUILD_DIR=$(mkv PIC320_BUILD_DIR)     # build_pic10f320
 PIC320_TAG=$(mkv PIC320_TAG)                 # pic10f320
-PIC320_FW_BASE=$(mkv PIC320_FW_BASE)         # bypass_mcu
 PIC320_VARIANTS=$(mkv PIC320_VARIANTS_ALL)   # cd4053-simple cd4053-mute tq2-relay
 PIC320_XTAL=$(mkv PIC320_XTAL)
 PIC320_CLK_MHZ=$(awk -v h="${PIC320_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
@@ -545,12 +563,12 @@ XT_ELFS=()
 PIC_IMAGES=()
 PIC320_IMAGES=()
 for v in $VARIANTS; do
-	img="$AVR_BUILD_DIR/${FW_BASE}_${v}.hex"
+	img="$(fw_image "$AVR_BUILD_DIR" "$MCU" "$v").hex"
 	elf="${img%.hex}.elf"
 	IMAGES+=("$img"); AVR_IMAGES+=("$img"); AVR_ELFS+=("$elf")
 done
 for v in $VARIANTS; do for n in $TINYX5; do
-	img="$AVR_BUILD_DIR/${FW_BASE}_${v}_t${n}.hex"
+	img="$(fw_image "$AVR_BUILD_DIR" "attiny${n}" "$v").hex"
 	elf="${img%.hex}.elf"
 	IMAGES+=("$img"); AVR_IMAGES+=("$img"); AVR_ELFS+=("$elf")
 done; done
@@ -558,16 +576,16 @@ done; done
 # classic lane's final step regenerates HEX from validated ELFs with
 # `make all13 all85 all45`, which knows nothing about the AVR-XT build.
 for v in $XT_VARIANTS; do
-	img="$XT_BUILD_DIR/${FW_BASE}_${v}_${XT_TAG}.hex"
+	img="$(fw_image "$XT_BUILD_DIR" "$XT_TAG" "$v").hex"
 	elf="${img%.hex}.elf"
 	IMAGES+=("$img"); XT_IMAGES+=("$img"); XT_ELFS+=("$elf")
 done
 for v in $VARIANTS; do
-	img="$PIC_BUILD_DIR/${FW_BASE}_${v}_${PIC_TAG}.hex"
+	img="$(fw_image "$PIC_BUILD_DIR" "$PIC_TAG" "$v").hex"
 	IMAGES+=("$img"); PIC_IMAGES+=("$img")
 done
 for v in $PIC320_VARIANTS; do
-	img="$PIC320_BUILD_DIR/${PIC320_FW_BASE}_${v}_${PIC320_TAG}.hex"
+	img="$(fw_image "$PIC320_BUILD_DIR" "$PIC320_TAG" "$v").hex"
 	IMAGES+=("$img"); PIC_IMAGES+=("$img"); PIC320_IMAGES+=("$img")
 done
 for img in "${IMAGES[@]}"; do [ -f "$img" ] || die "expected image not produced: $img"; done
@@ -704,7 +722,7 @@ declare -A SOAK_BIN SOAK_CWD SOAK_LOG SOAK_RC
 log "compiling soak binaries..."
 for v in $VARIANTS; do for n in $TINYX5; do
 	name="avr_${v}_t${n}"; bin="test/avr/test_soak_${v}_t${n}"
-	elf="$AVR_BUILD_DIR/${FW_BASE}_${v}_t${n}.elf"
+	elf="$(fw_image "$AVR_BUILD_DIR" "attiny${n}" "$v").elf"
 	make --old-file="$elf" "$bin" AVR_REBUILD_PREREQ= \
 		SOAK_VARIANT="$v" SOAK_CHIP="$n" SOAK_DURATION_MS="$SOAK_DURATION_MS" \
 		SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
@@ -728,7 +746,7 @@ for f in $XT_FUSE_NAMES; do
 done
 for v in $XT_VARIANTS; do
 	name="attiny202_${v}"; bin="$SOAKDIR/soak_attiny202_${v}.sh"
-	elf="$REPO_ROOT/$XT_BUILD_DIR/${FW_BASE}_${v}_${XT_TAG}.elf"
+	elf="$REPO_ROOT/$(fw_image "$XT_BUILD_DIR" "$XT_TAG" "$v").elf"
 	[ -f "$elf" ] || die "ATtiny202 soak ELF missing: $elf"
 	{
 		printf '#!/bin/sh\n'
@@ -1003,27 +1021,26 @@ img_row() {
 	# the manifest is generated. PIC usage stays n/a (XC8 reports words, not bytes).
 	local elf="$AVR_BUILD_DIR/${base%.hex}.elf"
 	local mcu clk fuses flashcmd prog amcu used="n/a"
+	# Every arm below matches the MANDATORY MCU field of the canonical basename
+	# (<prefix>-<mcu>-<stage>), so the arms are mutually exclusive and order
+	# carries no meaning. That is a change worth noticing: this used to be an
+	# ORDER-DEPENDENT chain ending in a bare `*.hex` ATtiny13a fallback, because
+	# a bare `bypass_cd4053.hex` was the ATtiny13a image. Any unrecognized name
+	# fell through to that arm and produced a row confidently labelling foreign
+	# firmware as an ATtiny13a with AVR fuse bytes. With the MCU always present
+	# the fallback becomes a hard error instead.
 	case "$base" in
-		# PIC10F320 FIRST. Its basenames carry a different prefix (bypass_mcu_)
-		# from every other target, and the final `*.hex` arm below is an
-		# ATtiny13a fallback -- so an unrecognized PIC name does not produce an
-		# error, it produces a row confidently labelling PIC firmware as an
-		# ATtiny13a image with AVR fuse bytes. Decision D2 kept those imported
-		# basenames, which makes this arm the thing that makes that safe.
-		*_${PIC320_TAG}.hex)
+		${FW_BASE}-${PIC320_TAG}-*.hex)
 			mcu="PIC10F320"; clk="${PIC320_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
 			# XC8 reports program space in WORDS, not bytes; the figure comes from
 			# this run's own build log, so it can never be a stale hand-copied number.
 			used=$(awk -v f="$base" '$0 ~ ("/" f " :") { for (i = 1; i <= NF; i++) if ($i == "words") { print $(i-1) " / '"$PIC320_FLASH_WORDS"' words"; exit } }' \
 				"$EVID/build-pic320.log" 2>/dev/null)
 			flashcmd="pk2cmd -PPIC10F320 -F$base -M -Y -R" ;;
-		*_${PIC_TAG}.hex)
+		${FW_BASE}-${PIC_TAG}-*.hex)
 			mcu="PIC10F322"; clk="${PIC_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
 			flashcmd="pk2cmd -PPIC10F322 -F$base -M -Y -R   (or: make program-pic VARIANT=<v>)" ;;
-		# ATtiny202 must also precede the `*.hex` fallback: its basenames end in
-		# `_attiny202.hex`, which that arm would otherwise label ATtiny13a and
-		# hand the reader classic lfuse/hfuse bytes for a part that has neither.
-		*_${XT_TAG}.hex)
+		${FW_BASE}-${XT_TAG}-*.hex)
 			mcu="ATtiny202"; clk="${XT_CLK_MHZ} MHz (internal, OSCCFG 16 MHz / 8)"
 			# AVR8X replaces lfuse/hfuse with seven individually named memories;
 			# enumerate them rather than inventing a two-byte summary.
@@ -1041,18 +1058,19 @@ img_row() {
 				flashcmd="$flashcmd -U $f:w:${XT_FUSE[$f]}:m"
 			done
 			flashcmd="$flashcmd -U flash:w:$base:i   (or: make attiny202-program VARIANT=<v> XT_UPDI_PORT=<port>)" ;;
-		*_t85.hex|*_t45.hex)
+		${FW_BASE}-attiny85-*.hex|${FW_BASE}-attiny45-*.hex)
 			case "$base" in
-				*_t85.hex) mcu="ATtiny85"; amcu="attiny85"; prog="t85" ;;
-				*)         mcu="ATtiny45"; amcu="attiny45"; prog="t45" ;;
+				${FW_BASE}-attiny85-*.hex) mcu="ATtiny85"; amcu="attiny85"; prog="t85" ;;
+				*)                         mcu="ATtiny45"; amcu="attiny45"; prog="t45" ;;
 			esac
 			clk="1.0 MHz"; fuses="lfuse=$LFUSE_X5 hfuse=$HFUSE_X5"
 			used=$(avr-size --mcu="$amcu" -C "$elf" 2>/dev/null | awk '/^Program:/{print $2" B"; exit}')
 			flashcmd="avrdude -c <prog> -p $prog -U lfuse:w:$LFUSE_X5:m -U hfuse:w:$HFUSE_X5:m -U flash:w:$base:i" ;;
-		*.hex)
+		${FW_BASE}-${MCU}-*.hex)
 			mcu="ATtiny13a"; clk="1.2 MHz"; fuses="lfuse=$LFUSE hfuse=$HFUSE"
 			used=$(avr-size --mcu=attiny13a -C "$elf" 2>/dev/null | awk '/^Program:/{print $2" B"; exit}')
 			flashcmd="avrdude -c <prog> -p $AVRDUDE_PART -U lfuse:w:$LFUSE:m -U hfuse:w:$HFUSE:m -U flash:w:$base:i" ;;
+		*) die "release image '$base' names no MCU this manifest generator knows; refusing to describe it" ;;
 	esac
 	printf '| `%s` | %s | %s | %s | %s | `%s` |\n' "$base" "$mcu" "$clk" "${used:-n/a}" "$fuses" "$sha"
 	printf '%s\t%s\n' "$base" "$flashcmd" >> "$WORK/flashcmds.txt"
@@ -1108,10 +1126,9 @@ REL_BANNER=""
 		printf 'Full detail: [docs/pic10f320_special_case.md](%s/blob/%s/docs/pic10f320_special_case.md).\n\n' \
 			"$REPO_URL" "$VERSION"
 	fi
-	printf 'Its images use a different basename prefix from every other target\n'
-	printf '(`bypass_mcu_<variant>_%s.hex`), inherited from the project it was merged\n' "$PIC320_TAG"
-	printf 'from and deliberately not renamed. Match images to MCUs by the table below,\n'
-	printf 'not by prefix.\n\n'
+	printf 'Its images follow the same `%s-<mcu>-<output stage>.hex` scheme as every\n' "$FW_BASE"
+	printf 'other target (`%s-%s-<output stage>.hex`); the imported `bypass_mcu_` prefix\n' "$FW_BASE" "$PIC320_TAG"
+	printf 'it shipped with through v0.9.7 is gone as of v0.9.8.\n\n'
 
 	printf '## Provenance\n\n'
 	printf -- '- **Version / tag:** %s\n' "$VERSION"

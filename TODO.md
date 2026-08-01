@@ -502,7 +502,7 @@ Key constraints (so it actually works for the read-off-the-chip scenario):
   provenance-rot problem — the link dies if the service does.)
 - **Verify it reached flash** (not just the ELF):
   ```
-  avr-objcopy -O binary build_avr_classic/bypass_relay_t85.elf - | strings | grep github
+  avr-objcopy -O binary build_avr_classic/bypass-attiny85-tq2_l2_5v_relay.elf - | strings | grep github
   ```
 
 Effort: ~1–2 h incl. the `BYPASS_EMBED_URL` Makefile wiring plus a
@@ -524,42 +524,45 @@ rather than drifting further. Four inconsistent axes:
   `PIC_TAG`/`PIC_*`, `XT_*`, plus the new `PIC320_*`. `PIC_FLASH_WORDS` is the
   cautionary case — a mis-scoped chip variable produces no compile error and no
   failing test, it produces a *passing* one (a 256-word image gated at 512).
-- **Release image basenames.** Three conventions coexist: prefix `bypass_` vs
-  `bypass_mcu_`; stage tokens `cd4053`/`mute`/`relay` vs
-  `cd4053-simple`/`cd4053-mute`/`tq2-relay`; and a part suffix that is
-  `_pic10f322`/`_pic10f320`/`_t45`/`_t85` — or *absent*, because a bare
-  `bypass_cd4053.hex` is the ATtiny13a image. `bypass_mute_pic10f322.hex` and
-  `bypass_mcu_cd4053-mute_pic10f320.hex` name the same output stage on two PIC
-  chips. Note the bare-name convention is pre-existing debt, older than either
-  PIC.
+- ~~**Release image basenames.**~~ **DONE for v0.9.8** (branch
+  `hex-image-name-consistency`). Every image is now
+  `bypass-<mcu>-<output stage>.hex` on all six parts, composed in one place by
+  the Makefile's `$(call fw_image,...)`. The `bypass_mcu_` prefix and
+  `PIC320_FW_BASE` are gone, and the ATtiny13a images carry an explicit
+  `attiny13a` field instead of being identified by the *absence* of a suffix —
+  which was the actual hazard, since nothing in a bare `bypass_cd4053.hex`
+  stopped it being flashed onto an ATtiny85. Historical `release/vX.Y.Z/`
+  directories were deliberately left alone (signed `SHA256SUMS` name the files);
+  `release/README.md` carries the old→new redirect table.
 - **Output-stage vocabulary.** The parent's `VARIANTS` and the PIC10F320's
-  variant list describe the same three output stages in different words.
+  variant list describe the same three output stages in different words. This is
+  the remaining half of the basename work: the v0.9.8 rename deliberately did
+  NOT touch the variant vocabulary, so `VARIANT=relay` still builds
+  `bypass-attiny13a-tq2_l2_5v_relay.hex`. The two vocabularies meet in exactly
+  one place — the Makefile's `IMAGE_STAGE_*` map — and unifying them collapses
+  that map to the identity and deletes it. Everything else (soak names, evidence
+  log names, coverage archive paths, gpsim fixtures, `make` goals) speaks the
+  short vocabulary and would move with it.
 
 Design notes if picked up:
-- This is a **breaking rename of published artifact names**, so it belongs at a
-  minor-version boundary with a redirect note in the release documentation and in
-  the archived child repository's pointer. Decide first whether historical
-  `release/vX/` directories are left alone (recommended — they are signed and
-  their `SHA256SUMS` name the files) or reissued.
-- `FW_BASE` is the mechanism for the image prefix; the stage tokens come from the
-  variant lists. Both are already Makefile-owned, so the canonical product set
-  built for the merge (`docs/pic10f320_merge_plan.md` §10) is the natural single
-  point of change — do this *after* that set exists, not before.
+- The basename axis is done; what remains is the three vocabulary/prefix axes
+  above. Sequence them so the tree is never half-unified — one axis per commit,
+  each with its consumers, rather than a sweeping rename reviewed all at once.
 - Renaming a Makefile variable is an **external interface change**, not an
   internal one: `scripts/make-release.sh` reads Makefile truth through
   `make -s print-<VAR>`. Grep `print-` across `scripts/` and
   `.github/workflows/` as part of any rename.
-- Sequence it so the tree is never half-unified — one axis per commit, each with
-  its consumers, rather than a sweeping rename that has to be reviewed all at
-  once.
 - The merge plan's §15 records which asymmetries were knowingly accepted; use it
-  as the worklist rather than re-deriving them.
+  as the worklist rather than re-deriving them, but note §5.3/D2's basename
+  entries are now superseded by the v0.9.8 rename.
+- A rename that changes published artifact names belongs at a version boundary
+  with a redirect note in the release documentation, as v0.9.8 did.
 
-Effort: ~4–8 h, most of it consumer updates and release-documentation redirects
-rather than the renames themselves. Impact: Medium — no behavioural change and no
-new assurance, but it removes a class of silent-misconfiguration hazard that
-grows with every added target, and it is the difference between "six targets in
-one repository" and "four projects sharing a Makefile".
+Effort: ~3–6 h remaining (was ~4–8 h; the basename axis is spent). Impact:
+Medium — no behavioural change and no new assurance, but it removes a class of
+silent-misconfiguration hazard that grows with every added target, and it is the
+difference between "six targets in one repository" and "four projects sharing a
+Makefile".
 
 **`make program-pic320` convenience target.** Added 2026-07-27. The PIC10F322
 has `make program-pic` (with `PIC_PROG=pk2cmd|ipecmd`,
@@ -715,7 +718,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |
 | Broader compiler & toolchain portability | 3 | Medium | Medium-High — adoption + reliability |
 | Embedded provenance URL | 3 | 1–2 h | Low — provenance polish |
-| Unified naming scheme across MCUs | 3 | 4–8 h | Medium — removes a silent-misconfig class |
+| Unified naming scheme across MCUs (basenames done in v0.9.8) | 3 | 3–6 h | Medium — removes a silent-misconfig class |
 | `make program-pic320` target | 3 | 1 h + bench | Low — convenience; `pk2cmd` documented |
 | Manufacturing artifacts (name as scope) | 4 | — | Completeness signal |
 | Signal-integrity SPICE modeling | 4 | 2 h | High for the board, not firmware work |
