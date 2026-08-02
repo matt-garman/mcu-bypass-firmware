@@ -80,8 +80,12 @@ MAX_MISMATCHES = 5
 
 # One settled tick is ~176 cycles of work inside a 2000-cycle period, but a
 # toggle tick also blocks in _delay_ms() for the variant's coil pulse. 50 ms of
-# cycles is far past the longest (12 ms relay, which yasimavr's flat instruction
-# timing runs even shorter) while still catching a genuinely stuck core.
+# cycles is four times the longest of those (the relay's 12 ms) while still
+# catching a genuinely stuck core. The margin also absorbs the upstream
+# SimLoop.run() cycle-rewind defect described in the delay oracle's header: the
+# 256-cycle probe stride below loses at most one instruction's worth of cycles
+# per call (under 2%), which only makes a pulse elapse sooner than the budget,
+# never later.
 TICK_BUDGET_MS = 50
 
 # Probe granularity while hunting for the wake and sleep edges. The awake window

@@ -205,13 +205,31 @@ is gated on the same two inputs and by the same probe discipline as the PIC ones
 These are properties of the AVR-XT *environment*, not of the firmware, and are
 ultimately validated on a real part at the bench.
 
-- **yasimavr is not cycle-accurate.** It charges roughly one cycle per
-  instruction with no multi-cycle timing model, so a busy-wait `_delay_ms` loop
-  runs at about half its real duration (a 12 ms coil pulse traces as ~6 ms). This
-  is why `attiny202-sim` asserts pulse *ordering, polarity, exclusion and
-  presence* but never wall-clock width, and why absolute width is recovered
-  separately from the disassembled image by `attiny202-delay-oracle`. TCB0 tick
-  timing is unaffected, so the debounce, LED and lock-step results stay accurate.
+- **The pinned yasimavr loses cycles when stepped in tiny budgets.** Its
+  `SimLoop.run(n)` pins the cycle counter to `first_cycle + n` on return, which
+  *rewinds* it whenever the last instruction overshoots — so a caller loses up to
+  one instruction's worth of cycles per call, and at `run(1)` every instruction
+  is billed exactly 1 cycle. The output tracer samples pin state one cycle at a
+  time, so inside a trace a busy-wait `_delay_ms` loop runs at about half its
+  real duration (a 12 ms coil pulse traces as ~6 ms). This is why `attiny202-sim`
+  asserts pulse *ordering, polarity, exclusion and presence* but never
+  wall-clock width, and why absolute width is recovered from the disassembled
+  image by `attiny202-delay-oracle` — a compile-time property, so reading it from
+  the image is both simulator-independent and tighter than a trace.
+
+  Tick timing is unaffected: the TCB0 period is counted by the peripheral, not by
+  summing instruction cycles. The debounce and LED tests advance in budgets of
+  2000 cycles (1 ms), where losing at most one instruction's worth of cycles per
+  call costs under 0.2%; the lock-step driver's 32–256-cycle edge probes are
+  coarser than the loss by a wide enough margin that they cannot step over a
+  ~176-cycle awake window.
+
+  The defect is reported upstream and confirmed, with a fix pending release; a
+  local rebuild carrying it measures the pulse correctly (12.669 ms) with the
+  suite otherwise unchanged. Earlier revisions of this note attributed the
+  halving to a "flat one cycle per instruction" core with no multi-cycle timing
+  model — that diagnosis was wrong, and was itself an artifact of measuring by
+  single-stepping through the same bug.
 - **The force-reset spin cannot be observed completing.** The shell's
   unrecoverable path is `cli; for(;;){}`, and yasimavr treats an interrupts-off
   infinite loop as a terminal halt, stopping before the ~256 ms watchdog would

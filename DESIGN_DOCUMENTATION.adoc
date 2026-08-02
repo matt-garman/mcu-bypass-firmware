@@ -53,8 +53,11 @@ The trade-offs are honest ones and are recorded where they bite:
       pinned; see TOOLCHAIN.adoc.  A modern from-source avr-libc (>= 2.2.0) has
       native ATtiny202 support and would remove this dependency.
     * **Simulation.** Neither simavr nor QEMU models the AVR8X core.  The
-      dynamic harness runs on yasimavr instead, which is a genuine behavioural
-      simulator but is not cycle-accurate; see "Known simulator gaps" in
+      dynamic harness runs on yasimavr instead, a genuine behavioural simulator
+      that needs three local fixes for this firmware — two vendored patches
+      without which a fuse-locked watchdog cannot run at all, and one unpatched
+      cycle-accounting defect that stops the harness measuring busy-delay widths
+      in-simulation.  See "Known gaps (AVR-XT — hardware-bench only)" in
       test/README.md for exactly what that does and does not cover.
 
 

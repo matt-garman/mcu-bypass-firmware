@@ -223,6 +223,36 @@ file is the human-readable summary of *what changed*.
   PIC gpsim mutants reported as unavailable instead of failing loudly. Found by
   the prefix sweep, not by a gate: the mutation run is in `test-long`, not
   `make test`. The path is now composed from the canonical fields.
+- **Documentation: the recorded reason the ATtiny202 harness cannot measure
+  busy-delay width was wrong, and is corrected everywhere it appeared.** Since
+  `0.9.5` the delay oracle, `test_sim_attiny202.py`, `scripts/fetch_yasimavr.sh`,
+  the Makefile, `test/README.md`, `TODO.md` and `DESIGN_DOCUMENTATION.adoc` all
+  stated that yasimavr charges a flat ~1 cycle per instruction with no
+  multi-cycle timing model. It does not; its AVR-XT core models instruction
+  timing correctly.
+
+  The real defect is in `SimLoop::run(nbcycles)`, which pins the cycle counter to
+  `first_cycle + nbcycles` on return and therefore *rewinds* it whenever the last
+  instruction overshoots the budget. A caller loses up to one instruction's worth
+  of cycles per call, and at `run(1)` — one instruction per call — every
+  instruction is billed exactly 1 cycle. The ATtiny202 output tracer samples pin
+  state one cycle at a time, which is why a 12 ms coil pulse traced as ~6 ms. The
+  original "flat instruction timing" conclusion was itself measured by
+  single-stepping through that same bug.
+
+  Reported upstream; the maintainer confirmed it and produced a fix. Verified
+  against a local rebuild of the pinned 0.1.6 carrying that guard: `SBIW` steps
+  as 2 cycles, the relay pulse measures 12.669 ms at single-cycle sampling
+  instead of 6.186 ms, and `make attiny202-sim` passes unchanged. The pinned
+  release does not carry the fix, so no test behaviour changes here and the
+  absolute width stays with the disassembly oracle — where it belongs regardless,
+  being a compile-time property. Re-pinning is filed as a `TODO.md` Tier 2.5 item.
+
+  Nothing about the shipped firmware changes: the images were always correct for
+  real 2 MHz silicon, and tick-driven timing (debounce thresholds, LED
+  sequencing, lock-step) was never affected. The `0.9.5` entry adding the delay
+  oracle carries this superseded rationale in its justification clause; the
+  oracle itself remains correct and is unchanged.
 
 ## [0.9.7] - 2026-08-01
 
@@ -936,7 +966,9 @@ file is the human-readable summary of *what changed*.
   phase-swept ISR-handshake corruption, and a long healthy negative control.
 - An ATtiny202 disassembly oracle now verifies absolute 5 ms mute and 12 ms
   relay pulse widths directly from each built image, independent of yasimavr's
-  non-cycle-accurate delay execution.
+  non-cycle-accurate delay execution. *(Note added 2026-08-02: the oracle is
+  unchanged and still correct, but that stated reason for it was not — yasimavr
+  does model multi-cycle instruction timing. See the correction under `0.9.8`.)*
 - Host-only regressions now exercise PIC target-matrix validation and lock-step
   simulator stalls without requiring XC8 or libgpsim.
 

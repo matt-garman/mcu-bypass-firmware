@@ -27,25 +27,42 @@
 #   This is the yasimavr analogue of scripts/fetch_attiny_dfp.sh (which vendors
 #   the ATtiny_DFP device files for the compiler).
 #
-# KNOWN LIMITATION (NOT patched -- worked around in the test suite)
-#   yasimavr 0.1.6 is a functional/logic simulator: its AVR core charges a flat
-#   ~1 cycle per instruction and does NOT model the AVR's true multi-cycle
-#   instruction timing. (Single-stepping shows SBIW -> +1 cycle and a taken
-#   BRNE -> +1 cycle; on silicon each is 2 cycles.) Consequences:
+# KNOWN LIMITATION (a THIRD upstream bug, NOT patched here -- see below)
+#   0.1.6's SimLoop::run(nbcycles) forces the cycle counter to
+#   first_cycle + nbcycles when it returns. That is correct when the loop stops
+#   SHORT of the budget, but it REWINDS the counter when the last instruction
+#   overshoots it. So a caller that advances the simulation in very small budgets
+#   loses up to one instruction's worth of cycles per call, and at run(1) -- one
+#   instruction per call -- every instruction is billed exactly 1 cycle.
+#   Consequences for this harness:
 #     * TCB0-tick-driven timing (debounce thresholds, LED/state sequencing) is
-#       ACCURATE -- the tick period is counted by the peripheral, not by summing
-#       instruction cycles -- so `make attiny202-sim` validates it directly.
-#     * A raw-CPU-cycle busy delay is NOT accurate: avr-libc _delay_ms() coil
-#       pulses (the relay's 12 ms, the muted-x4053's 5 ms) run at ~HALF their
-#       real wall-clock length here (a 4-cycle loop body executes as 2). The
-#       harness therefore does NOT assert absolute pulse WIDTH; that is verified
-#       from the compiled image's _delay_ms loop by
-#       test/avr/test_attiny202_delay_oracle.py. See that file's header, the
-#       check_pulse_present() note in test/avr/test_sim_attiny202.py, and the
-#       project memory "yasimavr-flat-instruction-timing".
-#   This is a fidelity limit, not a firmware defect: the built image is correct
-#   for real 2 MHz silicon. It is left unpatched (accurate XT instruction timing
-#   would be a large core change); the disassembly oracle covers the gap exactly.
+#       ACCURATE. The tick period is counted by the peripheral, and those tests
+#       advance in millisecond budgets (2000 cycles), where losing at most one
+#       instruction's worth of cycles per call is under 0.2%.
+#     * The output tracer in test/avr/test_sim_attiny202.py samples pin state
+#       ONE CYCLE at a time, so inside a trace every instruction costs 1 cycle
+#       and the avr-libc _delay_ms() coil pulses (the relay's 12 ms, the
+#       muted-x4053's 5 ms) trace at ~HALF their real width. The harness
+#       therefore asserts pulse structure, not absolute WIDTH; the width is
+#       verified from the compiled image's _delay_ms loop by
+#       test/avr/test_attiny202_delay_oracle.py. See that file's header and the
+#       check_pulse_present() note in test/avr/test_sim_attiny202.py.
+#   Not a firmware defect: the built image is correct for real 2 MHz silicon.
+#
+#   CORRECTION (2026-08-02): this block previously blamed a "flat ~1 cycle per
+#   instruction" core with no multi-cycle timing model. That diagnosis was WRONG
+#   -- it was inferred from single-stepping via run(1), i.e. through the very bug
+#   above. The AVR-XT core does model multi-cycle instruction timing.
+#
+#   Left unpatched on purpose: upstream has confirmed the defect and has a fix
+#   (skip the adjustment when the counter already passed the end), so this one is
+#   expected to arrive in a release rather than needing a vendored patch, unlike
+#   0001/0002 which block the firmware from running at all. Verified locally
+#   against a rebuild of 0.1.6 carrying that guard: the relay pulse then measures
+#   12.669 ms at single-cycle sampling (vs 6.186 ms without) and
+#   `make attiny202-sim` still passes unchanged. When the fix lands in a pinned
+#   release, the width could optionally move back in-sim -- though the
+#   disassembly oracle stays the tighter check either way.
 #
 # USAGE
 #   scripts/fetch_yasimavr.sh [VENV_DIR]

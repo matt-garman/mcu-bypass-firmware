@@ -3,10 +3,11 @@
 
 Covers the STRUCTURAL trace checks the yasimavr harness performs -- transition
 sequence/polarity, safe startup, coil exclusion, and complete-pulse presence.
-The ABSOLUTE coil-pulse WIDTH is deliberately NOT a yasimavr check (that sim is
-not cycle-accurate for instruction timing; see check_pulse_present in
-test_sim_attiny202.py); it is verified from the compiled image by
-test_attiny202_delay_oracle.py, whose own --selftest exercises the width logic.
+The ABSOLUTE coil-pulse WIDTH is deliberately NOT a yasimavr check (it is a
+compile-time property, and the harness's one-cycle sampling hits an upstream
+SimLoop.run() defect; see check_pulse_present in test_sim_attiny202.py); it is
+verified from the compiled image by test_attiny202_delay_oracle.py, whose own
+--selftest exercises the width logic.
 """
 
 import contextlib

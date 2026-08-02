@@ -52,6 +52,34 @@ These items were identified during a full meta-review of the firmware, design
 doc, and test suite (2026-06-18) and re-verified as open on 2026-07-26. All
 close residual verification gaps that can be addressed in software.
 
+**Re-pin yasimavr once the `SimLoop.run()` cycle-rewind fix ships.** Added
+2026-08-02, after the upstream maintainer confirmed the defect reported from this
+project and produced a fix.
+
+`SimLoop::run(n)` pins the cycle counter to `first_cycle + n` on return, which
+rewinds it when the last instruction overshoots; at `run(1)` that bills every
+instruction 1 cycle. The ATtiny202 output tracer samples one cycle at a time, so
+a 12 ms coil pulse traces as ~6 ms today (full account in `test/README.md` and
+the `test_attiny202_delay_oracle.py` header).
+
+When a release carrying the fix appears, bump `YASIMAVR_VER` /
+`YASIMAVR_SDIST_SHA256` in `scripts/fetch_yasimavr.sh`, re-check whether patches
+`0001`/`0002` are still needed, and rewrite the "KNOWN LIMITATION" block. A local
+rebuild of 0.1.6 with the fix already showed the whole suite passing unchanged
+and the pulse measuring 12.669 ms at single-cycle sampling, so this is expected to
+be a pin bump, not a port.
+
+Optional follow-on, and *not* a reason to delay the bump: an in-sim width
+assertion becomes possible. It would be weaker than the existing oracle
+(disassembly reads the compile-time truth exactly, while a trace carries ~0.67 ms
+of tick-ISR preemption and the sampling granularity), so its only real value would
+be as an independent cross-check that the image's compiled delay is what a running
+device actually produces. Keep `attiny202-delay-oracle` as the gate either way.
+
+Effort: ~1 h for the bump; ~2 h more for the optional cross-check. Impact: Low —
+no new claim about the firmware, but it retires a documented simulator caveat and
+removes a note that has already been wrong once.
+
 **Extend the final-HEX return-stack oracle to the PIC10F322.** Added 2026-07-27
 during the `pic10f320-merge-fixes` merge; **re-scoped the same day after the
 device-geometry half was implemented and the real blocker was measured.**
@@ -429,13 +457,16 @@ Medium-High — adoption plus a genuine reliability net.
 The simavr (AVR Classic), libgpsim (PIC), and yasimavr (AVR-XT) suites prove the
 shells in simulation, but two gaps remain:
 
-- (a) **No cycle-accurate simulator for the AVR-XT target.** yasimavr runs real
-  ATtiny202 firmware and is a genuine behavioural simulator, but it executes
-  approximately one cycle per instruction with no multi-cycle timing model — so
-  busy-wait pulse widths come out at roughly half their real duration, and
-  absolute timing has to be recovered from a disassembly oracle rather than
-  measured in the simulator. Instruction-level behaviour is covered; cycle-level
-  timing is not.
+- (a) **No AVR-XT timing measured on a clock, only on a model.** yasimavr runs
+  real ATtiny202 firmware, and (corrected 2026-08-02) it *does* model multi-cycle
+  instruction timing — the earlier claim here that it charges one cycle per
+  instruction was wrong, an artifact of measuring by single-stepping through the
+  upstream `SimLoop.run()` defect described in `test/README.md`. Two gaps
+  survive that correction. Until that fix reaches a pinned release, the harness
+  cannot measure busy-delay width in-sim at all (absolute width comes from a
+  disassembly oracle instead). And regardless of the fix, simulated time is
+  *nominal*-clock time: the real part's internal oscillator tolerance over
+  voltage and temperature only shows on a bench instrument.
 - (b) **No existing test observes internal state on real silicon.** The suites
   assert I/O behaviour, not that the behaviour arises from the intended internal
   trajectory.

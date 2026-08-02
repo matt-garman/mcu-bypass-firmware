@@ -798,8 +798,10 @@ XT_MUTATIONS=(
 # These two live in the SHARED output drivers rather than the XT shell. The PIC
 # lane mutates the same lines against its own cycle-exact target I/O check; here
 # they gate the AVR-XT's only route to an absolute width -- the _delay_ms loop
-# read back out of the built image -- which exists precisely because yasimavr's
-# flat instruction timing cannot measure a busy-wait pulse.
+# read back out of the built image -- which is where the width lives because it
+# is a compile-time property, and because the yasimavr harness cannot measure a
+# busy-wait pulse while its one-cycle sampling trips the upstream SimLoop.run()
+# defect (see test/avr/test_attiny202_delay_oracle.py).
 "src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	attiny202-delay-oracle	XT relay coil pulse shortened below the 4 ms datasheet minimum; the image's _delay_ms loop no longer matches the 12 ms design"
 "src/bypass_output_cd4053_with_mute.c	s@BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS)@BYPASS_DELAY_MS(1)@g	attiny202-delay-oracle	XT cd4053_with_mute pre-switch mute window shortened from 5 ms; the disassembled delay loop no longer matches the design"
 )

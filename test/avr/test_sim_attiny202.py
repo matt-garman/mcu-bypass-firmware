@@ -140,20 +140,23 @@ def check_trace(ck, trace, expected_states):
 
 def check_pulse_present(ck, trace, pulse_state):
     """Assert a COMPLETE pulse of `pulse_state` (an edge into it and an edge out)
-    is observed -- the structural coil-pulse property yasimavr CAN verify.
+    is observed -- the structural coil-pulse property this driver owns.
 
     Deliberately does NOT assert the pulse's WALL-CLOCK WIDTH. The coil pulses
-    are avr-libc _delay_ms() busy loops, so their duration is a pure CPU-cycle
-    count -- and yasimavr 0.1.6 is a functional simulator that charges a flat
-    ~1 cycle per instruction rather than the AVR-XT's true instruction timing
-    (SBIW and a taken BRNE are 2 cycles each on silicon, 1 each here). It thus
-    runs every busy delay at ~half its real length (a 12 ms pulse traces as
-    ~6 ms), so an absolute-width check here would fail a CORRECT image. The
-    absolute width is a compile-time property of the flash and is verified from
-    the disassembled _delay_ms loop by test_attiny202_delay_oracle.py -- see that
-    file's header (and the project memory note "yasimavr-flat-instruction-
-    timing") for the full rationale. yasimavr's TCB0-tick timing is unaffected,
-    so the debounce/LED/sequence checks elsewhere in this driver stay accurate.
+    are avr-libc _delay_ms() busy loops, so their duration is a compile-time
+    CPU-cycle count, and it is checked directly against the disassembled loop by
+    test_attiny202_delay_oracle.py -- a simulator-independent check, tighter than
+    any trace could be. See that file's header for the full rationale.
+
+    A width check HERE would in any case fail a correct image, because
+    trace_outputs() advances the simulation one cycle at a time
+    (OUTPUT_SAMPLE_CYCLES) and the pinned yasimavr 0.1.6 rewinds its cycle
+    counter when a run() budget is overshot -- at run(1) that bills every
+    instruction 1 cycle, so a 12 ms pulse traces as ~6 ms. That is an upstream
+    SimLoop.run() defect, reported and confirmed with a fix pending release; it
+    is NOT the "flat 1 cycle per instruction" core limitation earlier revisions
+    of this comment claimed, and it never affected TCB0-tick timing, so the
+    debounce/LED/sequence checks elsewhere in this driver stay accurate.
     """
     start = None
     end = None

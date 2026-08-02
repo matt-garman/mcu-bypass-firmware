@@ -2270,9 +2270,10 @@ attiny202-analyze-misra: src/bypass_mcu_avr_xt.c $(XT_HEADERS) $(MISRA_ADDON) $(
 
 # Absolute coil-pulse WIDTH gate, read straight from the compiled image. The
 # relay/mute pulses are avr-libc _delay_ms() busy loops, so their duration is a
-# compile-time CPU-cycle count -- verifiable by disassembly and NOT by the
-# yasimavr harness, which is not cycle-accurate for instruction timing (it runs
-# every busy delay at ~half its true length; see
+# compile-time CPU-cycle count -- read most directly, and independently of any
+# simulator, by disassembly. It is deliberately NOT asserted by the yasimavr
+# harness, whose one-cycle pin sampling trips an upstream SimLoop.run() defect
+# that makes a busy delay trace at ~half its true length (see
 # test/avr/test_attiny202_delay_oracle.py and test_sim_attiny202.check_pulse_
 # present). This gate parses the _delay_ms loop count out of `avr-objdump -d`
 # and asserts each variant's design widths (tq2_l2_5v_relay 12 ms x2,
