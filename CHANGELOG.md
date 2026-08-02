@@ -30,6 +30,37 @@ file is the human-readable summary of *what changed*.
 
 ## [0.9.8] — unreleased
 
+### Added
+- **`make test` now fails if any `NAME=value` handed to make names a variable
+  the Makefile does not know.** A make override naming no existing variable is
+  legal and silent — the value is ignored and the default applies — which is how
+  a renamed `SOAK_*` left one mutant asking for 2 s of simulated soak and
+  getting the 24 h default for an entire release. New gate
+  `test-makefile-name-contract` (`test/test_makefile_name_contract.py`), axis C
+  of the four-axis name-contract item in `TODO.md`; 72 overrides verified.
+
+  The Makefile gains an `origin-%` rule beside `print-%`, plus a bulk
+  `make origins NAMES="…"` form that resolves a whole harvest in one invocation.
+  `$(origin)` is the oracle because non-emptiness cannot work here:
+  `XT_SOAK_COMBINATION_NAME` and `AVR_STACK_BUILD_DIR` are defined-but-empty by
+  design. The contract is *defined **or** consumed*: `$(origin)` alone reports
+  a command-line-only input such as `VERSION` as `undefined`, so the Makefile's
+  own `make release VERSION=v1.0.0` usage line would otherwise read as severed.
+
+  The gate is verified by reproducing the defect it exists to prevent: reverting
+  the mutation row to its pre-rename spellings makes it name all four severed
+  overrides and fail. That check matters because the specification this gate was
+  built from would **not** have caught that defect — it called for harvesting
+  "lines invoking make", and the row in question is a data row in a mutation
+  table with no `make` token on it at all. The mutation tables are enumerated as
+  their own source, and the gate asserts it found overrides there.
+
+  Harvesting only what follows the make word — assignments *before* it are
+  environment for make's children, not claims about the Makefile — cut the
+  expected allowlist from seven-plus names to one (`MUTATION_ALLOW_SKIP`), and
+  every exemption must still be reached by the harvest, so exemptions expire
+  rather than accumulate.
+
 ### Changed
 - **Every released firmware image is renamed to one consistent scheme.** All
   eighteen images on all six MCUs are now

@@ -327,8 +327,9 @@ datasheet startup time against 64 ms). Item (b) is a documentation task and pair
 naturally with the Tier 2 datasheet-citation item.
 
 **Fail-closed gate on the names other files exchange with the Makefile —
-`print-<VAR>` reads, documented `make <goal>` targets, `make VAR=value`
-overrides, and variables named to human readers.** Added 2026-08-01 while doing
+`print-<VAR>` reads, documented `make <goal>` targets, ~~`make VAR=value`
+overrides~~ (axis C **done**, 2026-08-02), and variables named to human
+readers.** Added 2026-08-01 while doing
 the variable-prefix rename in `v0.9.8`; widened three times on 2026-08-02 —
 first after the same class was found severed on the goal axis, then after it was
 found severed on the override axis (where it had already burned a >10-hour run),
@@ -427,11 +428,58 @@ passed, and a plain `=` also resists the environment. The cost of axis D is
 misdirection, not wrong output — which is exactly why no gate would ever notice
 it, and why the harvest has to be textual.
 
-Axis C is the cheapest of the four to gate and the only one with a demonstrated
-runtime cost, so build it first; axis B and D second — they share a harvest pass
-over the same files and differ only in the token class they look for, so
-building either alone wastes most of the work. Their consumers are humans,
-rather than a script that at least runs in CI.
+**Axis C is DONE (2026-08-02).** `test/test_makefile_name_contract.py`, wired in
+as `test-makefile-name-contract` in `TEST_GATES`, so it runs in `make test`.
+Verified by reproducing the original defect: reverting the mutation row to its
+pre-rename `SOAK_*` spellings makes the gate name all four severed overrides and
+fail. 9 checks, 72 overrides verified on a clean tree.
+
+Three things it learned that were **not** in the specification below, recorded
+because they invalidate parts of it:
+
+1. *The prototype would not have caught the defect it was written for.* The
+   spec says "harvest every `NAME=value` token from lines invoking make". The
+   `v0.9.8` defect lived in a **mutation table row**:
+   `test/run_mutation_tests.sh`
+   stores make command lines as the third tab-separated field of a data row, and
+   those rows contain no `make` token at all. Any harvest keyed on
+   "lines invoking make" misses them entirely. The gate enumerates the mutation
+   tables as a separate, named source, and asserts it found overrides there, so
+   a table-format change fails loudly instead of silently dropping the only
+   source that carries the motivating bug.
+2. *`$(origin)` alone is the wrong oracle.* The spec is right that
+   non-emptiness fails on defined-but-empty names, but `$(origin)` reports a
+   **command-line-only input** as `undefined` — it is never defined in the file,
+   it is *consumed*. `make release VERSION=v1.0.0` is the Makefile's own
+   documented interface and `$(VERSION)` is read in the recipe, yet origin says
+   undefined, so the Makefile's usage comment reads as severed. The contract is
+   *defined **or** consumed*: `$(origin)` plus a `$(NAME)`/`${NAME}` dereference
+   scan.
+3. *Position disambiguates, and it retires most of the allowlist.* Overrides
+   follow the make word; assignments **before** it are environment for make's
+   children. Harvesting only the trailing position drops every fake-tool shim
+   parameter (`FAKE_CC_LOG`, `FAKE_OBJCOPY_LOG`, …) and the `env` set handed to
+   `make-release.sh`, because those were never claims about the Makefile's
+   vocabulary. The allowlist went from the seven-plus names predicted below to
+   **one** (`MUTATION_ALLOW_SKIP`), and the gate now asserts every exemption is
+   still reached by the harvest, so exemptions expire instead of accumulating.
+
+Two smaller ones: the Makefile must be harvested by *physical* line while shell
+and YAML are continuation-joined (joining a recipe makes its whole body look
+like one make invocation, so every shell local in it reads as an override); and
+the harvest must stop at the first shell separator or redirection, or
+`make … >/dev/null 2>&1; rc=$?` reports `rc` forever.
+
+The Makefile side is an `origin-%` rule beside `print-%` — which had to live
+there, exactly as predicted — plus a bulk `origins NAMES="…"` form so a whole
+harvest resolves in one 27 ms invocation instead of one per name.
+
+**Still open: axes A, B and D.** Axis A (`print-<VAR>` reads) is now cheap: the
+`origin-%`/`origins` oracle it needs already exists, so it is a harvest plus the
+same contract check, ~1 h. Axes B and D share a harvest pass over the same files
+and differ only in the token class they look for, so building either alone
+wastes most of the work. Their consumers are humans, rather than a script that
+at least runs in CI.
 
 A prototype sweep already works: harvest every `NAME=value` token from lines
 invoking make across `test/`, `scripts/`, `.github/` and the Makefile's own
@@ -585,22 +633,28 @@ exist to be cross-checked against Makefile truth — but this one cross-checks
 nothing, it just needs a path, so the restatement buys nothing and cost exactly
 the silent lane-disable that `v0.9.8` fixed.
 
-Effort: ~4–6 h for all four axes (~1 h for axis C alone, which has a working
-prototype; axes B and D together ~2–3 h, since they share one harvest pass and
-one allowlist mechanism). Impact: High — no new assurance about the firmware,
-but it closes a silent-severance class on the interfaces between the Makefile
-and the release orchestrator, the published documentation and the test
-harnesses; those interfaces only ever get wider, and the class has now cost real
-time three times over one release (a disabled mutation lane, then a >10-hour
-hang, then ten stale surfaces that a meta-review had to find by hand).
+Effort: axis C is spent (~3 h, more than the ~1 h predicted — the three spec
+corrections above are where it went, and each one had to be found by the gate
+failing on the real tree). Remaining: ~1 h for axis A, now that the `origins`
+oracle exists; ~2–3 h for axes B and D together, since they share one harvest
+pass and one allowlist mechanism. Impact: High — no new assurance about the
+firmware, but it closes a silent-severance class on the interfaces between the
+Makefile and the release orchestrator, the published documentation and the test
+harnesses; those interfaces only ever get wider, and the class cost real time
+four times over one release (a disabled mutation lane, a >10-hour hang, ten
+stale surfaces a meta-review had to find by hand, and a severed per-variant map
+that had been failing the PIC10F322 soak build since the stage rename).
 
-A note on why this item keeps growing: each of the three widenings was found by
-looking, not by a gate, and each time the scope of the *previous* sweep was the
-reason the next one was missed — axis A swept `print-<VAR>`, so it did not see
-documents; axis B swept `make <goal>`, so it did not see variables in prose;
-axis C swept make-invoking lines, so it did not see continuations. That pattern
-is itself the argument for building the gate rather than doing a fourth sweep
-by hand.
+A note on why this item keeps growing: every widening was found by looking, not
+by a gate, and each time the scope of the *previous* sweep was the reason the
+next one was missed — axis A swept `print-<VAR>`, so it did not see documents;
+axis B swept `make <goal>`, so it did not see variables in prose; axis C swept
+make-invoking lines, so it did not see continuations, and then its own written
+specification turned out not to see the mutation tables where the motivating
+defect actually lived. That pattern is the argument for building the remaining
+axes rather than sweeping by hand a fifth time — and for the house rule that
+every gate carries a negative case, since axis C's most valuable single check is
+the one that reproduces the original bug and proves the gate fails on it.
 
 ---
 
@@ -964,7 +1018,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Multi-press boundary cases | 2.5 | 3–4 h | Medium — tick-boundary edge cases |
 | Power-on-pressed simulation gap | 2.5 | 1–2 h | Low — simulator fidelity, not coverage |
 | Power-supply ramp-up analysis | 2.5 | 2–3 h | Medium — real-world robustness |
-| Makefile name-contract gate (`print-<VAR>` reads + documented goals + `VAR=` overrides + variables named to readers) | 2.5 | 4–6 h | High — closes a silent-severance class in the release path, the published docs and the test harnesses; has cost a disabled mutation lane, a >10-hour hang and ten stale surfaces across one release |
+| Makefile name-contract gate — remaining axes A (`print-<VAR>` reads), B (documented goals), D (variables named to readers); axis C (`VAR=` overrides) **done** | 2.5 | 3–4 h | High — closes a silent-severance class in the release path, the published docs and the test harnesses; cost a disabled mutation lane, a >10-hour hang, ten stale surfaces and a severed per-variant map across one release |
 | Hardware-validation procedure doc | 3 | 2–3 h | High — primary-part WDT gap |
 | HIL rig: behavioural + register introspection | 3 | 5–8 d | High — silicon-level model validation |
 | Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |

@@ -627,7 +627,7 @@ FORCE:
         test-target-matrix test-target-lane-markers test-lockstep-progress \
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
-        test-variant-map-contract \
+        test-variant-map-contract test-makefile-name-contract \
         pic10f322-test-target pic10f322-test-target-variants pic10f322-test-io pic10f322-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
         test-flash-budget-regression test-soak test-soak-reset-witness \
@@ -2467,7 +2467,7 @@ TEST_GATES_LATE = \
         test-release-qualification test-release-history \
         test-build-serialization test-target-matrix \
         test-target-lane-markers test-lockstep-progress test-soak-timing \
-        test-variant-map-contract \
+        test-variant-map-contract test-makefile-name-contract \
         test-soak-reset-witness test-strict-tools test-workload-rebuild \
         test-pic-build-rebuild coverage-check coverage-check-core
 TEST_GATES = $(TEST_GATES_EARLY) $(TEST_GATES_LATE)
@@ -2668,6 +2668,16 @@ test-ci-local-routing:
 # let pic_soak_block_* sever silently through the whole v0.9.8 rename.
 test-variant-map-contract:
 	./test/test_variant_map_contract.sh
+
+# Host-only proof that every `NAME=value` handed to make names a variable this
+# Makefile defines or reads (axis C of the name-contract item). A make override
+# naming nothing is legal and silent, which is how a renamed SOAK_* left one
+# mutant running a 24 h soak instead of 2 s for an entire release.
+test-makefile-name-contract:
+	@if ! command -v python3 >/dev/null 2>&1; then \
+		echo "FAIL: python3 is required by the Makefile name-contract gate"; exit 1; \
+	fi
+	@python3 test/test_makefile_name_contract.py
 
 # Parse the GitHub workflow files and cross-check ci.yml's job list against
 # ci-local.sh. Nothing else here loads them as YAML, so an unparseable workflow
@@ -4700,6 +4710,38 @@ pic10f320-clean:
 print-%:
 	@echo '$($*)'
 
+# Companion oracle: does this Makefile actually KNOW a name?
+#
+# `print-%` is a pattern rule, so it matches anything. Ask it for a variable
+# that no longer exists and it prints an empty line and exits 0 -- which is why
+# a rename can sever the link between this file and the scripts, workflows and
+# documents that name its variables, with every gate staying green. v0.9.8 hit
+# that three times: three `mkv` calls in scripts/make-release.sh left pointing at
+# removed names (the damage would have surfaced as empty fuse bytes in a
+# published MANIFEST.md at the end of a 24-hour run), a mutation row passing four
+# renamed SOAK_* overrides that were silently inert, and ten stale surfaces
+# naming variables to human readers.
+#
+# Non-emptiness is NOT the test. Several names are defined-but-empty by design
+# (XT_SOAK_COMBINATION_NAME, AVR_STACK_BUILD_DIR), so asserting a value would
+# produce false failures. $(origin) is the only oracle that separates "never
+# defined" (undefined) from "deliberately set empty" (file).
+#
+# This has to live HERE, beside print-%, rather than in an outer makefile that
+# includes this one: _make-serialized-invocation intercepts goals it does not
+# recognize, so the invocation fails before an externally added rule is reached.
+#
+# `make origin-FOO` -> undefined | file | command line | environment | ...
+origin-%:
+	@echo '$(origin $*)'
+
+# Bulk form, so a gate can resolve a whole harvest in ONE make invocation
+# instead of one per name: `make origins NAMES="A B C"` prints "<name> <origin>"
+# per line. The per-name rule above stays for interactive use.
+.PHONY: origins
+origins:
+	@$(foreach n,$(NAMES),printf '%s %s\n' '$(n)' '$(origin $(n))';)
+
 # ============================================================================
 # RELEASE -- reproducible, fully-validated prebuilt firmware images
 # ============================================================================
@@ -4988,6 +5030,7 @@ help:
 	@echo "  test-lockstep-progress  both PIC exact-pin/stall-propagation checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
+	@echo "  test-makefile-name-contract  every make override names a real variable (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
 	@echo "  test-pic-build-rebuild  PIC soak binaries rebuild on a workload change"
