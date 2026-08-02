@@ -3,7 +3,7 @@
 
 // PIC10F322 adapter for the shared built-HEX GPIO/pulse-timing harness.
 
-#define PIC_IO_DEFAULT_FW_PATH "build_pic/bypass-pic10f322-cd4053_simple.hex"
+#define PIC_IO_DEFAULT_FW_PATH "build_pic10f322/bypass-pic10f322-cd4053_simple.hex"
 #define PIC_IO_DEFAULT_PROC_NAME "p10f322"
 #define PIC_IO_PART_NAME "PIC10F322"
 

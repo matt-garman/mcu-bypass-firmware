@@ -38,7 +38,7 @@
 //        iteration afterward. Driving one input per CLRWDT firing handles both for
 //        free -- exactly as the host harness (one input per loop iteration) does.
 //
-// Build/run via `make pic-test-lockstep` or `make pic320-test-lockstep`. The
+// Build/run via `make pic10f322-test-lockstep` or `make pic10f320-test-lockstep`. The
 // fail-closed target-variant aggregates run the matching adapter for every image
 // and require its PASS marker.
 

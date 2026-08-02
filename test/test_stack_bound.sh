@@ -51,13 +51,13 @@ chmod 750 "$tools/cc"
 
 run_gate() {
 	make --no-print-directory -C "$ROOT" test-stack-bound \
-		STACK_BUILD_DIR="$build" STACK_MAX_FRAME="${TEST_STACK_MAX-32}" \
+		AVR_STACK_BUILD_DIR="$build" AVR_STACK_MAX_FRAME="${TEST_STACK_MAX-32}" \
 		CC="$tools/cc" "$@"
 }
 
 run_gate_private() {
 	make --no-print-directory -C "$ROOT" test-stack-bound \
-		STACK_MAX_FRAME="${TEST_STACK_MAX-32}" CC="$tools/cc"
+		AVR_STACK_MAX_FRAME="${TEST_STACK_MAX-32}" CC="$tools/cc"
 }
 
 seed_stale() {
@@ -91,7 +91,7 @@ expect_failure() {
 
 seed_stale
 output=$(export FAKE_STACK_LOG="$log"; run_gate VARIANTS=cd4053_simple VARIANT=tq2_l2_5v_relay \
-	STACK_SOURCES=src/bypass_pure.c CORE_SRC=src/bypass_pure.c \
+	AVR_STACK_SOURCES=src/bypass_pure.c CORE_SRC=src/bypass_pure.c \
 	src_cd4053=src/bypass_pure.c src_mute=src/bypass_pure.c \
 	src_relay=src/bypass_pure.c)
 [[ "$output" == *"OK: 5 fresh reports"* ]] \

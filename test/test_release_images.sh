@@ -257,10 +257,10 @@ subset_canonical=$(cd "$ROOT" && \
 checks=$((checks + 1))
 
 subset_canonical=$(cd "$ROOT" && \
-	make -s PIC320_VARIANTS_ALL=cd4053_with_mute print-RELEASE_IMAGES) \
+	make -s PIC10F320_VARIANTS_ALL=cd4053_with_mute print-RELEASE_IMAGES) \
 	|| fail "could not read RELEASE_IMAGES with a PIC10F320 subset override"
 [ "$subset_canonical" = "$canonical" ] \
-	|| fail "PIC320_VARIANTS_ALL override changed the canonical release set"
+	|| fail "PIC10F320_VARIANTS_ALL override changed the canonical release set"
 checks=$((checks + 1))
 
 count_matching() {

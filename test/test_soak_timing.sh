@@ -103,11 +103,11 @@ expect_default_dry_run_shortened() {
 # release duration while checking liveness on a different schedule from the
 # evidence the MANIFEST claims -- and it would still print SOAK PASS.
 expect_release_liveness_wiring() {
-	grep -Eq '^[[:space:]]+SOAK_LIVENESS_INTERVAL_MS="\$SOAK_LIVENESS_INTERVAL_MS"' "$RELEASE" \
+	grep -Eq '^[[:space:]]+AVR_SOAK_LIVENESS_INTERVAL_MS="\$SOAK_LIVENESS_INTERVAL_MS"' "$RELEASE" \
 		|| fail "release does not pass the liveness interval to Classic AVR soaks"
-	grep -Eq '^[[:space:]]+PIC_SOAK_LIVENESS_INTERVAL_MS="\$SOAK_LIVENESS_INTERVAL_MS"' "$RELEASE" \
+	grep -Eq '^[[:space:]]+PIC10F322_SOAK_LIVENESS_INTERVAL_MS="\$SOAK_LIVENESS_INTERVAL_MS"' "$RELEASE" \
 		|| fail "release does not pass the liveness interval to PIC10F322 soaks"
-	grep -Eq '^[[:space:]]+PIC320_SOAK_LIVENESS_INTERVAL_MS="\$SOAK_LIVENESS_INTERVAL_MS"' "$RELEASE" \
+	grep -Eq '^[[:space:]]+PIC10F320_SOAK_LIVENESS_INTERVAL_MS="\$SOAK_LIVENESS_INTERVAL_MS"' "$RELEASE" \
 		|| fail "release does not pass the liveness interval to PIC10F320 soaks"
 	checks=$((checks + 1))
 }
@@ -117,10 +117,10 @@ expect_release_liveness_wiring() {
 # the string simply stops appearing -- which is a failure, not a pass, so assert
 # the duration knob is threaded too. Both are per-combo `make` arguments, so
 # their presence is the closest a static check gets to "the combo exists".
-expect_release_pic320_soak_combos() {
-	grep -Eq '^[[:space:]]+PIC320_SOAK_DURATION_MS="\$SOAK_DURATION_MS"' "$RELEASE" \
+expect_release_pic10f320_soak_combos() {
+	grep -Eq '^[[:space:]]+PIC10F320_SOAK_DURATION_MS="\$SOAK_DURATION_MS"' "$RELEASE" \
 		|| fail "release does not build PIC10F320 soak combos at the release duration"
-	grep -Eq 'PIC320_SOAK_VARIANT="\$v"' "$RELEASE" \
+	grep -Eq 'PIC10F320_SOAK_VARIANT="\$v"' "$RELEASE" \
 		|| fail "release does not select a PIC10F320 soak combo per output variant"
 	checks=$((checks + 1))
 }
@@ -370,7 +370,7 @@ for jobs in 0 -1 1.5 malformed 01; do
 	expect_release_jobs_reject "$jobs"
 done
 expect_release_liveness_wiring
-expect_release_pic320_soak_combos
+expect_release_pic10f320_soak_combos
 expect_release_avrxt_soak_combos
 expect_avrxt_soak_contract
 expect_pic_per_ms_transition_sampling

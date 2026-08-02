@@ -93,14 +93,14 @@ jobs:
   # -------------------------------------------------------------------------
   # PIC gate (BOTH chips): the PIC counterpart of `verify`.
   #
-  # PIC10F322 -- `make pic-test`: builds every variant with XC8 + enforces the
+  # PIC10F322 -- `make pic10f322-test`: builds every variant with XC8 + enforces the
   # 512-word flash budget, verifies the emitted CONFIG word vs design intent,
   # runs cppcheck+MISRA on the PIC shell, and drives the footswitch through gpsim
   # asserting PORTA/LATA -- then the fail-closed real-HEX target aggregate
-  # (`make pic-test-target-variants`): libgpsim fault recovery, firmware/model
+  # (`make pic10f322-test-target-variants`): libgpsim fault recovery, firmware/model
   # ctx_ lock-step, and GPIO transition / pulse timing for every PIC variant.
   #
-  # PIC10F320 -- `make pic320-test` + `make pic320-test-target-variants`: the same
+  # PIC10F320 -- `make pic10f320-test` + `make pic10f320-test-target-variants`: the same
   # shape for the constrained 256-word part, plus the host lanes it alone has
   # (firmware<->core equivalence, actuation sequence, host fault injection, and
   # the exact-line firmware coverage gate). See docs/pic10f320_special_case.md
@@ -111,20 +111,20 @@ jobs:
   # gates the whole repository -- and folding PIC10F320 into it means those four
   # gate on the new chip for free, with one XC8 install and one cache restore.
   # The accepted cost is that the full PIC10F320 lane sits on their critical path.
-  # Splitting it into a sibling `pic320` job later is mechanical, but it would
+  # Splitting it into a sibling `pic10f320` job later is mechanical, but it would
   # force an explicit decision about whether those four should gate on it; that
   # is the trade to revisit only if CI wall-clock becomes binding.
   #
   # XC8 and the PIC10-12Fxxx DFP are not in apt; they are fetched from Microchip
   # (the free tier needs no key to compile) and installed to the paths the
   # Makefile defaults to (also passed explicitly via PIC_CC / PIC_DFP and
-  # PIC320_CC / PIC320_DFP -- one shared installation, two variable pairs, so
+  # PIC10F320_CC / PIC10F320_DFP -- one shared installation, two variable pairs, so
   # either chip can be re-pinned without silently moving the other). gpsim,
   # gpsim-dev + libglib2.0-dev + g++ (the libgpsim fault-inject build), cppcheck,
   # python3 come from apt.
   #
   # CRITICAL: optional simulator/analyzer sub-targets SKIP CLEANLY when a
-  # tool/header is absent -- fatal for a gate even though pic320-test's hash and
+  # tool/header is absent -- fatal for a gate even though pic10f320-test's hash and
   # return-stack prerequisites fail closed. The "Assert PIC toolchain present"
   # step fails loud so a broken install can never masquerade as a pass;
   # the cache is only SAVED after that assert, so a half-baked install is never
@@ -205,18 +205,18 @@ jobs:
 
       - name: PIC pre-hardware gate
         # STRICT_TOOLS=1: the assert step above proved XC8/DFP/gpsim are present,
-        # so the pic-test sub-gates must run, not skip. (Consistent with that assert.)
+        # so the pic10f322-test sub-gates must run, not skip. (Consistent with that assert.)
         run: |
-          make pic-test STRICT_TOOLS=1 \
+          make pic10f322-test STRICT_TOOLS=1 \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC_DFP="${XC8_DFP_ROOT}/xc8"
 
       # Fail-closed target aggregate (libgpsim), every variant. The aggregate
       # itself requires explicit PASS sentinels from fault, lock-step, and I/O;
       # a silent skip or partial run is therefore a failure.
-      - name: PIC target aggregate (make pic-test-target-variants)
+      - name: PIC target aggregate (make pic10f322-test-target-variants)
         run: |
-          make pic-test-target-variants STRICT_TOOLS=1 \
+          make pic10f322-test-target-variants STRICT_TOOLS=1 \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC_DFP="${XC8_DFP_ROOT}/xc8"
 
@@ -227,20 +227,20 @@ jobs:
       # final-HEX return-stack checks, cppcheck + MISRA, and the CLI-gpsim
       # register-level test -- the last two swept across all three variants,
       # because each compiles a different output stage.
-      - name: PIC10F320 pre-hardware gate (make pic320-test)
+      - name: PIC10F320 pre-hardware gate (make pic10f320-test)
         run: |
-          make pic320-test STRICT_TOOLS=1 \
-            PIC320_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC320_DFP="${XC8_DFP_ROOT}/xc8"
+          make pic10f320-test STRICT_TOOLS=1 \
+            PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
 
       # ...and the PIC10F320 fail-closed target aggregate, same contract as the
       # 322's above: explicit PASS sentinels from fault, lock-step and I/O, so a
       # silent skip or a partial matrix is a failure.
-      - name: PIC10F320 target aggregate (make pic320-test-target-variants)
+      - name: PIC10F320 target aggregate (make pic10f320-test-target-variants)
         run: |
-          make pic320-test-target-variants STRICT_TOOLS=1 \
-            PIC320_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC320_DFP="${XC8_DFP_ROOT}/xc8"
+          make pic10f320-test-target-variants STRICT_TOOLS=1 \
+            PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
 
       # The mutation driver also runs its core AVR and ATtiny202 mutants. Keep
       # their extra toolchain and the minutes-long gate off the pull-request hot
@@ -336,8 +336,8 @@ jobs:
           make test-mutation STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC_DFP="${XC8_DFP_ROOT}/xc8" \
-            PIC320_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC320_DFP="${XC8_DFP_ROOT}/xc8"
+            PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
 
       # Two chips, two separately named artifacts -- never one merged upload.
       # The release machinery keys on image basename. Those basenames now carry
@@ -349,7 +349,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: firmware-pic10f322
-          path: build_pic/*.hex
+          path: build_pic10f322/*.hex
           if-no-files-found: error
 
       - name: Upload PIC10F320 firmware images
@@ -516,7 +516,7 @@ jobs:
 
       # Internal-state gate: `ctx_` in simulated SRAM must equal the shipping
       # pure core's state after every settled tick. The AVR-XT counterpart of
-      # the classic lock-step co-sim and pic-test-lockstep. One PASS per variant,
+      # the classic lock-step co-sim and pic10f322-test-lockstep. One PASS per variant,
       # and -- because each variant co-simulates BOTH boot scenarios -- two
       # co-simulation summaries per variant, so a scenario that bailed out early
       # cannot hide behind a green verdict.
@@ -553,8 +553,8 @@ jobs:
   # -------------------------------------------------------------------------
   # Visible build matrix: prove every variant builds for every release-supported
   # AVR Classic MCU and publish the firmware images + size reports. `make
-  # all13/all45/all85` builds all variants for that part; the size<n> target
-  # prints flash/RAM.
+  # attiny13a`/`attiny45`/`attiny85` builds all variants for that part; the
+  # matching attiny<n>-size target prints flash/RAM.
   # -------------------------------------------------------------------------
   build-matrix:
     name: build (${{ matrix.mcu }})
@@ -565,14 +565,14 @@ jobs:
       matrix:
         include:
           - mcu: attiny13a
-            build: all13
-            size: size
+            build: attiny13a
+            size: attiny13a-size
           - mcu: attiny85
-            build: all85
-            size: size85
+            build: attiny85
+            size: attiny85-size
           - mcu: attiny45
-            build: all45
-            size: size45
+            build: attiny45
+            size: attiny45-size
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:

@@ -194,8 +194,9 @@ expect_fail "manifest soak-count mismatch" "soak count does not match"
 overridden=$(make -s -C "$ROOT" RELEASE_SOAK_NAMES=bad print-RELEASE_SOAK_NAMES)
 [ "$overridden" = "${soak_names[*]}" ] \
 	|| fail "command-line override changed canonical RELEASE_SOAK_NAMES"
-for required in avr_cd4053_simple_t85 attiny202_tq2_l2_5v_relay \
-		pic_tq2_l2_5v_relay pic320_tq2_l2_5v_relay; do
+for required in attiny85_cd4053_simple attiny45_cd4053_simple \
+		attiny202_tq2_l2_5v_relay \
+		pic10f322_tq2_l2_5v_relay pic10f320_tq2_l2_5v_relay; do
 	[[ " ${soak_names[*]} " == *" $required "* ]] \
 		|| fail "canonical release soak set is missing $required"
 done
@@ -209,9 +210,9 @@ overridden=$(make -s -C "$ROOT" RELEASE_EVIDENCE_FILES=bad print-RELEASE_EVIDENC
 checks=$((checks + 1))
 
 for wiring in \
-	'SOAK_COMBINATION_NAME="$name"' \
-	'PIC_SOAK_COMBINATION_NAME="$name"' \
-	'PIC320_SOAK_COMBINATION_NAME="$name"' \
+	'AVR_SOAK_COMBINATION_NAME="$name"' \
+	'PIC10F322_SOAK_COMBINATION_NAME="$name"' \
+	'PIC10F320_SOAK_COMBINATION_NAME="$name"' \
 	'ATTINY202_SOAK_COMBINATION_NAME=%q'; do
 	grep -Fq "$wiring" "$ROOT/scripts/make-release.sh" \
 		|| fail "release producer is missing soak identity wiring: $wiring"

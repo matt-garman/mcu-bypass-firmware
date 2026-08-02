@@ -142,7 +142,7 @@ run_ci() {
 	env PATH="$fakebin:$PATH" FAKE_REPO_ROOT="$ROOT" FAKE_MAKE_LOG="$log" \
 		REAL_MAKE="$REAL_MAKE" \
 		PIC_CC="$work/xc8" PIC_DFP="$work/dfp" \
-		PIC320_CC="$work/xc8" PIC320_DFP="$work/dfp" \
+		PIC10F320_CC="$work/xc8" PIC10F320_DFP="$work/dfp" \
 		PIC_SOAK_GPSIM_INC="$work/gpsim-inc" \
 		SIMAVR_INC="$work/simavr-inc" \
 		XT_DFP="$work/xt-dfp" YASIMAVR_VENV="$work/yasimavr-venv" \
@@ -162,10 +162,10 @@ expect_calls() {
 }
 
 pic_calls=(
-	$'STRICT_TOOLS=1\tpic-test'
-	$'STRICT_TOOLS=1\tpic-test-target-variants'
-	$'STRICT_TOOLS=1\tpic320-test'
-	$'STRICT_TOOLS=1\tpic320-test-target-variants'
+	$'STRICT_TOOLS=1\tpic10f322-test'
+	$'STRICT_TOOLS=1\tpic10f322-test-target-variants'
+	$'STRICT_TOOLS=1\tpic10f320-test'
+	$'STRICT_TOOLS=1\tpic10f320-test-target-variants'
 )
 xt_calls=(
 	$'STRICT_TOOLS=1\tattiny202-test'
@@ -174,7 +174,7 @@ xt_calls=(
 	$'STRICT_TOOLS=1\tattiny202-lockstep'
 	$'STRICT_TOOLS=1\tattiny202-soak\tXT_SOAK_DURATION_MS=300000\tXT_SOAK_PROGRESS_INTERVAL_MS=300000'
 )
-build_call=$'STRICT_TOOLS=1\tall13\tall85\tall45'
+build_call=$'STRICT_TOOLS=1\tattiny13a\tattiny85\tattiny45'
 strict_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=0'
 partial_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=1'
 
@@ -221,7 +221,7 @@ fi
 mapfile -t calls < "$log"
 [ "${#calls[@]}" -eq 2 ] \
 	|| fail "PR with both skips executed ${#calls[@]} Make commands, expected 2"
-[ "${calls[0]}" = $'STRICT_TOOLS=1\tall13\tall85\tall45' ] \
+[ "${calls[0]}" = $'STRICT_TOOLS=1\tattiny13a\tattiny85\tattiny45' ] \
 	&& [ "${calls[1]}" = $'STRICT_TOOLS=1\ttest' ] \
 	|| fail "PR with both skips did not route the strict non-mutation suite"
 [[ "${calls[1]}" != *"MUTATION_ALLOW_SKIP"* ]] \

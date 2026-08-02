@@ -84,8 +84,8 @@ validation layers* in `test/README.md`, and measured results live in
 place is why this table carries neither; individual targets are still named in
 the prose below where the argument turns on which lane covers what.
 
-To run the set: `make pic320-test` covers the pre-hardware lanes and
-`make pic320-test-target-variants` the fail-closed real-HEX aggregate across all
+To run the set: `make pic10f320-test` covers the pre-hardware lanes and
+`make pic10f320-test-target-variants` the fail-closed real-HEX aggregate across all
 three variants. Both are release gates and run in the PIC CI job on pushes to
 `main`, pull requests, scheduled runs and manual dispatches.
 
@@ -130,11 +130,11 @@ split instead of one clean statement.
 
 **What the omission means in practice.** The firmware still range-checks
 `ctx_.effect_state` in the main-loop sanity gate before acting on it, and the
-output lanes do observe real pin state: `pic320-test-actuation` asserts the full
-settled `LATA` at every tick on the host, and `pic320-test-io` asserts each
+output lanes do observe real pin state: `pic10f320-test-actuation` asserts the full
+settled `LATA` at every tick on the host, and `pic10f320-test-io` asserts each
 variant's exact `LATA` transition sequence, the physical `PORTA` levels that
 follow it, and the pulse widths between edges on the emitted image.
-(`pic320-test-lockstep` compares `ctx_`, not the output latch.) Every one of
+(`pic10f320-test-lockstep` compares `ctx_`, not the output latch.) Every one of
 those catches firmware that *writes* the wrong latch.
 
 What is missing is a different thing: the firmware's own in-line self-check that
@@ -176,7 +176,7 @@ PIC-local and shared with nothing.
 
 **The sync is manual, but it is not merely documented — it is enforced.** This is
 the one place where merging into this repository changed the assurance argument
-rather than just relocating it. `pic320-test-equiv` compiles the *real* firmware
+rather than just relocating it. `pic10f320-test-equiv` compiles the *real* firmware
 and the *real* `src/bypass_pure.c` into one host binary and steps them together,
 taking its thresholds from `src/bypass_config.h` through the host shim. So a
 change to the core that this firmware does not mirror produces a divergence, and
@@ -189,7 +189,7 @@ would notice. Treat the table above as the checklist for what to edit, not as
 the mechanism that catches you forgetting.
 
 Two gaps the equivalence lane does not cover, so the table still earns its keep:
-the **output-stage** rows (covered instead by `pic320-test-actuation`, which
+the **output-stage** rows (covered instead by `pic10f320-test-actuation`, which
 asserts each variant's settled and mid-actuation pin patterns) and anything that
 changes only the *defensive* layer, which is compared by no automatic gate
 against the PIC10F322 shell — §4 above is the current, deliberate divergence.

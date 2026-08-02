@@ -72,8 +72,8 @@
 // program_state also reaches a belt-and-suspenders state-machine fault path; the
 // adapter's diagnostic names the pure-core or hand-inlined path for its part.
 //
-// Build/run via `make pic-test-fault` or `make pic320-test-fault-target`. The
-// fail-closed `pic-test-target-variants` and `pic320-test-target-variants`
+// Build/run via `make pic10f322-test-fault` or `make pic10f320-test-fault-target`. The
+// fail-closed `pic10f322-test-target-variants` and `pic10f320-test-target-variants`
 // aggregates run their respective adapter for every supported output variant.
 //
 // IMPORTANT (gpsim WDT calibration; see test_soak_pic.cc): gpsim honors

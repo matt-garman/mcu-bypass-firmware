@@ -7,14 +7,14 @@ set -euo pipefail
 #
 # WHY THIS EXISTS
 # ---------------
-# Every lane underneath these aggregates -- pic{,320}-test-fault{,-target},
+# Every lane underneath these aggregates -- pic10f32{2,0}-test-fault{,-target},
 # -test-lockstep, -test-io -- exits 0 through the Makefile's $(SKIP) contract
 # when XC8 / gpsim-dev / glib is absent. That is correct for them as standalone
 # development commands; the aggregate above them is the gate. An aggregate that
 # reads only exit status therefore reports "target lanes passed" having executed
 # nothing.
 #
-# That is not hypothetical. pic320-test-target shipped as a bare prerequisite
+# That is not hypothetical. pic10f320-test-target shipped as a bare prerequisite
 # list plus an unconditional success echo, so on a host with XC8 but without
 # gpsim-dev it printed a full green sweep across all three variants with zero
 # checks run -- while the PIC10F322 aggregate, which already required the
@@ -43,13 +43,13 @@ log="$work/make.log"
 checks=0
 
 LM_LABEL=${LM_LABEL:-PIC}
-LM_TARGET=${LM_TARGET:-pic-test-target}
-LM_VARIANT_ARG=${LM_VARIANT_ARG:-PIC_TARGET_VARIANT}
+LM_TARGET=${LM_TARGET:-pic10f322-test-target}
+LM_VARIANT_ARG=${LM_VARIANT_ARG:-PIC10F322_TARGET_VARIANT}
 LM_VARIANT=${LM_VARIANT:-mute}
 LM_SUCCESS_MARKER=${LM_SUCCESS_MARKER:-target fault/lock-step/I-O PASS}
 # Optional: an argument that must appear on EVERY lane invocation. The PIC10F320
-# aggregate uses it to pin the build-variant threading, because its `pic320`
-# prerequisite builds exactly one image (unlike the 322's `pic`, which builds the
+# aggregate uses it to pin the build-variant threading, because its `pic10f320`
+# prerequisite builds exactly one image (unlike the 322's `pic10f322`, which builds the
 # whole matrix), so a lane invoked without it silently compiles against the wrong
 # variant's HEX.
 LM_REQUIRE_ARG=${LM_REQUIRE_ARG:-}

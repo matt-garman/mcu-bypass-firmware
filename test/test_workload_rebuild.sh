@@ -114,8 +114,8 @@ run_make test-fuses >/dev/null
 [[ "$(compile_count test/avr/test_fuses)" -eq 1 ]] \
 	|| { printf 'FAIL: initial fuse configuration did not compile once\n' >&2; exit 1; }
 checks=$((checks + 1))
-if run_make test-fuses LFUSE=0x00 HFUSE=0x00 \
-		LFUSE_X5=0x00 HFUSE_X5=0x00 \
+if run_make test-fuses ATTINY13A_LFUSE=0x00 ATTINY13A_HFUSE=0x00 \
+		TINYX5_LFUSE=0x00 TINYX5_HFUSE=0x00 \
 		XT_FUSE_WDTCFG=0x00 XT_FUSE_BODCFG=0x00 \
 		XT_FUSE_OSCCFG=0x00 XT_FUSE_SYSCFG0=0x00 \
 		XT_FUSE_SYSCFG1=0x00 XT_FUSE_APPEND=0x01 \
@@ -180,16 +180,16 @@ grep -q -- '-DHOST_CUSTOM=1' "$log" \
 	|| { printf 'FAIL: custom host workload did not reach the compiler\n' >&2; exit 1; }
 checks=$((checks + 1))
 
-run_make test-sim-cd4053_simple SIM_DEFS=-DSIM_FAST=1 >/dev/null
-[[ "$(compile_count test/avr/test_sim_cd4053_simple)" -eq 1 ]] \
+run_make test-sim-cd4053_simple-attiny13a SIM_DEFS=-DSIM_FAST=1 >/dev/null
+[[ "$(compile_count test/avr/test_sim_cd4053_simple_attiny13a)" -eq 1 ]] \
 	|| { printf 'FAIL: initial simulator workload did not compile once\n' >&2; exit 1; }
 checks=$((checks + 1))
-run_make test-sim-cd4053_simple SIM_DEFS= >/dev/null
-[[ "$(compile_count test/avr/test_sim_cd4053_simple)" -eq 2 ]] \
+run_make test-sim-cd4053_simple-attiny13a SIM_DEFS= >/dev/null
+[[ "$(compile_count test/avr/test_sim_cd4053_simple_attiny13a)" -eq 2 ]] \
 	|| { printf 'FAIL: FAST-to-FULL simulator workload reused a stale binary\n' >&2; exit 1; }
 checks=$((checks + 1))
-run_make test-sim-cd4053_simple SIM_DEFS=-DSIM_CUSTOM=1 >/dev/null
-[[ "$(compile_count test/avr/test_sim_cd4053_simple)" -eq 3 ]] \
+run_make test-sim-cd4053_simple-attiny13a SIM_DEFS=-DSIM_CUSTOM=1 >/dev/null
+[[ "$(compile_count test/avr/test_sim_cd4053_simple_attiny13a)" -eq 3 ]] \
 	|| { printf 'FAIL: custom simulator workload reused a stale binary\n' >&2; exit 1; }
 checks=$((checks + 1))
 grep -q -- '-DSIM_CUSTOM=1' "$log" \
@@ -197,13 +197,13 @@ grep -q -- '-DSIM_CUSTOM=1' "$log" \
 checks=$((checks + 1))
 
 : > "$log"
-run_make test-sim SIM_DEFS=-DRECURSIVE_SIM=1 >/dev/null
+run_make test-sim-attiny13a SIM_DEFS=-DRECURSIVE_SIM=1 >/dev/null
 [[ "$(grep -c -- '-DRECURSIVE_SIM=1' "$log")" -eq 3 ]] \
 	|| { printf 'FAIL: recursive simulator phase lost effective SIM_DEFS\n' >&2; exit 1; }
 checks=$((checks + 1))
 : > "$log"
-run_make test-sim SIM_DEFS= >/dev/null
-[[ "$(compile_count test/avr/test_sim_cd4053_simple)" -eq 1 ]] \
+run_make test-sim-attiny13a SIM_DEFS= >/dev/null
+[[ "$(compile_count test/avr/test_sim_cd4053_simple_attiny13a)" -eq 1 ]] \
 	|| { printf 'FAIL: recursive FULL simulator phase did not rebuild\n' >&2; exit 1; }
 if grep -q -- '-DSIM_RANDOM_NOISE_DURATION_MS=' "$log"; then
 	printf 'FAIL: recursive FULL simulator phase fell back to FAST definitions\n' >&2
@@ -214,7 +214,7 @@ checks=$((checks + 1))
 : > "$log"
 (
 	export MAKEFLAGS=-B
-	run_make test-sim SIM_DEFS=-DFORCED_SIM=1
+	run_make test-sim-attiny13a SIM_DEFS=-DFORCED_SIM=1
 ) >/dev/null
 [[ "$(compile_count build_avr_classic/bypass-attiny13a-cd4053_simple.elf)" -eq 1 \
 	&& "$(compile_count build_avr_classic/bypass-attiny13a-cd4053_with_mute.elf)" -eq 1 \
@@ -223,7 +223,7 @@ checks=$((checks + 1))
 checks=$((checks + 1))
 
 : > "$log"
-run_make -j2 test-sim test-flash-budget SIM_DEFS=-DCOALESCED_SIM=1 >/dev/null
+run_make -j2 test-sim-attiny13a test-flash-budget SIM_DEFS=-DCOALESCED_SIM=1 >/dev/null
 [[ "$(compile_count build_avr_classic/bypass-attiny13a-cd4053_simple.elf)" -eq 1 \
 	&& "$(compile_count build_avr_classic/bypass-attiny13a-cd4053_with_mute.elf)" -eq 1 \
 	&& "$(compile_count build_avr_classic/bypass-attiny13a-tq2_l2_5v_relay.elf)" -eq 1 ]] \
@@ -231,13 +231,13 @@ run_make -j2 test-sim test-flash-budget SIM_DEFS=-DCOALESCED_SIM=1 >/dev/null
 checks=$((checks + 1))
 
 : > "$log"
-run_make -j2 test-sim-cd4053_simple-t85 test-fault-inject-cd4053_simple-t85 \
+run_make -j2 test-sim-cd4053_simple-attiny85 test-fault-inject-cd4053_simple-attiny85 \
 	SIM_DEFS=-DX5_SHARED=1 >/dev/null
-[[ "$(compile_count test/avr/test_sim_cd4053_simple_t85)" -eq 1 ]] \
+[[ "$(compile_count test/avr/test_sim_cd4053_simple_attiny85)" -eq 1 ]] \
 	|| { printf 'FAIL: shared tinyx5 binary compiled more than once per graph\n' >&2; exit 1; }
 checks=$((checks + 1))
-run_make test-sim-cd4053_simple-t85 SIM_DEFS= >/dev/null
-[[ "$(compile_count test/avr/test_sim_cd4053_simple_t85)" -eq 2 ]] \
+run_make test-sim-cd4053_simple-attiny85 SIM_DEFS= >/dev/null
+[[ "$(compile_count test/avr/test_sim_cd4053_simple_attiny85)" -eq 2 ]] \
 	|| { printf 'FAIL: tinyx5 FAST-to-FULL workload reused a stale binary\n' >&2; exit 1; }
 checks=$((checks + 1))
 
@@ -268,7 +268,7 @@ esac
 checks=$((checks + 2))
 
 outside="$work/external-build"
-run_make test-sim-cd4053_simple AVR_BUILD_DIR="$outside" SIM_DEFS=-DISOLATED=1 >/dev/null
+run_make test-sim-cd4053_simple-attiny13a AVR_BUILD_DIR="$outside" SIM_DEFS=-DISOLATED=1 >/dev/null
 [ ! -e "$outside/bypass-attiny13a-cd4053_simple.elf" ] \
 	|| { printf 'FAIL: regression escaped its isolated mini-tree build path\n' >&2; exit 1; }
 checks=$((checks + 1))

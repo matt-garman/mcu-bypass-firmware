@@ -70,9 +70,9 @@ validation suite — backs these binaries, through two mechanisms:
    combination and report the configured duration, expected nonzero
    liveness-check count, and zero failure counters. The current unified pipeline
    requires `make test-long`, both ATtiny202 gates (`make attiny202-test` and
-   `make attiny202-test-target`), both PIC10F322 gates (`make pic-test` and
-   `make pic-test-target-variants`), both PIC10F320 gates (`make pic320-test` and
-   `make pic320-test-target-variants`), and a **24-hour soak of every release
+   `make attiny202-test-target`), both PIC10F322 gates (`make pic10f322-test` and
+   `make pic10f322-test-target-variants`), both PIC10F320 gates (`make pic10f320-test` and
+   `make pic10f320-test-target-variants`), and a **24-hour soak of every release
    soak combination**. Releases `v0.9.0` through `v0.9.5` predate
    `QUALIFICATION` and use the manifest/evidence contract recorded in their own
    tags; they must not be judged against the later 15-soak/28-file inventory.
@@ -174,6 +174,25 @@ where old `<v>` `cd4053`/`mute`/`relay` maps to `<stage>`
 unchanged by the rename — each `v0.9.8` image is bit-identical to its `v0.9.7`
 counterpart unless the changelog says the firmware itself changed.
 
+**The build commands moved too.** Every make goal that acts on one part now
+carries that part's name, in the same vocabulary as the image field, so an
+older `MANIFEST.md` may name a goal that no longer exists:
+
+| up to `v0.9.7` | from `v0.9.8` |
+|---|---|
+| `make all13` / `all85` / `all45` | `make attiny13a` / `attiny85` / `attiny45` |
+| `make size` / `size85` | `make attiny13a-size` / `attiny85-size` |
+| `make fuses` / `flash` / `program` | `make attiny13a-fuses` / `-flash` / `-program` |
+| `make program85` | `make attiny85-program` |
+| `make pic` / `pic-test` | `make pic10f322` / `pic10f322-test` |
+| `make program-pic` | `make pic10f322-program` |
+| `make pic320-*` | `make pic10f320-*` |
+| `make test-sim` / `test-sim-t85` | `make test-sim-attiny13a` / `test-sim-attiny85` |
+
+`make all` also changed meaning: it used to build the ATtiny13a images only,
+and now builds every part (lanes whose cross-toolchain is not installed skip
+with a message). `attiny202-*` goals were already part-named and did not move.
+
 The per-release `MANIFEST.md` lists every image with its MCU, clock, flash
 usage, fuse bytes, and exact flashing command.
 
@@ -212,8 +231,8 @@ avrdude -c usbtiny -p t13 \
 ```
 
 If you have the source tree, the Makefile does both steps for you:
-`make program VARIANT=<variant>` (ATtiny13a) or `make program85 VARIANT=<variant>`
-(ATtiny85), etc. `<variant>` is the output-stage name from the table above —
+`make attiny13a-program VARIANT=<variant>` (ATtiny13a) or
+`make attiny85-program VARIANT=<variant>` (ATtiny85), etc. `<variant>` is the output-stage name from the table above —
 `cd4053_simple`, `cd4053_with_mute` or `tq2_l2_5v_relay` — the same string that
 appears in the image filename. (Through `v0.9.7` these were spelled `cd4053`,
 `mute` and `relay`, and the PIC10F320 lane used `cd4053-simple`, `cd4053-mute`
@@ -224,7 +243,7 @@ configures the device; there is no separate fuse step:
 
 ```sh
 pk2cmd -PPIC10F322 -Fbypass-pic10f322-cd4053_simple.hex -M -Y -R   # PICkit 2
-# or, from the source tree: make program-pic VARIANT=<variant>
+# or, from the source tree: make pic10f322-program VARIANT=<variant>
 ```
 
 **PIC10F320** — same story; the CONFIG word is embedded in the HEX:
@@ -233,7 +252,7 @@ pk2cmd -PPIC10F322 -Fbypass-pic10f322-cd4053_simple.hex -M -Y -R   # PICkit 2
 pk2cmd -PPIC10F320 -Fbypass-pic10f320-cd4053_simple.hex -M -Y -R   # PICkit 2
 ```
 
-There is no `make program-pic320` convenience target yet; flash it with the
+There is no `make pic10f320-program` convenience target yet; flash it with the
 programmer command above.
 
 ## Reproduce the images bit-for-bit
@@ -241,7 +260,7 @@ programmer command above.
 ### Unified releases (v0.9.6 or later)
 
 A freshly built release HEX lands under `build_avr_classic/`, `build_avr_xt/`,
-`build_pic/` and `build_pic10f320/`, not in the release directory, so run the
+`build_pic10f322/` and `build_pic10f320/`, not in the release directory, so run the
 checksum list against those fresh bytes — running it from the repo root would only
 re-verify the committed copies against themselves.
 
@@ -249,8 +268,8 @@ re-verify the committed copies against themselves.
 git checkout vX.Y.Z
 # install the pinned toolchain (see TOOLCHAIN.adoc), then:
 scripts/verify-release-qualification.sh release/vX.Y.Z vX.Y.Z
-make clean && make all13 all85 all45 && make attiny202
-make pic && make pic320-variants
+make clean && make attiny13a attiny85 attiny45 && make attiny202
+make pic10f322 && make pic10f320-variants
 scripts/verify-release-images.sh release/vX.Y.Z $(make -s print-RELEASE_IMAGE_DIRS)
 ```
 
@@ -273,7 +292,7 @@ byte-identical images.
 
 These releases have no `QUALIFICATION`, and their image matrices and Make targets
 predate the unified 18-image command above. Do not run the current qualification
-verifier or append `pic320-variants` to a historical build command. For
+verifier or append `pic10f320-variants` to a historical build command. For
 `v0.9.3` through `v0.9.5`, check out the release's own tag and follow the
 **Reproducing these images** section in that release's `MANIFEST.md`. Running the
 current verifier against, for example, `release/v0.9.4/` correctly reports a
@@ -288,6 +307,6 @@ their checksum command with this corrected isolated check:
 ```sh
 repo=$PWD
 tmp=$(mktemp -d)
-cp build_avr_classic/*.hex build_pic/*.hex "$tmp"/
+cp build_avr_classic/*.hex build_pic10f322/*.hex "$tmp"/
 ( cd "$tmp" && sha256sum -c "$repo/release/vX.Y.Z/SHA256SUMS" )
 ```

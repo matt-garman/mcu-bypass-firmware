@@ -61,7 +61,7 @@ scratch_tree_copy() {
     cp "$root/Makefile" "$dst/" || return 1
     # The Makefile's build/validate recipes invoke helper scripts under
     # scripts/ -- notably IHEX_VALIDATOR (scripts/validate-ihex.sh), which
-    # `make pic` and the .hex rules REQUIRE and fail closed without. Mirror the
+    # `make pic10f322` and the .hex rules REQUIRE and fail closed without. Mirror the
     # whole dir so a sandbox build behaves exactly like the real tree; -a
     # preserves the executable bit the validator-present check relies on.
     cp -a "$root/scripts" "$dst/" || return 1

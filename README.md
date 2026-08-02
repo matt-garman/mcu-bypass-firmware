@@ -91,7 +91,7 @@ MCUs):
 
 ```
 make
-make program
+make attiny13a-program
 ```
 
 To build and validate the PIC ports instead requires a host C compiler,
@@ -100,31 +100,31 @@ compiler, PIC10-12Fxxx device pack, `gpsim`, and `gpsim-dev` for the target-leve
 gates:
 
 ```
-make pic                         # build all variants + 512-word flash-budget gate
-make pic-test                    # CONFIG, analysis, source coverage, and gpsim checks
-make pic-test-target-variants    # fail-closed libgpsim fault/lock-step/I/O gates
+make pic10f322                         # build all variants + 512-word flash-budget gate
+make pic10f322-test                    # CONFIG, analysis, source coverage, and gpsim checks
+make pic10f322-test-target-variants    # fail-closed libgpsim fault/lock-step/I/O gates
 ```
 
-The PIC10F320 has its own lane, using the same toolchain (`pic320-*` targets,
+The PIC10F320 has its own lane, using the same toolchain (`pic10f320-*` targets,
 `PIC320_*` variables):
 
 ```
-make pic320-variants             # build all variants + flash-budget/return-stack gates
-make pic320-test-build           # rebuild + enforce reviewed SHA-256 image baseline
-make pic320-test-return-stack    # rebuild + recheck/report all three final HEX images
-make pic320-test                 # host equivalence/actuation/fault/coverage,
+make pic10f320-variants             # build all variants + flash-budget/return-stack gates
+make pic10f320-test-build           # rebuild + enforce reviewed SHA-256 image baseline
+make pic10f320-test-return-stack    # rebuild + recheck/report all three final HEX images
+make pic10f320-test                 # host equivalence/actuation/fault/coverage,
                                  #   hashes, CONFIG, return stack, analysis/gpsim
-make pic320-test-target-variants # fail-closed libgpsim fault/lock-step/I/O gates
+make pic10f320-test-target-variants # fail-closed libgpsim fault/lock-step/I/O gates
 ```
 
 These targets are independent of the AVR build. Individual optional-tool targets
 generally skip cleanly if their primary compiler/simulator is absent. The
-PIC10F320 exception is deliberate: every generated `pic320` image must pass the
-Python return-stack oracle. `pic320-test-build` additionally requires the
+PIC10F320 exception is deliberate: every generated `pic10f320` image must pass the
+Python return-stack oracle. `pic10f320-test-build` additionally requires the
 complete rebuilt matrix to match the reviewed XC8/DFP SHA-256 baseline, and
-`pic320-test-return-stack` rechecks all three images. These targets feed
-`pic320-test` and fail closed if Python, the baseline, or an image is missing.
-Host source coverage is mandatory when `pic-test` runs. The target aggregates
+`pic10f320-test-return-stack` rechecks all three images. These targets feed
+`pic10f320-test` and fail closed if Python, the baseline, or an image is missing.
+Host source coverage is mandatory when `pic10f322-test` runs. The target aggregates
 are the authoritative simulator gates and fail closed on any missing/skipped
 libgpsim layer.
 

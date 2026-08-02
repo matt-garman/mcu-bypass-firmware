@@ -92,18 +92,18 @@ file is the human-readable summary of *what changed*.
 
   This is a **breaking change to command lines and make goals**:
 
-  | before | after |
+  | before | after (see also the prefix change below) |
   |---|---|
-  | `make VARIANT=relay program` | `make VARIANT=tq2_l2_5v_relay program` |
-  | `make PIC320_VARIANT=cd4053-mute pic320` | `make PIC320_VARIANT=cd4053_with_mute pic320` |
-  | `make test-sim-mute` | `make test-sim-cd4053_with_mute` |
-  | `SOAK_VARIANT=relay` | `SOAK_VARIANT=tq2_l2_5v_relay` |
+  | `make VARIANT=relay program` | `make VARIANT=tq2_l2_5v_relay attiny13a-program` |
+  | `make PIC320_VARIANT=cd4053-mute pic320` | `make PIC10F320_VARIANT=cd4053_with_mute pic10f320` |
+  | `make test-sim-mute` | `make test-sim-cd4053_with_mute-attiny13a` |
+  | `SOAK_VARIANT=relay` | `AVR_SOAK_VARIANT=tq2_l2_5v_relay` |
 
   Release soak combination names change with it, and so therefore do the
   retained evidence filenames: `evidence/soak-avr_cd4053_t85.log` becomes
-  `evidence/soak-avr_cd4053_simple_t85.log`, `soak-pic320_tq2-relay.log`
-  becomes `soak-pic320_tq2_l2_5v_relay.log`, and so on for all fifteen. Evidence
-  already committed under `release/v0.9.7/` and earlier is untouched.
+  `evidence/soak-attiny85_cd4053_simple.log`, `soak-pic320_tq2-relay.log`
+  becomes `soak-pic10f320_tq2_l2_5v_relay.log`, and so on for all fifteen.
+  Evidence already committed under `release/v0.9.7/` and earlier is untouched.
 
   The longer tokens cost more typing, once per command line. What they buy is
   that a variant name cannot be valid in one lane and meaningless in another,
@@ -122,6 +122,107 @@ file is the human-readable summary of *what changed*.
   not the 12-free-words PIC10F320 is a legitimate divergence.
 
   Image contents are again unchanged: all 18 remain bit-identical to `v0.9.7`.
+
+- **Every make goal that acts on one part is named after that part.** The goal
+  vocabulary now matches the image field exactly: `attiny13a`, `attiny45`,
+  `attiny85`, `attiny202`, `pic10f322`, `pic10f320`.
+
+  | before | after |
+  |---|---|
+  | `make all13` / `all85` / `all45` | `make attiny13a` / `attiny85` / `attiny45` |
+  | `make size` / `size85` | `make attiny13a-size` / `attiny85-size` |
+  | `make fuses` / `flash` / `program` | `make attiny13a-fuses` / `-flash` / `-program` |
+  | `make readfuses` / `trace` | `make attiny13a-readfuses` / `-trace` |
+  | `make program85` | `make attiny85-program` |
+  | `make pic` / `pic-test` | `make pic10f322` / `pic10f322-test` |
+  | `make pic-analyze` | `make pic10f322-analyze` |
+  | `make program-pic` | `make pic10f322-program` |
+  | `make pic320-*` | `make pic10f320-*` |
+  | `make test-sim` / `test-sim-t85` | `make test-sim-attiny13a` / `test-sim-attiny85` |
+  | `make test-sim-secondary` | `make test-sim-tinyx5` |
+
+  Two defects motivated this, and they are the same defect at different ages.
+  `pic-` meant PIC10F322 only because that part arrived first, so `pic-test-soak`
+  and `pic320-test-soak` sat one near-name apart with nothing in either name
+  saying which silicon it drove — the residual risk the PIC10F320 merge recorded
+  and deferred (`docs/pic10f320_merge_plan.md` §15, D1). The classic AVR lane had
+  the same shape one layer down: `flash`, `size` and `test-sim` were the
+  ATtiny13a because it got there first, while every other part carried a name.
+
+  A `pic-*` goal now means **both** PIC parts, which is what `test-pic-build`,
+  `test-lockstep-progress` and `test-stack-bound-pic-regression` already did;
+  they keep their names and are now accurate rather than ambiguous.
+  `attiny202-*` was already part-named and did not move, and the `test-<mcu>-*`
+  goals keep their word order: `attiny202-delay-oracle` runs the oracle against
+  firmware while `test-attiny202-delay-oracle` runs the oracle's own selftest,
+  a distinction the ordering carries.
+
+  **`make all` now builds every part**, not just the ATtiny13a. A lane whose
+  cross-toolchain is absent (XC8 for either PIC, the ATtiny_DFP for the
+  ATtiny202) prints a named skip and does not fail, so a bare `make` still works
+  on an AVR-only machine; `STRICT_TOOLS=1` turns each of those skips into an
+  error, which is what release and CI use. Because the PIC lanes require the
+  complete output-stage matrix, `make all VARIANTS=<subset>` is now rejected up
+  front with the single-part command to use instead, rather than failing forty
+  lines into the PIC lane's own matrix check.
+
+  Release evidence filenames follow the goals: `build-avr.log` and
+  `build-pic.log` become `build-avr-classic.log` and `build-pic10f322.log`,
+  `pic-test.log` becomes `pic10f322-test.log`, and the fifteen soak combination
+  names become one `<mcu>_<output stage>` pair each — `attiny85_cd4053_simple`
+  rather than `avr_cd4053_simple_t85`, which had spelled the chip at both ends.
+
+- **Chip-scoped Makefile variables carry their chip's name.** `PIC_*` names that
+  held a PIC10F322 fact are now `PIC10F322_*`, and `PIC320_*` is `PIC10F320_*`.
+  The cautionary case is the one the deferred TODO item named: `PIC_FLASH_WORDS`
+  was 512, a 322 fact under a family name, and a variable mis-scoped that way
+  produces no compile error and no failing test — it produces a *passing* one,
+  because a 256-word image gated at 512 words passes.
+
+  The rule is now stated in the Makefile and is two-tier rather than uniform: a
+  `PIC_*` name with no part in it means **shared by both PIC parts**, and there
+  are exactly nine of them plus four wrapper-script env parameters — one XC8
+  (`PIC_CC`, `PIC_DFP`, `PIC_XC8_INCLUDE`), one C++ and gpsim header set, one
+  soak driver source. Those are correct as they stand. `AVR_*` and `XT_*` are
+  left alone for the same reason: they name the `avr_classic` and `avr_xt`
+  families their shells are named for, and renaming `XT_*` to `ATTINY202_*`
+  would break that correspondence rather than fix anything.
+
+  The classic AVR lane had the unmarked-default problem here too, since
+  `XT_SOAK_*`, `PIC10F322_SOAK_*` and `PIC10F320_SOAK_*` were all qualified
+  while plain `SOAK_*` silently meant the AVR one. Renamed accordingly:
+  `MCU`/`F_CPU`/`HFUSE`/`LFUSE`/`AVRDUDE_PART`/`AVRDUDE_FLAGS` →
+  `ATTINY13A_*`; `F_CPU_X5`/`HFUSE_X5`/`LFUSE_X5` → `TINYX5_*`;
+  `FLASH_T13_*` → `ATTINY13A_FLASH_*`; `SOAK_*` → `AVR_SOAK_*`;
+  `PROGRAMMER` → `AVR_PROGRAMMER`; `STACK_SOURCES`/`STACK_MAX_FRAME`/
+  `STACK_BUILD_DIR` → `AVR_STACK_*`; and `STACK_DEPTH_GATE`, which serves both
+  PIC parts, → `PIC_STACK_DEPTH_GATE`. The PIC10F322 build directory moves from
+  `build_pic/` to `build_pic10f322/`, matching `build_pic10f320/`.
+
+  Names that are *not* chip facts keep their spelling — `SIM_DEFS`, `HOST_DEFS`,
+  `COVERAGE_*`, `STRICT_TOOLS`, `VARIANT(S)` and the tool variables name a tool,
+  a host facility or a project-wide policy, not a part.
+
+  C-side contracts deliberately did **not** move: the compiler macros
+  `-DF_CPU`, `-DSOAK_DURATION_MS`, `-DSOAK_COMBINATION_NAME` and the rest keep
+  their names, because those are the firmware's and the test drivers' interface,
+  not the build system's. Renaming a Make variable is nevertheless an external
+  interface change — `scripts/make-release.sh` and `scripts/ci-local.sh` read
+  Makefile truth through `make -s print-<VAR>` — so every `print-` consumer was
+  swept with the rename and re-checked to resolve.
+
+  Image contents are unchanged for a third time: all 18 remain bit-identical.
+
+### Fixed
+- **The mutation suite's PIC lane had been silently disabled since the image
+  rename earlier in this release.** `test/run_mutation_tests.sh` built its
+  PIC10F322 baseline image path from the *old* basename scheme
+  (`${FW_BASE}_cd4053_${PIC_TAG}.hex`), which stopped existing when images
+  became `bypass-pic10f322-cd4053_simple.hex`. The miss degraded to a skip
+  rather than a failure — the missing file left `PIC_GPSIM_OK` unset, so the
+  PIC gpsim mutants reported as unavailable instead of failing loudly. Found by
+  the prefix sweep, not by a gate: the mutation run is in `test-long`, not
+  `make test`. The path is now composed from the canonical fields.
 
 ## [Unreleased]
 

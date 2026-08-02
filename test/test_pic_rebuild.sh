@@ -14,12 +14,12 @@ set -euo pipefail
 # INTERVAL}_MS and the variant are compiled in as -D flags -- and both rules
 # omitted FORCE until 2026-07-27. Measured before the fix, on both chips:
 #
-#   make build_pic10f320/test_soak_pic PIC320_SOAK_DURATION_MS=60000
-#   make build_pic10f320/test_soak_pic PIC320_SOAK_DURATION_MS=120000
+#   make build_pic10f320/test_soak_pic PIC10F320_SOAK_DURATION_MS=60000
+#   make build_pic10f320/test_soak_pic PIC10F320_SOAK_DURATION_MS=120000
 #     -> "'build_pic10f320/test_soak_pic' is up to date."  (60000 binary kept)
 #
 # It stayed invisible because the normal lane never uses the file rule:
-# pic{,320}-test-soak deletes and recompiles the binary inline. So the hazard is
+# pic10f32{2,0}-test-soak deletes and recompiles the binary inline. So the hazard is
 # reachable only by naming the artifact directly -- which is what a release
 # rehearsal or a hand-run soak at a shortened duration does.
 #
@@ -55,7 +55,7 @@ read -r -a MAKE_CMD <<<"${PROJECT_MAKE:-make}"
 mkdir -p "$tools"
 scratch_tree_copy "$ROOT" "$repo" \
 	|| fail "could not populate the scratch repo (see test/scratch_tree.sh)"
-mkdir -p "$repo/build_pic" "$repo/build_pic10f320"
+mkdir -p "$repo/build_pic10f322" "$repo/build_pic10f320"
 
 # Blank the prerequisites of the rules under test, which is this fixture's whole
 # point: the property is Make's staleness decision, not compilation, and the fake
@@ -76,7 +76,7 @@ blank_prereq() {
 	checks=$((checks + 1))
 }
 
-# ONE soak source, not two: PIC320_SOAK_SRC = $(PIC_SOAK_SRC) (merge plan §4
+# ONE soak source, not two: PIC10F320_SOAK_SRC = $(PIC_SOAK_SRC) (merge plan §4
 # FOLD), so both chips' rules name test/pic/test_soak_pic.cc. A
 # test/pic10f320/ counterpart would fabricate a prerequisite no rule has.
 blank_prereq test/soak_timing_config.h
@@ -173,9 +173,9 @@ check_chip() {
 }
 
 check_chip "PIC10F322" "test/pic/test_soak_pic" \
-	PIC_SOAK_CXX PIC_SOAK_DURATION_MS ""
+	PIC_SOAK_CXX PIC10F322_SOAK_DURATION_MS ""
 check_chip "PIC10F320" "build_pic10f320/test_soak_pic" \
-	PIC320_SOAK_CXX PIC320_SOAK_DURATION_MS ""
+	PIC10F320_SOAK_CXX PIC10F320_SOAK_DURATION_MS ""
 
 # --- the two chips must not share one binary ---------------------------------
 # Since the §4 FOLD they compile from the SAME source, differing only in the -D

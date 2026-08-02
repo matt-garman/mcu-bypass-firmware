@@ -7,7 +7,7 @@ set -euo pipefail
 #
 # INVENTORY SCOPE (merge plan §6.12, §12). This used to cover exactly two
 # recipes -- test-cbmc and analyze-cppcheck -- which meant NEITHER PIC chip had
-# an enforcing regression, and a pic320- recipe with a private early `exit 0`
+# an enforcing regression, and a pic10f320- recipe with a private early `exit 0`
 # would have passed review. It now covers both chips' XC8 and cppcheck/MISRA
 # recipes as well.
 #
@@ -15,8 +15,8 @@ set -euo pipefail
 # and the reason that gap is gone is worth recording, because the sentence that
 # justified it was WRONG in the one place it mattered. It read: "Those recipes
 # use the same $(SKIP) mechanism; what is unproven is only that they still will."
-# pic320-test-gpsim did not use it. It had no tool probe at all, so
-# `make pic320-test STRICT_TOOLS=1` on a host without gpsim printed "all
+# pic10f320-test-gpsim did not use it. It had no tool probe at all, so
+# `make pic10f320-test STRICT_TOOLS=1` on a host without gpsim printed "all
 # PIC10F320 pre-hardware checks complete" having run zero of its six scenarios
 # (the wrappers exit 0 on a missing gpsim by design). An assumed mechanism is not
 # a mechanism, which is the whole argument for enumerating recipes here.
@@ -30,7 +30,7 @@ set -euo pipefail
 # runner, XC8 or not.
 #
 # Still NOT covered, same prerequisite problem and no equivalent lever: the
-# libgpsim and soak recipes (pic320-test-fault-target, pic{,320}-test-soak, ...),
+# libgpsim and soak recipes (pic10f320-test-fault-target, pic10f32{2,0}-test-soak, ...),
 # whose guards check headers, glib and a C++ compiler rather than one binary, and
 # which -o would strand mid-way (the harness still has to compile and link). That
 # remains a stated gap -- but a narrower one, and both chips' gpsim lanes now
@@ -104,41 +104,41 @@ expect_both test-cbmc "cbmc not installed" "CBMC=$missing_cbmc"
 expect_both analyze-cppcheck "cppcheck not installed" "CPPCHECK=$missing_cppcheck"
 
 # --- both PIC chips' optional-tool recipes -----------------------------------
-# The build directories are redirected into the scratch tree: `pic` and `pic320`
+# The build directories are redirected into the scratch tree: `pic10f322` and `pic10f320`
 # BOTH remove their output image(s) as the very first recipe step, before the
-# XC8 guard is reached, so driving them against the real build_pic/ and
+# XC8 guard is reached, so driving them against the real build_pic10f322/ and
 # build_pic10f320/ would delete a developer's images as a side effect of running
 # `make test`. Redirecting costs one assignment and removes the side effect
 # entirely. Everything the guards themselves check is unaffected.
-pic_build="$work/build_pic"
-pic320_build="$work/build_pic10f320"
+pic_build="$work/build_pic10f322"
+pic10f320_build="$work/build_pic10f320"
 
-expect_both pic "XC8 not found at $missing_xc8" \
-	"PIC_CC=$missing_xc8" "PIC_BUILD_DIR=$pic_build"
-expect_both pic320 "XC8 not found at $missing_xc8" \
-	"PIC320_CC=$missing_xc8" "PIC320_BUILD_DIR=$pic320_build"
+expect_both pic10f322 "XC8 not found at $missing_xc8" \
+	"PIC_CC=$missing_xc8" "PIC10F322_BUILD_DIR=$pic_build"
+expect_both pic10f320 "XC8 not found at $missing_xc8" \
+	"PIC10F320_CC=$missing_xc8" "PIC10F320_BUILD_DIR=$pic10f320_build"
 
-expect_both pic-analyze-cppcheck "cppcheck not installed" \
+expect_both pic10f322-analyze-cppcheck "cppcheck not installed" \
 	"CPPCHECK=$missing_cppcheck"
-expect_both pic320-analyze-cppcheck "cppcheck not installed" \
-	"CPPCHECK=$missing_cppcheck"
-
-expect_both pic-analyze-misra "cppcheck and/or python3 not available" \
-	"CPPCHECK=$missing_cppcheck"
-expect_both pic320-analyze-misra "cppcheck and/or python3 not available" \
+expect_both pic10f320-analyze-cppcheck "cppcheck not installed" \
 	"CPPCHECK=$missing_cppcheck"
 
-# Both chips' CLI-gpsim lanes. `-o pic` / `-o pic320` suppresses the build
+expect_both pic10f322-analyze-misra "cppcheck and/or python3 not available" \
+	"CPPCHECK=$missing_cppcheck"
+expect_both pic10f320-analyze-misra "cppcheck and/or python3 not available" \
+	"CPPCHECK=$missing_cppcheck"
+
+# Both chips' CLI-gpsim lanes. `-o pic10f322` / `-o pic10f320` suppresses the build
 # prerequisite (see the header), so these run identically with or without XC8.
 # The reason strings are chip-specific on purpose: they also pin that the shared
 # preflight's label argument is threaded per chip, so the two lanes cannot
 # collapse into one indistinguishable diagnostic.
-expect_both pic-test-gpsim \
+expect_both pic10f322-test-gpsim \
 	"gpsim not installed; skipping PIC10F322 gpsim register-level test" \
-	"GPSIM=$missing_gpsim" -o pic
-expect_both pic320-test-gpsim \
+	"GPSIM=$missing_gpsim" -o pic10f322
+expect_both pic10f320-test-gpsim \
 	"gpsim not installed; skipping PIC10F320 gpsim register-level test" \
-	"GPSIM=$missing_gpsim" -o pic320
+	"GPSIM=$missing_gpsim" -o pic10f320
 
 fake_cbmc="$work/fake-cbmc"
 fake_cppcheck="$work/fake-cppcheck"

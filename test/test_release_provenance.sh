@@ -213,15 +213,15 @@ checks=$((checks + 1))
 
 shared_cc="$work/shared-xc8"
 pic_cc=$(make -s -C "$ROOT" "PIC_CC=$shared_cc" print-PIC_CC)
-pic320_cc=$(make -s -C "$ROOT" "PIC_CC=$shared_cc" print-PIC320_CC)
-[ "$pic_cc" = "$shared_cc" ] && [ "$pic320_cc" = "$shared_cc" ] \
-	|| fail "PIC320_CC did not inherit an overridden PIC_CC"
+pic10f320_cc=$(make -s -C "$ROOT" "PIC_CC=$shared_cc" print-PIC10F320_CC)
+[ "$pic_cc" = "$shared_cc" ] && [ "$pic10f320_cc" = "$shared_cc" ] \
+	|| fail "PIC10F320_CC did not inherit an overridden PIC_CC"
 checks=$((checks + 1))
 
 separate_cc="$work/separate-xc8"
-pic_cc=$(make -s -C "$ROOT" "PIC_CC=$shared_cc" "PIC320_CC=$separate_cc" print-PIC_CC)
-pic320_cc=$(make -s -C "$ROOT" "PIC_CC=$shared_cc" "PIC320_CC=$separate_cc" print-PIC320_CC)
-[ "$pic_cc" = "$shared_cc" ] && [ "$pic320_cc" = "$separate_cc" ] \
+pic_cc=$(make -s -C "$ROOT" "PIC_CC=$shared_cc" "PIC10F320_CC=$separate_cc" print-PIC_CC)
+pic10f320_cc=$(make -s -C "$ROOT" "PIC_CC=$shared_cc" "PIC10F320_CC=$separate_cc" print-PIC10F320_CC)
+[ "$pic_cc" = "$shared_cc" ] && [ "$pic10f320_cc" = "$separate_cc" ] \
 	|| fail "Makefile did not preserve independent PIC compiler selections"
 checks=$((checks + 1))
 
@@ -303,11 +303,11 @@ mapfile -t xc8_322_lines < <(grep -nF \
 	'TC_XC8_322=$(release_tool_version_line "PIC10F322 XC8 (PIC_CC=$PIC_CC)" "$PIC_CC")' \
 	"$RELEASE")
 mapfile -t xc8_320_lines < <(grep -nF \
-	'TC_XC8_320=$(release_tool_version_line "PIC10F320 XC8 (PIC320_CC=$PIC320_CC)" "$PIC320_CC")' \
+	'TC_XC8_320=$(release_tool_version_line "PIC10F320 XC8 (PIC10F320_CC=$PIC10F320_CC)" "$PIC10F320_CC")' \
 	"$RELEASE")
 mapfile -t clean_lines < <(grep -nF 'make clean >/dev/null' "$RELEASE")
 mapfile -t manifest_322_lines < <(grep -nF 'PIC10F322 XC8 (`PIC_CC=%s`)' "$RELEASE")
-mapfile -t manifest_320_lines < <(grep -nF 'PIC10F320 XC8 (`PIC320_CC=%s`)' "$RELEASE")
+mapfile -t manifest_320_lines < <(grep -nF 'PIC10F320 XC8 (`PIC10F320_CC=%s`)' "$RELEASE")
 [ "${#xc8_322_lines[@]}" -eq 1 ] \
 	&& [ "${#xc8_320_lines[@]}" -eq 1 ] \
 	&& [ "${#clean_lines[@]}" -eq 1 ] \
@@ -321,7 +321,7 @@ clean_line=${clean_lines[0]%%:*}
 	|| fail "release compiler identity is not captured before the clean build"
 grep -Fq '"$PIC_CC" "$TC_XC8_322"' "$RELEASE" \
 	|| fail "PIC10F322 manifest row does not use its selected compiler and version"
-grep -Fq '"$PIC320_CC" "$TC_XC8_320"' "$RELEASE" \
+grep -Fq '"$PIC10F320_CC" "$TC_XC8_320"' "$RELEASE" \
 	|| fail "PIC10F320 manifest row does not use its selected compiler and version"
 if grep -Fq "printf -- '| XC8 |" "$RELEASE"; then
 	fail "release manifest still contains an ambiguous generic XC8 row"

@@ -13,23 +13,23 @@ host_run_log="$work/host-run.log"
 # Defaults reproduce the PIC10F322 run exactly, so `make test-pic-build` is
 # unchanged; the PIC10F320 lane re-invokes with the PB_* overrides.
 PB_LABEL=${PB_LABEL:-PIC}
-PB_TARGET=${PB_TARGET:-pic}
+PB_TARGET=${PB_TARGET:-pic10f322}
 PB_CC_VAR=${PB_CC_VAR:-PIC_CC}
-PB_BUILD_DIR_VAR=${PB_BUILD_DIR_VAR:-PIC_BUILD_DIR}
-PB_BUILD_DIR=${PB_BUILD_DIR:-build_pic}
+PB_BUILD_DIR_VAR=${PB_BUILD_DIR_VAR:-PIC10F322_BUILD_DIR}
+PB_BUILD_DIR=${PB_BUILD_DIR:-build_pic10f322}
 PB_FW_BASE_VAR=${PB_FW_BASE_VAR:-FW_BASE}
 PB_FW_BASE=${PB_FW_BASE:-bypass}
-PB_TAG_VAR=${PB_TAG_VAR:-PIC_TAG}
+PB_TAG_VAR=${PB_TAG_VAR:-PIC10F322_TAG}
 PB_TAG=${PB_TAG:-pic10f322}
-PB_FLASH_VAR=${PB_FLASH_VAR:-PIC_FLASH_WORDS}
+PB_FLASH_VAR=${PB_FLASH_VAR:-PIC10F322_FLASH_WORDS}
 PB_FLASH_WORDS=${PB_FLASH_WORDS:-512}
 PB_VARIANT_VAR=${PB_VARIANT_VAR:-VARIANTS}
 PB_VARIANT=${PB_VARIANT:-cd4053_simple}
-# The all-variant build target, and the images it must produce. `pic` builds the
+# The all-variant build target, and the images it must produce. `pic10f322` builds the
 # whole VARIANTS matrix in one invocation; the PIC10F320 lane splits that into
-# per-variant `pic320` plus the `pic320-variants` aggregate, so the matrix checks
+# per-variant `pic10f320` plus the `pic10f320-variants` aggregate, so the matrix checks
 # below point at whichever target owns the matrix for this chip.
-PB_MATRIX_TARGET=${PB_MATRIX_TARGET:-pic}
+PB_MATRIX_TARGET=${PB_MATRIX_TARGET:-pic10f322}
 PB_MATRIX_VARIANTS_VAR=${PB_MATRIX_VARIANTS_VAR:-VARIANTS}
 PB_MATRIX_VARIANTS=${PB_MATRIX_VARIANTS:-cd4053_simple cd4053_with_mute tq2_l2_5v_relay}
 PB_MATRIX_IMAGES=${PB_MATRIX_IMAGES:-bypass-pic10f322-cd4053_simple.hex bypass-pic10f322-cd4053_with_mute.hex bypass-pic10f322-tq2_l2_5v_relay.hex}
@@ -39,26 +39,26 @@ PB_MATRIX_UNSUPPORTED=${PB_MATRIX_UNSUPPORTED:-unknown}
 PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-}
 PB_SELECTOR_ROUTING=${PB_SELECTOR_ROUTING:-0}
 PB_SIZE_TARGET=${PB_SIZE_TARGET:-}
-PB_STACK_TARGET=${PB_STACK_TARGET:-pic-test-stack-bound}
-PB_STACK_DEVICE_VAR=${PB_STACK_DEVICE_VAR:-PIC_DEVICE_INI}
+PB_STACK_TARGET=${PB_STACK_TARGET:-pic10f322-test-stack-bound}
+PB_STACK_DEVICE_VAR=${PB_STACK_DEVICE_VAR:-PIC10F322_DEVICE_INI}
 PB_RETURN_STACK_REQUIRED=${PB_RETURN_STACK_REQUIRED:-0}
 PB_REBUILD_REQUIRED=${PB_REBUILD_REQUIRED:-0}
 product_override_args=()
 case "$PB_TARGET" in
-	pic)
+	pic10f322)
 		[ "$PB_LABEL" = PIC ] \
-			|| { printf 'FAIL: canonical pic build validation requires PB_LABEL=PIC\n' >&2; exit 1; }
+			|| { printf 'FAIL: canonical pic10f322 build validation requires PB_LABEL=PIC\n' >&2; exit 1; }
 		PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_MATRIX_VARIANTS}
-		product_override_args=(PIC_HEXES= PIC_ASSEMBLIES= PIC_SYMBOLS= PIC_BUILD_PRODUCTS=)
+		product_override_args=(PIC10F322_HEXES= PIC10F322_ASSEMBLIES= PIC10F322_SYMBOLS= PIC10F322_BUILD_PRODUCTS=)
 		expected_checks=36
 		;;
-	pic320)
+	pic10f320)
 		[ "$PB_LABEL" = PIC10F320 ] \
-			|| { printf 'FAIL: canonical pic320 build validation requires PB_LABEL=PIC10F320\n' >&2; exit 1; }
+			|| { printf 'FAIL: canonical pic10f320 build validation requires PB_LABEL=PIC10F320\n' >&2; exit 1; }
 		[ "$PB_REBUILD_REQUIRED" = 1 ] \
-			|| { printf 'FAIL: canonical pic320 build validation requires PB_REBUILD_REQUIRED=1\n' >&2; exit 1; }
+			|| { printf 'FAIL: canonical pic10f320 build validation requires PB_REBUILD_REQUIRED=1\n' >&2; exit 1; }
 		PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}
-		product_override_args=(PIC320_HEX= PIC320_ASM= PIC320_SYM= PIC320_BUILD_PRODUCTS=)
+		product_override_args=(PIC10F320_HEX= PIC10F320_ASM= PIC10F320_SYM= PIC10F320_BUILD_PRODUCTS=)
 		expected_checks=75
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; expected_checks= ;;
@@ -82,7 +82,7 @@ unset FAKE_XC8_MODE FAKE_XC8_FAIL_NAME FAKE_XC8_SIGNAL_MARKER \
 	MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES
 mkdir -p "$repo/src" "$repo/scripts" "$repo/test/pic10f320/equiv" \
 	"$repo/test/pic10f320/actuation" "$repo/test/pic10f320/fault" \
-	"$repo/build_pic" "$tools"
+	"$repo/build_pic10f322" "$tools"
 cp "$ROOT/Makefile" "$repo/Makefile"
 cp "$ROOT/scripts/validate-ihex.sh" "$repo/scripts/validate-ihex.sh"
 cp "$ROOT/test/check_stack_depth_pic.sh" "$repo/test/check_stack_depth_pic.sh"
@@ -225,7 +225,7 @@ chmod 640 "$tools/noop-oracle.py"
 
 # The PIC10F320 byte-identity target must compare the fake compiler's canonical
 # output with a sandbox-local baseline rather than the production XC8 hashes.
-if [ "$PB_TARGET" = pic320 ]; then
+if [ "$PB_TARGET" = pic10f320 ]; then
 	fake_hash=390b76d89cfb079a761cb76c4688d48e7c0b486523b9e2d5acb203d909d9b259
 	for image in $PB_MATRIX_IMAGES; do
 		printf '%s  %s\n' "$fake_hash" "$image"
@@ -263,7 +263,7 @@ files=(
 	src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h
 	src/bypass_output_tq2_l2_5v_relay.h
 	# PIC10F320's shell is self-contained -- it includes no src/ header -- but
-	# the `pic320` rule still needs its source to exist. Harmless for the
+	# the `pic10f320` rule still needs its source to exist. Harmless for the
 	# PIC10F322 leg, which never compiles it.
 	src/bypass_mcu_pic10f320.c
 	test/pic10f320/equiv/fw_harness.c
@@ -282,13 +282,13 @@ run_make() {
 		"$PB_VARIANT_VAR=$PB_BUILD_VARIANTS" STRICT_TOOLS=1 AWK=awk "$@"
 }
 
-run_pic320_host_make() {
+run_pic10f320_host_make() {
 	local target=$1
 	shift
 	FAKE_HOST_CC_LOG="$host_cc_log" FAKE_HOST_RUN_LOG="$host_run_log" \
 		make --no-print-directory -C "$repo" "$target" \
-			CC=true HOSTCC=true PIC320_HOST_CC="$tools/host-cc" \
-			PIC320_BUILD_DIR="$PB_BUILD_DIR" PIC320_VARIANT="$PB_VARIANT" "$@"
+			CC=true HOSTCC=true PIC10F320_HOST_CC="$tools/host-cc" \
+			PIC10F320_BUILD_DIR="$PB_BUILD_DIR" PIC10F320_VARIANT="$PB_VARIANT" "$@"
 }
 
 logged_command_count() {
@@ -342,11 +342,11 @@ run_matrix_make() {
 }
 
 run_expected_hash_make() {
-	make --no-print-directory -C "$repo" pic320-test-build \
-		CC=true HOSTCC=true PIC320_CC="$tools/xc8" PIC320_BUILD_DIR="$PB_BUILD_DIR" \
-		FW_BASE="$PB_FW_BASE" PIC320_TAG="$PB_TAG" \
-		PIC320_FLASH_WORDS="$PB_FLASH_WORDS" \
-		PIC320_VARIANTS_ALL="$PB_MATRIX_VARIANTS" STRICT_TOOLS=1 AWK=awk "$@"
+	make --no-print-directory -C "$repo" pic10f320-test-build \
+		CC=true HOSTCC=true PIC10F320_CC="$tools/xc8" PIC10F320_BUILD_DIR="$PB_BUILD_DIR" \
+		FW_BASE="$PB_FW_BASE" PIC10F320_TAG="$PB_TAG" \
+		PIC10F320_FLASH_WORDS="$PB_FLASH_WORDS" \
+		PIC10F320_VARIANTS_ALL="$PB_MATRIX_VARIANTS" STRICT_TOOLS=1 AWK=awk "$@"
 }
 
 run_stack_make() {
@@ -356,7 +356,7 @@ run_stack_make() {
 		"$PB_FLASH_VAR=$PB_FLASH_WORDS" \
 		"$PB_VARIANT_VAR=$PB_VARIANT" \
 		"$PB_MATRIX_VARIANTS_VAR=$PB_MATRIX_VARIANTS" \
-		"$PB_STACK_DEVICE_VAR=8" STACK_DEPTH_GATE=./test/check_stack_depth_pic.sh \
+		"$PB_STACK_DEVICE_VAR=8" PIC_STACK_DEPTH_GATE=./test/check_stack_depth_pic.sh \
 		STRICT_TOOLS=1 AWK=awk "$@"
 }
 
@@ -523,7 +523,7 @@ if [ "$PB_RETURN_STACK_REQUIRED" -eq 1 ]; then
 	expect_oracle_image_rejected "a reachable RETFIE image" bad-stack
 	expect_oracle_image_rejected \
 		"a reachable RETFIE image with a successful no-op oracle override" bad-stack \
-		"PIC320_RETURN_STACK_ORACLE=$tools/noop-oracle.py"
+		"PIC10F320_RETURN_STACK_ORACLE=$tools/noop-oracle.py"
 
 	bad_depth_fixture="$work/depth-9.hex"
 	FAKE_XC8_MODE=bad-depth "$tools/xc8" -o "$bad_depth_fixture" >/dev/null
@@ -539,8 +539,8 @@ if [ "$PB_RETURN_STACK_REQUIRED" -eq 1 ]; then
 	checks=$((checks + 1))
 
 	expect_oracle_image_rejected \
-		"a depth-9 image with PIC320_RETURN_STACK_LIMIT=99" bad-depth \
-		PIC320_RETURN_STACK_LIMIT=99
+		"a depth-9 image with PIC10F320_RETURN_STACK_LIMIT=99" bad-depth \
+		PIC10F320_RETURN_STACK_LIMIT=99
 fi
 
 for mode in over-budget huge-count; do
@@ -642,7 +642,7 @@ if [ "$PB_MATRIX_REQUIRE_COMPLETE" -eq 1 ]; then
 	done
 	checks=$((checks + 1))
 
-	if [ "$PB_TARGET" = pic320 ]; then
+	if [ "$PB_TARGET" = pic10f320 ]; then
 		run_expected_hash_make >/dev/null
 		checks=$((checks + 1))
 
@@ -701,7 +701,7 @@ if [ "$PB_MATRIX_REQUIRE_COMPLETE" -eq 1 ]; then
 		"$PB_MATRIX_VARIANTS_VAR contains unsupported names"
 	[[ ! -e "$injection_marker" ]] \
 		|| { printf 'FAIL: %s matrix text executed shell syntax\n' "$PB_LABEL" >&2; exit 1; }
-	if [ "$PB_TARGET" = pic ]; then
+	if [ "$PB_TARGET" = pic10f322 ]; then
 		eval_marker="$work/pic-matrix-make-function-executed"
 		rm -f "$eval_marker"
 		malicious_matrix='$(eval override CLASSIC_VARIANTS_SUPPORTED:=unknown)$(shell touch '"$eval_marker"')unknown'
@@ -722,27 +722,27 @@ fi
 assert_no_matrix_products "late $PB_LABEL matrix compiler failure"
 checks=$((checks + 1))
 
-# PIC10F320's target/soak lanes have selectors separate from PIC320_VARIANT.
-# Each selector must control the image rebuilt by the pic320 prerequisite, even
-# when a caller supplies a conflicting PIC320_VARIANT that names a stale image.
+# PIC10F320's target/soak lanes have selectors separate from PIC10F320_VARIANT.
+# Each selector must control the image rebuilt by the pic10f320 prerequisite, even
+# when a caller supplies a conflicting PIC10F320_VARIANT that names a stale image.
 if [ "$PB_SELECTOR_ROUTING" -eq 1 ]; then
 	selected=tq2_l2_5v_relay
 	selected_hex=$(pb_image "$selected")
 	selector_specs=(
-		"pic320-test-fault-target PIC320_FAULT_VARIANT"
-		"pic320-test-lockstep PIC320_LOCKSTEP_VARIANT"
-		"pic320-test-io PIC320_IO_VARIANT"
-		"pic320-test-soak PIC320_SOAK_VARIANT"
+		"pic10f320-test-fault-target PIC10F320_FAULT_VARIANT"
+		"pic10f320-test-lockstep PIC10F320_LOCKSTEP_VARIANT"
+		"pic10f320-test-io PIC10F320_IO_VARIANT"
+		"pic10f320-test-soak PIC10F320_SOAK_VARIANT"
 	)
 	for spec in "${selector_specs[@]}"; do
 		read -r target selector <<<"$spec"
 		rm -f "$hex" "$selected_hex"
 		if ! make --no-print-directory -C "$repo" "$target" \
-				CC=true HOSTCC=true PIC320_CC="$tools/xc8" \
-				PIC320_BUILD_DIR="$PB_BUILD_DIR" FW_BASE="$PB_FW_BASE" \
-				PIC320_TAG="$PB_TAG" PIC320_FLASH_WORDS="$PB_FLASH_WORDS" \
-				PIC320_VARIANT="$PB_VARIANT" "$selector=$selected" \
-				PIC320_SOAK_CXX="$tools/missing-cxx" STRICT_TOOLS= AWK=awk \
+				CC=true HOSTCC=true PIC10F320_CC="$tools/xc8" \
+				PIC10F320_BUILD_DIR="$PB_BUILD_DIR" FW_BASE="$PB_FW_BASE" \
+				PIC10F320_TAG="$PB_TAG" PIC10F320_FLASH_WORDS="$PB_FLASH_WORDS" \
+				PIC10F320_VARIANT="$PB_VARIANT" "$selector=$selected" \
+				PIC10F320_SOAK_CXX="$tools/missing-cxx" STRICT_TOOLS= AWK=awk \
 				>/dev/null 2>&1; then
 			printf 'FAIL: %s did not skip cleanly after building its selected variant\n' \
 				"$target" >&2
@@ -823,7 +823,7 @@ if [ "$PB_REBUILD_REQUIRED" = 1 ]; then
 		&& command_has_arg "$latest" '-DOUTPUT_CD4053_SIMPLE' \
 		|| { printf 'FAIL: initial PIC10F320 rebuild used stale clock/output flags\n' >&2; exit 1; }
 	checks=$((checks + 1))
-	: > "$repo/pic320"
+	: > "$repo/pic10f320"
 
 	run_make >/dev/null
 	[[ "$(logged_command_count "$xc8_log" "$image_output")" -eq $((image_count + 2)) ]] \
@@ -834,22 +834,22 @@ if [ "$PB_REBUILD_REQUIRED" = 1 ]; then
 		|| { printf 'FAIL: repeated PIC10F320 request used stale flags\n' >&2; exit 1; }
 	checks=$((checks + 1))
 
-	run_make PIC320_XTAL=4000000UL >/dev/null
+	run_make PIC10F320_XTAL=4000000UL >/dev/null
 	[[ "$(logged_command_count "$xc8_log" "$image_output")" -eq $((image_count + 3)) ]] \
-		|| { printf 'FAIL: changed PIC320_XTAL did not invoke XC8 exactly once\n' >&2; exit 1; }
+		|| { printf 'FAIL: changed PIC10F320_XTAL did not invoke XC8 exactly once\n' >&2; exit 1; }
 	latest=$(latest_logged_command "$xc8_log" "$image_output")
 	command_has_arg "$latest" '-D_XTAL_FREQ=4000000UL' \
 		&& ! command_has_arg "$latest" '-D_XTAL_FREQ=2000000UL' \
-		|| { printf 'FAIL: changed PIC320_XTAL did not reach the current XC8 invocation\n' >&2; exit 1; }
+		|| { printf 'FAIL: changed PIC10F320_XTAL did not reach the current XC8 invocation\n' >&2; exit 1; }
 	checks=$((checks + 1))
 
 	run_make >/dev/null
 	[[ "$(logged_command_count "$xc8_log" "$image_output")" -eq $((image_count + 4)) ]] \
-		|| { printf 'FAIL: restored PIC320_XTAL did not invoke XC8 exactly once\n' >&2; exit 1; }
+		|| { printf 'FAIL: restored PIC10F320_XTAL did not invoke XC8 exactly once\n' >&2; exit 1; }
 	latest=$(latest_logged_command "$xc8_log" "$image_output")
 	command_has_arg "$latest" '-D_XTAL_FREQ=2000000UL' \
 		&& ! command_has_arg "$latest" '-D_XTAL_FREQ=4000000UL' \
-		|| { printf 'FAIL: restored PIC320_XTAL did not reach the current XC8 invocation\n' >&2; exit 1; }
+		|| { printf 'FAIL: restored PIC10F320_XTAL did not reach the current XC8 invocation\n' >&2; exit 1; }
 	checks=$((checks + 1))
 
 	equiv_outputs=(
@@ -858,50 +858,50 @@ if [ "$PB_REBUILD_REQUIRED" = 1 ]; then
 		"$PB_BUILD_DIR/bypass_pure_equiv.o"
 		"$PB_BUILD_DIR/test_equiv"
 	)
-	run_pic320_host_make pic320-test-equiv >/dev/null
-	assert_host_output_counts 1 'initial pic320-test-equiv request' "${equiv_outputs[@]}"
-	assert_host_run_count 1 'initial pic320-test-equiv request' "$PB_BUILD_DIR/test_equiv"
+	run_pic10f320_host_make pic10f320-test-equiv >/dev/null
+	assert_host_output_counts 1 'initial pic10f320-test-equiv request' "${equiv_outputs[@]}"
+	assert_host_run_count 1 'initial pic10f320-test-equiv request' "$PB_BUILD_DIR/test_equiv"
 	checks=$((checks + 1))
-	: > "$repo/pic320-test-equiv"
-	run_pic320_host_make pic320-test-equiv >/dev/null
-	assert_host_output_counts 2 'identical pic320-test-equiv request' "${equiv_outputs[@]}"
-	assert_host_run_count 2 'identical pic320-test-equiv request' "$PB_BUILD_DIR/test_equiv"
+	: > "$repo/pic10f320-test-equiv"
+	run_pic10f320_host_make pic10f320-test-equiv >/dev/null
+	assert_host_output_counts 2 'identical pic10f320-test-equiv request' "${equiv_outputs[@]}"
+	assert_host_run_count 2 'identical pic10f320-test-equiv request' "$PB_BUILD_DIR/test_equiv"
 	checks=$((checks + 1))
 
-	run_pic320_host_make pic320-test-equiv PIC320_VARIANT=cd4053_with_mute >/dev/null
-	assert_host_output_counts 3 'changed-variant pic320-test-equiv request' "${equiv_outputs[@]}"
-	assert_host_run_count 3 'changed-variant pic320-test-equiv request' "$PB_BUILD_DIR/test_equiv"
+	run_pic10f320_host_make pic10f320-test-equiv PIC10F320_VARIANT=cd4053_with_mute >/dev/null
+	assert_host_output_counts 3 'changed-variant pic10f320-test-equiv request' "${equiv_outputs[@]}"
+	assert_host_run_count 3 'changed-variant pic10f320-test-equiv request' "$PB_BUILD_DIR/test_equiv"
 	latest=$(latest_logged_command "$host_cc_log" "$PB_BUILD_DIR/fw_harness.o")
 	command_has_arg "$latest" '-DOUTPUT_CD4053_WITH_MUTE' \
 		&& ! command_has_arg "$latest" '-DOUTPUT_CD4053_SIMPLE' \
-		|| { printf 'FAIL: changed PIC320_VARIANT did not reach the current shared harness compile\n' >&2; exit 1; }
+		|| { printf 'FAIL: changed PIC10F320_VARIANT did not reach the current shared harness compile\n' >&2; exit 1; }
 	checks=$((checks + 1))
 
-	run_pic320_host_make pic320-test-equiv >/dev/null
-	assert_host_output_counts 4 'restored-variant pic320-test-equiv request' "${equiv_outputs[@]}"
-	assert_host_run_count 4 'restored-variant pic320-test-equiv request' "$PB_BUILD_DIR/test_equiv"
+	run_pic10f320_host_make pic10f320-test-equiv >/dev/null
+	assert_host_output_counts 4 'restored-variant pic10f320-test-equiv request' "${equiv_outputs[@]}"
+	assert_host_run_count 4 'restored-variant pic10f320-test-equiv request' "$PB_BUILD_DIR/test_equiv"
 	latest=$(latest_logged_command "$host_cc_log" "$PB_BUILD_DIR/fw_harness.o")
 	command_has_arg "$latest" '-DOUTPUT_CD4053_SIMPLE' \
 		&& ! command_has_arg "$latest" '-DOUTPUT_CD4053_WITH_MUTE' \
-		|| { printf 'FAIL: restored PIC320_VARIANT did not reach the current shared harness compile\n' >&2; exit 1; }
+		|| { printf 'FAIL: restored PIC10F320_VARIANT did not reach the current shared harness compile\n' >&2; exit 1; }
 	checks=$((checks + 1))
 
-	run_pic320_host_make pic320-test-equiv \
-		PIC320_HOST_CFLAGS='-std=c11 -O0 -DPB_HOST_FLAGS_CHANGED' >/dev/null
-	assert_host_output_counts 5 'changed-flags pic320-test-equiv request' "${equiv_outputs[@]}"
-	assert_host_run_count 5 'changed-flags pic320-test-equiv request' "$PB_BUILD_DIR/test_equiv"
+	run_pic10f320_host_make pic10f320-test-equiv \
+		PIC10F320_HOST_CFLAGS='-std=c11 -O0 -DPB_HOST_FLAGS_CHANGED' >/dev/null
+	assert_host_output_counts 5 'changed-flags pic10f320-test-equiv request' "${equiv_outputs[@]}"
+	assert_host_run_count 5 'changed-flags pic10f320-test-equiv request' "$PB_BUILD_DIR/test_equiv"
 	for output in "$PB_BUILD_DIR/test_equiv_drv.o" "$PB_BUILD_DIR/bypass_pure_equiv.o"; do
 		latest=$(latest_logged_command "$host_cc_log" "$output")
 		command_has_arg "$latest" '-DPB_HOST_FLAGS_CHANGED' \
 			&& command_has_arg "$latest" '-O0' \
-			|| { printf 'FAIL: changed PIC320_HOST_CFLAGS did not reach current compile for %s\n' \
+			|| { printf 'FAIL: changed PIC10F320_HOST_CFLAGS did not reach current compile for %s\n' \
 				"$output" >&2; exit 1; }
 	done
 	checks=$((checks + 1))
 
-	run_pic320_host_make pic320-test-equiv >/dev/null
-	assert_host_output_counts 6 'restored-flags pic320-test-equiv request' "${equiv_outputs[@]}"
-	assert_host_run_count 6 'restored-flags pic320-test-equiv request' "$PB_BUILD_DIR/test_equiv"
+	run_pic10f320_host_make pic10f320-test-equiv >/dev/null
+	assert_host_output_counts 6 'restored-flags pic10f320-test-equiv request' "${equiv_outputs[@]}"
+	assert_host_run_count 6 'restored-flags pic10f320-test-equiv request' "$PB_BUILD_DIR/test_equiv"
 	for output in "$PB_BUILD_DIR/test_equiv_drv.o" "$PB_BUILD_DIR/bypass_pure_equiv.o"; do
 		latest=$(latest_logged_command "$host_cc_log" "$output")
 		command_has_arg "$latest" '-O2' \
@@ -909,7 +909,7 @@ if [ "$PB_REBUILD_REQUIRED" = 1 ]; then
 			&& command_has_arg "$latest" '-Wextra' \
 			&& command_has_arg "$latest" '-Werror' \
 			&& ! command_has_arg "$latest" '-DPB_HOST_FLAGS_CHANGED' \
-			|| { printf 'FAIL: restored PIC320_HOST_CFLAGS did not reach current compile for %s\n' \
+			|| { printf 'FAIL: restored PIC10F320_HOST_CFLAGS did not reach current compile for %s\n' \
 				"$output" >&2; exit 1; }
 	done
 	checks=$((checks + 1))
@@ -919,15 +919,15 @@ if [ "$PB_REBUILD_REQUIRED" = 1 ]; then
 		"$PB_BUILD_DIR/test_actuation_drv_$PB_VARIANT.o"
 		"$PB_BUILD_DIR/test_actuation_$PB_VARIANT"
 	)
-	run_pic320_host_make pic320-test-actuation >/dev/null
-	assert_host_output_counts 1 'initial pic320-test-actuation request' "${actuation_outputs[@]}"
-	assert_host_run_count 1 'initial pic320-test-actuation request' \
+	run_pic10f320_host_make pic10f320-test-actuation >/dev/null
+	assert_host_output_counts 1 'initial pic10f320-test-actuation request' "${actuation_outputs[@]}"
+	assert_host_run_count 1 'initial pic10f320-test-actuation request' \
 		"$PB_BUILD_DIR/test_actuation_$PB_VARIANT"
 	checks=$((checks + 1))
-	: > "$repo/pic320-test-actuation"
-	run_pic320_host_make pic320-test-actuation >/dev/null
-	assert_host_output_counts 2 'identical pic320-test-actuation request' "${actuation_outputs[@]}"
-	assert_host_run_count 2 'identical pic320-test-actuation request' \
+	: > "$repo/pic10f320-test-actuation"
+	run_pic10f320_host_make pic10f320-test-actuation >/dev/null
+	assert_host_output_counts 2 'identical pic10f320-test-actuation request' "${actuation_outputs[@]}"
+	assert_host_run_count 2 'identical pic10f320-test-actuation request' \
 		"$PB_BUILD_DIR/test_actuation_$PB_VARIANT"
 	checks=$((checks + 1))
 
@@ -936,14 +936,14 @@ if [ "$PB_REBUILD_REQUIRED" = 1 ]; then
 		"$PB_BUILD_DIR/test_fault_drv.o"
 		"$PB_BUILD_DIR/test_fault"
 	)
-	run_pic320_host_make pic320-test-fault-host >/dev/null
-	assert_host_output_counts 1 'initial pic320-test-fault-host request' "${fault_outputs[@]}"
-	assert_host_run_count 1 'initial pic320-test-fault-host request' "$PB_BUILD_DIR/test_fault"
+	run_pic10f320_host_make pic10f320-test-fault-host >/dev/null
+	assert_host_output_counts 1 'initial pic10f320-test-fault-host request' "${fault_outputs[@]}"
+	assert_host_run_count 1 'initial pic10f320-test-fault-host request' "$PB_BUILD_DIR/test_fault"
 	checks=$((checks + 1))
-	: > "$repo/pic320-test-fault-host"
-	run_pic320_host_make pic320-test-fault-host >/dev/null
-	assert_host_output_counts 2 'identical pic320-test-fault-host request' "${fault_outputs[@]}"
-	assert_host_run_count 2 'identical pic320-test-fault-host request' "$PB_BUILD_DIR/test_fault"
+	: > "$repo/pic10f320-test-fault-host"
+	run_pic10f320_host_make pic10f320-test-fault-host >/dev/null
+	assert_host_output_counts 2 'identical pic10f320-test-fault-host request' "${fault_outputs[@]}"
+	assert_host_run_count 2 'identical pic10f320-test-fault-host request' "$PB_BUILD_DIR/test_fault"
 	checks=$((checks + 1))
 fi
 

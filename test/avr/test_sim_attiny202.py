@@ -4,7 +4,7 @@
 #
 # test_sim_attiny202.py -- ATtiny202 (AVR-XT) register-level FUNCTIONAL test on
 # a patched yasimavr. The AVR-XT analogue of the AVR-Classic simavr functional
-# test (test/avr/test_sim.c) and the PIC gpsim toggle test (pic-test-gpsim):
+# test (test/avr/test_sim.c) and the PIC gpsim toggle test (pic10f322-test-gpsim):
 # drive the real built firmware image, wiggle the footswitch, and assert the
 # status LED engages/disengages on each debounced press. It also traces physical
 # PA2/PA3 output transitions and pulse timing for all three output variants,

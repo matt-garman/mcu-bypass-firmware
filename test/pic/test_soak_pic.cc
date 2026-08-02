@@ -17,11 +17,12 @@
 // The LED is RA0 (LATA bit0) on every variant, so this driver is variant-
 // agnostic -- the variant only selects which HEX is loaded.
 //
-// Build/run via the Makefile:  `make pic-test-soak`
-//   This target is intentionally NOT part of `make test` or `make pic-test`:
+// Build/run via the Makefile:  `make pic10f322-test-soak`
+//   This target is intentionally NOT part of `make test` or `make pic10f322-test`:
 //   it runs for minutes and needs the gpsim-dev + libglib2.0-dev headers, which
 //   CI may lack. The target skips cleanly when those (or XC8's HEX) are absent.
-//   Overrides: PIC_SOAK_VARIANT (cd4053/mute/relay), PIC_SOAK_DURATION_MS, etc.
+//   Overrides: PIC10F322_SOAK_VARIANT (cd4053_simple/cd4053_with_mute/
+//   tq2_l2_5v_relay), PIC10F322_SOAK_DURATION_MS, etc.
 //
 // IMPORTANT (see docs / project notes): gpsim honors WDTCON.WDTPS but its
 // calibration does NOT match the datasheet -- at the firmware's WDTPS=0x08 the
@@ -51,7 +52,7 @@
 
 // ---- Firmware / MCU parameters (injected by the Makefile build rule) --------
 #ifndef FW_PATH
-#  define FW_PATH  "build_pic/bypass-pic10f322-cd4053_simple.hex"
+#  define FW_PATH  "build_pic10f322/bypass-pic10f322-cd4053_simple.hex"
 #endif
 #ifndef PROC_NAME
 #  define PROC_NAME "p10f322"

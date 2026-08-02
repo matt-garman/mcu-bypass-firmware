@@ -5,7 +5,7 @@
 *.hex
 *.elf
 build_avr_classic/
-build_pic/
+build_pic10f322/
 build_avr_xt/
 # PIC10F320 build + coverage artifacts (coverage lives UNDER the build dir --
 # see docs/pic10f320_merge_plan.md §5.7 -- so this one entry covers both, and no

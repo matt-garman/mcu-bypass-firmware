@@ -9,7 +9,7 @@
 # Usage:
 #   run_gpsim_test.sh <hexfile> [expected_engaged_lata_hex] [expected_bypass_lata_hex]
 #
-#   <hexfile>                 a built PIC HEX (build_pic/bypass_<v>_pic10f322.hex)
+#   <hexfile>                 a built PIC HEX (build_pic10f322/bypass_<v>_pic10f322.hex)
 #   expected_engaged_lata_hex optional: the FULL LATA value when ENGAGED for this
 #                             variant (cd4053_simple=0x3, cd4053_with_mute=0x7,
 #                             tq2_l2_5v_relay=0x1). When

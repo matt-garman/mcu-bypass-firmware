@@ -11,7 +11,7 @@
 #   checkpoints. The wrapper test/pic/run_gpsim_test.sh parses the snapshots and
 #   turns them into PASS/FAIL.
 #
-# HOW IT IS RUN (see the wrapper / `make pic320-test-gpsim`)
+# HOW IT IS RUN (see the wrapper / `make pic10f320-test-gpsim`)
 #   gpsim -i -pp10f320 <variant>.hex -c test/pic/footswitch_toggle.stc
 #   The HEX (any of the three output variants) is supplied on the gpsim command
 #   line, so this script is variant-agnostic (the wrapper supplies the per-variant

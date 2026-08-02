@@ -57,9 +57,9 @@ implementation files. Those lanes currently have no report-only companions.
 | Direct source input | `bypass_mcu_avr_xt.c` only | `bypass_mcu_pic10f322.c` only | `bypass_mcu_pic10f320.c` only |
 | Target model | `--platform=avr8`, `--std=c11` | `--platform=pic8-enhanced`, `--std=c11` | same |
 | Adopted headers | avr-libc + ATtiny DFP | XC8 v3.10 + `proc/pic10f322.h` | XC8 v3.10 + `proc/pic10f320.h` |
-| Direct MISRA target | `make attiny202-analyze-misra` | `make pic-analyze-misra` | `make pic320-analyze-misra` |
-| Direct target coverage | AVR-XT shell | PIC10F322 shell | one selected `PIC320_VARIANT` branch |
-| Canonical coverage | one shell configuration | one shell configuration | `make pic320-test STRICT_TOOLS=1` sweeps all three output branches |
+| Direct MISRA target | `make attiny202-analyze-misra` | `make pic10f322-analyze-misra` | `make pic10f320-analyze-misra` |
+| Direct target coverage | AVR-XT shell | PIC10F322 shell | one selected `PIC10F320_VARIANT` branch |
+| Canonical coverage | one shell configuration | one shell configuration | `make pic10f320-test STRICT_TOOLS=1` sweeps all three output branches |
 
 These targets do not re-run `bypass_pure.c` or the modular output-driver
 translation units under each MCU target model; those shared C files are direct
@@ -99,7 +99,7 @@ The compliance boundary is **this project's authored firmware source**:
 
 Cppcheck receives C files as its direct inputs; authored headers are analyzed
 only when parsed through an include path from those inputs. The Makefile's
-`FW_HEADERS`, `XT_HEADERS`, and `PIC_HEADERS` are rebuild dependency lists, not
+`FW_HEADERS`, `XT_HEADERS`, and `PIC10F322_HEADERS` are rebuild dependency lists, not
 additional analyzer source arguments. In particular,
 `bypass_output_cd4053_simple.h` is in the authored boundary but is not currently
 included by an analyzed C file, and the modular driver files are not re-analyzed
@@ -316,9 +316,9 @@ When changing the firmware:
    ```sh
    make analyze-misra VARIANTS="cd4053 mute relay" STRICT_TOOLS=1
    make attiny202-analyze-misra STRICT_TOOLS=1
-   make pic-analyze-misra STRICT_TOOLS=1
+   make pic10f322-analyze-misra STRICT_TOOLS=1
    for v in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
-       make pic320-analyze-misra PIC320_VARIANT="$v" STRICT_TOOLS=1 || exit 1
+       make pic10f320-analyze-misra PIC10F320_VARIANT="$v" STRICT_TOOLS=1 || exit 1
    done
    ```
 

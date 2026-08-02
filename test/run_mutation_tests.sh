@@ -13,10 +13,10 @@
 # is "killed"). A mutant that survives (tests still pass) marks a real hole in
 # the suite.
 #
-# Core/config mutants map to the single fast variant target `test-sim-cd4053_simple`
+# Core/config mutants map to the single fast variant target `test-sim-cd4053_simple-attiny13a`
 # (the core debounce/WDT logic is shared by every variant, so one variant
 # suffices to kill them). Output-driver mutants map to their own variant target
-# (`test-sim-tq2_l2_5v_relay` / `test-sim-cd4053_with_mute` / `test-sim-cd4053_simple`).
+# (`test-sim-tq2_l2_5v_relay-attiny13a` / `test-sim-cd4053_with_mute-attiny13a` / `test-sim-cd4053_simple-attiny13a`).
 #
 # This operates entirely on a throwaway COPY of the tree; it never modifies the
 # real sources. It is wired into `make test-mutation` and is intentionally NOT
@@ -29,7 +29,7 @@
 # RELEASE_THRESH/PRESSED_THRESH from bypass_config.h (the single source of
 # truth), so they intentionally CANNOT catch a threshold change (expectation and
 # code move together). The threshold mutants below are therefore mapped to
-# `test-sim`, where the simavr noise test asserts a HARD-CODED toggle count and
+# `test-sim-attiny13a`, where the simavr noise test asserts a HARD-CODED toggle count and
 # the lock-step co-sim compares the real binary against an independent model.
 
 set -u
@@ -64,7 +64,8 @@ readonly MUTATION_EXPECTED_TOTAL=94
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
 FW_BASE="${FW_BASE:-bypass}"
-PIC_TAG="${PIC_TAG:-pic10f322}"
+PIC10F322_TAG="${PIC10F322_TAG:-pic10f322}"
+PIC10F322_BUILD_DIR="${PIC10F322_BUILD_DIR:-build_pic10f322}"
 GPSIM="${GPSIM:-gpsim}"
 MUTATION_MAKE="${MUTATION_MAKE:-make}"
 PIC_SOAK_GPSIM_INC="${PIC_SOAK_GPSIM_INC:-/usr/include/gpsim}"
@@ -205,14 +206,14 @@ drain_workers() {
 # The sed expression uses '@' as delimiter to avoid clashing with C operators.
 MUTATIONS=(
 # --- core debounce algorithm (bypass_pure.c) -----------------------------------
-"src/bypass_pure.c	s@{ ++counter; }@{ --counter; }@	test-sim-cd4053_simple	ISR integrator: increment-on-press becomes decrement (counter never rises -> never toggles)"
-"src/bypass_pure.c	s@ctx.debounce_counter >= PRESSED_THRESH@ctx.debounce_counter > PRESSED_THRESH@	test-sim-cd4053_simple	press threshold off-by-one (>= becomes >); test_minimum_press_toggles catches the 1-tick divergence"
-"src/bypass_mcu_avr_classic.c	s@PORTB |=  (1 << LED_PIN)@PORTB \&= (uint8_t)~(1 << LED_PIN)@	test-sim-cd4053_simple	set_engaged LED output inverted (lights become dark)"
-"src/bypass_config.h	s@#define PRESSED_THRESH (8U)@#define PRESSED_THRESH (4U)@	test-sim-cd4053_simple	press threshold shortened 8->4 (timing/noise-count regression)"
-"src/bypass_config.h	s@#define RELEASE_THRESH (25U)@#define RELEASE_THRESH (15U)@	test-sim-cd4053_simple	release lock-out shortened 25->15 (noise-count regression)"
+"src/bypass_pure.c	s@{ ++counter; }@{ --counter; }@	test-sim-cd4053_simple-attiny13a	ISR integrator: increment-on-press becomes decrement (counter never rises -> never toggles)"
+"src/bypass_pure.c	s@ctx.debounce_counter >= PRESSED_THRESH@ctx.debounce_counter > PRESSED_THRESH@	test-sim-cd4053_simple-attiny13a	press threshold off-by-one (>= becomes >); test_minimum_press_toggles catches the 1-tick divergence"
+"src/bypass_mcu_avr_classic.c	s@PORTB |=  (1 << LED_PIN)@PORTB \&= (uint8_t)~(1 << LED_PIN)@	test-sim-cd4053_simple-attiny13a	set_engaged LED output inverted (lights become dark)"
+"src/bypass_config.h	s@#define PRESSED_THRESH (8U)@#define PRESSED_THRESH (4U)@	test-sim-cd4053_simple-attiny13a	press threshold shortened 8->4 (timing/noise-count regression)"
+"src/bypass_config.h	s@#define RELEASE_THRESH (25U)@#define RELEASE_THRESH (15U)@	test-sim-cd4053_simple-attiny13a	release lock-out shortened 25->15 (noise-count regression)"
 # --- ISR bounds guards (bypass_pure.c) -----------------------------------------
-"src/bypass_pure.c	s@if (debounce_counter < RELEASE_THRESH) { ++counter; }@++counter;@	test-sim-cd4053_simple	ISR increment: remove saturation guard (counter wraps from 255->0 after 256 sustained ticks)"
-"src/bypass_pure.c	s@if (debounce_counter > 0U) { --counter; }@--counter;@	test-sim-cd4053_simple	ISR decrement: remove underflow guard (counter wraps 0->255 on release; lock-step catches divergence)"
+"src/bypass_pure.c	s@if (debounce_counter < RELEASE_THRESH) { ++counter; }@++counter;@	test-sim-cd4053_simple-attiny13a	ISR increment: remove saturation guard (counter wraps from 255->0 after 256 sustained ticks)"
+"src/bypass_pure.c	s@if (debounce_counter > 0U) { --counter; }@--counter;@	test-sim-cd4053_simple-attiny13a	ISR decrement: remove underflow guard (counter wraps 0->255 on release; lock-step catches divergence)"
 # --- power-on initialization (bypass_pure.c) ------------------------------------
 # simavr cannot reliably inject a held switch at power-on (PORTB write in init()
 # resets the IRQ-driven pin level), so these map to test-model-check which calls
@@ -220,32 +221,32 @@ MUTATIONS=(
 "src/bypass_pure.c	s@ctx.program_state = RELEASE_DEBOUNCE_WAIT;@ctx.program_state = PRESS_DEBOUNCE_WAIT;@	test-model-check	power-on-pressed: wrong program_state; verify_init_context() checks RELEASE_DEBOUNCE_WAIT"
 "src/bypass_pure.c	s@ctx.debounce_counter = RELEASE_THRESH;@ctx.debounce_counter = 0U;@	test-model-check	power-on-pressed: lockout counter 0 instead of RELEASE_THRESH; verify_init_context() checks counter"
 # --- lockout mechanism (bypass_pure.c) -----------------------------------------
-"src/bypass_pure.c	s@res.lockout_value = RELEASE_THRESH;@res.lockout_value = 0;@g	test-sim-cd4053_simple	toggle lockout: counter reset to 0 instead of RELEASE_THRESH (immediate re-arm, no hold lockout)"
-"src/bypass_pure.c	s@res.program_state = RELEASE_DEBOUNCE_WAIT;@res.program_state = PRESS_DEBOUNCE_WAIT;@g	test-sim-cd4053_simple	toggle lockout: stays in PRESS_DEBOUNCE_WAIT after toggle (counter=25 >= 8 -> immediate re-toggle cascade)"
+"src/bypass_pure.c	s@res.lockout_value = RELEASE_THRESH;@res.lockout_value = 0;@g	test-sim-cd4053_simple-attiny13a	toggle lockout: counter reset to 0 instead of RELEASE_THRESH (immediate re-arm, no hold lockout)"
+"src/bypass_pure.c	s@res.program_state = RELEASE_DEBOUNCE_WAIT;@res.program_state = PRESS_DEBOUNCE_WAIT;@g	test-sim-cd4053_simple-attiny13a	toggle lockout: stays in PRESS_DEBOUNCE_WAIT after toggle (counter=25 >= 8 -> immediate re-toggle cascade)"
 # --- watchdog handshake (bypass_mcu_avr_classic.c) ----------------------------------------
 # Note what kills each of these, because it is NOT the watchdog on the first
-# two. `test-sim-cd4053_simple` is the ATtiny13a build, and simavr 1.6 does not model
+# two. `test-sim-cd4053_simple-attiny13a` is the ATtiny13a build, and simavr 1.6 does not model
 # the ATtiny13a WDT system reset at all (see test_sim.c's
 # test_watchdog_backstop_documented) -- so no assertion on that lane can observe
 # a watchdog reset. The third entry is the one that actually exercises the
 # watchdog: it runs on the tinyx5, where simavr does model the reset, and is
 # killed by the soak's reset witness.
-"src/bypass_mcu_avr_classic.c	s@hw_wdt_pet();@(void)0; /* MUTANT: no WDT pet */@	test-sim-cd4053_simple	WDT pet call site removed from the main loop: it is the only caller, so hw_wdt_pet goes unused and the build fails under -Werror=unused-function before any test runs. Kept because that compiler guard is real coverage; the BEHAVIOURAL form of this fault is the soak mutant below"
-"src/bypass_mcu_avr_classic.c	s@timer_isr_called_ = TIMER_ISR_CALLED;@timer_isr_called_ = TIMER_ISR_NOT_CALLED;@	test-sim-cd4053_simple	WDT handshake: ISR clears its own flag -> main never sees CALLED -> the debounce state machine never advances, so the LED never toggles; the functional, noise-count and lock-step assertions all fail (the ATtiny13a watchdog is not what catches it)"
+"src/bypass_mcu_avr_classic.c	s@hw_wdt_pet();@(void)0; /* MUTANT: no WDT pet */@	test-sim-cd4053_simple-attiny13a	WDT pet call site removed from the main loop: it is the only caller, so hw_wdt_pet goes unused and the build fails under -Werror=unused-function before any test runs. Kept because that compiler guard is real coverage; the BEHAVIOURAL form of this fault is the soak mutant below"
+"src/bypass_mcu_avr_classic.c	s@timer_isr_called_ = TIMER_ISR_CALLED;@timer_isr_called_ = TIMER_ISR_NOT_CALLED;@	test-sim-cd4053_simple-attiny13a	WDT handshake: ISR clears its own flag -> main never sees CALLED -> the debounce state machine never advances, so the LED never toggles; the functional, noise-count and lock-step assertions all fail (the ATtiny13a watchdog is not what catches it)"
 "src/bypass_mcu_avr_classic.c	s@static void hw_wdt_pet(void) { wdt_reset(); }@static void hw_wdt_pet(void) { /* MUTANT: no WDT pet */ }@	SOAK_VARIANT=cd4053_simple SOAK_CHIP=85 SOAK_DURATION_MS=$AVR_SOAK_MUT_MS SOAK_LIVENESS_INTERVAL_MS=$AVR_SOAK_MUT_LIVENESS_MS test-soak	SOAK main-loop WDT pet defeated at the definition, so the call site remains and the build stays clean; the tinyx5 soak's reset witness records the un-pet watchdog in watchdog_failures within the short mutation window"
 # --- main-loop sanity guard / toggle dispatch (bypass_mcu_avr_classic.c) -------------------
-"src/bypass_mcu_avr_classic.c	s@(actual_direction_mask == (uint8_t)BYPASS_OUTPUT_DDR_MASK)@(1U != 0U)@	test-sim-cd4053_simple	DDRB exact-mask predicate removed: PB0 output and PB4 input corruptions evade the former caller-output subset check"
-"src/bypass_mcu_avr_classic.c	s@PORTB & (uint8_t)BYPASS_OUTPUT_DDR_MASK@PORTB \& (uint8_t)0x0EU@	test-sim-cd4053_simple	output-latch mask omits spare PB4; PB4 corruption must still force watchdog recovery"
-"src/bypass_mcu_avr_classic.c	s@(timer_isr_called_ > TIMER_ISR_NOT_CALLED)@(0U != 0U)@	test-fault-inject-cd4053_simple-t85	invalid ISR/main handshake-value guard removed; ISR-write-synchronized corruption must still force and witness a WDT reset"
-"src/bypass_pure.c	s@res.effect_state = BYPASS;@res.effect_state = ENGAGED;@	test-sim-cd4053_simple	toggle: always sets ENGAGED (never returns to BYPASS); round-trip and lock-step tests catch it"
+"src/bypass_mcu_avr_classic.c	s@(actual_direction_mask == (uint8_t)BYPASS_OUTPUT_DDR_MASK)@(1U != 0U)@	test-sim-cd4053_simple-attiny13a	DDRB exact-mask predicate removed: PB0 output and PB4 input corruptions evade the former caller-output subset check"
+"src/bypass_mcu_avr_classic.c	s@PORTB & (uint8_t)BYPASS_OUTPUT_DDR_MASK@PORTB \& (uint8_t)0x0EU@	test-sim-cd4053_simple-attiny13a	output-latch mask omits spare PB4; PB4 corruption must still force watchdog recovery"
+"src/bypass_mcu_avr_classic.c	s@(timer_isr_called_ > TIMER_ISR_NOT_CALLED)@(0U != 0U)@	test-fault-inject-cd4053_simple-attiny85	invalid ISR/main handshake-value guard removed; ISR-write-synchronized corruption must still force and witness a WDT reset"
+"src/bypass_pure.c	s@res.effect_state = BYPASS;@res.effect_state = ENGAGED;@	test-sim-cd4053_simple-attiny13a	toggle: always sets ENGAGED (never returns to BYPASS); round-trip and lock-step tests catch it"
 # --- CD4053 simple output driver -----------------------------------------------
-"src/bypass_output_cd4053_simple.c	s@hw_pin_set_low(CD4053_PIN)@hw_pin_set_high(CD4053_PIN)@	test-sim-cd4053_simple	bypass routes CD4053 the wrong way (PB2 stuck high); power-on control-output test catches it"
-"src/bypass_output_cd4053_simple.c	s@hw_pin_set_high(CD4053_PIN)@hw_pin_set_low(CD4053_PIN)@	test-sim-cd4053_simple	engaged routes CD4053 the wrong way (PB2 stuck low); control-output test catches it"
+"src/bypass_output_cd4053_simple.c	s@hw_pin_set_low(CD4053_PIN)@hw_pin_set_high(CD4053_PIN)@	test-sim-cd4053_simple-attiny13a	bypass routes CD4053 the wrong way (PB2 stuck high); power-on control-output test catches it"
+"src/bypass_output_cd4053_simple.c	s@hw_pin_set_high(CD4053_PIN)@hw_pin_set_low(CD4053_PIN)@	test-sim-cd4053_simple-attiny13a	engaged routes CD4053 the wrong way (PB2 stuck low); control-output test catches it"
 # --- TQ2 relay output driver ---------------------------------------------------
-"src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	test-sim-tq2_l2_5v_relay	relay coil pulse shortened to 1ms (< 4ms datasheet min); pulse-width test catches it"
-"src/bypass_output_tq2_l2_5v_relay.c	s@pin_set_high(RELAY_SET_PIN)@pin_set_high(RELAY_RESET_PIN)@	test-sim-tq2_l2_5v_relay	engage pulses the wrong (RESET) coil; relay test catches SET-not-pulsed / RESET-moved"
+"src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	test-sim-tq2_l2_5v_relay-attiny13a	relay coil pulse shortened to 1ms (< 4ms datasheet min); pulse-width test catches it"
+"src/bypass_output_tq2_l2_5v_relay.c	s@pin_set_high(RELAY_SET_PIN)@pin_set_high(RELAY_RESET_PIN)@	test-sim-tq2_l2_5v_relay-attiny13a	engage pulses the wrong (RESET) coil; relay test catches SET-not-pulsed / RESET-moved"
 # --- CD4053 with-mute output driver --------------------------------------------
-"src/bypass_output_cd4053_with_mute.c	s@BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS)@BYPASS_DELAY_MS(1)@g	test-sim-cd4053_with_mute	mute settle window shortened to 1ms; mute-window timing test catches it"
+"src/bypass_output_cd4053_with_mute.c	s@BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS)@BYPASS_DELAY_MS(1)@g	test-sim-cd4053_with_mute-attiny13a	mute settle window shortened to 1ms; mute-window timing test catches it"
 
 # --- shared core: migrated from the PIC10F320 project (merge, 2026-07-26) ------
 # Its other five model mutants duplicate entries already above; this one does
@@ -274,7 +275,7 @@ copy_tree() {
 # it protects only against gaps someone already thought of. The allowlist walk in
 # test/scratch_tree.sh is the real fix; this is the check that turns a future
 # omission into one obvious line instead of a misattributed toolchain complaint.
-validate_pic320_sandbox() {
+validate_pic10f320_sandbox() {
     local root="$1" required ok=1
     for required in \
         test/pic/footswitch_toggle.stc \
@@ -336,13 +337,13 @@ if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
         echo "ERROR: could not create mutation self-test sandbox" >&2
         exit 1
     fi
-    if ! copy_tree "$SELFTEST_DIR" || ! validate_pic320_sandbox "$SELFTEST_DIR"; then
+    if ! copy_tree "$SELFTEST_DIR" || ! validate_pic10f320_sandbox "$SELFTEST_DIR"; then
         rm -rf "$SELFTEST_DIR"
         exit 1
     fi
 
     rm -f "$SELFTEST_DIR/test/pic/run_gpsim_test.sh"
-    if validate_pic320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
+    if validate_pic10f320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
         echo "ERROR: mutation sandbox validator accepted a missing gpsim wrapper" >&2
         rm -rf "$SELFTEST_DIR"
         exit 1
@@ -353,7 +354,7 @@ if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
         rm -rf "$SELFTEST_DIR"; exit 1
     fi
     chmod -x "$SELFTEST_DIR/test/pic/run_gpsim_power_on_pressed.sh"
-    if validate_pic320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
+    if validate_pic10f320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
         echo "ERROR: mutation sandbox validator accepted a non-executable gpsim wrapper" >&2
         rm -rf "$SELFTEST_DIR"
         exit 1
@@ -364,7 +365,7 @@ if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
         rm -rf "$SELFTEST_DIR"; exit 1
     fi
     rm -f "$SELFTEST_DIR/test/pic/find_pin_exact.h"
-    if validate_pic320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
+    if validate_pic10f320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
         echo "ERROR: mutation sandbox validator accepted a missing find_pin_exact.h" >&2
         rm -rf "$SELFTEST_DIR"
         exit 1
@@ -375,7 +376,7 @@ if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
         rm -rf "$SELFTEST_DIR"; exit 1
     fi
     rm -f "$SELFTEST_DIR/test/pic/test_fault_pic_core.h"
-    if validate_pic320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
+    if validate_pic10f320_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
         echo "ERROR: mutation sandbox validator accepted a missing shared PIC harness core" >&2
         rm -rf "$SELFTEST_DIR"
         exit 1
@@ -423,7 +424,7 @@ if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
 fi
 
 # Run one PIC gpsim register-level check against a freshly built (mutated) HEX.
-# We build + drive the wrapper DIRECTLY rather than via `make pic-test-gpsim`.
+# We build + drive the wrapper DIRECTLY rather than via `make pic10f322-test-gpsim`.
 # That began as a workaround: the target's preflight checked its wrapper scripts'
 # mode in the git index, which no mktemp sandbox can satisfy. The workaround was
 # applied HERE and nowhere else, so the PIC10F320 lane -- which does go through
@@ -439,10 +440,10 @@ fi
 # failed gpsim assertion.
 pic_gpsim_run() {
     local work="$1" rc
-    make -C "$work" pic >/dev/null 2>&1
+    make -C "$work" pic10f322 >/dev/null 2>&1
     rc=$?
     [ "$rc" -eq 0 ] || return "$rc"
-    local hex="$work/build_pic/${FW_BASE}_cd4053_${PIC_TAG}.hex"
+    local hex="$work/$PIC10F322_BUILD_DIR/${FW_BASE}-${PIC10F322_TAG}-cd4053_simple.hex"
     [ -f "$hex" ] || return 125
     GPSIM="$GPSIM" "$PROJ_DIR/test/pic/run_gpsim_test.sh" "$hex" 0x3 >/dev/null 2>&1
 }
@@ -606,20 +607,20 @@ run_mutant() {
             run_mutation_make_command "$work" "$arg" >/dev/null 2>&1; rc=$?
             ;;
         picgpsim)
-            label="pic-test-gpsim"
+            label="pic10f322-test-gpsim"
             pic_gpsim_run "$work"; rc=$?
             ;;
         picsoak)
-            label="pic-test-soak"
-            make -C "$work" pic-test-soak \
-                PIC_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" \
-                PIC_SOAK_LIVENESS_INTERVAL_MS="$PIC_SOAK_MUT_LIVENESS_MS" \
-                PIC_SOAK_VARIANT=cd4053_simple \
+            label="pic10f322-test-soak"
+            make -C "$work" pic10f322-test-soak \
+                PIC10F322_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" \
+                PIC10F322_SOAK_LIVENESS_INTERVAL_MS="$PIC_SOAK_MUT_LIVENESS_MS" \
+                PIC10F322_SOAK_VARIANT=cd4053_simple \
                 >/dev/null 2>&1; rc=$?
             ;;
         pictarget)
-            label="pic-test-target($arg)"
-            make -C "$work" PIC_TARGET_VARIANT="$arg" pic-test-target >/dev/null 2>&1; rc=$?
+            label="pic10f322-test-target($arg)"
+            make -C "$work" PIC10F322_TARGET_VARIANT="$arg" pic10f322-test-target >/dev/null 2>&1; rc=$?
             ;;
         avrxt)
             # Same shape as `make`, plus the two absolute tool paths the sandbox
@@ -704,46 +705,46 @@ PIC_TARGET_MUTATIONS=(
 # libgpsim and are gated by the PIC10F320 probe below. Without that split the
 # tool-dependent ones would "survive" on any box lacking the toolchain -- the
 # exact false-pass the existing PIC probe was written to prevent.
-PIC320_HOST_MUTATIONS=(
-"src/bypass_mcu_pic10f320.c	s@++ctx_.debounce_counter@--ctx_.debounce_counter@	pic320-test-equiv	FW integrator: increment-on-press becomes decrement (never reaches threshold)"
-"src/bypass_mcu_pic10f320.c	s@ctx_.debounce_counter >= PRESSED_THRESH@ctx_.debounce_counter > PRESSED_THRESH@	pic320-test-equiv	FW press threshold off-by-one (>= becomes >): 1-tick latency divergence"
-"src/bypass_mcu_pic10f320.c	s@if (0U == ctx_.debounce_counter)@if (0U != ctx_.debounce_counter)@	pic320-test-equiv	FW release re-arm condition inverted (lock-out never clears / clears wrongly)"
-"src/bypass_mcu_pic10f320.c	s@#define PRESSED_THRESH  (8U)@#define PRESSED_THRESH  (4U)@	pic320-test-equiv	FW press threshold shortened 8->4 (diverges from the model's 8)"
-"src/bypass_mcu_pic10f320.c	s@#define RELEASE_THRESH  (25U)@#define RELEASE_THRESH  (15U)@	pic320-test-equiv	FW release lock-out shortened 25->15 (diverges from the model)"
-"src/bypass_mcu_pic10f320.c	s@ctx_.program_state = RELEASE_DEBOUNCE_WAIT;@ctx_.program_state = PRESS_DEBOUNCE_WAIT;@	pic320-test-equiv	FW power-on-pressed: wrong program_state (held switch could spuriously engage)"
-"src/bypass_mcu_pic10f320.c	s@(uint8_t)(0x0FU ^ BYPASS_OUTPUT_DDR_MASK)@(uint8_t)(TRISA \& 0x0FU)@	pic320-test-fault-variants	FW output-pin SEU check neutered (exact-TRISA compare made a tautology; no direction fault ever detected)"
-"src/bypass_mcu_pic10f320.c	s@(0U == wpu_global)@1U@	pic320-test-fault-variants	FW global footswitch pull-up SEU check neutered (nWPUEN corruption never detected)"
-"src/bypass_mcu_pic10f320.c	s@(ctx_.effect_state > ENGAGED)@(ctx_.effect_state > 99U)@	pic320-test-fault-variants	FW effect_state range guard defeated (corrupt effect_state never forces reset)"
-"src/bypass_mcu_pic10f320.c	s@(ctx_.debounce_counter > RELEASE_THRESH)@(ctx_.debounce_counter > 255U)@	pic320-test-fault-variants	FW counter range guard defeated (corrupt debounce_counter never forces reset)"
-"src/bypass_mcu_pic10f320.c	s@WPUA = (uint8_t)(1U << FOOTSW_PIN);@WPUA |= (uint8_t)(1U << FOOTSW_PIN);@	pic320-test-fault-variants	FW pull-up init regressed to read-modify-write: WPUA reset value 0x0F preserved instead of exact RA3-only 0x08"
-"src/bypass_mcu_pic10f320.c	s@WPUA \& 0x0FU@WPUA \& (1U << FOOTSW_PIN)@	pic320-test-fault-variants	FW pull-up integrity guard masks away unexpected RA0..RA2 WPUA latches"
-"src/bypass_mcu_pic10f320.c	s@(HFINTOSC_2MHZ_IRCF == OSCCONbits.IRCF)@1U@	pic320-test-fault-variants	FW clock-select (OSCCON IRCF) SEU guard defeated (corrupt clock never forces reset)"
-"src/bypass_mcu_pic10f320.c	s@(WDT_WDTPS_256MS == WDTCONbits.WDTPS)@1U@	pic320-test-fault-variants	FW watchdog-period (WDTCON WDTPS) SEU guard defeated (corrupt WDT period never forces reset)"
-"src/bypass_mcu_pic10f320.c	s@(TMR2_PR2_PERIOD == PR2)@1U@	pic320-test-fault-variants	FW tick-period (PR2) SEU guard defeated (corrupt 1 ms reload never forces reset)"
-"src/bypass_mcu_pic10f320.c	s@(TMR2_T2CON_CONFIG == T2CON)@1U@	pic320-test-fault-variants	FW tick-control (T2CON) SEU guard defeated (corrupt prescale/enable never forces reset)"
-"src/bypass_mcu_pic10f320.c	s@(0U == (uint8_t)(ANSELA & BYPASS_OUTPUT_DDR_MASK))@1U@	pic320-test-fault-variants	FW digital-port (ANSELA) SEU guard defeated (output pin re-selected analog never forces reset)"
-"src/bypass_mcu_pic10f320.c	s@ANSELA & BYPASS_OUTPUT_DDR_MASK@ANSELA \& 0x01U@	pic320-test-fault-variants	FW ANSELA sanity mask narrowed to RA0 only (RA1/RA2 analog re-selection undetected)"
-"src/bypass_mcu_pic10f320.c	s@LATA |=  (uint8_t)(1U << LED_PIN)@LATA \&= (uint8_t)~(1U << LED_PIN)@	pic320-test-equiv	FW set_engaged LED output inverted (RA0 stays dark when ENGAGED)"
-"src/bypass_mcu_pic10f320.c	s@hw_x4053_ctl_low();@hw_x4053_ctl_high();@	PIC320_VARIANT=cd4053_simple pic320-test-actuation	FW CD4053 control routed the wrong way (set_engaged drives the bypass level); settled ENGAGED LATA 0x1 not 0x3 (RA0 unaffected, so equiv/gpsim-RA0 miss it; killed by the actuation settled-LATA check)"
-"src/bypass_mcu_pic10f320.c	s@static void hw_x4053_ctl_high(void) { LATA \&= (uint8_t)~(1U << CD4053_PIN); }@static void hw_x4053_ctl_high(void) { LATA |=  (uint8_t)(1U << CD4053_PIN); }@	PIC320_VARIANT=cd4053_simple pic320-test-actuation	FW CD4053 control-pin drive polarity inverted at the definition (ctl_high drives the pin HIGH not LOW); bypass control pin settles wrong (BYPASS 0x2 not 0x0), RA0 unaffected so equiv/gpsim-RA0 miss it"
-"src/bypass_mcu_pic10f320.c	s@(0U == (PORTA & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (PORTA \& (uint8_t)(1U << FOOTSW_PIN)))@	pic320-test-equiv	FW footswitch read polarity inverted (toggles on release, not press)"
-"src/bypass_mcu_pic10f320.c	s@hw_relay_set_pin_set_high(); // pulse set coil@hw_relay_reset_pin_set_high(); // MUTANT@	PIC320_VARIANT=tq2_l2_5v_relay pic320-test-actuation	FW relay ENGAGE pulses the RESET coil instead of SET (relay latches backwards; settles to same LATA, so equiv/gpsim miss it)"
-"src/bypass_mcu_pic10f320.c	s@hw_relay_reset_pin_set_high(); // pulse reset coil@hw_relay_set_pin_set_high(); // MUTANT@	PIC320_VARIANT=tq2_l2_5v_relay pic320-test-actuation	FW relay BYPASS pulses the SET coil instead of RESET (relay latches backwards)"
-"src/bypass_mcu_pic10f320.c	s@#  define CD4053_MUTE_DELAY_MS (5U)@#  define CD4053_MUTE_DELAY_MS (0U)@	PIC320_VARIANT=cd4053_with_mute pic320-test-actuation	FW cd4053_with_mute pre-switch mute window defeated (5->0 ms): audible click on every switch"
-"src/bypass_mcu_pic10f320.c	s@#  define CD4053_CTL1     (1U) // RA1@#  define CD4053_CTL1     (2U) // MUTANT@;s@#  define CD4053_CTL2     (2U) // RA2@#  define CD4053_CTL2     (1U) // MUTANT@	PIC320_VARIANT=cd4053_with_mute pic320-test-actuation	FW cd4053_with_mute CTL1/CTL2 pins swapped (mute applied to wrong control; mid-mute LATA pattern wrong, settles to same LATA so equiv/gpsim miss it)"
-"src/bypass_mcu_pic10f320.c	s@    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@    hw_x4053_ctl1_low(); // MUTANT: reassert ENGAGED at startup\\n    hw_x4053_ctl2_low();\\n\\n    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@	PIC320_VARIANT=cd4053_with_mute pic320-test-actuation	FW cd4053_with_mute startup reasserts ENGAGED before MUTE, traversing INVALID/ENGAGED routing instead of remaining continuously in BYPASS"
+PIC10F320_HOST_MUTATIONS=(
+"src/bypass_mcu_pic10f320.c	s@++ctx_.debounce_counter@--ctx_.debounce_counter@	pic10f320-test-equiv	FW integrator: increment-on-press becomes decrement (never reaches threshold)"
+"src/bypass_mcu_pic10f320.c	s@ctx_.debounce_counter >= PRESSED_THRESH@ctx_.debounce_counter > PRESSED_THRESH@	pic10f320-test-equiv	FW press threshold off-by-one (>= becomes >): 1-tick latency divergence"
+"src/bypass_mcu_pic10f320.c	s@if (0U == ctx_.debounce_counter)@if (0U != ctx_.debounce_counter)@	pic10f320-test-equiv	FW release re-arm condition inverted (lock-out never clears / clears wrongly)"
+"src/bypass_mcu_pic10f320.c	s@#define PRESSED_THRESH  (8U)@#define PRESSED_THRESH  (4U)@	pic10f320-test-equiv	FW press threshold shortened 8->4 (diverges from the model's 8)"
+"src/bypass_mcu_pic10f320.c	s@#define RELEASE_THRESH  (25U)@#define RELEASE_THRESH  (15U)@	pic10f320-test-equiv	FW release lock-out shortened 25->15 (diverges from the model)"
+"src/bypass_mcu_pic10f320.c	s@ctx_.program_state = RELEASE_DEBOUNCE_WAIT;@ctx_.program_state = PRESS_DEBOUNCE_WAIT;@	pic10f320-test-equiv	FW power-on-pressed: wrong program_state (held switch could spuriously engage)"
+"src/bypass_mcu_pic10f320.c	s@(uint8_t)(0x0FU ^ BYPASS_OUTPUT_DDR_MASK)@(uint8_t)(TRISA \& 0x0FU)@	pic10f320-test-fault-variants	FW output-pin SEU check neutered (exact-TRISA compare made a tautology; no direction fault ever detected)"
+"src/bypass_mcu_pic10f320.c	s@(0U == wpu_global)@1U@	pic10f320-test-fault-variants	FW global footswitch pull-up SEU check neutered (nWPUEN corruption never detected)"
+"src/bypass_mcu_pic10f320.c	s@(ctx_.effect_state > ENGAGED)@(ctx_.effect_state > 99U)@	pic10f320-test-fault-variants	FW effect_state range guard defeated (corrupt effect_state never forces reset)"
+"src/bypass_mcu_pic10f320.c	s@(ctx_.debounce_counter > RELEASE_THRESH)@(ctx_.debounce_counter > 255U)@	pic10f320-test-fault-variants	FW counter range guard defeated (corrupt debounce_counter never forces reset)"
+"src/bypass_mcu_pic10f320.c	s@WPUA = (uint8_t)(1U << FOOTSW_PIN);@WPUA |= (uint8_t)(1U << FOOTSW_PIN);@	pic10f320-test-fault-variants	FW pull-up init regressed to read-modify-write: WPUA reset value 0x0F preserved instead of exact RA3-only 0x08"
+"src/bypass_mcu_pic10f320.c	s@WPUA \& 0x0FU@WPUA \& (1U << FOOTSW_PIN)@	pic10f320-test-fault-variants	FW pull-up integrity guard masks away unexpected RA0..RA2 WPUA latches"
+"src/bypass_mcu_pic10f320.c	s@(HFINTOSC_2MHZ_IRCF == OSCCONbits.IRCF)@1U@	pic10f320-test-fault-variants	FW clock-select (OSCCON IRCF) SEU guard defeated (corrupt clock never forces reset)"
+"src/bypass_mcu_pic10f320.c	s@(WDT_WDTPS_256MS == WDTCONbits.WDTPS)@1U@	pic10f320-test-fault-variants	FW watchdog-period (WDTCON WDTPS) SEU guard defeated (corrupt WDT period never forces reset)"
+"src/bypass_mcu_pic10f320.c	s@(TMR2_PR2_PERIOD == PR2)@1U@	pic10f320-test-fault-variants	FW tick-period (PR2) SEU guard defeated (corrupt 1 ms reload never forces reset)"
+"src/bypass_mcu_pic10f320.c	s@(TMR2_T2CON_CONFIG == T2CON)@1U@	pic10f320-test-fault-variants	FW tick-control (T2CON) SEU guard defeated (corrupt prescale/enable never forces reset)"
+"src/bypass_mcu_pic10f320.c	s@(0U == (uint8_t)(ANSELA & BYPASS_OUTPUT_DDR_MASK))@1U@	pic10f320-test-fault-variants	FW digital-port (ANSELA) SEU guard defeated (output pin re-selected analog never forces reset)"
+"src/bypass_mcu_pic10f320.c	s@ANSELA & BYPASS_OUTPUT_DDR_MASK@ANSELA \& 0x01U@	pic10f320-test-fault-variants	FW ANSELA sanity mask narrowed to RA0 only (RA1/RA2 analog re-selection undetected)"
+"src/bypass_mcu_pic10f320.c	s@LATA |=  (uint8_t)(1U << LED_PIN)@LATA \&= (uint8_t)~(1U << LED_PIN)@	pic10f320-test-equiv	FW set_engaged LED output inverted (RA0 stays dark when ENGAGED)"
+"src/bypass_mcu_pic10f320.c	s@hw_x4053_ctl_low();@hw_x4053_ctl_high();@	PIC10F320_VARIANT=cd4053_simple pic10f320-test-actuation	FW CD4053 control routed the wrong way (set_engaged drives the bypass level); settled ENGAGED LATA 0x1 not 0x3 (RA0 unaffected, so equiv/gpsim-RA0 miss it; killed by the actuation settled-LATA check)"
+"src/bypass_mcu_pic10f320.c	s@static void hw_x4053_ctl_high(void) { LATA \&= (uint8_t)~(1U << CD4053_PIN); }@static void hw_x4053_ctl_high(void) { LATA |=  (uint8_t)(1U << CD4053_PIN); }@	PIC10F320_VARIANT=cd4053_simple pic10f320-test-actuation	FW CD4053 control-pin drive polarity inverted at the definition (ctl_high drives the pin HIGH not LOW); bypass control pin settles wrong (BYPASS 0x2 not 0x0), RA0 unaffected so equiv/gpsim-RA0 miss it"
+"src/bypass_mcu_pic10f320.c	s@(0U == (PORTA & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (PORTA \& (uint8_t)(1U << FOOTSW_PIN)))@	pic10f320-test-equiv	FW footswitch read polarity inverted (toggles on release, not press)"
+"src/bypass_mcu_pic10f320.c	s@hw_relay_set_pin_set_high(); // pulse set coil@hw_relay_reset_pin_set_high(); // MUTANT@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-actuation	FW relay ENGAGE pulses the RESET coil instead of SET (relay latches backwards; settles to same LATA, so equiv/gpsim miss it)"
+"src/bypass_mcu_pic10f320.c	s@hw_relay_reset_pin_set_high(); // pulse reset coil@hw_relay_set_pin_set_high(); // MUTANT@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-actuation	FW relay BYPASS pulses the SET coil instead of RESET (relay latches backwards)"
+"src/bypass_mcu_pic10f320.c	s@#  define CD4053_MUTE_DELAY_MS (5U)@#  define CD4053_MUTE_DELAY_MS (0U)@	PIC10F320_VARIANT=cd4053_with_mute pic10f320-test-actuation	FW cd4053_with_mute pre-switch mute window defeated (5->0 ms): audible click on every switch"
+"src/bypass_mcu_pic10f320.c	s@#  define CD4053_CTL1     (1U) // RA1@#  define CD4053_CTL1     (2U) // MUTANT@;s@#  define CD4053_CTL2     (2U) // RA2@#  define CD4053_CTL2     (1U) // MUTANT@	PIC10F320_VARIANT=cd4053_with_mute pic10f320-test-actuation	FW cd4053_with_mute CTL1/CTL2 pins swapped (mute applied to wrong control; mid-mute LATA pattern wrong, settles to same LATA so equiv/gpsim miss it)"
+"src/bypass_mcu_pic10f320.c	s@    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@    hw_x4053_ctl1_low(); // MUTANT: reassert ENGAGED at startup\\n    hw_x4053_ctl2_low();\\n\\n    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@	PIC10F320_VARIANT=cd4053_with_mute pic10f320-test-actuation	FW cd4053_with_mute startup reasserts ENGAGED before MUTE, traversing INVALID/ENGAGED routing instead of remaining continuously in BYPASS"
 )
 
-PIC320_TOOL_MUTATIONS=(
-"src/bypass_mcu_pic10f320.c	s@PIR1bits.TMR2IF = 0;@@	pic320-test-gpsim	FW TMR2IF tick-flag clear removed: 1 ms poll never re-blocks, loop free-runs, debounce window collapses (host forces TMR2IF=1, so only gpsim's PRESS1_EARLY catches it)"
-"src/bypass_mcu_pic10f320.c	s@WPUA = (uint8_t)(1U << FOOTSW_PIN);@WPUA |= (uint8_t)(1U << FOOTSW_PIN);@	PIC320_VARIANT=cd4053_simple PIC320_TARGET_VARIANT=cd4053_simple pic320-test-target	TARGET pull-up init regressed to read-modify-write; exact startup WPUA check catches retained RA0..RA2 latches"
-"src/bypass_mcu_pic10f320.c	s@wpua_latches == (uint8_t)(1U << FOOTSW_PIN)@0U != (wpua_latches \& (uint8_t)(1U << FOOTSW_PIN))@	PIC320_VARIANT=cd4053_simple PIC320_TARGET_VARIANT=cd4053_simple pic320-test-target	TARGET exact WPUA guard weakened to RA3-present only; target fault injections catch extra output-pin latches"
-"src/bypass_mcu_pic10f320.c	s@static uint8_t hw_output_pins_intact(void) {@static uint8_t hw_output_pins_intact(void) { return 1U;@	PIC320_VARIANT=cd4053_simple PIC320_TARGET_VARIANT=cd4053_simple pic320-test-target	TARGET output-direction guard disabled; simulated-core TRISA injections no longer recover"
-"src/bypass_mcu_pic10f320.c	s@ANSELA & BYPASS_OUTPUT_DDR_MASK@ANSELA \& 0x01U@	PIC320_VARIANT=cd4053_simple PIC320_TARGET_VARIANT=cd4053_simple pic320-test-target	TARGET ANSELA sanity mask narrowed to RA0; RA1/RA2 analog re-selection goes undetected"
-"src/bypass_mcu_pic10f320.c	s@    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@    hw_x4053_ctl1_low(); // MUTANT: reassert ENGAGED at startup\n    hw_x4053_ctl2_low();\n\n    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@	PIC320_VARIANT=cd4053_with_mute PIC320_TARGET_VARIANT=cd4053_with_mute pic320-test-target	TARGET mute startup reasserts ENGAGED before MUTE; physical startup transition trace catches it"
-"src/bypass_mcu_pic10f320.c	s@#  define CD4053_MUTE_DELAY_MS (5U)@#  define CD4053_MUTE_DELAY_MS (1U)@	PIC320_VARIANT=cd4053_with_mute PIC320_TARGET_VARIANT=cd4053_with_mute pic320-test-target	TARGET mute window shortened below 5ms; cycle-exact target I/O timing catches it"
-"src/bypass_mcu_pic10f320.c	s@#  define TQ2_L2_5V_PULSE_MS (12U)@#  define TQ2_L2_5V_PULSE_MS (1U)@	PIC320_VARIANT=tq2_l2_5v_relay PIC320_TARGET_VARIANT=tq2_l2_5v_relay pic320-test-target	TARGET relay pulse shortened below the 4ms datasheet minimum; cycle-exact target I/O timing catches it"
-"src/bypass_mcu_pic10f320.c	/void main(void)/,\$s@CLRWDT();@(void)0; /* MUTANT: no main-loop WDT pet */@	PIC320_VARIANT=cd4053_simple PIC320_SOAK_DURATION_MS=$PIC_SOAK_MUT_MS PIC320_SOAK_LIVENESS_INTERVAL_MS=$PIC_SOAK_MUT_MS pic320-test-soak	SOAK main-loop WDT pet removed; reset notifier catches the un-pet watchdog within the short mutation window"
+PIC10F320_TOOL_MUTATIONS=(
+"src/bypass_mcu_pic10f320.c	s@PIR1bits.TMR2IF = 0;@@	pic10f320-test-gpsim	FW TMR2IF tick-flag clear removed: 1 ms poll never re-blocks, loop free-runs, debounce window collapses (host forces TMR2IF=1, so only gpsim's PRESS1_EARLY catches it)"
+"src/bypass_mcu_pic10f320.c	s@WPUA = (uint8_t)(1U << FOOTSW_PIN);@WPUA |= (uint8_t)(1U << FOOTSW_PIN);@	PIC10F320_VARIANT=cd4053_simple PIC10F320_TARGET_VARIANT=cd4053_simple pic10f320-test-target	TARGET pull-up init regressed to read-modify-write; exact startup WPUA check catches retained RA0..RA2 latches"
+"src/bypass_mcu_pic10f320.c	s@wpua_latches == (uint8_t)(1U << FOOTSW_PIN)@0U != (wpua_latches \& (uint8_t)(1U << FOOTSW_PIN))@	PIC10F320_VARIANT=cd4053_simple PIC10F320_TARGET_VARIANT=cd4053_simple pic10f320-test-target	TARGET exact WPUA guard weakened to RA3-present only; target fault injections catch extra output-pin latches"
+"src/bypass_mcu_pic10f320.c	s@static uint8_t hw_output_pins_intact(void) {@static uint8_t hw_output_pins_intact(void) { return 1U;@	PIC10F320_VARIANT=cd4053_simple PIC10F320_TARGET_VARIANT=cd4053_simple pic10f320-test-target	TARGET output-direction guard disabled; simulated-core TRISA injections no longer recover"
+"src/bypass_mcu_pic10f320.c	s@ANSELA & BYPASS_OUTPUT_DDR_MASK@ANSELA \& 0x01U@	PIC10F320_VARIANT=cd4053_simple PIC10F320_TARGET_VARIANT=cd4053_simple pic10f320-test-target	TARGET ANSELA sanity mask narrowed to RA0; RA1/RA2 analog re-selection goes undetected"
+"src/bypass_mcu_pic10f320.c	s@    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@    hw_x4053_ctl1_low(); // MUTANT: reassert ENGAGED at startup\n    hw_x4053_ctl2_low();\n\n    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@	PIC10F320_VARIANT=cd4053_with_mute PIC10F320_TARGET_VARIANT=cd4053_with_mute pic10f320-test-target	TARGET mute startup reasserts ENGAGED before MUTE; physical startup transition trace catches it"
+"src/bypass_mcu_pic10f320.c	s@#  define CD4053_MUTE_DELAY_MS (5U)@#  define CD4053_MUTE_DELAY_MS (1U)@	PIC10F320_VARIANT=cd4053_with_mute PIC10F320_TARGET_VARIANT=cd4053_with_mute pic10f320-test-target	TARGET mute window shortened below 5ms; cycle-exact target I/O timing catches it"
+"src/bypass_mcu_pic10f320.c	s@#  define TQ2_L2_5V_PULSE_MS (12U)@#  define TQ2_L2_5V_PULSE_MS (1U)@	PIC10F320_VARIANT=tq2_l2_5v_relay PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay pic10f320-test-target	TARGET relay pulse shortened below the 4ms datasheet minimum; cycle-exact target I/O timing catches it"
+"src/bypass_mcu_pic10f320.c	/void main(void)/,\$s@CLRWDT();@(void)0; /* MUTANT: no main-loop WDT pet */@	PIC10F320_VARIANT=cd4053_simple PIC10F320_SOAK_DURATION_MS=$PIC_SOAK_MUT_MS PIC10F320_SOAK_LIVENESS_INTERVAL_MS=$PIC_SOAK_MUT_MS pic10f320-test-soak	SOAK main-loop WDT pet removed; reset notifier catches the un-pet watchdog within the short mutation window"
 )
 
 PIC_SOAK_MUTATIONS=(
@@ -841,15 +842,15 @@ validate_mutation_inventory PIC_TARGET_MUTATIONS PIC-target \
     "$MUTATION_EXPECTED_PIC_TARGET" 4 || exit 2
 validate_mutation_inventory PIC_SOAK_MUTATIONS PIC-soak \
     "$MUTATION_EXPECTED_PIC_SOAK" 3 || exit 2
-validate_mutation_inventory PIC320_HOST_MUTATIONS PIC10F320-host \
+validate_mutation_inventory PIC10F320_HOST_MUTATIONS PIC10F320-host \
     "$MUTATION_EXPECTED_PIC320_HOST" 4 || exit 2
-validate_mutation_inventory PIC320_TOOL_MUTATIONS PIC10F320-tool \
+validate_mutation_inventory PIC10F320_TOOL_MUTATIONS PIC10F320-tool \
     "$MUTATION_EXPECTED_PIC320_TOOL" 4 || exit 2
 validate_mutation_inventory XT_MUTATIONS ATtiny202 "$MUTATION_EXPECTED_XT" 4 || exit 2
 inventory_total=$((${#MUTATIONS[@]} + ${#XT_MUTATIONS[@]} \
     + ${#PIC_GPSIM_MUTATIONS[@]} \
     + ${#PIC_TARGET_MUTATIONS[@]} + ${#PIC_SOAK_MUTATIONS[@]} \
-    + ${#PIC320_HOST_MUTATIONS[@]} + ${#PIC320_TOOL_MUTATIONS[@]}))
+    + ${#PIC10F320_HOST_MUTATIONS[@]} + ${#PIC10F320_TOOL_MUTATIONS[@]}))
 mutation_require_count total "$MUTATION_EXPECTED_TOTAL" "$inventory_total" || exit 2
 
 collect_baseline_targets() {
@@ -870,17 +871,17 @@ collect_baseline_targets() {
 }
 
 CORE_BASE_TARGETS=()
-PIC320_HOST_BASE_TARGETS=()
-PIC320_BASE_TARGETS=()
+PIC10F320_HOST_BASE_TARGETS=()
+PIC10F320_BASE_TARGETS=()
 collect_baseline_targets MUTATIONS core/AVR 4 2 CORE_BASE_TARGETS || exit 2
-collect_baseline_targets PIC320_HOST_MUTATIONS PIC10F320-host 4 2 \
-    PIC320_HOST_BASE_TARGETS || exit 2
-collect_baseline_targets PIC320_TOOL_MUTATIONS PIC10F320-tool 4 2 \
-    PIC320_BASE_TARGETS || exit 2
+collect_baseline_targets PIC10F320_HOST_MUTATIONS PIC10F320-host 4 2 \
+    PIC10F320_HOST_BASE_TARGETS || exit 2
+collect_baseline_targets PIC10F320_TOOL_MUTATIONS PIC10F320-tool 4 2 \
+    PIC10F320_BASE_TARGETS || exit 2
 
 HOST_BASE_TARGETS=()
 declare -A host_baseline_seen=()
-for target in "${CORE_BASE_TARGETS[@]}" "${PIC320_HOST_BASE_TARGETS[@]}"; do
+for target in "${CORE_BASE_TARGETS[@]}" "${PIC10F320_HOST_BASE_TARGETS[@]}"; do
     if [[ -z ${host_baseline_seen["$target"]+x} ]]; then
         host_baseline_seen["$target"]=1
         HOST_BASE_TARGETS+=("$target")
@@ -929,9 +930,9 @@ if [ "$SANDBOX_SELFTEST_DONE" -eq 1 ]; then
         echo "ERROR: mutation accounting split a plain Make target incorrectly" >&2; exit 1
     }
     split_mutation_make_command selftest \
-        'PIC320_VARIANT=cd4053_simple pic320-test-actuation' || exit 1
-    [ "${MUTATION_MAKE_ARGS[0]}" = 'PIC320_VARIANT=cd4053_simple' ] \
-        && [ "${MUTATION_MAKE_ARGS[1]}" = 'pic320-test-actuation' ] || {
+        'PIC10F320_VARIANT=cd4053_simple pic10f320-test-actuation' || exit 1
+    [ "${MUTATION_MAKE_ARGS[0]}" = 'PIC10F320_VARIANT=cd4053_simple' ] \
+        && [ "${MUTATION_MAKE_ARGS[1]}" = 'pic10f320-test-actuation' ] || {
         echo "ERROR: mutation accounting split an assignment target incorrectly" >&2; exit 1
     }
     fake_make="$RESULT_DIR/fake-make"
@@ -944,12 +945,12 @@ EOF
     real_mutation_make=$MUTATION_MAKE
     MUTATION_MAKE=$fake_make MUTATION_MAKE_LOG=$make_log \
         run_mutation_make_command /fixture \
-            'PIC320_VARIANT=cd4053_simple pic320-test-actuation' \
+            'PIC10F320_VARIANT=cd4053_simple pic10f320-test-actuation' \
             GPSIM=fake || exit 1
     MUTATION_MAKE=$real_mutation_make
     mapfile -t make_argv < "$make_log"
     expected_make_argv=(-C /fixture GPSIM=fake \
-        PIC320_VARIANT=cd4053_simple pic320-test-actuation)
+        PIC10F320_VARIANT=cd4053_simple pic10f320-test-actuation)
     [ "${make_argv[*]}" = "${expected_make_argv[*]}" ] || {
         echo "ERROR: mutation Make runner forwarded incorrect argv" >&2; exit 1
     }
@@ -999,7 +1000,7 @@ fi
 # Sanity: the unmutated tree must PASS every target we rely on, otherwise a
 # "killed" result is meaningless (it would just mean the baseline is broken).
 # Baseline-check EVERY distinct kill target the MUTATIONS list uses -- not just
-# test-sim -- so a mutant killed by e.g. test-model-check can never be a false
+# test-sim-attiny13a -- so a mutant killed by e.g. test-model-check can never be a false
 # kill against a baseline that was never verified. (The PIC-shell mutants have
 # their own baseline probe below, since their tools may be absent.)
 echo "=== mutation testing: baseline sanity check ==="
@@ -1012,7 +1013,7 @@ if ! copy_tree "$BASE_DIR"; then
     rm -rf "$BASE_DIR"
     exit 2
 fi
-if ! validate_pic320_sandbox "$BASE_DIR"; then
+if ! validate_pic10f320_sandbox "$BASE_DIR"; then
     rm -rf "$BASE_DIR"
     exit 2
 fi
@@ -1040,8 +1041,8 @@ done
 
 # PIC10F320 host-lane mutants: only a C compiler is required, so these ride with
 # the core batch and are never skipped.
-p320_host_cat="${#PIC320_HOST_MUTATIONS[@]} PIC10F320 host mutants (equiv/actuation/fault)"
-for entry in "${PIC320_HOST_MUTATIONS[@]}"; do
+p320_host_cat="${#PIC10F320_HOST_MUTATIONS[@]} PIC10F320 host mutants (equiv/actuation/fault)"
+for entry in "${PIC10F320_HOST_MUTATIONS[@]}"; do
     mutation_parse_record "PIC10F320 host collection" 4 "$entry" || exit 2
     file=${MUTATION_RECORD_FIELDS[0]}; sed_expr=${MUTATION_RECORD_FIELDS[1]}
     target=${MUTATION_RECORD_FIELDS[2]}; desc=${MUTATION_RECORD_FIELDS[3]}
@@ -1050,8 +1051,8 @@ done
 
 # --- PIC toolchain probe ------------------------------------------------------
 # Enable the PIC-shell mutants only when the PIC tools are present AND the
-# UNMUTATED tree genuinely PASSES (a clean skip is NOT a pass). pic-test-gpsim /
-# pic-test-soak both exit 0 when their tools are absent, so without this gate an
+# UNMUTATED tree genuinely PASSES (a clean skip is NOT a pass). pic10f322-test-gpsim /
+# pic10f322-test-soak both exit 0 when their tools are absent, so without this gate an
 # unguarded PIC mutant would be a false "survivor" on any box lacking XC8/gpsim.
 PIC_GPSIM_OK=0
 PIC_SOAK_OK=0
@@ -1064,7 +1065,7 @@ PIC_TARGET_OK=0
 # reason, so the closing advice can stop recommending a package install.
 PIC_SOAK_WHY="tools absent"
 PIC_TARGET_WHY="tools absent"
-PIC320_TOOL_WHY="tools absent"
+PIC10F320_TOOL_WHY="tools absent"
 MUT_BASELINE_FAILED=0
 echo
 echo "=== PIC toolchain probe (gates the PIC-shell mutants) ==="
@@ -1077,8 +1078,8 @@ if ! copy_tree "$PIC_BASE"; then
     rm -rf "$PIC_BASE"
     exit 2
 fi
-make -C "$PIC_BASE" pic >/dev/null 2>&1
-PIC_BASE_HEX="$PIC_BASE/build_pic/${FW_BASE}_cd4053_${PIC_TAG}.hex"
+make -C "$PIC_BASE" pic10f322 >/dev/null 2>&1
+PIC_BASE_HEX="$PIC_BASE/$PIC10F322_BUILD_DIR/${FW_BASE}-${PIC10F322_TAG}-cd4053_simple.hex"
 if command -v "$GPSIM" >/dev/null 2>&1 && [ -f "$PIC_BASE_HEX" ]; then
     if GPSIM="$GPSIM" "$PROJ_DIR/test/pic/run_gpsim_test.sh" \
             "$PIC_BASE_HEX" 0x3 >/dev/null 2>&1; then
@@ -1087,10 +1088,10 @@ if command -v "$GPSIM" >/dev/null 2>&1 && [ -f "$PIC_BASE_HEX" ]; then
         if command -v c++ >/dev/null 2>&1 \
            && [ -f "$PIC_SOAK_GPSIM_INC/sim_context.h" ] \
            && pkg-config --exists glib-2.0 2>/dev/null; then
-            if make -C "$PIC_BASE" pic-test-soak \
-                    PIC_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" \
-                    PIC_SOAK_LIVENESS_INTERVAL_MS="$PIC_SOAK_MUT_LIVENESS_MS" \
-                    PIC_SOAK_VARIANT=cd4053_simple >/dev/null 2>&1; then
+            if make -C "$PIC_BASE" pic10f322-test-soak \
+                    PIC10F322_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" \
+                    PIC10F322_SOAK_LIVENESS_INTERVAL_MS="$PIC_SOAK_MUT_LIVENESS_MS" \
+                    PIC10F322_SOAK_VARIANT=cd4053_simple >/dev/null 2>&1; then
                 PIC_SOAK_OK=1
                 echo "gpsim-dev + glib + c++ present, soak baseline PASS -> WDT mutant ENABLED"
             else
@@ -1098,7 +1099,7 @@ if command -v "$GPSIM" >/dev/null 2>&1 && [ -f "$PIC_BASE_HEX" ]; then
                 MUT_BASELINE_FAILED=1
                 echo "soak baseline did not pass cleanly -> WDT (soak) mutant SKIPPED"
             fi
-            if make -C "$PIC_BASE" pic-test-target-variants >/dev/null 2>&1; then
+            if make -C "$PIC_BASE" pic10f322-test-target-variants >/dev/null 2>&1; then
                 PIC_TARGET_OK=1
                 echo "target aggregate baseline PASS -> PIC target mutants ENABLED"
             else
@@ -1120,12 +1121,12 @@ rm -rf "$PIC_BASE"
 # --- PIC10F320 toolchain probe -----------------------------------------------
 # Same discipline as the PIC10F322 probe above: the tool-dependent PIC10F320
 # mutants are enabled only when the tools exist AND every DISTINCT kill command
-# passes on the unmutated sandbox. Testing only pic320-test-target-variants does
-# not baseline pic320-test-gpsim or pic320-test-soak; worse, a missing wrapper in
+# passes on the unmutated sandbox. Testing only pic10f320-test-target-variants does
+# not baseline pic10f320-test-gpsim or pic10f320-test-soak; worse, a missing wrapper in
 # either mutant sandbox then produces a nonzero status that is falsely scored as
-# a kill. pic320-test-{gpsim,target,soak} can all skip with status 0, so the outer
+# a kill. pic10f320-test-{gpsim,target,soak} can all skip with status 0, so the outer
 # tool checks and exact per-command baselines are both required.
-PIC320_TOOL_OK=0
+PIC10F320_TOOL_OK=0
 echo
 echo "=== PIC10F320 toolchain probe (gates its tool-dependent mutants) ==="
 if ! P320_BASE="$(mktemp -d)"; then
@@ -1137,19 +1138,19 @@ if ! copy_tree "$P320_BASE"; then
     rm -rf "$P320_BASE"
     exit 2
 fi
-if ! validate_pic320_sandbox "$P320_BASE"; then
+if ! validate_pic10f320_sandbox "$P320_BASE"; then
     rm -rf "$P320_BASE"
     exit 2
 fi
 echo "PIC10F320 mutation sandbox helpers: PASS"
 
-if make -C "$P320_BASE" pic320-variants >/dev/null 2>&1 \
+if make -C "$P320_BASE" pic10f320-variants >/dev/null 2>&1 \
    && command -v "$GPSIM" >/dev/null 2>&1 \
    && command -v c++ >/dev/null 2>&1 \
    && [ -f "$PIC_SOAK_GPSIM_INC/sim_context.h" ] \
    && pkg-config --exists glib-2.0 2>/dev/null; then
     P320_BASELINES_OK=1
-    for target in "${PIC320_BASE_TARGETS[@]}"; do
+    for target in "${PIC10F320_BASE_TARGETS[@]}"; do
         # Intentional word splitting: each field contains optional VAR=value
         # assignments followed by one Make target, validated and tokenized by
         # the same helper used for mutant execution.
@@ -1162,10 +1163,10 @@ if make -C "$P320_BASE" pic320-variants >/dev/null 2>&1 \
         fi
     done
     if [ "$P320_BASELINES_OK" -eq 1 ]; then
-        PIC320_TOOL_OK=1
+        PIC10F320_TOOL_OK=1
         echo "XC8 + gpsim + libgpsim present, all baselines PASS -> PIC10F320 tool mutants ENABLED"
     else
-        PIC320_TOOL_WHY="baseline FAILED"
+        PIC10F320_TOOL_WHY="baseline FAILED"
         MUT_BASELINE_FAILED=1
         echo "a PIC10F320 kill-target baseline failed -> its tool mutants SKIPPED"
     fi
@@ -1223,9 +1224,9 @@ fi
 rm -rf "$XT_BASE"
 
 # Collect the enabled PIC subsets onto the same work list.
-if [ "$PIC320_TOOL_OK" -eq 1 ]; then
-    p320_tool_cat="${#PIC320_TOOL_MUTATIONS[@]} PIC10F320 target mutants (gpsim/libgpsim/soak)"
-    for entry in "${PIC320_TOOL_MUTATIONS[@]}"; do
+if [ "$PIC10F320_TOOL_OK" -eq 1 ]; then
+    p320_tool_cat="${#PIC10F320_TOOL_MUTATIONS[@]} PIC10F320 target mutants (gpsim/libgpsim/soak)"
+    for entry in "${PIC10F320_TOOL_MUTATIONS[@]}"; do
         mutation_parse_record "PIC10F320 tool collection" 4 "$entry" || exit 2
         file=${MUTATION_RECORD_FIELDS[0]}; sed_expr=${MUTATION_RECORD_FIELDS[1]}
         target=${MUTATION_RECORD_FIELDS[2]}; desc=${MUTATION_RECORD_FIELDS[3]}
@@ -1363,11 +1364,11 @@ else
     echo "PIC-shell mutants: SKIPPED (PIC toolchain absent -- not gated on this host)"
     pic_skipped=$((pic_skipped + ${#PIC_GPSIM_MUTATIONS[@]} + ${#PIC_SOAK_MUTATIONS[@]} + ${#PIC_TARGET_MUTATIONS[@]}))
 fi
-if [ "$PIC320_TOOL_OK" -eq 1 ]; then
+if [ "$PIC10F320_TOOL_OK" -eq 1 ]; then
     echo "PIC10F320 mutants: RAN (host lanes + gpsim/libgpsim/soak)"
 else
-    echo "PIC10F320 mutants: host lanes RAN; target/soak SKIPPED ($PIC320_TOOL_WHY)"
-    pic_skipped=$((pic_skipped + ${#PIC320_TOOL_MUTATIONS[@]}))
+    echo "PIC10F320 mutants: host lanes RAN; target/soak SKIPPED ($PIC10F320_TOOL_WHY)"
+    pic_skipped=$((pic_skipped + ${#PIC10F320_TOOL_MUTATIONS[@]}))
 fi
 # The ATtiny202 lane is all-or-nothing (one probe, one toolchain) and is counted
 # separately from the PIC total so the summary keeps saying which substrate went

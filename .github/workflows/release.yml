@@ -21,9 +21,9 @@ name: Release
 #      mean anything: three sets derived by globbing the same directories agree
 #      perfectly on a release that is missing an entire MCU (merge plan §10);
 #   4. re-runs `make test-long` + `make attiny202-test` +
-#      `make attiny202-test-target` + `make pic-test` +
-#      `make pic-test-target-variants` + `make pic320-test` +
-#      `make pic320-test-target-variants` on the clean runner -- the same gates
+#      `make attiny202-test-target` + `make pic10f322-test` +
+#      `make pic10f322-test-target-variants` + `make pic10f320-test` +
+#      `make pic10f320-test-target-variants` on the clean runner -- the same gates
 #      the MANIFEST claims;
 #   5. rechecks the protected remote tag's object, pinned-key signature and
 #      target, then publishes a GitHub Release with the images, SHA256SUMS.asc,
@@ -119,8 +119,8 @@ jobs:
             clang clang-tidy cppcheck cbmc python3 unzip wget
 
       # --- toolchain: XC8 + PIC10-12Fxxx DFP (Microchip downloads) ----------
-      # gpsim CLI drives `make pic-test`; gpsim-dev + libglib2.0-dev + g++ build
-      # the libgpsim harnesses behind `make pic-test-target-variants`.
+      # gpsim CLI drives `make pic10f322-test`; gpsim-dev + libglib2.0-dev + g++ build
+      # the libgpsim harnesses behind `make pic10f322-test-target-variants`.
       - name: Install gpsim + libgpsim build deps (apt)
         run: sudo apt-get install -y gpsim gpsim-dev libglib2.0-dev g++ pkg-config
 
@@ -220,16 +220,16 @@ jobs:
       - name: Rebuild all release images from the tagged source
         run: |
           make clean
-          make all13 all85 all45
+          make attiny13a attiny85 attiny45
           # STRICT_TOOLS=1: an absent ATtiny_DFP must fail the reproducibility
           # gate, never skip it into an image set that is short three files.
           make attiny202 STRICT_TOOLS=1
-          make pic PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
-          # pic320-variants, not pic: it builds all three output stages and
+          make pic10f322 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
+          # pic10f320-variants, not pic10f320: it builds all three output stages and
           # removes the whole image set if any one of them fails, so a partial
           # matrix can never reach the reproducibility gate.
-          make pic320-variants PIC320_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC320_DFP="${XC8_DFP_ROOT}/xc8"
+          make pic10f320-variants PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
 
       # --- THE reproducibility gate ----------------------------------------
       - name: Verify committed images reproduce bit-for-bit
@@ -276,15 +276,15 @@ jobs:
       - name: Re-run make attiny202-test-target (yasimavr, every variant)
         run: make attiny202-test-target STRICT_TOOLS=1
 
-      - name: Re-run make pic-test
-        run: make pic-test STRICT_TOOLS=1 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
+      - name: Re-run make pic10f322-test
+        run: make pic10f322-test STRICT_TOOLS=1 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
 
       # The MANIFEST's Validation line claims the fail-closed PIC target aggregate;
       # the public clean-runner attestation must actually re-run it rather than
       # lean on committed local evidence. The aggregate fails on any silent skip.
-      - name: Re-run make pic-test-target-variants (libgpsim, every variant)
+      - name: Re-run make pic10f322-test-target-variants (libgpsim, every variant)
         run: |
-          make pic-test-target-variants STRICT_TOOLS=1 \
+          make pic10f322-test-target-variants STRICT_TOOLS=1 \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC_DFP="${XC8_DFP_ROOT}/xc8"
 
@@ -292,17 +292,17 @@ jobs:
       # so its gates belong in the public attestation on identical terms -- and
       # the constrained target is the one whose evidence a reader is most likely
       # to want to see re-run on a clean machine.
-      - name: Re-run make pic320-test
+      - name: Re-run make pic10f320-test
         run: |
-          make pic320-test STRICT_TOOLS=1 \
-            PIC320_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC320_DFP="${XC8_DFP_ROOT}/xc8"
+          make pic10f320-test STRICT_TOOLS=1 \
+            PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
 
-      - name: Re-run make pic320-test-target-variants (libgpsim, every variant)
+      - name: Re-run make pic10f320-test-target-variants (libgpsim, every variant)
         run: |
-          make pic320-test-target-variants STRICT_TOOLS=1 \
-            PIC320_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC320_DFP="${XC8_DFP_ROOT}/xc8"
+          make pic10f320-test-target-variants STRICT_TOOLS=1 \
+            PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
 
       # --- publish ----------------------------------------------------------
       - name: Publish GitHub Release

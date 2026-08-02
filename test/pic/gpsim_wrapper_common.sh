@@ -17,7 +17,7 @@
 
 GPSIM="${GPSIM:-gpsim}"
 GPSIM_TIMEOUT_SECONDS="${GPSIM_TIMEOUT_SECONDS:-60}"
-PROC="${PIC_GPSIM_PROC:-p10f322}"
+PROC="${PIC10F322_GPSIM_PROC:-p10f322}"
 
 fails=0
 note() { printf '  %-14s %s\n' "$1" "$2"; }

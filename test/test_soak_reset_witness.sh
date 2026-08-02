@@ -28,15 +28,15 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 HOSTCC=${HOSTCC:-cc}
-: "${SOAK_WITNESS_CFLAGS:?compiler flags for the soak driver}"
-: "${SOAK_WITNESS_LIBS:?simulator libraries for the soak driver}"
-: "${SOAK_WITNESS_MACRO:?output-variant selector macro}"
-: "${SOAK_WITNESS_FW:?path to the firmware ELF under soak}"
-: "${SOAK_WITNESS_MCU:?simavr MCU name}"
-: "${SOAK_WITNESS_F_CPU:?MCU clock in Hz}"
-: "${SOAK_WITNESS_DURATION_MS:?soak duration in ms}"
-: "${SOAK_WITNESS_LIVENESS_MS:?liveness interval in ms}"
-: "${SOAK_WITNESS_KILL_TIMER_MS:?timer-kill offset in ms}"
+: "${AVR_SOAK_WITNESS_CFLAGS:?compiler flags for the soak driver}"
+: "${AVR_SOAK_WITNESS_LIBS:?simulator libraries for the soak driver}"
+: "${AVR_SOAK_WITNESS_MACRO:?output-variant selector macro}"
+: "${AVR_SOAK_WITNESS_FW:?path to the firmware ELF under soak}"
+: "${AVR_SOAK_WITNESS_MCU:?simavr MCU name}"
+: "${AVR_SOAK_WITNESS_F_CPU:?MCU clock in Hz}"
+: "${AVR_SOAK_WITNESS_DURATION_MS:?soak duration in ms}"
+: "${AVR_SOAK_WITNESS_LIVENESS_MS:?liveness interval in ms}"
+: "${AVR_SOAK_WITNESS_KILL_TIMER_MS:?timer-kill offset in ms}"
 
 checks=0
 work=$(mktemp -d "${TMPDIR:-/tmp}/soak-reset-witness.XXXXXX")
@@ -47,11 +47,11 @@ fail() {
 	exit 1
 }
 
-[ -f "$ROOT/$SOAK_WITNESS_FW" ] \
-	|| fail "firmware image not built: $SOAK_WITNESS_FW"
+[ -f "$ROOT/$AVR_SOAK_WITNESS_FW" ] \
+	|| fail "firmware image not built: $AVR_SOAK_WITNESS_FW"
 
 # The fixture must never be reachable from a real soak. Every soak binary the
-# project ships is compiled by SOAK_COMPILE, so a leaked define could only come
+# project ships is compiled by AVR_SOAK_COMPILE, so a leaked define could only come
 # from the Makefile -- assert that rather than trusting the header's default.
 if grep -q -- '-DSOAK_SELFTEST' "$ROOT/Makefile"; then
 	fail "a Makefile recipe defines the soak self-test hook"
@@ -64,18 +64,18 @@ build_soak() {
 	shift
 	local -a compiler cflags libs
 	read -r -a compiler <<<"$HOSTCC"
-	read -r -a cflags <<<"$SOAK_WITNESS_CFLAGS"
-	read -r -a libs <<<"$SOAK_WITNESS_LIBS"
+	read -r -a cflags <<<"$AVR_SOAK_WITNESS_CFLAGS"
+	read -r -a libs <<<"$AVR_SOAK_WITNESS_LIBS"
 	[ "${#compiler[@]}" -gt 0 ] || fail "empty compiler command"
 	(cd "$ROOT" && "${compiler[@]}" "${cflags[@]}" \
-		"-D$SOAK_WITNESS_MACRO" -Itest \
-		"-DFW_PATH=\"$SOAK_WITNESS_FW\"" \
-		"-DMCU_NAME=\"$SOAK_WITNESS_MCU\"" \
-		"-DF_CPU_HZ=$SOAK_WITNESS_F_CPU" \
+		"-D$AVR_SOAK_WITNESS_MACRO" -Itest \
+		"-DFW_PATH=\"$AVR_SOAK_WITNESS_FW\"" \
+		"-DMCU_NAME=\"$AVR_SOAK_WITNESS_MCU\"" \
+		"-DF_CPU_HZ=$AVR_SOAK_WITNESS_F_CPU" \
 		-DTARGET_TINYX5 \
-		"-DSOAK_DURATION_MS=$SOAK_WITNESS_DURATION_MS" \
-		"-DSOAK_LIVENESS_INTERVAL_MS=$SOAK_WITNESS_LIVENESS_MS" \
-		"-DSOAK_PROGRESS_INTERVAL_MS=$SOAK_WITNESS_DURATION_MS" \
+		"-DSOAK_DURATION_MS=$AVR_SOAK_WITNESS_DURATION_MS" \
+		"-DSOAK_LIVENESS_INTERVAL_MS=$AVR_SOAK_WITNESS_LIVENESS_MS" \
+		"-DSOAK_PROGRESS_INTERVAL_MS=$AVR_SOAK_WITNESS_DURATION_MS" \
 		'-DSOAK_COMBINATION_NAME="reset-witness"' \
 		"$@" \
 		test/avr/test_soak.c -o "$out" "${libs[@]}") \
@@ -98,7 +98,7 @@ result_field() {
 	[ -n "$RESULT_FIELD" ] || fail "SOAK_RESULT in $log has no $field field"
 }
 
-expected_checks=$((SOAK_WITNESS_DURATION_MS / SOAK_WITNESS_LIVENESS_MS))
+expected_checks=$((AVR_SOAK_WITNESS_DURATION_MS / AVR_SOAK_WITNESS_LIVENESS_MS))
 
 # --- control: the soak exactly as released ----------------------------------
 build_soak "$work/soak_control"
@@ -130,7 +130,7 @@ checks=$((checks + 1))
 
 # --- injected: same image, timer interrupt disabled mid-run -----------------
 build_soak "$work/soak_injected" \
-	"-DSOAK_SELFTEST_KILL_TIMER_MS=$SOAK_WITNESS_KILL_TIMER_MS"
+	"-DSOAK_SELFTEST_KILL_TIMER_MS=$AVR_SOAK_WITNESS_KILL_TIMER_MS"
 checks=$((checks + 1))
 injected_status=0
 "$work/soak_injected" > "$work/injected.log" 2>&1 || injected_status=$?
@@ -159,7 +159,7 @@ checks=$((checks + 1))
 grep -q '^SOAK FAIL .*unexpected device reset' "$work/injected.log" \
 	|| fail "un-pet soak did not log the reset it counted"
 checks=$((checks + 1))
-grep -q "^SOAK FAIL: $SOAK_WITNESS_DURATION_MS ms " "$work/injected.log" \
+grep -q "^SOAK FAIL: $AVR_SOAK_WITNESS_DURATION_MS ms " "$work/injected.log" \
 	|| fail "un-pet soak did not run the full duration before failing"
 checks=$((checks + 1))
 

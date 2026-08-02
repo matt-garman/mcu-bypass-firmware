@@ -38,7 +38,7 @@ test/
   test_lockstep_progress.sh shared: PIC libgpsim lock-step progress checks
   test_make_serialization.sh shared: worktree Make/release lock regression
   test_pic_build.sh         shared: PIC image/size/rebuild-trigger checks
-  test_pic320_coverage_archive.sh shared: coverage-gate source-archive mode checks
+  test_pic10f320_coverage_archive.sh shared: coverage-gate source-archive mode checks
   test_pic_rebuild.sh       shared: PIC soak rebuild determinism
   test_release_images.sh    shared: isolated exact release artifact verification
   test_release_provenance.sh shared: source/compiler/output release-provenance regression
@@ -89,9 +89,9 @@ test/
 
   pic/     PIC10F322-specific tests plus shared PIC gpsim harness code.
             fw_coverage/         real PIC source via host SFR mock + gcov
-                                                        (make pic-coverage-check-fw)
-            test_config_pic.c    CONFIG-word check     (make pic-test-config)
-            *.stc + run_gpsim_*  register-level gpsim  (make pic-test-gpsim)
+                                                        (make pic10f322-coverage-check-fw)
+            test_config_pic.c    CONFIG-word check     (make pic10f322-test-config)
+            *.stc + run_gpsim_*  register-level gpsim  (make pic10f322-test-gpsim)
             gpsim_wrapper_common.sh
                                   scaffolding both run_gpsim_* wrappers source
                                   (sourced, not executable)
@@ -99,14 +99,14 @@ test/
             gpsim_bootstrap.h    shared libgpsim bring-up: core init, image
                                   load, footswitch stimulus, footsw_set()
             soak_sampling.h      per-ms observation for multi-ms soak holds
-            test_fault_pic.cc    PIC10F322 fault adapter (make pic-test-fault)
+            test_fault_pic.cc    PIC10F322 fault adapter (make pic10f322-test-fault)
             test_lockstep_pic.cc PIC10F322 HEX/model lock-step adapter
-                                                        (make pic-test-lockstep)
+                                                        (make pic10f322-test-lockstep)
             test_io_pic.cc       PIC10F322 GPIO/pulse-timing adapter
-                                                        (make pic-test-io)
+                                                        (make pic10f322-test-io)
             test_{fault,lockstep,io}_pic_core.h
                                   shared libgpsim harness implementations
-            test_soak_pic.cc     libgpsim soak         (make pic-test-soak)
+            test_soak_pic.cc     libgpsim soak         (make pic10f322-test-soak)
                                   shared with the PIC10F320 lane
 
   pic10f320/  PIC10F320-specific tests. Separate from pic/ because this target's
@@ -115,30 +115,30 @@ test/
                thin target-simulator adapters (docs/pic10f320_special_case.md).
             equiv/     fw_harness.c   the real firmware #included, host-compiled
                        test_equiv.c   tick-for-tick vs src/bypass_pure.c
-                                                       (make pic320-test-equiv)
+                                                       (make pic10f320-test-equiv)
                        xc.h           mock <xc.h>: SFR accesses become host storage
             actuation/ test_actuation.c  settled + mid-actuation LATA per variant
-                                                       (make pic320-test-actuation)
+                                                       (make pic10f320-test-actuation)
             fault/     fw_fault_harness.{c,h}  fault-injection API over the firmware
                        test_fault.c            defensive-layer driver
-                                                       (make pic320-test-fault-host)
+                                                       (make pic10f320-test-fault-host)
                        check_fw_coverage.sh    exact-line firmware coverage gate
-                                                       (make pic320-coverage-check-fw)
+                                                       (make pic10f320-coverage-check-fw)
             gpsim/     test_fault_pic.cc     libgpsim fault adapter
-                                                       (make pic320-test-fault-target)
+                                                       (make pic10f320-test-fault-target)
                        test_lockstep_pic.cc  libgpsim lock-step adapter
-                                                       (make pic320-test-lockstep)
+                                                       (make pic10f320-test-lockstep)
                        test_io_pic.cc        libgpsim GPIO/timing adapter
-                                                       (make pic320-test-io)
+                                                       (make pic10f320-test-io)
                        footswitch_toggle.stc gpsim stimulus
             return_stack_oracle.py  strict final-HEX control-flow/return-stack
                                     proof + fixtures
-                             (make test-pic320-return-stack-oracle;
-                              make pic320-test-return-stack for real images)
+                             (make test-pic10f320-return-stack-oracle;
+                              make pic10f320-test-return-stack for real images)
             check_expected_images.py  strict SHA-256 manifest/image checker
             expected_images.sha256    reviewed XC8/DFP three-image baseline
-                             (make test-pic320-expected-images;
-                              make pic320-test-build for real images)
+                             (make test-pic10f320-expected-images;
+                              make pic10f320-test-build for real images)
 ```
 
 The PIC10F320 lane reuses, rather than forks, everything it can: the CONFIG-word
@@ -245,19 +245,19 @@ below so a green gate means every PIC layer actually ran.
 | layer | target | what it proves | substrate |
 |---|---|---|---|
 | Image generation | `test-pic-build` | Missing, partial, malformed, or non-regular XC8 output cannot become a PIC firmware image; malformed/zero budgets, huge usage counts, and arithmetic-tool failures are rejected. The PIC10F322 producer requires its immutable complete matrix. Same-stem `.s`/`.sym` are invalidated with the HEX, and a current HEX without fresh assembly fails the stack target rather than skipping. | host fake-XC8 regression |
-| CONFIG word | `pic-test-config` | The XC8-emitted CONFIG word matches the documented oscillator/WDT/BOR/MCLR/LVP design intent. | host parser over HEX |
-| Static analysis | `pic-analyze` | cppcheck + MISRA pass over the PIC shell with real XC8/DFP register headers. | host tools |
-| Shipping-source coverage | `pic-coverage-check-fw` | Every executable line in the real PIC shell, shared pure core, and all three output drivers is host-executed except the documented non-returning reset path. | host gcov with PIC SFR mock |
-| Register-level functional | `pic-test-gpsim` | Real HEX toggles on press, handles power-on-held switch, keeps settled LATA/PORTA expectations, and includes the mid-debounce `PRESS1_EARLY` tick-cadence check. | gpsim CLI |
+| CONFIG word | `pic10f322-test-config` | The XC8-emitted CONFIG word matches the documented oscillator/WDT/BOR/MCLR/LVP design intent. | host parser over HEX |
+| Static analysis | `pic10f322-analyze` | cppcheck + MISRA pass over the PIC shell with real XC8/DFP register headers. | host tools |
+| Shipping-source coverage | `pic10f322-coverage-check-fw` | Every executable line in the real PIC shell, shared pure core, and all three output drivers is host-executed except the documented non-returning reset path. | host gcov with PIC SFR mock |
+| Register-level functional | `pic10f322-test-gpsim` | Real HEX toggles on press, handles power-on-held switch, keeps settled LATA/PORTA expectations, and includes the mid-debounce `PRESS1_EARLY` tick-cadence check. | gpsim CLI |
 | gpsim process gate | `test-gpsim-wrappers` | Both functional wrappers require a positive decimal timeout, reject nonzero or killed gpsim runs even after complete snapshots, prove routed stimuli contain one exact `attach n1 fsw ra3`, and fail rather than skip missing gpsim under `STRICT_TOOLS=1`. | Bash + fake gpsim |
-| Fault recovery | `pic-test-fault` | Runtime direction, settled-output-latch, configuration, pull-up, and `ctx_` corruptions produce the variant-appropriate WDT recovery response. | libgpsim |
-| HEX/model lock-step | `pic-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches the shared pure model after every completed main-loop iteration. | libgpsim |
+| Fault recovery | `pic10f322-test-fault` | Runtime direction, settled-output-latch, configuration, pull-up, and `ctx_` corruptions produce the variant-appropriate WDT recovery response. | libgpsim |
+| HEX/model lock-step | `pic10f322-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches the shared pure model after every completed main-loop iteration. | libgpsim |
 | Lock-step progress regression | `test-lockstep-progress` | Both chip-specific adapters bind the exact RA3 pin despite substring decoys and abort simulator stalls during settle, calibration, or completion immediately. | host C++ + fake gpsim API |
-| Target I/O timing | `pic-test-io` | TRISA/ANSELA/LATA/PORTA transitions, relay coil exclusion, and mute/relay pulse widths match the design. | libgpsim |
-| Fail-closed aggregate | `pic-test-target-variants` | Requires the complete supported matrix — empty, duplicate, unsupported, and incomplete requests are all rejected — then runs fault recovery, lock-step, and target-I/O for every PIC variant and requires each PASS sentinel. | Makefile wrapper |
+| Target I/O timing | `pic10f322-test-io` | TRISA/ANSELA/LATA/PORTA transitions, relay coil exclusion, and mute/relay pulse widths match the design. | libgpsim |
+| Fail-closed aggregate | `pic10f322-test-target-variants` | Requires the complete supported matrix — empty, duplicate, unsupported, and incomplete requests are all rejected — then runs fault recovery, lock-step, and target-I/O for every PIC variant and requires each PASS sentinel. | Makefile wrapper |
 | Aggregate regression | `test-target-matrix` | Proves complete matrices run exactly once per variant, that empty, duplicate, unsupported, and incomplete matrices fail before any target invocation, and that both PIC target aggregates require explicit fault, lock-step, and I/O completion markers. | Bash + fake recursive Make |
 | Aggregate fail-closed regression | `test-target-lane-markers` | Proves the per-variant aggregate requires each lane's explicit `PASS` marker, not just its exit status: a skipped, crashed, or failing-but-zero-exit lane is rejected and the aggregate's own success line is withheld. Covers both PIC chips. | Bash + fake recursive Make |
-| Hardware return-stack depth | `pic-test-stack-bound`, `pic320-test-stack-bound` | Bounds the **8-level hardware return stack** — the PIC counterpart of the AVR's byte-valued `test-stack-bound`, and a different quantity: the PIC14 core has no data stack, and hardware-stack overflow on this part is silent (no `STKPTR`, no `STKOVF`, no overflow reset). Computes the deepest call chain from the freshly generated instruction stream, cross-checks it against XC8's own `callstack` directives, and rejects missing/current-image assembly, recursion, indirect calls, and an over-budget build. Every variant, both chips. | XC8-generated `.s` + awk |
+| Hardware return-stack depth | `pic10f322-test-stack-bound`, `pic10f320-test-stack-bound` | Bounds the **8-level hardware return stack** — the PIC counterpart of the AVR's byte-valued `test-stack-bound`, and a different quantity: the PIC14 core has no data stack, and hardware-stack overflow on this part is silent (no `STKPTR`, no `STKOVF`, no overflow reset). Computes the deepest call chain from the freshly generated instruction stream, cross-checks it against XC8's own `callstack` directives, and rejects missing/current-image assembly, recursion, indirect calls, and an over-budget build. Every variant, both chips. | XC8-generated `.s` + awk |
 | Stack-depth gate regression | `test-stack-bound-pic-regression` | Proves that gate rejects each way the analysis can be wrong — over budget, recursion, an overflowing build, the two oracles disagreeing, an unresolvable or indirect call, no entry point, and a device pack declaring no depth. Synthetic fixtures, so it needs no toolchain. | Bash + awk |
 | Soak rebuild determinism | `test-pic-build-rebuild` | Both chips' soak binaries compile their workload sizing in as `-D` flags, so their file rules must be *unconditionally* out of date. Asserts a changed duration recompiles with the new value, and that an identical rerun recompiles too — the signature of `FORCE`, as opposed to a rebuild that merely followed a timestamp. Populates its scratch repository with the shared `test/scratch_tree.sh` walk, then blanks each named prerequisite: contents cannot matter to a staleness decision, and a prerequisite that has been renamed or dropped is reported instead of silently shrinking the fixture. | Bash + fake c++ |
 | Soak timing/liveness contract | `test-soak-timing` | Native Classic AVR/PIC soaks require the liveness interval within the total duration; short release rehearsals clamp it so every passing run completes a responsiveness round-trip. A rapid PIC retrigger fixture proves multi-ms holds are sampled every millisecond, and a fake AVR-XT simulator resets during the final round-trip hold to prove the witness is checked before verdict. | host C/C++ compilers + release CLI + fake simulator |
@@ -267,7 +267,7 @@ below so a green gate means every PIC layer actually ran.
 | yasimavr venv fetch safety | `test-fetch-yasimavr` | Caller-selected destinations are canonicalized and cannot name roots, symlinks, files, or unstamped directories. Offline fake tools prove failed builds preserve the old owned venv and only a fully verified sibling tree is renamed into place. | Bash + synthetic toolchain |
 | External supply-chain integrity | `test-supply-chain` | XC8 and PIC DFP bytes must match reviewed hashes before `sudo`; restored ATtiny_DFP files are re-hashed; yasimavr dependencies are wheel/hash-locked and built without dependency resolution; both workflows use one installer and hash-sensitive cache keys. | Bash + synthetic downloads/toolchains |
 
-`pic-test-gpsim` now samples one non-settled point, `PRESS1_EARLY`, roughly
+`pic10f322-test-gpsim` now samples one non-settled point, `PRESS1_EARLY`, roughly
 6 ms (3,000 instruction cycles) after the first press edge. A correct 1 ms tick
 has not yet accumulated the eight separated pressed samples needed to toggle, so
 the LED must still be off.
@@ -276,7 +276,7 @@ and the main loop free-ran through the debounce threshold. The same wrapper also
 asserts full BYPASS `LATA` at startup and after the second press, so analog-switch
 control pins are checked in both settled directions, not just the LED bit.
 
-`pic-test-target-variants` is the gate to use when a PIC result must be
+`pic10f322-test-target-variants` is the gate to use when a PIC result must be
 authoritative. The component libgpsim targets remain useful standalone commands,
 but they are allowed to skip for missing tools; the aggregate turns any skip or
 missing PASS marker into a failure. It also requires the complete supported
@@ -291,7 +291,7 @@ for 5 ms and 12 ms after a toggle, so qualification uses conservative 38 ms and
 post-block sample, making the ideal path roughly one tick shorter; the PIC soak
 deliberately adds the full active variant block to every liveness window.
 
-`pic-test-fault` first requires exact startup `WPUA=0x08` and `TRISA=0x08`, then
+`pic10f322-test-fault` first requires exact startup `WPUA=0x08` and `TRISA=0x08`, then
 injects every guarded direction, settled-output-latch, SFR, and SRAM fault at the
 behaviorally identified main-loop `CLRWDT`, including every RA0..RA2 direction
 flip (the exact-TRISA gate covers the simple variant's spare RA2). Register
@@ -320,36 +320,36 @@ targets are always fail-closed rather than skip-clean.
 
 | layer | target | what it proves | substrate |
 |---|---|---|---|
-| Firmware↔core equivalence | `pic320-test-equiv` | The real firmware, host-compiled, stepped tick-for-tick against `src/bypass_pure.c` over 266,144 stimulus sequences, visiting all 66 reachable model states, with zero divergence. This is the layer that closes the inlining seam. | host C |
-| Actuation sequence | `pic320-test-actuation` | Each variant's full *settled* `LATA` at every tick, plus the mute/relay *mid-actuation* sequencing and pulse width that a settled snapshot cannot see. | host C |
-| Host fault injection | `pic320-test-fault-host` | Corrupting a guarded SFR or the debounce context forces the sanity gate to take the watchdog-reset path — the defensive layer valid stimulus never reaches. | host C |
-| Shipping-source coverage | `pic320-coverage-check-fw` | An **exact** property, not a percentage floor: every line of the real firmware is host-executed except an enumerated, justified watchdog-reset path. Run per variant, because the three output stages give 84 / 95 / 99 executable lines. | host gcov with the mock `xc.h` |
-| All-variant host aggregate | `pic320-test-host-variants` | The four layers above across all three variants, with the complete supported matrix required first. **This is the member of `make test`.** | Makefile wrapper |
-| Return-stack oracle regression | `test-pic320-return-stack-oracle` | 149 deterministic checks: passing depths through 8, recursion/depth-9 rejection, independently required skip edges and operand boundaries, classic alias ranges, all 16,384 legality decisions, every destination writer against PCL/INDF/INTCON, 9-bit PC/physical-fetch aliasing, literal HEX layout, and fail-closed parser/file cases. Includes ten device-geometry checks: `--program-words` is validated as a power of two inside the 9-bit PC space, and fixtures whose verdict *differs* between the 256- and 512-word geometries pin the fetch alias in both directions — an image with code above word `0x0FF` is rejected when 256 words are declared, and one that relies on the fold is rejected when 512 are. **This is also a member of `make test`.** | dependency-free Python 3 |
+| Firmware↔core equivalence | `pic10f320-test-equiv` | The real firmware, host-compiled, stepped tick-for-tick against `src/bypass_pure.c` over 266,144 stimulus sequences, visiting all 66 reachable model states, with zero divergence. This is the layer that closes the inlining seam. | host C |
+| Actuation sequence | `pic10f320-test-actuation` | Each variant's full *settled* `LATA` at every tick, plus the mute/relay *mid-actuation* sequencing and pulse width that a settled snapshot cannot see. | host C |
+| Host fault injection | `pic10f320-test-fault-host` | Corrupting a guarded SFR or the debounce context forces the sanity gate to take the watchdog-reset path — the defensive layer valid stimulus never reaches. | host C |
+| Shipping-source coverage | `pic10f320-coverage-check-fw` | An **exact** property, not a percentage floor: every line of the real firmware is host-executed except an enumerated, justified watchdog-reset path. Run per variant, because the three output stages give 84 / 95 / 99 executable lines. | host gcov with the mock `xc.h` |
+| All-variant host aggregate | `pic10f320-test-host-variants` | The four layers above across all three variants, with the complete supported matrix required first. **This is the member of `make test`.** | Makefile wrapper |
+| Return-stack oracle regression | `test-pic10f320-return-stack-oracle` | 149 deterministic checks: passing depths through 8, recursion/depth-9 rejection, independently required skip edges and operand boundaries, classic alias ranges, all 16,384 legality decisions, every destination writer against PCL/INDF/INTCON, 9-bit PC/physical-fetch aliasing, literal HEX layout, and fail-closed parser/file cases. Includes ten device-geometry checks: `--program-words` is validated as a power of two inside the 9-bit PC space, and fixtures whose verdict *differs* between the 256- and 512-word geometries pin the fetch alias in both directions — an image with code above word `0x0FF` is rejected when 256 words are declared, and one that relies on the fold is rejected when 512 are. **This is also a member of `make test`.** | dependency-free Python 3 |
 | Image generation | `test-pic-build` | 36 PIC10F322 and 75 PIC10F320 checks. Both runs prove missing-XC8 skips remove the complete product matrix despite attempted inventory overrides, stale assembly/symbol sidecars cannot survive a current-HEX-only build, and shell syntax in matrix text is rejected without execution. The 322 run additionally rejects recursively self-whitelisting GNU Make input; the 320 run covers selector rebuilds, deletion of reachable-RETFIE and depth-9 images despite attempted oracle/limit overrides, exact per-output XC8/host-compiler rebuild invocations with current clock/variant/host flags, and matching/mismatching/malformed/missing expected-image gate inputs. | host fake-XC8/fake-CC regression |
-| Expected image bytes | `test-pic320-expected-images`; `pic320-test-build` | The dependency-free checker pins exact manifest grammar and fail-closed file handling in `make test`; the full-tool target rebuilds the immutable three-variant matrix and compares each raw HEX file with the reviewed XC8 V3.10 / DFP 1.9.189 SHA-256 baseline. Kept out of mutation kill targets so a broad byte mismatch cannot mask a weak behavioural oracle. | Python 3; pinned XC8/DFP for the real-image comparison |
-| CONFIG word | `pic320-test-config` | The emitted CONFIG word matches design intent, over every built image. Uses the shared checker with a device-accurate label. | host parser over HEX |
-| Hardware return stack | every `pic320` build; `pic320-test-return-stack` | The base build strictly parses and traverses its final HEX before marking that image complete, so gpsim/target/soak/release rebuilds use the same fail-closed gate. The explicit target rebuilds the supported matrix and rechecks all three together, reporting each maximum and witness. | dependency-free Python 3 over final HEX |
-| Static analysis | `pic320-analyze` | cppcheck + MISRA over the shell, **swept across all three variants** — each compiles a different `#if defined(OUTPUT_*)` branch, so one run would leave two thirds unanalyzed. | host tools |
-| Register-level functional | `pic320-test-gpsim` | Real HEX toggles on press and handles a power-on-held switch via the shared wrappers, with the processor and chip-specific toggle-cadence stimulus overridden. | gpsim CLI |
-| Fault recovery | `pic320-test-fault-target` | The host fault argument re-made on the real emitted image: every guarded SFR/SRAM location and the required `TRISA` directions, 22 checks per variant. | libgpsim |
-| HEX/model lock-step | `pic320-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches `src/bypass_pure.c` after every completed main-loop iteration — 3,005 checks per variant, 66/66 states. | libgpsim |
-| Target I/O timing | `pic320-test-io` | Exact `TRISA`, physical `PORTA` following every `LATA` transition, each variant's complete transition sequence, and mute/relay pulse widths from simulator cycles. | libgpsim |
-| Fail-closed aggregate | `pic320-test-target-variants` | Rejects any matrix other than the complete supported set, then requires fault, lock-step and target-I/O PASS sentinels for every variant. | Makefile wrapper |
-| Pre-hardware aggregate | `pic320-test` | The single target CI and the release script invoke: the host aggregate, expected-image hash, CONFIG and return-stack proof over all images, and analysis + gpsim per variant. | Makefile wrapper |
-| Soak | `pic320-test-soak` | Long-duration libgpsim soak per output stage; three combos at full duration are part of release qualification. | libgpsim |
+| Expected image bytes | `test-pic10f320-expected-images`; `pic10f320-test-build` | The dependency-free checker pins exact manifest grammar and fail-closed file handling in `make test`; the full-tool target rebuilds the immutable three-variant matrix and compares each raw HEX file with the reviewed XC8 V3.10 / DFP 1.9.189 SHA-256 baseline. Kept out of mutation kill targets so a broad byte mismatch cannot mask a weak behavioural oracle. | Python 3; pinned XC8/DFP for the real-image comparison |
+| CONFIG word | `pic10f320-test-config` | The emitted CONFIG word matches design intent, over every built image. Uses the shared checker with a device-accurate label. | host parser over HEX |
+| Hardware return stack | every `pic10f320` build; `pic10f320-test-return-stack` | The base build strictly parses and traverses its final HEX before marking that image complete, so gpsim/target/soak/release rebuilds use the same fail-closed gate. The explicit target rebuilds the supported matrix and rechecks all three together, reporting each maximum and witness. | dependency-free Python 3 over final HEX |
+| Static analysis | `pic10f320-analyze` | cppcheck + MISRA over the shell, **swept across all three variants** — each compiles a different `#if defined(OUTPUT_*)` branch, so one run would leave two thirds unanalyzed. | host tools |
+| Register-level functional | `pic10f320-test-gpsim` | Real HEX toggles on press and handles a power-on-held switch via the shared wrappers, with the processor and chip-specific toggle-cadence stimulus overridden. | gpsim CLI |
+| Fault recovery | `pic10f320-test-fault-target` | The host fault argument re-made on the real emitted image: every guarded SFR/SRAM location and the required `TRISA` directions, 22 checks per variant. | libgpsim |
+| HEX/model lock-step | `pic10f320-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches `src/bypass_pure.c` after every completed main-loop iteration — 3,005 checks per variant, 66/66 states. | libgpsim |
+| Target I/O timing | `pic10f320-test-io` | Exact `TRISA`, physical `PORTA` following every `LATA` transition, each variant's complete transition sequence, and mute/relay pulse widths from simulator cycles. | libgpsim |
+| Fail-closed aggregate | `pic10f320-test-target-variants` | Rejects any matrix other than the complete supported set, then requires fault, lock-step and target-I/O PASS sentinels for every variant. | Makefile wrapper |
+| Pre-hardware aggregate | `pic10f320-test` | The single target CI and the release script invoke: the host aggregate, expected-image hash, CONFIG and return-stack proof over all images, and analysis + gpsim per variant. | Makefile wrapper |
+| Soak | `pic10f320-test-soak` | Long-duration libgpsim soak per output stage; three combos at full duration are part of release qualification. | libgpsim |
 
 The shared stale-sidecar and matrix cases run in both parameterized
 `test-pic-build` invocations; the PIC10F320 rebuild cases run only in the second.
 The script itself requires
-`PB_REBUILD_REQUIRED=1` for canonical `PB_TARGET=pic320` and enforces exactly 75
-final checks; canonical `PB_TARGET=pic` enforces 36. A missing or misspelled
+`PB_REBUILD_REQUIRED=1` for canonical `PB_TARGET=pic10f320` and enforces exactly 75
+final checks; canonical `PB_TARGET=pic10f322` enforces 36. A missing or misspelled
 rebuild-arm assignment therefore fails instead of reporting a 61-check subset as
 green.
 
 In a fresh temporary repository the arm proves that identical requests reinvoke
-the compiler for `pic320`, `pic320-test-equiv`, `pic320-test-actuation`, and
-`pic320-test-fault-host`. After each initial request it creates a regular
+the compiler for `pic10f320`, `pic10f320-test-equiv`, `pic10f320-test-actuation`, and
+`pic10f320-test-fault-host`. After each initial request it creates a regular
 same-name file in the sandbox root before repeating, so removing the target's
 `.PHONY` declaration makes Make skip the recipe and fails the exact invocation
 count. Every fake linked host test also logs its executed path; execution counts
@@ -359,12 +359,12 @@ applicable command, not any historical log entry, and the unqualified shared
 equivalence harness must be recompiled with the current output macro after both
 variant transitions. This is deterministic
 **rebuild triggering with the current flags**, not byte-for-byte XC8
-reproducibility. Byte identity is enforced separately by `pic320-test-build`.
+reproducibility. Byte identity is enforced separately by `pic10f320-test-build`.
 The coverage lane needs no stable-output probe: every request
 uses a new `mktemp` directory and requires fresh `.gcda` and `.gcov` evidence
 before that directory is removed.
 
-Note what `pic320-test-equiv` and `pic320-test-lockstep` run *against*. Both
+Note what `pic10f320-test-equiv` and `pic10f320-test-lockstep` run *against*. Both
 compile and link `src/bypass_pure.c` — the same file every other target compiles
 into its shipping image, not a vendored snapshot of it. That is the property the
 whole layer stack rests on; `docs/pic10f320_special_case.md` §3 argues why.
@@ -387,10 +387,10 @@ PIC10F320 control state has a 9-bit architectural PC. The oracle normalizes uppe
 direct-target bits, sequential and skip successors, pushed return PCs, and popped
 return PCs into `0x000..0x1ff`; only instruction fetch aliases through the low
 eight bits into the 256 implemented physical words. Its fetch helper remains
-strict about receiving normalized architectural PCs. Every successful `pic320`
+strict about receiving normalized architectural PCs. Every successful `pic10f320`
 recipe runs that oracle before setting its completion flag, inside the existing
 cleanup trap. The explicit
-`pic320-test-return-stack` target is still valuable: it rebuilds and rechecks the
+`pic10f320-test-return-stack` target is still valuable: it rebuilds and rechecks the
 whole immutable supported matrix in one reported invocation. This is execution-
 time enforcement, not a claim that a later staged/copied artifact cannot be
 modified; release provenance and reproduction checks remain separate controls.
@@ -418,7 +418,7 @@ exact WPUA pull-up state, ANSELA mask narrowing, muted-CD4053 startup
 reassertion, mute-window shortening, and relay pulse shortening.
 
 **Which lane owns the Classic AVR watchdog matters, and is easy to get wrong.**
-The two long-standing watchdog-handshake mutants both run on `test-sim-cd4053_simple`,
+The two long-standing watchdog-handshake mutants both run on `test-sim-cd4053_simple-attiny13a`,
 which is the ATtiny13a build — and simavr 1.6 does not model the ATtiny13a WDT
 system reset at all, so no assertion on that lane can witness one. They are
 still killed, but not by the watchdog: deleting the `hw_wdt_pet()` call site
@@ -510,8 +510,8 @@ repository, and drifted; this is the single copy.)
 - **WDT-timing / brown-out behaviour** is not simulated. gpsim's WDT calibration
   differs from silicon — at the firmware's `WDTPS = 0x08` gpsim's period is
   ~1.06 s versus the silicon ~256 ms — and gpsim has no analog BOR model.
-  `make pic-test-config` proves `WDTE`/`BOREN` are *enabled*; their real-time
-  behaviour is a bench concern. `make pic-test-soak` exercises WDT *liveness* and
+  `make pic10f322-test-config` proves `WDTE`/`BOREN` are *enabled*; their real-time
+  behaviour is a bench concern. `make pic10f322-test-soak` exercises WDT *liveness* and
   periodic responsiveness at scale, but asserts nothing about WDT *timing* (it
   uses the WDT only as a qualitative liveness signal — see
   `test/pic/test_soak_pic.cc`). This is distinct from the **1 ms TMR2 tick

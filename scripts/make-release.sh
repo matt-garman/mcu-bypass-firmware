@@ -36,9 +36,9 @@
 #      variant matrices as the build commands shrinks in lock-step with an
 #      omission and agrees with itself (merge plan §10, §14.8).
 #   2. Run `make test-long`, `make attiny202-test`,
-#      `make attiny202-test-target`, `make pic-test`,
-#      `make pic-test-target-variants`, `make pic320-test`, and
-#      `make pic320-test-target-variants` (the full qualification gates for
+#      `make attiny202-test-target`, `make pic10f322-test`,
+#      `make pic10f322-test-target-variants`, `make pic10f320-test`, and
+#      `make pic10f320-test-target-variants` (the full qualification gates for
 #      every release-supported target).
 #   3. Run ALL release soak combinations IN PARALLEL for the full
 #      duration, collecting a pass/fail verdict and evidence from each. That is
@@ -192,7 +192,7 @@ mkv() { make -s print-"$1"; }      # echo one Makefile variable
 VARIANTS=$(mkv VARIANTS)           # cd4053_simple cd4053_with_mute tq2_l2_5v_relay
 TINYX5=$(mkv TINYX5)               # 85 45
 FW_BASE=$(mkv FW_BASE)             # bypass
-MCU=$(mkv MCU)                     # attiny13a
+ATTINY13A_MCU=$(mkv ATTINY13A_MCU) # attiny13a
 
 # The canonical image basename: <prefix>-<mcu>-<output stage>, where the stage
 # field IS the variant name. Composed here rather than read back from the
@@ -207,18 +207,18 @@ MCU=$(mkv MCU)                     # attiny13a
 # $(fw_image <build dir> <mcu tag> <variant>) -> full path, no suffix
 fw_image() { printf '%s/%s-%s-%s' "$1" "$FW_BASE" "$2" "$3"; }
 AVR_BUILD_DIR=$(mkv AVR_BUILD_DIR) # build_avr_classic
-PIC_BUILD_DIR=$(mkv PIC_BUILD_DIR) # build_pic
-PIC_TAG=$(mkv PIC_TAG)             # pic10f322
-PIC_XTAL=$(mkv PIC_XTAL)           # 2000000UL  (_XTAL_FREQ; drives __delay_ms)
-# Human clock string for the manifest, derived from PIC_XTAL so it can never
+PIC10F322_BUILD_DIR=$(mkv PIC10F322_BUILD_DIR) # build_pic10f322
+PIC10F322_TAG=$(mkv PIC10F322_TAG)             # pic10f322
+PIC10F322_XTAL=$(mkv PIC10F322_XTAL)           # 2000000UL  (_XTAL_FREQ; drives __delay_ms)
+# Human clock string for the manifest, derived from PIC10F322_XTAL so it can never
 # drift from the firmware's asserted _XTAL_FREQ / OSCCON IRCF setting.
-PIC_CLK_MHZ=$(awk -v h="${PIC_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
-PIC_GPSIM_PROC=$(mkv PIC_GPSIM_PROC)
-LFUSE=$(mkv LFUSE);     HFUSE=$(mkv HFUSE)
-LFUSE_X5=$(mkv LFUSE_X5); HFUSE_X5=$(mkv HFUSE_X5)
+PIC10F322_CLK_MHZ=$(awk -v h="${PIC10F322_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
+PIC10F322_GPSIM_PROC=$(mkv PIC10F322_GPSIM_PROC)
+LFUSE=$(mkv ATTINY13A_LFUSE);     HFUSE=$(mkv ATTINY13A_HFUSE)
+LFUSE_X5=$(mkv TINYX5_LFUSE); HFUSE_X5=$(mkv TINYX5_HFUSE)
 PIC_CC=$(mkv PIC_CC)
 PIC_DFP=$(mkv PIC_DFP)
-AVRDUDE_PART=$(mkv AVRDUDE_PART)   # t13
+AVRDUDE_PART=$(mkv ATTINY13A_AVRDUDE_PART)   # t13
 declare -A AVRDUDE_PART_X5
 for n in $TINYX5; do AVRDUDE_PART_X5[$n]=$(mkv part_"$n"); done
 
@@ -257,14 +257,14 @@ XT_FUSE[bootend]=$(mkv XT_FUSE_BOOTEND)
 # pairs exist precisely so one can be re-pinned (merge plan §5.6) -- and a
 # release script that assumed they track would build one chip with the other's
 # toolchain and say nothing.
-PIC320_BUILD_DIR=$(mkv PIC320_BUILD_DIR)     # build_pic10f320
-PIC320_TAG=$(mkv PIC320_TAG)                 # pic10f320
-PIC320_VARIANTS=$(mkv PIC320_VARIANTS_ALL)   # same three names as VARIANTS
-PIC320_XTAL=$(mkv PIC320_XTAL)
-PIC320_CLK_MHZ=$(awk -v h="${PIC320_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
-PIC320_FLASH_WORDS=$(mkv PIC320_FLASH_WORDS) # 256
-PIC320_CC=$(mkv PIC320_CC)
-PIC320_DFP=$(mkv PIC320_DFP)
+PIC10F320_BUILD_DIR=$(mkv PIC10F320_BUILD_DIR)     # build_pic10f320
+PIC10F320_TAG=$(mkv PIC10F320_TAG)                 # pic10f320
+PIC10F320_VARIANTS=$(mkv PIC10F320_VARIANTS_ALL)   # same three names as VARIANTS
+PIC10F320_XTAL=$(mkv PIC10F320_XTAL)
+PIC10F320_CLK_MHZ=$(awk -v h="${PIC10F320_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
+PIC10F320_FLASH_WORDS=$(mkv PIC10F320_FLASH_WORDS) # 256
+PIC10F320_CC=$(mkv PIC10F320_CC)
+PIC10F320_DFP=$(mkv PIC10F320_DFP)
 
 # --- host / AVR / analysis tools, read through their Makefile variables -------
 # The preconditions below assert these, and the manifest records their versions.
@@ -285,7 +285,7 @@ GCOV=$(mkv GCOV)
 GPSIM=$(mkv GPSIM)
 SIMAVR_INC=$(mkv SIMAVR_INC)
 PIC_SOAK_GPSIM_INC=$(mkv PIC_SOAK_GPSIM_INC)
-PIC320_SOAK_GPSIM_INC=$(mkv PIC320_SOAK_GPSIM_INC)
+PIC10F320_SOAK_GPSIM_INC=$(mkv PIC10F320_SOAK_GPSIM_INC)
 
 # The canonical release product set (merge plan §10). This script ENUMERATES the
 # images it expects to build from the variant matrices below; RELEASE_IMAGES is
@@ -421,19 +421,19 @@ req_file "$PIC_CC"                                  "XC8 (PIC_CC=)"
 req_file "$PIC_DFP/pic/include/proc/pic10f322.h"    "PIC10-12Fxxx DFP (PIC_DFP=)"
 # ...and the PIC10F320's, asserted through its own pair. One DFP ships both
 # device headers, so this normally passes with the line above -- but a truncated
-# unpack, or a deliberately re-pinned PIC320_DFP, is exactly the case where the
+# unpack, or a deliberately re-pinned PIC10F320_DFP, is exactly the case where the
 # 320 lane would otherwise skip cleanly and the release would ship 15 images
 # while claiming 18.
-req_file "$PIC320_CC"                                "XC8 (PIC320_CC=)"
-req_file "$PIC320_DFP/pic/include/proc/pic10f320.h"  "PIC10F320 device header (PIC320_DFP=)"
-req_cmd "$GPSIM"       "apt: gpsim (pic-test-gpsim, pic320-test-gpsim)"
+req_file "$PIC10F320_CC"                                "XC8 (PIC10F320_CC=)"
+req_file "$PIC10F320_DFP/pic/include/proc/pic10f320.h"  "PIC10F320 device header (PIC10F320_DFP=)"
+req_cmd "$GPSIM"       "apt: gpsim (pic10f322-test-gpsim, pic10f320-test-gpsim)"
 req_cmd c++            "host C++ compiler (PIC soaks)"
 # Each chip's libgpsim headers through its OWN variable, for the same reason the
 # CC/DFP pairs above are: one gpsim-dev install serves both today, but the two
 # variables exist so one lane can be re-pinned, and a single hardcoded path
 # would assert the wrong install and let the other lane skip.
 req_file "$PIC_SOAK_GPSIM_INC/sim_context.h"        "apt: gpsim-dev (PIC10F322 soaks; PIC_SOAK_GPSIM_INC=)"
-req_file "$PIC320_SOAK_GPSIM_INC/sim_context.h"     "apt: gpsim-dev (PIC10F320 soaks; PIC320_SOAK_GPSIM_INC=)"
+req_file "$PIC10F320_SOAK_GPSIM_INC/sim_context.h"     "apt: gpsim-dev (PIC10F320 soaks; PIC10F320_SOAK_GPSIM_INC=)"
 pkg-config --exists glib-2.0 2>/dev/null || MISSING+=("glib-2.0  (apt: libglib2.0-dev, PIC soaks)")
 # ATtiny202 (AVR-XT). Both inputs are fetched on demand and NOT committed, and
 # every attiny202-* target skips cleanly without them -- so a release that did
@@ -504,7 +504,7 @@ TC_HOST_CC=$(release_tool_version_line "host C compiler (HOSTCC=$HOST_CC)" "$HOS
 	|| die "could not record the host compiler provenance"
 TC_XC8_322=$(release_tool_version_line "PIC10F322 XC8 (PIC_CC=$PIC_CC)" "$PIC_CC") \
 	|| die "could not record the PIC10F322 compiler provenance"
-TC_XC8_320=$(release_tool_version_line "PIC10F320 XC8 (PIC320_CC=$PIC320_CC)" "$PIC320_CC") \
+TC_XC8_320=$(release_tool_version_line "PIC10F320 XC8 (PIC10F320_CC=$PIC10F320_CC)" "$PIC10F320_CC") \
 	|| die "could not record the PIC10F320 compiler provenance"
 TC_GPSIM=$(release_tool_version_line "gpsim (GPSIM=$GPSIM)" "$GPSIM") \
 	|| die "could not record the gpsim provenance"
@@ -536,18 +536,18 @@ esac
 # ============================================================================
 section "1. clean build (all variants x release-supported MCUs)"
 make clean >/dev/null
-make all13 all85 all45 >"$EVID/build-avr.log" 2>&1 || { cat "$EVID/build-avr.log" >&2; die "AVR build failed."; }
+make attiny13a attiny85 attiny45 >"$EVID/build-avr-classic.log" 2>&1 || { cat "$EVID/build-avr-classic.log" >&2; die "AVR build failed."; }
 # ATtiny202: STRICT_TOOLS=1 so an absent ATtiny_DFP is a hard failure here rather
 # than a clean skip that would leave build_avr_xt/ empty and be caught much later
 # as three missing images.
 make attiny202 STRICT_TOOLS=1 XT_DFP="$XT_DFP" >"$EVID/build-avr-xt.log" 2>&1 \
 	|| { cat "$EVID/build-avr-xt.log" >&2; die "ATtiny202 build failed."; }
-make pic PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/build-pic.log" 2>&1 || { cat "$EVID/build-pic.log" >&2; die "PIC build failed."; }
-# pic320-variants builds all three and, on any failure, removes the WHOLE image
+make pic10f322 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/build-pic10f322.log" 2>&1 || { cat "$EVID/build-pic10f322.log" >&2; die "PIC build failed."; }
+# pic10f320-variants builds all three and, on any failure, removes the WHOLE image
 # set rather than leaving a partial matrix behind for a later step to stage.
-make pic320-variants PIC320_CC="$PIC320_CC" PIC320_DFP="$PIC320_DFP" \
-	>"$EVID/build-pic320.log" 2>&1 \
-	|| { cat "$EVID/build-pic320.log" >&2; die "PIC10F320 build failed."; }
+make pic10f320-variants PIC10F320_CC="$PIC10F320_CC" PIC10F320_DFP="$PIC10F320_DFP" \
+	>"$EVID/build-pic10f320.log" 2>&1 \
+	|| { cat "$EVID/build-pic10f320.log" >&2; die "PIC10F320 build failed."; }
 
 # Enumerate the expected image set and assert each exists.
 IMAGES=()
@@ -556,9 +556,9 @@ AVR_ELFS=()
 XT_IMAGES=()
 XT_ELFS=()
 PIC_IMAGES=()
-PIC320_IMAGES=()
+PIC10F320_IMAGES=()
 for v in $VARIANTS; do
-	img="$(fw_image "$AVR_BUILD_DIR" "$MCU" "$v").hex"
+	img="$(fw_image "$AVR_BUILD_DIR" "$ATTINY13A_MCU" "$v").hex"
 	elf="${img%.hex}.elf"
 	IMAGES+=("$img"); AVR_IMAGES+=("$img"); AVR_ELFS+=("$elf")
 done
@@ -569,19 +569,19 @@ for v in $VARIANTS; do for n in $TINYX5; do
 done; done
 # ATtiny202 is kept in its own arrays rather than folded into AVR_IMAGES: the
 # classic lane's final step regenerates HEX from validated ELFs with
-# `make all13 all85 all45`, which knows nothing about the AVR-XT build.
+# `make attiny13a attiny85 attiny45`, which knows nothing about the AVR-XT build.
 for v in $XT_VARIANTS; do
 	img="$(fw_image "$XT_BUILD_DIR" "$XT_TAG" "$v").hex"
 	elf="${img%.hex}.elf"
 	IMAGES+=("$img"); XT_IMAGES+=("$img"); XT_ELFS+=("$elf")
 done
 for v in $VARIANTS; do
-	img="$(fw_image "$PIC_BUILD_DIR" "$PIC_TAG" "$v").hex"
+	img="$(fw_image "$PIC10F322_BUILD_DIR" "$PIC10F322_TAG" "$v").hex"
 	IMAGES+=("$img"); PIC_IMAGES+=("$img")
 done
-for v in $PIC320_VARIANTS; do
-	img="$(fw_image "$PIC320_BUILD_DIR" "$PIC320_TAG" "$v").hex"
-	IMAGES+=("$img"); PIC_IMAGES+=("$img"); PIC320_IMAGES+=("$img")
+for v in $PIC10F320_VARIANTS; do
+	img="$(fw_image "$PIC10F320_BUILD_DIR" "$PIC10F320_TAG" "$v").hex"
+	IMAGES+=("$img"); PIC_IMAGES+=("$img"); PIC10F320_IMAGES+=("$img")
 done
 for img in "${IMAGES[@]}"; do [ -f "$img" ] || die "expected image not produced: $img"; done
 
@@ -600,14 +600,14 @@ fi
 ok "built ${#IMAGES[@]} images; set matches the canonical RELEASE_IMAGES exactly."
 
 # Structural Intel-HEX validation of every PIC10F320 image. The PIC10F322 lane
-# gets this inside `make pic`, and the 320's `make pic320` validates each image
+# gets this inside `make pic10f322`, and the 320's `make pic10f320` validates each image
 # as it is produced; repeating it here covers the window between build and
 # staging, and costs nothing.
-for img in "${PIC320_IMAGES[@]}"; do
+for img in "${PIC10F320_IMAGES[@]}"; do
 	scripts/validate-ihex.sh "$img" >/dev/null \
 		|| die "PIC10F320 image failed Intel-HEX validation: $img"
 done
-ok "all ${#PIC320_IMAGES[@]} PIC10F320 images are structurally valid Intel HEX."
+ok "all ${#PIC10F320_IMAGES[@]} PIC10F320 images are structurally valid Intel HEX."
 
 hash_avr_elf_set() {
 	local elf
@@ -676,33 +676,33 @@ ok "attiny202-test-target passed."
 validated_xt_image_hashes=$(hash_xt_image_set "${XT_IMAGES[@]}")
 validated_xt_elf_hashes=$(hash_xt_image_set "${XT_ELFS[@]}")
 
-log "running make pic-test (PIC CONFIG word + analyze + gpsim)..."
-make pic-test STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/pic-test.log" 2>&1 || { tail -40 "$EVID/pic-test.log" >&2; die "make pic-test FAILED."; }
-ok "pic-test passed."
+log "running make pic10f322-test (PIC CONFIG word + analyze + gpsim)..."
+make pic10f322-test STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/pic10f322-test.log" 2>&1 || { tail -40 "$EVID/pic10f322-test.log" >&2; die "make pic10f322-test FAILED."; }
+ok "pic10f322-test passed."
 
 # Fail-closed PIC target aggregate (libgpsim): per variant, require target fault
 # recovery, firmware/model ctx_ lock-step, and GPIO transition/pulse timing PASS
 # sentinels. This target converts the standalone skip-clean libgpsim drivers into
 # a release gate: any missing tool, missing ctx_ symbol, skipped subtarget, or
 # partial run is a hard failure.
-log "running make pic-test-target-variants (fault + lock-step + target I/O on the real HEX)..."
-make pic-test-target-variants STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
-	>"$EVID/pic-test-target-variants.log" 2>&1 \
-	|| { tail -60 "$EVID/pic-test-target-variants.log" >&2; die "make pic-test-target-variants FAILED."; }
-ok "pic-test-target-variants passed."
+log "running make pic10f322-test-target-variants (fault + lock-step + target I/O on the real HEX)..."
+make pic10f322-test-target-variants STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
+	>"$EVID/pic10f322-test-target-variants.log" 2>&1 \
+	|| { tail -60 "$EVID/pic10f322-test-target-variants.log" >&2; die "make pic10f322-test-target-variants FAILED."; }
+ok "pic10f322-test-target-variants passed."
 
-log "running make pic320-test (PIC10F320 host lanes + hashes + CONFIG + stack + analysis + gpsim, all variants)..."
-make pic320-test STRICT_TOOLS=1 PIC320_CC="$PIC320_CC" PIC320_DFP="$PIC320_DFP" \
-	>"$EVID/pic320-test.log" 2>&1 \
-	|| { tail -60 "$EVID/pic320-test.log" >&2; die "make pic320-test FAILED."; }
-ok "pic320-test passed."
+log "running make pic10f320-test (PIC10F320 host lanes + hashes + CONFIG + stack + analysis + gpsim, all variants)..."
+make pic10f320-test STRICT_TOOLS=1 PIC10F320_CC="$PIC10F320_CC" PIC10F320_DFP="$PIC10F320_DFP" \
+	>"$EVID/pic10f320-test.log" 2>&1 \
+	|| { tail -60 "$EVID/pic10f320-test.log" >&2; die "make pic10f320-test FAILED."; }
+ok "pic10f320-test passed."
 
-log "running make pic320-test-target-variants (fault + lock-step + target I/O on the real HEX)..."
-make pic320-test-target-variants STRICT_TOOLS=1 \
-	PIC320_CC="$PIC320_CC" PIC320_DFP="$PIC320_DFP" \
-	>"$EVID/pic320-test-target-variants.log" 2>&1 \
-	|| { tail -60 "$EVID/pic320-test-target-variants.log" >&2; die "make pic320-test-target-variants FAILED."; }
-ok "pic320-test-target-variants passed."
+log "running make pic10f320-test-target-variants (fault + lock-step + target I/O on the real HEX)..."
+make pic10f320-test-target-variants STRICT_TOOLS=1 \
+	PIC10F320_CC="$PIC10F320_CC" PIC10F320_DFP="$PIC10F320_DFP" \
+	>"$EVID/pic10f320-test-target-variants.log" 2>&1 \
+	|| { tail -60 "$EVID/pic10f320-test-target-variants.log" >&2; die "make pic10f320-test-target-variants FAILED."; }
+ok "pic10f320-test-target-variants passed."
 validated_pic_image_hashes=$(hash_pic_image_set "${PIC_IMAGES[@]}")
 
 # ============================================================================
@@ -716,12 +716,12 @@ declare -A SOAK_BIN SOAK_CWD SOAK_LOG SOAK_RC
 
 log "compiling soak binaries..."
 for v in $VARIANTS; do for n in $TINYX5; do
-	name="avr_${v}_t${n}"; bin="test/avr/test_soak_${v}_t${n}"
+	name="attiny${n}_${v}"; bin="test/avr/test_soak_${v}_attiny${n}"
 	elf="$(fw_image "$AVR_BUILD_DIR" "attiny${n}" "$v").elf"
 	make --old-file="$elf" "$bin" AVR_REBUILD_PREREQ= \
-		SOAK_VARIANT="$v" SOAK_CHIP="$n" SOAK_DURATION_MS="$SOAK_DURATION_MS" \
-		SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
-		SOAK_COMBINATION_NAME="$name" \
+		AVR_SOAK_VARIANT="$v" AVR_SOAK_CHIP="$n" AVR_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
+		AVR_SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
+		AVR_SOAK_COMBINATION_NAME="$name" \
 		>>"$EVID/soak-build.log" 2>&1 || die "failed to build AVR soak $name"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$REPO_ROOT/$bin"
 	SOAK_CWD[$name]="$REPO_ROOT"   # relative FW_PATH; the binary writes no files
@@ -765,10 +765,10 @@ for v in $XT_VARIANTS; do
 	SOAK_LOG[$name]="$EVID/soak-$name.log"
 done
 for v in $VARIANTS; do
-	name="pic_${v}"; bin="$SOAKDIR/test_soak_pic_${v}"
-	make "$bin" PIC_SOAK_BIN="$bin" PIC_SOAK_VARIANT="$v" PIC_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
-		PIC_SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
-		PIC_SOAK_COMBINATION_NAME="$name" \
+	name="pic10f322_${v}"; bin="$SOAKDIR/test_soak_pic10f322_${v}"
+	make "$bin" PIC10F322_SOAK_BIN="$bin" PIC10F322_SOAK_VARIANT="$v" PIC10F322_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
+		PIC10F322_SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
+		PIC10F322_SOAK_COMBINATION_NAME="$name" \
 		>>"$EVID/soak-build.log" 2>&1 || die "failed to build PIC soak $name"
 	rundir="$SOAKDIR/run-$name"; mkdir -p "$rundir"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
@@ -777,14 +777,14 @@ for v in $VARIANTS; do
 done
 # Three more combos, one per PIC10F320 output stage -- the same full duration as
 # every other release combo, not a shortened smoke. Each drives its own real HEX
-# in libgpsim. PIC320_SOAK_VARIANT selects the image; the driver itself is the
+# in libgpsim. PIC10F320_SOAK_VARIANT selects the image; the driver itself is the
 # shared parent one (§4: the parent copy is ahead, carrying SOAK_LIVENESS_DUE).
-for v in $PIC320_VARIANTS; do
-	name="pic320_${v}"; bin="$SOAKDIR/test_soak_pic320_${v}"
-	make "$bin" PIC320_SOAK_BIN="$bin" PIC320_SOAK_VARIANT="$v" \
-		PIC320_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
-		PIC320_SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
-		PIC320_SOAK_COMBINATION_NAME="$name" \
+for v in $PIC10F320_VARIANTS; do
+	name="pic10f320_${v}"; bin="$SOAKDIR/test_soak_pic10f320_${v}"
+	make "$bin" PIC10F320_SOAK_BIN="$bin" PIC10F320_SOAK_VARIANT="$v" \
+		PIC10F320_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
+		PIC10F320_SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
+		PIC10F320_SOAK_COMBINATION_NAME="$name" \
 		>>"$EVID/soak-build.log" 2>&1 || die "failed to build PIC10F320 soak $name"
 	rundir="$SOAKDIR/run-$name"; mkdir -p "$rundir"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
@@ -906,7 +906,7 @@ rm -f -- "${AVR_IMAGES[@]}" \
 	|| die "could not remove stale classic AVR HEX before final regeneration"
 old_file_args=()
 for elf in "${AVR_ELFS[@]}"; do old_file_args+=("--old-file=$elf"); done
-make "${old_file_args[@]}" all13 all85 all45 AVR_REBUILD_PREREQ= \
+make "${old_file_args[@]}" attiny13a attiny85 attiny45 AVR_REBUILD_PREREQ= \
 	>"$EVID/final-image-build.log" 2>&1 \
 	|| { tail -60 "$EVID/final-image-build.log" >&2; die "final classic HEX regeneration FAILED."; }
 current_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
@@ -977,7 +977,7 @@ if [ "$staged_sorted" != "$wanted_sorted" ]; then
 fi
 ok "wrote SHA256SUMS over ${#IMAGES[@]} images; staging directory holds exactly that set."
 
-# Copy evidence. The per-combo soak logs and build/pic-test logs are small and
+# Copy evidence. The per-combo soak logs and build/pic10f322-test logs are small and
 # kept in full; the exhaustive test-long log is large (100s of KB) and would
 # bloat the repo on every release, so commit a concise summary instead -- the
 # full log is reproduced (and archived) by the tag-triggered release CI run.
@@ -1025,16 +1025,16 @@ img_row() {
 	# firmware as an ATtiny13a with AVR fuse bytes. With the MCU always present
 	# the fallback becomes a hard error instead.
 	case "$base" in
-		${FW_BASE}-${PIC320_TAG}-*.hex)
-			mcu="PIC10F320"; clk="${PIC320_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
+		${FW_BASE}-${PIC10F320_TAG}-*.hex)
+			mcu="PIC10F320"; clk="${PIC10F320_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
 			# XC8 reports program space in WORDS, not bytes; the figure comes from
 			# this run's own build log, so it can never be a stale hand-copied number.
-			used=$(awk -v f="$base" '$0 ~ ("/" f " :") { for (i = 1; i <= NF; i++) if ($i == "words") { print $(i-1) " / '"$PIC320_FLASH_WORDS"' words"; exit } }' \
-				"$EVID/build-pic320.log" 2>/dev/null)
+			used=$(awk -v f="$base" '$0 ~ ("/" f " :") { for (i = 1; i <= NF; i++) if ($i == "words") { print $(i-1) " / '"$PIC10F320_FLASH_WORDS"' words"; exit } }' \
+				"$EVID/build-pic10f320.log" 2>/dev/null)
 			flashcmd="pk2cmd -PPIC10F320 -F$base -M -Y -R" ;;
-		${FW_BASE}-${PIC_TAG}-*.hex)
-			mcu="PIC10F322"; clk="${PIC_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
-			flashcmd="pk2cmd -PPIC10F322 -F$base -M -Y -R   (or: make program-pic VARIANT=<v>)" ;;
+		${FW_BASE}-${PIC10F322_TAG}-*.hex)
+			mcu="PIC10F322"; clk="${PIC10F322_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
+			flashcmd="pk2cmd -PPIC10F322 -F$base -M -Y -R   (or: make pic10f322-program VARIANT=<v>)" ;;
 		${FW_BASE}-${XT_TAG}-*.hex)
 			mcu="ATtiny202"; clk="${XT_CLK_MHZ} MHz (internal, OSCCFG 16 MHz / 8)"
 			# AVR8X replaces lfuse/hfuse with seven individually named memories;
@@ -1061,7 +1061,7 @@ img_row() {
 			clk="1.0 MHz"; fuses="lfuse=$LFUSE_X5 hfuse=$HFUSE_X5"
 			used=$(avr-size --mcu="$amcu" -C "$elf" 2>/dev/null | awk '/^Program:/{print $2" B"; exit}')
 			flashcmd="avrdude -c <prog> -p $prog -U lfuse:w:$LFUSE_X5:m -U hfuse:w:$HFUSE_X5:m -U flash:w:$base:i" ;;
-		${FW_BASE}-${MCU}-*.hex)
+		${FW_BASE}-${ATTINY13A_MCU}-*.hex)
 			mcu="ATtiny13a"; clk="1.2 MHz"; fuses="lfuse=$LFUSE hfuse=$HFUSE"
 			used=$(avr-size --mcu=attiny13a -C "$elf" 2>/dev/null | awk '/^Program:/{print $2" B"; exit}')
 			flashcmd="avrdude -c <prog> -p $AVRDUDE_PART -U lfuse:w:$LFUSE:m -U hfuse:w:$HFUSE:m -U flash:w:$base:i" ;;
@@ -1122,7 +1122,7 @@ REL_BANNER=""
 			"$REPO_URL" "$VERSION"
 	fi
 	printf 'Its images follow the same `%s-<mcu>-<output stage>.hex` scheme as every\n' "$FW_BASE"
-	printf 'other target (`%s-%s-<output stage>.hex`); the imported `bypass_mcu_` prefix\n' "$FW_BASE" "$PIC320_TAG"
+	printf 'other target (`%s-%s-<output stage>.hex`); the imported `bypass_mcu_` prefix\n' "$FW_BASE" "$PIC10F320_TAG"
 	printf 'it shipped with through v0.9.7 is gone as of v0.9.8.\n\n'
 
 	printf '## Provenance\n\n'
@@ -1133,7 +1133,7 @@ REL_BANNER=""
 	printf -- '- **Soak combinations:** %s\n' "$NCOMBOS"
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
-	printf -- '- **Validation:** `make test-long` + `make attiny202-test` + `make attiny202-test-target` + `make pic-test` + `make pic-test-target-variants` + `make pic320-test` + `make pic320-test-target-variants` (real-image fault handling, firmware/model ctx_ lock-step, and physical-output checks across AVR-XT and both PIC parts) + %s-h parallel soak of every release soak combination (see evidence/).\n' "$hours"
+	printf -- '- **Validation:** `make test-long` + `make attiny202-test` + `make attiny202-test-target` + `make pic10f322-test` + `make pic10f322-test-target-variants` + `make pic10f320-test` + `make pic10f320-test-target-variants` (real-image fault handling, firmware/model ctx_ lock-step, and physical-output checks across AVR-XT and both PIC parts) + %s-h parallel soak of every release soak combination (see evidence/).\n' "$hours"
 	printf -- '- **Release set:** %d images, checked against the canonical `RELEASE_IMAGES` set declared in the Makefile -- not against whatever the build happened to produce.\n\n' "${#IMAGES[@]}"
 
 	printf '## Toolchain\n\n'
@@ -1143,9 +1143,9 @@ REL_BANNER=""
 	printf -- '| avr-libc (pkg) | %s |\n' "$TC_AVR_LIBC"
 	printf -- '| host cc | %s |\n' "$TC_HOST_CC"
 	printf -- '| PIC10F322 XC8 (`PIC_CC=%s`) | %s |\n' "$PIC_CC" "$TC_XC8_322"
-	printf -- '| PIC10F320 XC8 (`PIC320_CC=%s`) | %s |\n' "$PIC320_CC" "$TC_XC8_320"
+	printf -- '| PIC10F320 XC8 (`PIC10F320_CC=%s`) | %s |\n' "$PIC10F320_CC" "$TC_XC8_320"
 	printf -- '| PIC10F322 DFP | %s |\n' "$PIC_DFP"
-	printf -- '| PIC10F320 DFP | %s |\n' "$PIC320_DFP"
+	printf -- '| PIC10F320 DFP | %s |\n' "$PIC10F320_DFP"
 	printf -- '| gpsim | %s |\n' "$TC_GPSIM"
 	printf -- '| libsimavr-dev (pkg) | %s |\n' "$TC_SIMAVR"
 	printf -- '| cppcheck | %s |\n' "$TC_CPPCHECK"
@@ -1183,8 +1183,8 @@ REL_BANNER=""
 	printf '```\n'
 	printf 'git checkout %s\n' "$VERSION"
 	printf '# install the pinned toolchain (see TOOLCHAIN.adoc), then:\n'
-	printf 'make clean && make all13 all85 all45 && make attiny202\n'
-	printf 'make pic && make pic320-variants\n'
+	printf 'make clean && make attiny13a attiny85 attiny45 && make attiny202\n'
+	printf 'make pic10f322 && make pic10f320-variants\n'
 	printf 'scripts/verify-release-images.sh release/%s %s\n' "$VERSION" "$RELEASE_IMAGE_DIRS"
 	printf '```\n'
 	printf 'A passing verifier proves four things agree: the committed files, the checksum\n'
@@ -1228,8 +1228,8 @@ ok "release qualification metadata and evidence verified."
 	printf 'PIC10F320 -- %d images, checked against the canonical RELEASE_IMAGES set the\n' "${#IMAGES[@]}"
 	printf 'Makefile declares rather than against whatever the build produced.\n\n'
 	printf 'Validation: make test-long + make attiny202-test + make attiny202-test-target\n'
-	printf '+ make pic-test + make pic-test-target-variants\n'
-	printf '+ make pic320-test + make pic320-test-target-variants\n'
+	printf '+ make pic10f322-test + make pic10f322-test-target-variants\n'
+	printf '+ make pic10f320-test + make pic10f320-test-target-variants\n'
 	printf '+ %s-h parallel soak of every release soak combination (evidence under\n' "$hours"
 	printf 'release/%s/evidence/).\n\n' "$VERSION"
 	printf 'Reproducibility is pinned by release/%s/SHA256SUMS and verified on a\n' "$VERSION"

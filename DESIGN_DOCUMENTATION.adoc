@@ -754,7 +754,7 @@ family has far more of both flash and SRAM (the ATtiny85 uses approximately
 That SRAM headroom is a deliberate design property, and it is gated rather
 than merely stated: `test_stack_high_water_mark()` in `test/avr/test_sim.c`
 paints SRAM with a canary, exercises the deepest call paths, and fails
-`make test-sim` if fewer than 8 free bytes separate the deepest stack pointer
+`make test-sim-attiny13a` if fewer than 8 free bytes separate the deepest stack pointer
 from the top of the static data. Measured today: 29 free bytes on relay and
 mute, 31 on cd4053 — the same figures as above. The top of static data is read
 from the firmware ELF's `__bss_end` rather than assumed, so a future static
@@ -801,7 +801,7 @@ and is tracked as such.
 
 The PIC10F322 port has a much tighter device budget, 512 fourteen-bit program
 words and 64 bytes of RAM, so its figures are reported in WORDS (by the XC8
-compiler), not bytes. `make pic` enforces the flash-word budget per variant.
+compiler), not bytes. `make pic10f322` enforces the flash-word budget per variant.
 
 .Table PIC10F322 Utilization by Variant (measured, XC8 V3.10)
 |===
@@ -818,7 +818,7 @@ PIC's polled Model-B loop has no `timer_isr_called_` handshake, unlike the
 AVR ISR design), and the remainder is the XC8 runtime's scratch and temporaries.
 Against the 512-word limit the margin is real but not generous: the largest
 variant, relay, leaves 39 words free (7.6%), and cd4053 leaves 67 (13.1%). That
-is enough for maintenance work, not for a substantial new feature. `make pic`
+is enough for maintenance work, not for a substantial new feature. `make pic10f322`
 gates every variant against the budget on every build, so an overshoot fails
 the build rather than reaching hardware.
 
@@ -828,7 +828,7 @@ The PIC10F320 is the same silicon family with **half** the flash: 256 fourteen-b
 program words. It is the most flash-constrained supported part by a wide margin,
 and it is the reason its firmware is structured differently from every other
 target (see "The one target that does not follow this rule" below, and
-`docs/pic10f320_special_case.md`). `make pic320` enforces the 256-word budget per
+`docs/pic10f320_special_case.md`). `make pic10f320` enforces the 256-word budget per
 variant and fails the build on any overshoot.
 
 .Table PIC10F320 Utilization by Variant (measured, XC8 V3.10)

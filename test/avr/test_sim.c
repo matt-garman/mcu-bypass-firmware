@@ -9,7 +9,7 @@
 // Timer0 configuration, sleep/wake, and main-loop state machine as compiled
 // for the AVR.
 //
-// Build & run: see Makefile target `test-sim` (one binary per variant).
+// Build & run: see Makefile target `test-sim-attiny13a` (one binary per variant).
 //
 // The debounce algorithm -- and therefore the LED behavior -- is IDENTICAL
 // across all three output variants: PB1 is lit when engaged, dark when

@@ -634,14 +634,14 @@ class _SelftestChecker:
         self.checks += 1
         if not condition:
             self.failures += 1
-            print("[pic320-stack] FAIL: %s" % message, file=sys.stderr)
+            print("[pic10f320-stack] FAIL: %s" % message, file=sys.stderr)
         else:
-            print("[pic320-stack] OK:   %s" % message)
+            print("[pic10f320-stack] OK:   %s" % message)
 
 
 def selftest():
     checker = _SelftestChecker()
-    with tempfile.TemporaryDirectory(prefix="pic320-return-stack-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="pic10f320-return-stack-") as temporary:
         root = Path(temporary)
 
         def write(name, raw):
@@ -1133,7 +1133,7 @@ def selftest():
         missing = root / "missing.hex"
         expect_image_reject("missing-file", missing, "cannot stat image")
 
-    print("[pic320-stack] selftest: %d checks, %d failures"
+    print("[pic10f320-stack] selftest: %d checks, %d failures"
           % (checker.checks, checker.failures))
     return 1 if checker.failures else 0
 

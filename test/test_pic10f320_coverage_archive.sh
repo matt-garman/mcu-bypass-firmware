@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-work=$(mktemp -d "${TMPDIR:-/tmp}/test-pic320-coverage-archive.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/test-pic10f320-coverage-archive.XXXXXX")
 archive="$work/archive"
 tools="$work/tools"
 cc_log="$work/cc.log"
@@ -85,8 +85,8 @@ chmod 750 "$tools/fake-cc" "$tools/fake-gcov"
 run_gate() {
 	env PATH="$tools:$PATH" FAKE_CC_LOG="$cc_log" \
 		"${MAKE_CMD[@]}" --no-print-directory -C "$archive" \
-			PIC320_HOST_CC="$tools/fake-cc" GCOV="$tools/fake-gcov" \
-			pic320-coverage-check-fw
+			PIC10F320_HOST_CC="$tools/fake-cc" GCOV="$tools/fake-gcov" \
+			pic10f320-coverage-check-fw
 }
 
 : > "$cc_log"

@@ -10,7 +10,8 @@ cc_log="$work/cc.log"
 objcopy_log="$work/objcopy.log"
 checks=0
 unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES
-unset AVR_BUILD_DIR AVR_FW FW_BASE MCU F_CPU F_CPU_X5 CFLAGS CFLAGS_COMMON
+unset AVR_BUILD_DIR AVR_FW FW_BASE ATTINY13A_MCU ATTINY13A_F_CPU TINYX5_F_CPU \
+      CFLAGS CFLAGS_COMMON
 unset AVR_REBUILD_PREREQ
 unset TEST_OBJCOPY
 unset FAKE_CC_MODE FAKE_OBJCOPY_MODE FAKE_READELF_MODE
@@ -109,11 +110,11 @@ run_make "$t13.hex" >/dev/null
 	|| { printf 'FAIL: repeated configuration reused stale ATtiny13a artifacts\n' >&2; exit 1; }
 checks=$((checks + 1))
 
-run_make "$t13.hex" F_CPU=2400000UL >/dev/null
+run_make "$t13.hex" ATTINY13A_F_CPU=2400000UL >/dev/null
 [[ "$(cc_count "$t13.elf")" -eq 3 ]] && grep -q -- '-DF_CPU=2400000UL' "$cc_log" \
 	|| { printf 'FAIL: current F_CPU did not reach ATtiny13a compiler\n' >&2; exit 1; }
 checks=$((checks + 1))
-run_make "$t13.hex" F_CPU=2400000UL >/dev/null
+run_make "$t13.hex" ATTINY13A_F_CPU=2400000UL >/dev/null
 [[ "$(cc_count "$t13.elf")" -eq 4 ]] \
 	|| { printf 'FAIL: repeated F_CPU configuration reused a stale ELF\n' >&2; exit 1; }
 checks=$((checks + 1))
@@ -185,9 +186,9 @@ run_make "$x5.hex" >/dev/null
 run_make "$x5.hex" >/dev/null
 [[ "$(cc_count "$x5.elf")" -eq 2 ]] \
 	|| { printf 'FAIL: repeated tinyx5 configuration reused a stale ELF\n' >&2; exit 1; }
-run_make "$x5.hex" F_CPU_X5=2000000UL >/dev/null
+run_make "$x5.hex" TINYX5_F_CPU=2000000UL >/dev/null
 [[ "$(cc_count "$x5.elf")" -eq 3 ]] && grep -q -- '-DF_CPU=2000000UL' "$cc_log" \
-	|| { printf 'FAIL: current F_CPU_X5 did not reach compiler\n' >&2; exit 1; }
+	|| { printf 'FAIL: current TINYX5_F_CPU did not reach compiler\n' >&2; exit 1; }
 checks=$((checks + 3))
 
 # A forced ELF rebuild must invalidate its paired HEX. A subsequent consumer
@@ -221,7 +222,7 @@ run_make "$t13.elf" AVR_REBUILD_PREREQ= >/dev/null
 	|| { printf 'FAIL: consumer-only ELF access invalidated publishable artifacts\n' >&2; exit 1; }
 checks=$((checks + 1))
 
-if (export FAKE_CC_MODE=fail; run_make "$t13.hex" F_CPU=3000000UL) >/dev/null 2>&1; then
+if (export FAKE_CC_MODE=fail; run_make "$t13.hex" ATTINY13A_F_CPU=3000000UL) >/dev/null 2>&1; then
 	printf 'FAIL: compiler failure was accepted\n' >&2; exit 1
 fi
 shopt -s nullglob
@@ -230,34 +231,34 @@ shopt -u nullglob
 [[ ! -e "$repo/$t13.elf" && ! -e "$repo/$t13.hex" && "${#temps[@]}" -eq 0 ]] \
 	|| { printf 'FAIL: compiler failure left stale or partial artifacts\n' >&2; exit 1; }
 checks=$((checks + 1))
-run_make "$t13.hex" F_CPU=3000000UL >/dev/null
+run_make "$t13.hex" ATTINY13A_F_CPU=3000000UL >/dev/null
 
-if (export FAKE_CC_MODE=empty; run_make "$t13.hex" F_CPU=3050000UL) >/dev/null 2>&1; then
+if (export FAKE_CC_MODE=empty; run_make "$t13.hex" ATTINY13A_F_CPU=3050000UL) >/dev/null 2>&1; then
 	printf 'FAIL: empty compiler output was accepted\n' >&2; exit 1
 fi
 [[ ! -e "$repo/$t13.elf" && ! -e "$repo/$t13.hex" ]] \
 	|| { printf 'FAIL: empty compiler output left final artifacts\n' >&2; exit 1; }
 checks=$((checks + 1))
-run_make "$t13.hex" F_CPU=3050000UL >/dev/null
+run_make "$t13.hex" ATTINY13A_F_CPU=3050000UL >/dev/null
 
-if (export FAKE_CC_MODE=malformed; run_make "$t13.hex" F_CPU=3075000UL) >/dev/null 2>&1; then
+if (export FAKE_CC_MODE=malformed; run_make "$t13.hex" ATTINY13A_F_CPU=3075000UL) >/dev/null 2>&1; then
 	printf 'FAIL: malformed compiler output was accepted\n' >&2; exit 1
 fi
 [[ ! -e "$repo/$t13.elf" && ! -e "$repo/$t13.hex" ]] \
 	|| { printf 'FAIL: malformed compiler output left final artifacts\n' >&2; exit 1; }
 checks=$((checks + 1))
-run_make "$t13.hex" F_CPU=3075000UL >/dev/null
+run_make "$t13.hex" ATTINY13A_F_CPU=3075000UL >/dev/null
 
-if (export FAKE_READELF_MODE=wrong; run_make "$t13.hex" F_CPU=3080000UL) >/dev/null 2>&1; then
+if (export FAKE_READELF_MODE=wrong; run_make "$t13.hex" ATTINY13A_F_CPU=3080000UL) >/dev/null 2>&1; then
 	printf 'FAIL: wrong-architecture compiler output was accepted\n' >&2; exit 1
 fi
 [[ ! -e "$repo/$t13.elf" && ! -e "$repo/$t13.hex" ]] \
 	|| { printf 'FAIL: wrong-architecture compiler output left final artifacts\n' >&2; exit 1; }
 checks=$((checks + 1))
-run_make "$t13.hex" F_CPU=3080000UL >/dev/null
+run_make "$t13.hex" ATTINY13A_F_CPU=3080000UL >/dev/null
 
 if (export TEST_OBJCOPY="$tools/objcopy_fail" FAKE_OBJCOPY_MODE=fail; \
-		run_make "$t13.hex" F_CPU=3100000UL) >/dev/null 2>&1; then
+		run_make "$t13.hex" ATTINY13A_F_CPU=3100000UL) >/dev/null 2>&1; then
 	printf 'FAIL: objcopy failure was accepted\n' >&2; exit 1
 fi
 shopt -s nullglob
@@ -268,7 +269,7 @@ shopt -u nullglob
 checks=$((checks + 1))
 
 if (export TEST_OBJCOPY="$tools/objcopy_empty" FAKE_OBJCOPY_MODE=empty; \
-		run_make "$t13.hex" F_CPU=3200000UL) >/dev/null 2>&1; then
+		run_make "$t13.hex" ATTINY13A_F_CPU=3200000UL) >/dev/null 2>&1; then
 	printf 'FAIL: empty objcopy output was accepted\n' >&2; exit 1
 fi
 [[ -s "$repo/$t13.elf" && ! -e "$repo/$t13.hex" ]] \
@@ -276,7 +277,7 @@ fi
 checks=$((checks + 1))
 
 if (export FAKE_OBJCOPY_MODE=malformed; \
-		run_make "$t13.hex" F_CPU=3250000UL) >/dev/null 2>&1; then
+		run_make "$t13.hex" ATTINY13A_F_CPU=3250000UL) >/dev/null 2>&1; then
 	printf 'FAIL: malformed objcopy output was accepted\n' >&2; exit 1
 fi
 [[ -s "$repo/$t13.elf" && ! -e "$repo/$t13.hex" ]] \
@@ -296,7 +297,7 @@ checks=$((checks + 1))
 
 rm -f "$repo/$t13.hex"
 mkdir "$repo/$t13.hex"
-if run_make "$t13.elf" F_CPU=3300000UL >/dev/null 2>&1; then
+if run_make "$t13.elf" ATTINY13A_F_CPU=3300000UL >/dev/null 2>&1; then
 	printf 'FAIL: unremovable stale HEX path was accepted\n' >&2; exit 1
 fi
 [[ -d "$repo/$t13.hex" && ! -e "$repo/$t13.elf" ]] \

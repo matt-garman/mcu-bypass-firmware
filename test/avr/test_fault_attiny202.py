@@ -4,7 +4,7 @@
 #
 # test_fault_attiny202.py -- ATtiny202 (AVR-XT) critical-SFR / latch / state
 # fault-injection test on a patched yasimavr. The AVR-XT analogue of the PIC
-# libgpsim fault test (test/pic/test_fault_pic.cc / pic-test-fault) and the AVR
+# libgpsim fault test (test/pic/test_fault_pic.cc / pic10f322-test-fault) and the AVR
 # simavr inject_config_sfr cases (test/avr/test_sim.c): corrupt a value the shell
 # guards and assert the firmware CATCHES it and forces recovery. It is the mirror
 # image of the soak test -- there a reset is a FAILURE, here it is the PASS.

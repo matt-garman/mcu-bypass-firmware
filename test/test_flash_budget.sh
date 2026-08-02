@@ -10,7 +10,7 @@ images="$work/images"
 mkdir -p "$tools" "$images"
 checks=0
 unset FAKE_SIZE_MODE FAKE_SIZE_FAIL_NAME TEST_SIZE_COMMAND TEST_FLASH_BYTES TEST_BUDGET
-unset FLASH_T13_BUDGET AVR_REBUILD_PREREQ MAKEFLAGS MFLAGS GNUMAKEFLAGS
+unset ATTINY13A_FLASH_BUDGET AVR_REBUILD_PREREQ MAKEFLAGS MFLAGS GNUMAKEFLAGS
 
 cat > "$tools/cc" <<'EOF'
 #!/usr/bin/env bash
@@ -81,7 +81,7 @@ run_make_gate() {
 	make --no-print-directory -C "$ROOT" test-flash-budget \
 		AVR_BUILD_DIR="$images" CC="$tools/cc" HOSTCC="$tools/cc" SIZE="$tools/size" \
 		READELF="$tools/readelf" \
-		FLASH_T13_BUDGET=90 VARIANTS="cd4053_simple cd4053_with_mute tq2_l2_5v_relay" \
+		ATTINY13A_FLASH_BUDGET=90 VARIANTS="cd4053_simple cd4053_with_mute tq2_l2_5v_relay" \
 		MCU=attiny13a FW_BASE=bypass "$@"
 }
 
@@ -161,7 +161,7 @@ output=$(run_make_gate)
 	|| { printf 'FAIL: Make flash gate lacked complete verdict\n' >&2; exit 1; }
 checks=$((checks + 1))
 
-for override in MCU=attiny85 FW_BASE=alternate AVR_FW=alternate; do
+for override in ATTINY13A_MCU=attiny85 FW_BASE=alternate AVR_FW=alternate; do
 	reset_images
 	before=$(sha256sum "$images"/*.elf)
 	if output=$(run_make_gate "$override" 2>&1); then
@@ -193,8 +193,8 @@ for variants in '' 'cd4053_simple' 'cd4053_simple cd4053_with_mute' \
 	checks=$((checks + 1))
 done
 
-for overrides in 'FLASH_T13_ELFS=alternate.elf' \
-	'FLASH_T13_MCU=attiny85 FLASH_T13_BYTES=1'; do
+for overrides in 'ATTINY13A_FLASH_ELFS=alternate.elf' \
+	'ATTINY13A_FLASH_MCU=attiny85 ATTINY13A_FLASH_BYTES=1'; do
 	reset_images
 	read -r -a override_args <<<"$overrides"
 	output=$(run_make_gate "${override_args[@]}") \

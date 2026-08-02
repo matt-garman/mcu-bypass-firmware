@@ -180,7 +180,7 @@ class Selftest:
             action()
         except (OSError, ValidationError) as exc:
             self.failures += 1
-            print("[pic320-hash] FAIL: %s (%s)" % (label, exc), file=sys.stderr)
+            print("[pic10f320-hash] FAIL: %s (%s)" % (label, exc), file=sys.stderr)
 
     def expect_error(self, label, diagnostic, action):
         self.checks += 1
@@ -189,11 +189,11 @@ class Selftest:
         except ValidationError as exc:
             if diagnostic not in str(exc):
                 self.failures += 1
-                print("[pic320-hash] FAIL: %s reported the wrong error (%s)" %
+                print("[pic10f320-hash] FAIL: %s reported the wrong error (%s)" %
                       (label, exc), file=sys.stderr)
             return
         self.failures += 1
-        print("[pic320-hash] FAIL: %s was accepted" % label, file=sys.stderr)
+        print("[pic10f320-hash] FAIL: %s was accepted" % label, file=sys.stderr)
 
     def expect_status(self, label, expected, diagnostic, action):
         self.checks += 1
@@ -204,7 +204,7 @@ class Selftest:
         output = stdout.getvalue() + stderr.getvalue()
         if actual != expected or diagnostic not in output:
             self.failures += 1
-            print("[pic320-hash] FAIL: %s returned %d, output %r" %
+            print("[pic10f320-hash] FAIL: %s returned %d, output %r" %
                   (label, actual, output), file=sys.stderr)
 
 
@@ -219,7 +219,7 @@ def write_manifest(path, digests, names=EXPECTED_NAMES, separator="  ",
 
 def run_selftest():
     checker = Selftest()
-    with tempfile.TemporaryDirectory(prefix="pic320-expected-images-") as temp:
+    with tempfile.TemporaryDirectory(prefix="pic10f320-expected-images-") as temp:
         root = Path(temp)
         images = []
         for index, name in enumerate(EXPECTED_NAMES):

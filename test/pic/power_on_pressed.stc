@@ -10,7 +10,7 @@
 #   fresh press. The wrapper test/pic/run_gpsim_power_on_pressed.sh parses the
 #   snapshots and turns them into PASS/FAIL.
 #
-# HOW IT IS RUN (see the wrapper / `make pic-test-gpsim`)
+# HOW IT IS RUN (see the wrapper / `make pic10f322-test-gpsim`)
 #   gpsim -i -pp10f322 <variant>.hex -c test/pic/power_on_pressed.stc
 #   Variant-agnostic: only RA0 (LED) and RA3 (footswitch) are asserted, and those
 #   are identical across all three output variants. Running it per variant also

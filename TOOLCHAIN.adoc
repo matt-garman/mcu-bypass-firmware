@@ -47,18 +47,18 @@ tool, re-run `make clean && make test` before relying on its output.
 
 ONE XC8 + device-pack installation serves BOTH PIC parts. They are kept on
 separate Makefile variable pairs (`PIC_CC`/`PIC_DFP` for the 10F322,
-`PIC320_CC`/`PIC320_DFP` for the 10F320) so either chip can be re-pinned to a
+`PIC10F320_CC`/`PIC10F320_DFP` for the 10F320) so either chip can be re-pinned to a
 different compiler or pack without silently moving the other; by default the
 320's variables track the 322's. The release manifest probes and records both
 selected compiler paths and versions independently, even when they resolve to
 the same installation.
 
-The PIC10F322 port (`make pic`, `make pic-test`,
-`make pic-test-target-variants`) is a SEPARATE, optional toolchain, entirely
+The PIC10F322 port (`make pic10f322`, `make pic10f322-test`,
+`make pic10f322-test-target-variants`) is a SEPARATE, optional toolchain, entirely
 independent of the AVR build above and deliberately NOT part of `make test` (the
 AVR pre-hardware gate).  Individual PIC targets skip cleanly when their tools
 are absent, so the AVR workflow is unaffected if these are not installed.  CI
-and release use `STRICT_TOOLS=1` and the fail-closed `pic-test-target-variants`
+and release use `STRICT_TOOLS=1` and the fail-closed `pic10f322-test-target-variants`
 aggregate so missing PIC tooling cannot produce a false green release gate.
 
   MPLAB XC8:    V3.10  (Microchip MPLAB XC8 C Compiler; build date Aug 13 2025)
@@ -79,22 +79,22 @@ aggregate so missing PIC tooling cannot produce a false green release gate.
                 override with PIC_DFP=... on the make command line.
 
   gpsim:        0.32.1  (Ubuntu package: gpsim)
-                Instruction-level PIC simulator used by `make pic-test-gpsim`
+                Instruction-level PIC simulator used by `make pic10f322-test-gpsim`
                 for register-level functional tests.  The libgpsim harnesses
                 below add the PIC lock-step, fault-injection, and target-I/O
                 gates.
                 install: apt install gpsim
                 note: gpsim 0.32.1 supports p10f320 natively too; the
                 PIC10F320 lane reuses these exact wrapper scripts with only the
-                processor overridden (PIC320_GPSIM_PROC=p10f320).
+                processor overridden (PIC10F320_GPSIM_PROC=p10f320).
                 note: gpsim 0.32.1 DOES support the p10f322; its I/O pins are
                 named ra0..ra3 (lower-case) in stimulus/attach scripts.
 
   libgpsim:     gpsim-dev + libglib2.0-dev + g++ + pkg-config  (Ubuntu packages)
-                Needed by `make pic-test-fault` (SFR / pull-up / ctx_
-                fault-injection), `make pic-test-lockstep` (built-HEX live SRAM
-                vs model), `make pic-test-io` (GPIO transition and pulse timing),
-                and `make pic-test-soak` (long-duration soak). These harnesses
+                Needed by `make pic10f322-test-fault` (SFR / pull-up / ctx_
+                fault-injection), `make pic10f322-test-lockstep` (built-HEX live SRAM
+                vs model), `make pic10f322-test-io` (GPIO transition and pulse timing),
+                and `make pic10f322-test-soak` (long-duration soak). These harnesses
                 LINK libgpsim instead of scripting the gpsim CLI; the runtime
                 `gpsim` package ships no headers, the C++ harnesses need g++,
                 and the glib include/link flags are discovered through
@@ -106,23 +106,23 @@ aggregate so missing PIC tooling cannot produce a false green release gate.
                 The build passes -isystem for the gpsim headers (they emit their
                 own -Woverloaded-virtual warnings).  The standalone libgpsim
                 targets skip cleanly when dev packages or the XC8-built HEX are
-                absent; use `make pic-test-target-variants STRICT_TOOLS=1` when
+                absent; use `make pic10f322-test-target-variants STRICT_TOOLS=1` when
                  a missing or skipped target must fail closed.
 
   Python:       Python 3, standard library only. `make
-                test-pic320-return-stack-oracle` runs deterministic parser and
+                test-pic10f320-return-stack-oracle` runs deterministic parser and
                 control-flow fixtures in the normal `make test` / `test-long`
-                graph. Every successful `make pic320` build applies the oracle
+                graph. Every successful `make pic10f320` build applies the oracle
                 before its image is marked complete. `make
-                pic320-test-return-stack` rebuilds and rechecks all three XC8
+                pic10f320-test-return-stack` rebuilds and rechecks all three XC8
                 HEX images together and never skips for a missing interpreter
-                or image. `make test-pic320-expected-images` independently
+                or image. `make test-pic10f320-expected-images` independently
                 validates the strict three-record SHA-256 contract without XC8;
-                `make pic320-test-build` rebuilds the complete image matrix and
+                `make pic10f320-test-build` rebuilds the complete image matrix and
                 fails unless every raw HEX file matches that reviewed baseline.
 
   cppcheck:     2.13.0  (the SAME binary as the AVR analysis, below)
-                `make pic-analyze` runs it with --platform=pic8-enhanced over the
+                `make pic10f322-analyze` runs it with --platform=pic8-enhanced over the
                 real XC8 + DFP register headers.  No install beyond the XC8/DFP
                 packs.
 
@@ -152,8 +152,8 @@ XC8 / device-pack behaviours relied on (proven against V3.10 + DFP v1.9.189):
 
 Device budgets, both gated per variant on every build:
 
-  PIC10F322:  512 words of flash, 64 bytes of RAM   (`make pic`)
-  PIC10F320:  256 words of flash, 64 bytes of RAM   (`make pic320`)
+  PIC10F322:  512 words of flash, 64 bytes of RAM   (`make pic10f322`)
+  PIC10F320:  256 words of flash, 64 bytes of RAM   (`make pic10f320`)
 
 See "Resource Utilization" in DESIGN_DOCUMENTATION.adoc for the measured
 figures, which own the per-variant word counts.  The 320's margins there are
@@ -161,20 +161,20 @@ tight enough to be a design input rather than a footnote: they are why one of
 the PIC10F322 shell's defensive checks could not be ported to it; see
 docs/pic10f320_special_case.md.
 
-PIC10F320 commands, for reference (same toolchain, `pic320-` targets):
+PIC10F320 commands, for reference (same toolchain, `pic10f320-` targets):
 
-  make pic320-variants             build all three variants + 256-word gate
-  make pic320-size                 XC8 program/data memory summary
-  make pic320-test-build           reviewed SHA-256 baseline (all images)
-  make pic320-test-return-stack    final-HEX reachable return-stack proof (all images)
-  make pic320-test                 host equivalence/actuation/fault/coverage,
+  make pic10f320-variants             build all three variants + 256-word gate
+  make pic10f320-size                 XC8 program/data memory summary
+  make pic10f320-test-build           reviewed SHA-256 baseline (all images)
+  make pic10f320-test-return-stack    final-HEX reachable return-stack proof (all images)
+  make pic10f320-test                 host equivalence/actuation/fault/coverage,
                                      hashes/CONFIG/return stack, cppcheck+MISRA,
                                      and CLI gpsim, swept across all variants
-  make pic320-test-target-variants fail-closed libgpsim fault/lock-step/I-O
-  make pic320-test-soak            long-duration libgpsim soak
+  make pic10f320-test-target-variants fail-closed libgpsim fault/lock-step/I-O
+  make pic10f320-test-soak            long-duration libgpsim soak
 
 Its build output goes to build_pic10f320/ (build and coverage artifacts alike),
-kept separate from the 322's build_pic/ and from the shared top-level coverage/.
+kept separate from the 322's build_pic10f322/ and from the shared top-level coverage/.
 
 The final-HEX stack oracle decodes the PIC10F320's classic 35-instruction
 mid-range PIC14 ISA directly. `CALL`/`GOTO` use masks `0x2000/0x3800` and
@@ -192,7 +192,7 @@ PIC10F320 has a 9-bit architectural PC and 256 implemented physical words.
 `CALL`/`GOTO` targets, sequential/skip PCs, pushed return addresses, and popped
 successors normalize to `0x000..0x1ff`; only instruction fetch aliases through
 the low eight bits to physical words `0x00..0xff`. The per-build check runs inside
-`pic320`'s existing incomplete-image trap; an oracle, Python, or analysis failure
+`pic10f320`'s existing incomplete-image trap; an oracle, Python, or analysis failure
 removes that build output. This does not make an artifact immutable after the
 recipe returns. The complete-matrix target and release provenance/reproduction
 gates provide later rechecks at their own use points.
@@ -326,15 +326,15 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   Optional analysis tools:
   sudo apt install valgrind lcov gcovr
 
-  Optional PIC10F322 port (`make pic` / `make pic-test` /
-  `make pic-test-target-variants`):
+  Optional PIC10F322 port (`make pic10f322` / `make pic10f322-test` /
+  `make pic10f322-test-target-variants`):
   sudo apt install gpsim          # the PIC simulator (apt)
   # For the libgpsim fault/lock-step/target-I/O gates and the soak:
   sudo apt install gpsim-dev libglib2.0-dev g++ pkg-config
   # XC8 V3.10 + the PIC10-12Fxxx_DFP pack are separate Microchip downloads
   # (see the PIC toolchain section above).  Without them, the pic* targets
   # skip cleanly and the AVR `make test` is unaffected.  Release/CI use
-  # STRICT_TOOLS=1 plus `make pic-test-target-variants`, where any skip fails.
+  # STRICT_TOOLS=1 plus `make pic10f322-test-target-variants`, where any skip fails.
 
   Mutation tests that require the PIC target toolchain may be allowed to skip
   locally with `MUTATION_ALLOW_SKIP=1` (the default).  Full-toolchain and release

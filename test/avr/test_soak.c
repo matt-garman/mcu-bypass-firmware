@@ -29,7 +29,7 @@
 //   - Progress lines are printed to stdout every SOAK_PROGRESS_INTERVAL_MS.
 //   - This is a standalone binary; it does not link bypass_pure.c or
 //     model_step.h (no lock-step co-simulation -- that is covered by the
-//     regular test-sim suite at smaller scale).
+//     regular test-sim-attiny13a suite at smaller scale).
 //
 // Build:  `make test-soak`
 // This target is intentionally NOT part of `make test` or `make test-long`.

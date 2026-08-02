@@ -25,8 +25,8 @@
 //
 // USAGE
 //   test_config_pic <file.hex> [<file.hex> ...]
-// The Makefile's `pic-test-config` target builds the HEX (via `make pic`) and
-// runs this against every build_pic/*.hex. All three output variants share the
+// The Makefile's `pic10f322-test-config` target builds the HEX (via `make pic10f322`) and
+// runs this against every build_pic10f322/*.hex. All three output variants share the
 // same shell + the same #pragma config, so every variant's CONFIG word must be
 // identical; checking them all also catches any accidental divergence.
 //

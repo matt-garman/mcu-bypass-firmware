@@ -184,7 +184,7 @@ on. Building with an alternative compiler and running the full simulation suite
 would catch compiler-specific behavioural changes. Classic firmware targets
 already rebuild on request, but nothing *compares* behavioural results between
 compiler versions. A `test-cross-compiler` target that builds with
-`CC=avr-gcc-12` (if installed) and re-runs `test-sim` would close this gap. See
+`CC=avr-gcc-12` (if installed) and re-runs `test-sim-attiny13a` would close this gap. See
 also the broader multi-compiler matrix in Tier 3, of which this is the narrow
 first step.
 
@@ -338,7 +338,7 @@ Design notes if picked up:
   mismatch is corruption). Do NOT reach for cli/sei around the check — that would
   break the documented "no interrupts disabled in steady state" invariant.
 - PIC10F322: single-threaded polled loop, so a full shadow is trivial — but watch
-  the flash budget, which `make pic` gates. RAM cost is +2–3 bytes against ample
+  the flash budget, which `make pic10f322` gates. RAM cost is +2–3 bytes against ample
   free space on both parts.
 - PIC10F320: almost certainly does not fit. Check against its budget before
   promising cross-target parity, and record the omission if it cannot be done.
@@ -508,72 +508,10 @@ Key constraints (so it actually works for the read-off-the-chip scenario):
 Effort: ~1–2 h incl. the `BYPASS_EMBED_URL` Makefile wiring plus a
 `strings`-based build check. Firmware source edit is the user's.
 
-**Unified naming scheme across MCU targets and output stages.** Added 2026-07-26
-as the deferred half of the PIC10F320 merge (`docs/pic10f320_merge_plan.md` §15).
-That merge deliberately took the smallest-change option at every naming fork so
-it would not also become a rename project. The debt is real, it is now
-*visible in one tree* for the first time, and it should be paid deliberately
-rather than drifting further. Four inconsistent axes, of which the two that
-touch published and typed names are now paid off (v0.9.8) and two remain:
-
-- **Make target prefixes.** ATtiny13a/tinyx5 use bare or suffixed goals (`all`,
-  `all13`, `all85`, `size45`); PIC10F322 uses `pic-`; ATtiny202 uses
-  `attiny202-`; PIC10F320 adds `pic320-`. So `pic-` silently means "the PIC that
-  got here first", which is exactly the near-name hazard the merge plan lists as
-  residual risk 7.
-- **Makefile variable prefixes.** Three idioms for "which chip": `MCU`,
-  `PIC_TAG`/`PIC_*`, `XT_*`, plus the new `PIC320_*`. `PIC_FLASH_WORDS` is the
-  cautionary case — a mis-scoped chip variable produces no compile error and no
-  failing test, it produces a *passing* one (a 256-word image gated at 512).
-- ~~**Release image basenames.**~~ **DONE for v0.9.8** (branch
-  `hex-image-name-consistency`). Every image is now
-  `bypass-<mcu>-<output stage>.hex` on all six parts, composed in one place by
-  the Makefile's `$(call fw_image,...)`. The `bypass_mcu_` prefix and
-  `PIC320_FW_BASE` are gone, and the ATtiny13a images carry an explicit
-  `attiny13a` field instead of being identified by the *absence* of a suffix —
-  which was the actual hazard, since nothing in a bare `bypass_cd4053.hex`
-  stopped it being flashed onto an ATtiny85. Historical `release/vX.Y.Z/`
-  directories were deliberately left alone (signed `SHA256SUMS` name the files);
-  `release/README.md` carries the old→new redirect table.
-- ~~**Output-stage vocabulary.**~~ **DONE for v0.9.8**, immediately after the
-  basename axis and on the same branch. Both variant lists — and the AVR-XT
-  one — now hold `cd4053_simple`/`cd4053_with_mute`/`tq2_l2_5v_relay`, the same
-  strings the driver sources and the image field use. `VARIANT=`, the make
-  goals (`test-sim-cd4053_with_mute`), the soak combination names and their
-  retained evidence filenames all moved with it. The `IMAGE_STAGE_*` map
-  collapsed to the identity and was deleted, along with its two downstream
-  copies in `scripts/make-release.sh` and `test/test_pic_build.sh`; what guards
-  the vocabulary now is a parse-time check that every supported variant in every
-  lane has a `macro_<v>` and a `src_<v>`. Longer command lines are the accepted
-  cost.
-
-Design notes if picked up:
-- What remains is the two PREFIX axes above (make-target prefixes, Makefile
-  variable prefixes). Both are internal: neither changes a published artifact
-  name, and only the make-goal prefixes are user-visible. Sequence them so the
-  tree is never half-unified — one axis per commit, each with its consumers,
-  rather than a sweeping rename reviewed all at once.
-- Renaming a Makefile variable is an **external interface change**, not an
-  internal one: `scripts/make-release.sh` reads Makefile truth through
-  `make -s print-<VAR>`. Grep `print-` across `scripts/` and
-  `.github/workflows/` as part of any rename.
-- The merge plan's §15 records which asymmetries were knowingly accepted; use it
-  as the worklist rather than re-deriving them, but note §5.3/D2's basename
-  entries are now superseded by the v0.9.8 rename.
-- A rename that changes published artifact names belongs at a version boundary
-  with a redirect note in the release documentation, as v0.9.8 did.
-
-Effort: ~2–4 h remaining (was ~4–8 h; the basename and vocabulary axes are
-spent). Impact:
-Medium — no behavioural change and no new assurance, but it removes a class of
-silent-misconfiguration hazard that grows with every added target, and it is the
-difference between "six targets in one repository" and "four projects sharing a
-Makefile".
-
-**`make program-pic320` convenience target.** Added 2026-07-27. The PIC10F322
-has `make program-pic` (with `PIC_PROG=pk2cmd|ipecmd`,
-`PIC_PROG_TOOL`, `PIC_PROG_CMD` overrides); the PIC10F320 has no equivalent, so
-`release/README.md` and the generated `MANIFEST.md` print the bare
+**`make pic10f320-program` convenience target.** Added 2026-07-27. The PIC10F322
+has `make pic10f322-program` (with `PIC10F322_PROG=pk2cmd|ipecmd`,
+`PIC10F322_PROG_TOOL` and `PIC10F322_PROG_CMD` overrides); the PIC10F320 has no
+equivalent, so `release/README.md` and the generated `MANIFEST.md` print the bare
 `pk2cmd -PPIC10F320 -F<image> -M -Y -R` instead. The merge recorded this as a
 deliberate omission rather than shipping it unverified
 (`docs/pic10f320_merge_plan.md` §15.10): it is ~15 lines modelled on the 322
@@ -581,8 +519,8 @@ recipe, but it is hardware-programming surface that **cannot be tested without a
 programmer and a part on the bench**, and a wrong programmer invocation aimed at
 the wrong device is worse than an honest absence.
 
-Design notes if picked up: mirror `program-pic` exactly rather than inventing a
-second idiom, add `PIC320_PROG*` variables under the §5.6 prefix rule (the whole
+Design notes if picked up: mirror `pic10f322-program` exactly rather than inventing a
+second idiom, add `PIC10F320_PROG*` variables under the part-prefix rule (the whole
 point of the separate pair is that one chip can be re-pinned without moving the
 other), and update the `make help` Hardware block, the PIC10F320 flashing section
 in `release/README.md`, and the manifest's flashing command in the same change.
@@ -693,7 +631,7 @@ one measures a constant.
 identical stimulus and diff the LED edges to show variant-consistent behaviour.
 Declined: the property is already asserted directly by the per-variant
 behavioural tests, and the output is a documentation artifact rather than a gate.
-`make trace` remains available for anyone who wants the waveform.
+`make attiny13a-trace` remains available for anyone who wants the waveform.
 
 ---
 
@@ -724,7 +662,6 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |
 | Broader compiler & toolchain portability | 3 | Medium | Medium-High — adoption + reliability |
 | Embedded provenance URL | 3 | 1–2 h | Low — provenance polish |
-| Unified naming scheme across MCUs (names+vocabulary done in v0.9.8; prefixes remain) | 3 | 2–4 h | Medium — removes a silent-misconfig class |
-| `make program-pic320` target | 3 | 1 h + bench | Low — convenience; `pk2cmd` documented |
+| `make pic10f320-program` target | 3 | 1 h + bench | Low — convenience; `pk2cmd` documented |
 | Manufacturing artifacts (name as scope) | 4 | — | Completeness signal |
 | Signal-integrity SPICE modeling | 4 | 2 h | High for the board, not firmware work |

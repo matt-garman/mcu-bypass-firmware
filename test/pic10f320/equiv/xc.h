@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Matthew Garman
 
-// Mock <xc.h> for the firmware<->model equivalence test (make pic320-test-equiv).
+// Mock <xc.h> for the firmware<->model equivalence test (make pic10f320-test-equiv).
 //
 // This lets the REAL firmware (bypass_mcu_pic10f320.c) be compiled and run on
 // the host: it replaces the XC8/DFP device header with plain host storage for
