@@ -327,7 +327,8 @@ datasheet startup time against 64 ms). Item (b) is a documentation task and pair
 naturally with the Tier 2 datasheet-citation item.
 
 **Fail-closed gate on the names other files exchange with the Makefile —
-`print-<VAR>` reads, documented `make <goal>` targets, ~~`make VAR=value`
+~~`print-<VAR>` reads~~ (axis A **done**, 2026-08-02), documented
+`make <goal>` targets, ~~`make VAR=value`
 overrides~~ (axis C **done**, 2026-08-02), and variables named to human
 readers.** Added 2026-08-01 while doing
 the variable-prefix rename in `v0.9.8`; widened three times on 2026-08-02 —
@@ -340,9 +341,9 @@ One defect, four axes. Nothing asserts that the Makefile names other files
 *speak* are a subset of the names the Makefile actually *defines*, so a rename
 severs the link silently and every gate stays green.
 
-*Axis A — variables.* `print-%` is a pattern rule (`Makefile`, `@echo '$($*)'`),
-so it matches any name. Ask it for a variable that no longer exists and it
-prints an empty line and exits 0.
+*Axis A — variables (**done**).* `print-%` is a pattern rule (`Makefile`,
+`@echo '$($*)'`), so it matches any name. Ask it for a variable that no longer
+exists and it prints an empty line and exits 0.
 
 That is not hypothetical: the `v0.9.8` rename left three `mkv` calls in
 `scripts/make-release.sh` pointed at removed names (`MCU`, `LFUSE_X5`,
@@ -474,12 +475,59 @@ The Makefile side is an `origin-%` rule beside `print-%` — which had to live
 there, exactly as predicted — plus a bulk `origins NAMES="…"` form so a whole
 harvest resolves in one 27 ms invocation instead of one per name.
 
-**Still open: axes A, B and D.** Axis A (`print-<VAR>` reads) is now cheap: the
-`origin-%`/`origins` oracle it needs already exists, so it is a harvest plus the
-same contract check, ~1 h. Axes B and D share a harvest pass over the same files
-and differ only in the token class they look for, so building either alone
-wastes most of the work. Their consumers are humans, rather than a script that
-at least runs in CI.
+**Axis A is DONE (2026-08-02).** Folded into the same
+`test/test_makefile_name_contract.py` rather than given its own gate: it shares
+the oracle, the harvest machinery and the exemption discipline, and the gate was
+never named for one axis. Verified by restoring the `v0.9.7` spellings in
+`scripts/make-release.sh`, which makes it name all five severed reads with
+their line numbers and exit 1. 22 checks total now, 64 variable queries
+verified, 0.4 s.
+
+Four things worth recording, two of which contradict the specification above:
+
+1. *Anchoring on the make word — correct for axis C — is wrong here, and would
+   have lost real sites.* Axis C needs the anchor because `NAME=` is a generic
+   shape. `print-` is not: every non-query form in this tree
+   (`--no-print-directory`, `-print-file-name`, `--print-data-base`,
+   `--print-targets`) carries a hyphen immediately before `print`, so one
+   lookbehind separates them and no `make` adjacency is needed. Requiring it
+   would have dropped `test/test_workload_rebuild.sh:255`, which queries through
+   a `run_make` wrapper and has no bare `make` token, and half of
+   `scripts/ci-local.sh:368`, which spreads eight queries across a
+   continuation. The two axes want different harvests, and assuming otherwise
+   costs coverage silently.
+2. *Axis A's contract is strictly stronger than axis C's.* Axis C accepts
+   *defined **or** consumed*; a read must be **defined**. A command-line-only
+   input such as `VERSION` is legitimate to set but useless to ask for — the
+   query returns an empty line, which is the severance symptom itself.
+3. *The historical-document exemption should be self-declared, not listed.* The
+   spec (under axis B, below) predicted a hardcoded whole-file list. In fact
+   nine markdown files already open with a banner calling themselves historical
+   — `> **Historical decision record…**`, `**Status:** historical evidence`,
+   `> …retained only for historical reproducibility` — so the gate keys on the
+   banner. A new historical document is exempt the day it is written, deleting
+   the banner puts the document back under the contract, and both directions are
+   asserted. Only `CHANGELOG.md` is listed by name, because recording what names
+   *used to be* is a changelog working correctly. This mechanism should be
+   reused for axis B, where the exemption problem is described as the hard part.
+4. *Computed names must be expanded, not skipped, and an unrecognised one has to
+   fail.* `mkv part_"$n"` is the only one; it expands over `$(TINYX5)` to
+   `part_85`/`part_45`, both checked. A skip would be invisible, so the gate
+   fails on any computed prefix it has no expansion for.
+
+The self-exemption is the other thing that had to be added, and it was not
+foreseen: **the gate now harvests its own source.** That only became true when
+the axis-C file was first committed — while it was untracked, `git ls-files` did
+not list it and the exemption was accidental. Its docstrings necessarily quote
+the removed names as examples and its negative-case fixtures build overrides on
+purpose, so the file is excluded from both harvests, and the exclusion is
+asserted to still be load-bearing. Any gate whose subject is *text* will meet
+this; worth expecting on axes B and D rather than rediscovering.
+
+**Still open: axes B and D.** They share a harvest pass over the same files and
+differ only in the token class they look for, so building either alone wastes
+most of the work. Their consumers are humans, rather than a script that at least
+runs in CI.
 
 A prototype sweep already works: harvest every `NAME=value` token from lines
 invoking make across `test/`, `scripts/`, `.github/` and the Makefile's own
@@ -531,22 +579,28 @@ The same check belongs in the Makefile itself if it can be done cheaply, since
 it would also catch a hand-typed `make test-soak SOAK_DURATION_MS=...` — which
 is exactly what the Makefile's own comment recommended until 2026-08-02.
 
-Design notes if picked up:
-- **Use `$(origin)`, not non-emptiness.** Several variables the scripts read
+Design notes if picked up (the first three are ~~settled~~ by axes A and C and
+are kept as the record of why, not as work):
+- ~~**Use `$(origin)`, not non-emptiness.**~~ Several variables the scripts read
   are defined-but-empty by design (`XT_SOAK_COMBINATION_NAME`,
   `AVR_STACK_BUILD_DIR`), so a non-empty assertion produces false failures.
   `$(origin VAR)` returns `undefined` for a name the Makefile never sets and
   `file` for one deliberately set empty — verified, and it is the only oracle
-  that separates the two cases.
-- This needs an `origin-%` rule *inside* the Makefile, beside `print-%`. It
+  that separates the two cases. Held up exactly as written.
+- ~~This needs an `origin-%` rule *inside* the Makefile, beside `print-%`.~~ It
   cannot be bolted on from an outer makefile that `include`s this one: the
   serialization wrapper (`_make-serialized-invocation`) intercepts goals it
-  does not know and the invocation fails before the rule is reached.
-- Harvest the variable names from both spellings. `grep -oE
+  does not know and the invocation fails before the rule is reached. Confirmed
+  when axis C built it; a bulk `origins NAMES="…"` form was added beside it so a
+  whole harvest costs one invocation.
+- ~~Harvest the variable names from both spellings.~~ `grep -oE
   'print-[A-Z][A-Z0-9_]*'` across `scripts/` and `.github/workflows/` finds
   most, but `scripts/make-release.sh` wraps them as `mkv <NAME>`, a bare word.
   Its `mkv part_"$n"` is a *computed* name and must be expanded over
-  `$(TINYX5)` or excluded explicitly, not silently skipped.
+  `$(TINYX5)` or excluded explicitly, not silently skipped. All correct, and
+  under-scoped in one respect: restricting the harvest to `scripts/` and
+  `.github/` would have missed `release/README.md`, a *published* document that
+  tells a reader to query a variable. Axis A harvests every tracked file.
 - **For axis B, resolve goals without running them.** `make -n <goal>` builds a
   dependency graph and is far too slow to do ~90 times; it also blocks on the
   serial lock whenever a soak or `test-long` is running, which is exactly when
@@ -633,11 +687,14 @@ exist to be cross-checked against Makefile truth — but this one cross-checks
 nothing, it just needs a path, so the restatement buys nothing and cost exactly
 the silent lane-disable that `v0.9.8` fixed.
 
-Effort: axis C is spent (~3 h, more than the ~1 h predicted — the three spec
-corrections above are where it went, and each one had to be found by the gate
-failing on the real tree). Remaining: ~1 h for axis A, now that the `origins`
-oracle exists; ~2–3 h for axes B and D together, since they share one harvest
-pass and one allowlist mechanism. Impact: High — no new assurance about the
+Effort: axes C and A are spent — ~3 h for C against ~1 h predicted (the three
+spec corrections above are where it went, and each one had to be found by the
+gate failing on the real tree), then ~1 h for A, on estimate, because C had
+already paid for the oracle and the exemption discipline. Remaining: ~2–3 h for
+axes B and D together, since they share one harvest pass and one allowlist
+mechanism — and axis A's self-declared-banner exemption is now available to
+them, which was the part of axis B flagged as hardest. Impact: High — no new
+assurance about the
 firmware, but it closes a silent-severance class on the interfaces between the
 Makefile and the release orchestrator, the published documentation and the test
 harnesses; those interfaces only ever get wider, and the class cost real time
@@ -653,8 +710,18 @@ make-invoking lines, so it did not see continuations, and then its own written
 specification turned out not to see the mutation tables where the motivating
 defect actually lived. That pattern is the argument for building the remaining
 axes rather than sweeping by hand a fifth time — and for the house rule that
-every gate carries a negative case, since axis C's most valuable single check is
-the one that reproduces the original bug and proves the gate fails on it.
+every gate carries a negative case, since on both finished axes the most
+valuable single check is the one that reproduces the original bug and proves the
+gate fails on it.
+
+The pattern held once more on axis A, in the mildest possible form and worth
+noting for that reason: the spec's harvest scope (`scripts/`,
+`.github/workflows/`) would have missed the *published* `release/README.md`, and
+its make-word anchor — carried over from axis C without re-examining it — would
+have missed two live query sites. Neither was a bug in the tree; both were
+places the gate would simply not have looked. That is the same shape as every
+earlier miss, which is why each axis now states its own scope in its own header
+rather than inheriting the previous one's.
 
 ---
 
@@ -1018,7 +1085,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Multi-press boundary cases | 2.5 | 3–4 h | Medium — tick-boundary edge cases |
 | Power-on-pressed simulation gap | 2.5 | 1–2 h | Low — simulator fidelity, not coverage |
 | Power-supply ramp-up analysis | 2.5 | 2–3 h | Medium — real-world robustness |
-| Makefile name-contract gate — remaining axes A (`print-<VAR>` reads), B (documented goals), D (variables named to readers); axis C (`VAR=` overrides) **done** | 2.5 | 3–4 h | High — closes a silent-severance class in the release path, the published docs and the test harnesses; cost a disabled mutation lane, a >10-hour hang, ten stale surfaces and a severed per-variant map across one release |
+| Makefile name-contract gate — remaining axes B (documented goals) and D (variables named to readers); axes A (`print-<VAR>` reads) and C (`VAR=` overrides) **done** | 2.5 | 2–3 h | High — closes a silent-severance class in the release path, the published docs and the test harnesses; cost a disabled mutation lane, a >10-hour hang, ten stale surfaces and a severed per-variant map across one release |
 | Hardware-validation procedure doc | 3 | 2–3 h | High — primary-part WDT gap |
 | HIL rig: behavioural + register introspection | 3 | 5–8 d | High — silicon-level model validation |
 | Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |

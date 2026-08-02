@@ -1,9 +1,29 @@
 #!/usr/bin/env python3
-"""Axis C of the Makefile name contract: every `NAME=value` handed to make must
-name a variable the Makefile actually knows.
+"""The Makefile name contract: every name another file hands to, or asks of, the
+Makefile must be a name the Makefile actually knows.
 
-THE DEFECT CLASS. A make override that names no existing variable is legal and
-silent. `make test-soak SOAK_DURATION_MS=2000` defines a make variable called
+THE DEFECT CLASS is silent severance. A rename moves a variable; the files still
+speaking its old name keep running, quietly, wrongly. Make reports nothing in
+either direction -- an override naming no variable is legal, and a query for a
+variable that does not exist prints an empty line and exits 0. TODO.md tracks
+four axes of this class; two of them are implemented here:
+
+  Axis C -- `make VAR=value`.   A file SETS a Makefile variable.
+  Axis A -- `make print-VAR`.   A file READS one.
+
+Axes B and D -- goals and variables named to human readers in prose -- remain
+open, and this gate does not cover them.
+
+THE ORACLE, shared by both axes, is `make origins NAMES="..."`, which reports
+$(origin) per name in one invocation. Non-emptiness is NOT usable:
+XT_SOAK_COMBINATION_NAME and AVR_STACK_BUILD_DIR are defined-but-empty by
+design, so only $(origin) separates "never defined" (undefined) from
+"deliberately empty" (file).
+
+================================ AXIS C ================================
+
+A make override that names no existing variable is legal and silent.
+`make test-soak SOAK_DURATION_MS=2000` defines a make variable called
 SOAK_DURATION_MS; if the recipe reads $(AVR_SOAK_DURATION_MS), the override is
 inert and the default applies, with no error and no diagnostic. In v0.9.8 that
 left the classic-AVR WDT mutant asking for 2 s of simulated soak and silently
@@ -11,11 +31,6 @@ getting the 24 h default -- 43,200x. A local run sat in that one mutant for over
 ten hours before it was killed by hand; both CI jobs reaching the row declared no
 timeout and would have been cancelled at GitHub's six-hour limit having reported
 nothing. Four separate guards missed it, each for a different reason.
-
-THE ORACLE is `make origins NAMES="..."`, which reports $(origin) per name in one
-invocation. Non-emptiness is NOT usable: XT_SOAK_COMBINATION_NAME and
-AVR_STACK_BUILD_DIR are defined-but-empty by design, so only $(origin) separates
-"never defined" (undefined) from "deliberately empty" (file).
 
 WHERE OVERRIDES LIVE -- three sources, and the third is the one that matters.
 
@@ -39,11 +54,49 @@ WHERE OVERRIDES LIVE -- three sources, and the third is the one that matters.
      "lines invoking make" would not have caught the defect it exists to
      prevent. That is the whole reason this source is enumerated separately.
 
-SCOPE, stated so the next reader does not over-trust it: this checks names
+SCOPE, stated so the next reader does not over-trust it: axis C checks names
 passed to make. It does not check names a document merely mentions in prose
 (that is axis B/D, still open in TODO.md), and it cannot know that a name
 reaching make is meant for make rather than for a script reading the
 environment -- hence ENV_ALLOWLIST below, which must stay short and justified.
+
+================================ AXIS A ================================
+
+`print-%` is a pattern rule (`print-%: ; @echo '$($*)'`), so it matches ANY
+name. Ask it for a variable that no longer exists and it prints an empty line
+and exits 0 -- there is no such thing as an unknown variable to ask about.
+
+That is not hypothetical. The v0.9.8 rename left three reads in
+scripts/make-release.sh pointed at removed names (MCU, LFUSE_X5, HFUSE_X5).
+Nothing failed anywhere in the suite. The effect would have surfaced only in the
+published artifact, at the END of a 24-hour release run: a MANIFEST.md with
+empty ATtiny13a and tinyx5 fuse bytes, and one image path composed as
+`bypass--<stage>.hex`. `make test` cannot catch that by running, because it
+never executes the release script's variable preamble -- so the check has to be
+textual, which is what this is.
+
+TWO SPELLINGS, and a harvest that knows only the first is worth little here,
+because the defect above was in the second:
+
+  1. `make -s print-NAME`, direct.
+  2. `mkv NAME`, scripts/make-release.sh's one-line wrapper
+     (`mkv() { make -s print-"$1"; }`). The name arrives as a bare word, so
+     nothing about it looks like a Makefile query.
+
+DELIBERATELY NOT ANCHORED ON THE MAKE WORD, unlike axis C. `print-` with the
+lookbehind below is already unambiguous in this tree -- every non-query form
+(`--no-print-directory`, `-print-file-name`, `--print-data-base`,
+`--print-targets`) has a hyphen immediately before `print`. Requiring `make` on
+the same line would instead LOSE real reads: test_workload_rebuild.sh:255 goes
+through a `run_make` wrapper (no bare `make` token), and ci-local.sh:368 spreads
+eight queries across a backslash continuation. A harvest that silently stops
+seeing real sites is the exact failure this item exists to catch.
+
+STRICTER CONTRACT THAN AXIS C: a read must be DEFINED, not merely "defined or
+consumed". A command-line-only input such as VERSION is legitimate to SET but
+useless to ASK FOR -- `make -s print-VERSION` prints an empty line, which is
+precisely the severance symptom. The two axes want different oracles and get
+them.
 """
 
 import os
@@ -52,6 +105,24 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# This gate's own source, excluded from both harvests.
+#
+# It quotes severed names deliberately and has to: the docstrings name the exact
+# variables v0.9.8 removed (SOAK_DURATION_MS, MCU, LFUSE_X5), they write the
+# schema `make VAR=value`, and the negative-case fixtures below construct
+# `make foo \ BAR=1` and `print-VAR` on purpose. Every one is an EXAMPLE of the
+# defect, so a gate that checked its own prose could not document what it
+# checks. This surfaced the moment the file was first committed -- until then
+# `git ls-files` did not list it, and the exemption was accidental rather than
+# stated.
+#
+# Cost, stated plainly rather than glossed: the one real override this file
+# passes to make (`NAMES=`, to the `origins` rule) goes unchecked by axis C.
+# That name is exercised on every single run instead -- `make origins` fails
+# loudly if it stops existing -- which is a stronger guarantee than a textual
+# check, so nothing is actually lost.
+SELF_EXEMPT = "test/test_makefile_name_contract.py"
 
 # Names that legitimately travel to a child process's ENVIRONMENT through a make
 # command line, and are read by a script rather than by the Makefile. Nothing in
@@ -170,6 +241,8 @@ def harvest():
         found.setdefault(name, []).append(where)
 
     for rel in files:
+        if rel == SELF_EXEMPT:
+            continue
         path = os.path.join(ROOT, rel)
         try:
             with open(path, encoding="utf-8") as fh:
@@ -255,7 +328,256 @@ def origins(names):
     return result
 
 
-def main():
+# ----------------------------------------------------------------- axis A ---
+
+# A `print-<NAME>` query. The lookbehind is the whole discriminator: it rejects
+# `--no-print-directory`, `$(CC) -print-file-name=avr/io.h`,
+# `make --print-data-base` and `clang --print-targets`, all of which appear in
+# this tree and none of which is a Makefile variable query. Every real query has
+# whitespace before `print-`, because it is a make GOAL.
+PRINT_QUERY = re.compile(r"(?<![-\w])print-([A-Za-z_][A-Za-z0-9_]*)")
+
+# scripts/make-release.sh's wrapper: `mkv() { make -s print-"$1"; }`. Harvested
+# tree-wide rather than in that one file, so copying the idiom stays covered.
+MKV_QUERY = re.compile(r"(?<![-\w])mkv\s+([A-Za-z_][A-Za-z0-9_]*)")
+
+# A query whose name is built at runtime, e.g. `mkv part_"$n"`, detected by the
+# harvested word running straight into a shell expansion. These must be EXPANDED
+# and checked, not skipped -- a computed name is no less severable than a
+# literal one, and skipping it would be invisible. Each entry maps the constant
+# prefix to the Makefile variable supplying its keys; an unrecognised computed
+# prefix is a hard failure rather than a silent pass.
+COMPUTED_KEYS = {
+    "part_": "TINYX5",     # `for n in $TINYX5; do ... $(mkv part_"$n"); done`
+}
+COMPUTED_TAIL = ('"', "'", "$", "{")
+
+# Documents whose job is to record what names USED to be. A changelog naming a
+# removed variable is the changelog working correctly.
+#
+# Everything else earns its exemption by SELF-DECLARING, so this list stays at
+# one entry: a markdown file whose opening banner calls itself historical is
+# skipped, which means a new historical document is covered the day it is
+# written, and deleting the banner puts the document back under the contract.
+# Nine files currently declare themselves this way.
+HISTORICAL_FILES = {"CHANGELOG.md"}
+HISTORICAL_BANNER = re.compile(r"^\s*(?:>|\*\*Status:\*\*).*\bhistorical\b", re.I)
+BANNER_SCAN_LINES = 15
+
+
+def self_declared_historical(text):
+    """True if a markdown file's opening banner calls it a historical record."""
+    return any(HISTORICAL_BANNER.search(line)
+               for line in text.split("\n")[:BANNER_SCAN_LINES])
+
+
+def harvest_reads():
+    """Return (names, computed_prefixes, per_spelling_counts).
+
+    `names` maps a queried variable name to where it was queried;
+    `computed_prefixes` maps the constant part of a runtime-built name to the
+    same; `per_spelling_counts` records how many hits each spelling produced, so
+    losing one of the two spellings fails loudly.
+
+    Scoped to every tracked file, not just test/ and scripts/: a published
+    document telling a reader to run `make print-RELEASE_IMAGE_DIRS` is making
+    the same claim about the Makefile's vocabulary that a script does, and
+    release/README.md does exactly that.
+    """
+    files = subprocess.run(
+        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True,
+    ).stdout.split()
+
+    found = {}
+    computed = {}
+    per_spelling = {"print-<VAR>": 0, "mkv <VAR>": 0}
+
+    for rel in files:
+        if rel == SELF_EXEMPT:
+            continue
+        path = os.path.join(ROOT, rel)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+
+        is_markdown = rel.endswith(".md")
+        if is_markdown and (rel in HISTORICAL_FILES
+                            or self_declared_historical(text)):
+            continue
+
+        for lineno, line in enumerate(text.split("\n"), 1):
+            # Comments are skipped in CODE only. A `#` opens a comment in shell
+            # and YAML -- test_ci_local_routing.sh documents its fake make shim
+            # with "a `make -s print-FOO ...` is a VARIABLE QUERY", where FOO is
+            # a placeholder standing for any name, not a claim that FOO exists.
+            # In markdown `#` opens a HEADING, so skipping there would blind the
+            # gate to a whole class of live documentation.
+            if not is_markdown and line.lstrip().startswith("#"):
+                continue
+            for spelling, pattern in (("print-<VAR>", PRINT_QUERY),
+                                      ("mkv <VAR>", MKV_QUERY)):
+                for m in pattern.finditer(line):
+                    where = f"{rel}:{lineno}"
+                    per_spelling[spelling] += 1
+                    if line[m.end():m.end() + 1] in COMPUTED_TAIL:
+                        computed.setdefault(m.group(1), []).append(where)
+                    else:
+                        found.setdefault(m.group(1), []).append(where)
+
+    return found, computed, per_spelling
+
+
+def print_values(name):
+    """`make -s print-<name>`, split into words."""
+    proc = subprocess.run(
+        ["make", "-s", "print-" + name],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        sys.exit(f"FAIL: `make -s print-{name}` failed:\n" + proc.stderr.strip())
+    return proc.stdout.split()
+
+
+def severed_reads(names):
+    """Names among `names` that the Makefile does not define."""
+    org = origins(names)
+    return sorted(n for n in names if org.get(n, "undefined") == "undefined")
+
+
+def check_axis_a():
+    """Axis A: every `print-<VAR>` / `mkv <VAR>` query names a defined variable."""
+    checks = 0
+    found, computed, per_spelling = harvest_reads()
+
+    if not found:
+        sys.exit("FAIL: axis A harvested no Makefile variable queries at all "
+                 "-- the regex has stopped matching")
+    checks += 1
+
+    # Both spellings must still be reached. The v0.9.8 defect was in the `mkv`
+    # form exclusively, so a harvest that quietly lost that spelling would pass
+    # while blind to the only occurrence of the bug it exists to prevent.
+    empty = sorted(s for s, n in per_spelling.items() if n == 0)
+    if empty:
+        sys.exit("FAIL: axis A harvested nothing in the "
+                 + ", ".join(f"`{s}`" for s in empty)
+                 + " spelling. Fix the pattern rather than dropping the source.")
+    checks += 1
+
+    if len(found) < 40:
+        sys.exit(f"FAIL: axis A harvested only {len(found)} queries; expected >= 40")
+    checks += 1
+
+    # Computed names: expand the known ones, refuse the unknown ones.
+    unknown = sorted(set(computed) - set(COMPUTED_KEYS))
+    if unknown:
+        lines = ["FAIL: axis A found computed variable queries it cannot expand:"]
+        for prefix in unknown:
+            lines.append(f"  {prefix}<computed>   {computed[prefix][0]}")
+        lines.append("")
+        lines.append("Add the prefix to COMPUTED_KEYS with the Makefile variable")
+        lines.append("supplying its keys. Skipping it would leave a name unchecked.")
+        sys.exit("\n".join(lines))
+    checks += 1
+
+    stale_keys = sorted(set(COMPUTED_KEYS) - set(computed))
+    if stale_keys:
+        sys.exit("FAIL: COMPUTED_KEYS expands prefix(es) the harvest no longer "
+                 "finds: " + ", ".join(stale_keys) + "\nRemove them; an entry "
+                 "nothing reaches is dead configuration.")
+    checks += 1
+
+    for prefix, key_var in COMPUTED_KEYS.items():
+        keys = print_values(key_var)
+        if not keys:
+            sys.exit(f"FAIL: axis A cannot expand `{prefix}` -- "
+                     f"$({key_var}) is empty")
+        for key in keys:
+            found.setdefault(prefix + key, []).extend(computed[prefix])
+    checks += 1
+
+    for rel in sorted(HISTORICAL_FILES):
+        if not os.path.isfile(os.path.join(ROOT, rel)):
+            sys.exit(f"FAIL: HISTORICAL_FILES exempts '{rel}', which does not "
+                     "exist. Remove the entry; a stale path is a silent exemption.")
+    checks += 1
+
+    # The contract.
+    severed = severed_reads(set(found))
+    if severed:
+        lines = ["FAIL: Makefile variable(s) queried by name that the Makefile "
+                 "does not define:"]
+        for name in severed:
+            lines.append(f"  {name}")
+            for loc in sorted(set(found[name]))[:4]:
+                lines.append(f"      {loc}")
+        lines.append("")
+        lines.append("`print-%` matches any name, so a query for a removed variable")
+        lines.append("prints an empty line and exits 0. The caller gets '' and")
+        lines.append("carries on -- which is how a release manifest ends up with")
+        lines.append("empty fuse bytes after a 24-hour run.")
+        sys.exit("\n".join(lines))
+    checks += 1
+
+    # NEGATIVE CASES.
+    #
+    # (a) THE ORIGINAL DEFECT. These are the three names the v0.9.8 rename left
+    # in scripts/make-release.sh's mkv calls. If the contract check above cannot
+    # still reject them, it has stopped testing anything.
+    historical_defect = ["MCU", "LFUSE_X5", "HFUSE_X5"]
+    missed = sorted(set(historical_defect) - set(severed_reads(set(historical_defect))))
+    if missed:
+        sys.exit("FAIL: negative case -- the v0.9.8 axis-A defect no longer "
+                 "reproduces; these removed names read as defined: "
+                 + ", ".join(missed))
+    checks += 1
+
+    # (b) make and compiler FLAGS containing "print-" must not harvest as
+    # queries. All four of these appear in the tree.
+    for flag in ("make --no-print-directory -C x",
+                 "$(CC) -print-file-name=avr/io.h",
+                 "make -rRn --print-data-base",
+                 "clang --print-targets"):
+        if PRINT_QUERY.search(flag):
+            sys.exit(f"FAIL: negative case -- `{flag}` harvests as a variable query")
+    checks += 1
+
+    # (c) the historical-document exemption must be driven by the banner, in
+    # both directions: present means exempt, absent means checked. Otherwise a
+    # document could keep an exemption it no longer declares.
+    banner = "> **Historical work record — retained intentionally.**"
+    if not self_declared_historical("# Doc\n\n" + banner + "\n"):
+        sys.exit("FAIL: negative case -- a historical banner is no longer recognised")
+    if self_declared_historical("# Doc\n\nOrdinary current documentation.\n"):
+        sys.exit("FAIL: negative case -- a document with no banner reads as historical")
+    with open(os.path.join(ROOT, "docs/pic10f320_validation.md"), encoding="utf-8") as fh:
+        if self_declared_historical(fh.read()):
+            sys.exit("FAIL: negative case -- docs/pic10f320_validation.md is "
+                     "current qualification evidence and must not be exempt")
+    checks += 1
+
+    # (d) a computed query must be detected as computed rather than harvested as
+    # the literal prefix, which is how `part_` would silently become a check for
+    # a variable named "part_".
+    if PRINT_QUERY.search('make -s print-"$1"'):
+        sys.exit("FAIL: negative case -- a fully computed print- query harvests "
+                 "as a literal name")
+    line = 'AVRDUDE_PART_X5[$n]=$(mkv part_"$n")'
+    m = MKV_QUERY.search(line)
+    if not m or line[m.end():m.end() + 1] not in COMPUTED_TAIL:
+        sys.exit("FAIL: negative case -- `mkv part_\"$n\"` is not detected as a "
+                 "computed name")
+    checks += 1
+
+    return checks, len(found)
+
+
+def check_axis_c():
+    """Axis C: every `NAME=value` handed to make names a variable it knows."""
     checks = 0
     found = harvest()
     checked = {n: locs for n, locs in found.items() if n not in ENV_ALLOWLIST}
@@ -345,8 +667,40 @@ def main():
         sys.exit("FAIL: negative case -- `make-release.sh` is being treated as a make invocation")
     checks += 1
 
-    print(f"Makefile name contract (axis C): {checks} checks, "
-          f"{len(checked)} overrides verified, 0 failures")
+    return checks, len(checked)
+
+
+def check_self_exemption():
+    """The self-exemption must still be load-bearing, or it is a blind spot.
+
+    Exemptions expire here, exactly as ENV_ALLOWLIST entries do: if this file
+    stops quoting severed names -- because the examples moved to a document, say
+    -- then the exclusion is buying nothing and is silently hiding whatever the
+    file grows next. Verifying it means verifying BOTH harvests still have
+    something to say about it.
+    """
+    with open(os.path.join(ROOT, SELF_EXEMPT), encoding="utf-8") as fh:
+        text = fh.read()
+    has_overrides = any(assignments_passed_to_make(line)
+                        for _, line in logical_lines(text))
+    has_reads = bool(PRINT_QUERY.search(text) or MKV_QUERY.search(text))
+    if not (has_overrides and has_reads):
+        sys.exit(
+            f"FAIL: '{SELF_EXEMPT}' is excluded from both harvests, but no "
+            "longer contains the examples that justified it "
+            f"(overrides={has_overrides}, queries={has_reads}).\n"
+            "Drop SELF_EXEMPT; an exclusion nothing reaches is a blind spot."
+        )
+    return 1
+
+
+def main():
+    c_checks, overrides = check_axis_c()
+    a_checks, reads = check_axis_a()
+    a_checks += check_self_exemption()
+
+    print(f"Makefile name contract: {c_checks + a_checks} checks, 0 failures "
+          f"(axis C: {overrides} overrides; axis A: {reads} variable queries)")
 
 
 if __name__ == "__main__":

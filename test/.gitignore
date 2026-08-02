@@ -23,6 +23,9 @@ avr/test_trace_*
 !avr/*.py
 avr/__pycache__/
 
+# python byte-compiled files
+__pycache__/
+
 # KLEE output. The Makefile pins it to test/formal/klee-out; the unsuffixed
 # klee-last / klee-out-*/ entries stay because KLEE's own default naming lands
 # there when the solver is driven by hand, and because existing worktrees may

@@ -61,6 +61,38 @@ file is the human-readable summary of *what changed*.
   every exemption must still be reached by the harvest, so exemptions expire
   rather than accumulate.
 
+- **The same gate now also fails if any `make print-<VAR>` query asks for a
+  variable the Makefile does not define.** `print-%` is a pattern rule, so it
+  matches *any* name: ask it for a variable that no longer exists and it prints
+  an empty line and exits 0. The `v0.9.8` rename left three such reads in
+  `scripts/make-release.sh` pointed at removed names, and nothing failed — the
+  effect would have surfaced only in the published artifact, at the end of a
+  24-hour release run, as a `MANIFEST.md` with empty ATtiny13a and tinyx5 fuse
+  bytes and one image path composed as `bypass--<stage>.hex`. Axis A of the
+  same four-axis item; 64 queries verified, 22 checks in total, 0.4 s.
+
+  Both spellings are harvested — direct `print-<VAR>`, and the `mkv` wrapper in
+  `scripts/make-release.sh`, which passes the name as a bare word — and it
+  fails if either stops producing hits, because the historical defect was in
+  the wrapper form only. Computed names (`mkv part_"$n"`) are expanded over the Makefile
+  variable supplying their keys and checked; a computed name the gate cannot
+  expand is a failure rather than a skip.
+
+  A read is held to a **stricter** contract than an override: it must be
+  *defined*, not merely defined-or-consumed. A command-line-only input such as
+  `VERSION` is legitimate to set but useless to ask for, since the query returns
+  an empty line.
+
+  Historical documents are exempt by **self-declaration** rather than by a
+  hardcoded list: nine markdown files already open with a banner calling
+  themselves historical records, and that banner is what the gate keys on — so a
+  new historical document is exempt the day it is written, and deleting the
+  banner puts the document back under the contract. Only `CHANGELOG.md` is
+  exempt by name, because naming a variable that no longer exists is a changelog
+  working correctly. Verified by restoring the `v0.9.7` spellings in
+  `scripts/make-release.sh`: the gate names all five severed reads with their
+  line numbers and fails.
+
 ### Changed
 - **Every released firmware image is renamed to one consistent scheme.** All
   eighteen images on all six MCUs are now

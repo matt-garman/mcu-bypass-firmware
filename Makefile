@@ -2669,10 +2669,13 @@ test-ci-local-routing:
 test-variant-map-contract:
 	./test/test_variant_map_contract.sh
 
-# Host-only proof that every `NAME=value` handed to make names a variable this
-# Makefile defines or reads (axis C of the name-contract item). A make override
-# naming nothing is legal and silent, which is how a renamed SOAK_* left one
-# mutant running a 24 h soak instead of 2 s for an entire release.
+# Host-only proof that the names other files exchange with this Makefile are
+# names it actually knows, in both directions (axes C and A of the name-contract
+# item). Make is silent about either: an override naming nothing is legal, so a
+# renamed SOAK_* left one mutant running a 24 h soak instead of 2 s for an
+# entire release; and `print-%` matches ANY name, so a query for a removed
+# variable prints an empty line and exits 0 -- which is how three make-release
+# reads survived the same rename pointed at MCU, LFUSE_X5 and HFUSE_X5.
 test-makefile-name-contract:
 	@if ! command -v python3 >/dev/null 2>&1; then \
 		echo "FAIL: python3 is required by the Makefile name-contract gate"; exit 1; \
@@ -5030,7 +5033,7 @@ help:
 	@echo "  test-lockstep-progress  both PIC exact-pin/stall-propagation checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
-	@echo "  test-makefile-name-contract  every make override names a real variable (included in test)"
+	@echo "  test-makefile-name-contract  every make override and print-<VAR> query names a real variable (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
 	@echo "  test-pic-build-rebuild  PIC soak binaries rebuild on a workload change"
