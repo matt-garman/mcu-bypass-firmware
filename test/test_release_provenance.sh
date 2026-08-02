@@ -166,9 +166,26 @@ worker_pids=()
 	|| fail "cooperative release worker survived cleanup"
 ! kill -0 "$ignore_pid" 2>/dev/null \
 	|| fail "TERM-ignoring release worker survived KILL fallback"
-! kill -0 "$term_child" 2>/dev/null \
+# The leaders above are this shell's own children, so the helper's `wait` has
+# already reaped them and a single `kill -0` is exact. Their descendants are
+# not: they are grandchildren, `wait` cannot reap them, and SIGKILL to a
+# process group only marks its members for death -- each still has to be
+# scheduled and reaped by the reaper that adopts it before its PID goes away.
+# Sampling `kill -0` once therefore fails a *correct* cleanup whenever the
+# machine is loaded enough to widen that window. Poll for the exit that group
+# cleanup does guarantee, bounded so a descendant that genuinely survives is
+# still caught.
+await_descendant_exit() {
+	local pid=$1 attempt
+	for ((attempt = 0; attempt < 500; attempt++)); do
+		kill -0 "$pid" 2>/dev/null || return 0
+		sleep 0.01
+	done
+	return 1
+}
+await_descendant_exit "$term_child" \
 	|| fail "cooperative worker descendant survived group cleanup"
-! kill -0 "$ignore_child" 2>/dev/null \
+await_descendant_exit "$ignore_child" \
 	|| fail "TERM-ignoring worker descendant survived group cleanup"
 checks=$((checks + 1))
 

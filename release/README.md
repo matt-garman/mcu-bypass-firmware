@@ -7,9 +7,10 @@ documentation marks them as superseded. Each release lives in its own
 `vX.Y.Z/` subdirectory and is also published as a
 [GitHub Release](https://github.com/matt-garman/mcu-bypass-firmware/releases).
 
-> **Current availability:** `v0.9.6` is the first unified 18-image release. It
-> includes prebuilt firmware for all six release targets and introduces the first
-> images in this release line for ATtiny202 and PIC10F320.
+> **Current availability:** `v0.9.7` is the current release, with prebuilt
+> firmware for all six release targets. `v0.9.6` was the first unified 18-image
+> release and introduced the first ATtiny202 and PIC10F320 images in this
+> release line.
 
 ## Safety warning: v0.9.0-v0.9.2 TMUX images
 
@@ -43,9 +44,9 @@ below its image table explains: [`v0.9.0`](v0.9.0/MANIFEST.md#images),
 [`v0.9.3`](v0.9.3/MANIFEST.md#images), and
 [`v0.9.4`](v0.9.4/MANIFEST.md#images).
 
-The current Makefile's canonical product set matches the unified `v0.9.6`
-release: AVR Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT), PIC10F322 and
-PIC10F320.
+The current Makefile's canonical product set matches the unified releases from
+`v0.9.6` onward: AVR Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT), PIC10F322
+and PIC10F320.
 
 That set is not a description of whatever a build happened to produce — it is
 declared once in the Makefile as `RELEASE_IMAGES` and enforced. The verifier
