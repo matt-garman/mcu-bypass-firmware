@@ -1,0 +1,4 @@
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053 -> build_pic/bypass_cd4053_pic10f322.hex : 445 words (86.9%) of 512
+OK:   mute -> build_pic/bypass_mute_pic10f322.hex : 471 words (92.0%) of 512
+OK:   relay -> build_pic/bypass_relay_pic10f322.hex : 473 words (92.4%) of 512
