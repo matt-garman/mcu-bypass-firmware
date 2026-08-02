@@ -81,7 +81,7 @@ signed tags above. That trade was declined deliberately.
 ## 2. Byte identity: the ported build recipe emits the same bytes
 
 This historical evidence now supplies the reviewed baseline for the standing
-`pic320-test-build` gate, so its provenance is recorded in full.
+`pic10f320-test-build` gate, so its provenance is recorded in full.
 
 The concern the check existed to answer: the build recipe was *rewritten* during
 the merge — new variable names, a different Makefile, a different flash-budget
@@ -119,12 +119,18 @@ change codegen, but "cannot" and "did not" are different claims.
 **Standing regression added after the merge audit.** The original gate was
 deliberately retired as a one-shot migration check because its reference images
 lived under the deleted import prefix. The reviewed run-2/run-3 digests above now
-live in `test/pic10f320/expected_images.sha256`. `pic320-test-build` rebuilds the
-complete immutable variant matrix and requires all three raw HEX files to match;
-it runs through `pic320-test` in CI and release qualification. The checker and
-manifest parser also run without XC8 inside `make test`.
+live in `test/pic10f320/expected_images.sha256`. `pic10f320-test-build` rebuilds
+the complete immutable variant matrix and requires all three raw HEX files to
+match; it runs through `pic10f320-test` in CI and release qualification. The
+checker and manifest parser also run without XC8 inside `make test`.
 
-The hash target intentionally remains separate from the per-variant `pic320`
+The digests in that file are byte-for-byte the run-2 ones above; the *filenames*
+beside them are not, because `v0.9.8` renamed every released image to
+`bypass-<mcu>-<output stage>.hex` (`release/README.md` carries the old→new
+mapping). The transcripts above keep the names the runs actually emitted, which
+is what makes them evidence rather than a restatement.
+
+The hash target intentionally remains separate from the per-variant `pic10f320`
 build used by mutation tests. Otherwise every code-generating mutant would die
 at the broad byte check before reaching the behavioural lane whose sensitivity
 the mutation inventory is meant to prove. A hash change therefore fails normal
@@ -141,7 +147,7 @@ evidence.
 | Lane | Result |
 | --- | --- |
 | Build + 256-word budget | 220 / 241 / 244 words of 256; Intel-HEX validated |
-| Expected image bytes | Three reviewed SHA-256 records; complete matrix enforced by `pic320-test-build` |
+| Expected image bytes | Three reviewed SHA-256 records; complete matrix enforced by `pic10f320-test-build` |
 | Static analysis (cppcheck + MISRA-C:2012) | clean on all three variants, **zero unwaived findings** |
 | CONFIG word | 45 checks, 0 failures — `0x389E` on all three |
 | Firmware↔core equivalence | **266,144 sequences, 0 divergences**, 66/66 reachable model states |
@@ -214,11 +220,11 @@ part yields `warning: (1393) possible hardware stack overflow detected` and
 `xc8-cc` **still exits 0 and writes a HEX**. Overflow is otherwise undetectable
 on this core: no `STKPTR`, no `TOSL`/`TOSH`, no `STKOVF` in `PCON`, and no CONFIG
 `STVREN` bit, so the stack silently wraps and a return goes to the wrong address.
-That is the fail-open `pic320-test-stack-bound` closes.
+That is the fail-open `pic10f320-test-stack-bound` closes.
 
 **Two witnesses, deliberately.** The gate above measures the *emitted assembly*
 and enforces the policy budget (peak + reserve). §3b re-derives the same quantity
-from the *shipped HEX* by a wholly different method. Both run in `pic320-test`,
+from the *shipped HEX* by a wholly different method. Both run in `pic10f320-test`,
 and they agree — 3 / 3 / 4 entries for simple / mute / relay. A disagreement
 between them would itself be the finding.
 
@@ -274,10 +280,10 @@ worth trusting — nothing rests on timestamps, and the fake linked tests log th
 executed path so a removed binary-run recipe cannot pass on compile counts alone.
 
 It is **not** byte-for-byte XC8 reproducibility, and it does not by itself
-qualify exact-final-source PIC10F320 images. The separate `pic320-test-build`
+qualify exact-final-source PIC10F320 images. The separate `pic10f320-test-build`
 gate owns emitted-byte comparison (§2); the production aggregates and retained
 evidence named in the status section own the qualification claim.
-`pic320-coverage-check-fw` is deliberately outside the probe altogether: every
+`pic10f320-coverage-check-fw` is deliberately outside the probe altogether: every
 invocation uses a new `mktemp` directory and requires fresh `.gcda`/`.gcov`
 evidence, so it has no prior artifact a later request could reuse.
 
@@ -357,11 +363,12 @@ Stated so nobody has to infer it:
   Together they are still not the same kind of statement as "the verified code
   is the shipped code", which is what every other target gets for free.
 - **The standing expected-image gate is not universal compiler
-  reproducibility.** `pic320-test-build` watches all three emitted images against
-  the committed, reviewed SHA-256 baseline from the pinned XC8/DFP build, so byte
-  drift fails qualification until an intentional rebaseline. The host fake-tool
-  regression separately proves current commands run with current flags. Neither
-  establishes that arbitrary XC8 versions or environments emit identical bytes.
+  reproducibility.** `pic10f320-test-build` watches all three emitted images
+  against the committed, reviewed SHA-256 baseline from the pinned XC8/DFP
+  build, so byte drift fails qualification until an intentional rebaseline. The
+  host fake-tool regression separately proves current commands run with current
+  flags. Neither establishes that arbitrary XC8 versions or environments emit
+  identical bytes.
 - **The output-latch integrity check is absent** (§4).
 - **Hardware-bench properties are simulated, not proven**: WDT timing and
   brown-out behaviour, absolute tick period, and real-silicon pulse timing. These
@@ -372,14 +379,20 @@ Stated so nobody has to infer it:
 ## 7. Reproducing any of this
 
 ```
-make pic320-test                    # all lanes; each build stack-checks its final HEX
-make pic320-test-return-stack       # fresh all-image stack recheck + depth witnesses
-make pic320-test-target-variants    # fail-closed libgpsim fault/lock-step/I-O
-make test-pic-build                 # host fake-tool image/rebuild regression
+make pic10f320-test                    # all lanes; each build stack-checks its final HEX
+make pic10f320-test-return-stack       # fresh all-image stack recheck + depth witnesses
+make pic10f320-test-target-variants    # fail-closed libgpsim fault/lock-step/I-O
+make test-pic-build                    # host fake-tool image/rebuild regression
 make test-mutation MUTATION_ALLOW_SKIP=0
-make pic320-test-soak PIC320_SOAK_DURATION_MS=86400000
+make pic10f320-test-soak PIC10F320_SOAK_DURATION_MS=86400000
 ```
+
+These are the `v0.9.8` goal and variable names. Evidence recorded above and under
+`release/v0.9.7/` and earlier was produced by the same lanes under their previous
+`pic320-*` / `PIC320_*` spellings; `release/README.md` carries the mapping, and
+`git checkout` of an earlier tag gets that tree's names along with its Makefile.
 
 Add `STRICT_TOOLS=1` for authoritative optional analyzer/simulator results.
 Individual optional-tool lanes may otherwise skip, but the return-stack target
-does not: missing Python or any image is a failure, and `pic320-test` includes it.
+does not: missing Python or any image is a failure, and `pic10f320-test`
+includes it.

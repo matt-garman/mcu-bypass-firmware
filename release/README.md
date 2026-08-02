@@ -258,7 +258,7 @@ programmer command above.
 
 ## Reproduce the images bit-for-bit
 
-### Unified releases (v0.9.6 or later)
+### Unified releases (v0.9.8 or later)
 
 A freshly built release HEX lands under `build_avr_classic/`, `build_avr_xt/`,
 `build_pic10f322/` and `build_pic10f320/`, not in the release directory, so run the
@@ -288,6 +288,33 @@ Byte-exact reproduction requires the same `avr-gcc` and `binutils-avr` versions,
 plus the target-qualified XC8 compiler and DFP recorded for each PIC family in
 the manifest. A different toolchain may produce functionally identical but not
 byte-identical images.
+
+### Unified releases v0.9.6 and v0.9.7
+
+Same 18-image contract and the same two verifiers; only the build goals are
+spelled differently, because `v0.9.8` renamed them (see
+[Renamed in v0.9.8](#renamed-in-v098-v097-and-earlier-used-different-names)).
+Use the names that exist in the tree you check out:
+
+```sh
+git checkout vX.Y.Z          # v0.9.6 or v0.9.7
+# install the pinned toolchain (see TOOLCHAIN.adoc), then:
+scripts/verify-release-qualification.sh release/vX.Y.Z vX.Y.Z
+make clean && make all13 all85 all45 && make attiny202
+make pic && make pic320-variants
+scripts/verify-release-images.sh release/vX.Y.Z $(make -s print-RELEASE_IMAGE_DIRS)
+```
+
+`git checkout` moves the whole tree together — Makefile, `RELEASE_IMAGES`,
+`SHA256SUMS` and both verifier scripts — so nothing here is a workaround and
+the guarantees are exactly those described above.
+
+Do **not** mix trees. Running the *current* `scripts/verify-release-images.sh`
+against `release/v0.9.6/` or `release/v0.9.7/` reports a canonical-set mismatch,
+because those directories name their images under the pre-`v0.9.8` scheme while
+the current Makefile's `RELEASE_IMAGES` names them under the new one. That is the
+naming boundary reporting itself, not a defect in either release — the same
+situation, and the same correct answer, as the `v0.9.4` case described next.
 
 ### Historical releases (v0.9.0 through v0.9.5)
 

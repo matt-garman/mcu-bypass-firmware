@@ -88,7 +88,7 @@ and CONFIG names. SFR addresses in parentheses.
   `PWRTE`, `MCLRE`, `CP`, `LVP`, `LPBOR`, `BORV`, `WRT`. The as-built selections
   and their rationale are documented in the shell's own header comment; the
   emitted CONFIG word is `0x389E` and is verified out of the built HEX by
-  `make pic-test-config`.
+  `make pic10f322-test-config`.
 
 ---
 

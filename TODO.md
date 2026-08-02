@@ -326,14 +326,19 @@ analysis that the 64 ms SUT delay covers the LDO ramp (check the LP2950/AP7375
 datasheet startup time against 64 ms). Item (b) is a documentation task and pairs
 naturally with the Tier 2 datasheet-citation item.
 
-**Fail-closed gate on every `make print-<VAR>` a script or workflow reads.**
-Added 2026-08-01, found while doing the variable-prefix rename in `v0.9.8`.
+**Fail-closed gate on the names other files read out of the Makefile — both
+`print-<VAR>` variables and documented `make <goal>` targets.** Added
+2026-08-01 while doing the variable-prefix rename in `v0.9.8`; widened
+2026-08-02 after the same class was found to have severed on the goal axis too,
+and to still be severed in the tree at that point.
 
-`print-%` is a pattern rule (`Makefile`, `@echo '$($*)'`), so it matches *any*
-name. Ask it for a variable that no longer exists and it prints an empty line
-and exits 0. Nothing asserts that the set of names the scripts read is a subset
-of the names the Makefile actually defines, so a rename can silently sever the
-link and every gate stays green.
+One defect, two axes. Nothing asserts that the Makefile names other files
+*speak* are a subset of the names the Makefile actually *defines*, so a rename
+severs the link silently and every gate stays green.
+
+*Axis A — variables.* `print-%` is a pattern rule (`Makefile`, `@echo '$($*)'`),
+so it matches any name. Ask it for a variable that no longer exists and it
+prints an empty line and exits 0.
 
 That is not hypothetical: the `v0.9.8` rename left three `mkv` calls in
 `scripts/make-release.sh` pointed at removed names (`MCU`, `LFUSE_X5`,
@@ -343,6 +348,20 @@ bytes, and one image path composed as `bypass--<stage>.hex` — at the end of a
 24-hour release run. It was caught by an ad-hoc sweep, not by the suite, and
 `make test` cannot catch it because it never executes the release script's
 variable preamble.
+
+*Axis B — goals named in documentation.* Same severance, worse outcome, because
+a reader runs these by hand and gets `No rule to make target`. The `v0.9.8`
+prefix rename left 14 dead goal references in `docs/pic10f320_validation.md` —
+a document explicitly framed as *current* qualification evidence, not history —
+including its entire §7 "Reproducing any of this" block, where four of six
+commands failed. One more sat in `docs/phase2_pic_shell.md`, and
+`release/README.md`'s reproduce recipe told the reader to `git checkout v0.9.6`
+and then run goals that only exist from `v0.9.8` on. Those were fixed by hand;
+nothing prevents the next rename from re-creating them.
+
+Axis B is the one to build first if the two are split: it has a demonstrated
+in-tree failure, and its consumers are humans rather than a script that at least
+runs in CI.
 
 Design notes if picked up:
 - **Use `$(origin)`, not non-emptiness.** Several variables the scripts read
@@ -355,23 +374,72 @@ Design notes if picked up:
   cannot be bolted on from an outer makefile that `include`s this one: the
   serialization wrapper (`_make-serialized-invocation`) intercepts goals it
   does not know and the invocation fails before the rule is reached.
-- Harvest the names from both spellings. `grep -oE 'print-[A-Z][A-Z0-9_]*'`
-  across `scripts/` and `.github/workflows/` finds most, but
-  `scripts/make-release.sh` wraps them as `mkv <NAME>`, a bare word. Its
-  `mkv part_"$n"` is a *computed* name and must be expanded over `$(TINYX5)`
-  or excluded explicitly, not silently skipped.
-- Include the negative case, per the house pattern for every other gate: a
+- Harvest the variable names from both spellings. `grep -oE
+  'print-[A-Z][A-Z0-9_]*'` across `scripts/` and `.github/workflows/` finds
+  most, but `scripts/make-release.sh` wraps them as `mkv <NAME>`, a bare word.
+  Its `mkv part_"$n"` is a *computed* name and must be expanded over
+  `$(TINYX5)` or excluded explicitly, not silently skipped.
+- **For axis B, resolve goals without running them.** `make -n <goal>` builds a
+  dependency graph and is far too slow to do ~90 times; it also blocks on the
+  serial lock whenever a soak or `test-long` is running, which is exactly when
+  someone is likely to run `make test`. Prefer a single `make -rRn
+  --print-data-base` parse, cached once per invocation — but note that on this
+  Makefile that command took over two minutes when tried on 2026-08-02, so
+  measure it before committing to it. A static harvest of rule heads plus
+  `.PHONY` members plus the `$(eval $(call ...))` generators is the fallback,
+  and it must expand the generated families (`attiny$(1)`, `attiny$(1)-program`,
+  `test-sim-<variant>-attiny<n>`) rather than report them missing.
+- **Be honest about axis B's ceiling: it can only check goals it can
+  recognise.** A harvest keyed on `make <goal>` catches commands, which is the
+  case that matters most because a reader runs those. It does *not* catch a
+  goal named in running prose — "the per-variant `pic320` build" was one of the
+  `v0.9.8` casualties, and it has neither the word `make` nor a hyphen suffix
+  to key on. Widening the harvest to every backticked token that happens to
+  look like a goal name will produce false positives (`pic320` is also a chip
+  token, a directory fragment and a log-file stem). Recommend scoping the gate
+  to `make <goal>` occurrences, and stating that scope in the gate's own header
+  so the next reader does not mistake it for total coverage.
+- **The allowlist is the hard part, and it is not "which file".** Live documents
+  legitimately name retired goals in three distinct situations, all of which
+  currently exist:
+  1. Deliberate old→new redirect tables (`release/README.md`).
+  2. Recipes pinned to an *older tag*, where the goal correctly does not exist
+     in the current tree — `release/README.md`'s "Unified releases v0.9.6 and
+     v0.9.7" block names `all13`, `pic`, `pic320-variants` on purpose, under a
+     `git checkout` line.
+  3. Quoted historical transcripts and real evidence paths
+     (`docs/pic10f320_validation.md` lines 179 and 262: a captured `make: ***
+     [pic320-test-equiv] Error 1` and
+     `release/v0.9.6/evidence/pic320-test.log`, a file that exists under that
+     name).
+
+  So the exemption has to be per-block or per-line, not per-file — an explicit
+  marker comment is probably cleaner than pattern-matching prose. Whole-file
+  exemption is right only for the banner-marked historical records
+  (`docs/pic10f320_merge_plan.md`, `docs/v0.9.6_post_release_polish.md`,
+  `docs/pic10f320_feasibility.md`), which already declare themselves.
+- Include the negative case on **both** axes, per the house pattern: a
   deliberately bogus name must make the gate fail, so it cannot pass by
-  harvesting nothing. The realistic failure mode here is a harvest regex that
-  silently stops matching, which is the same class of defect the gate exists
-  to catch.
-- Natural home is a new `test-makefile-variable-contract` in `TEST_GATES`
+  harvesting nothing. The realistic failure mode is a harvest regex that
+  silently stops matching, which is the same class of defect the gate exists to
+  catch. For axis B add a second negative: an exempt block must stop being
+  exempt if its marker is removed.
+- Natural home is a new `test-makefile-name-contract` in `TEST_GATES`
   (host-only, no toolchain, so it belongs in `make test` rather than
   `test-long`), modelled on `test_release_provenance.sh`.
 
-Effort: ~1–2 h. Impact: Medium — no new assurance about the firmware, but it
-closes a silent-severance class on the one interface between the Makefile and
-the release orchestrator, and that interface only ever gets wider.
+Related, and cheap to fold in: `test/run_mutation_tests.sh:1084` hand-composes
+`${FW_BASE}-${PIC10F322_TAG}-cd4053_simple.hex` instead of reading
+`print-PIC10F322_RELEASE_IMAGES`. The independent restatements in
+`scripts/make-release.sh` and `test/test_pic_build.sh` are deliberate — they
+exist to be cross-checked against Makefile truth — but this one cross-checks
+nothing, it just needs a path, so the restatement buys nothing and cost exactly
+the silent lane-disable that `v0.9.8` fixed.
+
+Effort: ~2–3 h for both axes (~1–2 h for axis A alone). Impact: Medium-High —
+no new assurance about the firmware, but it closes a silent-severance class on
+the interfaces between the Makefile and both the release orchestrator and the
+published documentation, and those interfaces only ever get wider.
 
 ---
 
@@ -735,7 +803,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Multi-press boundary cases | 2.5 | 3–4 h | Medium — tick-boundary edge cases |
 | Power-on-pressed simulation gap | 2.5 | 1–2 h | Low — simulator fidelity, not coverage |
 | Power-supply ramp-up analysis | 2.5 | 2–3 h | Medium — real-world robustness |
-| `make print-<VAR>` contract gate | 2.5 | 1–2 h | Medium — closes a silent-severance class in the release path |
+| Makefile name-contract gate (`print-<VAR>` + documented goals) | 2.5 | 2–3 h | Medium-High — closes a silent-severance class in the release path and in the published docs |
 | Hardware-validation procedure doc | 3 | 2–3 h | High — primary-part WDT gap |
 | HIL rig: behavioural + register introspection | 3 | 5–8 d | High — silicon-level model validation |
 | Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |

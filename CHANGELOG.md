@@ -223,6 +223,41 @@ file is the human-readable summary of *what changed*.
   PIC gpsim mutants reported as unavailable instead of failing loudly. Found by
   the prefix sweep, not by a gate: the mutation run is in `test-long`, not
   `make test`. The path is now composed from the canonical fields.
+- **The goal rename left sixteen dead `make` commands in documents that describe
+  the current tree.** Same silent-severance class as the mutation-lane miss, on
+  the axis pointed at readers rather than at scripts: nothing asserts that a goal
+  named in a document still exists, so `make pic320-test` and its siblings
+  survived the rename as instructions that now fail with `No rule to make
+  target`.
+
+  Fifteen were in `docs/pic10f320_validation.md`, which is framed as *current*
+  qualification evidence rather than history — eleven in prose describing
+  standing gates, and four in its §7 "Reproducing any of this", where four of
+  six commands were dead and `PIC320_SOAK_DURATION_MS` had been renamed too. The
+  sixteenth was `make pic-test-config` in `docs/phase2_pic_shell.md`. All now
+  carry their `v0.9.8` spellings. Two references are deliberately left in the
+  old vocabulary and read correctly as history: a captured
+  `make: *** [pic320-test-equiv] Error 1` transcript, and
+  `release/v0.9.6/evidence/pic320-test.log`, which is a real file under that
+  name.
+
+  `release/README.md`'s reproduce recipe had a related defect that a rename table
+  could not fix. Its "Unified releases (v0.9.6 or later)" section says
+  `git checkout vX.Y.Z` and then builds with goals that only exist from `v0.9.8`
+  on, so it was wrong for two of the three releases it claimed to cover. The
+  section is now scoped to `v0.9.8` or later, and a second section carries the
+  same recipe for `v0.9.6` and `v0.9.7` in that era's goal names. Checking out a
+  tag moves the Makefile, `RELEASE_IMAGES`, `SHA256SUMS` and both verifier
+  scripts together, so those releases remain reproducible with exactly the
+  guarantees described for the current one; what does not work, and is now stated,
+  is pointing the *current* image verifier at an older release directory.
+
+  The `TODO.md` item filed earlier in this release for the `make print-<VAR>`
+  contract gate is widened to cover both axes, since one gate closes both. Its
+  allowlist is the hard part and is now specified from the real cases: a document
+  may legitimately name a retired goal in an old→new redirect table, in a recipe
+  pinned to an older tag, or in a quoted transcript — so the exemption has to be
+  per-block, not per-file.
 - **Documentation: the recorded reason the ATtiny202 harness cannot measure
   busy-delay width was wrong, and is corrected everywhere it appeared.** Since
   `0.9.5` the delay oracle, `test_sim_attiny202.py`, `scripts/fetch_yasimavr.sh`,
