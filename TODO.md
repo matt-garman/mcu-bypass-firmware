@@ -298,6 +298,53 @@ analysis that the 64 ms SUT delay covers the LDO ramp (check the LP2950/AP7375
 datasheet startup time against 64 ms). Item (b) is a documentation task and pairs
 naturally with the Tier 2 datasheet-citation item.
 
+**Fail-closed gate on every `make print-<VAR>` a script or workflow reads.**
+Added 2026-08-01, found while doing the variable-prefix rename in `v0.9.8`.
+
+`print-%` is a pattern rule (`Makefile`, `@echo '$($*)'`), so it matches *any*
+name. Ask it for a variable that no longer exists and it prints an empty line
+and exits 0. Nothing asserts that the set of names the scripts read is a subset
+of the names the Makefile actually defines, so a rename can silently sever the
+link and every gate stays green.
+
+That is not hypothetical: the `v0.9.8` rename left three `mkv` calls in
+`scripts/make-release.sh` pointed at removed names (`MCU`, `LFUSE_X5`,
+`HFUSE_X5`). Nothing failed. The effect would have surfaced only in the
+published artifact — a `MANIFEST.md` with empty ATtiny13a and tinyx5 fuse
+bytes, and one image path composed as `bypass--<stage>.hex` — at the end of a
+24-hour release run. It was caught by an ad-hoc sweep, not by the suite, and
+`make test` cannot catch it because it never executes the release script's
+variable preamble.
+
+Design notes if picked up:
+- **Use `$(origin)`, not non-emptiness.** Several variables the scripts read
+  are defined-but-empty by design (`XT_SOAK_COMBINATION_NAME`,
+  `AVR_STACK_BUILD_DIR`), so a non-empty assertion produces false failures.
+  `$(origin VAR)` returns `undefined` for a name the Makefile never sets and
+  `file` for one deliberately set empty — verified, and it is the only oracle
+  that separates the two cases.
+- This needs an `origin-%` rule *inside* the Makefile, beside `print-%`. It
+  cannot be bolted on from an outer makefile that `include`s this one: the
+  serialization wrapper (`_make-serialized-invocation`) intercepts goals it
+  does not know and the invocation fails before the rule is reached.
+- Harvest the names from both spellings. `grep -oE 'print-[A-Z][A-Z0-9_]*'`
+  across `scripts/` and `.github/workflows/` finds most, but
+  `scripts/make-release.sh` wraps them as `mkv <NAME>`, a bare word. Its
+  `mkv part_"$n"` is a *computed* name and must be expanded over `$(TINYX5)`
+  or excluded explicitly, not silently skipped.
+- Include the negative case, per the house pattern for every other gate: a
+  deliberately bogus name must make the gate fail, so it cannot pass by
+  harvesting nothing. The realistic failure mode here is a harvest regex that
+  silently stops matching, which is the same class of defect the gate exists
+  to catch.
+- Natural home is a new `test-makefile-variable-contract` in `TEST_GATES`
+  (host-only, no toolchain, so it belongs in `make test` rather than
+  `test-long`), modelled on `test_release_provenance.sh`.
+
+Effort: ~1–2 h. Impact: Medium — no new assurance about the firmware, but it
+closes a silent-severance class on the one interface between the Makefile and
+the release orchestrator, and that interface only ever gets wider.
+
 ---
 
 ## Tier 3 — platinum-level / nice-to-have
@@ -657,6 +704,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Multi-press boundary cases | 2.5 | 3–4 h | Medium — tick-boundary edge cases |
 | Power-on-pressed simulation gap | 2.5 | 1–2 h | Low — simulator fidelity, not coverage |
 | Power-supply ramp-up analysis | 2.5 | 2–3 h | Medium — real-world robustness |
+| `make print-<VAR>` contract gate | 2.5 | 1–2 h | Medium — closes a silent-severance class in the release path |
 | Hardware-validation procedure doc | 3 | 2–3 h | High — primary-part WDT gap |
 | HIL rig: behavioural + register introspection | 3 | 5–8 d | High — silicon-level model validation |
 | Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |
