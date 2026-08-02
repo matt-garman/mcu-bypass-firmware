@@ -11,13 +11,14 @@
 #
 #   <hexfile>                 a built PIC HEX (build_pic/bypass_<v>_pic10f322.hex)
 #   expected_engaged_lata_hex optional: the FULL LATA value when ENGAGED for this
-#                             variant (cd4053=0x3, mute=0x7, relay=0x1). When
+#                             variant (cd4053_simple=0x3, cd4053_with_mute=0x7,
+#                             tq2_l2_5v_relay=0x1). When
 #                             given, it is asserted in addition to the universal
 #                             LED-bit checks; when omitted, only the LED bit (RA0)
 #                             and footswitch (RA3) behaviour is asserted.
 #   expected_bypass_lata_hex  optional: the FULL LATA value in BYPASS for this
 #                             variant. Defaults to 0x0, correct for every current
-#                             variant: cd4053/mute control pins settle LOW in
+#                             variant: the CD4053 control pins settle LOW in
 #                             bypass and relay coils settle low.
 #
 # Exit status: 0 = all checks passed (or gpsim not installed -> skipped); 1 = a

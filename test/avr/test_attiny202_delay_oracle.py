@@ -36,9 +36,9 @@
 #   finds every avr-libc _delay_ms busy loop, recovers its 16-bit iteration
 #   count, converts that to milliseconds at F_CPU, and asserts the per-variant
 #   expected set of pulse widths (and the relay's 4 ms datasheet minimum):
-#       cd4053 (simple x4053): no coil pulse  -> zero delay loops
-#       mute   (muted x4053) : two 5 ms mute windows  (engage + bypass paths)
-#       relay  (TQ2-L2-5V)   : two 12 ms coil pulses  (engage + bypass paths)
+#       cd4053_simple    (simple x4053): no coil pulse -> zero delay loops
+#       cd4053_with_mute (muted x4053) : two 5 ms mute windows (engage+bypass)
+#       tq2_l2_5v_relay  (TQ2-L2-5V)   : two 12 ms coil pulses (engage+bypass)
 #
 # MODES
 #   test_attiny202_delay_oracle.py <elf> [<elf> ...]   verify real built images
@@ -66,18 +66,18 @@ RELAY_MIN_MS = 4              # TQ2-L2-5V coil-set datasheet minimum
 # would give and far inside any physically meaningful margin.
 WIDTH_TOLERANCE_MS = 0.10
 
-VARIANTS = ("cd4053", "mute", "relay")
+VARIANTS = ("cd4053_simple", "cd4053_with_mute", "tq2_l2_5v_relay")
 
 # Expected coil-pulse widths per variant, in milliseconds. Each variant drives
 # the pulse on BOTH the engage and the bypass path, so a non-empty set lists the
-# design width twice. cd4053 (simple) has no blocking pulse at all.
+# design width twice. cd4053_simple has no blocking pulse at all.
 EXPECTED_WIDTHS_MS = {
-    "cd4053": [],
-    "mute": [5, 5],
-    "relay": [12, 12],
+    "cd4053_simple": [],
+    "cd4053_with_mute": [5, 5],
+    "tq2_l2_5v_relay": [12, 12],
 }
 # Variants whose pulses must also clear a datasheet minimum coil-energise time.
-RELAY_MINIMUM_VARIANTS = ("relay",)
+RELAY_MINIMUM_VARIANTS = ("tq2_l2_5v_relay",)
 
 # avr-libc compiles _delay_ms() to a 4-cycle busy loop:
 #     ldi  rL, <lo>          ; low  byte of the 16-bit iteration count
@@ -218,29 +218,21 @@ def check_variant(ck, variant, counts):
             % (variant, RELAY_MIN_MS, pretty))
 
 
-# Image stage token -> the short variant vocabulary this oracle speaks. The two
-# differ on purpose (see the Makefile's "canonical firmware image basename"),
-# so the image name cannot simply be searched for a variant name.
-STAGE_VARIANTS = {
-    "cd4053_simple": "cd4053",
-    "cd4053_with_mute": "mute",
-    "tq2_l2_5v_relay": "relay",
-}
-
-
 def variant_of(elf_path):
-    """Map an image path (bypass-<mcu>-<stage>.elf) to its variant.
+    """Map an image path (bypass-<mcu>-<variant>.elf) to its variant.
 
-    Split on the field delimiter rather than searching for a substring: the
-    stage tokens share prefixes (`cd4053_simple` / `cd4053_with_mute`), and a
-    substring match would also accept a name with the wrong field count. An
-    unrecognized or malformed name returns None and the caller fails it.
+    The basename's third field IS the variant name, so this only has to split
+    and validate. Split on the field delimiter rather than searching for a
+    substring: the variant names share prefixes (`cd4053_simple` /
+    `cd4053_with_mute`), and a substring match would also accept a name with the
+    wrong field count. An unrecognized or malformed name returns None and the
+    caller fails it.
     """
     stem = os.path.basename(elf_path).rsplit(".", 1)[0]
     fields = stem.split("-")
-    if len(fields) != 3:
+    if len(fields) != 3 or fields[2] not in VARIANTS:
         return None
-    return STAGE_VARIANTS.get(fields[2])
+    return fields[2]
 
 
 def disassemble(elf_path):
@@ -331,22 +323,22 @@ def selftest():
     def counts_for(widths):
         return [int(round(w * F_CPU_HZ / 1000 / DELAY_LOOP_CYCLES)) for w in widths]
 
-    ck.check(_variant_fails("cd4053", []) == 0, "cd4053 with no loops passes")
-    ck.check(_variant_fails("mute", counts_for([5, 5])) == 0, "mute with two 5 ms passes")
-    ck.check(_variant_fails("relay", [5999, 5999]) == 0,
+    ck.check(_variant_fails("cd4053_simple", []) == 0, "cd4053 with no loops passes")
+    ck.check(_variant_fails("cd4053_with_mute", counts_for([5, 5])) == 0, "mute with two 5 ms passes")
+    ck.check(_variant_fails("tq2_l2_5v_relay", [5999, 5999]) == 0,
              "relay with avr-libc's real 5999-iter loops passes")
 
     # Fail-closed: wrong count, missing pulse, extra pulse, sub-minimum relay.
-    ck.check(_variant_fails("relay", counts_for([12, 6])) > 0,
+    ck.check(_variant_fails("tq2_l2_5v_relay", counts_for([12, 6])) > 0,
              "relay with a half-width pulse (the yasimavr artifact) fails")
-    ck.check(_variant_fails("relay", counts_for([12])) > 0,
+    ck.check(_variant_fails("tq2_l2_5v_relay", counts_for([12])) > 0,
              "relay missing a pulse fails")
-    ck.check(_variant_fails("mute", counts_for([5, 5, 5])) > 0,
+    ck.check(_variant_fails("cd4053_with_mute", counts_for([5, 5, 5])) > 0,
              "mute with an extra unexpected pulse fails")
-    ck.check(_variant_fails("cd4053", counts_for([5])) > 0,
+    ck.check(_variant_fails("cd4053_simple", counts_for([5])) > 0,
              "simple cd4053 with any coil pulse fails")
     # A relay pulse below the 4 ms datasheet minimum trips both width and minimum.
-    ck.check(_variant_fails("relay", counts_for([3, 3])) >= 2,
+    ck.check(_variant_fails("tq2_l2_5v_relay", counts_for([3, 3])) >= 2,
              "sub-minimum relay pulse fails design width AND datasheet minimum")
 
     print("[delay] selftest: %d checks, %d failures" % (ck.checks, ck.fails))

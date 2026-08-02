@@ -57,13 +57,13 @@ void bypass_equiv_on_clrwdt(void);
 #define CLRWDT() bypass_equiv_on_clrwdt()
 
 // --- __delay_ms(): per-actuation hook (defined by the harness) ----------------
-// The cd4053-mute and tq2-relay output drivers call __delay_ms() exactly once per
+// The cd4053_with_mute and tq2_l2_5v_relay output drivers call __delay_ms() exactly once per
 // actuation, BETWEEN asserting the mute / energising the relay coil and releasing
 // it again -- so it is the one seam at which the firmware's transient (mid-pulse)
 // output state is observable on the host. Routing it through a hook lets a harness
 // snapshot LATA there: the equiv/fault harnesses make it a no-op (they only watch
 // RA0 / the sanity gate), while test/pic10f320/actuation captures the snapshot to verify the
-// variant's mute/coil pin pattern. cd4053-simple never calls __delay_ms.
+// variant's mute/coil pin pattern. cd4053_simple never calls __delay_ms.
 void bypass_on_delay_ms(unsigned ms);
 #define __delay_ms(x) bypass_on_delay_ms((unsigned)(x))
 

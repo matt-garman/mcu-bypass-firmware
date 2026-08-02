@@ -30,9 +30,9 @@ common=(
     -c "$ROOT/src/bypass_pure.c" -o "$work/pure.o"
 
 variants=(
-    "cd4053:CD4053_SIMPLE:bypass_output_cd4053_simple.c"
-    "mute:CD4053_WITH_MUTE:bypass_output_cd4053_with_mute.c"
-    "relay:TQ2_L2_5V_RELAY:bypass_output_tq2_l2_5v_relay.c"
+    "cd4053_simple:CD4053_SIMPLE:bypass_output_cd4053_simple.c"
+    "cd4053_with_mute:CD4053_WITH_MUTE:bypass_output_cd4053_with_mute.c"
+    "tq2_l2_5v_relay:TQ2_L2_5V_RELAY:bypass_output_tq2_l2_5v_relay.c"
 )
 
 for spec in "${variants[@]}"; do
@@ -51,7 +51,8 @@ for spec in "${variants[@]}"; do
     "$work/test_$variant"
 done
 
-for profile in pure shell_cd4053 driver_cd4053 driver_mute driver_relay; do
+for profile in pure shell_cd4053_simple driver_cd4053_simple \
+		driver_cd4053_with_mute driver_tq2_l2_5v_relay; do
     if [ ! -f "$work/$profile.gcda" ] || [ ! -s "$work/$profile.gcda" ]; then
         echo "FAIL: missing fresh PIC firmware profile: $profile.gcda" >&2
         exit 1

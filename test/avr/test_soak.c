@@ -36,7 +36,7 @@
 // `make test-soak-reset-witness` IS, and it proves this file's watchdog witness
 // still fires -- see the SOAK_SELFTEST_KILL_TIMER_MS fixture below.
 //
-// Default configuration: cd4053 variant, ATtiny85 @ 1 MHz (simavr models the
+// Default configuration: cd4053_simple variant, ATtiny85 @ 1 MHz (simavr models the
 // WDT system reset for the tinyx5 family).
 // Override via Makefile variables: SOAK_VARIANT, SOAK_CHIP, SOAK_DURATION_MS.
 

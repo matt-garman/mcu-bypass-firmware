@@ -92,7 +92,7 @@
 // many 1 ms debounce-integration TICKS are stolen from whichever window the
 // pulse overlaps. (The AVR integrates in its timer ISR, which keeps counting
 // through the block, so it is immune -- see the liveness-check note below.) The
-// Makefile passes the active variant's value (relay 12, mute 5, cd4053 0);
+// Makefile passes the active variant's value (relay 12, mute 5, simple 0);
 // default to the relay's 12 ms -- the maximum -- so an unspecified build is held
 // long enough rather than under-held.
 #ifndef SOAK_ACTUATION_BLOCK_MS

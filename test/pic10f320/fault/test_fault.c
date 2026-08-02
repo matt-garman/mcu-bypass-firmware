@@ -75,7 +75,7 @@ static void test_predicates(void) {
     CHECK(fwp_sanity_failed() != 0, "lost CD4053 output must flag sanity failure");
 
     // RA2 flipped to input -- SEU on TRISA bit 2.  RA2 is load-bearing for
-    // mute/relay (CTL2/SET coil).  For cd4053-simple it is configured as an
+    // mute/relay (CTL2/SET coil).  For cd4053_simple it is configured as an
     // output but not logically driven; the exact-TRISA gate nonetheless covers
     // it, so a direction fault on the spare pin is a reset on EVERY variant --
     // no variant split here any more.
@@ -141,8 +141,8 @@ static void test_fault_injection(void) {
     expect_reset(FWI_PULLUP_GLOBAL_OFF,    "OPTION_REG nWPUEN=1 (global pull-up off)");
     expect_reset(FWI_LED_PIN_TO_INPUT,     "TRISA RA0 (LED) flipped to input");
     expect_reset(FWI_CD4053_PIN_TO_INPUT,  "TRISA RA1 (CD4053/RESET) flipped to input");
-    // RA2 is load-bearing for cd4053-mute / tq2-relay (CTL2 / SET coil) and a
-    // spare driven-low output on cd4053-simple. The gate compares TRISA exactly
+    // RA2 is load-bearing for cd4053_with_mute / tq2_l2_5v_relay (CTL2 / SET coil) and a
+    // spare driven-low output on cd4053_simple. The gate compares TRISA exactly
     // against its init() value, so a direction fault on RA2 forces a reset on
     // EVERY variant -- the spare pin is covered too, and no variant split
     // remains here.
@@ -157,10 +157,10 @@ static void test_fault_injection(void) {
     expect_reset(FWI_PR2_SKEW,         "PR2 skewed off the 1 ms tick reload");
     expect_reset(FWI_T2CON_SKEW,       "T2CON skewed off the configured prescale/enable");
     // ANSELA analog re-selection. Unlike the TRISA output-pin check -- whose mask is
-    // per-variant, making RA2 a negative control on cd4053-simple above -- the ANSELA
+    // per-variant, making RA2 a negative control on cd4053_simple above -- the ANSELA
     // term in hw_critical_sfrs_intact() masks the FIXED BYPASS_OUTPUT_DDR_MASK
     // (RA0|RA1|RA2) on EVERY variant. All three output pins are always driven digital
-    // (even the spare RA2 on cd4053-simple), so an analog re-selection of ANY of them
+    // (even the spare RA2 on cd4053_simple), so an analog re-selection of ANY of them
     // must force a reset regardless of output scheme (no per-variant #if here).
     expect_reset(FWI_ANSELA_SKEW_RA0,  "ANSELA RA0 (LED) re-selected analog");
     expect_reset(FWI_ANSELA_SKEW_RA1,  "ANSELA RA1 (control pin) re-selected analog");

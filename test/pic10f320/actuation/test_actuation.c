@@ -4,7 +4,7 @@
 // Firmware actuation-sequence test.
 //
 // WHY THIS EXISTS
-//   The cd4053-mute and tq2-relay output drivers are BLOCKING: each actuation
+//   The cd4053_with_mute and tq2_l2_5v_relay output drivers are BLOCKING: each actuation
 //   asserts the mute / energises a relay coil, calls __delay_ms(), then releases
 //   it. The firmware<->model equivalence test only watches RA0 (the LED), and the
 //   gpsim functional test only samples the SETTLED register state -- so NEITHER
@@ -30,12 +30,12 @@
 // switch variants (cd4053-*) drive their control pins with a single unified
 // polarity that is correct for both the CD4053 and the pin-compatible TMUX4053
 // board; the LED (RA0) and relay stage are unchanged.
-//   cd4053-mute : CTL1=RA1, CTL2=RA2. The mute drops the not-yet-switched control,
+//   cd4053_with_mute : CTL1=RA1, CTL2=RA2. The mute drops the not-yet-switched control,
 //                 waits, then switches. engage mid: LED|CTL2 = 0x5; bypass mid: CTL2 = 0x4.
-//   tq2-relay   : RESET=RA1, SET=RA2. engage pulses SET (LED|SET = 0x5); bypass
+//   tq2_l2_5v_relay   : RESET=RA1, SET=RA2. engage pulses SET (LED|SET = 0x5); bypass
 //                 pulses RESET (RESET = 0x2). Coils settle low, so the settled
 //                 ENGAGED LATA is 0x1 -- all gpsim/equiv can confirm.
-//   cd4053-simple: no blocking actuation -> zero snapshots.
+//   cd4053_simple: no blocking actuation -> zero snapshots.
 
 #include <stdint.h>
 #include <stdio.h>
@@ -56,9 +56,9 @@ extern uint8_t  fw_tick_lata(int i);   // full SETTLED LATA at end of tick i
 // polarity: BYPASS = MCU pin low (control pins settle LOW in bypass, so BYPASS is
 // 0x0), ENGAGE = MCU pin high -- correct for both the CD4053 and the pin-compatible
 // TMUX4053 board. The LED (RA0) is on when ENGAGED / off in BYPASS for every variant.
-//   cd4053-simple : ENGAGED 0x3 (LED+RA1)      BYPASS 0x0
-//   cd4053-mute   : ENGAGED 0x7 (LED+RA1+RA2)   BYPASS 0x0
-//   tq2-relay     : ENGAGED 0x1 (LED only; coils pulse, settle low) BYPASS 0x0
+//   cd4053_simple : ENGAGED 0x3 (LED+RA1)      BYPASS 0x0
+//   cd4053_with_mute   : ENGAGED 0x7 (LED+RA1+RA2)   BYPASS 0x0
+//   tq2_l2_5v_relay     : ENGAGED 0x1 (LED only; coils pulse, settle low) BYPASS 0x0
 #if defined(OUTPUT_CD4053_SIMPLE)
 #  define EXP_ENGAGED_LATA 0x3u   // LED(RA0) + CD4053(RA1); RA2 spare low
 #  define EXP_BYPASS_LATA  0x0u
@@ -137,7 +137,7 @@ int main(void) {
     // Assert the FULL per-variant pin pattern, not just RA0: the control pins
     // (RA1/RA2) must agree with the LED at every tick. This is the host-side
     // analogue of the gpsim full-LATA check and, crucially, it covers the
-    // cd4053-simple CD4053 control pin (RA1) -- which has no blocking actuation for
+    // cd4053_simple CD4053 control pin (RA1) -- which has no blocking actuation for
     // the snapshot path below to catch, and so was otherwise verified only on the
     // simulated core (a mis-routed RA1 there survived the whole host suite; see the
     // mutation table). Mid-pulse transients remain the actuation-snapshot checks.
@@ -154,7 +154,7 @@ int main(void) {
     }
 
 #if defined(OUTPUT_CD4053_SIMPLE)
-    printf("actuation-sequence (cd4053-simple): expect no blocking actuation\n");
+    printf("actuation-sequence (cd4053_simple): expect no blocking actuation\n");
     CHECK(count == 0,
           "simple analog-switch variant must not call __delay_ms (no blocking "
           "actuation), got %d snapshot(s)",
@@ -168,7 +168,7 @@ int main(void) {
     //   bypass mid : 0x4 (CTL2 high, CTL1 low, LED off)
 #  define EXP_ENGAGE_MID 0x5u
 #  define EXP_BYPASS_MID 0x4u
-    printf("actuation-sequence (cd4053-mute): mid-mute LATA snapshots\n");
+    printf("actuation-sequence (cd4053_with_mute): mid-mute LATA snapshots\n");
     // Snapshot order: [0] power-on init-bypass, [1] engage, [2] bypass.
     CHECK(count == 3,
           "expected 3 actuations (init-bypass, engage, bypass), got %d", count);
@@ -189,7 +189,7 @@ int main(void) {
     }
 
 #elif defined(OUTPUT_TQ2_RELAY)
-    printf("actuation-sequence (tq2-relay): coil-pulse LATA snapshots\n");
+    printf("actuation-sequence (tq2_l2_5v_relay): coil-pulse LATA snapshots\n");
     // Snapshot order: [0] power-on init-bypass, [1] engage, [2] bypass.
     CHECK(count == 3,
           "expected 3 actuations (init-bypass, engage, bypass), got %d", count);

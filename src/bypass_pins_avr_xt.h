@@ -37,7 +37,7 @@
 // (the shared output drivers consume it); the value is interpreted by the
 // per-MCU hw_configure_output_pins() (AVR-XT: PORTA.DIR bit = 1 => output).
 // All three variants use PA1..PA3: LED(PA1) + two control pins (PA2/PA3); the
-// cd4053-simple variant leaves PA3 a spare driven low. ("DDR" is legacy AVR
+// cd4053_simple variant leaves PA3 a spare driven low. ("DDR" is legacy AVR
 // wording, kept for a single cross-MCU macro name.)
 //
 // we also include PA6 here: it's unused, but we don't want it to float, so

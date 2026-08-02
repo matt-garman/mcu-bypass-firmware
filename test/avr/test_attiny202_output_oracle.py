@@ -61,13 +61,13 @@ def run_oracle(action):
     return checker.fails
 
 
-mute = make_trace("mute", [(100, 0x2), (105, 0x3)])
+mute = make_trace("cd4053_with_mute", [(100, 0x2), (105, 0x3)])
 check(run_oracle(lambda ck: (
     driver.check_trace(ck, mute, [0x2, 0x3]),
     driver.check_pulse_present(ck, mute, 0x2)
 )) == 0, "valid mute sequence with a complete pulse must pass")
 
-relay = make_trace("relay", [(200, 0x1), (212, 0x0)])
+relay = make_trace("tq2_l2_5v_relay", [(200, 0x1), (212, 0x0)])
 check(run_oracle(lambda ck: (
     driver.check_trace(ck, relay, [0x1, 0x0]),
     driver.check_pulse_present(ck, relay, 0x1)
@@ -144,7 +144,7 @@ class ControlSim:
         self.state = 0x0
         self.events = {}
         self.engaged = False
-        if scenario_variant == "relay":
+        if scenario_variant == "tq2_l2_5v_relay":
             self.events[1] = 0x1
             self.events[1 + 12] = 0x0
 
@@ -169,9 +169,9 @@ class ControlSim:
     def press(self):
         start = self.current_cycle + 8
         if not self.engaged:
-            if scenario_variant == "cd4053":
+            if scenario_variant == "cd4053_simple":
                 self.events[start] = 0x1
-            elif scenario_variant == "mute":
+            elif scenario_variant == "cd4053_with_mute":
                 self.events[start] = 0x2
                 self.events[start + 5] = 0x3
             else:
@@ -181,9 +181,9 @@ class ControlSim:
                 self.events[start + 12] = 0x0
             self.engaged = True
         else:
-            if scenario_variant == "cd4053":
+            if scenario_variant == "cd4053_simple":
                 self.events[start] = 0x0
-            elif scenario_variant == "mute":
+            elif scenario_variant == "cd4053_with_mute":
                 self.events[start] = 0x2
                 self.events[start + 5] = 0x0
             else:
@@ -216,7 +216,7 @@ for variant in driver.VARIANTS:
 # harness check. Pulse-WIDTH faults (a short relay coil, a long mute window) are
 # no longer judged here -- test_attiny202_delay_oracle.py owns width, and its
 # --selftest asserts those fail-closed paths from the compiled loop count.
-check(run_control_orchestration("relay", "relay_overlap") > 0,
+check(run_control_orchestration("tq2_l2_5v_relay", "relay_overlap") > 0,
       "orchestration must reject simultaneous relay coils")
 
 old_variant = os.environ.get("ATTINY202_VARIANT")

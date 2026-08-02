@@ -90,7 +90,7 @@ expect_failure() {
 }
 
 seed_stale
-output=$(export FAKE_STACK_LOG="$log"; run_gate VARIANTS=cd4053 VARIANT=relay \
+output=$(export FAKE_STACK_LOG="$log"; run_gate VARIANTS=cd4053_simple VARIANT=tq2_l2_5v_relay \
 	STACK_SOURCES=src/bypass_pure.c CORE_SRC=src/bypass_pure.c \
 	src_cd4053=src/bypass_pure.c src_mute=src/bypass_pure.c \
 	src_relay=src/bypass_pure.c)

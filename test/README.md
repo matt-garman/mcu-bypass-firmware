@@ -418,7 +418,7 @@ exact WPUA pull-up state, ANSELA mask narrowing, muted-CD4053 startup
 reassertion, mute-window shortening, and relay pulse shortening.
 
 **Which lane owns the Classic AVR watchdog matters, and is easy to get wrong.**
-The two long-standing watchdog-handshake mutants both run on `test-sim-cd4053`,
+The two long-standing watchdog-handshake mutants both run on `test-sim-cd4053_simple`,
 which is the ATtiny13a build — and simavr 1.6 does not model the ATtiny13a WDT
 system reset at all, so no assertion on that lane can witness one. They are
 still killed, but not by the watchdog: deleting the `hw_wdt_pet()` call site

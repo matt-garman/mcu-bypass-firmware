@@ -9,7 +9,8 @@ name: CI
 # cppcheck 2.13, simavr 1.6) as closely as the distro packages allow.
 #
 # Most of the matrix lives inside the Makefile: a single `make test` already
-# exercises all three variants (cd4053, mute, relay) across the ATtiny13a and
+# exercises all three variants (cd4053_simple, cd4053_with_mute,
+# tq2_l2_5v_relay) across the ATtiny13a and
 # the tinyx5 family, plus every analysis gate (clang-tidy, cppcheck,
 # clang-analyzer, MISRA-C:2012), the PIC10F320 host lanes (firmware<->core
 # equivalence, actuation, host fault injection and firmware line coverage, all
@@ -490,7 +491,7 @@ jobs:
       #
       # The expected count comes from XT_VARIANTS_SUPPORTED, not VARIANTS.
       # VARIANTS is the classic-AVR list and is user-overridable, so a
-      # `VARIANTS=cd4053` invocation would shrink both the build and the
+      # `VARIANTS=cd4053_simple` invocation would shrink both the build and the
       # expectation together and let these gates go green having exercised a
       # third of the matrix. XT_VARIANTS_SUPPORTED is declared `override` and
       # cannot be shrunk that way. The fault gate below deliberately keeps a

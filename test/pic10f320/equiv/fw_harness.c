@@ -4,8 +4,8 @@
 // Firmware harness for the equivalence test: runs the REAL PIC10F320 firmware
 // on the host and captures its status-LED (RA0) output trace, one sample per
 // tick. RA0 is the variant-independent witness of effect state -- it is high iff
-// the effect is ENGAGED for every output variant (cd4053-simple, cd4053-with-
-// mute, tq2-relay), whereas the RA1/RA2 control pins differ per variant (their
+// the effect is ENGAGED for every output variant (cd4053_simple,
+// cd4053_with_mute, tq2_l2_5v_relay), whereas the RA1/RA2 control pins differ per variant (their
 // per-variant LATA pattern is asserted on real silicon by the gpsim test).
 //
 // HOW IT WORKS
@@ -87,7 +87,7 @@ static int            g_clrwdt_calls;
 // (test/pic10f320/equiv/xc.h); we record LATA + the requested delay for each call so
 // test/pic10f320/actuation can assert the per-variant mid-actuation pin pattern -- the part
 // the equivalence (RA0-only) and gpsim (settled-state-only) tests cannot see.
-// The equivalence run itself ignores these; cd4053-simple never calls __delay_ms.
+// The equivalence run itself ignores these; cd4053_simple never calls __delay_ms.
 #define FW_ACTUATION_MAX 64
 static uint8_t  g_act_lata[FW_ACTUATION_MAX];
 static unsigned g_act_ms[FW_ACTUATION_MAX];
@@ -119,7 +119,7 @@ uint8_t  fw_init_lata_transition(int i) {
 // test/pic10f320/actuation assert each variant's per-variant control pins (RA1/RA2) at every
 // settled tick, not just RA0. That closes the one hole the RA0-only equivalence
 // test leaves on the host: a mis-routed / stuck control pin on the NON-blocking
-// cd4053-simple variant (which has no __delay_ms for the actuation-snapshot path
+// cd4053_simple variant (which has no __delay_ms for the actuation-snapshot path
 // to catch) -- previously verified only on the simulated core. The equivalence run
 // fills this too (and compares the per-tick internal state below). The buffer is
 // sized to span the equivalence test's longest stimulus (test/pic10f320/equiv/test_equiv.c

@@ -24,14 +24,14 @@ PB_TAG=${PB_TAG:-pic10f322}
 PB_FLASH_VAR=${PB_FLASH_VAR:-PIC_FLASH_WORDS}
 PB_FLASH_WORDS=${PB_FLASH_WORDS:-512}
 PB_VARIANT_VAR=${PB_VARIANT_VAR:-VARIANTS}
-PB_VARIANT=${PB_VARIANT:-cd4053}
+PB_VARIANT=${PB_VARIANT:-cd4053_simple}
 # The all-variant build target, and the images it must produce. `pic` builds the
 # whole VARIANTS matrix in one invocation; the PIC10F320 lane splits that into
 # per-variant `pic320` plus the `pic320-variants` aggregate, so the matrix checks
 # below point at whichever target owns the matrix for this chip.
 PB_MATRIX_TARGET=${PB_MATRIX_TARGET:-pic}
 PB_MATRIX_VARIANTS_VAR=${PB_MATRIX_VARIANTS_VAR:-VARIANTS}
-PB_MATRIX_VARIANTS=${PB_MATRIX_VARIANTS:-cd4053 mute relay}
+PB_MATRIX_VARIANTS=${PB_MATRIX_VARIANTS:-cd4053_simple cd4053_with_mute tq2_l2_5v_relay}
 PB_MATRIX_IMAGES=${PB_MATRIX_IMAGES:-bypass-pic10f322-cd4053_simple.hex bypass-pic10f322-cd4053_with_mute.hex bypass-pic10f322-tq2_l2_5v_relay.hex}
 PB_MATRIX_FAIL_IMAGE=${PB_MATRIX_FAIL_IMAGE:-bypass-pic10f322-tq2_l2_5v_relay.hex}
 PB_MATRIX_REQUIRE_COMPLETE=${PB_MATRIX_REQUIRE_COMPLETE:-1}
@@ -64,19 +64,14 @@ case "$PB_TARGET" in
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; expected_checks= ;;
 esac
 # Local restatement of the Makefile's canonical image basename (see its
-# "canonical firmware image basename" block): <prefix>-<mcu>-<output stage>.
-# Deliberately independent of the Makefile rather than read back from it -- this
-# regression exists to prove the build emits the names the release contract
-# expects, and a name derived from the thing under test could not fail.
+# "canonical firmware image basename" block): <prefix>-<mcu>-<output stage>,
+# where the stage field is the variant name itself. Deliberately independent of
+# the Makefile rather than read back from it -- this regression exists to prove
+# the build emits the names the release contract expects, and a name derived
+# from the thing under test could not fail.
 pb_image() {
-	case $1 in
-	cd4053|cd4053-simple) _stage=cd4053_simple ;;
-	mute|cd4053-mute)     _stage=cd4053_with_mute ;;
-	relay|tq2-relay)      _stage=tq2_l2_5v_relay ;;
-	*) printf 'FAIL: no image stage known for variant %s\n' "$1" >&2; exit 1 ;;
-	esac
 	printf '%s/%s/%s-%s-%s.hex' "$repo" "$PB_BUILD_DIR" \
-		"$PB_FW_BASE" "$PB_TAG" "$_stage"
+		"$PB_FW_BASE" "$PB_TAG" "$1"
 }
 hex=$(pb_image "$PB_VARIANT")
 asm=${hex%.hex}.s
@@ -731,7 +726,7 @@ checks=$((checks + 1))
 # Each selector must control the image rebuilt by the pic320 prerequisite, even
 # when a caller supplies a conflicting PIC320_VARIANT that names a stale image.
 if [ "$PB_SELECTOR_ROUTING" -eq 1 ]; then
-	selected=tq2-relay
+	selected=tq2_l2_5v_relay
 	selected_hex=$(pb_image "$selected")
 	selector_specs=(
 		"pic320-test-fault-target PIC320_FAULT_VARIANT"
@@ -873,7 +868,7 @@ if [ "$PB_REBUILD_REQUIRED" = 1 ]; then
 	assert_host_run_count 2 'identical pic320-test-equiv request' "$PB_BUILD_DIR/test_equiv"
 	checks=$((checks + 1))
 
-	run_pic320_host_make pic320-test-equiv PIC320_VARIANT=cd4053-mute >/dev/null
+	run_pic320_host_make pic320-test-equiv PIC320_VARIANT=cd4053_with_mute >/dev/null
 	assert_host_output_counts 3 'changed-variant pic320-test-equiv request' "${equiv_outputs[@]}"
 	assert_host_run_count 3 'changed-variant pic320-test-equiv request' "$PB_BUILD_DIR/test_equiv"
 	latest=$(latest_logged_command "$host_cc_log" "$PB_BUILD_DIR/fw_harness.o")

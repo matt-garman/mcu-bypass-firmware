@@ -39,7 +39,7 @@ N_TOGGLES = 6
 OUTPUT_SAMPLE_CYCLES = 1
 OUTPUT_TRACE_MS = 30
 
-VARIANTS = ("cd4053", "mute", "relay")
+VARIANTS = ("cd4053_simple", "cd4053_with_mute", "tq2_l2_5v_relay")
 
 
 class OutputTrace:
@@ -188,13 +188,13 @@ def test_control_outputs(elf, variant, ck):
     check_trace(ck, release_one, [])
     check_trace(ck, release_two, [])
 
-    if variant == "cd4053":
+    if variant == "cd4053_simple":
         check_trace(ck, startup, [])
         check_trace(ck, engage, [0x1])
         check_trace(ck, bypass, [0x0])
         ck.check(sim.control_state() == 0x0,
                  "simple x4053: PA2 low and spare PA3 parked low in BYPASS")
-    elif variant == "mute":
+    elif variant == "cd4053_with_mute":
         check_trace(ck, startup, [])
         check_trace(ck, engage, [0x2, 0x3])
         check_trace(ck, bypass, [0x2, 0x0])

@@ -213,7 +213,11 @@ avrdude -c usbtiny -p t13 \
 
 If you have the source tree, the Makefile does both steps for you:
 `make program VARIANT=<variant>` (ATtiny13a) or `make program85 VARIANT=<variant>`
-(ATtiny85), etc.
+(ATtiny85), etc. `<variant>` is the output-stage name from the table above —
+`cd4053_simple`, `cd4053_with_mute` or `tq2_l2_5v_relay` — the same string that
+appears in the image filename. (Through `v0.9.7` these were spelled `cd4053`,
+`mute` and `relay`, and the PIC10F320 lane used `cd4053-simple`, `cd4053-mute`
+and `tq2-relay`; all six spellings were retired in `v0.9.8`.)
 
 **PIC10F322** — the CONFIG word is embedded in the HEX, so writing the HEX
 configures the device; there is no separate fuse step:

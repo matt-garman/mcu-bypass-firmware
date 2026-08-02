@@ -835,17 +835,17 @@ variant and fails the build on any overshoot.
 |===
 | Variant | Program (flash) | of 256 words | Free
 
-| cd4053-simple | 220 words | 85.9% | 36 words
-| cd4053-mute   | 241 words | 94.1% | 15 words
-| tq2-relay     | 244 words | 95.3% | 12 words
+| cd4053_simple    | 220 words | 85.9% | 36 words
+| cd4053_with_mute | 241 words | 94.1% | 15 words
+| tq2_l2_5v_relay  | 244 words | 95.3% | 12 words
 |===
 
 Data (RAM) use is 10 bytes of 64 (15.6%); the single live global is the same
 3-byte `ctx_`, with the remainder XC8 runtime scratch.
 
-Those margins are the whole story of this target. **12 free words** on tq2-relay
+Those margins are the whole story of this target. **12 free words** on tq2_l2_5v_relay
 is why the output-latch integrity check the PIC10F322 shell carries could not be
-ported — it overshoots by 3 words on that variant and 5 on cd4053-mute — and why
+ported — it overshoots by 3 words on that variant and 5 on cd4053_with_mute — and why
 the exact-`TRISA` check, which costs exactly 1 word, was worth porting. Both
 decisions are recorded in `docs/pic10f320_special_case.md`.
 

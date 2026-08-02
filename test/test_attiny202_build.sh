@@ -78,7 +78,7 @@ chmod 750 "$tools"/*
 
 run_build() {
 	make --no-print-directory -C "$ROOT" attiny202 \
-		XT_BUILD_DIR="$build" XT_DFP="${TEST_DFP-$dfp}" VARIANTS="${TEST_VARIANTS-cd4053}" \
+		XT_BUILD_DIR="$build" XT_DFP="${TEST_DFP-$dfp}" VARIANTS="${TEST_VARIANTS-cd4053_simple}" \
 		CC="$tools/cc" READELF="$tools/readelf" SIZE="$tools/size" \
 		OBJCOPY="$tools/objcopy" "$@"
 }
@@ -111,14 +111,13 @@ expect_failure() {
 }
 
 seed_stale
-(export TEST_VARIANTS="cd4053 mute relay"; run_build) >/dev/null
-# Spelled out per variant rather than composed from the variant name: the
-# canonical basename's stage token is NOT the variant token (`mute` builds
-# `cd4053_with_mute`), and this test's job includes proving the build emits the
-# names the release contract names.
-for spec in "cd4053 cd4053_simple" "mute cd4053_with_mute" "relay tq2_l2_5v_relay"; do
-	read -r variant stage <<<"$spec"
-	stem="$build/bypass-attiny202-${stage}"
+(export TEST_VARIANTS="cd4053_simple cd4053_with_mute tq2_l2_5v_relay"; run_build) >/dev/null
+# The stage field of the canonical basename IS the variant name, so these are
+# composed directly. Still spelled against a literal `bypass-attiny202-` prefix
+# rather than asking the Makefile: this test's job includes proving the build
+# emits the names the release contract names.
+for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
+	stem="$build/bypass-attiny202-${variant}"
 	[ -s "$stem.elf" ] \
 		|| { printf 'FAIL: missing fresh %s ELF\n' "$variant" >&2; exit 1; }
 	grep -q '^fresh ELF$' "$stem.elf" \
@@ -184,15 +183,15 @@ expect_failure "zero flash budget" "positive decimal integer" XT_FLASH_BYTES=0
 expect_failure "malformed flash budget" "positive decimal integer" XT_FLASH_BYTES=invalid
 expect_failure "unsupported variant" "unsupported ATtiny202 variant" TEST_VARIANTS=bogus
 expect_failure "redirect-like variant" "unsupported ATtiny202 variant" \
-	"TEST_VARIANTS=cd4053 >$work/injected"
+	"TEST_VARIANTS=cd4053_simple >$work/injected"
 [ ! -e "$work/injected" ] || { printf 'FAIL: variant text executed a redirection\n' >&2; exit 1; }
 expect_failure "duplicate variant" "duplicate ATtiny202 variant" \
-	"TEST_VARIANTS=cd4053 cd4053"
+	"TEST_VARIANTS=cd4053_simple cd4053_simple"
 expect_failure "empty variant matrix" "VARIANTS is empty" TEST_VARIANTS=
 
 seed_stale
 if output=$(run_build VARIANTS=bogus XT_VARIANTS_UNKNOWN= \
-		XT_VARIANTS_REQUESTED=cd4053 2>&1); then
+		XT_VARIANTS_REQUESTED=cd4053_simple 2>&1); then
 	printf 'FAIL: command-line variant guard overrides were accepted\n' >&2
 	exit 1
 fi

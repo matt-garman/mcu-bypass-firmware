@@ -189,28 +189,23 @@ source "$REPO_ROOT/scripts/release-signing-policy.sh" \
 
 mkv() { make -s print-"$1"; }      # echo one Makefile variable
 
-VARIANTS=$(mkv VARIANTS)           # cd4053 mute relay
+VARIANTS=$(mkv VARIANTS)           # cd4053_simple cd4053_with_mute tq2_l2_5v_relay
 TINYX5=$(mkv TINYX5)               # 85 45
 FW_BASE=$(mkv FW_BASE)             # bypass
 MCU=$(mkv MCU)                     # attiny13a
 
-# The canonical image basename: <prefix>-<mcu>-<output stage>. Restated here
-# rather than read back from the Makefile ON PURPOSE. The enumeration below is
-# this script's INDEPENDENT opinion of what a complete release contains, and it
-# is cross-checked against the Makefile's RELEASE_IMAGES a few dozen lines down;
-# deriving the names from the thing being cross-checked would make that check
-# agree with itself. Keep this in step with the Makefile's IMAGE_STAGE_* map --
-# the cross-check is what tells you when it has drifted.
-stage_of() {
-	case $1 in
-	cd4053|cd4053-simple) printf 'cd4053_simple' ;;
-	mute|cd4053-mute)     printf 'cd4053_with_mute' ;;
-	relay|tq2-relay)      printf 'tq2_l2_5v_relay' ;;
-	*) die "no image stage known for output variant '$1'" ;;
-	esac
-}
+# The canonical image basename: <prefix>-<mcu>-<output stage>, where the stage
+# field IS the variant name. Composed here rather than read back from the
+# Makefile ON PURPOSE: the enumeration below is this script's INDEPENDENT
+# opinion of what a complete release contains, and it is cross-checked against
+# the Makefile's RELEASE_IMAGES a few dozen lines down. Deriving the names from
+# the thing being cross-checked would make that check agree with itself.
+#
+# v0.9.8 briefly needed a variant->stage translation table here. It is gone
+# because the vocabularies were unified rather than mapped, so the only thing
+# left to restate is the delimiter layout.
 # $(fw_image <build dir> <mcu tag> <variant>) -> full path, no suffix
-fw_image() { printf '%s/%s-%s-%s' "$1" "$FW_BASE" "$2" "$(stage_of "$3")"; }
+fw_image() { printf '%s/%s-%s-%s' "$1" "$FW_BASE" "$2" "$3"; }
 AVR_BUILD_DIR=$(mkv AVR_BUILD_DIR) # build_avr_classic
 PIC_BUILD_DIR=$(mkv PIC_BUILD_DIR) # build_pic
 PIC_TAG=$(mkv PIC_TAG)             # pic10f322
@@ -239,7 +234,7 @@ XT_DFP=$(mkv XT_DFP)               # third_party/attiny_dfp
 XT_F_CPU=$(mkv XT_F_CPU)           # 2000000UL
 XT_CLK_MHZ=$(awk -v h="${XT_F_CPU//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
 XT_FLASH_BYTES=$(mkv XT_FLASH_BYTES)
-XT_VARIANTS=$(mkv XT_VARIANTS_SUPPORTED)     # cd4053 mute relay
+XT_VARIANTS=$(mkv XT_VARIANTS_SUPPORTED)     # same three names as VARIANTS
 YASIMAVR_PY=$(mkv YASIMAVR_PY)     # third_party/yasimavr/venv/bin/python
 XT_AVRDUDE_PART=$(mkv XT_AVRDUDE_PART)       # t202
 XT_PROGRAMMER=$(mkv XT_PROGRAMMER)           # serialupdi
@@ -264,7 +259,7 @@ XT_FUSE[bootend]=$(mkv XT_FUSE_BOOTEND)
 # toolchain and say nothing.
 PIC320_BUILD_DIR=$(mkv PIC320_BUILD_DIR)     # build_pic10f320
 PIC320_TAG=$(mkv PIC320_TAG)                 # pic10f320
-PIC320_VARIANTS=$(mkv PIC320_VARIANTS_ALL)   # cd4053-simple cd4053-mute tq2-relay
+PIC320_VARIANTS=$(mkv PIC320_VARIANTS_ALL)   # same three names as VARIANTS
 PIC320_XTAL=$(mkv PIC320_XTAL)
 PIC320_CLK_MHZ=$(awk -v h="${PIC320_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
 PIC320_FLASH_WORDS=$(mkv PIC320_FLASH_WORDS) # 256

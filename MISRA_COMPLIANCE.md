@@ -317,7 +317,7 @@ When changing the firmware:
    make analyze-misra VARIANTS="cd4053 mute relay" STRICT_TOOLS=1
    make attiny202-analyze-misra STRICT_TOOLS=1
    make pic-analyze-misra STRICT_TOOLS=1
-   for v in cd4053-simple cd4053-mute tq2-relay; do
+   for v in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
        make pic320-analyze-misra PIC320_VARIANT="$v" STRICT_TOOLS=1 || exit 1
    done
    ```

@@ -82,10 +82,46 @@ file is the human-readable summary of *what changed*.
   now matches on the mandatory MCU field, making the arms mutually exclusive,
   and an unrecognized image is a hard error.
 
-  The command-line vocabulary is **unchanged**: `VARIANT=relay`, the `make`
-  goals, soak names and evidence log names all still use the short tokens.
-  Unifying those as well remains a TODO item; the `IMAGE_STAGE_*` map is the
-  single seam where the two vocabularies meet.
+- **One output-stage vocabulary everywhere, replacing three.** The variant
+  names themselves are now `cd4053_simple`, `cd4053_with_mute` and
+  `tq2_l2_5v_relay` — the same strings the driver sources and the published
+  image field use. Two internal vocabularies are retired: the classic-AVR and
+  AVR-XT lanes' `cd4053`/`mute`/`relay`, and the PIC10F320 lane's inherited
+  `cd4053-simple`/`cd4053-mute`/`tq2-relay`, which named the same three output
+  stages in different words.
+
+  This is a **breaking change to command lines and make goals**:
+
+  | before | after |
+  |---|---|
+  | `make VARIANT=relay program` | `make VARIANT=tq2_l2_5v_relay program` |
+  | `make PIC320_VARIANT=cd4053-mute pic320` | `make PIC320_VARIANT=cd4053_with_mute pic320` |
+  | `make test-sim-mute` | `make test-sim-cd4053_with_mute` |
+  | `SOAK_VARIANT=relay` | `SOAK_VARIANT=tq2_l2_5v_relay` |
+
+  Release soak combination names change with it, and so therefore do the
+  retained evidence filenames: `evidence/soak-avr_cd4053_t85.log` becomes
+  `evidence/soak-avr_cd4053_simple_t85.log`, `soak-pic320_tq2-relay.log`
+  becomes `soak-pic320_tq2_l2_5v_relay.log`, and so on for all fifteen. Evidence
+  already committed under `release/v0.9.7/` and earlier is untouched.
+
+  The longer tokens cost more typing, once per command line. What they buy is
+  that a variant name cannot be valid in one lane and meaningless in another,
+  which is what `cd4053-mute` versus `mute` was.
+
+  The `IMAGE_STAGE_*` map added earlier in this release is **deleted**: with
+  the vocabularies unified it was the identity function. So are its two
+  downstream copies — `stage_of()` in `scripts/make-release.sh` and `pb_image()`
+  in `test/test_pic_build.sh` — and the stage-to-variant table in the ATtiny202
+  delay oracle. A translation table is a place where two names can disagree;
+  removing the need for one is a stronger guarantee than maintaining it
+  correctly. What replaces it as the parse-time guard is a completeness check
+  that every supported variant, in every lane, has a `macro_<v>` selector and a
+  `src_<v>` driver. That check deliberately does *not* require the three lanes'
+  supported sets to be equal — a future output stage that fits the ATtiny13a but
+  not the 12-free-words PIC10F320 is a legitimate divergence.
+
+  Image contents are again unchanged: all 18 remain bit-identical to `v0.9.7`.
 
 ## [Unreleased]
 

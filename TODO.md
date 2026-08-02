@@ -513,7 +513,8 @@ as the deferred half of the PIC10F320 merge (`docs/pic10f320_merge_plan.md` §15
 That merge deliberately took the smallest-change option at every naming fork so
 it would not also become a rename project. The debt is real, it is now
 *visible in one tree* for the first time, and it should be paid deliberately
-rather than drifting further. Four inconsistent axes:
+rather than drifting further. Four inconsistent axes, of which the two that
+touch published and typed names are now paid off (v0.9.8) and two remain:
 
 - **Make target prefixes.** ATtiny13a/tinyx5 use bare or suffixed goals (`all`,
   `all13`, `all85`, `size45`); PIC10F322 uses `pic-`; ATtiny202 uses
@@ -534,20 +535,24 @@ rather than drifting further. Four inconsistent axes:
   stopped it being flashed onto an ATtiny85. Historical `release/vX.Y.Z/`
   directories were deliberately left alone (signed `SHA256SUMS` name the files);
   `release/README.md` carries the old→new redirect table.
-- **Output-stage vocabulary.** The parent's `VARIANTS` and the PIC10F320's
-  variant list describe the same three output stages in different words. This is
-  the remaining half of the basename work: the v0.9.8 rename deliberately did
-  NOT touch the variant vocabulary, so `VARIANT=relay` still builds
-  `bypass-attiny13a-tq2_l2_5v_relay.hex`. The two vocabularies meet in exactly
-  one place — the Makefile's `IMAGE_STAGE_*` map — and unifying them collapses
-  that map to the identity and deletes it. Everything else (soak names, evidence
-  log names, coverage archive paths, gpsim fixtures, `make` goals) speaks the
-  short vocabulary and would move with it.
+- ~~**Output-stage vocabulary.**~~ **DONE for v0.9.8**, immediately after the
+  basename axis and on the same branch. Both variant lists — and the AVR-XT
+  one — now hold `cd4053_simple`/`cd4053_with_mute`/`tq2_l2_5v_relay`, the same
+  strings the driver sources and the image field use. `VARIANT=`, the make
+  goals (`test-sim-cd4053_with_mute`), the soak combination names and their
+  retained evidence filenames all moved with it. The `IMAGE_STAGE_*` map
+  collapsed to the identity and was deleted, along with its two downstream
+  copies in `scripts/make-release.sh` and `test/test_pic_build.sh`; what guards
+  the vocabulary now is a parse-time check that every supported variant in every
+  lane has a `macro_<v>` and a `src_<v>`. Longer command lines are the accepted
+  cost.
 
 Design notes if picked up:
-- The basename axis is done; what remains is the three vocabulary/prefix axes
-  above. Sequence them so the tree is never half-unified — one axis per commit,
-  each with its consumers, rather than a sweeping rename reviewed all at once.
+- What remains is the two PREFIX axes above (make-target prefixes, Makefile
+  variable prefixes). Both are internal: neither changes a published artifact
+  name, and only the make-goal prefixes are user-visible. Sequence them so the
+  tree is never half-unified — one axis per commit, each with its consumers,
+  rather than a sweeping rename reviewed all at once.
 - Renaming a Makefile variable is an **external interface change**, not an
   internal one: `scripts/make-release.sh` reads Makefile truth through
   `make -s print-<VAR>`. Grep `print-` across `scripts/` and
@@ -558,7 +563,8 @@ Design notes if picked up:
 - A rename that changes published artifact names belongs at a version boundary
   with a redirect note in the release documentation, as v0.9.8 did.
 
-Effort: ~3–6 h remaining (was ~4–8 h; the basename axis is spent). Impact:
+Effort: ~2–4 h remaining (was ~4–8 h; the basename and vocabulary axes are
+spent). Impact:
 Medium — no behavioural change and no new assurance, but it removes a class of
 silent-misconfiguration hazard that grows with every added target, and it is the
 difference between "six targets in one repository" and "four projects sharing a
@@ -718,7 +724,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |
 | Broader compiler & toolchain portability | 3 | Medium | Medium-High — adoption + reliability |
 | Embedded provenance URL | 3 | 1–2 h | Low — provenance polish |
-| Unified naming scheme across MCUs (basenames done in v0.9.8) | 3 | 3–6 h | Medium — removes a silent-misconfig class |
+| Unified naming scheme across MCUs (names+vocabulary done in v0.9.8; prefixes remain) | 3 | 2–4 h | Medium — removes a silent-misconfig class |
 | `make program-pic320` target | 3 | 1 h + bench | Low — convenience; `pk2cmd` documented |
 | Manufacturing artifacts (name as scope) | 4 | — | Completeness signal |
 | Signal-integrity SPICE modeling | 4 | 2 h | High for the board, not firmware work |

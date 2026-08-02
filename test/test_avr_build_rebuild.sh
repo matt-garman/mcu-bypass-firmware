@@ -91,7 +91,7 @@ run_make() {
 		READELF="$tools/readelf" \
 		AVR_BUILD_DIR=build_avr_classic \
 		AVR_FW=build_avr_classic/bypass FW_BASE=bypass MCU=attiny13a \
-		VARIANTS="cd4053 mute relay"
+		VARIANTS="cd4053_simple cd4053_with_mute tq2_l2_5v_relay"
 }
 
 cc_count() { grep -c -F "$1.tmp" "$cc_log" || true; }
@@ -137,39 +137,39 @@ run_make "$t13.hex" CFLAGS=-DCUSTOM_CFLAGS >/dev/null
 [[ "$(cc_count "$t13.elf")" -eq 8 ]] && grep -q -- '-DCUSTOM_CFLAGS' "$cc_log" \
 	|| { printf 'FAIL: current CFLAGS did not reach compiler\n' >&2; exit 1; }
 checks=$((checks + 1))
-run_make "$t13.hex" CFLAGS=-DCUSTOM_CFLAGS macro_cd4053=CUSTOM_VARIANT >/dev/null
+run_make "$t13.hex" CFLAGS=-DCUSTOM_CFLAGS macro_cd4053_simple=CUSTOM_VARIANT >/dev/null
 [[ "$(cc_count "$t13.elf")" -eq 9 ]] && grep -q -- '-DCUSTOM_VARIANT' "$cc_log" \
 	|| { printf 'FAIL: current variant macro did not reach compiler\n' >&2; exit 1; }
 checks=$((checks + 1))
 (export TEST_OBJCOPY="$tools/objcopy2"; \
-	run_make "$t13.hex" CFLAGS=-DCUSTOM_CFLAGS macro_cd4053=CUSTOM_VARIANT) >/dev/null
+	run_make "$t13.hex" CFLAGS=-DCUSTOM_CFLAGS macro_cd4053_simple=CUSTOM_VARIANT) >/dev/null
 [[ "$(cc_count "$t13.elf")" -eq 10 && "$(objcopy_count "$t13.hex")" -eq 10 ]] \
 	|| { printf 'FAIL: current objcopy command did not rebuild artifacts\n' >&2; exit 1; }
 checks=$((checks + 1))
 
 (export TEST_OBJCOPY="$tools/objcopy2"; \
-	run_make "$t13.hex" CFLAGS=-DCUSTOM_CFLAGS macro_cd4053=CUSTOM_VARIANT \
+	run_make "$t13.hex" CFLAGS=-DCUSTOM_CFLAGS macro_cd4053_simple=CUSTOM_VARIANT \
 		CORE_SRC=src/bypass_pure.c) >/dev/null
 [[ "$(cc_count "$t13.elf")" -eq 11 ]] && grep -q -- 'src/bypass_pure.c' "$cc_log" \
 	|| { printf 'FAIL: current CORE_SRC did not reach compiler\n' >&2; exit 1; }
 checks=$((checks + 1))
 (export TEST_OBJCOPY="$tools/objcopy2"; \
-	run_make "$t13.hex" CFLAGS=-DCUSTOM_CFLAGS macro_cd4053=CUSTOM_VARIANT \
-		CORE_SRC=src/bypass_pure.c src_cd4053=src/alternate_driver.c) >/dev/null
+	run_make "$t13.hex" CFLAGS=-DCUSTOM_CFLAGS macro_cd4053_simple=CUSTOM_VARIANT \
+		CORE_SRC=src/bypass_pure.c src_cd4053_simple=src/alternate_driver.c) >/dev/null
 [[ "$(cc_count "$t13.elf")" -eq 12 ]] && grep -q -- 'src/alternate_driver.c' "$cc_log" \
 	|| { printf 'FAIL: current driver source mapping did not reach compiler\n' >&2; exit 1; }
 checks=$((checks + 1))
 printf '\nprintf "objcopy replacement used\\n" >> "$FAKE_OBJCOPY_LOG"\n' >> "$tools/objcopy2"
 (export TEST_OBJCOPY="$tools/objcopy2"; \
-	run_make "$t13.hex" CFLAGS=-DCUSTOM_CFLAGS macro_cd4053=CUSTOM_VARIANT \
-		CORE_SRC=src/bypass_pure.c src_cd4053=src/alternate_driver.c) >/dev/null
+	run_make "$t13.hex" CFLAGS=-DCUSTOM_CFLAGS macro_cd4053_simple=CUSTOM_VARIANT \
+		CORE_SRC=src/bypass_pure.c src_cd4053_simple=src/alternate_driver.c) >/dev/null
 [[ "$(cc_count "$t13.elf")" -eq 13 ]] && grep -q 'objcopy replacement used' "$objcopy_log" \
 	|| { printf 'FAIL: same-path objcopy replacement was not consumed\n' >&2; exit 1; }
 checks=$((checks + 1))
 printf '\nprintf "compiler replacement used\\n" >> "$FAKE_CC_LOG"\n' >> "$tools/cc"
 (export TEST_OBJCOPY="$tools/objcopy2"; \
-	run_make "$t13.hex" CFLAGS=-DCUSTOM_CFLAGS macro_cd4053=CUSTOM_VARIANT \
-		CORE_SRC=src/bypass_pure.c src_cd4053=src/alternate_driver.c) >/dev/null
+	run_make "$t13.hex" CFLAGS=-DCUSTOM_CFLAGS macro_cd4053_simple=CUSTOM_VARIANT \
+		CORE_SRC=src/bypass_pure.c src_cd4053_simple=src/alternate_driver.c) >/dev/null
 [[ "$(cc_count "$t13.elf")" -eq 14 ]] && grep -q 'compiler replacement used' "$cc_log" \
 	|| { printf 'FAIL: same-path compiler replacement was not consumed\n' >&2; exit 1; }
 checks=$((checks + 1))

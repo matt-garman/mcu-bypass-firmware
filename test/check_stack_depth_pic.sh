@@ -28,7 +28,7 @@ set -euo pipefail
 # --------------------------------------
 # XC8 does its own analysis and prints, per function,
 #     ;; Hardware stack levels required when called: N
-# It is not a safe upper bound. Measured on the shipping tq2-relay image, XC8
+# It is not a safe upper bound. Measured on the shipping tq2_l2_5v_relay image, XC8
 # reports 3 for _main while the emitted instruction stream contains a genuine
 # 4-deep chain:
 #     _main -> _init -> _hw_set_bypass_state -> _set_relay_coils_low

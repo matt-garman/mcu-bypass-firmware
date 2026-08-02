@@ -97,7 +97,7 @@ run_make() {
 		CC="$tools/cc" HOSTCC="$tools/cc" SANITIZE= \
 		SIZE="$tools/size" READELF="$tools/readelf" SIM_LIBS= AVR_BUILD_DIR=build_avr_classic \
 		AVR_FW=build_avr_classic/bypass FW_BASE=bypass MCU=attiny13a \
-		VARIANTS="cd4053 mute relay"
+		VARIANTS="cd4053_simple cd4053_with_mute tq2_l2_5v_relay"
 }
 
 compile_count() {
@@ -180,16 +180,16 @@ grep -q -- '-DHOST_CUSTOM=1' "$log" \
 	|| { printf 'FAIL: custom host workload did not reach the compiler\n' >&2; exit 1; }
 checks=$((checks + 1))
 
-run_make test-sim-cd4053 SIM_DEFS=-DSIM_FAST=1 >/dev/null
-[[ "$(compile_count test/avr/test_sim_cd4053)" -eq 1 ]] \
+run_make test-sim-cd4053_simple SIM_DEFS=-DSIM_FAST=1 >/dev/null
+[[ "$(compile_count test/avr/test_sim_cd4053_simple)" -eq 1 ]] \
 	|| { printf 'FAIL: initial simulator workload did not compile once\n' >&2; exit 1; }
 checks=$((checks + 1))
-run_make test-sim-cd4053 SIM_DEFS= >/dev/null
-[[ "$(compile_count test/avr/test_sim_cd4053)" -eq 2 ]] \
+run_make test-sim-cd4053_simple SIM_DEFS= >/dev/null
+[[ "$(compile_count test/avr/test_sim_cd4053_simple)" -eq 2 ]] \
 	|| { printf 'FAIL: FAST-to-FULL simulator workload reused a stale binary\n' >&2; exit 1; }
 checks=$((checks + 1))
-run_make test-sim-cd4053 SIM_DEFS=-DSIM_CUSTOM=1 >/dev/null
-[[ "$(compile_count test/avr/test_sim_cd4053)" -eq 3 ]] \
+run_make test-sim-cd4053_simple SIM_DEFS=-DSIM_CUSTOM=1 >/dev/null
+[[ "$(compile_count test/avr/test_sim_cd4053_simple)" -eq 3 ]] \
 	|| { printf 'FAIL: custom simulator workload reused a stale binary\n' >&2; exit 1; }
 checks=$((checks + 1))
 grep -q -- '-DSIM_CUSTOM=1' "$log" \
@@ -203,7 +203,7 @@ run_make test-sim SIM_DEFS=-DRECURSIVE_SIM=1 >/dev/null
 checks=$((checks + 1))
 : > "$log"
 run_make test-sim SIM_DEFS= >/dev/null
-[[ "$(compile_count test/avr/test_sim_cd4053)" -eq 1 ]] \
+[[ "$(compile_count test/avr/test_sim_cd4053_simple)" -eq 1 ]] \
 	|| { printf 'FAIL: recursive FULL simulator phase did not rebuild\n' >&2; exit 1; }
 if grep -q -- '-DSIM_RANDOM_NOISE_DURATION_MS=' "$log"; then
 	printf 'FAIL: recursive FULL simulator phase fell back to FAST definitions\n' >&2
@@ -231,20 +231,20 @@ run_make -j2 test-sim test-flash-budget SIM_DEFS=-DCOALESCED_SIM=1 >/dev/null
 checks=$((checks + 1))
 
 : > "$log"
-run_make -j2 test-sim-cd4053-t85 test-fault-inject-cd4053-t85 \
+run_make -j2 test-sim-cd4053_simple-t85 test-fault-inject-cd4053_simple-t85 \
 	SIM_DEFS=-DX5_SHARED=1 >/dev/null
-[[ "$(compile_count test/avr/test_sim_cd4053_t85)" -eq 1 ]] \
+[[ "$(compile_count test/avr/test_sim_cd4053_simple_t85)" -eq 1 ]] \
 	|| { printf 'FAIL: shared tinyx5 binary compiled more than once per graph\n' >&2; exit 1; }
 checks=$((checks + 1))
-run_make test-sim-cd4053-t85 SIM_DEFS= >/dev/null
-[[ "$(compile_count test/avr/test_sim_cd4053_t85)" -eq 2 ]] \
+run_make test-sim-cd4053_simple-t85 SIM_DEFS= >/dev/null
+[[ "$(compile_count test/avr/test_sim_cd4053_simple_t85)" -eq 2 ]] \
 	|| { printf 'FAIL: tinyx5 FAST-to-FULL workload reused a stale binary\n' >&2; exit 1; }
 checks=$((checks + 1))
 
 : > "$log"
-run_make test/avr/test_trace_cd4053 SIM_DEFS=-DTRACE_FAST=1 >/dev/null
-run_make test/avr/test_trace_cd4053 SIM_DEFS= >/dev/null
-[[ "$(compile_count test/avr/test_trace_cd4053)" -eq 2 ]] \
+run_make test/avr/test_trace_cd4053_simple SIM_DEFS=-DTRACE_FAST=1 >/dev/null
+run_make test/avr/test_trace_cd4053_simple SIM_DEFS= >/dev/null
+[[ "$(compile_count test/avr/test_trace_cd4053_simple)" -eq 2 ]] \
 	|| { printf 'FAIL: trace workload reused a stale binary\n' >&2; exit 1; }
 checks=$((checks + 1))
 
@@ -268,7 +268,7 @@ esac
 checks=$((checks + 2))
 
 outside="$work/external-build"
-run_make test-sim-cd4053 AVR_BUILD_DIR="$outside" SIM_DEFS=-DISOLATED=1 >/dev/null
+run_make test-sim-cd4053_simple AVR_BUILD_DIR="$outside" SIM_DEFS=-DISOLATED=1 >/dev/null
 [ ! -e "$outside/bypass-attiny13a-cd4053_simple.elf" ] \
 	|| { printf 'FAIL: regression escaped its isolated mini-tree build path\n' >&2; exit 1; }
 checks=$((checks + 1))

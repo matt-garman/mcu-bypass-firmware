@@ -316,7 +316,7 @@ if ! output=$(
 	FAKE_GPSIM_STC_LOG="$stc_log" \
 	_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" "${MAKE_CMD[@]}" --no-print-directory \
 		-C "$ROOT" --old-file=pic320 pic320-test-gpsim STRICT_TOOLS= \
-		PIC320_VARIANT=tq2-relay PIC320_BUILD_DIR="$pic320_build" \
+		PIC320_VARIANT=tq2_l2_5v_relay PIC320_BUILD_DIR="$pic320_build" \
 		GPSIM="$tools/gpsim" GPSIM_TIMEOUT_SECONDS=2 2>&1
 ); then
 	printf 'FAIL: pic320-test-gpsim rejected the fake-gpsim routing probe: %s\n' "$output" >&2

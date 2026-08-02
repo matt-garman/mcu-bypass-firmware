@@ -51,7 +51,7 @@
 // phantom resets and the gate does not fire spuriously. That control is now the
 // ONLY delta == 0 assertion here: since the exact-TRISA port every injection
 // below is a guarded fault expecting exactly one reset, identically on all three
-// variants. (Before the port, cd4053-simple carried an extra write-back-verified
+// variants. (Before the port, cd4053_simple carried an extra write-back-verified
 // negative injection -- its spare RA2 sat outside the old per-variant mask.
 // Exact TRISA covers RA2 too, so both that blind spot and the variant split in
 // these expectations are gone; see EXPECTED_CHECKS below.)
@@ -472,7 +472,7 @@ int main() {
 
     // Output directions (hw_is_sanity_check_failed). The gate compares TRISA
     // exactly against its init() value, so all three output directions are
-    // guarded on every variant -- including cd4053-simple's spare RA2, which
+    // guarded on every variant -- including cd4053_simple's spare RA2, which
     // used to be a negative control here.
     inject_case("TRISA.RA0", TRISA_ADDR, "tris", false, 0x01, 1,
                 "RA0 changed from output to input");

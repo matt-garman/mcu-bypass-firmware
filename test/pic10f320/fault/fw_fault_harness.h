@@ -36,7 +36,7 @@ typedef enum {
     FWI_LED_PIN_TO_INPUT,     // TRISA RA0 (LED) flipped from output to input
     FWI_CD4053_PIN_TO_INPUT,  // TRISA RA1 (CD4053) flipped from output to input
     FWI_RA2_PIN_TO_INPUT,     // TRISA RA2 flipped from output to input (load-bearing
-                              // for cd4053-mute / tq2-relay; harmless for cd4053-simple)
+                              // for cd4053_with_mute / tq2_l2_5v_relay; harmless for cd4053_simple)
     // Critical configuration SFRs: a bit-flip in the clock select, watchdog
     // period, or the 1ms tick timer must also force a reset. These four gate
     // checks (main()'s IRCF / WDTPS / PR2 / T2CON comparisons) are variant-
@@ -50,7 +50,7 @@ typedef enum {
     // (so the TRISA output-pin check cannot see it -- only the ANSELA term in
     // hw_critical_sfrs_intact() can). That term masks the FIXED BYPASS_OUTPUT_DDR_MASK
     // (RA0|RA1|RA2) on EVERY variant -- all three pins are always driven digital, even
-    // the spare RA2 on cd4053-simple -- so re-selecting ANY of RA0/RA1/RA2 must reset
+    // the spare RA2 on cd4053_simple -- so re-selecting ANY of RA0/RA1/RA2 must reset
     // regardless of output scheme (unlike the per-variant TRISA RA2 case above).
     FWI_ANSELA_SKEW_RA0,      // ANSELA RA0 (LED) re-selected analog
     FWI_ANSELA_SKEW_RA1,      // ANSELA RA1 (control pin) re-selected analog

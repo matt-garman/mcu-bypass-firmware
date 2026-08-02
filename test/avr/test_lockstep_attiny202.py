@@ -59,7 +59,7 @@ import sim_attiny202 as S
 
 from yasimavr.lib import core as _core
 
-VARIANTS = ("cd4053", "mute", "relay")
+VARIANTS = ("cd4053_simple", "cd4053_with_mute", "tq2_l2_5v_relay")
 
 # Ticks of pseudo-random stimulus. Parity with the classic lock-step's
 # SIM_LOCKSTEP_ITERS (5000 full / 1500 fast); overridable from the Makefile.
@@ -232,9 +232,9 @@ def expected_control_state(variant, effect_state):
     output traces: the simple x4053 drives PA2 only and parks the spare PA3 low,
     the muted x4053 drives both lines together, and both relay coils are parked
     low between pulses."""
-    if variant == "cd4053":
+    if variant == "cd4053_simple":
         return effect_state          # PA2 tracks the effect, PA3 stays low
-    if variant == "mute":
+    if variant == "cd4053_with_mute":
         return 0x3 if effect_state else 0x0
     return 0x0                       # relay: coils parked after every pulse
 

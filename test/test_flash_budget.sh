@@ -81,7 +81,7 @@ run_make_gate() {
 	make --no-print-directory -C "$ROOT" test-flash-budget \
 		AVR_BUILD_DIR="$images" CC="$tools/cc" HOSTCC="$tools/cc" SIZE="$tools/size" \
 		READELF="$tools/readelf" \
-		FLASH_T13_BUDGET=90 VARIANTS="cd4053 mute relay" \
+		FLASH_T13_BUDGET=90 VARIANTS="cd4053_simple cd4053_with_mute tq2_l2_5v_relay" \
 		MCU=attiny13a FW_BASE=bypass "$@"
 }
 
@@ -176,15 +176,16 @@ for override in MCU=attiny85 FW_BASE=alternate AVR_FW=alternate; do
 	checks=$((checks + 1))
 done
 
-for variants in '' 'cd4053' 'cd4053 mute' 'cd4053 mute relay relay' \
-	'cd4053 mute bogus'; do
+for variants in '' 'cd4053_simple' 'cd4053_simple cd4053_with_mute' \
+	'cd4053_simple cd4053_with_mute tq2_l2_5v_relay tq2_l2_5v_relay' \
+	'cd4053_simple cd4053_with_mute bogus'; do
 	reset_images
 	before=$(sha256sum "$images"/*.elf)
 	if output=$(run_make_gate "VARIANTS=$variants" 2>&1); then
 		printf 'FAIL: incomplete Make variant matrix %q was accepted\n' "$variants" >&2
 		exit 1
 	fi
-	[[ "$output" == *"requires the complete cd4053/mute/relay variant matrix"* ]] \
+	[[ "$output" == *"requires the complete cd4053_simple cd4053_with_mute tq2_l2_5v_relay variant matrix"* ]] \
 		|| { printf 'FAIL: matrix %q failed for the wrong reason: %s\n' "$variants" "$output" >&2; exit 1; }
 	after=$(sha256sum "$images"/*.elf)
 	[[ "$after" == "$before" ]] \

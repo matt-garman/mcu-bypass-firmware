@@ -12,8 +12,8 @@ endif
 # literal words without expanding embedded GNU Make functions, expose only known
 # names to rule generation, and forward safe metadata through the serialization
 # submake so inner recipes can still distinguish empty/duplicate/unknown input.
-override CLASSIC_VARIANTS_SUPPORTED := cd4053 mute relay
-override PIC320_VARIANTS_SUPPORTED := cd4053-simple cd4053-mute tq2-relay
+override CLASSIC_VARIANTS_SUPPORTED := cd4053_simple cd4053_with_mute tq2_l2_5v_relay
+override PIC320_VARIANTS_SUPPORTED := cd4053_simple cd4053_with_mute tq2_l2_5v_relay
 
 _MAKE_SERIAL_VARIANTS_ORIGIN := $(origin VARIANTS)
 ifeq ($(_MAKE_SERIAL_VARIANTS_ORIGIN),undefined)
@@ -84,10 +84,10 @@ unexport _MAKE_SERIAL_CLASSIC_EMPTY _MAKE_SERIAL_CLASSIC_DUPLICATE \
 # WHAT THIS BUILDS
 #   A hardware-agnostic core (bypass_mcu_avr_classic.c) plus one interchangeable
 #   output driver, selected at build time:
-#     - cd4053      : CD4053 analog switch, single control line (CD4053_SIMPLE)
-#     - mute        : CD4053 with mute-before-switch (CD4053_WITH_MUTE)
-#     - relay       : Panasonic TQ2-L2-5V latching relay, pulsed coils (TQ2_L2_5V_RELAY)
-#   The cd4053/mute images drive a single MCU polarity (bypass = pin low, the
+#     - cd4053_simple    : CD4053 analog switch, single control line (CD4053_SIMPLE)
+#     - cd4053_with_mute : CD4053 with mute-before-switch (CD4053_WITH_MUTE)
+#     - tq2_l2_5v_relay  : Panasonic TQ2-L2-5V latching relay, pulsed coils (TQ2_L2_5V_RELAY)
+#   The two CD4053 images drive a single MCU polarity (bypass = pin low, the
 #   natural/MCU-absent state) that serves BOTH the CD4053-with-MOSFET-inverter
 #   board and the TMUX4053 direct-drive board: the CD4053's inverter and the
 #   TMUX's swapped analog throws cancel, so one image fits both (see the CD4053
@@ -106,8 +106,9 @@ unexport _MAKE_SERIAL_CLASSIC_EMPTY _MAKE_SERIAL_CLASSIC_DUPLICATE \
 #   bypass-attiny13a-cd4053_simple.elf, bypass-attiny85-tq2_l2_5v_relay.hex.
 #   See "canonical firmware image basename" below; note the stage token is the
 #   driver-source spelling, not the short VARIANT token. Pick a variant for
-#   single-target actions with VARIANT=<name>, e.g. `make VARIANT=relay program`
-#   (ATtiny13a) or `make VARIANT=relay program45` (ATtiny45).
+#   single-target actions with VARIANT=<name>, e.g.
+#   `make VARIANT=tq2_l2_5v_relay program` (ATtiny13a) or
+#   `make VARIANT=tq2_l2_5v_relay program45` (ATtiny45).
 #
 # HOW THE TESTS ARE LAYERED (fast -> thorough)
 #   1. analyze            static analysis (clang-tidy / -fanalyzer)
@@ -129,7 +130,7 @@ unexport _MAKE_SERIAL_CLASSIC_EMPTY _MAKE_SERIAL_CLASSIC_DUPLICATE \
 #   make test            fast full test suite (all variants) -- use constantly
 #   make test-long       exhaustive test suite (minutes) -- before release/HW
 #   make trace           emit build_avr_classic/bypass_trace.vcd (VARIANT=, GTKWave)
-#   make VARIANT=relay program   set fuses + flash one variant (fresh chip)
+#   make VARIANT=tq2_l2_5v_relay program   set fuses + flash one variant
 #   make clean           remove all build/test artifacts
 #
 # FAST vs FULL TESTS
@@ -214,23 +215,34 @@ F_CPU_X5   = 1000000UL
 
 # --- Output variants ---------------------------------------------------------
 # The hardware-agnostic core (bypass_mcu_avr_classic.c) links against exactly one output
-# driver. A variant is identified by a short name; each maps to the -D selector
-# macro the firmware/tests compile with and to its driver source file. To add a
-# variant: add its short name to the immutable supported set and define
+# driver. A variant is identified by its output-stage name; each maps to the -D
+# selector macro the firmware/tests compile with and to its driver source file.
+# To add a variant: add its name to the immutable supported set and define
 # macro_<name>/src_<name> below. VARIANTS remains caller-selectable for
 # development targets; production matrix gates compare it with the supported set.
+#
+# A variant name IS the output-stage name, spelled exactly as the driver source
+# file and the published image field spell it. One vocabulary, used by the
+# command line (`VARIANT=`), the make goals, the soak combination names and the
+# image basenames alike. Before v0.9.8 there were two -- short tokens
+# (`cd4053`/`mute`/`relay`) on the classic AVR and AVR-XT lanes, hyphenated ones
+# (`cd4053-simple`/`cd4053-mute`/`tq2-relay`) on PIC10F320 -- naming the same
+# three output stages in different words, plus a third spelling in the image
+# names themselves. The cost of the longer token is real and accepted: it is
+# paid once per command line, and it buys the property that a name cannot be
+# correct in one lane and meaningless in another.
 CORE_SRC = src/bypass_mcu_avr_classic.c src/bypass_pure.c
 override CLASSIC_VARIANTS_UNKNOWN := $(if $(filter 1,$(CLASSIC_VARIANTS_REQUEST_UNKNOWN)),invalid,)
 
-# variant short name -> firmware -D selector macro
-macro_cd4053      = CD4053_SIMPLE
-macro_mute        = CD4053_WITH_MUTE
-macro_relay       = TQ2_L2_5V_RELAY
+# variant name -> firmware -D selector macro
+macro_cd4053_simple    = CD4053_SIMPLE
+macro_cd4053_with_mute = CD4053_WITH_MUTE
+macro_tq2_l2_5v_relay  = TQ2_L2_5V_RELAY
 
-# variant short name -> output driver source file
-src_cd4053      = src/bypass_output_cd4053_simple.c
-src_mute        = src/bypass_output_cd4053_with_mute.c
-src_relay       = src/bypass_output_tq2_l2_5v_relay.c
+# variant name -> output driver source file
+src_cd4053_simple    = src/bypass_output_cd4053_simple.c
+src_cd4053_with_mute = src/bypass_output_cd4053_with_mute.c
+src_tq2_l2_5v_relay  = src/bypass_output_tq2_l2_5v_relay.c
 
 # --- canonical firmware image basename ---------------------------------------
 # THE single spelling rule for every published .elf/.hex basename, on every MCU:
@@ -245,78 +257,48 @@ src_relay       = src/bypass_output_tq2_l2_5v_relay.c
 #
 #     IFS=- read -r prefix mcu stage <<< "$${base%.hex}"
 #
-# WHAT THIS REPLACED (TODO.md "Unified naming scheme", axis 3). Three
-# conventions used to coexist: prefix `bypass_` vs `bypass_mcu_`; stage tokens
-# `cd4053`/`mute`/`relay` vs `cd4053-simple`/`cd4053-mute`/`tq2-relay`; and a
-# part suffix that was `_t45`/`_t85`/`_pic10f322`/`_pic10f320` -- or ABSENT,
-# because a bare `bypass_cd4053.hex` silently meant "the ATtiny13a one". That
-# last case was the real hazard: nothing in the filename stopped a builder from
-# flashing the 1.2 MHz ATtiny13a image onto an ATtiny85. The MCU field is now
-# mandatory on every image, so the 6 x 3 product matrix is visible in a plain
-# directory listing and no image is identified by omission.
+# WHAT THIS REPLACED (TODO.md "Unified naming scheme", axes 3 and 4). Three
+# basename conventions used to coexist: prefix `bypass_` vs `bypass_mcu_`; stage
+# tokens `cd4053`/`mute`/`relay` vs `cd4053-simple`/`cd4053-mute`/`tq2-relay`;
+# and a part suffix that was `_t45`/`_t85`/`_pic10f322`/`_pic10f320` -- or
+# ABSENT, because a bare `bypass_cd4053.hex` silently meant "the ATtiny13a one".
+# That last case was the real hazard: nothing in the filename stopped a builder
+# from flashing the 1.2 MHz ATtiny13a image onto an ATtiny85. The MCU field is
+# now mandatory on every image, so the 6 x 3 product matrix is visible in a
+# plain directory listing and no image is identified by omission.
 #
 # Longest resulting name is 37 characters (bypass-pic10f320-cd4053_with_mute.hex),
 # one SHORTER than the 38-character worst case this scheme replaced, so the
 # verbose spelling costs nothing anywhere in the toolchain.
 #
-# NOTE the deliberate seam. The stage token is NOT the variant token: `VARIANT=`
-# on the command line, the soak names and the make goals all still speak the
-# short vocabulary (`cd4053`/`mute`/`relay`, `cd4053-simple`/...). This map is
-# the ONLY place the two vocabularies meet. Unifying them as well is axis 4 of
-# the same TODO item; when that happens this map collapses to the identity and
-# is deleted, and nothing else has to move.
-
-# variant short name -> image stage token (matches the driver source basename).
-# `override`, like CLASSIC_VARIANTS_SUPPORTED: these feed RELEASE_IMAGES, which
-# is a contract the build is checked AGAINST, so a command-line assignment must
-# not be able to rename a release image.
-override IMAGE_STAGE_cd4053        = cd4053_simple
-override IMAGE_STAGE_mute          = cd4053_with_mute
-override IMAGE_STAGE_relay         = tq2_l2_5v_relay
-# PIC10F320 speaks its own (inherited) variant vocabulary for the same three
-# output stages; it maps onto the identical stage tokens.
-override IMAGE_STAGE_cd4053-simple = cd4053_simple
-override IMAGE_STAGE_cd4053-mute   = cd4053_with_mute
-override IMAGE_STAGE_tq2-relay     = tq2_l2_5v_relay
+# THE STAGE FIELD IS THE VARIANT NAME, unchanged -- see "Output variants" above.
+# v0.9.8 first added an IMAGE_STAGE_<variant> map here to translate two internal
+# vocabularies into this one published spelling, then removed it by renaming the
+# vocabularies to match (axis 4). There is nothing left to translate: what you
+# type after `VARIANT=`, what the make goals and soak names carry, and what the
+# image field says are one string. A translation table is a place where two
+# names can disagree; the way to make that unrepresentable is to not have one.
 
 # $(call fw_image_tail,<variant>,<mcu-tag>) -> `-<mcu>-<stage>`: everything that
 # follows the prefix. Split out from fw_image so a path stem that ALREADY ends in
 # the prefix can append it without re-deriving the prefix -- the AVR lane's
 # AVR_FW is exactly that, and it stays overridable (test-flash-budget asserts it
 # has not been redirected away from where FLASH_T13_ELFS points).
-#
-# An UNMAPPED variant falls back to its own name rather than to a truncated
-# `bypass-attiny85-`. That case is only reachable through a caller-supplied
-# VARIANTS/VARIANT override naming something unsupported, and the existing
-# request gates reject it by name with their own message -- but those gates run
-# at recipe time, long after this has been expanded to build the rule set. The
-# fallback keeps such names distinct (two bogus variants must not collide on one
-# target) and keeps the gate, not this function, the thing that reports the
-# error. Every SUPPORTED variant is guaranteed to have a mapping by the
-# completeness check below, so the fallback never fires on a real image.
-fw_image_tail = -$(strip $(2))-$(or $(IMAGE_STAGE_$(strip $(1))),$(strip $(1)))
+fw_image_tail = -$(strip $(2))-$(strip $(1))
 
 # $(call fw_image,<variant>,<mcu-tag>) -> the basename, no directory, no suffix.
 fw_image = $(FW_BASE)$(call fw_image_tail,$(1),$(2))
 
 # The SHELL-side counterpart, for recipe loops that hold the variant in a shell
-# variable (`for v in $$vars`, `for v in "$$@"`) and so cannot index the map with
-# $(IMAGE_STAGE_...). Paste $(fw_image_sh) at the top of such a recipe, then call
-# `fw_image_of <variant> <mcu-tag>`; it prints the same basename $(call fw_image)
-# would, including the same passthrough for an unmapped variant.
+# variable (`for v in $$vars`, `for v in "$$@"`). Paste $(fw_image_sh) at the top
+# of such a recipe, then call `fw_image_of <variant> <mcu-tag>`; it prints
+# exactly what $(call fw_image) would.
 #
-# It is generated FROM the map above rather than restating it, so the two cannot
-# disagree. (The `\#` is a make-level escape for the shell's `$${p#*:}` prefix
-# strip -- without it make would treat the rest of the line as a comment.)
-override IMAGE_VARIANTS_ALL := $(CLASSIC_VARIANTS_SUPPORTED) $(PIC320_VARIANTS_SUPPORTED)
-override IMAGE_STAGE_PAIRS := $(foreach v,$(IMAGE_VARIANTS_ALL),$(v):$(IMAGE_STAGE_$(v)))
-fw_image_sh = fw_image_of() { for _p in $(IMAGE_STAGE_PAIRS); do if [ "$${_p%%:*}" = "$$1" ]; then echo "$(FW_BASE)-$$2-$${_p\#*:}"; return 0; fi; done; echo "$(FW_BASE)-$$2-$$1"; }
-
-# Fail at parse time, not at publish time, if a supported variant has no stage
-# mapping. Without this the omission surfaces as a missing release image after a
-# 24-hour soak has already run.
-$(foreach v,$(IMAGE_VARIANTS_ALL), \
-	$(if $(IMAGE_STAGE_$(v)),,$(error supported variant '$(v)' has no IMAGE_STAGE_$(v) mapping)))
+# Yes, the body is now one interpolation. It stays a function anyway, for the
+# same reason fw_image exists in make context: the delimiter layout is spelled
+# ONCE per context rather than at each of the dozen-plus recipe sites that build
+# an image path. That is the property this whole section is for.
+fw_image_sh = fw_image_of() { echo "$(FW_BASE)-$$2-$$1"; }
 
 # Headers shared by every firmware build; any change rebuilds all variants.
 FW_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
@@ -330,7 +312,7 @@ FW_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
 # VARIANT selects the single-target build for size/flash/trace/program actions.
 # `make`/`make test` cover ALL variants; VARIANT only matters when you act on
 # one specific image (e.g. flashing).
-VARIANT ?= cd4053
+VARIANT ?= cd4053_simple
 
 # Programmer settings.
 # PROGRAMMER: "51 AVR USB ISP ASP" dongle is a USBasp clone -> usbasp.
@@ -386,7 +368,8 @@ SANITIZE    ?= -fsanitize=undefined,address -fno-sanitize-recover=all
 # Per-function stack-frame ceiling for test-stack-bound (-fstack-usage).
 # This gates individual frames, not total depth.  The largest frame today is
 # the 19 B timer ISR (__vector_6); the whole-program runtime high-water mark
-# is 29 B (cd4053) / 31 B (relay, mute), measured separately by test-sim.
+# is 29 B (cd4053_simple) / 31 B (the relay and mute variants), measured
+# separately by test-sim.
 # Run `make test-stack-bound` to re-measure every frame.  Any individual frame
 # above this threshold signals unintended bloat (e.g. an accidental local
 # array).
@@ -398,7 +381,8 @@ override STACK_SOURCES := src/bypass_mcu_avr_classic.c src/bypass_pure.c \
                           src/bypass_output_tq2_l2_5v_relay.c
 
 # ATtiny13a flash-budget ceiling for test-flash-budget (percentage of 1 KB).
-# Firmware is at 73.8% today (relay and mute; cd4053 is 69.9%), so the 90%
+# Firmware is at 73.8% today (the relay and mute variants; cd4053_simple is
+# 69.9%), so the 90%
 # ceiling leaves 16.2 points of margin.  Run `make test-flash-budget` to
 # re-measure -- it prints the per-variant percentages, so this comment can be
 # checked rather than trusted.  A future accidental bloat passes silently
@@ -935,9 +919,9 @@ pic: $(PIC_CORE_SRC) $(PIC_HEADERS) $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(
 	fail=0; \
 	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
 		case $$v in \
-			*mute)  m=CD4053_WITH_MUTE; drv=src/bypass_output_cd4053_with_mute.c ;; \
-			*relay) m=TQ2_L2_5V_RELAY;  drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
-			*)      m=CD4053_SIMPLE;    drv=src/bypass_output_cd4053_simple.c ;; \
+			cd4053_with_mute) m=CD4053_WITH_MUTE; drv=src/bypass_output_cd4053_with_mute.c ;; \
+			tq2_l2_5v_relay)  m=TQ2_L2_5V_RELAY;  drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
+			*)                m=CD4053_SIMPLE;    drv=src/bypass_output_cd4053_simple.c ;; \
 		esac; \
 		stem=`fw_image_of "$$v" $(PIC_TAG)`; name=$$stem.hex; \
 		hex=$(PIC_BUILD_DIR)/$$name; asm=$(PIC_BUILD_DIR)/$$stem.s; sym=$(PIC_BUILD_DIR)/$$stem.sym; \
@@ -1080,8 +1064,9 @@ pic-analyze-misra: src/bypass_mcu_pic10f322.c $(PIC_HEADERS) $(MISRA_ADDON) $(MI
 # This is the PIC shell's analogue of the AVR simavr suite (the PIC shell has no
 # simavr lock-step). Variant-agnostic stimulus (test/pic/footswitch_toggle.stc);
 # the expected ENGAGED full-LATA pattern is passed per variant (el): the
-# analog-switch variants drive the control pins HIGH when engaged (cd4053=0x3,
-# mute=0x7); the relay parks its coils low at the settled checkpoint, leaving
+# analog-switch variants drive the control pins HIGH when engaged
+# (cd4053_simple=0x3, cd4053_with_mute=0x7); the relay parks its coils low at
+# the settled checkpoint, leaving
 # only the LED bit set (el=0x1).
 #
 # A second scenario (test/pic/power_on_pressed.stc, via
@@ -1160,9 +1145,9 @@ pic-test-gpsim: pic
 	fail=0; \
 	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
 		case $$v in \
-			*mute)  el=0x7 ;; \
-			*relay) el=0x1 ;; \
-			*)      el=0x3 ;; \
+			cd4053_with_mute) el=0x7 ;; \
+			tq2_l2_5v_relay)  el=0x1 ;; \
+			*)                el=0x3 ;; \
 		esac; \
 		hex=$(PIC_BUILD_DIR)/`fw_image_of "$$v" $(PIC_TAG)`.hex; \
 		if [ ! -f "$$hex" ]; then \
@@ -1292,11 +1277,11 @@ test-stack-bound-pic-regression:
 # built HEX are absent -- exactly as `pic-test-gpsim` skips without gpsim. Phony
 # + always recompiles so PIC_SOAK_* command-line overrides are always applied.
 #
-# Overrides: PIC_SOAK_VARIANT (cd4053/mute/relay), PIC_SOAK_DURATION_MS (default
+# Overrides: PIC_SOAK_VARIANT (any supported variant), PIC_SOAK_DURATION_MS (default
 # 1 h; pass 86400000 for 24 h), PIC_SOAK_LIVENESS_INTERVAL_MS, PIC_SOAK_PROGRESS_INTERVAL_MS.
 PIC_SOAK_CXX         ?= c++
 PIC_SOAK_GPSIM_INC   ?= /usr/include/gpsim
-PIC_SOAK_VARIANT     ?= cd4053
+PIC_SOAK_VARIANT     ?= cd4053_simple
 PIC_SOAK_DURATION_MS ?= 3600000
 PIC_SOAK_LIVENESS_INTERVAL_MS ?= 60000
 PIC_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
@@ -1321,7 +1306,7 @@ PIC_SOAK_HEX = $(PIC_BUILD_DIR)/$(call fw_image,$(PIC_SOAK_VARIANT),$(PIC_TAG)).
 # POLLED PIC main loop, stealing that many 1 ms debounce ticks from a window, so
 # the soak's liveness check must hold each press/release that much longer to stay
 # robust (see test/pic/test_soak_pic.cc). Mirror the driver headers'
-# TQ2_L2_5V_PULSE_MS (12) and CD4053_MUTE_DELAY_MS (5); cd4053-simple is 0.
+# TQ2_L2_5V_PULSE_MS (12) and CD4053_MUTE_DELAY_MS (5); cd4053_simple is 0.
 pic_soak_block_cd4053      = 0
 pic_soak_block_mute        = 5
 pic_soak_block_relay       = 12
@@ -1401,7 +1386,7 @@ pic-test-soak: pic
 # those headers, or the built HEX are absent. PIC_FAULT_VARIANT selects the HEX
 # and the output-stage macro needed for variant-aware TRISA fault expectations.
 # Reuses the soak's toolchain settings (PIC_SOAK_CXX, PIC_SOAK_GPSIM_INC).
-PIC_FAULT_VARIANT ?= cd4053
+PIC_FAULT_VARIANT ?= cd4053_simple
 PIC_FAULT_SRC = test/pic/test_fault_pic.cc
 PIC_FAULT_BIN = test/pic/test_fault_pic
 PIC_FAULT_HEX = $(PIC_BUILD_DIR)/$(call fw_image,$(PIC_FAULT_VARIANT),$(PIC_TAG)).hex
@@ -1477,7 +1462,7 @@ pic-test-fault: pic
 # stream, then compare live ctx_ SRAM after every completed main-loop iteration.
 # Standalone use is skip-clean for missing tools; pic-test-target below turns it
 # into a fail-closed gate by requiring the LOCK-STEP PASS sentinel.
-PIC_LOCKSTEP_VARIANT ?= cd4053
+PIC_LOCKSTEP_VARIANT ?= cd4053_simple
 PIC_LOCKSTEP_SRC = test/pic/test_lockstep_pic.cc
 PIC_LOCKSTEP_BIN = test/pic/test_lockstep_pic
 PIC_LOCKSTEP_MODEL_OBJ = $(PIC_BUILD_DIR)/bypass_pure_lockstep.o
@@ -1533,7 +1518,7 @@ pic-test-lockstep: pic
 # round trip. Asserts exact TRISA/ANSELA/LATA/PORTA behaviour, relay coil
 # exclusion, and mute/relay pulse widths. Standalone use is skip-clean;
 # pic-test-target below requires the TARGET-IO PASS sentinel.
-PIC_IO_VARIANT ?= cd4053
+PIC_IO_VARIANT ?= cd4053_simple
 PIC_IO_SRC = test/pic/test_io_pic.cc
 PIC_IO_BIN = test/pic/test_io_pic
 PIC_IO_HEX = $(PIC_BUILD_DIR)/$(call fw_image,$(PIC_IO_VARIANT),$(PIC_TAG)).hex
@@ -1570,7 +1555,7 @@ pic-test-io: pic
 # convenient skip-clean development commands; this wrapper requires explicit PASS
 # markers, so a missing compiler/header, missing ctx_ symbol, or partial run fails
 # CI/release instead of masquerading as green.
-PIC_TARGET_VARIANT ?= cd4053
+PIC_TARGET_VARIANT ?= cd4053_simple
 override PIC_TARGET_VARIANTS_SUPPORTED := $(CLASSIC_VARIANTS_SUPPORTED)
 .PHONY: pic-test-target pic-test-target-variants
 pic-test-target:
@@ -1750,7 +1735,7 @@ attiny202-smoke: $(XT_SMOKE_SRC) | $(AVR_BUILD_DIR)
 XT_BUILD_DIR ?= build_avr_xt
 XT_TAG       ?= attiny202
 XT_F_CPU     ?= 2000000UL
-override XT_VARIANTS_SUPPORTED := cd4053 mute relay
+override XT_VARIANTS_SUPPORTED := cd4053_simple cd4053_with_mute tq2_l2_5v_relay
 override XT_VARIANTS_REQUESTED := $(filter $(XT_VARIANTS_SUPPORTED),$(VARIANTS))
 override XT_VARIANTS_UNKNOWN := $(CLASSIC_VARIANTS_UNKNOWN)
 # The shell + the unchanged pure core (the AVR-classic counterpart is CORE_SRC).
@@ -1812,9 +1797,9 @@ attiny202: | $(XT_BUILD_DIR)
 	fail=0; \
 	for v in "$$@"; do \
 		case $$v in \
-			cd4053) m=CD4053_SIMPLE;     drv=src/bypass_output_cd4053_simple.c ;; \
-			mute)    m=CD4053_WITH_MUTE;  drv=src/bypass_output_cd4053_with_mute.c ;; \
-			relay)   m=TQ2_L2_5V_RELAY;   drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
+			cd4053_simple)    m=CD4053_SIMPLE;    drv=src/bypass_output_cd4053_simple.c ;; \
+			cd4053_with_mute) m=CD4053_WITH_MUTE; drv=src/bypass_output_cd4053_with_mute.c ;; \
+			tq2_l2_5v_relay)  m=TQ2_L2_5V_RELAY;  drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
 			*) echo "FAIL: unsupported ATtiny202 variant '$$v'"; fail=1; continue ;; \
 		esac; \
 		stem=$(XT_BUILD_DIR)/`fw_image_of "$$v" $(XT_TAG)`; \
@@ -1918,7 +1903,7 @@ XT_FUSE_ENV = ATTINY202_FUSE_WDTCFG=$(XT_FUSE_WDTCFG) \
 # skips without the DFP and `pic-test-soak` skips without gpsim-dev. CI builds
 # the venv explicitly (a fetch step) so a skip there cannot mask a real failure.
 #
-# XT_SIM_VARIANT selects one variant (cd4053/mute/relay); empty
+# XT_SIM_VARIANT selects one supported variant; empty
 # (the default) runs every built variant. Each target first runs test-fuses, so
 # complete but non-production overrides cannot reach a simulator that does not
 # behaviorally observe every fuse. The drivers import test/avr/sim_attiny202.py,
@@ -1956,7 +1941,7 @@ endef
 attiny202-sim: test-fuses attiny202
 	@selected="$(XT_SIM_VARIANT)"; \
 	if [ -n "$$selected" ]; then \
-		case "$$selected" in cd4053|mute|relay) ;; \
+		case "$$selected" in cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay) ;; \
 			*) echo "FAIL: XT_SIM_VARIANT must be one supported variant"; exit 2 ;; esac; \
 		case " $(VARIANTS) " in *" $$selected "*) ;; \
 			*) echo "FAIL: XT_SIM_VARIANT=$$selected is not in VARIANTS=$(VARIANTS)"; exit 2 ;; esac; \
@@ -1990,7 +1975,7 @@ attiny202-sim: test-fuses attiny202
 attiny202-fault: test-fuses attiny202
 	@selected="$(XT_SIM_VARIANT)"; \
 	if [ -n "$$selected" ]; then \
-		case "$$selected" in cd4053|mute|relay) ;; \
+		case "$$selected" in cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay) ;; \
 			*) echo "FAIL: XT_SIM_VARIANT must be one supported variant"; exit 2 ;; esac; \
 		case " $(VARIANTS) " in *" $$selected "*) ;; \
 			*) echo "FAIL: XT_SIM_VARIANT=$$selected is not in VARIANTS=$(VARIANTS)"; exit 2 ;; esac; \
@@ -2036,7 +2021,7 @@ attiny202-fault: test-fuses attiny202
 attiny202-soak: test-fuses attiny202
 	@selected="$(XT_SIM_VARIANT)"; \
 	if [ -n "$$selected" ]; then \
-		case "$$selected" in cd4053|mute|relay) ;; \
+		case "$$selected" in cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay) ;; \
 			*) echo "FAIL: XT_SIM_VARIANT must be one supported variant"; exit 2 ;; esac; \
 		case " $(VARIANTS) " in *" $$selected "*) ;; \
 			*) echo "FAIL: XT_SIM_VARIANT=$$selected is not in VARIANTS=$(VARIANTS)"; exit 2 ;; esac; \
@@ -2107,7 +2092,7 @@ $(XT_LOCKSTEP_FFI_LIB): $(XT_LOCKSTEP_FFI_SRC) test/model_step.h \
 attiny202-lockstep: test-fuses attiny202 $(XT_LOCKSTEP_FFI_LIB)
 	@selected="$(XT_SIM_VARIANT)"; \
 	if [ -n "$$selected" ]; then \
-		case "$$selected" in cd4053|mute|relay) ;; \
+		case "$$selected" in cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay) ;; \
 			*) echo "FAIL: XT_SIM_VARIANT must be one supported variant"; exit 2 ;; esac; \
 		case " $(VARIANTS) " in *" $$selected "*) ;; \
 			*) echo "FAIL: XT_SIM_VARIANT=$$selected is not in VARIANTS=$(VARIANTS)"; exit 2 ;; esac; \
@@ -2250,8 +2235,9 @@ attiny202-analyze-misra: src/bypass_mcu_avr_xt.c $(XT_HEADERS) $(MISRA_ADDON) $(
 # every busy delay at ~half its true length; see
 # test/avr/test_attiny202_delay_oracle.py and test_sim_attiny202.check_pulse_
 # present). This gate parses the _delay_ms loop count out of `avr-objdump -d`
-# and asserts each variant's design widths (relay 12 ms x2, mute 5 ms x2, simple
-# cd4053 none) plus the relay's 4 ms datasheet minimum. Needs only binutils-avr
+# and asserts each variant's design widths (tq2_l2_5v_relay 12 ms x2,
+# cd4053_with_mute 5 ms x2, cd4053_simple none) plus the relay's 4 ms datasheet
+# minimum. Needs only binutils-avr
 # (already required to build), so it runs in the same standalone pre-hardware
 # aggregate; it skips cleanly (STRICT_TOOLS honored) when the DFP is absent.
 .PHONY: attiny202-delay-oracle
@@ -2363,7 +2349,7 @@ clean:
 # ============================================================================
 # FLASH / FUSES -- hardware (select the image with VARIANT=<name>)
 # ============================================================================
-# These act on ONE variant image, chosen by VARIANT (default cd4053). The
+# These act on ONE variant image, chosen by VARIANT (default cd4053_simple). The
 # per-chip tinyx5 equivalents (fuses85/flash85/program85, fuses45/...) act on
 # the corresponding ATtiny85/ATtiny45 build of the selected variant.
 
@@ -2544,10 +2530,10 @@ test-pic-build:
 	PB_FLASH_VAR='PIC320_FLASH_WORDS' \
 	PB_FLASH_WORDS='256' \
 	PB_VARIANT_VAR='PIC320_VARIANT' \
-	PB_VARIANT='cd4053-simple' \
+	PB_VARIANT='cd4053_simple' \
 	PB_MATRIX_TARGET='pic320-variants' \
 	PB_MATRIX_VARIANTS_VAR='PIC320_VARIANTS_ALL' \
-	PB_MATRIX_VARIANTS='cd4053-simple cd4053-mute tq2-relay' \
+	PB_MATRIX_VARIANTS='cd4053_simple cd4053_with_mute tq2_l2_5v_relay' \
 	PB_MATRIX_IMAGES='bypass-pic10f320-cd4053_simple.hex bypass-pic10f320-cd4053_with_mute.hex bypass-pic10f320-tq2_l2_5v_relay.hex' \
 	PB_MATRIX_FAIL_IMAGE='bypass-pic10f320-tq2_l2_5v_relay.hex' \
 	PB_MATRIX_REQUIRE_COMPLETE=1 PB_MATRIX_UNSUPPORTED='tmux4053-simple' \
@@ -2662,8 +2648,8 @@ test-target-matrix:
 	TM_PER_VARIANT_TARGET='pic320-test-target' \
 	TM_VARIANTS_VAR='PIC320_VARIANTS_ALL' \
 	TM_VARIANT_ARG='PIC320_TARGET_VARIANT' \
-	TM_SUPPORTED='cd4053-simple cd4053-mute tq2-relay' \
-	TM_SUBSET='cd4053-mute' \
+	TM_SUPPORTED='cd4053_simple cd4053_with_mute tq2_l2_5v_relay' \
+	TM_SUBSET='cd4053_with_mute' \
 	TM_UNSUPPORTED='tmux4053-simple' \
 	TM_FAULT_TARGET='pic320-test-fault-target' \
 	TM_FAULT_VARIANT_ARG='PIC320_FAULT_VARIANT' \
@@ -2682,8 +2668,8 @@ test-target-matrix:
 	TM_PER_VARIANT_TARGET='pic320-test-host' \
 	TM_VARIANTS_VAR='PIC320_VARIANTS_ALL' \
 	TM_VARIANT_ARG='PIC320_VARIANT' \
-	TM_SUPPORTED='cd4053-simple cd4053-mute tq2-relay' \
-	TM_SUBSET='cd4053-mute' \
+	TM_SUPPORTED='cd4053_simple cd4053_with_mute tq2_l2_5v_relay' \
+	TM_SUBSET='cd4053_with_mute' \
 	TM_UNSUPPORTED='tmux4053-simple' \
 	TM_CHECK_SENTINELS=0 \
 		./test/test_target_matrix.sh
@@ -2693,8 +2679,8 @@ test-target-matrix:
 	TM_LABEL='ATtiny202' \
 	TM_TARGET='attiny202-test-target' \
 	TM_VARIANTS_VAR='VARIANTS' \
-	TM_SUPPORTED='cd4053 mute relay' \
-	TM_SUBSET='mute' \
+	TM_SUPPORTED='cd4053_simple cd4053_with_mute tq2_l2_5v_relay' \
+	TM_SUBSET='cd4053_with_mute' \
 	TM_UNSUPPORTED='unknown' \
 	TM_FAULT_TARGET='attiny202-sim' \
 	TM_LOCKSTEP_TARGET='attiny202-fault' \
@@ -2726,8 +2712,8 @@ test-target-lane-markers:
 	LM_LABEL='PIC10F320' \
 	LM_TARGET='pic320-test-target' \
 	LM_VARIANT_ARG='PIC320_TARGET_VARIANT' \
-	LM_VARIANT='cd4053-mute' \
-	LM_REQUIRE_ARG='PIC320_VARIANT=cd4053-mute' \
+	LM_VARIANT='cd4053_with_mute' \
+	LM_REQUIRE_ARG='PIC320_VARIANT=cd4053_with_mute' \
 		./test/test_target_lane_markers.sh
 
 # Compile both real PIC lock-step drivers against a fake core; exercise exact pin
@@ -3050,7 +3036,8 @@ test-stack-bound-regression:
 
 # Flash-utilization budget assertion: run avr-size on every ATtiny13a variant
 # ELF and fail if flash (Program bytes) exceeds FLASH_T13_BUDGET% of 1024 B.
-# Firmware is at 73.8% today (relay and mute; cd4053 is 69.9%), inside the 90%
+# Firmware is at 73.8% today (the relay and mute variants; cd4053_simple is
+# 69.9%), inside the 90%
 # default ceiling by 16.2 points.  The target prints the measured per-variant
 # percentages, so this figure can be re-checked by running it.  A future
 # accidental bloat would otherwise pass silently.
@@ -3064,7 +3051,7 @@ test-flash-budget:
 	if [ "$(words $(strip $(VARIANTS)))" -ne 3 ] \
 			|| [ "$(words $(sort $(VARIANTS)))" -ne 3 ] \
 			|| [ "$(words $(FLASH_T13_UNKNOWN))" -ne 0 ]; then \
-		echo "FAIL: test-flash-budget requires the complete cd4053/mute/relay variant matrix"; \
+		echo "FAIL: test-flash-budget requires the complete $(CLASSIC_VARIANTS_SUPPORTED) variant matrix"; \
 		exit 2; \
 	fi
 	@$(MAKE) --no-print-directory _test-flash-budget-measure
@@ -3192,11 +3179,11 @@ test-mutation:
 # before hardware signoff or as a pre-release gate.
 #
 # Overrides (command line):
-#   SOAK_VARIANT=relay        variant to test (cd4053/mute/relay; default cd4053)
+#   SOAK_VARIANT=<name>       variant to test (default cd4053_simple)
 #   SOAK_CHIP=45              tinyx5 chip number (85/45; default 85)
 #   SOAK_DURATION_MS=3600000  simulated duration in ms (default 86400000 = 24 h)
 #   SOAK_LIVENESS_INTERVAL_MS=10000   liveness-check interval (default 60000 ms)
-SOAK_VARIANT     ?= cd4053
+SOAK_VARIANT     ?= cd4053_simple
 SOAK_CHIP        ?= 85
 SOAK_DURATION_MS ?= 86400000
 SOAK_COMBINATION_NAME ?= standalone
@@ -3245,7 +3232,7 @@ test-soak: $(SOAK_DEPS) $(AVR_FW)$(call fw_image_tail,$(SOAK_VARIANT),$(mmcu_$(S
 # Short by construction: the numbers below are one WDT window plus slack, not a
 # scaled-down release soak. tinyx5 only -- simavr models the WDT system reset
 # for the ATtiny25/45/85 family and not for the ATtiny13a.
-SOAK_WITNESS_VARIANT       ?= cd4053
+SOAK_WITNESS_VARIANT       ?= cd4053_simple
 SOAK_WITNESS_CHIP          ?= 85
 SOAK_WITNESS_DURATION_MS   ?= 3000
 SOAK_WITNESS_LIVENESS_MS   ?= 1000
@@ -3346,7 +3333,7 @@ analyze-deep: $(FW_SOURCES) $(FW_HEADERS)
 
 # MISRA-C:2012 compliance analysis (cppcheck misra addon). Runs over every
 # firmware TU, each under a representative variant -D: the core and the
-# CD4053-simple driver under the default VARIANT's macro, the mute and relay
+# cd4053_simple driver under the default VARIANT's macro, the mute and relay
 # drivers under their own. Findings are rule-labeled via test/misra_rules.txt;
 # avr-libc/avr-gcc system-header findings are excluded (compliance boundary).
 #
@@ -3587,15 +3574,15 @@ PIC320_BUILD_DIR   ?= build_pic10f320
 PIC320_COVERAGE_DIR := $(PIC320_BUILD_DIR)/coverage
 
 # --- output variant ----------------------------------------------------------
-PIC320_VARIANT      ?= cd4053-simple
+PIC320_VARIANT      ?= cd4053_simple
 # The authoritative supported set and sanitized request are established before
 # serialization so command-line matrix text cannot execute during recursive Make.
 
-ifeq ($(PIC320_VARIANT),cd4053-simple)
+ifeq ($(PIC320_VARIANT),cd4053_simple)
   PIC320_OUTPUT_MACRO := OUTPUT_CD4053_SIMPLE
-else ifeq ($(PIC320_VARIANT),cd4053-mute)
+else ifeq ($(PIC320_VARIANT),cd4053_with_mute)
   PIC320_OUTPUT_MACRO := OUTPUT_CD4053_WITH_MUTE
-else ifeq ($(PIC320_VARIANT),tq2-relay)
+else ifeq ($(PIC320_VARIANT),tq2_l2_5v_relay)
   PIC320_OUTPUT_MACRO := OUTPUT_TQ2_RELAY
 else
   $(error PIC320_VARIANT must be one of: $(PIC320_VARIANTS_ALL) (got '$(PIC320_VARIANT)'))
@@ -4176,7 +4163,7 @@ pic320_hex_of = $(PIC320_BUILD_DIR)/$(call fw_image,$(1),$(PIC320_TAG)).hex
 # The imported project held all three of these in the same ifeq/else ladder as
 # the output macro, ending in $(error) -- so adding a variant could not silently
 # inherit another one's expectations. Folding them into nested $(if ...) here
-# lost that: an unrecognized name used to resolve to tq2-relay's values (its
+# lost that: an unrecognized name used to resolve to tq2_l2_5v_relay's values (its
 # OUTPUT_ macro and its 0x1 settled LATA) and run a green-looking test against
 # the wrong contract. The top-level PIC320_VARIANT ladder still rejects unknown
 # names, but it is NOT the only entry point -- PIC320_{FAULT,IO,LOCKSTEP,TARGET}_
@@ -4188,9 +4175,9 @@ pic320_hex_of = $(PIC320_BUILD_DIR)/$(call fw_image,$(1),$(PIC320_TAG)).hex
 # definition collapses to a SPACE: without it these would expand to
 # " OUTPUT_TQ2_RELAY" and land in the compile line as "-D OUTPUT_TQ2_RELAY".
 pic320_macro_of = $(strip \
-	$(if $(filter cd4053-simple,$(1)),OUTPUT_CD4053_SIMPLE, \
-	$(if $(filter cd4053-mute,$(1)),OUTPUT_CD4053_WITH_MUTE, \
-	$(if $(filter tq2-relay,$(1)),OUTPUT_TQ2_RELAY, \
+	$(if $(filter cd4053_simple,$(1)),OUTPUT_CD4053_SIMPLE, \
+	$(if $(filter cd4053_with_mute,$(1)),OUTPUT_CD4053_WITH_MUTE, \
+	$(if $(filter tq2_l2_5v_relay,$(1)),OUTPUT_TQ2_RELAY, \
 	$(error pic320_macro_of: no output macro for PIC10F320 variant '$(1)'; supported: $(PIC320_VARIANTS_SUPPORTED))))))
 
 # The full RA0..RA2 LATA each variant drives once settled, asserted by the gpsim
@@ -4198,9 +4185,9 @@ pic320_macro_of = $(strip \
 # for every variant today, but it is answered per variant rather than assumed,
 # for the same reason as above.
 pic320_engaged_lata_of = $(strip \
-	$(if $(filter cd4053-simple,$(1)),0x3, \
-	$(if $(filter cd4053-mute,$(1)),0x7, \
-	$(if $(filter tq2-relay,$(1)),0x1, \
+	$(if $(filter cd4053_simple,$(1)),0x3, \
+	$(if $(filter cd4053_with_mute,$(1)),0x7, \
+	$(if $(filter tq2_l2_5v_relay,$(1)),0x1, \
 	$(error pic320_engaged_lata_of: no settled ENGAGED LATA for PIC10F320 variant '$(1)'; supported: $(PIC320_VARIANTS_SUPPORTED))))))
 pic320_bypass_lata_of = $(strip \
 	$(if $(filter $(PIC320_VARIANTS_SUPPORTED),$(1)),0x0, \
@@ -4512,8 +4499,8 @@ pic320-test-fault-variants:
 # PIC320_VARIANT is threaded down alongside each lane's own variable because
 # `pic320` (the build prerequisite of all three lanes) builds exactly ONE image,
 # selected by PIC320_VARIANT -- unlike the 322's `pic`, which builds the whole
-# matrix. Without it, `make pic320-test-target PIC320_TARGET_VARIANT=tq2-relay`
-# would build cd4053-simple and then fail looking for the tq2-relay image.
+# matrix. Without it, `make pic320-test-target PIC320_TARGET_VARIANT=tq2_l2_5v_relay`
+# would build cd4053_simple and then fail looking for the tq2_l2_5v_relay image.
 pic320-test-target:
 	@set -e; \
 	for spec in \
@@ -4566,9 +4553,9 @@ pic320-test-target-variants:
 # busy-blocks the POLLED main loop and steals that many 1 ms debounce ticks, so
 # the soak must hold each press/release correspondingly longer. Mirrors the
 # firmware's TQ2_L2_5V_PULSE_MS (12) and CD4053_MUTE_DELAY_MS (5).
-pic320_soak_block_cd4053-simple = 0
-pic320_soak_block_cd4053-mute   = 5
-pic320_soak_block_tq2-relay     = 12
+pic320_soak_block_cd4053_simple = 0
+pic320_soak_block_cd4053_with_mute   = 5
+pic320_soak_block_tq2_l2_5v_relay     = 12
 
 PIC320_SOAK_DURATION_MS          ?= 3600000
 PIC320_SOAK_LIVENESS_INTERVAL_MS ?= 60000
@@ -4713,6 +4700,29 @@ print-%:
 # five divergent conventions that used to be reconciled here by hand (merge plan
 # §5.3, decision D2) were retired in v0.9.8; see "canonical firmware image
 # basename" near the top for what replaced them and why.
+# Fail at parse time, not at publish time, if a supported variant is not fully
+# declared. Every lane's supported set is checked, so a variant that exists for
+# one MCU but was never given a driver mapping cannot reach a build rule; without
+# this the omission surfaces as a missing release image after a 24-hour soak has
+# already run.
+#
+# This lives HERE rather than beside the variant definitions because it is the
+# first point at which all three lanes' supported sets exist -- XT_VARIANTS_
+# SUPPORTED is not defined until the AVR-XT section, and an immediate-evaluation
+# check placed earlier would silently pass by checking an empty list.
+#
+# Deliberately NOT an equality check between the three lists. They hold the same
+# three names today, but a future output stage that fits the ATtiny13a and not
+# the 12-free-words PIC10F320 is a legitimate divergence, and a guard forbidding
+# it would be wrong. What must hold is that wherever a name appears it means the
+# same stage and is completely declared.
+override ALL_SUPPORTED_VARIANTS := $(sort $(CLASSIC_VARIANTS_SUPPORTED) \
+                                          $(XT_VARIANTS_SUPPORTED) \
+                                          $(PIC320_VARIANTS_SUPPORTED))
+$(foreach v,$(ALL_SUPPORTED_VARIANTS), \
+	$(if $(macro_$(v)),,$(error supported variant '$(v)' has no macro_$(v) selector)) \
+	$(if $(src_$(v)),,$(error supported variant '$(v)' has no src_$(v) driver source)))
+
 # Broken out per lane so a consumer that legitimately cares about ONE chip
 # (CI's per-lane "images were actually built" asserts) can name that lane's
 # basenames instead of composing them by hand from a variant list -- a hand-built
@@ -4744,12 +4754,12 @@ RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(XT_BUILD_DIR) $(PIC_BUILD_DIR) $(PIC320
 # actual soak-name set that differs before starting the 24-hour phase, and the
 # qualification verifier requires the exact evidence set afterward.
 override RELEASE_SOAK_NAMES := \
-	avr_cd4053_t85 avr_cd4053_t45 \
-	avr_mute_t85 avr_mute_t45 \
-	avr_relay_t85 avr_relay_t45 \
-	attiny202_cd4053 attiny202_mute attiny202_relay \
-	pic_cd4053 pic_mute pic_relay \
-	pic320_cd4053-simple pic320_cd4053-mute pic320_tq2-relay
+	avr_cd4053_simple_t85 avr_cd4053_simple_t45 \
+	avr_cd4053_with_mute_t85 avr_cd4053_with_mute_t45 \
+	avr_tq2_l2_5v_relay_t85 avr_tq2_l2_5v_relay_t45 \
+	attiny202_cd4053_simple attiny202_cd4053_with_mute attiny202_tq2_l2_5v_relay \
+	pic_cd4053_simple pic_cd4053_with_mute pic_tq2_l2_5v_relay \
+	pic320_cd4053_simple pic320_cd4053_with_mute pic320_tq2_l2_5v_relay
 
 override RELEASE_FIXED_EVIDENCE_FILES := \
 	build-avr.log build-avr-xt.log build-pic.log build-pic320.log \
@@ -4800,7 +4810,7 @@ help:
 	@echo "  program-pic     flash one PIC variant to hardware (VARIANT=, PIC_PROG=pk2cmd|ipecmd)"
 	@echo "PIC10F320 (constrained 256-word target; docs/pic10f320_special_case.md):"
 	@echo "  pic320          build one PIC10F320 variant + 256-word and HW-stack gates"
-	@echo "                  (PIC320_VARIANT=cd4053-simple|cd4053-mute|tq2-relay)"
+	@echo "                  (PIC320_VARIANT=cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay)"
 	@echo "  pic320-variants build every variant; removes the whole set if any one fails"
 	@echo "  pic320-size     XC8 program + data memory summary for one variant"
 	@echo "  pic320-test     ALL PIC10F320 pre-hardware checks: host lanes (all variants) +"
@@ -4860,7 +4870,7 @@ help:
 	@echo "  test-sim        real firmware in simavr, all variants (ATtiny13a)"
 	@echo "  test-sim-t85 / test-sim-t45  all variants on that tinyx5 chip"
 	@echo "  test-sim-secondary  all variants on every tinyx5 chip"
-	@echo "  test-sim-<v>[-t<n>]  single variant, e.g. test-sim-relay / test-sim-relay-t45"
+	@echo "  test-sim-<v>[-t<n>]  single variant, e.g. test-sim-tq2_l2_5v_relay / test-sim-tq2_l2_5v_relay-t45"
 	@echo "  test-fault-inject  corrupt state, verify WDT recovery (all variants x tinyx5)"
 	@echo "  test-mutation   inject firmware faults, verify the suite kills them"
 	@echo "  test-mutation-sandbox  verify mutation sandbox + inventory/result accounting"

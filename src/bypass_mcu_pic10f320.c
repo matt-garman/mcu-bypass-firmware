@@ -66,9 +66,9 @@
 // see also hw_configure_output_pins()
 //
 // All output schemes use RA0..RA2:
-//    relay = LED(RA0), RESET(RA1), SET(RA2)
-//    mute = LED(RA0), CTL1(RA1), CTL2(RA2)
-//    cd4053-simple = LED(RA0), CD4053(RA1), leaving RA2 a spare driven low
+//    tq2_l2_5v_relay = LED(RA0), RESET(RA1), SET(RA2)
+//    cd4053_with_mute = LED(RA0), CTL1(RA1), CTL2(RA2)
+//    cd4053_simple = LED(RA0), CD4053(RA1), leaving RA2 a spare driven low
 // Mask 0x07 for all
 #define BYPASS_OUTPUT_DDR_MASK (0x07U) // RA0|RA1|RA2
 
