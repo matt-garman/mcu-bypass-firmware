@@ -35,7 +35,7 @@ mkdir -p "$fakebin" "$work/dfp/pic/include/proc" "$work/gpsim-inc" \
 	"$work/xt-dfp/gcc/dev/attiny202/device-specs" \
 	"$work/xt-dfp/include/avr" "$work/yasimavr-venv/bin"
 # Both device headers: assert_pic_toolchain checks each chip through its own
-# PIC_*/PIC320_* pair, so a fake DFP with only one of them would fail the assert
+# PIC_*/PIC10F320_* pair, so a fake DFP with only one of them would fail the assert
 # before any routing was exercised.
 : > "$work/dfp/pic/include/proc/pic10f322.h"
 : > "$work/dfp/pic/include/proc/pic10f320.h"

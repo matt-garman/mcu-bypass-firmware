@@ -82,7 +82,7 @@ run_make_gate() {
 		AVR_BUILD_DIR="$images" CC="$tools/cc" HOSTCC="$tools/cc" SIZE="$tools/size" \
 		READELF="$tools/readelf" \
 		ATTINY13A_FLASH_BUDGET=90 VARIANTS="cd4053_simple cd4053_with_mute tq2_l2_5v_relay" \
-		MCU=attiny13a FW_BASE=bypass "$@"
+		ATTINY13A_MCU=attiny13a FW_BASE=bypass "$@"
 }
 
 expect_pass() {
@@ -168,7 +168,7 @@ for override in ATTINY13A_MCU=attiny85 FW_BASE=alternate AVR_FW=alternate; do
 		printf 'FAIL: Make override %s bypassed the ATtiny13a gate\n' "$override" >&2
 		exit 1
 	fi
-	[[ "$output" == *"requires MCU=attiny13a, FW_BASE=bypass"* ]] \
+	[[ "$output" == *"requires ATTINY13A_MCU=attiny13a, FW_BASE=bypass"* ]] \
 		|| { printf 'FAIL: Make override %s failed for the wrong reason: %s\n' "$override" "$output" >&2; exit 1; }
 	after=$(sha256sum "$images"/*.elf)
 	[[ "$after" == "$before" ]] \

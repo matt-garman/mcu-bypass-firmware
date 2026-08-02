@@ -96,7 +96,7 @@ run_make() {
 	FAKE_COMPILER_LOG="$log" make --no-print-directory -C "$repo" "$@" \
 		CC="$tools/cc" HOSTCC="$tools/cc" SANITIZE= \
 		SIZE="$tools/size" READELF="$tools/readelf" SIM_LIBS= AVR_BUILD_DIR=build_avr_classic \
-		AVR_FW=build_avr_classic/bypass FW_BASE=bypass MCU=attiny13a \
+		AVR_FW=build_avr_classic/bypass FW_BASE=bypass ATTINY13A_MCU=attiny13a \
 		VARIANTS="cd4053_simple cd4053_with_mute tq2_l2_5v_relay"
 }
 

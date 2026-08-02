@@ -91,7 +91,7 @@ run_make() {
 		OBJCOPY="${TEST_OBJCOPY-$tools/objcopy}" \
 		READELF="$tools/readelf" \
 		AVR_BUILD_DIR=build_avr_classic \
-		AVR_FW=build_avr_classic/bypass FW_BASE=bypass MCU=attiny13a \
+		AVR_FW=build_avr_classic/bypass FW_BASE=bypass ATTINY13A_MCU=attiny13a \
 		VARIANTS="cd4053_simple cd4053_with_mute tq2_l2_5v_relay"
 }
 

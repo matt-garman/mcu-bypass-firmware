@@ -246,7 +246,7 @@ trap on_exit EXIT
 # PIC_SOAK_GPSIM_INC wins (they are ?= in the Makefile).
 #
 # The two chips are checked through their OWN variables rather than assuming
-# PIC320_* still tracks PIC_*: the whole point of the separate pair (merge plan
+# PIC10F320_* still tracks PIC_*: the whole point of the separate pair (merge plan
 # §5.6) is that one chip can be re-pinned, and a checker that reads only PIC_*
 # would then assert the wrong installation and pass while the 320 lane skipped.
 assert_pic_toolchain() {

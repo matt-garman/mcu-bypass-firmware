@@ -106,7 +106,7 @@ make pic10f322-test-target-variants    # fail-closed libgpsim fault/lock-step/I/
 ```
 
 The PIC10F320 has its own lane, using the same toolchain (`pic10f320-*` targets,
-`PIC320_*` variables):
+`PIC10F320_*` variables):
 
 ```
 make pic10f320-variants             # build all variants + flash-budget/return-stack gates

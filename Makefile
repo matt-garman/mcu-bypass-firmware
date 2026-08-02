@@ -3086,7 +3086,7 @@ test-stack-bound-regression:
 test-flash-budget:
 	@if [ "$(ATTINY13A_MCU)" != "$(ATTINY13A_FLASH_MCU)" ] || [ "$(FW_BASE)" != "bypass" ] \
 			|| [ "$(AVR_FW)" != "$(AVR_BUILD_DIR)/bypass" ]; then \
-		echo "FAIL: test-flash-budget requires MCU=attiny13a, FW_BASE=bypass, and the canonical AVR_FW"; \
+		echo "FAIL: test-flash-budget requires ATTINY13A_MCU=attiny13a, FW_BASE=bypass, and the canonical AVR_FW"; \
 		exit 2; \
 	fi; \
 	if [ "$(words $(strip $(VARIANTS)))" -ne 3 ] \
@@ -4213,8 +4213,9 @@ pic10f320_hex_of = $(PIC10F320_BUILD_DIR)/$(call fw_image,$(1),$(PIC10F320_TAG))
 # lost that: an unrecognized name used to resolve to tq2_l2_5v_relay's values (its
 # OUTPUT_ macro and its 0x1 settled LATA) and run a green-looking test against
 # the wrong contract. The top-level PIC10F320_VARIANT ladder still rejects unknown
-# names, but it is NOT the only entry point -- PIC320_{FAULT,IO,LOCKSTEP,TARGET}_
-# VARIANT can each be set directly on the command line and never pass through it.
+# names, but it is NOT the only entry point -- PIC10F320_{FAULT,IO,LOCKSTEP,
+# TARGET}_VARIANT can each be set directly on the command line and never pass
+# through it.
 # The explicit final arm restores the imported behaviour: an unknown variant is a
 # hard error at the point of use, not a wrong answer.
 #
@@ -4542,7 +4543,7 @@ pic10f320-test-fault-variants:
 # masquerading as green. Both chips' harnesses print the identical markers
 # (test/pic{,10f320}/**/test_{fault,lockstep,io}_pic.cc all emit
 # "<LANE> %s: %u checks" with PASS/FAIL), so this is the PIC10F322 driver at
-# `pic10f322-test-target` above, verbatim in structure, with the PIC320_ names.
+# `pic10f322-test-target` above, verbatim in structure, with the PIC10F320_ names.
 #
 # PIC10F320_VARIANT is threaded down alongside each lane's own variable because
 # `pic10f320` (the build prerequisite of all three lanes) builds exactly ONE image,

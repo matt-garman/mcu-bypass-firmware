@@ -327,13 +327,15 @@ datasheet startup time against 64 ms). Item (b) is a documentation task and pair
 naturally with the Tier 2 datasheet-citation item.
 
 **Fail-closed gate on the names other files exchange with the Makefile —
-`print-<VAR>` reads, documented `make <goal>` targets, and `make VAR=value`
-overrides.** Added 2026-08-01 while doing the variable-prefix rename in
-`v0.9.8`; widened twice on 2026-08-02, first after the same class was found
-severed on the goal axis, then again the same day after it was found severed on
-the override axis — where it had already burned a >10-hour run.
+`print-<VAR>` reads, documented `make <goal>` targets, `make VAR=value`
+overrides, and variables named to human readers.** Added 2026-08-01 while doing
+the variable-prefix rename in `v0.9.8`; widened three times on 2026-08-02 —
+first after the same class was found severed on the goal axis, then after it was
+found severed on the override axis (where it had already burned a >10-hour run),
+then after a meta-review of the whole release found ten more surfaces naming
+removed variables, two of them instructing a reader to type one.
 
-One defect, three axes. Nothing asserts that the Makefile names other files
+One defect, four axes. Nothing asserts that the Makefile names other files
 *speak* are a subset of the names the Makefile actually *defines*, so a rename
 severs the link silently and every gate stays green.
 
@@ -360,6 +362,17 @@ commands failed. One more sat in `docs/phase2_pic_shell.md`, and
 and then run goals that only exist from `v0.9.8` on. Those were fixed by hand;
 nothing prevents the next rename from re-creating them.
 
+One further casualty surfaced in the 2026-08-02 meta-review, and it is the
+sharpest argument for this axis: `test/README.md:68` named
+`make test-sim-<variant>`,
+which has no rule — the real goal is `test-sim-<variant>-attiny13a`. That is
+precisely the defect the whole `v0.9.8` rename existed to kill, a goal
+identified by the *omission* of its MCU field, surviving in a live document
+because no sweep covered `test/README.md`. Note also that it is a goal
+*schema* rather than a literal, so the gate must either resolve `<variant>`
+against `VARIANTS` or skip placeholder forms deliberately — not silently fail
+to match them, which is how it went unnoticed.
+
 *Axis C — command-line overrides.* The reverse direction of axis A: instead of a
 file *reading* a Makefile variable, a file *sets* one. `make test-soak
 SOAK_DURATION_MS=2000` defines a make variable named `SOAK_DURATION_MS`; if the
@@ -384,20 +397,79 @@ build is clean; the mutant is still correctly killed, just ~43,000× too slow, s
 the failure mode is a hang rather than a wrong answer; mutation runs only in
 `test-long`; and the mutation harness wraps no mutant in `timeout`.
 
-Axis C is the cheapest of the three to gate and the only one with a demonstrated
-runtime cost, so build it first; axis B second, since its consumers are humans
+*Axis D — variables named to human readers.* The variable-side twin of axis B,
+and the one this item kept missing because each earlier widening was scoped to
+the names *that* rename had just touched. A comment, a README or a `make`
+diagnostic names a variable; the rename moves it; the prose keeps recommending
+the dead spelling. Where axis C is a *file* setting an inert variable, this is a
+*document telling a person* to set one, and the person gets no error at all —
+make accepts the assignment and ignores it.
+
+Found 2026-08-02 by a meta-review of the finished release, ten surfaces:
+
+- `Makefile:3089` — the `test-flash-budget` guard reads `$(ATTINY13A_MCU)` but
+  its failure message said `requires MCU=attiny13a`. Worst of the set: it is the
+  *gate's own advice to a user who has already failed*, and following it changes
+  nothing. `test/test_flash_budget.sh:171` asserted that exact substring, so the
+  regression was pinning the wrong advice in place — a gate can entrench this
+  class as well as catch it.
+- `Makefile:4216` — "`PIC320_{FAULT,IO,LOCKSTEP,TARGET}_VARIANT` can each be set
+  directly on the command line", an instruction naming four removed variables.
+- `Makefile:4546`, `scripts/ci-local.sh:249`, `test/test_ci_local_routing.sh:38`
+  — descriptive `PIC320_*` prose; code beside all three was correct.
+- `README.md:109` — told readers the PIC10F320 lane uses `PIC320_*` variables.
+- `test/test_avr_build_rebuild.sh:94`, `test/test_workload_rebuild.sh:99`,
+  `test/test_flash_budget.sh:85` — inert `MCU=attiny13a` (also axis C).
+
+Worth recording honestly: none of these mis-built anything. `ATTINY13A_MCU` is a
+plain `=` (`Makefile:165`) whose default equals the value the dead overrides
+passed, and a plain `=` also resists the environment. The cost of axis D is
+misdirection, not wrong output — which is exactly why no gate would ever notice
+it, and why the harvest has to be textual.
+
+Axis C is the cheapest of the four to gate and the only one with a demonstrated
+runtime cost, so build it first; axis B and D second — they share a harvest pass
+over the same files and differ only in the token class they look for, so
+building either alone wastes most of the work. Their consumers are humans,
 rather than a script that at least runs in CI.
 
 A prototype sweep already works: harvest every `NAME=value` token from lines
 invoking make across `test/`, `scripts/`, `.github/` and the Makefile's own
-comments, and assert each name is Makefile-known. Run over the whole tree on
-2026-08-02 it produced five hits, all benign — which is the real design input,
-because the gate has to tolerate every one of them:
+comments, and assert each name is Makefile-known.
 
-- Names passed through the *environment* to a script rather than to make
-  (`MUTATION_ALLOW_SKIP`, read by `test/mutation_policy.sh`;
-  `FAKE_COMPILER_LOG`, read by a fake-tool shim). These need a small allowlist;
-  nothing in the Makefile can infer them.
+**It must join backslash continuations before matching, and the first version of
+it did not.** That version keyed on *physical* lines and reported five hits, all
+benign. Re-run on 2026-08-02 with continuations joined, it found three more that
+were real — the inert `MCU=attiny13a` overrides in axis D above:
+
+```
+test/test_avr_build_rebuild.sh
+   89   make --no-print-directory -C "$repo" "$@" \
+   ...
+   94       AVR_FW=... FW_BASE=bypass MCU=attiny13a \
+```
+
+Five lines apart. Across `test/`, `scripts/` and `.github/` there were **zero**
+physical lines containing both `make` and `MCU=`, and three once the
+continuations were joined. This is the same "harvest regex quietly stops
+matching" failure this item exists to catch, met on the prototype that produced
+this item's own specification — which is the strongest possible argument for the
+negative case demanded below.
+
+With continuations joined the residual hits are these, and the gate has to
+tolerate every one:
+
+- Names passed through the *environment* to a script rather than to make. The
+  recorded list of two was short by at least five: `MUTATION_ALLOW_SKIP` (read
+  by `test/mutation_policy.sh`), `FAKE_COMPILER_LOG`, `FAKE_CC_LOG`,
+  `FAKE_OBJCOPY_LOG`, `FAKE_HOST_CC_LOG` and `FAKE_HOST_RUN_LOG` (fake-tool
+  shims), plus the `EXPECTED_LOCK` / `LOCK_ATTEMPT` / `REAL_FLOCK` set handed to
+  `scripts/make-release.sh` via `env`. These need an allowlist; nothing in the
+  Makefile can infer them.
+- A **fourth** harvest-artifact class the earlier list missed: a line merely
+  *mentioning* `scripts/make-release.sh` matches a bare `\bmake\b`, which is
+  what drags in `RELEASE=`, `REPO_URL=`, `REAL_MAKE=` and the `env` set above.
+  The make-invocation test needs a word boundary that `make-release.sh` fails.
 - `override`-defined names (`RELEASE_EVIDENCE_FILES`, `Makefile:4825`), which a
   naive `^NAME=` harvest of *definitions* misses. Note that
   `test_release_qualification.sh:207` deliberately passes
@@ -447,6 +519,31 @@ Design notes if picked up:
   token, a directory fragment and a log-file stem). Recommend scoping the gate
   to `make <goal>` occurrences, and stating that scope in the gate's own header
   so the next reader does not mistake it for total coverage.
+- **For axis D, harvest the variable token, not a `make` line.** Axis C's
+  harvest is anchored on a make invocation; axis D's cannot be, because its
+  occurrences are prose (`README.md:109`), comments (`Makefile:4216`) and
+  `echo` strings inside recipes (`Makefile:3089`) that never mention `make` at
+  all. Key it instead on the shapes a variable name actually takes in this
+  tree — `NAME=value`, `` `NAME` ``, `NAME_*`/`NAME=` inside a quoted
+  diagnostic — restricted to the project's own prefix vocabulary (`ATTINY13A_`,
+  `TINYX5_`, `AVR_`, `XT_`, `PIC_`, `PIC10F320_`, `PIC10F322_`, and the retired
+  `PIC320_`/`MCU`/`SOAK_`/`PROGRAMMER` spellings). Scoping to that vocabulary is
+  what keeps the false-positive rate survivable; a generic `[A-Z_]{3,}` sweep
+  over prose will drown in C macros, register names and acronyms.
+- **Axis D's highest-value target is `echo`/`$(error)` text inside recipes, not
+  documentation.** A wrong comment misleads a reader who may already know
+  better; a wrong *diagnostic* is read at the exact moment someone is confused
+  and trusts it completely. `Makefile:3089` was that case. These are also the
+  cheapest to check, because a recipe's strings sit beside the variables the
+  same recipe dereferences — a rule whose body reads `$(ATTINY13A_MCU)` while
+  its message says `MCU=` is locally inconsistent and needs no whole-tree
+  knowledge to flag.
+- **Guard against the gate entrenching the defect.** `test_flash_budget.sh:171`
+  asserted the *wrong* diagnostic text verbatim, so the dead name had a
+  regression test defending it, and correcting the Makefile alone would have
+  turned that gate red. Any assertion that pins diagnostic text is a place this
+  class can calcify; when axis D lands, sweep the existing assertions for
+  hardcoded variable names too, not just the sources.
 - **The allowlist is the hard part, and it is not "which file".** Live documents
   legitimately name retired goals in three distinct situations, all of which
   currently exist:
@@ -466,14 +563,16 @@ Design notes if picked up:
   exemption is right only for the banner-marked historical records
   (`docs/pic10f320_merge_plan.md`, `docs/v0.9.6_post_release_polish.md`,
   `docs/pic10f320_feasibility.md`), which already declare themselves.
-- Include the negative case on **all three** axes, per the house pattern: a
+- Include the negative case on **all four** axes, per the house pattern: a
   deliberately bogus name must make the gate fail, so it cannot pass by
   harvesting nothing. The realistic failure mode is a harvest regex that
   silently stops matching, which is the same class of defect the gate exists to
-  catch — and on axis C it is the *documented* failure mode, since the
-  2026-08-02 sweep needed three regex corrections before its five remaining hits
-  were all genuine. For axis B add a second negative: an exempt block must stop
-  being exempt if its marker is removed.
+  catch — and on axis C it is no longer hypothetical but *demonstrated twice*:
+  the 2026-08-02 sweep needed three regex corrections before its five remaining
+  hits were all genuine, and then the physical-line bug above hid three real
+  ones behind a backslash. Make one axis-C negative a multi-line continued
+  invocation specifically. For axis B add a second negative: an exempt block
+  must stop being exempt if its marker is removed.
 - Natural home is a new `test-makefile-name-contract` in `TEST_GATES`
   (host-only, no toolchain, so it belongs in `make test` rather than
   `test-long`), modelled on `test_release_provenance.sh`.
@@ -486,12 +585,22 @@ exist to be cross-checked against Makefile truth — but this one cross-checks
 nothing, it just needs a path, so the restatement buys nothing and cost exactly
 the silent lane-disable that `v0.9.8` fixed.
 
-Effort: ~3–4 h for all three axes (~1 h for axis C alone, which has a working
-prototype). Impact: High — no new assurance about the firmware, but it closes a
-silent-severance class on the interfaces between the Makefile and the release
-orchestrator, the published documentation and the test harnesses; those
-interfaces only ever get wider, and axis C has now cost real time twice (a
-disabled mutation lane in `v0.9.8`, then a >10-hour hang).
+Effort: ~4–6 h for all four axes (~1 h for axis C alone, which has a working
+prototype; axes B and D together ~2–3 h, since they share one harvest pass and
+one allowlist mechanism). Impact: High — no new assurance about the firmware,
+but it closes a silent-severance class on the interfaces between the Makefile
+and the release orchestrator, the published documentation and the test
+harnesses; those interfaces only ever get wider, and the class has now cost real
+time three times over one release (a disabled mutation lane, then a >10-hour
+hang, then ten stale surfaces that a meta-review had to find by hand).
+
+A note on why this item keeps growing: each of the three widenings was found by
+looking, not by a gate, and each time the scope of the *previous* sweep was the
+reason the next one was missed — axis A swept `print-<VAR>`, so it did not see
+documents; axis B swept `make <goal>`, so it did not see variables in prose;
+axis C swept make-invoking lines, so it did not see continuations. That pattern
+is itself the argument for building the gate rather than doing a fourth sweep
+by hand.
 
 ---
 
@@ -855,7 +964,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Multi-press boundary cases | 2.5 | 3–4 h | Medium — tick-boundary edge cases |
 | Power-on-pressed simulation gap | 2.5 | 1–2 h | Low — simulator fidelity, not coverage |
 | Power-supply ramp-up analysis | 2.5 | 2–3 h | Medium — real-world robustness |
-| Makefile name-contract gate (`print-<VAR>` reads + documented goals + `VAR=` overrides) | 2.5 | 3–4 h | High — closes a silent-severance class in the release path, the published docs and the test harnesses; the override axis has already cost a >10-hour hang |
+| Makefile name-contract gate (`print-<VAR>` reads + documented goals + `VAR=` overrides + variables named to readers) | 2.5 | 4–6 h | High — closes a silent-severance class in the release path, the published docs and the test harnesses; has cost a disabled mutation lane, a >10-hour hang and ten stale surfaces across one release |
 | Hardware-validation procedure doc | 3 | 2–3 h | High — primary-part WDT gap |
 | HIL rig: behavioural + register introspection | 3 | 5–8 d | High — silicon-level model validation |
 | Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |

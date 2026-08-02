@@ -65,7 +65,7 @@ test/
 
   avr/     ATtiny-specific tests: the real firmware ELF in simavr, plus fuses.
            attiny202_smoke.c    AVR-XT peripheral compile/link smoke image
-           test_sim.c           simavr integration    (make test-sim-<variant>)
+           test_sim.c           simavr integration    (make test-sim-<variant>-attiny13a)
            test_soak.c          long-duration soak    (make test-soak)
            test_fuses.c         all-target fuse bytes (make test-fuses)
            attiny202_fuses.py   fail-closed simulator fuse configuration
