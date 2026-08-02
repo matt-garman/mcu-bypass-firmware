@@ -73,10 +73,26 @@ mutation_validate_totals() {
     fi
 }
 
+# Statuses that mean "the checker did not run", as opposed to "the checker ran
+# and the mutant failed it". The distinction is load-bearing: a mutant is KILLED
+# on any nonzero exit, so anything misfiled here becomes a silent false green.
+#
+# 124 is timeout(1)'s expiry status and is the reason this comment exists. Every
+# mutant checker is wrapped in `timeout` (see mutation_bounded in
+# run_mutation_tests.sh), and without 124 in this set a mutant that HANGS would
+# exit nonzero and be recorded as killed -- the suite would report a clean run
+# while the thing it was measuring never finished. 125/126/127 are timeout's own
+# failure-to-run statuses and the shell's not-executable / not-found; >=128 is
+# death by signal.
+#
+# A checker that genuinely exits 124 for a non-timeout reason is now reported as
+# ERROR rather than killed. That is the safe direction: a loud, investigable
+# result instead of a quiet wrong one.
 mutation_checker_status_is_infrastructure_error() {
     local status=$1
     [[ $status =~ ^(0|[1-9][0-9]*)$ ]] || return 0
-    [ "$status" -eq 125 ] || [ "$status" -eq 126 ] || [ "$status" -eq 127 ] \
+    [ "$status" -eq 124 ] || [ "$status" -eq 125 ] || [ "$status" -eq 126 ] \
+        || [ "$status" -eq 127 ] \
         || { [ "$status" -ge 128 ] && [ "$status" -le 255 ]; }
 }
 

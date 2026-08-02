@@ -51,6 +51,7 @@ jobs:
   verify:
     name: verify (make test)
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     # Gate the AVR suite behind the fast PIC job: a PIC failure short-circuits
     # the run -- the slow AVR jobs are skipped instead of running in parallel.
     needs: pic
@@ -137,6 +138,7 @@ jobs:
   pic:
     name: pic (10F322 + 10F320)
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     env:
       # Pin to the versions in TOOLCHAIN.adoc; bump compiler + DFP together.
       XC8_VERSION: "3.10"
@@ -384,6 +386,7 @@ jobs:
   attiny202:
     name: "attiny202 (AVR-XT: analyze/sim/fault/soak)"
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     needs: pic   # gate behind the fast PIC job (see `verify`)
     env:
       # Bump with scripts/fetch_attiny_dfp.sh's pinned VER (keeps the cache key
@@ -559,6 +562,7 @@ jobs:
   build-matrix:
     name: build (${{ matrix.mcu }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     needs: pic   # gate behind the fast PIC job (see `verify`)
     strategy:
       fail-fast: false
@@ -607,6 +611,11 @@ jobs:
   stress:
     name: stress (make test-long)
     runs-on: ubuntu-24.04
+    # The job this exists for. In v0.9.8 a severed override left one mutant
+    # running a 24 h soak instead of 2 s; with no bound, GitHub cancelled at
+    # its 6 h default and reported nothing useful. 300 min is far above any
+    # observed run and still fails loudly, with the log, well before that.
+    timeout-minutes: 300
     needs: pic   # gate behind the fast PIC job (see `verify`)
     if: >-
       github.event_name == 'push' ||

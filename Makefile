@@ -627,6 +627,7 @@ FORCE:
         test-target-matrix test-target-lane-markers test-lockstep-progress \
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
+        test-variant-map-contract \
         pic10f322-test-target pic10f322-test-target-variants pic10f322-test-io pic10f322-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
         test-flash-budget-regression test-soak test-soak-reset-witness \
@@ -1347,9 +1348,9 @@ PIC10F322_SOAK_HEX = $(PIC10F322_BUILD_DIR)/$(call fw_image,$(PIC10F322_SOAK_VAR
 # the soak's liveness check must hold each press/release that much longer to stay
 # robust (see test/pic/test_soak_pic.cc). Mirror the driver headers'
 # TQ2_L2_5V_PULSE_MS (12) and CD4053_MUTE_DELAY_MS (5); cd4053_simple is 0.
-pic_soak_block_cd4053      = 0
-pic_soak_block_mute        = 5
-pic_soak_block_relay       = 12
+pic_soak_block_cd4053_simple    = 0
+pic_soak_block_cd4053_with_mute = 5
+pic_soak_block_tq2_l2_5v_relay  = 12
 
 # Compile command for the PIC soak driver, factored into one variable so BOTH
 # the run target (pic10f322-test-soak) and the build-only rule ($(PIC10F322_SOAK_BIN) below)
@@ -2466,6 +2467,7 @@ TEST_GATES_LATE = \
         test-release-qualification test-release-history \
         test-build-serialization test-target-matrix \
         test-target-lane-markers test-lockstep-progress test-soak-timing \
+        test-variant-map-contract \
         test-soak-reset-witness test-strict-tools test-workload-rebuild \
         test-pic-build-rebuild coverage-check coverage-check-core
 TEST_GATES = $(TEST_GATES_EARLY) $(TEST_GATES_LATE)
@@ -2659,6 +2661,13 @@ test-build-serialization:
 # Host-only proof that ci-local skip options route strict/partial suites correctly.
 test-ci-local-routing:
 	./test/test_ci_local_routing.sh
+
+# Host-only proof that every per-variant map is registered with the parse-time
+# require_variant_map guard. The guard catches a registered map whose keys go
+# stale; this catches a map that was never registered, which is the half that
+# let pic_soak_block_* sever silently through the whole v0.9.8 rename.
+test-variant-map-contract:
+	./test/test_variant_map_contract.sh
 
 # Parse the GitHub workflow files and cross-check ci.yml's job list against
 # ci-local.sh. Nothing else here loads them as YAML, so an unparseable workflow
@@ -4768,9 +4777,35 @@ print-%:
 override ALL_SUPPORTED_VARIANTS := $(sort $(CLASSIC_VARIANTS_SUPPORTED) \
                                           $(XT_VARIANTS_SUPPORTED) \
                                           $(PIC10F320_VARIANTS_SUPPORTED))
-$(foreach v,$(ALL_SUPPORTED_VARIANTS), \
-	$(if $(macro_$(v)),,$(error supported variant '$(v)' has no macro_$(v) selector)) \
-	$(if $(src_$(v)),,$(error supported variant '$(v)' has no src_$(v) driver source)))
+
+# $(call require_variant_map,<prefix>,<supported set>,<what it is>)
+#
+# Every per-variant map in this file goes through here. It was two hardcoded
+# checks (macro_ and src_) until v0.9.8, and the two it did NOT cover are
+# exactly where the stage-vocabulary rename severed: pic_soak_block_* kept its
+# retired cd4053/mute/relay keys while PIC10F322_SOAK_VARIANT moved to
+# cd4053_simple/cd4053_with_mute/tq2_l2_5v_relay. Every lookup expanded empty,
+# so the soak compile line emitted `-DSOAK_ACTUATION_BLOCK_MS=u` and the driver
+# failed to build -- which degraded the PIC10F322 WDT mutant to a SKIP and would
+# have failed three of the fifteen release soak binaries. The 10F320 copy of the
+# same map had been renamed correctly, so the two lanes disagreed in silence.
+#
+# A non-empty value is required, not merely a declared one. `0` is a legitimate
+# value here and is non-empty as a string, so the numeric maps are safe; an
+# empty value is always a mistake (write `0`, not nothing).
+require_variant_map = $(foreach v,$(2), \
+	$(if $($(1)$(v)),,$(error supported variant '$(v)' has no $(1)$(v) $(3))))
+
+# macro_/src_ are universal: every variant in every lane needs an output-macro
+# selector and a driver source. The soak-block maps are per-lane, and are
+# checked against THAT lane's supported set rather than the union -- the
+# divergence note above is the reason. Requiring the 10F322 map to cover a
+# variant only the ATtiny13a supports would forbid exactly the future this
+# guard is written not to forbid.
+$(call require_variant_map,macro_,$(ALL_SUPPORTED_VARIANTS),output-macro selector)
+$(call require_variant_map,src_,$(ALL_SUPPORTED_VARIANTS),driver source)
+$(call require_variant_map,pic_soak_block_,$(CLASSIC_VARIANTS_SUPPORTED),PIC10F322 soak actuation-block time)
+$(call require_variant_map,pic10f320_soak_block_,$(PIC10F320_VARIANTS_SUPPORTED),PIC10F320 soak actuation-block time)
 
 # Broken out per lane so a consumer that legitimately cares about ONE chip
 # (CI's per-lane "images were actually built" asserts) can name that lane's
@@ -4952,6 +4987,7 @@ help:
 	@echo "  pic10f322-test-stack-bound / pic10f320-test-stack-bound  8-level HW return-stack depth gate"
 	@echo "  test-lockstep-progress  both PIC exact-pin/stall-propagation checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
+	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
 	@echo "  test-pic-build-rebuild  PIC soak binaries rebuild on a workload change"

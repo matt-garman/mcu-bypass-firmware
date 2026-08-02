@@ -69,6 +69,33 @@ PIC10F322_BUILD_DIR="${PIC10F322_BUILD_DIR:-build_pic10f322}"
 GPSIM="${GPSIM:-gpsim}"
 MUTATION_MAKE="${MUTATION_MAKE:-make}"
 PIC_SOAK_GPSIM_INC="${PIC_SOAK_GPSIM_INC:-/usr/include/gpsim}"
+# Wall-clock ceiling on a single mutant checker. Every mutant runs under this;
+# see mutation_bounded below.
+#
+# Why this exists: in v0.9.8 a renamed override left the classic-AVR WDT mutant
+# asking for 2 s of simulated soak and silently getting the 24 h default. A local
+# run sat in that ONE mutant for over ten hours before it was killed by hand, and
+# both CI jobs reaching that row would have been cancelled at GitHub's 6 h job
+# limit with nothing useful reported. Nothing in the harness bounded it.
+#
+# 900 s is deliberately loose. The mutant soak windows above are 2-2.5 s of
+# simulated time and the slowest legitimate mutant is a full XC8 rebuild plus a
+# gpsim run, so this is ~2 orders of magnitude of headroom -- tight enough to
+# catch the 43,200x class of severance immediately, loose enough that it cannot
+# become a source of flaky failures. Tighten it from measured runtimes later if
+# that is ever worth doing; do not tighten it speculatively.
+MUTATION_TIMEOUT_S="${MUTATION_TIMEOUT_S:-900}"
+# SIGTERM at the deadline, SIGKILL 10 s later for anything that ignores it.
+# timeout(1) runs the command in its own process group and signals the group, so
+# make's children go down with it rather than being orphaned into the background.
+#
+# The exit status matters as much as the bound: expiry yields 124, which
+# mutation_accounting.sh classifies as an infrastructure error, so a hung mutant
+# is reported as ERROR. Without that classification a hang would exit nonzero and
+# be recorded as KILLED -- a clean-looking run that measured nothing.
+mutation_bounded() {
+    timeout -k 10 "$MUTATION_TIMEOUT_S" "$@"
+}
 # Short soak window for the WDT-liveness mutant: must exceed one gpsim WDT period
 # (~1.057s at WDTPS=0x08, per the soak's own note) so an un-pet dog actually
 # fires, while staying quick. The baseline (pet) run sees zero resets and passes.
@@ -440,12 +467,16 @@ fi
 # failed gpsim assertion.
 pic_gpsim_run() {
     local work="$1" rc
-    make -C "$work" pic10f322 >/dev/null 2>&1
+    mutation_bounded make -C "$work" pic10f322 >/dev/null 2>&1
     rc=$?
     [ "$rc" -eq 0 ] || return "$rc"
     local hex="$work/$PIC10F322_BUILD_DIR/${FW_BASE}-${PIC10F322_TAG}-cd4053_simple.hex"
     [ -f "$hex" ] || return 125
-    GPSIM="$GPSIM" "$PROJ_DIR/test/pic/run_gpsim_test.sh" "$hex" 0x3 >/dev/null 2>&1
+    # `env` rather than a GPSIM= prefix on mutation_bounded: a var-prefix on a
+    # SHELL FUNCTION is scoped differently in bash than on an external command
+    # (it can persist in the caller), so pass it to the timed command explicitly.
+    mutation_bounded env GPSIM="$GPSIM" \
+        "$PROJ_DIR/test/pic/run_gpsim_test.sh" "$hex" 0x3 >/dev/null 2>&1
 }
 
 split_mutation_make_command() {
@@ -473,7 +504,7 @@ run_mutation_make_command() {
     local root=$1 command=$2
     shift 2
     split_mutation_make_command runtime "$command" || return 2
-    "$MUTATION_MAKE" -C "$root" "$@" "${MUTATION_MAKE_ARGS[@]}"
+    mutation_bounded "$MUTATION_MAKE" -C "$root" "$@" "${MUTATION_MAKE_ARGS[@]}"
 }
 
 unpack_mutation_job_spec() {
@@ -612,7 +643,7 @@ run_mutant() {
             ;;
         picsoak)
             label="pic10f322-test-soak"
-            make -C "$work" pic10f322-test-soak \
+            mutation_bounded make -C "$work" pic10f322-test-soak \
                 PIC10F322_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" \
                 PIC10F322_SOAK_LIVENESS_INTERVAL_MS="$PIC_SOAK_MUT_LIVENESS_MS" \
                 PIC10F322_SOAK_VARIANT=cd4053_simple \
@@ -620,7 +651,7 @@ run_mutant() {
             ;;
         pictarget)
             label="pic10f322-test-target($arg)"
-            make -C "$work" PIC10F322_TARGET_VARIANT="$arg" pic10f322-test-target >/dev/null 2>&1; rc=$?
+            mutation_bounded make -C "$work" PIC10F322_TARGET_VARIANT="$arg" pic10f322-test-target >/dev/null 2>&1; rc=$?
             ;;
         avrxt)
             # Same shape as `make`, plus the two absolute tool paths the sandbox
@@ -628,7 +659,7 @@ run_mutant() {
             # word splitting on $arg: each entry is optional VAR=value
             # assignments followed by one Make target, never shell metacharacters.
             label="$arg"
-            make -C "$work" $arg \
+            mutation_bounded make -C "$work" $arg \
                 XT_DFP="$XT_DFP_ABS" \
                 YASIMAVR_VENV="$XT_YASIMAVR_VENV_ABS" >/dev/null 2>&1; rc=$?
             ;;
@@ -908,12 +939,34 @@ if [ "$SANDBOX_SELFTEST_DONE" -eq 1 ]; then
     if mutation_validate_totals 94 51 43 51 0 0 1 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a failed worker" >&2; exit 1
     fi
-    for checker_rc in 125 126 127 143; do
+    # 124 is timeout(1) expiry and is the one that must not regress: if it ever
+    # stops counting as infrastructure, a hung mutant is recorded as KILLED and
+    # the suite reports a clean run it never actually completed.
+    for checker_rc in 124 125 126 127 143; do
         mutation_checker_status_is_infrastructure_error "$checker_rc" || {
             echo "ERROR: mutation accounting accepted checker infrastructure status $checker_rc" >&2
             exit 1
         }
     done
+    # The bound is real, and it reports as infrastructure rather than as a kill.
+    # Asserting the classifier alone would pass even if mutation_bounded were
+    # deleted, so drive the actual wrapper against a command that outlives it.
+    mutation_selftest_rc=0
+    MUTATION_TIMEOUT_S=1 mutation_bounded sleep 30 >/dev/null 2>&1 || mutation_selftest_rc=$?
+    [ "$mutation_selftest_rc" -eq 124 ] || {
+        echo "ERROR: mutation_bounded did not report timeout expiry as 124 (got $mutation_selftest_rc)" >&2
+        exit 1
+    }
+    mutation_checker_status_is_infrastructure_error "$mutation_selftest_rc" || {
+        echo "ERROR: mutation_bounded expiry is not classified as infrastructure" >&2
+        exit 1
+    }
+    # ...and does not fire on a command that finishes inside it, so the bound
+    # cannot pass by simply failing everything.
+    MUTATION_TIMEOUT_S=30 mutation_bounded true >/dev/null 2>&1 || {
+        echo "ERROR: mutation_bounded failed a command that completed in time" >&2
+        exit 1
+    }
     if mutation_checker_status_is_infrastructure_error 1; then
         echo "ERROR: mutation accounting rejected an ordinary mutation kill status" >&2
         exit 1
@@ -1080,17 +1133,22 @@ if ! copy_tree "$PIC_BASE"; then
     rm -rf "$PIC_BASE"
     exit 2
 fi
-make -C "$PIC_BASE" pic10f322 >/dev/null 2>&1
+# The baseline probes are bounded for the same reason the mutants are: they run
+# the same soak and the same simulator, and a hang here stalls the run before a
+# single mutant is dispatched. A probe that times out reports as "baseline
+# FAILED", which skips its lane and sets MUT_BASELINE_FAILED -- so it still fails
+# closed under MUTATION_ALLOW_SKIP=0 rather than quietly shrinking the run.
+mutation_bounded make -C "$PIC_BASE" pic10f322 >/dev/null 2>&1
 PIC_BASE_HEX="$PIC_BASE/$PIC10F322_BUILD_DIR/${FW_BASE}-${PIC10F322_TAG}-cd4053_simple.hex"
 if command -v "$GPSIM" >/dev/null 2>&1 && [ -f "$PIC_BASE_HEX" ]; then
-    if GPSIM="$GPSIM" "$PROJ_DIR/test/pic/run_gpsim_test.sh" \
+    if mutation_bounded env GPSIM="$GPSIM" "$PROJ_DIR/test/pic/run_gpsim_test.sh" \
             "$PIC_BASE_HEX" 0x3 >/dev/null 2>&1; then
         PIC_GPSIM_OK=1
         echo "gpsim + XC8 present, baseline PASS -> PIC gpsim mutants ENABLED"
         if command -v c++ >/dev/null 2>&1 \
            && [ -f "$PIC_SOAK_GPSIM_INC/sim_context.h" ] \
            && pkg-config --exists glib-2.0 2>/dev/null; then
-            if make -C "$PIC_BASE" pic10f322-test-soak \
+            if mutation_bounded make -C "$PIC_BASE" pic10f322-test-soak \
                     PIC10F322_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" \
                     PIC10F322_SOAK_LIVENESS_INTERVAL_MS="$PIC_SOAK_MUT_LIVENESS_MS" \
                     PIC10F322_SOAK_VARIANT=cd4053_simple >/dev/null 2>&1; then
@@ -1101,7 +1159,7 @@ if command -v "$GPSIM" >/dev/null 2>&1 && [ -f "$PIC_BASE_HEX" ]; then
                 MUT_BASELINE_FAILED=1
                 echo "soak baseline did not pass cleanly -> WDT (soak) mutant SKIPPED"
             fi
-            if make -C "$PIC_BASE" pic10f322-test-target-variants >/dev/null 2>&1; then
+            if mutation_bounded make -C "$PIC_BASE" pic10f322-test-target-variants >/dev/null 2>&1; then
                 PIC_TARGET_OK=1
                 echo "target aggregate baseline PASS -> PIC target mutants ENABLED"
             else
@@ -1146,7 +1204,7 @@ if ! validate_pic10f320_sandbox "$P320_BASE"; then
 fi
 echo "PIC10F320 mutation sandbox helpers: PASS"
 
-if make -C "$P320_BASE" pic10f320-variants >/dev/null 2>&1 \
+if mutation_bounded make -C "$P320_BASE" pic10f320-variants >/dev/null 2>&1 \
    && command -v "$GPSIM" >/dev/null 2>&1 \
    && command -v c++ >/dev/null 2>&1 \
    && [ -f "$PIC_SOAK_GPSIM_INC/sim_context.h" ] \
@@ -1203,7 +1261,7 @@ if [ -f "$XT_DFP_ABS/gcc/dev/$XT_MCU/device-specs/specs-$XT_MCU" ] \
     while IFS= read -r target; do
         # Intentional word splitting: each field is optional VAR=value
         # assignments followed by one Make target, never shell metacharacters.
-        if make -C "$XT_BASE" $target \
+        if mutation_bounded make -C "$XT_BASE" $target \
                 XT_DFP="$XT_DFP_ABS" \
                 YASIMAVR_VENV="$XT_YASIMAVR_VENV_ABS" >/dev/null 2>&1; then
             echo "baseline $target: PASS"

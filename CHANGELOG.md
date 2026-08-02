@@ -214,6 +214,89 @@ file is the human-readable summary of *what changed*.
   Image contents are unchanged for a third time: all 18 remain bit-identical.
 
 ### Fixed
+- **The PIC10F322 soak driver had not compiled since the stage-vocabulary
+  rename, silently disabling a mutant and breaking three release soak
+  binaries.** `Makefile`'s `pic_soak_block_*` map kept its retired
+  `cd4053`/`mute`/`relay` keys while `PIC10F322_SOAK_VARIANT` moved to
+  `cd4053_simple`/`cd4053_with_mute`/`tq2_l2_5v_relay`. All three lookups
+  expanded empty, so the compile line emitted `-DSOAK_ACTUATION_BLOCK_MS=u` and
+  the driver failed with ``error: `u' was not declared in this scope``. The
+  PIC10F320 copy of the same map had been renamed correctly, so the two lanes
+  disagreed in silence for an entire release.
+
+  It degraded to a *skip*, not a failure: `make pic10f322-test-soak` was broken
+  outright, the mutation harness reported its baseline as failed and skipped the
+  PIC10F322 WDT mutant, and the run still exited zero as a `PARTIAL`. The
+  mutation inventory is back to **94 killed, 0 survived, 0 errored, 0 skipped**
+  from 93 killed with one skip. `scripts/make-release.sh` builds the three
+  PIC10F322 release soak binaries through the same rule, so this would also have
+  failed the `v0.9.8` release soak.
+
+  The parse-time completeness guard added earlier in this release covered
+  `macro_<v>` and `src_<v>` only; `pic_soak_block_<v>` was a third per-variant
+  map it did not know about, and `pic10f320_soak_block_<v>` a fourth. The guard
+  is now a reusable `require_variant_map` contract covering all four, with each
+  soak map checked against *its own lane's* supported set so the deliberate
+  divergence between lanes stays legal.
+
+  A guard that needs a human to remember to extend it has the failure mode it
+  exists to prevent, so a new `test-variant-map-contract` gate (in `make test`)
+  asserts every per-variant map is registered. It harvests **dereference** sites
+  rather than definitions, because a definition-keyed harvest would not have
+  caught this defect — `pic_soak_block_cd4053` matches no current variant name,
+  so it was invisible exactly when it was broken.
+- **No mutant, and no CI job, had a wall-clock bound.** Containment for the
+  severed-override defect below, which is the same incident from the other end:
+  that fix removed the cause, this one removes the blast radius. A single mutant
+  ran for over ten hours locally before being killed by hand, and nothing in the
+  harness or either workflow would have stopped it.
+
+  Every mutant checker and every toolchain baseline probe now runs under
+  `timeout` (`mutation_bounded`, default 900 s, `MUTATION_TIMEOUT_S` to
+  override). The bound is deliberately loose: mutant soak windows are 2–2.5 s of
+  simulated time, so 900 s is about two orders of magnitude of headroom — enough
+  to catch a 43,200× severance immediately without ever becoming a flaky
+  failure.
+
+  The load-bearing half is the exit status, not the bound. A mutant is recorded
+  as *killed* on any nonzero exit, so a hung mutant terminated at the deadline
+  would have been counted as killed — a suite reporting a clean run it never
+  finished. `timeout` exits 124 on expiry, which is now classified as an
+  infrastructure error in `test/mutation_accounting.sh`, so a hang surfaces as
+  `ERROR`. Both properties are covered by new selftest assertions that drive the
+  wrapper itself rather than only the classifier, so deleting the bound fails the
+  suite.
+
+  All six GitHub Actions jobs gain `timeout-minutes` (previously zero across both
+  workflows): `verify`, `pic`, `build-matrix` 45, `attiny202` 60, `stress` 300,
+  `release` 60. The `stress` job is the one that matters — it reaches the
+  mutation lane and would otherwise have been cancelled at GitHub's six-hour
+  default with nothing useful reported.
+- **The `v0.9.8` rename left dead variable and goal names on eleven live
+  surfaces, two of them instructing a reader to type one.** The same
+  silent-severance class as the entries below, found by a meta-review of the
+  finished release rather than by any gate. `make -s print-MCU` and
+  `make -s print-PIC320_TAG` both returned empty.
+
+  The sharpest was `Makefile`'s `test-flash-budget` guard, which reads
+  `$(ATTINY13A_MCU)` but told a user who tripped it that it `requires
+  MCU=attiny13a` — advice that, followed, sets an inert override and changes
+  nothing. `test/test_flash_budget.sh` asserted that exact text, so the
+  regression was defending the dead name; correcting the message alone would have
+  turned the gate red. Also fixed: a Makefile comment instructing readers to set
+  four removed `PIC320_*_VARIANT` names on the command line, three more `PIC320_*`
+  prose references, `README.md`'s claim that the PIC10F320 lane uses `PIC320_*`
+  variables, three harnesses passing an inert `MCU=attiny13a`, and
+  `test/README.md`'s `make test-sim-<variant>`, which has no rule — the goal
+  identified by the *omission* of its MCU field, the exact defect this release's
+  rename existed to remove.
+
+  Nothing was mis-built: `ATTINY13A_MCU` is a plain `=` whose default equals the
+  value the dead overrides passed. The cost was misdirection, not wrong output,
+  which is why no gate would ever have noticed. `TODO.md`'s name-contract item is
+  widened to a fourth axis (variables named to human readers) and records why its
+  own prototype sweep missed these: it keyed on physical lines, and the overrides
+  sat five backslash-continued lines away from the `make` that consumed them.
 - **The mutation suite's PIC lane had been silently disabled since the image
   rename earlier in this release.** `test/run_mutation_tests.sh` built its
   PIC10F322 baseline image path from the *old* basename scheme
