@@ -326,13 +326,14 @@ analysis that the 64 ms SUT delay covers the LDO ramp (check the LP2950/AP7375
 datasheet startup time against 64 ms). Item (b) is a documentation task and pairs
 naturally with the Tier 2 datasheet-citation item.
 
-**Fail-closed gate on the names other files read out of the Makefile — both
-`print-<VAR>` variables and documented `make <goal>` targets.** Added
-2026-08-01 while doing the variable-prefix rename in `v0.9.8`; widened
-2026-08-02 after the same class was found to have severed on the goal axis too,
-and to still be severed in the tree at that point.
+**Fail-closed gate on the names other files exchange with the Makefile —
+`print-<VAR>` reads, documented `make <goal>` targets, and `make VAR=value`
+overrides.** Added 2026-08-01 while doing the variable-prefix rename in
+`v0.9.8`; widened twice on 2026-08-02, first after the same class was found
+severed on the goal axis, then again the same day after it was found severed on
+the override axis — where it had already burned a >10-hour run.
 
-One defect, two axes. Nothing asserts that the Makefile names other files
+One defect, three axes. Nothing asserts that the Makefile names other files
 *speak* are a subset of the names the Makefile actually *defines*, so a rename
 severs the link silently and every gate stays green.
 
@@ -351,7 +352,7 @@ variable preamble.
 
 *Axis B — goals named in documentation.* Same severance, worse outcome, because
 a reader runs these by hand and gets `No rule to make target`. The `v0.9.8`
-prefix rename left 14 dead goal references in `docs/pic10f320_validation.md` —
+prefix rename left 15 dead goal references in `docs/pic10f320_validation.md` —
 a document explicitly framed as *current* qualification evidence, not history —
 including its entire §7 "Reproducing any of this" block, where four of six
 commands failed. One more sat in `docs/phase2_pic_shell.md`, and
@@ -359,9 +360,56 @@ commands failed. One more sat in `docs/phase2_pic_shell.md`, and
 and then run goals that only exist from `v0.9.8` on. Those were fixed by hand;
 nothing prevents the next rename from re-creating them.
 
-Axis B is the one to build first if the two are split: it has a demonstrated
-in-tree failure, and its consumers are humans rather than a script that at least
-runs in CI.
+*Axis C — command-line overrides.* The reverse direction of axis A: instead of a
+file *reading* a Makefile variable, a file *sets* one. `make test-soak
+SOAK_DURATION_MS=2000` defines a make variable named `SOAK_DURATION_MS`; if the
+recipe reads `$(AVR_SOAK_DURATION_MS)`, the override is inert and the default
+applies. Make says nothing, because an override naming no existing variable is
+legal.
+
+Found 2026-08-02, in the tree, having already cost a run.
+`test/run_mutation_tests.sh:236` still passed the pre-rename `SOAK_VARIANT=` /
+`SOAK_CHIP=` / `SOAK_DURATION_MS=` / `SOAK_LIVENESS_INTERVAL_MS=` to `make
+test-soak`, so the classic-AVR WDT-pet mutant asked for 2 s of simulated time
+and silently got `AVR_SOAK_DURATION_MS`'s 24 h default — 43,200×. A local
+`ci-local.sh` run sat in that single mutant for over 10 hours before being
+killed. Both CI jobs reaching this row (`ci.yml:336`, `:643`) declare no
+`timeout-minutes`, so they would have been cancelled at GitHub's 6-hour job
+limit.
+
+Four guards missed it, each for a different reason, and the set is worth
+recording because it explains why this class needs its own gate: the soak-timing
+contract's `static_assert` compares the *defaults* (60000 <= 86400000), so the
+build is clean; the mutant is still correctly killed, just ~43,000× too slow, so
+the failure mode is a hang rather than a wrong answer; mutation runs only in
+`test-long`; and the mutation harness wraps no mutant in `timeout`.
+
+Axis C is the cheapest of the three to gate and the only one with a demonstrated
+runtime cost, so build it first; axis B second, since its consumers are humans
+rather than a script that at least runs in CI.
+
+A prototype sweep already works: harvest every `NAME=value` token from lines
+invoking make across `test/`, `scripts/`, `.github/` and the Makefile's own
+comments, and assert each name is Makefile-known. Run over the whole tree on
+2026-08-02 it produced five hits, all benign — which is the real design input,
+because the gate has to tolerate every one of them:
+
+- Names passed through the *environment* to a script rather than to make
+  (`MUTATION_ALLOW_SKIP`, read by `test/mutation_policy.sh`;
+  `FAKE_COMPILER_LOG`, read by a fake-tool shim). These need a small allowlist;
+  nothing in the Makefile can infer them.
+- `override`-defined names (`RELEASE_EVIDENCE_FILES`, `Makefile:4825`), which a
+  naive `^NAME=` harvest of *definitions* misses. Note that
+  `test_release_qualification.sh:207` deliberately passes
+  `RELEASE_EVIDENCE_FILES=bad` to prove the override is ignored — so a
+  legitimate override may also be a deliberate negative test.
+- Harvest artifacts, both fixable in the regex: shell locals assigned from make
+  output on the same line (`XT_N=$(make -s print-...)`), and `-D` macros inside
+  a quoted `SIM_DEFS='...'`.
+
+The same check belongs in the Makefile itself if it can be done cheaply, since
+it would also catch a hand-typed `make test-soak SOAK_DURATION_MS=...` — which
+is exactly what the Makefile's own comment recommended until 2026-08-02.
 
 Design notes if picked up:
 - **Use `$(origin)`, not non-emptiness.** Several variables the scripts read
@@ -418,12 +466,14 @@ Design notes if picked up:
   exemption is right only for the banner-marked historical records
   (`docs/pic10f320_merge_plan.md`, `docs/v0.9.6_post_release_polish.md`,
   `docs/pic10f320_feasibility.md`), which already declare themselves.
-- Include the negative case on **both** axes, per the house pattern: a
+- Include the negative case on **all three** axes, per the house pattern: a
   deliberately bogus name must make the gate fail, so it cannot pass by
   harvesting nothing. The realistic failure mode is a harvest regex that
   silently stops matching, which is the same class of defect the gate exists to
-  catch. For axis B add a second negative: an exempt block must stop being
-  exempt if its marker is removed.
+  catch — and on axis C it is the *documented* failure mode, since the
+  2026-08-02 sweep needed three regex corrections before its five remaining hits
+  were all genuine. For axis B add a second negative: an exempt block must stop
+  being exempt if its marker is removed.
 - Natural home is a new `test-makefile-name-contract` in `TEST_GATES`
   (host-only, no toolchain, so it belongs in `make test` rather than
   `test-long`), modelled on `test_release_provenance.sh`.
@@ -436,10 +486,12 @@ exist to be cross-checked against Makefile truth — but this one cross-checks
 nothing, it just needs a path, so the restatement buys nothing and cost exactly
 the silent lane-disable that `v0.9.8` fixed.
 
-Effort: ~2–3 h for both axes (~1–2 h for axis A alone). Impact: Medium-High —
-no new assurance about the firmware, but it closes a silent-severance class on
-the interfaces between the Makefile and both the release orchestrator and the
-published documentation, and those interfaces only ever get wider.
+Effort: ~3–4 h for all three axes (~1 h for axis C alone, which has a working
+prototype). Impact: High — no new assurance about the firmware, but it closes a
+silent-severance class on the interfaces between the Makefile and the release
+orchestrator, the published documentation and the test harnesses; those
+interfaces only ever get wider, and axis C has now cost real time twice (a
+disabled mutation lane in `v0.9.8`, then a >10-hour hang).
 
 ---
 
@@ -803,7 +855,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Multi-press boundary cases | 2.5 | 3–4 h | Medium — tick-boundary edge cases |
 | Power-on-pressed simulation gap | 2.5 | 1–2 h | Low — simulator fidelity, not coverage |
 | Power-supply ramp-up analysis | 2.5 | 2–3 h | Medium — real-world robustness |
-| Makefile name-contract gate (`print-<VAR>` + documented goals) | 2.5 | 2–3 h | Medium-High — closes a silent-severance class in the release path and in the published docs |
+| Makefile name-contract gate (`print-<VAR>` reads + documented goals + `VAR=` overrides) | 2.5 | 3–4 h | High — closes a silent-severance class in the release path, the published docs and the test harnesses; the override axis has already cost a >10-hour hang |
 | Hardware-validation procedure doc | 3 | 2–3 h | High — primary-part WDT gap |
 | HIL rig: behavioural + register introspection | 3 | 5–8 d | High — silicon-level model validation |
 | Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |

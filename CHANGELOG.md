@@ -258,6 +258,37 @@ file is the human-readable summary of *what changed*.
   may legitimately name a retired goal in an old→new redirect table, in a recipe
   pinned to an older tag, or in a quoted transcript — so the exemption has to be
   per-block, not per-file.
+- **The variable rename left the classic-AVR WDT mutant running a 24-hour soak
+  in place of a 2-second one.** A third axis of the same silent-severance class
+  as the two entries above — `make VAR=value` overrides — and the first to cost
+  wall-clock time. `test/run_mutation_tests.sh` still passed `SOAK_VARIANT=` /
+  `SOAK_CHIP=` / `SOAK_DURATION_MS=` / `SOAK_LIVENESS_INTERVAL_MS=` to
+  `make test-soak`, but those became `AVR_SOAK_*` earlier in this release. An
+  override naming a variable no recipe reads is legal and silent, so the mutant
+  asked for 2 s of simulated time and got `AVR_SOAK_DURATION_MS`'s 24 h default
+  — 43,200×. A local `scripts/ci-local.sh` run sat in that single mutant for
+  over ten hours before it was killed, and neither CI job that reaches the row
+  declares `timeout-minutes`, so both would have been cancelled at GitHub's
+  six-hour job limit. Now restored: the mutant is killed in 2.4 s with 127
+  watchdog resets, exactly as its recorded rationale describes.
+
+  Four guards missed it, each for a different reason, which is why this axis
+  needs a gate of its own: the soak-timing contract's `static_assert` compares
+  the *defaults* (`60000 <= 86400000`), so the build stays clean; the mutant is
+  still correctly killed, only ~43,000× too slowly, so it presents as a hang
+  rather than a wrong answer; the mutation run is in `test-long`, not
+  `make test`; and no mutant is wrapped in `timeout`.
+
+  The same rename had also left the Makefile recommending the broken spelling.
+  Its soak-override block, `make help` and two header comments documented
+  `SOAK_*` and `PROGRAMMER=` instead of `AVR_SOAK_*` and `AVR_PROGRAMMER`, so a
+  reader following `make test-soak SOAK_DURATION_MS=3600000` got a silent
+  24-hour run. All corrected, and that block now says explicitly that the bare
+  `SOAK_*` spellings are the compiled-in C macros rather than make variables. A
+  tree-wide sweep of every `NAME=value` passed to make confirms no other
+  override is stale; the `TODO.md` gate item is widened again to cover this
+  axis, and now recommends building it first, since it is the cheapest of the
+  three and the only one with a demonstrated runtime cost.
 - **Documentation: the recorded reason the ATtiny202 harness cannot measure
   busy-delay width was wrong, and is corrected everywhere it appeared.** Since
   `0.9.5` the delay oracle, `test_sim_attiny202.py`, `scripts/fetch_yasimavr.sh`,

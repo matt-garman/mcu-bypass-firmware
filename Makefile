@@ -141,7 +141,7 @@ unexport _MAKE_SERIAL_CLASSIC_EMPTY _MAKE_SERIAL_CLASSIC_DUPLICATE \
 #       make test SIM_DEFS='-DSIM_RANDOM_NOISE_DURATION_MS=20000u'
 #
 # USEFUL OVERRIDES (command line)
-#   PROGRAMMER=usbasp       use a different ISP programmer
+#   AVR_PROGRAMMER=usbasp   use a different ISP programmer
 #   COVERAGE_MIN=95         raise the coverage gate
 #   HOSTCC=clang            use a different host compiler for the test suite
 #
@@ -319,7 +319,7 @@ VARIANT ?= cd4053_simple
 # AVR_PROGRAMMER: "51 AVR USB ISP ASP" dongle is a USBasp clone -> usbasp.
 # ATTINY13A_AVRDUDE_PART: avrdude's short name for the ATtiny13/13a.
 # Override on the command line if needed, e.g.:
-#   make attiny13a-flash PROGRAMMER=usbasp
+#   make attiny13a-flash AVR_PROGRAMMER=usbasp
 AVR_PROGRAMMER   ?= usbtiny
 ATTINY13A_AVRDUDE_PART   ?= t13
 
@@ -3212,18 +3212,21 @@ test-mutation:
 #
 # Drives random input for AVR_SOAK_DURATION_MS of simulated time (default 24 h).
 # Checks WDT liveness (no unexpected resets) and device responsiveness (a
-# 2-press round-trip every SOAK_LIVENESS_INTERVAL_MS).  Unlike test_sim.c,
+# 2-press round-trip every AVR_SOAK_LIVENESS_INTERVAL_MS).  Unlike test_sim.c,
 # failures are NEVER fatal: each anomaly is logged and the run continues so
 # the full duration is exercised even after an early failure.
 #
 # Intentionally NOT part of `make test` or `make test-long` -- run standalone
 # before hardware signoff or as a pre-release gate.
 #
-# Overrides (command line):
-#   SOAK_VARIANT=<name>       variant to test (default cd4053_simple)
-#   SOAK_CHIP=45              tinyx5 chip number (85/45; default 85)
-#   SOAK_DURATION_MS=3600000  simulated duration in ms (default 86400000 = 24 h)
-#   SOAK_LIVENESS_INTERVAL_MS=10000   liveness-check interval (default 60000 ms)
+# Overrides (command line) -- note the AVR_ prefix. The bare SOAK_* spellings
+# are the compiled-in C macros below, NOT make variables: passing one of those
+# on the command line defines a variable nothing reads, and the soak silently
+# runs at its 24 h default. See test/run_mutation_tests.sh's WDT-pet mutant.
+#   AVR_SOAK_VARIANT=<name>             variant to test (default cd4053_simple)
+#   AVR_SOAK_CHIP=45                    tinyx5 chip number (85/45; default 85)
+#   AVR_SOAK_DURATION_MS=3600000        simulated ms (default 86400000 = 24 h)
+#   AVR_SOAK_LIVENESS_INTERVAL_MS=10000 liveness-check interval (default 60000 ms)
 AVR_SOAK_VARIANT     ?= cd4053_simple
 AVR_SOAK_CHIP        ?= 85
 AVR_SOAK_DURATION_MS ?= 86400000
@@ -3232,9 +3235,9 @@ AVR_SOAK_BIN  = test/avr/test_soak_$(AVR_SOAK_VARIANT)_t$(AVR_SOAK_CHIP)
 AVR_SOAK_DEPS = test/avr/test_soak.c test/bypass_output_host.h test/bypass_config_host.h \
             test/soak_timing_config.h src/bypass_config.h $(FW_HEADERS)
 
-# The SOAK_* variables (-DSOAK_DURATION_MS, -DSOAK_LIVENESS_INTERVAL_MS, etc.)
-# are baked into the binary at compile time. To ensure command-line overrides
-# (e.g. `make test-soak SOAK_DURATION_MS=3600000`) are always picked up, the
+# The C macros (-DSOAK_DURATION_MS, -DSOAK_LIVENESS_INTERVAL_MS, etc.) are baked
+# into the binary at compile time. To ensure command-line overrides
+# (e.g. `make test-soak AVR_SOAK_DURATION_MS=3600000`) are always picked up, the
 # test-soak recipe is phony and always recompiles before running.
 AVR_SOAK_LIVENESS_INTERVAL_MS  ?= 60000
 AVR_SOAK_PROGRESS_INTERVAL_MS  ?= 3600000
@@ -3256,7 +3259,7 @@ AVR_SOAK_COMPILE = $(HOSTCC) $(SIM_CFLAGS) $(PURE_HOST_CFLAGS) \
 $(AVR_SOAK_BIN): $(AVR_SOAK_DEPS) $(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_VARIANT),$(mmcu_$(AVR_SOAK_CHIP))).elf
 	$(AVR_SOAK_COMPILE)
 
-# Run target: always recompiles (phony) so every SOAK_* override is applied.
+# Run target: always recompiles (phony) so every AVR_SOAK_* override is applied.
 test-soak: $(AVR_SOAK_DEPS) $(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_VARIANT),$(mmcu_$(AVR_SOAK_CHIP))).elf
 	$(AVR_SOAK_COMPILE)
 	@echo "--- soak test: variant=$(AVR_SOAK_VARIANT)  MCU=ATtiny$(AVR_SOAK_CHIP)  duration=$(AVR_SOAK_DURATION_MS) ms ---"
@@ -4977,7 +4980,7 @@ help:
 	@echo "  clean           remove build + test artifacts"
 	@echo "  clean-tests     remove only test binaries"
 	@echo "  coverage-clean  remove coverage artifacts"
-	@echo "Overrides: VARIANT=, PROGRAMMER=, COVERAGE_MIN=, HOSTCC=, HOST_DEFS=, SIM_DEFS=, AVR_BUILD_DIR="
+	@echo "Overrides: VARIANT=, AVR_PROGRAMMER=, COVERAGE_MIN=, HOSTCC=, HOST_DEFS=, SIM_DEFS=, AVR_BUILD_DIR="
 	@echo "PIC overrides: PIC_CC=, PIC10F322_PROG=pk2cmd|ipecmd, PIC10F322_PROG_TOOL=PK3|PK4|PK5, PIC10F322_PROG_CMD="
 
 else
