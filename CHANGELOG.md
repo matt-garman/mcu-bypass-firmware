@@ -400,6 +400,26 @@ file is the human-readable summary of *what changed*.
   pinned exactly by `RELEASE_EVIDENCE_FILES` for *every* release: a file only
   one release produces would fail the next release's qualification verifier.
 
+- **Three more places still spelled a name this release moved.** The published
+  `MANIFEST.md` took the ATtiny85/45 programmer name from a literal (`t85` /
+  `t45`) while `make-release.sh` read `part_85` / `part_45` from the Makefile
+  into an array nobody used — the `mkv` preamble validating a value it then
+  discarded. The array is now wired into the manifest arm, indexed by the part
+  number the arm already computes.
+
+  `test/run_mutation_tests.sh` composed the PIC10F322 image path from three
+  restated defaults (`FW_BASE`, `PIC10F322_TAG`, `PIC10F322_BUILD_DIR`); it now
+  resolves the path once from `PIC10F322_BUILD_DIR` +
+  `PIC10F322_RELEASE_IMAGES`, so an output stage that no longer exists fails at
+  startup by name rather than as a missing file per mutant — which is the
+  dangerous shape, since a missing image makes each PIC mutant return the
+  infrastructure-error status and the lane degrade to a skip.
+
+  And `make clean` now removes a pre-rename `build_pic/`, which `.gitignore` no
+  longer covered either: XC8's `.p1`/`.d`/`.sdb`/`.sym`/`.cmf` intermediates
+  match none of its global patterns, so a worktree upgraded from `v0.9.7` would
+  offer them to `git add -A` forever.
+
 ### Changed
 - **Every released firmware image is renamed to one consistent scheme.** All
   eighteen images on all six MCUs are now
@@ -584,6 +604,29 @@ file is the human-readable summary of *what changed*.
   Image contents are unchanged for a third time: all 18 remain bit-identical.
 
 ### Fixed
+- **`make release` could not have completed: the AVR soak binary was renamed on
+  one side only.** The same rename that moved `test_sim_<v>_t<n>` to
+  `_attiny<n>` updated `scripts/make-release.sh`, which composed its own copy of
+  the soak binary's path, to ask for `test/avr/test_soak_<v>_attiny<n>` — while
+  the Makefile's `AVR_SOAK_BIN` went on saying `_t<n>`. There is no such target:
+  `make -n test/avr/test_soak_cd4053_simple_attiny85` answered *"No rule to make
+  target"*. A release run would have died in step 3, on the far side of `make
+  test-long` and every qualification gate, an hour or more in.
+
+  Filed as cosmetic residue — "the `_t<n>` suffix this release retired
+  everywhere else still exists in two places" — and it was not. Nothing builds
+  these binaries outside a real release, so no gate ran the composition that
+  had severed.
+
+  `AVR_SOAK_BIN` now spells `_attiny<n>`, matching its sibling simulation
+  binaries, and `make-release.sh` READS it rather than keeping a second copy.
+  The image basenames beside it stay restated on purpose: those are the script's
+  independent opinion of the release set, cross-checked against
+  `RELEASE_IMAGES`, so restating them is what gives the check meaning. This path
+  was cross-checked against nothing and only needed to be right — the
+  distinction the copy missed. The retired `_t<n>` binaries join
+  `AVR_TEST_BINARIES_RETIRED` so an existing worktree does not keep them.
+
 - **`make clean` stopped removing nine of the binaries it builds, and
   `clean-tests` stopped removing anything at all in the classic-AVR lane.** Both
   targets spell their artifacts as a hand-written list, and the image rename

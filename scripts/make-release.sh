@@ -739,7 +739,17 @@ declare -A SOAK_BIN SOAK_CWD SOAK_LOG SOAK_RC
 
 log "compiling soak binaries..."
 for v in $VARIANTS; do for n in $TINYX5; do
-	name="attiny${n}_${v}"; bin="test/avr/test_soak_${v}_attiny${n}"
+	# The binary path is READ from the Makefile, not composed here. Unlike the
+	# image basenames above -- restated on purpose so they can be cross-checked
+	# against RELEASE_IMAGES -- this path is cross-checked against nothing, and
+	# a copy of it here severed silently once already: v0.9.8 renamed the
+	# release's soak COMBINATIONS, updated this line to the new _attiny<n>
+	# spelling, and left AVR_SOAK_BIN saying _t<n>. `make` was then asked for a
+	# target that did not exist, which fails the release an hour in, at step 3.
+	name="attiny${n}_${v}"
+	bin=$(make -s print-AVR_SOAK_BIN AVR_SOAK_VARIANT="$v" AVR_SOAK_CHIP="$n") \
+		|| die "cannot read AVR_SOAK_BIN for $name from the Makefile"
+	[ -n "$bin" ] || die "AVR_SOAK_BIN expands empty for $name"
 	elf="$(fw_image "$AVR_BUILD_DIR" "attiny${n}" "$v").elf"
 	make --old-file="$elf" "$bin" AVR_REBUILD_PREREQ= \
 		AVR_SOAK_VARIANT="$v" AVR_SOAK_CHIP="$n" AVR_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
@@ -1088,9 +1098,17 @@ img_row() {
 			flashcmd="$flashcmd -U flash:w:$base:i   (or: make attiny202-program VARIANT=<v> XT_UPDI_PORT=<port>)" ;;
 		${FW_BASE}-attiny85-*.hex|${FW_BASE}-attiny45-*.hex)
 			case "$base" in
-				${FW_BASE}-attiny85-*.hex) mcu="ATtiny85"; amcu="attiny85"; prog="t85" ;;
-				*)                         mcu="ATtiny45"; amcu="attiny45"; prog="t45" ;;
+				${FW_BASE}-attiny85-*.hex) mcu="ATtiny85"; amcu="attiny85" ;;
+				*)                         mcu="ATtiny45"; amcu="attiny45" ;;
 			esac
+			# From the Makefile's part_<n>, like the other four arms. The
+			# literals this replaces were the only programmer names in the
+			# manifest not taken from Makefile truth -- and AVRDUDE_PART_X5 was
+			# built above and then read by nobody, so the whole `mkv` preamble
+			# was validating a value it discarded.
+			prog=${AVRDUDE_PART_X5[${amcu#attiny}]:-}
+			[ -n "$prog" ] \
+				|| die "no avrdude part name for $amcu: TINYX5 and this manifest arm disagree"
 			clk="1.0 MHz"; fuses="lfuse=$LFUSE_X5 hfuse=$HFUSE_X5"
 			used=$(avr-size --mcu="$amcu" -C "$elf" 2>/dev/null | awk '/^Program:/{print $2" B"; exit}')
 			flashcmd="avrdude -c <prog> -p $prog -U lfuse:w:$LFUSE_X5:m -U hfuse:w:$HFUSE_X5:m -U flash:w:$base:i" ;;

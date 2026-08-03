@@ -63,11 +63,41 @@ readonly MUTATION_EXPECTED_TOTAL=94
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
-FW_BASE="${FW_BASE:-bypass}"
-PIC10F322_TAG="${PIC10F322_TAG:-pic10f322}"
-PIC10F322_BUILD_DIR="${PIC10F322_BUILD_DIR:-build_pic10f322}"
 GPSIM="${GPSIM:-gpsim}"
 MUTATION_MAKE="${MUTATION_MAKE:-make}"
+
+# The PIC10F322 image the two PIC-shell lanes drive, resolved ONCE from the
+# Makefile rather than recomposed from restated defaults.
+#
+# It used to be spelled "$PIC10F322_BUILD_DIR/${FW_BASE}-${PIC10F322_TAG}-<v>.hex"
+# from three env-defaulted variables. The restatements in
+# scripts/make-release.sh and test/test_pic_build.sh are deliberate -- they are
+# independent opinions that exist to be cross-checked against Makefile truth --
+# but these two cross-checked nothing and only needed a path, so a rename could
+# move the image out from under them with nothing to notice. When that happens
+# the lane does not fail: `[ -f "$hex" ]` is false, the mutant returns the
+# infrastructure-error status, and the PIC subset degrades to a skip.
+#
+# Resolved by asking which release image carries the wanted stage, so a stage
+# that no longer exists fails HERE, once, by name -- not as a missing file per
+# mutant.
+PIC10F322_MUTATION_VARIANT="${PIC10F322_MUTATION_VARIANT:-cd4053_simple}"
+resolve_pic10f322_mutation_hex() {
+    local dir images matched
+    dir=$("$MUTATION_MAKE" -s -C "$PROJ_DIR" print-PIC10F322_BUILD_DIR) || return 1
+    images=$("$MUTATION_MAKE" -s -C "$PROJ_DIR" print-PIC10F322_RELEASE_IMAGES) || return 1
+    [ -n "$dir" ] && [ -n "$images" ] || return 1
+    matched=$(printf '%s\n' $images | grep -c -- "-${PIC10F322_MUTATION_VARIANT}\.hex$")
+    [ "$matched" -eq 1 ] || return 1
+    printf '%s/%s\n' "$dir" \
+        "$(printf '%s\n' $images | grep -- "-${PIC10F322_MUTATION_VARIANT}\.hex$")"
+}
+if ! PIC10F322_MUTATION_HEX=$(resolve_pic10f322_mutation_hex); then
+    echo "ERROR: cannot resolve the PIC10F322 ${PIC10F322_MUTATION_VARIANT} image" \
+         "from the Makefile; PIC10F322_RELEASE_IMAGES names no such output stage" >&2
+    exit 1
+fi
+readonly PIC10F322_MUTATION_HEX
 PIC_SOAK_GPSIM_INC="${PIC_SOAK_GPSIM_INC:-/usr/include/gpsim}"
 # Wall-clock ceiling on a single mutant checker. Every mutant runs under this;
 # see mutation_bounded below.
@@ -470,7 +500,7 @@ pic_gpsim_run() {
     mutation_bounded make -C "$work" pic10f322 >/dev/null 2>&1
     rc=$?
     [ "$rc" -eq 0 ] || return "$rc"
-    local hex="$work/$PIC10F322_BUILD_DIR/${FW_BASE}-${PIC10F322_TAG}-cd4053_simple.hex"
+    local hex="$work/$PIC10F322_MUTATION_HEX"
     [ -f "$hex" ] || return 125
     # `env` rather than a GPSIM= prefix on mutation_bounded: a var-prefix on a
     # SHELL FUNCTION is scoped differently in bash than on an external command
@@ -1139,7 +1169,7 @@ fi
 # FAILED", which skips its lane and sets MUT_BASELINE_FAILED -- so it still fails
 # closed under MUTATION_ALLOW_SKIP=0 rather than quietly shrinking the run.
 mutation_bounded make -C "$PIC_BASE" pic10f322 >/dev/null 2>&1
-PIC_BASE_HEX="$PIC_BASE/$PIC10F322_BUILD_DIR/${FW_BASE}-${PIC10F322_TAG}-cd4053_simple.hex"
+PIC_BASE_HEX="$PIC_BASE/$PIC10F322_MUTATION_HEX"
 if command -v "$GPSIM" >/dev/null 2>&1 && [ -f "$PIC_BASE_HEX" ]; then
     if mutation_bounded env GPSIM="$GPSIM" "$PROJ_DIR/test/pic/run_gpsim_test.sh" \
             "$PIC_BASE_HEX" 0x3 >/dev/null 2>&1; then

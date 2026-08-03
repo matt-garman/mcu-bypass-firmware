@@ -158,23 +158,18 @@ listed as added rather than silently counted; and a non-matching version reports
 script itself — it is fail-fast, fail-closed one-shot release machinery, with
 floors (≥10 mapped rows, ≥1 compared image) so it cannot pass vacuously.
 
-**`scripts/make-release.sh` reads two tinyx5 programmer names and uses
-neither.** Added 2026-08-03 by the meta-review. `make-release.sh:222-223` builds
-`AVRDUDE_PART_X5[]` from `mkv part_85` / `mkv part_45`, and nothing ever reads
-the array. The manifest's ATtiny85/45 arm hardcodes `prog="t85"` / `"t45"`
-instead (`:1056-1063`), so the published `MANIFEST.md` flash command carries a
-literal rather than the Makefile's `part_<n>`.
+**~~`scripts/make-release.sh` reads two tinyx5 programmer names and uses
+neither.~~ DONE (2026-08-03).** `AVRDUDE_PART_X5[]` was built from `mkv part_85`
+/ `mkv part_45` and read by nobody, while the manifest's ATtiny85/45 arm
+hardcoded `prog="t85"` / `"t45"` — so the published flash command carried a
+literal, and the `mkv` preamble was validating a value it discarded.
 
-Two spellings of one fact in the release orchestrator, which is the shape this
-release spent itself removing — and the dead half is now *validated* by axis A
-of the name contract, which dutifully expands `mkv part_"$n"` and checks a value
-that is then discarded. Either wire the array into the arm or delete it and say
-the literal is deliberate. Wiring it is the better direction: the other four
-arms all take their programmer name from Makefile truth.
-
-Effort: ~20 min. Impact: Low — `part_85`/`part_45` have never changed, so this
-is latent rather than live; it is on the list because the whole point of the
-`mkv` preamble is that the manifest cannot disagree with the Makefile.
+Wired the array in, as the better of the two directions the item offered: the
+other four manifest arms all take their programmer name from Makefile truth.
+Indexed by the part number the arm already computes
+(`${AVRDUDE_PART_X5[${amcu#attiny}]}`) rather than by two more literals, with a
+non-empty check so a `TINYX5` that stops covering an arm fails loudly instead of
+publishing an empty `-p`.
 
 **Re-pin yasimavr once the `SimLoop.run()` cycle-rewind fix ships.** Added
 2026-08-02, after the upstream maintainer confirmed the defect reported from this
@@ -1178,43 +1173,62 @@ one after. Note this cuts the other way for a scratch file that is neither
 ignored nor intended to be committed — check what the existing exemptions and
 `SELF_EXEMPT` already cover before widening. ~15 min, plus a decision.
 
-**Upgrade residue from the `v0.9.8` renames.** Added 2026-08-03 by the
-meta-review. Three loose ends, each individually trivial, listed together
-because they are one decision: how much does a worktree that predates the
-rename cost its owner?
+**~~Upgrade residue from the `v0.9.8` renames.~~ MOSTLY DONE (2026-08-03); one
+bullet deliberately left open below.** Filed as three trivial loose ends. One of
+them was not trivial and not cosmetic: **it had already broken `make release`.**
 
-- **`build_pic/` is no longer ignored and is no longer cleaned.** `.gitignore`
-  moved to `build_pic10f322/` and `clean` removes `$(PIC10F322_BUILD_DIR)`, so a
-  stale `build_pic/` from a `v0.9.7` checkout survives `make clean` and shows up
-  as untracked. The `.hex`/`.elf` inside stay ignored by the global patterns, but
-  the `.p1`/`.d`/`.sdb`/`.sym`/`.cmf` artifacts do not, so `git add -A` will
-  happily commit them. Fix: a legacy `build_pic/` line in `.gitignore` and in
-  `clean`'s `rm -rf`, exactly as `clean` already carries the pre-`src/`
-  KLEE paths and (since 2026-08-03) `AVR_TEST_BINARIES_RETIRED`.
-- **The AVR soak binary and its chip selector kept the pre-rename vocabulary.**
-  `AVR_SOAK_BIN` is `test/avr/test_soak_<variant>_t85` and `AVR_SOAK_CHIP` is a
-  bare `85`, while the sibling simulation binaries became
-  `test_sim_<variant>_attiny85` and every goal, image field and evidence
-  filename in the release carries the full part name. Neither is a released
-  artifact, which is why the rename did not reach them; the cost is that the
-  `_t<n>` suffix this release retired everywhere else still exists in two
-  places, one of which is a user-facing override. Renaming them is mechanical
-  (`AVR_SOAK_CHIP` has one consumer outside the Makefile, a mutation-table row)
-  but it is a breaking command-line change for a second time, so it belongs in
-  the same release as any other such change or nowhere.
-- **`test/run_mutation_tests.sh` still hand-composes an image path** at `:473`
-  and `:1142` (`${FW_BASE}-${PIC10F322_TAG}-cd4053_simple.hex`) rather than
-  reading `print-PIC10F322_RELEASE_IMAGES`, and restates `FW_BASE` at `:66`. The
-  independent restatements in `scripts/make-release.sh` and
-  `test/test_pic_build.sh` are deliberate — they exist to be cross-checked
-  against Makefile truth — but these cross-check nothing; they just need a path.
-  This is the leftover recorded at the end of the (now complete) name-contract
-  item, and it is exactly what silently disabled the PIC mutation lane in
-  `v0.9.8`. Move it here before that item is pruned, or it is pruned with it.
+- **~~`build_pic/` is no longer ignored and is no longer cleaned.~~ DONE.** A
+  retired-spelling line in `.gitignore` and an `rm -rf build_pic` in `clean`, on
+  the same principle as `AVR_TEST_BINARIES_RETIRED` and the pre-`src/` KLEE
+  paths: a worktree that predates a rename should not keep the old artifacts
+  forever, and XC8's `.p1`/`.d`/`.sdb`/`.sym`/`.cmf` intermediates match none of
+  `.gitignore`'s global patterns, so `git add -A` would have committed them.
+- **~~The AVR soak binary kept the pre-rename vocabulary.~~ DONE, and the
+  premise was wrong.** This was filed as cosmetic — `_t<n>` where the sibling
+  simulation binaries had become `_attiny<n>`. It was a live severance in the
+  release path. `scripts/make-release.sh` composed its own copy of the binary
+  path, and `v0.9.8` updated THAT copy to `test/avr/test_soak_<v>_attiny<n>`
+  while `AVR_SOAK_BIN` stayed `_t<n>`. Verified: `make -n
+  test/avr/test_soak_cd4053_simple_attiny85` answered *"No rule to make
+  target"*. `make release` would have died in step 3 — after `make test-long`
+  and every qualification gate, an hour or more in — on "failed to build AVR
+  soak attiny85_cd4053_simple".
 
-Effort: ~15 min, ~1 h, ~30 min. Impact: Low each — none is a correctness defect
-today; all three are the last places where a name this release moved is still
-spelled the old way.
+  Fixed at the root rather than at the symptom: `AVR_SOAK_BIN` now spells
+  `_attiny<n>`, and make-release.sh READS it (`make -s print-AVR_SOAK_BIN
+  AVR_SOAK_VARIANT=... AVR_SOAK_CHIP=...`) instead of keeping a second copy. The
+  image basenames beside it are restated on purpose — they are an independent
+  opinion cross-checked against `RELEASE_IMAGES` — but this path was checked
+  against nothing and only needed to be correct, which is the distinction the
+  copy missed. The old `_t<n>` binaries join `AVR_TEST_BINARIES_RETIRED`.
+- **~~`test/run_mutation_tests.sh` hand-composes an image path.~~ DONE.**
+  Resolved once at startup from `print-PIC10F322_BUILD_DIR` +
+  `print-PIC10F322_RELEASE_IMAGES`, selecting the image whose stage matches, so
+  an output stage that no longer exists fails immediately and by name. The three
+  restated defaults (`FW_BASE`, `PIC10F322_TAG`, `PIC10F322_BUILD_DIR`) are
+  gone. The failure mode this removes is the bad one: a moved image makes
+  `[ -f "$hex" ]` false, every PIC mutant returns the infrastructure-error
+  status, and the lane degrades to a skip rather than a failure.
+
+**Still open: `AVR_SOAK_CHIP` takes a bare `85`/`45`.** Deliberately not changed,
+and the reasoning belongs with the decision. Every *other* user-facing selector
+in this release names a full part (`make attiny85-flash`,
+`PIC10F322_SOAK_VARIANT`, the image MCU field, the soak evidence filenames), so
+`AVR_SOAK_CHIP=45` is the last place a part is named by a fragment — but the
+bare number is also the Makefile's own internal chip vocabulary (`TINYX5` is
+`85 45`; `mmcu_$(n)`; the generated `attiny$(n)-flash` goals), so this selector
+is consistent with something real rather than merely stale. Changing it breaks a
+documented command line for cosmetics only, and it is the one part of this item
+with no correctness argument behind it.
+
+It is nevertheless **now or never**: `v0.9.8` is the release that breaks command
+lines, so this either ships with it or should be dropped from the list. Doing it
+means `TINYX5_PARTS = $(foreach n,$(TINYX5),$(mmcu_$(n)))` as the guard's
+supported set, `AVR_SOAK_CHIP ?= attiny85`, `$(mmcu_$(AVR_SOAK_CHIP))` collapsing
+to `$(AVR_SOAK_CHIP)`, and updates in `scripts/make-release.sh:745`, the
+`run_mutation_tests.sh` WDT-pet row, and `test_variant_selector_guard.py`. ~30
+min, and the guard added earlier this release already gives a good error for the
+old spelling. **Owner's call.**
 
 **Hardware-validation procedure.** The single largest residual verification gap
 is structural: simavr cannot model the ATtiny13a watchdog system reset (only the
@@ -1559,8 +1573,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Design doc: datasheet citations | 2 | 2 h | High — completeness/rigor |
 | `-D<MACRO>` fallbacks: classify the remaining 25 | 2.5 | 1–2 h | Medium — `SOAK_DURATION_MS` repeats a defect already shipped once |
 | Re-pin yasimavr after the cycle-rewind fix | 2.5 | 1 h (+2 h optional) | Low — retires a documented simulator caveat |
-| `make-release.sh`: dead `AVRDUDE_PART_X5` | 2.5 | 20 min | Low — manifest restates a Makefile fact |
-| Upgrade residue from the v0.9.8 renames | 3 | 15 min – 1 h | Low — last places spelled the old way |
+| `AVR_SOAK_CHIP` takes a bare 85/45 (now or never) | 3 | 30 min | Low — cosmetic, but breaks a command line if deferred |
 | Name contract cannot see an uncommitted file | 3 | 15 min | Low-Medium — the violation is reported one run late |
 | Return-stack oracle: extend to PIC10F322 | 2.5 | High | Low-Medium — second witness on a chip the assembly gate already bounds |
 | Formal verification of output drivers | 2.5 | 3–4 h | Medium — driver correctness |

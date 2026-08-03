@@ -2467,17 +2467,21 @@ AVR_SIM_BINARIES = \
 	$(foreach v,$(VARIANTS),test/avr/test_trace_$(v) test/avr/test_sim_$(v)_attiny13a) \
 	$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_sim_$(v)_attiny$(n)))
 AVR_SOAK_BINARIES = \
-	$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_soak_$(v)_t$(n)))
+	$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_soak_$(v)_attiny$(n)))
 
 # Retired spellings, removed so a worktree carrying pre-v0.9.8 binaries does not
 # keep them forever -- the same courtesy `clean` already extends to the
 # pre-`src/`-reorganization KLEE paths below. BOTH fields moved, so both are
 # enumerated: the output-stage tokens (cd4053/mute/relay, plus the _tmux boards
 # dropped in 0.9.4) and the MCU suffix (absent or _t<n>). This is a fixed
-# historical list; it never grows again unless another rename adds to it.
+# historical list; it grows only when another rename adds to it, which happened
+# once more on 2026-08-03: the soak binary's MCU suffix moved from _t<n> to
+# _attiny<n> (it had been missed when its sibling test_sim_ binaries moved), so
+# the CURRENT variant names now have a retired soak spelling too.
 AVR_TEST_BINARIES_RETIRED = $(foreach v,cd4053 mute relay cd4053_tmux mute_tmux, \
 	test/avr/test_sim_$(v) test/avr/test_trace_$(v) \
-	$(foreach n,$(TINYX5),test/avr/test_sim_$(v)_t$(n) test/avr/test_soak_$(v)_t$(n)))
+	$(foreach n,$(TINYX5),test/avr/test_sim_$(v)_t$(n) test/avr/test_soak_$(v)_t$(n))) \
+	$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_soak_$(v)_t$(n)))
 
 # Remove all build outputs and test binaries (keeps coverage/ -- see
 # coverage-clean for that).
@@ -2496,6 +2500,12 @@ clean:
 	rm -rf $(KLEE_OUT_DIR) test/formal/klee-out-* test/formal/klee-last \
 		test/klee-out-* test/klee-last test/avr/__pycache__
 	rm -rf $(AVR_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(XT_BUILD_DIR)
+	@# Retired build directory (pre-v0.9.8 spelling of $(PIC10F322_BUILD_DIR)),
+	@# for the same reason AVR_TEST_BINARIES_RETIRED exists: without it a
+	@# worktree that predates the rename keeps a stale build_pic/ through every
+	@# `make clean`, and its XC8 intermediates are not covered by .gitignore's
+	@# global patterns.
+	rm -rf build_pic
 	# PIC10F320: one directory holds every build, coverage and test artifact
 	# for this target (merge plan §5.7), so a single rm covers the lot and
 	# cannot reach the shared top-level coverage/ the parent lanes own.
@@ -3434,7 +3444,7 @@ AVR_SOAK_VARIANT     ?= cd4053_simple
 AVR_SOAK_CHIP        ?= 85
 AVR_SOAK_DURATION_MS ?= 86400000
 AVR_SOAK_COMBINATION_NAME ?= standalone
-AVR_SOAK_BIN  = test/avr/test_soak_$(AVR_SOAK_VARIANT)_t$(AVR_SOAK_CHIP)
+AVR_SOAK_BIN  = test/avr/test_soak_$(AVR_SOAK_VARIANT)_attiny$(AVR_SOAK_CHIP)
 AVR_SOAK_DEPS = test/avr/test_soak.c test/bypass_output_host.h test/bypass_config_host.h \
             test/soak_timing_config.h src/bypass_config.h $(FW_HEADERS)
 

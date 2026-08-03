@@ -6,6 +6,10 @@
 *.elf
 build_avr_classic/
 build_pic10f322/
+# Retired spelling (pre-v0.9.8). A worktree that predates the rename still has
+# build_pic/, and its .p1/.d/.sdb/.sym/.cmf artifacts match none of the global
+# patterns above -- so without this line `git add -A` commits XC8 intermediates.
+build_pic/
 build_avr_xt/
 # PIC10F320 build + coverage artifacts (coverage lives UNDER the build dir --
 # see docs/pic10f320_merge_plan.md §5.7 -- so this one entry covers both, and no
