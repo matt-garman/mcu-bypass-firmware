@@ -52,56 +52,72 @@ These items were identified during a full meta-review of the firmware, design
 doc, and test suite (2026-06-18) and re-verified as open on 2026-07-26. All
 close residual verification gaps that can be addressed in software.
 
-**A severed `-D<MACRO>=$(VAR)` compile-line contract is silent, and the fuse
-checker demonstrates it.** Added 2026-08-03 by the `v0.9.8` meta-review. This is
+**~~A severed `-D<MACRO>=$(VAR)` compile-line contract is silent, and the fuse
+checker demonstrates it.~~ DONE for the fuse bytes (2026-08-03); the sweep over
+the other `-D` macros is split out below.** Raised by the `v0.9.8` meta-review:
 the same silent-severance class as the four name-contract axes, on the one
-interface those axes deliberately do not cover: the Makefile's `-D` compile
-lines. The name contract excludes them on purpose — the C macros are the
-firmware's and the drivers' interface and were deliberately NOT renamed with the
-Make variables — so nothing checks that the two halves still agree.
+interface those axes deliberately do not cover, because the C macro names are
+the tests' own interface and were not renamed with the Make variables.
 
-`test/avr/test_fuses.c` opens by declaring itself the single source of truth for
-fuse bytes ("injected by the Makefile via `-D` so there is a single source of
-truth"), then defines `#ifndef` fallbacks for all eleven of them
-(`test_fuses.c:30-62`). **Ten of those eleven fallbacks are exactly the current
-values.** Measured: compiling with the real `-D` set minus `T85_LFUSE` — what a
-rename on either side produces — gives `fuse checks: 46 checks, 0 failures`,
-exit 0. A green run that no longer verifies anything about the Makefile.
+The defect, measured before the fix: `test/avr/test_fuses.c` declared itself the
+single source of truth for fuse bytes and then defined `#ifndef` fallbacks for
+all eleven, **ten of which were exactly the current values**. The real compile
+line minus `-DT85_LFUSE` printed `fuse checks: 46 checks, 0 failures` and exited
+0. Only `T13_LFUSE` failed, by luck, on a fallback that had gone stale.
 
-Only `T13_LFUSE` is caught, and by luck: its fallback is the stale `0x6a`
-against a current `0x4a`, so it trips one assertion. Nothing designed that.
+Fixed as specified. The eleven fallbacks are `#error`s, each naming the Makefile
+variable its byte comes from, and `test/test_fuse_injection_contract.py` (gate
+`test-fuse-injection-contract`, in `TEST_GATES_LATE`, 14 checks in ~4 s) follows
+each byte the whole way. Three things the specification did not anticipate:
 
-Note which direction fails safely. A severed *Makefile* variable
-(`-DT13_LFUSE=$(RENAMED)`) emits `-DT13_LFUSE=` and the compile fails loudly, so
-axis A/C already cover that half. The uncovered half is a severed *macro name* —
-rename the macro on either side and the C file silently falls back.
+- **The round trip needed a fourth link the item did not list: *burned* ==
+  *injected*.** Comparing the printed byte against `make -s print-<VAR>` proves
+  the checker reads the Makefile, not that it reads the byte anyone flashes. The
+  gate now harvests the `-U <mem>:w:$(VAR):m` variables out of the avrdude
+  recipes and requires that set to equal the `-D` set exactly. A checker
+  verifying a byte no flash target burns is decoration, and it would look
+  identical from the inside.
+- **The value link is not redundant with the checker's own assertions, and the
+  negative case proves which bit shows it.** `T13_LFUSE` bit 6 is EESAVE, which
+  no assertion in `test_fuses.c` reads — so an lfuse disagreeing with the
+  Makefile in that bit alone passes all 46 checks. The gate builds exactly that
+  binary and requires the round trip to catch it. The search is adaptive rather
+  than pinned to that bit, so strengthening the checker later cannot turn this
+  negative case into a false failure.
+- **The gate builds its own binaries from the compile line `make -n` prints,**
+  never from `test/avr/test_fuses` in the tree. The command is therefore the
+  real one rather than a reconstruction, a stale checker cannot make the gate
+  fail, and the two deliberately-broken builds cannot disturb the tree's.
 
-Two fixes, and the first is nearly free:
+Verified by reintroducing each defect on the real tree and restoring: a restored
+`#define` fallback, a macro renamed on the Makefile side only (reported as one
+rename, both halves named, not as two unrelated problems), an `#error` naming
+the wrong variable, and a burned byte the checker does not verify.
 
-1. **Delete the fallbacks; `#error` instead.** These eleven values have no
-   meaningful default — the whole point is that they come from the Makefile.
-   The project already uses exactly this idiom two directories away:
-   `test/pic/test_io_pic_core.h:32-40` says `#error "PIC_IO_DEFAULT_FW_PATH must
-   be defined by the part adapter"`. ~15 min.
-2. **Assert the value made the whole trip.** `test_fuses` already PRINTS what it
-   was compiled with (`ATtiny13a: lfuse=0x4a hfuse=0xf9`), so a gate can compare
-   that output against `make -s print-ATTINY13A_LFUSE`. That checks the entire
-   chain — Makefile variable → `-D` name → C name → assertion — rather than one
-   link of it, and it is the only form that would catch a *value* drift as well
-   as a name one. ~1 h.
+**Classify the other `-D` macros with in-source fallbacks.** Split out
+2026-08-03 from the item above, which closed the fuse-byte half. Measured today:
+the Makefile passes 58 distinct `-D` macros and **25 still have `#ifndef`
+fallbacks**. Most are legitimate workload knobs where a default is correct
+behaviour (`SIM_*`, `MODEL_FUZZ_*`, `SOAK_PROGRESS_INTERVAL_MS`). Two groups are
+not:
 
-Scope beyond the fuses: 40 of the 58 `-D` macros the Makefile passes have
-in-source `#ifndef` fallbacks. Most are legitimate workload knobs where a
-default is correct behaviour (`SIM_*`, `MODEL_FUZZ_*`) — but note that a severed
-`-DSOAK_DURATION_MS` reverts a soak to its in-source default, which is the C-side
-twin of the 43,200× overrun that `v0.9.8` fixed on the make side. Worth a sweep
-classifying each as "default is meaningful" or "must be injected", and applying
-fix 1 to the second group.
+- **`SOAK_DURATION_MS`** (`test/avr/test_soak.c:78`). A severed injection
+  reverts a soak to its in-source default — the C-side twin of the 43,200×
+  overrun `v0.9.8` fixed on the make side, and the reason that overrun is worth
+  taking seriously twice.
+- **`PB0`/`PB1`/`PB2` and `F_CPU`** (`test/bypass_config_host.h:22-38`,
+  `test/bypass_output_host.h:26-32`). These are pin numbers and a clock rate.
+  Their fallbacks exist because CBMC ignores `-include` and needs them on the
+  command line, so deleting them outright is not the fix — but a host test that
+  silently substitutes its own pin map for the Makefile's is the same defect
+  wearing different clothes, and the `#ifndef` is doing two jobs.
+  `FW_PATH` (five files) is a third case: the fallback is a path, so a severed
+  injection points a driver at an image that may not be the one under test.
 
-Effort: ~15 min for the fuse `#error`s, ~1 h for the round-trip gate, ~1–2 h for
-the sweep. Impact: Medium — no new claim about the firmware, but the fuse
-checker is the ONLY thing standing between a fat-fingered fuse edit and a bench
-session, and it is currently able to pass without reading the Makefile at all.
+Apply the `#error` treatment to the "must be injected" group, and where a
+fallback has to stay for CBMC, say so in the `#ifndef` and make the reason
+checkable. Effort: ~1–2 h. Impact: Medium — `SOAK_DURATION_MS` alone repeats a
+defect this project has already been bitten by once.
 
 **Record the `v0.9.8` byte-identity verification as evidence, not just as a
 claim.** Added 2026-08-03 by the meta-review. `CHANGELOG.md` states three times
@@ -1498,7 +1514,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Item | Tier | Effort | Impact |
 |---|---|---|---|
 | Design doc: datasheet citations | 2 | 2 h | High — completeness/rigor |
-| `-D<MACRO>` compile-line contracts (fuse fallbacks) | 2.5 | 15 min – 2 h | Medium — the fuse checker can currently pass without reading the Makefile |
+| `-D<MACRO>` fallbacks: classify the remaining 25 | 2.5 | 1–2 h | Medium — `SOAK_DURATION_MS` repeats a defect already shipped once |
 | Record the v0.9.8 byte-identity verification | 2.5 | 30 min | Medium — turns the release's headline claim into evidence |
 | Re-pin yasimavr after the cycle-rewind fix | 2.5 | 1 h (+2 h optional) | Low — retires a documented simulator caveat |
 | `make-release.sh`: dead `AVRDUDE_PART_X5` | 2.5 | 20 min | Low — manifest restates a Makefile fact |

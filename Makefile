@@ -629,7 +629,7 @@ FORCE:
         test-soak-timing test-strict-tools test-workload-rebuild \
         test-variant-map-contract test-makefile-name-contract \
         test-analyze-variant-guard test-variant-selector-guard \
-        test-clean-contract test-static-assert-guards \
+        test-clean-contract test-fuse-injection-contract test-static-assert-guards \
         pic10f322-test-target pic10f322-test-target-variants pic10f322-test-io pic10f322-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
         test-flash-budget-regression test-soak test-soak-reset-witness \
@@ -2583,7 +2583,7 @@ TEST_GATES_LATE = \
         test-target-lane-markers test-lockstep-progress test-soak-timing \
         test-variant-map-contract test-makefile-name-contract \
         test-analyze-variant-guard test-variant-selector-guard \
-        test-clean-contract \
+        test-clean-contract test-fuse-injection-contract \
         test-soak-reset-witness test-strict-tools test-workload-rebuild \
         test-pic-build-rebuild coverage-check coverage-check-core
 TEST_GATES = $(TEST_GATES_EARLY) $(TEST_GATES_LATE)
@@ -2835,6 +2835,18 @@ test-variant-selector-guard:
 # inventory of what it can build.
 test-clean-contract:
 	./test/test_clean_contract.sh
+
+# `-D<MACRO>=$(VAR)` is a name contract the four Makefile name-contract axes
+# deliberately do not cover: the C macro names are the tests' own interface and
+# were not renamed with the Make variables. So a macro renamed on either side
+# severed in silence for as long as the C file carried a default -- and
+# test/avr/test_fuses.c carried one for all eleven fuse bytes, ten of them equal
+# to the current values. The real compile line minus -DT85_LFUSE printed
+# "46 checks, 0 failures" and exited 0. The defaults are now `#error`s; this
+# keeps them gone and follows each byte the whole way: burned == injected ==
+# guarded == printed, and every printed byte equal to print-<VAR>.
+test-fuse-injection-contract:
+	./test/test_fuse_injection_contract.py
 
 # Prove the firmware's compile-time guards actually FIRE. Every build checks
 # them, but only in the sense that they stay silent -- and a guard still
@@ -5223,6 +5235,7 @@ help:
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
 	@echo "  test-variant-selector-guard  every lane rejects a bad single-variant selector instead of skipping (included in test)"
 	@echo "  test-clean-contract  clean/clean-tests remove everything the Makefile builds (included in test)"
+	@echo "  test-fuse-injection-contract  every fuse byte survives -D injection into the checker (included in test)"
 	@echo "  test-static-assert-guards  the firmware's compile-time guards really fail the build when violated (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"

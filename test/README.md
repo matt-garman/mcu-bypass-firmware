@@ -45,6 +45,8 @@ test/
                                      selector instead of reporting a missing tool
   test_clean_contract.sh    shared: clean/clean-tests remove everything the
                                      Makefile knows how to build
+  test_fuse_injection_contract.py shared: every fuse byte the Makefile burns is
+                                     the byte the -D-injected checker verifies
   test_variant_map_contract.sh shared: every per-variant map is guard-registered
   test_static_assert_guards.sh shared: the firmware's compile-time guards really
                                      fail the build when their inputs are broken

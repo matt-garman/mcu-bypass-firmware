@@ -17,6 +17,22 @@
 //   -DT202_SYSCFG0=... -DT202_SYSCFG1=... -DT202_APPEND=...
 //   -DT202_BOOTEND=...
 //
+// THERE ARE DELIBERATELY NO IN-SOURCE DEFAULTS, and the history is the reason.
+// Until 2026-08-03 every macro below had an `#ifndef` fallback, and TEN of the
+// eleven fallbacks were exactly the current values. So a macro renamed on
+// either side -- the Makefile's -D name or the name here -- did not fail. The
+// file fell back to its own copy and printed "46 checks, 0 failures": a green
+// run that no longer read the Makefile at all. Measured rather than supposed --
+// dropping -DT85_LFUSE from the real compile line exits 0. Only T13_LFUSE was
+// caught, and by luck, because its fallback had gone stale (0x6a vs 0x4a).
+//
+// A missing byte now fails the COMPILE. That is the fail-closed rule the
+// ATtiny202 half of this same gate already follows -- attiny202_fuses.py raises
+// FuseConfigError on a missing ATTINY202_FUSE_* rather than defaulting -- and
+// the idiom used two directories away in test/pic/test_io_pic_core.h.
+// test/test_fuse_injection_contract.py checks the other direction: that every
+// byte the Makefile injects survives the whole trip into the output below.
+//
 // Datasheet references:
 //   ATtiny13A  rev. 8126F, "Fuse Bytes" (low/high byte bit maps)
 //   ATtiny25/45/85 rev. 2586Q, "Fuse Bytes"
@@ -27,38 +43,40 @@
 #include <stdint.h>
 #include <stdio.h>
 
+// Each guard names the Makefile variable the byte comes from, so the mapping is
+// readable here and checkable by test/test_fuse_injection_contract.py.
 #ifndef T13_LFUSE
-#  define T13_LFUSE 0x6a
+#  error "T13_LFUSE is not defined; the Makefile must inject -DT13_LFUSE=$(ATTINY13A_LFUSE)"
 #endif
 #ifndef T13_HFUSE
-#  define T13_HFUSE 0xf9
+#  error "T13_HFUSE is not defined; the Makefile must inject -DT13_HFUSE=$(ATTINY13A_HFUSE)"
 #endif
 #ifndef T85_LFUSE
-#  define T85_LFUSE 0x62
+#  error "T85_LFUSE is not defined; the Makefile must inject -DT85_LFUSE=$(TINYX5_LFUSE)"
 #endif
 #ifndef T85_HFUSE
-#  define T85_HFUSE 0xcc
+#  error "T85_HFUSE is not defined; the Makefile must inject -DT85_HFUSE=$(TINYX5_HFUSE)"
 #endif
 #ifndef T202_WDTCFG
-#  define T202_WDTCFG 0x06
+#  error "T202_WDTCFG is not defined; the Makefile must inject -DT202_WDTCFG=$(XT_FUSE_WDTCFG)"
 #endif
 #ifndef T202_BODCFG
-#  define T202_BODCFG 0xe5
+#  error "T202_BODCFG is not defined; the Makefile must inject -DT202_BODCFG=$(XT_FUSE_BODCFG)"
 #endif
 #ifndef T202_OSCCFG
-#  define T202_OSCCFG 0x01
+#  error "T202_OSCCFG is not defined; the Makefile must inject -DT202_OSCCFG=$(XT_FUSE_OSCCFG)"
 #endif
 #ifndef T202_SYSCFG0
-#  define T202_SYSCFG0 0xf6
+#  error "T202_SYSCFG0 is not defined; the Makefile must inject -DT202_SYSCFG0=$(XT_FUSE_SYSCFG0)"
 #endif
 #ifndef T202_SYSCFG1
-#  define T202_SYSCFG1 0x07
+#  error "T202_SYSCFG1 is not defined; the Makefile must inject -DT202_SYSCFG1=$(XT_FUSE_SYSCFG1)"
 #endif
 #ifndef T202_APPEND
-#  define T202_APPEND 0x00
+#  error "T202_APPEND is not defined; the Makefile must inject -DT202_APPEND=$(XT_FUSE_APPEND)"
 #endif
 #ifndef T202_BOOTEND
-#  define T202_BOOTEND 0x00
+#  error "T202_BOOTEND is not defined; the Makefile must inject -DT202_BOOTEND=$(XT_FUSE_BOOTEND)"
 #endif
 
 static int g_failures = 0;

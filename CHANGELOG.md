@@ -332,6 +332,44 @@ file is the human-readable summary of *what changed*.
   was that the simavr tests judge the firmware by comparing it against this
   model, so a model that drifted would make a firmware that drifted look right.
 
+- **The fuse checker can no longer pass without reading the Makefile.**
+  `test/avr/test_fuses.c` decodes the exact fuse bytes this Makefile burns and
+  is the only thing standing between a fat-fingered fuse edit and a bench
+  session. It declared itself the single source of truth for those bytes and
+  then defined `#ifndef` fallbacks for all eleven — **ten of them exactly the
+  current values**. Compiling with the real `-D` set minus `-DT85_LFUSE`, which
+  is what renaming a macro on either side produces, printed `fuse checks: 46
+  checks, 0 failures` and exited 0. Only `T13_LFUSE` failed, and only because
+  its fallback had gone stale (`0x6a` against a current `0x4a`); nothing
+  designed that.
+
+  `-D<MACRO>=$(VAR)` is a name contract the four axes above deliberately do not
+  cover — the C macro names are the tests' own interface and were not renamed
+  with the Make variables in this release — so nothing joined its two halves.
+  The eleven fallbacks are now `#error`s, each naming the Makefile variable its
+  byte comes from, which is the fail-closed rule the ATtiny202 half of the same
+  gate already followed (`attiny202_fuses.py` raises rather than defaulting on a
+  missing `ATTINY202_FUSE_*`).
+
+  New gate `test-fuse-injection-contract`
+  (`test/test_fuse_injection_contract.py`, 14 checks) follows each byte the
+  whole way: the variables the avrdude recipes burn to silicon must be exactly
+  the variables the checker is compiled with; the compile line and the C file
+  must name the same macros, with each `#error` naming the variable the Makefile
+  really pairs it with and no macro carrying a default; every injected byte must
+  reach the program's output, one for one; and each printed byte must equal
+  `make -s print-<VAR>`.
+
+  Two of those links exist for reasons worth recording. *Burned == injected*
+  because proving the checker reads the Makefile is not the same as proving it
+  reads the byte anyone flashes — a checker verifying a byte no flash target
+  burns is decoration and looks identical from the inside. *Printed == the
+  Makefile's value* because it is the only link that catches a value drift as
+  well as a name one, and it is not redundant with the checker's own assertions:
+  `T13_LFUSE` bit 6 is EESAVE, which no assertion in the file reads, so an lfuse
+  that disagrees with the Makefile in that bit alone passes all 46 checks. The
+  gate builds exactly that binary and requires the round trip to catch it.
+
 ### Changed
 - **Every released firmware image is renamed to one consistent scheme.** All
   eighteen images on all six MCUs are now
