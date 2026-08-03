@@ -603,6 +603,36 @@ file is the human-readable summary of *what changed*.
 
   Image contents are unchanged for a third time: all 18 remain bit-identical.
 
+- **The tinyx5 soak selectors take a part name, not a chip number.**
+  `AVR_SOAK_CHIP` and `AVR_SOAK_WITNESS_CHIP` were the last user-facing
+  selectors that named a part by a fragment:
+
+  | before | after |
+  |---|---|
+  | `make test-soak AVR_SOAK_CHIP=45` | `make test-soak AVR_SOAK_CHIP=attiny45` |
+  | `make test-soak-reset-witness AVR_SOAK_WITNESS_CHIP=85` | `... AVR_SOAK_WITNESS_CHIP=attiny85` |
+
+  The distinction the change draws is between the family's *internal* indexing
+  and what a *request* may name. `TINYX5` remains `85 45`, because that is what
+  indexes `mmcu_<n>`/`part_<n>` and generates the `attiny<n>`,
+  `attiny<n>-size` and `attiny<n>-flash` goals. The new `TINYX5_PARTS` is that
+  same family expressed as parts, derived (`$(foreach n,$(TINYX5),$(mmcu_$(n)))`)
+  rather than restated, so a third sibling cannot enter one list and not the
+  other — and it is what both selectors now validate against.
+
+  A command line carrying the old spelling is told so, by the single-variant
+  selector guard added earlier in this release, and the guard's own test asserts
+  that message so the claim cannot quietly stop being true:
+
+  ```
+  $ make test-soak AVR_SOAK_CHIP=85
+  FAIL: AVR_SOAK_CHIP=85 is not supported; expected one of: attiny85 attiny45
+  ```
+
+  Nothing published moves: the six soak binary paths, the fifteen release soak
+  combination names and the retained evidence filenames are byte-for-byte what
+  they were before this change. Only the request vocabulary moved.
+
 ### Fixed
 - **`make release` could not have completed: the AVR soak binary was renamed on
   one side only.** The same rename that moved `test_sim_<v>_t<n>` to

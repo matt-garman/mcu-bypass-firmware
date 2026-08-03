@@ -203,15 +203,24 @@ AVR_FW         = $(AVR_BUILD_DIR)/$(FW_BASE)
 # registers, same fuse bytes -- they differ ONLY in flash/RAM size, the -mmcu
 # name, and the avrdude part. simavr models their watchdog system reset (which
 # it cannot do for the ATtiny13a), so they also carry the WDT-reset and
-# fault-injection coverage for the whole family. Suffix <n> names the artifacts
-# (bypass_<variant>_t<n>.elf, targets size<n>/flash<n>/...). To add a sibling
-# (e.g. the ATtiny25), append its number here and define mmcu_<n>/part_<n>.
+# fault-injection coverage for the whole family. <n> is the family's INTERNAL
+# vocabulary -- it indexes mmcu_<n>/part_<n> and generates the attiny<n>,
+# attiny<n>-size and attiny<n>-flash goals. To add a sibling (e.g. the
+# ATtiny25), append its number here and define mmcu_<n>/part_<n>.
 TINYX5     = 85 45
 mmcu_85    = attiny85
 mmcu_45    = attiny45
 part_85    = t85
 part_45    = t45
 TINYX5_F_CPU   = 1000000UL
+
+# The same family as full part names. Anything a USER types names a whole part
+# (attiny85), never the fragment: v0.9.8 removed the last of the `_t85`/`85`
+# spellings from artifacts and goals, and a selector that still took a bare
+# number would have been the only place left where a request had to know the
+# family's internal indexing. Derived from TINYX5 rather than spelled out, so a
+# new sibling cannot appear in one list and not the other.
+TINYX5_PARTS   = $(foreach n,$(TINYX5),$(mmcu_$(n)))
 
 # --- Output variants ---------------------------------------------------------
 # The hardware-agnostic core (bypass_mcu_avr_classic.c) links against exactly one output
@@ -814,8 +823,8 @@ VARIANT_SELECTORS = \
 	VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	AVR_SOAK_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	AVR_SOAK_WITNESS_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
-	AVR_SOAK_CHIP:TINYX5 \
-	AVR_SOAK_WITNESS_CHIP:TINYX5 \
+	AVR_SOAK_CHIP:TINYX5_PARTS \
+	AVR_SOAK_WITNESS_CHIP:TINYX5_PARTS \
 	PIC10F322_SOAK_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC10F322_FAULT_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC10F322_LOCKSTEP_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
@@ -2466,8 +2475,11 @@ attiny202-test-target:
 AVR_SIM_BINARIES = \
 	$(foreach v,$(VARIANTS),test/avr/test_trace_$(v) test/avr/test_sim_$(v)_attiny13a) \
 	$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_sim_$(v)_attiny$(n)))
+# Over TINYX5_PARTS, not TINYX5: AVR_SOAK_BIN composes this path from
+# $(AVR_SOAK_CHIP), which now holds a full part name, so the list is built from
+# the same vocabulary the target is.
 AVR_SOAK_BINARIES = \
-	$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_soak_$(v)_attiny$(n)))
+	$(foreach v,$(VARIANTS),$(foreach p,$(TINYX5_PARTS),test/avr/test_soak_$(v)_$(p)))
 
 # Retired spellings, removed so a worktree carrying pre-v0.9.8 binaries does not
 # keep them forever -- the same courtesy `clean` already extends to the
@@ -3437,14 +3449,14 @@ test-mutation:
 # on the command line defines a variable nothing reads, and the soak silently
 # runs at its 24 h default. See test/run_mutation_tests.sh's WDT-pet mutant.
 #   AVR_SOAK_VARIANT=<name>             variant to test (default cd4053_simple)
-#   AVR_SOAK_CHIP=45                    tinyx5 chip number (85/45; default 85)
+#   AVR_SOAK_CHIP=attiny45              tinyx5 part ($(TINYX5_PARTS); default attiny85)
 #   AVR_SOAK_DURATION_MS=3600000        simulated ms (default 86400000 = 24 h)
 #   AVR_SOAK_LIVENESS_INTERVAL_MS=10000 liveness-check interval (default 60000 ms)
 AVR_SOAK_VARIANT     ?= cd4053_simple
-AVR_SOAK_CHIP        ?= 85
+AVR_SOAK_CHIP        ?= attiny85
 AVR_SOAK_DURATION_MS ?= 86400000
 AVR_SOAK_COMBINATION_NAME ?= standalone
-AVR_SOAK_BIN  = test/avr/test_soak_$(AVR_SOAK_VARIANT)_attiny$(AVR_SOAK_CHIP)
+AVR_SOAK_BIN  = test/avr/test_soak_$(AVR_SOAK_VARIANT)_$(AVR_SOAK_CHIP)
 AVR_SOAK_DEPS = test/avr/test_soak.c test/bypass_output_host.h test/bypass_config_host.h \
             test/soak_timing_config.h src/bypass_config.h $(FW_HEADERS)
 
@@ -3457,8 +3469,8 @@ AVR_SOAK_PROGRESS_INTERVAL_MS  ?= 3600000
 AVR_SOAK_COMPILE = $(HOSTCC) $(SIM_CFLAGS) $(PURE_HOST_CFLAGS) \
 	-D$(macro_$(AVR_SOAK_VARIANT)) \
 	-Itest \
-	-DFW_PATH=\"$(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_VARIANT),$(mmcu_$(AVR_SOAK_CHIP))).elf\" \
-	-DMCU_NAME=\"$(mmcu_$(AVR_SOAK_CHIP))\" \
+	-DFW_PATH=\"$(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_VARIANT),$(AVR_SOAK_CHIP)).elf\" \
+	-DMCU_NAME=\"$(AVR_SOAK_CHIP)\" \
 	-DF_CPU_HZ=$(TINYX5_F_CPU) \
 	-DTARGET_TINYX5 \
 	-DSOAK_DURATION_MS=$(AVR_SOAK_DURATION_MS) \
@@ -3469,13 +3481,13 @@ AVR_SOAK_COMPILE = $(HOSTCC) $(SIM_CFLAGS) $(PURE_HOST_CFLAGS) \
 
 # Optional build-only convenience: build without running (Make's normal
 # dependency tracking applies; won't rebuild on AVR_SOAK_DURATION_MS change alone).
-$(AVR_SOAK_BIN): $(AVR_SOAK_DEPS) $(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_VARIANT),$(mmcu_$(AVR_SOAK_CHIP))).elf | variant-selectors-valid
+$(AVR_SOAK_BIN): $(AVR_SOAK_DEPS) $(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_VARIANT),$(AVR_SOAK_CHIP)).elf | variant-selectors-valid
 	$(AVR_SOAK_COMPILE)
 
 # Run target: always recompiles (phony) so every AVR_SOAK_* override is applied.
-test-soak: variant-selectors-valid $(AVR_SOAK_DEPS) $(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_VARIANT),$(mmcu_$(AVR_SOAK_CHIP))).elf
+test-soak: variant-selectors-valid $(AVR_SOAK_DEPS) $(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_VARIANT),$(AVR_SOAK_CHIP)).elf
 	$(AVR_SOAK_COMPILE)
-	@echo "--- soak test: variant=$(AVR_SOAK_VARIANT)  MCU=ATtiny$(AVR_SOAK_CHIP)  duration=$(AVR_SOAK_DURATION_MS) ms ---"
+	@echo "--- soak test: variant=$(AVR_SOAK_VARIANT)  MCU=$(AVR_SOAK_CHIP)  duration=$(AVR_SOAK_DURATION_MS) ms ---"
 	./$(AVR_SOAK_BIN)
 
 # The soak's `watchdog_failures` counter is release evidence, so prove a real
@@ -3490,7 +3502,7 @@ test-soak: variant-selectors-valid $(AVR_SOAK_DEPS) $(AVR_FW)$(call fw_image_tai
 # scaled-down release soak. tinyx5 only -- simavr models the WDT system reset
 # for the ATtiny25/45/85 family and not for the ATtiny13a.
 AVR_SOAK_WITNESS_VARIANT       ?= cd4053_simple
-AVR_SOAK_WITNESS_CHIP          ?= 85
+AVR_SOAK_WITNESS_CHIP          ?= attiny85
 AVR_SOAK_WITNESS_DURATION_MS   ?= 3000
 AVR_SOAK_WITNESS_LIVENESS_MS   ?= 1000
 # Kill the tick with a full WDT window (nominal 250 ms, RC tolerance to ~350 ms)
@@ -3498,14 +3510,14 @@ AVR_SOAK_WITNESS_LIVENESS_MS   ?= 1000
 # after its last millisecond.
 AVR_SOAK_WITNESS_KILL_TIMER_MS ?= 1500
 test-soak-reset-witness: variant-selectors-valid $(AVR_SOAK_DEPS) \
-                         $(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_WITNESS_VARIANT),$(mmcu_$(AVR_SOAK_WITNESS_CHIP))).elf
-	@echo "--- soak reset witness: variant=$(AVR_SOAK_WITNESS_VARIANT)  MCU=ATtiny$(AVR_SOAK_WITNESS_CHIP) ---"
+                         $(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_WITNESS_VARIANT),$(AVR_SOAK_WITNESS_CHIP)).elf
+	@echo "--- soak reset witness: variant=$(AVR_SOAK_WITNESS_VARIANT)  MCU=$(AVR_SOAK_WITNESS_CHIP) ---"
 	HOSTCC="$(HOSTCC)" \
 	AVR_SOAK_WITNESS_CFLAGS="$(SIM_CFLAGS) $(PURE_HOST_CFLAGS)" \
 	AVR_SOAK_WITNESS_LIBS="$(SIM_LIBS)" \
 	AVR_SOAK_WITNESS_MACRO="$(macro_$(AVR_SOAK_WITNESS_VARIANT))" \
-	AVR_SOAK_WITNESS_FW="$(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_WITNESS_VARIANT),$(mmcu_$(AVR_SOAK_WITNESS_CHIP))).elf" \
-	AVR_SOAK_WITNESS_MCU="$(mmcu_$(AVR_SOAK_WITNESS_CHIP))" \
+	AVR_SOAK_WITNESS_FW="$(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_WITNESS_VARIANT),$(AVR_SOAK_WITNESS_CHIP)).elf" \
+	AVR_SOAK_WITNESS_MCU="$(AVR_SOAK_WITNESS_CHIP)" \
 	AVR_SOAK_WITNESS_F_CPU="$(TINYX5_F_CPU)" \
 	AVR_SOAK_WITNESS_DURATION_MS="$(AVR_SOAK_WITNESS_DURATION_MS)" \
 	AVR_SOAK_WITNESS_LIVENESS_MS="$(AVR_SOAK_WITNESS_LIVENESS_MS)" \

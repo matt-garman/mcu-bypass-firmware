@@ -190,7 +190,8 @@ source "$REPO_ROOT/scripts/release-signing-policy.sh" \
 mkv() { make -s print-"$1"; }      # echo one Makefile variable
 
 VARIANTS=$(mkv VARIANTS)           # cd4053_simple cd4053_with_mute tq2_l2_5v_relay
-TINYX5=$(mkv TINYX5)               # 85 45
+TINYX5=$(mkv TINYX5)               # 85 45      (the family's internal indexing)
+TINYX5_PARTS=$(mkv TINYX5_PARTS)   # attiny85 attiny45  (what a request names)
 FW_BASE=$(mkv FW_BASE)             # bypass
 ATTINY13A_MCU=$(mkv ATTINY13A_MCU) # attiny13a
 
@@ -738,7 +739,7 @@ declare -a SOAK_NAMES=()
 declare -A SOAK_BIN SOAK_CWD SOAK_LOG SOAK_RC
 
 log "compiling soak binaries..."
-for v in $VARIANTS; do for n in $TINYX5; do
+for v in $VARIANTS; do for p in $TINYX5_PARTS; do
 	# The binary path is READ from the Makefile, not composed here. Unlike the
 	# image basenames above -- restated on purpose so they can be cross-checked
 	# against RELEASE_IMAGES -- this path is cross-checked against nothing, and
@@ -746,13 +747,13 @@ for v in $VARIANTS; do for n in $TINYX5; do
 	# release's soak COMBINATIONS, updated this line to the new _attiny<n>
 	# spelling, and left AVR_SOAK_BIN saying _t<n>. `make` was then asked for a
 	# target that did not exist, which fails the release an hour in, at step 3.
-	name="attiny${n}_${v}"
-	bin=$(make -s print-AVR_SOAK_BIN AVR_SOAK_VARIANT="$v" AVR_SOAK_CHIP="$n") \
+	name="${p}_${v}"
+	bin=$(make -s print-AVR_SOAK_BIN AVR_SOAK_VARIANT="$v" AVR_SOAK_CHIP="$p") \
 		|| die "cannot read AVR_SOAK_BIN for $name from the Makefile"
 	[ -n "$bin" ] || die "AVR_SOAK_BIN expands empty for $name"
-	elf="$(fw_image "$AVR_BUILD_DIR" "attiny${n}" "$v").elf"
+	elf="$(fw_image "$AVR_BUILD_DIR" "$p" "$v").elf"
 	make --old-file="$elf" "$bin" AVR_REBUILD_PREREQ= \
-		AVR_SOAK_VARIANT="$v" AVR_SOAK_CHIP="$n" AVR_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
+		AVR_SOAK_VARIANT="$v" AVR_SOAK_CHIP="$p" AVR_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
 		AVR_SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
 		AVR_SOAK_COMBINATION_NAME="$name" \
 		>>"$EVID/soak-build.log" 2>&1 || die "failed to build AVR soak $name"

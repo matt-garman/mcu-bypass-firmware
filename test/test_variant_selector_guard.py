@@ -270,6 +270,11 @@ def main():
         ("empty", "AVR_SOAK_CHIP=", "is empty"),
         ("more than one", "VARIANT=cd4053_simple tq2_l2_5v_relay",
          "names more than one value"),
+        # The retired spelling. AVR_SOAK_CHIP took a bare chip number until
+        # v0.9.8 moved it to the full part name, and a command line carrying the
+        # old one must be told so rather than composing bypass-attiny-cd4053...
+        # from a value the family's internal indexing still recognizes.
+        ("retired spelling", "AVR_SOAK_CHIP=85", "is not supported"),
     ]
     for label, override, expected in malformed:
         rc, out = run_make(GUARD, override)
@@ -283,7 +288,7 @@ def main():
     # A recognized value must still pass, or the guard is just breaking things.
     rc, out = run_make(GUARD, "PIC10F322_SOAK_VARIANT=cd4053_with_mute",
                        "PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay",
-                       "AVR_SOAK_CHIP=45")
+                       "AVR_SOAK_CHIP=attiny45")
     if rc != 0:
         fail(f"the guard rejected a valid non-default request:\n{out.strip()[:2000]}")
     checks += 1

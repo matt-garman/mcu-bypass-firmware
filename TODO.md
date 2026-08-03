@@ -1173,9 +1173,10 @@ one after. Note this cuts the other way for a scratch file that is neither
 ignored nor intended to be committed — check what the existing exemptions and
 `SELF_EXEMPT` already cover before widening. ~15 min, plus a decision.
 
-**~~Upgrade residue from the `v0.9.8` renames.~~ MOSTLY DONE (2026-08-03); one
-bullet deliberately left open below.** Filed as three trivial loose ends. One of
-them was not trivial and not cosmetic: **it had already broken `make release`.**
+**~~Upgrade residue from the `v0.9.8` renames.~~ DONE (2026-08-03), including
+the selector rename that was held for the owner's call.** Filed as three trivial
+loose ends. One of them was not trivial and not cosmetic: **it had already
+broken `make release`.**
 
 - **~~`build_pic/` is no longer ignored and is no longer cleaned.~~ DONE.** A
   retired-spelling line in `.gitignore` and an `rm -rf build_pic` in `clean`, on
@@ -1210,25 +1211,33 @@ them was not trivial and not cosmetic: **it had already broken `make release`.**
   `[ -f "$hex" ]` false, every PIC mutant returns the infrastructure-error
   status, and the lane degrades to a skip rather than a failure.
 
-**Still open: `AVR_SOAK_CHIP` takes a bare `85`/`45`.** Deliberately not changed,
-and the reasoning belongs with the decision. Every *other* user-facing selector
-in this release names a full part (`make attiny85-flash`,
-`PIC10F322_SOAK_VARIANT`, the image MCU field, the soak evidence filenames), so
-`AVR_SOAK_CHIP=45` is the last place a part is named by a fragment — but the
-bare number is also the Makefile's own internal chip vocabulary (`TINYX5` is
-`85 45`; `mmcu_$(n)`; the generated `attiny$(n)-flash` goals), so this selector
-is consistent with something real rather than merely stale. Changing it breaks a
-documented command line for cosmetics only, and it is the one part of this item
-with no correctness argument behind it.
+**~~`AVR_SOAK_CHIP` takes a bare `85`/`45`.~~ DONE**, on the owner's call, and
+`AVR_SOAK_WITNESS_CHIP` with it — the two are one entry apart in
+`VARIANT_SELECTORS`, and renaming one would have left the fragment spelling
+looking deliberate rather than retired. Both now take a full part name
+(`AVR_SOAK_CHIP=attiny45`).
 
-It is nevertheless **now or never**: `v0.9.8` is the release that breaks command
-lines, so this either ships with it or should be dropped from the list. Doing it
-means `TINYX5_PARTS = $(foreach n,$(TINYX5),$(mmcu_$(n)))` as the guard's
-supported set, `AVR_SOAK_CHIP ?= attiny85`, `$(mmcu_$(AVR_SOAK_CHIP))` collapsing
-to `$(AVR_SOAK_CHIP)`, and updates in `scripts/make-release.sh:745`, the
-`run_mutation_tests.sh` WDT-pet row, and `test_variant_selector_guard.py`. ~30
-min, and the guard added earlier this release already gives a good error for the
-old spelling. **Owner's call.**
+The line the change draws is between the family's INTERNAL indexing and what a
+request may name. `TINYX5` stays `85 45` because that is what indexes
+`mmcu_<n>`/`part_<n>` and generates the `attiny<n>`/`attiny<n>-flash` goals; the
+new `TINYX5_PARTS = $(foreach n,$(TINYX5),$(mmcu_$(n)))` is that same family as
+parts, and it is what the two selectors validate against. Derived, not spelled
+out, so a third sibling cannot enter one list and not the other. Downstream,
+`$(mmcu_$(AVR_SOAK_CHIP))` collapses to `$(AVR_SOAK_CHIP)` in five places, and
+`AVR_SOAK_BINARIES` is built from `TINYX5_PARTS` so the clean list is composed
+from the same vocabulary as the target it must mirror.
+
+Verified end to end rather than by inspection: the `attiny45`/`cd4053_with_mute`
+combination builds and runs (`SOAK_RESULT ... status=pass`, MCU=attiny45,
+against `bypass-attiny45-cd4053_with_mute.elf`), `test-soak-reset-witness` still
+records its reset (16 checks), and all six `AVR_SOAK_BINARIES` paths plus the 15
+release soak combination names are byte-for-byte what they were — the rename is
+in the request vocabulary only, not in anything published.
+
+The retired spelling now has a gate rather than a promise: the guard test
+asserts `AVR_SOAK_CHIP=85` is rejected with *"is not supported; expected one of:
+attiny85 attiny45"*, so the claim "the old command line gets a good error" fails
+if it ever stops being true.
 
 **Hardware-validation procedure.** The single largest residual verification gap
 is structural: simavr cannot model the ATtiny13a watchdog system reset (only the
@@ -1573,7 +1582,6 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Design doc: datasheet citations | 2 | 2 h | High — completeness/rigor |
 | `-D<MACRO>` fallbacks: classify the remaining 25 | 2.5 | 1–2 h | Medium — `SOAK_DURATION_MS` repeats a defect already shipped once |
 | Re-pin yasimavr after the cycle-rewind fix | 2.5 | 1 h (+2 h optional) | Low — retires a documented simulator caveat |
-| `AVR_SOAK_CHIP` takes a bare 85/45 (now or never) | 3 | 30 min | Low — cosmetic, but breaks a command line if deferred |
 | Name contract cannot see an uncommitted file | 3 | 15 min | Low-Medium — the violation is reported one run late |
 | Return-stack oracle: extend to PIC10F322 | 2.5 | High | Low-Medium — second witness on a chip the assembly gate already bounds |
 | Formal verification of output drivers | 2.5 | 3–4 h | Medium — driver correctness |
