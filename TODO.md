@@ -52,6 +52,100 @@ These items were identified during a full meta-review of the firmware, design
 doc, and test suite (2026-06-18) and re-verified as open on 2026-07-26. All
 close residual verification gaps that can be addressed in software.
 
+**A severed `-D<MACRO>=$(VAR)` compile-line contract is silent, and the fuse
+checker demonstrates it.** Added 2026-08-03 by the `v0.9.8` meta-review. This is
+the same silent-severance class as the four name-contract axes, on the one
+interface those axes deliberately do not cover: the Makefile's `-D` compile
+lines. The name contract excludes them on purpose — the C macros are the
+firmware's and the drivers' interface and were deliberately NOT renamed with the
+Make variables — so nothing checks that the two halves still agree.
+
+`test/avr/test_fuses.c` opens by declaring itself the single source of truth for
+fuse bytes ("injected by the Makefile via `-D` so there is a single source of
+truth"), then defines `#ifndef` fallbacks for all eleven of them
+(`test_fuses.c:30-62`). **Ten of those eleven fallbacks are exactly the current
+values.** Measured: compiling with the real `-D` set minus `T85_LFUSE` — what a
+rename on either side produces — gives `fuse checks: 46 checks, 0 failures`,
+exit 0. A green run that no longer verifies anything about the Makefile.
+
+Only `T13_LFUSE` is caught, and by luck: its fallback is the stale `0x6a`
+against a current `0x4a`, so it trips one assertion. Nothing designed that.
+
+Note which direction fails safely. A severed *Makefile* variable
+(`-DT13_LFUSE=$(RENAMED)`) emits `-DT13_LFUSE=` and the compile fails loudly, so
+axis A/C already cover that half. The uncovered half is a severed *macro name* —
+rename the macro on either side and the C file silently falls back.
+
+Two fixes, and the first is nearly free:
+
+1. **Delete the fallbacks; `#error` instead.** These eleven values have no
+   meaningful default — the whole point is that they come from the Makefile.
+   The project already uses exactly this idiom two directories away:
+   `test/pic/test_io_pic_core.h:32-40` says `#error "PIC_IO_DEFAULT_FW_PATH must
+   be defined by the part adapter"`. ~15 min.
+2. **Assert the value made the whole trip.** `test_fuses` already PRINTS what it
+   was compiled with (`ATtiny13a: lfuse=0x4a hfuse=0xf9`), so a gate can compare
+   that output against `make -s print-ATTINY13A_LFUSE`. That checks the entire
+   chain — Makefile variable → `-D` name → C name → assertion — rather than one
+   link of it, and it is the only form that would catch a *value* drift as well
+   as a name one. ~1 h.
+
+Scope beyond the fuses: 40 of the 58 `-D` macros the Makefile passes have
+in-source `#ifndef` fallbacks. Most are legitimate workload knobs where a
+default is correct behaviour (`SIM_*`, `MODEL_FUZZ_*`) — but note that a severed
+`-DSOAK_DURATION_MS` reverts a soak to its in-source default, which is the C-side
+twin of the 43,200× overrun that `v0.9.8` fixed on the make side. Worth a sweep
+classifying each as "default is meaningful" or "must be injected", and applying
+fix 1 to the second group.
+
+Effort: ~15 min for the fuse `#error`s, ~1 h for the round-trip gate, ~1–2 h for
+the sweep. Impact: Medium — no new claim about the firmware, but the fuse
+checker is the ONLY thing standing between a fat-fingered fuse edit and a bench
+session, and it is currently able to pass without reading the Makefile at all.
+
+**Record the `v0.9.8` byte-identity verification as evidence, not just as a
+claim.** Added 2026-08-03 by the meta-review. `CHANGELOG.md` states three times
+that the eighteen renamed images are bit-identical to their `v0.9.7`
+counterparts — "only the filenames moved" is the entire premise of the release —
+and nothing in the tree records that anyone checked. The meta-review did check
+it (all 18 rebuilt and hashed against `release/v0.9.7/SHA256SUMS` through the
+old→new mapping: 18 identical, 0 differ), but that result lives in a
+conversation.
+
+The precedent is `docs/pic10f320_validation.md` §2, which exists *because* a
+byte-identity proof from a deliberately one-shot gate deserved durable
+provenance. Do the same here: run the comparison as part of `v0.9.8`
+qualification and retain the old→new hash table under `release/v0.9.8/`.
+
+Deliberately NOT a standing gate. Pinning the current images to a previous
+release's hashes is correct for exactly one release — the one whose claim is
+that nothing changed — and becomes a false alarm the first time a release
+legitimately changes a byte. `test/pic10f320/expected_images.sha256` is the
+standing form of this check and already covers drift within a release.
+
+Effort: ~30 min (the comparison is a dozen lines against the existing mapping
+table in `release/README.md`). Impact: Medium — it converts the release's
+headline claim from an assertion into retained evidence, which is the standard
+every other claim in `release/` already meets.
+
+**`scripts/make-release.sh` reads two tinyx5 programmer names and uses
+neither.** Added 2026-08-03 by the meta-review. `make-release.sh:222-223` builds
+`AVRDUDE_PART_X5[]` from `mkv part_85` / `mkv part_45`, and nothing ever reads
+the array. The manifest's ATtiny85/45 arm hardcodes `prog="t85"` / `"t45"`
+instead (`:1056-1063`), so the published `MANIFEST.md` flash command carries a
+literal rather than the Makefile's `part_<n>`.
+
+Two spellings of one fact in the release orchestrator, which is the shape this
+release spent itself removing — and the dead half is now *validated* by axis A
+of the name contract, which dutifully expands `mkv part_"$n"` and checks a value
+that is then discarded. Either wire the array into the arm or delete it and say
+the literal is deliberate. Wiring it is the better direction: the other four
+arms all take their programmer name from Makefile truth.
+
+Effort: ~20 min. Impact: Low — `part_85`/`part_45` have never changed, so this
+is latent rather than live; it is on the list because the whole point of the
+`mkv` preamble is that the manifest cannot disagree with the Makefile.
+
 **Re-pin yasimavr once the `SimLoop.run()` cycle-rewind fix ships.** Added
 2026-08-02, after the upstream maintainer confirmed the defect reported from this
 project and produced a fix.
@@ -529,7 +623,8 @@ naturally with the Tier 2 datasheet-citation item.
 
 **~~Fail-closed gate on the names other files exchange with the Makefile —
 `print-<VAR>` reads, documented `make <goal>` targets, <!-- name-contract: exempt (<goal> is generic) -->
-`make VAR=value` overrides, and variables named to human
+`make VAR=value` overrides, <!-- name-contract: exempt (VAR=value is the generic schema) -->
+and variables named to human
 readers.~~ COMPLETE (all four axes, 2026-08-02.)** Added 2026-08-01 while doing
 the variable-prefix rename in `v0.9.8`; widened three times on 2026-08-02 —
 first after the same class was found severed on the goal axis, then after it was
@@ -865,7 +960,9 @@ tolerate every one:
   a quoted `SIM_DEFS='...'`.
 
 The same check belongs in the Makefile itself if it can be done cheaply, since
-it would also catch a hand-typed `make test-soak SOAK_DURATION_MS=...` — which
+it would also catch a hand-typed
+<!-- name-contract: exempt (quotes the retired spelling this item is about) -->
+`make test-soak SOAK_DURATION_MS=...` — which
 is exactly what the Makefile's own comment recommended until 2026-08-02.
 
 Design notes if picked up (the first three are ~~settled~~ by axes A and C and
@@ -1021,6 +1118,44 @@ watch the gate fail on it. All four now do.
 ---
 
 ## Tier 3 — platinum-level / nice-to-have
+
+**Upgrade residue from the `v0.9.8` renames.** Added 2026-08-03 by the
+meta-review. Three loose ends, each individually trivial, listed together
+because they are one decision: how much does a worktree that predates the
+rename cost its owner?
+
+- **`build_pic/` is no longer ignored and is no longer cleaned.** `.gitignore`
+  moved to `build_pic10f322/` and `clean` removes `$(PIC10F322_BUILD_DIR)`, so a
+  stale `build_pic/` from a `v0.9.7` checkout survives `make clean` and shows up
+  as untracked. The `.hex`/`.elf` inside stay ignored by the global patterns, but
+  the `.p1`/`.d`/`.sdb`/`.sym`/`.cmf` artifacts do not, so `git add -A` will
+  happily commit them. Fix: a legacy `build_pic/` line in `.gitignore` and in
+  `clean`'s `rm -rf`, exactly as `clean` already carries the pre-`src/`
+  KLEE paths and (since 2026-08-03) `AVR_TEST_BINARIES_RETIRED`.
+- **The AVR soak binary and its chip selector kept the pre-rename vocabulary.**
+  `AVR_SOAK_BIN` is `test/avr/test_soak_<variant>_t85` and `AVR_SOAK_CHIP` is a
+  bare `85`, while the sibling simulation binaries became
+  `test_sim_<variant>_attiny85` and every goal, image field and evidence
+  filename in the release carries the full part name. Neither is a released
+  artifact, which is why the rename did not reach them; the cost is that the
+  `_t<n>` suffix this release retired everywhere else still exists in two
+  places, one of which is a user-facing override. Renaming them is mechanical
+  (`AVR_SOAK_CHIP` has one consumer outside the Makefile, a mutation-table row)
+  but it is a breaking command-line change for a second time, so it belongs in
+  the same release as any other such change or nowhere.
+- **`test/run_mutation_tests.sh` still hand-composes an image path** at `:473`
+  and `:1142` (`${FW_BASE}-${PIC10F322_TAG}-cd4053_simple.hex`) rather than
+  reading `print-PIC10F322_RELEASE_IMAGES`, and restates `FW_BASE` at `:66`. The
+  independent restatements in `scripts/make-release.sh` and
+  `test/test_pic_build.sh` are deliberate — they exist to be cross-checked
+  against Makefile truth — but these cross-check nothing; they just need a path.
+  This is the leftover recorded at the end of the (now complete) name-contract
+  item, and it is exactly what silently disabled the PIC mutation lane in
+  `v0.9.8`. Move it here before that item is pruned, or it is pruned with it.
+
+Effort: ~15 min, ~1 h, ~30 min. Impact: Low each — none is a correctness defect
+today; all three are the last places where a name this release moved is still
+spelled the old way.
 
 **Hardware-validation procedure.** The single largest residual verification gap
 is structural: simavr cannot model the ATtiny13a watchdog system reset (only the
@@ -1363,6 +1498,11 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Item | Tier | Effort | Impact |
 |---|---|---|---|
 | Design doc: datasheet citations | 2 | 2 h | High — completeness/rigor |
+| `-D<MACRO>` compile-line contracts (fuse fallbacks) | 2.5 | 15 min – 2 h | Medium — the fuse checker can currently pass without reading the Makefile |
+| Record the v0.9.8 byte-identity verification | 2.5 | 30 min | Medium — turns the release's headline claim into evidence |
+| Re-pin yasimavr after the cycle-rewind fix | 2.5 | 1 h (+2 h optional) | Low — retires a documented simulator caveat |
+| `make-release.sh`: dead `AVRDUDE_PART_X5` | 2.5 | 20 min | Low — manifest restates a Makefile fact |
+| Upgrade residue from the v0.9.8 renames | 3 | 15 min – 1 h | Low — last places spelled the old way |
 | Return-stack oracle: extend to PIC10F322 | 2.5 | High | Low-Medium — second witness on a chip the assembly gate already bounds |
 | Formal verification of output drivers | 2.5 | 3–4 h | Medium — driver correctness |
 | Formal verification of blocking-delay safety | 2.5 | 1–2 h | Medium — makes the argument explicit |

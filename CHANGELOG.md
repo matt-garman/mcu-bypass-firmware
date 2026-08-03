@@ -37,7 +37,7 @@ file is the human-readable summary of *what changed*.
   a renamed `SOAK_*` left one mutant asking for 2 s of simulated soak and
   getting the 24 h default for an entire release. New gate
   `test-makefile-name-contract` (`test/test_makefile_name_contract.py`), axis C
-  of the four-axis name-contract item in `TODO.md`; 72 overrides verified.
+  of the four-axis name-contract item in `TODO.md`; 74 overrides verified.
 
   The Makefile gains an `origin-%` rule beside `print-%`, plus a bulk
   `make origins NAMES="…"` form that resolves a whole harvest in one invocation.
@@ -60,6 +60,26 @@ file is the human-readable summary of *what changed*.
   expected allowlist from seven-plus names to one (`MUTATION_ALLOW_SKIP`), and
   every exemption must still be reached by the harvest, so exemptions expire
   rather than accumulate.
+
+  **Documents are in scope too**, which they were not when this axis was first
+  built. The original harvest read `test/`, `scripts/`, `.github/` and the
+  Makefile — where the *machine-facing* overrides live — and that scope left the
+  human-facing half of the same defect unchecked by any of the four axes.
+  `MISRA_COMPLIANCE.md` tells a maintainer to run `make analyze-misra
+  VARIANTS="…" STRICT_TOOLS=1`; `README.md` documents `make attiny202-program
+  VARIANT=<v>`. Axis D reads doc prose, but only for names inside the project's
+  variable *prefixes*, and `VARIANTS`, `VARIANT`, `STRICT_TOOLS`, `VERSION` and
+  `PIC10F322_PROG` are all unprefixed — so nine names in six live documents were
+  reachable by no axis at all. Anchoring on the make word, which this axis
+  already did, is what let the scope widen without needing a vocabulary list to
+  keep the false-positive rate survivable: two lines needed an exemption marker,
+  both of them in `TODO.md`'s specification of this very item. The gate now
+  fails if it stops finding overrides in documents, for the same reason it fails
+  if it stops finding them in the mutation tables.
+
+  This is the fifth widening, and — like the four before it — it was found by
+  looking rather than by a gate, in the place the *previous* scope did not
+  reach.
 
 - **The same gate now also fails if any `make print-<VAR>` query asks for a
   variable the Makefile does not define.** `print-%` is a pattern rule, so it
@@ -95,9 +115,9 @@ file is the human-readable summary of *what changed*.
 
 - **The same gate now also fails if any documented `make <goal>` names a goal
   that does not exist, or if any prose or diagnostic names a variable that does
-  not.** Axes B and D, closing the four-axis name-contract item. 35 checks in
-  total, 0.6 s: 65 variable queries, 349 documented commands, 72 overrides and
-  65 variable mentions. Each new axis found a live defect on its first clean
+  not.** Axes B and D, closing the four-axis name-contract item. 36 checks in
+  total, 0.6 s: 66 variable queries, 356 documented commands, 74 overrides and
+  68 variable mentions. Each new axis found a live defect on its first clean
   run — `.gitignore` named `make pic-test-soak`, a goal the `v0.9.8` rename
   removed, in the comment explaining which goal produces the file it ignores;
   and a `Makefile` comment described the PIC soak's knobs as a family no
@@ -186,6 +206,68 @@ file is the human-readable summary of *what changed*.
   `make analyze-misra VARIANTS="cd4053 mute relay"` checks 2 files, reports
   `MISRA-C:2012: clean` and exits 0. With it, nothing is analyzed and it exits
   2.
+
+- **Every lane that selects *one* output stage now rejects an unrecognised
+  selector instead of skipping.** `VARIANTS` is a list and has been guarded for
+  releases. The sixteen variables that pick a single stage or chip for a single
+  lane — `PIC10F322_SOAK_VARIANT`, `PIC10F320_IO_VARIANT`, `AVR_SOAK_VARIANT`,
+  `AVR_SOAK_CHIP`, `VARIANT` and the rest — had no guard at all, and an
+  unrecognised value there composes a path to a file nothing builds, which the
+  lane reports as a *missing toolchain*:
+
+  ```
+  $ make pic10f322-test-soak PIC10F322_SOAK_VARIANT=relay
+  no build_pic10f322/bypass-pic10f322-relay.hex (XC8 absent?); skipping ...
+  $ echo $?
+  0
+  ```
+
+  XC8 was installed; the request was a typo carrying the pre-`v0.9.8` stage
+  vocabulary. `STRICT_TOOLS=1` (CI, release) turns that skip into a failure with
+  the same wrong diagnosis, so it moved the cost rather than removing it. Same
+  class as the analyzers above — and the same shape as the PIC10F322 soak driver
+  under *Fixed*, which "degraded to a skip, not a failure" for a whole release.
+  A skip is the dangerous outcome precisely because it is indistinguishable from
+  an honest one.
+
+  New `variant-selectors-valid` guard, wired as the **first** prerequisite of
+  all 30 consuming rules (order-only for the one file target, so a phony
+  prerequisite cannot make it look perpetually out of date). It validates every
+  selector on every invocation, not just the one the requested goal reads: an
+  override naming a value no lane supports is inert wherever it lands, and inert
+  overrides are the defect class. `XT_SIM_VARIANT` stays out of the table —
+  empty means "every supported variant" there, so it is list-or-empty and
+  already validates itself in each of its four recipes.
+
+  New gate `test-variant-selector-guard`
+  (`test/test_variant_selector_guard.py`, in `make test`), 14 checks in 1.5 s,
+  in the same two halves as its analyzer sibling: the behavioural half proves
+  all three malformed shapes are rejected (unknown, empty, more-than-one) and
+  that the real lane above now fails naming the selector and never prints the
+  skip; the contract half proves the guard is still attached to every rule that
+  consumes a selector.
+
+  The contract half needs a **transitive closure**, and that is the whole
+  difficulty: almost no rule mentions a selector directly. `pic10f322-test-soak`
+  reads `$(PIC10F322_SOAK_HEX)`, composed from the selector three definitions
+  away. A harvest keyed on the selector names alone finds 17 of the 31 rules
+  that actually depend on one — and the fourteen it misses include every
+  PIC10F320 lane. It also has to join backslash continuations before parsing
+  rule heads, which the first draft did not: `test-soak-reset-witness` carries
+  its prerequisites on a continued line and was classified as consuming no
+  selector at all, the same physical-line mistake axis C of the name contract
+  made.
+
+  It found a live one on its first clean run:
+  `test/test_target_lane_markers.sh` defaulted `LM_VARIANT` to `mute`, a
+  pre-`v0.9.8` stage token passed to the *real* make, inert only because nothing
+  had ever checked it.
+
+  Adding a second guard to `analyze-misra` also broke the analyzer gate's
+  negative fixture, which pinned the guard to the *first* prerequisite position
+  by exact text — it reported the spelling change as a missing guard, correctly
+  and unhelpfully. That fixture is now position-independent, so the next guard
+  added to that rule does not fail it.
 
 - **The firmware's compile-time guards are now proven to actually fire.** Every
   build checks the `static_assert`s in the config headers and MCU shells, but
@@ -434,6 +516,41 @@ file is the human-readable summary of *what changed*.
   Image contents are unchanged for a third time: all 18 remain bit-identical.
 
 ### Fixed
+- **`make clean` stopped removing nine of the binaries it builds, and
+  `clean-tests` stopped removing anything at all in the classic-AVR lane.** Both
+  targets spell their artifacts as a hand-written list, and the image rename
+  earlier in this release moved the simulation binaries from `test_sim_<v>` /
+  `test_sim_<v>_t<n>` to `test_sim_<v>_attiny13a` / `_attiny<n>` without either
+  list following. Every path they named had stopped existing; all nine binaries
+  actually built survived both targets. Nothing failed, because an `rm -f` of a
+  file that is not there is a successful `rm -f`.
+
+  `clean-tests` is the sharper half: its stated job is to drop binaries so the
+  next run rebuilds them at the currently selected workload sizing, so a
+  `clean-tests` that removes nothing means a `make test-long` could run FAST
+  workloads while reporting the exhaustive suite. It could not, in fact —
+  every affected rule carries `FORCE` and recompiles regardless — but that is an
+  accident of an unrelated design decision, not a guarantee, and it would go
+  silently the day a `FORCE` came off.
+
+  The list is now spelled **once** (`AVR_SIM_BINARIES` / `AVR_SOAK_BINARIES`)
+  rather than twice, and `clean` additionally removes the retired spellings so a
+  worktree predating the rename does not keep them forever — the same courtesy it
+  already extended to the pre-`src/`-reorganization KLEE paths.
+
+  New gate `test-clean-contract` (`test/test_clean_contract.sh`, in `make
+  test`), 9 checks in 0.4 s. Its oracle is `make -rRn --print-data-base`: every
+  explicit non-phony target under `test/` that is not a tracked source file is
+  something the Makefile builds, and `make -n clean` must remove it. Reading
+  Make's own inventory is the point — a second hand-written list would just be a
+  third copy of the spelling to drift, and the families that matter
+  (`test_sim_<variant>_attiny<n>`) exist only after `$(eval $(call ...))`
+  expansion, so a textual harvest of rule heads would not see them at all.
+  `clean-tests` has a deliberately narrower scope, so its gap is checked against
+  declared exemptions rather than required to be empty; a new build product
+  forces a decision. Verified by restoring the pre-rename spellings, which makes
+  the gate name all nine binaries and fail.
+
 - **`MISRA_COMPLIANCE.md`'s maintenance procedure told a maintainer to run the
   MISRA sweep over variant names that no longer exist**, and the command did not
   fail — it silently analyzed **zero** output drivers and exited 0.

@@ -41,6 +41,10 @@ test/
                                      names is one the Makefile really defines
   test_analyze_variant_guard.sh shared: analyze-* targets reject a bad VARIANTS=
                                      instead of silently analyzing less
+  test_variant_selector_guard.py shared: every lane rejects a bad single-variant
+                                     selector instead of reporting a missing tool
+  test_clean_contract.sh    shared: clean/clean-tests remove everything the
+                                     Makefile knows how to build
   test_variant_map_contract.sh shared: every per-variant map is guard-registered
   test_static_assert_guards.sh shared: the firmware's compile-time guards really
                                      fail the build when their inputs are broken

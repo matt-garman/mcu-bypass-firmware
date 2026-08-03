@@ -45,7 +45,11 @@ checks=0
 LM_LABEL=${LM_LABEL:-PIC}
 LM_TARGET=${LM_TARGET:-pic10f322-test-target}
 LM_VARIANT_ARG=${LM_VARIANT_ARG:-PIC10F322_TARGET_VARIANT}
-LM_VARIANT=${LM_VARIANT:-mute}
+# A real supported output stage: this is passed to the REAL make (only the
+# per-lane sub-invocations are faked), so `variant-selectors-valid` rejects a
+# name no lane supports. It read `mute` until 2026-08-03 -- a pre-v0.9.8 stage
+# token the rename left behind, inert only because nothing had ever checked it.
+LM_VARIANT=${LM_VARIANT:-cd4053_with_mute}
 LM_SUCCESS_MARKER=${LM_SUCCESS_MARKER:-target fault/lock-step/I-O PASS}
 # Optional: an argument that must appear on EVERY lane invocation. The PIC10F320
 # aggregate uses it to pin the build-variant threading, because its `pic10f320`

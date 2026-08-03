@@ -628,7 +628,8 @@ FORCE:
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
         test-variant-map-contract test-makefile-name-contract \
-        test-analyze-variant-guard test-static-assert-guards \
+        test-analyze-variant-guard test-variant-selector-guard \
+        test-clean-contract test-static-assert-guards \
         pic10f322-test-target pic10f322-test-target-variants pic10f322-test-io pic10f322-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
         test-flash-budget-regression test-soak test-soak-reset-witness \
@@ -771,6 +772,85 @@ classic-variant-request-valid:
 	if [ "$(CLASSIC_VARIANTS_REQUEST_DUPLICATE)" -eq 1 ]; then \
 		echo "FAIL: VARIANTS must not contain duplicate names"; exit 2; \
 	fi
+
+# ---------------------------------------------------------------------------
+# SINGLE-VARIANT SELECTORS
+# ---------------------------------------------------------------------------
+#
+# `VARIANTS` above is a LIST, guarded by classic-variant-request-valid. The
+# variables below each select exactly ONE output stage (or one tinyx5 chip) for
+# a lane that acts on a single image, and they had no guard at all.
+#
+# WHY THEY NEED ONE. An unrecognized name here does not fail -- it composes a
+# path to a file nobody builds, and the lane that wanted it reports a SKIP with
+# the wrong reason:
+#
+#     $ make pic10f322-test-soak PIC10F322_SOAK_VARIANT=relay
+#     no build_pic10f322/bypass-pic10f322-relay.hex (XC8 absent?); skipping ...
+#     $ echo $?
+#     0
+#
+# XC8 is installed and the request was a typo, but the operator is told a
+# toolchain is missing and the suite is told nothing at all. STRICT_TOOLS=1 (CI
+# and release) turns that into a failure -- with the same wrong diagnosis. This
+# is the same class the v0.9.8 analyzers had ("shrank the subject and reported
+# the smaller set clean") and the same shape as the PIC10F322 soak driver that
+# had been failing to compile for a release ("degraded to a skip, not a
+# failure"). The classic-AVR soak lane fails on a bad selector rather than
+# skipping, but composes `bypass--<stage>.elf` on the way -- the empty-MCU-field
+# spelling this release exists to make unrepresentable.
+#
+# ONE GUARD, ALL SELECTORS, deliberately: an override naming a value no lane
+# supports is inert wherever it lands, and inert overrides are precisely the
+# defect class here. `make pic10f322-test-soak PIC10F320_IO_VARIANT=typo` is
+# therefore an error even though the 320's I/O lane is not what was asked for.
+#
+# `XT_SIM_VARIANT` is NOT in this table: empty means "every supported variant"
+# for that lane, so it is a list-or-empty selector, and it already validates
+# itself in each of its four recipes.
+#
+# <selector variable>:<variable holding its supported values>
+VARIANT_SELECTORS = \
+	VARIANT:CLASSIC_VARIANTS_SUPPORTED \
+	AVR_SOAK_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
+	AVR_SOAK_WITNESS_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
+	AVR_SOAK_CHIP:TINYX5 \
+	AVR_SOAK_WITNESS_CHIP:TINYX5 \
+	PIC10F322_SOAK_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
+	PIC10F322_FAULT_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
+	PIC10F322_LOCKSTEP_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
+	PIC10F322_IO_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
+	PIC10F322_TARGET_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
+	PIC10F320_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
+	PIC10F320_TARGET_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
+	PIC10F320_FAULT_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
+	PIC10F320_IO_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
+	PIC10F320_LOCKSTEP_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
+	PIC10F320_SOAK_VARIANT:PIC10F320_VARIANTS_SUPPORTED
+
+# $(call selector_check,<selector variable>,<supported-set variable>) -> one
+# shell fragment. Both names are expanded by make, so the shell never has to
+# dereference a variable it cannot see.
+selector_check = sel="$($(1))"; \
+	case "$$sel" in \
+		"") echo "FAIL: $(1) is empty; expected exactly one of: $($(2))"; rc=2 ;; \
+		*" "*) echo "FAIL: $(1)=\"$$sel\" names more than one value; expected exactly one of: $($(2))"; rc=2 ;; \
+		*) case " $($(2)) " in \
+			*" $$sel "*) : ;; \
+			*) echo "FAIL: $(1)=$$sel is not supported; expected one of: $($(2))"; rc=2 ;; \
+		esac ;; \
+	esac;
+
+# Reject every malformed single-variant request BEFORE any lane builds, skips or
+# reports. Rejecting late is not equivalent: a lane that builds first and then
+# discovers the typo has already spent the build, and a lane that skips first
+# never discovers it at all.
+.PHONY: variant-selectors-valid
+variant-selectors-valid:
+	@rc=0; \
+	$(foreach s,$(VARIANT_SELECTORS),\
+		$(call selector_check,$(word 1,$(subst :, ,$(s))),$(word 2,$(subst :, ,$(s))))) \
+	exit $$rc
 
 # Build all ATtiny13a variant firmwares (.hex) + print sizes.
 attiny13a: classic-variant-request-valid $(ATTINY13A_HEXES) attiny13a-size
@@ -1398,7 +1478,7 @@ $(PIC10F322_SOAK_BIN): $(PIC10F322_SOAK_DEPS) FORCE
 	$(PIC10F322_SOAK_COMPILE)
 
 .PHONY: pic10f322-test-soak
-pic10f322-test-soak: pic10f322
+pic10f322-test-soak: variant-selectors-valid pic10f322
 	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
 		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC soak"; $(SKIP); \
 	fi; \
@@ -1464,7 +1544,7 @@ $(PIC10F322_FAULT_BIN): $(PIC10F322_FAULT_SRC) $(PIC10F322_FAULT_CORE_HDR) $(PIC
 	$(PIC10F322_FAULT_COMPILE)
 
 .PHONY: pic10f322-test-fault
-pic10f322-test-fault: pic10f322
+pic10f322-test-fault: variant-selectors-valid pic10f322
 	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
 		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC fault-inject"; $(SKIP); \
 	fi; \
@@ -1526,7 +1606,7 @@ $(PIC10F322_LOCKSTEP_BIN): $(PIC10F322_LOCKSTEP_SRC) $(PIC10F322_LOCKSTEP_CORE_H
 	$(PIC10F322_LOCKSTEP_COMPILE)
 
 .PHONY: pic10f322-test-lockstep
-pic10f322-test-lockstep: pic10f322
+pic10f322-test-lockstep: variant-selectors-valid pic10f322
 	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
 		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC lock-step"; $(SKIP); \
 	fi; \
@@ -1576,7 +1656,7 @@ $(PIC10F322_IO_BIN): $(PIC10F322_IO_SRC) $(PIC10F322_IO_CORE_HDR) $(PIC_PIN_LOOK
 	$(PIC10F322_IO_COMPILE)
 
 .PHONY: pic10f322-test-io
-pic10f322-test-io: pic10f322
+pic10f322-test-io: variant-selectors-valid pic10f322
 	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
 		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC target-I/O test"; $(SKIP); \
 	fi; \
@@ -1601,7 +1681,7 @@ pic10f322-test-io: pic10f322
 PIC10F322_TARGET_VARIANT ?= cd4053_simple
 override PIC10F322_TARGET_VARIANTS_SUPPORTED := $(CLASSIC_VARIANTS_SUPPORTED)
 .PHONY: pic10f322-test-target pic10f322-test-target-variants
-pic10f322-test-target:
+pic10f322-test-target: variant-selectors-valid
 	@set -e; \
 	for spec in \
 		"pic10f322-test-fault PIC10F322_FAULT_VARIANT=$(PIC10F322_TARGET_VARIANT)|FAULT-INJECT PASS" \
@@ -1669,7 +1749,7 @@ endif
 # skip) if the HEX or the programmer is missing. Echoes the exact command before
 # it touches silicon.
 .PHONY: pic10f322-program
-pic10f322-program: pic10f322
+pic10f322-program: variant-selectors-valid pic10f322
 	@hex="$(PIC10F322_PROG_HEX)"; \
 	if [ ! -f "$$hex" ]; then \
 		echo "ERROR: $$hex not found -- 'make pic10f322' produced no HEX (XC8 installed?)."; \
@@ -2185,7 +2265,7 @@ attiny202-fuses:
 		-U bootend:w:$(XT_FUSE_BOOTEND):m
 
 # Flash ONE variant image to hardware (select with VARIANT=<name>); builds first.
-attiny202-flash: attiny202
+attiny202-flash: variant-selectors-valid attiny202
 	$(AVRDUDE) $(XT_AVRDUDE_FLAGS) \
 		-U flash:w:$(XT_BUILD_DIR)/$(call fw_image,$(VARIANT),$(XT_TAG)).hex:i
 
@@ -2367,12 +2447,42 @@ attiny202-test-target:
 # CLEAN
 # ============================================================================
 
+# The classic-AVR lanes are the only ones that build test binaries NEXT TO their
+# sources; every other lane writes into a build directory a single `rm -rf`
+# covers. Spelled ONCE here because `clean` and `clean-tests` both remove them.
+#
+# WHY THAT MATTERS. Both targets used to spell the list themselves, and the
+# v0.9.8 MCU-field rename moved the rules (`test_sim_<v>` and `test_sim_<v>_t<n>`
+# became `test_sim_<v>_attiny13a` / `_attiny<n>`) without either copy following.
+# The result was the exact silent severance this release exists to remove: every
+# path both targets named had stopped existing, and all nine binaries actually
+# built survived `make clean`. Nothing failed, because an `rm -f` of a file that
+# is not there is a successful `rm -f`.
+#
+# These MUST mirror the rule heads in "SIMULATION TESTS" below character for
+# character -- `test-clean-contract` checks the list against Make's own target
+# inventory rather than against a second copy of the spelling, so a divergence
+# in either direction is a failing gate rather than a leftover file.
+AVR_SIM_BINARIES = \
+	$(foreach v,$(VARIANTS),test/avr/test_trace_$(v) test/avr/test_sim_$(v)_attiny13a) \
+	$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_sim_$(v)_attiny$(n)))
+AVR_SOAK_BINARIES = \
+	$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_soak_$(v)_t$(n)))
+
+# Retired spellings, removed so a worktree carrying pre-v0.9.8 binaries does not
+# keep them forever -- the same courtesy `clean` already extends to the
+# pre-`src/`-reorganization KLEE paths below. BOTH fields moved, so both are
+# enumerated: the output-stage tokens (cd4053/mute/relay, plus the _tmux boards
+# dropped in 0.9.4) and the MCU suffix (absent or _t<n>). This is a fixed
+# historical list; it never grows again unless another rename adds to it.
+AVR_TEST_BINARIES_RETIRED = $(foreach v,cd4053 mute relay cd4053_tmux mute_tmux, \
+	test/avr/test_sim_$(v) test/avr/test_trace_$(v) \
+	$(foreach n,$(TINYX5),test/avr/test_sim_$(v)_t$(n) test/avr/test_soak_$(v)_t$(n)))
+
 # Remove all build outputs and test binaries (keeps coverage/ -- see
 # coverage-clean for that).
 clean:
-	rm -f $(foreach v,$(VARIANTS),test/avr/test_sim_$(v) test/avr/test_trace_$(v)) \
-		$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_sim_$(v)_t$(n))) \
-		$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_soak_$(v)_t$(n))) \
+	rm -f $(AVR_SIM_BINARIES) $(AVR_SOAK_BINARIES) $(AVR_TEST_BINARIES_RETIRED) \
 		test/host/test_logic_host test/pic/test_config_pic test/pic/test_soak_pic \
 		test/pic/test_fault_pic test/pic/test_lockstep_pic test/pic/test_io_pic \
 		test/formal/test_model_check test/formal/test_symbolic test/avr/test_fuses \
@@ -2411,7 +2521,7 @@ attiny13a-fuses:
 		-U hfuse:w:$(ATTINY13A_HFUSE):m
 
 # Flash the selected variant's ATtiny13a image to the MCU.
-attiny13a-flash: $(AVR_FW)$(call fw_image_tail,$(VARIANT),$(ATTINY13A_MCU)).hex
+attiny13a-flash: variant-selectors-valid $(AVR_FW)$(call fw_image_tail,$(VARIANT),$(ATTINY13A_MCU)).hex
 	$(AVRDUDE) $(ATTINY13A_AVRDUDE_FLAGS) -U flash:w:$(AVR_FW)$(call fw_image_tail,$(VARIANT),$(ATTINY13A_MCU)).hex:i
 
 # Convenience: set fuses, then flash firmware. Use for a fresh chip.
@@ -2427,7 +2537,7 @@ attiny$(1)-fuses:
 	$$(AVRDUDE) -c $$(AVR_PROGRAMMER) -p $$(part_$(1)) \
 		-U lfuse:w:$$(TINYX5_LFUSE):m \
 		-U hfuse:w:$$(TINYX5_HFUSE):m
-attiny$(1)-flash: $(AVR_FW)$$(call fw_image_tail,$$(VARIANT),$$(mmcu_$(1))).hex
+attiny$(1)-flash: variant-selectors-valid $(AVR_FW)$$(call fw_image_tail,$$(VARIANT),$$(mmcu_$(1))).hex
 	$$(AVRDUDE) -c $$(AVR_PROGRAMMER) -p $$(part_$(1)) -U flash:w:$(AVR_FW)$$(call fw_image_tail,$$(VARIANT),$$(mmcu_$(1))).hex:i
 attiny$(1)-program: attiny$(1)-fuses attiny$(1)-flash
 endef
@@ -2472,7 +2582,8 @@ TEST_GATES_LATE = \
         test-build-serialization test-target-matrix \
         test-target-lane-markers test-lockstep-progress test-soak-timing \
         test-variant-map-contract test-makefile-name-contract \
-        test-analyze-variant-guard \
+        test-analyze-variant-guard test-variant-selector-guard \
+        test-clean-contract \
         test-soak-reset-witness test-strict-tools test-workload-rebuild \
         test-pic-build-rebuild coverage-check coverage-check-core
 TEST_GATES = $(TEST_GATES_EARLY) $(TEST_GATES_LATE)
@@ -2507,8 +2618,7 @@ stress: test-long
 clean-tests:
 	rm -f test/host/test_logic_host test/formal/test_model_check test/formal/test_symbolic \
 	      test/avr/test_fuses \
-	      $(foreach v,$(VARIANTS),test/avr/test_sim_$(v) test/avr/test_trace_$(v)) \
-	      $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_sim_$(v)_t$(n)))
+	      $(AVR_SIM_BINARIES)
 	@# PIC10F320 host test artifacts. Unlike every other target's, these are
 	@# written into the chip's build directory rather than next to their sources
 	@# (§5.7), so the rm above cannot reach them -- and leaving them behind would
@@ -2703,6 +2813,28 @@ test-makefile-name-contract:
 # analyzed zero of the three output drivers and exited 0.
 test-analyze-variant-guard:
 	./test/test_analyze_variant_guard.sh
+
+# The single-variant counterpart of the gate above. VARIANTS is a list and has
+# been guarded for releases; the variables that select ONE output stage for one
+# lane (PIC10F322_SOAK_VARIANT, PIC10F320_IO_VARIANT, AVR_SOAK_VARIANT, ...)
+# were not, and an unrecognized value there composes a path to a file nothing
+# builds -- which the lane reports as a MISSING TOOLCHAIN and skips, exit 0.
+# Checks that the guard rejects all three malformed shapes and that it is still
+# attached to every rule consuming a selector, transitively: almost none name a
+# selector directly, they read a HEX path composed from one three definitions
+# away.
+test-variant-selector-guard:
+	./test/test_variant_selector_guard.py
+
+# `rm -f` of a path that does not exist SUCCEEDS, so a `clean` list that has
+# drifted from the rules producing the files is completely silent -- which is
+# what the v0.9.8 rename left behind: both clean and clean-tests named
+# `test_sim_<v>` / `test_sim_<v>_t<n>` while the rules had moved to
+# `test_sim_<v>_attiny<n>`, so every path they named was gone and all nine
+# binaries actually built survived. Checks both targets against Make's own
+# inventory of what it can build.
+test-clean-contract:
+	./test/test_clean_contract.sh
 
 # Prove the firmware's compile-time guards actually FIRE. Every build checks
 # them, but only in the sense that they stay silent -- and a guard still
@@ -3315,11 +3447,11 @@ AVR_SOAK_COMPILE = $(HOSTCC) $(SIM_CFLAGS) $(PURE_HOST_CFLAGS) \
 
 # Optional build-only convenience: build without running (Make's normal
 # dependency tracking applies; won't rebuild on AVR_SOAK_DURATION_MS change alone).
-$(AVR_SOAK_BIN): $(AVR_SOAK_DEPS) $(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_VARIANT),$(mmcu_$(AVR_SOAK_CHIP))).elf
+$(AVR_SOAK_BIN): $(AVR_SOAK_DEPS) $(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_VARIANT),$(mmcu_$(AVR_SOAK_CHIP))).elf | variant-selectors-valid
 	$(AVR_SOAK_COMPILE)
 
 # Run target: always recompiles (phony) so every AVR_SOAK_* override is applied.
-test-soak: $(AVR_SOAK_DEPS) $(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_VARIANT),$(mmcu_$(AVR_SOAK_CHIP))).elf
+test-soak: variant-selectors-valid $(AVR_SOAK_DEPS) $(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_VARIANT),$(mmcu_$(AVR_SOAK_CHIP))).elf
 	$(AVR_SOAK_COMPILE)
 	@echo "--- soak test: variant=$(AVR_SOAK_VARIANT)  MCU=ATtiny$(AVR_SOAK_CHIP)  duration=$(AVR_SOAK_DURATION_MS) ms ---"
 	./$(AVR_SOAK_BIN)
@@ -3343,7 +3475,7 @@ AVR_SOAK_WITNESS_LIVENESS_MS   ?= 1000
 # plus margin left in the run, so the reset lands inside the soak rather than
 # after its last millisecond.
 AVR_SOAK_WITNESS_KILL_TIMER_MS ?= 1500
-test-soak-reset-witness: $(AVR_SOAK_DEPS) \
+test-soak-reset-witness: variant-selectors-valid $(AVR_SOAK_DEPS) \
                          $(AVR_FW)$(call fw_image_tail,$(AVR_SOAK_WITNESS_VARIANT),$(mmcu_$(AVR_SOAK_WITNESS_CHIP))).elf
 	@echo "--- soak reset witness: variant=$(AVR_SOAK_WITNESS_VARIANT)  MCU=ATtiny$(AVR_SOAK_WITNESS_CHIP) ---"
 	HOSTCC="$(HOSTCC)" \
@@ -3361,7 +3493,7 @@ test-soak-reset-witness: $(AVR_SOAK_DEPS) \
 # Generate a GTKWave-viewable waveform of PB0/PB1/PB2/PB3 over a representative
 # press/release sequence for the selected VARIANT. Writes
 # $(AVR_BUILD_DIR)/bypass_trace.vcd.
-attiny13a-trace: test/avr/test_trace_$(VARIANT)
+attiny13a-trace: variant-selectors-valid test/avr/test_trace_$(VARIANT)
 	./test/avr/test_trace_$(VARIANT)
 	@echo "View with: gtkwave $(AVR_BUILD_DIR)/bypass_trace.vcd"
 
@@ -3460,7 +3592,7 @@ analyze-deep: classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS)
 # --suppressions-list waives those; --error-exitcode=2 makes cppcheck exit
 # non-zero on anything left. Part of `analyze` -> `make test`.
 .PHONY: analyze-misra
-analyze-misra: classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
+analyze-misra: variant-selectors-valid classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1; then \
 		echo "cppcheck not installed; skipping MISRA analysis"; $(SKIP); \
 	fi; \
@@ -3496,7 +3628,7 @@ analyze-misra: classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS) $(MISRA
 # the waived deviations (it omits --suppressions-list). Never fails the build.
 # Use it when reviewing or maintaining MISRA_COMPLIANCE.md.
 .PHONY: analyze-misra-report
-analyze-misra-report: classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS) $(MISRA_ADDON) $(MISRA_RULES)
+analyze-misra-report: variant-selectors-valid classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS) $(MISRA_ADDON) $(MISRA_RULES)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then \
 		echo "cppcheck and/or python3 not available; skipping MISRA report"; $(SKIP); \
 	fi; \
@@ -3807,7 +3939,7 @@ pic10f320-test-equiv:
 
 # Settled control-pin sequence for the selected output stage (the variant-
 # specific RA1/RA2 pattern the equivalence lane deliberately does not check).
-pic10f320-test-actuation:
+pic10f320-test-actuation: variant-selectors-valid
 	@mkdir -p $(PIC10F320_BUILD_DIR)
 	@$(PIC10F320_HOST_CC) -std=c11 -O2 $(PIC10F320_FW_HOST_DEFS) -I$(PIC10F320_EQUIV_DIR) \
 		-c $(PIC10F320_EQUIV_DIR)/fw_harness.c -o $(PIC10F320_BUILD_DIR)/fw_harness_$(PIC10F320_VARIANT).o
@@ -3855,7 +3987,7 @@ pic10f320-test-fault-host:
 # Runs per variant: the firmware's #ifdef output stages give the three variants
 # 84 / 95 / 99 executable lines, so a single-variant run would leave real
 # firmware logic unmeasured. pic10f320-test-host-variants sweeps all three.
-pic10f320-coverage-check-fw:
+pic10f320-coverage-check-fw: variant-selectors-valid
 	@# Local executability is required everywhere, including source archives.
 	@# Inside a worktree, also verify what CI will receive from the Git index.
 	@if [ ! -x "$(PIC10F320_COVERAGE_FW_GATE)" ]; then \
@@ -3899,7 +4031,8 @@ pic10f320-coverage-check-fw:
 # Tool-independent aggregate: everything above needs only a host C compiler (plus
 # gcov for the coverage gate), so this joins `test` (Principle 5). It does NOT
 # build any HEX.
-pic10f320-test-host: pic10f320-test-equiv pic10f320-test-actuation pic10f320-test-fault-host \
+pic10f320-test-host: variant-selectors-valid \
+                  pic10f320-test-equiv pic10f320-test-actuation pic10f320-test-fault-host \
                   pic10f320-coverage-check-fw
 	@echo "=== all PIC10F320 host lanes passed (variant $(PIC10F320_VARIANT)) ==="
 
@@ -3984,7 +4117,7 @@ PIC10F320_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 \
 #   - the final HEX passes the immutable hardware return-stack oracle BEFORE the
 #     completion flag is set, so any oracle/tool failure reaches the same cleanup
 #     trap and removes the rejected image.
-pic10f320: $(PIC10F320_SRC)
+pic10f320: variant-selectors-valid $(PIC10F320_SRC)
 	@for path in $(PIC10F320_BUILD_PRODUCTS); do \
 		if [ -d "$$path" ] && [ ! -L "$$path" ]; then rmdir "$$path"; \
 		else rm -f "$$path"; fi || exit 1; \
@@ -4153,7 +4286,7 @@ pic10f320-variants:
 	echo "=== all PIC10F320 variants built within budget ==="
 
 # XC8's full memory-usage summary (program + data space) for one variant.
-pic10f320-size: $(PIC10F320_SRC)
+pic10f320-size: variant-selectors-valid $(PIC10F320_SRC)
 	@# One shell, for the same reason as `pic10f320` above: $(SKIP) is `exit 0` in
 	@# non-strict mode and would otherwise skip only its own recipe line.
 	@mkdir -p "$(PIC10F320_BUILD_DIR)"; \
@@ -4444,7 +4577,7 @@ pic10f320-test-config: pic10f320-variants
 # STRICT_TOOLS is forwarded as well as probed. The Make-level preflight decides
 # skip-vs-fail before the wrappers run; forwarding keeps the wrappers' own strict
 # path consistent when they are reached, exactly as the PIC10F322 lane does.
-pic10f320-test-gpsim: pic10f320
+pic10f320-test-gpsim: variant-selectors-valid pic10f320
 	@$(call gpsim_wrapper_preflight,PIC10F320); \
 	if [ ! -f "$(PIC10F320_HEX)" ]; then \
 		echo "no $(PIC10F320_HEX) (XC8 absent?); skipping PIC10F320 gpsim test"; $(SKIP); \
@@ -4513,19 +4646,19 @@ pic10f320-test: pic10f320-test-host-variants pic10f320-test-build pic10f320-test
 # selected value so all simply-expanded build paths, flags and output macros are
 # recomputed together; target-specific variables are too late for those `:=`
 # definitions and can produce a selected label on a default-variant image.
-_pic10f320-build-fault-target:
+_pic10f320-build-fault-target: variant-selectors-valid
 	@$(MAKE) --no-print-directory PIC10F320_VARIANT=$(PIC10F320_FAULT_VARIANT) pic10f320
 
-_pic10f320-build-io:
+_pic10f320-build-io: variant-selectors-valid
 	@$(MAKE) --no-print-directory PIC10F320_VARIANT=$(PIC10F320_IO_VARIANT) pic10f320
 
-_pic10f320-build-lockstep:
+_pic10f320-build-lockstep: variant-selectors-valid
 	@$(MAKE) --no-print-directory PIC10F320_VARIANT=$(PIC10F320_LOCKSTEP_VARIANT) pic10f320
 
-_pic10f320-build-soak:
+_pic10f320-build-soak: variant-selectors-valid
 	@$(MAKE) --no-print-directory PIC10F320_VARIANT=$(PIC10F320_SOAK_VARIANT) pic10f320
 
-pic10f320-test-fault-target: _pic10f320-build-fault-target
+pic10f320-test-fault-target: variant-selectors-valid _pic10f320-build-fault-target
 	@if ! command -v $(PIC10F320_SOAK_CXX) >/dev/null 2>&1; then \
 		echo "no C++ compiler ($(PIC10F320_SOAK_CXX)); skipping PIC10F320 target fault-inject"; $(SKIP); \
 	fi; \
@@ -4551,7 +4684,7 @@ pic10f320-test-fault-target: _pic10f320-build-fault-target
 	fi; \
 	$(PIC10F320_FAULT_COMPILE) && $(PIC10F320_FAULT_BIN)
 
-pic10f320-test-io: _pic10f320-build-io
+pic10f320-test-io: variant-selectors-valid _pic10f320-build-io
 	@if ! command -v $(PIC10F320_SOAK_CXX) >/dev/null 2>&1 \
 	   || [ ! -f "$(PIC10F320_SOAK_GPSIM_INC)/sim_context.h" ] \
 	   || ! pkg-config --exists glib-2.0 2>/dev/null; then \
@@ -4562,7 +4695,7 @@ pic10f320-test-io: _pic10f320-build-io
 	fi; \
 	$(PIC10F320_IO_COMPILE) && $(PIC10F320_IO_BIN)
 
-pic10f320-test-lockstep: _pic10f320-build-lockstep
+pic10f320-test-lockstep: variant-selectors-valid _pic10f320-build-lockstep
 	@if ! command -v $(PIC10F320_SOAK_CXX) >/dev/null 2>&1 \
 	   || [ ! -f "$(PIC10F320_SOAK_GPSIM_INC)/sim_context.h" ] \
 	   || ! pkg-config --exists glib-2.0 2>/dev/null; then \
@@ -4624,7 +4757,7 @@ pic10f320-test-fault-variants:
 # selected by PIC10F320_VARIANT -- unlike the 322's `pic10f322`, which builds the whole
 # matrix. Without it, `make pic10f320-test-target PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay`
 # would build cd4053_simple and then fail looking for the tq2_l2_5v_relay image.
-pic10f320-test-target:
+pic10f320-test-target: variant-selectors-valid
 	@set -e; \
 	for spec in \
 		"pic10f320-test-fault-target PIC10F320_FAULT_VARIANT=$(PIC10F320_TARGET_VARIANT)|FAULT-INJECT PASS" \
@@ -4714,7 +4847,7 @@ $(PIC10F320_SOAK_BIN): $(PIC10F320_SOAK_DEPS) FORCE
 	$(PIC10F320_SOAK_COMPILE)
 
 .PHONY: pic10f320-test-soak
-pic10f320-test-soak: _pic10f320-build-soak
+pic10f320-test-soak: variant-selectors-valid _pic10f320-build-soak
 	@if ! command -v $(PIC10F320_SOAK_CXX) >/dev/null 2>&1 \
 	   || [ ! -f "$(PIC10F320_SOAK_GPSIM_INC)/sim_context.h" ] \
 	   || ! pkg-config --exists glib-2.0 2>/dev/null; then \
@@ -5088,6 +5221,8 @@ help:
 	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
 	@echo "  test-makefile-name-contract  every make goal and variable named by a file or a doc really exists (included in test)"
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
+	@echo "  test-variant-selector-guard  every lane rejects a bad single-variant selector instead of skipping (included in test)"
+	@echo "  test-clean-contract  clean/clean-tests remove everything the Makefile builds (included in test)"
 	@echo "  test-static-assert-guards  the firmware's compile-time guards really fail the build when violated (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"

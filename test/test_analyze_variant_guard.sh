@@ -87,7 +87,11 @@ checks=$((checks + 1))
 # contract half must report exactly that target.
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/test-analyze-guard.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
-sed "s/^analyze-misra: $GUARD /analyze-misra: /" "$MAKEFILE" > "$scratch/Makefile"
+# Positional-independent on purpose: analyze-misra carries a second guard since
+# 2026-08-03 (variant-selectors-valid), and a fixture pinned to "the guard is the
+# FIRST prerequisite" fails the day another one is added -- reporting a spelling
+# change as a missing guard.
+sed "s/^\(analyze-misra:.*\)$GUARD /\1/" "$MAKEFILE" > "$scratch/Makefile"
 cmp -s "$MAKEFILE" "$scratch/Makefile" \
 	&& fail "negative fixture changed nothing -- the analyze-misra guard is not spelled as this test expects"
 mapfile -t mutated < <(harvest "$scratch/Makefile")

@@ -34,9 +34,9 @@ ten hours before it was killed by hand; both CI jobs reaching the row declared n
 timeout and would have been cancelled at GitHub's six-hour limit having reported
 nothing. Four separate guards missed it, each for a different reason.
 
-WHERE OVERRIDES LIVE -- three sources, and the third is the one that matters.
+WHERE OVERRIDES LIVE -- four sources, and the last two are the ones that matter.
 
-  1. Shell and YAML lines invoking make, across test/, scripts/ and .github/.
+  1. Lines invoking make, in EVERY tracked file: shell, YAML, and documents.
      Backslash continuations are joined FIRST. This is not optional: in
      test/test_avr_build_rebuild.sh the `make` sits on one line and its
      overrides five continued lines below, and there are ZERO physical lines in
@@ -56,11 +56,24 @@ WHERE OVERRIDES LIVE -- three sources, and the third is the one that matters.
      "lines invoking make" would not have caught the defect it exists to
      prevent. That is the whole reason this source is enumerated separately.
 
+  4. DOCUMENTS, folded into source 1 on 2026-08-03. This axis originally
+     harvested test/, scripts/, .github/ and the Makefile -- the scope where the
+     machine-facing overrides live -- which left the human-facing half of the
+     same defect unchecked by any of the four axes. MISRA_COMPLIANCE.md tells a
+     maintainer to run `make analyze-misra VARIANTS="..." STRICT_TOOLS=1`;
+     README.md documents `make attiny202-program VARIANT=<v>`. Axis D reads doc
+     prose but only for names inside the project's variable PREFIXES, and
+     VARIANTS, VARIANT, STRICT_TOOLS, VERSION and PIC10F322_PROG are all
+     unprefixed, so nine names were reachable by no axis at all. Anchoring on
+     the make word -- which this axis already did -- is what let the scope widen
+     without needing a vocabulary list to keep the false-positive rate down.
+
 SCOPE, stated so the next reader does not over-trust it: axis C checks names
-passed to make. It does not check names a document merely mentions in prose
-(that is axis B/D, still open in TODO.md), and it cannot know that a name
-reaching make is meant for make rather than for a script reading the
-environment -- hence ENV_ALLOWLIST below, which must stay short and justified.
+passed to make. It does not check a variable a document merely MENTIONS without
+handing it to make (that is axis D, and only within its prefix vocabulary), and
+it cannot know that a name reaching make is meant for make rather than for a
+script reading the environment -- hence ENV_ALLOWLIST below, which must stay
+short and justified.
 
 ================================ AXIS A ================================
 
@@ -310,26 +323,34 @@ def assignments_passed_to_make(line):
 
 
 def harvest():
-    """Return {name: [locations]} for every NAME= handed to make."""
-    files = subprocess.run(
-        ["git", "ls-files", "test/", "scripts/", ".github/", "Makefile"],
-        cwd=ROOT, capture_output=True, text=True, check=True,
-    ).stdout.split()
+    """Return ({name: [locations]}, used_markers, all_markers) for every NAME=
+    handed to make.
 
+    SCOPED TO EVERY TRACKED FILE, like axes A, B and D, and NOT to test/,
+    scripts/, .github/ and the Makefile as it was when axis C was first built.
+    That original scope was inherited from where the *machine-facing* overrides
+    live, and it left a real hole: a document telling a reader to run
+
+        make analyze-misra VARIANTS="cd4053_simple ..." STRICT_TOOLS=1
+
+    makes exactly the same claim about the Makefile's vocabulary that a script
+    does, and the reader who follows it gets an inert override and no error --
+    the human-facing half of the same defect. Axis D covers doc prose but only
+    for names inside the project's variable PREFIXES, so `VARIANTS`,
+    `STRICT_TOOLS`, `VERSION` and every other unprefixed name were checked by
+    nothing at all. Anchoring on the make word, as this axis already does, keeps
+    the precision that lets the scope widen without a vocabulary list.
+    """
     found = {}
+    used_markers, all_markers = set(), {}
 
     def record(name, where):
         found.setdefault(name, []).append(where)
 
-    for rel in files:
-        if rel == SELF_EXEMPT:
-            continue
-        path = os.path.join(ROOT, rel)
-        try:
-            with open(path, encoding="utf-8") as fh:
-                text = fh.read()
-        except (OSError, UnicodeDecodeError):
-            continue
+    for rel, text in harvestable_files():
+        exempt, markers = exemptions(text)
+        for line in markers:
+            all_markers[(rel, line)] = markers[line]
 
         # Sources 1 and 2: anything invoking make, comments included.
         #
@@ -340,6 +361,7 @@ def harvest():
         # YAML files are joined, because there a continued line genuinely is one
         # command -- which is the case that hid three inert overrides in v0.9.8.
         is_makefile = rel == "Makefile"
+        is_doc = rel.endswith((".md", ".adoc"))
         lines = ([(i, l) for i, l in enumerate(text.split("\n"), 1)]
                  if is_makefile else logical_lines(text))
         for lineno, line in lines:
@@ -353,9 +375,14 @@ def harvest():
             # in that script, not an override anyone is being told to pass.
             # Harvesting those trades a real check for recurring false
             # positives on generic words.
-            if not is_makefile and line.lstrip().startswith("#"):
+            # ...and in documents, where every line is prose addressed to a
+            # reader and a leading `#` is a heading rather than a comment.
+            if not is_makefile and not is_doc and line.lstrip().startswith("#"):
                 continue
             for name in assignments_passed_to_make(line):
+                if lineno in exempt:
+                    used_markers.add((rel, exempt[lineno]))
+                    continue
                 record(name, f"{rel}:{lineno}")
 
         # Source 3: mutation table rows, whose 3rd field is a make command.
@@ -370,7 +397,7 @@ def harvest():
                 for name in assignments_in(fields[2]):
                     record(name, f"{rel}:{lineno} (mutation row)")
 
-    return found
+    return found, used_markers, all_markers
 
 
 def dereferenced_names():
@@ -1198,7 +1225,7 @@ def check_axis_d(known_names):
 def check_axis_c():
     """Axis C: every `NAME=value` handed to make names a variable it knows."""
     checks = 0
-    found = harvest()
+    found, used_markers, all_markers = harvest()
     checked = {n: locs for n, locs in found.items() if n not in ENV_ALLOWLIST}
 
     # The harvest must find something, and must find the sources separately. A
@@ -1214,6 +1241,22 @@ def check_axis_c():
             "FAIL: harvested no overrides from the mutation tables. That source "
             "carries the v0.9.8 defect this gate exists to prevent; if the table "
             "format changed, fix the parser rather than dropping the source."
+        )
+    checks += 1
+
+    # Documents are a source in their own right and are checked the same way, so
+    # losing them must be loud. Nine names reach this axis ONLY from prose
+    # (STRICT_TOOLS, VARIANTS, VERSION, ...); before the scope widened they were
+    # checked by nothing -- axis D covers doc prose but only inside the project's
+    # variable prefixes, and every one of those nine is unprefixed.
+    from_docs = [n for n, locs in found.items()
+                 if any(re.search(r"\.(?:md|adoc):\d+$", l) for l in locs)]
+    if not from_docs:
+        sys.exit(
+            "FAIL: harvested no overrides from any document. A documented "
+            "`make <goal> NAME=value` is the same claim about the Makefile's "
+            "vocabulary as a script's, aimed at a reader who gets no error at "
+            "all; restore the scope rather than narrowing the contract."
         )
     checks += 1
 
@@ -1286,7 +1329,7 @@ def check_axis_c():
         sys.exit("FAIL: negative case -- `make-release.sh` is being treated as a make invocation")
     checks += 1
 
-    return checks, len(checked)
+    return checks, len(checked), used_markers, all_markers
 
 
 def check_self_exemption():
@@ -1334,7 +1377,7 @@ def check_markers(used, declared):
 
 
 def main():
-    c_checks, overrides = check_axis_c()
+    c_checks, overrides, c_used, c_marks = check_axis_c()
     a_checks, reads = check_axis_a()
     a_checks += check_self_exemption()
 
@@ -1343,8 +1386,9 @@ def main():
         data_base()[2] | dereferenced_names())
 
     marks = dict(b_marks)
+    marks.update(c_marks)
     marks.update(d_marks)
-    shared = check_markers(b_used | d_used, marks)
+    shared = check_markers(b_used | c_used | d_used, marks)
 
     total = c_checks + a_checks + b_checks + d_checks + shared
     print(f"Makefile name contract: {total} checks, 0 failures "
