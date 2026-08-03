@@ -628,7 +628,7 @@ FORCE:
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
         test-variant-map-contract test-makefile-name-contract \
-        test-analyze-variant-guard \
+        test-analyze-variant-guard test-static-assert-guards \
         pic10f322-test-target pic10f322-test-target-variants pic10f322-test-io pic10f322-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
         test-flash-budget-regression test-soak test-soak-reset-witness \
@@ -2453,7 +2453,8 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # failure is reported, not whether it is caught. A new gate may go in either
 # half, and lands in both aggregates either way.
 TEST_GATES_EARLY = \
-        analyze test-host test-model-check test-symbolic test-cbmc \
+        analyze test-static-assert-guards \
+        test-host test-model-check test-symbolic test-cbmc \
         test-fuses test-stack-bound test-stack-bound-regression \
         test-stack-bound-pic-regression test-flash-budget-regression \
         test-fault-inject pic10f320-test-host-variants \
@@ -2702,6 +2703,20 @@ test-makefile-name-contract:
 # analyzed zero of the three output drivers and exited 0.
 test-analyze-variant-guard:
 	./test/test_analyze_variant_guard.sh
+
+# Prove the firmware's compile-time guards actually FIRE. Every build checks
+# them, but only in the sense that they stay silent -- and a guard still
+# enforcing its invariant is indistinguishable from one that has been defused,
+# because both are silent and both build green. This breaks one INPUT to each
+# guard (a threshold, a pin ordinal, the timer constant, -fshort-enums) in a
+# throwaway copy of src/ and requires the build to fail with that guard's own
+# message, plus a census so a guard whose siblings share its diagnostic cannot
+# be deleted unnoticed. The firmware itself is never modified.
+test-static-assert-guards:
+	@if ! command -v $(CC) >/dev/null 2>&1; then \
+		echo "$(CC) not installed; skipping the static_assert guard checks"; $(SKIP); \
+	fi; \
+	./test/test_static_assert_guards.sh
 
 # Parse the GitHub workflow files and cross-check ci.yml's job list against
 # ci-local.sh. Nothing else here loads them as YAML, so an unparseable workflow
@@ -5073,6 +5088,7 @@ help:
 	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
 	@echo "  test-makefile-name-contract  every make goal and variable named by a file or a doc really exists (included in test)"
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
+	@echo "  test-static-assert-guards  the firmware's compile-time guards really fail the build when violated (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
 	@echo "  test-pic-build-rebuild  PIC soak binaries rebuild on a workload change"

@@ -239,16 +239,53 @@ simple script. Medium effort (~2–3 h). Note XC8 does not support
 `-fstack-usage`; its `--callgraph` output is the PIC equivalent if this is
 extended there.
 
-**Negative `static_assert` verification.** `init()` and the config headers
-contain several `static_assert` guards enforcing critical constraints
-(`RELEASE_THRESH > PRESSED_THRESH`, `PRESSED_THRESH > 0`, timer formula
-consistency, pin-ordinal agreement). These are compile-time checks, implicitly
-verified on every build — but no test confirms they *actually fire* when
-violated. A meta-test would copy the source with a deliberately broken
-constraint, attempt to compile, and assert the build fails with the expected
-diagnostic. Mechanically similar to `run_mutation_tests.sh` but checking for
-compile failure rather than test failure. Low effort (~30 min); closes the gap
-where a refactor could weaken or remove a guard unnoticed.
+**~~Negative `static_assert` verification.~~ DONE (2026-08-02).**
+`test/test_static_assert_guards.sh`, wired in as `test-static-assert-guards` in
+`TEST_GATES_EARLY`, so it runs in both `make test` and `make test-long`. 27
+checks in 0.3 s: 24 guards counted, 9 mutations proven to trip one.
+
+Built as specified — copy `src/` to a throwaway tree, break one thing, require
+the build to fail with that guard's own message — with three corrections the
+specification did not anticipate:
+
+- **Break the guard's INPUTS, never the guard.** Mutating a `static_assert` line
+  would prove only that the compiler implements `static_assert`. Breaking a
+  threshold, a pin ordinal, the timer constant or a build flag is what a real
+  regression looks like, and catching it there is the guard's actual job. One
+  mutation is therefore not a source edit at all: dropping `-fshort-enums` from
+  `CFLAGS` is the realistic way the enum-width guards get defeated, and no edit
+  to `src/` can express it.
+- **Mutations alone cannot detect a DELETED guard, and the first version of this
+  file proved it by missing one.** Guards come in families sharing one
+  diagnostic — three enum-size asserts all say `use -fshort-enums`, seven pin
+  asserts all fail the same build — so deleting one leaves a sibling to trip the
+  mutation and the deletion scores as a pass. Removing `sizeof(effect_state_t)`
+  went unnoticed until a probe went looking. Fixed by a census: per-file guard
+  counts are pinned, so a deletion fails and so does an addition, which forces
+  someone to decide whether the new guard needs a mutation.
+- **Three preconditions have to be checked, not assumed**, or the whole exercise
+  measures nothing: the unmutated tree must compile (otherwise every "it failed"
+  is unattributable), each mutation must actually change its file (`sed` patterns
+  rot — `TIMER0_OCR0A_1MS` is defined with leading whitespace inside an `#if`,
+  and the first draft's pattern silently matched nothing), and the failure must
+  carry the guard's own message (or an unrelated compile error scores as a pass).
+
+Validated against a doctored copy of `src/` — reached through
+`STATIC_ASSERT_SRC`, which exists only so the watcher can be tested without
+editing the firmware it watches. Every failure mode fires with its own
+diagnostic: guard deleted, guard weakened `>` to `>=`, message reworded,
+`#define` reindented out from under a mutation, a shell dropping the shared
+header's `#include`, a sixth invariant added, and the pristine tree broken.
+
+**Follow-up for the firmware owner, not fixable from the test suite:**
+`src/bypass_mcu_pic10f320.c` does not include `bypass_compile_checks.h`. It
+carries its own copy of all five threshold invariants and its own
+`DEBOUNCE_COUNTER_MAX`. The values agree today, so nothing is wrong — but the
+shared header's own comment says the invariant "lives in ONE place and cannot
+drift between shells", and for that shell it does not. The comment also names
+only two shells while three include it. The gate records the divergence
+explicitly (`SHELLS_WITH_OWN_COPY`) so it is counted rather than blessed, and a
+fifth shell that does neither now fails.
 
 **Clock drift fine-grained sweep.** `test_oscillator_drift_tolerance` checks only
 the ±10% endpoints (drift factors 0.9 and 1.1). An exhaustive sweep in finer
@@ -259,14 +296,47 @@ intermediate frequencies could expose a rounding or tick-count edge case the
 endpoints alone miss. Mechanically simple: loop over drift factors, reset sim,
 measure latency, assert <10 ms.
 
-**Stuck-switch long-duration test.** The design documents that a mechanically
-stuck (permanently closed) switch leaves the firmware in RELEASE_DEBOUNCE_WAIT
-indefinitely with no recovery — intentional. But no test drives the footswitch
-permanently low for an extended duration and asserts exactly zero further
-toggles. `test_long_hold_single_toggle` holds for 3–5 seconds; a multi-hour
-golden-model run with a permanent low input would make this documented behaviour
-an enforced guarantee. Mechanically trivial. Use the golden-model path for
-duration — the simulator's real-time ratio makes hours impractical.
+**~~Stuck-switch long-duration test.~~ DONE (2026-08-02).**
+`test_stuck_switch_no_recovery()` in `test/host/test_logic_host.c`, on the
+golden-model path as specified. Six simulated hours per case (`21600000` ms,
+knob `MODEL_STUCK_SWITCH_DURATION_MS`), two cases, 0.2 s of real time — so it is
+deliberately NOT workload-scaled: shrinking it in the fast lane would leave
+`make test` asserting something weaker than the caveat it enforces, and would
+save nothing worth having.
+
+**One correction to the item's premise, and it matters for how the test is
+read.** The framing assumed duration is where the strength comes from. It is
+not. This model is finite-state with a counter bounded at `RELEASE_THRESH`, so a
+held-low input reaches its fixed point within `RELEASE_THRESH` ticks and every
+millisecond after the 25th revisits the same state. Measured while looking for a
+defect only this test catches: deleting the integrator's saturation — the
+counter wrap this looks like it exists to catch — is *already* caught by sixteen
+other assertions in the file, because a wrapping counter misbehaves inside the
+existing 5 s hold too.
+
+What the test actually adds is the shape of the assertions:
+
+- the **power-on-stuck** case is driven over time at all. `test_power_on_pressed`
+  checks the instant after `init()` and nothing after it, so "a pedal that boots
+  with a jammed switch never toggles on its own" was asserted for exactly one
+  tick;
+- invariants are checked **every tick** rather than at the end, so a transient
+  excursion that settles back cannot hide behind a final state;
+- the debounce counter is **pinned to its saturated value**, which no other test
+  asserts;
+- **recovery once the fault clears** is asserted, so "no recovery" cannot decay
+  into "left corrupt" — the design doc promises the first, not the second.
+
+The hours buy one thing beyond that, and it is worth the 0.2 s: a standing guard
+against a future change introducing an accumulator that is *not* bounded, which
+is the only defect class a long run can see and a short one cannot.
+
+Subject is the golden model, i.e. the ORACLE, not the firmware. The shipping
+integrator is already covered more strongly than any run can manage —
+`test/formal/test_cbmc.c` (C1) proves `debounce_integrate()` saturates for every
+admitted input. The gap was that the simavr tests judge the firmware by
+comparing it against this model, so a model that drifted would make a firmware
+that drifted look right.
 
 **WDT pet frequency measurement.** `test_watchdog_not_tripped_normally` confirms
 the WDT does not fire during normal operation, but does not verify the *rate* at
@@ -1171,9 +1241,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Cross-compiler verification | 2.5 | 2 h | Medium — compiler-safety net |
 | Compiler optimization sensitivity test | 2.5 | 1 h | Medium — quick win |
 | Stack depth cross-verification | 2.5 | 2–3 h | Medium — third independent bound |
-| Negative `static_assert` verification | 2.5 | 30 min | Low — build-guard meta-test |
 | Clock drift fine-grained sweep | 2.5 | 1 h | Low — narrow but real edge case |
-| Stuck-switch long-duration test | 2.5 | 30 min | Medium — enforces documented behaviour |
 | WDT pet frequency measurement | 2.5 | 1–2 h | Medium — catches handshake bugs |
 | Interrupt-free window measurement | 2.5 | 1 h | Medium — confirms runtime invariant |
 | Multi-press boundary cases | 2.5 | 3–4 h | Medium — tick-boundary edge cases |

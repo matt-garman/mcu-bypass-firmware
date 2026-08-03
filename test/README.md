@@ -42,6 +42,8 @@ test/
   test_analyze_variant_guard.sh shared: analyze-* targets reject a bad VARIANTS=
                                      instead of silently analyzing less
   test_variant_map_contract.sh shared: every per-variant map is guard-registered
+  test_static_assert_guards.sh shared: the firmware's compile-time guards really
+                                     fail the build when their inputs are broken
   test_pic_build.sh         shared: PIC image/size/rebuild-trigger checks
   test_pic10f320_coverage_archive.sh shared: coverage-gate source-archive mode checks
   test_pic_rebuild.sh       shared: PIC soak rebuild determinism

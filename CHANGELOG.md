@@ -69,7 +69,7 @@ file is the human-readable summary of *what changed*.
   effect would have surfaced only in the published artifact, at the end of a
   24-hour release run, as a `MANIFEST.md` with empty ATtiny13a and tinyx5 fuse
   bytes and one image path composed as `bypass--<stage>.hex`. Axis A of the
-  same four-axis item; 64 queries verified, 22 checks in total, 0.4 s.
+  same four-axis item; 65 queries verified.
 
   Both spellings are harvested — direct `print-<VAR>`, and the `mkv` wrapper in
   `scripts/make-release.sh`, which passes the name as a bare word — and it
@@ -96,7 +96,7 @@ file is the human-readable summary of *what changed*.
 - **The same gate now also fails if any documented `make <goal>` names a goal
   that does not exist, or if any prose or diagnostic names a variable that does
   not.** Axes B and D, closing the four-axis name-contract item. 35 checks in
-  total, 0.6 s: 64 variable queries, 342 documented commands, 72 overrides and
+  total, 0.6 s: 65 variable queries, 349 documented commands, 72 overrides and
   65 variable mentions. Each new axis found a live defect on its first clean
   run — `.gitignore` named `make pic-test-soak`, a goal the `v0.9.8` rename
   removed, in the comment explaining which goal produces the file it ignores;
@@ -186,6 +186,69 @@ file is the human-readable summary of *what changed*.
   `make analyze-misra VARIANTS="cd4053 mute relay"` checks 2 files, reports
   `MISRA-C:2012: clean` and exits 0. With it, nothing is analyzed and it exits
   2.
+
+- **The firmware's compile-time guards are now proven to actually fire.** Every
+  build checks the `static_assert`s in the config headers and MCU shells, but
+  only in the sense that they stay silent — and a guard still enforcing its
+  invariant is indistinguishable from one that has been defused, because both
+  are silent and both build green. Reorder a header so the constants arrive
+  after the check, drop an `#include`, weaken `>` to `>=`, comment one out
+  during a debugging session: nothing notices. New gate
+  `test-static-assert-guards` (`test/test_static_assert_guards.sh`, in `make
+  test`), 27 checks in 0.3 s — 24 guards counted, 9 mutations proven to trip
+  one. The firmware itself is never modified; mutations are applied to a
+  throwaway copy of `src/`.
+
+  The guards' **inputs** are broken, never the guards: a mutation editing a
+  `static_assert` line would prove only that the compiler implements
+  `static_assert`. Breaking a threshold, a pin ordinal, the Timer0 constant or a
+  build flag is what a real regression looks like. One mutation is not a source
+  edit at all — dropping `-fshort-enums` is how the enum-width guards actually
+  get defeated, and no edit to `src/` can express it.
+
+  Mutations alone cannot catch a **deleted** guard, and the first version of
+  this gate demonstrated that by missing one: guards come in families sharing a
+  diagnostic (three enum-size asserts all say `use -fshort-enums`, seven pin
+  asserts all fail the same build), so deleting one leaves a sibling to trip the
+  mutation. A per-file guard census closes it — a deletion fails, and so does an
+  addition, which forces a decision about whether the new guard needs a
+  mutation.
+
+  Three preconditions are checked rather than assumed, since without them the
+  whole exercise measures nothing: the unmutated tree must compile, each
+  mutation must actually change its file (`TIMER0_OCR0A_1MS` is defined with
+  leading whitespace inside an `#if`, and the first draft's pattern silently
+  matched nothing), and the failure must carry the guard's own message.
+
+- **A mechanically stuck footswitch is now an enforced guarantee rather than a
+  documented intention.** `DESIGN_DOCUMENTATION.adoc` states under Caveats and
+  Limitations that "by design, no recovery is currently provided for a
+  mechanically stuck switch" — a promise in both directions, since it also means
+  no spontaneous *second* toggle while the fault persists. Only the first half
+  was ever framed as intentional, and the second half is the one a player would
+  notice. `test_stuck_switch_no_recovery()` drives the input low for six
+  simulated hours in each of the two ways a switch sticks closed — after a
+  normal press (one toggle, parked `ENGAGED`) and already stuck at power-on (no
+  toggle at all, parked `BYPASS`) — then asserts recovery once the fault clears.
+
+  Recorded because the obvious reading is wrong: the duration is *not* where the
+  strength comes from. The model is finite-state with a counter bounded at
+  `RELEASE_THRESH`, so a held-low input reaches its fixed point within
+  `RELEASE_THRESH` ticks. Deleting the integrator's saturation — the counter
+  wrap this looks like it exists to catch — is already caught by sixteen other
+  assertions in the file. What is new is the shape: the power-on-stuck case is
+  driven over time at all (`test_power_on_pressed` checked the instant after
+  `init()` and nothing after), invariants are checked every tick rather than at
+  the end, the counter is pinned to its saturated value, and recovery is
+  asserted so "no recovery" cannot decay into "left corrupt". The six hours cost
+  0.2 s and buy a standing guard against a future unbounded accumulator, the one
+  defect class a long run sees and a short one cannot.
+
+  Subject is the golden model — the *oracle*, not the firmware. The shipping
+  integrator is covered more strongly than any run can manage: `test_cbmc.c`
+  (C1) proves `debounce_integrate()` saturates for every admitted input. The gap
+  was that the simavr tests judge the firmware by comparing it against this
+  model, so a model that drifted would make a firmware that drifted look right.
 
 ### Changed
 - **Every released firmware image is renamed to one consistent scheme.** All

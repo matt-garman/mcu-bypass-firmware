@@ -38,6 +38,14 @@
 #define MODEL_FUZZ_EXTREME_BOUNCE_PRESSES 10
 #endif
 
+// Simulated milliseconds a stuck switch is held. The default is six hours --
+// long enough that a uint8_t debounce counter would have wrapped ~84,000 times
+// if the integrator's saturation ever stopped holding. See
+// test_stuck_switch_no_recovery().
+#ifndef MODEL_STUCK_SWITCH_DURATION_MS
+#define MODEL_STUCK_SWITCH_DURATION_MS 21600000u
+#endif
+
 //////////////////////////////////////////////////////////////////////////////
 // Golden model: mirrors bypass_mcu_avr_classic.c constants and logic exactly.
 //////////////////////////////////////////////////////////////////////////////
@@ -167,6 +175,104 @@ static void test_long_hold_single_toggle(void) {
     drive(&m, 1, 5000);  // hold for 5 seconds
     CHECK(m.toggle_count == 1, "5s hold = single toggle, got %u", m.toggle_count);
     CHECK(m.effect_state == ENGAGED, "still engaged during hold");
+}
+
+// Reliability goal: a MECHANICALLY STUCK switch parks the firmware and leaves
+// it parked. DESIGN_DOCUMENTATION.adoc states it plainly under Caveats and
+// Limitations -- "By design, no recovery is currently provided for a
+// mechanically stuck switch" -- and that is a promise in both directions: no
+// self-recovery, and equally no spontaneous SECOND toggle while the fault
+// persists. Only the first half was documented as intentional; the second half
+// is what a player would actually notice, and until now nothing enforced it.
+//
+// test_long_hold_single_toggle covers five seconds. A stuck switch is not a
+// five-second event -- it is however long the pedal stays on the board, which
+// is the whole point of the caveat.
+//
+// WHERE THE STRENGTH ACTUALLY COMES FROM, stated honestly because the obvious
+// reading is wrong. It is NOT the duration. This model is finite-state with a
+// counter bounded at RELEASE_THRESH, so a held-low input reaches its fixed
+// point within RELEASE_THRESH ticks and every millisecond after the 25th
+// revisits the same state. Measured: deleting the integrator's saturation
+// entirely -- the wrap this looks like it exists to catch -- is already caught
+// by sixteen other assertions in this file, because a wrapping counter
+// misbehaves within the 5 s hold too.
+//
+// What is new here is the SHAPE of the assertions, not the hours:
+//   - the power-on-stuck case is driven over time at all. test_power_on_pressed
+//     checks the instant after init and nothing afterwards, so "a pedal that
+//     boots with a jammed switch never toggles on its own" was asserted for one
+//     tick;
+//   - the invariants are checked EVERY tick rather than at the end, so a
+//     transient excursion that settles back cannot hide behind a final state;
+//   - the counter is pinned to its saturated value, which no other test asserts;
+//   - recovery once the fault clears is asserted, so "no recovery" cannot decay
+//     into "left corrupt".
+// The six hours cost 0.2 s and buy one thing: a standing guard against a future
+// change introducing an accumulator that is NOT bounded, which is the only
+// defect class a long run can see and a short one cannot.
+//
+// SUBJECT. The GOLDEN MODEL, not the firmware -- this file re-implements the
+// algorithm on purpose (see the file header). The shipping integrator is
+// covered more strongly than any run: test/formal/test_cbmc.c (C1) PROVES
+// debounce_integrate() saturates at RELEASE_THRESH for every admitted input.
+// What was unguarded is the ORACLE -- the simavr tests decide the firmware is
+// correct by comparing it against this model, so a model that drifted would
+// make a firmware that drifted look right.
+static void test_stuck_switch_no_recovery(void) {
+    // Two ways a switch sticks closed, with different correct answers.
+    //   (a) it sticks after a normal press:  one toggle, then parked ENGAGED.
+    //   (b) it is already stuck at power-on: NO toggle at all, parked BYPASS.
+    // (b) is the safety-relevant one -- a pedal must not come up in a state
+    // the player did not ask for, and must not leave that state on its own.
+    for (int stuck_at_power_on = 0; stuck_at_power_on <= 1; ++stuck_at_power_on) {
+        model_t m; model_init(&m, stuck_at_power_on);
+        const effect_state_t expect_state   = stuck_at_power_on ? BYPASS : ENGAGED;
+        const uint32_t       expect_toggles = stuck_at_power_on ? 0u : 1u;
+
+        // Qualify the press. A no-op for (b): model_init already parks the
+        // power-on-pressed case in RELEASE_DEBOUNCE_WAIT without toggling.
+        drive(&m, 1, (int)PRESSED_THRESH);
+        CHECK(m.toggle_count == expect_toggles,
+              "stuck(power_on=%d): %u toggle(s) expected before the hold, got %u",
+              stuck_at_power_on, expect_toggles, m.toggle_count);
+
+        // Violations are COUNTED, not CHECKed per tick: at this duration a
+        // per-tick CHECK on a real regression would report millions of times
+        // and bury every other result in the suite.
+        uint32_t bad_effect = 0u, bad_program = 0u, bad_counter = 0u;
+        for (uint32_t t = 0u; t < MODEL_STUCK_SWITCH_DURATION_MS; ++t) {
+            model_step_ms(&m, 1);
+            if (m.effect_state != expect_state)           { ++bad_effect; }
+            if (m.program_state != RELEASE_DEBOUNCE_WAIT) { ++bad_program; }
+            if (m.debounce_counter != RELEASE_THRESH)     { ++bad_counter; }
+        }
+
+        CHECK(m.toggle_count == expect_toggles,
+              "stuck(power_on=%d): a stuck switch toggled the effect; expected %u toggle(s) total, got %u",
+              stuck_at_power_on, expect_toggles, m.toggle_count);
+        CHECK(bad_effect == 0u,
+              "stuck(power_on=%d): effect state left its parked value on %u of %u ticks",
+              stuck_at_power_on, bad_effect, MODEL_STUCK_SWITCH_DURATION_MS);
+        CHECK(bad_program == 0u,
+              "stuck(power_on=%d): re-armed out of RELEASE_DEBOUNCE_WAIT on %u of %u ticks",
+              stuck_at_power_on, bad_program, MODEL_STUCK_SWITCH_DURATION_MS);
+        CHECK(bad_counter == 0u,
+              "stuck(power_on=%d): debounce_counter left saturation on %u of %u ticks -- the integrator is not saturating",
+              stuck_at_power_on, bad_counter, MODEL_STUCK_SWITCH_DURATION_MS);
+
+        // Parked, not broken. "No recovery" is a statement about the stuck
+        // switch, not a licence to leave the state machine corrupt: once the
+        // fault clears, the next press must work exactly as it always did.
+        drive(&m, 0, (int)RELEASE_THRESH);
+        CHECK(m.program_state == PRESS_DEBOUNCE_WAIT,
+              "stuck(power_on=%d): did not re-arm once the switch freed",
+              stuck_at_power_on);
+        drive(&m, 1, (int)PRESSED_THRESH);
+        CHECK(m.toggle_count == expect_toggles + 1u,
+              "stuck(power_on=%d): the press after the fault cleared did not toggle; expected %u, got %u",
+              stuck_at_power_on, expect_toggles + 1u, m.toggle_count);
+    }
 }
 
 // Reliability goal: switch bounce must never generate multiple state changes.
@@ -646,6 +752,7 @@ int main(void) {
     test_single_clean_press();
     test_two_presses_round_trip();
     test_long_hold_single_toggle();
+    test_stuck_switch_no_recovery();
     test_bouncy_press_single_toggle();
     test_short_spike_rejected();
     test_exact_threshold_toggles();
