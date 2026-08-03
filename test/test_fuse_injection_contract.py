@@ -39,7 +39,7 @@ case below builds exactly that binary and requires this gate to catch it.
 HERMETIC ON PURPOSE. All three binaries here are built into a scratch directory
 from the compile line `make -n` prints -- the real command, not a reconstruction
 -- and never from test/avr/test_fuses in the tree. So a stale checker cannot
-make this gate fail, and this gate's negative cases cannot disturb the tree's.
+fail this gate, and this gate's negative cases cannot disturb the tree's.
 
 SCOPE, stated so the next reader does not over-trust it. This covers the eleven
 fuse bytes. The Makefile passes many other -D macros, most of them workload
@@ -79,9 +79,9 @@ def read(path):
 def run_make(*args):
     """Run make from ROOT.
 
-    _MAKE_SERIAL_LOCK_HELD is inherited on purpose: it is what lets a nested
-    make skip the worktree lock the outer `make test` already holds, and
-    clearing it deadlocks.
+    _MAKE_SERIAL_LOCK_HELD is inherited on purpose: it is what lets a nested make
+    skip the worktree lock the outer `make test` already holds, and clearing it
+    deadlocks.
     """
     proc = subprocess.run(["make", "--no-print-directory", "-C", ROOT, *args],
                           capture_output=True, text=True)

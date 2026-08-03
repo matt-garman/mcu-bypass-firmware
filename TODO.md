@@ -119,30 +119,44 @@ fallback has to stay for CBMC, say so in the `#ifndef` and make the reason
 checkable. Effort: ~1–2 h. Impact: Medium — `SOAK_DURATION_MS` alone repeats a
 defect this project has already been bitten by once.
 
-**Record the `v0.9.8` byte-identity verification as evidence, not just as a
-claim.** Added 2026-08-03 by the meta-review. `CHANGELOG.md` states three times
-that the eighteen renamed images are bit-identical to their `v0.9.7`
-counterparts — "only the filenames moved" is the entire premise of the release —
-and nothing in the tree records that anyone checked. The meta-review did check
-it (all 18 rebuilt and hashed against `release/v0.9.7/SHA256SUMS` through the
-old→new mapping: 18 identical, 0 differ), but that result lives in a
-conversation.
+**~~Record the `v0.9.8` byte-identity verification as evidence, not just as a
+claim.~~ DONE (2026-08-03).** `scripts/verify-rename-identity.sh`, run from
+`scripts/make-release.sh` step 1 and retained as
+`release/<version>/RENAME_IDENTITY.md`. Measured on the current tree: **18
+identical, 0 differ, 0 missing, 0 added**.
 
-The precedent is `docs/pic10f320_validation.md` §2, which exists *because* a
-byte-identity proof from a deliberately one-shot gate deserved durable
-provenance. Do the same here: run the comparison as part of `v0.9.8`
-qualification and retain the old→new hash table under `release/v0.9.8/`.
+Built as specified — hash every image against the entry for its old name in the
+signed `release/v0.9.7/SHA256SUMS`, through the `release/README.md` mapping —
+with four decisions the item did not anticipate:
 
-Deliberately NOT a standing gate. Pinning the current images to a previous
-release's hashes is correct for exactly one release — the one whose claim is
-that nothing changed — and becomes a false alarm the first time a release
-legitimately changes a byte. `test/pic10f320/expected_images.sha256` is the
-standing form of this check and already covers drift within a release.
+- **The script holds no version of its own.** It reads BOTH versions out of the
+  rename table's own header (`| up to \`v0.9.7\` | from \`v0.9.8\` |`), so it
+  says "not applicable" and does nothing for any other release. The
+  "deliberately not a standing gate" requirement is then a property of the
+  script rather than a note asking a future maintainer to remember to remove a
+  call. Delete it when the table stops naming the current release.
+- **It runs in step 1, not at staging.** The natural place to compare is where
+  the hashes are written — on the far side of the 24-hour soak. A changed byte
+  would then cost a day to discover. Nothing about the comparison needs the
+  staged copies, so it runs immediately after the build.
+- **Not under `evidence/`.** That directory's contents are pinned exactly by
+  `RELEASE_EVIDENCE_FILES` for EVERY release, so a file only one release
+  produces would fail the *next* release's qualification verifier. It is staged
+  beside the images instead, and named in `MANIFEST.md` and the per-release
+  `README.md`.
+- **The mapping is parsed, never restated.** A second copy of eighteen renames
+  in a verifier would be a third spelling of the same fact, free to drift from
+  the table users actually follow — which is the defect class this release spent
+  itself removing. Both stage vocabularies come from the document too, since the
+  rename is what retired the old tokens and they exist nowhere else.
 
-Effort: ~30 min (the comparison is a dozen lines against the existing mapping
-table in `release/README.md`). Impact: Medium — it converts the release's
-headline claim from an assertion into retained evidence, which is the standard
-every other claim in `release/` already meets.
+Verified by hand on all five paths: the real 18-image comparison passes; a
+single changed byte reports `DIFFERS` with both digests and fails the release; a
+missing image reports `NOT BUILT`; an image with no `v0.9.7` counterpart is
+listed as added rather than silently counted; and a non-matching version reports
+"not applicable" and exits 0. There is deliberately no standing gate for the
+script itself — it is fail-fast, fail-closed one-shot release machinery, with
+floors (≥10 mapped rows, ≥1 compared image) so it cannot pass vacuously.
 
 **`scripts/make-release.sh` reads two tinyx5 programmer names and uses
 neither.** Added 2026-08-03 by the meta-review. `make-release.sh:222-223` builds
@@ -1135,6 +1149,35 @@ watch the gate fail on it. All four now do.
 
 ## Tier 3 — platinum-level / nice-to-have
 
+**The name-contract gate cannot see a file until it is committed.** Added
+2026-08-03, from an observed instance rather than a review: `harvestable_files()`
+enumerates `git ls-files`, so a NEW file is invisible to axes B, C and D until it
+is tracked. `make test` therefore passes on the commit that introduces a
+violation and fails on the next run — which is exactly what
+`test/test_fuse_injection_contract.py` did, on two docstring lines that wrap
+such that a line begins with the word "make" followed by an English word:
+
+<!-- name-contract: exempt-begin (quotes prose that READS as a command; the
+     goals named are English words, which is the entire point of the item) -->
+> ... So a stale checker cannot
+> `make this gate fail`, and this gate's negative cases ...
+
+<!-- name-contract: exempt-end -->
+
+Axis B's rule is that the make word must OPEN the command, which both lines
+satisfied by accident of reflowing. (This item's own first draft then tripped the
+gate the same way, quoting those lines — hence the marker above, which is the
+honest use of one: the span really is not a command.)
+
+Fix: harvest `git ls-files` plus `git ls-files --others --exclude-standard`, so
+a file that exists and is not ignored is in scope whether or not it has been
+added yet. The cost is that a work-in-progress document gets held to the same
+contract as a finished one; the benefit is that the gate reports the violation
+to the person who just wrote it, in the run before the commit rather than the
+one after. Note this cuts the other way for a scratch file that is neither
+ignored nor intended to be committed — check what the existing exemptions and
+`SELF_EXEMPT` already cover before widening. ~15 min, plus a decision.
+
 **Upgrade residue from the `v0.9.8` renames.** Added 2026-08-03 by the
 meta-review. Three loose ends, each individually trivial, listed together
 because they are one decision: how much does a worktree that predates the
@@ -1515,10 +1558,10 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 |---|---|---|---|
 | Design doc: datasheet citations | 2 | 2 h | High — completeness/rigor |
 | `-D<MACRO>` fallbacks: classify the remaining 25 | 2.5 | 1–2 h | Medium — `SOAK_DURATION_MS` repeats a defect already shipped once |
-| Record the v0.9.8 byte-identity verification | 2.5 | 30 min | Medium — turns the release's headline claim into evidence |
 | Re-pin yasimavr after the cycle-rewind fix | 2.5 | 1 h (+2 h optional) | Low — retires a documented simulator caveat |
 | `make-release.sh`: dead `AVRDUDE_PART_X5` | 2.5 | 20 min | Low — manifest restates a Makefile fact |
 | Upgrade residue from the v0.9.8 renames | 3 | 15 min – 1 h | Low — last places spelled the old way |
+| Name contract cannot see an uncommitted file | 3 | 15 min | Low-Medium — the violation is reported one run late |
 | Return-stack oracle: extend to PIC10F322 | 2.5 | High | Low-Medium — second witness on a chip the assembly gate already bounds |
 | Formal verification of output drivers | 2.5 | 3–4 h | Medium — driver correctness |
 | Formal verification of blocking-delay safety | 2.5 | 1–2 h | Medium — makes the argument explicit |

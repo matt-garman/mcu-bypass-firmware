@@ -370,6 +370,36 @@ file is the human-readable summary of *what changed*.
   that disagrees with the Makefile in that bit alone passes all 46 checks. The
   gate builds exactly that binary and requires the round trip to catch it.
 
+- **The release's headline claim is now checked, and the check is retained.**
+  This changelog states in three places that the eighteen renamed images are
+  bit-identical to their `v0.9.7` counterparts — "only the filenames moved" is
+  the entire premise of the release — and nothing in the tree recorded that
+  anyone had confirmed it. Every other claim under `release/` is backed by a
+  retained artifact.
+
+  `scripts/verify-rename-identity.sh` hashes every image this release builds
+  against the entry for its old name in the signed `release/v0.9.7/SHA256SUMS`,
+  through the published old-to-new table in `release/README.md`, and emits the
+  per-image table as the evidence document. `scripts/make-release.sh` runs it in
+  step 1 — before the 24-hour soak, so a changed byte costs seconds rather than
+  a day — and stages the result as `release/v0.9.8/RENAME_IDENTITY.md`. Result
+  on the current tree: **18 identical, 0 differ, 0 missing**.
+
+  Three decisions are what keep this from becoming a liability later. It is
+  **not a standing gate**: pinning current images to a *previous* release's
+  hashes is correct for exactly one release, and turns into a false alarm the
+  first time a release legitimately changes a byte (the standing form of the
+  check is per-release and already exists). It **holds no version of its own**,
+  reading both from the rename table's own header, so it reports "not
+  applicable" and does nothing for any other release and needs no maintenance to
+  retire. And it **restates no part of the mapping**, parsing the table users
+  actually follow, so the rows that were verified cannot drift from the rows a
+  reader is given.
+
+  It is also deliberately not retained under `evidence/`, whose contents are
+  pinned exactly by `RELEASE_EVIDENCE_FILES` for *every* release: a file only
+  one release produces would fail the next release's qualification verifier.
+
 ### Changed
 - **Every released firmware image is renamed to one consistent scheme.** All
   eighteen images on all six MCUs are now

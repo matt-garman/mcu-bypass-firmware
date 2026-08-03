@@ -177,6 +177,12 @@ where old `<v>` `cd4053`/`mute`/`relay` maps to `<stage>`
 unchanged by the rename — each `v0.9.8` image is bit-identical to its `v0.9.7`
 counterpart unless the changelog says the firmware itself changed.
 
+That is a checked claim, not an assurance: `release/v0.9.8/RENAME_IDENTITY.md`
+lists every image with the digest it shares with its `v0.9.7` counterpart, and
+the release fails before its soak if any of them disagree. The comparison reads
+the table above, so a row that is wrong here is wrong there too — the two cannot
+drift apart into a mapping that verifies something other than what you follow.
+
 **The build commands moved too.** Every make goal that acts on one part now
 carries that part's name, in the same vocabulary as the image field, so an
 older `MANIFEST.md` may name a goal that no longer exists:

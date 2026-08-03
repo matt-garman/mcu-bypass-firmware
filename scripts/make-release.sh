@@ -609,6 +609,29 @@ for img in "${PIC10F320_IMAGES[@]}"; do
 done
 ok "all ${#PIC10F320_IMAGES[@]} PIC10F320 images are structurally valid Intel HEX."
 
+# Byte identity against the previous release, for a release whose claim is that
+# only the filenames moved. Run HERE, not at staging, so a changed byte costs
+# seconds instead of a 24-hour soak.
+#
+# No version appears in this call and none is needed: the script reads which two
+# releases the published rename table in release/README.md is about, and says so
+# and does nothing for any other version. It therefore needs no maintenance
+# between releases and cannot become a false alarm the first time a release
+# legitimately changes a byte.
+RENAME_IDENTITY_DOC=""
+if ! scripts/verify-rename-identity.sh "$VERSION" "${IMAGES[@]}" \
+		>"$WORK/RENAME_IDENTITY.md" 2>"$WORK/rename-identity.err"; then
+	cat "$WORK/RENAME_IDENTITY.md" >&2
+	cat "$WORK/rename-identity.err" >&2
+	die "images are not byte-identical to the release the rename table maps from."
+fi
+if head -1 "$WORK/RENAME_IDENTITY.md" | grep -q '^rename identity: not applicable'; then
+	log "$(cat "$WORK/RENAME_IDENTITY.md")"
+else
+	RENAME_IDENTITY_DOC="$WORK/RENAME_IDENTITY.md"
+	ok "$(grep -E '^identical=' "$RENAME_IDENTITY_DOC") -- byte identity against the previous release."
+fi
+
 hash_avr_elf_set() {
 	local elf
 	for elf in "$@"; do
@@ -977,6 +1000,16 @@ if [ "$staged_sorted" != "$wanted_sorted" ]; then
 fi
 ok "wrote SHA256SUMS over ${#IMAGES[@]} images; staging directory holds exactly that set."
 
+# Retain the byte-identity proof beside the images it is about, for the one
+# release it applies to. NOT under evidence/ -- that directory's contents are
+# pinned exactly by RELEASE_EVIDENCE_FILES for EVERY release, and a file only
+# this release produces would fail the next release's qualification verifier.
+if [ -n "$RENAME_IDENTITY_DOC" ]; then
+	cp -p "$RENAME_IDENTITY_DOC" "$OUTPUT_DIR/RENAME_IDENTITY.md" \
+		|| die "could not retain the byte-identity proof"
+	ok "retained RENAME_IDENTITY.md beside the images."
+fi
+
 # Copy evidence. The per-combo soak logs and build/pic10f322-test logs are small and
 # kept in full; the exhaustive test-long log is large (100s of KB) and would
 # bloat the repo on every release, so commit a concise summary instead -- the
@@ -1134,7 +1167,11 @@ REL_BANNER=""
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
 	printf -- '- **Validation:** `make test-long` + `make attiny202-test` + `make attiny202-test-target` + `make pic10f322-test` + `make pic10f322-test-target-variants` + `make pic10f320-test` + `make pic10f320-test-target-variants` (real-image fault handling, firmware/model ctx_ lock-step, and physical-output checks across AVR-XT and both PIC parts) + %s-h parallel soak of every release soak combination (see evidence/).\n' "$hours"
-	printf -- '- **Release set:** %d images, checked against the canonical `RELEASE_IMAGES` set declared in the Makefile -- not against whatever the build happened to produce.\n\n' "${#IMAGES[@]}"
+	printf -- '- **Release set:** %d images, checked against the canonical `RELEASE_IMAGES` set declared in the Makefile -- not against whatever the build happened to produce.\n' "${#IMAGES[@]}"
+	if [ -n "$RENAME_IDENTITY_DOC" ]; then
+		printf -- '- **Byte identity:** every renamed image was hashed against its counterpart in the previous release, through the old-to-new table in `release/README.md`. Table and verdict: `RENAME_IDENTITY.md`.\n'
+	fi
+	printf '\n'
 
 	printf '## Toolchain\n\n'
 	printf -- '| tool | version |\n|---|---|\n'
@@ -1205,6 +1242,11 @@ ok "wrote MANIFEST.md"
 	printf 'fuse bytes / flashing commands, **QUALIFICATION** for the machine-verified\n'
 	printf 'release gate, and evidence/ for the retained logs. See the top-level\n'
 	printf '[release/README.md](../README.md) for the trust model and verification steps.\n\n'
+	if [ -n "$RENAME_IDENTITY_DOC" ]; then
+		printf 'This release renamed its images. **RENAME_IDENTITY.md** is the check of the\n'
+		printf 'claim that only the names moved: every image hashed against its counterpart\n'
+		printf 'in the previous release.\n\n'
+	fi
 	printf 'Quick verify:\n```\ncd release/%s && sha256sum -c SHA256SUMS\n```\n' "$VERSION"
 	printf '\nVerify the required checksum signature first:\n'
 	printf '```\ngpg --verify SHA256SUMS.asc SHA256SUMS\n```\n'
