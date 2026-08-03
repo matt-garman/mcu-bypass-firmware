@@ -37,6 +37,11 @@ test/
   test_klee_build.sh        shared: linked KLEE bitcode build regression
   test_lockstep_progress.sh shared: PIC libgpsim lock-step progress checks
   test_make_serialization.sh shared: worktree Make/release lock regression
+  test_makefile_name_contract.py shared: every make goal/variable a file or doc
+                                     names is one the Makefile really defines
+  test_analyze_variant_guard.sh shared: analyze-* targets reject a bad VARIANTS=
+                                     instead of silently analyzing less
+  test_variant_map_contract.sh shared: every per-variant map is guard-registered
   test_pic_build.sh         shared: PIC image/size/rebuild-trigger checks
   test_pic10f320_coverage_archive.sh shared: coverage-gate source-archive mode checks
   test_pic_rebuild.sh       shared: PIC soak rebuild determinism

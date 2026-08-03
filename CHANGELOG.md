@@ -96,7 +96,7 @@ file is the human-readable summary of *what changed*.
 - **The same gate now also fails if any documented `make <goal>` names a goal
   that does not exist, or if any prose or diagnostic names a variable that does
   not.** Axes B and D, closing the four-axis name-contract item. 35 checks in
-  total, 0.6 s: 64 variable queries, 341 documented commands, 72 overrides and
+  total, 0.6 s: 64 variable queries, 342 documented commands, 72 overrides and
   65 variable mentions. Each new axis found a live defect on its first clean
   run — `.gitignore` named `make pic-test-soak`, a goal the `v0.9.8` rename
   removed, in the comment explaining which goal produces the file it ignores;
@@ -140,6 +140,52 @@ file is the human-readable summary of *what changed*.
   exempt by path, since they are immutable records nobody should edit. Every one
   of the 21 markers must still suppress something or the gate fails, so
   exemptions expire rather than accumulate.
+
+- **Every static-analysis target now rejects an unrecognised `VARIANTS=`
+  instead of quietly analyzing less.** `analyze-tidy`, `analyze-cppcheck`,
+  `analyze-deep`, `analyze-misra` and `analyze-misra-report` all analyze
+  `$(FW_SOURCES)`, which maps `$(VARIANTS)` through `src_<variant>` — and an
+  unrecognised name maps to *nothing*. A typo therefore did not fail: it shrank
+  the subject and the analyzer honestly reported the smaller set clean. All five
+  now carry `classic-variant-request-valid`, the same guard the build targets
+  (`attiny13a`, `attiny85`, …) already had. Recognised **subsets** remain valid —
+  analyzing one driver is a normal development request.
+
+  This is the class behind the `MISRA_COMPLIANCE.md` defect under *Fixed*
+  below, where the documented compliance command analyzed zero of the three
+  output drivers and exited 0. Fixing the document removed the instance; the
+  guard removes the class, which matters most for exactly these targets: an
+  analyzer is believed, so an analyzer reporting on a set nobody chose is worse
+  than one that does not run.
+
+  New gate `test-analyze-variant-guard`
+  (`test/test_analyze_variant_guard.sh`, in `make test`), 19 checks in 0.3 s,
+  built in two halves because either alone leaves the hole open. The
+  behavioural half proves all five reject the empty, unknown and duplicate
+  requests, and reject *before* analyzing — a partial analysis that stops early
+  still prints findings a reader could mistake for a verdict. The contract half
+  walks the Makefile's rules and requires the guard on **every** target that
+  consumes `$(FW_SOURCES)`, including ones added later; a guard that needs a
+  human to remember to extend it has the same failure mode as the thing it
+  guards.
+
+  One subtlety the gate had to be built around, since it is what made the first
+  version of it measure nothing: the serialization wrapper re-execs make under
+  `flock` and hands the inner invocation its request's verdict through the
+  *environment*, because it also sanitises `VARIANTS` on the way down. Correct
+  for its own recursion — by then the bad names are gone and only the inherited
+  flags still remember they were typed — but wrong for an independent nested
+  make started by a test, which inherits `make test`'s verdict ("clean") and
+  applies it to a request make never saw. Left set, every rejection became an
+  acceptance. The gate clears those flags by *harvesting* their names from the
+  Makefile, pins the lock-held condition so a standalone run and a `make test`
+  run exercise the same thing, and carries a control proving the clearing is
+  load-bearing rather than decorative.
+
+  Verified by reproducing the original defect: with the guard removed,
+  `make analyze-misra VARIANTS="cd4053 mute relay"` checks 2 files, reports
+  `MISRA-C:2012: clean` and exits 0. With it, nothing is analyzed and it exits
+  2.
 
 ### Changed
 - **Every released firmware image is renamed to one consistent scheme.** All
@@ -329,11 +375,13 @@ file is the human-readable summary of *what changed*.
   MISRA sweep over variant names that no longer exist**, and the command did not
   fail — it silently analyzed **zero** output drivers and exited 0.
   `make analyze-misra VARIANTS="cd4053 mute relay"` (and the
-  `analyze-misra-report` line beside it) named the pre-`v0.9.6` stage
+  `analyze-misra-report` line beside it) named the pre-`v0.9.8` stage
   vocabulary; `$(FW_SOURCES)` is built by
   `$(foreach v,$(VARIANTS),$(src_$(v)))`, so every unrecognised name
   contributes nothing and the set silently shrank from five files to two.
-  Both lines now name the current values.
+  Both lines now name the current values, and the command they name can no
+  longer behave that way for anyone: the five `analyze-*` targets now validate
+  their variant request (see *Added*).
 
   This is the *value* twin of the four name-contract axes and is not covered by
   any of them: `VARIANTS` exists, so axis C is satisfied; only its contents were

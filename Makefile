@@ -628,6 +628,7 @@ FORCE:
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
         test-variant-map-contract test-makefile-name-contract \
+        test-analyze-variant-guard \
         pic10f322-test-target pic10f322-test-target-variants pic10f322-test-io pic10f322-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
         test-flash-budget-regression test-soak test-soak-reset-witness \
@@ -2470,6 +2471,7 @@ TEST_GATES_LATE = \
         test-build-serialization test-target-matrix \
         test-target-lane-markers test-lockstep-progress test-soak-timing \
         test-variant-map-contract test-makefile-name-contract \
+        test-analyze-variant-guard \
         test-soak-reset-witness test-strict-tools test-workload-rebuild \
         test-pic-build-rebuild coverage-check coverage-check-core
 TEST_GATES = $(TEST_GATES_EARLY) $(TEST_GATES_LATE)
@@ -2690,6 +2692,16 @@ test-makefile-name-contract:
 		echo "FAIL: python3 is required by the Makefile name-contract gate"; exit 1; \
 	fi
 	@python3 test/test_makefile_name_contract.py
+
+# Host-only proof that every static-analysis target validates its variant
+# request before analyzing anything. $(FW_SOURCES) maps $(VARIANTS) through
+# src_<variant> and an unrecognized name maps to NOTHING, so a mistyped or
+# retired variant does not fail the analyzers -- it shrinks their subject and
+# they report the smaller set clean. v0.9.8 shipped a MISRA_COMPLIANCE.md whose
+# documented compliance command named the pre-rename stage vocabulary: it
+# analyzed zero of the three output drivers and exited 0.
+test-analyze-variant-guard:
+	./test/test_analyze_variant_guard.sh
 
 # Parse the GitHub workflow files and cross-check ci.yml's job list against
 # ci-local.sh. Nothing else here loads them as YAML, so an unparseable workflow
@@ -3353,13 +3365,28 @@ attiny13a-trace: test/avr/test_trace_$(VARIANT)
 #                      except for the documented deviations in MISRA_COMPLIANCE.md
 # -Wconversion is already enforced by the normal build (CFLAGS); these targets
 # focus on deeper flow/lint analysis.
+#
+# EVERY TARGET BELOW GUARDS ITS VARIANT REQUEST, for a reason that is easy to
+# miss: the subject of the analysis is $(FW_SOURCES), which maps $(VARIANTS)
+# through src_<variant>, and an unrecognized name maps to NOTHING. So a bad
+# VARIANTS= does not fail here -- it silently SHRINKS the analysis set and the
+# analyzer honestly reports the smaller set clean. `VARIANTS="cd4053 mute
+# relay"` (the pre-v0.9.8 stage vocabulary) leaves the two core files and zero
+# of the three output drivers, and `make analyze-misra` exits 0.
+#
+# That is not hypothetical: MISRA_COMPLIANCE.md documented exactly that command
+# as the compliance procedure to run after changing the firmware, so the one
+# gate whose whole job is to be believed was the one analyzing nothing.
+# classic-variant-request-valid rejects empty, unknown and duplicate names, the
+# same guard the build targets carry. Recognized SUBSETS stay valid -- analyzing
+# a single driver is a normal development request.
 analyze: analyze-tidy analyze-cppcheck analyze-deep analyze-misra
 	@echo "=== static analysis (clang-tidy + cppcheck + clang-analyzer + MISRA) clean ==="
 
 # clang-tidy (or whatever ANALYZE_CMD points at). Falls back to avr-gcc
 # -fanalyzer if a NEWER avr-gcc that supports it is ever installed; otherwise
 # errors with guidance.
-analyze-tidy: $(FW_SOURCES) $(FW_HEADERS)
+analyze-tidy: classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS)
 	@cmd=$(word 1,$(ANALYZE_CMD)); \
 	if command -v $$cmd >/dev/null 2>&1; then \
 		for f in $(FW_SOURCES); do \
@@ -3378,7 +3405,7 @@ analyze-tidy: $(FW_SOURCES) $(FW_HEADERS)
 	fi
 
 # cppcheck second-opinion analyzer (gates via --error-exitcode=2).
-analyze-cppcheck: $(FW_SOURCES) $(FW_HEADERS)
+analyze-cppcheck: classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS)
 	@if command -v $(CPPCHECK) >/dev/null 2>&1; then \
 		echo "cppcheck: $(CPPCHECK)"; \
 		$(CPPCHECK) $(CPPCHECK_FLAGS) $(FW_SOURCES); \
@@ -3389,7 +3416,7 @@ analyze-cppcheck: $(FW_SOURCES) $(FW_HEADERS)
 # Deep path analysis via the clang static analyzer on the AVR target. Emits
 # diagnostics as text and FAILS the build on any report (-Werror). This is the
 # `-fanalyzer`-equivalent gate.
-analyze-deep: $(FW_SOURCES) $(FW_HEADERS)
+analyze-deep: classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS)
 	@if command -v $(CLANG) >/dev/null 2>&1; then \
 		for f in $(FW_SOURCES); do \
 			echo "clang --analyze (-target avr): $(CLANG) $$f"; \
@@ -3418,7 +3445,7 @@ analyze-deep: $(FW_SOURCES) $(FW_HEADERS)
 # --suppressions-list waives those; --error-exitcode=2 makes cppcheck exit
 # non-zero on anything left. Part of `analyze` -> `make test`.
 .PHONY: analyze-misra
-analyze-misra: $(FW_SOURCES) $(FW_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
+analyze-misra: classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1; then \
 		echo "cppcheck not installed; skipping MISRA analysis"; $(SKIP); \
 	fi; \
@@ -3454,7 +3481,7 @@ analyze-misra: $(FW_SOURCES) $(FW_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA
 # the waived deviations (it omits --suppressions-list). Never fails the build.
 # Use it when reviewing or maintaining MISRA_COMPLIANCE.md.
 .PHONY: analyze-misra-report
-analyze-misra-report: $(FW_SOURCES) $(FW_HEADERS) $(MISRA_ADDON) $(MISRA_RULES)
+analyze-misra-report: classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS) $(MISRA_ADDON) $(MISRA_RULES)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then \
 		echo "cppcheck and/or python3 not available; skipping MISRA report"; $(SKIP); \
 	fi; \
@@ -5045,6 +5072,7 @@ help:
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
 	@echo "  test-makefile-name-contract  every make goal and variable named by a file or a doc really exists (included in test)"
+	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
 	@echo "  test-pic-build-rebuild  PIC soak binaries rebuild on a workload change"
