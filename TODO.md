@@ -277,15 +277,146 @@ diagnostic: guard deleted, guard weakened `>` to `>=`, message reworded,
 `#define` reindented out from under a mutation, a shell dropping the shared
 header's `#include`, a sixth invariant added, and the pristine tree broken.
 
-**Follow-up for the firmware owner, not fixable from the test suite:**
-`src/bypass_mcu_pic10f320.c` does not include `bypass_compile_checks.h`. It
-carries its own copy of all five threshold invariants and its own
-`DEBOUNCE_COUNTER_MAX`. The values agree today, so nothing is wrong — but the
-shared header's own comment says the invariant "lives in ONE place and cannot
-drift between shells", and for that shell it does not. The comment also names
-only two shells while three include it. The gate records the divergence
-explicitly (`SHELLS_WITH_OWN_COPY`) so it is counted rather than blessed, and a
-fifth shell that does neither now fails.
+Surfaced one finding for the firmware owner, filed separately below as
+**"`bypass_compile_checks.h` claims a reach it does not have"**. The gate
+records the divergence explicitly (`SHELLS_WITH_OWN_COPY`) so it is counted
+rather than blessed, and a fifth shell that does neither now fails.
+
+**`bypass_compile_checks.h` claims a reach it does not have.** Found 2026-08-02
+while building `test-static-assert-guards`. **Firmware edit — for the owner.**
+
+The header opens with:
+
+```c
+// Shared, MCU-NEUTRAL compile-time contract for the debounce thresholds.
+// Included by every hardware shell (bypass_mcu_avr_classic.c,
+// bypass_mcu_pic10f322.c) so the invariant lives in ONE place and cannot drift
+// between shells.
+```
+
+Both halves of that sentence are wrong, in opposite directions:
+
+- **The list is short one shell.** `src/bypass_mcu_avr_xt.c` includes the header
+  too (added with the ATtiny202 target; the comment was never updated). Three
+  shells include it, not two — so the reader checking whether the ATtiny202 is
+  covered is told it is not.
+- **"every hardware shell" overstates it.** `src/bypass_mcu_pic10f320.c` is a
+  hardware shell and does not include it. It carries its own `RELEASE_THRESH`,
+  `PRESSED_THRESH`, `DEBOUNCE_COUNTER_MAX`, its own `static_assert` shim, and
+  its own copy of all five invariants — with different message text
+  (`"RELEASE_THRESH >= DEBOUNCE_COUNTER_MAX (i.e. UINT8_MAX)"` against the
+  shared `"RELEASE_THRESH >= UINT8_MAX"`).
+
+**First, what is NOT wrong**, because the obvious reading of the above is that
+the PIC10F320 is out of compliance and it is not. Its self-containment is
+deliberate, measured and documented: `docs/pic10f320_special_case.md` is the
+authoritative statement, and `docs/pic10f320_feasibility.md` records that the
+modular architecture overshoots 256 words by roughly 100. The merge plan states
+it explicitly — "*Not* re-architecting the PIC10F320 firmware. It stays
+single-file". That decision stands.
+
+**Second, the duplicated thresholds are already guarded** — verified rather than
+assumed, because the answer decides how urgent this is. The firmware↔core
+equivalence lane host-compiles the real firmware (which uses its own `#define`s)
+against `src/bypass_pure.c` driven from `bypass_config_host.h` (the shared
+truth), so a drift in either constant makes the two step differently. Measured
+on a scratch copy:
+
+| Mutation to the 320's copy | Result |
+| --- | --- |
+| `RELEASE_THRESH` 25 → 30 | `FAIL: internal-state divergence at tick 0/18: fw(dc=30) model(dc=25)`, exit 1 |
+| `PRESSED_THRESH` 8 → 12 | divergence on sequence 511, exit 1 |
+| unmutated control | 266,144 sequences, 0 divergences |
+
+So this is a **documentation defect, not a correctness defect**. It matters
+because the comment is the thing a reviewer reads to decide whether the
+threshold contract is centralised, and it currently answers that question
+wrongly in both directions.
+
+## Fix A — correct the comment (required; this is the actual defect)
+
+In `src/bypass_compile_checks.h`, replace the opening paragraph with something
+that states the real reach and why one shell is outside it. Suggested wording:
+
+```c
+// Shared, MCU-NEUTRAL compile-time contract for the debounce thresholds.
+// Included by the three MODULAR hardware shells -- bypass_mcu_avr_classic.c,
+// bypass_mcu_avr_xt.c and bypass_mcu_pic10f322.c -- so the invariant lives in
+// ONE place for all of them and cannot drift between them.
+//
+// bypass_mcu_pic10f320.c is deliberately NOT among them: at 256 words of flash
+// it is a single self-contained file that shares no headers with src/, and it
+// carries its own copy of these five invariants. That is a documented design
+// decision, not an oversight -- see docs/pic10f320_special_case.md. Its copy is
+// held to these values by the firmware<->core equivalence lane, which compares
+// the real firmware against bypass_pure.c driven from the shared config, so a
+// drift in either threshold fails that lane rather than passing silently.
+//
+// MCU-SPECIFIC compile-time checks stay in their shells: the -fshort-enums size
+// asserts, the F_CPU / _XTAL_FREQ checks, and the per-MCU pin-map pinning.
+```
+
+`test-static-assert-guards` already pins the rest: it fails if a shell stops
+including the header without being recorded in `SHELLS_WITH_OWN_COPY`, and its
+census fails if the count of invariants changes.
+
+## Fix B — optionally let the 320 share the two constants (measured: free)
+
+Strictly optional, and it does **not** re-architect anything: it removes two
+duplicated *constants*, not the inlined algorithm, so the seam
+`docs/pic10f320_special_case.md` §2 describes is untouched. The file stays
+single-TU and links nothing new — `RELEASE_THRESH` and `PRESSED_THRESH` are
+defined *outside* `bypass_config.h`'s `#if defined(__AVR__)` block, so a
+non-AVR compiler picks up those two macros and nothing else.
+
+Edits to `src/bypass_mcu_pic10f320.c`:
+
+1. after `#include <stdint.h>`, add
+
+   ```c
+   #include "bypass_config.h"        // PRESSED_THRESH / RELEASE_THRESH
+   #include "bypass_compile_checks.h" // the shared threshold invariants
+   ```
+
+2. delete its `#define RELEASE_THRESH (25U)` and `#define PRESSED_THRESH (8U)`
+   (with their comments — the shared header's are better);
+3. delete its `#define DEBOUNCE_COUNTER_MAX (255U)` and the MISRA-`UINT8_MAX`
+   rationale comment above it, both duplicated verbatim from the shared header;
+4. delete its five `static_assert` invariants;
+5. keep its local `static_assert` shim, or drop it for
+   `#include "bypass_static_assert.h"` — that header is just `<assert.h>` plus
+   the same alias, and the file already includes `<assert.h>`.
+
+No include-path change is needed: XC8 compiles the firmware from `src/`, and
+quoted includes resolve relative to the including file's directory. The host
+harnesses reach the firmware through `#include "../../../src/…"`, so their
+nested quoted includes resolve the same way.
+
+**Measured on a scratch copy of the tree, all three variants** (XC8 v3.10,
+DFP 1.9.189, the pinned release toolchain):
+
+| Variant | Flash before | Flash after | Emitted HEX |
+| --- | --- | --- | --- |
+| `OUTPUT_CD4053_SIMPLE` | 220/256 words | 220/256 | **byte-identical** |
+| `OUTPUT_CD4053_WITH_MUTE` | 241/256 | 241/256 | **byte-identical** |
+| `OUTPUT_TQ2_RELAY` | 244/256 | 244/256 | **byte-identical** |
+
+Byte-identical images matter for more than reassurance: `test/pic10f320/expected_images.sha256`
+pins the whole matrix, so this change needs **no rebaseline**. The equivalence
+lane also passes unchanged on the modified copy (266,144 sequences, 0
+divergences, 66/66 model states).
+
+Net effect: −21 lines, one fewer place for the thresholds to drift, and the
+`SHELLS_WITH_OWN_COPY` entry in `test/test_static_assert_guards.sh` becomes
+empty — delete it and the shells loop covers all four with no exception.
+
+After either fix, re-run `make test`; after Fix B also
+`make test-pic10f320-expected-images` and `make pic10f320` to confirm the hashes
+still match.
+
+Effort: Fix A ~10 min. Fix B ~20 min plus the re-runs. Impact: Low-Medium —
+no behaviour change, but it corrects the one document a reviewer would use to
+decide whether the threshold contract is centralised.
 
 **Clock drift fine-grained sweep.** `test_oscillator_drift_tolerance` checks only
 the ±10% endpoints (drift factors 0.9 and 1.1). An exhaustive sweep in finer
@@ -1241,6 +1372,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Cross-compiler verification | 2.5 | 2 h | Medium — compiler-safety net |
 | Compiler optimization sensitivity test | 2.5 | 1 h | Medium — quick win |
 | Stack depth cross-verification | 2.5 | 2–3 h | Medium — third independent bound |
+| `bypass_compile_checks.h` reach comment | 2.5 | 10–30 min | Low-Medium — corrects a centralisation claim |
 | Clock drift fine-grained sweep | 2.5 | 1 h | Low — narrow but real edge case |
 | WDT pet frequency measurement | 2.5 | 1–2 h | Medium — catches handshake bugs |
 | Interrupt-free window measurement | 2.5 | 1 h | Medium — confirms runtime invariant |
