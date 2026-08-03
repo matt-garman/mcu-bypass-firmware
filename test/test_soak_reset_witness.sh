@@ -22,6 +22,7 @@
 # tinyx5 only: simavr models the WDT system reset for the ATtiny25/45/85 family
 # and not for the ATtiny13a (see the watchdog backstop tests in test_sim.c).
 #
+# name-contract: exempt (environment inputs to this script, not make variables)
 # Driven by `make test-soak-reset-witness`, which supplies every SOAK_WITNESS_*
 # input below.
 set -euo pipefail

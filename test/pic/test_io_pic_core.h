@@ -50,7 +50,9 @@
 
 #if (defined(PIC_IO_SIMPLE) + defined(PIC_IO_MUTE) + \
      defined(PIC_IO_RELAY)) != 1
+/* name-contract: exempt-begin (PIC_IO_* is a C macro family, not make vars) */
 #  error "part adapter must select exactly one PIC_IO_* variant"
+/* name-contract: exempt-end */
 #endif
 
 #define PORTA_ADDR  0x005u

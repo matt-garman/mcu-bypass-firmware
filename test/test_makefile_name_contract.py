@@ -2,20 +2,22 @@
 """The Makefile name contract: every name another file hands to, or asks of, the
 Makefile must be a name the Makefile actually knows.
 
-THE DEFECT CLASS is silent severance. A rename moves a variable; the files still
-speaking its old name keep running, quietly, wrongly. Make reports nothing in
-either direction -- an override naming no variable is legal, and a query for a
-variable that does not exist prints an empty line and exits 0. TODO.md tracks
-four axes of this class; two of them are implemented here:
+THE DEFECT CLASS is silent severance. A rename moves a name; the files and
+documents still speaking the old one keep running, quietly, wrongly. Make
+reports nothing in any of the four directions this checks:
 
-  Axis C -- `make VAR=value`.   A file SETS a Makefile variable.
-  Axis A -- `make print-VAR`.   A file READS one.
+  Axis A -- `make print-VAR`     a file READS a variable
+  Axis B -- `make <goal>`        a document names a GOAL to a reader
+  Axis C -- `make VAR=value`     a file SETS a variable
+  Axis D -- "set PIC320_TAG"     a document names a VARIABLE to a reader
 
-Axes B and D -- goals and variables named to human readers in prose -- remain
-open, and this gate does not cover them.
+A and C are machine-facing and fail silently; B and D are human-facing, and
+their consumer is a person following instructions. B is the only one of the four
+whose failure is loud when it happens -- `No rule to make target` -- which is
+precisely why it must be caught before the reader is the one who finds it.
 
-THE ORACLE, shared by both axes, is `make origins NAMES="..."`, which reports
-$(origin) per name in one invocation. Non-emptiness is NOT usable:
+THE ORACLES. For variables, `make origins NAMES="..."` reports $(origin) per
+name in one invocation. Non-emptiness is NOT usable:
 XT_SOAK_COMBINATION_NAME and AVR_STACK_BUILD_DIR are defined-but-empty by
 design, so only $(origin) separates "never defined" (undefined) from
 "deliberately empty" (file).
@@ -97,6 +99,85 @@ consumed". A command-line-only input such as VERSION is legitimate to SET but
 useless to ASK FOR -- `make -s print-VERSION` prints an empty line, which is
 precisely the severance symptom. The two axes want different oracles and get
 them.
+
+================================ AXIS B ================================
+
+A document naming a goal that no longer exists sends a reader to `No rule to
+make target`. The v0.9.8 prefix rename left 15 of these in
+docs/pic10f320_validation.md alone -- a document framed as CURRENT qualification
+evidence -- including its entire "Reproducing any of this" section, where four
+of six commands failed.
+
+THE ORACLE is `make -rRn --print-data-base`, parsed once. Reading make's own
+inventory rather than grepping rule heads is what makes the generated families
+resolvable: `attiny85-program` and `test-sim-cd4053_simple-attiny13a` exist only
+after `$(eval $(call ...))` expansion, so a textual harvest would report every
+correct use of them as missing.
+
+PRECISION IS THE WHOLE PROBLEM, and it is a bigger one than any other axis
+faces. English follows the word "make" constantly -- "make sure", "make the",
+"make a" -- so a harvest that reads any line containing `make` reports English
+words as missing goals. Measured on this tree: 881 distinct tokens, of which
+about a dozen were real. Three rules bring that to zero false positives:
+
+  1. Only COMMAND contexts are read (see code_fragments): fenced blocks and
+     backtick spans in documentation, command lines in code, backtick spans in
+     comments. A sentence is not a command.
+  2. The make word must OPEN its fragment. `sudo apt-get install -y make ...`
+     installs a package; it does not invoke one.
+  3. Only the FIRST goal word is taken, because what follows a documented goal
+     is very often prose -- an aligned `# what this builds` comment, or a
+     sentence continuing past a closing backtick.
+
+Rule 3 is a real ceiling and is stated rather than hidden: `make clean test`
+checks only `clean`. So is the harvest's blindness to a goal named in running
+prose without the word `make` in front of it.
+
+GOAL SCHEMAS are resolved, not skipped. `make test-sim-<variant>` expands over
+$(VARIANTS) and every expansion must exist. That is the check that catches the
+sharpest v0.9.8 casualty: test/README.md named exactly that form, which has no
+rule at all -- the goal carries an MCU field, `test-sim-<variant>-attiny13a`,
+and the missing field is the very defect the rename existed to kill. A
+placeholder with no mapping FAILS; skipping it silently is how that one survived
+in a live document.
+
+================================ AXIS D ================================
+
+The variable-side twin of axis B, and the one with no machine consequence at
+all: make accepts an assignment to a name it does not know and ignores it, so a
+reader who follows a stale instruction gets no error whatsoever. Ten such
+surfaces survived v0.9.8, two of them telling a reader to type a removed name.
+The worst was the `test-flash-budget` guard's own failure message, which told a
+user who had already tripped it to pass `MCU=attiny13a` while the guard read
+$(ATTINY13A_MCU) -- advice that changes nothing, delivered at the moment someone
+is confused and trusts it completely.
+
+SCOPE: prose only -- documentation, and comments in code. A variable name in
+executable code is not a claim about the Makefile; it is a shell local or a C
+macro, and this tree has hundreds sharing the project's prefixes (SOAK_PIDS,
+MUTATION_MAKE, RELEASE_THRESH). Reading code lines reported 154 of them as
+severed.
+
+FAMILY REFERENCES ARE CHECKED AS PREFIXES. `PIC320_*` asks whether ANY known
+variable begins with `PIC320_`. Testing the stem as a whole name -- which is
+what the specification proposed -- reports `AVR_SOAK_*` and `XT_FUSE_*` as
+severed, because no variable is literally called AVR_SOAK. The family shape is
+also the one that carried the worst surface: README.md's "the PIC10F320 lane
+uses PIC320_* variables".
+
+======================== EXEMPTIONS, ALL AXES =========================
+
+Live documents legitimately name a retired goal or variable: an old-to-new
+redirect table, a recipe pinned to a tag where the name is still correct, a
+quoted transcript, a sentence whose whole point is that a name is gone. None of
+that is inferable from the text and none is a property of a whole FILE, so it is
+written down per line or per block (`name-contract: exempt`). Four file-level
+exemptions exist and each is justified where it is defined: published release
+artifacts, self-declared historical documents, CHANGELOG.md, and this file.
+
+Every exemption -- marker, allowlist entry, computed-name mapping -- must still
+suppress something, or the gate fails. Exemptions expire; a marker left over
+clean text silently covers the next dead name written under it.
 """
 
 import os
@@ -384,31 +465,12 @@ def harvest_reads():
     the same claim about the Makefile's vocabulary that a script does, and
     release/README.md does exactly that.
     """
-    files = subprocess.run(
-        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True,
-    ).stdout.split()
-
     found = {}
     computed = {}
     per_spelling = {"print-<VAR>": 0, "mkv <VAR>": 0}
 
-    for rel in files:
-        if rel == SELF_EXEMPT:
-            continue
-        path = os.path.join(ROOT, rel)
-        if not os.path.isfile(path):
-            continue
-        try:
-            with open(path, encoding="utf-8") as fh:
-                text = fh.read()
-        except (OSError, UnicodeDecodeError):
-            continue
-
+    for rel, text in harvestable_files():
         is_markdown = rel.endswith(".md")
-        if is_markdown and (rel in HISTORICAL_FILES
-                            or self_declared_historical(text)):
-            continue
-
         for lineno, line in enumerate(text.split("\n"), 1):
             # Comments are skipped in CODE only. A `#` opens a comment in shell
             # and YAML -- test_ci_local_routing.sh documents its fake make shim
@@ -576,6 +638,563 @@ def check_axis_a():
     return checks, len(found)
 
 
+# ------------------------------------------------------------- axes B and D ---
+
+# Published release artifacts. These are immutable records of what a past
+# release said, so they name that release's goals and variables correctly and
+# must never be edited to match the current tree. A path rule rather than a
+# marker, precisely because nobody should be opening these files to add one.
+PUBLISHED = re.compile(r"^release/v[\d.]+/")
+
+# Documents whose subject matter IS retired names, exempt from axis D only.
+# CHANGELOG.md records what things used to be called; TODO.md holds this item's
+# own specification, which quotes every dead spelling the four axes exist to
+# catch. Both are still checked by axes A, B and C -- the exemption is scoped to
+# the one axis whose signal is "prose naming a variable", because for these two
+# files that is the intended content rather than a defect.
+PROSE_EXEMPT_AXIS_D = {"TODO.md"}
+
+# Per-line and per-block exemption markers. Live documents legitimately name a
+# retired goal or variable in three situations, all of which exist here: a
+# deliberate old-to-new redirect table, a recipe pinned to an older tag where
+# the goal correctly does not exist in the current tree, and a quoted transcript
+# or a sentence whose whole point is that a name is gone. None of those can be
+# inferred from the text, and none is a property of the whole FILE -- so the
+# exemption is per-line or per-block, and it has to be written down.
+EXEMPT_BEGIN = re.compile(r"name-contract:\s*exempt-begin\b")
+EXEMPT_END = re.compile(r"name-contract:\s*exempt-end\b")
+EXEMPT_LINE = re.compile(r"name-contract:\s*exempt(?!-)\b")
+
+
+# Whatever can precede a marker on a line that carries nothing else: comment
+# leaders in every syntax this tree uses, and the surrounding punctuation of an
+# HTML comment.
+MARKER_LEAD = re.compile(r"[\s#/<!*|-]*\Z")
+
+
+def exemptions(text):
+    """Return ({exempted line -> the marker line responsible}, {marker -> kind}).
+
+    A marker exempts the line it sits on. If it is the ONLY thing on its line --
+    no prose before it, just a comment leader -- it also exempts the next
+    non-blank line, because that is the only way to annotate a line that cannot
+    carry a trailing comment: a C `#error` whose trailing text would become part
+    of the message, or a sentence wrapped across a comment block. A trailing
+    marker deliberately does NOT reach forward, so annotating one row of a table
+    cannot silently exempt the row beneath it.
+
+    A marker line is itself exempt, so a marker whose reason string quotes the
+    dead name it is explaining does not fail the gate it just opened.
+    """
+    exempt = {}
+    markers = {}
+    lines = text.split("\n")
+    block_start = None
+
+    def forward_from(index):
+        for j in range(index, len(lines)):
+            if lines[j].strip():
+                return j + 1
+        return None
+
+    for lineno, line in enumerate(lines, 1):
+        m = (EXEMPT_BEGIN.search(line) or EXEMPT_END.search(line)
+             or EXEMPT_LINE.search(line))
+        if m is None:
+            if block_start is not None:
+                exempt[lineno] = block_start
+            continue
+        exempt[lineno] = lineno
+        if EXEMPT_BEGIN.search(line):
+            markers[lineno] = "block"
+            block_start = lineno
+            continue
+        if EXEMPT_END.search(line):
+            if block_start is not None:
+                for k in range(block_start, lineno + 1):
+                    exempt.setdefault(k, block_start)
+                block_start = None
+            continue
+        markers[lineno] = "line"
+        if MARKER_LEAD.match(line[:m.start()]):
+            nxt = forward_from(lineno)
+            if nxt is not None:
+                exempt.setdefault(nxt, lineno)
+    return exempt, markers
+
+
+def harvestable_files():
+    """Tracked, readable files that are not published release artifacts."""
+    rels = subprocess.run(
+        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True,
+    ).stdout.split()
+    for rel in rels:
+        if rel == SELF_EXEMPT or PUBLISHED.match(rel):
+            continue
+        path = os.path.join(ROOT, rel)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        if rel.endswith(".md") and (rel in HISTORICAL_FILES
+                                    or self_declared_historical(text)):
+            continue
+        yield rel, text
+
+
+# ----------------------------------------------------------------- axis B ---
+
+# A goal token: lowercase, as every goal in this Makefile is. Uppercase forms
+# are handled before this test, because `print-VARIANTS` is a legitimate goal
+# through the print-% pattern rule.
+GOAL_TOKEN = re.compile(r"[a-z0-9_][a-z0-9_.+-]*\Z")
+
+# `make -C dir`, `make -f file`, ... consume the following word.
+FLAG_TAKES_ARG = {"-C", "-f", "-j", "-l", "-o", "-W",
+                  "--directory", "--file", "--jobs"}
+
+# A documented goal SCHEMA rather than a literal: `make test-sim-<variant>`.
+# Each placeholder is resolved against the Makefile variable that supplies its
+# values, and every expansion must exist. This is the check that catches the
+# sharpest v0.9.8 casualty: test/README.md named `make test-sim-<variant>`,
+# which has no rule at all -- the goal is `test-sim-<variant>-attiny13a`, and
+# the missing MCU field is the exact defect the whole rename existed to kill.
+# A placeholder with no mapping fails; skipping it silently is how that one
+# survived in a live document.
+PLACEHOLDERS = {"variant": "VARIANTS"}
+PLACEHOLDER = re.compile(r"<([a-z][a-z0-9_]*)>")
+
+
+_DATA_BASE = {}
+
+
+def data_base():
+    """(explicit targets, pattern-rule prefixes, defined variable names).
+
+    One parse, cached, serving axis B's goal inventory and axis D's variable
+    inventory. Reading the data base rather than grepping definitions is what
+    makes both axes see GENERATED names -- the `$(eval $(call ...))` families
+    such as `attiny85-program` and `test-sim-cd4053_simple-attiny13a` exist only
+    after expansion, and a textual harvest of the Makefile would report every
+    documented use of them as missing.
+
+    Cost is 0.024 s nested inside `make test`, which is the only place this is
+    gated. Standalone it also waits on the worktree flock -- `-n` still runs
+    recipe lines containing $(MAKE), and the serialization wrapper's is one --
+    so it blocks while a soak or test-long is running, exactly as `make -s
+    print-VAR` already does. That lock wait, not parse cost, is the "over two
+    minutes" recorded against this approach in TODO.md.
+
+    Standalone the output carries two data-base blocks (the wrapper's, then the
+    real one); nested it carries one. Both are parsed and unioned, so the same
+    code is correct either way.
+    """
+    if _DATA_BASE:
+        return _DATA_BASE["value"]
+
+    proc = subprocess.run(
+        ["make", "-rRn", "--print-data-base"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        sys.exit("FAIL: `make -rRn --print-data-base` failed:\n"
+                 + proc.stderr.strip()[:2000])
+
+    explicit, patterns, variables, section = set(), set(), set(), None
+    for line in proc.stdout.split("\n"):
+        if line.startswith("# Variables"):
+            section = "vars"
+        elif line.startswith("# Implicit Rules"):
+            section = "pattern"
+        elif line.startswith("# Files"):
+            section = "explicit"
+        elif line.startswith("# Finished"):
+            section = None
+        elif not section or not line or line[0] in "#\t ":
+            continue
+        elif section == "vars":
+            m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*[:?+!]?=", line)
+            if m:
+                variables.add(m.group(1))
+        else:
+            m = re.match(r"^([^:=]+):(?!=)", line)
+            if m:
+                (patterns if section == "pattern" else explicit).update(
+                    m.group(1).split())
+
+    _DATA_BASE["value"] = (explicit,
+                           {p[:-1] for p in patterns if p.endswith("%")},
+                           variables)
+    return _DATA_BASE["value"]
+
+
+def variant_values():
+    """Values for each goal placeholder, from the Makefile."""
+    return {name: print_values(var) for name, var in PLACEHOLDERS.items()}
+
+
+def code_fragments(rel, text):
+    """Yield (lineno, fragment) for text that is a COMMAND rather than prose.
+
+    This is the whole precision problem of axis B. English follows the word
+    "make" constantly -- "make sure", "make the", "make a" -- so a harvest that
+    reads any line containing `make` reports hundreds of English words as
+    missing goals (measured: 881 distinct tokens). What separates a command from
+    a sentence is the context it sits in, per file type:
+
+      markdown/asciidoc  fenced code blocks, and inline `backtick spans`
+      Makefile           recipe and directive lines; in COMMENTS, spans only
+      shell/YAML/python  command lines; in comments, spans only
+      anything else      spans only (a .gitignore comment documenting the goal
+                         that produces the file it ignores is a real reference,
+                         and one of them was stale)
+
+    Shell and YAML are continuation-joined first, so that a `\\`-continued apt
+    line reading `install -y \\ \\n make util-linux ...` is not mistaken for an
+    invocation of make with the goal `util-linux`.
+    """
+    is_doc = rel.endswith((".md", ".adoc"))
+    is_makefile = rel == "Makefile"
+    is_code = rel.endswith((".sh", ".yml", ".yaml", ".py"))
+
+    def spans(line):
+        return re.findall(r"`([^`]+)`", line)
+
+    if is_doc or is_makefile:
+        source = enumerate(text.split("\n"), 1)
+    else:
+        source = logical_lines(text)
+
+    fenced = False
+    for lineno, line in source:
+        if is_doc:
+            stripped = line.strip()
+            if stripped.startswith("```") or stripped in ("----", "...."):
+                fenced = not fenced
+                continue
+            if fenced:
+                yield lineno, line
+            else:
+                for span in spans(line):
+                    yield lineno, span
+        elif is_makefile or is_code:
+            body = line.lstrip().lstrip("@")
+            if body.startswith("#"):
+                for span in spans(line):
+                    yield lineno, span
+            else:
+                yield lineno, line
+        else:
+            for span in spans(line):
+                yield lineno, span
+
+
+def first_goal(tail):
+    """The first goal word after a make command, or None.
+
+    Only the FIRST is taken, and that is a deliberate ceiling rather than an
+    oversight. Documented invocations put the goal that matters first, while the
+    text after it is very often prose -- an aligned `# what this builds` comment
+    in a README block, or a sentence continuing past a closing backtick. Reading
+    every word instead reported `checks`, `gates`, `variants` and `for` as
+    missing goals. The cost is that `make clean test` checks only `clean`; in
+    practice each goal is also documented on its own somewhere.
+    """
+    # Redirections end the command; `<variant>` placeholders do NOT. Splitting
+    # on a bare `<` truncates `test-sim-<variant>` to `test-sim-`, which turns
+    # the goal schema into an unrecognisable stub and quietly disables the
+    # placeholder resolution below -- the single check that catches the
+    # test/README.md casualty this axis was written for.
+    tail = PLACEHOLDER.sub(lambda m: "\x01" + m.group(1) + "\x02", tail)
+    tail = re.split(r"\d*[<>]|[;|&]|\|\||&&", tail, maxsplit=1)[0]
+    tail = tail.replace("\x01", "<").replace("\x02", ">")
+    tail = re.split(r"(?:^|\s)#", tail, maxsplit=1)[0]
+    tail = re.sub(r'"[^"]*"|\'[^\']*\'', "", tail)   # VARIANTS="a b c"
+    words = tail.split()
+    i = 0
+    while i < len(words):
+        word = words[i]
+        if word in FLAG_TAKES_ARG:
+            i += 2
+            continue
+        if word.startswith("-") or "=" in word:
+            i += 1
+            continue
+        return word
+    return None
+
+
+def expand_goal(token, values):
+    """Resolve a goal schema to concrete goals, or None if it is not literal."""
+    holes = PLACEHOLDER.findall(token)
+    if not holes:
+        return [token] if GOAL_TOKEN.match(token) else None
+    out = [token]
+    for hole in holes:
+        if hole not in values:
+            return "unmapped:" + hole
+        out = [g.replace("<" + hole + ">", v) for g in out for v in values[hole]]
+    return out
+
+
+def check_axis_b():
+    """Axis B: every `make <goal>` in the tree names a goal that exists."""
+    checks = 0
+    explicit, patterns, _ = data_base()
+    values = variant_values()
+
+    if len(explicit) < 150:
+        sys.exit(f"FAIL: axis B read only {len(explicit)} targets from the make "
+                 "data base; the parse has stopped working")
+    checks += 1
+
+    def known(goal):
+        return goal in explicit or any(goal.startswith(p) for p in patterns)
+
+    missing, unmapped, harvested = {}, {}, 0
+    used_markers, all_markers = set(), {}
+
+    for rel, text in harvestable_files():
+        exempt, markers = exemptions(text)
+        for line in markers:
+            all_markers[(rel, line)] = markers[line]
+        for lineno, fragment in code_fragments(rel, text):
+            for m in MAKE_WORD.finditer(fragment):
+                if fragment[:m.start()].strip():
+                    continue          # the make word must open the command
+                token = first_goal(fragment[m.end():])
+                if token is None or any(c in token for c in "$\\\"'`()"):
+                    continue
+                harvested += 1
+                expansion = expand_goal(token, values)
+                if expansion is None:
+                    continue
+                if isinstance(expansion, str):
+                    if lineno in exempt:
+                        used_markers.add((rel, exempt[lineno]))
+                    else:
+                        unmapped.setdefault(expansion[len("unmapped:"):],
+                                            []).append(f"{rel}:{lineno}")
+                    continue
+                bad = [g for g in expansion if not known(g)]
+                if not bad:
+                    continue
+                if lineno in exempt:
+                    used_markers.add((rel, exempt[lineno]))
+                    continue
+                for goal in bad:
+                    missing.setdefault(goal, []).append(f"{rel}:{lineno}")
+
+    if harvested < 200:
+        sys.exit(f"FAIL: axis B harvested only {harvested} make commands; "
+                 "expected >= 200. The context rules have stopped matching.")
+    checks += 1
+
+    if unmapped:
+        lines = ["FAIL: axis B found goal schemas with unresolvable placeholders:"]
+        for hole, locs in sorted(unmapped.items()):
+            lines.append(f"  <{hole}>   {locs[0]}")
+        lines.append("")
+        lines.append("Map the placeholder to the Makefile variable supplying its")
+        lines.append("values in PLACEHOLDERS, or exempt the line. Skipping it is")
+        lines.append("how `make test-sim-<variant>` survived with no rule at all.")
+        sys.exit("\n".join(lines))
+    checks += 1
+
+    if missing:
+        lines = ["FAIL: documented `make <goal>` command(s) naming goals that do "
+                 "not exist:"]
+        for goal in sorted(missing):
+            lines.append(f"  {goal}")
+            for loc in sorted(set(missing[goal]))[:4]:
+                lines.append(f"      {loc}")
+        lines.append("")
+        lines.append("A reader who types one of these gets 'No rule to make target'.")
+        sys.exit("\n".join(lines))
+    checks += 1
+
+    # NEGATIVE CASES.
+    #
+    # (a) a real goal resolves and a bogus one does not.
+    if not known("test"):
+        sys.exit("FAIL: negative case -- axis B does not recognise `make test`")
+    if known("mcu-bypass-definitely-not-a-goal"):
+        sys.exit("FAIL: negative case -- axis B accepts a goal that does not exist")
+    checks += 1
+
+    # (b) THE ORIGINAL DEFECT. test/README.md named `make test-sim-<variant>`,
+    # whose real form carries an MCU field. The schema must expand and the
+    # expansion must be rejected, or this axis has lost the casualty it was
+    # written for.
+    stub = expand_goal("test-sim-<variant>", values)
+    real = expand_goal("test-sim-<variant>-attiny13a", values)
+    if not isinstance(stub, list) or len(stub) < 3:
+        sys.exit("FAIL: negative case -- `test-sim-<variant>` no longer expands; "
+                 "placeholder resolution has regressed")
+    if all(known(g) for g in stub):
+        sys.exit("FAIL: negative case -- the MCU-less `test-sim-<variant>` form "
+                 "reads as a valid goal")
+    if not all(known(g) for g in real):
+        sys.exit("FAIL: negative case -- the real `test-sim-<variant>-attiny13a` "
+                 "form reads as missing")
+    checks += 1
+
+    # (c) PRECISION. English follows the word "make" constantly; a harvest that
+    # reads prose reports hundreds of words as missing goals. Sentences must not
+    # be treated as commands, and a package list must not either -- `apt-get
+    # install -y \\ <newline> make util-linux` reads as `make util-linux` unless
+    # continuations are joined first.
+    for prose in ("this is here to make sure the file exists",
+                  "which would make the gate fail"):
+        for m in MAKE_WORD.finditer(prose):
+            if not prose[:m.start()].strip():
+                sys.exit(f"FAIL: negative case -- prose '{prose}' parses as a "
+                         "make command")
+    apt = list(logical_lines("  sudo apt-get install -y \\\n    make util-linux\n"))
+    if MAKE_WORD.search(apt[0][1]) and not apt[0][1][
+            :MAKE_WORD.search(apt[0][1]).start()].strip():
+        sys.exit("FAIL: negative case -- a continued apt package list parses as "
+                 "a make invocation")
+    checks += 1
+
+    # (d) an exemption must stop applying when its marker is removed, in both
+    # the block and the standalone-line forms.
+    block = "a\n<!-- name-contract: exempt-begin x -->\nb\n<!-- name-contract: exempt-end -->\nc\n"
+    exempt_map, _ = exemptions(block)
+    if 3 not in exempt_map or 5 in exempt_map:
+        sys.exit("FAIL: negative case -- block exemption covers the wrong lines")
+    unmarked = exemptions(block.replace("<!-- name-contract: exempt-begin x -->",
+                                        "x"))[0]
+    if 3 in unmarked:
+        sys.exit("FAIL: negative case -- a block's contents stay exempt after "
+                 "its opening marker is removed")
+    standalone, _ = exemptions("# name-contract: exempt (why)\nprose here\nother\n")
+    if 2 not in standalone or 3 in standalone:
+        sys.exit("FAIL: negative case -- a standalone marker does not exempt "
+                 "exactly the line it introduces")
+    trailing, _ = exemptions("prose <!-- name-contract: exempt -->\nnext row\n")
+    if 1 not in trailing or 2 in trailing:
+        sys.exit("FAIL: negative case -- a trailing marker reaches forward and "
+                 "would silently exempt the line beneath it")
+    checks += 1
+
+    return checks, harvested, used_markers, all_markers
+
+
+# ----------------------------------------------------------------- axis D ---
+
+# The project's own variable vocabulary. Scoping to it is what makes a textual
+# sweep survivable: a generic [A-Z_]{3,} pass over prose drowns in C macros,
+# register names and acronyms. The retired spellings are listed too, because a
+# document still recommending one is the entire defect.
+VAR_PREFIXES = ("ATTINY13A_", "TINYX5_", "AVR_", "XT_", "PIC_",
+                "PIC10F320_", "PIC10F322_", "PIC320_", "SOAK_")
+VAR_RETIRED = {"MCU", "PROGRAMMER", "LFUSE", "HFUSE"}
+
+# `NAME` in backticks, or NAME= in a sentence or a diagnostic string.
+VAR_NAMED = re.compile(r"`([A-Z][A-Z0-9_]{2,})`|\b([A-Z][A-Z0-9_]{2,})=(?!=)")
+# A family reference: PIC320_* or PIC320_{FAULT,IO}. This is the shape that
+# carried the worst of the v0.9.8 surfaces, README.md's "the PIC10F320 lane uses
+# PIC320_* variables", so it is checked as a PREFIX: some known variable must
+# begin with it. Testing the stem as a whole name instead reports every correct
+# family reference (AVR_SOAK_*, XT_FUSE_*) as severed.
+VAR_FAMILY = re.compile(r"\b([A-Z][A-Z0-9_]{2,}_)(?:\*|\{)")
+
+
+def check_axis_d(known_names):
+    """Axis D: variables named to human readers still exist."""
+    checks = 0
+    severed, harvested = {}, 0
+    used_markers, all_markers = set(), {}
+
+    def relevant(name):
+        return name.startswith(VAR_PREFIXES) or name in VAR_RETIRED
+
+    for rel, text in harvestable_files():
+        if rel in PROSE_EXEMPT_AXIS_D:
+            continue
+        exempt, markers = exemptions(text)
+        for line in markers:
+            all_markers[(rel, line)] = markers[line]
+        is_doc = rel.endswith((".md", ".adoc"))
+        for lineno, line in enumerate(text.split("\n"), 1):
+            body = line.lstrip().lstrip("@")
+            # Prose only: documentation, and comments in code. A variable name
+            # in executable code is not a claim about the Makefile -- it is a
+            # shell local or a C macro, and this tree has hundreds that share
+            # the project's prefixes (SOAK_PIDS, MUTATION_MAKE, RELEASE_THRESH).
+            if not (is_doc or body.startswith(("#", "//", "*", "/*"))):
+                continue
+            hits = []
+            for m in VAR_NAMED.finditer(line):
+                name = next(g for g in m.groups() if g)
+                if relevant(name):
+                    hits.append((name, name in known_names))
+            for m in VAR_FAMILY.finditer(line):
+                stem = m.group(1)
+                if relevant(stem):
+                    hits.append((stem + "*",
+                                 any(k.startswith(stem) for k in known_names)))
+            for label, ok in hits:
+                harvested += 1
+                if ok:
+                    continue
+                if lineno in exempt:
+                    used_markers.add((rel, exempt[lineno]))
+                    continue
+                severed.setdefault(label, []).append(f"{rel}:{lineno}")
+
+    if harvested < 40:
+        sys.exit(f"FAIL: axis D harvested only {harvested} variable mentions; "
+                 "expected >= 40. The shape patterns have stopped matching.")
+    checks += 1
+
+    if severed:
+        lines = ["FAIL: prose or diagnostics naming variables the Makefile "
+                 "neither defines nor reads:"]
+        for name in sorted(severed):
+            lines.append(f"  {name}")
+            for loc in sorted(set(severed[name]))[:4]:
+                lines.append(f"      {loc}")
+        lines.append("")
+        lines.append("Make accepts an assignment to a name it does not know and")
+        lines.append("ignores it, so a reader who follows this gets no error at all.")
+        sys.exit("\n".join(lines))
+    checks += 1
+
+    # NEGATIVE CASES.
+    #
+    # (a) a correct family reference must pass and a retired one must not. This
+    # is the distinction the specification got wrong: it proposed testing the
+    # stem as a whole NAME, under which `AVR_SOAK_*` -- a perfectly good
+    # reference to eleven real variables -- reads as severed, because no
+    # variable is literally called AVR_SOAK.
+    if not any(k.startswith("AVR_SOAK_") for k in known_names):
+        sys.exit("FAIL: negative case -- axis D no longer resolves the "
+                 "AVR_SOAK_* family")
+    if any(k.startswith("PIC320_") for k in known_names):
+        sys.exit("FAIL: negative case -- PIC320_* is the retired prefix and must "
+                 "not resolve; the v0.9.8 rename removed it")
+    checks += 1
+
+    # (b) the shapes must still match, and executable code must NOT be read as
+    # prose. This tree has hundreds of shell locals and C macros sharing the
+    # project's prefixes (SOAK_PIDS, MUTATION_MAKE, RELEASE_THRESH); reading
+    # code lines reported 154 of them as severed variables.
+    if not VAR_NAMED.search("the `PIC320_TAG` variable") \
+            or not VAR_FAMILY.search("uses PIC320_* variables"):
+        sys.exit("FAIL: negative case -- axis D's shape patterns no longer match")
+    if VAR_FAMILY.search("PIC320-star") or VAR_NAMED.search("PIC320_TAG"):
+        sys.exit("FAIL: negative case -- axis D matches a bare word with no "
+                 "variable shape around it")
+    checks += 1
+
+    return checks, harvested, used_markers, all_markers
+
+
 def check_axis_c():
     """Axis C: every `NAME=value` handed to make names a variable it knows."""
     checks = 0
@@ -694,13 +1313,43 @@ def check_self_exemption():
     return 1
 
 
+def check_markers(used, declared):
+    """Every exemption marker must still suppress something.
+
+    Same discipline as ENV_ALLOWLIST and SELF_EXEMPT: a marker that stops
+    matching anything is a permanent hole sitting over live text, and the next
+    dead name written under it is covered silently. Exemptions expire.
+    """
+    stale = sorted(set(declared) - set(used))
+    if stale:
+        lines = ["FAIL: name-contract exemption marker(s) that no longer suppress "
+                 "anything:"]
+        for rel, lineno in stale:
+            lines.append(f"  {rel}:{lineno}  ({declared[(rel, lineno)]})")
+        lines.append("")
+        lines.append("Remove them. A marker over text that is now clean will")
+        lines.append("silently cover the next dead name written under it.")
+        sys.exit("\n".join(lines))
+    return 1
+
+
 def main():
     c_checks, overrides = check_axis_c()
     a_checks, reads = check_axis_a()
     a_checks += check_self_exemption()
 
-    print(f"Makefile name contract: {c_checks + a_checks} checks, 0 failures "
-          f"(axis C: {overrides} overrides; axis A: {reads} variable queries)")
+    b_checks, commands, b_used, b_marks = check_axis_b()
+    d_checks, mentions, d_used, d_marks = check_axis_d(
+        data_base()[2] | dereferenced_names())
+
+    marks = dict(b_marks)
+    marks.update(d_marks)
+    shared = check_markers(b_used | d_used, marks)
+
+    total = c_checks + a_checks + b_checks + d_checks + shared
+    print(f"Makefile name contract: {total} checks, 0 failures "
+          f"(axis A: {reads} queries; axis B: {commands} commands; "
+          f"axis C: {overrides} overrides; axis D: {mentions} mentions)")
 
 
 if __name__ == "__main__":

@@ -825,6 +825,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_BUILD_TARGETS,$(n))))
 #
 # Anything whose VALUE is a property of one chip must carry that chip's name.
 # A mis-scoped chip variable produces no compile error and no failing test, it
+# name-contract: exempt (names a removed variable to explain why it is gone)
 # produces a PASSING one: PIC_FLASH_WORDS=512 silently gated the 256-word part
 # against the 322's budget, which is why that class of name no longer exists.
 PIC_CC    ?= /opt/microchip/xc8/v3.10/bin/xc8-cc
@@ -1955,7 +1956,8 @@ XT_SIM_VARIANT ?=
 XT_SIM_DRIVER   = test/avr/test_sim_attiny202.py
 XT_FAULT_DRIVER = test/avr/test_fault_attiny202.py
 XT_SOAK_DRIVER  = test/avr/test_soak_attiny202.py
-# Soak knobs (parity with the PIC soak's SOAK_*). Default 1 h simulated (~17 s
+# Soak knobs (parity with the PIC soak's PIC10F322_SOAK_*). Default 1 h
+# simulated (~17 s
 # wall/variant in yasimavr fast mode); pass 86400000 for 24 h.
 XT_SOAK_DURATION_MS ?= 3600000
 XT_SOAK_LIVENESS_INTERVAL_MS ?= 60000
@@ -2669,13 +2671,20 @@ test-ci-local-routing:
 test-variant-map-contract:
 	./test/test_variant_map_contract.sh
 
-# Host-only proof that the names other files exchange with this Makefile are
-# names it actually knows, in both directions (axes C and A of the name-contract
-# item). Make is silent about either: an override naming nothing is legal, so a
-# renamed SOAK_* left one mutant running a 24 h soak instead of 2 s for an
-# entire release; and `print-%` matches ANY name, so a query for a removed
-# variable prints an empty line and exits 0 -- which is how three make-release
-# reads survived the same rename pointed at MCU, LFUSE_X5 and HFUSE_X5.
+# Host-only proof that the names other files and documents exchange with this
+# Makefile are names it actually knows. All four axes of the name-contract item:
+# a variable READ (print-VAR), a goal named to a READER (make <goal>), a
+# variable SET (VAR=value), and a variable named to a reader. Make is silent
+# about three of the four -- an override naming nothing is legal, `print-%`
+# matches ANY name and returns an empty line, and an assignment to an unknown
+# variable is simply ignored -- so a rename severs the link with every gate
+# still green. The fourth is loud, but only for the reader who types the dead
+# goal, which is exactly who should not be the one to find it.
+#
+# name-contract: exempt (names the retired spellings to describe the defect)
+# In v0.9.8 this class cost a 43,200x soak overrun on a renamed SOAK_* override,
+# three make-release reads left pointed at MCU/LFUSE_X5/HFUSE_X5, 15 dead goals
+# in a live qualification document, and ten stale variable surfaces.
 test-makefile-name-contract:
 	@if ! command -v python3 >/dev/null 2>&1; then \
 		echo "FAIL: python3 is required by the Makefile name-contract gate"; exit 1; \
@@ -3241,6 +3250,7 @@ test-mutation:
 # Intentionally NOT part of `make test` or `make test-long` -- run standalone
 # before hardware signoff or as a pre-release gate.
 #
+# name-contract: exempt (SOAK_* here is the C macro family, stated below)
 # Overrides (command line) -- note the AVR_ prefix. The bare SOAK_* spellings
 # are the compiled-in C macros below, NOT make variables: passing one of those
 # on the command line defines a variable nothing reads, and the soak silently
@@ -4722,6 +4732,7 @@ print-%:
 # that three times: three `mkv` calls in scripts/make-release.sh left pointing at
 # removed names (the damage would have surfaced as empty fuse bytes in a
 # published MANIFEST.md at the end of a 24-hour run), a mutation row passing four
+# name-contract: exempt (names the retired spelling to describe the defect)
 # renamed SOAK_* overrides that were silently inert, and ten stale surfaces
 # naming variables to human readers.
 #
@@ -5033,7 +5044,7 @@ help:
 	@echo "  test-lockstep-progress  both PIC exact-pin/stall-propagation checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
-	@echo "  test-makefile-name-contract  every make override and print-<VAR> query names a real variable (included in test)"
+	@echo "  test-makefile-name-contract  every make goal and variable named by a file or a doc really exists (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
 	@echo "  test-pic-build-rebuild  PIC soak binaries rebuild on a workload change"

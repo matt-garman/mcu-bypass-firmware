@@ -41,7 +41,7 @@ third_party/yasimavr/.venv.old.*/
 *.ctu-info
 cppcheck-addon-ctu-file-list*
 
-# gpsim drops this log (often 0-byte) in the cwd on every `make pic-test-soak`
+# gpsim drops this log (often 0-byte) in the cwd on every `make pic10f322-test-soak`
 gpsim.log
 
 # Persistent inode used to serialize complete Make and release invocations.

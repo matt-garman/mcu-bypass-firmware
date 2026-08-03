@@ -326,11 +326,10 @@ analysis that the 64 ms SUT delay covers the LDO ramp (check the LP2950/AP7375
 datasheet startup time against 64 ms). Item (b) is a documentation task and pairs
 naturally with the Tier 2 datasheet-citation item.
 
-**Fail-closed gate on the names other files exchange with the Makefile —
-~~`print-<VAR>` reads~~ (axis A **done**, 2026-08-02), documented
-`make <goal>` targets, ~~`make VAR=value`
-overrides~~ (axis C **done**, 2026-08-02), and variables named to human
-readers.** Added 2026-08-01 while doing
+**~~Fail-closed gate on the names other files exchange with the Makefile —
+`print-<VAR>` reads, documented `make <goal>` targets, <!-- name-contract: exempt (<goal> is generic) -->
+`make VAR=value` overrides, and variables named to human
+readers.~~ COMPLETE (all four axes, 2026-08-02.)** Added 2026-08-01 while doing
 the variable-prefix rename in `v0.9.8`; widened three times on 2026-08-02 —
 first after the same class was found severed on the goal axis, then after it was
 found severed on the override axis (where it had already burned a >10-hour run),
@@ -354,7 +353,7 @@ bytes, and one image path composed as `bypass--<stage>.hex` — at the end of a
 `make test` cannot catch it because it never executes the release script's
 variable preamble.
 
-*Axis B — goals named in documentation.* Same severance, worse outcome, because
+*Axis B — goals named in documentation (**done**).* Same severance, worse outcome, because
 a reader runs these by hand and gets `No rule to make target`. The `v0.9.8`
 prefix rename left 15 dead goal references in `docs/pic10f320_validation.md` —
 a document explicitly framed as *current* qualification evidence, not history —
@@ -366,7 +365,7 @@ nothing prevents the next rename from re-creating them.
 
 One further casualty surfaced in the 2026-08-02 meta-review, and it is the
 sharpest argument for this axis: `test/README.md:68` named
-`make test-sim-<variant>`,
+`make test-sim-<variant>`, <!-- name-contract: exempt (quotes the defect) -->
 which has no rule — the real goal is `test-sim-<variant>-attiny13a`. That is
 precisely the defect the whole `v0.9.8` rename existed to kill, a goal
 identified by the *omission* of its MCU field, surviving in a live document
@@ -399,7 +398,7 @@ build is clean; the mutant is still correctly killed, just ~43,000× too slow, s
 the failure mode is a hang rather than a wrong answer; mutation runs only in
 `test-long`; and the mutation harness wraps no mutant in `timeout`.
 
-*Axis D — variables named to human readers.* The variable-side twin of axis B,
+*Axis D — variables named to human readers (**done**).* The variable-side twin of axis B,
 and the one this item kept missing because each earlier widening was scoped to
 the names *that* rename had just touched. A comment, a README or a `make`
 diagnostic names a variable; the rename moves it; the prose keeps recommending
@@ -524,10 +523,99 @@ purpose, so the file is excluded from both harvests, and the exclusion is
 asserted to still be load-bearing. Any gate whose subject is *text* will meet
 this; worth expecting on axes B and D rather than rediscovering.
 
-**Still open: axes B and D.** They share a harvest pass over the same files and
-differ only in the token class they look for, so building either alone wastes
-most of the work. Their consumers are humans, rather than a script that at least
-runs in CI.
+**Axes B and D are DONE (2026-08-02), and the item is closed.** Built together,
+as predicted, sharing one harvest pass over the same files and one exemption
+mechanism. 35 checks now across all four axes, 0.6 s: 64 variable queries, 336
+documented commands, 72 overrides, 65 variable mentions.
+
+Both found a live defect on the first clean run — `.gitignore:44` named
+`pic-test-soak`, a goal the `v0.9.8` rename removed, in the comment explaining
+which goal produces the file it ignores; and a `Makefile` comment described the
+PIC soak's knobs as a family that no variable belongs to.
+
+Corrections to the specification above, recorded because two of them invalidate
+design notes that were written with some confidence:
+
+1. *The ">2 minutes" figure for `make -rRn --print-data-base` was wrong, and the
+   reason matters more than the number.* The parse costs **0.024 s** nested and
+   0.1 s cold. What the earlier measurement caught was the **worktree flock**:
+   under `-n` make still executes recipe lines containing `$(MAKE)`, and the
+   serialization wrapper's is one, so a standalone parse waits on the lock
+   exactly as `make -s print-<VAR>` does. Measured directly: against a 6 s lock
+   holder the parse took 5.7 s, and inside `make test` — where
+   `_MAKE_SERIAL_LOCK_HELD` is inherited and the wrapper is bypassed — 0.024 s.
+   The static-harvest fallback was never needed, and would have been strictly
+   worse: make's own data base is the only source that carries the
+   `$(eval $(call ...))` families, so a textual harvest of rule heads would have
+   reported every documented use of `attiny85-program` or
+   `test-sim-cd4053_simple-attiny13a` as missing.
+2. *Axis D's prefix-vocabulary premise was wrong.* "Scoping to that vocabulary
+   is what keeps the false-positive rate survivable" — it is not, because the
+   vocabulary is shared. `SOAK_PIDS`, `MUTATION_MAKE`, `RELEASE_THRESH`,
+   `FW_PATH` and 150 others carry the project's prefixes and are shell locals,
+   C macros and CI environment keys. A prefix cannot tell a Makefile variable
+   from any of them, and the first measurement of the specified sweep returned
+   154 candidates of which 1 was real. Two changes make it work: harvest
+   **prose only** (documentation, and comments in code — never executable
+   lines), and treat a family reference as a **prefix query** rather than a
+   name. `PIC320_*` asks whether any known variable begins with `PIC320_`;
+   testing the stem as a whole name reports `AVR_SOAK_*` and `XT_FUSE_*` as
+   severed, since nothing is literally called `AVR_SOAK`.
+3. *Axis B's precision problem is far larger than "some false positives", and
+   the fix is context rather than vocabulary.* English follows the word "make"
+   constantly. A harvest reading every line containing `make` returned **881**
+   distinct tokens — "sure", "the", "a", "and" — against about a dozen real
+   ones. Three rules take that to zero: read only command contexts (fenced
+   blocks and backtick spans in documentation, command lines in code, backtick
+   spans in comments); require the make word to **open** its fragment, so
+   `apt-get install -y make util-linux` is not an invocation; and take only the
+   **first** goal word, because what follows a documented goal is usually prose.
+   Continuation joining matters here too, and for the opposite reason it did on
+   axis C:
+   <!-- name-contract: exempt (quotes the misparse) -->
+   the apt list above only reads as `make util-linux` when its
+   backslash is left unjoined.
+4. *Goal-schema resolution is worth more than it looked, and it had to be
+   fixed twice.*
+   <!-- name-contract: exempt (quotes the defect) -->
+   `make test-sim-<variant>` expands over `$(VARIANTS)` and every
+   expansion must exist, which is what makes the `test/README.md` casualty
+   catchable. The first implementation silently disabled itself: the shell
+   redirection split ran before placeholder resolution and truncated the schema
+   to `test-sim-`, turning a resolvable schema into an
+   unrecognisable stub. A placeholder with no mapping now fails loudly rather
+   than being skipped — which immediately surfaced two more schema forms
+   (`<goal>`, `<target>`) that the sweep had never noticed.
+5. *The exemption mechanism is per-line and per-block, as predicted, and the
+   marker has to know which line it annotates.* A trailing marker exempts its
+   own line; a marker that is the only thing on its line exempts the next
+   non-blank one, which is the only way to annotate a C `#error` (whose trailing
+   text would become part of the message) or a sentence wrapped across a comment
+   block. A trailing marker deliberately does not reach forward, so annotating
+   one table row cannot silently exempt the row beneath it. Twenty-one markers
+   exist; every one must still suppress something or the gate fails.
+
+Three of the four file-level exemptions predicted for axis B were needed and one
+was not. Published release artifacts (`release/v*/`) are exempt by path rather
+than by marker, deliberately: they are immutable records of what a past release
+said, so nobody should be opening one to add a comment. Self-declared historical
+documents reuse axis A's banner mechanism, which is what that prediction called
+"the hard part" and turned out to cost nothing extra. `CHANGELOG.md` is exempt
+by name on all axes, and `TODO.md` on axis D only — this file quotes every dead
+spelling the four axes exist to catch, but its
+<!-- name-contract: exempt (<goal> is generic) -->
+`make <goal>` commands are still checked.
+
+Ceilings, stated so the next reader does not over-trust the gate:
+
+- Axis B checks only the first goal of a multi-goal command, and cannot see a
+  goal named in running prose without `make` in front of it — "the per-variant
+  `pic320` build" was a real `v0.9.8` casualty and is invisible to this.
+- Axis D cannot distinguish a Makefile variable from a shell local or C macro
+  sharing a project prefix, which is why five of the twenty-one markers say
+  exactly that.
+- Both are textual. Neither knows whether a documented command would actually
+  succeed, only that its goal and its variables resolve.
 
 A prototype sweep already works: harvest every `NAME=value` token from lines
 invoking make across `test/`, `scripts/`, `.github/` and the Makefile's own
@@ -601,7 +689,7 @@ are kept as the record of why, not as work):
   under-scoped in one respect: restricting the harvest to `scripts/` and
   `.github/` would have missed `release/README.md`, a *published* document that
   tells a reader to query a variable. Axis A harvests every tracked file.
-- **For axis B, resolve goals without running them.** `make -n <goal>` builds a
+- **For axis B, resolve goals without running them.** `make -n <goal>` builds a <!-- name-contract: exempt (<goal> is generic) -->
   dependency graph and is far too slow to do ~90 times; it also blocks on the
   serial lock whenever a soak or `test-long` is running, which is exactly when
   someone is likely to run `make test`. Prefer a single `make -rRn
@@ -612,14 +700,15 @@ are kept as the record of why, not as work):
   and it must expand the generated families (`attiny$(1)`, `attiny$(1)-program`,
   `test-sim-<variant>-attiny<n>`) rather than report them missing.
 - **Be honest about axis B's ceiling: it can only check goals it can
-  recognise.** A harvest keyed on `make <goal>` catches commands, which is the
+  recognise.**
+  A harvest keyed on `make <goal>` catches commands, <!-- name-contract: exempt (<goal> is generic) --> which is the
   case that matters most because a reader runs those. It does *not* catch a
   goal named in running prose — "the per-variant `pic320` build" was one of the
   `v0.9.8` casualties, and it has neither the word `make` nor a hyphen suffix
   to key on. Widening the harvest to every backticked token that happens to
   look like a goal name will produce false positives (`pic320` is also a chip
   token, a directory fragment and a log-file stem). Recommend scoping the gate
-  to `make <goal>` occurrences, and stating that scope in the gate's own header
+  to `make <goal>` occurrences, and stating that scope in the gate's own header <!-- name-contract: exempt (<goal> is generic) -->
   so the next reader does not mistake it for total coverage.
 - **For axis D, harvest the variable token, not a `make` line.** Axis C's
   harvest is anchored on a make invocation; axis D's cannot be, because its
@@ -687,13 +776,13 @@ exist to be cross-checked against Makefile truth — but this one cross-checks
 nothing, it just needs a path, so the restatement buys nothing and cost exactly
 the silent lane-disable that `v0.9.8` fixed.
 
-Effort: axes C and A are spent — ~3 h for C against ~1 h predicted (the three
-spec corrections above are where it went, and each one had to be found by the
-gate failing on the real tree), then ~1 h for A, on estimate, because C had
-already paid for the oracle and the exemption discipline. Remaining: ~2–3 h for
-axes B and D together, since they share one harvest pass and one allowlist
-mechanism — and axis A's self-declared-banner exemption is now available to
-them, which was the part of axis B flagged as hardest. Impact: High — no new
+Effort: **spent, item complete.** ~3 h for axis C against ~1 h predicted (the
+three spec corrections are where it went, and each had to be found by the gate
+failing on the real tree), ~1 h for A on estimate because C had already paid for
+the oracle, and ~3 h for B and D together against ~2–3 h predicted. Total ~7 h.
+Every axis cost more in *correcting its own specification* than in code, which
+is the honest summary of this item: the sweeps were easy and knowing what they
+should look at was not. Impact: High — no new
 assurance about the
 firmware, but it closes a silent-severance class on the interfaces between the
 Makefile and the release orchestrator, the published documentation and the test
@@ -705,7 +794,7 @@ that had been failing the PIC10F322 soak build since the stage rename).
 A note on why this item keeps growing: every widening was found by looking, not
 by a gate, and each time the scope of the *previous* sweep was the reason the
 next one was missed — axis A swept `print-<VAR>`, so it did not see documents;
-axis B swept `make <goal>`, so it did not see variables in prose; axis C swept
+axis B swept `make <goal>`, so it did not see variables in prose; axis C swept <!-- name-contract: exempt (<goal> is generic) -->
 make-invoking lines, so it did not see continuations, and then its own written
 specification turned out not to see the mutation tables where the motivating
 defect actually lived. That pattern is the argument for building the remaining
@@ -714,14 +803,19 @@ every gate carries a negative case, since on both finished axes the most
 valuable single check is the one that reproduces the original bug and proves the
 gate fails on it.
 
-The pattern held once more on axis A, in the mildest possible form and worth
-noting for that reason: the spec's harvest scope (`scripts/`,
+The pattern held to the very end. On axis A, in the mildest possible form: the spec's harvest scope (`scripts/`,
 `.github/workflows/`) would have missed the *published* `release/README.md`, and
 its make-word anchor — carried over from axis C without re-examining it — would
 have missed two live query sites. Neither was a bug in the tree; both were
-places the gate would simply not have looked. That is the same shape as every
-earlier miss, which is why each axis now states its own scope in its own header
-rather than inheriting the previous one's.
+places the gate would simply not have looked. On axes B and D it was blunter:
+the design note for B recorded a two-minute cost that was really a lock wait,
+and the design note for D asserted a false-positive control (prefix scoping)
+that does not work at all. Both were written from a single measurement.
+
+That is the same shape as every earlier miss, which is why each axis now states
+its own scope in its own header rather than inheriting the previous one's — and
+why the closing verification on each was to reproduce the original defect and
+watch the gate fail on it. All four now do.
 
 ---
 
@@ -936,7 +1030,7 @@ Key constraints (so it actually works for the read-off-the-chip scenario):
 Effort: ~1–2 h incl. the `BYPASS_EMBED_URL` Makefile wiring plus a
 `strings`-based build check. Firmware source edit is the user's.
 
-**`make pic10f320-program` convenience target.** Added 2026-07-27. The PIC10F322
+**`make pic10f320-program` convenience target.** <!-- name-contract: exempt (documents an absent goal) --> Added 2026-07-27. The PIC10F322
 has `make pic10f322-program` (with `PIC10F322_PROG=pk2cmd|ipecmd`,
 `PIC10F322_PROG_TOOL` and `PIC10F322_PROG_CMD` overrides); the PIC10F320 has no
 equivalent, so `release/README.md` and the generated `MANIFEST.md` print the bare
@@ -1085,12 +1179,11 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Multi-press boundary cases | 2.5 | 3–4 h | Medium — tick-boundary edge cases |
 | Power-on-pressed simulation gap | 2.5 | 1–2 h | Low — simulator fidelity, not coverage |
 | Power-supply ramp-up analysis | 2.5 | 2–3 h | Medium — real-world robustness |
-| Makefile name-contract gate — remaining axes B (documented goals) and D (variables named to readers); axes A (`print-<VAR>` reads) and C (`VAR=` overrides) **done** | 2.5 | 2–3 h | High — closes a silent-severance class in the release path, the published docs and the test harnesses; cost a disabled mutation lane, a >10-hour hang, ten stale surfaces and a severed per-variant map across one release |
 | Hardware-validation procedure doc | 3 | 2–3 h | High — primary-part WDT gap |
 | HIL rig: behavioural + register introspection | 3 | 5–8 d | High — silicon-level model validation |
 | Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |
 | Broader compiler & toolchain portability | 3 | Medium | Medium-High — adoption + reliability |
 | Embedded provenance URL | 3 | 1–2 h | Low — provenance polish |
-| `make pic10f320-program` target | 3 | 1 h + bench | Low — convenience; `pk2cmd` documented |
+| `make pic10f320-program` target <!-- name-contract: exempt (absent goal) --> | 3 | 1 h + bench | Low — convenience; `pk2cmd` documented |
 | Manufacturing artifacts (name as scope) | 4 | — | Completeness signal |
 | Signal-integrity SPICE modeling | 4 | 2 h | High for the board, not firmware work |

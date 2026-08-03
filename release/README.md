@@ -157,6 +157,8 @@ Historical release directories are **not** renamed: their `SHA256SUMS` names the
 files and is covered by a detached signature, so renaming them would invalidate
 the published signatures. Use this table to map an old name to its replacement.
 
+<!-- name-contract: exempt-begin (old->new goal redirect table; the left
+     column names goals that deliberately no longer exist) -->
 | up to `v0.9.7` | from `v0.9.8` |
 |---|---|
 | `bypass_cd4053.hex` | `bypass-attiny13a-cd4053_simple.hex` |
@@ -189,6 +191,7 @@ older `MANIFEST.md` may name a goal that no longer exists:
 | `make program-pic` | `make pic10f322-program` |
 | `make pic320-*` | `make pic10f320-*` |
 | `make test-sim` / `test-sim-t85` | `make test-sim-attiny13a` / `test-sim-attiny85` |
+<!-- name-contract: exempt-end -->
 
 `make all` also changed meaning: it used to build the ATtiny13a images only,
 and now builds every part (lanes whose cross-toolchain is not installed skip
@@ -253,7 +256,7 @@ pk2cmd -PPIC10F322 -Fbypass-pic10f322-cd4053_simple.hex -M -Y -R   # PICkit 2
 pk2cmd -PPIC10F320 -Fbypass-pic10f320-cd4053_simple.hex -M -Y -R   # PICkit 2
 ```
 
-There is no `make pic10f320-program` convenience target yet; flash it with the
+There is no `make pic10f320-program` convenience target yet; <!-- name-contract: exempt (documents an absent goal) --> flash it with the
 programmer command above.
 
 ## Reproduce the images bit-for-bit
@@ -298,10 +301,13 @@ Use the names that exist in the tree you check out:
 
 ```sh
 git checkout vX.Y.Z          # v0.9.6 or v0.9.7
+# name-contract: exempt-begin (pinned to an older tag: these goals are
+# correct in THAT tree and deliberately absent from this one)
 # install the pinned toolchain (see TOOLCHAIN.adoc), then:
 scripts/verify-release-qualification.sh release/vX.Y.Z vX.Y.Z
 make clean && make all13 all85 all45 && make attiny202
 make pic && make pic320-variants
+# name-contract: exempt-end
 scripts/verify-release-images.sh release/vX.Y.Z $(make -s print-RELEASE_IMAGE_DIRS)
 ```
 

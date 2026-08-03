@@ -314,7 +314,7 @@ When changing the firmware:
    PIC10F320 branch sweep explicit:
 
    ```sh
-   make analyze-misra VARIANTS="cd4053 mute relay" STRICT_TOOLS=1
+   make analyze-misra VARIANTS="cd4053_simple cd4053_with_mute tq2_l2_5v_relay" STRICT_TOOLS=1
    make attiny202-analyze-misra STRICT_TOOLS=1
    make pic10f322-analyze-misra STRICT_TOOLS=1
    for v in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
@@ -326,8 +326,8 @@ When changing the firmware:
    include paths; those path discoveries are not completeness gates. The PIC
    lanes explicitly guard their XC8/DFP headers.
 2. Run
-   `make analyze-misra-report VARIANTS="cd4053 mute relay" STRICT_TOOLS=1` to
-   inspect the unsuppressed Classic/shared inventory. It does not report the
+   `make analyze-misra-report VARIANTS="cd4053_simple cd4053_with_mute tq2_l2_5v_relay" STRICT_TOOLS=1`
+   to inspect the unsuppressed Classic/shared inventory. It does not report the
    other three MCU implementation files. When their suppression scope changes,
    use `make -n` to obtain the target's expanded cppcheck command and re-run it
    without `--suppressions-list=...`. Also remove PIC10F322's

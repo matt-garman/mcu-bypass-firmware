@@ -93,6 +93,54 @@ file is the human-readable summary of *what changed*.
   `scripts/make-release.sh`: the gate names all five severed reads with their
   line numbers and fails.
 
+- **The same gate now also fails if any documented `make <goal>` names a goal
+  that does not exist, or if any prose or diagnostic names a variable that does
+  not.** Axes B and D, closing the four-axis name-contract item. 35 checks in
+  total, 0.6 s: 64 variable queries, 341 documented commands, 72 overrides and
+  65 variable mentions. Each new axis found a live defect on its first clean
+  run — `.gitignore` named `make pic-test-soak`, a goal the `v0.9.8` rename
+  removed, in the comment explaining which goal produces the file it ignores;
+  and a `Makefile` comment described the PIC soak's knobs as a family no
+  variable belongs to.
+
+  Axis B is the only one of the four whose failure is loud — `No rule to make
+  target` — which is exactly why it has to be caught before a reader is the one
+  who finds it. The `v0.9.8` rename left 15 dead goals in
+  `docs/pic10f320_validation.md` alone, a document framed as *current*
+  qualification evidence, including its entire "Reproducing any of this"
+  section, where four of six commands failed.
+
+  Goals resolve against `make -rRn --print-data-base`, parsed once. Reading
+  make's own inventory rather than grepping rule heads is what makes the
+  generated families resolvable at all: `attiny85-program` and
+  `test-sim-cd4053_simple-attiny13a` exist only after `$(eval $(call ...))`
+  expansion. Goal *schemas* are expanded rather than skipped — `make
+  test-sim-<variant>` is resolved over `$(VARIANTS)` and every expansion must
+  exist, which is the check that catches the sharpest `v0.9.8` casualty, a
+  documented goal identified by the *omission* of its MCU field.
+
+  Precision was the whole problem on axis B and is worth recording: English
+  follows the word "make" constantly, so a harvest reading every line containing
+  it reported **881** distinct tokens ("sure", "the", "a") against about a dozen
+  real ones. Three rules take that to zero — read only command contexts, require
+  the make word to *open* its fragment (`apt-get install -y make util-linux`
+  installs a package), and take only the first goal word.
+
+  Axis D reads prose only, never executable lines: this tree has over 150 shell
+  locals, C macros and CI keys sharing the project's variable prefixes, so a
+  prefix alone cannot identify a Makefile variable. Family references are
+  checked as prefixes — `PIC320_*` asks whether any known variable begins with
+  `PIC320_` — because testing the stem as a name reports correct references like
+  `AVR_SOAK_*` as severed.
+
+  Live documents legitimately name retired names: redirect tables, recipes
+  pinned to an older tag, quoted transcripts, and sentences whose point is that
+  a name is gone. Those carry a per-line or per-block `name-contract: exempt`
+  marker with a reason; published release artifacts under `release/v*/` are
+  exempt by path, since they are immutable records nobody should edit. Every one
+  of the 21 markers must still suppress something or the gate fails, so
+  exemptions expire rather than accumulate.
+
 ### Changed
 - **Every released firmware image is renamed to one consistent scheme.** All
   eighteen images on all six MCUs are now
@@ -277,6 +325,23 @@ file is the human-readable summary of *what changed*.
   Image contents are unchanged for a third time: all 18 remain bit-identical.
 
 ### Fixed
+- **`MISRA_COMPLIANCE.md`'s maintenance procedure told a maintainer to run the
+  MISRA sweep over variant names that no longer exist**, and the command did not
+  fail — it silently analyzed **zero** output drivers and exited 0.
+  `make analyze-misra VARIANTS="cd4053 mute relay"` (and the
+  `analyze-misra-report` line beside it) named the pre-`v0.9.6` stage
+  vocabulary; `$(FW_SOURCES)` is built by
+  `$(foreach v,$(VARIANTS),$(src_$(v)))`, so every unrecognised name
+  contributes nothing and the set silently shrank from five files to two.
+  Both lines now name the current values.
+
+  This is the *value* twin of the four name-contract axes and is not covered by
+  any of them: `VARIANTS` exists, so axis C is satisfied; only its contents were
+  stale. It is also the failure mode the `Makefile` warns about in its own
+  words — "a mis-scoped chip variable produces no compile error and no failing
+  test, it produces a PASSING one". Found by hand while building axis D, in the
+  same code block whose very next line already used the current spellings.
+
 - **The PIC10F322 soak driver had not compiled since the stage-vocabulary
   rename, silently disabling a mutant and breaking three release soak
   binaries.** `Makefile`'s `pic_soak_block_*` map kept its retired

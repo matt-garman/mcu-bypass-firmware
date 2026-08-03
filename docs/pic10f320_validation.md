@@ -343,7 +343,7 @@ skip-accounting design exists to prevent.
 Two cautions learned while building this set, recorded because both produce
 misleading greens:
 
-- **A mutant that fails to compile also makes `make <target>` exit non-zero**, so
+- **A mutant that fails to compile also makes `make <target>` exit non-zero**, so <!-- name-contract: exempt (<target> is generic) -->
   it scores as "killed". Confirm any new firmware mutant builds before accepting
   its kill.
 - **A mutant built against a sandbox missing its harness dies for the wrong
@@ -389,7 +389,7 @@ make pic10f320-test-soak PIC10F320_SOAK_DURATION_MS=86400000
 
 These are the `v0.9.8` goal and variable names. Evidence recorded above and under
 `release/v0.9.7/` and earlier was produced by the same lanes under their previous
-`pic320-*` / `PIC320_*` spellings; `release/README.md` carries the mapping, and
+`pic320-*` / `PIC320_*` spellings; <!-- name-contract: exempt (redirect note) --> `release/README.md` carries the mapping, and
 `git checkout` of an earlier tag gets that tree's names along with its Makefile.
 
 Add `STRICT_TOOLS=1` for authoritative optional analyzer/simulator results.

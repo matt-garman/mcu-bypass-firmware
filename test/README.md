@@ -142,7 +142,7 @@ test/
 ```
 
 The PIC10F320 lane reuses, rather than forks, everything it can: the CONFIG-word
-checker (`pic/test_config_pic.c`, parameterised on `PIC_DEVICE_NAME`), both gpsim
+checker (`pic/test_config_pic.c`, parameterised on `PIC_DEVICE_NAME`), <!-- name-contract: exempt (C macro, not a make variable) --> both gpsim
 CLI wrappers, the soak driver (`pic/test_soak_pic.cc`), the three libgpsim harness
 cores, and — most importantly — `src/bypass_pure.c` itself. Thin per-part adapters
 keep processor/image defaults and output-macro vocabularies explicit. The fault
@@ -194,6 +194,7 @@ The split mirrors the PIC lanes: **the host-only rows below are members of
 | Register-level functional | `attiny202-sim` | The real image toggles on debounced press, boots dark with the WDT locked and `PORTA.DIR` exact, stays stable at idle, handles a switch held through power-on, and drives the correct PA2/PA3 sequence per variant. | yasimavr |
 | Fault recovery | `attiny202-fault` | 22 guarded SFR/latch/state/pin-polarity corruptions each produce the correct response — the sanity gate's force-reset path, or a witnessed watchdog reset for the tick timer itself. Includes an independent `INVEN` injection on all five bonded application pins, which `OUT` readback alone cannot see. Zero skips, exact completion accounting over 23 results. | yasimavr |
 | Firmware/model lock-step | `attiny202-lockstep` | `ctx_` in simulated SRAM equals the shipping core's state after **every settled tick**, over both boot scenarios, plus LED and settled control-line agreement. Catches a shell defect on the tick it happens rather than as a wrong output later. | yasimavr + host core via ctypes |
+<!-- name-contract: exempt (SOAK_RESULT is the driver's stdout token, not a make variable) -->
 | Liveness soak | `attiny202-soak` | Over a long run the watchdog never resets the device (GPR0 reset witness), the sanity gate never force-resets, and a periodic 2-press round-trip still toggles. Emits the shared `SOAK_RESULT` release contract. | yasimavr |
 | Fail-closed aggregate | `attiny202-test-target` | sim + fault + lock-step across every variant, with no skip permitted. This is what release qualification runs. | yasimavr |
 
