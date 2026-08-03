@@ -17,7 +17,13 @@
 
 GPSIM="${GPSIM:-gpsim}"
 GPSIM_TIMEOUT_SECONDS="${GPSIM_TIMEOUT_SECONDS:-60}"
-PROC="${PIC10F322_GPSIM_PROC:-p10f322}"
+# The processor the SHARED wrappers hand gpsim. PIC_GPSIM_PROC carries no part
+# in its name on purpose: it is the channel each lane passes its OWN part's
+# value through (PIC10F322_GPSIM_PROC / PIC10F320_GPSIM_PROC), exactly as the
+# naming rule beside the PIC variables in the Makefile states. Spelling it for
+# one part severs the other lane silently, because the fallback below is that
+# one part -- so the PIC10F320 lanes go on passing while simulating a PIC10F322.
+PROC="${PIC_GPSIM_PROC:-p10f322}"
 
 fails=0
 note() { printf '  %-14s %s\n' "$1" "$2"; }

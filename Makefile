@@ -4603,6 +4603,14 @@ pic10f320-test-config: pic10f320-variants
 # their own `${GPSIM:-gpsim}` default, so a `make ... GPSIM=<other>` override was
 # silently ignored on this chip and the lane tested whatever gpsim was on PATH.
 #
+# PIC_GPSIM_PROC is the other half of that, and the more dangerous one to lose.
+# The shared wrappers fall back to p10f322, so a severed prefix here does not
+# fail the lane -- it runs this chip's HEX on the OTHER chip's device model and
+# reports PASS, because the 322 is a superset. That happened once, in v0.9.8,
+# when the wrapper's read was renamed and these prefixes were not.
+# test/test_gpsim_wrappers.sh now records the -p argument this target actually
+# reaches gpsim with, so the link is checked rather than assumed.
+#
 # PIC_GPSIM_STC is what makes the SHARED wrappers correct for this chip: the
 # toggle cadence checkpoint differs, so without the override this lane drove the
 # PIC10F320 through the PIC10F322's stimulus. The power-on-pressed stimulus is

@@ -634,6 +634,72 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **The PIC10F320 gpsim lanes simulated a PIC10F322, and the gate written to
+  prevent exactly that stayed green.** The variable-prefix rename in this
+  release renamed the shared gpsim wrapper's processor selector from
+  `PIC_GPSIM_PROC` to `PIC10F322_GPSIM_PROC` in
+  `test/pic/gpsim_wrapper_common.sh`, and left all four Makefile recipes
+  spelling `PIC_GPSIM_PROC=`. Those assignments became inert environment for a
+  name nothing reads, so both wrappers fell through to their `p10f322` fallback:
+  `make pic10f320-test-gpsim` ran the 256-word part's HEX on the 512-word part's
+  device model and reported `RESULT: PASS`. The PIC10F322 lane was correct only
+  by coincidence — its override happens to equal that fallback.
+
+  Introduced on this branch; `v0.9.7` spelled the name the same on both sides,
+  so no published release is affected. Both PIC10F320 wrappers pass unchanged on
+  the correct model, across all three output stages.
+
+  The rename was also backwards on its own terms. `Makefile` states the rule
+  beside the PIC variables — a `PIC_*` name with no part in it is the channel
+  each lane passes its OWN part's value through, and names
+  `PIC_GPSIM_PROC` as one of four such channels. A shared wrapper whose selector
+  carries one part's name severs the other lane by construction, and silently,
+  because the fallback is that same part. Fixed by restoring the read.
+
+  **The gate is the more important half.** `test/test_gpsim_wrappers.sh` already
+  carried a behavioural check for this, with a comment reading *"If this
+  regresses, the PIC10F320 lanes silently simulate a PIC10F322"* — and the same
+  commit rewrote that check's own probe to set the new name, so it went on
+  proving that the wrapper READS the variable while the Makefile stopped WRITING
+  it. A gate that supplies the input it is meant to observe cannot see its
+  producer disappear. Both public lanes are now probed end-to-end through a
+  `-p`-recording fake gpsim:
+
+  - `pic10f320-test-gpsim` is run with nothing overridden and must reach gpsim
+    with `p10f320` twice. Non-vacuous because the shared fallback is `p10f322`,
+    which is precisely the value the severed lane produced.
+  - `pic10f322-test-gpsim` cannot be checked that way at all — its correct
+    processor IS the fallback, so severed and intact are indistinguishable. It
+    is handed a probe value that is neither part's and must carry it through.
+    Setting it on the make command line does not short-circuit the check: make
+    exports command-line variables to the recipe environment, but under
+    `PIC10F322_GPSIM_PROC`, which the wrapper does not read.
+
+  Both probes read the wrapper's fallback rather than restating it, fail if that
+  value cannot be extracted, and fail if the expected value has drifted to equal
+  it. Verified by reintroducing the defect four ways — the 320 prefix severed,
+  the 322 prefix severed, the expected value made equal to the fallback, and the
+  fallback made unreadable — each reported by its own diagnostic. 44 checks.
+
+  **The name-contract gate's axis D was pointing at this defect**, which is how
+  it was found: prose naming `PIC_GPSIM_PROC` reads as severed there, because
+  axis D's known-name set was make variables only. A `NAME=value` prefix on a
+  recipe line defines no make variable, so the only spellings axis D accepted
+  for a shared env channel were part-scoped make-variable names — the rename
+  that broke this lane. `env_channel_names()` now unions those prefixes into the
+  known set, walking every statement of a recipe rather than only its first
+  (recipes are one logical line, and these invocations are the eighth statement
+  of theirs — reading only the head finds 44 channels and misses this one). It
+  takes the prefix position only, stopping at the first word that is not an
+  assignment, so make overrides and `-D` macros stay with axis C and the
+  fuse-injection contract respectively. A negative case fails if the harvest
+  stops finding `PIC_GPSIM_PROC` or starts reading `-D` macros as environment.
+
+  This closes a false positive, not the class. Nothing yet checks that a child
+  still READS the environment its parent sets — the gap this defect came
+  through. Filed as axis E in `TODO.md`, with the surface measured (121
+  channels, one severed) and the two things that make a naive version wrong.
+
 - **`make release` could not have completed: the AVR soak binary was renamed on
   one side only.** The same rename that moved `test_sim_<v>_t<n>` to
   `_attiny<n>` updated `scripts/make-release.sh`, which composed its own copy of

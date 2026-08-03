@@ -418,6 +418,59 @@ def dereferenced_names():
     return set(re.findall(r"\$[({]([A-Za-z_][A-Za-z0-9_]*)[)}]", text))
 
 
+def env_channel_names():
+    """Names the Makefile hands a CHILD PROCESS as environment.
+
+    A `NAME=value` prefix on a recipe line defines no make variable, so
+    $(origin) and the data base both report it as nothing at all. It is still
+    the Makefile SPEAKING that name: it is the channel a shared script reads its
+    per-lane configuration through, and the Makefile documents four of them by
+    name beside the PIC variables ("the env-var names the shared wrapper scripts
+    read ... each lane passes its own part's value through them").
+
+    Axis D needs them, or its only accepted spellings are make-variable names --
+    which is pressure toward exactly the rename that broke pic10f320-test-gpsim
+    in v0.9.8, where a SHARED wrapper's selector was re-spelled for ONE part.
+    Correcting that fix's own prose would have been the alternative, and the
+    prose was right.
+
+    Only the PREFIX position, walked word by word and stopped at the first word
+    that is not an assignment -- which is what the shell itself does, and what
+    keeps `make foo BAR=1` (an override, axis C's subject) and `cc -DBAR=1` (a
+    macro, the fuse-injection contract's) out of this set.
+
+    EVERY statement in the recipe, not just its first. A recipe is one logical
+    line once continuations are joined, and the interesting prefixes sit deep
+    inside a `; `-separated sequence -- the gpsim invocations are the eighth
+    statement of theirs. Reading only the head of the joined line finds 44
+    channels and misses the one this exists for.
+
+    NOT a claim that the name is read anywhere. That check is the standing gap
+    recorded in TODO.md: no axis verifies that a child still reads the
+    environment its parent sets, and the gpsim defect is what that gap costs.
+    """
+    names = set()
+    with open(os.path.join(ROOT, "Makefile"), encoding="utf-8") as fh:
+        text = fh.read()
+    word = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=")
+    # Words that introduce a command without being one, so an assignment after
+    # them is still in prefix position.
+    TRANSPARENT = {"export", "env", "then", "do", "else", "{", "("}
+    for _, line in logical_lines(text):
+        if not line.startswith("\t"):
+            continue
+        body = line.lstrip("\t").lstrip().lstrip("@-+")
+        for statement in re.split(r"[;|&<>]|\|\||&&", body):
+            for token in statement.split():
+                if token in TRANSPARENT:
+                    continue
+                m = word.match(token)
+                if not m:
+                    break
+                names.add(m.group(1))
+    return names
+
+
 def origins(names):
     """{name: $(origin name)} via one make invocation."""
     if not names:
@@ -1219,6 +1272,22 @@ def check_axis_d(known_names):
                  "variable shape around it")
     checks += 1
 
+    # (c) the env-channel half of the known set must resolve, and must not have
+    # swallowed either neighbouring shape. PIC_GPSIM_PROC is the motivating
+    # case: a name four recipes write, no make variable defines, and whose loss
+    # left the PIC10F320 lanes simulating a PIC10F322 in v0.9.8. A `-D` macro is
+    # the shape most easily mistaken for it, and belongs to the fuse-injection
+    # contract instead.
+    channels = env_channel_names()
+    if "PIC_GPSIM_PROC" not in channels:
+        sys.exit("FAIL: negative case -- the env-channel harvest no longer finds "
+                 "PIC_GPSIM_PROC; a recipe prefix has moved or the word walk "
+                 "has stopped working")
+    if channels & {"T13_LFUSE", "DT13_LFUSE", "T85_LFUSE"}:
+        sys.exit("FAIL: negative case -- the env-channel harvest is reading -D "
+                 "macros as environment")
+    checks += 1
+
     return checks, harvested, used_markers, all_markers
 
 
@@ -1383,7 +1452,7 @@ def main():
 
     b_checks, commands, b_used, b_marks = check_axis_b()
     d_checks, mentions, d_used, d_marks = check_axis_d(
-        data_base()[2] | dereferenced_names())
+        data_base()[2] | dereferenced_names() | env_channel_names())
 
     marks = dict(b_marks)
     marks.update(c_marks)

@@ -119,6 +119,60 @@ fallback has to stay for CBMC, say so in the `#ifndef` and make the reason
 checkable. Effort: ~1–2 h. Impact: Medium — `SOAK_DURATION_MS` alone repeats a
 defect this project has already been bitten by once.
 
+**Axis E — nothing checks that a child still READS the environment its parent
+sets.** Added 2026-08-03, from a live defect rather than a review. This is the
+third interface in the same family as the four name-contract axes and the `-D`
+item above, and the only one of the three that has already produced a wrong
+answer in the tree.
+
+Axis C harvests `NAME=value` only where it FOLLOWS the make word, and that
+scoping is right: an assignment *before* a command is environment for that
+command's child, not a claim about the Makefile's vocabulary. But nothing then
+checks the other end. The child's read is renamed, the parent's write is not,
+and the assignment becomes legal, silent and inert — the child falls back to its
+own in-source default, which is axis C's failure mode with a different owner.
+
+Measured: `test/pic/gpsim_wrapper_common.sh` had its `PIC_GPSIM_PROC` read
+renamed to `PIC10F322_GPSIM_PROC` while all four Makefile writers kept the old
+spelling, so `make pic10f320-test-gpsim` ran the 256-word part's HEX on a
+`p10f322` device model and reported `RESULT: PASS`. Fixed, and
+`test/test_gpsim_wrappers.sh` now probes both public lanes end-to-end — but that
+is one gate for one channel, not a contract.
+
+*Two things learned while fixing it, both of which shape the item.*
+
+- **The gate that existed for this was severed the same way.** Its comment said
+  "if this regresses, the PIC10F320 lanes silently simulate a PIC10F322", and
+  the rename rewrote the check's own probe to supply the new name. A gate that
+  sets the input it means to observe cannot see its producer disappear. Any
+  axis-E gate must read the value from the producer, never inject it.
+- **Axis D's vocabulary actively pointed at the defect.** Its known-name set was
+  make variables only, so prose naming a shared env channel read as severed and
+  the only accepted spellings were part-scoped make-variable names — which is
+  the rename that caused this. Fixed the same day by unioning in
+  `env_channel_names()` (`NAME=` prefixes in recipe statements). That closes the
+  false positive; it deliberately does **not** check that anything reads the
+  name, which is this item.
+
+*Scope, measured on the current tree:* 121 env-channel names are written from
+Makefile recipe prefixes. A probe requiring each to be read somewhere under
+`test/` or `scripts/` (following `.` sourcing and Python imports, since
+`AWK` reaches `check_stack_depth_pic.sh` through a wrapper and
+`BYPASS_MODEL_FFI` reaches `model_step_ffi.py` through an import) reported
+exactly one severed name — `PIC_GPSIM_PROC`, the defect above. So the surface is
+small and the false-positive rate looks survivable, which is the property that
+made axes C and D affordable.
+
+Two design notes for whoever builds it. The reverse direction (a script reading
+an env name nothing sets) is NOT the same check and should not be bundled: a
+script legitimately reads names an operator sets by hand. And a transitive
+reader search is required, not optional — a direct-read-only version reports
+both examples above as severed on a correct tree.
+
+Effort: ~2–3 h. Impact: Medium-High — it is the one axis in this family with a
+demonstrated live defect, and the failure mode is a passing test measuring the
+wrong thing.
+
 **~~Record the `v0.9.8` byte-identity verification as evidence, not just as a
 claim.~~ DONE (2026-08-03).** `scripts/verify-rename-identity.sh`, run from
 `scripts/make-release.sh` step 1 and retained as
@@ -1581,6 +1635,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 |---|---|---|---|
 | Design doc: datasheet citations | 2 | 2 h | High — completeness/rigor |
 | `-D<MACRO>` fallbacks: classify the remaining 25 | 2.5 | 1–2 h | Medium — `SOAK_DURATION_MS` repeats a defect already shipped once |
+| Axis E: env channels a child stopped reading | 2.5 | 2–3 h | Medium-High — the one axis in this family with a live defect behind it |
 | Re-pin yasimavr after the cycle-rewind fix | 2.5 | 1 h (+2 h optional) | Low — retires a documented simulator caveat |
 | Name contract cannot see an uncommitted file | 3 | 15 min | Low-Medium — the violation is reported one run late |
 | Return-stack oracle: extend to PIC10F322 | 2.5 | High | Low-Medium — second witness on a chip the assembly gate already bounds |

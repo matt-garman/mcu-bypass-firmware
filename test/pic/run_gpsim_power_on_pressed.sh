@@ -45,7 +45,7 @@ fi
 # the two-press toggle needs a chip-specific stimulus because its mid-debounce
 # cadence checkpoint depends on instruction timing, whereas this scenario's
 # stimulus is byte-identical for the PIC10F320 and PIC10F322 and is therefore
-# shared. PIC10F322_GPSIM_PROC is still honoured (via the shared helper), so the same
+# shared. PIC_GPSIM_PROC is still honoured (via the shared helper), so the same
 # stimulus runs on either chip. See the pic10f320-test-gpsim recipe in the Makefile,
 # which asserts this routing, and test/test_gpsim_wrappers.sh, which checks it
 # behaviourally.
