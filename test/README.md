@@ -38,7 +38,9 @@ test/
   test_lockstep_progress.sh shared: PIC libgpsim lock-step progress checks
   test_make_serialization.sh shared: worktree Make/release lock regression
   test_makefile_name_contract.py shared: every make goal/variable a file or doc
-                                     names is one the Makefile really defines
+                                     names is one the Makefile really defines,
+                                     checked from the moment a file exists
+                                     rather than from the commit after
   test_analyze_variant_guard.sh shared: analyze-* targets reject a bad VARIANTS=
                                      instead of silently analyzing less
   test_variant_selector_guard.py shared: every lane rejects a bad single-variant

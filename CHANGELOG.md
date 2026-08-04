@@ -682,6 +682,43 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **The name-contract gate could not see a file until it was committed, so it
+  reported a violation one run late — to the next person rather than to its
+  author.** `harvestable_files()` enumerated `git ls-files`, which reads the
+  *index*: a newly written file was invisible to all four axes until it was
+  added. `make test` therefore passed on the commit that introduced a violation
+  and failed on the run after. Filed from an observed instance, not a review —
+  `test/test_fuse_injection_contract.py` did exactly this, on two docstring
+  lines that reflowed such that a line began with the word `make` followed by an
+  English word. The gate's own self-exemption was accidental for the same reason
+  until the day the file was first committed.
+
+  The harvest now reads the working **tree**: `git ls-files` plus
+  `git ls-files --others --exclude-standard`, so a file is in scope from the
+  moment it exists. Both halves of that are load-bearing in opposite directions
+  and both are now asserted, against a throwaway fixture repository rather than
+  against this one — a clean working directory has no untracked file to
+  demonstrate the property with, which is precisely why it went unnoticed.
+  Without `--others` the gate silently narrows back to committed files; without
+  `--exclude-standard` it silently widens to every generated artifact under
+  `build_avr_classic/` and `third_party/`. Each direction was verified to fail.
+
+  Two consequences worth stating rather than discovering. The `PUBLISHED` path
+  rule that excludes `release/v*/` is newly load-bearing: a release directory is
+  untracked while `make release` is staging it, so what used to be redundant for
+  an unadded file is now the only thing keeping a past release's goal names out
+  of a check on the current tree — asserted alongside the harvest. And the
+  untracked half honours the developer's `core.excludesFile`, so it can see
+  slightly less on one machine than another; the tracked half is identical
+  everywhere, so CI remains the floor and this half can only ever catch *more*,
+  earlier.
+
+  Paths are read `-z`-delimited rather than split on whitespace. The untracked
+  half is the one that can hold a name a person typed by hand, and a space in it
+  would have split into two nonexistent paths, both dropped by the existing
+  `isfile` test — that is, skipped **silently**, which is the defect class the
+  gate exists to prevent. 37 → 39 checks, still 0.7 s.
+
 - **The PIC10F320 gpsim lanes simulated a PIC10F322, and the gate written to
   prevent exactly that stayed green.** The variable-prefix rename in this
   release renamed the shared gpsim wrapper's processor selector from

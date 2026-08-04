@@ -36,7 +36,8 @@ nothing. Four separate guards missed it, each for a different reason.
 
 WHERE OVERRIDES LIVE -- four sources, and the last two are the ones that matter.
 
-  1. Lines invoking make, in EVERY tracked file: shell, YAML, and documents.
+  1. Lines invoking make, in EVERY file in the tree -- tracked, plus untracked
+     and not ignored (see repo_files) -- shell, YAML, and documents.
      Backslash continuations are joined FIRST. This is not optional: in
      test/test_avr_build_rebuild.sh the `make` sits on one line and its
      overrides five continued lines below, and there are ZERO physical lines in
@@ -197,6 +198,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -209,7 +211,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # defect, so a gate that checked its own prose could not document what it
 # checks. This surfaced the moment the file was first committed -- until then
 # `git ls-files` did not list it, and the exemption was accidental rather than
-# stated.
+# stated. That accident is now impossible: the harvest reads the working tree
+# rather than the index (see repo_files), so a file is in scope from the moment
+# it exists. This exemption is the one that had to be WRITTEN, and it is.
 #
 # Cost, stated plainly rather than glossed: the one real override this file
 # passes to make (`NAMES=`, to the `origins` rule) goes unchecked by axis C.
@@ -540,7 +544,7 @@ def harvest_reads():
     same; `per_spelling_counts` records how many hits each spelling produced, so
     losing one of the two spellings fails loudly.
 
-    Scoped to every tracked file, not just test/ and scripts/: a published
+    Scoped to every file in the tree, not just test/ and scripts/: a published
     document telling a reader to run `make print-RELEASE_IMAGE_DIRS` is making
     the same claim about the Makefile's vocabulary that a script does, and
     release/README.md does exactly that.
@@ -803,12 +807,49 @@ def exemptions(text):
     return exempt, markers
 
 
+def repo_files(root, env=None):
+    """Every path git considers part of the tree: tracked, plus untracked and
+    not ignored.
+
+    The second query is what lets this gate see a file the run BEFORE it is
+    committed. `git ls-files` alone made every NEW file exempt until it was
+    added, so `make test` passed on the commit that introduced a violation and
+    failed on the next run -- reporting it to whoever ran the suite next rather
+    than to the person who had just written it.
+    test/test_fuse_injection_contract.py did exactly that, and this file's own
+    self-exemption below was accidental for the same reason until the day it was
+    first committed. Neither can happen now.
+
+    Both directions matter and check_harvest_scope() asserts both: without
+    `--others` the gate silently narrows back to committed files only; without
+    `--exclude-standard` it silently widens to every generated artifact in
+    build_avr_classic/ and third_party/, none of which anybody wrote.
+
+    `-z` rather than splitting on whitespace, because the untracked half is the
+    one that can contain a name a person typed by hand. A space in it would
+    split into two nonexistent paths, both dropped by the `isfile` test below --
+    that is, the file would be skipped SILENTLY, which is the defect class this
+    whole gate exists to prevent.
+
+    Scope caveat, stated because it cannot be enforced: the untracked half
+    honours the developer's core.excludesFile as well as the repo's .gitignore,
+    so it can see slightly less on one machine than another. The tracked half is
+    identical everywhere, so CI stays the floor and this half can only ever
+    catch MORE, earlier.
+    """
+    seen = set()
+    for query in (["git", "ls-files", "-z"],
+                  ["git", "ls-files", "-z", "--others", "--exclude-standard"]):
+        out = subprocess.run(
+            query, cwd=root, env=env, capture_output=True, text=True, check=True,
+        ).stdout
+        seen.update(rel for rel in out.split("\0") if rel)
+    return sorted(seen)
+
+
 def harvestable_files():
-    """Tracked, readable files that are not published release artifacts."""
-    rels = subprocess.run(
-        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True,
-    ).stdout.split()
-    for rel in rels:
+    """Readable files in the tree that are not published release artifacts."""
+    for rel in repo_files(ROOT):
         if rel == SELF_EXEMPT or PUBLISHED.match(rel):
             continue
         path = os.path.join(ROOT, rel)
@@ -1401,6 +1442,65 @@ def check_axis_c():
     return checks, len(checked), used_markers, all_markers
 
 
+def check_harvest_scope():
+    """The harvest must see an untracked file, and must not see an ignored one.
+
+    A FIXTURE repo rather than an assertion about the real tree, because a clean
+    working directory has no untracked file to see -- the property that matters
+    here is precisely the one the repository cannot demonstrate about itself on
+    the day it is checked.
+
+    The fixture stages with `git add` and never commits, so it needs no
+    user.name/user.email, and it neutralises the global and system config so
+    that a developer's own core.excludesFile cannot change what is asserted.
+    """
+    env = dict(os.environ)
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_SYSTEM"] = os.devnull
+
+    fixture = {
+        ".gitignore": "ignored.md\n",
+        "committed.md": "tracked\n",
+        "uncommitted.md": "written, not yet added -- must be in scope\n",
+        "ignored.md": "generated -- must not be\n",
+        # A release directory staged but not yet committed: exactly the state
+        # `make release` leaves behind. Newly REACHABLE now that the harvest no
+        # longer stops at the index, so the PUBLISHED path rule -- which used to
+        # be redundant for an unadded file -- is now what keeps an immutable
+        # record of a past release out of a check on the current tree.
+        "release/v9.9.9/README.md": "make some-goal-that-is-long-gone\n",
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        for rel, body in fixture.items():
+            path = os.path.join(tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(body)
+        subprocess.run(["git", "init", "-q", tmp], env=env,
+                       capture_output=True, check=True)
+        subprocess.run(["git", "add", ".gitignore", "committed.md"],
+                       cwd=tmp, env=env, capture_output=True, check=True)
+        got = set(repo_files(tmp, env=env))
+
+    want = set(fixture) - {"ignored.md"}
+    if got != want:
+        sys.exit(
+            "FAIL: the file harvest does not cover what it must.\n"
+            f"  missing: {sorted(want - got) or '(none)'}\n"
+            f"  extra:   {sorted(got - want) or '(none)'}\n"
+            "An untracked file must be in scope, or a violation is reported one\n"
+            "run late -- to the next person rather than to its author. An\n"
+            "ignored file must not be, or the gate harvests build artifacts."
+        )
+    if not PUBLISHED.match("release/v9.9.9/README.md"):
+        sys.exit(
+            "FAIL: PUBLISHED no longer excludes a release directory, and the\n"
+            "harvest now reaches one before it is committed. A past release's\n"
+            "own goal names would be checked against the current Makefile."
+        )
+    return 2
+
+
 def check_self_exemption():
     """The self-exemption must still be load-bearing, or it is a blind spot.
 
@@ -1449,6 +1549,7 @@ def main():
     c_checks, overrides, c_used, c_marks = check_axis_c()
     a_checks, reads = check_axis_a()
     a_checks += check_self_exemption()
+    a_checks += check_harvest_scope()
 
     b_checks, commands, b_used, b_marks = check_axis_b()
     d_checks, mentions, d_used, d_marks = check_axis_d(

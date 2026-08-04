@@ -936,7 +936,8 @@ Four things worth recording, two of which contradict the specification above:
 The self-exemption is the other thing that had to be added, and it was not
 foreseen: **the gate now harvests its own source.** That only became true when
 the axis-C file was first committed — while it was untracked, `git ls-files` did
-not list it and the exemption was accidental. Its docstrings necessarily quote
+not list it and the exemption was accidental. (No longer possible: the harvest
+reads the working tree rather than the index, per the closed Tier 3 item below.) Its docstrings necessarily quote
 the removed names as examples and its negative-case fixtures build overrides on
 purpose, so the file is excluded from both harvests, and the exclusion is
 asserted to still be load-bearing. Any gate whose subject is *text* will meet
@@ -1242,11 +1243,12 @@ watch the gate fail on it. All four now do.
 
 ## Tier 3 — platinum-level / nice-to-have
 
-**The name-contract gate cannot see a file until it is committed.** Added
-2026-08-03, from an observed instance rather than a review: `harvestable_files()`
-enumerates `git ls-files`, so a NEW file is invisible to axes B, C and D until it
-is tracked. `make test` therefore passes on the commit that introduces a
-violation and fails on the next run — which is exactly what
+**~~The name-contract gate cannot see a file until it is committed.~~ DONE
+(2026-08-03).** Added 2026-08-03,
+from an observed instance rather than a review: `harvestable_files()`
+enumerated `git ls-files`, so a NEW file was invisible to axes B, C and D until
+it was tracked. `make test` therefore passed on the commit that introduced a
+violation and failed on the next run — which is exactly what
 `test/test_fuse_injection_contract.py` did, on two docstring lines that wrap
 such that a line begins with the word "make" followed by an English word:
 
@@ -1262,14 +1264,47 @@ satisfied by accident of reflowing. (This item's own first draft then tripped th
 gate the same way, quoting those lines — hence the marker above, which is the
 honest use of one: the span really is not a command.)
 
-Fix: harvest `git ls-files` plus `git ls-files --others --exclude-standard`, so
-a file that exists and is not ignored is in scope whether or not it has been
-added yet. The cost is that a work-in-progress document gets held to the same
-contract as a finished one; the benefit is that the gate reports the violation
-to the person who just wrote it, in the run before the commit rather than the
-one after. Note this cuts the other way for a scratch file that is neither
-ignored nor intended to be committed — check what the existing exemptions and
-`SELF_EXEMPT` already cover before widening. ~15 min, plus a decision.
+Fixed as specified: `repo_files()` harvests `git ls-files` plus
+`git ls-files --others --exclude-standard`, so a file that exists and is not
+ignored is in scope whether or not it has been added yet. 37 → 39 checks,
+still 0.7 s.
+
+**The decision the item asked for, resolved rather than deferred.** The worry
+was a scratch file that is neither ignored nor meant to be committed. Checked
+before widening: the repository currently has *zero* untracked-and-unignored
+paths, and `.gitignore` already covers every category that produces them —
+`/commit_msg.txt`, `build_*/`, `third_party/*`, `coverage/`, `gpsim.log`,
+`*.gcda`/`*.gcno`/`*.gcov`, `*~`, `.claude/`. `scripts/make-release.sh` was the
+one case worth confirming, and it stages into `mktemp -d` outside the tree, so
+`make release` leaves nothing newly harvestable. The deciding argument is the
+asymmetry: the tracked half is unchanged and identical on every machine, so CI
+remains the floor and the new half can only ever catch *more*, *earlier*. A
+local-only failure is a true positive about a file that is about to be
+committed.
+
+**Three things the specification did not say, all found in the doing.**
+
+1. *A clean working directory cannot demonstrate the property.* There is no
+   untracked file here to assert against — which is the same blindness that let
+   the gap sit unnoticed. `check_harvest_scope()` therefore builds a throwaway
+   fixture repository (staged with `git add`, never committed, so it needs no
+   `user.email`; `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` neutralised so a
+   developer's own `core.excludesFile` cannot change what is asserted) holding a
+   tracked, an untracked and an ignored file. Both directions fail when broken,
+   verified: dropping `--others` reports the untracked file missing, dropping
+   `--exclude-standard` reports the ignored one extra.
+2. *`PUBLISHED` became load-bearing.* A `release/v*/` directory is untracked
+   while the release script is staging it. The path rule that excludes published
+   artifacts used to be redundant for an unadded file and is now the only thing
+   keeping a past release's goal names out of a check on the current tree. The
+   fixture asserts it too.
+3. *Whitespace splitting had to go.* The untracked half is the one that can hold
+   a hand-typed name, and a space in it would have split into two nonexistent
+   paths, both dropped by the existing `os.path.isfile` test — skipped
+   **silently**, the exact defect class. Paths are read `-z`-delimited.
+
+Verified end to end: an untracked file naming a nonexistent goal now fails the
+run in which it is written, where before it passed and failed the run after.
 
 **~~Upgrade residue from the `v0.9.8` renames.~~ DONE (2026-08-03), including
 the selector rename that was held for the owner's call.** Filed as three trivial
@@ -1680,7 +1715,6 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Design doc: datasheet citations | 2 | 2 h | High — completeness/rigor |
 | Axis E: env channels a child stopped reading | 2.5 | 2–3 h | Medium-High — the one axis in this family with a live defect behind it |
 | Re-pin yasimavr after the cycle-rewind fix | 2.5 | 1 h (+2 h optional) | Low — retires a documented simulator caveat |
-| Name contract cannot see an uncommitted file | 3 | 15 min | Low-Medium — the violation is reported one run late |
 | Return-stack oracle: extend to PIC10F322 | 2.5 | High | Low-Medium — second witness on a chip the assembly gate already bounds |
 | Formal verification of output drivers | 2.5 | 3–4 h | Medium — driver correctness |
 | Formal verification of blocking-delay safety | 2.5 | 1–2 h | Medium — makes the argument explicit |
