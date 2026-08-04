@@ -35,14 +35,50 @@ was verified to still be open.
 
 ## Tier 2 — closes verification / traceability gaps
 
-**Datasheet citations in the design doc.** The sleep-wakeup §7.3 cite lives in
-`bypass_mcu_avr_classic.c`; the *design doc itself* currently cites no datasheet
-sections at all (verified: zero datasheet references in
-`DESIGN_DOCUMENTATION.adoc`). Each load-bearing decision should trace to a
-page/section: WDT ~16 ms post-reset window; WDTON always-on; internal-RC ±10%;
-Timer0 CTC formula; BOD level. The PIC shell's datasheet facts are already
-recorded in `docs/phase2_pic_shell.md` §2 and can be cross-referenced rather
-than duplicated.
+**Datasheet citations in the design doc — PIC side DONE (2026-08-04), AVR side
+open and blocked on the datasheets.**
+
+`DESIGN_DOCUMENTATION.adoc` now carries a **Datasheet References** section: a
+table tracing each load-bearing decision to its vendor reference *and* to the
+place in the repository where the as-built value is enforced. That third column
+is the part worth keeping — every row is checked by something that fails a build
+or a test if it drifts, so the table is not merely prose that can rot.
+
+Eight rows are filled, all from sources already confirmed in-tree rather than
+re-derived: WDT time base (DS40001585 **OS09**, LFINTOSC 31 kHz ±25%), WDT
+period tolerance (**param 31**, −37%/+69%), WDT period (`WDTCON`, **Register
+5-1**, `WDTPS` = `0b01000`), oscillator (`OSCCON` 0x10, `IRCF` = `0b100`), the
+1 ms tick (`T2CON`/`PR2`/`TMR2IF`), brown-out (`BORV`), quiescent current
+(**D017–D019**), and the ATtiny13A sleep wake-up ordering (**§7.3**).
+
+*Two corrections to this item's own text, found while doing it.* The claim
+"zero datasheet references in `DESIGN_DOCUMENTATION.adoc`" was stale — the PIC
+Power / Current Draw section already cited DS40001585 D017–D019. And the two
+in-tree descriptions of the `IRCF` field disagreed on notation
+(`docs/phase2_pic_shell.md` §2 says `IRCF<2:0>`, `src/bypass_mcu_pic10f322.c`
+says `IRCF<6:4>`); the DFP header settles it — `_OSCCON_IRCF_POSN` = 0x4,
+`_OSCCON_IRCF_SIZE` = 3, `_OSCCON_IRCF_MASK` = 0x70, so it is a 3-bit field at
+register bits 6:4 and *both* spellings are right in their own notation. The
+table says so explicitly rather than picking one.
+
+**What remains, and why it was not done.** The AVR Classic and AVR-XT
+*electrical* parameters have **no datasheet citation anywhere in this
+repository** — the only AVR reference in `src/` is the ATtiny13A §7.3 one above.
+So these five cannot be filled by cross-referencing, only by reading the
+datasheets, and a guessed section number in a reference-grade document is worse
+than an absent one:
+
+- ATtiny13a/45/85 BOD fuse levels (4.3 V / 2.7 V / 1.8 V)
+- ATtiny202 `BODCFG` `LVL=BODLEVEL7` (~4.2 V)
+- the ~16 ms post-reset watchdog window
+- `WDTON` always-on fuse semantics
+- internal-RC ±10% tolerance, and the Timer0 CTC divisor that is sized from it
+
+All five are as-built and *are* enforced (the fuse-injection contract and the
+timing gates), so this is a traceability gap and not a correctness one. The
+scope note at the end of the new section states exactly this, so the table
+cannot be over-trusted in the meantime. Effort to close: ~1 h with the two AVR
+datasheets open.
 
 ---
 
@@ -51,6 +87,66 @@ than duplicated.
 These items were identified during a full meta-review of the firmware, design
 doc, and test suite (2026-06-18) and re-verified as open on 2026-07-26. All
 close residual verification gaps that can be addressed in software.
+
+**`scripts/make-release.sh` step 0 cannot be run without starting a release.**
+Added 2026-08-04. **Release-tooling edit — for the owner**, which is why this is
+filed rather than built.
+
+*The measured gap.* Lines 364–537 are 175 lines and roughly 35 checks — every
+required tool, both XC8 installs, both DFP device headers, both libgpsim header
+sets, the ATtiny_DFP specs file, the yasimavr venv *and* a live `import
+yasimavr`, the staging path's writability, a clean tree, a free tag, and a
+warning if the pinned release signing key is absent from the keyring. Nothing in
+the repository executes any of it except a real `make release`. `--dry-run` is
+not a substitute: it rehearses the *whole* pipeline with a shortened soak, so it
+costs a full build plus every qualification gate before it reports anything.
+
+That matters in one direction only, but it is the expensive one: step 0 exists
+precisely so a release "fails loud here, never mid-run", and its own correctness
+is the thing no one can check cheaply. A precondition that stopped being
+asserted — a `req_file` pointed at a path that moved, say — would not show up as
+a failure. It would show up as step 0 passing and step 2 or step 4 failing
+hours later, which is the exact cost step 0 was written to avoid.
+
+*The fix, and why it has to be this one.* Add a `--preflight` mode that runs
+section 0 and exits 0 before the first mutating line (`make clean`, line 539):
+
+```sh
+--preflight)  PREFLIGHT=1; shift ;;        # beside --dry-run in the arg loop
+```
+
+```sh
+# ...immediately before `section "1. clean build ..."`:
+if [ "$PREFLIGHT" -eq 1 ]; then
+        ok "preflight passed: this host can start a release."
+        exit 0
+fi
+```
+
+plus `PREFLIGHT=0` beside `DRY_RUN=0`, a `# USAGE` line so `--help` documents it,
+and a `release-preflight` goal in the Makefile wrapping
+`./scripts/make-release.sh --preflight`.
+
+A *separate* preflight script is the wrong answer and should not be taken: it
+would hold a second copy of the precondition list, free to drift from the one a
+release actually runs. That is the defect class `v0.9.8` spent itself removing,
+and this list is exactly the shape that has already produced one — three `mkv`
+calls in this same script left pointing at renamed variables.
+
+Note `--preflight` must skip the two checks that are about *publishing* rather
+than *capability*: the tag-does-not-exist test and the clean-tree requirement
+would make the mode unusable on a working branch, which is when a maintainer
+most wants it. Warn on both instead, as `--dry-run` already does for the tree.
+
+*Worth pairing with a gate*, once the mode exists: prove `--preflight` reaches
+the end of section 0 and then touches nothing — no `make clean`, no `$OUTPUT_DIR`,
+no writes outside the work directory — with a fake `make` on PATH asserting it is
+never invoked for a build goal. That is what turns "it exited early" into "it
+exited early *and* the 175 lines really ran".
+
+Effort: ~30 min for the mode, ~1 h with the gate. Impact: Medium — no behaviour
+change to a real release, but it makes the one code path that protects a 26-hour
+pipeline runnable in seconds, and testable at all.
 
 **~~A severed `-D<MACRO>=$(VAR)` compile-line contract is silent, and the fuse
 checker demonstrates it.~~ DONE for the fuse bytes (2026-08-03); the sweep over
@@ -1763,7 +1859,8 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 
 | Item | Tier | Effort | Impact |
 |---|---|---|---|
-| Design doc: datasheet citations | 2 | 2 h | High — completeness/rigor |
+| Design doc: datasheet citations — AVR half only | 2 | 1 h (needs the two AVR datasheets) | High — completeness/rigor; PIC half done 2026-08-04 |
+| `make release` step 0 not runnable alone | 2.5 | 30 min (1 h with gate) | Medium — 175 lines protecting a 26-hour pipeline, executed only by a real release |
 | Re-pin yasimavr after the cycle-rewind fix | 2.5 | 1 h (+2 h optional) | Low — retires a documented simulator caveat |
 | Return-stack oracle: extend to PIC10F322 | 2.5 | High | Low-Medium — second witness on a chip the assembly gate already bounds |
 | Formal verification of output drivers | 2.5 | 3–4 h | Medium — driver correctness |

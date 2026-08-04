@@ -31,6 +31,38 @@ file is the human-readable summary of *what changed*.
 ## [0.9.8] — unreleased
 
 ### Added
+- **`DESIGN_DOCUMENTATION.adoc` traces its load-bearing decisions to vendor
+  documentation.** A new **Datasheet References** section: each decision against
+  its DS40001585 / ATtiny13A reference *and* against the place in the repository
+  where the as-built value is enforced. That third column is what keeps the
+  table from rotting into prose — every row is checked by something that fails a
+  build or a test if the value drifts (a `static_assert`, the runtime
+  configuration sanity check, or the CONFIG word read back out of the built HEX
+  by `make pic10f322-test-config`).
+
+  Eight rows, all from sources already confirmed in-tree rather than re-derived:
+  WDT time base (**OS09**, LFINTOSC 31 kHz ±25%), WDT period tolerance (**param
+  31**, −37%/+69%), WDT period (`WDTCON`, **Register 5-1**), oscillator
+  (`OSCCON`, `IRCF` = `0b100` → 2 MHz), the 1 ms Timer2 tick, brown-out
+  (`BORV`), quiescent current (**D017–D019**), and the ATtiny13A sleep wake-up
+  ordering (**§7.3**).
+
+  The AVR Classic and AVR-XT *electrical* parameters — BOD fuse levels, the
+  ~16 ms post-reset watchdog window, `WDTON`, the internal-RC ±10% tolerance and
+  the Timer0 CTC divisor — are **not** cited, because no citation for them exists
+  anywhere in this repository and a guessed section number in a reference-grade
+  document is worse than an absent one. All five are as-built and enforced by the
+  fuse-injection contract and the timing gates, so this is a traceability gap
+  rather than a correctness one; the section says so explicitly so the table
+  cannot be over-trusted, and the remainder is tracked in `TODO.md`.
+
+  Settled while writing it: the two in-tree descriptions of the `IRCF` field
+  disagreed on notation (`IRCF<2:0>` in `docs/phase2_pic_shell.md` §2,
+  `IRCF<6:4>` in `src/bypass_mcu_pic10f322.c`). The DFP header is authoritative —
+  `_OSCCON_IRCF_POSN` = 0x4, `_SIZE` = 3, `_MASK` = 0x70 — so it is a 3-bit field
+  at register bits 6:4 and both spellings are correct in their own notation. The
+  table records that rather than silently picking one.
+
 - **`make test` now fails if the Makefile sets environment for a child process
   that no longer reads it.** Axis E of the name-contract family, and the only
   one of the five with a defect already behind it rather than a review: the

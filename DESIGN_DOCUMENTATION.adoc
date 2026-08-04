@@ -690,6 +690,73 @@ The PIC builds instead use XC8's C99 mode and `-O2`; see `TOOLCHAIN.adoc` for
 the complete target-specific compiler and device-pack commands.
 
 
+== Datasheet References
+
+Each load-bearing electrical or timing decision below traces to the vendor
+document that establishes it, and to the place in this repository where the
+as-built value is *enforced* rather than merely written down. The last column is
+what makes the row more than a claim: every value here is checked by something
+that fails a build or a test if it drifts.
+
+.Table Design decisions traced to vendor documentation
+|===
+| Decision | As built | Vendor reference | Enforced in-tree by
+
+| WDT time base
+| 31 kHz LFINTOSC, independent of `FOSC`
+| DS40001585, param **OS09** (LFINTOSC = 31 kHz ±25%)
+| `docs/phase2_pic_shell.md` §2
+
+| WDT period tolerance
+| −37% / +69% worst case, so ~256 ms nominal ≥ ~160 ms worst case
+| DS40001585, **param 31**
+| `docs/phase2_pic_shell.md` §2; sizing argument in the same section
+
+| WDT period
+| `WDTPS` = `0b01000` (1:8192) ≈ 256 ms
+| DS40001585, `WDTCON` (**Register 5-1**)
+| `src/bypass_mcu_pic10f322.c` (`WDT_WDTPS_256MS`), re-read and compared in the
+  runtime configuration sanity check
+
+| Oscillator
+| `IRCF` = `0b100` → 2 MHz HFINTOSC
+| DS40001585, `OSCCON` (0x10); `IRCF` is a 3-bit field at register bits 6:4
+| DFP header `pic10f322.h` (`_OSCCON_IRCF_POSN` = 0x4, `_OSCCON_IRCF_MASK` =
+  0x70); `static_assert(_XTAL_FREQ == 2000000UL)`
+
+| 1 ms tick
+| `T2CKPS` = `0b01` (1:4) and `PR2` = 124 → 125 counts at 125 kHz
+| DS40001585, `T2CON` (0x13), `PR2` (0x12), `TMR2IF` = `PIR1` (0x0C) bit 1
+| `docs/phase2_pic_shell.md` §2 (which also records that the datasheet *prose*
+  on the prescale codes is incomplete — the register table is authoritative)
+
+| Brown-out trip
+| `BOREN=ON`, `LPBOR=OFF`, `BORV=HI` → ~2.7 V (HI) / ~2.4 V (LO)
+| DS40001585, `BORV`
+| CONFIG word `0x389E`, read back out of the built HEX by
+  `make pic10f322-test-config`
+
+| Quiescent current
+| see the PIC Power / Current Draw section above
+| DS40001585, **D017–D019** (IDD)
+| tabulated in this document from the datasheet rows
+
+| Sleep wake-up ordering
+| one instruction executes after `SEI` before the pending interrupt is serviced
+| ATtiny13A datasheet **§7.3**
+| `src/bypass_mcu_avr_classic.c` (the sleep-entry sequence comment)
+|===
+
+NOTE: Scope, stated so this table is not over-trusted. The PIC10(L)F320/322
+parameters above were confirmed against DS40001585 and the DFP device header as
+recorded in `docs/phase2_pic_shell.md` §2, and the ATtiny13A reference against
+that part's datasheet. The AVR Classic and AVR-XT *electrical* parameters used
+elsewhere in this document — the 4.3 V / 4.2 V BOD levels, the ~16 ms
+post-reset watchdog window, the internal-RC ±10% tolerance and the Timer0 CTC
+divisor — are as-built and are enforced by the fuse-injection and timing gates,
+but they are not yet traced to datasheet section numbers. Completing them is
+tracked in `TODO.md`.
+
 == Testing and Validation
 
 This project features an extensive testing, validation and simulation suite.
