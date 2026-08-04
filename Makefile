@@ -2807,19 +2807,23 @@ test-variant-map-contract:
 	./test/test_variant_map_contract.sh
 
 # Host-only proof that the names other files and documents exchange with this
-# Makefile are names it actually knows. All four axes of the name-contract item:
+# Makefile are names it actually knows. All five axes of the name-contract item:
 # a variable READ (print-VAR), a goal named to a READER (make <goal>), a
-# variable SET (VAR=value), and a variable named to a reader. Make is silent
-# about three of the four -- an override naming nothing is legal, `print-%`
-# matches ANY name and returns an empty line, and an assignment to an unknown
-# variable is simply ignored -- so a rename severs the link with every gate
-# still green. The fourth is loud, but only for the reader who types the dead
-# goal, which is exactly who should not be the one to find it.
+# variable SET (VAR=value), a variable named to a reader, and the ENVIRONMENT a
+# recipe hands a child (NAME=value ./child.sh). Make is silent about four of the
+# five -- an override naming nothing is legal, `print-%` matches ANY name and
+# returns an empty line, an assignment to an unknown variable is simply ignored,
+# and a child that stopped reading a name just uses its own default -- so a
+# rename severs the link with every gate still green. The fifth is loud, but
+# only for the reader who types the dead goal, which is exactly who should not
+# be the one to find it.
 #
 # name-contract: exempt (names the retired spellings to describe the defect)
 # In v0.9.8 this class cost a 43,200x soak overrun on a renamed SOAK_* override,
 # three make-release reads left pointed at MCU/LFUSE_X5/HFUSE_X5, 15 dead goals
-# in a live qualification document, and ten stale variable surfaces.
+# in a live qualification document, ten stale variable surfaces, and -- the one
+# that reached a result rather than a document -- a PIC10F320 lane simulating a
+# PIC10F322 for a whole release, on a PIC_GPSIM_PROC= nothing read any more.
 test-makefile-name-contract:
 	@if ! command -v python3 >/dev/null 2>&1; then \
 		echo "FAIL: python3 is required by the Makefile name-contract gate"; exit 1; \
@@ -5265,7 +5269,7 @@ help:
 	@echo "  test-lockstep-progress  both PIC exact-pin/stall-propagation checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
-	@echo "  test-makefile-name-contract  every make goal and variable named by a file or a doc really exists (included in test)"
+	@echo "  test-makefile-name-contract  every make goal, variable and child-environment name a file or doc uses really exists (included in test)"
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
 	@echo "  test-variant-selector-guard  every lane rejects a bad single-variant selector instead of skipping (included in test)"
 	@echo "  test-clean-contract  clean/clean-tests remove everything the Makefile builds (included in test)"

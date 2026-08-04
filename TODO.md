@@ -163,8 +163,11 @@ fallback has to stay for CBMC, say so in the `#ifndef` and make the reason
 checkable. Effort: ~1–2 h. Impact: Medium — `SOAK_DURATION_MS` alone repeats a
 defect this project has already been bitten by once.
 
-**Axis E — nothing checks that a child still READS the environment its parent
-sets.** Added 2026-08-03, from a live defect rather than a review. This is the
+**~~Axis E — nothing checks that a child still READS the environment its parent
+sets.~~ DONE (2026-08-03).** Built as axis E of
+`test/test_makefile_name_contract.py`; 98 channels over 154 write sites, every
+one verified to reach a reader. 39 → 44 checks, 0.7 s → 2.3 s. Added
+2026-08-03, from a live defect rather than a review. This is the
 third interface in the same family as the four name-contract axes and the `-D`
 item above, and the only one of the three that has already produced a wrong
 answer in the tree.
@@ -213,9 +216,57 @@ script legitimately reads names an operator sets by hand. And a transitive
 reader search is required, not optional — a direct-read-only version reports
 both examples above as severed on a correct tree.
 
-Effort: ~2–3 h. Impact: Medium-High — it is the one axis in this family with a
-demonstrated live defect, and the failure mode is a passing test measuring the
-wrong thing.
+**Both design notes held.** The reverse direction is not bundled, and
+transitivity is load-bearing exactly as predicted — `AWK` reaches its read
+through a wrapper, `BYPASS_MODEL_FFI` through a Python import.
+
+**Four things the specification did not anticipate.**
+
+1. *Separating a channel from a shell local needs a real recipe tokenizer, not a
+   word split.* This is the whole difficulty of the producer side, and it cuts
+   both ways: `NAME=$(MAKEVAR)` — the shape of every channel here, including the
+   severed one — reads as a command substitution to a naive splitter and
+   disappears from the harvest, while `rc=$$?` and `out=$$(…)` read as channels.
+   The tokenizer is quote- and expansion-aware, so `$(call f,a,b)` is one token
+   and a `;` inside a quoted awk program does not end a statement. The
+   discriminator is then structural rather than conventional: a prefix is an
+   assignment *followed by a command in the same statement*; a local is an
+   assignment that is the whole statement. Measured, that rule alone separates
+   them perfectly — 98 channels, none lowercase, and every lowercase name among
+   the 40-odd locals it drops. No naming convention is relied on, so a channel
+   spelled in lowercase would still be checked.
+2. *The check must be per LINK, not per name.* Discovered by a negative case
+   coming back vacuous. `ATTINY202_FUSE_WDTCFG` is written at five sites: four
+   to drivers that read it through a computed prefix, one to the fuse reader's
+   own unit test, which names it literally. Satisfying the *name* lets breaking
+   the computed prefix — which severs all four real consumers at once — pass on
+   the strength of the unit test. Every write site is now its own link.
+3. *A channel can hide behind a make variable.* `$(XT_FUSE_ENV)` expands to
+   seven `ATTINY202_FUSE_*` assignments that appear nowhere in the recipe text.
+   A lone `$(VAR)` in prefix position is expanded through `make print-` and
+   walked.
+4. *A reader can BUILD the name instead of writing it.* `attiny202_fuses.py`
+   computes `"ATTINY202_FUSE_" + name` over a table, so no literal spelling of
+   any of the seven exists in the file that reads them. Axis A already needed
+   this shape for `mkv part_"$n"`; the environment has it too. Computed reads
+   are counted separately in the summary line rather than blessed silently.
+
+*Scope, stated because it is narrower than "every env channel":* Makefile recipe
+prefixes. Shell scripts write 14 prefixes between them, dominated by shell
+built-ins that happen to be uppercase (`IFS`, terminal colour codes), so a
+second discrimination pass does not pay — and Makefile-to-script is where the
+defect was. An unresolvable consumer **fails** rather than being skipped, since
+a skipped check that reports as a pass is this gate's own defect class; the two
+genuine external consumers (`PYTHONPATH`, `PYTHONWARNINGS`, read by CPython at
+startup) are listed with reasons and expire like every other exemption.
+
+Verified against seven mutations, each confirmed to fail and confirmed to fail
+for its own reason: the original defect re-created (rename the sourced wrapper's
+read, keep the Makefile writes); a directly-invoked child stopping its read; a
+transitive child stopping its read; the computed prefix changing; an
+unresolvable consumer; a stale allowlist entry; and a tokenizer that returns
+nothing. All seven are applied to the gate's own text cache, so no file in the
+repository is modified to run them.
 
 **~~Record the `v0.9.8` byte-identity verification as evidence, not just as a
 claim.~~ DONE (2026-08-03).** `scripts/verify-rename-identity.sh`, run from
@@ -1713,7 +1764,6 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Item | Tier | Effort | Impact |
 |---|---|---|---|
 | Design doc: datasheet citations | 2 | 2 h | High — completeness/rigor |
-| Axis E: env channels a child stopped reading | 2.5 | 2–3 h | Medium-High — the one axis in this family with a live defect behind it |
 | Re-pin yasimavr after the cycle-rewind fix | 2.5 | 1 h (+2 h optional) | Low — retires a documented simulator caveat |
 | Return-stack oracle: extend to PIC10F322 | 2.5 | High | Low-Medium — second witness on a chip the assembly gate already bounds |
 | Formal verification of output drivers | 2.5 | 3–4 h | Medium — driver correctness |

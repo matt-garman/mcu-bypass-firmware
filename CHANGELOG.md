@@ -31,6 +31,58 @@ file is the human-readable summary of *what changed*.
 ## [0.9.8] — unreleased
 
 ### Added
+- **`make test` now fails if the Makefile sets environment for a child process
+  that no longer reads it.** Axis E of the name-contract family, and the only
+  one of the five with a defect already behind it rather than a review: the
+  PIC10F320 gpsim lanes simulated a PIC10F322 for an entire release because a
+  shared wrapper's `PIC_GPSIM_PROC` read was re-spelled for one part while all
+  four Makefile writers kept the old name. The assignment stayed legal, silent
+  and inert, and the child fell back to its own default. 98 channels over 154
+  write sites, every one verified to reach a reader; 44 checks total, 2.3 s.
+
+  Checked per **link**, not per name — every `NAME=value <child>` site must
+  reach a file that reads `NAME`. Per-name is measurably too weak:
+  `ATTINY202_FUSE_WDTCFG` is written at five sites, and the one pointing at the
+  fuse reader's own unit test (which names it literally) covers the four real
+  consumers being severed at once. Verified — the per-name form passes that
+  mutation, the per-link form fails it.
+
+  The reader search is **transitive**, which is required rather than a
+  refinement: a direct-read check reports two *correct* channels as severed,
+  because `AWK` is written for a wrapper whose read lives in the gate it runs
+  and `BYPASS_MODEL_FFI` for a Python driver whose read lives in a module it
+  imports. A child inherits the environment, so the reader is anywhere
+  downstream.
+
+  Two shapes the obvious implementation misses, both live in this tree. A
+  channel can hide behind a make variable — `$(XT_FUSE_ENV)` expands to seven
+  `ATTINY202_FUSE_*` assignments that appear nowhere in the recipe text. And a
+  reader can *build* the name rather than write it: `attiny202_fuses.py`
+  computes `"ATTINY202_FUSE_" + name` over a table, so no literal spelling of
+  any of the seven exists in the file that reads them. Both are resolved, and
+  the computed reads are counted separately rather than blessed.
+
+  Separating a channel from a shell local turned out to need a real recipe
+  tokenizer, not a word split: `NAME=$(MAKEVAR)` — the shape of every channel
+  here, including the severed one — reads as a command substitution to a naive
+  splitter and vanishes from the harvest, while `rc=$$?` and `out=$$(…)` read as
+  channels. The distinction is structural, not conventional: a prefix is an
+  assignment *followed by a command*; a local is the whole statement. On this
+  Makefile that rule alone separates them perfectly — 98 channels, none
+  lowercase, and every lowercase name among the 40-odd locals it drops.
+
+  A channel whose consumer cannot be resolved **fails** rather than being
+  skipped, since a skipped check reporting as a pass is this gate's own defect
+  class. The two genuine external consumers (`PYTHONPATH`, `PYTHONWARNINGS`,
+  both read by CPython at startup) are listed with their reasons and expire like
+  every other exemption. The reverse direction — a script reading a name nothing
+  sets — is deliberately not bundled: a script legitimately reads names an
+  operator sets by hand.
+
+  Verified against seven mutations, including a re-creation of the original
+  defect: renaming the sourced wrapper's read while leaving the Makefile writes
+  reports `PIC_GPSIM_PROC` severed with the write line and the child named.
+
 - **`make test` now fails if any `NAME=value` handed to make names a variable
   the Makefile does not know.** A make override naming no existing variable is
   legal and silent — the value is ignored and the default applies — which is how

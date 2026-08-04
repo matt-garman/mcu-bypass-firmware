@@ -10,9 +10,10 @@ reports nothing in any of the four directions this checks:
   Axis B -- `make <goal>`        a document names a GOAL to a reader
   Axis C -- `make VAR=value`     a file SETS a variable
   Axis D -- "set PIC320_TAG"     a document names a VARIABLE to a reader
+  Axis E -- `NAME=v ./child.sh`  the Makefile sets a child's ENVIRONMENT
 
-A and C are machine-facing and fail silently; B and D are human-facing, and
-their consumer is a person following instructions. B is the only one of the four
+A, C and E are machine-facing and fail silently; B and D are human-facing, and
+their consumer is a person following instructions. B is the only one of the five
 whose failure is loud when it happens -- `No rule to make target` -- which is
 precisely why it must be caught before the reader is the one who finds it.
 
@@ -178,6 +179,49 @@ what the specification proposed -- reports `AVR_SOAK_*` and `XT_FUSE_*` as
 severed, because no variable is literally called AVR_SOAK. The family shape is
 also the one that carried the worst surface: README.md's "the PIC10F320 lane
 uses PIC320_* variables".
+
+================================ AXIS E ================================
+
+The other end of axis C, and the only axis here with a defect already behind it.
+Axis C harvests `NAME=value` only where it FOLLOWS the make word, which is
+right: an assignment BEFORE a command is environment for that command's child,
+not a claim about the Makefile's vocabulary. Nothing then checked the far end.
+Rename the child's read, leave the parent's write, and the assignment becomes
+legal, silent and inert -- the child falls back to its own in-source default.
+`test/pic/gpsim_wrapper_common.sh` had its PIC_GPSIM_PROC read re-spelled for
+one part while all four Makefile writers kept the old name, so
+`make pic10f320-test-gpsim` ran the 256-word part's image on a p10f322 device
+model and reported `RESULT: PASS` for an entire release.
+
+THE CHECK is per LINK, not per name: every `NAME=value <child>` site must reach
+a file that reads NAME. Per-name is measurably too weak -- ATTINY202_FUSE_WDTCFG
+is written at five sites, and the one pointing at the fuse reader's own unit
+test (which names it literally) would cover the four real consumers being
+severed at once.
+
+THE READER SEARCH IS TRANSITIVE, which is required rather than a refinement: a
+direct-read check reports two CORRECT channels as severed. AWK is written for a
+wrapper whose read lives in the gate it runs; BYPASS_MODEL_FFI is written for a
+Python driver whose read lives in a module it imports. A child inherits the
+environment, so the reader is anywhere downstream.
+
+TWO SHAPES THE OBVIOUS IMPLEMENTATION MISSES, both live here. A channel can be
+hidden behind a make variable -- `$(XT_FUSE_ENV)` expands to seven
+ATTINY202_FUSE_* assignments that appear nowhere in the recipe text. And a
+reader can BUILD the name instead of writing it: attiny202_fuses.py computes
+`"ATTINY202_FUSE_" + name` over a table, so no literal spelling of any of the
+seven exists in the file that reads them. Both are resolved; the computed reads
+are counted separately rather than blessed.
+
+SCOPE: Makefile recipe prefixes. Shell scripts write 14 prefixes between them,
+dominated by shell built-ins that happen to be uppercase (IFS, colour codes), so
+a second discrimination pass does not pay -- and Makefile-to-script is where the
+defect was. The reverse direction (a script reading a name nothing sets) is
+deliberately NOT bundled: a script legitimately reads names an operator sets by
+hand. A channel whose consumer cannot be resolved FAILS rather than being
+skipped, because a skipped check that reports as a pass is this gate's own
+defect class; the two genuine external consumers are listed in
+EXTERNAL_CONSUMERS with their reasons and expire like every other exemption.
 
 ======================== EXEMPTIONS, ALL AXES =========================
 
@@ -449,9 +493,14 @@ def env_channel_names():
     statement of theirs. Reading only the head of the joined line finds 44
     channels and misses the one this exists for.
 
-    NOT a claim that the name is read anywhere. That check is the standing gap
-    recorded in TODO.md: no axis verifies that a child still reads the
-    environment its parent sets, and the gpsim defect is what that gap costs.
+    NOT a claim that the name is read anywhere -- that is axis E, which harvests
+    the same recipes through env_channel_writes(). The two are deliberately
+    different strengths and must stay that way. This one wants a SUPERSET: a
+    name it misses becomes a false severance report on correct prose, so it errs
+    toward accepting, and the shell locals it also picks up (`rc`, `fail`, `out`)
+    are harmless here because axis D only judges names inside the project's
+    variable prefixes. Axis E wants a PRECISE set, because a name it harvests
+    wrongly becomes a demand that some file read a shell local.
     """
     names = set()
     with open(os.path.join(ROOT, "Makefile"), encoding="utf-8") as fh:
@@ -864,6 +913,22 @@ def harvestable_files():
                                     or self_declared_historical(text)):
             continue
         yield rel, text
+
+
+# Path lookups axis E resolves child commands through. Built from the same
+# harvest the other axes read, so a file this gate cannot see is also a file it
+# will not resolve a command to -- rather than resolving it to something stale.
+_UNIVERSE = set()
+_BY_BASENAME = {}
+
+
+def index_repo_files():
+    """Populate the path lookups, once."""
+    if _UNIVERSE:
+        return
+    for rel in repo_files(ROOT):
+        _UNIVERSE.add(rel)
+        _BY_BASENAME.setdefault(os.path.basename(rel), []).append(rel)
 
 
 # ----------------------------------------------------------------- axis B ---
@@ -1332,6 +1397,410 @@ def check_axis_d(known_names):
     return checks, harvested, used_markers, all_markers
 
 
+# ----------------------------------------------------------------- axis E ---
+
+# Channels whose consumer is not a file in this repository, with the reason.
+# Same discipline as ENV_ALLOWLIST: every entry is a name this axis cannot
+# check, so a wrong one is a permanent blind spot, and every entry must still be
+# reached by the harvest or it fails as stale.
+#
+# Both members are INTERPRETER variables -- read by CPython itself and by
+# cppcheck's Python addon runner, before any code in this tree gets control.
+# There is no repo file that could read them, which is what makes them safe to
+# list and also what makes the list unlikely to grow: a project-specific channel
+# always has a consumer here.
+EXTERNAL_CONSUMERS = {
+    "PYTHONPATH": "read by CPython at startup, to import the yasimavr venv",
+    "PYTHONWARNINGS": "read by CPython at startup, inside cppcheck's addon runner",
+}
+
+# A word that introduces a command without being one, so an assignment after it
+# is still in prefix position.
+PREFIX_TRANSPARENT = {"export", "env", "then", "do", "else", "{", "(", "!",
+                      "time", "nice", "nohup"}
+
+# A token that is exactly one make expansion, e.g. `$(XT_FUSE_ENV)`. Resolved
+# through `make print-`, because a command or an env prefix hidden behind a make
+# variable is still a command or an env prefix.
+LONE_MAKEVAR = re.compile(r"\A\$[({]([A-Za-z_][A-Za-z0-9_]*)[)}]\Z")
+
+SCRIPTISH = (".sh", ".py", ".awk", ".bash", ".cc", ".c")
+
+# A literal prefix being concatenated to build a name at runtime:
+# `"ATTINY202_FUSE_" + name` in test/avr/attiny202_fuses.py. Axis A already
+# needed this shape (`mkv part_"$n"`); the environment has it too, and a reader
+# that builds its names this way contains no literal spelling of any of them.
+CONCATENATED = re.compile(r"[\"']([A-Z][A-Z0-9_]*_)[\"']\s*(?:\+|%|,)")
+
+_EXPANDED = {}
+_FILE_TEXT = {}
+
+
+def make_expand(name):
+    """`make -s print-<name>`, cached. Empty string if make fails."""
+    if name not in _EXPANDED:
+        done = subprocess.run(["make", "-s", "print-" + name], cwd=ROOT,
+                              capture_output=True, text=True)
+        _EXPANDED[name] = done.stdout.strip() if done.returncode == 0 else ""
+    return _EXPANDED[name]
+
+
+def file_text(rel):
+    """A repo file's text, cached. Empty string if it cannot be read."""
+    if rel not in _FILE_TEXT:
+        try:
+            with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
+                _FILE_TEXT[rel] = fh.read()
+        except (OSError, UnicodeDecodeError):
+            _FILE_TEXT[rel] = ""
+    return _FILE_TEXT[rel]
+
+
+def recipe_statements(body):
+    """Split a recipe body into statements, each a list of tokens.
+
+    Quote- and expansion-aware, and it has to be. Splitting on whitespace gets
+    all four of the shapes this axis meets wrong:
+
+      hex="$(call fw_image_tail,$(1),$(MCU)).hex"   two tokens, one value
+      tmp=$$(mktemp "$@.tmp.XXXXXX")                a SHELL substitution
+      TM_LABEL='a b' ./test/x.sh                    a space inside a value
+      awk 'prev=="x"{print $$2; exit}' "$$f"        a `;` inside a quote
+
+    Getting them wrong is not cosmetic here. A `NAME=$(MAKEVAR)` prefix -- the
+    exact shape of every real channel, including the one whose severance this
+    axis exists for -- looks like a command substitution to a naive splitter and
+    disappears from the harvest entirely. And the shell LOCALS that a recipe is
+    full of (`rc=$$?`, `fail=1`, `out=$$(...)`) look like channels.
+
+    That distinction is the whole discrimination, and it is structural rather
+    than conventional: a prefix is an assignment FOLLOWED BY A COMMAND in the
+    same statement; a local is an assignment that is the whole statement, or one
+    whose value is a substitution the rest of the line sits inside. Measured on
+    this Makefile, the structural rule alone separates them perfectly -- 98
+    channels, of which zero are lowercase, and the 40-odd shell locals it drops
+    include every lowercase name. No naming convention is relied on, so a
+    channel spelled in lowercase would still be checked.
+    """
+    opening = {"(": ")", "{": "}"}
+    out, statement, token = [], [], ""
+    i, n = 0, len(body)
+    while i < n:
+        char = body[i]
+        if char in "'\"`":                        # quoted or substituted span
+            end = body.find(char, i + 1)
+            end = n if end < 0 else end
+            token += body[i:end + 1]
+            i = end + 1
+            continue
+        if char == "$" and i + 1 < n:
+            k = i + 1
+            while k < n and body[k] == "$":       # `$$(` is the shell's own
+                k += 1
+            if k < n and body[k] in opening:
+                close, depth, j = opening[body[k]], 0, k
+                while j < n:
+                    if body[j] in opening and opening[body[j]] == close:
+                        depth += 1
+                    elif body[j] == close:
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    j += 1
+                token += body[i:j + 1]
+                i = j + 1
+                continue
+        if char.isspace():
+            if token:
+                statement.append(token)
+                token = ""
+            i += 1
+            continue
+        if char in ";|&<>\n":
+            if token:
+                statement.append(token)
+                token = ""
+            if statement:
+                out.append(statement)
+                statement = []
+            i += 1
+            continue
+        token += char
+        i += 1
+    if token:
+        statement.append(token)
+    if statement:
+        out.append(statement)
+    return out
+
+
+def split_prefix(statement, depth=0):
+    """(channel names written, the command tokens that follow them).
+
+    A lone `$(VAR)` in prefix position is expanded and walked, because
+    `$(XT_FUSE_ENV) $(YASIMAVR_PY) $(XT_SIM_DRIVER)` hides seven
+    ATTINY202_FUSE_* channels behind one make variable. Reading only the
+    literal text of the recipe finds none of them.
+    """
+    names, i = [], 0
+    while i < len(statement):
+        token = statement[i]
+        if token in PREFIX_TRANSPARENT:
+            i += 1
+            continue
+        assigned = re.match(r"([A-Za-z_][A-Za-z0-9_]*)=", token)
+        if assigned:
+            names.append(assigned.group(1))
+            i += 1
+            continue
+        lone = LONE_MAKEVAR.match(token)
+        if lone and depth < 3:
+            words = make_expand(lone.group(1)).split()
+            if words and re.match(r"[A-Za-z_][A-Za-z0-9_]*=", words[0]):
+                more, rest = split_prefix(words + statement[i + 1:], depth + 1)
+                return names + more, rest
+        break
+    return names, statement[i:]
+
+
+def env_channel_writes():
+    """{channel name -> [(Makefile line, command tokens it was written for)]}.
+
+    The PRODUCER side of axis E, and deliberately stricter than
+    env_channel_names(), which serves axis D. That one wants a superset: a name
+    it fails to harvest becomes a false severance report on correct prose, so it
+    errs toward accepting. This one wants a *precise* set: a name it harvests
+    wrongly becomes a demand that some file read a shell local.
+
+    Scope, measured rather than assumed: Makefile recipe prefixes only. Shell
+    scripts write 14 such prefixes between them, and they are dominated by
+    shell built-ins and locals that happen to be uppercase -- IFS, and the
+    terminal colour codes -- so the yield does not pay for a second
+    discrimination pass. Makefile-to-script is also where the defect was.
+    """
+    writes = {}
+    with open(os.path.join(ROOT, "Makefile"), encoding="utf-8") as fh:
+        text = fh.read()
+    for lineno, line in logical_lines(text):
+        if not line.startswith("\t"):
+            continue
+        body = line.lstrip("\t").lstrip().lstrip("@-+")
+        for statement in recipe_statements(body):
+            names, command = split_prefix(statement)
+            if not names or not command:
+                continue
+            for name in names:
+                writes.setdefault(name, []).append((lineno, tuple(command)))
+    return writes
+
+
+def repo_path(token):
+    """The repo file a token names, if any."""
+    text = token.strip("\"'")
+    lone = LONE_MAKEVAR.match(text)
+    if lone:
+        text = make_expand(lone.group(1))
+    text = text.strip("\"'").lstrip("./")
+    if text in _UNIVERSE:
+        return text
+    # Resolve by BASENAME when the path is built at runtime, which is how every
+    # sourced helper in this tree is written: `. "$(dirname "$0")/common.sh"`,
+    # `GATE="$ROOT/check_stack_depth_pic.sh"`. Only when the basename is unique
+    # in the repository, so this can never silently pick the wrong file.
+    base = os.path.basename(text)
+    if text.endswith(SCRIPTISH) and len(_BY_BASENAME.get(base, ())) == 1:
+        return _BY_BASENAME[base][0]
+    return None
+
+
+def resolve_child(command):
+    """(repo files the command runs, kind). Empty set means unresolved."""
+    words = []
+    for token in command:
+        lone = LONE_MAKEVAR.match(token.strip("\"'"))
+        words.extend(make_expand(lone.group(1)).split() if lone else [token])
+    for token in words:
+        found = repo_path(token)
+        if found:
+            return {found}, "file"
+    # A recursive make: the environment reaches the sub-make's own expansions,
+    # so the Makefile is the reader. This is how the _MAKE_SERIAL_* test hooks
+    # travel -- `flock .make.lock $(MAKE_COMMAND) ...`, read back as
+    # `$(value _MAKE_SERIAL_CLASSIC_DUPLICATE)`.
+    for token in words:
+        if os.path.basename(token.strip("\"'")) in ("make", "gmake"):
+            return {"Makefile"}, "recursive-make"
+    return set(), "external:" + (words[0].strip("\"'") if words else "?")
+
+
+def strip_comments(text):
+    """Drop `#` comments, so a filename merely MENTIONED is not an edge."""
+    return "\n".join(re.sub(r"(?<!\$)#.*", "", line) for line in text.split("\n"))
+
+
+def invoked_by(rel):
+    """Repo files this one runs, sources or imports."""
+    text = strip_comments(file_text(rel))
+    reached = set()
+    for statement in recipe_statements(text):
+        for token in statement:
+            if token.strip("\"'").endswith(SCRIPTISH) or "/" in token:
+                found = repo_path(token)
+                if found and found != rel:
+                    reached.add(found)
+    for module in re.findall(r"^\s*(?:from|import)\s+([A-Za-z_][A-Za-z0-9_]*)",
+                             text, re.M):
+        reached.update(_BY_BASENAME.get(module + ".py", ()))
+    return reached
+
+
+def reader_closure(seeds):
+    """Every repo file the environment can reach from these entry points.
+
+    Transitive, and that is required rather than a refinement: a direct-read
+    check reports two correct channels as severed. AWK is written for
+    test/test_stack_depth_pic.sh, which is a WRAPPER -- the read is in
+    check_stack_depth_pic.sh, which it runs as a child, and a child inherits the
+    environment. BYPASS_MODEL_FFI is written for a Python driver whose read is
+    in a module it imports. Both are correct code.
+    """
+    seen, todo = set(), list(seeds)
+    while todo:
+        rel = todo.pop()
+        if rel in seen:
+            continue
+        seen.add(rel)
+        todo.extend(invoked_by(rel) - seen)
+    return seen
+
+
+def reads_channel(rel, name):
+    """(does this file read the name?, was the name COMPUTED rather than written?)"""
+    text = file_text(rel)
+    quoted = re.escape(name)
+    for pattern in (rf"\${quoted}\b", rf"\$\{{{quoted}[}}:\-/#%\[]",
+                    rf"\$\({quoted}\)", rf"\$\((?:value|origin)\s+{quoted}\)"):
+        if re.search(pattern, text):
+            return True, False
+    # Python names its environment with STRINGS, and not always at the point of
+    # access: test/avr/test_soak_attiny202.py passes
+    # "ATTINY202_SOAK_DURATION_MS" to a local _env_ms() helper that calls
+    # os.environ.get. Requiring `environ`/`getenv` adjacent to the literal
+    # reports every such read as severed, so any quoted occurrence counts. The
+    # looseness is safe in the direction that matters: after a rename severs the
+    # producer, the literal in the file is the NEW spelling, so the old name
+    # still appears nowhere and is still caught.
+    if rel.endswith(".py") and re.search(rf"[\"']{quoted}[\"']", text):
+        return True, False
+    for built in CONCATENATED.finditer(text):
+        prefix = built.group(1)
+        if len(prefix) >= 6 and name.startswith(prefix) and name != prefix:
+            return True, True
+    return False, False
+
+
+def check_axis_e():
+    """Axis E: a child still reads the environment the Makefile sets for it."""
+    checks = 0
+    index_repo_files()
+    writes = env_channel_writes()
+    if len(writes) < 40:
+        sys.exit(f"FAIL: axis E harvested only {len(writes)} env channels from "
+                 "the Makefile; the recipe tokenizer or the prefix walk has "
+                 "rotted, and a harvest this small cannot be checking much")
+    checks += 1
+
+    # EVERY write site is checked, not just one per name. Each
+    # `NAME=value <child>` is an independent producer-consumer link, and a
+    # severed one is a defect however healthy its siblings are. Measured, this
+    # is not a hypothetical: ATTINY202_FUSE_WDTCFG is written at five sites,
+    # four of them to drivers that read it through a computed prefix and the
+    # fifth to the fuse reader's own unit test, which names it literally.
+    # Satisfying the NAME rather than the LINK lets breaking the computed
+    # prefix -- which severs all four real consumers -- pass on the strength of
+    # the unit test. Verified: the per-name form does exactly that.
+    severed, unresolved, computed, reached = {}, {}, set(), 0
+    for name in sorted(writes):
+        if name in EXTERNAL_CONSUMERS:
+            continue
+        for lineno, command in writes[name]:
+            children, kind = resolve_child(list(command))
+            if not children:
+                unresolved[(name, lineno)] = kind
+                continue
+            satisfied = None
+            for rel in sorted(reader_closure(children)):
+                hit, was_computed = reads_channel(rel, name)
+                if hit:
+                    satisfied = (rel, was_computed)
+                    break
+            if not satisfied:
+                severed[(name, lineno)] = sorted(children)
+                continue
+            reached += 1
+            if satisfied[1]:
+                computed.add(name)
+
+    if severed:
+        lines = ["FAIL: the Makefile sets environment no child reads:"]
+        for (name, lineno), children in sorted(severed.items()):
+            lines.append(f"  {name}")
+            lines.append(f"      written  Makefile:{lineno}")
+            lines.append(f"      child    {', '.join(children) or '(unresolved)'}")
+        lines += [
+            "",
+            "The assignment is legal, silent and inert: the child falls back to",
+            "its own in-source default and the lane goes on passing while",
+            "measuring something else. That is what `make pic10f320-test-gpsim`",
+            "did for an entire release, on a p10f322 device model.",
+            "",
+            "Rename the child's read to match, or -- if the consumer is not a",
+            "file in this repository -- add it to EXTERNAL_CONSUMERS with the",
+            "reason.",
+        ]
+        sys.exit("\n".join(lines))
+    checks += 1
+
+    if unresolved:
+        lines = ["FAIL: axis E cannot find the consumer of these channels:"]
+        for (name, lineno), kind in sorted(unresolved.items()):
+            lines.append(f"  {name:34s} Makefile:{lineno}  {kind}")
+        lines += [
+            "",
+            "An unresolved channel is a SKIPPED check, not a passing one, so it",
+            "fails rather than being counted quietly. Either teach",
+            "resolve_child() the shape, or record the name in",
+            "EXTERNAL_CONSUMERS with the reason its consumer is not a repo file.",
+        ]
+        sys.exit("\n".join(lines))
+    checks += 1
+
+    # Every allowlist entry must still be a channel this axis actually meets,
+    # or it is covering whatever gets written under that name next.
+    stale = sorted(set(EXTERNAL_CONSUMERS) - set(writes))
+    if stale:
+        sys.exit("FAIL: EXTERNAL_CONSUMERS names channels the Makefile no "
+                 f"longer writes: {', '.join(stale)}\nRemove them; an "
+                 "exemption nothing reaches is a blind spot.")
+    checks += 1
+
+    # Negative case: the harvest must still find the channel the axis was built
+    # for, reached through a SOURCED helper rather than the invoked script --
+    # the one shape a direct-read check gets wrong.
+    proc = "PIC_GPSIM_PROC"
+    if proc not in writes:
+        sys.exit(f"FAIL: negative case -- axis E no longer harvests {proc}, the "
+                 "channel whose severance it exists to catch")
+    wrapper = "test/pic/gpsim_wrapper_common.sh"
+    if not reads_channel(wrapper, proc)[0]:
+        sys.exit(f"FAIL: negative case -- {wrapper} no longer reads {proc}. If "
+                 "that is deliberate, this axis has just done its job; if not, "
+                 "the read-detection patterns have rotted.")
+    checks += 1
+
+    return checks, len(writes), reached, len(computed)
+
+
 def check_axis_c():
     """Axis C: every `NAME=value` handed to make names a variable it knows."""
     checks = 0
@@ -1554,16 +2023,19 @@ def main():
     b_checks, commands, b_used, b_marks = check_axis_b()
     d_checks, mentions, d_used, d_marks = check_axis_d(
         data_base()[2] | dereferenced_names() | env_channel_names())
+    e_checks, channels, reached, computed = check_axis_e()
 
     marks = dict(b_marks)
     marks.update(c_marks)
     marks.update(d_marks)
     shared = check_markers(b_used | c_used | d_used, marks)
 
-    total = c_checks + a_checks + b_checks + d_checks + shared
+    total = c_checks + a_checks + b_checks + d_checks + e_checks + shared
     print(f"Makefile name contract: {total} checks, 0 failures "
           f"(axis A: {reads} queries; axis B: {commands} commands; "
-          f"axis C: {overrides} overrides; axis D: {mentions} mentions)")
+          f"axis C: {overrides} overrides; axis D: {mentions} mentions; "
+          f"axis E: {channels} env channels over {reached} write sites, "
+          f"every one reached [{computed} through a computed name])")
 
 
 if __name__ == "__main__":
