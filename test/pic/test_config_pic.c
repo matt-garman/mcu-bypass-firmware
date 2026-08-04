@@ -44,8 +44,15 @@
 // checker serves both chips; only the printed device name differs. The
 // PIC10F320 lane overrides this on the command line (merge plan §4:
 // "one checker with device-accurate labels ... for both chips").
+// Both lanes now pass it. It used to default to "PIC10F322", which made this
+// one source with two callers and a fallback correct for only one of them --
+// the same shape that let the shared gpsim wrapper run PIC10F320 images on a
+// p10f322 model. Here the value is a printed label rather than a simulated
+// device, so a severed injection would have mislabelled a passing check instead
+// of testing the wrong part; the shape is worth removing anyway, since which of
+// those two it is depends only on what the macro is later used for.
 #ifndef PIC_DEVICE_NAME
-#  define PIC_DEVICE_NAME "PIC10F322"
+#  error "PIC_DEVICE_NAME must be injected: -DPIC_DEVICE_NAME from PIC10F322_CHIP or the PIC10F320 config rule"
 #endif
 
 // CONFIG word location + field map (identical on PIC10F322 and PIC10F320)

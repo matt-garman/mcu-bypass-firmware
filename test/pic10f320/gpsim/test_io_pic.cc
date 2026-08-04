@@ -3,8 +3,6 @@
 
 // PIC10F320 adapter for the shared built-HEX GPIO/pulse-timing harness.
 
-#define PIC_IO_DEFAULT_FW_PATH \
-    "build_pic10f320/bypass-pic10f320-cd4053_simple.hex"
 #define PIC_IO_DEFAULT_PROC_NAME "p10f320"
 #define PIC_IO_PART_NAME "PIC10F320"
 

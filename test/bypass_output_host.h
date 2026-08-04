@@ -23,14 +23,34 @@
 // --- AVR register-bit-name shims --------------------------------------------
 // PORTB has 6 bits (PB0..PB5) on both the ATtiny13a and ATtiny85. Define them
 // as their bit positions, matching <avr/io.h>.
-#ifndef PB0
-#  define PB0 0
+// PB0..PB2 are asserted rather than merely defaulted, for the same reason as in
+// bypass_config_host.h: they exist in more than one place. Here there are three
+// copies -- this header, that one, and `CBMC_DEFS` -- and the host harnesses
+// include BOTH headers, in an order that decides which one's values win. That
+// made the agreement a property of include order rather than of anything
+// checked. Now whichever is defined first is compared against this header's
+// canonical value, so the three copies are held together in every build that
+// touches two of them. PB3..PB5 below are defined nowhere else and stay plain.
+#define BYPASS_OUTPUT_HOST_PB0 0
+#define BYPASS_OUTPUT_HOST_PB1 1
+#define BYPASS_OUTPUT_HOST_PB2 2
+#if defined(PB0)
+_Static_assert(PB0 == BYPASS_OUTPUT_HOST_PB0,
+               "PB0 disagrees with the host output pin shim");
+#else
+#  define PB0 BYPASS_OUTPUT_HOST_PB0
 #endif
-#ifndef PB1
-#  define PB1 1
+#if defined(PB1)
+_Static_assert(PB1 == BYPASS_OUTPUT_HOST_PB1,
+               "PB1 disagrees with the host output pin shim");
+#else
+#  define PB1 BYPASS_OUTPUT_HOST_PB1
 #endif
-#ifndef PB2
-#  define PB2 2
+#if defined(PB2)
+_Static_assert(PB2 == BYPASS_OUTPUT_HOST_PB2,
+               "PB2 disagrees with the host output pin shim");
+#else
+#  define PB2 BYPASS_OUTPUT_HOST_PB2
 #endif
 #ifndef PB3
 #  define PB3 3

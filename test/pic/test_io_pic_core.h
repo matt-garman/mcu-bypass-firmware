@@ -29,23 +29,28 @@
 // gpsim_attach_footswitch() and footsw_set().
 #include "pic/gpsim_bootstrap.h"
 
-#ifndef PIC_IO_DEFAULT_FW_PATH
-#  error "PIC_IO_DEFAULT_FW_PATH must be defined by the part adapter"
-#endif
 #ifndef PIC_IO_DEFAULT_PROC_NAME
 #  error "PIC_IO_DEFAULT_PROC_NAME must be defined by the part adapter"
 #endif
 #ifndef PIC_IO_PART_NAME
 #  error "PIC_IO_PART_NAME must be defined by the part adapter"
 #endif
+// FW_PATH names an output STAGE, which the Makefile selects per run -- unlike
+// PROC_NAME below, which names the PART and so is legitimately the adapter's to
+// default. An adapter default for FW_PATH looked like the same thing and was
+// not: it is per-part correct and per-variant wrong, so a severed injection
+// tested one output stage while the run reported another.
 #ifndef FW_PATH
-#  define FW_PATH PIC_IO_DEFAULT_FW_PATH
+#  error "FW_PATH must be injected: -DFW_PATH from PIC10F322_IO_HEX or PIC10F320_IO_HEX"
 #endif
 #ifndef PROC_NAME
 #  define PROC_NAME PIC_IO_DEFAULT_PROC_NAME
 #endif
+// FOSC; instruction clock = FOSC/4. A part fact, and the two PIC parts share
+// one value today -- which is exactly why a default here is a hazard: re-pin
+// one chip's XTAL and this harness goes on simulating the other's.
 #ifndef F_CPU_HZ
-#  define F_CPU_HZ 2000000UL
+#  error "F_CPU_HZ must be injected: -DF_CPU_HZ from PIC10F322_XTAL or PIC10F320_XTAL"
 #endif
 
 #if (defined(PIC_IO_SIMPLE) + defined(PIC_IO_MUTE) + \

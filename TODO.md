@@ -94,6 +94,50 @@ Verified by reintroducing each defect on the real tree and restoring: a restored
 rename, both halves named, not as two unrelated problems), an `#error` naming
 the wrong variable, and a burned byte the checker does not verify.
 
+**~~Classify the other `-D` macros with in-source fallbacks.~~ DONE
+(2026-08-03).** 26 silent fallbacks down to 15, and every one that remains is in
+a category with a stated reason. Three corrections to the specification below,
+each of which changed what the work was:
+
+- **The `SIM_*` / `MODEL_FUZZ_*` defaults are LOAD-BEARING, not laziness.**
+  `FULL_HOST_DEFS` and `FULL_SIM_DEFS` are deliberately empty, so `make
+  test-long` — the release gate — reaches the exhaustive workload by *not*
+  overriding them. An `#error` there would have failed the release gate. Both
+  groups now say so in the file, because the next reader to "finish the job"
+  would otherwise repeat the mistake.
+- **`PB0`/`PB1`/`PB2` and `F_CPU` are not severable injections at all.**
+  `CBMC_DEFS` is the *only* thing that injects them; every other host build
+  reaches the pin map through the shim. So the hazard is the reverse of the one
+  described: the map exists in two or three copies and nothing compared them —
+  change a pin in the shim and cbmc goes on proving the firmware against the old
+  map, reported as a pass. Closed in C rather than with a gate: the canonical
+  value is named once and `_Static_assert`ed against whatever was injected, so
+  the copies cannot drift. Verified by drifting `CBMC_DEFS` PB1 1 → 3, which
+  fails `test-cbmc` by name.
+- **Two more instances of the shared-source/one-fallback shape turned up**, both
+  the same shape as the `PIC_GPSIM_PROC` defect: `test_soak_pic.cc` is compiled
+  for BOTH PIC parts and defaulted `PROC_NAME` to `p10f322`, and
+  `test_config_pic.c` serves both lanes and defaulted its device label to
+  `PIC10F322`. The per-part harnesses (`test_io`/`test_fault`/`test_lockstep`)
+  may keep an adapter default for `PROC_NAME` precisely because they have one
+  adapter per part — that is the structural difference, and it is now written
+  down where the exception is taken.
+
+Hardened to `#error`, each naming the Makefile variable its value comes from:
+`FW_PATH` (6 sites), `F_CPU_HZ` (4), `MCU_NAME` (2), `PROC_NAME` (shared soak),
+`PIC_DEVICE_NAME`, and all four soak knobs. The dead `PIC_*_DEFAULT_FW_PATH`
+adapter macros went with them. `test_sim.c`'s ATtiny13a lane was the last place
+a part was identified by the *omission* of a field — the tinyx5 rules injected
+`MCU_NAME`/`F_CPU_HZ` and the 13a rules did not — and its `MCU_NAME` default was
+the wrong spelling (`attiny13`) besides; both 13a rules now pass
+`ATTINY13A_MCU`/`ATTINY13A_F_CPU`, byte-identical results.
+
+What remains and why: 13 workload knobs (above), `PROC_NAME` in the three
+per-part harnesses (adapter default is per-part correct), and `TRACE_VCD_PATH`
+(reachable only under `-DTRACE`).
+
+The original text follows.
+
 **Classify the other `-D` macros with in-source fallbacks.** Split out
 2026-08-03 from the item above, which closed the fuse-byte half. Measured today:
 the Makefile passes 58 distinct `-D` macros and **25 still have `#ifndef`
@@ -1634,7 +1678,6 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | Item | Tier | Effort | Impact |
 |---|---|---|---|
 | Design doc: datasheet citations | 2 | 2 h | High — completeness/rigor |
-| `-D<MACRO>` fallbacks: classify the remaining 25 | 2.5 | 1–2 h | Medium — `SOAK_DURATION_MS` repeats a defect already shipped once |
 | Axis E: env channels a child stopped reading | 2.5 | 2–3 h | Medium-High — the one axis in this family with a live defect behind it |
 | Re-pin yasimavr after the cycle-rewind fix | 2.5 | 1 h (+2 h optional) | Low — retires a documented simulator caveat |
 | Name contract cannot see an uncommitted file | 3 | 15 min | Low-Medium — the violation is reported one run late |

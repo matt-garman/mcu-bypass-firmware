@@ -421,6 +421,54 @@ file is the human-readable summary of *what changed*.
   offer them to `git add -A` forever.
 
 ### Changed
+- **A `-D` macro a test harness must be told is now a build error when it is not
+  told, instead of a plausible default.** The C-side twin of the name-contract
+  axes: the Makefile injects 56 macros, 26 of which had `#ifndef` fallbacks that
+  a severed injection would reach silently. Every such fallback was a correct
+  value for *some* combination, which is exactly what made them dangerous —
+  `test/avr/test_soak.c` would have answered a severed `-DSOAK_DURATION_MS` with
+  24 h, the same 43,200× overrun this release already fixed on the make side,
+  and a severed `-DFW_PATH` with a real ELF that is simply not the one the run
+  reported soaking.
+
+  Now 15, each in a category with a stated reason. Hardened to `#error`, every
+  one naming the Makefile variable its value comes from: `FW_PATH` (6 sites),
+  `F_CPU_HZ` (4), `MCU_NAME` (2), `PROC_NAME` in the shared PIC soak,
+  `PIC_DEVICE_NAME`, and all four soak knobs. The `PIC_*_DEFAULT_FW_PATH`
+  adapter macros went with them — an image path is an output-stage fact the
+  Makefile selects, not a part fact the adapter owns, and defaulting it looked
+  like the second only because it sat next to `PROC_NAME`, which genuinely is.
+
+  **Two more instances of the shared-source shape** that produced the
+  `PIC_GPSIM_PROC` defect above turned up here and are the reason this landed in
+  the same release: `test_soak_pic.cc` is compiled for BOTH PIC parts and
+  defaulted `PROC_NAME` to `p10f322`, so a severed injection would have soaked a
+  PIC10F320 image on a p10f322 model for 24 hours; `test_config_pic.c` serves
+  both lanes and defaulted its device label to `PIC10F322`. The per-part
+  harnesses keep their adapter default for `PROC_NAME` precisely because they
+  have one adapter per part — one source with two callers must have no fallback,
+  one source per part may.
+
+  **`test_sim.c`'s ATtiny13a lane was the last place a part was identified by
+  the omission of a field.** The tinyx5 rules injected `MCU_NAME` and
+  `F_CPU_HZ`; the ATtiny13a rules injected neither and let the file's own
+  defaults answer — and that `MCU_NAME` default was `attiny13`, a spelling the
+  rest of the tree retired, which simavr happens to accept. Both ATtiny13a rules
+  now pass `ATTINY13A_MCU` and `ATTINY13A_F_CPU`; check counts are unchanged.
+
+  **Two groups deliberately keep their fallbacks, and now say why.** The 13
+  `SIM_*` / `MODEL_FUZZ_*` workload knobs are load-bearing: `FULL_SIM_DEFS` and
+  `FULL_HOST_DEFS` are empty, so `make test-long` reaches the exhaustive
+  workload by *not* overriding them, and an `#error` would have failed the
+  release gate. And `PB0`/`PB1`/`PB2`/`F_CPU` turned out not to be severable
+  injections at all — `CBMC_DEFS` is their only injector, so the hazard is the
+  reverse one: the pin map exists in two or three copies and nothing compared
+  them, which would let cbmc go on proving the firmware against a map the shim
+  no longer holds and report it as a pass. Closed in C rather than with a new
+  gate — the canonical value is named once and `_Static_assert`ed against
+  whatever was injected. Verified by drifting `CBMC_DEFS` `PB1` from 1 to 3:
+  `test-cbmc` fails by name.
+
 - **Every released firmware image is renamed to one consistent scheme.** All
   eighteen images on all six MCUs are now
   `bypass-<mcu>-<output stage>.hex` — three hyphen-separated fields, with

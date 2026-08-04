@@ -50,15 +50,32 @@
 #include "pic/gpsim_bootstrap.h"
 #include "pic/soak_sampling.h"
 
-// ---- Firmware / MCU parameters (injected by the Makefile build rule) --------
+// ---- Injected parameters: EVERY one is required, none has a default ---------
+//
+// THIS FILE IS SHARED BY BOTH PIC PARTS. PIC_SOAK_SRC names it once and both
+// PIC10F322_SOAK_COMPILE and PIC10F320_SOAK_COMPILE pass their own part's
+// values through it. A single fallback here is therefore correct for at most
+// one of the two callers, and silently wrong for the other -- which is not a
+// hypothetical shape: it is exactly how the shared gpsim CLI wrapper came to
+// run PIC10F320 images on a p10f322 model in `v0.9.8`, passing, because the
+// 322 is a superset of the 320.
+//
+// The per-part harnesses (test_io/test_fault/test_lockstep) may keep an
+// adapter default for PROC_NAME precisely because they DO have one adapter per
+// part, so their fallback is per-part correct. This file has one source and two
+// callers, so it must have none.
+//
+// Each #error names the Makefile variable its value comes from, so a severed
+// injection is reported as the rename it is rather than as a missing macro.
 #ifndef FW_PATH
-#  define FW_PATH  "build_pic10f322/bypass-pic10f322-cd4053_simple.hex"
+#  error "FW_PATH must be injected: -DFW_PATH from PIC10F322_SOAK_HEX or PIC10F320_SOAK_HEX"
 #endif
 #ifndef PROC_NAME
-#  define PROC_NAME "p10f322"
+#  error "PROC_NAME must be injected: -DPROC_NAME from PIC10F322_GPSIM_PROC or PIC10F320_GPSIM_PROC"
 #endif
 #ifndef F_CPU_HZ
-#  define F_CPU_HZ 2000000UL           // FOSC; instruction clock = FOSC/4
+   // FOSC; instruction clock = FOSC/4
+#  error "F_CPU_HZ must be injected: -DF_CPU_HZ from PIC10F322_XTAL or PIC10F320_XTAL"
 #endif
 #define CYCLES_PER_MS  ((F_CPU_HZ / 4UL) / 1000UL)   // 500 @ 2 MHz
 
@@ -72,17 +89,20 @@
 #define LATA_ADDR   0x07u
 #define LED_MASK    0x01u              // RA0
 
-// ---- Soak configuration (override with -DNAME=value from the Makefile) ------
-// 24 h sim = 3.46e11 instr-cycles; gpsim is slower than simavr, so default to a
-// shorter duration and make 24 h an explicit opt-in (parallel to the AVR soak).
+// ---- Soak configuration ----------------------------------------------------
+// Set these through their Makefile variables (PIC10F32x_SOAK_DURATION_MS et al),
+// never by editing a default here. 24 h sim = 3.46e11 instr-cycles and gpsim is
+// slower than simavr, so the MAKEFILE-side default is 1 h (the AVR's is 24 h)
+// and 24 h is an explicit opt-in; that asymmetry belongs in the Makefile, where
+// it is visible, rather than here, where a severed injection would reach it.
 #ifndef SOAK_DURATION_MS
-#  define SOAK_DURATION_MS 3600000u    // 1 h default (AVR default is 24 h)
+#  error "SOAK_DURATION_MS must be injected: -DSOAK_DURATION_MS from PIC10F322_SOAK_DURATION_MS or PIC10F320_SOAK_DURATION_MS"
 #endif
 #ifndef SOAK_LIVENESS_INTERVAL_MS
-#  define SOAK_LIVENESS_INTERVAL_MS 60000u
+#  error "SOAK_LIVENESS_INTERVAL_MS must be injected: -DSOAK_LIVENESS_INTERVAL_MS from PIC10F32x_SOAK_LIVENESS_INTERVAL_MS"
 #endif
 #ifndef SOAK_PROGRESS_INTERVAL_MS
-#  define SOAK_PROGRESS_INTERVAL_MS 3600000u
+#  error "SOAK_PROGRESS_INTERVAL_MS must be injected: -DSOAK_PROGRESS_INTERVAL_MS from PIC10F32x_SOAK_PROGRESS_INTERVAL_MS"
 #endif
 
 #include "../soak_timing_config.h"
@@ -93,11 +113,17 @@
 // many 1 ms debounce-integration TICKS are stolen from whichever window the
 // pulse overlaps. (The AVR integrates in its timer ISR, which keeps counting
 // through the block, so it is immune -- see the liveness-check note below.) The
-// Makefile passes the active variant's value (relay 12, mute 5, simple 0);
-// default to the relay's 12 ms -- the maximum -- so an unspecified build is held
-// long enough rather than under-held.
+// Makefile passes the active variant's value (relay 12, mute 5, simple 0) from
+// pic_soak_block_<variant> / pic10f320_soak_block_<variant>.
+//
+// This one previously defaulted to the relay's 12 ms on the reasoning that an
+// unspecified build should be over-held rather than under-held. That reasoning
+// is sound for a MISSING value and wrong for a SEVERED one: the map lookup has
+// already failed once in this tree and emitted `-DSOAK_ACTUATION_BLOCK_MS=u`,
+// and a default that silently absorbs the next such failure hides which variant
+// the binary was actually sized for.
 #ifndef SOAK_ACTUATION_BLOCK_MS
-#  define SOAK_ACTUATION_BLOCK_MS 12u
+#  error "SOAK_ACTUATION_BLOCK_MS must be injected: -DSOAK_ACTUATION_BLOCK_MS from pic_soak_block_<variant> or pic10f320_soak_block_<variant>"
 #endif
 // Safety cap: max run() resumes to cover one ms. A genuinely wedged core (PC
 // stuck, never reaching the cycle break) trips this instead of hanging forever.

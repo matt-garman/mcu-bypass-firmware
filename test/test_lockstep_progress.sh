@@ -280,8 +280,15 @@ run_missing_pin() {
 run_adapter() {
 	local label=$1 source=$2 processor=$3
 	local bin="$work/test_lockstep_progress_$processor"
+	# FW_PATH is required rather than defaulted (test_lockstep_pic_core.h), so
+	# this gate states its own instead of inheriting a part adapter's. The value
+	# is never opened: the fake CSimulationContext::LoadProgram above ignores its
+	# path argument entirely, because what is under test here is the harness's
+	# failure reporting, not image loading. Naming that in the value keeps a
+	# reader from hunting for a file that was never meant to exist.
 	"$CXX" -std=c++17 -O0 -I"$fake" -I"$ROOT/test" \
 		-DCTX_ADDR=0x20 -DF_CPU_HZ=2000000UL \
+		-DFW_PATH='"<never loaded: fake gpsim ignores the image path>"' \
 		-DLOCKSTEP_ITERS=8 "$ROOT/$source" -o "$bin"
 	run_missing_pin "$label" "$processor" "$bin"
 	run_wedge "$label" "$processor" "$bin" settle

@@ -1130,7 +1130,7 @@ pic10f322: $(PIC10F322_CORE_SRC) $(PIC10F322_HEADERS) $(foreach v,$(CLASSIC_VARI
 # (all share the same #pragma config, so each must match -- also catches
 # divergence). Skips cleanly when XC8 is absent (no HEX produced).
 test/pic/test_config_pic: test/pic/test_config_pic.c
-	$(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) $< -o $@
+	$(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) -DPIC_DEVICE_NAME='"PIC$(PIC10F322_CHIP)"' $< -o $@
 
 .PHONY: pic10f322-test-config
 pic10f322-test-config: pic10f322 test/pic/test_config_pic
@@ -3350,11 +3350,15 @@ define VARIANT_SIM_T13
 test/avr/test_sim_$(1)_attiny13a: $$(SIM_DEPS) $(AVR_FW)$(call fw_image_tail,$(1),$(ATTINY13A_MCU)).elf FORCE
 	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -Itest \
 		-DFW_PATH=\"$(AVR_FW)$(call fw_image_tail,$(1),$(ATTINY13A_MCU)).elf\" \
+		-DMCU_NAME=\"$(ATTINY13A_MCU)\" \
+		-DF_CPU_HZ=$(ATTINY13A_F_CPU) \
 		test/avr/test_sim.c $$(PURE_HOST_SRC) -o $$@ $$(SIM_LIBS)
 
 test/avr/test_trace_$(1): $$(SIM_DEPS) $(AVR_FW)$(call fw_image_tail,$(1),$(ATTINY13A_MCU)).elf FORCE
 	$$(HOSTCC) $$(SIM_CFLAGS) $$(SIM_DEFS) $$(PURE_HOST_CFLAGS) -D$$(macro_$(1)) -DTRACE -Itest \
 		-DFW_PATH=\"$(AVR_FW)$(call fw_image_tail,$(1),$(ATTINY13A_MCU)).elf\" \
+		-DMCU_NAME=\"$(ATTINY13A_MCU)\" \
+		-DF_CPU_HZ=$(ATTINY13A_F_CPU) \
 		-DTRACE_VCD_PATH=\"$(AVR_BUILD_DIR)/bypass_trace.vcd\" \
 		test/avr/test_sim.c $$(PURE_HOST_SRC) -o $$@ $$(SIM_LIBS)
 

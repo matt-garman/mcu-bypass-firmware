@@ -63,14 +63,30 @@
 #include "model_step.h"
 #endif
 
+// ---- Injected parameters: EVERY one is required, none has a default ---------
+//
+// These three were `#ifndef` fallbacks holding the ATtiny13a's values, which
+// made this harness the last place in the tree where a part was identified by
+// the OMISSION of a field: the tinyx5 rules injected all three, the ATtiny13a
+// rules injected only FW_PATH and let the other two default. `v0.9.8` removed
+// exactly that pattern from the image basenames and the make goals; the C
+// harness kept it one layer down, where a severed injection is silent and the
+// simulated part is whatever the last editor of this file believed.
+//
+// The MCU_NAME default was also the wrong spelling -- "attiny13", where the
+// rest of the tree says attiny13a. simavr accepts both, so nothing ever
+// complained. Both ATtiny13a rules now pass ATTINY13A_MCU and ATTINY13A_F_CPU.
+//
+// Each #error names the Makefile variable its value comes from, so a severed
+// injection is reported as the rename it is rather than as a missing macro.
 #ifndef FW_PATH
-#  define FW_PATH      "bypass-attiny13a-cd4053_simple.elf"
+#  error "FW_PATH must be injected: -DFW_PATH from the VARIANT_SIM_T13/VARIANT_SIM_X5 rule"
 #endif
 #ifndef MCU_NAME
-#  define MCU_NAME     "attiny13"
+#  error "MCU_NAME must be injected: -DMCU_NAME from ATTINY13A_MCU or mmcu_<n>"
 #endif
 #ifndef F_CPU_HZ
-#  define F_CPU_HZ     1200000UL
+#  error "F_CPU_HZ must be injected: -DF_CPU_HZ from ATTINY13A_F_CPU or TINYX5_F_CPU"
 #endif
 
 // Worst-case blocking delay (ms) the selected variant performs inside
@@ -112,6 +128,18 @@
 // variant's init pulse.
 #define SETTLE_MS (5u + CTL_DELAY_MS)
 
+// ---- Workload knobs: these fallbacks are LOAD-BEARING, do not make them errors
+//
+// Every SIM_* default below IS the exhaustive workload. `make test` passes the
+// smaller FAST_SIM_DEFS; `make test-long` -- the release gate -- sets
+// SIM_DEFS = FULL_SIM_DEFS, and FULL_SIM_DEFS is deliberately EMPTY, so the
+// full run reaches these values by NOT overriding them.
+//
+// That makes them the opposite case from the injected parameters at the top of
+// this file, and the distinction is the whole point of classifying them: there,
+// reaching a default means an injection was severed and the test silently
+// measured the wrong thing; here, reaching a default is the exhaustive run
+// working as designed. Turning these into #errors would fail `make test-long`.
 #ifndef SIM_RANDOM_NOISE_DURATION_MS
 #define SIM_RANDOM_NOISE_DURATION_MS 60000u
 #endif

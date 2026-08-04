@@ -22,6 +22,15 @@
 
 #include "bypass_config_host.h" // RELEASE_THRESH, PRESSED_THRESH (firmware truth)
 
+// ---- Workload knobs: these fallbacks are LOAD-BEARING, do not make them errors
+//
+// Every MODEL_FUZZ_* default below IS the exhaustive workload. `make test`
+// passes the smaller FAST_HOST_DEFS; `make test-long` sets
+// HOST_DEFS = FULL_HOST_DEFS, and FULL_HOST_DEFS is deliberately EMPTY, so the
+// full run reaches these values by NOT overriding them. Reaching a default here
+// is the exhaustive run working, not an injection that severed -- the opposite
+// of the required parameters in test_sim.c and test_soak.c. Turning these into
+// #errors would fail `make test-long`.
 #ifndef MODEL_FUZZ_RANDOM_DURATION_MS
 #define MODEL_FUZZ_RANDOM_DURATION_MS 1000000u
 #endif

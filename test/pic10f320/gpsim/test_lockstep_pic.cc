@@ -5,8 +5,6 @@
 // compares the constrained hand-inlined firmware implementation against the
 // independently compiled shared pure core after every loop iteration.
 
-#define PIC_LOCKSTEP_DEFAULT_FW_PATH \
-    "build_pic10f320/bypass-pic10f320-tq2_l2_5v_relay.hex"
 #define PIC_LOCKSTEP_DEFAULT_PROC_NAME "p10f320"
 
 #include "pic/test_lockstep_pic_core.h"

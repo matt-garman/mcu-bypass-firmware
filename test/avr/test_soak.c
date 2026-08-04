@@ -61,34 +61,56 @@
 // single source of truth, via the host-test shim.
 #include "bypass_config_host.h"
 
-// ---- Firmware / MCU parameters (injected by the Makefile build rule) --------
+// ---- Injected parameters: EVERY one is required, none has a default ---------
+//
+// These were `#ifndef` fallbacks, and every fallback was a correct value for
+// SOME combination -- which is precisely what made them dangerous. AVR_SOAK_
+// COMPILE passes all six unconditionally, so a fallback could only ever be
+// reached by a SEVERED injection, and would then answer with the wrong
+// combination's value while the run went on reporting the requested one.
+//
+// That is not hypothetical for this file. `v0.9.8` severed the make-side twin
+// of SOAK_DURATION_MS -- the mutation runner asked for 2 s of simulated soak
+// through a renamed variable and silently got the 24 h default, 43,200x over,
+// for an entire release. The C-side severance is the same defect with the same
+// blast radius and one fewer place to notice it, because the compile line is
+// not something anyone reads.
+//
+// Each #error names the Makefile variable its value comes from, so a severed
+// injection is reported as the rename it is rather than as a missing macro.
 #ifndef FW_PATH
-#  define FW_PATH  "bypass-attiny85-cd4053_simple.elf"
+#  error "FW_PATH must be injected: -DFW_PATH from AVR_SOAK_VARIANT/AVR_SOAK_CHIP (AVR_SOAK_COMPILE)"
 #endif
 #ifndef MCU_NAME
-#  define MCU_NAME "attiny85"
+#  error "MCU_NAME must be injected: -DMCU_NAME from AVR_SOAK_CHIP (AVR_SOAK_COMPILE)"
 #endif
 #ifndef F_CPU_HZ
-#  define F_CPU_HZ 1000000UL
+#  error "F_CPU_HZ must be injected: -DF_CPU_HZ from TINYX5_F_CPU (AVR_SOAK_COMPILE)"
 #endif
 
-// ---- Soak configuration (override with -DNAME=value on the command line) ----
+// ---- Soak configuration ----------------------------------------------------
+//
+// Set these through their Makefile variables (`make test-soak
+// AVR_SOAK_DURATION_MS=2000`), never by editing a default here: the release
+// orchestrator pins all three per combination and then requires the SOAK_RESULT
+// record to echo the exact values it asked for.
 
-// Total simulated duration in milliseconds. Default: 86 400 000 ms = 24 h.
+// Total simulated duration in milliseconds. AVR_SOAK_DURATION_MS defaults to
+// 86 400 000 ms = 24 h; the release passes it explicitly.
 #ifndef SOAK_DURATION_MS
-#  define SOAK_DURATION_MS 86400000u
+#  error "SOAK_DURATION_MS must be injected: -DSOAK_DURATION_MS from AVR_SOAK_DURATION_MS"
 #endif
 
 // How often (simulated ms) to pause the noise stream for a liveness check.
 // Each check performs a 2-press round-trip (~(4*(PRESSED_THRESH+RELEASE_THRESH
 // +10)) ms of simulated time; ~141 ms at default thresholds).
 #ifndef SOAK_LIVENESS_INTERVAL_MS
-#  define SOAK_LIVENESS_INTERVAL_MS 60000u
+#  error "SOAK_LIVENESS_INTERVAL_MS must be injected: -DSOAK_LIVENESS_INTERVAL_MS from AVR_SOAK_LIVENESS_INTERVAL_MS"
 #endif
 
 // How often (simulated ms) to print a progress line to stdout.
 #ifndef SOAK_PROGRESS_INTERVAL_MS
-#  define SOAK_PROGRESS_INTERVAL_MS 3600000u
+#  error "SOAK_PROGRESS_INTERVAL_MS must be injected: -DSOAK_PROGRESS_INTERVAL_MS from AVR_SOAK_PROGRESS_INTERVAL_MS"
 #endif
 
 #include "../soak_timing_config.h"
