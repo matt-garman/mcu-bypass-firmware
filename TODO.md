@@ -1595,6 +1595,169 @@ to "work" under one optimizer). Two strands:
 Effort: Medium (mostly CI plumbing plus a documented from-source build). Impact:
 Medium-High — adoption plus a genuine reliability net.
 
+**PIC12F675 as a fourth MCU target — feasibility MEASURED 2026-08-04, nothing
+committed.** Asked as a question ("is it similar enough to the 10F322 to be an
+easy port?") and answered by building a throwaway shell in a scratch tree and
+running it, rather than by reading datasheets. The prototype is not repo code
+and no firmware source was touched; what follows is the measurement, so that
+whoever picks this up starts from evidence instead of re-deriving it.
+
+**The short answer: yes, and it is a materially easier port than the 10F320
+was — for the opposite reason.** The 320 is the *same silicon* as the 322 and
+still needed the whole special-case inlined architecture of
+`docs/pic10f320_special_case.md`, because 256 words could not hold the modular
+build. The 12F675 is a *different core* — legacy mid-range (PIC12F6xx), not the
+322's enhanced mid-range — but it has 1024 words, so the **modular architecture
+fits with room to spare**. `bypass_pure.c` compiles and links unchanged, which
+means this target keeps the compile-the-verified-core property the 320 had to
+trade away for an equivalence-and-lockstep argument. The entire device delta
+lives in one new hardware shell plus one new pin map; the pure core, the three
+output drivers and `src/bypass_hw_iface.h` are untouched.
+
+*Toolchain: nothing new to install or pin.* XC8 v3.10 and `PIC10-12Fxxx_DFP`
+v1.9.189 — the exact versions already pinned in `TOOLCHAIN.adoc` for the two
+existing PIC parts — support the 12F675 out of the box (`pic12f675.h`,
+`12f675.cgen.inc`, `12f675.cfgmap`, `12f675.ini` are all in the installed pack).
+
+*Fit, measured, free-tier XC8 `-O2`, all three output variants:*
+
+| Variant          | 10F322 (512 w) | 12F675 (1024 w)  |
+|------------------|----------------|------------------|
+| cd4053-simple    | 356 w (69.5%)  | **496 w (48.4%)** |
+| cd4053-with-mute | 386 w (75.4%)  | **522 w (51.0%)** |
+| tq2 relay        | 381 w (74.4%)  | **524 w (51.2%)** |
+
+RAM 35/64 B (54.7%). The legacy mid-range core costs about **140 extra words
+(~+38%)** against the same sources on the enhanced core — a real penalty, and
+one 1024 words absorbs without argument. Note this is the *modular* build, so
+the number is directly comparable to the 322 row and not to the 320's inlined
+special case.
+
+**The device delta — everything that forces a new shell rather than a rebuild.**
+Every row was confirmed against the DFP device header or the pack's data files,
+not from memory:
+
+| 10F322                          | 12F675                                  | Consequence for the shell |
+|---------------------------------|-----------------------------------------|---------------------------|
+| `LATA` output latch             | **no `LATx` at all**                    | A GPIO bit-write is a read-modify-write of the *pin* levels — the classic mid-range R-M-W hazard on a capacitively loaded pin. Needs a RAM output shadow and whole-byte `GPIO` writes. Also rewrites `hw_output_state_intact()`: there is no latch to read back, so it must check the shadow *and* the pin readback |
+| TMR2 + `PR2` hardware auto-reload | **no TMR2/`PR2`**                     | The 1 ms tick comes from TMR1 (16-bit) with a software reload every tick, polled on `TMR1IF` — reload jitter where the 322 had a hardware period match |
+| `WDTCON.WDTPS`, independent     | **WDT postscaler IS the TMR0 prescaler** (`OPTION_REG.PSA`) | You get one or the other. The relay variant's 12 ms block needs the long WDT, so the prescaler must go to the WDT — which is the second, independent reason the tick has to be TMR1. No `WDTCON` exists; the period comes from `OPTION_REG.PS` |
+| `ANSELA`                        | `ANSEL` (which also carries `ADCS`), `CMCON`, `ADCON0` | Three registers to force the port all-digital instead of one, and three more terms in `hw_critical_sfrs_intact()`. The 675 carries a 10-bit ADC and a comparator (the 12F629 does not) whose default states must be forced off and then checked |
+| RA3 input-only **with** weak pull-up | **GP3 has no weak pull-up** — `WPU` implements bits 0,1,2,4,5 only | The one row that changes the *hardware* design; see below |
+| 2 MHz HFINTOSC, self-contained  | 4 MHz INTOSC, **factory-calibrated**    | See the OSCCAL hazard below |
+| `BORV=HI` (~2.7 V)              | fixed trip, no `BORV` bit               | Even less able than the 322 to enforce the >4 V floor the relay/MOSFET peripherals want. The CONFIG word also loses `LVP`, `LPBOR` and `WRT` |
+
+*The footswitch pin has to move, and that is a schematic change.* On the 322 the
+footswitch sits on input-only RA3 with the internal pull-up, and
+`hw_footswitch_pullup_intact()` is a genuine SEU check on the two-part enable.
+GP3 on the 675 is input-only in the same way but has **no** weak pull-up, so the
+choice is: move the footswitch to a pull-up-capable pin and keep that check, or
+leave it on GP3 with an external resistor and lose it. The prototype took the
+first option — footswitch on GP5, `MCLRE=ON` so GP3 stays MCLR (tied to VDD, as
+the 322 board already does) rather than becoming a floating unused input, and
+GP0/GP1/GP2 as the three outputs with the otherwise-idle GP4 driven low. That
+board has 6 I/O against the 322's 4, so the pin map is a redesign, not a copy.
+
+**The OSCCAL word is a production hazard with no analogue on either existing
+part, and it is the one finding here that is not merely bookkeeping.** The
+675's 4 MHz INTOSC is factory-calibrated by a `retlw` at the last flash word
+(0x3FF), which XC8's startup code calls. It bit the prototype immediately: the
+first simulator run called into erased flash, ran off the end of program memory
+and WDT-reset in a loop. In simulation the fix is to seed 0x3FF (the prototype
+appends `retlw 0x80` to the HEX). **On silicon it means the programming
+workflow must preserve that word** — a bulk erase destroys it, and an
+uncalibrated oscillator drifts both the debounce time base *and* the relay coil
+pulse width, i.e. it degrades exactly the two timing properties this project
+gates. That earns a release-lane check and a documented programming procedure,
+neither of which exists today because neither PIC10F32x part needs one.
+
+**Simulation and validation tooling: better than expected — both gpsim lanes
+work.** gpsim 0.32.1, already installed and already the PIC substrate, has a
+`p12f675` model, and the prototype image ran correctly under both paths:
+
+- *The libgpsim C++ path* (the bring-up in `test/pic/gpsim_bootstrap.h` shared
+  by the io / lock-step / fault / soak harnesses) produced a clean two-press
+  toggle: settle `gpio=0x20` (BYPASS, footswitch released, pull-up holding),
+  press → `0x03` (LED + CD4053 high = ENGAGED), release → `0x23` (latched),
+  press → `0x00` (BYPASS), release → `0x20`. So the TMR1 tick, the weak
+  pull-up, the debounce wiring and the outputs are all modelled.
+- *The gpsim CLI path* reproduced the five checkpoints of
+  `test/pic/footswitch_toggle.stc` at 2x cycle scaling (4 MHz → 1000 cycles/ms),
+  including the `PRESS1_EARLY` checkpoint whose whole purpose is to prove the
+  tick still gates the loop.
+
+Three tooling facts worth having written down before someone rediscovers them:
+
+- **gpsim names these pins `gpio0/1/2/4/5` and `MCLR`** — not `gp5`, and there
+  is no `gpio3` while `MCLRE=ON`. Confirmed by enumerating `get_pin_name()`
+  over the loaded model.
+- **A bad pin name in a `.stc` `attach` does not error — gpsim 0.32.1 HANGS.**
+  This cost several runs during the investigation and looked exactly like a
+  simulator that could not model the part. The C++ harnesses are already immune
+  because `test/pic/find_pin_exact.h` fails loudly on an unknown pin; the CLI
+  wrappers have no equivalent guard, which is a small, cheap gap to close on
+  its own merits whether or not this port ever happens.
+- **cppcheck needs `--platform=pic8`, not `pic8-enhanced`** — the 675 is
+  mid-range. Both the plain and the MISRA passes ran clean on the prototype
+  shell under that platform, the only MISRA hit being the same
+  `_XTAL_FREQ` Rule 10.4 static-assert item the 322 already handles.
+- **The hardware return-stack gate generalises for free.**
+  `12f675.ini` declares `STACKDEPTH=8`, identical to both existing parts, and
+  `test/check_stack_depth_pic.sh` reads that from the pack rather than
+  hardcoding it — so the gate applies unchanged, and its "overflow is silent on
+  this core, nothing at runtime can detect it" reasoning applies with equal
+  force here.
+
+**Where the actual work is.** Not in the shell — in the per-part lanes, which
+is the same shape the 320 integration had. The shared core and drivers arrive
+already covered: host suite, CBMC, KLEE, mutation and golden-model lock-step
+all apply unchanged, because this target compiles the same `bypass_pure.c`.
+What has to be built:
+
+- A `PIC12F675_*` variable family and its goals, mirroring the existing
+  `PIC10F322_*` / `PIC10F320_*` pairs: build, flash budget, stack depth, config
+  check, analyze, program.
+- New adapters for the four libgpsim harnesses. These are already parameterised
+  (`PROC_NAME`, `FOOTSW_PIN_NAME`, cycles-per-ms), so this is mostly new `-D`
+  values plus the `gpio5` pin-name fact above.
+- Both `.stc` wrapper scripts retimed for 4 MHz (every checkpoint doubles).
+- A new fault-injection corrupt-value table for `test/pic/test_fault_pic.cc`:
+  the 322's targets `TMR2`, `WDTCON` and `ANSELA`, none of which exist on this
+  part. The lesson from the ATtiny202 fault-injection work applies directly —
+  a corrupt value must still leave the tick alive to be a valid GATE case, or
+  the harness proves nothing.
+- A new expected CONFIG word for the config check
+  (`FOSC=INTRCIO, WDTE, PWRTE, MCLRE, BOREN, CP, CPD`).
+- Release-lane surface: images, provenance, target matrix, CI routing, MISRA
+  suppressions under the `pic8` platform, and a `DS41190` column in the
+  `DESIGN_DOCUMENTATION.adoc` datasheet-references table.
+
+**What was NOT verified, stated so the item cannot be over-trusted.** Three
+numbers in the analysis came from recollection of DS41190 rather than from
+anything in this tree or the device pack, and must be read out of the datasheet
+before they land anywhere load-bearing: the WDT nominal period (~18 ms, so
+`PS`=1:16 ≈ 288 ms as the nearest available match to the 322's 256 ms), the BOR
+trip voltage (~2.1 V), and `CMCON`=0x07 as the comparator-off encoding. This is
+the same trap the Tier 2 datasheet-citation item names: a guessed section number
+or figure in a reference-grade document is worse than an absent one. Everything
+else above is either a measurement or a fact read out of the installed pack.
+
+**One judgement to record with the item.** Unlike the 320 (a constrained
+exception that strained the architecture) and the 322 (a family sibling), the
+675 exercises the hardware-abstraction boundary against a genuinely different
+core for the first time — and the boundary held: the whole delta stayed inside
+one shell file and one pin map, with no change to the iface, the drivers or the
+pure core. That is worth something as evidence about the architecture
+independent of whether the part is ever shipped. Against it: a fourth part is a
+fourth set of release gates to keep green forever, and this one arrives with a
+production hazard (OSCCAL) the other three do not have.
+
+Effort: Medium-High — ~1 day for shell + pin map (most of it re-deriving the
+tick/WDT numbers and the shadow-write semantics, not typing), and the lanes
+dominating the rest; comparable in surface to the 320 integration but simpler in
+kind, since no equivalence argument is needed. Impact: Medium — a wider parts
+story and a real test of the abstraction, against a permanent maintenance cost.
+
 **Hardware-in-the-loop (HIL) validation rig with register-level introspection.**
 The simavr (AVR Classic), libgpsim (PIC), and yasimavr (AVR-XT) suites prove the
 shells in simulation, but two gaps remain:
@@ -1882,6 +2045,7 @@ behavioural tests, and the output is a documentation artifact rather than a gate
 | HIL rig: behavioural + register introspection | 3 | 5–8 d | High — silicon-level model validation |
 | Inverted-copy (complemented) `ctx_` storage | 3 | 3–6 h | Medium — in-range SEU detection |
 | Broader compiler & toolchain portability | 3 | Medium | Medium-High — adoption + reliability |
+| PIC12F675 as a fourth MCU target | 3 | Medium-High (~1 d shell, lanes dominate) | Medium — fits modular build (496–524/1024 w, measured); OSCCAL hazard is new |
 | Embedded provenance URL | 3 | 1–2 h | Low — provenance polish |
 | `make pic10f320-program` target <!-- name-contract: exempt (absent goal) --> | 3 | 1 h + bench | Low — convenience; `pk2cmd` documented |
 | Manufacturing artifacts (name as scope) | 4 | — | Completeness signal |
