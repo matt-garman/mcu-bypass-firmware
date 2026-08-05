@@ -13,7 +13,8 @@ name: Release
 #      verifies the retained qualification belongs to the tag event's commit:
 #      an artifact-only child whose sole parent is the qualified source;
 #   2. rebuilds every release image from the TAGGED source on a clean, pinned
-#      runner (AVR Classic + ATtiny202 + PIC10F322 + PIC10F320);
+#      runner (AVR Classic + ATtiny202 + PIC10F322 + PIC10F320), then regenerates
+#      and byte-compares one-shot rename evidence when the rename table applies;
 #   3. REPRODUCIBILITY GATE: asserts the committed files, SHA256SUMS entries,
 #      freshly built files, AND the canonical RELEASE_IMAGES set the Makefile
 #      declares are all the same complete set with byte-identical contents
@@ -233,13 +234,44 @@ jobs:
             PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
 
       # --- THE reproducibility gate ----------------------------------------
-      - name: Verify committed images reproduce bit-for-bit
+      - name: Verify committed images and rename evidence reproduce bit-for-bit
         id: repro
         env:
           RELEASE_DIR: ${{ steps.rel.outputs.dir }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           dir=$RELEASE_DIR
+
+          # Give rename identity and normal reproduction the same immutable
+          # view of the clean build. Reading the live paths in sequence would
+          # allow a change between gates to make both individually pass over
+          # different bytes.
+          image_dirs_text=$(make -s print-RELEASE_IMAGE_DIRS)
+          read -r -a image_dirs <<< "$image_dirs_text"
+          ((${#image_dirs[@]} > 0)) \
+            || { echo "::error::Makefile RELEASE_IMAGE_DIRS is empty"; exit 1; }
+          fresh_root="${RUNNER_TEMP}/fresh-release-images"
+          verified_rename_root="${RUNNER_TEMP}/verified-rename"
+          rm -rf "$fresh_root" "$verified_rename_root"
+          mkdir -p "$fresh_root" "$verified_rename_root"
+          fresh_dirs=()
+          images=()
+          shopt -s nullglob dotglob
+          for i in "${!image_dirs[@]}"; do
+            fresh_dir="$fresh_root/$i"
+            mkdir "$fresh_dir"
+            cp -a -- "${image_dirs[$i]}"/. "$fresh_dir"/
+            fresh_dirs+=("$fresh_dir")
+            for image in "$fresh_dir"/*.hex; do
+              images+=("$image")
+            done
+          done
+          ((${#images[@]} > 0)) \
+            || { echo "::error::clean rebuild produced no release images"; exit 1; }
+          scripts/verify-rename-identity.sh --compare-report "$dir" \
+            "$verified_rename_root/RENAME_IDENTITY.md" "$RELEASE_TAG" \
+            "${images[@]}"
 
           # Enforce FOUR-way equality for release images: the canonical
           # RELEASE_IMAGES set, the actual committed .hex files, the checksum
@@ -248,9 +280,9 @@ jobs:
           # three-way equality between observations misses anything all three
           # observations omit together.
           #
-          # The fresh directories come from the Makefile too, so adding a target
-          # cannot leave this line behind pointing at a stale set of dirs.
-          scripts/verify-release-images.sh "$dir" $(make -s print-RELEASE_IMAGE_DIRS)
+          # The snapshot directories correspond one-for-one with the Makefile's
+          # list, so adding a target cannot leave this call on a stale set.
+          scripts/verify-release-images.sh "$dir" "${fresh_dirs[@]}"
 
           # Freeze the verified release assets before later test targets run.
           # Publication consumes only this snapshot, never the mutable tree.

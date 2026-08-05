@@ -36,6 +36,78 @@ die() {
 	exit 1
 }
 
+if [ "${1:-}" = "--compare-report" ]; then
+	[ "$#" -ge 5 ] || {
+		printf 'usage: %s --compare-report <committed-release-dir> <verified-report> <version> <image> [image ...]\n' \
+			"$0" >&2
+		exit 2
+	}
+	COMMITTED_RELEASE=$2
+	VERIFIED_REPORT=$3
+	COMPARE_VERSION=$4
+	shift 4
+	[ -d "$COMMITTED_RELEASE" ] && [ ! -L "$COMMITTED_RELEASE" ] \
+		|| die "committed release is missing or not a regular directory: $COMMITTED_RELEASE"
+	VERIFIED_REPORT_DIR=${VERIFIED_REPORT%/*}
+	[ "$VERIFIED_REPORT_DIR" != "$VERIFIED_REPORT" ] \
+		&& [ -d "$VERIFIED_REPORT_DIR" ] && [ ! -L "$VERIFIED_REPORT_DIR" ] \
+		|| die "verified-report parent is missing or not a regular directory: $VERIFIED_REPORT_DIR"
+	[ ! -e "$VERIFIED_REPORT" ] && [ ! -L "$VERIFIED_REPORT" ] \
+		|| die "verified-report output already exists: $VERIFIED_REPORT"
+
+	COMPARE_WORK=$(mktemp -d "$VERIFIED_REPORT_DIR/.rename-report-compare.XXXXXX") \
+		|| die "cannot create rename-report comparison work directory"
+	trap 'rm -rf "$COMPARE_WORK"' EXIT
+	GENERATED_REPORT="$COMPARE_WORK/RENAME_IDENTITY.md"
+	if "$0" "$COMPARE_VERSION" "$@" >"$GENERATED_REPORT"; then
+		:
+	else
+		rc=$?
+		cat "$GENERATED_REPORT" >&2
+		exit "$rc"
+	fi
+	[ -s "$GENERATED_REPORT" ] \
+		|| die "rename verifier produced an empty report for $COMPARE_VERSION"
+	IFS= read -r first_line < "$GENERATED_REPORT"
+	COMMITTED_REPORT="$COMMITTED_RELEASE/RENAME_IDENTITY.md"
+	case "$first_line" in
+	"rename identity: not applicable to "*)
+		if [ -e "$COMMITTED_REPORT" ] || [ -L "$COMMITTED_REPORT" ]; then
+			die "rename identity is not applicable to $COMPARE_VERSION, but committed evidence exists: $COMMITTED_REPORT"
+		fi
+		printf '%s\n' "$first_line"
+		exit 0
+		;;
+	'# '*) ;;
+	*) die "rename verifier produced an unrecognized report for $COMPARE_VERSION" ;;
+	esac
+
+	[ -f "$COMMITTED_REPORT" ] && [ ! -L "$COMMITTED_REPORT" ] \
+		&& [ -s "$COMMITTED_REPORT" ] \
+		|| die "committed rename evidence is missing, empty, or not a regular file: $COMMITTED_REPORT"
+	COMMITTED_SNAPSHOT="$COMPARE_WORK/COMMITTED_RENAME_IDENTITY.md"
+	cp -a -- "$COMMITTED_REPORT" "$COMMITTED_SNAPSHOT" \
+		|| die "cannot snapshot committed rename evidence: $COMMITTED_REPORT"
+	[ -f "$COMMITTED_SNAPSHOT" ] && [ ! -L "$COMMITTED_SNAPSHOT" ] \
+		&& [ -s "$COMMITTED_SNAPSHOT" ] \
+		|| die "committed rename-evidence snapshot is empty or not a regular file"
+	cmp -s -- "$GENERATED_REPORT" "$COMMITTED_SNAPSHOT" \
+		|| die "committed rename evidence does not match the CI-regenerated report: $COMMITTED_REPORT"
+	# The output must never be reopened through a pathname that appeared after
+	# the initial absence check. Both names are on the same filesystem, so an
+	# exclusive hard link retains these exact bytes or fails without opening an
+	# attacker-supplied symlink/FIFO.
+	ln -- "$GENERATED_REPORT" "$VERIFIED_REPORT" \
+		|| die "cannot retain verified rename evidence: $VERIFIED_REPORT"
+	[ -f "$VERIFIED_REPORT" ] && [ ! -L "$VERIFIED_REPORT" ] \
+		&& [ -s "$VERIFIED_REPORT" ] \
+		&& cmp -s -- "$GENERATED_REPORT" "$VERIFIED_REPORT" \
+		|| die "retained rename evidence does not match the verified report: $VERIFIED_REPORT"
+	printf 'rename identity: committed report matches CI-regenerated evidence for %s.\n' \
+		"$COMPARE_VERSION"
+	exit 0
+fi
+
 if [ "$#" -lt 2 ]; then
 	printf 'usage: %s <version> <image> [image ...]\n' "$0" >&2
 	exit 2

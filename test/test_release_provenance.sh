@@ -5,6 +5,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 RELEASE="$ROOT/scripts/make-release.sh"
 RELEASE_WORKFLOW="$ROOT/.github/workflows/release.yml"
 RENAME_VERIFY="$ROOT/scripts/verify-rename-identity.sh"
+RELEASE_IMAGE_VERIFY="$ROOT/scripts/verify-release-images.sh"
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-provenance.XXXXXX")
 repo="$work/repo with spaces"
 log="$work/check.log"
@@ -341,6 +342,54 @@ final_image_line=${final_image_lines[0]%%:*}
 	|| fail "rename identity is not checked both before validation and over the final pre-stage images"
 checks=$((checks + 1))
 
+# Tag CI has a third, independent job: regenerate from its clean-build paths and
+# compare before the normal four-way image gate snapshots anything for
+# publication. Pin the exact path enumeration and fail-closed ordering.
+mapfile -t ci_final_build_lines < <(grep -nF \
+	'make pic10f320-variants PIC10F320_CC=' "$RELEASE_WORKFLOW")
+mapfile -t ci_snapshot_lines < <(grep -nF \
+	'cp -a -- "${image_dirs[$i]}"/. "$fresh_dir"/' "$RELEASE_WORKFLOW")
+mapfile -t ci_rename_lines < <(grep -nF \
+	'scripts/verify-rename-identity.sh --compare-report "$dir" \' "$RELEASE_WORKFLOW")
+mapfile -t ci_repro_lines < <(grep -nF \
+	'scripts/verify-release-images.sh "$dir"' "$RELEASE_WORKFLOW")
+mapfile -t ci_publish_snapshot_lines < <(grep -nF \
+	'cp -p -- "$dir"/*.hex' "$RELEASE_WORKFLOW")
+[ "${#ci_final_build_lines[@]}" -eq 1 ] \
+	&& [ "${#ci_snapshot_lines[@]}" -eq 1 ] \
+	&& [ "${#ci_rename_lines[@]}" -eq 1 ] \
+	&& [ "${#ci_repro_lines[@]}" -eq 1 ] \
+	&& [ "${#ci_publish_snapshot_lines[@]}" -eq 1 ] \
+	|| fail "tag-CI rebuild/rename/reproduction/snapshot markers are missing or ambiguous"
+ci_final_build_line=${ci_final_build_lines[0]%%:*}
+ci_snapshot_line=${ci_snapshot_lines[0]%%:*}
+ci_rename_line=${ci_rename_lines[0]%%:*}
+ci_repro_line=${ci_repro_lines[0]%%:*}
+ci_publish_snapshot_line=${ci_publish_snapshot_lines[0]%%:*}
+[ "$ci_final_build_line" -lt "$ci_snapshot_line" ] \
+	&& [ "$ci_snapshot_line" -lt "$ci_rename_line" ] \
+	&& [ "$ci_rename_line" -lt "$ci_repro_line" ] \
+	&& [ "$ci_repro_line" -lt "$ci_publish_snapshot_line" ] \
+	|| fail "tag CI does not compare regenerated rename evidence between rebuild and reproduction"
+ci_rename_block=$(awk '/- name: Verify committed images and rename evidence reproduce bit-for-bit/ { in_block=1 }
+	/# --- re-run the gates on the clean runner/ { in_block=0 }
+	in_block { print }' "$RELEASE_WORKFLOW")
+for required in \
+	'set -euo pipefail' \
+	'image_dirs_text=$(make -s print-RELEASE_IMAGE_DIRS)' \
+	'shopt -s nullglob dotglob' \
+	'cp -a -- "${image_dirs[$i]}"/. "$fresh_dir"/' \
+	'"$verified_rename_root/RENAME_IDENTITY.md" "$RELEASE_TAG"' \
+	'scripts/verify-release-images.sh "$dir" "${fresh_dirs[@]}"'; do
+	[[ "$ci_rename_block" == *"$required"* ]] \
+		|| fail "tag-CI rename step omits required clean-image wiring: $required"
+done
+if grep -Eq '^[[:space:]]+(continue-on-error|if):' <<<"$ci_rename_block" \
+		|| grep -Fq '|| true' <<<"$ci_rename_block"; then
+	fail "tag-CI rename comparison can be skipped or ignored"
+fi
+checks=$((checks + 1))
+
 # Exercise the temporal defect directly. The first comparison passes over a
 # complete byte-identical v0.9.8 fixture; changing one image afterward must make
 # the comparison that represents the final release fail by hash, not merely by
@@ -368,11 +417,13 @@ rename_pairs=(
 	"bypass_mcu_tq2-relay_pic10f320.hex|bypass-pic10f320-tq2_l2_5v_relay.hex"
 )
 rename_paths=()
+rename_names=()
 for pair in "${rename_pairs[@]}"; do
 	old=${pair%%|*}
 	new=${pair#*|}
 	cp "$ROOT/release/v0.9.7/$old" "$rename_images/$new"
 	rename_paths+=("$rename_images/$new")
+	rename_names+=("$new")
 done
 "$RENAME_VERIFY" v0.9.8 "${rename_paths[@]}" >"$work/rename-early.out" \
 	2>"$work/rename-early.err" \
@@ -383,6 +434,165 @@ grep -Fq 'detached signature verified against the pinned release key' \
 	"$work/rename-early.out" \
 	|| fail "rename report does not attest that the baseline signature was verified"
 checks=$((checks + 1))
+
+# The workflow-facing mode regenerates into private storage and compares exact
+# bytes with the committed report. Exercise path shapes dynamically rather than
+# trusting a source-text check of the workflow's test/cmp commands.
+committed_rename_release="$work/committed release"
+valid_rename_report="$work/valid RENAME_IDENTITY.md"
+verified_rename_dir="$work/verified rename"
+verified_rename_report="$verified_rename_dir/RENAME_IDENTITY.md"
+mkdir -p "$committed_rename_release"
+mkdir -p "$verified_rename_dir"
+cp "$work/rename-early.out" "$valid_rename_report"
+cp "$valid_rename_report" "$committed_rename_release/RENAME_IDENTITY.md"
+
+expect_rename_report_fail() {
+	local label=$1 version=$2 expected=$3 rc
+	rm -f "$verified_rename_report"
+	if timeout 15 "$RENAME_VERIFY" --compare-report "$committed_rename_release" \
+			"$verified_rename_report" "$version" "${rename_paths[@]}" \
+			>"$work/rename-compare.out" \
+			2>"$work/rename-compare.err"; then
+		fail "$label: invalid committed rename evidence was accepted"
+	else
+		rc=$?
+	fi
+	[ "$rc" -ne 124 ] || fail "$label: rename report comparison blocked"
+	grep -Fq "$expected" "$work/rename-compare.err" \
+		|| fail "$label failed without '$expected': $(<"$work/rename-compare.err")"
+	checks=$((checks + 1))
+}
+
+"$RENAME_VERIFY" --compare-report "$committed_rename_release" \
+	"$verified_rename_report" v0.9.8 "${rename_paths[@]}" \
+	>"$work/rename-compare.out" \
+	|| fail "correct committed rename evidence did not match its regeneration"
+grep -Fq 'committed report matches CI-regenerated evidence for v0.9.8' \
+	"$work/rename-compare.out" \
+	|| fail "successful rename report comparison omitted its verdict"
+cmp -s "$valid_rename_report" "$verified_rename_report" \
+	|| fail "successful comparison did not retain the exact verified report"
+checks=$((checks + 1))
+
+rm "$committed_rename_release/RENAME_IDENTITY.md"
+expect_rename_report_fail "missing committed report" v0.9.8 \
+	"committed rename evidence is missing, empty, or not a regular file"
+
+: > "$committed_rename_release/RENAME_IDENTITY.md"
+expect_rename_report_fail "empty committed report" v0.9.8 \
+	"committed rename evidence is missing, empty, or not a regular file"
+
+rm "$committed_rename_release/RENAME_IDENTITY.md"
+ln -s "$valid_rename_report" "$committed_rename_release/RENAME_IDENTITY.md"
+expect_rename_report_fail "symlinked committed report" v0.9.8 \
+	"committed rename evidence is missing, empty, or not a regular file"
+
+rm "$committed_rename_release/RENAME_IDENTITY.md"
+ln -s "$work/absent-report" "$committed_rename_release/RENAME_IDENTITY.md"
+expect_rename_report_fail "dangling committed report symlink" v0.9.8 \
+	"committed rename evidence is missing, empty, or not a regular file"
+
+rm "$committed_rename_release/RENAME_IDENTITY.md"
+mkfifo "$committed_rename_release/RENAME_IDENTITY.md"
+expect_rename_report_fail "FIFO committed report" v0.9.8 \
+	"committed rename evidence is missing, empty, or not a regular file"
+
+rm "$committed_rename_release/RENAME_IDENTITY.md"
+mkdir "$committed_rename_release/RENAME_IDENTITY.md"
+expect_rename_report_fail "directory committed report" v0.9.8 \
+	"committed rename evidence is missing, empty, or not a regular file"
+
+# Replace a report after its initial regular-file check. Archive-mode cp must
+# preserve the raced FIFO in the private snapshot for prompt rejection rather
+# than opening it as a byte stream and blocking the release job.
+rm -rf "$committed_rename_release/RENAME_IDENTITY.md"
+cp "$valid_rename_report" "$committed_rename_release/RENAME_IDENTITY.md"
+report_race_bin="$work/report-race-bin"
+mkdir "$report_race_bin"
+real_cp=$(command -v cp) || fail "cp is required"
+cat > "$report_race_bin/cp" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = -a ] && [ "${2:-}" = -- ] && [ "${3:-}" = "$RACE_REPORT" ]; then
+	rm -- "$RACE_REPORT"
+	mkfifo "$RACE_REPORT"
+fi
+exec "$REAL_CP" "$@"
+EOF
+chmod 750 "$report_race_bin/cp"
+rm -f "$verified_rename_report"
+if PATH="$report_race_bin:$PATH" REAL_CP="$real_cp" \
+		RACE_REPORT="$committed_rename_release/RENAME_IDENTITY.md" \
+		timeout 15 "$RENAME_VERIFY" --compare-report "$committed_rename_release" \
+		"$verified_rename_report" v0.9.8 "${rename_paths[@]}" \
+		>"$work/rename-report-race.out" 2>"$work/rename-report-race.err"; then
+	fail "report type-change race was accepted"
+else
+	rc=$?
+fi
+[ "$rc" -ne 124 ] || fail "report type-change race blocked on the FIFO"
+grep -Fq 'committed rename-evidence snapshot is empty or not a regular file' \
+	"$work/rename-report-race.err" \
+	|| fail "report type-change race failed for the wrong reason: $(<"$work/rename-report-race.err")"
+rm "$committed_rename_release/RENAME_IDENTITY.md"
+checks=$((checks + 1))
+
+cp "$valid_rename_report" "$committed_rename_release/RENAME_IDENTITY.md"
+# Race the initially absent retained-output path to a FIFO immediately before
+# creation. Atomic hard-link retention must fail without opening or replacing it.
+output_race_bin="$work/output-race-bin"
+mkdir "$output_race_bin"
+real_ln=$(command -v ln) || fail "ln is required"
+cat > "$output_race_bin/ln" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = -- ] && [ "${3:-}" = "$RACE_OUTPUT" ]; then
+	mkfifo "$RACE_OUTPUT"
+fi
+exec "$REAL_LN" "$@"
+EOF
+chmod 750 "$output_race_bin/ln"
+rm -f "$verified_rename_report"
+if PATH="$output_race_bin:$PATH" REAL_LN="$real_ln" \
+		RACE_OUTPUT="$verified_rename_report" \
+		timeout 15 "$RENAME_VERIFY" --compare-report "$committed_rename_release" \
+		"$verified_rename_report" v0.9.8 "${rename_paths[@]}" \
+		>"$work/rename-output-race.out" 2>"$work/rename-output-race.err"; then
+	fail "retained-output path race was accepted"
+else
+	rc=$?
+fi
+[ "$rc" -ne 124 ] || fail "retained-output path race blocked on the FIFO"
+grep -Fq 'cannot retain verified rename evidence' "$work/rename-output-race.err" \
+	|| fail "retained-output path race failed for the wrong reason: $(<"$work/rename-output-race.err")"
+[ -p "$verified_rename_report" ] \
+	|| fail "retained-output race fixture did not create its FIFO"
+rm "$verified_rename_report"
+checks=$((checks + 1))
+
+printf X >> "$committed_rename_release/RENAME_IDENTITY.md"
+expect_rename_report_fail "one-byte changed committed report" v0.9.8 \
+	"committed rename evidence does not match the CI-regenerated report"
+
+rm "$committed_rename_release/RENAME_IDENTITY.md"
+rm -f "$verified_rename_report"
+"$RENAME_VERIFY" --compare-report "$committed_rename_release" \
+	"$verified_rename_report" v0.9.9 "${rename_paths[@]}" \
+	>"$work/rename-inapplicable.out" \
+	|| fail "an inapplicable later release incorrectly required rename evidence"
+grep -Fq 'rename identity: not applicable to v0.9.9' \
+	"$work/rename-inapplicable.out" \
+	|| fail "inapplicable rename report comparison omitted its verdict"
+[ ! -e "$verified_rename_report" ] && [ ! -L "$verified_rename_report" ] \
+	|| fail "inapplicable rename comparison retained a report"
+checks=$((checks + 1))
+
+ln -s "$work/absent-report" "$committed_rename_release/RENAME_IDENTITY.md"
+expect_rename_report_fail "stale inapplicable report" v0.9.9 \
+	"rename identity is not applicable to v0.9.9, but committed evidence exists"
+rm "$committed_rename_release/RENAME_IDENTITY.md"
+cp "$valid_rename_report" "$committed_rename_release/RENAME_IDENTITY.md"
 
 # Signature verification must dominate every read of a baseline hash. A
 # malformed append is deliberate: if parsing moves ahead of verification, this
@@ -544,6 +754,22 @@ expect_rename_signature_fail "empty signature verifier" \
 cp -p "$ROOT/scripts/verify-release-signature.sh" \
 	"$rename_fixture/scripts/verify-release-signature.sh"
 
+# Preserve the same valid fresh image set as a synthetic committed release for
+# the normal four-way reproducibility gate. The mutation below must be rejected
+# independently by both that gate and tag CI's rename-report regeneration.
+repro_release="$work/reproduction release"
+mkdir -p "$repro_release"
+cp -- "${rename_paths[@]}" "$repro_release/"
+(
+	cd "$repro_release"
+	sha256sum -- "${rename_names[@]}" > SHA256SUMS
+)
+rename_expected="${rename_names[*]}"
+RELEASE_EXPECTED_IMAGES="$rename_expected" \
+	"$RELEASE_IMAGE_VERIFY" "$repro_release" "$rename_images" >/dev/null \
+	|| fail "valid rename fixture failed normal release reproduction"
+checks=$((checks + 1))
+
 printf '\npost-validation mutation\n' >> "$rename_images/bypass-attiny13a-cd4053_simple.hex"
 if "$RENAME_VERIFY" v0.9.8 "${rename_paths[@]}" >"$work/rename-final.out" \
 		2>"$work/rename-final.err"; then
@@ -552,6 +778,29 @@ fi
 grep -Fq '**DIFFERS**' "$work/rename-final.out" \
 	&& grep -Fq 'rename identity FAILED: 1 image(s) differ' "$work/rename-final.err" \
 	|| fail "final rename comparison rejected the mutation for the wrong reason"
+checks=$((checks + 1))
+
+if RELEASE_EXPECTED_IMAGES="$rename_expected" \
+		"$RELEASE_IMAGE_VERIFY" "$repro_release" "$rename_images" \
+		>"$work/reproduction-mutation.out" 2>&1; then
+	fail "normal release reproduction accepted the changed clean-build image"
+fi
+grep -Fq 'fresh image checksum verification failed' \
+	"$work/reproduction-mutation.out" \
+	|| fail "normal reproduction rejected the changed image for the wrong reason"
+checks=$((checks + 1))
+
+rm -f "$verified_rename_report"
+if "$RENAME_VERIFY" --compare-report "$committed_rename_release" \
+		"$verified_rename_report" v0.9.8 "${rename_paths[@]}" \
+		>"$work/rename-mutated-compare.out" \
+		2>"$work/rename-mutated-compare.err"; then
+	fail "tag-CI report regeneration accepted the changed clean-build image"
+fi
+grep -Fq '**DIFFERS**' "$work/rename-mutated-compare.err" \
+	&& grep -Fq 'rename identity FAILED: 1 image(s) differ' \
+		"$work/rename-mutated-compare.err" \
+	|| fail "tag-CI report regeneration rejected the changed image for the wrong reason"
 checks=$((checks + 1))
 
 # The release orchestrator must identify each selected compiler before building

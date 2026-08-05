@@ -514,6 +514,13 @@ file is the human-readable summary of *what changed*.
   `release/v0.9.8/RENAME_IDENTITY.md`. Result on the current tree: **18
   identical, 0 differ, 0 missing**.
 
+  Tag CI does not trust that retained report on sight. After rebuilding all
+  release images from the tagged source, it regenerates the report from those
+  exact clean-build paths and requires a byte-for-byte match with the committed
+  `RENAME_IDENTITY.md`. Missing, empty, non-regular, stale or altered evidence
+  fails publication; once the rename table no longer applies, the same check
+  requires no report and rejects a stale one.
+
   Three decisions are what keep this from becoming a liability later. It is
   **not a standing gate**: pinning current images to a *previous* release's
   hashes is correct for exactly one release, and turns into a false alarm the
