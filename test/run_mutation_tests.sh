@@ -65,6 +65,9 @@ readonly MUTATION_EXPECTED_TOTAL=94
 # the PIC-shell mutants and their toolchain probe below.
 GPSIM="${GPSIM:-gpsim}"
 MUTATION_MAKE="${MUTATION_MAKE:-make}"
+PIC_SOAK_CXX="${PIC_SOAK_CXX:-c++}"
+PIC10F320_SOAK_CXX="${PIC10F320_SOAK_CXX:-$PIC_SOAK_CXX}"
+export PIC_SOAK_CXX PIC10F320_SOAK_CXX
 
 # The PIC10F322 image the two PIC-shell lanes drive, resolved ONCE from the
 # Makefile rather than recomposed from restated defaults.
@@ -99,6 +102,7 @@ if ! PIC10F322_MUTATION_HEX=$(resolve_pic10f322_mutation_hex); then
 fi
 readonly PIC10F322_MUTATION_HEX
 PIC_SOAK_GPSIM_INC="${PIC_SOAK_GPSIM_INC:-/usr/include/gpsim}"
+PIC10F320_SOAK_GPSIM_INC="${PIC10F320_SOAK_GPSIM_INC:-$PIC_SOAK_GPSIM_INC}"
 # Wall-clock ceiling on a single mutant checker. Every mutant runs under this;
 # see mutation_bounded below.
 #
@@ -158,8 +162,16 @@ AVR_SOAK_MUT_LIVENESS_MS="${AVR_SOAK_MUT_LIVENESS_MS:-1000}"
 # the lane. Passing them in absolutely keeps the sandbox self-contained for
 # SOURCES while sharing the read-only toolchain, and the probe below refuses to
 # enable the lane unless both actually resolve.
-XT_DFP_ABS="${XT_DFP_ABS:-$PROJ_DIR/third_party/attiny_dfp}"
-XT_YASIMAVR_VENV_ABS="${XT_YASIMAVR_VENV_ABS:-$PROJ_DIR/third_party/yasimavr/venv}"
+xt_dfp_input="${XT_DFP:-${XT_DFP_ABS:-third_party/attiny_dfp}}"
+xt_yasimavr_venv_input="${YASIMAVR_VENV:-${XT_YASIMAVR_VENV_ABS:-third_party/yasimavr/venv}}"
+case "$xt_dfp_input" in
+    /*) xt_dfp_abs=$xt_dfp_input ;;
+    *)  xt_dfp_abs="$PROJ_DIR/$xt_dfp_input" ;;
+esac
+case "$xt_yasimavr_venv_input" in
+    /*) xt_yasimavr_venv_abs=$xt_yasimavr_venv_input ;;
+    *)  xt_yasimavr_venv_abs="$PROJ_DIR/$xt_yasimavr_venv_input" ;;
+esac
 XT_MCU="${XT_MCU:-attiny202}"
 # Soak window for the WDT-liveness mutant. The ATtiny202's fuse-locked WDT
 # period is ~256 ms (WDTCFG=0x06), so this is many periods: an un-pet dog resets
@@ -497,7 +509,7 @@ fi
 # failed gpsim assertion.
 pic_gpsim_run() {
     local work="$1" rc
-    mutation_bounded make -C "$work" pic10f322 >/dev/null 2>&1
+    mutation_bounded "$MUTATION_MAKE" -C "$work" pic10f322 >/dev/null 2>&1
     rc=$?
     [ "$rc" -eq 0 ] || return "$rc"
     local hex="$work/$PIC10F322_MUTATION_HEX"
@@ -673,7 +685,7 @@ run_mutant() {
             ;;
         picsoak)
             label="pic10f322-test-soak"
-            mutation_bounded make -C "$work" pic10f322-test-soak \
+            mutation_bounded "$MUTATION_MAKE" -C "$work" pic10f322-test-soak \
                 PIC10F322_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" \
                 PIC10F322_SOAK_LIVENESS_INTERVAL_MS="$PIC_SOAK_MUT_LIVENESS_MS" \
                 PIC10F322_SOAK_VARIANT=cd4053_simple \
@@ -681,7 +693,7 @@ run_mutant() {
             ;;
         pictarget)
             label="pic10f322-test-target($arg)"
-            mutation_bounded make -C "$work" PIC10F322_TARGET_VARIANT="$arg" pic10f322-test-target >/dev/null 2>&1; rc=$?
+            mutation_bounded "$MUTATION_MAKE" -C "$work" PIC10F322_TARGET_VARIANT="$arg" pic10f322-test-target >/dev/null 2>&1; rc=$?
             ;;
         avrxt)
             # Same shape as `make`, plus the two absolute tool paths the sandbox
@@ -689,9 +701,9 @@ run_mutant() {
             # word splitting on $arg: each entry is optional VAR=value
             # assignments followed by one Make target, never shell metacharacters.
             label="$arg"
-            mutation_bounded make -C "$work" $arg \
-                XT_DFP="$XT_DFP_ABS" \
-                YASIMAVR_VENV="$XT_YASIMAVR_VENV_ABS" >/dev/null 2>&1; rc=$?
+            mutation_bounded "$MUTATION_MAKE" -C "$work" $arg \
+                XT_DFP="$xt_dfp_abs" \
+                YASIMAVR_VENV="$xt_yasimavr_venv_abs" >/dev/null 2>&1; rc=$?
             ;;
         *)
             publish_mutation_result "$stem" errored \
@@ -1168,28 +1180,28 @@ fi
 # single mutant is dispatched. A probe that times out reports as "baseline
 # FAILED", which skips its lane and sets MUT_BASELINE_FAILED -- so it still fails
 # closed under MUTATION_ALLOW_SKIP=0 rather than quietly shrinking the run.
-mutation_bounded make -C "$PIC_BASE" pic10f322 >/dev/null 2>&1
+mutation_bounded "$MUTATION_MAKE" -C "$PIC_BASE" pic10f322 >/dev/null 2>&1
 PIC_BASE_HEX="$PIC_BASE/$PIC10F322_MUTATION_HEX"
 if command -v "$GPSIM" >/dev/null 2>&1 && [ -f "$PIC_BASE_HEX" ]; then
     if mutation_bounded env GPSIM="$GPSIM" "$PROJ_DIR/test/pic/run_gpsim_test.sh" \
             "$PIC_BASE_HEX" 0x3 >/dev/null 2>&1; then
         PIC_GPSIM_OK=1
         echo "gpsim + XC8 present, baseline PASS -> PIC gpsim mutants ENABLED"
-        if command -v c++ >/dev/null 2>&1 \
+        if command -v "$PIC_SOAK_CXX" >/dev/null 2>&1 \
            && [ -f "$PIC_SOAK_GPSIM_INC/sim_context.h" ] \
            && pkg-config --exists glib-2.0 2>/dev/null; then
-            if mutation_bounded make -C "$PIC_BASE" pic10f322-test-soak \
+            if mutation_bounded "$MUTATION_MAKE" -C "$PIC_BASE" pic10f322-test-soak \
                     PIC10F322_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" \
                     PIC10F322_SOAK_LIVENESS_INTERVAL_MS="$PIC_SOAK_MUT_LIVENESS_MS" \
                     PIC10F322_SOAK_VARIANT=cd4053_simple >/dev/null 2>&1; then
                 PIC_SOAK_OK=1
-                echo "gpsim-dev + glib + c++ present, soak baseline PASS -> WDT mutant ENABLED"
+                echo "gpsim-dev + glib + $PIC_SOAK_CXX present, soak baseline PASS -> WDT mutant ENABLED"
             else
                 PIC_SOAK_WHY="baseline FAILED"
                 MUT_BASELINE_FAILED=1
                 echo "soak baseline did not pass cleanly -> WDT (soak) mutant SKIPPED"
             fi
-            if mutation_bounded make -C "$PIC_BASE" pic10f322-test-target-variants >/dev/null 2>&1; then
+            if mutation_bounded "$MUTATION_MAKE" -C "$PIC_BASE" pic10f322-test-target-variants >/dev/null 2>&1; then
                 PIC_TARGET_OK=1
                 echo "target aggregate baseline PASS -> PIC target mutants ENABLED"
             else
@@ -1198,7 +1210,7 @@ if command -v "$GPSIM" >/dev/null 2>&1 && [ -f "$PIC_BASE_HEX" ]; then
                 echo "target aggregate baseline did not pass cleanly -> PIC target mutants SKIPPED"
             fi
         else
-            echo "gpsim-dev/glib/c++ absent -> WDT (soak) mutant SKIPPED"
+            echo "gpsim-dev/glib/$PIC_SOAK_CXX absent -> WDT (soak) mutant SKIPPED"
         fi
     else
         echo "PIC gpsim baseline did not pass -> PIC-shell mutants SKIPPED"
@@ -1234,10 +1246,10 @@ if ! validate_pic10f320_sandbox "$P320_BASE"; then
 fi
 echo "PIC10F320 mutation sandbox helpers: PASS"
 
-if mutation_bounded make -C "$P320_BASE" pic10f320-variants >/dev/null 2>&1 \
+if mutation_bounded "$MUTATION_MAKE" -C "$P320_BASE" pic10f320-variants >/dev/null 2>&1 \
    && command -v "$GPSIM" >/dev/null 2>&1 \
-   && command -v c++ >/dev/null 2>&1 \
-   && [ -f "$PIC_SOAK_GPSIM_INC/sim_context.h" ] \
+   && command -v "$PIC10F320_SOAK_CXX" >/dev/null 2>&1 \
+   && [ -f "$PIC10F320_SOAK_GPSIM_INC/sim_context.h" ] \
    && pkg-config --exists glib-2.0 2>/dev/null; then
     P320_BASELINES_OK=1
     for target in "${PIC10F320_BASE_TARGETS[@]}"; do
@@ -1284,16 +1296,16 @@ if ! validate_avr_xt_sandbox "$XT_BASE"; then
 fi
 echo "AVR-XT mutation sandbox files: PASS"
 
-if [ -f "$XT_DFP_ABS/gcc/dev/$XT_MCU/device-specs/specs-$XT_MCU" ] \
-   && [ -x "$XT_YASIMAVR_VENV_ABS/bin/python" ] \
-   && "$XT_YASIMAVR_VENV_ABS/bin/python" -c "import yasimavr" >/dev/null 2>&1; then
+if [ -f "$xt_dfp_abs/gcc/dev/$XT_MCU/device-specs/specs-$XT_MCU" ] \
+   && [ -x "$xt_yasimavr_venv_abs/bin/python" ] \
+   && "$xt_yasimavr_venv_abs/bin/python" -c "import yasimavr" >/dev/null 2>&1; then
     XT_BASELINES_OK=1
     while IFS= read -r target; do
         # Intentional word splitting: each field is optional VAR=value
         # assignments followed by one Make target, never shell metacharacters.
-        if mutation_bounded make -C "$XT_BASE" $target \
-                XT_DFP="$XT_DFP_ABS" \
-                YASIMAVR_VENV="$XT_YASIMAVR_VENV_ABS" >/dev/null 2>&1; then
+        if mutation_bounded "$MUTATION_MAKE" -C "$XT_BASE" $target \
+                XT_DFP="$xt_dfp_abs" \
+                YASIMAVR_VENV="$xt_yasimavr_venv_abs" >/dev/null 2>&1; then
             echo "baseline $target: PASS"
         else
             echo "baseline $target: FAIL"

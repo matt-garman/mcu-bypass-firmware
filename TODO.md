@@ -88,9 +88,8 @@ These items were identified during a full meta-review of the firmware, design
 doc, and test suite (2026-06-18) and re-verified as open on 2026-07-26. All
 close residual verification gaps that can be addressed in software.
 
-**`scripts/make-release.sh` step 0 cannot be run without starting a release.**
-Added 2026-08-04. **Release-tooling edit — for the owner**, which is why this is
-filed rather than built.
+**~~`scripts/make-release.sh` step 0 cannot be run without starting a release.~~
+DONE (2026-08-05).** Added 2026-08-04 as a release-tooling item for the owner.
 
 *The measured gap.* Lines 364–537 are 175 lines and roughly 35 checks — every
 required tool, both XC8 installs, both DFP device headers, both libgpsim header
@@ -147,6 +146,40 @@ exited early *and* the 175 lines really ran".
 Effort: ~30 min for the mode, ~1 h with the gate. Impact: Medium — no behaviour
 change to a real release, but it makes the one code path that protects a 26-hour
 pipeline runnable in seconds, and testable at all.
+
+Built as specified, with five details found by exercising the real step rather
+than copying it into a test:
+
+- `make release-preflight` needs no version. It uses a non-publishable
+  `v0.0.0-preflight` path only to exercise staging-path validation; supplying
+  `VERSION=vX.Y.Z` additionally checks local/remote tag and output state as
+  warnings. Dirty source warns too. None weakens the production checks.
+- The gate drives the actual script with synthetic selected release inputs and
+  real base host utilities, delegating all 74 `print-<VAR>` reads to the real
+  Makefile. Its fake `make` rejects every non-query goal, fake Git rejects every
+  modifying operation, tracked/nonignored worktree content and the prospective
+  output are compared around every path, and a marker from the final Python
+  version probe proves step 0 reached its end rather than exiting early.
+- The preflight had been checking literal `c++`, while the two PIC lanes build
+  with independently selectable `PIC_SOAK_CXX` / `PIC10F320_SOAK_CXX`. The gate
+  hides the latter while ordinary `c++` remains installed and requires a
+  variable-specific failure. Both selected commands are now checked.
+- A present but non-executable yasimavr interpreter previously skipped its live
+  import and let the precondition list pass. It now fails as an executable input.
+  The same work fixed the later absolute-venv bug: the generated soak wrapper
+  prepended `$REPO_ROOT` unconditionally, turning a supported absolute
+  `YASIMAVR_VENV` into an invalid path after all earlier qualification gates.
+- A final child-gate inventory added selected binutils, analysis, mutation and
+  host-compiler commands; `timeout`, `tar` and `pkg-config`; both PIC XC8/DFP
+  analysis include pairs and INIs; complete simavr/gpsim headers; and every
+  fetched ATtiny202 DFP build input. Files must be regular and nonempty. Live
+  probes cover avr-libc preprocessing, simavr/libelf and both gpsim link paths,
+  selected AWK output, complete yasimavr target modules and PyYAML. PATH-selected
+  tools remain valid where their Make contract permits them, repository-relative
+  paths are normalized, and `test-long`/mutation consume the same configuration.
+  Git status/local-tag/origin/remote failures are reported rather than treated as
+  clean or absent, and Make exports version/options instead of interpolating
+  them into shell syntax.
 
 **~~A severed `-D<MACRO>=$(VAR)` compile-line contract is silent, and the fuse
 checker demonstrates it.~~ DONE for the fuse bytes (2026-08-03); the sweep over

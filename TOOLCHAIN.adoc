@@ -356,6 +356,15 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   # binutils-avr matters here beyond linking: the harness resolves ctx_ with
   # avr-nm and reads coil-pulse widths back out of the image with avr-objdump.
 
+  Before starting the long release pipeline, run `make release-preflight`. It
+  executes the release script's real step 0 — selected compilers/tools, both
+  device packs, simulator headers/import, staging-path writability and executable
+  version probes — and exits before cleaning, building or staging. It also runs
+  short preprocess/link probes for avr-libc, simavr/libelf and both libgpsim C++
+  lanes, so installed command names alone are not sufficient. A version is
+  optional; `make release-preflight VERSION=vX.Y.Z` also reports local/remote tag
+  and output-directory conflicts as warnings.
+
 == Version pinning strategy
 
 Exact versions above were the latest Ubuntu 24.04 LTS packages at the time

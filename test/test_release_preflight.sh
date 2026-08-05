@@ -1,0 +1,603 @@
+#!/usr/bin/env bash
+# Exercise the real release step 0 without starting a release. Every external
+# selected release input is supplied by a throwaway fake toolchain; base host
+# utilities and Make variable queries remain real. The preflight must reach the
+# last version probe, execute no build goal, create no output directory, and
+# leave tracked/nonignored worktree content unchanged on every tested path.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+RELEASE="$ROOT/scripts/make-release.sh"
+MUTATION="$ROOT/test/run_mutation_tests.sh"
+lock_id=$(stat -Lc '%d:%i' "$ROOT") || { printf 'FAIL: could not identify the worktree lock\n' >&2; exit 1; }
+if [ "${_MAKE_SERIAL_LOCK_HELD:-}" != "$lock_id" ]; then
+	exec flock --no-fork "$ROOT/.make.lock" env _MAKE_SERIAL_LOCK_HELD="$lock_id" "$0" "$@"
+fi
+REAL_MAKE=$(command -v make) || { printf 'FAIL: make is required\n' >&2; exit 1; }
+REAL_PYTHON=$(command -v python3) || { printf 'FAIL: python3 is required\n' >&2; exit 1; }
+REAL_GIT=$(command -v git) || { printf 'FAIL: git is required\n' >&2; exit 1; }
+REAL_AWK=$(command -v awk) || { printf 'FAIL: awk is required\n' >&2; exit 1; }
+work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-preflight.XXXXXX")
+fakebin="$work/bin"
+toolchain="$work/toolchain"
+make_log="$work/make.log"
+tool_log="$work/tool.log"
+output="$work/output.log"
+preflight_output="$ROOT/release/v0.0.0-preflight"
+OUTPUT_PATH_OWNED=0
+checks=0
+
+fail() {
+	printf 'FAIL: %s\n' "$*" >&2
+	exit 1
+}
+
+cleanup() {
+	rm -rf "$work"
+	if [ "${OUTPUT_PATH_OWNED:-0}" -eq 1 ]; then
+		rm -rf -- "$preflight_output"
+	fi
+}
+trap cleanup EXIT HUP INT TERM
+
+mkdir -p "$fakebin" \
+	"$toolchain/simavr" \
+	"$toolchain/pic10f322/pic/include/proc" \
+	"$toolchain/pic10f320/pic/include/proc" \
+	"$toolchain/xc8-322-include" \
+	"$toolchain/xc8-320-include" \
+	"$toolchain/pic10f322-gpsim" \
+	"$toolchain/pic10f320-gpsim" \
+	"$toolchain/attiny-dfp/gcc/dev/attiny202/device-specs" \
+	"$toolchain/attiny-dfp/gcc/dev/attiny202/avrxmega3/short-calls" \
+	"$toolchain/attiny-dfp/include/avr" \
+	"$toolchain/yasimavr/bin"
+for fixture in \
+	"$toolchain/simavr/sim_avr.h" \
+	"$toolchain/simavr/sim_elf.h" \
+	"$toolchain/simavr/sim_irq.h" \
+	"$toolchain/simavr/sim_vcd_file.h" \
+	"$toolchain/simavr/avr_ioport.h" \
+	"$toolchain/pic10f322/pic/include/proc/pic10f322.h" \
+	"$toolchain/pic10f320/pic/include/proc/pic10f320.h" \
+	"$toolchain/xc8-322-include/xc.h" \
+	"$toolchain/xc8-320-include/xc.h" \
+	"$toolchain/pic10f322.ini" \
+	"$toolchain/pic10f320.ini" \
+	"$toolchain/attiny-dfp/gcc/dev/attiny202/device-specs/specs-attiny202" \
+	"$toolchain/attiny-dfp/gcc/dev/attiny202/avrxmega3/short-calls/crtattiny202.o" \
+	"$toolchain/attiny-dfp/gcc/dev/attiny202/avrxmega3/short-calls/libattiny202.a" \
+	"$toolchain/attiny-dfp/include/avr/iotn202.h"; do
+	printf 'synthetic preflight fixture\n' > "$fixture"
+done
+for gpsim_inc in "$toolchain/pic10f322-gpsim" "$toolchain/pic10f320-gpsim"; do
+	for gpsim_header in interface.h sim_context.h processor.h pic-processor.h modules.h ioports.h stimuli.h \
+			gpsim_time.h breakpoints.h trigger.h registers.h; do
+		printf 'synthetic preflight fixture\n' > "$gpsim_inc/$gpsim_header"
+	done
+done
+: > "$make_log"
+: > "$tool_log"
+
+cat > "$fakebin/fake-tool" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = --version ]; then
+	printf 'fake release tool 1.0\n'
+fi
+if [[ " $* " == *" -mmcu=attiny13a "* ]] && [[ " $* " == *" -E "* ]]; then
+	[ "${TEST_AVR_LIBC_FAIL:-0}" -eq 0 ] || exit 81
+fi
+if [[ " $* " == *" -lsimavr "* ]]; then
+	[ "${TEST_SIMAVR_LINK_FAIL:-0}" -eq 0 ] || exit 82
+fi
+if [[ " $* " == *" -lgpsim "* ]]; then
+	[ "${TEST_GPSIM_LINK_FAIL:-0}" -eq 0 ] || exit 83
+fi
+exit 0
+EOF
+
+cat > "$fakebin/fake-awk" <<'EOF'
+#!/usr/bin/env bash
+[ "${TEST_AWK_FAIL:-0}" -eq 0 ] || exit 84
+exec "${REAL_AWK:?}" "$@"
+EOF
+
+# The test process owns the real worktree lock. Injection checks use this shim
+# to exercise the outer serialization recipe and its recursive Make without
+# deadlocking on that already-held lock.
+cat > "$fakebin/flock" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = --no-fork ]; then shift; fi
+[ "$#" -ge 2 ] || exit 90
+shift
+exec "$@"
+EOF
+
+cat > "$toolchain/xc8-322" <<'EOF'
+#!/usr/bin/env bash
+printf 'Microchip MPLAB XC8 C Compiler V3.10\n'
+EOF
+cat > "$toolchain/xc8-320" <<'EOF'
+#!/usr/bin/env bash
+printf 'Microchip MPLAB XC8 C Compiler V3.10\n'
+EOF
+
+cat > "$toolchain/yasimavr/bin/python" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = -c ] && [[ "${2:-}" == *'DeviceDescriptor'* ]] \
+		&& [[ "${2:-}" == *'XT_DeviceBuilder'* ]] && [[ "${2:-}" == *'dev_tiny_0series'* ]] \
+		&& [[ "${2:-}" == *'yasimavr.lib import core'* ]]; then
+	[ "${TEST_YASIMAVR_IMPORT_FAIL:-0}" -eq 0 ] || exit 85
+	printf 'yasimavr-import\n' >> "${TOOL_LOG:?}"
+	exit 0
+fi
+printf 'unexpected yasimavr interpreter arguments: %s\n' "$*" >&2
+exit 9
+EOF
+
+cat > "$fakebin/python3" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = -c ] && [ "${2:-}" = "import yaml" ]; then
+	[ "${TEST_PYYAML_FAIL:-0}" -eq 0 ] || exit 1
+	printf 'yaml-import\n' >> "${TOOL_LOG:?}"
+	exit 0
+fi
+if [ "${1:-}" = --version ]; then
+	printf 'python-version\n' >> "${TOOL_LOG:?}"
+fi
+exec "${REAL_PYTHON:?}" "$@"
+EOF
+
+cat > "$fakebin/gpg" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+	--list-secret-keys) exit 1 ;;
+	--version) printf 'gpg fake 1.0\n'; exit 0 ;;
+	*) exit 0 ;;
+esac
+EOF
+
+cat > "$fakebin/git" <<'EOF'
+#!/usr/bin/env bash
+if [ "${TEST_GIT_STATUS_FAIL:-0}" -eq 1 ] && [ "${1:-}" = status ]; then
+	exit 71
+fi
+if [ "${TEST_GIT_CLEAN:-0}" -eq 1 ] && [ "${1:-}" = status ]; then
+	exit 0
+fi
+if [ "${1:-}" = rev-parse ] && [ "${2:-}" = -q ] \
+		&& [ "${TEST_GIT_LOCAL_TAG_FAIL:-0}" -eq 1 ]; then
+	exit 74
+fi
+if [ "${1:-}" = remote ] && [ "${2:-}" = get-url ] && [ "${3:-}" = origin ]; then
+	[ "${TEST_GIT_REMOTE_CONFIG_FAIL:-0}" -eq 0 ] || exit 73
+	[ "${TEST_GIT_NO_ORIGIN:-0}" -eq 0 ] || exit 2
+	printf 'https://invalid.example/preflight.git\n'
+	exit 0
+fi
+if [ "${1:-}" = ls-remote ]; then
+	[ "${TEST_GIT_REMOTE_FAIL:-0}" -eq 0 ] || exit 72
+	exit 2
+fi
+case "${1:-}" in
+	check-ref-format|rev-parse|status) exec "${REAL_GIT:?}" "$@" ;;
+	*) printf 'forbidden Git invocation: %s\n' "$*" >> "${TOOL_LOG:?}"; exit 96 ;;
+esac
+EOF
+
+cat > "$fakebin/pkg-config" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}:${2:-}" in
+	--exists:glib-2.0) exit 0 ;;
+	--cflags:glib-2.0) printf '%s\n' '-I/fake/glib'; exit 0 ;;
+	*) exit 1 ;;
+esac
+EOF
+
+for tool in avr-nm avr-objdump pic-cxx-322 pic-cxx-320; do
+	cp "$fakebin/fake-tool" "$fakebin/$tool"
+done
+cp "$toolchain/xc8-322" "$fakebin/xc8-322-path"
+chmod 750 "$fakebin"/* "$toolchain/xc8-322" "$toolchain/xc8-320" \
+	"$toolchain/yasimavr/bin/python"
+
+# The release script asks Make only for print-<VAR> values before preflight exits.
+# Delegate those reads to the real Makefile with a complete synthetic toolchain;
+# reject any build/clean goal so a misplaced exit cannot score as a pass.
+cat > "$fakebin/make" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$#" -eq 2 ] && [ "$1" = -s ] || {
+	printf 'forbidden non-query Make invocation: %s\n' "$*" >> "${MAKE_LOG:?}"
+	exit 97
+}
+case "$2" in
+	print-*) goal=$2 ;;
+	*)
+		printf 'forbidden non-query Make invocation: %s\n' "$*" >> "${MAKE_LOG:?}"
+		exit 97
+		;;
+esac
+printf '%s\n' "$goal" >> "${MAKE_LOG:?}"
+exec "${REAL_MAKE:?}" --no-print-directory -s -C "${FAKE_REPO_ROOT:?}" \
+	CC=fake-tool OBJCOPY=fake-tool SIZE=fake-tool HOSTCC=fake-tool \
+	OBJDUMP="${TEST_OBJDUMP:-fake-tool}" READELF=fake-tool \
+	IHEX_VALIDATOR="${TEST_IHEX_VALIDATOR:-${FAKE_BIN:?}/fake-tool}" AWK="${FAKE_BIN:?}/fake-awk" \
+	CLANG=fake-tool CLANG_TIDY=fake-tool CPPCHECK=fake-tool CBMC=fake-tool \
+	GCOV=fake-tool GPSIM=fake-tool \
+	PIC_CC="${TEST_PIC_CC:-${FAKE_TOOLCHAIN:?}/xc8-322}" \
+	PIC10F320_CC="${FAKE_TOOLCHAIN:?}/xc8-320" \
+	PIC_DFP="${FAKE_TOOLCHAIN:?}/pic10f322" \
+	PIC10F320_DFP="${FAKE_TOOLCHAIN:?}/pic10f320" \
+	PIC_XC8_INCLUDE="${FAKE_TOOLCHAIN:?}/xc8-322-include" \
+	PIC10F320_XC8_INCLUDE="${FAKE_TOOLCHAIN:?}/xc8-320-include" \
+	PIC10F322_DFP_INCLUDE="${TEST_PIC10F322_DFP_INCLUDE:-${FAKE_TOOLCHAIN:?}/pic10f322/pic/include}" \
+	PIC10F320_DFP_INCLUDE="${TEST_PIC10F320_DFP_INCLUDE:-${FAKE_TOOLCHAIN:?}/pic10f320/pic/include}" \
+	PIC10F322_DEVICE_INI="${FAKE_TOOLCHAIN:?}/pic10f322.ini" \
+	PIC10F320_DEVICE_INI="${FAKE_TOOLCHAIN:?}/pic10f320.ini" \
+	PIC10F320_HOST_CC=fake-tool \
+	SIMAVR_INC="${FAKE_TOOLCHAIN:?}/simavr" \
+	XT_DFP="${FAKE_TOOLCHAIN:?}/attiny-dfp" \
+	YASIMAVR_VENV="${TEST_YASIMAVR_VENV:-${FAKE_TOOLCHAIN:?}/yasimavr}" \
+	PIC_SOAK_CXX="${TEST_PIC_SOAK_CXX:-pic-cxx-322}" \
+	PIC10F320_SOAK_CXX="${TEST_PIC10F320_SOAK_CXX:-pic-cxx-320}" \
+	PIC_SOAK_GPSIM_INC="${FAKE_TOOLCHAIN:?}/pic10f322-gpsim" \
+	PIC10F320_SOAK_GPSIM_INC="${FAKE_TOOLCHAIN:?}/pic10f320-gpsim" \
+	ANALYZE_CMD="${TEST_ANALYZE_CMD:-fake-tool --checks=fake}" \
+	"$goal"
+EOF
+chmod 750 "$fakebin/make"
+
+[ ! -e "$preflight_output" ] \
+	|| fail "reserved preflight output fixture already exists: $preflight_output"
+OUTPUT_PATH_OWNED=1
+
+run_preflight() {
+	local status_before status_after output_existed_before output_existed_after rc
+	status_before=$(tree_snapshot) || fail "could not snapshot the working tree"
+	[ -e "$preflight_output" ] && output_existed_before=1 || output_existed_before=0
+	if (
+		export PATH="$fakebin:$PATH"
+		export TMPDIR="$work"
+		export REAL_MAKE REAL_PYTHON REAL_GIT REAL_AWK
+		export FAKE_REPO_ROOT="$ROOT" FAKE_TOOLCHAIN="$toolchain"
+		export FAKE_BIN="$fakebin"
+		export MAKE_LOG="$make_log" TOOL_LOG="$tool_log"
+		export _MAKE_SERIAL_LOCK_HELD="$lock_id"
+		"$RELEASE" --preflight "$@"
+	); then
+		rc=0
+	else
+		rc=$?
+	fi
+	status_after=$(tree_snapshot) || fail "could not resnapshot the working tree"
+	[ -e "$preflight_output" ] && output_existed_after=1 || output_existed_after=0
+	[ "$status_after" = "$status_before" ] \
+		|| fail "preflight changed tracked/nonignored worktree content"
+	[ "$output_existed_after" -eq "$output_existed_before" ] \
+		|| fail "preflight changed the prospective output path"
+	if grep -Fq 'forbidden non-query Make invocation' "$make_log"; then
+		fail "preflight reached a build or clean Make goal"
+	fi
+	if grep -Fq 'forbidden Git invocation' "$tool_log"; then
+		fail "preflight attempted a non-read-only Git operation"
+	fi
+	return "$rc"
+}
+
+tree_snapshot() {
+	local rel mode digest target
+	while IFS= read -r -d '' rel; do
+		mode=$(stat -c '%a' "$ROOT/$rel") || return 1
+		if [ -L "$ROOT/$rel" ]; then
+			target=$(readlink "$ROOT/$rel") || return 1
+			printf 'L %q %s %q\n' "$rel" "$mode" "$target"
+		elif [ -f "$ROOT/$rel" ]; then
+			digest=$(sha256sum "$ROOT/$rel") || return 1
+			printf 'F %q %s %s\n' "$rel" "$mode" "${digest%% *}"
+		fi
+	done < <(git -C "$ROOT" ls-files -co --exclude-standard -z | sort -z)
+}
+
+assert_no_release_scratch() {
+	local -a leftovers
+	shopt -s nullglob
+	leftovers=("$work"/mcu-release.*)
+	shopt -u nullglob
+	[ "${#leftovers[@]}" -eq 0 ] \
+		|| fail "preflight leaked release scratch: ${leftovers[*]}"
+}
+
+run_preflight >"$output" 2>&1 \
+	|| fail "valid preflight failed: $(<"$output")"
+grep -Fq 'preflight passed: this host can start a release.' "$output" \
+	|| fail "preflight exited without its terminal success record"
+grep -Fq 'no release version supplied; tag availability was not checked.' "$output" \
+	|| fail "versionless preflight did not state its tag-check scope"
+grep -Fxq 'python-version' "$tool_log" \
+	|| fail "preflight exited before the final executable-version probe"
+grep -Fxq 'yasimavr-import' "$tool_log" \
+	|| fail "preflight did not execute a live yasimavr import"
+grep -Fxq 'yaml-import' "$tool_log" \
+	|| fail "preflight did not execute a live PyYAML import"
+[ ! -e "$preflight_output" ] \
+	|| fail "preflight created its prospective release output directory"
+query_count=$(wc -l < "$make_log")
+[ "$query_count" -eq 74 ] \
+	|| fail "preflight made $query_count Makefile queries, expected 74"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+# Independent missing capabilities are aggregated exactly as the real preflight
+# aggregates its report. One run proves every diagnostic without paying for 74
+# real Makefile parses per missing input.
+if TEST_AVR_LIBC_FAIL=1 TEST_SIMAVR_LINK_FAIL=1 TEST_AWK_FAIL=1 \
+		TEST_PIC_SOAK_CXX=missing-selected-pic10f322-cxx \
+		TEST_PIC10F320_SOAK_CXX=missing-selected-pic10f320-cxx \
+		TEST_YASIMAVR_IMPORT_FAIL=1 TEST_PYYAML_FAIL=1 \
+		TEST_OBJDUMP=missing-selected-objdump TEST_IHEX_VALIDATOR=fake-tool \
+		TEST_ANALYZE_CMD='missing-selected-analysis --checks=fake' \
+		AVR_NM=missing-selected-avr-nm MUTATION_MAKE=missing-selected-make \
+		run_preflight >"$output" 2>&1; then
+	fail "preflight accepted an aggregated set of missing release capabilities"
+fi
+for diagnostic in \
+	'avr-libc headers' \
+	'simavr header/link capability' \
+	'AWK must execute a basic program' \
+	'missing-selected-pic10f322-cxx' \
+	'selected by PIC_SOAK_CXX' \
+	'missing-selected-pic10f320-cxx' \
+	'selected by PIC10F320_SOAK_CXX' \
+	'yasimavr target-module imports' \
+	'PyYAML' \
+	'missing-selected-objdump' \
+	'nonempty executable Intel HEX validator file' \
+	'missing-selected-analysis' \
+	'missing-selected-avr-nm' \
+	'missing-selected-make'; do
+	grep -Fq "$diagnostic" "$output" \
+		|| fail "aggregated preflight failure omitted diagnostic: $diagnostic"
+done
+assert_no_release_scratch
+checks=$((checks + 1))
+
+# Both independently selected C++/header lanes must compile and link the exact
+# gpsim header surface consumed by the target harnesses.
+if TEST_GPSIM_LINK_FAIL=1 run_preflight >"$output" 2>&1; then
+	fail "preflight accepted unlinkable gpsim toolchains"
+fi
+grep -Fq 'PIC10F322 gpsim compile/link capability' "$output" \
+	|| fail "failed PIC10F322 gpsim link probe lacked its lane-specific diagnostic"
+grep -Fq 'PIC10F320 gpsim compile/link capability' "$output" \
+	|| fail "failed PIC10F320 gpsim link probe lacked its lane-specific diagnostic"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+# Existence is insufficient for an interpreter. The old precheck skipped the
+# import when -x was false, then reported that every tool was present.
+chmod 640 "$toolchain/yasimavr/bin/python"
+if run_preflight >"$output" 2>&1; then
+	fail "preflight accepted a non-executable yasimavr interpreter"
+fi
+grep -Fq 'executable patched yasimavr interpreter' "$output" \
+	|| fail "non-executable yasimavr failed without the executable-path diagnostic"
+chmod 750 "$toolchain/yasimavr/bin/python"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+# The ATtiny device spec alone is not a usable DFP; every mandatory build also
+# consumes a REGULAR part avr/io header. A same-name directory must not pass.
+rm "$toolchain/attiny-dfp/include/avr/iotn202.h"
+mkdir "$toolchain/attiny-dfp/include/avr/iotn202.h"
+if run_preflight >"$output" 2>&1; then
+	fail "preflight accepted a directory as the ATtiny_DFP I/O header"
+fi
+grep -Fq 'ATtiny_DFP I/O header' "$output" \
+	|| fail "non-file ATtiny I/O header failed without its specific diagnostic"
+rmdir "$toolchain/attiny-dfp/include/avr/iotn202.h"
+printf 'synthetic preflight fixture\n' > "$toolchain/attiny-dfp/include/avr/iotn202.h"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+# A regular path is still not a usable fetched pack artifact when extraction was
+# truncated to zero bytes. The runtime and device library are linker inputs even
+# though the Makefile's local skip probe historically checked only spec/header.
+: > "$toolchain/attiny-dfp/gcc/dev/attiny202/avrxmega3/short-calls/crtattiny202.o"
+: > "$toolchain/pic10f320-gpsim/stimuli.h"
+if TEST_PIC10F320_DFP_INCLUDE="$work/missing-pic10f320-analysis-include" \
+		run_preflight >"$output" 2>&1; then
+	fail "preflight accepted truncated target toolchain inputs"
+fi
+grep -Fq 'ATtiny_DFP C runtime' "$output" \
+	|| fail "empty ATtiny runtime failed without its specific diagnostic"
+grep -Fq 'PIC10F320 analysis header' "$output" \
+	|| fail "missing selected PIC10F320 analysis header lacked its diagnostic"
+grep -Fq 'PIC10F320 gates; PIC10F320_SOAK_GPSIM_INC=' "$output" \
+	|| fail "empty selected PIC10F320 gpsim header lacked its diagnostic"
+printf 'synthetic preflight fixture\n' \
+	> "$toolchain/attiny-dfp/gcc/dev/attiny202/avrxmega3/short-calls/crtattiny202.o"
+printf 'synthetic preflight fixture\n' > "$toolchain/pic10f320-gpsim/stimuli.h"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+# A selected XC8 command may be a PATH name, exactly as the Make recipes allow.
+TEST_PIC_CC=xc8-322-path run_preflight >"$output" 2>&1 \
+	|| fail "preflight rejected a PATH-selected executable PIC_CC: $(<"$output")"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+if TEST_GIT_STATUS_FAIL=1 run_preflight >"$output" 2>&1; then
+	fail "preflight accepted a failed git status as a clean tree"
+fi
+grep -Fq 'could not inspect working-tree status' "$output" \
+	|| fail "failed git status did not fail closed by name"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+TEST_GIT_LOCAL_TAG_FAIL=1 run_preflight v99.0.0 >"$output" 2>&1 \
+	|| fail "versioned preflight treated a failed local-tag query as a host-capability failure"
+grep -Fq 'could not check local tag v99.0.0 (git rev-parse exited 74).' "$output" \
+	|| fail "versioned preflight silently treated a local-tag query failure as absence"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+TEST_GIT_REMOTE_CONFIG_FAIL=1 run_preflight v99.0.0 >"$output" 2>&1 \
+	|| fail "versioned preflight treated failed origin inspection as a host-capability failure"
+grep -Fq 'could not inspect origin for tag v99.0.0 (git remote get-url exited 73).' "$output" \
+	|| fail "versioned preflight silently treated failed origin inspection as no remote"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+TEST_GIT_REMOTE_FAIL=1 run_preflight v99.0.0 >"$output" 2>&1 \
+	|| fail "versioned preflight treated an unavailable remote as a host-capability failure"
+grep -Fq 'could not check tag v99.0.0 on origin (git ls-remote exited 72).' "$output" \
+	|| fail "versioned preflight silently treated a remote failure as tag absence"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+TEST_GIT_NO_ORIGIN=1 run_preflight v99.0.0 >"$output" 2>&1 \
+	|| fail "versioned preflight rejected a repository without origin: $(<"$output")"
+if grep -Fq 'could not inspect origin' "$output"; then
+	fail "an absent origin was misreported as an operational failure"
+fi
+assert_no_release_scratch
+checks=$((checks + 1))
+
+# Existing output is publishing state. Even a regular-file conflict must warn
+# without changing the host-capability verdict; the real release still rejects.
+printf 'conflicting release leaf\n' > "$preflight_output"
+run_preflight >"$output" 2>&1 \
+	|| fail "preflight turned an existing output warning into a capability failure: $(<"$output")"
+grep -Fq 'already exists; a real release would refuse to overwrite it.' "$output" \
+	|| fail "existing preflight output did not produce its warning"
+rm "$preflight_output"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+if run_preflight --dry-run >"$output" 2>&1; then
+	fail "preflight accepted the contradictory --dry-run mode"
+fi
+grep -Fq -- '--preflight and --dry-run are mutually exclusive' "$output" \
+	|| fail "preflight/dry-run conflict failed for the wrong reason"
+checks=$((checks + 1))
+
+# Pin both consumers of an absolute venv. Step 0 above dynamically proves the
+# absolute interpreter is found and imported; these assertions cover the two
+# later paths that previously prepended the repository root to it.
+grep -Fq 'export YASIMAVR_VENV="$(dirname "$(dirname "$YASIMAVR_PY_ABS")")"' "$RELEASE" \
+	|| fail "ATtiny202 target qualification does not preserve an absolute yasimavr venv"
+grep -Fq 'printf '\''  %q %q %q\n'\'' "$YASIMAVR_PY_ABS"' "$RELEASE" \
+	|| fail "ATtiny202 release soak wrapper does not execute the absolute yasimavr interpreter"
+checks=$((checks + 1))
+
+grep -Fq 'command -v "$PIC_SOAK_CXX"' "$MUTATION" \
+	&& grep -Fq 'command -v "$PIC10F320_SOAK_CXX"' "$MUTATION" \
+	&& grep -Fq '${XT_DFP:-${XT_DFP_ABS:-third_party/attiny_dfp}}' "$MUTATION" \
+	&& grep -Fq '${YASIMAVR_VENV:-${XT_YASIMAVR_VENV_ABS:-third_party/yasimavr/venv}}' "$MUTATION" \
+	&& grep -Fq 'PIC10F320_SOAK_GPSIM_INC="${PIC10F320_SOAK_GPSIM_INC:-$PIC_SOAK_GPSIM_INC}"' "$MUTATION" \
+	|| fail "mutation qualification does not consume the selected PIC/AVR-XT tool paths"
+grep -Fq 'PIC10F320_SOAK_GPSIM_INC="$PIC10F320_SOAK_GPSIM_INC"' "$RELEASE" \
+	|| fail "release does not pass the selected PIC10F320 gpsim headers to test-long"
+if grep -Eq '^[[:space:]]*mutation_bounded[[:space:]]+make[[:space:]]+-C' "$MUTATION"; then
+	fail "a specialized mutation branch bypasses selected MUTATION_MAKE"
+fi
+checks=$((checks + 1))
+
+# The Make target is intentionally versionless by default. Ask Make for the
+# recipe without running it, under the already-held lock path used by recursion.
+target_recipe=$(
+	export _MAKE_SERIAL_LOCK_HELD="$lock_id"
+	PATH="$fakebin:$PATH" "$REAL_MAKE" --no-print-directory -n -C "$ROOT" \
+		CC=fake-tool release-preflight
+)
+[[ "$target_recipe" == *'./scripts/make-release.sh --preflight'* ]] \
+	|| fail "make release-preflight does not route to the script's preflight mode"
+checks=$((checks + 1))
+
+# VERSION reaches the recipe through Make's exported command-line environment,
+# never by textual interpolation into shell syntax.
+shell_injection_marker="$work/version-shell-injection-ran"
+make_injection_marker="$work/version-make-injection-ran"
+if (
+	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL _MAKE_SERIAL_LOCK_HELD
+	export PATH="$fakebin:$PATH"
+	export REAL_MAKE REAL_PYTHON REAL_GIT REAL_AWK
+	export FAKE_REPO_ROOT="$ROOT" FAKE_TOOLCHAIN="$toolchain" FAKE_BIN="$fakebin"
+	export MAKE_LOG="$make_log" TOOL_LOG="$tool_log"
+	"$REAL_MAKE" --no-print-directory -C "$ROOT" CC=fake-tool MAKE_COMMAND="$REAL_MAKE" \
+		release-preflight VERSION="v1.2.3\$(shell touch $make_injection_marker)"
+) >"$output" 2>&1; then
+	fail "make release-preflight accepted a Make-function VERSION"
+fi
+[ ! -e "$make_injection_marker" ] \
+	|| fail "make release-preflight expanded a Make function in VERSION"
+grep -Fq 'must not contain dollar signs' "$output" \
+	|| fail "Make-function VERSION failed for the wrong reason"
+checks=$((checks + 1))
+
+if (
+	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL _MAKE_SERIAL_LOCK_HELD
+	export PATH="$fakebin:$PATH"
+	"$REAL_MAKE" --no-print-directory -C "$ROOT" MAKE_COMMAND="$REAL_MAKE" \
+		release-preflight VERSION="v1.2.3; touch $shell_injection_marker"
+) >"$output" 2>&1; then
+	fail "make release-preflight accepted a shell-metacharacter VERSION"
+fi
+[ ! -e "$shell_injection_marker" ] \
+	|| fail "make release-preflight interpolated VERSION into shell syntax"
+grep -Fq "is not vX.Y.Z" "$output" \
+	|| fail "shell-metacharacter VERSION failed for the wrong reason"
+checks=$((checks + 1))
+
+release_args_shell_marker="$work/release-args-shell-injection-ran"
+release_args_make_marker="$work/release-args-make-injection-ran"
+if (
+	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL _MAKE_SERIAL_LOCK_HELD
+	export PATH="$fakebin:$PATH"
+	"$REAL_MAKE" --no-print-directory -C "$ROOT" MAKE_COMMAND="$REAL_MAKE" \
+		release VERSION=v1.2.3 RELEASE_ARGS="\$(shell touch $release_args_make_marker)"
+) >"$output" 2>&1; then
+	fail "make release accepted a Make-function RELEASE_ARGS"
+fi
+[ ! -e "$release_args_make_marker" ] \
+	|| fail "make release expanded a Make function in RELEASE_ARGS"
+grep -Fq 'must not contain dollar signs' "$output" \
+	|| fail "Make-function RELEASE_ARGS failed for the wrong reason"
+checks=$((checks + 1))
+
+if (
+	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL _MAKE_SERIAL_LOCK_HELD
+	export PATH="$fakebin:$PATH"
+	"$REAL_MAKE" --no-print-directory -C "$ROOT" MAKE_COMMAND="$REAL_MAKE" \
+		release VERSION=v1.2.3 \
+		RELEASE_ARGS="--soak-duration-ms 0; touch $release_args_shell_marker"
+) >"$output" 2>&1; then
+	fail "make release accepted a shell-metacharacter RELEASE_ARGS"
+fi
+[ ! -e "$release_args_shell_marker" ] \
+	|| fail "make release interpolated RELEASE_ARGS into shell syntax"
+grep -Fq 'RELEASE_ARGS may contain options only' "$output" \
+	|| fail "shell-metacharacter RELEASE_ARGS failed for the wrong reason"
+checks=$((checks + 1))
+
+: > "$make_log"
+if (
+	export PATH="$fakebin:$PATH" TEST_GIT_CLEAN=1
+	export REAL_MAKE REAL_PYTHON REAL_GIT REAL_AWK
+	export FAKE_REPO_ROOT="$ROOT" FAKE_TOOLCHAIN="$toolchain" FAKE_BIN="$fakebin"
+	export MAKE_LOG="$make_log" TOOL_LOG="$tool_log"
+	"$REAL_MAKE" --no-print-directory -C "$ROOT" CC=fake-tool \
+		release VERSION=v1.2.3 RELEASE_ARGS=v9.9.9
+) >"$output" 2>&1; then
+	fail "RELEASE_ARGS silently overrode VERSION with a positional value"
+fi
+grep -Fq 'RELEASE_ARGS may contain options only' "$output" \
+	|| fail "positional RELEASE_ARGS failed without its specific diagnostic"
+if grep -Fq 'forbidden non-query Make invocation' "$make_log"; then
+	fail "positional RELEASE_ARGS crossed the release build boundary"
+fi
+checks=$((checks + 1))
+
+printf 'release preflight validation: %d checks, 0 failures (%d Makefile queries)\n' \
+	"$checks" "$query_count"

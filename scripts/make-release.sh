@@ -52,8 +52,11 @@
 #
 # USAGE
 #   scripts/make-release.sh [options] <version>
-#     <version>                vX.Y.Z (semantic version, leading 'v')
+#     <version>                vX.Y.Z (semantic version, leading 'v'); required
+#                              except in --preflight mode
 #   options:
+#     --preflight              run every release capability/precondition check,
+#                              then exit before cleaning, building, or staging
 #     --dry-run                rehearse the whole pipeline with a SHORT soak
 #                              (does not produce a real release; output is
 #                              clearly marked and no git commands are emitted)
@@ -99,7 +102,11 @@ die()     { printf '%sFATAL%s %s\n' "$RED" "$RST" "$*" >&2; exit 1; }
 # ----------------------------------------------------------------------------
 # Argument parsing
 # ----------------------------------------------------------------------------
+MAKE_VERSION=${VERSION-}
+MAKE_RELEASE_ARGS=${RELEASE_ARGS-}
 VERSION=""
+VERSION_WAS_SUPPLIED=0
+PREFLIGHT=0
 DRY_RUN=0
 RELEASE_MODE=production
 # Canonical project URL. MANIFEST.md is used verbatim as the GitHub Release
@@ -113,22 +120,51 @@ SOAK_DURATION_MS=$MIN_RELEASE_SOAK_MS
 SOAK_LIVENESS_INTERVAL_MS=60000
 JOBS=""                            # empty => all combinations
 OUTPUT_DIR=""
+MAKE_RELEASE_ARGS_ACTIVE=0
 
 usage() { sed -n '2,200p' "$0" | sed -n '/^# USAGE/,/^$/p' | sed 's/^# \{0,1\}//'; }
 
+# The Make target exports RELEASE_ARGS rather than interpolating it into shell
+# syntax. Split its documented whitespace-delimited option list without eval;
+# direct script invocations already provide exact argv and ignore this channel.
+if [ "$#" -eq 0 ] && [ -n "$MAKE_RELEASE_ARGS" ]; then
+	IFS=$' \t\n' read -r -d '' -a make_release_argv \
+		< <(printf '%s\0' "$MAKE_RELEASE_ARGS")
+	set -- "${make_release_argv[@]}"
+	MAKE_RELEASE_ARGS_ACTIVE=1
+fi
+
 while [ $# -gt 0 ]; do
 	case "$1" in
+		--preflight)          PREFLIGHT=1; shift ;;
 		--dry-run)            DRY_RUN=1; shift ;;
 		--soak-duration-ms)   SOAK_DURATION_MS="${2:?--soak-duration-ms needs a value}"; shift 2 ;;
 		--jobs)               JOBS="${2:?--jobs needs a value}"; shift 2 ;;
 		--output-dir)         OUTPUT_DIR="${2:?--output-dir needs a value}"; shift 2 ;;
 		-h|--help)            usage; exit 0 ;;
 		-*)                   die "unknown option: $1 (try --help)" ;;
-		*)                    [ -z "$VERSION" ] || die "unexpected extra argument: $1"; VERSION="$1"; shift ;;
+		*)                    [ "$MAKE_RELEASE_ARGS_ACTIVE" -eq 0 ] \
+				|| die "RELEASE_ARGS may contain options only, not positional value: $1"
+			[ -z "$VERSION" ] || die "unexpected extra argument: $1"; VERSION="$1"; VERSION_WAS_SUPPLIED=1; shift ;;
 	esac
 done
 
-[ -n "$VERSION" ] || die "no <version> given (e.g. v1.0.0). Try --help."
+[ "$PREFLIGHT" -eq 0 ] || [ "$DRY_RUN" -eq 0 ] \
+	|| die "--preflight and --dry-run are mutually exclusive"
+if [ "$VERSION_WAS_SUPPLIED" -eq 0 ] && [ -n "$MAKE_VERSION" ]; then
+	# GNU Make exports command-line variables to recipes. Reading VERSION from
+	# that environment keeps arbitrary bytes out of the recipe's shell syntax;
+	# semantic/ref validation below still treats it exactly like a positional arg.
+	VERSION=$MAKE_VERSION
+	VERSION_WAS_SUPPLIED=1
+fi
+if [ -z "$VERSION" ]; then
+	[ "$PREFLIGHT" -eq 1 ] \
+		|| die "no <version> given (e.g. v1.0.0). Try --help."
+	# Capability checks need a safe prospective staging path, but not a release
+	# number. A caller that wants tag/output-state warnings can still supply one.
+	VERSION=v0.0.0-preflight
+fi
 [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
 	|| die "version '$VERSION' is not vX.Y.Z (optionally -suffix)"
 git check-ref-format "refs/tags/$VERSION" >/dev/null 2>&1 \
@@ -187,7 +223,28 @@ declare -F release_jobs_cap >/dev/null \
 source "$REPO_ROOT/scripts/release-signing-policy.sh" \
 	|| die "release signing policy could not be loaded"
 
+# GNU Make expands a few parse-time shell expressions through the platform awk
+# before AWK itself can be read from Makefile truth. Diagnose that bootstrap
+# prerequisite explicitly instead of failing inside an opaque print-<VAR> query.
+command -v awk >/dev/null 2>&1 \
+	|| die "awk is required to read release configuration from the Makefile"
+
 mkv() { make -s print-"$1"; }      # echo one Makefile variable
+path_from_repo() {
+	case "$1" in
+		/*) printf '%s\n' "$1" ;;
+		*)  printf '%s/%s\n' "$REPO_ROOT" "$1" ;;
+	esac
+}
+tool_from_repo() {
+	case "$1" in
+		*/*) path_from_repo "$1" ;;
+		*)   printf '%s\n' "$1" ;;
+	esac
+}
+
+AWK=$(mkv AWK)
+AWK=$(tool_from_repo "$AWK")
 
 VARIANTS=$(mkv VARIANTS)           # cd4053_simple cd4053_with_mute tq2_l2_5v_relay
 TINYX5=$(mkv TINYX5)               # 85 45      (the family's internal indexing)
@@ -211,14 +268,15 @@ AVR_BUILD_DIR=$(mkv AVR_BUILD_DIR) # build_avr_classic
 PIC10F322_BUILD_DIR=$(mkv PIC10F322_BUILD_DIR) # build_pic10f322
 PIC10F322_TAG=$(mkv PIC10F322_TAG)             # pic10f322
 PIC10F322_XTAL=$(mkv PIC10F322_XTAL)           # 2000000UL  (_XTAL_FREQ; drives __delay_ms)
-# Human clock string for the manifest, derived from PIC10F322_XTAL so it can never
-# drift from the firmware's asserted _XTAL_FREQ / OSCCON IRCF setting.
-PIC10F322_CLK_MHZ=$(awk -v h="${PIC10F322_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
+# The manifest clock string is derived after preflight validates the selected
+# AWK, so it cannot drift from this firmware clock source.
 PIC10F322_GPSIM_PROC=$(mkv PIC10F322_GPSIM_PROC)
 LFUSE=$(mkv ATTINY13A_LFUSE);     HFUSE=$(mkv ATTINY13A_HFUSE)
 LFUSE_X5=$(mkv TINYX5_LFUSE); HFUSE_X5=$(mkv TINYX5_HFUSE)
 PIC_CC=$(mkv PIC_CC)
 PIC_DFP=$(mkv PIC_DFP)
+PIC_CC=$(tool_from_repo "$PIC_CC")
+PIC_DFP=$(path_from_repo "$PIC_DFP")
 AVRDUDE_PART=$(mkv ATTINY13A_AVRDUDE_PART)   # t13
 declare -A AVRDUDE_PART_X5
 for n in $TINYX5; do AVRDUDE_PART_X5[$n]=$(mkv part_"$n"); done
@@ -232,11 +290,12 @@ XT_BUILD_DIR=$(mkv XT_BUILD_DIR)   # build_avr_xt
 XT_TAG=$(mkv XT_TAG)               # attiny202
 XT_MCU=$(mkv XT_MCU)               # attiny202
 XT_DFP=$(mkv XT_DFP)               # third_party/attiny_dfp
+XT_DFP=$(path_from_repo "$XT_DFP")
 XT_F_CPU=$(mkv XT_F_CPU)           # 2000000UL
-XT_CLK_MHZ=$(awk -v h="${XT_F_CPU//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
 XT_FLASH_BYTES=$(mkv XT_FLASH_BYTES)
 XT_VARIANTS=$(mkv XT_VARIANTS_SUPPORTED)     # same three names as VARIANTS
 YASIMAVR_PY=$(mkv YASIMAVR_PY)     # third_party/yasimavr/venv/bin/python
+YASIMAVR_PY_ABS=$(path_from_repo "$YASIMAVR_PY")
 XT_AVRDUDE_PART=$(mkv XT_AVRDUDE_PART)       # t202
 XT_PROGRAMMER=$(mkv XT_PROGRAMMER)           # serialupdi
 # The seven AVR8X fuse bytes, in the datasheet's memory order. Unlike the classic
@@ -262,10 +321,11 @@ PIC10F320_BUILD_DIR=$(mkv PIC10F320_BUILD_DIR)     # build_pic10f320
 PIC10F320_TAG=$(mkv PIC10F320_TAG)                 # pic10f320
 PIC10F320_VARIANTS=$(mkv PIC10F320_VARIANTS_ALL)   # same three names as VARIANTS
 PIC10F320_XTAL=$(mkv PIC10F320_XTAL)
-PIC10F320_CLK_MHZ=$(awk -v h="${PIC10F320_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
 PIC10F320_FLASH_WORDS=$(mkv PIC10F320_FLASH_WORDS) # 256
 PIC10F320_CC=$(mkv PIC10F320_CC)
 PIC10F320_DFP=$(mkv PIC10F320_DFP)
+PIC10F320_CC=$(tool_from_repo "$PIC10F320_CC")
+PIC10F320_DFP=$(path_from_repo "$PIC10F320_DFP")
 
 # --- host / AVR / analysis tools, read through their Makefile variables -------
 # The preconditions below assert these, and the manifest records their versions.
@@ -278,15 +338,70 @@ HOST_CC=$(mkv HOSTCC)
 AVR_CC=$(mkv CC)
 AVR_OBJCOPY=$(mkv OBJCOPY)
 AVR_SIZE=$(mkv SIZE)
+AVR_OBJDUMP=$(mkv OBJDUMP)
+READELF=$(mkv READELF)
+IHEX_VALIDATOR=$(mkv IHEX_VALIDATOR)
 CLANG=$(mkv CLANG)
-CLANG_TIDY=$(mkv CLANG_TIDY)
 CPPCHECK=$(mkv CPPCHECK)
 CBMC=$(mkv CBMC)
 GCOV=$(mkv GCOV)
 GPSIM=$(mkv GPSIM)
 SIMAVR_INC=$(mkv SIMAVR_INC)
+PIC_XC8_INCLUDE=$(mkv PIC_XC8_INCLUDE)
+PIC10F320_XC8_INCLUDE=$(mkv PIC10F320_XC8_INCLUDE)
+PIC10F322_DFP_INCLUDE=$(mkv PIC10F322_DFP_INCLUDE)
+PIC10F320_DFP_INCLUDE=$(mkv PIC10F320_DFP_INCLUDE)
+PIC10F322_DEVICE_INI=$(mkv PIC10F322_DEVICE_INI)
+PIC10F320_DEVICE_INI=$(mkv PIC10F320_DEVICE_INI)
+XT_IO_HEADER=$(mkv XT_IO_HEADER)
+PIC10F320_HOST_CC=$(mkv PIC10F320_HOST_CC)
+PIC_SOAK_CXX=$(mkv PIC_SOAK_CXX)
+PIC10F320_SOAK_CXX=$(mkv PIC10F320_SOAK_CXX)
 PIC_SOAK_GPSIM_INC=$(mkv PIC_SOAK_GPSIM_INC)
 PIC10F320_SOAK_GPSIM_INC=$(mkv PIC10F320_SOAK_GPSIM_INC)
+ANALYZE_CMD=$(mkv ANALYZE_CMD)
+
+SIMAVR_INC=$(path_from_repo "$SIMAVR_INC")
+PIC_XC8_INCLUDE=$(path_from_repo "$PIC_XC8_INCLUDE")
+PIC10F320_XC8_INCLUDE=$(path_from_repo "$PIC10F320_XC8_INCLUDE")
+PIC10F322_DFP_INCLUDE=$(path_from_repo "$PIC10F322_DFP_INCLUDE")
+PIC10F320_DFP_INCLUDE=$(path_from_repo "$PIC10F320_DFP_INCLUDE")
+PIC10F322_DEVICE_INI=$(path_from_repo "$PIC10F322_DEVICE_INI")
+PIC10F320_DEVICE_INI=$(path_from_repo "$PIC10F320_DEVICE_INI")
+XT_IO_HEADER=$(path_from_repo "$XT_IO_HEADER")
+PIC_SOAK_GPSIM_INC=$(path_from_repo "$PIC_SOAK_GPSIM_INC")
+PIC10F320_SOAK_GPSIM_INC=$(path_from_repo "$PIC10F320_SOAK_GPSIM_INC")
+AVR_CC=$(tool_from_repo "$AVR_CC")
+AVR_OBJCOPY=$(tool_from_repo "$AVR_OBJCOPY")
+AVR_SIZE=$(tool_from_repo "$AVR_SIZE")
+AVR_OBJDUMP=$(tool_from_repo "$AVR_OBJDUMP")
+READELF=$(tool_from_repo "$READELF")
+IHEX_VALIDATOR=$(tool_from_repo "$IHEX_VALIDATOR")
+HOST_CC=$(tool_from_repo "$HOST_CC")
+PIC10F320_HOST_CC=$(tool_from_repo "$PIC10F320_HOST_CC")
+CLANG=$(tool_from_repo "$CLANG")
+CPPCHECK=$(tool_from_repo "$CPPCHECK")
+CBMC=$(tool_from_repo "$CBMC")
+GCOV=$(tool_from_repo "$GCOV")
+GPSIM=$(tool_from_repo "$GPSIM")
+PIC_SOAK_CXX=$(tool_from_repo "$PIC_SOAK_CXX")
+PIC10F320_SOAK_CXX=$(tool_from_repo "$PIC10F320_SOAK_CXX")
+ANALYZE_TOOL=${ANALYZE_CMD%%[[:space:]]*}
+AVR_NM=$(tool_from_repo "${AVR_NM:-avr-nm}")
+MUTATION_MAKE=$(tool_from_repo "${MUTATION_MAKE:-make}")
+
+# Every nested Make and child script must consume the exact paths preflight
+# approved. Most Makefile selectors are ?= and therefore honor these exports;
+# the three plain classic-tool assignments are also passed explicitly where the
+# release invokes their build/test graphs.
+export OBJDUMP="$AVR_OBJDUMP" READELF IHEX_VALIDATOR AWK HOSTCC="$HOST_CC"
+export CLANG CPPCHECK CBMC GCOV GPSIM SIMAVR_INC
+export ANALYZE_CMD AVR_NM MUTATION_MAKE
+export PIC_CC PIC_DFP PIC_XC8_INCLUDE PIC10F322_DFP_INCLUDE PIC10F322_DEVICE_INI
+export PIC10F320_CC PIC10F320_DFP PIC10F320_XC8_INCLUDE PIC10F320_DFP_INCLUDE PIC10F320_DEVICE_INI
+export PIC10F320_HOST_CC PIC_SOAK_CXX PIC10F320_SOAK_CXX
+export PIC_SOAK_GPSIM_INC PIC10F320_SOAK_GPSIM_INC XT_DFP
+export YASIMAVR_VENV="$(dirname "$(dirname "$YASIMAVR_PY_ABS")")"
 
 # The canonical release product set (merge plan §10). This script ENUMERATES the
 # images it expects to build from the variant matrices below; RELEASE_IMAGES is
@@ -313,7 +428,6 @@ RELEASE_EVIDENCE_FILES=$(mkv RELEASE_EVIDENCE_FILES)
 # crashed/failed run can be inspected; folded into the release on success.
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/mcu-release.XXXXXX")"
 EVID="$WORK/evidence"; SOAKDIR="$WORK/soak"
-mkdir -p "$EVID" "$SOAKDIR"
 KEEP_WORK=0
 SOAK_PIDS=()
 TRACKING_WORKER=0
@@ -330,7 +444,7 @@ on_exit() {
 		warn "could not terminate every release soak worker cleanly"
 	fi
 	SOAK_PIDS=()
-	if [ "$rc" -ne 0 ]; then
+	if [ "$rc" -ne 0 ] && [ "${PREFLIGHT:-0}" -eq 0 ]; then
 		KEEP_WORK=1
 		warn "left working dir for inspection: $WORK"
 	fi
@@ -349,6 +463,8 @@ trap on_exit EXIT
 trap 'on_signal 129' HUP
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
+mkdir -p "$EVID" "$SOAKDIR" \
+	|| die "could not initialize release scratch directories under $WORK"
 
 # Where to stage. A real release lands in the repo at release/<version>; a dry
 # run lands in the auto-scratch WORK (kept, never littering the repo).
@@ -364,11 +480,16 @@ release_output_path_is_safe "$REPO_ROOT" "$OUTPUT_DIR" "$RELEASE_MODE" "$VERSION
 section "0. preconditions"
 
 # Clean working tree -- the provenance commit SHA must mean something. A real
-# release requires it; an explicitly non-publishable dry run only warns.
+# release requires it; explicitly non-publishable dry-run and capability-only
+# preflight modes warn because they are intended to run before the release
+# changes are committed.
 GIT_DIRTY=0
-if [ -n "$(git status --porcelain)" ]; then
+if ! GIT_STATUS=$(git status --porcelain); then
+	die "could not inspect working-tree status"
+fi
+if [ -n "$GIT_STATUS" ]; then
 	GIT_DIRTY=1
-	if [ "$DRY_RUN" -eq 1 ]; then
+	if [ "$DRY_RUN" -eq 1 ] || [ "$PREFLIGHT" -eq 1 ]; then
 		warn "working tree is DIRTY; provenance SHA $(git rev-parse --short HEAD) will not capture uncommitted changes."
 	else
 		git status --short >&2
@@ -376,16 +497,70 @@ if [ -n "$(git status --porcelain)" ]; then
 	fi
 fi
 
-# Tag must not already exist (local or, if a remote is configured, remote).
-git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null 2>&1 \
-	&& die "tag $VERSION already exists."
-if git remote get-url origin >/dev/null 2>&1; then
-	git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1 \
-		&& die "tag $VERSION already exists on origin."
+# Tag availability is publishing state, not host capability. Check and warn in
+# preflight when a real prospective version was supplied; with no version there
+# is intentionally nothing meaningful to query.
+if [ "$PREFLIGHT" -eq 1 ] && [ "$VERSION_WAS_SUPPLIED" -eq 0 ]; then
+	warn "no release version supplied; tag availability was not checked."
+else
+	if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null 2>&1; then
+		LOCAL_TAG_STATUS=0
+	else
+		LOCAL_TAG_STATUS=$?
+	fi
+	case "$LOCAL_TAG_STATUS" in
+		0)
+			[ "$PREFLIGHT" -eq 1 ] && warn "tag $VERSION already exists locally." \
+				|| die "tag $VERSION already exists."
+			;;
+		1) : ;; # no matching local ref
+		*)
+			[ "$PREFLIGHT" -eq 1 ] \
+				&& warn "could not check local tag $VERSION (git rev-parse exited $LOCAL_TAG_STATUS)." \
+				|| die "could not check local tag $VERSION (git rev-parse exited $LOCAL_TAG_STATUS)."
+			;;
+	esac
+	if git remote get-url origin >/dev/null 2>&1; then
+		ORIGIN_STATUS=0
+	else
+		ORIGIN_STATUS=$?
+	fi
+	case "$ORIGIN_STATUS" in
+	0)
+		if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
+			REMOTE_TAG_STATUS=0
+		else
+			REMOTE_TAG_STATUS=$?
+		fi
+		case "$REMOTE_TAG_STATUS" in
+			0)
+				[ "$PREFLIGHT" -eq 1 ] && warn "tag $VERSION already exists on origin." \
+					|| die "tag $VERSION already exists on origin."
+				;;
+			2) : ;; # --exit-code: remote reachable, no matching ref
+			*)
+				[ "$PREFLIGHT" -eq 1 ] \
+					&& warn "could not check tag $VERSION on origin (git ls-remote exited $REMOTE_TAG_STATUS)." \
+					|| die "could not check tag $VERSION on origin (git ls-remote exited $REMOTE_TAG_STATUS)."
+				;;
+		esac
+		;;
+	2) : ;; # no origin configured
+	*)
+		[ "$PREFLIGHT" -eq 1 ] \
+			&& warn "could not inspect origin for tag $VERSION (git remote get-url exited $ORIGIN_STATUS)." \
+			|| die "could not inspect origin for tag $VERSION (git remote get-url exited $ORIGIN_STATUS)."
+		;;
+	esac
 fi
 
 # Output dir must not already exist (don't clobber a prior release).
-[ -e "$OUTPUT_DIR" ] && die "$OUTPUT_DIR already exists; refusing to overwrite."
+OUTPUT_EXISTS=0
+if [ -e "$OUTPUT_DIR" ]; then
+	OUTPUT_EXISTS=1
+	[ "$PREFLIGHT" -eq 1 ] && warn "$OUTPUT_DIR already exists; a real release would refuse to overwrite it." \
+		|| die "$OUTPUT_DIR already exists; refusing to overwrite."
+fi
 
 GIT_SHA=$(git rev-parse HEAD)
 GIT_SHORT=$(git rev-parse --short HEAD)
@@ -394,7 +569,17 @@ GIT_SHORT=$(git rev-parse --short HEAD)
 MISSING=()
 have()      { command -v "$1" >/dev/null 2>&1; }
 req_cmd()   { have "$1" || MISSING+=("$1${2:+  ($2)}"); }
-req_file()  { [ -e "$1" ] || MISSING+=("$1${2:+  ($2)}"); }
+req_file()  { [ -f "$1" ] && [ -s "$1" ] || MISSING+=("$1${2:+  ($2)}"); }
+req_exec() {
+	case "$1" in
+		*/*) [ -f "$1" ] && [ -s "$1" ] && [ -x "$1" ] ;;
+		*)   have "$1" ;;
+	esac || MISSING+=("$1${2:+  ($2)}")
+}
+req_exec_file() {
+	[ -f "$1" ] && [ -s "$1" ] && [ -x "$1" ] \
+		|| MISSING+=("$1${2:+  ($2)}")
+}
 
 req_cmd make
 req_cmd flock          "apt: util-linux (whole-worktree serialization)"
@@ -402,14 +587,33 @@ req_cmd setsid         "apt: util-linux (isolated release-soak process groups)"
 req_cmd "$AVR_CC"      "apt: gcc-avr"
 req_cmd "$AVR_OBJCOPY" "apt: binutils-avr (HEX bytes + reproducibility)"
 req_cmd "$AVR_SIZE"    "apt: binutils-avr"
+req_cmd "$AVR_OBJDUMP" "apt: binutils-avr (ATtiny202 coil-pulse width oracle)"
+req_cmd "$READELF"     "apt: binutils (ELF architecture validation)"
+req_exec_file "$IHEX_VALIDATOR" "nonempty executable Intel HEX validator file (IHEX_VALIDATOR=)"
+req_cmd "$AWK"         "awk implementation selected by AWK"
+if have "$AWK" && [ "$("$AWK" 'BEGIN { print "release-awk-ok" }' 2>/dev/null)" != release-awk-ok ]; then
+	MISSING+=("$AWK  (AWK must execute a basic program and produce output)")
+fi
 req_cmd "$HOST_CC"     "host C compiler (HOSTCC=)"
+req_cmd "$PIC10F320_HOST_CC" "PIC10F320 host compiler selected by PIC10F320_HOST_CC"
+req_cmd "$ANALYZE_TOOL" "analysis command selected by ANALYZE_CMD"
+req_cmd "$AVR_NM"      "ATtiny202 symbol resolver selected by AVR_NM"
+req_cmd "$MUTATION_MAKE" "Make executable selected by MUTATION_MAKE"
 req_file "$SIMAVR_INC/sim_avr.h" "apt: libsimavr-dev (SIMAVR_INC=)"
+req_file "$SIMAVR_INC/sim_elf.h" "apt: libsimavr-dev (SIMAVR_INC=)"
+req_file "$SIMAVR_INC/sim_irq.h" "apt: libsimavr-dev (SIMAVR_INC=)"
+req_file "$SIMAVR_INC/sim_vcd_file.h" "apt: libsimavr-dev (SIMAVR_INC=)"
+req_file "$SIMAVR_INC/avr_ioport.h" "apt: libsimavr-dev (SIMAVR_INC=)"
 req_cmd "$CLANG"       "apt: clang (analyze-deep)"
-req_cmd "$CLANG_TIDY"  "apt: clang-tidy (analyze)"
 req_cmd "$CPPCHECK"    "apt: cppcheck (analyze + MISRA)"
 req_cmd "$CBMC"        "apt: cbmc (formal proof in test-long)"
 req_cmd python3        "MISRA addon"
+if have python3 && ! python3 -c 'import yaml' >/dev/null 2>&1; then
+	MISSING+=("PyYAML  (apt: python3-yaml; strict workflow syntax validation)")
+fi
 req_cmd gpg            "release checksum/tag signing and signature regressions"
+req_cmd timeout        "coreutils (bounded mutation and simulator probes)"
+req_cmd tar            "tar (PIC10F320 coverage archive regression)"
 # gcov backs coverage-check / coverage-check-core, which run inside the
 # `make test-long` at step 2. Absent, that gate fails AFTER the clean build.
 req_cmd "$GCOV"        "ships with gcc (coverage-check in test-long)"
@@ -417,37 +621,93 @@ req_cmd "$GCOV"        "ships with gcc (coverage-check in test-long)"
 # writes SHA256SUMS during STAGING -- i.e. on the far side of the 24-hour soak.
 # Nothing before that point would notice its absence.
 req_cmd sha256sum      "coreutils (SHA256SUMS; the reproducibility anchor)"
+if have "$AVR_CC" && ! printf '%s\n' \
+		'#include <avr/io.h>' '#include <avr/wdt.h>' '#include <avr/power.h>' \
+		'#include <avr/sleep.h>' '#include <avr/interrupt.h>' \
+		| "$AVR_CC" -mmcu="$ATTINY13A_MCU" -x c -E - >/dev/null 2>&1; then
+	MISSING+=("avr-libc headers  (apt: avr-libc; selected CC cannot preprocess the firmware headers)")
+fi
+if have "$HOST_CC" && ! printf '%s\n' \
+		'#include "sim_avr.h"' '#include "sim_elf.h"' '#include "sim_irq.h"' \
+		'#include "sim_vcd_file.h"' '#include "avr_ioport.h"' \
+		'int main(void) { return 0; }' \
+		| "$HOST_CC" -std=c11 -I"$SIMAVR_INC" -x c - -o "$WORK/preflight-simavr-link" \
+			-Wl,--no-as-needed -lsimavr -lelf >/dev/null 2>&1; then
+	MISSING+=("simavr header/link capability  (apt: libsimavr-dev libelf-dev; SIMAVR_INC=, HOSTCC=)")
+fi
 # PIC toolchain (paths come from the Makefile defaults / PIC_CC, PIC_DFP).
-req_file "$PIC_CC"                                  "XC8 (PIC_CC=)"
+req_exec "$PIC_CC"                                  "executable XC8 driver (PIC_CC=)"
 req_file "$PIC_DFP/pic/include/proc/pic10f322.h"    "PIC10-12Fxxx DFP (PIC_DFP=)"
+req_file "$PIC_XC8_INCLUDE/xc.h"                    "XC8 base header (PIC_XC8_INCLUDE=)"
+req_file "$PIC10F322_DFP_INCLUDE/proc/pic10f322.h"  "PIC10F322 analysis header (PIC10F322_DFP_INCLUDE=)"
+req_file "$PIC10F322_DEVICE_INI"                    "PIC10F322 device geometry (PIC10F322_DEVICE_INI=)"
 # ...and the PIC10F320's, asserted through its own pair. One DFP ships both
 # device headers, so this normally passes with the line above -- but a truncated
 # unpack, or a deliberately re-pinned PIC10F320_DFP, is exactly the case where the
 # 320 lane would otherwise skip cleanly and the release would ship 15 images
 # while claiming 18.
-req_file "$PIC10F320_CC"                                "XC8 (PIC10F320_CC=)"
+req_exec "$PIC10F320_CC"                                "executable XC8 driver (PIC10F320_CC=)"
 req_file "$PIC10F320_DFP/pic/include/proc/pic10f320.h"  "PIC10F320 device header (PIC10F320_DFP=)"
+req_file "$PIC10F320_XC8_INCLUDE/xc.h"                   "XC8 base header (PIC10F320_XC8_INCLUDE=)"
+req_file "$PIC10F320_DFP_INCLUDE/proc/pic10f320.h"       "PIC10F320 analysis header (PIC10F320_DFP_INCLUDE=)"
+req_file "$PIC10F320_DEVICE_INI"                        "PIC10F320 device geometry (PIC10F320_DEVICE_INI=)"
 req_cmd "$GPSIM"       "apt: gpsim (pic10f322-test-gpsim, pic10f320-test-gpsim)"
-req_cmd c++            "host C++ compiler (PIC soaks)"
+req_cmd "$PIC_SOAK_CXX"       "host C++ compiler selected by PIC_SOAK_CXX"
+req_cmd "$PIC10F320_SOAK_CXX" "host C++ compiler selected by PIC10F320_SOAK_CXX"
 # Each chip's libgpsim headers through its OWN variable, for the same reason the
 # CC/DFP pairs above are: one gpsim-dev install serves both today, but the two
 # variables exist so one lane can be re-pinned, and a single hardcoded path
 # would assert the wrong install and let the other lane skip.
-req_file "$PIC_SOAK_GPSIM_INC/sim_context.h"        "apt: gpsim-dev (PIC10F322 soaks; PIC_SOAK_GPSIM_INC=)"
-req_file "$PIC10F320_SOAK_GPSIM_INC/sim_context.h"     "apt: gpsim-dev (PIC10F320 soaks; PIC10F320_SOAK_GPSIM_INC=)"
-pkg-config --exists glib-2.0 2>/dev/null || MISSING+=("glib-2.0  (apt: libglib2.0-dev, PIC soaks)")
+for gpsim_header in interface.h sim_context.h processor.h pic-processor.h modules.h ioports.h stimuli.h \
+		gpsim_time.h breakpoints.h trigger.h registers.h; do
+	req_file "$PIC_SOAK_GPSIM_INC/$gpsim_header" \
+		"apt: gpsim-dev (PIC10F322 gates; PIC_SOAK_GPSIM_INC=)"
+	req_file "$PIC10F320_SOAK_GPSIM_INC/$gpsim_header" \
+		"apt: gpsim-dev (PIC10F320 gates; PIC10F320_SOAK_GPSIM_INC=)"
+done
+req_cmd pkg-config     "apt: pkg-config (PIC soak glib flags)"
+if have pkg-config && pkg-config --exists glib-2.0 2>/dev/null; then
+	if GLIB_CFLAGS_RAW=$(pkg-config --cflags glib-2.0 2>/dev/null); then
+		read -r -a GLIB_CFLAGS <<< "$GLIB_CFLAGS_RAW"
+	else
+		MISSING+=("glib-2.0 compiler flags  (pkg-config --cflags glib-2.0 failed)")
+		GLIB_CFLAGS=()
+	fi
+	for gpsim_probe in \
+		"PIC10F322|$PIC_SOAK_CXX|$PIC_SOAK_GPSIM_INC" \
+		"PIC10F320|$PIC10F320_SOAK_CXX|$PIC10F320_SOAK_GPSIM_INC"; do
+		IFS='|' read -r gpsim_label gpsim_cxx gpsim_inc <<< "$gpsim_probe"
+		if have "$gpsim_cxx" && ! printf '%s\n' \
+				'#include <glib.h>' '#include "gpsim_time.h"' '#include "breakpoints.h"' \
+				'#include "trigger.h"' '#include "registers.h"' \
+				'#include "pic/gpsim_bootstrap.h"' 'int main() { return 0; }' \
+				| "$gpsim_cxx" -std=c++17 "${GLIB_CFLAGS[@]}" \
+					-isystem "$gpsim_inc" -I"$REPO_ROOT/test" -I"$REPO_ROOT/src" \
+					-x c++ - -o "$WORK/preflight-gpsim-$gpsim_label" \
+					-Wl,--no-as-needed -lgpsim >/dev/null 2>&1; then
+			MISSING+=("$gpsim_label gpsim compile/link capability  (gpsim-dev + libglib2.0-dev)")
+		fi
+	done
+else
+	MISSING+=("glib-2.0  (apt: libglib2.0-dev, PIC soaks)")
+fi
 # ATtiny202 (AVR-XT). Both inputs are fetched on demand and NOT committed, and
 # every attiny202-* target skips cleanly without them -- so a release that did
 # not assert them here would quietly ship three unqualified images. avr-nm and
 # avr-objdump are the harness's own tools: the drivers resolve ctx_ with the
 # former and read coil-pulse widths back out of the image with the latter.
-req_cmd avr-nm         "apt: binutils-avr (ATtiny202 symbol resolution)"
-req_cmd avr-objdump    "apt: binutils-avr (ATtiny202 coil-pulse width oracle)"
 req_file "$XT_DFP/gcc/dev/$XT_MCU/device-specs/specs-$XT_MCU" \
 	"ATtiny_DFP (scripts/fetch_attiny_dfp.sh; XT_DFP=)"
-req_file "$YASIMAVR_PY" "patched yasimavr (scripts/fetch_yasimavr.sh; YASIMAVR_VENV=)"
-if [ -x "$YASIMAVR_PY" ] && ! "$YASIMAVR_PY" -c "import yasimavr" >/dev/null 2>&1; then
-	MISSING+=("yasimavr import  (rebuild: scripts/fetch_yasimavr.sh)")
+req_file "$XT_DFP/gcc/dev/$XT_MCU/avrxmega3/short-calls/crt$XT_MCU.o" \
+	"ATtiny_DFP C runtime (scripts/fetch_attiny_dfp.sh; XT_DFP=)"
+req_file "$XT_DFP/gcc/dev/$XT_MCU/avrxmega3/short-calls/lib$XT_MCU.a" \
+	"ATtiny_DFP device library (scripts/fetch_attiny_dfp.sh; XT_DFP=)"
+req_file "$XT_IO_HEADER" "ATtiny_DFP I/O header (scripts/fetch_attiny_dfp.sh; XT_DFP=)"
+req_exec "$YASIMAVR_PY_ABS" "executable patched yasimavr interpreter (scripts/fetch_yasimavr.sh; YASIMAVR_VENV=)"
+YASIMAVR_IMPORT='from yasimavr.device_library.descriptors import DeviceDescriptor; from yasimavr.device_library.builders._builders_arch_xt import XT_DeviceBuilder; from yasimavr.device_library.builders import dev_tiny_0series; from yasimavr.lib import core'
+if [ -f "$YASIMAVR_PY_ABS" ] && [ -x "$YASIMAVR_PY_ABS" ] \
+		&& ! "$YASIMAVR_PY_ABS" -c "$YASIMAVR_IMPORT" >/dev/null 2>&1; then
+	MISSING+=("yasimavr target-module imports  (rebuild: scripts/fetch_yasimavr.sh)")
 fi
 
 # Staging (step 4) runs on the far side of the ~24-hour soak, so a destination
@@ -455,6 +715,11 @@ fi
 # exist (asserted above), so walk up to the nearest EXISTING ancestor and
 # require that it be a writable directory NOW.
 STAGE_ANCHOR="$OUTPUT_DIR"
+if [ "$PREFLIGHT" -eq 1 ] && [ "$OUTPUT_EXISTS" -eq 1 ]; then
+	# Test the capability to create a fresh leaf, not the conflicting leaf's own
+	# type/mode. A real release still rejects the conflict above.
+	STAGE_ANCHOR=$(dirname "$OUTPUT_DIR")
+fi
 while [ ! -e "$STAGE_ANCHOR" ]; do
 	stage_up=$(dirname "$STAGE_ANCHOR")
 	[ "$stage_up" = "$STAGE_ANCHOR" ] && break
@@ -462,8 +727,8 @@ while [ ! -e "$STAGE_ANCHOR" ]; do
 done
 if [ ! -d "$STAGE_ANCHOR" ]; then
 	MISSING+=("$STAGE_ANCHOR  (staging path's nearest existing ancestor is not a directory)")
-elif [ ! -w "$STAGE_ANCHOR" ]; then
-	MISSING+=("$STAGE_ANCHOR  (not writable; step 4 stages $OUTPUT_DIR under it)")
+elif [ ! -w "$STAGE_ANCHOR" ] || [ ! -x "$STAGE_ANCHOR" ]; then
+	MISSING+=("$STAGE_ANCHOR  (not writable/searchable; step 4 stages $OUTPUT_DIR under it)")
 fi
 
 if [ "${#MISSING[@]}" -gt 0 ]; then
@@ -471,7 +736,17 @@ if [ "${#MISSING[@]}" -gt 0 ]; then
 	for m in "${MISSING[@]}"; do log "  - $m"; done
 	die "resolve the above (see TOOLCHAIN.adoc) and re-run."
 fi
-ok "working tree clean @ $GIT_SHORT; tag $VERSION free; all tools present."
+
+# These values are publication metadata, but computing them exercises the
+# selected AWK. Do it only after its capability probe has passed.
+PIC10F322_CLK_MHZ=$("$AWK" -v h="${PIC10F322_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
+XT_CLK_MHZ=$("$AWK" -v h="${XT_F_CPU//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
+PIC10F320_CLK_MHZ=$("$AWK" -v h="${PIC10F320_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
+if [ "$PREFLIGHT" -eq 1 ]; then
+	ok "all required release tools, headers, imports and staging-path capabilities are present."
+else
+	ok "working tree clean @ $GIT_SHORT; tag $VERSION free; all tools present."
+fi
 
 # The release is signed BY HAND at step 5 with the pinned release key -- roughly
 # 24 hours after this point. An operator whose keyring lacks that secret key
@@ -531,6 +806,11 @@ case "$TC_XC8_320" in
 	*V3.10*|*v3.10*) : ;;
 	*) warn "PIC10F320 XC8 is not the pinned V3.10 ($TC_XC8_320). Images may not reproduce the CI build; the release.yml repro-verify will catch a mismatch." ;;
 esac
+
+if [ "$PREFLIGHT" -eq 1 ]; then
+	ok "preflight passed: this host can start a release."
+	exit 0
+fi
 
 # ============================================================================
 # 1. CLEAN BUILD -- every image
@@ -682,7 +962,25 @@ hash_xt_image_set() {
 # ============================================================================
 section "2. validation: test-long + ATtiny202 and both PIC chips' pre-hardware/target gates"
 log "running make test-long (exhaustive AVR suite + mutation)..."
-make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 >"$EVID/test-long.log" 2>&1 || { tail -40 "$EVID/test-long.log" >&2; die "make test-long FAILED."; }
+make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 \
+	CC="$AVR_CC" OBJCOPY="$AVR_OBJCOPY" SIZE="$AVR_SIZE" \
+	OBJDUMP="$AVR_OBJDUMP" READELF="$READELF" IHEX_VALIDATOR="$IHEX_VALIDATOR" \
+	AWK="$AWK" HOSTCC="$HOST_CC" PIC10F320_HOST_CC="$PIC10F320_HOST_CC" \
+	CLANG="$CLANG" ANALYZE_CMD="$ANALYZE_CMD" CPPCHECK="$CPPCHECK" \
+	CBMC="$CBMC" GCOV="$GCOV" GPSIM="$GPSIM" SIMAVR_INC="$SIMAVR_INC" \
+	PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
+	PIC_XC8_INCLUDE="$PIC_XC8_INCLUDE" PIC10F322_DFP_INCLUDE="$PIC10F322_DFP_INCLUDE" \
+	PIC10F322_DEVICE_INI="$PIC10F322_DEVICE_INI" \
+	PIC10F320_CC="$PIC10F320_CC" PIC10F320_DFP="$PIC10F320_DFP" \
+	PIC10F320_XC8_INCLUDE="$PIC10F320_XC8_INCLUDE" \
+	PIC10F320_DFP_INCLUDE="$PIC10F320_DFP_INCLUDE" \
+	PIC10F320_DEVICE_INI="$PIC10F320_DEVICE_INI" \
+	PIC_SOAK_CXX="$PIC_SOAK_CXX" PIC10F320_SOAK_CXX="$PIC10F320_SOAK_CXX" \
+	PIC_SOAK_GPSIM_INC="$PIC_SOAK_GPSIM_INC" \
+	PIC10F320_SOAK_GPSIM_INC="$PIC10F320_SOAK_GPSIM_INC" \
+	XT_DFP="$XT_DFP" YASIMAVR_VENV="$YASIMAVR_VENV" \
+	>"$EVID/test-long.log" 2>&1 \
+	|| { tail -40 "$EVID/test-long.log" >&2; die "make test-long FAILED."; }
 ok "test-long passed."
 validated_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
 
@@ -700,7 +998,7 @@ ok "attiny202-test passed."
 # STRICT_TOOLS=1 converts each driver's clean skip into a hard failure.
 log "running make attiny202-test-target (sim + fault + lock-step on the real image)..."
 make attiny202-test-target STRICT_TOOLS=1 XT_DFP="$XT_DFP" \
-	YASIMAVR_VENV="$(dirname "$(dirname "$YASIMAVR_PY")")" \
+	YASIMAVR_VENV="$YASIMAVR_VENV" \
 	>"$EVID/attiny202-test-target.log" 2>&1 \
 	|| { tail -60 "$EVID/attiny202-test-target.log" >&2; die "make attiny202-test-target FAILED."; }
 ok "attiny202-test-target passed."
@@ -795,7 +1093,7 @@ for v in $XT_VARIANTS; do
 		printf '  ATTINY202_SOAK_LIVENESS_INTERVAL_MS=%q \\\n' "$SOAK_LIVENESS_INTERVAL_MS"
 		printf '  ATTINY202_SOAK_PROGRESS_INTERVAL_MS=%q \\\n' "$SOAK_LIVENESS_INTERVAL_MS"
 		printf '  ATTINY202_SOAK_COMBINATION_NAME=%q \\\n' "$name"
-		printf '  %q %q %q\n' "$REPO_ROOT/$YASIMAVR_PY" \
+		printf '  %q %q %q\n' "$YASIMAVR_PY_ABS" \
 			"$REPO_ROOT/test/avr/test_soak_attiny202.py" "$elf"
 	} > "$bin" || die "could not write ATtiny202 soak wrapper $bin"
 	chmod +x "$bin" || die "could not make $bin executable"
@@ -855,7 +1153,7 @@ if [ "$actual_soaks" != "$canonical_soaks" ]; then
 fi
 JOBS=$(release_jobs_cap "$JOBS" "$NCOMBOS") \
 	|| die "could not resolve the release soak concurrency limit"
-hours=$(awk -v ms="$SOAK_DURATION_MS" 'BEGIN{printf "%.1f", ms/3600000}')
+hours=$("$AWK" -v ms="$SOAK_DURATION_MS" 'BEGIN{printf "%.1f", ms/3600000}')
 ncpu=$(nproc 2>/dev/null || echo "?")
 log "launching $NCOMBOS soak combos, up to $JOBS at once (~${hours} h each; this box has $ncpu logical CPUs)."
 [ "$JOBS" -lt "$NCOMBOS" ] && warn "more combos ($NCOMBOS) than the --jobs cap ($JOBS): total time scales up."
@@ -1066,7 +1364,7 @@ done
 # Echoes a markdown table row for one image path.
 img_row() {
 	local path="$1" base; base=$(basename "$path")
-	local sha; sha=$(awk -v f="$base" '$2==f{print $1}' "$OUTPUT_DIR/SHA256SUMS")
+	local sha; sha=$("$AWK" -v f="$base" '$2==f{print $1}' "$OUTPUT_DIR/SHA256SUMS")
 	# Flash usage is read from the build ELF (the HEX does not carry section
 	# sizes avr-size can total); the ELF is still present in $AVR_BUILD_DIR when
 	# the manifest is generated. PIC usage stays n/a (XC8 reports words, not bytes).
@@ -1085,7 +1383,7 @@ img_row() {
 			mcu="PIC10F320"; clk="${PIC10F320_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
 			# XC8 reports program space in WORDS, not bytes; the figure comes from
 			# this run's own build log, so it can never be a stale hand-copied number.
-			used=$(awk -v f="$base" '$0 ~ ("/" f " :") { for (i = 1; i <= NF; i++) if ($i == "words") { print $(i-1) " / '"$PIC10F320_FLASH_WORDS"' words"; exit } }' \
+			used=$("$AWK" -v f="$base" '$0 ~ ("/" f " :") { for (i = 1; i <= NF; i++) if ($i == "words") { print $(i-1) " / '"$PIC10F320_FLASH_WORDS"' words"; exit } }' \
 				"$EVID/build-pic10f320.log" 2>/dev/null)
 			flashcmd="pk2cmd -PPIC10F320 -F$base -M -Y -R" ;;
 		${FW_BASE}-${PIC10F322_TAG}-*.hex)
@@ -1102,7 +1400,7 @@ img_row() {
 			# From this run's own build log, like the PIC10F320 arm: the figure is
 			# never a stale hand-copied number, and avr-size cannot total it here
 			# (binutils 2.26 reports "Device: Unknown" for avrxmega3 parts).
-			used=$(awk -v f="$base" '$0 ~ ("/" f " :") { for (i = 1; i <= NF; i++) if ($i == "B") { print $(i-1) " B"; exit } }' \
+			used=$("$AWK" -v f="$base" '$0 ~ ("/" f " :") { for (i = 1; i <= NF; i++) if ($i == "B") { print $(i-1) " B"; exit } }' \
 				"$EVID/build-avr-xt.log" 2>/dev/null)
 			flashcmd="avrdude -c $XT_PROGRAMMER -P <port> -p $XT_AVRDUDE_PART"
 			for f in $XT_FUSE_NAMES; do
@@ -1123,11 +1421,11 @@ img_row() {
 			[ -n "$prog" ] \
 				|| die "no avrdude part name for $amcu: TINYX5 and this manifest arm disagree"
 			clk="1.0 MHz"; fuses="lfuse=$LFUSE_X5 hfuse=$HFUSE_X5"
-			used=$(avr-size --mcu="$amcu" -C "$elf" 2>/dev/null | awk '/^Program:/{print $2" B"; exit}')
+			used=$("$AVR_SIZE" --mcu="$amcu" -C "$elf" 2>/dev/null | "$AWK" '/^Program:/{print $2" B"; exit}')
 			flashcmd="avrdude -c <prog> -p $prog -U lfuse:w:$LFUSE_X5:m -U hfuse:w:$HFUSE_X5:m -U flash:w:$base:i" ;;
 		${FW_BASE}-${ATTINY13A_MCU}-*.hex)
 			mcu="ATtiny13a"; clk="1.2 MHz"; fuses="lfuse=$LFUSE hfuse=$HFUSE"
-			used=$(avr-size --mcu=attiny13a -C "$elf" 2>/dev/null | awk '/^Program:/{print $2" B"; exit}')
+			used=$("$AVR_SIZE" --mcu=attiny13a -C "$elf" 2>/dev/null | "$AWK" '/^Program:/{print $2" B"; exit}')
 			flashcmd="avrdude -c <prog> -p $AVRDUDE_PART -U lfuse:w:$LFUSE:m -U hfuse:w:$HFUSE:m -U flash:w:$base:i" ;;
 		*) die "release image '$base' names no MCU this manifest generator knows; refusing to describe it" ;;
 	esac

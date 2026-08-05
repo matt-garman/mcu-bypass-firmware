@@ -1,6 +1,9 @@
 # Build and validation recipes share worktree-local firmware images, host test
 # binaries, coverage data, and simulator logs. Route each independent top-level
 # invocation through one persistent flock, then execute the real graph serially.
+# The two release goals are the exception only in mechanism: make-release.sh
+# acquires this same lock itself, avoiding a recursive Make pass that could
+# reinterpret untrusted VERSION/RELEASE_ARGS command-line text.
 # Recipes that explicitly launch isolated recursive `$(MAKE) -jN` workloads may
 # still use their reviewed internal parallelism. Recursive makes and release
 # scripts inherit the held marker and must not reacquire the same lock.
@@ -67,12 +70,24 @@ override VARIANTS := $(_MAKE_SERIAL_VARIANTS_SAFE)
 override PIC10F320_VARIANTS_ALL := $(_MAKE_SERIAL_PIC320_VARIANTS_SAFE)
 
 _make_shell_quote = '$(subst ','"'"',$(1))'
+_MAKE_RELEASE_DIRECT := $(if $(filter release release-preflight,$(MAKECMDGOALS)),$(if $(word 2,$(MAKECMDGOALS)),,1))
+_MAKE_SERIAL_LOCK_WAS_HELD := $(if $(filter $(_MAKE_SERIAL_WORKTREE_ID),$(_MAKE_SERIAL_LOCK_HELD)),1,0)
+ifeq ($(_MAKE_RELEASE_DIRECT),1)
+ifeq ($(_MAKE_SERIAL_LOCK_WAS_HELD),0)
+override _MAKE_SERIAL_LOCK_HELD := $(_MAKE_SERIAL_WORKTREE_ID)
+_MAKE_RELEASE_LOCK_IN_SCRIPT := 1
+endif
+endif
 ifneq ($(findstring q,$(firstword $(MAKEFLAGS))),)
 override _MAKE_SERIAL_LOCK_HELD := $(_MAKE_SERIAL_WORKTREE_ID)
 endif
 
 ifeq ($(_MAKE_SERIAL_LOCK_HELD),$(_MAKE_SERIAL_WORKTREE_ID))
+ifeq ($(_MAKE_RELEASE_LOCK_IN_SCRIPT),1)
+unexport _MAKE_SERIAL_LOCK_HELD
+else
 export _MAKE_SERIAL_LOCK_HELD
+endif
 unexport _MAKE_SERIAL_CLASSIC_EMPTY _MAKE_SERIAL_CLASSIC_DUPLICATE \
          _MAKE_SERIAL_CLASSIC_UNKNOWN _MAKE_SERIAL_PIC320_EMPTY \
          _MAKE_SERIAL_PIC320_DUPLICATE _MAKE_SERIAL_PIC320_UNKNOWN
@@ -629,7 +644,7 @@ FORCE:
         test-pic10f320-return-stack-oracle test-pic10f320-expected-images \
         test-pic10f320-coverage-archive \
         test-attiny202-build test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-fetch-yasimavr test-supply-chain test-klee-build \
-        test-pic-build test-release-images test-release-provenance test-release-qualification test-release-history test-build-serialization \
+        test-pic-build test-release-images test-release-preflight test-release-provenance test-release-qualification test-release-history test-build-serialization \
         test-make-lock-probe test-make-safe-parallel-probe \
         _test-make-safe-parallel-probe-run _test-make-safe-parallel-probe-a \
         _test-make-safe-parallel-probe-b _test-mutation-policy-probe \
@@ -2599,7 +2614,7 @@ TEST_GATES_LATE = \
         test-avr-build-rebuild test-ci-local-routing test-workflow-syntax \
         test-gpsim-wrappers test-fetch-yasimavr test-supply-chain \
         test-klee-build test-mutation-sandbox test-pic-build \
-        test-release-images test-release-provenance \
+        test-release-images test-release-preflight test-release-provenance \
         test-release-qualification test-release-history \
         test-build-serialization test-target-matrix \
         test-target-lane-markers test-lockstep-progress test-soak-timing \
@@ -2727,6 +2742,11 @@ test-pic-build:
 # Exact-set and hash checks for the tag workflow's committed/listed/fresh images.
 test-release-images:
 	./test/test_release_images.sh
+
+# Fake-tool proof that release step 0 reaches its end without cleaning, building
+# or staging, and validates the actual caller-selected tool paths.
+test-release-preflight:
+	./test/test_release_preflight.sh
 
 # Isolated proof of final source identity and per-PIC compiler attribution.
 test-release-provenance:
@@ -5003,6 +5023,8 @@ origins:
 # the tag on a clean runner, verifies the committed image hashes reproduce
 # bit-for-bit, and publishes the GitHub Release.
 #
+#   make release-preflight                 # capability check, no build/staging
+#   make release-preflight VERSION=v1.0.0  # also warn on tag/output state
 #   make release VERSION=v1.0.0
 #   make release VERSION=v1.0.0 RELEASE_ARGS='--dry-run'   # skip the 24-h soak
 
@@ -5142,13 +5164,33 @@ override RELEASE_FIXED_EVIDENCE_FILES := \
 override RELEASE_EVIDENCE_FILES := $(RELEASE_FIXED_EVIDENCE_FILES) \
 	$(addprefix soak-,$(addsuffix .log,$(RELEASE_SOAK_NAMES)))
 
-.PHONY: release
+.PHONY: release release-preflight
+# Keep release arguments in the recipe environment, never in shell source. The
+# script validates VERSION and safely splits the documented RELEASE_ARGS words.
+# `value` captures command-line text without expanding embedded GNU Make
+# functions; the override then converts each channel to a simple literal before
+# export. Otherwise VERSION='$(shell ...)' would execute before script validation.
+_RELEASE_VERSION_LITERAL := $(value VERSION)
+_RELEASE_ARGS_LITERAL := $(value RELEASE_ARGS)
+_RELEASE_DOLLAR := $$
+override VERSION := $(_RELEASE_VERSION_LITERAL)
+override RELEASE_ARGS := $(_RELEASE_ARGS_LITERAL)
+export VERSION RELEASE_ARGS
+# Recursive Make otherwise forwards the original command-line spellings through
+# MAKEOVERRIDES, bypassing the literal values above. A dollar cannot occur in a
+# valid release version and is not a supported RELEASE_ARGS expansion syntax, so
+# reject it in the outer process before serialization can re-parse it.
+ifneq ($(filter release release-preflight,$(MAKECMDGOALS)),)
+ifneq ($(findstring $(_RELEASE_DOLLAR),$(_RELEASE_VERSION_LITERAL)$(_RELEASE_ARGS_LITERAL)),)
+$(error VERSION and RELEASE_ARGS must not contain dollar signs)
+endif
+endif
+
+release-preflight:
+	./scripts/make-release.sh --preflight
+
 release:
-	@if [ -z "$(VERSION)" ]; then \
-		echo "usage: make release VERSION=vX.Y.Z [RELEASE_ARGS='--dry-run']"; \
-		exit 2; \
-	fi
-	./scripts/make-release.sh $(RELEASE_ARGS) $(VERSION)
+	./scripts/make-release.sh
 
 # ============================================================================
 # HELP
@@ -5258,6 +5300,7 @@ help:
 	@echo "  test-klee-build  linked harness/pure-core KLEE bitcode regression"
 	@echo "  test-pic-build  PIC image validation + PIC10F320 rebuild-trigger checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
+	@echo "  test-release-preflight  step-0 tool/input checks run to completion without build or staging"
 	@echo "  test-release-provenance  release source/compiler provenance checks"
 	@echo "  test-release-qualification  exact release evidence + 15-soak publication checks"
 	@echo "  test-release-history  bind release history + checksum/tag signatures"
@@ -5295,6 +5338,8 @@ help:
 	@echo "  attiny13a-flash / attiny<n>-flash      flash the selected variant"
 	@echo "  attiny13a-program / attiny<n>-program  fuses + flash (fresh chip)"
 	@echo "Release:"
+	@echo "  release-preflight  check every release prerequisite without cleaning, building or staging"
+	@echo "                     (optional VERSION=vX.Y.Z also checks tag/output state as warnings)"
 	@echo "  release         VERSION=vX.Y.Z: build+validate every release image -- AVR Classic"
 	@echo "                  + ATtiny202 + PIC10F322 + PIC10F320, the canonical RELEASE_IMAGES"
 	@echo "                  set (incl. 24-h soak of all 15 combos) + stage release/<ver>/."

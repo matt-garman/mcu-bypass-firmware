@@ -31,6 +31,48 @@ file is the human-readable summary of *what changed*.
 ## [0.9.8] — unreleased
 
 ### Added
+- **Release step 0 is now independently runnable and regression-tested.**
+  `make release-preflight` runs every release capability check and executable
+  version probe, then exits before `make clean`, any build goal, or staging.
+  It needs no version and is deliberately usable from a dirty working branch;
+  `VERSION=vX.Y.Z` is optional when the maintainer also wants local/remote tag
+  and output-state warnings. `--preflight` and `--dry-run` are distinct and
+  mutually exclusive: the former finishes in seconds and writes no release,
+  while the latter rehearses the complete pipeline.
+
+  New gate `test-release-preflight` supplies every selected release input from a
+  synthetic toolchain while retaining the real base host utilities and real
+  `print-<VAR>` interface. It proves section 0 reaches its final Python version
+  probe, records 74 variable queries and zero clean/build invocations, leaves
+  tracked/nonignored worktree content and the prospective output unchanged on
+  every tested path, and covers the negative paths below rather than merely
+  asserting the early exit exists.
+
+  The audit that motivated the mode found several live precondition defects,
+  all fixed with it. An absolute `YASIMAVR_VENV` is preserved through mutation,
+  target tests and generated soak wrappers instead of becoming
+  `<repo>/<absolute path>`;
+  preflight checks the independently selected `PIC_SOAK_CXX` and
+  `PIC10F320_SOAK_CXX` commands rather than literal `c++`; and a yasimavr
+  interpreter must be executable before step 0 can pass. PATH-selected XC8
+  commands and executable XC8 paths are both accepted, matching the build. The
+  selected `objdump`, `readelf`, file-valued IHEX validator, AWK, analysis
+  command, AVR symbol resolver, mutation Make and PIC10F320 host compiler;
+  `timeout`, `tar` and `pkg-config`; both XC8/DFP analysis include pairs and
+  device-geometry INIs; the complete simavr/gpsim header sets; and all four
+  fetched ATtiny202 DFP files are checked before success. Required files must be
+  regular and nonempty. Live probes additionally exercise avr-libc preprocessing,
+  simavr/libelf and both gpsim C++ link paths, complete yasimavr target-module
+  imports, PyYAML and the selected AWK. Selected repository-relative paths are
+  normalized before preflight, builds and mutation consume them.
+
+  Make no longer interpolates `VERSION` or `RELEASE_ARGS` into release recipe
+  shell syntax. GNU Make exports those values and the release script validates or
+  splits them without `eval`, so malformed values cannot execute before semantic
+  version validation. Git status, local-tag, origin-configuration and remote-tag
+  failures are distinguished from clean/absent state, and the preflight gate's
+  fake Git rejects every modifying operation.
+
 - **`DESIGN_DOCUMENTATION.adoc` traces its load-bearing decisions to vendor
   documentation.** A new **Datasheet References** section: each decision against
   its DS40001585 / ATtiny13A reference *and* against the place in the repository
