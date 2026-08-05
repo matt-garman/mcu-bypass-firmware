@@ -833,6 +833,31 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **The PIC hardware-stack gate rejected every real image after it started
+  reading `psect` directives.** Tracking "inside a function psect" ended the
+  current function at *any* `psect` directive, but XC8 re-selects a function's
+  own psect inside its body — once immediately after the `;psect for function`
+  marker, and again to restore the psect after each inline-asm escape (`clrwdt`
+  in the PIC shell). Every function body therefore parsed as being outside any
+  function psect, and `pic10f322-test-stack-bound` failed all three variants
+  with `call to annotated function _hw_set_bypass_state occurs outside any
+  function psect`. The measurement itself was never wrong — the gate refused to
+  produce one.
+
+  Each function is now bound to the psect it was declared in; re-selecting that
+  psect stays inside the body, while any other psect still ends it, and an
+  operandless `psect` is a structural error rather than a silent no-op. A marker
+  with no declaration of its own binds nothing instead of inheriting the
+  preceding one, so it keeps the conservative behaviour.
+
+  The synthetic fixtures missed this because they emitted a bare marker with no
+  psect scaffolding, so the regression suite passed against a gate that could
+  not read a single real image. The fixture builders now emit the full
+  declaration / marker / re-selection sequence XC8 produces — every case
+  exercises it — plus dedicated cases for the inline-asm restore, a genuine
+  mid-body psect switch, a marker that would otherwise inherit the preceding
+  psect, and a malformed directive.
+
 - **The PIC hardware-stack gate could silently ignore a direct call whose target
   used an unrecognized prefix.** Its instruction lexer admitted only `_...` and
   XC8's known `iN_...` interrupt duplicates. An in-function call to `x_helper`

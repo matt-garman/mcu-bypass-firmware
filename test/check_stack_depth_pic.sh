@@ -155,8 +155,19 @@ report=$(
 		else if (pending == "") structural("function psect marker for " pfn " has no preceding annotation")
 		else if (pfn != pending) structural("function psect marker " pfn " does not match annotation " pending)
 		else if (pfn in psect_seen) structural("duplicate function psect marker for " pfn)
-		else { psect_seen[pfn] = 1; cur = pfn }
-		pending = ""; next
+		else {
+			psect_seen[pfn] = 1; cur = pfn
+			# Bind the psect this body lives in, so a re-selection of it can be
+			# told apart from a transition out. Only an unclaimed psect binds: a
+			# marker with no declaration of its own would otherwise inherit the
+			# one before it. An unbound function has no psect it may be
+			# re-selected into, so every psect directive ends its body -- the
+			# conservative direction.
+			if (open_psect != "" && !(open_psect in psect_owner)) {
+				fn_psect[pfn] = open_psect; psect_owner[open_psect] = pfn
+			}
+		}
+		open_psect = ""; pending = ""; next
 	}
 	# Runtime/startup psects are outside every C function. Their direct calls are
 	# recorded below but are not part of the measured C call graph.
@@ -179,7 +190,25 @@ report=$(
 			if (code == "") next
 		}
 		ntok = split(code, tok, /[ \t]+/); op = tolower(tok[1])
-		if (op == "psect") { cur = ""; next }
+		# A psect directive ends the current function body -- UNLESS it re-selects
+		# the psect that body already lives in. XC8 does exactly that once before
+		# a single instruction of every function
+		#     psect  text1,local,class=CODE,delta=2,merge=1,group=0
+		#     global __ptext1
+		#     __ptext1:  ;psect for function _init
+		#     psect  text1              <-- re-selection, still inside _init
+		#     _init:
+		# and again to restore the psect after each inline-asm escape (`clrwdt`
+		# in the PIC shell). Reading those as transitions puts the entire body of
+		# every function outside any function psect and drops every call edge --
+		# which is how this gate came to reject all three PIC10F322 images.
+		if (op == "psect") {
+			if (ntok < 2) { structural("malformed psect directive: " code); next }
+			pname = tok[2]; sub(/,.*/, "", pname)
+			if (cur == "" || fn_psect[cur] == "" || pname != fn_psect[cur]) cur = ""
+			open_psect = pname
+			next
+		}
 		if (op == "callstack") {
 			if (ntok != 2 || tok[2] !~ /^-?[0-9]+$/) {
 				structural("malformed callstack directive: " code); next

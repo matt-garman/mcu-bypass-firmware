@@ -831,6 +831,34 @@ annotation. Startup helpers such as `clear_ram0` remain allowed only outside
 function psects. Regression case 12 uses the real `i1_` spelling, while separate
 fixtures prove arbitrary unprefixed targets cannot disappear from the graph.
 
+That change carried its own instance of the same lesson, and it is worth being
+blunt about it. Deciding "inside a function psect" meant reading `psect`
+directives, and the new rule ended the current function at every one of them.
+XC8 re-selects a function's own psect *inside* its body — once immediately after
+the `;psect for function` marker, and again to restore the psect after every
+inline-asm escape (`clrwdt` in the PIC shell):
+
+```
+psect	text1,local,class=CODE,delta=2,merge=1,group=0
+global __ptext1
+__ptext1:	;psect for function _init
+psect	text1              <-- re-selection; still inside _init
+_init:
+	fcall	_hw_wdt_pet
+```
+
+Every body in every real image therefore parsed as being outside any function
+psect, and the gate rejected all three PIC10F322 variants. The synthetic
+fixtures did not catch it because they emitted a bare marker with no psect
+scaffolding at all — the same gap as case 11's `_ihelp`, one layer down: a
+fixture that is *shaped* like XC8 output only proves what its shape covers. The
+gate now binds each function to the psect it was declared in and treats a
+re-selection of that psect as staying inside the body, while any other psect
+still ends it. The fixture builders emit the full declaration/marker/re-selection
+sequence, so every case exercises it, and dedicated cases cover the inline-asm
+restore, a genuine mid-body psect switch, and a marker that would otherwise
+inherit the preceding function's psect.
+
 ---
 
 ## 9. Recommendation

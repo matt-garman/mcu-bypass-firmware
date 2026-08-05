@@ -31,9 +31,28 @@ checks=0
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 # --- fixture builders --------------------------------------------------------
-# emit_fn <file> <name> <called-by> <callee...>   -- one XC8-shaped function block
-emit_fn() {
+# The psect scaffolding around each body is not decoration, and getting it wrong
+# here is what let a real regression ship. XC8 declares the function's psect,
+# emits the `;psect for function` marker, and then RE-SELECTS that same psect
+# before a single instruction of the body:
+#
+#     psect  text1,local,class=CODE,delta=2,merge=1,group=0
+#     global __ptext1
+#     __ptext1:  ;psect for function _init
+#     psect  text1               <-- re-selection; still inside _init
+#     _init:
+#             fcall  _hw_wdt_pet
+#
+# It re-selects again after every inline-asm escape. A gate that reads any psect
+# directive as leaving the function puts every body outside any function psect
+# and loses every call edge in every real image, so fixtures that omit the
+# re-selection cannot detect that. Emit what the compiler emits.
+#
+# emit_fn_body <file> <name> <called-by> <calls-annotation...> -- header + psect
+# scaffolding, up to and including the body label. Instructions follow.
+emit_fn_body() {
 	local f=$1 name=$2 by=$3; shift 3
+	local ps="text_${name#_}"
 	{
 		printf ';; *************** function %s *****************\n' "$name"
 		printf ';; This function is called by:\n'
@@ -41,7 +60,18 @@ emit_fn() {
 		printf ';; This function calls:\n'
 		if [ "$#" -eq 0 ]; then printf ';;\t\tNothing\n'; else printf ';;\t\t%s\n' "$@"; fi
 		printf '\n'
-		printf '__ptext_%s:\t;psect for function %s\n' "${name#_}" "$name"
+		printf 'psect\t%s,local,class=CODE,delta=2,merge=1,group=0\n' "$ps"
+		printf 'global __p%s\n' "$ps"
+		printf '__p%s:\t;psect for function %s\n' "$ps" "$name"
+		printf 'psect\t%s\n' "$ps"
+		printf '%s:\t\n' "$name"
+	} >> "$f"
+}
+# emit_fn <file> <name> <called-by> <callee...>   -- one XC8-shaped function block
+emit_fn() {
+	local f=$1 name=$2 by=$3; shift 3
+	emit_fn_body "$f" "$name" "$by" "$@"
+	{
 		local c
 		for c in "$@"; do printf '\tfcall\t%s\n' "$c"; done
 		printf '\treturn\n\n'
@@ -50,13 +80,8 @@ emit_fn() {
 # emit_fn_op <file> <name> <called-by> <opcode> <callee>
 emit_fn_op() {
 	local f=$1 name=$2 by=$3 opcode=$4 callee=$5
+	emit_fn_body "$f" "$name" "$by" "$callee"
 	{
-		printf ';; *************** function %s *****************\n' "$name"
-		printf ';; This function is called by:\n'
-		printf ';;\t\t%s\n' "$by"
-		printf ';; This function calls:\n'
-		printf ';;\t\t%s\n\n' "$callee"
-		printf '__ptext_%s:\t;psect for function %s\n' "${name#_}" "$name"
 		printf '\t%s\t%s\n' "$opcode" "$callee"
 		printf '\treturn\n\n'
 	} >> "$f"
@@ -210,6 +235,64 @@ printf '\tpsect\truntime,class=CODE\n\tfcall\tclear_ram0 ; XC8 runtime helper\n'
 emit_callstack "$f" 8
 expect_pass "runtime-call-after-psect-transition" "$f" 8 2 0
 
+# --- 7b. re-selecting a body's OWN psect is not a transition out of it --------
+# XC8 restores the psect after every inline-asm escape, mid-body. This is the
+# shape that broke every real image once the gate started reading psect
+# directives: the restore ended the function, and the call after it was reported
+# as occurring outside any function psect.
+f="$work/psect-reselect.s"; : > "$f"
+emit_fn_body "$f" _main "Startup code after reset" _a
+printf '%s\n' \
+	'# 207 "src/bypass_mcu_pic10f322.c"' \
+	'clrwdt ;# ' \
+	'psect	text_main' \
+	'	fcall	_a' \
+	'	return' >> "$f"
+emit_fn "$f" _a "_main"
+emit_callstack "$f" 7
+expect_pass "psect-reselect-after-inline-asm" "$f" 8 2 1
+
+# The permission is exact: a DIFFERENT psect mid-body still ends the body, so
+# the fail-closed direction the re-selection rule relaxes is still covered.
+f="$work/psect-switch.s"; : > "$f"
+emit_fn_body "$f" _main "Startup code after reset" _a
+printf '%s\n' \
+	'psect	somewhere_else,class=CODE,delta=2' \
+	'	fcall	_a' \
+	'	return' >> "$f"
+emit_fn "$f" _a "_main"
+emit_callstack "$f" 7
+expect_fail "psect-switch-inside-body" "$f" 8 2 \
+	"call to annotated function _a occurs outside any function psect"
+
+# A marker with no psect declaration of its own must not inherit the previous
+# function's binding -- otherwise that psect's name would re-open a body it
+# does not own.
+f="$work/psect-inherited.s"; : > "$f"
+emit_fn "$f" _main "Startup code after reset" _a
+printf '%s\n' \
+	';; *************** function _a *****************' \
+	';; This function is called by:' \
+	';;	_main' \
+	';; This function calls:' \
+	';;	_b' \
+	'__ptext_a:	;psect for function _a' \
+	'psect	text_main' \
+	'	fcall	_b' \
+	'	return' >> "$f"
+emit_fn "$f" _b "_a"
+emit_callstack "$f" 6
+expect_fail "psect-binding-not-inherited" "$f" 8 2 \
+	"call to annotated function _b occurs outside any function psect"
+
+# An operandless psect directive cannot be classified, so it must not be assumed
+# harmless in either direction.
+f="$work/psect-malformed.s"; : > "$f"
+emit_fn "$f" _main "Startup code after reset"
+printf '\tpsect\n' >> "$f"
+emit_callstack "$f" 8
+expect_fail "malformed-psect" "$f" 8 2 "malformed psect directive"
+
 # A call to an annotated C function outside every function psect is structural
 # drift, not runtime plumbing that may be ignored.
 f="$work/known-outside.s"; : > "$f"
@@ -241,6 +324,7 @@ printf '%s\n' \
 	';;    _main' \
 	';; This function calls:' \
 	';;    Nothing' \
+	'psect	text_wrong,local,class=CODE,delta=2,merge=1,group=0' \
 	'__ptext_wrong:    ;psect for function _main' \
 	'    return' \
 	'    callstack 8' >> "$f"
@@ -290,6 +374,7 @@ printf '%s\n' \
 	';; This function calls:' \
 	';;    Nothing' \
 	'' \
+	'psect	text_main,global,class=CODE,delta=2,split=1,group=0' \
 	'__ptext_main:    ;psect for function _main' \
 	'    return' \
 	'    callstack 8' >> "$f"
