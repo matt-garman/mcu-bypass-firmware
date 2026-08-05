@@ -37,9 +37,17 @@ unpriced — so the decision to start (or not start) can be taken on evidence.
    already omits the output-latch check that the cost falls on. What does not fit
    is range-checking the new state variable: that costs 4 words and puts the
    relay variant exactly on 256, unlinkable (§6.4).
+7. **It drops a relay-coil safety property that nothing else in this document
+   noticed.** The blocking form cannot pet the watchdog while a coil is energized;
+   the non-blocking form pets it twelve times. The coil-on window goes from
+   watchdog-bounded to unbounded, and the worst failure — the countdown cleared
+   mid-pulse, so the de-energize never runs — is invisible to every check
+   currently proposed. Two mitigations cost 2 and 3 words, neither subsumes the
+   other, and the PIC10F320 relay variant affords exactly one (§7). This also
+   overturns §4's strongest argument (§7.7).
 
-**Date / branch:** 2026-08-05. §2–§5 measured on `main` @ `59d55e9`; §6 measured
-on `main` @ `831d1d3`.
+**Date / branch:** 2026-08-05. §2–§5 measured on `main` @ `59d55e9`; §6 and §7
+measured on `main` @ `831d1d3`.
 
 **Toolchain used for every figure below** — the versions pinned in
 `TOOLCHAIN.adoc`, with no additions:
@@ -52,8 +60,8 @@ on `main` @ `831d1d3`.
 > Scope note: every figure here comes from **throwaway spikes** written outside
 > the repository — an ISR-converted copy of the shipping
 > `src/bypass_mcu_pic10f322.c`, a macro-ablatable copy of each shell used to price
-> the checks one at a time, and (for §6) three non-blocking transforms of
-> `src/bypass_mcu_pic10f320.c`. None is proposed code and none is checked in. §9
+> the checks one at a time, and (for §6 and §7) eight non-blocking transforms of
+> `src/bypass_mcu_pic10f320.c`. None is proposed code and none is checked in. §10
 > lists the exact edits behind every number.
 
 ---
@@ -309,6 +317,12 @@ existing complexity exists only to accommodate blocking, and would be deleted:
   materially shorter watchdog period on both families. **That is a reliability
   improvement, not a cleanup** — it is the strongest argument in this document.
 
+  > **Corrected by §7.7.** This holds for the analog-switch variants and **not**
+  > for the relay. §7 establishes that the pet must be *withheld* across the
+  > actuation window to keep the coil-on time bounded, which requires the watchdog
+  > period to stay above the pulse — the same constraint this bullet wanted to
+  > remove. Between the two, the coil wins.
+
 The interface gets wider (two functions where there was one call site) and the
 conceptual model gets narrower (one timing story instead of two). That is usually
 the right direction, and the intuition that a more complex API can be a
@@ -508,7 +522,7 @@ That leaves three options, none free:
    that apply unchanged here: the fault harness and mutation topology would need
    per-variant expected counts, and the documentation gains a three-way split
    instead of one clean statement.
-3. **Find 4 words elsewhere**, which means reopening exactly the trade §2 and §8
+3. **Find 4 words elsewhere**, which means reopening exactly the trade §2 and §9
    conclude against.
 
 This is the decision this section exists to surface. It is the difference between
@@ -582,7 +596,196 @@ about whether the shape fits the part.
 
 ---
 
-## 7. Related finding: the stack gate could not measure an ISR build
+## 7. The relay coil: a safety property the redesign silently drops
+
+Every section above treats this as a resource question. It is also a hardware
+safety question, and on the relay variant that is the more serious of the two: the
+TQ2-L2-5V's coils are pulse-rated, and leaving one energized is a way to destroy
+the part rather than merely misbehave.
+
+The concern that opened this section was an intuition — that the blocking form
+"feels" safer because *energize, wait, de-energize* is verifiable in four
+consecutive lines, while the non-blocking form spreads the same obligation across
+a dozen loop iterations and a RAM byte. That intuition is correct, and the reason
+is more specific than the surface area.
+
+### 7.1 What the blocking form guarantees without saying so
+
+`CLRWDT()` is the last statement in the `main()` loop body, and the coil pulse
+happens earlier in the same iteration. **So the dog cannot be fed while a coil is
+energized.** Any fault that strands the CPU mid-pulse — a corrupted PC, a hang in
+the delay loop — withholds the pet by construction and is bounded by one watchdog
+period.
+
+Nobody designed that. It falls out of where the pulse sits relative to the pet.
+But it is a real property, and it is load-bearing.
+
+Under non-blocking actuation the pulse spans twelve *complete* loop iterations,
+and every one of them reaches `CLRWDT()`. The watchdog is being fed, on schedule,
+by a loop that is doing exactly the wrong thing. **The coil-on window goes from
+watchdog-bounded to unbounded**, and nothing in §3 through §6 notices.
+
+### 7.2 The dangerous failure is the counter reaching zero early
+
+The obvious fear is an upset that raises `actuation_ticks_`, stretching the pulse.
+The worse one is the opposite.
+
+`_post()` fires only on the 1 → 0 transition of the countdown. An upset that
+*clears* the counter while a coil is energized means that transition never
+happens: the de-energize never runs, the loop remains perfectly healthy, the
+sanity gate sees nothing wrong, and the coil stays energized indefinitely.
+
+Note what this does to §6.4. The range check priced there tests
+`actuation_ticks_ > ACTUATION_TICKS` — it catches too-high and is blind to
+too-low. The defensive check that did not fit would not have covered the worst
+case anyway, which weakens the argument for buying it at the expense of something
+else.
+
+### 7.3 Two mitigations, and the PIC10F320 relay affords one
+
+Both were built and measured on the relay variant, on top of the four-function
+non-blocking build from §6.2 (252 words, 4 spare):
+
+| Build | Relay words | Spare |
+|---|---|---|
+| non-blocking, no mitigation | 252 | 4 |
+| **+ re-assert the safe resting state when idle** | 254 | 2 |
+| **+ withhold the pet during actuation** | 255 | 1 |
+| + both, as two separate tests | — | **does not link** |
+| + both, merged into one `actuation_ticks_ == 0` test | — | **does not link** |
+| + the §6.4 range check | — | **does not link** |
+
+**Withholding the pet** restores §7.1's property exactly:
+
+```c
+#if (ACTUATION_TICKS > 0U)
+        if (0U == actuation_ticks_)
+#endif
+        {
+            CLRWDT();
+        }
+```
+
+The longest un-petted span becomes one tick plus the pulse — 13 ms — which is
+precisely what the existing assertion in each driver already guarantees:
+
+```c
+static_assert((TICK_PERIOD_MS + TQ2_L2_5V_PULSE_MS) < WDT_MIN_PERIOD_MS, ...);
+```
+
+That is a third assertion this redesign promotes rather than retires (compare
+§5.2). It also **subsumes the §6.4 range check for this hazard**: a counter upset
+high withholds the pet until the watchdog fires, so the bound holds without the
+check that does not fit.
+
+**Re-asserting the safe resting state on every idle tick** covers §7.2. It is a
+per-driver notion — the relay's resting state is "both coils low", while the
+x4053 control pins are steady-state signals with nothing to re-assert — so it
+belongs behind a per-variant hook:
+
+```c
+#  define ACTUATION_IDLE() set_relay_coils_low()   /* relay      */
+#  define ACTUATION_IDLE() /* nothing pulses */    /* both x4053 */
+```
+
+It must be a **macro, not a function**. As a function it costs +3 words on
+`cd4053_with_mute` for an empty body the compiler does not elide, and the relay
+build does not link at all; as a macro the analog-switch variants pay nothing and
+the relay pays 2.
+
+**Neither subsumes the other.** Withholding the pet bounds the coil-on time from
+above but does nothing about a counter stuck at zero, because the pet resumes the
+moment it reaches zero. The idle re-drive fixes stuck-at-zero but does not bound a
+counter stuck high, because the loop keeps petting throughout. Together they are
+complete; on the PIC10F320 relay variant they do not fit, including when merged
+into a single comparison at the end of the loop body to share the test.
+
+### 7.4 The blocking form is not as safe as it feels
+
+The intuition holds for the *pulse* and fails for the *steady state*.
+
+If an SEU sets a coil bit in `LATA` after the pulse has completed, the PIC10F320
+re-drives `LATA` only on a debounced press. `docs/pic10f320_special_case.md` §4
+states the consequence directly: the upset "persists — wrong LED, wrong signal
+path, or both — until the next footswitch press re-drives the outputs." For the
+relay that is an unbounded energized coil, in shipping firmware, today.
+
+On the PIC10F322 it is caught: `hw_output_state_intact()` compares the exact latch
+against the expected mask every tick and forces a watchdog reset. That is the one
+defensive check the PIC10F320 omits for flash — the same omission that made §6.3
+cheap. It cuts both ways, and here it cuts against the current design.
+
+So the idle re-drive from §7.3 would **close an existing hole**, not merely
+contain a new one. On this specific axis, non-blocking actuation plus a 2-word
+mitigation is safer than what ships now.
+
+The reset path itself is sound under either scheme, and is worth stating because
+the rest of the argument leans on it: `TRISA` returns to inputs on reset, removing
+drive from the coil pins regardless of `LATA`, and `init()` then drives `LATA` low
+*before* restoring the output directions — so recovery de-energizes the coil and
+does not glitch it on the way back up.
+
+### 7.5 What the watchdog is, and is not, a backstop for
+
+It is tempting to treat abnormal conditions as beyond reach — extreme EMI, thermal
+excursion, "all bets are off, hope the watchdog resets us." That is half right,
+and the half that is wrong matters here.
+
+The watchdog backstops a **hung** CPU. It does not backstop a loop that is running
+correctly, passing every sanity check, petting on schedule, and holding a coil
+energized. That is precisely the state §7.1 and §7.2 describe, and it is reachable
+only because the redesign moved the pulse to the fed side of the pet.
+
+So "hope the watchdog triggers" is not a fallback this design gets for free. It is
+a property that currently exists by accident, that the redesign removes, and that
+costs 3 words to put back deliberately.
+
+### 7.6 It is provable in the lanes that already exist
+
+This does not rest on argument. Both failure modes fit the PIC10F320's existing
+harnesses:
+
+- **Counter stuck high** — `pic10f320-test-fault` already corrupts every guarded
+  SRAM location and requires exactly one real watchdog reset. With the pet
+  withheld, `actuation_ticks_` becomes injectable in that lane on the same terms
+  as `ctx_`.
+- **Counter cleared mid-pulse** — this belongs to the actuation lane rather than
+  the fault lane: corrupt the counter while a coil is energized, and assert both
+  coils are low within one tick.
+
+Note the dependency. `actuation_ticks_` only becomes fault-injectable if something
+makes its corruption *observable*, and with §6.4's range check unaffordable the
+withheld pet is what supplies that.
+
+### 7.7 This changes §4's strongest argument
+
+§4 argues that non-blocking actuation would permit a materially shorter watchdog
+period on both families, and calls that the strongest item in this document. §7.3
+withholds the pet across the actuation window, which requires the watchdog period
+to stay above the pulse — exactly the constraint §4 wanted to remove.
+
+They are the same knob turned in opposite directions, and **only one is
+available.** Between a faster reaction to a hung CPU and a bounded energized coil,
+the coil should win: one is a latency improvement on a fault that is already
+caught, the other is the difference between a caught fault and destroyed hardware.
+§4 stands as written for the analog-switch variants, and does not stand for the
+relay.
+
+### 7.8 What is not established here
+
+- **Whether the PIC10F322 affords both mitigations.** It has 39 spare words on the
+  relay variant against the PIC10F320's 12, and the mitigations cost 2 and 3 words
+  respectively there, so it very likely does — but that is an inference from a
+  different part, not a measurement, and the PIC10F322 spike was not built.
+- **What the TQ2-L2-5V actually survives.** Everything above reasons about
+  *bounds* — unbounded versus one watchdog period. It does not establish what the
+  coil tolerates thermally at a ~160–430 ms worst-case watchdog window, which is
+  a datasheet question this document has not answered and which decides how much
+  the difference between the two mitigations is worth.
+
+---
+
+## 8. Related finding: the stack gate could not measure an ISR build
 
 Discovered while taking the §2.3 measurements, and **fixed in the same commit as
 this document**.
@@ -629,7 +832,7 @@ fails against the pre-fix gate.
 
 ---
 
-## 8. Recommendation
+## 9. Recommendation
 
 **Do not trade self-health checks for an ISR on the PIC10F322.** The purchase
 price is a 511/512-word image with 0 of 8 stack levels spare on the relay
@@ -665,19 +868,33 @@ recoverable — the AVR parts, then the PIC10F322 — and port it here once the 
 has stopped moving. Two of the findings in §6 were only visible *because* this
 part has no margin; that makes it an excellent validator and a poor prototype.
 
-**Settle §6.4 before writing code, not at link time.** Whether
-`actuation_ticks_` is range-checked in the sanity gate decides whether the
-PIC10F320 relay variant builds at all. It is a defensive-layer policy question
-that `docs/pic10f320_special_case.md` §4 has precedent for, and it should be
-answered in that document's terms rather than discovered by the linker.
+**Withhold the watchdog pet across the actuation window, on every target.** This
+is the one item here that protects hardware rather than timing, it costs 3 words,
+and it restores a property the current design has by accident and the redesign
+would remove (§7). It also subsumes the §6.4 range check for the coil hazard,
+which is the cheapest way to resolve that section's three-way choice.
+
+**Settle §6.4 and §7.3 together, before writing code rather than at link time.**
+The PIC10F320 relay variant has room for exactly one of: the range check, the
+withheld pet, or the idle re-drive. Deciding which is a defensive-layer policy
+question that `docs/pic10f320_special_case.md` §4 has precedent for, and it should
+be answered in that document's terms rather than discovered by the linker. On the
+evidence here the withheld pet is the one to buy: it bounds the hazard the other
+two only partly cover, and it is what makes `actuation_ticks_` fault-injectable in
+the existing lane (§7.6).
+
+**Do not treat this proposal as timing-only work.** §1 framed it as a uniformity
+question and §4 as a simplification; §7 shows it also moves a hardware-safety
+boundary on the relay variant. Any decision to proceed should be taken on all
+three, and the relay variant should be the one that decides it.
 
 Note also that the PIC12F675 assessment
 (`docs/pic12f675_feasibility.md` §4.3) is unaffected as to flash but **not** as
-to the stack — see §10.
+to the stack — see §11.
 
 ---
 
-## 9. Reproducing the figures
+## 10. Reproducing the figures
 
 Every number above came from the pinned XC8 in the toolchain table, invoked as
 the Makefile invokes it:
@@ -700,7 +917,7 @@ xc8-cc -mcpu=10F322 -mdfp=<DFP> -std=c99 -O2 \
   `hw_wait_for_tick()` call with the AVR's `if (1U != timer_isr_called_)
   { continue; }` handshake; and snapshot `ctx_` before `debounce_step()`.
 - **§2.3 stack depths** — `test/check_stack_depth_pic.sh <asm> 8 2 <label>`
-  against the generated `.s`, using the fixed gate from §7.
+  against the generated `.s`, using the fixed gate from §8.
 - **Stack depth of both parts** — `STACKDEPTH=8` in
   `<DFP>/xc8/pic/dat/ini/{10f322,12f675}.ini`, corroborated by
   `hwstackdepth="8"` in the corresponding `edc/PIC*.PIC`.
@@ -735,10 +952,21 @@ xc8-cc -mcpu=10F320 -mdfp=<DFP> -std=c99 -O2 \
 - **§6.5 stack depths** — `test/check_stack_depth_pic.sh <asm> 8 2 <label>` on the
   generated `.s`, and `test/pic10f320/return_stack_oracle.py --limit 8 <hex>` on
   the emitted image; both oracles run against both baseline and spike.
+- **§7.3 mitigations** — five further builds on top of the §6.2 four-function
+  source. *Withheld pet*: the trailing `CLRWDT()` wrapped in
+  `#if (ACTUATION_TICKS > 0U) if (0U == actuation_ticks_) #endif { ... }`.
+  *Idle re-drive*: a per-variant `ACTUATION_IDLE()` macro beside each
+  `ACTUATION_TICKS`, invoked from an `else` on the countdown — built both as a
+  macro and as a `hw_actuation_idle()` function, which is where the +3-words-for-
+  an-empty-body figure comes from. *Both*, as two separate tests and again merged
+  into a single `actuation_ticks_ == 0` test at the end of the loop body.
+- **§6.2's delay-loop claim** — the shipping source with `CD4053_MUTE_DELAY_MS`
+  changed from `5U` to `12U` and nothing else, confirming an identical 241-word
+  image and therefore that XC8's generated delay does not grow with the constant.
 
 ---
 
-## 10. Corrections this implies for other documents
+## 11. Corrections this implies for other documents
 
 Recorded, **not applied** — each belongs to the document that owns the claim.
 
@@ -750,9 +978,19 @@ Recorded, **not applied** — each belongs to the document that owns the claim.
 | `phase2_pic_shell.md` §5 | The tick-stealing divergence from the AVR is accepted behaviour. | Still accurate. Worth a forward reference to this document, which proposes removing the divergence rather than accepting it. |
 | `pic10f320_special_case.md` §4 | The output-latch match does not fit and is deliberately omitted. | Still accurate, and this document depends on it (§6.3). Worth recording that non-blocking actuation would make re-adding it strictly more expensive — a third, transient expectation on top of the two-state version that already did not fit. |
 | `pic10f320_special_case.md` §5 | The shared surface is "small, finite and auditable", and the table is all of it. | Accurate today. If this proposal is adopted the table gains an actuation-timing row, and §6.7 records that `pic10f320-test-equiv` would not cover the new state — so the row would be genuinely manual, not merely documented. |
+| `pic10f320_special_case.md` §4 | An `LATA` upset "persists ... until the next footswitch press re-drives the outputs". | Accurate, and §7.4 draws out what it means on the relay variant specifically: an upset that sets a coil bit strands that coil energized with no bound at all. That is a hardware-destruction path rather than a wrong-output path, and it exists in shipping firmware today. The idle re-drive priced in §7.3 would close it for 2 words, independently of whether the rest of this proposal is adopted. |
 
-One correction inside **this** document has already been applied rather than
-recorded: §3.2 previously recommended a two-function `hw_actuation_begin/end(
-effect_state_t)` interface. §6.2 measured that form as unaffordable on the
-PIC10F320, and §3.2 now carries both the four-function recommendation and the
-measurement that overturned the original one.
+Two corrections inside **this** document have been applied rather than recorded.
+Both are cases where a later measurement overturned an earlier recommendation, and
+in both the original claim is left visible next to its limit rather than quietly
+rewritten:
+
+- **§3.2** recommended a two-function `hw_actuation_begin/end(effect_state_t)`
+  interface. §6.2 measured that form as unaffordable on the PIC10F320. §3.2 now
+  carries the four-function recommendation and the measurement that overturned the
+  original.
+- **§4** called a shorter watchdog period the strongest argument in this document.
+  §7.7 establishes that it is unavailable on the relay variant, because bounding
+  the coil-on time requires withholding the pet across the actuation window — the
+  same constraint §4 wanted to remove. The bullet now carries that correction
+  inline.
