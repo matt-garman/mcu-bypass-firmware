@@ -833,6 +833,25 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **The PIC12F675 feasibility assessment recommended an ISR model whose return
+  stack had never been measured.** Its flash/RAM builds and one gpsim trajectory
+  succeeded, but both PIC parts have the same 8-level hardware stack and the
+  throwaway PIC12F675 ISR source and assembly were not retained. The historical
+  parser diagnostic survives, but no numeric current-gate result or complete
+  supporting output does.
+  The document also described a historical `i1_` lexer failure as a current
+  inability to represent interrupt trees, even though the gate now handles them.
+
+  The assessment now establishes Model B as feasible and treats ISR as a
+  candidate pending a reproducible three-variant stack result with the required
+  reserve. Summary, verdict, resource table, gate description, risks,
+  recommendation, validation lanes, sequencing and reproduction notes all make
+  the same distinction: the current gate can compute the result; the inputs and
+  result do not exist. Measurement provenance remains pinned to `0cfc72e`, while
+  the correction records the later gate changes without implying a remeasurement.
+  The non-blocking feasibility document now marks its corresponding correction
+  as applied rather than correcting a live contradiction elsewhere.
+
 - **The PIC hardware-stack gate could silently ignore a direct call whose target
   used an unrecognized prefix.** Its instruction lexer admitted only `_...` and
   XC8's known `iN_...` interrupt duplicates. An in-function call to `x_helper`
