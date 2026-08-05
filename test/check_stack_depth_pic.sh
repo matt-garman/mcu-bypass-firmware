@@ -135,7 +135,25 @@ report=$(
 	/;psect for function / { n = split($0, a, "function "); cur = a[n]; sub(/[ \t]+$/, "", cur); next }
 	# A call pushes a return address. "callstack" is a directive, not a call:
 	# the trailing separator in each alternative keeps it from matching.
-	/^[ \t]+(fcall|call|lcall|pcall)[ \t]+_/ {
+	#
+	# Call targets are C symbols, which XC8 spells with a leading underscore --
+	# EXCEPT the copies it makes of a non-reentrant function that is reachable
+	# from more than one call graph (advisory 1510: "appears in multiple call
+	# graphs and has been duplicated by the compiler"). Those are named by
+	# interrupt level, i1_<name> / i2_<name>, with no underscore in front. They
+	# appear the moment an ISR shares a helper with main, so the pattern has to
+	# admit them, or the edge from the ISR into its own copy is silently lost.
+	#
+	# It is deliberately NOT broadened to "any identifier": startup code calls
+	# runtime helpers such as `clear_ram0` from outside any function psect, and
+	# the leading-underscore requirement is exactly what keeps those from
+	# parsing as calls (they would trip the "call outside any function" check).
+	#
+	# If XC8 ever mints some third prefix this pattern does not know, the lost
+	# edge leaves a function nothing calls, and the root/entry cross-check in
+	# END rejects it -- so an unrecognised naming scheme fails CLOSED with a
+	# structural error. It can never quietly under-count the depth.
+	/^[ \t]+(fcall|call|lcall|pcall)[ \t]+(_|i[0-9]+_)/ {
 		t = $2
 		if (cur == "") { bad = bad "call outside any function: " $0 "\n"; next }
 		add_edge(cur, t); called[t] = 1; next

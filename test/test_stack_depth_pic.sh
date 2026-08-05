@@ -10,12 +10,14 @@ set -euo pipefail
 # that quietly stops running. Every case below is a synthetic .s fixture in the
 # format XC8 emits, so this runs inside `make test` with no toolchain at all.
 #
-# It asserts the gate ACCEPTS a well-formed in-budget program and REJECTS each
-# way the analysis can be wrong: over budget, recursion, an overflowing build
-# (XC8 zeroes its callstack directives), a corroboration mismatch between the
-# two oracles, an unresolvable or indirect call, a missing entry point, and a
-# device pack with no declared depth. A gate that has never rejected anything is
-# an assumption, not a check.
+# It asserts the gate ACCEPTS the shapes a real program takes -- in budget, at
+# the exact boundary, and with an ISR (whose tree sums with the main one and
+# whose duplicated helpers XC8 names without a leading underscore) -- and that
+# it REJECTS each way the analysis can be wrong: over budget, recursion, an
+# overflowing build (XC8 zeroes its callstack directives), a corroboration
+# mismatch between the two oracles, an unresolvable or indirect call, a missing
+# entry point, and a device pack with no declared depth. A gate that has never
+# rejected anything is an assumption, not a check.
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 GATE="$ROOT/check_stack_depth_pic.sh"
@@ -166,12 +168,35 @@ emit_fn "$f" _ihelp "_isr"
 emit_callstack "$f" 5
 expect_pass "isr-tree-sums" "$f" 8 2 3
 
-# --- 12. unusable inputs ------------------------------------------------------
+# --- 12. XC8's interrupt-context duplicate is a real call edge ---------------
+# A non-reentrant helper reachable from BOTH main and an ISR is duplicated by
+# XC8 (advisory 1510), and the copy is named i1_<name> -- with no leading
+# underscore, unlike every other C symbol it emits. Case 11 above cannot catch a
+# parser that requires that underscore, because its synthetic helper is spelled
+# _ihelp; this fixture uses the name the compiler actually produces.
+#
+# Dropping the _isr -> i1_help edge does not under-count the depth: it leaves
+# i1_help with no callers, and the root/entry cross-check rejects that. The
+# symptom is a confusing "is never called but XC8 does not list it as an entry
+# point" pointing at the firmware, when the fault is in this parser.
+#
+# main: _main -> _a -> _help = 2 pushes. ISR: _isr -> i1_help = 1, +1 for the
+# push hardware makes on entry = 2. Trees sum: 4.
+f="$work/isrdup.s"; : > "$f"
+emit_fn "$f" _main   "Startup code after reset" _a
+emit_fn "$f" _a      "_main"                    _help
+emit_fn "$f" _help   "_a"
+emit_fn "$f" _isr    "Interrupt level 1"        i1_help
+emit_fn "$f" i1_help "_isr"
+emit_callstack "$f" 4
+expect_pass "xc8-i1-duplicate" "$f" 8 2 4
+
+# --- 13. unusable inputs ------------------------------------------------------
 : > "$work/empty.s"
 expect_fail "empty-file"    "$work/empty.s"   8 2 "generated assembly is empty"
 expect_fail "missing-file"  "$work/absent.s"  8 2 "generated assembly not found"
 
-# --- 13. a device pack that declares no depth must not fall back to a guess ---
+# --- 14. a device pack that declares no depth must not fall back to a guess ---
 printf 'ARCH=PIC14\n' > "$work/nodepth.ini"
 expect_fail "ini-without-stackdepth" "$work/ok.s" "$work/nodepth.ini" 2 "no STACKDEPTH="
 printf 'ARCH=PIC14\nSTACKDEPTH=8\n' > "$work/good.ini"
