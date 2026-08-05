@@ -833,6 +833,12 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **The non-blocking feasibility headline said the PIC10F320 spike was measured
+  "end to end", overstating its evidence.** The spike was compiled, linked,
+  flash-budgeted and stack-gated, but no actuation, lock-step, I/O, fault, soak or
+  release-qualification lane ran against it. The executive summary now states
+  that exact boundary and points to the existing §6.8 scope record.
+
 - **The PIC hardware-stack gate rejected every real image after it started
   reading `psect` directives.** Tracking "inside a function psect" ended the
   current function at *any* `psect` directive, but XC8 re-selects a function's

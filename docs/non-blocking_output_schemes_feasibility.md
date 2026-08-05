@@ -32,11 +32,12 @@ unpriced — so the decision to start (or not start) can be taken on evidence.
    `hw_is_sanity_check_failed()` must learn about it (§5.1). That cost is
    **unmeasured** there and is the first thing a spike should price.
 6. **The PIC10F320 — the most constrained part — fits it, and is the cheapest
-   part to convert.** Measured end to end (§6): +0 / +8 / +8 words, the return
-   stack unchanged, and §5's transient-state cost is *zero* because this part
-   already omits the output-latch check that the cost falls on. What does not fit
-   is range-checking the new state variable: that costs 4 words and puts the
-   relay variant exactly on 256, unlinkable (§6.4).
+   part to convert.** Compiled, linked, flash-budgeted and stack-gated, but not
+   run through functional or qualification lanes (§6, especially §6.8): +0 / +8
+   / +8 words, the return stack unchanged, and §5's transient-state cost is
+   *zero* because this part already omits the output-latch check that the cost
+   falls on. What does not fit is range-checking the new state variable: that
+   costs 4 words and puts the relay variant exactly on 256, unlinkable (§6.4).
 7. **It drops a relay-coil safety property that nothing else in this document
    noticed.** The blocking form cannot pet the watchdog while a coil is energized;
    the non-blocking form pets it twelve times. The coil-on window goes from
