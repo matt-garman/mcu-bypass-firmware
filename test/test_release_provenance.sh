@@ -351,44 +351,208 @@ mapfile -t ci_snapshot_lines < <(grep -nF \
 	'cp -a -- "${image_dirs[$i]}"/. "$fresh_dir"/' "$RELEASE_WORKFLOW")
 mapfile -t ci_rename_lines < <(grep -nF \
 	'scripts/verify-rename-identity.sh --compare-report "$dir" \' "$RELEASE_WORKFLOW")
+mapfile -t ci_frozen_rename_lines < <(grep -nF \
+	'"$publish/RENAME_IDENTITY.md" "$RELEASE_TAG" "${images[@]}" \' \
+	"$RELEASE_WORKFLOW")
 mapfile -t ci_repro_lines < <(grep -nF \
 	'scripts/verify-release-images.sh "$dir"' "$RELEASE_WORKFLOW")
 mapfile -t ci_publish_snapshot_lines < <(grep -nF \
 	'cp -p -- "$dir"/*.hex' "$RELEASE_WORKFLOW")
+mapfile -t ci_state_output_lines < <(grep -nF \
+	'echo "rename_identity_applicable=$rename_applicable"' "$RELEASE_WORKFLOW")
+mapfile -t ci_tag_verify_lines < <(grep -nF \
+	'scripts/verify-release-tag-target.sh origin' "$RELEASE_WORKFLOW")
+mapfile -t ci_rename_asset_lines < <(grep -nF \
+	'assets+=("$rename_report")' "$RELEASE_WORKFLOW")
+mapfile -t ci_publish_lines < <(grep -nF \
+	'gh release create "$tag"' "$RELEASE_WORKFLOW")
 [ "${#ci_final_build_lines[@]}" -eq 1 ] \
 	&& [ "${#ci_snapshot_lines[@]}" -eq 1 ] \
 	&& [ "${#ci_rename_lines[@]}" -eq 1 ] \
+	&& [ "${#ci_frozen_rename_lines[@]}" -eq 1 ] \
 	&& [ "${#ci_repro_lines[@]}" -eq 1 ] \
 	&& [ "${#ci_publish_snapshot_lines[@]}" -eq 1 ] \
-	|| fail "tag-CI rebuild/rename/reproduction/snapshot markers are missing or ambiguous"
+	&& [ "${#ci_state_output_lines[@]}" -eq 1 ] \
+	&& [ "${#ci_tag_verify_lines[@]}" -eq 1 ] \
+	&& [ "${#ci_rename_asset_lines[@]}" -eq 1 ] \
+	&& [ "${#ci_publish_lines[@]}" -eq 1 ] \
+	|| fail "tag-CI rebuild/rename/reproduction/snapshot/publication markers are missing or ambiguous"
 ci_final_build_line=${ci_final_build_lines[0]%%:*}
 ci_snapshot_line=${ci_snapshot_lines[0]%%:*}
 ci_rename_line=${ci_rename_lines[0]%%:*}
+ci_frozen_rename_line=${ci_frozen_rename_lines[0]%%:*}
 ci_repro_line=${ci_repro_lines[0]%%:*}
 ci_publish_snapshot_line=${ci_publish_snapshot_lines[0]%%:*}
+ci_state_output_line=${ci_state_output_lines[0]%%:*}
+ci_tag_verify_line=${ci_tag_verify_lines[0]%%:*}
+ci_rename_asset_line=${ci_rename_asset_lines[0]%%:*}
+ci_publish_line=${ci_publish_lines[0]%%:*}
 [ "$ci_final_build_line" -lt "$ci_snapshot_line" ] \
 	&& [ "$ci_snapshot_line" -lt "$ci_rename_line" ] \
-	&& [ "$ci_rename_line" -lt "$ci_repro_line" ] \
+	&& [ "$ci_rename_line" -lt "$ci_frozen_rename_line" ] \
+	&& [ "$ci_frozen_rename_line" -lt "$ci_repro_line" ] \
 	&& [ "$ci_repro_line" -lt "$ci_publish_snapshot_line" ] \
-	|| fail "tag CI does not compare regenerated rename evidence between rebuild and reproduction"
+	&& [ "$ci_publish_snapshot_line" -lt "$ci_state_output_line" ] \
+	&& [ "$ci_state_output_line" -lt "$ci_tag_verify_line" ] \
+	&& [ "$ci_tag_verify_line" -lt "$ci_rename_asset_line" ] \
+	&& [ "$ci_rename_asset_line" -lt "$ci_publish_line" ] \
+	|| fail "tag CI does not preserve compare-before-freeze-before-publish ordering"
 ci_rename_block=$(awk '/- name: Verify committed images and rename evidence reproduce bit-for-bit/ { in_block=1 }
 	/# --- re-run the gates on the clean runner/ { in_block=0 }
+	in_block { print }' "$RELEASE_WORKFLOW")
+ci_publish_block=$(awk '/- name: Publish GitHub Release/ { in_block=1 }
 	in_block { print }' "$RELEASE_WORKFLOW")
 for required in \
 	'set -euo pipefail' \
 	'image_dirs_text=$(make -s print-RELEASE_IMAGE_DIRS)' \
 	'shopt -s nullglob dotglob' \
 	'cp -a -- "${image_dirs[$i]}"/. "$fresh_dir"/' \
-	'"$verified_rename_root/RENAME_IDENTITY.md" "$RELEASE_TAG"' \
+	'"$publish/RENAME_IDENTITY.md" "$RELEASE_TAG" "${images[@]}"' \
+	'mapfile -t rename_fields < "$rename_status"' \
+	'rename_identity_applicable=1)' \
+	'rename_identity_applicable=0)' \
+	'[ "$frozen_rename_sha256" = "$rename_sha256" ]' \
+	'echo "rename_identity_applicable=$rename_applicable"' \
+	'echo "rename_identity_sha256=$rename_sha256"' \
 	'scripts/verify-release-images.sh "$dir" "${fresh_dirs[@]}"'; do
 	[[ "$ci_rename_block" == *"$required"* ]] \
 		|| fail "tag-CI rename step omits required clean-image wiring: $required"
 done
+for required in \
+	'RENAME_IDENTITY_APPLICABLE: ${{ steps.repro.outputs.rename_identity_applicable }}' \
+	'RENAME_IDENTITY_SHA256: ${{ steps.repro.outputs.rename_identity_sha256 }}' \
+	'case "$RENAME_IDENTITY_APPLICABLE" in' \
+	'[ "$actual_rename_sha256" = "$RENAME_IDENTITY_SHA256" ]' \
+	'assets+=("$rename_report")' \
+	'"${assets[@]}"' \
+	'inapplicable release contains a frozen rename report'; do
+	[[ "$ci_publish_block" == *"$required"* ]] \
+		|| fail "tag-CI publication omits required conditional rename asset wiring: $required"
+done
+[[ "$ci_rename_block" != *'"$dir/RENAME_IDENTITY.md"'* ]] \
+	|| fail "tag CI freezes rename evidence by reopening the mutable committed report"
 if grep -Eq '^[[:space:]]+(continue-on-error|if):' <<<"$ci_rename_block" \
 		|| grep -Fq '|| true' <<<"$ci_rename_block"; then
 	fail "tag-CI rename comparison can be skipped or ignored"
 fi
+if grep -Eq '^[[:space:]]+(continue-on-error|if):' <<<"$ci_publish_block" \
+		|| grep -Fq '|| true' <<<"$ci_publish_block"; then
+	fail "tag-CI rename publication can be skipped or ignored"
+fi
 checks=$((checks + 1))
+
+# Execute the workflow's publication shell itself with fake tag verification
+# and GitHub CLI commands. This proves the step-output consumer constructs the
+# final asset vector conditionally rather than only looking right to grep.
+publish_step="$work/publish-step.sh"
+awk '
+	/- name: Publish GitHub Release/ { in_step=1 }
+	in_step && /^        run: \|$/ { in_run=1; next }
+	in_run && /^          / { print substr($0, 11); next }
+	in_run { exit }
+' "$RELEASE_WORKFLOW" > "$publish_step"
+[ -s "$publish_step" ] || fail "could not extract release publication shell"
+bash -n "$publish_step" || fail "extracted release publication shell is invalid"
+
+publish_fixture="$work/publish fixture"
+publish_assets="$publish_fixture/frozen assets"
+publish_bin="$publish_fixture/bin"
+publish_args="$publish_fixture/gh.args"
+mkdir -p "$publish_fixture/scripts" "$publish_assets" "$publish_bin"
+cat > "$publish_fixture/scripts/verify-release-tag-target.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$#" -eq 3 ]
+printf '%s\n' "$*" > "$TAG_VERIFY_LOG"
+EOF
+cat > "$publish_bin/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "$GH_ARGS"
+EOF
+chmod 750 "$publish_fixture/scripts/verify-release-tag-target.sh" \
+	"$publish_bin/gh"
+printf ':00000001FF\n' > "$publish_assets/a.hex"
+printf 'dummy sums\n' > "$publish_assets/SHA256SUMS"
+printf 'dummy signature\n' > "$publish_assets/SHA256SUMS.asc"
+printf '# Test release\n' > "$publish_assets/MANIFEST.md"
+printf 'dummy qualification\n' > "$publish_assets/QUALIFICATION"
+publish_report="$publish_assets/RENAME_IDENTITY.md"
+saved_publish_report="$work/saved-publish-report"
+printf '# Verified rename report\n' > "$saved_publish_report"
+publish_hash=$(sha256sum -- "$saved_publish_report")
+publish_hash=${publish_hash%% *}
+tag_verify_log="$work/tag-verify.log"
+
+run_publish_step() {
+	local applicable=$1 digest=$2
+	rm -f "$publish_args" "$tag_verify_log"
+	(
+		cd "$publish_fixture"
+		PATH="$publish_bin:$PATH" GH_ARGS="$publish_args" \
+			TAG_VERIFY_LOG="$tag_verify_log" \
+			RELEASE_DIR="$publish_assets" RELEASE_TAG=v0.9.8 \
+			VERIFIED_RELEASE_COMMIT=0000000000000000000000000000000000000000 \
+			RENAME_IDENTITY_APPLICABLE="$applicable" \
+			RENAME_IDENTITY_SHA256="$digest" \
+			bash "$publish_step"
+	)
+}
+
+expect_publish_fail() {
+	local label=$1 applicable=$2 digest=$3 expected=$4
+	if run_publish_step "$applicable" "$digest" \
+			>"$work/publish-fail.out" 2>&1; then
+		fail "$label: invalid frozen publication state was accepted"
+	fi
+	grep -Fq "$expected" "$work/publish-fail.out" \
+		|| fail "$label failed without '$expected': $(<"$work/publish-fail.out")"
+	[ ! -e "$publish_args" ] \
+		|| fail "$label invoked gh after rejecting the frozen report"
+	checks=$((checks + 1))
+}
+
+cp "$saved_publish_report" "$publish_report"
+run_publish_step 1 "$publish_hash" >"$work/publish.out" 2>"$work/publish.err" \
+	|| fail "applicable frozen report did not publish: $(<"$work/publish.err")"
+[ "$(grep -Fxc "$publish_report" "$publish_args")" -eq 1 ] \
+	|| fail "applicable publication did not pass RENAME_IDENTITY.md to gh exactly once"
+for asset in "$publish_assets/a.hex" "$publish_assets/SHA256SUMS" \
+		"$publish_assets/SHA256SUMS.asc" "$publish_assets/MANIFEST.md" \
+		"$publish_assets/QUALIFICATION"; do
+	grep -Fxq "$asset" "$publish_args" \
+		|| fail "applicable publication omitted base asset: $asset"
+done
+checks=$((checks + 1))
+
+rm "$publish_report"
+run_publish_step 0 '' >"$work/publish.out" 2>"$work/publish.err" \
+	|| fail "inapplicable release without a report did not publish: $(<"$work/publish.err")"
+if grep -Fxq "$publish_report" "$publish_args"; then
+	fail "inapplicable publication passed RENAME_IDENTITY.md to gh"
+fi
+checks=$((checks + 1))
+
+expect_publish_fail "missing applicable frozen report" 1 "$publish_hash" \
+	"frozen rename report is missing, empty, or not a regular file"
+
+ln -s "$saved_publish_report" "$publish_report"
+expect_publish_fail "symlinked applicable frozen report" 1 "$publish_hash" \
+	"frozen rename report is missing, empty, or not a regular file"
+rm "$publish_report"
+
+printf '# Changed rename report\n' > "$publish_report"
+expect_publish_fail "changed applicable frozen report" 1 "$publish_hash" \
+	"frozen rename report changed after verification"
+rm "$publish_report"
+
+cp "$saved_publish_report" "$publish_report"
+expect_publish_fail "stale inapplicable frozen report" 0 '' \
+	"inapplicable release contains a frozen rename report"
+rm "$publish_report"
+
+expect_publish_fail "invalid frozen applicability" invalid '' \
+	"invalid frozen rename applicability state"
 
 # Exercise the temporal defect directly. The first comparison passes over a
 # complete byte-identical v0.9.8 fixture; changing one image afterward must make
@@ -468,11 +632,14 @@ expect_rename_report_fail() {
 	"$verified_rename_report" v0.9.8 "${rename_paths[@]}" \
 	>"$work/rename-compare.out" \
 	|| fail "correct committed rename evidence did not match its regeneration"
-grep -Fq 'committed report matches CI-regenerated evidence for v0.9.8' \
-	"$work/rename-compare.out" \
-	|| fail "successful rename report comparison omitted its verdict"
 cmp -s "$valid_rename_report" "$verified_rename_report" \
 	|| fail "successful comparison did not retain the exact verified report"
+valid_rename_hash=$(sha256sum -- "$valid_rename_report")
+valid_rename_hash=${valid_rename_hash%% *}
+printf 'rename_identity_applicable=1\nrename_identity_sha256=%s\n' \
+	"$valid_rename_hash" > "$work/rename-compare.expected"
+cmp -s "$work/rename-compare.expected" "$work/rename-compare.out" \
+	|| fail "applicable rename comparison returned malformed status"
 checks=$((checks + 1))
 
 rm "$committed_rename_release/RENAME_IDENTITY.md"
@@ -581,9 +748,10 @@ rm -f "$verified_rename_report"
 	"$verified_rename_report" v0.9.9 "${rename_paths[@]}" \
 	>"$work/rename-inapplicable.out" \
 	|| fail "an inapplicable later release incorrectly required rename evidence"
-grep -Fq 'rename identity: not applicable to v0.9.9' \
-	"$work/rename-inapplicable.out" \
-	|| fail "inapplicable rename report comparison omitted its verdict"
+printf 'rename_identity_applicable=0\nrename_identity_sha256=\n' \
+	> "$work/rename-inapplicable.expected"
+cmp -s "$work/rename-inapplicable.expected" "$work/rename-inapplicable.out" \
+	|| fail "inapplicable rename comparison returned malformed status"
 [ ! -e "$verified_rename_report" ] && [ ! -L "$verified_rename_report" ] \
 	|| fail "inapplicable rename comparison retained a report"
 checks=$((checks + 1))

@@ -28,8 +28,8 @@ name: Release
 #      the MANIFEST claims;
 #   5. rechecks the protected remote tag's object, pinned-key signature and
 #      target, then publishes a GitHub Release with the images, SHA256SUMS.asc,
-#      MANIFEST,
-#      and the machine-verified QUALIFICATION record.
+#      MANIFEST, the machine-verified QUALIFICATION record, and the verified
+#      RENAME_IDENTITY.md when the one-shot rename check applies.
 #
 # The runner is pinned to ubuntu-24.04 so the toolchain matches TOOLCHAIN.adoc;
 # byte-exact reproduction depends on that pin (esp. avr-gcc + binutils-avr).
@@ -252,9 +252,10 @@ jobs:
           ((${#image_dirs[@]} > 0)) \
             || { echo "::error::Makefile RELEASE_IMAGE_DIRS is empty"; exit 1; }
           fresh_root="${RUNNER_TEMP}/fresh-release-images"
-          verified_rename_root="${RUNNER_TEMP}/verified-rename"
-          rm -rf "$fresh_root" "$verified_rename_root"
-          mkdir -p "$fresh_root" "$verified_rename_root"
+          publish="${RUNNER_TEMP}/verified-release"
+          rename_status="${RUNNER_TEMP}/rename-identity.status"
+          rm -rf "$fresh_root" "$publish" "$rename_status"
+          mkdir -p "$fresh_root" "$publish"
           fresh_dirs=()
           images=()
           shopt -s nullglob dotglob
@@ -270,8 +271,43 @@ jobs:
           ((${#images[@]} > 0)) \
             || { echo "::error::clean rebuild produced no release images"; exit 1; }
           scripts/verify-rename-identity.sh --compare-report "$dir" \
-            "$verified_rename_root/RENAME_IDENTITY.md" "$RELEASE_TAG" \
-            "${images[@]}"
+            "$publish/RENAME_IDENTITY.md" "$RELEASE_TAG" "${images[@]}" \
+            > "$rename_status"
+          mapfile -t rename_fields < "$rename_status"
+          [ "${#rename_fields[@]}" -eq 2 ] \
+            || { echo "::error::rename verifier returned malformed status"; exit 1; }
+          case "${rename_fields[0]}" in
+          rename_identity_applicable=1)
+            rename_applicable=1
+            [[ "${rename_fields[1]}" =~ ^rename_identity_sha256=([0-9a-f]{64})$ ]] \
+              || { echo "::error::rename verifier returned malformed applicable digest"; exit 1; }
+            rename_sha256=${BASH_REMATCH[1]}
+            ;;
+          rename_identity_applicable=0)
+            rename_applicable=0
+            [ "${rename_fields[1]}" = rename_identity_sha256= ] \
+              || { echo "::error::inapplicable rename status carried a digest"; exit 1; }
+            rename_sha256=
+            ;;
+          *)
+            echo "::error::rename verifier returned invalid applicability"
+            exit 1
+            ;;
+          esac
+
+          frozen_rename="$publish/RENAME_IDENTITY.md"
+          if [ "$rename_applicable" -eq 1 ]; then
+            test -f "$frozen_rename" && test ! -L "$frozen_rename" \
+              && test -s "$frozen_rename" \
+              || { echo "::error::verified rename report was not retained as a regular file"; exit 1; }
+            frozen_rename_sha256=$(sha256sum -- "$frozen_rename")
+            frozen_rename_sha256=${frozen_rename_sha256%% *}
+            [ "$frozen_rename_sha256" = "$rename_sha256" ] \
+              || { echo "::error::frozen rename report differs from verified bytes"; exit 1; }
+          elif [ -e "$frozen_rename" ] || [ -L "$frozen_rename" ]; then
+            echo "::error::inapplicable rename check retained an unexpected report"
+            exit 1
+          fi
 
           # Enforce FOUR-way equality for release images: the canonical
           # RELEASE_IMAGES set, the actual committed .hex files, the checksum
@@ -288,12 +324,13 @@ jobs:
           # Publication consumes only this snapshot, never the mutable tree.
           test -f "$dir/MANIFEST.md" && test ! -L "$dir/MANIFEST.md" \
             || { echo "::error::$dir/MANIFEST.md is missing or not a regular file"; exit 1; }
-          publish="${RUNNER_TEMP}/verified-release"
-          rm -rf "$publish"
-          mkdir -p "$publish"
           cp -p -- "$dir"/*.hex "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \
             "$dir/MANIFEST.md" "$dir/QUALIFICATION" "$publish"/
-          echo "dir=$publish" >> "$GITHUB_OUTPUT"
+          {
+            echo "dir=$publish"
+            echo "rename_identity_applicable=$rename_applicable"
+            echo "rename_identity_sha256=$rename_sha256"
+          } >> "$GITHUB_OUTPUT"
 
       # --- re-run the gates on the clean runner -----------------------------
       # STRICT_TOOLS=1 throughout: this is THE public attestation, so every gate
@@ -344,6 +381,8 @@ jobs:
           RELEASE_DIR: ${{ steps.repro.outputs.dir }}
           RELEASE_TAG: ${{ github.ref_name }}
           VERIFIED_RELEASE_COMMIT: ${{ steps.rel.outputs.commit }}
+          RENAME_IDENTITY_APPLICABLE: ${{ steps.repro.outputs.rename_identity_applicable }}
+          RENAME_IDENTITY_SHA256: ${{ steps.repro.outputs.rename_identity_sha256 }}
         run: |
           set -euo pipefail
           dir=$RELEASE_DIR
@@ -352,6 +391,33 @@ jobs:
             "$dir/MANIFEST.md" "$dir/QUALIFICATION" )
           notes="$dir/MANIFEST.md"; [ -f "$notes" ] || notes=/dev/null
           scripts/verify-release-tag-target.sh origin "$tag" "$VERIFIED_RELEASE_COMMIT"
+          rename_report="$dir/RENAME_IDENTITY.md"
+          case "$RENAME_IDENTITY_APPLICABLE" in
+          1)
+            [[ "$RENAME_IDENTITY_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+              || { echo "::error::applicable rename report has an invalid expected digest"; exit 1; }
+            test -f "$rename_report" && test ! -L "$rename_report" \
+              && test -s "$rename_report" \
+              || { echo "::error::frozen rename report is missing, empty, or not a regular file"; exit 1; }
+            actual_rename_sha256=$(sha256sum -- "$rename_report")
+            actual_rename_sha256=${actual_rename_sha256%% *}
+            [ "$actual_rename_sha256" = "$RENAME_IDENTITY_SHA256" ] \
+              || { echo "::error::frozen rename report changed after verification"; exit 1; }
+            assets+=("$rename_report")
+            ;;
+          0)
+            [ -z "$RENAME_IDENTITY_SHA256" ] \
+              || { echo "::error::inapplicable rename report has an unexpected digest"; exit 1; }
+            if [ -e "$rename_report" ] || [ -L "$rename_report" ]; then
+              echo "::error::inapplicable release contains a frozen rename report"
+              exit 1
+            fi
+            ;;
+          *)
+            echo "::error::invalid frozen rename applicability state"
+            exit 1
+            ;;
+          esac
           gh release create "$tag" \
             --title "Firmware $tag" \
             --notes-file "$notes" \

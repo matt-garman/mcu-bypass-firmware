@@ -75,7 +75,8 @@ if [ "${1:-}" = "--compare-report" ]; then
 		if [ -e "$COMMITTED_REPORT" ] || [ -L "$COMMITTED_REPORT" ]; then
 			die "rename identity is not applicable to $COMPARE_VERSION, but committed evidence exists: $COMMITTED_REPORT"
 		fi
-		printf '%s\n' "$first_line"
+		printf 'rename_identity_applicable=0\n'
+		printf 'rename_identity_sha256=\n'
 		exit 0
 		;;
 	'# '*) ;;
@@ -93,6 +94,10 @@ if [ "${1:-}" = "--compare-report" ]; then
 		|| die "committed rename-evidence snapshot is empty or not a regular file"
 	cmp -s -- "$GENERATED_REPORT" "$COMMITTED_SNAPSHOT" \
 		|| die "committed rename evidence does not match the CI-regenerated report: $COMMITTED_REPORT"
+	verified_hash=$(sha256sum -- "$GENERATED_REPORT")
+	verified_hash=${verified_hash%% *}
+	[[ "$verified_hash" =~ ^[0-9a-f]{64}$ ]] \
+		|| die "cannot hash regenerated rename evidence"
 	# The output must never be reopened through a pathname that appeared after
 	# the initial absence check. Both names are on the same filesystem, so an
 	# exclusive hard link retains these exact bytes or fails without opening an
@@ -101,10 +106,13 @@ if [ "${1:-}" = "--compare-report" ]; then
 		|| die "cannot retain verified rename evidence: $VERIFIED_REPORT"
 	[ -f "$VERIFIED_REPORT" ] && [ ! -L "$VERIFIED_REPORT" ] \
 		&& [ -s "$VERIFIED_REPORT" ] \
-		&& cmp -s -- "$GENERATED_REPORT" "$VERIFIED_REPORT" \
 		|| die "retained rename evidence does not match the verified report: $VERIFIED_REPORT"
-	printf 'rename identity: committed report matches CI-regenerated evidence for %s.\n' \
-		"$COMPARE_VERSION"
+	retained_hash=$(sha256sum -- "$VERIFIED_REPORT")
+	retained_hash=${retained_hash%% *}
+	[ "$retained_hash" = "$verified_hash" ] \
+		|| die "retained rename evidence does not match the verified digest: $VERIFIED_REPORT"
+	printf 'rename_identity_applicable=1\n'
+	printf 'rename_identity_sha256=%s\n' "$verified_hash"
 	exit 0
 fi
 
