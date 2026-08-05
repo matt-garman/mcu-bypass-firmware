@@ -438,8 +438,9 @@ jobs:
       - name: Assert ATtiny202 images built (fail loud, do NOT skip)
         run: |
           # Ask the Makefile for the canonical basenames rather than composing
-          # them here: the image stage token is not the variant token, so a
-          # hand-built name would silently stop matching after a rename.
+          # them here. The output-stage field is exactly the variant name, but a
+          # second copy of the prefix/MCU/stage composition could drift after a
+          # future naming change.
           for hex in $(make -s print-XT_RELEASE_IMAGES); do
             test -f "build_avr_xt/$hex" \
               || { echo "::error::missing build_avr_xt/$hex (DFP fetch or build failed)"; exit 1; }

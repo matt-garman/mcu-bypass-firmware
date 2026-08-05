@@ -12,7 +12,8 @@
 # Usage:
 #   run_gpsim_power_on_pressed.sh <hexfile>
 #
-#   <hexfile>   a built PIC HEX (build_pic10f322/bypass_<v>_pic10f322.hex). Only RA0/RA3
+#   <hexfile>   a built PIC HEX, for example
+#               build_pic10f322/bypass-pic10f322-cd4053_simple.hex. Only RA0/RA3
 #               are asserted -- identical across all three variants -- so no
 #               per-variant control-pin pattern is needed here.
 #

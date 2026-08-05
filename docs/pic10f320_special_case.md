@@ -113,16 +113,16 @@ only one of:
 
 Exact `TRISA` was ported because it turned out to cost **one word** per variant.
 It also *subsumes* the older per-pin check, which is why it was nearly free — and
-it closed a real blind spot, cd4053-simple's spare RA2 pin, which the previous
+it closed a real blind spot, `cd4053_simple`'s spare RA2 pin, which the previous
 per-variant mask did not cover.
 
 The output-latch match **does not fit and is deliberately omitted**. Even in the
 leanest formulation that preserves the check's meaning it overruns 256 words on
-two of the three variants; only cd4053-simple would fit. Both options were priced
+two of the three variants; only `cd4053_simple` would fit. Both options were priced
 on the real toolchain before the decision was taken, and the per-variant word
 counts are tabulated in `docs/pic10f320_validation.md` §4.
 
-Taking it on cd4053-simple alone was considered and rejected. A defensive layer
+Taking it on `cd4053_simple` alone was considered and rejected. A defensive layer
 that differs *between variants of the same firmware* is worse than a uniform,
 documented omission: the fault harness and the mutation topology would both need
 per-variant expected counts, and this document would have to explain a three-way

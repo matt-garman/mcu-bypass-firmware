@@ -112,7 +112,7 @@ are PORTA bit indices.
 The bit positions differ from AVR for *every* logical pin — which is why pin
 assignments live in a per-MCU pin map (`src/bypass_pins_pic10f322.h`) rather
 than in the drivers. The relay and mute variants use all three output pins
-(zero spare); cd4053-simple leaves RA2 as a spare driven low, which the
+(zero spare); `cd4053_simple` leaves RA2 as a spare driven low, which the
 integrity checks still cover (see §4).
 
 ---
@@ -144,7 +144,7 @@ obvious version:
 
 - **`hw_output_state_intact` compares the complete implemented `TRISA` state,
   not just the caller-required pins.** A subset check misses a direction flip on
-  a *spare* output — on cd4053-simple, RA2 is driven low and is not in the
+  a *spare* output — on `cd4053_simple`, RA2 is driven low and is not in the
   required mask, so a `TRISA` upset would float it invisibly. The latch half is
   equally deliberate: `LATA` still reads the correct value when a pin has been
   flipped to an input, so direction and latch must both be checked.

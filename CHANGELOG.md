@@ -833,6 +833,13 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **Five active surfaces still used pre-v0.9.8 image or variant vocabulary.** The
+  two gpsim wrapper usage blocks now show canonical MCU-qualified basenames; the
+  PIC10F320 special-case and PIC shell notes use `cd4053_simple`; and ATtiny202 CI
+  now correctly says the output-stage field is exactly the variant name while
+  still deriving complete basenames from the Makefile. Historical release
+  evidence, migration tables and old feasibility records remain unchanged.
+
 - **The non-blocking feasibility headline said the PIC10F320 spike was measured
   "end to end", overstating its evidence.** The spike was compiled, linked,
   flash-budgeted and stack-gated, but no actuation, lock-step, I/O, fault, soak or
