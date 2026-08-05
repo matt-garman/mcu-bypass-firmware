@@ -22,11 +22,18 @@ taken on evidence rather than on part-number adjacency.
    CPU core generation with a different peripheral set, so the hardware shell is
    a rewrite, the pin map must change for an electrical reason, and the tick and
    watchdog become coupled in a way they are not on the 10F32x.
-4. The validation tooling divides cleanly into three piles: lanes that port for
+4. That flash headroom buys something the PIC10F322 can no longer afford: the
+   **AVR's ISR-driven concurrency model**, where a timer ISR keeps integrating
+   the footswitch *through* a blocking relay or mute actuation. Measured both
+   ways on both parts (§4.3). This is the finding that reframes the port — the
+   12F675's case stops being "a third PIC" and becomes "the first PIC that can
+   run the AVR's concurrency model".
+5. The validation tooling divides cleanly into three piles: lanes that port for
    free, lanes that need a **device-parameterization pass** on shared test cores
    that currently hard-code 10F32x register addresses, and one genuinely **new**
    piece of infrastructure (oscillator-calibration-word injection) with a real
-   hardware-programming risk attached to it.
+   hardware-programming risk attached to it. Choosing the ISR model moves one
+   lane out of the first pile — see §4.3.2 item 3.
 
 **Date / branch:** 2026-08-05, `main` @ `0cfc72e`.
 
@@ -40,11 +47,13 @@ taken on evidence rather than on part-number adjacency.
 | gpsim | 0.32.1 | system, plus `libgpsim.so.0` |
 | cppcheck | 2.13.0 | system |
 
-> Scope note: the measurements were taken with a **throwaway spike shell** written
-> outside the repository, whose only purpose was to price the real core and real
-> drivers on this device and to exercise the simulator. It is not proposed code
-> and is not checked in. Where this document describes shell design it is
-> describing a *design intent to be reviewed*, not an implementation.
+> Scope note: the measurements were taken with **throwaway spike shells** written
+> outside the repository — a polled PIC12F675 shell, an ISR-driven variant of it,
+> and an ISR-converted copy of the shipping `src/bypass_mcu_pic10f322.c` — whose
+> only purpose was to price the real core and real drivers on these devices and
+> to exercise the simulator. None is proposed code and none is checked in. Where
+> this document describes shell design it is describing a *design intent to be
+> reviewed*, not an implementation. §10 lists the exact edits behind each figure.
 
 ---
 
@@ -66,6 +75,12 @@ The two things that make it attractive are in §3 and §5: it fits the reference
 architecture with ~500 words spare (against the 10F322's 39), and it costs
 nothing in new tooling.
 
+And one thing makes it *interesting* rather than merely feasible, in §4.3: that
+same headroom is enough to run the AVR shells' ISR-driven concurrency model,
+which the PIC10F322 misses by two words on its largest variant. If the goal is a
+PIC target that behaves like the AVR ones rather than one that merely produces
+the same outputs, this is the part that allows it.
+
 ---
 
 ## 2. Why the PIC10F322 shell is not a starting point
@@ -81,16 +96,17 @@ row below was read from the device pack — `pic12f675.h` / `pic10f322.h`,
 | Flash | 512 words (`ROMSIZE=200`) | **1024 words** (`ROMSIZE=400`) | §3: the architecture fits |
 | RAM | 64 B | 64 B | comparable; see §3 |
 | EEPROM | none | 128 B (unused) | `CPD` config bit exists |
-| Hardware return stack | 8 (`STACKDEPTH=8`, `hwstackdepth="8"`) | 8 (identical, both oracles) | existing gate ports unchanged (§6.4) |
+| Hardware return stack | 8 (`STACKDEPTH=8`, `hwstackdepth="8"`) | 8 (identical, both oracles) | existing gate ports unchanged under Model B (§3.1); breaks under an ISR (§4.3.2) |
+| Interrupts | `INTCON.GIE`/`PEIE`, `PIE1.TMR2IE` — present, unused (Model B) | `INTCON.GIE`/`PEIE`/`T0IE`, `PIE1.TMR1IE` | both parts *can*; only this one can *afford* it (§4.3) |
 | CONFIG word address | `0x2007` | `0x2007` | config lane ports structurally |
 | I/O pins | 4: RA0–RA2 bidirectional, RA3 input-only | 6: GP0–GP2, GP4, GP5 bidirectional, GP3 input-only | 2 spare pins |
 | Port registers | `PORTA` / `TRISA` / **`LATA`** | `GPIO` / `TRISIO` / **no LAT register** | §4.2 shadow latch |
-| Analog disable | `ANSELA` | `ANSEL` **plus `CMCON`** (comparator owns GP0–GP2 out of reset) **plus `ADCON0`** | §4.5 wider init + wider guard set |
+| Analog disable | `ANSELA` | `ANSEL` **plus `CMCON`** (comparator owns GP0–GP2 out of reset) **plus `ADCON0`** | §4.6 wider init + wider guard set |
 | Weak pull-ups | `WPUA` bits 0–3 (**including** RA3) + `OPTION_REG.nWPUEN` | `WPU` bits 0,1,2,4,5 (**no GP3 bit**) + `OPTION_REG.nGPPU` | §4.1 pin map must change |
-| Tick timer | TMR2 with `PR2` period register + `T2CON` | **no TMR2** — TMR0 (8-bit, no period reg) or TMR1 (16-bit, no period reg) | §4.3 tick redesign |
-| WDT period control | `WDTCON.WDTPS`, independent of any timer | `OPTION_REG` `PSA`/`PS` — **one prescaler shared with TMR0** | §4.3 real coupling |
-| Oscillator | `OSCCON.IRCF`, selectable; 2 MHz used | fixed 4 MHz INTOSC, **`OSCCAL`** trim register, no `OSCCON` | §4.4 `_XTAL_FREQ` 4 MHz; new failure mode |
-| CONFIG fields | FOSC, WDTE, PWRTE, MCLRE, BOREN, BORV, LPBOR, CP, LVP, WRT | FOSC, WDTE, PWRTE, MCLRE, BOREN, CP, **CPD**, **BG** (bandgap calibration) | §4.6 |
+| Tick timer | TMR2 with `PR2` period register + `T2CON` | **no TMR2** — TMR0 (8-bit, no period reg) or TMR1 (16-bit, no period reg) | §4.4 tick redesign |
+| WDT period control | `WDTCON.WDTPS`, independent of any timer | `OPTION_REG` `PSA`/`PS` — **one prescaler shared with TMR0** | §4.4 real coupling |
+| Oscillator | `OSCCON.IRCF`, selectable; 2 MHz used | fixed 4 MHz INTOSC, **`OSCCAL`** trim register, no `OSCCON` | §4.5 `_XTAL_FREQ` 4 MHz; new failure mode |
+| CONFIG fields | FOSC, WDTE, PWRTE, MCLRE, BOREN, BORV, LPBOR, CP, LVP, WRT | FOSC, WDTE, PWRTE, MCLRE, BOREN, CP, **CPD**, **BG** (bandgap calibration) | §4.7 |
 
 ### 2.1 SFR map, for the test-harness work
 
@@ -106,12 +122,12 @@ address (`0x081`, `0x085`, …), not an alias.
 | Analog select | `ANSELA` `0x008` | `ANSEL` `0x09F` | also carries `ADCS<2:0>` |
 | Weak pull-up latch | `WPUA` `0x009` | `WPU` `0x095` | no bit 3 |
 | Global pull-up enable | `OPTION_REG.nWPUEN` `0x00E` bit 7 | `OPTION_REG.nGPPU` `0x081` bit 7 | active low on both |
-| Oscillator | `OSCCON.IRCF` `0x010` bits 6:4 | `OSCCAL` `0x090` (8-bit trim) | §4.4 |
-| Tick period | `PR2` `0x012`, `T2CON` `0x013` | — | §4.3 |
-| Tick flag | `PIR1.TMR2IF` | `INTCON.T0IF` bit 2 `0x00B` (or `PIR1.TMR1IF` bit 0 `0x00C`) | §4.3 |
-| Watchdog period | `WDTCON.WDTPS` `0x030` bits 5:1 | `OPTION_REG` `PSA` bit 3, `PS<2:0>` bits 2:0 | §4.3 |
-| Comparator | — | `CMCON` `0x019` (`CM<2:0>` bits 2:0) | §4.5 |
-| ADC | — | `ADCON0` `0x01F` (`ADON` bit 0) | §4.5 |
+| Oscillator | `OSCCON.IRCF` `0x010` bits 6:4 | `OSCCAL` `0x090` (8-bit trim) | §4.5 |
+| Tick period | `PR2` `0x012`, `T2CON` `0x013` | — | §4.4 |
+| Tick flag | `PIR1.TMR2IF` | `INTCON.T0IF` bit 2 `0x00B` (or `PIR1.TMR1IF` bit 0 `0x00C`) | §4.4 |
+| Watchdog period | `WDTCON.WDTPS` `0x030` bits 5:1 | `OPTION_REG` `PSA` bit 3, `PS<2:0>` bits 2:0 | §4.4 |
+| Comparator | — | `CMCON` `0x019` (`CM<2:0>` bits 2:0) | §4.6 |
+| ADC | — | `ADCON0` `0x01F` (`ADON` bit 0) | §4.6 |
 | Reset status | — | `PCON` `0x08E` (`nPOR` bit 1, `nBOR`/`nBOD` bit 0) | optional new evidence source |
 
 `OPTION_REG` bit positions on the PIC12F675: `nGPPU`=7, `INTEDG`=6, `T0CS`=5,
@@ -129,7 +145,7 @@ The **real** `src/bypass_pure.c` and the **real, unmodified**
 compiled for the PIC12F675 against a spike shell carrying the complete defensive
 layer — the full per-tick sanity gate, exact-`TRISIO` direction check, output
 state check, pull-up integrity check, and a guarded-SFR check wider than the
-10F322's (§4.7). Free-tier XC8 v3.10, `-O2`, the shipping optimization level:
+10F322's (§4.8). Free-tier XC8 v3.10, `-O2`, the shipping optimization level:
 
 | Variant | PIC12F675 (1024 words) | PIC10F322 (512 words), for scale |
 |---|---|---|
@@ -155,6 +171,10 @@ The `-Os` license cap documented in §2 of `pic10f320_feasibility.md` still
 applies — it is the same free-tier compiler — but it is irrelevant here, because
 nothing is near the ceiling.
 
+All figures in this section are for a **Model B (polled)** shell, matching the
+current PIC10F322 architecture. §4.3 prices the ISR-driven alternative on both
+parts and is where the headroom above turns out to matter most.
+
 ### 3.1 Return-stack depth
 
 The repository's existing hardware-return-stack gate,
@@ -171,7 +191,13 @@ STACK-DEPTH PASS [PIC12F675 tq2_l2_5v_relay]:  4 + 2 reserve <= 8 levels (2 spar
 
 The deepest chain is the same shape as the 10F322's, for the same reason
 (`_main -> _init -> _hw_set_bypass_state -> _set_relay_coils_low -> _hw_pin_set_low`).
-This gate needs no work beyond a Makefile lane.
+Under Model B this gate needs no work beyond a Makefile lane.
+
+> **This result does not survive the ISR model.** Run against the ISR build the
+> same script fails closed — it does not know the interrupt tree is a second
+> root — and the bound itself becomes main's chain plus the ISR's chain plus one.
+> See §4.3.2 item 3; it is why §9 sequences the stack work as a prerequisite
+> rather than a cheap early lane.
 
 ---
 
@@ -183,7 +209,7 @@ This gate needs no work beyond a Makefile lane.
 `src/bypass_config.h`, `src/bypass_hw_iface.h`, `src/bypass_static_assert.h`,
 `src/bypass_compile_checks.h`, and all three `src/bypass_output_*.c` drivers with
 their headers. `src/bypass_blocking_delay.h` already routes non-AVR builds to
-XC8's `__delay_ms()`; only `_XTAL_FREQ` changes (§4.4).
+XC8's `__delay_ms()`; only `_XTAL_FREQ` changes (§4.5).
 
 New files: `src/bypass_mcu_pic12f675.c` and `src/bypass_pins_pic12f675.h`, plus a
 `BYPASS_MCU_PIC12F675` arm in `src/bypass_output_common.h`.
@@ -221,8 +247,8 @@ no analog function — `ANSEL` implements `ANS0..ANS3` = GP0, GP1, GP2, GP4, and
 the comparator's `CIN+`/`CIN-`/`COUT` are GP0/GP1/GP2. GP5 therefore needs no
 `ANSEL` handling and cannot be silently re-analogized by an upset in either
 `ANSEL` or `CMCON`. Its alternate functions are `OSC1`/`CLKIN` (released as I/O
-by `FOSC=INTRCIO`, §4.6) and `T1CKI` (unconsumed — the recommended tick uses TMR0,
-and even the TMR1 alternatives in §4.3 clock from Fosc/4 with `TMR1CS=0`).
+by `FOSC=INTRCIO`, §4.7) and `T1CKI` (unconsumed — the recommended tick uses TMR0,
+and even the TMR1 alternatives in §4.4 clock from Fosc/4 with `TMR1CS=0`).
 
 Proposed map (the spike's, for review):
 
@@ -293,10 +319,189 @@ design record:
 `hw_output_state_intact()`'s `expected_high_mask` contract is unchanged from
 `bypass_hw_iface.h` — the drivers do not need to know any of this.
 
-### 4.3 The tick and the watchdog share one prescaler
+### 4.3 Concurrency: this part can afford the AVR's ISR model, and the PIC10F322 cannot
+
+This is the most consequential finding in the document, and it is a consequence
+of §3 rather than of any peripheral difference.
+
+**The question.** The AVR shells are, loosely, two threads: the Timer0 ISR
+samples and integrates the footswitch while `main()` runs the state machine, so
+debounce keeps advancing *through* the 12 ms relay pulse and the 5 ms mute
+delay — and `main()` sleeps in IDLE between ticks. Both PIC shells are Model B:
+one polled loop, no ISR, sampling suspended for the duration of any blocking
+actuation (`docs/phase2_pic_shell.md` §1 and §5).
+
+**The answer is yes, and it is a flash question, not a capability question.**
+The PIC10F322 has always had `INTCON.GIE`/`PEIE` and `PIE1.TMR2IE`; Model B was
+a choice, and one of its three stated payoffs was dissolving the shared-state
+hazard. But that choice is now locked in by the budget. The real
+`src/bypass_mcu_pic10f322.c` was converted to the ISR split — ISR, handshake
+flag, `volatile ctx_`, flag protocol replacing the `TMR2IF` poll — and rebuilt:
+
+| PIC10F322 (512 w) | polled (shipping) | ISR | Δ |
+|---|---|---|---|
+| `cd4053_simple` | 445 (86.9%) | 483 (94.3%) | +38 |
+| `cd4053_with_mute` | 471 (92.0%) | **509 (99.4%)** | +38 |
+| `tq2_l2_5v_relay` | 473 (92.4%) | **link fails** | — |
+| RAM | 34 B (53.1%) | 43 B (67.2%) | +9 B |
+
+The relay failure is worth quoting rather than paraphrasing, because it is far
+closer than "does not fit" suggests:
+
+```
+error: (1347) can't find 0x2 words for psect "text18" in class "CODE"
+       (largest unused contiguous range 0x1)
+```
+
+**Two words.** A leaner conversion than this one might genuinely land it. That
+is the wrong thing to optimize: it would mean shipping three PIC10F322 images at
+94.3%, 99.4% and ~100% of flash, on a part whose largest variant already leaves
+only 39 words free. The honest reading is that the PIC10F322 is *at* the ceiling
+for this architecture, not below it.
+
+The same conversion on the PIC12F675:
+
+| PIC12F675 (1024 w) | polled | ISR | Δ |
+|---|---|---|---|
+| `cd4053_simple` | 494 (48.2%) | 549 (53.6%) | +55 |
+| `cd4053_with_mute` | 520 (50.8%) | 575 (56.2%) | +55 |
+| `tq2_l2_5v_relay` | 523 (51.1%) | **578 (56.4%)** | +55 |
+| RAM | 36 B (56.2%) | **46 B (71.9%)** | +10 B |
+
+The +55 against the 322's +38 is not a core penalty and the two should not be
+compared directly. The 12F675 ISR carries the divide-by-4 sub-tick that the
+322's true-period TMR2 does not need (§4.4), plus two guards (`T0IE`, `GIE`)
+that the 322 conversion was not given. How much of the 17-word gap is silicon
+and how much is spike was not separated, because nothing turns on it: both
+numbers land where they land against their own budgets.
+
+Verified end to end: the ISR-driven image was run in gpsim and produced the
+identical engage / latch / bypass trajectory as the polled build (§6.1), so the
+simulator models the interrupt as well as the timer.
+
+#### 4.3.1 What the ISR model buys
+
+- **The behaviour matches the AVR.** Debounce integrates through the blocking
+  actuation, which is the difference the user of a relay-equipped pedal could in
+  principle feel.
+- **`docs/phase2_pic_shell.md` §5 stops needing to exist.** That section is
+  entirely an argument that the polled shell's ~12 ms sampling gap is benign. An
+  ISR-integrated shell has no gap to defend.
+- **So does its test-side consequence.** §5's closing line — *"any PIC timing
+  test that counts ticks must budget for the actuation stealing them, or it will
+  mis-measure the release gate"* — describes a real defect this tree has already
+  paid for once, in the relay soak's release gate. An ISR-integrated PIC would
+  use AVR-shaped budgets (modulo the 1.024 ms tick, §4.4.1).
+- **The watchdog liveness proof gets stronger.** Model B pets unconditionally at
+  the bottom of the loop, so reaching `CLRWDT` proves *one* thread is alive. The
+  AVR pattern pets only on the ISR handshake, proving **both** are.
+
+#### 4.3.2 What it costs
+
+**1. The shared state is one byte, so the AVR's lock-free protocol ports
+directly.** `docs/phase2_pic_shell.md` §6 warns that a future ISR "must add
+explicit protection (disable interrupts around the access, or share only a
+single byte)" because multi-byte objects are not atomic on an 8-bit core. That
+warning is correct in general but over-broad for this design: the ISR touches
+only `ctx_.debounce_counter` — a `uint8_t` — and the `timer_isr_called_` flag.
+`program_state` and `effect_state` are written exclusively by `main()`, so their
+being 2-byte `int` under XC8 is irrelevant to atomicity. **The consequence is
+that the AVR's protocol ports without needing `-fshort-enums`, which is exactly
+the property §6 assumed a PIC could not have.** That section should be corrected
+whether or not this port happens.
+
+**2. XC8 silently duplicates functions reachable from both contexts.** The build
+emits:
+
+```
+advisory: (1510) non-reentrant function "_hw_read_footswitch" appears in
+multiple call graphs and has been duplicated by the compiler
+```
+
+XC8 has no data stack — locals live in a statically overlaid compiled stack — so
+a function called from both `main()` and the ISR gets a second copy
+(`i1_hw_read_footswitch`) rather than risking overlay corruption under
+reentrance. It is automatic and its cost is already inside the word counts
+above, but it is silent and it scales with how much the two contexts share.
+
+**3. The hardware return-stack gate breaks, and the underlying bound gets
+harder.** Running `test/check_stack_depth_pic.sh` unmodified against the ISR
+build:
+
+```
+FAIL: [PIC12F675-ISR tq2_l2_5v_relay] i1_hw_read_footswitch is never called
+      but XC8 does not list it as an entry point
+```
+
+It fails closed, which is the designed behaviour, but it does not know the
+interrupt tree is a second root and does not recognize XC8's `i1_` duplicate
+naming. More importantly the *quantity* changes: an interrupt can fire at
+`main()`'s deepest point, so the bound becomes **main's deepest chain + the
+ISR's deepest chain + 1** for the interrupt's own return address, against 8
+levels, against the gate's 2-level reserve. Main is already 4 on the relay
+variant (§3.1). That is tight enough that it may constrain the ISR's structure —
+flattening its call chain, or inlining the footswitch read and the integrator
+into it. XC8's own annotation cannot settle it: `check_stack_depth_pic.sh`'s
+header already documents that the annotation under-reports on this project's
+real images, which is why the script re-derives the chain instead.
+
+This is why §9 makes the stack work a **prerequisite** of the ISR decision
+rather than a follow-up.
+
+**4. RAM becomes the binding resource.** 46 of 64 bytes (71.9%), up from 36.
+Still comfortable, but it inverts the PIC10F322's situation: on that part flash
+is the constraint and RAM is idle; here it would be the reverse.
+
+Two smaller items: the fault harness's behaviourally identified main-loop
+`CLRWDT` anchor must be re-established against the new loop shape, and there is a
+design choice about whether the per-tick sanity gate runs once per tick (AVR
+shape, gate inside the handshake) or on every busy-wait spin.
+
+#### 4.3.3 What it does *not* buy: sleep
+
+The AVR gets a second benefit from its ISR that the PIC cannot have. On AVR,
+IDLE sleep halts the core while leaving the peripheral clock running, so Timer0
+keeps counting and the ISR still wakes it. **PIC `SLEEP` stops the system
+oscillator outright — there is no IDLE-equivalent mode.** A TMR0 or TMR1 clocked
+from Fosc/4 stops dead and can never generate the wake-up.
+
+The only timer that survives `SLEEP` on this part is Timer1 in asynchronous mode
+off the Timer1 (LP) oscillator, and the device pack is explicit about which pins
+that is: *"LP oscillator: Low power crystal on GP4/OSC2/CLKOUT and
+GP5/OSC1/CLKIN"*. That consumes **both** spare pins **and** GP5 — the pin §4.1
+assigns to the footswitch — and adds an external 32.768 kHz crystal to a design
+that currently needs no external timing component. It is not a trade this design
+would make.
+
+So an ISR-driven PIC12F675 gets the concurrency but keeps a busy-waiting
+`main()`. That is a real difference from the AVR and should be stated plainly
+rather than implied — but it costs nothing that matters here, because
+`docs/phase2_pic_shell.md` §1 already books the same trade for the PIC10F322:
+*"Accepted trade-off: no low-power sleep. Fine for an always-powered pedal."*
+
+The WDT-periodic-wakeup loop ("Model A") that *would* sleep was considered and
+rejected for the PIC10F322 for reasons that apply here unchanged, and it is a
+different architecture from the one this section is about.
+
+#### 4.3.4 Recommendation
+
+**Take the ISR model if the part is taken.** Behaviour parity with the AVR
+shells, the deletion of `phase2_pic_shell.md` §5, and the test-budget
+simplification are worth more than 55 words at 56% flash occupancy. But it makes
+the stack-depth work in §4.3.2 item 3 a prerequisite rather than a follow-up: it
+is the one item that can come back and constrain the shell's structure after it
+is written.
+
+If the ISR model is taken, §4.4 below is still the right tick source — the
+difference is that `T0IF` raises an interrupt instead of being polled — and the
+guard set in §4.8 gains `INTCON.GIE`, `INTCON.T0IE` and the handshake flag's
+range check.
+
+### 4.4 The tick source and the watchdog prescaler
 
 This is the trap, and it is the item most likely to be missed by someone reading
-only the part summary.
+only the part summary. It applies to the polled and ISR models alike: both need
+a ~1 ms time base, and both need the watchdog to outlast a blocking actuation.
 
 The PIC12F675 has **no TMR2 and no period register anywhere**. TMR0 is 8-bit and
 free-running to overflow; TMR1 is 16-bit and free-running to overflow; there is
@@ -334,7 +539,7 @@ Simulation confirms the model exactly: with `PSA=1, PS=1:16` a starved watchdog
 reset fired at **cycle 288,039**, i.e. 288.0 ms at 1 MIPS — precisely 18 ms × 16
 (§6.1).
 
-#### 4.3.1 The tick is 1.024 ms, not 1.000 ms — and that propagates
+#### 4.4.1 The tick is 1.024 ms, not 1.000 ms — and that propagates
 
 A 2.4% stretch is inconsequential for debounce behaviour and changes **nothing**
 in the pure core (which counts samples, not milliseconds). It does change every
@@ -371,7 +576,7 @@ a margin that is doing other work.
 
 The alternative — a TMR1-based exact 1.000 ms tick — buys numerical parity with
 every other target and makes this whole subsection disappear, at the cost of the
-complexity in the §4.3 table. **This is a genuine fork in the design and should
+complexity in the §4.4 table. **This is a genuine fork in the design and should
 be decided deliberately, not defaulted.**
 
 The polled-loop tick wait also gains an inner loop (four `T0IF` waits instead of
@@ -380,7 +585,7 @@ quantity is still the actuation delay, not the tick — but the fault harness's
 "behaviourally identified main-loop `CLRWDT`" anchor must be re-established
 against the new loop shape.
 
-### 4.4 Fixed 4 MHz INTOSC, and the OSCCAL calibration word
+### 4.5 Fixed 4 MHz INTOSC, and the OSCCAL calibration word
 
 There is **no `OSCCON`** on this part and no runtime frequency selection: the
 internal oscillator is 4 MHz, trimmed by the 8-bit `OSCCAL` register. So:
@@ -419,7 +624,7 @@ Consequences, both real:
   become a documented, gated part of the programming procedure, not a footnote.
   See §8.
 
-### 4.5 The comparator and ADC are a new hazard surface
+### 4.6 The comparator and ADC are a new hazard surface
 
 On the PIC10F322 the only analog encroachment is `ANSELA`. On the PIC12F675 there
 are three:
@@ -438,7 +643,7 @@ Each of these is a single-event-upset path to "the firmware still thinks it owns
 GP0–GP2 but the analog peripheral has taken them". The 322 has one such path;
 this part has three.
 
-### 4.6 CONFIG word
+### 4.7 CONFIG word
 
 Same address (`0x2007`), different fields. From `edc/PIC12F675.PIC`:
 
@@ -463,9 +668,9 @@ Measured: for the settings above XC8 emits `CONFIG = 0x31CC`, decoding as
 `FOSC=4 (INTRCIO)`, `WDTE=1 (ON)`, `PWRTE=0 (ON, active low)`, `MCLRE=0 (OFF)`,
 `BOREN=1 (ON)`, `CP=1 (OFF)`, `CPD=1 (OFF)`, `BG=0b11`.
 
-### 4.7 Proposed guarded-SFR set
+### 4.8 Proposed guarded-SFR set
 
-Putting §4.1–§4.6 together, the per-tick sanity gate for this part would guard:
+Putting §4.1–§4.7 together, the per-tick sanity gate for this part would guard:
 
 | Guarded item | PIC10F322 counterpart | Status |
 |---|---|---|
@@ -473,13 +678,19 @@ Putting §4.1–§4.6 together, the per-tick sanity gate for this part would gua
 | Output shadow vs expected mask | `LATA` vs expected mask | ported |
 | Physical `GPIO` vs shadow | — | **new** (§4.2) |
 | `ANSEL & BYPASS_OUTPUT_DDR_MASK == 0` | `ANSELA & mask == 0` | ported, masked differently |
-| `CMCON & 0x07 == 0x07` | — | **new** (§4.5) |
-| `ADCON0.ADON == 0` | — | **new** (§4.5) |
+| `CMCON & 0x07 == 0x07` | — | **new** (§4.6) |
+| `ADCON0.ADON == 0` | — | **new** (§4.6) |
 | `WPU & 0x37` exactly `1 << FOOTSW_PIN` | `WPUA & 0x0F` exactly `1 << FOOTSW_PIN` | ported, mask excludes the absent bit 3 |
 | `OPTION_REG.nGPPU == 0` | `OPTION_REG.nWPUEN == 0` | ported |
 | `OPTION_REG` exact (carries `PSA`/`PS` — the WDT period — **and** `T0CS` — the tick clock source — **and** `nGPPU`) | `WDTCON.WDTPS`, `PR2`, `T2CON` separately | **consolidated**; one register now carries three safety-relevant fields |
-| `OSCCAL` vs captured snapshot | `OSCCON.IRCF` vs constant | **changed** (§4.4) |
+| `OSCCAL` vs captured snapshot | `OSCCON.IRCF` vs constant | **changed** (§4.5) |
 | `ctx_` range checks | identical | ported |
+| `INTCON.GIE == 1`, `INTCON.T0IE == 1` | — (no ISR on either PIC today) | **ISR model only** (§4.3); the AVR-shell analogue of proving the tick source is still armed |
+| `timer_isr_called_` range check | AVR shell's identical check | **ISR model only** (§4.3) |
+
+The last two rows are conditional on §4.3's decision. They are listed here rather
+than in §4.3 because the fault-injection matrix is built from this table, and
+`PIC_FAULT_EXPECTED_CHECKS` has to be right for whichever model is chosen.
 
 The `OPTION_REG` consolidation is worth calling out in review: on the 322 an
 upset to the WDT period, the tick period and the pull-up enable are three
@@ -551,7 +762,7 @@ and has never been used; this would be its first consumer.
 
 ### 6.2 New infrastructure: calibration-word injection
 
-As established in §4.4, an unmodified XC8 `.hex` **cannot run** on a simulated
+As established in §4.5, an unmodified XC8 `.hex` **cannot run** on a simulated
 PIC12F675 — the startup `call 0x3ff` walks off the end of flash and the part sits
 in a watchdog reset loop. Every gpsim and libgpsim lane therefore needs the
 oscillator calibration word injected first.
@@ -573,7 +784,7 @@ the *policy* is not, and it should be settled before any lane is written:
   one is a test artifact. This needs to be decided explicitly, because getting it
   wrong means either injecting into the released image or baselining an image
   that cannot run in any lane.
-- **The `OSCCAL` guard interacts with it.** The §4.4 proposal snapshots `OSCCAL`
+- **The `OSCCAL` guard interacts with it.** The §4.5 proposal snapshots `OSCCAL`
   at init and compares per tick. Under injection, that snapshot is the injected
   value — which is fine, and is in fact exactly what makes the guard testable:
   the fault harness can corrupt `OSCCAL` at `0x090` and require a reset.
@@ -593,8 +804,13 @@ argument to construct, because there is no second expression of the algorithm:
 Also free, or near-free:
 
 - **`pic12f675-test-stack-bound`** — the gate script runs unmodified today (§3.1);
-  only a Makefile lane and the `12f675.ini` path are needed.
+  only a Makefile lane and the `12f675.ini` path are needed. **Conditional on
+  §4.3:** free under Model B, but the ISR model moves this lane out of this pile
+  entirely and into the prerequisite slot in §9 (§4.3.2 item 3).
 - **`test-stack-bound-pic-regression`** — synthetic fixtures, part-independent.
+  Would need new fixtures for the interrupt-tree cases if the ISR model is taken,
+  since that gate's whole purpose is proving the analysis rejects each way it can
+  be wrong.
 - **`pic12f675-coverage-check-fw`** — host gcov with an SFR mock. The mock header
   needs the new register set, but the lane's structure is unchanged.
 - **`pic12f675-analyze-{cppcheck,misra}`** — platform and device-macro swap (§5).
@@ -646,19 +862,19 @@ and the `.stc` scripts (`footswitch_toggle.stc`, `power_on_pressed.stc`), which
 carry `attach n1 fsw ra3` and cycle-count checkpoints derived from the 322's
 2 MHz clock. The 12F675 runs at 4 MHz (1 MIPS vs 500 kIPS), so **every checkpoint
 cycle number doubles** relative to the same wall-clock instant, on top of the
-1.024 ms tick from §4.3.1. Note that `test-gpsim-wrappers` asserts the exact
+1.024 ms tick from §4.4.1. Note that `test-gpsim-wrappers` asserts the exact
 string `attach n1 fsw ra3` in routed stimuli — that assertion becomes per-part.
 
 ### 6.5 Lanes that are new work, but structurally familiar
 
 | Lane | Work |
 |---|---|
-| `pic12f675-test-config` | new decode table (§4.6); mechanism and HEX parser unchanged |
+| `pic12f675-test-config` | new decode table (§4.7); mechanism and HEX parser unchanged |
 | `pic12f675-test-gpsim` | new `.stc` pair with re-derived cycle checkpoints; `gpio5` stimulus; calibration injection |
-| `pic12f675-test-fault` | new injection matrix over the §4.7 guard set — including new cases for `CMCON`, `ADCON0`, `OSCCAL`, the `GPIO` shadow, and an `OPTION_REG` that now carries three guarded fields; new `PIC_FAULT_EXPECTED_CHECKS` count |
+| `pic12f675-test-fault` | new injection matrix over the §4.8 guard set — including new cases for `CMCON`, `ADCON0`, `OSCCAL`, the `GPIO` shadow, and an `OPTION_REG` that now carries three guarded fields; new `PIC_FAULT_EXPECTED_CHECKS` count |
 | `pic12f675-test-io` | `GPIO`/`TRISIO` instead of `LATA`/`PORTA`/`TRISA`; note this lane gets *more* meaningful here, since shadow-vs-port divergence is observable |
 | `pic12f675-test-lockstep` | `_ctx_` address extraction from the XC8 `.sym` is unchanged; adapter + proc name only |
-| `pic12f675-test-soak` | re-derived timing budgets (§4.3.1); calibration injection |
+| `pic12f675-test-soak` | re-derived timing budgets (§4.4.1); calibration injection |
 | `pic12f675-test-target-variants` | fail-closed aggregate, same shape |
 | `test-target-matrix`, `test-target-lane-markers` | extend to a third PIC chip |
 | Mutation | new topology entries; the guard set differs from the 322's |
@@ -666,6 +882,20 @@ string `attach n1 fsw ra3` in routed stimuli — that assertion becomes per-part
 | Release | image set, `MANIFEST.md`, provenance, `release/README.md` flashing notes (§8) |
 | CI | new job or matrix entry; `test_ci_local_routing.sh` |
 | Docs | `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc`, `MISRA_COMPLIANCE.md`, `test/README.md` |
+
+Under the ISR model (§4.3) three of these change shape rather than merely
+gaining a part:
+
+| Lane | Additional work under the ISR model |
+|---|---|
+| `pic12f675-test-stack-bound` | `check_stack_depth_pic.sh` must learn the interrupt tree as a second root, XC8's `i1_` duplicate naming, and the main-chain + ISR-chain + 1 bound (§4.3.2) |
+| `pic12f675-test-fault` | two more guard cases (`GIE`, `T0IE`) plus the handshake-flag range check; injections now have an ISR that can run *between* injection and observation |
+| `pic12f675-test-soak` | budgets stop needing the "actuation steals ticks" correction, because it stops being true (§4.3.1) — a simplification, but a re-derivation either way |
+
+Also: sharing `volatile` state across an ISR boundary is new MISRA surface for
+this project. The AVR shells already carry it, so precedent exists, but the PIC
+suppression set in `test/misra_suppressions.txt` was written for a
+single-threaded shell and would need a review pass rather than a copy.
 
 ---
 
@@ -720,23 +950,34 @@ is declared release-supported. They are listed worst-first.
    cadence, wrong `__delay_ms()` coil-pulse widths, and a device that still
    *appears* to work. `pk2cmd` has explicit OSCCAL handling for this family; that
    needs to be confirmed rather than assumed, and the result written into
-   `release/README.md`'s flashing procedure. The §4.4 `OSCCAL` runtime guard does
+   `release/README.md`'s flashing procedure. The §4.5 `OSCCAL` runtime guard does
    **not** help — it snapshots whatever is there at init, including garbage.
-3. **Watchdog period characterization.** gpsim models an 18 ms base period, and
-   the §4.3 margin argument (13.1 ms worst-case pet window vs 288 ms nominal)
+3. **The hardware return-stack bound under the ISR model — unquantified.**
+   Applies only if §4.3 is taken, and it is the one open item that could
+   constrain the *firmware's structure* rather than a test. The bound becomes
+   main's deepest chain + the ISR's deepest chain + 1, against 8 levels, against
+   the project's 2-level reserve; main is already 4 on the relay variant. The
+   existing gate cannot currently compute it (it fails closed on the interrupt
+   tree), and XC8's own annotation is documented-unreliable on this project's
+   real images — so **there is no number yet, and getting one is prerequisite
+   work, not verification work.** If it does not fit, the ISR's call chain has to
+   be flattened, which is a shell-design constraint discovered late if it is
+   discovered after the shell is written.
+4. **Watchdog period characterization.** gpsim models an 18 ms base period, and
+   the §4.4 margin argument (13.1 ms worst-case pet window vs 288 ms nominal)
    assumes the datasheet's min/max spread is no worse than the 10F32x's
    (−37%/+69%, which the 322 shell cites from DS40001585 param 31). The
    PIC12F629/675 spread has **not** been read here. If the fast end is materially
    worse than assumed, the prescaler choice moves from 1:16 to 1:32.
-4. **Brown-out trip point.** Expect the same limitation the 322 documents — the
+5. **Brown-out trip point.** Expect the same limitation the 322 documents — the
    relay/MOSFET peripherals want >4 V and the PIC BOR cannot enforce it, making
    this a hardware-design constraint rather than a firmware one. The 12F675's
    actual trip voltage was not read; unlike the 322 there is **no `BORV`
    field**, so there is not even a high/low choice to make.
-5. **INTOSC accuracy over temperature and voltage.** `__delay_ms()` pulse widths
+6. **INTOSC accuracy over temperature and voltage.** `__delay_ms()` pulse widths
    and the tick cadence both ride on the 4 MHz INTOSC. Needs the datasheet figure,
-   and it feeds the §4.3.1 timing-budget derivation.
-6. **`asynchronous_stimulus` initial state.** In the spike, a stimulus declared
+   and it feeds the §4.4.1 timing-budget derivation.
+7. **`asynchronous_stimulus` initial state.** In the spike, a stimulus declared
    `initial_state 1` read **low** on `gpio5` at a checkpoint before its first
    listed transition, while the same firmware with no stimulus attached read the
    pin high via the internal pull-up. The libgpsim harnesses drive via `set_Vth`
@@ -744,7 +985,7 @@ is declared release-supported. They are listed worst-first.
    mechanism, `putState` being a no-op for this purpose) and would not hit this —
    but the `.stc`-driven `pic12f675-test-gpsim` lane would, and the behaviour
    needs to be understood rather than worked around by moving checkpoints.
-7. **Programmer device support.** PICkit 2 supports this family well. Whether the
+8. **Programmer device support.** PICkit 2 supports this family well. Whether the
    current `ipecmd` path still lists PIC12F675 should be confirmed before
    `pic12f675-program` is written against it.
 
@@ -756,20 +997,28 @@ Ordered so that each step is independently green and independently revertible.
 
 | # | Step | Notes |
 |---|---|---|
-| 0 | **Decide the two forks in §4.3.1 and §7** — 1.024 ms TMR0 tick vs exact 1 ms TMR1; single-part `pic12f675` shell vs `pic12f6xx` family shell covering the 629 | Both are expensive to change later |
-| 1 | Device-parameterize `test_{io,fault,lockstep}_pic_core.h` | Behaviour-preserving; 322 + 320 lanes green across it is the acceptance test. **Largest single item** |
-| 2 | Calibration-word injection helper + policy (§6.2) | Standalone, testable on its own |
-| 3 | Pin map, `bypass_output_common.h` arm, shell, build lane + flash budget | Firmware — user-authored |
-| 4 | `pic12f675-test-stack-bound`, `-analyze`, `-coverage-check-fw` | Cheapest lanes; script already works (§3.1) |
-| 5 | `pic12f675-test-config` (new decode table) | |
-| 6 | `.stc` pair + `pic12f675-test-gpsim` | First lane needing re-derived cycle checkpoints |
-| 7 | libgpsim adapters: io, lockstep, fault | Rides on step 1 |
-| 8 | Soak + re-derived timing budgets | Rides on §4.3.1 |
-| 9 | Aggregates, mutation topology, CI routing | |
-| 10 | Docs, release integration, hardware bench (§8 items 1, 2, 7) | The §8 risks close here or nowhere |
+| 0 | **Decide the three forks: §4.3 (ISR vs Model B), §4.4.1 (1.024 ms TMR0 vs exact 1 ms TMR1), §7 (single-part `pic12f675` vs `pic12f6xx` family shell covering the 629)** | All three are expensive to change later; §4.3 is the one that changes the most downstream |
+| 1 | **If the ISR model is taken:** extend `check_stack_depth_pic.sh` to the interrupt tree and *get a number* for the ISR build | **Prerequisite, not verification** (§8 item 3). If the bound does not fit, it constrains the shell before it is written |
+| 2 | Device-parameterize `test_{io,fault,lockstep}_pic_core.h` | Behaviour-preserving; 322 + 320 lanes green across it is the acceptance test. **Largest single item** |
+| 3 | Calibration-word injection helper + policy (§6.2) | Standalone, testable on its own |
+| 4 | Pin map, `bypass_output_common.h` arm, shell, build lane + flash budget | Firmware — user-authored |
+| 5 | `pic12f675-test-stack-bound`, `-analyze`, `-coverage-check-fw` | Cheap under Model B (script already works, §3.1); under the ISR model this is just wiring up step 1 |
+| 6 | `pic12f675-test-config` (new decode table) | |
+| 7 | `.stc` pair + `pic12f675-test-gpsim` | First lane needing re-derived cycle checkpoints |
+| 8 | libgpsim adapters: io, lockstep, fault | Rides on step 2 |
+| 9 | Soak + re-derived timing budgets | Rides on §4.4.1; simpler under the ISR model (§4.3.1) |
+| 10 | Aggregates, mutation topology, CI routing | |
+| 11 | Docs, release integration, hardware bench (§8 items 1, 2, 8) | The §8 risks close here or nowhere |
 
 Firmware is roughly a day of design plus implementation. The test infrastructure
-is the bulk of the calendar time, and step 1 gates most of it.
+is the bulk of the calendar time, and step 2 gates most of it.
+
+**Why step 1 sits where it does.** Every other test item can be built after the
+shell and fixed independently of it. The return-stack bound cannot: it is a
+property of the shell's call graph, it is silent when violated on this core, and
+the existing gate cannot currently measure it for an ISR build. Discovering after
+the fact that the ISR's chain does not fit means rewriting the shell, not
+adjusting a test. Under Model B this step does not exist at all.
 
 ---
 
@@ -843,6 +1092,32 @@ unmodified, against the assembly XC8 emitted for those builds:
   "$DFP"/pic/dat/ini/12f675.ini 2 "PIC12F675 <variant>"
 ```
 
+The §4.3 ISR figures came from two further spikes. The PIC12F675 one is the
+shell above with the polled tick wait replaced by a TMR0 ISR plus the AVR's
+`timer_isr_called_` handshake. **The PIC10F322 one is the shipping shell itself**
+— `src/bypass_mcu_pic10f322.c`, copied out of the tree and given the same five
+edits, so the +38-word delta is measured against real code rather than against
+another spike:
+
+1. `static debounce_context_t ctx_;` → `volatile`, plus a
+   `volatile uint8_t timer_isr_called_;`
+2. a `void __interrupt() isr(void)` that clears `TMR2IF`, sets the handshake, and
+   runs `debounce_integrate()`
+3. `hw_tick_timer_start()` also sets `PIE1bits.TMR2IE`, `INTCONbits.PEIE`,
+   `INTCONbits.GIE`
+4. the main loop's `hw_wait_for_tick()` poll and inline `debounce_integrate()`
+   replaced by the handshake protocol
+5. the sanity gate gains the handshake range check, for AVR parity
+
+Both were built exactly as their polled counterparts above. Running the
+stack-depth gate against the *ISR* assembly is what produces the failure quoted
+in §4.3.2:
+
+```sh
+./test/check_stack_depth_pic.sh <spike-dir>/isr_<variant>.s \
+  "$DFP"/pic/dat/ini/12f675.ini 2 "PIC12F675-ISR <variant>"
+```
+
 ---
 
 ## 11. Where the rest of it would live
@@ -859,3 +1134,12 @@ structure the PIC10F320 work established:
 | Per-lane rationale, simulator gaps, timing budgets | `test/README.md` |
 | Flashing — including the §8 OSCCAL and bandgap procedures | `release/README.md` |
 | MISRA status and any new deviations | `MISRA_COMPLIANCE.md` |
+
+Two corrections to **existing** documents fall out of §4.3 and are worth making
+whether or not this port happens, because both are statements about the
+PIC10F322 that this analysis measured directly:
+
+| Document | Correction |
+|---|---|
+| `docs/phase2_pic_shell.md` §6 | Its "if a future revision ever added an ISR … that change must add explicit protection" is over-broad. The ISR/`main()` shared set is one `uint8_t` plus a flag, so the AVR's lock-free protocol ports without `-fshort-enums` (§4.3.2 item 1) |
+| `docs/phase2_pic_shell.md` §1 | Model B's rationale is still correct, but it now has a fourth, unstated and decisive reason on that part: the ISR alternative no longer fits the PIC10F322's flash (§4.3) |
