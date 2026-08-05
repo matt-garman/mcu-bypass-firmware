@@ -22,20 +22,25 @@ taken on evidence rather than on part-number adjacency.
    CPU core generation with a different peripheral set, so the hardware shell is
    a rewrite, the pin map must change for an electrical reason, and the tick and
    watchdog become coupled in a way they are not on the 10F32x.
-4. That flash headroom buys something the PIC10F322 can no longer afford: the
-   **AVR's ISR-driven concurrency model**, where a timer ISR keeps integrating
-   the footswitch *through* a blocking relay or mute actuation. Measured both
-   ways on both parts (§4.3). This is the finding that reframes the port — the
-   12F675's case stops being "a third PIC" and becomes "the first PIC that can
-   run the AVR's concurrency model".
+4. That flash headroom is enough to compile, link and run a gpsim trajectory for
+   the **AVR's ISR-driven concurrency model**, where a timer ISR keeps integrating
+   the footswitch *through* a blocking relay or mute actuation (§4.3). It does
+   **not** establish return-stack feasibility: the PIC12F675 ISR build has no
+   retained stack result, and its 8-level hardware stack is no larger than the
+   PIC10F322's. The ISR model remains a candidate, not a recommendation, until a
+   regenerated three-variant spike passes the current stack gate with a recorded
+   result.
 5. The validation tooling divides cleanly into three piles: lanes that port for
    free, lanes that need a **device-parameterization pass** on shared test cores
    that currently hard-code 10F32x register addresses, and one genuinely **new**
    piece of infrastructure (oscillator-calibration-word injection) with a real
-   hardware-programming risk attached to it. Choosing the ISR model moves one
-   lane out of the first pile — see §4.3.2 item 3.
+   hardware-programming risk attached to it. Considering the ISR model adds a
+   prerequisite measurement with the current stack gate — see §4.3.2 item 3.
 
-**Date / branch:** 2026-08-05, `main` @ `0cfc72e`.
+**Measurement provenance:** 2026-08-05, `main` @ `0cfc72e`. The categorical ISR
+recommendation entered in `59d55e9`; this document was corrected after the stack
+gate changes in `56ad068` and `084ae09`. Those gate changes did **not** remeasure
+the absent PIC12F675 ISR spike.
 
 **Toolchain used for every figure below** — the same versions pinned in
 `TOOLCHAIN.adoc`, with no additions:
@@ -54,14 +59,18 @@ taken on evidence rather than on part-number adjacency.
 > to exercise the simulator. None is proposed code and none is checked in. Where
 > this document describes shell design it is describing a *design intent to be
 > reviewed*, not an implementation. §10 lists the exact edits behind each figure.
+> It does not contain the spike sources, so the flash, gpsim and stack figures are
+> historical measurements rather than results reproducible from this repository
+> alone.
 
 ---
 
 ## 1. Verdict
 
-**Feasible, moderate cost, no blocking unknowns in the toolchain.** In effort and
-in shape it resembles the ATtiny202 (AVR-XT) increment more than either PIC
-increment: a new hardware shell against an already-proven core, plus a
+**Feasible under the polled Model B; the ISR model remains conditional on a
+measured return-stack result.** There are no blocking unknowns in the toolchain.
+In effort and in shape it resembles the ATtiny202 (AVR-XT) increment more than
+either PIC increment: a new hardware shell against an already-proven core, plus a
 test-infrastructure generalization, minus the toolchain archaeology that
 dominated the AVR-XT work — because here the toolchain already exists and is
 already pinned.
@@ -76,10 +85,10 @@ architecture with ~500 words spare (against the 10F322's 39), and it costs
 nothing in new tooling.
 
 And one thing makes it *interesting* rather than merely feasible, in §4.3: that
-same headroom is enough to run the AVR shells' ISR-driven concurrency model,
-which the PIC10F322 misses by two words on its largest variant. If the goal is a
-PIC target that behaves like the AVR ones rather than one that merely produces
-the same outputs, this is the part that allows it.
+same headroom lets an AVR-shaped ISR spike compile, link and run the tested gpsim
+trajectory, while the PIC10F322 relay conversion cannot link. That is enough to
+justify measuring the PIC12F675 ISR option, not enough to select it: its combined
+main/interrupt return-stack peak and reserve remain unknown.
 
 ---
 
@@ -96,8 +105,8 @@ row below was read from the device pack — `pic12f675.h` / `pic10f322.h`,
 | Flash | 512 words (`ROMSIZE=200`) | **1024 words** (`ROMSIZE=400`) | §3: the architecture fits |
 | RAM | 64 B | 64 B | comparable; see §3 |
 | EEPROM | none | 128 B (unused) | `CPD` config bit exists |
-| Hardware return stack | 8 (`STACKDEPTH=8`, `hwstackdepth="8"`) | 8 (identical, both oracles) | existing gate ports unchanged under Model B (§3.1); breaks under an ISR (§4.3.2) |
-| Interrupts | `INTCON.GIE`/`PEIE`, `PIE1.TMR2IE` — present, unused (Model B) | `INTCON.GIE`/`PEIE`/`T0IE`, `PIE1.TMR1IE` | both parts *can*; only this one can *afford* it (§4.3) |
+| Hardware return stack | 8 (`STACKDEPTH=8`, `hwstackdepth="8"`) | 8 (identical capacity) | current gate handles polled and ISR graphs; polled 3/3/4 measured, PIC12F675 ISR result pending (§3.1, §4.3.2) |
+| Interrupts | `INTCON.GIE`/`PEIE`, `PIE1.TMR2IE` — present, unused (Model B) | `INTCON.GIE`/`PEIE`/`T0IE`, `PIE1.TMR1IE` | both parts can; PIC12F675 ISR fits flash/RAM, return-stack affordability unmeasured (§4.3) |
 | CONFIG word address | `0x2007` | `0x2007` | config lane ports structurally |
 | I/O pins | 4: RA0–RA2 bidirectional, RA3 input-only | 6: GP0–GP2, GP4, GP5 bidirectional, GP3 input-only | 2 spare pins |
 | Port registers | `PORTA` / `TRISA` / **`LATA`** | `GPIO` / `TRISIO` / **no LAT register** | §4.2 shadow latch |
@@ -172,16 +181,18 @@ applies — it is the same free-tier compiler — but it is irrelevant here, bec
 nothing is near the ceiling.
 
 All figures in this section are for a **Model B (polled)** shell, matching the
-current PIC10F322 architecture. §4.3 prices the ISR-driven alternative on both
-parts and is where the headroom above turns out to matter most.
+current PIC10F322 architecture. §4.3 prices ISR flash/RAM and records one gpsim
+trajectory for the PIC12F675; it does not establish PIC12F675 ISR return-stack
+feasibility. The PIC10F322 comparison is a flash/RAM build, not a second gpsim
+trajectory claim.
 
 ### 3.1 Return-stack depth
 
-The repository's existing hardware-return-stack gate,
-`test/check_stack_depth_pic.sh`, was run **unmodified** against the spike
-assembly, reading the depth from the device pack exactly as it does for the
-10F32x parts (`12f675.ini` declares `STACKDEPTH=8`; `edc/PIC12F675.PIC` declares
-`hwstackdepth="8"` — the same two independent oracles the script requires):
+The repository's hardware-return-stack gate, `test/check_stack_depth_pic.sh`, was
+run against the polled spike assembly. The gate reads `STACKDEPTH=8` from
+`12f675.ini`; `edc/PIC12F675.PIC` independently corroborates the hardware
+capacity with `hwstackdepth="8"`. Its analysis oracles are instead the emitted
+instruction-stream call graph and XC8's mandatory `callstack` directives:
 
 ```
 STACK-DEPTH PASS [PIC12F675 cd4053_simple]:    3 + 2 reserve <= 8 levels (3 spare)
@@ -189,15 +200,16 @@ STACK-DEPTH PASS [PIC12F675 cd4053_with_mute]: 3 + 2 reserve <= 8 levels (3 spar
 STACK-DEPTH PASS [PIC12F675 tq2_l2_5v_relay]:  4 + 2 reserve <= 8 levels (2 spare)
 ```
 
-The deepest chain is the same shape as the 10F322's, for the same reason
+These are historical **Model B** measurements. The deepest chain is the same
+shape as the 10F322's, for the same reason
 (`_main -> _init -> _hw_set_bypass_state -> _set_relay_coils_low -> _hw_pin_set_low`).
 Under Model B this gate needs no work beyond a Makefile lane.
 
-> **This result does not survive the ISR model.** Run against the ISR build the
-> same script fails closed — it does not know the interrupt tree is a second
-> root — and the bound itself becomes main's chain plus the ISR's chain plus one.
-> See §4.3.2 item 3; it is why §9 sequences the stack work as a prerequisite
-> rather than a cheap early lane.
+> **This result does not transfer to the ISR model.** The current gate does know
+> that an interrupt tree is a second root, recognizes XC8 interrupt-context
+> duplicates, and computes main tree + interrupt tree (including the hardware
+> entry push). What is missing is a retained PIC12F675 ISR assembly and numeric
+> result. See §4.3.2 item 3; §9 therefore measures before selecting the model.
 
 ---
 
@@ -319,7 +331,7 @@ design record:
 `hw_output_state_intact()`'s `expected_high_mask` contract is unchanged from
 `bypass_hw_iface.h` — the drivers do not need to know any of this.
 
-### 4.3 Concurrency: this part can afford the AVR's ISR model, and the PIC10F322 cannot
+### 4.3 Concurrency: ISR flash fits and gpsim runs; return-stack feasibility is pending
 
 This is the most consequential finding in the document, and it is a consequence
 of §3 rather than of any peripheral difference.
@@ -331,8 +343,9 @@ delay — and `main()` sleeps in IDLE between ticks. Both PIC shells are Model B
 one polled loop, no ISR, sampling suspended for the duration of any blocking
 actuation (`docs/phase2_pic_shell.md` §1 and §5).
 
-**The answer is yes, and it is a flash question, not a capability question.**
-The PIC10F322 has always had `INTCON.GIE`/`PEIE` and `PIE1.TMR2IE`; Model B was
+**The answer has three parts:** peripheral capability yes; measured flash/RAM
+fit yes; return-stack feasibility not yet established. The PIC10F322 has always
+had `INTCON.GIE`/`PEIE` and `PIE1.TMR2IE`; Model B was
 a choice, and one of its three stated payoffs was dissolving the shared-state
 hazard. But that choice is now locked in by the budget. The real
 `src/bypass_mcu_pic10f322.c` was converted to the ISR split — ISR, handshake
@@ -353,8 +366,12 @@ error: (1347) can't find 0x2 words for psect "text18" in class "CODE"
        (largest unused contiguous range 0x1)
 ```
 
-**Two words.** A leaner conversion than this one might genuinely land it. That
-is the wrong thing to optimize: it would mean shipping three PIC10F322 images at
+The linker needed a two-word contiguous range while the largest free range was
+one word. The later map analysis in `non-blocking_output_schemes_feasibility.md`
+places the build at 511/512 words, so this is fragmentation at the ceiling, not
+a proof that the program is simply two words oversized. A leaner conversion
+might genuinely land it. That is the wrong thing to optimize: it would mean
+shipping three PIC10F322 images at
 94.3%, 99.4% and ~100% of flash, on a part whose largest variant already leaves
 only 39 words free. The honest reading is that the PIC10F322 is *at* the ceiling
 for this architecture, not below it.
@@ -375,11 +392,12 @@ that the 322 conversion was not given. How much of the 17-word gap is silicon
 and how much is spike was not separated, because nothing turns on it: both
 numbers land where they land against their own budgets.
 
-Verified end to end: the ISR-driven image was run in gpsim and produced the
-identical engage / latch / bypass trajectory as the polled build (§6.1), so the
-simulator models the interrupt as well as the timer.
+The ISR-driven image was run in gpsim and produced the same tested engage / latch
+/ bypass trajectory as the polled build (§6.1), demonstrating that the simulator
+models the interrupt and timer path. That functional trajectory does not measure
+the worst-case hardware return-stack peak or its reserve.
 
-#### 4.3.1 What the ISR model buys
+#### 4.3.1 What the ISR model would buy if the stack result passes
 
 - **The behaviour matches the AVR.** Debounce integrates through the blocking
   actuation, which is the difference the user of a relay-equipped pedal could in
@@ -424,33 +442,36 @@ a function called from both `main()` and the ISR gets a second copy
 reentrance. It is automatic and its cost is already inside the word counts
 above, but it is silent and it scales with how much the two contexts share.
 
-**3. The hardware return-stack gate breaks, and the underlying bound gets
-harder.** Running `test/check_stack_depth_pic.sh` unmodified against the ISR
-build:
+**3. The hardware return-stack bound must be measured before this model is
+selected.** At the time of the original spike, the then-current
+`test/check_stack_depth_pic.sh` failed on the ISR build:
 
 ```
 FAIL: [PIC12F675-ISR tq2_l2_5v_relay] i1_hw_read_footswitch is never called
       but XC8 does not list it as an entry point
 ```
 
-It fails closed, which is the designed behaviour, but it does not know the
-interrupt tree is a second root and does not recognize XC8's `i1_` duplicate
-naming. More importantly the *quantity* changes: an interrupt can fire at
-`main()`'s deepest point, so the bound becomes **main's deepest chain + the
-ISR's deepest chain + 1** for the interrupt's own return address, against 8
-levels, against the gate's 2-level reserve. Main is already 4 on the relay
-variant (§3.1). That is tight enough that it may constrain the ISR's structure —
-flattening its call chain, or inlining the footswitch read and the integrator
-into it. XC8's own annotation cannot settle it: `check_stack_depth_pic.sh`'s
-header already documents that the annotation under-reports on this project's
-real images, which is why the script re-derives the chain instead.
+That diagnostic exposed the `i1_` lexer defect fixed in `56ad068`; `084ae09`
+later removed target-prefix assumptions and hardened psect/call parsing. The
+current gate recognizes interrupt-context duplicates, sums the main and ISR
+trees, and includes the hardware-pushed interrupt return address. The old
+failure is historical, not a current limitation.
+
+The *quantity* still changes: an interrupt can fire at `main()`'s deepest point,
+so the bound becomes **main's deepest chain + the ISR tree including its entry
+push**, against 8 levels and the project's 2-level reserve. The polled relay main
+tree measured 4 (§3.1), but the ISR build can change both graphs. No source,
+assembly or current-gate output from that PIC12F675 ISR spike was retained, so
+there is no numeric result to cite. XC8's prose annotation cannot substitute for
+one: the gate re-derives the instruction-stream chain and requires XC8's
+`callstack` directives as corroboration.
 
 This is why §9 makes the stack work a **prerequisite** of the ISR decision
 rather than a follow-up.
 
-**4. RAM becomes the binding resource.** 46 of 64 bytes (71.9%), up from 36.
-Still comfortable, but it inverts the PIC10F322's situation: on that part flash
-is the constraint and RAM is idle; here it would be the reverse.
+**4. RAM becomes the tighter measured storage resource.** 46 of 64 bytes (71.9%),
+up from 36. It inverts the PIC10F322's measured flash/RAM situation, but cannot
+be called the binding resource until the unmeasured return-stack result exists.
 
 Two smaller items: the fault harness's behaviourally identified main-loop
 `CLRWDT` anchor must be re-established against the new loop shape, and there is a
@@ -473,10 +494,11 @@ assigns to the footswitch — and adds an external 32.768 kHz crystal to a desig
 that currently needs no external timing component. It is not a trade this design
 would make.
 
-So an ISR-driven PIC12F675 gets the concurrency but keeps a busy-waiting
-`main()`. That is a real difference from the AVR and should be stated plainly
-rather than implied — but it costs nothing that matters here, because
-`docs/phase2_pic_shell.md` §1 already books the same trade for the PIC10F322:
+So a PIC12F675 ISR design, **if accepted after the stack measurement**, would get
+the concurrency but keep a busy-waiting `main()`. That is a real difference from
+the AVR and should be stated plainly rather than implied — but it costs nothing
+that matters here, because `docs/phase2_pic_shell.md` §1 already books the same
+trade for the PIC10F322:
 *"Accepted trade-off: no low-power sleep. Fine for an always-powered pedal."*
 
 The WDT-periodic-wakeup loop ("Model A") that *would* sleep was considered and
@@ -485,17 +507,21 @@ different architecture from the one this section is about.
 
 #### 4.3.4 Recommendation
 
-**Take the ISR model if the part is taken.** Behaviour parity with the AVR
-shells, the deletion of `phase2_pic_shell.md` §5, and the test-budget
-simplification are worth more than 55 words at 56% flash occupancy. But it makes
-the stack-depth work in §4.3.2 item 3 a prerequisite rather than a follow-up: it
-is the one item that can come back and constrain the shell's structure after it
-is written.
+**Do not select the ISR model yet.** Its measured flash/RAM fit, tested gpsim
+trajectory, AVR behaviour parity and test-budget simplification make it a strong
+candidate, but none establishes that the combined call graph fits the 8-level
+stack with the required 2-level reserve. Model B is the only model this document
+currently establishes as feasible. Before choosing ISR, regenerate
+all three spike variants, run the current gate, and retain the source/patch,
+exact toolchain command, generated assembly (or immutable hashes) and complete
+gate output. If every variant passes with an accepted margin, the benefits above
+support selecting it; if not, use Model B or flatten the spike and remeasure
+before production-shell work.
 
-If the ISR model is taken, §4.4 below is still the right tick source — the
-difference is that `T0IF` raises an interrupt instead of being polled — and the
-guard set in §4.8 gains `INTCON.GIE`, `INTCON.T0IE` and the handshake flag's
-range check.
+If the ISR model passes that decision gate, §4.4 below is still the right tick
+source — the difference is that `T0IF` raises an interrupt instead of being
+polled — and the guard set in §4.8 gains `INTCON.GIE`, `INTCON.T0IE` and the
+handshake flag's range check.
 
 ### 4.4 The tick source and the watchdog prescaler
 
@@ -545,7 +571,7 @@ A 2.4% stretch is inconsequential for debounce behaviour and changes **nothing**
 in the pure core (which counts samples, not milliseconds). It does change every
 *physical* timing figure this repository asserts:
 
-| Quantity | ISR-driven AVR / PIC10F322 | PIC12F675 |
+| Quantity | AVR (ISR-driven) / PIC10F322 (polled) | PIC12F675 |
 |---|---|---|
 | `PRESSED_THRESH` = 8 samples | 8.0 ms | 8.19 ms |
 | `RELEASE_THRESH` = 25 samples | 25.0 ms | 25.6 ms |
@@ -688,7 +714,7 @@ Putting §4.1–§4.7 together, the per-tick sanity gate for this part would gua
 | `INTCON.GIE == 1`, `INTCON.T0IE == 1` | — (no ISR on either PIC today) | **ISR model only** (§4.3); the AVR-shell analogue of proving the tick source is still armed |
 | `timer_isr_called_` range check | AVR shell's identical check | **ISR model only** (§4.3) |
 
-The last two rows are conditional on §4.3's decision. They are listed here rather
+The last two rows are conditional on a future positive §4.3 stack decision. They are listed here rather
 than in §4.3 because the fault-injection matrix is built from this table, and
 `PIC_FAULT_EXPECTED_CHECKS` has to be right for whichever model is chosen. <!-- name-contract: exempt (C adapter macro, not a Make variable) -->
 
@@ -803,14 +829,15 @@ argument to construct, because there is no second expression of the algorithm:
 
 Also free, or near-free:
 
-- **`pic12f675-test-stack-bound`** — the gate script runs unmodified today (§3.1);
-  only a Makefile lane and the `12f675.ini` path are needed. **Conditional on
-  §4.3:** free under Model B, but the ISR model moves this lane out of this pile
-  entirely and into the prerequisite slot in §9 (§4.3.2 item 3).
-- **`test-stack-bound-pic-regression`** — synthetic fixtures, part-independent.
-  Would need new fixtures for the interrupt-tree cases if the ISR model is taken,
-  since that gate's whole purpose is proving the analysis rejects each way it can
-  be wrong.
+- **`pic12f675-test-stack-bound`** — the current gate already handles polled and
+  interrupt-root call graphs; only a Makefile lane and the `12f675.ini` path are
+  needed for production images. Model B has historical 3/3/4 spike results
+  (§3.1). Considering ISR first requires the separate retained spike measurement
+  in §9, because no PIC12F675 ISR result survives from the original assessment.
+- **`test-stack-bound-pic-regression`** — synthetic fixtures, part-independent,
+  and already covering main-plus-interrupt-tree summing and XC8's real `i1_`
+  duplicate naming. A new naming shape must add a fixture, but ISR support itself
+  no longer needs one.
 - **`pic12f675-coverage-check-fw`** — host gcov with an SFR mock. The mock header
   needs the new register set, but the lane's structure is unchanged.
 - **`pic12f675-analyze-{cppcheck,misra}`** — platform and device-macro swap (§5).
@@ -883,12 +910,12 @@ string `attach n1 fsw ra3` in routed stimuli — that assertion becomes per-part
 | CI | new job or matrix entry; `test_ci_local_routing.sh` |
 | Docs | `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc`, `MISRA_COMPLIANCE.md`, `test/README.md` |
 
-Under the ISR model (§4.3) three of these change shape rather than merely
-gaining a part:
+If the ISR model passes the §4.3 prerequisite, three of these change shape rather
+than merely gaining a part:
 
 | Lane | Additional work under the ISR model |
 |---|---|
-| `pic12f675-test-stack-bound` | `check_stack_depth_pic.sh` must learn the interrupt tree as a second root, XC8's `i1_` duplicate naming, and the main-chain + ISR-chain + 1 bound (§4.3.2) |
+| `pic12f675-test-stack-bound` | regenerate every ISR variant, run the current gate, and retain each main tree, ISR tree including entry push, total used, reserve and spare (§4.3.2) |
 | `pic12f675-test-fault` | two more guard cases (`GIE`, `T0IE`) plus the handshake-flag range check; injections now have an ISR that can run *between* injection and observation |
 | `pic12f675-test-soak` | budgets stop needing the "actuation steals ticks" correction, because it stops being true (§4.3.1) — a simplification, but a re-derivation either way |
 
@@ -933,8 +960,9 @@ family shell after the fact is the expensive order.
 
 ## 8. Open risks and unknowns
 
-None of these block the assessment; all of them should be closed before the port
-is declared release-supported. They are listed worst-first.
+None blocks the Model B feasibility assessment; item 3 blocks selection of the
+ISR model. All should be closed before the port is declared release-supported.
+They are listed worst-first.
 
 1. **Bandgap calibration bits in the CONFIG word (`BG<1:0>`).** These are
    factory-calibrated per device and set the BOD/POR trip voltages. XC8 emitted
@@ -952,17 +980,18 @@ is declared release-supported. They are listed worst-first.
    needs to be confirmed rather than assumed, and the result written into
    `release/README.md`'s flashing procedure. The §4.5 `OSCCAL` runtime guard does
    **not** help — it snapshots whatever is there at init, including garbage.
-3. **The hardware return-stack bound under the ISR model — unquantified.**
-   Applies only if §4.3 is taken, and it is the one open item that could
+3. **The hardware return-stack bound under the ISR model — unquantified and
+   blocking selection of that model.** It does not block Model B feasibility,
+   but it is the one open item that could
    constrain the *firmware's structure* rather than a test. The bound becomes
    main's deepest chain + the ISR's deepest chain + 1, against 8 levels, against
-   the project's 2-level reserve; main is already 4 on the relay variant. The
-   existing gate cannot currently compute it (it fails closed on the interrupt
-   tree), and XC8's own annotation is documented-unreliable on this project's
-   real images — so **there is no number yet, and getting one is prerequisite
-   work, not verification work.** If it does not fit, the ISR's call chain has to
-   be flattened, which is a shell-design constraint discovered late if it is
-   discovered after the shell is written.
+   the project's 2-level reserve; the polled relay main tree measured 4. The
+   current gate can compute the ISR bound, but no PIC12F675 ISR source, assembly
+   or numeric result is retained, and XC8's prose annotation is not a substitute.
+   **Getting a reproducible number is prerequisite work, not verification work.**
+   If it does not fit, the ISR call graph has to be flattened or Model B chosen —
+   a shell-design constraint discovered too late if measured after production
+   implementation.
 4. **Watchdog period characterization.** gpsim models an 18 ms base period, and
    the §4.4 margin argument (13.1 ms worst-case pet window vs 288 ms nominal)
    assumes the datasheet's min/max spread is no worse than the 10F32x's
@@ -997,12 +1026,12 @@ Ordered so that each step is independently green and independently revertible.
 
 | # | Step | Notes |
 |---|---|---|
-| 0 | **Decide the three forks: §4.3 (ISR vs Model B), §4.4.1 (1.024 ms TMR0 vs exact 1 ms TMR1), §7 (single-part `pic12f675` vs `pic12f6xx` family shell covering the 629)** | All three are expensive to change later; §4.3 is the one that changes the most downstream |
-| 1 | **If the ISR model is taken:** extend `check_stack_depth_pic.sh` to the interrupt tree and *get a number* for the ISR build | **Prerequisite, not verification** (§8 item 3). If the bound does not fit, it constrains the shell before it is written |
+| 0 | **Decide two forks and identify the concurrency candidate:** §4.4.1 (1.024 ms TMR0 vs exact 1 ms TMR1), §7 (single-part `pic12f675` vs `pic12f6xx` family shell covering the 629), and whether ISR merits the step-1 spike | Do not select ISR from the flash table; its decision follows the stack result |
+| 1 | **If ISR is being considered:** regenerate all three ISR spikes, run the current `check_stack_depth_pic.sh`, retain the complete inputs/output, then choose ISR or Model B | **Decision prerequisite, not production verification** (§8 item 3). If the bound does not fit with reserve, flatten and remeasure or choose Model B before the shell is written |
 | 2 | Device-parameterize `test_{io,fault,lockstep}_pic_core.h` | Behaviour-preserving; 322 + 320 lanes green across it is the acceptance test. **Largest single item** |
 | 3 | Calibration-word injection helper + policy (§6.2) | Standalone, testable on its own |
 | 4 | Pin map, `bypass_output_common.h` arm, shell, build lane + flash budget | Firmware — user-authored |
-| 5 | `pic12f675-test-stack-bound`, `-analyze`, `-coverage-check-fw` | Cheap under Model B (script already works, §3.1); under the ISR model this is just wiring up step 1 |
+| 5 | `pic12f675-test-stack-bound`, `-analyze`, `-coverage-check-fw` | Stack lane wires the current gate to production images; under ISR its expected shape comes from the retained step-1 result |
 | 6 | `pic12f675-test-config` (new decode table) | |
 | 7 | `.stc` pair + `pic12f675-test-gpsim` | First lane needing re-derived cycle checkpoints |
 | 8 | libgpsim adapters: io, lockstep, fault | Rides on step 2 |
@@ -1015,10 +1044,11 @@ is the bulk of the calendar time, and step 2 gates most of it.
 
 **Why step 1 sits where it does.** Every other test item can be built after the
 shell and fixed independently of it. The return-stack bound cannot: it is a
-property of the shell's call graph, it is silent when violated on this core, and
-the existing gate cannot currently measure it for an ISR build. Discovering after
-the fact that the ISR's chain does not fit means rewriting the shell, not
-adjusting a test. Under Model B this step does not exist at all.
+property of the shell's call graph and is silent when violated on this core. The
+current gate can measure it, but the original throwaway ISR spike and result were
+not retained. Discovering after implementation that the ISR graph does not fit
+means rewriting the shell, not adjusting a test. Under Model B this step does not
+exist at all.
 
 ---
 
@@ -1026,7 +1056,8 @@ adjusting a test. Under Model B this step does not exist at all.
 
 From the repository root. The spike shell referenced below is not in the tree —
 what is reproducible without it is the toolchain support, the device facts and
-the simulator capabilities; the flash figures require a shell to link against.
+the simulator's processor/pin support. The flash figures and functional/timing
+simulation results require the missing shell and built image.
 
 ```sh
 XC8=/opt/microchip/xc8/v3.10/bin/xc8-cc
@@ -1084,8 +1115,8 @@ spike `bypass_pins_pic12f675.h`, as:
   <spike-dir>/shell.c src/bypass_pure.c src/bypass_output_<variant>.c
 ```
 
-The stack-depth result in §3.1 was produced by running the repository's own gate,
-unmodified, against the assembly XC8 emitted for those builds:
+The historical Model B stack-depth result in §3.1 was produced by running the
+then-current repository gate against the assembly XC8 emitted for those builds:
 
 ```sh
 ./test/check_stack_depth_pic.sh <spike-dir>/fw_<variant>.s \
@@ -1109,14 +1140,20 @@ another spike:
    replaced by the handshake protocol
 5. the sanity gate gains the handshake range check, for AVR parity
 
-Both were built exactly as their polled counterparts above. Running the
-stack-depth gate against the *ISR* assembly is what produces the failure quoted
-in §4.3.2:
+Both were built exactly as their polled counterparts above. At the time, running
+the gate against the *ISR* assembly produced the historical `i1_` parser failure
+quoted in §4.3.2:
 
 ```sh
 ./test/check_stack_depth_pic.sh <spike-dir>/isr_<variant>.s \
   "$DFP"/pic/dat/ini/12f675.ini 2 "PIC12F675-ISR <variant>"
 ```
+
+That command would produce a numeric main-plus-ISR verdict with the current
+gate, but the spike source and generated assembly were not retained, so it cannot
+be rerun now. A new result must retain a complete source snapshot or patch, exact
+XC8/DFP command, all three generated assemblies (or immutable hashes), and the
+complete gate output; the old parser failure is not stack evidence.
 
 ---
 

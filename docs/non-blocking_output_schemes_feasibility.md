@@ -785,10 +785,12 @@ relay.
 
 ---
 
-## 8. Related finding: the stack gate could not measure an ISR build
+## 8. Related historical finding: the old call lexer rejected an ISR build
 
-Discovered while taking the §2.3 measurements, and **fixed in the same commit as
-this document**.
+Discovered while taking the §2.3 measurements. The initial `i1_` recognition fix
+landed in `56ad068`; `084ae09` later removed the prefix assumption and hardened
+the complete direct-call/psect parser. Neither commit measured a PIC12F675 ISR
+stack result.
 
 `test/check_stack_depth_pic.sh` built its call graph from targets matching:
 
@@ -917,9 +919,9 @@ question and §4 as a simplification; §7 shows it also moves a hardware-safety
 boundary on the relay variant. Any decision to proceed should be taken on all
 three, and the relay variant should be the one that decides it.
 
-Note also that the PIC12F675 assessment
-(`docs/pic12f675_feasibility.md` §4.3) is unaffected as to flash but **not** as
-to the stack — see §11.
+The PIC12F675 assessment (`docs/pic12f675_feasibility.md` §4.3) now makes the same
+distinction: its ISR spike fits flash/RAM, while ISR return-stack feasibility
+awaits an independent measurement on that different shell.
 
 ---
 
@@ -947,7 +949,7 @@ xc8-cc -mcpu=10F322 -mdfp=<DFP> -std=c99 -O2 \
   { continue; }` handshake; and snapshot `ctx_` before `debounce_step()`.
 - **§2.3 stack depths** — `test/check_stack_depth_pic.sh <asm> 8 2 <label>`
   against the generated `.s`, using the fixed gate from §8.
-- **Stack depth of both parts** — `STACKDEPTH=8` in
+- **Hardware stack capacity of both parts** — `STACKDEPTH=8` in
   `<DFP>/xc8/pic/dat/ini/{10f322,12f675}.ini`, corroborated by
   `hwstackdepth="8"` in the corresponding `edc/PIC*.PIC`.
 
@@ -995,14 +997,17 @@ xc8-cc -mcpu=10F320 -mdfp=<DFP> -std=c99 -O2 \
 
 ---
 
-## 11. Corrections this implies for other documents
+## 11. Cross-document follow-ups
 
-Recorded, **not applied** — each belongs to the document that owns the claim.
+The two PIC12F675 corrections identified by the original review have now been
+applied in the owning document: ISR flash fit is no longer presented as
+return-stack affordability, and the PIC10F322 linker failure is described as
+fragmentation at 511/512 rather than simply "two words" oversized. The remaining
+follow-ups below are recorded, **not applied**, because each belongs to its owning
+document.
 
 | Document | Claim | Correction |
 |---|---|---|
-| `pic12f675_feasibility.md` §4.3 | The PIC12F675's flash headroom makes the ISR model affordable. | True **for flash only**. Both parts declare `STACKDEPTH=8`, so the 12F675's flash advantage does not extend to the return stack. The relay-variant stack cost measured in §2.3 (6 used, 0 spare) has no reason to be smaller there and must be measured before the ISR model is called affordable on that part. |
-| `pic12f675_feasibility.md` §4.3 | The PIC10F322 relay ISR build "misses by two words". | Accurate as the linker's message, but the mechanism is fragmentation at 511/512 with a largest contiguous free run of 1 word (§2.2), not a program 2 words too large. |
 | `phase2_pic_shell.md` §1 | Model B is justified by three reasons. | There is a fourth, now measured: on the relay variant the ISR alternative does not fit the part — and would exhaust the return-stack reserve even if it did. |
 | `phase2_pic_shell.md` §5 | The tick-stealing divergence from the AVR is accepted behaviour. | Still accurate. Worth a forward reference to this document, which proposes removing the divergence rather than accepting it. |
 | `pic10f320_special_case.md` §4 | The output-latch match does not fit and is deliberately omitted. | Still accurate, and this document depends on it (§6.3). Worth recording that non-blocking actuation would make re-adding it strictly more expensive — a third, transient expectation on top of the two-state version that already did not fit. |
