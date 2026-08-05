@@ -808,6 +808,20 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **Mandatory host Python gates now have an explicit, fail-fast version
+  contract.** The system `python3` minimum is 3.7, the first version providing
+  the `subprocess.run(capture_output=..., text=...)` APIs those gates already
+  use. A shared executable check is the first prerequisite of `make test` and
+  `make test-long`, and the three directly affected gates depend on it when run
+  alone, so Python 3.6 now gets an actionable version/path diagnostic instead of
+  an internal `TypeError`.
+
+  Release preflight runs the same check before probing PyYAML or starting any
+  child gate. Its regression accepts the 3.7 boundary, rejects 3.6, permits
+  newer host interpreters, and proves an old interpreter cannot reach the
+  PyYAML probe. This system-Python contract remains separate from the patched
+  yasimavr venv's narrower CPython 3.9-3.13 platform lock.
+
 - **The retained rename-identity report now describes the final images, not an
   earlier build at the same paths.** The fail-fast comparison still runs after
   the initial 18-image build, before any expensive qualification gate. But

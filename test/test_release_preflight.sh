@@ -137,6 +137,14 @@ EOF
 
 cat > "$fakebin/python3" <<'EOF'
 #!/usr/bin/env bash
+if [ "${1:-}" = "${FAKE_REPO_ROOT:?}/test/python_version.py" ]; then
+	printf 'python-minimum-check\n' >> "${TOOL_LOG:?}"
+	if [ "${TEST_PYTHON_TOO_OLD:-0}" -eq 1 ]; then
+		printf '%s\n' 'FAIL: Python 3.7 or newer is required by the repository host gates; found Python 3.6.8 at /fake/python3. Upgrade Python and ensure `python3` selects the newer interpreter.' >&2
+		exit 1
+	fi
+	exit 0
+fi
 if [ "${1:-}" = -c ] && [ "${2:-}" = "import yaml" ]; then
 	[ "${TEST_PYYAML_FAIL:-0}" -eq 0 ] || exit 1
 	printf 'yaml-import\n' >> "${TOOL_LOG:?}"
@@ -316,6 +324,8 @@ grep -Fq 'no release version supplied; tag availability was not checked.' "$outp
 	|| fail "versionless preflight did not state its tag-check scope"
 grep -Fxq 'python-version' "$tool_log" \
 	|| fail "preflight exited before the final executable-version probe"
+grep -Fxq 'python-minimum-check' "$tool_log" \
+	|| fail "preflight did not enforce the host Python minimum"
 grep -Fxq 'yasimavr-import' "$tool_log" \
 	|| fail "preflight did not execute a live yasimavr import"
 grep -Fxq 'yaml-import' "$tool_log" \
@@ -325,6 +335,51 @@ grep -Fxq 'yaml-import' "$tool_log" \
 query_count=$(wc -l < "$make_log")
 [ "$query_count" -eq 74 ] \
 	|| fail "preflight made $query_count Makefile queries, expected 74"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+# The boundary is executable policy, not documentation: 3.7 is accepted, 3.6
+# is rejected, and newer host Python has no upper cap. This pure comparison can
+# be exercised even when the test host itself is the intentionally rejected 3.6.
+PYTHONPATH="$ROOT/test" "$REAL_PYTHON" - <<'PY' \
+	|| fail "Python minimum-version boundary regression failed"
+import python_version
+
+assert python_version.MINIMUM == (3, 7)
+assert not python_version.is_supported((3, 6, 15))
+assert python_version.is_supported((3, 7, 0))
+assert python_version.is_supported((3, 14, 0))
+PY
+checks=$((checks + 1))
+
+# The aggregate must reject an old host before any child gate starts, while the
+# three gates that introduced the 3.7 API dependency must also reject it when
+# invoked directly.
+early_gates=$("$REAL_MAKE" --no-print-directory -s -C "$ROOT" print-TEST_GATES_EARLY) \
+	|| fail "could not read the early gate inventory"
+[ "${early_gates%% *}" = python-version-valid ] \
+	|| fail "python-version-valid is not the first aggregate gate"
+for target in test-makefile-name-contract test-variant-selector-guard \
+		test-fuse-injection-contract; do
+	grep -Eq "^${target}:.*python-version-valid" "$ROOT/Makefile" \
+		|| fail "$target does not enforce the Python minimum when run directly"
+done
+checks=$((checks + 1))
+
+# An old interpreter must be diagnosed before PyYAML or any child gate runs.
+: > "$tool_log"
+if TEST_PYTHON_TOO_OLD=1 run_preflight >"$output" 2>&1; then
+	fail "preflight accepted Python 3.6"
+fi
+grep -Fq 'Python 3.7 or newer is required' "$output" \
+	|| fail "old Python failed without the actionable minimum-version diagnostic"
+grep -Fq 'found Python 3.6.8' "$output" \
+	|| fail "old Python diagnostic omitted the detected version"
+grep -Fxq 'python-minimum-check' "$tool_log" \
+	|| fail "old-Python preflight did not execute the minimum-version probe"
+if grep -Fxq 'yaml-import' "$tool_log"; then
+	fail "old-Python preflight continued into the PyYAML child probe"
+fi
 assert_no_release_scratch
 checks=$((checks + 1))
 

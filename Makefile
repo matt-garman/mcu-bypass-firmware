@@ -636,7 +636,7 @@ FORCE:
 .PHONY: all all-request-valid attiny13a attiny13a-size clean help \
         attiny13a-readfuses attiny13a-fuses attiny13a-flash attiny13a-program \
         attiny13a-trace \
-        test test-fast test-long stress \
+        test test-fast test-long stress python-version-valid \
         test-host test-sim-attiny13a test-sim-tinyx5 \
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation test-mutation-sandbox \
         test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle \
@@ -2591,7 +2591,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # test-long additionally running test-mutation.
 #
 # Listing the inventory ONCE is what keeps that true. Two hand-maintained
-# 46-target prerequisite lines invite a new gate landing in only one aggregate,
+# prerequisite lines invite a new gate landing in only one aggregate,
 # and the aggregate it misses is usually test-long -- the release gate, where
 # the omission surfaces as a green run rather than as a failure.
 #
@@ -2600,7 +2600,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # failure is reported, not whether it is caught. A new gate may go in either
 # half, and lands in both aggregates either way.
 TEST_GATES_EARLY = \
-        analyze test-static-assert-guards \
+        python-version-valid analyze test-static-assert-guards \
         test-host test-model-check test-symbolic test-cbmc \
         test-fuses test-stack-bound test-stack-bound-regression \
         test-stack-bound-pic-regression test-flash-budget-regression \
@@ -2625,6 +2625,16 @@ TEST_GATES_LATE = \
         test-pic-build-rebuild coverage-check coverage-check-core
 TEST_GATES = $(TEST_GATES_EARLY) $(TEST_GATES_LATE)
 TEST_LONG_GATES = $(TEST_GATES_EARLY) test-mutation $(TEST_GATES_LATE)
+
+# The mandatory host gates use subprocess.run(capture_output=..., text=...),
+# both added in Python 3.7. Keep this first in each aggregate so an unsupported
+# host gets the actionable contract diagnostic before any Python child gate.
+python-version-valid:
+	@if ! command -v python3 >/dev/null 2>&1; then \
+		echo "FAIL: Python 3.7 or newer is required by the repository host gates; python3 was not found." >&2; \
+		exit 1; \
+	fi
+	@python3 test/python_version.py
 
 # Default `make test`: FAST workload. Runs static analysis, the host golden
 # model, the exhaustive state-space model check, the symbolic single-step proof,
@@ -2844,10 +2854,7 @@ test-variant-map-contract:
 # in a live qualification document, ten stale variable surfaces, and -- the one
 # that reached a result rather than a document -- a PIC10F320 lane simulating a
 # PIC10F322 for a whole release, on a PIC_GPSIM_PROC= nothing read any more.
-test-makefile-name-contract:
-	@if ! command -v python3 >/dev/null 2>&1; then \
-		echo "FAIL: python3 is required by the Makefile name-contract gate"; exit 1; \
-	fi
+test-makefile-name-contract: python-version-valid
 	@python3 test/test_makefile_name_contract.py
 
 # Host-only proof that every static-analysis target validates its variant
@@ -2869,7 +2876,7 @@ test-analyze-variant-guard:
 # attached to every rule consuming a selector, transitively: almost none name a
 # selector directly, they read a HEX path composed from one three definitions
 # away.
-test-variant-selector-guard:
+test-variant-selector-guard: python-version-valid
 	./test/test_variant_selector_guard.py
 
 # `rm -f` of a path that does not exist SUCCEEDS, so a `clean` list that has
@@ -2891,7 +2898,7 @@ test-clean-contract:
 # "46 checks, 0 failures" and exited 0. The defaults are now `#error`s; this
 # keeps them gone and follows each byte the whole way: burned == injected ==
 # guarded == printed, and every printed byte equal to print-<VAR>.
-test-fuse-injection-contract:
+test-fuse-injection-contract: python-version-valid
 	./test/test_fuse_injection_contract.py
 
 # Prove the firmware's compile-time guards actually FIRE. Every build checks

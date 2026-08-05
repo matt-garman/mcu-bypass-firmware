@@ -27,6 +27,7 @@ test/
   soak_timing_config.h      shared: native soak timing bounds
   check_flash_budget.sh     shared: exact flash-budget checker
   check_stack_depth_pic.sh  shared: PIC hardware return-stack depth gate
+  python_version.py         shared: Python 3.7+ host-gate prerequisite
   test_attiny202_build.sh   shared: fail-closed AVR-XT build checks
   test_avr_build_rebuild.sh shared: classic AVR rebuild/partial-output checks
   test_ci_local_routing.sh  shared: local-CI skip-option command routing

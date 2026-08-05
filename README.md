@@ -95,9 +95,9 @@ make attiny13a-program
 ```
 
 To build and validate the PIC ports instead requires a host C compiler,
-matching `gcov`, Python 3, and Bash for source coverage, plus the Microchip XC8
-compiler, PIC10-12Fxxx device pack, `gpsim`, and `gpsim-dev` for the target-level
-gates:
+matching `gcov`, Python 3.7 or newer, and Bash for source coverage, plus the
+Microchip XC8 compiler, PIC10-12Fxxx device pack, `gpsim`, and `gpsim-dev` for
+the target-level gates:
 
 ```
 make pic10f322                         # build all variants + 512-word flash-budget gate

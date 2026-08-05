@@ -607,8 +607,17 @@ req_file "$SIMAVR_INC/avr_ioport.h" "apt: libsimavr-dev (SIMAVR_INC=)"
 req_cmd "$CLANG"       "apt: clang (analyze-deep)"
 req_cmd "$CPPCHECK"    "apt: cppcheck (analyze + MISRA)"
 req_cmd "$CBMC"        "apt: cbmc (formal proof in test-long)"
-req_cmd python3        "MISRA addon"
-if have python3 && ! python3 -c 'import yaml' >/dev/null 2>&1; then
+req_cmd python3        "Python 3.7 or newer; host gates and MISRA addon"
+PYTHON_VERSION_OK=0
+if have python3; then
+	if PYTHON_VERSION_ERROR=$(python3 "$REPO_ROOT/test/python_version.py" 2>&1); then
+		PYTHON_VERSION_OK=1
+	else
+		MISSING+=("${PYTHON_VERSION_ERROR:-python3 minimum-version probe failed}")
+	fi
+fi
+if [ "$PYTHON_VERSION_OK" -eq 1 ] \
+		&& ! python3 -c 'import yaml' >/dev/null 2>&1; then
 	MISSING+=("PyYAML  (apt: python3-yaml; strict workflow syntax validation)")
 fi
 req_cmd gpg            "release checksum/tag signing and signature regressions"

@@ -109,8 +109,16 @@ aggregate so missing PIC tooling cannot produce a false green release gate.
                 absent; use `make pic10f322-test-target-variants STRICT_TOOLS=1` when
                  a missing or skipped target must fail closed.
 
-  Python:       Python 3, standard library only. `make
-                test-pic10f320-return-stack-oracle` runs deterministic parser and
+  Python:       Python 3.7 or newer for the system `python3`; repository-authored
+                host gates use the standard library only. Python 3.7 is the exact
+                minimum because mandatory gates use `subprocess.run()`'s
+                `capture_output=` and `text=` arguments, both introduced in 3.7.
+                `make test` checks this contract before running any Python child
+                gate, and release preflight checks it before PyYAML or validation.
+                This host-Python range has no upper cap and is distinct from the
+                patched yasimavr build/runtime requirement, which supports only
+                standard 64-bit CPython 3.9 through 3.13 (see below).
+                `make test-pic10f320-return-stack-oracle` runs deterministic parser and
                 control-flow fixtures in the normal `make test` / `test-long`
                 graph. Every successful `make pic10f320` build applies the oracle
                 before its image is marked complete. `make
