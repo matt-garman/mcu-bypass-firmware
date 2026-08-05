@@ -26,10 +26,9 @@
 //     CD4053_SIMPLE    : PB2 = CD4053 ctrl, PB3 unused (low)
 //     CD4053_WITH_MUTE : PB2 = CTL1, PB3 = CTL2 (mute-before-switch)
 //     TQ2_L2_5V_RELAY  : PB2 = RESET coil, PB3 = SET coil (pulsed, then parked low)
-//   For the CD4053/TMUX4053 analog-switch variants the MCU *pin* level for a
-//   given effect state is the same in both builds (see X4053_CTL_FOR_STATE):
-//   the CD4053's MOSFET inverter and the TMUX4053's swapped analog throws
-//   cancel, so the firmware drives the pin identically.
+//   The CD4053 analog-switch variants use one MCU pin polarity for both CD4053
+//   and pin-compatible TMUX4053 boards (see X4053_CTL_FOR_STATE): LOW in BYPASS
+//   and HIGH when ENGAGED.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -102,12 +101,10 @@
 #  define CTL_DELAY_MS  0
 #endif
 
-// Expected MCU control-pin level for a given effect state, on the CD4053/
-// TMUX4053 analog-switch variants. Both builds drive the MCU pin with the SAME
-// polarity: the CD4053's MOSFET inverter and the TMUX4053's swapped analog
-// throws cancel out, so the firmware is byte-identical for both. The natural,
-// MCU-absent state (control pins at the bypass level via pulldown/pullup) is
-// BYPASS by design.
+// Expected MCU control-pin level for a given effect state on the CD4053
+// analog-switch variants. The one supported polarity serves both CD4053 and
+// pin-compatible TMUX4053 boards. The natural, MCU-absent state (control pins at
+// the bypass level via pulldown/pullup) is BYPASS by design.
 //   MCU pin == effect_state  (ENGAGED -> MCU HIGH, BYPASS -> MCU LOW)
 // (effect_state: 1 = ENGAGED, 0 = BYPASS. Not meaningful for the relay variant,
 // whose coil pins are pulsed and parked low regardless of polarity.)
@@ -551,13 +548,13 @@ static void test_power_on_default(void) {
           "power-on relay coils should be parked low, got PB2=%d PB3=%d",
           g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3]);
 #elif defined(CD4053_WITH_MUTE)
-    // Both control lines at the BYPASS steady-state level (polarity-dependent).
+    // Both control lines are LOW at the BYPASS steady-state level.
     CHECK(g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(0) &&
           g_ctl_level[CTL_PB3] == X4053_CTL_FOR_STATE(0),
           "power-on mute control lines wrong, got PB2=%d PB3=%d expected=%d",
           g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3], X4053_CTL_FOR_STATE(0));
 #else // CD4053_SIMPLE
-    // PB2 at the BYPASS control level (polarity-dependent); PB3 unused (low).
+    // PB2 is LOW at the BYPASS control level; PB3 is unused and LOW.
     CHECK(g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(0) && g_ctl_level[CTL_PB3] == 0,
           "power-on CD4053 control wrong, got PB2=%d PB3=%d (expected PB2=%d PB3=0)",
           g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3], X4053_CTL_FOR_STATE(0));
@@ -912,11 +909,9 @@ static void test_toggle_parity_invariant(void) {
               "parity broken at i=%u: toggles=%u led=%d expected=%d",
               i, toggles, g_led_level, expect_lit);
 #if defined(CD4053_SIMPLE) || (!defined(CD4053_WITH_MUTE) && !defined(TQ2_L2_5V_RELAY))
-        // CD4053 simple: the control output (PB2) tracks the effect state (which
-        // the LED also reflects), modulo drive polarity -- equal to the LED on
-        // the CD4053 build, inverted on the TMUX4053 direct-drive build. The
-        // mute/relay variants drive PB2/PB3 differently (pulses), so this mirror
-        // invariant is simple-only.
+        // CD4053 simple: the control output (PB2) tracks the effect state and
+        // therefore the LED. The mute/relay variants drive PB2/PB3 differently
+        // (pulses), so this mirror invariant is simple-only.
         CHECK(g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(g_led_level),
               "CD4053 (PB2=%d) diverged from LED (PB1=%d) at i=%u",
               g_ctl_level[CTL_PB2], g_led_level, i);
@@ -1144,7 +1139,7 @@ static void test_lockstep_cosim(void) {
                   "lock-step: LED (PB1=%d) disagrees with model effect_state=%u at tick %u",
                   g_led_level, m.effect_state, ticks);
 #if defined(CD4053_SIMPLE) || (!defined(CD4053_WITH_MUTE) && !defined(TQ2_L2_5V_RELAY))
-            // CD4053 simple only: PB2 tracks effect state (modulo drive polarity).
+            // CD4053 simple only: PB2 tracks effect state exactly.
             CHECK(g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(m.effect_state),
                   "lock-step: CD4053 (PB2=%d) disagrees with model effect_state=%u at tick %u",
                   g_ctl_level[CTL_PB2], m.effect_state, ticks);
@@ -1157,9 +1152,8 @@ static void test_lockstep_cosim(void) {
                   "lock-step relay: coils not parked at tick %u (PB2=%d PB3=%d)",
                   ticks, g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3]);
 #elif defined(CD4053_WITH_MUTE)
-            // Mute: both control lines equal the effect-state control level in
-            // steady state (polarity-dependent: both LOW for BYPASS / HIGH for
-            // ENGAGED on the CD4053 build, inverted on the TMUX4053 build).
+            // Mute: both control lines equal the effect state in steady state:
+            // LOW for BYPASS and HIGH for ENGAGED.
             // ls_model_step() has already updated m.effect_state to the
             // post-tick value, so this compares against the same state the
             // firmware just settled into.
@@ -2158,8 +2152,7 @@ static void test_control_relay_pulse(void) {
 static void test_control_mute_sequence(void) {
     if (sim_reset(0) != 0) { g_failures++; return; }
 
-    // Power-on bypass steady state: both control lines at the BYPASS level
-    // (low on CD4053, high on TMUX4053 direct-drive).
+    // Power-on bypass steady state: both control lines are LOW.
     CHECK(g_ctl_level[CTL_PB2] == X4053_CTL_FOR_STATE(0) &&
           g_ctl_level[CTL_PB3] == X4053_CTL_FOR_STATE(0),
           "mute: bypass steady state both at bypass level (PB2=%d PB3=%d expected=%d)",
@@ -2202,10 +2195,9 @@ static void test_control_mute_sequence(void) {
 }
 
 #else // CD4053_SIMPLE (default)
-// Simple CD4053/TMUX4053: a single control line (PB2) follows the effect state,
-// one edge per toggle. The MCU pin tracks the LED on the CD4053 build and is
-// inverted on the TMUX4053 direct-drive build (see X4053_CTL_FOR_STATE); either
-// way the 4053 sees engaged/bypass. PB3 is an unused output parked low.
+// Simple CD4053 analog-switch stage: one control line (PB2) follows the effect
+// state and the LED, with one edge per toggle. The same polarity also serves the
+// pin-compatible TMUX4053 board. PB3 is an unused output parked low.
 static void test_control_cd4053_simple(void) {
     if (sim_reset(0) != 0) { g_failures++; return; }
 

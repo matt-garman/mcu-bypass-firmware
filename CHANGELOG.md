@@ -833,6 +833,12 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **The AVR simulator still described a retired per-build TMUX4053 polarity.**
+  The separate direct-drive variants no longer exist: the current CD4053 images
+  use one control-pin polarity for both CD4053 and pin-compatible TMUX4053 board
+  wiring, LOW in BYPASS and HIGH when ENGAGED. Comments now state that invariant
+  consistently; simulator logic and assertions are unchanged.
+
 - **Five active surfaces still used pre-v0.9.8 image or variant vocabulary.** The
   two gpsim wrapper usage blocks now show canonical MCU-qualified basenames; the
   PIC10F320 special-case and PIC shell notes use `cd4053_simple`; and ATtiny202 CI
