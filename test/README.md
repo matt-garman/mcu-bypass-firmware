@@ -530,8 +530,10 @@ control pin to `attiny202-sim`, a dropped `ctx_` write-back to
 `attiny202-lockstep`, a defeated SFR/direction/pull-up guard to
 `attiny202-fault`, a missing WDT pet or broken ISR handshake to
 `attiny202-soak`, and a shortened coil pulse to `attiny202-delay-oracle` — the
-AVR-XT's only route to an absolute pulse width, since yasimavr's flat
-instruction timing cannot measure a busy-wait loop.
+AVR-XT's only route to an absolute pulse width. As described under "Known gaps"
+above, the output tracer calls `SimLoop.run(1)`; the pinned yasimavr rewinds any
+instruction overshoot on return, effectively billing every traced instruction
+one cycle even though its core models multi-cycle instructions.
 
 
 ## Known gaps (PIC — hardware-bench only)

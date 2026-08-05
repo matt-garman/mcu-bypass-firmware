@@ -833,6 +833,13 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **The mutation guide attributed yasimavr's half-width pulse traces to flat
+  instruction timing.** The core models multi-cycle instructions; the pinned
+  release loses their overshoot because the output tracer repeatedly calls
+  `SimLoop.run(1)`, which rewinds the cycle counter on return. The mutation
+  section now matches the detailed known-gap analysis and still routes absolute
+  pulse-width checks to the image-based delay oracle.
+
 - **The AVR lock-step comments called their per-tick oracle independent even
   though it executes the shipping pure core.** The simulated AVR image and the
   host `model_step.h` adapter both run `src/bypass_pure.c`; the symbolic harness
