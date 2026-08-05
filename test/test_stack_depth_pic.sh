@@ -15,9 +15,10 @@ set -euo pipefail
 # whose duplicated helpers XC8 names without a leading underscore) -- and that
 # it REJECTS each way the analysis can be wrong: over budget, recursion, an
 # overflowing build (XC8 zeroes its callstack directives), a corroboration
-# mismatch between the two oracles, an unresolvable or indirect call, a missing
-# entry point, and a device pack with no declared depth. A gate that has never
-# rejected anything is an assumption, not a check.
+# mismatch between the two oracles, unresolvable direct calls in every accepted
+# lexical form, indirect calls, missing/malformed corroboration, invalid function
+# psect ownership, a missing entry point, and a device pack with no declared
+# depth. A gate that has never rejected anything is an assumption, not a check.
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 GATE="$ROOT/check_stack_depth_pic.sh"
@@ -43,6 +44,20 @@ emit_fn() {
 		printf '__ptext_%s:\t;psect for function %s\n' "${name#_}" "$name"
 		local c
 		for c in "$@"; do printf '\tfcall\t%s\n' "$c"; done
+		printf '\treturn\n\n'
+	} >> "$f"
+}
+# emit_fn_op <file> <name> <called-by> <opcode> <callee>
+emit_fn_op() {
+	local f=$1 name=$2 by=$3 opcode=$4 callee=$5
+	{
+		printf ';; *************** function %s *****************\n' "$name"
+		printf ';; This function is called by:\n'
+		printf ';;\t\t%s\n' "$by"
+		printf ';; This function calls:\n'
+		printf ';;\t\t%s\n\n' "$callee"
+		printf '__ptext_%s:\t;psect for function %s\n' "${name#_}" "$name"
+		printf '\t%s\t%s\n' "$opcode" "$callee"
 		printf '\treturn\n\n'
 	} >> "$f"
 }
@@ -136,13 +151,150 @@ printf '\tfcall\t_nowhere\n' >> "$f"
 emit_callstack "$f" 6
 expect_fail "unannotated-callee" "$f" 8 2 "call to unannotated symbol"
 
+# --- 7a. target spelling must never decide whether a direct call exists -------
+# Exercise each direct opcode separately so recognizing one cannot hide a hole
+# in another. None of these unprefixed targets has an annotation.
+for opcode in call fcall lcall pcall; do
+	f="$work/unprefixed-$opcode.s"; : > "$f"
+	emit_fn_op "$f" _main "Startup code after reset" "$opcode" x_helper
+	emit_callstack "$f" 7
+	expect_fail "unprefixed-$opcode" "$f" 8 2 \
+		"call to unannotated symbol x_helper from _main"
+done
+
+# Lexical layout and comments cannot decide whether the same direct call exists.
+f="$work/psect-in-comment.s"; : > "$f"
+emit_fn "$f" _main "Startup code after reset"
+printf '\tfcall\tx_helper ;psect is comment text, not a transition\n' >> "$f"
+emit_callstack "$f" 7
+expect_fail "psect-text-in-call-comment" "$f" 8 2 \
+	"call to unannotated symbol x_helper from _main"
+
+f="$work/inline-label-call.s"; : > "$f"
+emit_fn "$f" _main "Startup code after reset"
+printf 'local_label: FCALL x_helper\n' >> "$f"
+emit_callstack "$f" 7
+expect_fail "inline-label-uppercase-call" "$f" 8 2 \
+	"call to unannotated symbol x_helper from _main"
+
+f="$work/column-zero-call.s"; : > "$f"
+emit_fn "$f" _main "Startup code after reset"
+printf 'LCALL x_helper\n' >> "$f"
+emit_callstack "$f" 7
+expect_fail "column-zero-uppercase-call" "$f" 8 2 \
+	"call to unannotated symbol x_helper from _main"
+
+# Unprefixed symbols are valid when XC8 provides annotations for them. This
+# chain uses all four direct opcodes and must measure every edge.
+f="$work/unprefixed-known.s"; : > "$f"
+emit_fn_op "$f" _main "Startup code after reset" call x_a
+emit_fn_op "$f" x_a   "_main"                   fcall x_b
+emit_fn_op "$f" x_b   "x_a"                     lcall x_c
+emit_fn_op "$f" x_c   "x_b"                     pcall x_d
+emit_fn    "$f" x_d   "x_c"
+emit_callstack "$f" 4
+expect_pass "unprefixed-known-chain" "$f" 8 2 4
+
+# Startup/runtime helpers outside function psects are not C call-graph edges.
+# Cover both the preamble and a non-function psect after a function body so a
+# stale `cur` cannot attribute runtime plumbing to the last C function.
+f="$work/runtime-preamble.s"; : > "$f"
+printf '\tfcall\tclear_ram0 ; XC8 startup helper\n' >> "$f"
+emit_fn "$f" _main "Startup code after reset"
+emit_callstack "$f" 8
+expect_pass "runtime-call-before-functions" "$f" 8 2 0
+
+f="$work/runtime-psect.s"; : > "$f"
+emit_fn "$f" _main "Startup code after reset"
+printf '\tpsect\truntime,class=CODE\n\tfcall\tclear_ram0 ; XC8 runtime helper\n' >> "$f"
+emit_callstack "$f" 8
+expect_pass "runtime-call-after-psect-transition" "$f" 8 2 0
+
+# A call to an annotated C function outside every function psect is structural
+# drift, not runtime plumbing that may be ignored.
+f="$work/known-outside.s"; : > "$f"
+emit_fn "$f" _main "Startup code after reset"
+emit_fn "$f" _a "_main"
+printf '\tpsect\truntime,class=CODE\n\tfcall\t_a\n' >> "$f"
+emit_callstack "$f" 8
+expect_fail "known-call-outside-psect" "$f" 8 2 \
+	"call to annotated function _a occurs outside any function psect"
+
+# Function annotations and emitted psect markers are two views of the same
+# function. Missing or mismatched ownership must fail before graph traversal.
+f="$work/missing-psect.s"; : > "$f"
+printf '%s\n' \
+	';; *************** function _main *****************' \
+	';; This function is called by:' \
+	';;    Startup code after reset' \
+	';; This function calls:' \
+	';;    Nothing' \
+	'    callstack 8' >> "$f"
+expect_fail "missing-function-psect" "$f" 8 2 \
+	"function _main has no matching psect marker"
+
+f="$work/mismatched-psect.s"; : > "$f"
+emit_fn "$f" _main "Startup code after reset"
+printf '%s\n' \
+	';; *************** function _other *****************' \
+	';; This function is called by:' \
+	';;    _main' \
+	';; This function calls:' \
+	';;    Nothing' \
+	'__ptext_wrong:    ;psect for function _main' \
+	'    return' \
+	'    callstack 8' >> "$f"
+expect_fail "mismatched-function-psect" "$f" 8 2 \
+	"function psect marker _main does not match annotation _other"
+
 # --- 8. an indirect call makes the static graph incomplete ------------------
 f="$work/indirect.s"; : > "$f"
 emit_fn "$f" _main "Startup code after reset" _a
 emit_fn "$f" _a    "_main"
-printf '\tcallw\n' >> "$f"
+printf '\tcallw ; computed target\n' >> "$f"
 emit_callstack "$f" 6
 expect_fail "indirect-call" "$f" 8 2 "indirect call"
+
+f="$work/operandless-pcall.s"; : > "$f"
+emit_fn "$f" _main "Startup code after reset"
+printf '\tpcall ; computed target\n' >> "$f"
+emit_callstack "$f" 8
+expect_fail "operandless-pcall" "$f" 8 2 "indirect call"
+
+f="$work/inline-callw.s"; : > "$f"
+emit_fn "$f" _main "Startup code after reset"
+printf 'computed_site: CALLW ; computed target\n' >> "$f"
+emit_callstack "$f" 8
+expect_fail "inline-label-callw" "$f" 8 2 "indirect call"
+
+# The second oracle is mandatory and its syntax must not drift into "not
+# emitted". Otherwise a lexer miss and missing corroboration could agree on a
+# false depth of zero.
+f="$work/missing-callstack.s"; : > "$f"
+emit_fn "$f" _main "Startup code after reset"
+expect_fail "missing-callstack" "$f" 8 2 "no XC8 callstack directives found"
+
+f="$work/malformed-callstack.s"; : > "$f"
+emit_fn "$f" _main "Startup code after reset"
+printf '\tcallstack 0,changed\n' >> "$f"
+expect_fail "malformed-callstack" "$f" 8 2 "malformed callstack directive"
+
+# A function cannot be both reset and interrupt entry. Overwriting one
+# classification with the other would lose the interrupt hardware push.
+f="$work/conflicting-entry.s"; : > "$f"
+printf '%s\n' \
+	';; *************** function _main *****************' \
+	';; This function is called by:' \
+	';;    Interrupt level 1' \
+	';;    Startup code after reset' \
+	';; This function calls:' \
+	';;    Nothing' \
+	'' \
+	'__ptext_main:    ;psect for function _main' \
+	'    return' \
+	'    callstack 8' >> "$f"
+expect_fail "conflicting-entry-classification" "$f" 8 2 \
+	"conflicting entry-point classifications for _main"
 
 # --- 9. no annotations at all must not read as "depth 0" --------------------
 f="$work/bare.s"; : > "$f"

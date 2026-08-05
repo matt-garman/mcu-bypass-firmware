@@ -824,6 +824,22 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **The PIC hardware-stack gate could silently ignore a direct call whose target
+  used an unrecognized prefix.** Its instruction lexer admitted only `_...` and
+  XC8's known `iN_...` interrupt duplicates. An in-function call to `x_helper`
+  therefore disappeared before target validation and could turn a real call
+  chain into a reported depth of zero.
+
+  The gate now tokenizes every direct `call`, `fcall`, `lcall` and resolved
+  `pcall` inside a validated function psect, independent of target spelling, and
+  requires every target to resolve to an XC8 function annotation. Each
+  annotation must own exactly one matching psect marker; non-function psect
+  transitions clear function context; startup/runtime calls remain permitted
+  only outside function psects; and indirect or malformed calls still fail
+  closed. Synthetic fixtures cover all four direct opcodes, unprefixed known and
+  unknown functions, psect ownership, startup/runtime boundaries, indirect
+  calls, and the existing main-plus-ISR accounting.
+
 - **Mandatory host Python gates now have an explicit, fail-fast version
   contract.** The system `python3` minimum is 3.7, the first version providing
   the `subprocess.run(capture_output=..., text=...)` APIs those gates already

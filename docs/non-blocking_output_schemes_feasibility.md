@@ -813,22 +813,23 @@ Three things are worth recording about this:
   either PIC shell and no `GIE = 1` anywhere, so XC8 never emitted a duplicate.
   Every call target inside a function psect in all three built images starts with
   `_`, and all three measure correctly (3 / 3 / 4 levels).
-- **It failed closed, structurally.** A dropped edge always leaves an uncalled
-  function that is not an XC8 entry point, and that check runs before any depth
-  is reported — so the failure mode was a confusing error, never a silent
-  under-count. The bad direction was not available.
+- **The observed `i1_` case failed structurally, but that was not a general
+  guarantee.** This duplicate had its own XC8 function annotation, so dropping
+  the edge left an uncalled annotated function that was not an entry point. An
+  unrecognized target with no annotation could instead disappear before the
+  structural checks and lower the measured depth.
 - **The gate's analysis was already right.** It sums the reset and interrupt
   trees and adds the hardware-pushed return address, and `test_stack_depth_pic.sh`
   case 11 already covered ISR summing. That case passed because its synthetic
   helper is spelled `_ihelp`; only the lexer had not been told what real XC8
   emits.
 
-The fix admits `i[0-9]+_` and is deliberately no broader — startup code calls
-runtime helpers such as `clear_ram0` from outside any function psect, and the
-leading-underscore requirement is what keeps those from parsing as calls. A
-future unrecognized prefix still fails closed by the same mechanism. Regression
-case 12 in `test/test_stack_depth_pic.sh` uses the name XC8 actually emits, and
-fails against the pre-fix gate.
+The initial fix admitted `i[0-9]+_`; the gate now removes the prefix assumption
+entirely. It records every direct `call`/`fcall`/`lcall`/resolved `pcall` inside a
+validated function psect and requires the target to have an XC8 function
+annotation. Startup helpers such as `clear_ram0` remain allowed only outside
+function psects. Regression case 12 uses the real `i1_` spelling, while separate
+fixtures prove arbitrary unprefixed targets cannot disappear from the graph.
 
 ---
 

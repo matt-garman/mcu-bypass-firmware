@@ -95,6 +95,7 @@ printf '%s' "$RESERVE" | grep -qE '^[0-9]+$' \
 # longest-path walk with cycle detection produces the peak.
 report=$(
 	"${AWK:-awk}" -v label="$LABEL" -v stack_depth="$STACK_DEPTH" -v reserve="$RESERVE" '
+	function structural(msg) { if (bad == "") bad = msg }
 	function add_edge(f, t) {
 		if (index(" " calls[f] " ", " " t " ") == 0) calls[f] = calls[f] " " t
 	}
@@ -116,7 +117,13 @@ report=$(
 	function chain(n,   s) { s = n; while (nxt[n] != "") { n = nxt[n]; s = s " -> " n } return s }
 
 	# ---- function blocks and their annotations
-	$1 == ";;" && $3 == "function" && $2 ~ /^\*+$/ { fn = $4; known[fn] = 1; mode = ""; next }
+	$1 == ";;" && $3 == "function" && $2 ~ /^\*+$/ {
+		cur = ""
+		if (pending != "") structural("function " pending " has no matching psect marker")
+		fn = $4
+		if (fn in known) structural("duplicate function annotation for " fn)
+		known[fn] = 1; pending = fn; mode = ""; next
+	}
 	/^;; This function calls:/            { mode = "calls";    next }
 	/^;; This function is called by:/     { mode = "calledby"; next }
 	/^;;/ && mode != "" {
@@ -124,52 +131,81 @@ report=$(
 		sub(/^;;[ \t]*/, "", s)
 		if (s == "" || s == "Nothing") next
 		if (mode == "calledby") {
-			if (s ~ /^Startup code after reset/)  { entry[fn] = "reset" }
-			else if (s ~ /^Interrupt level/)      { entry[fn] = "interrupt" }
+			if (s ~ /^Startup code after reset/) {
+				if ((fn in entry) && entry[fn] != "reset") structural("conflicting entry-point classifications for " fn)
+				else entry[fn] = "reset"
+			}
+			else if (s ~ /^Interrupt level/) {
+				if ((fn in entry) && entry[fn] != "interrupt") structural("conflicting entry-point classifications for " fn)
+				else entry[fn] = "interrupt"
+			}
 		}
 		next
 	}
 	!/^;;/ { mode = "" }
 
 	# ---- the emitted instruction stream
-	/;psect for function / { n = split($0, a, "function "); cur = a[n]; sub(/[ \t]+$/, "", cur); next }
-	# A call pushes a return address. "callstack" is a directive, not a call:
-	# the trailing separator in each alternative keeps it from matching.
-	#
-	# Call targets are C symbols, which XC8 spells with a leading underscore --
-	# EXCEPT the copies it makes of a non-reentrant function that is reachable
-	# from more than one call graph (advisory 1510: "appears in multiple call
-	# graphs and has been duplicated by the compiler"). Those are named by
-	# interrupt level, i1_<name> / i2_<name>, with no underscore in front. They
-	# appear the moment an ISR shares a helper with main, so the pattern has to
-	# admit them, or the edge from the ISR into its own copy is silently lost.
-	#
-	# It is deliberately NOT broadened to "any identifier": startup code calls
-	# runtime helpers such as `clear_ram0` from outside any function psect, and
-	# the leading-underscore requirement is exactly what keeps those from
-	# parsing as calls (they would trip the "call outside any function" check).
-	#
-	# If XC8 ever mints some third prefix this pattern does not know, the lost
-	# edge leaves a function nothing calls, and the root/entry cross-check in
-	# END rejects it -- so an unrecognised naming scheme fails CLOSED with a
-	# structural error. It can never quietly under-count the depth.
-	/^[ \t]+(fcall|call|lcall|pcall)[ \t]+(_|i[0-9]+_)/ {
-		t = $2
-		if (cur == "") { bad = bad "call outside any function: " $0 "\n"; next }
-		add_edge(cur, t); called[t] = 1; next
+	# A function annotation must own exactly one matching psect marker. Without
+	# this check, a changed marker spelling can put real edges under an unknown,
+	# unreachable caller and make the measured depth smaller.
+	/;psect for function / {
+		cur = ""
+		n = split($0, a, "function "); pfn = a[n]; sub(/[ \t]+$/, "", pfn)
+		if (!(pfn in known)) structural("function psect marker names unannotated symbol " pfn)
+		else if (pending == "") structural("function psect marker for " pfn " has no preceding annotation")
+		else if (pfn != pending) structural("function psect marker " pfn " does not match annotation " pending)
+		else if (pfn in psect_seen) structural("duplicate function psect marker for " pfn)
+		else { psect_seen[pfn] = 1; cur = pfn }
+		pending = ""; next
 	}
-	# Indirect calls cannot be resolved statically; refuse rather than under-count.
-	/^[ \t]+(callw|pcall)[ \t]*$/ { indirect++ ; next }
-	/^[ \t]+callstack[ \t]+-?[0-9]+/ {
-		cs_seen++
-		if ($2 + 0 != 0) { if (cs_min == "" || $2 + 0 < cs_min) cs_min = $2 + 0 }
-		next
+	# Runtime/startup psects are outside every C function. Their direct calls are
+	# recorded below but are not part of the measured C call graph.
+	/^[^ \t;]+:[ \t]*;psect/ { cur = ""; next }
+
+	# Tokenize instructions after removing assembler comments. Every direct call
+	# inside a function is an edge regardless of the current XC8 symbol prefix. This
+	# is what makes a new naming scheme fail at the known-function check instead
+	# of disappearing from the graph. Calls outside function psects are startup
+	# or runtime plumbing; if such a target is one of the annotated C functions,
+	# END rejects it as a misplaced edge.
+	{
+		code = $0; sub(/;.*/, "", code)
+		sub(/^[ \t]+/, "", code); sub(/[ \t]+$/, "", code)
+		if (code == "") next
+		# Accept the normal separate-label form and fail closed if XC8 moves an
+		# instruction onto the same line as a label.
+		if (code ~ /^[^ \t]+:[ \t]*/) {
+			sub(/^[^ \t]+:[ \t]*/, "", code)
+			if (code == "") next
+		}
+		ntok = split(code, tok, /[ \t]+/); op = tolower(tok[1])
+		if (op == "psect") { cur = ""; next }
+		if (op == "callstack") {
+			if (ntok != 2 || tok[2] !~ /^-?[0-9]+$/) {
+				structural("malformed callstack directive: " code); next
+			}
+			cs_seen++
+			if (tok[2] + 0 != 0) { if (cs_min == "" || tok[2] + 0 < cs_min) cs_min = tok[2] + 0 }
+			next
+		}
+		# Indirect calls cannot be resolved statically; refuse rather than under-count.
+		if (op == "callw" || (op == "pcall" && ntok == 1)) { indirect++; next }
+		if (op == "fcall" || op == "call" || op == "lcall" || op == "pcall") {
+			if (ntok != 2) { structural("malformed direct call instruction: " code); next }
+			t = tok[2]
+			if (cur == "") { outside[t] = 1; next }
+			add_edge(cur, t); called[t] = 1; next
+		}
 	}
 
 	END {
-		if (bad != "") { printf "%s", bad > "/dev/stderr"; print "ERR structural"; exit 0 }
+		if (bad != "") { print "ERR " bad; exit 0 }
 		nfun = 0; for (f in known) nfun++
 		if (nfun == 0) { print "ERR no XC8 function annotations found (wrong file, or the annotation format changed)"; exit 0 }
+		for (f in known)
+			if (!(f in psect_seen)) { print "ERR function " f " has no matching psect marker"; exit 0 }
+		for (t in outside)
+			if (t in known) { print "ERR call to annotated function " t " occurs outside any function psect"; exit 0 }
 		if (indirect > 0) { print "ERR " indirect " indirect call(s) present; the static call graph is incomplete"; exit 0 }
 
 		# Every call target must be a function we know about.
@@ -178,6 +214,7 @@ report=$(
 			for (i = 1; i <= m; i++)
 				if (!(arr[i] in known)) { print "ERR call to unannotated symbol " arr[i] " from " f; exit 0 }
 		}
+		if (cs_seen == 0) { print "ERR no XC8 callstack directives found (annotation format changed? do not drop corroboration)"; exit 0 }
 
 		# Roots derived from the instruction stream must match the roots XC8
 		# declared, or one of the two views is stale.
@@ -204,8 +241,7 @@ report=$(
 		}
 
 		# XC8 zeroes every callstack directive when the graph does not fit.
-		if (cs_seen > 0 && cs_min == "") { print "ERR XC8 zeroed every callstack directive: it could not fit the call graph (see warning 1393)"; exit 0 }
-		corro = "not emitted"
+		if (cs_min == "") { print "ERR XC8 zeroed every callstack directive: it could not fit the call graph (see warning 1393)"; exit 0 }
 		if (cs_min != "") {
 			used = stack_depth - cs_min
 			if (used != total) { print "ERR computed peak " total " disagrees with XC8 callstack (" used "); parser or toolchain moved"; exit 0 }
