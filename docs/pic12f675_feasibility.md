@@ -690,7 +690,7 @@ Putting §4.1–§4.7 together, the per-tick sanity gate for this part would gua
 
 The last two rows are conditional on §4.3's decision. They are listed here rather
 than in §4.3 because the fault-injection matrix is built from this table, and
-`PIC_FAULT_EXPECTED_CHECKS` has to be right for whichever model is chosen.
+`PIC_FAULT_EXPECTED_CHECKS` has to be right for whichever model is chosen. <!-- name-contract: exempt (C adapter macro, not a Make variable) -->
 
 The `OPTION_REG` consolidation is worth calling out in review: on the 322 an
 upset to the WDT period, the tick period and the pull-up enable are three
@@ -850,8 +850,8 @@ part. Failure messages are register-named too ("TRISA did not remain exact…",
 
 The work is to lift register addresses, register *names*, expected init values,
 and the injection matrix from core constants into adapter-supplied macros — the
-same move already made once for `FOOTSW_PIN_NAME`, `PIC_FAULT_PROGRAM_WORDS`,
-`PIC_FAULT_EXPECTED_CHECKS` and `PIC_FAULT_EXTRA_OUTPUT_INJECTIONS()`. It is
+same move already made once for `FOOTSW_PIN_NAME`, `PIC_FAULT_PROGRAM_WORDS`, <!-- name-contract: exempt (C adapter macro, not a Make variable) -->
+`PIC_FAULT_EXPECTED_CHECKS` and `PIC_FAULT_EXTRA_OUTPUT_INJECTIONS()`. <!-- name-contract: exempt (C adapter macros, not Make variables) --> It is
 mechanical but wide, and it touches lanes that currently pass for two parts, so
 it wants to be a standalone, behaviour-preserving commit **before** any 12F675
 adapter is written — with the 10F322 and 10F320 lanes green across it as the
@@ -871,7 +871,7 @@ string `attach n1 fsw ra3` in routed stimuli — that assertion becomes per-part
 |---|---|
 | `pic12f675-test-config` | new decode table (§4.7); mechanism and HEX parser unchanged |
 | `pic12f675-test-gpsim` | new `.stc` pair with re-derived cycle checkpoints; `gpio5` stimulus; calibration injection |
-| `pic12f675-test-fault` | new injection matrix over the §4.8 guard set — including new cases for `CMCON`, `ADCON0`, `OSCCAL`, the `GPIO` shadow, and an `OPTION_REG` that now carries three guarded fields; new `PIC_FAULT_EXPECTED_CHECKS` count |
+| `pic12f675-test-fault` | new injection matrix over the §4.8 guard set — including new cases for `CMCON`, `ADCON0`, `OSCCAL`, the `GPIO` shadow, and an `OPTION_REG` that now carries three guarded fields; new `PIC_FAULT_EXPECTED_CHECKS` count | <!-- name-contract: exempt (C adapter macro, not a Make variable) -->
 | `pic12f675-test-io` | `GPIO`/`TRISIO` instead of `LATA`/`PORTA`/`TRISA`; note this lane gets *more* meaningful here, since shadow-vs-port divergence is observable |
 | `pic12f675-test-lockstep` | `_ctx_` address extraction from the XC8 `.sym` is unchanged; adapter + proc name only |
 | `pic12f675-test-soak` | re-derived timing budgets (§4.4.1); calibration injection |
