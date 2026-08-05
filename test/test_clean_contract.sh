@@ -82,7 +82,9 @@ inventory() {
 # even under -n), and inherits _MAKE_SERIAL_LOCK_HELD when nested inside `make
 # test` so it does not deadlock on the lock the outer make already holds.
 removed_by() {
-	make -n "$1" 2>/dev/null | awk '
+	local target=$1
+	shift
+	make -n "$@" "$target" 2>/dev/null | awk '
 	/^[ \t]*rm -[rf]*f/ { inrm = 1 }
 	inrm {
 		line = $0
@@ -132,6 +134,78 @@ checks=$((checks + 1))
 
 [ "${#CLEANTESTS_REMOVES[@]}" -ge 8 ] \
 	|| fail "\`make -n clean-tests\` yielded only ${#CLEANTESTS_REMOVES[@]} removed paths; expected >= 8 -- the recipe parse has stopped matching"
+checks=$((checks + 1))
+
+# An upgraded worktree can contain retired image names in every historical build
+# directory. First read the actual defaults with caller overrides sanitized; a
+# test that injects the expected values itself would keep passing after a default
+# changed. _MAKE_SERIAL_LOCK_HELD remains inherited so this nested read does not
+# deadlock on the outer serialized make.
+mapfile -t DEFAULT_BUILD_DIRS < <(env \
+	-u MAKEFLAGS -u MFLAGS -u GNUMAKEFLAGS -u MAKEOVERRIDES \
+	-u AVR_BUILD_DIR -u PIC10F322_BUILD_DIR -u XT_BUILD_DIR \
+	-u PIC10F320_BUILD_DIR \
+	make -s print-AVR_BUILD_DIR print-XT_BUILD_DIR \
+		print-PIC10F322_BUILD_DIR print-PIC10F320_BUILD_DIR 2>/dev/null)
+EXPECTED_DEFAULT_BUILD_DIRS=(
+	build_avr_classic
+	build_avr_xt
+	build_pic10f322
+	build_pic10f320
+)
+[ "${#DEFAULT_BUILD_DIRS[@]}" -eq "${#EXPECTED_DEFAULT_BUILD_DIRS[@]}" ] \
+	|| fail "read ${#DEFAULT_BUILD_DIRS[@]} canonical build-directory defaults; expected ${#EXPECTED_DEFAULT_BUILD_DIRS[@]}"
+for i in "${!EXPECTED_DEFAULT_BUILD_DIRS[@]}"; do
+	[ "${DEFAULT_BUILD_DIRS[$i]}" = "${EXPECTED_DEFAULT_BUILD_DIRS[$i]}" ] \
+		|| fail "canonical build-directory default ${DEFAULT_BUILD_DIRS[$i]} differs from expected ${EXPECTED_DEFAULT_BUILD_DIRS[$i]}"
+done
+
+# Now pin the complete build* operand set emitted by canonical `make clean`.
+# Exact equality rejects both omissions and broad additions such as build_*.
+mapfile -t DEFAULT_CLEAN_REMOVES < <(removed_by clean \
+	AVR_BUILD_DIR=build_avr_classic \
+	PIC10F322_BUILD_DIR=build_pic10f322 \
+	XT_BUILD_DIR=build_avr_xt \
+	PIC10F320_BUILD_DIR=build_pic10f320)
+ACTUAL_BUILD_REMOVALS=()
+for removed in "${DEFAULT_CLEAN_REMOVES[@]}"; do
+	case "$removed" in build*) ACTUAL_BUILD_REMOVALS+=("$removed") ;; esac
+done
+EXPECTED_BUILD_REMOVALS=(
+	build_avr_classic
+	build_avr_xt
+	build_pic
+	build_pic10f320
+	build_pic10f322
+)
+[ "${#ACTUAL_BUILD_REMOVALS[@]}" -eq "${#EXPECTED_BUILD_REMOVALS[@]}" ] \
+	|| fail "canonical \`make clean\` has ${#ACTUAL_BUILD_REMOVALS[@]} build-directory operands; expected exactly ${#EXPECTED_BUILD_REMOVALS[@]}"
+for i in "${!EXPECTED_BUILD_REMOVALS[@]}"; do
+	[ "${ACTUAL_BUILD_REMOVALS[$i]}" = "${EXPECTED_BUILD_REMOVALS[$i]}" ] \
+		|| fail "canonical \`make clean\` build-directory operand ${ACTUAL_BUILD_REMOVALS[$i]} differs from expected ${EXPECTED_BUILD_REMOVALS[$i]}"
+done
+checks=$((checks + 1))
+
+# The warning belongs before the old-to-new table where an upgrading user first
+# encounters the rename, not only in the later reproducibility recipe whose
+# unrelated `make clean` would make a loose search pass.
+rename_intro=$(awk '
+	/^### Renamed in v0.9.8/ { in_section=1 }
+	in_section { print }
+	in_section && /^\| up to `v0.9.7`/ { exit }
+' "$ROOT/release/README.md")
+for required in \
+	'**Upgrading an existing checkout:**' \
+	'worktree was used to build `v0.9.7`' \
+	'run `make clean` once before' \
+	'path formerly passed as `PIC_BUILD_DIR` is now passed as' \
+	'`PIC10F322_BUILD_DIR`' \
+	'old `PIC320_BUILD_DIR` path is now passed as' \
+	'`PIC10F320_BUILD_DIR`' \
+	'retired and current image names can coexist'; do
+	[[ "$rename_intro" == *"$required"* ]] \
+		|| fail "v0.9.8 rename introduction omits upgrade warning text: $required"
+done
 checks=$((checks + 1))
 
 # The generated per-variant, per-MCU simulation family is the one that drifted,

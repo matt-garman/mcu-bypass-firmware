@@ -148,6 +148,19 @@ image and gives the exact `avrdude` command.
 
 ### Renamed in v0.9.8 (`v0.9.7` and earlier used different names)
 
+<!-- name-contract: exempt-begin (old->new upgrade guidance and redirect tables;
+     old names deliberately no longer exist) -->
+**Upgrading an existing checkout:** If this worktree was used to build `v0.9.7`
+or earlier, after updating to `v0.9.8` or later run `make clean` once before
+building. If the old build used custom build directories, reuse each old path
+under the current variable name: `AVR_BUILD_DIR` and `XT_BUILD_DIR` are unchanged;
+the path formerly passed as `PIC_BUILD_DIR` is now passed as
+`PIC10F322_BUILD_DIR`, and the old `PIC320_BUILD_DIR` path is now passed as
+`PIC10F320_BUILD_DIR`. The renamed build targets create the current image names
+but do not remove differently named images left by an older build; without the
+one-time clean, retired and current image names can coexist in the same build
+directory.
+
 Releases up to and including `v0.9.7` used three inconsistent conventions, and
 the ATtiny13a images carried **no MCU field at all** — a bare `bypass_cd4053.hex`
 was the ATtiny13a image. Nothing in that filename stopped it being flashed onto
@@ -157,8 +170,6 @@ Historical release directories are **not** renamed: their `SHA256SUMS` names the
 files and is covered by a detached signature, so renaming them would invalidate
 the published signatures. Use this table to map an old name to its replacement.
 
-<!-- name-contract: exempt-begin (old->new goal redirect table; the left
-     column names goals that deliberately no longer exist) -->
 | up to `v0.9.7` | from `v0.9.8` |
 |---|---|
 | `bypass_cd4053.hex` | `bypass-attiny13a-cd4053_simple.hex` |

@@ -646,6 +646,15 @@ file is the human-readable summary of *what changed*.
   `SHA256SUMS` names the files and is covered by a detached signature, so
   renaming them would invalidate published signatures.
 
+  An existing source worktree is different: current build targets create the
+  new names but do not remove differently named images from an older build.
+  Builders upgrading a checkout that built `v0.9.7` or earlier are therefore
+  told, in both Quickstart and the published rename section, to run `make clean`
+  once before the first new build. `test-clean-contract` pins the exact four
+  current default build directories plus retired `build_pic/` that cleanup
+  removes; the guidance also maps paths supplied through renamed PIC
+  build-directory variables onto their current cleanup variables.
+
   Internals: the spelling is composed in exactly one place, the Makefile's
   `$(call fw_image,<variant>,<mcu-tag>)`, backed by an `IMAGE_STAGE_*` map with
   a parse-time completeness check over both supported variant sets — a supported
@@ -1019,7 +1028,7 @@ file is the human-readable summary of *what changed*.
   already extended to the pre-`src/`-reorganization KLEE paths.
 
   New gate `test-clean-contract` (`test/test_clean_contract.sh`, in `make
-  test`), 9 checks in 0.4 s. Its oracle is `make -rRn --print-data-base`: every
+  test`), 11 checks in 0.4 s. Its oracle is `make -rRn --print-data-base`: every
   explicit non-phony target under `test/` that is not a tracked source file is
   something the Makefile builds, and `make -n clean` must remove it. Reading
   Make's own inventory is the point — a second hand-written list would just be a

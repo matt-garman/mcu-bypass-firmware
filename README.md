@@ -89,6 +89,13 @@ Requires avrtools, assumes a USBtiny programmer, and a fresh
 ATtiny13a chip (see `make help` for how to build/program other
 MCUs):
 
+If this existing worktree was used to build `v0.9.7` or earlier, after updating
+run `make clean` once before the first new build. Custom PIC build-directory
+variables were renamed too; if the old build used any custom build directory,
+follow the cleanup override mapping under
+[Renamed in v0.9.8](release/README.md#renamed-in-v098-v097-and-earlier-used-different-names).
+Without that one-time clean, retired and current image names can coexist.
+
 ```
 make
 make attiny13a-program
