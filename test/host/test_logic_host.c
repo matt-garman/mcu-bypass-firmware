@@ -225,9 +225,10 @@ static void test_long_hold_single_toggle(void) {
 // algorithm on purpose (see the file header). The shipping integrator is
 // covered more strongly than any run: test/formal/test_cbmc.c (C1) PROVES
 // debounce_integrate() saturates at RELEASE_THRESH for every admitted input.
-// What was unguarded is the ORACLE -- the simavr tests decide the firmware is
-// correct by comparing it against this model, so a model that drifted would
-// make a firmware that drifted look right.
+// What was unguarded is this independent ORACLE itself. It does not feed the
+// simavr lock-step comparison, which uses the shipping pure core on its host
+// side. It remains a separate behavioral argument, so drift here would invalidate
+// that independent evidence even though the direct-core lanes stayed green.
 static void test_stuck_switch_no_recovery(void) {
     // Two ways a switch sticks closed, with different correct answers.
     //   (a) it sticks after a normal press:  one toggle, then parked ENGAGED.

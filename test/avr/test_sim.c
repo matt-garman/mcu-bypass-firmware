@@ -194,11 +194,11 @@
 #define SIM_PARITY_ITERS 400u
 #endif
 
-// Number of 1ms ticks driven through the lock-step co-simulation (firmware vs
-// golden model, internal-state comparison every tick). Each tick is one full
-// wake/process/sleep cycle of the real firmware, so this is comparable in cost
-// to the parity stream; keep modest for `make test`, crank via -D for
-// `make test-long`.
+// Number of 1ms ticks driven through the lock-step co-simulation (AVR image vs
+// host-compiled shipping core, internal-state comparison every tick). Each tick
+// is one full wake/process/sleep cycle of the real firmware, so this is
+// comparable in cost to the parity stream; keep modest for `make test`, crank
+// via -D for `make test-long`.
 #ifndef SIM_LOCKSTEP_ITERS
 #define SIM_LOCKSTEP_ITERS 5000u
 #endif
@@ -921,21 +921,29 @@ static void test_toggle_parity_invariant(void) {
 
 
 //////////////////////////////////////////////////////////////////////////////
-// Lock-step co-simulation: firmware internal state vs golden model, EVERY tick.
+// Lock-step co-simulation: AVR-image state vs host-compiled shipping core, EVERY
+// tick.
 //
 // The output-only tests above prove the LED/CD4053 *transitions* match
 // expectations. This test goes deeper: it drives the SAME input stream into the
-// real firmware (simavr) and an independent golden model, and after every 1ms
-// tick compares the firmware's internal RAM (debounce_counter_, program_state_,
-// effect_state_) against the model's. That closes the binary<->model gap left
-// open by the proofs in test_model_check.c / test_symbolic.c, which verify a
-// re-implementation of the algorithm rather than the compiled binary: here the
-// compiled firmware's full state trajectory must match the proven model tick
-// for tick, not merely agree on the final toggle count.
+// compiled AVR firmware in simavr and a host-side step() adapter, then compares
+// the firmware's internal RAM (debounce_counter_, program_state_, effect_state_)
+// after every 1ms tick. step() reproduces the shell's pin conversion, operation
+// order and result application, but delegates the transitions themselves to
+// debounce_integrate() and debounce_step() in the same shipping bypass_pure.c
+// used by the AVR image. This lane therefore checks target compilation and shell
+// integration against a host build of the core; it is not an independent
+// transition oracle, and a semantic defect in bypass_pure.c can agree on both
+// sides.
 //
-// The model below is byte-identical to the golden model in test_logic_host.c
-// and the step() in test_model_check.c / test_symbolic.c, and pulls its
-// thresholds from bypass_config.h via the host shim.
+// test_symbolic.c and the principal state-graph checks in test_model_check.c call
+// that same adapter and core. The model checker separately uses handwritten
+// substeps for its nondeterministic-scheduling proof. The broad independent
+// re-implementation is test/host/test_logic_host.c: model_tick_isr() and
+// model_main_step() are handwritten against only the shared thresholds, and do
+// not feed this lock-step comparison. ls_model_init() below independently spells
+// the released-at-power-on stable state used by this lane; its pressed branch is
+// not exercised here.
 //////////////////////////////////////////////////////////////////////////////
 
 enum { LS_PRESS_WAIT = 0, LS_RELEASE_WAIT = 1 };
@@ -961,9 +969,9 @@ static void ls_model_init(ls_model_t *m, int pressed_at_power_on) {
 // One 1ms tick: ISR saturating integrator, then one main-loop state-machine
 // pass. pin_low != 0 means PB0 reads low == switch pressed.
 //
-// Delegates to step() from model_step.h -- the single canonical copy of the
-// algorithm shared with test_model_check.c and test_symbolic.c.  LS_* enum
-// values are numerically identical to the model_step.h enum values (both are
+// Delegates to step() from model_step.h, the host adapter around the shipping
+// bypass_pure.c core also used by test_model_check.c and test_symbolic.c. LS_*
+// enum values are numerically identical to the model_step.h values (both are
 // 0/1), so the conversion between ls_model_t and state_t is lossless.
 static void ls_model_step(ls_model_t *m, int pin_low) {
     state_t s = { m->program_state, m->effect_state, m->debounce_counter };
@@ -1035,10 +1043,11 @@ static int run_one_tick_settled(int pin_low) {
 // that the toggle occurs. A >= -> > mutant requires PRESSED_THRESH+1 ticks
 // and does NOT toggle here, making it the independent killer for that mutation.
 //
-// The lock-step co-sim cannot catch this mutation because its golden model
-// calls debounce_step() from bypass_pure.c directly -- both the firmware binary
-// and the model receive the same mutated code and continue to agree tick-for-tick.
-// This test has an independent hard-coded expectation that breaks the symmetry.
+// The lock-step co-sim cannot catch this mutation because its host transition
+// oracle calls debounce_step() from bypass_pure.c through step() -- both the
+// firmware binary and the oracle receive the same mutated code and continue to
+// agree tick-for-tick. This test has an independent hard-coded expectation that
+// breaks the symmetry.
 static void test_minimum_press_toggles(void) {
     if (sim_reset(0) != 0) { g_failures++; return; }
 
@@ -1177,12 +1186,13 @@ static void test_lockstep_cosim(void) {
 }
 
 // Multi-seed lock-step: test_lockstep_cosim runs ONE fixed seed; this drives
-// several more random seeds through the REAL firmware vs. the golden model and
-// asserts byte-for-byte agreement on every tick, so the fixed-seed co-sim lock
-// cannot hide a seed-dependent divergence between the compiled firmware and the
-// model.  Kept short per seed -- simavr is slow -- because the wide, long
-// long-duration sweep is covered far more cheaply by the golden-model Monte
-// Carlo (test_monte_carlo_seeds in test_logic_host.c).  Tunable via -D.
+// several more random seeds through the REAL firmware vs. the host shipping-core
+// adapter and asserts byte-for-byte agreement on every tick, so the fixed-seed
+// co-sim lock cannot hide a seed-dependent divergence between the compiled
+// firmware and host execution. Kept short per seed -- simavr is slow -- because
+// the wide, long-duration sweep is covered far more cheaply by the independent
+// golden-model Monte Carlo (test_monte_carlo_seeds in test_logic_host.c). Tunable
+// via -D.
 #ifndef MC_SIM_SEED_COUNT
 #define MC_SIM_SEED_COUNT 5u
 #endif
@@ -1236,7 +1246,7 @@ static void test_monte_carlo_lockstep(void) {
             }
         }
     }
-    printf("  mc-lockstep: %u seeds x %u ticks, real firmware vs golden model\n",
+    printf("  mc-lockstep: %u seeds x %u ticks, AVR image vs host shipping core\n",
            (unsigned)MC_SIM_SEED_COUNT, (unsigned)MC_SIM_SEED_TICKS);
 }
 

@@ -1,15 +1,16 @@
 // Shared single-step model for test_model_check.c, test_symbolic.c and
 // test_sim.c.
 //
-// SINGLE SOURCE OF TRUTH
-// ----------------------
+// SHIPPING TRANSITIONS, EXPLICIT SHELL ADAPTER
+// --------------------------------------------
 // This header used to RE-IMPLEMENT the debounce algorithm so the proofs had a
 // model to check. That re-implementation was a maintenance hazard: it had to be
 // kept byte-identical to the firmware by hand. It no longer exists. step() now
-// DELEGATES directly to the firmware's own pure functions -- debounce_integrate()
-// and debounce_step() from bypass_pure.c -- so the model checker, the symbolic
-// property test, and the simavr oracle all exercise the EXACT code that ships.
-// There is nothing left to drift.
+// DELEGATES the two state transitions to the firmware's own pure functions --
+// debounce_integrate() and debounce_step() from bypass_pure.c. The thin adapter
+// remains handwritten: it maps pin polarity, orders the ISR transition before
+// the main-loop transition, and applies reload_lockout as the shell does. The
+// simavr lock-step lane checks that adapter against the compiled AVR shell.
 //
 // The pure firmware logic is host-compilable (no hardware, no globals, no side
 // effects), which is the whole point of the functional-core/imperative-shell
@@ -48,11 +49,10 @@ typedef struct {
     int     toggled;
 } step_result_t;
 
-// One 1ms step: the firmware's ISR saturating integrator followed by one
-// main-loop state-machine pass -- i.e. exactly the per-tick work bypass_mcu_avr_classic.c's
-// main() does (debounce_integrate() inside the timer-tick block, then
-// debounce_step()). Delegates to the real firmware functions so this verifies
-// the shipping algorithm, not a copy.
+// One modeled 1ms step: the classic AVR firmware's ISR saturating integrator
+// followed by one main-loop state-machine pass. The transitions delegate to the
+// real firmware functions; the ordering and result application below model the
+// shell explicitly.
 // pin_low != 0  =>  PB0 read low  =>  switch pressed.
 static step_result_t step(state_t s, int pin_low) {
     // ISR (firmware: TIM0_COMPA_vect): saturating integrator over the live pin.

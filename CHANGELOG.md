@@ -833,6 +833,16 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **The AVR lock-step comments called their per-tick oracle independent even
+  though it executes the shipping pure core.** The simulated AVR image and the
+  host `model_step.h` adapter both run `src/bypass_pure.c`; the symbolic harness
+  and the model checker's principal state graph call that adapter too. The
+  comments now distinguish this target-compilation and shell-integration
+  comparison from the model checker's handwritten scheduling submodel and the
+  broad independent reimplementation in `test/host/test_logic_host.c`. They also
+  scope the lock-step lane's handwritten initialization anchor to the released
+  startup state it actually exercises.
+
 - **The AVR simulator still described a retired per-build TMUX4053 polarity.**
   The separate direct-drive variants no longer exist: the current CD4053 images
   use one control-pin polarity for both CD4053 and pin-compatible TMUX4053 board
