@@ -69,10 +69,26 @@ fi
 BASELINE_SUMS="$REPO_ROOT/release/$BASELINE/SHA256SUMS"
 [ -f "$BASELINE_SUMS" ] && [ ! -L "$BASELINE_SUMS" ] \
 	|| die "baseline checksum manifest not found: $BASELINE_SUMS"
-# Compare against the PUBLISHED, signed manifest or not at all. An unsigned
-# baseline would make this a comparison against whatever is in the tree.
-[ -f "$REPO_ROOT/release/$BASELINE/SHA256SUMS.asc" ] \
-	|| die "release/$BASELINE/SHA256SUMS carries no detached signature; it is not the published baseline"
+BASELINE_SIGNATURE="$REPO_ROOT/release/$BASELINE/SHA256SUMS.asc"
+SIGNATURE_VERIFY="$REPO_ROOT/scripts/verify-release-signature.sh"
+[ -f "$SIGNATURE_VERIFY" ] && [ ! -L "$SIGNATURE_VERIFY" ] \
+	&& [ -s "$SIGNATURE_VERIFY" ] && [ -x "$SIGNATURE_VERIFY" ] \
+	|| die "release signature verifier is missing or not executable: $SIGNATURE_VERIFY"
+# Compare against the PUBLISHED manifest or not at all. Presence of a detached
+# signature proves nothing: establish that the pinned release key signed these
+# exact bytes before any baseline hash is parsed. Snapshot the manifest first so
+# the later parse cannot reopen a pathname that changed after GPG returned. The
+# signature is consumed only by GPG, and the shared verifier validates its type.
+VERIFY_WORK=$(mktemp -d "${TMPDIR:-/tmp}/rename-identity.XXXXXX") \
+	|| die "cannot create baseline verification work directory"
+trap 'rm -rf "$VERIFY_WORK"' EXIT
+BASELINE_SUMS_SNAPSHOT="$VERIFY_WORK/SHA256SUMS"
+cp -P -- "$BASELINE_SUMS" "$BASELINE_SUMS_SNAPSHOT" \
+	|| die "cannot snapshot baseline checksum manifest: $BASELINE_SUMS"
+if ! "$SIGNATURE_VERIFY" detached "$BASELINE_SIGNATURE" \
+		"$BASELINE_SUMS_SNAPSHOT" >/dev/null; then
+	die "baseline checksum signature verification failed for release/$BASELINE/SHA256SUMS"
+fi
 
 # --- the old <v> / new <stage> output-stage vocabulary ----------------------
 # Stated in the sentence under the table, because the retired stage tokens exist
@@ -162,7 +178,7 @@ while IFS= read -r entry; do
 		differ=$((differ + 1))
 		rows_md+=("| \`$old_name\` | \`$new_name\` | \`$new_hash\` | **DIFFERS** (was \`$old_hash\`) |")
 	fi
-done < "$BASELINE_SUMS"
+done < "$BASELINE_SUMS_SNAPSHOT"
 
 # An image with no baseline counterpart is not a failure by itself -- a release
 # may legitimately add a part -- but it must be visible, or "18 identical" would
@@ -181,7 +197,7 @@ printf 'CONTENTS did not change. This is that claim checked rather than asserted
 printf 'each image built for `%s` is hashed and compared against the entry for its\n' "$TARGET"
 printf 'old name in the signed `release/%s/SHA256SUMS`, through the published\n' "$BASELINE"
 printf 'old-to-new table in `release/README.md`.\n\n'
-printf -- '- **Baseline:** `release/%s/SHA256SUMS` (detached signature present)\n' "$BASELINE"
+printf -- '- **Baseline:** `release/%s/SHA256SUMS` (detached signature verified against the pinned release key)\n' "$BASELINE"
 printf -- '- **Mapping:** `release/README.md`, %d image rows\n' "$rows"
 printf -- '- **Compared:** %d images\n\n' "${#IMAGES[@]}"
 printf '| up to `%s` | from `%s` | sha256 | verdict |\n' "$BASELINE" "$TARGET"

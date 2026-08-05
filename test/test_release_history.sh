@@ -272,12 +272,16 @@ publish_block=$(awk '/- name: Publish GitHub Release/ { in_block=1 }
 	|| fail "tag-signature workflow verification is not fail-closed"
 checks=$((checks + 1))
 
-# The checked-in trust root must still verify the latest historical release. This
-# also catches an accidental key replacement independently of the fixture keys.
-"$PINNED_SIGNATURE_VERIFY" detached "$ROOT/release/v0.9.5/SHA256SUMS.asc" \
-	"$ROOT/release/v0.9.5/SHA256SUMS" >/dev/null \
-	|| fail "pinned key did not verify the historical v0.9.5 checksums"
-checks=$((checks + 1))
+# The checked-in trust root must still verify both the first signed fixture used
+# by this test and the rename verifier's latest historical baseline. This also
+# catches an accidental key replacement independently of the disposable keys.
+for historical_version in v0.9.5 v0.9.7; do
+	"$PINNED_SIGNATURE_VERIFY" detached \
+		"$ROOT/release/$historical_version/SHA256SUMS.asc" \
+		"$ROOT/release/$historical_version/SHA256SUMS" >/dev/null \
+		|| fail "pinned key did not verify the historical $historical_version checksums"
+	checks=$((checks + 1))
+done
 
 # Git must not rewrite byte-exact artifacts even when the checkout policy would
 # normally convert text to CRLF. This fixture deliberately includes an AVR HEX

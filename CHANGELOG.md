@@ -503,13 +503,16 @@ file is the human-readable summary of *what changed*.
   anyone had confirmed it. Every other claim under `release/` is backed by a
   retained artifact.
 
-  `scripts/verify-rename-identity.sh` hashes every image this release builds
-  against the entry for its old name in the signed `release/v0.9.7/SHA256SUMS`,
-  through the published old-to-new table in `release/README.md`, and emits the
-  per-image table as the evidence document. `scripts/make-release.sh` runs it in
-  step 1 — before the 24-hour soak, so a changed byte costs seconds rather than
-  a day — and stages the result as `release/v0.9.8/RENAME_IDENTITY.md`. Result
-  on the current tree: **18 identical, 0 differ, 0 missing**.
+  `scripts/verify-rename-identity.sh` first verifies that the pinned release key
+  signed the exact `release/v0.9.7/SHA256SUMS` bytes, then hashes every image this
+  release builds against the entry for its old name through the published
+  old-to-new table in `release/README.md`, and emits the per-image table as the
+  evidence document. Missing, empty, symlinked, malformed, wrong-key, or stale
+  signatures all fail before any baseline hash is parsed.
+  `scripts/make-release.sh` runs it in step 1 — before the 24-hour soak, so a
+  changed byte costs seconds rather than a day — and stages the result as
+  `release/v0.9.8/RENAME_IDENTITY.md`. Result on the current tree: **18
+  identical, 0 differ, 0 missing**.
 
   Three decisions are what keep this from becoming a liability later. It is
   **not a standing gate**: pinning current images to a *previous* release's

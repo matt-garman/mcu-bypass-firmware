@@ -25,6 +25,8 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 command -v git >/dev/null 2>&1 || fail "git is required"
+command -v gpg >/dev/null 2>&1 || fail "gpg is required"
+command -v timeout >/dev/null 2>&1 || fail "timeout is required"
 
 # shellcheck source=../scripts/release-provenance.sh
 source "$ROOT/scripts/release-provenance.sh"
@@ -377,7 +379,171 @@ done
 	|| fail "byte-identical rename fixture failed its initial comparison: $(<"$work/rename-early.err")"
 grep -Fq 'identical=18 differ=0 missing=0 added=0' "$work/rename-early.out" \
 	|| fail "initial rename fixture did not compare the complete 18-image set"
+grep -Fq 'detached signature verified against the pinned release key' \
+	"$work/rename-early.out" \
+	|| fail "rename report does not attest that the baseline signature was verified"
 checks=$((checks + 1))
+
+# Signature verification must dominate every read of a baseline hash. A
+# malformed append is deliberate: if parsing moves ahead of verification, this
+# fails as an unparsable checksum line instead of as altered signed bytes.
+mapfile -t baseline_signature_lines < <(grep -nF \
+	'"$SIGNATURE_VERIFY" detached "$BASELINE_SIGNATURE"' \
+	"$RENAME_VERIFY")
+mapfile -t baseline_copy_lines < <(grep -nF \
+	'cp -P -- "$BASELINE_SUMS" "$BASELINE_SUMS_SNAPSHOT"' "$RENAME_VERIFY")
+mapfile -t baseline_parse_lines < <(grep -nF \
+	'done < "$BASELINE_SUMS_SNAPSHOT"' "$RENAME_VERIFY")
+[ "${#baseline_signature_lines[@]}" -eq 1 ] \
+	&& [ "${#baseline_copy_lines[@]}" -eq 1 ] \
+	&& [ "${#baseline_parse_lines[@]}" -eq 1 ] \
+	|| fail "rename verifier baseline signature/parse markers are missing or ambiguous"
+mapfile -t original_manifest_refs < <(grep -En \
+	'\$\{?BASELINE_SUMS\}?([^A-Za-z0-9_]|$)' "$RENAME_VERIFY")
+mapfile -t snapshot_manifest_refs < <(grep -En \
+	'\$\{?BASELINE_SUMS_SNAPSHOT\}?([^A-Za-z0-9_]|$)' "$RENAME_VERIFY")
+[ "${#original_manifest_refs[@]}" -eq 5 ] \
+	&& [ "${#snapshot_manifest_refs[@]}" -eq 3 ] \
+	|| fail "rename verifier has an unreviewed baseline-manifest reference that could bypass signature ordering"
+copy_line=${baseline_copy_lines[0]%%:*}
+signature_line=${baseline_signature_lines[0]%%:*}
+parse_line=${baseline_parse_lines[0]%%:*}
+[ "$copy_line" -lt "$signature_line" ] && [ "$signature_line" -lt "$parse_line" ] \
+	|| fail "rename verifier parses baseline hashes before signature verification"
+checks=$((checks + 1))
+
+# Use an isolated copy so every fail-closed input shape can be exercised without
+# touching the checked-in release. The fixture retains the production pinned key
+# and verifier; only the wrong-key case creates a disposable second signer.
+rename_fixture="$work/rename-fixture"
+mkdir -p "$rename_fixture/scripts" "$rename_fixture/release/v0.9.7"
+cp "$ROOT/scripts/verify-rename-identity.sh" \
+	"$ROOT/scripts/verify-release-signature.sh" \
+	"$ROOT/scripts/release-signing-policy.sh" "$rename_fixture/scripts/"
+cp "$ROOT/release/signing-key.asc" "$ROOT/release/README.md" \
+	"$rename_fixture/release/"
+cp "$ROOT/release/v0.9.7/SHA256SUMS" \
+	"$ROOT/release/v0.9.7/SHA256SUMS.asc" \
+	"$rename_fixture/release/v0.9.7/"
+chmod 750 "$rename_fixture/scripts/verify-rename-identity.sh" \
+	"$rename_fixture/scripts/verify-release-signature.sh"
+fixture_rename_verify="$rename_fixture/scripts/verify-rename-identity.sh"
+fixture_sums="$rename_fixture/release/v0.9.7/SHA256SUMS"
+fixture_signature="$rename_fixture/release/v0.9.7/SHA256SUMS.asc"
+saved_sums="$work/valid-v0.9.7-SHA256SUMS"
+saved_signature="$work/valid-v0.9.7-SHA256SUMS.asc"
+cp -p "$fixture_sums" "$saved_sums"
+cp -p "$fixture_signature" "$saved_signature"
+
+expect_rename_signature_fail() {
+	local label=$1 expected=$2 rc
+	if timeout 15 "$fixture_rename_verify" v0.9.8 "${rename_paths[@]}" \
+			>"$work/rename-signature.out" 2>"$work/rename-signature.err"; then
+		fail "$label: rename verifier accepted an untrusted baseline"
+	else
+		rc=$?
+	fi
+	[ "$rc" -ne 124 ] || fail "$label: rename verifier blocked on an invalid input"
+	grep -Fq "$expected" "$work/rename-signature.err" \
+		|| fail "$label failed without '$expected': $(<"$work/rename-signature.err")"
+	if grep -Fq 'unparsable line' "$work/rename-signature.err"; then
+		fail "$label parsed a baseline hash before signature verification"
+	fi
+	checks=$((checks + 1))
+}
+
+"$fixture_rename_verify" v0.9.8 "${rename_paths[@]}" \
+	>"$work/rename-fixture-valid.out" 2>"$work/rename-fixture-valid.err" \
+	|| fail "isolated valid baseline failed: $(<"$work/rename-fixture-valid.err")"
+checks=$((checks + 1))
+
+# Replace the original manifest after the real GPG verification returns. The
+# comparison must continue over its already-verified private snapshot, never
+# reopen the now-untrusted release pathname.
+mv "$rename_fixture/scripts/verify-release-signature.sh" \
+	"$rename_fixture/scripts/verify-release-signature-real.sh"
+cat > "$rename_fixture/scripts/verify-release-signature.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+"$script_dir/verify-release-signature-real.sh" "$@"
+printf 'post-verification pathname replacement\n' \
+	> "$script_dir/../release/v0.9.7/SHA256SUMS"
+EOF
+chmod 750 "$rename_fixture/scripts/verify-release-signature.sh"
+"$fixture_rename_verify" v0.9.8 "${rename_paths[@]}" \
+	>"$work/rename-snapshot.out" 2>"$work/rename-snapshot.err" \
+	|| fail "verified-manifest snapshot did not survive pathname replacement: $(<"$work/rename-snapshot.err")"
+grep -Fq 'identical=18 differ=0 missing=0 added=0' "$work/rename-snapshot.out" \
+	|| fail "pathname replacement changed the verified baseline comparison"
+grep -Fxq 'post-verification pathname replacement' "$fixture_sums" \
+	|| fail "pathname-replacement fixture did not run after signature verification"
+rm "$rename_fixture/scripts/verify-release-signature.sh"
+mv "$rename_fixture/scripts/verify-release-signature-real.sh" \
+	"$rename_fixture/scripts/verify-release-signature.sh"
+cp -p "$saved_sums" "$fixture_sums"
+checks=$((checks + 1))
+
+printf 'malformed unsigned append\n' >> "$fixture_sums"
+expect_rename_signature_fail "modified baseline manifest" \
+	"detached release signature is invalid"
+cp -p "$saved_sums" "$fixture_sums"
+
+rm "$fixture_signature"
+expect_rename_signature_fail "missing baseline signature" \
+	"detached signature is missing, empty, or not a regular file"
+cp -p "$saved_signature" "$fixture_signature"
+
+: > "$fixture_signature"
+expect_rename_signature_fail "empty baseline signature" \
+	"detached signature is missing, empty, or not a regular file"
+cp -p "$saved_signature" "$fixture_signature"
+
+rm "$fixture_signature"
+ln -s "$saved_signature" "$fixture_signature"
+expect_rename_signature_fail "symlinked baseline signature" \
+	"detached signature is missing, empty, or not a regular file"
+rm "$fixture_signature"
+cp -p "$saved_signature" "$fixture_signature"
+
+rm "$fixture_signature"
+mkfifo "$fixture_signature"
+expect_rename_signature_fail "FIFO baseline signature" \
+	"detached signature is missing, empty, or not a regular file"
+rm "$fixture_signature"
+cp -p "$saved_signature" "$fixture_signature"
+
+printf 'not an OpenPGP signature\n' > "$fixture_signature"
+expect_rename_signature_fail "malformed baseline signature" \
+	"detached release signature is invalid"
+cp -p "$saved_signature" "$fixture_signature"
+
+wrong_key_home="$work/wrong-rename-keyring"
+install -d -m 700 "$wrong_key_home"
+gpg --batch --no-options --homedir "$wrong_key_home" --pinentry-mode loopback \
+	--passphrase '' --quick-generate-key \
+	"Wrong Rename Baseline Signer <wrong-rename@example.invalid>" ed25519 sign 1d \
+	>/dev/null 2>&1 || fail "could not generate wrong rename-baseline key"
+wrong_key_fingerprint=$(gpg --batch --no-options --homedir "$wrong_key_home" \
+	--with-colons --fingerprint --list-secret-keys 2>/dev/null \
+	| awk -F: '$1 == "fpr" { print $10; exit }')
+[[ "$wrong_key_fingerprint" =~ ^[0-9A-F]{40}$ ]] \
+	|| fail "could not read wrong rename-baseline key fingerprint"
+rm "$fixture_signature"
+gpg --batch --no-options --homedir "$wrong_key_home" --pinentry-mode loopback \
+	--passphrase '' --local-user "$wrong_key_fingerprint" --armor --detach-sign \
+	--output "$fixture_signature" "$fixture_sums" \
+	|| fail "could not create wrong-key rename-baseline signature"
+expect_rename_signature_fail "wrong-key baseline signature" \
+	"detached release signature is invalid"
+cp -p "$saved_signature" "$fixture_signature"
+
+: > "$rename_fixture/scripts/verify-release-signature.sh"
+expect_rename_signature_fail "empty signature verifier" \
+	"release signature verifier is missing or not executable"
+cp -p "$ROOT/scripts/verify-release-signature.sh" \
+	"$rename_fixture/scripts/verify-release-signature.sh"
+
 printf '\npost-validation mutation\n' >> "$rename_images/bypass-attiny13a-cd4053_simple.hex"
 if "$RENAME_VERIFY" v0.9.8 "${rename_paths[@]}" >"$work/rename-final.out" \
 		2>"$work/rename-final.err"; then
