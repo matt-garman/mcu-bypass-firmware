@@ -611,8 +611,10 @@ done
 ok "all ${#PIC10F320_IMAGES[@]} PIC10F320 images are structurally valid Intel HEX."
 
 # Byte identity against the previous release, for a release whose claim is that
-# only the filenames moved. Run HERE, not at staging, so a changed byte costs
-# seconds instead of a 24-hour soak.
+# only the filenames moved. Run HERE so a changed byte costs seconds instead of
+# a 24-hour soak, then run the same check again over the final validated images
+# immediately before staging. Validation rebuilds these paths, so only the
+# second report is retained as evidence about what is actually released.
 #
 # No version appears in this call and none is needed: the script reads which two
 # releases the published rename table in release/README.md is about, and says so
@@ -620,18 +622,23 @@ ok "all ${#PIC10F320_IMAGES[@]} PIC10F320 images are structurally valid Intel HE
 # between releases and cannot become a false alarm the first time a release
 # legitimately changes a byte.
 RENAME_IDENTITY_DOC=""
-if ! scripts/verify-rename-identity.sh "$VERSION" "${IMAGES[@]}" \
-		>"$WORK/RENAME_IDENTITY.md" 2>"$WORK/rename-identity.err"; then
-	cat "$WORK/RENAME_IDENTITY.md" >&2
-	cat "$WORK/rename-identity.err" >&2
-	die "images are not byte-identical to the release the rename table maps from."
-fi
-if head -1 "$WORK/RENAME_IDENTITY.md" | grep -q '^rename identity: not applicable'; then
-	log "$(cat "$WORK/RENAME_IDENTITY.md")"
-else
-	RENAME_IDENTITY_DOC="$WORK/RENAME_IDENTITY.md"
-	ok "$(grep -E '^identical=' "$RENAME_IDENTITY_DOC") -- byte identity against the previous release."
-fi
+verify_rename_identity() {
+	local phase=$1
+	if ! scripts/verify-rename-identity.sh "$VERSION" "${IMAGES[@]}" \
+			>"$WORK/RENAME_IDENTITY.md" 2>"$WORK/rename-identity.err"; then
+		cat "$WORK/RENAME_IDENTITY.md" >&2
+		cat "$WORK/rename-identity.err" >&2
+		die "$phase images are not byte-identical to the release the rename table maps from."
+	fi
+	if head -1 "$WORK/RENAME_IDENTITY.md" | grep -q '^rename identity: not applicable'; then
+		RENAME_IDENTITY_DOC=""
+		log "$(cat "$WORK/RENAME_IDENTITY.md")"
+	else
+		RENAME_IDENTITY_DOC="$WORK/RENAME_IDENTITY.md"
+		ok "$phase: $(grep -E '^identical=' "$RENAME_IDENTITY_DOC") -- byte identity against the previous release."
+	fi
+}
+verify_rename_identity "initial build"
 
 hash_avr_elf_set() {
 	local elf
@@ -954,6 +961,11 @@ current_pic_image_hashes=$(hash_pic_image_set "${PIC_IMAGES[@]}")
 [ "$current_pic_image_hashes" = "$validated_pic_image_hashes" ] \
 	|| die "a validated PIC image changed before staging"
 ok "all validated release images are present and nonempty."
+
+# Replace the early fail-fast report with one computed from the exact final
+# image paths that staging consumes. A rebuild that changed bytes after the
+# early check must fail here, never leave stale evidence beside different files.
+verify_rename_identity "final validated images"
 
 # Builds and parallel soaks can run for 24 hours. The Make lock protects shared
 # artifacts from other Make invocations, but intentionally cannot prevent a

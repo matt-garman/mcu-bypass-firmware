@@ -766,6 +766,22 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **The retained rename-identity report now describes the final images, not an
+  earlier build at the same paths.** The fail-fast comparison still runs after
+  the initial 18-image build, before any expensive qualification gate. But
+  `make test-long`, the target aggregates and final Classic-AVR HEX regeneration
+  can all rebuild those paths. The report produced before them was therefore a
+  claim about files that no longer necessarily existed by staging time.
+
+  `scripts/make-release.sh` now runs the same comparison again after every final
+  image-presence/hash check and immediately before source provenance and
+  staging. That second invocation overwrites the provisional report, so the
+  retained `RENAME_IDENTITY.md` is computed from the exact image paths copied
+  into the release. `test-release-provenance` pins both sides of the ordering and
+  reproduces the defect dynamically: all 18 images pass the early comparison,
+  one is changed, and the final comparison must fail with that image marked
+  `DIFFERS`.
+
 - **The name-contract gate could not see a file until it was committed, so it
   reported a violation one run late — to the next person rather than to its
   author.** `harvestable_files()` enumerated `git ls-files`, which reads the

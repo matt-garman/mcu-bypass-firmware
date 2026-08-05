@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 RELEASE="$ROOT/scripts/make-release.sh"
 RELEASE_WORKFLOW="$ROOT/.github/workflows/release.yml"
+RENAME_VERIFY="$ROOT/scripts/verify-rename-identity.sh"
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-provenance.XXXXXX")
 repo="$work/repo with spaces"
 log="$work/check.log"
@@ -312,6 +313,79 @@ check_line=${check_lines[0]%%:*}
 stage_line=${stage_lines[0]%%:*}
 [ "$capture_line" -lt "$check_line" ] && [ "$check_line" -lt "$stage_line" ] \
 	|| fail "release provenance is not rechecked between capture and staging"
+checks=$((checks + 1))
+
+# Rename identity has two distinct jobs: reject a changed initial build before
+# the expensive gates, then replace that provisional report with one computed
+# from the final validated images. Pin both calls around the rebuild window and
+# before source/output provenance and staging.
+mapfile -t initial_identity_lines < <(grep -nF 'verify_rename_identity "initial build"' "$RELEASE")
+mapfile -t final_identity_lines < <(grep -nF 'verify_rename_identity "final validated images"' "$RELEASE")
+mapfile -t validation_lines < <(grep -nF 'section "2. validation:' "$RELEASE")
+mapfile -t final_image_lines < <(grep -nF 'ok "all validated release images are present and nonempty."' "$RELEASE")
+[ "${#initial_identity_lines[@]}" -eq 1 ] \
+	&& [ "${#final_identity_lines[@]}" -eq 1 ] \
+	&& [ "${#validation_lines[@]}" -eq 1 ] \
+	&& [ "${#final_image_lines[@]}" -eq 1 ] \
+	|| fail "release rename-identity/final-image markers are missing or ambiguous"
+initial_identity_line=${initial_identity_lines[0]%%:*}
+final_identity_line=${final_identity_lines[0]%%:*}
+validation_line=${validation_lines[0]%%:*}
+final_image_line=${final_image_lines[0]%%:*}
+[ "$initial_identity_line" -lt "$validation_line" ] \
+	&& [ "$final_image_line" -lt "$final_identity_line" ] \
+	&& [ "$final_identity_line" -lt "$check_line" ] \
+	&& [ "$final_identity_line" -lt "$stage_line" ] \
+	|| fail "rename identity is not checked both before validation and over the final pre-stage images"
+checks=$((checks + 1))
+
+# Exercise the temporal defect directly. The first comparison passes over a
+# complete byte-identical v0.9.8 fixture; changing one image afterward must make
+# the comparison that represents the final release fail by hash, not merely by
+# a missing path or malformed fixture.
+rename_images="$work/rename-images"
+mkdir -p "$rename_images"
+rename_pairs=(
+	"bypass_cd4053.hex|bypass-attiny13a-cd4053_simple.hex"
+	"bypass_mute.hex|bypass-attiny13a-cd4053_with_mute.hex"
+	"bypass_relay.hex|bypass-attiny13a-tq2_l2_5v_relay.hex"
+	"bypass_cd4053_t85.hex|bypass-attiny85-cd4053_simple.hex"
+	"bypass_mute_t85.hex|bypass-attiny85-cd4053_with_mute.hex"
+	"bypass_relay_t85.hex|bypass-attiny85-tq2_l2_5v_relay.hex"
+	"bypass_cd4053_t45.hex|bypass-attiny45-cd4053_simple.hex"
+	"bypass_mute_t45.hex|bypass-attiny45-cd4053_with_mute.hex"
+	"bypass_relay_t45.hex|bypass-attiny45-tq2_l2_5v_relay.hex"
+	"bypass_cd4053_attiny202.hex|bypass-attiny202-cd4053_simple.hex"
+	"bypass_mute_attiny202.hex|bypass-attiny202-cd4053_with_mute.hex"
+	"bypass_relay_attiny202.hex|bypass-attiny202-tq2_l2_5v_relay.hex"
+	"bypass_cd4053_pic10f322.hex|bypass-pic10f322-cd4053_simple.hex"
+	"bypass_mute_pic10f322.hex|bypass-pic10f322-cd4053_with_mute.hex"
+	"bypass_relay_pic10f322.hex|bypass-pic10f322-tq2_l2_5v_relay.hex"
+	"bypass_mcu_cd4053-simple_pic10f320.hex|bypass-pic10f320-cd4053_simple.hex"
+	"bypass_mcu_cd4053-mute_pic10f320.hex|bypass-pic10f320-cd4053_with_mute.hex"
+	"bypass_mcu_tq2-relay_pic10f320.hex|bypass-pic10f320-tq2_l2_5v_relay.hex"
+)
+rename_paths=()
+for pair in "${rename_pairs[@]}"; do
+	old=${pair%%|*}
+	new=${pair#*|}
+	cp "$ROOT/release/v0.9.7/$old" "$rename_images/$new"
+	rename_paths+=("$rename_images/$new")
+done
+"$RENAME_VERIFY" v0.9.8 "${rename_paths[@]}" >"$work/rename-early.out" \
+	2>"$work/rename-early.err" \
+	|| fail "byte-identical rename fixture failed its initial comparison: $(<"$work/rename-early.err")"
+grep -Fq 'identical=18 differ=0 missing=0 added=0' "$work/rename-early.out" \
+	|| fail "initial rename fixture did not compare the complete 18-image set"
+checks=$((checks + 1))
+printf '\npost-validation mutation\n' >> "$rename_images/bypass-attiny13a-cd4053_simple.hex"
+if "$RENAME_VERIFY" v0.9.8 "${rename_paths[@]}" >"$work/rename-final.out" \
+		2>"$work/rename-final.err"; then
+	fail "final rename comparison accepted an image changed after the initial check"
+fi
+grep -Fq '**DIFFERS**' "$work/rename-final.out" \
+	&& grep -Fq 'rename identity FAILED: 1 image(s) differ' "$work/rename-final.err" \
+	|| fail "final rename comparison rejected the mutation for the wrong reason"
 checks=$((checks + 1))
 
 # The release orchestrator must identify each selected compiler before building

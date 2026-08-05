@@ -383,7 +383,15 @@ with four decisions the item did not anticipate:
 - **It runs in step 1, not at staging.** The natural place to compare is where
   the hashes are written — on the far side of the 24-hour soak. A changed byte
   would then cost a day to discover. Nothing about the comparison needs the
-  staged copies, so it runs immediately after the build.
+  staged copies, so it first runs immediately after the build.
+- **The retained report is re-generated over the final images.** A later
+  meta-review found that qualification rebuilds the same paths and the release
+  explicitly re-materializes the Classic AVR HEX files afterward. The early
+  report was therefore only a fail-fast precheck, not evidence about the files
+  eventually staged. The comparison now runs a second time after all final
+  image checks and immediately before staging; that result overwrites the first
+  and is the one retained. The provenance regression changes one image between
+  the two comparisons and requires the final one to reject it as `DIFFERS`.
 - **Not under `evidence/`.** That directory's contents are pinned exactly by
   `RELEASE_EVIDENCE_FILES` for EVERY release, so a file only one release
   produces would fail the *next* release's qualification verifier. It is staged
