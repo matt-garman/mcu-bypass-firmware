@@ -504,7 +504,10 @@ can enable the tool-dependent PIC10F320 mutants. The host-only
 `test-mutation-sandbox` regression exercises the same copy routine in `make test`,
 including the wrappers' executable mode, and covers inventory, conservation,
 record/command parsing, atomic publication, checker-status classification, and
-result grammar in 30 checks.
+result grammar in 37 checks. It also makes a failed PIC10F322 baseline build
+leave an apparently usable HEX, then proves the probe reports `baseline FAILED`
+without invoking gpsim or enabling mutants; ordinary nonzero checker statuses
+can count as kills only after a successful baseline admits the lane.
 
 That copy routine is **`test/scratch_tree.sh`**, shared with the other harness
 that builds a throwaway repository and runs Make inside it,

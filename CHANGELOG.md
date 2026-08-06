@@ -1291,6 +1291,18 @@ file is the human-readable summary of *what changed*.
   PIC gpsim mutants reported as unavailable instead of failing loudly. Found by
   the prefix sweep, not by a gate: the mutation run is in `test-long`, not
   `make test`. The path is now composed from the canonical fields.
+- **A failed PIC10F322 mutation baseline build could admit stale HEX bytes and
+  manufacture six clean-looking kills.** The bounded `pic10f322` build's status
+  was discarded before the probe checked whether its selected HEX existed. A
+  failed or timed-out build that left an apparently usable file could therefore
+  enable the gpsim lane; ordinary mutant build failures would then count as
+  kills even though the unmutated baseline had never passed.
+
+  The build must now succeed before the probe inspects or executes the HEX. A
+  failure disables the complete PIC10F322 lane as `baseline FAILED`, latches the
+  existing infrastructure-failure diagnostic, and reaches no simulator or
+  mutant dispatch. The host-only mutation self-test recreates the stale-HEX
+  path with status 42 and proves that it cannot be reported as a kill.
 - **The goal rename left sixteen dead `make` commands in documents that describe
   the current tree.** Same silent-severance class as the mutation-lane miss, on
   the axis pointed at readers rather than at scripts: nothing asserts that a goal

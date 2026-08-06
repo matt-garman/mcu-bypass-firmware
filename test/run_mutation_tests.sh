@@ -130,6 +130,43 @@ MUTATION_TIMEOUT_S="${MUTATION_TIMEOUT_S:-900}"
 mutation_bounded() {
     timeout -k 10 "$MUTATION_TIMEOUT_S" "$@"
 }
+
+# A PIC10F322 gpsim mutant is meaningful only after the unmutated image both
+# builds successfully and passes the register-level check. In particular, never
+# trust a HEX merely because it exists: a failed build can leave stale output.
+PIC_GPSIM_OK=0
+PIC_GPSIM_WHY="tools absent"
+MUT_BASELINE_FAILED=0
+probe_pic10f322_gpsim_baseline() {
+    local root="$1" hex build_rc
+    PIC_GPSIM_OK=0
+    PIC_GPSIM_WHY="tools absent"
+
+    mutation_bounded "$MUTATION_MAKE" -C "$root" pic10f322 >/dev/null 2>&1
+    build_rc=$?
+    if [ "$build_rc" -ne 0 ]; then
+        PIC_GPSIM_WHY="baseline FAILED"
+        MUT_BASELINE_FAILED=1
+        echo "PIC10F322 baseline build FAILED (status $build_rc) -> PIC-shell mutants SKIPPED"
+        return 1
+    fi
+
+    hex="$root/$PIC10F322_MUTATION_HEX"
+    if ! command -v "$GPSIM" >/dev/null 2>&1 || [ ! -f "$hex" ]; then
+        echo "gpsim and/or XC8 absent -> PIC-shell mutants SKIPPED"
+        return 1
+    fi
+    if ! mutation_bounded env GPSIM="$GPSIM" \
+            "$PROJ_DIR/test/pic/run_gpsim_test.sh" "$hex" 0x3 >/dev/null 2>&1; then
+        PIC_GPSIM_WHY="baseline FAILED"
+        MUT_BASELINE_FAILED=1
+        echo "PIC gpsim baseline FAILED -> PIC-shell mutants SKIPPED"
+        return 1
+    fi
+
+    PIC_GPSIM_OK=1
+    echo "gpsim + XC8 present, baseline PASS -> PIC gpsim mutants ENABLED"
+}
 # Short soak window for the WDT-liveness mutant: must exceed one gpsim WDT period
 # (~1.057s at WDTPS=0x08, per the soak's own note) so an un-pet dog actually
 # fires, while staying quick. The baseline (pet) run sees zero resets and passes.
@@ -1055,6 +1092,80 @@ EOF
     [ "${make_argv[*]}" = "${expected_make_argv[*]}" ] || {
         echo "ERROR: mutation Make runner forwarded incorrect argv" >&2; exit 1
     }
+
+    # A failed baseline build must dominate a stale, apparently usable HEX. Use
+    # an ordinary nonzero status (which is a legitimate kill for a mutant) to
+    # prove it is treated as baseline infrastructure here, before dispatch.
+    fake_pic_make="$RESULT_DIR/fake-pic-baseline-make"
+    fake_gpsim="$RESULT_DIR/fake-gpsim"
+    stale_hex_root="$RESULT_DIR/pic-baseline"
+    gpsim_log="$RESULT_DIR/fake-gpsim.log"
+    pic_probe_log="$RESULT_DIR/pic-baseline.log"
+    cat > "$fake_pic_make" <<'EOF'
+#!/usr/bin/env bash
+root=
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = -C ]; then root=$2; shift 2; else shift; fi
+done
+mkdir -p "$(dirname "$root/${PIC_BASELINE_STALE_HEX:?}")"
+printf ':020000040000FA\n:00000001FF\n' > "$root/$PIC_BASELINE_STALE_HEX"
+exit 42
+EOF
+    cat > "$fake_gpsim" <<'EOF'
+#!/usr/bin/env bash
+: > "${PIC_GPSIM_SELFTEST_LOG:?}"
+cat <<'SNAPSHOTS'
+===INIT_BYPASS===
+porta = 0x8
+lata = 0x0
+===PRESS1_EARLY===
+porta = 0x0
+lata = 0x0
+===PRESS1_LOW===
+porta = 0x0
+lata = 0x3
+===ENGAGED===
+porta = 0xb
+lata = 0x3
+===BYPASS_AGAIN===
+porta = 0x8
+lata = 0x0
+SNAPSHOTS
+exit 0
+EOF
+    chmod 750 "$fake_pic_make" "$fake_gpsim"
+    mkdir -p "$stale_hex_root"
+    PIC_GPSIM_OK=1
+    PIC_GPSIM_WHY="tools absent"
+    MUT_BASELINE_FAILED=0
+    pic_probe_rc=0
+    MUTATION_MAKE="$fake_pic_make" \
+        PIC_BASELINE_STALE_HEX="$PIC10F322_MUTATION_HEX" \
+        GPSIM="$fake_gpsim" PIC_GPSIM_SELFTEST_LOG="$gpsim_log" \
+        probe_pic10f322_gpsim_baseline "$stale_hex_root" \
+            >"$pic_probe_log" 2>&1 || pic_probe_rc=$?
+    [ "$pic_probe_rc" -ne 0 ] || {
+        echo "ERROR: failed PIC baseline build was accepted" >&2; exit 1
+    }
+    [ -f "$stale_hex_root/$PIC10F322_MUTATION_HEX" ] || {
+        echo "ERROR: PIC baseline regression did not leave its stale HEX" >&2; exit 1
+    }
+    [ ! -e "$gpsim_log" ] || {
+        echo "ERROR: failed PIC baseline build reached gpsim through a stale HEX" >&2; exit 1
+    }
+    [ "$PIC_GPSIM_OK" -eq 0 ] || {
+        echo "ERROR: failed PIC baseline build enabled gpsim mutants" >&2; exit 1
+    }
+    [ "$PIC_GPSIM_WHY" = "baseline FAILED" ] || {
+        echo "ERROR: failed PIC baseline build has the wrong skip reason" >&2; exit 1
+    }
+    [ "$MUT_BASELINE_FAILED" -eq 1 ] || {
+        echo "ERROR: failed PIC baseline build did not latch infrastructure failure" >&2; exit 1
+    }
+    grep -Fq 'baseline build FAILED (status 42)' "$pic_probe_log" \
+        && ! grep -Eq 'ENABLED|killed' "$pic_probe_log" || {
+        echo "ERROR: failed PIC baseline build was not reported fail-closed" >&2; exit 1
+    }
     unpack_mutation_job_spec \
         "fixture$US""picgpsim$US$US""src/file.c$US""s@a@b@$US""description" \
         || exit 1
@@ -1094,7 +1205,7 @@ EOF
             "$RESULT_DIR/selftest-no-newline.status" >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted an unterminated status" >&2; exit 1
     fi
-    echo "mutation sandbox/accounting validation: 30 checks, 0 failures"
+    echo "mutation sandbox/accounting validation: 37 checks, 0 failures"
     exit 0
 fi
 
@@ -1164,6 +1275,7 @@ PIC_TARGET_OK=0
 # former unconditionally, which is how a complete toolchain got blamed for a
 # sandbox bug. MUT_BASELINE_FAILED latches if ANY lane failed for the second
 # reason, so the closing advice can stop recommending a package install.
+PIC_GPSIM_WHY="tools absent"
 PIC_SOAK_WHY="tools absent"
 PIC_TARGET_WHY="tools absent"
 PIC10F320_TOOL_WHY="tools absent"
@@ -1184,43 +1296,32 @@ fi
 # single mutant is dispatched. A probe that times out reports as "baseline
 # FAILED", which skips its lane and sets MUT_BASELINE_FAILED -- so it still fails
 # closed under MUTATION_ALLOW_SKIP=0 rather than quietly shrinking the run.
-mutation_bounded "$MUTATION_MAKE" -C "$PIC_BASE" pic10f322 >/dev/null 2>&1
-PIC_BASE_HEX="$PIC_BASE/$PIC10F322_MUTATION_HEX"
-if command -v "$GPSIM" >/dev/null 2>&1 && [ -f "$PIC_BASE_HEX" ]; then
-    if mutation_bounded env GPSIM="$GPSIM" "$PROJ_DIR/test/pic/run_gpsim_test.sh" \
-            "$PIC_BASE_HEX" 0x3 >/dev/null 2>&1; then
-        PIC_GPSIM_OK=1
-        echo "gpsim + XC8 present, baseline PASS -> PIC gpsim mutants ENABLED"
-        if command -v "$PIC_SOAK_CXX" >/dev/null 2>&1 \
-           && [ -f "$PIC_SOAK_GPSIM_INC/sim_context.h" ] \
-           && pkg-config --exists glib-2.0 2>/dev/null; then
-            if mutation_bounded "$MUTATION_MAKE" -C "$PIC_BASE" pic10f322-test-soak \
-                    PIC10F322_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" \
-                    PIC10F322_SOAK_LIVENESS_INTERVAL_MS="$PIC_SOAK_MUT_LIVENESS_MS" \
-                    PIC10F322_SOAK_VARIANT=cd4053_simple >/dev/null 2>&1; then
-                PIC_SOAK_OK=1
-                echo "gpsim-dev + glib + $PIC_SOAK_CXX present, soak baseline PASS -> WDT mutant ENABLED"
-            else
-                PIC_SOAK_WHY="baseline FAILED"
-                MUT_BASELINE_FAILED=1
-                echo "soak baseline did not pass cleanly -> WDT (soak) mutant SKIPPED"
-            fi
-            if mutation_bounded "$MUTATION_MAKE" -C "$PIC_BASE" pic10f322-test-target-variants >/dev/null 2>&1; then
-                PIC_TARGET_OK=1
-                echo "target aggregate baseline PASS -> PIC target mutants ENABLED"
-            else
-                PIC_TARGET_WHY="baseline FAILED"
-                MUT_BASELINE_FAILED=1
-                echo "target aggregate baseline did not pass cleanly -> PIC target mutants SKIPPED"
-            fi
+if probe_pic10f322_gpsim_baseline "$PIC_BASE"; then
+    if command -v "$PIC_SOAK_CXX" >/dev/null 2>&1 \
+       && [ -f "$PIC_SOAK_GPSIM_INC/sim_context.h" ] \
+       && pkg-config --exists glib-2.0 2>/dev/null; then
+        if mutation_bounded "$MUTATION_MAKE" -C "$PIC_BASE" pic10f322-test-soak \
+                PIC10F322_SOAK_DURATION_MS="$PIC_SOAK_MUT_MS" \
+                PIC10F322_SOAK_LIVENESS_INTERVAL_MS="$PIC_SOAK_MUT_LIVENESS_MS" \
+                PIC10F322_SOAK_VARIANT=cd4053_simple >/dev/null 2>&1; then
+            PIC_SOAK_OK=1
+            echo "gpsim-dev + glib + $PIC_SOAK_CXX present, soak baseline PASS -> WDT mutant ENABLED"
         else
-            echo "gpsim-dev/glib/$PIC_SOAK_CXX absent -> WDT (soak) mutant SKIPPED"
+            PIC_SOAK_WHY="baseline FAILED"
+            MUT_BASELINE_FAILED=1
+            echo "soak baseline did not pass cleanly -> WDT (soak) mutant SKIPPED"
+        fi
+        if mutation_bounded "$MUTATION_MAKE" -C "$PIC_BASE" pic10f322-test-target-variants >/dev/null 2>&1; then
+            PIC_TARGET_OK=1
+            echo "target aggregate baseline PASS -> PIC target mutants ENABLED"
+        else
+            PIC_TARGET_WHY="baseline FAILED"
+            MUT_BASELINE_FAILED=1
+            echo "target aggregate baseline did not pass cleanly -> PIC target mutants SKIPPED"
         fi
     else
-        echo "PIC gpsim baseline did not pass -> PIC-shell mutants SKIPPED"
+        echo "gpsim-dev/glib/$PIC_SOAK_CXX absent -> WDT (soak) mutant SKIPPED"
     fi
-else
-    echo "gpsim and/or XC8 absent -> PIC-shell mutants SKIPPED"
 fi
 rm -rf "$PIC_BASE"
 
@@ -1467,7 +1568,7 @@ if [ "$PIC_GPSIM_OK" -eq 1 ]; then
     fi
     echo "$msg)"
 else
-    echo "PIC-shell mutants: SKIPPED (PIC toolchain absent -- not gated on this host)"
+    echo "PIC-shell mutants: SKIPPED ($PIC_GPSIM_WHY)"
     pic_skipped=$((pic_skipped + ${#PIC_GPSIM_MUTATIONS[@]} + ${#PIC_SOAK_MUTATIONS[@]} + ${#PIC_TARGET_MUTATIONS[@]}))
 fi
 if [ "$PIC10F320_TOOL_OK" -eq 1 ]; then
