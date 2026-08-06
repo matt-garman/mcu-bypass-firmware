@@ -176,17 +176,27 @@ loop:    hw_wait_for_tick();                     // poll TMR2IF (~1 ms)
 On AVR the footswitch is sampled by the Timer0 ISR even *during* the 12 ms
 actuation; on PIC the single polled loop pauses sampling for those ~12 ms.
 
-This is benign, and the argument is specific rather than hand-waved: the
-actuation only ever runs immediately after a toggle, at which point
-`debounce_step` has already reloaded the counter to `RELEASE_THRESH`, so the
-firmware is in the post-toggle lockout window. The switch is still held. Re-arm
-requires `RELEASE_THRESH` *release* samples, which cannot begin until the user
-releases — well after the actuation has finished. Missing samples inside a
-window where every sample would have been "still pressed" changes nothing.
+The initial toggle is not at risk: actuation begins only after the shell has
+applied `debounce_step`'s accepted press, changed the effect state and reloaded
+the counter to `RELEASE_THRESH`. Missing later samples cannot undo or duplicate
+that toggle. They can, however, delay release recognition. If the user releases
+immediately, the first 5 ms (mute) or 12 ms (relay) of physical release occur
+while the loop is blocked, so the lockout counter cannot drain during that
+interval.
 
-The practical consequence is for *tests*, not for the firmware: any PIC timing
-test that counts ticks must budget for the actuation stealing them, or it will
-mis-measure the release gate.
+TMR2 continues running and its flag is latched, so one pending tick normally
+produces an immediate post-actuation sample; additional elapsed ticks are not
+queued. The conservative release-to-re-arm budget is therefore the full block
+plus `RELEASE_THRESH` nominal sample periods. The pending sample can make the
+ideal path about one tick shorter, but the full-block budget remains robust to
+instruction overhead and sample phase.
+
+From press onset through re-arm, use `PRESSED_THRESH + block + RELEASE_THRESH`:
+33 ms for simple CD4053, 38 ms for mute and 45 ms for relay. These are
+sample-count-derived conservative nominal budgets, not exact physical minima;
+a normal tap clears them comfortably. This is a real firmware responsiveness
+effect as well as a test constraint: PIC timing tests must include the blocked
+interval, while the requested audible toggle has already been accepted.
 
 ### 6. Concurrency model: single-threaded, so no atomicity requirement
 

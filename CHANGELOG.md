@@ -833,6 +833,13 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **The PIC phase-2 notes said blocking actuation affected tests but not firmware
+  timing.** The initial toggle has already been accepted before the block, but an
+  immediate release cannot drain the lockout counter during the 5 ms mute or
+  12 ms relay actuation. The notes now account for the one normally latched
+  pending timer sample and use the conservative 33/38/45 ms simple/mute/relay
+  press-to-re-arm budgets from the design document.
+
 - **The mutation guide attributed yasimavr's half-width pulse traces to flat
   instruction timing.** The core models multi-cycle instructions; the pinned
   release loses their overshoot because the output tracer repeatedly calls
