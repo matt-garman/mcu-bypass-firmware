@@ -75,12 +75,11 @@ file is the human-readable summary of *what changed*.
 
 - **`DESIGN_DOCUMENTATION.adoc` traces its load-bearing decisions to vendor
   documentation.** A new **Datasheet References** section: each decision against
-  its DS40001585 / ATtiny13A reference *and* against the place in the repository
-  where the as-built value is enforced. That third column is what keeps the
-  table from rotting into prose — every row is checked by something that fails a
-  build or a test if the value drifts (a `static_assert`, the runtime
-  configuration sanity check, or the CONFIG word read back out of the built HEX
-  by `make pic10f322-test-config`).
+  its DS40001585 / ATtiny13A reference *and* against its in-tree implementation
+  or evidence. The final column labels the evidence strength: configured values
+  may be machine-gated, runtime-checked or read from a built artifact, while
+  physical silicon properties are documented vendor inputs rather than claims
+  of software enforcement.
 
   Eight rows, all from sources already confirmed in-tree rather than re-derived:
   WDT time base (**OS09**, LFINTOSC 31 kHz ±25%), WDT period tolerance (**param
@@ -93,10 +92,11 @@ file is the human-readable summary of *what changed*.
   ~16 ms post-reset watchdog window, `WDTON`, the internal-RC ±10% tolerance and
   the Timer0 CTC divisor — are **not** cited, because no citation for them exists
   anywhere in this repository and a guessed section number in a reference-grade
-  document is worse than an absent one. All five are as-built and enforced by the
-  fuse-injection contract and the timing gates, so this is a traceability gap
-  rather than a correctness one; the section says so explicitly so the table
-  cannot be over-trusted, and the remainder is tracked in `TODO.md`.
+  document is worse than an absent one. Fuse selections and timing constants are
+  machine-gated, but the resulting BOD voltages, watchdog window and oscillator
+  tolerance remain vendor physical specifications. This distinction and the
+  remaining citation work are recorded explicitly rather than presenting every
+  row as build-enforced; the remainder is tracked in `TODO.md`.
 
   Settled while writing it: the two in-tree descriptions of the `IRCF` field
   disagreed on notation (`IRCF<2:0>` in `docs/phase2_pic_shell.md` §2,
@@ -833,6 +833,13 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **Datasheet traceability conflated machine enforcement with documentary
+  evidence.** The design table now labels each row as machine-gated,
+  runtime-checked, build-derived or documented, and separates enforced register
+  selections from vendor physical properties such as tolerance, trip voltage and
+  current draw. The matching changelog and TODO summaries no longer claim every
+  row can fail a build or test.
+
 - **Release preflight used Git and Make before checking that they existed.**
   Minimal bootstrap checks now diagnose either missing prerequisite before tag,
   repository or `print-<VAR>` operations, while section 0 retains both commands

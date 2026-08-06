@@ -40,9 +40,11 @@ open and blocked on the datasheets.**
 
 `DESIGN_DOCUMENTATION.adoc` now carries a **Datasheet References** section: a
 table tracing each load-bearing decision to its vendor reference *and* to the
-place in the repository where the as-built value is enforced. That third column
-is the part worth keeping — every row is checked by something that fails a build
-or a test if it drifts, so the table is not merely prose that can rot.
+in-tree implementation or evidence. Its final column labels each row's strength:
+machine-gated, runtime-checked, build-derived or documented. Register selections
+and derived artifacts can fail a gate if they drift; physical vendor properties
+such as oscillator tolerance, trip voltage and current draw cannot be enforced
+by repository software merely by citing them.
 
 Eight rows are filled, all from sources already confirmed in-tree rather than
 re-derived: WDT time base (DS40001585 **OS09**, LFINTOSC 31 kHz ±25%), WDT
@@ -74,11 +76,11 @@ than an absent one:
 - `WDTON` always-on fuse semantics
 - internal-RC ±10% tolerance, and the Timer0 CTC divisor that is sized from it
 
-All five are as-built and *are* enforced (the fuse-injection contract and the
-timing gates), so this is a traceability gap and not a correctness one. The
-scope note at the end of the new section states exactly this, so the table
-cannot be over-trusted in the meantime. Effort to close: ~1 h with the two AVR
-datasheets open.
+The fuse selections and timing constants are machine-gated, but the resulting
+BOD voltages, watchdog window and oscillator tolerance remain vendor physical
+specifications. The scope note distinguishes those claims so the table cannot be
+over-trusted in the meantime. Completing the citations remains a traceability
+task; effort to close: ~1 h with the two AVR datasheets open.
 
 ---
 
@@ -539,6 +541,88 @@ Note the two gates deliberately differ in what they enforce — the assembly gat
 owns the policy budget (peak + reserve, depth read from the device pack), the
 oracle owns the architectural limit — so this remains an extension of coverage,
 not a consolidation.
+
+**PIC10F320 relay idle-coil re-drive — close the existing unbounded `LATA`
+upset path (high-priority defensive hardening).** This is independent of the
+non-blocking-output proposal in
+`docs/non-blocking_output_schemes_feasibility.md`; §7.4 of that document is the
+full analysis. It is not a nominal control-flow defect: every normal blocking
+actuation parks both coils low before returning. It is a fault-containment gap
+under the project's stated SEU/extreme-EMI assumptions.
+
+The failure chain is specific:
+
+1. The relay's stable state requires both coil-driver latches, RA1 and RA2, low.
+   `set_relay_coils_low()` establishes that before and after each RESET/SET pulse
+   (`src/bypass_mcu_pic10f320.c`, relay output branch).
+2. PIC10F320 deliberately checks only the exact `TRISA` direction state through
+   `hw_output_pins_intact()`. Unlike PIC10F322, it has no stable-output `LATA`
+   comparison; the full check was priced and rejected for flash, as recorded in
+   `docs/pic10f320_special_case.md` §4.
+3. If an SEU or extreme EMI sets either relay-coil bit in `LATA` after an
+   actuation, the corresponding external coil driver can remain asserted even
+   though `ctx_`, TMR2 and the main loop are all otherwise healthy.
+4. Idle firmware does not rewrite the relay outputs. They are touched again only
+   by the next accepted footswitch actuation. The main loop continues to execute
+   its unconditional trailing `CLRWDT()`, so the watchdog sees a healthy loop and
+   never resets it.
+5. The energized interval is therefore unbounded in firmware: it ends only at
+   the next accepted press, an unrelated reset, or power removal. The relay's
+   thermal tolerance for that condition has not been established, so this is a
+   potential hardware-damage path rather than only a wrong-output indication.
+
+PIC10F322 and the AVR shells carry stable-latch validation, so an equivalent
+upset is detected on the next sanity pass. Their current fault handlers still do
+not remove coil drive before waiting for watchdog reset, so their interval is
+bounded rather than immediate; a general output-aware fault-abort operation is a
+separate worthwhile hardening item. PIC10F320 is the exceptional case where the
+upset is not detected at all.
+
+**Candidate minimal fix:** in the PIC10F320 relay build only, re-assert
+`set_relay_coils_low()` at the beginning of every serviced main-loop iteration,
+before the sanity gate can divert into the watchdog-reset spin. The prior
+iteration's blocking actuation has already completed by that point, so the rewrite
+cannot truncate a legitimate pulse. It would reduce an idle latch upset from
+unbounded duration to at most approximately one loop/tick before correction, and
+the correction would occur before that iteration's sanity decision or eventual
+`CLRWDT()`. Do not add this to the analog-switch variants: their control pins are
+steady-state routing signals, not pulse outputs.
+
+The non-blocking feasibility spike measured a relay idle re-drive at +2 words,
+but that number came from a different transformed source. Price the fix directly
+on the current blocking PIC10F320 relay image with pinned XC8/DFP rather than
+assuming the same delta. The shipping relay image currently has 12 words spare,
+so this is plausible but must still pass the 256-word link/fragmentation gate.
+
+Required evidence before accepting the firmware change:
+
+- Build all three PIC10F320 variants and prove the change is relay-only; review
+  and intentionally update the relay expected-image SHA-256 while requiring the
+  two analog-switch images to remain byte-identical.
+- Re-run both return-stack witnesses, static analysis/MISRA, host coverage,
+  host/core equivalence, target I/O, lock-step and soak. The normal relay trace
+  must gain no output edge: writing an already-low latch is electrically and
+  trace-wise idempotent.
+- Add host and real-HEX fault cases that set RESET and SET `LATA` bits separately,
+  and both together, at a deterministic idle-loop phase. Assert both physical
+  `PORTA` coil drives return low within one completed iteration, a single-bit
+  injection never raises the other coil, no footswitch toggle is required, and
+  the firmware does not rely on a watchdog reset for correction.
+- Add mutations deleting the idle re-drive and parking only one coil low; require
+  the new fault cases to kill both. Existing settled functional tests are not
+  sufficient because correct firmware and either mutant have identical nominal
+  relay traces.
+- Confirm from the relay/driver hardware and datasheet that the bounded
+  upset-to-correction interval is electrically safe. The software can prove the
+  new bound; it cannot establish coil thermal behavior by itself.
+
+The alternative full stable-`LATA` check remains more expensive and, without an
+output-aware fault abort, detects the fault only to wait for watchdog reset. The
+idle re-drive is therefore not merely a cheaper substitute for diagnosis: for
+this pulse-only output it directly enforces the safe resting condition. Effort:
+medium, dominated by adding fault/mutation evidence rather than the firmware
+edit. Impact: High for defensive robustness, despite the initiating fault being
+an extreme outlier.
 
 **Formal verification of output drivers.** The output drivers (relay, mute,
 CD4053) contain blocking delays and multi-step pin sequences. They are tested by

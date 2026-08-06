@@ -694,68 +694,89 @@ the complete target-specific compiler and device-pack commands.
 
 Each load-bearing electrical or timing decision below traces to the vendor
 document that establishes it, and to the place in this repository where the
-as-built value is *enforced* rather than merely written down. The last column is
-what makes the row more than a claim: every value here is checked by something
-that fails a build or a test if it drifts.
+implementation or supporting evidence lives. The last column labels its strength:
+machine-gated, runtime-checked, build-derived or documented. Only the first three
+can fail a build or test when an implemented selector or derived artifact drifts.
+Physical silicon properties remain vendor specifications; documenting their use
+does not make them independently enforceable by this repository.
 
 .Table Design decisions traced to vendor documentation
 |===
-| Decision | As built | Vendor reference | Enforced in-tree by
+| Decision | As built | Vendor reference | Implementation / evidence
 
 | WDT time base
 | 31 kHz LFINTOSC, independent of `FOSC`
 | DS40001585, param **OS09** (LFINTOSC = 31 kHz ±25%)
-| `docs/phase2_pic_shell.md` §2
+| **Documented vendor input.** `docs/phase2_pic_shell.md` §2 records the
+  LFINTOSC source and uses it in the watchdog sizing argument; no software gate
+  can verify the oscillator's physical frequency or tolerance.
 
 | WDT period tolerance
 | −37% / +69% worst case, so ~256 ms nominal ≥ ~160 ms worst case
 | DS40001585, **param 31**
-| `docs/phase2_pic_shell.md` §2; sizing argument in the same section
+| **Documented vendor input.** `docs/phase2_pic_shell.md` §2 applies the
+  characterized tolerance to the worst-case watchdog margin; it is not a
+  machine measurement of silicon timing.
 
 | WDT period
 | `WDTPS` = `0b01000` (1:8192) ≈ 256 ms
 | DS40001585, `WDTCON` (**Register 5-1**)
-| `src/bypass_mcu_pic10f322.c` (`WDT_WDTPS_256MS`), re-read and compared in the
-  runtime configuration sanity check
+| **Runtime-checked configuration; documented timing derivation.**
+  `src/bypass_mcu_pic10f322.c` writes `WDT_WDTPS_256MS` and re-reads `WDTPS` in
+  the runtime configuration sanity check. That enforces the prescaler selection,
+  not the vendor-specified physical period.
 
 | Oscillator
 | `IRCF` = `0b100` → 2 MHz HFINTOSC
 | DS40001585, `OSCCON` (0x10); `IRCF` is a 3-bit field at register bits 6:4
-| DFP header `pic10f322.h` (`_OSCCON_IRCF_POSN` = 0x4, `_OSCCON_IRCF_MASK` =
-  0x70); `static_assert(_XTAL_FREQ == 2000000UL)`
+| **Machine-gated and runtime-checked.** DFP header `pic10f322.h`
+  (`_OSCCON_IRCF_POSN` = 0x4, `_OSCCON_IRCF_MASK` = 0x70) establishes the field;
+  `static_assert(_XTAL_FREQ == 2000000UL)` couples delay compilation to the
+  selected clock, and the runtime sanity check re-reads `IRCF`.
 
 | 1 ms tick
 | `T2CKPS` = `0b01` (1:4) and `PR2` = 124 → 125 counts at 125 kHz
 | DS40001585, `T2CON` (0x13), `PR2` (0x12), `TMR2IF` = `PIR1` (0x0C) bit 1
-| `docs/phase2_pic_shell.md` §2 (which also records that the datasheet *prose*
-  on the prescale codes is incomplete — the register table is authoritative)
+| **Runtime-checked configuration; documented derivation.**
+  `src/bypass_mcu_pic10f322.c` writes and re-reads `PR2` and `T2CON`; target fault
+  injection exercises both guards. `docs/phase2_pic_shell.md` §2 records the
+  divisor arithmetic and that the register table, not incomplete datasheet
+  prose, is authoritative for the prescale code.
 
 | Brown-out trip
 | `BOREN=ON`, `LPBOR=OFF`, `BORV=HI` → ~2.7 V (HI) / ~2.4 V (LO)
 | DS40001585, `BORV`
-| CONFIG word `0x389E`, read back out of the built HEX by
-  `make pic10f322-test-config`
+| **Build-derived machine gate; documented physical thresholds.** CONFIG word
+  `0x389E` is read back out of the built HEX by
+  `make pic10f322-test-config`. That proves the `BOREN`/`LPBOR`/`BORV` encoding,
+  not the silicon's physical trip voltage.
 
 | Quiescent current
 | see the PIC Power / Current Draw section above
 | DS40001585, **D017–D019** (IDD)
-| tabulated in this document from the datasheet rows
+| **Documented vendor estimate.** The PIC Power / Current Draw section
+  interpolates D017-D019; there is no current-measurement gate or bench result in
+  this repository.
 
 | Sleep wake-up ordering
 | one instruction executes after `SEI` before the pending interrupt is serviced
 | ATtiny13A datasheet **§7.3**
-| `src/bypass_mcu_avr_classic.c` (the sleep-entry sequence comment)
+| **Documented implementation rationale.** The sleep-entry comment in
+  `src/bypass_mcu_avr_classic.c` ties the sequence to §7.3. No dedicated test can
+  enforce the cited silicon interrupt-ordering guarantee.
 |===
 
 NOTE: Scope, stated so this table is not over-trusted. The PIC10(L)F320/322
-parameters above were confirmed against DS40001585 and the DFP device header as
+references above were confirmed against DS40001585 and the DFP device header as
 recorded in `docs/phase2_pic_shell.md` §2, and the ATtiny13A reference against
-that part's datasheet. The AVR Classic and AVR-XT *electrical* parameters used
-elsewhere in this document — the 4.3 V / 4.2 V BOD levels, the ~16 ms
-post-reset watchdog window, the internal-RC ±10% tolerance and the Timer0 CTC
-divisor — are as-built and are enforced by the fuse-injection and timing gates,
-but they are not yet traced to datasheet section numbers. Completing them is
-tracked in `TODO.md`.
+that part's datasheet. Machine gates can enforce configured encodings and
+software arithmetic, but not vendor physical specifications. The AVR Classic
+and AVR-XT *electrical* parameters used elsewhere in this document — the 4.3 V /
+4.2 V BOD levels, the ~16 ms post-reset watchdog window and internal-RC ±10%
+tolerance — are likewise physical inputs; their fuse selections and timing
+constants are gated, not the resulting voltage or silicon timing. Those inputs,
+`WDTON` semantics and the Timer0 CTC derivation are not yet traced here to exact
+datasheet sections. Completing them is tracked in `TODO.md`.
 
 == Testing and Validation
 
