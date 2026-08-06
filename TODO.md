@@ -222,6 +222,40 @@ Dependencies: a sound treatment of interrupts, recursion, indirect control
 flow, and compiler-generated helpers. Effort: about 2-3 hours. Risk: Medium;
 adds a third independent witness for the Classic AVR stack bound.
 
+### T25-avr-xt-stack - Bound AVR-XT shell stack frames
+
+Add an ATtiny202-specific `-fstack-usage` lane for
+`src/bypass_mcu_avr_xt.c`. The existing `test-stack-bound` gate compiles the
+Classic AVR shell plus the shared core and output drivers under Classic
+`CFLAGS`; sharing those other translation units does not measure frames owned
+by the AVR-XT shell.
+
+Compile with the shipping `XT_FW_CFLAGS` contract: `-DF_CPU=$(XT_F_CPU)`,
+`-DBYPASS_MCU_AVR_XT`, `-mmcu=$(XT_MCU)`, `-B $(XT_SPEC_DIR)`,
+`-I $(XT_INC)`, and `$(CFLAGS_COMMON)`, plus each production variant selector.
+Require the `XT_DFP` path inputs represented by `XT_SPEC_FILE` and
+`XT_IO_HEADER`; those Makefile sentinels establish presence, while the canonical
+SHA-verified provenance comes from `scripts/fetch_attiny_dfp.sh`. Give the lane
+its own target and add it to the DFP-aware `attiny202-test` aggregate, not the
+default `make test` path. Follow the normal optional-tool policy locally while
+failing closed when release validation invokes that aggregate with
+`STRICT_TOOLS=1`.
+
+Require exactly the expected fresh object and `.su` reports, reject missing,
+empty, malformed, dynamic, or unexpected report/artifact files, and fail any
+frame above a reviewed AVR-XT ceiling. Pin function-record identities only if
+that stronger contract is deliberately chosen and regression-tested. Reuse or
+factor the existing parser/regression behavior rather than creating a weaker
+second format. State explicitly that `-fstack-usage` bounds individual frames,
+not complete call depth. Once measured, update the stale gap notes in
+`DESIGN_DOCUMENTATION.adoc` and `test/README.md` with the retained result.
+
+Dependencies: pinned avr-gcc plus the fetched, SHA-verified ATtiny_DFP device
+specs and headers. Effort: about 2-3 hours including negative regressions. Risk:
+Low and completeness-focused: ATtiny202 has 128 bytes of SRAM with only 4 bytes
+of static data, while the ATtiny13A has half the SRAM and a measured 31-byte
+whole-program peak that still leaves about 29 bytes free.
+
 ### T25-pic320-thresholds - Optionally centralize PIC10F320 thresholds
 
 After `v0.9.8`, consider including `bypass_config.h` and
@@ -498,6 +532,7 @@ The stable ID in each row matches exactly one open section above.
 | T25-cross-compiler | Narrow alternate-AVR-compiler lane | 2.5 | 2 h | Medium |
 | T25-opt-sweep | Compiler optimization sweep | 2.5 | 1 h | Medium |
 | T25-stack-cross | AVR disassembly stack cross-check | 2.5 | 2-3 h | Medium |
+| T25-avr-xt-stack | AVR-XT shell stack-frame bound | 2.5 | 2-3 h | Low - completeness |
 | T25-pic320-thresholds | Optionally centralize PIC10F320 thresholds | 2.5 | 20 min + reruns | Low |
 | T25-clock-sweep | Fine-grained oscillator-drift sweep | 2.5 | 1 h | Low |
 | T25-wdt-rate | Watchdog pet-frequency measurement | 2.5 | 1-2 h | Medium |
