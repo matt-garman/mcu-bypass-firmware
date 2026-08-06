@@ -5,11 +5,23 @@
 #define BYPASS_COMPILE_CHECKS_H__
 
 // Shared, MCU-NEUTRAL compile-time contract for the debounce thresholds.
-// Included by every hardware shell (bypass_mcu_avr_classic.c,
-// bypass_mcu_pic10f322.c) so the invariant lives in ONE place and cannot drift
-// between shells. MCU-SPECIFIC compile-time checks stay in their shells: the
-// -fshort-enums size asserts, the F_CPU / _XTAL_FREQ checks, and the per-MCU
-// pin-map pinning.
+// Included by the three modular hardware shells
+// (bypass_mcu_avr_classic.c, bypass_mcu_avr_xt.c and
+// bypass_mcu_pic10f322.c) so the invariant lives in one place for all of
+// them and cannot drift between them.
+//
+// bypass_mcu_pic10f320.c is deliberately NOT among them: at 256 words of
+// flash it is a single self-contained file that shares no headers with
+// src/, and it carries its own copy of these five invariants.  That is by
+// design (see docs/pic10f320_special_case.md).  Its copy is held to these
+// values by the firmware<->core equivalence lane, which compares the real
+// firmware against bypass_pure.c driven from the shared config, so a
+// drift in either threshold fails that lane rather than passing silently.
+//
+// MCU-SPECIFIC compile-time checks stay in their shells: the
+// -fshort-enums size asserts, the F_CPU / _XTAL_FREQ checks, and the
+// per-MCU pin-map pinning.
+
 
 #include "bypass_config.h"        // PRESSED_THRESH / RELEASE_THRESH
 #include "bypass_static_assert.h" // static_assert()
