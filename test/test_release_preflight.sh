@@ -17,8 +17,12 @@ REAL_MAKE=$(command -v make) || { printf 'FAIL: make is required\n' >&2; exit 1;
 REAL_PYTHON=$(command -v python3) || { printf 'FAIL: python3 is required\n' >&2; exit 1; }
 REAL_GIT=$(command -v git) || { printf 'FAIL: git is required\n' >&2; exit 1; }
 REAL_AWK=$(command -v awk) || { printf 'FAIL: awk is required\n' >&2; exit 1; }
+REAL_BASH=$(command -v bash) || { printf 'FAIL: bash is required\n' >&2; exit 1; }
+REAL_DIRNAME=$(command -v dirname) || { printf 'FAIL: dirname is required\n' >&2; exit 1; }
+REAL_STAT=$(command -v stat) || { printf 'FAIL: stat is required\n' >&2; exit 1; }
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-preflight.XXXXXX")
 fakebin="$work/bin"
+bootstrap_bin="$work/bootstrap-bin"
 toolchain="$work/toolchain"
 make_log="$work/make.log"
 tool_log="$work/tool.log"
@@ -40,7 +44,7 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-mkdir -p "$fakebin" \
+mkdir -p "$fakebin" "$bootstrap_bin" \
 	"$toolchain/simavr" \
 	"$toolchain/pic10f322/pic/include/proc" \
 	"$toolchain/pic10f320/pic/include/proc" \
@@ -315,6 +319,36 @@ assert_no_release_scratch() {
 	[ "${#leftovers[@]}" -eq 0 ] \
 		|| fail "preflight leaked release scratch: ${leftovers[*]}"
 }
+
+# Git and Make are consumed before section 0 can aggregate the selected release
+# toolchain. Run the real script under a minimal PATH so each absence is observed
+# by its bootstrap check, not by a shell error or a later print-<VAR> query.
+ln -s "$REAL_DIRNAME" "$bootstrap_bin/dirname"
+ln -s "$REAL_STAT" "$bootstrap_bin/stat"
+if (
+	export PATH="$bootstrap_bin" _MAKE_SERIAL_LOCK_HELD="$lock_id"
+	"$REAL_BASH" "$RELEASE" --preflight
+) >"$output" 2>&1; then
+	fail "release preflight accepted missing Git"
+fi
+grep -Fq 'Git is required to validate release tags and repository provenance' "$output" \
+	|| fail "missing Git failed without its bootstrap prerequisite diagnostic"
+[ ! -s "$make_log" ] \
+	|| fail "missing-Git bootstrap path reached a Makefile query"
+checks=$((checks + 1))
+
+ln -s "$REAL_GIT" "$bootstrap_bin/git"
+if (
+	export PATH="$bootstrap_bin" _MAKE_SERIAL_LOCK_HELD="$lock_id"
+	"$REAL_BASH" "$RELEASE" --preflight
+) >"$output" 2>&1; then
+	fail "release preflight accepted missing Make"
+fi
+grep -Fq 'GNU Make is required to read release configuration (print-<VAR>)' "$output" \
+	|| fail "missing Make failed without its bootstrap prerequisite diagnostic"
+[ ! -s "$make_log" ] \
+	|| fail "missing-Make bootstrap path reached a Makefile query"
+checks=$((checks + 1))
 
 run_preflight >"$output" 2>&1 \
 	|| fail "valid preflight failed: $(<"$output")"

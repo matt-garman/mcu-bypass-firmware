@@ -833,6 +833,13 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **Release preflight used Git and Make before checking that they existed.**
+  Minimal bootstrap checks now diagnose either missing prerequisite before tag,
+  repository or `print-<VAR>` operations, while section 0 retains both commands
+  in its complete required-tool inventory. Isolated-PATH regressions cover both
+  failures and the successful preflight still reaches its terminal version probe
+  without cleaning, building or staging.
+
 - **The PIC phase-2 notes said blocking actuation affected tests but not firmware
   timing.** The initial toggle has already been accepted before the block, but an
   immediate release cannot drain the lockout counter during the 5 ms mute or

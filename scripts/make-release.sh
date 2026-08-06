@@ -167,6 +167,15 @@ if [ -z "$VERSION" ]; then
 fi
 [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
 	|| die "version '$VERSION' is not vX.Y.Z (optionally -suffix)"
+
+# Bootstrap prerequisites: both are consumed before section 0 can build its
+# complete selected-tool inventory. Keep the explicit inventory entries there
+# too, but diagnose an absent command before its first use here.
+command -v git >/dev/null 2>&1 \
+	|| die "Git is required to validate release tags and repository provenance"
+command -v make >/dev/null 2>&1 \
+	|| die "GNU Make is required to read release configuration (print-<VAR>)"
+
 git check-ref-format "refs/tags/$VERSION" >/dev/null 2>&1 \
 	|| die "version '$VERSION' is not a valid Git tag name"
 
@@ -581,7 +590,8 @@ req_exec_file() {
 		|| MISSING+=("$1${2:+  ($2)}")
 }
 
-req_cmd make
+req_cmd git           "repository provenance and tag validation"
+req_cmd make          "release configuration and qualification orchestration"
 req_cmd flock          "apt: util-linux (whole-worktree serialization)"
 req_cmd setsid         "apt: util-linux (isolated release-soak process groups)"
 req_cmd "$AVR_CC"      "apt: gcc-avr"
