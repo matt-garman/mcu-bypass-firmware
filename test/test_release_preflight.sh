@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Exercise the real release step 0 without starting a release. Every external
-# selected release input is supplied by a throwaway fake toolchain; base host
-# utilities and Make variable queries remain real. The preflight must reach the
-# last version probe, execute no build goal, create no output directory, and
-# leave tracked/nonignored worktree content unchanged on every tested path.
+# Exercise the real release step 0 without starting a release, plus the
+# source-loaded helper that binds final classic-AVR HEX bytes across staging.
+# Every external selected release input is supplied by a throwaway fake
+# toolchain; base host utilities and Make variable queries remain real. The
+# preflight must reach the last version probe, execute no build goal, create no
+# output directory, and leave tracked/nonignored worktree content unchanged on
+# every tested path.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -20,6 +22,14 @@ REAL_AWK=$(command -v awk) || { printf 'FAIL: awk is required\n' >&2; exit 1; }
 REAL_BASH=$(command -v bash) || { printf 'FAIL: bash is required\n' >&2; exit 1; }
 REAL_DIRNAME=$(command -v dirname) || { printf 'FAIL: dirname is required\n' >&2; exit 1; }
 REAL_STAT=$(command -v stat) || { printf 'FAIL: stat is required\n' >&2; exit 1; }
+REAL_CP=$(command -v cp) || { printf 'FAIL: cp is required\n' >&2; exit 1; }
+# shellcheck source=scripts/release-provenance.sh
+source "$ROOT/scripts/release-provenance.sh"
+if ! declare -F release_hash_classic_avr_images >/dev/null \
+		|| ! declare -F release_stage_classic_avr_images >/dev/null; then
+	printf 'FAIL: classic-AVR release binding helpers are missing\n' >&2
+	exit 1
+fi
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-preflight.XXXXXX")
 fakebin="$work/bin"
 bootstrap_bin="$work/bootstrap-bin"
@@ -685,6 +695,105 @@ grep -Fq 'RELEASE_ARGS may contain options only' "$output" \
 	|| fail "positional RELEASE_ARGS failed without its specific diagnostic"
 if grep -Fq 'forbidden non-query Make invocation' "$make_log"; then
 	fail "positional RELEASE_ARGS crossed the release build boundary"
+fi
+checks=$((checks + 1))
+
+# Exercise the exact helper used at the production copy boundary. The cp shim
+# can alter one source immediately before copying or one destination immediately
+# after copying; both must fail before the caller can accept SHA256SUMS.
+binding_bin="$work/binding-bin"
+binding_source="$work/binding-source"
+binding_stage="$work/binding-stage"
+binding_marker="$work/binding-mutation.log"
+binding_checksum="$work/SHA256SUMS.accepted"
+mkdir -p "$binding_bin"
+cat > "$binding_bin/cp" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$#" -eq 4 ] && [ "$1" = -p ] && [ "$2" = -- ] \
+	|| { printf 'unexpected release-binding cp arguments: %s\n' "$*" >&2; exit 91; }
+source_image=$3
+output_dir=${4%/}
+if [ "${RELEASE_BINDING_MUTATION:-none}" = pre-copy ] \
+		&& [ "${source_image##*/}" = "${RELEASE_BINDING_TARGET:?}" ]; then
+	printf ':00000001FE\n' >> "$source_image"
+	printf 'pre-copy\n' > "${RELEASE_BINDING_MARKER:?}"
+fi
+"${REAL_CP:?}" "$@"
+if [ "${RELEASE_BINDING_MUTATION:-none}" = staged ] \
+		&& [ "${source_image##*/}" = "${RELEASE_BINDING_TARGET:?}" ]; then
+	printf ':00000001FD\n' >> "$output_dir/${source_image##*/}"
+	printf 'staged\n' > "${RELEASE_BINDING_MARKER:?}"
+fi
+EOF
+chmod 750 "$binding_bin/cp"
+
+reset_binding_fixture() {
+	rm -rf "$binding_source" "$binding_stage"
+	mkdir -p "$binding_source" "$binding_stage/evidence"
+	printf ':020000040000FA\n:020000000102FB\n:00000001FF\n' \
+		> "$binding_source/bypass-attiny13a-cd4053_simple.hex"
+	printf ':020000040000FA\n:020000000304F7\n:00000001FF\n' \
+		> "$binding_source/bypass-attiny85-cd4053_simple.hex"
+	rm -f "$binding_marker" "$binding_checksum"
+}
+
+binding_images=(
+	"$binding_source/bypass-attiny13a-cd4053_simple.hex"
+	"$binding_source/bypass-attiny85-cd4053_simple.hex"
+)
+binding_target=${binding_images[0]##*/}
+
+reset_binding_fixture
+binding_hashes=$(release_hash_classic_avr_images "${binding_images[@]}") \
+	|| fail "could not hash valid classic-AVR binding fixtures"
+if PATH="$binding_bin:$PATH" REAL_CP="$REAL_CP" \
+		RELEASE_BINDING_MUTATION=none RELEASE_BINDING_TARGET="$binding_target" \
+		RELEASE_BINDING_MARKER="$binding_marker" \
+		release_stage_classic_avr_images "$binding_stage" "$binding_hashes" \
+			"${binding_images[@]}"; then
+	: > "$binding_checksum"
+else
+	fail "classic-AVR staging helper rejected byte-identical copies"
+fi
+if [ ! -f "$binding_checksum" ] || [ -e "$binding_marker" ]; then
+	fail "valid classic-AVR staging did not reach the checksum boundary cleanly"
+fi
+checks=$((checks + 1))
+
+reset_binding_fixture
+binding_hashes=$(release_hash_classic_avr_images "${binding_images[@]}") \
+	|| fail "could not hash pre-copy mutation fixtures"
+if PATH="$binding_bin:$PATH" REAL_CP="$REAL_CP" \
+		RELEASE_BINDING_MUTATION=pre-copy RELEASE_BINDING_TARGET="$binding_target" \
+		RELEASE_BINDING_MARKER="$binding_marker" \
+		release_stage_classic_avr_images "$binding_stage" "$binding_hashes" \
+			"${binding_images[@]}"; then
+	: > "$binding_checksum"
+	fail "classic-AVR staging accepted a source mutation at the copy boundary"
+fi
+if [ ! -f "$binding_marker" ] || [ "$(<"$binding_marker")" != pre-copy ] \
+		|| [ -e "$binding_checksum" ] \
+		|| ! cmp -s "${binding_images[0]}" "$binding_stage/$binding_target"; then
+	fail "pre-copy mutation did not fail before checksum acceptance for byte identity"
+fi
+checks=$((checks + 1))
+
+reset_binding_fixture
+binding_hashes=$(release_hash_classic_avr_images "${binding_images[@]}") \
+	|| fail "could not hash staged-mutation fixtures"
+if PATH="$binding_bin:$PATH" REAL_CP="$REAL_CP" \
+		RELEASE_BINDING_MUTATION=staged RELEASE_BINDING_TARGET="$binding_target" \
+		RELEASE_BINDING_MARKER="$binding_marker" \
+		release_stage_classic_avr_images "$binding_stage" "$binding_hashes" \
+			"${binding_images[@]}"; then
+	: > "$binding_checksum"
+	fail "classic-AVR staging accepted a post-copy destination mutation"
+fi
+if [ ! -f "$binding_marker" ] || [ "$(<"$binding_marker")" != staged ] \
+		|| [ -e "$binding_checksum" ] \
+		|| cmp -s "${binding_images[0]}" "$binding_stage/$binding_target"; then
+	fail "staged-byte mutation did not fail before checksum acceptance for byte identity"
 fi
 checks=$((checks + 1))
 

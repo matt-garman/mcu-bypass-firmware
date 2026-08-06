@@ -318,6 +318,33 @@ stage_line=${stage_lines[0]%%:*}
 	|| fail "release provenance is not rechecked between capture and staging"
 checks=$((checks + 1))
 
+# The final classic-AVR HEX digest must be captured after regeneration, and the
+# source-loaded copy/compare helper must complete before SHA256SUMS or retained
+# evidence can accept staged bytes.
+mapfile -t avr_final_hash_lines < <(grep -nF \
+	'final_avr_image_hashes=$(release_hash_classic_avr_images "${AVR_IMAGES[@]}")' "$RELEASE")
+mapfile -t avr_stage_bind_lines < <(grep -nF \
+	'release_stage_classic_avr_images "$OUTPUT_DIR" "$final_avr_image_hashes"' "$RELEASE")
+mapfile -t checksum_lines < <(grep -nF \
+	'( cd "$OUTPUT_DIR" && sha256sum -- "${release_basenames[@]}" > SHA256SUMS )' "$RELEASE")
+mapfile -t evidence_copy_lines < <(grep -nF \
+	'for f in "$EVID"/*.log; do' "$RELEASE")
+[ "${#avr_final_hash_lines[@]}" -eq 1 ] \
+	&& [ "${#avr_stage_bind_lines[@]}" -eq 1 ] \
+	&& [ "${#checksum_lines[@]}" -eq 1 ] \
+	&& [ "${#evidence_copy_lines[@]}" -eq 1 ] \
+	|| fail "classic-AVR final-hash/staging/checksum markers are missing or ambiguous"
+avr_final_hash_line=${avr_final_hash_lines[0]%%:*}
+avr_stage_bind_line=${avr_stage_bind_lines[0]%%:*}
+checksum_line=${checksum_lines[0]%%:*}
+evidence_copy_line=${evidence_copy_lines[0]%%:*}
+[ "$avr_final_hash_line" -lt "$stage_line" ] \
+	&& [ "$stage_line" -lt "$avr_stage_bind_line" ] \
+	&& [ "$avr_stage_bind_line" -lt "$checksum_line" ] \
+	&& [ "$checksum_line" -lt "$evidence_copy_line" ] \
+	|| fail "classic-AVR byte binding does not dominate checksum/evidence acceptance"
+checks=$((checks + 1))
+
 # Rename identity has two distinct jobs: reject a changed initial build before
 # the expensive gates, then replace that provisional report with one computed
 # from the final validated images. Pin both calls around the rebuild window and

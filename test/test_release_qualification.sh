@@ -247,6 +247,9 @@ grep -Fq 'a staged PIC image differs from the image exercised by the soak' \
 grep -Fq 'a staged ATtiny202 image differs from the image exercised by its gates and soak' \
 	"$ROOT/scripts/make-release.sh" \
 	|| fail "release producer does not bind staged ATtiny202 images to soak inputs"
+grep -Fq 'a staged classic AVR image differs from the final HEX regenerated from its validated ELF' \
+	"$ROOT/scripts/make-release.sh" \
+	|| fail "release producer does not bind staged classic AVR images to validated ELFs"
 checks=$((checks + 1))
 
 printf 'release qualification validation: %d checks, 0 failures\n' "$checks"

@@ -156,6 +156,48 @@ release_jobs_cap() {
 	fi
 }
 
+# Hash classic-AVR HEX files by basename so build-tree paths compare directly
+# with their staged counterparts. The final HEX files are regenerated from the
+# validated ELFs after all gates and soaks, making this the byte-level handoff
+# from validated executable to release artifact.
+release_hash_classic_avr_images() {
+	local image result hash
+	[ "$#" -gt 0 ] || {
+		printf 'FATAL: no classic AVR images supplied for release hashing\n' >&2
+		return 2
+	}
+	for image in "$@"; do
+		if [ ! -f "$image" ] || [ -L "$image" ] || [ ! -s "$image" ]; then
+			printf 'FATAL: classic AVR image missing, empty, or not regular: %s\n' \
+				"$image" >&2
+			return 1
+		fi
+		result=$(sha256sum -- "$image") || return 1
+		hash=${result%% *}
+		printf '%s  %s\n' "$hash" "${image##*/}"
+	done
+}
+
+# Copy the complete classic-AVR set, construct the destination paths only after
+# each copy, then re-read every staged byte. This closes both sides of the copy
+# boundary before SHA256SUMS can attest to a substituted destination.
+release_stage_classic_avr_images() {
+	[ "$#" -gt 2 ] || {
+		printf 'FATAL: release_stage_classic_avr_images requires output, hashes, and images\n' >&2
+		return 2
+	}
+	local output_dir=$1 expected_hashes=$2 image staged_hashes
+	shift 2
+	local -a staged_images=()
+	for image in "$@"; do
+		cp -p -- "$image" "$output_dir/" || return 1
+		staged_images+=("$output_dir/${image##*/}")
+	done
+	staged_hashes=$(release_hash_classic_avr_images "${staged_images[@]}") \
+		|| return 1
+	[ "$staged_hashes" = "$expected_hashes" ]
+}
+
 release_source_is_unchanged() {
 	local expected_sha=$1
 	local permit_dirty=$2

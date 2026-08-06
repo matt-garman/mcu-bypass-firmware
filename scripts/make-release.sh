@@ -228,6 +228,10 @@ declare -F release_terminate_workers >/dev/null \
 	|| die "release provenance checker did not define its worker-cleanup function"
 declare -F release_jobs_cap >/dev/null \
 	|| die "release provenance checker did not define its jobs-cap function"
+declare -F release_hash_classic_avr_images >/dev/null \
+	|| die "release provenance checker did not define its classic-AVR image hash function"
+declare -F release_stage_classic_avr_images >/dev/null \
+	|| die "release provenance checker did not define its classic-AVR staging function"
 # shellcheck source=release-signing-policy.sh
 source "$REPO_ROOT/scripts/release-signing-policy.sh" \
 	|| die "release signing policy could not be loaded"
@@ -1271,6 +1275,8 @@ make "${old_file_args[@]}" attiny13a attiny85 attiny45 AVR_REBUILD_PREREQ= \
 current_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
 [ "$current_avr_elf_hashes" = "$validated_avr_elf_hashes" ] \
 	|| die "a validated classic AVR ELF changed during final HEX regeneration"
+final_avr_image_hashes=$(release_hash_classic_avr_images "${AVR_IMAGES[@]}") \
+	|| die "could not hash the final classic AVR HEX regenerated from validated ELFs"
 for img in "${IMAGES[@]}"; do
 	[ -f "$img" ] && [ ! -L "$img" ] && [ -s "$img" ] \
 		|| die "validated release image missing, empty, or not regular after final regeneration: $img"
@@ -1304,18 +1310,12 @@ release_output_path_is_safe "$REPO_ROOT" "$OUTPUT_DIR" "$RELEASE_MODE" "$VERSION
 # ============================================================================
 section "4. stage $OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR/evidence"
-for img in "${IMAGES[@]}"; do cp -p "$img" "$OUTPUT_DIR/"; done
-
-# Checksums over the images. Named EXPLICITLY, never globbed: `sha256sum ./*.hex`
-# would faithfully record whatever happens to be sitting in the staging
-# directory, so a stale image left by an earlier run would be checksummed,
-# committed and published as part of this release. The verifier would then
-# confirm it -- the producer and the verifier sharing one blind spot is the
-# §14.8 hole from the writing side.
-release_basenames=()
-for img in "${IMAGES[@]}"; do release_basenames+=("$(basename "$img")"); done
-( cd "$OUTPUT_DIR" && sha256sum -- "${release_basenames[@]}" > SHA256SUMS ) \
-	|| die "could not checksum the staged release images"
+release_stage_classic_avr_images "$OUTPUT_DIR" "$final_avr_image_hashes" \
+	"${AVR_IMAGES[@]}" \
+	|| die "a staged classic AVR image differs from the final HEX regenerated from its validated ELF"
+for img in "${XT_IMAGES[@]}" "${PIC_IMAGES[@]}"; do
+	cp -p -- "$img" "$OUTPUT_DIR/"
+done
 STAGED_PIC_IMAGES=()
 for img in "${PIC_IMAGES[@]}"; do STAGED_PIC_IMAGES+=("$OUTPUT_DIR/$(basename "$img")"); done
 staged_pic_image_hashes=$(hash_pic_image_set "${STAGED_PIC_IMAGES[@]}")
@@ -1326,6 +1326,18 @@ for img in "${XT_IMAGES[@]}"; do STAGED_XT_IMAGES+=("$OUTPUT_DIR/$(basename "$im
 staged_xt_image_hashes=$(hash_xt_image_set "${STAGED_XT_IMAGES[@]}")
 [ "$staged_xt_image_hashes" = "$validated_xt_image_hashes" ] \
 	|| die "a staged ATtiny202 image differs from the image exercised by its gates and soak"
+
+# Checksums over the images. Named EXPLICITLY, never globbed: `sha256sum ./*.hex`
+# would faithfully record whatever happens to be sitting in the staging
+# directory, so a stale image left by an earlier run would be checksummed,
+# committed and published as part of this release. The verifier would then
+# confirm it -- the producer and the verifier sharing one blind spot is the
+# §14.8 hole from the writing side. Every family is byte-bound above before this
+# checksum file can be accepted as release evidence.
+release_basenames=()
+for img in "${IMAGES[@]}"; do release_basenames+=("$(basename "$img")"); done
+( cd "$OUTPUT_DIR" && sha256sum -- "${release_basenames[@]}" > SHA256SUMS ) \
+	|| die "could not checksum the staged release images"
 
 # ...and assert the staging directory holds exactly that set and nothing else,
 # because publication (.github/workflows/release.yml) uploads by glob.

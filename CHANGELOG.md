@@ -840,6 +840,21 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **Staged classic-AVR HEX bytes were not bound to the ELFs exercised by release
+  qualification.** The nine ELFs retained hash continuity through validation,
+  soak preparation and final HEX regeneration, but staging checked only that
+  each regenerated HEX existed. Unlike PIC and AVR-XT, a changed classic image
+  at the copy boundary could therefore be recorded as its own truth in
+  `SHA256SUMS` rather than rejected against the validated artifact chain.
+
+  The release now hashes all nine final regenerated classic HEX files by
+  basename, copies them through a source-loaded staging helper, reconstructs the
+  staged paths, and re-reads every destination byte. Classic AVR, AVR-XT and PIC
+  staged comparisons all complete before `SHA256SUMS` is written or evidence is
+  retained. The release-preflight contract independently mutates one classic
+  source immediately before `cp` and one destination immediately after `cp`;
+  both fail before checksum acceptance, while an unmodified control passes.
+
 - **A PIC10F320 relay-coil latch upset can no longer remain energized
   indefinitely while healthy firmware pets the watchdog.** The constrained
   target still cannot afford the PIC10F322's general expected-mask latch check,
