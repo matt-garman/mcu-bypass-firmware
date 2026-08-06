@@ -2927,13 +2927,16 @@ tinyx5 part, **0** matching ATtiny202, the three PIC10F320 basenames present by
 name, and no retired `tmux4053` image. Dropping the PIC10F320 line from
 `RELEASE_IMAGES` fails with `canonical release set has 12 images, expected 15`.
 
-**The env-var override fails closed.** `RELEASE_EXPECTED_IMAGES` exists so the
-regression can drive synthetic fixtures, and it is tested for being *set*, not
-for being non-empty — `RELEASE_EXPECTED_IMAGES=` is an error, not a quietly
-disabled gate. Empty, malformed and duplicated override sets each have their own
-rejection, and one check drives the verifier with no override at all and requires
-the failure message to name the Makefile as the source, so a broken
-`print-RELEASE_IMAGES` cannot leave the gate reading an empty set.
+**Correction from the `v0.9.8` release review:** the environment override above
+failed closed only for invalid values. A valid reduced value could replace the
+independent oracle and make identically incomplete committed, checksum and fresh
+sets pass. `RELEASE_EXPECTED_IMAGES` is therefore no longer a verifier input:
+production always reads Makefile `RELEASE_IMAGES`. Synthetic empty, malformed,
+duplicate and incomplete-set cases now run an unchanged copy of the production
+verifier beside a test-only Makefile, and a dedicated regression proves an
+inherited reduced value cannot alter production truth. The verifier also pins
+that repository Makefile and clears inherited GNU Make flags, assignments and
+injected-makefile controls before querying it.
 
 **The classifier hazard D2 created is closed.** `make-release.sh`'s image→MCU
 `case` ends in a bare `*.hex` arm that means "ATtiny13a". A PIC10F320 basename —

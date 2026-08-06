@@ -11,11 +11,26 @@ fresh2="$work/fresh2"
 release_alias="$work/release-alias"
 fresh_alias="$work/fresh-alias"
 fakebin="$work/fakebin"
+fixture_root="$work/verifier-fixture"
+fixture_verify="$fixture_root/scripts/verify-release-images.sh"
 checks=0
 
 fail() {
 	printf 'FAIL: %s\n' "$*" >&2
 	exit 1
+}
+
+mkdir -p "$fixture_root/scripts"
+cp -p "$VERIFY" "$fixture_verify"
+cat > "$fixture_root/Makefile" <<'EOF'
+override RELEASE_IMAGES := $(shell cat expected-images.txt)
+.PHONY: print-RELEASE_IMAGES
+print-RELEASE_IMAGES:
+	@printf '%s\n' "$(RELEASE_IMAGES)"
+EOF
+
+set_fixture_expected_images() {
+	printf '%s\n' "$1" > "$fixture_root/expected-images.txt"
 }
 
 reset_fixture() {
@@ -26,10 +41,9 @@ reset_fixture() {
 	printf ':0100000002FD\n:00000001FF\n' > "$release/b.hex"
 	cp "$release/a.hex" "$release/b.hex" "$fresh"/
 	(cd "$release" && sha256sum a.hex b.hex > SHA256SUMS)
-	# The canonical product set for the synthetic fixture. Exported, so the
-	# verifier uses it instead of the real Makefile RELEASE_IMAGES; the
-	# canonical set's REAL content is asserted separately at the end.
-	export RELEASE_EXPECTED_IMAGES='a.hex b.hex'
+	# Synthetic tests use the production verifier unchanged beside a test-only
+	# Makefile. Production therefore retains exactly one canonical-set input.
+	set_fixture_expected_images 'a.hex b.hex'
 }
 
 real_sha256sum=$(command -v sha256sum) \
@@ -42,7 +56,7 @@ expect_pass() {
 expect_pass_dirs() {
 	local label=$1
 	shift
-	"$VERIFY" "$release" "$@" >/dev/null \
+	"$fixture_verify" "$release" "$@" >/dev/null \
 		|| fail "$label: valid release was rejected"
 	checks=$((checks + 1))
 }
@@ -54,7 +68,7 @@ expect_fail() {
 expect_fail_dirs() {
 	local label=$1 expected=$2 output
 	shift 2
-	if output=$("$VERIFY" "$release" "$@" 2>&1); then
+	if output=$("$fixture_verify" "$release" "$@" 2>&1); then
 		fail "$label: invalid release was accepted"
 	fi
 	[[ "$output" == *"$expected"* ]] \
@@ -116,7 +130,7 @@ if ! output=$(PATH="$fakebin:$PATH" \
 		MUTATION_SENTINEL="$snapshot_sentinel" \
 		MUTATE_RELEASE="$release" \
 		MUTATE_FRESH="$fresh" \
-		"$VERIFY" "$release" "$fresh" 2>&1); then
+		"$fixture_verify" "$release" "$fresh" 2>&1); then
 	fail "private input snapshots: valid snapshot was rejected: $output"
 fi
 [ -f "$snapshot_sentinel" ] \
@@ -209,34 +223,71 @@ expect_fail "image omitted from all three observed sets" \
 # but absent from the canonical set is equally a release-contents change, and
 # must not slip through as "all three agree".
 reset_fixture
-RELEASE_EXPECTED_IMAGES='a.hex' \
-	expect_fail "image present everywhere but not canonical" \
-		"do not exactly match the canonical release product set"
+set_fixture_expected_images 'a.hex'
+expect_fail "image present everywhere but not canonical" \
+	"do not exactly match the canonical release product set"
 
-# Fail closed, not open: an empty expected set must be an error rather than a
-# silently disabled gate. This is the failure mode an env-var override invites.
+# Fail closed, not open: an empty value from the test-only Makefile must be an
+# error rather than a silently disabled canonical-set gate.
 reset_fixture
-RELEASE_EXPECTED_IMAGES='' \
-	expect_fail "empty canonical set" "canonical release image set is empty"
-
-reset_fixture
-RELEASE_EXPECTED_IMAGES='a.hex ../escape.hex' \
-	expect_fail "invalid name in canonical set" \
-		"canonical release image set has an invalid image name"
+set_fixture_expected_images ''
+expect_fail "empty canonical set" "canonical release image set is empty"
 
 reset_fixture
-RELEASE_EXPECTED_IMAGES='a.hex b.hex a.hex' \
-	expect_fail "duplicate in canonical set" \
-		"canonical release image set has a duplicate image name"
+set_fixture_expected_images 'a.hex ../escape.hex'
+expect_fail "invalid name in canonical set" \
+	"canonical release image set has an invalid image name"
 
-# The verifier must read the real Makefile when nothing overrides it. Drive it
-# with no RELEASE_EXPECTED_IMAGES at all against a fixture that cannot match, and
-# require the failure to name the Makefile as the source -- otherwise a broken
-# `make -s print-RELEASE_IMAGES` could leave the gate reading an empty set.
+reset_fixture
+set_fixture_expected_images 'a.hex b.hex a.hex'
+expect_fail "duplicate in canonical set" \
+	"canonical release image set has a duplicate image name"
+
+# Drive the production verifier with no hostile ambient value against a fixture
+# that cannot match, and require the failure to name the Makefile as the source.
+# Otherwise a broken `make -s print-RELEASE_IMAGES` could leave the gate reading
+# an empty set.
 reset_fixture
 unset RELEASE_EXPECTED_IMAGES
-expect_fail "canonical set read from the Makefile by default" \
-	"(Makefile RELEASE_IMAGES)"
+if output=$("$VERIFY" "$release" "$fresh" 2>&1); then
+	fail "canonical set read from the Makefile by default: synthetic release was accepted"
+fi
+[[ "$output" == *"(Makefile RELEASE_IMAGES)"* ]] \
+	|| fail "production canonical-set failure did not name the Makefile: $output"
+checks=$((checks + 1))
+
+# The exact ambient-reduction exploit: all three observed sets contain one
+# valid image and agree on its bytes. A stale exported one-image value must not
+# replace the production Makefile's complete 18-image oracle. The same applies
+# to GNU Make's inherited option, variable and injected-makefile channels.
+reset_fixture
+rm "$release/b.hex" "$fresh/b.hex"
+(cd "$release" && sha256sum a.hex > SHA256SUMS)
+injected_makefile="$work/injected-release-images.mk"
+printf 'override RELEASE_IMAGES := a.hex\n' > "$injected_makefile"
+
+expect_ambient_reduction_rejected() {
+	local label=$1 output
+	shift
+	if output=$(env "$@" "$VERIFY" "$release" "$fresh" 2>&1); then
+		fail "$label reduced the production canonical set"
+	fi
+	[[ "$output" == *"SHA256SUMS entries do not exactly match"* \
+		&& "$output" == *"(Makefile RELEASE_IMAGES)"* ]] \
+		|| fail "$label failed for the wrong reason: $output"
+	checks=$((checks + 1))
+}
+
+expect_ambient_reduction_rejected "inherited RELEASE_EXPECTED_IMAGES" \
+	RELEASE_EXPECTED_IMAGES=a.hex
+expect_ambient_reduction_rejected "inherited MAKEFLAGS assignment" \
+	MAKEFLAGS=RELEASE_IMAGES=a.hex
+expect_ambient_reduction_rejected "inherited GNUMAKEFLAGS assignment" \
+	GNUMAKEFLAGS=RELEASE_IMAGES=a.hex
+expect_ambient_reduction_rejected "inherited MAKEFILES injection" \
+	MAKEFILES="$injected_makefile"
+expect_ambient_reduction_rejected "inherited Make environment precedence" \
+	MAKEFLAGS=-e RELEASE_IMAGES=a.hex
 
 # Finally, the content of the real canonical set. Every check above works
 # equally well on a set that has quietly lost a whole MCU, so assert what the

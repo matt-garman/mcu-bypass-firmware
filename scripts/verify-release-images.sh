@@ -50,23 +50,24 @@ filename_re='^[A-Za-z0-9][A-Za-z0-9._-]*\.hex$'
 checksum_re='^[[:xdigit:]]{64} [ *]([A-Za-z0-9][A-Za-z0-9._-]*\.hex)$'
 
 # --- the canonical release product set --------------------------------------
-# Normally read straight from the Makefile, the single source of truth. An
-# explicitly EXPORTED RELEASE_EXPECTED_IMAGES overrides it so the regression can
-# drive synthetic fixtures -- but note the test is for the variable being SET,
-# not for it being non-empty: `RELEASE_EXPECTED_IMAGES=` must fail loudly rather
-# than quietly disable the strongest check in this script.
+# Always read straight from the adjacent Makefile, the single source of truth.
+# Synthetic regressions run a copy of this verifier beside a fixture Makefile;
+# production has no alternate environment or command-line oracle that ambient
+# state can accidentally select.
 expected_source='Makefile RELEASE_IMAGES'
-if [ "${RELEASE_EXPECTED_IMAGES+set}" = set ]; then
-	expected_raw=$RELEASE_EXPECTED_IMAGES
-	expected_source='RELEASE_EXPECTED_IMAGES'
-else
-	repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P) \
-		|| die "could not locate the repository root"
-	command -v make >/dev/null 2>&1 \
-		|| die "make is required to read the canonical release image set"
-	expected_raw=$(cd "$repo_root" && make -s print-RELEASE_IMAGES) \
-		|| die "could not read RELEASE_IMAGES from the Makefile"
-fi
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P) \
+	|| die "could not locate the repository root"
+command -v make >/dev/null 2>&1 \
+	|| die "make is required to read the canonical release image set"
+expected_raw=$(
+	# Do not inherit recursive-Make flags, command-line variable assignments, or
+	# injected makefiles from the caller. The tracked repository Makefile is the
+	# oracle, not ambient GNU Make process state.
+	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES MAKEOVERRIDES
+	cd "$repo_root" \
+		&& make --no-print-directory -s -f "$repo_root/Makefile" \
+			print-RELEASE_IMAGES
+) || die "could not read RELEASE_IMAGES from the Makefile"
 
 read -r -a expected_images <<<"$expected_raw"
 [ "${#expected_images[@]}" -gt 0 ] \

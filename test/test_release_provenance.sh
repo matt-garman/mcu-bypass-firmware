@@ -466,6 +466,9 @@ if grep -Eq '^[[:space:]]+(continue-on-error|if):' <<<"$ci_publish_block" \
 		|| grep -Fq '|| true' <<<"$ci_publish_block"; then
 	fail "tag-CI rename publication can be skipped or ignored"
 fi
+if grep -Fq 'RELEASE_EXPECTED_IMAGES' "$RELEASE_WORKFLOW"; then
+	fail "tag CI exposes a non-Makefile canonical release-image input"
+fi
 checks=$((checks + 1))
 
 # Execute the workflow's publication shell itself with fake tag verification
@@ -1013,10 +1016,10 @@ cp -- "${rename_paths[@]}" "$repro_release/"
 	cd "$repro_release"
 	sha256sum -- "${rename_names[@]}" > SHA256SUMS
 )
-rename_expected="${rename_names[*]}"
-RELEASE_EXPECTED_IMAGES="$rename_expected" \
+ambient_release_expected=${rename_names[0]}
+RELEASE_EXPECTED_IMAGES="$ambient_release_expected" \
 	"$RELEASE_IMAGE_VERIFY" "$repro_release" "$rename_images" >/dev/null \
-	|| fail "valid rename fixture failed normal release reproduction"
+	|| fail "ambient reduced image set replaced Makefile truth during valid reproduction"
 checks=$((checks + 1))
 
 printf '\npost-validation mutation\n' >> "$rename_images/bypass-attiny13a-cd4053_simple.hex"
@@ -1029,7 +1032,7 @@ grep -Fq '**UNEXPECTED DIFFERENCE**' "$work/rename-final.out" \
 	|| fail "final rename comparison rejected the mutation for the wrong reason"
 checks=$((checks + 1))
 
-if RELEASE_EXPECTED_IMAGES="$rename_expected" \
+if RELEASE_EXPECTED_IMAGES="$ambient_release_expected" \
 		"$RELEASE_IMAGE_VERIFY" "$repro_release" "$rename_images" \
 		>"$work/reproduction-mutation.out" 2>&1; then
 	fail "normal release reproduction accepted the changed clean-build image"

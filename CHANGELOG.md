@@ -840,6 +840,21 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **Ambient environment state could replace the release verifier's independent
+  canonical image set.** `RELEASE_EXPECTED_IMAGES` existed for synthetic tests,
+  but the production verifier also honored it. A stale exported value naming a
+  valid subset could therefore make identically incomplete committed,
+  `SHA256SUMS`, and fresh-build sets pass the four-way comparison.
+
+  Production now pins the repository Makefile, clears inherited GNU Make option,
+  assignment and injected-makefile channels, and reads `RELEASE_IMAGES` with no
+  alternate fixture option or environment oracle. Synthetic empty, malformed,
+  duplicate and incomplete canonical sets use an unchanged verifier copy beside
+  a test-only Makefile. Regressions recreate the one-image exploit through
+  `RELEASE_EXPECTED_IMAGES`, `MAKEFLAGS`, `GNUMAKEFLAGS`, `MAKEFILES`, and Make's
+  environment-precedence mode; the full 18-image provenance fixture also passes
+  with a hostile reduced value.
+
 - **Staged classic-AVR HEX bytes were not bound to the ELFs exercised by release
   qualification.** The nine ELFs retained hash continuity through validation,
   soak preparation and final HEX regeneration, but staging checked only that
