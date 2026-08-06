@@ -403,9 +403,10 @@ file is the human-readable summary of *what changed*.
   after the check, drop an `#include`, weaken `>` to `>=`, comment one out
   during a debugging session: nothing notices. New gate
   `test-static-assert-guards` (`test/test_static_assert_guards.sh`, in `make
-  test`), 27 checks in 0.3 s — 24 guards counted, 9 mutations proven to trip
-  one. The firmware itself is never modified; mutations are applied to a
-  throwaway copy of `src/`.
+  test`), 33 checks — 24 guards counted, 9 mutations proven to trip one, plus
+  three modular-shell include omissions each proven to change its fixture and
+  identify the exact missing shell. The firmware itself is never modified;
+  mutations are applied to a throwaway copy of `src/`.
 
   The guards' **inputs** are broken, never the guards: a mutation editing a
   `static_assert` line would prove only that the compiler implements
@@ -840,6 +841,20 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **The shared compile-check reach gate accepted commented-out includes.** Its
+  unanchored substring search treated
+  `// #include "bypass_compile_checks.h"` as proof that the threshold contract
+  reached an MCU shell. The semantic guard mutations compile only the Classic
+  AVR shell, so removing the include from AVR-XT or PIC10F322 could leave the
+  gate green while those shells silently lost all five shared assertions.
+
+  Reach verification now requires an anchored, uncommented direct preprocessing
+  directive with the exact header name. Fresh negative fixtures comment out the
+  include in Classic AVR, AVR-XT, and PIC10F322 one at a time, prove the source
+  changed, and require the common detector to report exactly that shell.
+  PIC10F320 remains the sole explicit exception because it carries its
+  constrained local copy.
+
 - **Ambient environment state could replace the release verifier's independent
   canonical image set.** `RELEASE_EXPECTED_IMAGES` existed for synthetic tests,
   but the production verifier also honored it. A stale exported value naming a

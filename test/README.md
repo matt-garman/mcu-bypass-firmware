@@ -53,8 +53,10 @@ test/
   test_fuse_injection_contract.py shared: every fuse byte the Makefile burns is
                                      the byte the -D-injected checker verifies
   test_variant_map_contract.sh shared: every per-variant map is guard-registered
-  test_static_assert_guards.sh shared: the firmware's compile-time guards really
-                                     fail the build when their inputs are broken
+  test_static_assert_guards.sh shared: every modular shell has an anchored,
+                                     uncommented direct include of the shared
+                                     checks, whose guards fail the build when
+                                     their inputs are broken
   test_pic_build.sh         shared: PIC image/size/rebuild-trigger checks
   test_pic10f320_coverage_archive.sh shared: coverage-gate source-archive mode checks
   test_pic_rebuild.sh       shared: PIC soak rebuild determinism

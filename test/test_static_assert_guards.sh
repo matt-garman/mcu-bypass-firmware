@@ -34,12 +34,12 @@
 #   3. the failure carries the guard's OWN message -- a mutant that fails to
 #      compile for an unrelated reason would otherwise score as a pass.
 #
-# SCOPE, stated so the next reader does not over-trust it: this compiles the
-# classic-AVR lane only, with avr-gcc. The shared invariants in
-# bypass_compile_checks.h are MCU-neutral and reach every shell that includes it
-# (asserted below), so proving them on one shell proves the header; the
-# per-shell pin/timer guards on the AVR-XT and PIC lanes are NOT exercised here
-# and would need their own toolchains.
+# SCOPE, stated so the next reader does not over-trust it: guard mutations compile
+# the classic-AVR lane only, with avr-gcc. The shared invariants in
+# bypass_compile_checks.h are MCU-neutral and reach every modular shell through a
+# direct include. That include topology and its negative fixtures are checked
+# below without target tools; the AVR-XT and PIC shell-local pin/timer guards are
+# NOT compiled here and would need their own toolchains.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -54,6 +54,15 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-static-assert.XXXXXX")
 trap 'rm -rf "$work"' EXIT
+
+# A pristine copy per check, so one doctored include or compile mutation can
+# never leak into the next.
+plant() {
+	local tree=$1
+	rm -rf "$tree"
+	mkdir -p "$tree"
+	cp "$SRC"/*.c "$SRC"/*.h "$tree/"
+}
 
 # Read the real build's compiler and flags rather than restating them: a guard
 # proven under flags nobody ships is not proven. print-<VAR> is itself held to
@@ -84,16 +93,58 @@ checks=$((checks + 1))
 # header -- recorded here so the divergence is visible and counted, not so it is
 # blessed. A fifth shell that does neither fails this check.
 SHELLS_WITH_OWN_COPY="bypass_mcu_pic10f320.c"
-missing=()
-for shell in "$SRC"/bypass_mcu_*.c; do
-	base=$(basename "$shell")
-	grep -q '#include "bypass_compile_checks.h"' "$shell" && continue
-	[[ " $SHELLS_WITH_OWN_COPY " == *" $base "* ]] && continue
-	missing+=("$base")
-done
-[ "${#missing[@]}" -eq 0 ] \
-	|| fail "these MCU shells neither include bypass_compile_checks.h nor are recorded as carrying their own copy, so the threshold contract does not reach them: ${missing[*]}"
+# "Active" here is deliberately lexical: the # is the first non-whitespace
+# token and the direct include consumes the complete line. Proving reach through
+# conditional preprocessing belongs to each real target toolchain; the release
+# server runs semantic negative compiles for AVR-XT and PIC10F322.
+ACTIVE_SHARED_INCLUDE_RE='^[[:space:]]*#[[:space:]]*include[[:space:]]+"bypass_compile_checks[.]h"[[:space:]]*$'
+find_shells_missing_shared_checks() {
+	local source_root=$1 shell base
+	local -a shells=("$source_root"/bypass_mcu_*.c)
+	MISSING_SHARED_CHECK_SHELLS=()
+	[ -e "${shells[0]}" ] \
+		|| fail "no MCU shells found under $source_root"
+	for shell in "${shells[@]}"; do
+		base=${shell##*/}
+		grep -Eq -- "$ACTIVE_SHARED_INCLUDE_RE" "$shell" && continue
+		[[ " $SHELLS_WITH_OWN_COPY " == *" $base "* ]] && continue
+		MISSING_SHARED_CHECK_SHELLS+=("$base")
+	done
+}
+
+find_shells_missing_shared_checks "$SRC"
+[ "${#MISSING_SHARED_CHECK_SHELLS[@]}" -eq 0 ] \
+	|| fail "these MCU shells neither actively include bypass_compile_checks.h nor are recorded as carrying their own copy, so the threshold contract does not reach them: ${MISSING_SHARED_CHECK_SHELLS[*]}"
 checks=$((checks + 1))
+
+# The lexical contract must reject the exact false-positive that prompted this
+# gate hardening. Exercise every modular shell independently against the same
+# function used above; requiring the exact basename prevents one unrelated
+# missing include from satisfying all three cases.
+SHARED_CHECK_SHELLS=(
+	bypass_mcu_avr_classic.c
+	bypass_mcu_avr_xt.c
+	bypass_mcu_pic10f322.c
+)
+for base in "${SHARED_CHECK_SHELLS[@]}"; do
+	tree="$work/include-$base"
+	plant "$tree"
+	before=$(sha256sum "$tree/$base" | cut -d' ' -f1)
+	sed -i -E \
+		's@^([[:space:]]*)#[[:space:]]*include[[:space:]]+"bypass_compile_checks[.]h"[[:space:]]*$@\1// #include "bypass_compile_checks.h"@' \
+		"$tree/$base"
+	after=$(sha256sum "$tree/$base" | cut -d' ' -f1)
+	[ "$before" != "$after" ] \
+		|| fail "commented-include fixture changed nothing in $base"
+	checks=$((checks + 1))
+
+	find_shells_missing_shared_checks "$tree"
+	if [ "${#MISSING_SHARED_CHECK_SHELLS[@]}" -ne 1 ] \
+			|| [ "${MISSING_SHARED_CHECK_SHELLS[0]:-}" != "$base" ]; then
+		fail "commenting the shared compile-check include in $base reported the wrong missing shells: ${MISSING_SHARED_CHECK_SHELLS[*]:-none}"
+	fi
+	checks=$((checks + 1))
+done
 
 # ---------------------------------------------------------------------------
 # Guard census: pinned so a DELETED guard is caught even where no mutation
@@ -153,14 +204,6 @@ MUTATIONS=(
 	"relay pulse budget|bypass_output_tq2_l2_5v_relay.h|s/^#define TQ2_L2_5V_PULSE_MS (12U)/#define TQ2_L2_5V_PULSE_MS (25U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|relay coil pulse must be shorter than RELEASE_THRESH"
 	"enum width flag||-fshort-enums|bypass_mcu_avr_classic.c|CD4053_SIMPLE|sizeof(effect_state_t) != 1, use -fshort-enums&&sizeof(program_state_t) != 1&&sizeof(timer_isr_called_t) != 1"
 )
-
-# A pristine copy per compile, so one mutation can never leak into the next.
-plant() {
-	local tree=$1
-	rm -rf "$tree"
-	mkdir -p "$tree"
-	cp "$SRC"/*.c "$SRC"/*.h "$tree/"
-}
 
 compile() {
 	local tree=$1 tu=$2 macro=$3 flags=$4
