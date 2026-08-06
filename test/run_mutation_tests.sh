@@ -57,9 +57,9 @@ readonly MUTATION_EXPECTED_XT=19
 readonly MUTATION_EXPECTED_PIC_GPSIM=6
 readonly MUTATION_EXPECTED_PIC_TARGET=8
 readonly MUTATION_EXPECTED_PIC_SOAK=1
-readonly MUTATION_EXPECTED_PIC320_HOST=27
-readonly MUTATION_EXPECTED_PIC320_TOOL=9
-readonly MUTATION_EXPECTED_TOTAL=94
+readonly MUTATION_EXPECTED_PIC320_HOST=29
+readonly MUTATION_EXPECTED_PIC320_TOOL=11
+readonly MUTATION_EXPECTED_TOTAL=98
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
@@ -803,6 +803,8 @@ PIC10F320_HOST_MUTATIONS=(
 "src/bypass_mcu_pic10f320.c	s@(0U == (PORTA & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (PORTA \& (uint8_t)(1U << FOOTSW_PIN)))@	pic10f320-test-equiv	FW footswitch read polarity inverted (toggles on release, not press)"
 "src/bypass_mcu_pic10f320.c	s@hw_relay_set_pin_set_high(); // pulse set coil@hw_relay_reset_pin_set_high(); // MUTANT@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-actuation	FW relay ENGAGE pulses the RESET coil instead of SET (relay latches backwards; settles to same LATA, so equiv/gpsim miss it)"
 "src/bypass_mcu_pic10f320.c	s@hw_relay_reset_pin_set_high(); // pulse reset coil@hw_relay_set_pin_set_high(); // MUTANT@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-actuation	FW relay BYPASS pulses the SET coil instead of RESET (relay latches backwards)"
+"src/bypass_mcu_pic10f320.c	/void main(void)/,\$s@        set_relay_coils_low(); // reassert the safe idle state every serviced iteration@@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-fault-host	FW relay idle coil-low re-drive removed; host latch injections remain energized after the next serviced iteration"
+"src/bypass_mcu_pic10f320.c	/void main(void)/,\$s@        set_relay_coils_low(); // reassert the safe idle state every serviced iteration@        hw_relay_reset_pin_set_low(); // MUTANT: clear RESET only@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-fault-host	FW relay idle re-drive clears RESET only; an injected SET coil remains energized"
 "src/bypass_mcu_pic10f320.c	s@#  define CD4053_MUTE_DELAY_MS (5U)@#  define CD4053_MUTE_DELAY_MS (0U)@	PIC10F320_VARIANT=cd4053_with_mute pic10f320-test-actuation	FW cd4053_with_mute pre-switch mute window defeated (5->0 ms): audible click on every switch"
 "src/bypass_mcu_pic10f320.c	s@#  define CD4053_CTL1     (1U) // RA1@#  define CD4053_CTL1     (2U) // MUTANT@;s@#  define CD4053_CTL2     (2U) // RA2@#  define CD4053_CTL2     (1U) // MUTANT@	PIC10F320_VARIANT=cd4053_with_mute pic10f320-test-actuation	FW cd4053_with_mute CTL1/CTL2 pins swapped (mute applied to wrong control; mid-mute LATA pattern wrong, settles to same LATA so equiv/gpsim miss it)"
 "src/bypass_mcu_pic10f320.c	s@    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@    hw_x4053_ctl1_low(); // MUTANT: reassert ENGAGED at startup\\n    hw_x4053_ctl2_low();\\n\\n    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@	PIC10F320_VARIANT=cd4053_with_mute pic10f320-test-actuation	FW cd4053_with_mute startup reasserts ENGAGED before MUTE, traversing INVALID/ENGAGED routing instead of remaining continuously in BYPASS"
@@ -817,6 +819,8 @@ PIC10F320_TOOL_MUTATIONS=(
 "src/bypass_mcu_pic10f320.c	s@    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@    hw_x4053_ctl1_low(); // MUTANT: reassert ENGAGED at startup\n    hw_x4053_ctl2_low();\n\n    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@	PIC10F320_VARIANT=cd4053_with_mute PIC10F320_TARGET_VARIANT=cd4053_with_mute pic10f320-test-target	TARGET mute startup reasserts ENGAGED before MUTE; physical startup transition trace catches it"
 "src/bypass_mcu_pic10f320.c	s@#  define CD4053_MUTE_DELAY_MS (5U)@#  define CD4053_MUTE_DELAY_MS (1U)@	PIC10F320_VARIANT=cd4053_with_mute PIC10F320_TARGET_VARIANT=cd4053_with_mute pic10f320-test-target	TARGET mute window shortened below 5ms; cycle-exact target I/O timing catches it"
 "src/bypass_mcu_pic10f320.c	s@#  define TQ2_L2_5V_PULSE_MS (12U)@#  define TQ2_L2_5V_PULSE_MS (1U)@	PIC10F320_VARIANT=tq2_l2_5v_relay PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay pic10f320-test-target	TARGET relay pulse shortened below the 4ms datasheet minimum; cycle-exact target I/O timing catches it"
+"src/bypass_mcu_pic10f320.c	/void main(void)/,\$s@        set_relay_coils_low(); // reassert the safe idle state every serviced iteration@@	PIC10F320_VARIANT=tq2_l2_5v_relay PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay pic10f320-test-target	TARGET relay idle coil-low re-drive removed; physical PORTA injections remain energized past the next serviced iteration"
+"src/bypass_mcu_pic10f320.c	/void main(void)/,\$s@        set_relay_coils_low(); // reassert the safe idle state every serviced iteration@        hw_relay_set_pin_set_low(); // MUTANT: clear SET only@	PIC10F320_VARIANT=tq2_l2_5v_relay PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay pic10f320-test-target	TARGET relay idle re-drive clears SET only; an injected RESET coil remains physically energized"
 "src/bypass_mcu_pic10f320.c	/void main(void)/,\$s@CLRWDT();@(void)0; /* MUTANT: no main-loop WDT pet */@	PIC10F320_VARIANT=cd4053_simple PIC10F320_SOAK_DURATION_MS=$PIC_SOAK_MUT_MS PIC10F320_SOAK_LIVENESS_INTERVAL_MS=$PIC_SOAK_MUT_MS pic10f320-test-soak	SOAK main-loop WDT pet removed; reset notifier catches the un-pet watchdog within the short mutation window"
 )
 
@@ -965,20 +969,20 @@ done
 
 if [ "$SANDBOX_SELFTEST_DONE" -eq 1 ]; then
     # Fully provisioned, then the two partial shapes the skip accounting can
-    # produce: every simulator absent (only the 51 host mutants dispatch), and
+    # produce: every simulator absent (only the 53 host mutants dispatch), and
     # the ATtiny202 lane alone absent. The second is the case this file's
     # combined `skipped` exists for -- a box with the PIC stack but no vendored
     # DFP/yasimavr -- so the totals check must accept a skip that is not PIC's.
-    mutation_validate_totals 94 94 0 94 0 0 0 0 || exit 1
-    mutation_validate_totals 94 51 43 51 0 0 0 0 || exit 1
-    mutation_validate_totals 94 75 19 75 0 0 0 0 || exit 1
-    if mutation_validate_totals 94 50 43 50 0 0 0 0 >/dev/null 2>&1; then
+    mutation_validate_totals 98 98 0 98 0 0 0 0 || exit 1
+    mutation_validate_totals 98 53 45 53 0 0 0 0 || exit 1
+    mutation_validate_totals 98 79 19 79 0 0 0 0 || exit 1
+    if mutation_validate_totals 98 52 45 52 0 0 0 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a dropped dispatch" >&2; exit 1
     fi
-    if mutation_validate_totals 94 51 43 50 0 0 0 0 >/dev/null 2>&1; then
+    if mutation_validate_totals 98 53 45 52 0 0 0 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a missing result" >&2; exit 1
     fi
-    if mutation_validate_totals 94 51 43 51 0 0 1 0 >/dev/null 2>&1; then
+    if mutation_validate_totals 98 53 45 53 0 0 1 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a failed worker" >&2; exit 1
     fi
     # 124 is timeout(1) expiry and is the one that must not regress: if it ever

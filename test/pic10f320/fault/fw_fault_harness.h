@@ -64,6 +64,23 @@ typedef enum {
 //   returns -1 -> harness error (should be impossible)
 int fw_fault_run(fw_inject_t inj);
 
+#if defined(OUTPUT_TQ2_RELAY)
+// Result of injecting one or both relay-coil latch bits after a clean iteration
+// and observing the next completed iteration. The host mock proves the firmware
+// latch behavior; the libgpsim fault lane separately proves physical PORTA.
+typedef struct {
+    uint8_t injected_coils;
+    uint8_t observed_coils;
+    uint8_t final_coils;
+    uint8_t footswitch_stayed_released;
+    uint8_t completed_iterations;
+} fw_relay_fault_result_t;
+
+// `coil_mask` must select RESET/RA1, SET/RA2, or both (0x02/0x04/0x06).
+// Returns the same reset/no-reset status as fw_fault_run().
+int fw_relay_fault_run(uint8_t coil_mask, fw_relay_fault_result_t *result);
+#endif
+
 // Drive the real firmware over `fsw[0..n-1]` (1 = pressed / RA3 low, 0 =
 // released). fsw[0] is the power-on level init() samples. Returns the final
 // status-LED bit RA0 (LATA & 0x01): 1 == ENGAGED, 0 == BYPASS (0xFF on an

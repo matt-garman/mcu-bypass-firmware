@@ -59,7 +59,23 @@ OSCCONbits_t     OSCCONbits;
 WDTCONbits_t     WDTCONbits;
 INTCONbits_t     INTCONbits;
 
-uint8_t *bypass_lata_access(void) { return &g_lata; }
+#define RELAY_COIL_MASK 0x06u
+
+#if defined(OUTPUT_TQ2_RELAY)
+static uint8_t g_relay_fault_active;
+static uint8_t g_relay_fault_requested;
+static uint8_t g_relay_injected_mask;
+static fw_relay_fault_result_t g_relay_result;
+#endif
+
+uint8_t *bypass_lata_access(void) {
+#if defined(OUTPUT_TQ2_RELAY)
+    if (g_relay_fault_active != 0u) {
+        g_relay_result.observed_coils |= (uint8_t)(g_lata & RELAY_COIL_MASK);
+    }
+#endif
+    return &g_lata;
+}
 
 static PIR1bits_t g_pir1;
 PIR1bits_t *bypass_pir1(void) {
@@ -193,21 +209,36 @@ void bypass_equiv_on_clrwdt(void) {
 
     // MODE_FAULT
     if (g_clrwdt_calls == 2) {
+#if defined(OUTPUT_TQ2_RELAY)
+        if (g_relay_fault_requested != 0u) {
+            g_lata |= g_relay_injected_mask;
+            g_relay_result.injected_coils = (uint8_t)(g_lata & RELAY_COIL_MASK);
+            g_relay_result.observed_coils |= g_relay_result.injected_coils;
+            g_relay_result.footswitch_stayed_released =
+                (uint8_t)((PORTA & (uint8_t)(1u << 3)) != 0u);
+            g_relay_fault_active = 1u;
+            return;
+        }
+#endif
         apply_injection(g_inject); // corrupt after exactly one clean iteration
         return;
     }
     // Reaching here means a SECOND clean iteration completed: the sanity gate did
     // NOT fire for this injection.
+#if defined(OUTPUT_TQ2_RELAY)
+    if (g_relay_fault_active != 0u) {
+        g_relay_result.observed_coils |= (uint8_t)(g_lata & RELAY_COIL_MASK);
+        g_relay_result.final_coils = (uint8_t)(g_lata & RELAY_COIL_MASK);
+        g_relay_result.footswitch_stayed_released &=
+            (uint8_t)((PORTA & (uint8_t)(1u << 3)) != 0u);
+        g_relay_result.completed_iterations = 1u;
+    }
+#endif
     disarm_timer();
     siglongjmp(g_jmp, 1);
 }
 
-int fw_fault_run(fw_inject_t inj) {
-    reset_sfrs_power_on();
-    g_mode = MODE_FAULT;
-    g_clrwdt_calls = 0;
-    g_inject = (int)inj;
-
+static int run_fault_mode(void) {
     install_alarm();
     arm_timer_ms(FW_FAULT_TIMEOUT_MS);
 
@@ -220,6 +251,42 @@ int fw_fault_run(fw_inject_t inj) {
     disarm_timer();
     return (sj == 2) ? 1 : 0; // 2 = reset spin (timer); 1 = clean completion
 }
+
+int fw_fault_run(fw_inject_t inj) {
+    reset_sfrs_power_on();
+    g_mode = MODE_FAULT;
+    g_clrwdt_calls = 0;
+    g_inject = (int)inj;
+#if defined(OUTPUT_TQ2_RELAY)
+    g_relay_fault_active = 0u;
+    g_relay_fault_requested = 0u;
+#endif
+    return run_fault_mode();
+}
+
+#if defined(OUTPUT_TQ2_RELAY)
+int fw_relay_fault_run(uint8_t coil_mask, fw_relay_fault_result_t *result) {
+    if (result == NULL || (coil_mask != 0x02u && coil_mask != 0x04u &&
+                          coil_mask != RELAY_COIL_MASK)) {
+        return -1;
+    }
+
+    reset_sfrs_power_on();
+    g_mode = MODE_FAULT;
+    g_clrwdt_calls = 0;
+    g_inject = (int)FWI_NONE;
+    g_relay_fault_active = 0u;
+    g_relay_fault_requested = 1u;
+    g_relay_injected_mask = coil_mask;
+    memset(&g_relay_result, 0, sizeof g_relay_result);
+
+    int const status = run_fault_mode();
+    *result = g_relay_result;
+    g_relay_fault_active = 0u;
+    g_relay_fault_requested = 0u;
+    return status;
+}
+#endif
 
 uint8_t fw_drive(const uint8_t *fsw, int n) {
     reset_sfrs_power_on();

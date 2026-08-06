@@ -496,23 +496,27 @@ file is the human-readable summary of *what changed*.
   that disagrees with the Makefile in that bit alone passes all 46 checks. The
   gate builds exactly that binary and requires the round trip to catch it.
 
-- **The release's headline claim is now checked, and the check is retained.**
-  This changelog states in three places that the eighteen renamed images are
-  bit-identical to their `v0.9.7` counterparts — "only the filenames moved" is
-  the entire premise of the release — and nothing in the tree recorded that
-  anyone had confirmed it. Every other claim under `release/` is backed by a
-  retained artifact.
+- **The release's image-change claim is checked exactly, and the check is
+  retained.** The filename migration itself preserves all image bytes, while the
+  later PIC10F320 relay safety correction intentionally changes one image. The
+  release contract is therefore exact: seventeen renamed images must remain
+  bit-identical to `v0.9.7`, and the one published relay exception must differ.
+  Every other claim under `release/` is backed by a retained artifact; this one
+  now is too.
 
   `scripts/verify-rename-identity.sh` first verifies that the pinned release key
   signed the exact `release/v0.9.7/SHA256SUMS` bytes, then hashes every image this
   release builds against the entry for its old name through the published
-  old-to-new table in `release/README.md`, and emits the per-image table as the
-  evidence document. Missing, empty, symlinked, malformed, wrong-key, or stale
-  signatures all fail before any baseline hash is parsed.
+  old-to-new table and exact intentional-change declaration in
+  `release/README.md`, and emits the per-image table as the evidence document.
+  Missing, empty, symlinked, malformed, wrong-key, or stale signatures all fail
+  before any baseline hash is parsed.
   `scripts/make-release.sh` runs it in step 1 — before the 24-hour soak, so a
   changed byte costs seconds rather than a day — and stages the result as
-  `release/v0.9.8/RENAME_IDENTITY.md`. Result on the current tree: **18
-  identical, 0 differ, 0 missing**.
+  `release/v0.9.8/RENAME_IDENTITY.md`. The required final result is **17
+  identical, 1 intentional change, 0 unexpected differences, 0 missing, 0
+  added**. An unchanged declared exception, a second changed image, or a wrong
+  exception name all fail.
 
   Tag CI does not trust that retained report on sight. After rebuilding all
   release images from the tagged source, it regenerates the report from those
@@ -529,9 +533,9 @@ file is the human-readable summary of *what changed*.
 
   Three decisions are what keep this from becoming a liability later. It is
   **not a standing gate**: pinning current images to a *previous* release's
-  hashes is correct for exactly one release, and turns into a false alarm the
-  first time a release legitimately changes a byte (the standing form of the
-  check is per-release and already exists). It **holds no version of its own**,
+  hashes and one published exception is correct for exactly this release, and
+  turns into a false alarm on the next one (the standing form of the check is
+  per-release and already exists). It **holds no version of its own**,
   reading both from the rename table's own header, so it reports "not
   applicable" and does nothing for any other release and needs no maintenance to
   retire. And it **restates no part of the mapping**, parsing the table users
@@ -638,9 +642,10 @@ file is the human-readable summary of *what changed*.
   MCU field is now mandatory on every image, so the 6 × 3 product matrix is
   visible in a plain directory listing.
 
-  **Image contents are unchanged.** Each image is bit-identical to its `v0.9.7`
-  counterpart; only the filenames moved. `release/README.md` carries the full
-  old→new mapping table.
+  **The filename change itself does not change image contents.** The later
+  PIC10F320 relay idle-latch correction intentionally changes that one image;
+  the other seventeen remain bit-identical to `v0.9.7`. `release/README.md`
+  carries the full old→new mapping and the exact exception.
 
   Historical `release/vX.Y.Z/` directories are **not** renamed. Their
   `SHA256SUMS` names the files and is covered by a detached signature, so
@@ -708,9 +713,10 @@ file is the human-readable summary of *what changed*.
   that every supported variant, in every lane, has a `macro_<v>` selector and a
   `src_<v>` driver. That check deliberately does *not* require the three lanes'
   supported sets to be equal — a future output stage that fits the ATtiny13a but
-  not the 12-free-words PIC10F320 is a legitimate divergence.
+  not the 11-free-words PIC10F320 is a legitimate divergence.
 
-  Image contents are again unchanged: all 18 remain bit-identical to `v0.9.7`.
+  This vocabulary-only step changes no image byte. The later relay safety fix is
+  the release's sole intentional image difference from `v0.9.7`.
 
 - **Every make goal that acts on one part is named after that part.** The goal
   vocabulary now matches the image field exactly: `attiny13a`, `attiny45`,
@@ -800,7 +806,8 @@ file is the human-readable summary of *what changed*.
   Makefile truth through `make -s print-<VAR>` — so every `print-` consumer was
   swept with the rename and re-checked to resolve.
 
-  Image contents are unchanged for a third time: all 18 remain bit-identical.
+  This goal/variable rename also changes no image byte. The later relay safety
+  fix remains the release's sole intentional image difference.
 
 - **The tinyx5 soak selectors take a part name, not a chip number.**
   `AVR_SOAK_CHIP` and `AVR_SOAK_WITNESS_CHIP` were the last user-facing
@@ -833,6 +840,38 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **A PIC10F320 relay-coil latch upset can no longer remain energized
+  indefinitely while healthy firmware pets the watchdog.** The constrained
+  target still cannot afford the PIC10F322's general expected-mask latch check,
+  but its relay variant now reasserts both coil outputs low immediately after
+  every accepted timer event, before the sanity decision and watchdog pet. The
+  blocking 12 ms actuation is unaffected: the loop cannot execute during its
+  delay, and the existing pre/post-pulse clears remain in place.
+
+  Host fault injection forces RESET, SET and both coil bits high after one clean
+  iteration and requires both outputs to be low in each of the three cases at
+  the next completed iteration, without a footswitch event or reset. Its relay
+  count grows from 41 to 59 while
+  the two analog variants remain at 41. The real-HEX libgpsim lane repeats the
+  three cases against physical `PORTA`, rejects an opposite-coil transient, and
+  grows only the relay count from 22 to 25. Exact host actuation (115 checks),
+  target I/O (36), and lock-step (3,005) retain their prior counts and no new
+  normal-path edge. At the test's deterministic loop-boundary injection seam,
+  the emitted image clears the physical outputs in 364-366 instruction cycles
+  (0.728-0.732 ms nominal), versus measured 12.024-12.036 ms intentional pulses.
+  An arbitrary idle-phase upset is bounded by one actual timer period plus
+  rewrite overhead; an upset during blocking actuation is cleared by the
+  existing post-pulse clear. This bounds per-channel coil/driver energy; it does
+  not claim that a short accidental pulse cannot mechanically switch the relay.
+
+  The pinned XC8 V3.10 / DFP 1.9.189 build prices the fix at one word: the relay
+  grows from 244 to 245 of 256 words, leaves 11 free, and retains a 4/8 maximum
+  return-stack depth. Both analog image hashes remain unchanged; only the relay
+  baseline moves to
+  `00e1d3ac37ed1857f5e1b3047e921ac22bd9705a728f7c77c9c9daae31d34cd8`.
+  Four mutations remove the rewrite or reduce it to one coil across the host and
+  real-image planes, taking the pinned total from 94 to 98.
+
 - **Datasheet traceability conflated machine enforcement with documentary
   evidence.** The design table now labels each row as machine-gated,
   runtime-checked, build-derived or documented, and separates enforced register
@@ -976,9 +1015,9 @@ file is the human-readable summary of *what changed*.
   staging. That second invocation overwrites the provisional report, so the
   retained `RENAME_IDENTITY.md` is computed from the exact image paths copied
   into the release. `test-release-provenance` pins both sides of the ordering and
-  reproduces the defect dynamically: all 18 images pass the early comparison,
-  one is changed, and the final comparison must fail with that image marked
-  `DIFFERS`.
+  reproduces the defect dynamically: the exact 17-identical +
+  1-intentional-change set passes, a second image is changed, and the final
+  comparison must fail with that image marked `UNEXPECTED DIFFERENCE`.
 
 - **The name-contract gate could not see a file until it was committed, so it
   reported a violation one run late — to the next person rather than to its

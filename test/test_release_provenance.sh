@@ -397,7 +397,7 @@ ci_publish_line=${ci_publish_lines[0]%%:*}
 	&& [ "$ci_tag_verify_line" -lt "$ci_rename_asset_line" ] \
 	&& [ "$ci_rename_asset_line" -lt "$ci_publish_line" ] \
 	|| fail "tag CI does not preserve compare-before-freeze-before-publish ordering"
-ci_rename_block=$(awk '/- name: Verify committed images and rename evidence reproduce bit-for-bit/ { in_block=1 }
+ci_rename_block=$(awk '/- name: Verify committed images and rename\/change evidence reproduce bit-for-bit/ { in_block=1 }
 	/# --- re-run the gates on the clean runner/ { in_block=0 }
 	in_block { print }' "$RELEASE_WORKFLOW")
 ci_publish_block=$(awk '/- name: Publish GitHub Release/ { in_block=1 }
@@ -554,10 +554,10 @@ rm "$publish_report"
 expect_publish_fail "invalid frozen applicability" invalid '' \
 	"invalid frozen rename applicability state"
 
-# Exercise the temporal defect directly. The first comparison passes over a
-# complete byte-identical v0.9.8 fixture; changing one image afterward must make
-# the comparison that represents the final release fail by hash, not merely by
-# a missing path or malformed fixture.
+# Exercise the temporal defect directly. The published contract requires one
+# exact PIC10F320 relay change and 17 identities. An all-identical fixture must
+# fail; after making only that declared change, a later second mutation must make
+# the comparison that represents the final release fail by hash.
 rename_images="$work/rename-images"
 mkdir -p "$rename_images"
 rename_pairs=(
@@ -589,11 +589,23 @@ for pair in "${rename_pairs[@]}"; do
 	rename_paths+=("$rename_images/$new")
 	rename_names+=("$new")
 done
+if "$RENAME_VERIFY" v0.9.8 "${rename_paths[@]}" >"$work/rename-all-identical.out" \
+		2>"$work/rename-all-identical.err"; then
+	fail "all-identical fixture passed without the required PIC10F320 relay change"
+fi
+grep -Fq '**REQUIRED CHANGE ABSENT**' "$work/rename-all-identical.out" \
+	&& grep -Fq 'required_change_absent=1' "$work/rename-all-identical.err" \
+	|| fail "all-identical fixture failed for the wrong reason"
+checks=$((checks + 1))
+
+printf '\nintentional PIC10F320 relay safety correction\n' \
+	>> "$rename_images/bypass-pic10f320-tq2_l2_5v_relay.hex"
 "$RENAME_VERIFY" v0.9.8 "${rename_paths[@]}" >"$work/rename-early.out" \
 	2>"$work/rename-early.err" \
-	|| fail "byte-identical rename fixture failed its initial comparison: $(<"$work/rename-early.err")"
-grep -Fq 'identical=18 differ=0 missing=0 added=0' "$work/rename-early.out" \
-	|| fail "initial rename fixture did not compare the complete 18-image set"
+	|| fail "valid 17+1 rename fixture failed: $(<"$work/rename-early.err")"
+grep -Fq 'identical=17 intentional_change=1 differ=0 missing=0 added=0' \
+	"$work/rename-early.out" \
+	|| fail "valid rename fixture did not enforce the complete 17+1 image set"
 grep -Fq 'detached signature verified against the pinned release key' \
 	"$work/rename-early.out" \
 	|| fail "rename report does not attest that the baseline signature was verified"
@@ -835,6 +847,47 @@ expect_rename_signature_fail() {
 	|| fail "isolated valid baseline failed: $(<"$work/rename-fixture-valid.err")"
 checks=$((checks + 1))
 
+fixture_rename_doc="$rename_fixture/release/README.md"
+saved_rename_doc="$work/valid-release-README.md"
+cp "$fixture_rename_doc" "$saved_rename_doc"
+sed -i \
+	's@intentional-change=bypass-pic10f320-tq2_l2_5v_relay.hex@intentional-change=bypass-attiny13a-tq2_l2_5v_relay.hex@' \
+	"$fixture_rename_doc"
+if "$fixture_rename_verify" v0.9.8 "${rename_paths[@]}" \
+		>"$work/rename-wrong-exception.out" 2>"$work/rename-wrong-exception.err"; then
+	fail "rename verifier accepted the wrong intentional-change image"
+fi
+grep -Fq '**UNEXPECTED DIFFERENCE**' "$work/rename-wrong-exception.out" \
+	&& grep -Fq 'required_change_absent=1' "$work/rename-wrong-exception.err" \
+	|| fail "wrong intentional-change declaration failed for the wrong reason"
+cp "$saved_rename_doc" "$fixture_rename_doc"
+checks=$((checks + 1))
+
+intentional_change_line=$(grep -F 'rename-identity: intentional-change=' \
+	"$fixture_rename_doc" | head -1)
+printf '%s\n' "$intentional_change_line" >> "$fixture_rename_doc"
+if "$fixture_rename_verify" v0.9.8 "${rename_paths[@]}" \
+		>"$work/rename-duplicate-exception.out" 2>"$work/rename-duplicate-exception.err"; then
+	fail "rename verifier accepted two intentional-change declarations"
+fi
+grep -Fq 'must declare exactly one rename-identity intentional change' \
+	"$work/rename-duplicate-exception.err" \
+	|| fail "duplicate intentional-change declaration failed for the wrong reason"
+cp "$saved_rename_doc" "$fixture_rename_doc"
+checks=$((checks + 1))
+
+printf '| `unexpected_old.hex` | `unexpected_new.hex` |\n' \
+	>> "$fixture_rename_doc"
+if "$fixture_rename_verify" v0.9.8 "${rename_paths[@]}" \
+		>"$work/rename-extra-mapping.out" 2>"$work/rename-extra-mapping.err"; then
+	fail "rename verifier accepted a surplus published mapping"
+fi
+grep -Fq 'the published rename contract requires exactly 18' \
+	"$work/rename-extra-mapping.err" \
+	|| fail "surplus rename mapping failed for the wrong reason"
+cp "$saved_rename_doc" "$fixture_rename_doc"
+checks=$((checks + 1))
+
 # Replace the original manifest after the real GPG verification returns. The
 # comparison must continue over its already-verified private snapshot, never
 # reopen the now-untrusted release pathname.
@@ -852,7 +905,8 @@ chmod 750 "$rename_fixture/scripts/verify-release-signature.sh"
 "$fixture_rename_verify" v0.9.8 "${rename_paths[@]}" \
 	>"$work/rename-snapshot.out" 2>"$work/rename-snapshot.err" \
 	|| fail "verified-manifest snapshot did not survive pathname replacement: $(<"$work/rename-snapshot.err")"
-grep -Fq 'identical=18 differ=0 missing=0 added=0' "$work/rename-snapshot.out" \
+grep -Fq 'identical=17 intentional_change=1 differ=0 missing=0 added=0' \
+	"$work/rename-snapshot.out" \
 	|| fail "pathname replacement changed the verified baseline comparison"
 grep -Fxq 'post-verification pathname replacement' "$fixture_sums" \
 	|| fail "pathname-replacement fixture did not run after signature verification"
@@ -943,8 +997,8 @@ if "$RENAME_VERIFY" v0.9.8 "${rename_paths[@]}" >"$work/rename-final.out" \
 		2>"$work/rename-final.err"; then
 	fail "final rename comparison accepted an image changed after the initial check"
 fi
-grep -Fq '**DIFFERS**' "$work/rename-final.out" \
-	&& grep -Fq 'rename identity FAILED: 1 image(s) differ' "$work/rename-final.err" \
+grep -Fq '**UNEXPECTED DIFFERENCE**' "$work/rename-final.out" \
+	&& grep -Fq 'unexpected_differences=1' "$work/rename-final.err" \
 	|| fail "final rename comparison rejected the mutation for the wrong reason"
 checks=$((checks + 1))
 
@@ -965,8 +1019,8 @@ if "$RENAME_VERIFY" --compare-report "$committed_rename_release" \
 		2>"$work/rename-mutated-compare.err"; then
 	fail "tag-CI report regeneration accepted the changed clean-build image"
 fi
-grep -Fq '**DIFFERS**' "$work/rename-mutated-compare.err" \
-	&& grep -Fq 'rename identity FAILED: 1 image(s) differ' \
+grep -Fq '**UNEXPECTED DIFFERENCE**' "$work/rename-mutated-compare.err" \
+	&& grep -Fq 'unexpected_differences=1' \
 		"$work/rename-mutated-compare.err" \
 	|| fail "tag-CI report regeneration rejected the changed image for the wrong reason"
 checks=$((checks + 1))

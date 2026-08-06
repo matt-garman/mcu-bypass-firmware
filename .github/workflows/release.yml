@@ -14,7 +14,7 @@ name: Release
 #      an artifact-only child whose sole parent is the qualified source;
 #   2. rebuilds every release image from the TAGGED source on a clean, pinned
 #      runner (AVR Classic + ATtiny202 + PIC10F322 + PIC10F320), then regenerates
-#      and byte-compares one-shot rename evidence when the rename table applies;
+#      and byte-compares one-shot rename/change evidence when the table applies;
 #   3. REPRODUCIBILITY GATE: asserts the committed files, SHA256SUMS entries,
 #      freshly built files, AND the canonical RELEASE_IMAGES set the Makefile
 #      declares are all the same complete set with byte-identical contents
@@ -234,7 +234,7 @@ jobs:
             PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
 
       # --- THE reproducibility gate ----------------------------------------
-      - name: Verify committed images and rename evidence reproduce bit-for-bit
+      - name: Verify committed images and rename/change evidence reproduce bit-for-bit
         id: repro
         env:
           RELEASE_DIR: ${{ steps.rel.outputs.dir }}
@@ -243,7 +243,7 @@ jobs:
           set -euo pipefail
           dir=$RELEASE_DIR
 
-          # Give rename identity and normal reproduction the same immutable
+          # Give rename/change evidence and normal reproduction the same immutable
           # view of the clean build. Reading the live paths in sequence would
           # allow a change between gates to make both individually pass over
           # different bytes.

@@ -4054,7 +4054,7 @@ pic10f320-test-fault-host:
 # them would weaken one or the other, so it is recorded rather than forced.
 #
 # Runs per variant: the firmware's #ifdef output stages give the three variants
-# 84 / 95 / 99 executable lines, so a single-variant run would leave real
+# 84 / 95 / 100 executable lines, so a single-variant run would leave real
 # firmware logic unmeasured. pic10f320-test-host-variants sweeps all three.
 pic10f320-coverage-check-fw: variant-selectors-valid
 	@# Local executability is required everywhere, including source archives.
@@ -5081,7 +5081,7 @@ origins:
 #
 # Deliberately NOT an equality check between the three lists. They hold the same
 # three names today, but a future output stage that fits the ATtiny13a and not
-# the 12-free-words PIC10F320 is a legitimate divergence, and a guard forbidding
+# the 11-free-words PIC10F320 is a legitimate divergence, and a guard forbidding
 # it would be wrong. What must hold is that wherever a name appears it means the
 # same stage and is completely declared.
 override ALL_SUPPORTED_VARIANTS := $(sort $(CLASSIC_VARIANTS_SUPPORTED) \

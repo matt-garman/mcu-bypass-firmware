@@ -165,8 +165,10 @@ CLI wrappers, the soak driver (`pic/test_soak_pic.cc`), the three libgpsim harne
 cores, and — most importantly — `src/bypass_pure.c` itself. Thin per-part adapters
 keep processor/image defaults and output-macro vocabularies explicit. The fault
 adapters additionally pin each part's program-space limit, independent expected
-check count, and output-latch policy: PIC10F322 runs three LATA injections that
-PIC10F320 deliberately omits because its firmware has no latch-integrity guard.
+check count, and output-latch policy: PIC10F322 runs three reset-producing LATA
+injections because it has a general latch-integrity guard. PIC10F320 omits that
+general guard; its relay adapter instead runs three no-reset coil-latch cases
+that require the safe idle state to be restored within one serviced iteration.
 
 Build artifacts (compiled binaries, `*.bc`) are written next to their sources in
 each subdirectory and are git-ignored; see `.gitignore`. KLEE output directories
@@ -301,7 +303,7 @@ below so a green gate means every PIC layer actually ran.
 | Soak watchdog witness | `test-soak-reset-witness` | The Classic AVR soak's `watchdog_failures` counter is release evidence, so a real watchdog reset must be able to reach it. Builds the soak driver twice against the same healthy ATtiny85 image — untouched, and with a fixture that disables the timer interrupt mid-run — and requires the first to pass with `watchdog_failures=0` and the second to fail with a nonzero one. The control half is what stops a permanently broken soak from satisfying the failing half on its own. | simavr + host C compiler |
 | Release qualification contract | `test-release-qualification` | Publication requires clean production metadata, the exact canonical 28-file evidence set, and one identity-, duration-, and counter-bearing result for each of 15 release soak combinations. | Bash + synthetic retained evidence |
 | Release preflight contract | `test-release-preflight` | The real release step 0 reaches its final executable-version probe without cleaning, building, staging, or changing tracked/nonignored worktree content. Synthetic selected tools and nonempty pack/header fixtures prove avr-libc, simavr/libelf, both gpsim lanes, analysis paths, complete yasimavr imports, safe Make argument routing, and absolute-venv routing fail closed. | Bash + synthetic selected toolchain + base host utilities |
-| Release provenance contract | `test-release-provenance` | Final images are rechecked immediately before staging, and rename-only evidence compares against baseline checksum bytes whose detached signature first verifies against the pinned release key. Modified manifests and missing, empty, symlinked, malformed, or wrong-key signatures fail before any baseline hash is parsed. Tag CI independently regenerates applicable rename evidence from its clean-build image paths, requires a byte-identical committed report, and publishes the digest-rechecked frozen copy. | Bash + GnuPG + isolated release fixtures |
+| Release provenance contract | `test-release-provenance` | Final images are rechecked immediately before staging, and exact rename/change evidence compares against baseline checksum bytes whose detached signature first verifies against the pinned release key. Modified manifests and missing, empty, symlinked, malformed, or wrong-key signatures fail before any baseline hash is parsed. Tag CI independently regenerates applicable evidence from its clean-build image paths, requires a byte-identical committed report, and publishes the digest-rechecked frozen copy. | Bash + GnuPG + isolated release fixtures |
 | Release history/signature contract | `test-release-history` | The tag event must peel to an artifact-only, single-parent child of the exact qualified source. `SHA256SUMS.asc` and the exact remote annotated tag must verify against the pinned full-fingerprint key in an isolated keyring; altered bytes, missing/malformed/wrong-key signatures, lightweight/unsigned/same-target-replaced tags, and moved tags are rejected immediately before publication. | Bash + GnuPG + scratch Git repositories |
 | yasimavr venv fetch safety | `test-fetch-yasimavr` | Caller-selected destinations are canonicalized and cannot name roots, symlinks, files, or unstamped directories. Offline fake tools prove failed builds preserve the old owned venv and only a fully verified sibling tree is renamed into place. | Bash + synthetic toolchain |
 | External supply-chain integrity | `test-supply-chain` | XC8 and PIC DFP bytes must match reviewed hashes before `sudo`; restored ATtiny_DFP files are re-hashed; yasimavr dependencies are wheel/hash-locked and built without dependency resolution; both workflows use one installer and hash-sensitive cache keys. | Bash + synthetic downloads/toolchains |
@@ -361,8 +363,8 @@ targets are always fail-closed rather than skip-clean.
 |---|---|---|---|
 | Firmware↔core equivalence | `pic10f320-test-equiv` | The real firmware, host-compiled, stepped tick-for-tick against `src/bypass_pure.c` over 266,144 stimulus sequences, visiting all 66 reachable model states, with zero divergence. This is the layer that closes the inlining seam. | host C |
 | Actuation sequence | `pic10f320-test-actuation` | Each variant's full *settled* `LATA` at every tick, plus the mute/relay *mid-actuation* sequencing and pulse width that a settled snapshot cannot see. | host C |
-| Host fault injection | `pic10f320-test-fault-host` | Corrupting a guarded SFR or the debounce context forces the sanity gate to take the watchdog-reset path — the defensive layer valid stimulus never reaches. | host C |
-| Shipping-source coverage | `pic10f320-coverage-check-fw` | An **exact** property, not a percentage floor: every line of the real firmware is host-executed except an enumerated, justified watchdog-reset path. Run per variant, because the three output stages give 84 / 95 / 99 executable lines. | host gcov with the mock `xc.h` |
+| Host fault injection | `pic10f320-test-fault-host` | Corrupting a guarded SFR or the debounce context forces the sanity gate to take the watchdog-reset path. The relay variant additionally injects RESET, SET, and both coil-latch bits and requires correction within one completed iteration without a press or reset: 41 / 41 / 59 checks. | host C |
+| Shipping-source coverage | `pic10f320-coverage-check-fw` | An **exact** property, not a percentage floor: every line of the real firmware is host-executed except an enumerated, justified watchdog-reset path. Run per variant, because the three output stages give 84 / 95 / 100 executable lines. | host gcov with the mock `xc.h` |
 | All-variant host aggregate | `pic10f320-test-host-variants` | The four layers above across all three variants, with the complete supported matrix required first. **This is the member of `make test`.** | Makefile wrapper |
 | Return-stack oracle regression | `test-pic10f320-return-stack-oracle` | 149 deterministic checks: passing depths through 8, recursion/depth-9 rejection, independently required skip edges and operand boundaries, classic alias ranges, all 16,384 legality decisions, every destination writer against PCL/INDF/INTCON, 9-bit PC/physical-fetch aliasing, literal HEX layout, and fail-closed parser/file cases. Includes ten device-geometry checks: `--program-words` is validated as a power of two inside the 9-bit PC space, and fixtures whose verdict *differs* between the 256- and 512-word geometries pin the fetch alias in both directions — an image with code above word `0x0FF` is rejected when 256 words are declared, and one that relies on the fold is rejected when 512 are. **This is also a member of `make test`.** | dependency-free Python 3 |
 | Image generation | `test-pic-build` | 36 PIC10F322 and 75 PIC10F320 checks. Both runs prove missing-XC8 skips remove the complete product matrix despite attempted inventory overrides, stale assembly/symbol sidecars cannot survive a current-HEX-only build, and shell syntax in matrix text is rejected without execution. The 322 run additionally rejects recursively self-whitelisting GNU Make input; the 320 run covers selector rebuilds, deletion of reachable-RETFIE and depth-9 images despite attempted oracle/limit overrides, exact per-output XC8/host-compiler rebuild invocations with current clock/variant/host flags, and matching/mismatching/malformed/missing expected-image gate inputs. | host fake-XC8/fake-CC regression |
@@ -371,7 +373,7 @@ targets are always fail-closed rather than skip-clean.
 | Hardware return stack | every `pic10f320` build; `pic10f320-test-return-stack` | The base build strictly parses and traverses its final HEX before marking that image complete, so gpsim/target/soak/release rebuilds use the same fail-closed gate. The explicit target rebuilds the supported matrix and rechecks all three together, reporting each maximum and witness. | dependency-free Python 3 over final HEX |
 | Static analysis | `pic10f320-analyze` | cppcheck + MISRA over the shell, **swept across all three variants** — each compiles a different `#if defined(OUTPUT_*)` branch, so one run would leave two thirds unanalyzed. | host tools |
 | Register-level functional | `pic10f320-test-gpsim` | Real HEX toggles on press and handles a power-on-held switch via the shared wrappers, with the processor and chip-specific toggle-cadence stimulus overridden. | gpsim CLI |
-| Fault recovery | `pic10f320-test-fault-target` | The host fault argument re-made on the real emitted image: every guarded SFR/SRAM location and the required `TRISA` directions, 22 checks per variant. | libgpsim |
+| Fault recovery | `pic10f320-test-fault-target` | The host fault argument re-made on the real emitted image: every guarded SFR/SRAM location and required `TRISA` direction, plus relay-only RESET, SET, and both-coil physical `PORTA` correction within one serviced iteration and without reset: 22 / 22 / 25 checks. | libgpsim |
 | HEX/model lock-step | `pic10f320-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches `src/bypass_pure.c` after every completed main-loop iteration — 3,005 checks per variant, 66/66 states. | libgpsim |
 | Target I/O timing | `pic10f320-test-io` | Exact `TRISA`, physical `PORTA` following every `LATA` transition, each variant's complete transition sequence, and mute/relay pulse widths from simulator cycles. | libgpsim |
 | Fail-closed aggregate | `pic10f320-test-target-variants` | Rejects any matrix other than the complete supported set, then requires fault, lock-step and target-I/O PASS sentinels for every variant. | Makefile wrapper |
@@ -454,7 +456,8 @@ went unexercised rather than reporting one anonymous number.
 The PIC mutation set includes target-level faults for the new coverage: collapsed
 TMR2IF cadence, exact-TRISA predicate removal, output-latch mask narrowing,
 exact WPUA pull-up state, ANSELA mask narrowing, muted-CD4053 startup
-reassertion, mute-window shortening, and relay pulse shortening.
+reassertion, mute-window shortening, relay pulse shortening, and removal or
+one-coil weakening of the PIC10F320 relay idle safe-state rewrite.
 
 **Which lane owns the Classic AVR watchdog matters, and is easy to get wrong.**
 The two long-standing watchdog-handshake mutants both run on `test-sim-cd4053_simple-attiny13a`,
@@ -471,9 +474,9 @@ the reset. The soak's reset witness records it in `watchdog_failures`. This
 gives the Classic AVR the soak-lane mutant the PIC and ATtiny202 families
 already had.
 
-**PIC10F320 mutants are split by what they NEED, not by what they test.** 27 of
+**PIC10F320 mutants are split by what they NEED, not by what they test.** 29 of
 them are killed by the host lanes and require only a C compiler, so they ride
-with the unskippable core batch; 9 need XC8 + gpsim + libgpsim and sit behind
+with the unskippable core batch; 11 need XC8 + gpsim + libgpsim and sit behind
 their own tool probe, which first verifies every distinct kill command against
 the *unmutated* tree. Without that split they would "survive" on any host lacking
 the PIC toolchain; without the per-command baselines, a broken gpsim or soak
@@ -487,9 +490,9 @@ kill, and the sandbox gaps that briefly cut it to 56 — is recorded in
 `docs/pic10f320_validation.md` §5.
 
 The driver independently pins the seven mutation categories at **24 core/AVR +
-19 AVR-XT + 27 PIC10F320 host + 9 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 8
-PIC target = 94**. It rejects category drift before probing, then requires
-dispatched + skipped = 94 and killed + survived + errored = dispatched. Every
+19 AVR-XT + 29 PIC10F320 host + 11 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 8
+PIC target = 98**. It rejects category drift before probing, then requires
+dispatched + skipped = 98 and killed + survived + errored = dispatched. Every
 worker status is checked; result status/output pairs are atomically published
 and accepted only with exact text grammar and no missing, hidden, or extra
 artifacts.

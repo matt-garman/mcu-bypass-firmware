@@ -909,11 +909,12 @@ for img in "${PIC10F320_IMAGES[@]}"; do
 done
 ok "all ${#PIC10F320_IMAGES[@]} PIC10F320 images are structurally valid Intel HEX."
 
-# Byte identity against the previous release, for a release whose claim is that
-# only the filenames moved. Run HERE so a changed byte costs seconds instead of
-# a 24-hour soak, then run the same check again over the final validated images
-# immediately before staging. Validation rebuilds these paths, so only the
-# second report is retained as evidence about what is actually released.
+# Exact rename/change evidence against the previous release: 17 images must be
+# byte-identical and the one documented PIC10F320 relay correction must differ.
+# Run HERE so an unexpected byte costs seconds instead of a 24-hour soak, then
+# run the same check again over the final validated images immediately before
+# staging. Validation rebuilds these paths, so only the second report is retained
+# as evidence about what is actually released.
 #
 # No version appears in this call and none is needed: the script reads which two
 # releases the published rename table in release/README.md is about, and says so
@@ -927,14 +928,14 @@ verify_rename_identity() {
 			>"$WORK/RENAME_IDENTITY.md" 2>"$WORK/rename-identity.err"; then
 		cat "$WORK/RENAME_IDENTITY.md" >&2
 		cat "$WORK/rename-identity.err" >&2
-		die "$phase images are not byte-identical to the release the rename table maps from."
+		die "$phase images violate the published rename/change contract."
 	fi
 	if head -1 "$WORK/RENAME_IDENTITY.md" | grep -q '^rename identity: not applicable'; then
 		RENAME_IDENTITY_DOC=""
 		log "$(cat "$WORK/RENAME_IDENTITY.md")"
 	else
 		RENAME_IDENTITY_DOC="$WORK/RENAME_IDENTITY.md"
-		ok "$phase: $(grep -E '^identical=' "$RENAME_IDENTITY_DOC") -- byte identity against the previous release."
+		ok "$phase: $(grep -E '^identical=' "$RENAME_IDENTITY_DOC") -- rename/change evidence against the previous release."
 	fi
 }
 verify_rename_identity "initial build"
@@ -1517,7 +1518,7 @@ REL_BANNER=""
 	printf -- '- **Validation:** `make test-long` + `make attiny202-test` + `make attiny202-test-target` + `make pic10f322-test` + `make pic10f322-test-target-variants` + `make pic10f320-test` + `make pic10f320-test-target-variants` (real-image fault handling, firmware/model ctx_ lock-step, and physical-output checks across AVR-XT and both PIC parts) + %s-h parallel soak of every release soak combination (see evidence/).\n' "$hours"
 	printf -- '- **Release set:** %d images, checked against the canonical `RELEASE_IMAGES` set declared in the Makefile -- not against whatever the build happened to produce.\n' "${#IMAGES[@]}"
 	if [ -n "$RENAME_IDENTITY_DOC" ]; then
-		printf -- '- **Byte identity:** every renamed image was hashed against its counterpart in the previous release, through the old-to-new table in `release/README.md`. Table and verdict: `RENAME_IDENTITY.md`.\n'
+		printf -- '- **Rename/change evidence:** every renamed image was hashed against its counterpart in the previous release, through the old-to-new table and exact intentional-change declaration in `release/README.md`. The report requires 17 identities and the one documented PIC10F320 relay change: `RENAME_IDENTITY.md`.\n'
 	fi
 	printf '\n'
 
@@ -1591,9 +1592,9 @@ ok "wrote MANIFEST.md"
 	printf 'release gate, and evidence/ for the retained logs. See the top-level\n'
 	printf '[release/README.md](../README.md) for the trust model and verification steps.\n\n'
 	if [ -n "$RENAME_IDENTITY_DOC" ]; then
-		printf 'This release renamed its images. **RENAME_IDENTITY.md** is the check of the\n'
-		printf 'claim that only the names moved: every image hashed against its counterpart\n'
-		printf 'in the previous release.\n\n'
+		printf 'This release renamed its images and changed the PIC10F320 relay image for\n'
+		printf 'idle coil-latch safety. **RENAME_IDENTITY.md** requires the other 17 images\n'
+		printf 'to match their previous-release counterparts byte for byte.\n\n'
 	fi
 	printf 'Quick verify:\n```\ncd release/%s && sha256sum -c SHA256SUMS\n```\n' "$VERSION"
 	printf '\nVerify the required checksum signature first:\n'

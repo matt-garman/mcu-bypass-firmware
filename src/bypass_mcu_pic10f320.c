@@ -610,6 +610,9 @@ void main(void) {
         // TMR2IF (no sleep)
         while (0U == PIR1bits.TMR2IF) { }
         PIR1bits.TMR2IF = 0;
+#if defined(OUTPUT_TQ2_RELAY)
+        set_relay_coils_low(); // reassert the safe idle state every serviced iteration
+#endif
 
 
 

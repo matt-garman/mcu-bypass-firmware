@@ -1,13 +1,13 @@
 # Remaining work toward textbook reference quality
 
 **Status (2026-08-06):** No nominal-path firmware correctness defect is
-currently known, but the high-priority PIC10F320 relay fault-containment gap
-and bounded relay fault-abort hardening below remain open. Changes under `src/`
-since `v0.9.7` are comments only;
-however, the current `v0.9.8` candidate does not yet have authoritative
+currently known. The PIC10F320 relay idle-latch gap is closed in the current
+candidate; bounded relay fault-abort hardening below remains open. The
+PIC10F320 relay image now carries that intentional firmware change from
+`v0.9.7`; however, the current `v0.9.8` candidate does not yet have authoritative
 full-toolchain `make test`, `make test-long`, real-XC8 stack, static-assert, or
-final 18-image identity results. Narrow results and pending release validation
-are tracked in `v0.9.8-TODO.md`.
+final 17-identical + 1-intentional-change release results. Narrow results and
+pending release validation are tracked in `v0.9.8-TODO.md`.
 
 This file contains open actions only. Completed work is removed rather than
 kept as implementation journals; Git history and `CHANGELOG.md` are the record.
@@ -79,36 +79,6 @@ cross-check.
 Dependencies: PIC baseline instruction semantics and XC8 startup behavior.
 Effort: High. Risk if deferred: Low-Medium because the existing assembly gate
 already bounds PIC10F322 stack use; this would add a second independent witness.
-
-### T25-pic320-relay-idle - Bound PIC10F320 idle relay-coil latch upsets
-
-PIC10F320 checks `TRISA` but, due to its flash limit, does not validate stable
-relay-output `LATA`. An SEU or extreme-EMI upset that sets RA1 or RA2 after an
-actuation can therefore energize a coil indefinitely while the otherwise
-healthy main loop continues to pet the watchdog. Normal control flow always
-parks both coils low; this is a fault-containment gap, not a nominal-path defect.
-
-The candidate minimal firmware fix is relay-only: reassert
-`set_relay_coils_low()` at the beginning of every serviced loop iteration,
-before the sanity decision and watchdog pet. Price it on the current blocking
-image rather than assuming the earlier spike's +2-word result. The firmware edit
-must be made by the owner.
-
-Required evidence includes all three PIC10F320 builds, an intentional relay
-expected-image update, and byte-identical analog-switch images. Re-run both
-stack witnesses, static analysis, host coverage, equivalence, target I/O,
-lock-step, and soak; the normal relay trace must gain no edge. Host and real-HEX
-fault cases must inject each coil bit and both together, then prove physical
-`PORTA` returns low within one completed iteration, one injected bit never
-raises the other coil, and correction needs neither a footswitch toggle nor a
-watchdog reset. Mutations must remove the re-drive and clear only one coil.
-Confirm the resulting one-iteration bound is electrically safe for the relay
-and driver.
-
-Dependencies: pinned XC8/DFP and relay/driver electrical data. Effort: Medium,
-mostly test and mutation evidence. Risk: High under the project's SEU/extreme-
-EMI threat model because the current energized interval is unbounded and may
-damage hardware.
 
 ### T25-relay-fault-abort - De-energize relay coils on detected faults
 
@@ -522,7 +492,6 @@ The stable ID in each row matches exactly one open section above.
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
 | T25-yasimavr-repin | Re-pin yasimavr after upstream cycle fix | 2.5 | 1 h, +2 h optional | Low |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
-| T25-pic320-relay-idle | Bound PIC10F320 idle relay-coil upsets | 2.5 | Medium | High - fault containment |
 | T25-relay-fault-abort | De-energize relay coils on detected faults | 2.5 | Medium | Medium-High |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |
 | T25-delay-formal | Blocking-delay safety argument | 2.5 | 1-2 h | Medium |

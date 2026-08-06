@@ -167,6 +167,37 @@ static void test_fault_injection(void) {
     expect_reset(FWI_ANSELA_SKEW_RA2,  "ANSELA RA2 (control pin) re-selected analog");
 }
 
+#if defined(OUTPUT_TQ2_RELAY)
+static void expect_relay_coils_corrected(uint8_t mask, const char *what) {
+    fw_relay_fault_result_t result;
+    int const status = fw_relay_fault_run(mask, &result);
+
+    CHECK(status == 0,
+          "relay latch fault [%s] must be corrected without watchdog reset (got r=%d)",
+          what, status);
+    CHECK(result.injected_coils == mask,
+          "relay latch fault [%s] did not inject exactly 0x%02X (got 0x%02X)",
+          what, (unsigned)mask, (unsigned)result.injected_coils);
+    CHECK(result.observed_coils == mask,
+          "relay latch fault [%s] observed coil mask 0x%02X, expected exactly 0x%02X",
+          what, (unsigned)result.observed_coils, (unsigned)mask);
+    CHECK(result.final_coils == 0u,
+          "relay latch fault [%s] left coil mask 0x%02X after one iteration",
+          what, (unsigned)result.final_coils);
+    CHECK(result.completed_iterations == 1u,
+          "relay latch fault [%s] completed %u post-injection iterations, expected one",
+          what, (unsigned)result.completed_iterations);
+    CHECK(result.footswitch_stayed_released != 0u,
+          "relay latch fault [%s] correction depended on a footswitch press", what);
+}
+
+static void test_relay_idle_fault_correction(void) {
+    expect_relay_coils_corrected(0x02u, "RESET/RA1 high");
+    expect_relay_coils_corrected(0x04u, "SET/RA2 high");
+    expect_relay_coils_corrected(0x06u, "RESET+SET/RA1+RA2 high");
+}
+#endif
+
 //////////////////////////////////////////////////////////////////////////////
 // C. Happy path (covers the firmware's normal toggle lines)
 //////////////////////////////////////////////////////////////////////////////
@@ -207,7 +238,22 @@ int main(void) {
     printf("firmware fault-injection + defensive-path tests:\n");
     test_predicates();
     test_fault_injection();
+#if defined(OUTPUT_TQ2_RELAY)
+    test_relay_idle_fault_correction();
+#endif
     test_happy_path();
+    {
+#if defined(OUTPUT_TQ2_RELAY)
+        int const expected_checks = 59;
+#else
+        int const expected_checks = 41;
+#endif
+        if (g_checks != expected_checks) {
+            g_failures++;
+            fprintf(stderr, "FAIL: executed %d checks, expected %d for this variant\n",
+                    g_checks, expected_checks);
+        }
+    }
     printf("firmware fault harness: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

@@ -803,9 +803,9 @@ Specific tests verify specific requirements, as shown in the following table:
 == Resource Utilization
 
 Resource use spans a wide range across the supported parts: the same behaviour
-occupies 9.1% of an ATtiny85's flash and 95.3% of a PIC10F320's. Headroom is
+occupies 9.1% of an ATtiny85's flash and 95.7% of a PIC10F320's. Headroom is
 generous on the roomier parts and deliberately tight at the bottom of that
-range -- the 256-word PIC10F320 leaves 12 words free on its largest variant,
+range -- the 256-word PIC10F320 leaves 11 words free on its largest variant,
 which is why that target is built differently from every other one and is
 documented as a special case (see `docs/pic10f320_special_case.md`). Every
 family carries a build-time flash-budget gate, so an overshoot fails the build
@@ -928,17 +928,18 @@ variant and fails the build on any overshoot.
 
 | cd4053_simple    | 220 words | 85.9% | 36 words
 | cd4053_with_mute | 241 words | 94.1% | 15 words
-| tq2_l2_5v_relay  | 244 words | 95.3% | 12 words
+| tq2_l2_5v_relay  | 245 words | 95.7% | 11 words
 |===
 
 Data (RAM) use is 10 bytes of 64 (15.6%); the single live global is the same
 3-byte `ctx_`, with the remainder XC8 runtime scratch.
 
-Those margins are the whole story of this target. **12 free words** on tq2_l2_5v_relay
-is why the output-latch integrity check the PIC10F322 shell carries could not be
-ported — it overshoots by 3 words on that variant and 5 on cd4053_with_mute — and why
-the exact-`TRISA` check, which costs exactly 1 word, was worth porting. Both
-decisions are recorded in `docs/pic10f320_special_case.md`.
+Those margins are the whole story of this target. The general output-latch
+integrity check was measured before the relay rewrite and already exceeded the
+256-word budget on the mute and relay variants; the combined current form has
+not been re-priced because there is less headroom, not more. The exact-`TRISA`
+check and relay-only idle coil-low rewrite, each costing one word, were worth
+porting. Those decisions are recorded in `docs/pic10f320_special_case.md`.
 
 
 == PIC Power / Current Draw

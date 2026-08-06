@@ -27,7 +27,11 @@ release gates including the corrected 74/74 mutation run, and ran all 12
 then-canonical soak combinations for 60 seconds. It was explicitly
 non-publishable and predates the final production contract. Numeric results below
 remain historical evidence at their recorded tips unless they explicitly cite
-the retained `v0.9.6` production record.
+the retained `v0.9.6` production record or identify current candidate evidence.
+The `v0.9.8` Run 4 results below were produced on 2026-08-06 from the exact
+firmware and tests committed with this document. They are narrow change evidence,
+not retained production qualification; R10 records the later clean-server and
+full-duration release evidence.
 
 ---
 
@@ -116,19 +120,47 @@ b30783d20e1ef088b3fa612cb7c41755b48ba1060395e01cf7360ea664d1e50f  bypass_mcu_tq2
 re-checked against the run-2 hashes: **MATCH on all three**. Comments cannot
 change codegen, but "cannot" and "did not" are different claims.
 
+**Run 4 — the `v0.9.8` relay idle-latch safety correction.** The relay-only
+`set_relay_coils_low()` call intentionally changes one image. A pinned XC8 V3.10
+and DFP 1.9.189 build left both analog-switch images byte-identical to run 2/3 and
+changed only the relay image:
+
+```
+e48ed8e50e89a7f2c2e145603d16c25099925269ea0b29b31becc9c02eb2143f  bypass-pic10f320-cd4053_simple.hex
+1cc2cbf6572a876b1a0a5d19e2e3179a41c7a46bd1b7419d2b5e72aa2aec27a7  bypass-pic10f320-cd4053_with_mute.hex
+00e1d3ac37ed1857f5e1b3047e921ac22bd9705a728f7c77c9c9daae31d34cd8  bypass-pic10f320-tq2_l2_5v_relay.hex
+```
+
+The relay grew from 244 to 245 words and retained its 4/8 return-stack maximum.
+The exact host actuation trace remained 115 checks and the real-image target-I/O
+trace remained 36 checks, with no added edge. At the deterministic trailing
+`CLRWDT` injection seam, physical-output fault injection measured RESET, SET and
+both-bit correction in 364-366 instruction cycles (0.728-0.732 ms at nominal
+2 MHz), versus the emitted image's 12.024-12.036 ms intentional coil pulses. An
+upset at an arbitrary idle phase has the more general bound of one actual timer
+period plus the short two-pin rewrite, still far less per-channel energy than a
+normal pulse. This does not prove that an accidental short pulse cannot
+mechanically switch the relay, nor characterize the board-specific shared-supply
+transient when both drivers are upset together.
+
+R1 closes at the firmware boundary on that evidence. This project does not
+specify the external coil-driver topology, power supply, flyback network or PCB,
+so adopters must validate relay motion and the simultaneous-driver supply
+transient against their hardware. That responsibility is not evidence for
+leaving the firmware's former unbounded energy path open.
+
 **Standing regression added after the merge audit.** The original gate was
 deliberately retired as a one-shot migration check because its reference images
-lived under the deleted import prefix. The reviewed run-2/run-3 digests above now
-live in `test/pic10f320/expected_images.sha256`. `pic10f320-test-build` rebuilds
+lived under the deleted import prefix. The reviewed run-4 digests above now live
+in `test/pic10f320/expected_images.sha256`. `pic10f320-test-build` rebuilds
 the complete immutable variant matrix and requires all three raw HEX files to
 match; it runs through `pic10f320-test` in CI and release qualification. The
 checker and manifest parser also run without XC8 inside `make test`.
 
-The digests in that file are byte-for-byte the run-2 ones above; the *filenames*
-beside them are not, because `v0.9.8` renamed every released image to
-`bypass-<mcu>-<output stage>.hex` (`release/README.md` carries the old→new
-mapping). The transcripts above keep the names the runs actually emitted, which
-is what makes them evidence rather than a restatement.
+The first two digests remain byte-for-byte the run-2 ones; the relay digest is
+the intentional run-4 rebaseline. The older transcripts keep the names those
+runs actually emitted, which is what makes them evidence rather than a
+restatement.
 
 The hash target intentionally remains separate from the per-variant `pic10f320`
 build used by mutation tests. Otherwise every code-generating mutant would die
@@ -162,6 +194,14 @@ evidence.
 | Soak (libgpsim) | PASS on all three |
 | Hardware return-stack depth | **3 / 3 / 4 levels of 8** (cd4053-simple / cd4053-mute / tq2-relay), 2 held in reserve |
 | Mutation | see §5 |
+
+The narrow `v0.9.8` relay-correction rerun updated only the affected current
+measurements: build use is 220 / 241 / **245** words; host fault injection is
+41 / 41 / **59** checks; firmware coverage is 80/84, 91/95, **96/100**; and
+target fault injection is 22 / 22 / **25** checks. The all-variant target
+aggregate retained 3,005 lock-step checks per variant and target-I/O counts
+25 / 26 / 36, all passing. Full release qualification remains separate from
+this narrow change evidence.
 
 The equivalence and lock-step rows carry the weight here, because both run
 against `src/bypass_pure.c` itself rather than a vendored copy;
@@ -312,6 +352,13 @@ considered and rejected: a defensive layer that differs between variants of one
 firmware is worse than a uniform documented omission. See
 `docs/pic10f320_special_case.md` §4 for what the omission means in practice.
 
+`v0.9.8` adds a narrower relay-only safe-state rewrite rather than a partial
+latch-match guard. Once per serviced iteration, before the sanity decision and
+watchdog pet, both coil bits are forced low. RESET, SET and both-bit injections
+must therefore clear in one iteration without a footswitch event or reset. This
+does not detect or repair LED/analog-control latch mismatches and does not change
+the general omission above. It costs one relay word: 245/256, with 11 free.
+
 ## 5. Mutation topology
 
 The suite is only as good as its ability to *fail*. The first merge-time run
@@ -369,7 +416,9 @@ Stated so nobody has to infer it:
   host fake-tool regression separately proves current commands run with current
   flags. Neither establishes that arbitrary XC8 versions or environments emit
   identical bytes.
-- **The output-latch integrity check is absent** (§4).
+- **The general output-latch integrity check is absent** (§4). The relay-only
+  idle safe-state rewrite bounds coil-bit upsets; LED and analog-control latch
+  upsets remain outside that mitigation.
 - **Hardware-bench properties are simulated, not proven**: WDT timing and
   brown-out behaviour, absolute tick period, and real-silicon pulse timing. These
   are shared with the PIC10F322 build, since both are validated in the same gpsim

@@ -184,15 +184,24 @@ the published signatures. Use this table to map an old name to its replacement.
 | `bypass_mcu_tq2-relay_pic10f320.hex` | `bypass-pic10f320-tq2_l2_5v_relay.hex` |
 
 where old `<v>` `cd4053`/`mute`/`relay` maps to `<stage>`
-`cd4053_simple`/`cd4053_with_mute`/`tq2_l2_5v_relay`. The image CONTENTS are
-unchanged by the rename — each `v0.9.8` image is bit-identical to its `v0.9.7`
-counterpart unless the changelog says the firmware itself changed.
+`cd4053_simple`/`cd4053_with_mute`/`tq2_l2_5v_relay`. The rename itself does not
+change image contents. Seventeen `v0.9.8` images are therefore required to be
+bit-identical to their `v0.9.7` counterparts. The one exception is the
+PIC10F320 relay image, which also adds the `v0.9.8` idle coil-latch safety
+correction and is required to differ:
 
-That is a checked claim, not an assurance: `release/v0.9.8/RENAME_IDENTITY.md`
-lists every image with the digest it shares with its `v0.9.7` counterpart, and
-the release fails before its soak if any of them disagree. The comparison reads
-the table above, so a row that is wrong here is wrong there too — the two cannot
-drift apart into a mapping that verifies something other than what you follow.
+<!-- rename-identity: intentional-change=bypass-pic10f320-tq2_l2_5v_relay.hex -->
+
+`bypass-pic10f320-tq2_l2_5v_relay.hex` reasserts both relay-coil outputs low on
+every serviced iteration. The exact new bytes remain pinned by the PIC10F320
+expected-image manifest and the release checksum manifest.
+
+The final release will retain the checked result in
+`release/v0.9.8/RENAME_IDENTITY.md`, listing both digests and the verdict for
+every image. Release creation fails before its soak unless exactly 17 images are
+identical and exactly the named relay image differs, with no missing, added, or
+other changed image. The comparison reads the table and intentional-change
+declaration above, so the published contract and verified contract cannot drift.
 
 **The build commands moved too.** Every make goal that acts on one part now
 carries that part's name, in the same vocabulary as the image field, so an

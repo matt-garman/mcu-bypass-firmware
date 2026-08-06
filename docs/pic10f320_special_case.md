@@ -122,11 +122,12 @@ two of the three variants; only `cd4053_simple` would fit. Both options were pri
 on the real toolchain before the decision was taken, and the per-variant word
 counts are tabulated in `docs/pic10f320_validation.md` §4.
 
-Taking it on `cd4053_simple` alone was considered and rejected. A defensive layer
-that differs *between variants of the same firmware* is worse than a uniform,
-documented omission: the fault harness and the mutation topology would both need
-per-variant expected counts, and this document would have to explain a three-way
-split instead of one clean statement.
+Taking the general latch-match guard on `cd4053_simple` alone was considered and
+rejected. A partial version of that general defense would make the same class of
+fault depend on the selected output stage. The relay-only safe-state rewrite
+described below is different: it does not claim general latch integrity, and it
+exists because a high relay-coil bit has a hardware-energy consequence that an
+LED or analog-control mismatch does not.
 
 **What the omission means in practice.** The firmware still range-checks
 `ctx_.effect_state` in the main-loop sanity gate before acting on it, and the
@@ -137,23 +138,36 @@ follow it, and the pulse widths between edges on the emitted image.
 (`pic10f320-test-lockstep` compares `ctx_`, not the output latch.) Every one of
 those catches firmware that *writes* the wrong latch.
 
-What is missing is a different thing: the firmware's own in-line self-check that
+What is still missing is a different thing: the firmware's own in-line self-check that
 its output latch still matches what its state says it should be — a defence
 against a single-event upset in `LATA` *after* the firmware wrote it. On the
 PIC10F322 that window is closed in firmware. `hw_output_state_intact()`
 in `src/bypass_mcu_pic10f322.c` compares the exact latch against the expected mask
 inside the per-tick sanity gate, so an upset forces a watchdog reset.
 
-On the PIC10F320 **nothing closes it**, and the two mitigations a reader might
-reasonably assume are both absent. The watchdog does not help: `CLRWDT()` runs
-unconditionally at the end of every `main()` loop iteration in
-`src/bypass_mcu_pic10f320.c`, so a corrupt `LATA` never delays a pet. Nor
-is there a per-tick rewrite to correct it: `LATA` is written only by
-`hw_set_bypass_state()` / `hw_set_engaged_state()`, and those run on a *debounced
-press* in `main()`, not every tick. An upset therefore persists — wrong LED,
-wrong signal path, or both — until the next footswitch press re-drives the outputs.
-That is the actual size of this omission, and it is why §6 says to prefer another
-part when the choice is yours.
+On the PIC10F320, the general gap remains for the LED and analog-switch control
+bits: the trailing `CLRWDT()` does not turn their mismatch into a reset, and
+their stable state is rewritten only by a debounced actuation. A wrong LED or
+analog signal path can therefore persist until the next accepted press.
+
+The relay variant has a narrower safety rule as of `v0.9.8`. Immediately after
+accepting and clearing each timer event, before the sanity decision and watchdog
+pet, it reasserts `set_relay_coils_low()`. A post-actuation RA1 or RA2 latch upset
+is therefore corrected by the next serviced iteration without requiring a
+footswitch event or watchdog reset. Host fault injection covers RESET, SET and
+both bits; the real-image fault lane additionally observes physical `PORTA` and
+requires that a one-bit injection never raises the other coil. Existing exact
+host and target-I/O traces require the defensive low-to-low writes to add no
+normal-path edge.
+
+This is correction, not detection: it does not restore a relay that an accidental
+pulse mechanically switched, and it does not make the PIC10F320 equivalent to the
+PIC10F322's full expected-mask check. It closes the unbounded coil-energy path
+while leaving the broader documented latch-integrity limitation intact. That
+remaining distinction is why §6 still says to prefer another part when the
+choice is yours. The external driver, flyback network, supply and PCB are outside
+this generic firmware's definition; each adopter must validate the bounded pulse
+and simultaneous-driver transient on the actual circuit.
 
 ## 5. Keeping it in step: the shared surface
 

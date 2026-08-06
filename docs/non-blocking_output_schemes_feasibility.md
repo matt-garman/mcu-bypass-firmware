@@ -909,22 +909,22 @@ to bounded hardware energy.
 
 The intuition holds for the *pulse* and fails for the *steady state*.
 
-If an SEU sets a coil bit in `LATA` after the pulse has completed, the PIC10F320
-re-drives `LATA` only on a debounced press. `docs/pic10f320_special_case.md` §4
-states the consequence directly: the upset "persists — wrong LED, wrong signal
-path, or both — until the next footswitch press re-drives the outputs." For the
-relay that is an unbounded energized coil, in shipping firmware, today.
+Through `v0.9.7`, if an SEU set a coil bit in `LATA` after the pulse completed,
+the PIC10F320 re-drove `LATA` only on a debounced press. For the relay that was an
+unbounded energized coil in released firmware. This analysis found that existing
+gap; `v0.9.8` closes it with the independent relay-only idle rewrite proposed
+below, without adopting the non-blocking architecture studied by this document.
 
 Spelled out electrically, the relay's stable firmware state has both RA1/RA2 coil
 driver latches low. A post-actuation upset that sets either bit high can turn the
 corresponding external coil driver on even though `ctx_.effect_state`, the
 debounce machine, TMR2 and the watchdog are all healthy. PIC10F320 validates the
 pin directions but deliberately does not compare `LATA` with the expected stable
-mask. Its unconditional trailing `CLRWDT()` therefore continues forever, and no
-software event rewrites the coil bit until the next accepted press. This is not a
-failure of the blocking delay and non-blocking actuation is not required to fix
-it; it is the direct consequence of omitting both stable-latch validation and an
-idle safe-state rewrite.
+mask. Before `v0.9.8`, its unconditional trailing `CLRWDT()` continued forever
+and no software event rewrote the coil bit until the next accepted press. This
+was not a failure of the blocking delay and did not require non-blocking
+actuation to fix; it was the direct consequence of omitting both stable-latch
+validation and an idle safe-state rewrite.
 
 On the PIC10F322 it is caught: `hw_output_state_intact()` compares the exact latch
 against the expected mask every tick and forces a watchdog reset. That is the one
@@ -939,16 +939,15 @@ Whether that interval is thermally safe is the same unanswered hardware question
 as §7.8. An explicit fault-abort operation would improve the blocking firmware
 too.
 
-So the idle re-drive from §7.3 would **close an existing hole**, not merely
-contain a new one. On this specific axis, non-blocking actuation plus a 2-word
-mitigation is safer than what ships now.
+So the idle re-drive from §7.3 **closed an existing hole**, not merely a risk in
+the proposed redesign. On this specific axis, `v0.9.8` is safer than the prior
+blocking firmware and than a non-blocking implementation without both required
+mitigations.
 
-The improvement should not be held hostage to the architectural decision. The
-same relay-only idle coil-low re-drive can be evaluated as an independent change
-to the current blocking PIC10F320 firmware, where the relay image has 12 spare
-words rather than the non-blocking spike's four. Rejecting or deferring the
-non-blocking redesign is not a reason to leave this existing unbounded path in
-place.
+The improvement was not held hostage to the architectural decision. `v0.9.8`
+applies the same relay-only idle coil-low re-drive independently to the blocking
+PIC10F320 firmware. Rejecting or deferring the non-blocking redesign was not a
+reason to leave the existing unbounded path in place.
 
 The reset path itself is sound under either scheme, and is worth stating because
 the rest of the argument leans on it: `TRISA` returns to inputs on reset, removing
@@ -1358,10 +1357,12 @@ equivalent formulation, free enough words without weakening another defensive
 layer, retain blocking relay actuation on this target, or do not support that
 target/variant combination under the new architecture.
 
-**Address the existing PIC10F320 relay latch-upset hole independently.** A
-relay-only idle coil-low re-drive closes a current unbounded failure and was
-measured at 2 words in the non-blocking spike; the current blocking image has more
-headroom. It does not require adopting the wider redesign (§7.4).
+**The existing PIC10F320 relay latch-upset hole was addressed independently.**
+`v0.9.8` adds the relay-only idle coil-low re-drive to the blocking firmware; it
+does not require adopting the wider redesign (§7.4). Host and real-image fault
+cases pin the one-serviced-iteration bound and mutations remove or weaken the
+rewrite. On the pinned build it costs one word, moving the relay from 244 to 245
+of 256 words while retaining the 4/8 return-stack maximum.
 
 **Do not treat this proposal as timing-only work.** §1 framed it as a uniformity
 question and §4 as a simplification; §7 shows it also moves a hardware-safety
@@ -1456,9 +1457,10 @@ xc8-cc -mcpu=10F320 -mdfp=<DFP> -std=c99 -O2 \
 The two PIC12F675 corrections identified by the original review have now been
 applied in the owning document: ISR flash fit is no longer presented as
 return-stack affordability, and the PIC10F322 linker failure is described as
-fragmentation at 511/512 rather than simply "two words" oversized. The remaining
-follow-ups below are recorded, **not applied**, because each belongs to its owning
-document.
+fragmentation at 511/512 rather than simply "two words" oversized. The
+PIC10F320 relay-specific consequence and mitigation have likewise been applied
+to `pic10f320_special_case.md`. The remaining follow-ups below are recorded,
+**not applied**, because each belongs to its owning document.
 
 | Document | Claim | Correction |
 |---|---|---|
@@ -1467,7 +1469,6 @@ document.
 | `phase2_pic_shell.md` §4/§5 | Startup actuation completes before the tick starts; a blocking pulse cannot depend on tick progress. | If non-blocking actuation is adopted, document the new serialized boot phase and the fact that timer progress becomes part of relay completion (§5.3, §7.10). |
 | `pic10f320_special_case.md` §4 | The output-latch match does not fit and is deliberately omitted. | Still accurate, and this document depends on it (§6.3). Non-blocking actuation would require direction-specific transient semantics in addition to the stable-state check; that formulation is unpriced and cannot fit within the measured current headroom unless space is recovered. |
 | `pic10f320_special_case.md` §5 | The shared surface is "small, finite and auditable", and the table is all of it. | Accurate today. If this proposal is adopted the table gains an actuation-timing row, and §6.7 records that `pic10f320-test-equiv` would not cover the new state — so the row would be genuinely manual, not merely documented. |
-| `pic10f320_special_case.md` §4 | An `LATA` upset "persists ... until the next footswitch press re-drives the outputs". | Accurate, and §7.4 draws out what it means on the relay variant specifically: an upset that sets a coil bit strands that coil energized with no bound at all. That is a potential hardware-damage path rather than only a wrong-output path, and it exists in shipping firmware today. The idle re-drive cost +2 words atop the non-blocking spike; the same fix can be evaluated independently on the roomier current blocking image. |
 | `test/README.md` PIC lock-step/fault layers | Loop `CLRWDT` is the once-per-iteration boundary and deterministic injection seam. | Withholding the pet intentionally removes that instruction during active ticks. Both PIC layers need a watchdog-independent serviced-tick boundary and phase-aware output comparison/injection (§6.7, §7.13). |
 | `DESIGN_DOCUMENTATION.adoc` output timing | A 5/12 ms blocking delay defines the mute/relay interval. | Tick-counted output timing needs accepted-tick semantics, loop-position/WCET bounds, oscillator tolerance and explicit minimum/maximum physical widths (§5.5). |
 

@@ -18,9 +18,11 @@
 //                    OPTION_REG.nWPUEN
 //   * ctx_ SRAM      program_state / effect_state / debounce_counter (range checks)
 // PIC10F322 additionally injects LATA.RA0..RA2 because that firmware guards its
-// settled output latch. PIC10F320 deliberately omits that guard for flash budget,
-// so its adapter supplies no LATA cases. The literal per-part expected counts
-// ensure a missing case cannot silently reduce either lane.
+// settled output latch. PIC10F320 deliberately omits that general guard for flash
+// budget; its relay adapter instead injects coil bits and requires their idle
+// safe-state rewrite to correct both LATA and physical PORTA within one serviced
+// iteration, without a reset. The literal per-part expected counts ensure a
+// missing case cannot silently reduce either lane.
 //
 // CTX_ADDR is required. The Makefile extracts _ctx_'s data address from the XC8
 // .sym so the test self-adjusts per variant and cannot pass with SRAM cases
@@ -150,6 +152,7 @@
 // Each is cross-checked against the register's gpsim name at runtime so an
 // address drift is surfaced rather than silently corrupting the wrong register.
 #define WPUA_ADDR    0x009u  // RA3 weak-pull-up latch = bit 3 (mask 0x08)
+#define PORTA_ADDR   0x005u  // physical pin levels; RA3 input, RA0..RA2 outputs
 #define TRISA_ADDR   0x006u  // RA3 input; RA0..RA2 outputs after init (0x08)
 #define LATA_ADDR    0x007u  // LED/control output latch (mask 0x07)
 #define OPTION_ADDR  0x00Eu  // OPTION_REG; nWPUEN (global pull-up enable) = bit 7
@@ -313,6 +316,108 @@ static bool advance_to_loop_clrwdt(void) {
     }
     fprintf(stderr, "FAIL: never reached loop CLRWDT 0x%03x\n", g_loop_clrwdt_addr);
     return false;
+}
+
+// PIC10F320 relay-only policy: a stable-state coil latch upset is corrected, not
+// reset. Inject at the trailing loop CLRWDT, then stop at its next occurrence.
+// That is exactly one serviced iteration and places the verdict before its pet.
+static void inject_relay_correction_case(unsigned mask, const char *note) {
+    static unsigned const coil_mask = 0x06u;
+    footsw_set(0);
+    if (!run_ms(SETTLE_MS) || !advance_to_loop_clrwdt()) {
+        g_checks++;
+        g_fails++;
+        return;
+    }
+
+    Register *lata = fetch_sfr(LATA_ADDR, "lata");
+    Register *porta = fetch_sfr(PORTA_ADDR, "porta");
+    if (lata == nullptr || porta == nullptr) {
+        g_checks++;
+        g_fails++;
+        return;
+    }
+
+    unsigned const initial_lata = lata->get_value() & 0xFFu;
+    unsigned const injected = initial_lata | mask;
+    guint64 const resets_before = g_resets;
+    guint64 const injection_cycle = get_cycles().get();
+    guint64 correction_cycle = 0u;
+    lata->put_value(injected);
+    unsigned const written = lata->get_value() & 0xFFu;
+    unsigned observed_lata = written & coil_mask;
+    unsigned observed_porta = porta->get_value() & coil_mask;
+    bool footswitch_released = (porta->get_value() & 0x08u) != 0u;
+    bool left_clrwdt = false;
+    bool completed_iteration = false;
+
+    printf("  inject relay coils    @0x%03x: 0x%02x -> 0x%02x  (%s)\n",
+           LATA_ADDR, initial_lata, injected, note);
+    fflush(stdout);
+
+    for (int i = 0; i < 8000; ++i) {
+        unsigned const pc = g_cpu->pc->get_value();
+        if (left_clrwdt && pc == g_loop_clrwdt_addr) {
+            completed_iteration = true;
+            break;
+        }
+
+        guint64 const cycle = get_cycles().get() + 1;
+        get_cycles().set_break(cycle);
+        g_cpu->run(false);
+        get_cycles().clear_break(cycle);
+
+        if (g_cpu->pc->get_value() != g_loop_clrwdt_addr) {
+            left_clrwdt = true;
+        }
+        observed_lata |= lata->get_value() & coil_mask;
+        observed_porta |= porta->get_value() & coil_mask;
+        if (correction_cycle == 0u &&
+                (lata->get_value() & coil_mask) == 0u &&
+                (porta->get_value() & coil_mask) == 0u) {
+            correction_cycle = get_cycles().get();
+        }
+        footswitch_released = footswitch_released &&
+                              ((porta->get_value() & 0x08u) != 0u);
+    }
+
+    unsigned const final_lata = lata->get_value() & coil_mask;
+    unsigned const final_porta = porta->get_value() & coil_mask;
+    guint64 const reset_delta = g_resets - resets_before;
+    guint64 const correction_cycles = correction_cycle > injection_cycle
+        ? correction_cycle - injection_cycle : 0u;
+    bool const pass = (initial_lata & coil_mask) == 0u &&
+                      written == injected &&
+                      observed_lata == mask && observed_porta == mask &&
+                      correction_cycles > 0u && completed_iteration &&
+                      final_lata == 0u &&
+                      final_porta == 0u && reset_delta == 0u &&
+                      footswitch_released;
+
+    // Keep cases independent even when exercising a mutant that fails to clear
+    // the injected state. The verdict above already captured the physical and
+    // latch failure; the next case must still begin from the quiescent contract.
+    lata->put_value((lata->get_value() & 0xFFu) & ~coil_mask);
+
+    g_checks++;
+    if (pass) {
+        printf("    PASS: physical/latch coil mask 0x%02x cleared in %" G_GUINT64_FORMAT
+               " cycles (%.3f ms), within one iteration and without reset\n",
+               mask, correction_cycles,
+               (double)correction_cycles / (double)CYCLES_PER_MS);
+    } else {
+        g_fails++;
+        fprintf(stderr,
+                "    FAIL: init=0x%02x write=0x%02x seen-lata=0x%02x "
+                "seen-porta=0x%02x final-lata=0x%02x final-porta=0x%02x "
+                "completed=%u correction-cycles=%" G_GUINT64_FORMAT
+                " resets=%" G_GUINT64_FORMAT " released=%u\n",
+                initial_lata & coil_mask, written & coil_mask, observed_lata,
+                observed_porta, final_lata, final_porta,
+                completed_iteration ? 1u : 0u, correction_cycles, reset_delta,
+                footswitch_released ? 1u : 0u);
+    }
+    fflush(stdout);
 }
 
 // ---- One injection case -----------------------------------------------------
@@ -486,7 +591,8 @@ int main() {
     inject_case("TRISA.RA2", TRISA_ADDR, "tris", false, 0x04, 1,
                 "RA2 changed from output to input");
 
-    // PIC10F322 guards its settled output latch; PIC10F320 deliberately does not.
+    // PIC10F322 guards its settled output latch. PIC10F320 has no general latch
+    // guard, but its relay adapter requires idle correction of both coil bits.
     PIC_FAULT_EXTRA_OUTPUT_INJECTIONS();
 
     // config SFRs (hw_critical_sfrs_intact)

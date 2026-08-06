@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Prove that a rename-only release changed no image byte, and emit the proof.
+# Prove the exact image-byte contract for the one release that renamed images.
 #
 # WHY THIS EXISTS
-#   v0.9.8 renamed every firmware image and CHANGELOG.md states three times that
-#   the contents did not change -- "only the filenames moved" is the entire
-#   premise of the release. Every other claim under release/ is backed by a
-#   retained artifact; that one was backed by nobody having checked. This script
-#   checks it and prints the evidence, so `release/<version>/RENAME_IDENTITY.md`
-#   records the comparison the same way evidence/ records the soak.
+#   v0.9.8 renamed every firmware image. Seventeen image contents must not change;
+#   one published exception carries the PIC10F320 relay idle-latch correction.
+#   This script checks that exact 17+1 contract and prints the evidence, so
+#   `release/<version>/RENAME_IDENTITY.md` records the comparison the same way
+#   evidence/ records the soak.
 #
 #   The precedent is docs/pic10f320_validation.md §2, which exists because a
 #   byte-identity proof from a deliberately one-shot gate still deserved durable
@@ -15,8 +14,8 @@
 #
 # DELIBERATELY NOT A STANDING GATE, and it retires itself.
 #   Pinning current images to a PREVIOUS release's hashes is correct for exactly
-#   one release -- the one claiming nothing changed -- and becomes a false alarm
-#   the first time a release legitimately changes a byte. So this script holds no
+#   one release -- the one carrying this rename/change contract -- and becomes a
+#   false alarm on later releases. So this script holds no
 #   version of its own: it reads the two versions out of the rename table's own
 #   header in release/README.md ("| up to `vA.B.C` | from `vX.Y.Z` |"). Run it
 #   for any other version and it says so and exits 0. When that table stops
@@ -146,6 +145,17 @@ if [ "$VERSION" != "$TARGET" ]; then
 	exit 0
 fi
 
+# The one allowed firmware change is declared beside the published mapping, not
+# restated here. Requiring exactly one declaration makes both accidental removal
+# and an open-ended allowlist fail before any image hash is accepted.
+mapfile -t intentional_change_lines < <(grep -E \
+	'^<!-- rename-identity: intentional-change=[A-Za-z0-9][A-Za-z0-9._-]*\.hex -->$' \
+	"$RENAME_DOC" || true)
+[ "${#intentional_change_lines[@]}" -eq 1 ] \
+	|| die "release/README.md must declare exactly one rename-identity intentional change"
+INTENTIONAL_CHANGE=${intentional_change_lines[0]#*=}
+INTENTIONAL_CHANGE=${INTENTIONAL_CHANGE% -->}
+
 BASELINE_SUMS="$REPO_ROOT/release/$BASELINE/SHA256SUMS"
 [ -f "$BASELINE_SUMS" ] && [ ! -L "$BASELINE_SUMS" ] \
 	|| die "baseline checksum manifest not found: $BASELINE_SUMS"
@@ -210,8 +220,8 @@ while IFS= read -r line; do
 	rows=$((rows + 1))
 done < <(grep -E '^\| *`[A-Za-z0-9_<>-]+\.hex` *\| *`[A-Za-z0-9_<>-]+\.hex` *\|$' "$RENAME_DOC")
 
-[ "$rows" -ge 10 ] \
-	|| die "parsed only $rows image rows out of the rename table; it has changed shape"
+[ "$rows" -eq 18 ] \
+	|| die "parsed $rows image mappings; the published rename contract requires exactly 18"
 
 # --- index the images this release built ------------------------------------
 declare -A IMAGE_PATH=()
@@ -223,7 +233,8 @@ for img in "${IMAGES[@]}"; do
 done
 
 # --- compare ----------------------------------------------------------------
-identical=0; differ=0; missing=0
+identical=0; intentional_change=0; differ=0; missing=0
+intentional_change_absent=0
 declare -A CLAIMED=()
 rows_md=()
 # Same shape scripts/verify-release-images.sh accepts, including the ` *`
@@ -252,33 +263,41 @@ while IFS= read -r entry; do
 	CLAIMED[$new_name]=1
 	new_hash=$(sha256sum -- "$path" | cut -d' ' -f1)
 	if [ "$new_hash" = "$old_hash" ]; then
-		identical=$((identical + 1))
-		rows_md+=("| \`$old_name\` | \`$new_name\` | \`$new_hash\` | identical |")
+		if [ "$new_name" = "$INTENTIONAL_CHANGE" ]; then
+			intentional_change_absent=1
+			rows_md+=("| \`$old_name\` | \`$new_name\` | \`$new_hash\` | **REQUIRED CHANGE ABSENT** |")
+		else
+			identical=$((identical + 1))
+			rows_md+=("| \`$old_name\` | \`$new_name\` | \`$new_hash\` | identical |")
+		fi
 	else
-		differ=$((differ + 1))
-		rows_md+=("| \`$old_name\` | \`$new_name\` | \`$new_hash\` | **DIFFERS** (was \`$old_hash\`) |")
+		if [ "$new_name" = "$INTENTIONAL_CHANGE" ]; then
+			intentional_change=$((intentional_change + 1))
+			rows_md+=("| \`$old_name\` | \`$new_name\` | \`$new_hash\` | intentional firmware change (was \`$old_hash\`) |")
+		else
+			differ=$((differ + 1))
+			rows_md+=("| \`$old_name\` | \`$new_name\` | \`$new_hash\` | **UNEXPECTED DIFFERENCE** (was \`$old_hash\`) |")
+		fi
 	fi
 done < "$BASELINE_SUMS_SNAPSHOT"
 
-# An image with no baseline counterpart is not a failure by itself -- a release
-# may legitimately add a part -- but it must be visible, or "18 identical" would
-# read as a statement about the whole release when it is a statement about the
-# eighteen that existed before.
+# This one-shot contract is over the exact renamed product set. A later release
+# may legitimately add a part, but v0.9.8 may not silently extend this evidence.
 added=()
 for base in "${!IMAGE_PATH[@]}"; do
 	[ -n "${CLAIMED[$base]+set}" ] || added+=("$base")
 done
 
 # --- the evidence document --------------------------------------------------
-printf '# %s image byte-identity against %s\n\n' "$TARGET" "$BASELINE"
+printf '# %s image rename/change evidence against %s\n\n' "$TARGET" "$BASELINE"
 printf 'Generated by `scripts/verify-rename-identity.sh`.\n\n'
-printf '`%s` renamed every firmware image. `CHANGELOG.md` states that the image\n' "$TARGET"
-printf 'CONTENTS did not change. This is that claim checked rather than asserted:\n'
+printf '`%s` renamed every firmware image and intentionally changed one named image.\n' "$TARGET"
+printf 'This is the exact 17-identical + 1-change claim checked rather than asserted:\n'
 printf 'each image built for `%s` is hashed and compared against the entry for its\n' "$TARGET"
 printf 'old name in the signed `release/%s/SHA256SUMS`, through the published\n' "$BASELINE"
-printf 'old-to-new table in `release/README.md`.\n\n'
+printf 'old-to-new table and intentional-change declaration in `release/README.md`.\n\n'
 printf -- '- **Baseline:** `release/%s/SHA256SUMS` (detached signature verified against the pinned release key)\n' "$BASELINE"
-printf -- '- **Mapping:** `release/README.md`, %d image rows\n' "$rows"
+printf -- '- **Mapping:** `release/README.md`, %d expanded image mappings\n' "$rows"
 printf -- '- **Compared:** %d images\n\n' "${#IMAGES[@]}"
 printf '| up to `%s` | from `%s` | sha256 | verdict |\n' "$BASELINE" "$TARGET"
 printf '|---|---|---|---|\n'
@@ -290,14 +309,16 @@ if [ "${#added[@]}" -gt 0 ]; then
 	printf -- '- `%s`\n' "${added[@]}"
 	printf '\n'
 fi
-printf 'identical=%d differ=%d missing=%d added=%d\n' \
-	"$identical" "$differ" "$missing" "${#added[@]}"
+printf 'identical=%d intentional_change=%d differ=%d missing=%d added=%d\n' \
+	"$identical" "$intentional_change" "$differ" "$missing" "${#added[@]}"
 
-if [ "$differ" -ne 0 ] || [ "$missing" -ne 0 ]; then
-	die "rename identity FAILED: $differ image(s) differ, $missing unmapped or not built"
+if [ "$intentional_change_absent" -ne 0 ] || [ "$intentional_change" -ne 1 ] \
+		|| [ "$differ" -ne 0 ] || [ "$missing" -ne 0 ] || [ "${#added[@]}" -ne 0 ]; then
+	die "rename/change evidence FAILED: intentional_change=$intentional_change, required_change_absent=$intentional_change_absent, unexpected_differences=$differ, missing=$missing, added=${#added[@]}"
 fi
-[ "$identical" -gt 0 ] \
-	|| die "rename identity compared nothing at all"
+[ "$identical" -eq 17 ] \
+	|| die "rename/change evidence expected 17 identical images, observed $identical"
 
-printf '\nAll %d renamed images are byte-identical to their `%s` counterparts.\n' \
-	"$identical" "$BASELINE"
+printf '\nExactly 17 renamed images are byte-identical to their `%s` counterparts;\n' \
+	"$BASELINE"
+printf '`%s` is the one verified intentional firmware change.\n' "$INTENTIONAL_CHANGE"
