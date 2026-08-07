@@ -242,7 +242,15 @@ source "$REPO_ROOT/scripts/release-signing-policy.sh" \
 command -v awk >/dev/null 2>&1 \
 	|| die "awk is required to read release configuration from the Makefile"
 
-mkv() { make -s print-"$1"; }      # echo one Makefile variable
+# Echo one Makefile variable. --no-print-directory is load-bearing and -s does
+# NOT imply it: Make enables -w in a sub-make and propagates a literal w through
+# MAKEFLAGS, where it OVERRIDES -s and wraps every reply in "Entering/Leaving
+# directory" lines. `make release` reaches this script with MAKEFLAGS clear, so
+# today only the flag's absence is theoretical -- but a release invoked one
+# level deeper (`make -C . release`, or from another Make) would feed a banner
+# into every value below, and from there into the staged MANIFEST. Ask silently,
+# always, rather than depend on the caller's nesting depth.
+mkv() { make -s --no-print-directory print-"$1"; }
 path_from_repo() {
 	case "$1" in
 		/*) printf '%s\n' "$1" ;;
@@ -1078,7 +1086,11 @@ for v in $VARIANTS; do for p in $TINYX5_PARTS; do
 	# spelling, and left AVR_SOAK_BIN saying _t<n>. `make` was then asked for a
 	# target that did not exist, which fails the release an hour in, at step 3.
 	name="${p}_${v}"
-	bin=$(make -s print-AVR_SOAK_BIN AVR_SOAK_VARIANT="$v" AVR_SOAK_CHIP="$p") \
+	# --no-print-directory for the same reason mkv carries it: -s alone loses to
+	# an inherited -w, and a banner here would name a soak binary that cannot
+	# exist.
+	bin=$(make -s --no-print-directory print-AVR_SOAK_BIN \
+		AVR_SOAK_VARIANT="$v" AVR_SOAK_CHIP="$p") \
 		|| die "cannot read AVR_SOAK_BIN for $name from the Makefile"
 	[ -n "$bin" ] || die "AVR_SOAK_BIN expands empty for $name"
 	elf="$(fw_image "$AVR_BUILD_DIR" "$p" "$v").elf"

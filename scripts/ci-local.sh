@@ -250,12 +250,18 @@ trap on_exit EXIT
 # §5.6) is that one chip can be re-pinned, and a checker that reads only PIC_*
 # would then assert the wrong installation and pass while the 320 lane skipped.
 assert_pic_toolchain() {
+	# Every print-<VAR> query in this file passes --no-print-directory, and -s
+	# does not imply it: Make enables -w in a sub-make and propagates a literal
+	# w through MAKEFLAGS, where it OVERRIDES -s. Run this script from a Make
+	# recipe and each value below would arrive wrapped in "Entering/Leaving
+	# directory" lines -- reporting an installed toolchain as missing, at a path
+	# nobody configured.
 	local pic_cc pic_dfp pic10f320_cc pic10f320_dfp gpsim_inc
-	pic_cc="${PIC_CC:-$(make -s print-PIC_CC)}"
-	pic_dfp="${PIC_DFP:-$(make -s print-PIC_DFP)}"
-	pic10f320_cc="${PIC10F320_CC:-$(make -s print-PIC10F320_CC)}"
-	pic10f320_dfp="${PIC10F320_DFP:-$(make -s print-PIC10F320_DFP)}"
-	gpsim_inc="${PIC_SOAK_GPSIM_INC:-$(make -s print-PIC_SOAK_GPSIM_INC)}"
+	pic_cc="${PIC_CC:-$(make -s --no-print-directory print-PIC_CC)}"
+	pic_dfp="${PIC_DFP:-$(make -s --no-print-directory print-PIC_DFP)}"
+	pic10f320_cc="${PIC10F320_CC:-$(make -s --no-print-directory print-PIC10F320_CC)}"
+	pic10f320_dfp="${PIC10F320_DFP:-$(make -s --no-print-directory print-PIC10F320_DFP)}"
+	gpsim_inc="${PIC_SOAK_GPSIM_INC:-$(make -s --no-print-directory print-PIC_SOAK_GPSIM_INC)}"
 	local missing=()
 	[ -x "$pic_cc" ]                                  || missing+=("XC8 (10F322) at $pic_cc  (export PIC_CC=...)")
 	[ -f "$pic_dfp/pic/include/proc/pic10f322.h" ]    || missing+=("PIC10-12Fxxx DFP at $pic_dfp  (export PIC_DFP=...)")
@@ -283,9 +289,9 @@ assert_pic_toolchain() {
 # the Makefile). avr-objdump (binutils-avr) backs the coil-pulse width oracle.
 assert_attiny202_toolchain() {
 	local xt_dfp venv objdump py
-	xt_dfp="${XT_DFP:-$(make -s print-XT_DFP)}"
-	venv="${YASIMAVR_VENV:-$(make -s print-YASIMAVR_VENV)}"
-	objdump="${OBJDUMP:-$(make -s print-OBJDUMP)}"
+	xt_dfp="${XT_DFP:-$(make -s --no-print-directory print-XT_DFP)}"
+	venv="${YASIMAVR_VENV:-$(make -s --no-print-directory print-YASIMAVR_VENV)}"
+	objdump="${OBJDUMP:-$(make -s --no-print-directory print-OBJDUMP)}"
 	py="$venv/bin/python"
 	# need_dfp / need_yasimavr: which of the two FETCH-ON-DEMAND artifacts is
 	# absent, tracked separately from the flat `missing` list so the failure can
@@ -365,8 +371,12 @@ assert_host_toolchain() {
 	# answer would otherwise leave a tool name EMPTY, and `command -v ""` fails,
 	# reporting a missing tool that is actually installed -- or, worse, aborting
 	# under `set -e` with no diagnostic at all.
-	raw="$(make -s print-CC print-HOSTCC print-CLANG print-CLANG_TIDY \
-		print-CPPCHECK print-CBMC print-GCOV print-SIMAVR_INC)" \
+	# --no-print-directory matters most here: the count check below turns an
+	# inherited -w into "expected 8 tool names, got 10 -- print-% broken?",
+	# blaming the Makefile for the caller's nesting.
+	raw="$(make -s --no-print-directory print-CC print-HOSTCC print-CLANG \
+		print-CLANG_TIDY print-CPPCHECK print-CBMC print-GCOV \
+		print-SIMAVR_INC)" \
 		|| die "could not query tool names from the Makefile (make print-* failed)."
 	mapfile -t vals <<<"$raw"
 	[ "${#vals[@]}" -eq 8 ] \
@@ -487,7 +497,7 @@ else
 	# XT_N is read once, before any gate runs: a complete Make invocation holds
 	# the worktree lock, so `make print-...` issued while another make is in
 	# flight would block rather than answer.
-	XT_N=$(make -s print-XT_VARIANTS_SUPPORTED | wc -w)
+	XT_N=$(make -s --no-print-directory print-XT_VARIANTS_SUPPORTED | wc -w)
 	[ "$XT_N" -gt 0 ] || die "XT_VARIANTS_SUPPORTED is empty; nothing would be gated"
 
 	run_step "attiny202 job: make attiny202-test" make attiny202-test

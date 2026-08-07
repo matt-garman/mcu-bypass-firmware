@@ -123,9 +123,17 @@ liveness_num=$((liveness))
 expected_checks=$((duration_num / liveness_num))
 [ "$expected_checks" -gt 0 ] || die "qualification would execute zero liveness checks"
 
-canonical_soaks_raw=$(make -s -C "$repo_root" print-RELEASE_SOAK_NAMES) \
+# --no-print-directory is required here, and -s does not imply it: Make enables
+# -w in a sub-make and propagates a literal w through MAKEFLAGS, where it
+# OVERRIDES -s. This verifier runs both standalone (clean MAKEFLAGS) and from
+# the test-release-qualification gate, which `make release` reaches through a
+# sub-make -- there the directory banner became the first canonical soak name
+# and this script rejected a VALID qualification for a count mismatch.
+canonical_soaks_raw=$(make -s --no-print-directory -C "$repo_root" \
+	print-RELEASE_SOAK_NAMES) \
 	|| die "cannot read RELEASE_SOAK_NAMES from the Makefile"
-canonical_evidence_raw=$(make -s -C "$repo_root" print-RELEASE_EVIDENCE_FILES) \
+canonical_evidence_raw=$(make -s --no-print-directory -C "$repo_root" \
+	print-RELEASE_EVIDENCE_FILES) \
 	|| die "cannot read RELEASE_EVIDENCE_FILES from the Makefile"
 read -r -a canonical_soaks <<<"$canonical_soaks_raw"
 read -r -a canonical_evidence <<<"$canonical_evidence_raw"

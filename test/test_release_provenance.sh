@@ -232,16 +232,47 @@ fi
 	|| fail "empty compiler probe produced the wrong diagnostic: $output"
 checks=$((checks + 1))
 
+# Both compiler-selection checks below assert a rule that lives in the Makefile
+# -- PIC10F320_CC ?= PIC_CC -- so they must ask a Make that has been told
+# NOTHING about either name. THREE separate channels would otherwise answer for
+# it, and `make release` feeds all three:
+#
+#   The NAME, as an exported environment variable. make-release.sh exports
+#     PIC_CC/PIC10F320_CC, and Make additionally exports every command-line
+#     variable into the environment of every recipe -- so the name is already
+#     defined here, and ?= keeps that value rather than deriving one. This is
+#     the channel that actually bit: clearing only the Make flags below still
+#     left PIC10F320_CC standing in the environment.
+#   MAKEFLAGS / MAKEOVERRIDES, carrying the release's `PIC10F320_CC=<path>`
+#     down from its test-long command line as a COMMAND-LINE override, which
+#     outranks the ?= for the same reason.
+#   MAKEFLAGS again, carrying a literal w: make-release.sh holds the worktree
+#     lock, so the serialization wrapper that would supply --no-print-directory
+#     never runs, and an inherited -w OVERRIDES -s and wraps every reply in
+#     "Entering/Leaving directory" banners.
+#
+# Clear all three. Unsetting the two NAMES is what makes this a real test of the
+# Makefile rather than an echo of the caller's configuration.
+# _MAKE_SERIAL_LOCK_HELD is a plain variable, not a Make flag, so it survives
+# and these queries still skip the worktree lock the outer run already holds.
+read_pic_cc() {
+	(
+		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEOVERRIDES MAKELEVEL
+		unset PIC_CC PIC10F320_CC
+		make -s --no-print-directory -C "$ROOT" "$@"
+	)
+}
 shared_cc="$work/shared-xc8"
-pic_cc=$(make -s -C "$ROOT" "PIC_CC=$shared_cc" print-PIC_CC)
-pic10f320_cc=$(make -s -C "$ROOT" "PIC_CC=$shared_cc" print-PIC10F320_CC)
+pic_cc=$(read_pic_cc "PIC_CC=$shared_cc" print-PIC_CC)
+pic10f320_cc=$(read_pic_cc "PIC_CC=$shared_cc" print-PIC10F320_CC)
 [ "$pic_cc" = "$shared_cc" ] && [ "$pic10f320_cc" = "$shared_cc" ] \
 	|| fail "PIC10F320_CC did not inherit an overridden PIC_CC"
 checks=$((checks + 1))
 
 separate_cc="$work/separate-xc8"
-pic_cc=$(make -s -C "$ROOT" "PIC_CC=$shared_cc" "PIC10F320_CC=$separate_cc" print-PIC_CC)
-pic10f320_cc=$(make -s -C "$ROOT" "PIC_CC=$shared_cc" "PIC10F320_CC=$separate_cc" print-PIC10F320_CC)
+pic_cc=$(read_pic_cc "PIC_CC=$shared_cc" "PIC10F320_CC=$separate_cc" print-PIC_CC)
+pic10f320_cc=$(read_pic_cc \
+	"PIC_CC=$shared_cc" "PIC10F320_CC=$separate_cc" print-PIC10F320_CC)
 [ "$pic_cc" = "$shared_cc" ] && [ "$pic10f320_cc" = "$separate_cc" ] \
 	|| fail "Makefile did not preserve independent PIC compiler selections"
 checks=$((checks + 1))

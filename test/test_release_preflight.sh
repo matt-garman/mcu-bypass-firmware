@@ -226,15 +226,22 @@ chmod 750 "$fakebin"/* "$toolchain/xc8-322" "$toolchain/xc8-320" \
 # The release script asks Make only for print-<VAR> values before preflight exits.
 # Delegate those reads to the real Makefile with a complete synthetic toolchain;
 # reject any build/clean goal so a misplaced exit cannot score as a pass.
+#
+# --no-print-directory is part of the accepted QUERY SHAPE, not merely tolerated
+# in it, and requiring it here is the point: -s alone loses to a -w inherited
+# through MAKEFLAGS, so a release invoked one Make deep would read every value
+# back wrapped in "Entering/Leaving directory" banners and stage them into the
+# MANIFEST. Pinning the flag in the shape means dropping it fails this gate
+# instead of corrupting a release.
 cat > "$fakebin/make" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-[ "$#" -eq 2 ] && [ "$1" = -s ] || {
+[ "$#" -eq 3 ] && [ "$1" = -s ] && [ "$2" = --no-print-directory ] || {
 	printf 'forbidden non-query Make invocation: %s\n' "$*" >> "${MAKE_LOG:?}"
 	exit 97
 }
-case "$2" in
-	print-*) goal=$2 ;;
+case "$3" in
+	print-*) goal=$3 ;;
 	*)
 		printf 'forbidden non-query Make invocation: %s\n' "$*" >> "${MAKE_LOG:?}"
 		exit 97

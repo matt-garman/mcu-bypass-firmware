@@ -272,8 +272,11 @@ checks=$((checks + 1))
 # a Makefile copy on purpose -- the serialization wrapper re-execs $(MAKE)
 # WITHOUT -f, so a `make -f <copy>` run would silently read the real Makefile
 # back and the negative case would prove nothing.
-variants=$(make -s print-VARIANTS)
-tinyx5=$(make -s print-TINYX5)
+# --no-print-directory for the same reason the DEFAULT_BUILD_DIRS query above
+# clears MAKEFLAGS outright: -s loses to an inherited -w, and both lists are
+# word-split below, so a directory banner would fabricate variant names.
+variants=$(make -s --no-print-directory print-VARIANTS)
+tinyx5=$(make -s --no-print-directory print-TINYX5)
 [ -n "$variants" ] && [ -n "$tinyx5" ] \
 	|| fail "negative case: could not read VARIANTS/TINYX5 from the Makefile"
 

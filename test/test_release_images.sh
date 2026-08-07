@@ -293,7 +293,15 @@ expect_ambient_reduction_rejected "inherited Make environment precedence" \
 # equally well on a set that has quietly lost a whole MCU, so assert what the
 # Makefile actually declares: all six release-supported MCU parts present, in the
 # quantity each part's variant matrix implies.
-canonical=$(cd "$ROOT" && make -s print-RELEASE_IMAGES) \
+#
+# --no-print-directory is load-bearing on every capture below, and -s does not
+# imply it: Make enables -w in a sub-make and propagates a literal w through
+# MAKEFLAGS, where it OVERRIDES -s. `make release` runs this gate through such
+# a sub-make (make-release.sh holds the worktree lock, so the serialization
+# wrapper that would supply the flag is skipped), and `read -r -a` then parsed
+# the first line of the reply -- the directory banner -- into a 4-word
+# "canonical set". Direct `make test-long` never saw it.
+canonical=$(cd "$ROOT" && make -s --no-print-directory print-RELEASE_IMAGES) \
 	|| fail "could not read RELEASE_IMAGES from the Makefile"
 read -r -a canonical_arr <<<"$canonical"
 [ "${#canonical_arr[@]}" -eq 18 ] \
@@ -301,14 +309,15 @@ read -r -a canonical_arr <<<"$canonical"
 checks=$((checks + 1))
 
 subset_canonical=$(cd "$ROOT" && \
-	make -s VARIANTS=cd4053_with_mute print-RELEASE_IMAGES) \
+	make -s --no-print-directory VARIANTS=cd4053_with_mute print-RELEASE_IMAGES) \
 	|| fail "could not read RELEASE_IMAGES with a classic-output subset override"
 [ "$subset_canonical" = "$canonical" ] \
 	|| fail "VARIANTS override changed the canonical release set"
 checks=$((checks + 1))
 
 subset_canonical=$(cd "$ROOT" && \
-	make -s PIC10F320_VARIANTS_ALL=cd4053_with_mute print-RELEASE_IMAGES) \
+	make -s --no-print-directory PIC10F320_VARIANTS_ALL=cd4053_with_mute \
+		print-RELEASE_IMAGES) \
 	|| fail "could not read RELEASE_IMAGES with a PIC10F320 subset override"
 [ "$subset_canonical" = "$canonical" ] \
 	|| fail "PIC10F320_VARIANTS_ALL override changed the canonical release set"

@@ -15,8 +15,16 @@ fail() {
 	exit 1
 }
 
-read -r -a soak_names <<<"$(make -s -C "$ROOT" print-RELEASE_SOAK_NAMES)"
-read -r -a evidence_names <<<"$(make -s -C "$ROOT" print-RELEASE_EVIDENCE_FILES)"
+# --no-print-directory is required on every capture here, and -s does not imply
+# it: Make enables -w in a sub-make and propagates a literal w through
+# MAKEFLAGS, where it OVERRIDES -s. `make release` reaches this gate through
+# such a sub-make -- make-release.sh holds the worktree lock, so the
+# serialization wrapper that would supply the flag never runs -- and the
+# directory banner would then be parsed as the first name in each set.
+read -r -a soak_names \
+	<<<"$(make -s --no-print-directory -C "$ROOT" print-RELEASE_SOAK_NAMES)"
+read -r -a evidence_names \
+	<<<"$(make -s --no-print-directory -C "$ROOT" print-RELEASE_EVIDENCE_FILES)"
 
 reset_fixture() {
 	local mode=${1:-production}
@@ -191,7 +199,8 @@ expect_fail "manifest soak-count mismatch" "soak count does not match"
 
 [ "${#soak_names[@]}" -eq 15 ] \
 	|| fail "canonical release soak set has ${#soak_names[@]} entries, expected 15"
-overridden=$(make -s -C "$ROOT" RELEASE_SOAK_NAMES=bad print-RELEASE_SOAK_NAMES)
+overridden=$(make -s --no-print-directory -C "$ROOT" \
+	RELEASE_SOAK_NAMES=bad print-RELEASE_SOAK_NAMES)
 [ "$overridden" = "${soak_names[*]}" ] \
 	|| fail "command-line override changed canonical RELEASE_SOAK_NAMES"
 for required in attiny85_cd4053_simple attiny45_cd4053_simple \
@@ -204,7 +213,8 @@ checks=$((checks + 1))
 
 [ "${#evidence_names[@]}" -eq 28 ] \
 	|| fail "canonical release evidence set has ${#evidence_names[@]} entries, expected 28"
-overridden=$(make -s -C "$ROOT" RELEASE_EVIDENCE_FILES=bad print-RELEASE_EVIDENCE_FILES)
+overridden=$(make -s --no-print-directory -C "$ROOT" \
+	RELEASE_EVIDENCE_FILES=bad print-RELEASE_EVIDENCE_FILES)
 [ "$overridden" = "${evidence_names[*]}" ] \
 	|| fail "command-line override changed canonical RELEASE_EVIDENCE_FILES"
 checks=$((checks + 1))

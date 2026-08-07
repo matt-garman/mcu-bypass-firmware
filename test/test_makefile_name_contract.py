@@ -97,8 +97,8 @@ because the defect above was in the second:
 
   1. `make -s print-NAME`, direct.
   2. `mkv NAME`, scripts/make-release.sh's one-line wrapper
-     (`mkv() { make -s print-"$1"; }`). The name arrives as a bare word, so
-     nothing about it looks like a Makefile query.
+     (`mkv() { make -s --no-print-directory print-"$1"; }`). The name arrives
+     as a bare word, so nothing about it looks like a Makefile query.
 
 DELIBERATELY NOT ANCHORED ON THE MAKE WORD, unlike axis C. `print-` with the
 lookbehind below is already unambiguous in this tree -- every non-query form
@@ -528,8 +528,15 @@ def origins(names):
     """{name: $(origin name)} via one make invocation."""
     if not names:
         return {}
+    # --no-print-directory on every Make call in this file, and -s does NOT
+    # imply it: Make enables -w in a sub-make and propagates a literal w through
+    # MAKEFLAGS, where it OVERRIDES -s. `make release` reaches this gate through
+    # such a sub-make, and the directory banner then reads as DATA -- axis A
+    # expanded `mkv part_"$n"` over a TINYX5 carrying "Entering", "directory"
+    # and the repo path, and reported those as undefined Makefile variables.
     proc = subprocess.run(
-        ["make", "-s", "origins", "NAMES=" + " ".join(sorted(names))],
+        ["make", "-s", "--no-print-directory", "origins",
+         "NAMES=" + " ".join(sorted(names))],
         cwd=ROOT, capture_output=True, text=True,
     )
     if proc.returncode != 0:
@@ -551,7 +558,8 @@ def origins(names):
 # whitespace before `print-`, because it is a make GOAL.
 PRINT_QUERY = re.compile(r"(?<![-\w])print-([A-Za-z_][A-Za-z0-9_]*)")
 
-# scripts/make-release.sh's wrapper: `mkv() { make -s print-"$1"; }`. Harvested
+# scripts/make-release.sh's wrapper:
+# `mkv() { make -s --no-print-directory print-"$1"; }`. Harvested
 # tree-wide rather than in that one file, so copying the idiom stays covered.
 MKV_QUERY = re.compile(r"(?<![-\w])mkv\s+([A-Za-z_][A-Za-z0-9_]*)")
 
@@ -629,7 +637,7 @@ def harvest_reads():
 def print_values(name):
     """`make -s print-<name>`, split into words."""
     proc = subprocess.run(
-        ["make", "-s", "print-" + name],
+        ["make", "-s", "--no-print-directory", "print-" + name],
         cwd=ROOT, capture_output=True, text=True,
     )
     if proc.returncode != 0:
@@ -982,7 +990,7 @@ def data_base():
         return _DATA_BASE["value"]
 
     proc = subprocess.run(
-        ["make", "-rRn", "--print-data-base"],
+        ["make", "-rRn", "--no-print-directory", "--print-data-base"],
         cwd=ROOT, capture_output=True, text=True,
     )
     if proc.returncode != 0:
@@ -1439,7 +1447,8 @@ _FILE_TEXT = {}
 def make_expand(name):
     """`make -s print-<name>`, cached. Empty string if make fails."""
     if name not in _EXPANDED:
-        done = subprocess.run(["make", "-s", "print-" + name], cwd=ROOT,
+        done = subprocess.run(["make", "-s", "--no-print-directory",
+                               "print-" + name], cwd=ROOT,
                               capture_output=True, text=True)
         _EXPANDED[name] = done.stdout.strip() if done.returncode == 0 else ""
     return _EXPANDED[name]
