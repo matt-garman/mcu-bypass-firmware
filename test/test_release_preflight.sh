@@ -286,6 +286,15 @@ run_preflight() {
 	status_before=$(tree_snapshot) || fail "could not snapshot the working tree"
 	[ -e "$preflight_output" ] && output_existed_before=1 || output_existed_before=0
 	if (
+		# VERSION and RELEASE_ARGS are how the Makefile hands a release its
+		# arguments (`export VERSION RELEASE_ARGS`), and make-release.sh reads
+		# both from the environment when no positional version is given. That
+		# export is global, so under `make release VERSION=vX.Y.Z` every recipe
+		# -- including the one running this gate -- inherits it, and a
+		# `run_preflight` with no version would silently exercise the
+		# *versioned* path instead. Clearing the names here keeps each case
+		# testing the argument vector it actually passes.
+		unset VERSION RELEASE_ARGS
 		export PATH="$fakebin:$PATH"
 		export TMPDIR="$work"
 		export REAL_MAKE REAL_PYTHON REAL_GIT REAL_AWK
@@ -343,6 +352,7 @@ assert_no_release_scratch() {
 ln -s "$REAL_DIRNAME" "$bootstrap_bin/dirname"
 ln -s "$REAL_STAT" "$bootstrap_bin/stat"
 if (
+	unset VERSION RELEASE_ARGS   # inherited release config; see run_preflight
 	export PATH="$bootstrap_bin" _MAKE_SERIAL_LOCK_HELD="$lock_id"
 	"$REAL_BASH" "$RELEASE" --preflight
 ) >"$output" 2>&1; then
@@ -356,6 +366,7 @@ checks=$((checks + 1))
 
 ln -s "$REAL_GIT" "$bootstrap_bin/git"
 if (
+	unset VERSION RELEASE_ARGS   # inherited release config; see run_preflight
 	export PATH="$bootstrap_bin" _MAKE_SERIAL_LOCK_HELD="$lock_id"
 	"$REAL_BASH" "$RELEASE" --preflight
 ) >"$output" 2>&1; then
