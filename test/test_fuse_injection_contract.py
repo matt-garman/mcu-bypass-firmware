@@ -29,6 +29,8 @@ WHAT IS CHECKED, in the order a value travels:
   GUARDED == PRINTED   every injected macro reaches the program's output, one
                        for one, so a byte cannot be injected and then ignored.
   VALUE                each printed byte equals `make -s print-<VARIABLE>`.
+                       Make stdout is the value protocol; stderr is retained for
+                       diagnostics but is not interpreted as value rows.
 
 The last link is the only one that catches a VALUE drift as well as a name one,
 and it is not redundant with the checker's own assertions: T13_LFUSE bit 6
@@ -57,6 +59,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TARGET = "test/avr/test_fuses"
@@ -77,7 +80,7 @@ def read(path):
 
 
 def run_make(*args):
-    """Run make from ROOT.
+    """Run make from ROOT. -> (returncode, stdout, stderr)
 
     _MAKE_SERIAL_LOCK_HELD is inherited on purpose: it is what lets a nested make
     skip the worktree lock the outer `make test` already holds, and clearing it
@@ -85,7 +88,40 @@ def run_make(*args):
     """
     proc = subprocess.run(["make", "--no-print-directory", "-C", ROOT, *args],
                           capture_output=True, text=True)
-    return proc.returncode, proc.stdout + proc.stderr
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def make_stream_diagnostic(stdout, stderr):
+    """Return independently bounded, labeled Make output channels."""
+    out = stdout[:2000].rstrip() or "<empty>"
+    err = stderr[:2000].rstrip() or "<empty>"
+    return "stdout:\n%s\nstderr:\n%s" % (out, err)
+
+
+def make_fuse_values(pairs):
+    """Return {macro: byte} from one stdout row per print-<VAR> goal."""
+    macros = sorted(pairs)
+    names = [pairs[macro] for macro in macros]
+    goals = [f"print-{name}" for name in names]
+    rc, stdout, stderr = run_make("-s", *goals)
+    streams = make_stream_diagnostic(stdout, stderr)
+    if rc != 0:
+        fail(f"`make -s {' '.join(goals)}` failed with status {rc}\n{streams}")
+
+    lines = stdout.splitlines()
+    if len(lines) != len(names):
+        fail(f"`make -s print-<VAR> ...` produced {len(lines)} stdout lines "
+             f"for {len(names)} fuse variables; expected exactly one line per "
+             f"requested goal\n{streams}")
+
+    expected = {}
+    for macro, value in zip(macros, lines):
+        value = value.strip()
+        if not re.fullmatch(r"0[xX][0-9a-fA-F]{1,2}", value):
+            fail(f"{pairs[macro]} does not expand to a fuse byte: {value!r}\n"
+                 f"{streams}")
+        expected[macro] = int(value, 16)
+    return expected
 
 
 def injected(text):
@@ -125,17 +161,84 @@ def guards(text):
 
 def compile_command():
     """The real, expanded compile line, as argv without the -o pair."""
-    rc, out = run_make("-n", TARGET)
+    rc, stdout, stderr = run_make("-n", TARGET)
+    streams = make_stream_diagnostic(stdout, stderr)
     if rc != 0:
-        fail(f"`make -n {TARGET}` failed:\n{out.strip()[:2000]}")
+        fail(f"`make -n {TARGET}` failed with status {rc}\n{streams}")
     # `[^;]*` rather than `.*?`: the recipe opens with `if ! rm -f ...;` and a
     # non-greedy dot-all match starts there and swallows the whole preamble.
     # The compile command itself contains no `;`, so this anchors on it.
-    m = re.search(r"if ! ([^;]*?)\s+-o \"\$tmp\";", out, re.S)
+    m = re.search(r"if ! ([^;]*?)\s+-o \"\$tmp\";", stdout, re.S)
     if not m:
         fail(f"could not find the compile command in `make -n {TARGET}` output -- "
-             "the build rule's shape has changed")
+             f"the build rule's shape has changed\n{streams}")
     return shlex.split(re.sub(r"\\\n\s*", " ", m.group(1)))
+
+
+def check_make_stream_contract():
+    """Exercise the production Make query against controlled output channels."""
+    pairs = {"T1_ALPHA": "FUSE_ALPHA", "T2_BETA": "FUSE_BETA"}
+    checks = 0
+
+    completed = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="0x0a\n0xB7\n",
+        stderr="fixture: unrelated avr-gcc parse-time diagnostic\n")
+    with mock.patch.object(subprocess, "run", return_value=completed) as run:
+        values = make_fuse_values(pairs)
+    if values != {"T1_ALPHA": 0x0A, "T2_BETA": 0xB7}:
+        fail(f"valid fuse stdout changed when Make wrote unrelated stderr: {values}")
+    if run.call_count != 1 \
+            or run.call_args[1] != {"capture_output": True, "text": True}:
+        fail("Make stream fixture did not exercise run_make() with separate capture")
+    checks += 1
+
+    completed = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="0x0a\n0xB7\n\n",
+        stderr="fixture-cardinality-stderr\n")
+    with mock.patch.object(subprocess, "run", return_value=completed):
+        try:
+            make_fuse_values(pairs)
+        except SystemExit as exc:
+            message = str(exc)
+        else:
+            fail("an extra blank Make stdout row was accepted")
+    if not all(part in message for part in (
+            "3 stdout lines", "for 2 fuse variables", "stdout:", "stderr:",
+            "fixture-cardinality-stderr")):
+        fail(f"wrong diagnostic for extra Make stdout: {message}")
+    checks += 1
+
+    completed = subprocess.CompletedProcess(
+        args=[], returncode=2, stdout="0x0a\n0xB7\n",
+        stderr="fixture-make-failure\n")
+    with mock.patch.object(subprocess, "run", return_value=completed):
+        try:
+            make_fuse_values(pairs)
+        except SystemExit as exc:
+            message = str(exc)
+        else:
+            fail("nonzero Make status was accepted with valid-looking stdout")
+    if not all(part in message for part in (
+            "status 2", "stdout:", "stderr:", "fixture-make-failure")):
+        fail(f"wrong diagnostic for failed Make query: {message}")
+    checks += 1
+
+    completed = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="not-a-byte\n0xB7\n",
+        stderr="fixture-value-stderr\n")
+    with mock.patch.object(subprocess, "run", return_value=completed):
+        try:
+            make_fuse_values(pairs)
+        except SystemExit as exc:
+            message = str(exc)
+        else:
+            fail("a malformed fuse value on Make stdout was accepted")
+    if not all(part in message for part in (
+            "FUSE_ALPHA", "'not-a-byte'", "stdout:", "stderr:",
+            "fixture-value-stderr")):
+        fail(f"wrong diagnostic for malformed Make stdout: {message}")
+    checks += 1
+    return checks
 
 
 def build(argv, out, drop=None, substitute=None):
@@ -258,17 +361,8 @@ def main():
     checks += 1
 
     # ------------------------------------------------------- Makefile values --
-    names = [pairs[m] for m in sorted(pairs)]
-    rc, out = run_make("-s", *[f"print-{v}" for v in names])
-    lines = out.strip().split("\n")
-    if rc != 0 or len(lines) != len(names):
-        fail(f"could not read the fuse variables through print-<VAR>:\n{out.strip()[:2000]}")
-    expected = {}
-    for macro, value in zip(sorted(pairs), lines):
-        value = value.strip()
-        if not re.fullmatch(r"0[xX][0-9a-fA-F]{1,2}", value):
-            fail(f"{pairs[macro]} does not expand to a fuse byte: {value!r}")
-        expected[macro] = int(value, 16)
+    checks += check_make_stream_contract()
+    expected = make_fuse_values(pairs)
     checks += 1
 
     with tempfile.TemporaryDirectory(prefix="fuse-contract.") as scratch:

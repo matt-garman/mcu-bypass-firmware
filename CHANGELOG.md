@@ -479,7 +479,7 @@ file is the human-readable summary of *what changed*.
   missing `ATTINY202_FUSE_*`).
 
   New gate `test-fuse-injection-contract`
-  (`test/test_fuse_injection_contract.py`, 14 checks) follows each byte the
+  (`test/test_fuse_injection_contract.py`, 18 checks) follows each byte the
   whole way: the variables the avrdude recipes burn to silicon must be exactly
   the variables the checker is compiled with; the compile line and the C file
   must name the same macros, with each `#error` naming the variable the Makefile
@@ -872,6 +872,18 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **The fuse-injection contract no longer interprets Make stderr as fuse
+  values.** Its helper concatenated stdout and stderr before the bulk
+  `print-<VAR>` query required exactly one line per fuse variable. Unrelated
+  parse-time diagnostics, including missing-`avr-gcc` discovery noise, therefore
+  made a valid contract fail before any value was checked.
+
+  Make stdout is now the sole value and dry-run recipe protocol. Stderr remains
+  separately captured and is included, with stdout, when Make fails or stdout
+  has the wrong cardinality or value syntax. Four stream regressions accept
+  valid values beside stderr noise and reject extra blank stdout, nonzero Make
+  status, and malformed fuse values with both channels preserved in diagnostics.
+
 - **The ATtiny202 delay oracle no longer discards recognized loops with
   undecodable seeds.** A complete `sbiw` plus back-targeting `brne` signature
   previously emitted a warning and disappeared when either seed-register LDI
