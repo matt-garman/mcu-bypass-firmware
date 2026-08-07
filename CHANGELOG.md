@@ -841,6 +841,17 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **The ATtiny202 delay oracle no longer discards recognized loops with
+  undecodable seeds.** A complete `sbiw` plus back-targeting `brne` signature
+  previously emitted a warning and disappeared when either seed-register LDI
+  could not be recovered. That let `cd4053_simple` pass as having no delays and
+  let a timed variant hide an undecodable extra loop beside its valid pulses.
+
+  Recognized candidates now require a provable 16-bit iteration seed or produce
+  one normal per-image oracle failure. The host self-test drives the production
+  parse/check path for both false-pass shapes: an undecodable candidate in the
+  simple variant, and two valid 5 ms mute loops plus an undecodable extra.
+
 - **Mutation timeout and interruption controls now fail closed.** An explicitly
   empty `MUTATION_TIMEOUT_S` previously became the 900-second default, zero
   disabled GNU `timeout`, and malformed values reached the tool unchecked. The
@@ -859,8 +870,9 @@ file is the human-readable summary of *what changed*.
   scans for late session registrations, refuses to signal a reused SID without
   its private ownership token, and keeps all mutation scratch trees below the
   run-owned result root. The 62-check host regression uses real fractional
-  expiry, nested timeout groups, a TERM-ignoring descendant, and an unregistered
-  launch-gap worker, then proves no owned process survives interruption.
+  expiry, nested timeout groups, a TERM-ignoring descendant, and a stopped
+  launch-gap worker with inherited ownership, then proves no owned process
+  survives interruption.
 
 - **The shared compile-check reach gate accepted commented-out includes.** Its
   unanchored substring search treated

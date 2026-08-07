@@ -54,7 +54,8 @@
 #   For each built variant image it disassembles the flash (avr-objdump -d),
 #   finds every avr-libc _delay_ms busy loop, recovers its 16-bit iteration
 #   count, converts that to milliseconds at F_CPU, and asserts the per-variant
-#   expected set of pulse widths (and the relay's 4 ms datasheet minimum):
+#   expected set of pulse widths (and the relay's 4 ms datasheet minimum). Every
+#   recognized loop must have a decodable 16-bit seed; none may be discarded:
 #       cd4053_simple    (simple x4053): no coil pulse -> zero delay loops
 #       cd4053_with_mute (muted x4053) : two 5 ms mute windows (engage+bypass)
 #       tq2_l2_5v_relay  (TQ2-L2-5V)   : two 12 ms coil pulses (engage+bypass)
@@ -120,6 +121,10 @@ _LDI_RE = re.compile(
     r"^\s*[0-9a-f]+:\s+[0-9a-f ]+\s+ldi\s+r(\d+),\s*0x([0-9a-f]+)", re.I)
 
 
+class DelayLoopDecodeError(Exception):
+    """A recognized delay-loop candidate has no provable iteration seed."""
+
+
 def _ldi_value(line, want_reg):
     """Return the immediate an `ldi rWANT, 0xNN` line loads, or None."""
     m = _LDI_RE.match(line)
@@ -135,7 +140,9 @@ def parse_delay_loops(objdump_text):
 
     Returns a list of 16-bit iteration counts, one per delay loop, in the order
     they appear in the disassembly. Pure text function so it is exercised both
-    against real images and against synthetic snippets in --selftest.
+    against real images and against synthetic snippets in --selftest. Raises
+    DelayLoopDecodeError rather than omitting a recognized loop whose seed
+    registers cannot be decoded.
     """
     lines = objdump_text.splitlines()
     counts = []
@@ -156,11 +163,11 @@ def parse_delay_loops(objdump_text):
         if int(brne.group(2), 16) != sbiw_addr:
             continue                          # branches elsewhere: not a delay
 
-        # Walk back over the two `ldi`s that seed the count register pair. They
-        # are emitted immediately above the loop but tolerate an intervening
-        # unrelated instruction or two.
+        # The two immediately preceding instructions must seed this exact count
+        # register pair. Looking farther back can borrow stale LDIs from a prior
+        # loop and turn an unseeded candidate into false timing evidence.
         lo = hi = None
-        for j in range(i - 1, max(-1, i - 6), -1):
+        for j in range(i - 1, max(-1, i - 3), -1):
             if lo is None:
                 lo = _ldi_value(lines[j], low_reg)
                 if lo is not None:
@@ -170,10 +177,14 @@ def parse_delay_loops(objdump_text):
             if lo is not None and hi is not None:
                 break
         if lo is None or hi is None:
-            sys.stderr.write(
-                "WARN: _delay_ms loop at 0x%X missing its ldi seed(s)\n"
-                % sbiw_addr)
-            continue
+            missing = []
+            if lo is None:
+                missing.append("r%d" % low_reg)
+            if hi is None:
+                missing.append("r%d" % high_reg)
+            raise DelayLoopDecodeError(
+                "recognized sbiw/brne loop at 0x%X has undecodable ldi "
+                "seed register(s): %s" % (sbiw_addr, ", ".join(missing)))
         counts.append((hi << 8) | lo)
     return counts
 
@@ -238,6 +249,16 @@ def check_variant(ck, variant, counts):
             % (variant, RELAY_MIN_MS, pretty))
 
 
+def check_disassembly(ck, variant, objdump_text):
+    """Parse one image's disassembly and check its complete timing evidence."""
+    try:
+        counts = parse_delay_loops(objdump_text)
+    except DelayLoopDecodeError as exc:
+        ck.check(False, "%s: delay-loop oracle error: %s" % (variant, exc))
+        return
+    check_variant(ck, variant, counts)
+
+
 def variant_of(elf_path):
     """Map an image path (bypass-<mcu>-<variant>.elf) to its variant.
 
@@ -279,8 +300,7 @@ def verify_images(elf_paths):
         if variant is None:
             ck.check(False, "cannot map %s to a known variant" % elf)
             continue
-        counts = parse_delay_loops(disassemble(elf))
-        check_variant(ck, variant, counts)
+        check_disassembly(ck, variant, disassemble(elf))
     if not elf_paths:
         ck.check(False, "no ATtiny202 images given to verify")
     print("[delay] %d checks, %d failures" % (ck.checks, ck.fails))
@@ -295,8 +315,9 @@ def verify_images(elf_paths):
 def _synthetic(loops):
     """Build a minimal objdump-style snippet with the given loops.
 
-    `loops` is a list of (low_reg, count) pairs. Emits the exact avr-libc
-    ldi/ldi/sbiw/brne shape plus decoy back-branches that must NOT be parsed as
+    `loops` is a list of (low_reg, count) pairs. A None count emits a recognized
+    sbiw/brne candidate without its seed LDIs. Other entries emit the exact
+    avr-libc ldi/ldi/sbiw/brne shape. Decoy back-branches must NOT be parsed as
     delays (a bss-style clear and a plain conditional branch).
     """
     out = [
@@ -306,9 +327,10 @@ def _synthetic(loops):
     ]
     addr = 0x300
     for low_reg, count in loops:
-        hi, lo = (count >> 8) & 0xFF, count & 0xFF
-        out.append("%4x:\t8f e6\tldi\tr%d, 0x%02X" % (addr, low_reg, lo))
-        out.append("%4x:\t97 e1\tldi\tr%d, 0x%02X" % (addr + 2, low_reg + 1, hi))
+        if count is not None:
+            hi, lo = (count >> 8) & 0xFF, count & 0xFF
+            out.append("%4x:\t8f e6\tldi\tr%d, 0x%02X" % (addr, low_reg, lo))
+            out.append("%4x:\t97 e1\tldi\tr%d, 0x%02X" % (addr + 2, low_reg + 1, hi))
         out.append("%4x:\t01 97\tsbiw\tr%d, 0x01\t; 1" % (addr + 4, low_reg))
         out.append("%4x:\tf1 f7\tbrne\t.-4      ; 0x%x" % (addr + 6, addr + 4))
         addr += 0x20
@@ -361,6 +383,33 @@ def selftest():
     ck.check(_variant_fails("tq2_l2_5v_relay", counts_for([3, 3])) >= 2,
              "sub-minimum relay pulse fails design width AND datasheet minimum")
 
+    # A complete loop signature with an undecodable seed is an oracle error,
+    # never absence of evidence.
+    ck.check(_disassembly_fails("cd4053_simple", _synthetic([(30, None)])) == 1,
+             "simple cd4053 with an undecodable delay candidate fails")
+    ck.check(_disassembly_fails(
+                 "cd4053_with_mute",
+                 _synthetic([(24, n5), (24, n5), (30, None)])) == 1,
+             "mute with valid loops plus an undecodable extra candidate fails")
+
+    try:
+        parse_delay_loops(_synthetic([(30, None)]))
+    except DelayLoopDecodeError as exc:
+        decode_error = str(exc)
+    else:
+        decode_error = ""
+    ck.check("0x304" in decode_error and "r30, r31" in decode_error,
+             "undecodable candidate reports its address and missing seed pair")
+
+    try:
+        parse_delay_loops(_synthetic([(24, n5), (24, n5), (24, None)]))
+    except DelayLoopDecodeError as exc:
+        stale_seed_error = str(exc)
+    else:
+        stale_seed_error = ""
+    ck.check("0x344" in stale_seed_error and "r24, r25" in stale_seed_error,
+             "unseeded loop cannot borrow the preceding loop's seed pair")
+
     print("[delay] selftest: %d checks, %d failures" % (ck.checks, ck.fails))
     return 1 if ck.fails else 0
 
@@ -373,6 +422,17 @@ def _variant_fails(variant, counts):
     with contextlib.redirect_stdout(io.StringIO()), \
             contextlib.redirect_stderr(io.StringIO()):
         check_variant(ck, variant, counts)
+    return ck.fails
+
+
+def _disassembly_fails(variant, objdump_text):
+    """Run the production parse/check path silently; return its failure count."""
+    import contextlib
+    import io
+    ck = Checker()
+    with contextlib.redirect_stdout(io.StringIO()), \
+            contextlib.redirect_stderr(io.StringIO()):
+        check_disassembly(ck, variant, objdump_text)
     return ck.fails
 
 
