@@ -51,7 +51,9 @@ test/
   test_clean_contract.sh    shared: clean/clean-tests remove everything the
                                      Makefile knows how to build
   test_fuse_injection_contract.py shared: every fuse byte the Makefile burns is
-                                     the byte the -D-injected checker verifies
+                                     the byte the -D-injected checker verifies;
+                                     stdout alone carries queried values while
+                                     stderr is retained as diagnostic context
   test_variant_map_contract.sh shared: every per-variant map is guard-registered
   test_static_assert_guards.sh shared: every modular shell has an anchored,
                                      uncommented direct include of the shared
