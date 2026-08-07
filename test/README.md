@@ -93,7 +93,7 @@ test/
            attiny202_fuses.py   fail-closed simulator fuse configuration
            test_attiny202_fuses.py  simulator-fuse host regression
            sim_attiny202.py     shared yasimavr device/pin support
-           test_sim_attiny202.py   functional + PA2/PA3 transition/timing checks
+           test_sim_attiny202.py   functional + PA2/PA3 transition/pulse-presence checks
            test_attiny202_output_oracle.py  host regression for output checks
            test_attiny202_fault_oracle.py   host fault-run accounting regression
            test_fault_attiny202.py  critical-SFR/state/pin-polarity fault injection
@@ -213,7 +213,7 @@ The split mirrors the PIC lanes: **the host-only rows below are members of
 | Golden-model bridge | `test-attiny202-model-ffi` | The ctypes bridge reaches the shipping pure core and behaves correctly at the `>=` press-threshold boundary, both saturation bounds, the lock-out, and a full round trip — independent hard-coded expectations, not another comparison against the model. | host |
 | Output-sequence oracle | `test-attiny202-output-oracle` | The PA2/PA3 transition, ordering and pulse-presence checker itself is correct. | host |
 | Fault accounting oracle | `test-attiny202-fault-oracle` | The fault driver's run accounting cannot silently under-count injections. | host |
-| Coil-pulse width | `attiny202-delay-oracle` | Absolute relay (12 ms) and mute (5 ms) pulse widths, recovered from the disassembled `_delay_ms` loop in the built image, match design and clear the 4 ms datasheet minimum. Every recognized loop candidate must provide a decodable 16-bit seed; no candidate can be dropped as missing evidence. | host, over real image |
+| Coil-pulse width | `attiny202-delay-oracle` | Compiled relay (12 ms) and mute (5 ms) delay-body cycle counts, recovered from the disassembled `_delay_ms` loop in the built image, match design and clear the 4 ms datasheet minimum. Timer-ISR preemption makes the edge-to-edge pin-high interval slightly longer. Every recognized loop candidate must provide a decodable 16-bit seed; no candidate can be dropped as missing evidence. | host, over real image |
 | Static analysis | `attiny202-analyze` | cppcheck + MISRA pass over the AVR-XT shell with real DFP/avr-libc headers. | host tools |
 | Register-level functional | `attiny202-sim` | The real image toggles on debounced press, boots dark with the WDT locked and `PORTA.DIR` exact, stays stable at idle, handles a switch held through power-on, and drives the correct PA2/PA3 sequence per variant. | yasimavr |
 | Fault recovery | `attiny202-fault` | 22 guarded SFR/latch/state/pin-polarity corruptions each produce the correct response — the sanity gate's force-reset path, or a witnessed watchdog reset for the tick timer itself. Includes an independent `INVEN` injection on all five bonded application pins, which `OUT` readback alone cannot see. Zero skips, exact completion accounting over 23 results. | yasimavr |

@@ -3185,9 +3185,9 @@ test-fuses: test/avr/test_fuses test/avr/test_attiny202_fuses.py test/avr/attiny
 	./test/avr/test_fuses
 	$(XT_FUSE_ENV) PYTHONPATH=test/avr python3 test/avr/test_attiny202_fuses.py
 
-# Host-only regression for the ATtiny202 transition/timing oracle. It stubs the
-# unavailable yasimavr module and exercises positive and fail-closed trace paths;
-# the full-tool CI job remains authoritative for the real built-image execution.
+# Host-only regression for the ATtiny202 transition/pulse-presence oracle. It
+# stubs the unavailable yasimavr module and exercises positive and fail-closed
+# structural trace paths; full-tool CI runs the real built image.
 test-attiny202-output-oracle:
 	PYTHONPATH=test/avr python3 test/avr/test_attiny202_output_oracle.py
 
@@ -3422,7 +3422,7 @@ $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(eval $(call VARIANT_SIM_X5,$(v),
 
 # Aggregate run targets.
 # test-sim-attiny13a          : all variants on ATtiny13a
-# test-sim-t<n>     : all variants on tinyx5 chip <n> (e.g. test-sim-t85)
+# test-sim-attiny<n> : all variants on tinyx5 chip <n> (e.g. test-sim-attiny85)
 # test-sim-tinyx5: all variants on every tinyx5 chip
 # test-fault-inject : all variants x every tinyx5 chip
 #

@@ -507,7 +507,7 @@ PCB space, the TVS diode and ferrite bead can be omitted.
     * Consequence: the CD4053's MOSFET inversion and the TMUX's swapped
       throws cancel, so the MCU drives an IDENTICAL polarity for both parts
       (BYPASS = pin low, ENGAGE = pin high). A single firmware image
-      (cd4053 / mute) drives BOTH boards -- there is deliberately no
+      (`cd4053_simple` / `cd4053_with_mute`) drives BOTH boards -- there is deliberately no
       separate TMUX build. (An earlier revision shipped separate _tmux
       images that re-inverted the MCU drive; because the hardware already
       cancels the difference, that was a latent polarity bug and the
@@ -824,19 +824,20 @@ stack-canary test (see Testing and Validation above).
 |===
 | Part      | Variant | Flash               | of device flash
 
-| ATtiny13a | cd4053  | 716 bytes           | 69.9% of 1 KB
-| ATtiny13a | relay   | 756 bytes           | 73.8% of 1 KB
-| ATtiny13a | mute    | 756 bytes           | 73.8% of 1 KB
-| ATtiny45  | cd4053  | 742 bytes           | 18.1% of 4 KB
-| ATtiny45  | relay   | 782 bytes           | 19.1% of 4 KB
-| ATtiny45  | mute    | 782 bytes           | 19.1% of 4 KB
-| ATtiny85  | cd4053  | 742 bytes           | 9.1% of 8 KB
-| ATtiny85  | relay   | 782 bytes           | 9.5% of 8 KB
-| ATtiny85  | mute    | 782 bytes           | 9.5% of 8 KB
+| ATtiny13a | cd4053_simple     | 716 bytes | 69.9% of 1 KB
+| ATtiny13a | tq2_l2_5v_relay   | 756 bytes | 73.8% of 1 KB
+| ATtiny13a | cd4053_with_mute  | 756 bytes | 73.8% of 1 KB
+| ATtiny45  | cd4053_simple     | 742 bytes | 18.1% of 4 KB
+| ATtiny45  | tq2_l2_5v_relay   | 782 bytes | 19.1% of 4 KB
+| ATtiny45  | cd4053_with_mute  | 782 bytes | 19.1% of 4 KB
+| ATtiny85  | cd4053_simple     | 742 bytes | 9.1% of 8 KB
+| ATtiny85  | tq2_l2_5v_relay   | 782 bytes | 9.5% of 8 KB
+| ATtiny85  | cd4053_with_mute  | 782 bytes | 9.5% of 8 KB
 |===
 
 SRAM use is dominated by 4 bytes of static data; peak stack measured 31 bytes
-(relay and mute variants) and 29 bytes (cd4053). On the most constrained part,
+(`tq2_l2_5v_relay` and `cd4053_with_mute`) and 29 bytes (`cd4053_simple`). On the
+most constrained part,
 the ATtiny13a, with 64 bytes of SRAM: worst-case consumption is 35 bytes
 (4 static + 31 stack), leaving 29 bytes of free headroom. The tinyx5
 family has far more of both flash and SRAM (the ATtiny85 uses approximately
@@ -846,8 +847,9 @@ That SRAM headroom is a deliberate design property, and it is gated rather
 than merely stated: `test_stack_high_water_mark()` in `test/avr/test_sim.c`
 paints SRAM with a canary, exercises the deepest call paths, and fails
 `make test-sim-attiny13a` if fewer than 8 free bytes separate the deepest stack pointer
-from the top of the static data. Measured today: 29 free bytes on relay and
-mute, 31 on cd4053 — the same figures as above. The top of static data is read
+from the top of the static data. Measured today: 29 free bytes on
+`tq2_l2_5v_relay` and `cd4053_with_mute`, 31 on `cd4053_simple` — the same
+figures as above. The top of static data is read
 from the firmware ELF's `__bss_end` rather than assumed, so a future static
 variable tightens the gate on its own; if that symbol cannot be resolved the
 test fails rather than falling back to a looser reference point.
@@ -870,9 +872,9 @@ device-aware mode: binutils 2.26 does not recognise `avrxmega3` parts, so
 |===
 | Variant | Flash     | of 2 KB | Free
 
-| cd4053  | 848 bytes | 41.4%   | 1200 bytes
-| mute    | 888 bytes | 43.4%   | 1160 bytes
-| relay   | 888 bytes | 43.4%   | 1160 bytes
+| cd4053_simple     | 848 bytes | 41.4% | 1200 bytes
+| cd4053_with_mute  | 888 bytes | 43.4% | 1160 bytes
+| tq2_l2_5v_relay   | 888 bytes | 43.4% | 1160 bytes
 |===
 
 Static data is 4 bytes, identical to the AVR Classic figure and for the same
@@ -898,9 +900,9 @@ compiler), not bytes. `make pic10f322` enforces the flash-word budget per varian
 |===
 | Variant | Program (flash) | of 512 words | Data (RAM) | of 64 bytes
 
-| cd4053  | 445 words | 86.9% | 34 bytes | 53.1%
-| relay   | 473 words | 92.4% | 34 bytes | 53.1%
-| mute    | 471 words | 92.0% | 34 bytes | 53.1%
+| cd4053_simple     | 445 words | 86.9% | 34 bytes | 53.1%
+| tq2_l2_5v_relay   | 473 words | 92.4% | 34 bytes | 53.1%
+| cd4053_with_mute  | 471 words | 92.0% | 34 bytes | 53.1%
 |===
 
 The 34-byte data figure is XC8's total reservation, not just the firmware's
@@ -908,7 +910,8 @@ state: the single live global is `ctx_` (the 3-byte `debounce_context_t`; the
 PIC's polled Model-B loop has no `timer_isr_called_` handshake, unlike the
 AVR ISR design), and the remainder is the XC8 runtime's scratch and temporaries.
 Against the 512-word limit the margin is real but not generous: the largest
-variant, relay, leaves 39 words free (7.6%), and cd4053 leaves 67 (13.1%). That
+variant, `tq2_l2_5v_relay`, leaves 39 words free (7.6%), and `cd4053_simple`
+leaves 67 (13.1%). That
 is enough for maintenance work, not for a substantial new feature. `make pic10f322`
 gates every variant against the budget on every build, so an overshoot fails
 the build rather than reaching hardware.
@@ -936,7 +939,7 @@ Data (RAM) use is 10 bytes of 64 (15.6%); the single live global is the same
 
 Those margins are the whole story of this target. The general output-latch
 integrity check was measured before the relay rewrite and already exceeded the
-256-word budget on the mute and relay variants; the combined current form has
+256-word budget on `cd4053_with_mute` and `tq2_l2_5v_relay`; the combined current form has
 not been re-priced because there is less headroom, not more. The exact-`TRISA`
 check and relay-only idle coil-low rewrite, each costing one word, were worth
 porting. Those decisions are recorded in `docs/pic10f320_special_case.md`.

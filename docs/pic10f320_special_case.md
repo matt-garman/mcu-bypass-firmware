@@ -1,11 +1,11 @@
 # PIC10F320 — the constrained target
 
-**Status:** release-supported since `v0.9.6`, whose production qualification ran
-the final source through the release gates and the full-duration release soak
-matrix. It remains architecturally different from every other target in this
-repository. This document is the single authoritative statement of that
-difference; execution evidence, its exact scope and the combination counts live
-in `docs/pic10f320_validation.md`.
+**Status:** release-supported since `v0.9.6`. The production qualification named
+here is historical `v0.9.6` evidence, not qualification of the current `v0.9.8`
+candidate. The target remains architecturally different from every other target
+in this repository. This document is the single authoritative statement of that
+difference; execution evidence, its exact scope, release history and current
+candidate status live in `docs/pic10f320_validation.md`.
 
 **Read this if** you are choosing an MCU, reviewing the assurance argument, or
 wondering why one firmware file looks unlike the rest of `src/`.
@@ -149,6 +149,11 @@ On the PIC10F320, the general gap remains for the LED and analog-switch control
 bits: the trailing `CLRWDT()` does not turn their mismatch into a reset, and
 their stable state is rewritten only by a debounced actuation. A wrong LED or
 analog signal path can therefore persist until the next accepted press.
+
+Before the `v0.9.8` rewrite, the same omission had a more severe relay-specific
+consequence: a post-actuation upset that raised RA1 or RA2 could leave a coil
+energized without bound while the otherwise healthy loop continued to pet the
+watchdog. That unintended drive was not limited by the normal 12 ms pulse.
 
 The relay variant has a narrower safety rule as of `v0.9.8`. Immediately after
 accepting and clearing each timer event, before the sanity decision and watchdog

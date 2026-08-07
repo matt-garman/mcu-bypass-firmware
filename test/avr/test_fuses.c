@@ -165,12 +165,12 @@ static void verify_t13(void) {
 //   bit7 RSTDISBL  (1=disabled -> PB5 stays RESET)
 //   bit6 DWEN      (1=disabled)
 //   bit5 SPIEN     (0=enabled)
-//   bit4 WDTON     (1=WDT not forced on)
+//   bit4 WDTON     (0=WDT forced always-on; software cannot disable it)
 //   bit3 EESAVE    (1=don't preserve EEPROM)
 //   bit2 BODLEVEL2
 //   bit1 BODLEVEL1
 //   bit0 BODLEVEL0
-//   (BODLEVEL[2:0]=101 -> 2.7V)
+//   (BODLEVEL[2:0]=100 -> 4.3V)
 //////////////////////////////////////////////////////////////////////////////
 static void verify_t85(void) {
     unsigned lo = (unsigned)T85_LFUSE;

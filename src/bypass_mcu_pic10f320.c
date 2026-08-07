@@ -131,9 +131,11 @@
 #  define static_assert _Static_assert
 #endif
 
-// MCU-neutral threshold invariants -- identical across all shells, so defined
-// once here.  Evaluated at file scope (zero runtime cost); a violation fails the
-// build of every shell that includes this header.
+
+// MCU-neutral threshold invariants.  This self-contained PIC10F320 shell
+// carries a local copy of the five invariants in bypass_compile_checks.h.
+// Evaluated at file scope (zero runtime cost); a violation fails this
+// shell's build.
 static_assert(RELEASE_THRESH < DEBOUNCE_COUNTER_MAX, "RELEASE_THRESH >= DEBOUNCE_COUNTER_MAX (i.e. UINT8_MAX)");
 static_assert(RELEASE_THRESH > 0U,                   "RELEASE_THRESH <= 0");
 static_assert(RELEASE_THRESH > PRESSED_THRESH,       "RELEASE_THRESH <= PRESSED_THRESH");

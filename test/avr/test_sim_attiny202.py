@@ -7,9 +7,9 @@
 # test (test/avr/test_sim.c) and the PIC gpsim toggle test (pic10f322-test-gpsim):
 # drive the real built firmware image, wiggle the footswitch, and assert the
 # status LED engages/disengages on each debounced press. It also traces physical
-# PA2/PA3 output transitions and pulse timing for all three output variants,
-# plus the boot-health and idle-stability properties the shell's per-tick sanity
-# gate guarantees.
+# PA2/PA3 output transitions for all three variants and checks ordering, polarity,
+# coil exclusion and complete-pulse presence, plus the boot-health and
+# idle-stability properties the shell's per-tick sanity gate guarantees.
 #
 # This is also the in-harness regression for upstream yasimavr WDT patch 0002:
 # were the WINDOW=OFF bug present, the fuse-locked WDT would reset ~every pet and

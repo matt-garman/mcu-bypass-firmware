@@ -13,8 +13,14 @@ deliberately one-shot gate whose original child-tree baseline was deleted. Its
 reviewed successor digests now drive a standing gate, while the migration proof
 and its provenance remain durable only here.
 
-**Current qualification status (2026-07-30): production-qualified and released.**
-Release `v0.9.6` qualified final source commit `d3ba040`: all 18 canonical images
+**Qualification status (2026-08-07):** `v0.9.7` is the current
+production-qualified release. Its retained production record identifies source
+commit `1d2fc877`, all 18 canonical images, and 15 full-duration soak
+combinations under `release/v0.9.7/`. The current `v0.9.8` candidate has narrow
+change evidence but is not yet production-qualified.
+
+Release `v0.9.6`, the first unified release, qualified final source commit
+`d3ba040`: all 18 canonical images
 built, the required AVR-XT and PIC host/target aggregates passed, and all 15
 release soak combinations completed their full 24-hour simulated durations. The
 retained `QUALIFICATION`, manifest, image checksums and lane/soak evidence live
@@ -30,8 +36,8 @@ remain historical evidence at their recorded tips unless they explicitly cite
 the retained `v0.9.6` production record or identify current candidate evidence.
 The `v0.9.8` Run 4 results below were produced on 2026-08-06 from the exact
 firmware and tests committed with this document. They are narrow change evidence,
-not retained production qualification; R10 records the later clean-server and
-full-duration release evidence.
+not retained production qualification; final clean-server and full-duration
+`v0.9.8` qualification remains pending.
 
 ---
 
@@ -173,8 +179,8 @@ an intentional, reviewed firmware/toolchain change in the same commit.
 
 Measured during the merge on XC8 V3.10 + PIC10-12Fxxx DFP 1.9.189, gpsim 0.32.1,
 all three output variants unless noted. These results establish the implemented
-lanes and historical baseline; the status note above links the current production
-evidence.
+lanes and historical baseline; the status note above distinguishes that
+historical production evidence from current-candidate evidence.
 
 | Lane | Result |
 | --- | --- |
@@ -320,9 +326,9 @@ worth trusting — nothing rests on timestamps, and the fake linked tests log th
 executed path so a removed binary-run recipe cannot pass on compile counts alone.
 
 It is **not** byte-for-byte XC8 reproducibility, and it does not by itself
-qualify exact-final-source PIC10F320 images. The separate `pic10f320-test-build`
-gate owns emitted-byte comparison (§2); the production aggregates and retained
-evidence named in the status section own the qualification claim.
+qualify exact-final-source PIC10F320 images. For a released version, its
+production aggregates and retained release evidence own the qualification
+claim.
 `pic10f320-coverage-check-fw` is deliberately outside the probe altogether: every
 invocation uses a new `mktemp` directory and requires fresh `.gcda`/`.gcov`
 evidence, so it has no prior artifact a later request could reuse.
@@ -428,7 +434,7 @@ Stated so nobody has to infer it:
 ## 7. Reproducing any of this
 
 ```
-make pic10f320-test                    # all lanes; each build stack-checks its final HEX
+make pic10f320-test                    # pre-hardware aggregate; each build stack-checks its final HEX
 make pic10f320-test-return-stack       # fresh all-image stack recheck + depth witnesses
 make pic10f320-test-target-variants    # fail-closed libgpsim fault/lock-step/I-O
 make test-pic-build                    # host fake-tool image/rebuild regression

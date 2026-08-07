@@ -75,7 +75,9 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
   - Built-image simulator validation: simavr for AVR Classic and gpsim/libgpsim
     for PIC10F322 provide functional, fault-injection, lock-step, target-I/O,
     and soak tests; yasimavr for AVR-XT (ATtiny202) provides functional,
-    fault-injection, lock-step, physical target-output timing, and soak tests. The
+    fault-injection, lock-step, PA2/PA3 transition ordering, polarity,
+    pulse-presence, and soak tests. A separate built-image disassembly oracle
+    verifies the compiled 5 ms mute and 12 ms relay delay-body cycle counts. The
     PIC10F320's directly implemented algorithm is additionally compared with the
     verified core, tick for tick, by scoped host and real-image lock-step lanes
   - Mutation tests (deliberately break code to prove tests catch
@@ -142,7 +144,7 @@ toolchain plus the fetched-on-demand Microchip device files and a patched
 ```
 make attiny202             # build all variants + 2 KB flash-budget gate
 make attiny202-test        # all pre-hardware checks (fuses, budget, analysis, pulse widths)
-make attiny202-sim         # yasimavr functional + PA2/PA3 transition/timing test
+make attiny202-sim         # yasimavr functional + PA2/PA3 transition/pulse-presence test
 make attiny202-fault       # fault-injection: corrupt a guarded SFR/state, assert recovery
 make attiny202-lockstep    # ctx_-vs-verified-core co-simulation, every settled tick
 make attiny202-soak        # long-duration liveness soak (XT_SOAK_DURATION_MS=)

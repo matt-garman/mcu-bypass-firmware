@@ -1172,11 +1172,11 @@ structure the PIC10F320 work established:
 | Flashing — including the §8 OSCCAL and bandgap procedures | `release/README.md` |
 | MISRA status and any new deviations | `MISRA_COMPLIANCE.md` |
 
-Two corrections to **existing** documents fall out of §4.3 and are worth making
-whether or not this port happens, because both are statements about the
-PIC10F322 that this analysis measured directly:
+The PIC10F322 linker finding in §4.3 and the later PIC10F322 return-stack
+measurement produced two corrections to its existing design notes. Both have
+now been applied, independent of whether this port happens:
 
 | Document | Correction |
 |---|---|
-| `docs/phase2_pic_shell.md` §6 | Its "if a future revision ever added an ISR … that change must add explicit protection" is over-broad. The ISR/`main()` shared set is one `uint8_t` plus a flag, so the AVR's lock-free protocol ports without `-fshort-enums` (§4.3.2 item 1) |
-| `docs/phase2_pic_shell.md` §1 | Model B's rationale is still correct, but it now has a fourth, unstated and decisive reason on that part: the ISR alternative no longer fits the PIC10F322's flash (§4.3) |
+| `docs/phase2_pic_shell.md` §6 | Protection is now required only for a future multi-byte shared object; the documented single-byte option preserves the AVR's lock-free protocol without `-fshort-enums` (§4.3.2 item 1). |
+| `docs/phase2_pic_shell.md` §1 | The original three reasons remain historical rationale; a separate later retention reason now records the relay ISR link failure, inferred flash occupancy and measured return-stack limit (`non-blocking_output_schemes_feasibility.md` §§2.2–2.4). |

@@ -1043,7 +1043,7 @@ file is the human-readable summary of *what changed*.
   exercises it — plus dedicated cases for the inline-asm restore, a genuine
   mid-body psect switch, a marker that would otherwise inherit the preceding
   psect, and a malformed directive.
-  
+
 - **The PIC12F675 feasibility assessment recommended an ISR model whose return
   stack had never been measured.** Its flash/RAM builds and one gpsim trajectory
   succeeded, but both PIC parts have the same 8-level hardware stack and the

@@ -1323,6 +1323,16 @@ shipping conversion starts:
 10. The exact spike sources are retained long enough for independent rebuild and
     review; prose reproduction steps are useful evidence and not a substitute for
     reviewing the implementation whose size is being accepted.
+11. If the redesign is adopted, update its owning documents in the same change:
+    `phase2_pic_shell.md` §§4–5 must describe serialized boot and timer-dependent
+    completion; `pic10f320_special_case.md` §§4–5 must define and price
+    direction-specific transient latch semantics and add actuation timing to the
+    manually synchronized surface, explicitly noting the equivalence limit;
+    `test/README.md` must describe the watchdog-independent serviced-tick seam
+    and phase-aware complete-output comparison/injection for both PIC layers;
+    and `DESIGN_DOCUMENTATION.adoc` must derive minimum and maximum physical
+    widths from accepted-tick semantics, loop position/WCET and oscillator
+    tolerance rather than retaining the blocking-delay statement.
 
 **Use the four-function `_pre`/`_post` interface, not a parameterised pair.**
 This is settled by measurement rather than taste (§3.2, §6.2), and getting it
@@ -1454,23 +1464,19 @@ xc8-cc -mcpu=10F320 -mdfp=<DFP> -std=c99 -O2 \
 
 ## 11. Cross-document follow-ups
 
-The two PIC12F675 corrections identified by the original review have now been
-applied in the owning document: ISR flash fit is no longer presented as
-return-stack affordability, and the PIC10F322 linker failure is described as
-fragmentation at 511/512 rather than simply "two words" oversized. The
-PIC10F320 relay-specific consequence and mitigation have likewise been applied
-to `pic10f320_special_case.md`. The remaining follow-ups below are recorded,
-**not applied**, because each belongs to its owning document.
+The two PIC12F675 corrections identified by the original review have been
+applied in their owning document, and the PIC10F320 relay-specific consequence
+and mitigation have been applied to `pic10f320_special_case.md`.
 
-| Document | Claim | Correction |
-|---|---|---|
-| `phase2_pic_shell.md` §1 | Model B is justified by three reasons. | There is a fourth, now measured: on the relay variant the ISR alternative does not fit the part — and would exhaust the return-stack reserve even if it did. |
-| `phase2_pic_shell.md` §5 | The tick-stealing divergence from the AVR is accepted behaviour. | Still accurate. Worth a forward reference to this document, which proposes removing the divergence rather than accepting it. |
-| `phase2_pic_shell.md` §4/§5 | Startup actuation completes before the tick starts; a blocking pulse cannot depend on tick progress. | If non-blocking actuation is adopted, document the new serialized boot phase and the fact that timer progress becomes part of relay completion (§5.3, §7.10). |
-| `pic10f320_special_case.md` §4 | The output-latch match does not fit and is deliberately omitted. | Still accurate, and this document depends on it (§6.3). Non-blocking actuation would require direction-specific transient semantics in addition to the stable-state check; that formulation is unpriced and cannot fit within the measured current headroom unless space is recovered. |
-| `pic10f320_special_case.md` §5 | The shared surface is "small, finite and auditable", and the table is all of it. | Accurate today. If this proposal is adopted the table gains an actuation-timing row, and §6.7 records that `pic10f320-test-equiv` would not cover the new state — so the row would be genuinely manual, not merely documented. |
-| `test/README.md` PIC lock-step/fault layers | Loop `CLRWDT` is the once-per-iteration boundary and deterministic injection seam. | Withholding the pet intentionally removes that instruction during active ticks. Both PIC layers need a watchdog-independent serviced-tick boundary and phase-aware output comparison/injection (§6.7, §7.13). |
-| `DESIGN_DOCUMENTATION.adoc` output timing | A 5/12 ms blocking delay defines the mute/relay interval. | Tick-counted output timing needs accepted-tick semantics, loop-position/WCET bounds, oscillator tolerance and explicit minimum/maximum physical widths (§5.5). |
+The two unconditional PIC10F322 follow-ups have also been applied to
+`phase2_pic_shell.md`: Model B now includes the measured ISR flash/return-stack
+reason, and its accepted tick-stealing divergence points forward to this
+assessment.
+
+The remaining follow-ups were conditional on adopting non-blocking actuation,
+so applying them to the current blocking documentation would be inaccurate.
+Their owning-document obligations have instead been migrated into §9 item 11
+and must be completed atomically with any accepted implementation.
 
 Corrections inside **this** document have been applied rather than merely
 recorded. The first two are cases where a later measurement overturned an earlier
