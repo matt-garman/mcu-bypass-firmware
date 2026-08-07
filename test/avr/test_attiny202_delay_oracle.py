@@ -5,8 +5,8 @@
 # test_attiny202_delay_oracle.py -- verify the ABSOLUTE width of the ATtiny202
 # coil-pulse blocking delays directly from the COMPILED IMAGE.
 #
-# WHY THIS EXISTS (and why the width is NOT checked in the yasimavr harness)
-# -------------------------------------------------------------------------
+# WHY THIS EXISTS (and how it divides work with the yasimavr harness)
+# ------------------------------------------------------------------
 # The relay SET/RESET pulse (12 ms) and the muted-x4053 mute window (5 ms) are
 # avr-libc _delay_ms() busy loops (src/bypass_blocking_delay.h). Their duration
 # is therefore a pure function of the CPU CYCLE COUNT baked into the image at
@@ -14,41 +14,36 @@
 #
 # Reading that count out of the image is the tightest and most direct check
 # available: it is simulator-independent, it needs no running device, and it
-# resolves the width to a few loop iterations (+/-0.10 ms below) rather than to a
-# trace's sampling granularity. That is why this oracle owns the ABSOLUTE WIDTH
-# even though a simulator can now measure it too, and the yasimavr harness
-# (test_sim_attiny202.py) keeps only the STRUCTURAL pulse checks -- a complete
-# pulse of the right polarity, correct ordering, coil exclusion.
+# resolves the width to a few loop iterations (+/-0.10 ms below). That is why
+# this oracle owns the ABSOLUTE DESIGN WIDTH even though a simulator can measure
+# a width too.
 #
-# A NOTE ON THE PINNED SIMULATOR (corrected 2026-08-02)
-# ----------------------------------------------------
-# Earlier revisions of this header said the split existed because yasimavr 0.1.6
-# "charges a flat ~1 cycle per instruction". THAT WAS WRONG. Its AVR-XT core does
-# model multi-cycle instruction timing. The real defect is in SimLoop.run():
-# given a cycle budget it forces the cycle counter to first_cycle + nbcycles on
-# return, which REWINDS the counter whenever the last instruction overshoots the
-# requested end. A harness that advances in very small budgets therefore loses up
-# to one instruction's worth of cycles per call -- and at run(1), one instruction
-# per call, every instruction is billed exactly 1 cycle. That is what made a 12 ms
-# pulse trace as ~6 ms here: trace_outputs() in test_sim_attiny202.py samples the
-# control pins one cycle at a time (OUTPUT_SAMPLE_CYCLES).
+# The yasimavr harness (test_sim_attiny202.check_pulse_width) measures something
+# related but distinct: the DELIVERED width, the span the pin actually held,
+# taken from exact traced transition cycles. Expect it slightly ABOVE the
+# compiled width, because the 1 ms TCB0 tick ISR preempts the busy loop at ~110
+# cycles a tick -- about 5.5% of elapsed time whatever the pulse length, so the
+# 12 ms pulse occupies ~12.67 ms of pin-high time and the 5 ms mute ~5.28 ms.
+# (The relay's startup pulse runs before sei() and so measures ~12.01 ms.) The
+# compiled loop count this oracle reads is the delay proper, which is what the
+# design specifies; neither check subsumes the other.
 #
-# Reported upstream; the maintainer confirmed it and has a fix (skip the
-# adjustment when the counter already passed the end). Verified against a local
-# rebuild of 0.1.6 carrying that guard: the relay pulse then measures 12.669 ms
-# at single-cycle sampling and `make attiny202-sim` still passes unchanged. The
-# pinned 0.1.6 release does NOT carry the fix (scripts/fetch_yasimavr.sh pins the
-# sdist by SHA-256), so the harness keeps sampling structurally, not by width.
+# A NOTE ON THE PINNED SIMULATOR (corrected 2026-08-02, superseded 2026-08-07)
+# ---------------------------------------------------------------------------
+# Earlier revisions of this header said the harness could not check width at all,
+# first because yasimavr 0.1.6 "charges a flat ~1 cycle per instruction" (WRONG:
+# its AVR-XT core does model multi-cycle instruction timing), then because of the
+# real defect -- SimLoop.run() forces the cycle counter to first_cycle + nbcycles
+# on return, REWINDING it whenever the last instruction overshoots, so a caller
+# advancing in tiny budgets loses up to one instruction's worth of cycles per
+# call and at run(1) bills every instruction exactly 1 cycle.
 #
-# Either way the built ELF was always correct for real 2 MHz silicon, and
-# yasimavr's TCB0-tick timing was never affected: the tick period is counted by
-# the peripheral, and the 2000-cycle (1 ms) budgets the debounce/LED tests
-# advance by lose under 0.2% to the rewind.
-#
-# Expect a TRACED width slightly ABOVE the compiled one: the 1 ms TCB0 tick ISR
-# preempts the busy loop at ~110 cycles a tick, so the 12 ms pulse occupies
-# ~12.67 ms of pin-high time and the 5 ms mute ~5.28 ms. The compiled loop count
-# this oracle reads is the delay proper, which is what the design specifies.
+# That defect is real, is reported upstream and confirmed with a fix pending
+# release, but it no longer reaches this project: the output tracer no longer
+# steps cycle by cycle. It free-runs in millisecond budgets and timestamps pin
+# edges from a signal hook, which measures the true widths on the pinned 0.1.6.
+# TCB0-tick timing was never affected either way -- the tick period is counted by
+# the peripheral, not by summing instruction cycles.
 #
 # WHAT IT CHECKS
 #   For each built variant image it disassembles the flash (avr-objdump -d),
