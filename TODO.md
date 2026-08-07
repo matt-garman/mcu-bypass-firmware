@@ -1,13 +1,12 @@
 # Remaining work toward textbook reference quality
 
-**Status (2026-08-06):** No nominal-path firmware correctness defect is
-currently known. The PIC10F320 relay idle-latch gap is closed in the current
-candidate; bounded relay fault-abort hardening below remains open. The
-PIC10F320 relay image now carries that intentional firmware change from
-`v0.9.7`; however, the current `v0.9.8` candidate does not yet have authoritative
-full-toolchain `make test`, `make test-long`, real-XC8 stack, static-assert, or
-final 17-identical + 1-intentional-change release results. Narrow results and
-pending release validation are tracked in `v0.9.8-TODO.md`.
+**Status (2026-08-08):** No nominal-path firmware correctness defect is
+currently known. Release `v0.9.8` closes the PIC10F320 relay idle-latch gap;
+bounded relay fault-abort hardening below remains open. Its authoritative
+full-toolchain, target, stack, mutation, soak and final-image evidence is retained
+under `release/v0.9.8/`. The PIC10F320 relay image is the one intentional binary
+change from `v0.9.7`; rename-identity evidence pins the other 17 images as
+byte-identical.
 
 This file contains open actions only. Completed work is removed rather than
 kept as implementation journals; Git history and `CHANGELOG.md` are the record.
@@ -34,8 +33,8 @@ or parameter references to `DESIGN_DOCUMENTATION.adoc` for:
 `test/avr/test_fuses.c` already identifies the relevant datasheets and fuse
 sections; the gap is precise design-document traceability, not a complete
 absence of AVR references. Cross-check fuse encodings against the values the
-Makefile injects and burns, and do not guess section numbers. This remains
-deferred for `v0.9.8` unless the source datasheets are readily available.
+Makefile injects and burns, and do not guess section numbers. This was deferred
+from `v0.9.8`; complete it as post-release reference-grade traceability work.
 
 Dependencies: exact AVR vendor datasheets. Effort: about 1 hour with the source
 documents open. Risk if deferred: incomplete reference-grade traceability, not

@@ -28,7 +28,9 @@ file is the human-readable summary of *what changed*.
 > unified release onward there is one timeline, with PIC10F320 changes recorded
 > as a sub-lane inside each entry.
 
-## [0.9.8] — unreleased
+## [Unreleased]
+
+## [0.9.8] - 2026-08-08
 
 ### Added
 - **Release step 0 is now independently runnable and regression-tested.**
@@ -2502,7 +2504,8 @@ file is the human-readable summary of *what changed*.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[0.9.8]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.7...HEAD
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.8...HEAD
+[0.9.8]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.7...v0.9.8
 [0.9.7]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.6...v0.9.7
 [0.9.6]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.4...v0.9.5

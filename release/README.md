@@ -7,10 +7,10 @@ documentation marks them as superseded. Each release lives in its own
 `vX.Y.Z/` subdirectory and is also published as a
 [GitHub Release](https://github.com/matt-garman/mcu-bypass-firmware/releases).
 
-> **Current availability:** `v0.9.7` is the current release, with prebuilt
-> firmware for all six release targets. `v0.9.6` was the first unified 18-image
-> release and introduced the first ATtiny202 and PIC10F320 images in this
-> release line.
+> **Current availability:** `v0.9.8` is the current release, with 18 prebuilt
+> firmware images covering all six release targets and three output stages.
+> `v0.9.6` was the first unified 18-image release and introduced the first
+> ATtiny202 and PIC10F320 images in this release line.
 
 ## Safety warning: v0.9.0-v0.9.2 TMUX images
 
@@ -196,7 +196,7 @@ correction and is required to differ:
 every serviced iteration. The exact new bytes remain pinned by the PIC10F320
 expected-image manifest and the release checksum manifest.
 
-The final release will retain the checked result in
+The release retains the checked result in
 `release/v0.9.8/RENAME_IDENTITY.md`, listing both digests and the verdict for
 every image. Release creation fails before its soak unless exactly 17 images are
 identical and exactly the named relay image differs, with no missing, added, or

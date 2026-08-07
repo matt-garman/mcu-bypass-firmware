@@ -1,11 +1,11 @@
 # PIC10F320 — the constrained target
 
-**Status:** release-supported since `v0.9.6`. The production qualification named
-here is historical `v0.9.6` evidence, not qualification of the current `v0.9.8`
-candidate. The target remains architecturally different from every other target
-in this repository. This document is the single authoritative statement of that
-difference; execution evidence, its exact scope, release history and current
-candidate status live in `docs/pic10f320_validation.md`.
+**Status:** release-supported since `v0.9.6` and production-qualified in the
+current `v0.9.8` release. The target remains architecturally different from every
+other target in this repository. This document is the single authoritative
+statement of that difference; execution evidence, its exact scope, release
+history and current qualification status live in
+`docs/pic10f320_validation.md`.
 
 **Read this if** you are choosing an MCU, reviewing the assurance argument, or
 wondering why one firmware file looks unlike the rest of `src/`.

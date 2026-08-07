@@ -13,11 +13,15 @@ deliberately one-shot gate whose original child-tree baseline was deleted. Its
 reviewed successor digests now drive a standing gate, while the migration proof
 and its provenance remain durable only here.
 
-**Qualification status (2026-08-07):** `v0.9.7` is the current
-production-qualified release. Its retained production record identifies source
-commit `1d2fc877`, all 18 canonical images, and 15 full-duration soak
-combinations under `release/v0.9.7/`. The current `v0.9.8` candidate has narrow
-change evidence but is not yet production-qualified.
+**Qualification status (2026-08-08):** `v0.9.8` is the current
+production-qualified release. Its authoritative `QUALIFICATION`, manifest,
+image checksums, rename-identity result and exact lane/soak evidence live under
+`release/v0.9.8/`; that retained record, rather than this summary, identifies
+the qualified source commit and measured results.
+
+The preceding `v0.9.7` production record identifies source commit `1d2fc877`,
+all 18 then-canonical images, and 15 full-duration soak combinations under
+`release/v0.9.7/`.
 
 Release `v0.9.6`, the first unified release, qualified final source commit
 `d3ba040`: all 18 canonical images
@@ -33,11 +37,10 @@ release gates including the corrected 74/74 mutation run, and ran all 12
 then-canonical soak combinations for 60 seconds. It was explicitly
 non-publishable and predates the final production contract. Numeric results below
 remain historical evidence at their recorded tips unless they explicitly cite
-the retained `v0.9.6` production record or identify current candidate evidence.
-The `v0.9.8` Run 4 results below were produced on 2026-08-06 from the exact
-firmware and tests committed with this document. They are narrow change evidence,
-not retained production qualification; final clean-server and full-duration
-`v0.9.8` qualification remains pending.
+a retained production record or identify narrow change evidence. The `v0.9.8`
+Run 4 results below were produced on 2026-08-06 from the exact firmware and tests
+committed with this document. They remain useful narrow change evidence but do
+not replace the retained clean-server, full-duration `v0.9.8` qualification.
 
 ---
 
@@ -180,7 +183,7 @@ an intentional, reviewed firmware/toolchain change in the same commit.
 Measured during the merge on XC8 V3.10 + PIC10-12Fxxx DFP 1.9.189, gpsim 0.32.1,
 all three output variants unless noted. These results establish the implemented
 lanes and historical baseline; the status note above distinguishes that
-historical production evidence from current-candidate evidence.
+historical evidence from the current retained production record.
 
 | Lane | Result |
 | --- | --- |
