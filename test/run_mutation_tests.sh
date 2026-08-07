@@ -119,12 +119,36 @@ export PIC_SOAK_CXX PIC10F320_SOAK_CXX
 # Resolved by asking which release image carries the wanted stage, so a stage
 # that no longer exists fails HERE, once, by name -- not as a missing file per
 # mutant.
+#
+# --no-print-directory is REQUIRED, not decorative, and `-s` does NOT cover it.
+# GNU Make turns on -w in a sub-make and then propagates a literal `w` in
+# MAKEFLAGS; an explicit -w inherited that way OVERRIDES -s, so the capture
+# below silently becomes three lines -- "Entering directory ...", the value,
+# "Leaving directory ...". Whether that happens depends on how this suite was
+# entered, which is why it hid for so long:
+#
+#   make test-long / make test-mutation  -> the worktree-serialization wrapper
+#       re-execs with --no-print-directory, MAKEFLAGS is clean, resolution works
+#   make release -> make-release.sh -> make test-long  -> that Make is a
+#       sub-make, MAKEFLAGS carries `w`, and PIC10F322_BUILD_DIR came back with
+#       the directory banner glued to it
+#
+# The corrupted path made `[ -f "$hex" ]` false in the probe below, which the
+# summary reported as "PIC-shell mutants: SKIPPED (tools absent)" on a host with
+# the whole PIC toolchain installed -- 15 mutants unenforced, blamed on an
+# absent tool. Exactly the silent-shrink failure the comment above describes,
+# reached through Make's output rather than through a rename. The whitespace
+# guard is the fail-closed backstop: this resolution yields ONE bare path word,
+# so anything else fails HERE, by name, instead of degrading to a skip.
 PIC10F322_MUTATION_VARIANT="${PIC10F322_MUTATION_VARIANT:-cd4053_simple}"
 resolve_pic10f322_mutation_hex() {
     local dir images matched
-    dir=$("$MUTATION_MAKE" -s -C "$PROJ_DIR" print-PIC10F322_BUILD_DIR) || return 1
-    images=$("$MUTATION_MAKE" -s -C "$PROJ_DIR" print-PIC10F322_RELEASE_IMAGES) || return 1
+    dir=$("$MUTATION_MAKE" -s --no-print-directory -C "$PROJ_DIR" \
+        print-PIC10F322_BUILD_DIR) || return 1
+    images=$("$MUTATION_MAKE" -s --no-print-directory -C "$PROJ_DIR" \
+        print-PIC10F322_RELEASE_IMAGES) || return 1
     [ -n "$dir" ] && [ -n "$images" ] || return 1
+    case $dir in *[[:space:]]*) return 1 ;; esac
     matched=$(printf '%s\n' $images | grep -c -- "-${PIC10F322_MUTATION_VARIANT}\.hex$")
     [ "$matched" -eq 1 ] || return 1
     printf '%s/%s\n' "$dir" \
@@ -132,7 +156,8 @@ resolve_pic10f322_mutation_hex() {
 }
 if ! PIC10F322_MUTATION_HEX=$(resolve_pic10f322_mutation_hex); then
     echo "ERROR: cannot resolve the PIC10F322 ${PIC10F322_MUTATION_VARIANT} image" \
-         "from the Makefile; PIC10F322_RELEASE_IMAGES names no such output stage" >&2
+         "from the Makefile; either PIC10F322_RELEASE_IMAGES names no such output" \
+         "stage, or print-PIC10F322_BUILD_DIR did not return one bare path word" >&2
     exit 1
 fi
 readonly PIC10F322_MUTATION_HEX
