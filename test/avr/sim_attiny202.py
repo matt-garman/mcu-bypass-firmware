@@ -131,6 +131,87 @@ def resolve_elf(arg=None):
 
 NM = os.environ.get("AVR_NM", "avr-nm")
 
+# --- pin state ---------------------------------------------------------------
+StateEnum = _core.Pin.StateEnum
+
+
+def level_of_state(state):
+    """Map a Pin.StateEnum value to a driven level of 0 or 1, else None.
+
+    None means "not driven High or Low": floating, pulled, analog, shorted or
+    error. Shared by the polled Sim.control_levels() and by PinEdgeRecorder, so
+    the sampled and the event-driven views of a pin cannot drift apart on what
+    counts as driven.
+    """
+    if state == StateEnum.Low:
+        return 0
+    if state == StateEnum.High:
+        return 1
+    return None
+
+
+class PinEdgeRecorder:
+    """An exact transition log for a set of pins, captured as the edges happen.
+
+    This is the pattern yasimavr's author recommends for observing a GPIO
+    transition at better than sampling resolution: a CallableSignalHook
+    connected to Pin.signal(), filtered to the signal id of interest, while the
+    simulation free-runs. Upstream's examples/mega328_blink is the reference.
+
+    It replaces stepping the simulator one cycle at a time and re-reading
+    pin.state(). That cost tens of thousands of SimLoop.run(1) calls per traced
+    segment and, because 0.1.6 rewinds its cycle counter when a run() budget is
+    overshot, billed every instruction exactly one cycle -- which halved every
+    width measured inside a trace. Free-running in millisecond budgets and
+    timestamping the edges themselves measures the real widths.
+
+    Filtered on StateChange rather than DigitalChange deliberately: a
+    StateChange payload is the full Pin.StateEnum, so a pin that is not driven
+    at all stays distinguishable from one driven Low. DigitalChange collapses
+    both to 0, and does not fire at all when the shell first takes a floating
+    pin Low -- which is exactly the safe-startup edge the output tracer has to
+    see.
+    """
+
+    def __init__(self, sim, pins):
+        self._sim = sim
+        self._events = []
+        # yasimavr does not take ownership of a hook, so these Python objects
+        # must outlive the connection or the signal calls into freed memory.
+        self._hooks = []
+        for index, pin in enumerate(pins):
+            hook = _core.CallableSignalHook(self._make_callback(index))
+            pin.signal().connect(hook)
+            self._hooks.append(hook)
+
+    def _make_callback(self, index):
+        def callback(sigdata, hooktag):
+            # This must never raise. An exception escaping into the C++ signal
+            # dispatcher aborts the whole process through std::terminate, with
+            # no Python traceback to explain it -- so check the signal id AND
+            # the payload type before reading a value out of the payload.
+            if sigdata.sigid != _core.Wire.SignalId.StateChange:
+                return
+            data = sigdata.data
+            if data.type() != _core.vardata_t.Type.Uinteger:
+                return
+            self._events.append(
+                (self._sim.cycle(), index, level_of_state(data.as_uint())))
+        return callback
+
+    def drain(self):
+        """Return the edges recorded since the last drain, and forget them.
+
+        Each entry is (cycle, pin index, driven level or None), oldest first.
+        Pins changed by one instruction share a cycle, so a caller that
+        reconstructs a combined state must fold a whole cycle's worth of edges
+        before judging it -- otherwise a single write fabricates an
+        intermediate state the hardware never presented.
+        """
+        events = self._events
+        self._events = []
+        return events
+
 
 def _read_symbols(elf_path):
     """Return [(addr, name), ...] from `avr-nm -n`, sorted by address.
@@ -180,11 +261,12 @@ class Sim:
     the footswitch/LED and the register reads the drivers need.
     """
 
-    StateEnum = _core.Pin.StateEnum
+    StateEnum = StateEnum
 
     def __init__(self, elf_path, f_cpu=F_CPU_HZ):
         self.f_cpu = f_cpu
         self.elf_path = elf_path
+        self._control_edges = None
 
         # Resolve per-variant SRAM addresses from the ELF (avr-nm) so the harness
         # never hard-codes them: the debounce context + the ISR handshake flag.
@@ -265,15 +347,18 @@ class Sim:
 
     def control_levels(self):
         """Physical PA2/PA3 levels as 0/1; a non-driven level is None."""
-        def level(pin):
-            state = pin.state()
-            if state == self.StateEnum.Low:
-                return 0
-            if state == self.StateEnum.High:
-                return 1
-            return None
+        return level_of_state(self.ctl1.state()), level_of_state(self.ctl2.state())
 
-        return level(self.ctl1), level(self.ctl2)
+    def control_edges(self):
+        """Return the PA2/PA3 edge recorder, attaching its hooks on first use.
+
+        Lazy on purpose. Only the functional driver traces output transitions;
+        the soak and fault drivers never ask, so they neither pay for the hook
+        callbacks nor accumulate an event list across a multi-hour run.
+        """
+        if self._control_edges is None:
+            self._control_edges = PinEdgeRecorder(self, (self.ctl1, self.ctl2))
+        return self._control_edges
 
     def control_state(self):
         """Physical PA2/PA3 levels as bit0/bit1, or None if not both driven."""

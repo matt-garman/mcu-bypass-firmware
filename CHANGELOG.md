@@ -568,6 +568,37 @@ file is the human-readable summary of *what changed*.
   offer them to `git add -A` forever.
 
 ### Changed
+- **The ATtiny202 output tracer now watches pin edges the way yasimavr's author
+  recommends, and asserts the delivered coil-pulse width.** It used to advance
+  the simulation one cycle at a time and re-read `pin.state()`. Asked directly,
+  upstream recommended a `CallableSignalHook` connected to `pin.signal()`,
+  filtered by signal id, while the simulation free-runs — so the tracer now does
+  that (`sim_attiny202.PinEdgeRecorder`), filtering `StateChange` rather than
+  `DigitalChange` because only the former keeps a floating pin distinguishable
+  from one driven low, and only the former fires when the shell first takes a
+  floating control pin low.
+
+  Three consequences. Every transition now carries its exact cycle, so
+  `attiny202-sim` asserts the pulse *width* it delivers and not only its
+  structure: the relay coil measures 12.014–12.669 ms and the mute window
+  5.28 ms against a band of the design width less the delay oracle's compile
+  rounding, plus 10% for tick-ISR preemption. The compiled design width stays
+  owned by `attiny202-delay-oracle`, which reads it from the image independently
+  of any simulator; what the trace adds is the ~5.5% the tick ISR stretches a
+  busy loop by, which a compile-time count cannot show. Second, the upstream
+  `SimLoop.run()` cycle-rewind defect no longer reaches any measurement this
+  project makes — that defect is what made a 12 ms pulse trace as ~6 ms, and it
+  only ever applied to single-cycle stepping. Third, the traced segments run
+  about 5× faster.
+
+  Edges that share a cycle are folded before the combined PA2/PA3 state is
+  judged, so one instruction changing both pins cannot fabricate an intermediate
+  state — for the relay that would have been a spurious both-coils-high report.
+  The stall check moved from a cycle delta, which `SimLoop.run()` pins to the
+  full budget even when the device halts early, to the device reaching its
+  terminal state, which is the condition that actually means it stopped.
+  `test_attiny202_output_oracle.py` gained host-side cases for the folding rule
+  and for width faults at both the checker and the orchestration level.
 - **A `-D` macro a test harness must be told is now a build error when it is not
   told, instead of a plausible default.** The C-side twin of the name-contract
   axes: the Makefile injects 56 macros, 26 of which had `#ifndef` fallbacks that

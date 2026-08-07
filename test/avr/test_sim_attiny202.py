@@ -22,6 +22,7 @@ import os
 import sys
 
 import sim_attiny202 as S
+import test_attiny202_delay_oracle as Delay
 
 # Hold times: comfortably past the debounce thresholds (8 ms press, 25 ms
 # release) so a press/release is unambiguously registered.
@@ -31,13 +32,25 @@ SETTLE_MS = 50
 IDLE_STABILITY_MS = 250     # idle soak for the sanity-gate / no-spurious-reset check
 N_TOGGLES = 6
 
-# Physical output tracing runs one simulator cycle at a time so even a one-cycle
-# wrong ordering or dual-coil state is observable. This driver asserts pulse
-# ORDERING/POLARITY/exclusion, not wall-clock WIDTH -- see check_pulse_present()
-# for why absolute coil-pulse width is verified from the image by
-# test_attiny202_delay_oracle.py instead.
-OUTPUT_SAMPLE_CYCLES = 1
+# Physical output tracing free-runs and captures every PA2/PA3 edge from a
+# signal hook (sim_attiny202.PinEdgeRecorder), so even a one-cycle wrong
+# ordering or dual-coil state is observable, and each transition carries its
+# exact cycle. This driver asserts pulse ORDERING/POLARITY/exclusion and the
+# DELIVERED width; the absolute design width stays owned by the compiled-image
+# oracle test_attiny202_delay_oracle.py -- see check_pulse_width().
 OUTPUT_TRACE_MS = 30
+
+# Coil-pulse width band, as a fraction above and (via the oracle's tolerance)
+# below the design width. The lower edge reuses the delay oracle's compile
+# rounding tolerance, because avr-libc emits e.g. a 5999-iteration loop for
+# 12 ms, i.e. 11.998 ms. The upper edge allows for tick-ISR preemption: the 1 ms
+# TCB0 ISR interrupts the busy loop for roughly 110 cycles a tick, about 5.5% of
+# elapsed time whatever the pulse length (measured: relay 12.014 ms during
+# startup, before sei(), through 12.669 ms once ticking; muted x4053 5.279 ms).
+# 10% therefore allows nearly twice the observed preemption overhead -- 1.2 ms
+# against 0.67 ms on the relay coil, 0.5 ms against 0.28 ms on the mute window
+# -- while still rejecting a half-width or double-width pulse.
+PULSE_PREEMPTION_MARGIN = 0.10
 
 VARIANTS = ("cd4053_simple", "cd4053_with_mute", "tq2_l2_5v_relay")
 
@@ -87,24 +100,41 @@ def state_from_levels(levels):
 
 
 def trace_outputs(sim, name, milliseconds):
+    """Free-run for `milliseconds` and fold the recorded PA2/PA3 edges into a
+    transition trace.
+
+    Edges arrive from a signal hook, so every transition is captured with its
+    exact cycle however briefly it lasts, and the simulation advances in one
+    millisecond-scale budget instead of being stepped a cycle at a time. Edges
+    sharing a cycle -- one instruction changing both control pins -- are folded
+    together before the combined state is judged, so a single write can never
+    fabricate an intermediate state the hardware never presented.
+    """
+    recorder = sim.control_edges()
     trace = OutputTrace(name)
-    levels = sim.control_levels()
+    levels = list(sim.control_levels())
     previous = state_from_levels(levels)
     trace.unsafe_before_config = previous is None and 1 in levels
     if previous is not None:
         trace.configured = True
         trace.initial_state = previous
         trace.saw_both_high = previous == 0x3
-    end_cycle = sim.cycle() + sim.cycles(milliseconds)
 
-    while sim.cycle() < end_cycle:
-        before = sim.cycle()
-        sim.run_cycles(min(OUTPUT_SAMPLE_CYCLES, end_cycle - before))
-        after = sim.cycle()
-        if after <= before:
-            trace.stalled = True
-            break
-        levels = sim.control_levels()
+    sim.run_ms(milliseconds)
+    # SimLoop.run() pins its cycle counter to first_cycle + budget even when the
+    # device halts early, so a cycle delta cannot witness a stall. The device
+    # reaching its terminal Done state is the condition that actually means the
+    # simulation stopped advancing.
+    trace.stalled = sim.is_done()
+
+    events = recorder.drain()
+    index = 0
+    while index < len(events):
+        cycle = events[index][0]
+        while index < len(events) and events[index][0] == cycle:
+            _cycle, pin_index, level = events[index]
+            levels[pin_index] = level
+            index += 1
         state = state_from_levels(levels)
         if state is None:
             if trace.configured:
@@ -120,7 +150,7 @@ def trace_outputs(sim, name, milliseconds):
             continue
         trace.saw_both_high = trace.saw_both_high or state == 0x3
         if state != previous:
-            trace.transitions.append((after, state))
+            trace.transitions.append((cycle, state))
             previous = state
     return trace
 
@@ -138,25 +168,38 @@ def check_trace(ck, trace, expected_states):
              % (trace.name, actual_states, expected_states))
 
 
-def check_pulse_present(ck, trace, pulse_state):
-    """Assert a COMPLETE pulse of `pulse_state` (an edge into it and an edge out)
-    is observed -- the structural coil-pulse property this driver owns.
+def design_pulse_ms(variant):
+    """The single coil-pulse width `variant` is designed to drive, in ms.
 
-    Deliberately does NOT assert the pulse's WALL-CLOCK WIDTH. The coil pulses
-    are avr-libc _delay_ms() busy loops, so their duration is a compile-time
-    CPU-cycle count, and it is checked directly against the disassembled loop by
-    test_attiny202_delay_oracle.py -- a simulator-independent check, tighter than
-    any trace could be. See that file's header for the full rationale.
+    Read from the delay oracle's table so the design width has one definition in
+    the tree. Every variant that pulses at all drives the same width on both the
+    engage and the bypass path; a table that stopped being uniform would make
+    taking the first entry silently wrong, so that is checked rather than
+    assumed. Callers must not ask about a variant with no pulse at all.
+    """
+    widths = Delay.EXPECTED_WIDTHS_MS[variant]
+    if not widths or any(width != widths[0] for width in widths):
+        sys.stderr.write("ERROR: %s has no single design pulse width (%r).\n"
+                         % (variant, widths))
+        sys.exit(2)
+    return widths[0]
 
-    A width check HERE would in any case fail a correct image, because
-    trace_outputs() advances the simulation one cycle at a time
-    (OUTPUT_SAMPLE_CYCLES) and the pinned yasimavr 0.1.6 rewinds its cycle
-    counter when a run() budget is overshot -- at run(1) that bills every
-    instruction 1 cycle, so a 12 ms pulse traces as ~6 ms. That is an upstream
-    SimLoop.run() defect, reported and confirmed with a fix pending release; it
-    is NOT the "flat 1 cycle per instruction" core limitation earlier revisions
-    of this comment claimed, and it never affected TCB0-tick timing, so the
-    debounce/LED/sequence checks elsewhere in this driver stay accurate.
+
+def check_pulse_width(ck, trace, pulse_state, design_ms):
+    """Assert a COMPLETE pulse of `pulse_state` -- an edge into it and an edge
+    back out -- and that the width it held falls inside the design band.
+
+    The width is measured from exact transition cycles, which the signal-hook
+    tracer timestamps as the edges happen while the simulation free-runs.
+
+    This is a cross-check on, not a replacement for,
+    test_attiny202_delay_oracle.py. That oracle reads the compiled _delay_ms
+    loop count straight out of the image: simulator-independent, resolved to a
+    few loop iterations, and it remains what pins the ABSOLUTE width. What this
+    check adds is the DELIVERED width -- what the pin actually held once the
+    1 ms tick ISR has preempted the busy loop -- which a compile-time count
+    structurally cannot show. Its lower edge also subsumes the relay's 4 ms
+    datasheet coil minimum, which the oracle asserts directly.
     """
     start = None
     end = None
@@ -167,9 +210,18 @@ def check_pulse_present(ck, trace, pulse_state):
                 end = trace.transitions[index + 1][0]
             break
 
-    ck.check(start is not None and end is not None,
-             "%s: complete state 0x%X pulse observed"
-             % (trace.name, pulse_state))
+    if not ck.check(start is not None and end is not None,
+                    "%s: complete state 0x%X pulse observed"
+                    % (trace.name, pulse_state)):
+        return
+
+    width_ms = (end - start) * 1000.0 / S.F_CPU_HZ
+    lowest = design_ms - Delay.WIDTH_TOLERANCE_MS
+    highest = design_ms * (1.0 + PULSE_PREEMPTION_MARGIN)
+    ck.check(lowest <= width_ms <= highest,
+             "%s: state 0x%X pulse held %.3f ms, within [%.3f, %.3f] ms of the "
+             "%g ms design width"
+             % (trace.name, pulse_state, width_ms, lowest, highest, design_ms))
 
 
 def test_control_outputs(elf, variant, ck):
@@ -198,23 +250,25 @@ def test_control_outputs(elf, variant, ck):
         ck.check(sim.control_state() == 0x0,
                  "simple x4053: PA2 low and spare PA3 parked low in BYPASS")
     elif variant == "cd4053_with_mute":
+        mute_ms = design_pulse_ms(variant)
         check_trace(ck, startup, [])
         check_trace(ck, engage, [0x2, 0x3])
         check_trace(ck, bypass, [0x2, 0x0])
-        check_pulse_present(ck, engage, 0x2)
-        check_pulse_present(ck, bypass, 0x2)
+        check_pulse_width(ck, engage, 0x2, mute_ms)
+        check_pulse_width(ck, bypass, 0x2, mute_ms)
         ck.check(sim.control_state() == 0x0,
                  "muted x4053: PA2/PA3 finish at BYPASS 0x0")
     else:
+        coil_ms = design_pulse_ms(variant)
         check_trace(ck, startup, [0x1, 0x0])
         check_trace(ck, engage, [0x2, 0x0])
         check_trace(ck, bypass, [0x1, 0x0])
         for trace in (startup, engage, release_one, bypass, release_two):
             ck.check(not trace.saw_both_high,
                      "%s: relay coils were never both high" % trace.name)
-        check_pulse_present(ck, startup, 0x1)
-        check_pulse_present(ck, engage, 0x2)
-        check_pulse_present(ck, bypass, 0x1)
+        check_pulse_width(ck, startup, 0x1, coil_ms)
+        check_pulse_width(ck, engage, 0x2, coil_ms)
+        check_pulse_width(ck, bypass, 0x1, coil_ms)
         ck.check(sim.control_state() == 0x0,
                  "relay: PA2/PA3 coils finish parked low")
 

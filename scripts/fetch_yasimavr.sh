@@ -27,42 +27,42 @@
 #   This is the yasimavr analogue of scripts/fetch_attiny_dfp.sh (which vendors
 #   the ATtiny_DFP device files for the compiler).
 #
-# KNOWN LIMITATION (a THIRD upstream bug, NOT patched here -- see below)
+# A THIRD UPSTREAM BUG, NOT PATCHED HERE AND NO LONGER REACHED
 #   0.1.6's SimLoop::run(nbcycles) forces the cycle counter to
 #   first_cycle + nbcycles when it returns. That is correct when the loop stops
 #   SHORT of the budget, but it REWINDS the counter when the last instruction
 #   overshoots it. So a caller that advances the simulation in very small budgets
 #   loses up to one instruction's worth of cycles per call, and at run(1) -- one
 #   instruction per call -- every instruction is billed exactly 1 cycle.
-#   Consequences for this harness:
-#     * TCB0-tick-driven timing (debounce thresholds, LED/state sequencing) is
-#       ACCURATE. The tick period is counted by the peripheral, and those tests
-#       advance in millisecond budgets (2000 cycles), where losing at most one
-#       instruction's worth of cycles per call is under 0.2%.
-#     * The output tracer in test/avr/test_sim_attiny202.py samples pin state
-#       ONE CYCLE at a time, so inside a trace every instruction costs 1 cycle
-#       and the avr-libc _delay_ms() coil pulses (the relay's 12 ms, the
-#       muted-x4053's 5 ms) trace at ~HALF their real width. The harness
-#       therefore asserts pulse structure, not absolute WIDTH; the width is
-#       verified from the compiled image's _delay_ms loop by
-#       test/avr/test_attiny202_delay_oracle.py. See that file's header and the
-#       check_pulse_present() note in test/avr/test_sim_attiny202.py.
-#   Not a firmware defect: the built image is correct for real 2 MHz silicon.
+#
+#   This harness no longer advances that way, so the defect no longer affects any
+#   measurement it makes:
+#     * TCB0-tick-driven timing (debounce thresholds, LED/state sequencing) was
+#       never affected. The tick period is counted by the peripheral, and those
+#       tests advance in millisecond budgets (2000 cycles), where losing at most
+#       one instruction's worth of cycles per call is under 0.2%.
+#     * The output tracer in test/avr/test_sim_attiny202.py used to sample pin
+#       state ONE CYCLE at a time, which billed every instruction 1 cycle and made
+#       the avr-libc _delay_ms() coil pulses (the relay's 12 ms, the muted-x4053's
+#       5 ms) trace at ~HALF their real width. It now free-runs in millisecond
+#       budgets and timestamps pin edges from a CallableSignalHook -- the pattern
+#       upstream recommends -- so it measures the true delivered widths on the
+#       pinned 0.1.6: 12.014 to 12.669 ms for the relay coil, 5.28 ms for the mute
+#       window. See check_pulse_width() there. The compiled design width remains
+#       owned by test/avr/test_attiny202_delay_oracle.py, which reads the
+#       _delay_ms loop count straight out of the image.
+#     * The lock-step driver's 32-256-cycle edge probes remain coarse enough that
+#       the loss cannot step over the ~176-cycle awake window.
+#   Never a firmware defect: the built image is correct for real 2 MHz silicon.
 #
 #   CORRECTION (2026-08-02): this block previously blamed a "flat ~1 cycle per
 #   instruction" core with no multi-cycle timing model. That diagnosis was WRONG
 #   -- it was inferred from single-stepping via run(1), i.e. through the very bug
 #   above. The AVR-XT core does model multi-cycle instruction timing.
 #
-#   Left unpatched on purpose: upstream has confirmed the defect and has a fix
-#   (skip the adjustment when the counter already passed the end), so this one is
-#   expected to arrive in a release rather than needing a vendored patch, unlike
-#   0001/0002 which block the firmware from running at all. Verified locally
-#   against a rebuild of 0.1.6 carrying that guard: the relay pulse then measures
-#   12.669 ms at single-cycle sampling (vs 6.186 ms without) and
-#   `make attiny202-sim` still passes unchanged. When the fix lands in a pinned
-#   release, the width could optionally move back in-sim -- though the
-#   disassembly oracle stays the tighter check either way.
+#   Left unpatched on purpose: upstream has confirmed the defect and fixed it, so
+#   it is expected to arrive in a release rather than needing a vendored patch,
+#   unlike 0001/0002 which block the firmware from running at all.
 #
 # USAGE
 #   scripts/fetch_yasimavr.sh [VENV_DIR]

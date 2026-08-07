@@ -45,21 +45,49 @@ a known firmware defect.
 
 ## Tier 2.5 - additional software verification
 
-### T25-yasimavr-repin - Re-pin yasimavr after the cycle-rewind fix ships
+### T25-yasimavr-repin - Re-pin yasimavr and retire the vendored patches
 
-The pinned yasimavr 0.1.6 `SimLoop.run(n)` rewinds instruction overshoot when
-the tracer repeatedly requests one cycle. This makes the ATtiny202 12 ms pulse
-trace as roughly 6 ms even though the core models multi-cycle instructions.
-The disassembly-based delay oracle remains authoritative.
+Both vendored patches are fixed upstream, as is the `SimLoop.run(n)` cycle
+rewind, but no release carries any of them. yasimavr 0.1.6 of 2026-06-10 is
+still both the newest GitHub release and the newest PyPI version, and the
+`VERSION` file on upstream `main` still reads `0.1.6`:
 
-When an upstream release containing the fix exists, update `YASIMAVR_VER` and
-`YASIMAVR_SDIST_SHA256`, reassess local patches `0001` and `0002`, and retire or
-rewrite the known-limitation text. An optional in-simulator width assertion may
-be added as an independent cross-check, but must not replace the image oracle.
+- `0001-tiny0-wdt-builder`, issue 145, fixed upstream in `f40b72c` on 2026-07-28;
+- `0002-wdt-window-off-delay`, issue 146, fixed upstream in `aeaac8a` on
+  2026-07-29;
+- the `SimLoop.run(n)` cycle rewind, issue 147, fixed upstream in `7d09002` on
+  2026-08-04.
 
-Dependencies: an upstream release containing the confirmed fix. Effort: about
-1 hour, plus about 2 hours for the optional cross-check. Risk: Low; this closes
-a simulator-fidelity caveat rather than a firmware gap.
+When a release containing them exists, update `YASIMAVR_VER` and
+`YASIMAVR_SDIST_SHA256` in `scripts/fetch_yasimavr.sh`, delete both patch files,
+retire the known-limitation text, and reduce the derived-work discussion in
+`third_party/yasimavr/README.md` to a plain upstream-identity notice, because
+the project would then no longer distribute a modified work. Confirm that
+`test/test_supply_chain.sh` and the CI simulator cache key, which both key on
+the patch set, still fail closed once `patches/` is empty.
+
+Patch removal is already evidenced. Upstream `main` at `7d09002`, built
+unpatched with the fetch script's exact hash-locked, no-index pip invocation,
+runs the functional, fault-injection, soak and lockstep ATtiny202 drivers green
+on every variant, so the bump is expected to be a pin change rather than a
+harness change.
+
+Do not pin a bare upstream commit as an interim step. That trades the PyPI
+source-archive hash for a generated GitHub archive whose bytes are not
+guaranteed stable, and adopts unreleased upstream changes that no release has
+qualified. If it ever becomes necessary, pin the Git commit and verify it with
+`git rev-parse`, which is content-addressed, rather than hashing a generated
+archive.
+
+The in-simulator pulse-width caveat is no longer a reason to re-pin. It is a
+property of the single-cycle sampling in `test/avr/test_sim_attiny202.py` rather
+than of the pinned release, and it disappears when that tracer moves to the
+signal-hook pattern the upstream author recommends. The disassembly-based delay
+oracle remains authoritative either way.
+
+Dependencies: an upstream release containing the three fixes. Effort: about
+1 hour. Risk: Low; this retires vendored third-party modifications and a
+simulator-fidelity caveat rather than closing a firmware gap.
 
 ### T25-pic322-hex-stack - Extend the final-HEX stack oracle to PIC10F322
 
@@ -490,7 +518,7 @@ The stable ID in each row matches exactly one open section above.
 | ID | Item | Tier | Effort | Impact |
 |---|---|---:|---:|---|
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
-| T25-yasimavr-repin | Re-pin yasimavr after upstream cycle fix | 2.5 | 1 h, +2 h optional | Low |
+| T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
 | T25-relay-fault-abort | De-energize relay coils on detected faults | 2.5 | Medium | Medium-High |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |
