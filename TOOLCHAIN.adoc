@@ -22,6 +22,12 @@ tool, re-run `make clean && make test` before relying on its output.
   flock:        util-linux (required). Complete Make and direct release-script
                 invocations use one worktree-local advisory lock because build,
                 test, coverage, and simulator artifacts are intentionally shared.
+  timeout:      GNU coreutils (required). Mutation and simulator checks use
+                bounded wall-clock execution.
+  setsid:       util-linux (required). Each bounded mutation checker owns an
+                isolated process session for descendant cleanup.
+  ps:           procps (required). Mutation interruption cleanup enumerates the
+                process groups in each owned checker session.
 
   Git:          git (required). Release-history/signature tests construct and
                 inspect temporary repositories; ci-local also requires a real

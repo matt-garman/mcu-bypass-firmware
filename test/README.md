@@ -507,7 +507,15 @@ can enable the tool-dependent PIC10F320 mutants. The host-only
 `test-mutation-sandbox` regression exercises the same copy routine in `make test`,
 including the wrappers' executable mode, and covers inventory, conservation,
 record/command parsing, atomic publication, checker-status classification, and
-result grammar in 37 checks. It also makes a failed PIC10F322 baseline build
+result grammar in 62 checks. `MUTATION_TIMEOUT_S` defaults only when unset and
+accepts `0.001..86400` seconds with at most three fractional digits; zero,
+negative, empty, malformed, under-resolution, and over-limit values fail before
+any Make or tool probe. Every bounded checker owns a registered process session,
+so normal return and interrupted-run cleanup reach nested timeout groups as well
+as Make, compiler, and simulator descendants. The regression interrupts both a
+nested-timeout session with a TERM-ignoring descendant and an unregistered
+launch-gap worker, then proves their PIDs and process groups disappear. It also
+makes a failed PIC10F322 baseline build
 leave an apparently usable HEX, then proves the probe reports `baseline FAILED`
 without invoking gpsim or enabling mutants; ordinary nonzero checker statuses
 can count as kills only after a successful baseline admits the lane.

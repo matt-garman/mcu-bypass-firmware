@@ -841,6 +841,27 @@ file is the human-readable summary of *what changed*.
   they were before this change. Only the request vocabulary moved.
 
 ### Fixed
+- **Mutation timeout and interruption controls now fail closed.** An explicitly
+  empty `MUTATION_TIMEOUT_S` previously became the 900-second default, zero
+  disabled GNU `timeout`, and malformed values reached the tool unchecked. The
+  control now accepts only representable `0.001..86400` second values with at
+  most three fractional digits; unset still means 900, while empty, zero,
+  negative, malformed, under-resolution, and over-limit values fail before any
+  Make or optional-tool probe. The outer mutation deadline is also inherited by
+  nested gpsim wrappers, so their earlier timeout cannot collapse infrastructure
+  expiry into an ordinary mutation-kill status.
+
+  Every bounded checker now runs in a registered, token-owned process session.
+  Normal completion and signal cleanup enumerate every process group in that
+  session, covering nested GNU `timeout`, Make, compiler, and simulator
+  descendants; TERM is followed by a rescan and KILL for non-cooperative
+  processes. Cleanup discovers jobs in the interrupted shell itself, repeatedly
+  scans for late session registrations, refuses to signal a reused SID without
+  its private ownership token, and keeps all mutation scratch trees below the
+  run-owned result root. The 62-check host regression uses real fractional
+  expiry, nested timeout groups, a TERM-ignoring descendant, and an unregistered
+  launch-gap worker, then proves no owned process survives interruption.
+
 - **The shared compile-check reach gate accepted commented-out includes.** Its
   unanchored substring search treated
   `// #include "bypass_compile_checks.h"` as proof that the threshold contract

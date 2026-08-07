@@ -76,6 +76,15 @@ gpsim_run() {
 		:
 	else
 		local rc=$?
+		# Mutation Make routes can collapse every failed recipe to status 2. Leave
+		# an out-of-band witness so the outer mutation runner still classifies an
+		# inner timeout/tool-launch failure as infrastructure, never as a kill.
+		case "$rc" in
+			124|125|126|127|137)
+				[ -z "${MUTATION_INFRA_MARKER:-}" ] \
+					|| : > "$MUTATION_INFRA_MARKER"
+				;;
+		esac
 		echo "FAIL: gpsim exited with status $rc for $hex. Output was:"
 		printf '%s\n' "$out"
 		exit 1

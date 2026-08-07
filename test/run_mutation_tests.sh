@@ -37,6 +37,41 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJ_DIR="$(dirname "$SCRIPT_DIR")"
 
+# Wall-clock ceiling on a single mutant checker. Use the unset-only default:
+# an explicitly empty value is invalid and must not silently become 900.
+mutation_timeout_is_valid() {
+    local value=$1 whole fraction canonical_whole whole_number
+    [[ $value =~ ^[0-9]+([.][0-9]{1,3})?$ ]] || return 1
+    whole=${value%%.*}
+    if [[ $value == *.* ]]; then fraction=${value#*.}; else fraction=0; fi
+    canonical_whole=$whole
+    while [ "${#canonical_whole}" -gt 1 ] && [[ $canonical_whole == 0* ]]; do
+        canonical_whole=${canonical_whole#0}
+    done
+    [ "${#canonical_whole}" -le 5 ] || return 1
+    whole_number=$((10#$canonical_whole))
+    [ "$whole_number" -lt 86400 ] \
+        || { [ "$whole_number" -eq 86400 ] && [[ ! $fraction =~ [1-9] ]]; } \
+        || return 1
+    [ "$whole_number" -gt 0 ] || [[ $fraction =~ [1-9] ]]
+}
+resolve_mutation_timeout() {
+    local value
+    if [ "${MUTATION_TIMEOUT_S+x}" = x ]; then value=$MUTATION_TIMEOUT_S; else value=900; fi
+    mutation_timeout_is_valid "$value" || {
+        echo "ERROR: MUTATION_TIMEOUT_S must be 0.001..86400 seconds with at most three fractional digits (got '$value')" >&2
+        return 2
+    }
+    printf '%s\n' "$value"
+}
+if ! MUTATION_TIMEOUT_S=$(resolve_mutation_timeout); then exit 2; fi
+for mutation_command in timeout setsid ps; do
+    command -v "$mutation_command" >/dev/null 2>&1 || {
+        echo "ERROR: $mutation_command is required for bounded mutation process cleanup" >&2
+        exit 2
+    }
+done
+
 # Missing PIC tools normally make the PIC mutation subset an explicit partial
 # local run. Strict/full-tool contexts default to failure unless the caller
 # explicitly authorizes a partial mutation run.
@@ -103,8 +138,7 @@ fi
 readonly PIC10F322_MUTATION_HEX
 PIC_SOAK_GPSIM_INC="${PIC_SOAK_GPSIM_INC:-/usr/include/gpsim}"
 PIC10F320_SOAK_GPSIM_INC="${PIC10F320_SOAK_GPSIM_INC:-$PIC_SOAK_GPSIM_INC}"
-# Wall-clock ceiling on a single mutant checker. Every mutant runs under this;
-# see mutation_bounded below.
+# Every mutant runs under this wall-clock ceiling; see mutation_bounded below.
 #
 # Why this exists: in v0.9.8 a renamed override left the classic-AVR WDT mutant
 # asking for 2 s of simulated soak and silently getting the 24 h default. A local
@@ -118,17 +152,184 @@ PIC10F320_SOAK_GPSIM_INC="${PIC10F320_SOAK_GPSIM_INC:-$PIC_SOAK_GPSIM_INC}"
 # catch the 43,200x class of severance immediately, loose enough that it cannot
 # become a source of flaky failures. Tighten it from measured runtimes later if
 # that is ever worth doing; do not tighten it speculatively.
-MUTATION_TIMEOUT_S="${MUTATION_TIMEOUT_S:-900}"
-# SIGTERM at the deadline, SIGKILL 10 s later for anything that ignores it.
-# timeout(1) runs the command in its own process group and signals the group, so
-# make's children go down with it rather than being orphaned into the background.
+# SIGTERM at the deadline, SIGKILL 10 s later for anything that ignores it. Each
+# outer timeout is also a session leader. That ownership boundary contains nested
+# timeout process groups used by gpsim wrappers, which an outer group signal alone
+# cannot reach.
 #
 # The exit status matters as much as the bound: expiry yields 124, which
 # mutation_accounting.sh classifies as an infrastructure error, so a hung mutant
 # is reported as ERROR. Without that classification a hang would exit nonzero and
 # be recorded as KILLED -- a clean-looking run that measured nothing.
+mutation_snapshot_processes() {
+    MUTATION_PROCESS_SNAPSHOT=$(ps -eo pid=,pgid=,sid=) || return 1
+}
+
+mutation_process_has_env_entry() {
+    local pid=$1 wanted_entry=$2 entry
+    [ -r "/proc/$pid/environ" ] || return 1
+    while IFS= read -r -d '' entry; do
+        [ "$entry" = "$wanted_entry" ] && return 0
+    done < "/proc/$pid/environ"
+    return 1
+}
+
+mutation_process_read_ownership_tokens() {
+    local pid=$1 entry
+    MUTATION_PROCESS_WORKER_TOKEN=
+    MUTATION_PROCESS_CHECKER_TOKEN=
+    [ -r "/proc/$pid/environ" ] || return 1
+    while IFS= read -r -d '' entry; do
+        case "$entry" in
+            MUTATION_WORKER_TOKEN=*)
+                MUTATION_PROCESS_WORKER_TOKEN=${entry#MUTATION_WORKER_TOKEN=}
+                ;;
+            MUTATION_CHECKER_TOKEN=*)
+                MUTATION_PROCESS_CHECKER_TOKEN=${entry#MUTATION_CHECKER_TOKEN=}
+                ;;
+        esac
+    done < "/proc/$pid/environ"
+}
+
+mutation_env_entry_is_owned() {
+    local wanted_entry=$1 pid pgid sid
+    mutation_snapshot_processes || return 2
+    while read -r pid pgid sid; do
+        mutation_process_has_env_entry "$pid" "$wanted_entry" && return 0
+    done <<< "$MUTATION_PROCESS_SNAPSHOT"
+    return 1
+}
+
+mutation_signal_env_entry_groups() {
+    local wanted_entry=$1 signal=$2 pid pgid sid
+    local -A seen=()
+    mutation_env_entry_is_owned "$wanted_entry" || return $?
+    while read -r pid pgid sid; do
+        mutation_process_has_env_entry "$pid" "$wanted_entry" || continue
+        [[ -n ${seen["$pgid"]+x} ]] && continue
+        seen["$pgid"]=1
+        kill -"$signal" -- "-$pgid" 2>/dev/null || true
+    done <<< "$MUTATION_PROCESS_SNAPSHOT"
+}
+
+mutation_session_has_processes() {
+    local wanted_sid=$1 pid pgid sid
+    mutation_snapshot_processes || return 2
+    while read -r pid pgid sid; do
+        [ "$sid" = "$wanted_sid" ] && return 0
+    done <<< "$MUTATION_PROCESS_SNAPSHOT"
+    return 1
+}
+
+mutation_session_is_owned() {
+    local wanted_sid=$1 wanted_token=$2 pid pgid sid found=0
+    mutation_snapshot_processes || return 3
+    while read -r pid pgid sid; do
+        [ "$sid" = "$wanted_sid" ] || continue
+        found=1
+        mutation_process_has_env_entry "$pid" \
+            "MUTATION_CHECKER_TOKEN=$wanted_token" && return 0
+    done <<< "$MUTATION_PROCESS_SNAPSHOT"
+    [ "$found" -eq 0 ] && return 1
+    return 2
+}
+
+mutation_signal_session_groups() {
+    local wanted_sid=$1 wanted_token=$2 signal=$3 pid pgid sid
+    local -A seen=()
+    mutation_session_is_owned "$wanted_sid" "$wanted_token" || return $?
+    while read -r pid pgid sid; do
+        [ "$sid" = "$wanted_sid" ] || continue
+        [[ -n ${seen["$pgid"]+x} ]] && continue
+        seen["$pgid"]=1
+        kill -"$signal" -- "-$pgid" 2>/dev/null || true
+    done <<< "$MUTATION_PROCESS_SNAPSHOT"
+}
+
+mutation_terminate_checker_session() {
+    local sid=$1 token=$2 attempt state signal_rc
+    [[ $sid =~ ^[1-9][0-9]*$ && $token =~ ^checker-session[.][A-Za-z0-9]+$ ]] || return 1
+    for ((attempt = 0; attempt < 20; attempt++)); do
+        mutation_session_is_owned "$sid" "$token"
+        state=$?
+        [ "$state" -eq 1 ] && return 0
+        if [ "$state" -eq 0 ]; then
+            mutation_signal_session_groups "$sid" "$token" TERM
+            signal_rc=$?
+            [ "$signal_rc" -eq 1 ] && return 0
+            [ "$signal_rc" -eq 0 ] || { sleep 0.05; continue; }
+        fi
+        sleep 0.05
+    done
+    # Re-scan and signal on every KILL attempt: a descendant may create a new
+    # process group after any earlier snapshot. Repository checkers do not
+    # daemonize into a different session.
+    for ((attempt = 0; attempt < 100; attempt++)); do
+        mutation_session_is_owned "$sid" "$token"
+        state=$?
+        [ "$state" -eq 1 ] && return 0
+        if [ "$state" -eq 0 ]; then
+            mutation_signal_session_groups "$sid" "$token" KILL
+            signal_rc=$?
+            [ "$signal_rc" -eq 1 ] && return 0
+        fi
+        sleep 0.05
+    done
+    return 1
+}
+
 mutation_bounded() {
-    timeout -k 10 "$MUTATION_TIMEOUT_S" "$@"
+    local slot ready_marker infra_marker checker_tmp child sid token token_suffix
+    local registered_token rc monitor_mode=0 cleanup_rc=0
+    mutation_timeout_is_valid "$MUTATION_TIMEOUT_S" || return 125
+    [ ! -e "$MUTATION_STOP_FILE" ] || return 125
+    slot=$(mktemp "$RESULT_DIR/checker-session.XXXXXX") || return 125
+    token=${slot##*/}
+    token_suffix=${token#checker-session.}
+    ready_marker="$RESULT_DIR/checker-ready.$token_suffix"
+    infra_marker="$RESULT_DIR/checker-infrastructure.$token_suffix"
+    checker_tmp="$RESULT_DIR/checker-tmp.$token_suffix"
+    mkdir "$checker_tmp" || { rm -f "$slot"; return 125; }
+
+    case $- in *m*) monitor_mode=1; set +m ;; esac
+    (
+        printf '%s %s\n' "$BASHPID" "$token" > "$slot" || exit 125
+        [ ! -e "$MUTATION_STOP_FILE" ] || exit 125
+        export MUTATION_CHECKER_TOKEN="$token"
+        export MUTATION_CHECKER_READY="$ready_marker"
+        export MUTATION_INFRA_MARKER="$infra_marker"
+        export MUTATION_CHECKER_TIMEOUT="$MUTATION_TIMEOUT_S"
+        export MUTATION_CHECKER_TMP="$checker_tmp"
+        exec setsid "$BASH" -c '
+            : > "$MUTATION_CHECKER_READY" || exit 125
+            exec timeout -k 10 "$MUTATION_CHECKER_TIMEOUT" env \
+                GPSIM_TIMEOUT_SECONDS="$MUTATION_CHECKER_TIMEOUT" \
+                TMPDIR="$MUTATION_CHECKER_TMP" "$@"
+        ' mutation-checker "$@"
+    ) &
+    child=$!
+    launching_checker_pid=$child
+    # The child publishes independently, while this parent write closes the
+    # normal launch gap. With monitor mode off, child PID == checker SID.
+    printf '%s %s\n' "$child" "$token" > "$slot" || true
+    [ "$monitor_mode" -eq 0 ] || set -m
+    launching_checker_pid=0
+
+    if wait "$child"; then rc=0; else rc=$?; fi
+    [ -f "$ready_marker" ] || rc=125
+    [ ! -f "$infra_marker" ] || rc=125
+    read -r sid registered_token < "$slot"
+    if [ "$registered_token" != "$token" ] \
+            || ! mutation_terminate_checker_session "$sid" "$token"; then
+        cleanup_rc=1
+    fi
+    [ ! -f "$infra_marker" ] || rc=125
+    if [ "$cleanup_rc" -eq 0 ]; then
+        rm -rf "$slot" "$ready_marker" "$infra_marker" "$checker_tmp"
+    else
+        return 125
+    fi
+    return "$rc"
 }
 
 # A PIC10F322 gpsim mutant is meaningful only after the unmutated image both
@@ -234,44 +435,168 @@ if ! RESULT_DIR="$(mktemp -d)"; then
     echo "ERROR: could not create mutation result directory" >&2
     exit 2
 fi
+result_dir_input=$RESULT_DIR
+if ! RESULT_DIR=$(cd "$RESULT_DIR" && pwd -P); then
+    rm -rf "$result_dir_input"
+    echo "ERROR: could not resolve the mutation result directory" >&2
+    exit 2
+fi
+MUTATION_STOP_FILE="$RESULT_DIR/stopping"
 active_pids=()
 launching_pid=0
+launching_checker_pid=0
 cleanup_mutation_run() {
-    local pid attempt alive
-    local -a groups=()
-    local -A seen_groups=()
-    for pid in "${active_pids[@]}" "$launching_pid"; do
-        [ "$pid" -eq 0 ] && continue
-        if [[ -z ${seen_groups["$pid"]+x} ]]; then
-            seen_groups["$pid"]=1
-            groups+=("$pid")
-        fi
-    done
-    # `jobs -pr` closes the signal window between `run_mutant &` and assigning
-    # `$!` to launching_pid: every unreaped worker group is still discoverable.
-    while read -r pid; do
-        [ -n "$pid" ] || continue
-        if [[ -z ${seen_groups["$pid"]+x} ]]; then
-            seen_groups["$pid"]=1
-            groups+=("$pid")
-        fi
-    done < <(jobs -pr)
-    for pid in "${groups[@]}"; do kill -TERM -- "-$pid" 2>/dev/null || true; done
-    for ((attempt = 0; attempt < 20; attempt++)); do
+    local original_status=$?
+    local pid sid token expected_token slot attempt state signal age alive stable=0
+    local process_pid process_pgid process_sid job_pgid runner_pgid
+    local cleanup_failed=0
+    local job_file="$RESULT_DIR/cleanup-jobs"
+    local -a groups=() slots=() worker_slots=()
+    local -A job_first_seen=()
+    local -A session_first_seen=()
+    local -A worker_first_seen=()
+    local -A worker_slot_by_token=()
+    local -A worker_signal_by_token=()
+    local -A checker_sid_by_token=()
+    local -A checker_signal_by_token=()
+    local -A signalled_groups=()
+    trap - EXIT
+    trap '' HUP INT TERM
+    : > "$MUTATION_STOP_FILE" 2>/dev/null || true
+    if mutation_snapshot_processes; then
+        while read -r process_pid process_pgid process_sid; do
+            [ "$process_pid" = "$BASHPID" ] && { runner_pgid=$process_pgid; break; }
+        done <<< "$MUTATION_PROCESS_SNAPSHOT"
+    fi
+    if [ -z "${runner_pgid:-}" ]; then
+        cleanup_failed=1
+        runner_pgid=-1
+    fi
+
+    # Discover jobs in this shell, not a process-substitution subshell (which has
+    # no Bash job table). Re-scan both jobs and registration slots throughout the
+    # grace period to close worker and checker launch windows. Numeric IDs are
+    # signalled only while the shell still owns the job or the session still
+    # carries its private token, so a completed ID cannot hit an unrelated reuse.
+    for ((attempt = 0; attempt < 120; attempt++)); do
         alive=0
-        for pid in "${groups[@]}"; do
-            if kill -0 -- "-$pid" 2>/dev/null; then alive=1; break; fi
+        if jobs -p > "$job_file" 2>/dev/null; then
+            mapfile -t groups < "$job_file"
+        else
+            groups=()
+            alive=1
+            cleanup_failed=1
+        fi
+
+        worker_slot_by_token=()
+        worker_signal_by_token=()
+        checker_sid_by_token=()
+        checker_signal_by_token=()
+        signalled_groups=()
+        shopt -s nullglob globstar
+        worker_slots=("$RESULT_DIR"/**/mutation-worker.*)
+        slots=("$RESULT_DIR"/**/checker-session.*)
+        shopt -u nullglob globstar
+        for slot in "${worker_slots[@]}"; do
+            [ -s "$slot" ] || { alive=1; continue; }
+            read -r pid token < "$slot" || { alive=1; continue; }
+            expected_token=${slot##*/}
+            [[ $pid =~ ^[1-9][0-9]*$ && $token = "$expected_token" ]] \
+                || continue
+            if [[ -z ${worker_first_seen["$slot"]+x} ]]; then
+                worker_first_seen["$slot"]=$attempt
+            fi
+            age=$((attempt - worker_first_seen["$slot"]))
+            if [ "$age" -lt 20 ]; then signal=TERM; else signal=KILL; fi
+            worker_slot_by_token["$token"]=$slot
+            worker_signal_by_token["$token"]=$signal
         done
-        [ "$alive" -eq 1 ] || break
+        for slot in "${slots[@]}"; do
+            [ -s "$slot" ] || { alive=1; continue; }
+            read -r sid token < "$slot" || { alive=1; continue; }
+            expected_token=${slot##*/}
+            [[ $sid =~ ^[1-9][0-9]*$ && $token = "$expected_token" ]] \
+                || continue
+            if [[ -z ${session_first_seen["$slot"]+x} ]]; then
+                session_first_seen["$slot"]=$attempt
+            fi
+            age=$((attempt - session_first_seen["$slot"]))
+            if [ "$age" -lt 20 ]; then signal=TERM; else signal=KILL; fi
+            checker_sid_by_token["$token"]=$sid
+            checker_signal_by_token["$token"]=$signal
+        done
+
+        if ! mutation_snapshot_processes; then
+            alive=1
+            cleanup_failed=1
+            sleep 0.05
+            continue
+        fi
+        for pid in "${groups[@]}"; do
+            [ -n "$pid" ] || continue
+            if [[ -z ${job_first_seen["$pid"]+x} ]]; then
+                job_first_seen["$pid"]=$attempt
+            fi
+            age=$((attempt - job_first_seen["$pid"]))
+            if [ "$age" -lt 20 ]; then signal=TERM; else signal=KILL; fi
+            job_pgid=
+            while read -r process_pid process_pgid process_sid; do
+                [ "$process_pid" = "$pid" ] \
+                    && { job_pgid=$process_pgid; break; }
+            done <<< "$MUTATION_PROCESS_SNAPSHOT"
+            if [ -n "$job_pgid" ] && [ "$job_pgid" != "$runner_pgid" ]; then
+                kill -"$signal" -- "-$job_pgid" 2>/dev/null || true
+            elif [ -n "$job_pgid" ]; then
+                kill -"$signal" "$pid" 2>/dev/null || true
+            fi
+            alive=1
+        done
+
+        while read -r process_pid process_pgid process_sid; do
+            mutation_process_read_ownership_tokens "$process_pid" || continue
+            token=$MUTATION_PROCESS_WORKER_TOKEN
+            if [ -n "$token" ] && [[ -n ${worker_slot_by_token["$token"]+x} ]]; then
+                signal=${worker_signal_by_token["$token"]}
+                if [[ -z ${signalled_groups["$signal:$process_pgid"]+x} ]]; then
+                    signalled_groups["$signal:$process_pgid"]=1
+                    kill -"$signal" -- "-$process_pgid" 2>/dev/null || true
+                fi
+                alive=1
+            fi
+            token=$MUTATION_PROCESS_CHECKER_TOKEN
+            if [ -n "$token" ] && [[ -n ${checker_sid_by_token["$token"]+x} ]] \
+                    && [ "$process_sid" = "${checker_sid_by_token["$token"]}" ]; then
+                signal=${checker_signal_by_token["$token"]}
+                if [[ -z ${signalled_groups["$signal:$process_pgid"]+x} ]]; then
+                    signalled_groups["$signal:$process_pgid"]=1
+                    kill -"$signal" -- "-$process_pgid" 2>/dev/null || true
+                fi
+                alive=1
+            fi
+        done <<< "$MUTATION_PROCESS_SNAPSHOT"
+
+        if [ "$alive" -eq 0 ]; then stable=$((stable + 1)); else stable=0; fi
+        [ "$stable" -ge 5 ] && break
         sleep 0.05
     done
-    for pid in "${groups[@]}"; do kill -KILL -- "-$pid" 2>/dev/null || true; done
-    for pid in "${groups[@]}"; do wait "$pid" 2>/dev/null || true; done
-    rm -rf "$RESULT_DIR"
+    for pid in "${active_pids[@]}" "$launching_pid" "$launching_checker_pid"; do
+        [ "$pid" -eq 0 ] || wait "$pid" 2>/dev/null || true
+    done
+    if [ "$attempt" -ge 120 ]; then
+        cleanup_failed=1
+        echo "ERROR: mutation cleanup could not prove all owned processes exited" >&2
+    fi
+    if [ "$cleanup_failed" -eq 0 ]; then
+        rm -rf "$RESULT_DIR"
+    else
+        echo "ERROR: retaining mutation run root for failed cleanup: $RESULT_DIR" >&2
+        [ "$original_status" -ne 0 ] || original_status=2
+    fi
+    exit "$original_status"
 }
 mutation_signal_exit() {
     local code=$1
-    trap - HUP INT TERM
+    trap '' HUP INT TERM
     exit "$code"
 }
 trap cleanup_mutation_run EXIT
@@ -290,11 +615,29 @@ wait_oldest_worker() {
     active_pids=("${active_pids[@]:1}")
 }
 dispatch() {
+    local worker_slot worker_token worker_rc
+    worker_slot=$(mktemp "$RESULT_DIR/mutation-worker.XXXXXX") || {
+        echo "ERROR: could not create mutation worker registration" >&2
+        exit 2
+    }
+    worker_token=${worker_slot##*/}
+    printf '0 %s\n' "$worker_token" > "$worker_slot" || {
+        rm -f "$worker_slot"
+        echo "ERROR: could not initialize mutation worker registration" >&2
+        exit 2
+    }
     # Briefly enable job control so this worker and every descendant Make process
     # receive their own process group. Disable it before waiting to suppress job
     # notifications in the deterministic mutation log.
     set -m
-    run_mutant "$@" &
+    (
+        export MUTATION_WORKER_TOKEN="$worker_token"
+        printf '%s %s\n' "$BASHPID" "$worker_token" > "$worker_slot" || exit 125
+        [ ! -e "$MUTATION_STOP_FILE" ] || exit 125
+        if run_mutant "$@"; then worker_rc=0; else worker_rc=$?; fi
+        rm -f "$worker_slot"
+        exit "$worker_rc"
+    ) &
     launching_pid=$!
     set +m
     active_pids+=("$launching_pid")
@@ -439,7 +782,7 @@ validate_avr_xt_sandbox() {
 
 SANDBOX_SELFTEST_DONE=0
 if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
-    if ! SELFTEST_DIR="$(mktemp -d)"; then
+    if ! SELFTEST_DIR="$(mktemp -d "$RESULT_DIR/selftest.XXXXXX")"; then
         echo "ERROR: could not create mutation self-test sandbox" >&2
         exit 1
     fi
@@ -667,7 +1010,7 @@ run_mutant() {
     local stem; stem="$RESULT_DIR/$(printf '%04d' "$idx")"
 
     local work
-    if ! work="$(mktemp -d)"; then
+    if ! work="$(mktemp -d "$RESULT_DIR/mutant.XXXXXX")"; then
         publish_mutation_result "$stem" errored \
             "[$idx] ERROR  could not create mutation sandbox: $desc"
         return $?
@@ -1005,6 +1348,10 @@ for target in "${CORE_BASE_TARGETS[@]}" "${PIC10F320_HOST_BASE_TARGETS[@]}"; do
 done
 
 if [ "$SANDBOX_SELFTEST_DONE" -eq 1 ]; then
+    [[ $RESULT_DIR == /* ]] || {
+        echo "ERROR: mutation result root is not absolute: $RESULT_DIR" >&2
+        exit 1
+    }
     # Fully provisioned, then the two partial shapes the skip accounting can
     # produce: every simulator absent (only the 53 host mutants dispatch), and
     # the ATtiny202 lane alone absent. The second is the case this file's
@@ -1022,6 +1369,31 @@ if [ "$SANDBOX_SELFTEST_DONE" -eq 1 ]; then
     if mutation_validate_totals 98 53 45 53 0 0 1 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a failed worker" >&2; exit 1
     fi
+    # Pin the public timeout grammar, including the distinction between unset
+    # (default 900) and explicitly empty (invalid).
+    resolved_timeout=$(unset MUTATION_TIMEOUT_S; resolve_mutation_timeout) || exit 1
+    [ "$resolved_timeout" = 900 ] || {
+        echo "ERROR: unset MUTATION_TIMEOUT_S did not resolve to 900" >&2; exit 1
+    }
+    for timeout_control in 1 0.001 0.5 00.5 86400; do
+        resolved_timeout=$(MUTATION_TIMEOUT_S="$timeout_control" resolve_mutation_timeout) \
+            || exit 1
+        [ "$resolved_timeout" = "$timeout_control" ] || {
+            echo "ERROR: valid MUTATION_TIMEOUT_S changed during validation: $timeout_control" >&2
+            exit 1
+        }
+    done
+    for timeout_control in '' 0 00.000 -1 malformed .5 1. 1e2 0.0001 86400.001; do
+        if timeout_diagnostic=$(MUTATION_TIMEOUT_S="$timeout_control" \
+                resolve_mutation_timeout 2>&1); then
+            echo "ERROR: invalid MUTATION_TIMEOUT_S was accepted: '$timeout_control'" >&2
+            exit 1
+        fi
+        [[ $timeout_diagnostic == *'must be 0.001..86400 seconds'* ]] || {
+            echo "ERROR: invalid MUTATION_TIMEOUT_S had the wrong diagnostic: $timeout_diagnostic" >&2
+            exit 1
+        }
+    done
     # 124 is timeout(1) expiry and is the one that must not regress: if it ever
     # stops counting as infrastructure, a hung mutant is recorded as KILLED and
     # the suite reports a clean run it never actually completed.
@@ -1035,7 +1407,7 @@ if [ "$SANDBOX_SELFTEST_DONE" -eq 1 ]; then
     # Asserting the classifier alone would pass even if mutation_bounded were
     # deleted, so drive the actual wrapper against a command that outlives it.
     mutation_selftest_rc=0
-    MUTATION_TIMEOUT_S=1 mutation_bounded sleep 30 >/dev/null 2>&1 || mutation_selftest_rc=$?
+    MUTATION_TIMEOUT_S=0.1 mutation_bounded sleep 30 >/dev/null 2>&1 || mutation_selftest_rc=$?
     [ "$mutation_selftest_rc" -eq 124 ] || {
         echo "ERROR: mutation_bounded did not report timeout expiry as 124 (got $mutation_selftest_rc)" >&2
         exit 1
@@ -1046,10 +1418,277 @@ if [ "$SANDBOX_SELFTEST_DONE" -eq 1 ]; then
     }
     # ...and does not fire on a command that finishes inside it, so the bound
     # cannot pass by simply failing everything.
-    MUTATION_TIMEOUT_S=30 mutation_bounded true >/dev/null 2>&1 || {
+    MUTATION_TIMEOUT_S=1 mutation_bounded true >/dev/null 2>&1 || {
         echo "ERROR: mutation_bounded failed a command that completed in time" >&2
         exit 1
     }
+    MUTATION_TIMEOUT_S=1 mutation_bounded bash -c 'sleep 0.02 &' \
+        >/dev/null 2>&1 || {
+        echo "ERROR: mutation_bounded failed to clean a short-lived descendant" >&2
+        exit 1
+    }
+    fake_setsid_dir="$RESULT_DIR/fake-setsid-bin"
+    mkdir "$fake_setsid_dir"
+    cat > "$fake_setsid_dir/setsid" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+    chmod 750 "$fake_setsid_dir/setsid"
+    setsid_failure_rc=0
+    PATH="$fake_setsid_dir:$PATH" MUTATION_TIMEOUT_S=1 \
+        mutation_bounded true >/dev/null 2>&1 || setsid_failure_rc=$?
+    [ "$setsid_failure_rc" -eq 125 ] || {
+        echo "ERROR: setsid launch failure was not classified as infrastructure (got $setsid_failure_rc)" >&2
+        exit 1
+    }
+    # A nested wrapper deadline may fire before the outer bound and then be
+    # collapsed by Make to an ordinary status. Its out-of-band marker must still
+    # force infrastructure status 125 rather than crediting a mutation kill.
+    nested_timeout_rc=0
+    MUTATION_TIMEOUT_S=1 mutation_bounded bash -c '
+        timeout -s KILL 0.1 sleep 30 && exit 91
+        rc=$?
+        [ "$rc" -ne 137 ] || : > "$MUTATION_INFRA_MARKER"
+        exit 1
+    ' \
+        >/dev/null 2>&1 || nested_timeout_rc=$?
+    [ "$nested_timeout_rc" -eq 125 ] || {
+        echo "ERROR: nested checker timeout was not classified as infrastructure (got $nested_timeout_rc)" >&2
+        exit 1
+    }
+
+    # Interrupt a runner while a bounded checker owns a nested timeout group and
+    # a TERM-ignoring descendant. The configured 30-second bound is deliberately
+    # much longer than this test: disappearance must come from signal cleanup.
+    interrupt_dir="$RESULT_DIR/interrupt"
+    interrupt_result="$interrupt_dir/result"
+    interrupt_checker="$interrupt_dir/checker"
+    interrupt_ignore="$interrupt_dir/ignore-term"
+    mkdir -p "$interrupt_result"
+    cat > "$interrupt_ignore" <<'EOF'
+#!/usr/bin/env bash
+trap '' HUP INT TERM
+printf '%s\n' "$BASHPID" > "${MUTATION_INTERRUPT_IGNORE_PID:?}"
+while :; do sleep 1; done
+EOF
+    cat > "$interrupt_checker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$BASHPID" > "${MUTATION_INTERRUPT_CHECKER_PID:?}"
+timeout 30 "${MUTATION_INTERRUPT_IGNORE:?}" &
+printf '%s\n' "$!" > "${MUTATION_INTERRUPT_NESTED_PID:?}"
+for ((attempt = 0; attempt < 500; attempt++)); do
+    [ -s "${MUTATION_INTERRUPT_IGNORE_PID:?}" ] && break
+    sleep 0.01
+done
+[ -s "${MUTATION_INTERRUPT_IGNORE_PID:?}" ] || exit 92
+: > "${MUTATION_INTERRUPT_READY:?}"
+wait
+EOF
+    chmod 750 "$interrupt_checker" "$interrupt_ignore"
+    interrupt_ready="$interrupt_dir/ready"
+    interrupt_checker_pid_file="$interrupt_dir/checker.pid"
+    interrupt_nested_pid_file="$interrupt_dir/nested.pid"
+    interrupt_ignore_pid_file="$interrupt_dir/ignore.pid"
+    (
+        RESULT_DIR="$interrupt_result"
+        MUTATION_STOP_FILE="$interrupt_result/stopping"
+        active_pids=()
+        launching_pid=0
+        launching_checker_pid=0
+        set +m
+        trap cleanup_mutation_run EXIT
+        trap 'mutation_signal_exit 129' HUP
+        trap 'mutation_signal_exit 130' INT
+        trap 'mutation_signal_exit 143' TERM
+        MUTATION_TIMEOUT_S=30 \
+            MUTATION_INTERRUPT_CHECKER_PID="$interrupt_checker_pid_file" \
+            MUTATION_INTERRUPT_NESTED_PID="$interrupt_nested_pid_file" \
+            MUTATION_INTERRUPT_IGNORE_PID="$interrupt_ignore_pid_file" \
+            MUTATION_INTERRUPT_READY="$interrupt_ready" \
+            MUTATION_INTERRUPT_IGNORE="$interrupt_ignore" \
+            mutation_bounded "$interrupt_checker"
+    ) &
+    interrupt_runner_pid=$!
+    for ((interrupt_attempt = 0; interrupt_attempt < 500; interrupt_attempt++)); do
+        [ -f "$interrupt_ready" ] && break
+        kill -0 "$interrupt_runner_pid" 2>/dev/null || break
+        sleep 0.01
+    done
+    interrupt_error=
+    if [ ! -f "$interrupt_ready" ]; then
+        interrupt_error="interruption fixture did not become ready"
+    else
+        interrupt_checker_pid=$(<"$interrupt_checker_pid_file")
+        interrupt_nested_pid=$(<"$interrupt_nested_pid_file")
+        interrupt_ignore_pid=$(<"$interrupt_ignore_pid_file")
+        shopt -s nullglob
+        interrupt_slots=("$interrupt_result"/checker-session.*)
+        shopt -u nullglob
+        [ "${#interrupt_slots[@]}" -eq 1 ] \
+            && read -r interrupt_registered_sid interrupt_checker_token \
+                < "${interrupt_slots[0]}" \
+            || interrupt_error="interruption fixture did not publish exactly one checker session"
+        read -r interrupt_checker_pgid interrupt_checker_sid \
+            < <(ps -o pgid=,sid= -p "$interrupt_checker_pid")
+        read -r interrupt_nested_pgid interrupt_nested_sid \
+            < <(ps -o pgid=,sid= -p "$interrupt_nested_pid")
+        read -r interrupt_ignore_pgid interrupt_ignore_sid \
+            < <(ps -o pgid=,sid= -p "$interrupt_ignore_pid")
+        if [ "${interrupt_registered_sid:-}" != "$interrupt_checker_sid" ] \
+                || [ "$interrupt_checker_pgid" != "$interrupt_checker_sid" ] \
+                || [ "$interrupt_nested_pgid" != "$interrupt_nested_pid" ] \
+                || [ "$interrupt_nested_pgid" = "$interrupt_checker_pgid" ] \
+                || [ "$interrupt_nested_sid" != "$interrupt_checker_sid" ] \
+                || [ "$interrupt_ignore_pgid" != "$interrupt_nested_pgid" ] \
+                || [ "$interrupt_ignore_sid" != "$interrupt_checker_sid" ]; then
+            interrupt_error="interruption fixture did not create nested checker process groups in one session"
+        fi
+    fi
+
+    kill -TERM "$interrupt_runner_pid" 2>/dev/null || true
+    if wait "$interrupt_runner_pid"; then interrupt_runner_rc=0; else interrupt_runner_rc=$?; fi
+    [ "$interrupt_runner_rc" -eq 143 ] \
+        || interrupt_error="${interrupt_error:+$interrupt_error; }interrupted runner exited $interrupt_runner_rc, expected 143"
+
+    if [ -n "${interrupt_checker_sid:-}" ]; then
+        for ((interrupt_attempt = 0; interrupt_attempt < 100; interrupt_attempt++)); do
+            interrupt_alive=0
+            for interrupt_pid in "$interrupt_checker_pid" "$interrupt_nested_pid" "$interrupt_ignore_pid"; do
+                if kill -0 "$interrupt_pid" 2>/dev/null; then interrupt_alive=1; break; fi
+            done
+            mutation_session_has_processes "$interrupt_checker_sid"
+            interrupt_session_state=$?
+            if [ "$interrupt_alive" -eq 0 ] && [ "$interrupt_session_state" -eq 1 ]; then
+                break
+            fi
+            [ "$interrupt_session_state" -ne 2 ] \
+                || interrupt_error="${interrupt_error:+$interrupt_error; }process snapshot failed during interruption proof"
+            sleep 0.05
+        done
+        mutation_session_has_processes "$interrupt_checker_sid"
+        interrupt_session_state=$?
+        if [ "$interrupt_alive" -ne 0 ] || [ "$interrupt_session_state" -ne 1 ]; then
+            interrupt_error="${interrupt_error:+$interrupt_error; }checker descendants survived interrupted-run cleanup"
+            mutation_signal_session_groups "$interrupt_checker_sid" \
+                "${interrupt_checker_token:-invalid}" KILL || true
+        fi
+    fi
+    [ -z "$interrupt_error" ] || { echo "ERROR: $interrupt_error" >&2; exit 1; }
+
+    # Exercise worker ownership independently of checker registration. TERM
+    # removes the tracked worker from Bash's job table while its stopped,
+    # TERM-ignoring child remains in that PGID; only the inherited worker token
+    # can safely retain and KILL the group afterward.
+    job_gap_result="$RESULT_DIR/job-gap-result"
+    job_gap_pid_file="$RESULT_DIR/job-gap.pid"
+    job_gap_ready="$RESULT_DIR/job-gap.ready"
+    job_gap_runner_log="$RESULT_DIR/job-gap.stderr"
+    job_gap_token="job-gap-$RANDOM-$BASHPID"
+    job_gap_worker_token="mutation-worker.$RANDOM$RANDOM"
+    job_gap_worker_slot="$job_gap_result/$job_gap_worker_token"
+    job_gap_worker="$RESULT_DIR/job-gap-worker"
+    mkdir -p "$job_gap_result"
+    cat > "$job_gap_worker" <<'EOF'
+#!/usr/bin/env bash
+set -u
+printf '%s %s\n' "$BASHPID" "${MUTATION_WORKER_TOKEN:?}" \
+    > "${MUTATION_WORKER_SLOT:?}"
+"${MUTATION_INTERRUPT_IGNORE:?}" &
+wait
+EOF
+    chmod 750 "$job_gap_worker"
+    printf '0 %s\n' "$job_gap_worker_token" > "$job_gap_worker_slot"
+    (
+        RESULT_DIR="$job_gap_result"
+        MUTATION_STOP_FILE="$job_gap_result/stopping"
+        active_pids=()
+        launching_pid=0
+        launching_checker_pid=0
+        set +m
+        trap cleanup_mutation_run EXIT
+        trap 'mutation_signal_exit 143' TERM
+        MUTATION_WORKER_TOKEN="$job_gap_worker_token" \
+            MUTATION_WORKER_SLOT="$job_gap_worker_slot" \
+            MUTATION_JOB_GAP_TOKEN="$job_gap_token" \
+            MUTATION_INTERRUPT_IGNORE_PID="$job_gap_pid_file" \
+            MUTATION_INTERRUPT_IGNORE="$interrupt_ignore" \
+            setsid "$job_gap_worker" >/dev/null 2>&1 &
+        for ((attempt = 0; attempt < 500; attempt++)); do
+            [ -s "$job_gap_pid_file" ] && break
+            sleep 0.01
+        done
+        [ -s "$job_gap_pid_file" ] || exit 93
+        : > "$job_gap_ready"
+        wait
+    ) 2>"$job_gap_runner_log" &
+    job_gap_runner_pid=$!
+    for ((interrupt_attempt = 0; interrupt_attempt < 500; interrupt_attempt++)); do
+        [ -f "$job_gap_ready" ] && break
+        kill -0 "$job_gap_runner_pid" 2>/dev/null || break
+        sleep 0.01
+    done
+    [ -f "$job_gap_ready" ] || {
+        kill -TERM "$job_gap_runner_pid" 2>/dev/null || true
+        wait "$job_gap_runner_pid" 2>/dev/null || true
+        if [ -s "$job_gap_pid_file" ]; then
+            job_gap_pid=$(<"$job_gap_pid_file")
+            job_gap_pgid=$(ps -o pgid= -p "$job_gap_pid" 2>/dev/null || true)
+            read -r job_gap_pgid <<< "$job_gap_pgid"
+            if mutation_process_has_env_entry "$job_gap_pid" \
+                    "MUTATION_JOB_GAP_TOKEN=$job_gap_token"; then
+                kill -KILL -- "-$job_gap_pgid" 2>/dev/null || true
+            fi
+        fi
+        echo "ERROR: worker launch-gap fixture did not become ready" >&2
+        exit 1
+    }
+    job_gap_pid=$(<"$job_gap_pid_file")
+    read -r job_gap_worker_pid published_worker_token < "$job_gap_worker_slot"
+    job_gap_pgid=$(ps -o pgid= -p "$job_gap_pid")
+    read -r job_gap_pgid <<< "$job_gap_pgid"
+    if [ "$published_worker_token" != "$job_gap_worker_token" ] \
+            || [ "$job_gap_pgid" != "$job_gap_worker_pid" ] \
+            || [ "$job_gap_pid" = "$job_gap_worker_pid" ]; then
+        if mutation_process_has_env_entry "$job_gap_pid" \
+                "MUTATION_JOB_GAP_TOKEN=$job_gap_token"; then
+            kill -KILL -- "-$job_gap_pgid" 2>/dev/null || true
+        fi
+        echo "ERROR: worker launch-gap fixture did not own a process group" >&2
+        exit 1
+    fi
+    kill -STOP "$job_gap_pid"
+    job_gap_state=$(ps -o stat= -p "$job_gap_pid")
+    [[ $job_gap_state == T* ]] || {
+        if mutation_process_has_env_entry "$job_gap_pid" \
+                "MUTATION_JOB_GAP_TOKEN=$job_gap_token"; then
+            kill -KILL -- "-$job_gap_pgid" 2>/dev/null || true
+        fi
+        echo "ERROR: worker launch-gap fixture did not enter stopped state" >&2
+        exit 1
+    }
+    kill -TERM "$job_gap_runner_pid"
+    if wait "$job_gap_runner_pid"; then job_gap_rc=0; else job_gap_rc=$?; fi
+    [ "$job_gap_rc" -eq 143 ] || {
+        if mutation_process_has_env_entry "$job_gap_pid" \
+                "MUTATION_JOB_GAP_TOKEN=$job_gap_token"; then
+            kill -KILL -- "-$job_gap_pgid" 2>/dev/null || true
+        fi
+        echo "ERROR: worker launch-gap runner exited $job_gap_rc, expected 143" >&2
+        exit 1
+    }
+    for ((interrupt_attempt = 0; interrupt_attempt < 100; interrupt_attempt++)); do
+        kill -0 "$job_gap_pid" 2>/dev/null || break
+        sleep 0.05
+    done
+    if kill -0 "$job_gap_pid" 2>/dev/null; then
+        if mutation_process_has_env_entry "$job_gap_pid" \
+                "MUTATION_JOB_GAP_TOKEN=$job_gap_token"; then
+            kill -KILL -- "-$job_gap_pgid" 2>/dev/null || true
+        fi
+        echo "ERROR: unregistered worker survived current-shell job cleanup" >&2
+        exit 1
+    fi
     if mutation_checker_status_is_infrastructure_error 1; then
         echo "ERROR: mutation accounting rejected an ordinary mutation kill status" >&2
         exit 1
@@ -1205,7 +1844,7 @@ EOF
             "$RESULT_DIR/selftest-no-newline.status" >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted an unterminated status" >&2; exit 1
     fi
-    echo "mutation sandbox/accounting validation: 37 checks, 0 failures"
+    echo "mutation sandbox/accounting validation: 62 checks, 0 failures"
     exit 0
 fi
 
@@ -1216,7 +1855,7 @@ fi
 # kill against a baseline that was never verified. (The PIC-shell mutants have
 # their own baseline probe below, since their tools may be absent.)
 echo "=== mutation testing: baseline sanity check ==="
-if ! BASE_DIR="$(mktemp -d)"; then
+if ! BASE_DIR="$(mktemp -d "$RESULT_DIR/baseline.XXXXXX")"; then
     echo "ERROR: could not create mutation baseline sandbox" >&2
     exit 2
 fi
@@ -1282,7 +1921,7 @@ PIC10F320_TOOL_WHY="tools absent"
 MUT_BASELINE_FAILED=0
 echo
 echo "=== PIC toolchain probe (gates the PIC-shell mutants) ==="
-if ! PIC_BASE="$(mktemp -d)"; then
+if ! PIC_BASE="$(mktemp -d "$RESULT_DIR/pic-baseline.XXXXXX")"; then
     echo "ERROR: could not create PIC mutation probe sandbox" >&2
     exit 2
 fi
@@ -1336,7 +1975,7 @@ rm -rf "$PIC_BASE"
 PIC10F320_TOOL_OK=0
 echo
 echo "=== PIC10F320 toolchain probe (gates its tool-dependent mutants) ==="
-if ! P320_BASE="$(mktemp -d)"; then
+if ! P320_BASE="$(mktemp -d "$RESULT_DIR/pic320-baseline.XXXXXX")"; then
     echo "ERROR: could not create PIC10F320 mutation probe sandbox" >&2
     exit 2
 fi
@@ -1393,7 +2032,10 @@ XT_OK=0
 XT_WHY="tools absent"
 echo
 echo "=== AVR-XT toolchain probe (gates the ATtiny202 mutants) ==="
-XT_BASE="$(mktemp -d)"
+if ! XT_BASE="$(mktemp -d "$RESULT_DIR/xt-baseline.XXXXXX")"; then
+    echo "ERROR: could not create AVR-XT baseline sandbox" >&2
+    exit 2
+fi
 copy_tree "$XT_BASE"
 if ! validate_avr_xt_sandbox "$XT_BASE"; then
     rm -rf "$XT_BASE"

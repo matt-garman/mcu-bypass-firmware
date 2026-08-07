@@ -10,7 +10,7 @@ checks=0
 unset FAKE_GPSIM_MODE FAKE_GPSIM_EXIT FAKE_GPSIM_MARKER FAKE_GPSIM_STC_LOG \
 	FAKE_GPSIM_PROC_LOG \
 	FAKE_TIMEOUT_MARKER GPSIM GPSIM_TIMEOUT_SECONDS PIC_GPSIM_PROC PIC_GPSIM_STC \
-	STRICT_TOOLS
+	MUTATION_INFRA_MARKER STRICT_TOOLS
 mkdir -p "$tools"
 printf ':00000001FF\n' > "$hex"
 REAL_TIMEOUT=$(command -v timeout)
@@ -107,23 +107,29 @@ for wrapper in run_toggle run_power_on; do
 		|| { printf 'FAIL: %s rejected a padded positive decimal timeout\n' "$wrapper" >&2; exit 1; }
 	checks=$((checks + 1))
 
-	if output=$(export FAKE_GPSIM_MODE=exit FAKE_GPSIM_EXIT=7; "$wrapper" 2>&1); then
+	infra_marker="$work/$wrapper.mutation-infrastructure"
+	rm -f "$infra_marker"
+	if output=$(export FAKE_GPSIM_MODE=exit FAKE_GPSIM_EXIT=7 \
+			MUTATION_INFRA_MARKER="$infra_marker"; "$wrapper" 2>&1); then
 		printf 'FAIL: %s accepted nonzero gpsim exit\n' "$wrapper" >&2
 		exit 1
 	fi
 	[[ "$output" == *"gpsim exited with status 7"* \
 		&& "$output" == *"$expected_final"* \
-		&& "$output" == *"FAKE_GPSIM_SNAPSHOTS_COMPLETE"* ]] \
+		&& "$output" == *"FAKE_GPSIM_SNAPSHOTS_COMPLETE"* \
+		&& ! -e "$infra_marker" ]] \
 		|| { printf 'FAIL: %s reported the wrong nonzero-exit failure: %s\n' "$wrapper" "$output" >&2; exit 1; }
 	checks=$((checks + 1))
 
-	if output=$(export FAKE_GPSIM_MODE=sleep GPSIM_TIMEOUT_SECONDS=0.5; "$wrapper" 2>&1); then
+	if output=$(export FAKE_GPSIM_MODE=sleep GPSIM_TIMEOUT_SECONDS=0.5 \
+			MUTATION_INFRA_MARKER="$infra_marker"; "$wrapper" 2>&1); then
 		printf 'FAIL: %s accepted a timed-out gpsim run\n' "$wrapper" >&2
 		exit 1
 	fi
 	[[ "$output" == *"gpsim exited with status 137"* \
 		&& "$output" == *"$expected_final"* \
-		&& "$output" == *"FAKE_GPSIM_SNAPSHOTS_COMPLETE"* ]] \
+		&& "$output" == *"FAKE_GPSIM_SNAPSHOTS_COMPLETE"* \
+		&& -f "$infra_marker" ]] \
 		|| { printf 'FAIL: %s reported the wrong timeout failure: %s\n' "$wrapper" "$output" >&2; exit 1; }
 	checks=$((checks + 1))
 
