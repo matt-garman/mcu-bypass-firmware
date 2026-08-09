@@ -1,0 +1,336 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
+./test/avr/test_fuses
+fuse-byte verification:
+  ATtiny13a: lfuse=0x4a hfuse=0xf9
+  ATtiny85:  lfuse=0x62 hfuse=0xcc
+  ATtiny202:  WDTCFG=0x06 BODCFG=0xe5 OSCCFG=0x01 SYSCFG0=0xf6 SYSCFG1=0x07 APPEND=0x00 BOOTEND=0x00
+fuse checks: 46 checks, 0 failures
+ATTINY202_FUSE_WDTCFG=0x06 ATTINY202_FUSE_BODCFG=0xE5 ATTINY202_FUSE_OSCCFG=0x01 ATTINY202_FUSE_SYSCFG0=0xF6 ATTINY202_FUSE_SYSCFG1=0x07 ATTINY202_FUSE_APPEND=0x00 ATTINY202_FUSE_BOOTEND=0x00 PYTHONPATH=test/avr python3 test/avr/test_attiny202_fuses.py
+ATtiny202 simulator fuse validation: 39 checks, 0 failures
+=== ATtiny202 (avrxmega3) build + flash-budget (2048 B) ===
+OK:   cd4053_simple -> build_avr_xt/bypass-attiny202-cd4053_simple.hex : 848 B (41.4%) of 2048 B
+OK:   cd4053_with_mute -> build_avr_xt/bypass-attiny202-cd4053_with_mute.hex : 888 B (43.4%) of 2048 B
+OK:   tq2_l2_5v_relay -> build_avr_xt/bypass-attiny202-tq2_l2_5v_relay.hex : 888 B (43.4%) of 2048 B
+--- ATtiny202 sim (functional): variant=cd4053_simple ---
+SIM START: fw=build_avr_xt/bypass-attiny202-cd4053_simple.elf  variant=cd4053_simple  F_CPU=2000000 Hz
+[sim] OK    output startup: first driven PA2/PA3 state was safe low 0x0
+[sim] OK    output release after engage: simulator kept advancing
+[sim] OK    output release after engage: no control pin was high before both became driven
+[sim] OK    output release after engage: PA2/PA3 became driven outputs
+[sim] OK    output release after engage: PA2/PA3 stayed exact driven High/Low
+[sim] OK    output release after engage: PA2/PA3 states [] == expected []
+[sim] OK    output release after bypass: simulator kept advancing
+[sim] OK    output release after bypass: no control pin was high before both became driven
+[sim] OK    output release after bypass: PA2/PA3 became driven outputs
+[sim] OK    output release after bypass: PA2/PA3 stayed exact driven High/Low
+[sim] OK    output release after bypass: PA2/PA3 states [] == expected []
+[sim] OK    output startup: simulator kept advancing
+[sim] OK    output startup: no control pin was high before both became driven
+[sim] OK    output startup: PA2/PA3 became driven outputs
+[sim] OK    output startup: PA2/PA3 stayed exact driven High/Low
+[sim] OK    output startup: PA2/PA3 states [] == expected []
+[sim] OK    output engage: simulator kept advancing
+[sim] OK    output engage: no control pin was high before both became driven
+[sim] OK    output engage: PA2/PA3 became driven outputs
+[sim] OK    output engage: PA2/PA3 stayed exact driven High/Low
+[sim] OK    output engage: PA2/PA3 states [1] == expected [1]
+[sim] OK    output bypass: simulator kept advancing
+[sim] OK    output bypass: no control pin was high before both became driven
+[sim] OK    output bypass: PA2/PA3 became driven outputs
+[sim] OK    output bypass: PA2/PA3 stayed exact driven High/Low
+[sim] OK    output bypass: PA2/PA3 states [0] == expected [0]
+[sim] OK    simple x4053: PA2 low and spare PA3 parked low in BYPASS
+[sim] OK    boot: PC not in force-reset spin (PC=0x028E)
+[sim] OK    boot: WDT.STATUS.LOCK set
+[sim] OK    boot: WDT.CTRLA == 0x06
+[sim] OK    boot: PORTA.DIR == exact 0x4E
+[sim] OK    boot: critical SFRs intact
+[sim] OK    boot: LED dark at idle
+[sim] OK    press #1 -> LED ON
+[sim] OK    press #2 -> LED off
+[sim] OK    press #3 -> LED ON
+[sim] OK    press #4 -> LED off
+[sim] OK    press #5 -> LED ON
+[sim] OK    press #6 -> LED off
+[sim] OK    idle 250 ms: never entered force-reset spin
+[sim] OK    idle 250 ms: WDT stayed locked
+[sim] OK    idle 250 ms: LED stayed dark
+[sim] OK    power-on-pressed: stays bypass (LED dark)
+[sim] OK    power-on-pressed: not in force-reset spin
+[sim] OK    power-on-pressed: first press after release engages
+
+SIM PASS: 0 check(s) failed.
+--- ATtiny202 sim (functional): variant=cd4053_with_mute ---
+SIM START: fw=build_avr_xt/bypass-attiny202-cd4053_with_mute.elf  variant=cd4053_with_mute  F_CPU=2000000 Hz
+[sim] OK    output startup: first driven PA2/PA3 state was safe low 0x0
+[sim] OK    output release after engage: simulator kept advancing
+[sim] OK    output release after engage: no control pin was high before both became driven
+[sim] OK    output release after engage: PA2/PA3 became driven outputs
+[sim] OK    output release after engage: PA2/PA3 stayed exact driven High/Low
+[sim] OK    output release after engage: PA2/PA3 states [] == expected []
+[sim] OK    output release after bypass: simulator kept advancing
+[sim] OK    output release after bypass: no control pin was high before both became driven
+[sim] OK    output release after bypass: PA2/PA3 became driven outputs
+[sim] OK    output release after bypass: PA2/PA3 stayed exact driven High/Low
+[sim] OK    output release after bypass: PA2/PA3 states [] == expected []
+[sim] OK    output startup: simulator kept advancing
+[sim] OK    output startup: no control pin was high before both became driven
+[sim] OK    output startup: PA2/PA3 became driven outputs
+[sim] OK    output startup: PA2/PA3 stayed exact driven High/Low
+[sim] OK    output startup: PA2/PA3 states [] == expected []
+[sim] OK    output engage: simulator kept advancing
+[sim] OK    output engage: no control pin was high before both became driven
+[sim] OK    output engage: PA2/PA3 became driven outputs
+[sim] OK    output engage: PA2/PA3 stayed exact driven High/Low
+[sim] OK    output engage: PA2/PA3 states [2, 3] == expected [2, 3]
+[sim] OK    output bypass: simulator kept advancing
+[sim] OK    output bypass: no control pin was high before both became driven
+[sim] OK    output bypass: PA2/PA3 became driven outputs
+[sim] OK    output bypass: PA2/PA3 stayed exact driven High/Low
+[sim] OK    output bypass: PA2/PA3 states [2, 0] == expected [2, 0]
+[sim] OK    output engage: complete state 0x2 pulse observed
+[sim] OK    output engage: state 0x2 pulse held 5.279 ms, within [4.900, 5.500] ms of the 5 ms design width
+[sim] OK    output bypass: complete state 0x2 pulse observed
+[sim] OK    output bypass: state 0x2 pulse held 5.281 ms, within [4.900, 5.500] ms of the 5 ms design width
+[sim] OK    muted x4053: PA2/PA3 finish at BYPASS 0x0
+[sim] OK    boot: PC not in force-reset spin (PC=0x028E)
+[sim] OK    boot: WDT.STATUS.LOCK set
+[sim] OK    boot: WDT.CTRLA == 0x06
+[sim] OK    boot: PORTA.DIR == exact 0x4E
+[sim] OK    boot: critical SFRs intact
+[sim] OK    boot: LED dark at idle
+[sim] OK    press #1 -> LED ON
+[sim] OK    press #2 -> LED off
+[sim] OK    press #3 -> LED ON
+[sim] OK    press #4 -> LED off
+[sim] OK    press #5 -> LED ON
+[sim] OK    press #6 -> LED off
+[sim] OK    idle 250 ms: never entered force-reset spin
+[sim] OK    idle 250 ms: WDT stayed locked
+[sim] OK    idle 250 ms: LED stayed dark
+[sim] OK    power-on-pressed: stays bypass (LED dark)
+[sim] OK    power-on-pressed: not in force-reset spin
+[sim] OK    power-on-pressed: first press after release engages
+
+SIM PASS: 0 check(s) failed.
+--- ATtiny202 sim (functional): variant=tq2_l2_5v_relay ---
+SIM START: fw=build_avr_xt/bypass-attiny202-tq2_l2_5v_relay.elf  variant=tq2_l2_5v_relay  F_CPU=2000000 Hz
+[sim] OK    output startup: first driven PA2/PA3 state was safe low 0x0
+[sim] OK    output release after engage: simulator kept advancing
+[sim] OK    output release after engage: no control pin was high before both became driven
+[sim] OK    output release after engage: PA2/PA3 became driven outputs
+[sim] OK    output release after engage: PA2/PA3 stayed exact driven High/Low
+[sim] OK    output release after engage: PA2/PA3 states [] == expected []
+[sim] OK    output release after bypass: simulator kept advancing
+[sim] OK    output release after bypass: no control pin was high before both became driven
+[sim] OK    output release after bypass: PA2/PA3 became driven outputs
+[sim] OK    output release after bypass: PA2/PA3 stayed exact driven High/Low
+[sim] OK    output release after bypass: PA2/PA3 states [] == expected []
+[sim] OK    output startup: simulator kept advancing
+[sim] OK    output startup: no control pin was high before both became driven
+[sim] OK    output startup: PA2/PA3 became driven outputs
+[sim] OK    output startup: PA2/PA3 stayed exact driven High/Low
+[sim] OK    output startup: PA2/PA3 states [1, 0] == expected [1, 0]
+[sim] OK    output engage: simulator kept advancing
+[sim] OK    output engage: no control pin was high before both became driven
+[sim] OK    output engage: PA2/PA3 became driven outputs
+[sim] OK    output engage: PA2/PA3 stayed exact driven High/Low
+[sim] OK    output engage: PA2/PA3 states [2, 0] == expected [2, 0]
+[sim] OK    output bypass: simulator kept advancing
+[sim] OK    output bypass: no control pin was high before both became driven
+[sim] OK    output bypass: PA2/PA3 became driven outputs
+[sim] OK    output bypass: PA2/PA3 stayed exact driven High/Low
+[sim] OK    output bypass: PA2/PA3 states [1, 0] == expected [1, 0]
+[sim] OK    output startup: relay coils were never both high
+[sim] OK    output engage: relay coils were never both high
+[sim] OK    output release after engage: relay coils were never both high
+[sim] OK    output bypass: relay coils were never both high
+[sim] OK    output release after bypass: relay coils were never both high
+[sim] OK    output startup: complete state 0x1 pulse observed
+[sim] OK    output startup: state 0x1 pulse held 12.014 ms, within [11.900, 13.200] ms of the 12 ms design width
+[sim] OK    output engage: complete state 0x2 pulse observed
+[sim] OK    output engage: state 0x2 pulse held 12.669 ms, within [11.900, 13.200] ms of the 12 ms design width
+[sim] OK    output bypass: complete state 0x1 pulse observed
+[sim] OK    output bypass: state 0x1 pulse held 12.655 ms, within [11.900, 13.200] ms of the 12 ms design width
+[sim] OK    relay: PA2/PA3 coils finish parked low
+[sim] OK    boot: PC not in force-reset spin (PC=0x028E)
+[sim] OK    boot: WDT.STATUS.LOCK set
+[sim] OK    boot: WDT.CTRLA == 0x06
+[sim] OK    boot: PORTA.DIR == exact 0x4E
+[sim] OK    boot: critical SFRs intact
+[sim] OK    boot: LED dark at idle
+[sim] OK    press #1 -> LED ON
+[sim] OK    press #2 -> LED off
+[sim] OK    press #3 -> LED ON
+[sim] OK    press #4 -> LED off
+[sim] OK    press #5 -> LED ON
+[sim] OK    press #6 -> LED off
+[sim] OK    idle 250 ms: never entered force-reset spin
+[sim] OK    idle 250 ms: WDT stayed locked
+[sim] OK    idle 250 ms: LED stayed dark
+[sim] OK    power-on-pressed: stays bypass (LED dark)
+[sim] OK    power-on-pressed: not in force-reset spin
+[sim] OK    power-on-pressed: first press after release engages
+
+SIM PASS: 0 check(s) failed.
+./test/avr/test_fuses
+fuse-byte verification:
+  ATtiny13a: lfuse=0x4a hfuse=0xf9
+  ATtiny85:  lfuse=0x62 hfuse=0xcc
+  ATtiny202:  WDTCFG=0x06 BODCFG=0xe5 OSCCFG=0x01 SYSCFG0=0xf6 SYSCFG1=0x07 APPEND=0x00 BOOTEND=0x00
+fuse checks: 46 checks, 0 failures
+ATTINY202_FUSE_WDTCFG=0x06 ATTINY202_FUSE_BODCFG=0xE5 ATTINY202_FUSE_OSCCFG=0x01 ATTINY202_FUSE_SYSCFG0=0xF6 ATTINY202_FUSE_SYSCFG1=0x07 ATTINY202_FUSE_APPEND=0x00 ATTINY202_FUSE_BOOTEND=0x00 PYTHONPATH=test/avr python3 test/avr/test_attiny202_fuses.py
+ATtiny202 simulator fuse validation: 39 checks, 0 failures
+=== ATtiny202 (avrxmega3) build + flash-budget (2048 B) ===
+OK:   cd4053_simple -> build_avr_xt/bypass-attiny202-cd4053_simple.hex : 848 B (41.4%) of 2048 B
+OK:   cd4053_with_mute -> build_avr_xt/bypass-attiny202-cd4053_with_mute.hex : 888 B (43.4%) of 2048 B
+OK:   tq2_l2_5v_relay -> build_avr_xt/bypass-attiny202-tq2_l2_5v_relay.hex : 888 B (43.4%) of 2048 B
+--- ATtiny202 fault-injection: variant=cd4053_simple ---
+FAULT START: fw=build_avr_xt/bypass-attiny202-cd4053_simple.elf  F_CPU=2000000 Hz
+[fault] OK    CLKCTRL.MCLKCTRLB corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN7CTRL(pullup) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN1CTRL(INVEN) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN2CTRL(INVEN) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN3CTRL(INVEN) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN6CTRL(INVEN) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN7CTRL(INVEN) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.DIR(outputs) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.DIR(footswitch) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.DIR(spare PA6) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.OUT(PA1 LED) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.OUT(PA2 control) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.OUT(PA3 control) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.OUT(PA6 spare) corrupted -> gate forced reset (+1 ms)
+[fault] OK    ctx_.program_state corrupted -> gate forced reset (+1 ms)
+[fault] OK    ctx_.effect_state corrupted -> gate forced reset (+1 ms)
+[fault] OK    ctx_.debounce_counter corrupted -> gate forced reset (+1 ms)
+[fault] OK    timer_isr_called_ repeatedly corrupted -> gate forced reset
+[fault] OK    TCB0.CTRLB(mode) corrupted -> gate forced reset (+1 ms)
+[fault] OK    TCB0.CCMP(period) corrupted -> gate forced reset (+2 ms)
+[fault] OK    TCB0.CTRLA(tick) corrupted -> register restored by witnessed WDT reset (+250 ms)
+[fault] OK    TCB0.INTCTRL(tick) corrupted -> register restored by witnessed WDT reset (+250 ms)
+[fault] OK    no corruption -> healthy for 650 ms
+
+FAULT PASS: 0 failed, 0 skipped, 22/22 injections, 23/23 results.
+--- ATtiny202 fault-injection: variant=cd4053_with_mute ---
+FAULT START: fw=build_avr_xt/bypass-attiny202-cd4053_with_mute.elf  F_CPU=2000000 Hz
+[fault] OK    CLKCTRL.MCLKCTRLB corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN7CTRL(pullup) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN1CTRL(INVEN) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN2CTRL(INVEN) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN3CTRL(INVEN) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN6CTRL(INVEN) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN7CTRL(INVEN) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.DIR(outputs) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.DIR(footswitch) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.DIR(spare PA6) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.OUT(PA1 LED) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.OUT(PA2 control) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.OUT(PA3 control) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.OUT(PA6 spare) corrupted -> gate forced reset (+1 ms)
+[fault] OK    ctx_.program_state corrupted -> gate forced reset (+1 ms)
+[fault] OK    ctx_.effect_state corrupted -> gate forced reset (+1 ms)
+[fault] OK    ctx_.debounce_counter corrupted -> gate forced reset (+1 ms)
+[fault] OK    timer_isr_called_ repeatedly corrupted -> gate forced reset
+[fault] OK    TCB0.CTRLB(mode) corrupted -> gate forced reset (+1 ms)
+[fault] OK    TCB0.CCMP(period) corrupted -> gate forced reset (+2 ms)
+[fault] OK    TCB0.CTRLA(tick) corrupted -> register restored by witnessed WDT reset (+255 ms)
+[fault] OK    TCB0.INTCTRL(tick) corrupted -> register restored by witnessed WDT reset (+255 ms)
+[fault] OK    no corruption -> healthy for 650 ms
+
+FAULT PASS: 0 failed, 0 skipped, 22/22 injections, 23/23 results.
+--- ATtiny202 fault-injection: variant=tq2_l2_5v_relay ---
+FAULT START: fw=build_avr_xt/bypass-attiny202-tq2_l2_5v_relay.elf  F_CPU=2000000 Hz
+[fault] OK    CLKCTRL.MCLKCTRLB corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN7CTRL(pullup) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN1CTRL(INVEN) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN2CTRL(INVEN) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN3CTRL(INVEN) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN6CTRL(INVEN) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.PIN7CTRL(INVEN) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.DIR(outputs) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.DIR(footswitch) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.DIR(spare PA6) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.OUT(PA1 LED) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.OUT(PA2 control) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.OUT(PA3 control) corrupted -> gate forced reset (+1 ms)
+[fault] OK    PORTA.OUT(PA6 spare) corrupted -> gate forced reset (+1 ms)
+[fault] OK    ctx_.program_state corrupted -> gate forced reset (+1 ms)
+[fault] OK    ctx_.effect_state corrupted -> gate forced reset (+1 ms)
+[fault] OK    ctx_.debounce_counter corrupted -> gate forced reset (+1 ms)
+[fault] OK    timer_isr_called_ repeatedly corrupted -> gate forced reset
+[fault] OK    TCB0.CTRLB(mode) corrupted -> gate forced reset (+1 ms)
+[fault] OK    TCB0.CCMP(period) corrupted -> gate forced reset (+2 ms)
+[fault] OK    TCB0.CTRLA(tick) corrupted -> register restored by witnessed WDT reset (+265 ms)
+[fault] OK    TCB0.INTCTRL(tick) corrupted -> register restored by witnessed WDT reset (+265 ms)
+[fault] OK    no corruption -> healthy for 650 ms
+
+FAULT PASS: 0 failed, 0 skipped, 22/22 injections, 23/23 results.
+./test/avr/test_fuses
+fuse-byte verification:
+  ATtiny13a: lfuse=0x4a hfuse=0xf9
+  ATtiny85:  lfuse=0x62 hfuse=0xcc
+  ATtiny202:  WDTCFG=0x06 BODCFG=0xe5 OSCCFG=0x01 SYSCFG0=0xf6 SYSCFG1=0x07 APPEND=0x00 BOOTEND=0x00
+fuse checks: 46 checks, 0 failures
+ATTINY202_FUSE_WDTCFG=0x06 ATTINY202_FUSE_BODCFG=0xE5 ATTINY202_FUSE_OSCCFG=0x01 ATTINY202_FUSE_SYSCFG0=0xF6 ATTINY202_FUSE_SYSCFG1=0x07 ATTINY202_FUSE_APPEND=0x00 ATTINY202_FUSE_BOOTEND=0x00 PYTHONPATH=test/avr python3 test/avr/test_attiny202_fuses.py
+ATtiny202 simulator fuse validation: 39 checks, 0 failures
+=== ATtiny202 (avrxmega3) build + flash-budget (2048 B) ===
+OK:   cd4053_simple -> build_avr_xt/bypass-attiny202-cd4053_simple.hex : 848 B (41.4%) of 2048 B
+OK:   cd4053_with_mute -> build_avr_xt/bypass-attiny202-cd4053_with_mute.hex : 888 B (43.4%) of 2048 B
+OK:   tq2_l2_5v_relay -> build_avr_xt/bypass-attiny202-tq2_l2_5v_relay.hex : 888 B (43.4%) of 2048 B
+--- ATtiny202 lock-step: variant=cd4053_simple ticks=5000 ---
+LOCKSTEP START: fw=build_avr_xt/bypass-attiny202-cd4053_simple.elf  variant=cd4053_simple  ticks=5000  model=build_avr_xt/libbypass_model.so
+[lockstep] OK    released-at-boot: shell reached its first idle sleep after reset
+[lockstep] OK    ctx_ occupies exactly 3 bytes (ctx_=0x3F80, timer_isr_called_=0x3F83, gap=3)
+[lockstep] OK    PRESSED_THRESH: firmware 8 == harness 8
+[lockstep] OK    RELEASE_THRESH: firmware 25 == harness 25
+[lockstep] OK    released-at-boot anchor: fw(ps=0 es=0 dc=0) == model(ps=0 es=0 dc=0)
+[lockstep] OK    released-at-boot: co-simulated 5000 tick(s), 0 divergence(s)
+[lockstep] OK    released-at-boot: stimulus produced 45 effect-state toggle(s) over 5000 tick(s)
+[lockstep] OK    pressed-at-boot: shell reached its first idle sleep after reset
+[lockstep] OK    ctx_ occupies exactly 3 bytes (ctx_=0x3F80, timer_isr_called_=0x3F83, gap=3)
+[lockstep] OK    PRESSED_THRESH: firmware 8 == harness 8
+[lockstep] OK    RELEASE_THRESH: firmware 25 == harness 25
+[lockstep] OK    pressed-at-boot anchor: fw(ps=1 es=0 dc=25) == model(ps=1 es=0 dc=25)
+[lockstep] OK    pressed-at-boot: co-simulated 5000 tick(s), 0 divergence(s)
+[lockstep] OK    pressed-at-boot: stimulus produced 45 effect-state toggle(s) over 5000 tick(s)
+
+LOCKSTEP PASS: 0 check(s) failed.
+--- ATtiny202 lock-step: variant=cd4053_with_mute ticks=5000 ---
+LOCKSTEP START: fw=build_avr_xt/bypass-attiny202-cd4053_with_mute.elf  variant=cd4053_with_mute  ticks=5000  model=build_avr_xt/libbypass_model.so
+[lockstep] OK    released-at-boot: shell reached its first idle sleep after reset
+[lockstep] OK    ctx_ occupies exactly 3 bytes (ctx_=0x3F80, timer_isr_called_=0x3F83, gap=3)
+[lockstep] OK    PRESSED_THRESH: firmware 8 == harness 8
+[lockstep] OK    RELEASE_THRESH: firmware 25 == harness 25
+[lockstep] OK    released-at-boot anchor: fw(ps=0 es=0 dc=0) == model(ps=0 es=0 dc=0)
+[lockstep] OK    released-at-boot: co-simulated 5000 tick(s), 0 divergence(s)
+[lockstep] OK    released-at-boot: stimulus produced 45 effect-state toggle(s) over 5000 tick(s)
+[lockstep] OK    pressed-at-boot: shell reached its first idle sleep after reset
+[lockstep] OK    ctx_ occupies exactly 3 bytes (ctx_=0x3F80, timer_isr_called_=0x3F83, gap=3)
+[lockstep] OK    PRESSED_THRESH: firmware 8 == harness 8
+[lockstep] OK    RELEASE_THRESH: firmware 25 == harness 25
+[lockstep] OK    pressed-at-boot anchor: fw(ps=1 es=0 dc=25) == model(ps=1 es=0 dc=25)
+[lockstep] OK    pressed-at-boot: co-simulated 5000 tick(s), 0 divergence(s)
+[lockstep] OK    pressed-at-boot: stimulus produced 45 effect-state toggle(s) over 5000 tick(s)
+
+LOCKSTEP PASS: 0 check(s) failed.
+--- ATtiny202 lock-step: variant=tq2_l2_5v_relay ticks=5000 ---
+LOCKSTEP START: fw=build_avr_xt/bypass-attiny202-tq2_l2_5v_relay.elf  variant=tq2_l2_5v_relay  ticks=5000  model=build_avr_xt/libbypass_model.so
+[lockstep] OK    released-at-boot: shell reached its first idle sleep after reset
+[lockstep] OK    ctx_ occupies exactly 3 bytes (ctx_=0x3F80, timer_isr_called_=0x3F83, gap=3)
+[lockstep] OK    PRESSED_THRESH: firmware 8 == harness 8
+[lockstep] OK    RELEASE_THRESH: firmware 25 == harness 25
+[lockstep] OK    released-at-boot anchor: fw(ps=0 es=0 dc=0) == model(ps=0 es=0 dc=0)
+[lockstep] OK    released-at-boot: co-simulated 5000 tick(s), 0 divergence(s)
+[lockstep] OK    released-at-boot: stimulus produced 45 effect-state toggle(s) over 5000 tick(s)
+[lockstep] OK    pressed-at-boot: shell reached its first idle sleep after reset
+[lockstep] OK    ctx_ occupies exactly 3 bytes (ctx_=0x3F80, timer_isr_called_=0x3F83, gap=3)
+[lockstep] OK    PRESSED_THRESH: firmware 8 == harness 8
+[lockstep] OK    RELEASE_THRESH: firmware 25 == harness 25
+[lockstep] OK    pressed-at-boot anchor: fw(ps=1 es=0 dc=25) == model(ps=1 es=0 dc=25)
+[lockstep] OK    pressed-at-boot: co-simulated 5000 tick(s), 0 divergence(s)
+[lockstep] OK    pressed-at-boot: stimulus produced 45 effect-state toggle(s) over 5000 tick(s)
+
+LOCKSTEP PASS: 0 check(s) failed.
+=== ATtiny202 target sim/fault/lock-step validated for all variants ===
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware'

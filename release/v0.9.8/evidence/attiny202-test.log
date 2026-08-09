@@ -1,0 +1,30 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
+./test/avr/test_fuses
+fuse-byte verification:
+  ATtiny13a: lfuse=0x4a hfuse=0xf9
+  ATtiny85:  lfuse=0x62 hfuse=0xcc
+  ATtiny202:  WDTCFG=0x06 BODCFG=0xe5 OSCCFG=0x01 SYSCFG0=0xf6 SYSCFG1=0x07 APPEND=0x00 BOOTEND=0x00
+fuse checks: 46 checks, 0 failures
+ATTINY202_FUSE_WDTCFG=0x06 ATTINY202_FUSE_BODCFG=0xE5 ATTINY202_FUSE_OSCCFG=0x01 ATTINY202_FUSE_SYSCFG0=0xF6 ATTINY202_FUSE_SYSCFG1=0x07 ATTINY202_FUSE_APPEND=0x00 ATTINY202_FUSE_BOOTEND=0x00 PYTHONPATH=test/avr python3 test/avr/test_attiny202_fuses.py
+ATtiny202 simulator fuse validation: 39 checks, 0 failures
+=== ATtiny202 (avrxmega3) smoke: compile + link + arch + 2048 B budget ===
+OK:   avrxmega3, build_avr_classic/attiny202_smoke.elf uses 264 B (12.9%) of 2048 B
+=== ATtiny202 (avrxmega3) build + flash-budget (2048 B) ===
+OK:   cd4053_simple -> build_avr_xt/bypass-attiny202-cd4053_simple.hex : 848 B (41.4%) of 2048 B
+OK:   cd4053_with_mute -> build_avr_xt/bypass-attiny202-cd4053_with_mute.hex : 888 B (43.4%) of 2048 B
+OK:   tq2_l2_5v_relay -> build_avr_xt/bypass-attiny202-tq2_l2_5v_relay.hex : 888 B (43.4%) of 2048 B
+cppcheck (ATtiny202, avr8/avrxmega3): cppcheck src/bypass_mcu_avr_xt.c
+Checking src/bypass_mcu_avr_xt.c ...
+Checking src/bypass_mcu_avr_xt.c: __AVR__=1;__AVR_XMEGA__=1;__AVR_MEGA__=1;__AVR_ATtiny202__=1;__AVR_ARCH__=103;__AVR_DEV_LIB_NAME__=tn202;BYPASS_MCU_AVR_XT=1;F_CPU=2000000UL...
+MISRA-C:2012 analysis -- ATtiny202 shell (cppcheck + misra addon, avr8)
+Checking src/bypass_mcu_avr_xt.c ...
+Checking src/bypass_mcu_avr_xt.c: __AVR__=1;__AVR_XMEGA__=1;__AVR_MEGA__=1;__AVR_ATtiny202__=1;__AVR_ARCH__=103;__AVR_DEV_LIB_NAME__=tn202;BYPASS_MCU_AVR_XT=1;F_CPU=2000000UL...
+MISRA-C:2012 (ATtiny202 shell): clean (documented deviations waived per MISRA_COMPLIANCE.md)
+=== ATtiny202 static analysis (cppcheck + MISRA) complete ===
+[delay] OK    cd4053_simple: coil-pulse widths [(none)] == design (none) (+/-0.10 ms)
+[delay] OK    cd4053_with_mute: coil-pulse widths [4.998 ms, 4.998 ms] == design [5, 5] (+/-0.10 ms)
+[delay] OK    tq2_l2_5v_relay: coil-pulse widths [11.998 ms, 11.998 ms] == design [12, 12] (+/-0.10 ms)
+[delay] OK    tq2_l2_5v_relay: every coil pulse >= 4 ms datasheet minimum (11.998 ms, 11.998 ms)
+[delay] 4 checks, 0 failures
+=== all ATtiny202 pre-hardware checks complete ===
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
