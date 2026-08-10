@@ -847,6 +847,7 @@ VARIANT_SELECTORS = \
 	PIC10F322_TARGET_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC12F675_IO_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC12F675_LOCKSTEP_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
+	PIC12F675_FAULT_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC10F320_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
 	PIC10F320_TARGET_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
 	PIC10F320_FAULT_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
@@ -1451,7 +1452,11 @@ PIC_PIN_LOOKUP_HDR = test/pic/find_pin_exact.h
 # soak) on BOTH parts. It is a prerequisite of every one of them below: an edit
 # here changes what every PIC gpsim binary does, so none may be stale for it.
 PIC_GPSIM_BOOTSTRAP_HDR = test/pic/gpsim_bootstrap.h
-PIC10F322_FAULT_CORE_HDR = test/pic/test_fault_pic_core.h
+# Shared by all three fault adapters, and named for that rather than for the
+# part whose lane defined it first. TARGET_FAULT for the same reason as
+# TARGET_IO below: the adapters state their guard policy through a C macro
+# family that would otherwise share the stem.
+PIC_TARGET_FAULT_CORE_HDR = test/pic/test_fault_pic_core.h
 # Named PIC_ rather than PIC10F322_ because the PIC12F675 io lane compiles the
 # same core: it is shared mechanism, like the bring-up header above, and a
 # part-named variable would have read as the 322's private copy.
@@ -1475,9 +1480,11 @@ PIC_TARGET_LOCKSTEP_CORE_HDR = test/pic/test_lockstep_pic_core.h
 # consume them; the PIC10F320 lanes compile inline and so cannot go stale.
 PIC10F32X_REGS_HDR = test/pic/pic10f32x_regs.h
 PIC10F32X_FAULT_MATRIX_HDR = test/pic/pic10f32x_fault_matrix.h
-# The PIC12F675 counterpart. Its guard-policy sibling (pic12f675_fault_matrix.h)
-# arrives with the fault lane; this file alone is what the io lane needs.
+# The PIC12F675 counterparts. Same split for the same reason: identity in one
+# file, guard policy in the other. The io and lock-step lanes need only the
+# first; the fault lane needs both.
 PIC12F675_REGS_HDR = test/pic/pic12f675_regs.h
+PIC12F675_FAULT_MATRIX_HDR = test/pic/pic12f675_fault_matrix.h
 PIC_SOAK_SRC = test/pic/test_soak_pic.cc
 PIC_SOAK_SAMPLING_HDR = test/pic/soak_sampling.h
 PIC10F322_SOAK_DEPS = $(PIC_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
@@ -1600,7 +1607,7 @@ PIC10F322_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags 
 		-DF_CPU_HZ=$(PIC10F322_XTAL) -D$(macro_$(PIC10F322_FAULT_VARIANT)) $(PIC10F322_FAULT_CTX_DEF) \
 		$(PIC10F322_FAULT_SRC) -o $(PIC10F322_FAULT_BIN) -lgpsim
 
-$(PIC10F322_FAULT_BIN): $(PIC10F322_FAULT_SRC) $(PIC10F322_FAULT_CORE_HDR) $(PIC_PIN_LOOKUP_HDR) \
+$(PIC10F322_FAULT_BIN): $(PIC10F322_FAULT_SRC) $(PIC_TARGET_FAULT_CORE_HDR) $(PIC_PIN_LOOKUP_HDR) \
                   $(PIC_GPSIM_BOOTSTRAP_HDR) $(PIC10F32X_REGS_HDR) \
                   $(PIC10F32X_FAULT_MATRIX_HDR)
 	$(PIC10F322_FAULT_COMPILE)
@@ -2555,7 +2562,7 @@ clean:
 	rm -f $(AVR_SIM_BINARIES) $(AVR_SOAK_BINARIES) $(AVR_TEST_BINARIES_RETIRED) \
 		test/host/test_logic_host test/pic/test_config_pic test/pic/test_soak_pic \
 		test/pic/test_config_pic12f675 test/pic/test_io_pic12f675 \
-		test/pic/test_lockstep_pic12f675 \
+		test/pic/test_lockstep_pic12f675 test/pic/test_fault_pic12f675 \
 		test/pic/test_fault_pic test/pic/test_lockstep_pic test/pic/test_io_pic \
 		test/formal/test_model_check test/formal/test_symbolic test/avr/test_fuses \
 		test/formal/test_symbolic.bc test/formal/bypass_pure_klee.bc \
@@ -5554,6 +5561,100 @@ pic12f675-test-lockstep: variant-selectors-valid pic12f675-simcal
 	$(PIC12F675_LOCKSTEP_COMPILE) && \
 	./$(PIC12F675_LOCKSTEP_BIN)
 
+# --- PIC12F675 critical-SFR fault-injection test (libgpsim) --------------------
+# The PIC12F675 leg of the fault lane: the same shared core
+# (test/pic/test_fault_pic_core.h) corrupting a guarded location on the real
+# XC8-built image and requiring the firmware to recover through exactly one
+# watchdog reset. Four notes specific to this part:
+#
+#   1. IT NEEDS TWO ADDRESSES FROM THE BUILD, not one. Every other fault lane
+#      lifts _ctx_ alone; this part has no output-latch SFR, so the latch it
+#      corrupts is the shell's gpio_shadow_ in SRAM and its address is lifted
+#      the same way. The adapter refuses to compile without it rather than
+#      defaulting: no default can be right for a per-build address, and the
+#      obvious one is actively wrong -- register 0x000 is INDF, so a write
+#      through it lands wherever FSR points.
+#   2. IT INJECTS INTO THE PHYSICAL PORT AS WELL AS THE LATCH. With the shadow
+#      left correct and GPIO driven high, the only clause of the gate that can
+#      explain the reset is "the port still follows the shadow" -- the check
+#      this part can make and the PIC10F322 cannot.
+#   3. IT SCANS THE WHOLE 1024-WORD PROGRAM SPACE for the main loop's CLRWDT,
+#      the point at which every injection is parked. Half of this image sits
+#      above the 0x200 the two 10F32x lanes scan.
+#   4. IT RUNS THE DERIVED IMAGE, like every simulator lane for this part, while
+#      taking _ctx_, gpio_shadow_ and the `ds 3` layout check from the SHIPPING
+#      build beside it -- the injector adds one calibration word and changes no
+#      symbol.
+#
+# Skip-clean for missing tools, and standalone for now: this part has no
+# fail-closed target aggregate yet, so nothing currently requires the
+# FAULT-INJECT PASS sentinel the way pic10f322-test-target requires the 322's.
+PIC12F675_FAULT_VARIANT ?= cd4053_simple
+PIC12F675_FAULT_SRC = test/pic/test_fault_pic12f675.cc
+PIC12F675_FAULT_BIN = test/pic/test_fault_pic12f675
+PIC12F675_FAULT_STEM = $(call fw_image,$(PIC12F675_FAULT_VARIANT),$(PIC12F675_TAG))
+PIC12F675_FAULT_HEX = $(PIC12F675_SIMCAL_DIR)/$(PIC12F675_FAULT_STEM)_simcal.hex
+# Both from the shipping build, NOT from the derived image beside it: the
+# calibration injector rewrites one program word and emits no symbol table or
+# assembly of its own.
+PIC12F675_FAULT_SYM = $(PIC12F675_BUILD_DIR)/$(PIC12F675_FAULT_STEM).sym
+PIC12F675_FAULT_ASM = $(PIC12F675_BUILD_DIR)/$(PIC12F675_FAULT_STEM).s
+# A $(shell) in these recursive (=) variables re-runs when the compile command
+# below is expanded, so a rebuilt .sym is picked up without re-entering make.
+# Empty when the symbol is absent; the run recipe FAILS closed on that, and the
+# adapter will not compile without the shadow address.
+PIC12F675_FAULT_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC12F675_FAULT_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DCTX_ADDR=0x$$a)
+PIC12F675_FAULT_SHADOW_DEF = $(shell a=$$(awk '$$1=="_gpio_shadow_"{print $$2; exit}' $(PIC12F675_FAULT_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DPIC_SHADOW_ADDR=0x$$a)
+PIC12F675_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
+		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
+		-DFW_PATH='"$(CURDIR)/$(PIC12F675_FAULT_HEX)"' -DPROC_NAME='"$(PIC12F675_GPSIM_PROC)"' \
+		-DF_CPU_HZ=$(PIC12F675_XTAL) -D$(macro_$(PIC12F675_FAULT_VARIANT)) \
+		$(PIC12F675_FAULT_CTX_DEF) $(PIC12F675_FAULT_SHADOW_DEF) \
+		$(PIC12F675_FAULT_SRC) -o $(PIC12F675_FAULT_BIN) -lgpsim
+
+$(PIC12F675_FAULT_BIN): $(PIC12F675_FAULT_SRC) $(PIC_TARGET_FAULT_CORE_HDR) \
+                  $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
+                  $(PIC12F675_REGS_HDR) $(PIC12F675_FAULT_MATRIX_HDR)
+	$(PIC12F675_FAULT_COMPILE)
+
+.PHONY: pic12f675-test-fault
+pic12f675-test-fault: variant-selectors-valid pic12f675-simcal
+	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
+		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC12F675 fault-inject"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
+		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC12F675 fault-inject (install gpsim-dev)"; $(SKIP); \
+	fi; \
+	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
+		echo "libglib2.0-dev not found; skipping PIC12F675 fault-inject (install libglib2.0-dev)"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC12F675_FAULT_HEX)" ]; then \
+		echo "no $(PIC12F675_FAULT_HEX) (XC8 absent?); skipping PIC12F675 fault-inject for variant $(PIC12F675_FAULT_VARIANT)"; $(SKIP); \
+	fi; \
+	alloc=`awk 'prev=="_ctx_:"{print $$2; exit} {prev=$$1}' "$(PIC12F675_FAULT_ASM)" 2>/dev/null`; \
+	if [ "$$alloc" != "3" ]; then \
+		echo "FAIL: _ctx_ allocates $${alloc:-?} bytes in $(PIC12F675_FAULT_ASM) -- expected 3 (packed 1-byte enums)."; \
+		echo "      test_fault_pic12f675.cc injects at the hard-coded byte offsets ctx_+0/+1/+2"; \
+		echo "      (program_state / effect_state / debounce_counter); fix them if packing changed."; \
+		exit 1; \
+	fi; \
+	ctx_addr=`awk '$$1=="_ctx_"{print $$2; exit}' "$(PIC12F675_FAULT_SYM)" 2>/dev/null`; \
+	if [ -z "$$ctx_addr" ]; then \
+		echo "FAIL: _ctx_ symbol not found in $(PIC12F675_FAULT_SYM); ctx_ SRAM fault cases would be omitted."; \
+		exit 1; \
+	fi; \
+	shadow_addr=`awk '$$1=="_gpio_shadow_"{print $$2; exit}' "$(PIC12F675_FAULT_SYM)" 2>/dev/null`; \
+	if [ -z "$$shadow_addr" ]; then \
+		echo "FAIL: _gpio_shadow_ symbol not found in $(PIC12F675_FAULT_SYM)."; \
+		echo "      This part has no output-latch SFR, so the shadow IS the latch: the six"; \
+		echo "      output injections have nothing to corrupt without its address."; \
+		exit 1; \
+	fi; \
+	echo "--- PIC12F675 fault-inject: variant=$(PIC12F675_FAULT_VARIANT) proc=$(PIC12F675_GPSIM_PROC) (ctx_ at 0x$$ctx_addr, gpio_shadow_ at 0x$$shadow_addr, layout verified: 3 bytes) ---"; \
+	rm -f $(PIC12F675_FAULT_BIN) && \
+	$(PIC12F675_FAULT_COMPILE) && \
+	./$(PIC12F675_FAULT_BIN)
+
 # --- PIC12F675 CONFIG-word verification ---------------------------------------
 # Same mechanism as the PIC10F32x lane (test/pic/test_config_pic_core.h), its own
 # decode table (test/pic/pic12f675_config.h). See the PIC CONFIG-word block above
@@ -6077,6 +6178,8 @@ help:
 	@echo "  pic12f675-test-io     libgpsim GPIO transition + pulse timing, and the physical port"
 	@echo "                        against the SRAM output shadow (PIC12F675_IO_VARIANT)"
 	@echo "  pic12f675-test-lockstep  libgpsim HEX-vs-model ctx_ lock-step (PIC12F675_LOCKSTEP_VARIANT)"
+	@echo "  pic12f675-test-fault  libgpsim SEU injection into the guarded SFRs, the SRAM output"
+	@echo "                        shadow and the pins, expecting WDT recovery (PIC12F675_FAULT_VARIANT)"
 	@echo "  pic12f675-analyze     cppcheck + MISRA on the PIC12F675 shell (pic8 platform; standalone)"
 	@echo "  pic12f675-coverage-check-fw  exact host-gcov gate over the shell, core, and drivers"
 	@echo "  pic12f675-test-stack-bound  bound the 8-level hardware return stack for every variant"

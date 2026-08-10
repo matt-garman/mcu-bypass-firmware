@@ -42,8 +42,8 @@
 // lane that includes this file. The lock-step lane reads ctx_ and never looks
 // at the output path, so demanding a shadow address of it would be demanding a
 // value it has no use for. The latch macros below therefore exist only when the
-// build supplied one, and a core that reads them without one cannot compile:
-// test_io_pic_core.h says so by name (its PIC_REG_LATCH_ADDR guard), and any
+// build supplied one, and a lane that reads them without one cannot compile:
+// test_io_pic_core.h and test_fault_pic12f675.cc each say so by name, and any
 // other consumer stops on an undeclared identifier.
 //
 // Absent, rather than defaulted, on purpose: a default would point the
@@ -77,11 +77,19 @@
 #ifdef PIC_SHADOW_ADDR
 #  define PIC_REG_LATCH_ADDR   PIC_SHADOW_ADDR
 #  define PIC_REG_LATCH_NAME   "gpio_shadow_"
-// No gpsim name to match: SRAM registers are named positionally ("REG040"), so
-// a name cross-check would assert the placement rather than the identity. The
-// core treats a null token as "not checkable"; see PIC_REG_LATCH_LC in
-// pic10f32x_regs.h for why the printable name is a separate macro.
-#  define PIC_REG_LATCH_TOKEN  nullptr
+// The token the fault lane's fetch_sfr() requires the gpsim register name to
+// contain. gpsim names SRAM positionally ("REG040") and SFRs by their datasheet
+// name, so "reg" asserts exactly one thing: the address being corrupted is an
+// unnamed GPR and not a special-function register. It deliberately does NOT
+// assert WHICH GPR -- that would pin the placement, which is XC8's to choose --
+// and it is what stops a mis-edited injection from corrupting GPIO or TRISIO
+// while its label still says shadow. The check is a substring match, so the one
+// SFR it cannot separate from a GPR is OPTION_REG, whose name contains "reg";
+// every other register on this part is excluded by name.
+//
+// See PIC_REG_LATCH_LC in pic10f32x_regs.h for why the printable name is a
+// separate macro.
+#  define PIC_REG_LATCH_TOKEN  "reg"
 #  define PIC_REG_LATCH_LC     "gpio_shadow_"
 #endif
 
