@@ -148,6 +148,12 @@ test/
                                                         (make pic10f322-test-lockstep)
             test_io_pic.cc       PIC10F322 GPIO/pulse-timing adapter
                                                         (make pic10f322-test-io)
+            test_io_pic12f675.cc PIC12F675 GPIO/pulse-timing adapter. Same core,
+                                  but with no output-latch SFR the comparison is
+                                  the SRAM shadow against the physical pins --
+                                  firmware intent against reality, which the
+                                  32x lanes cannot express
+                                                        (make pic12f675-test-io)
             test_{fault,lockstep,io}_pic_core.h
                                   shared libgpsim harness implementations,
                                   device-parameterised: a part adapter supplies
@@ -158,6 +164,12 @@ test/
                                   PIC10F32x fault-injection matrix (PIC_FAULT_*), <!-- name-contract: exempt (C macro family, not a make variable) -->
                                   deliberately separate from identity: guard
                                   POLICY is per-family, not per-register
+            pic12f675_regs.h     PIC12F675 register identity. Not the 32x map
+                                  renumbered: bank 1 is a different address, the
+                                  output "latch" is an SRAM shadow whose address
+                                  the Makefile lifts from the build's .sym, and
+                                  the port may trail that shadow by a bounded
+                                  number of trace samples
             inject_calibration_word.py
                                   derives a simulator-runnable image by injecting
                                   the oscillator calibration word the factory

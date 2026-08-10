@@ -845,6 +845,7 @@ VARIANT_SELECTORS = \
 	PIC10F322_LOCKSTEP_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC10F322_IO_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC10F322_TARGET_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
+	PIC12F675_IO_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC10F320_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
 	PIC10F320_TARGET_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
 	PIC10F320_FAULT_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
@@ -1450,7 +1451,16 @@ PIC_PIN_LOOKUP_HDR = test/pic/find_pin_exact.h
 # here changes what every PIC gpsim binary does, so none may be stale for it.
 PIC_GPSIM_BOOTSTRAP_HDR = test/pic/gpsim_bootstrap.h
 PIC10F322_FAULT_CORE_HDR = test/pic/test_fault_pic_core.h
-PIC10F322_IO_CORE_HDR = test/pic/test_io_pic_core.h
+# Named PIC_ rather than PIC10F322_ because the PIC12F675 io lane compiles the
+# same core: it is shared mechanism, like the bring-up header above, and a
+# part-named variable would have read as the 322's private copy.
+#
+# TARGET_IO, not IO: the core selects its output variant through a C macro
+# family whose names share that shorter stem, and test/pic/test_io_pic_core.h
+# carries a name-contract exemption saying so. A make variable on the same stem
+# would satisfy that axis by coincidence and retire a marker that is still
+# telling the truth.
+PIC_TARGET_IO_CORE_HDR = test/pic/test_io_pic_core.h
 PIC10F322_LOCKSTEP_CORE_HDR = test/pic/test_lockstep_pic_core.h
 # PIC10F32x device identity (register addresses, gpsim name tokens, masks,
 # expected init values) and guard policy (which locations the fault lane
@@ -1460,6 +1470,9 @@ PIC10F322_LOCKSTEP_CORE_HDR = test/pic/test_lockstep_pic_core.h
 # consume them; the PIC10F320 lanes compile inline and so cannot go stale.
 PIC10F32X_REGS_HDR = test/pic/pic10f32x_regs.h
 PIC10F32X_FAULT_MATRIX_HDR = test/pic/pic10f32x_fault_matrix.h
+# The PIC12F675 counterpart. Its guard-policy sibling (pic12f675_fault_matrix.h)
+# arrives with the fault lane; this file alone is what the io lane needs.
+PIC12F675_REGS_HDR = test/pic/pic12f675_regs.h
 PIC_SOAK_SRC = test/pic/test_soak_pic.cc
 PIC_SOAK_SAMPLING_HDR = test/pic/soak_sampling.h
 PIC10F322_SOAK_DEPS = $(PIC_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
@@ -1695,7 +1708,7 @@ PIC10F322_IO_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags gli
 		-DF_CPU_HZ=$(PIC10F322_XTAL) -D$(macro_$(PIC10F322_IO_VARIANT)) \
 		$(PIC10F322_IO_SRC) -o $(PIC10F322_IO_BIN) -lgpsim
 
-$(PIC10F322_IO_BIN): $(PIC10F322_IO_SRC) $(PIC10F322_IO_CORE_HDR) $(PIC_PIN_LOOKUP_HDR) \
+$(PIC10F322_IO_BIN): $(PIC10F322_IO_SRC) $(PIC_TARGET_IO_CORE_HDR) $(PIC_PIN_LOOKUP_HDR) \
                $(PIC_GPSIM_BOOTSTRAP_HDR) $(PIC10F32X_REGS_HDR)
 	$(PIC10F322_IO_COMPILE)
 
@@ -2536,7 +2549,7 @@ AVR_TEST_BINARIES_RETIRED = $(foreach v,cd4053 mute relay cd4053_tmux mute_tmux,
 clean:
 	rm -f $(AVR_SIM_BINARIES) $(AVR_SOAK_BINARIES) $(AVR_TEST_BINARIES_RETIRED) \
 		test/host/test_logic_host test/pic/test_config_pic test/pic/test_soak_pic \
-		test/pic/test_config_pic12f675 \
+		test/pic/test_config_pic12f675 test/pic/test_io_pic12f675 \
 		test/pic/test_fault_pic test/pic/test_lockstep_pic test/pic/test_io_pic \
 		test/formal/test_model_check test/formal/test_symbolic test/avr/test_fuses \
 		test/formal/test_symbolic.bc test/formal/bypass_pure_klee.bc \
@@ -5375,6 +5388,74 @@ pic12f675-test-gpsim: pic12f675-simcal $(PIC12F675_GPSIM_REGS) \
 	fi; \
 	exit $$fail
 
+# --- PIC12F675 built-HEX GPIO transitions + pulse timing (libgpsim) ------------
+# The PIC12F675 counterpart of pic10f322-test-io, on the same shared core
+# (test/pic/test_io_pic_core.h). Three things it does that the 322 lane cannot:
+#
+#   1. IT COMPARES INTENT AGAINST REALITY. The 322 reads LATA and PORTA, two
+#      views of one latch, so "the port follows the latch" is nearly a tautology
+#      there. This part has no output latch: the shell keeps gpio_shadow_ in
+#      SRAM and writes shadow -> GPIO, so the comparison is between what the
+#      firmware meant to drive and what the pins actually are. That is the check
+#      docs/pic12f675_feasibility.md section 6.5 means by this lane getting MORE
+#      meaningful on the part with less hardware.
+#   2. IT LOCATES THE SHADOW PER BUILD. gpio_shadow_ is a file-static placed by
+#      XC8, not a device address, so it is lifted from the .sym exactly as the
+#      fault and lock-step lanes lift _ctx_. Empty when the .sym is absent; the
+#      run recipe below FAILS if the image exists but the symbol cannot be
+#      resolved, so the lane cannot pass having quietly read register 0x000.
+#   3. IT RUNS THE DERIVED IMAGE. Like the gpsim CLI lane above, it consumes
+#      $(PIC12F675_SIMCAL_DIR) -- an uninjected image never reaches main().
+#      The .sym still comes from the SHIPPING build beside it: the injector adds
+#      one calibration word and changes no symbol.
+PIC12F675_IO_VARIANT ?= cd4053_simple
+PIC12F675_IO_SRC = test/pic/test_io_pic12f675.cc
+PIC12F675_IO_BIN = test/pic/test_io_pic12f675
+PIC12F675_IO_STEM = $(call fw_image,$(PIC12F675_IO_VARIANT),$(PIC12F675_TAG))
+PIC12F675_IO_HEX = $(PIC12F675_SIMCAL_DIR)/$(PIC12F675_IO_STEM)_simcal.hex
+PIC12F675_IO_SYM = $(PIC12F675_BUILD_DIR)/$(PIC12F675_IO_STEM).sym
+# A $(shell) in this recursive (=) variable re-runs when PIC12F675_IO_COMPILE is
+# expanded in the recipe -- i.e. AFTER the `pic12f675-simcal` prerequisite has
+# built the .sym.
+PIC12F675_IO_SHADOW_DEF = $(shell a=$$(awk '$$1=="_gpio_shadow_"{print $$2; exit}' $(PIC12F675_IO_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DPIC_SHADOW_ADDR=0x$$a)
+PIC12F675_IO_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
+		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
+		-DFW_PATH='"$(CURDIR)/$(PIC12F675_IO_HEX)"' -DPROC_NAME='"$(PIC12F675_GPSIM_PROC)"' \
+		-DF_CPU_HZ=$(PIC12F675_XTAL) -D$(macro_$(PIC12F675_IO_VARIANT)) \
+		$(PIC12F675_IO_SHADOW_DEF) \
+		$(PIC12F675_IO_SRC) -o $(PIC12F675_IO_BIN) -lgpsim
+
+$(PIC12F675_IO_BIN): $(PIC12F675_IO_SRC) $(PIC_TARGET_IO_CORE_HDR) $(PIC_PIN_LOOKUP_HDR) \
+               $(PIC_GPSIM_BOOTSTRAP_HDR) $(PIC12F675_REGS_HDR)
+	$(PIC12F675_IO_COMPILE)
+
+.PHONY: pic12f675-test-io
+pic12f675-test-io: variant-selectors-valid pic12f675-simcal
+	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
+		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC12F675 target-I/O test"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
+		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC12F675 target-I/O test (install gpsim-dev)"; $(SKIP); \
+	fi; \
+	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
+		echo "libglib2.0-dev not found; skipping PIC12F675 target-I/O test (install libglib2.0-dev)"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC12F675_IO_HEX)" ]; then \
+		echo "no $(PIC12F675_IO_HEX) (XC8 absent?); skipping PIC12F675 target-I/O for variant $(PIC12F675_IO_VARIANT)"; $(SKIP); \
+	fi; \
+	shadow_addr=`awk '$$1=="_gpio_shadow_"{print $$2; exit}' "$(PIC12F675_IO_SYM)" 2>/dev/null`; \
+	if [ -z "$$shadow_addr" ]; then \
+		echo "FAIL: _gpio_shadow_ symbol not found in $(PIC12F675_IO_SYM)."; \
+		echo "      This part has no output-latch SFR, so the shadow IS the latch: without"; \
+		echo "      its address the harness would read register 0x000 (INDF) and the"; \
+		echo "      shadow-vs-port comparison would pass while checking nothing."; \
+		exit 1; \
+	fi; \
+	echo "--- PIC12F675 target I/O: variant=$(PIC12F675_IO_VARIANT) proc=$(PIC12F675_GPSIM_PROC) (gpio_shadow_ at 0x$$shadow_addr) ---"; \
+	rm -f $(PIC12F675_IO_BIN) && \
+	$(PIC12F675_IO_COMPILE) && \
+	./$(PIC12F675_IO_BIN)
+
 # --- PIC12F675 CONFIG-word verification ---------------------------------------
 # Same mechanism as the PIC10F32x lane (test/pic/test_config_pic_core.h), its own
 # decode table (test/pic/pic12f675_config.h). See the PIC CONFIG-word block above
@@ -5819,6 +5900,8 @@ help:
 	@echo "  pic12f675             build all variants for PIC12F675 (XC8) + 1024-word budget gate"
 	@echo "  pic12f675-test-config build PIC12F675 HEX, then verify each CONFIG word vs design intent"
 	@echo "  pic12f675-test-gpsim  drive the footswitch in gpsim, assert GPIO on the simcal images"
+	@echo "  pic12f675-test-io     libgpsim GPIO transition + pulse timing, and the physical port"
+	@echo "                        against the SRAM output shadow (PIC12F675_IO_VARIANT)"
 	@echo "  pic12f675-analyze     cppcheck + MISRA on the PIC12F675 shell (pic8 platform; standalone)"
 	@echo "  pic12f675-test-stack-bound  bound the 8-level hardware return stack for every variant"
 	@echo "  pic12f675-simcal      derive simulator images with the oscillator calibration word"

@@ -91,4 +91,12 @@
 #define PIC_REG_WPU_INIT_STR   "0x08"
 #define PIC_REG_WPU_DESC       "RA3-only (0x08)"
 
+// ---- Physical port vs output latch ------------------------------------------
+// LATA is a real SFR and PORTA follows it with no firmware step in between, so
+// the two never disagree and the tolerance is zero: any divergence at all is a
+// fault. A part whose latch is an SRAM shadow needs a non-zero bound here,
+// because propagating the shadow to the port costs it an instruction.
+#define PIC_REG_PORT_SKEW_SAMPLES 0u
+#define PIC_REG_PORT_SKEW_DESC    ""
+
 #endif // TEST_PIC_PIC10F32X_REGS_H
