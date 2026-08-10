@@ -8,7 +8,8 @@ tools="$work/tools"
 hex="$work/firmware.hex"
 checks=0
 unset FAKE_GPSIM_MODE FAKE_GPSIM_EXIT FAKE_GPSIM_MARKER FAKE_GPSIM_STC_LOG \
-	FAKE_GPSIM_PROC_LOG FAKE_GPSIM_FOOTSW_PIN FAKE_GPSIM_TOGGLE_LINES \
+	FAKE_GPSIM_PROC_LOG FAKE_GPSIM_REGS_LOG FAKE_GPSIM_HEX_LOG \
+	FAKE_GPSIM_FOOTSW_PIN FAKE_GPSIM_TOGGLE_LINES \
 	FAKE_GPSIM_PON_LINES PIC_GPSIM_REGS PIC_GPSIM_PON_STC \
 	FAKE_TIMEOUT_MARKER GPSIM GPSIM_TIMEOUT_SECONDS PIC_GPSIM_PROC PIC_GPSIM_STC \
 	MUTATION_INFRA_MARKER STRICT_TOOLS
@@ -31,11 +32,13 @@ cat > "$tools/gpsim" <<'EOF'
 set -euo pipefail
 script=
 proc=
+image=
 while [ "$#" -gt 0 ]; do
 	case "$1" in
 		-c)  script=$2; shift 2 ;;
 		-p*) proc=${1#-p}; shift ;;
-		*)   shift ;;
+		-*)  shift ;;
+		*)   image=$1; shift ;;
 	esac
 done
 if [ ! -f "$script" ]; then
@@ -87,9 +90,11 @@ case "$script" in
 		;;
 esac
 [ -z "${FAKE_GPSIM_STC_LOG:-}" ] || printf '%s\n' "$script" >> "$FAKE_GPSIM_STC_LOG"
-# Recorded beside the stimulus so both logs carry one entry per COMPLETED
-# invocation and can be compared by index.
+# Recorded together so every route log carries one entry per COMPLETED invocation
+# and can be compared by index.
 [ -z "${FAKE_GPSIM_PROC_LOG:-}" ] || printf '%s\n' "$proc" >> "$FAKE_GPSIM_PROC_LOG"
+[ -z "${FAKE_GPSIM_REGS_LOG:-}" ] || printf '%s\n' "${PIC_GPSIM_REGS:-}" >> "$FAKE_GPSIM_REGS_LOG"
+[ -z "${FAKE_GPSIM_HEX_LOG:-}" ] || printf '%s\n' "$image" >> "$FAKE_GPSIM_HEX_LOG"
 [ -z "${FAKE_GPSIM_MARKER:-}" ] || : > "$FAKE_GPSIM_MARKER"
 printf 'FAKE_GPSIM_SNAPSHOTS_COMPLETE\n'
 case "${FAKE_GPSIM_MODE:-pass}" in
@@ -360,7 +365,9 @@ stc_log="$work/pic10f320.stc.log"
 proc_log="$work/pic10f320.proc.log"
 : > "$stc_log"; : > "$proc_log"
 if ! output=$(
-	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL
+	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL \
+		PIC12F675_GPSIM_PROC PIC12F675_GPSIM_REGS \
+		PIC12F675_GPSIM_TOGGLE_STC PIC12F675_GPSIM_PON_STC
 	FAKE_GPSIM_STC_LOG="$stc_log" FAKE_GPSIM_PROC_LOG="$proc_log" \
 	_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" "${MAKE_CMD[@]}" --no-print-directory \
 		-C "$ROOT" --old-file=pic10f320 pic10f320-test-gpsim STRICT_TOOLS= \
@@ -557,7 +564,86 @@ fi
 	|| { printf 'FAIL: power-on wrapper did not adopt the PIC12F675 labels: %s\n' "$output" >&2; exit 1; }
 checks=$((checks + 1))
 
-# 5. The output mask is load-bearing, not decoration: with the PIC12F675 identity
+# 5. Exercise the PUBLIC PIC12F675 target and require its complete route to reach
+#    fake gpsim. The direct checks above prove the shared wrappers READ the
+#    register identity and two stimulus channels; this proves the Make recipe
+#    WRITES all of them, along with the processor and derived image. Only one
+#    simulator image is present so the lane must make exactly two calls -- one
+#    per scenario -- while the absent variants take their documented skip.
+#
+#    The image name is load-bearing: this part cannot reach main() without the
+#    factory calibration word, so the lane must consume *_simcal.hex from the
+#    isolated simcal directory and never the shipping image beside it.
+pic12f675_build="$work/build_pic12f675"
+pic12f675_simcal="$pic12f675_build/simcal"
+pic12f675_hex="$pic12f675_simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex"
+mkdir -p "$pic12f675_simcal"
+: > "$pic12f675_hex"
+stc_log_675="$work/pic12f675.stc.log"
+proc_log_675="$work/pic12f675.proc.log"
+regs_log_675="$work/pic12f675.regs.log"
+hex_log_675="$work/pic12f675.hex.log"
+: > "$stc_log_675"; : > "$proc_log_675"; : > "$regs_log_675"; : > "$hex_log_675"
+if ! output=$(
+	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL
+	FAKE_GPSIM_STC_LOG="$stc_log_675" FAKE_GPSIM_PROC_LOG="$proc_log_675" \
+		FAKE_GPSIM_REGS_LOG="$regs_log_675" FAKE_GPSIM_HEX_LOG="$hex_log_675" \
+		FAKE_GPSIM_FOOTSW_PIN=gpio5 FAKE_GPSIM_TOGGLE_LINES="$pic12f675_toggle" \
+		FAKE_GPSIM_PON_LINES="$pic12f675_pon" \
+	_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" "${MAKE_CMD[@]}" --no-print-directory \
+		-C "$ROOT" --old-file=pic12f675-simcal pic12f675-test-gpsim STRICT_TOOLS= \
+		PIC12F675_BUILD_DIR="$pic12f675_build" \
+		GPSIM="$tools/gpsim" GPSIM_TIMEOUT_SECONDS=2 2>&1
+); then
+	printf 'FAIL: pic12f675-test-gpsim rejected the fake-gpsim routing probe: %s\n' "$output" >&2
+	exit 1
+fi
+
+mapfile -t routed_stc_675 < "$stc_log_675"
+if [ "${#routed_stc_675[@]}" -ne 2 ] \
+		|| [ "${routed_stc_675[0]:-}" != "$ROOT/test/pic/pic12f675_footswitch_toggle.stc" ] \
+		|| [ "${routed_stc_675[1]:-}" != "$ROOT/test/pic/pic12f675_power_on_pressed.stc" ]; then
+	printf 'FAIL: pic12f675-test-gpsim routed the wrong stimuli or invocation count: %s\n' \
+		"$(tr '\n' ' ' < "$stc_log_675")" >&2
+	exit 1
+fi
+checks=$((checks + 1))
+
+[ p12f675 != "$wrapper_fallback" ] \
+	|| { printf 'FAIL: the PIC12F675 processor equals the wrapper fallback (%s), so this probe cannot fail\n' \
+		"$wrapper_fallback" >&2; exit 1; }
+checks=$((checks + 1))
+mapfile -t routed_proc_675 < "$proc_log_675"
+if [ "${#routed_proc_675[@]}" -ne 2 ] \
+		|| [ "${routed_proc_675[0]:-}" != p12f675 ] \
+		|| [ "${routed_proc_675[1]:-}" != p12f675 ]; then
+	printf 'FAIL: pic12f675-test-gpsim reached gpsim with the wrong processor or invocation count: %s\n' \
+		"$(tr '\n' ' ' < "$proc_log_675")" >&2
+	exit 1
+fi
+checks=$((checks + 1))
+
+mapfile -t routed_regs_675 < "$regs_log_675"
+if [ "${#routed_regs_675[@]}" -ne 2 ] \
+		|| [ "${routed_regs_675[0]:-}" != "$ROOT/test/pic/pic12f675_gpsim_regs.sh" ] \
+		|| [ "${routed_regs_675[1]:-}" != "$ROOT/test/pic/pic12f675_gpsim_regs.sh" ]; then
+	printf 'FAIL: pic12f675-test-gpsim routed the wrong register identity or invocation count: %s\n' \
+		"$(tr '\n' ' ' < "$regs_log_675")" >&2
+	exit 1
+fi
+checks=$((checks + 1))
+
+mapfile -t routed_hex_675 < "$hex_log_675"
+if [ "${#routed_hex_675[@]}" -ne 2 ] \
+		|| [ "${routed_hex_675[0]:-}" != "$pic12f675_hex" ] \
+		|| [ "${routed_hex_675[1]:-}" != "$pic12f675_hex" ]; then
+	printf 'FAIL: pic12f675-test-gpsim routed the wrong simulator image or invocation count: %s\n' \
+		"$(tr '\n' ' ' < "$hex_log_675")" >&2
+	exit 1
+fi
+checks=$((checks + 1))
+
+# 6. The output mask is load-bearing, not decoration: with the PIC12F675 identity
 #    the ENGAGED snapshot is 0x21 (LED plus the released footswitch bit) and the
 #    variant expectation is 0x1. Drop the mask -- by borrowing the 10F32x
 #    fragment's 0xFF -- and the same run must FAIL, which is what proves the
@@ -578,7 +664,7 @@ fi
 	|| { printf 'FAIL: removing the output mask produced the wrong failure: %s\n' "$output" >&2; exit 1; }
 checks=$((checks + 1))
 
-# 6. The per-part power-on stimulus really is a separate channel from the toggle
+# 7. The per-part power-on stimulus really is a separate channel from the toggle
 #    one. Pointing PIC_GPSIM_STC at a power-on script must NOT redirect the
 #    power-on wrapper, because a single "the stimulus" variable for two scenarios
 #    is how a lane ends up running one script through the other's wrapper.
