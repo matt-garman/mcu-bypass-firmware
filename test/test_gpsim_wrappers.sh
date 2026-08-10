@@ -480,7 +480,32 @@ for wrapper in run_toggle run_power_on; do
 	checks=$((checks + 1))
 done
 
-# 2. A fragment that defines only SOME of the identity is refused, by name. This
+# 2. Environment values cannot complete an empty fragment. The identity channel
+#    is deliberately one file rather than nine independent overrides, so every
+#    required name must come from that file even when the caller exports a full,
+#    internally consistent identity. Before the wrapper cleared these names, the
+#    empty fragment below inherited the PIC10F32x defaults and both scenarios
+#    passed outright.
+empty_regs="$work/empty-regs.sh"
+: > "$empty_regs"
+for wrapper in run_toggle run_power_on; do
+	if output=$(export PIC_GPSIM_REGS="$empty_regs" \
+			GPSIM_PORT_REG=porta GPSIM_PORT_LABEL=PORTA \
+			GPSIM_LATCH_REG=lata GPSIM_LATCH_LABEL=LATA \
+			GPSIM_FOOTSW_MASK=0x8 GPSIM_FOOTSW_LABEL=RA3 \
+			GPSIM_LED_MASK=0x1 GPSIM_LED_LABEL=RA0 \
+			GPSIM_OUTPUT_MASK=0xFF; "$wrapper" 2>&1); then
+		printf 'FAIL: %s completed an empty register fragment from inherited identity values\n' \
+			"$wrapper" >&2
+		exit 1
+	fi
+	[[ "$output" == *"does not define GPSIM_PORT_REG"* && "$output" != *"RESULT: PASS"* ]] \
+		|| { printf 'FAIL: %s did not reject the empty inherited-identity fragment first: %s\n' \
+			"$wrapper" "$output" >&2; exit 1; }
+	checks=$((checks + 1))
+done
+
+# 3. A fragment that defines only SOME of the identity is refused, by name. This
 #    is the partial-override hazard the single-file design exists to prevent: a
 #    fragment carrying new register names but stale masks would read the right
 #    register and test the wrong bit.
@@ -497,7 +522,7 @@ for wrapper in run_toggle run_power_on; do
 	checks=$((checks + 1))
 done
 
-# 3. End-to-end routing through the REAL shipped PIC12F675 fragment and the REAL
+# 4. End-to-end routing through the REAL shipped PIC12F675 fragment and the REAL
 #    PIC12F675 stimuli: a part with one register instead of two, the footswitch on
 #    gpio5 instead of ra3, and an output mask that matters (GPIO carries the
 #    footswitch bit, so an unmasked comparison would fail wherever the switch is
@@ -532,7 +557,7 @@ fi
 	|| { printf 'FAIL: power-on wrapper did not adopt the PIC12F675 labels: %s\n' "$output" >&2; exit 1; }
 checks=$((checks + 1))
 
-# 4. The output mask is load-bearing, not decoration: with the PIC12F675 identity
+# 5. The output mask is load-bearing, not decoration: with the PIC12F675 identity
 #    the ENGAGED snapshot is 0x21 (LED plus the released footswitch bit) and the
 #    variant expectation is 0x1. Drop the mask -- by borrowing the 10F32x
 #    fragment's 0xFF -- and the same run must FAIL, which is what proves the
@@ -553,7 +578,7 @@ fi
 	|| { printf 'FAIL: removing the output mask produced the wrong failure: %s\n' "$output" >&2; exit 1; }
 checks=$((checks + 1))
 
-# 5. The per-part power-on stimulus really is a separate channel from the toggle
+# 6. The per-part power-on stimulus really is a separate channel from the toggle
 #    one. Pointing PIC_GPSIM_STC at a power-on script must NOT redirect the
 #    power-on wrapper, because a single "the stimulus" variable for two scenarios
 #    is how a lane ends up running one script through the other's wrapper.
