@@ -144,14 +144,16 @@ checks=$((checks + 1))
 mapfile -t DEFAULT_BUILD_DIRS < <(env \
 	-u MAKEFLAGS -u MFLAGS -u GNUMAKEFLAGS -u MAKEOVERRIDES \
 	-u AVR_BUILD_DIR -u PIC10F322_BUILD_DIR -u XT_BUILD_DIR \
-	-u PIC10F320_BUILD_DIR \
+	-u PIC10F320_BUILD_DIR -u PIC12F675_BUILD_DIR \
 	make -s print-AVR_BUILD_DIR print-XT_BUILD_DIR \
-		print-PIC10F322_BUILD_DIR print-PIC10F320_BUILD_DIR 2>/dev/null)
+		print-PIC10F322_BUILD_DIR print-PIC10F320_BUILD_DIR \
+		print-PIC12F675_BUILD_DIR 2>/dev/null)
 EXPECTED_DEFAULT_BUILD_DIRS=(
 	build_avr_classic
 	build_avr_xt
 	build_pic10f322
 	build_pic10f320
+	build_pic12f675
 )
 [ "${#DEFAULT_BUILD_DIRS[@]}" -eq "${#EXPECTED_DEFAULT_BUILD_DIRS[@]}" ] \
 	|| fail "read ${#DEFAULT_BUILD_DIRS[@]} canonical build-directory defaults; expected ${#EXPECTED_DEFAULT_BUILD_DIRS[@]}"
@@ -163,11 +165,11 @@ done
 # Now pin the complete build* operand set emitted by canonical `make clean`.
 # Exact equality rejects both omissions and broad additions such as build_*.
 mapfile -t DEFAULT_CLEAN_REMOVES < <(removed_by clean \
-	AVR_BUILD_DIR=build_avr_classic \
-	PIC10F322_BUILD_DIR=build_pic10f322 \
-	XT_BUILD_DIR=build_avr_xt \
-	PIC10F320_BUILD_DIR=build_pic10f320 \
-	PIC12F675_BUILD_DIR=build_pic12f675)
+	AVR_BUILD_DIR="${DEFAULT_BUILD_DIRS[0]}" \
+	XT_BUILD_DIR="${DEFAULT_BUILD_DIRS[1]}" \
+	PIC10F322_BUILD_DIR="${DEFAULT_BUILD_DIRS[2]}" \
+	PIC10F320_BUILD_DIR="${DEFAULT_BUILD_DIRS[3]}" \
+	PIC12F675_BUILD_DIR="${DEFAULT_BUILD_DIRS[4]}")
 ACTUAL_BUILD_REMOVALS=()
 for removed in "${DEFAULT_CLEAN_REMOVES[@]}"; do
 	case "$removed" in build*) ACTUAL_BUILD_REMOVALS+=("$removed") ;; esac
