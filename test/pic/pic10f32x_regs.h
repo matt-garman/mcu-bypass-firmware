@@ -48,8 +48,10 @@
 #define PIC_REG_LATCH_NAME   "LATA"
 #define PIC_REG_LATCH_TOKEN  "lata"
 // Lowercase printable name. Kept SEPARATE from the token because a part whose
-// output latch is a RAM shadow rather than an SFR has no gpsim name to match,
-// so its token is nullptr while it still needs a name to print.
+// output latch is a RAM shadow rather than an SFR has no datasheet name for
+// gpsim to report: its token can only assert the WEAKER claim that the address
+// is an unnamed GPR (see PIC_REG_LATCH_TOKEN in pic12f675_regs.h), while the
+// name it prints still has to say gpio_shadow_.
 #define PIC_REG_LATCH_LC     "lata"
 
 #define PIC_REG_ANSEL_ADDR   0x008u   // ANSELA: ANSA0..ANSA2 = RA0..RA2 analog select
@@ -72,6 +74,11 @@
 #define PIC_REG_PORT_MASK    0x0Fu
 // Pins the firmware drives as outputs (BYPASS_OUTPUT_DDR_MASK): RA0|RA1|RA2.
 #define PIC_REG_OUTPUT_MASK  0x07u
+// The status LED (BYPASS_LED_PIN): RA0, bit 0 of the latch above. Named rather
+// than spelled 0x01 in the soak, which polls it once per simulated millisecond
+// on every part -- the one output bit whose meaning is identical family to
+// family, and the one a part with no latch SFR still has to expose somehow.
+#define PIC_REG_LED_MASK     0x01u
 // The footswitch pin: RA3, the input-only pin on this family.
 #define PIC_REG_FOOTSW_MASK  0x08u
 // The two relay coil bits (RELAY_RESET_PIN | RELAY_SET_PIN) = RA1|RA2.

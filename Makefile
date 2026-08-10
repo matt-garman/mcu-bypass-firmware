@@ -851,6 +851,7 @@ VARIANT_SELECTORS = \
 	PIC12F675_IO_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC12F675_LOCKSTEP_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC12F675_FAULT_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
+	PIC12F675_SOAK_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC10F320_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
 	PIC10F320_TARGET_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
 	PIC10F320_FAULT_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
@@ -1488,9 +1489,18 @@ PIC10F32X_FAULT_MATRIX_HDR = test/pic/pic10f32x_fault_matrix.h
 # first; the fault lane needs both.
 PIC12F675_REGS_HDR = test/pic/pic12f675_regs.h
 PIC12F675_FAULT_MATRIX_HDR = test/pic/pic12f675_fault_matrix.h
+# The soak's mechanism, shared by all three parts exactly as the three headers
+# above are. TARGET_SOAK for the same reason as TARGET_IO: the adapters state
+# their timebase and their watchdog caveat through a C macro family that would
+# otherwise share the stem.
+PIC_TARGET_SOAK_CORE_HDR = test/pic/test_soak_pic_core.h
+# The PIC10F32x soak ADAPTER -- one file for two parts, which is why this
+# variable is not part-named while the PIC12F675's is. It carries the family's
+# register map, tick period and watchdog caveat; both 10F32x lanes compile it.
 PIC_SOAK_SRC = test/pic/test_soak_pic.cc
 PIC_SOAK_SAMPLING_HDR = test/pic/soak_sampling.h
-PIC10F322_SOAK_DEPS = $(PIC_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
+PIC10F322_SOAK_DEPS = $(PIC_SOAK_SRC) $(PIC_TARGET_SOAK_CORE_HDR) \
+                $(PIC10F32X_REGS_HDR) $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
                 $(PIC_SOAK_SAMPLING_HDR) test/soak_timing_config.h
 PIC10F322_SOAK_BIN = test/pic/test_soak_pic
 PIC10F322_SOAK_HEX = $(PIC10F322_BUILD_DIR)/$(call fw_image,$(PIC10F322_SOAK_VARIANT),$(PIC10F322_TAG)).hex
@@ -1499,7 +1509,7 @@ PIC10F322_SOAK_HEX = $(PIC10F322_BUILD_DIR)/$(call fw_image,$(PIC10F322_SOAK_VAR
 # -DSOAK_ACTUATION_BLOCK_MS. A relay coil pulse / CD4053 mute busy-blocks the
 # POLLED PIC main loop, stealing that many 1 ms debounce ticks from a window, so
 # the soak's liveness check must hold each press/release that much longer to stay
-# robust (see test/pic/test_soak_pic.cc). Mirror the driver headers'
+# robust (see test/pic/test_soak_pic_core.h). Mirror the driver headers'
 # TQ2_L2_5V_PULSE_MS (12) and CD4053_MUTE_DELAY_MS (5); cd4053_simple is 0.
 pic_soak_block_cd4053_simple    = 0
 pic_soak_block_cd4053_with_mute = 5
@@ -2566,6 +2576,7 @@ clean:
 		test/host/test_logic_host test/pic/test_config_pic test/pic/test_soak_pic \
 		test/pic/test_config_pic12f675 test/pic/test_io_pic12f675 \
 		test/pic/test_lockstep_pic12f675 test/pic/test_fault_pic12f675 \
+		test/pic/test_soak_pic12f675 \
 		test/pic/test_fault_pic test/pic/test_lockstep_pic test/pic/test_io_pic \
 		test/formal/test_model_check test/formal/test_symbolic test/avr/test_fuses \
 		test/formal/test_symbolic.bc test/formal/bypass_pure_klee.bc \
@@ -4973,7 +4984,8 @@ PIC10F320_SOAK_LIVENESS_INTERVAL_MS ?= 60000
 PIC10F320_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
 PIC10F320_SOAK_COMBINATION_NAME     ?= standalone
 PIC10F320_SOAK_SRC  = $(PIC_SOAK_SRC)
-PIC10F320_SOAK_DEPS = $(PIC10F320_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) \
+PIC10F320_SOAK_DEPS = $(PIC10F320_SOAK_SRC) $(PIC_TARGET_SOAK_CORE_HDR) \
+                   $(PIC10F32X_REGS_HDR) $(PIC_PIN_LOOKUP_HDR) \
                    $(PIC_GPSIM_BOOTSTRAP_HDR) $(PIC_SOAK_SAMPLING_HDR) \
                    test/soak_timing_config.h
 PIC10F320_SOAK_BIN  = $(PIC10F320_BUILD_DIR)/test_soak_pic
@@ -5659,6 +5671,113 @@ pic12f675-test-fault: variant-selectors-valid pic12f675-simcal
 	$(PIC12F675_FAULT_COMPILE) && \
 	./$(PIC12F675_FAULT_BIN)
 
+# --- PIC12F675 long-duration soak test (libgpsim) -----------------------------
+# The PIC12F675 leg of the soak lane: the shared driver
+# (test/pic/test_soak_pic_core.h) running the real image for
+# PIC12F675_SOAK_DURATION_MS of simulated time, asserting watchdog liveness and a
+# periodic 2-press round-trip. Four notes specific to this part:
+#
+#   1. ITS HOLDS ARE RE-DERIVED, NOT INHERITED. This part's debounce tick is
+#      1.024 ms -- four unprescaled TMR0 rollovers, because the one prescaler is
+#      the watchdog's -- so a threshold counted in TICKS and a hold counted in
+#      simulated MILLISECONDS stop being the same number. The adapter states the
+#      tick period and the core converts. docs/pic12f675_feasibility.md section
+#      4.4.1 asked for exactly that, and specifically for NOT letting the
+#      existing 10 ms slack absorb it: that slack is already paying for the
+#      blocking actuation in note 4.
+#   2. IT READS THE LED OUT OF SRAM. With no output-latch SFR the shell's
+#      gpio_shadow_ is the latch, so the once-per-millisecond LED sample needs
+#      the .sym address the io and fault lanes already lift. The adapter will not
+#      compile without it, and the recipe below fails closed if the image exists
+#      but the symbol cannot be resolved.
+#   3. IT RUNS THE DERIVED IMAGE, like every simulator lane for this part, and
+#      applies the exact-matrix gate before its optional-tool skips -- otherwise
+#      a suppressed producer could let one selected image stand in for the set.
+#      The .sym still comes from the SHIPPING build beside it.
+#   4. ITS BLOCKING-ACTUATION TABLE IS IN THE SAME MILLISECONDS as the 10F32x
+#      parts'. A relay coil pulse and a mute delay are wall-clock waits in the
+#      shared output drivers, not tick counts, so they do NOT scale with the
+#      1.024 ms tick and the numbers are unchanged. It is still a separate table:
+#      a part that ever needed a different pulse width would otherwise inherit
+#      another part's silently, and the value it feeds is the one the soak's
+#      windows are sized from.
+#
+# STANDALONE, like both 10F32x soaks and for the same reasons: it runs for
+# minutes and links libgpsim, so it is deliberately not in `make test`. Skips
+# cleanly when the compiler, the gpsim-dev / libglib2.0-dev headers or the
+# derived image are absent.
+pic12f675_soak_block_cd4053_simple    = 0
+pic12f675_soak_block_cd4053_with_mute = 5
+pic12f675_soak_block_tq2_l2_5v_relay  = 12
+
+PIC12F675_SOAK_VARIANT     ?= cd4053_simple
+PIC12F675_SOAK_DURATION_MS ?= 3600000
+PIC12F675_SOAK_LIVENESS_INTERVAL_MS ?= 60000
+PIC12F675_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
+PIC12F675_SOAK_COMBINATION_NAME ?= standalone
+PIC12F675_SOAK_SRC  = test/pic/test_soak_pic12f675.cc
+PIC12F675_SOAK_BIN  = test/pic/test_soak_pic12f675
+PIC12F675_SOAK_STEM = $(call fw_image,$(PIC12F675_SOAK_VARIANT),$(PIC12F675_TAG))
+PIC12F675_SOAK_HEX  = $(PIC12F675_SIMCAL_DIR)/$(PIC12F675_SOAK_STEM)_simcal.hex
+# From the SHIPPING build, not the derived image beside it: the calibration
+# injector rewrites one program word and emits no symbol table of its own.
+PIC12F675_SOAK_SYM  = $(PIC12F675_BUILD_DIR)/$(PIC12F675_SOAK_STEM).sym
+# A $(shell) in this recursive (=) variable re-runs when the compile command is
+# expanded in the recipe -- i.e. AFTER the `pic12f675-simcal` prerequisite has
+# built the .sym. Empty when the .sym is absent; the recipe fails closed on that,
+# and the adapter will not compile without the address.
+PIC12F675_SOAK_SHADOW_DEF = $(shell a=$$(awk '$$1=="_gpio_shadow_"{print $$2; exit}' $(PIC12F675_SOAK_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DPIC_SHADOW_ADDR=0x$$a)
+PIC12F675_SOAK_DEPS = $(PIC12F675_SOAK_SRC) $(PIC_TARGET_SOAK_CORE_HDR) \
+                $(PIC12F675_REGS_HDR) $(PIC_PIN_LOOKUP_HDR) \
+                $(PIC_GPSIM_BOOTSTRAP_HDR) $(PIC_SOAK_SAMPLING_HDR) \
+                test/soak_timing_config.h
+PIC12F675_SOAK_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
+		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
+		-DFW_PATH='"$(CURDIR)/$(PIC12F675_SOAK_HEX)"' -DPROC_NAME='"$(PIC12F675_GPSIM_PROC)"' \
+		-DF_CPU_HZ=$(PIC12F675_XTAL) $(PIC12F675_SOAK_SHADOW_DEF) \
+		-DSOAK_DURATION_MS=$(PIC12F675_SOAK_DURATION_MS) \
+		-DSOAK_LIVENESS_INTERVAL_MS=$(PIC12F675_SOAK_LIVENESS_INTERVAL_MS) \
+		-DSOAK_PROGRESS_INTERVAL_MS=$(PIC12F675_SOAK_PROGRESS_INTERVAL_MS) \
+		-DSOAK_COMBINATION_NAME='"$(PIC12F675_SOAK_COMBINATION_NAME)"' \
+		-DSOAK_ACTUATION_BLOCK_MS=$(pic12f675_soak_block_$(PIC12F675_SOAK_VARIANT))u \
+		$(PIC12F675_SOAK_SRC) -o $(PIC12F675_SOAK_BIN) -lgpsim
+
+# Build-only rule, the analogue of the two 10F32x soak rules. FORCE for the
+# reason stated at the PIC10F322 rule: this binary's effective build command
+# includes command-line variables -- the three interval/duration values and the
+# variant are compiled IN as -D flags -- and a timestamp cannot represent them,
+# so without it a second `make test/pic/test_soak_pic12f675` at a different
+# duration reports "up to date" and leaves the first binary in place.
+$(PIC12F675_SOAK_BIN): $(PIC12F675_SOAK_DEPS) FORCE
+	$(PIC12F675_SOAK_COMPILE)
+
+.PHONY: pic12f675-test-soak
+pic12f675-test-soak: variant-selectors-valid pic12f675-simcal
+	@$(pic12f675_simcal_matrix_sh); \
+	if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
+		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC12F675 soak"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
+		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC12F675 soak (install gpsim-dev)"; $(SKIP); \
+	fi; \
+	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
+		echo "libglib2.0-dev not found; skipping PIC12F675 soak (install libglib2.0-dev)"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC12F675_SOAK_HEX)" ]; then \
+		echo "no $(PIC12F675_SOAK_HEX) (XC8 absent?); skipping PIC12F675 soak for variant $(PIC12F675_SOAK_VARIANT)"; $(SKIP); \
+	fi; \
+	shadow_addr=`awk '$$1=="_gpio_shadow_"{print $$2; exit}' "$(PIC12F675_SOAK_SYM)" 2>/dev/null`; \
+	if [ -z "$$shadow_addr" ]; then \
+		echo "FAIL: _gpio_shadow_ symbol not found in $(PIC12F675_SOAK_SYM)."; \
+		echo "      This part has no output-latch SFR, so the shadow IS the latch: the"; \
+		echo "      per-millisecond LED sample has nothing to read without its address."; \
+		exit 1; \
+	fi; \
+	echo "--- PIC12F675 soak: variant=$(PIC12F675_SOAK_VARIANT) proc=$(PIC12F675_GPSIM_PROC) duration=$(PIC12F675_SOAK_DURATION_MS) ms (gpio_shadow_ at 0x$$shadow_addr) ---"; \
+	rm -f $(PIC12F675_SOAK_BIN) && \
+	$(PIC12F675_SOAK_COMPILE) && \
+	./$(PIC12F675_SOAK_BIN)
+
 # --- PIC12F675 CONFIG-word verification ---------------------------------------
 # Same mechanism as the PIC10F32x lane (test/pic/test_config_pic_core.h), its own
 # decode table (test/pic/pic12f675_config.h). See the PIC CONFIG-word block above
@@ -6062,6 +6181,7 @@ $(call require_variant_map,macro_,$(ALL_SUPPORTED_VARIANTS),output-macro selecto
 $(call require_variant_map,src_,$(ALL_SUPPORTED_VARIANTS),driver source)
 $(call require_variant_map,pic_soak_block_,$(CLASSIC_VARIANTS_SUPPORTED),PIC10F322 soak actuation-block time)
 $(call require_variant_map,pic10f320_soak_block_,$(PIC10F320_VARIANTS_SUPPORTED),PIC10F320 soak actuation-block time)
+$(call require_variant_map,pic12f675_soak_block_,$(CLASSIC_VARIANTS_SUPPORTED),PIC12F675 soak actuation-block time)
 
 # Broken out per lane so a consumer that legitimately cares about ONE chip
 # (CI's per-lane "images were actually built" asserts) can name that lane's
@@ -6178,8 +6298,7 @@ help:
 	@echo "                        (PIC10F322_TARGET_VARIANT); pic10f322-test-target-variants runs all"
 	@echo "  pic10f322-program     flash one PIC variant to hardware (VARIANT=, PIC10F322_PROG=pk2cmd|ipecmd)"
 	@echo "PIC12F675 staged standalone target (not release-supported; omitted from all/release):"
-	@echo "  No qualification aggregate, soak/timing-budget qualification, mutation, dedicated CI"
-	@echo "  or program integration yet."
+	@echo "  No qualification aggregate, mutation, dedicated CI or program integration yet."
 	@echo "  pic12f675             build all variants for PIC12F675 (XC8) + 1024-word budget gate"
 	@echo "  pic12f675-test-config build PIC12F675 HEX, then verify each CONFIG word vs design intent"
 	@echo "  pic12f675-test-gpsim  drive the footswitch in gpsim, assert GPIO on the simcal images"
@@ -6188,6 +6307,9 @@ help:
 	@echo "  pic12f675-test-lockstep  libgpsim HEX-vs-model ctx_ lock-step (PIC12F675_LOCKSTEP_VARIANT)"
 	@echo "  pic12f675-test-fault  libgpsim SEU injection into the guarded SFRs, the SRAM output"
 	@echo "                        shadow and the pins, expecting WDT recovery (PIC12F675_FAULT_VARIANT)"
+	@echo "  pic12f675-test-soak   libgpsim soak: WDT liveness + responsiveness, on holds re-derived"
+	@echo "                        for the 1.024 ms tick (standalone; needs gpsim-dev+libglib2.0-dev;"
+	@echo "                        PIC12F675_SOAK_VARIANT, PIC12F675_SOAK_DURATION_MS)"
 	@echo "  pic12f675-analyze     cppcheck + MISRA on the PIC12F675 shell (pic8 platform; standalone)"
 	@echo "  pic12f675-coverage-check-fw  exact host-gcov gate over the shell, core, and drivers"
 	@echo "  pic12f675-test-stack-bound  bound the 8-level hardware return stack for every variant"

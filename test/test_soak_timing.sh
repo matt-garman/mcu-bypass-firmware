@@ -156,7 +156,11 @@ expect_avrxt_soak_contract() {
 }
 
 expect_pic_per_ms_transition_sampling() {
-	local tmp source="$ROOT/test/pic/test_soak_pic.cc"
+	# The mechanism moved into a shared core when the PIC12F675 lane arrived, so
+	# the wiring is asserted there -- and, below, that every adapter still
+	# reaches it. Checking one adapter alone would have stopped covering the
+	# binaries the other adapters build.
+	local tmp adapter adapters=0 source="$ROOT/test/pic/test_soak_pic_core.h"
 	local -a compiler
 	read -r -a compiler <<<"$HOSTCXX"
 	[ "${#compiler[@]}" -gt 0 ] || fail "empty C++ compiler command"
@@ -209,7 +213,18 @@ if not match or match.group(1).count(
         "soak_run_each_ms(ms, soak_run_one_ms, sample_led)") != 1:
     raise SystemExit("PIC soak_run_ms is not wired to per-ms sampling")
 PY
-	checks=$((checks + 2))
+	for adapter in "$ROOT"/test/pic/test_soak_pic*.cc; do
+		[ -f "$adapter" ] || continue
+		grep -q '#include "pic/test_soak_pic_core.h"' "$adapter" \
+			|| fail "$(basename "$adapter") does not include the shared soak core"
+		adapters=$((adapters + 1))
+		checks=$((checks + 1))
+	done
+	# The glob is the enrolment: a part adapter added later is covered without
+	# editing this file, and a glob that matched nothing must not read as pass.
+	[ "$adapters" -ge 2 ] \
+		|| fail "expected at least two PIC soak adapters, found $adapters"
+	checks=$((checks + 3))
 }
 
 for language in c c++; do

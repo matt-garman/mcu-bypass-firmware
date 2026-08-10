@@ -113,6 +113,11 @@
 #define PIC_REG_PORT_MASK    0x3Fu
 // Pins the firmware drives as outputs (BYPASS_OUTPUT_DDR_MASK): GP0|GP1|GP2|GP4.
 #define PIC_REG_OUTPUT_MASK  0x17u
+// The status LED (BYPASS_LED_PIN): GP0, bit 0 of the "latch" above -- which on
+// this part means bit 0 of the SRAM shadow, so the soak that polls it once per
+// simulated millisecond is reading the firmware's write intent rather than a
+// register the silicon owns.
+#define PIC_REG_LED_MASK     0x01u
 // The footswitch pin: GP5. NOT the input-only pin (GP3), which has no pull-up.
 #define PIC_REG_FOOTSW_MASK  0x20u
 // The two relay coil bits (RELAY_RESET_PIN | RELAY_SET_PIN) = GP1|GP2.

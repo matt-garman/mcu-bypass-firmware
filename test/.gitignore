@@ -10,6 +10,7 @@ avr/test_soak_*5
 pic/test_config_pic
 pic/test_config_pic12f675
 pic/test_soak_pic
+pic/test_soak_pic12f675
 pic/test_fault_pic
 pic/test_fault_pic12f675
 pic/test_io_pic

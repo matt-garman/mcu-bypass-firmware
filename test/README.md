@@ -170,7 +170,7 @@ test/
                                   reset. Parked GP4 is injected through its
                                   direction, shadow, pin and ANS3 guard paths
                                                      (make pic12f675-test-fault)
-            test_{fault,lockstep,io}_pic_core.h
+            test_{fault,lockstep,io,soak}_pic_core.h
                                   shared libgpsim harness implementations,
                                   device-parameterised: a part adapter supplies
                                   the register map and injection matrix below
@@ -206,8 +206,21 @@ test/
                                   expected set after any failed derivation
                              (make pic12f675-test-calibration;
                               make pic12f675-simcal for the derived images)
-            test_soak_pic.cc     libgpsim soak         (make pic10f322-test-soak)
-                                  shared with the PIC10F320 lane
+            test_soak_pic.cc     PIC10F32x libgpsim soak adapter -- ONE file for
+                                  two parts, which is why this lane carries no
+                                  per-part default anywhere: a fallback would be
+                                  correct for one caller and silently wrong for
+                                  the other
+                                                        (make pic10f322-test-soak
+                                                         make pic10f320-test-soak)
+            test_soak_pic12f675.cc
+                                  PIC12F675 soak adapter. Reads the LED out of
+                                  the SRAM shadow, since this part has no output
+                                  latch to read, and states the 1.024 ms tick the
+                                  core converts every hold through -- the
+                                  thresholds are counted in ticks and the soak
+                                  advances in milliseconds
+                                                      (make pic12f675-test-soak)
 
   pic10f320/  PIC10F320-specific tests. Separate from pic/ because this target's
                firmware is a single hand-inlined translation unit rather than a
@@ -243,7 +256,7 @@ test/
 
 The PIC10F320 lane reuses, rather than forks, everything it can: the CONFIG-word
 checker (`pic/test_config_pic.c`, parameterised on `PIC_DEVICE_NAME`), <!-- name-contract: exempt (C macro, not a make variable) --> both gpsim
-CLI wrappers, the soak driver (`pic/test_soak_pic.cc`), the three libgpsim harness
+CLI wrappers, the soak adapter (`pic/test_soak_pic.cc`), all four libgpsim harness
 cores, and — most importantly — `src/bypass_pure.c` itself. Thin per-part adapters
 keep processor/image defaults and output-macro vocabularies explicit. The fault
 adapters additionally pin each part's program-space limit, independent expected
@@ -443,6 +456,15 @@ for 5 ms and 12 ms after a toggle, so qualification uses conservative 38 ms and
 post-block sample, making the ideal path roughly one tick shorter; the PIC soak
 deliberately adds the full active variant block to every liveness window.
 
+Those figures are *samples converted at one sample per millisecond*, which holds
+only where the tick is 1.000 ms. The PIC12F675 tick is 1.024 ms, so the same
+thresholds are 8.19 ms and 25.6 ms and the three budgets become roughly 34, 39
+and 46 ms. The soak does not carry those numbers as constants: its adapter states
+the part's tick period and the shared core converts each threshold to
+milliseconds, rounding up, before adding the block and the slack. The blocking
+actuation itself does *not* scale -- a coil pulse and a mute delay are wall-clock
+waits, not tick counts -- so it is added in milliseconds on every part.
+
 `pic10f322-test-fault` first requires exact startup `WPUA=0x08` and `TRISA=0x08`, then
 injects every guarded direction, settled-output-latch, SFR, and SRAM fault at the
 behaviorally identified main-loop `CLRWDT`, including every RA0..RA2 direction
@@ -478,7 +500,7 @@ targets are always fail-closed rather than skip-clean.
 | Shipping-source coverage | `pic10f320-coverage-check-fw` | An **exact** property, not a percentage floor: every line of the real firmware is host-executed except an enumerated, justified watchdog-reset path. Run per variant, because the three output stages give 84 / 95 / 100 executable lines. | host gcov with the mock `xc.h` |
 | All-variant host aggregate | `pic10f320-test-host-variants` | The four layers above across all three variants, with the complete supported matrix required first. **This is the member of `make test`.** | Makefile wrapper |
 | Return-stack oracle regression | `test-pic10f320-return-stack-oracle` | 149 deterministic checks: passing depths through 8, recursion/depth-9 rejection, independently required skip edges and operand boundaries, classic alias ranges, all 16,384 legality decisions, every destination writer against PCL/INDF/INTCON, 9-bit PC/physical-fetch aliasing, literal HEX layout, and fail-closed parser/file cases. Includes ten device-geometry checks: `--program-words` is validated as a power of two inside the 9-bit PC space, and fixtures whose verdict *differs* between the 256- and 512-word geometries pin the fetch alias in both directions — an image with code above word `0x0FF` is rejected when 256 words are declared, and one that relies on the fold is rejected when 512 are. **This is also a member of `make test`.** | dependency-free Python 3 |
-| Image generation | `test-pic-build` | 36 PIC10F322, 75 PIC10F320, and 48 PIC12F675 checks. All three runs prove missing-XC8 skips remove the complete product matrix despite attempted inventory overrides, stale assembly/symbol sidecars cannot survive a current-HEX-only build, and shell syntax in matrix text is rejected without execution. The 322 run additionally rejects recursively self-whitelisting GNU Make input; the 320 run covers selector rebuilds, deletion of reachable-RETFIE and depth-9 images despite attempted oracle/limit overrides, exact per-output XC8/host-compiler rebuild invocations with current clock/variant/host flags, and matching/mismatching/malformed/missing expected-image gate inputs. The 675 run adds exact simulator-image publication, calibration-consumer, CLI, target-I/O, lock-step, fault-injection, failed-producer cleanup, signal cleanup, and zero-image skip/strict checks. | host fake-XC8/fake-CC regression |
+| Image generation | `test-pic-build` | 36 PIC10F322, 75 PIC10F320, and 49 PIC12F675 checks. All three runs prove missing-XC8 skips remove the complete product matrix despite attempted inventory overrides, stale assembly/symbol sidecars cannot survive a current-HEX-only build, and shell syntax in matrix text is rejected without execution. The 322 run additionally rejects recursively self-whitelisting GNU Make input; the 320 run covers selector rebuilds, deletion of reachable-RETFIE and depth-9 images despite attempted oracle/limit overrides, exact per-output XC8/host-compiler rebuild invocations with current clock/variant/host flags, and matching/mismatching/malformed/missing expected-image gate inputs. The 675 run adds exact simulator-image publication, calibration-consumer, CLI, target-I/O, lock-step, fault-injection, soak, failed-producer cleanup, signal cleanup, and zero-image skip/strict checks. | host fake-XC8/fake-CC regression |
 | Expected image bytes | `test-pic10f320-expected-images`; `pic10f320-test-build` | The dependency-free checker pins exact manifest grammar and fail-closed file handling in `make test`; the full-tool target rebuilds the immutable three-variant matrix and compares each raw HEX file with the reviewed XC8 V3.10 / DFP 1.9.189 SHA-256 baseline. Kept out of mutation kill targets so a broad byte mismatch cannot mask a weak behavioural oracle. | Python 3; pinned XC8/DFP for the real-image comparison |
 | CONFIG word | `pic10f320-test-config` | The emitted CONFIG word matches design intent, over every built image. Uses the shared checker with a device-accurate label. | host parser over HEX |
 | Hardware return stack | every `pic10f320` build; `pic10f320-test-return-stack` | The base build strictly parses and traverses its final HEX before marking that image complete, so gpsim/target/soak/release rebuilds use the same fail-closed gate. The explicit target rebuilds the supported matrix and rechecks all three together, reporting each maximum and witness. | dependency-free Python 3 over final HEX |

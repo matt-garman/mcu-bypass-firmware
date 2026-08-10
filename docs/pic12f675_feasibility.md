@@ -596,23 +596,34 @@ in the pure core (which counts samples, not milliseconds). It does change every
 
 The qualification budgets in the last three rows are the ones documented in
 `test/README.md`. The soak driver does not read them as constants — it derives
-its holds in `test/pic/test_soak_pic.cc` as
+its holds, and since the step 9 lane it derives them **through** the tick period
+rather than assuming one. `test/pic/test_soak_pic_core.h` now reads
 
 ```c
-#define SOAK_PRESS_HOLD_MS    (PRESSED_THRESH + SOAK_ACTUATION_BLOCK_MS + 10u)
-#define SOAK_RELEASE_HOLD_MS  (RELEASE_THRESH + SOAK_ACTUATION_BLOCK_MS + 10u)
+#define SOAK_TICKS_MS(ticks)  (((ticks) * SOAK_TICK_US + 999u) / 1000u)
+#define SOAK_PRESS_HOLD_MS    (SOAK_TICKS_MS(PRESSED_THRESH) + SOAK_ACTUATION_BLOCK_MS + 10u)
+#define SOAK_RELEASE_HOLD_MS  (SOAK_TICKS_MS(RELEASE_THRESH) + SOAK_ACTUATION_BLOCK_MS + 10u)
 ```
 
-with `CYCLES_PER_MS = (F_CPU_HZ / 4) / 1000`. Two things follow. First, the cycle
-conversion is **already** parameterized by clock and becomes 1000 (from 500) at
-4 MHz with no code change. Second, the hold expressions silently assume
-**one tick == one millisecond**, which stops being true at 1.024 ms: `THRESH`
-ticks now take `THRESH × 1.024` ms, so the release hold is short by ~0.6 ms
-against its own intent. The existing 10 ms slack absorbs that comfortably at
-these threshold values — but the slack is already load-bearing for a different
-reason (a blocking actuation steals integration ticks from the polled loop), so
-this should be **stated and re-derived deliberately**, not left to be absorbed by
-a margin that is doing other work.
+with `CYCLES_PER_MS = (F_CPU_HZ / 4) / 1000` and the tick period stated by the
+part adapter — `SOAK_TICK_US` is 1000 on the PIC10F32x parts and 1024 here. <!-- name-contract: exempt (C adapter macro, not a Make variable) -->
+Three things follow. First, the cycle conversion was **already** parameterized by
+clock and becomes 1000 (from 500) at 4 MHz with no code change. Second, the hold
+expressions used to assume **one tick == one millisecond**, which stops being
+true at 1.024 ms: `THRESH` ticks take `THRESH × 1.024` ms, so the release hold
+was short by ~0.6 ms against its own intent. The existing 10 ms slack would have
+absorbed that comfortably at these threshold values — but that slack is already
+load-bearing for a different reason (a blocking actuation steals integration
+ticks from the polled loop), and one margin covering two unrelated errors reports
+neither when it finally runs out. So it is now **stated and re-derived**, not
+absorbed. Third, the conversion rounds **up** and is exact at 1.000 ms: the
+PIC10F32x holds are the numbers they always were, which is what allowed all six
+shipping soak binaries to stay byte-identical across the change.
+
+The blocking actuation is added in **milliseconds** on every part and does not
+scale with the tick: a coil pulse and a mute delay are wall-clock `__delay_ms()`
+waits in the shared output drivers, so a block of *B* ms costs *B* ms of tick
+accumulation whatever the tick period is.
 
 The alternative — a TMR1-based exact 1.000 ms tick — buys numerical parity with
 every other target and makes this whole subsection disappear, at the cost of the
@@ -953,8 +964,8 @@ serves multiple parts, part name where the repository builds exactly one:
 | Build macro | `BYPASS_MCU_PIC12F675` (new arm in `src/bypass_output_common.h`) |
 | Build dir | `build_pic12f675/` |
 | Image stem | `bypass-pic12f675-<variant>` |
-| Implemented target families | build, analysis, coverage, stack, CONFIG, calibration, CLI gpsim, and selected-variant libgpsim I/O, lock-step and fault |
-| Deferred integration | default `all`, pre-hardware and fail-closed target aggregates, soak/timing, mutation, dedicated CI, release and programming |
+| Implemented target families | build, analysis, coverage, stack, CONFIG, calibration, CLI gpsim, selected-variant libgpsim I/O, lock-step and fault, and the long-duration soak |
+| Deferred integration | default `all`, pre-hardware and fail-closed target aggregates, mutation, dedicated CI, release and programming |
 
 **Name-length contract:** `bypass-pic12f675-cd4053_with_mute.hex` is 37
 characters — **exactly** the current longest name
@@ -1054,10 +1065,11 @@ green, independently revertible sequencing below.
 
 **Current staged status (2026-08-10):** step 0 selected the 1.024 ms TMR0 design,
 a single-part PIC12F675 shell, and Model B. Step 1 is not applicable unless the
-ISR alternative is reconsidered; steps 2 through 8 are implemented. Step 9
-(soak/timing), step 10 (aggregates, mutation and dedicated CI), and the
-broader documentation, release/programming and hardware portions of step 11
-remain deferred. The table retains the original dependency order rather than
+ISR alternative is reconsidered; steps 2 through 9 are implemented — step 9
+re-derived the holds through the tick period rather than letting the slack absorb
+the 1.024 ms stretch (§4.4.1). Step 10 (aggregates, mutation and dedicated CI)
+and the broader documentation, release/programming and hardware portions of
+step 11 remain deferred. The table retains the original dependency order rather than
 claiming every row is open.
 
 | # | Step | Notes |

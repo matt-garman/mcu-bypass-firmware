@@ -1569,9 +1569,24 @@ def split_prefix(statement, depth=0):
             continue
         lone = LONE_MAKEVAR.match(token)
         if lone and depth < 3:
-            words = make_expand(lone.group(1)).split()
+            # Re-tokenize the expansion with the same statement-aware splitter
+            # the recipe went through, rather than str.split(). A make variable
+            # in prefix position is not always a prefix: a `define` holding a
+            # whole shell fragment expands to SEVERAL statements, the first of
+            # which may be a plain assignment -- `simcal_count=0; for ... done`.
+            # Split naively, that reads as the channel simcal_count written for
+            # the command `for`, and demands that some file in the repository
+            # read a shell local through its environment. Which nothing does,
+            # because `x=0; cmd` does not put x in cmd's environment at all;
+            # only `x=0 cmd` does, and that is one statement.
+            expanded = recipe_statements(make_expand(lone.group(1)))
+            words = expanded[0] if expanded else []
             if words and re.match(r"[A-Za-z_][A-Za-z0-9_]*=", words[0]):
-                more, rest = split_prefix(words + statement[i + 1:], depth + 1)
+                # The recipe text after this token continues the FIRST statement
+                # only when the expansion was one statement. Otherwise the
+                # expansion ended in a `;` and what follows is its own command.
+                tail = statement[i + 1:] if len(expanded) == 1 else []
+                more, rest = split_prefix(words + tail, depth + 1)
                 return names + more, rest
         break
     return names, statement[i:]
