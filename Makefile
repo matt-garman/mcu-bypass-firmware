@@ -5431,7 +5431,10 @@ pic12f675-test-config: pic12f675 test/pic/test_config_pic12f675
 # is that the shell's init ran at all (OPTION_REG 0x0C, CMCON 0x07, TRISIO 0x38).
 PIC12F675_CAL_INJECTOR ?= test/pic/inject_calibration_word.py
 PIC12F675_CAL_VALUE    ?= 0x80
-PIC12F675_SIMCAL_DIR   ?= $(PIC12F675_BUILD_DIR)/simcal
+# Not independently caller-overridable: simulator images must stay in this
+# dedicated subdirectory so no shipping-image glob can select them. Relocating
+# PIC12F675_BUILD_DIR still relocates the complete target artifact tree.
+override PIC12F675_SIMCAL_DIR := $(PIC12F675_BUILD_DIR)/simcal
 override PIC12F675_SIMCAL_HEXES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(PIC12F675_SIMCAL_DIR)/$(call fw_image,$(v),$(PIC12F675_TAG))_simcal.hex)
 # Derived images are build products: a `pic12f675` rebuild must not leave a stale
 # one behind for a lane to pick up. Appended rather than folded into the original

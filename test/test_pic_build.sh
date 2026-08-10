@@ -74,9 +74,9 @@ case "$PB_TARGET" in
 		product_override_args=(PIC12F675_HEXES= PIC12F675_ASSEMBLIES= PIC12F675_SYMBOLS= PIC12F675_BUILD_PRODUCTS=)
 		# Same CLASSIC_VARIANTS_* validation preamble as the PIC10F322 target,
 		# so it is exposed to the same injection vector and must run the same
-		# check -- which is why this lane's count matches the 322's.
+		# check. Its additional check pins simulator-image path separation.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=36
+		expected_checks=37
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -510,6 +510,23 @@ for sidecar in "$asm" "$sym"; do
 			"$PB_LABEL" "$sidecar" >&2; exit 1; }
 done
 checks=$((checks + 1))
+
+# PIC12F675 simulator images carry a fabricated oscillator-calibration word and
+# must never sit beside shipping images. The producer derives its directory from
+# the caller-selected build root and deliberately overrides a direct collision
+# attempt. Query the real copied Makefile so this test pins the Make expansion,
+# rather than restating the intended assignment in shell.
+if [ "$PB_TARGET" = pic12f675 ]; then
+	simcal_dir=$(make -s --no-print-directory -C "$repo" \
+		CC=true HOSTCC=true \
+		"$PB_BUILD_DIR_VAR=$PB_BUILD_DIR" \
+		PIC12F675_SIMCAL_DIR="$PB_BUILD_DIR" \
+		print-PIC12F675_SIMCAL_DIR 2>/dev/null)
+	[ "$simcal_dir" = "$PB_BUILD_DIR/simcal" ] \
+		|| { printf 'FAIL: PIC12F675_SIMCAL_DIR collision override resolved to %s, expected %s/simcal\n' \
+			"$simcal_dir" "$PB_BUILD_DIR" >&2; exit 1; }
+	checks=$((checks + 1))
+fi
 
 # Missing XC8 is a valid development-time skip, but only after every stale
 # product has been removed. Exercise the public stack target so a stale HEX
