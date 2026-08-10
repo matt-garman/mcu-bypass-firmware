@@ -19,6 +19,25 @@
 #define FW_FAULT_TIMEOUT_MS 120
 #define FW_DRIVE_TIMEOUT_MS 2000
 
+#if defined(BYPASS_MCU_PIC12F675)
+static uint8_t g_gpio;
+static int g_footswitch_pressed;
+uint8_t TRISIO, ANSEL, WPU, CMCON, OSCCAL, TMR0;
+bypass_option_reg_t bypass_option_reg;
+bypass_adcon0_reg_t bypass_adcon0_reg;
+static volatile INTCONbits_t g_intcon;
+
+uint8_t *bypass_gpio_access(void) {
+    if (g_footswitch_pressed) { g_gpio &= (uint8_t)~0x20u; }
+    else                      { g_gpio |= (uint8_t) 0x20u; }
+    return &g_gpio;
+}
+
+volatile INTCONbits_t *bypass_intcon(void) {
+    g_intcon.T0IF = 1u;
+    return &g_intcon;
+}
+#else
 static uint8_t g_lata;
 uint8_t PORTA, TRISA, ANSELA, WPUA, PR2, T2CON;
 OPTION_REGbits_t OPTION_REGbits;
@@ -33,6 +52,7 @@ PIR1bits_t *bypass_pir1(void) {
     g_pir1.TMR2IF = 1u;
     return &g_pir1;
 }
+#endif
 
 void bypass_on_delay_ms(unsigned ms) { (void)ms; }
 
@@ -46,12 +66,33 @@ static int             g_tick;
 static uint8_t         g_last_lata;
 static int             g_inject;
 
+static void set_footswitch(int pressed) {
+#if defined(BYPASS_MCU_PIC12F675)
+    g_footswitch_pressed = pressed != 0;
+    (void)bypass_gpio_access();
+#else
+    if (pressed) { PORTA &= (uint8_t)~0x08u; }
+    else         { PORTA |= (uint8_t) 0x08u; }
+#endif
+}
+
 static void present_footswitch(int i) {
-    if (g_fsw[i]) { PORTA &= (uint8_t)~0x08u; }
-    else          { PORTA |=  (uint8_t) 0x08u; }
+    set_footswitch(g_fsw[i] != 0u);
 }
 
 static void reset_sfrs_power_on(void) {
+#if defined(BYPASS_MCU_PIC12F675)
+    g_gpio = 0u;
+    TRISIO = 0x3fu;
+    ANSEL = 0x0fu;
+    WPU = CMCON = TMR0 = 0u;
+    OSCCAL = 0x80u;
+    OPTION_REG = 0xffu;
+    ADCON0 = 0u;
+    g_intcon.T0IF = 0u;
+    g_intcon.GIE = 1u;
+    set_footswitch(0);
+#else
     g_lata = 0u;
     PORTA = TRISA = ANSELA = PR2 = T2CON = 0u;
     WPUA = 0x0fu;
@@ -61,6 +102,7 @@ static void reset_sfrs_power_on(void) {
     INTCONbits.GIE = 1u;
     g_pir1.TMR2IF = 0u;
     PORTA |= (uint8_t)(1u << 3);
+#endif
 }
 
 static void on_sigalrm(int sig) {
@@ -91,9 +133,60 @@ static int disarm_timer(void) {
     return setitimer(ITIMER_REAL, &it, NULL) == 0;
 }
 
-#include "../../../src/bypass_mcu_pic10f322.c"
+#if defined(BYPASS_MCU_PIC12F675)
+#  include "../../../src/bypass_mcu_pic12f675.c"
+#else
+#  include "../../../src/bypass_mcu_pic10f322.c"
+#endif
 
 static void apply_injection(int inj) {
+#if defined(BYPASS_MCU_PIC12F675)
+    switch (inj) {
+        case FWI_VALID_ENGAGED:
+            ctx_.program_state = RELEASE_DEBOUNCE_WAIT;
+            ctx_.effect_state = ENGAGED;
+            ctx_.debounce_counter = RELEASE_THRESH;
+#if defined(CD4053_SIMPLE)
+            fwp_set_output_state(0x03u, 0x03u);
+#elif defined(CD4053_WITH_MUTE)
+            fwp_set_output_state(0x07u, 0x07u);
+#else
+            fwp_set_output_state(0x01u, 0x01u);
+#endif
+            break;
+        case FWI_PROGRAM_STATE_OOR:    ctx_.program_state = (program_state_t)2; break;
+        case FWI_EFFECT_STATE_OOR:     ctx_.effect_state = (effect_state_t)2; break;
+        case FWI_COUNTER_OOR:          ctx_.debounce_counter = (uint8_t)(RELEASE_THRESH + 50u); break;
+        case FWI_PULLUP_LATCH_CLEARED: WPU &= (uint8_t)~(1u << 5); break;
+        case FWI_PULLUP_EXTRA_GP0:     WPU |= (uint8_t)(1u << 0); break;
+        case FWI_PULLUP_EXTRA_GP1:     WPU |= (uint8_t)(1u << 1); break;
+        case FWI_PULLUP_EXTRA_GP2:     WPU |= (uint8_t)(1u << 2); break;
+        case FWI_PULLUP_EXTRA_GP4:     WPU |= (uint8_t)(1u << 4); break;
+        case FWI_PULLUP_GLOBAL_OFF:    OPTION_REGbits.nGPPU = 1u; break;
+        case FWI_GP0_PIN_TO_INPUT:     TRISIO |= (uint8_t)(1u << 0); break;
+        case FWI_GP1_PIN_TO_INPUT:     TRISIO |= (uint8_t)(1u << 1); break;
+        case FWI_GP2_PIN_TO_INPUT:     TRISIO |= (uint8_t)(1u << 2); break;
+        case FWI_GP4_PIN_TO_OUTPUT:    TRISIO &= (uint8_t)~(1u << 4); break;
+        case FWI_GP5_PIN_TO_OUTPUT:    TRISIO &= (uint8_t)~(1u << 5); break;
+        case FWI_SHADOW_GP0_HIGH:      gpio_shadow_ |= (uint8_t)(1u << 0); break;
+        case FWI_SHADOW_GP1_HIGH:      gpio_shadow_ |= (uint8_t)(1u << 1); break;
+        case FWI_SHADOW_GP2_HIGH:      gpio_shadow_ |= (uint8_t)(1u << 2); break;
+        case FWI_GPIO_GP0_HIGH:        g_gpio |= (uint8_t)(1u << 0); break;
+        case FWI_GPIO_GP1_HIGH:        g_gpio |= (uint8_t)(1u << 1); break;
+        case FWI_GPIO_GP2_HIGH:        g_gpio |= (uint8_t)(1u << 2); break;
+        case FWI_OPTION_REG_SKEW:      OPTION_REG ^= (uint8_t)0x01u; break;
+        case FWI_CMCON_SKEW:           CMCON ^= (uint8_t)0x01u; break;
+        case FWI_ADCON0_ADON_SET:      ADCON0bits.ADON = 1u; break;
+        case FWI_ANSEL_SKEW_GP0:       ANSEL |= (uint8_t)(1u << 0); break;
+        case FWI_ANSEL_SKEW_GP1:       ANSEL |= (uint8_t)(1u << 1); break;
+        case FWI_ANSEL_SKEW_GP2:       ANSEL |= (uint8_t)(1u << 2); break;
+        case FWI_OSCCAL_SKEW:          OSCCAL ^= (uint8_t)0x04u; break;
+        case FWI_HARNESS_STALL:        for (;;) { }
+        case FWI_NONE:
+        default:
+            break;
+    }
+#else
     switch (inj) {
         case FWI_VALID_ENGAGED:
             ctx_.program_state = RELEASE_DEBOUNCE_WAIT;
@@ -133,6 +226,7 @@ static void apply_injection(int inj) {
         default:
             break;
     }
+#endif
 }
 
 void bypass_coverage_on_clrwdt(void) {
@@ -140,7 +234,11 @@ void bypass_coverage_on_clrwdt(void) {
     if (g_clrwdt_calls == 1) return;
 
     if (g_mode == MODE_DRIVE) {
+#if defined(BYPASS_MCU_PIC12F675)
+        g_last_lata = (uint8_t)(GPIO & 0x01u);
+#else
         g_last_lata = (uint8_t)(LATA & 0x01u);
+#endif
         g_tick++;
         if (g_tick >= g_n) {
             disarm_timer();
@@ -209,3 +307,12 @@ int fwp_critical_sfrs_intact(void)       { return (int)hw_critical_sfrs_intact()
 int fwp_footswitch_is_high(void) {
     return (hw_read_footswitch() == PIN_STATE_HIGH) ? 1 : 0;
 }
+void fwp_set_footswitch(int pressed) { set_footswitch(pressed); }
+#if defined(BYPASS_MCU_PIC12F675)
+void fwp_set_output_state(uint8_t intended, uint8_t physical) {
+    gpio_shadow_ = (uint8_t)((gpio_shadow_ & (uint8_t)~0x07u) |
+                             (intended & 0x07u));
+    g_gpio = (uint8_t)((g_gpio & (uint8_t)~0x07u) | (physical & 0x07u));
+}
+void fwp_capture_osccal(void) { osccal_snapshot_ = OSCCAL; }
+#endif

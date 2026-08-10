@@ -1325,7 +1325,7 @@ pic10f322-test-gpsim: pic10f322 $(PIC10F32X_GPSIM_REGS)
 .PHONY: pic10f322-coverage-check-fw
 pic10f322-coverage-check-fw:
 	@HOSTCC="$(HOSTCC)" GCOV="$(GCOV)" COVERAGE_DIR="$(abspath $(COVERAGE_DIR))" \
-		test/pic/fw_coverage/run_fw_coverage.sh
+		test/pic/fw_coverage/run_fw_coverage.sh pic10f322
 
 # Aggregate: every PIC pre-hardware check (build+budget, CONFIG word, static
 # analysis, shipping-source coverage, gpsim functional). Standalone -- NOT part
@@ -5278,6 +5278,14 @@ pic12f675-analyze-misra: src/bypass_mcu_pic12f675.c $(PIC12F675_HEADERS) $(MISRA
 	rm -f $$out *.dump *.ctu-info cppcheck-addon-ctu-file-list*; \
 	echo "MISRA-C:2012 (PIC shell): clean (documented deviations waived per MISRA_COMPLIANCE.md)"
 
+# Host-gcov gate over the real PIC12F675 shipping source set: the shell, shared
+# pure core, and all three unmodified output drivers. Uses a classic-PIC SFR mock
+# and needs no XC8, DFP or simulator installation.
+.PHONY: pic12f675-coverage-check-fw
+pic12f675-coverage-check-fw:
+	@HOSTCC="$(HOSTCC)" GCOV="$(GCOV)" COVERAGE_DIR="$(abspath $(COVERAGE_DIR))" \
+		test/pic/fw_coverage/run_fw_coverage.sh pic12f675
+
 # --- PIC12F675 hardware return-stack bound ------------------------------------
 # The classic mid-range core has the same 8-level hardware return stack as the
 # PIC10F32x (STACKDEPTH=8 in 12f675.ini, corroborated by hwstackdepth="8" in
@@ -5823,6 +5831,7 @@ help:
 	@echo "  pic12f675-test-config build PIC12F675 HEX, then verify each CONFIG word vs design intent"
 	@echo "  pic12f675-test-gpsim  drive the footswitch in gpsim, assert GPIO on the simcal images"
 	@echo "  pic12f675-analyze     cppcheck + MISRA on the PIC12F675 shell (pic8 platform; standalone)"
+	@echo "  pic12f675-coverage-check-fw  exact host-gcov gate over the shell, core, and drivers"
 	@echo "  pic12f675-test-stack-bound  bound the 8-level hardware return stack for every variant"
 	@echo "  pic12f675-simcal      derive simulator images with the oscillator calibration word"
 	@echo "  pic12f675-test-calibration  prove the calibration injection leaves the shipping HEX alone"

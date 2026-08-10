@@ -15,6 +15,31 @@ typedef enum {
     FWI_EFFECT_STATE_OOR,
     FWI_COUNTER_OOR,
     FWI_PULLUP_LATCH_CLEARED,
+#if defined(BYPASS_MCU_PIC12F675)
+    FWI_PULLUP_EXTRA_GP0,
+    FWI_PULLUP_EXTRA_GP1,
+    FWI_PULLUP_EXTRA_GP2,
+    FWI_PULLUP_EXTRA_GP4,
+    FWI_PULLUP_GLOBAL_OFF,
+    FWI_GP0_PIN_TO_INPUT,
+    FWI_GP1_PIN_TO_INPUT,
+    FWI_GP2_PIN_TO_INPUT,
+    FWI_GP4_PIN_TO_OUTPUT,
+    FWI_GP5_PIN_TO_OUTPUT,
+    FWI_SHADOW_GP0_HIGH,
+    FWI_SHADOW_GP1_HIGH,
+    FWI_SHADOW_GP2_HIGH,
+    FWI_GPIO_GP0_HIGH,
+    FWI_GPIO_GP1_HIGH,
+    FWI_GPIO_GP2_HIGH,
+    FWI_OPTION_REG_SKEW,
+    FWI_CMCON_SKEW,
+    FWI_ADCON0_ADON_SET,
+    FWI_ANSEL_SKEW_GP0,
+    FWI_ANSEL_SKEW_GP1,
+    FWI_ANSEL_SKEW_GP2,
+    FWI_OSCCAL_SKEW,
+#else
     FWI_PULLUP_EXTRA_RA0,
     FWI_PULLUP_EXTRA_RA1,
     FWI_PULLUP_EXTRA_RA2,
@@ -32,6 +57,7 @@ typedef enum {
     FWI_ANSELA_SKEW_RA0,
     FWI_ANSELA_SKEW_RA1,
     FWI_ANSELA_SKEW_RA2,
+#endif
     FWI_HARNESS_STALL
 } fw_inject_t;
 
@@ -42,5 +68,10 @@ int fwp_sanity_failed(effect_state_t effect_state);
 int fwp_pullup_intact(void);
 int fwp_critical_sfrs_intact(void);
 int fwp_footswitch_is_high(void);
+void fwp_set_footswitch(int pressed);
+#if defined(BYPASS_MCU_PIC12F675)
+void fwp_set_output_state(uint8_t intended, uint8_t physical);
+void fwp_capture_osccal(void);
+#endif
 
 #endif

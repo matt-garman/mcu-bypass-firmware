@@ -112,8 +112,9 @@ test/
   pic/     PIC10F322 and PIC12F675 tests plus shared PIC harness code. Both
            parts are a shell over the shared pure core, so their adapters sit
            beside the mechanism they share rather than in per-part trees.
-            fw_coverage/         real PIC source via host SFR mock + gcov
-                                                        (make pic10f322-coverage-check-fw)
+            fw_coverage/         real PIC source via per-device host SFR mocks +
+                                  gcov (make pic10f322-coverage-check-fw;
+                                        make pic12f675-coverage-check-fw)
             test_config_pic_core.h  CONFIG-word mechanism: locate the word in a
                                   built HEX, mask it, compare against intent
             test_config_pic.c    PIC10F32x adapter     (make pic10f322-test-config)
@@ -315,6 +316,29 @@ ultimately validated on a real part at the bench.
 - **UPDI programming is untested on silicon.** The `attiny202-program` recipe and
   its fuse writes have not been exercised against a real part.
 
+
+## PIC12F675 shipping-source coverage
+
+`make pic12f675-coverage-check-fw` host-compiles the real
+`bypass_mcu_pic12f675.c`, shared pure core, and all three unmodified output
+drivers under gcov. It needs only Bash, a host C compiler, and matching gcov;
+XC8, the device pack, and gpsim are not involved.
+
+The shared coverage harness selects a PIC12F675 mock `<xc.h>` that preserves the
+classic-PIC distinctions the firmware depends on: GPIO intent and physical pin
+levels are separate, externally driven GP5 survives whole-port writes,
+`OPTION_REG`/`nGPPU` and `ADCON0`/`ADON` share their respective backing bytes,
+and each `T0IF` access supplies the next of the four polled TMR0 subticks. Runtime
+checks pin the implementation-defined host bitfield layout before it can count
+as firmware evidence.
+
+Every output variant runs an exact 78-check predicate, fault, and happy-path
+matrix. The coverage oracle then requires every executable line in all five
+shipping sources except one exact, documented defense-in-depth call: invalid
+context is caught by the main-loop range gate before `debounce_step()` can
+return `res.fault`. The live sanity-gate call to `hw_force_wdt_reset()` is a
+positive coverage requirement, so the allowance cannot hide a harness that
+never enters the real reset path.
 
 ## PIC10F322 target validation layers
 
