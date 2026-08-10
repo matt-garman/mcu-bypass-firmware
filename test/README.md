@@ -161,6 +161,14 @@ test/
                                   loop CLRWDT sits above the bound the core used
                                   to hard-code
                                                   (make pic12f675-test-lockstep)
+            test_fault_pic12f675.cc
+                                  PIC12F675 fault adapter. Its per-part output
+                                  policy injects into BOTH the SRAM shadow and
+                                  the pins: with the shadow left correct, only
+                                  "the port still follows it" can explain the
+                                  reset. Also carries the one deliberate
+                                  non-guard the 32x lanes no longer have
+                                                     (make pic12f675-test-fault)
             test_{fault,lockstep,io}_pic_core.h
                                   shared libgpsim harness implementations,
                                   device-parameterised: a part adapter supplies
@@ -180,6 +188,14 @@ test/
                                   by a bounded number of trace samples. Also the
                                   one place the footswitch pin name is written,
                                   so every 675 harness attaches to gpio5
+            pic12f675_fault_matrix.h
+                                  PIC12F675 fault-injection matrix, split from
+                                  identity for the same reason as the 32x pair.
+                                  Names the locations this part guards that the
+                                  32x cannot, and the two OPTION_REG bits it
+                                  deliberately leaves alone because starving the
+                                  tick would produce the same reset count as the
+                                  gate firing
             inject_calibration_word.py
                                   derives a simulator-runnable image by injecting
                                   the oscillator calibration word the factory

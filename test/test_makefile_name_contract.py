@@ -1284,8 +1284,13 @@ def check_axis_b():
 # sweep survivable: a generic [A-Z_]{3,} pass over prose drowns in C macros,
 # register names and acronyms. The retired spellings are listed too, because a
 # document still recommending one is the entire defect.
+#
+# A NEW PART MUST BE ADDED HERE. Its variables are spelled with the part name,
+# so until the prefix is listed, prose naming one of them is out of scope and a
+# severed mention passes silently -- which is what happened to PIC12F675_ while
+# that part's lanes were being built.
 VAR_PREFIXES = ("ATTINY13A_", "TINYX5_", "AVR_", "XT_", "PIC_",
-                "PIC10F320_", "PIC10F322_", "PIC320_", "SOAK_")
+                "PIC10F320_", "PIC10F322_", "PIC12F675_", "PIC320_", "SOAK_")
 VAR_RETIRED = {"MCU", "PROGRAMMER", "LFUSE", "HFUSE"}
 
 # `NAME` in backticks, or NAME= in a sentence or a diagnostic string.

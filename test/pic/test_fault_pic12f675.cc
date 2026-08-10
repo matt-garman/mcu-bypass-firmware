@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Matthew Garman
+
+// PIC12F675 adapter for the shared libgpsim fault-injection harness. 1024
+// program words, and an output "latch" that is not a register at all: this part
+// has no LATx, so the shell keeps gpio_shadow_ in SRAM and writes shadow ->
+// GPIO. The core's per-part output hook therefore injects SIX cases where the
+// PIC10F322 injects three -- the shadow, and the physical port that must follow
+// it -- because the gate here compares the firmware's INTENT against the pins,
+// which is a fault class the 322 cannot see at all.
+//
+// Everything else this part guards, and the two OPTION_REG bits it deliberately
+// does not, live in the injection matrix beside this file.
+
+/* name-contract: exempt-begin (PIC_REG_ and PIC_FAULT_ names are C macro
+   families, not make vars) */
+#include "pic/pic12f675_regs.h"          // PIC_REG_* device identity, FOOTSW_PIN_NAME
+#include "pic/pic12f675_fault_matrix.h"  // PIC_FAULT_* injection matrix
+/* name-contract: exempt-end */
+
+// The shadow address is a per-build fact lifted from the XC8 .sym, not a device
+// address, so the register map leaves its macros undefined when the build did
+// not supply one. This lane CORRUPTS the shadow, so it says so by name rather
+// than failing later on an undeclared identifier. There is no value a default
+// could carry that would be right, and the obvious one is actively wrong:
+// register 0x000 is INDF, which is not storage at all -- a write through it
+// lands wherever FSR happens to point, so the three shadow cases would be
+// corrupting an arbitrary GPR under a label that says shadow.
+#ifndef PIC_SHADOW_ADDR
+#  error "PIC_SHADOW_ADDR (_gpio_shadow_ from the XC8 .sym) is required: this lane injects into the shadow"
+#endif
+
+#define PIC_FAULT_DEFAULT_PROC_NAME "p12f675"
+// 1024 words of flash, matching this part's budget in the Makefile.
+#define PIC_FAULT_PROGRAM_WORDS 0x400u
+#define PIC_FAULT_EXPECTED_CHECKS 35u
+// The shadow cases corrupt what the firmware MEANT to drive; the GPIO cases
+// corrupt what the pins actually are, leaving the shadow correct. Only the
+// port-follows-shadow clause of hw_output_state_intact() can explain a reset
+// from the second group -- the shadow still matches its expected mask -- so the
+// two groups together pin both halves of that comparison independently.
+#define PIC_FAULT_EXTRA_OUTPUT_INJECTIONS() do { \
+    inject_case("shadow.GP0", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x01, 1, \
+                "GP0 LED shadow changed from settled low to high"); \
+    inject_case("shadow.GP1", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x02, 1, \
+                "GP1 control/reset-coil shadow changed from low to high"); \
+    inject_case("shadow.GP2", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x04, 1, \
+                "GP2 control/set-coil/spare shadow changed from low to high"); \
+    inject_case("GPIO.GP0",   PIC_REG_PORT_ADDR,  PIC_REG_PORT_TOKEN,  false, 0x01, 1, \
+                "GP0 pin driven high with its shadow low: port stopped following"); \
+    inject_case("GPIO.GP1",   PIC_REG_PORT_ADDR,  PIC_REG_PORT_TOKEN,  false, 0x02, 1, \
+                "GP1 pin driven high with its shadow low: port stopped following"); \
+    inject_case("GPIO.GP2",   PIC_REG_PORT_ADDR,  PIC_REG_PORT_TOKEN,  false, 0x04, 1, \
+                "GP2 pin driven high with its shadow low: port stopped following"); \
+} while (0)
+#define PIC_FAULT_PROGRAM_STATE_NOTE \
+    "0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault)"
+
+#if (defined(CD4053_SIMPLE) + defined(CD4053_WITH_MUTE) + \
+     defined(TQ2_L2_5V_RELAY)) != 1
+#  error "define exactly one output variant"
+#endif
+
+#include "pic/test_fault_pic_core.h"

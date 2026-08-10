@@ -22,14 +22,15 @@
 //   * ctx_ SRAM           program_state / effect_state / debounce_counter
 //                         (range checks -- genuinely device-independent, so they
 //                         are the only injections still written out below)
-// The output-latch policy is the per-PART hook, and the two
-// PIC10F32x consumers show why it has to be: PIC10F322 injects its latch bits
-// because that firmware guards the settled latch, while PIC10F320 deliberately
-// omits that general guard for flash budget and its relay adapter instead
-// injects coil bits and requires their idle safe-state rewrite to correct both
-// latch and physical port within one serviced iteration, without a reset. The
-// literal per-part expected counts ensure a missing case cannot silently reduce
-// any lane.
+// The output-latch policy is the per-PART hook, and the three consumers show
+// why it has to be: PIC10F322 injects its latch bits because that firmware
+// guards the settled latch; PIC10F320 deliberately omits that general guard for
+// flash budget and its relay adapter instead injects coil bits and requires
+// their idle safe-state rewrite to correct both latch and physical port within
+// one serviced iteration, without a reset; and PIC12F675 has no latch REGISTER
+// at all, so it injects into the SRAM shadow that serves as one AND into the
+// pins, which the gate requires to follow it. The literal per-part expected
+// counts ensure a missing case cannot silently reduce any lane.
 //
 // CTX_ADDR is required. The Makefile extracts _ctx_'s data address from the XC8
 // .sym so the test self-adjusts per variant and cannot pass with SRAM cases
@@ -57,14 +58,17 @@
 //      note below), which would otherwise pass silently.
 // A no-injection CONTROL case runs first and asserts delta == 0: a quiescent
 // device must NOT reset in a full window, proving the window is not catching
-// phantom resets and the gate does not fire spuriously. That control is now the
-// ONLY delta == 0 assertion here: since the exact-direction port every injection
-// below is a guarded fault expecting exactly one reset, identically on all three
-// variants. (Before the port, cd4053_simple carried an extra write-back-verified
-// negative injection -- its spare third output pin sat outside the old
-// per-variant mask. An exact direction check covers that pin too, so both the
-// blind spot and the variant split in these expectations are gone; see
-// EXPECTED_CHECKS below.)
+// phantom resets and the gate does not fire spuriously.
+//
+// Whether any OTHER delta == 0 case exists is the matrix's call, not this
+// core's, and the two families answer differently. On the 10F32x parts every
+// injection is a guarded fault expecting exactly one reset, identically on all
+// three variants -- the exact-direction port took away the last negative
+// control, cd4053_simple's spare third output pin, by bringing it inside the
+// guard. The PIC12F675 matrix reintroduces one, because that firmware
+// deliberately leaves ANSEL.ANS3 unchecked (GP4 is an unused spare input) and a
+// zero-expectation case is how a deliberate non-guard gets pinned rather than
+// assumed.
 //
 // CORRUPTION VALUES are chosen so the main loop keeps running and the GATE is
 // the sole reset path. That confound analysis is per-register and therefore
@@ -75,9 +79,10 @@
 // program_state also reaches a belt-and-suspenders state-machine fault path; the
 // adapter's diagnostic names the pure-core or hand-inlined path for its part.
 //
-// Build/run via `make pic10f322-test-fault` or `make pic10f320-test-fault-target`. The
-// fail-closed `pic10f322-test-target-variants` and `pic10f320-test-target-variants`
-// aggregates run their respective adapter for every supported output variant.
+// Build/run via `make pic10f322-test-fault`, `make pic10f320-test-fault-target`
+// or `make pic12f675-test-fault`. The fail-closed `pic10f322-test-target-variants`
+// and `pic10f320-test-target-variants` aggregates run their respective adapter
+// for every supported output variant.
 //
 // IMPORTANT (gpsim WDT calibration; see test_soak_pic.cc): on the PIC10F32x
 // gpsim honors WDTCON.WDTPS but does NOT match the datasheet -- at that
@@ -145,18 +150,19 @@
 // not: it is per-part correct and per-variant wrong, so a severed injection
 // tested one output stage while the run reported another.
 #ifndef FW_PATH
-#  error "FW_PATH must be injected: -DFW_PATH from PIC10F322_FAULT_HEX or PIC10F320_FAULT_HEX"
+#  error "FW_PATH must be injected: -DFW_PATH from PIC10F322_FAULT_HEX, PIC10F320_FAULT_HEX or PIC12F675_FAULT_HEX"
 #endif
 #ifndef PROC_NAME
 #  define PROC_NAME PIC_FAULT_DEFAULT_PROC_NAME
 #endif
-// FOSC; instruction clock = FOSC/4. A part fact, and the two PIC parts share
-// one value today -- which is exactly why a default here is a hazard: re-pin
-// one chip's XTAL and this harness goes on simulating the other's.
+// FOSC; instruction clock = FOSC/4. A part fact, and NOT a shared one: the two
+// 10F32x parts run at 2 MHz and the PIC12F675 at 4 MHz. A default here would be
+// a hazard even had they agreed -- re-pin one chip's XTAL and this harness goes
+// on simulating the other's.
 #ifndef F_CPU_HZ
-#  error "F_CPU_HZ must be injected: -DF_CPU_HZ from PIC10F322_XTAL or PIC10F320_XTAL"
+#  error "F_CPU_HZ must be injected: -DF_CPU_HZ from PIC10F322_XTAL, PIC10F320_XTAL or PIC12F675_XTAL"
 #endif
-#define CYCLES_PER_MS  ((F_CPU_HZ / 4UL) / 1000UL)   // 500 @ 2 MHz
+#define CYCLES_PER_MS  ((F_CPU_HZ / 4UL) / 1000UL)   // 500 @ 2 MHz, 1000 @ 4 MHz
 #define CLRWDT_OPCODE  0x0064u
 
 // The footswitch is driven by footsw_set() on FOOTSW_PIN_NAME; both come from
@@ -166,7 +172,7 @@
 // fetch_sfr() so an address drift is surfaced rather than silently corrupting
 // the wrong register.
 
-// ctx_ is file-static SRAM in both firmware parts. The Makefile passes its .sym
+// ctx_ is file-static SRAM in all three firmware parts. The Makefile passes its .sym
 // address and asserts the generated allocation is three bytes. Field offsets
 // follow the common program_state/effect_state/debounce_counter order. ctx_ is a
 // GPR, so pass a null token to fetch_sfr to skip the name cross-check.
