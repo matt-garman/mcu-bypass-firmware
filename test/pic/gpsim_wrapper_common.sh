@@ -31,22 +31,31 @@ PROC="${PIC_GPSIM_PROC:-p10f322}"
 # half of them: a part whose register names differ but whose masks did not follow
 # would read the right register and test the wrong bit, which is the one failure
 # in here that could still score a pass. One file, set entirely or not at all.
+_gpsim_required_vars=(
+	GPSIM_PORT_REG GPSIM_PORT_LABEL GPSIM_LATCH_REG GPSIM_LATCH_LABEL
+	GPSIM_FOOTSW_MASK GPSIM_FOOTSW_LABEL GPSIM_LED_MASK GPSIM_LED_LABEL
+	GPSIM_OUTPUT_MASK
+)
 GPSIM_REGS="${PIC_GPSIM_REGS:-$(dirname "${BASH_SOURCE[0]}")/pic10f32x_gpsim_regs.sh}"
 if [ ! -r "$GPSIM_REGS" ]; then
 	echo "FAIL: missing gpsim register identity fragment: $GPSIM_REGS"
 	exit 1
 fi
+# A fragment must supply its complete identity itself. Without this reset, a
+# missing field can inherit an exported value from the caller and make a partial
+# or even empty fragment look complete.
+for _required in "${_gpsim_required_vars[@]}"; do
+	unset "$_required"
+done
 # shellcheck source=test/pic/pic10f32x_gpsim_regs.sh
 . "$GPSIM_REGS" || { echo "FAIL: could not source $GPSIM_REGS"; exit 1; }
-for _required in GPSIM_PORT_REG GPSIM_PORT_LABEL GPSIM_LATCH_REG GPSIM_LATCH_LABEL \
-		GPSIM_FOOTSW_MASK GPSIM_FOOTSW_LABEL GPSIM_LED_MASK GPSIM_LED_LABEL \
-		GPSIM_OUTPUT_MASK; do
+for _required in "${_gpsim_required_vars[@]}"; do
 	if [ -z "${!_required:-}" ]; then
 		echo "FAIL: $GPSIM_REGS does not define $_required"
 		exit 1
 	fi
 done
-unset _required
+unset _required _gpsim_required_vars
 
 fails=0
 note() { printf '  %-14s %s\n' "$1" "$2"; }
