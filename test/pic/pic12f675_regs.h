@@ -23,7 +23,7 @@
 // page. To re-derive after a toolchain or firmware change, load a *_simcal.hex
 // on p12f675, run past init(), and print rma.get_register(addr)->name() and
 // ->get_value() for each address below; the observed steady state is
-// TRISIO=0x38, ANSEL=0x00, WPU=0x20, OPTION_REG=0x0C, GPIO=0x20.
+// TRISIO=0x28, ANSEL=0x00, WPU=0x20, OPTION_REG=0x0C, GPIO=0x20.
 //
 // The fault-injection-only SFRs of this part (CMCON, ADCON0, OSCCAL) are NOT
 // here, for the same reason OSCCON/PR2/T2CON/WDTCON are not in the 10F32x map:
@@ -96,6 +96,7 @@
 #define PIC_REG_ANSEL_ADDR   0x09Fu   // ANSEL (bank 1); ANS0..ANS3 = GP0,GP1,GP2,GP4
 #define PIC_REG_ANSEL_NAME   "ANSEL"
 #define PIC_REG_ANSEL_TOKEN  "ansel"
+#define PIC_REG_ANSEL_MASK   0x0Fu
 
 // ---- Weak pull-ups ----------------------------------------------------------
 #define PIC_REG_WPU_ADDR     0x095u   // WPU (bank 1): per-pin weak-pull-up latch
@@ -110,20 +111,21 @@
 // Implemented I/O bits: six (GP0..GP5) against the 10F32x's four, so every
 // masked comparison widens -- which is exactly why the cores never spell 0x0F.
 #define PIC_REG_PORT_MASK    0x3Fu
-// Pins the firmware drives as outputs (BYPASS_OUTPUT_DDR_MASK): GP0|GP1|GP2.
-#define PIC_REG_OUTPUT_MASK  0x07u
+// Pins the firmware drives as outputs (BYPASS_OUTPUT_DDR_MASK): GP0|GP1|GP2|GP4.
+#define PIC_REG_OUTPUT_MASK  0x17u
 // The footswitch pin: GP5. NOT the input-only pin (GP3), which has no pull-up.
 #define PIC_REG_FOOTSW_MASK  0x20u
 // The two relay coil bits (RELAY_RESET_PIN | RELAY_SET_PIN) = GP1|GP2.
 #define PIC_REG_COIL_MASK    0x06u
 
-// Exact steady-state TRISIO after init(): GP3..GP5 inputs, GP0..GP2 outputs.
-// GP3 reads back as an input on this part whatever is written to it.
-#define PIC_REG_TRIS_INIT      0x38u
-#define PIC_REG_TRIS_INIT_STR  "0x38"
+// Exact steady-state TRISIO after init(): GP3/GP5 inputs, GP0..GP2/GP4 outputs.
+// GP3 reads back as an input on this part whatever is written to it; GP4 is the
+// parked low output whose direction, shadow, pin level and ANS3 bit are guarded.
+#define PIC_REG_TRIS_INIT      0x28u
+#define PIC_REG_TRIS_INIT_STR  "0x28"
 // Pin-role phrasing for the two differently-worded assertions that print it.
-#define PIC_REG_TRIS_LAYOUT    "GP3..GP5-input/GP0..GP2-output"
-#define PIC_REG_TRIS_DESC      "GP3..GP5 inputs, GP0..GP2 outputs (0x38)"
+#define PIC_REG_TRIS_LAYOUT    "GP3/GP5-input/GP0..GP2/GP4-output"
+#define PIC_REG_TRIS_DESC      "GP3/GP5 inputs, GP0..GP2/GP4 outputs (0x28)"
 
 // Implemented WPU bits, and the exact latch init(): GP5 only. The mask is 0x37,
 // not 0x3F -- this part has NO WPU bit 3, matching WPU_IMPLEMENTED_MASK in the

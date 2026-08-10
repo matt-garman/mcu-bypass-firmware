@@ -77,7 +77,7 @@ case "$PB_TARGET" in
 		# check. Its additional checks pin simulator-image path separation and
 		# complete-matrix production/consumption.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=47
+		expected_checks=48
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -1112,10 +1112,10 @@ EOF
 			"$cal_output" >&2; exit 1; }
 	checks=$((checks + 1))
 
-	# The two libgpsim consumers arrived after the original finding. They must
+	# The three libgpsim consumers arrived after the original finding. They must
 	# apply the same matrix oracle before their optional C++/header skips, or a
 	# suppressed producer could let one selected image stand in for the matrix.
-	for target in pic12f675-test-io pic12f675-test-lockstep; do
+	for target in pic12f675-test-io pic12f675-test-lockstep pic12f675-test-fault; do
 		if cal_output=$(run_simcal_consumer_make "$target" 2>&1); then
 			printf 'FAIL: %s accepted a partial PIC12F675 simulator-image matrix\n' "$target" >&2
 			exit 1

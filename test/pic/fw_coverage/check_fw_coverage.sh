@@ -40,7 +40,7 @@ for gcov_file in "$@"; do
             esac
         elif [ "$base" = "bypass_mcu_pic12f675.c.gcov" ]; then
             case "$lineno:$src" in
-                "569:hw_force_wdt_reset();")
+                "589:hw_force_wdt_reset();")
                     # The earlier main-loop range gate catches every invalid
                     # context before debounce_step() can report res.fault.
                     allowed=$((allowed + 1))
@@ -58,24 +58,24 @@ for gcov_file in "$@"; do
             file_bad=$((file_bad + 1))
         fi
     elif [ "$base" = "bypass_mcu_pic12f675.c.gcov" ]; then
-        if ! grep -Eq '^[[:space:]]*[1-9][0-9]*:[[:space:]]*536:[[:space:]]*if \([[:space:]]*\(ctx_\.program_state > RELEASE_DEBOUNCE_WAIT\) \|\|[[:space:]]*$' "$gcov_file"; then
-            echo "  FAIL: program-state range guard at source line 536 is not covered"
+        if ! grep -Eq '^[[:space:]]*[1-9][0-9]*:[[:space:]]*556:[[:space:]]*if \([[:space:]]*\(ctx_\.program_state > RELEASE_DEBOUNCE_WAIT\) \|\|[[:space:]]*$' "$gcov_file"; then
+            echo "  FAIL: program-state range guard at source line 556 is not covered"
             file_bad=$((file_bad + 1))
         fi
-        if ! grep -Eq '^[[:space:]]*[1-9][0-9]*:[[:space:]]*537:[[:space:]]*\(ctx_\.debounce_counter > RELEASE_THRESH\) \|\|[[:space:]]*$' "$gcov_file"; then
-            echo "  FAIL: debounce-counter range guard at source line 537 is not covered"
+        if ! grep -Eq '^[[:space:]]*[1-9][0-9]*:[[:space:]]*557:[[:space:]]*\(ctx_\.debounce_counter > RELEASE_THRESH\) \|\|[[:space:]]*$' "$gcov_file"; then
+            echo "  FAIL: debounce-counter range guard at source line 557 is not covered"
             file_bad=$((file_bad + 1))
         fi
-        if ! grep -Eq '^[[:space:]]*[1-9][0-9]*:[[:space:]]*538:[[:space:]]*\(ctx_\.effect_state > ENGAGED\) \|\|[[:space:]]*$' "$gcov_file"; then
-            echo "  FAIL: effect-state range guard at source line 538 is not covered"
+        if ! grep -Eq '^[[:space:]]*[1-9][0-9]*:[[:space:]]*558:[[:space:]]*\(ctx_\.effect_state > ENGAGED\) \|\|[[:space:]]*$' "$gcov_file"; then
+            echo "  FAIL: effect-state range guard at source line 558 is not covered"
             file_bad=$((file_bad + 1))
         fi
-        if ! grep -Eq '^[[:space:]]*[1-9][0-9]*:[[:space:]]*545:[[:space:]]*hw_force_wdt_reset\(\);[[:space:]]*$' "$gcov_file"; then
-            echo "  FAIL: live sanity-gate reset call at source line 545 is not covered"
+        if ! grep -Eq '^[[:space:]]*[1-9][0-9]*:[[:space:]]*565:[[:space:]]*hw_force_wdt_reset\(\);[[:space:]]*$' "$gcov_file"; then
+            echo "  FAIL: live sanity-gate reset call at source line 565 is not covered"
             file_bad=$((file_bad + 1))
         fi
-        if ! grep -Eq '^[[:space:]]*#####:[[:space:]]*569:[[:space:]]*hw_force_wdt_reset\(\);[[:space:]]*$' "$gcov_file"; then
-            echo "  FAIL: defense-in-depth reset call at source line 569 did not remain structurally unreachable"
+        if ! grep -Eq '^[[:space:]]*#####:[[:space:]]*589:[[:space:]]*hw_force_wdt_reset\(\);[[:space:]]*$' "$gcov_file"; then
+            echo "  FAIL: defense-in-depth reset call at source line 589 did not remain structurally unreachable"
             file_bad=$((file_bad + 1))
         fi
     fi

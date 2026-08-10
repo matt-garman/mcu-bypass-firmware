@@ -35,5 +35,6 @@ GPSIM_LED_LABEL=GP0
 # LOAD-BEARING rather than a formality. Because the snapshot register is GPIO,
 # it also carries the footswitch bit and the two other input pins; comparing the
 # whole register against a variant's expected output pattern would fail on every
-# checkpoint where the switch happens to be released. Only GP0..GP2 are outputs.
-GPSIM_OUTPUT_MASK=0x07
+# checkpoint where the switch happens to be released. GP0..GP2 are active
+# outputs and parked-spare GP4 is a guarded output that must remain low.
+GPSIM_OUTPUT_MASK=0x17

@@ -101,10 +101,10 @@ if [ "$device" = pic12f675 ]; then
     probe_dir="$work/oracle-probe"
     mkdir "$probe_dir"
     probe="$probe_dir/$shell_annotation"
-    sed -E 's/^([[:space:]]*)#####([[:space:]]*:[[:space:]]*569:)/\1        1\2/' \
+    sed -E 's/^([[:space:]]*)#####([[:space:]]*:[[:space:]]*589:)/\1        1\2/' \
         "$work/$shell_annotation" > "$probe"
-    if ! grep -Eq '^[[:space:]]*1:[[:space:]]*569:' "$probe"; then
-        echo "FAIL: PIC12F675 coverage-oracle probe did not alter source line 569" >&2
+    if ! grep -Eq '^[[:space:]]*1:[[:space:]]*589:' "$probe"; then
+        echo "FAIL: PIC12F675 coverage-oracle probe did not alter source line 589" >&2
         exit 1
     fi
     if "$ROOT/test/pic/fw_coverage/check_fw_coverage.sh" "$probe" >/dev/null 2>&1; then

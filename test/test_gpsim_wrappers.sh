@@ -550,6 +550,7 @@ done
 #    `gpio` lines -- so a wrapper still reaching for porta/lata finds nothing and
 #    fails on missing snapshots.
 pic12f675_toggle=$'===INIT_BYPASS===\ngpio = 0x20\n===PRESS1_EARLY===\ngpio = 0x0\n===PRESS1_LOW===\ngpio = 0x1\n===ENGAGED===\ngpio = 0x21\n===BYPASS_AGAIN===\ngpio = 0x20'
+pic12f675_gp4_high=$'===INIT_BYPASS===\ngpio = 0x20\n===PRESS1_EARLY===\ngpio = 0x0\n===PRESS1_LOW===\ngpio = 0x1\n===ENGAGED===\ngpio = 0x31\n===BYPASS_AGAIN===\ngpio = 0x20'
 pic12f675_pon=$'===PON_HELD===\ngpio = 0x0\n===PON_RELEASED===\ngpio = 0x20\n===PON_ENGAGED===\ngpio = 0x21'
 if ! output=$(
 		export PIC_GPSIM_REGS="$ROOT/test/pic/pic12f675_gpsim_regs.sh"
@@ -822,6 +823,22 @@ if output=$(
 fi
 [[ "$output" == *"GPIO should be 0x1 for this variant, got 0x21"* ]] \
 	|| { printf 'FAIL: removing the output mask produced the wrong failure: %s\n' "$output" >&2; exit 1; }
+checks=$((checks + 1))
+
+# The PIC12F675 output mask must include parked GP4, not merely mask away GP5.
+# Raise only GP4 in the settled ENGAGED snapshot: 0x17 catches it, while the
+# stale pre-policy 0x07 mask would reduce 0x31 to the expected 0x1 and pass.
+if output=$(
+		export PIC_GPSIM_REGS="$ROOT/test/pic/pic12f675_gpsim_regs.sh"
+		export PIC_GPSIM_STC="$ROOT/test/pic/pic12f675_footswitch_toggle.stc"
+		export FAKE_GPSIM_FOOTSW_PIN=gpio5
+		export FAKE_GPSIM_TOGGLE_LINES="$pic12f675_gp4_high"
+		run_toggle 2>&1); then
+	printf 'FAIL: toggle wrapper accepted parked GP4 high with the PIC12F675 output mask\n' >&2
+	exit 1
+fi
+[[ "$output" == *"GPIO should be 0x1 for this variant, got 0x31"* ]] \
+	|| { printf 'FAIL: parked-GP4 output-mask probe produced the wrong failure: %s\n' "$output" >&2; exit 1; }
 checks=$((checks + 1))
 
 # 7. The per-part power-on stimulus really is a separate channel from the toggle

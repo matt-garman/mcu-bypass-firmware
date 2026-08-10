@@ -166,20 +166,23 @@ static void apply_injection(int inj) {
         case FWI_GP0_PIN_TO_INPUT:     TRISIO |= (uint8_t)(1u << 0); break;
         case FWI_GP1_PIN_TO_INPUT:     TRISIO |= (uint8_t)(1u << 1); break;
         case FWI_GP2_PIN_TO_INPUT:     TRISIO |= (uint8_t)(1u << 2); break;
-        case FWI_GP4_PIN_TO_OUTPUT:    TRISIO &= (uint8_t)~(1u << 4); break;
+        case FWI_GP4_PIN_TO_INPUT:     TRISIO |= (uint8_t)(1u << 4); break;
         case FWI_GP5_PIN_TO_OUTPUT:    TRISIO &= (uint8_t)~(1u << 5); break;
         case FWI_SHADOW_GP0_HIGH:      gpio_shadow_ |= (uint8_t)(1u << 0); break;
         case FWI_SHADOW_GP1_HIGH:      gpio_shadow_ |= (uint8_t)(1u << 1); break;
         case FWI_SHADOW_GP2_HIGH:      gpio_shadow_ |= (uint8_t)(1u << 2); break;
+        case FWI_SHADOW_GP4_HIGH:      gpio_shadow_ |= (uint8_t)(1u << 4); break;
         case FWI_GPIO_GP0_HIGH:        g_gpio |= (uint8_t)(1u << 0); break;
         case FWI_GPIO_GP1_HIGH:        g_gpio |= (uint8_t)(1u << 1); break;
         case FWI_GPIO_GP2_HIGH:        g_gpio |= (uint8_t)(1u << 2); break;
+        case FWI_GPIO_GP4_HIGH:        g_gpio |= (uint8_t)(1u << 4); break;
         case FWI_OPTION_REG_SKEW:      OPTION_REG ^= (uint8_t)0x01u; break;
         case FWI_CMCON_SKEW:           CMCON ^= (uint8_t)0x01u; break;
         case FWI_ADCON0_ADON_SET:      ADCON0bits.ADON = 1u; break;
         case FWI_ANSEL_SKEW_GP0:       ANSEL |= (uint8_t)(1u << 0); break;
         case FWI_ANSEL_SKEW_GP1:       ANSEL |= (uint8_t)(1u << 1); break;
         case FWI_ANSEL_SKEW_GP2:       ANSEL |= (uint8_t)(1u << 2); break;
+        case FWI_ANSEL_SKEW_GP4:       ANSEL |= (uint8_t)(1u << 3); break;
         case FWI_OSCCAL_SKEW:          OSCCAL ^= (uint8_t)0x04u; break;
         case FWI_HARNESS_STALL:        for (;;) { }
         case FWI_NONE:
@@ -310,9 +313,9 @@ int fwp_footswitch_is_high(void) {
 void fwp_set_footswitch(int pressed) { set_footswitch(pressed); }
 #if defined(BYPASS_MCU_PIC12F675)
 void fwp_set_output_state(uint8_t intended, uint8_t physical) {
-    gpio_shadow_ = (uint8_t)((gpio_shadow_ & (uint8_t)~0x07u) |
-                             (intended & 0x07u));
-    g_gpio = (uint8_t)((g_gpio & (uint8_t)~0x07u) | (physical & 0x07u));
+    gpio_shadow_ = (uint8_t)((gpio_shadow_ & (uint8_t)~0x17u) |
+                             (intended & 0x17u));
+    g_gpio = (uint8_t)((g_gpio & (uint8_t)~0x17u) | (physical & 0x17u));
 }
 void fwp_capture_osccal(void) { osccal_snapshot_ = OSCCAL; }
 #endif

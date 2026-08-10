@@ -270,17 +270,21 @@ Proposed map (the spike's, for review):
 | Status LED | RA0 | GP0 |
 | `CD4053_PIN` / `CD4053_CTL1` / `RELAY_RESET_PIN` | RA1 | GP1 |
 | `CD4053_CTL2` / `RELAY_SET_PIN` | RA2 | GP2 |
-| `BYPASS_OUTPUT_DDR_MASK` | `0x07` | `0x07` (unchanged) |
-| Spare | — | GP3 (input-only), GP4 |
+| `BYPASS_OUTPUT_DDR_MASK` | `0x07` | `0x17` (GP0–GP2 plus parked GP4) |
+| Spare | — | GP3 input with external ICSP-safe pull-up; GP4 output driven low |
 
-Expected steady-state `TRISIO` is therefore `0x38` (GP0–GP2 outputs; GP3, GP4,
-GP5 inputs), the direct analogue of the 322's exact-`TRISA` `0x08`. Confirmed in
-simulation (§6.1).
+Expected steady-state `TRISIO` is therefore `0x28` (GP0–GP2 and GP4 outputs;
+GP3 and GP5 inputs), the direct analogue of the 322's exact-`TRISA` `0x08`.
+GP4 follows the project's parked-spare policy: its direction, SRAM shadow,
+physical pin level, and `ANSEL.ANS3` setting are guarded, and the board must
+leave it unconnected or attach only a load safe while driven low. GP3 cannot be
+parked in firmware because it is input-only and has no `WPU3`; the board must
+provide an external pull-up compatible with ICSP/VPP programming.
 
-The two spare pins are worth noting as a genuine advantage of this part — GP4 in
-particular is a free bidirectional pin — but nothing in the current design uses
-them, and the exact-`TRISIO` gate must decide explicitly what it expects of them
-rather than leaving them unconstrained.
+The two spare pins remain available only by changing the hardware contract and
+firmware together. The reference design deliberately constrains them rather
+than leaving floating digital inputs: GP3 is externally pulled high and GP4 is
+parked low.
 
 **In-circuit programming parity.** The LED lands on `ICSPDAT` and the first
 control pin on `ICSPCLK`, with `Vpp` on the input-only pin. That is exactly the
@@ -656,18 +660,19 @@ On the PIC10F322 the only analog encroachment is `ANSELA`. On the PIC12F675 ther
 are three:
 
 - **`CMCON`** — the comparator is **on out of reset** and takes GP0, GP1 and GP2,
-  which are exactly the three output pins. `CMCON = 0x07` (`CM<2:0> = 111`,
+  which are exactly the three active output pins. `CMCON = 0x07` (`CM<2:0> = 111`,
   comparator off) is mandatory in init, and is a new guarded SFR.
-- **`ANSEL`** — clears the analog selects for GP0/GP1/GP2/GP4. Note it *also*
-  carries `ADCS<2:0>` in bits 6:4, so a masked comparison is required; a bare
-  equality check against `0x00` would be checking ADC clock-select bits that no
-  longer matter.
+- **`ANSEL`** — clears and guards `ANS0..ANS3` for GP0/GP1/GP2/GP4. GP4 is GPIO
+  bit 4 but `ANS3` is ANSEL bit 3, so the GPIO output mask cannot be reused for
+  this comparison. ANSEL also carries `ADCS<2:0>` in bits 6:4, which do not
+  matter with the ADC off.
 - **`ADCON0.ADON`** — must be 0, and is worth guarding for the same reason
   `CMCON` is.
 
 Each of these is a single-event-upset path to "the firmware still thinks it owns
-GP0–GP2 but the analog peripheral has taken them". The 322 has one such path;
-this part has three.
+a digital output but an analog peripheral has taken it". CMCON affects the three
+active outputs; ANSEL also covers parked GP4 through ANS3. The 322 has one such
+path; this part has three.
 
 ### 4.7 CONFIG word
 
@@ -700,10 +705,10 @@ Putting §4.1–§4.7 together, the per-tick sanity gate for this part would gua
 
 | Guarded item | PIC10F322 counterpart | Status |
 |---|---|---|
-| Exact `TRISIO` (`& 0x3F`, expect `0x38`) | exact `TRISA` (`& 0x0F`, expect `0x08`) | ported |
+| Exact `TRISIO` (`& 0x3F`, expect `0x28`) | exact `TRISA` (`& 0x0F`, expect `0x08`) | ported; GP4 parked low |
 | Output shadow vs expected mask | `LATA` vs expected mask | ported |
 | Physical `GPIO` vs shadow | — | **new** (§4.2) |
-| `ANSEL & BYPASS_OUTPUT_DDR_MASK == 0` | `ANSELA & mask == 0` | ported, masked differently |
+| `ANSEL & 0x0F == 0` | `ANSELA & mask == 0` | ported; ANS3 maps to GPIO GP4 |
 | `CMCON & 0x07 == 0x07` | — | **new** (§4.6) |
 | `ADCON0.ADON == 0` | — | **new** (§4.6) |
 | `WPU & 0x37` exactly `1 << FOOTSW_PIN` | `WPUA & 0x0F` exactly `1 << FOOTSW_PIN` | ported, mask excludes the absent bit 3 |
@@ -758,7 +763,7 @@ XC8-compiled image of the **modular** firmware (real core, real
 `asynchronous_stimulus`:
 
 ```
-INIT_BYPASS     gpio=0x00   trisio=0x38     (GP0-GP2 outputs, GP3-GP5 inputs)
+INIT_BYPASS     gpio=0x00   trisio=0x28     (GP0-GP2/GP4 outputs, GP3/GP5 inputs)
 ENGAGED         gpio=0x03   (LED + CD4053 control high after a debounced press)
 STILL_ENGAGED   gpio=0x23   (state latched across release; GP5 high = released)
 BYPASS_AGAIN    gpio=0x00   (toggled back on the second press)
@@ -770,7 +775,7 @@ running on simulated PIC12F675 silicon. Confirmed modelled along the way:
 | Capability | Needed by | Evidence |
 |---|---|---|
 | Weak pull-ups (`WPU` + `nGPPU`) | fault, io, lockstep, soak, gpsim CLI | with no stimulus attached, `GPIO` read `0x20` — GP5 pulled high by the internal pull-up alone |
-| `TRISIO` direction | io, fault | `trisio=0x38` as configured |
+| `TRISIO` direction | io, fault | `trisio=0x28` as configured; parked GP4 remains an output |
 | TMR0 / `INTCON.T0IF` tick | every lane | the debounce reached threshold and toggled on schedule |
 | **WDT reset** | fault (the whole lane), soak | starved watchdog reset at **cycle 288,039** = 288.0 ms at 1 MIPS = exactly 18 ms × 16 with `PSA=1, PS=1:16` |
 | Register reads at absolute addresses | fault, io, lockstep | `x gpio` / `x trisio` / `x wpu` / `x option_reg` / `x osccal` all resolved |

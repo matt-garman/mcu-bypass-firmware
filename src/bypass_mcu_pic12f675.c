@@ -39,7 +39,8 @@
 //   WDTE=ON      watchdog cannot be disabled by software (EMI/SEU resilience);
 //                period set to ~288ms via OPTION_REG PSA/PS at runtime
 //   PWRTE=ON     power-up timer: let the supply settle before code runs
-//   MCLRE=OFF    GP3 is a digital input (an unused spare); MCLR tied to VDD
+//   MCLRE=OFF    GP3 is a digital spare input with an external ICSP-safe
+//                pull-up; MCLR tied internally to VDD
 //   BOREN=ON     brown-out reset enabled
 //   CP=OFF       no program-memory code protection
 //   CPD=OFF      no data-EEPROM code protection (the 128B EEPROM is unused;
@@ -91,7 +92,12 @@
 // Implemented-bit masks. This part has 6 I/O (GP0..GP5) so the port registers
 // carry 6 implemented bits, unlike the PIC10F322's 4.
 #define GPIO_IMPLEMENTED_MASK  (0x3FU) // GP0..GP5
-#define WPU_IMPLEMENTED_MASK   (0x37U) // GP0,GP1,GP2,GP4,GP5 -- GP3 has NO pull-up
+#define WPU_IMPLEMENTED_MASK   (0x37U) // GP0,GP1,GP2,GP4,GP5 (GP3 has NO pull-up)
+
+// ANSEL bit positions match GPIO for GP0..GP2, but ANS3 controls GP4:
+// GPIO bit 4 therefore maps to ANSEL bit 3. All four output-capable analog pins
+// must remain digital now that spare GP4 is a parked output.
+#define ANSEL_OUTPUT_MASK      (0x0FU) // ANS0..ANS3 = GP0,GP1,GP2,GP4
 
 // OPTION_REG, written as a whole and checked exactly. It carries THREE
 // safety-relevant fields on this part, where the PIC10F322 spreads the same
@@ -109,8 +115,9 @@
 #define TMR0_SUBTICKS_PER_TICK (4U)
 
 // CMCON = 0x07 -> CM<2:0> = 111 = comparator OFF. MANDATORY: the comparator is
-// ON out of reset (CM<2:0> = 000) and owns GP0, GP1 and GP2 -- which are
-// exactly this design's three output pins.
+// ON out of reset (CM<2:0> = 000) and owns GP0, GP1 and GP2 - which are
+// exactly this design's three active output pins. Parked GP4 has no
+// comparator function.
 #define CMCON_COMPARATOR_OFF   (0x07U)
 
 // ADCON0 = 0x00 -> ADON = 0, ADC off.
@@ -179,8 +186,8 @@ void hw_pin_set_low(uint8_t const pin) {
 // configure exactly the pins in output_mask as outputs (TRISIO bit = 0); all
 // other pins are left as inputs (TRISIO bit = 1). The selected pins are made
 // digital (ANSEL bit = 0, comparator and ADC off) and driven low (shadow and
-// GPIO bit = 0). GP3 is input-only and always remains an input (its TRISIO bit
-// reads 1).
+// GPIO bit = 0). GP4 is therefore parked low with the active outputs. GP3 is
+// input-only and always remains an input (its TRISIO bit reads 1).
 //
 // The comparator/ADC disable belongs HERE and not only in hw_mcu_init()
 // because on this part "make these pins digital" genuinely requires it: with
@@ -190,7 +197,8 @@ void hw_pin_set_low(uint8_t const pin) {
 void hw_configure_output_pins(uint8_t const output_mask) {
     CMCON  = CMCON_COMPARATOR_OFF;                       // comparator off: releases GP0..GP2
     ADCON0 = ADCON0_ADC_OFF;                             // ADC off
-    ANSEL &= (uint8_t)~output_mask;                      // selected pins -> digital
+    // Do not mask ANSEL with output_mask: GPIO bit 4 maps to ANSEL bit 3.
+    ANSEL &= (uint8_t)~ANSEL_OUTPUT_MASK;                // GP0..GP2/GP4 -> digital
     gpio_shadow_ &= (uint8_t)~output_mask;               // selected pins -> low (shadow)
     GPIO   = gpio_shadow_;                               // ... and on the port
     TRISIO = (uint8_t)((uint8_t)~output_mask & GPIO_IMPLEMENTED_MASK);
@@ -203,10 +211,9 @@ void hw_configure_output_pins(uint8_t const output_mask) {
 // bit is still 0), the output shadow matches the expected state, AND the
 // physical port still follows the shadow.
 //
-// Exact TRISIO protects GP0..GP2 as outputs (including the spare low-driven
-// pin on the simple-CD4053 variant) and GP3/GP4/GP5 as inputs, so the expected
-// value is the six implemented direction bits minus the configured outputs
-// (0x3F ^ 0x07 = 0x38).
+// Exact TRISIO protects GP0..GP2 and parked-spare GP4 as outputs, and GP3/GP5
+// as inputs. The expected value is the six implemented direction bits minus
+// the configured outputs (0x3F ^ 0x17 = 0x28).
 //
 // The shadow-vs-port comparison is STRONGER than anything the PIC10F322 can
 // do. The 322 compares its LATA latch against the expected mask and stops
@@ -218,7 +225,7 @@ uint8_t hw_output_state_intact(
         uint8_t const expected_high_mask) {
 
     uint8_t expected_direction_mask =
-        (uint8_t)(GPIO_IMPLEMENTED_MASK ^ BYPASS_OUTPUT_DDR_MASK); // = 0x38
+        (uint8_t)(GPIO_IMPLEMENTED_MASK ^ BYPASS_OUTPUT_DDR_MASK); // = 0x28
     uint8_t actual_direction_mask = (uint8_t)(TRISIO & GPIO_IMPLEMENTED_MASK);
     uint8_t shadow_high_mask =
         (uint8_t)(gpio_shadow_ & (uint8_t)BYPASS_OUTPUT_DDR_MASK);
@@ -247,18 +254,18 @@ static uint8_t hw_critical_sfrs_intact(void) {
     // safety-relevant -- and one exact comparison covers all of it.
     //
     // CMCON: the comparator is ON out of reset and owns GP0..GP2, this
-    // design's three output pins. CM<2:0> = 111 is the off state. Only the low
-    // three bits are checked: COUT (6) and CINV (4) are not meaningful with
-    // the comparator disabled.
+    // design's three active output pins. CM<2:0> = 111 is the off state.
+    // Only the low three bits are checked: COUT (6) and CINV (4) are not
+    // meaningful with the comparator disabled.  (Parked GP4 has no
+    // comparator function.)
     //
     // ADCON0.ADON: same class of hazard as CMCON -- an upset that turns the
     // ADC on takes an output pin analog.
     //
-    // ANSEL: masked to the OUTPUT pins (ANS0..ANS2 = GP0..GP2). A bare
-    // equality against 0x00 would also be asserting ADCS<2:0> in bits 6:4,
-    // which are ADC clock-select bits that no longer matter with ADON=0.
-    // ANS3 (GP4) is deliberately NOT checked: GP4 is an unused spare input, so
-    // an upset re-analogizing it has no effect on this design.
+    // ANSEL: masked to ANS0..ANS3, which select GP0, GP1, GP2 and GP4. GP4 is
+    // now a parked output, so ANS3 must remain clear and guarded. This cannot
+    // use BYPASS_OUTPUT_DDR_MASK directly because GPIO bit 4 maps to ANSEL bit
+    // 3. Bits 6:4 are ADC clock-select fields and do not matter with ADON=0.
     //
     // OSCCAL: compared against the value captured at init, not a constant --
     // it is factory trim (see osccal_snapshot_).
@@ -266,7 +273,7 @@ static uint8_t hw_critical_sfrs_intact(void) {
     uint8_t option  = (uint8_t)OPTION_REG;
     uint8_t cmcon   = (uint8_t)(CMCON & 0x07U);
     uint8_t adon    = (uint8_t)ADCON0bits.ADON;
-    uint8_t ansel   = (uint8_t)(ANSEL & BYPASS_OUTPUT_DDR_MASK); // 0 = output pins still digital
+    uint8_t ansel   = (uint8_t)(ANSEL & ANSEL_OUTPUT_MASK);
     uint8_t osccal  = (uint8_t)OSCCAL;
 
     return
@@ -366,17 +373,19 @@ static void hw_wdt_pet(void) { CLRWDT(); }
 // program word 0x3FF.
 static void hw_mcu_init(void) {
 
-    // entire port digital. THREE registers, where the PIC10F322 has one: the
-    // comparator (on out of reset, owning GP0..GP2), the ADC, and the analog
-    // selects. Each is an independent single-event-upset path to "the firmware
-    // still thinks it owns GP0..GP2 but an analog peripheral has taken them",
-    // and each is guarded per tick in hw_critical_sfrs_intact().
+    // entire port digital. THREE registers, where the PIC10F322 has one:
+    // the comparator (on out of reset, owning GP0..GP2), the ADC, and the
+    // analog selects. Each is an independent single-event-upset path to
+    // "the firmware still thinks it owns a digital output but an analog
+    // peripheral has taken it", and each is guarded per tick in
+    // hw_critical_sfrs_intact().
     CMCON  = CMCON_COMPARATOR_OFF; // CM<2:0> = 111: comparator off
     ADCON0 = ADCON0_ADC_OFF;       // ADON = 0
     ANSEL  = 0x00U;                // ANS0..ANS3 digital (also zeroes ADCS, unused)
 
-    // enable the footswitch (GP5) input pull-up; FOOTSW_PIN high = released,
-    // low = pressed. (Belt-and-suspenders alongside any external pull-up.)
+    // Enable the footswitch (GP5) input pull-up; FOOTSW_PIN high = released,
+    // low = pressed. GP3's required pull-up is external because WPU3 does not
+    // exist. GP4 is an output and therefore receives no pull-up latch.
     WPU = (uint8_t)(1U << FOOTSW_PIN);
 
     // One write configures the global pull-up enable, the TMR0 clock source
@@ -454,8 +463,8 @@ static debounce_context_t ctx_;
 // called at power-on, and after a reset (e.g. brown-out or watchdog timeout)
 static void init(void) {
 
-    // pin-map sanity: the PIC pin map hard-codes GPIO bit positions as literals
-    // (0U,1U,2U,5U). Pin them at compile time against the DFP's _GPIO_GPx_POSN
+    // pin-map sanity: the PIC pin map hard-codes GPIO bit positions as literals.
+    // Pin them at compile time against the DFP's _GPIO_GPx_POSN
     // so a typo in the map or a DFP change can never silently misroute a pin
     // (parity with the AVR shell's PBx asserts).
     static_assert(FOOTSW_PIN      == _GPIO_GP5_POSN, "FOOTSW_PIN must be GP5");
@@ -465,6 +474,17 @@ static void init(void) {
     static_assert(RELAY_SET_PIN   == _GPIO_GP2_POSN, "RELAY_SET_PIN must be GP2");
     static_assert(CD4053_CTL1     == _GPIO_GP1_POSN, "CD4053_CTL1 must be GP1");
     static_assert(CD4053_CTL2     == _GPIO_GP2_POSN, "CD4053_CTL2 must be GP2");
+    static_assert(SPARE_INPUT_PIN == _GPIO_GP3_POSN,
+        "SPARE_INPUT_PIN must be input-only GP3");
+    static_assert(SPARE_OUTPUT_PIN == _GPIO_GP4_POSN,
+        "SPARE_OUTPUT_PIN must be GP4");
+
+    static_assert(0U == ((1U << SPARE_INPUT_PIN) & WPU_IMPLEMENTED_MASK),
+        "SPARE_INPUT_PIN must use the external pull-up because GP3 has no WPU");
+    static_assert(0U == ((1U << SPARE_INPUT_PIN) & BYPASS_OUTPUT_DDR_MASK),
+        "SPARE_INPUT_PIN must remain an input");
+    static_assert(0U != ((1U << SPARE_OUTPUT_PIN) & BYPASS_OUTPUT_DDR_MASK),
+        "SPARE_OUTPUT_PIN must be a guarded low-driven output");
 
     // The footswitch pin must be one the silicon can weakly pull up. GP3 has no
     // WPU bit on this part, which is exactly why the map differs from the

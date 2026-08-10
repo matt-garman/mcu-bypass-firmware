@@ -25,7 +25,7 @@ static void sfr_clean(void) {
 #if defined(BYPASS_MCU_PIC12F675)
     fwp_set_output_state(0u, 0u);
     fwp_set_footswitch(0);
-    TRISIO = 0x38u;
+    TRISIO = 0x28u;
     ANSEL = 0u;
     WPU = 0x20u;
     OPTION_REG = 0x0cu;
@@ -53,7 +53,7 @@ static void sfr_clean(void) {
 static void test_predicates(void) {
 #if defined(BYPASS_MCU_PIC12F675)
     sfr_clean();
-    CHECK(fwp_output_state_intact(0x07u, 0x00u) != 0,
+    CHECK(fwp_output_state_intact(0x17u, 0x00u) != 0,
           "clean outputs should be intact and low");
     CHECK(fwp_sanity_failed(BYPASS) == 0,
           "clean bypass output configuration should pass");
@@ -80,9 +80,9 @@ static void test_predicates(void) {
     CHECK(fwp_sanity_failed(BYPASS) != 0,
           "GP2 input must fail every variant's output sanity");
 
-    sfr_clean(); TRISIO &= (uint8_t)~0x10u;
+    sfr_clean(); TRISIO |= 0x10u;
     CHECK(fwp_sanity_failed(BYPASS) != 0,
-          "spare GP4 output must fail exact direction sanity");
+          "parked GP4 input must fail exact direction sanity");
     sfr_clean(); TRISIO &= (uint8_t)~0x20u;
     CHECK(fwp_sanity_failed(BYPASS) != 0,
           "footswitch GP5 output must fail exact direction sanity");
@@ -93,6 +93,8 @@ static void test_predicates(void) {
     CHECK(fwp_sanity_failed(BYPASS) != 0, "GP1 shadow high must fail bypass sanity");
     sfr_clean(); fwp_set_output_state(0x04u, 0x00u);
     CHECK(fwp_sanity_failed(BYPASS) != 0, "GP2 shadow high must fail bypass sanity");
+    sfr_clean(); fwp_set_output_state(0x10u, 0x00u);
+    CHECK(fwp_sanity_failed(BYPASS) != 0, "parked GP4 shadow high must fail bypass sanity");
 
     sfr_clean(); fwp_set_output_state(0x00u, 0x01u);
     CHECK(fwp_sanity_failed(BYPASS) != 0, "physical GP0 divergence must fail sanity");
@@ -100,6 +102,8 @@ static void test_predicates(void) {
     CHECK(fwp_sanity_failed(BYPASS) != 0, "physical GP1 divergence must fail sanity");
     sfr_clean(); fwp_set_output_state(0x00u, 0x04u);
     CHECK(fwp_sanity_failed(BYPASS) != 0, "physical GP2 divergence must fail sanity");
+    sfr_clean(); fwp_set_output_state(0x00u, 0x10u);
+    CHECK(fwp_sanity_failed(BYPASS) != 0, "physical GP4 divergence must fail sanity");
 
     sfr_clean();
 #if defined(CD4053_SIMPLE)
@@ -141,6 +145,8 @@ static void test_predicates(void) {
     CHECK(fwp_critical_sfrs_intact() == 0, "GP1 analog select must fail critical SFRs");
     sfr_clean(); ANSEL |= 0x04u;
     CHECK(fwp_critical_sfrs_intact() == 0, "GP2 analog select must fail critical SFRs");
+    sfr_clean(); ANSEL |= 0x08u;
+    CHECK(fwp_critical_sfrs_intact() == 0, "parked GP4 analog select must fail critical SFRs");
     sfr_clean(); OSCCAL ^= 0x04u;
     CHECK(fwp_critical_sfrs_intact() == 0, "OSCCAL skew must fail critical SFRs");
 
@@ -227,7 +233,7 @@ static void test_faults(void) {
     expect_no_reset(FWI_NONE, "clean state");
     CHECK(WPU == 0x20u, "init must replace WPU reset state with GP5-only");
     CHECK(OPTION_REG == 0x0cu, "init must configure the exact timer/WDT/pull-up byte");
-    CHECK(TRISIO == 0x38u, "init must configure exact GP0..GP2 outputs");
+    CHECK(TRISIO == 0x28u, "init must configure GP0..GP2/GP4 outputs exactly");
     CHECK(CMCON == 0x07u, "init must disable the comparator");
     CHECK(OSCCAL == 0x80u, "init must preserve the oscillator calibration value");
     expect_no_reset(FWI_VALID_ENGAGED, "valid engaged state");
@@ -243,20 +249,23 @@ static void test_faults(void) {
     expect_reset(FWI_GP0_PIN_TO_INPUT, "GP0 direction fault");
     expect_reset(FWI_GP1_PIN_TO_INPUT, "GP1 direction fault");
     expect_reset(FWI_GP2_PIN_TO_INPUT, "GP2 direction fault");
-    expect_reset(FWI_GP4_PIN_TO_OUTPUT, "GP4 direction fault");
+    expect_reset(FWI_GP4_PIN_TO_INPUT, "parked GP4 direction fault");
     expect_reset(FWI_GP5_PIN_TO_OUTPUT, "GP5 direction fault");
     expect_reset(FWI_SHADOW_GP0_HIGH, "GP0 shadow-latch fault");
     expect_reset(FWI_SHADOW_GP1_HIGH, "GP1 shadow-latch fault");
     expect_reset(FWI_SHADOW_GP2_HIGH, "GP2 shadow-latch fault");
+    expect_reset(FWI_SHADOW_GP4_HIGH, "parked GP4 shadow-latch fault");
     expect_reset(FWI_GPIO_GP0_HIGH, "physical GP0 divergence");
     expect_reset(FWI_GPIO_GP1_HIGH, "physical GP1 divergence");
     expect_reset(FWI_GPIO_GP2_HIGH, "physical GP2 divergence");
+    expect_reset(FWI_GPIO_GP4_HIGH, "physical GP4 divergence");
     expect_reset(FWI_OPTION_REG_SKEW, "OPTION_REG configuration fault");
     expect_reset(FWI_CMCON_SKEW, "comparator configuration fault");
     expect_reset(FWI_ADCON0_ADON_SET, "ADC enable fault");
     expect_reset(FWI_ANSEL_SKEW_GP0, "GP0 analog-selection fault");
     expect_reset(FWI_ANSEL_SKEW_GP1, "GP1 analog-selection fault");
     expect_reset(FWI_ANSEL_SKEW_GP2, "GP2 analog-selection fault");
+    expect_reset(FWI_ANSEL_SKEW_GP4, "parked GP4 analog-selection fault");
     expect_reset(FWI_OSCCAL_SKEW, "oscillator calibration fault");
     CHECK(fw_fault_run(FWI_HARNESS_STALL) == -1,
           "timeout outside the reset path must be a harness error, not a reset");
@@ -330,9 +339,9 @@ int main(void) {
     test_happy_path();
     test_pure_fault_path();
 #if defined(BYPASS_MCU_PIC12F675)
-    if (g_checks != 78) {
+    if (g_checks != 84) {
         g_failures++;
-        fprintf(stderr, "FAIL: PIC12F675 coverage harness ran %d checks, expected 78\n",
+        fprintf(stderr, "FAIL: PIC12F675 coverage harness ran %d checks, expected 84\n",
                 g_checks);
     }
 #else

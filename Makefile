@@ -2765,7 +2765,7 @@ test-supply-chain:
 	./test/test_supply_chain.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 36/75/47
+# image/host rebuild triggering. The script enforces the canonical 36/75/48
 # counts, so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
@@ -5367,7 +5367,7 @@ pic12f675-test-stack-bound: pic12f675
 #      and the tick is 1024 cycles rather than 1 ms, so every checkpoint is
 #      re-derived on tick boundaries -- not scaled from the 322's numbers.
 # The part's REGISTER IDENTITY (GPIO for both port and latch, GP5 footswitch,
-# GP0 LED, 0x07 output mask) rides in on PIC_GPSIM_REGS so the two shared
+# GP0 LED, 0x17 output mask including parked GP4) rides in on PIC_GPSIM_REGS so the two shared
 # wrappers need no per-part branch.
 PIC12F675_GPSIM_PROC       ?= p12f675
 PIC12F675_GPSIM_REGS       ?= test/pic/pic12f675_gpsim_regs.sh
@@ -5619,7 +5619,8 @@ $(PIC12F675_FAULT_BIN): $(PIC12F675_FAULT_SRC) $(PIC_TARGET_FAULT_CORE_HDR) \
 
 .PHONY: pic12f675-test-fault
 pic12f675-test-fault: variant-selectors-valid pic12f675-simcal
-	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
+	@$(pic12f675_simcal_matrix_sh); \
+	if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
 		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC12F675 fault-inject"; $(SKIP); \
 	fi; \
 	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
@@ -5646,7 +5647,7 @@ pic12f675-test-fault: variant-selectors-valid pic12f675-simcal
 	shadow_addr=`awk '$$1=="_gpio_shadow_"{print $$2; exit}' "$(PIC12F675_FAULT_SYM)" 2>/dev/null`; \
 	if [ -z "$$shadow_addr" ]; then \
 		echo "FAIL: _gpio_shadow_ symbol not found in $(PIC12F675_FAULT_SYM)."; \
-		echo "      This part has no output-latch SFR, so the shadow IS the latch: the six"; \
+		echo "      This part has no output-latch SFR, so the shadow IS the latch: the eight"; \
 		echo "      output injections have nothing to corrupt without its address."; \
 		exit 1; \
 	fi; \
@@ -5665,9 +5666,10 @@ pic12f675-test-fault: variant-selectors-valid pic12f675-simcal
 # bits, which the build must leave ERASED because they are factory trim the
 # programmer preserves (the CONFIG-word sibling of the OSCCAL story below). And
 # FOSC widens from one bit to three, which promotes it to a design-intent check:
-# six of the eight settings hand GP4 and/or GP5 to an oscillator, and GP5 is the
-# footswitch, so a wrong oscillator selection removes the only input this device
-# has -- a failure mode the single-bit 10F32x FOSC simply cannot have.
+# seven of the eight settings hand GP4 and/or GP5 to an oscillator. Six claim
+# footswitch GP5; the remaining one claims parked-output GP4. Only INTRCIO
+# preserves both declared pin roles, a constraint the single-bit 10F32x FOSC
+# simply cannot express.
 test/pic/test_config_pic12f675: test/pic/test_config_pic12f675.c $(PIC_CONFIG_CORE_HDR) $(PIC12F675_CONFIG_HDR)
 	$(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) -Itest -DPIC_DEVICE_NAME='"PIC$(PIC12F675_CHIP)"' $< -o $@
 
@@ -5708,7 +5710,7 @@ pic12f675-test-config: pic12f675 test/pic/test_config_pic12f675
 # it records: gpsim gives the OSCCAL *register* its 0x80 reset value whether or
 # not the flash word exists, so "OSCCAL reads 0x80" does NOT distinguish a
 # working image from one looping on the missing word. The distinguishing evidence
-# is that the shell's init ran at all (OPTION_REG 0x0C, CMCON 0x07, TRISIO 0x38).
+# is that the shell's init ran at all (OPTION_REG 0x0C, CMCON 0x07, TRISIO 0x28).
 PIC12F675_CAL_INJECTOR ?= test/pic/inject_calibration_word.py
 PIC12F675_CAL_VALUE    ?= 0x80
 # Not independently caller-overridable: simulator images must stay in this

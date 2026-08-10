@@ -108,14 +108,14 @@ static void pic_config_check_fields(uint16_t impl) {
 // The set is NOT the PIC10F32x's set with the names changed:
 //   WDTE=ON     : same reason -- hw_force_wdt_reset() needs the WDT.
 //   FOSC=INTRCIO: NEW. On the 10F32x, FOSC is one bit and the footswitch pin is
-//                 never at stake. Here six of eight settings hand GP4 and/or GP5
-//                 to an oscillator, and GP5 IS the footswitch -- so a wrong
-//                 oscillator silently removes the only input the device has.
+//                 never at stake. Here seven of eight settings hand GP4 and/or
+//                 GP5 to an oscillator: six claim footswitch GP5, and the other
+//                 claims parked-output GP4. Only INTRCIO preserves both roles.
 //   MCLRE=OFF   : same bit, DIFFERENT reason. On the 10F32x, MCLRE=ON steals RA3,
 //                 which is that part's footswitch. Here the footswitch is GP5 and
-//                 MCLRE governs GP3, so what MCLRE=ON costs is the internal MCLR
-//                 tie to VDD -- the part would then need an external pull-up that
-//                 this design does not fit, leaving reset floating.
+//                 MCLRE governs GP3. The reference board gives GP3 an ICSP-safe
+//                 external pull-up, but its declared role is a digital spare input;
+//                 MCLRE=ON would silently turn it into the reset input instead.
 //   BOREN=ON    : same reason -- brown-out protection during actuation.
 // -------------------------------------------------------------------------
 static void pic_config_check_intent(uint16_t impl) {
@@ -123,13 +123,11 @@ static void pic_config_check_intent(uint16_t impl) {
           "DESIGN INTENT: the watchdog MUST be enabled (WDTE=ON) -- the firmware's "
           "fault recovery relies on a WDT reset; WDTE=OFF would hang forever.");
     CHECK((impl & FOSC_MASK) == FOSC_INTRCIO,
-          "DESIGN INTENT: FOSC MUST be INTRCIO so GP5 stays a digital I/O pin -- it "
-          "carries the footswitch; every other internal/external clock setting "
-          "claims GP5 or GP4 and removes the only input this device has.");
+          "DESIGN INTENT: FOSC MUST be INTRCIO so GP5 and GP4 remain digital I/O -- "
+          "GP5 carries the footswitch and GP4 is the guarded low-driven spare.");
     CHECK((impl & MCLRE_MASK) == MCLRE_OFF,
-          "DESIGN INTENT: MCLRE MUST be OFF so MCLR is tied internally to VDD; "
-          "MCLRE=ON turns GP3 into an external reset pin that this design fits no "
-          "pull-up for, leaving reset floating.");
+          "DESIGN INTENT: MCLRE MUST be OFF so GP3 remains the externally pulled-up "
+          "digital spare input rather than becoming an external reset input.");
     CHECK((impl & BOREN_MASK) == BOREN_ON,
           "DESIGN INTENT: brown-out reset MUST be enabled (BOREN=ON).");
 }

@@ -61,14 +61,11 @@
 // phantom resets and the gate does not fire spuriously.
 //
 // Whether any OTHER delta == 0 case exists is the matrix's call, not this
-// core's, and the two families answer differently. On the 10F32x parts every
-// injection is a guarded fault expecting exactly one reset, identically on all
-// three variants -- the exact-direction port took away the last negative
-// control, cd4053_simple's spare third output pin, by bringing it inside the
-// guard. The PIC12F675 matrix reintroduces one, because that firmware
-// deliberately leaves ANSEL.ANS3 unchecked (GP4 is an unused spare input) and a
-// zero-expectation case is how a deliberate non-guard gets pinned rather than
-// assumed.
+// core's. Every current part now guards every injected location: the exact
+// direction/output checks brought each spare output inside the policy, including
+// PIC12F675 GP4 and its non-isomorphic ANSEL.ANS3 mapping. The zero-expectation
+// support remains because a future deliberate non-guard must be pinned rather
+// than assumed.
 //
 // CORRUPTION VALUES are chosen so the main loop keeps running and the GATE is
 // the sole reset path. That confound analysis is per-register and therefore

@@ -25,9 +25,10 @@
 //      all: its LATA-vs-PORTA comparison is two views of one latch. The
 //      injections that exercise it are the adapter's, beside the shadow ones,
 //      because output-latch policy is the core's per-PART hook.
-//   2. TWO SPARE INPUTS CAN BE FLIPPED TO OUTPUTS. The exact-TRISIO gate covers
-//      all six implemented direction bits; the 322's port has four, three of
-//      them outputs and the fourth input-only, so there was nothing to flip.
+//   2. PARKED GP4 IS GUARDED IN FOUR INDEPENDENT WAYS. It must remain an output,
+//      its shadow and physical pin must remain low, and ANSEL.ANS3 must remain
+//      clear. GP3 is the externally pulled-up input-only spare; gpsim cannot
+//      model its board resistor, and silicon fixes its direction bit at one.
 //   3. ONE BYTE CARRIES THREE SAFETY FIELDS. OPTION_REG holds the watchdog
 //      period, the tick clock source and the global pull-up enable, where the
 //      322 spreads them across WDTCON, T2CON/PR2 and OPTION. One exact
@@ -93,9 +94,9 @@
 #define PIC_REG_OSCCAL_ADDR  0x090u  // factory trim, snapshotted at init
 
 // ---- Output directions (hw_output_state_intact, via hw_is_sanity_check_failed)
-// The gate compares TRISIO exactly against 0x38, so this covers both
-// directions of upset: an output pin that stops being one, and a spare input
-// that starts driving. All five implemented flippable bits are injected; GP3 is
+// The gate compares TRISIO exactly against 0x28, so this covers both directions
+// of upset: GP0..GP2 or parked GP4 stopping being outputs, and footswitch GP5
+// starting to drive. All five implemented flippable bits are injected; GP3 is
 // the excluded sixth, for the reason in the header comment.
 #define PIC_FAULT_DIRECTION_INJECTIONS() do { \
     inject_case("TRISIO.GP0", PIC_REG_TRIS_ADDR, PIC_REG_TRIS_TOKEN, false, 0x01, 1, \
@@ -105,7 +106,7 @@
     inject_case("TRISIO.GP2", PIC_REG_TRIS_ADDR, PIC_REG_TRIS_TOKEN, false, 0x04, 1, \
                 "GP2 changed from output to input"); \
     inject_case("TRISIO.GP4", PIC_REG_TRIS_ADDR, PIC_REG_TRIS_TOKEN, false, 0x10, 1, \
-                "GP4 spare input started driving: exact-TRISIO violation"); \
+                "GP4 parked output changed to input: exact-TRISIO violation"); \
     inject_case("TRISIO.GP5", PIC_REG_TRIS_ADDR, PIC_REG_TRIS_TOKEN, false, 0x20, 1, \
                 "GP5 footswitch input started driving against the switch"); \
 } while (0)
@@ -118,10 +119,8 @@
 // PS lengthens the watchdog rather than shortening it, which keeps the
 // injection clear of the starvation confound at the other end.
 //
-// The ANSEL cases mask to the OUTPUT pins, matching the firmware. ANS3 is the
-// negative control: GP4 is an unused spare input, so the gate deliberately does
-// NOT check it, and this case pins that decision. If a later firmware widens
-// the mask to 0x0F, this is the case that fails and says so.
+// The ANSEL cases cover all four analog-capable outputs. ANS3 maps to GPIO GP4,
+// not GPIO bit 3; keeping it explicit pins the non-isomorphic register mapping.
 #define PIC_FAULT_CONFIG_INJECTIONS() do { \
     inject_case("OPTION.INTEDG", PIC_REG_OPTION_ADDR, PIC_REG_OPTION_TOKEN, false, 0x40, 1, \
                 "INTEDG 0->1: INT edge select skewed (else silent, INT unused)"); \
@@ -139,8 +138,8 @@
                 "ANS1=1: GP1 (control pin) re-selected analog, out of digital service"); \
     inject_case("ANSEL.ANS2",    PIC_REG_ANSEL_ADDR, PIC_REG_ANSEL_TOKEN, false, 0x04, 1, \
                 "ANS2=1: GP2 (control pin) re-selected analog, out of digital service"); \
-    inject_case("ANSEL.ANS3",    PIC_REG_ANSEL_ADDR, PIC_REG_ANSEL_TOKEN, false, 0x08, 0, \
-                "ANS3=1: GP4 spare re-analogized -- NOT guarded, and must not reset"); \
+    inject_case("ANSEL.ANS3",    PIC_REG_ANSEL_ADDR, PIC_REG_ANSEL_TOKEN, false, 0x08, 1, \
+                "ANS3=1: parked GP4 re-selected analog, out of digital service"); \
     inject_case("OSCCAL",        PIC_REG_OSCCAL_ADDR, "osccal", false, 0x01, 1, \
                 "trim drifted one step from the value init() snapshotted"); \
 } while (0)
@@ -161,7 +160,7 @@
     inject_case("WPU.GP2",      PIC_REG_WPU_ADDR, PIC_REG_WPU_TOKEN, false, 0x04, 1, \
                 "set GP2 output-pin pull-up latch: exact GP5-only mask violated"); \
     inject_case("WPU.GP4",      PIC_REG_WPU_ADDR, PIC_REG_WPU_TOKEN, false, 0x10, 1, \
-                "set GP4 spare-input pull-up latch: exact GP5-only mask violated"); \
+                "set parked-output GP4 pull-up latch: exact GP5-only mask violated"); \
     inject_case("OPTION.nGPPU", PIC_REG_OPTION_ADDR, PIC_REG_OPTION_TOKEN, false, 0x80, 1, \
                 "set nGPPU: global weak pull-ups disabled"); \
 } while (0)

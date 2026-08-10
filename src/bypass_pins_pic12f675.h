@@ -37,6 +37,15 @@
 #define FOOTSW_PIN      (5U) // GP5 (bidirectional, used as input) + weak pull-up
 #define LED_PIN         (0U) // GP0
 
+// Unused pins have explicit electrical policies:
+//   - GP3 is input-only and has no internal weak pull-up; the PCB must
+//     provide an external pull-up compatible with ICSP/VPP programming
+//   - GP4 is an unused output parked low; the board must leave it
+//     unconnected or connect it only to a load that is safe while driven
+//     low
+#define SPARE_INPUT_PIN  (3U) // GP3: externally pulled up, remains an input
+#define SPARE_OUTPUT_PIN (4U) // GP4: guarded output, always driven low
+
 // CD4053 simple
 #define CD4053_PIN      (1U) // GP1
 
@@ -49,21 +58,22 @@
 #define RELAY_SET_PIN   (2U)  // GP2
 
 
-// Bits that must be OUTPUTS (GP0|GP1|GP2). Same macro NAME as the AVR and
+// Bits that must be OUTPUTS (GP0|GP1|GP2|GP4). Same macro NAME as the AVR and
 // PIC10F322 maps (the shared drivers consume it); the value is the output-bit
 // set, interpreted by the per-MCU hw_configure_output_pins() (PIC: TRISIO bit
 // 0 = output). ("DDR" is legacy AVR wording, kept for a single cross-MCU macro
 // name.)
 //
-// All three variants use GP0..GP2:
+// All three variants use GP0..GP2 for their active outputs:
 //    tq2_l2_5v_relay = LED(GP0)/RESET(GP1)/SET(GP2)
 //    cd4053_with_mute = LED(GP0)/CTL1(GP1)/CTL2(GP2)
 //    cd4053_simple = LED(GP0)/CD4053(GP1),
-// leaving GP2 a spare driven low. Mask 0x07 for all.
+// leaving GP2 a spare driven low.
 //
-// GP3 (input-only) and GP4 are spares and remain inputs; the exact-TRISIO gate
-// in hw_output_state_intact() requires exactly that.
-#define BYPASS_OUTPUT_DDR_MASK (0x07U)  // GP0|GP1|GP2
+// GP4 is also a spare driven low, matching the project's existing unused-pin
+// policy. It is included in the exact-direction, shadow, physical-port and
+// analog-selection guards. GP3 and GP5 are the only inputs.
+#define BYPASS_OUTPUT_DDR_MASK (0x17U)  // GP0|GP1|GP2|GP4
 
 
 #endif // BYPASS_PINS_PIC12F675_H__

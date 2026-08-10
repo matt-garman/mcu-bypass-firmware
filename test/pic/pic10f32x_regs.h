@@ -55,6 +55,7 @@
 #define PIC_REG_ANSEL_ADDR   0x008u   // ANSELA: ANSA0..ANSA2 = RA0..RA2 analog select
 #define PIC_REG_ANSEL_NAME   "ANSELA"
 #define PIC_REG_ANSEL_TOKEN  "ansel"
+#define PIC_REG_ANSEL_MASK   0x07u
 
 // ---- Weak pull-ups ----------------------------------------------------------
 #define PIC_REG_WPU_ADDR     0x009u   // WPUA: per-pin weak-pull-up latch

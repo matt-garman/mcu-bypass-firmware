@@ -162,7 +162,7 @@ static void trace_cycles(IoTrace *trace, guint64 cycles, bool require_configured
         }
 
         unsigned const tris = reg8(g_tris) & PIC_REG_PORT_MASK;
-        unsigned const ansel = reg8(g_ansel) & OUTPUT_MASK;
+        unsigned const ansel = reg8(g_ansel) & PIC_REG_ANSEL_MASK;
         unsigned const latch = reg8(g_latch) & OUTPUT_MASK;
         unsigned const port = reg8(g_port) & OUTPUT_MASK;
 

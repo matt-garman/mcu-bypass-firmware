@@ -4,7 +4,7 @@
 // PIC12F675 adapter for the shared libgpsim fault-injection harness. 1024
 // program words, and an output "latch" that is not a register at all: this part
 // has no LATx, so the shell keeps gpio_shadow_ in SRAM and writes shadow ->
-// GPIO. The core's per-part output hook therefore injects SIX cases where the
+// GPIO. The core's per-part output hook therefore injects EIGHT cases where the
 // PIC10F322 injects three -- the shadow, and the physical port that must follow
 // it -- because the gate here compares the firmware's INTENT against the pins,
 // which is a fault class the 322 cannot see at all.
@@ -33,7 +33,7 @@
 #define PIC_FAULT_DEFAULT_PROC_NAME "p12f675"
 // 1024 words of flash, matching this part's budget in the Makefile.
 #define PIC_FAULT_PROGRAM_WORDS 0x400u
-#define PIC_FAULT_EXPECTED_CHECKS 35u
+#define PIC_FAULT_EXPECTED_CHECKS 36u
 // The shadow cases corrupt what the firmware MEANT to drive; the GPIO cases
 // corrupt what the pins actually are, leaving the shadow correct. Only the
 // port-follows-shadow clause of hw_output_state_intact() can explain a reset
@@ -46,12 +46,16 @@
                 "GP1 control/reset-coil shadow changed from low to high"); \
     inject_case("shadow.GP2", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x04, 1, \
                 "GP2 control/set-coil/spare shadow changed from low to high"); \
+    inject_case("shadow.GP4", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x10, 1, \
+                "parked GP4 shadow changed from low to high"); \
     inject_case("GPIO.GP0",   PIC_REG_PORT_ADDR,  PIC_REG_PORT_TOKEN,  false, 0x01, 1, \
                 "GP0 pin driven high with its shadow low: port stopped following"); \
     inject_case("GPIO.GP1",   PIC_REG_PORT_ADDR,  PIC_REG_PORT_TOKEN,  false, 0x02, 1, \
                 "GP1 pin driven high with its shadow low: port stopped following"); \
     inject_case("GPIO.GP2",   PIC_REG_PORT_ADDR,  PIC_REG_PORT_TOKEN,  false, 0x04, 1, \
                 "GP2 pin driven high with its shadow low: port stopped following"); \
+    inject_case("GPIO.GP4",   PIC_REG_PORT_ADDR,  PIC_REG_PORT_TOKEN,  false, 0x10, 1, \
+                "parked GP4 pin high with its shadow low: port stopped following"); \
 } while (0)
 #define PIC_FAULT_PROGRAM_STATE_NOTE \
     "0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault)"
