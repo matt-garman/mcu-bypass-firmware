@@ -7,8 +7,28 @@ CC=${HOSTCC:-cc}
 GCOV_TOOL=${GCOV:-gcov}
 COVERAGE_ROOT=${COVERAGE_DIR:-$ROOT/coverage}
 
+if [ "$#" -ne 1 ]; then
+    echo "usage: run_fw_coverage.sh <pic10f322|pic12f675>" >&2
+    exit 2
+fi
+device=$1
+case "$device" in
+    pic10f322)
+        device_flags=(-D_XTAL_FREQ=2000000UL -DBYPASS_MCU_PIC10F322)
+        shell_annotation=bypass_mcu_pic10f322.c.gcov
+        ;;
+    pic12f675)
+        device_flags=(-D_XTAL_FREQ=4000000UL -DBYPASS_MCU_PIC12F675)
+        shell_annotation=bypass_mcu_pic12f675.c.gcov
+        ;;
+    *)
+        echo "FAIL: unsupported PIC firmware coverage device: $device" >&2
+        exit 2
+        ;;
+esac
+
 mkdir -p "$COVERAGE_ROOT"
-work=$(mktemp -d "$COVERAGE_ROOT/pic-fw.XXXXXX")
+work=$(mktemp -d "$COVERAGE_ROOT/$device-fw.XXXXXX")
 cleanup() {
     if [ "${PIC_FW_COVERAGE_KEEP:-0}" = 1 ]; then
         echo "PIC firmware coverage artifacts kept at $work"
@@ -22,7 +42,7 @@ trap 'exit 1' HUP INT TERM
 common=(
     -std=c11 -O0 -Wall -Wextra -Werror -Wconversion
     -fshort-enums -funsigned-char --coverage
-    -D_XTAL_FREQ=2000000UL -DBYPASS_MCU_PIC10F322
+    "${device_flags[@]}"
     -I"$ROOT/test/pic/fw_coverage" -I"$ROOT/test" -I"$ROOT/src"
 )
 
@@ -65,10 +85,31 @@ for profile in pure shell_cd4053_simple driver_cd4053_simple \
 done
 
 annotations=(
-    "$work/bypass_mcu_pic10f322.c.gcov"
+    "$work/$shell_annotation"
     "$work/bypass_pure.c.gcov"
     "$work/bypass_output_cd4053_simple.c.gcov"
     "$work/bypass_output_cd4053_with_mute.c.gcov"
     "$work/bypass_output_tq2_l2_5v_relay.c.gcov"
 )
 "$ROOT/test/pic/fw_coverage/check_fw_coverage.sh" "${annotations[@]}"
+
+# The PIC12F675 oracle asserts more than line coverage: the res.fault reset call
+# must remain unreachable because the earlier context range gate dominates it.
+# Turn that exact gcov record into a covered line and require the unchanged
+# checker to reject the resulting contradiction.
+if [ "$device" = pic12f675 ]; then
+    probe_dir="$work/oracle-probe"
+    mkdir "$probe_dir"
+    probe="$probe_dir/$shell_annotation"
+    sed -E 's/^([[:space:]]*)#####([[:space:]]*:[[:space:]]*569:)/\1        1\2/' \
+        "$work/$shell_annotation" > "$probe"
+    if ! grep -Eq '^[[:space:]]*1:[[:space:]]*569:' "$probe"; then
+        echo "FAIL: PIC12F675 coverage-oracle probe did not alter source line 569" >&2
+        exit 1
+    fi
+    if "$ROOT/test/pic/fw_coverage/check_fw_coverage.sh" "$probe" >/dev/null 2>&1; then
+        echo "FAIL: PIC12F675 coverage oracle accepted a reachable res.fault reset call" >&2
+        exit 1
+    fi
+    echo "PIC12F675 coverage-oracle negative probe: PASS"
+fi
