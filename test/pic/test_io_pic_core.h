@@ -11,6 +11,13 @@
 // Register identity -- addresses, gpsim name tokens, printable names, masks and
 // expected init values -- is NOT here: the adapter includes its family's
 // pic*_regs.h (e.g. pic/pic10f32x_regs.h) and this file carries only mechanism.
+//
+// "Output latch" below means whatever holds the firmware's write intent: a LATx
+// SFR on a part that has one, or the shell's SRAM shadow on a part that does
+// not. The distinction is confined to two family macros -- the latch address
+// and PIC_REG_PORT_SKEW_SAMPLES, the bound on how long the physical port may
+// lag that intent -- so the trace, the sequence checks and the pulse timing are
+// identical either way.
 
 #ifndef TEST_PIC_TEST_IO_PIC_CORE_H
 #define TEST_PIC_TEST_IO_PIC_CORE_H
@@ -36,6 +43,13 @@
 #ifndef PIC_REG_PORT_ADDR
 #  error "part adapter must include its family register map (e.g. pic/pic10f32x_regs.h)"
 #endif
+// Named separately from the map because it is the one entry a family may not be
+// able to supply on its own: where the output latch is an SRAM shadow rather
+// than an SFR, its address comes from the build's .sym and the family header
+// derives this from an injected value.
+#ifndef PIC_REG_LATCH_ADDR
+#  error "family register map did not define PIC_REG_LATCH_ADDR (shadow address not injected?)"
+#endif
 #ifndef PIC_IO_DEFAULT_PROC_NAME
 #  error "PIC_IO_DEFAULT_PROC_NAME must be defined by the part adapter"
 #endif
@@ -48,16 +62,16 @@
 // not: it is per-part correct and per-variant wrong, so a severed injection
 // tested one output stage while the run reported another.
 #ifndef FW_PATH
-#  error "FW_PATH must be injected: -DFW_PATH from PIC10F322_IO_HEX or PIC10F320_IO_HEX"
+#  error "FW_PATH must be injected: -DFW_PATH from PIC10F322_IO_HEX, PIC10F320_IO_HEX or PIC12F675_IO_HEX"
 #endif
 #ifndef PROC_NAME
 #  define PROC_NAME PIC_IO_DEFAULT_PROC_NAME
 #endif
-// FOSC; instruction clock = FOSC/4. A part fact, and the two PIC parts share
-// one value today -- which is exactly why a default here is a hazard: re-pin
-// one chip's XTAL and this harness goes on simulating the other's.
+// FOSC; instruction clock = FOSC/4. A part fact, and NOT a shared one: the two
+// 10F32x parts run at 2 MHz and the PIC12F675 at 4 MHz, so a default here would
+// silently halve or double every measured pulse width.
 #ifndef F_CPU_HZ
-#  error "F_CPU_HZ must be injected: -DF_CPU_HZ from PIC10F322_XTAL or PIC10F320_XTAL"
+#  error "F_CPU_HZ must be injected: -DF_CPU_HZ from PIC10F322_XTAL, PIC10F320_XTAL or PIC12F675_XTAL"
 #endif
 
 #if (defined(PIC_IO_SIMPLE) + defined(PIC_IO_MUTE) + \
@@ -91,6 +105,10 @@ struct IoTrace {
     bool ansel_ok = true;
     bool port_ok = true;
     bool relay_coils_ok = true;
+    // Consecutive samples in which the physical port disagreed with the output
+    // latch: the current run, and the longest run seen.
+    unsigned port_skew_run = 0;
+    unsigned port_skew_max = 0;
 
     explicit IoTrace(const char *trace_name) : name(trace_name) {}
 };
@@ -152,7 +170,21 @@ static void trace_cycles(IoTrace *trace, guint64 cycles, bool require_configured
         if (require_configured || trace->saw_configured) {
             if (tris != TRIS_INIT) trace->tris_ok = false;
             if (ansel != 0u) trace->ansel_ok = false;
-            if (port != latch) trace->port_ok = false;
+            // A latch SFR drives the port with no firmware step between them
+            // (skew bound 0, so the first disagreeing sample fails). A shadow
+            // in SRAM has to be copied out, so a bounded lead is expected and
+            // only an unbroken run longer than that bound is a fault.
+            if (port != latch) {
+                trace->port_skew_run++;
+                if (trace->port_skew_run > trace->port_skew_max)
+                    trace->port_skew_max = trace->port_skew_run;
+                if (trace->port_skew_run > PIC_REG_PORT_SKEW_SAMPLES)
+                    trace->port_ok = false;
+            } else {
+                trace->port_skew_run = 0;
+            }
+        } else {
+            trace->port_skew_run = 0;
         }
 #if defined(PIC_IO_RELAY)
         if ((latch & PIC_REG_COIL_MASK) == PIC_REG_COIL_MASK) trace->relay_coils_ok = false;
@@ -171,7 +203,15 @@ static void check_trace_health(const IoTrace &trace, bool require_seen) {
         PIC_REG_TRIS_NAME " did not remain exact " PIC_REG_TRIS_LAYOUT " " PIC_REG_TRIS_INIT_STR);
     check(trace.ansel_ok, PIC_REG_ANSEL_NAME " re-selected an output pin as analog");
     check(trace.port_ok,
-        "physical " PIC_REG_PORT_NAME " output bits did not follow " PIC_REG_LATCH_NAME);
+        "physical " PIC_REG_PORT_NAME " output bits did not follow " PIC_REG_LATCH_NAME
+        PIC_REG_PORT_SKEW_DESC);
+#if PIC_REG_PORT_SKEW_SAMPLES > 0u
+    // Evidence, in the same spirit as the pulse widths: a run that crept up to
+    // the bound without crossing it is how this check goes quietly stale.
+    printf("  %s max " PIC_REG_PORT_NAME "/" PIC_REG_LATCH_NAME
+           " skew: %u sample(s) (bound %u)\n",
+           trace.name, trace.port_skew_max, (unsigned)PIC_REG_PORT_SKEW_SAMPLES);
+#endif
 #if defined(PIC_IO_RELAY)
     check(trace.relay_coils_ok, "relay RESET and SET coils were high simultaneously");
 #endif

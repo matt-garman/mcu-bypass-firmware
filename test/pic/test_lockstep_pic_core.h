@@ -12,11 +12,12 @@
 //   then compares live ctx_ SRAM after every completed main-loop iteration.
 //
 // WHAT IT PROVES -- and DELIBERATELY DOES NOT
-//   Both adapters prove XC8 code-generation and integration fidelity. PIC10F320
-//   additionally checks its hand-inlined constrained implementation against the
-//   shared pure core; PIC10F322 calls that core directly. This does not re-prove
-//   the algorithm, so the independent formal, host, and checkpoint layers remain
-//   necessary.
+//   Every adapter proves XC8 code-generation and integration fidelity for its
+//   part. PIC10F320 additionally checks its hand-inlined constrained
+//   implementation against the shared pure core; PIC10F322 and PIC12F675 call
+//   that core directly, from two different core families and two different
+//   shells. This does not re-prove the algorithm, so the independent formal,
+//   host, and checkpoint layers remain necessary.
 //
 // HOW IT WORKS (the tick boundary on a POLLING core)
 //   The PIC firmware never sleeps -- it busy-polls the tick flag -- so there is
@@ -38,9 +39,9 @@
 //        immediate iteration afterward. Driving one input per CLRWDT firing handles both for
 //        free -- exactly as the host harness (one input per loop iteration) does.
 //
-// Build/run via `make pic10f322-test-lockstep` or `make pic10f320-test-lockstep`. The
-// fail-closed target-variant aggregates run the matching adapter for every image
-// and require its PASS marker.
+// Build/run via `make pic10f322-test-lockstep`, `make pic10f320-test-lockstep`
+// or `make pic12f675-test-lockstep`. The fail-closed target-variant aggregates
+// run the matching adapter for every image and require its PASS marker.
 
 #ifndef TEST_PIC_TEST_LOCKSTEP_PIC_CORE_H
 #define TEST_PIC_TEST_LOCKSTEP_PIC_CORE_H
@@ -82,7 +83,9 @@ extern "C" {
 // Program-space size in words, for the CLRWDT site scan below. A part fact --
 // it was hard-coded to the PIC10F322's 0x200 while both consumers happened to
 // fit inside it, which silently over-scanned the 256-word PIC10F320 and would
-// silently UNDER-scan any larger part, hiding its loop CLRWDT entirely.
+// silently UNDER-scan any larger part, hiding its loop CLRWDT entirely. The
+// 1024-word PIC12F675 is that larger part: half its program space sits above
+// the old constant.
 #ifndef PIC_LOCKSTEP_PROGRAM_WORDS
 #  error "PIC_LOCKSTEP_PROGRAM_WORDS must be defined by the part adapter"
 #endif
@@ -92,21 +95,22 @@ extern "C" {
 // not: it is per-part correct and per-variant wrong, so a severed injection
 // tested one output stage while the run reported another.
 #ifndef FW_PATH
-#  error "FW_PATH must be injected: -DFW_PATH from PIC10F322_LOCKSTEP_HEX or PIC10F320_LOCKSTEP_HEX"
+#  error "FW_PATH must be injected: -DFW_PATH from PIC10F322_LOCKSTEP_HEX, PIC10F320_LOCKSTEP_HEX or PIC12F675_LOCKSTEP_HEX"
 #endif
 #ifndef PROC_NAME
 #  define PROC_NAME PIC_LOCKSTEP_DEFAULT_PROC_NAME
 #endif
-// FOSC; instruction clock = FOSC/4. A part fact, and the two PIC parts share
-// one value today -- which is exactly why a default here is a hazard: re-pin
-// one chip's XTAL and this harness goes on simulating the other's.
+// FOSC; instruction clock = FOSC/4. A part fact, and NOT a shared one: the two
+// 10F32x parts run at 2 MHz and the PIC12F675 at 4 MHz. Even when values
+// coincide a default here would be a hazard -- re-pin one chip's XTAL and the
+// harness goes on simulating the other's.
 #ifndef F_CPU_HZ
-#  error "F_CPU_HZ must be injected: -DF_CPU_HZ from PIC10F322_XTAL or PIC10F320_XTAL"
+#  error "F_CPU_HZ must be injected: -DF_CPU_HZ from PIC10F322_XTAL, PIC10F320_XTAL or PIC12F675_XTAL"
 #endif
 #ifndef CTX_ADDR
 #  error "CTX_ADDR (the _ctx_ SRAM address from the XC8 .sym) must be passed by the Makefile"
 #endif
-#define CYCLES_PER_MS  ((F_CPU_HZ / 4UL) / 1000UL)   // 500 @ 2 MHz
+#define CYCLES_PER_MS  ((F_CPU_HZ / 4UL) / 1000UL)   // 500 @ 2 MHz, 1000 @ 4 MHz
 // CLRWDT is the same 14-bit encoding on the classic and enhanced mid-range
 // cores, so this is genuinely shared rather than a family fact.
 #define CLRWDT_OPCODE  0x0064u

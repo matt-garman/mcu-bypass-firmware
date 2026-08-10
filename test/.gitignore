@@ -12,7 +12,9 @@ pic/test_config_pic12f675
 pic/test_soak_pic
 pic/test_fault_pic
 pic/test_io_pic
+pic/test_io_pic12f675
 pic/test_lockstep_pic
+pic/test_lockstep_pic12f675
 # per-variant simavr harnesses: test_sim_<variant>[_t85], test_trace_<variant>
 avr/test_sim
 avr/test_sim_*
