@@ -74,9 +74,10 @@ case "$PB_TARGET" in
 		product_override_args=(PIC12F675_HEXES= PIC12F675_ASSEMBLIES= PIC12F675_SYMBOLS= PIC12F675_BUILD_PRODUCTS=)
 		# Same CLASSIC_VARIANTS_* validation preamble as the PIC10F322 target,
 		# so it is exposed to the same injection vector and must run the same
-		# check. Its additional check pins simulator-image path separation.
+		# check. Its additional checks pin simulator-image path separation and
+		# complete-matrix production/consumption.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=37
+		expected_checks=47
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -996,6 +997,231 @@ if [ "$PB_REBUILD_REQUIRED" = 1 ]; then
 	run_pic10f320_host_make pic10f320-test-fault-host >/dev/null
 	assert_host_output_counts 2 'identical pic10f320-test-fault-host request' "${fault_outputs[@]}"
 	assert_host_run_count 2 'identical pic10f320-test-fault-host request' "$PB_BUILD_DIR/test_fault"
+	checks=$((checks + 1))
+fi
+
+if [ "$PB_TARGET" = pic12f675 ]; then
+	# Exercise the real calibration injector and Make recipes over a private,
+	# minimal PIC12F675 HEX matrix. --old-file suppresses the fake-XC8 producer:
+	# these checks isolate derived-set publication and consumption rather than
+	# rebuilding the shipping images whose contract was established above.
+	mkdir -p "$repo/test/pic" "$repo/$PB_BUILD_DIR"
+	cp "$ROOT/test/pic/inject_calibration_word.py" \
+		"$repo/test/pic/inject_calibration_word.py"
+
+	cal_shipping=()
+	cal_sim=()
+	for image in $PB_MATRIX_IMAGES; do
+		cal_shipping+=("$repo/$PB_BUILD_DIR/$image")
+		cal_sim+=("$repo/$PB_BUILD_DIR/simcal/${image%.hex}_simcal.hex")
+	done
+	cal_extra="$repo/$PB_BUILD_DIR/simcal/unexpected_simcal.hex"
+	cal_repo_lock_id=$(stat -Lc '%d:%i' "$repo")
+
+	write_calibration_fixture() {
+		printf '%s\n' \
+			':040000000028FF23B2' \
+			':02400E009E38DA' \
+			':00000001FF' > "$1"
+	}
+
+	run_simcal_make() {
+		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+			make --no-print-directory -C "$repo" --old-file=pic12f675 pic12f675-simcal \
+			CC=true HOSTCC=true PIC12F675_BUILD_DIR="$PB_BUILD_DIR" \
+			FW_BASE="$PB_FW_BASE" PIC12F675_TAG="$PB_TAG" \
+			PIC12F675_FLASH_WORDS="$PB_FLASH_WORDS" STRICT_TOOLS=1 "$@"
+	}
+
+	run_calibration_make() {
+		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+			make --no-print-directory -C "$repo" --old-file=pic12f675-simcal \
+			pic12f675-test-calibration \
+			CC=true HOSTCC=true PIC12F675_BUILD_DIR="$PB_BUILD_DIR" \
+			FW_BASE="$PB_FW_BASE" PIC12F675_TAG="$PB_TAG" \
+			PIC12F675_FLASH_WORDS="$PB_FLASH_WORDS" STRICT_TOOLS=1 "$@"
+	}
+
+	run_simcal_consumer_make() {
+		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+			make --no-print-directory -C "$repo" --old-file=pic12f675-simcal "$1" \
+			CC=true HOSTCC=true PIC12F675_BUILD_DIR="$PB_BUILD_DIR" \
+			FW_BASE="$PB_FW_BASE" PIC12F675_TAG="$PB_TAG" \
+			PIC_SOAK_CXX="$tools/missing-cxx" STRICT_TOOLS= "${@:2}"
+	}
+
+	# Fail or signal while validating the second image, but only after witnessing
+	# the first derived image as a nonempty regular file. This makes the producer
+	# cleanup regression non-vacuous: there was a partial publication to remove.
+	simcal_validator="$tools/simcal-validator"
+	cat > "$simcal_validator" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+image=${1:?}
+case "$image" in
+	*-cd4053_with_mute_simcal.hex)
+		[[ -f "${SIMCAL_FIRST_IMAGE:?}" && ! -L "$SIMCAL_FIRST_IMAGE" && -s "$SIMCAL_FIRST_IMAGE" ]] \
+			|| { printf 'first simulator image was not published before second-image validation\n' >&2; exit 81; }
+		: > "${SIMCAL_FAILURE_MARKER:?}"
+		case "${SIMCAL_VALIDATOR_MODE:-fail}" in
+			fail)
+				printf 'forced second-image validation failure\n' >&2
+				exit 82
+				;;
+			signal)
+				kill -TERM "$PPID"
+				: > "${SIMCAL_SIGNAL_MARKER:?}"
+				sleep 1
+				exit 0
+				;;
+		esac
+		;;
+esac
+exec "${REAL_IHEX_VALIDATOR:?}" "$@"
+EOF
+	chmod 750 "$simcal_validator"
+
+	for image in "${cal_shipping[@]}"; do write_calibration_fixture "$image"; done
+	run_simcal_make >/dev/null
+	for image in "${cal_sim[@]}"; do
+		[[ -f "$image" && ! -L "$image" && -s "$image" ]] \
+			|| { printf 'FAIL: successful PIC12F675 simcal producer omitted %s\n' "$image" >&2; exit 1; }
+	done
+	checks=$((checks + 1))
+
+	cal_output=$(run_calibration_make)
+	[[ "$cal_output" == *"calibration contract holds for all 3 variants"* ]] \
+		|| { printf 'FAIL: complete PIC12F675 calibration contract omitted its matrix sentinel: %s\n' \
+			"$cal_output" >&2; exit 1; }
+	for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
+		[ "$(grep -cF "CALIBRATION PASS [$variant]:" <<<"$cal_output")" -eq 1 ] \
+			|| { printf 'FAIL: PIC12F675 calibration contract did not check %s exactly once: %s\n' \
+				"$variant" "$cal_output" >&2; exit 1; }
+	done
+	checks=$((checks + 1))
+
+	# A representative partial set must fail the calibration contract itself,
+	# even when its producer prerequisite is deliberately suppressed.
+	rm -f "${cal_sim[2]}"
+	if cal_output=$(run_calibration_make 2>&1); then
+		printf 'FAIL: PIC12F675 calibration contract accepted a partial simulator-image matrix\n' >&2
+		exit 1
+	fi
+	[[ "$cal_output" == *"simulator image matrix is partial"* ]] \
+		|| { printf 'FAIL: partial PIC12F675 calibration matrix produced the wrong result: %s\n' \
+			"$cal_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# The two libgpsim consumers arrived after the original finding. They must
+	# apply the same matrix oracle before their optional C++/header skips, or a
+	# suppressed producer could let one selected image stand in for the matrix.
+	for target in pic12f675-test-io pic12f675-test-lockstep; do
+		if cal_output=$(run_simcal_consumer_make "$target" 2>&1); then
+			printf 'FAIL: %s accepted a partial PIC12F675 simulator-image matrix\n' "$target" >&2
+			exit 1
+		fi
+		[[ "$cal_output" == *"simulator image matrix is partial"* \
+			&& "$cal_output" != *"no C++ compiler"* ]] \
+			|| { printf 'FAIL: %s did not validate the image matrix before its tool skip: %s\n' \
+				"$target" "$cal_output" >&2; exit 1; }
+		checks=$((checks + 1))
+	done
+
+	# Fail while validating the second output after the first derived image was
+	# witnessed. The producer trap must remove the complete expected set, not
+	# leave that prefix.
+	for image in "${cal_shipping[@]}"; do write_calibration_fixture "$image"; done
+	simcal_failure_marker="$work/simcal-second-image-validated"
+	rm -f "$simcal_failure_marker"
+	export SIMCAL_FIRST_IMAGE="${cal_sim[0]}" \
+		SIMCAL_FAILURE_MARKER="$simcal_failure_marker" \
+		REAL_IHEX_VALIDATOR="$repo/scripts/validate-ihex.sh" \
+		SIMCAL_VALIDATOR_MODE=fail
+	if cal_output=$(run_simcal_make "IHEX_VALIDATOR=$simcal_validator" 2>&1); then
+		printf 'FAIL: PIC12F675 simcal producer accepted a forced second-image validation failure\n' >&2
+		exit 1
+	fi
+	[[ -f "$simcal_failure_marker" && "$cal_output" == *"forced second-image validation failure"* ]] \
+		|| { printf 'FAIL: failed PIC12F675 simcal producer reported the wrong injection error: %s\n' \
+			"$cal_output" >&2; exit 1; }
+	for image in "${cal_sim[@]}"; do
+		[[ ! -e "$image" && ! -L "$image" ]] \
+			|| { printf 'FAIL: failed PIC12F675 simcal producer left partial image %s\n' "$image" >&2; exit 1; }
+	done
+	checks=$((checks + 1))
+
+	# The same mid-matrix point interrupted by SIGTERM must be a nonzero target
+	# result and must clean every expected output even if the shell entered its
+	# signal trap with a prior command status of zero.
+	rm -f "$simcal_failure_marker"
+	simcal_signal_marker="$work/simcal-signal-delivered"
+	rm -f "$simcal_signal_marker"
+	export SIMCAL_VALIDATOR_MODE=signal SIMCAL_SIGNAL_MARKER="$simcal_signal_marker"
+	if cal_output=$(run_simcal_make "IHEX_VALIDATOR=$simcal_validator" 2>&1); then
+		printf 'FAIL: interrupted PIC12F675 simcal producer exited successfully\n' >&2
+		exit 1
+	fi
+	[[ -f "$simcal_failure_marker" && -f "$simcal_signal_marker" ]] \
+		|| { printf 'FAIL: PIC12F675 simcal signal fixture did not reach second-image validation\n' >&2; exit 1; }
+	for image in "${cal_sim[@]}"; do
+		[[ ! -e "$image" && ! -L "$image" ]] \
+			|| { printf 'FAIL: interrupted PIC12F675 simcal producer left image %s\n' "$image" >&2; exit 1; }
+	done
+	checks=$((checks + 1))
+	unset SIMCAL_FIRST_IMAGE SIMCAL_FAILURE_MARKER REAL_IHEX_VALIDATOR \
+		SIMCAL_VALIDATOR_MODE SIMCAL_SIGNAL_MARKER
+
+	# An unregistered simulator image prevents successful publication. Expected
+	# products are cleaned as a set; the unknown file is reported, not deleted.
+	for image in "${cal_shipping[@]}"; do write_calibration_fixture "$image"; done
+	mkdir -p "$(dirname "$cal_extra")"
+	printf ':00000001FF\n' > "$cal_extra"
+	if cal_output=$(run_simcal_make 2>&1); then
+		printf 'FAIL: PIC12F675 simcal producer accepted an unexpected derived image\n' >&2
+		exit 1
+	fi
+	[[ "$cal_output" == *"unexpected PIC12F675 simulator image outside the exact matrix"* \
+		&& -f "$cal_extra" ]] \
+		|| { printf 'FAIL: unexpected PIC12F675 simulator image produced the wrong publication result: %s\n' \
+			"$cal_output" >&2; exit 1; }
+	for image in "${cal_sim[@]}"; do
+		[[ ! -e "$image" && ! -L "$image" ]] \
+			|| { printf 'FAIL: rejected PIC12F675 simcal publication left expected image %s\n' "$image" >&2; exit 1; }
+	done
+	checks=$((checks + 1))
+
+	# No shipping images is the one accepted incomplete state: the normal local
+	# no-XC8 skip remains zero, while STRICT_TOOLS turns the same condition into a
+	# failure. Both paths remove stale expected derived images.
+	rm -f "$cal_extra" "${cal_shipping[@]}" "${cal_sim[@]}"
+	mkdir -p "$(dirname "${cal_sim[0]}")"
+	write_calibration_fixture "${cal_sim[0]}"
+	if ! cal_output=$(run_simcal_make STRICT_TOOLS= 2>&1); then
+		printf 'FAIL: PIC12F675 simcal producer rejected its zero-image local skip: %s\n' "$cal_output" >&2
+		exit 1
+	fi
+	[[ "$cal_output" == *"skipping calibration injection"* ]] \
+		|| { printf 'FAIL: PIC12F675 simcal zero-image skip reported the wrong result: %s\n' \
+			"$cal_output" >&2; exit 1; }
+	for image in "${cal_sim[@]}"; do
+		[[ ! -e "$image" && ! -L "$image" ]] \
+			|| { printf 'FAIL: PIC12F675 simcal zero-image skip left %s\n' "$image" >&2; exit 1; }
+	done
+	checks=$((checks + 1))
+
+	mkdir -p "$(dirname "${cal_sim[0]}")"
+	write_calibration_fixture "${cal_sim[0]}"
+	if cal_output=$(run_simcal_make 2>&1); then
+		printf 'FAIL: PIC12F675 simcal producer accepted zero shipping images under STRICT_TOOLS=1\n' >&2
+		exit 1
+	fi
+	[[ "$cal_output" == *"STRICT_TOOLS=1:"* ]] \
+		|| { printf 'FAIL: strict PIC12F675 simcal zero-image failure reported the wrong result: %s\n' \
+			"$cal_output" >&2; exit 1; }
+	for image in "${cal_sim[@]}"; do
+		[[ ! -e "$image" && ! -L "$image" ]] \
+			|| { printf 'FAIL: strict PIC12F675 simcal zero-image failure left %s\n' "$image" >&2; exit 1; }
+	done
 	checks=$((checks + 1))
 fi
 

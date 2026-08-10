@@ -2758,7 +2758,7 @@ test-supply-chain:
 	./test/test_supply_chain.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 36/75/36
+# image/host rebuild triggering. The script enforces the canonical 36/75/47
 # counts, so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
@@ -5370,9 +5370,14 @@ PIC12F675_GPSIM_PON_STC    ?= test/pic/pic12f675_power_on_pressed.stc
 .PHONY: pic12f675-test-gpsim
 pic12f675-test-gpsim: pic12f675-simcal $(PIC12F675_GPSIM_REGS) \
                      $(PIC12F675_GPSIM_TOGGLE_STC) $(PIC12F675_GPSIM_PON_STC)
-	@$(call gpsim_wrapper_preflight,PIC12F675); \
-	$(fw_image_sh); \
-	fail=0; ran=0; \
+	@$(fw_image_sh); \
+	$(pic12f675_simcal_matrix_sh); \
+	$(call gpsim_wrapper_preflight,PIC12F675); \
+	if [ $$simcal_count -eq 0 ]; then \
+		echo "no PIC12F675 simulator images (XC8 absent?); skipping gpsim lane"; \
+		$(SKIP); \
+	fi; \
+	fail=0; \
 	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
 		case $$v in \
 			cd4053_with_mute) el=0x7 ;; \
@@ -5381,10 +5386,6 @@ pic12f675-test-gpsim: pic12f675-simcal $(PIC12F675_GPSIM_REGS) \
 		esac; \
 		stem=`fw_image_of "$$v" $(PIC12F675_TAG)`; \
 		hex=$(PIC12F675_SIMCAL_DIR)/$${stem}_simcal.hex; \
-		if [ ! -f "$$hex" ]; then \
-			echo "no $$hex (XC8 absent?); skipping gpsim test for $$v"; continue; \
-		fi; \
-		ran=1; \
 		echo "--- gpsim register-level test: PIC12F675 variant $$v ---"; \
 		GPSIM=$(GPSIM) PIC_GPSIM_PROC=$(PIC12F675_GPSIM_PROC) \
 			PIC_GPSIM_REGS="$(CURDIR)/$(PIC12F675_GPSIM_REGS)" \
@@ -5397,10 +5398,6 @@ pic12f675-test-gpsim: pic12f675-simcal $(PIC12F675_GPSIM_REGS) \
 			STRICT_TOOLS="$(STRICT_TOOLS)" \
 			test/pic/run_gpsim_power_on_pressed.sh $$hex || fail=1; \
 	done; \
-	if [ $$fail -eq 0 ] && [ $$ran -eq 0 ]; then \
-		echo "no PIC12F675 simulator images (XC8 absent?); skipping gpsim lane"; \
-		$(SKIP); \
-	fi; \
 	exit $$fail
 
 # --- PIC12F675 built-HEX GPIO transitions + pulse timing (libgpsim) ------------
@@ -5446,7 +5443,8 @@ $(PIC12F675_IO_BIN): $(PIC12F675_IO_SRC) $(PIC_TARGET_IO_CORE_HDR) $(PIC_PIN_LOO
 
 .PHONY: pic12f675-test-io
 pic12f675-test-io: variant-selectors-valid pic12f675-simcal
-	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
+	@$(pic12f675_simcal_matrix_sh); \
+	if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
 		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC12F675 target-I/O test"; $(SKIP); \
 	fi; \
 	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
@@ -5527,7 +5525,8 @@ $(PIC12F675_LOCKSTEP_BIN): $(PIC12F675_LOCKSTEP_SRC) $(PIC_TARGET_LOCKSTEP_CORE_
 
 .PHONY: pic12f675-test-lockstep
 pic12f675-test-lockstep: variant-selectors-valid pic12f675-simcal
-	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
+	@$(pic12f675_simcal_matrix_sh); \
+	if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
 		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC12F675 lock-step"; $(SKIP); \
 	fi; \
 	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
@@ -5621,12 +5620,62 @@ override PIC12F675_SIMCAL_HEXES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(P
 # definition so the whole calibration story stays in this one block.
 override PIC12F675_BUILD_PRODUCTS += $(PIC12F675_SIMCAL_HEXES)
 
+# Classify the complete derived-image set in the caller's current shell. Zero
+# images remains the intentional no-XC8 skip; every nonzero subset is a hard
+# failure. Present members must be nonempty regular files, never symlinks, and
+# the dedicated directory may not contain an unregistered *_simcal.hex. The
+# producer and every simulator consumer expand this same oracle so their set
+# definitions cannot drift apart.
+define pic12f675_simcal_matrix_sh
+simcal_count=0; \
+for simcal_image in $(PIC12F675_SIMCAL_HEXES); do \
+	if [ -e "$$simcal_image" ] || [ -L "$$simcal_image" ]; then \
+		if [ ! -f "$$simcal_image" ] || [ -L "$$simcal_image" ] || [ ! -s "$$simcal_image" ]; then \
+			echo "FAIL: PIC12F675 simulator image is empty, a symlink, or not a regular file: $$simcal_image"; \
+			exit 1; \
+		fi; \
+		simcal_count=$$((simcal_count + 1)); \
+	fi; \
+done; \
+if [ $$simcal_count -ne 0 ] && [ $$simcal_count -ne 3 ]; then \
+	echo "FAIL: PIC12F675 simulator image matrix is partial: found $$simcal_count of 3 expected images"; \
+	exit 1; \
+fi; \
+for simcal_image in "$(PIC12F675_SIMCAL_DIR)"/*_simcal.hex "$(PIC12F675_SIMCAL_DIR)"/.*_simcal.hex; do \
+	if [ ! -e "$$simcal_image" ] && [ ! -L "$$simcal_image" ]; then continue; fi; \
+	simcal_known=0; \
+	for simcal_expected in $(PIC12F675_SIMCAL_HEXES); do \
+		[ "$$simcal_image" != "$$simcal_expected" ] || simcal_known=1; \
+	done; \
+	if [ $$simcal_known -ne 1 ]; then \
+		echo "FAIL: unexpected PIC12F675 simulator image outside the exact matrix: $$simcal_image"; \
+		exit 1; \
+	fi; \
+done
+endef
+
 # Derive the simulator images. Regenerates unconditionally -- the injector is
 # cheap, and "the derived image is older than the HEX it came from" is precisely
-# the silent staleness this target exists to make impossible.
+# the silent staleness this target exists to make impossible. The trap removes
+# the entire expected set after any failed injection or validation, so a failed
+# producer cannot publish the prefix it completed before the failure.
 .PHONY: pic12f675-simcal
 pic12f675-simcal: pic12f675 $(PIC12F675_CAL_INJECTOR)
-	@if ! command -v python3 >/dev/null 2>&1; then \
+	@simcal_complete=0; simcal_skipped=0; \
+	cleanup_simcal_products() { \
+		rc=$$1; \
+		if [ $$rc -ne 0 ] || [ $$simcal_complete -ne 1 ]; then \
+			rm -f $(PIC12F675_SIMCAL_HEXES) || rc=1; \
+		fi; \
+		if [ $$rc -eq 0 ] && [ $$simcal_complete -ne 1 ] && [ $$simcal_skipped -ne 1 ]; then rc=1; fi; \
+		trap - 0 1 2 15; exit $$rc; \
+	}; \
+	trap 'cleanup_simcal_products $$?' 0; \
+	trap 'cleanup_simcal_products 129' 1; \
+	trap 'cleanup_simcal_products 130' 2; \
+	trap 'cleanup_simcal_products 143' 15; \
+	rm -f $(PIC12F675_SIMCAL_HEXES) || exit 1; \
+	if ! command -v python3 >/dev/null 2>&1; then \
 		echo "FAIL: python3 is required by the PIC12F675 calibration-word injector"; exit 1; \
 	fi; \
 	$(fw_image_sh); \
@@ -5636,6 +5685,7 @@ pic12f675-simcal: pic12f675 $(PIC12F675_CAL_INJECTOR)
 	done; \
 	if [ $$have_hex -eq 0 ]; then \
 		echo "no PIC12F675 HEX in $(PIC12F675_BUILD_DIR)/ (XC8 absent?); skipping calibration injection"; \
+		simcal_skipped=1; \
 		$(SKIP); \
 	fi; \
 	mkdir -p $(PIC12F675_SIMCAL_DIR) || exit 1; \
@@ -5651,21 +5701,27 @@ pic12f675-simcal: pic12f675 $(PIC12F675_CAL_INJECTOR)
 			--value $(PIC12F675_CAL_VALUE) "$$hex" "$$sim" || exit 1; \
 		$(IHEX_VALIDATOR) "$$sim" || exit 1; \
 	done; \
+	$(pic12f675_simcal_matrix_sh); \
+	if [ $$simcal_count -ne 3 ]; then \
+		echo "FAIL: PIC12F675 simulator image producer did not publish all 3 images"; exit 1; \
+	fi; \
+	simcal_complete=1; \
 	echo "=== PIC12F675 simulator images derived in $(PIC12F675_SIMCAL_DIR)/ ==="
 
-# The calibration contract. Five properties, in the order they would bite:
+# The calibration contract. Six properties, in the order they would bite:
 #   1. the injector's own behaviour (its --selftest, which needs no toolchain);
-#   2. injecting leaves the SHIPPING image byte-identical, and is deterministic --
+#   2. shipping and derived inputs are each the complete three-image matrix;
+#   3. injecting leaves the SHIPPING image byte-identical, and is deterministic --
 #      both established by re-running it on the real image and comparing, because
-#      "the derived image contains everything the shipping one did" (property 3)
+#      "the derived image contains everything the shipping one did" (property 4)
 #      would still hold if the injector had quietly rewritten its own input first;
-#   3. the derived image differs from the shipping one by exactly the expected
+#   4. the derived image differs from the shipping one by exactly the expected
 #      calibration record -- whose encoding is computed here from the policy
 #      constants, independently of the injector, because a record read back from
 #      the thing under test could not fail;
-#   4. the injector refuses to run again on its own output, so a lane cannot
+#   5. the injector refuses to run again on its own output, so a lane cannot
 #      quietly double-inject or inject the wrong part's image;
-#   5. no derived image is reachable through a shipping-image glob.
+#   6. no derived image is reachable through a shipping-image glob.
 .PHONY: pic12f675-test-calibration
 pic12f675-test-calibration: pic12f675-simcal $(PIC12F675_CAL_INJECTOR)
 	@if ! command -v python3 >/dev/null 2>&1; then \
@@ -5673,15 +5729,31 @@ pic12f675-test-calibration: pic12f675-simcal $(PIC12F675_CAL_INJECTOR)
 	fi
 	@python3 $(PIC12F675_CAL_INJECTOR) --selftest
 	@$(fw_image_sh); \
+	shipping_count=0; \
+	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
+		shipping=$(PIC12F675_BUILD_DIR)/`fw_image_of "$$v" $(PIC12F675_TAG)`.hex; \
+		if [ -e "$$shipping" ] || [ -L "$$shipping" ]; then \
+			if [ ! -f "$$shipping" ] || [ -L "$$shipping" ] || [ ! -s "$$shipping" ]; then \
+				echo "FAIL: PIC12F675 shipping image is empty, a symlink, or not a regular file: $$shipping"; exit 1; \
+			fi; \
+			shipping_count=$$((shipping_count + 1)); \
+		fi; \
+	done; \
+	$(pic12f675_simcal_matrix_sh); \
+	if [ $$shipping_count -eq 0 ] && [ $$simcal_count -eq 0 ]; then \
+		echo "no PIC12F675 HEX (XC8 absent?); skipping calibration contract"; $(SKIP); \
+	fi; \
+	if [ $$shipping_count -ne 3 ]; then \
+		echo "FAIL: PIC12F675 shipping image matrix is partial: found $$shipping_count of 3 expected images"; exit 1; \
+	fi; \
+	if [ $$simcal_count -ne 3 ]; then \
+		echo "FAIL: PIC12F675 calibration contract requires all 3 derived simulator images"; exit 1; \
+	fi; \
 	checked=0; \
 	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
 		stem=`fw_image_of "$$v" $(PIC12F675_TAG)`; \
 		hex=$(PIC12F675_BUILD_DIR)/$$stem.hex; \
 		sim=$(PIC12F675_SIMCAL_DIR)/$${stem}_simcal.hex; \
-		if [ ! -f "$$hex" ]; then continue; fi; \
-		if [ ! -f "$$sim" ] || [ -L "$$sim" ] || [ ! -s "$$sim" ]; then \
-			echo "FAIL: no derived simulator image for $$v: $$sim"; exit 1; \
-		fi; \
 		witness=$(PIC12F675_SIMCAL_DIR)/$$stem.witness; probe=$(PIC12F675_SIMCAL_DIR)/$$stem.probe; \
 		rm -f "$$witness" "$$probe"; \
 		cp "$$hex" "$$witness" || exit 1; \
@@ -5718,11 +5790,8 @@ pic12f675-test-calibration: pic12f675-simcal $(PIC12F675_CAL_INJECTOR)
 		fi; \
 		rm -f "$$sim.reinjected"; \
 		echo "CALIBRATION PASS [$$v]: $$record injected, shipping image unchanged"; \
-		checked=`expr $$checked + 1`; \
+		checked=$$((checked + 1)); \
 	done; \
-	if [ $$checked -eq 0 ]; then \
-		echo "no PIC12F675 HEX (XC8 absent?); skipping calibration contract"; $(SKIP); \
-	fi; \
 	stray=`ls $(PIC12F675_BUILD_DIR)/*_simcal.hex 2>/dev/null || true`; \
 	if [ -n "$$stray" ]; then \
 		echo "FAIL: derived image(s) beside the shipping images, where a"; \
@@ -5730,7 +5799,10 @@ pic12f675-test-calibration: pic12f675-simcal $(PIC12F675_CAL_INJECTOR)
 		printf '        %s\n' $$stray; \
 		exit 1; \
 	fi; \
-	echo "=== PIC12F675 calibration contract holds for $$checked variant(s) ==="
+	if [ $$checked -ne 3 ]; then \
+		echo "FAIL: PIC12F675 calibration contract checked $$checked variants, expected 3"; exit 1; \
+	fi; \
+	echo "=== PIC12F675 calibration contract holds for all 3 variants ==="
 
 # ============================================================================
 # INTROSPECTION -- expose one Makefile variable's value to scripts

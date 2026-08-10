@@ -9,7 +9,7 @@ hex="$work/firmware.hex"
 checks=0
 unset FAKE_GPSIM_MODE FAKE_GPSIM_EXIT FAKE_GPSIM_MARKER FAKE_GPSIM_STC_LOG \
 	FAKE_GPSIM_PROC_LOG FAKE_GPSIM_REGS_LOG FAKE_GPSIM_HEX_LOG \
-	FAKE_GPSIM_FOOTSW_PIN FAKE_GPSIM_TOGGLE_LINES \
+	FAKE_GPSIM_FOOTSW_PIN FAKE_GPSIM_TOGGLE_LINES FAKE_GPSIM_PIC12F675_MATRIX \
 	FAKE_GPSIM_PON_LINES PIC_GPSIM_REGS PIC_GPSIM_PON_STC \
 	FAKE_TIMEOUT_MARKER GPSIM GPSIM_TIMEOUT_SECONDS PIC_GPSIM_PROC PIC_GPSIM_STC \
 	MUTATION_INFRA_MARKER STRICT_TOOLS
@@ -73,7 +73,20 @@ case "$script" in
 		fi
 		;;
 	*footswitch_toggle.stc)
-		if [ -n "${FAKE_GPSIM_TOGGLE_LINES:-}" ]; then
+		if [ -n "${FAKE_GPSIM_PIC12F675_MATRIX:-}" ]; then
+			case "$image" in
+				*-cd4053_simple_simcal.hex) engaged=0x23 ;;
+				*-cd4053_with_mute_simcal.hex) engaged=0x27 ;;
+				*-tq2_l2_5v_relay_simcal.hex) engaged=0x21 ;;
+				*) printf 'unexpected PIC12F675 simulator image: %s\n' "$image" >&2; exit 65 ;;
+			esac
+			printf '%s\n' \
+				'===INIT_BYPASS===' 'gpio = 0x20' \
+				'===PRESS1_EARLY===' 'gpio = 0x0' \
+				'===PRESS1_LOW===' 'gpio = 0x1' \
+				'===ENGAGED===' "gpio = $engaged" \
+				'===BYPASS_AGAIN===' 'gpio = 0x20'
+		elif [ -n "${FAKE_GPSIM_TOGGLE_LINES:-}" ]; then
 			printf '%s\n' "$FAKE_GPSIM_TOGGLE_LINES"
 		else
 			printf '%s\n' \
@@ -567,46 +580,94 @@ checks=$((checks + 1))
 # 5. Exercise the PUBLIC PIC12F675 target and require its complete route to reach
 #    fake gpsim. The direct checks above prove the shared wrappers READ the
 #    register identity and two stimulus channels; this proves the Make recipe
-#    WRITES all of them, along with the processor and derived image. Only one
-#    simulator image is present so the lane must make exactly two calls -- one
-#    per scenario -- while the absent variants take their documented skip.
+#    WRITES all of them, along with the processor and complete image matrix. All
+#    three simulator images are present, so the lane must make exactly six calls
+#    in variant/scenario order.
 #
 #    The image name is load-bearing: this part cannot reach main() without the
 #    factory calibration word, so the lane must consume *_simcal.hex from the
 #    isolated simcal directory and never the shipping image beside it.
 pic12f675_build="$work/build_pic12f675"
 pic12f675_simcal="$pic12f675_build/simcal"
-pic12f675_hex="$pic12f675_simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex"
 mkdir -p "$pic12f675_simcal"
-: > "$pic12f675_hex"
+pic12f675_hexes=(
+	"$pic12f675_simcal/bypass-pic12f675-cd4053_simple_simcal.hex"
+	"$pic12f675_simcal/bypass-pic12f675-cd4053_with_mute_simcal.hex"
+	"$pic12f675_simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex"
+)
+pic12f675_extra="$pic12f675_simcal/unexpected_simcal.hex"
+pic12f675_hidden_extra="$pic12f675_simcal/.unexpected_simcal.hex"
+
+write_pic12f675_image() {
+	# Minimal valid derived PIC12F675 image: CALL 0x3FF plus the injected
+	# mid-scale RETLW calibration record. This is a matrix the real producer
+	# could publish, even though fake gpsim does not parse its instructions.
+	printf '%s\n' \
+		':040000000028FF23B2' \
+		':02400E009E38DA' \
+		':0207FE00803445' \
+		':00000001FF' > "$1"
+}
+
+write_pic12f675_matrix() {
+	local mask=$1 i
+	rm -rf "${pic12f675_hexes[@]}" "$pic12f675_extra" "$pic12f675_hidden_extra"
+	for i in "${!pic12f675_hexes[@]}"; do
+		if [ $((mask & (1 << i))) -ne 0 ]; then
+			write_pic12f675_image "${pic12f675_hexes[$i]}"
+		fi
+	done
+}
+
 stc_log_675="$work/pic12f675.stc.log"
 proc_log_675="$work/pic12f675.proc.log"
 regs_log_675="$work/pic12f675.regs.log"
 hex_log_675="$work/pic12f675.hex.log"
+
+run_pic12f675_public() {
+	(
+		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL \
+			PIC12F675_GPSIM_PROC PIC12F675_GPSIM_REGS \
+			PIC12F675_GPSIM_TOGGLE_STC PIC12F675_GPSIM_PON_STC
+		FAKE_GPSIM_STC_LOG="$stc_log_675" FAKE_GPSIM_PROC_LOG="$proc_log_675" \
+			FAKE_GPSIM_REGS_LOG="$regs_log_675" FAKE_GPSIM_HEX_LOG="$hex_log_675" \
+			FAKE_GPSIM_MARKER="${route_marker_675:-}" \
+			FAKE_GPSIM_FOOTSW_PIN=gpio5 FAKE_GPSIM_PIC12F675_MATRIX=1 \
+			FAKE_GPSIM_PON_LINES="$pic12f675_pon" \
+		_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" "${MAKE_CMD[@]}" --no-print-directory \
+			-C "$ROOT" --old-file=pic12f675-simcal pic12f675-test-gpsim STRICT_TOOLS= \
+			PIC12F675_BUILD_DIR="$pic12f675_build" \
+			GPSIM="$tools/gpsim" GPSIM_TIMEOUT_SECONDS=2
+	)
+}
+
+write_pic12f675_matrix 7
 : > "$stc_log_675"; : > "$proc_log_675"; : > "$regs_log_675"; : > "$hex_log_675"
-if ! output=$(
-	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL
-	FAKE_GPSIM_STC_LOG="$stc_log_675" FAKE_GPSIM_PROC_LOG="$proc_log_675" \
-		FAKE_GPSIM_REGS_LOG="$regs_log_675" FAKE_GPSIM_HEX_LOG="$hex_log_675" \
-		FAKE_GPSIM_FOOTSW_PIN=gpio5 FAKE_GPSIM_TOGGLE_LINES="$pic12f675_toggle" \
-		FAKE_GPSIM_PON_LINES="$pic12f675_pon" \
-	_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" "${MAKE_CMD[@]}" --no-print-directory \
-		-C "$ROOT" --old-file=pic12f675-simcal pic12f675-test-gpsim STRICT_TOOLS= \
-		PIC12F675_BUILD_DIR="$pic12f675_build" \
-		GPSIM="$tools/gpsim" GPSIM_TIMEOUT_SECONDS=2 2>&1
-); then
+if ! output=$(run_pic12f675_public 2>&1); then
 	printf 'FAIL: pic12f675-test-gpsim rejected the fake-gpsim routing probe: %s\n' "$output" >&2
 	exit 1
 fi
 
 mapfile -t routed_stc_675 < "$stc_log_675"
-if [ "${#routed_stc_675[@]}" -ne 2 ] \
-		|| [ "${routed_stc_675[0]:-}" != "$ROOT/test/pic/pic12f675_footswitch_toggle.stc" ] \
-		|| [ "${routed_stc_675[1]:-}" != "$ROOT/test/pic/pic12f675_power_on_pressed.stc" ]; then
+expected_stc_675=()
+expected_hex_675=()
+for pic12f675_hex in "${pic12f675_hexes[@]}"; do
+	expected_stc_675+=(
+		"$ROOT/test/pic/pic12f675_footswitch_toggle.stc"
+		"$ROOT/test/pic/pic12f675_power_on_pressed.stc"
+	)
+	expected_hex_675+=("$pic12f675_hex" "$pic12f675_hex")
+done
+if [ "${#routed_stc_675[@]}" -ne 6 ]; then
 	printf 'FAIL: pic12f675-test-gpsim routed the wrong stimuli or invocation count: %s\n' \
 		"$(tr '\n' ' ' < "$stc_log_675")" >&2
 	exit 1
 fi
+for i in "${!expected_stc_675[@]}"; do
+	[ "${routed_stc_675[$i]}" = "${expected_stc_675[$i]}" ] \
+		|| { printf 'FAIL: pic12f675-test-gpsim routed stimulus %d as %s, expected %s\n' \
+			"$i" "${routed_stc_675[$i]}" "${expected_stc_675[$i]}" >&2; exit 1; }
+done
 checks=$((checks + 1))
 
 [ p12f675 != "$wrapper_fallback" ] \
@@ -614,33 +675,132 @@ checks=$((checks + 1))
 		"$wrapper_fallback" >&2; exit 1; }
 checks=$((checks + 1))
 mapfile -t routed_proc_675 < "$proc_log_675"
-if [ "${#routed_proc_675[@]}" -ne 2 ] \
-		|| [ "${routed_proc_675[0]:-}" != p12f675 ] \
-		|| [ "${routed_proc_675[1]:-}" != p12f675 ]; then
+if [ "${#routed_proc_675[@]}" -ne 6 ]; then
 	printf 'FAIL: pic12f675-test-gpsim reached gpsim with the wrong processor or invocation count: %s\n' \
 		"$(tr '\n' ' ' < "$proc_log_675")" >&2
 	exit 1
 fi
+for routed in "${routed_proc_675[@]}"; do
+	[ "$routed" = p12f675 ] \
+		|| { printf 'FAIL: pic12f675-test-gpsim reached gpsim with processor %s\n' "$routed" >&2; exit 1; }
+done
 checks=$((checks + 1))
 
 mapfile -t routed_regs_675 < "$regs_log_675"
-if [ "${#routed_regs_675[@]}" -ne 2 ] \
-		|| [ "${routed_regs_675[0]:-}" != "$ROOT/test/pic/pic12f675_gpsim_regs.sh" ] \
-		|| [ "${routed_regs_675[1]:-}" != "$ROOT/test/pic/pic12f675_gpsim_regs.sh" ]; then
+if [ "${#routed_regs_675[@]}" -ne 6 ]; then
 	printf 'FAIL: pic12f675-test-gpsim routed the wrong register identity or invocation count: %s\n' \
 		"$(tr '\n' ' ' < "$regs_log_675")" >&2
 	exit 1
 fi
+for routed in "${routed_regs_675[@]}"; do
+	[ "$routed" = "$ROOT/test/pic/pic12f675_gpsim_regs.sh" ] \
+		|| { printf 'FAIL: pic12f675-test-gpsim routed register identity %s\n' "$routed" >&2; exit 1; }
+done
 checks=$((checks + 1))
 
 mapfile -t routed_hex_675 < "$hex_log_675"
-if [ "${#routed_hex_675[@]}" -ne 2 ] \
-		|| [ "${routed_hex_675[0]:-}" != "$pic12f675_hex" ] \
-		|| [ "${routed_hex_675[1]:-}" != "$pic12f675_hex" ]; then
+if [ "${#routed_hex_675[@]}" -ne 6 ]; then
 	printf 'FAIL: pic12f675-test-gpsim routed the wrong simulator image or invocation count: %s\n' \
 		"$(tr '\n' ' ' < "$hex_log_675")" >&2
 	exit 1
 fi
+for i in "${!expected_hex_675[@]}"; do
+	[ "${routed_hex_675[$i]}" = "${expected_hex_675[$i]}" ] \
+		|| { printf 'FAIL: pic12f675-test-gpsim routed image %d as %s, expected %s\n' \
+			"$i" "${routed_hex_675[$i]}" "${expected_hex_675[$i]}" >&2; exit 1; }
+done
+checks=$((checks + 1))
+
+# Every nonempty proper subset of the three images is a hard failure before
+# gpsim is called. Exhausting masks 1..6 prevents a check that happens to reject
+# only one missing basename or only the one-image case from claiming the matrix.
+route_marker_675="$work/pic12f675.gpsim-called"
+for mask in 1 2 3 4 5 6; do
+	write_pic12f675_matrix "$mask"
+	rm -f "$route_marker_675"
+	if output=$(run_pic12f675_public 2>&1); then
+		printf 'FAIL: pic12f675-test-gpsim accepted partial simulator-image mask %d\n' "$mask" >&2
+		exit 1
+	fi
+	[[ "$output" == *"simulator image matrix is partial"* && ! -e "$route_marker_675" ]] \
+		|| { printf 'FAIL: partial simulator-image mask %d produced the wrong result: %s\n' \
+			"$mask" "$output" >&2; exit 1; }
+	checks=$((checks + 1))
+done
+
+# The empty set remains the intentional no-XC8 skip, but it must not call gpsim.
+write_pic12f675_matrix 0
+rm -f "$route_marker_675"
+if ! output=$(run_pic12f675_public 2>&1); then
+	printf 'FAIL: pic12f675-test-gpsim rejected the empty simulator-image skip: %s\n' "$output" >&2
+	exit 1
+fi
+[[ "$output" == *"no PIC12F675 simulator images"* && ! -e "$route_marker_675" ]] \
+	|| { printf 'FAIL: empty PIC12F675 simulator-image set did not skip before gpsim: %s\n' "$output" >&2; exit 1; }
+checks=$((checks + 1))
+
+# Existing paths are not enough: each expected member must be nonempty, regular,
+# and not a symlink, and no unregistered *_simcal.hex may join the exact set.
+write_pic12f675_matrix 7
+: > "${pic12f675_hexes[0]}"
+rm -f "$route_marker_675"
+if output=$(run_pic12f675_public 2>&1); then
+	printf 'FAIL: pic12f675-test-gpsim accepted an empty simulator image\n' >&2
+	exit 1
+fi
+[[ "$output" == *"simulator image is empty, a symlink, or not a regular file"* \
+	&& ! -e "$route_marker_675" ]] \
+	|| { printf 'FAIL: empty PIC12F675 simulator image produced the wrong result: %s\n' "$output" >&2; exit 1; }
+checks=$((checks + 1))
+
+write_pic12f675_matrix 7
+rm -f "${pic12f675_hexes[0]}"
+ln -s "${pic12f675_hexes[1]}" "${pic12f675_hexes[0]}"
+rm -f "$route_marker_675"
+if output=$(run_pic12f675_public 2>&1); then
+	printf 'FAIL: pic12f675-test-gpsim accepted a symlink simulator image\n' >&2
+	exit 1
+fi
+[[ "$output" == *"simulator image is empty, a symlink, or not a regular file"* \
+	&& ! -e "$route_marker_675" ]] \
+	|| { printf 'FAIL: symlink PIC12F675 simulator image produced the wrong result: %s\n' "$output" >&2; exit 1; }
+checks=$((checks + 1))
+
+write_pic12f675_matrix 7
+write_pic12f675_image "$pic12f675_extra"
+rm -f "$route_marker_675"
+if output=$(run_pic12f675_public 2>&1); then
+	printf 'FAIL: pic12f675-test-gpsim accepted an unexpected simulator image\n' >&2
+	exit 1
+fi
+[[ "$output" == *"unexpected PIC12F675 simulator image outside the exact matrix"* \
+	&& ! -e "$route_marker_675" ]] \
+	|| { printf 'FAIL: unexpected PIC12F675 simulator image produced the wrong result: %s\n' "$output" >&2; exit 1; }
+checks=$((checks + 1))
+
+write_pic12f675_matrix 7
+rm -f "${pic12f675_hexes[0]}"
+mkdir "${pic12f675_hexes[0]}"
+rm -f "$route_marker_675"
+if output=$(run_pic12f675_public 2>&1); then
+	printf 'FAIL: pic12f675-test-gpsim accepted a directory as a simulator image\n' >&2
+	exit 1
+fi
+[[ "$output" == *"simulator image is empty, a symlink, or not a regular file"* \
+	&& ! -e "$route_marker_675" ]] \
+	|| { printf 'FAIL: directory PIC12F675 simulator image produced the wrong result: %s\n' "$output" >&2; exit 1; }
+checks=$((checks + 1))
+
+write_pic12f675_matrix 7
+write_pic12f675_image "$pic12f675_hidden_extra"
+rm -f "$route_marker_675"
+if output=$(run_pic12f675_public 2>&1); then
+	printf 'FAIL: pic12f675-test-gpsim accepted a hidden unexpected simulator image\n' >&2
+	exit 1
+fi
+[[ "$output" == *"unexpected PIC12F675 simulator image outside the exact matrix"* \
+	&& ! -e "$route_marker_675" ]] \
+	|| { printf 'FAIL: hidden unexpected PIC12F675 simulator image produced the wrong result: %s\n' "$output" >&2; exit 1; }
 checks=$((checks + 1))
 
 # 6. The output mask is load-bearing, not decoration: with the PIC12F675 identity
