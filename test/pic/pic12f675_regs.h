@@ -38,17 +38,24 @@
 // the build's .sym and injects it, exactly as the fault and lock-step lanes
 // already do for _ctx_ (-DCTX_ADDR=...).
 //
-// A missing injection is a hard error rather than a default, because the
-// fallback would be register 0x000 -- INDF, which reads plausibly and would
-// make the shadow-vs-port comparison silently meaningless.
-#ifndef PIC_SHADOW_ADDR
-#  error "PIC_SHADOW_ADDR must be injected: -DPIC_SHADOW_ADDR=0x<addr> for _gpio_shadow_ from the XC8 .sym"
-#endif
+// The injection is required of the lanes that COMPARE the latch, not of every
+// lane that includes this file. The lock-step lane reads ctx_ and never looks
+// at the output path, so demanding a shadow address of it would be demanding a
+// value it has no use for. The latch macros below therefore exist only when the
+// build supplied one, and a core that reads them without one cannot compile:
+// test_io_pic_core.h says so by name (its PIC_REG_LATCH_ADDR guard), and any
+// other consumer stops on an undeclared identifier.
+//
+// Absent, rather than defaulted, on purpose: a default would point the
+// comparison at register 0x000 -- INDF, which reads plausibly -- and a
+// shadow-vs-port check against INDF passes while checking nothing. A macro that
+// does not exist cannot do that.
 
 // ---- gpsim pin identity -----------------------------------------------------
 // Consumed by pic/gpsim_bootstrap.h, whose own default is the 10F32x's "ra3".
 // It lives here rather than in each adapter so every PIC12F675 harness -- io,
-// fault, soak -- attaches its stimulus to the same pin by construction.
+// lock-step, fault, soak -- attaches its stimulus to the same pin by
+// construction.
 #ifndef FOOTSW_PIN_NAME
 #  define FOOTSW_PIN_NAME "gpio5"
 #endif
@@ -66,14 +73,17 @@
 // The output latch: the shell's gpio_shadow_, NOT an SFR. Every output write is
 // shadow -> GPIO, so the shadow is write intent and GPIO is the physical
 // result; comparing them is the check this part can make and the 10F32x cannot.
-#define PIC_REG_LATCH_ADDR   PIC_SHADOW_ADDR
-#define PIC_REG_LATCH_NAME   "gpio_shadow_"
+// Defined only when the build injected the address -- see above.
+#ifdef PIC_SHADOW_ADDR
+#  define PIC_REG_LATCH_ADDR   PIC_SHADOW_ADDR
+#  define PIC_REG_LATCH_NAME   "gpio_shadow_"
 // No gpsim name to match: SRAM registers are named positionally ("REG040"), so
 // a name cross-check would assert the placement rather than the identity. The
 // core treats a null token as "not checkable"; see PIC_REG_LATCH_LC in
 // pic10f32x_regs.h for why the printable name is a separate macro.
-#define PIC_REG_LATCH_TOKEN  nullptr
-#define PIC_REG_LATCH_LC     "gpio_shadow_"
+#  define PIC_REG_LATCH_TOKEN  nullptr
+#  define PIC_REG_LATCH_LC     "gpio_shadow_"
+#endif
 
 #define PIC_REG_ANSEL_ADDR   0x09Fu   // ANSEL (bank 1); ANS0..ANS3 = GP0,GP1,GP2,GP4
 #define PIC_REG_ANSEL_NAME   "ANSEL"

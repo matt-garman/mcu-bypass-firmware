@@ -846,6 +846,7 @@ VARIANT_SELECTORS = \
 	PIC10F322_IO_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC10F322_TARGET_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC12F675_IO_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
+	PIC12F675_LOCKSTEP_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC10F320_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
 	PIC10F320_TARGET_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
 	PIC10F320_FAULT_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
@@ -1461,7 +1462,11 @@ PIC10F322_FAULT_CORE_HDR = test/pic/test_fault_pic_core.h
 # would satisfy that axis by coincidence and retire a marker that is still
 # telling the truth.
 PIC_TARGET_IO_CORE_HDR = test/pic/test_io_pic_core.h
-PIC10F322_LOCKSTEP_CORE_HDR = test/pic/test_lockstep_pic_core.h
+# Shared by all three lock-step adapters, exactly like the two headers above,
+# and named for that rather than for the part whose lane happened to define it
+# first. TARGET_LOCKSTEP for the same reason as TARGET_IO: the adapters select
+# their part through a C macro family that would otherwise share the stem.
+PIC_TARGET_LOCKSTEP_CORE_HDR = test/pic/test_lockstep_pic_core.h
 # PIC10F32x device identity (register addresses, gpsim name tokens, masks,
 # expected init values) and guard policy (which locations the fault lane
 # injects, and with what). The harness cores carry only mechanism, so an edit to
@@ -1658,7 +1663,7 @@ PIC10F322_LOCKSTEP_COMPILE = \
 			-DF_CPU_HZ=$(PIC10F322_XTAL) $(PIC10F322_LOCKSTEP_CTX_DEF) \
 			$(PIC10F322_LOCKSTEP_SRC) $(PIC10F322_LOCKSTEP_MODEL_OBJ) -o $(PIC10F322_LOCKSTEP_BIN) -lgpsim
 
-$(PIC10F322_LOCKSTEP_BIN): $(PIC10F322_LOCKSTEP_SRC) $(PIC10F322_LOCKSTEP_CORE_HDR) \
+$(PIC10F322_LOCKSTEP_BIN): $(PIC10F322_LOCKSTEP_SRC) $(PIC_TARGET_LOCKSTEP_CORE_HDR) \
                      $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) $(PURE_HOST_DEP)
 	$(PIC10F322_LOCKSTEP_COMPILE)
 
@@ -2550,6 +2555,7 @@ clean:
 	rm -f $(AVR_SIM_BINARIES) $(AVR_SOAK_BINARIES) $(AVR_TEST_BINARIES_RETIRED) \
 		test/host/test_logic_host test/pic/test_config_pic test/pic/test_soak_pic \
 		test/pic/test_config_pic12f675 test/pic/test_io_pic12f675 \
+		test/pic/test_lockstep_pic12f675 \
 		test/pic/test_fault_pic test/pic/test_lockstep_pic test/pic/test_io_pic \
 		test/formal/test_model_check test/formal/test_symbolic test/avr/test_fuses \
 		test/formal/test_symbolic.bc test/formal/bypass_pure_klee.bc \
@@ -3073,8 +3079,9 @@ test-target-lane-markers:
 	LM_REQUIRE_ARG='PIC10F320_VARIANT=cd4053_with_mute' \
 		./test/test_target_lane_markers.sh
 
-# Compile both real PIC lock-step drivers against a fake core; exercise exact pin
-# resolution and inject progress stalls at every run phase.
+# Compile all three real PIC lock-step drivers against a fake core; exercise
+# exact pin resolution -- per adapter, since they do not agree on a pin name --
+# and inject progress stalls at every run phase.
 test-lockstep-progress:
 	PIC_SOAK_CXX="$(PIC_SOAK_CXX)" ./test/test_lockstep_progress.sh
 
@@ -5456,6 +5463,90 @@ pic12f675-test-io: variant-selectors-valid pic12f675-simcal
 	$(PIC12F675_IO_COMPILE) && \
 	./$(PIC12F675_IO_BIN)
 
+# --- PIC12F675 built-HEX lock-step test (libgpsim + shared model) -------------
+# The PIC12F675 leg of the lock-step lane: the same shared core
+# (test/pic/test_lockstep_pic_core.h) driving the real XC8-built instruction
+# stream and the shared model with one footswitch stream, comparing live ctx_
+# SRAM after every completed main-loop iteration. Three notes specific to this
+# part:
+#
+#   1. IT SCANS THE WHOLE 1024-WORD PROGRAM SPACE for the main loop's CLRWDT.
+#      The core scanned a hard-coded 0x200 until this part arrived; half of this
+#      image sits above that line, and the loop CLRWDT is the iteration boundary
+#      the entire comparison hangs on. The scan bound is now a part constant in
+#      the adapter.
+#   2. IT RUNS THE DERIVED IMAGE, like every simulator lane for this part, while
+#      taking _ctx_ and its `ds 3` layout check from the SHIPPING build beside
+#      it -- the injector adds one calibration word and changes no symbol.
+#   3. NOTHING TIMING-RELATED HAD TO BE RE-DERIVED. The comparison is per
+#      ITERATION, one model step per completed loop pass, so the 1.024 ms tick
+#      and the 12 ms blocking coil pulse -- which the gpsim CLI checkpoints did
+#      have to be re-derived for -- change nothing here.
+#
+# Skip-clean for missing tools, and standalone for now: this part has no
+# fail-closed target aggregate yet, so nothing currently requires the LOCK-STEP
+# PASS sentinel the way pic10f322-test-target requires the 322's.
+PIC12F675_LOCKSTEP_VARIANT ?= cd4053_simple
+PIC12F675_LOCKSTEP_SRC = test/pic/test_lockstep_pic12f675.cc
+PIC12F675_LOCKSTEP_BIN = test/pic/test_lockstep_pic12f675
+PIC12F675_LOCKSTEP_MODEL_OBJ = $(PIC12F675_BUILD_DIR)/bypass_pure_lockstep.o
+PIC12F675_LOCKSTEP_STEM = $(call fw_image,$(PIC12F675_LOCKSTEP_VARIANT),$(PIC12F675_TAG))
+PIC12F675_LOCKSTEP_HEX = $(PIC12F675_SIMCAL_DIR)/$(PIC12F675_LOCKSTEP_STEM)_simcal.hex
+# Both from the shipping build, NOT from the derived image beside it: the
+# calibration injector rewrites one program word and emits no symbol table or
+# assembly of its own.
+PIC12F675_LOCKSTEP_SYM = $(PIC12F675_BUILD_DIR)/$(PIC12F675_LOCKSTEP_STEM).sym
+PIC12F675_LOCKSTEP_ASM = $(PIC12F675_BUILD_DIR)/$(PIC12F675_LOCKSTEP_STEM).s
+PIC12F675_LOCKSTEP_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC12F675_LOCKSTEP_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DCTX_ADDR=0x$$a)
+# The mkdir is not ceremony: the model object lands in the target build
+# directory, which only the `pic12f675` build target creates, and this recipe is
+# also reachable as a plain file target.
+PIC12F675_LOCKSTEP_COMPILE = \
+		mkdir -p $(PIC12F675_BUILD_DIR) && \
+		$(HOSTCC) $(HOST_CFLAGS) $(PURE_HOST_CFLAGS) -Itest -Isrc \
+			-c $(PURE_HOST_SRC) -o $(PIC12F675_LOCKSTEP_MODEL_OBJ) && \
+		$(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
+			-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
+			-DFW_PATH='"$(CURDIR)/$(PIC12F675_LOCKSTEP_HEX)"' -DPROC_NAME='"$(PIC12F675_GPSIM_PROC)"' \
+			-DF_CPU_HZ=$(PIC12F675_XTAL) $(PIC12F675_LOCKSTEP_CTX_DEF) \
+			$(PIC12F675_LOCKSTEP_SRC) $(PIC12F675_LOCKSTEP_MODEL_OBJ) \
+			-o $(PIC12F675_LOCKSTEP_BIN) -lgpsim
+
+$(PIC12F675_LOCKSTEP_BIN): $(PIC12F675_LOCKSTEP_SRC) $(PIC_TARGET_LOCKSTEP_CORE_HDR) \
+                     $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
+                     $(PIC12F675_REGS_HDR) $(PURE_HOST_DEP)
+	$(PIC12F675_LOCKSTEP_COMPILE)
+
+.PHONY: pic12f675-test-lockstep
+pic12f675-test-lockstep: variant-selectors-valid pic12f675-simcal
+	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
+		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC12F675 lock-step"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
+		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC12F675 lock-step (install gpsim-dev)"; $(SKIP); \
+	fi; \
+	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
+		echo "libglib2.0-dev not found; skipping PIC12F675 lock-step (install libglib2.0-dev)"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC12F675_LOCKSTEP_HEX)" ]; then \
+		echo "no $(PIC12F675_LOCKSTEP_HEX) (XC8 absent?); skipping PIC12F675 lock-step for variant $(PIC12F675_LOCKSTEP_VARIANT)"; $(SKIP); \
+	fi; \
+	alloc=`awk 'prev=="_ctx_:"{print $$2; exit} {prev=$$1}' "$(PIC12F675_LOCKSTEP_ASM)" 2>/dev/null`; \
+	if [ "$$alloc" != "3" ]; then \
+		echo "FAIL: _ctx_ allocates $${alloc:-?} bytes in $(PIC12F675_LOCKSTEP_ASM) -- expected 3 (packed 1-byte enums)."; \
+		echo "      test_lockstep_pic12f675.cc reads ctx_+0/+1/+2; fix offsets if packing changed."; \
+		exit 1; \
+	fi; \
+	ctx_addr=`awk '$$1=="_ctx_"{print $$2; exit}' "$(PIC12F675_LOCKSTEP_SYM)" 2>/dev/null`; \
+	if [ -z "$$ctx_addr" ]; then \
+		echo "FAIL: _ctx_ symbol not found in $(PIC12F675_LOCKSTEP_SYM); lock-step cannot read firmware state."; \
+		exit 1; \
+	fi; \
+	echo "--- PIC12F675 lock-step: variant=$(PIC12F675_LOCKSTEP_VARIANT) proc=$(PIC12F675_GPSIM_PROC) (ctx_ at 0x$$ctx_addr, layout verified: 3 bytes) ---"; \
+	rm -f $(PIC12F675_LOCKSTEP_BIN) && \
+	$(PIC12F675_LOCKSTEP_COMPILE) && \
+	./$(PIC12F675_LOCKSTEP_BIN)
+
 # --- PIC12F675 CONFIG-word verification ---------------------------------------
 # Same mechanism as the PIC10F32x lane (test/pic/test_config_pic_core.h), its own
 # decode table (test/pic/pic12f675_config.h). See the PIC CONFIG-word block above
@@ -5905,6 +5996,7 @@ help:
 	@echo "  pic12f675-test-gpsim  drive the footswitch in gpsim, assert GPIO on the simcal images"
 	@echo "  pic12f675-test-io     libgpsim GPIO transition + pulse timing, and the physical port"
 	@echo "                        against the SRAM output shadow (PIC12F675_IO_VARIANT)"
+	@echo "  pic12f675-test-lockstep  libgpsim HEX-vs-model ctx_ lock-step (PIC12F675_LOCKSTEP_VARIANT)"
 	@echo "  pic12f675-analyze     cppcheck + MISRA on the PIC12F675 shell (pic8 platform; standalone)"
 	@echo "  pic12f675-test-stack-bound  bound the 8-level hardware return stack for every variant"
 	@echo "  pic12f675-simcal      derive simulator images with the oscillator calibration word"

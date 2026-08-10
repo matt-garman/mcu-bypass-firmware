@@ -154,6 +154,13 @@ test/
                                   firmware intent against reality, which the
                                   32x lanes cannot express
                                                         (make pic12f675-test-io)
+            test_lockstep_pic12f675.cc
+                                  PIC12F675 HEX/model lock-step adapter. Same
+                                  core and same reference model; what it adds is
+                                  a 1024-word CLRWDT scan, because this part's
+                                  loop CLRWDT sits above the bound the core used
+                                  to hard-code
+                                                  (make pic12f675-test-lockstep)
             test_{fault,lockstep,io}_pic_core.h
                                   shared libgpsim harness implementations,
                                   device-parameterised: a part adapter supplies
@@ -167,9 +174,12 @@ test/
             pic12f675_regs.h     PIC12F675 register identity. Not the 32x map
                                   renumbered: bank 1 is a different address, the
                                   output "latch" is an SRAM shadow whose address
-                                  the Makefile lifts from the build's .sym, and
-                                  the port may trail that shadow by a bounded
-                                  number of trace samples
+                                  the Makefile lifts from the build's .sym (so
+                                  the latch entries exist only for the lanes that
+                                  compare it), and the port may trail that shadow
+                                  by a bounded number of trace samples. Also the
+                                  one place the footswitch pin name is written,
+                                  so every 675 harness attaches to gpio5
             inject_calibration_word.py
                                   derives a simulator-runnable image by injecting
                                   the oscillator calibration word the factory

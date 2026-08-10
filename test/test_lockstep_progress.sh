@@ -52,6 +52,13 @@ public:
     unsigned get_opcode(unsigned addr) const { return addr == 1u ? 0x0064u : 0u; }
 };
 
+// The footswitch pin name is a PARAMETER, not a constant: the adapters do not
+// agree on one (ra3 on the 10F32x parts, gpio5 on the PIC12F675), and the point
+// of the decoys below is that each adapter resolves ITS OWN name exactly.
+#ifndef FAKE_FOOTSW_PIN
+#  define FAKE_FOOTSW_PIN "ra3"
+#endif
+
 class IOPIN {};
 
 inline IOPIN *fake_pin(unsigned index) {
@@ -63,9 +70,12 @@ class Module {
 public:
     int get_pin_count() const { return 3; }
     std::string &get_pin_name(unsigned index) {
-        static std::string names[] = { "", "ra30", "xra3", "ra3" };
-        static std::string hidden("ra3_missing");
-        if (index == 3u && std::getenv("FAKE_GPSIM_HIDE_RA3") != nullptr) return hidden;
+        // Two decoys that differ from the real name by a suffix and by a
+        // prefix, so a substring match would pick the wrong pin.
+        static std::string names[] = { "", FAKE_FOOTSW_PIN "0", "x" FAKE_FOOTSW_PIN,
+                                       FAKE_FOOTSW_PIN };
+        static std::string hidden(FAKE_FOOTSW_PIN "_absent");
+        if (index == 3u && std::getenv("FAKE_GPSIM_HIDE_PIN") != nullptr) return hidden;
         return names[index <= 3u ? index : 0u];
     }
     IOPIN *get_pin(unsigned index) { return fake_pin(index); }
@@ -160,7 +170,8 @@ public:
     void attach_stimulus(source_stimulus *) {}
     void attach_stimulus(IOPIN *pin) {
         if (pin != fake_pin(3u)) {
-            std::fprintf(stderr, "FATAL: footswitch stimulus was not attached to exact ra3\n");
+            std::fprintf(stderr, "FATAL: footswitch stimulus was not attached to exact "
+                         FAKE_FOOTSW_PIN "\n");
             std::exit(1);
         }
     }
@@ -263,22 +274,28 @@ run_wedge() {
 }
 
 run_missing_pin() {
-	local label=$1 processor=$2 bin=$3 output status
+	local label=$1 processor=$2 bin=$3 pin=$4 output status
 	set +e
-	output=$(FAKE_GPSIM_HIDE_RA3=1 timeout 5 "$bin" 2>&1)
+	output=$(FAKE_GPSIM_HIDE_PIN=1 timeout 5 "$bin" 2>&1)
 	status=$?
 	set -e
 	[ "$status" -eq 1 ] \
-		|| { printf 'FAIL: %s missing-ra3 probe exited %d instead of 1: %s\n' \
-			"$label" "$status" "$output" >&2; exit 1; }
-	[[ "$output" == *"proc=$processor "* && "$output" == *"FATAL: pin ra3 not found"* ]] \
-		|| { printf 'FAIL: %s did not reject decoys when exact ra3 was absent: %s\n' \
-			"$label" "$output" >&2; exit 1; }
+		|| { printf 'FAIL: %s missing-%s probe exited %d instead of 1: %s\n' \
+			"$label" "$pin" "$status" "$output" >&2; exit 1; }
+	[[ "$output" == *"proc=$processor "* && "$output" == *"FATAL: pin $pin not found"* ]] \
+		|| { printf 'FAIL: %s did not reject decoys when exact %s was absent: %s\n' \
+			"$label" "$pin" "$output" >&2; exit 1; }
 	checks=$((checks + 1))
 }
 
+# $1 label, $2 adapter source, $3 gpsim processor, $4 footswitch pin name, $5 FOSC.
+#
+# The pin is passed to the STUB, never to the adapter: each adapter must reach
+# its own pin name through its own device map (the PIC12F675's comes from
+# test/pic/pic12f675_regs.h), and this gate proves the name it actually asks for
+# is the one it resolves. Defining it for the adapter would prove nothing.
 run_adapter() {
-	local label=$1 source=$2 processor=$3
+	local label=$1 source=$2 processor=$3 pin=$4 fosc=$5
 	local bin="$work/test_lockstep_progress_$processor"
 	# FW_PATH is required rather than defaulted (test_lockstep_pic_core.h), so
 	# this gate states its own instead of inheriting a part adapter's. The value
@@ -287,16 +304,17 @@ run_adapter() {
 	# failure reporting, not image loading. Naming that in the value keeps a
 	# reader from hunting for a file that was never meant to exist.
 	"$CXX" -std=c++17 -O0 -I"$fake" -I"$ROOT/test" \
-		-DCTX_ADDR=0x20 -DF_CPU_HZ=2000000UL \
+		-DCTX_ADDR=0x20 -DF_CPU_HZ="$fosc" -DFAKE_FOOTSW_PIN="\"$pin\"" \
 		-DFW_PATH='"<never loaded: fake gpsim ignores the image path>"' \
 		-DLOCKSTEP_ITERS=8 "$ROOT/$source" -o "$bin"
-	run_missing_pin "$label" "$processor" "$bin"
+	run_missing_pin "$label" "$processor" "$bin" "$pin"
 	run_wedge "$label" "$processor" "$bin" settle
 	run_wedge "$label" "$processor" "$bin" calibration
 	run_wedge "$label" "$processor" "$bin" lockstep
 }
 
-run_adapter PIC10F322 test/pic/test_lockstep_pic.cc p10f322
-run_adapter PIC10F320 test/pic10f320/gpsim/test_lockstep_pic.cc p10f320
+run_adapter PIC10F322 test/pic/test_lockstep_pic.cc p10f322 ra3 2000000UL
+run_adapter PIC10F320 test/pic10f320/gpsim/test_lockstep_pic.cc p10f320 ra3 2000000UL
+run_adapter PIC12F675 test/pic/test_lockstep_pic12f675.cc p12f675 gpio5 4000000UL
 
 printf 'lock-step progress failure validation: %d checks, 0 failures\n' "$checks"
