@@ -6,5 +6,6 @@
 // independently compiled shared pure core after every loop iteration.
 
 #define PIC_LOCKSTEP_DEFAULT_PROC_NAME "p10f320"
+#define PIC_LOCKSTEP_PROGRAM_WORDS 0x100u
 
 #include "pic/test_lockstep_pic_core.h"

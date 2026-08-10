@@ -1,0 +1,117 @@
+# gpsim command script: drive the PIC12F675 footswitch and snapshot GPIO.
+#
+# WHAT THIS IS
+#   A register-level functional check of the PIC shell (bypass_mcu_pic12f675.c)
+#   running inside gpsim. The pure debounce core and the output drivers are
+#   already covered by the host/formal suite; the PIC SHELL -- the TMR0 tick, the
+#   footswitch read on GP5, the debounce integrate/step wiring, and the GPIO
+#   outputs -- has no simavr equivalent, so this drives the real built HEX in
+#   gpsim and asserts the observable register state at five checkpoints. The
+#   wrapper test/pic/run_gpsim_test.sh parses the snapshots and turns them into
+#   PASS/FAIL.
+#
+# HOW IT IS RUN (see the wrapper / `make pic12f675-test-gpsim`)
+#   gpsim -i -pp12f675 <variant>_simcal.hex -c test/pic/pic12f675_footswitch_toggle.stc
+#   NOTE THE IMAGE: this lane runs the DERIVED *_simcal.hex, not the shipping
+#   HEX. An uninjected image cannot run at all on this part -- the startup
+#   `CALL 0x3FF` walks off the end of flash and the part watchdog-resets in a
+#   loop with main() never reached. See `make pic12f675-simcal`.
+#   The image is supplied on the gpsim command line, so this script is
+#   variant-agnostic. gpsim names the pins gpio0..gpio5.
+#
+# PINS (per src/bypass_pins_pic12f675.h)
+#   GP5 = footswitch (input + weak pull-up; high = released, low = pressed)
+#   GP0 = status LED  (high = effect ENGAGED, low = BYPASS)
+#   GP1/GP2 = the active variant's control output(s)
+#   Only GPIO is snapshotted, once per checkpoint: this part has no LATx, so the
+#   port IS the latch and a second read would return the same register.
+#
+# TIMING -- EVERY NUMBER HERE IS RE-DERIVED, NOT SCALED FROM THE 10F32x
+#   FOSC = 4 MHz -> instruction clock FOSC/4 = 1 MHz -> 1000 cycles per 1 ms.
+#   The tick is NOT 1 ms on this part: TMR0 runs unprescaled and rolls over every
+#   256 instruction cycles, and the shell counts four rollovers, so
+#       1 tick = 4 * 256 = 1024 cycles = 1.024 ms.
+#   The debounce counts TICKS, not milliseconds, so every checkpoint below is
+#   placed on a tick boundary -- N * 1024 -- and the arithmetic is written in
+#   ticks. PRESSED_THRESH(8) ticks register a press; RELEASE_THRESH(25) ticks
+#   re-arm.
+#
+#   Blocking actuation steals ticks from the polled loop (the relay/mute drivers
+#   busy-wait), so checkpoints sit well clear of those windows. Measured in gpsim
+#   on the real images, for the placement below:
+#     - relay variant's power-on bypass pulse holds GP1 until cycle 13312
+#       (13 ticks) -- INIT_BYPASS at 23040 is 10 ticks clear of it;
+#     - a toggle's relay coil pulse runs ~12288 cycles (12 ticks) and the mute
+#       variant's second stage lands ~6144 cycles (6 ticks) after the first, so
+#       neither has settled at PRESS1_LOW -- which is why the wrapper asserts
+#       only the LED BIT there, never the full output pattern.
+#
+# SCENARIO (two MOMENTARY presses; the effect latches between them)
+#   tick   0..25  (cyc      0..25600)  : released -> BYPASS (power-on default)
+#   tick  25..55  (cyc  25600..56320)  : press #1 (30 ticks) -> ENGAGED, then released
+#   tick  55..130 (cyc  56320..133120) : released, effect stays ENGAGED (latching)
+#   tick 130..160 (cyc 133120..163840) : press #2 (30 ticks) -> back to BYPASS
+#
+# CHECKPOINTS (the wrapper keys on these exact === labels ===)
+#   INIT_BYPASS  @ 23040  (tick 22.5) : LED off, GP5 == 1 (released). Past the
+#                         relay variant's 13-tick power-on pulse.
+#   PRESS1_EARLY @ 31744  (tick 31)   : LED still OFF, GP5 == 0 (pressed).
+#                         This is 6 ticks after the press edge (tick 25) and
+#                         2 ticks BEFORE the earliest legitimate toggle, which is
+#                         tick 25 + PRESSED_THRESH(8) = tick 33 = cycle 33792 --
+#                         measured, and it lands on that cycle exactly. It pins
+#                         that the TICK GATES the loop: the debounce demands 8
+#                         SEPARATED samples, so a correct firmware is still
+#                         mid-debounce here. A firmware whose tick stopped gating
+#                         (a T0IF poll that never re-blocks) free-runs; its loop
+#                         still spends a few hundred instruction cycles per
+#                         sample, so it crosses the threshold within roughly one
+#                         tick of the edge -- around cycle 26600, five ticks
+#                         BEFORE this checkpoint -> LED already ON here -> FAIL.
+#   PRESS1_LOW   @ 38400  (tick 37.5) : GP5 == 0 (still pressed), LED == 1 (the
+#                         effect toggled ON the press, not on release)
+#   ENGAGED      @ 76800  (tick 75)   : LED on and latched, GP5 == 1, and every
+#                         variant's output pattern has settled (last settle is
+#                         the relay's, at cycle 46080)
+#   BYPASS_AGAIN @ 204800 (tick 200)  : toggled back off; press #2 toggles at
+#                         tick 138 (cycle 141312) and the relay finishes its
+#                         pulse by cycle ~152600
+
+stimulus asynchronous_stimulus
+  initial_state 1
+  { 25600, 0,
+    56320, 1,
+    133120, 0,
+    163840, 1 }
+  name fsw
+end
+
+node n1
+attach n1 fsw gpio5
+
+break c 23040
+run
+echo ===INIT_BYPASS===
+gpio
+
+break c 31744
+run
+echo ===PRESS1_EARLY===
+gpio
+
+break c 38400
+run
+echo ===PRESS1_LOW===
+gpio
+
+break c 76800
+run
+echo ===ENGAGED===
+gpio
+
+break c 204800
+run
+echo ===BYPASS_AGAIN===
+gpio
+
+quit

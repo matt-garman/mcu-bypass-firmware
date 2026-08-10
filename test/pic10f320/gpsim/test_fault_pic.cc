@@ -7,6 +7,12 @@
 // their safe idle state every serviced iteration, so it adds three no-reset
 // physical-output correction cases to the 18 common injections.
 
+/* name-contract: exempt-begin (PIC_REG_ and PIC_FAULT_ names are C macro
+   families, not make vars) */
+#include "pic/pic10f32x_regs.h"          // PIC_REG_* device identity
+#include "pic/pic10f32x_fault_matrix.h"  // PIC_FAULT_* injection matrix
+/* name-contract: exempt-end */
+
 #define PIC_FAULT_DEFAULT_PROC_NAME "p10f320"
 #define PIC_FAULT_PROGRAM_WORDS 0x100u
 #if defined(OUTPUT_TQ2_RELAY)

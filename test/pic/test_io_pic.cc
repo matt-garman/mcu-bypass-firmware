@@ -3,6 +3,10 @@
 
 // PIC10F322 adapter for the shared built-HEX GPIO/pulse-timing harness.
 
+/* name-contract: exempt-begin (PIC_REG_ names are a C macro family, not make vars) */
+#include "pic/pic10f32x_regs.h"   // PIC_REG_* device identity
+/* name-contract: exempt-end */
+
 #define PIC_IO_DEFAULT_PROC_NAME "p10f322"
 #define PIC_IO_PART_NAME "PIC10F322"
 

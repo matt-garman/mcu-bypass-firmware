@@ -25,6 +25,29 @@ GPSIM_TIMEOUT_SECONDS="${GPSIM_TIMEOUT_SECONDS:-60}"
 # one part -- so the PIC10F320 lanes go on passing while simulating a PIC10F322.
 PROC="${PIC_GPSIM_PROC:-p10f322}"
 
+# The part's REGISTER IDENTITY -- which registers a snapshot is read from, which
+# bits carry the footswitch and LED, and what to call them. A sourced fragment
+# rather than a handful of separate environment channels, so a lane cannot set
+# half of them: a part whose register names differ but whose masks did not follow
+# would read the right register and test the wrong bit, which is the one failure
+# in here that could still score a pass. One file, set entirely or not at all.
+GPSIM_REGS="${PIC_GPSIM_REGS:-$(dirname "${BASH_SOURCE[0]}")/pic10f32x_gpsim_regs.sh}"
+if [ ! -r "$GPSIM_REGS" ]; then
+	echo "FAIL: missing gpsim register identity fragment: $GPSIM_REGS"
+	exit 1
+fi
+# shellcheck source=test/pic/pic10f32x_gpsim_regs.sh
+. "$GPSIM_REGS" || { echo "FAIL: could not source $GPSIM_REGS"; exit 1; }
+for _required in GPSIM_PORT_REG GPSIM_PORT_LABEL GPSIM_LATCH_REG GPSIM_LATCH_LABEL \
+		GPSIM_FOOTSW_MASK GPSIM_FOOTSW_LABEL GPSIM_LED_MASK GPSIM_LED_LABEL \
+		GPSIM_OUTPUT_MASK; do
+	if [ -z "${!_required:-}" ]; then
+		echo "FAIL: $GPSIM_REGS does not define $_required"
+		exit 1
+	fi
+done
+unset _required
+
 fails=0
 note() { printf '  %-14s %s\n' "$1" "$2"; }
 fail() { echo "  FAIL: $1"; fails=$((fails + 1)); }
@@ -32,6 +55,18 @@ pass() { echo "  ok:   $1"; }
 
 # Bit test on a hex value. $1=hexval $2=bitmask(hex) -> echoes 1 if set.
 bit() { echo $(( ( $1 & $2 ) != 0 )); }
+
+# Format one checkpoint's two snapshots for the log. On a part with no LATx the
+# port IS the latch, so both snapshots are the same register read twice; print it
+# once there rather than emitting "gpio=0x3 gpio=0x3" and inviting a reader to
+# hunt for a difference that cannot exist.
+snapshot() {
+	if [ "$GPSIM_PORT_REG" = "$GPSIM_LATCH_REG" ]; then
+		printf '%s=%s' "$GPSIM_PORT_REG" "$1"
+	else
+		printf '%s=%s %s=%s' "$GPSIM_PORT_REG" "$1" "$GPSIM_LATCH_REG" "$2"
+	fi
+}
 
 # gpsim_run <hexfile> <stcfile> <what>
 #

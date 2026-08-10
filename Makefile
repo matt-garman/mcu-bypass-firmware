@@ -1135,17 +1135,28 @@ pic10f322: $(PIC10F322_CORE_SRC) $(PIC10F322_HEADERS) $(foreach v,$(CLASSIC_VARI
 # --- PIC CONFIG-word verification --------------------------------------------
 # Host-compiled check (the PIC analogue of test-fuses, but STRONGER): it parses
 # the CONFIG word XC8 emitted into each built HEX from the shell's `#pragma
-# config` and asserts it matches the documented design intent (FOSC=INTOSC,
-# WDTE=ON, MCLRE=OFF, BOREN=ON, ...). The PIC CONFIG word lives in firmware
-# source -- no host/formal test sees it and the PIC shell has no simavr harness
-# -- so a fat-fingered pragma would otherwise only bite on silicon. Reads the
-# ACTUAL compiler output rather than a Makefile-injected value.
+# config` and asserts it matches the documented design intent (the oscillator
+# selection, WDTE=ON, MCLRE=OFF, BOREN=ON, ...). The PIC CONFIG word lives in
+# firmware source -- no host/formal test sees it and the PIC shells have no
+# simavr harness -- so a fat-fingered pragma would otherwise only bite on
+# silicon. Reads the ACTUAL compiler output rather than a Makefile-injected value.
+#
+# One mechanism, one decode table per part. The PIC10F322 and PIC10F320 share a
+# table (same address, same layout, same expected word -- only the printed label
+# differs), while the PIC12F675 shares the CONFIG ADDRESS and nothing else, so it
+# brings its own. Declared here, ahead of every rule that names them: a
+# prerequisite list is expanded when the rule is READ, so a header variable
+# defined further down expands to nothing and silently stops being a dependency.
+PIC10F32X_GPSIM_REGS = test/pic/pic10f32x_gpsim_regs.sh
+PIC_CONFIG_CORE_HDR  = test/pic/test_config_pic_core.h
+PIC10F32X_CONFIG_HDR = test/pic/pic10f32x_config.h
+PIC12F675_CONFIG_HDR = test/pic/pic12f675_config.h
 #
 # Depends on `pic10f322` to build the HEX, and runs against every produced variant
 # (all share the same #pragma config, so each must match -- also catches
 # divergence). Skips cleanly when XC8 is absent (no HEX produced).
-test/pic/test_config_pic: test/pic/test_config_pic.c
-	$(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) -DPIC_DEVICE_NAME='"PIC$(PIC10F322_CHIP)"' $< -o $@
+test/pic/test_config_pic: test/pic/test_config_pic.c $(PIC_CONFIG_CORE_HDR) $(PIC10F32X_CONFIG_HDR)
+	$(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) -Itest -DPIC_DEVICE_NAME='"PIC$(PIC10F322_CHIP)"' $< -o $@
 
 .PHONY: pic10f322-test-config
 pic10f322-test-config: pic10f322 test/pic/test_config_pic
@@ -1286,7 +1297,7 @@ done; \
 endef
 
 .PHONY: pic10f322-test-gpsim
-pic10f322-test-gpsim: pic10f322
+pic10f322-test-gpsim: pic10f322 $(PIC10F32X_GPSIM_REGS)
 	@$(call gpsim_wrapper_preflight,PIC10F322); \
 	$(fw_image_sh); \
 	fail=0; \
@@ -1441,6 +1452,14 @@ PIC_GPSIM_BOOTSTRAP_HDR = test/pic/gpsim_bootstrap.h
 PIC10F322_FAULT_CORE_HDR = test/pic/test_fault_pic_core.h
 PIC10F322_IO_CORE_HDR = test/pic/test_io_pic_core.h
 PIC10F322_LOCKSTEP_CORE_HDR = test/pic/test_lockstep_pic_core.h
+# PIC10F32x device identity (register addresses, gpsim name tokens, masks,
+# expected init values) and guard policy (which locations the fault lane
+# injects, and with what). The harness cores carry only mechanism, so an edit to
+# either of these changes what every PIC10F32x gpsim binary asserts or corrupts
+# -- they are prerequisites exactly as the cores are. Both parts' adapters
+# consume them; the PIC10F320 lanes compile inline and so cannot go stale.
+PIC10F32X_REGS_HDR = test/pic/pic10f32x_regs.h
+PIC10F32X_FAULT_MATRIX_HDR = test/pic/pic10f32x_fault_matrix.h
 PIC_SOAK_SRC = test/pic/test_soak_pic.cc
 PIC_SOAK_SAMPLING_HDR = test/pic/soak_sampling.h
 PIC10F322_SOAK_DEPS = $(PIC_SOAK_SRC) $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
@@ -1564,7 +1583,8 @@ PIC10F322_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags 
 		$(PIC10F322_FAULT_SRC) -o $(PIC10F322_FAULT_BIN) -lgpsim
 
 $(PIC10F322_FAULT_BIN): $(PIC10F322_FAULT_SRC) $(PIC10F322_FAULT_CORE_HDR) $(PIC_PIN_LOOKUP_HDR) \
-                  $(PIC_GPSIM_BOOTSTRAP_HDR)
+                  $(PIC_GPSIM_BOOTSTRAP_HDR) $(PIC10F32X_REGS_HDR) \
+                  $(PIC10F32X_FAULT_MATRIX_HDR)
 	$(PIC10F322_FAULT_COMPILE)
 
 .PHONY: pic10f322-test-fault
@@ -1676,7 +1696,7 @@ PIC10F322_IO_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags gli
 		$(PIC10F322_IO_SRC) -o $(PIC10F322_IO_BIN) -lgpsim
 
 $(PIC10F322_IO_BIN): $(PIC10F322_IO_SRC) $(PIC10F322_IO_CORE_HDR) $(PIC_PIN_LOOKUP_HDR) \
-               $(PIC_GPSIM_BOOTSTRAP_HDR)
+               $(PIC_GPSIM_BOOTSTRAP_HDR) $(PIC10F32X_REGS_HDR)
 	$(PIC10F322_IO_COMPILE)
 
 .PHONY: pic10f322-test-io
@@ -2516,6 +2536,7 @@ AVR_TEST_BINARIES_RETIRED = $(foreach v,cd4053 mute relay cd4053_tmux mute_tmux,
 clean:
 	rm -f $(AVR_SIM_BINARIES) $(AVR_SOAK_BINARIES) $(AVR_TEST_BINARIES_RETIRED) \
 		test/host/test_logic_host test/pic/test_config_pic test/pic/test_soak_pic \
+		test/pic/test_config_pic12f675 \
 		test/pic/test_fault_pic test/pic/test_lockstep_pic test/pic/test_io_pic \
 		test/formal/test_model_check test/formal/test_symbolic test/avr/test_fuses \
 		test/formal/test_symbolic.bc test/formal/bypass_pure_klee.bc \
@@ -2527,7 +2548,7 @@ clean:
 	@# -reorganization forms so an existing worktree carrying either is cleaned too.
 	rm -rf $(KLEE_OUT_DIR) test/formal/klee-out-* test/formal/klee-last \
 		test/klee-out-* test/klee-last test/avr/__pycache__
-	rm -rf $(AVR_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(XT_BUILD_DIR)
+	rm -rf $(AVR_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(XT_BUILD_DIR) $(PIC12F675_BUILD_DIR)
 	@# Retired build directory (pre-v0.9.8 spelling of $(PIC10F322_BUILD_DIR)),
 	@# for the same reason AVR_TEST_BINARIES_RETIRED exists: without it a
 	@# worktree that predates the rename keeps a stale build_pic/ through every
@@ -2718,8 +2739,8 @@ test-supply-chain:
 	./test/test_supply_chain.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 36/75 counts,
-# so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
+# image/host rebuild triggering. The script enforces the canonical 36/75/36
+# counts, so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
 	@# Same fake-XC8 regression against the PIC10F320 contract: its own
@@ -2748,6 +2769,32 @@ test-pic-build:
 	PB_RETURN_STACK_REQUIRED=1 \
 	PB_SELECTOR_ROUTING=1 PB_SIZE_TARGET='pic10f320-size' \
 	PB_REBUILD_REQUIRED=1 \
+		./test/test_pic_build.sh
+	@# And again against the PIC12F675 contract. Same modular shape as the
+	@# PIC10F322 (one target builds every variant), so the overrides differ only
+	@# in the names and the budget -- which is exactly the pair a copy-adapted
+	@# lane gets wrong, and exactly what a passing budget gate would hide.
+	PB_LABEL='PIC12F675' \
+	PB_TARGET='pic12f675' \
+	PB_CC_VAR='PIC_CC' \
+	PB_BUILD_DIR_VAR='PIC12F675_BUILD_DIR' \
+	PB_BUILD_DIR='build_pic12f675' \
+	PB_FW_BASE_VAR='FW_BASE' \
+	PB_FW_BASE='bypass' \
+	PB_TAG_VAR='PIC12F675_TAG' \
+	PB_TAG='pic12f675' \
+	PB_FLASH_VAR='PIC12F675_FLASH_WORDS' \
+	PB_FLASH_WORDS='1024' \
+	PB_VARIANT_VAR='VARIANTS' \
+	PB_VARIANT='cd4053_simple' \
+	PB_MATRIX_TARGET='pic12f675' \
+	PB_MATRIX_VARIANTS_VAR='VARIANTS' \
+	PB_MATRIX_VARIANTS='cd4053_simple cd4053_with_mute tq2_l2_5v_relay' \
+	PB_MATRIX_IMAGES='bypass-pic12f675-cd4053_simple.hex bypass-pic12f675-cd4053_with_mute.hex bypass-pic12f675-tq2_l2_5v_relay.hex' \
+	PB_MATRIX_FAIL_IMAGE='bypass-pic12f675-tq2_l2_5v_relay.hex' \
+	PB_MATRIX_REQUIRE_COMPLETE=1 PB_MATRIX_UNSUPPORTED='unknown' \
+	PB_STACK_TARGET='pic12f675-test-stack-bound' \
+	PB_STACK_DEVICE_VAR='PIC12F675_DEVICE_INI' \
 		./test/test_pic_build.sh
 
 # Exact-set and hash checks for the tag workflow's committed/listed/fresh images.
@@ -4622,7 +4669,7 @@ pic10f320-test-config: pic10f320-variants
 		echo "no PIC10F320 HEX in $(PIC10F320_BUILD_DIR)/ (XC8 absent?); skipping CONFIG-word check"; \
 		$(SKIP); \
 	fi; \
-	$(HOSTCC) $(HOST_CFLAGS) -DPIC_DEVICE_NAME='"PIC10F320"' \
+	$(HOSTCC) $(HOST_CFLAGS) -Itest -DPIC_DEVICE_NAME='"PIC10F320"' \
 		test/pic/test_config_pic.c -o $(PIC10F320_BUILD_DIR)/test_config_pic || exit 1; \
 	$(PIC10F320_BUILD_DIR)/test_config_pic $$hexes
 
@@ -4655,7 +4702,7 @@ pic10f320-test-config: pic10f320-variants
 # STRICT_TOOLS is forwarded as well as probed. The Make-level preflight decides
 # skip-vs-fail before the wrappers run; forwarding keeps the wrappers' own strict
 # path consistent when they are reached, exactly as the PIC10F322 lane does.
-pic10f320-test-gpsim: variant-selectors-valid pic10f320
+pic10f320-test-gpsim: variant-selectors-valid pic10f320 $(PIC10F32X_GPSIM_REGS)
 	@$(call gpsim_wrapper_preflight,PIC10F320); \
 	if [ ! -f "$(PIC10F320_HEX)" ]; then \
 		echo "no $(PIC10F320_HEX) (XC8 absent?); skipping PIC10F320 gpsim test"; $(SKIP); \
@@ -4966,6 +5013,543 @@ pic10f320-clean:
 	rm -rf $(PIC10F320_BUILD_DIR)
 
 # ============================================================================
+# BUILD -- PIC12F675 (Microchip XC8) cross-build
+# ============================================================================
+#
+# The CLASSIC mid-range PIC. Same toolchain as the PIC10F32x lanes (one XC8, one
+# device pack), a different silicon generation: no LATx, no TMR2, no OSCCON, no
+# WDTCON, a second register bank, and a 1024-word flash that is twice the
+# PIC10F322's. That last fact is why this part builds the MODULAR architecture
+# -- the shipping pure core plus an unmodified output driver, exactly like the
+# PIC10F322 and unlike the hand-inlined PIC10F320.
+#
+# `make pic12f675` builds every variant and gates each on the device's
+# 1024-word flash budget. STANDALONE, like its PIC10F322 sibling: deliberately
+# not part of `make test`, and it skips cleanly when XC8 is absent.
+#
+# NAMING follows the rule stated in the PIC10F322 section: a PIC_* name with no
+# part in it is shared by every PIC part; anything whose VALUE is a property of
+# this chip is spelled PIC12F675_*. Two values here are the ones that must never
+# be inherited from a sibling, because a wrong one produces a PASSING test
+# rather than a failing one: PIC12F675_FLASH_WORDS (1024, not 512) and
+# PIC12F675_XTAL (4 MHz fixed INTOSC, not the 322's 2 MHz).
+#
+# THE UL SUFFIX ON PIC12F675_XTAL IS LOAD-BEARING. _XTAL_FREQ reaches the shell's
+# static_assert(_XTAL_FREQ == 4000000UL, ...); a bare 4000000 is essentially
+# signed, so the comparison mixes essential type categories and trips MISRA
+# Rule 10.4 in pic12f675-analyze-misra. PIC10F322_XTAL carries the same suffix
+# for the same reason.
+
+PIC12F675_CHIP  ?= 12F675
+PIC12F675_TAG   ?= pic12f675
+PIC12F675_XTAL  ?= 4000000UL
+PIC12F675_BUILD_DIR ?= build_pic12f675
+override PIC12F675_HEXES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(PIC12F675_BUILD_DIR)/$(call fw_image,$(v),$(PIC12F675_TAG)).hex)
+override PIC12F675_ASSEMBLIES := $(PIC12F675_HEXES:.hex=.s)
+override PIC12F675_SYMBOLS := $(PIC12F675_HEXES:.hex=.sym)
+override PIC12F675_BUILD_PRODUCTS := $(PIC12F675_HEXES) $(PIC12F675_ASSEMBLIES) $(PIC12F675_SYMBOLS)
+# PIC12F675 device budget: 1024 words flash / 64 B RAM. TWICE the PIC10F322's
+# flash, which is the measured reason the modular architecture fits here (the
+# largest variant lands near 51%, against the 322's 92%) -- see
+# docs/pic12f675_feasibility.md section 3.
+PIC12F675_FLASH_WORDS ?= 1024
+# NB: GPSIM, GPSIM_TIMEOUT_SECONDS and PIC_XC8_INCLUDE are SHARED across every
+# PIC part and are declared once in the PIC10F322 section above -- per the
+# naming rule there, a PIC_* name with no part in it belongs to all of them.
+# This part's gpsim processor name arrives with its gpsim lane, not here.
+
+# The PIC shell + the unchanged pure core (the AVR counterpart is CORE_SRC =
+# bypass_mcu_avr_classic.c + bypass_pure.c).
+PIC12F675_CORE_SRC = src/bypass_mcu_pic12f675.c src/bypass_pure.c
+
+# Headers that, if changed, should rebuild the PIC images: the AVR FW_HEADERS
+# set with the PIC pin map substituted for the AVR-classic one.
+PIC12F675_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
+              src/bypass_output_common.h src/bypass_pins_pic12f675.h \
+              src/bypass_blocking_delay.h src/bypass_static_assert.h \
+              src/bypass_compile_checks.h \
+              src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
+              src/bypass_output_tq2_l2_5v_relay.h
+
+# XC8 compile flags: select the PIC12F675 + its DFP, C99 (no C11 in XC8), the
+# PIC pin map, and _XTAL_FREQ for __delay_ms.
+PIC12F675_CFLAGS = -mcpu=$(PIC12F675_CHIP) -mdfp=$(PIC_DFP) -std=c99 -O2 \
+             -DBYPASS_MCU_PIC12F675 -D_XTAL_FREQ=$(PIC12F675_XTAL)
+
+# --- PIC static analysis (cppcheck + MISRA addon) ----------------------------
+# The cppcheck/MISRA register-correct parse of the PIC shell needs the real XC8
+# + DFP headers (the PIC analogue of avr-libc). XC8's base include dir supplies
+# xc.h; the DFP supplies pic.h + the device header proc/pic12f675.h, selected by
+# the chip macro -D_<CHIP> (e.g. -D_12F675). The platform is `pic8` -- the
+# CLASSIC mid-range core -- NOT the `pic8-enhanced` the PIC10F32x lanes use.
+# Both exist in cppcheck 2.13.0 and a bad --platform name is a hard error, so
+# a clean run is itself the check that the right one was named.
+PIC12F675_DFP_INCLUDE  ?= $(PIC_DFP)/pic/include
+PIC12F675_CHIP_MACRO   ?= _$(PIC12F675_CHIP)
+
+# Defines/includes shared by both PIC cppcheck passes: select the device header,
+# pin the PIC configuration so cppcheck does not also explore the AVR branch of
+# bypass_output_common.h, and add the XC8 + DFP header search paths.
+PIC12F675_CPPCHECK_CPPFLAGS = -D__XC8 -D$(PIC12F675_CHIP_MACRO) -D_XTAL_FREQ=$(PIC12F675_XTAL) \
+                        -DBYPASS_MCU_PIC12F675 -U__AVR__ -UBYPASS_MCU_AVR_CLASSIC \
+                        -Isrc -I$(PIC12F675_DFP_INCLUDE) -I$(PIC12F675_DFP_INCLUDE)/proc -I$(PIC_XC8_INCLUDE)
+
+# Plain bug-finding pass (parallel to analyze-cppcheck for the AVR build).
+PIC12F675_CPPCHECK_FLAGS ?= --enable=warning,style,performance,portability \
+                      --std=c11 --platform=pic8 --error-exitcode=2 \
+                      --inline-suppr --max-configs=1 \
+                      --suppress=missingIncludeSystem \
+                      --suppress=unmatchedSuppression \
+                      --suppress=unusedStructMember \
+                      '--suppress=*:$(PIC_XC8_INCLUDE)/*' \
+                      '--suppress=*:$(PIC12F675_DFP_INCLUDE)/*' \
+                      $(PIC12F675_CPPCHECK_CPPFLAGS)
+
+# MISRA addon pass (parallel to MISRA_CPPCHECK_FLAGS for the AVR build). Notes:
+#   - System headers (XC8 base + DFP) are outside the compliance boundary, like
+#     avr-libc for the AVR run -> suppressed by path.
+#   - --suppress=misra-config: cppcheck cannot value-flow-model the volatile SFR
+#     bitfield unions from the Microchip headers (e.g. INTCONbits.T0IF in the
+#     tick poll); that is a cppcheck modeling limitation on adopted toolchain
+#     headers, NOT a code defect.
+PIC12F675_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 --platform=pic8 \
+                      --enable=style --inline-suppr --max-configs=1 \
+                      --suppress=missingIncludeSystem \
+                      --suppress=unmatchedSuppression \
+                      --suppress=misra-config \
+                      '--suppress=*:$(PIC_XC8_INCLUDE)/*' \
+                      '--suppress=*:$(PIC12F675_DFP_INCLUDE)/*' \
+                      $(PIC12F675_CPPCHECK_CPPFLAGS)
+
+# Build every PIC variant and enforce the flash-word budget. The variant -D
+# selector and driver source are chosen inline (the same case-pattern the AVR
+# analyze/budget recipes use, since $(macro_<v>)/$(src_<v>) cannot expand inside
+# a shell loop). Sources are passed as make-time absolute paths so the compiler
+# can run with its cwd in PIC12F675_BUILD_DIR.
+.PHONY: pic12f675
+pic12f675: $(PIC12F675_CORE_SRC) $(PIC12F675_HEADERS) $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(src_$(v)))
+	@if [ "$(CLASSIC_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS must not be empty"; exit 2; \
+	fi; \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_DUPLICATE)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS must not contain duplicate names"; exit 2; \
+	fi; \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_UNKNOWN)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS contains unsupported names; supported: $(CLASSIC_VARIANTS_SUPPORTED)"; exit 2; \
+	fi; \
+	if [ "$(if $(filter-out $(VARIANTS),$(CLASSIC_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
+		echo "FAIL: VARIANTS must contain every supported name; required: $(CLASSIC_VARIANTS_SUPPORTED)"; exit 2; \
+	fi
+	@rm -f $(PIC12F675_BUILD_PRODUCTS)
+	@if [ ! -x "$(PIC_CC)" ] && ! command -v $(PIC_CC) >/dev/null 2>&1; then \
+		echo "XC8 not found at $(PIC_CC); skipping PIC build (override with PIC_CC=...)"; \
+		$(SKIP); \
+	fi; \
+	$(IHEX_VALIDATOR_CHECK); \
+	mkdir -p $(PIC12F675_BUILD_DIR); \
+	pic_complete=0; \
+	cleanup_pic_products() { \
+		rc=$$?; \
+		if [ $$rc -ne 0 ] || [ $$pic_complete -ne 1 ]; then \
+			rm -f $(PIC12F675_BUILD_PRODUCTS) || rc=1; \
+			[ $$rc -ne 0 ] || rc=1; \
+		fi; \
+		trap - 0 1 2 15; exit $$rc; \
+	}; \
+	trap cleanup_pic_products 0 1 2 15; \
+	export PIC_RECIPE_PID=$$$$; \
+	LC_ALL=C; export LC_ALL; \
+	budget="$(PIC12F675_FLASH_WORDS)"; \
+	case "$$budget" in \
+		''|*[!0-9]*) echo "FAIL: PIC12F675_FLASH_WORDS must be a positive decimal integer"; exit 1 ;; \
+	esac; \
+	while [ "$${#budget}" -gt 1 ] && [ "$${budget#0}" != "$$budget" ]; do \
+		budget=$${budget#0}; \
+	done; \
+	if [ "$$budget" = 0 ]; then \
+		echo "FAIL: PIC12F675_FLASH_WORDS must be a positive decimal integer"; exit 1; \
+	fi; \
+	echo "=== PIC12F675 build + flash-budget ($$budget words) ==="; \
+	$(fw_image_sh); \
+	fail=0; \
+	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
+		case $$v in \
+			cd4053_with_mute) m=CD4053_WITH_MUTE; drv=src/bypass_output_cd4053_with_mute.c ;; \
+			tq2_l2_5v_relay)  m=TQ2_L2_5V_RELAY;  drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
+			*)                m=CD4053_SIMPLE;    drv=src/bypass_output_cd4053_simple.c ;; \
+		esac; \
+		stem=`fw_image_of "$$v" $(PIC12F675_TAG)`; name=$$stem.hex; \
+		hex=$(PIC12F675_BUILD_DIR)/$$name; asm=$(PIC12F675_BUILD_DIR)/$$stem.s; sym=$(PIC12F675_BUILD_DIR)/$$stem.sym; \
+		if ! rm -f "$$hex" "$$asm" "$$sym"; then \
+			echo "FAIL: could not remove stale PIC12F675 products for variant $$v before compiling"; fail=1; continue; \
+		fi; \
+		out=`cd $(PIC12F675_BUILD_DIR) && $(PIC_CC) $(PIC12F675_CFLAGS) -D$$m \
+			$(addprefix $(CURDIR)/,$(PIC12F675_CORE_SRC)) $(CURDIR)/$$drv \
+			-o $$name 2>&1` \
+			|| { printf '%s\n' "$$out"; echo "FAIL: variant $$v did not compile for PIC12F675"; rm -f "$$hex"; fail=1; continue; }; \
+		if [ ! -s "$$hex" ]; then \
+			echo "FAIL: XC8 reported success but did not produce a nonempty $$hex"; \
+			printf '%s\n' "$$out"; rm -f "$$hex"; fail=1; continue; \
+		fi; \
+		if ! $(IHEX_VALIDATOR) "$$hex"; then \
+			echo "FAIL: XC8 produced an invalid Intel HEX image for variant $$v"; \
+			rm -f "$$hex"; fail=1; continue; \
+		fi; \
+		dec=`printf '%s\n' "$$out" | grep -E 'Program space' \
+			| grep -oE '\( *[0-9]+ *\)' | head -1 | tr -d '() '`; \
+		if [ -z "$$dec" ]; then \
+			echo "FAIL: $$v: could not parse program-word count from XC8 output:"; \
+			printf '%s\n' "$$out"; rm -f "$$hex"; fail=1; continue; \
+		fi; \
+		while [ "$${#dec}" -gt 1 ] && [ "$${dec#0}" != "$$dec" ]; do \
+			dec=$${dec#0}; \
+		done; \
+		over_budget=0; \
+		if [ "$${#dec}" -gt "$${#budget}" ]; then \
+			over_budget=1; \
+		elif [ "$${#dec}" -eq "$${#budget}" ]; then \
+			cmp=`$(AWK) -v a="x$$dec" -v b="x$$budget" \
+				'BEGIN { print (a > b ? "gt" : "le") }'`; cmp_rc=$$?; \
+			if [ $$cmp_rc -ne 0 ]; then \
+				echo "FAIL: $$v: could not compare program usage with flash budget"; \
+				rm -f "$$hex"; fail=1; continue; \
+			fi; \
+			case "$$cmp" in \
+				gt) over_budget=1 ;; \
+				le) ;; \
+				*) echo "FAIL: $$v: invalid flash-budget comparison result"; \
+					rm -f "$$hex"; fail=1; continue ;; \
+			esac; \
+		fi; \
+		pct=`$(AWK) -v u="$$dec" -v t="$$budget" \
+			'BEGIN { printf "%.1f", u * 100 / t }'`; pct_rc=$$?; \
+		pct_integer=$${pct%.*}; pct_fraction=$${pct#*.}; pct_valid=1; \
+		[ "$$pct_integer" != "$$pct" ] || pct_valid=0; \
+		case "$$pct_integer" in ''|*[!0-9]*) pct_valid=0 ;; esac; \
+		case "$$pct_fraction" in [0-9]) ;; *) pct_valid=0 ;; esac; \
+		if [ $$pct_rc -ne 0 ] || [ $$pct_valid -ne 1 ]; then \
+			echo "FAIL: $$v: could not calculate flash usage percentage"; \
+			rm -f "$$hex"; fail=1; continue; \
+		fi; \
+		if [ $$over_budget -eq 1 ]; then \
+			echo "FAIL: $$v uses $$dec words ($${pct}%) -- exceeds $$budget"; rm -f "$$hex"; fail=1; \
+		else \
+			echo "OK:   $$v -> $$hex : $$dec words ($${pct}%) of $$budget"; \
+		fi; \
+	done; \
+	[ $$fail -ne 0 ] || pic_complete=1; \
+	exit $$fail
+
+.PHONY: pic12f675-analyze pic12f675-analyze-cppcheck pic12f675-analyze-misra
+pic12f675-analyze: pic12f675-analyze-cppcheck pic12f675-analyze-misra
+	@echo "=== PIC static analysis (cppcheck + MISRA) complete ==="
+
+pic12f675-analyze-cppcheck: src/bypass_mcu_pic12f675.c $(PIC12F675_HEADERS)
+	@if ! command -v $(CPPCHECK) >/dev/null 2>&1; then \
+		echo "cppcheck not installed; skipping PIC cppcheck analysis"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC_XC8_INCLUDE)/xc.h" ] || [ ! -f "$(PIC12F675_DFP_INCLUDE)/proc/pic12f675.h" ]; then \
+		echo "XC8/DFP headers not found; skipping PIC cppcheck analysis"; $(SKIP); \
+	fi; \
+	echo "cppcheck (PIC, pic8): $(CPPCHECK) src/bypass_mcu_pic12f675.c"; \
+	$(CPPCHECK) $(PIC12F675_CPPCHECK_FLAGS) src/bypass_mcu_pic12f675.c
+
+pic12f675-analyze-misra: src/bypass_mcu_pic12f675.c $(PIC12F675_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
+	@if ! command -v $(CPPCHECK) >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then \
+		echo "cppcheck and/or python3 not available; skipping PIC MISRA analysis"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(PIC_XC8_INCLUDE)/xc.h" ] || [ ! -f "$(PIC12F675_DFP_INCLUDE)/proc/pic12f675.h" ]; then \
+		echo "XC8/DFP headers not found; skipping PIC MISRA analysis"; $(SKIP); \
+	fi; \
+	echo "MISRA-C:2012 analysis -- PIC shell ($(CPPCHECK) + misra addon, pic8)"; \
+	out=`mktemp`; rc=0; \
+	PYTHONWARNINGS=ignore $(CPPCHECK) $(PIC12F675_MISRA_CPPCHECK_FLAGS) \
+		--suppressions-list=$(MISRA_SUPPRESS) --error-exitcode=2 \
+		src/bypass_mcu_pic12f675.c 2>>$$out || rc=1; \
+	if [ $$rc -ne 0 ]; then \
+		echo "MISRA findings NOT covered by a documented deviation:"; \
+		grep -E "misra-c2012" $$out || true; \
+		echo ""; \
+		echo "Fix it, or (if genuinely unavoidable) add a per-file entry to"; \
+		echo "$(MISRA_SUPPRESS) with a matching record in MISRA_COMPLIANCE.md."; \
+		rm -f $$out *.dump *.ctu-info cppcheck-addon-ctu-file-list*; \
+		exit 1; \
+	fi; \
+	rm -f $$out *.dump *.ctu-info cppcheck-addon-ctu-file-list*; \
+	echo "MISRA-C:2012 (PIC shell): clean (documented deviations waived per MISRA_COMPLIANCE.md)"
+
+# --- PIC12F675 hardware return-stack bound ------------------------------------
+# The classic mid-range core has the same 8-level hardware return stack as the
+# PIC10F32x (STACKDEPTH=8 in 12f675.ini, corroborated by hwstackdepth="8" in
+# edc/PIC12F675.PIC), and the same 2-level reserve applies for the same two
+# reasons the PIC10F322 block states: an in-circuit debugger consumes a level,
+# and a future ISR would cost a level plus its own tree.
+PIC12F675_DEVICE_INI    ?= $(PIC_DFP)/pic/dat/ini/$(shell printf '%s' '$(PIC12F675_CHIP)' | tr 'A-Z' 'a-z').ini
+PIC12F675_STACK_RESERVE ?= 2
+
+.PHONY: pic12f675-test-stack-bound
+pic12f675-test-stack-bound: pic12f675
+	@# One shell: skip only when the build produced no HEX. A current HEX without
+	@# its freshly generated assembly is a failed gate, never an absent-tool skip.
+	@$(fw_image_sh); \
+	have_hex=0; \
+	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
+		hex="$(PIC12F675_BUILD_DIR)/`fw_image_of "$$v" $(PIC12F675_TAG)`.hex"; \
+		if [ -e "$$hex" ] || [ -L "$$hex" ]; then have_hex=1; fi; \
+	done; \
+	if [ $$have_hex -eq 0 ]; then \
+		echo "no PIC12F675 HEX in $(PIC12F675_BUILD_DIR)/ (XC8 absent?); skipping stack-depth gate"; \
+		$(SKIP); \
+	fi; \
+	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
+		stem="$(PIC12F675_BUILD_DIR)/`fw_image_of "$$v" $(PIC12F675_TAG)`"; \
+		hex="$$stem.hex"; \
+		asm="$$stem.s"; \
+		if [ ! -f "$$hex" ] || [ -L "$$hex" ] || [ ! -s "$$hex" ]; then \
+			echo "FAIL: current PIC12F675 image is missing, empty, or not regular: $$hex"; exit 1; \
+		fi; \
+		if [ ! -f "$$asm" ] || [ -L "$$asm" ] || [ ! -s "$$asm" ]; then \
+			echo "FAIL: current PIC12F675 HEX exists but generated assembly is missing, empty, or not regular: $$asm"; exit 1; \
+		fi; \
+		$(PIC_STACK_DEPTH_GATE) "$$asm" \
+			"$(PIC12F675_DEVICE_INI)" "$(PIC12F675_STACK_RESERVE)" "PIC12F675 $$v" || exit 1; \
+	done; \
+	echo "=== PIC12F675 hardware stack bounded for every variant ==="
+
+# --- PIC12F675 gpsim CLI functional lane ---------------------------------------
+# The PIC12F675 counterpart of pic10f322-test-gpsim: drive the footswitch in
+# gpsim and assert the observable register state at settled checkpoints, for
+# every output variant and for both startup branches (released at power-on, and
+# held at power-on).
+#
+# THREE THINGS DIFFER FROM THE 10F32x LANES, and all three are why this part
+# needs its own stimuli rather than PIC_GPSIM_STC pointing at the shared ones:
+#   1. THE IMAGE. It runs the DERIVED *_simcal.hex, never the shipping HEX -- an
+#      uninjected image cannot reach main() at all on this part (see the
+#      calibration block below). This is the first lane to consume them.
+#   2. THE PIN. The stimulus attaches to gpio5, not ra3.
+#   3. THE CYCLE COUNTS. 4 MHz FOSC gives 1000 cycles/ms against the 322's 500,
+#      and the tick is 1024 cycles rather than 1 ms, so every checkpoint is
+#      re-derived on tick boundaries -- not scaled from the 322's numbers.
+# The part's REGISTER IDENTITY (GPIO for both port and latch, GP5 footswitch,
+# GP0 LED, 0x07 output mask) rides in on PIC_GPSIM_REGS so the two shared
+# wrappers need no per-part branch.
+PIC12F675_GPSIM_PROC       ?= p12f675
+PIC12F675_GPSIM_REGS       ?= test/pic/pic12f675_gpsim_regs.sh
+PIC12F675_GPSIM_TOGGLE_STC ?= test/pic/pic12f675_footswitch_toggle.stc
+PIC12F675_GPSIM_PON_STC    ?= test/pic/pic12f675_power_on_pressed.stc
+
+.PHONY: pic12f675-test-gpsim
+pic12f675-test-gpsim: pic12f675-simcal $(PIC12F675_GPSIM_REGS) \
+                     $(PIC12F675_GPSIM_TOGGLE_STC) $(PIC12F675_GPSIM_PON_STC)
+	@$(call gpsim_wrapper_preflight,PIC12F675); \
+	$(fw_image_sh); \
+	fail=0; ran=0; \
+	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
+		case $$v in \
+			cd4053_with_mute) el=0x7 ;; \
+			tq2_l2_5v_relay)  el=0x1 ;; \
+			*)                el=0x3 ;; \
+		esac; \
+		stem=`fw_image_of "$$v" $(PIC12F675_TAG)`; \
+		hex=$(PIC12F675_SIMCAL_DIR)/$${stem}_simcal.hex; \
+		if [ ! -f "$$hex" ]; then \
+			echo "no $$hex (XC8 absent?); skipping gpsim test for $$v"; continue; \
+		fi; \
+		ran=1; \
+		echo "--- gpsim register-level test: PIC12F675 variant $$v ---"; \
+		GPSIM=$(GPSIM) PIC_GPSIM_PROC=$(PIC12F675_GPSIM_PROC) \
+			PIC_GPSIM_REGS="$(CURDIR)/$(PIC12F675_GPSIM_REGS)" \
+			PIC_GPSIM_STC="$(CURDIR)/$(PIC12F675_GPSIM_TOGGLE_STC)" \
+			STRICT_TOOLS="$(STRICT_TOOLS)" \
+			test/pic/run_gpsim_test.sh $$hex $$el || fail=1; \
+		GPSIM=$(GPSIM) PIC_GPSIM_PROC=$(PIC12F675_GPSIM_PROC) \
+			PIC_GPSIM_REGS="$(CURDIR)/$(PIC12F675_GPSIM_REGS)" \
+			PIC_GPSIM_PON_STC="$(CURDIR)/$(PIC12F675_GPSIM_PON_STC)" \
+			STRICT_TOOLS="$(STRICT_TOOLS)" \
+			test/pic/run_gpsim_power_on_pressed.sh $$hex || fail=1; \
+	done; \
+	if [ $$fail -eq 0 ] && [ $$ran -eq 0 ]; then \
+		echo "no PIC12F675 simulator images (XC8 absent?); skipping gpsim lane"; \
+		$(SKIP); \
+	fi; \
+	exit $$fail
+
+# --- PIC12F675 CONFIG-word verification ---------------------------------------
+# Same mechanism as the PIC10F32x lane (test/pic/test_config_pic_core.h), its own
+# decode table (test/pic/pic12f675_config.h). See the PIC CONFIG-word block above
+# for why this check exists at all.
+#
+# The table is NOT the 10F32x's with the names changed. Two of this part's fields
+# have no 10F32x counterpart at all -- CPD, and the BG<1:0> bandgap calibration
+# bits, which the build must leave ERASED because they are factory trim the
+# programmer preserves (the CONFIG-word sibling of the OSCCAL story below). And
+# FOSC widens from one bit to three, which promotes it to a design-intent check:
+# six of the eight settings hand GP4 and/or GP5 to an oscillator, and GP5 is the
+# footswitch, so a wrong oscillator selection removes the only input this device
+# has -- a failure mode the single-bit 10F32x FOSC simply cannot have.
+test/pic/test_config_pic12f675: test/pic/test_config_pic12f675.c $(PIC_CONFIG_CORE_HDR) $(PIC12F675_CONFIG_HDR)
+	$(HOSTCC) $(HOST_CFLAGS) $(SANITIZE) -Itest -DPIC_DEVICE_NAME='"PIC$(PIC12F675_CHIP)"' $< -o $@
+
+.PHONY: pic12f675-test-config
+pic12f675-test-config: pic12f675 test/pic/test_config_pic12f675
+	@hexes=`ls $(PIC12F675_BUILD_DIR)/$(FW_BASE)-$(PIC12F675_TAG)-*.hex 2>/dev/null`; \
+	if [ -z "$$hexes" ]; then \
+		echo "no PIC12F675 HEX in $(PIC12F675_BUILD_DIR)/ (XC8 absent?); skipping CONFIG-word check"; \
+		$(SKIP); \
+	fi; \
+	./test/pic/test_config_pic12f675 $$hexes
+
+# --- PIC12F675 oscillator calibration word (simulator images) -----------------
+# THE SHIPPING IMAGE CANNOT RUN IN A SIMULATOR, and that is not a defect. On this
+# part the oscillator trim lives in FLASH at the last program word (0x3FF, the
+# device pack's ".oscval" CalDataZone) and is written at the factory; XC8 emits a
+# `CALL 0x3FF` in startup and expects a `RETLW k` waiting there. A programmer
+# preserves that word, so a built HEX never contains it -- in gpsim the program
+# counter runs off the end of flash and the part watchdog-resets in a LOOP, with
+# main() never reached. Every simulator lane for this part therefore runs against
+# a DERIVED image carrying an injected calibration word.
+#
+# WHY DERIVED AND NOT PATCHED IN PLACE. The shipping HEX is what the SHA-256
+# baseline and the release provenance chain cover. Injecting into it would ship an
+# image carrying a fabricated calibration value; baselining the injected one would
+# pin an image no lane can run. So injection produces a separate artifact, and it
+# lands in its own SUBDIRECTORY rather than beside the shipping images: several
+# lanes reach for their input with `$(PIC12F675_BUILD_DIR)/...-*.hex`, and a
+# derived image sitting in that glob's way is exactly the sort of thing that gets
+# decoded, checksummed or released by accident. `$(PIC12F675_SIMCAL_DIR)` keeps
+# the two populations from ever meeting.
+#
+# The injected value is a fixed documented constant so the lanes are
+# deterministic -- see the injector's header for what that costs. It is also what
+# the shell's OSCCAL guard snapshots at init, which is precisely what makes that
+# guard testable: a fault harness corrupts OSCCAL (0x090) after init and requires
+# a reset, with no compile-time expected value to have to agree about. Note one trap
+# it records: gpsim gives the OSCCAL *register* its 0x80 reset value whether or
+# not the flash word exists, so "OSCCAL reads 0x80" does NOT distinguish a
+# working image from one looping on the missing word. The distinguishing evidence
+# is that the shell's init ran at all (OPTION_REG 0x0C, CMCON 0x07, TRISIO 0x38).
+PIC12F675_CAL_INJECTOR ?= test/pic/inject_calibration_word.py
+PIC12F675_CAL_VALUE    ?= 0x80
+PIC12F675_SIMCAL_DIR   ?= $(PIC12F675_BUILD_DIR)/simcal
+override PIC12F675_SIMCAL_HEXES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(PIC12F675_SIMCAL_DIR)/$(call fw_image,$(v),$(PIC12F675_TAG))_simcal.hex)
+# Derived images are build products: a `pic12f675` rebuild must not leave a stale
+# one behind for a lane to pick up. Appended rather than folded into the original
+# definition so the whole calibration story stays in this one block.
+override PIC12F675_BUILD_PRODUCTS += $(PIC12F675_SIMCAL_HEXES)
+
+# Derive the simulator images. Regenerates unconditionally -- the injector is
+# cheap, and "the derived image is older than the HEX it came from" is precisely
+# the silent staleness this target exists to make impossible.
+.PHONY: pic12f675-simcal
+pic12f675-simcal: pic12f675 $(PIC12F675_CAL_INJECTOR)
+	@if ! command -v python3 >/dev/null 2>&1; then \
+		echo "FAIL: python3 is required by the PIC12F675 calibration-word injector"; exit 1; \
+	fi; \
+	$(fw_image_sh); \
+	have_hex=0; \
+	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
+		[ ! -f "$(PIC12F675_BUILD_DIR)/`fw_image_of "$$v" $(PIC12F675_TAG)`.hex" ] || have_hex=1; \
+	done; \
+	if [ $$have_hex -eq 0 ]; then \
+		echo "no PIC12F675 HEX in $(PIC12F675_BUILD_DIR)/ (XC8 absent?); skipping calibration injection"; \
+		$(SKIP); \
+	fi; \
+	mkdir -p $(PIC12F675_SIMCAL_DIR) || exit 1; \
+	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
+		stem=`fw_image_of "$$v" $(PIC12F675_TAG)`; \
+		hex=$(PIC12F675_BUILD_DIR)/$$stem.hex; \
+		sim=$(PIC12F675_SIMCAL_DIR)/$${stem}_simcal.hex; \
+		if [ ! -f "$$hex" ] || [ -L "$$hex" ] || [ ! -s "$$hex" ]; then \
+			echo "FAIL: PIC12F675 image is missing, empty, or not regular: $$hex"; exit 1; \
+		fi; \
+		rm -f "$$sim" || exit 1; \
+		python3 $(PIC12F675_CAL_INJECTOR) --flash-words $(PIC12F675_FLASH_WORDS) \
+			--value $(PIC12F675_CAL_VALUE) "$$hex" "$$sim" || exit 1; \
+		$(IHEX_VALIDATOR) "$$sim" || exit 1; \
+	done; \
+	echo "=== PIC12F675 simulator images derived in $(PIC12F675_SIMCAL_DIR)/ ==="
+
+# The calibration contract. Five properties, in the order they would bite:
+#   1. the injector's own behaviour (its --selftest, which needs no toolchain);
+#   2. injecting leaves the SHIPPING image byte-identical, and is deterministic --
+#      both established by re-running it on the real image and comparing, because
+#      "the derived image contains everything the shipping one did" (property 3)
+#      would still hold if the injector had quietly rewritten its own input first;
+#   3. the derived image differs from the shipping one by exactly the expected
+#      calibration record -- whose encoding is computed here from the policy
+#      constants, independently of the injector, because a record read back from
+#      the thing under test could not fail;
+#   4. the injector refuses to run again on its own output, so a lane cannot
+#      quietly double-inject or inject the wrong part's image;
+#   5. no derived image is reachable through a shipping-image glob.
+.PHONY: pic12f675-test-calibration
+pic12f675-test-calibration: pic12f675-simcal $(PIC12F675_CAL_INJECTOR)
+	@if ! command -v python3 >/dev/null 2>&1; then \
+		echo "FAIL: python3 is required by the PIC12F675 calibration-word injector"; exit 1; \
+	fi
+	@python3 $(PIC12F675_CAL_INJECTOR) --selftest
+	@$(fw_image_sh); \
+	checked=0; \
+	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
+		stem=`fw_image_of "$$v" $(PIC12F675_TAG)`; \
+		hex=$(PIC12F675_BUILD_DIR)/$$stem.hex; \
+		sim=$(PIC12F675_SIMCAL_DIR)/$${stem}_simcal.hex; \
+		if [ ! -f "$$hex" ]; then continue; fi; \
+		if [ ! -f "$$sim" ] || [ -L "$$sim" ] || [ ! -s "$$sim" ]; then \
+			echo "FAIL: no derived simulator image for $$v: $$sim"; exit 1; \
+		fi; \
+		witness=$(PIC12F675_SIMCAL_DIR)/$$stem.witness; probe=$(PIC12F675_SIMCAL_DIR)/$$stem.probe; \
+		rm -f "$$witness" "$$probe"; \
+		cp "$$hex" "$$witness" || exit 1; \
+		if ! python3 $(PIC12F675_CAL_INJECTOR) --flash-words $(PIC12F675_FLASH_WORDS) \
+			--value $(PIC12F675_CAL_VALUE) "$$hex" "$$probe" >/dev/null; then \
+			rm -f "$$witness" "$$probe"; \
+			echo "FAIL: $$v: the injector failed on a second run over the shipping image"; exit 1; \
+		fi; \
+		if ! cmp -s "$$hex" "$$witness"; then \
+			rm -f "$$witness" "$$probe"; \
+			echo "FAIL: $$v: injecting MODIFIED the shipping image $$hex"; exit 1; \
+		fi; \
+		if ! cmp -s "$$sim" "$$probe"; then \
+			rm -f "$$witness" "$$probe"; \
+			echo "FAIL: $$v: injection is not deterministic -- a second run differs from $$sim"; exit 1; \
+		fi; \
+		rm -f "$$witness" "$$probe"; \
+		added=`diff "$$hex" "$$sim" | grep -c '^>' || true`; \
+		removed=`diff "$$hex" "$$sim" | grep -c '^<' || true`; \
+		if [ "$$added" != 1 ] || [ "$$removed" != 0 ]; then \
+			echo "FAIL: $$v: derived image differs from the shipping image by $$added added / $$removed removed records, expected 1 / 0"; \
+			exit 1; \
+		fi; \
+		record=`diff "$$hex" "$$sim" | sed -n 's/^> //p'`; \
+		expected=`python3 -c 'import sys; v=int(sys.argv[1],0); w=int(sys.argv[2],0)-1; b=w*2; op=0x3400|v; d=bytes([2,(b>>8)&0xFF,b&0xFF,0,op&0xFF,(op>>8)&0xFF]); print(":"+(d+bytes([(-sum(d))&0xFF])).hex().upper())' \
+			'$(PIC12F675_CAL_VALUE)' '$(PIC12F675_FLASH_WORDS)'`; \
+		if [ "$$record" != "$$expected" ]; then \
+			echo "FAIL: $$v: calibration record is $$record, expected $$expected"; exit 1; \
+		fi; \
+		if ! python3 $(PIC12F675_CAL_INJECTOR) --flash-words $(PIC12F675_FLASH_WORDS) \
+			--value $(PIC12F675_CAL_VALUE) "$$sim" "$$sim.reinjected" >/dev/null 2>&1; then :; else \
+			rm -f "$$sim.reinjected"; \
+			echo "FAIL: $$v: the injector accepted an already-injected image"; exit 1; \
+		fi; \
+		rm -f "$$sim.reinjected"; \
+		echo "CALIBRATION PASS [$$v]: $$record injected, shipping image unchanged"; \
+		checked=`expr $$checked + 1`; \
+	done; \
+	if [ $$checked -eq 0 ]; then \
+		echo "no PIC12F675 HEX (XC8 absent?); skipping calibration contract"; $(SKIP); \
+	fi; \
+	stray=`ls $(PIC12F675_BUILD_DIR)/*_simcal.hex 2>/dev/null || true`; \
+	if [ -n "$$stray" ]; then \
+		echo "FAIL: derived image(s) beside the shipping images, where a"; \
+		echo "      shipping-image glob would pick them up:"; \
+		printf '        %s\n' $$stray; \
+		exit 1; \
+	fi; \
+	echo "=== PIC12F675 calibration contract holds for $$checked variant(s) ==="
+
+# ============================================================================
 # INTROSPECTION -- expose one Makefile variable's value to scripts
 # ============================================================================
 # `make print-VARIANTS` echoes "$(VARIANTS)", `make print-ATTINY13A_LFUSE` echoes the fuse
@@ -5231,6 +5815,14 @@ help:
 	@echo "  pic10f322-test-target fail-closed fault + lock-step + target-I/O for one PIC variant"
 	@echo "                        (PIC10F322_TARGET_VARIANT); pic10f322-test-target-variants runs all"
 	@echo "  pic10f322-program     flash one PIC variant to hardware (VARIANT=, PIC10F322_PROG=pk2cmd|ipecmd)"
+	@echo "PIC12F675 (classic mid-range, 1024 words; docs/pic12f675_feasibility.md):"
+	@echo "  pic12f675             build all variants for PIC12F675 (XC8) + 1024-word budget gate"
+	@echo "  pic12f675-test-config build PIC12F675 HEX, then verify each CONFIG word vs design intent"
+	@echo "  pic12f675-test-gpsim  drive the footswitch in gpsim, assert GPIO on the simcal images"
+	@echo "  pic12f675-analyze     cppcheck + MISRA on the PIC12F675 shell (pic8 platform; standalone)"
+	@echo "  pic12f675-test-stack-bound  bound the 8-level hardware return stack for every variant"
+	@echo "  pic12f675-simcal      derive simulator images with the oscillator calibration word"
+	@echo "  pic12f675-test-calibration  prove the calibration injection leaves the shipping HEX alone"
 	@echo "PIC10F320 (constrained 256-word target; docs/pic10f320_special_case.md):"
 	@echo "  pic10f320          build one PIC10F320 variant + 256-word and HW-stack gates"
 	@echo "                     (PIC10F320_VARIANT=cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay)"

@@ -2,11 +2,15 @@
 // Copyright (c) Matthew Garman
 
 // Include-only built-HEX GPIO transition and pulse-timing implementation shared
-// by the PIC10F320 and PIC10F322 adapters. It observes the XC8-generated
-// instruction stream in libgpsim and checks exact distinct LATA states, ordering,
-// corresponding physical PORTA levels, and delay between pulse edges. The timing
+// by the PIC part adapters. It observes the XC8-generated instruction stream in
+// libgpsim and checks exact distinct output-latch states, ordering, the
+// corresponding physical port levels, and delay between pulse edges. The timing
 // assertion validates code generation at the configured FOSC; it does not
 // validate oscillator tolerance on real silicon.
+//
+// Register identity -- addresses, gpsim name tokens, printable names, masks and
+// expected init values -- is NOT here: the adapter includes its family's
+// pic*_regs.h (e.g. pic/pic10f32x_regs.h) and this file carries only mechanism.
 
 #ifndef TEST_PIC_TEST_IO_PIC_CORE_H
 #define TEST_PIC_TEST_IO_PIC_CORE_H
@@ -29,6 +33,9 @@
 // gpsim_attach_footswitch() and footsw_set().
 #include "pic/gpsim_bootstrap.h"
 
+#ifndef PIC_REG_PORT_ADDR
+#  error "part adapter must include its family register map (e.g. pic/pic10f32x_regs.h)"
+#endif
 #ifndef PIC_IO_DEFAULT_PROC_NAME
 #  error "PIC_IO_DEFAULT_PROC_NAME must be defined by the part adapter"
 #endif
@@ -60,12 +67,10 @@
 /* name-contract: exempt-end */
 #endif
 
-#define PORTA_ADDR  0x005u
-#define TRISA_ADDR  0x006u
-#define LATA_ADDR   0x007u
-#define ANSELA_ADDR 0x008u
-#define OUTPUT_MASK 0x07u
-#define TRISA_INIT  0x08u
+// Device identity comes from the adapter's family register map; only the
+// derived shorthands the mechanism below reads are named here.
+#define OUTPUT_MASK PIC_REG_OUTPUT_MASK
+#define TRIS_INIT   PIC_REG_TRIS_INIT
 #define CYCLES_PER_MS ((F_CPU_HZ / 4UL) / 1000UL)
 #define STARTUP_MS 30u
 #define PRESS_TRACE_MS 30u
@@ -74,7 +79,7 @@
 #define PULSE_TOLERANCE_CYCLES (CYCLES_PER_MS / 5u)  // +/-0.2 ms
 
 struct Transition {
-    unsigned lata;
+    unsigned latch;
     guint64 cycle;
 };
 
@@ -82,19 +87,19 @@ struct IoTrace {
     const char *name;
     std::vector<Transition> transitions;
     bool saw_configured = false;
-    bool trisa_ok = true;
-    bool ansela_ok = true;
-    bool porta_ok = true;
+    bool tris_ok = true;
+    bool ansel_ok = true;
+    bool port_ok = true;
     bool relay_coils_ok = true;
 
     explicit IoTrace(const char *trace_name) : name(trace_name) {}
 };
 
 // g_cpu / g_fsw_node / g_fsw_src come from pic/gpsim_bootstrap.h.
-static Register *g_porta = nullptr;
-static Register *g_trisa = nullptr;
-static Register *g_lata = nullptr;
-static Register *g_ansela = nullptr;
+static Register *g_port = nullptr;
+static Register *g_tris = nullptr;
+static Register *g_latch = nullptr;
+static Register *g_ansel = nullptr;
 static unsigned g_checks = 0;
 static unsigned g_fails = 0;
 
@@ -131,39 +136,42 @@ static bool run_one_cycle(void) {
 }
 
 static void trace_cycles(IoTrace *trace, guint64 cycles, bool require_configured) {
-    unsigned previous = reg8(g_lata) & OUTPUT_MASK;
+    unsigned previous = reg8(g_latch) & OUTPUT_MASK;
     for (guint64 i = 0; i < cycles; ++i) {
         if (!run_one_cycle()) {
-            trace->trisa_ok = trace->ansela_ok = trace->porta_ok = false;
+            trace->tris_ok = trace->ansel_ok = trace->port_ok = false;
             return;
         }
 
-        unsigned const trisa = reg8(g_trisa) & 0x0Fu;
-        unsigned const ansela = reg8(g_ansela) & OUTPUT_MASK;
-        unsigned const lata = reg8(g_lata) & OUTPUT_MASK;
-        unsigned const porta = reg8(g_porta) & OUTPUT_MASK;
+        unsigned const tris = reg8(g_tris) & PIC_REG_PORT_MASK;
+        unsigned const ansel = reg8(g_ansel) & OUTPUT_MASK;
+        unsigned const latch = reg8(g_latch) & OUTPUT_MASK;
+        unsigned const port = reg8(g_port) & OUTPUT_MASK;
 
-        if (trisa == TRISA_INIT && ansela == 0u) trace->saw_configured = true;
+        if (tris == TRIS_INIT && ansel == 0u) trace->saw_configured = true;
         if (require_configured || trace->saw_configured) {
-            if (trisa != TRISA_INIT) trace->trisa_ok = false;
-            if (ansela != 0u) trace->ansela_ok = false;
-            if (porta != lata) trace->porta_ok = false;
+            if (tris != TRIS_INIT) trace->tris_ok = false;
+            if (ansel != 0u) trace->ansel_ok = false;
+            if (port != latch) trace->port_ok = false;
         }
 #if defined(PIC_IO_RELAY)
-        if ((lata & 0x06u) == 0x06u) trace->relay_coils_ok = false;
+        if ((latch & PIC_REG_COIL_MASK) == PIC_REG_COIL_MASK) trace->relay_coils_ok = false;
 #endif
-        if (lata != previous) {
-            trace->transitions.push_back({lata, get_cycles().get()});
-            previous = lata;
+        if (latch != previous) {
+            trace->transitions.push_back({latch, get_cycles().get()});
+            previous = latch;
         }
     }
 }
 
 static void check_trace_health(const IoTrace &trace, bool require_seen) {
-    if (require_seen) check(trace.saw_configured, "startup never reached digital TRISA=0x08 configuration");
-    check(trace.trisa_ok, "TRISA did not remain exact RA3-input/RA0..RA2-output 0x08");
-    check(trace.ansela_ok, "ANSELA re-selected an output pin as analog");
-    check(trace.porta_ok, "physical PORTA output bits did not follow LATA");
+    if (require_seen) check(trace.saw_configured,
+        "startup never reached digital " PIC_REG_TRIS_NAME "=" PIC_REG_TRIS_INIT_STR " configuration");
+    check(trace.tris_ok,
+        PIC_REG_TRIS_NAME " did not remain exact " PIC_REG_TRIS_LAYOUT " " PIC_REG_TRIS_INIT_STR);
+    check(trace.ansel_ok, PIC_REG_ANSEL_NAME " re-selected an output pin as analog");
+    check(trace.port_ok,
+        "physical " PIC_REG_PORT_NAME " output bits did not follow " PIC_REG_LATCH_NAME);
 #if defined(PIC_IO_RELAY)
     check(trace.relay_coils_ok, "relay RESET and SET coils were high simultaneously");
 #endif
@@ -174,14 +182,14 @@ static void check_sequence(const IoTrace &trace, const unsigned *expected, size_
     bool match = trace.transitions.size() == count;
     if (match) {
         for (size_t i = 0; i < count; ++i) {
-            if (trace.transitions[i].lata != expected[i]) { match = false; break; }
+            if (trace.transitions[i].latch != expected[i]) { match = false; break; }
         }
     }
     if (!match) {
         g_fails++;
-        fprintf(stderr, "FAIL: %s LATA trace [", trace.name);
+        fprintf(stderr, "FAIL: %s " PIC_REG_LATCH_NAME " trace [", trace.name);
         for (size_t i = 0; i < trace.transitions.size(); ++i)
-            fprintf(stderr, "%s0x%x", i ? "," : "", trace.transitions[i].lata);
+            fprintf(stderr, "%s0x%x", i ? "," : "", trace.transitions[i].latch);
         fprintf(stderr, "] != expected [");
         for (size_t i = 0; i < count; ++i)
             fprintf(stderr, "%s0x%x", i ? "," : "", expected[i]);
@@ -194,7 +202,7 @@ static void check_pulse(const IoTrace &trace, unsigned pulse_state,
     const Transition *start = nullptr;
     const Transition *end = nullptr;
     for (size_t i = 0; i < trace.transitions.size(); ++i) {
-        if (trace.transitions[i].lata == pulse_state) {
+        if (trace.transitions[i].latch == pulse_state) {
             start = &trace.transitions[i];
             if (i + 1u < trace.transitions.size()) end = &trace.transitions[i + 1u];
             break;
@@ -229,11 +237,11 @@ static void check_pulse(const IoTrace &trace, unsigned pulse_state,
 int main(void) {
     if (!gpsim_bootstrap_cpu(FW_PATH, PROC_NAME)) return 1;
 
-    g_porta = g_cpu->rma.get_register(PORTA_ADDR);
-    g_trisa = g_cpu->rma.get_register(TRISA_ADDR);
-    g_lata = g_cpu->rma.get_register(LATA_ADDR);
-    g_ansela = g_cpu->rma.get_register(ANSELA_ADDR);
-    if (g_porta == nullptr || g_trisa == nullptr || g_lata == nullptr || g_ansela == nullptr) {
+    g_port = g_cpu->rma.get_register(PIC_REG_PORT_ADDR);
+    g_tris = g_cpu->rma.get_register(PIC_REG_TRIS_ADDR);
+    g_latch = g_cpu->rma.get_register(PIC_REG_LATCH_ADDR);
+    g_ansel = g_cpu->rma.get_register(PIC_REG_ANSEL_ADDR);
+    if (g_port == nullptr || g_tris == nullptr || g_latch == nullptr || g_ansel == nullptr) {
         fprintf(stderr, "FATAL: %s GPIO register map is unavailable\n", PIC_IO_PART_NAME);
         return 1;
     }
@@ -247,9 +255,11 @@ int main(void) {
     IoTrace startup("startup");
     trace_cycles(&startup, (guint64)STARTUP_MS * CYCLES_PER_MS, false);
     check_trace_health(startup, true);
-    check((reg8(g_trisa) & 0x0Fu) == TRISA_INIT, "startup TRISA is not exact 0x08");
-    check((reg8(g_lata) & OUTPUT_MASK) == 0u, "startup did not settle in BYPASS LATA=0x0");
-    check((reg8(g_porta) & OUTPUT_MASK) == 0u, "startup physical outputs did not settle low");
+    check((reg8(g_tris) & PIC_REG_PORT_MASK) == TRIS_INIT,
+          "startup " PIC_REG_TRIS_NAME " is not exact " PIC_REG_TRIS_INIT_STR);
+    check((reg8(g_latch) & OUTPUT_MASK) == 0u,
+          "startup did not settle in BYPASS " PIC_REG_LATCH_NAME "=0x0");
+    check((reg8(g_port) & OUTPUT_MASK) == 0u, "startup physical outputs did not settle low");
 
     footsw_set(true);
     IoTrace engage("engage");
@@ -279,7 +289,7 @@ int main(void) {
     check_sequence(startup, nullptr, 0u);
     check_sequence(engage, engage_expected, 2u);
     check_sequence(bypass, bypass_expected, 2u);
-    check((reg8(g_lata) & OUTPUT_MASK) == 0u, "simple output did not finish in BYPASS");
+    check((reg8(g_latch) & OUTPUT_MASK) == 0u, "simple output did not finish in BYPASS");
 #elif defined(PIC_IO_MUTE)
     static const unsigned engage_expected[] = {0x1u, 0x5u, 0x7u};
     static const unsigned bypass_expected[] = {0x6u, 0x4u, 0x0u};
@@ -298,7 +308,7 @@ int main(void) {
     check_pulse(startup, 0x2u, 12u, true);
     check_pulse(engage, 0x5u, 12u, true);
     check_pulse(bypass, 0x2u, 12u, true);
-    check((reg8(g_lata) & 0x06u) == 0u, "relay coils were not parked low");
+    check((reg8(g_latch) & PIC_REG_COIL_MASK) == 0u, "relay coils were not parked low");
 #endif
 
     bool const pass = g_fails == 0u;

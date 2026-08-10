@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Matthew Garman
 
-// Include-only silicon-level lock-step co-simulation shared by the PIC10F320 and
-// PIC10F322 adapters: the real built HEX vs. the reference
-// model, comparing the firmware's internal debounce state EVERY loop iteration.
+// Include-only silicon-level lock-step co-simulation shared by the PIC part
+// adapters: the real built HEX vs. the reference model, comparing the
+// firmware's internal debounce state EVERY loop iteration.
 //
 // WHY THIS EXISTS (the gap it closes)
 //   Host equivalence runs C source rather than the XC8-compiled instruction
@@ -19,8 +19,8 @@
 //   necessary.
 //
 // HOW IT WORKS (the tick boundary on a POLLING core)
-//   The PIC firmware never sleeps -- it busy-polls TMR2IF -- so there is no sleep
-//   signal. Instead we set a gpsim NOTIFY breakpoint at the main
+//   The PIC firmware never sleeps -- it busy-polls the tick flag -- so there is
+//   no sleep signal. Instead we set a gpsim NOTIFY breakpoint at the main
 //   loop's CLRWDT (the end-of-loop "pet the dog"): it fires once per completed loop
 //   iteration, with ctx_ fully settled (post state-machine, post hw_set_*_state()).
 //   That callback is the exact analogue of the host harness's CLRWDT hook
@@ -34,8 +34,8 @@
 //        BEHAVIOURALLY: after settle, only the loop CLRWDT keeps firing.
 //     2. We lock-step on ITERATIONS, never on milliseconds. A toggling iteration
 //        blocks ~13 ms in __delay_ms (relay/mute) yet is ONE model step; and the
-//        TMR2IF latched during that delay makes the firmware run one extra immediate
-//        iteration afterward. Driving one input per CLRWDT firing handles both for
+//        tick flag latched during that delay makes the firmware run one extra
+//        immediate iteration afterward. Driving one input per CLRWDT firing handles both for
 //        free -- exactly as the host harness (one input per loop iteration) does.
 //
 // Build/run via `make pic10f322-test-lockstep` or `make pic10f320-test-lockstep`. The
@@ -79,6 +79,13 @@ extern "C" {
 #ifndef PIC_LOCKSTEP_DEFAULT_PROC_NAME
 #  error "PIC_LOCKSTEP_DEFAULT_PROC_NAME must be defined by the part adapter"
 #endif
+// Program-space size in words, for the CLRWDT site scan below. A part fact --
+// it was hard-coded to the PIC10F322's 0x200 while both consumers happened to
+// fit inside it, which silently over-scanned the 256-word PIC10F320 and would
+// silently UNDER-scan any larger part, hiding its loop CLRWDT entirely.
+#ifndef PIC_LOCKSTEP_PROGRAM_WORDS
+#  error "PIC_LOCKSTEP_PROGRAM_WORDS must be defined by the part adapter"
+#endif
 // FW_PATH names an output STAGE, which the Makefile selects per run -- unlike
 // PROC_NAME below, which names the PART and so is legitimately the adapter's to
 // default. An adapter default for FW_PATH looked like the same thing and was
@@ -100,7 +107,10 @@ extern "C" {
 #  error "CTX_ADDR (the _ctx_ SRAM address from the XC8 .sym) must be passed by the Makefile"
 #endif
 #define CYCLES_PER_MS  ((F_CPU_HZ / 4UL) / 1000UL)   // 500 @ 2 MHz
-#define CLRWDT_OPCODE  0x0064u                        // 14-bit classic mid-range CLRWDT
+// CLRWDT is the same 14-bit encoding on the classic and enhanced mid-range
+// cores, so this is genuinely shared rather than a family fact.
+#define CLRWDT_OPCODE  0x0064u
+#define PROGRAM_WORDS  PIC_LOCKSTEP_PROGRAM_WORDS
 
 // ctx_ field offsets (struct order; each a 1-byte object -- the Makefile asserts
 // `_ctx_: ds 3` in the .s, so these offsets are pinned).
@@ -312,7 +322,7 @@ int main() {
            FW_PATH, PROC_NAME, (unsigned long)F_CPU_HZ, (unsigned)CTX_ADDR, (unsigned)LOCKSTEP_ITERS);
     fflush(stdout);
 
-    // Footswitch stimulus source on RA3.
+    // Footswitch stimulus source (FOOTSW_PIN_NAME, per part).
     if (!gpsim_attach_footswitch(FOOTSW_PIN_NAME, PROC_NAME)) return 1;
 
     // Power-on RELEASED + settle, so the anchor is the stable released init state.
@@ -322,7 +332,7 @@ int main() {
     // Find CLRWDT sites, then identify the LOOP one behaviourally (only it keeps
     // firing after init settles; addresses are not reliably ordered).
     std::vector<ClrwdtHook *> hooks;
-    for (unsigned a = 0; a < 0x200u; ++a) {
+    for (unsigned a = 0; a < PROGRAM_WORDS; ++a) {
         if (g_cpu->pma->get_opcode(a) == CLRWDT_OPCODE) {
             ClrwdtHook *h = new ClrwdtHook(a);
             hooks.push_back(h);

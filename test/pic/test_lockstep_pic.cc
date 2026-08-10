@@ -6,5 +6,6 @@
 // state trajectory after every loop iteration.
 
 #define PIC_LOCKSTEP_DEFAULT_PROC_NAME "p10f322"
+#define PIC_LOCKSTEP_PROGRAM_WORDS 0x200u
 
 #include "pic/test_lockstep_pic_core.h"

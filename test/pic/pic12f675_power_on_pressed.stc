@@ -1,0 +1,74 @@
+# gpsim command script: PIC12F675 POWER-ON-PRESSED startup case.
+#
+# WHAT THIS IS
+#   The companion to pic12f675_footswitch_toggle.stc, covering the ONE startup
+#   branch that the released-start scenario never exercises: the footswitch held
+#   CLOSED (pressed) at power-on. debounce_init_context(PIN_STATE_LOW) brings the
+#   device up in BYPASS / RELEASE_DEBOUNCE_WAIT with the counter pre-loaded to
+#   RELEASE_THRESH, so a switch that is stuck or held at boot does NOT spuriously
+#   engage the effect; the effect may only toggle after a genuine release + a
+#   fresh press. The wrapper test/pic/run_gpsim_power_on_pressed.sh parses the
+#   snapshots and turns them into PASS/FAIL.
+#
+# HOW IT IS RUN (see the wrapper / `make pic12f675-test-gpsim`)
+#   gpsim -i -pp12f675 <variant>_simcal.hex -c test/pic/pic12f675_power_on_pressed.stc
+#   Runs the DERIVED *_simcal.hex for the reason the toggle script states.
+#   Variant-agnostic: only GP0 (LED) and GP5 (footswitch) are asserted, and those
+#   are identical across all three output variants. Running it per variant also
+#   confirms each variant's init-time blocking actuation (the relay/mute pulse)
+#   does not perturb the held-at-boot path.
+#
+# PINS (per src/bypass_pins_pic12f675.h)
+#   GP5 = footswitch (input + weak pull-up; high = released, low = pressed)
+#   GP0 = status LED  (high = effect ENGAGED, low = BYPASS)
+#
+# TIMING
+#   As in the toggle script: 4 MHz FOSC -> 1000 cycles/ms, and 1 tick = 1024
+#   cycles (TMR0 unprescaled, four rollovers counted in software). Checkpoints
+#   are placed on tick boundaries. This part needs its own copy of this scenario
+#   rather than sharing the 10F32x one for two independent reasons: the stimulus
+#   attaches to gpio5 rather than ra3, and every cycle count differs.
+#
+# SCENARIO (switch HELD at power-on, then released, then a fresh press)
+#   tick   0..50  (cyc      0..51200)  : PRESSED at boot -> stay BYPASS, NO toggle
+#   tick  50..100 (cyc  51200..102400) : released -> lockout drains, arm; BYPASS
+#   tick 100..150 (cyc 102400..153600) : fresh press -> ENGAGED (the only toggle,
+#                                        measured at cycle 110592 = tick 108)
+#   tick 150..    (cyc 153600..)       : released -> effect latches ENGAGED
+#
+# CHECKPOINTS (the wrapper keys on these exact === labels ===)
+#   PON_HELD     @ 30720  (tick 30)    : LED off (held switch did NOT engage),
+#                         GP5 == 0 (read as pressed). Past the relay variant's
+#                         13-tick power-on pulse.
+#   PON_RELEASED @ 89600  (tick 87.5)  : LED off (release alone does not toggle),
+#                         GP5 == 1 (released)
+#   PON_ENGAGED  @ 192000 (tick 187.5) : LED on (fresh press toggled, latched),
+#                         GP5 == 1 (released)
+
+stimulus asynchronous_stimulus
+  initial_state 0
+  { 51200, 1,
+    102400, 0,
+    153600, 1 }
+  name fsw
+end
+
+node n1
+attach n1 fsw gpio5
+
+break c 30720
+run
+echo ===PON_HELD===
+gpio
+
+break c 89600
+run
+echo ===PON_RELEASED===
+gpio
+
+break c 192000
+run
+echo ===PON_ENGAGED===
+gpio
+
+quit

@@ -42,48 +42,52 @@ fi
 # shellcheck source=test/pic/gpsim_wrapper_common.sh
 . "$COMMON" || { echo "FAIL: could not source $COMMON"; exit 1; }
 
-# Unlike run_gpsim_test.sh there is deliberately no PIC_GPSIM_STC override here:
-# the two-press toggle needs a chip-specific stimulus because its mid-debounce
-# cadence checkpoint depends on instruction timing, whereas this scenario's
-# stimulus is byte-identical for the PIC10F320 and PIC10F322 and is therefore
-# shared. PIC_GPSIM_PROC is still honoured (via the shared helper), so the same
-# stimulus runs on either chip. See the pic10f320-test-gpsim recipe in the Makefile,
-# which asserts this routing, and test/test_gpsim_wrappers.sh, which checks it
-# behaviourally.
-STC="$(dirname "$0")/power_on_pressed.stc"
+# This scenario's stimulus IS byte-identical for the PIC10F320 and PIC10F322 --
+# same pin name, same instruction cadence -- so those two lanes share it and the
+# default below is all either needs. It stopped being universal with the
+# PIC12F675, whose footswitch is a different pin and whose tick is a different
+# number of cycles, so an override channel now exists for a part that needs its
+# own. PIC_GPSIM_PON_STC is separate from run_gpsim_test.sh's PIC_GPSIM_STC on
+# purpose: one variable naming "the stimulus" for two scenarios is how a lane
+# ends up running the toggle script through the power-on wrapper, which would
+# fail on missing snapshots rather than on anything real.
+STC="${PIC_GPSIM_PON_STC:-$(dirname "$0")/power_on_pressed.stc}"
 
 gpsim_run "$HEX" "$STC" "power-on-pressed gpsim test"
 
 echo "gpsim power-on-pressed test: $HEX (proc $PROC)"
 
 # Gather snapshots.
-hd_porta=$(parse PON_HELD     porta);  hd_lata=$(parse PON_HELD     lata)
-rl_porta=$(parse PON_RELEASED porta);  rl_lata=$(parse PON_RELEASED lata)
-en_porta=$(parse PON_ENGAGED  porta);  en_lata=$(parse PON_ENGAGED  lata)
+hd_porta=$(parse PON_HELD     "$GPSIM_PORT_REG");  hd_lata=$(parse PON_HELD     "$GPSIM_LATCH_REG")
+rl_porta=$(parse PON_RELEASED "$GPSIM_PORT_REG");  rl_lata=$(parse PON_RELEASED "$GPSIM_LATCH_REG")
+en_porta=$(parse PON_ENGAGED  "$GPSIM_PORT_REG");  en_lata=$(parse PON_ENGAGED  "$GPSIM_LATCH_REG")
 
 # Guard: did gpsim actually produce all the snapshots?
 gpsim_require_snapshots "$hd_porta" "$hd_lata" "$rl_porta" "$rl_lata" \
 	"$en_porta" "$en_lata"
 
-note "PON_HELD"     "porta=$hd_porta lata=$hd_lata"
-note "PON_RELEASED" "porta=$rl_porta lata=$rl_lata"
-note "PON_ENGAGED"  "porta=$en_porta lata=$en_lata"
+note "PON_HELD"     "$(snapshot "$hd_porta" "$hd_lata")"
+note "PON_RELEASED" "$(snapshot "$rl_porta" "$rl_lata")"
+note "PON_ENGAGED"  "$(snapshot "$en_porta" "$en_lata")"
 
 # --- assertions ---
+# Register names, bit masks and pin labels come from the part's identity fragment
+# (see gpsim_wrapper_common.sh); only the scenario is written here.
+#
 # 1. Switch HELD at power-on: the device comes up BYPASS (LED off) and the held
-#    switch does NOT spuriously engage; footswitch reads pressed (RA3 low). This
-#    is the debounce_init_context(PIN_STATE_LOW) RELEASE-wait branch.
-[ "$(bit "$hd_lata" 0x1)"  = 0 ] && pass "PON_HELD: LED off (held switch did not engage)" || fail "PON_HELD: LED (RA0) should be off, lata=$hd_lata"
-[ "$(bit "$hd_porta" 0x8)" = 0 ] && pass "PON_HELD: footswitch pressed (RA3=0)"           || fail "PON_HELD: RA3 should read pressed (low), porta=$hd_porta"
+#    switch does NOT spuriously engage; footswitch reads pressed. This is the
+#    debounce_init_context(PIN_STATE_LOW) RELEASE-wait branch.
+[ "$(bit "$hd_lata" "$GPSIM_LED_MASK")"  = 0 ] && pass "PON_HELD: LED off (held switch did not engage)" || fail "PON_HELD: LED ($GPSIM_LED_LABEL) should be off, $GPSIM_LATCH_REG=$hd_lata"
+[ "$(bit "$hd_porta" "$GPSIM_FOOTSW_MASK")" = 0 ] && pass "PON_HELD: footswitch pressed ($GPSIM_FOOTSW_LABEL=0)"           || fail "PON_HELD: $GPSIM_FOOTSW_LABEL should read pressed (low), $GPSIM_PORT_REG=$hd_porta"
 
 # 2. Releasing the power-on-held switch must NOT toggle: still BYPASS (LED off),
-#    footswitch now released (RA3 high). The lockout simply drains and re-arms.
-[ "$(bit "$rl_lata" 0x1)"  = 0 ] && pass "PON_RELEASED: still bypass (release did not toggle)" || fail "PON_RELEASED: LED (RA0) should be off, lata=$rl_lata"
-[ "$(bit "$rl_porta" 0x8)" = 1 ] && pass "PON_RELEASED: footswitch released (RA3=1)"           || fail "PON_RELEASED: RA3 should read released (high), porta=$rl_porta"
+#    footswitch now released. The lockout simply drains and re-arms.
+[ "$(bit "$rl_lata" "$GPSIM_LED_MASK")"  = 0 ] && pass "PON_RELEASED: still bypass (release did not toggle)" || fail "PON_RELEASED: LED ($GPSIM_LED_LABEL) should be off, $GPSIM_LATCH_REG=$rl_lata"
+[ "$(bit "$rl_porta" "$GPSIM_FOOTSW_MASK")" = 1 ] && pass "PON_RELEASED: footswitch released ($GPSIM_FOOTSW_LABEL=1)"           || fail "PON_RELEASED: $GPSIM_FOOTSW_LABEL should read released (high), $GPSIM_PORT_REG=$rl_porta"
 
 # 3. A fresh press AFTER release is the first real press -> toggles to ENGAGED
 #    (LED on), and the effect latches on once the switch is released again.
-[ "$(bit "$en_lata" 0x1)"  = 1 ] && pass "PON_ENGAGED: LED on (fresh press toggled, latched)" || fail "PON_ENGAGED: LED (RA0) should be on, lata=$en_lata"
-[ "$(bit "$en_porta" 0x8)" = 1 ] && pass "PON_ENGAGED: footswitch released (RA3=1)"           || fail "PON_ENGAGED: RA3 should read released (high), porta=$en_porta"
+[ "$(bit "$en_lata" "$GPSIM_LED_MASK")"  = 1 ] && pass "PON_ENGAGED: LED on (fresh press toggled, latched)" || fail "PON_ENGAGED: LED ($GPSIM_LED_LABEL) should be on, $GPSIM_LATCH_REG=$en_lata"
+[ "$(bit "$en_porta" "$GPSIM_FOOTSW_MASK")" = 1 ] && pass "PON_ENGAGED: footswitch released ($GPSIM_FOOTSW_LABEL=1)"           || fail "PON_ENGAGED: $GPSIM_FOOTSW_LABEL should read released (high), $GPSIM_PORT_REG=$en_porta"
 
 gpsim_verdict "$HEX"

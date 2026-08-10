@@ -166,7 +166,8 @@ mapfile -t DEFAULT_CLEAN_REMOVES < <(removed_by clean \
 	AVR_BUILD_DIR=build_avr_classic \
 	PIC10F322_BUILD_DIR=build_pic10f322 \
 	XT_BUILD_DIR=build_avr_xt \
-	PIC10F320_BUILD_DIR=build_pic10f320)
+	PIC10F320_BUILD_DIR=build_pic10f320 \
+	PIC12F675_BUILD_DIR=build_pic12f675)
 ACTUAL_BUILD_REMOVALS=()
 for removed in "${DEFAULT_CLEAN_REMOVES[@]}"; do
 	case "$removed" in build*) ACTUAL_BUILD_REMOVALS+=("$removed") ;; esac
@@ -177,6 +178,7 @@ EXPECTED_BUILD_REMOVALS=(
 	build_pic
 	build_pic10f320
 	build_pic10f322
+	build_pic12f675
 )
 [ "${#ACTUAL_BUILD_REMOVALS[@]}" -eq "${#EXPECTED_BUILD_REMOVALS[@]}" ] \
 	|| fail "canonical \`make clean\` has ${#ACTUAL_BUILD_REMOVALS[@]} build-directory operands; expected exactly ${#EXPECTED_BUILD_REMOVALS[@]}"

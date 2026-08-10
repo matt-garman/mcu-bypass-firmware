@@ -44,12 +44,14 @@ PB_STACK_DEVICE_VAR=${PB_STACK_DEVICE_VAR:-PIC10F322_DEVICE_INI}
 PB_RETURN_STACK_REQUIRED=${PB_RETURN_STACK_REQUIRED:-0}
 PB_REBUILD_REQUIRED=${PB_REBUILD_REQUIRED:-0}
 product_override_args=()
+matrix_supported_var=
 case "$PB_TARGET" in
 	pic10f322)
 		[ "$PB_LABEL" = PIC ] \
 			|| { printf 'FAIL: canonical pic10f322 build validation requires PB_LABEL=PIC\n' >&2; exit 1; }
 		PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_MATRIX_VARIANTS}
 		product_override_args=(PIC10F322_HEXES= PIC10F322_ASSEMBLIES= PIC10F322_SYMBOLS= PIC10F322_BUILD_PRODUCTS=)
+		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
 		expected_checks=36
 		;;
 	pic10f320)
@@ -59,9 +61,24 @@ case "$PB_TARGET" in
 			|| { printf 'FAIL: canonical pic10f320 build validation requires PB_REBUILD_REQUIRED=1\n' >&2; exit 1; }
 		PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}
 		product_override_args=(PIC10F320_HEX= PIC10F320_ASM= PIC10F320_SYM= PIC10F320_BUILD_PRODUCTS=)
+		# This lane's supported set is PIC10F320_VARIANTS_ALL, which is a plain
+		# literal rather than the CLASSIC_VARIANTS_* machinery, so the
+		# self-whitelisting Make-function attack below does not apply to it.
+		matrix_supported_var=
 		expected_checks=75
 		;;
-	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; expected_checks= ;;
+	pic12f675)
+		[ "$PB_LABEL" = PIC12F675 ] \
+			|| { printf 'FAIL: canonical pic12f675 build validation requires PB_LABEL=PIC12F675\n' >&2; exit 1; }
+		PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_MATRIX_VARIANTS}
+		product_override_args=(PIC12F675_HEXES= PIC12F675_ASSEMBLIES= PIC12F675_SYMBOLS= PIC12F675_BUILD_PRODUCTS=)
+		# Same CLASSIC_VARIANTS_* validation preamble as the PIC10F322 target,
+		# so it is exposed to the same injection vector and must run the same
+		# check -- which is why this lane's count matches the 322's.
+		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
+		expected_checks=36
+		;;
+	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
 # Local restatement of the Makefile's canonical image basename (see its
 # "canonical firmware image basename" block): <prefix>-<mcu>-<output stage>,
@@ -94,6 +111,11 @@ cp "$ROOT/test/pic10f320/check_expected_images.py" \
 : > "$host_cc_log"
 : > "$host_run_log"
 export FAKE_XC8_LOG="$xc8_log"
+# The over-budget fixture must be over THIS lane's budget, not a fixed 513: a
+# 513-word image is comfortably inside a 1024-word part, so a hard-coded value
+# silently stopped testing the budget gate the moment a bigger part arrived.
+# One word past is also a sharper test than "far over" -- it pins the boundary.
+export FAKE_XC8_OVER_BUDGET_WORDS=$((PB_FLASH_WORDS + 1))
 
 cat > "$tools/xc8" <<'EOF'
 #!/usr/bin/env bash
@@ -152,7 +174,7 @@ printf '%s\t%s\n' "$out" "$args" >> "${FAKE_XC8_LOG:?}"
 mode=${FAKE_XC8_MODE:-pass}
 case "$mode" in
 	no-summary) ;;
-	over-budget) printf 'Program space used (513)\n' ;;
+	over-budget) printf 'Program space used (%s)\n' "${FAKE_XC8_OVER_BUDGET_WORDS:-513}" ;;
 	huge-count) printf 'Program space used (9999999999999999999999999999999999999999)\n' ;;
 	leading-count) printf 'Program space used (00042)\n' ;;
 	*) printf 'Program space used (42)\n' ;;
@@ -266,6 +288,10 @@ files=(
 	# the `pic10f320` rule still needs its source to exist. Harmless for the
 	# PIC10F322 leg, which never compiles it.
 	src/bypass_mcu_pic10f320.c
+	# PIC12F675 shell + pin map. Its `pic12f675` rule lists both as
+	# prerequisites, so both must exist for any leg -- and an absent one is a
+	# hard "No rule to make target", not a silent skip.
+	src/bypass_mcu_pic12f675.c src/bypass_pins_pic12f675.h
 	test/pic10f320/equiv/fw_harness.c
 	test/pic10f320/equiv/test_equiv.c
 	test/pic10f320/actuation/test_actuation.c
@@ -572,13 +598,18 @@ expect_override_rejected "an empty percentage result" \
 expect_override_rejected "an invalid percentage result" \
 	AWK="$tools/invalid-percentage-awk"
 
-(export FAKE_XC8_MODE=leading-count; run_make $PB_FLASH_VAR=000512) >/dev/null
+# Leading-zero budget parsing, proved in both directions. The pinned budget is
+# this lane's own with zeros prepended, so it stays consistent with the
+# over-budget fixture above (which is one word past the same number) rather than
+# pinning a second part's 512 that a 1024-word lane is legitimately under.
+leading_zero_budget=000$PB_FLASH_WORDS
+(export FAKE_XC8_MODE=leading-count; run_make $PB_FLASH_VAR=$leading_zero_budget) >/dev/null
 "$repo/scripts/validate-ihex.sh" "$hex"
 checks=$((checks + 1))
 
 printf 'stale image\n' > "$hex"
 if (export FAKE_XC8_MODE=over-budget; \
-		run_make $PB_FLASH_VAR=000512) >/dev/null 2>&1; then
+		run_make $PB_FLASH_VAR=$leading_zero_budget) >/dev/null 2>&1; then
 	printf 'FAIL: leading-zero flash budget bypassed the limit\n' >&2
 	exit 1
 fi
@@ -701,16 +732,20 @@ if [ "$PB_MATRIX_REQUIRE_COMPLETE" -eq 1 ]; then
 		"$PB_MATRIX_VARIANTS_VAR contains unsupported names"
 	[[ ! -e "$injection_marker" ]] \
 		|| { printf 'FAIL: %s matrix text executed shell syntax\n' "$PB_LABEL" >&2; exit 1; }
-	if [ "$PB_TARGET" = pic10f322 ]; then
-		eval_marker="$work/pic-matrix-make-function-executed"
+	# A variant name that rewrites the supported set it is about to be checked
+	# against. Applies to every target whose supported set is a Make variable the
+	# request can reach -- keyed on that variable, not on a part name, so a new
+	# part built on the same machinery cannot quietly skip it.
+	if [ -n "$matrix_supported_var" ]; then
+		eval_marker="$work/$PB_TARGET-matrix-make-function-executed"
 		rm -f "$eval_marker"
-		malicious_matrix='$(eval override CLASSIC_VARIANTS_SUPPORTED:=unknown)$(shell touch '"$eval_marker"')unknown'
+		malicious_matrix='$(eval override '"$matrix_supported_var"':=unknown)$(shell touch '"$eval_marker"')unknown'
 		expect_build_matrix_rejected \
 			"a recursively self-whitelisting unsupported name" \
 			"$malicious_matrix" \
 			"$PB_MATRIX_VARIANTS_VAR contains unsupported names"
 		[[ ! -e "$eval_marker" ]] \
-			|| { printf 'FAIL: PIC matrix text executed a GNU Make function\n' >&2; exit 1; }
+			|| { printf 'FAIL: %s matrix text executed a GNU Make function\n' "$PB_LABEL" >&2; exit 1; }
 	fi
 fi
 

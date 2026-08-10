@@ -1,28 +1,35 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Matthew Garman
 
-// Include-only implementation shared by the PIC10F320 and PIC10F322 adapters.
-// Each adapter pins its processor, image, program-space limit, independent check
-// count, output-variant vocabulary, and output-latch fault policy before including
-// this file. Keeping those facts outside the common mechanism makes accidental
-// cross-part drift visible while eliminating duplicated simulator logic.
+// Include-only implementation shared by the PIC part adapters. Each adapter
+// pins its processor, image, program-space limit, independent check count,
+// output-variant vocabulary, and output-latch fault policy, and includes its
+// family's register map (pic*_regs.h) and injection matrix (pic*_fault_matrix.h)
+// before including this file. Keeping those facts outside the common mechanism
+// makes accidental cross-part drift visible while eliminating duplicated
+// simulator logic.
 //
 // This test links libgpsim, drives a real built HEX, corrupts a guarded location
 // at runtime (an SEU/EMI single-event-upset model), and asserts that the firmware
 // detects the corruption and recovers via a watchdog reset on the simulated core.
 //
-// COMMON COVERAGE:
-//   * output SFRs    TRISA (exact output directions)
-//   * config SFRs    OSCCON.IRCF / WDTCON.WDTPS / PR2 / T2CON / ANSELA
-//   * pull-up SFRs   WPUA (exactly RA3 latched, RA0..RA2 clear) +
-//                    OPTION_REG.nWPUEN
-//   * ctx_ SRAM      program_state / effect_state / debounce_counter (range checks)
-// PIC10F322 additionally injects LATA.RA0..RA2 because that firmware guards its
-// settled output latch. PIC10F320 deliberately omits that general guard for flash
-// budget; its relay adapter instead injects coil bits and requires their idle
-// safe-state rewrite to correct both LATA and physical PORTA within one serviced
-// iteration, without a reset. The literal per-part expected counts ensure a
-// missing case cannot silently reduce either lane.
+// COMMON COVERAGE (the register sets are the family matrix's to name; this core
+// only sequences them):
+//   * output directions   PIC_FAULT_DIRECTION_INJECTIONS()
+//   * output latch        PIC_FAULT_EXTRA_OUTPUT_INJECTIONS()  (per PART)
+//   * config SFRs         PIC_FAULT_CONFIG_INJECTIONS()
+//   * pull-up SFRs        PIC_FAULT_PULLUP_INJECTIONS()
+//   * ctx_ SRAM           program_state / effect_state / debounce_counter
+//                         (range checks -- genuinely device-independent, so they
+//                         are the only injections still written out below)
+// The output-latch policy is the per-PART hook, and the two
+// PIC10F32x consumers show why it has to be: PIC10F322 injects its latch bits
+// because that firmware guards the settled latch, while PIC10F320 deliberately
+// omits that general guard for flash budget and its relay adapter instead
+// injects coil bits and requires their idle safe-state rewrite to correct both
+// latch and physical port within one serviced iteration, without a reset. The
+// literal per-part expected counts ensure a missing case cannot silently reduce
+// any lane.
 //
 // CTX_ADDR is required. The Makefile extracts _ctx_'s data address from the XC8
 // .sym so the test self-adjusts per variant and cannot pass with SRAM cases
@@ -51,23 +58,17 @@
 // A no-injection CONTROL case runs first and asserts delta == 0: a quiescent
 // device must NOT reset in a full window, proving the window is not catching
 // phantom resets and the gate does not fire spuriously. That control is now the
-// ONLY delta == 0 assertion here: since the exact-TRISA port every injection
+// ONLY delta == 0 assertion here: since the exact-direction port every injection
 // below is a guarded fault expecting exactly one reset, identically on all three
 // variants. (Before the port, cd4053_simple carried an extra write-back-verified
-// negative injection -- its spare RA2 sat outside the old per-variant mask.
-// Exact TRISA covers RA2 too, so both that blind spot and the variant split in
-// these expectations are gone; see EXPECTED_CHECKS below.)
+// negative injection -- its spare third output pin sat outside the old
+// per-variant mask. An exact direction check covers that pin too, so both the
+// blind spot and the variant split in these expectations are gone; see
+// EXPECTED_CHECKS below.)
 //
 // CORRUPTION VALUES are chosen so the main loop keeps running and the GATE is
-// the sole reset path (confound analysis, per case, below). OSCCON.IRCF and
-// WDTCON.WDTPS are the cleanest: no other firmware logic reads them and the loop
-// keeps petting, so absent the gate there is provably NO reset -- a WDTPS skew
-// is otherwise entirely silent. PR2/T2CON are also read by the TMR2 hardware, so
-// their corruption is kept tick-preserving (T2CON keeps TMR2ON set; PR2 stays a
-// valid period) so the reset is the gate, not a wedged tick. ANSELA and the
-// pull-up SFRs are gate-only too: the footswitch is externally driven here, so
-// re-selecting an output pin analog / disabling the pull-up does not change the
-// footswitch pin -- only the gate's check reacts.
+// the sole reset path. That confound analysis is per-register and therefore
+// lives with the matrix that picks the values (e.g. pic/pic10f32x_fault_matrix.h).
 //
 // The ctx_ cases differ subtly. effect_state and debounce_counter persist until
 // the next gate check while the device is quiescent. An out-of-range
@@ -78,12 +79,13 @@
 // fail-closed `pic10f322-test-target-variants` and `pic10f320-test-target-variants`
 // aggregates run their respective adapter for every supported output variant.
 //
-// IMPORTANT (gpsim WDT calibration; see test_soak_pic.cc): gpsim honors
-// WDTCON.WDTPS but does NOT match the datasheet -- at the firmware's WDTPS=0x08
-// the gpsim WDT period is ~1.057 s, not the silicon ~256 ms. The recovery reset
-// therefore takes ~1.06 s of simulated time here; WDT_RESET_WINDOW_MS carries
-// margin over that. This test asserts nothing about WDT TIMING, only that the
-// reset happens within a generous window.
+// IMPORTANT (gpsim WDT calibration; see test_soak_pic.cc): on the PIC10F32x
+// gpsim honors WDTCON.WDTPS but does NOT match the datasheet -- at that
+// firmware's WDTPS=0x08 the gpsim WDT period is ~1.057 s, not the silicon
+// ~256 ms. The recovery reset therefore takes ~1.06 s of simulated time there;
+// WDT_RESET_WINDOW_MS carries margin over it. This test asserts nothing about
+// WDT TIMING, only that the reset happens within a generous window -- which is
+// what lets one window serve parts whose watchdog models differ.
 
 #ifndef TEST_PIC_TEST_FAULT_PIC_CORE_H
 #define TEST_PIC_TEST_FAULT_PIC_CORE_H
@@ -110,6 +112,18 @@
 #include "pic/gpsim_bootstrap.h"
 
 // ---- Firmware / MCU parameters (provided by the part adapter / Makefile) -----
+#ifndef PIC_REG_PORT_ADDR
+#  error "part adapter must include its family register map (e.g. pic/pic10f32x_regs.h)"
+#endif
+#ifndef PIC_FAULT_DIRECTION_INJECTIONS
+#  error "part adapter must include its family fault matrix (e.g. pic/pic10f32x_fault_matrix.h)"
+#endif
+#ifndef PIC_FAULT_CONFIG_INJECTIONS
+#  error "PIC_FAULT_CONFIG_INJECTIONS must come from the family fault matrix"
+#endif
+#ifndef PIC_FAULT_PULLUP_INJECTIONS
+#  error "PIC_FAULT_PULLUP_INJECTIONS must come from the family fault matrix"
+#endif
 #ifndef PIC_FAULT_DEFAULT_PROC_NAME
 #  error "PIC_FAULT_DEFAULT_PROC_NAME must be defined by the part adapter"
 #endif
@@ -145,22 +159,12 @@
 #define CYCLES_PER_MS  ((F_CPU_HZ / 4UL) / 1000UL)   // 500 @ 2 MHz
 #define CLRWDT_OPCODE  0x0064u
 
-// Shared pin map: RA3 footswitch (driven by footsw_set(), see gpsim_bootstrap.h),
-// RA0 LED on LATA bit 0. FOOTSW_PIN_NAME is defined there.
-
-// ---- SFR addresses shared by the PIC10F320/PIC10F322 DFP headers ------------
-// Each is cross-checked against the register's gpsim name at runtime so an
-// address drift is surfaced rather than silently corrupting the wrong register.
-#define WPUA_ADDR    0x009u  // RA3 weak-pull-up latch = bit 3 (mask 0x08)
-#define PORTA_ADDR   0x005u  // physical pin levels; RA3 input, RA0..RA2 outputs
-#define TRISA_ADDR   0x006u  // RA3 input; RA0..RA2 outputs after init (0x08)
-#define LATA_ADDR    0x007u  // LED/control output latch (mask 0x07)
-#define OPTION_ADDR  0x00Eu  // OPTION_REG; nWPUEN (global pull-up enable) = bit 7
-#define OSCCON_ADDR  0x010u  // IRCF = bits 6:4 (mask 0x70)
-#define PR2_ADDR     0x012u
-#define T2CON_ADDR   0x013u
-#define ANSELA_ADDR  0x008u  // ANSA0..ANSA2 = bits 0..2 (RA0..RA2 analog select)
-#define WDTCON_ADDR  0x030u  // WDTPS = bits 5:1 (mask 0x3E)
+// The footswitch is driven by footsw_set() on FOOTSW_PIN_NAME; both come from
+// gpsim_bootstrap.h. Every SFR address, gpsim name token and expected init
+// value comes from the family register map the adapter included, and each
+// address is cross-checked against the register's gpsim name at runtime by
+// fetch_sfr() so an address drift is surfaced rather than silently corrupting
+// the wrong register.
 
 // ctx_ is file-static SRAM in both firmware parts. The Makefile passes its .sym
 // address and asserts the generated allocation is three bytes. Field offsets
@@ -322,7 +326,7 @@ static bool advance_to_loop_clrwdt(void) {
 // reset. Inject at the trailing loop CLRWDT, then stop at its next occurrence.
 // That is exactly one serviced iteration and places the verdict before its pet.
 static void inject_relay_correction_case(unsigned mask, const char *note) {
-    static unsigned const coil_mask = 0x06u;
+    static unsigned const coil_mask = PIC_REG_COIL_MASK;
     footsw_set(0);
     if (!run_ms(SETTLE_MS) || !advance_to_loop_clrwdt()) {
         g_checks++;
@@ -330,29 +334,29 @@ static void inject_relay_correction_case(unsigned mask, const char *note) {
         return;
     }
 
-    Register *lata = fetch_sfr(LATA_ADDR, "lata");
-    Register *porta = fetch_sfr(PORTA_ADDR, "porta");
-    if (lata == nullptr || porta == nullptr) {
+    Register *latch = fetch_sfr(PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN);
+    Register *port = fetch_sfr(PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN);
+    if (latch == nullptr || port == nullptr) {
         g_checks++;
         g_fails++;
         return;
     }
 
-    unsigned const initial_lata = lata->get_value() & 0xFFu;
-    unsigned const injected = initial_lata | mask;
+    unsigned const initial_latch = latch->get_value() & 0xFFu;
+    unsigned const injected = initial_latch | mask;
     guint64 const resets_before = g_resets;
     guint64 const injection_cycle = get_cycles().get();
     guint64 correction_cycle = 0u;
-    lata->put_value(injected);
-    unsigned const written = lata->get_value() & 0xFFu;
-    unsigned observed_lata = written & coil_mask;
-    unsigned observed_porta = porta->get_value() & coil_mask;
-    bool footswitch_released = (porta->get_value() & 0x08u) != 0u;
+    latch->put_value(injected);
+    unsigned const written = latch->get_value() & 0xFFu;
+    unsigned observed_latch = written & coil_mask;
+    unsigned observed_port = port->get_value() & coil_mask;
+    bool footswitch_released = (port->get_value() & PIC_REG_FOOTSW_MASK) != 0u;
     bool left_clrwdt = false;
     bool completed_iteration = false;
 
     printf("  inject relay coils    @0x%03x: 0x%02x -> 0x%02x  (%s)\n",
-           LATA_ADDR, initial_lata, injected, note);
+           PIC_REG_LATCH_ADDR, initial_latch, injected, note);
     fflush(stdout);
 
     for (int i = 0; i < 8000; ++i) {
@@ -370,34 +374,34 @@ static void inject_relay_correction_case(unsigned mask, const char *note) {
         if (g_cpu->pc->get_value() != g_loop_clrwdt_addr) {
             left_clrwdt = true;
         }
-        observed_lata |= lata->get_value() & coil_mask;
-        observed_porta |= porta->get_value() & coil_mask;
+        observed_latch |= latch->get_value() & coil_mask;
+        observed_port |= port->get_value() & coil_mask;
         if (correction_cycle == 0u &&
-                (lata->get_value() & coil_mask) == 0u &&
-                (porta->get_value() & coil_mask) == 0u) {
+                (latch->get_value() & coil_mask) == 0u &&
+                (port->get_value() & coil_mask) == 0u) {
             correction_cycle = get_cycles().get();
         }
         footswitch_released = footswitch_released &&
-                              ((porta->get_value() & 0x08u) != 0u);
+                              ((port->get_value() & PIC_REG_FOOTSW_MASK) != 0u);
     }
 
-    unsigned const final_lata = lata->get_value() & coil_mask;
-    unsigned const final_porta = porta->get_value() & coil_mask;
+    unsigned const final_latch = latch->get_value() & coil_mask;
+    unsigned const final_port = port->get_value() & coil_mask;
     guint64 const reset_delta = g_resets - resets_before;
     guint64 const correction_cycles = correction_cycle > injection_cycle
         ? correction_cycle - injection_cycle : 0u;
-    bool const pass = (initial_lata & coil_mask) == 0u &&
+    bool const pass = (initial_latch & coil_mask) == 0u &&
                       written == injected &&
-                      observed_lata == mask && observed_porta == mask &&
+                      observed_latch == mask && observed_port == mask &&
                       correction_cycles > 0u && completed_iteration &&
-                      final_lata == 0u &&
-                      final_porta == 0u && reset_delta == 0u &&
+                      final_latch == 0u &&
+                      final_port == 0u && reset_delta == 0u &&
                       footswitch_released;
 
     // Keep cases independent even when exercising a mutant that fails to clear
     // the injected state. The verdict above already captured the physical and
     // latch failure; the next case must still begin from the quiescent contract.
-    lata->put_value((lata->get_value() & 0xFFu) & ~coil_mask);
+    latch->put_value((latch->get_value() & 0xFFu) & ~coil_mask);
 
     g_checks++;
     if (pass) {
@@ -408,12 +412,13 @@ static void inject_relay_correction_case(unsigned mask, const char *note) {
     } else {
         g_fails++;
         fprintf(stderr,
-                "    FAIL: init=0x%02x write=0x%02x seen-lata=0x%02x "
-                "seen-porta=0x%02x final-lata=0x%02x final-porta=0x%02x "
+                "    FAIL: init=0x%02x write=0x%02x seen-" PIC_REG_LATCH_LC "=0x%02x "
+                "seen-" PIC_REG_PORT_LC "=0x%02x final-" PIC_REG_LATCH_LC "=0x%02x "
+                "final-" PIC_REG_PORT_LC "=0x%02x "
                 "completed=%u correction-cycles=%" G_GUINT64_FORMAT
                 " resets=%" G_GUINT64_FORMAT " released=%u\n",
-                initial_lata & coil_mask, written & coil_mask, observed_lata,
-                observed_porta, final_lata, final_porta,
+                initial_latch & coil_mask, written & coil_mask, observed_latch,
+                observed_port, final_latch, final_port,
                 completed_iteration ? 1u : 0u, correction_cycles, reset_delta,
                 footswitch_released ? 1u : 0u);
     }
@@ -423,7 +428,7 @@ static void inject_relay_correction_case(unsigned mask, const char *note) {
 // ---- One injection case -----------------------------------------------------
 // absolute=true writes `val`; absolute=false writes (current ^ val), i.e. an
 // SEU bit-flip of the bits in `val`. Every call site passes expected_resets == 1
-// since the exact-TRISA port made all three variants guard the same directions;
+// since the exact-direction port made all three variants guard the same pins;
 // the parameter and its restore-and-verify branch below are kept because a
 // zero-expectation case is exactly what a future unguarded location would need,
 // and because that branch is what proved the old RA2 negative control genuinely
@@ -482,7 +487,8 @@ static void inject_case(const char *label, unsigned addr, const char *token,
         g_fails++;
         char const *reason = expected_resets == 0u
             ? "  [unexpected reset path fired]"
-            : (delta > 1u ? "  [reset-loop: is gpsim retaining corrupted WDTCON?]"
+            : (delta > 1u ? "  [reset-loop: is gpsim retaining the corrupted"
+                            " watchdog-period register?]"
                           : "  [gate did not fire?]");
         printf("    FAIL: %" G_GUINT64_FORMAT " resets in %u ms (want exactly %u)%s\n",
                delta, WDT_RESET_WINDOW_MS, expected_resets, reason);
@@ -525,32 +531,34 @@ static void control_case(void) {
     fflush(stdout);
 }
 
-// init() must establish the exact RA3-only mask before globally enabling pull-ups;
-// preserving RA0..RA2 would let a later direction fault activate a pull-up against
-// the fail-safe pull-down.
-static void check_startup_wpua(void) {
-    Register *r = fetch_sfr(WPUA_ADDR, "wpu");
+// init() must establish the exact footswitch-only pull-up mask before globally
+// enabling pull-ups; preserving the output pins' latches would let a later
+// direction fault activate a pull-up against the fail-safe pull-down.
+static void check_startup_wpu(void) {
+    Register *r = fetch_sfr(PIC_REG_WPU_ADDR, PIC_REG_WPU_TOKEN);
     g_checks++;
     if (r == nullptr) { g_fails++; return; }
-    unsigned const val = r->get_value() & 0x0Fu;
-    if (val == 0x08u) {
-        printf("  PASS: startup WPUA is RA3-only (0x08)\n");
+    unsigned const val = r->get_value() & PIC_REG_WPU_MASK;
+    if (val == PIC_REG_WPU_INIT) {
+        printf("  PASS: startup " PIC_REG_WPU_NAME " is " PIC_REG_WPU_DESC "\n");
     } else {
         g_fails++;
-        printf("  FAIL: startup WPUA is 0x%02x (want exact RA3-only 0x08)\n", val);
+        printf("  FAIL: startup " PIC_REG_WPU_NAME " is 0x%02x"
+               " (want exact " PIC_REG_WPU_DESC ")\n", val);
     }
 }
 
-static void check_startup_trisa(void) {
-    Register *r = fetch_sfr(TRISA_ADDR, "tris");
+static void check_startup_tris(void) {
+    Register *r = fetch_sfr(PIC_REG_TRIS_ADDR, PIC_REG_TRIS_TOKEN);
     g_checks++;
     if (r == nullptr) { g_fails++; return; }
-    unsigned const val = r->get_value() & 0x0Fu;
-    if (val == 0x08u) {
-        printf("  PASS: startup TRISA is RA3 input, RA0..RA2 outputs (0x08)\n");
+    unsigned const val = r->get_value() & PIC_REG_PORT_MASK;
+    if (val == PIC_REG_TRIS_INIT) {
+        printf("  PASS: startup " PIC_REG_TRIS_NAME " is " PIC_REG_TRIS_DESC "\n");
     } else {
         g_fails++;
-        printf("  FAIL: startup TRISA is 0x%02x (want exact 0x08)\n", val);
+        printf("  FAIL: startup " PIC_REG_TRIS_NAME " is 0x%02x"
+               " (want exact " PIC_REG_TRIS_INIT_STR ")\n", val);
     }
 }
 
@@ -572,60 +580,28 @@ int main() {
     fflush(stdout);
 
     // Negative control first, then one case per guarded location.
-    check_startup_wpua();
-    check_startup_trisa();
+    check_startup_wpu();
+    check_startup_tris();
     if (!identify_loop_clrwdt()) {
         printf("\nFAULT-INJECT FAIL: %u checks, %u failures\n", g_checks, g_fails);
         return 1;
     }
     control_case();
 
-    // Output directions (hw_is_sanity_check_failed). The gate compares TRISA
-    // exactly against its init() value, so all three output directions are
-    // guarded on every variant -- including cd4053_simple's spare RA2, which
-    // used to be a negative control here.
-    inject_case("TRISA.RA0", TRISA_ADDR, "tris", false, 0x01, 1,
-                "RA0 changed from output to input");
-    inject_case("TRISA.RA1", TRISA_ADDR, "tris", false, 0x02, 1,
-                "RA1 changed from output to input");
-    inject_case("TRISA.RA2", TRISA_ADDR, "tris", false, 0x04, 1,
-                "RA2 changed from output to input");
+    // Output directions (hw_is_sanity_check_failed).
+    PIC_FAULT_DIRECTION_INJECTIONS();
 
-    // PIC10F322 guards its settled output latch. PIC10F320 has no general latch
-    // guard, but its relay adapter requires idle correction of both coil bits.
+    // The output latch, whose guard policy is the one thing that differs
+    // BETWEEN parts of a family rather than between families: PIC10F322 guards
+    // its settled latch, PIC10F320 has no general latch guard but its relay
+    // adapter requires idle correction of both coil bits.
     PIC_FAULT_EXTRA_OUTPUT_INJECTIONS();
 
-    // config SFRs (hw_critical_sfrs_intact)
-    inject_case("OSCCON.IRCF",  OSCCON_ADDR, "osccon", false, 0x10, 1,
-                "IRCF 0b100->0b101: 2MHz->4MHz clock skew");
-    inject_case("WDTCON.WDTPS", WDTCON_ADDR, "wdtcon", false, 0x10, 1,
-                "WDTPS 0b01000->0b00000: 1:8192->1:32, WDT miscalibrated (else silent)");
-    inject_case("PR2",          PR2_ADDR,    "pr2",    true,  99, 1,
-                "tick period 124->99: 1ms tick skewed");
-    inject_case("T2CON",        T2CON_ADDR,  "t2con",  false, 0x01, 1,
-                "T2CKPS 1:4->1:1, TMR2ON preserved: timer cfg skew");
-    // The ANSELA gate masks the fixed RA0|RA1|RA2 (BYPASS_OUTPUT_DDR_MASK) on every
-    // variant, so re-selecting ANY output pin analog must recover via one reset --
-    // not just RA0 (a narrowed mask that only checked RA0 would slip RA1/RA2 past).
-    inject_case("ANSELA.RA0",   ANSELA_ADDR, "ansel",  false, 0x01, 1,
-                "ANSA0=1: RA0 (LED) re-selected analog, out of digital service");
-    inject_case("ANSELA.RA1",   ANSELA_ADDR, "ansel",  false, 0x02, 1,
-                "ANSA1=1: RA1 (control pin) re-selected analog, out of digital service");
-    inject_case("ANSELA.RA2",   ANSELA_ADDR, "ansel",  false, 0x04, 1,
-                "ANSA2=1: RA2 (control pin) re-selected analog, out of digital service");
+    // Clock / tick / analog config SFRs (hw_critical_sfrs_intact).
+    PIC_FAULT_CONFIG_INJECTIONS();
 
-    // pull-up SFRs (hw_footswitch_pullup_intact) -- footswitch is externally
-    // driven, so the pin stays released; only the gate's check reacts.
-    inject_case("WPUA.RA3",     WPUA_ADDR,   "wpu",    false, 0x08, 1,
-                "clear RA3 pull-up latch: footswitch weak pull-up disabled");
-    inject_case("WPUA.RA0",     WPUA_ADDR,   "wpu",    false, 0x01, 1,
-                "set RA0 output-pin pull-up latch: exact RA3-only mask violated");
-    inject_case("WPUA.RA1",     WPUA_ADDR,   "wpu",    false, 0x02, 1,
-                "set RA1 output-pin pull-up latch: exact RA3-only mask violated");
-    inject_case("WPUA.RA2",     WPUA_ADDR,   "wpu",    false, 0x04, 1,
-                "set RA2 output-pin pull-up latch: exact RA3-only mask violated");
-    inject_case("OPTION.nWPUEN",OPTION_ADDR, "option", false, 0x80, 1,
-                "set nWPUEN: global weak pull-ups disabled");
+    // Weak pull-ups (hw_footswitch_pullup_intact).
+    PIC_FAULT_PULLUP_INJECTIONS();
 
     // ctx_ SRAM range checks (see the ctx_ note in the header comment)
     inject_case("ctx.program_state",    CTX_PROGRAM_STATE,    nullptr, true, 0x02, 1,

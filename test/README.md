@@ -109,13 +109,35 @@ test/
                                 hard-coded algorithm expectations
                                                         (make test-attiny202-model-ffi)
 
-  pic/     PIC10F322-specific tests plus shared PIC gpsim harness code.
+  pic/     PIC10F322 and PIC12F675 tests plus shared PIC harness code. Both
+           parts are a shell over the shared pure core, so their adapters sit
+           beside the mechanism they share rather than in per-part trees.
             fw_coverage/         real PIC source via host SFR mock + gcov
                                                         (make pic10f322-coverage-check-fw)
-            test_config_pic.c    CONFIG-word check     (make pic10f322-test-config)
+            test_config_pic_core.h  CONFIG-word mechanism: locate the word in a
+                                  built HEX, mask it, compare against intent
+            test_config_pic.c    PIC10F32x adapter     (make pic10f322-test-config)
+            pic10f32x_config.h   PIC10F32x decode table (shared by 322 and 320:
+                                  same address, layout and expected word)
+            test_config_pic12f675.c  PIC12F675 adapter (make pic12f675-test-config)
+            pic12f675_config.h   PIC12F675 decode table -- shares the CONFIG
+                                  address with the 32x and no other bit; adds
+                                  CPD and the BG factory-calibration bits
             *.stc + run_gpsim_*  register-level gpsim  (make pic10f322-test-gpsim)
+            pic12f675_footswitch_toggle.stc, pic12f675_power_on_pressed.stc
+                                  the same two scenarios re-derived for the
+                                  PIC12F675: gpio5 stimulus, 1024-cycle tick, and
+                                  they run the DERIVED *_simcal.hex
+                                                        (make pic12f675-test-gpsim)
             gpsim_wrapper_common.sh
                                   scaffolding both run_gpsim_* wrappers source
+                                  (sourced, not executable)
+            pic10f32x_gpsim_regs.sh, pic12f675_gpsim_regs.sh
+                                  per-part register identity the wrappers source
+                                  via PIC_GPSIM_REGS: which registers a snapshot
+                                  reads, which bits are footswitch/LED, and which
+                                  output bits a variant expectation covers. One
+                                  file per part so a lane cannot set half of it
                                   (sourced, not executable)
             find_pin_exact.h     shared exact gpsim pin-name lookup
             gpsim_bootstrap.h    shared libgpsim bring-up: core init, image
@@ -127,7 +149,21 @@ test/
             test_io_pic.cc       PIC10F322 GPIO/pulse-timing adapter
                                                         (make pic10f322-test-io)
             test_{fault,lockstep,io}_pic_core.h
-                                  shared libgpsim harness implementations
+                                  shared libgpsim harness implementations,
+                                  device-parameterised: a part adapter supplies
+                                  the register map and injection matrix below
+            pic10f32x_regs.h     PIC10F32x register identity (PIC_REG_* names, <!-- name-contract: exempt (C macro family, not a make variable) -->
+                                  addresses and masks) for both 32x adapters
+            pic10f32x_fault_matrix.h
+                                  PIC10F32x fault-injection matrix (PIC_FAULT_*), <!-- name-contract: exempt (C macro family, not a make variable) -->
+                                  deliberately separate from identity: guard
+                                  POLICY is per-family, not per-register
+            inject_calibration_word.py
+                                  derives a simulator-runnable image by injecting
+                                  the oscillator calibration word the factory
+                                  programs; never touches the shipping HEX
+                             (make pic12f675-test-calibration;
+                              make pic12f675-simcal for the derived images)
             test_soak_pic.cc     libgpsim soak         (make pic10f322-test-soak)
                                   shared with the PIC10F320 lane
 

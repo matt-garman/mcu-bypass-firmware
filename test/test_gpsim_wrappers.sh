@@ -8,7 +8,8 @@ tools="$work/tools"
 hex="$work/firmware.hex"
 checks=0
 unset FAKE_GPSIM_MODE FAKE_GPSIM_EXIT FAKE_GPSIM_MARKER FAKE_GPSIM_STC_LOG \
-	FAKE_GPSIM_PROC_LOG \
+	FAKE_GPSIM_PROC_LOG FAKE_GPSIM_FOOTSW_PIN FAKE_GPSIM_TOGGLE_LINES \
+	FAKE_GPSIM_PON_LINES PIC_GPSIM_REGS PIC_GPSIM_PON_STC \
 	FAKE_TIMEOUT_MARKER GPSIM GPSIM_TIMEOUT_SECONDS PIC_GPSIM_PROC PIC_GPSIM_STC \
 	MUTATION_INFRA_MARKER STRICT_TOOLS
 mkdir -p "$tools"
@@ -41,27 +42,44 @@ if [ ! -f "$script" ]; then
 	printf 'gpsim command script not found: %s\n' "$script" >&2
 	exit 65
 fi
+# The footswitch pin and the snapshot register names are per-PART, not fixed:
+# the PIC10F32x parts attach to ra3 and report porta/lata, the PIC12F675
+# attaches to gpio5 and has no LATx at all. Defaulted to the 10F32x spelling so
+# every pre-existing check reads unchanged.
+pin=${FAKE_GPSIM_FOOTSW_PIN:-ra3}
 fsw_attach_count=$(awk '$1 == "attach" && $2 == "n1" && $3 == "fsw" { count++ } END { print count + 0 }' "$script")
-ra3_attach_count=$(awk '$1 == "attach" && $2 == "n1" && $3 == "fsw" && $4 == "ra3" && NF == 4 { count++ } END { print count + 0 }' "$script")
-if [ "$fsw_attach_count" -ne 1 ] || [ "$ra3_attach_count" -ne 1 ]; then
-	printf 'invalid footswitch attachment: expected exactly one attach n1 fsw ra3 in %s\n' \
-		"$script" >&2
+pin_attach_count=$(awk -v pin="$pin" '$1 == "attach" && $2 == "n1" && $3 == "fsw" && $4 == pin && NF == 4 { count++ } END { print count + 0 }' "$script")
+if [ "$fsw_attach_count" -ne 1 ] || [ "$pin_attach_count" -ne 1 ]; then
+	printf 'invalid footswitch attachment: expected exactly one attach n1 fsw %s in %s\n' \
+		"$pin" "$script" >&2
 	exit 65
 fi
+# The canned snapshots are the PIC10F32x's (two registers, RA3/RA0 bit
+# positions). A part whose register identity differs supplies its own block --
+# that is what proves PIC_GPSIM_REGS actually reaches the parse, rather than the
+# wrapper happening to find porta/lata regardless.
 case "$script" in
 	*power_on_pressed.stc)
-		printf '%s\n' \
-			'===PON_HELD===' 'porta = 0x0' 'lata = 0x0' \
-			'===PON_RELEASED===' 'porta = 0x8' 'lata = 0x0' \
-			'===PON_ENGAGED===' 'porta = 0x9' 'lata = 0x1'
+		if [ -n "${FAKE_GPSIM_PON_LINES:-}" ]; then
+			printf '%s\n' "$FAKE_GPSIM_PON_LINES"
+		else
+			printf '%s\n' \
+				'===PON_HELD===' 'porta = 0x0' 'lata = 0x0' \
+				'===PON_RELEASED===' 'porta = 0x8' 'lata = 0x0' \
+				'===PON_ENGAGED===' 'porta = 0x9' 'lata = 0x1'
+		fi
 		;;
 	*footswitch_toggle.stc)
-		printf '%s\n' \
-			'===INIT_BYPASS===' 'porta = 0x8' 'lata = 0x0' \
-			'===PRESS1_EARLY===' 'porta = 0x0' 'lata = 0x0' \
-			'===PRESS1_LOW===' 'porta = 0x5' 'lata = 0x5' \
-			'===ENGAGED===' 'porta = 0x9' 'lata = 0x1' \
-			'===BYPASS_AGAIN===' 'porta = 0x8' 'lata = 0x0'
+		if [ -n "${FAKE_GPSIM_TOGGLE_LINES:-}" ]; then
+			printf '%s\n' "$FAKE_GPSIM_TOGGLE_LINES"
+		else
+			printf '%s\n' \
+				'===INIT_BYPASS===' 'porta = 0x8' 'lata = 0x0' \
+				'===PRESS1_EARLY===' 'porta = 0x0' 'lata = 0x0' \
+				'===PRESS1_LOW===' 'porta = 0x5' 'lata = 0x5' \
+				'===ENGAGED===' 'porta = 0x9' 'lata = 0x1' \
+				'===BYPASS_AGAIN===' 'porta = 0x8' 'lata = 0x0'
+		fi
 		;;
 	*)
 		printf 'unexpected gpsim command script: %s\n' "$script" >&2
@@ -439,6 +457,114 @@ if [ "${#routed_proc_322[@]}" -ne 2 ] \
 	printf '      check the PIC_GPSIM_PROC= prefixes in the pic10f322-test-gpsim recipe\n' >&2
 	exit 1
 fi
+checks=$((checks + 1))
+
+# --- register-identity channel (PIC_GPSIM_REGS) -------------------------------
+# The wrappers learn which registers to snapshot, which bits carry the footswitch
+# and LED, and which output bits a variant expectation covers, from a sourced
+# fragment. Three things have to hold, and none of them is visible from a passing
+# PIC10F32x run -- that lane would pass just the same if the channel were dead,
+# because its values ARE the defaults.
+
+# 1. A fragment that cannot be read is a hard failure, not a silent fall back to
+#    the default identity. Falling back would run another part's masks against
+#    this part's registers, which is the one way in here to score a wrong pass.
+for wrapper in run_toggle run_power_on; do
+	if output=$(export PIC_GPSIM_REGS="$work/absent-regs.sh"; "$wrapper" 2>&1); then
+		printf 'FAIL: %s accepted an unreadable register fragment\n' "$wrapper" >&2
+		exit 1
+	fi
+	[[ "$output" == *"missing gpsim register identity fragment"* && "$output" != *"RESULT: PASS"* ]] \
+		|| { printf 'FAIL: %s did not report the unreadable register fragment: %s\n' \
+			"$wrapper" "$output" >&2; exit 1; }
+	checks=$((checks + 1))
+done
+
+# 2. A fragment that defines only SOME of the identity is refused, by name. This
+#    is the partial-override hazard the single-file design exists to prevent: a
+#    fragment carrying new register names but stale masks would read the right
+#    register and test the wrong bit.
+partial="$work/partial-regs.sh"
+grep -v '^GPSIM_LED_MASK' "$ROOT/test/pic/pic12f675_gpsim_regs.sh" > "$partial"
+for wrapper in run_toggle run_power_on; do
+	if output=$(export PIC_GPSIM_REGS="$partial"; "$wrapper" 2>&1); then
+		printf 'FAIL: %s accepted a fragment missing GPSIM_LED_MASK\n' "$wrapper" >&2
+		exit 1
+	fi
+	[[ "$output" == *"does not define GPSIM_LED_MASK"* && "$output" != *"RESULT: PASS"* ]] \
+		|| { printf 'FAIL: %s did not name the missing identity variable: %s\n' \
+			"$wrapper" "$output" >&2; exit 1; }
+	checks=$((checks + 1))
+done
+
+# 3. End-to-end routing through the REAL shipped PIC12F675 fragment and the REAL
+#    PIC12F675 stimuli: a part with one register instead of two, the footswitch on
+#    gpio5 instead of ra3, and an output mask that matters (GPIO carries the
+#    footswitch bit, so an unmasked comparison would fail wherever the switch is
+#    released). Fake gpsim asserts the stimulus attaches to gpio5, and emits only
+#    `gpio` lines -- so a wrapper still reaching for porta/lata finds nothing and
+#    fails on missing snapshots.
+pic12f675_toggle=$'===INIT_BYPASS===\ngpio = 0x20\n===PRESS1_EARLY===\ngpio = 0x0\n===PRESS1_LOW===\ngpio = 0x1\n===ENGAGED===\ngpio = 0x21\n===BYPASS_AGAIN===\ngpio = 0x20'
+pic12f675_pon=$'===PON_HELD===\ngpio = 0x0\n===PON_RELEASED===\ngpio = 0x20\n===PON_ENGAGED===\ngpio = 0x21'
+if ! output=$(
+		export PIC_GPSIM_REGS="$ROOT/test/pic/pic12f675_gpsim_regs.sh"
+		export PIC_GPSIM_STC="$ROOT/test/pic/pic12f675_footswitch_toggle.stc"
+		export FAKE_GPSIM_FOOTSW_PIN=gpio5
+		export FAKE_GPSIM_TOGGLE_LINES="$pic12f675_toggle"
+		run_toggle 2>&1); then
+	printf 'FAIL: toggle wrapper rejected the PIC12F675 identity: %s\n' "$output" >&2
+	exit 1
+fi
+[[ "$output" == *"RESULT: PASS"* && "$output" == *"(GP5=1)"* && "$output" == *"full GPIO == 0x1"* ]] \
+	|| { printf 'FAIL: toggle wrapper did not adopt the PIC12F675 labels/masks: %s\n' "$output" >&2; exit 1; }
+checks=$((checks + 1))
+
+if ! output=$(
+		export PIC_GPSIM_REGS="$ROOT/test/pic/pic12f675_gpsim_regs.sh"
+		export PIC_GPSIM_PON_STC="$ROOT/test/pic/pic12f675_power_on_pressed.stc"
+		export FAKE_GPSIM_FOOTSW_PIN=gpio5
+		export FAKE_GPSIM_PON_LINES="$pic12f675_pon"
+		run_power_on 2>&1); then
+	printf 'FAIL: power-on wrapper rejected the PIC12F675 identity: %s\n' "$output" >&2
+	exit 1
+fi
+[[ "$output" == *"RESULT: PASS"* && "$output" == *"(GP5=0)"* ]] \
+	|| { printf 'FAIL: power-on wrapper did not adopt the PIC12F675 labels: %s\n' "$output" >&2; exit 1; }
+checks=$((checks + 1))
+
+# 4. The output mask is load-bearing, not decoration: with the PIC12F675 identity
+#    the ENGAGED snapshot is 0x21 (LED plus the released footswitch bit) and the
+#    variant expectation is 0x1. Drop the mask -- by borrowing the 10F32x
+#    fragment's 0xFF -- and the same run must FAIL, which is what proves the
+#    comparison is masked rather than accidentally equal.
+unmasked="$work/unmasked-regs.sh"
+sed 's/^GPSIM_OUTPUT_MASK=.*/GPSIM_OUTPUT_MASK=0xFF/' \
+	"$ROOT/test/pic/pic12f675_gpsim_regs.sh" > "$unmasked"
+if output=$(
+		export PIC_GPSIM_REGS="$unmasked"
+		export PIC_GPSIM_STC="$ROOT/test/pic/pic12f675_footswitch_toggle.stc"
+		export FAKE_GPSIM_FOOTSW_PIN=gpio5
+		export FAKE_GPSIM_TOGGLE_LINES="$pic12f675_toggle"
+		run_toggle 2>&1); then
+	printf 'FAIL: toggle wrapper passed with the output mask removed: %s\n' "$output" >&2
+	exit 1
+fi
+[[ "$output" == *"GPIO should be 0x1 for this variant, got 0x21"* ]] \
+	|| { printf 'FAIL: removing the output mask produced the wrong failure: %s\n' "$output" >&2; exit 1; }
+checks=$((checks + 1))
+
+# 5. The per-part power-on stimulus really is a separate channel from the toggle
+#    one. Pointing PIC_GPSIM_STC at a power-on script must NOT redirect the
+#    power-on wrapper, because a single "the stimulus" variable for two scenarios
+#    is how a lane ends up running one script through the other's wrapper.
+if ! output=$(
+		export PIC_GPSIM_STC="$ROOT/test/pic/pic12f675_power_on_pressed.stc"
+		run_power_on 2>&1); then
+	printf 'FAIL: power-on wrapper followed PIC_GPSIM_STC: %s\n' "$output" >&2
+	exit 1
+fi
+[[ "$output" == *"RESULT: PASS"* ]] \
+	|| { printf 'FAIL: power-on wrapper did not keep its own stimulus: %s\n' "$output" >&2; exit 1; }
 checks=$((checks + 1))
 
 printf 'gpsim wrapper validation: %d checks, 0 failures\n' "$checks"

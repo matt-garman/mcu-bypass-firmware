@@ -5,7 +5,9 @@
 #define BYPASS_OUTPUT_COMMON_H__
 
 
-#if defined(BYPASS_MCU_PIC10F322)
+#if defined(BYPASS_MCU_PIC12F675)
+#  include "bypass_pins_pic12f675.h"
+#elif defined(BYPASS_MCU_PIC10F322)
 #  include "bypass_pins_pic10f322.h"
 #elif defined(BYPASS_MCU_AVR_XT)
 #  include "bypass_pins_avr_xt.h"

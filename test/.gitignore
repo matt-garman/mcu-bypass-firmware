@@ -8,6 +8,7 @@ formal/test_symbolic_klee.bc
 avr/test_fuses
 avr/test_soak_*5
 pic/test_config_pic
+pic/test_config_pic12f675
 pic/test_soak_pic
 pic/test_fault_pic
 pic/test_io_pic

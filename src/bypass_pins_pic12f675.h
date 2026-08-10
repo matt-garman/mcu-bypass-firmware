@@ -1,0 +1,69 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Matthew Garman
+
+#ifndef BYPASS_PINS_PIC12F675_H__
+#define BYPASS_PINS_PIC12F675_H__
+
+
+#include <stdint.h>
+
+
+// PIC12F675 pin map: GPIO/TRISIO bit positions.  The PIC12F675 has 6 I/O:
+//     - GP0, GP1, GP2, GP4, GP5 bidirectional
+//     - GP3 INPUT-ONLY (it shares MCLR/VPP; with MCLRE=OFF it is a plain
+//       digital input)
+//
+// UNLIKE the PIC10F322, the footswitch does NOT go on the input-only pin. The
+// 322's map rests on a coincidence: RA3 is input-only AND pull-up capable.
+// The pic12f675 does not have this: the WPU register implements bits
+// 0,1,2,4,5 only, so GP3 has NO internal weak pull-up. Putting the footswitch
+// there would make an external pull-up mandatory and would delete
+// hw_footswitch_pullup_intact() from this target.
+//
+// The footswitch therefore goes on GP5, the one bidirectional pin carrying no
+// analog function: ANSEL implements ANS0..ANS3 = GP0, GP1, GP2, GP4, and the
+// comparator's CIN+/CIN-/COUT are GP0/GP1/GP2. GP5 needs no ANSEL handling and
+// cannot be silently re-analogized by an upset in either ANSEL or CMCON. Its
+// alternate functions are OSC1/CLKIN (released as I/O by FOSC=INTRCIO) and
+// T1CKI (unconsumed - the tick is TMR0 off Fosc/4).
+//
+// see also PIC10F322 counterpart bypass_pins_pic10f322.h
+//
+// Selected by bypass_output_common.h on the BYPASS_MCU_PIC12F675 build macro.
+// Bit positions are pinned to the device header's _GPIO_GPx_POSN by
+// compile-time asserts in bypass_mcu_pic12f675.c.
+//
+// footswitch and status LED pins are common across all output variants
+#define FOOTSW_PIN      (5U) // GP5 (bidirectional, used as input) + weak pull-up
+#define LED_PIN         (0U) // GP0
+
+// CD4053 simple
+#define CD4053_PIN      (1U) // GP1
+
+// CD4053 with muting
+#define CD4053_CTL1     (1U) // GP1
+#define CD4053_CTL2     (2U) // GP2
+
+// dual-latching mechanical relay bypass (e.g. Panasonic TQ2-2L)
+#define RELAY_RESET_PIN (1U)  // GP1
+#define RELAY_SET_PIN   (2U)  // GP2
+
+
+// Bits that must be OUTPUTS (GP0|GP1|GP2). Same macro NAME as the AVR and
+// PIC10F322 maps (the shared drivers consume it); the value is the output-bit
+// set, interpreted by the per-MCU hw_configure_output_pins() (PIC: TRISIO bit
+// 0 = output). ("DDR" is legacy AVR wording, kept for a single cross-MCU macro
+// name.)
+//
+// All three variants use GP0..GP2:
+//    tq2_l2_5v_relay = LED(GP0)/RESET(GP1)/SET(GP2)
+//    cd4053_with_mute = LED(GP0)/CTL1(GP1)/CTL2(GP2)
+//    cd4053_simple = LED(GP0)/CD4053(GP1),
+// leaving GP2 a spare driven low. Mask 0x07 for all.
+//
+// GP3 (input-only) and GP4 are spares and remain inputs; the exact-TRISIO gate
+// in hw_output_state_intact() requires exactly that.
+#define BYPASS_OUTPUT_DDR_MASK (0x07U)  // GP0|GP1|GP2
+
+
+#endif // BYPASS_PINS_PIC12F675_H__
