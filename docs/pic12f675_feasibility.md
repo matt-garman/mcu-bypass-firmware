@@ -1029,6 +1029,18 @@ They are listed worst-first.
 
 Ordered so that each step is independently green and independently revertible.
 
+**Implementation sequencing note (2026-08-10).** Work spanning steps 2 through 7
+landed together in `64b4d2d`, so that implementation commit does not satisfy the
+independent-reversion requirement above. The review branch had already been
+published and accumulated dependent commits and merges before this was caught;
+splitting it afterward would invalidate those reviewed hashes and their evidence.
+The sequencing requirement is therefore waived for that implementation commit
+only. Its commit message retains the per-gate commands, results and negative
+probes, while the subsequent isolation, target-I/O, lock-step, coverage, gpsim,
+fault, matrix, clean-contract, spare-pin and rationale commits retain focused
+review and verification evidence. Remaining work must follow the independently
+green, independently revertible sequencing below.
+
 | # | Step | Notes |
 |---|---|---|
 | 0 | **Decide two forks and identify the concurrency candidate:** §4.4.1 (1.024 ms TMR0 vs exact 1 ms TMR1), §7 (single-part `pic12f675` vs `pic12f6xx` family shell covering the 629), and whether ISR merits the step-1 spike | Do not select ISR from the flash table; its decision follows the stack result |
