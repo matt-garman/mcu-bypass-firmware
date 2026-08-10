@@ -1,12 +1,24 @@
 # PIC12F675 feasibility — porting the reference architecture to a classic mid-range PIC
 
-**Status:** feasibility assessment. Nothing in this document is implemented; no
-`src/`, `test/` or `Makefile` change has been made. It records what was measured
-on the real toolchain, what would have to be designed rather than copied, and
-what remains unknown — so the decision to start (or not start) the port can be
-taken on evidence rather than on part-number adjacency.
+**Status (2026-08-10): staged standalone implementation; not release-supported.**
+The repository now contains the production Model-B PIC12F675 shell and pin map,
+the complete three-variant build and flash-budget lane, static analysis,
+shipping-source coverage, production-image return-stack and CONFIG gates,
+oscillator-calibration image derivation, CLI gpsim functional tests, and
+standalone selected-variant libgpsim I/O, lock-step and fault-injection lanes.
 
-**What this document establishes:**
+PIC12F675 is intentionally absent from the default `all` goal, pre-hardware and
+fail-closed target aggregates, soak/timing qualification, mutation topology,
+dedicated full-tool CI, release integration, programming, and hardware-bench
+validation. It is therefore not release-supported.
+
+The 2026-08-05 assessment, design rationale, spike provenance and proposed
+sequencing are retained below. Unless explicitly marked as a current or dated
+implementation note, implementation-status, prospective and open-risk wording
+describes that preimplementation state and is not a statement of the current
+repository boundary.
+
+**What the 2026-08-05 assessment established:**
 
 1. The **modular** architecture — the verified pure core `src/bypass_pure.c` and
    the three unmodified `src/bypass_output_*.c` drivers, compiled and linked into
@@ -53,15 +65,13 @@ the absent PIC12F675 ISR spike.
 | cppcheck | 2.13.0 | system |
 
 > Scope note: the measurements were taken with **throwaway spike shells** written
-> outside the repository — a polled PIC12F675 shell, an ISR-driven variant of it,
-> and an ISR-converted copy of the shipping `src/bypass_mcu_pic10f322.c` — whose
-> only purpose was to price the real core and real drivers on these devices and
-> to exercise the simulator. None is proposed code and none is checked in. Where
-> this document describes shell design it is describing a *design intent to be
-> reviewed*, not an implementation. §10 lists the exact edits behind each figure.
-> It does not contain the spike sources, so the flash, gpsim and stack figures are
-> historical measurements rather than results reproducible from this repository
-> alone.
+> outside the repository: a polled PIC12F675 shell, an ISR-driven variant of it,
+> and an ISR-converted copy of the shipping `src/bypass_mcu_pic10f322.c`. Those
+> spike sources remain absent. A later production Model-B implementation is now
+> checked in; references below to "the spike" identify only the historical
+> measurement source, not the current shell. §10 lists the edits behind each
+> historical figure, which remain results that cannot be reproduced byte for byte
+> from this repository alone.
 
 ---
 
@@ -943,7 +953,8 @@ serves multiple parts, part name where the repository builds exactly one:
 | Build macro | `BYPASS_MCU_PIC12F675` (new arm in `src/bypass_output_common.h`) |
 | Build dir | `build_pic12f675/` |
 | Image stem | `bypass-pic12f675-<variant>` |
-| Make targets | `pic12f675`, `pic12f675-test`, `pic12f675-analyze`, `pic12f675-program`, … |
+| Implemented target families | build, analysis, coverage, stack, CONFIG, calibration, CLI gpsim, and selected-variant libgpsim I/O, lock-step and fault |
+| Deferred integration | default `all`, pre-hardware and fail-closed target aggregates, soak/timing, mutation, dedicated CI, release and programming |
 
 **Name-length contract:** `bypass-pic12f675-cd4053_with_mute.hex` is 37
 characters — **exactly** the current longest name
@@ -958,8 +969,8 @@ in `pic12f629.h`). gpsim supports `p12f629` too. So a family shell
 (`bypass_mcu_pic12f6xx.c`, `BYPASS_MCU_PIC12F6XX`) guarding the `ANSEL`/`ADCON0`
 writes and the corresponding two sanity checks behind one `#if` would cover both
 parts for very little extra work — and the 629 is the cheaper, more available
-part. **Worth deciding before the first line is written**, because retrofitting a
-family shell after the fact is the expensive order.
+part. The staged implementation selected a single-part `pic12f675` shell;
+PIC12F629 family generalization remains deferred.
 
 ---
 
@@ -1040,6 +1051,14 @@ probes, while the subsequent isolation, target-I/O, lock-step, coverage, gpsim,
 fault, matrix, clean-contract, spare-pin and rationale commits retain focused
 review and verification evidence. Remaining work must follow the independently
 green, independently revertible sequencing below.
+
+**Current staged status (2026-08-10):** step 0 selected the 1.024 ms TMR0 design,
+a single-part PIC12F675 shell, and Model B. Step 1 is not applicable unless the
+ISR alternative is reconsidered; steps 2 through 8 are implemented. Step 9
+(soak/timing), step 10 (aggregates, mutation and dedicated CI), and the
+broader documentation, release/programming and hardware portions of step 11
+remain deferred. The table retains the original dependency order rather than
+claiming every row is open.
 
 | # | Step | Notes |
 |---|---|---|

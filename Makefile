@@ -141,7 +141,8 @@ unexport _MAKE_SERIAL_CLASSIC_EMPTY _MAKE_SERIAL_CLASSIC_DUPLICATE \
 # graph, so current command-line flags and toolchain bytes are always consumed.
 #
 # COMMON COMMANDS
-#   make                 build every part's variant firmwares (.hex) + sizes
+#   make                 build every release-supported part's variant images
+#                        (.hex) + sizes; PIC12F675 is staged standalone
 #   make test            fast full test suite (all variants) -- use constantly
 #   make test-long       exhaustive test suite (minutes) -- before release/HW
 #   make attiny13a-trace emit build_avr_classic/bypass_trace.vcd (VARIANT=, GTKWave)
@@ -756,11 +757,13 @@ TINYX5_HEXES = $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),$(AVR_FW)$(call fw_
 $(foreach n,$(TINYX5),$(eval ATTINY$(n)_ELFS := $(foreach v,$(VARIANTS),$(AVR_FW)$(call fw_image_tail,$(v),$(mmcu_$(n))).elf)))
 $(foreach n,$(TINYX5),$(eval ATTINY$(n)_HEXES := $(foreach v,$(VARIANTS),$(AVR_FW)$(call fw_image_tail,$(v),$(mmcu_$(n))).hex)))
 
-# Default goal: build every supported part, not just the one that got here
-# first. A lane whose cross-toolchain is absent (XC8 for either PIC, the
-# ATtiny_DFP for the ATtiny202) prints a named skip and does not fail the
-# build, so a bare `make` stays useful on an AVR-only machine; STRICT_TOOLS=1
-# turns each of those skips into an error, which is what release and CI use.
+# Default goal: build every release-supported part, not just the one that got
+# here first. PIC12F675 is staged standalone and intentionally omitted until
+# its aggregate qualification and default integration are added. A
+# default-integrated lane whose cross-toolchain is absent (XC8 for either
+# release PIC, the ATtiny_DFP for the ATtiny202) prints a named skip and does
+# not fail the build, so a bare `make` stays useful on an AVR-only machine;
+# STRICT_TOOLS=1 turns each skip into an error, as release and CI require.
 #
 # Composed from $(TINYX5) rather than spelled out, so adding a tinyx5 chip
 # reaches the default goal without a second edit here.
@@ -6149,17 +6152,18 @@ release:
 # One-line summary of the most useful targets.
 help:
 	@echo "Variants: $(VARIANTS)  (select with VARIANT=<name>; default $(VARIANT))"
-	@echo "MCUs: ATtiny13a/45/85 + ATtiny202 + PIC10F322 + PIC10F320"
+	@echo "MCUs: release-supported: ATtiny13a/45/85 + ATtiny202 + PIC10F322 + PIC10F320"
+	@echo "      staged standalone: PIC12F675"
 	@echo "Build:"
-	@echo "  all (default)   build EVERY part's variant images (.hex) + sizes. A lane"
-	@echo "                  whose cross-toolchain is absent skips with a named message;"
-	@echo "                  STRICT_TOOLS=1 turns those skips into failures."
+	@echo "  all (default)   build every release-supported part's variant images (.hex) + sizes."
+	@echo "                  PIC12F675 remains staged standalone; use make pic12f675."
+	@echo "                  Missing optional PIC/ATtiny202 toolchains skip by name; STRICT_TOOLS=1 makes that fatal."
 	@echo "  attiny13a       build all variant firmwares for ATtiny13a"
 	@echo "  attiny85 / attiny45   build all variant firmwares for that tinyx5 chip"
 	@echo "  attiny13a-size  print flash/RAM usage for every ATtiny13a variant"
 	@echo "  attiny85-size / attiny45-size   the same for that tinyx5 chip"
 	@echo "  pic10f322             build all variants for PIC10F322 (XC8) + 512-word budget gate"
-	@echo "  pic10f322-test        all PIC pre-hardware checks (CONFIG + analysis + source coverage + gpsim)"
+	@echo "  pic10f322-test        all PIC10F322 pre-hardware checks (CONFIG + analysis + source coverage + gpsim)"
 	@echo "  pic10f322-test-config build PIC HEX, then verify each CONFIG word vs design intent"
 	@echo "  pic10f322-analyze     cppcheck + MISRA on the PIC shell (XC8/DFP headers; standalone)"
 	@echo "  pic10f322-coverage-check-fw  exact host-gcov gate over PIC shell, core, and drivers"
@@ -6173,7 +6177,9 @@ help:
 	@echo "  pic10f322-test-target fail-closed fault + lock-step + target-I/O for one PIC variant"
 	@echo "                        (PIC10F322_TARGET_VARIANT); pic10f322-test-target-variants runs all"
 	@echo "  pic10f322-program     flash one PIC variant to hardware (VARIANT=, PIC10F322_PROG=pk2cmd|ipecmd)"
-	@echo "PIC12F675 (classic mid-range, 1024 words; docs/pic12f675_feasibility.md):"
+	@echo "PIC12F675 staged standalone target (not release-supported; omitted from all/release):"
+	@echo "  No qualification aggregate, soak/timing-budget qualification, mutation, dedicated CI"
+	@echo "  or program integration yet."
 	@echo "  pic12f675             build all variants for PIC12F675 (XC8) + 1024-word budget gate"
 	@echo "  pic12f675-test-config build PIC12F675 HEX, then verify each CONFIG word vs design intent"
 	@echo "  pic12f675-test-gpsim  drive the footswitch in gpsim, assert GPIO on the simcal images"
@@ -6272,8 +6278,9 @@ help:
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
 	@echo "  test-target-lane-markers  PIC target aggregates must require each lane's PASS marker"
 	@echo "  test-stack-bound-pic-regression  PIC hardware return-stack gate regression"
-	@echo "  pic10f322-test-stack-bound / pic10f320-test-stack-bound  8-level HW return-stack depth gate"
-	@echo "  test-lockstep-progress  both PIC exact-pin/stall-propagation checks"
+	@echo "  pic10f322-test-stack-bound / pic10f320-test-stack-bound / pic12f675-test-stack-bound"
+	@echo "                  8-level PIC hardware return-stack depth gates"
+	@echo "  test-lockstep-progress  all three PIC exact-pin/stall-propagation checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
 	@echo "  test-makefile-name-contract  every make goal, variable and child-environment name a file or doc uses really exists (included in test)"
