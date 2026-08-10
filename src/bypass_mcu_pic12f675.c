@@ -21,15 +21,15 @@
 // Note the tick is 1.024ms, not 1.000ms; this is deliberate. OPTION_REG.PSA
 // assigns the ONE prescaler to EITHER TMR0 OR the watchdog, never both, and
 // this part has no period register anywhere (no TMR2/PR2, no CCP). Giving the
-// prescaler to TMR0 would leave the WDT at its ~18ms nominal base period --
-// SHORTER than the 12ms relay coil pulse plus a tick, so the relay variant
-// would reset itself mid-actuation. So the prescaler goes to the watchdog
-// (PSA=1, PS=1:16 -> ~288ms) and TMR0 runs unprescaled at Fosc/4 = 1MHz,
-// rolling over every 256us; the tick is four rollovers counted in software.
-// 4 x 256us = 1.024ms. The 2.4% stretch changes nothing in the pure core
-// (which counts samples, not milliseconds) but it does change every physical
-// timing figure the test suite asserts.  See docs/pic12f675_feasibility.md
-// section 4.4.1.
+// prescaler to TMR0 would leave the WDT at its 18ms nominal base period. That
+// value exceeds a 12ms relay pulse plus one 1.024ms tick; the safety decision
+// instead rests on the 10ms characterized minimum, which is shorter than the
+// normal pet-to-pet path once loop overhead is included. So the prescaler goes
+// to the WDT (PSA=1, PS=1:16 -> 288ms nominal, 160ms minimum), and TMR0 runs
+// unprescaled at Fosc/4 = 1MHz, rolling over every 256us; four rollovers counted
+// in software make the 1.024ms tick. The 2.4% stretch changes nothing in the
+// pure core (which counts samples, not milliseconds), but it changes every
+// physical timing figure. See docs/pic12f675_feasibility.md section 4.4.1.
 //
 // CONFIG / fuse rationale (PIC analogue of the AVR fuse table in the AVR shell):
 //   FOSC=INTRCIO internal 4MHz INTOSC with I/O on BOTH GP4 and GP5 -- required,
@@ -47,11 +47,11 @@
 //                this field has no PIC10F322 counterpart)
 // Absent relative to the PIC10F322: LVP, WRT, BORV, LPBOR.
 //
-// BG note: CONFIG bits 12:11 are the factory bandgap calibration and have no
-// #pragma config setting in the device pack, so they take the CWORD default
-// (0b11). They set the BOD/POR trip voltages and are programmed per device at
-// the factory. Whether a given programmer PRESERVES them is a silicon-only
-// concern -- see docs/pic12f675_feasibility.md section 8 item 1.
+// BG note: CONFIG bits 13:12 (BG1:BG0, mask 0x3000) are the factory bandgap
+// calibration and have no #pragma config setting in the device pack, so they
+// take the CWORD default (0b11). They set the BOD/POR trip voltages and are
+// programmed per device at the factory. Whether a programmer PRESERVES them is
+// a silicon-only concern -- see docs/pic12f675_feasibility.md section 8 item 1.
 //
 // BOR note: the AVR uses a 4.3V BOD because the relay/MOSFET peripherals need
 // >4V. The PIC12F675 BOR trip point is ~2.1V and, unlike the PIC10F322, this
@@ -391,14 +391,14 @@ static void hw_mcu_init(void) {
     // One write configures the global pull-up enable, the TMR0 clock source
     // and the watchdog period -- see OPTION_REG_CONFIG above.
     //
-    // ~288ms (PSA = 1 assigns the shared prescaler to the WDT; PS = 0b100 =
-    // 1:16 on the 18ms nominal base period), the closest analogue to the
-    // PIC10F322's ~256ms and to the AVR shell's 250ms. Worst-case pet-to-pet
-    // window is one tick (1.024ms) plus the longest blocking actuation (the
-    // 12ms relay coil pulse) = ~13.1ms, against 288ms nominal. The datasheet
-    // min/max spread for this part has NOT yet been read (see
-    // docs/pic12f675_feasibility.md section 8 item 4); if its fast end is
-    // materially worse than the PIC10F32x's -37%, PS moves from 1:16 to 1:32.
+    // PSA = 1 assigns the shared prescaler to the WDT; PS = 0b100 = 1:16,
+    // giving 288ms nominal (18ms x 16). DS41190G Table 12-4 parameter 31 gives
+    // a 10ms unprescaled minimum, so the characterized minimum here is 160ms.
+    // This is the closest analogue to the PIC10F322's ~256ms and the AVR
+    // shell's 250ms. The dominant nominal pet-to-pet interval is one 1.024ms
+    // tick plus the longest blocking actuation, the 12ms relay coil pulse:
+    // 13.024ms plus small loop overhead, comfortably below the 160ms minimum.
+    // The prescaler choice therefore retains ample margin at the fast WDT end.
     OPTION_REG = OPTION_REG_CONFIG;
 
     // Capture the factory oscillator trim AFTER bring-up, for the per-tick
