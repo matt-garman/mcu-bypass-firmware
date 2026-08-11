@@ -309,8 +309,8 @@ def run(source, destination, flash_words, value):
 def run_check(source, flash_words):
     text = read_image_text(source, "image")
     cal_word = assert_preserves_calibration(text, source, flash_words)
-    print("calibration word 0x%03X is unprogrammed: %s preserves the device's "
-          "factory oscillator trim" % (cal_word, source))
+    print("PIC12F675_CALIBRATION_CHECK PASS image=%s word=0x%03X"
+          % (source, cal_word))
     return 0
 
 

@@ -75,9 +75,10 @@ case "$PB_TARGET" in
 		# Same CLASSIC_VARIANTS_* validation preamble as the PIC10F322 target,
 		# so it is exposed to the same injection vector and must run the same
 		# check. Its additional checks pin simulator-image path separation and
-		# complete-matrix production/consumption.
+		# complete-matrix production/consumption and the hardware-programming
+		# calibration guard.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=49
+		expected_checks=53
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -1042,6 +1043,44 @@ if [ "$PB_TARGET" = pic12f675 ]; then
 			PIC12F675_FLASH_WORDS="$PB_FLASH_WORDS" STRICT_TOOLS=1 "$@"
 	}
 
+	program_log="$work/pic12f675-program.log"
+	programmer="$tools/pic12f675-programmer"
+	cat > "$programmer" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${PIC12F675_PROGRAM_LOG:?}"
+EOF
+	cat > "$tools/near-match-checker.py" <<'EOF'
+#!/usr/bin/env python3
+import sys
+print("PIC12F675_CALIBRATION_CHECK PASS image=%s word=0x3FF trailing-output"
+      % sys.argv[-1])
+EOF
+	cat > "$repo/test/pic/test_config_pic12f675" <<'EOF'
+#!/usr/bin/env sh
+exit 0
+EOF
+	chmod 750 "$programmer" "$repo/test/pic/test_config_pic12f675"
+
+	run_program_make() {
+		local image=$1
+		shift
+		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+		PIC12F675_PROGRAM_LOG="$program_log" \
+			make --no-print-directory -C "$repo" \
+				--old-file=pic12f675 \
+				--old-file=test/pic/test_config_pic12f675 \
+				pic12f675-program \
+				CC=true HOSTCC=true PIC12F675_BUILD_DIR="$PB_BUILD_DIR" \
+				FW_BASE="$PB_FW_BASE" PIC12F675_TAG="$PB_TAG" \
+				PIC12F675_FLASH_WORDS="$PB_FLASH_WORDS" \
+				VARIANT=cd4053_simple PIC12F675_PROG="$programmer" \
+				PIC12F675_PROG_HEX="$image" \
+				PIC12F675_CAL_INJECTOR="$tools/noop-oracle.py" \
+				PIC12F675_CAL_CHECKER="$tools/noop-oracle.py" \
+				STRICT_TOOLS=1 "$@"
+	}
+
 	run_simcal_consumer_make() {
 		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
 			make --no-print-directory -C "$repo" --old-file=pic12f675-simcal "$1" \
@@ -1098,6 +1137,68 @@ EOF
 			|| { printf 'FAIL: PIC12F675 calibration contract did not check %s exactly once: %s\n' \
 				"$variant" "$cal_output" >&2; exit 1; }
 	done
+	checks=$((checks + 1))
+
+	# The programming target must run the repository checker, observe its exact
+	# image/word record, and only then invoke the selected programmer. Both checker
+	# names are attacked here: the simulation injector is legitimately replaceable,
+	# while the hardware checker must ignore a command-line replacement.
+	: > "$program_log"
+	program_output=$(run_program_make "${cal_shipping[0]}")
+	expected_program_check="PIC12F675_CALIBRATION_CHECK PASS image=${cal_shipping[0]} word=0x3FF"
+	case "$program_output" in
+		*"$expected_program_check"*"Programming PIC12F675"*) ;;
+		*) printf 'FAIL: PIC12F675 programming did not report the exact calibration check before the programmer: %s\n' \
+			"$program_output" >&2; exit 1 ;;
+	esac
+	mapfile -t program_calls < "$program_log"
+	[[ "${#program_calls[@]}" -eq 1 && "${program_calls[0]}" == *"${cal_shipping[0]}"* ]] \
+		|| { printf 'FAIL: checked PIC12F675 shipping image did not reach the fake programmer exactly once\n' >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# A simulator-derived image remains fatal even when callers point both the old
+	# injector variable and the new checker spelling at a successful no-op script.
+	: > "$program_log"
+	if program_output=$(run_program_make "${cal_sim[0]}" 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted a derived image through checker overrides\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"already programs the calibration word 0x3FF"* \
+		&& ! -s "$program_log" ]] \
+		|| { printf 'FAIL: derived PIC12F675 image reached the programmer or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# Exit status zero is insufficient. Replacing the repository checker itself
+	# with a no-op simulates deletion of either its invocation or success output;
+	# the exact-record gate must keep the programmer unreachable.
+	checker="$repo/test/pic/inject_calibration_word.py"
+	mv "$checker" "$work/inject_calibration_word.py"
+	cp "$tools/noop-oracle.py" "$checker"
+	: > "$program_log"
+	if program_output=$(run_program_make "${cal_shipping[0]}" 2>&1); then
+		printf 'FAIL: PIC12F675 programming trusted a no-op calibration checker\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"did not emit its exact success record"* \
+		&& ! -s "$program_log" ]] \
+		|| { printf 'FAIL: no-op PIC12F675 checker reached the programmer or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# A marker substring is not the contract either: extra output could conceal a
+	# warning or a second contradictory result. Only one byte-exact record passes.
+	cp "$tools/near-match-checker.py" "$checker"
+	: > "$program_log"
+	if program_output=$(run_program_make "${cal_shipping[0]}" 2>&1); then
+		printf 'FAIL: PIC12F675 programming trusted a near-match calibration record\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"did not emit its exact success record"* \
+		&& ! -s "$program_log" ]] \
+		|| { printf 'FAIL: near-match PIC12F675 checker reached the programmer or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	mv "$work/inject_calibration_word.py" "$checker"
 	checks=$((checks + 1))
 
 	# A representative partial set must fail the calibration contract itself,

@@ -2780,7 +2780,7 @@ test-supply-chain:
 	./test/test_supply_chain.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 36/75/48
+# image/host rebuild triggering. The script enforces the canonical 36/75/53
 # counts, so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
@@ -5862,6 +5862,10 @@ pic12f675-test-config: pic12f675 test/pic/test_config_pic12f675
 # working image from one looping on the missing word. The distinguishing evidence
 # is that the shell's init ran at all (OPTION_REG 0x0C, CMCON 0x07, TRISIO 0x28).
 PIC12F675_CAL_INJECTOR ?= test/pic/inject_calibration_word.py
+# Simulation tests may replace the injector above. Hardware programming may not:
+# this repository-owned path is the safety gate between a fabricated simulator
+# calibration word and irreversible loss of a device's factory oscillator trim.
+override PIC12F675_CAL_CHECKER := test/pic/inject_calibration_word.py
 PIC12F675_CAL_VALUE    ?= 0x80
 # Not independently caller-overridable: simulator images must stay in this
 # dedicated subdirectory so no shipping-image glob can select them. Relocating
@@ -6182,9 +6186,11 @@ endif
 # runs afterwards, at the wrong clock. The derived images live in their own
 # subdirectory precisely so no shipping-image glob can select one, but a command
 # that writes to silicon must not rest on a directory layout: it asks the
-# injector's inverse mode whether THIS image programs word 0x3FF, whatever path
-# it arrived by and whoever selected it. The same call refuses another part's
-# image outright, because such an image never fetches word 0x3FF at all.
+# immutable checker's inverse mode whether THIS image programs word 0x3FF,
+# whatever path it arrived by and whoever selected it. The same call refuses
+# another part's image outright, because such an image never fetches word 0x3FF
+# at all. An exact image/word success record proves the check actually ran before
+# the programmer becomes reachable; exit status zero alone is insufficient.
 #
 # The CONFIG word is decoded from that same file rather than from the build glob
 # `pic12f675-test-config` walks, for the same reason: what matters here is the
@@ -6192,7 +6198,8 @@ endif
 # tree did not build. That check is what covers the BG<1:0> half of item 1 --
 # the build must leave the factory bandgap bits erased.
 .PHONY: pic12f675-program
-pic12f675-program: variant-selectors-valid pic12f675 test/pic/test_config_pic12f675
+pic12f675-program: variant-selectors-valid pic12f675 \
+                  test/pic/test_config_pic12f675 $(PIC12F675_CAL_CHECKER)
 	@hex="$(PIC12F675_PROG_HEX)"; \
 	if [ ! -f "$$hex" ] || [ -L "$$hex" ] || [ ! -s "$$hex" ]; then \
 		echo "ERROR: $$hex is missing, empty, a symlink, or not a regular file."; \
@@ -6207,8 +6214,9 @@ pic12f675-program: variant-selectors-valid pic12f675 test/pic/test_config_pic12f
 		echo "       Refusing to program without that check."; \
 		exit 1; \
 	fi; \
-	if ! python3 $(PIC12F675_CAL_INJECTOR) --assert-preserves-calibration \
-			--flash-words $(PIC12F675_FLASH_WORDS) "$$hex"; then \
+	if ! calibration_check=`python3 "$(PIC12F675_CAL_CHECKER)" \
+			--assert-preserves-calibration \
+			--flash-words $(PIC12F675_FLASH_WORDS) "$$hex"`; then \
 		echo "ERROR: refusing to program $$hex."; \
 		echo "       An image that writes the calibration word would destroy this"; \
 		echo "       device's factory oscillator trim. The derived images under"; \
@@ -6216,6 +6224,13 @@ pic12f675-program: variant-selectors-valid pic12f675 test/pic/test_config_pic12f
 		echo "       simulators only; program the shipping HEX from $(PIC12F675_BUILD_DIR)/."; \
 		exit 1; \
 	fi; \
+	expected_calibration_check="PIC12F675_CALIBRATION_CHECK PASS image=$$hex word=0x3FF"; \
+	if [ "$$calibration_check" != "$$expected_calibration_check" ]; then \
+		echo "ERROR: refusing to program $$hex."; \
+		echo "       The immutable calibration checker did not emit its exact success record."; \
+		exit 1; \
+	fi; \
+	printf '%s\n' "$$calibration_check"; \
 	./test/pic/test_config_pic12f675 "$$hex" || exit 1; \
 	if ! command -v $(PIC12F675_PROG) >/dev/null 2>&1; then \
 		echo "ERROR: PIC programmer '$(PIC12F675_PROG)' not found on PATH."; \
