@@ -82,7 +82,7 @@ case "$PB_TARGET" in
 		# complete-matrix production/consumption and the hardware-programming
 		# calibration guard.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=81
+		expected_checks=82
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -1148,10 +1148,21 @@ if [[ -n "$read_hex" ]]; then
 			&& "${PIC12F675_PROGRAMMER_MODE:-read}" == wrong-program-byte ]]; then
 		program_record=:040000000300FF23D7
 	fi
+	# Real programmer exports may open with an extended linear address record.
+	# A zero base is a no-op, so every lane runs against one; a non-zero base
+	# relocates, and must be refused rather than silently moving the words the
+	# trim comparisons are identified by. validate-ihex.sh accepts both -- it
+	# checks the record's shape, not its payload -- so only the evidence parser
+	# can tell them apart.
+	base=:020000040000FA
+	if [[ "${PIC12F675_PROGRAMMER_MODE:-read}" == relocated-read ]]; then
+		base=:0200000480007A
+	fi
 	if [[ -n "$program_record" ]]; then
-		printf '%s\n' "$program_record" "$osccal" "$config" ':00000001FF' > "$read_hex"
+		printf '%s\n' "$base" "$program_record" "$osccal" "$config" \
+			':00000001FF' > "$read_hex"
 	else
-		printf '%s\n' "$osccal" "$config" ':00000001FF' > "$read_hex"
+		printf '%s\n' "$base" "$osccal" "$config" ':00000001FF' > "$read_hex"
 	fi
 	printf 'Target PIC12F675\nDevice ID = 0x0FC0\nDevice Revision = 0x0001\n'
 	exit 0
@@ -1253,6 +1264,7 @@ EOF
 
 	run_preflight_make() {
 		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+		PIC12F675_PROGRAMMER_MODE="${PIC12F675_PROGRAMMER_MODE:-read}" \
 		PIC12F675_HARDWARE_LOG="$hardware_log" \
 		PIC12F675_PROGRAM_LOG="$program_log" \
 		PIC12F675_PROGRAM_CAPTURE="$program_capture" \
@@ -1366,6 +1378,33 @@ assert record["config_word"] == "0x11FF"
 assert record["bg_bits"] == "0x1000"
 PY
 	checks=$((checks + 1))
+
+	# A read whose export RELOCATES addresses must be refused, not
+	# reinterpreted: OSCCAL and CONFIG are identified by address alone, so a
+	# non-zero base would move them somewhere the comparison never looks.
+	# validate-ihex.sh passes this file -- it checks the record's shape, not
+	# its payload -- so the evidence parser is the only thing standing here.
+	: > "$hardware_log"
+	rm -f "$program_evidence"
+	if relocated_output=$(PIC12F675_PROGRAMMER_MODE=relocated-read \
+			run_preflight_make 2>&1); then
+		printf 'FAIL: PIC12F675 preflight accepted a relocated device read: %s\n' \
+			"$relocated_output" >&2
+		exit 1
+	fi
+	[[ "$relocated_output" == *"address relocation is not supported"* \
+		&& ! -e "$program_evidence" ]] \
+		|| { printf 'FAIL: relocated device read failed for the wrong reason: %s\n' \
+			"$relocated_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# Re-establish the baseline the scenarios below consume.
+	: > "$hardware_log"
+	preflight_output=$(run_preflight_make)
+	[[ "$preflight_output" == *"PIC12F675_TRIM_BASELINE PASS evidence=$program_evidence"* \
+		&& -f "$program_evidence" ]] \
+		|| { printf 'FAIL: PIC12F675 baseline could not be re-established: %s\n' \
+			"$preflight_output" >&2; exit 1; }
 
 	# A fresh programming invocation with no baseline fails before any hardware
 	# command, as does one that has nowhere exclusive to retain the result.
