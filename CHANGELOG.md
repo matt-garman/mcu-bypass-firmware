@@ -158,6 +158,22 @@ file is the human-readable summary of *what changed*.
   matches the tier it is filed under (`T2` → Tier 2, `T25` → Tier 2.5). Both
   missing rows were added.
 
+- **`make test-pinout-alignment`.** The ASCII package-pinout diagrams are
+  transcribed from each device pack's own pinout data and are what somebody
+  wires a board from, and nothing checked them. The PIC12F675 DIP-8 diagram had
+  shipped with one extra leading space on its `V_DD` row, putting that row's
+  package walls one column right of the corner rows and of every other pin row.
+  It rendered visibly stepped and survived review, because that is the class of
+  defect a reader's eye completes for them. The gate reads each box's wall
+  columns from its corner rows and requires every row between them to carry a
+  wall character in both, across every tracked `.md`/`.adoc` outside the frozen
+  `release/v*/` artifacts. It asserts a floor on the number of diagrams found,
+  so a checker that has stopped recognizing them fails rather than passing
+  quietly, and it runs six synthetic probes on every invocation — one of them
+  the real historical defect, which it reports by file, line, column and the
+  character actually found. The diagram itself was corrected, and a sweep of
+  the other three found no second instance.
+
 - **`TODO.md` T25-misra-header-gate.** The 2026-08-10 suppression review
   measured that cppcheck 2.13.0 sets `--error-exitcode` only from findings
   located in the file passed on the command line, so a finding in an included

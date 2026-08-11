@@ -653,6 +653,7 @@ FORCE:
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
         test-variant-map-contract test-makefile-name-contract test-todo-index \
+        test-pinout-alignment \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract test-static-assert-guards \
         pic10f322-test-target pic10f322-test-target-variants pic10f322-test-io pic10f322-test-lockstep \
@@ -2682,6 +2683,7 @@ TEST_GATES_LATE = \
         test-build-serialization test-target-matrix \
         test-target-lane-markers test-lockstep-progress test-soak-timing \
         test-variant-map-contract test-makefile-name-contract test-todo-index \
+        test-pinout-alignment \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract \
         test-soak-reset-witness test-strict-tools test-workload-rebuild \
@@ -2958,6 +2960,22 @@ test-makefile-name-contract: python-version-valid
 .PHONY: test-todo-index
 test-todo-index: python-version-valid test/test_todo_index.py TODO.md
 	@python3 test/test_todo_index.py
+
+# The package pinout diagrams are transcribed from each device pack's own pinout
+# data and are what somebody wires a board from, so a whitespace defect in one is
+# a documentation defect in the thing most likely to be trusted on sight. The
+# PIC12F675 diagram shipped with one extra leading space on its V_DD row, putting
+# that row's walls one column right of the corners and every other row; it
+# rendered visibly stepped and survived review, because that is the class of
+# defect a reader's eye completes for them.
+# Same prerequisite discipline as the gate above -- the checker is named, not
+# just invoked -- and the same vacuity discipline inside it: the scan asserts a
+# floor on the number of diagrams it found, and six synthetic probes (one of them
+# the real historical defect) run on every invocation, so a checker that has
+# stopped recognizing anything fails instead of passing quietly.
+.PHONY: test-pinout-alignment
+test-pinout-alignment: python-version-valid test/test_pinout_alignment.py
+	@python3 test/test_pinout_alignment.py
 
 # Host-only proof that every static-analysis target validates its variant
 # request before analyzing anything. $(FW_SOURCES) maps $(VARIANTS) through
@@ -6723,6 +6741,7 @@ help:
 	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
 	@echo "  test-makefile-name-contract  every make goal, variable and child-environment name a file or doc uses really exists (included in test)"
 	@echo "  test-todo-index    TODO.md's priority summary matches its open sections, both ways (included in test)"
+	@echo "  test-pinout-alignment  every ASCII package-pinout diagram draws a square box (included in test)"
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
 	@echo "  test-variant-selector-guard  every lane rejects a bad single-variant selector instead of skipping (included in test)"
 	@echo "  test-clean-contract  clean/clean-tests remove everything the Makefile builds (included in test)"

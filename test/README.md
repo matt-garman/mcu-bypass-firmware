@@ -45,6 +45,13 @@ test/
                                      child is one that child still reads;
                                      checked from the moment a file exists
                                      rather than from the commit after
+  test_todo_index.py        shared: TODO.md's priority summary and its open
+                                    sections index each other both ways, with
+                                    each ID's tier prefix agreeing with the tier
+                                    it is filed under
+  test_pinout_alignment.py  shared: every ASCII package-pinout diagram draws
+                                    a square box -- each row's walls in the
+                                    columns the corner rows put them in
   test_analyze_variant_guard.sh shared: analyze-* targets reject a bad VARIANTS=
                                      instead of silently analyzing less
   test_variant_selector_guard.py shared: every lane rejects a bad single-variant
