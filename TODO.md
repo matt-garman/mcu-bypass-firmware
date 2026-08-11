@@ -434,14 +434,16 @@ lane this repository has. They are stated in full as items 1, 2, 8 and 9 of
 
 - **1 - bandgap calibration bits (`BG<1:0>`) preserved on program.** They are
   factory-set per device and fix the BOR/POR trip voltages.
-  `make pic12f675-program` already enforces the build-side half -- the toolchain
-  must leave the field erased -- and prints the read-back procedure before every
-  write. The programmer's own erase behavior is what needs measuring.
+  `make pic12f675-program` enforces the build-side half -- the toolchain must
+  leave the field erased -- and now requires a `pic12f675-preflight` baseline,
+  an immediate matching pre-write read, and a retained matching post-write
+  result. The programmer's own erase behavior still needs measuring on silicon.
 - **2 - factory oscillator trim (flash word 0x3FF) preserved on program.**
   Losing it yields an untrimmed clock: wrong tick cadence, wrong coil-pulse
-  widths, and a device that still appears to work. Confirm `pk2cmd`'s handling
-  for this family, then write the result into `release/README.md`'s flashing
-  procedure.
+  widths, and a device that still appears to work. The guarded workflow now
+  compares the complete word before/after and fails on a change; run it with a
+  real PICkit, retain the generated JSON, then write the measured result into
+  `release/README.md`'s flashing procedure.
 - **8 - `ipecmd` actually runs against the part.** The pinned device pack lists
   the PIC12F675 with the same MPLAB hardware-tool set as the PIC10F322, but
   neither programmer binary is installed on any machine this repository is

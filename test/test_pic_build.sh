@@ -3,7 +3,11 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-pic-build.XXXXXX")
-trap 'rm -rf "$work"' EXIT
+cleanup_work() {
+	chmod -R u+w "$work" 2>/dev/null || :
+	rm -rf "$work"
+}
+trap cleanup_work EXIT
 repo="$work/repo"
 tools="$work/tools"
 xc8_log="$work/xc8.log"
@@ -78,7 +82,7 @@ case "$PB_TARGET" in
 		# complete-matrix production/consumption and the hardware-programming
 		# calibration guard.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=67
+		expected_checks=81
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -99,6 +103,7 @@ size_probe_stem="$repo/$PB_BUILD_DIR/size_probe_$PB_VARIANT"
 checks=0
 unset FAKE_XC8_MODE FAKE_XC8_FAIL_NAME FAKE_XC8_SIGNAL_MARKER \
 	PIC12F675_PART PIC12F675_PROG PIC12F675_PROG_KIND PIC12F675_PROG_TOOL \
+	PIC12F675_READ_PROG PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT \
 	PIC12F675_PROG_HEX PIC12F675_PROG_CMD \
 	MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES
 mkdir -p "$repo/src" "$repo/scripts" "$repo/test/pic10f320/equiv" \
@@ -1031,6 +1036,8 @@ if [ "$PB_TARGET" = pic12f675 ]; then
 	mkdir -p "$repo/test/pic" "$repo/$PB_BUILD_DIR"
 	cp "$ROOT/test/pic/inject_calibration_word.py" \
 		"$repo/test/pic/inject_calibration_word.py"
+	cp "$ROOT/test/pic/pic12f675_trim_evidence.py" \
+		"$repo/test/pic/pic12f675_trim_evidence.py"
 
 	cal_shipping=()
 	cal_sim=()
@@ -1076,19 +1083,92 @@ if [ "$PB_TARGET" = pic12f675 ]; then
 	}
 
 	program_log="$work/pic12f675-program.log"
+	hardware_log="$work/pic12f675-hardware.log"
 	program_capture="$work/pic12f675-program.hex"
 	program_late_marker="$work/pic12f675-late-replacement"
+	program_transaction="$work/pic12f675-current-transaction"
+	program_device_state="$work/pic12f675-device-programmed"
+	program_evidence="$work/pic12f675-trim-baseline.json"
 	programmer="$tools/pic12f675-programmer"
 	cat > "$programmer" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 image=
-printf '%s\0' "$@" >> "${PIC12F675_PROGRAM_LOG:?}"
+read_hex=
+identity=0
+printf '[' >> "${PIC12F675_HARDWARE_LOG:?}"
+printf ' %q' "$@" >> "$PIC12F675_HARDWARE_LOG"
+printf ' ]\n' >> "$PIC12F675_HARDWARE_LOG"
+if [[ "${1:-}" == '-?V' ]]; then
+	printf 'pk2cmd fixture version 1.21\n'
+	exit 0
+fi
+if [[ "${1:-}" == '-?' ]]; then
+	printf 'ipecmd fixture version 6.20\n'
+	exit 0
+fi
 for arg in "$@"; do
-	case "$arg" in -F*) image=${arg#-F} ;; esac
+	case "$arg" in
+		-GF*) read_hex=${arg#-GF} ;;
+		-F*) image=${arg#-F} ;;
+		-I) identity=1 ;;
+	esac
 done
+if [[ "$identity" -eq 1 && -z "$read_hex" ]]; then
+	printf 'Target PIC12F675\nDevice ID = 0x0FC0\nDevice Revision = 0x0001\n'
+	exit 0
+fi
+if [[ -n "$read_hex" ]]; then
+	if [[ -e "${PIC12F675_PROGRAM_TRANSACTION:?}" \
+			&& "${PIC12F675_PROGRAMMER_MODE:-read}" == post-read-fail ]]; then
+		printf 'forced post-program read failure\n' >&2
+		exit 92
+	fi
+	osccal=:0207FE00A53420
+	config=:02400E00FF11A0
+	if [[ -e "${PIC12F675_DEVICE_STATE:?}" ]]; then
+		config=:02400E00CC11D3
+	fi
+	if [[ ! -e "$PIC12F675_PROGRAM_TRANSACTION" \
+			&& "${PIC12F675_PROGRAMMER_MODE:-read}" == prewrite-change ]]; then
+		osccal=:0207FE00A6341F
+	fi
+	if [[ -e "$PIC12F675_PROGRAM_TRANSACTION" ]]; then
+		case "${PIC12F675_PROGRAMMER_MODE:-read}" in
+			change-osccal) osccal=:0207FE00A6341F ;;
+			change-bg) config=:02400E00CC21C3 ;;
+			wrong-config) config=:02400E00CD11D2 ;;
+		esac
+	fi
+	program_record=
+	if [[ -e "${PIC12F675_DEVICE_STATE:?}" && -f "${PIC12F675_PROGRAM_CAPTURE:?}" ]]; then
+		IFS= read -r program_record < "$PIC12F675_PROGRAM_CAPTURE"
+	fi
+	if [[ -e "$PIC12F675_PROGRAM_TRANSACTION" \
+			&& "${PIC12F675_PROGRAMMER_MODE:-read}" == wrong-program-byte ]]; then
+		program_record=:040000000300FF23D7
+	fi
+	if [[ -n "$program_record" ]]; then
+		printf '%s\n' "$program_record" "$osccal" "$config" ':00000001FF' > "$read_hex"
+	else
+		printf '%s\n' "$osccal" "$config" ':00000001FF' > "$read_hex"
+	fi
+	printf 'Target PIC12F675\nDevice ID = 0x0FC0\nDevice Revision = 0x0001\n'
+	exit 0
+fi
 [[ -n "$image" && -f "$image" && ! -L "$image" && -s "$image" ]] \
 	|| { printf 'programmer did not receive a nonempty regular -F image\n' >&2; exit 91; }
+printf '%s\0' "$@" >> "${PIC12F675_PROGRAM_LOG:?}"
+if [[ "${PIC12F675_PROGRAMMER_MODE:-read}" == no-op ]]; then
+	: > "$PIC12F675_PROGRAM_TRANSACTION"
+	printf 'Target PIC12F675\nDevice ID = 0x0FC0\nDevice Revision = 0x0001\nProgram complete\n'
+	exit 0
+fi
+if [[ "${PIC12F675_PROGRAMMER_MODE:-read}" == writer-fail ]]; then
+	: > "$PIC12F675_PROGRAM_TRANSACTION"
+	printf 'forced writer failure\n' >&2
+	exit 94
+fi
 if [[ "${PIC12F675_PROGRAMMER_MODE:-read}" == replace ]]; then
 	if mv -- "$image" "$image.late" 2>/dev/null; then
 		cp -- "${PIC12F675_PROGRAMMER_REPLACEMENT:?}" "$image"
@@ -1099,6 +1179,15 @@ if [[ "${PIC12F675_PROGRAMMER_MODE:-read}" == replace ]]; then
 fi
 rm -f -- "${PIC12F675_PROGRAM_CAPTURE:?}"
 cp -- "$image" "$PIC12F675_PROGRAM_CAPTURE"
+: > "$PIC12F675_DEVICE_STATE"
+: > "$PIC12F675_PROGRAM_TRANSACTION"
+if [[ "${PIC12F675_PROGRAMMER_MODE:-read}" == signal-after-write ]]; then
+	printf 'program bytes consumed before forced signal\n'
+	kill -TERM "$PPID"
+	sleep 1
+	exit 95
+fi
+printf 'Target PIC12F675\nDevice ID = 0x0FC0\nDevice Revision = 0x0001\nProgram complete\n'
 EOF
 	cat > "$tools/near-match-checker.py" <<'EOF'
 #!/usr/bin/env python3
@@ -1128,11 +1217,16 @@ EOF
 
 	run_program_make() {
 		local build_dir=$1 variant=$2
+		local result_path="$work/result-${BASHPID}-${RANDOM}.json"
 		shift 2
+		rm -f "$program_transaction" "$program_device_state" "$program_capture"
 		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
 		PIC12F675_PROGRAM_LOG="$program_log" \
+		PIC12F675_HARDWARE_LOG="$hardware_log" \
 		PIC12F675_PROGRAM_CAPTURE="$program_capture" \
 		PIC12F675_PROGRAMMER_MARKER="$program_late_marker" \
+		PIC12F675_PROGRAM_TRANSACTION="$program_transaction" \
+		PIC12F675_DEVICE_STATE="$program_device_state" \
 		PIC12F675_PROGRAMMER_MODE="${PIC12F675_PROGRAMMER_MODE:-read}" \
 		PIC12F675_PROGRAMMER_REPLACEMENT="${PIC12F675_PROGRAMMER_REPLACEMENT:-}" \
 		PIC12F675_CONFIG_MODE="${PIC12F675_CONFIG_MODE:-check}" \
@@ -1148,10 +1242,27 @@ EOF
 				FW_BASE="$PB_FW_BASE" PIC12F675_TAG="$PB_TAG" \
 				PIC12F675_FLASH_WORDS="$PB_FLASH_WORDS" \
 				VARIANT="$variant" PIC12F675_PROG="$programmer" \
+				PIC12F675_READ_PROG="$programmer" \
+				PIC12F675_TRIM_EVIDENCE="$program_evidence" \
+				PIC12F675_BENCH_RESULT="$result_path" \
 				PIC12F675_PART=PIC10F322 \
 				PIC12F675_CAL_INJECTOR="$tools/noop-oracle.py" \
 				PIC12F675_CAL_CHECKER="$tools/noop-oracle.py" \
 				STRICT_TOOLS=1 "$@"
+	}
+
+	run_preflight_make() {
+		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+		PIC12F675_HARDWARE_LOG="$hardware_log" \
+		PIC12F675_PROGRAM_LOG="$program_log" \
+		PIC12F675_PROGRAM_CAPTURE="$program_capture" \
+		PIC12F675_PROGRAMMER_MARKER="$program_late_marker" \
+		PIC12F675_PROGRAM_TRANSACTION="$program_transaction" \
+		PIC12F675_DEVICE_STATE="$program_device_state" \
+			make --no-print-directory -C "$repo" pic12f675-preflight \
+				PIC12F675_READ_PROG="$programmer" \
+				PIC12F675_TRIM_EVIDENCE="$program_evidence" \
+				PIC12F675_PART=PIC10F322 STRICT_TOOLS=1 "$@"
 	}
 
 	run_simcal_consumer_make() {
@@ -1227,6 +1338,95 @@ EOF
 			"$config_output" >&2; exit 1; }
 	checks=$((checks + 1))
 
+	# A separate read-only target creates the baseline before any programming
+	# target is allowed to build or write. The immutable part defeats the same
+	# wrong-device command-line override exercised by the write target.
+	: > "$hardware_log"
+	: > "$program_log"
+	rm -f "$program_evidence" "$program_device_state" "$program_transaction"
+	preflight_output=$(run_preflight_make)
+	[[ "$preflight_output" == *"pk2cmd fixture version 1.21"* \
+		&& "$preflight_output" == *"PIC12F675_TRIM_BASELINE PASS evidence=$program_evidence"* \
+		&& -f "$program_evidence" && ! -L "$program_evidence" \
+		&& ! -s "$program_log" \
+		&& "$(<"$hardware_log")" == *"[ -\?V ]"* \
+		&& "$(<"$hardware_log")" == *"[ -PPIC12F675 -I -GF"*" -R ]"* ]] \
+		|| { printf 'FAIL: PIC12F675 read-only preflight did not retain the expected baseline: %s\n' \
+			"$preflight_output" >&2; exit 1; }
+	python3 - "$program_evidence" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+assert record["part"] == "PIC12F675"
+assert record["device_id"] == "0x0FC0"
+assert record["device_revision"] == "0x0001"
+assert record["osccal_word"] == "0x34A5"
+assert record["config_word"] == "0x11FF"
+assert record["bg_bits"] == "0x1000"
+PY
+	checks=$((checks + 1))
+
+	# A fresh programming invocation with no baseline fails before any hardware
+	# command, as does one that has nowhere exclusive to retain the result.
+	: > "$hardware_log"
+	if program_output=$(run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			PIC12F675_TRIM_EVIDENCE= 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted a missing trim baseline\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"PIC12F675_TRIM_EVIDENCE is required"* \
+		&& ! -s "$hardware_log" ]] \
+		|| { printf 'FAIL: missing trim baseline reached hardware or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	: > "$hardware_log"
+	if program_output=$(run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			PIC12F675_BENCH_RESULT= 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted a missing bench-result path\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"PIC12F675_BENCH_RESULT is required"* \
+		&& ! -s "$hardware_log" ]] \
+		|| { printf 'FAIL: missing bench-result path reached hardware or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# The durable result directory must be reservable before the write. A missing
+	# parent may consume read-only preflight operations, but never programming.
+	unreservable_result="$work/missing-result-parent/result"
+	: > "$program_log"
+	if program_output=$(run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_BENCH_RESULT=$unreservable_result" 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted an unreservable result directory\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"bench-result parent directory does not exist"* \
+		&& ! -s "$program_log" && ! -e "$program_transaction" ]] \
+		|| { printf 'FAIL: unreservable result path reached programming or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# Exit status alone cannot prove a write happened. A no-op writer that reports
+	# success is rejected because the post-read omits the requested image bytes.
+	no_op_result="$work/no-op-result"
+	rm -rf "$no_op_result"
+	: > "$program_log"
+	rm -f "$program_capture" "$program_device_state"
+	if program_output=$(PIC12F675_PROGRAMMER_MODE=no-op \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_BENCH_RESULT=$no_op_result" 2>&1); then
+		printf 'FAIL: PIC12F675 programming trusted a zero-exit no-op writer\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"post-program read omits image byte address"* \
+		&& "$program_output" == *"PIC12F675_TRIM_RESULT FAIL evidence=$no_op_result/result.json"* \
+		&& -f "$no_op_result/reservation.json" && -f "$no_op_result/result.json" ]] \
+		|| { printf 'FAIL: no-op writer was not rejected by image readback: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
 	# pk2cmd receives one exact, private -F snapshot of a matrix rebuilt by this
 	# target. Attempts to change the chip, compiler flags, source set and programmer
 	# part are ignored by their fixed PIC12F675 definitions.
@@ -1235,12 +1435,16 @@ EOF
 		program_build_counts[$image]=$(logged_command_count "$xc8_log" "$image")
 	done
 	: > "$program_log"
+	: > "$hardware_log"
 	rm -f "$program_capture"
+	program_result="$work/pic12f675-program-result"
+	rm -rf "$program_result"
 	program_output=$(run_program_make "$PB_BUILD_DIR" "$program_variant" \
 		PIC12F675_CHIP=12F683 \
 		'PIC12F675_CFLAGS=-mcpu=12F683 -DWRONG_PROGRAM_TARGET' \
 		PIC12F675_CORE_SRC=/dev/null \
-		FW_BASE=../../escaped PIC12F675_TAG=wrong-part)
+		FW_BASE=../../escaped PIC12F675_TAG=wrong-part \
+		"PIC12F675_BENCH_RESULT=$program_result")
 	for image in $PB_MATRIX_IMAGES; do
 		[[ "$(logged_command_count "$xc8_log" "$image")" \
 			-eq $((program_build_counts[$image] + 1)) ]] \
@@ -1275,14 +1479,164 @@ EOF
 	program_snapshot=${program_args[1]#-F}
 	expected_program_check="PIC12F675_CALIBRATION_CHECK PASS image=$program_snapshot word=0x3FF"
 	[[ "$program_output" == *"$expected_program_check"* \
+		&& "$program_output" == *"PIC12F675_TRIM_PREWRITE PASS evidence=$program_evidence"* \
+		&& "$program_output" == *"PIC12F675_TRIM_RESULT PASS evidence=$program_result/result.json"* \
 		&& "$program_output" == *"selected variant $program_variant from the fresh build matrix"* \
 		&& "$program_snapshot" == */pic12f675-program.*/"image snapshot.hex" \
 		&& ! -e "$program_snapshot" \
-		&& -f "$program_capture" ]] \
+		&& -f "$program_capture" && -f "$program_result/reservation.json" \
+		&& -f "$program_result/result.json" ]] \
 		|| { printf 'FAIL: pk2cmd programming did not bind the selected image to its private checked snapshot: %s\n' \
 			"$program_output" >&2; exit 1; }
 	cmp -s "$program_source" "$program_capture" \
 		|| { printf 'FAIL: pk2cmd did not consume the selected shipping-image bytes\n' >&2; exit 1; }
+	python3 - "$program_result/result.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+assert record["status"] == "PASS"
+assert record["baseline_osccal_word"] == record["post_osccal_word"] == "0x34A5"
+assert record["baseline_bg_bits"] == record["post_bg_bits"] == "0x1000"
+assert record["baseline_config_word"] == "0x11FF"
+assert record["post_config_word"] == "0x11CC"
+assert record["writer_kind"] == "pk2cmd"
+assert record["program_exit"] == record["post_read_exit"] == 0
+assert record["programmed_image_bytes_verified"] > 2
+PY
+	checks=$((checks + 1))
+
+	# A writer failure after the evidence directory was reserved leaves its raw
+	# transcript and a final FAIL record instead of deleting the transaction.
+	writer_failure_result="$work/writer-failure-result"
+	rm -rf "$writer_failure_result"
+	if program_output=$(PIC12F675_PROGRAMMER_MODE=writer-fail \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_BENCH_RESULT=$writer_failure_result" 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted a failed writer\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"programmer exited 94"* \
+		&& -f "$writer_failure_result/reservation.json" \
+		&& -f "$writer_failure_result/program.log" \
+		&& -f "$writer_failure_result/result.json" ]] \
+		|| { printf 'FAIL: failed writer did not retain its transaction: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# Once reservation succeeds, an interruption during the writer leaves the
+	# intended image/pre-write record and the writer's durable log in place.
+	signal_result="$work/writer-signal-result"
+	rm -rf "$signal_result"
+	if program_output=$(PIC12F675_PROGRAMMER_MODE=signal-after-write \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_BENCH_RESULT=$signal_result" 2>&1); then
+		printf 'FAIL: interrupted PIC12F675 writer returned success\n' >&2
+		exit 1
+	fi
+	[[ -f "$signal_result/reservation.json" \
+		&& -f "$signal_result/program.log" \
+		&& "$(<"$signal_result/program.log")" == *"program bytes consumed before forced signal"* \
+		&& ! -e "$signal_result/result.json" ]] \
+		|| { printf 'FAIL: interrupted writer lost its reserved transaction: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# The live read immediately before the write must still match the retained
+	# baseline. A changed chip/trim cannot reach the programming argv.
+	: > "$program_log"
+	prewrite_result="$work/prewrite-mismatch-result"
+	rm -rf "$prewrite_result"
+	if program_output=$(PIC12F675_PROGRAMMER_MODE=prewrite-change \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_BENCH_RESULT=$prewrite_result" 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted a pre-write trim mismatch\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"current pre-write read differs from baseline: read_hex_sha256, osccal_word, osccal_value"* \
+		&& ! -s "$program_log" && ! -e "$prewrite_result" ]] \
+		|| { printf 'FAIL: pre-write trim mismatch reached programming or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# A writer that changes either factory value fails after the write but leaves
+	# a durable FAIL result containing the before/after values and transcripts.
+	for spec in \
+		"change-osccal|post-program OSCCAL word differs from baseline|0x34A6|0x1000" \
+		"change-bg|post-program BG<1:0> differs from baseline|0x34A5|0x2000" \
+		"wrong-program-byte|post-program image byte differs at 0x0000|0x34A5|0x1000" \
+		"wrong-config|post-program CONFIG differs outside factory BG<1:0>|0x34A5|0x1000"; do
+		mode=${spec%%|*}; rest=${spec#*|}
+		reason=${rest%%|*}; rest=${rest#*|}
+		post_osccal=${rest%%|*}; post_bg=${rest#*|}
+		failure_result="$work/$mode-result"
+		rm -rf "$failure_result"
+		: > "$program_log"
+		if program_output=$(PIC12F675_PROGRAMMER_MODE="$mode" \
+				run_program_make "$PB_BUILD_DIR" "$program_variant" \
+				"PIC12F675_BENCH_RESULT=$failure_result" 2>&1); then
+			printf 'FAIL: PIC12F675 programming accepted %s\n' "$mode" >&2
+			exit 1
+		fi
+		[[ "$program_output" == *"$reason"* \
+			&& "$program_output" == *"PIC12F675_TRIM_RESULT FAIL evidence=$failure_result/result.json"* \
+			&& -s "$program_log" && -f "$failure_result/result.json" ]] \
+			|| { printf 'FAIL: %s did not retain the expected failed readback: %s\n' \
+				"$mode" "$program_output" >&2; exit 1; }
+		python3 - "$failure_result/result.json" "$post_osccal" "$post_bg" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+assert record["status"] == "FAIL"
+assert record["baseline_osccal_word"] == "0x34A5"
+assert record["baseline_bg_bits"] == "0x1000"
+assert record["post_osccal_word"] == sys.argv[2]
+assert record["post_bg_bits"] == sys.argv[3]
+PY
+		checks=$((checks + 1))
+	done
+
+	# Evidence is parsed fail-closed before tools or a private build are reached.
+	tampered_evidence="$work/tampered-evidence.json"
+	cp "$program_evidence" "$tampered_evidence"
+	chmod 600 "$tampered_evidence"
+	python3 - "$tampered_evidence" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+record["osccal_word"] = "0x34A6"
+with open(sys.argv[1], "w", encoding="ascii") as handle:
+    json.dump(record, handle, sort_keys=True)
+PY
+	: > "$hardware_log"
+	if program_output=$(run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_TRIM_EVIDENCE=$tampered_evidence" 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted tampered trim evidence\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"baseline osccal_word does not match the retained read HEX"* \
+		&& ! -s "$hardware_log" ]] \
+		|| { printf 'FAIL: tampered baseline reached hardware or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# A failed post-read is retained as an explicit failed result rather than
+	# deleting the only account of a write that may already have erased the chip.
+	postread_result="$work/postread-failure-result"
+	rm -rf "$postread_result"
+	: > "$program_log"
+	if program_output=$(PIC12F675_PROGRAMMER_MODE=post-read-fail \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_BENCH_RESULT=$postread_result" 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted a failed post-program read\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"post-program read exited 92"* \
+		&& -s "$program_log" && -f "$postread_result/result.json" ]] \
+		|| { printf 'FAIL: post-read failure was not retained correctly: %s\n' \
+			"$program_output" >&2; exit 1; }
 	checks=$((checks + 1))
 	run_simcal_make >/dev/null
 

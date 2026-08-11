@@ -2782,7 +2782,7 @@ test-supply-chain:
 	./test/test_supply_chain.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 36/75/67
+# image/host rebuild triggering. The script enforces the canonical 36/75/81
 # counts, so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
@@ -6190,8 +6190,10 @@ pic12f675-test-target-variants:
 # programmer preserves the factory bandgap trim in CONFIG and the oscillator
 # calibration word in flash -- are silicon-only risks. No simulator lane can
 # reach them; they close at a bench, with this command, or not at all. So the
-# target does not refuse to run on their account, which would make the risks
-# permanently uncloseable. It states them, every time, and runs.
+# target now makes their bench measurement the transaction: a read-only baseline
+# must exist, the live device must still match it immediately before the write,
+# and a post-write readback/result is mandatory. This enables the silicon check;
+# it does not promote the part without retained real-hardware evidence.
 #
 # ON TOOL SUPPORT (section 8 item 8). PICkit 2 has long covered this family, and
 # the pinned device pack registers PIC12F675 with the same MPLAB hardware-tool
@@ -6204,7 +6206,99 @@ override PIC12F675_PART := PIC12F675
 PIC12F675_PROG      ?= pk2cmd
 PIC12F675_PROG_KIND ?= $(if $(filter ipecmd,$(notdir $(PIC12F675_PROG))),ipecmd,pk2cmd)
 PIC12F675_PROG_TOOL ?= PK4
-export PIC12F675_PART PIC12F675_PROG PIC12F675_PROG_KIND PIC12F675_PROG_TOOL
+# pk2cmd's read-to-HEX path is the only readback dialect pinned here. An ipecmd
+# write can still be measured, but needs a separately connected pk2cmd reader;
+# guessing an untested IPE read command would turn the safety gate into theatre.
+PIC12F675_READ_PROG ?= $(if $(filter pk2cmd,$(PIC12F675_PROG_KIND)),$(PIC12F675_PROG),pk2cmd)
+PIC12F675_TRIM_EVIDENCE ?=
+PIC12F675_BENCH_RESULT ?=
+override PIC12F675_TRIM_EVIDENCE_TOOL := test/pic/pic12f675_trim_evidence.py
+export PIC12F675_PART PIC12F675_PROG PIC12F675_PROG_KIND PIC12F675_PROG_TOOL \
+       PIC12F675_READ_PROG PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT
+
+# Capture the factory values without issuing any erase/write option. The raw
+# programmer version and device transcripts, target Device ID/revision, complete
+# read HEX digest, word 0x3FF, CONFIG and BG<1:0> are retained in one exclusive
+# evidence file. The output path is mandatory and may not already exist.
+.PHONY: pic12f675-preflight
+pic12f675-preflight: $(PIC12F675_TRIM_EVIDENCE_TOOL)
+	@if [ "$(if $(filter undefined,$(origin PIC12F675_PROG_HEX)),0,1)" -ne 0 ]; then \
+		echo "ERROR: PIC12F675_PROG_HEX is not supported by the guarded hardware workflow."; \
+		exit 1; \
+	fi; \
+	if [ "$(if $(filter undefined,$(origin PIC12F675_PROG_CMD)),0,1)" -ne 0 ]; then \
+		echo "ERROR: PIC12F675_PROG_CMD is not supported by the guarded hardware workflow."; \
+		exit 1; \
+	fi; \
+	evidence=$$PIC12F675_TRIM_EVIDENCE; \
+	reader=$$PIC12F675_READ_PROG; \
+	part=$$PIC12F675_PART; \
+	if [ -z "$$evidence" ]; then \
+		echo "ERROR: PIC12F675_TRIM_EVIDENCE is required for read-only baseline capture."; \
+		exit 1; \
+	fi; \
+	if [ -e "$$evidence" ] || [ -L "$$evidence" ]; then \
+		echo "ERROR: trim-evidence output already exists; refusing to overwrite: $$evidence"; \
+		exit 1; \
+	fi; \
+	case "$$reader" in \
+		*/*) [ -f "$$reader" ] && [ -x "$$reader" ]; reader_path=$$reader ;; \
+		*) reader_path=`command -v "$$reader" 2>/dev/null` ;; \
+	esac; \
+	if [ -z "$$reader_path" ] || [ ! -f "$$reader_path" ] || [ ! -x "$$reader_path" ]; then \
+		echo "ERROR: pk2cmd reader '$$reader' not found or not executable."; \
+		echo "       Set PIC12F675_READ_PROG to a pk2cmd executable."; \
+		exit 1; \
+	fi; \
+	if ! command -v python3 >/dev/null 2>&1; then \
+		echo "ERROR: python3 is required to create trim evidence."; exit 1; \
+	fi; \
+	if ! command -v mktemp >/dev/null 2>&1; then \
+		echo "ERROR: mktemp is required to capture trim evidence privately."; exit 1; \
+	fi; \
+	if ! command -v sha256sum >/dev/null 2>&1; then \
+		echo "ERROR: sha256sum is required to bind the reader executable to its evidence."; exit 1; \
+	fi; \
+	$(IHEX_VALIDATOR_CHECK); \
+	hash_file() { \
+		hash_output=`sha256sum -- "$$1"` || return 1; \
+		hash_digest=$${hash_output%% *}; \
+		case "$$hash_digest" in ''|*[!0-9a-f]*) return 1 ;; esac; \
+		[ $${#hash_digest} -eq 64 ] || return 1; \
+		printf '%s' "$$hash_digest"; \
+	}; \
+	bench_dir=`mktemp -d "/tmp/pic12f675-preflight.XXXXXX"` || exit 1; \
+	chmod 700 "$$bench_dir" || { rm -rf -- "$$bench_dir"; exit 1; }; \
+	cleanup_preflight() { rc=$$1; trap - 0 1 2 15; rm -rf -- "$$bench_dir" || rc=1; exit $$rc; }; \
+	trap 'cleanup_preflight $$?' 0; \
+	trap 'cleanup_preflight 129' 1; \
+	trap 'cleanup_preflight 130' 2; \
+	trap 'cleanup_preflight 143' 15; \
+	version_log="$$bench_dir/pk2cmd-version.log"; \
+	read_log="$$bench_dir/device-read.log"; \
+	read_hex="$$bench_dir/device-read.hex"; \
+	reader_digest_before=`hash_file "$$reader_path"` || exit 1; \
+	if ! "$$reader_path" '-?V' >"$$version_log" 2>&1; then \
+		cat "$$version_log"; echo "ERROR: pk2cmd version query failed."; exit 1; \
+	fi; \
+	if ! "$$reader_path" "-P$$part" -I "-GF$$read_hex" -R >"$$read_log" 2>&1; then \
+		cat "$$read_log"; echo "ERROR: read-only PIC12F675 baseline capture failed."; exit 1; \
+	fi; \
+	reader_digest_after=`hash_file "$$reader_path"` || exit 1; \
+	if [ "$$reader_digest_before" != "$$reader_digest_after" ]; then \
+		echo "ERROR: pk2cmd reader changed during baseline capture."; exit 1; \
+	fi; \
+	cat "$$version_log"; cat "$$read_log"; \
+	$(IHEX_VALIDATOR) "$$read_hex" || exit 1; \
+	baseline_output=`python3 "$(PIC12F675_TRIM_EVIDENCE_TOOL)" baseline \
+		--reader-path "$$reader_path" --version-log "$$version_log" \
+		--read-log "$$read_log" --read-hex "$$read_hex" --output "$$evidence"` || exit 1; \
+	expected_baseline="PIC12F675_TRIM_BASELINE PASS evidence=$$evidence"; \
+	if [ "$$baseline_output" != "$$expected_baseline" ] || \
+			[ ! -f "$$evidence" ] || [ -L "$$evidence" ] || [ ! -s "$$evidence" ]; then \
+		echo "ERROR: trim-evidence oracle did not emit its exact baseline record."; exit 1; \
+	fi; \
+	printf '%s\n' "$$baseline_output"
 
 # Builds every variant + the flash-budget gate first (so the image is fresh and
 # proven to fit), derives the selected image only from validated VARIANT, then
@@ -6233,7 +6327,8 @@ export PIC12F675_PART PIC12F675_PROG PIC12F675_PROG_KIND PIC12F675_PROG_TOOL
 # half of item 1 -- the build must leave the factory bandgap bits erased.
 .PHONY: pic12f675-program
 pic12f675-program: variant-selectors-valid \
-                  test/pic/test_config_pic12f675 $(PIC12F675_CAL_CHECKER)
+                  test/pic/test_config_pic12f675 $(PIC12F675_CAL_CHECKER) \
+                  $(PIC12F675_TRIM_EVIDENCE_TOOL)
 	@if [ "$(if $(filter undefined,$(origin PIC12F675_PROG_HEX)),0,1)" -ne 0 ]; then \
 		echo "ERROR: PIC12F675_PROG_HEX is not supported; the image is derived from validated VARIANT."; \
 		exit 1; \
@@ -6246,7 +6341,22 @@ pic12f675-program: variant-selectors-valid \
 	prog=$$PIC12F675_PROG; \
 	prog_kind=$$PIC12F675_PROG_KIND; \
 	prog_tool=$$PIC12F675_PROG_TOOL; \
+	reader=$$PIC12F675_READ_PROG; \
+	evidence=$$PIC12F675_TRIM_EVIDENCE; \
+	result=$$PIC12F675_BENCH_RESULT; \
 	part=$$PIC12F675_PART; \
+	if [ -z "$$evidence" ]; then \
+		echo "ERROR: PIC12F675_TRIM_EVIDENCE is required; run pic12f675-preflight first."; \
+		exit 1; \
+	fi; \
+	if [ -z "$$result" ]; then \
+		echo "ERROR: PIC12F675_BENCH_RESULT is required for retained before/after evidence."; \
+		exit 1; \
+	fi; \
+	if [ -e "$$result" ] || [ -L "$$result" ]; then \
+		echo "ERROR: bench-result output already exists; refusing to overwrite: $$result"; \
+		exit 1; \
+	fi; \
 	case "$$prog_kind" in \
 		pk2cmd|ipecmd) : ;; \
 		*) echo "ERROR: PIC12F675_PROG_KIND must be exactly pk2cmd or ipecmd; got '$$prog_kind'."; exit 1 ;; \
@@ -6258,14 +6368,24 @@ pic12f675-program: variant-selectors-valid \
 		esac; \
 	fi; \
 	case "$$prog" in \
-		*/*) [ -f "$$prog" ] && [ -x "$$prog" ] ;; \
-		*) command -v "$$prog" >/dev/null 2>&1 ;; \
-	esac || { \
+		*/*) [ -f "$$prog" ] && [ -x "$$prog" ]; prog_path=$$prog ;; \
+		*) prog_path=`command -v "$$prog" 2>/dev/null` ;; \
+	esac; \
+	if [ -z "$$prog_path" ] || [ ! -f "$$prog_path" ] || [ ! -x "$$prog_path" ]; then \
 		echo "ERROR: PIC programmer '$$prog' not found or not executable."; \
 		echo "       Set PIC12F675_PROG to the executable path and PIC12F675_PROG_KIND"; \
 		echo "       to pk2cmd or ipecmd when its basename does not identify the dialect."; \
 		exit 1; \
-	}; \
+	fi; \
+	case "$$reader" in \
+		*/*) [ -f "$$reader" ] && [ -x "$$reader" ]; reader_path=$$reader ;; \
+		*) reader_path=`command -v "$$reader" 2>/dev/null` ;; \
+	esac; \
+	if [ -z "$$reader_path" ] || [ ! -f "$$reader_path" ] || [ ! -x "$$reader_path" ]; then \
+		echo "ERROR: pk2cmd reader '$$reader' not found or not executable."; \
+		echo "       Set PIC12F675_READ_PROG to the pk2cmd used for the baseline."; \
+		exit 1; \
+	fi; \
 	if ! command -v python3 >/dev/null 2>&1; then \
 		echo "ERROR: python3 is required to check the calibration word before flashing."; \
 		echo "       Refusing to program without that check."; \
@@ -6280,6 +6400,13 @@ pic12f675-program: variant-selectors-valid \
 		exit 1; \
 	fi; \
 	$(IHEX_VALIDATOR_CHECK); \
+	baseline_check=`python3 "$(PIC12F675_TRIM_EVIDENCE_TOOL)" inspect \
+		--baseline "$$evidence"` || exit 1; \
+	expected_baseline_check="PIC12F675_TRIM_BASELINE_VALID PASS evidence=$$evidence"; \
+	if [ "$$baseline_check" != "$$expected_baseline_check" ]; then \
+		echo "ERROR: trim-evidence oracle did not emit its exact validation record."; exit 1; \
+	fi; \
+	printf '%s\n' "$$baseline_check"; \
 	hash_file() { \
 		hash_output=`sha256sum -- "$$1"` || return 1; \
 		hash_digest=$${hash_output%% *}; \
@@ -6291,11 +6418,16 @@ pic12f675-program: variant-selectors-valid \
 		echo "ERROR: could not create a private programming directory."; exit 1; \
 	}; \
 	chmod 700 "$$program_dir" || { rm -rf -- "$$program_dir"; exit 1; }; \
+	bench_dir=`mktemp -d "/tmp/pic12f675-bench.XXXXXX"` || { \
+		rm -rf -- "$$program_dir"; \
+		echo "ERROR: could not create a private bench-record directory."; exit 1; \
+	}; \
+	chmod 700 "$$bench_dir" || { rm -rf -- "$$program_dir" "$$bench_dir"; exit 1; }; \
 	cleanup_program_snapshot() { \
 		rc=$$1; \
 		trap - 0 1 2 15; \
 		chmod 700 "$$program_dir" 2>/dev/null || :; \
-		rm -rf -- "$$program_dir" || rc=1; \
+		rm -rf -- "$$program_dir" "$$bench_dir" || rc=1; \
 		exit $$rc; \
 	}; \
 	trap 'cleanup_program_snapshot $$?' 0; \
@@ -6363,37 +6495,103 @@ pic12f675-program: variant-selectors-valid \
 		echo "ERROR: private programming snapshot changed during pre-flash checks."; \
 		exit 1; \
 	fi; \
-	echo ""; \
-	echo "  ----------------------------------------------------------------"; \
-	echo "  PIC12F675 pre-flash notice. Two factory-trimmed values are at"; \
-	echo "  risk here from the PROGRAMMER's erase step, not from this image:"; \
-	echo ""; \
-	echo "    OSCCAL   flash word 0x3FF, the oscillator trim. This image"; \
-	echo "             leaves it unprogrammed (just checked). A programmer"; \
-	echo "             that bulk-erases without preserving it leaves the part"; \
-	echo "             untrimmed: wrong tick cadence and wrong coil-pulse"; \
-	echo "             widths, on a device that still appears to work."; \
-	echo "    BG<1:0>  bandgap calibration in the CONFIG word, which sets the"; \
-	echo "             BOR/POR trip points. This image leaves the field erased"; \
-	echo "             (just checked); an erase still clears the silicon's."; \
-	echo ""; \
-	echo "  Neither is verified for this project's programmers, and neither is"; \
-	echo "  visible to any simulator lane. On a NEW device: read and RECORD"; \
-	echo "  word 0x3FF before this first program, read it back afterwards, and"; \
-	echo "  require it unchanged. If the verify step reports a mismatch at"; \
-	echo "  word 0x3FF, that is the programmer comparing a preserved factory"; \
-	echo "  value against an image that deliberately omits it -- record what"; \
-	echo "  it says; that is evidence for the item, not automatically a fault."; \
-	echo "  docs/pic12f675_feasibility.md section 8, items 1 and 2."; \
-	echo "  ----------------------------------------------------------------"; \
-	echo ""; \
-	echo "Programming PIC12F675 selected variant $$variant from the fresh build matrix."; \
-	echo "  executable: $$prog ($$prog_kind arguments)"; \
-	echo "  checked snapshot: $$snapshot"; \
+	reader_version_log="$$bench_dir/reader-version.log"; \
+	prewrite_log="$$bench_dir/prewrite-read.log"; \
+	prewrite_hex="$$bench_dir/prewrite-read.hex"; \
+	writer_version_log="$$bench_dir/writer-version.log"; \
+	reader_digest_before=`hash_file "$$reader_path"` || exit 1; \
+	if ! "$$reader_path" '-?V' >"$$reader_version_log" 2>&1; then \
+		cat "$$reader_version_log"; echo "ERROR: pk2cmd reader version query failed."; exit 1; \
+	fi; \
+	if ! "$$reader_path" "-P$$part" -I "-GF$$prewrite_hex" -R >"$$prewrite_log" 2>&1; then \
+		cat "$$prewrite_log"; echo "ERROR: immediate pre-write device read failed."; exit 1; \
+	fi; \
+	reader_digest_after=`hash_file "$$reader_path"` || exit 1; \
+	if [ "$$reader_digest_before" != "$$reader_digest_after" ]; then \
+		echo "ERROR: pk2cmd reader changed during immediate pre-write capture."; exit 1; \
+	fi; \
+	cat "$$reader_version_log"; cat "$$prewrite_log"; \
+	$(IHEX_VALIDATOR) "$$prewrite_hex" || exit 1; \
+	prewrite_check=`python3 "$(PIC12F675_TRIM_EVIDENCE_TOOL)" verify \
+		--baseline "$$evidence" --reader-path "$$reader_path" \
+		--version-log "$$reader_version_log" --read-log "$$prewrite_log" \
+		--read-hex "$$prewrite_hex"` || exit 1; \
+	expected_prewrite="PIC12F675_TRIM_PREWRITE PASS evidence=$$evidence"; \
+	if [ "$$prewrite_check" != "$$expected_prewrite" ]; then \
+		echo "ERROR: trim-evidence oracle did not emit its exact pre-write record."; exit 1; \
+	fi; \
+	printf '%s\n' "$$prewrite_check"; \
 	case "$$prog_kind" in \
-		ipecmd) "$$prog" "-TP$$prog_tool" "-P$$part" -M "-F$$snapshot" ;; \
-		pk2cmd) "$$prog" "-P$$part" "-F$$snapshot" -M -Y -R ;; \
-	esac
+		ipecmd) version_arg='-?' ;; \
+		pk2cmd) version_arg='-?V' ;; \
+	esac; \
+	writer_digest_before=`hash_file "$$prog_path"` || exit 1; \
+	if ! "$$prog_path" "$$version_arg" >"$$writer_version_log" 2>&1; then \
+		cat "$$writer_version_log"; echo "ERROR: programmer version query failed."; exit 1; \
+	fi; \
+	writer_digest_after=`hash_file "$$prog_path"` || exit 1; \
+	if [ "$$writer_digest_before" != "$$writer_digest_after" ]; then \
+		echo "ERROR: programmer executable changed during its version query."; exit 1; \
+	fi; \
+	cat "$$writer_version_log"; \
+	reservation_output=`python3 "$(PIC12F675_TRIM_EVIDENCE_TOOL)" reserve \
+		--baseline "$$evidence" --reader-path "$$reader_path" \
+		--version-log "$$reader_version_log" --read-log "$$prewrite_log" \
+		--read-hex "$$prewrite_hex" --writer-kind "$$prog_kind" \
+		--writer-path "$$prog_path" --writer-version-log "$$writer_version_log" \
+		--image-hex "$$snapshot" --variant "$$variant" --output-dir "$$result"` || exit 1; \
+	expected_reservation="PIC12F675_TRIM_RESERVATION PASS evidence-dir=$$result"; \
+	if [ "$$reservation_output" != "$$expected_reservation" ] || \
+			[ ! -f "$$result/reservation.json" ] || [ -L "$$result/reservation.json" ]; then \
+		echo "ERROR: trim-evidence oracle did not reserve the exact result directory."; exit 1; \
+	fi; \
+	printf '%s\n' "$$reservation_output"; \
+	writer_digest_ready=`hash_file "$$prog_path"` || exit 1; \
+	if [ "$$writer_digest_before" != "$$writer_digest_ready" ]; then \
+		echo "ERROR: programmer executable changed before the write."; exit 1; \
+	fi; \
+	program_log="$$result/program.log"; \
+	postread_log="$$result/postread.log"; \
+	postread_hex="$$result/postread.hex"; \
+	echo "Programming PIC12F675 selected variant $$variant from the fresh build matrix."; \
+	echo "  executable: $$prog_path ($$prog_kind arguments)"; \
+	echo "  readback oracle: $$reader_path (pk2cmd arguments)"; \
+	echo "  checked snapshot: $$snapshot"; \
+	program_rc=0; \
+	case "$$prog_kind" in \
+		ipecmd) "$$prog_path" "-TP$$prog_tool" "-P$$part" -M "-F$$snapshot" \
+			>"$$program_log" 2>&1 || program_rc=$$? ;; \
+		pk2cmd) "$$prog_path" "-P$$part" "-F$$snapshot" -M -Y -R \
+			>"$$program_log" 2>&1 || program_rc=$$? ;; \
+	esac; \
+	cat "$$program_log"; \
+	postread_rc=0; \
+	"$$reader_path" "-P$$part" -I "-GF$$postread_hex" -R \
+		>"$$postread_log" 2>&1 || postread_rc=$$?; \
+	cat "$$postread_log"; \
+	if [ "$$postread_rc" -eq 0 ] && ! $(IHEX_VALIDATOR) "$$postread_hex"; then \
+		postread_rc=125; \
+	fi; \
+	result_rc=0; \
+	result_output=`python3 "$(PIC12F675_TRIM_EVIDENCE_TOOL)" result \
+		--baseline "$$evidence" --reservation "$$result/reservation.json" \
+		--reader-path "$$reader_path" \
+		--version-log "$$reader_version_log" --read-log "$$prewrite_log" \
+		--read-hex "$$prewrite_hex" --writer-kind "$$prog_kind" \
+		--writer-path "$$prog_path" --writer-version-log "$$writer_version_log" \
+		--program-log "$$program_log" --program-exit "$$program_rc" \
+		--post-read-log "$$postread_log" --post-read-hex "$$postread_hex" \
+		--post-read-exit "$$postread_rc" --output-dir "$$result" 2>&1` || result_rc=$$?; \
+	printf '%s\n' "$$result_output"; \
+	expected_result="PIC12F675_TRIM_RESULT PASS evidence=$$result/result.json"; \
+	if [ "$$result_rc" -ne 0 ] || [ "$$result_output" != "$$expected_result" ] || \
+			[ ! -f "$$result/result.json" ] || [ -L "$$result/result.json" ] || \
+			[ ! -s "$$result/result.json" ]; then \
+		echo "ERROR: PIC12F675 programming did not produce passing before/after trim evidence."; \
+		echo "       Retained transaction directory: $$result"; \
+		exit 1; \
+	fi; \
+	echo "PIC12F675 programming and factory-trim readback PASS: $$result/result.json"
 
 # ============================================================================
 # INTROSPECTION -- expose one Makefile variable's value to scripts
@@ -6597,9 +6795,9 @@ RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(XT_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(
 # port-follows-shadow guard requires and which gpsim's ideal pin model cannot
 # test. A device that lost either of the first two still appears to work; one
 # that fails the third watchdog-resets forever. See
-# docs/pic12f675_feasibility.md section 8, items 1, 2 and 9. The first two are
-# closed by `make pic12f675-program`, which states them before every write; the
-# third is closed with a meter.
+# docs/pic12f675_feasibility.md section 8, items 1, 2 and 9. The guarded
+# preflight/program workflow measures the first two and retains the result; only
+# a real PASS closes them. The third is closed with a meter.
 #
 # GRADUATING THE PART means, together and in this order:
 #   0. close section 8 items 1, 2 and 9 at a bench, on real silicon;
@@ -6739,7 +6937,7 @@ help:
 	@echo "                        (PIC10F322_TARGET_VARIANT); pic10f322-test-target-variants runs all"
 	@echo "  pic10f322-program     flash one PIC variant to hardware (VARIANT=, PIC10F322_PROG=pk2cmd|ipecmd)"
 	@echo "PIC12F675 staged standalone target (not release-supported; omitted from all/release):"
-	@echo "  CI-gated, and programmable at a bench; no release-image integration yet."
+	@echo "  CI-gated, and programmable at a bench with retained trim evidence; no release integration."
 	@echo "  pic12f675-test        all PIC12F675 pre-hardware checks (CONFIG + analysis + source"
 	@echo "                        coverage + calibration contract + gpsim + stack bound)"
 	@echo "  pic12f675             build all variants for PIC12F675 (XC8) + 1024-word budget gate"
@@ -6760,8 +6958,11 @@ help:
 	@echo "  pic12f675-test-calibration  prove the calibration injection leaves the shipping HEX alone"
 	@echo "  pic12f675-test-target fail-closed fault + lock-step + target-I/O for one variant"
 	@echo "                        (PIC12F675_TARGET_VARIANT); pic12f675-test-target-variants runs all"
-	@echo "  pic12f675-program     flash one fresh variant (VARIANT=, PIC12F675_PROG=, PIC12F675_PROG_KIND=pk2cmd|ipecmd);"
-	@echo "                        refuses any image that would overwrite the factory calibration word"
+	@echo "  pic12f675-preflight   read-only factory-trim capture (PIC12F675_READ_PROG=pk2cmd,"
+	@echo "                        PIC12F675_TRIM_EVIDENCE= new retained JSON path)"
+	@echo "  pic12f675-program     flash one fresh variant and require matching before/after trim reads"
+	@echo "                        (VARIANT=, PIC12F675_PROG=, PIC12F675_PROG_KIND=pk2cmd|ipecmd,"
+	@echo "                        PIC12F675_TRIM_EVIDENCE=, PIC12F675_BENCH_RESULT= new directory)"
 	@echo "PIC10F320 (constrained 256-word target; docs/pic10f320_special_case.md):"
 	@echo "  pic10f320          build one PIC10F320 variant + 256-word and HW-stack gates"
 	@echo "                     (PIC10F320_VARIANT=cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay)"
@@ -6893,7 +7094,8 @@ help:
 	@echo "  coverage-clean  remove coverage artifacts"
 	@echo "Overrides: VARIANT=, AVR_PROGRAMMER=, COVERAGE_MIN=, HOSTCC=, HOST_DEFS=, SIM_DEFS=, AVR_BUILD_DIR="
 	@echo "PIC overrides: PIC_CC=, PIC10F322_PROG=pk2cmd|ipecmd, PIC10F322_PROG_TOOL=PK3|PK4|PK5, PIC10F322_PROG_CMD="
-	@echo "               PIC12F675_PROG=, PIC12F675_PROG_KIND=pk2cmd|ipecmd, PIC12F675_PROG_TOOL=PK3|PK4|PK5"
+	@echo "               PIC12F675_PROG=, PIC12F675_PROG_KIND=pk2cmd|ipecmd, PIC12F675_PROG_TOOL=PK3|PK4|PK5,"
+	@echo "               PIC12F675_READ_PROG=pk2cmd, PIC12F675_TRIM_EVIDENCE=, PIC12F675_BENCH_RESULT="
 
 else
 

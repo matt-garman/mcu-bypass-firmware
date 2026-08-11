@@ -138,10 +138,17 @@ make pic12f675                      # build all variants + 1024-word flash-budge
 make pic12f675-test                 # CONFIG, analysis, source coverage, calibration
                                     #   contract, gpsim, and the 8-level stack bound
 make pic12f675-test-target-variants # fail-closed libgpsim fault/lock-step/I/O gates
-make pic12f675-program VARIANT=cd4053_simple # flash one fresh variant (bench)
+make pic12f675-preflight \
+  PIC12F675_TRIM_EVIDENCE=pic12f675-baseline.json # read-only factory-trim capture
+make pic12f675-program VARIANT=cd4053_simple \
+  PIC12F675_TRIM_EVIDENCE=pic12f675-baseline.json \
+  PIC12F675_BENCH_RESULT=pic12f675-program-result
 # Renamed/path-qualified IPE executable:
 make pic12f675-program VARIANT=tq2_l2_5v_relay \
-  PIC12F675_PROG=/opt/microchip/ipe/ipecmd.sh PIC12F675_PROG_KIND=ipecmd
+  PIC12F675_PROG=/opt/microchip/ipe/ipecmd.sh PIC12F675_PROG_KIND=ipecmd \
+  PIC12F675_READ_PROG=/usr/bin/pk2cmd \
+  PIC12F675_TRIM_EVIDENCE=pic12f675-baseline.json \
+  PIC12F675_BENCH_RESULT=pic12f675-ipe-result
 ```
 
 Its simulator lanes run *derived* images: `make pic12f675-simcal` injects the
@@ -158,10 +165,24 @@ oscillator trim irreversibly — and silently, since the part still runs
 afterwards. The snapshot must leave that word unprogrammed, carry the intended
 CONFIG, and retain one SHA-256 digest through every check; the programmer gets
 that same snapshot through directly constructed argv. External image and
-whole-command overrides are deliberately unsupported. Two things it cannot
-check are the programmer's own erase behaviour toward that word and toward the
-`BG<1:0>` bandgap trim; it prints both, with the read-back procedure, every time
-it runs.
+whole-command overrides are deliberately unsupported.
+
+Programming also requires a baseline made by the read-only
+`pic12f675-preflight` target. It records the exact reader binary/version and
+device ID/revision plus word `0x3FF`, CONFIG, and `BG<1:0>`. The write target
+repeats that read immediately before programming, refuses a mismatch, reads the
+device again afterwards, and publishes an exclusive result containing the raw
+transcripts, programmed-byte comparison, and before/after values. The
+`PIC12F675_BENCH_RESULT` path is reserved as a new directory before the write;
+`reservation.json` remains useful after interruption and `result.json` records
+the final PASS/FAIL. A baseline is a one-device, pre-first-write record: the
+immediate read must match its complete exported HEX as well as identity/trim, so
+do not reuse it for another device or a later reflash. pk2cmd is the pinned
+readback dialect. An
+ipecmd write therefore needs `PIC12F675_READ_PROG` set to the pk2cmd reader used
+for the baseline; no untested IPE read command is guessed. These records enable
+the silicon check but do not replace it: the part remains staged until retained
+real-hardware evidence passes.
 
 These targets are independent of the AVR build. Individual optional-tool targets
 generally skip cleanly if their primary compiler/simulator is absent. The

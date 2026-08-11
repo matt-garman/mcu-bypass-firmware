@@ -136,10 +136,42 @@ aggregate so missing PIC tooling cannot produce a false green release gate.
                 injector to derive its simulator images, so every 12F675
                 simulator lane fails closed without an interpreter. The same
                 tool guards `make pic12f675-program` in its inverse mode -- the
-                private snapshot selected from the fresh `VARIANT` matrix must
-                NOT carry a calibration word -- and that target refuses to
-                flash silicon at all rather than program a device with the
-                check unrun or a changed snapshot.
+                 private snapshot selected from the fresh `VARIANT` matrix must
+                 NOT carry a calibration word -- and that target refuses to
+                 flash silicon at all rather than program a device with the
+                 check unrun or a changed snapshot.
+
+  PIC12F675
+  programmer:    `pk2cmd` is the only pinned readback dialect. Run
+                 `make pic12f675-preflight PIC12F675_TRIM_EVIDENCE=<new-file>`
+                 before the first write. Its read-only `-GF<file>` transaction
+                 records the exact executable digest/version transcript,
+                 target Device ID/revision transcript, complete read-HEX
+                 digest, factory `RETLW` word at 0x3FF, CONFIG at 0x2007, and
+                 `BG<1:0>`. The output path is exclusive and is never replaced.
+                 `make pic12f675-program` requires that baseline plus a new
+                 `PIC12F675_BENCH_RESULT` directory path. It repeats the read immediately
+                 before writing and requires the complete export, device
+                 identity, OSCCAL, CONFIG, and BG to match. A baseline therefore
+                 belongs to one device before its first write and must not be
+                 reused for a later reflash. The target programs
+                 the immutable checked image, reads again, compares every image
+                 byte (masking only factory BG bits), and retains the raw
+                 writer/readback transcripts and before/after fields. The
+                 directory is exclusively reserved with `reservation.json`
+                 before the write, so an interruption cannot erase all account
+                 of the transaction; `result.json` is the final verdict. A failed
+                 write, failed post-read, or changed trim produces retained
+                 FAIL evidence and a failing Make target.
+
+                 ipecmd remains a write dialect only: set
+                 `PIC12F675_READ_PROG` to the pk2cmd executable used for the
+                 baseline. No ipecmd read argv is claimed until it is confirmed
+                 against an installed IPE and hardware. Neither programmer is
+                 installed on this build host, so fake-tool coverage validates
+                 command routing and fail-closed evidence handling, not silicon
+                 preservation. The part remains staged until a real result is
+                 retained and reviewed.
                 `make test-pic10f320-return-stack-oracle` runs deterministic parser and
                 control-flow fixtures in the normal `make test` / `test-long`
                 graph. Every successful `make pic10f320` build applies the oracle

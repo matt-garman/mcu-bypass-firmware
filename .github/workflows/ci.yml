@@ -118,8 +118,9 @@ jobs:
   # gating CI on it anyway is deliberate: a staged part that is exercised only
   # when someone remembers to run it by hand is a part whose lanes rot. What is
   # deliberately NOT here is an image upload -- publishing a downloadable HEX
-  # belongs with release integration, where this part's OSCCAL-preservation
-  # flashing procedure is documented and where `pic12f675-program` will live.
+  # belongs with release integration. The guarded `pic12f675-preflight` /
+  # `pic12f675-program` bench workflow can produce preservation evidence, but a
+  # real passing record and its release flashing procedure do not exist yet.
   #
   # ONE job for all three, deliberately (merge plan §11, decision D3). `verify`,
   # `attiny202`, `build-matrix` and `stress` ALL declare `needs: pic`, so this job
