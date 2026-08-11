@@ -119,7 +119,8 @@ jobs:
   # when someone remembers to run it by hand is a part whose lanes rot. What is
   # deliberately NOT here is an image upload -- publishing a downloadable HEX
   # belongs with release integration, where this part's OSCCAL-preservation
-  # flashing procedure is documented and where `pic12f675-program` will live.
+  # flashing procedure is documented. `make pic12f675-program` already exists as
+  # a bench action, but it publishes nothing and CI never runs it.
   #
   # ONE job for all three, deliberately (merge plan §11, decision D3). `verify`,
   # `attiny202`, `build-matrix` and `stress` ALL declare `needs: pic`, so this job
