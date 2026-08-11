@@ -128,7 +128,7 @@ row below was read from the device pack — `pic12f675.h` / `pic10f322.h`,
 | CONFIG word address | `0x2007` | `0x2007` | config lane ports structurally |
 | I/O pins | 4: RA0–RA2 bidirectional, RA3 input-only | 6: GP0–GP2, GP4, GP5 bidirectional, GP3 input-only | 2 spare pins |
 | Port registers | `PORTA` / `TRISA` / **`LATA`** | `GPIO` / `TRISIO` / **no LAT register** | §4.2 shadow latch |
-| Analog disable | `ANSELA` | `ANSEL` **plus `CMCON`** (comparator owns GP0–GP2 out of reset) **plus `ADCON0`** | §4.6 wider init + wider guard set |
+| Analog disable | `ANSELA` | `ANSEL` **plus `CMCON`** (comparator holds GP0–GP1 analog out of reset; COUT modes also take GP2) **plus `ADCON0`** | §4.6 wider init + wider guard set |
 | Weak pull-ups | `WPUA` bits 0–3 (**including** RA3) + `OPTION_REG.nWPUEN` | `WPU` bits 0,1,2,4,5 (**no GP3 bit**) + `OPTION_REG.nGPPU` | §4.1 pin map must change |
 | Tick timer | TMR2 with `PR2` period register + `T2CON` | **no TMR2** — TMR0 (8-bit, no period reg) or TMR1 (16-bit, no period reg) | §4.4 tick redesign |
 | WDT period control | `WDTCON.WDTPS`, independent of any timer | `OPTION_REG` `PSA`/`PS` — **one prescaler shared with TMR0** | §4.4 real coupling |
@@ -731,9 +731,17 @@ Consequences, both real:
 On the PIC10F322 the only analog encroachment is `ANSELA`. On the PIC12F675 there
 are three:
 
-- **`CMCON`** — the comparator is **on out of reset** and takes GP0, GP1 and GP2,
-  which are exactly the three active output pins. `CMCON = 0x07` (`CM<2:0> = 111`,
-  comparator off) is mandatory in init, and is a new guarded SFR.
+- **`CMCON`** — `CM<2:0> = 000` out of reset is "Comparator Reset" mode
+  (DS41190G Figure 6-2), which makes GP0/CIN+ and GP1/CIN- **analog inputs**;
+  §3.1 says an analog input "always reads 0" whatever the pin is driving. GP2 is
+  **not** taken at reset — §6.4 puts `COUT` on it in three of the eight modes,
+  which is an upset path rather than the reset state. Note the mechanism: §3.1
+  is explicit that `TRISIO` still controls direction "even when they are being
+  used as analog inputs", so what the reset state breaks is **readback**, not
+  drive — which is precisely why the §4.2 port-follows-shadow comparison is the
+  check that catches it, and why leaving `CM<2:0> = 000` would fail that check
+  on every tick. `CMCON = 0x07` (`CM<2:0> = 111`, comparator off) is mandatory
+  in init, and is a new guarded SFR.
 - **`ANSEL`** — clears and guards `ANS0..ANS3` for GP0/GP1/GP2/GP4. GP4 is GPIO
   bit 4 but `ANS3` is ANSEL bit 3, so the GPIO output mask cannot be reused for
   this comparison. ANSEL also carries `ADCS<2:0>` in bits 6:4, which do not
@@ -742,8 +750,9 @@ are three:
   `CMCON` is.
 
 Each of these is a single-event-upset path to "the firmware still thinks it owns
-a digital output but an analog peripheral has taken it". CMCON affects the three
-active outputs; ANSEL also covers parked GP4 through ANS3. The 322 has one such
+a digital output but an analog peripheral has taken it". CMCON reaches all three
+active outputs — GP0 and GP1 at reset, GP2 only through a COUT mode; ANSEL also
+covers parked GP4 through ANS3. The 322 has one such
 path; this part has three.
 
 ### 4.7 CONFIG word

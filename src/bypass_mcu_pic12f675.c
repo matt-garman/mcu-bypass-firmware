@@ -119,10 +119,13 @@
 // rollovers make the 1.024ms tick.
 #define TMR0_SUBTICKS_PER_TICK (4U)
 
-// CMCON = 0x07 -> CM<2:0> = 111 = comparator OFF. MANDATORY: the comparator is
-// ON out of reset (CM<2:0> = 000) and owns GP0, GP1 and GP2 - which are
-// exactly this design's three active output pins. Parked GP4 has no
-// comparator function.
+// CMCON = 0x07 -> CM<2:0> = 111 = comparator OFF. MANDATORY: CM<2:0> = 000 out
+// of reset ("Comparator Reset" mode) makes GP0/CIN+ and GP1/CIN- analog
+// inputs, and an analog input ALWAYS READS 0 whatever the pin is driving. Two
+// of this design's three active outputs are on GP0/GP1, so leaving CM<2:0> =
+// 000 would fail the port-follows-shadow check on every tick. GP2 is not taken
+// at reset; COUT reaches it in three of the eight modes, which is an upset
+// path rather than the reset state. Parked GP4 has no comparator function.
 #define CMCON_COMPARATOR_OFF   (0x07U)
 
 // ADCON0 = 0x00 -> ADON = 0, ADC off.
@@ -196,11 +199,14 @@ void hw_pin_set_low(uint8_t const pin) {
 //
 // The comparator/ADC disable belongs HERE and not only in hw_mcu_init()
 // because on this part "make these pins digital" genuinely requires it: with
-// CM<2:0> = 000 out of reset the comparator owns GP0..GP2 and their digital
-// output drivers are disabled, so a direction write alone would not take
-// effect. (The PIC10F322 has only ANSELA to clear.)
+// CM<2:0> = 000 out of reset GP0 and GP1 are comparator analog inputs, and an
+// analog input reads back 0 no matter what the output driver is doing. TRISIO
+// still controls direction, so a direction write DOES take effect; what it
+// cannot fix is the readback, which would leave hw_output_state_intact()
+// comparing a forced 0 against a set shadow bit. (The PIC10F322 has only
+// ANSELA to clear.)
 void hw_configure_output_pins(uint8_t const output_mask) {
-    CMCON  = CMCON_COMPARATOR_OFF;                       // comparator off: releases GP0..GP2
+    CMCON  = CMCON_COMPARATOR_OFF;                       // frees GP0/GP1, bars COUT on GP2
     ADCON0 = ADCON0_ADC_OFF;                             // ADC off
     // Do not mask ANSEL with output_mask: GPIO bit 4 maps to ANSEL bit 3.
     ANSEL &= (uint8_t)~ANSEL_OUTPUT_MASK;                // GP0..GP2/GP4 -> digital
@@ -258,11 +264,12 @@ static uint8_t hw_critical_sfrs_intact(void) {
     // ONE byte, so a single-bit upset is MORE likely to hit something
     // safety-relevant -- and one exact comparison covers all of it.
     //
-    // CMCON: the comparator is ON out of reset and owns GP0..GP2, this
-    // design's three active output pins. CM<2:0> = 111 is the off state.
-    // Only the low three bits are checked: COUT (6) and CINV (4) are not
-    // meaningful with the comparator disabled.  (Parked GP4 has no
-    // comparator function.)
+    // CMCON: CM<2:0> = 000 out of reset makes GP0 and GP1 comparator analog
+    // inputs, which read back 0 whatever they drive; three of the eight modes
+    // additionally put COUT on GP2. All three are active outputs here, so any
+    // CM<2:0> but 111 breaks the port-follows-shadow check. Only the low three
+    // bits are checked: COUT (6) and CINV (4) are not meaningful with the
+    // comparator disabled.  (Parked GP4 has no comparator function.)
     //
     // ADCON0.ADON: same class of hazard as CMCON -- an upset that turns the
     // ADC on takes an output pin analog.
@@ -364,13 +371,14 @@ static void hw_wdt_pet(void) { CLRWDT(); }
 // hw_tick_timer_start()).
 //
 // Ordering: call BEFORE hw_init_output_pins(). This is the OPPOSITE of the
-// PIC10F322 shell, and for a reason specific to this part: the comparator is
-// enabled out of reset and owns GP0..GP2, so their digital output drivers are
-// disabled until CMCON is written. Configuring pin directions first would
-// configure pins the comparator still holds. (hw_configure_output_pins()
-// re-asserts CMCON/ADCON0 for the same reason, so the ordering is
-// belt-and-suspenders rather than load-bearing -- but the order should still
-// be the safe one.)
+// PIC10F322 shell, and for a reason specific to this part: CM<2:0> = 000 out
+// of reset leaves GP0 and GP1 as comparator analog inputs, which read back 0
+// regardless of what is driven. Configuring pin directions first would leave
+// two of the three active outputs unreadable until CMCON is written. It is
+// also the order the datasheet's own EXAMPLE 3-1 "INITIALIZING GPIO" uses:
+// CMCON, then ANSEL, then TRISIO. (hw_configure_output_pins() re-asserts
+// CMCON/ADCON0 for the same reason, so the ordering is belt-and-suspenders
+// rather than load-bearing - but the order should still be the safe one.)
 //
 // There is no clock-select write here and no OSCCON on this part: the
 // oscillator is a fixed 4MHz INTOSC selected by FOSC=INTRCIO in CONFIG,
@@ -378,12 +386,12 @@ static void hw_wdt_pet(void) { CLRWDT(); }
 // program word 0x3FF.
 static void hw_mcu_init(void) {
 
-    // entire port digital. THREE registers, where the PIC10F322 has one:
-    // the comparator (on out of reset, owning GP0..GP2), the ADC, and the
-    // analog selects. Each is an independent single-event-upset path to
-    // "the firmware still thinks it owns a digital output but an analog
-    // peripheral has taken it", and each is guarded per tick in
-    // hw_critical_sfrs_intact().
+    // entire port digital. THREE registers, where the PIC10F322 has one: the
+    // comparator (CM<2:0> = 000 out of reset, holding GP0 and GP1 analog),
+    // the ADC, and the analog selects.  Each is an independent
+    // single-event-upset path to "the firmware still thinks it owns a digital
+    // output but an analog peripheral has taken it", and each is guarded per
+    // tick in hw_critical_sfrs_intact().
     CMCON  = CMCON_COMPARATOR_OFF; // CM<2:0> = 111: comparator off
     ADCON0 = ADCON0_ADC_OFF;       // ADON = 0
     ANSEL  = 0x00U;                // ANS0..ANS3 digital (also zeroes ADCS, unused)
@@ -520,10 +528,10 @@ static void init(void) {
     hw_wdt_pet(); // i.e., CLRWDT()
 
 
-    // clock-independent bring-up FIRST on this part: the comparator owns
-    // GP0..GP2 out of reset, so the analog peripherals must be turned off
-    // before pin directions mean anything. (The PIC10F322 shell orders these
-    // the other way; see hw_mcu_init().)
+    // clock-independent bring-up FIRST on this part: GP0 and GP1 come out of
+    // reset as comparator analog inputs, so the analog peripherals must be
+    // turned off before a driven pin reads back what was written. (The
+    // PIC10F322 shell orders these the other way; see hw_mcu_init().)
     hw_mcu_init();
 
     // driver: set pin directions (TRISIO/ANSEL/shadow+GPIO for the active variant)

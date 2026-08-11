@@ -57,9 +57,12 @@ file is the human-readable summary of *what changed*.
   - **No `OSCCON`.** The 4 MHz INTOSC is fixed by `FOSC=INTRCIO` and trimmed by
     a factory `OSCCAL` value in the last program word. The runtime guard
     therefore compares against a value captured at init, not a constant.
-  - **A comparator that owns GP0..GP2 out of reset** — this design's three
-    active output pins — so `CMCON` and `ADCON0` are part of bring-up and part
-    of the per-tick guard set.
+  - **A comparator holding GP0 and GP1 out of reset** — `CM<2:0> = 000` makes
+    them analog inputs, and an analog input reads back 0 whatever the pin is
+    driving, so the port-follows-shadow check would fail every tick. Three of
+    the eight modes additionally put `COUT` on GP2. All three are active output
+    pins here, so `CMCON` and `ADCON0` are part of bring-up and part of the
+    per-tick guard set.
 
   The footswitch is on GP5, not on the input-only pin the 322 uses: `WPU`
   implements bits 0,1,2,4,5, so GP3 has no internal weak pull-up and siting the
