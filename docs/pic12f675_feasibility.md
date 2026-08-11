@@ -1005,6 +1005,12 @@ They are listed worst-first.
    exactly the class of defect `pic12f675-test-config` would exist to catch, and
    exactly the class it cannot catch alone. **Needs a datasheet read (DS41190) and
    a hardware-bench check.**
+   *Status 2026-08-10: still open, now surfaced rather than silent.*
+   `pic12f675-program` decodes the CONFIG word of the exact image it is about to
+   write, so the build-side half — that the toolchain leaves `BG<1:0>` erased
+   rather than programming a value of its own over the factory one — is enforced
+   at flash time and not merely at build time. The programmer's erase behaviour
+   is unchanged by that and is printed as a warning before every write.
 2. **OSCCAL preservation on programming.** Same class, different register. A bulk
    erase that drops word `0x3FF` yields an untrimmed oscillator: wrong tick
    cadence, wrong `__delay_ms()` coil-pulse widths, and a device that still
@@ -1012,6 +1018,14 @@ They are listed worst-first.
    needs to be confirmed rather than assumed, and the result written into
    `release/README.md`'s flashing procedure. The §4.5 `OSCCAL` runtime guard does
    **not** help — it snapshots whatever is there at init, including garbage.
+   *Status 2026-08-10: still open; one adjacent hazard closed.* The risk above
+   is the programmer erasing the factory word. A second way to destroy it was
+   introduced by this port itself — writing one of the DERIVED simulator images,
+   which carries a fabricated calibration value — and `pic12f675-program` now
+   refuses to write any image that programs word 0x3FF, checked on the exact
+   file and not on its path. The read-back procedure for the original risk is
+   printed before every write, and still has to be performed by a human at a
+   bench.
 3. **The hardware return-stack bound under the ISR model — unquantified and
    blocking selection of that model.** It does not block Model B feasibility,
    but it is the one open item that could
@@ -1049,6 +1063,17 @@ They are listed worst-first.
 8. **Programmer device support.** PICkit 2 supports this family well. Whether the
    current `ipecmd` path still lists PIC12F675 should be confirmed before
    `pic12f675-program` is written against it.
+   *Status 2026-08-10: measured as far as this host allows; residually open.*
+   The pinned device pack registers PIC12F675 with the same MPLAB hardware-tool
+   set as the PIC10F322 this project already programs — an identical
+   `hwtools/sdm` file list in the pack's `.pdsc`, and both parts named in every
+   `sdm*.xml` that names either (§10 reproduces this). Since that pack is what
+   supplies MPLAB X/IPE its device support, the part is still listed. What that
+   does **not** establish is that `ipecmd` runs correctly against it: neither
+   `pk2cmd` nor `ipecmd` is installed on any machine this repository is tested
+   on, so the command shape is inherited from the working PIC10F322 target and
+   has never been executed for this part. `pic12f675-program` was written on
+   that basis, with `pk2cmd` as the default.
 
 ---
 
@@ -1078,8 +1103,10 @@ the 1.024 ms stretch (§4.4.1). Step 10 is done: `pic12f675-test` and
 own toolchain probe and sandbox validator take the mutation inventory to 111;
 and both aggregates now run in CI's shared `pic` job with the two mirrors —
 `scripts/ci-local.sh` and `test-ci-local-routing` — extended alongside. Step 10
-is complete; the documentation, release/programming and hardware portions of
-step 11 remain. The table retains the original dependency order rather than
+is complete. Step 11 is partly done: the user-facing documentation landed, and
+`pic12f675-program` now exists with a pre-flash gate that refuses any image
+carrying a calibration word (§8 items 1, 2 and 8 updated with what it does and
+does not close). Release integration and the hardware bench remain. The table retains the original dependency order rather than
 claiming every row is open.
 
 | # | Step | Notes |
@@ -1154,6 +1181,19 @@ rm -f /tmp/p.c
 
 # The package pinout, from the pack rather than a web summary:
 python3 -c "import re,sys; s=open('/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/edc/PIC12F675.PIC',encoding='utf-8',errors='replace').read(); [print(i,'/'.join(re.findall(r'edc:name=\"([^\"]+)\"',b))) for i,b in enumerate(re.findall(r'<edc:Pin>(.*?)</edc:Pin>',s,re.S),1)]"
+
+# Hardware-tool support parity with the PIC10F322, quoted in section 8 item 8 --
+# the pack's per-device hwtool file list, and the per-tool device lists:
+for p in PIC12F675 PIC10F322; do
+  printf '%s: ' "$p"
+  awk -v d="<device Dname=\"$p\">" '$0 ~ d,/<\/device>/' \
+    "$DFP"/../Microchip.PIC10-12Fxxx_DFP.pdsc \
+    | sed -n 's@.*hwtools/\([^"]*\)".*@\1@p' | tr '\n' ' '; echo
+done
+for f in "$DFP"/../hwtools/sdm/*.xml; do
+  printf '%-22s 12F675=%s 10F322=%s\n' "$(basename "$f")" \
+    "$(grep -c PIC12F675 "$f")" "$(grep -c PIC10F322 "$f")"
+done
 
 # The 10F322 scale reference quoted in section 3 (473 of 512 words):
 "$XC8" -mcpu=10F322 -mdfp="$DFP" -std=c99 -O2 \

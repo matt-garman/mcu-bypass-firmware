@@ -21,7 +21,7 @@ is **not release-supported** — see the table below.
 | **ATtiny202 (AVR-XT)** | release-supported | first released in `v0.9.6`; 2 KB flash, SOIC-8 only (no DIP), UPDI programming |
 | PIC10F322 | release-supported | 512 words |
 | **PIC10F320** | release-supported | **first released here in `v0.9.6`; constrained exception: 256 words, so the debounce algorithm is implemented directly rather than by compiling the verified core — see [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md)** |
-| PIC12F675 | **staged — not release-supported** | classic mid-range: 1024 words, no `LATx` (the output latch is an SRAM shadow), 1.024 ms tick. Every pre-hardware lane the release parts have, plus a calibration contract they do not need, and all of it gated in CI — but no release images, no `pic12f675-program`, and **no hardware-bench validation**. See [docs/pic12f675_feasibility.md](docs/pic12f675_feasibility.md) |
+| PIC12F675 | **staged — not release-supported** | classic mid-range: 1024 words, no `LATx` (the output latch is an SRAM shadow), 1.024 ms tick. Every pre-hardware lane the release parts have, plus a calibration contract they do not need, and all of it gated in CI, plus `pic12f675-program` for bench work — but no release images and **no hardware-bench validation yet**. See [docs/pic12f675_feasibility.md](docs/pic12f675_feasibility.md) |
 
 Every release target except one compiles the verified core (`src/bypass_pure.c`)
 directly into its shipping image. The release-supported PIC10F320 cannot — its
@@ -138,6 +138,7 @@ make pic12f675                      # build all variants + 1024-word flash-budge
 make pic12f675-test                 # CONFIG, analysis, source coverage, calibration
                                     #   contract, gpsim, and the 8-level stack bound
 make pic12f675-test-target-variants # fail-closed libgpsim fault/lock-step/I/O gates
+make pic12f675-program              # flash one variant to a real device (bench)
 ```
 
 Its simulator lanes run *derived* images: `make pic12f675-simcal` injects the
@@ -145,6 +146,15 @@ oscillator calibration word that a real device carries in its last program word
 and that an erased simulator image does not, and `make pic12f675-test-calibration`
 proves the injection leaves the shipping images byte-identical. That is why this
 part has one aggregate lane the others do not.
+
+The same asymmetry is why `make pic12f675-program` checks the image it is about
+to write: a derived image carries a *fabricated* calibration value, and putting
+one on a real device would overwrite that device's factory oscillator trim
+irreversibly — and silently, since the part still runs afterwards. The target
+refuses any image that programs the calibration word, whatever path it arrived
+by. Two things it cannot check are the programmer's own erase behaviour toward
+that word and toward the `BG<1:0>` bandgap trim; it prints both, with the
+read-back procedure, every time it runs.
 
 These targets are independent of the AVR build. Individual optional-tool targets
 generally skip cleanly if their primary compiler/simulator is absent. The

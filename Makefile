@@ -6135,6 +6135,122 @@ pic12f675-test-target-variants:
 	done
 	@echo "=== PIC12F675 target fault/lock-step/I-O validated for all variants ==="
 
+# --- PIC12F675 device programming (hardware) ----------------------------------
+# Flash ONE built variant (chosen by VARIANT, default $(VARIANT)) onto a real
+# PIC12F675. Same shape as pic10f322-program and for the same reasons: the
+# CONFIG word rides inside the HEX -- XC8's `#pragma config` -- so there is no
+# separate fuse step, and the power default is conservative (the programmer does
+# NOT source Vdd, which is safe for an externally powered pedal board). For a
+# bare chip powered by the programmer, add the power flag: pk2cmd `-T` (with
+# `-A<volts>`), ipecmd `-W`. PIC12F675_PROG_CMD overrides the command wholesale.
+#
+# THIS PART IS STAGED, NOT RELEASE-SUPPORTED, AND THIS TARGET IS HOW THAT
+# CHANGES. docs/pic12f675_feasibility.md section 8 items 1 and 2 -- whether a
+# programmer preserves the factory bandgap trim in CONFIG and the oscillator
+# calibration word in flash -- are silicon-only risks. No simulator lane can
+# reach them; they close at a bench, with this command, or not at all. So the
+# target does not refuse to run on their account, which would make the risks
+# permanently uncloseable. It states them, every time, and runs.
+#
+# ON TOOL SUPPORT (section 8 item 8). PICkit 2 has long covered this family, and
+# the pinned device pack registers PIC12F675 with the same MPLAB hardware-tool
+# set as the PIC10F322 this project already programs -- a byte-identical hwtool
+# file list in the pack's .pdsc, and both parts named in every sdm*.xml that
+# names either. That is evidence current MPLAB/IPE device support still lists
+# the part (docs/pic12f675_feasibility.md section 10 reproduces the two lists). It is not a substitute for running the programmer once; neither
+# pk2cmd nor ipecmd is installed on any machine this repository is tested on.
+PIC12F675_PART      ?= PIC12F675
+PIC12F675_PROG      ?= pk2cmd
+PIC12F675_PROG_TOOL ?= PK4
+PIC12F675_PROG_HEX   = $(PIC12F675_BUILD_DIR)/$(call fw_image,$(VARIANT),$(PIC12F675_TAG)).hex
+ifeq ($(PIC12F675_PROG),ipecmd)
+PIC12F675_PROG_CMD ?= $(PIC12F675_PROG) -TP$(PIC12F675_PROG_TOOL) -P$(PIC12F675_PART) -M -F$(PIC12F675_PROG_HEX)
+else
+PIC12F675_PROG_CMD ?= $(PIC12F675_PROG) -P$(PIC12F675_PART) -F$(PIC12F675_PROG_HEX) -M -Y -R
+endif
+
+# Builds every variant + the flash-budget gate first (so the image is fresh and
+# proven to fit), then checks THE EXACT IMAGE about to be written, then flashes
+# it. Like the 322's target this is a deliberate bench action: it FAILS LOUDLY
+# rather than skipping when anything is missing, and echoes the command before it
+# touches silicon.
+#
+# THE PRE-FLASH GATE THE 10F32x PARTS DO NOT NEED. Every simulator lane for this
+# part runs on a DERIVED image carrying a fabricated calibration word (see the
+# calibration block above). Writing one of those to a device overwrites the
+# factory oscillator trim -- irreversibly, and silently, because the part still
+# runs afterwards, at the wrong clock. The derived images live in their own
+# subdirectory precisely so no shipping-image glob can select one, but a command
+# that writes to silicon must not rest on a directory layout: it asks the
+# injector's inverse mode whether THIS image programs word 0x3FF, whatever path
+# it arrived by and whoever selected it. The same call refuses another part's
+# image outright, because such an image never fetches word 0x3FF at all.
+#
+# The CONFIG word is decoded from that same file rather than from the build glob
+# `pic12f675-test-config` walks, for the same reason: what matters here is the
+# artifact about to be written, including when PIC12F675_PROG_HEX names one this
+# tree did not build. That check is what covers the BG<1:0> half of item 1 --
+# the build must leave the factory bandgap bits erased.
+.PHONY: pic12f675-program
+pic12f675-program: variant-selectors-valid pic12f675 test/pic/test_config_pic12f675
+	@hex="$(PIC12F675_PROG_HEX)"; \
+	if [ ! -f "$$hex" ] || [ -L "$$hex" ] || [ ! -s "$$hex" ]; then \
+		echo "ERROR: $$hex is missing, empty, a symlink, or not a regular file."; \
+		echo "       'make pic12f675' produces it (XC8 installed?); select a variant"; \
+		echo "       with VARIANT=<$(VARIANTS)> (default $(VARIANT))."; \
+		exit 1; \
+	fi; \
+	$(IHEX_VALIDATOR_CHECK); \
+	$(IHEX_VALIDATOR) "$$hex" || exit 1; \
+	if ! command -v python3 >/dev/null 2>&1; then \
+		echo "ERROR: python3 is required to check the calibration word before flashing."; \
+		echo "       Refusing to program without that check."; \
+		exit 1; \
+	fi; \
+	if ! python3 $(PIC12F675_CAL_INJECTOR) --assert-preserves-calibration \
+			--flash-words $(PIC12F675_FLASH_WORDS) "$$hex"; then \
+		echo "ERROR: refusing to program $$hex."; \
+		echo "       An image that writes the calibration word would destroy this"; \
+		echo "       device's factory oscillator trim. The derived images under"; \
+		echo "       $(PIC12F675_SIMCAL_DIR)/ carry exactly such a word and are for"; \
+		echo "       simulators only; program the shipping HEX from $(PIC12F675_BUILD_DIR)/."; \
+		exit 1; \
+	fi; \
+	./test/pic/test_config_pic12f675 "$$hex" || exit 1; \
+	if ! command -v $(PIC12F675_PROG) >/dev/null 2>&1; then \
+		echo "ERROR: PIC programmer '$(PIC12F675_PROG)' not found on PATH."; \
+		echo "       install pk2cmd (PICkit 2), or set PIC12F675_PROG=ipecmd (PICkit 3/4/5),"; \
+		echo "       or override the whole command with PIC12F675_PROG_CMD=..."; \
+		exit 1; \
+	fi; \
+	echo ""; \
+	echo "  ----------------------------------------------------------------"; \
+	echo "  PIC12F675 pre-flash notice. Two factory-trimmed values are at"; \
+	echo "  risk here from the PROGRAMMER's erase step, not from this image:"; \
+	echo ""; \
+	echo "    OSCCAL   flash word 0x3FF, the oscillator trim. This image"; \
+	echo "             leaves it unprogrammed (just checked). A programmer"; \
+	echo "             that bulk-erases without preserving it leaves the part"; \
+	echo "             untrimmed: wrong tick cadence and wrong coil-pulse"; \
+	echo "             widths, on a device that still appears to work."; \
+	echo "    BG<1:0>  bandgap calibration in the CONFIG word, which sets the"; \
+	echo "             BOR/POR trip points. This image leaves the field erased"; \
+	echo "             (just checked); an erase still clears the silicon's."; \
+	echo ""; \
+	echo "  Neither is verified for this project's programmers, and neither is"; \
+	echo "  visible to any simulator lane. On a NEW device: read and RECORD"; \
+	echo "  word 0x3FF before this first program, read it back afterwards, and"; \
+	echo "  require it unchanged. If the verify step reports a mismatch at"; \
+	echo "  word 0x3FF, that is the programmer comparing a preserved factory"; \
+	echo "  value against an image that deliberately omits it -- record what"; \
+	echo "  it says; that is evidence for the item, not automatically a fault."; \
+	echo "  docs/pic12f675_feasibility.md section 8, items 1 and 2."; \
+	echo "  ----------------------------------------------------------------"; \
+	echo ""; \
+	echo "Programming PIC12F675 (variant $(VARIANT)) via $(PIC12F675_PROG):"; \
+	echo "  $(PIC12F675_PROG_CMD)"; \
+	$(PIC12F675_PROG_CMD)
+
 # ============================================================================
 # INTROSPECTION -- expose one Makefile variable's value to scripts
 # ============================================================================
@@ -6404,7 +6520,7 @@ help:
 	@echo "                        (PIC10F322_TARGET_VARIANT); pic10f322-test-target-variants runs all"
 	@echo "  pic10f322-program     flash one PIC variant to hardware (VARIANT=, PIC10F322_PROG=pk2cmd|ipecmd)"
 	@echo "PIC12F675 staged standalone target (not release-supported; omitted from all/release):"
-	@echo "  CI-gated; no release-image or program integration yet."
+	@echo "  CI-gated, and programmable at a bench; no release-image integration yet."
 	@echo "  pic12f675-test        all PIC12F675 pre-hardware checks (CONFIG + analysis + source"
 	@echo "                        coverage + calibration contract + gpsim + stack bound)"
 	@echo "  pic12f675             build all variants for PIC12F675 (XC8) + 1024-word budget gate"
@@ -6425,6 +6541,8 @@ help:
 	@echo "  pic12f675-test-calibration  prove the calibration injection leaves the shipping HEX alone"
 	@echo "  pic12f675-test-target fail-closed fault + lock-step + target-I/O for one variant"
 	@echo "                        (PIC12F675_TARGET_VARIANT); pic12f675-test-target-variants runs all"
+	@echo "  pic12f675-program     flash one variant to hardware (VARIANT=, PIC12F675_PROG=pk2cmd|ipecmd);"
+	@echo "                        refuses any image that would overwrite the factory calibration word"
 	@echo "PIC10F320 (constrained 256-word target; docs/pic10f320_special_case.md):"
 	@echo "  pic10f320          build one PIC10F320 variant + 256-word and HW-stack gates"
 	@echo "                     (PIC10F320_VARIANT=cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay)"
@@ -6554,6 +6672,7 @@ help:
 	@echo "  coverage-clean  remove coverage artifacts"
 	@echo "Overrides: VARIANT=, AVR_PROGRAMMER=, COVERAGE_MIN=, HOSTCC=, HOST_DEFS=, SIM_DEFS=, AVR_BUILD_DIR="
 	@echo "PIC overrides: PIC_CC=, PIC10F322_PROG=pk2cmd|ipecmd, PIC10F322_PROG_TOOL=PK3|PK4|PK5, PIC10F322_PROG_CMD="
+	@echo "               the same four spelled PIC12F675_* select the PIC12F675 programmer"
 
 else
 

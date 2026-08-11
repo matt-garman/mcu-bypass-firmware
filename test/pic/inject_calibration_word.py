@@ -24,6 +24,15 @@ of deriving rather than patching in place: getting it wrong means either
 shipping an image carrying a fake calibration value, or baselining an image that
 cannot run in any lane.
 
+A SECOND JOB, THE INVERSE. `--assert-preserves-calibration` injects nothing: it
+requires that an image LEAVES the calibration word alone. That is the question a
+device programmer has to answer, and `pic12f675-program` asks it before writing
+any HEX to real silicon -- because getting a DERIVED image onto a device
+overwrites the factory oscillator trim with the fabricated constant above,
+irreversibly, and silently, since the part still appears to work afterwards. The
+two modes share one definition of where the word is and of what "programmed"
+means, so the producer and the guard against it cannot drift apart.
+
 WHICH VALUE. Any legal value simulates equally well, so a fixed documented
 constant is chosen to keep the lanes deterministic. The default is 0x80: on this
 family OSCCAL implements bits 7:2 (CAL5:CAL0) and reads the low two bits as
@@ -171,8 +180,8 @@ def emit_record(addr, data, rtype=REC_DATA):
     return ":" + (body + bytes([(-sum(body)) & 0xFF])).hex().upper()
 
 
-def inject(text, label, flash_words, value):
-    """Return the derived image text, or raise ValidationError."""
+def calibration_word(flash_words):
+    """Validate the device size and return the calibration word's address."""
     if flash_words <= 0:
         raise ValidationError("flash size must be a positive number of words")
     cal_word = flash_words - 1
@@ -181,15 +190,15 @@ def inject(text, label, flash_words, value):
             "calibration word 0x%X is beyond the first CALL page (0x%X words); "
             "this injector only supports parts whose calibration word is "
             "directly CALL-reachable" % (cal_word, CALL_PAGE_WORDS))
-    if not 0 <= value <= 0xFF:
-        raise ValidationError("calibration value 0x%X is not a byte" % value)
+    return cal_word
 
-    cal_byte = cal_word * 2
-    records = parse_records(text, label)
 
+def require_unprogrammed(records, label, flash_words, cal_word):
+    """Require that no record programs either byte of the calibration word."""
     # Interval overlap against BOTH bytes of the word, not just its low byte: a
     # record starting at cal_byte+1 programs the opcode's high half, and the
     # injected record -- emitted last -- would silently win over it in a loader.
+    cal_byte = cal_word * 2
     for _line, count, addr, rtype, _data in records:
         if rtype == REC_DATA and addr < cal_byte + 2 and cal_byte < addr + count:
             raise ValidationError(
@@ -197,6 +206,9 @@ def inject(text, label, flash_words, value):
                 "either the image is for a larger part than %d words, or it has "
                 "been injected already" % (label, cal_word, cal_byte, flash_words))
 
+
+def require_calibration_call(records, label, flash_words, cal_word):
+    """Require the image to fetch the word it is being judged against."""
     words = program_words(records, flash_words)
     call_opcode = CALL_OPCODE_BASE | cal_word
     if not any(word == call_opcode for word in words.values()):
@@ -204,6 +216,37 @@ def inject(text, label, flash_words, value):
             "%s never executes CALL 0x%03X (opcode 0x%04X), so word 0x%03X is "
             "not the calibration word this image fetches; check the %d-word "
             "flash size" % (label, cal_word, call_opcode, cal_word, flash_words))
+
+
+def assert_preserves_calibration(text, label, flash_words):
+    """Require an image that leaves the factory calibration word ALONE.
+
+    The inverse of inject(), and the check a device programmer wants: return
+    the calibration word's address, or raise ValidationError if this image
+    would write it.
+
+    THE CALL IS CHECKED FIRST, deliberately. "Word 0x3FF is not programmed" is
+    trivially true of an image built for another part, or of any image checked
+    against the wrong flash size -- so proving the image actually fetches this
+    word is what stops a pass from being vacuous.
+    """
+    cal_word = calibration_word(flash_words)
+    records = parse_records(text, label)
+    require_calibration_call(records, label, flash_words, cal_word)
+    require_unprogrammed(records, label, flash_words, cal_word)
+    return cal_word
+
+
+def inject(text, label, flash_words, value):
+    """Return the derived image text, or raise ValidationError."""
+    cal_word = calibration_word(flash_words)
+    if not 0 <= value <= 0xFF:
+        raise ValidationError("calibration value 0x%X is not a byte" % value)
+
+    cal_byte = cal_word * 2
+    records = parse_records(text, label)
+    require_unprogrammed(records, label, flash_words, cal_word)
+    require_calibration_call(records, label, flash_words, cal_word)
 
     opcode = RETLW_OPCODE_BASE | value
     cal_record = emit_record(cal_byte, bytes([opcode & 0xFF, (opcode >> 8) & 0xFF]))
@@ -263,6 +306,14 @@ def run(source, destination, flash_words, value):
     return 0
 
 
+def run_check(source, flash_words):
+    text = read_image_text(source, "image")
+    cal_word = assert_preserves_calibration(text, source, flash_words)
+    print("calibration word 0x%03X is unprogrammed: %s preserves the device's "
+          "factory oscillator trim" % (cal_word, source))
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Selftest
 # ---------------------------------------------------------------------------
@@ -304,6 +355,21 @@ def run_selftest():
             return
         failures += 1
         print("FAIL: %s -- accepted" % label, file=sys.stderr)
+
+    def refuses(text, fragment, label, flash_words=1024):
+        """rejects(), for the --assert-preserves-calibration side."""
+        nonlocal checks, failures
+        checks += 1
+        try:
+            assert_preserves_calibration(text, "selftest image", flash_words)
+        except ValidationError as exc:
+            if fragment not in str(exc):
+                failures += 1
+                print("FAIL: %s -- refused, but not for the stated reason: %s"
+                      % (label, exc), file=sys.stderr)
+            return
+        failures += 1
+        print("FAIL: %s -- accepted for programming" % label, file=sys.stderr)
 
     derived, cal_word, opcode = inject(SELFTEST_IMAGE, "selftest image", 1024,
                                        DEFAULT_CAL_VALUE)
@@ -351,6 +417,31 @@ def run_selftest():
                        SELFTEST_EOF]) + "\n"
     rejects(small, "already programs the calibration word",
             "flash size too small", flash_words=512)
+
+    # The inverse check: what pic12f675-program asks before touching silicon.
+    check(assert_preserves_calibration(SELFTEST_IMAGE, "selftest image", 1024)
+          == 0x3FF, "accepts a shipping image and reports the word it checked")
+    refuses(derived, "already programs the calibration word",
+            "an injected image is refused for programming")
+    refuses(already, "already programs the calibration word",
+            "a hand-written calibration word is refused for programming")
+    refuses(high_half, "already programs the calibration word",
+            "a calibration high byte alone is refused for programming")
+    # Vacuity, both ways: "word N is unprogrammed" must not be answerable about
+    # a word this image never fetches. Without the CALL requirement, BOTH of
+    # these would pass -- the exact failure that would wave a wrong part's
+    # image through to the programmer.
+    refuses(SELFTEST_IMAGE, "never executes CALL",
+            "a shipping image checked against too large a flash size",
+            flash_words=2048)
+    refuses(SELFTEST_IMAGE, "never executes CALL",
+            "a shipping image checked against too small a flash size",
+            flash_words=512)
+    # ...and the injected image is caught even at the wrong size, because at
+    # 512 words it is the CALL that is missing rather than the word being clear.
+    refuses(derived, "never executes CALL",
+            "an injected image checked against too small a flash size",
+            flash_words=512)
 
     # Refusals: malformed input.
     rejects("garbage\n", "not an Intel HEX record", "non-record line")
@@ -459,11 +550,14 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--selftest", action="store_true",
                         help="run the built-in checks and exit")
+    parser.add_argument("--assert-preserves-calibration", action="store_true",
+                        help="do not inject: require that SOURCE leaves the "
+                             "factory calibration word unprogrammed, as an "
+                             "image about to be written to real silicon must")
     parser.add_argument("--flash-words", type=lambda s: int(s, 0),
                         help="device program memory size in words; the "
                              "calibration word is its last word")
-    parser.add_argument("--value", type=lambda s: int(s, 0),
-                        default=DEFAULT_CAL_VALUE,
+    parser.add_argument("--value", type=lambda s: int(s, 0), default=None,
                         help="calibration byte to inject (default 0x%02X)"
                              % DEFAULT_CAL_VALUE)
     parser.add_argument("source", nargs="?", help="the shipping image to read")
@@ -472,16 +566,28 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     if args.selftest:
-        if args.source or args.destination or args.flash_words is not None:
+        if args.source or args.destination or args.flash_words is not None \
+                or args.value is not None or args.assert_preserves_calibration:
             parser.error("--selftest accepts no other options or paths")
         return run_selftest()
     if args.flash_words is None:
         parser.error("--flash-words is required")
-    if not args.source or not args.destination:
-        parser.error("a source and a destination image are required")
 
     try:
-        return run(args.source, args.destination, args.flash_words, args.value)
+        if args.assert_preserves_calibration:
+            # A checking mode that quietly accepted an injection value, or a
+            # destination it was never going to write, would be a trap.
+            if args.value is not None:
+                parser.error("--assert-preserves-calibration injects nothing, "
+                             "so it takes no --value")
+            if not args.source or args.destination:
+                parser.error("--assert-preserves-calibration takes exactly one "
+                             "image to check")
+            return run_check(args.source, args.flash_words)
+        if not args.source or not args.destination:
+            parser.error("a source and a destination image are required")
+        value = DEFAULT_CAL_VALUE if args.value is None else args.value
+        return run(args.source, args.destination, args.flash_words, value)
     except ValidationError as exc:
         print("ERROR: %s" % exc, file=sys.stderr)
         return 1

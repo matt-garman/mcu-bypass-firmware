@@ -77,9 +77,29 @@ file is the human-readable summary of *what changed*.
   oscillator calibration word is injected into a *copy*, because an erased
   image never reaches `main()` in gpsim — and `pic12f675-test-calibration`
   proves the injection leaves the shipping images byte-identical. And there are
-  **no release images, no programming target, and no hardware-bench
-  validation**, which is what "not release-supported" means here. See
-  `docs/pic12f675_feasibility.md`.
+  **no release images and no hardware-bench validation**, which is what "not
+  release-supported" means here. See `docs/pic12f675_feasibility.md`.
+
+- **`make pic12f675-program`**, so the part can be put on real silicon. Same
+  shape as `pic10f322-program` — one `VARIANT`, the CONFIG word carried inside
+  the HEX, a conservative no-Vdd default, `PIC12F675_PROG=pk2cmd|ipecmd` — with
+  one gate the 10F32x parts have no need of.
+
+  Every simulator lane for this part runs a *derived* image carrying a
+  fabricated oscillator calibration word. Writing one to a device would
+  overwrite that device's factory trim irreversibly, and silently, because the
+  part still runs afterwards at the wrong clock. So the target checks the exact
+  image it is about to write, through the injector's new inverse mode
+  (`--assert-preserves-calibration`): the image must leave the calibration word
+  unprogrammed, and must prove it is this part's image by fetching that word at
+  all, so the answer cannot be vacuously true of some other part's HEX. It
+  decodes the CONFIG word from that same file rather than from the build
+  directory, which is what covers the `BG<1:0>` bandgap-trim half of the same
+  risk. Without `python3` it refuses to program rather than flash unchecked.
+
+  What it cannot check is the programmer's own erase behaviour toward those two
+  factory values — silicon-only risks that close at a bench or nowhere. It
+  prints both, with the read-back procedure, before every write.
 
 - **`TODO.md` T25-misra-header-gate.** The 2026-08-10 suppression review
   measured that cppcheck 2.13.0 sets `--error-exitcode` only from findings
