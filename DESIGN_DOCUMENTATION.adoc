@@ -385,7 +385,7 @@ by the silicon:
   output latch, the shell keeps an SRAM shadow and re-reads GPIO against it
   every tick, so the output pins' *input* thresholds become a board requirement
   — and GP2 is the only output here whose input buffer is a Schmitt Trigger
-  (VIH min 0.8 x VDD) rather than TTL (VIH min 2.0v). A GP2 held high that
+  (VIH min 0.8 x VDD) rather than TTL (VIH min 2.0 V). A GP2 held high that
   reads back below 0.8 x VDD trips the integrity check and the part resets
   forever. This binds `cd4053_with_mute`, the one variant that holds GP2 high in
   a checked state: `cd4053_simple` leaves it a spare driven low, and the relay
