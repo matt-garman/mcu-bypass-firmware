@@ -1,4 +1,8 @@
-# cppcheck suppressions shared by the project's four MISRA-C:2012 analysis lanes.
+# cppcheck suppressions shared by the project's five MISRA-C:2012 analysis lanes
+# (Classic/shared, AVR-XT, PIC10F322, PIC10F320, PIC12F675). Three of them
+# currently consume an entry: the PIC10F322 and PIC12F675 shells analyze clean
+# against an EMPTY version of this file -- see MISRA_COMPLIANCE.md, "Suppression
+# review".
 
 # This file holds DOCUMENTED, PROJECT-SPECIFIC finding suppressions. D-1 records
 # actual MISRA deviations; D-2/D-3 are advisory analyzer artifacts for
@@ -11,6 +15,19 @@
 # instance of one of these rules in a NEW file therefore still surfaces and
 # fails its MISRA lane. Another finding with the same ID in an already-listed
 # file is covered, so suppression changes also require an unsuppressed review.
+
+# ...with ONE measured caveat, which is why the entries below are described as
+# policy scope rather than as the gate. With cppcheck 2.13.0, --error-exitcode
+# is set only by findings located in the FILE PASSED ON THE COMMAND LINE.
+# Findings located in an included HEADER are printed but do not fail the lane,
+# so the header entries below (the pin maps, bypass_config.h, bypass_types.h)
+# suppress output rather than a failure today. Measured both ways: dropping
+# misra-c2012-11.4:src/bypass_mcu_avr_classic.c (a .c entry) fails
+# `make analyze-misra` with 30 findings, while dropping
+# misra-c2012-2.3:src/bypass_types.h or misra-c2012-2.5:src/bypass_pins_avr_xt.h
+# (header entries) leaves it green. They are kept, and a new map is added
+# alongside them, so the policy stays complete if a later cppcheck starts
+# gating header findings. See TODO.md T25-misra-header-gate.
 
 # Out of scope (handled on cppcheck command lines in the Makefile, not here):
 # findings located in adopted avr-libc/avr-gcc, ATtiny DFP, XC8/PIC DFP, and
@@ -60,6 +77,11 @@ misra-c2012-2.5:src/bypass_config.h
 # list and its macros read "unused" in the classic and PIC runs. Same D-2
 # cross-config artifact.
 misra-c2012-2.5:src/bypass_pins_avr_xt.h
+# The PIC12F675 map is the fourth, and behaves identically -- the classic lane
+# reports three of its macros unused per checked translation unit. Recorded for
+# the same reason and with the same standing as the three above; per the caveat
+# at the top of this file, no header entry gates a lane today.
+misra-c2012-2.5:src/bypass_pins_pic12f675.h
 
 # --- D-3: shared algorithm-type header (Rules 2.3, 2.4) ----------------------
 # bypass_types.h is the single source of truth for the debounce/bypass algorithm

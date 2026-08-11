@@ -88,6 +88,37 @@ Dependencies: an upstream release containing the three fixes. Effort: about
 1 hour. Risk: Low; this retires vendored third-party modifications and a
 simulator-fidelity caveat rather than closing a firmware gap.
 
+### T25-misra-header-gate - Make header-located MISRA findings fail their lane
+
+With cppcheck 2.13.0, `--error-exitcode` is set only by findings located in the
+file passed on the command line; a finding located in an included header is
+printed and then ignored. Measured during the 2026-08-10 suppression review:
+dropping `misra-c2012-11.4:src/bypass_mcu_avr_classic.c` fails
+`make analyze-misra` with 30 findings, while dropping
+`misra-c2012-2.3:src/bypass_types.h` or
+`misra-c2012-2.5:src/bypass_pins_avr_xt.h` leaves it green.
+
+Consequence: every D-2 and D-3 entry currently suppresses output rather than a
+failure, and a new Rule 2.5 or 2.3 artifact appearing in a NEW authored header
+would not fail any lane. The suppression file's stated scope contract -- "a
+matching finding in a new file therefore fails the gate" -- holds only for `.c`
+files today.
+
+Options, cheapest first: post-process the captured cppcheck output and fail on
+any `misra-c2012-*` line whose path is inside `src/`, which needs no cppcheck
+change and reuses the `$out` capture every MISRA recipe already makes; or pass
+each authored header through a lane of its own; or re-pin cppcheck if a later
+version gates header findings natively. The first keeps the suppression list as
+the single place a finding is waived, which is the property worth preserving.
+
+Whichever is chosen, the acceptance test is a negative probe: introduce an
+unused macro in an authored header, confirm the lane fails, then confirm a
+matching suppression entry makes it pass again.
+
+Dependencies: none. Effort: Low-Medium. Risk if deferred: Low -- the affected
+findings are advisory analyzer artifacts that are false at project scope, and
+the authored `.c` files (where the real deviations live) are gated correctly.
+
 ### T25-pic322-hex-stack - Extend the final-HEX stack oracle to PIC10F322
 
 The PIC10F320 oracle decodes every reachable word in the shipped HEX and is
