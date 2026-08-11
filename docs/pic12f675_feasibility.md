@@ -1048,13 +1048,13 @@ these numbers elsewhere in the repository stay valid.
 **Status 2026-08-11.** Items 4, 5 and 6 are CLOSED — all three were datasheet
 reads rather than bench work, and DS41190G answers them; item 4's own stated
 assumption turned out to be wrong in the unsafe direction, and its conclusion
-survives anyway. Items 1, 2 and 9 are the ones that need silicon; for 1 and 2, `make
-pic12f675-program` states them before every write and refuses the one adjacent
-hazard this port introduced. Item 9 was opened on 2026-08-11 in review of the
-port branch; it also needs silicon, but a meter rather than a programmer. Items
-3 and 7 are Model-B-inapplicable and lane-local respectively. **What is left is
-a bench**, tracked in `TODO.md` as `T3-pic12f675-bench` together with the
-graduation diff that follows it.
+survives anyway. Items 1, 2 and 9 are the ones that need silicon. Items 1 and 2
+now have a fail-closed baseline/write/readback workflow, but no real-hardware
+result has been retained. Item 9 was opened on 2026-08-11 in review of the port
+branch; it also needs silicon, but a meter rather than a programmer. Items 3 and
+7 are Model-B-inapplicable and lane-local respectively. **What is left is a
+bench**, tracked in `TODO.md` as `T3-pic12f675-bench` together with the graduation
+diff that follows it.
 
 1. **Bandgap calibration bits in the CONFIG word (`BG<1:0>`).** These are
    factory-calibrated per device and set the BOD/POR trip voltages. XC8 emitted
@@ -1070,9 +1070,12 @@ graduation diff that follows it.
    validated `VARIANT`, and decodes CONFIG from the private snapshot it passes to
    the programmer. The build-side half — that the toolchain leaves `BG<1:0>`
    erased rather than programming a value of its own over the factory one — is
-   therefore enforced at flash time and not merely at build time. The
-   programmer's erase behaviour is unchanged by that and is printed as a warning
-   before every write.
+   therefore enforced at flash time and not merely at build time. The guarded
+   hardware workflow now measures the programmer's erase behaviour:
+   `pic12f675-preflight` records CONFIG/BG and `pic12f675-program` requires the
+   same BG value immediately before and after the write. The result is retained
+   even when the comparison fails. No real result exists yet, so the item remains
+   open.
 2. **OSCCAL preservation on programming.** Same class, different register. A bulk
    erase that drops word `0x3FF` yields an untrimmed oscillator: wrong tick
    cadence, wrong `__delay_ms()` coil-pulse widths, and a device that still
@@ -1087,9 +1090,11 @@ graduation diff that follows it.
    refuses a selected snapshot that programs word 0x3FF. External image and
    whole-command substitution are unsupported; the private snapshot's SHA-256
    digest must remain unchanged through calibration and CONFIG checks before the
-   target passes that same path to the programmer. The read-back procedure for
-   the original risk is printed before every write, and still has to be
-   performed by a human at a bench.
+   target passes that same path to the programmer. Readback for the original
+   risk is now enforced rather than printed: a pk2cmd baseline records the full
+   `RETLW` word at 0x3FF, an immediate pre-write read must match it, and the
+   post-write read/result must match too. Fake-tool regressions pin every branch;
+   a retained result from real silicon is still required.
 3. **The hardware return-stack bound under the ISR model — unquantified and
    blocking selection of that model.** It does not block Model B feasibility,
    but it is the one open item that could
@@ -1186,8 +1191,8 @@ graduation diff that follows it.
    but the `.stc`-driven `pic12f675-test-gpsim` lane would, and the behaviour
    needs to be understood rather than worked around by moving checkpoints.
 8. **Programmer device support.** PICkit 2 supports this family well. Whether the
-   current `ipecmd` path still lists PIC12F675 should be confirmed before
-   `pic12f675-program` is written against it.
+   current `ipecmd` path still runs against PIC12F675 must be confirmed at the
+   bench.
    *Status 2026-08-10: measured as far as this host allows; residually open.*
    The pinned device pack registers PIC12F675 with the same MPLAB hardware-tool
    set as the PIC10F322 this project already programs — an identical
@@ -1198,7 +1203,9 @@ graduation diff that follows it.
    `pk2cmd` nor `ipecmd` is installed on any machine this repository is tested
    on, so the command shape is inherited from the working PIC10F322 target and
    has never been executed for this part. `pic12f675-program` was written on
-   that basis, with `pk2cmd` as the default.
+   that basis, with `pk2cmd` as the default. Its ipecmd write path now requires
+   a separate pk2cmd reader for the baseline and before/after trim comparison;
+   no unconfirmed ipecmd read argv is claimed.
 9. **GP2's readback margin against its Schmitt-Trigger input buffer.**
    *Opened 2026-08-11 in review of the port branch. Needs a meter, not a
    datasheet — the numbers below are already read.* The §4.2 port-follows-shadow
@@ -1268,8 +1275,10 @@ and both aggregates now run in CI's shared `pic` job with the two mirrors —
 `scripts/ci-local.sh` and `test-ci-local-routing` — extended alongside. Step 10
 is complete. Step 11 is partly done: the user-facing documentation landed, and
 `pic12f675-program` now exists with a pre-flash gate that refuses any image
-carrying a calibration word (§8 items 1, 2 and 8 updated with what it does and
-does not close). Release integration is done in the only sense available before
+carrying a calibration word, and `pic12f675-preflight` plus mandatory immediate
+before/after reads retain the evidence needed to measure §8 items 1 and 2
+(items 1, 2 and 8 state what this still does not close). Release integration is
+done in the only sense available before
 a bench: the part's images are DECLARED as deliberately withheld
 (`RELEASE_STAGED_IMAGES`), the release set and the staged set are asserted
 disjoint at Make parse time, and `test-release-images` pins both the exclusion

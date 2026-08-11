@@ -100,9 +100,25 @@ file is the human-readable summary of *what changed*.
   validated pk2cmd/ipecmd argv. External image and whole-command overrides are
   rejected. Without `python3` it refuses to program rather than flash unchecked.
 
-  What it cannot check is the programmer's own erase behaviour toward those two
-  factory values — silicon-only risks that close at a bench or nowhere. It
-  prints both, with the read-back procedure, before every write.
+  The programmer's erase behaviour is now a fail-closed bench transaction rather
+  than a warning. `pic12f675-preflight` uses pk2cmd's read-only export to retain
+  the reader binary/version, target Device ID/revision, full read-HEX digest,
+  word `0x3FF`, CONFIG and `BG<1:0>`. `pic12f675-program` requires that baseline
+  and a new result-directory path, repeats the read immediately before writing, compares
+  device identity/OSCCAL/BG, and reads again after programming. A successful
+  result retains exact before/after values and raw transcripts; a changed trim,
+  failed write, or failed post-read retains FAIL evidence and fails the target.
+  The directory is exclusively reserved with the intended image and pre-write
+  evidence before programming; writer/post-read logs are written there directly,
+  so even interruption leaves a `PENDING` account. The post-read must also match
+  every requested image byte outside the factory BG field, preventing a
+  zero-exit no-op writer from producing PASS. Evidence is never overwritten.
+
+  pk2cmd is the only pinned readback dialect. ipecmd remains available for the
+  write, but must be paired with `PIC12F675_READ_PROG=<pk2cmd>` for the baseline
+  and before/after reads; the Makefile does not guess an untested IPE read argv.
+  Fake-tool coverage exercises the transaction, not silicon preservation. The
+  part stays staged until a real retained result passes.
 
 - **The PIC12F675's exclusion from the release set is now declared and
   enforced, not incidental.** `RELEASE_IMAGES` exists because an incomplete
