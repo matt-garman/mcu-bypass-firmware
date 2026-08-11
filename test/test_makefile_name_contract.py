@@ -787,12 +787,20 @@ def check_axis_a():
 # marker, precisely because nobody should be opening these files to add one.
 PUBLISHED = re.compile(r"^release/v[\d.]+/")
 
-# Documents whose subject matter IS retired names, exempt from axis D only.
-# CHANGELOG.md records what things used to be called; TODO.md holds this item's
-# own specification, which quotes every dead spelling the four axes exist to
-# catch. Both are still checked by axes A, B and C -- the exemption is scoped to
-# the one axis whose signal is "prose naming a variable", because for these two
-# files that is the intended content rather than a defect.
+# The one document whose subject matter IS retired names. TODO.md holds this
+# item's own specification, which quotes every dead spelling this gate exists to
+# catch, so a variable this file's prose NAMES is the intended content rather
+# than a defect. The exemption is scoped to the single axis whose signal is
+# exactly that: axes A, B and C still read TODO.md, and each catches a severed
+# name in it on its own -- probed with a print- query, a `make <goal>` command
+# and an override, all three failing from TODO.md alone.
+#
+# CHANGELOG.md is NOT a second member, though the shape of the problem looks
+# identical and this comment used to say it was. HISTORICAL_FILES above drops a
+# changelog from the harvest that feeds EVERY axis, so naming it here would
+# understate its exemption rather than describe it: a `make <goal>` that does
+# not exist passes from CHANGELOG.md today, which is that file working as
+# intended and not something this line governs.
 PROSE_EXEMPT_AXIS_D = {"TODO.md"}
 
 # Per-line and per-block exemption markers. Live documents legitimately name a
