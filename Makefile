@@ -6325,6 +6325,13 @@ pic12f675-preflight: $(PIC12F675_TRIM_EVIDENCE_TOOL)
 # The CONFIG word is decoded from the same private snapshot rather than from the
 # build glob `pic12f675-test-config` walks. That check is what covers the BG<1:0>
 # half of item 1 -- the build must leave the factory bandgap bits erased.
+#
+# EVERY oracle capture below compares STDOUT ONLY, and compares it for exact
+# equality. Do NOT fold stderr in with `2>&1`: a deprecation warning, a tracing
+# line, anything a future interpreter decides to print would be prepended to a
+# PASS record and turn a successful bench write into a reported failure -- after
+# the device has already been programmed. The evidence tool prints its own FAIL
+# reasons to stderr, which reaches the terminal live either way.
 .PHONY: pic12f675-program
 pic12f675-program: variant-selectors-valid \
                   test/pic/test_config_pic12f675 $(PIC12F675_CAL_CHECKER) \
@@ -6581,7 +6588,7 @@ pic12f675-program: variant-selectors-valid \
 		--writer-path "$$prog_path" --writer-version-log "$$writer_version_log" \
 		--program-log "$$program_log" --program-exit "$$program_rc" \
 		--post-read-log "$$postread_log" --post-read-hex "$$postread_hex" \
-		--post-read-exit "$$postread_rc" --output-dir "$$result" 2>&1` || result_rc=$$?; \
+		--post-read-exit "$$postread_rc" --output-dir "$$result"` || result_rc=$$?; \
 	printf '%s\n' "$$result_output"; \
 	expected_result="PIC12F675_TRIM_RESULT PASS evidence=$$result/result.json"; \
 	if [ "$$result_rc" -ne 0 ] || [ "$$result_output" != "$$expected_result" ] || \
