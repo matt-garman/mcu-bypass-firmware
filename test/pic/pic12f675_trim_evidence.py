@@ -231,7 +231,13 @@ def verify_programmed_image(image_data, post_read_path):
 
 
 def utc_now():
-    return datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    # datetime.utcnow() is deprecated from Python 3.12, and because it would be
+    # called from __main__ the default warning filter PRINTS the notice. Every
+    # record this tool emits is compared for exact equality by the Makefile, so
+    # one stray line is a false failure. Build the same naive-UTC string from an
+    # aware value instead; datetime.timezone.utc predates the 3.7 minimum.
+    return datetime.datetime.now(datetime.timezone.utc).replace(
+        microsecond=0, tzinfo=None).isoformat() + "Z"
 
 
 def fsync_file(path):
