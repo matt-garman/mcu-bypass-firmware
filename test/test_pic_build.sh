@@ -75,9 +75,10 @@ case "$PB_TARGET" in
 		# Same CLASSIC_VARIANTS_* validation preamble as the PIC10F322 target,
 		# so it is exposed to the same injection vector and must run the same
 		# check. Its additional checks pin simulator-image path separation and
-		# complete-matrix production/consumption.
+		# complete-matrix production/consumption and the hardware-programming
+		# calibration guard.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=49
+		expected_checks=67
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -97,6 +98,8 @@ sym=${hex%.hex}.sym
 size_probe_stem="$repo/$PB_BUILD_DIR/size_probe_$PB_VARIANT"
 checks=0
 unset FAKE_XC8_MODE FAKE_XC8_FAIL_NAME FAKE_XC8_SIGNAL_MARKER \
+	PIC12F675_PART PIC12F675_PROG PIC12F675_PROG_KIND PIC12F675_PROG_TOOL \
+	PIC12F675_PROG_HEX PIC12F675_PROG_CMD \
 	MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES
 mkdir -p "$repo/src" "$repo/scripts" "$repo/test/pic10f320/equiv" \
 	"$repo/test/pic10f320/actuation" "$repo/test/pic10f320/fault" \
@@ -122,10 +125,30 @@ cat > "$tools/xc8" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 write_valid_hex() {
-	printf '%s\n' \
-		':020000000028D6' \
-		':02400E009E38DA' \
-		':00000001FF'
+	case "${out:-}" in
+		*-cd4053_with_mute.hex) program_record=:040000000100FF23D9 ;;
+		*-tq2_l2_5v_relay.hex) program_record=:040000000200FF23D8 ;;
+		*) program_record=:040000000000FF23DA ;;
+	esac
+	case "${FAKE_XC8_PIC12F675_MODE:-default}" in
+		shipping)
+			printf '%s\n' "$program_record" ':02400E00CC31B3' ':00000001FF'
+			;;
+		bad-config)
+			printf '%s\n' "$program_record" ':02400E00CD31B2' ':00000001FF'
+			;;
+		overlap)
+			printf '%s\n' "$program_record" ':02000200FF23DA' \
+				':02400E00CC31B3' ':00000001FF'
+			;;
+		derived)
+			printf '%s\n' "$program_record" ':02400E00CC31B3' \
+				':0207FE00803445' ':00000001FF'
+			;;
+		*)
+			printf '%s\n' ':020000000028D6' ':02400E009E38DA' ':00000001FF'
+			;;
+	esac
 }
 write_bad_stack_hex() {
 	# Structurally valid PIC14 image whose reset instruction is RETFIE (0x0009).
@@ -1021,8 +1044,18 @@ if [ "$PB_TARGET" = pic12f675 ]; then
 	write_calibration_fixture() {
 		printf '%s\n' \
 			':040000000028FF23B2' \
-			':02400E009E38DA' \
+			':02400E00CC31B3' \
 			':00000001FF' > "$1"
+	}
+
+	write_program_fixture() {
+		local path=$1 variant=$2 record
+		case "$variant" in
+			cd4053_with_mute) record=:040000000100FF23D9 ;;
+			tq2_l2_5v_relay) record=:040000000200FF23D8 ;;
+			*) record=:040000000000FF23DA ;;
+		esac
+		printf '%s\n' "$record" ':02400E00CC31B3' ':00000001FF' > "$path"
 	}
 
 	run_simcal_make() {
@@ -1040,6 +1073,85 @@ if [ "$PB_TARGET" = pic12f675 ]; then
 			CC=true HOSTCC=true PIC12F675_BUILD_DIR="$PB_BUILD_DIR" \
 			FW_BASE="$PB_FW_BASE" PIC12F675_TAG="$PB_TAG" \
 			PIC12F675_FLASH_WORDS="$PB_FLASH_WORDS" STRICT_TOOLS=1 "$@"
+	}
+
+	program_log="$work/pic12f675-program.log"
+	program_capture="$work/pic12f675-program.hex"
+	program_late_marker="$work/pic12f675-late-replacement"
+	programmer="$tools/pic12f675-programmer"
+	cat > "$programmer" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+image=
+printf '%s\0' "$@" >> "${PIC12F675_PROGRAM_LOG:?}"
+for arg in "$@"; do
+	case "$arg" in -F*) image=${arg#-F} ;; esac
+done
+[[ -n "$image" && -f "$image" && ! -L "$image" && -s "$image" ]] \
+	|| { printf 'programmer did not receive a nonempty regular -F image\n' >&2; exit 91; }
+if [[ "${PIC12F675_PROGRAMMER_MODE:-read}" == replace ]]; then
+	if mv -- "$image" "$image.late" 2>/dev/null; then
+		cp -- "${PIC12F675_PROGRAMMER_REPLACEMENT:?}" "$image"
+		printf 'replaced\n' > "${PIC12F675_PROGRAMMER_MARKER:?}"
+	else
+		printf 'blocked\n' > "${PIC12F675_PROGRAMMER_MARKER:?}"
+	fi
+fi
+rm -f -- "${PIC12F675_PROGRAM_CAPTURE:?}"
+cp -- "$image" "$PIC12F675_PROGRAM_CAPTURE"
+EOF
+	cat > "$tools/near-match-checker.py" <<'EOF'
+#!/usr/bin/env python3
+import sys
+print("PIC12F675_CALIBRATION_CHECK PASS image=%s word=0x3FF trailing-output"
+      % sys.argv[-1])
+EOF
+	real_config_checker="$tools/test_config_pic12f675"
+	cc -std=c11 -O2 -Wall -Wextra -Werror -I"$ROOT/test" \
+		-DPIC_DEVICE_NAME='"PIC12F675"' \
+		"$ROOT/test/pic/test_config_pic12f675.c" -o "$real_config_checker"
+	cat > "$repo/test/pic/test_config_pic12f675" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+image=${1:?}
+"${PIC12F675_REAL_CONFIG_CHECKER:?}" "$image"
+case "${PIC12F675_CONFIG_MODE:-check}" in
+	check) ;;
+	replace)
+		mv -- "$image" "$image.checked"
+		cp -- "${PIC12F675_CONFIG_REPLACEMENT:?}" "$image"
+		;;
+	*) printf 'unknown fixture CONFIG mode\n' >&2; exit 93 ;;
+esac
+EOF
+	chmod 750 "$programmer" "$repo/test/pic/test_config_pic12f675"
+
+	run_program_make() {
+		local build_dir=$1 variant=$2
+		shift 2
+		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+		PIC12F675_PROGRAM_LOG="$program_log" \
+		PIC12F675_PROGRAM_CAPTURE="$program_capture" \
+		PIC12F675_PROGRAMMER_MARKER="$program_late_marker" \
+		PIC12F675_PROGRAMMER_MODE="${PIC12F675_PROGRAMMER_MODE:-read}" \
+		PIC12F675_PROGRAMMER_REPLACEMENT="${PIC12F675_PROGRAMMER_REPLACEMENT:-}" \
+		PIC12F675_CONFIG_MODE="${PIC12F675_CONFIG_MODE:-check}" \
+		PIC12F675_CONFIG_REPLACEMENT="${PIC12F675_CONFIG_REPLACEMENT:-}" \
+		PIC12F675_REAL_CONFIG_CHECKER="$real_config_checker" \
+		FAKE_XC8_PIC12F675_MODE="${PIC12F675_PROGRAM_IMAGE_MODE:-shipping}" \
+		FAKE_XC8_MODE="${PIC12F675_PROGRAM_XC8_MODE:-pass}" \
+			make --no-print-directory -C "$repo" \
+				--old-file=test/pic/test_config_pic12f675 \
+				pic12f675-program \
+				CC=true HOSTCC=true PIC12F675_BUILD_DIR="$build_dir" \
+				PIC_CC="$tools/xc8" \
+				FW_BASE="$PB_FW_BASE" PIC12F675_TAG="$PB_TAG" \
+				PIC12F675_FLASH_WORDS="$PB_FLASH_WORDS" \
+				VARIANT="$variant" PIC12F675_PROG="$programmer" \
+				PIC12F675_PART=PIC10F322 \
+				PIC12F675_CAL_INJECTOR="$tools/noop-oracle.py" \
+				PIC12F675_CAL_CHECKER="$tools/noop-oracle.py" \
+				STRICT_TOOLS=1 "$@"
 	}
 
 	run_simcal_consumer_make() {
@@ -1098,6 +1210,303 @@ EOF
 			|| { printf 'FAIL: PIC12F675 calibration contract did not check %s exactly once: %s\n' \
 				"$variant" "$cal_output" >&2; exit 1; }
 	done
+	checks=$((checks + 1))
+
+	program_variant=cd4053_simple
+	program_source="$work/program-$program_variant.hex"
+	write_program_fixture "$program_source" "$program_variant"
+	config_overlap="$work/config-overlap.hex"
+	printf '%s\n' ':040000000028FF23B2' ':02400E00CC31B3' \
+		':02400E00CC31B3' ':00000001FF' > "$config_overlap"
+	if config_output=$("$real_config_checker" "$config_overlap" 2>&1); then
+		printf 'FAIL: PIC12F675 CONFIG checker accepted a duplicate CONFIG definition\n' >&2
+		exit 1
+	fi
+	[[ "$config_output" == *"duplicate CONFIG byte address"* ]] \
+		|| { printf 'FAIL: duplicate CONFIG definition failed for the wrong reason: %s\n' \
+			"$config_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# pk2cmd receives one exact, private -F snapshot of a matrix rebuilt by this
+	# target. Attempts to change the chip, compiler flags, source set and programmer
+	# part are ignored by their fixed PIC12F675 definitions.
+	declare -A program_build_counts=()
+	for image in $PB_MATRIX_IMAGES; do
+		program_build_counts[$image]=$(logged_command_count "$xc8_log" "$image")
+	done
+	: > "$program_log"
+	rm -f "$program_capture"
+	program_output=$(run_program_make "$PB_BUILD_DIR" "$program_variant" \
+		PIC12F675_CHIP=12F683 \
+		'PIC12F675_CFLAGS=-mcpu=12F683 -DWRONG_PROGRAM_TARGET' \
+		PIC12F675_CORE_SRC=/dev/null \
+		FW_BASE=../../escaped PIC12F675_TAG=wrong-part)
+	for image in $PB_MATRIX_IMAGES; do
+		[[ "$(logged_command_count "$xc8_log" "$image")" \
+			-eq $((program_build_counts[$image] + 1)) ]] \
+			|| { printf 'FAIL: PIC12F675 programming did not freshly rebuild %s exactly once\n' \
+				"$image" >&2; exit 1; }
+		latest=$(latest_logged_command "$xc8_log" "$image")
+		case "$image" in
+			*-cd4053_with_mute.hex) expected_macro=-DCD4053_WITH_MUTE; expected_driver=bypass_output_cd4053_with_mute.c ;;
+			*-tq2_l2_5v_relay.hex) expected_macro=-DTQ2_L2_5V_RELAY; expected_driver=bypass_output_tq2_l2_5v_relay.c ;;
+			*) expected_macro=-DCD4053_SIMPLE; expected_driver=bypass_output_cd4053_simple.c ;;
+		esac
+		command_has_arg "$latest" '-mcpu=12F675' \
+			&& command_has_arg "$latest" '-DBYPASS_MCU_PIC12F675' \
+			&& command_has_arg "$latest" "$expected_macro" \
+			&& [[ "$latest" == *"/$expected_driver"* ]] \
+			&& [[ "$latest" == *"$repo/src/bypass_mcu_pic12f675.c"* \
+				&& "$latest" == *"$repo/src/bypass_pure.c"* ]] \
+			&& ! command_has_arg "$latest" '-mcpu=12F683' \
+			&& ! command_has_arg "$latest" '-DWRONG_PROGRAM_TARGET' \
+			&& ! command_has_arg "$latest" /dev/null \
+			|| { printf 'FAIL: fresh programming build accepted wrong-part compiler identity for %s\n' \
+				"$image" >&2; exit 1; }
+	done
+	mapfile -d '' -t program_args < "$program_log"
+	[[ "${#program_args[@]}" -eq 5 \
+		&& "${program_args[0]}" == -PPIC12F675 \
+		&& "${program_args[1]}" == -F* \
+		&& "${program_args[2]}" == -M \
+		&& "${program_args[3]}" == -Y \
+		&& "${program_args[4]}" == -R ]] \
+		|| { printf 'FAIL: pk2cmd received unexpected PIC12F675 argv\n' >&2; exit 1; }
+	program_snapshot=${program_args[1]#-F}
+	expected_program_check="PIC12F675_CALIBRATION_CHECK PASS image=$program_snapshot word=0x3FF"
+	[[ "$program_output" == *"$expected_program_check"* \
+		&& "$program_output" == *"selected variant $program_variant from the fresh build matrix"* \
+		&& "$program_snapshot" == */pic12f675-program.*/"image snapshot.hex" \
+		&& ! -e "$program_snapshot" \
+		&& -f "$program_capture" ]] \
+		|| { printf 'FAIL: pk2cmd programming did not bind the selected image to its private checked snapshot: %s\n' \
+			"$program_output" >&2; exit 1; }
+	cmp -s "$program_source" "$program_capture" \
+		|| { printf 'FAIL: pk2cmd did not consume the selected shipping-image bytes\n' >&2; exit 1; }
+	checks=$((checks + 1))
+	run_simcal_make >/dev/null
+
+	# A path-qualified ipecmd is identified from its basename without an explicit
+	# kind, and the whitespace-bearing snapshot remains one argv element.
+	space_variant=tq2_l2_5v_relay
+	space_source="$work/program-$space_variant.hex"
+	write_program_fixture "$space_source" "$space_variant"
+	ipe_dir="$tools/ipe path"
+	ipe_programmer="$ipe_dir/ipecmd"
+	mkdir -p "$ipe_dir"
+	cp "$programmer" "$ipe_programmer"
+	chmod 750 "$ipe_programmer"
+	: > "$program_log"
+	rm -f "$program_capture"
+	program_output=$(run_program_make "$PB_BUILD_DIR" "$space_variant" \
+			"PIC12F675_PROG=$ipe_programmer" \
+			PIC12F675_PROG_TOOL=PK5)
+	mapfile -d '' -t program_args < "$program_log"
+	[[ "${#program_args[@]}" -eq 4 \
+		&& "${program_args[0]}" == -TPPK5 \
+		&& "${program_args[1]}" == -PPIC12F675 \
+		&& "${program_args[2]}" == -M \
+		&& "${program_args[3]}" == -F* ]] \
+		|| { printf 'FAIL: renamed ipecmd received unexpected PIC12F675 argv\n' >&2; exit 1; }
+	program_snapshot=${program_args[3]#-F}
+	[[ "$program_output" == *"PIC12F675_CALIBRATION_CHECK PASS image=$program_snapshot word=0x3FF"* \
+		&& "$program_output" == *"selected variant $space_variant from the fresh build matrix"* \
+		&& "$program_snapshot" == */pic12f675-program.*/"image snapshot.hex" \
+		&& ! -e "$program_snapshot" ]] \
+		|| { printf 'FAIL: path-qualified ipecmd did not preserve its argv or selected variant: %s\n' \
+			"$program_output" >&2; exit 1; }
+	cmp -s "$space_source" "$program_capture" \
+		|| { printf 'FAIL: ipecmd did not consume the selected shipping-image bytes\n' >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# A renamed executable uses the explicitly selected ipecmd dialect.
+	renamed_ipe="$tools/renamed ipe programmer"
+	cp "$programmer" "$renamed_ipe"
+	chmod 750 "$renamed_ipe"
+	: > "$program_log"
+	program_output=$(run_program_make "$PB_BUILD_DIR" "$program_variant" \
+		"PIC12F675_PROG=$renamed_ipe" PIC12F675_PROG_KIND=ipecmd)
+	mapfile -d '' -t program_args < "$program_log"
+	[[ "${#program_args[@]}" -eq 4 && "${program_args[0]}" == -TPPK4 \
+		&& "${program_args[1]}" == -PPIC12F675 \
+		&& "${program_args[2]}" == -M && "${program_args[3]}" == -F* ]] \
+		|| { printf 'FAIL: renamed ipecmd did not receive its explicitly selected argv dialect\n' >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# External-image selection is retired rather than allowed to weaken the normal
+	# target's fresh-build provenance. Name each hazardous substitution explicitly.
+	external_dir="$work/external images"
+	mkdir -p "$external_dir"
+	minimal_image="$external_dir/minimal call.hex"
+	wrong_part_image="$external_dir/wrong part.hex"
+	write_calibration_fixture "$minimal_image"
+	printf '%s\n' ':040000000028FF21B4' ':02400E009E38DA' ':00000001FF' \
+		> "$wrong_part_image"
+	for spec in \
+		"wrong output variant|${cal_shipping[1]}" \
+		"wrong part|$wrong_part_image" \
+		"minimal fake CALL image|$minimal_image"; do
+		label=${spec%%|*}
+		external_image=${spec#*|}
+		: > "$program_log"
+		if program_output=$(run_program_make "$PB_BUILD_DIR" "$program_variant" \
+				"PIC12F675_PROG_HEX=$external_image" 2>&1); then
+			printf 'FAIL: PIC12F675 programming accepted %s through an external-image override\n' "$label" >&2
+			exit 1
+		fi
+		[[ "$program_output" == *"PIC12F675_PROG_HEX is not supported"* \
+			&& ! -s "$program_log" ]] \
+			|| { printf 'FAIL: %s reached the programmer or failed for the wrong reason: %s\n' \
+				"$label" "$program_output" >&2; exit 1; }
+		checks=$((checks + 1))
+	done
+
+	# Whole-command substitution is rejected before even an unrelated/missing
+	# PIC12F675_PROG executable is consulted.
+	: > "$program_log"
+	if program_output=$(run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			PIC12F675_PROG="$tools/missing-programmer" \
+			"PIC12F675_PROG_CMD=$programmer -PPIC12F675 -F$minimal_image" 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted a whole-command override\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"PIC12F675_PROG_CMD is not supported"* \
+		&& ! -s "$program_log" ]] \
+		|| { printf 'FAIL: whole-command override reached the programmer or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	: > "$program_log"
+	if program_output=$(run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			PIC12F675_PROG_KIND=unknown 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted an unknown programmer dialect\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"PIC12F675_PROG_KIND must be exactly pk2cmd or ipecmd"* \
+		&& ! -s "$program_log" ]] \
+		|| { printf 'FAIL: unknown programmer dialect reached the programmer or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	: > "$program_log"
+	if program_output=$(run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_PROG=$ipe_programmer" PIC12F675_PROG_KIND=ipecmd \
+			'PIC12F675_PROG_TOOL=PK4 -Fwrong.hex' 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted an invalid ipecmd hardware tool\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"PIC12F675_PROG_TOOL must be exactly PK3, PK4, or PK5"* \
+		&& ! -s "$program_log" ]] \
+		|| { printf 'FAIL: invalid ipecmd tool reached the programmer or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# The remaining hostile images are emitted by the private fresh build itself.
+	# Each must fail its own pre-flash layer before the fake programmer is reachable.
+	: > "$program_log"
+	if program_output=$(PIC12F675_PROGRAM_IMAGE_MODE=bad-config \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted a bad CONFIG word\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"CONFIG checks:"* \
+		&& ! -s "$program_log" ]] \
+		|| { printf 'FAIL: bad CONFIG reached the programmer or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	: > "$program_log"
+	if program_output=$(PIC12F675_PROGRAM_IMAGE_MODE=overlap \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted overlapping HEX data\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"overlaps its definition"* && ! -s "$program_log" ]] \
+		|| { printf 'FAIL: overlapping HEX reached CONFIG/programming or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	: > "$program_log"
+	if program_output=$(PIC12F675_PROGRAM_IMAGE_MODE=derived \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted a derived simulator image at the selected path\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"already programs the calibration word 0x3FF"* \
+		&& ! -s "$program_log" ]] \
+		|| { printf 'FAIL: derived image reached the programmer or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	: > "$program_log"
+	if program_output=$(PIC12F675_PROGRAM_XC8_MODE=symlink \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted a symlinked selected image\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"private PIC12F675 programming matrix did not build successfully"* \
+		&& ! -s "$program_log" ]] \
+		|| { printf 'FAIL: symlinked image reached the programmer or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	replacement_image="$work/replacement.hex"
+	printf '%s\n' ':040000000300FF23D7' ':02400E00CC31B3' ':00000001FF' \
+		> "$replacement_image"
+	: > "$program_log"
+	if program_output=$(PIC12F675_CONFIG_MODE=replace \
+			PIC12F675_CONFIG_REPLACEMENT="$replacement_image" \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" 2>&1); then
+		printf 'FAIL: PIC12F675 programming accepted a snapshot replaced during checks\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"private programming snapshot changed during pre-flash checks"* \
+		&& ! -s "$program_log" ]] \
+		|| { printf 'FAIL: replaced snapshot reached the programmer or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# After the final digest the private directory is read/search-only. Even the
+	# programmer process cannot replace the path before opening it.
+	: > "$program_log"
+	rm -f "$program_capture" "$program_late_marker"
+	program_output=$(PIC12F675_PROGRAMMER_MODE=replace \
+		PIC12F675_PROGRAMMER_REPLACEMENT="$replacement_image" \
+		run_program_make "$PB_BUILD_DIR" "$program_variant")
+	[[ "$(<"$program_late_marker")" == blocked ]] \
+		|| { printf 'FAIL: private snapshot remained replaceable after its final digest\n' >&2; exit 1; }
+	cmp -s "$program_source" "$program_capture" \
+		|| { printf 'FAIL: late replacement attempt changed programmed snapshot bytes\n' >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# Exit status zero is insufficient. Replacing the repository checker itself
+	# first with no output and then a near-match record must leave programming
+	# unreachable in both cases.
+	checker="$repo/test/pic/inject_calibration_word.py"
+	mv "$checker" "$work/inject_calibration_word.py"
+	cp "$tools/noop-oracle.py" "$checker"
+	: > "$program_log"
+	if program_output=$(run_program_make "$PB_BUILD_DIR" "$program_variant" 2>&1); then
+		printf 'FAIL: PIC12F675 programming trusted a no-op calibration checker\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"did not emit its exact success record"* \
+		&& ! -s "$program_log" ]] \
+		|| { printf 'FAIL: no-op PIC12F675 checker reached the programmer or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	cp "$tools/near-match-checker.py" "$checker"
+	: > "$program_log"
+	if program_output=$(run_program_make "$PB_BUILD_DIR" "$program_variant" 2>&1); then
+		printf 'FAIL: PIC12F675 programming trusted a near-match calibration record\n' >&2
+		exit 1
+	fi
+	[[ "$program_output" == *"did not emit its exact success record"* \
+		&& ! -s "$program_log" ]] \
+		|| { printf 'FAIL: near-match PIC12F675 checker reached the programmer or failed for the wrong reason: %s\n' \
+			"$program_output" >&2; exit 1; }
+	mv "$work/inject_calibration_word.py" "$checker"
 	checks=$((checks + 1))
 
 	# A representative partial set must fail the calibration contract itself,

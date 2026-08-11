@@ -2782,7 +2782,7 @@ test-supply-chain:
 	./test/test_supply_chain.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 36/75/48
+# image/host rebuild triggering. The script enforces the canonical 36/75/67
 # counts, so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
@@ -5141,7 +5141,7 @@ pic10f320-clean:
 # Rule 10.4 in pic12f675-analyze-misra. PIC10F322_XTAL carries the same suffix
 # for the same reason.
 
-PIC12F675_CHIP  ?= 12F675
+override PIC12F675_CHIP := 12F675
 PIC12F675_TAG   ?= pic12f675
 PIC12F675_XTAL  ?= 4000000UL
 PIC12F675_BUILD_DIR ?= build_pic12f675
@@ -5161,7 +5161,7 @@ PIC12F675_FLASH_WORDS ?= 1024
 
 # The PIC shell + the unchanged pure core (the AVR counterpart is CORE_SRC =
 # bypass_mcu_avr_classic.c + bypass_pure.c).
-PIC12F675_CORE_SRC = src/bypass_mcu_pic12f675.c src/bypass_pure.c
+override PIC12F675_CORE_SRC := src/bypass_mcu_pic12f675.c src/bypass_pure.c
 
 # Headers that, if changed, should rebuild the PIC images: the AVR FW_HEADERS
 # set with the PIC pin map substituted for the AVR-classic one.
@@ -5174,7 +5174,7 @@ PIC12F675_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h
 
 # XC8 compile flags: select the PIC12F675 + its DFP, C99 (no C11 in XC8), the
 # PIC pin map, and _XTAL_FREQ for __delay_ms.
-PIC12F675_CFLAGS = -mcpu=$(PIC12F675_CHIP) -mdfp=$(PIC_DFP) -std=c99 -O2 \
+override PIC12F675_CFLAGS := -mcpu=$(PIC12F675_CHIP) -mdfp=$(PIC_DFP) -std=c99 -O2 \
              -DBYPASS_MCU_PIC12F675 -D_XTAL_FREQ=$(PIC12F675_XTAL)
 
 # --- PIC static analysis (cppcheck + MISRA addon) ----------------------------
@@ -5893,6 +5893,10 @@ pic12f675-test-config: pic12f675 test/pic/test_config_pic12f675
 # working image from one looping on the missing word. The distinguishing evidence
 # is that the shell's init ran at all (OPTION_REG 0x0C, CMCON 0x07, TRISIO 0x28).
 PIC12F675_CAL_INJECTOR ?= test/pic/inject_calibration_word.py
+# Simulation tests may replace the injector above. Hardware programming may not:
+# this repository-owned path is the safety gate between a fabricated simulator
+# calibration word and irreversible loss of a device's factory oscillator trim.
+override PIC12F675_CAL_CHECKER := test/pic/inject_calibration_word.py
 PIC12F675_CAL_VALUE    ?= 0x80
 # Not independently caller-overridable: simulator images must stay in this
 # dedicated subdirectory so no shipping-image glob can select them. Relocating
@@ -6171,9 +6175,15 @@ pic12f675-test-target-variants:
 # PIC12F675. Same shape as pic10f322-program and for the same reasons: the
 # CONFIG word rides inside the HEX -- XC8's `#pragma config` -- so there is no
 # separate fuse step, and the power default is conservative (the programmer does
-# NOT source Vdd, which is safe for an externally powered pedal board). For a
-# bare chip powered by the programmer, add the power flag: pk2cmd `-T` (with
-# `-A<volts>`), ipecmd `-W`. PIC12F675_PROG_CMD overrides the command wholesale.
+# NOT source Vdd, which is safe for an externally powered pedal board). The
+# target intentionally does not ask the programmer to source Vdd; externally
+# power the board. Programmer-powered bare-chip operation needs its own validated
+# voltage interface rather than a whole-command escape hatch. PIC12F675_PROG
+# names the executable;
+# PIC12F675_PROG_KIND selects the validated pk2cmd/ipecmd argument dialect when
+# the executable has been path-qualified or renamed. The guarded target accepts
+# no image or whole-command override: both could separate checked bytes from the
+# bytes the programmer consumes.
 #
 # THIS PART IS STAGED, NOT RELEASE-SUPPORTED, AND THIS TARGET IS HOW THAT
 # CHANGES. docs/pic12f675_feasibility.md section 8 items 1 and 2 -- whether a
@@ -6190,21 +6200,19 @@ pic12f675-test-target-variants:
 # names either. That is evidence current MPLAB/IPE device support still lists
 # the part (docs/pic12f675_feasibility.md section 10 reproduces the two lists). It is not a substitute for running the programmer once; neither
 # pk2cmd nor ipecmd is installed on any machine this repository is tested on.
-PIC12F675_PART      ?= PIC12F675
+override PIC12F675_PART := PIC12F675
 PIC12F675_PROG      ?= pk2cmd
+PIC12F675_PROG_KIND ?= $(if $(filter ipecmd,$(notdir $(PIC12F675_PROG))),ipecmd,pk2cmd)
 PIC12F675_PROG_TOOL ?= PK4
-PIC12F675_PROG_HEX   = $(PIC12F675_BUILD_DIR)/$(call fw_image,$(VARIANT),$(PIC12F675_TAG)).hex
-ifeq ($(PIC12F675_PROG),ipecmd)
-PIC12F675_PROG_CMD ?= $(PIC12F675_PROG) -TP$(PIC12F675_PROG_TOOL) -P$(PIC12F675_PART) -M -F$(PIC12F675_PROG_HEX)
-else
-PIC12F675_PROG_CMD ?= $(PIC12F675_PROG) -P$(PIC12F675_PART) -F$(PIC12F675_PROG_HEX) -M -Y -R
-endif
+export PIC12F675_PART PIC12F675_PROG PIC12F675_PROG_KIND PIC12F675_PROG_TOOL
 
 # Builds every variant + the flash-budget gate first (so the image is fresh and
-# proven to fit), then checks THE EXACT IMAGE about to be written, then flashes
-# it. Like the 322's target this is a deliberate bench action: it FAILS LOUDLY
-# rather than skipping when anything is missing, and echoes the command before it
-# touches silicon.
+# proven to fit), derives the selected image only from validated VARIANT, then
+# copies it into a private read-only snapshot. Every parser consumes that
+# snapshot, its SHA-256 digest is required unchanged after all checks, and the
+# programmer receives that same private path through directly constructed argv.
+# Like the 322's target this is a deliberate bench action: it FAILS LOUDLY rather
+# than skipping when anything is missing.
 #
 # THE PRE-FLASH GATE THE 10F32x PARTS DO NOT NEED. Every simulator lane for this
 # part runs on a DERIVED image carrying a fabricated calibration word (see the
@@ -6212,46 +6220,147 @@ endif
 # factory oscillator trim -- irreversibly, and silently, because the part still
 # runs afterwards, at the wrong clock. The derived images live in their own
 # subdirectory precisely so no shipping-image glob can select one, but a command
-# that writes to silicon must not rest on a directory layout: it asks the
-# injector's inverse mode whether THIS image programs word 0x3FF, whatever path
-# it arrived by and whoever selected it. The same call refuses another part's
-# image outright, because such an image never fetches word 0x3FF at all.
+# that writes to silicon must not rest on a directory layout. This target selects
+# only the freshly built VARIANT image and asks the immutable checker's inverse
+# mode whether its private snapshot programs word 0x3FF. The private, immutable
+# 12F675 build supplies part identity; the CALL check is defense in depth against
+# a malformed or substituted result, not part provenance by itself. An exact
+# image/word success record proves the check actually ran before the programmer
+# becomes reachable; exit status zero alone is insufficient.
 #
-# The CONFIG word is decoded from that same file rather than from the build glob
-# `pic12f675-test-config` walks, for the same reason: what matters here is the
-# artifact about to be written, including when PIC12F675_PROG_HEX names one this
-# tree did not build. That check is what covers the BG<1:0> half of item 1 --
-# the build must leave the factory bandgap bits erased.
+# The CONFIG word is decoded from the same private snapshot rather than from the
+# build glob `pic12f675-test-config` walks. That check is what covers the BG<1:0>
+# half of item 1 -- the build must leave the factory bandgap bits erased.
 .PHONY: pic12f675-program
-pic12f675-program: variant-selectors-valid pic12f675 test/pic/test_config_pic12f675
-	@hex="$(PIC12F675_PROG_HEX)"; \
-	if [ ! -f "$$hex" ] || [ -L "$$hex" ] || [ ! -s "$$hex" ]; then \
-		echo "ERROR: $$hex is missing, empty, a symlink, or not a regular file."; \
-		echo "       'make pic12f675' produces it (XC8 installed?); select a variant"; \
-		echo "       with VARIANT=<$(VARIANTS)> (default $(VARIANT))."; \
+pic12f675-program: variant-selectors-valid \
+                  test/pic/test_config_pic12f675 $(PIC12F675_CAL_CHECKER)
+	@if [ "$(if $(filter undefined,$(origin PIC12F675_PROG_HEX)),0,1)" -ne 0 ]; then \
+		echo "ERROR: PIC12F675_PROG_HEX is not supported; the image is derived from validated VARIANT."; \
 		exit 1; \
 	fi; \
-	$(IHEX_VALIDATOR_CHECK); \
-	$(IHEX_VALIDATOR) "$$hex" || exit 1; \
+	if [ "$(if $(filter undefined,$(origin PIC12F675_PROG_CMD)),0,1)" -ne 0 ]; then \
+		echo "ERROR: PIC12F675_PROG_CMD is not supported; guarded argv is constructed by the target."; \
+		exit 1; \
+	fi; \
+	variant="$(VARIANT)"; \
+	prog=$$PIC12F675_PROG; \
+	prog_kind=$$PIC12F675_PROG_KIND; \
+	prog_tool=$$PIC12F675_PROG_TOOL; \
+	part=$$PIC12F675_PART; \
+	case "$$prog_kind" in \
+		pk2cmd|ipecmd) : ;; \
+		*) echo "ERROR: PIC12F675_PROG_KIND must be exactly pk2cmd or ipecmd; got '$$prog_kind'."; exit 1 ;; \
+	esac; \
+	if [ "$$prog_kind" = ipecmd ]; then \
+		case "$$prog_tool" in \
+			PK3|PK4|PK5) : ;; \
+			*) echo "ERROR: PIC12F675_PROG_TOOL must be exactly PK3, PK4, or PK5 for ipecmd; got '$$prog_tool'."; exit 1 ;; \
+		esac; \
+	fi; \
+	case "$$prog" in \
+		*/*) [ -f "$$prog" ] && [ -x "$$prog" ] ;; \
+		*) command -v "$$prog" >/dev/null 2>&1 ;; \
+	esac || { \
+		echo "ERROR: PIC programmer '$$prog' not found or not executable."; \
+		echo "       Set PIC12F675_PROG to the executable path and PIC12F675_PROG_KIND"; \
+		echo "       to pk2cmd or ipecmd when its basename does not identify the dialect."; \
+		exit 1; \
+	}; \
 	if ! command -v python3 >/dev/null 2>&1; then \
 		echo "ERROR: python3 is required to check the calibration word before flashing."; \
 		echo "       Refusing to program without that check."; \
 		exit 1; \
 	fi; \
-	if ! python3 $(PIC12F675_CAL_INJECTOR) --assert-preserves-calibration \
-			--flash-words $(PIC12F675_FLASH_WORDS) "$$hex"; then \
-		echo "ERROR: refusing to program $$hex."; \
+	if ! command -v sha256sum >/dev/null 2>&1; then \
+		echo "ERROR: sha256sum is required to bind pre-flash checks to the programmed snapshot."; \
+		exit 1; \
+	fi; \
+	if ! command -v mktemp >/dev/null 2>&1; then \
+		echo "ERROR: mktemp is required to create a private programming snapshot."; \
+		exit 1; \
+	fi; \
+	$(IHEX_VALIDATOR_CHECK); \
+	hash_file() { \
+		hash_output=`sha256sum -- "$$1"` || return 1; \
+		hash_digest=$${hash_output%% *}; \
+		case "$$hash_digest" in ''|*[!0-9a-f]*) return 1 ;; esac; \
+		[ $${#hash_digest} -eq 64 ] || return 1; \
+		printf '%s' "$$hash_digest"; \
+	}; \
+	program_dir=`mktemp -d "/tmp/pic12f675-program.XXXXXX"` || { \
+		echo "ERROR: could not create a private programming directory."; exit 1; \
+	}; \
+	chmod 700 "$$program_dir" || { rm -rf -- "$$program_dir"; exit 1; }; \
+	cleanup_program_snapshot() { \
+		rc=$$1; \
+		trap - 0 1 2 15; \
+		chmod 700 "$$program_dir" 2>/dev/null || :; \
+		rm -rf -- "$$program_dir" || rc=1; \
+		exit $$rc; \
+	}; \
+	trap 'cleanup_program_snapshot $$?' 0; \
+	trap 'cleanup_program_snapshot 129' 1; \
+	trap 'cleanup_program_snapshot 130' 2; \
+	trap 'cleanup_program_snapshot 143' 15; \
+	program_build="$$program_dir/build"; \
+	if ! $(MAKE) --no-print-directory pic12f675 \
+			PIC12F675_BUILD_DIR="$$program_build" \
+			FW_BASE=bypass PIC12F675_TAG=pic12f675 \
+			VARIANTS='$(CLASSIC_VARIANTS_SUPPORTED)' STRICT_TOOLS=1; then \
+		echo "ERROR: private PIC12F675 programming matrix did not build successfully."; \
+		exit 1; \
+	fi; \
+	hex="$$program_build/bypass-pic12f675-$(VARIANT).hex"; \
+	if [ ! -f "$$hex" ] || [ -L "$$hex" ] || [ ! -s "$$hex" ]; then \
+		echo "ERROR: fresh selected image is missing, empty, a symlink, or not regular: $$hex"; \
+		exit 1; \
+	fi; \
+	source_digest_before=`hash_file "$$hex"` || { \
+		echo "ERROR: could not hash fresh selected image $$hex."; exit 1; \
+	}; \
+	snapshot="$$program_dir/image snapshot.hex"; \
+	cp -- "$$hex" "$$snapshot" || exit 1; \
+	chmod 400 "$$snapshot" || exit 1; \
+	if [ ! -f "$$hex" ] || [ -L "$$hex" ] || [ ! -s "$$hex" ]; then \
+		echo "ERROR: selected image changed type while its private snapshot was created: $$hex"; \
+		exit 1; \
+	fi; \
+	source_digest_after=`hash_file "$$hex"` || exit 1; \
+	if [ ! -f "$$snapshot" ] || [ -L "$$snapshot" ] || [ ! -s "$$snapshot" ]; then \
+		echo "ERROR: private programming snapshot is not a nonempty regular file."; exit 1; \
+	fi; \
+	snapshot_digest_before=`hash_file "$$snapshot"` || exit 1; \
+	if [ "$$source_digest_before" != "$$source_digest_after" ] || \
+			[ "$$source_digest_before" != "$$snapshot_digest_before" ]; then \
+		echo "ERROR: selected image changed while its private snapshot was created: $$hex"; \
+		exit 1; \
+	fi; \
+	$(IHEX_VALIDATOR) "$$snapshot" || exit 1; \
+	if ! calibration_check=`python3 "$(PIC12F675_CAL_CHECKER)" \
+			--assert-preserves-calibration \
+			--flash-words $(PIC12F675_FLASH_WORDS) "$$snapshot"`; then \
+		echo "ERROR: refusing to program selected variant $$variant."; \
 		echo "       An image that writes the calibration word would destroy this"; \
 		echo "       device's factory oscillator trim. The derived images under"; \
 		echo "       $(PIC12F675_SIMCAL_DIR)/ carry exactly such a word and are for"; \
 		echo "       simulators only; program the shipping HEX from $(PIC12F675_BUILD_DIR)/."; \
 		exit 1; \
 	fi; \
-	./test/pic/test_config_pic12f675 "$$hex" || exit 1; \
-	if ! command -v $(PIC12F675_PROG) >/dev/null 2>&1; then \
-		echo "ERROR: PIC programmer '$(PIC12F675_PROG)' not found on PATH."; \
-		echo "       install pk2cmd (PICkit 2), or set PIC12F675_PROG=ipecmd (PICkit 3/4/5),"; \
-		echo "       or override the whole command with PIC12F675_PROG_CMD=..."; \
+	expected_calibration_check="PIC12F675_CALIBRATION_CHECK PASS image=$$snapshot word=0x3FF"; \
+	if [ "$$calibration_check" != "$$expected_calibration_check" ]; then \
+		echo "ERROR: refusing to program selected variant $$variant."; \
+		echo "       The immutable calibration checker did not emit its exact success record."; \
+		exit 1; \
+	fi; \
+	printf '%s\n' "$$calibration_check"; \
+	./test/pic/test_config_pic12f675 "$$snapshot" || exit 1; \
+	chmod 500 "$$program_dir" || exit 1; \
+	if [ ! -f "$$snapshot" ] || [ -L "$$snapshot" ] || [ ! -s "$$snapshot" ]; then \
+		echo "ERROR: private programming snapshot changed type during pre-flash checks."; exit 1; \
+	fi; \
+	snapshot_digest_after=`hash_file "$$snapshot"` || exit 1; \
+	if [ "$$snapshot_digest_before" != "$$snapshot_digest_after" ]; then \
+		echo "ERROR: private programming snapshot changed during pre-flash checks."; \
 		exit 1; \
 	fi; \
 	echo ""; \
@@ -6278,9 +6387,13 @@ pic12f675-program: variant-selectors-valid pic12f675 test/pic/test_config_pic12f
 	echo "  docs/pic12f675_feasibility.md section 8, items 1 and 2."; \
 	echo "  ----------------------------------------------------------------"; \
 	echo ""; \
-	echo "Programming PIC12F675 (variant $(VARIANT)) via $(PIC12F675_PROG):"; \
-	echo "  $(PIC12F675_PROG_CMD)"; \
-	$(PIC12F675_PROG_CMD)
+	echo "Programming PIC12F675 selected variant $$variant from the fresh build matrix."; \
+	echo "  executable: $$prog ($$prog_kind arguments)"; \
+	echo "  checked snapshot: $$snapshot"; \
+	case "$$prog_kind" in \
+		ipecmd) "$$prog" "-TP$$prog_tool" "-P$$part" -M "-F$$snapshot" ;; \
+		pk2cmd) "$$prog" "-P$$part" "-F$$snapshot" -M -Y -R ;; \
+	esac
 
 # ============================================================================
 # INTROSPECTION -- expose one Makefile variable's value to scripts
@@ -6647,7 +6760,7 @@ help:
 	@echo "  pic12f675-test-calibration  prove the calibration injection leaves the shipping HEX alone"
 	@echo "  pic12f675-test-target fail-closed fault + lock-step + target-I/O for one variant"
 	@echo "                        (PIC12F675_TARGET_VARIANT); pic12f675-test-target-variants runs all"
-	@echo "  pic12f675-program     flash one variant to hardware (VARIANT=, PIC12F675_PROG=pk2cmd|ipecmd);"
+	@echo "  pic12f675-program     flash one fresh variant (VARIANT=, PIC12F675_PROG=, PIC12F675_PROG_KIND=pk2cmd|ipecmd);"
 	@echo "                        refuses any image that would overwrite the factory calibration word"
 	@echo "PIC10F320 (constrained 256-word target; docs/pic10f320_special_case.md):"
 	@echo "  pic10f320          build one PIC10F320 variant + 256-word and HW-stack gates"
@@ -6780,7 +6893,7 @@ help:
 	@echo "  coverage-clean  remove coverage artifacts"
 	@echo "Overrides: VARIANT=, AVR_PROGRAMMER=, COVERAGE_MIN=, HOSTCC=, HOST_DEFS=, SIM_DEFS=, AVR_BUILD_DIR="
 	@echo "PIC overrides: PIC_CC=, PIC10F322_PROG=pk2cmd|ipecmd, PIC10F322_PROG_TOOL=PK3|PK4|PK5, PIC10F322_PROG_CMD="
-	@echo "               the same four spelled PIC12F675_* select the PIC12F675 programmer"
+	@echo "               PIC12F675_PROG=, PIC12F675_PROG_KIND=pk2cmd|ipecmd, PIC12F675_PROG_TOOL=PK3|PK4|PK5"
 
 else
 

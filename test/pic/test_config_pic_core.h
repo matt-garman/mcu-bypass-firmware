@@ -202,12 +202,32 @@ static int read_config_word(const char *path, uint8_t *out_lo, uint8_t *out_hi) 
             continue;
         }
 
-        // data record: see whether it covers either CONFIG byte address
+        // Data record: see whether it covers either CONFIG byte address. A
+        // second definition is ambiguous even when the byte value agrees: the
+        // programmer's overlap semantics are not part of this contract.
         for (int d = 0; d < cnt; d++) {
             uint32_t abs_addr = ext_base + rec_addr + (uint32_t)d;
-            if (abs_addr == CONFIG_BYTE_ADDR)        { lo = (uint8_t)data[d]; found_lo = 1; }
-            else if (abs_addr == CONFIG_BYTE_ADDR + 1u) { hi = (uint8_t)data[d]; found_hi = 1; }
+            if (abs_addr == CONFIG_BYTE_ADDR) {
+                if (found_lo) {
+                    fprintf(stderr, "FAIL: duplicate CONFIG byte address 0x%04X in '%s'\n",
+                            (unsigned)CONFIG_BYTE_ADDR, path);
+                    ok = 0;
+                    break;
+                }
+                lo = (uint8_t)data[d];
+                found_lo = 1;
+            } else if (abs_addr == CONFIG_BYTE_ADDR + 1u) {
+                if (found_hi) {
+                    fprintf(stderr, "FAIL: duplicate CONFIG byte address 0x%04X in '%s'\n",
+                            (unsigned)(CONFIG_BYTE_ADDR + 1u), path);
+                    ok = 0;
+                    break;
+                }
+                hi = (uint8_t)data[d];
+                found_hi = 1;
+            }
         }
+        if (!ok) { break; }
     }
     fclose(f);
 

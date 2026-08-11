@@ -82,20 +82,23 @@ file is the human-readable summary of *what changed*.
 
 - **`make pic12f675-program`**, so the part can be put on real silicon. Same
   shape as `pic10f322-program` — one `VARIANT`, the CONFIG word carried inside
-  the HEX, a conservative no-Vdd default, `PIC12F675_PROG=pk2cmd|ipecmd` — with
-  one gate the 10F32x parts have no need of.
+  the HEX, and a conservative no-Vdd default — with one gate the 10F32x parts
+  have no need of. `PIC12F675_PROG` names the executable and
+  `PIC12F675_PROG_KIND=pk2cmd|ipecmd` selects its argument dialect when a
+  path-qualified or renamed executable cannot identify itself.
 
   Every simulator lane for this part runs a *derived* image carrying a
   fabricated oscillator calibration word. Writing one to a device would
   overwrite that device's factory trim irreversibly, and silently, because the
-  part still runs afterwards at the wrong clock. So the target checks the exact
-  image it is about to write, through the injector's new inverse mode
-  (`--assert-preserves-calibration`): the image must leave the calibration word
-  unprogrammed, and must prove it is this part's image by fetching that word at
-  all, so the answer cannot be vacuously true of some other part's HEX. It
-  decodes the CONFIG word from that same file rather than from the build
-  directory, which is what covers the `BG<1:0>` bandgap-trim half of the same
-  risk. Without `python3` it refuses to program rather than flash unchecked.
+  part still runs afterwards at the wrong clock. So the target rebuilds the
+  complete matrix, derives the image only from validated `VARIANT`, and checks a
+  private read-only snapshot through the injector's inverse mode
+  (`--assert-preserves-calibration`). The image must leave the calibration word
+  unprogrammed and prove it fetches that word, so the answer cannot be vacuously
+  true of another part's HEX. The target decodes CONFIG from that same snapshot
+  and requires its SHA-256 digest unchanged before passing the path directly to
+  validated pk2cmd/ipecmd argv. External image and whole-command overrides are
+  rejected. Without `python3` it refuses to program rather than flash unchecked.
 
   What it cannot check is the programmer's own erase behaviour toward those two
   factory values — silicon-only risks that close at a bench or nowhere. It
