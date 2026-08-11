@@ -6404,7 +6404,7 @@ help:
 	@echo "                        (PIC10F322_TARGET_VARIANT); pic10f322-test-target-variants runs all"
 	@echo "  pic10f322-program     flash one PIC variant to hardware (VARIANT=, PIC10F322_PROG=pk2cmd|ipecmd)"
 	@echo "PIC12F675 staged standalone target (not release-supported; omitted from all/release):"
-	@echo "  No dedicated CI or program integration yet."
+	@echo "  CI-gated; no release-image or program integration yet."
 	@echo "  pic12f675-test        all PIC12F675 pre-hardware checks (CONFIG + analysis + source"
 	@echo "                        coverage + calibration contract + gpsim + stack bound)"
 	@echo "  pic12f675             build all variants for PIC12F675 (XC8) + 1024-word budget gate"

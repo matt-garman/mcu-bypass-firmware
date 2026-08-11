@@ -31,7 +31,8 @@ test/
   test_attiny202_build.sh   shared: fail-closed AVR-XT build checks
   test_avr_build_rebuild.sh shared: classic AVR rebuild/partial-output checks
   test_ci_local_routing.sh  shared: local-CI skip-option command routing
-  test_workflow_syntax.sh   shared: GitHub workflow YAML + ci-local job-map checks
+  test_workflow_syntax.sh   shared: GitHub workflow YAML + ci-local job-map and
+                                    per-part PIC lane checks
   test_flash_budget.sh      shared: fail-closed flash measurement checks
   test_fetch_yasimavr.sh    shared: safe yasimavr venv fetch/rebuild checks
   test_gpsim_wrappers.sh    shared: fail-closed gpsim wrapper checks
@@ -447,6 +448,12 @@ but they are allowed to skip for missing tools; the aggregate turns any skip or
 missing PASS marker into a failure. It also requires the complete supported
 variant matrix before starting its first target, so an empty, malformed, or
 incomplete matrix cannot report an all-variants PASS or leave a partial run.
+
+Both of this part's aggregates run in CI's shared `pic` job and in
+`scripts/ci-local.sh`, and `test-workflow-syntax` compares the two files'
+per-part lane sets in both directions — the job-list check above is at job
+granularity, and one job now carries three parts, so a part could otherwise be
+dropped from either side with every other gate green.
 
 `pic12f675-test-target-variants` is the same gate for that part, built from the
 same two regressions above, and `pic12f675-test` is its pre-hardware aggregate:

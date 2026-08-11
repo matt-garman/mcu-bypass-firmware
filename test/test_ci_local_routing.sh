@@ -34,11 +34,13 @@ fail() {
 mkdir -p "$fakebin" "$work/dfp/pic/include/proc" "$work/gpsim-inc" \
 	"$work/xt-dfp/gcc/dev/attiny202/device-specs" \
 	"$work/xt-dfp/include/avr" "$work/yasimavr-venv/bin"
-# Both device headers: assert_pic_toolchain checks each chip through its own
-# PIC_*/PIC10F320_* pair, so a fake DFP with only one of them would fail the assert
-# before any routing was exercised.
+# All three device headers: assert_pic_toolchain checks the 322 and the 320
+# through their own PIC_*/PIC10F320_* pairs and the 12F675 through the 322's
+# pair, so a fake DFP missing any one of them would fail the assert before any
+# routing was exercised.
 : > "$work/dfp/pic/include/proc/pic10f322.h"
 : > "$work/dfp/pic/include/proc/pic10f320.h"
+: > "$work/dfp/pic/include/proc/pic12f675.h"
 : > "$work/gpsim-inc/sim_context.h"
 : > "$work/xt-dfp/gcc/dev/attiny202/device-specs/specs-attiny202"
 : > "$work/xt-dfp/include/avr/iotn202.h"
@@ -166,6 +168,8 @@ pic_calls=(
 	$'STRICT_TOOLS=1\tpic10f322-test-target-variants'
 	$'STRICT_TOOLS=1\tpic10f320-test'
 	$'STRICT_TOOLS=1\tpic10f320-test-target-variants'
+	$'STRICT_TOOLS=1\tpic12f675-test'
+	$'STRICT_TOOLS=1\tpic12f675-test-target-variants'
 )
 xt_calls=(
 	$'STRICT_TOOLS=1\tattiny202-test'

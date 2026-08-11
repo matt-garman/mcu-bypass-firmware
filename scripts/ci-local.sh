@@ -30,6 +30,12 @@
 #                    make pic10f320-test-target-variants
 #                                           (10F320: the same fail-closed
 #                                            libgpsim aggregate)
+#                    make pic12f675-test       (12F675: CONFIG + cppcheck/MISRA +
+#                                            host coverage + calibration contract
+#                                            + CLI gpsim + hardware stack bound)
+#                    make pic12f675-test-target-variants
+#                                           (12F675: the same fail-closed
+#                                            libgpsim aggregate)
 #   build-matrix  -> make attiny13a attiny85 attiny45 (every variant builds for every
 #                                            AVR; each prints flash/RAM)
 #   attiny202     -> make attiny202-test    (fuses + smoke + build/budget +
@@ -65,11 +71,11 @@
 #                    `stress` job and run `make test` instead of `make test-long`
 #     --no-clean     skip the initial `make clean` (faster, but not a true
 #                    clean-checkout reproduction of CI)
-#     --skip-pic     skip the PIC (XC8/gpsim) job -- BOTH chips, 10F322 and
-#                    10F320, since they share one toolchain and one CI job;
-#                    ONLY if you lack that toolchain. Push mode still runs
-#                    host/AVR mutation strictly but permits unavailable PIC
-#                    mutants of EITHER chip to be reported skipped instead of
+#     --skip-pic     skip the PIC (XC8/gpsim) job -- ALL THREE parts, 10F322,
+#                    10F320 and 12F675, since they share one toolchain and one
+#                    CI job; ONLY if you lack that toolchain. Push mode still
+#                    runs host/AVR mutation strictly but permits unavailable PIC
+#                    mutants of ANY of them to be reported skipped instead of
 #                    failing; this no longer mirrors CI, so it warns.
 #                    NOTE: it does not skip the PIC10F320 HOST lanes -- those
 #                    need only a host compiler and run inside `make test` /
@@ -92,12 +98,13 @@
 #   Use --skip-pic / --skip-attiny202 if you genuinely lack one of those two.
 #   The host/AVR set has no --skip: those lanes run on every invocation.
 #
-#   The PIC job uses the Makefile's PIC_CC / PIC_DFP defaults, and the PIC10F320
-#   lane's PIC10F320_CC / PIC10F320_DFP default to those in turn (one shared XC8 + DFP
-#   install serves both chips). If your XC8/DFP live elsewhere, export PIC_CC
-#   and/or PIC_DFP before invoking and make will pick them up (they are `?=`
-#   defaults, so the environment wins); export PIC10F320_CC / PIC10F320_DFP as well
-#   only if you deliberately want the two chips on different toolchains.
+#   The PIC job uses the Makefile's PIC_CC / PIC_DFP defaults for the 10F322 and
+#   the 12F675, and the PIC10F320 lane's PIC10F320_CC / PIC10F320_DFP default to
+#   those in turn (one shared XC8 + DFP install serves all three parts). If your
+#   XC8/DFP live elsewhere, export PIC_CC and/or PIC_DFP before invoking and make
+#   will pick them up (they are `?=` defaults, so the environment wins); export
+#   PIC10F320_CC / PIC10F320_DFP as well only if you deliberately want that chip
+#   on a different toolchain.
 
 set -euo pipefail
 
@@ -238,7 +245,7 @@ trap on_exit EXIT
 # "Assert PIC toolchain present" step).
 # ----------------------------------------------------------------------------
 
-# Fail loud if any PIC tool/header is missing, for BOTH chips. Optional simulator
+# Fail loud if any PIC tool/header is missing, for ALL THREE parts. Optional simulator
 # and analyzer sub-targets skip cleanly when their tools are absent; pic10f320-test's
 # expected-image and stack prerequisites fail closed, but they do not replace
 # this complete preflight. Paths come from the Makefile
@@ -267,17 +274,21 @@ assert_pic_toolchain() {
 	[ -f "$pic_dfp/pic/include/proc/pic10f322.h" ]    || missing+=("PIC10-12Fxxx DFP at $pic_dfp  (export PIC_DFP=...)")
 	[ -x "$pic10f320_cc" ]                               || missing+=("XC8 (10F320) at $pic10f320_cc  (export PIC10F320_CC=...)")
 	[ -f "$pic10f320_dfp/pic/include/proc/pic10f320.h" ] || missing+=("PIC10F320 device header under $pic10f320_dfp  (export PIC10F320_DFP=...)")
+	# The PIC12F675 shares the 322's PIC_CC/PIC_DFP pair -- one installation,
+	# one DFP -- so only its device header is a separate fact to assert. A
+	# truncated unzip that left it behind would make every 12F675 lane skip.
+	[ -f "$pic_dfp/pic/include/proc/pic12f675.h" ]    || missing+=("PIC12F675 device header under $pic_dfp  (export PIC_DFP=...)")
 	command -v gpsim >/dev/null 2>&1                  || missing+=("gpsim  (apt: gpsim)")
 	command -v cppcheck >/dev/null 2>&1               || missing+=("cppcheck  (apt: cppcheck)")
 	command -v c++ >/dev/null 2>&1                    || missing+=("c++  (apt: g++; pic10f322-test-target-variants)")
 	[ -f "$gpsim_inc/sim_context.h" ]                 || missing+=("libgpsim headers at $gpsim_inc  (apt: gpsim-dev; pic10f322-test-target-variants)")
 	pkg-config --exists glib-2.0 2>/dev/null          || missing+=("glib-2.0  (apt: libglib2.0-dev; pic10f322-test-target-variants)")
 	if [ "${#missing[@]}" -gt 0 ]; then
-		log "PIC toolchain incomplete -- the pic/pic10f320 targets would silently SKIP, not fail:"
+		log "PIC toolchain incomplete -- the pic/pic10f320/pic12f675 targets would silently SKIP, not fail:"
 		for m in "${missing[@]}"; do log "  - $m"; done
 		die "install the above (see TOOLCHAIN.adoc), or --skip-pic (no longer mirrors CI)."
 	fi
-	ok "PIC toolchain present, both chips (XC8 + DFP + gpsim + gpsim-dev + glib + cppcheck + c++)."
+	ok "PIC toolchain present, all three parts (XC8 + DFP + gpsim + gpsim-dev + glib + cppcheck + c++)."
 }
 
 # Fail loud if any ATtiny202 (AVR-XT) input is missing. Like the PIC targets,
@@ -469,7 +480,7 @@ run_step "preflight: validate GitHub workflow files" \
 
 run_step "preflight: assert host/AVR toolchain present" assert_host_toolchain
 if [ "$SKIP_PIC" -eq 0 ]; then
-	run_step "preflight: assert PIC toolchain present (both chips)" assert_pic_toolchain
+	run_step "preflight: assert PIC toolchain present (all three parts)" assert_pic_toolchain
 fi
 if [ "$SKIP_ATTINY202" -eq 0 ]; then
 	run_step "preflight: assert ATtiny202 toolchain present" assert_attiny202_toolchain
@@ -478,13 +489,15 @@ fi
 [ "$DO_CLEAN" -eq 1 ] && run_step "make clean (match CI fresh checkout)" make clean
 
 if [ "$SKIP_PIC" -eq 1 ]; then
-	warn "--skip-pic: NOT running the PIC job (either chip); this does not mirror CI."
+	warn "--skip-pic: NOT running the PIC job (any of the three parts); this does not mirror CI."
 else
 	# Toolchain asserted in PREFLIGHT above.
 	run_step "pic job: make pic10f322-test" make pic10f322-test
 	run_step "pic job: pic10f322-test-target-variants" make pic10f322-test-target-variants
 	run_step "pic job: make pic10f320-test" make pic10f320-test
 	run_step "pic job: pic10f320-test-target-variants" make pic10f320-test-target-variants
+	run_step "pic job: make pic12f675-test" make pic12f675-test
+	run_step "pic job: pic12f675-test-target-variants" make pic12f675-test-target-variants
 fi
 
 run_step "build-matrix: make attiny13a attiny85 attiny45" make attiny13a attiny85 attiny45

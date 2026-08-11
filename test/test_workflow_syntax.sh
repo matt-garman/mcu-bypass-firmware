@@ -436,6 +436,33 @@ if check(os.path.isfile(ci_local), "scripts/ci-local.sh: missing"):
                 f"ci-local.sh maps '{entry}', which is not a job in ci.yml",
             )
 
+# --- the pic job's PART LANES must match ci-local.sh's, both ways -------------
+# The job-list check above is at JOB granularity, and the pic job is one job for
+# three parts (ci.yml decision D3). So a part can be dropped from either side --
+# or added to only one -- with every other gate green, and the failure mode is
+# the quiet one: a clean local run that no longer implies a green CI run, or a
+# CI lane nobody can reproduce locally. Compare the SETS of per-part Make
+# targets, not their order: the two files are free to sequence them differently.
+    ci_doc = docs.get("ci.yml")
+    if isinstance(ci_doc, dict) and isinstance(ci_doc.get("jobs"), dict) \
+            and isinstance(ci_doc["jobs"].get("pic"), dict):
+        pat = re.compile(r"\bmake\s+(pic[0-9a-z]+-test(?:-target-variants)?)\b")
+        yml_lanes = set()
+        for step in ci_doc["jobs"]["pic"].get("steps") or []:
+            if isinstance(step, dict) and isinstance(step.get("run"), str):
+                yml_lanes.update(pat.findall(step["run"]))
+        local_lanes = set()
+        for line in lines:
+            if "run_step" in line and "pic job:" in line:
+                local_lanes.update(pat.findall(line))
+        check(bool(yml_lanes), "ci.yml pic job: no per-part Make lanes found")
+        for lane in sorted(yml_lanes - local_lanes):
+            check(False, f"ci.yml pic job runs '{lane}', which ci-local.sh's pic job does not")
+        for lane in sorted(local_lanes - yml_lanes):
+            check(False, f"ci-local.sh's pic job runs '{lane}', which ci.yml's pic job does not")
+        for lane in sorted(yml_lanes & local_lanes):
+            check(True, f"pic lane '{lane}' runs in both")
+
 for msg in failures:
     print(f"FAIL: {msg}", file=sys.stderr)
 

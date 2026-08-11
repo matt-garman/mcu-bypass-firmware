@@ -92,7 +92,7 @@ jobs:
         run: make test STRICT_TOOLS=1
 
   # -------------------------------------------------------------------------
-  # PIC gate (BOTH chips): the PIC counterpart of `verify`.
+  # PIC gate (ALL THREE parts): the PIC counterpart of `verify`.
   #
   # PIC10F322 -- `make pic10f322-test`: builds every variant with XC8 + enforces the
   # 512-word flash budget, verifies the emitted CONFIG word vs design intent,
@@ -107,20 +107,35 @@ jobs:
   # the exact-line firmware coverage gate). See docs/pic10f320_special_case.md
   # for why that chip's firmware inlines the verified core rather than calling it.
   #
-  # ONE job for both chips, deliberately (merge plan §11, decision D3). `verify`,
+  # PIC12F675 -- `make pic12f675-test` + `make pic12f675-test-target-variants`:
+  # the same two-aggregate shape again, for the classic mid-range part. Its
+  # pre-hardware aggregate additionally runs the calibration contract, which no
+  # other part has: this is the only chip whose SIMULATOR images are derived
+  # (an oscillator calibration word injected into a copy), and the contract is
+  # what proves deriving them leaves the shipping images untouched.
+  #
+  # The 12F675 is NOT release-supported (docs/pic12f675_feasibility.md §7), and
+  # gating CI on it anyway is deliberate: a staged part that is exercised only
+  # when someone remembers to run it by hand is a part whose lanes rot. What is
+  # deliberately NOT here is an image upload -- publishing a downloadable HEX
+  # belongs with release integration, where this part's OSCCAL-preservation
+  # flashing procedure is documented and where `pic12f675-program` will live.
+  #
+  # ONE job for all three, deliberately (merge plan §11, decision D3). `verify`,
   # `attiny202`, `build-matrix` and `stress` ALL declare `needs: pic`, so this job
-  # gates the whole repository -- and folding PIC10F320 into it means those four
-  # gate on the new chip for free, with one XC8 install and one cache restore.
-  # The accepted cost is that the full PIC10F320 lane sits on their critical path.
+  # gates the whole repository -- and folding each new part into it means those
+  # four gate on it for free, with one XC8 install and one cache restore. The
+  # accepted cost is that every PIC lane sits on their critical path.
   # Splitting it into a sibling `pic10f320` job later is mechanical, but it would
   # force an explicit decision about whether those four should gate on it; that
   # is the trade to revisit only if CI wall-clock becomes binding.
   #
   # XC8 and the PIC10-12Fxxx DFP are not in apt; they are fetched from Microchip
   # (the free tier needs no key to compile) and installed to the paths the
-  # Makefile defaults to (also passed explicitly via PIC_CC / PIC_DFP and
-  # PIC10F320_CC / PIC10F320_DFP -- one shared installation, two variable pairs, so
-  # either chip can be re-pinned without silently moving the other). gpsim,
+  # Makefile defaults to (also passed explicitly via PIC_CC / PIC_DFP -- which
+  # the 10F322 and 12F675 share -- and PIC10F320_CC / PIC10F320_DFP: one shared
+  # installation, two variable pairs, so the 320 can be re-pinned without
+  # silently moving the other two). gpsim,
   # gpsim-dev + libglib2.0-dev + g++ (the libgpsim fault-inject build), cppcheck,
   # python3 come from apt.
   #
@@ -176,9 +191,9 @@ jobs:
         run: |
           xc8="${XC8_DIR}/bin/xc8-cc"
           test -x "${xc8}" || { echo "::error::XC8 missing: ${xc8}"; exit 1; }
-          # One DFP, two devices. Assert BOTH headers: a truncated unzip that
-          # left one behind would make that chip's whole lane skip silently.
-          for d in pic10f322 pic10f320; do
+          # One DFP, three devices. Assert ALL THREE headers: a truncated unzip
+          # that left one behind would make that part's whole lane skip silently.
+          for d in pic10f322 pic10f320 pic12f675; do
             dev="${XC8_DFP_ROOT}/xc8/pic/include/proc/${d}.h"
             test -f "${dev}" || { echo "::error::DFP missing: ${dev}"; exit 1; }
           done
@@ -243,6 +258,26 @@ jobs:
           make pic10f320-test-target-variants STRICT_TOOLS=1 \
             PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
+
+      # PIC12F675 pre-hardware gate. CONFIG decode, cppcheck + MISRA, the
+      # host-gcov shipping-source gate, the calibration contract, the CLI-gpsim
+      # register-level test across all three derived images, and the 8-level
+      # hardware return-stack bound for every variant. It shares the 322's
+      # PIC_CC / PIC_DFP pair: one XC8 installation, one DFP.
+      - name: PIC12F675 pre-hardware gate (make pic12f675-test)
+        run: |
+          make pic12f675-test STRICT_TOOLS=1 \
+            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC_DFP="${XC8_DFP_ROOT}/xc8"
+
+      # ...and the PIC12F675 fail-closed target aggregate, same contract as the
+      # other two: explicit fault, lock-step and target-I/O PASS sentinels for
+      # every variant, so a silent skip or a partial matrix is a failure.
+      - name: PIC12F675 target aggregate (make pic12f675-test-target-variants)
+        run: |
+          make pic12f675-test-target-variants STRICT_TOOLS=1 \
+            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC_DFP="${XC8_DFP_ROOT}/xc8"
 
       # The mutation driver also runs its core AVR and ATtiny202 mutants. Keep
       # their extra toolchain and the minutes-long gate off the pull-request hot
@@ -341,7 +376,9 @@ jobs:
             PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
 
-      # Two chips, two separately named artifacts -- never one merged upload.
+      # Two release-supported chips, two separately named artifacts -- never one
+      # merged upload. (The 12F675 gate above builds images too; they are not
+      # uploaded, per the staging note in this job's header.)
       # The release machinery keys on image basename. Those basenames now carry
       # the MCU (`bypass-pic10f322-<stage>.hex` vs `bypass-pic10f320-<stage>.hex`),
       # so a flattened upload would no longer silently collide -- but keep them
@@ -642,7 +679,7 @@ jobs:
 
       # MUTATION_ALLOW_SKIP=1 is stated explicitly rather than left to the
       # default. This job installs no XC8/gpsim and neither ATtiny202 input, so
-      # both chips' PIC mutants AND the ATtiny202 lane are unavailable here and
+      # every part's PIC mutants AND the ATtiny202 lane are unavailable here and
       # must be allowed to report skipped -- but that makes this job's mutation
       # output for those substrates diagnostic only. The authoritative,
       # fail-closed evidence for all of them comes from the `pic` job, which
