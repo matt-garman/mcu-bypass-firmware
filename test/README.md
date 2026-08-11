@@ -421,7 +421,7 @@ below so a green gate means every PIC layer actually ran.
 | Aggregate fail-closed regression | `test-target-lane-markers` | Proves the per-variant aggregate requires each lane's explicit `PASS` marker, not just its exit status: a skipped, crashed, or failing-but-zero-exit lane is rejected and the aggregate's own success line is withheld. Covers all three PIC chips. | Bash + fake recursive Make |
 | Hardware return-stack depth | `pic10f322-test-stack-bound`, `pic10f320-test-stack-bound` | Bounds the **8-level hardware return stack** — the PIC counterpart of the AVR's byte-valued `test-stack-bound`, and a different quantity: the PIC14 core has no data stack, and hardware-stack overflow on this part is silent (no `STKPTR`, no `STKOVF`, no overflow reset). Computes the deepest call chain from the freshly generated instruction stream, cross-checks it against XC8's own `callstack` directives, and rejects missing/current-image assembly, recursion, indirect calls, and an over-budget build. Every variant, both chips. | XC8-generated `.s` + awk |
 | Stack-depth gate regression | `test-stack-bound-pic-regression` | Proves that gate rejects each way the analysis can be wrong — over budget, recursion, an overflowing build, the two oracles disagreeing, every unresolvable direct-call spelling/opcode, an indirect call, malformed function-psect ownership, no entry point, and a device pack declaring no depth — and that it still *accepts* the psect scaffolding XC8 really emits, including the mid-body re-selection that follows every inline-asm escape. Fixtures reproduce the full declaration/marker/re-selection sequence, so a rule that cannot read a real image fails here first. Synthetic, so it needs no toolchain. | Bash + awk |
-| Soak rebuild determinism | `test-pic-build-rebuild` | Both chips' soak binaries compile their workload sizing in as `-D` flags, so their file rules must be *unconditionally* out of date. Asserts a changed duration recompiles with the new value, and that an identical rerun recompiles too — the signature of `FORCE`, as opposed to a rebuild that merely followed a timestamp. Populates its scratch repository with the shared `test/scratch_tree.sh` walk, then blanks each named prerequisite: contents cannot matter to a staleness decision, and a prerequisite that has been renamed or dropped is reported instead of silently shrinking the fixture. | Bash + fake c++ |
+| Soak rebuild determinism | `test-pic-build-rebuild` | All three chips' soak binaries compile their workload sizing in as `-D` flags, so their file rules must be *unconditionally* out of date. Asserts a changed duration recompiles with the new value, and that an identical rerun recompiles too — the signature of `FORCE`, as opposed to a rebuild that merely followed a timestamp. Populates its scratch repository with the shared `test/scratch_tree.sh` walk, then blanks each named prerequisite: contents cannot matter to a staleness decision, and a prerequisite that has been renamed or dropped is reported instead of silently shrinking the fixture. | Bash + fake c++ |
 | Soak timing/liveness contract | `test-soak-timing` | Native Classic AVR/PIC soaks require the liveness interval within the total duration; short release rehearsals clamp it so every passing run completes a responsiveness round-trip. A rapid PIC retrigger fixture proves multi-ms holds are sampled every millisecond, and a fake AVR-XT simulator resets during the final round-trip hold to prove the witness is checked before verdict. | host C/C++ compilers + release CLI + fake simulator |
 | Soak watchdog witness | `test-soak-reset-witness` | The Classic AVR soak's `watchdog_failures` counter is release evidence, so a real watchdog reset must be able to reach it. Builds the soak driver twice against the same healthy ATtiny85 image — untouched, and with a fixture that disables the timer interrupt mid-run — and requires the first to pass with `watchdog_failures=0` and the second to fail with a nonzero one. The control half is what stops a permanently broken soak from satisfying the failing half on its own. | simavr + host C compiler |
 | Release image reproduction | `test-release-images` | Committed images, `SHA256SUMS`, and fresh builds must each exactly match Makefile `RELEASE_IMAGES` before byte reproduction is accepted. Production pins the repository Makefile and ignores inherited `RELEASE_EXPECTED_IMAGES`, GNU Make flags, variable assignments, environment precedence, and injected makefiles; synthetic empty, malformed, duplicate and incomplete canonical sets run the unchanged verifier beside a test-only Makefile. | Bash + synthetic image trees |
@@ -618,6 +618,19 @@ the reset. The soak's reset witness records it in `watchdog_failures`. This
 gives the Classic AVR the soak-lane mutant the PIC and ATtiny202 families
 already had.
 
+**PIC12F675 mutants are one table, not three, and are chosen for what this part
+has that the 10F32x parts do not.** All 13 need XC8 plus gpsim or libgpsim plus
+the derived simulator images, so there is no host-only lane for them to fall
+back to and nothing to split. Copying the 322's list would mostly have re-proved
+the shared pure core, so the set targets the SRAM output shadow (a severed
+write-back, and a port-follows-shadow guard turned into a tautology — a fault
+the 322 cannot express, since its port and latch are two views of one register),
+the software sub-tick counter that stands in for the period register this part
+lacks, the comparator and OSCCAL-trim guards that have no 322 counterpart, and
+ANSEL's off-by-one mapping (GPIO bit 4 selects ANS3). Kill targets are assigned
+by what each fault actually perturbs and that assignment is load-bearing: moved
+to the gpsim CLI lane, the defeated comparator guard survives.
+
 **PIC10F320 mutants are split by what they NEED, not by what they test.** 29 of
 them are killed by the host lanes and require only a C compiler, so they ride
 with the unskippable core batch; 11 need XC8 + gpsim + libgpsim and sit behind
@@ -633,10 +646,10 @@ current shape — the merge-time 74-mutant run, the audit that invalidated one
 kill, and the sandbox gaps that briefly cut it to 56 — is recorded in
 `docs/pic10f320_validation.md` §5.
 
-The driver independently pins the seven mutation categories at **24 core/AVR +
+The driver independently pins the eight mutation categories at **24 core/AVR +
 19 AVR-XT + 29 PIC10F320 host + 11 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 8
-PIC target = 98**. It rejects category drift before probing, then requires
-dispatched + skipped = 98 and killed + survived + errored = dispatched. Every
+PIC target + 13 PIC12F675 = 111**. It rejects category drift before probing, then
+requires dispatched + skipped = 111 and killed + survived + errored = dispatched. Every
 worker status is checked; result status/output pairs are atomically published
 and accepted only with exact text grammar and no missing, hidden, or extra
 artifacts.

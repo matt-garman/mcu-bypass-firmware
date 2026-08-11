@@ -94,7 +94,8 @@ readonly MUTATION_EXPECTED_PIC_TARGET=8
 readonly MUTATION_EXPECTED_PIC_SOAK=1
 readonly MUTATION_EXPECTED_PIC320_HOST=29
 readonly MUTATION_EXPECTED_PIC320_TOOL=11
-readonly MUTATION_EXPECTED_TOTAL=98
+readonly MUTATION_EXPECTED_PIC12F675=13
+readonly MUTATION_EXPECTED_TOTAL=111
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
@@ -778,6 +779,34 @@ validate_pic10f320_sandbox() {
     [ "$ok" -eq 1 ]
 }
 
+# The PIC12F675 counterpart. Same failure mode, one extra hazard: this part is
+# the only one whose simulator images are DERIVED, so pic12f675-simcal must find
+# both python3 and the injector. A sandbox missing the injector does not build a
+# broken image -- it builds no derived image at all, every lane below skips with
+# status 0, and the baseline probe reports the whole part as "tools absent" on a
+# host that has every tool.
+validate_pic12f675_sandbox() {
+    local root="$1" required ok=1
+    for required in \
+        test/pic/inject_calibration_word.py \
+        test/pic/pic12f675_footswitch_toggle.stc \
+        test/pic/pic12f675_power_on_pressed.stc \
+        test/pic/pic12f675_gpsim_regs.sh \
+        test/pic/pic12f675_regs.h \
+        test/pic/pic12f675_fault_matrix.h \
+        test/pic/test_io_pic12f675.cc \
+        test/pic/test_lockstep_pic12f675.cc \
+        test/pic/test_fault_pic12f675.cc \
+        test/pic/test_soak_pic12f675.cc \
+        test/pic/test_soak_pic_core.h; do
+        if [ ! -f "$root/$required" ]; then
+            echo "ERROR: PIC12F675 mutation sandbox is missing $required" >&2
+            ok=0
+        fi
+    done
+    [ "$ok" -eq 1 ]
+}
+
 # The AVR-XT counterpart, and for the same reason: every attiny202-* target
 # skips cleanly on a missing input, so a file that copy_tree failed to bring
 # across turns the whole lane into silent survivors rather than a loud error.
@@ -811,9 +840,24 @@ if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
         echo "ERROR: could not create mutation self-test sandbox" >&2
         exit 1
     fi
-    if ! copy_tree "$SELFTEST_DIR" || ! validate_pic10f320_sandbox "$SELFTEST_DIR"; then
+    if ! copy_tree "$SELFTEST_DIR" || ! validate_pic10f320_sandbox "$SELFTEST_DIR" \
+            || ! validate_pic12f675_sandbox "$SELFTEST_DIR"; then
         rm -rf "$SELFTEST_DIR"
         exit 1
+    fi
+
+    # The PIC12F675 hazard specifically: without the injector no derived image
+    # exists, so every lane skips clean and the probe blames the toolchain.
+    rm -f "$SELFTEST_DIR/test/pic/inject_calibration_word.py"
+    if validate_pic12f675_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
+        echo "ERROR: mutation sandbox validator accepted a missing calibration injector" >&2
+        rm -rf "$SELFTEST_DIR"
+        exit 1
+    fi
+
+    if ! copy_tree "$SELFTEST_DIR"; then
+        echo "ERROR: could not restore mutation self-test sandbox" >&2
+        rm -rf "$SELFTEST_DIR"; exit 1
     fi
 
     rm -f "$SELFTEST_DIR/test/pic/run_gpsim_test.sh"
@@ -1233,6 +1277,43 @@ PIC_SOAK_MUTATIONS=(
 "src/bypass_mcu_pic10f322.c	s@{ CLRWDT(); }@{ (void)0; /* MUTANT: no WDT pet */ }@	PIC WDT pet (CLRWDT) removed; soak reset counter trips within ~1s of an un-pet WDT"
 )
 
+# --- PIC12F675 mutants --------------------------------------------------------
+# One table, not three, because this part has ONE toolchain gate: every kill
+# target below needs XC8 plus gpsim or libgpsim, and pic12f675-simcal on top of
+# that. Splitting by lane the way the PIC10F322 tables do would buy nothing --
+# there is no host-only PIC12F675 lane for a mutant to fall back to.
+#
+# Chosen for what each fault actually perturbs, and weighted toward what this
+# part has that the 10F32x parts do not:
+#   * the SRAM output shadow (no LATx), so "the port did not follow intent" is
+#     an expressible fault here and a tautology on the 322;
+#   * the software sub-tick counter, since TMR0 has no period register;
+#   * the comparator and the OSCCAL trim snapshot, neither of which exists on
+#     the 322 -- its analogues are ANSELA alone and a constant OSCCON compare;
+#   * ANSEL's off-by-one mapping (GPIO bit 4 -> ANS3), which is exactly the kind
+#     of thing a mask narrowed by hand gets wrong.
+# Copying the 322's list verbatim would have re-proved the shared pure core and
+# left every one of those unexercised.
+#
+# Each entry: file<TAB>sed-expression<TAB>make-args<TAB>description. The make
+# args are the same shape as the PIC10F320 tool table's: optional VAR=value
+# assignments followed by exactly one target, tokenized by the shared helper.
+PIC12F675_MUTATIONS=(
+"src/bypass_mcu_pic12f675.c	s@gpio_shadow_ |= (uint8_t)(1U << LED_PIN);@gpio_shadow_ \&= (uint8_t)~(1U << LED_PIN);@	pic12f675-test-gpsim	FW set_engaged LED inverted at the shadow (GP0 stays dark); the ENGAGED checkpoint catches it"
+"src/bypass_mcu_pic12f675.c	s@(0U == (GPIO & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (GPIO \& (uint8_t)(1U << FOOTSW_PIN)))@	pic12f675-test-gpsim	FW footswitch read polarity inverted (GP5 sense flipped -> toggles on release); PRESS1 toggle-on-press checkpoint catches it"
+"src/bypass_mcu_pic12f675.c	s@#define TMR0_SUBTICKS_PER_TICK (4U)@#define TMR0_SUBTICKS_PER_TICK (1U)@	pic12f675-test-gpsim	FW software sub-tick count 4->1: the tick becomes 256us, debounce completes 4x early; PRESS1_EARLY cadence checkpoint catches it (no PIC10F322 counterpart -- that part has a period register)"
+"src/bypass_mcu_pic12f675.c	/void hw_pin_set_high/,/^}/s@GPIO = gpio_shadow_;@/* MUTANT: shadow never reaches the port */@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET control-pin write never reaches GPIO -- a fault only a part with an SRAM shadow can express. The shell's own port-follows-shadow guard then resets every iteration, and lock-step sees the ctx_ divergence"
+"src/bypass_mcu_pic12f675.c	s@        (uint8_t)(GPIO & (uint8_t)BYPASS_OUTPUT_DDR_MASK);@        (uint8_t)(gpio_shadow_ \& (uint8_t)BYPASS_OUTPUT_DDR_MASK);@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET port-follows-shadow guard reads the shadow twice, making the comparison a tautology; physical-pin fault injections stop recovering"
+"src/bypass_mcu_pic12f675.c	s@(actual_direction_mask == expected_direction_mask) &&@(1U != 0U) \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET exact-TRISIO predicate removed: parked-spare GP4 direction corruption evades the remaining required-subset check"
+"src/bypass_mcu_pic12f675.c	s@wpu_latches == (uint8_t)(1U << FOOTSW_PIN)@0U != (wpu_latches \& (uint8_t)(1U << FOOTSW_PIN))@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET exact WPU guard weakened to GP5-present only; extra output-pin pull-up latches go undetected"
+"src/bypass_mcu_pic12f675.c	s@ansel   = (uint8_t)(ANSEL & ANSEL_OUTPUT_MASK);@ansel   = (uint8_t)(ANSEL \& 0x07U);@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET ANSEL guard narrowed to ANS0..ANS2, dropping ANS3; GP4 re-selected analog goes undetected (GPIO bit 4 maps to ANSEL bit 3, so this is the mapping's own mutant)"
+"src/bypass_mcu_pic12f675.c	s@(CMCON_COMPARATOR_OFF == cmcon)  &&@(1U != 0U)  \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET comparator-off guard defeated; a CMCON upset re-takes GP0..GP2 with no reset (no PIC10F322 counterpart -- that part has no comparator)"
+"src/bypass_mcu_pic12f675.c	s@(osccal_snapshot_     == osccal);@(1U != 0U);@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET oscillator-trim guard defeated; a corrupt OSCCAL never forces a reset (no PIC10F322 counterpart -- that part compares OSCCON against a constant)"
+"src/bypass_mcu_pic12f675.c	s@        ctx_.effect_state  = res.effect_state;@@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET effect_state write-back dropped: the pins still follow res, so only the ctx_ lock-step against the pure model diverges"
+"src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	TARGET relay coil pulse shortened below the datasheet minimum; the target-I/O pulse-width check catches it on this part's 1.024 ms tick as it does on the 322's 1.000 ms one"
+"src/bypass_mcu_pic12f675.c	s@static void hw_wdt_pet(void) { CLRWDT(); }@static void hw_wdt_pet(void) { (void)0; /* MUTANT: no WDT pet */ }@	PIC12F675_SOAK_VARIANT=cd4053_simple PIC12F675_SOAK_DURATION_MS=$PIC_SOAK_MUT_MS PIC12F675_SOAK_LIVENESS_INTERVAL_MS=$PIC_SOAK_MUT_LIVENESS_MS pic12f675-test-soak	SOAK main-loop WDT pet removed; the soak's reset notifier catches the un-pet watchdog inside the short mutation window (this part's period is ~288 ms, well inside it)"
+)
+
 # --- AVR-XT shell mutants (src/bypass_mcu_avr_xt.c) ---------------------------
 # The ATtiny202 counterpart of the classic-AVR shell mutants above and the PIC
 # ones below them. Every entry is killed by driving the REAL avr-gcc-built image
@@ -1330,11 +1411,14 @@ validate_mutation_inventory PIC10F320_HOST_MUTATIONS PIC10F320-host \
     "$MUTATION_EXPECTED_PIC320_HOST" 4 || exit 2
 validate_mutation_inventory PIC10F320_TOOL_MUTATIONS PIC10F320-tool \
     "$MUTATION_EXPECTED_PIC320_TOOL" 4 || exit 2
+validate_mutation_inventory PIC12F675_MUTATIONS PIC12F675 \
+    "$MUTATION_EXPECTED_PIC12F675" 4 || exit 2
 validate_mutation_inventory XT_MUTATIONS ATtiny202 "$MUTATION_EXPECTED_XT" 4 || exit 2
 inventory_total=$((${#MUTATIONS[@]} + ${#XT_MUTATIONS[@]} \
     + ${#PIC_GPSIM_MUTATIONS[@]} \
     + ${#PIC_TARGET_MUTATIONS[@]} + ${#PIC_SOAK_MUTATIONS[@]} \
-    + ${#PIC10F320_HOST_MUTATIONS[@]} + ${#PIC10F320_TOOL_MUTATIONS[@]}))
+    + ${#PIC10F320_HOST_MUTATIONS[@]} + ${#PIC10F320_TOOL_MUTATIONS[@]} \
+    + ${#PIC12F675_MUTATIONS[@]}))
 mutation_require_count total "$MUTATION_EXPECTED_TOTAL" "$inventory_total" || exit 2
 
 collect_baseline_targets() {
@@ -1357,11 +1441,14 @@ collect_baseline_targets() {
 CORE_BASE_TARGETS=()
 PIC10F320_HOST_BASE_TARGETS=()
 PIC10F320_BASE_TARGETS=()
+PIC12F675_BASE_TARGETS=()
 collect_baseline_targets MUTATIONS core/AVR 4 2 CORE_BASE_TARGETS || exit 2
 collect_baseline_targets PIC10F320_HOST_MUTATIONS PIC10F320-host 4 2 \
     PIC10F320_HOST_BASE_TARGETS || exit 2
 collect_baseline_targets PIC10F320_TOOL_MUTATIONS PIC10F320-tool 4 2 \
     PIC10F320_BASE_TARGETS || exit 2
+collect_baseline_targets PIC12F675_MUTATIONS PIC12F675 4 2 \
+    PIC12F675_BASE_TARGETS || exit 2
 
 HOST_BASE_TARGETS=()
 declare -A host_baseline_seen=()
@@ -2046,6 +2133,63 @@ else
 fi
 rm -rf "$P320_BASE"
 
+# --- PIC12F675 toolchain probe ------------------------------------------------
+# Same discipline as both probes above, with one part-specific addition: the
+# sandbox check runs FIRST, because this part's lanes all consume a DERIVED
+# image and a sandbox that cannot derive one skips every lane with status 0.
+# Every distinct kill command is baselined on the unmutated tree, again derived
+# from the table itself rather than written out here -- a mutant whose kill
+# command was never baselined is a mutant whose nonzero status could mean
+# "sandbox broken" rather than "fault detected".
+PIC12F675_OK=0
+PIC12F675_WHY="tools absent"
+echo
+echo "=== PIC12F675 toolchain probe (gates its mutants) ==="
+if ! P675_BASE="$(mktemp -d "$RESULT_DIR/pic675-baseline.XXXXXX")"; then
+    echo "ERROR: could not create PIC12F675 mutation probe sandbox" >&2
+    exit 2
+fi
+if ! copy_tree "$P675_BASE"; then
+    echo "ERROR: could not populate PIC12F675 mutation probe sandbox" >&2
+    rm -rf "$P675_BASE"
+    exit 2
+fi
+if ! validate_pic12f675_sandbox "$P675_BASE"; then
+    rm -rf "$P675_BASE"
+    exit 2
+fi
+echo "PIC12F675 mutation sandbox helpers: PASS"
+
+if mutation_bounded "$MUTATION_MAKE" -C "$P675_BASE" pic12f675-simcal >/dev/null 2>&1 \
+   && command -v "$GPSIM" >/dev/null 2>&1 \
+   && command -v "$PIC_SOAK_CXX" >/dev/null 2>&1 \
+   && [ -f "$PIC_SOAK_GPSIM_INC/sim_context.h" ] \
+   && pkg-config --exists glib-2.0 2>/dev/null; then
+    P675_BASELINES_OK=1
+    for target in "${PIC12F675_BASE_TARGETS[@]}"; do
+        # Intentional word splitting, as in the PIC10F320 probe: each field is
+        # optional VAR=value assignments followed by one Make target.
+        if run_mutation_make_command "$P675_BASE" "$target" \
+                "GPSIM=$GPSIM" >/dev/null 2>&1; then
+            echo "baseline $target: PASS"
+        else
+            echo "baseline $target: FAIL"
+            P675_BASELINES_OK=0
+        fi
+    done
+    if [ "$P675_BASELINES_OK" -eq 1 ]; then
+        PIC12F675_OK=1
+        echo "XC8 + gpsim + libgpsim present, all baselines PASS -> PIC12F675 mutants ENABLED"
+    else
+        PIC12F675_WHY="baseline FAILED"
+        MUT_BASELINE_FAILED=1
+        echo "a PIC12F675 kill-target baseline failed -> its mutants SKIPPED"
+    fi
+else
+    echo "XC8/gpsim/libgpsim absent -> PIC12F675 mutants SKIPPED"
+fi
+rm -rf "$P675_BASE"
+
 # --- AVR-XT toolchain probe ---------------------------------------------------
 # Same discipline as both PIC probes: enable the ATtiny202 mutants only when the
 # ATtiny_DFP and the patched yasimavr venv both resolve AND every DISTINCT kill
@@ -2135,6 +2279,16 @@ if [ "$PIC_TARGET_OK" -eq 1 ]; then
         file=${MUTATION_RECORD_FIELDS[0]}; sed_expr=${MUTATION_RECORD_FIELDS[1]}
         variant=${MUTATION_RECORD_FIELDS[2]}; desc=${MUTATION_RECORD_FIELDS[3]}
         job_specs+=("$target_cat$US""pictarget$US$variant$US$file$US$sed_expr$US$desc")
+    done
+fi
+
+if [ "$PIC12F675_OK" -eq 1 ]; then
+    p675_cat="${#PIC12F675_MUTATIONS[@]} PIC12F675 mutants (gpsim/target aggregate/soak)"
+    for entry in "${PIC12F675_MUTATIONS[@]}"; do
+        mutation_parse_record "PIC12F675 collection" 4 "$entry" || exit 2
+        file=${MUTATION_RECORD_FIELDS[0]}; sed_expr=${MUTATION_RECORD_FIELDS[1]}
+        target=${MUTATION_RECORD_FIELDS[2]}; desc=${MUTATION_RECORD_FIELDS[3]}
+        job_specs+=("$p675_cat$US""make$US$target$US$file$US$sed_expr$US$desc")
     done
 fi
 
@@ -2243,6 +2397,12 @@ if [ "$PIC10F320_TOOL_OK" -eq 1 ]; then
 else
     echo "PIC10F320 mutants: host lanes RAN; target/soak SKIPPED ($PIC10F320_TOOL_WHY)"
     pic_skipped=$((pic_skipped + ${#PIC10F320_TOOL_MUTATIONS[@]}))
+fi
+if [ "$PIC12F675_OK" -eq 1 ]; then
+    echo "PIC12F675 mutants: RAN (gpsim + target aggregate + soak)"
+else
+    echo "PIC12F675 mutants: SKIPPED ($PIC12F675_WHY)"
+    pic_skipped=$((pic_skipped + ${#PIC12F675_MUTATIONS[@]}))
 fi
 # The ATtiny202 lane is all-or-nothing (one probe, one toolchain) and is counted
 # separately from the PIC total so the summary keeps saying which substrate went

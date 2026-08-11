@@ -3147,7 +3147,7 @@ test-strict-tools:
 test-workload-rebuild:
 	./test/test_workload_rebuild.sh
 
-# The PIC counterpart: both chips' soak binaries compile their workload sizing in
+# The PIC counterpart: all three chips' soak binaries compile their workload sizing in
 # as -D flags, so their file rules must be unconditionally out of date. Fake
 # compiler, so it needs no gpsim/glib and runs in `make test`.
 test-pic-build-rebuild:
@@ -6404,7 +6404,7 @@ help:
 	@echo "                        (PIC10F322_TARGET_VARIANT); pic10f322-test-target-variants runs all"
 	@echo "  pic10f322-program     flash one PIC variant to hardware (VARIANT=, PIC10F322_PROG=pk2cmd|ipecmd)"
 	@echo "PIC12F675 staged standalone target (not release-supported; omitted from all/release):"
-	@echo "  No mutation, dedicated CI or program integration yet."
+	@echo "  No dedicated CI or program integration yet."
 	@echo "  pic12f675-test        all PIC12F675 pre-hardware checks (CONFIG + analysis + source"
 	@echo "                        coverage + calibration contract + gpsim + stack bound)"
 	@echo "  pic12f675             build all variants for PIC12F675 (XC8) + 1024-word budget gate"

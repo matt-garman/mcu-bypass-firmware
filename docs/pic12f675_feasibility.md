@@ -8,9 +8,9 @@ oscillator-calibration image derivation, CLI gpsim functional tests, and
 selected-variant libgpsim I/O, lock-step and fault-injection lanes, the
 long-duration soak, and both authoritative aggregates over them.
 
-PIC12F675 is intentionally absent from the default `all` goal, mutation
-topology, dedicated full-tool CI, release integration, programming, and
-hardware-bench validation. It is therefore not release-supported.
+PIC12F675 is intentionally absent from the default `all` goal, dedicated
+full-tool CI, release integration, programming, and hardware-bench validation.
+It is therefore not release-supported.
 
 The 2026-08-05 assessment, design rationale, spike provenance and proposed
 sequencing are retained below. Unless explicitly marked as a current or dated
@@ -930,7 +930,7 @@ string `attach n1 fsw ra3` in routed stimuli — that assertion becomes per-part
 | `pic12f675-test-soak` | re-derived timing budgets (§4.4.1); calibration injection |
 | `pic12f675-test-target-variants` | fail-closed aggregate, same shape |
 | `test-target-matrix`, `test-target-lane-markers` | extend to a third PIC chip |
-| Mutation | new topology entries; the guard set differs from the 322's |
+| Mutation | 13 entries in their own table with their own toolchain probe and sandbox validator; weighted toward the shadow, sub-tick, comparator, OSCCAL and ANSEL-mapping guards the 322 has no counterpart for |
 | Build / budget | `build_pic12f675/`, `PIC12F675_FLASH_WORDS = 1024`, fake-XC8 `test-pic-build` producer |
 | Release | image set, `MANIFEST.md`, provenance, `release/README.md` flashing notes (§8) |
 | CI | new job or matrix entry; `test_ci_local_routing.sh` |
@@ -964,8 +964,8 @@ serves multiple parts, part name where the repository builds exactly one:
 | Build macro | `BYPASS_MCU_PIC12F675` (new arm in `src/bypass_output_common.h`) |
 | Build dir | `build_pic12f675/` |
 | Image stem | `bypass-pic12f675-<variant>` |
-| Implemented target families | build, analysis, coverage, stack, CONFIG, calibration, CLI gpsim, selected-variant libgpsim I/O, lock-step and fault, the long-duration soak, and the pre-hardware and fail-closed target aggregates |
-| Deferred integration | default `all`, mutation, dedicated CI, release and programming |
+| Implemented target families | build, analysis, coverage, stack, CONFIG, calibration, CLI gpsim, selected-variant libgpsim I/O, lock-step and fault, the long-duration soak, the pre-hardware and fail-closed target aggregates, and the mutation topology |
+| Deferred integration | default `all`, dedicated CI, release and programming |
 
 **Name-length contract:** `bypass-pic12f675-cd4053_with_mute.hex` is 37
 characters — **exactly** the current longest name
@@ -1067,10 +1067,11 @@ green, independently revertible sequencing below.
 a single-part PIC12F675 shell, and Model B. Step 1 is not applicable unless the
 ISR alternative is reconsidered; steps 2 through 9 are implemented — step 9
 re-derived the holds through the tick period rather than letting the slack absorb
-the 1.024 ms stretch (§4.4.1). Step 10 is partly done: `pic12f675-test` and
+the 1.024 ms stretch (§4.4.1). Step 10 is nearly done: `pic12f675-test` and
 `pic12f675-test-target{,-variants}` are implemented and carry the third leg of
-`test-target-matrix` and `test-target-lane-markers`; the mutation topology and
-dedicated CI routing remain, as do the broader documentation,
+`test-target-matrix` and `test-target-lane-markers`, and 13 mutants with their
+own toolchain probe and sandbox validator take the mutation inventory to 111;
+dedicated CI routing remains, as do the broader documentation,
 release/programming and hardware portions of step 11. The table retains the original dependency order rather than
 claiming every row is open.
 

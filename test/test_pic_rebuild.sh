@@ -76,11 +76,16 @@ blank_prereq() {
 	checks=$((checks + 1))
 }
 
-# ONE soak source, not two: PIC10F320_SOAK_SRC = $(PIC_SOAK_SRC) (merge plan §4
-# FOLD), so both chips' rules name test/pic/test_soak_pic.cc. A
-# test/pic10f320/ counterpart would fabricate a prerequisite no rule has.
+# ONE soak source for the two 10F32x parts: PIC10F320_SOAK_SRC = $(PIC_SOAK_SRC)
+# (merge plan §4 FOLD), so both chips' rules name test/pic/test_soak_pic.cc. A
+# test/pic10f320/ counterpart would fabricate a prerequisite no rule has. The
+# PIC12F675 has its own adapter, and all three share the core header below.
 blank_prereq test/soak_timing_config.h
 blank_prereq test/pic/test_soak_pic.cc
+blank_prereq test/pic/test_soak_pic12f675.cc
+# $(PIC_TARGET_SOAK_CORE_HDR) -- the shared soak mechanism, a prerequisite of
+# every chip's soak rule since the adapter split.
+blank_prereq test/pic/test_soak_pic_core.h
 # $(PIC_PIN_LOOKUP_HDR) -- the exact-pin lookup helper is a prerequisite of BOTH
 # chips' soak rules. Its absence is what broke this fixture, and then the
 # mutation sandbox, before the two builders were converged.
@@ -176,13 +181,19 @@ check_chip "PIC10F322" "test/pic/test_soak_pic" \
 	PIC_SOAK_CXX PIC10F322_SOAK_DURATION_MS ""
 check_chip "PIC10F320" "build_pic10f320/test_soak_pic" \
 	PIC10F320_SOAK_CXX PIC10F320_SOAK_DURATION_MS ""
+# The PIC12F675 shares $(PIC_SOAK_CXX) with the 322 and, since the adapter
+# split, the core header too -- so its own -D flags are the only thing keeping
+# its binary distinct.
+check_chip "PIC12F675" "test/pic/test_soak_pic12f675" \
+	PIC_SOAK_CXX PIC12F675_SOAK_DURATION_MS ""
 
-# --- the two chips must not share one binary ---------------------------------
-# Since the §4 FOLD they compile from the SAME source, differing only in the -D
-# flags and the output path -- which is exactly what makes a shared output path
-# the live hazard here: it would leave one chip's soak silently running the
-# other chip's image.
+# --- the three chips must not share one binary -------------------------------
+# The two 10F32x parts compile from the SAME source since the §4 FOLD, and all
+# three now share the same core header, differing only in the -D flags and the
+# output path -- which is exactly what makes a shared output path the live
+# hazard here: it would leave one chip's soak silently running another's image.
 [ -f "$repo/test/pic/test_soak_pic" ] && [ -f "$repo/build_pic10f320/test_soak_pic" ] \
+	&& [ -f "$repo/test/pic/test_soak_pic12f675" ] \
 	|| fail "expected a separate soak binary per chip"
 checks=$((checks + 1))
 
