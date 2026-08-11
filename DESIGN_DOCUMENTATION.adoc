@@ -358,7 +358,7 @@ datasheet summary.
 
 ....
                                 +----+
-                       V_DD pin1-|    |-pin8 V_SS (GND)
+                      V_DD pin1-|    |-pin8 V_SS (GND)
     (T1CKI/OSC1/CLKIN) GP5 pin2-|    |-pin7 GP0 (AN0/CIN+/ICSPDAT)
  (AN3/T1G/OSC2/CLKOUT) GP4 pin3-|    |-pin6 GP1 (AN1/CIN-/Vref/ICSPCLK)
           (~MCLR/V_PP) GP3 pin4-|    |-pin5 GP2 (AN2/T0CKI/INT/COUT)
