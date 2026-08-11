@@ -652,7 +652,8 @@ FORCE:
         test-target-matrix test-target-lane-markers test-lockstep-progress \
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
-        test-variant-map-contract test-makefile-name-contract \
+        test-variant-map-contract test-makefile-name-contract test-todo-index \
+        test-pinout-alignment \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract test-static-assert-guards \
         pic10f322-test-target pic10f322-test-target-variants pic10f322-test-io pic10f322-test-lockstep \
@@ -2681,7 +2682,8 @@ TEST_GATES_LATE = \
         test-release-qualification test-release-history \
         test-build-serialization test-target-matrix \
         test-target-lane-markers test-lockstep-progress test-soak-timing \
-        test-variant-map-contract test-makefile-name-contract \
+        test-variant-map-contract test-makefile-name-contract test-todo-index \
+        test-pinout-alignment \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract \
         test-soak-reset-witness test-strict-tools test-workload-rebuild \
@@ -2945,6 +2947,35 @@ test-variant-map-contract:
 # PIC10F322 for a whole release, on a PIC_GPSIM_PROC= nothing read any more.
 test-makefile-name-contract: python-version-valid
 	@python3 test/test_makefile_name_contract.py
+
+# TODO.md states its own index invariant -- "the stable ID in each row matches
+# exactly one open section above" -- and nothing checked it, so it drifted: the
+# 2026-08-10 MISRA-review commit added a section with no summary row. Same
+# family as the name contract above: a document that claims a correspondence
+# should have that correspondence enforced rather than reviewed.
+# The checker is named as a PREREQUISITE, not just inside the recipe: the
+# clean-contract oracle is `make -rRn --print-data-base`, which sees only files
+# that are targets or prerequisites, so a helper mentioned in recipe text alone
+# can stay untracked forever.
+.PHONY: test-todo-index
+test-todo-index: python-version-valid test/test_todo_index.py TODO.md
+	@python3 test/test_todo_index.py
+
+# The package pinout diagrams are transcribed from each device pack's own pinout
+# data and are what somebody wires a board from, so a whitespace defect in one is
+# a documentation defect in the thing most likely to be trusted on sight. The
+# PIC12F675 diagram shipped with one extra leading space on its V_DD row, putting
+# that row's walls one column right of the corners and every other row; it
+# rendered visibly stepped and survived review, because that is the class of
+# defect a reader's eye completes for them.
+# Same prerequisite discipline as the gate above -- the checker is named, not
+# just invoked -- and the same vacuity discipline inside it: the scan asserts a
+# floor on the number of diagrams it found, and six synthetic probes (one of them
+# the real historical defect) run on every invocation, so a checker that has
+# stopped recognizing anything fails instead of passing quietly.
+.PHONY: test-pinout-alignment
+test-pinout-alignment: python-version-valid test/test_pinout_alignment.py
+	@python3 test/test_pinout_alignment.py
 
 # Host-only proof that every static-analysis target validates its variant
 # request before analyzing anything. $(FW_SOURCES) maps $(VARIANTS) through
@@ -6557,26 +6588,55 @@ RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(XT_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(
 #
 # WHY THE PIC12F675 IS NOT RELEASED. It has never run on silicon. Every claim
 # this project makes about it comes from simulation, formal proof and static
-# analysis -- thorough, and not the same claim as "it has run on the part". Two
-# of its open risks are specifically invisible to all of that: whether a
-# programmer preserves the factory oscillator trim in flash word 0x3FF, and
-# whether it preserves the BG<1:0> bandgap bits in the CONFIG word. A device
-# that lost either still appears to work. See docs/pic12f675_feasibility.md
-# section 8, items 1 and 2, and `make pic12f675-program`, which is how they get
-# closed.
+# analysis -- thorough, and not the same claim as "it has run on the part".
+# Three of its open risks are specifically invisible to all of that: whether a
+# programmer preserves the factory oscillator trim in flash word 0x3FF, whether
+# it preserves the BG<1:0> bandgap bits in the CONFIG word, and whether GP2 --
+# the one output pin whose input buffer is a Schmitt Trigger -- reads back above
+# 0.8*VDD where cd4053_with_mute holds it high, which the per-tick
+# port-follows-shadow guard requires and which gpsim's ideal pin model cannot
+# test. A device that lost either of the first two still appears to work; one
+# that fails the third watchdog-resets forever. See
+# docs/pic12f675_feasibility.md section 8, items 1, 2 and 9. The first two are
+# closed by `make pic12f675-program`, which states them before every write; the
+# third is closed with a meter.
 #
 # GRADUATING THE PART means, together and in this order:
-#   0. close section 8 items 1 and 2 at a bench, on real silicon;
+#   0. close section 8 items 1, 2 and 9 at a bench, on real silicon;
 #   1. move PIC12F675_STAGED_IMAGES into RELEASE_IMAGES, and add
 #      $(PIC12F675_BUILD_DIR) to RELEASE_IMAGE_DIRS above;
-#   2. in scripts/make-release.sh: a build step, a qualification step, and an
-#      img_row manifest arm -- that generator refuses to describe an image whose
-#      MCU it does not recognize, so a missed arm fails the release loudly
-#      (test-release-images pins that no arm matches a staged image today);
-#   3. record the flashing procedure in release/README.md, INCLUDING the
+#   2. extend the two publication inventories immediately below: the three
+#      soak combinations into RELEASE_SOAK_NAMES, and build-pic12f675.log,
+#      pic12f675-test.log and pic12f675-test-target-variants.log into
+#      RELEASE_FIXED_EVIDENCE_FILES. Both fail closed and both fail LATE:
+#      scripts/make-release.sh compares its actual soak set against the first
+#      BEFORE starting the 24-hour phase, and
+#      scripts/verify-release-qualification.sh requires the retained evidence
+#      to match the second exactly AFTER that phase ends;
+#   3. in scripts/make-release.sh: preflight req_file lines for
+#      PIC12F675_DFP_INCLUDE and PIC12F675_DEVICE_INI -- asserted through this
+#      part's OWN variables, for the reason the PIC10F320 pair states there;
+#      the soak's compiler and libgpsim requirements need nothing new, since
+#      this part reuses PIC_SOAK_CXX and PIC_SOAK_GPSIM_INC -- then a build
+#      step, a qualification step, a soak-combo loop producing the step 2
+#      names, and an img_row manifest arm. That generator refuses to describe
+#      an image whose MCU it does not recognize, so a missed arm fails the
+#      release loudly (test-release-images pins that no arm matches a staged
+#      image today). The soak loop must build pic12f675-simcal FIRST -- one
+#      prerequisite gets both halves, since it depends on pic12f675. This is
+#      the only part whose soak runs a DERIVED image and reads _gpio_shadow_
+#      out of the build's .sym, so a loop copied from the PIC10F32x arms
+#      compiles with no shadow address and fails closed at soak-build time,
+#      an hour into the run;
+#   4. in .github/workflows/release.yml: build the part on the pinned runner
+#      and re-run its lanes there. The reproducibility gate compares the
+#      rebuilt set against the Makefile's RELEASE_IMAGES, so a part added in
+#      step 1 and absent here fails the tag build -- the latest and most
+#      expensive place anything in this list can fail;
+#   5. record the flashing procedure in release/README.md, INCLUDING the
 #      calibration-word preservation requirement -- an image published without
 #      it is a device with an untrimmed oscillator that still appears to work;
-#   4. update the pinned counts in test/test_release_images.sh (18 -> 21).
+#   6. update the pinned counts in test/test_release_images.sh (18 -> 21).
 PIC12F675_STAGED_IMAGES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(call fw_image,$(v),$(PIC12F675_TAG)).hex)
 RELEASE_STAGED_IMAGES := $(PIC12F675_STAGED_IMAGES)
 
@@ -6793,6 +6853,8 @@ help:
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
 	@echo "  test-makefile-name-contract  every make goal, variable and child-environment name a file or doc uses really exists (included in test)"
+	@echo "  test-todo-index    TODO.md's priority summary matches its open sections, both ways (included in test)"
+	@echo "  test-pinout-alignment  every ASCII package-pinout diagram draws a square box (included in test)"
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
 	@echo "  test-variant-selector-guard  every lane rejects a bad single-variant selector instead of skipping (included in test)"
 	@echo "  test-clean-contract  clean/clean-tests remove everything the Makefile builds (included in test)"

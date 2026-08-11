@@ -330,8 +330,8 @@ void hw_pin_set_high(uint8_t const pin) {
 }
 ```
 
-This has one pleasant consequence and one unpleasant one, and both belong in the
-design record:
+This has one pleasant consequence and two unpleasant ones, and all three belong
+in the design record:
 
 - **Pleasant:** the integrity check gets *stronger* than the 322's. With a shadow
   it becomes possible to compare intent against reality — the shadow against the
@@ -344,6 +344,40 @@ design record:
   but note that it guards *itself*: an upset in the shadow diverges it from either
   the expected mask or the port, and either way the gate fires. It should also be
   added to the fault-injection matrix as its own case.
+- **Unpleasant, and specific to GP2:** reading the port back makes the guard
+  depend on the *DC input characteristics* of the output pins, and those are not
+  uniform. DS41190G Table 1-1 makes GP2 the only Schmitt-Trigger input in this
+  design's output set; GP0, GP1, GP3, GP4 and GP5 are TTL. The two are judged
+  against different thresholds — D040 gives the TTL buffers V<sub>IH</sub> min
+  2.0 V, D041 gives GP2 V<sub>IH</sub> min 0.8·V<sub>DD</sub> (4.0 V at 5 V) —
+  while the drive side is characterized at a single point: D090 gives
+  V<sub>OH</sub> min V<sub>DD</sub> − 0.7 V at I<sub>OH</sub> = −3.0 mA,
+  V<sub>DD</sub> = 4.5 V, which is 3.8 V against a 3.6 V Schmitt threshold, and
+  nothing at all is specified above 3 mA.
+
+  `cd4053_with_mute` holds GP0|GP1|GP2 high in ENGAGED, so GP2's readback is
+  judged at 0.8·V<sub>DD</sub> every 1.024 ms tick while its two neighbours are
+  judged at 2.0 V. A pin that is driving its load *correctly* but whose
+  V<sub>OH</sub> lands between 2.0 V and 0.8·V<sub>DD</sub> reads back low, the
+  gate fires, and the shell watchdog-resets — permanently, because the condition
+  is static.
+
+  Both documented board options clear this comfortably, and it is worth being
+  precise about why, because the two present different loads. On the CD4053
+  board the MCU pin drives a **MOSFET gate**, with the analog switch
+  level-shifted behind it, so the DC load is gate leakage. On the TMUX4053 the
+  MCU pin drives the control input **directly**, and both boards additionally
+  fit a **pulldown to ground** — the fail-safe that makes an undriven pin mean
+  BYPASS (`DESIGN_DOCUMENTATION.adoc`, GPIO pin assignment and the
+  CD4053-vs-TMUX4053 notes). That pulldown is the only real resistive load on
+  the pin and the only part of it a builder chooses: at the design's 100 kΩ it
+  draws 50 µA at 5 V, roughly 60× inside D090's characterized 3 mA point. The
+  requirement therefore bites only on a substituted low-value pulldown, or on a
+  builder who hangs something else off GP2 — which is exactly why it needs
+  writing down. It is a board precondition that the shadow comparison
+  *imports*, it belongs beside the GP3 and GP4 policies in
+  `src/bypass_pins_pic12f675.h`, and no simulator lane can see it: gpsim models
+  pins ideally. It belongs on the bench — §8 item 9.
 
 `hw_configure_output_pins()` must initialize the shadow and `GPIO` together, and
 `hw_output_state_intact()`'s `expected_high_mask` contract is unchanged from
@@ -576,8 +610,17 @@ With the prescaler assigned to the watchdog (`PSA=1`), the available periods are
 **1:16 → ~288 ms** is the closest analogue to the PIC10F322's ~256 ms and is what
 the spike used. The margin argument mirrors the 322's: worst-case pet-to-pet
 window is one tick (1.024 ms) plus the longest blocking actuation (12 ms relay
-coil pulse) ≈ **13.1 ms**, against a 288 ms nominal period. See §8 for the
-datasheet check this argument still needs.
+coil pulse) ≈ **13.1 ms**, against a 288 ms nominal period.
+
+**The 18 ms base above is the MODELLED period, and the argument does not rest on
+it** (datasheet read 2026-08-11, §8 item 4). DS41190G Table 12-4 parameter 31
+`TWDT` gives the unprescaled period as **10 ms min / 17 ms typ / 25 ms max**
+(30 ms max at extended temperature) — so the typical is 17 ms, not 18 ms, and
+1:16 is 272 ms typical rather than 288 ms. 18 ms is what gpsim models and what
+the family is conventionally quoted at; both are *nominal* figures, and a
+watchdog margin argument may not be built on a nominal figure at all. The one
+that matters is the **minimum: 10 ms × 16 = 160 ms**, which is what the shell
+cites and what the 13.1 ms window is judged against — a factor of 12.
 
 Simulation confirms the model exactly: with `PSA=1, PS=1:16` a starved watchdog
 reset fired at **cycle 288,039**, i.e. 288.0 ms at 1 MIPS — precisely 18 ms × 16
@@ -994,7 +1037,20 @@ PIC12F629 family generalization remains deferred.
 
 None blocks the Model B feasibility assessment; item 3 blocks selection of the
 ISR model. All should be closed before the port is declared release-supported.
-They are listed worst-first.
+They are listed worst-first; item 9 was opened after this list was first
+numbered and is appended rather than inserted, so that the cross-references to
+these numbers elsewhere in the repository stay valid.
+
+**Status 2026-08-11.** Items 4, 5 and 6 are CLOSED — all three were datasheet
+reads rather than bench work, and DS41190G answers them; item 4's own stated
+assumption turned out to be wrong in the unsafe direction, and its conclusion
+survives anyway. Items 1, 2 and 9 are the ones that need silicon; for 1 and 2, `make
+pic12f675-program` states them before every write and refuses the one adjacent
+hazard this port introduced. Item 9 was opened on 2026-08-11 in review of the
+port branch; it also needs silicon, but a meter rather than a programmer. Items
+3 and 7 are Model-B-inapplicable and lane-local respectively. **What is left is
+a bench**, tracked in `TODO.md` as `T3-pic12f675-bench` together with the
+graduation diff that follows it.
 
 1. **Bandgap calibration bits in the CONFIG word (`BG<1:0>`).** These are
    factory-calibrated per device and set the BOD/POR trip voltages. XC8 emitted
@@ -1042,20 +1098,81 @@ They are listed worst-first.
    If it does not fit, the ISR call graph has to be flattened or Model B chosen —
    a shell-design constraint discovered too late if measured after production
    implementation.
-4. **Watchdog period characterization.** gpsim models an 18 ms base period, and
-   the §4.4 margin argument (13.1 ms worst-case pet window vs 288 ms nominal)
-   assumes the datasheet's min/max spread is no worse than the 10F32x's
-   (−37%/+69%, which the 322 shell cites from DS40001585 param 31). The
-   PIC12F629/675 spread has **not** been read here. If the fast end is materially
-   worse than assumed, the prescaler choice moves from 1:16 to 1:32.
-5. **Brown-out trip point.** Expect the same limitation the 322 documents — the
-   relay/MOSFET peripherals want >4 V and the PIC BOR cannot enforce it, making
-   this a hardware-design constraint rather than a firmware one. The 12F675's
-   actual trip voltage was not read; unlike the 322 there is **no `BORV`
-   field**, so there is not even a high/low choice to make.
-6. **INTOSC accuracy over temperature and voltage.** `__delay_ms()` pulse widths
-   and the tick cadence both ride on the 4 MHz INTOSC. Needs the datasheet figure,
-   and it feeds the §4.4.1 timing-budget derivation.
+4. **Watchdog period characterization.** *CLOSED 2026-08-11 — read, assumption
+   was wrong, conclusion holds.* DS41190G Table 12-4, parameter 31 `TWDT`,
+   "Watchdog Timer Time-out Period (No Prescaler)": **min 10 ms, typ 17 ms,
+   max 25 ms** at V<sub>DD</sub> = 5 V over −40 °C to +85 °C, and **max 30 ms**
+   at extended temperature. Three findings, in the order they matter:
+
+   - **The assumed spread was optimistic.** This item assumed the min/max spread
+     was no worse than the 10F32x's −37%/+69% (DS40001585 param 31). Measured
+     against the 17 ms typical it is **−41% / +47%**, and **+76%** at extended
+     temperature: worse at *both* ends. The assumption, not the design, was the
+     defect.
+   - **The prescaler choice is unchanged.** The trigger written into this item
+     was "if the fast end is materially worse than assumed, move 1:16 → 1:32".
+     The fast end *is* worse, and 1:16 still stands by a wide margin: 10 ms × 16
+     = **160 ms** floor against a 13.024 ms worst-case pet-to-pet window, a
+     factor of 12. Doubling to 1:32 would buy margin nothing needs and cost
+     320 ms of fault-detection latency.
+   - **The shell already cites this correctly.** `src/bypass_mcu_pic12f675.c`
+     names "DS41190G Table 12-4 parameter 31 … a 10ms unprescaled minimum, so
+     the characterized minimum here is 160ms". That citation is exact. What the
+     shell (and this document, until now) got loose is the *nominal*: 18 ms is
+     gpsim's model, while the datasheet typical is 17 ms. Nothing depends on it
+     — see the note under the §4.4 table.
+
+   Residual: none for the period itself. The margin is stated in prose on this
+   part rather than enforced at compile time as it is on the PIC10F320; filed
+   as `TODO.md` T25-wdt-margin-assert.
+5. **Brown-out trip point.** *CLOSED 2026-08-11 — read; the expected limitation
+   is confirmed, with numbers.* DS41190G Table 12-4, `BVDD` "Brown-out Detect
+   Voltage": **2.025 V min, 2.175 V max** (no typical given; the hysteresis is
+   listed TBD). Parameter 35 `TBOD` requires V<sub>DD</sub> to stay below `BVDD`
+   for at least **100 µs** for the reset to be guaranteed, and that figure is
+   characterized but not tested.
+
+   So the detector trips at roughly 2.0–2.2 V, against peripherals that want
+   >4 V — the CD4053 and the TQ2-L2-5V coil both. Between about 2.2 V and 4 V
+   the firmware runs correctly and the peripherals may not, and no configuration
+   choice available on this part changes that: unlike the PIC10F322 there is no
+   `BORV` field, so there is not even a high/low selection to make. This is a
+   **hardware-design constraint**, identical in kind to the one the 322
+   documents: a builder who needs brown-out protection at the peripheral supply
+   must provide it externally. Recorded so nobody reads `BOREN=ON` in the CONFIG
+   word as the protection it is not.
+6. **INTOSC accuracy over temperature and voltage.** *CLOSED 2026-08-11 — read;
+   nothing in the timing budget is threatened.* DS41190G Table 12-2, "Precision
+   Internal Oscillator Parameters", parameter F10 `FOSC`, "Internal Calibrated
+   INTOSC Frequency", gives three graded tolerances:
+
+   | Tolerance | Min / Typ / Max | Conditions |
+   |---|---|---|
+   | ±1% | 3.96 / 4.00 / 4.04 MHz | V<sub>DD</sub> = 3.5 V, 25 °C |
+   | ±2% | 3.92 / 4.00 / 4.08 MHz | 2.5 V ≤ V<sub>DD</sub> ≤ 5.5 V, 0 °C ≤ T<sub>A</sub> ≤ +85 °C |
+   | ±5% | 3.80 / 4.00 / 4.20 MHz | 2.0 V ≤ V<sub>DD</sub> ≤ 5.5 V, −40 °C ≤ T<sub>A</sub> ≤ +85 °C (IND) and −40 °C ≤ T<sub>A</sub> ≤ +125 °C (EXT) |
+
+   **±5% is the figure to design against**, since a pedal is an
+   industrial-temperature part in practice. Everything derived from the
+   oscillator scales by it, and each consumer keeps its margin:
+
+   - **Relay coil pulse.** 12 ms nominal becomes **11.4–12.6 ms**. The
+     Panasonic TQ-L2-5V wants a 4 ms minimum set/reset pulse, so the 3× safety
+     factor `src/bypass_output_tq2_l2_5v_relay.h` chose degrades to **2.85×**.
+     Intact.
+   - **Watchdog margin.** The pet interval is measured in ticks and stretches
+     with the oscillator (13.024 ms → **13.68 ms**); the watchdog runs on its own
+     internal RC and does *not*, so the two errors do not correlate away. Against
+     the 160 ms floor of item 4 that is still a factor of **11.7**.
+   - **Debounce.** Unaffected in the way that matters. The pure core counts
+     samples, not milliseconds, so a ±5% oscillator moves the wall-clock
+     debounce window by ±5% and changes no state-machine behaviour at all.
+
+   The tolerance also bounds what any simulator lane can honestly claim about
+   absolute timing: gpsim runs a nominal clock, so a lane asserting an absolute
+   oscillator-derived figure is asserting against the *typical* device, never
+   the worst-case one. The lanes assert relative cadences and bounded windows
+   for this reason.
 7. **`asynchronous_stimulus` initial state.** In the spike, a stimulus declared
    `initial_state 1` read **low** on `gpio5` at a checkpoint before its first
    listed transition, while the same firmware with no stimulus attached read the
@@ -1078,6 +1195,44 @@ They are listed worst-first.
    on, so the command shape is inherited from the working PIC10F322 target and
    has never been executed for this part. `pic12f675-program` was written on
    that basis, with `pk2cmd` as the default.
+9. **GP2's readback margin against its Schmitt-Trigger input buffer.**
+   *Opened 2026-08-11 in review of the port branch. Needs a meter, not a
+   datasheet — the numbers below are already read.* The §4.2 port-follows-shadow
+   comparison imports a DC precondition on the board, and it lands on exactly one
+   pin. DS41190G Table 1-1 makes GP2 the only Schmitt-Trigger input among this
+   design's outputs — V<sub>IH</sub> min **0.8·V<sub>DD</sub>** (D041), 4.0 V at
+   a 5 V supply — where GP0, GP1, GP4 and GP5 are TTL at V<sub>IH</sub> min
+   **2.0 V** (D040). The drive side is characterized at a single point: D090
+   gives V<sub>OH</sub> min V<sub>DD</sub> − 0.7 V at I<sub>OH</sub> = −3.0 mA,
+   V<sub>DD</sub> = 4.5 V — 3.8 V against a 3.6 V threshold, **0.2 V** of margin
+   — and nothing is specified above 3 mA. `cd4053_with_mute` holds GP2 high in
+   ENGAGED and `hw_output_state_intact()` re-reads it every 1.024 ms tick, so a
+   pin driving its load *correctly* but landing between 2.0 V and
+   0.8·V<sub>DD</sub> reads back low and the shell watchdog-resets permanently.
+   It binds that one variant: `cd4053_simple` leaves GP2 a spare driven low, and
+   `tq2_l2_5v_relay` raises it only inside the blocking coil pulse, which no
+   integrity check straddles.
+
+   **The reference design is not at risk.** On the CD4053 board GP2 drives a
+   MOSFET gate; on the TMUX4053 board it drives a CMOS control input. Either
+   way the only real resistive load is the 100 kΩ fail-safe pulldown both boards
+   fit — 50 µA at 5 V, roughly 60× inside the one point D090 characterizes. The
+   item is open because that margin rests on a *board* choice rather than on
+   anything this repository builds or tests, and this part has no bench
+   validation underneath it. It is the same class as items 1 and 2 — invisible
+   to every simulator lane, since gpsim models pins ideally.
+   The mutation lane's "shadow never reaches the port" mutant (deleting
+   `GPIO = gpio_shadow_` from `hw_pin_set_high`) proves the guard fires and
+   resets when the port diverges from the shadow; nothing in the repository can
+   exercise the board condition under which it would fire *spuriously*.
+
+   **Bench check:** on the `cd4053_with_mute` variant with the real load
+   attached, engage the effect and measure GP2 against V<sub>DD</sub>; confirm
+   the level exceeds 0.8·V<sub>DD</sub> and record the margin. Do it on
+   whichever of the two board options is built, since they load the pin
+   differently. The recorded margin is what bounds the minimum pulldown a
+   builder may substitute. The requirement is stated in
+   `src/bypass_pins_pic12f675.h` alongside the GP3 and GP4 pin policies.
 
 ---
 
@@ -1116,7 +1271,8 @@ a bench: the part's images are DECLARED as deliberately withheld
 disjoint at Make parse time, and `test-release-images` pins both the exclusion
 and the fact that the manifest generator has no arm for these images — so a
 graduation that skips a step fails loudly instead of publishing a PIC described
-as an ATtiny. The Makefile carries the graduation checklist. Shipping the images
+as an ATtiny. The Makefile carries the graduation checklist. The datasheet half
+of §8 is also closed (items 4, 5 and 6, read 2026-08-11). Shipping the images
 remains blocked on the hardware bench, which is the last open item. The table retains the original dependency order rather than
 claiming every row is open.
 
@@ -1133,7 +1289,7 @@ claiming every row is open.
 | 8 | libgpsim adapters: io, lockstep, fault | Rides on step 2 |
 | 9 | Soak + re-derived timing budgets | Rides on §4.4.1; simpler under the ISR model (§4.3.1) |
 | 10 | Aggregates, mutation topology, CI routing | |
-| 11 | Docs, release integration, hardware bench (§8 items 1, 2, 8) | The §8 risks close here or nowhere |
+| 11 | Docs, release integration, hardware bench (§8 items 1, 2, 8, 9) | The §8 risks close here or nowhere |
 
 Firmware is roughly a day of design plus implementation. The test infrastructure
 is the bulk of the calendar time, and step 2 gates most of it.

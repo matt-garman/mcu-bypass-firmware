@@ -123,6 +123,60 @@ file is the human-readable summary of *what changed*.
   forgets its manifest arm fails the release instead of publishing a PIC
   labelled as an ATtiny with AVR fuse bytes.
 
+- **The PIC12F675's three datasheet-read risks are closed** (DS41190G, read
+  2026-08-11). They never needed silicon, only the datasheet:
+
+  - **Watchdog period** (Table 12-4 param 31 `TWDT`): 10 ms min / 17 ms typ /
+    25 ms max, 30 ms max at extended temperature. The risk item had *assumed*
+    the spread was no worse than the PIC10F32x's −37%/+69%; measured, it is
+    −41%/+47% and +76% extended — worse at both ends. The assumption was the
+    defect, not the design: the prescaler stays at 1:16 because the argument
+    rests on the **minimum** (10 ms × 16 = 160 ms) against a 13.024 ms
+    worst-case pet window, a factor of 12. The shell's citation of that minimum
+    was exact. Note 18 ms is what gpsim models; the datasheet typical is 17 ms,
+    and nothing depends on either.
+  - **Brown-out** (Table 12-4 `BVDD`): trips at 2.025–2.175 V, with a 100 µs
+    minimum excursion. Against peripherals that want >4 V, `BOREN=ON` is
+    therefore **not** the protection it looks like, and this part has no `BORV`
+    field to raise it — a hardware-design constraint, now recorded with numbers.
+  - **INTOSC accuracy** (Table 12-2 param F10): ±1% at 3.5 V/25 °C, ±2% over
+    0–85 °C, **±5%** over the industrial and extended ranges. At the −5% corner
+    the relay coil pulse degrades from a 3× to a 2.85× margin over the TQ-L2's
+    4 ms minimum, and the watchdog margin from 12× to 11.7×. Debounce is
+    unaffected in the way that matters — the core counts samples, not
+    milliseconds.
+
+- **`TODO.md` T25-wdt-margin-assert.** Found while checking whether the margin
+  above is enforced anywhere: `src/bypass_mcu_pic10f320.c` static_asserts
+  `(TICK_PERIOD_MS + pulse) < WDT_MIN_PERIOD_MS` per blocking variant, and the
+  other four shells carry the same invariant in comments only. No shell is near
+  its floor today; the gap is that a future timing change erodes the margin
+  silently.
+
+- **`make test-todo-index`.** TODO.md states an index invariant — "the stable ID
+  in each row matches exactly one open section above" — that nothing checked,
+  and it had drifted: the 2026-08-10 MISRA-review entry added a section with no
+  summary row. The new gate pins the correspondence both ways, checks each row's
+  tier column against the section it indexes, and checks that an ID's prefix
+  matches the tier it is filed under (`T2` → Tier 2, `T25` → Tier 2.5). Both
+  missing rows were added.
+
+- **`make test-pinout-alignment`.** The ASCII package-pinout diagrams are
+  transcribed from each device pack's own pinout data and are what somebody
+  wires a board from, and nothing checked them. The PIC12F675 DIP-8 diagram had
+  shipped with one extra leading space on its `V_DD` row, putting that row's
+  package walls one column right of the corner rows and of every other pin row.
+  It rendered visibly stepped and survived review, because that is the class of
+  defect a reader's eye completes for them. The gate reads each box's wall
+  columns from its corner rows and requires every row between them to carry a
+  wall character in both, across every tracked `.md`/`.adoc` outside the frozen
+  `release/v*/` artifacts. It asserts a floor on the number of diagrams found,
+  so a checker that has stopped recognizing them fails rather than passing
+  quietly, and it runs six synthetic probes on every invocation — one of them
+  the real historical defect, which it reports by file, line, column and the
+  character actually found. The diagram itself was corrected, and a sweep of
+  the other three found no second instance.
+
 - **`TODO.md` T25-misra-header-gate.** The 2026-08-10 suppression review
   measured that cppcheck 2.13.0 sets `--error-exitcode` only from findings
   located in the file passed on the command line, so a finding in an included
