@@ -50,15 +50,16 @@ tool, re-run `make clean && make test` before relying on its output.
   Minimum avr-gcc version: 4.9 (for _Static_assert / C11 support with -std=gnu11)
   Recommended: 7.x or later (best -fshort-enums / LTO support for tiny parts)
 
-== PIC toolchain (PIC10F322 and PIC10F320, optional second toolchain)
+== PIC toolchain (PIC10F322, PIC10F320 and PIC12F675, optional second toolchain)
 
-ONE XC8 + device-pack installation serves BOTH PIC parts. They are kept on
-separate Makefile variable pairs (`PIC_CC`/`PIC_DFP` for the 10F322,
-`PIC10F320_CC`/`PIC10F320_DFP` for the 10F320) so either chip can be re-pinned to a
-different compiler or pack without silently moving the other; by default the
+ONE XC8 + device-pack installation serves ALL THREE PIC parts. They are kept on
+two Makefile variable pairs (`PIC_CC`/`PIC_DFP` for the 10F322 and the 12F675,
+`PIC10F320_CC`/`PIC10F320_DFP` for the 10F320) so the 320 can be re-pinned to a
+different compiler or pack without silently moving the other two; by default the
 320's variables track the 322's. The release manifest probes and records both
 selected compiler paths and versions independently, even when they resolve to
-the same installation.
+the same installation. The PIC12F675 is staged and not release-supported, so it
+has no manifest entry; it is gated in CI on the same installation.
 
 The PIC10F322 port (`make pic10f322`, `make pic10f322-test`,
 `make pic10f322-test-target-variants`) is a SEPARATE, optional toolchain, entirely
@@ -74,11 +75,12 @@ aggregate so missing PIC tooling cannot produce a false green release gate.
                 override the path with PIC_CC=... on the make command line.
 
   Device pack:  PIC10-12Fxxx_DFP  v1.9.189  (Microchip device family pack)
-                Supplies the device-support + register headers for BOTH parts
-                (proc/pic10f322.h and proc/pic10f320.h) that the XC8 base
-                install does NOT include.  CI and the release script assert
-                BOTH headers: one pack ships both, so a truncated unpack would
-                otherwise let a whole chip's lane skip silently.
+                Supplies the device-support + register headers for ALL THREE
+                parts (proc/pic10f322.h, proc/pic10f320.h and
+                proc/pic12f675.h) that the XC8 base install does NOT include.
+                CI and scripts/ci-local.sh assert ALL THREE headers: one pack
+                ships them all, so a truncated unpack would otherwise let a
+                whole part's lane skip silently.
                 install dir: /opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189
                 NOTE: -mdfp must point at the pack's xc8/ SUBDIR, not the pack
                 root (pointing at the root gives XC8 error 2104):
@@ -96,6 +98,10 @@ aggregate so missing PIC tooling cannot produce a false green release gate.
                 processor overridden (PIC10F320_GPSIM_PROC=p10f320).
                 note: gpsim 0.32.1 DOES support the p10f322; its I/O pins are
                 named ra0..ra3 (lower-case) in stimulus/attach scripts.
+                note: gpsim 0.32.1 also supports the p12f675, whose pins are
+                gpio0..gpio5.  That lane simulates DERIVED images (see python3
+                below): an image without the oscillator calibration word in
+                program word 0x3FF never reaches main().
 
   libgpsim:     gpsim-dev + libglib2.0-dev + g++ + pkg-config  (Ubuntu packages)
                 Needed by `make pic10f322-test-fault` (SFR / pull-up / ctx_
@@ -125,6 +131,10 @@ aggregate so missing PIC tooling cannot produce a false green release gate.
                 This host-Python range has no upper cap and is distinct from the
                 patched yasimavr build/runtime requirement, which supports only
                 standard 64-bit CPython 3.9 through 3.13 (see below).
+                The PIC12F675 needs python3 for a second reason: `make
+                pic12f675-simcal` runs the repository's calibration-word
+                injector to derive its simulator images, so every 12F675
+                simulator lane fails closed without an interpreter.
                 `make test-pic10f320-return-stack-oracle` runs deterministic parser and
                 control-flow fixtures in the normal `make test` / `test-long`
                 graph. Every successful `make pic10f320` build applies the oracle

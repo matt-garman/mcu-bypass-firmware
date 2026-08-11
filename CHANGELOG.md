@@ -30,6 +30,64 @@ file is the human-readable summary of *what changed*.
 
 ## [Unreleased]
 
+### Added
+
+- **PIC12F675 support, staged and not release-supported.** A fourth core
+  generation (Microchip *classic* mid-range, beside AVR Classic, AVR-XT and the
+  enhanced mid-range PIC10F32x) and a fourth modular shell,
+  `src/bypass_mcu_pic12f675.c`, over the same compiled `src/bypass_pure.c`
+  core. 1024 program words, ~51% used by the largest variant.
+
+  The part needs its own shell rather than a PIC10F32x rename because the
+  classic core lacks four things the 32x has, each with a design consequence:
+
+  - **No `LATx`.** Reading `GPIO` returns physical pin levels, so the 322's
+    read-modify-write idiom would be a read-modify-write *on the pins*. Every
+    output write goes through an SRAM shadow instead, and the shadow guards
+    itself — the per-tick integrity check compares it against both the expected
+    mask and the physical port, so an upset in either direction forces a reset.
+    That comparison is strictly stronger than anything the 322 can do, where
+    latch and port are two views of one register.
+  - **No period register and one shared prescaler.** `OPTION_REG.PSA` assigns
+    the single prescaler to the timer *or* the watchdog, never both. It goes to
+    the watchdog (1:16, ~288 ms nominal, 160 ms characterized minimum), leaving
+    TMR0 unprescaled at F_OSC/4; four 256 us rollovers counted in software make
+    a **1.024 ms** tick. The 2.4% stretch changes nothing in the debounce core,
+    which counts samples, but it moves every physical timing figure.
+  - **No `OSCCON`.** The 4 MHz INTOSC is fixed by `FOSC=INTRCIO` and trimmed by
+    a factory `OSCCAL` value in the last program word. The runtime guard
+    therefore compares against a value captured at init, not a constant.
+  - **A comparator that owns GP0..GP2 out of reset** — this design's three
+    active output pins — so `CMCON` and `ADCON0` are part of bring-up and part
+    of the per-tick guard set.
+
+  The footswitch is on GP5, not on the input-only pin the 322 uses: `WPU`
+  implements bits 0,1,2,4,5, so GP3 has no internal weak pull-up and siting the
+  switch there would delete the pull-up integrity check from this target.
+
+  Validation is the full pre-hardware set: build and 1024-word budget, CONFIG
+  decode, cppcheck + MISRA, host-gcov shipping-source coverage, the 8-level
+  hardware return-stack bound, gpsim CLI functional tests, and libgpsim
+  target-I/O, lock-step, fault-injection and long-duration soak lanes, behind
+  the fail-closed `pic12f675-test` and `pic12f675-test-target-variants`
+  aggregates. 13 mutants with their own toolchain probe take the mutation
+  inventory to 111. Both aggregates run in CI and in `scripts/ci-local.sh`.
+
+  Two things are deliberately absent. Simulator images are **derived**: an
+  oscillator calibration word is injected into a *copy*, because an erased
+  image never reaches `main()` in gpsim — and `pic12f675-test-calibration`
+  proves the injection leaves the shipping images byte-identical. And there are
+  **no release images, no programming target, and no hardware-bench
+  validation**, which is what "not release-supported" means here. See
+  `docs/pic12f675_feasibility.md`.
+
+- **`TODO.md` T25-misra-header-gate.** The 2026-08-10 suppression review
+  measured that cppcheck 2.13.0 sets `--error-exitcode` only from findings
+  located in the file passed on the command line, so a finding in an included
+  header is printed and ignored. Every D-2/D-3 entry therefore suppresses
+  output rather than a failure today; `MISRA_COMPLIANCE.md` records the
+  measurement and the qualifier.
+
 ## [0.9.8] - 2026-08-08
 
 ### Added

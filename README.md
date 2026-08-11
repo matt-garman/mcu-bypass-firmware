@@ -9,6 +9,9 @@ ATtiny202, and the Microchip PIC10F322 and PIC10F320. Release `v0.9.6` is the
 first unified release covering all six: 18 prebuilt images qualified from the
 final source, including ATtiny202 and PIC10F320 for the first time.
 
+A seventh part, the Microchip PIC12F675, is present and fully gated in CI but
+is **not release-supported** — see the table below.
+
 ## Targets
 
 | Target | Status | Notes |
@@ -18,6 +21,7 @@ final source, including ATtiny202 and PIC10F320 for the first time.
 | **ATtiny202 (AVR-XT)** | release-supported | first released in `v0.9.6`; 2 KB flash, SOIC-8 only (no DIP), UPDI programming |
 | PIC10F322 | release-supported | 512 words |
 | **PIC10F320** | release-supported | **first released here in `v0.9.6`; constrained exception: 256 words, so the debounce algorithm is implemented directly rather than by compiling the verified core — see [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md)** |
+| PIC12F675 | **staged — not release-supported** | classic mid-range: 1024 words, no `LATx` (the output latch is an SRAM shadow), 1.024 ms tick. Every pre-hardware lane the release parts have, plus a calibration contract they do not need, and all of it gated in CI — but no release images, no `pic12f675-program`, and **no hardware-bench validation**. See [docs/pic12f675_feasibility.md](docs/pic12f675_feasibility.md) |
 
 Every release target except one compiles the verified core (`src/bypass_pure.c`)
 directly into its shipping image. The release-supported PIC10F320 cannot — its
@@ -125,6 +129,22 @@ make pic10f320-test                 # host equivalence/actuation/fault/coverage,
                                  #   hashes, CONFIG, return stack, analysis/gpsim
 make pic10f320-test-target-variants # fail-closed libgpsim fault/lock-step/I/O gates
 ```
+
+The PIC12F675 has its own lane on the same XC8 installation (`pic12f675-*`
+targets, `PIC12F675_*` variables, and the 322's `PIC_CC`/`PIC_DFP` pair):
+
+```
+make pic12f675                      # build all variants + 1024-word flash-budget gate
+make pic12f675-test                 # CONFIG, analysis, source coverage, calibration
+                                    #   contract, gpsim, and the 8-level stack bound
+make pic12f675-test-target-variants # fail-closed libgpsim fault/lock-step/I/O gates
+```
+
+Its simulator lanes run *derived* images: `make pic12f675-simcal` injects the
+oscillator calibration word that a real device carries in its last program word
+and that an erased simulator image does not, and `make pic12f675-test-calibration`
+proves the injection leaves the shipping images byte-identical. That is why this
+part has one aggregate lane the others do not.
 
 These targets are independent of the AVR build. Individual optional-tool targets
 generally skip cleanly if their primary compiler/simulator is absent. The

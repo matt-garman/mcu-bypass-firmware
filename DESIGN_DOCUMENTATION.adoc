@@ -20,6 +20,16 @@ free tier restricts the options that are available. PIC10F320's 256-word flash
 also requires the self-contained architecture documented in
 `docs/pic10f320_special_case.md`.
 
+A third PIC, the PIC12F675, is present on the same toolchain but is **staged and
+not release-supported**: no release images, no programming target, and no
+hardware-bench validation. It is a *classic* mid-range core rather than the
+32x's enhanced mid-range, which is why it needs its own shell — no `LATx` output
+latch, no `OSCCON`, no `TMR2`/`PR2` period register, and one shared prescaler
+that must be given to either the timer or the watchdog but not both. The design
+consequences of each are recorded in `docs/pic12f675_feasibility.md`; the two
+that reach this document are the SRAM output shadow (below) and the 1.024 ms
+tick that follows from the prescaler decision.
+
 
 == Why ATtiny202 (AVR-XT):
 
@@ -339,6 +349,39 @@ user.  The release-debounce, or lock-out period, is longer so as to
 The PIC10F320 is pin-compatible with the PIC10F322 in this design — same
 package, same pin functions, same footswitch/LED/control assignment — so the
 pinout above applies unchanged. The parts differ in flash size, not in wiring.
+
+
+== PIC12F675 DIP-8 Package Pinout
+
+Pin functions transcribed from the device pack's `edc/PIC12F675.PIC`, not from a
+datasheet summary.
+
+....
+                                +----+
+                       V_DD pin1-|    |-pin8 V_SS (GND)
+    (T1CKI/OSC1/CLKIN) GP5 pin2-|    |-pin7 GP0 (AN0/CIN+/ICSPDAT)
+ (AN3/T1G/OSC2/CLKOUT) GP4 pin3-|    |-pin6 GP1 (AN1/CIN-/Vref/ICSPCLK)
+          (~MCLR/V_PP) GP3 pin4-|    |-pin5 GP2 (AN2/T0CKI/INT/COUT)
+                                +----+
+....
+
+This is **not** the PIC10F32x assignment renamed. Two differences are forced by
+the silicon:
+
+* **The footswitch is on GP5, not on the input-only pin.** The 322's map rests
+  on a coincidence — its RA3 is both input-only *and* pull-up capable. Here the
+  `WPU` register implements bits 0, 1, 2, 4 and 5 only: GP3 has no internal weak
+  pull-up at all. Putting the footswitch there would make an external pull-up
+  mandatory and would delete the runtime pull-up integrity check from this
+  target. GP5 is also the one bidirectional pin with no analog function, so no
+  `ANSEL` or `CMCON` upset can silently re-analogize it.
+* **GP4 is a parked output, not an unconnected spare.** It is driven low and
+  included in the guarded output mask, so the board must leave it unconnected or
+  connect it only to a load that is safe while driven low. GP3 remains an input
+  and needs an external pull-up compatible with ICSP/V_PP programming.
+
+LED on GP0, control/coil pins on GP1 and GP2 — the same roles the 322 gives RA0,
+RA1 and RA2.
 
 
 == ATtiny202 SOIC-8 Package Pinout
@@ -674,6 +717,12 @@ See TOOLCHAIN.adoc for details.  Summary:
       ** PIC10-12Fxxx_DFP device pack
       ** gpsim/libgpsim
       ** PIC10F320 uses its self-contained constrained-target implementation
+    * PIC12F675 (staged, not release-supported)
+      ** the same XC8 / PIC10-12Fxxx_DFP / gpsim toolchain
+      ** classic mid-range core: no LATx, so the output latch is an SRAM shadow
+      ** 1.024 ms software tick (TMR0, four unprescaled rollovers)
+      ** simulator images are DERIVED: the oscillator calibration word is
+         injected into a copy, never patched into the shipping image
 
 == AVR Classic and AVR-XT Compilation Flags
 
@@ -944,11 +993,41 @@ not been re-priced because there is less headroom, not more. The exact-`TRISA`
 check and relay-only idle coil-low rewrite, each costing one word, were worth
 porting. Those decisions are recorded in `docs/pic10f320_special_case.md`.
 
+=== PIC12F675 (XC8 build)
+
+The PIC12F675 is the roomiest PIC here: 1024 fourteen-bit program words, 64
+bytes of RAM, plus 128 bytes of data EEPROM the firmware does not use.
+`make pic12f675` enforces the 1024-word budget per variant.
+
+.Table PIC12F675 Utilization by Variant (measured, XC8 V3.10)
+|===
+| Variant | Program (flash) | of 1024 words | Data (RAM) | of 64 bytes
+
+| cd4053_simple    | 495 words | 48.3% | 36 bytes | 56.2%
+| cd4053_with_mute | 521 words | 50.9% | 36 bytes | 56.2%
+| tq2_l2_5v_relay  | 523 words | 51.1% | 36 bytes | 56.2%
+|===
+
+Roughly half the flash free on every variant — the only PIC target here with
+room to spare. Two of those 36 RAM bytes are this part's own: `gpio_shadow_`,
+the software output latch the classic mid-range core has no `LATx` for, and
+`osccal_snapshot_`, the factory oscillator trim captured at init so a later
+change can be detected. The 322 needs neither: it has a real output latch, and
+compares `OSCCON` against a compile-time constant instead of a captured value.
+
+The comfortable margin is a consequence of the part, not of a leaner build. The
+comparison that isolates it is `tq2_l2_5v_relay`, which compiles the same core
+and the same driver on both parts: 523 words here against the PIC10F322's 473.
+The extra ~50 words are shell, and they buy the work this core makes necessary —
+turning off a comparator and an ADC the 32x parts do not have, routing every
+output write through the shadow, and counting four timer rollovers in software
+to make the tick.
 
 == PIC Power / Current Draw
 
-Applies to both PIC parts: they share a datasheet family, a clock choice and a
-main-loop model.
+Applies to both PIC10F32x parts: they share a datasheet family, a clock choice
+and a main-loop model. The PIC12F675 shares the model and differs in the
+numbers; see the note at the end of this section.
 
 The PIC core runs at **2 MHz** (HFINTOSC) on a **polled 1 ms tick** — a busy-wait
 on `TMR2IF`, never asleep. This is the opposite of the AVR Classic design, which
@@ -981,6 +1060,17 @@ if it were: in a typical pedal the always-on status LED and the analog signal
 path dominate the supply, so the MCU's sub-milliamp draw is usually negligible.
 The 2 MHz choice is simply "no reason to burn 4 mW when 2 does the same job."
 
+**The PIC12F675 makes the same trade with different numbers.** It is also always
+awake, but its oscillator is fixed at 4 MHz in silicon by `FOSC=INTRCIO` — there
+is no `OSCCON` and nothing to select at runtime — so the clock is not a design
+variable on that part. Its tick is 1.024 ms rather than 1 ms because the core has
+no period register and one shared prescaler that goes to *either* the timer or
+the watchdog: giving it to the watchdog leaves TMR0 unprescaled at F_OSC/4, and
+four 256 us rollovers counted in software make the tick. The 2.4% stretch changes
+nothing in the debounce core, which counts samples rather than milliseconds, but
+it moves every physical timing figure — see `docs/pic12f675_feasibility.md`
+section 4.4.1.
+
 
 == Multi-MCU Architecture: Shared Core, Per-MCU Shell
 
@@ -990,10 +1080,12 @@ the register level. Five targets use the modular architecture through three
 shell source files: `src/bypass_mcu_avr_classic.c` serves ATtiny13a/45/85,
 `src/bypass_mcu_avr_xt.c` serves ATtiny202, and
 `src/bypass_mcu_pic10f322.c` serves PIC10F322. PIC10F320 is the sixth,
-self-contained implementation described below. The modular split has two
-rules.
+self-contained implementation described below. The staged PIC12F675 is a
+seventh target and a fourth core generation (classic mid-range); it is modular,
+so `src/bypass_mcu_pic12f675.c` is a fourth shell over the same compiled core.
+The modular split has two rules.
 
-**The five modular targets share one compiled core.** `src/bypass_pure.c` is
+**The modular targets share one compiled core.** `src/bypass_pure.c` is
 the functional core: no hardware access, no globals, no side effects. Every
 modular target compiles and links that same file, and the core host tests and
 formal proofs exercise it directly. Nothing about it is per-MCU. PIC10F320 does
@@ -1042,9 +1134,13 @@ driver (`hw_pin_set_*`, `hw_led_pin_set_*`, `hw_configure_output_pins`,
 `hw_output_state_intact`) and the operations a driver provides back
 (`hw_set_bypass_state`, `hw_set_engaged_state`, `hw_is_sanity_check_failed`,
 `hw_init_output_pins`). The pin-direction API is mask-based so one driver body
-serves all five modular targets: the AVR Classic implementation writes `DDRB`,
-the AVR-XT one writes `PORTA.DIR`, and the PIC10F322 shell maps the mask onto
-`TRISA`. PIC10F320 does not consume this interface or the modular drivers.
+serves every modular target: the AVR Classic implementation writes `DDRB`, the
+AVR-XT one writes `PORTA.DIR`, the PIC10F322 shell maps the mask onto `TRISA`,
+and the PIC12F675 shell maps it onto `TRISIO` — and, having no `LATx`, applies
+every level change to an SRAM shadow and then copies the shadow to `GPIO`,
+because a read-modify-write against `GPIO` would read back *pin* levels rather
+than the last value written. PIC10F320 does not consume this interface or the
+modular drivers.
 
 In the modular architecture, everything else — footswitch read, watchdog arm
 and pet, clock and peripheral bring-up, wait-for-tick, the forced-reset path,
