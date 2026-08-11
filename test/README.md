@@ -20,6 +20,7 @@ test/
   misra.json                shared: cppcheck MISRA addon config
   misra_rules.txt           shared: MISRA rule paraphrases
   misra_suppressions.txt    shared: documented per-file MISRA deviations
+  misra_output_gate.py      shared: fail-closed authored source/header diagnostic parser
   mutation_policy.sh        shared: strict/partial mutation policy resolver
   mutation_accounting.sh    shared: mutation inventory/result accounting helpers
   run_mutation_tests.sh     shared: mutation-testing driver (make test-mutation)
@@ -39,6 +40,7 @@ test/
   test_klee_build.sh        shared: linked KLEE bitcode build regression
   test_lockstep_progress.sh shared: PIC libgpsim lock-step progress checks
   test_make_serialization.sh shared: worktree Make/release lock regression
+  test_misra_output_contract.sh shared: all-lane fake-cppcheck/header gate regression
   test_makefile_name_contract.py shared: every make goal/variable a file or doc
                                      names is one the Makefile really defines,
                                      and every NAME=value a recipe sets for a
@@ -601,6 +603,29 @@ whole immutable supported matrix in one reported invocation. This is execution-
 time enforcement, not a claim that a later staged/copied artifact cannot be
 modified; release provenance and reproduction checks remain separate controls.
 
+
+## MISRA output contract
+
+`make test-misra-output-contract` closes a cppcheck 2.13.0 status gap: a
+diagnostic attributed to an included header is printed without affecting
+`--error-exitcode`. Every MISRA recipe therefore requests one strict record
+format and passes its captured stderr to `misra_output_gate.py`, which normalizes
+paths and fails unwaived diagnostics in authored `src/*.c` and `src/*.h` files.
+Malformed stderr and nonzero tool status fail as infrastructure defects; adopted
+toolchain, `third_party/`, and test paths remain outside the firmware compliance
+boundary. Unattributed pseudo-path diagnostics also fail because they have not
+been shown to belong to adopted code.
+
+The host-only regression exercises the parser directly and then drives the
+Classic/shared, AVR-XT, PIC10F322, PIC10F320, and PIC12F675 recipes with fake
+device-pack headers and fake cppcheck. Its zero-exit Required-rule finding in an
+authored header must fail all five lanes. An exact `rule:file` suppression must
+restore success, while a right-rule/wrong-header suppression must not. A rule
+census and severed-call fixture keep every recipe attached to the parser, and
+the fake argv log rejects any return of invocation-wide `misra-config`
+suppression. The committed suppression inventory is pinned to exactly the three
+PIC shell source paths, and a `misra-config` record in an authored header remains
+failing.
 
 ## Mutation testing and skipped optional tools
 

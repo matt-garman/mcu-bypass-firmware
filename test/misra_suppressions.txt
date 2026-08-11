@@ -1,8 +1,8 @@
 # cppcheck suppressions shared by the project's five MISRA-C:2012 analysis lanes
-# (Classic/shared, AVR-XT, PIC10F322, PIC10F320, PIC12F675). Three of them
-# currently consume an entry: the PIC10F322 and PIC12F675 shells analyze clean
-# against an EMPTY version of this file -- see MISRA_COMPLIANCE.md, "Suppression
-# review".
+# (Classic/shared, AVR-XT, PIC10F322, PIC10F320, PIC12F675). All five consume at
+# least one entry. PIC10F322 and PIC12F675 need no MISRA-rule deviation, but each
+# has one file-scoped misra-config analyzer accommodation; see
+# MISRA_COMPLIANCE.md, "Suppression review".
 
 # This file holds DOCUMENTED, PROJECT-SPECIFIC finding suppressions. D-1 records
 # actual MISRA deviations; D-2/D-3 are advisory analyzer artifacts for
@@ -16,18 +16,13 @@
 # fails its MISRA lane. Another finding with the same ID in an already-listed
 # file is covered, so suppression changes also require an unsuppressed review.
 
-# ...with ONE measured caveat, which is why the entries below are described as
-# policy scope rather than as the gate. With cppcheck 2.13.0, --error-exitcode
-# is set only by findings located in the FILE PASSED ON THE COMMAND LINE.
-# Findings located in an included HEADER are printed but do not fail the lane,
-# so the header entries below (the pin maps, bypass_config.h, bypass_types.h)
-# suppress output rather than a failure today. Measured both ways: dropping
-# misra-c2012-11.4:src/bypass_mcu_avr_classic.c (a .c entry) fails
-# `make analyze-misra` with 30 findings, while dropping
-# misra-c2012-2.3:src/bypass_types.h or misra-c2012-2.5:src/bypass_pins_avr_xt.h
-# (header entries) leaves it green. They are kept, and a new map is added
-# alongside them, so the policy stays complete if a later cppcheck starts
-# gating header findings. See TODO.md T25-misra-header-gate.
+# cppcheck 2.13.0 itself sets --error-exitcode only for findings located in the
+# FILE PASSED ON THE COMMAND LINE. Every gating recipe therefore forces a
+# machine-readable diagnostic template and passes captured output through
+# test/misra_output_gate.py. The parser normalizes relative and absolute paths
+# and independently fails every unwaived finding in authored src/*.c or src/*.h.
+# A committed fake-cppcheck probe emits a zero-exit Required-rule finding in an
+# authored header and proves that only the exact rule:file entry restores clean.
 
 # Out of scope (handled on cppcheck command lines in the Makefile, not here):
 # findings located in adopted avr-libc/avr-gcc, ATtiny DFP, XC8/PIC DFP, and
@@ -65,7 +60,7 @@ misra-c2012-10.8:src/bypass_mcu_avr_xt.c
 # each active map, while individual driver TUs use variant-specific subsets;
 # cppcheck's TU-local and cross-configuration processing can report declarations
 # used elsewhere, including directives from inactive maps. `bypass_config.h` has
-# the same split: the shared core and three modular shells consume both
+# the same split: the shared core and four modular shells consume both
 # thresholds, while mute/relay driver assertions consume RELEASE_THRESH but not
 # PRESSED_THRESH. See D-2.
 misra-c2012-2.5:src/bypass_pins_avr_classic.h
@@ -79,8 +74,7 @@ misra-c2012-2.5:src/bypass_config.h
 misra-c2012-2.5:src/bypass_pins_avr_xt.h
 # The PIC12F675 map is the fourth, and behaves identically -- the classic lane
 # reports three of its macros unused per checked translation unit. Recorded for
-# the same reason and with the same standing as the three above; per the caveat
-# at the top of this file, no header entry gates a lane today.
+# the same reason and with the same standing as the three above.
 misra-c2012-2.5:src/bypass_pins_pic12f675.h
 
 # --- D-3: shared algorithm-type header (Rules 2.3, 2.4) ----------------------
@@ -94,17 +88,19 @@ misra-c2012-2.5:src/bypass_pins_pic12f675.h
 misra-c2012-2.3:src/bypass_types.h
 misra-c2012-2.4:src/bypass_types.h
 
-# --- D-4: PIC10F320 device-SFR symbol resolution (misra-config) --------------
+# --- D-4: PIC device-SFR symbol resolution (misra-config) --------------------
 # NOT a MISRA rule deviation. `misra-config` is cppcheck's own diagnostic for
-# "the addon could not resolve this symbol" -- here `PIR1bits`/`TMR2IF` in the
-# 1 ms tick wait. The declaration is present and correct: the analogous
-# statement against the sibling PIC10F322 header from the same DFP
-# pack analyzes clean. The addon loses the device symbol table on this file,
-# bisected to its heavy in-function `static_assert` use.
-# Scoped to this file deliberately. All other finding IDs remain visible, but
-# this entry covers every `misra-config` diagnostic attributed to the file;
-# Rule 14.4 injection was used to confirm an unrelated MISRA finding still fails.
-# See MISRA_COMPLIANCE.md D-4.
+# "the addon could not resolve this symbol". PIC10F322 and PIC12F675 report this
+# for volatile SFR bitfield reads in their tick polls; their former broad command-
+# line suppression is now one exact source file each, so an occurrence in any
+# header or other source reaches the output gate.
+misra-config:src/bypass_mcu_pic10f322.c
+misra-config:src/bypass_mcu_pic12f675.c
+# PIC10F320 reports the same diagnostic for `PIR1bits`/`TMR2IF` in its 1 ms tick
+# wait. On this file the addon loses the device symbol table, bisected to its
+# heavy in-function `static_assert` use. Scoped to this file deliberately. All
+# other finding IDs remain visible; Rule 14.4 injection confirms an unrelated
+# MISRA finding still fails. See MISRA_COMPLIANCE.md D-4.
 misra-config:src/bypass_mcu_pic10f320.c
 # Same root cause, rule side: TICK_PERIOD_MS and WDT_MIN_PERIOD_MS are consumed
 # ONLY inside static_assert() expressions, which the addon cannot see for this

@@ -575,6 +575,12 @@ CPPCHECK_FLAGS     ?= --enable=warning,style,performance,portability \
 MISRA_ADDON        ?= test/misra.json
 MISRA_RULES        ?= test/misra_rules.txt
 MISRA_SUPPRESS     ?= test/misra_suppressions.txt
+# cppcheck 2.13.0 does not set --error-exitcode for diagnostics attributed to an
+# included header. Force every diagnostic into one strict record format and let
+# the repository-owned parser decide whether its normalized path is authored
+# firmware. These are validation mechanisms, not caller-selectable tools.
+override MISRA_OUTPUT_GATE := test/misra_output_gate.py
+override MISRA_DIAGNOSTIC_TEMPLATE := --template='MCU_BYPASS_CPPCHECK|{file}|{line}|{column}|{severity}|{id}|{message}'
 
 # The MISRA run shares the robust AVR_LIBC_INCLUDE discovery above (it
 # originally had its own preprocessor-search-path discovery, which is now the
@@ -653,7 +659,7 @@ FORCE:
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
         test-variant-map-contract test-makefile-name-contract test-todo-index \
-        test-pinout-alignment \
+        test-pinout-alignment test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract test-static-assert-guards \
         pic10f322-test-target pic10f322-test-target-variants pic10f322-test-io pic10f322-test-lockstep \
@@ -1009,15 +1015,14 @@ PIC10F322_CPPCHECK_FLAGS ?= --enable=warning,style,performance,portability \
 # MISRA addon pass (parallel to MISRA_CPPCHECK_FLAGS for the AVR build). Notes:
 #   - System headers (XC8 base + DFP) are outside the compliance boundary, like
 #     avr-libc for the AVR run -> suppressed by path.
-#   - --suppress=misra-config: cppcheck cannot value-flow-model the volatile SFR
-#     bitfield unions from the Microchip headers (e.g. PIR1bits.TMR2IF in the
-#     tick poll); that is a cppcheck modeling limitation on adopted toolchain
-#     headers, NOT a code defect.
+#   - cppcheck cannot value-flow-model the volatile SFR bitfield unions from the
+#     Microchip headers (e.g. PIR1bits.TMR2IF in the tick poll). The resulting
+#     misra-config accommodation is file-scoped in MISRA_SUPPRESS; findings in
+#     every other authored file remain visible to the output gate.
 PIC10F322_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 --platform=pic8-enhanced \
                       --enable=style --inline-suppr --max-configs=1 \
                       --suppress=missingIncludeSystem \
                       --suppress=unmatchedSuppression \
-                      --suppress=misra-config \
                       '--suppress=*:$(PIC_XC8_INCLUDE)/*' \
                       '--suppress=*:$(PIC10F322_DFP_INCLUDE)/*' \
                       $(PIC10F322_CPPCHECK_CPPFLAGS)
@@ -1199,7 +1204,7 @@ pic10f322-analyze-cppcheck: src/bypass_mcu_pic10f322.c $(PIC10F322_HEADERS)
 	echo "cppcheck (PIC, pic8-enhanced): $(CPPCHECK) src/bypass_mcu_pic10f322.c"; \
 	$(CPPCHECK) $(PIC10F322_CPPCHECK_FLAGS) src/bypass_mcu_pic10f322.c
 
-pic10f322-analyze-misra: src/bypass_mcu_pic10f322.c $(PIC10F322_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
+pic10f322-analyze-misra: src/bypass_mcu_pic10f322.c $(PIC10F322_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS) $(MISRA_OUTPUT_GATE)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then \
 		echo "cppcheck and/or python3 not available; skipping PIC MISRA analysis"; $(SKIP); \
 	fi; \
@@ -1209,11 +1214,11 @@ pic10f322-analyze-misra: src/bypass_mcu_pic10f322.c $(PIC10F322_HEADERS) $(MISRA
 	echo "MISRA-C:2012 analysis -- PIC shell ($(CPPCHECK) + misra addon, pic8-enhanced)"; \
 	out=`mktemp`; rc=0; \
 	PYTHONWARNINGS=ignore $(CPPCHECK) $(PIC10F322_MISRA_CPPCHECK_FLAGS) \
-		--suppressions-list=$(MISRA_SUPPRESS) --error-exitcode=2 \
-		src/bypass_mcu_pic10f322.c 2>>$$out || rc=1; \
-	if [ $$rc -ne 0 ]; then \
+		$(MISRA_DIAGNOSTIC_TEMPLATE) --suppressions-list=$(MISRA_SUPPRESS) \
+		--error-exitcode=2 src/bypass_mcu_pic10f322.c 2>>$$out || rc=$$?; \
+	if ! python3 "$(MISRA_OUTPUT_GATE)" --repo-root "$(CURDIR)" \
+			--output "$$out" --tool-status "$$rc"; then \
 		echo "MISRA findings NOT covered by a documented deviation:"; \
-		grep -E "misra-c2012" $$out || true; \
 		echo ""; \
 		echo "Fix it, or (if genuinely unavoidable) add a per-file entry to"; \
 		echo "$(MISRA_SUPPRESS) with a matching record in MISRA_COMPLIANCE.md."; \
@@ -2412,7 +2417,7 @@ attiny202-analyze-cppcheck: src/bypass_mcu_avr_xt.c $(XT_HEADERS)
 	echo "cppcheck (ATtiny202, avr8/avrxmega3): $(CPPCHECK) src/bypass_mcu_avr_xt.c"; \
 	$(CPPCHECK) $(XT_CPPCHECK_FLAGS) src/bypass_mcu_avr_xt.c
 
-attiny202-analyze-misra: src/bypass_mcu_avr_xt.c $(XT_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
+attiny202-analyze-misra: src/bypass_mcu_avr_xt.c $(XT_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS) $(MISRA_OUTPUT_GATE)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then \
 		echo "cppcheck and/or python3 not available; skipping ATtiny202 MISRA analysis"; $(SKIP); \
 	fi; \
@@ -2422,11 +2427,11 @@ attiny202-analyze-misra: src/bypass_mcu_avr_xt.c $(XT_HEADERS) $(MISRA_ADDON) $(
 	echo "MISRA-C:2012 analysis -- ATtiny202 shell ($(CPPCHECK) + misra addon, avr8)"; \
 	out=`mktemp`; rc=0; \
 	PYTHONWARNINGS=ignore $(CPPCHECK) $(XT_MISRA_CPPCHECK_FLAGS) \
-		--suppressions-list=$(MISRA_SUPPRESS) --error-exitcode=2 \
-		src/bypass_mcu_avr_xt.c 2>>$$out || rc=1; \
-	if [ $$rc -ne 0 ]; then \
+		$(MISRA_DIAGNOSTIC_TEMPLATE) --suppressions-list=$(MISRA_SUPPRESS) \
+		--error-exitcode=2 src/bypass_mcu_avr_xt.c 2>>$$out || rc=$$?; \
+	if ! python3 "$(MISRA_OUTPUT_GATE)" --repo-root "$(CURDIR)" \
+			--output "$$out" --tool-status "$$rc"; then \
 		echo "MISRA findings NOT covered by a documented deviation:"; \
-		grep -E "misra-c2012" $$out || true; \
 		echo ""; \
 		echo "Fix it, or (if genuinely unavoidable) add a per-file entry to"; \
 		echo "$(MISRA_SUPPRESS) with a matching record in MISRA_COMPLIANCE.md."; \
@@ -2683,7 +2688,7 @@ TEST_GATES_LATE = \
         test-build-serialization test-target-matrix \
         test-target-lane-markers test-lockstep-progress test-soak-timing \
         test-variant-map-contract test-makefile-name-contract test-todo-index \
-        test-pinout-alignment \
+        test-pinout-alignment test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract \
         test-soak-reset-witness test-strict-tools test-workload-rebuild \
@@ -2986,6 +2991,13 @@ test-pinout-alignment: python-version-valid test/test_pinout_alignment.py
 # analyzed zero of the three output drivers and exited 0.
 test-analyze-variant-guard:
 	./test/test_analyze_variant_guard.sh
+
+# cppcheck 2.13.0 prints included-header MISRA findings without applying
+# --error-exitcode. Exercise the repository parser directly, census all five
+# gating recipes, and drive each recipe with a fake zero-exit Required-rule
+# diagnostic to prove an exact per-file suppression is the only clean path.
+test-misra-output-contract: test/misra_output_gate.py test/test_misra_output_contract.sh
+	./test/test_misra_output_contract.sh
 
 # The single-variant counterpart of the gate above. VARIANTS is a list and has
 # been guarded for releases; the variables that select ONE output stage for one
@@ -3806,10 +3818,11 @@ analyze-deep: classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS)
 #
 # GATING: fails the build on any finding NOT covered by a documented deviation
 # in test/misra_suppressions.txt (each justified in MISRA_COMPLIANCE.md). The
-# --suppressions-list waives those; --error-exitcode=2 makes cppcheck exit
-# non-zero on anything left. Part of `analyze` -> `make test`.
+# suppression list waives those; MISRA_OUTPUT_GATE independently parses every
+# remaining source/header diagnostic because cppcheck's error exit status does
+# not cover included headers. Part of `analyze` -> `make test`.
 .PHONY: analyze-misra
-analyze-misra: variant-selectors-valid classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
+analyze-misra: variant-selectors-valid classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS) $(MISRA_OUTPUT_GATE)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1; then \
 		echo "cppcheck not installed; skipping MISRA analysis"; $(SKIP); \
 	fi; \
@@ -3825,12 +3838,12 @@ analyze-misra: variant-selectors-valid classic-variant-request-valid $(FW_SOURCE
 			*)                  m=$(macro_$(VARIANT)) ;; \
 		esac; \
 		PYTHONWARNINGS=ignore $(CPPCHECK) $(MISRA_CPPCHECK_FLAGS) \
-			--suppressions-list=$(MISRA_SUPPRESS) --error-exitcode=2 \
-			-D$$m $$f 2>>$$out || rc=1; \
+			$(MISRA_DIAGNOSTIC_TEMPLATE) --suppressions-list=$(MISRA_SUPPRESS) \
+			--error-exitcode=2 -D$$m $$f 2>>$$out || rc=$$?; \
 	done; \
-	if [ $$rc -ne 0 ]; then \
+	if ! python3 "$(MISRA_OUTPUT_GATE)" --repo-root "$(CURDIR)" \
+			--output "$$out" --tool-status "$$rc"; then \
 		echo "MISRA findings NOT covered by a documented deviation:"; \
-		grep -E "misra-c2012" $$out || true; \
 		echo ""; \
 		echo "Fix it, or (if genuinely unavoidable) add a per-file entry to"; \
 		echo "$(MISRA_SUPPRESS) with a matching record in MISRA_COMPLIANCE.md."; \
@@ -4572,7 +4585,7 @@ pic10f320-analyze-cppcheck: $(PIC10F320_SRC)
 	echo "cppcheck (PIC10F320, pic8-enhanced): $(PIC10F320_SRC)"; \
 	$(CPPCHECK) $(PIC10F320_CPPCHECK_FLAGS) $(PIC10F320_SRC)
 
-pic10f320-analyze-misra: $(PIC10F320_SRC) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
+pic10f320-analyze-misra: $(PIC10F320_SRC) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS) $(MISRA_OUTPUT_GATE)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then \
 		echo "cppcheck and/or python3 not available; skipping PIC10F320 MISRA analysis"; $(SKIP); \
 	fi; \
@@ -4582,11 +4595,11 @@ pic10f320-analyze-misra: $(PIC10F320_SRC) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_
 	echo "MISRA-C:2012 analysis -- PIC10F320 shell ($(CPPCHECK) + misra addon, pic8-enhanced)"; \
 	out=`mktemp`; rc=0; \
 	PYTHONWARNINGS=ignore $(CPPCHECK) $(PIC10F320_MISRA_CPPCHECK_FLAGS) \
-		--suppressions-list=$(MISRA_SUPPRESS) --error-exitcode=2 \
-		$(PIC10F320_SRC) 2>>$$out || rc=1; \
-	if [ $$rc -ne 0 ]; then \
+		$(MISRA_DIAGNOSTIC_TEMPLATE) --suppressions-list=$(MISRA_SUPPRESS) \
+		--error-exitcode=2 $(PIC10F320_SRC) 2>>$$out || rc=$$?; \
+	if ! python3 "$(MISRA_OUTPUT_GATE)" --repo-root "$(CURDIR)" \
+			--output "$$out" --tool-status "$$rc"; then \
 		echo "MISRA findings NOT covered by a documented deviation:"; \
-		grep -E "misra-c2012" $$out || true; \
 		echo ""; \
 		echo "Fix it, or (if genuinely unavoidable) add a per-file entry to"; \
 		echo "$(MISRA_SUPPRESS) with a matching record in MISRA_COMPLIANCE.md."; \
@@ -5209,15 +5222,14 @@ PIC12F675_CPPCHECK_FLAGS ?= --enable=warning,style,performance,portability \
 # MISRA addon pass (parallel to MISRA_CPPCHECK_FLAGS for the AVR build). Notes:
 #   - System headers (XC8 base + DFP) are outside the compliance boundary, like
 #     avr-libc for the AVR run -> suppressed by path.
-#   - --suppress=misra-config: cppcheck cannot value-flow-model the volatile SFR
-#     bitfield unions from the Microchip headers (e.g. INTCONbits.T0IF in the
-#     tick poll); that is a cppcheck modeling limitation on adopted toolchain
-#     headers, NOT a code defect.
+#   - cppcheck cannot value-flow-model the volatile SFR bitfield unions from the
+#     Microchip headers (e.g. INTCONbits.T0IF in the tick poll). The resulting
+#     misra-config accommodation is file-scoped in MISRA_SUPPRESS; findings in
+#     every other authored file remain visible to the output gate.
 PIC12F675_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 --platform=pic8 \
                       --enable=style --inline-suppr --max-configs=1 \
                       --suppress=missingIncludeSystem \
                       --suppress=unmatchedSuppression \
-                      --suppress=misra-config \
                       '--suppress=*:$(PIC_XC8_INCLUDE)/*' \
                       '--suppress=*:$(PIC12F675_DFP_INCLUDE)/*' \
                       $(PIC12F675_CPPCHECK_CPPFLAGS)
@@ -5355,7 +5367,7 @@ pic12f675-analyze-cppcheck: src/bypass_mcu_pic12f675.c $(PIC12F675_HEADERS)
 	echo "cppcheck (PIC, pic8): $(CPPCHECK) src/bypass_mcu_pic12f675.c"; \
 	$(CPPCHECK) $(PIC12F675_CPPCHECK_FLAGS) src/bypass_mcu_pic12f675.c
 
-pic12f675-analyze-misra: src/bypass_mcu_pic12f675.c $(PIC12F675_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS)
+pic12f675-analyze-misra: src/bypass_mcu_pic12f675.c $(PIC12F675_HEADERS) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_SUPPRESS) $(MISRA_OUTPUT_GATE)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then \
 		echo "cppcheck and/or python3 not available; skipping PIC MISRA analysis"; $(SKIP); \
 	fi; \
@@ -5365,11 +5377,11 @@ pic12f675-analyze-misra: src/bypass_mcu_pic12f675.c $(PIC12F675_HEADERS) $(MISRA
 	echo "MISRA-C:2012 analysis -- PIC shell ($(CPPCHECK) + misra addon, pic8)"; \
 	out=`mktemp`; rc=0; \
 	PYTHONWARNINGS=ignore $(CPPCHECK) $(PIC12F675_MISRA_CPPCHECK_FLAGS) \
-		--suppressions-list=$(MISRA_SUPPRESS) --error-exitcode=2 \
-		src/bypass_mcu_pic12f675.c 2>>$$out || rc=1; \
-	if [ $$rc -ne 0 ]; then \
+		$(MISRA_DIAGNOSTIC_TEMPLATE) --suppressions-list=$(MISRA_SUPPRESS) \
+		--error-exitcode=2 src/bypass_mcu_pic12f675.c 2>>$$out || rc=$$?; \
+	if ! python3 "$(MISRA_OUTPUT_GATE)" --repo-root "$(CURDIR)" \
+			--output "$$out" --tool-status "$$rc"; then \
 		echo "MISRA findings NOT covered by a documented deviation:"; \
-		grep -E "misra-c2012" $$out || true; \
 		echo ""; \
 		echo "Fix it, or (if genuinely unavoidable) add a per-file entry to"; \
 		echo "$(MISRA_SUPPRESS) with a matching record in MISRA_COMPLIANCE.md."; \
@@ -7067,6 +7079,7 @@ help:
 	@echo "  test-todo-index    TODO.md's priority summary matches its open sections, both ways (included in test)"
 	@echo "  test-pinout-alignment  every ASCII package-pinout diagram draws a square box (included in test)"
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
+	@echo "  test-misra-output-contract  authored source/header MISRA diagnostics fail every lane (included in test)"
 	@echo "  test-variant-selector-guard  every lane rejects a bad single-variant selector instead of skipping (included in test)"
 	@echo "  test-clean-contract  clean/clean-tests remove everything the Makefile builds (included in test)"
 	@echo "  test-fuse-injection-contract  every fuse byte survives -D injection into the checker (included in test)"
