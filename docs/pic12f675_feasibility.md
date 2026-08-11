@@ -1,20 +1,24 @@
 # PIC12F675 feasibility — porting the reference architecture to a classic mid-range PIC
 
-**Status (2026-08-10): staged standalone implementation; not release-supported.**
+**Status (2026-08-11): staged standalone implementation; not release-supported.**
 The repository now contains the production Model-B PIC12F675 shell and pin map,
 the complete three-variant build and flash-budget lane, static analysis,
 shipping-source coverage, production-image return-stack and CONFIG gates,
-oscillator-calibration image derivation, CLI gpsim functional tests, and
+oscillator-calibration image derivation, CLI gpsim functional tests,
 selected-variant libgpsim I/O, lock-step and fault-injection lanes, the
-long-duration soak, and both authoritative aggregates over them.
+long-duration soak, both authoritative aggregates over them, and the guarded
+bench programming target.
 
 PIC12F675 is intentionally absent from the default `all` goal, release
-integration, programming, and hardware-bench validation. It is therefore not
-release-supported. It *is* gated by CI: both aggregates run in the shared `pic`
-job, deliberately, because a staged part exercised only when someone remembers
-to run it by hand is a part whose lanes rot. What CI does not do is upload its
-images — publishing a downloadable HEX belongs with release integration, where
-this part's OSCCAL-preservation flashing procedure is documented (§8 item 2).
+integration, and hardware-bench validation, and is therefore not
+release-supported. Programming is the one bench-facing integration that does
+exist: `make pic12f675-program` flashes a single validated variant behind a
+pre-flash gate, but it publishes no images and is not a release path. The part
+*is* gated by CI: both aggregates run in the shared `pic` job, deliberately,
+because a staged part exercised only when someone remembers to run it by hand
+is a part whose lanes rot. What CI does not do is upload its images —
+publishing a downloadable HEX belongs with release integration, where this
+part's OSCCAL-preservation flashing procedure is documented (§8 item 2).
 
 The 2026-08-05 assessment, design rationale, spike provenance and proposed
 sequencing are retained below. Unless explicitly marked as a current or dated
@@ -1012,8 +1016,8 @@ serves multiple parts, part name where the repository builds exactly one:
 | Build macro | `BYPASS_MCU_PIC12F675` (new arm in `src/bypass_output_common.h`) |
 | Build dir | `build_pic12f675/` |
 | Image stem | `bypass-pic12f675-<variant>` |
-| Implemented target families | build, analysis, coverage, stack, CONFIG, calibration, CLI gpsim, selected-variant libgpsim I/O, lock-step and fault, the long-duration soak, the pre-hardware and fail-closed target aggregates, and the mutation topology |
-| Deferred integration | default `all`, release and programming (CI gates both aggregates; it does not upload images) |
+| Implemented target families | build, analysis, coverage, stack, CONFIG, calibration, CLI gpsim, selected-variant libgpsim I/O, lock-step and fault, the long-duration soak, the pre-hardware and fail-closed target aggregates, guarded bench programming, and the mutation topology |
+| Deferred integration | default `all` and release integration (CI gates both aggregates; it does not upload images) |
 
 **Name-length contract:** `bypass-pic12f675-cd4053_with_mute.hex` is 37
 characters — **exactly** the current longest name
