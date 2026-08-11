@@ -424,6 +424,47 @@ Dependencies: representative hardware and oscilloscope/logic analyzer. Effort:
 about 2-3 hours. Risk: High verification value; closes a primary-part silicon
 evidence gap.
 
+### T3-pic12f675-bench - Graduate the PIC12F675 on silicon
+
+The part is built, tested, formally verified and statically analyzed here, and
+has **never run on a device**. It is declared staged rather than released
+(`RELEASE_STAGED_IMAGES`), and four of its open risks are invisible to every
+lane this repository has. They are stated in full as items 1, 2, 8 and 9 of
+`docs/pic12f675_feasibility.md` section 8:
+
+- **1 - bandgap calibration bits (`BG<1:0>`) preserved on program.** They are
+  factory-set per device and fix the BOR/POR trip voltages.
+  `make pic12f675-program` already enforces the build-side half -- the toolchain
+  must leave the field erased -- and prints the read-back procedure before every
+  write. The programmer's own erase behavior is what needs measuring.
+- **2 - factory oscillator trim (flash word 0x3FF) preserved on program.**
+  Losing it yields an untrimmed clock: wrong tick cadence, wrong coil-pulse
+  widths, and a device that still appears to work. Confirm `pk2cmd`'s handling
+  for this family, then write the result into `release/README.md`'s flashing
+  procedure.
+- **8 - `ipecmd` actually runs against the part.** The pinned device pack lists
+  the PIC12F675 with the same MPLAB hardware-tool set as the PIC10F322, but
+  neither programmer binary is installed on any machine this repository is
+  tested on, so the command shape is inherited and has never been executed.
+- **9 - GP2's readback margin.** The port-follows-shadow guard re-reads `GPIO`
+  against the SRAM shadow every tick, and GP2 is the one output whose input
+  buffer is a Schmitt Trigger (VIH min 0.8*VDD) rather than TTL. On
+  `cd4053_with_mute` with the real load attached, engage the effect and confirm
+  GP2 reads above 0.8*VDD; record the margin, since it bounds the minimum
+  fail-safe pulldown a builder may substitute. gpsim models pins ideally, so no
+  lane here can see this one at all.
+
+Promotion after that is a code diff, and **the authoritative checklist is the
+`GRADUATING THE PART` comment beside `RELEASE_STAGED_IMAGES` in the Makefile**.
+It is deliberately not restated here: a second copy of a checklist is precisely
+the drift this file's own index gate exists to catch. Each step there names the
+script and line that enforces it.
+
+Dependencies: a PIC12F675, a PICkit programmer, a meter, and a built board.
+Effort: about half a day at the bench plus 1-2 hours for the graduation diff
+and its reruns. Risk: High; these four close here or nowhere, and the part
+cannot be released until they do.
+
 ### T3-ctx-complement - Add complemented debounce-context storage
 
 Range checks cannot detect an in-range bit flip in `program_state`,
@@ -605,6 +646,7 @@ The stable ID in each row matches exactly one open section above.
 | T25-poweron-sim | Power-on-pressed simulator fidelity | 2.5 | 1-2 h | Low |
 | T25-power-ramp | Power-supply ramp analysis | 2.5 | 2-3 h | Medium |
 | T3-hw-procedure | Hardware-validation procedure | 3 | 2-3 h | High |
+| T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - blocks release of the part |
 | T3-ctx-complement | Complemented debounce-context storage | 3 | 3-6 h | Medium |
 | T3-toolchain | Broader compiler/toolchain portability | 3 | Medium | Medium-High |
 | T3-hil | Behavioral and register-introspection HIL | 3 | 5-8 d | High |

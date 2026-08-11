@@ -1049,7 +1049,8 @@ pic12f675-program` states them before every write and refuses the one adjacent
 hazard this port introduced. Item 9 was opened on 2026-08-11 in review of the
 port branch; it also needs silicon, but a meter rather than a programmer. Items
 3 and 7 are Model-B-inapplicable and lane-local respectively. **What is left is
-a bench.**
+a bench**, tracked in `TODO.md` as `T3-pic12f675-bench` together with the
+graduation diff that follows it.
 
 1. **Bandgap calibration bits in the CONFIG word (`BG<1:0>`).** These are
    factory-calibrated per device and set the BOD/POR trip voltages. XC8 emitted
