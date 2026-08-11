@@ -59,12 +59,17 @@
 // CANNOT enforce a >4V floor in firmware; that is a hardware-design
 // limitation, not a firmware one.
 //
-// OSCCAL note: the oscillator calibration value lives in the LAST program word
-// (0x3FF, the pack's ".oscval" CalDataZone) as a RETLW, and XC8's startup code
-// calls it. A bulk erase that does not preserve that word leaves an untrimmed
-// oscillator -- wrong tick cadence and wrong __delay_ms() coil-pulse widths on
-// a device that still appears to work. See release/README.md's flashing
-// procedure and docs/pic12f675_feasibility.md section 8 item 2.
+// OSCCAL note: the oscillator calibration value lives in the LAST program
+// word (0x3FF, the pack's ".oscval" CalDataZone) as a RETLW, and XC8's
+// startup code calls it. A bulk erase that does not preserve that word leaves
+// an untrimmed oscillator, i.e. wrong tick cadence and wrong __delay_ms()
+// coil-pulse widths on a device that still appears to work.  make
+// pic12f675-program refuses any image that programs word 0x3FF and prints the
+// read-back procedure before every write; the risk itself is stated in
+// docs/pic12f675_feasibility.md section 8 item 2. That procedure moves into
+// release/README.md when this part is released (step 5 of the Makefile's
+// GRADUATING THE PART list).
+
 
 #include "bypass_config.h"        // PRESSED_THRESH / RELEASE_THRESH
 #include "bypass_output_common.h" // -> bypass_pins_pic12f675.h (build defines -DBYPASS_MCU_PIC12F675)
