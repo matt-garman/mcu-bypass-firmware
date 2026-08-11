@@ -616,15 +616,19 @@ the spike used. The margin argument mirrors the 322's: worst-case pet-to-pet
 window is one tick (1.024 ms) plus the longest blocking actuation (12 ms relay
 coil pulse) ≈ **13.1 ms**, against a 288 ms nominal period.
 
-**The 18 ms base above is the MODELLED period, and the argument does not rest on
-it** (datasheet read 2026-08-11, §8 item 4). DS41190G Table 12-4 parameter 31
-`TWDT` gives the unprescaled period as **10 ms min / 17 ms typ / 25 ms max**
-(30 ms max at extended temperature) — so the typical is 17 ms, not 18 ms, and
-1:16 is 272 ms typical rather than 288 ms. 18 ms is what gpsim models and what
-the family is conventionally quoted at; both are *nominal* figures, and a
-watchdog margin argument may not be built on a nominal figure at all. The one
-that matters is the **minimum: 10 ms × 16 = 160 ms**, which is what the shell
-cites and what the 13.1 ms window is judged against — a factor of 12.
+**The 18 ms base above is a NOMINAL period, and the argument does not rest on
+it** (datasheet read 2026-08-11, §8 item 4). Both figures in play are
+DS41190G's own, and they are different *kinds* of number rather than a
+discrepancy to reconcile. §9.6.1 "WDT PERIOD" states in its own prose: "The WDT
+has a nominal time-out period of **18 ms**, (with no prescaler)" — that is
+where the 18 ms base and the 288 ms row come from, and gpsim models the same
+figure. Table 12-4 parameter 31 `TWDT` then *characterizes* the unprescaled
+period as **10 ms min / 17 ms typ / 25 ms max** (30 ms max at extended
+temperature), so the characterized typical is 17 ms and 1:16 is 272 ms typical
+rather than 288 ms. A watchdog margin argument may not be built on a nominal or
+a typical at all. The one that matters is the **minimum: 10 ms × 16 = 160 ms**,
+which is what the shell cites and what the 13.1 ms window is judged against — a
+factor of 12.
 
 Simulation confirms the model exactly: with `PSA=1, PS=1:16` a starved watchdog
 reset fired at **cycle 288,039**, i.e. 288.0 ms at 1 MIPS — precisely 18 ms × 16
@@ -1133,12 +1137,17 @@ diff that follows it.
      = **160 ms** floor against a 13.024 ms worst-case pet-to-pet window, a
      factor of 12. Doubling to 1:32 would buy margin nothing needs and cost
      320 ms of fault-detection latency.
-   - **The shell already cites this correctly.** `src/bypass_mcu_pic12f675.c`
-     names "DS41190G Table 12-4 parameter 31 … a 10ms unprescaled minimum, so
-     the characterized minimum here is 160ms". That citation is exact. What the
-     shell (and this document, until now) got loose is the *nominal*: 18 ms is
-     gpsim's model, while the datasheet typical is 17 ms. Nothing depends on it
-     — see the note under the §4.4 table.
+   - **The shell already cites this correctly, nominal included.**
+     `src/bypass_mcu_pic12f675.c` names "DS41190G Table 12-4 parameter 31 … a
+     10ms unprescaled minimum, so the characterized minimum here is 160ms".
+     That citation is exact, and so is its 18 ms nominal: §9.6.1 "WDT PERIOD"
+     states "a nominal time-out period of 18 ms, (with no prescaler)", which is
+     also the figure gpsim models. So 18 ms (prose nominal) and 17 ms
+     (Table 12-4 characterized typical) are both DS41190G's; neither is loose,
+     and nothing depends on either — see the note under the §4.4 table.
+     **Do not "correct" the shell's 18 ms / 288 ms comments to 17 ms / 272 ms.**
+     They cite the section that states 18 ms, they match what the simulator
+     models, and the safety argument rests on the 160 ms floor either way.
 
    Residual: none for the period itself. The margin is stated in prose on this
    part rather than enforced at compile time as it is on the PIC10F320; filed

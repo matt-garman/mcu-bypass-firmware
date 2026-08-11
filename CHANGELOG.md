@@ -152,8 +152,9 @@ file is the human-readable summary of *what changed*.
     defect, not the design: the prescaler stays at 1:16 because the argument
     rests on the **minimum** (10 ms × 16 = 160 ms) against a 13.024 ms
     worst-case pet window, a factor of 12. The shell's citation of that minimum
-    was exact. Note 18 ms is what gpsim models; the datasheet typical is 17 ms,
-    and nothing depends on either.
+    was exact. Note the two nominals are both the datasheet's: §9.6.1 states
+    an 18 ms nominal in prose (the figure gpsim models), Table 12-4 gives a
+    17 ms characterized typical, and nothing depends on either.
   - **Brown-out** (Table 12-4 `BVDD`): trips at 2.025–2.175 V, with a 100 µs
     minimum excursion. Against peripherals that want >4 V, `BOREN=ON` is
     therefore **not** the protection it looks like, and this part has no `BORV`
