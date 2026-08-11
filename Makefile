@@ -5733,8 +5733,8 @@ pic12f675-test-fault: variant-selectors-valid pic12f675-simcal
 	shadow_addr=`awk '$$1=="_gpio_shadow_"{print $$2; exit}' "$(PIC12F675_FAULT_SYM)" 2>/dev/null`; \
 	if [ -z "$$shadow_addr" ]; then \
 		echo "FAIL: _gpio_shadow_ symbol not found in $(PIC12F675_FAULT_SYM)."; \
-		echo "      This part has no output-latch SFR, so the shadow IS the latch: the eight"; \
-		echo "      output injections have nothing to corrupt without its address."; \
+		echo "      This part has no output-latch SFR, so the shadow IS the latch: four"; \
+		echo "      shadow-corruption injections have nothing to corrupt without its address."; \
 		exit 1; \
 	fi; \
 	echo "--- PIC12F675 fault-inject: variant=$(PIC12F675_FAULT_VARIANT) proc=$(PIC12F675_GPSIM_PROC) (ctx_ at 0x$$ctx_addr, gpio_shadow_ at 0x$$shadow_addr, layout verified: 3 bytes) ---"; \

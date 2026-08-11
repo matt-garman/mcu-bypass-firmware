@@ -94,8 +94,8 @@ readonly MUTATION_EXPECTED_PIC_TARGET=8
 readonly MUTATION_EXPECTED_PIC_SOAK=1
 readonly MUTATION_EXPECTED_PIC320_HOST=29
 readonly MUTATION_EXPECTED_PIC320_TOOL=11
-readonly MUTATION_EXPECTED_PIC12F675=13
-readonly MUTATION_EXPECTED_TOTAL=111
+readonly MUTATION_EXPECTED_PIC12F675=14
+readonly MUTATION_EXPECTED_TOTAL=112
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
@@ -1299,6 +1299,7 @@ PIC_SOAK_MUTATIONS=(
 # args are the same shape as the PIC10F320 tool table's: optional VAR=value
 # assignments followed by exactly one target, tokenized by the shared helper.
 PIC12F675_MUTATIONS=(
+"src/bypass_mcu_pic12f675.c	s@(shadow_high_mask == expected_high_mask) &&@((shadow_high_mask == expected_high_mask) || (shadow_high_mask != expected_high_mask)) \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET shadow-versus-expected guard tautologized while retaining both operands; the valid ENGAGED context mismatch leaves BYPASS shadow/GPIO matching and must still recover"
 "src/bypass_mcu_pic12f675.c	s@gpio_shadow_ |= (uint8_t)(1U << LED_PIN);@gpio_shadow_ \&= (uint8_t)~(1U << LED_PIN);@	pic12f675-test-gpsim	FW set_engaged LED inverted at the shadow (GP0 stays dark); the ENGAGED checkpoint catches it"
 "src/bypass_mcu_pic12f675.c	s@(0U == (GPIO & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (GPIO \& (uint8_t)(1U << FOOTSW_PIN)))@	pic12f675-test-gpsim	FW footswitch read polarity inverted (GP5 sense flipped -> toggles on release); PRESS1 toggle-on-press checkpoint catches it"
 "src/bypass_mcu_pic12f675.c	s@#define TMR0_SUBTICKS_PER_TICK (4U)@#define TMR0_SUBTICKS_PER_TICK (1U)@	pic12f675-test-gpsim	FW software sub-tick count 4->1: the tick becomes 256us, debounce completes 4x early; PRESS1_EARLY cadence checkpoint catches it (no PIC10F322 counterpart -- that part has a period register)"
