@@ -112,6 +112,25 @@ def parse_hex_bytes(raw, label):
                 raise EvidenceError("%s line %d: malformed EOF" % (label, lineno))
             saw_eof = True
             continue
+        # scripts/validate-ihex.sh accepts record types 02/03/04/05, and the
+        # Makefile runs it on this same file immediately before this parser.
+        # Accept the ones that cannot move or omit a byte, so the two cannot
+        # disagree about a programmer's export: a zero extended-address base is
+        # a no-op, and a start-address record has no memory effect. Every data
+        # byte still lands at its literal 16-bit address, which is the property
+        # the trim and image comparisons rest on.
+        if record_type in (2, 4):
+            if count != 2 or (data[0] | data[1]):
+                raise EvidenceError(
+                    "%s line %d: address relocation is not supported; record "
+                    "type 0x%02X carries a non-zero base"
+                    % (label, lineno, record_type))
+            continue
+        if record_type in (3, 5):
+            if count != 4:
+                raise EvidenceError("%s line %d: malformed start-address record"
+                                    % (label, lineno))
+            continue
         if record_type != 0 or count == 0:
             raise EvidenceError("%s line %d: unsupported record type 0x%02X"
                                 % (label, lineno, record_type))
@@ -203,6 +222,14 @@ def extract_trim_bytes(data, label):
 
 
 def verify_programmed_image(image_data, post_read_path):
+    # Proves: every byte the checked image requests arrived at the address it
+    # requested, and CONFIG matches outside the factory BG<1:0> field.
+    #
+    # Does NOT prove: that flash the image does not cover reads erased. A
+    # writer that programs this image correctly while leaving stale data
+    # elsewhere still passes here. Asserting that would require knowing what
+    # the reader exports for unprogrammed regions, which no lane here can
+    # establish without a device.
     expected = parse_hex_bytes(image_data, "reserved programming image")
     actual = parse_hex(post_read_path, "post-program read HEX")
     config_byte = CONFIG_WORD_ADDR * 2
