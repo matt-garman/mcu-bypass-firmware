@@ -97,19 +97,33 @@ annotations=(
 # must remain unreachable because the earlier context range gate dominates it.
 # Turn that exact gcov record into a covered line and require the unchanged
 # checker to reject the resulting contradiction.
+#
+# The record is located the way the checker locates it -- by source text, from
+# the annotation itself -- so a shell edit that renumbers the main loop cannot
+# leave this probe flipping a line that no longer holds the call, which would
+# make it pass vacuously against a gate that is no longer being tested.
 if [ "$device" = pic12f675 ]; then
     probe_dir="$work/oracle-probe"
     mkdir "$probe_dir"
     probe="$probe_dir/$shell_annotation"
-    sed -E 's/^([[:space:]]*)#####([[:space:]]*:[[:space:]]*602:)/\1        1\2/' \
+    probe_recs=$(grep -E '^[[:space:]]*#####:[[:space:]]*[0-9]+:[[:space:]]*hw_force_wdt_reset\(\);[[:space:]]*$' \
+        "$work/$shell_annotation" || true)
+    probe_count=$(printf '%s' "$probe_recs" | grep -c . || true)
+    if [ "$probe_count" -ne 1 ]; then
+        echo "FAIL: PIC12F675 coverage-oracle probe expects exactly one uncovered" >&2
+        echo "      hw_force_wdt_reset() call record, found $probe_count" >&2
+        exit 1
+    fi
+    probe_line=$(printf '%s' "$probe_recs" | awk -F: '{gsub(/[^0-9]/,"",$2); print $2}')
+    sed -E "s/^([[:space:]]*)#####([[:space:]]*:[[:space:]]*$probe_line:)/\1        1\2/" \
         "$work/$shell_annotation" > "$probe"
-    if ! grep -Eq '^[[:space:]]*1:[[:space:]]*602:' "$probe"; then
-        echo "FAIL: PIC12F675 coverage-oracle probe did not alter source line 602" >&2
+    if ! grep -Eq "^[[:space:]]*1:[[:space:]]*$probe_line:" "$probe"; then
+        echo "FAIL: PIC12F675 coverage-oracle probe did not alter source line $probe_line" >&2
         exit 1
     fi
     if "$ROOT/test/pic/fw_coverage/check_fw_coverage.sh" "$probe" >/dev/null 2>&1; then
         echo "FAIL: PIC12F675 coverage oracle accepted a reachable res.fault reset call" >&2
         exit 1
     fi
-    echo "PIC12F675 coverage-oracle negative probe: PASS"
+    echo "PIC12F675 coverage-oracle negative probe: PASS (source line $probe_line)"
 fi

@@ -412,6 +412,14 @@ return `res.fault`. The live sanity-gate call to `hw_force_wdt_reset()` is a
 positive coverage requirement, so the allowance cannot hide a harness that
 never enters the real reset path.
 
+Both requirements are anchored to the *source text* of the constructs they
+name, never to line numbers, and locating an anchor is itself fail-closed: text
+that matches zero records, or several, fails the gate rather than silently
+checking nothing. The two `hw_force_wdt_reset()` call sites are identical text,
+so they are separated by file order under a requirement that exactly two exist
+-- the allowance covers the res.fault one alone and cannot slide onto the live
+one.
+
 ## PIC10F322 target validation layers
 
 Real-tool PIC targets are intentionally outside the default AVR `make test` path:

@@ -155,7 +155,8 @@ file is the human-readable summary of *what changed*.
   both operands, taking the PIC12F675 category to 14 and the complete mutation
   inventory to 112. The pulled shell refactor moved main-loop source lines
   without changing executable-line coverage; the gcov oracle and its negative
-  probe now follow the current 569-602 anchors rather than rejecting live HEAD.
+  probe were re-pointed from the old 556-589 anchors to 569-602 so they stopped
+  rejecting live HEAD. They no longer carry line numbers at all -- see below.
 
 - **The PIC12F675 target OSCCAL fault is now physically realizable.** The target
   matrix formerly XORed `0x01`, but this part implements `CAL5:CAL0` only in
@@ -239,6 +240,34 @@ file is the human-readable summary of *what changed*.
   invocation-wide: exactly three `misra-config` accommodations are pinned to the
   three PIC shell source paths, and the same ID in an authored header remains
   failing.
+
+- **The PIC shipping-source coverage oracle no longer takes source line numbers
+  as input.** `test/pic/fw_coverage/check_fw_coverage.sh` asserted five required
+  constructs and one allow-listed one by literal line number, so an edit that
+  merely moved the shell reported the guards themselves as missing. The main-loop
+  refactor above shifted the PIC12F675 loop by thirteen lines and fired six
+  violations against a shell whose behaviour and executable-line count were
+  unchanged; the message named the guard, the defect was in the gate. The same
+  breakage sat latent in the PIC10F322 arm, four violations deep, unfired only
+  because nothing had moved that file yet.
+
+  Every anchor is now located by the source text gcov already carries on each
+  record, and the line number is reported as observed evidence instead of
+  required as input. Location is fail-closed: an anchor matching zero lines, or
+  several, is a failure, so a guarded construct cannot be renamed, deleted or
+  duplicated and quietly stop being checked. `hw_force_wdt_reset();` is
+  deliberately not unique -- it is the live sanity-gate call and the res.fault
+  call, character for character -- so those two are separated by file order under
+  a requirement that exactly two exist. Matching them by text alone would accept
+  an annotation in which the live call went uncovered while the structurally
+  unreachable one became reachable, which is the precise regression the gate
+  exists to catch. `test/pic10f320/fault/check_fw_coverage.sh` was already text
+  anchored and is unchanged; it accepts that weaker separation knowingly, with
+  its own fault harness as the compensating control, and its header says so.
+
+  The negative probe in `run_fw_coverage.sh` locates its target the same way,
+  so a renumbering cannot leave it flipping a line that no longer holds the
+  res.fault call and passing vacuously against a gate it is no longer testing.
 
 ## [0.9.8] - 2026-08-08
 
