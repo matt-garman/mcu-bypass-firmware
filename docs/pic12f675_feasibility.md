@@ -1006,11 +1006,13 @@ They are listed worst-first.
    exactly the class it cannot catch alone. **Needs a datasheet read (DS41190) and
    a hardware-bench check.**
    *Status 2026-08-10: still open, now surfaced rather than silent.*
-   `pic12f675-program` decodes the CONFIG word of the exact image it is about to
-   write, so the build-side half — that the toolchain leaves `BG<1:0>` erased
-   rather than programming a value of its own over the factory one — is enforced
-   at flash time and not merely at build time. The programmer's erase behaviour
-   is unchanged by that and is printed as a warning before every write.
+   `pic12f675-program` rebuilds the matrix, derives the selected image only from
+   validated `VARIANT`, and decodes CONFIG from the private snapshot it passes to
+   the programmer. The build-side half — that the toolchain leaves `BG<1:0>`
+   erased rather than programming a value of its own over the factory one — is
+   therefore enforced at flash time and not merely at build time. The
+   programmer's erase behaviour is unchanged by that and is printed as a warning
+   before every write.
 2. **OSCCAL preservation on programming.** Same class, different register. A bulk
    erase that drops word `0x3FF` yields an untrimmed oscillator: wrong tick
    cadence, wrong `__delay_ms()` coil-pulse widths, and a device that still
@@ -1022,10 +1024,12 @@ They are listed worst-first.
    is the programmer erasing the factory word. A second way to destroy it was
    introduced by this port itself — writing one of the DERIVED simulator images,
    which carries a fabricated calibration value — and `pic12f675-program` now
-   refuses to write any image that programs word 0x3FF, checked on the exact
-   file and not on its path. The read-back procedure for the original risk is
-   printed before every write, and still has to be performed by a human at a
-   bench.
+   refuses a selected snapshot that programs word 0x3FF. External image and
+   whole-command substitution are unsupported; the private snapshot's SHA-256
+   digest must remain unchanged through calibration and CONFIG checks before the
+   target passes that same path to the programmer. The read-back procedure for
+   the original risk is printed before every write, and still has to be
+   performed by a human at a bench.
 3. **The hardware return-stack bound under the ISR model — unquantified and
    blocking selection of that model.** It does not block Model B feasibility,
    but it is the one open item that could

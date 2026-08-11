@@ -104,6 +104,7 @@ def parse_records(text, label):
     """Decode every Intel HEX record, rejecting anything malformed."""
     records = []
     saw_eof = False
+    data_lines = {}
     for lineno, raw_line in enumerate(text.splitlines(), 1):
         line = raw_line.strip()
         if not line:
@@ -141,6 +142,10 @@ def parse_records(text, label):
         if rtype == REC_DATA and count == 0:
             raise ValidationError("%s line %d: empty data record"
                                   % (label, lineno))
+        if rtype == REC_DATA and addr + count > 0x10000:
+            raise ValidationError(
+                "%s line %d: data record crosses the 16-bit address boundary"
+                % (label, lineno))
         if rtype == REC_EOF:
             if line.upper() != ":00000001FF":
                 raise ValidationError("%s line %d: malformed EOF record"
@@ -149,6 +154,15 @@ def parse_records(text, label):
         elif rtype != REC_DATA:
             raise ValidationError("%s line %d: unsupported record type 0x%02X"
                                   % (label, lineno, rtype))
+        if rtype == REC_DATA:
+            for offset in range(count):
+                byte_addr = addr + offset
+                if byte_addr in data_lines:
+                    raise ValidationError(
+                        "%s line %d: data byte address 0x%04X overlaps its "
+                        "definition on line %d"
+                        % (label, lineno, byte_addr, data_lines[byte_addr]))
+                data_lines[byte_addr] = lineno
         records.append((line, count, addr, rtype, data))
     if not records:
         raise ValidationError("%s contains no records" % label)
@@ -267,11 +281,7 @@ def inject(text, label, flash_words, value):
 
 
 def write_new_file(path, text, label, mode=None):
-    """Write `text` to a path that must not already exist."""
-    if os.path.lexists(path):
-        raise ValidationError(
-            "%s already exists: %s (refusing to overwrite -- the injector never "
-            "modifies an existing image)" % (label, path))
+    """Publish complete `text` to a path that must not already exist."""
     directory = os.path.dirname(os.path.abspath(path)) or "."
     if not os.path.isdir(directory):
         raise ValidationError("output directory does not exist: %s" % directory)
@@ -284,7 +294,19 @@ def write_new_file(path, text, label, mode=None):
         # reachable as the shipping image it was derived from, no more, no less.
         if mode is not None:
             os.chmod(handle.name, mode)
-        os.replace(handle.name, path)
+        # The hard link publishes the complete temporary inode atomically and,
+        # unlike os.replace(), fails if any file appeared at `path` after the
+        # caller began. Source and destination are in the same directory.
+        os.link(handle.name, path)
+        os.unlink(handle.name)
+    except FileExistsError as exc:
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
+        raise ValidationError(
+            "%s already exists: %s (refusing to overwrite -- the injector never "
+            "modifies an existing image)" % (label, path)) from exc
     except OSError as exc:
         try:
             os.unlink(handle.name)
@@ -462,6 +484,16 @@ def run_selftest():
     rejects("\n".join([SELFTEST_CALL, SELFTEST_EOF, SELFTEST_CONFIG]) + "\n",
             "record follows the EOF record", "record after EOF")
     rejects(":0000000000\n", "empty data record", "empty data record")
+    overlap = "\n".join([SELFTEST_CALL,
+                           emit_record(0x0002, bytes([0xFF, 0x23])),
+                           SELFTEST_CONFIG, SELFTEST_EOF]) + "\n"
+    rejects(overlap, "overlaps its definition on line 1",
+            "overlapping data records")
+    crossing = "\n".join([SELFTEST_CALL,
+                            emit_record(0xFFFF, bytes([0x00, 0x00])),
+                            SELFTEST_EOF]) + "\n"
+    rejects(crossing, "crosses the 16-bit address boundary",
+            "data record crossing the flat address space")
     rejects(":0400000300000005F4\n", "unsupported record type",
             "start-segment-address record")
     rejects("\n", "contains no records", "no records at all")
@@ -531,10 +563,36 @@ def run_selftest():
         except ValidationError:
             pass
 
+        # Reproduce the old check-then-os.replace() race: a competitor creates
+        # the destination only when publication begins. The complete temporary
+        # inode must lose that race without replacing the competitor's bytes.
+        raced = root / "raced.hex"
+        real_link = os.link
+
+        def publish_after_racer(temporary, destination):
+            raced.write_text("competitor\n", encoding="ascii")
+            return real_link(temporary, destination)
+
+        os.link = publish_after_racer
+        checks += 1
+        try:
+            write_new_file(str(raced), derived, "raced output")
+            failures += 1
+            print("FAIL: refuses a destination created during publication -- "
+                  "accepted", file=sys.stderr)
+        except ValidationError as exc:
+            if "already exists" not in str(exc) \
+                    or raced.read_text(encoding="ascii") != "competitor\n":
+                failures += 1
+                print("FAIL: destination publication race changed the competing "
+                      "file: %s" % exc, file=sys.stderr)
+        finally:
+            os.link = real_link
+
         check(sorted(p.name for p in root.iterdir()) ==
-              ["empty.hex", "image.hex", "image_simcal.hex", "link.hex",
-               "moded_simcal.hex"],
-              "leaves no temporary files behind")
+               ["empty.hex", "image.hex", "image_simcal.hex", "link.hex",
+                "moded_simcal.hex", "raced.hex"],
+               "leaves no temporary files behind")
 
     print("PIC calibration-word injection selftest: %d checks, %d failures"
           % (checks, failures))

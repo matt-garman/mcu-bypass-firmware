@@ -138,7 +138,10 @@ make pic12f675                      # build all variants + 1024-word flash-budge
 make pic12f675-test                 # CONFIG, analysis, source coverage, calibration
                                     #   contract, gpsim, and the 8-level stack bound
 make pic12f675-test-target-variants # fail-closed libgpsim fault/lock-step/I/O gates
-make pic12f675-program              # flash one variant to a real device (bench)
+make pic12f675-program VARIANT=cd4053_simple # flash one fresh variant (bench)
+# Renamed/path-qualified IPE executable:
+make pic12f675-program VARIANT=tq2_l2_5v_relay \
+  PIC12F675_PROG=/opt/microchip/ipe/ipecmd.sh PIC12F675_PROG_KIND=ipecmd
 ```
 
 Its simulator lanes run *derived* images: `make pic12f675-simcal` injects the
@@ -147,14 +150,18 @@ and that an erased simulator image does not, and `make pic12f675-test-calibratio
 proves the injection leaves the shipping images byte-identical. That is why this
 part has one aggregate lane the others do not.
 
-The same asymmetry is why `make pic12f675-program` checks the image it is about
-to write: a derived image carries a *fabricated* calibration value, and putting
-one on a real device would overwrite that device's factory oscillator trim
-irreversibly — and silently, since the part still runs afterwards. The target
-refuses any image that programs the calibration word, whatever path it arrived
-by. Two things it cannot check are the programmer's own erase behaviour toward
-that word and toward the `BG<1:0>` bandgap trim; it prints both, with the
-read-back procedure, every time it runs.
+The same asymmetry is why `make pic12f675-program` rebuilds the complete matrix,
+derives one image only from validated `VARIANT`, and checks a private read-only
+snapshot before writing it. A derived image carries a *fabricated* calibration
+value, and putting one on a real device would overwrite that device's factory
+oscillator trim irreversibly — and silently, since the part still runs
+afterwards. The snapshot must leave that word unprogrammed, carry the intended
+CONFIG, and retain one SHA-256 digest through every check; the programmer gets
+that same snapshot through directly constructed argv. External image and
+whole-command overrides are deliberately unsupported. Two things it cannot
+check are the programmer's own erase behaviour toward that word and toward the
+`BG<1:0>` bandgap trim; it prints both, with the read-back procedure, every time
+it runs.
 
 These targets are independent of the AVR build. Individual optional-tool targets
 generally skip cleanly if their primary compiler/simulator is absent. The
