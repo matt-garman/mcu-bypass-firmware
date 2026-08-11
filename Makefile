@@ -6430,6 +6430,52 @@ RELEASE_IMAGES := \
 # they come from.
 RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(XT_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(PIC10F320_BUILD_DIR)
 
+# --- what this repository builds and deliberately does NOT release ------------
+# The sets above say what a release CONTAINS. This one says what is missing ON
+# PURPOSE, which is a different statement from silence.
+#
+# WHY AN ABSENCE NEEDS DECLARING. The block above exists because an omission and
+# a complete set look identical to any check that observes the tree. A STAGED
+# part is that hazard's twin: `bypass-pic12f675-*.hex` is absent from
+# RELEASE_IMAGES for a reason, and nothing here could tell that reason from
+# somebody having forgotten the lane. Naming the images gives the intent a
+# place to live, gives test-release-images something to pin, and makes the
+# graduation a diff in one obvious spot rather than an archaeology exercise.
+#
+# WHY THE PIC12F675 IS NOT RELEASED. It has never run on silicon. Every claim
+# this project makes about it comes from simulation, formal proof and static
+# analysis -- thorough, and not the same claim as "it has run on the part". Two
+# of its open risks are specifically invisible to all of that: whether a
+# programmer preserves the factory oscillator trim in flash word 0x3FF, and
+# whether it preserves the BG<1:0> bandgap bits in the CONFIG word. A device
+# that lost either still appears to work. See docs/pic12f675_feasibility.md
+# section 8, items 1 and 2, and `make pic12f675-program`, which is how they get
+# closed.
+#
+# GRADUATING THE PART means, together and in this order:
+#   0. close section 8 items 1 and 2 at a bench, on real silicon;
+#   1. move PIC12F675_STAGED_IMAGES into RELEASE_IMAGES, and add
+#      $(PIC12F675_BUILD_DIR) to RELEASE_IMAGE_DIRS above;
+#   2. in scripts/make-release.sh: a build step, a qualification step, and an
+#      img_row manifest arm -- that generator refuses to describe an image whose
+#      MCU it does not recognize, so a missed arm fails the release loudly
+#      (test-release-images pins that no arm matches a staged image today);
+#   3. record the flashing procedure in release/README.md, INCLUDING the
+#      calibration-word preservation requirement -- an image published without
+#      it is a device with an untrimmed oscillator that still appears to work;
+#   4. update the pinned counts in test/test_release_images.sh (18 -> 21).
+PIC12F675_STAGED_IMAGES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(call fw_image,$(v),$(PIC12F675_TAG)).hex)
+RELEASE_STAGED_IMAGES := $(PIC12F675_STAGED_IMAGES)
+
+# The two sets are claims about the same namespace, so they must not overlap:
+# an image cannot be both shipped and deliberately withheld. Checked at parse
+# time, on every make invocation, because the failure it guards against is a
+# half-finished graduation -- exactly the state in which someone is least
+# likely to run the release gates.
+ifneq ($(filter $(RELEASE_STAGED_IMAGES),$(RELEASE_IMAGES)),)
+$(error release set and staged set overlap: $(filter $(RELEASE_STAGED_IMAGES),$(RELEASE_IMAGES)) -- a graduating image must be REMOVED from RELEASE_STAGED_IMAGES as it is added to RELEASE_IMAGES)
+endif
+
 # Canonical release-soak and retained-evidence inventories. These are explicit,
 # immutable publication contracts rather than observations of whichever loops or
 # files happened to exist during a run. The release orchestrator rejects any

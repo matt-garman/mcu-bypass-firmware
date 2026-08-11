@@ -1106,7 +1106,14 @@ and both aggregates now run in CI's shared `pic` job with the two mirrors —
 is complete. Step 11 is partly done: the user-facing documentation landed, and
 `pic12f675-program` now exists with a pre-flash gate that refuses any image
 carrying a calibration word (§8 items 1, 2 and 8 updated with what it does and
-does not close). Release integration and the hardware bench remain. The table retains the original dependency order rather than
+does not close). Release integration is done in the only sense available before
+a bench: the part's images are DECLARED as deliberately withheld
+(`RELEASE_STAGED_IMAGES`), the release set and the staged set are asserted
+disjoint at Make parse time, and `test-release-images` pins both the exclusion
+and the fact that the manifest generator has no arm for these images — so a
+graduation that skips a step fails loudly instead of publishing a PIC described
+as an ATtiny. The Makefile carries the graduation checklist. Shipping the images
+remains blocked on the hardware bench, which is the last open item. The table retains the original dependency order rather than
 claiming every row is open.
 
 | # | Step | Notes |

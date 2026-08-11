@@ -161,6 +161,19 @@ reset_fixture
 cp "$fresh/a.hex" "$fresh/extra.hex"
 expect_fail "extra fresh image" "fresh build image set"
 
+# The same two shapes, named for the case that actually threatens this tree: a
+# STAGED part's image reaching a release. The generic cases above already cover
+# the mechanism; these pin the scenario, so the day PIC12F675 graduates it is
+# these that have to be revisited deliberately rather than a rename quietly
+# making the coverage vacuous.
+reset_fixture
+cp "$release/a.hex" "$release/bypass-pic12f675-cd4053_simple.hex"
+expect_fail "staged image in committed release" "committed release image set"
+
+reset_fixture
+cp "$fresh/a.hex" "$fresh/bypass-pic12f675-cd4053_simple.hex"
+expect_fail "staged image in fresh build" "fresh build image set"
+
 reset_fixture
 cp "$fresh/a.hex" "$fresh/.hidden.hex"
 expect_fail "hidden fresh image" "invalid image name"
@@ -368,6 +381,126 @@ for base in bypass-pic10f320-cd4053_simple.hex \
 		bypass-pic10f320-tq2_l2_5v_relay.hex; do
 	[[ " $canonical " == *" $base "* ]] \
 		|| fail "canonical release set is missing $base"
+	checks=$((checks + 1))
+done
+
+# ---------------------------------------------------------------------------
+# The DECLARED exclusion. Everything above asks what the release contains; this
+# asks whether what is missing is missing on purpose. An omission and an
+# intention look identical to a check that only counts, so the Makefile names
+# the staged images and these pin that declaration from both sides.
+# ---------------------------------------------------------------------------
+staged=$(cd "$ROOT" && make -s --no-print-directory print-RELEASE_STAGED_IMAGES) \
+	|| fail "could not read RELEASE_STAGED_IMAGES from the Makefile"
+read -r -a staged_arr <<<"$staged"
+[ "${#staged_arr[@]}" -eq 3 ] \
+	|| fail "staged image set has ${#staged_arr[@]} images, expected 3"
+checks=$((checks + 1))
+
+# Named, not counted: these basenames are what the graduation moves, and a
+# count alone would survive a rename on either side.
+for base in bypass-pic12f675-cd4053_simple.hex \
+		bypass-pic12f675-cd4053_with_mute.hex \
+		bypass-pic12f675-tq2_l2_5v_relay.hex; do
+	[[ " $staged " == *" $base "* ]] \
+		|| fail "staged image set is missing $base"
+	checks=$((checks + 1))
+	[[ " $canonical " != *" $base "* ]] \
+		|| fail "staged image $base is in the canonical release set"
+	checks=$((checks + 1))
+done
+
+# ...and the same statement as a count, so an image that appears under some
+# OTHER pic12f675 name is caught too.
+expect_count "PIC12F675 (staged, must not be released)" 'bypass-pic12f675-*.hex' 0
+
+# The reproduction directories must not include the staged part's build tree
+# either: an image cannot be withheld from the set and still handed to the
+# verifier as a fresh build input.
+release_dirs=$(cd "$ROOT" && make -s --no-print-directory print-RELEASE_IMAGE_DIRS) \
+	|| fail "could not read RELEASE_IMAGE_DIRS from the Makefile"
+staged_dir=$(cd "$ROOT" && make -s --no-print-directory print-PIC12F675_BUILD_DIR) \
+	|| fail "could not read PIC12F675_BUILD_DIR from the Makefile"
+[ -n "$staged_dir" ] || fail "PIC12F675_BUILD_DIR is empty"
+[[ " $release_dirs " != *" $staged_dir "* ]] \
+	|| fail "RELEASE_IMAGE_DIRS contains the staged build directory $staged_dir"
+checks=$((checks + 1))
+
+# ---------------------------------------------------------------------------
+# The manifest generator's arms, cross-checked against the canonical set.
+# scripts/make-release.sh's img_row describes each released image by matching
+# its MCU field, and refuses outright to describe a name it does not recognize.
+# That refusal is the graduation trip-wire -- adding a part to RELEASE_IMAGES
+# without adding an arm fails the release -- so it is worth knowing that the
+# arms and the set agree TODAY, and that no arm already matches a staged image.
+# ---------------------------------------------------------------------------
+mapfile -t arm_specs < <(sed -n 's/^\t\t\(\${FW_BASE}[^)]*\))$/\1/p' \
+	"$ROOT/scripts/make-release.sh")
+# Pinned so a reformat of that case block fails here rather than silently
+# extracting nothing and passing every check below vacuously.
+[ "${#arm_specs[@]}" -eq 5 ] \
+	|| fail "extracted ${#arm_specs[@]} manifest arms from make-release.sh, expected 5"
+checks=$((checks + 1))
+
+declare -A mkvar=()
+for v in FW_BASE ATTINY13A_MCU XT_TAG PIC10F322_TAG PIC10F320_TAG; do
+	mkvar[$v]=$(cd "$ROOT" && make -s --no-print-directory print-"$v") \
+		|| fail "could not read $v from the Makefile"
+	[ -n "${mkvar[$v]}" ] || fail "Makefile $v is empty"
+done
+
+arm_patterns=()
+for spec in "${arm_specs[@]}"; do
+	# One arm may carry several alternatives (attiny85|attiny45).
+	IFS='|' read -r -a alternatives <<<"$spec"
+	for pattern in "${alternatives[@]}"; do
+		for v in "${!mkvar[@]}"; do
+			pattern=${pattern//"\${$v}"/${mkvar[$v]}}
+		done
+		# No eval anywhere above, so an arm naming a variable this test does not
+		# know stays unexpanded -- and says so instead of silently matching
+		# nothing.
+		[[ "$pattern" != *'$'* ]] \
+			|| fail "manifest arm pattern has an unresolved variable: $pattern"
+		arm_patterns+=("$pattern")
+	done
+done
+[ "${#arm_patterns[@]}" -eq 6 ] \
+	|| fail "expanded ${#arm_patterns[@]} manifest patterns, expected 6"
+checks=$((checks + 1))
+
+matches_an_arm() {
+	local base=$1 pattern
+	for pattern in "${arm_patterns[@]}"; do
+		case "$base" in $pattern) return 0 ;; esac
+	done
+	return 1
+}
+
+# The trip-wire itself: today no arm claims a staged image, so a graduation that
+# forgets step 2 of the Makefile's checklist dies in the manifest generator
+# rather than publishing a PIC described as an ATtiny.
+for base in "${staged_arr[@]}"; do
+	! matches_an_arm "$base" \
+		|| fail "make-release.sh already has a manifest arm matching staged image $base"
+	checks=$((checks + 1))
+done
+
+for base in "${canonical_arr[@]}"; do
+	matches_an_arm "$base" \
+		|| fail "no make-release.sh manifest arm describes released image $base"
+	checks=$((checks + 1))
+done
+
+# The other direction: an arm matching nothing is a part that left the release
+# set without its manifest arm being removed.
+for pattern in "${arm_patterns[@]}"; do
+	matched=0
+	for base in "${canonical_arr[@]}"; do
+		case "$base" in $pattern) matched=1; break ;; esac
+	done
+	[ "$matched" -eq 1 ] \
+		|| fail "make-release.sh manifest arm '$pattern' describes no released image"
 	checks=$((checks + 1))
 done
 

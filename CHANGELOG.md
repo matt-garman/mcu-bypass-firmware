@@ -101,6 +101,25 @@ file is the human-readable summary of *what changed*.
   factory values — silicon-only risks that close at a bench or nowhere. It
   prints both, with the read-back procedure, before every write.
 
+- **The PIC12F675's exclusion from the release set is now declared and
+  enforced, not incidental.** `RELEASE_IMAGES` exists because an incomplete
+  release and a complete one look identical to any check that observes the
+  tree; a staged part is that hazard's twin, since an image missing on purpose
+  and one missing by mistake are equally silent. `RELEASE_STAGED_IMAGES` names
+  the three images this repository builds and deliberately does not ship, the
+  two sets are asserted disjoint at Make parse time, and the Makefile carries
+  the graduation checklist.
+
+  `test-release-images` grew 53 → 93 checks around that: the staged images are
+  named rather than counted, `RELEASE_IMAGE_DIRS` must not contain the staged
+  build tree, and every arm of `make-release.sh`'s manifest generator is
+  cross-checked against the canonical set in both directions — every released
+  image has an arm, every arm describes a released image, and **no** arm
+  matches a staged image. That last one is the trip-wire: the generator refuses
+  to describe an image whose MCU it does not recognize, so a graduation that
+  forgets its manifest arm fails the release instead of publishing a PIC
+  labelled as an ATtiny with AVR fuse bytes.
+
 - **`TODO.md` T25-misra-header-gate.** The 2026-08-10 suppression review
   measured that cppcheck 2.13.0 sets `--error-exitcode` only from findings
   located in the file passed on the command line, so a finding in an included
