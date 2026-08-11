@@ -6457,16 +6457,21 @@ RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(XT_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(
 #
 # WHY THE PIC12F675 IS NOT RELEASED. It has never run on silicon. Every claim
 # this project makes about it comes from simulation, formal proof and static
-# analysis -- thorough, and not the same claim as "it has run on the part". Two
-# of its open risks are specifically invisible to all of that: whether a
-# programmer preserves the factory oscillator trim in flash word 0x3FF, and
-# whether it preserves the BG<1:0> bandgap bits in the CONFIG word. A device
-# that lost either still appears to work. See docs/pic12f675_feasibility.md
-# section 8, items 1 and 2, and `make pic12f675-program`, which is how they get
-# closed.
+# analysis -- thorough, and not the same claim as "it has run on the part".
+# Three of its open risks are specifically invisible to all of that: whether a
+# programmer preserves the factory oscillator trim in flash word 0x3FF, whether
+# it preserves the BG<1:0> bandgap bits in the CONFIG word, and whether GP2 --
+# the one output pin whose input buffer is a Schmitt Trigger -- reads back above
+# 0.8*VDD where cd4053_with_mute holds it high, which the per-tick
+# port-follows-shadow guard requires and which gpsim's ideal pin model cannot
+# test. A device that lost either of the first two still appears to work; one
+# that fails the third watchdog-resets forever. See
+# docs/pic12f675_feasibility.md section 8, items 1, 2 and 9. The first two are
+# closed by `make pic12f675-program`, which states them before every write; the
+# third is closed with a meter.
 #
 # GRADUATING THE PART means, together and in this order:
-#   0. close section 8 items 1 and 2 at a bench, on real silicon;
+#   0. close section 8 items 1, 2 and 9 at a bench, on real silicon;
 #   1. move PIC12F675_STAGED_IMAGES into RELEASE_IMAGES, and add
 #      $(PIC12F675_BUILD_DIR) to RELEASE_IMAGE_DIRS above;
 #   2. in scripts/make-release.sh: a build step, a qualification step, and an

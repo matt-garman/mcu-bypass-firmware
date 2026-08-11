@@ -365,8 +365,8 @@ datasheet summary.
                                 +----+
 ....
 
-This is **not** the PIC10F32x assignment renamed. Two differences are forced by
-the silicon:
+This is **not** the PIC10F32x assignment renamed. Three differences are forced
+by the silicon:
 
 * **The footswitch is on GP5, not on the input-only pin.** The 322's map rests
   on a coincidence — its RA3 is both input-only *and* pull-up capable. Here the
@@ -379,6 +379,20 @@ the silicon:
   included in the guarded output mask, so the board must leave it unconnected or
   connect it only to a load that is safe while driven low. GP3 remains an input
   and needs an external pull-up compatible with ICSP/V_PP programming.
+* **GP2 must read back as a logic high when it is driven high.** Having no
+  output latch, the shell keeps an SRAM shadow and re-reads GPIO against it
+  every tick, so the output pins' *input* thresholds become a board requirement
+  — and GP2 is the only output here whose input buffer is a Schmitt Trigger
+  (VIH min 0.8 x VDD) rather than TTL (VIH min 2.0v). A GP2 held high that
+  reads back below 0.8 x VDD trips the integrity check and the part resets
+  forever. This binds `cd4053_with_mute`, the one variant that holds GP2 high in
+  a checked state: `cd4053_simple` leaves it a spare driven low, and the relay
+  variant raises it only during the blocking coil pulse, which no integrity
+  check straddles. Both board options clear the requirement by a wide margin —
+  the pin drives a MOSFET gate or a CMOS control input, and the only resistive
+  load is the 100k fail-safe pulldown — but a substituted low-value pulldown, or
+  anything else hung off GP2, has to respect it. Numbers and the bench check are
+  in `docs/pic12f675_feasibility.md` section 4.2 and section 8 item 9.
 
 LED on GP0, control/coil pins on GP1 and GP2 — the same roles the 322 gives RA0,
 RA1 and RA2.
