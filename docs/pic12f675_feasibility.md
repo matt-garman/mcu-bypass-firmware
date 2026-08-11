@@ -149,7 +149,7 @@ address (`0x081`, `0x085`, …), not an alias.
 | Analog select | `ANSELA` `0x008` | `ANSEL` `0x09F` | also carries `ADCS<2:0>` |
 | Weak pull-up latch | `WPUA` `0x009` | `WPU` `0x095` | no bit 3 |
 | Global pull-up enable | `OPTION_REG.nWPUEN` `0x00E` bit 7 | `OPTION_REG.nGPPU` `0x081` bit 7 | active low on both |
-| Oscillator | `OSCCON.IRCF` `0x010` bits 6:4 | `OSCCAL` `0x090` (8-bit trim) | §4.5 |
+| Oscillator | `OSCCON.IRCF` `0x010` bits 6:4 | `OSCCAL` `0x090` (`CAL5:CAL0` in bits 7:2) | §4.5 |
 | Tick period | `PR2` `0x012`, `T2CON` `0x013` | — | §4.4 |
 | Tick flag | `PIR1.TMR2IF` | `INTCON.T0IF` bit 2 `0x00B` (or `PIR1.TMR1IF` bit 0 `0x00C`) | §4.4 |
 | Watchdog period | `WDTCON.WDTPS` `0x030` bits 5:1 | `OPTION_REG` `PSA` bit 3, `PS<2:0>` bits 2:0 | §4.4 |
@@ -697,7 +697,8 @@ against the new loop shape.
 ### 4.5 Fixed 4 MHz INTOSC, and the OSCCAL calibration word
 
 There is **no `OSCCON`** on this part and no runtime frequency selection: the
-internal oscillator is 4 MHz, trimmed by the 8-bit `OSCCAL` register. So:
+internal oscillator is 4 MHz, trimmed by `OSCCAL.CAL5:CAL0` in bits 7:2; bits
+1:0 are unimplemented and read zero. So:
 
 - `_XTAL_FREQ` becomes `4000000UL`, with the corresponding `static_assert`. The
   drivers' `__delay_ms(12)` / `__delay_ms(5)` are unaffected in *milliseconds*.

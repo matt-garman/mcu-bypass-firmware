@@ -92,6 +92,9 @@
 #define PIC_REG_CMCON_ADDR   0x019u  // CM<2:0> = bits 2:0; 111 = comparator off
 #define PIC_REG_ADCON0_ADDR  0x01Fu  // ADON = bit 0
 #define PIC_REG_OSCCAL_ADDR  0x090u  // factory trim, snapshotted at init
+// OSCCAL implements CAL5:CAL0 in bits 7:2; bits 1:0 are unimplemented and read
+// zero on silicon. Toggle CAL0 for the smallest physically realizable trim upset.
+#define PIC_FAULT_OSCCAL_CAL0_MASK 0x04u
 
 // ---- Output directions (hw_output_state_intact, via hw_is_sanity_check_failed)
 // The gate compares TRISIO exactly against 0x28, so this covers both directions
@@ -140,8 +143,9 @@
                 "ANS2=1: GP2 (control pin) re-selected analog, out of digital service"); \
     inject_case("ANSEL.ANS3",    PIC_REG_ANSEL_ADDR, PIC_REG_ANSEL_TOKEN, false, 0x08, 1, \
                 "ANS3=1: parked GP4 re-selected analog, out of digital service"); \
-    inject_case("OSCCAL",        PIC_REG_OSCCAL_ADDR, "osccal", false, 0x01, 1, \
-                "trim drifted one step from the value init() snapshotted"); \
+    inject_case("OSCCAL.CAL0",   PIC_REG_OSCCAL_ADDR, "osccal", false, \
+                PIC_FAULT_OSCCAL_CAL0_MASK, 1, \
+                "toggle implemented CAL0: one physically realizable trim step"); \
 } while (0)
 
 // ---- Weak pull-ups (hw_footswitch_pullup_intact) ----------------------------
