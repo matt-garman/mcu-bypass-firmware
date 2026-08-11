@@ -222,12 +222,16 @@ file is the human-readable summary of *what changed*.
   character actually found. The diagram itself was corrected, and a sweep of
   the other three found no second instance.
 
-- **Authored-header MISRA findings now fail closed.** The 2026-08-10 suppression
-  review measured that cppcheck 2.13.0 sets `--error-exitcode` only from findings
-  located in the file passed on the command line, so a finding in an included
-  header was printed and ignored. All five MISRA recipes now force a structured
-  diagnostic format and pass captured output through a repository-owned parser
-  that normalizes paths and fails every unwaived record in authored `src/*.c` or
+- **Authored-header MISRA findings now fail closed.** The 2026-08-10
+  suppression review measured that cppcheck 2.13.0 leaves `--error-exitcode`
+  unset for some findings located in an included header, so such a finding was
+  printed and then ignored. (Which ones is rule-dependent rather than purely
+  location-dependent: re-measured 2026-08-11 against real cppcheck 2.13.0, a
+  Rule 2.5 finding in an authored header leaves the status 0 while a Rule 20.7
+  finding in one sets it to 2. The parser exists so the project does not have
+  to know which.) All five MISRA recipes now force a structured diagnostic
+  format and pass captured output through a repository-owned parser that
+  normalizes paths and fails every unwaived record in authored `src/*.c` or
   `src/*.h`, independently of cppcheck's status. Malformed output and analyzer
   failure also fail closed.
 
