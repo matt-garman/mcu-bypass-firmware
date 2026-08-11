@@ -6474,14 +6474,38 @@ RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(XT_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(
 #   0. close section 8 items 1, 2 and 9 at a bench, on real silicon;
 #   1. move PIC12F675_STAGED_IMAGES into RELEASE_IMAGES, and add
 #      $(PIC12F675_BUILD_DIR) to RELEASE_IMAGE_DIRS above;
-#   2. in scripts/make-release.sh: a build step, a qualification step, and an
-#      img_row manifest arm -- that generator refuses to describe an image whose
-#      MCU it does not recognize, so a missed arm fails the release loudly
-#      (test-release-images pins that no arm matches a staged image today);
-#   3. record the flashing procedure in release/README.md, INCLUDING the
+#   2. extend the two publication inventories immediately below: the three
+#      soak combinations into RELEASE_SOAK_NAMES, and build-pic12f675.log,
+#      pic12f675-test.log and pic12f675-test-target-variants.log into
+#      RELEASE_FIXED_EVIDENCE_FILES. Both fail closed and both fail LATE:
+#      scripts/make-release.sh compares its actual soak set against the first
+#      BEFORE starting the 24-hour phase, and
+#      scripts/verify-release-qualification.sh requires the retained evidence
+#      to match the second exactly AFTER that phase ends;
+#   3. in scripts/make-release.sh: preflight req_file lines for
+#      PIC12F675_DFP_INCLUDE and PIC12F675_DEVICE_INI -- asserted through this
+#      part's OWN variables, for the reason the PIC10F320 pair states there;
+#      the soak's compiler and libgpsim requirements need nothing new, since
+#      this part reuses PIC_SOAK_CXX and PIC_SOAK_GPSIM_INC -- then a build
+#      step, a qualification step, a soak-combo loop producing the step 2
+#      names, and an img_row manifest arm. That generator refuses to describe
+#      an image whose MCU it does not recognize, so a missed arm fails the
+#      release loudly (test-release-images pins that no arm matches a staged
+#      image today). The soak loop must build pic12f675-simcal FIRST -- one
+#      prerequisite gets both halves, since it depends on pic12f675. This is
+#      the only part whose soak runs a DERIVED image and reads _gpio_shadow_
+#      out of the build's .sym, so a loop copied from the PIC10F32x arms
+#      compiles with no shadow address and fails closed at soak-build time,
+#      an hour into the run;
+#   4. in .github/workflows/release.yml: build the part on the pinned runner
+#      and re-run its lanes there. The reproducibility gate compares the
+#      rebuilt set against the Makefile's RELEASE_IMAGES, so a part added in
+#      step 1 and absent here fails the tag build -- the latest and most
+#      expensive place anything in this list can fail;
+#   5. record the flashing procedure in release/README.md, INCLUDING the
 #      calibration-word preservation requirement -- an image published without
 #      it is a device with an untrimmed oscillator that still appears to work;
-#   4. update the pinned counts in test/test_release_images.sh (18 -> 21).
+#   6. update the pinned counts in test/test_release_images.sh (18 -> 21).
 PIC12F675_STAGED_IMAGES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(call fw_image,$(v),$(PIC12F675_TAG)).hex)
 RELEASE_STAGED_IMAGES := $(PIC12F675_STAGED_IMAGES)
 
