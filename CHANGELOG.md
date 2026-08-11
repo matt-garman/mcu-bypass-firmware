@@ -73,8 +73,8 @@ file is the human-readable summary of *what changed*.
   hardware return-stack bound, gpsim CLI functional tests, and libgpsim
   target-I/O, lock-step, fault-injection and long-duration soak lanes, behind
   the fail-closed `pic12f675-test` and `pic12f675-test-target-variants`
-  aggregates. 13 mutants with their own toolchain probe take the mutation
-  inventory to 111. Both aggregates run in CI and in `scripts/ci-local.sh`.
+  aggregates. 14 mutants with their own toolchain probe take the mutation
+  inventory to 112. Both aggregates run in CI and in `scripts/ci-local.sh`.
 
   Two things are deliberately absent. Simulator images are **derived**: an
   oscillator calibration word is injected into a *copy*, because an erased
@@ -141,6 +141,21 @@ file is the human-readable summary of *what changed*.
   to describe an image whose MCU it does not recognize, so a graduation that
   forgets its manifest arm fails the release instead of publishing a PIC
   labelled as an ATtiny with AVR fuse bytes.
+
+- **The PIC12F675 output-integrity predicate is now exercised one clause at a
+  time.** The target fault harness changes a valid settled context from BYPASS to
+  ENGAGED while leaving the BYPASS shadow and physical GPIO untouched and
+  matching. The context range check accepts the value and port-versus-shadow
+  remains true, so the resulting watchdog reset independently witnesses
+  shadow-versus-expected for all three output variants. Target fault coverage
+  moves from 36 to 37 checks per variant; host predicate coverage moves from 84
+  to 85.
+
+  A dedicated mutant tautologizes only shadow-versus-expected while retaining
+  both operands, taking the PIC12F675 category to 14 and the complete mutation
+  inventory to 112. The pulled shell refactor moved main-loop source lines
+  without changing executable-line coverage; the gcov oracle and its negative
+  probe now follow the current 569-602 anchors rather than rejecting live HEAD.
 
 - **The PIC12F675's three datasheet-read risks are closed** (DS41190G, read
   2026-08-11). They never needed silicon, only the datasheet:

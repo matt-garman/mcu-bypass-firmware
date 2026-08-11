@@ -57,6 +57,8 @@ static void test_predicates(void) {
           "clean outputs should be intact and low");
     CHECK(fwp_sanity_failed(BYPASS) == 0,
           "clean bypass output configuration should pass");
+    CHECK(fwp_sanity_failed(ENGAGED) != 0,
+          "ENGAGED expectation must reject matching settled BYPASS shadow and GPIO");
     CHECK(fwp_pullup_intact() != 0, "clean GP5 pull-up should be intact");
     CHECK(fwp_critical_sfrs_intact() != 0, "clean critical SFRs should pass");
     CHECK(fwp_footswitch_is_high() == 1, "released GP5 footswitch should read high");
@@ -339,9 +341,9 @@ int main(void) {
     test_happy_path();
     test_pure_fault_path();
 #if defined(BYPASS_MCU_PIC12F675)
-    if (g_checks != 84) {
+    if (g_checks != 85) {
         g_failures++;
-        fprintf(stderr, "FAIL: PIC12F675 coverage harness ran %d checks, expected 84\n",
+        fprintf(stderr, "FAIL: PIC12F675 coverage harness ran %d checks, expected 85\n",
                 g_checks);
     }
 #else

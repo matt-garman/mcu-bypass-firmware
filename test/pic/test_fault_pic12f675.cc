@@ -4,10 +4,10 @@
 // PIC12F675 adapter for the shared libgpsim fault-injection harness. 1024
 // program words, and an output "latch" that is not a register at all: this part
 // has no LATx, so the shell keeps gpio_shadow_ in SRAM and writes shadow ->
-// GPIO. The core's per-part output hook therefore injects EIGHT cases where the
-// PIC10F322 injects three -- the shadow, and the physical port that must follow
-// it -- because the gate here compares the firmware's INTENT against the pins,
-// which is a fault class the 322 cannot see at all.
+// GPIO. The core's per-part output hook therefore injects NINE cases where the
+// PIC10F322 injects three: four shadow faults, four physical-port faults, and a
+// valid effect-state mismatch that leaves both shadow and port untouched. Those
+// groups isolate expected-vs-shadow and shadow-vs-port independently.
 //
 // Everything else this part guards, and the two OPTION_REG bits it deliberately
 // does not, live in the injection matrix beside this file.
@@ -24,7 +24,7 @@
 // than failing later on an undeclared identifier. There is no value a default
 // could carry that would be right, and the obvious one is actively wrong:
 // register 0x000 is INDF, which is not storage at all -- a write through it
-// lands wherever FSR happens to point, so the three shadow cases would be
+// lands wherever FSR happens to point, so the four shadow cases would be
 // corrupting an arbitrary GPR under a label that says shadow.
 #ifndef PIC_SHADOW_ADDR
 #  error "PIC_SHADOW_ADDR (_gpio_shadow_ from the XC8 .sym) is required: this lane injects into the shadow"
@@ -33,12 +33,12 @@
 #define PIC_FAULT_DEFAULT_PROC_NAME "p12f675"
 // 1024 words of flash, matching this part's budget in the Makefile.
 #define PIC_FAULT_PROGRAM_WORDS 0x400u
-#define PIC_FAULT_EXPECTED_CHECKS 36u
-// The shadow cases corrupt what the firmware MEANT to drive; the GPIO cases
-// corrupt what the pins actually are, leaving the shadow correct. Only the
-// port-follows-shadow clause of hw_output_state_intact() can explain a reset
-// from the second group -- the shadow still matches its expected mask -- so the
-// two groups together pin both halves of that comparison independently.
+#define PIC_FAULT_EXPECTED_CHECKS 37u
+// The shadow cases make both output-integrity clauses false. The GPIO cases
+// isolate port-follows-shadow: the shadow still matches settled BYPASS. The
+// final context case does the converse: valid ENGAGED changes only the expected
+// mask while settled BYPASS shadow/GPIO remain matching, so only
+// shadow-versus-expected can explain its reset.
 #define PIC_FAULT_EXTRA_OUTPUT_INJECTIONS() do { \
     inject_case("shadow.GP0", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x01, 1, \
                 "GP0 LED shadow changed from settled low to high"); \
@@ -56,6 +56,8 @@
                 "GP2 pin driven high with its shadow low: port stopped following"); \
     inject_case("GPIO.GP4",   PIC_REG_PORT_ADDR,  PIC_REG_PORT_TOKEN,  false, 0x10, 1, \
                 "parked GP4 pin high with its shadow low: port stopped following"); \
+    inject_case("ctx.expected", CTX_EFFECT_STATE, nullptr, true, 0x01, 1, \
+                "BYPASS shadow/GPIO stay matching; ENGAGED expectation isolates shadow mismatch"); \
 } while (0)
 #define PIC_FAULT_PROGRAM_STATE_NOTE \
     "0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault)"

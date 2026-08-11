@@ -347,7 +347,10 @@ in the design record:
   cosmic-ray/EMI threat model says can flip. It becomes a new guarded location —
   but note that it guards *itself*: an upset in the shadow diverges it from either
   the expected mask or the port, and either way the gate fires. It should also be
-  added to the fault-injection matrix as its own case.
+  added to the fault-injection matrix as its own case. The matrix also changes a
+  valid BYPASS context to ENGAGED without touching matching BYPASS shadow/GPIO,
+  independently witnessing the shadow-versus-expected half rather than relying
+  on a shadow upset that makes both comparisons false.
 - **Unpleasant, and specific to GP2:** reading the port back makes the guard
   depend on the *DC input characteristics* of the output pins, and those are not
   uniform. DS41190G Table 1-1 makes GP2 the only Schmitt-Trigger input in this
@@ -1287,8 +1290,8 @@ ISR alternative is reconsidered; steps 2 through 9 are implemented — step 9
 re-derived the holds through the tick period rather than letting the slack absorb
 the 1.024 ms stretch (§4.4.1). Step 10 is done: `pic12f675-test` and
 `pic12f675-test-target{,-variants}` are implemented and carry the third leg of
-`test-target-matrix` and `test-target-lane-markers`, and 13 mutants with their
-own toolchain probe and sandbox validator take the mutation inventory to 111;
+`test-target-matrix` and `test-target-lane-markers`, and 14 mutants with their
+own toolchain probe and sandbox validator take the mutation inventory to 112;
 and both aggregates now run in CI's shared `pic` job with the two mirrors —
 `scripts/ci-local.sh` and `test-ci-local-routing` — extended alongside. Step 10
 is complete. Step 11 is partly done: the user-facing documentation landed, and

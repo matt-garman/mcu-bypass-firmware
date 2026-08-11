@@ -403,7 +403,7 @@ and each `T0IF` access supplies the next of the four polled TMR0 subticks. Runti
 checks pin the implementation-defined host bitfield layout before it can count
 as firmware evidence.
 
-Every output variant runs an exact 84-check predicate, fault, and happy-path
+Every output variant runs an exact 85-check predicate, fault, and happy-path
 matrix. The coverage oracle then requires every executable line in all five
 shipping sources except one exact, documented defense-in-depth call: invalid
 context is caught by the main-loop range gate before `debounce_step()` can
@@ -665,12 +665,13 @@ gives the Classic AVR the soak-lane mutant the PIC and ATtiny202 families
 already had.
 
 **PIC12F675 mutants are one table, not three, and are chosen for what this part
-has that the 10F32x parts do not.** All 13 need XC8 plus gpsim or libgpsim plus
+has that the 10F32x parts do not.** All 14 need XC8 plus gpsim or libgpsim plus
 the derived simulator images, so there is no host-only lane for them to fall
 back to and nothing to split. Copying the 322's list would mostly have re-proved
 the shared pure core, so the set targets the SRAM output shadow (a severed
-write-back, and a port-follows-shadow guard turned into a tautology — a fault
-the 322 cannot express, since its port and latch are two views of one register),
+write-back, each of shadow-versus-expected and port-versus-shadow independently
+turned into a tautology, and physical divergence the 322 cannot express because
+its port and latch are two views of one register),
 the software sub-tick counter that stands in for the period register this part
 lacks, the comparator and OSCCAL-trim guards that have no 322 counterpart, and
 ANSEL's off-by-one mapping (GPIO bit 4 selects ANS3). Kill targets are assigned
@@ -694,8 +695,8 @@ kill, and the sandbox gaps that briefly cut it to 56 — is recorded in
 
 The driver independently pins the eight mutation categories at **24 core/AVR +
 19 AVR-XT + 29 PIC10F320 host + 11 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 8
-PIC target + 13 PIC12F675 = 111**. It rejects category drift before probing, then
-requires dispatched + skipped = 111 and killed + survived + errored = dispatched. Every
+PIC target + 14 PIC12F675 = 112**. It rejects category drift before probing, then
+requires dispatched + skipped = 112 and killed + survived + errored = dispatched. Every
 worker status is checked; result status/output pairs are atomically published
 and accepted only with exact text grammar and no missing, hidden, or extra
 artifacts.
