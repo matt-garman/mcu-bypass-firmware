@@ -81,7 +81,7 @@ test/
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
   test_stack_bound.sh       shared: fail-closed stack evidence checks
   test_stack_depth_pic.sh   shared: PIC return-stack gate regression
-  test_strict_tools.sh      shared: skip/strict policy for host + both PIC chips
+  test_strict_tools.sh      shared: skip/strict policy for host + all three PIC parts
   test_supply_chain.sh      shared: external download/cache/action pin checks
   test_target_lane_markers.sh shared: PIC aggregate PASS-marker regression
   test_target_matrix.sh     shared: fail-closed PIC/AVR-XT target-matrix regression
