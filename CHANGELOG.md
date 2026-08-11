@@ -193,12 +193,24 @@ file is the human-readable summary of *what changed*.
   character actually found. The diagram itself was corrected, and a sweep of
   the other three found no second instance.
 
-- **`TODO.md` T25-misra-header-gate.** The 2026-08-10 suppression review
-  measured that cppcheck 2.13.0 sets `--error-exitcode` only from findings
+- **Authored-header MISRA findings now fail closed.** The 2026-08-10 suppression
+  review measured that cppcheck 2.13.0 sets `--error-exitcode` only from findings
   located in the file passed on the command line, so a finding in an included
-  header is printed and ignored. Every D-2/D-3 entry therefore suppresses
-  output rather than a failure today; `MISRA_COMPLIANCE.md` records the
-  measurement and the qualifier.
+  header was printed and ignored. All five MISRA recipes now force a structured
+  diagnostic format and pass captured output through a repository-owned parser
+  that normalizes paths and fails every unwaived record in authored `src/*.c` or
+  `src/*.h`, independently of cppcheck's status. Malformed output and analyzer
+  failure also fail closed.
+
+  `make test-misra-output-contract` supplies all five recipes with a fake
+  cppcheck that returns zero while emitting a Required-rule finding in an
+  authored header. Every lane must reject it, and only the exact `rule:file`
+  suppression may restore clean; direct probes cover absolute paths, authored C,
+  adopted and test paths, unattributed/malformed records, tool failure, and a
+  severed parser call. PIC10F322 and PIC12F675 no longer suppress `misra-config`
+  invocation-wide: exactly three `misra-config` accommodations are pinned to the
+  three PIC shell source paths, and the same ID in an authored header remains
+  failing.
 
 ## [0.9.8] - 2026-08-08
 

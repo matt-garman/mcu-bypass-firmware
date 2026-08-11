@@ -88,37 +88,6 @@ Dependencies: an upstream release containing the three fixes. Effort: about
 1 hour. Risk: Low; this retires vendored third-party modifications and a
 simulator-fidelity caveat rather than closing a firmware gap.
 
-### T25-misra-header-gate - Make header-located MISRA findings fail their lane
-
-With cppcheck 2.13.0, `--error-exitcode` is set only by findings located in the
-file passed on the command line; a finding located in an included header is
-printed and then ignored. Measured during the 2026-08-10 suppression review:
-dropping `misra-c2012-11.4:src/bypass_mcu_avr_classic.c` fails
-`make analyze-misra` with 30 findings, while dropping
-`misra-c2012-2.3:src/bypass_types.h` or
-`misra-c2012-2.5:src/bypass_pins_avr_xt.h` leaves it green.
-
-Consequence: every D-2 and D-3 entry currently suppresses output rather than a
-failure, and a new Rule 2.5 or 2.3 artifact appearing in a NEW authored header
-would not fail any lane. The suppression file's stated scope contract -- "a
-matching finding in a new file therefore fails the gate" -- holds only for `.c`
-files today.
-
-Options, cheapest first: post-process the captured cppcheck output and fail on
-any `misra-c2012-*` line whose path is inside `src/`, which needs no cppcheck
-change and reuses the `$out` capture every MISRA recipe already makes; or pass
-each authored header through a lane of its own; or re-pin cppcheck if a later
-version gates header findings natively. The first keeps the suppression list as
-the single place a finding is waived, which is the property worth preserving.
-
-Whichever is chosen, the acceptance test is a negative probe: introduce an
-unused macro in an authored header, confirm the lane fails, then confirm a
-matching suppression entry makes it pass again.
-
-Dependencies: none. Effort: Low-Medium. Risk if deferred: Low -- the affected
-findings are advisory analyzer artifacts that are false at project scope, and
-the authored `.c` files (where the real deviations live) are gated correctly.
-
 ### T25-wdt-margin-assert - Enforce the tick+pulse < WDT floor at compile time
 
 Every shell states the same safety invariant: one tick plus the longest blocking
@@ -627,7 +596,6 @@ The stable ID in each row matches exactly one open section above.
 |---|---|---:|---:|---|
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
-| T25-misra-header-gate | Make header-located MISRA findings fail their lane | 2.5 | Low-Medium | Low |
 | T25-wdt-margin-assert | Enforce tick+pulse < WDT floor at compile time | 2.5 | Low | Low now, Medium on any timing change |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
 | T25-relay-fault-abort | De-energize relay coils on detected faults | 2.5 | Medium | Medium-High |
