@@ -6845,7 +6845,10 @@ RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(XT_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(
 #      expensive place anything in this list can fail;
 #   5. record the flashing procedure in release/README.md, INCLUDING the
 #      calibration-word preservation requirement -- an image published without
-#      it is a device with an untrimmed oscillator that still appears to work;
+#      it is a device with an untrimmed oscillator that still appears to work.
+#      Re-point the OSCCAL note in src/bypass_mcu_pic12f675.c at it in the same
+#      change: that comment names this step as where the procedure lands, and
+#      it is the pointer someone at a bench reads;
 #   6. update the pinned counts in test/test_release_images.sh (18 -> 21).
 PIC12F675_STAGED_IMAGES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(call fw_image,$(v),$(PIC12F675_TAG)).hex)
 RELEASE_STAGED_IMAGES := $(PIC12F675_STAGED_IMAGES)
