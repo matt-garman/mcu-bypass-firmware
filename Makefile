@@ -652,7 +652,7 @@ FORCE:
         test-target-matrix test-target-lane-markers test-lockstep-progress \
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
-        test-variant-map-contract test-makefile-name-contract \
+        test-variant-map-contract test-makefile-name-contract test-todo-index \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract test-static-assert-guards \
         pic10f322-test-target pic10f322-test-target-variants pic10f322-test-io pic10f322-test-lockstep \
@@ -2681,7 +2681,7 @@ TEST_GATES_LATE = \
         test-release-qualification test-release-history \
         test-build-serialization test-target-matrix \
         test-target-lane-markers test-lockstep-progress test-soak-timing \
-        test-variant-map-contract test-makefile-name-contract \
+        test-variant-map-contract test-makefile-name-contract test-todo-index \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract \
         test-soak-reset-witness test-strict-tools test-workload-rebuild \
@@ -2945,6 +2945,19 @@ test-variant-map-contract:
 # PIC10F322 for a whole release, on a PIC_GPSIM_PROC= nothing read any more.
 test-makefile-name-contract: python-version-valid
 	@python3 test/test_makefile_name_contract.py
+
+# TODO.md states its own index invariant -- "the stable ID in each row matches
+# exactly one open section above" -- and nothing checked it, so it drifted: the
+# 2026-08-10 MISRA-review commit added a section with no summary row. Same
+# family as the name contract above: a document that claims a correspondence
+# should have that correspondence enforced rather than reviewed.
+# The checker is named as a PREREQUISITE, not just inside the recipe: the
+# clean-contract oracle is `make -rRn --print-data-base`, which sees only files
+# that are targets or prerequisites, so a helper mentioned in recipe text alone
+# can stay untracked forever.
+.PHONY: test-todo-index
+test-todo-index: python-version-valid test/test_todo_index.py TODO.md
+	@python3 test/test_todo_index.py
 
 # Host-only proof that every static-analysis target validates its variant
 # request before analyzing anything. $(FW_SOURCES) maps $(VARIANTS) through
@@ -6680,6 +6693,7 @@ help:
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
 	@echo "  test-makefile-name-contract  every make goal, variable and child-environment name a file or doc uses really exists (included in test)"
+	@echo "  test-todo-index    TODO.md's priority summary matches its open sections, both ways (included in test)"
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
 	@echo "  test-variant-selector-guard  every lane rejects a bad single-variant selector instead of skipping (included in test)"
 	@echo "  test-clean-contract  clean/clean-tests remove everything the Makefile builds (included in test)"
