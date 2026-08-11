@@ -157,6 +157,15 @@ file is the human-readable summary of *what changed*.
   without changing executable-line coverage; the gcov oracle and its negative
   probe now follow the current 569-602 anchors rather than rejecting live HEAD.
 
+- **The PIC12F675 target OSCCAL fault is now physically realizable.** The target
+  matrix formerly XORed `0x01`, but this part implements `CAL5:CAL0` only in
+  OSCCAL bits 7:2; bits 1:0 read zero on silicon. The case now flips implemented
+  `CAL0` with `0x04`, producing the intended one-step `0x80 -> 0x84` trim change
+  with the canonical simulator value while retaining the write-stick check and
+  exact-one-reset verdict. The
+  independent host fault lane already used the implemented bit. Fault counts do
+  not change.
+
 - **The PIC12F675's three datasheet-read risks are closed** (DS41190G, read
   2026-08-11). They never needed silicon, only the datasheet:
 

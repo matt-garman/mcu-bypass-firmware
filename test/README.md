@@ -206,7 +206,8 @@ test/
                                   32x cannot, and the two OPTION_REG bits it
                                   deliberately leaves alone because starving the
                                   tick would produce the same reset count as the
-                                  gate firing
+                                  gate firing. Its OSCCAL case flips implemented
+                                  CAL0 (bit 2), never the read-zero low bits
             inject_calibration_word.py
                                   derives a simulator-runnable image by injecting
                                   the oscillator calibration word the factory
