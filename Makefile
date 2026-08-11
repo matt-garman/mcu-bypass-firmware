@@ -852,6 +852,7 @@ VARIANT_SELECTORS = \
 	PIC12F675_LOCKSTEP_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC12F675_FAULT_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC12F675_SOAK_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
+	PIC12F675_TARGET_VARIANT:CLASSIC_VARIANTS_SUPPORTED \
 	PIC10F320_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
 	PIC10F320_TARGET_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
 	PIC10F320_FAULT_VARIANT:PIC10F320_VARIANTS_SUPPORTED \
@@ -3042,6 +3043,25 @@ test-target-matrix:
 	TM_IO_TARGET='pic10f320-test-io' \
 	TM_IO_VARIANT_ARG='PIC10F320_IO_VARIANT' \
 		./test/test_target_matrix.sh
+	@# Same regression again, PIC12F675 contract. Its lanes take the CLASSIC
+	@# variant set and its aggregate builds the whole image matrix, so this mode
+	@# is the 322's with the names swapped -- which is the point: a third part
+	@# reusing the script is what keeps the aggregates from drifting apart.
+	TM_LABEL='PIC12F675' \
+	TM_TARGET='pic12f675-test-target-variants' \
+	TM_PER_VARIANT_TARGET='pic12f675-test-target' \
+	TM_VARIANTS_VAR='VARIANTS' \
+	TM_VARIANT_ARG='PIC12F675_TARGET_VARIANT' \
+	TM_SUPPORTED='cd4053_simple cd4053_with_mute tq2_l2_5v_relay' \
+	TM_SUBSET='cd4053_with_mute' \
+	TM_UNSUPPORTED='tmux4053-simple' \
+	TM_FAULT_TARGET='pic12f675-test-fault' \
+	TM_FAULT_VARIANT_ARG='PIC12F675_FAULT_VARIANT' \
+	TM_LOCKSTEP_TARGET='pic12f675-test-lockstep' \
+	TM_LOCKSTEP_VARIANT_ARG='PIC12F675_LOCKSTEP_VARIANT' \
+	TM_IO_TARGET='pic12f675-test-io' \
+	TM_IO_VARIANT_ARG='PIC12F675_IO_VARIANT' \
+		./test/test_target_matrix.sh
 	@# ...and the PIC10F320 HOST aggregate, which carries the same guard and is
 	@# what `make test` actually wires in -- so a bad matrix there would silently
 	@# reduce the default suite's PIC10F320 coverage rather than fail it. Guarding
@@ -3098,6 +3118,14 @@ test-target-lane-markers:
 	LM_VARIANT_ARG='PIC10F320_TARGET_VARIANT' \
 	LM_VARIANT='cd4053_with_mute' \
 	LM_REQUIRE_ARG='PIC10F320_VARIANT=cd4053_with_mute' \
+		./test/test_target_lane_markers.sh
+	@# The PIC12F675 contract. No LM_REQUIRE_ARG: its lanes share one build
+	@# prerequisite (pic12f675-simcal) that derives every variant's image, so
+	@# there is no second variable to thread and nothing for it to pin.
+	LM_LABEL='PIC12F675' \
+	LM_TARGET='pic12f675-test-target' \
+	LM_VARIANT_ARG='PIC12F675_TARGET_VARIANT' \
+	LM_VARIANT='cd4053_with_mute' \
 		./test/test_target_lane_markers.sh
 
 # Compile all three real PIC lock-step drivers against a fake core; exercise
@@ -5511,9 +5539,9 @@ pic12f675-test-io: variant-selectors-valid pic12f675-simcal
 #      and the 12 ms blocking coil pulse -- which the gpsim CLI checkpoints did
 #      have to be re-derived for -- change nothing here.
 #
-# Skip-clean for missing tools, and standalone for now: this part has no
-# fail-closed target aggregate yet, so nothing currently requires the LOCK-STEP
-# PASS sentinel the way pic10f322-test-target requires the 322's.
+# Skip-clean for missing tools when run on its own; pic12f675-test-target below
+# turns that into a failure by requiring the LOCK-STEP PASS sentinel, the way
+# pic10f322-test-target requires the 322's.
 PIC12F675_LOCKSTEP_VARIANT ?= cd4053_simple
 PIC12F675_LOCKSTEP_SRC = test/pic/test_lockstep_pic12f675.cc
 PIC12F675_LOCKSTEP_BIN = test/pic/test_lockstep_pic12f675
@@ -5601,9 +5629,9 @@ pic12f675-test-lockstep: variant-selectors-valid pic12f675-simcal
 #      build beside it -- the injector adds one calibration word and changes no
 #      symbol.
 #
-# Skip-clean for missing tools, and standalone for now: this part has no
-# fail-closed target aggregate yet, so nothing currently requires the
-# FAULT-INJECT PASS sentinel the way pic10f322-test-target requires the 322's.
+# Skip-clean for missing tools when run on its own; pic12f675-test-target below
+# turns that into a failure by requiring the FAULT-INJECT PASS sentinel, the way
+# pic10f322-test-target requires the 322's.
 PIC12F675_FAULT_VARIANT ?= cd4053_simple
 PIC12F675_FAULT_SRC = test/pic/test_fault_pic12f675.cc
 PIC12F675_FAULT_BIN = test/pic/test_fault_pic12f675
@@ -6029,6 +6057,84 @@ pic12f675-test-calibration: pic12f675-simcal $(PIC12F675_CAL_INJECTOR)
 	fi; \
 	echo "=== PIC12F675 calibration contract holds for all 3 variants ==="
 
+# --- PIC12F675 authoritative aggregates ---------------------------------------
+# Two aggregates, split the way both 10F32x parts split theirs, because they
+# answer different questions at different cost:
+#
+#   pic12f675-test         every pre-hardware check that needs no libgpsim --
+#                          the CONFIG decode, static analysis, host coverage,
+#                          the calibration contract, the gpsim CLI lane and the
+#                          hardware return-stack bound.
+#   pic12f675-test-target  the three libgpsim lanes against a real HEX, for ONE
+#                          variant; -test-target-variants sweeps the matrix.
+#
+# The soak is in NEITHER, exactly as on both 10F32x parts: an hour of simulated
+# time per variant is a long-duration command, not a pre-hardware check.
+#
+# WHY THE CALIBRATION CONTRACT IS LISTED HERE and not left implied by the lanes.
+# Every simulator lane for this part depends on pic12f675-simcal, so the derived
+# images get PRODUCED whatever else runs; what no other lane checks is that
+# producing them left the SHIPPING images untouched. That is the property whose
+# failure would ship a HEX different from the one the simulator lanes qualified,
+# and it is unique to this part -- neither 10F32x part derives anything.
+.PHONY: pic12f675-test
+pic12f675-test: pic12f675-test-config pic12f675-analyze pic12f675-coverage-check-fw \
+          pic12f675-test-calibration pic12f675-test-gpsim pic12f675-test-stack-bound
+	@echo "=== all PIC12F675 pre-hardware checks complete ==="
+
+# Fail-closed real-HEX aggregate, structurally identical to pic10f322-test-target
+# and for the same reason: each lane below exits 0 through $(SKIP) when XC8,
+# gpsim-dev or glib is absent, which is right for a standalone development
+# command and useless in a gate. So this wrapper requires each lane's explicit
+# PASS marker, and a skipped or truncated lane fails here.
+#
+# No build-variant threading, unlike pic10f320-test-target: `pic12f675-simcal`
+# (the prerequisite every lane shares) derives the WHOLE three-image matrix, as
+# `pic10f322` builds the 322's, so forwarding the lane selector is sufficient --
+# there is no second variable that could select a different variant's image.
+PIC12F675_TARGET_VARIANT ?= cd4053_simple
+override PIC12F675_TARGET_VARIANTS_SUPPORTED := $(CLASSIC_VARIANTS_SUPPORTED)
+.PHONY: pic12f675-test-target pic12f675-test-target-variants
+pic12f675-test-target: variant-selectors-valid
+	@set -e; \
+	for spec in \
+		"pic12f675-test-fault PIC12F675_FAULT_VARIANT=$(PIC12F675_TARGET_VARIANT)|FAULT-INJECT PASS" \
+		"pic12f675-test-lockstep PIC12F675_LOCKSTEP_VARIANT=$(PIC12F675_TARGET_VARIANT)|LOCK-STEP PASS" \
+		"pic12f675-test-io PIC12F675_IO_VARIANT=$(PIC12F675_TARGET_VARIANT)|TARGET-IO PASS"; do \
+		target=$${spec%%|*}; marker=$${spec#*|}; log=`mktemp`; \
+		if ! $(MAKE) --no-print-directory $$target >$$log 2>&1; then \
+			cat $$log; rm -f $$log; exit 1; \
+		fi; \
+		cat $$log; \
+		if ! grep -q "$$marker" $$log; then \
+			echo "FAIL: $$target did not report '$$marker' (skipped or incomplete?)"; \
+			rm -f $$log; exit 1; \
+		fi; \
+		rm -f $$log; \
+	done
+	@echo "=== PIC12F675 target fault/lock-step/I-O PASS (variant $(PIC12F675_TARGET_VARIANT)) ==="
+
+# ...and for ALL of them. Requires the exact supported set before running, so
+# "all variants passed" cannot hide an empty or incomplete matrix (§6.5).
+pic12f675-test-target-variants:
+	@if [ "$(CLASSIC_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS must not be empty" >&2; exit 2; \
+	fi; \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_DUPLICATE)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS must not contain duplicate names" >&2; exit 2; \
+	fi; \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_UNKNOWN)" -eq 1 ]; then \
+		echo "FAIL: VARIANTS contains unsupported names; supported: $(PIC12F675_TARGET_VARIANTS_SUPPORTED)" >&2; exit 2; \
+	fi; \
+	if [ "$(if $(filter-out $(VARIANTS),$(PIC12F675_TARGET_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
+		echo "FAIL: VARIANTS must contain every supported name; required: $(PIC12F675_TARGET_VARIANTS_SUPPORTED)" >&2; exit 2; \
+	fi
+	@for v in $(PIC12F675_TARGET_VARIANTS_SUPPORTED); do \
+		echo "===================== PIC12F675 TARGET VARIANT $$v ====================="; \
+		$(MAKE) --no-print-directory PIC12F675_TARGET_VARIANT=$$v pic12f675-test-target || exit 1; \
+	done
+	@echo "=== PIC12F675 target fault/lock-step/I-O validated for all variants ==="
+
 # ============================================================================
 # INTROSPECTION -- expose one Makefile variable's value to scripts
 # ============================================================================
@@ -6298,7 +6404,9 @@ help:
 	@echo "                        (PIC10F322_TARGET_VARIANT); pic10f322-test-target-variants runs all"
 	@echo "  pic10f322-program     flash one PIC variant to hardware (VARIANT=, PIC10F322_PROG=pk2cmd|ipecmd)"
 	@echo "PIC12F675 staged standalone target (not release-supported; omitted from all/release):"
-	@echo "  No qualification aggregate, mutation, dedicated CI or program integration yet."
+	@echo "  No mutation, dedicated CI or program integration yet."
+	@echo "  pic12f675-test        all PIC12F675 pre-hardware checks (CONFIG + analysis + source"
+	@echo "                        coverage + calibration contract + gpsim + stack bound)"
 	@echo "  pic12f675             build all variants for PIC12F675 (XC8) + 1024-word budget gate"
 	@echo "  pic12f675-test-config build PIC12F675 HEX, then verify each CONFIG word vs design intent"
 	@echo "  pic12f675-test-gpsim  drive the footswitch in gpsim, assert GPIO on the simcal images"
@@ -6315,6 +6423,8 @@ help:
 	@echo "  pic12f675-test-stack-bound  bound the 8-level hardware return stack for every variant"
 	@echo "  pic12f675-simcal      derive simulator images with the oscillator calibration word"
 	@echo "  pic12f675-test-calibration  prove the calibration injection leaves the shipping HEX alone"
+	@echo "  pic12f675-test-target fail-closed fault + lock-step + target-I/O for one variant"
+	@echo "                        (PIC12F675_TARGET_VARIANT); pic12f675-test-target-variants runs all"
 	@echo "PIC10F320 (constrained 256-word target; docs/pic10f320_special_case.md):"
 	@echo "  pic10f320          build one PIC10F320 variant + 256-word and HW-stack gates"
 	@echo "                     (PIC10F320_VARIANT=cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay)"

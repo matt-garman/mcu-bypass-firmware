@@ -417,8 +417,8 @@ below so a green gate means every PIC layer actually ran.
 | Lock-step progress regression | `test-lockstep-progress` | Both chip-specific adapters bind the exact RA3 pin despite substring decoys and abort simulator stalls during settle, calibration, or completion immediately. | host C++ + fake gpsim API |
 | Target I/O timing | `pic10f322-test-io` | TRISA/ANSELA/LATA/PORTA transitions, relay coil exclusion, and mute/relay pulse widths match the design. | libgpsim |
 | Fail-closed aggregate | `pic10f322-test-target-variants` | Requires the complete supported matrix — empty, duplicate, unsupported, and incomplete requests are all rejected — then runs fault recovery, lock-step, and target-I/O for every PIC variant and requires each PASS sentinel. | Makefile wrapper |
-| Aggregate regression | `test-target-matrix` | Proves complete matrices run exactly once per variant, that empty, duplicate, unsupported, and incomplete matrices fail before any target invocation, and that both PIC target aggregates require explicit fault, lock-step, and I/O completion markers. | Bash + fake recursive Make |
-| Aggregate fail-closed regression | `test-target-lane-markers` | Proves the per-variant aggregate requires each lane's explicit `PASS` marker, not just its exit status: a skipped, crashed, or failing-but-zero-exit lane is rejected and the aggregate's own success line is withheld. Covers both PIC chips. | Bash + fake recursive Make |
+| Aggregate regression | `test-target-matrix` | Proves complete matrices run exactly once per variant, that empty, duplicate, unsupported, and incomplete matrices fail before any target invocation, and that all three PIC target aggregates require explicit fault, lock-step, and I/O completion markers. | Bash + fake recursive Make |
+| Aggregate fail-closed regression | `test-target-lane-markers` | Proves the per-variant aggregate requires each lane's explicit `PASS` marker, not just its exit status: a skipped, crashed, or failing-but-zero-exit lane is rejected and the aggregate's own success line is withheld. Covers all three PIC chips. | Bash + fake recursive Make |
 | Hardware return-stack depth | `pic10f322-test-stack-bound`, `pic10f320-test-stack-bound` | Bounds the **8-level hardware return stack** — the PIC counterpart of the AVR's byte-valued `test-stack-bound`, and a different quantity: the PIC14 core has no data stack, and hardware-stack overflow on this part is silent (no `STKPTR`, no `STKOVF`, no overflow reset). Computes the deepest call chain from the freshly generated instruction stream, cross-checks it against XC8's own `callstack` directives, and rejects missing/current-image assembly, recursion, indirect calls, and an over-budget build. Every variant, both chips. | XC8-generated `.s` + awk |
 | Stack-depth gate regression | `test-stack-bound-pic-regression` | Proves that gate rejects each way the analysis can be wrong — over budget, recursion, an overflowing build, the two oracles disagreeing, every unresolvable direct-call spelling/opcode, an indirect call, malformed function-psect ownership, no entry point, and a device pack declaring no depth — and that it still *accepts* the psect scaffolding XC8 really emits, including the mid-body re-selection that follows every inline-asm escape. Fixtures reproduce the full declaration/marker/re-selection sequence, so a rule that cannot read a real image fails here first. Synthetic, so it needs no toolchain. | Bash + awk |
 | Soak rebuild determinism | `test-pic-build-rebuild` | Both chips' soak binaries compile their workload sizing in as `-D` flags, so their file rules must be *unconditionally* out of date. Asserts a changed duration recompiles with the new value, and that an identical rerun recompiles too — the signature of `FORCE`, as opposed to a rebuild that merely followed a timestamp. Populates its scratch repository with the shared `test/scratch_tree.sh` walk, then blanks each named prerequisite: contents cannot matter to a staleness decision, and a prerequisite that has been renamed or dropped is reported instead of silently shrinking the fixture. | Bash + fake c++ |
@@ -447,6 +447,17 @@ but they are allowed to skip for missing tools; the aggregate turns any skip or
 missing PASS marker into a failure. It also requires the complete supported
 variant matrix before starting its first target, so an empty, malformed, or
 incomplete matrix cannot report an all-variants PASS or leave a partial run.
+
+`pic12f675-test-target-variants` is the same gate for that part, built from the
+same two regressions above, and `pic12f675-test` is its pre-hardware aggregate:
+CONFIG decode, static analysis, shipping-source coverage, the calibration
+contract, the gpsim CLI lane, and the hardware return-stack bound. The
+calibration contract is listed there rather than left to the lanes, which all
+depend on `pic12f675-simcal` and so *produce* the derived images no matter what.
+What no lane checks is that producing them left the shipping images untouched --
+the one property whose failure would ship a HEX different from the one the
+simulator lanes qualified, and one no other part can have, because no other part
+derives anything.
 
 Debounce thresholds define a 33-sample pure-model minimum between press onsets.
 That is also the nominal 33 ms physical minimum on ISR-driven AVR targets and the

@@ -5,12 +5,12 @@ The repository now contains the production Model-B PIC12F675 shell and pin map,
 the complete three-variant build and flash-budget lane, static analysis,
 shipping-source coverage, production-image return-stack and CONFIG gates,
 oscillator-calibration image derivation, CLI gpsim functional tests, and
-standalone selected-variant libgpsim I/O, lock-step and fault-injection lanes.
+selected-variant libgpsim I/O, lock-step and fault-injection lanes, the
+long-duration soak, and both authoritative aggregates over them.
 
-PIC12F675 is intentionally absent from the default `all` goal, pre-hardware and
-fail-closed target aggregates, soak/timing qualification, mutation topology,
-dedicated full-tool CI, release integration, programming, and hardware-bench
-validation. It is therefore not release-supported.
+PIC12F675 is intentionally absent from the default `all` goal, mutation
+topology, dedicated full-tool CI, release integration, programming, and
+hardware-bench validation. It is therefore not release-supported.
 
 The 2026-08-05 assessment, design rationale, spike provenance and proposed
 sequencing are retained below. Unless explicitly marked as a current or dated
@@ -964,8 +964,8 @@ serves multiple parts, part name where the repository builds exactly one:
 | Build macro | `BYPASS_MCU_PIC12F675` (new arm in `src/bypass_output_common.h`) |
 | Build dir | `build_pic12f675/` |
 | Image stem | `bypass-pic12f675-<variant>` |
-| Implemented target families | build, analysis, coverage, stack, CONFIG, calibration, CLI gpsim, selected-variant libgpsim I/O, lock-step and fault, and the long-duration soak |
-| Deferred integration | default `all`, pre-hardware and fail-closed target aggregates, mutation, dedicated CI, release and programming |
+| Implemented target families | build, analysis, coverage, stack, CONFIG, calibration, CLI gpsim, selected-variant libgpsim I/O, lock-step and fault, the long-duration soak, and the pre-hardware and fail-closed target aggregates |
+| Deferred integration | default `all`, mutation, dedicated CI, release and programming |
 
 **Name-length contract:** `bypass-pic12f675-cd4053_with_mute.hex` is 37
 characters — **exactly** the current longest name
@@ -1067,9 +1067,11 @@ green, independently revertible sequencing below.
 a single-part PIC12F675 shell, and Model B. Step 1 is not applicable unless the
 ISR alternative is reconsidered; steps 2 through 9 are implemented — step 9
 re-derived the holds through the tick period rather than letting the slack absorb
-the 1.024 ms stretch (§4.4.1). Step 10 (aggregates, mutation and dedicated CI)
-and the broader documentation, release/programming and hardware portions of
-step 11 remain deferred. The table retains the original dependency order rather than
+the 1.024 ms stretch (§4.4.1). Step 10 is partly done: `pic12f675-test` and
+`pic12f675-test-target{,-variants}` are implemented and carry the third leg of
+`test-target-matrix` and `test-target-lane-markers`; the mutation topology and
+dedicated CI routing remain, as do the broader documentation,
+release/programming and hardware portions of step 11. The table retains the original dependency order rather than
 claiming every row is open.
 
 | # | Step | Notes |
