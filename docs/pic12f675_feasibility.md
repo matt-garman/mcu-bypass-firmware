@@ -1029,7 +1029,7 @@ string `attach n1 fsw ra3` in routed stimuli — that assertion becomes per-part
 | `pic12f675-test-io` | `GPIO`/`TRISIO` instead of `LATA`/`PORTA`/`TRISA`; note this lane gets *more* meaningful here, since shadow-vs-port divergence is observable |
 | `pic12f675-test-lockstep` | `_ctx_` address extraction from the XC8 `.sym` is unchanged; adapter + proc name only |
 | `pic12f675-test-soak` | re-derived timing budgets (§4.4.1); calibration injection |
-| `pic12f675-test-target-variants` | fail-closed aggregate over one retained shipping/simcal matrix; its staged hash record becomes the qualified manifest only after compiler/injector reproducibility, and every consumer re-verifies images and sidecars |
+| `pic12f675-test-target-variants` | fail-closed aggregate over one retained shipping/simcal matrix; its staged hash record becomes the qualified manifest only after compiler/injector reproducibility, every consumer re-verifies images and sidecars, and each target lane must emit one exact terminal device/lane/variant-bound result with its canonical nonzero check count and zero failures |
 | `test-target-matrix`, `test-target-lane-markers` | extend to a third PIC chip |
 | CI | one two-goal Make invocation in the shared `pic` job, mirrored in `scripts/ci-local.sh`, so pre-hardware and target evidence share one retained matrix; the device-header assert covers a third device out of the one DFP |
 | Mutation | 13 entries in their own table with their own toolchain probe and sandbox validator; weighted toward the shadow, sub-tick, comparator, OSCCAL and ANSEL-mapping guards the 322 has no counterpart for |

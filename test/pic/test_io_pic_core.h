@@ -29,6 +29,8 @@
 #include <vector>
 #include <iostream>
 
+#include "pic/target_result.h"
+
 #include <glib.h>
 #include "processor.h"
 #include "pic-processor.h"
@@ -354,6 +356,7 @@ int main(void) {
     bool const pass = g_fails == 0u;
     printf("TARGET-IO %s: %u checks, %u failures\n",
            pass ? "PASS" : "FAIL", g_checks, g_fails);
+    pic_target_result("io", pass, g_checks, g_fails);
     return pass ? 0 : 1;
 }
 

@@ -39,6 +39,7 @@ read -r -a supported <<<"$TM_SUPPORTED"
 read -r -a MAKE_CMD <<<"${PROJECT_MAKE:-make}"
 [ "${#MAKE_CMD[@]}" -gt 0 ] \
 	|| { printf 'FAIL: PROJECT_MAKE must name a Make command\n' >&2; exit 1; }
+real_make=$(command -v make)
 matrix_contract_args=()
 expected_matrix_record=
 if [ "$TM_LABEL" = PIC12F675 ]; then
@@ -70,6 +71,10 @@ marker=
 count=0
 for arg in "$@"; do
 	case "$arg" in
+		_pic12f675-qualify-matrix)
+			: > "${MATRIX_COMBINED_QUALIFIED_MARKER:?}"
+			exit 0
+			;;
 		"${FAKE_PER_VARIANT_TARGET:?}") target=$arg; marker=; count=0 ;;
 		"${FAKE_FAULT_TARGET:?}") target=$arg; marker=${FAKE_FAULT_MARKER:?}; count=${FAKE_FAULT_MARKER_COUNT:?} ;;
 		"${FAKE_LOCKSTEP_TARGET:?}") target=$arg; marker=${FAKE_LOCKSTEP_MARKER:?}; count=${FAKE_LOCKSTEP_MARKER_COUNT:?} ;;
@@ -83,8 +88,19 @@ printf 'CALL' >> "${FAKE_MAKE_LOG:?}"
 printf ' <%s>' "$@" >> "$FAKE_MAKE_LOG"
 printf '\n' >> "$FAKE_MAKE_LOG"
 if [ -n "$target" ] && [ "${FAKE_OMIT_MARKER:-}" != "$target" ]; then
-	i=0
-	while [ "$i" -lt "$count" ]; do printf '%s\n' "$marker"; i=$((i + 1)); done
+	if [ "${FAKE_EXACT_RESULTS:-0}" -eq 1 ] && [ -n "$marker" ]; then
+		case "$target" in
+			"$FAKE_FAULT_TARGET") lane=fault; checks=37 ;;
+			"$FAKE_LOCKSTEP_TARGET") lane=lockstep; checks=3005 ;;
+			"$FAKE_IO_TARGET") lane=io; checks=26 ;;
+		esac
+		printf '%s: %s checks, 0 failures\n' "$marker" "$checks"
+		printf 'PIC_TARGET_RESULT format=1 device=pic12f675 lane=%s variant=%s status=pass checks=%s failures=0\n' \
+			"$lane" "${FAKE_RESULT_VARIANT:?}" "$checks"
+	else
+		i=0
+		while [ "$i" -lt "$count" ]; do printf '%s\n' "$marker"; i=$((i + 1)); done
+	fi
 	if [ "$target" = "$FAKE_IO_TARGET" ] && [ -n "${FAKE_IO_EXTRA_MARKER:-}" ] \
 			&& [ "${FAKE_OMIT_EXTRA:-0}" -ne 1 ]; then
 		i=0
@@ -101,15 +117,19 @@ run_matrix() {
 	local matrix=$1
 	local omit_marker=${2:-}
 	local omit_extra=${3:-0}
-	local matrix_arg=()
+	local selector=${4-__NONE__}
+	local matrix_arg=() selector_arg=()
 	if [ "$matrix" != __DEFAULT__ ]; then
 		matrix_arg+=("$TM_VARIANTS_VAR=$matrix")
+	fi
+	if [ "$selector" != __NONE__ ]; then
+		selector_arg+=("$TM_VARIANT_ARG=$selector")
 	fi
 	: > "$log"
 	(
 		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKE "$TM_VARIANTS_VAR"
 		FAKE_MAKE_LOG="$log" \
-		REAL_PROJECT_MAKE="$(command -v make)" TM_ENTER_REAL_MAKE=1 \
+		REAL_PROJECT_MAKE="$real_make" TM_ENTER_REAL_MAKE=1 \
 		FAKE_PER_VARIANT_TARGET="$TM_PER_VARIANT_TARGET" \
 		FAKE_FAULT_TARGET="$TM_FAULT_TARGET" \
 		FAKE_LOCKSTEP_TARGET="$TM_LOCKSTEP_TARGET" \
@@ -124,9 +144,11 @@ run_matrix() {
 		FAKE_IO_EXTRA_MARKER_COUNT="$TM_IO_EXTRA_MARKER_COUNT" \
 		FAKE_OMIT_MARKER="$omit_marker" \
 		FAKE_OMIT_EXTRA="$omit_extra" \
+		FAKE_EXACT_RESULTS="$([ "$TM_LABEL" = PIC12F675 ] && printf 1 || printf 0)" \
+		FAKE_RESULT_VARIANT="$TM_SUBSET" \
 		"$fake_make" --no-print-directory -C "$ROOT" \
 			MAKE="$fake_make" PROJECT_MAKE=true "${matrix_contract_args[@]}" \
-			"${matrix_arg[@]}" "$TM_TARGET"
+			"${matrix_arg[@]}" "${selector_arg[@]}" "$TM_TARGET"
 	)
 }
 
@@ -136,7 +158,7 @@ run_target() {
 	(
 		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKE "$TM_VARIANT_ARG"
 		FAKE_MAKE_LOG="$log" \
-		REAL_PROJECT_MAKE="$(command -v make)" TM_ENTER_REAL_MAKE=1 \
+		REAL_PROJECT_MAKE="$real_make" TM_ENTER_REAL_MAKE=1 \
 		FAKE_PER_VARIANT_TARGET="$TM_PER_VARIANT_TARGET" \
 		FAKE_FAULT_TARGET="$TM_FAULT_TARGET" \
 		FAKE_LOCKSTEP_TARGET="$TM_LOCKSTEP_TARGET" \
@@ -150,6 +172,8 @@ run_target() {
 		FAKE_IO_EXTRA_MARKER="$TM_IO_EXTRA_MARKER" \
 		FAKE_IO_EXTRA_MARKER_COUNT="$TM_IO_EXTRA_MARKER_COUNT" \
 		FAKE_OMIT_MARKER="$omit_marker" \
+		FAKE_EXACT_RESULTS="$([ "$TM_LABEL" = PIC12F675 ] && printf 1 || printf 0)" \
+		FAKE_RESULT_VARIANT="$TM_SUBSET" \
 		"$fake_make" --no-print-directory -C "$ROOT" \
 			MAKE="$fake_make" PROJECT_MAKE=true "${matrix_contract_args[@]}" \
 			"$TM_VARIANT_ARG=$TM_SUBSET" \
@@ -205,6 +229,51 @@ expect_reject() {
 		|| { printf 'FAIL: %s matrix reported the wrong error: %s\n' "$label" "$output" >&2; exit 1; }
 	[ ! -s "$log" ] \
 		|| { printf 'FAIL: %s matrix invoked a variant before rejection\n' "$label" >&2; exit 1; }
+	checks=$((checks + 1))
+}
+
+expect_selector_reject() {
+	local label=$1 selector=$2 marker=$3 output
+	if output=$(run_matrix __DEFAULT__ "" 0 "$selector" 2>&1); then
+		printf 'FAIL: %s selector was accepted\n' "$label" >&2
+		exit 1
+	fi
+	[[ "$output" == *"$marker"* ]] \
+		|| { printf 'FAIL: %s selector reported the wrong error: %s\n' \
+			"$label" "$output" >&2; exit 1; }
+	[ ! -s "$log" ] \
+		|| { printf 'FAIL: %s selector invoked a variant before rejection\n' \
+			"$label" >&2; exit 1; }
+	checks=$((checks + 1))
+}
+
+expect_combined_selector_reject() {
+	local selector=$1 marker=$2 output qualified_marker="$work/combined-qualified"
+	: > "$log"
+	rm -f "$qualified_marker"
+	if output=$(
+		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKE
+		FAKE_MAKE_LOG="$log" \
+		REAL_PROJECT_MAKE="$real_make" TM_ENTER_REAL_MAKE=1 \
+		FAKE_PER_VARIANT_TARGET="$TM_PER_VARIANT_TARGET" \
+		FAKE_FAULT_TARGET="$TM_FAULT_TARGET" \
+		FAKE_LOCKSTEP_TARGET="$TM_LOCKSTEP_TARGET" \
+		FAKE_IO_TARGET="$TM_IO_TARGET" \
+		MATRIX_COMBINED_QUALIFIED_MARKER="$qualified_marker" \
+		"$fake_make" --no-print-directory -C "$ROOT" \
+			MAKE="$fake_make" PROJECT_MAKE=true \
+			PIC_CC=true "PIC12F675_BUILD_DIR=$matrix_dir" \
+			"$TM_VARIANT_ARG=$selector" \
+			pic12f675-test pic12f675-test-target-variants 2>&1
+	); then
+		printf 'FAIL: combined PIC12F675 graph accepted invalid selector\n' >&2
+		exit 1
+	fi
+	[[ "$output" == *"$marker"* \
+		&& ! -e "$qualified_marker" \
+		&& ! -s "$log" ]] \
+		|| { printf 'FAIL: combined selector was not rejected before qualification/consumers: %s\n' \
+			"$output" >&2; exit 1; }
 	checks=$((checks + 1))
 }
 
@@ -269,9 +338,15 @@ expect_sentinels() {
 				"$TM_LABEL" "${markers[$i]}" >&2
 			exit 1
 		fi
-		[[ "$output" == *"did not report '${markers[$i]}'"* ]] \
-			|| { printf 'FAIL: %s target aggregate reported the wrong missing-marker error: %s\n' \
-				"$TM_LABEL" "$output" >&2; exit 1; }
+		if [ "$TM_LABEL" = PIC12F675 ]; then
+			[[ "$output" == *"did not report one exact terminal result"* ]] \
+				|| { printf 'FAIL: %s target aggregate reported the wrong strict-result error: %s\n' \
+					"$TM_LABEL" "$output" >&2; exit 1; }
+		else
+			[[ "$output" == *"did not report '${markers[$i]}'"* ]] \
+				|| { printf 'FAIL: %s target aggregate reported the wrong missing-marker error: %s\n' \
+					"$TM_LABEL" "$output" >&2; exit 1; }
+		fi
 		checks=$((checks + 1))
 	done
 }
@@ -288,6 +363,17 @@ expect_reject duplicate "${supported[0]} $TM_SUBSET ${supported[0]}" \
 	"$TM_VARIANTS_VAR must not contain duplicate names"
 expect_reject unsupported "${supported[0]} $TM_UNSUPPORTED" \
 	"$TM_VARIANTS_VAR contains unsupported names"
+
+if [ "$TM_LABEL" = PIC12F675 ]; then
+	expect_selector_reject empty-target-selector "" \
+		"$TM_VARIANT_ARG is empty"
+	expect_selector_reject multi-target-selector "${supported[0]} ${supported[1]}" \
+		"names more than one value"
+	expect_selector_reject unsupported-target-selector "$TM_UNSUPPORTED" \
+		"$TM_VARIANT_ARG is not supported"
+	expect_combined_selector_reject "$TM_UNSUPPORTED" \
+		"$TM_VARIANT_ARG is not supported"
+fi
 
 if [ "$TM_CHECK_SENTINELS" -eq 1 ]; then
 	expect_sentinels

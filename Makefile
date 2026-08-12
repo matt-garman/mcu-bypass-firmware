@@ -17,6 +17,16 @@ endif
 # submake so inner recipes can still distinguish empty/duplicate/unknown input.
 override CLASSIC_VARIANTS_SUPPORTED := cd4053_simple cd4053_with_mute tq2_l2_5v_relay
 override PIC10F320_VARIANTS_SUPPORTED := cd4053_simple cd4053_with_mute tq2_l2_5v_relay
+_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_ORIGIN := $(origin PIC12F675_TARGET_VARIANT)
+ifeq ($(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_ORIGIN),undefined)
+_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_REQUESTED := cd4053_simple
+else
+_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_REQUESTED := $(value PIC12F675_TARGET_VARIANT)
+endif
+_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_SAFE := $(filter $(CLASSIC_VARIANTS_SUPPORTED),$(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_REQUESTED))
+_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_EMPTY_COMPUTED := $(if $(strip $(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_REQUESTED)),0,1)
+_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_MULTI_COMPUTED := $(if $(word 2,$(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_REQUESTED)),1,0)
+_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_UNKNOWN_COMPUTED := $(if $(filter-out $(CLASSIC_VARIANTS_SUPPORTED),$(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_REQUESTED)),1,0)
 
 _MAKE_SERIAL_VARIANTS_ORIGIN := $(origin VARIANTS)
 ifeq ($(_MAKE_SERIAL_VARIANTS_ORIGIN),undefined)
@@ -66,8 +76,18 @@ override PIC10F320_VARIANTS_REQUEST_EMPTY := $(_MAKE_SERIAL_PIC320_EMPTY_COMPUTE
 override PIC10F320_VARIANTS_REQUEST_DUPLICATE := $(_MAKE_SERIAL_PIC320_DUPLICATE_COMPUTED)
 override PIC10F320_VARIANTS_REQUEST_UNKNOWN := $(_MAKE_SERIAL_PIC320_UNKNOWN_COMPUTED)
 endif
+ifeq ($(origin _MAKE_SERIAL_PIC12F675_TARGET_VARIANT_EMPTY),environment)
+override PIC12F675_TARGET_VARIANT_REQUEST_EMPTY := $(value _MAKE_SERIAL_PIC12F675_TARGET_VARIANT_EMPTY)
+override PIC12F675_TARGET_VARIANT_REQUEST_MULTI := $(value _MAKE_SERIAL_PIC12F675_TARGET_VARIANT_MULTI)
+override PIC12F675_TARGET_VARIANT_REQUEST_UNKNOWN := $(value _MAKE_SERIAL_PIC12F675_TARGET_VARIANT_UNKNOWN)
+else
+override PIC12F675_TARGET_VARIANT_REQUEST_EMPTY := $(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_EMPTY_COMPUTED)
+override PIC12F675_TARGET_VARIANT_REQUEST_MULTI := $(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_MULTI_COMPUTED)
+override PIC12F675_TARGET_VARIANT_REQUEST_UNKNOWN := $(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_UNKNOWN_COMPUTED)
+endif
 override VARIANTS := $(_MAKE_SERIAL_VARIANTS_SAFE)
 override PIC10F320_VARIANTS_ALL := $(_MAKE_SERIAL_PIC320_VARIANTS_SAFE)
+override PIC12F675_TARGET_VARIANT := $(if $(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_SAFE),$(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_SAFE),cd4053_simple)
 
 _make_shell_quote = '$(subst ','"'"',$(1))'
 _MAKE_RELEASE_DIRECT := $(if $(filter release release-preflight,$(MAKECMDGOALS)),$(if $(word 2,$(MAKECMDGOALS)),,1))
@@ -90,7 +110,10 @@ export _MAKE_SERIAL_LOCK_HELD
 endif
 unexport _MAKE_SERIAL_CLASSIC_EMPTY _MAKE_SERIAL_CLASSIC_DUPLICATE \
          _MAKE_SERIAL_CLASSIC_UNKNOWN _MAKE_SERIAL_PIC320_EMPTY \
-         _MAKE_SERIAL_PIC320_DUPLICATE _MAKE_SERIAL_PIC320_UNKNOWN
+		 _MAKE_SERIAL_PIC320_DUPLICATE _MAKE_SERIAL_PIC320_UNKNOWN \
+		 _MAKE_SERIAL_PIC12F675_TARGET_VARIANT_EMPTY \
+		 _MAKE_SERIAL_PIC12F675_TARGET_VARIANT_MULTI \
+		 _MAKE_SERIAL_PIC12F675_TARGET_VARIANT_UNKNOWN
 
 ################################################################################
 # bypass -- build / test / flash Makefile
@@ -655,13 +678,15 @@ FORCE:
         test-make-lock-probe test-make-safe-parallel-probe \
         _test-make-safe-parallel-probe-run _test-make-safe-parallel-probe-a \
         _test-make-safe-parallel-probe-b _test-mutation-policy-probe \
-        test-target-matrix test-target-lane-markers test-lockstep-progress \
+		test-target-matrix test-target-lane-markers test-lockstep-progress \
+		test-pic-target-result-records \
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
         test-variant-map-contract test-makefile-name-contract test-todo-index \
         test-pinout-alignment test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract test-static-assert-guards \
+		pic12f675-target-selector-valid \
         pic10f322-test-target pic10f322-test-target-variants pic10f322-test-io pic10f322-test-lockstep \
         test-stack-bound test-stack-bound-regression test-flash-budget \
         test-flash-budget-regression test-soak test-soak-reset-witness \
@@ -870,7 +895,7 @@ VARIANT_SELECTORS = \
 # $(call selector_check,<selector variable>,<supported-set variable>) -> one
 # shell fragment. Both names are expanded by make, so the shell never has to
 # dereference a variable it cannot see.
-selector_check = sel="$($(1))"; \
+selector_check_generic = sel="$($(1))"; \
 	case "$$sel" in \
 		"") echo "FAIL: $(1) is empty; expected exactly one of: $($(2))"; rc=2 ;; \
 		*" "*) echo "FAIL: $(1)=\"$$sel\" names more than one value; expected exactly one of: $($(2))"; rc=2 ;; \
@@ -879,6 +904,11 @@ selector_check = sel="$($(1))"; \
 			*) echo "FAIL: $(1)=$$sel is not supported; expected one of: $($(2))"; rc=2 ;; \
 		esac ;; \
 	esac;
+selector_check = $(if $(filter PIC12F675_TARGET_VARIANT,$(1)),\
+	$(if $(filter 1,$(PIC12F675_TARGET_VARIANT_REQUEST_EMPTY)),echo "FAIL: PIC12F675_TARGET_VARIANT is empty; expected exactly one of: $($(2))"; rc=2;,\
+	$(if $(filter 1,$(PIC12F675_TARGET_VARIANT_REQUEST_MULTI)),echo "FAIL: PIC12F675_TARGET_VARIANT names more than one value; expected exactly one of: $($(2))"; rc=2;,\
+	$(if $(filter 1,$(PIC12F675_TARGET_VARIANT_REQUEST_UNKNOWN)),echo "FAIL: PIC12F675_TARGET_VARIANT is not supported; expected one of: $($(2))"; rc=2;,:;))),\
+	$(call selector_check_generic,$(1),$(2)))
 
 # Reject every malformed single-variant request BEFORE any lane builds, skips or
 # reports. Rejecting late is not equivalent: a lane that builds first and then
@@ -890,6 +920,22 @@ variant-selectors-valid:
 	$(foreach s,$(VARIANT_SELECTORS),\
 		$(call selector_check,$(word 1,$(subst :, ,$(s))),$(word 2,$(subst :, ,$(s))))) \
 	exit $$rc
+
+# The all-variant PIC12F675 wrapper overwrites this selector in each child
+# invocation, so validate the caller's literal request before qualification.
+# The outer serialization pass records only classification bits and replaces
+# the value with a supported token; no untrusted selector text reaches a recipe.
+.PHONY: pic12f675-target-selector-valid
+pic12f675-target-selector-valid:
+	@if [ "$(PIC12F675_TARGET_VARIANT_REQUEST_EMPTY)" -eq 1 ]; then \
+		echo "FAIL: PIC12F675_TARGET_VARIANT is empty; expected exactly one of: $(CLASSIC_VARIANTS_SUPPORTED)"; exit 2; \
+	fi; \
+	if [ "$(PIC12F675_TARGET_VARIANT_REQUEST_MULTI)" -eq 1 ]; then \
+		echo "FAIL: PIC12F675_TARGET_VARIANT names more than one value; expected exactly one of: $(CLASSIC_VARIANTS_SUPPORTED)"; exit 2; \
+	fi; \
+	if [ "$(PIC12F675_TARGET_VARIANT_REQUEST_UNKNOWN)" -eq 1 ]; then \
+		echo "FAIL: PIC12F675_TARGET_VARIANT is not supported; expected one of: $(CLASSIC_VARIANTS_SUPPORTED)"; exit 2; \
+	fi
 
 # Build all ATtiny13a variant firmwares (.hex) + print sizes.
 attiny13a: classic-variant-request-valid $(ATTINY13A_HEXES) attiny13a-size
@@ -1469,6 +1515,7 @@ PIC_GPSIM_BOOTSTRAP_HDR = test/pic/gpsim_bootstrap.h
 # TARGET_IO below: the adapters state their guard policy through a C macro
 # family that would otherwise share the stem.
 PIC_TARGET_FAULT_CORE_HDR = test/pic/test_fault_pic_core.h
+PIC_TARGET_RESULT_HDR = test/pic/target_result.h
 # Named PIC_ rather than PIC10F322_ because the PIC12F675 io lane compiles the
 # same core: it is shared mechanism, like the bring-up header above, and a
 # part-named variable would have read as the 322's private copy.
@@ -1628,7 +1675,7 @@ PIC10F322_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags 
 		-DF_CPU_HZ=$(PIC10F322_XTAL) -D$(macro_$(PIC10F322_FAULT_VARIANT)) $(PIC10F322_FAULT_CTX_DEF) \
 		$(PIC10F322_FAULT_SRC) -o $(PIC10F322_FAULT_BIN) -lgpsim
 
-$(PIC10F322_FAULT_BIN): $(PIC10F322_FAULT_SRC) $(PIC_TARGET_FAULT_CORE_HDR) $(PIC_PIN_LOOKUP_HDR) \
+$(PIC10F322_FAULT_BIN): $(PIC10F322_FAULT_SRC) $(PIC_TARGET_FAULT_CORE_HDR) $(PIC_TARGET_RESULT_HDR) $(PIC_PIN_LOOKUP_HDR) \
                   $(PIC_GPSIM_BOOTSTRAP_HDR) $(PIC10F32X_REGS_HDR) \
                   $(PIC10F32X_FAULT_MATRIX_HDR)
 	$(PIC10F322_FAULT_COMPILE)
@@ -1691,7 +1738,7 @@ PIC10F322_LOCKSTEP_COMPILE = \
 			-DF_CPU_HZ=$(PIC10F322_XTAL) $(PIC10F322_LOCKSTEP_CTX_DEF) \
 			$(PIC10F322_LOCKSTEP_SRC) $(PIC10F322_LOCKSTEP_MODEL_OBJ) -o $(PIC10F322_LOCKSTEP_BIN) -lgpsim
 
-$(PIC10F322_LOCKSTEP_BIN): $(PIC10F322_LOCKSTEP_SRC) $(PIC_TARGET_LOCKSTEP_CORE_HDR) \
+$(PIC10F322_LOCKSTEP_BIN): $(PIC10F322_LOCKSTEP_SRC) $(PIC_TARGET_LOCKSTEP_CORE_HDR) $(PIC_TARGET_RESULT_HDR) \
                      $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) $(PURE_HOST_DEP)
 	$(PIC10F322_LOCKSTEP_COMPILE)
 
@@ -1741,7 +1788,7 @@ PIC10F322_IO_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags gli
 		-DF_CPU_HZ=$(PIC10F322_XTAL) -D$(macro_$(PIC10F322_IO_VARIANT)) \
 		$(PIC10F322_IO_SRC) -o $(PIC10F322_IO_BIN) -lgpsim
 
-$(PIC10F322_IO_BIN): $(PIC10F322_IO_SRC) $(PIC_TARGET_IO_CORE_HDR) $(PIC_PIN_LOOKUP_HDR) \
+$(PIC10F322_IO_BIN): $(PIC10F322_IO_SRC) $(PIC_TARGET_IO_CORE_HDR) $(PIC_TARGET_RESULT_HDR) $(PIC_PIN_LOOKUP_HDR) \
                $(PIC_GPSIM_BOOTSTRAP_HDR) $(PIC10F32X_REGS_HDR)
 	$(PIC10F322_IO_COMPILE)
 
@@ -2687,8 +2734,9 @@ TEST_GATES_LATE = \
         test-klee-build test-mutation-sandbox test-pic-build \
         test-release-images test-release-preflight test-release-provenance \
         test-release-qualification test-release-history \
-        test-build-serialization test-target-matrix \
-        test-target-lane-markers test-lockstep-progress test-soak-timing \
+		test-build-serialization test-target-matrix \
+		test-target-lane-markers test-pic-target-result-records \
+		test-lockstep-progress test-soak-timing \
         test-variant-map-contract test-makefile-name-contract test-todo-index \
         test-pinout-alignment test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
@@ -3172,6 +3220,9 @@ test-target-lane-markers:
 	LM_VARIANT_ARG='PIC12F675_TARGET_VARIANT' \
 	LM_VARIANT='cd4053_with_mute' \
 		./test/test_target_lane_markers.sh
+
+test-pic-target-result-records:
+	PIC_SOAK_CXX="$(PIC_SOAK_CXX)" ./test/test_pic_target_result_records.sh
 
 # Compile all three real PIC lock-step drivers against a fake core; exercise
 # exact pin resolution -- per adapter, since they do not agree on a pin name --
@@ -4693,6 +4744,7 @@ PIC10F320_FAULT_COMPILE = $(PIC10F320_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --c
 		-DFW_PATH='"$(CURDIR)/$(PIC10F320_FAULT_HEX)"' -DPROC_NAME='"$(PIC10F320_GPSIM_PROC)"' \
 		-DF_CPU_HZ=$(PIC10F320_XTAL) -D$(call pic10f320_macro_of,$(PIC10F320_FAULT_VARIANT)) \
 		$(PIC10F320_FAULT_CTX_DEF) $(PIC10F320_FAULT_SRC) -o $(PIC10F320_FAULT_BIN) -lgpsim
+$(PIC10F320_FAULT_BIN): $(PIC10F320_FAULT_SRC) $(PIC_TARGET_FAULT_CORE_HDR) $(PIC_TARGET_RESULT_HDR)
 
 PIC10F320_IO_SRC = $(PIC10F320_GPSIM_DIR)/test_io_pic.cc
 PIC10F320_IO_BIN = $(PIC10F320_BUILD_DIR)/test_io_pic
@@ -4702,6 +4754,7 @@ PIC10F320_IO_COMPILE = $(PIC10F320_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cfla
 		-DFW_PATH='"$(CURDIR)/$(PIC10F320_IO_HEX)"' -DPROC_NAME='"$(PIC10F320_GPSIM_PROC)"' \
 		-DF_CPU_HZ=$(PIC10F320_XTAL) -D$(call pic10f320_macro_of,$(PIC10F320_IO_VARIANT)) \
 		$(PIC10F320_IO_SRC) -o $(PIC10F320_IO_BIN) -lgpsim
+$(PIC10F320_IO_BIN): $(PIC10F320_IO_SRC) $(PIC_TARGET_IO_CORE_HDR) $(PIC_TARGET_RESULT_HDR)
 
 PIC10F320_LOCKSTEP_SRC = $(PIC10F320_GPSIM_DIR)/test_lockstep_pic.cc
 PIC10F320_LOCKSTEP_BIN = $(PIC10F320_BUILD_DIR)/test_lockstep_pic
@@ -4721,6 +4774,7 @@ PIC10F320_LOCKSTEP_COMPILE = \
 			$(PIC10F320_LOCKSTEP_CTX_DEF) \
 			$(PIC10F320_LOCKSTEP_SRC) $(PIC10F320_LOCKSTEP_MODEL_OBJ) \
 			-o $(PIC10F320_LOCKSTEP_BIN) -lgpsim
+$(PIC10F320_LOCKSTEP_BIN): $(PIC10F320_LOCKSTEP_SRC) $(PIC_TARGET_LOCKSTEP_CORE_HDR) $(PIC_TARGET_RESULT_HDR)
 
 .PHONY: pic10f320-test-build pic10f320-test-config pic10f320-test-gpsim pic10f320-test-fault-target \
         pic10f320-test-io pic10f320-test-lockstep pic10f320-test-target \
@@ -5529,11 +5583,13 @@ PIC12F675_IO_SHADOW_DEF = $(shell a=$$(awk '$$1=="_gpio_shadow_"{print $$2; exit
 PIC12F675_IO_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
 		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
 		-DFW_PATH='"$(CURDIR)/$(PIC12F675_IO_HEX)"' -DPROC_NAME='"$(PIC12F675_GPSIM_PROC)"' \
+		-DPIC_TARGET_RESULT_DEVICE='"pic12f675"' \
+		-DPIC_TARGET_RESULT_VARIANT='"$(PIC12F675_IO_VARIANT)"' \
 		-DF_CPU_HZ=$(PIC12F675_XTAL) -D$(macro_$(PIC12F675_IO_VARIANT)) \
 		$(PIC12F675_IO_SHADOW_DEF) \
 		$(PIC12F675_IO_SRC) -o $(PIC12F675_IO_BIN) -lgpsim
 
-$(PIC12F675_IO_BIN): $(PIC12F675_IO_SRC) $(PIC_TARGET_IO_CORE_HDR) $(PIC_PIN_LOOKUP_HDR) \
+$(PIC12F675_IO_BIN): $(PIC12F675_IO_SRC) $(PIC_TARGET_IO_CORE_HDR) $(PIC_TARGET_RESULT_HDR) $(PIC_PIN_LOOKUP_HDR) \
                $(PIC_GPSIM_BOOTSTRAP_HDR) $(PIC12F675_REGS_HDR)
 	$(PIC12F675_IO_COMPILE)
 
@@ -5610,11 +5666,13 @@ PIC12F675_LOCKSTEP_COMPILE = \
 		$(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
 			-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
 			-DFW_PATH='"$(CURDIR)/$(PIC12F675_LOCKSTEP_HEX)"' -DPROC_NAME='"$(PIC12F675_GPSIM_PROC)"' \
+			-DPIC_TARGET_RESULT_DEVICE='"pic12f675"' \
+			-DPIC_TARGET_RESULT_VARIANT='"$(PIC12F675_LOCKSTEP_VARIANT)"' \
 			-DF_CPU_HZ=$(PIC12F675_XTAL) $(PIC12F675_LOCKSTEP_CTX_DEF) \
 			$(PIC12F675_LOCKSTEP_SRC) $(PIC12F675_LOCKSTEP_MODEL_OBJ) \
 			-o $(PIC12F675_LOCKSTEP_BIN) -lgpsim
 
-$(PIC12F675_LOCKSTEP_BIN): $(PIC12F675_LOCKSTEP_SRC) $(PIC_TARGET_LOCKSTEP_CORE_HDR) \
+$(PIC12F675_LOCKSTEP_BIN): $(PIC12F675_LOCKSTEP_SRC) $(PIC_TARGET_LOCKSTEP_CORE_HDR) $(PIC_TARGET_RESULT_HDR) \
                      $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
                      $(PIC12F675_REGS_HDR) $(PURE_HOST_DEP)
 	$(PIC12F675_LOCKSTEP_COMPILE)
@@ -5697,11 +5755,13 @@ PIC12F675_FAULT_SHADOW_DEF = $(shell a=$$(awk '$$1=="_gpio_shadow_"{print $$2; e
 PIC12F675_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
 		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
 		-DFW_PATH='"$(CURDIR)/$(PIC12F675_FAULT_HEX)"' -DPROC_NAME='"$(PIC12F675_GPSIM_PROC)"' \
+		-DPIC_TARGET_RESULT_DEVICE='"pic12f675"' \
+		-DPIC_TARGET_RESULT_VARIANT='"$(PIC12F675_FAULT_VARIANT)"' \
 		-DF_CPU_HZ=$(PIC12F675_XTAL) -D$(macro_$(PIC12F675_FAULT_VARIANT)) \
 		$(PIC12F675_FAULT_CTX_DEF) $(PIC12F675_FAULT_SHADOW_DEF) \
 		$(PIC12F675_FAULT_SRC) -o $(PIC12F675_FAULT_BIN) -lgpsim
 
-$(PIC12F675_FAULT_BIN): $(PIC12F675_FAULT_SRC) $(PIC_TARGET_FAULT_CORE_HDR) \
+$(PIC12F675_FAULT_BIN): $(PIC12F675_FAULT_SRC) $(PIC_TARGET_FAULT_CORE_HDR) $(PIC_TARGET_RESULT_HDR) \
                   $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
                   $(PIC12F675_REGS_HDR) $(PIC12F675_FAULT_MATRIX_HDR)
 	$(PIC12F675_FAULT_COMPILE)
@@ -6186,7 +6246,7 @@ pic12f675-test-calibration: pic12f675-simcal $(PIC12F675_CAL_INJECTOR)
 # manifest binds all six images plus the .s/.sym sidecars consumed by stack,
 # fault, lock-step and I/O; public wrappers verify it after every lane.
 .PHONY: _pic12f675-qualify-matrix
-_pic12f675-qualify-matrix: pic12f675-simcal $(PIC12F675_MATRIX_EVIDENCE)
+_pic12f675-qualify-matrix: pic12f675-target-selector-valid pic12f675-simcal $(PIC12F675_MATRIX_EVIDENCE)
 	@$(pic12f675_require_trusted_make_sh); \
 	qualified=0; skipped=0; final_owned=0; witness=; calibration_log=; \
 	cleanup_qualification() { \
@@ -6231,11 +6291,11 @@ _pic12f675-qualify-matrix: pic12f675-simcal $(PIC12F675_MATRIX_EVIDENCE)
 	fi; \
 	$(pic12f675_verify_staged_matrix_sh); \
 	calibration_log=`mktemp` || exit 1; calibration_rc=0; \
-	$(PROJECT_MAKE) --no-print-directory --old-file=pic12f675-simcal \
-			pic12f675-test-calibration >$$calibration_log 2>&1 || calibration_rc=$$?; \
+		$(PROJECT_MAKE) --no-print-directory --old-file=pic12f675-simcal \
+			pic12f675-test-calibration >"$$calibration_log" 2>&1 || calibration_rc=$$?; \
 	$(pic12f675_verify_staged_matrix_log_sh); \
-	replay_rc=0; cat $$calibration_log || replay_rc=$$?; \
-	rm -f $$calibration_log || exit 1; \
+	replay_rc=0; cat "$$calibration_log" || replay_rc=$$?; \
+	rm -f "$$calibration_log" || exit 1; \
 	if [ $$replay_rc -ne 0 ]; then exit $$replay_rc; fi; \
 	if [ $$calibration_rc -ne 0 ]; then \
 		echo "FAIL: retained PIC12F675 simulator matrix failed calibration qualification"; \
@@ -6286,9 +6346,9 @@ pic12f675-test: _pic12f675-qualify-matrix
 		"pic12f675-test-gpsim|--old-file=pic12f675-simcal" \
 		"pic12f675-test-stack-bound|--old-file=pic12f675"; do \
 		target=$${spec%%|*}; old=$${spec#*|}; log=`mktemp` || exit 1; lane_rc=0; \
-		$(PROJECT_MAKE) --no-print-directory $$old $$target >$$log 2>&1 || lane_rc=$$?; \
+		$(PROJECT_MAKE) --no-print-directory $$old $$target >"$$log" 2>&1 || lane_rc=$$?; \
 		$(pic12f675_verify_matrix_log_sh); \
-		replay_rc=0; cat $$log || replay_rc=$$?; rm -f $$log || exit 1; \
+		replay_rc=0; cat "$$log" || replay_rc=$$?; rm -f "$$log" || exit 1; \
 		if [ $$lane_rc -ne 0 ]; then exit $$lane_rc; fi; \
 		if [ $$replay_rc -ne 0 ]; then exit $$replay_rc; fi; \
 	done; \
@@ -6298,8 +6358,9 @@ pic12f675-test: _pic12f675-qualify-matrix
 # Fail-closed real-HEX aggregate, structurally identical to pic10f322-test-target
 # and for the same reason: each lane below exits 0 through $(SKIP) when XC8,
 # gpsim-dev or glib is absent, which is right for a standalone development
-# command and useless in a gate. So this wrapper requires each lane's explicit
-# PASS marker, and a skipped or truncated lane fails here.
+# command and useless in a gate. So this wrapper requires one exact, terminal,
+# variant-bound result record with the canonical check count and zero failures;
+# a skipped, truncated, duplicated or contradictory lane fails here.
 #
 # No build-variant threading, unlike pic10f320-test-target: `pic12f675-simcal`
 # (the prerequisite every lane shares) derives the WHOLE three-image matrix, as
@@ -6308,7 +6369,7 @@ pic12f675-test: _pic12f675-qualify-matrix
 PIC12F675_TARGET_VARIANT ?= cd4053_simple
 override PIC12F675_TARGET_VARIANTS_SUPPORTED := $(CLASSIC_VARIANTS_SUPPORTED)
 .PHONY: pic12f675-test-target pic12f675-test-target-variants
-pic12f675-test-target: variant-selectors-valid _pic12f675-qualify-matrix
+pic12f675-test-target: pic12f675-target-selector-valid variant-selectors-valid _pic12f675-qualify-matrix
 	@$(pic12f675_require_trusted_make_sh); \
 	if [ ! -f "$(PIC12F675_MATRIX_MANIFEST)" ]; then \
 		echo "FAIL: PIC12F675 target aggregate requires a qualified image matrix"; exit 1; \
@@ -6316,28 +6377,49 @@ pic12f675-test-target: variant-selectors-valid _pic12f675-qualify-matrix
 	$(pic12f675_load_matrix_sh); \
 	set -e; \
 	for spec in \
-		"pic12f675-test-fault PIC12F675_FAULT_VARIANT=$(PIC12F675_TARGET_VARIANT)|FAULT-INJECT PASS" \
-		"pic12f675-test-lockstep PIC12F675_LOCKSTEP_VARIANT=$(PIC12F675_TARGET_VARIANT)|LOCK-STEP PASS" \
-		"pic12f675-test-io PIC12F675_IO_VARIANT=$(PIC12F675_TARGET_VARIANT)|TARGET-IO PASS"; do \
-		target=$${spec%%|*}; marker=$${spec#*|}; log=`mktemp`; lane_rc=0; \
-		$(PROJECT_MAKE) --no-print-directory --old-file=pic12f675-simcal \
-			$$target >$$log 2>&1 || lane_rc=$$?; \
-		$(pic12f675_verify_matrix_log_sh); \
-		replay_rc=0; cat $$log || replay_rc=$$?; \
-		if [ $$lane_rc -ne 0 ]; then rm -f $$log; exit $$lane_rc; fi; \
-		if [ $$replay_rc -ne 0 ]; then rm -f $$log; exit $$replay_rc; fi; \
-		if ! grep -q "$$marker" $$log; then \
-			echo "FAIL: $$target did not report '$$marker' (skipped or incomplete?)"; \
-			rm -f $$log; exit 1; \
+		"pic12f675-test-fault PIC12F675_FAULT_VARIANT=$(PIC12F675_TARGET_VARIANT)|fault|FAULT-INJECT|37" \
+		"pic12f675-test-lockstep PIC12F675_LOCKSTEP_VARIANT=$(PIC12F675_TARGET_VARIANT)|lockstep|LOCK-STEP|3005" \
+		"pic12f675-test-io PIC12F675_IO_VARIANT=$(PIC12F675_TARGET_VARIANT)|io|TARGET-IO|variant"; do \
+		target=$${spec%%|*}; fields=$${spec#*|}; lane=$${fields%%|*}; \
+		fields=$${fields#*|}; human=$${fields%%|*}; checks=$${fields#*|}; \
+		if [ "$$checks" = variant ]; then \
+			case "$(PIC12F675_TARGET_VARIANT)" in \
+				cd4053_simple) checks=25 ;; \
+				cd4053_with_mute) checks=26 ;; \
+				tq2_l2_5v_relay) checks=36 ;; \
+				*) echo "FAIL: no target-I/O check count for $(PIC12F675_TARGET_VARIANT)"; exit 2 ;; \
+			esac; \
 		fi; \
-		rm -f $$log; \
+		expected="PIC_TARGET_RESULT format=1 device=pic12f675 lane=$$lane variant=$(PIC12F675_TARGET_VARIANT) status=pass checks=$$checks failures=0"; \
+		human_pass="$$human PASS: $$checks checks, 0 failures"; \
+		log=`mktemp`; lane_rc=0; \
+		$(PROJECT_MAKE) --no-print-directory --old-file=pic12f675-simcal \
+			$$target >"$$log" 2>&1 || lane_rc=$$?; \
+		$(pic12f675_verify_matrix_log_sh); \
+		if [ $$lane_rc -ne 0 ]; then cat "$$log"; rm -f "$$log"; exit $$lane_rc; fi; \
+		result_count=`grep -c '^PIC_TARGET_RESULT ' "$$log" || true`; \
+		result=`grep '^PIC_TARGET_RESULT ' "$$log" || true`; \
+		human_count=`grep -cFx "$$human_pass" "$$log" || true`; \
+		terminal=`$(AWK) 'NF { line=$$0 } END { print line }' "$$log"`; \
+		if [ "$$result_count" -ne 1 ] || [ "$$result" != "$$expected" ] \
+				|| [ "$$human_count" -ne 1 ] \
+				|| [ "$$terminal" != "$$expected" ] \
+				|| grep -q "^$$human FAIL:" "$$log"; then \
+			echo "FAIL: $$target did not report one exact terminal result:"; \
+			echo "      expected: $$expected"; \
+			echo "      observed records: $$result_count"; \
+			echo "      exact human PASS summaries: $$human_count"; \
+			cat "$$log"; rm -f "$$log"; exit 1; \
+		fi; \
+		replay_rc=0; cat "$$log" || replay_rc=$$?; rm -f "$$log" || exit 1; \
+		if [ $$replay_rc -ne 0 ]; then exit $$replay_rc; fi; \
 	done; \
 	$(pic12f675_verify_matrix_sh); \
 	echo "=== PIC12F675 target fault/lock-step/I-O PASS (variant $(PIC12F675_TARGET_VARIANT)): $$matrix_record ==="
 
 # ...and for ALL of them. Requires the exact supported set before running, so
 # "all variants passed" cannot hide an empty or incomplete matrix (§6.5).
-pic12f675-test-target-variants: _pic12f675-qualify-matrix
+pic12f675-test-target-variants: pic12f675-target-selector-valid variant-selectors-valid _pic12f675-qualify-matrix
 	@$(pic12f675_require_trusted_make_sh); \
 	if [ "$(CLASSIC_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
 		echo "FAIL: VARIANTS must not be empty" >&2; exit 2; \
@@ -7252,7 +7334,8 @@ help:
 	@echo "  test-release-history  bind release history + checksum/tag signatures"
 	@echo "  test-build-serialization  worktree Make/release lock regression"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
-	@echo "  test-target-lane-markers  PIC target aggregates must require each lane's PASS marker"
+	@echo "  test-target-lane-markers  PIC target aggregates require fail-closed lane results"
+	@echo "  test-pic-target-result-records  PIC12F675 canonical machine-result producers"
 	@echo "  test-stack-bound-pic-regression  PIC hardware return-stack gate regression"
 	@echo "  pic10f322-test-stack-bound / pic10f320-test-stack-bound / pic12f675-test-stack-bound"
 	@echo "                  8-level PIC hardware return-stack depth gates"
@@ -7323,6 +7406,9 @@ _make-serialized-invocation:
 		_MAKE_SERIAL_PIC320_EMPTY='$(_MAKE_SERIAL_PIC320_EMPTY_COMPUTED)' \
 		_MAKE_SERIAL_PIC320_DUPLICATE='$(_MAKE_SERIAL_PIC320_DUPLICATE_COMPUTED)' \
 		_MAKE_SERIAL_PIC320_UNKNOWN='$(_MAKE_SERIAL_PIC320_UNKNOWN_COMPUTED)' \
+		_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_EMPTY='$(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_EMPTY_COMPUTED)' \
+		_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_MULTI='$(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_MULTI_COMPUTED)' \
+		_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_UNKNOWN='$(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_UNKNOWN_COMPUTED)' \
 		flock ".make.lock" $(MAKE_COMMAND) \
 		--no-print-directory -j1 \
 		_MAKE_SERIAL_LOCK_HELD='$(_MAKE_SERIAL_WORKTREE_ID)' \

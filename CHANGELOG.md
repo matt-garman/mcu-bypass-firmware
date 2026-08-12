@@ -184,6 +184,18 @@ file is the human-readable summary of *what changed*.
   symlinked roots, stale or overwritten evidence, and a failing lane that mutates
   a retained image, moving PIC12F675 build validation from 82 to 86 checks.
 
+- **PIC12F675 target aggregates now require exact lane verdicts.** Fault,
+  lock-step and target-I/O emit a terminal `PIC_TARGET_RESULT format=1` record
+  binding the device, lane, selected variant, status, canonical check count and
+  failure count. The per-variant aggregate requires exactly one byte-exact
+  record and one matching human PASS summary, rejects contradictory FAIL output
+  or trailing diagnostics, and independently pins 37 fault, 3005 lock-step and
+  25/26/36 target-I/O checks. The all-variant wrapper validates even an otherwise
+  overwritten caller selector before qualification, while the central selector
+  guard classifies literal values without evaluating hostile Make or shell text.
+  Host regressions cover empty/multi/unknown selectors, every malformed-result
+  shape, the relay record producer and temporary paths containing spaces.
+
 - **The PIC12F675's three datasheet-read risks are closed** (DS41190G, read
   2026-08-11). They never needed silicon, only the datasheet:
 

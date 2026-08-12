@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Host-only proof that the authoritative per-variant TARGET aggregate is
-# genuinely fail-closed: it must require each libgpsim lane's explicit PASS
-# marker, never merely the lane's exit status.
+# genuinely fail-closed. PIC10F32x requires each lane's PASS marker; PIC12F675
+# requires one exact terminal machine record, never merely exit status.
 #
 # WHY THIS EXISTS
 # ---------------
@@ -60,6 +60,7 @@ LM_REQUIRE_ARG=${LM_REQUIRE_ARG:-}
 read -r -a MAKE_CMD <<<"${PROJECT_MAKE:-make}"
 [ "${#MAKE_CMD[@]}" -gt 0 ] \
 	|| { printf 'FAIL: PROJECT_MAKE must name a Make command\n' >&2; exit 1; }
+real_make=$(command -v make)
 matrix_contract_args=()
 expected_matrix_record=
 if [ "$LM_LABEL" = PIC12F675 ]; then
@@ -110,9 +111,9 @@ printf 'CALL' >> "${FAKE_MAKE_LOG:?}"
 printf ' <%s>' "$@" >> "$FAKE_MAKE_LOG"
 printf '\n' >> "$FAKE_MAKE_LOG"
 case "$lane" in
-	fault)    marker='FAULT-INJECT PASS' ;;
-	lockstep) marker='LOCK-STEP PASS' ;;
-	io)       marker='TARGET-IO PASS' ;;
+	fault)    marker='FAULT-INJECT PASS'; lane_name=fault; checks=37 ;;
+	lockstep) marker='LOCK-STEP PASS'; lane_name=lockstep; checks=3005 ;;
+	io)       marker='TARGET-IO PASS'; lane_name=io; checks=${FAKE_IO_CHECKS:-42} ;;
 	*)  printf 'fake-make: could not classify a lane from: %s\n' "$*" >&2
 	    exit 3 ;;
 esac
@@ -132,13 +133,40 @@ if [ "$lane" = "${FAKE_MODE_LANE:-}" ]; then
 	esac
 fi
 
-printf '%s: 42 checks, 0 failures\n' "$marker"
+printf '%s: %s checks, 0 failures\n' "$marker" "$checks"
+if [ "${FAKE_EXACT_RESULTS:-0}" -eq 1 ]; then
+	record="PIC_TARGET_RESULT format=1 device=pic12f675 lane=$lane_name variant=${FAKE_VARIANT:?} status=pass checks=$checks failures=0"
+	if [ "$lane" = "${FAKE_MODE_LANE:-}" ]; then
+		case "${FAKE_MODE:-ok}" in
+			diagnostic) printf 'diagnostic mentions %s\n' "$record"; exit 0 ;;
+			duplicate) printf '%s\n%s\n' "$record" "$record"; exit 0 ;;
+			duplicate-marker) printf '%s: %s checks, 0 failures\n%s\n' "$marker" "$checks" "$record"; exit 0 ;;
+			malformed) printf '%s extra=field\n' "$record"; exit 0 ;;
+			nonzero-failures)
+				printf 'PIC_TARGET_RESULT format=1 device=pic12f675 lane=%s variant=%s status=pass checks=%s failures=1\n' \
+					"$lane_name" "$FAKE_VARIANT" "$checks"
+				exit 0
+				;;
+			wrong-variant) printf '%s\n' "${record/variant=$FAKE_VARIANT/variant=unknown}"; exit 0 ;;
+			wrong-device) printf '%s\n' "${record/device=pic12f675/device=pic12f676}"; exit 0 ;;
+			wrong-lane) printf '%s\n' "${record/lane=$lane_name/lane=other}"; exit 0 ;;
+			zero-checks) printf '%s\n' "${record/checks=$checks/checks=0}"; exit 0 ;;
+			contradict)
+				printf '%s: %s checks, 1 failures\n%s\n' "${marker% PASS} FAIL" "$checks" "$record"
+				exit 0
+				;;
+			trailing) printf '%s\ntrailing diagnostic\n' "$record"; exit 0 ;;
+		esac
+	fi
+	printf '%s\n' "$record"
+fi
 exit 0
 EOF
 chmod 750 "$fake_make"
 
 run_aggregate() {
 	local mode=$1 mode_lane=$2
+	local tmpdir=${3:-}
 	: > "$log"
 	(
 		# MAKE is unset so the override below is the only definition in play.
@@ -147,8 +175,11 @@ run_aggregate() {
 		# would make the nested invocation try to reacquire the worktree lock
 		# this process already holds.
 		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKE
-		REAL_PROJECT_MAKE="$(command -v make)" LM_ENTER_REAL_MAKE=1 \
+		if [ -n "$tmpdir" ]; then export TMPDIR="$tmpdir"; fi
+		REAL_PROJECT_MAKE="$real_make" LM_ENTER_REAL_MAKE=1 \
 		FAKE_MAKE_LOG="$log" FAKE_MODE="$mode" FAKE_MODE_LANE="$mode_lane" \
+		FAKE_EXACT_RESULTS="$([ "$LM_LABEL" = PIC12F675 ] && printf 1 || printf 0)" \
+		FAKE_VARIANT="$LM_VARIANT" FAKE_IO_CHECKS=26 \
 			"$fake_make" --no-print-directory -C "$ROOT" \
 			MAKE="$fake_make" PROJECT_MAKE=true "${matrix_contract_args[@]}" \
 			"$LM_VARIANT_ARG=$LM_VARIANT" "$LM_TARGET"
@@ -206,8 +237,13 @@ expect_reject() {
 	[[ "$output" != *"$LM_SUCCESS_MARKER"* ]] \
 		|| fail "aggregate printed its success marker after a '$mode' $mode_lane lane"
 	if [ -n "$want_marker" ]; then
-		[[ "$output" == *"did not report '$want_marker'"* ]] \
-			|| fail "aggregate did not name the missing '$want_marker' marker: $output"
+		if [ "$LM_LABEL" = PIC12F675 ]; then
+			[[ "$output" == *"did not report one exact terminal result"* ]] \
+				|| fail "aggregate did not report the strict result failure: $output"
+		else
+			[[ "$output" == *"did not report '$want_marker'"* ]] \
+				|| fail "aggregate did not name the missing '$want_marker' marker: $output"
+		fi
 	fi
 	mapfile -t calls < "$log"
 	[ "${#calls[@]}" -eq "$want_calls" ] \
@@ -216,6 +252,15 @@ expect_reject() {
 }
 
 expect_accept
+
+if [ "$LM_LABEL" = PIC12F675 ]; then
+	spaced_tmp="$work/tmp with spaces"
+	mkdir "$spaced_tmp"
+	if ! output=$(run_aggregate ok none "$spaced_tmp" 2>&1); then
+		fail "aggregate rejected a valid TMPDIR containing spaces: $output"
+	fi
+	checks=$((checks + 1))
+fi
 
 # A skipped lane is the defect this file exists for -- once per lane, so the
 # check cannot be present on the first and missing on the rest.
@@ -229,5 +274,21 @@ expect_reject wrong fault 'FAULT-INJECT PASS' 1
 # ...and an outright nonzero lane still fails, marker check or not.
 expect_reject die fault '' 1
 
-printf '%s target-lane PASS-marker validation: %d checks, 0 failures\n' \
+if [ "$LM_LABEL" = PIC12F675 ]; then
+	# Exit-zero output must still be one exact, variant-bound, terminal PASS
+	# record with the canonical check count and no contradictory failure.
+	expect_reject diagnostic       fault 'strict-result' 1
+	expect_reject duplicate        fault 'strict-result' 1
+	expect_reject duplicate-marker fault 'strict-result' 1
+	expect_reject malformed        fault 'strict-result' 1
+	expect_reject nonzero-failures fault 'strict-result' 1
+	expect_reject wrong-variant    fault 'strict-result' 1
+	expect_reject wrong-device     fault 'strict-result' 1
+	expect_reject wrong-lane       fault 'strict-result' 1
+	expect_reject zero-checks      fault 'strict-result' 1
+	expect_reject contradict       fault 'strict-result' 1
+	expect_reject trailing         fault 'strict-result' 1
+fi
+
+printf '%s target-lane result validation: %d checks, 0 failures\n' \
 	"$LM_LABEL" "$checks"

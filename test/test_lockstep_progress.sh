@@ -261,6 +261,9 @@ run_wedge() {
 	[[ "$output" != *"LOCK-STEP PASS"* && "$output" != *"LOCK-STEP FAIL"* ]] \
 		|| { printf 'FAIL: %s %s wedge reached a lock-step summary\n' \
 			"$label" "$stage" >&2; exit 1; }
+	[[ "$output" != *"PIC_TARGET_RESULT"* ]] \
+		|| { printf 'FAIL: %s %s wedge reached a machine result record\n' \
+			"$label" "$stage" >&2; exit 1; }
 	if [ "$stage" = lockstep ]; then
 		[[ "$output" == *"loop CLRWDT identified"* ]] \
 			|| { printf 'FAIL: %s lockstep wedge did not reach the completion phase\n' \

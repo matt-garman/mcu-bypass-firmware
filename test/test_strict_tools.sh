@@ -191,4 +191,6 @@ fi
 	|| fail "analyze-cppcheck omitted its execution diagnostic"
 checks=$((checks + 1))
 
+[ "$checks" -eq 30 ] \
+	|| fail "strict optional-tool inventory ran $checks checks, expected 30"
 printf 'strict optional-tool validation (host + all three PIC parts): %d checks, 0 failures\n' "$checks"

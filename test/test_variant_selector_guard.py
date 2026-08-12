@@ -285,6 +285,30 @@ def main():
                  f"(expected {expected!r}):\n{out.strip()[:1000]}")
         checks += 1
 
+    # Malformed selector text is data, not a Make/shell program. The guard must
+    # reject it without evaluating a Make function or shell substitution.
+    marker = os.path.join(ROOT, "build-selector-injection-marker")
+    try:
+        os.unlink(marker)
+    except FileNotFoundError:
+        pass
+    hostile = [
+        ("PIC12F675_TARGET_VARIANT", f"$(shell touch {marker})"),
+        ("PIC12F675_TARGET_VARIANT", f"`touch {marker}`"),
+        ("PIC12F675_TARGET_VARIANT", f"x'; touch {marker}; : '"),
+    ]
+    for selector, value in hostile:
+        override = f"{selector}={value}"
+        for target in (GUARD, "pic12f675-target-selector-valid"):
+            rc, out = run_make(target, override)
+            if rc == 0 or not any(reason in out for reason in (
+                    "is not supported", "names more than one value")):
+                fail(f"{target} did not safely reject hostile selector data "
+                     f"{override!r}:\n{out.strip()[:1000]}")
+            if os.path.lexists(marker):
+                fail(f"{target} executed hostile selector data {override!r}")
+            checks += 1
+
     # A recognized value must still pass, or the guard is just breaking things.
     rc, out = run_make(GUARD, "PIC10F322_SOAK_VARIANT=cd4053_with_mute",
                        "PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay",

@@ -51,6 +51,8 @@
 #include <cstring>
 #include <string>
 #include <vector>
+
+#include "pic/target_result.h"
 #include <iostream>
 
 #include <stdint.h>
@@ -401,6 +403,7 @@ int main() {
            g_compared, g_toggles, g_mismatch);
     int pass = (g_fails == 0);
     printf("LOCK-STEP %s: %u checks, %u failures\n", pass ? "PASS" : "FAIL", g_checks, g_fails);
+    pic_target_result("lockstep", pass != 0, g_checks, g_fails);
     return pass ? 0 : 1;
 }
 

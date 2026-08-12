@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+real_make=$(command -v make)
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-pic-build.XXXXXX")
 cleanup_work() {
 	chmod -R u+w "$work" 2>/dev/null || :
@@ -1197,9 +1198,18 @@ lane=
 	fi
 	printf '%s\n' "$*" >> "${MATRIX_LANE_LOG:?}"
 	case "$lane" in
-		fault) printf 'FAULT-INJECT PASS: 37 checks, 0 failures\n' ;;
-		lockstep) printf 'LOCK-STEP PASS: 42 checks, 0 failures\n' ;;
-		io) printf 'TARGET-IO PASS: 42 checks, 0 failures\n' ;;
+		fault)
+			printf 'FAULT-INJECT PASS: 37 checks, 0 failures\n'
+			printf 'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=cd4053_simple status=pass checks=37 failures=0\n'
+			;;
+		lockstep)
+			printf 'LOCK-STEP PASS: 3005 checks, 0 failures\n'
+			printf 'PIC_TARGET_RESULT format=1 device=pic12f675 lane=lockstep variant=cd4053_simple status=pass checks=3005 failures=0\n'
+			;;
+		io)
+			printf 'TARGET-IO PASS: 25 checks, 0 failures\n'
+			printf 'PIC_TARGET_RESULT format=1 device=pic12f675 lane=io variant=cd4053_simple status=pass checks=25 failures=0\n'
+			;;
 		prehardware) printf 'PRE-HARDWARE COMPONENT PASS\n' ;;
 		target) printf 'TARGET AGGREGATE PASS\n' ;;
 	*) printf 'unexpected matrix lane command: %s\n' "$*" >&2; exit 2 ;;
@@ -1214,7 +1224,7 @@ EOF
 	chmod 750 "$matrix_lane_make"
 
 	run_matrix_target() {
-		REAL_PROJECT_MAKE="$(command -v make)" MATRIX_ENTER_REAL_MAKE=1 \
+		REAL_PROJECT_MAKE="$real_make" MATRIX_ENTER_REAL_MAKE=1 \
 		MATRIX_LANE_LOG="$matrix_lane_log" \
 		MATRIX_MUTATE_LANE="${MATRIX_MUTATE_LANE:-none}" \
 		MATRIX_MUTATE_PATH="${MATRIX_MUTATE_PATH:-}" \
@@ -1229,7 +1239,7 @@ EOF
 	}
 
 	run_matrix_combined() {
-		REAL_PROJECT_MAKE="$(command -v make)" MATRIX_ENTER_REAL_MAKE=1 \
+		REAL_PROJECT_MAKE="$real_make" MATRIX_ENTER_REAL_MAKE=1 \
 		MATRIX_INJECTOR_LOG="$matrix_injector_log" \
 		REAL_CAL_INJECTOR="$repo/test/pic/inject_calibration_word.py" \
 		MATRIX_INJECTOR_NONDETERMINISTIC=0 \

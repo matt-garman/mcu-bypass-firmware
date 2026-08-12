@@ -762,6 +762,7 @@ validate_pic10f320_sandbox() {
         test/pic/test_fault_pic_core.h \
         test/pic/test_io_pic_core.h \
         test/pic/test_lockstep_pic_core.h \
+		test/pic/target_result.h \
         test/pic/test_soak_pic.cc; do
         if [ ! -f "$root/$required" ]; then
             echo "ERROR: PIC10F320 mutation sandbox is missing $required" >&2
@@ -798,6 +799,8 @@ validate_pic12f675_sandbox() {
         test/pic/test_io_pic12f675.cc \
         test/pic/test_lockstep_pic12f675.cc \
         test/pic/test_fault_pic12f675.cc \
+		test/pic/target_result.h \
+		test/pic/test_target_result_records.cc \
         test/pic/test_soak_pic12f675.cc \
         test/pic/test_soak_pic_core.h; do
         if [ ! -f "$root/$required" ]; then

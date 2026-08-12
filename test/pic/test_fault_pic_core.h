@@ -100,6 +100,8 @@
 #include <vector>
 #include <iostream>
 
+#include "pic/target_result.h"
+
 #include <glib.h>                 // guint64, G_GUINT64_FORMAT
 #include "processor.h"            // Processor (rma, run)
 #include "pic-processor.h"        // pic_processor
@@ -623,6 +625,7 @@ int main() {
     int pass = (g_fails == 0);
     printf("\nFAULT-INJECT %s: %u checks, %u failures\n",
            pass ? "PASS" : "FAIL", g_checks, g_fails);
+    pic_target_result("fault", pass != 0, g_checks, g_fails);
     return pass ? 0 : 1;
 }
 
