@@ -41,7 +41,7 @@ total lines          7337
 full-line comments   2446   (33%)
 blank                 385
 ------------------------------
-make code            ~4506
+Makefile code        ~4506
 ```
 
 This project's stated aim is textbook-grade, reference-quality firmware where
@@ -204,7 +204,7 @@ Alternatives, and why each costs more than it returns:
 
 - **CMake / Meson** — both model one toolchain per build tree. This project has
   five exotic ones (XC8, avr-gcc 7.3, yasimavr, gpsim, CBMC, KLEE). The result
-  is five build trees plus a driver, and the `print-VAR` single-source-of-truth
+  is five build trees plus a driver, and the `print-%` single-source-of-truth
   interface is lost.
 - **Bazel / Buck** — hermeticity is genuinely attractive for reproducible
   release images, but it means hand-writing rules for XC8, gpsim, yasimavr and
