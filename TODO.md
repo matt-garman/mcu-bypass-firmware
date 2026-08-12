@@ -377,6 +377,47 @@ Dependencies: regulator and MCU electrical data. Effort: about 2-3 hours. Risk:
 Medium; real-board startup assumptions are not represented by digital
 simulation alone.
 
+### T25-name-contract-shim - Check overrides handed to a routing Make shim
+
+Axis C of `test/test_makefile_name_contract.py` harvests a `NAME=value` only
+where it follows a make word, and a make word is bare `make` or a `$(MAKE)`
+style reference. Five gate invocations now enter the real Make graph through a
+routing shim whose command word is a shell variable instead -- `"$fake_make"`
+in `test/test_target_matrix.sh` and `test/test_target_lane_markers.sh`,
+`"$matrix_lane_make"` in `test/test_pic_build.sh` -- so no make word occurs in
+those lines and the overrides they carry are checked by no axis at all. Those
+overrides are real: MAKE, PROJECT_MAKE, CC, HOSTCC, FW_BASE, STRICT_TOOLS and
+five PIC12F675 names travel that way, and MAKE and PROJECT_MAKE reach axis C
+from nowhere else in the tree. A rename would leave those five harnesses
+passing inert overrides -- the exact defect class the gate exists to catch,
+one level below where it currently looks.
+
+Measured 2026-08-12, when scoping the harvest per command context closed a
+false-positive class and revealed this as its cost: until then the five sites
+were harvested only by accident, because a `$(command -v make)` path lookup
+sitting in their environment prefixes anchored the line.
+
+The obvious repair is the wrong one, and it was measured rather than guessed.
+Widening the make word to accept a lowercase `$..._make` command word recovers
+MAKE and PROJECT_MAKE and adds four false positives -- MUTATION_MAKE_LOG,
+PIC_BASELINE_STALE_HEX, PIC_GPSIM_SELFTEST_LOG and TOOL_LOG, every one an
+environment prefix for a child process -- so it buys two names at the price of
+four the gate could then never check again. What the harvest actually needs is
+command POSITION: the command word of a statement is its first word that is
+not an assignment, and an override is an assignment after it. That is the
+shell's own rule, it is already implemented for the prefix half in
+`env_channel_names()`, and it recognizes any invocation of a Make command
+without a name-shape heuristic.
+
+Acceptance test: the five shim sites contribute their overrides again, the four
+names above stay unharvested, and axis C's negative case (e) still rejects a
+make word sitting inside an assignment's value.
+
+Dependencies: none. Effort: 2-3 hours, most of it re-measuring the harvest diff
+across the whole tree. Risk if deferred: Low -- each of those five harnesses
+asserts on the argument list its shim was called with, so a severed override
+there would most likely surface as a loud harness failure rather than silently.
+
 ---
 
 ## Tier 3 - platinum-grade hardening and silicon validation
@@ -615,6 +656,7 @@ The stable ID in each row matches exactly one open section above.
 | T25-multipress | Residual multi-press boundaries | 2.5 | 3-4 h | Medium |
 | T25-poweron-sim | Power-on-pressed simulator fidelity | 2.5 | 1-2 h | Low |
 | T25-power-ramp | Power-supply ramp analysis | 2.5 | 2-3 h | Medium |
+| T25-name-contract-shim | Check overrides handed to a routing Make shim | 2.5 | 2-3 h | Low |
 | T3-hw-procedure | Hardware-validation procedure | 3 | 2-3 h | High |
 | T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - blocks release of the part |
 | T3-ctx-complement | Complemented debounce-context storage | 3 | 3-6 h | Medium |

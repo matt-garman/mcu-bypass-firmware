@@ -308,6 +308,41 @@ ASSIGN = re.compile(r"(?<![-\w./$])([A-Za-z_][A-Za-z0-9_]*)=")
 MUTATION_ROW = re.compile(r'^"([^"]*)"')
 
 
+# An assignment whose VALUE opens a command substitution -- `X="$(cmd)"`,
+# X=`cmd`. The substitution's body is a command in its own right, so a make word
+# inside it belongs to THAT command and not to the line it sits on. Splitting on
+# it is what separates
+#
+#     REAL_PROJECT_MAKE="$(command -v make)" FAKE_MODE=x "$fake_make" ... BAR=1
+#
+# into the two claims it actually makes: `command -v make` (a path lookup, no
+# overrides at all) and a fake-make invocation carrying BAR. Without the split
+# the harvest anchors on the `make` inside the lookup, and every environment
+# prefix AFTER it reads as an override -- which is exactly the false-positive
+# class assignments_passed_to_make() exists to avoid, arriving through the value
+# position instead of the prefix position. It reported 27 fake-tool shim
+# parameters (FAKE_*, MATRIX_*, LM_*, TM_*) as severed overrides the day the
+# PIC12F675 matrix gates started resolving the real make binary that way.
+#
+# The body is HARVESTED, not discarded: `XT_N=$(make -s print-X VAR=1)` passes
+# VAR to make, and a substitution is where several real invocations in this tree
+# live (scripts/ci-local.sh, test/test_release_images.sh). Dropping it would
+# trade a false positive for a blind spot.
+#
+# COST, stated rather than glossed. Those shim invocations carry real overrides
+# (MAKE=, PROJECT_MAKE=, PIC12F675_BUILD_DIR=, STRICT_TOOLS=) and their command
+# word is a shell variable -- `"$fake_make"` -- so once the lookup no longer
+# anchors the line, nothing in it is a make word and the site contributes
+# nothing to this axis. Every name involved is still harvested from ordinary
+# `make ...` sites except MAKE and PROJECT_MAKE, which leave the harvest
+# entirely. Widening MAKE_WORD to accept a lowercase `$..._make` command word
+# recovers both, and costs four NEW false positives -- MUTATION_MAKE_LOG,
+# PIC_BASELINE_STALE_HEX, PIC_GPSIM_SELFTEST_LOG and TOOL_LOG, all environment
+# prefixes -- which is an allowlist of four names this gate would then never
+# check again. Two names checked from one fewer place is the better trade.
+SUBST_VALUE = re.compile(r"(?<![-\w./$])[A-Za-z_][A-Za-z0-9_]*=\"?(\$\(|`)")
+
+
 def logical_lines(text):
     """Yield (start_line_number, joined_line), joining backslash continuations."""
     lines = text.split("\n")
@@ -339,6 +374,47 @@ def assignments_in(fragment):
     return out
 
 
+def command_contexts(line):
+    """Yield each shell command context in `line` separately.
+
+    The first yield is the line at its own level, with the body of every
+    assignment-value substitution replaced by an empty one; each such body then
+    follows as a context of its own, recursively. A make word is thereby scoped
+    to the command it actually belongs to.
+
+    The emptied substitution keeps its `$(` and `)`, so assignments_in() still
+    sees the assignment as one whose value opens a substitution and skips it --
+    `make foo BAR=$(shell ...)` must stay unharvested, exactly as before.
+    """
+    kept, bodies, i = [], [], 0
+    while True:
+        m = SUBST_VALUE.search(line, i)
+        if not m:
+            kept.append(line[i:])
+            break
+        start = m.end()
+        if m.group(1) == "`":
+            end = line.find("`", start)
+            if end == -1:
+                end = len(line)
+        else:
+            depth, end = 1, start
+            while end < len(line):
+                if line[end] == "(":
+                    depth += 1
+                elif line[end] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                end += 1
+        kept.append(line[i:start])
+        bodies.append(line[start:end])
+        i = end
+    yield "".join(kept)
+    for body in bodies:
+        yield from command_contexts(body)
+
+
 def assignments_passed_to_make(line):
     """NAME= tokens that reach make as OVERRIDES, i.e. after the make word.
 
@@ -355,7 +431,20 @@ def assignments_passed_to_make(line):
 
     So: only what follows the make word is a claim about the Makefile's
     vocabulary.
+
+    Per COMMAND CONTEXT, not per line: a `make` inside an assignment's value is
+    that value's command, and the prefixes around it belong to a different one.
+    See command_contexts() above.
     """
+    out = []
+    for context in command_contexts(line):
+        out.extend(overrides_in_command(context))
+    return out
+
+
+def overrides_in_command(line):
+    """The override half of assignments_passed_to_make(), for ONE command
+    context -- i.e. with no substitution body left to anchor on by mistake."""
     m = MAKE_WORD.search(line)
     if not m:
         return []
@@ -1943,6 +2032,27 @@ def check_axis_c():
     # (d) and make-release.sh must not read as a make invocation.
     if MAKE_WORD.search("scripts/make-release.sh --soak-duration-ms 0"):
         sys.exit("FAIL: negative case -- `make-release.sh` is being treated as a make invocation")
+    checks += 1
+
+    # (e) a make word inside an assignment's VALUE belongs to that value's
+    # command, not to the line carrying it. Resolving make's path for a
+    # fake-tool shim -- `REAL_PROJECT_MAKE="$(command -v make)"` -- otherwise
+    # anchors the harvest at the lookup, and every environment prefix after it
+    # reads as an override: 27 shim parameters (FAKE_*, MATRIX_*, LM_*, TM_*)
+    # reported as severed the day the PIC12F675 matrix gates started doing that.
+    prefixed = ('REAL_PROJECT_MAKE="$(command -v make)" FAKE_MODE=x '
+                '"$fake_make" -C dir MAKE="$fake_make" PROJECT_MAKE=true')
+    if assignments_passed_to_make(prefixed):
+        sys.exit("FAIL: negative case -- a `make` inside an assignment's value "
+                 "anchors the override harvest, so the environment prefixes "
+                 "after it read as make overrides: "
+                 + ", ".join(assignments_passed_to_make(prefixed)))
+    # ...and the body of that substitution is still harvested as a command in
+    # its own right, or the fix trades a false positive for a blind spot: real
+    # invocations in this tree pass overrides from inside a substitution.
+    if assignments_passed_to_make("XT_N=$(make -s print-X BAR=1 | wc -w)") != ["BAR"]:
+        sys.exit("FAIL: negative case -- an override inside a command "
+                 "substitution is no longer harvested")
     checks += 1
 
     return checks, len(checked), used_markers, all_markers
