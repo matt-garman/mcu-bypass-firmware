@@ -81,7 +81,7 @@ test/
   test_soak_timing.sh       shared: soak input boundaries (make test-soak-timing)
   test_stack_bound.sh       shared: fail-closed stack evidence checks
   test_stack_depth_pic.sh   shared: PIC return-stack gate regression
-  test_strict_tools.sh      shared: skip/strict policy for host + both PIC chips
+  test_strict_tools.sh      shared: skip/strict policy for host + all three PIC parts
   test_supply_chain.sh      shared: external download/cache/action pin checks
   test_target_lane_markers.sh shared: PIC aggregate PASS-marker regression
   test_target_matrix.sh     shared: fail-closed PIC/AVR-XT target-matrix regression
@@ -417,6 +417,14 @@ context is caught by the main-loop range gate before `debounce_step()` can
 return `res.fault`. The live sanity-gate call to `hw_force_wdt_reset()` is a
 positive coverage requirement, so the allowance cannot hide a harness that
 never enters the real reset path.
+
+Both requirements are anchored to the *source text* of the constructs they
+name, never to line numbers, and locating an anchor is itself fail-closed: text
+that matches zero records, or several, fails the gate rather than silently
+checking nothing. The two `hw_force_wdt_reset()` call sites are identical text,
+so they are separated by file order under a requirement that exactly two exist
+-- the allowance covers the res.fault one alone and cannot slide onto the live
+one.
 
 ## PIC10F322 target validation layers
 

@@ -134,9 +134,10 @@ Directive 4.1's adopted-code provisions.
 
 The suppression file uses `rule-or-diagnostic:file` granularity, not a
 project-wide wildcard. A matching finding in a new source file or header
-therefore fails the gate. Cppcheck 2.13.0 does not enforce that policy for
-included headers through `--error-exitcode`, so every gating recipe captures a
-fixed `MCU_BYPASS_CPPCHECK|...` record and passes it to
+therefore fails the gate. Cppcheck 2.13.0 does not enforce that policy
+*reliably* for included headers through `--error-exitcode` — some header
+findings set the status and some do not (measured below) — so every gating
+recipe captures a fixed `MCU_BYPASS_CPPCHECK|...` record and passes it to
 `test/misra_output_gate.py`. The parser lexically normalizes relative and
 absolute paths against the repository root and treats exactly `src/**/*.c` and
 `src/**/*.h` as authored firmware; adopted headers, `third_party/`, and test code
@@ -165,13 +166,26 @@ Reviewed 2026-08-10, when the PIC12F675 shell joined the boundary, and hardened
 suppression file and record what changed, rather than to read the list and
 assume.
 
-**Two shells need no MISRA-rule deviation.** `make pic10f322-analyze-misra` and
-`make pic12f675-analyze-misra` each consume only one file-scoped `misra-config`
-analyzer accommodation. The reason is structural and worth stating: the PIC
-shells write SFRs as plain identifiers (`GPIO = gpio_shadow_;`), where avr-libc's
-`_SFR_*` macros expand an integer address to a volatile pointer — which is what
-produces the whole D-1 family. A PIC shell cannot inherit that deviation, so the
-PIC12F675 arrived adding no MISRA-rule suppression.
+**Neither PIC shell needs a MISRA-rule deviation of its own.** The reason is
+structural and worth stating: the PIC shells write SFRs as plain identifiers
+(`GPIO = gpio_shadow_;`), where avr-libc's `_SFR_*` macros expand an integer
+address to a volatile pointer — which is what produces the whole D-1 family. A
+PIC shell cannot inherit that deviation, so the PIC12F675 arrived adding no
+deviation attributable to its own source.
+
+What each PIC lane *consumes* is larger than that, and was understated here
+until the output gate made it visible. Measured 2026-08-11 by emptying the
+`misra-c2012*` entries and re-running: `pic10f322-analyze-misra` and
+`pic12f675-analyze-misra` each consume one file-scoped `misra-config`
+accommodation **and three Rule 2.5 header waivers** — the pin maps of the three
+parts that lane is not building, whose macros are genuinely unused in that
+translation unit. The waivers are symmetric: the 322 lane consumes
+`bypass_pins_avr_classic.h`, `bypass_pins_avr_xt.h` and
+`bypass_pins_pic12f675.h`; the 12F675 lane consumes the first two and
+`bypass_pins_pic10f322.h`. Note the inversion this creates for auditing: a pin
+map's own waiver is inert in its own part's lane, so dropping
+`misra-c2012-2.5:src/bypass_pins_pic12f675.h` and running the PIC12F675 lane
+proves nothing. Each entry earns its keep in the *other* lanes.
 
 The measured per-lane dependence is in the table above. Dropping the three
 `bypass_mcu_avr_xt.c` entries fails the AVR-XT lane; dropping the two
@@ -179,12 +193,26 @@ The measured per-lane dependence is in the table above. Dropping the three
 Classic/driver `.c` entries fails the Classic lane with 30 findings.
 
 **The measured header-gating defect is now closed.** With cppcheck 2.13.0,
-`--error-exitcode` is set only by findings located in the file passed on the
-command line. Findings located in an included **header** are printed but do not
-fail the lane. Measured both ways: dropping `misra-c2012-2.3:src/bypass_types.h`
-or `misra-c2012-2.5:src/bypass_pins_avr_xt.h` leaves `make analyze-misra` green,
-while dropping `misra-c2012-11.4:src/bypass_mcu_avr_classic.c` fails it. So every
-D-2 and D-3 entry formerly suppressed *output*, not a process failure.
+some findings located in an included **header** are printed without setting
+`--error-exitcode`, so they were formerly reported and then ignored. Measured
+2026-08-10: dropping `misra-c2012-2.3:src/bypass_types.h` or
+`misra-c2012-2.5:src/bypass_pins_avr_xt.h` leaves `make analyze-misra` green,
+while dropping `misra-c2012-11.4:src/bypass_mcu_avr_classic.c` fails it. So the
+D-2 and D-3 entries those name formerly suppressed *output*, not a process
+failure.
+
+**The behaviour is rule-dependent, not simply location-dependent** — corrected
+2026-08-11 by direct measurement against cppcheck 2.13.0, which the original
+review's host did not have. In one lane (`pic12f675-analyze-misra`), against one
+included authored header each: a Rule 2.5 finding in `src/bypass_static_assert.h`
+leaves cppcheck's status **0**, while a Rule 20.7 finding in
+`src/bypass_pins_pic12f675.h` sets it to **2**; the latter was confirmed by
+invoking cppcheck directly rather than through make. The rules the 2026-08-10
+review happened to sample — 2.3 and 2.5 — are the whole-program *unused
+declaration* rules. Which findings set the status was not pinned down further,
+and deliberately so: the point of the parser is that this project no longer has
+to know. Do not restate the rule as "header findings never fail the lane", and
+do not use cppcheck's exit status as evidence that an authored file is clean.
 
 All five recipes now force structured output through the repository parser
 independently of cppcheck's status. `make test-misra-output-contract` emits a

@@ -313,6 +313,11 @@ chmod 750 "$tools/failing-awk" "$tools/empty-awk" \
 
 files=(
 	src/bypass_mcu_pic10f322.c src/bypass_pure.c
+	# src/bypass_pure.h: every part's *_HEADERS list names it (FW_HEADERS always
+	# did; PIC10F322_HEADERS, PIC12F675_HEADERS and XT_HEADERS gained it in
+	# e2731e9), and each list is a hard prerequisite of its image target, so an
+	# absent placeholder here is "No rule to make target", not a silent skip.
+	src/bypass_pure.h
 	src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h
 	src/bypass_output_common.h src/bypass_pins_pic10f322.h
 	src/bypass_blocking_delay.h src/bypass_static_assert.h

@@ -812,6 +812,39 @@ The last two rows are conditional on a future positive §4.3 stack decision. The
 than in §4.3 because the fault-injection matrix is built from this table, and
 `PIC_FAULT_EXPECTED_CHECKS` has to be right for whichever model is chosen. <!-- name-contract: exempt (C adapter macro, not a Make variable) -->
 
+**The inverse direction — a spurious *arm* — is deliberately not guarded.** The
+two rows above prove the tick source is still armed, which is a hazard only when
+an ISR exists. Under Model B the mirror-image hazard is an upset that *enables*
+interrupts where no handler exists, so it is worth recording why `INTCON` is
+absent from the guard set rather than leaving the omission unexamined.
+
+It costs two coincident flips, which puts it outside a single-event threat
+model. The DFP's `edc/PIC12F675.PIC` gives `INTCON` `por="00000000"` with all
+eight bits implemented, and the shell writes exactly two of them: `GIE = 0` in
+`hw_force_wdt_reset()`, and `T0IF` in `hw_tick_timer_start()` and the tick
+loop. No enable bit is ever set, so `GIE` alone vectors nowhere. `T0IF` *is*
+set every 256 us by the free-running timer, which makes `GIE` + `T0IE` the
+cheapest path — and that is still two.
+
+The consequence if it happened is also mild, though this part is an observation
+about the built images rather than a design invariant. XC8 places the OSCCAL
+restore at `0x000`–`0x003`, which falls through into the interrupt vector, so
+`0x004` holds `GOTO 0x3F8` in all three shipping images — and `0x3F8` is XC8's
+`__initialization`, which clears RAM and ends in `GOTO 0x347`, `_main` (both
+symbols are in the per-variant `.sym`). A spurious interrupt would therefore
+re-run the C startup and re-enter `main()`: a warm restart into a fully
+re-initialized part, costing one hardware stack level to the pushed return
+address (peak depth is 3–4 of 8 with 2 reserved, so it is absorbed) and leaving
+the effect in `BYPASS`. Hardware clears `GIE` on entry and the firmware never
+sets it, so it cannot repeat without a second upset, and the watchdog backstops
+any layout where the vector did lead somewhere that hung.
+
+None of that is load-bearing: the reason to leave `INTCON` out is the two-flip
+cost, not XC8's current placement, which a code or optimization change could
+move. The PIC10F322 shell has the identical posture — `INTCONbits.GIE = 0`
+appears only in its force-reset path, and its guard set omits `INTCON` too — so
+this is a repo-wide position, not something new to this part.
+
 The `OPTION_REG` consolidation is worth calling out in review: on the 322 an
 upset to the WDT period, the tick period and the pull-up enable are three
 independent events in three registers; here they are three fields in one byte, so

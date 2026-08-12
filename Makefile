@@ -973,6 +973,7 @@ PIC10F322_CORE_SRC = src/bypass_mcu_pic10f322.c src/bypass_pure.c
 # Headers that, if changed, should rebuild the PIC images: the AVR FW_HEADERS
 # set with the PIC pin map substituted for the AVR-classic one.
 PIC10F322_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
+              src/bypass_pure.h \
               src/bypass_output_common.h src/bypass_pins_pic10f322.h \
               src/bypass_blocking_delay.h src/bypass_static_assert.h \
               src/bypass_compile_checks.h \
@@ -1955,6 +1956,7 @@ XT_CORE_SRC = src/bypass_mcu_avr_xt.c src/bypass_pure.c
 # Headers that, if changed, should rebuild the XT images: the FW_HEADERS set with
 # the AVR-XT pin map substituted for the classic one.
 XT_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
+             src/bypass_pure.h \
              src/bypass_output_common.h src/bypass_pins_avr_xt.h \
              src/bypass_blocking_delay.h src/bypass_static_assert.h \
              src/bypass_compile_checks.h \
@@ -5179,6 +5181,7 @@ override PIC12F675_CORE_SRC := src/bypass_mcu_pic12f675.c src/bypass_pure.c
 # Headers that, if changed, should rebuild the PIC images: the AVR FW_HEADERS
 # set with the PIC pin map substituted for the AVR-classic one.
 PIC12F675_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
+              src/bypass_pure.h \
               src/bypass_output_common.h src/bypass_pins_pic12f675.h \
               src/bypass_blocking_delay.h src/bypass_static_assert.h \
               src/bypass_compile_checks.h \

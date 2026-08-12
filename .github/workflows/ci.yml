@@ -153,7 +153,7 @@ jobs:
   # against microchip.com / `./xc8.run --help` (both change per release). The
   # DFP packs.download.microchip.com/<pack>.atpack URL scheme is stable.
   pic:
-    name: pic (10F322 + 10F320)
+    name: pic (10F322 + 10F320 + 12F675)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
