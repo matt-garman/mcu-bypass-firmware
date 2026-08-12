@@ -30,6 +30,15 @@ file is the human-readable summary of *what changed*.
 
 ## [Unreleased]
 
+### Fixed
+
+- PIC libgpsim soaks now propagate a core-advance failure through startup,
+  liveness holds, and the duration loop instead of discarding it and repeatedly
+  retrying a wedged simulator. A wedge stops at the resume cap, reports completed
+  requested milliseconds plus actual advanced cycles/time, and cannot emit a
+  full-duration result record. The host fake-gpsim progress regression exercises
+  this contract through all three PIC routes.
+
 ### Added
 
 - **PIC12F675 support, staged and not release-supported.** A fourth core

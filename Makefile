@@ -3224,9 +3224,9 @@ test-target-lane-markers:
 test-pic-target-result-records:
 	PIC_SOAK_CXX="$(PIC_SOAK_CXX)" ./test/test_pic_target_result_records.sh
 
-# Compile all three real PIC lock-step drivers against a fake core; exercise
-# exact pin resolution -- per adapter, since they do not agree on a pin name --
-# and inject progress stalls at every run phase.
+# Compile all three real PIC lock-step and soak drivers against a fake core;
+# exercise exact pin resolution and inject bounded progress stalls. A soak wedge
+# must stop immediately with actual elapsed evidence rather than claim duration.
 test-lockstep-progress:
 	PIC_SOAK_CXX="$(PIC_SOAK_CXX)" ./test/test_lockstep_progress.sh
 

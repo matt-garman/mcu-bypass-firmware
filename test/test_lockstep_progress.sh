@@ -21,11 +21,14 @@ cat > "$fake/gpsim_stubs.h" <<'EOF'
 #define GPSIM_STUBS_H
 
 #include <cstdint>
+#include <cinttypes>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 
 using guint64 = std::uint64_t;
+#define G_GUINT64_FORMAT PRIu64
 
 class TriggerObject {
 public:
@@ -37,6 +40,7 @@ class Register {
     unsigned value_ = 0;
 public:
     unsigned get_value() const { return value_; }
+    void set_value(unsigned value) { value_ = value; }
 };
 
 class RegisterMemoryAccess {
@@ -120,6 +124,11 @@ inline FakeBreakpoints &get_bp() {
     return breakpoints;
 }
 
+inline bool &fake_footswitch_pressed() {
+    static bool pressed = false;
+    return pressed;
+}
+
 class pic_processor : public Processor, public Module {
 public:
     ProgramMemoryAccess program_memory;
@@ -132,14 +141,43 @@ inline void pic_processor::run(bool) {
     constexpr guint64 cycles_per_ms = (F_CPU_HZ / 4UL) / 1000UL;
     char const *stage = std::getenv("FAKE_GPSIM_WEDGE_AT");
     guint64 const now = get_cycles().get();
+    static unsigned stalled_resumes = 0;
     bool const wedge = stage != nullptr
         && ((std::strcmp(stage, "settle") == 0)
             || (std::strcmp(stage, "calibration") == 0 && now >= 30u * cycles_per_ms)
-            || (std::strcmp(stage, "lockstep") == 0 && now >= 38u * cycles_per_ms));
-    if (wedge) return;
+            || (std::strcmp(stage, "lockstep") == 0 && now >= 38u * cycles_per_ms)
+            || (std::strcmp(stage, "soak") == 0 && now >= 5u * cycles_per_ms)
+            || (std::strcmp(stage, "soak-liveness") == 0
+                && now >= 6u * cycles_per_ms)
+            || (std::strcmp(stage, "soak-late") == 0
+                && now >= 200u * cycles_per_ms));
+    if (wedge) {
+#ifdef FAKE_SOAK_DRIVER
+        constexpr unsigned max_stalled_resumes = 70u;
+#else
+        constexpr unsigned max_stalled_resumes = 5000u;
+#endif
+        if (++stalled_resumes > max_stalled_resumes) {
+            std::fprintf(stderr, "FATAL: fake gpsim received excessive stalled resumes\n");
+            std::exit(91);
+        }
+        return;
+    }
 
+    stalled_resumes = 0;
     get_cycles().advance(cycles_per_ms);
+#ifdef FAKE_SOAK_DRIVER
+    static bool prior_pressed = false;
+    bool const pressed = fake_footswitch_pressed();
+    if (pressed && !prior_pressed) {
+        Register *latch = rma.get_register(PIC_REG_LATCH_ADDR);
+        latch->set_value(latch->get_value() ^ PIC_REG_LED_MASK);
+    }
+    prior_pressed = pressed;
+#endif
+#ifndef FAKE_SOAK_DRIVER
     if (get_bp().hook != nullptr) get_bp().hook->callback();
+#endif
 }
 
 class CSimulationContext {
@@ -161,7 +199,7 @@ class source_stimulus {
 public:
     void set_digital() {}
     void set_Zth(double) {}
-    void set_Vth(double) {}
+    void set_Vth(double voltage) { fake_footswitch_pressed() = voltage < 2.5; }
 };
 
 class Stimulus_Node {
@@ -291,6 +329,62 @@ run_missing_pin() {
 	checks=$((checks + 1))
 }
 
+run_soak_wedge() {
+	local label=$1 processor=$2 bin=$3 stage=$4 requested_ms=$5 completed_ms=$6
+	local expected_cycles=$7 expected_advanced_ms=$8 expected_checks=$9
+	local output status fail_count result
+	set +e
+	output=$(FAKE_GPSIM_WEDGE_AT="$stage" timeout 5 "$bin" 2>&1)
+	status=$?
+	set -e
+	[ "$status" -eq 1 ] \
+		|| { printf 'FAIL: %s %s wedge exited %d instead of 1: %s\n' \
+			"$label" "$stage" "$status" "$output" >&2; exit 1; }
+	[[ "$output" == *"proc=$processor "* ]] \
+		|| { printf 'FAIL: %s %s wedge did not run the %s adapter\n' \
+			"$label" "$stage" "$processor" >&2; exit 1; }
+	fail_count=$(grep -c 'SOAK FAIL.*core not advancing' <<<"$output")
+	[ "$fail_count" -eq 1 ] \
+		|| { printf 'FAIL: %s %s wedge reported %d progress failures\n' \
+			"$label" "$stage" "$fail_count" >&2; exit 1; }
+	[[ "$output" != *"excessive stalled resumes"* && "$output" != *"SOAK PASS"* ]] \
+		|| { printf 'FAIL: %s %s wedge continued after the resume cap\n' \
+			"$label" "$stage" >&2; exit 1; }
+	result="SOAK_RESULT format=1 status=fail combination=${label}-wedge duration_ms=$completed_ms liveness_interval_ms=1 checks=$expected_checks failures=1 watchdog_failures=0 liveness_failures=0"
+	[ "$(grep -c '^SOAK_RESULT ' <<<"$output")" -eq 1 ] \
+		&& grep -Fxq "$result" <<<"$output" \
+		|| { printf 'FAIL: %s %s wedge omitted its exact short-duration result: %s\n' \
+			"$label" "$stage" "$output" >&2; exit 1; }
+	[[ "$output" == *"SOAK FAIL: $completed_ms/$requested_ms requested ms completed; $expected_cycles cycles ($expected_advanced_ms ms) advanced."* ]] \
+		|| { printf 'FAIL: %s %s wedge omitted actual cycle/time evidence\n' \
+			"$label" "$stage" >&2; exit 1; }
+	! grep -Eq "^SOAK_RESULT .*duration_ms=${requested_ms}([[:space:]]|$)" <<<"$output" \
+		|| { printf 'FAIL: %s %s wedge claimed the full requested duration\n' \
+			"$label" "$stage" >&2; exit 1; }
+	checks=$((checks + 1))
+}
+
+run_soak_control() {
+	local label=$1 processor=$2 bin=$3 requested_ms=$4 output result
+	output=$(timeout 5 "$bin" 2>&1) \
+		|| { printf 'FAIL: %s healthy soak control failed: %s\n' \
+			"$label" "$output" >&2; exit 1; }
+	[[ "$output" == *"proc=$processor "* ]] \
+		|| { printf 'FAIL: %s healthy soak did not run the %s adapter\n' \
+			"$label" "$processor" >&2; exit 1; }
+	[ "$(grep -c "^SOAK PASS: $requested_ms ms " <<<"$output")" -eq 1 ] \
+		|| { printf 'FAIL: %s healthy soak omitted its exact-duration PASS summary\n' \
+			"$label" >&2; exit 1; }
+	result="SOAK_RESULT format=1 status=pass combination=${label}-wedge duration_ms=$requested_ms liveness_interval_ms=1 checks=$requested_ms failures=0 watchdog_failures=0 liveness_failures=0"
+	[ "$(grep -c '^SOAK_RESULT ' <<<"$output")" -eq 1 ] \
+		&& grep -Fxq "$result" <<<"$output" \
+		|| { printf 'FAIL: %s healthy soak omitted its release-compatible result: %s\n' \
+			"$label" "$output" >&2; exit 1; }
+	[[ "$output" != *"SOAK FAIL"* ]] \
+		|| { printf 'FAIL: %s healthy soak also reported failure\n' "$label" >&2; exit 1; }
+	checks=$((checks + 1))
+}
+
 # $1 label, $2 adapter source, $3 gpsim processor, $4 footswitch pin name, $5 FOSC.
 #
 # The pin is passed to the STUB, never to the adapter: each adapter must reach
@@ -316,8 +410,36 @@ run_adapter() {
 	run_wedge "$label" "$processor" "$bin" lockstep
 }
 
+run_soak_adapter() {
+	local label=$1 source=$2 processor=$3 pin=$4 fosc=$5 shadow_def=$6
+	local bin="$work/test_soak_progress_$processor" requested_ms=10 cycles_per_ms
+	"$CXX" -std=c++17 -O0 -I"$fake" -I"$ROOT/test" \
+		-DFAKE_SOAK_DRIVER=1 -DFAKE_FOOTSW_PIN="\"$pin\"" \
+		-DFW_PATH='"<fake gpsim image>"' \
+		-DPROC_NAME="\"$processor\"" -DF_CPU_HZ="$fosc" $shadow_def \
+		-DSOAK_DURATION_MS="$requested_ms" \
+		-DSOAK_LIVENESS_INTERVAL_MS=1 \
+		-DSOAK_PROGRESS_INTERVAL_MS="$requested_ms" \
+		-DSOAK_COMBINATION_NAME="\"${label}-wedge\"" \
+		-DSOAK_ACTUATION_BLOCK_MS=0u "$ROOT/$source" -o "$bin"
+	if [ "$fosc" = 4000000UL ]; then cycles_per_ms=1000; else cycles_per_ms=500; fi
+	run_soak_control "$label" "$processor" "$bin" "$requested_ms"
+	run_soak_wedge "$label" "$processor" "$bin" settle "$requested_ms" 0 0 0.000 1
+	run_soak_wedge "$label" "$processor" "$bin" soak "$requested_ms" 0 \
+		$((5 * cycles_per_ms)) 5.000 1
+	run_soak_wedge "$label" "$processor" "$bin" soak-liveness "$requested_ms" 0 \
+		$((6 * cycles_per_ms)) 6.000 1
+	run_soak_wedge "$label" "$processor" "$bin" soak-late "$requested_ms" 1 \
+		$((200 * cycles_per_ms)) 200.000 2
+}
+
 run_adapter PIC10F322 test/pic/test_lockstep_pic.cc p10f322 ra3 2000000UL
 run_adapter PIC10F320 test/pic10f320/gpsim/test_lockstep_pic.cc p10f320 ra3 2000000UL
 run_adapter PIC12F675 test/pic/test_lockstep_pic12f675.cc p12f675 gpio5 4000000UL
 
-printf 'lock-step progress failure validation: %d checks, 0 failures\n' "$checks"
+run_soak_adapter PIC10F322 test/pic/test_soak_pic.cc p10f322 ra3 2000000UL ''
+run_soak_adapter PIC10F320 test/pic/test_soak_pic.cc p10f320 ra3 2000000UL ''
+run_soak_adapter PIC12F675 test/pic/test_soak_pic12f675.cc p12f675 gpio5 4000000UL \
+	'-DPIC_SHADOW_ADDR=0x20'
+
+printf 'PIC simulator progress failure validation: %d checks, 0 failures\n' "$checks"

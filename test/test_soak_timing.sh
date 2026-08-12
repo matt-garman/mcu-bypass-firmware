@@ -207,11 +207,11 @@ with open(sys.argv[1], encoding="utf-8") as source_file:
     source = source_file.read()
 source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
 source = re.sub(r"//[^\n]*", "", source)
-match = re.search(r"static\s+void\s+soak_run_ms\s*\(unsigned\s+ms\)\s*"
+match = re.search(r"static\s+bool\s+soak_run_ms\s*\(unsigned\s+ms\)\s*"
                   r"\{([^{}]*)\}", source)
 if not match or match.group(1).count(
-        "soak_run_each_ms(ms, soak_run_one_ms, sample_led)") != 1:
-    raise SystemExit("PIC soak_run_ms is not wired to per-ms sampling")
+        "return soak_run_each_ms(ms, soak_run_one_ms, sample_led)") != 1:
+    raise SystemExit("PIC soak_run_ms does not propagate per-ms sampling failure")
 PY
 	for adapter in "$ROOT"/test/pic/test_soak_pic*.cc; do
 		[ -f "$adapter" ] || continue

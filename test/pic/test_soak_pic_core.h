@@ -10,15 +10,17 @@
 //      the watchdog pet continuously. gpsim models the PIC WDT reset (verified
 //      on both families); any WDT reset during the noise stream is logged as a
 //      failure but does NOT stop the run -- the soak continues for the full
-//      duration.
+//      duration. A simulator core that stops advancing is different: no further
+//      duration can be exercised, so that failure aborts the run immediately.
 //   2. Periodic responsiveness -- every SOAK_LIVENESS_INTERVAL_MS the noise
 //      stream is paused and a 2-press round-trip is performed. The device must
 //      respond with exactly 2 LED toggles and return to its prior effect state.
 //
-// Like the AVR soak, failures are NEVER fatal: each anomaly is logged to stderr
-// and the loop continues so the full duration is exercised even after an early
-// failure. The PIC shells have no simavr lock-step; this is their only at-scale
-// test.
+// Like the AVR soak, observable firmware failures are non-fatal: each anomaly is
+// logged to stderr and the loop continues so the full duration is exercised even
+// after an early failure. A simulator wedge is necessarily fatal to the run;
+// retrying a core that cannot advance would fabricate duration evidence. The PIC
+// shells have no simavr lock-step; this is their only at-scale test.
 //
 // The LED is bit 0 of the output latch on every part and variant, so this driver
 // is variant-agnostic -- the variant selects which HEX is loaded and how long a
@@ -202,6 +204,7 @@ static guint64   g_wdt_resets     = 0;   // counted by ResetNotifier (non-haltin
 static guint64   g_liveness_fails = 0;
 static guint64   g_total_checks   = 0;
 static guint64   g_total_failures = 0;
+static guint64   g_start_cycles   = 0;
 
 static double sim_hours() {
     return (double)get_cycles().get() / (double)(F_CPU_HZ / 4UL) / 3600.0;
@@ -260,8 +263,8 @@ static bool soak_run_one_ms() {
 
 // Multi-ms switch holds must remain observable at every millisecond boundary;
 // sampling only their endpoint can hide an even number of unintended toggles.
-static void soak_run_ms(unsigned ms) {
-    (void)soak_run_each_ms(ms, soak_run_one_ms, sample_led);
+static bool soak_run_ms(unsigned ms) {
+    return soak_run_each_ms(ms, soak_run_one_ms, sample_led);
 }
 
 // ---- 2-press round-trip liveness check --------------------------------------
@@ -278,16 +281,20 @@ static void soak_run_ms(unsigned ms) {
 // human press (>=50 ms) -- and does NOT relax what the firmware must do.
 #define SOAK_PRESS_HOLD_MS    (SOAK_TICKS_MS(PRESSED_THRESH) + SOAK_ACTUATION_BLOCK_MS + 10u)
 #define SOAK_RELEASE_HOLD_MS  (SOAK_TICKS_MS(RELEASE_THRESH) + SOAK_ACTUATION_BLOCK_MS + 10u)
-static void soak_liveness_check(uint32_t sim_ms) {
+static bool soak_liveness_check(uint32_t sim_ms) {
     footsw_set(0);
-    soak_run_ms(SOAK_RELEASE_HOLD_MS);          // settle: drain release-lockout
+    if (!soak_run_ms(SOAK_RELEASE_HOLD_MS)) return false; // drain release-lockout
     guint64 before = g_led_changes;
     int led_start  = g_led_level;
 
-    footsw_set(1); soak_run_ms(SOAK_PRESS_HOLD_MS);     // press 1
-    footsw_set(0); soak_run_ms(SOAK_RELEASE_HOLD_MS);
-    footsw_set(1); soak_run_ms(SOAK_PRESS_HOLD_MS);     // press 2
-    footsw_set(0); soak_run_ms(SOAK_RELEASE_HOLD_MS);
+    footsw_set(1);
+    if (!soak_run_ms(SOAK_PRESS_HOLD_MS)) return false; // press 1
+    footsw_set(0);
+    if (!soak_run_ms(SOAK_RELEASE_HOLD_MS)) return false;
+    footsw_set(1);
+    if (!soak_run_ms(SOAK_PRESS_HOLD_MS)) return false; // press 2
+    footsw_set(0);
+    if (!soak_run_ms(SOAK_RELEASE_HOLD_MS)) return false;
 
     guint64 delta = g_led_changes - before;
     g_total_checks++;
@@ -298,6 +305,7 @@ static void soak_liveness_check(uint32_t sim_ms) {
                 (double)sim_ms / 3600000.0, delta, led_start, g_led_level);
         fflush(stderr);
     }
+    return true;
 }
 
 static uint32_t xs(uint32_t *s){uint32_t x=*s;x^=x<<13;x^=x>>17;x^=x<<5;return *s=x;}
@@ -306,11 +314,12 @@ int main() {
     if (!gpsim_bootstrap_cpu(FW_PATH, PROC_NAME))            return 1;
     if (!gpsim_attach_footswitch(FOOTSW_PIN_NAME, PROC_NAME)) return 1;
 
+    g_start_cycles = get_cycles().get();
     footsw_set(0);                              // released at power-on
-    soak_run_ms(5);                             // let init() settle, reach main loop
+    bool advancing = soak_run_ms(5);            // let init() settle, reach main loop
 
     // Arm reset counting only now (skip the power-on pass through 0x000).
-    get_bp().set_notify_break(g_cpu, 0x000, &g_reset_notifier);
+    if (advancing) get_bp().set_notify_break(g_cpu, 0x000, &g_reset_notifier);
 
     printf("SOAK START: fw=%s proc=%s FOSC=%lu  dur=%.2f h  "
            SOAK_WDT_NOTE "\n",
@@ -321,13 +330,21 @@ int main() {
     uint32_t rng = 0xDEADBEEFu;
     uint64_t next_live = SOAK_LIVENESS_INTERVAL_MS;
     uint64_t next_prog = SOAK_PROGRESS_INTERVAL_MS;
-    for (uint32_t t = 0; t < (uint32_t)SOAK_DURATION_MS; ++t) {
+    uint32_t completed_ms = 0; // noise milliseconds whose due liveness work also completed
+    for (uint32_t t = 0; advancing && t < (uint32_t)SOAK_DURATION_MS; ++t) {
         footsw_set(((int)(xs(&rng) & 0xFFu)) < 128);
-        soak_run_ms(1);
+        if (!soak_run_ms(1)) {
+            advancing = false;
+            break;
+        }
         if (SOAK_LIVENESS_DUE(t + 1u, next_live)) {
-            soak_liveness_check(t + 1u);
+            if (!soak_liveness_check(t + 1u)) {
+                advancing = false;
+                break;
+            }
             next_live += SOAK_LIVENESS_INTERVAL_MS;
         }
+        completed_ms = t + 1u;
         if (t + 1u >= next_prog) {
             printf("SOAK [%.2f/%.2f h] checks=%" G_GUINT64_FORMAT " fails=%"
                    G_GUINT64_FORMAT " wdt_resets=%" G_GUINT64_FORMAT "\n",
@@ -338,18 +355,31 @@ int main() {
         }
     }
 
-    int pass = (g_total_failures == 0);
-    printf("\nSOAK %s: %u ms (%.2f h) simulated. wdt_resets=%" G_GUINT64_FORMAT
-           " liveness_fails=%" G_GUINT64_FORMAT " checks=%" G_GUINT64_FORMAT "\n",
-           pass ? "PASS" : "FAIL", (unsigned int)SOAK_DURATION_MS,
-           (double)SOAK_DURATION_MS / 3600000.0,
-           g_wdt_resets, g_liveness_fails, g_total_checks);
+    guint64 advanced_cycles = get_cycles().get() - g_start_cycles;
+    double advanced_ms = (double)advanced_cycles / (double)CYCLES_PER_MS;
+    int pass = advancing && completed_ms == (uint32_t)SOAK_DURATION_MS
+        && g_total_failures == 0;
+    if (pass) {
+        printf("\nSOAK PASS: %u ms (%.2f h) simulated. %" G_GUINT64_FORMAT
+               " cycles (%.3f ms) advanced; wdt_resets=%" G_GUINT64_FORMAT
+               " liveness_fails=%" G_GUINT64_FORMAT " checks=%" G_GUINT64_FORMAT "\n",
+               (unsigned int)SOAK_DURATION_MS,
+               (double)SOAK_DURATION_MS / 3600000.0, advanced_cycles, advanced_ms,
+               g_wdt_resets, g_liveness_fails, g_total_checks);
+    } else {
+        printf("\nSOAK FAIL: %u/%u requested ms completed; %" G_GUINT64_FORMAT
+               " cycles (%.3f ms) advanced. wdt_resets=%" G_GUINT64_FORMAT
+               " liveness_fails=%" G_GUINT64_FORMAT " checks=%" G_GUINT64_FORMAT "\n",
+               (unsigned int)completed_ms, (unsigned int)SOAK_DURATION_MS,
+               advanced_cycles, advanced_ms, g_wdt_resets, g_liveness_fails,
+               g_total_checks);
+    }
     printf("SOAK_RESULT format=1 status=%s combination=%s duration_ms=%u"
            " liveness_interval_ms=%u checks=%" G_GUINT64_FORMAT
            " failures=%" G_GUINT64_FORMAT " watchdog_failures=%" G_GUINT64_FORMAT
            " liveness_failures=%" G_GUINT64_FORMAT "\n",
            pass ? "pass" : "fail", SOAK_COMBINATION_NAME,
-           (unsigned int)SOAK_DURATION_MS,
+           (unsigned int)completed_ms,
            (unsigned int)SOAK_LIVENESS_INTERVAL_MS,
            g_total_checks, g_total_failures, g_wdt_resets,
            g_liveness_fails);
