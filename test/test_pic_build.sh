@@ -83,7 +83,7 @@ case "$PB_TARGET" in
 		# complete-matrix production/consumption and the hardware-programming
 		# calibration guard.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=86
+		expected_checks=88
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -2363,7 +2363,9 @@ PY
 
 	# No shipping images is the one accepted incomplete state: the normal local
 	# no-XC8 skip remains zero, while STRICT_TOOLS turns the same condition into a
-	# failure. Both paths remove stale expected derived images.
+	# failure. Both paths remove stale expected derived images. The local path must
+	# classify zero images before probing Python; otherwise a host missing both XC8
+	# and Python fails instead of taking the documented skip.
 	rm -f "$cal_extra" "${cal_shipping[@]}" "${cal_sim[@]}"
 	mkdir -p "$(dirname "${cal_sim[0]}")"
 	write_calibration_fixture "${cal_sim[0]}"
@@ -2382,6 +2384,24 @@ PY
 
 	mkdir -p "$(dirname "${cal_sim[0]}")"
 	write_calibration_fixture "${cal_sim[0]}"
+	if ! cal_output=$(run_simcal_make STRICT_TOOLS= \
+			"PIC12F675_PYTHON=$tools/missing-python" 2>&1); then
+		printf 'FAIL: PIC12F675 zero-XC8 simcal path required Python before skipping: %s\n' \
+			"$cal_output" >&2
+		exit 1
+	fi
+	[[ "$cal_output" == *"skipping calibration injection"* \
+		&& "$cal_output" != *"required by the PIC12F675 calibration-word injector"* ]] \
+		|| { printf 'FAIL: PIC12F675 zero-XC8/missing-Python skip reported the wrong result: %s\n' \
+			"$cal_output" >&2; exit 1; }
+	for image in "${cal_sim[@]}"; do
+		[[ ! -e "$image" && ! -L "$image" ]] \
+			|| { printf 'FAIL: zero-XC8/missing-Python skip left %s\n' "$image" >&2; exit 1; }
+	done
+	checks=$((checks + 1))
+
+	mkdir -p "$(dirname "${cal_sim[0]}")"
+	write_calibration_fixture "${cal_sim[0]}"
 	if cal_output=$(run_simcal_make 2>&1); then
 		printf 'FAIL: PIC12F675 simcal producer accepted zero shipping images under STRICT_TOOLS=1\n' >&2
 		exit 1
@@ -2393,6 +2413,19 @@ PY
 		[[ ! -e "$image" && ! -L "$image" ]] \
 			|| { printf 'FAIL: strict PIC12F675 simcal zero-image failure left %s\n' "$image" >&2; exit 1; }
 	done
+	checks=$((checks + 1))
+
+	# Python is still mandatory once shipping images exist. A reordered probe must
+	# not turn authoritative calibration work into a skip.
+	for image in "${cal_shipping[@]}"; do write_calibration_fixture "$image"; done
+	if cal_output=$(run_simcal_make STRICT_TOOLS= \
+			"PIC12F675_PYTHON=$tools/missing-python" 2>&1); then
+		printf 'FAIL: PIC12F675 simcal accepted missing Python with shipping images present\n' >&2
+		exit 1
+	fi
+	[[ "$cal_output" == *"required by the PIC12F675 calibration-word injector"* ]] \
+		|| { printf 'FAIL: PIC12F675 shipping-image/missing-Python failure reported the wrong result: %s\n' \
+			"$cal_output" >&2; exit 1; }
 	checks=$((checks + 1))
 fi
 

@@ -32,6 +32,13 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- The direct PIC12F675 soak-binary target now builds and validates its simulator
+  image and `.sym` inputs before deriving `PIC_SHADOW_ADDR`, so it works from a
+  clean tree. Its 1.024 ms tick and per-variant 0/5/12 ms blocking times are
+  derived from constants consumed by the firmware and pinned to exact physical
+  hold budgets. `pic12f675-simcal` now classifies a zero-XC8 image tree before
+  requiring Python, while still failing if images exist and Python is absent.
+
 - PIC libgpsim soaks now propagate a core-advance failure through startup,
   liveness holds, and the duration loop instead of discarding it and repeatedly
   retrying a wedged simulator. A wedge stops at the resume cap, reports completed

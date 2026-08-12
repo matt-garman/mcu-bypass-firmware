@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 HEADER="$ROOT/test/soak_timing_config.h"
 RELEASE="$ROOT/scripts/make-release.sh"
+PIC12_TIMING="$ROOT/test/pic/pic12f675_soak_timing.py"
 HOSTCC=${HOSTCC:-cc}
 HOSTCXX=${HOSTCXX:-c++}
 checks=0
@@ -227,6 +228,56 @@ PY
 	checks=$((checks + 3))
 }
 
+expect_pic12f675_hold_contract() {
+	local variant expected actual defs tick block fixture press_hold release_hold
+	local -a compiler
+	read -r -a compiler <<<"$HOSTCXX"
+	for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
+		case "$variant" in
+			cd4053_simple)
+				expected='PIC12F675_SOAK_TIMING format=1 variant=cd4053_simple fosc_hz=4000000 option_reg=0x0C subticks=4 tick_us=1024 actuation_block_ms=0 pressed_ticks=8 release_ticks=25 press_hold_ms=19 release_hold_ms=36'
+				press_hold=19 release_hold=36
+				;;
+			cd4053_with_mute)
+				expected='PIC12F675_SOAK_TIMING format=1 variant=cd4053_with_mute fosc_hz=4000000 option_reg=0x0C subticks=4 tick_us=1024 actuation_block_ms=5 pressed_ticks=8 release_ticks=25 press_hold_ms=24 release_hold_ms=41'
+				press_hold=24 release_hold=41
+				;;
+			*)
+				expected='PIC12F675_SOAK_TIMING format=1 variant=tq2_l2_5v_relay fosc_hz=4000000 option_reg=0x0C subticks=4 tick_us=1024 actuation_block_ms=12 pressed_ticks=8 release_ticks=25 press_hold_ms=31 release_hold_ms=48'
+				press_hold=31 release_hold=48
+				;;
+		esac
+		actual=$(python3 "$PIC12_TIMING" --root "$ROOT" --variant "$variant" \
+			--fosc-hz 4000000UL --format record) \
+			|| fail "could not derive PIC12F675 soak timing for $variant"
+		[ "$actual" = "$expected" ] \
+			|| fail "PIC12F675 $variant soak timing drifted: $actual"
+		defs=$(python3 "$PIC12_TIMING" --root "$ROOT" --variant "$variant" \
+			--fosc-hz 4000000UL --format defines) \
+			|| fail "could not emit PIC12F675 soak definitions for $variant"
+		read -r tick block <<<"$defs"
+		fixture=$(mktemp "${TMPDIR:-/tmp}/pic12f675-soak-holds.XXXXXX")
+		if ! printf '%s\n' '#define PRESSED_THRESH 8u' \
+				'#define RELEASE_THRESH 25u' \
+				'#include "pic/soak_hold_timing.h"' \
+				"static_assert(SOAK_PRESS_HOLD_MS == ${press_hold}u, \"press hold\");" \
+				"static_assert(SOAK_RELEASE_HOLD_MS == ${release_hold}u, \"release hold\");" \
+				'int main() { return 0; }' \
+			| "${compiler[@]}" -std=c++17 -Wall -Wextra -Werror -I"$ROOT/test" \
+				"$tick" "$block" -x c++ -o "$fixture" - >/dev/null 2>&1; then
+			rm -f "$fixture"
+			fail "derived PIC12F675 definitions did not compile for $variant: $defs"
+		fi
+		rm -f "$fixture"
+		checks=$((checks + 1))
+	done
+	if python3 "$PIC12_TIMING" --root "$ROOT" --variant cd4053_simple \
+			--fosc-hz 2000000UL --format record >/dev/null 2>&1; then
+		fail "PIC12F675 soak timing accepted the wrong FOSC"
+	fi
+	checks=$((checks + 1))
+}
+
 for language in c c++; do
 	if [ "$language" = c ]; then compiler=$HOSTCC; else compiler=$HOSTCXX; fi
 	expect_compile_pass "$compiler" "$language" 1 1 1
@@ -389,5 +440,6 @@ expect_release_pic10f320_soak_combos
 expect_release_avrxt_soak_combos
 expect_avrxt_soak_contract
 expect_pic_per_ms_transition_sampling
+expect_pic12f675_hold_contract
 
 printf 'soak timing validation: %d checks, 0 failures\n' "$checks"

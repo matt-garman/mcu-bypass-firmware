@@ -36,11 +36,10 @@
 #  error "PIC_SHADOW_ADDR (_gpio_shadow_ from the XC8 .sym) is required: this lane reads the LED out of the shadow"
 #endif
 
-// TMR0 has no period register on this part: the shell counts four unprescaled
-// 256 us rollovers per tick (src/bypass_mcu_pic12f675.c), because the ONE
-// prescaler is assigned to the watchdog instead. 4 x 256 us = 1.024 ms, so 8
-// press ticks are 8.192 ms and 25 release ticks are 25.6 ms.
-#define SOAK_TICK_US 1024u
+// TMR0 has no period register on this part. The build derives SOAK_TICK_US from
+// the shell's TMR0_SUBTICKS_PER_TICK and derives SOAK_ACTUATION_BLOCK_MS from
+// the selected output driver's header. The host timing contract pins the result:
+// four unprescaled 256 us rollovers make a 1.024 ms tick.
 
 // Unlike the 10F32x lanes, gpsim's watchdog model matches this part's datasheet
 // exactly: with PSA=1 and PS=1:16 a starved reset fires at cycle 288,039, i.e.

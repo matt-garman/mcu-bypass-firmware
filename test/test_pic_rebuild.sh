@@ -55,7 +55,9 @@ read -r -a MAKE_CMD <<<"${PROJECT_MAKE:-make}"
 mkdir -p "$tools"
 scratch_tree_copy "$ROOT" "$repo" \
 	|| fail "could not populate the scratch repo (see test/scratch_tree.sh)"
-mkdir -p "$repo/build_pic10f322" "$repo/build_pic10f320"
+repo_lock_id=$(stat -Lc '%d:%i' "$repo")
+mkdir -p "$repo/build_pic10f322" "$repo/build_pic10f320" \
+	"$repo/build_pic12f675/simcal"
 
 # Blank the prerequisites of the rules under test, which is this fixture's whole
 # point: the property is Make's staleness decision, not compilation, and the fake
@@ -96,6 +98,7 @@ blank_prereq test/pic/gpsim_bootstrap.h
 # $(PIC_SOAK_SAMPLING_HDR) keeps multi-ms LED observation at one sample per ms.
 # Both chip-specific soak rules consume it through their shared source.
 blank_prereq test/pic/soak_sampling.h
+blank_prereq test/pic/soak_hold_timing.h
 
 # Records the full argv, then writes the -o target so Make sees a fresh artifact.
 cat > "$tools/cxx" <<'EOF'
@@ -121,7 +124,43 @@ case "${1:-}" in
 esac
 exit 0
 EOF
-chmod 755 "$tools/cxx" "$tools/pkg-config"
+cat > "$tools/timing-python" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+script=${1:?}
+shift
+case "$script $*" in
+	*'pic12f675_soak_timing.py '*'--format defines'*)
+		case " $* " in
+			*' --variant cd4053_with_mute '*) block=5 ;;
+			*' --variant tq2_l2_5v_relay '*) block=12 ;;
+			*) block=0 ;;
+		esac
+		printf '%s\n' "-DSOAK_TICK_US=1024u -DSOAK_ACTUATION_BLOCK_MS=${block}u"
+		;;
+	*'inject_calibration_word.py '*)
+		argc=$#
+		eval "input=\${$((argc - 1))}"
+		eval "output=\${$argc}"
+		cp "$input" "$output"
+		;;
+	*) exit 2 ;;
+esac
+EOF
+cat > "$tools/xc8" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+out=
+while [ "$#" -gt 0 ]; do
+	if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi
+done
+[ -n "$out" ] || exit 2
+printf '%s\n' ':020000000028D6' ':02400E009E38DA' ':00000001FF' > "$out"
+printf 'fake assembly\n' > "${out%.hex}.s"
+printf '_gpio_shadow_ 0020\n' > "${out%.hex}.sym"
+printf 'Program space used (42)\n'
+EOF
+chmod 755 "$tools/cxx" "$tools/pkg-config" "$tools/timing-python" "$tools/xc8"
 
 # build <target> <var=value...> -- one Make invocation against the scratch repo
 build() {
@@ -129,6 +168,7 @@ build() {
 	(
 		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKE
 		PATH="$tools:$PATH" FAKE_CXX_LOG="$log" \
+		_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" \
 			"${MAKE_CMD[@]}" --no-print-directory -C "$repo" "$@" "$target" >/dev/null 2>&1
 	)
 }
@@ -142,7 +182,7 @@ compiles() { [ -f "$log" ] && grep -c . "$log" || printf '0\n'; }
 #    from a rebuild that merely happened because a timestamp moved
 check_chip() {
 	local label=$1 target=$2 cxx_var=$3 dur_var=$4 extra=$5
-	local before after args
+	local before after args after_change after_identical
 
 	: > "$log"
 	build "$target" "$cxx_var=$tools/cxx" "$dur_var=60000" $extra \
@@ -151,12 +191,36 @@ check_chip() {
 	args=$(tail -1 "$log")
 	[[ "$args" == *"-DSOAK_DURATION_MS=60000"* ]] \
 		|| fail "$label: first build did not carry the requested duration: $args"
+	if [ "$label" = PIC12F675 ]; then
+		for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
+			[[ -s "$repo/build_pic12f675/bypass-pic12f675-${variant}.sym" \
+				&& -s "$repo/build_pic12f675/simcal/bypass-pic12f675-${variant}_simcal.hex" ]] \
+				|| fail "$label: clean direct build did not produce complete symbol/simulator inputs for $variant"
+		done
+		[[ "$args" == *"-DPIC_SHADOW_ADDR=0x0020"* \
+			&& "$args" == *"-DSOAK_TICK_US=1024u"* \
+			&& "$args" == *"-DSOAK_ACTUATION_BLOCK_MS=0u"* ]] \
+			|| fail "$label: compile did not carry the symbol-derived address and timing definitions: $args"
+		checks=$((checks + 1))
+		# Re-run from no image/symbol tree without suppressing prerequisites. The
+		# direct file target itself must recreate every build-derived input.
+		rm -rf "$repo/build_pic12f675"
+		build "$target" "$cxx_var=$tools/cxx" "$dur_var=60000" $extra \
+			|| fail "$label: direct clean-tree rebuild failed"
+		[ "$(compiles)" -eq 2 ] \
+			|| fail "$label: clean-tree request did not reach the soak compiler"
+		args=$(tail -1 "$log")
+		[[ "$args" == *"-DPIC_SHADOW_ADDR=0x0020"* ]] \
+			|| fail "$label: clean-tree rebuild lost PIC_SHADOW_ADDR: $args"
+		checks=$((checks + 1))
+	fi
 	checks=$((checks + 1))
 
 	# (1) changed variable -> must recompile, with the NEW value
 	build "$target" "$cxx_var=$tools/cxx" "$dur_var=120000" $extra \
 		|| fail "$label: rebuild after a duration change failed"
-	[ "$(compiles)" -eq 2 ] \
+	if [ "$label" = PIC12F675 ]; then after_change=3; else after_change=2; fi
+	[ "$(compiles)" -eq "$after_change" ] \
 		|| fail "$label: a changed $dur_var did not recompile (stale binary kept); compiles=$(compiles)"
 	args=$(tail -1 "$log")
 	[[ "$args" == *"-DSOAK_DURATION_MS=120000"* ]] \
@@ -166,7 +230,8 @@ check_chip() {
 	# (2) identical rerun -> must STILL recompile (proves FORCE, not timestamps)
 	build "$target" "$cxx_var=$tools/cxx" "$dur_var=120000" $extra \
 		|| fail "$label: identical rerun failed"
-	[ "$(compiles)" -eq 3 ] \
+	if [ "$label" = PIC12F675 ]; then after_identical=4; else after_identical=3; fi
+	[ "$(compiles)" -eq "$after_identical" ] \
 		|| fail "$label: an identical rerun did not recompile, so the rule is not unconditionally out of date; compiles=$(compiles)"
 	checks=$((checks + 1))
 
@@ -185,7 +250,43 @@ check_chip "PIC10F320" "build_pic10f320/test_soak_pic" \
 # split, the core header too -- so its own -D flags are the only thing keeping
 # its binary distinct.
 check_chip "PIC12F675" "test/pic/test_soak_pic12f675" \
-	PIC_SOAK_CXX PIC12F675_SOAK_DURATION_MS ""
+	PIC_SOAK_CXX PIC12F675_SOAK_DURATION_MS \
+	"PIC_CC=$tools/xc8 PIC12F675_PYTHON=$tools/timing-python"
+
+# The selected variant must reach both the image path and timing derivation.
+for spec in cd4053_with_mute:5 tq2_l2_5v_relay:12; do
+	variant=${spec%%:*}; block=${spec#*:}
+	: > "$log"
+	build test/pic/test_soak_pic12f675 PIC_SOAK_CXX="$tools/cxx" \
+		PIC12F675_SOAK_DURATION_MS=60000 PIC_CC="$tools/xc8" \
+		PIC12F675_PYTHON="$tools/timing-python" PIC12F675_SOAK_VARIANT="$variant" \
+		|| fail "PIC12F675: direct $variant build failed"
+	args=$(tail -1 "$log")
+	[[ "$args" == *"bypass-pic12f675-${variant}_simcal.hex"* \
+		&& "$args" == *"-DSOAK_ACTUATION_BLOCK_MS=${block}u"* ]] \
+		|| fail "PIC12F675: $variant did not reach image/timing compile arguments: $args"
+	checks=$((checks + 1))
+done
+
+# A zero-XC8 skip must not leave a stale binary that no longer reflects the
+# requested duration/variant.
+printf 'stale soak binary\n' > "$repo/test/pic/test_soak_pic12f675"
+rm -rf "$repo/build_pic12f675"
+build test/pic/test_soak_pic12f675 PIC_SOAK_CXX="$tools/cxx" \
+	PIC_CC="$tools/missing-xc8" PIC12F675_PYTHON="$tools/missing-python" \
+	PIC12F675_SOAK_DURATION_MS=70000 \
+	|| fail "PIC12F675: zero-XC8 direct target did not skip cleanly"
+[ ! -e "$repo/test/pic/test_soak_pic12f675" ] \
+	|| fail "PIC12F675: zero-XC8 direct target retained a stale soak binary"
+checks=$((checks + 1))
+
+# Selector validation dominates both the producer and skip paths.
+if build test/pic/test_soak_pic12f675 PIC_SOAK_CXX="$tools/cxx" \
+		PIC_CC="$tools/missing-xc8" PIC12F675_PYTHON="$tools/missing-python" \
+		PIC12F675_SOAK_VARIANT=unknown; then
+	fail "PIC12F675: direct binary target accepted an invalid variant"
+fi
+checks=$((checks + 1))
 
 # --- the three chips must not share one binary -------------------------------
 # The two 10F32x parts compile from the SAME source since the §4 FOLD, and all
@@ -193,7 +294,6 @@ check_chip "PIC12F675" "test/pic/test_soak_pic12f675" \
 # output path -- which is exactly what makes a shared output path the live
 # hazard here: it would leave one chip's soak silently running another's image.
 [ -f "$repo/test/pic/test_soak_pic" ] && [ -f "$repo/build_pic10f320/test_soak_pic" ] \
-	&& [ -f "$repo/test/pic/test_soak_pic12f675" ] \
 	|| fail "expected a separate soak binary per chip"
 checks=$((checks + 1))
 

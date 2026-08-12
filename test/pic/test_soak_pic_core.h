@@ -122,32 +122,6 @@
 // inside the slack below -- which is precisely why it is converted here instead.
 // The slack is already load-bearing for a different reason (see the liveness
 // check), and a margin doing two jobs reports neither when it runs out.
-#ifndef SOAK_TICK_US
-#  error "SOAK_TICK_US must be defined by the part adapter: the firmware's debounce tick period in microseconds"
-#endif
-// Milliseconds that must elapse for the firmware to count that many ticks,
-// rounded UP: a hold that ends mid-tick has not delivered that tick.
-#define SOAK_TICKS_MS(ticks)  (((ticks) * SOAK_TICK_US + 999u) / 1000u)
-
-// The two properties the conversion has to have, checked against the real
-// thresholds at compile time. A hold one millisecond SHORT costs the liveness
-// check a press and is reported as "toggles=1" -- indistinguishable from the
-// firmware fault this driver exists to find -- and a hold rounded a whole
-// millisecond LONG would mean the expression had stopped being a conversion.
-// Exact at a 1.000 ms tick, which is why the PIC10F32x holds are unchanged.
-//
-// This pins the arithmetic, not the tick VALUE: that a PIC12F675 tick really is
-// 1.024 ms is asserted against the firmware elsewhere, by the gpsim CLI lane's
-// exact toggle checkpoint (press edge + 8 x 1024 cycles).
-static_assert(SOAK_TICKS_MS(PRESSED_THRESH) * 1000u >= PRESSED_THRESH * SOAK_TICK_US,
-              "press hold is shorter than PRESSED_THRESH ticks");
-static_assert(SOAK_TICKS_MS(PRESSED_THRESH) * 1000u < PRESSED_THRESH * SOAK_TICK_US + 1000u,
-              "press hold overshoots PRESSED_THRESH ticks by a whole millisecond");
-static_assert(SOAK_TICKS_MS(RELEASE_THRESH) * 1000u >= RELEASE_THRESH * SOAK_TICK_US,
-              "release hold is shorter than RELEASE_THRESH ticks");
-static_assert(SOAK_TICKS_MS(RELEASE_THRESH) * 1000u < RELEASE_THRESH * SOAK_TICK_US + 1000u,
-              "release hold overshoots RELEASE_THRESH ticks by a whole millisecond");
-
 // ---- What this part's simulated watchdog proves -----------------------------
 // A parenthetical for the start banner. Per-adapter because gpsim's WDT model
 // stands in a different relation to the datasheet on each family, and a banner
@@ -180,8 +154,9 @@ static_assert(SOAK_TICKS_MS(RELEASE_THRESH) * 1000u < RELEASE_THRESH * SOAK_TICK
 // to this many milliseconds of debounce integration are stolen from whichever
 // window the pulse overlaps. (The AVR integrates in its timer ISR, which keeps
 // counting through the block, so it is immune -- see the liveness-check note
-// below.) The Makefile passes the active variant's value (relay 12, mute 5,
-// simple 0) from that part's per-variant block table.
+// below.) The build passes the active variant's value (relay 12, mute 5, simple
+// 0); the PIC12F675 derives it from the selected output driver's header, while
+// the 10F32x builds use their part-local Make maps.
 //
 // This one previously defaulted to the relay's 12 ms on the reasoning that an
 // unspecified build should be over-held rather than under-held. That reasoning
@@ -190,8 +165,9 @@ static_assert(SOAK_TICKS_MS(RELEASE_THRESH) * 1000u < RELEASE_THRESH * SOAK_TICK
 // and a default that silently absorbs the next such failure hides which variant
 // the binary was actually sized for.
 #ifndef SOAK_ACTUATION_BLOCK_MS
-#  error "SOAK_ACTUATION_BLOCK_MS must be injected: -DSOAK_ACTUATION_BLOCK_MS from that part's per-variant blocking-actuation table"
+#  error "SOAK_ACTUATION_BLOCK_MS must be injected for the selected output variant"
 #endif
+#include "pic/soak_hold_timing.h"
 // Safety cap: max run() resumes to cover one ms. A genuinely wedged core (PC
 // stuck, never reaching the cycle break) trips this instead of hanging forever.
 #define MAX_RESUMES_PER_MS 64
@@ -279,8 +255,6 @@ static bool soak_run_ms(unsigned ms) {
 // (observed as "toggles=1"). Sizing every window ticks + block + slack models a
 // realistic minimum footswitch press on the polled core -- still far below any
 // human press (>=50 ms) -- and does NOT relax what the firmware must do.
-#define SOAK_PRESS_HOLD_MS    (SOAK_TICKS_MS(PRESSED_THRESH) + SOAK_ACTUATION_BLOCK_MS + 10u)
-#define SOAK_RELEASE_HOLD_MS  (SOAK_TICKS_MS(RELEASE_THRESH) + SOAK_ACTUATION_BLOCK_MS + 10u)
 static bool soak_liveness_check(uint32_t sim_ms) {
     footsw_set(0);
     if (!soak_run_ms(SOAK_RELEASE_HOLD_MS)) return false; // drain release-lockout

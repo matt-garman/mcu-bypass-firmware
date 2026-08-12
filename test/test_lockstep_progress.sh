@@ -412,7 +412,8 @@ run_adapter() {
 
 run_soak_adapter() {
 	local label=$1 source=$2 processor=$3 pin=$4 fosc=$5 shadow_def=$6
-	local bin="$work/test_soak_progress_$processor" requested_ms=10 cycles_per_ms
+	local bin="$work/test_soak_progress_$processor" requested_ms=10 cycles_per_ms tick_us
+	if [ "$fosc" = 4000000UL ]; then tick_us=1024; else tick_us=1000; fi
 	"$CXX" -std=c++17 -O0 -I"$fake" -I"$ROOT/test" \
 		-DFAKE_SOAK_DRIVER=1 -DFAKE_FOOTSW_PIN="\"$pin\"" \
 		-DFW_PATH='"<fake gpsim image>"' \
@@ -421,7 +422,8 @@ run_soak_adapter() {
 		-DSOAK_LIVENESS_INTERVAL_MS=1 \
 		-DSOAK_PROGRESS_INTERVAL_MS="$requested_ms" \
 		-DSOAK_COMBINATION_NAME="\"${label}-wedge\"" \
-		-DSOAK_ACTUATION_BLOCK_MS=0u "$ROOT/$source" -o "$bin"
+		-DSOAK_TICK_US="${tick_us}u" -DSOAK_ACTUATION_BLOCK_MS=0u \
+		"$ROOT/$source" -o "$bin"
 	if [ "$fosc" = 4000000UL ]; then cycles_per_ms=1000; else cycles_per_ms=500; fi
 	run_soak_control "$label" "$processor" "$bin" "$requested_ms"
 	run_soak_wedge "$label" "$processor" "$bin" settle "$requested_ms" 0 0 0.000 1
