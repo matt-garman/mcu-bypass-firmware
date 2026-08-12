@@ -107,8 +107,9 @@ jobs:
   # the exact-line firmware coverage gate). See docs/pic10f320_special_case.md
   # for why that chip's firmware inlines the verified core rather than calling it.
   #
-  # PIC12F675 -- `make pic12f675-test` + `make pic12f675-test-target-variants`:
-  # the same two-aggregate shape again, for the classic mid-range part. Its
+  # PIC12F675 -- one `make pic12f675-test pic12f675-test-target-variants` graph:
+  # the same two-aggregate shape again, for the classic mid-range part, but both
+  # consume one retained hash-qualified matrix. Its
   # pre-hardware aggregate additionally runs the calibration contract, which no
   # other part has: this is the only chip whose SIMULATOR images are derived
   # (an oscillator calibration word injected into a copy), and the contract is
@@ -260,23 +261,14 @@ jobs:
             PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
 
-      # PIC12F675 pre-hardware gate. CONFIG decode, cppcheck + MISRA, the
-      # host-gcov shipping-source gate, the calibration contract, the CLI-gpsim
-      # register-level test across all three derived images, and the 8-level
-      # hardware return-stack bound for every variant. It shares the 322's
-      # PIC_CC / PIC_DFP pair: one XC8 installation, one DFP.
-      - name: PIC12F675 pre-hardware gate (make pic12f675-test)
+      # PIC12F675 pre-hardware and target aggregates share one qualified,
+      # hash-recorded shipping/simulator matrix only when requested in the same
+      # Make graph. This covers CONFIG, analysis, host coverage, calibration,
+      # CLI gpsim, stack, and every fault/lock-step/I-O variant without any
+      # consumer rebuilding or republishing the retained bytes.
+      - name: PIC12F675 immutable-matrix aggregates
         run: |
-          make pic12f675-test STRICT_TOOLS=1 \
-            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC_DFP="${XC8_DFP_ROOT}/xc8"
-
-      # ...and the PIC12F675 fail-closed target aggregate, same contract as the
-      # other two: explicit fault, lock-step and target-I/O PASS sentinels for
-      # every variant, so a silent skip or a partial matrix is a failure.
-      - name: PIC12F675 target aggregate (make pic12f675-test-target-variants)
-        run: |
-          make pic12f675-test-target-variants STRICT_TOOLS=1 \
+          make pic12f675-test pic12f675-test-target-variants STRICT_TOOLS=1 \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC_DFP="${XC8_DFP_ROOT}/xc8"
 

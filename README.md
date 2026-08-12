@@ -135,9 +135,10 @@ targets, `PIC12F675_*` variables, and the 322's `PIC_CC`/`PIC_DFP` pair):
 
 ```
 make pic12f675                      # build all variants + 1024-word flash-budget gate
-make pic12f675-test                 # CONFIG, analysis, source coverage, calibration
-                                    #   contract, gpsim, and the 8-level stack bound
-make pic12f675-test-target-variants # fail-closed libgpsim fault/lock-step/I/O gates
+make pic12f675-test pic12f675-test-target-variants
+                                    # one retained hash-qualified matrix across
+                                    # CONFIG, analysis, coverage, calibration,
+                                    # gpsim, stack, and all libgpsim variants
 make pic12f675-preflight \
   PIC12F675_TRIM_EVIDENCE=pic12f675-baseline.json # read-only factory-trim capture
 make pic12f675-program VARIANT=cd4053_simple \
@@ -156,6 +157,15 @@ oscillator calibration word that a real device carries in its last program word
 and that an erased simulator image does not, and `make pic12f675-test-calibration`
 proves the injection leaves the shipping images byte-identical. That is why this
 part has one aggregate lane the others do not.
+
+Request the two PIC12F675 aggregates in one Make invocation as shown above. Make
+then builds one retained shipping/derived matrix and stages SHA-256 for all six
+images and the assembly/symbol sidecars consumed by the target lanes. It
+promotes that record to the qualified manifest only after the discarded private
+compiler build and calibration probes agree, then rechecks it after every
+consumer. Every aggregate PASS names the same six image hashes. Separate
+invocations remain valid standalone qualifications, but necessarily create
+separate retained matrices and therefore cannot be combined as one evidence set.
 
 The same asymmetry is why `make pic12f675-program` rebuilds the complete matrix,
 derives one image only from validated `VARIANT`, and checks a private read-only

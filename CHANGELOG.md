@@ -166,6 +166,23 @@ file is the human-readable summary of *what changed*.
   independent host fault lane already used the implemented bit. Fault counts do
   not change.
 
+- **PIC12F675 aggregate evidence now binds every lane to one retained image
+  matrix.** A repository-owned oracle exclusively records SHA-256 for all three
+  shipping images, all three derived simulator images, and the assembly/symbol
+  sidecars consumed by stack, fault, lock-step and I/O. Qualification stages that
+  record, compares a discarded private shipping build to reject compiler
+  nondeterminism, reuses the calibration contract's private probes to reject
+  injector nondeterminism, and only then promotes the final qualified manifest.
+
+  Pre-hardware and target wrappers suppress only their producer prerequisites,
+  verify the retained manifest after every consumer, invalidate it on any byte
+  change, and include the same six-image hash record in every aggregate PASS.
+  CI and `ci-local.sh` request both public aggregates in one Make graph, so the
+  common qualifier runs once rather than the target sweep republishing nine
+  matrices. Fake-tool coverage rejects nondeterministic compiler/injector output,
+  symlinked roots, stale or overwritten evidence, and a failing lane that mutates
+  a retained image, moving PIC12F675 build validation from 82 to 86 checks.
+
 - **The PIC12F675's three datasheet-read risks are closed** (DS41190G, read
   2026-08-11). They never needed silicon, only the datasheet:
 

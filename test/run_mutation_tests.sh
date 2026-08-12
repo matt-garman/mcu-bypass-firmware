@@ -789,6 +789,7 @@ validate_pic12f675_sandbox() {
     local root="$1" required ok=1
     for required in \
         test/pic/inject_calibration_word.py \
+        test/pic/pic12f675_matrix_evidence.py \
         test/pic/pic12f675_footswitch_toggle.stc \
         test/pic/pic12f675_power_on_pressed.stc \
         test/pic/pic12f675_gpsim_regs.sh \
@@ -844,6 +845,19 @@ if [ "${MUTATION_SANDBOX_SELFTEST:-0}" = 1 ]; then
             || ! validate_pic12f675_sandbox "$SELFTEST_DIR"; then
         rm -rf "$SELFTEST_DIR"
         exit 1
+    fi
+
+    # Aggregate consumers now require the retained-matrix hash oracle just as
+    # simulator-image production requires the calibration injector.
+    rm -f "$SELFTEST_DIR/test/pic/pic12f675_matrix_evidence.py"
+    if validate_pic12f675_sandbox "$SELFTEST_DIR" >/dev/null 2>&1; then
+        echo "ERROR: mutation sandbox validator accepted a missing matrix evidence oracle" >&2
+        rm -rf "$SELFTEST_DIR"
+        exit 1
+    fi
+    if ! copy_tree "$SELFTEST_DIR"; then
+        echo "ERROR: could not restore mutation self-test sandbox" >&2
+        rm -rf "$SELFTEST_DIR"; exit 1
     fi
 
     # The PIC12F675 hazard specifically: without the injector no derived image

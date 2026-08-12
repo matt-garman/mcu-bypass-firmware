@@ -215,8 +215,14 @@ test/
                                   producer publishes all three variants as one
                                   exact regular-file matrix and removes the whole
                                   expected set after any failed derivation
-                             (make pic12f675-test-calibration;
-                              make pic12f675-simcal for the derived images)
+                              (make pic12f675-test-calibration;
+                               make pic12f675-simcal for the derived images)
+            pic12f675_matrix_evidence.py
+                                  stages and re-verifies one retained shipping/
+                                  simcal matrix plus consumed .s/.sym sidecars,
+                                  exclusively promoting the qualified manifest
+                                  only after reproducibility checks; aggregate
+                                  PASS records expose the six image SHA-256 values
             pic12f675_trim_evidence.py
                                   independently parses pk2cmd device exports and
                                   exclusively publishes strict baseline/result
@@ -475,13 +481,15 @@ dropped from either side with every other gate green.
 `pic12f675-test-target-variants` is the same gate for that part, built from the
 same two regressions above, and `pic12f675-test` is its pre-hardware aggregate:
 CONFIG decode, static analysis, shipping-source coverage, the calibration
-contract, the gpsim CLI lane, and the hardware return-stack bound. The
-calibration contract is listed there rather than left to the lanes, which all
-depend on `pic12f675-simcal` and so *produce* the derived images no matter what.
-What no lane checks is that producing them left the shipping images untouched --
-the one property whose failure would ship a HEX different from the one the
-simulator lanes qualified, and one no other part can have, because no other part
-derives anything.
+contract, the gpsim CLI lane, and the hardware return-stack bound. Both share
+`_pic12f675-qualify-matrix` when requested in one Make graph. The qualifier
+stages one shipping/simcal hash record, compares all shipping images and sidecars
+with a discarded private compiler build, and uses the calibration contract's
+private probes to reject injector nondeterminism. Only then does it exclusively
+promote the final qualified manifest. Consumers suppress their phony producer
+prerequisites and re-verify the retained manifest after every lane.
+The pre-hardware, per-variant target, and all-variant target PASS records therefore
+name one identical six-image SHA-256 record.
 
 Debounce thresholds define a 33-sample pure-model minimum between press onsets.
 That is also the nominal 33 ms physical minimum on ISR-driven AVR targets and the
@@ -535,7 +543,7 @@ targets are always fail-closed rather than skip-clean.
 | Shipping-source coverage | `pic10f320-coverage-check-fw` | An **exact** property, not a percentage floor: every line of the real firmware is host-executed except an enumerated, justified watchdog-reset path. Run per variant, because the three output stages give 84 / 95 / 100 executable lines. | host gcov with the mock `xc.h` |
 | All-variant host aggregate | `pic10f320-test-host-variants` | The four layers above across all three variants, with the complete supported matrix required first. **This is the member of `make test`.** | Makefile wrapper |
 | Return-stack oracle regression | `test-pic10f320-return-stack-oracle` | 149 deterministic checks: passing depths through 8, recursion/depth-9 rejection, independently required skip edges and operand boundaries, classic alias ranges, all 16,384 legality decisions, every destination writer against PCL/INDF/INTCON, 9-bit PC/physical-fetch aliasing, literal HEX layout, and fail-closed parser/file cases. Includes ten device-geometry checks: `--program-words` is validated as a power of two inside the 9-bit PC space, and fixtures whose verdict *differs* between the 256- and 512-word geometries pin the fetch alias in both directions — an image with code above word `0x0FF` is rejected when 256 words are declared, and one that relies on the fold is rejected when 512 are. **This is also a member of `make test`.** | dependency-free Python 3 |
-| Image generation | `test-pic-build` | 36 PIC10F322, 75 PIC10F320, and 82 PIC12F675 checks. All three runs prove missing-XC8 skips remove the complete product matrix despite attempted inventory overrides, stale assembly/symbol sidecars cannot survive a current-HEX-only build, and shell syntax in matrix text is rejected without execution. The 322 run additionally rejects recursively self-whitelisting GNU Make input; the 320 run covers selector rebuilds, deletion of reachable-RETFIE and depth-9 images despite attempted oracle/limit overrides, exact per-output XC8/host-compiler rebuild invocations with current clock/variant/host flags, and matching/mismatching/malformed/missing expected-image gate inputs. The 675 run adds exact simulator-image publication, calibration consumers, selected-variant/private-snapshot programming, read-only trim baseline capture, required/malformed/unreservable evidence rejection, immediate pre-write comparison, exact pk2cmd/ipecmd write argv, post-read programmed-byte/CONFIG verification, no-op/failed/interrupted-writer rejection, retained OSCCAL/BG pass/fail evidence, acceptance of a zero-base extended-address record and refusal of a relocating one, external image/command refusal, overlap and path-replacement rejection, CLI, target-I/O, lock-step, fault-injection, soak, failed-producer cleanup, signal cleanup, and zero-image skip/strict checks. | host fake-XC8/fake-CC regression |
+| Image generation | `test-pic-build` | 36 PIC10F322, 75 PIC10F320, and 86 PIC12F675 checks. All three runs prove missing-XC8 skips remove the complete product matrix despite attempted inventory overrides, stale assembly/symbol sidecars cannot survive a current-HEX-only build, and shell syntax in matrix text is rejected without execution. The 322 run additionally rejects recursively self-whitelisting GNU Make input; the 320 run covers selector rebuilds, deletion of reachable-RETFIE and depth-9 images despite attempted oracle/limit overrides, exact per-output XC8/host-compiler rebuild invocations with current clock/variant/host flags, and matching/mismatching/malformed/missing expected-image gate inputs. The 675 run adds exact simulator-image publication, retained aggregate matrix hashing, compiler/injector nondeterminism rejection, post-consumer verification, selected-variant/private-snapshot programming, read-only trim baseline capture, required/malformed/unreservable evidence rejection, immediate pre-write comparison, exact pk2cmd/ipecmd write argv, post-read programmed-byte/CONFIG verification, no-op/failed/interrupted-writer rejection, retained OSCCAL/BG pass/fail evidence, acceptance of a zero-base extended-address record and refusal of a relocating one, external image/command refusal, overlap and path-replacement rejection, CLI, target-I/O, lock-step, fault-injection, soak, failed-producer cleanup, signal cleanup, and zero-image skip/strict checks. | host fake-XC8/fake-CC regression |
 | Expected image bytes | `test-pic10f320-expected-images`; `pic10f320-test-build` | The dependency-free checker pins exact manifest grammar and fail-closed file handling in `make test`; the full-tool target rebuilds the immutable three-variant matrix and compares each raw HEX file with the reviewed XC8 V3.10 / DFP 1.9.189 SHA-256 baseline. Kept out of mutation kill targets so a broad byte mismatch cannot mask a weak behavioural oracle. | Python 3; pinned XC8/DFP for the real-image comparison |
 | CONFIG word | `pic10f320-test-config` | The emitted CONFIG word matches design intent, over every built image. Uses the shared checker with a device-accurate label. | host parser over HEX |
 | Hardware return stack | every `pic10f320` build; `pic10f320-test-return-stack` | The base build strictly parses and traverses its final HEX before marking that image complete, so gpsim/target/soak/release rebuilds use the same fail-closed gate. The explicit target rebuilds the supported matrix and rechecks all three together, reporting each maximum and witness. | dependency-free Python 3 over final HEX |
@@ -553,7 +561,7 @@ The shared stale-sidecar and matrix cases run in all three parameterized
 The script itself requires
 `PB_REBUILD_REQUIRED=1` for canonical `PB_TARGET=pic10f320` and enforces exactly 75
 final checks; canonical `PB_TARGET=pic10f322` enforces 36 and
-`PB_TARGET=pic12f675` enforces 67. A missing or misspelled rebuild/matrix arm
+`PB_TARGET=pic12f675` enforces 86. A missing or misspelled rebuild/matrix arm
 assignment therefore fails instead of reporting a smaller subset as green.
 
 In a fresh temporary repository the arm proves that identical requests reinvoke

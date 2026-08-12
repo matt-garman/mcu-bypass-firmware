@@ -24,11 +24,10 @@ set -euo pipefail
 #
 # WHAT MAKES THIS RUNNABLE IN `make test`
 # ---------------------------------------
-# A fake `make` stands in for the lanes, so the regression is tool-independent
-# by construction -- it needs neither XC8 nor gpsim and cannot acquire a hidden
-# dependency on either. The Makefile's serialization wrapper drives the real
-# graph through $(MAKE_COMMAND) and passes MAKE= down untouched, so overriding
-# MAKE reaches the aggregate's recipe and nothing else.
+# A routing `make` executable enters the real graph, preserves its own argv[0]
+# as GNU Make's immutable recursive command, and intercepts only component-lane
+# submakes. The regression therefore needs neither XC8 nor gpsim, while
+# MAKE=/PROJECT_MAKE= command-line values cannot bypass the aggregate.
 #
 # Parameterized so ONE regression covers both PIC targets (merge plan §4: FOLD
 # the shared-name harnesses rather than forking them). Defaults reproduce the
@@ -61,6 +60,23 @@ LM_REQUIRE_ARG=${LM_REQUIRE_ARG:-}
 read -r -a MAKE_CMD <<<"${PROJECT_MAKE:-make}"
 [ "${#MAKE_CMD[@]}" -gt 0 ] \
 	|| { printf 'FAIL: PROJECT_MAKE must name a Make command\n' >&2; exit 1; }
+matrix_contract_args=()
+expected_matrix_record=
+if [ "$LM_LABEL" = PIC12F675 ]; then
+	matrix_dir="$work/pic12f675-matrix"
+	mkdir -p "$matrix_dir/simcal"
+	for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
+		stem="bypass-pic12f675-$variant"
+		printf 'shipping %s\n' "$variant" > "$matrix_dir/$stem.hex"
+		printf 'assembly %s\n' "$variant" > "$matrix_dir/$stem.s"
+		printf 'symbols %s\n' "$variant" > "$matrix_dir/$stem.sym"
+		printf 'simcal %s\n' "$variant" > "$matrix_dir/simcal/${stem}_simcal.hex"
+	done
+	expected_matrix_record=$(python3 "$ROOT/test/pic/pic12f675_matrix_evidence.py" record \
+		--build-dir "$matrix_dir" --fw-base bypass --tag pic12f675)
+	matrix_contract_args=(--old-file=_pic12f675-qualify-matrix \
+		"PIC12F675_BUILD_DIR=$matrix_dir")
+fi
 
 fail() {
 	printf 'FAIL: %s %s\n' "$LM_LABEL" "$*" >&2
@@ -74,9 +90,10 @@ fail() {
 cat > "$fake_make" <<'EOF'
 #!/usr/bin/env bash
 set -uo pipefail
-printf 'CALL' >> "${FAKE_MAKE_LOG:?}"
-printf ' <%s>' "$@" >> "$FAKE_MAKE_LOG"
-printf '\n' >> "$FAKE_MAKE_LOG"
+if [ "${LM_ENTER_REAL_MAKE:-0}" -eq 1 ]; then
+	export LM_ENTER_REAL_MAKE=0
+	exec -a "$0" "${REAL_PROJECT_MAKE:?}" "$@"
+fi
 
 lane=unknown
 for a in "$@"; do
@@ -86,6 +103,12 @@ for a in "$@"; do
 		*test-io*)       lane=io ;;
 	esac
 done
+if [ "$lane" = unknown ]; then
+	exec -a "$0" "${REAL_PROJECT_MAKE:?}" "$@"
+fi
+printf 'CALL' >> "${FAKE_MAKE_LOG:?}"
+printf ' <%s>' "$@" >> "$FAKE_MAKE_LOG"
+printf '\n' >> "$FAKE_MAKE_LOG"
 case "$lane" in
 	fault)    marker='FAULT-INJECT PASS' ;;
 	lockstep) marker='LOCK-STEP PASS' ;;
@@ -124,9 +147,11 @@ run_aggregate() {
 		# would make the nested invocation try to reacquire the worktree lock
 		# this process already holds.
 		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKE
+		REAL_PROJECT_MAKE="$(command -v make)" LM_ENTER_REAL_MAKE=1 \
 		FAKE_MAKE_LOG="$log" FAKE_MODE="$mode" FAKE_MODE_LANE="$mode_lane" \
-			"${MAKE_CMD[@]}" --no-print-directory -C "$ROOT" \
-			MAKE="$fake_make" "$LM_VARIANT_ARG=$LM_VARIANT" "$LM_TARGET"
+			"$fake_make" --no-print-directory -C "$ROOT" \
+			MAKE="$fake_make" PROJECT_MAKE=true "${matrix_contract_args[@]}" \
+			"$LM_VARIANT_ARG=$LM_VARIANT" "$LM_TARGET"
 	)
 }
 
@@ -140,6 +165,10 @@ assert_call_args() {
 		[[ "$call" == *"<$LM_REQUIRE_ARG>"* ]] \
 			|| fail "lane call $i did not carry '$LM_REQUIRE_ARG': $call"
 	fi
+	if [ "$LM_LABEL" = PIC12F675 ]; then
+		[[ "$call" == *"<--old-file=pic12f675-simcal>"* ]] \
+			|| fail "lane call $i did not suppress simulator-image production: $call"
+	fi
 }
 
 # All three lanes report their marker -> the aggregate accepts, in lane order.
@@ -150,6 +179,10 @@ expect_accept() {
 	fi
 	[[ "$output" == *"$LM_SUCCESS_MARKER"* ]] \
 		|| fail "aggregate omitted its own success marker: $output"
+	if [ -n "$expected_matrix_record" ]; then
+		[[ "$output" == *"$expected_matrix_record"* ]] \
+			|| fail "aggregate success omitted its retained hash record: $output"
+	fi
 	mapfile -t calls < "$log"
 	[ "${#calls[@]}" -eq 3 ] \
 		|| fail "aggregate ran ${#calls[@]} lanes, expected 3"

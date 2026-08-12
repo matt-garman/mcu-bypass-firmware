@@ -39,24 +39,49 @@ read -r -a supported <<<"$TM_SUPPORTED"
 read -r -a MAKE_CMD <<<"${PROJECT_MAKE:-make}"
 [ "${#MAKE_CMD[@]}" -gt 0 ] \
 	|| { printf 'FAIL: PROJECT_MAKE must name a Make command\n' >&2; exit 1; }
+matrix_contract_args=()
+expected_matrix_record=
+if [ "$TM_LABEL" = PIC12F675 ]; then
+	matrix_dir="$work/pic12f675-matrix"
+	mkdir -p "$matrix_dir/simcal"
+	for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
+		stem="bypass-pic12f675-$variant"
+		printf 'shipping %s\n' "$variant" > "$matrix_dir/$stem.hex"
+		printf 'assembly %s\n' "$variant" > "$matrix_dir/$stem.s"
+		printf 'symbols %s\n' "$variant" > "$matrix_dir/$stem.sym"
+		printf 'simcal %s\n' "$variant" > "$matrix_dir/simcal/${stem}_simcal.hex"
+	done
+	expected_matrix_record=$(python3 "$ROOT/test/pic/pic12f675_matrix_evidence.py" record \
+		--build-dir "$matrix_dir" --fw-base bypass --tag pic12f675)
+	matrix_contract_args=(--old-file=_pic12f675-qualify-matrix \
+		"PIC12F675_BUILD_DIR=$matrix_dir")
+fi
 
 cat > "$fake_make" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'CALL' >> "${FAKE_MAKE_LOG:?}"
-printf ' <%s>' "$@" >> "$FAKE_MAKE_LOG"
-printf '\n' >> "$FAKE_MAKE_LOG"
+if [ "${TM_ENTER_REAL_MAKE:-0}" -eq 1 ]; then
+	export TM_ENTER_REAL_MAKE=0
+	exec -a "$0" "${REAL_PROJECT_MAKE:?}" "$@"
+fi
 
 target=
 marker=
 count=0
 for arg in "$@"; do
 	case "$arg" in
+		"${FAKE_PER_VARIANT_TARGET:?}") target=$arg; marker=; count=0 ;;
 		"${FAKE_FAULT_TARGET:?}") target=$arg; marker=${FAKE_FAULT_MARKER:?}; count=${FAKE_FAULT_MARKER_COUNT:?} ;;
 		"${FAKE_LOCKSTEP_TARGET:?}") target=$arg; marker=${FAKE_LOCKSTEP_MARKER:?}; count=${FAKE_LOCKSTEP_MARKER_COUNT:?} ;;
 		"${FAKE_IO_TARGET:?}") target=$arg; marker=${FAKE_IO_MARKER:?}; count=${FAKE_IO_MARKER_COUNT:?} ;;
 	esac
 done
+if [ -z "$target" ]; then
+	exec -a "$0" "${REAL_PROJECT_MAKE:?}" "$@"
+fi
+printf 'CALL' >> "${FAKE_MAKE_LOG:?}"
+printf ' <%s>' "$@" >> "$FAKE_MAKE_LOG"
+printf '\n' >> "$FAKE_MAKE_LOG"
 if [ -n "$target" ] && [ "${FAKE_OMIT_MARKER:-}" != "$target" ]; then
 	i=0
 	while [ "$i" -lt "$count" ]; do printf '%s\n' "$marker"; i=$((i + 1)); done
@@ -84,6 +109,8 @@ run_matrix() {
 	(
 		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKE "$TM_VARIANTS_VAR"
 		FAKE_MAKE_LOG="$log" \
+		REAL_PROJECT_MAKE="$(command -v make)" TM_ENTER_REAL_MAKE=1 \
+		FAKE_PER_VARIANT_TARGET="$TM_PER_VARIANT_TARGET" \
 		FAKE_FAULT_TARGET="$TM_FAULT_TARGET" \
 		FAKE_LOCKSTEP_TARGET="$TM_LOCKSTEP_TARGET" \
 		FAKE_IO_TARGET="$TM_IO_TARGET" \
@@ -97,8 +124,9 @@ run_matrix() {
 		FAKE_IO_EXTRA_MARKER_COUNT="$TM_IO_EXTRA_MARKER_COUNT" \
 		FAKE_OMIT_MARKER="$omit_marker" \
 		FAKE_OMIT_EXTRA="$omit_extra" \
-		"${MAKE_CMD[@]}" --no-print-directory -C "$ROOT" \
-			MAKE="$fake_make" "${matrix_arg[@]}" "$TM_TARGET"
+		"$fake_make" --no-print-directory -C "$ROOT" \
+			MAKE="$fake_make" PROJECT_MAKE=true "${matrix_contract_args[@]}" \
+			"${matrix_arg[@]}" "$TM_TARGET"
 	)
 }
 
@@ -108,6 +136,8 @@ run_target() {
 	(
 		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKE "$TM_VARIANT_ARG"
 		FAKE_MAKE_LOG="$log" \
+		REAL_PROJECT_MAKE="$(command -v make)" TM_ENTER_REAL_MAKE=1 \
+		FAKE_PER_VARIANT_TARGET="$TM_PER_VARIANT_TARGET" \
 		FAKE_FAULT_TARGET="$TM_FAULT_TARGET" \
 		FAKE_LOCKSTEP_TARGET="$TM_LOCKSTEP_TARGET" \
 		FAKE_IO_TARGET="$TM_IO_TARGET" \
@@ -120,8 +150,9 @@ run_target() {
 		FAKE_IO_EXTRA_MARKER="$TM_IO_EXTRA_MARKER" \
 		FAKE_IO_EXTRA_MARKER_COUNT="$TM_IO_EXTRA_MARKER_COUNT" \
 		FAKE_OMIT_MARKER="$omit_marker" \
-		"${MAKE_CMD[@]}" --no-print-directory -C "$ROOT" \
-			MAKE="$fake_make" "$TM_VARIANT_ARG=$TM_SUBSET" \
+		"$fake_make" --no-print-directory -C "$ROOT" \
+			MAKE="$fake_make" PROJECT_MAKE=true "${matrix_contract_args[@]}" \
+			"$TM_VARIANT_ARG=$TM_SUBSET" \
 			"$TM_PER_VARIANT_TARGET"
 	)
 }
@@ -136,6 +167,10 @@ expect_accept() {
 	fi
 	[[ "$output" == *"validated for all variants"* ]] \
 		|| { printf 'FAIL: %s matrix omitted the PASS marker\n' "$label" >&2; exit 1; }
+	if [ -n "$expected_matrix_record" ]; then
+		[[ "$output" == *"$expected_matrix_record"* ]] \
+			|| { printf 'FAIL: %s matrix PASS omitted its retained hash record\n' "$label" >&2; exit 1; }
+	fi
 	mapfile -t calls < "$log"
 	[ "${#calls[@]}" -eq "${#expected[@]}" ] \
 		|| { printf 'FAIL: %s matrix ran %d variants, expected %d\n' \
@@ -149,6 +184,11 @@ expect_accept() {
 			[[ "${calls[$i]}" == *"<$TM_VARIANT_ARG=${expected[$i]}>"* \
 				&& "${calls[$i]}" == *"<$TM_PER_VARIANT_TARGET>"* ]] \
 				|| { printf 'FAIL: %s matrix call %d was wrong: %s\n' \
+					"$label" "$i" "${calls[$i]}" >&2; exit 1; }
+		fi
+		if [ "$TM_LABEL" = PIC12F675 ]; then
+			[[ "${calls[$i]}" == *"<--old-file=_pic12f675-qualify-matrix>"* ]] \
+				|| { printf 'FAIL: %s matrix call %d did not suppress requalification: %s\n' \
 					"$label" "$i" "${calls[$i]}" >&2; exit 1; }
 		fi
 	done
@@ -206,6 +246,11 @@ expect_sentinels() {
 	fi
 	[[ "$output" == *"PASS (variant $TM_SUBSET)"* ]] \
 		|| { printf 'FAIL: %s target aggregate omitted its PASS marker\n' "$TM_LABEL" >&2; exit 1; }
+	if [ -n "$expected_matrix_record" ]; then
+		[[ "$output" == *"$expected_matrix_record"* ]] \
+			|| { printf 'FAIL: %s target aggregate omitted its retained hash record\n' \
+				"$TM_LABEL" >&2; exit 1; }
+	fi
 	mapfile -t calls < "$log"
 	[ "${#calls[@]}" -eq 3 ] \
 		|| { printf 'FAIL: %s target aggregate ran %d lanes, expected 3\n' \

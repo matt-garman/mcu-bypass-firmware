@@ -30,12 +30,10 @@
 #                    make pic10f320-test-target-variants
 #                                           (10F320: the same fail-closed
 #                                            libgpsim aggregate)
-#                    make pic12f675-test       (12F675: CONFIG + cppcheck/MISRA +
-#                                            host coverage + calibration contract
-#                                            + CLI gpsim + hardware stack bound)
-#                    make pic12f675-test-target-variants
-#                                           (12F675: the same fail-closed
-#                                            libgpsim aggregate)
+#                    make pic12f675-test pic12f675-test-target-variants
+#                                           (12F675: one retained hash-qualified
+#                                            matrix across pre-hardware and the
+#                                            fail-closed libgpsim aggregate)
 #   build-matrix  -> make attiny13a attiny85 attiny45 (every variant builds for every
 #                                            AVR; each prints flash/RAM)
 #   attiny202     -> make attiny202-test    (fuses + smoke + build/budget +
@@ -496,8 +494,9 @@ else
 	run_step "pic job: pic10f322-test-target-variants" make pic10f322-test-target-variants
 	run_step "pic job: make pic10f320-test" make pic10f320-test
 	run_step "pic job: pic10f320-test-target-variants" make pic10f320-test-target-variants
-	run_step "pic job: make pic12f675-test" make pic12f675-test
-	run_step "pic job: pic12f675-test-target-variants" make pic12f675-test-target-variants
+	# One Make graph is load-bearing: the two goals share one qualified retained
+	# PIC12F675 matrix and verify its hashes after every consumer lane.
+	run_step "pic job: PIC12F675 immutable-matrix aggregates" make pic12f675-test pic12f675-test-target-variants
 fi
 
 run_step "build-matrix: make attiny13a attiny85 attiny45" make attiny13a attiny85 attiny45

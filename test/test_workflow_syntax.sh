@@ -446,16 +446,29 @@ if check(os.path.isfile(ci_local), "scripts/ci-local.sh: missing"):
     ci_doc = docs.get("ci.yml")
     if isinstance(ci_doc, dict) and isinstance(ci_doc.get("jobs"), dict) \
             and isinstance(ci_doc["jobs"].get("pic"), dict):
-        pat = re.compile(r"\bmake\s+(pic[0-9a-z]+-test(?:-target-variants)?)\b")
+        pat = re.compile(r"\b(pic[0-9a-z]+-test(?:-target-variants)?)\b")
         yml_lanes = set()
+        pic12_lines = []
         for step in ci_doc["jobs"]["pic"].get("steps") or []:
             if isinstance(step, dict) and isinstance(step.get("run"), str):
                 yml_lanes.update(pat.findall(step["run"]))
+                pic12_lines.extend(
+                    line.strip() for line in step["run"].splitlines()
+                    if "pic12f675-test" in line
+                )
         local_lanes = set()
         for line in lines:
             if "run_step" in line and "pic job:" in line:
                 local_lanes.update(pat.findall(line))
         check(bool(yml_lanes), "ci.yml pic job: no per-part Make lanes found")
+        check(
+            len(pic12_lines) == 1 and re.match(
+                r"^make\s+pic12f675-test\s+"
+                r"pic12f675-test-target-variants(?:\s|$)",
+                pic12_lines[0],
+            ) is not None,
+            "ci.yml pic job: PIC12F675 aggregates must share one Make command",
+        )
         for lane in sorted(yml_lanes - local_lanes):
             check(False, f"ci.yml pic job runs '{lane}', which ci-local.sh's pic job does not")
         for lane in sorted(local_lanes - yml_lanes):

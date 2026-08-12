@@ -368,7 +368,7 @@ ATTINY13A_AVRDUDE_FLAGS = -c $(AVR_PROGRAMMER) -p $(ATTINY13A_AVRDUDE_PART)
 HOSTCC      ?= cc
 GCOV        ?= gcov
 AWK         ?= awk
-export PROJECT_MAKE := $(MAKE_COMMAND)
+override export PROJECT_MAKE := $(MAKE_COMMAND)
 # -Wconversion catches implicit integer-narrowing/sign-change footguns in the
 # debounce arithmetic. The host model and the firmware share the same integer
 # semantics, so the model is a good place to enforce it too.
@@ -2787,7 +2787,7 @@ test-supply-chain:
 	./test/test_supply_chain.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 36/75/81
+# image/host rebuild triggering. The script enforces the canonical 36/75/86
 # counts, so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
@@ -5910,6 +5910,13 @@ PIC12F675_CAL_INJECTOR ?= test/pic/inject_calibration_word.py
 # calibration word and irreversible loss of a device's factory oscillator trim.
 override PIC12F675_CAL_CHECKER := test/pic/inject_calibration_word.py
 PIC12F675_CAL_VALUE    ?= 0x80
+# Aggregate qualification binds every image consumer to one retained matrix.
+# The helper and manifest location are validation mechanisms, not caller
+# extension points; relocating PIC12F675_BUILD_DIR relocates the manifest too.
+override PIC12F675_MATRIX_EVIDENCE := test/pic/pic12f675_matrix_evidence.py
+override PIC12F675_MATRIX_MANIFEST := $(PIC12F675_BUILD_DIR)/.pic12f675-qualified-matrix.json
+override PIC12F675_MATRIX_STAGED := $(PIC12F675_MATRIX_MANIFEST).staged
+override PIC12F675_MAKE_COMMAND_TRUSTED := $(if $(filter default,$(origin MAKE_COMMAND)),1,0)
 # Not independently caller-overridable: simulator images must stay in this
 # dedicated subdirectory so no shipping-image glob can select them. Relocating
 # PIC12F675_BUILD_DIR still relocates the complete target artifact tree.
@@ -5918,7 +5925,72 @@ override PIC12F675_SIMCAL_HEXES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(P
 # Derived images are build products: a `pic12f675` rebuild must not leave a stale
 # one behind for a lane to pick up. Appended rather than folded into the original
 # definition so the whole calibration story stays in this one block.
-override PIC12F675_BUILD_PRODUCTS += $(PIC12F675_SIMCAL_HEXES)
+override PIC12F675_BUILD_PRODUCTS += $(PIC12F675_SIMCAL_HEXES) \
+	$(PIC12F675_MATRIX_MANIFEST) $(PIC12F675_MATRIX_STAGED)
+
+define pic12f675_matrix_evidence_cmd
+python3 "$(PIC12F675_MATRIX_EVIDENCE)" $(1) \
+	--build-dir "$(PIC12F675_BUILD_DIR)" --fw-base "$(FW_BASE)" \
+	--tag "$(PIC12F675_TAG)"
+endef
+
+define pic12f675_require_trusted_make_sh
+if [ "$(PIC12F675_MAKE_COMMAND_TRUSTED)" -ne 1 ]; then \
+	echo "FAIL: MAKE_COMMAND is internal to PIC12F675 qualification"; exit 2; \
+fi
+endef
+
+# Recompute every shipping/derived image and consumed .s/.sym sidecar, then
+# compare the resulting six-image record with the one captured by the wrapper.
+define pic12f675_verify_matrix_sh
+current_matrix_record=`$(call pic12f675_matrix_evidence_cmd,verify)` || { \
+	rm -f "$(PIC12F675_MATRIX_MANIFEST)"; exit 1; \
+}; \
+if [ "$$current_matrix_record" != "$$matrix_record" ]; then \
+	echo "FAIL: PIC12F675 retained matrix record changed during aggregate execution"; \
+	echo "      expected: $$matrix_record"; \
+	echo "      observed: $$current_matrix_record"; \
+	rm -f "$(PIC12F675_MATRIX_MANIFEST)"; exit 1; \
+fi
+endef
+
+define pic12f675_verify_matrix_log_sh
+current_matrix_record=`$(call pic12f675_matrix_evidence_cmd,verify)` || { \
+	rm -f "$(PIC12F675_MATRIX_MANIFEST)" "$$log"; exit 1; \
+}; \
+if [ "$$current_matrix_record" != "$$matrix_record" ]; then \
+	echo "FAIL: PIC12F675 retained matrix record changed during aggregate execution"; \
+	echo "      expected: $$matrix_record"; \
+	echo "      observed: $$current_matrix_record"; \
+	rm -f "$(PIC12F675_MATRIX_MANIFEST)" "$$log"; exit 1; \
+fi
+endef
+
+define pic12f675_load_matrix_sh
+matrix_record=`$(call pic12f675_matrix_evidence_cmd,verify)` || { \
+	rm -f "$(PIC12F675_MATRIX_MANIFEST)"; exit 1; \
+}
+endef
+
+define pic12f675_verify_staged_matrix_sh
+current_matrix_record=`$(call pic12f675_matrix_evidence_cmd,verify-staged)` || { \
+	rm -f "$(PIC12F675_MATRIX_STAGED)"; exit 1; \
+}; \
+if [ "$$current_matrix_record" != "$$matrix_record" ]; then \
+	echo "FAIL: PIC12F675 staged matrix record changed during qualification"; \
+	rm -f "$(PIC12F675_MATRIX_STAGED)"; exit 1; \
+fi
+endef
+
+define pic12f675_verify_staged_matrix_log_sh
+current_matrix_record=`$(call pic12f675_matrix_evidence_cmd,verify-staged)` || { \
+	rm -f "$(PIC12F675_MATRIX_STAGED)" "$$calibration_log"; exit 1; \
+}; \
+if [ "$$current_matrix_record" != "$$matrix_record" ]; then \
+	echo "FAIL: PIC12F675 staged matrix record changed during qualification"; \
+	rm -f "$(PIC12F675_MATRIX_STAGED)" "$$calibration_log"; exit 1; \
+fi
+endef
 
 # Classify the complete derived-image set in the caller's current shell. Zero
 # images remains the intentional no-XC8 skip; every nonzero subset is a hard
@@ -6104,6 +6176,78 @@ pic12f675-test-calibration: pic12f675-simcal $(PIC12F675_CAL_INJECTOR)
 	fi; \
 	echo "=== PIC12F675 calibration contract holds for all 3 variants ==="
 
+# Build and qualify exactly one retained shipping/simulator matrix before any
+# aggregate consumer runs. The private second shipping build is discarded: it
+# exists only to reject compiler nondeterminism. The calibration contract's
+# private probes independently reject injector nondeterminism. A successful
+# manifest binds all six images plus the .s/.sym sidecars consumed by stack,
+# fault, lock-step and I/O; public wrappers verify it after every lane.
+.PHONY: _pic12f675-qualify-matrix
+_pic12f675-qualify-matrix: pic12f675-simcal $(PIC12F675_MATRIX_EVIDENCE)
+	@$(pic12f675_require_trusted_make_sh); \
+	qualified=0; skipped=0; final_owned=0; witness=; calibration_log=; \
+	cleanup_qualification() { \
+		rc=$$?; \
+		if [ -n "$$witness" ] && [ -e "$$witness" ]; then \
+			chmod -R u+w "$$witness" 2>/dev/null || :; rm -rf "$$witness" || rc=1; \
+		fi; \
+		if [ -n "$$calibration_log" ] && [ -e "$$calibration_log" ]; then \
+			rm -f "$$calibration_log" || rc=1; \
+		fi; \
+		if [ $$rc -ne 0 ] || [ $$qualified -ne 1 ]; then \
+			if [ $$final_owned -eq 1 ]; then \
+				rm -f "$(PIC12F675_MATRIX_MANIFEST)" || rc=1; \
+			fi; \
+			rm -f "$(PIC12F675_MATRIX_STAGED)" || rc=1; \
+		fi; \
+		if [ $$rc -eq 0 ] && [ $$qualified -ne 1 ] && [ $$skipped -ne 1 ]; then rc=1; fi; \
+		trap - 0 1 2 15; exit $$rc; \
+	}; \
+	trap cleanup_qualification 0; \
+	trap 'exit 129' 1; trap 'exit 130' 2; trap 'exit 143' 15; \
+	rm -f "$(PIC12F675_MATRIX_MANIFEST)" "$(PIC12F675_MATRIX_STAGED)" || exit 1; \
+	set -- $(PIC12F675_HEXES) $(PIC12F675_SIMCAL_HEXES); \
+	present=0; for image in "$$@"; do \
+		[ ! -e "$$image" ] && [ ! -L "$$image" ] || present=$$((present + 1)); \
+	done; \
+	if [ $$present -eq 0 ]; then \
+		echo "no PIC12F675 shipping/simulator matrix (XC8 absent?); skipping aggregate qualification"; \
+		skipped=1; $(SKIP); \
+	fi; \
+	matrix_record=`$(call pic12f675_matrix_evidence_cmd,stage)` || exit 1; \
+	witness=`mktemp -d "$(PIC12F675_BUILD_DIR).qualify.XXXXXX"` || exit 1; \
+	if ! $(PROJECT_MAKE) --no-print-directory PIC12F675_BUILD_DIR="$$witness" \
+			pic12f675; then \
+		echo "FAIL: private PIC12F675 reproducibility matrix did not build"; exit 1; \
+	fi; \
+	if ! python3 "$(PIC12F675_MATRIX_EVIDENCE)" compare-shipping-staged \
+			--build-dir "$(PIC12F675_BUILD_DIR)" \
+			--candidate-build-dir "$$witness" --fw-base "$(FW_BASE)" \
+			--tag "$(PIC12F675_TAG)" >/dev/null; then \
+		echo "FAIL: retained PIC12F675 shipping matrix is not compiler-reproducible"; exit 1; \
+	fi; \
+	$(pic12f675_verify_staged_matrix_sh); \
+	calibration_log=`mktemp` || exit 1; calibration_rc=0; \
+	$(PROJECT_MAKE) --no-print-directory --old-file=pic12f675-simcal \
+			pic12f675-test-calibration >$$calibration_log 2>&1 || calibration_rc=$$?; \
+	$(pic12f675_verify_staged_matrix_log_sh); \
+	replay_rc=0; cat $$calibration_log || replay_rc=$$?; \
+	rm -f $$calibration_log || exit 1; \
+	if [ $$replay_rc -ne 0 ]; then exit $$replay_rc; fi; \
+	if [ $$calibration_rc -ne 0 ]; then \
+		echo "FAIL: retained PIC12F675 simulator matrix failed calibration qualification"; \
+		exit $$calibration_rc; \
+	fi; \
+	promoted_record=`$(call pic12f675_matrix_evidence_cmd,promote)` || exit 1; \
+	final_owned=1; \
+	if [ "$$promoted_record" != "$$matrix_record" ]; then \
+		echo "FAIL: promoted PIC12F675 matrix record changed"; exit 1; \
+	fi; \
+	rm -f "$(PIC12F675_MATRIX_STAGED)" || exit 1; \
+	$(pic12f675_verify_matrix_sh); \
+	qualified=1; \
+	echo "=== PIC12F675 retained matrix qualified: $$matrix_record ==="
+
 # --- PIC12F675 authoritative aggregates ---------------------------------------
 # Two aggregates, split the way both 10F32x parts split theirs, because they
 # answer different questions at different cost:
@@ -6125,9 +6269,28 @@ pic12f675-test-calibration: pic12f675-simcal $(PIC12F675_CAL_INJECTOR)
 # failure would ship a HEX different from the one the simulator lanes qualified,
 # and it is unique to this part -- neither 10F32x part derives anything.
 .PHONY: pic12f675-test
-pic12f675-test: pic12f675-test-config pic12f675-analyze pic12f675-coverage-check-fw \
-          pic12f675-test-calibration pic12f675-test-gpsim pic12f675-test-stack-bound
-	@echo "=== all PIC12F675 pre-hardware checks complete ==="
+pic12f675-test: _pic12f675-qualify-matrix
+	@$(pic12f675_require_trusted_make_sh); \
+	if [ ! -f "$(PIC12F675_MATRIX_MANIFEST)" ]; then \
+		echo "no qualified PIC12F675 matrix (XC8 absent?); skipping pre-hardware aggregate"; \
+		$(SKIP); \
+	fi; \
+	$(pic12f675_load_matrix_sh); \
+	for spec in \
+		"pic12f675-test-config|--old-file=pic12f675" \
+		"pic12f675-analyze|" \
+		"pic12f675-coverage-check-fw|" \
+		"pic12f675-test-gpsim|--old-file=pic12f675-simcal" \
+		"pic12f675-test-stack-bound|--old-file=pic12f675"; do \
+		target=$${spec%%|*}; old=$${spec#*|}; log=`mktemp` || exit 1; lane_rc=0; \
+		$(PROJECT_MAKE) --no-print-directory $$old $$target >$$log 2>&1 || lane_rc=$$?; \
+		$(pic12f675_verify_matrix_log_sh); \
+		replay_rc=0; cat $$log || replay_rc=$$?; rm -f $$log || exit 1; \
+		if [ $$lane_rc -ne 0 ]; then exit $$lane_rc; fi; \
+		if [ $$replay_rc -ne 0 ]; then exit $$replay_rc; fi; \
+	done; \
+	$(pic12f675_verify_matrix_sh); \
+	echo "=== all PIC12F675 pre-hardware checks complete: $$matrix_record ==="
 
 # Fail-closed real-HEX aggregate, structurally identical to pic10f322-test-target
 # and for the same reason: each lane below exits 0 through $(SKIP) when XC8,
@@ -6142,29 +6305,38 @@ pic12f675-test: pic12f675-test-config pic12f675-analyze pic12f675-coverage-check
 PIC12F675_TARGET_VARIANT ?= cd4053_simple
 override PIC12F675_TARGET_VARIANTS_SUPPORTED := $(CLASSIC_VARIANTS_SUPPORTED)
 .PHONY: pic12f675-test-target pic12f675-test-target-variants
-pic12f675-test-target: variant-selectors-valid
-	@set -e; \
+pic12f675-test-target: variant-selectors-valid _pic12f675-qualify-matrix
+	@$(pic12f675_require_trusted_make_sh); \
+	if [ ! -f "$(PIC12F675_MATRIX_MANIFEST)" ]; then \
+		echo "FAIL: PIC12F675 target aggregate requires a qualified image matrix"; exit 1; \
+	fi; \
+	$(pic12f675_load_matrix_sh); \
+	set -e; \
 	for spec in \
 		"pic12f675-test-fault PIC12F675_FAULT_VARIANT=$(PIC12F675_TARGET_VARIANT)|FAULT-INJECT PASS" \
 		"pic12f675-test-lockstep PIC12F675_LOCKSTEP_VARIANT=$(PIC12F675_TARGET_VARIANT)|LOCK-STEP PASS" \
 		"pic12f675-test-io PIC12F675_IO_VARIANT=$(PIC12F675_TARGET_VARIANT)|TARGET-IO PASS"; do \
-		target=$${spec%%|*}; marker=$${spec#*|}; log=`mktemp`; \
-		if ! $(MAKE) --no-print-directory $$target >$$log 2>&1; then \
-			cat $$log; rm -f $$log; exit 1; \
-		fi; \
-		cat $$log; \
+		target=$${spec%%|*}; marker=$${spec#*|}; log=`mktemp`; lane_rc=0; \
+		$(PROJECT_MAKE) --no-print-directory --old-file=pic12f675-simcal \
+			$$target >$$log 2>&1 || lane_rc=$$?; \
+		$(pic12f675_verify_matrix_log_sh); \
+		replay_rc=0; cat $$log || replay_rc=$$?; \
+		if [ $$lane_rc -ne 0 ]; then rm -f $$log; exit $$lane_rc; fi; \
+		if [ $$replay_rc -ne 0 ]; then rm -f $$log; exit $$replay_rc; fi; \
 		if ! grep -q "$$marker" $$log; then \
 			echo "FAIL: $$target did not report '$$marker' (skipped or incomplete?)"; \
 			rm -f $$log; exit 1; \
 		fi; \
 		rm -f $$log; \
-	done
-	@echo "=== PIC12F675 target fault/lock-step/I-O PASS (variant $(PIC12F675_TARGET_VARIANT)) ==="
+	done; \
+	$(pic12f675_verify_matrix_sh); \
+	echo "=== PIC12F675 target fault/lock-step/I-O PASS (variant $(PIC12F675_TARGET_VARIANT)): $$matrix_record ==="
 
 # ...and for ALL of them. Requires the exact supported set before running, so
 # "all variants passed" cannot hide an empty or incomplete matrix (§6.5).
-pic12f675-test-target-variants:
-	@if [ "$(CLASSIC_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
+pic12f675-test-target-variants: _pic12f675-qualify-matrix
+	@$(pic12f675_require_trusted_make_sh); \
+	if [ "$(CLASSIC_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
 		echo "FAIL: VARIANTS must not be empty" >&2; exit 2; \
 	fi; \
 	if [ "$(CLASSIC_VARIANTS_REQUEST_DUPLICATE)" -eq 1 ]; then \
@@ -6176,11 +6348,20 @@ pic12f675-test-target-variants:
 	if [ "$(if $(filter-out $(VARIANTS),$(PIC12F675_TARGET_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
 		echo "FAIL: VARIANTS must contain every supported name; required: $(PIC12F675_TARGET_VARIANTS_SUPPORTED)" >&2; exit 2; \
 	fi
-	@for v in $(PIC12F675_TARGET_VARIANTS_SUPPORTED); do \
+	@if [ ! -f "$(PIC12F675_MATRIX_MANIFEST)" ]; then \
+		echo "FAIL: PIC12F675 all-variant target aggregate requires a qualified image matrix"; exit 1; \
+	fi; \
+	$(pic12f675_load_matrix_sh); \
+	for v in $(PIC12F675_TARGET_VARIANTS_SUPPORTED); do \
 		echo "===================== PIC12F675 TARGET VARIANT $$v ====================="; \
-		$(MAKE) --no-print-directory PIC12F675_TARGET_VARIANT=$$v pic12f675-test-target || exit 1; \
-	done
-	@echo "=== PIC12F675 target fault/lock-step/I-O validated for all variants ==="
+		lane_rc=0; \
+		$(PROJECT_MAKE) --no-print-directory --old-file=_pic12f675-qualify-matrix \
+			PIC12F675_TARGET_VARIANT=$$v pic12f675-test-target || lane_rc=$$?; \
+		$(pic12f675_verify_matrix_sh); \
+		if [ $$lane_rc -ne 0 ]; then exit $$lane_rc; fi; \
+	done; \
+	$(pic12f675_verify_matrix_sh); \
+	echo "=== PIC12F675 target fault/lock-step/I-O validated for all variants: $$matrix_record ==="
 
 # --- PIC12F675 device programming (hardware) ----------------------------------
 # Flash ONE built variant (chosen by VARIANT, default $(VARIANT)) onto a real

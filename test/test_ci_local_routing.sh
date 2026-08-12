@@ -168,8 +168,7 @@ pic_calls=(
 	$'STRICT_TOOLS=1\tpic10f322-test-target-variants'
 	$'STRICT_TOOLS=1\tpic10f320-test'
 	$'STRICT_TOOLS=1\tpic10f320-test-target-variants'
-	$'STRICT_TOOLS=1\tpic12f675-test'
-	$'STRICT_TOOLS=1\tpic12f675-test-target-variants'
+	$'STRICT_TOOLS=1\tpic12f675-test\tpic12f675-test-target-variants'
 )
 xt_calls=(
 	$'STRICT_TOOLS=1\tattiny202-test'

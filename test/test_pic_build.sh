@@ -82,7 +82,7 @@ case "$PB_TARGET" in
 		# complete-matrix production/consumption and the hardware-programming
 		# calibration guard.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=82
+		expected_checks=86
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -232,6 +232,13 @@ case "$mode" in
 	bad-stack) write_bad_stack_hex > "$out" ;;
 	bad-depth) write_bad_depth_hex > "$out" ;;
 	hash-mismatch) write_hash_mismatch_hex > "$out" ;;
+	nondeterministic-private)
+		if [[ "$PWD" == *.qualify.* && "$out" == *-cd4053_simple.hex ]]; then
+			write_hash_mismatch_hex > "$out"
+		else
+			write_valid_hex > "$out"
+		fi
+		;;
 	eof-only) printf ':00000001FF\n' > "$out" ;;
 	trailing) printf ':0100000001FE\n:00000001FF\ntrailing garbage\n' > "$out" ;;
 	symlink)
@@ -1038,6 +1045,8 @@ if [ "$PB_TARGET" = pic12f675 ]; then
 		"$repo/test/pic/inject_calibration_word.py"
 	cp "$ROOT/test/pic/pic12f675_trim_evidence.py" \
 		"$repo/test/pic/pic12f675_trim_evidence.py"
+	cp "$ROOT/test/pic/pic12f675_matrix_evidence.py" \
+		"$repo/test/pic/pic12f675_matrix_evidence.py"
 
 	cal_shipping=()
 	cal_sim=()
@@ -1080,6 +1089,162 @@ if [ "$PB_TARGET" = pic12f675 ]; then
 			CC=true HOSTCC=true PIC12F675_BUILD_DIR="$PB_BUILD_DIR" \
 			FW_BASE="$PB_FW_BASE" PIC12F675_TAG="$PB_TAG" \
 			PIC12F675_FLASH_WORDS="$PB_FLASH_WORDS" STRICT_TOOLS=1 "$@"
+	}
+
+	matrix_injector_log="$work/pic12f675-matrix-injector.log"
+	matrix_injector="$tools/pic12f675-matrix-injector.py"
+	cat > "$matrix_injector" <<'PY'
+#!/usr/bin/env python3
+import os
+import subprocess
+import sys
+
+with open(os.environ["MATRIX_INJECTOR_LOG"], "a", encoding="ascii") as stream:
+    stream.write(" ".join(sys.argv[1:]) + "\n")
+is_probe = sys.argv[-1].endswith(".probe")
+published = os.environ.get("MATRIX_REQUIRE_UNPUBLISHED_PATH")
+staged = os.environ.get("MATRIX_REQUIRE_STAGED_PATH")
+if is_probe and published and os.path.lexists(published):
+    print("final matrix evidence was published before calibration", file=sys.stderr)
+    sys.exit(98)
+if is_probe and staged:
+    if not os.path.isfile(staged) or os.path.islink(staged):
+        print("staged matrix evidence is unavailable during calibration", file=sys.stderr)
+        sys.exit(99)
+    verify = subprocess.call([
+        sys.executable, os.environ["MATRIX_EVIDENCE_TOOL"], "verify-staged",
+        "--build-dir", os.environ["MATRIX_EVIDENCE_BUILD_DIR"],
+        "--fw-base", os.environ["MATRIX_EVIDENCE_FW_BASE"],
+        "--tag", os.environ["MATRIX_EVIDENCE_TAG"],
+    ], stdout=subprocess.DEVNULL)
+    if verify != 0:
+        print("staged matrix evidence does not verify during calibration",
+              file=sys.stderr)
+        sys.exit(99)
+result = subprocess.call(
+    [sys.executable, os.environ["REAL_CAL_INJECTOR"]] + sys.argv[1:])
+collision = os.environ.get("MATRIX_PROMOTION_COLLISION_PATH")
+if (collision
+        and sys.argv[-1].endswith("tq2_l2_5v_relay_simcal.hex.reinjected")):
+    with open(collision, "x", encoding="ascii") as stream:
+        stream.write("existing promotion destination must survive byte-for-byte")
+if (result == 0 and os.environ.get("MATRIX_INJECTOR_NONDETERMINISTIC") == "1"
+        and sys.argv[-1].endswith(".probe")):
+    with open(sys.argv[-1], "ab") as stream:
+        stream.write(b"\n")
+    retained = os.environ.get("MATRIX_INJECTOR_MUTATE_PATH")
+    if retained:
+        with open(retained, "ab") as stream:
+            stream.write(b"consumer mutation\n")
+        collision = os.environ.get("MATRIX_STAGE_FAILURE_COLLISION_PATH")
+        if collision:
+            with open(collision, "x", encoding="ascii") as stream:
+                stream.write(
+                    "existing promotion destination must survive byte-for-byte")
+sys.exit(result)
+PY
+
+	run_matrix_qualifier() {
+		MATRIX_INJECTOR_LOG="$matrix_injector_log" \
+		REAL_CAL_INJECTOR="$repo/test/pic/inject_calibration_word.py" \
+		MATRIX_INJECTOR_NONDETERMINISTIC="${MATRIX_INJECTOR_NONDETERMINISTIC:-0}" \
+		MATRIX_INJECTOR_MUTATE_PATH="${MATRIX_INJECTOR_MUTATE_PATH:-}" \
+		MATRIX_REQUIRE_UNPUBLISHED_PATH="$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json" \
+		MATRIX_REQUIRE_STAGED_PATH="$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json.staged" \
+		MATRIX_EVIDENCE_TOOL="$repo/test/pic/pic12f675_matrix_evidence.py" \
+		MATRIX_EVIDENCE_BUILD_DIR="$repo/$PB_BUILD_DIR" \
+		MATRIX_EVIDENCE_FW_BASE="$PB_FW_BASE" MATRIX_EVIDENCE_TAG="$PB_TAG" \
+		MATRIX_PROMOTION_COLLISION_PATH="${MATRIX_PROMOTION_COLLISION_PATH:-}" \
+		MATRIX_STAGE_FAILURE_COLLISION_PATH="${MATRIX_STAGE_FAILURE_COLLISION_PATH:-}" \
+		FAKE_XC8_PIC12F675_MODE=shipping \
+		FAKE_XC8_MODE="${MATRIX_XC8_MODE:-pass}" \
+		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+			make --no-print-directory -C "$repo" _pic12f675-qualify-matrix \
+			CC=true HOSTCC=true PIC_CC="$tools/xc8" \
+			PIC12F675_BUILD_DIR="$PB_BUILD_DIR" \
+			FW_BASE="$PB_FW_BASE" PIC12F675_TAG="$PB_TAG" \
+			PIC12F675_FLASH_WORDS="$PB_FLASH_WORDS" \
+			PIC12F675_CAL_INJECTOR="$matrix_injector" STRICT_TOOLS=1
+	}
+
+	matrix_lane_log="$work/pic12f675-matrix-lanes.log"
+	matrix_lane_make="$tools/pic12f675-matrix-lane-make"
+	cat > "$matrix_lane_make" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${MATRIX_ENTER_REAL_MAKE:-0}" -eq 1 ]; then
+	export MATRIX_ENTER_REAL_MAKE=0
+	exec -a "$0" "${REAL_PROJECT_MAKE:?}" "$@"
+fi
+lane=
+	for arg in "$@"; do
+		case "$arg" in
+			pic12f675-test-fault) lane=fault ;;
+			pic12f675-test-lockstep) lane=lockstep ;;
+			pic12f675-test-io) lane=io ;;
+			pic12f675-test-config|pic12f675-analyze|pic12f675-coverage-check-fw|\
+			pic12f675-test-gpsim|pic12f675-test-stack-bound) lane=prehardware ;;
+			pic12f675-test-target) lane=target ;;
+		esac
+		done
+	if [ -z "$lane" ]; then
+		exec -a "$0" "${REAL_PROJECT_MAKE:?}" "$@"
+	fi
+	printf '%s\n' "$*" >> "${MATRIX_LANE_LOG:?}"
+	case "$lane" in
+		fault) printf 'FAULT-INJECT PASS: 37 checks, 0 failures\n' ;;
+		lockstep) printf 'LOCK-STEP PASS: 42 checks, 0 failures\n' ;;
+		io) printf 'TARGET-IO PASS: 42 checks, 0 failures\n' ;;
+		prehardware) printf 'PRE-HARDWARE COMPONENT PASS\n' ;;
+		target) printf 'TARGET AGGREGATE PASS\n' ;;
+	*) printf 'unexpected matrix lane command: %s\n' "$*" >&2; exit 2 ;;
+esac
+if [ "$lane" = "${MATRIX_MUTATE_LANE:-none}" ]; then
+	printf 'consumer mutation\n' >> "${MATRIX_MUTATE_PATH:?}"
+fi
+if [ "$lane" = "${MATRIX_FAIL_LANE:-none}" ]; then
+	exit 17
+fi
+EOF
+	chmod 750 "$matrix_lane_make"
+
+	run_matrix_target() {
+		REAL_PROJECT_MAKE="$(command -v make)" MATRIX_ENTER_REAL_MAKE=1 \
+		MATRIX_LANE_LOG="$matrix_lane_log" \
+		MATRIX_MUTATE_LANE="${MATRIX_MUTATE_LANE:-none}" \
+		MATRIX_MUTATE_PATH="${MATRIX_MUTATE_PATH:-}" \
+		MATRIX_FAIL_LANE="${MATRIX_FAIL_LANE:-none}" \
+		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+			"$matrix_lane_make" --no-print-directory -C "$repo" \
+			--old-file=_pic12f675-qualify-matrix pic12f675-test-target \
+			MAKE=true PROJECT_MAKE=true CC=true HOSTCC=true \
+			PIC12F675_BUILD_DIR="$PB_BUILD_DIR" \
+			FW_BASE="$PB_FW_BASE" PIC12F675_TAG="$PB_TAG" \
+			PIC12F675_TARGET_VARIANT=cd4053_simple STRICT_TOOLS=1
+	}
+
+	run_matrix_combined() {
+		REAL_PROJECT_MAKE="$(command -v make)" MATRIX_ENTER_REAL_MAKE=1 \
+		MATRIX_INJECTOR_LOG="$matrix_injector_log" \
+		REAL_CAL_INJECTOR="$repo/test/pic/inject_calibration_word.py" \
+		MATRIX_INJECTOR_NONDETERMINISTIC=0 \
+		MATRIX_REQUIRE_UNPUBLISHED_PATH="$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json" \
+		MATRIX_REQUIRE_STAGED_PATH="$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json.staged" \
+		MATRIX_EVIDENCE_TOOL="$repo/test/pic/pic12f675_matrix_evidence.py" \
+		MATRIX_EVIDENCE_BUILD_DIR="$repo/$PB_BUILD_DIR" \
+		MATRIX_EVIDENCE_FW_BASE="$PB_FW_BASE" MATRIX_EVIDENCE_TAG="$PB_TAG" \
+		MATRIX_LANE_LOG="$matrix_lane_log" \
+		MATRIX_MUTATE_LANE=none MATRIX_MUTATE_PATH= \
+		FAKE_XC8_PIC12F675_MODE=shipping FAKE_XC8_MODE=pass \
+		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+			"$matrix_lane_make" --no-print-directory -C "$repo" \
+			pic12f675-test pic12f675-test-target-variants \
+			MAKE=true PROJECT_MAKE=true CC=true HOSTCC=true \
+			PIC_CC="$tools/xc8" \
+			PIC12F675_BUILD_DIR="$PB_BUILD_DIR" \
+			FW_BASE="$PB_FW_BASE" PIC12F675_TAG="$PB_TAG" \
+			PIC12F675_FLASH_WORDS="$PB_FLASH_WORDS" \
+			PIC12F675_CAL_INJECTOR="$matrix_injector" STRICT_TOOLS=1
 	}
 
 	program_log="$work/pic12f675-program.log"
@@ -1334,6 +1499,193 @@ EOF
 				"$variant" "$cal_output" >&2; exit 1; }
 	done
 	checks=$((checks + 1))
+
+	# One combined Make graph qualifies the retained matrix exactly once, then
+	# both aggregates consume it without another producer call. The logged
+	# recursive commands also pin every load-bearing --old-file edge.
+	: > "$xc8_log"
+	: > "$matrix_injector_log"
+	: > "$matrix_lane_log"
+	matrix_output=$(run_matrix_combined)
+	matrix_record=$(python3 "$repo/test/pic/pic12f675_matrix_evidence.py" verify \
+		--build-dir "$repo/$PB_BUILD_DIR" --fw-base "$PB_FW_BASE" --tag "$PB_TAG")
+	[[ "$matrix_output" == *"retained matrix qualified: $matrix_record"* \
+		&& "$matrix_output" == *"all PIC12F675 pre-hardware checks complete: $matrix_record"* \
+		&& "$matrix_output" == *"validated for all variants: $matrix_record"* \
+		&& -f "$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json" \
+		&& ! -e "$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json.staged" ]] \
+		|| { printf 'FAIL: combined PIC12F675 graph omitted retained hash evidence: %s\n' \
+			"$matrix_output" >&2; exit 1; }
+	[ "$(wc -l < "$xc8_log")" -eq 6 ] \
+		|| { printf 'FAIL: combined PIC12F675 graph ran XC8 %s times, expected 6\n' \
+			"$(wc -l < "$xc8_log")" >&2; exit 1; }
+	[[ "$(wc -l < "$matrix_injector_log")" -eq 10 \
+		&& "$(grep -c -- '\.probe' "$matrix_injector_log")" -eq 3 ]] \
+		|| { printf 'FAIL: combined PIC12F675 graph changed the exact retained/calibration injection sequence:\n' >&2; \
+			cat "$matrix_injector_log" >&2; exit 1; }
+	for image in $PB_MATRIX_IMAGES; do
+		[ "$(logged_command_count "$xc8_log" "$image")" -eq 2 ] \
+			|| { printf 'FAIL: retained/private qualification did not compile %s exactly twice\n' \
+				"$image" >&2; exit 1; }
+	done
+	mapfile -t matrix_calls < "$matrix_lane_log"
+	expected_matrix_calls=(
+		'--no-print-directory --old-file=pic12f675 pic12f675-test-config'
+		'--no-print-directory pic12f675-analyze'
+		'--no-print-directory pic12f675-coverage-check-fw'
+		'--no-print-directory --old-file=pic12f675-simcal pic12f675-test-gpsim'
+		'--no-print-directory --old-file=pic12f675 pic12f675-test-stack-bound'
+		'--no-print-directory --old-file=_pic12f675-qualify-matrix PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target'
+		'--no-print-directory --old-file=_pic12f675-qualify-matrix PIC12F675_TARGET_VARIANT=cd4053_with_mute pic12f675-test-target'
+		'--no-print-directory --old-file=_pic12f675-qualify-matrix PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target'
+	)
+	[ "${#matrix_calls[@]}" -eq "${#expected_matrix_calls[@]}" ] \
+		|| { printf 'FAIL: combined PIC12F675 consumer command count changed\n' >&2; exit 1; }
+	for i in "${!expected_matrix_calls[@]}"; do
+		[[ "${matrix_calls[$i]}" == "${expected_matrix_calls[$i]}" ]] \
+			|| { printf 'FAIL: combined PIC12F675 consumer command %s changed: %s\n' \
+				"$i" "${matrix_calls[$i]}" >&2; exit 1; }
+	done
+	xc8_before_consumer=$(wc -l < "$xc8_log")
+	: > "$matrix_lane_log"
+	matrix_target_output=$(run_matrix_target)
+	mapfile -t matrix_calls < "$matrix_lane_log"
+	expected_matrix_calls=(
+		'--no-print-directory --old-file=pic12f675-simcal pic12f675-test-fault PIC12F675_FAULT_VARIANT=cd4053_simple'
+		'--no-print-directory --old-file=pic12f675-simcal pic12f675-test-lockstep PIC12F675_LOCKSTEP_VARIANT=cd4053_simple'
+		'--no-print-directory --old-file=pic12f675-simcal pic12f675-test-io PIC12F675_IO_VARIANT=cd4053_simple'
+	)
+	[[ "$matrix_target_output" == *"target fault/lock-step/I-O PASS"* \
+		&& "$matrix_target_output" == *"$matrix_record"* \
+		&& "${#matrix_calls[@]}" -eq "${#expected_matrix_calls[@]}" \
+		&& "$(wc -l < "$xc8_log")" -eq "$xc8_before_consumer" ]] \
+		|| { printf 'FAIL: PIC12F675 target consumers did not retain one hash-bound matrix: %s\n' \
+			"$matrix_target_output" >&2; exit 1; }
+	for i in "${!expected_matrix_calls[@]}"; do
+		[[ "${matrix_calls[$i]}" == "${expected_matrix_calls[$i]}" ]] \
+			|| { printf 'FAIL: PIC12F675 target consumer command %s changed: %s\n' \
+				"$i" "${matrix_calls[$i]}" >&2; exit 1; }
+	done
+	matrix_sentinel='existing promotion destination must survive byte-for-byte'
+	if matrix_output=$(MATRIX_PROMOTION_COLLISION_PATH="$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json" \
+			run_matrix_qualifier 2>&1); then
+		printf 'FAIL: PIC12F675 qualifier overwrote a colliding promotion destination\n' >&2
+		exit 1
+	fi
+	[[ "$matrix_output" == *"matrix evidence already exists"* \
+		&& "$(<"$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json")" == "$matrix_sentinel" \
+		&& ! -e "$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json.staged" ]] \
+		|| { printf 'FAIL: promotion collision did not preserve existing evidence exactly: %s\n' \
+			"$matrix_output" >&2; exit 1; }
+	rm "$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json"
+	run_matrix_qualifier >/dev/null
+	matrix_record=$(python3 "$repo/test/pic/pic12f675_matrix_evidence.py" verify \
+		--build-dir "$repo/$PB_BUILD_DIR" --fw-base "$PB_FW_BASE" --tag "$PB_TAG")
+	matrix_alias="$work/pic12f675-matrix-alias"
+	ln -s "$repo/$PB_BUILD_DIR" "$matrix_alias"
+	if matrix_output=$(python3 "$repo/test/pic/pic12f675_matrix_evidence.py" verify \
+			--build-dir "$matrix_alias" --fw-base "$PB_FW_BASE" --tag "$PB_TAG" 2>&1); then
+		printf 'FAIL: PIC12F675 matrix oracle accepted a symlinked build root\n' >&2
+		exit 1
+	fi
+	[[ "$matrix_output" == *"build directory is not a non-symlink directory"* ]] \
+		|| { printf 'FAIL: symlinked matrix root failed for the wrong reason: %s\n' \
+			"$matrix_output" >&2; exit 1; }
+	mv "$repo/$PB_BUILD_DIR/simcal" "$repo/$PB_BUILD_DIR/simcal.real"
+	ln -s simcal.real "$repo/$PB_BUILD_DIR/simcal"
+	if matrix_output=$(python3 "$repo/test/pic/pic12f675_matrix_evidence.py" verify \
+			--build-dir "$repo/$PB_BUILD_DIR" --fw-base "$PB_FW_BASE" --tag "$PB_TAG" 2>&1); then
+		printf 'FAIL: PIC12F675 matrix oracle accepted a symlinked simcal root\n' >&2
+		exit 1
+	fi
+	[[ "$matrix_output" == *"simcal directory is not a non-symlink directory"* ]] \
+		|| { printf 'FAIL: symlinked simcal root failed for the wrong reason: %s\n' \
+			"$matrix_output" >&2; exit 1; }
+	rm "$repo/$PB_BUILD_DIR/simcal"
+	mv "$repo/$PB_BUILD_DIR/simcal.real" "$repo/$PB_BUILD_DIR/simcal"
+	printf 'pre-lane mutation\n' >> "${cal_shipping[0]}"
+	: > "$matrix_lane_log"
+	if matrix_output=$(run_matrix_target 2>&1); then
+		printf 'FAIL: PIC12F675 aggregate accepted stale initial matrix evidence\n' >&2
+		exit 1
+	fi
+	[[ "$matrix_output" == *"qualified matrix artifact changed: shipping_cd4053_simple"* \
+		&& ! -s "$matrix_lane_log" \
+		&& ! -e "$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json" ]] \
+		|| { printf 'FAIL: stale initial matrix evidence was not invalidated: %s\n' \
+			"$matrix_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# A compiler that changes one private witness image must fail qualification
+	# before any consumer and invalidate the manifest.
+	: > "$matrix_lane_log"
+	if matrix_output=$(MATRIX_XC8_MODE=nondeterministic-private \
+			run_matrix_qualifier 2>&1); then
+		printf 'FAIL: PIC12F675 qualifier accepted nondeterministic compiler output\n' >&2
+		exit 1
+	fi
+	[[ "$matrix_output" == *"private compiler witness changed image shipping_cd4053_simple"* \
+		&& ! -e "$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json" \
+		&& ! -e "$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json.staged" \
+		&& ! -s "$matrix_lane_log" ]] \
+		|| { printf 'FAIL: nondeterministic compiler failed for the wrong reason: %s\n' \
+			"$matrix_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# The retained derivation and calibration probe must be byte-identical. First
+	# reject probe-only nondeterminism while the staged matrix remains unchanged.
+	if matrix_output=$(MATRIX_INJECTOR_NONDETERMINISTIC=1 \
+			run_matrix_qualifier 2>&1); then
+		printf 'FAIL: PIC12F675 qualifier accepted nondeterministic injection\n' >&2
+		exit 1
+	fi
+	[[ "$matrix_output" == *"injection is not deterministic"* \
+		&& ! -e "$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json" \
+		&& ! -e "$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json.staged" ]] \
+		|| { printf 'FAIL: nondeterministic injector failed for the wrong reason: %s\n' \
+			"$matrix_output" >&2; exit 1; }
+
+	# Also mutate a retained simulator image while that failing calibration runs.
+	# The post-failure verifier must reject it before replaying the lane output.
+	if matrix_output=$(MATRIX_INJECTOR_NONDETERMINISTIC=1 \
+			MATRIX_INJECTOR_MUTATE_PATH="${cal_sim[0]}" \
+			MATRIX_STAGE_FAILURE_COLLISION_PATH="$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json" \
+			run_matrix_qualifier 2>&1); then
+		printf 'FAIL: PIC12F675 qualifier accepted nondeterministic injection\n' >&2
+		exit 1
+	fi
+	[[ "$matrix_output" == *"qualified matrix artifact changed: simcal_cd4053_simple"* \
+		&& "$matrix_output" != *"injection is not deterministic"* \
+		&& "$(<"$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json")" \
+			== 'existing promotion destination must survive byte-for-byte' \
+		&& ! -e "$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json.staged" ]] \
+		|| { printf 'FAIL: failed calibration did not recheck its retained matrix: %s\n' \
+			"$matrix_output" >&2; exit 1; }
+	rm "$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json"
+	checks=$((checks + 1))
+
+	# Requalify, then let the first failing fake consumer alter a retained shipping
+	# image. Verification must run despite the lane failure, stop lock-step/I/O,
+	# and remove evidence that no longer describes the bytes on disk.
+	: > "$matrix_lane_log"
+	run_matrix_qualifier >/dev/null
+	mutated_matrix_image="${cal_shipping[0]}"
+	if matrix_output=$(MATRIX_MUTATE_LANE=fault MATRIX_FAIL_LANE=fault \
+		MATRIX_MUTATE_PATH="$mutated_matrix_image" run_matrix_target 2>&1); then
+		printf 'FAIL: PIC12F675 aggregate accepted a consumer-mutated matrix\n' >&2
+		exit 1
+	fi
+	[[ "$matrix_output" == *"qualified matrix artifact changed: shipping_cd4053_simple"* \
+		&& "$matrix_output" != *"FAULT-INJECT PASS"* \
+		&& "$(wc -l < "$matrix_lane_log")" -eq 1 \
+		&& ! -e "$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json" ]] \
+		|| { printf 'FAIL: consumer matrix mutation failed for the wrong reason: %s\n' \
+			"$matrix_output" >&2; exit 1; }
+	checks=$((checks + 1))
+	# Restore a coherent retained fixture for the pre-existing programming and
+	# simcal publication probes below; the mutation check intentionally left one
+	# shipping file malformed after EOF.
+	run_matrix_qualifier >/dev/null
 
 	program_variant=cd4053_simple
 	program_source="$work/program-$program_variant.hex"
