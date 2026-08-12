@@ -37,6 +37,7 @@ trap 'rm -rf "$work"' EXIT
 repo="$work/repo"
 tools="$work/tools"
 log="$work/compile.log"
+mklog="$work/make.log"
 checks=0
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
@@ -162,14 +163,16 @@ printf 'Program space used (42)\n'
 EOF
 chmod 755 "$tools/cxx" "$tools/pkg-config" "$tools/timing-python" "$tools/xc8"
 
-# build <target> <var=value...> -- one Make invocation against the scratch repo
+# build <target> <var=value...> -- one Make invocation against the scratch repo.
+# Combined output lands in $mklog so the skip/strict checks below can read the
+# recipe's own diagnostic instead of inferring it from an exit status.
 build() {
 	local target=$1; shift
 	(
 		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKE
 		PATH="$tools:$PATH" FAKE_CXX_LOG="$log" \
 		_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" \
-			"${MAKE_CMD[@]}" --no-print-directory -C "$repo" "$@" "$target" >/dev/null 2>&1
+			"${MAKE_CMD[@]}" --no-print-directory -C "$repo" "$@" "$target" >"$mklog" 2>&1
 	)
 }
 
@@ -270,22 +273,62 @@ done
 
 # A zero-XC8 skip must not leave a stale binary that no longer reflects the
 # requested duration/variant.
+#
+# STRICT_TOOLS is PINNED on the command line for every check from here down,
+# rather than inherited. It is exported by scripts/ci-local.sh and by the
+# release gates, and it is precisely what decides whether a missing-tool
+# condition skips or fails -- so an unpinned invocation measures the runner's
+# environment instead of the rule. Both settings are asserted, in that order.
 printf 'stale soak binary\n' > "$repo/test/pic/test_soak_pic12f675"
 rm -rf "$repo/build_pic12f675"
-build test/pic/test_soak_pic12f675 PIC_SOAK_CXX="$tools/cxx" \
+build test/pic/test_soak_pic12f675 STRICT_TOOLS= PIC_SOAK_CXX="$tools/cxx" \
 	PIC_CC="$tools/missing-xc8" PIC12F675_PYTHON="$tools/missing-python" \
 	PIC12F675_SOAK_DURATION_MS=70000 \
-	|| fail "PIC12F675: zero-XC8 direct target did not skip cleanly"
+	|| fail "PIC12F675: zero-XC8 direct target did not skip cleanly: $(cat "$mklog")"
+grep -q 'skipping PIC12F675 soak build' "$mklog" \
+	|| fail "PIC12F675: zero-XC8 direct target exited 0 without taking the" \
+		"documented skip: $(cat "$mklog")"
 [ ! -e "$repo/test/pic/test_soak_pic12f675" ] \
 	|| fail "PIC12F675: zero-XC8 direct target retained a stale soak binary"
 checks=$((checks + 1))
 
-# Selector validation dominates both the producer and skip paths.
-if build test/pic/test_soak_pic12f675 PIC_SOAK_CXX="$tools/cxx" \
+# The same condition under STRICT_TOOLS=1 -- what CI and the release gates run --
+# must fail closed instead, and must not compile a binary on the way out.
+#
+# Nothing is asserted here about the stale file. Under STRICT_TOOLS=1 the
+# failure lands in the PREREQUISITE ($(PIC12F675_SOAK_BIN) requires
+# _pic12f675-build-soak, which requires the XC8 build), so the soak rule's own
+# recipe -- the one carrying the `rm -f` scrub the skip path above relies on --
+# never runs at all. Make leaving existing artifacts alone when a prerequisite
+# fails is correct, and the caller is told the build is RED; the hazard this
+# fixture guards is a stale binary surviving a build that reported SUCCESS.
+printf 'stale soak binary\n' > "$repo/test/pic/test_soak_pic12f675"
+rm -rf "$repo/build_pic12f675"
+before=$(compiles)
+if build test/pic/test_soak_pic12f675 STRICT_TOOLS=1 PIC_SOAK_CXX="$tools/cxx" \
+		PIC_CC="$tools/missing-xc8" PIC12F675_PYTHON="$tools/missing-python" \
+		PIC12F675_SOAK_DURATION_MS=70000; then
+	fail "PIC12F675: zero-XC8 direct target skipped under STRICT_TOOLS=1"
+fi
+grep -q 'STRICT_TOOLS=1:' "$mklog" \
+	|| fail "PIC12F675: strict zero-XC8 failure reported the wrong result:" \
+		"$(cat "$mklog")"
+[ "$(compiles)" -eq "$before" ] \
+	|| fail "PIC12F675: strict zero-XC8 failure still reached the soak compiler"
+rm -f "$repo/test/pic/test_soak_pic12f675"
+checks=$((checks + 1))
+
+# Selector validation dominates both the producer and skip paths. Pinned to the
+# skipping setting: under STRICT_TOOLS=1 the missing compiler alone fails the
+# build, and this check would pass without the selector ever being consulted.
+if build test/pic/test_soak_pic12f675 STRICT_TOOLS= PIC_SOAK_CXX="$tools/cxx" \
 		PIC_CC="$tools/missing-xc8" PIC12F675_PYTHON="$tools/missing-python" \
 		PIC12F675_SOAK_VARIANT=unknown; then
 	fail "PIC12F675: direct binary target accepted an invalid variant"
 fi
+grep -q 'PIC12F675_SOAK_VARIANT=unknown is not supported' "$mklog" \
+	|| fail "PIC12F675: invalid variant was rejected for the wrong reason:" \
+		"$(cat "$mklog")"
 checks=$((checks + 1))
 
 # --- the three chips must not share one binary -------------------------------
