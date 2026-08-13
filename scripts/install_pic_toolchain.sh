@@ -71,7 +71,7 @@ sudo unzip -q -o "$dfp_pack" -d "$XC8_DFP_ROOT"
 
 xc8="$XC8_DIR/bin/xc8-cc"
 [ -x "$xc8" ] || die "XC8 installation did not create $xc8"
-for device in pic10f322 pic10f320; do
+for device in pic10f322 pic10f320 pic12f675; do
     header="$XC8_DFP_ROOT/xc8/pic/include/proc/${device}.h"
     [ -f "$header" ] || die "DFP installation did not create $header"
 done

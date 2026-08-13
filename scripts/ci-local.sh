@@ -72,8 +72,8 @@
 #     --skip-pic     skip the PIC (XC8/gpsim) job -- ALL THREE parts, 10F322,
 #                    10F320 and 12F675, since they share one toolchain and one
 #                    CI job; ONLY if you lack that toolchain. Push mode still
-#                    runs host/AVR mutation strictly but permits unavailable PIC
-#                    mutants of ANY of them to be reported skipped instead of
+#                    runs host/AVR and ATtiny202 mutation strictly but permits
+#                    unavailable PIC mutants to be reported skipped instead of
 #                    failing; this no longer mirrors CI, so it warns.
 #                    NOTE: it does not skip the PIC10F320 HOST lanes -- those
 #                    need only a host compiler and run inside `make test` /
@@ -250,10 +250,10 @@ trap on_exit EXIT
 # defaults; an exported PIC_CC / PIC_DFP / PIC10F320_CC / PIC10F320_DFP /
 # PIC_SOAK_GPSIM_INC wins (they are ?= in the Makefile).
 #
-# The two chips are checked through their OWN variables rather than assuming
+# The two variable pairs are checked independently rather than assuming
 # PIC10F320_* still tracks PIC_*: the whole point of the separate pair (merge plan
-# §5.6) is that one chip can be re-pinned, and a checker that reads only PIC_*
-# would then assert the wrong installation and pass while the 320 lane skipped.
+# §5.6) is that the 320 can be re-pinned, and a checker that reads only PIC_*
+# would then assert the wrong installation and pass while that lane skipped.
 assert_pic_toolchain() {
 	# Every print-<VAR> query in this file passes --no-print-directory, and -s
 	# does not imply it: Make enables -w in a sub-make and propagates a literal
@@ -278,11 +278,11 @@ assert_pic_toolchain() {
 	[ -f "$pic_dfp/pic/include/proc/pic12f675.h" ]    || missing+=("PIC12F675 device header under $pic_dfp  (export PIC_DFP=...)")
 	command -v gpsim >/dev/null 2>&1                  || missing+=("gpsim  (apt: gpsim)")
 	command -v cppcheck >/dev/null 2>&1               || missing+=("cppcheck  (apt: cppcheck)")
-	command -v c++ >/dev/null 2>&1                    || missing+=("c++  (apt: g++; pic10f322-test-target-variants)")
-	[ -f "$gpsim_inc/sim_context.h" ]                 || missing+=("libgpsim headers at $gpsim_inc  (apt: gpsim-dev; pic10f322-test-target-variants)")
-	pkg-config --exists glib-2.0 2>/dev/null          || missing+=("glib-2.0  (apt: libglib2.0-dev; pic10f322-test-target-variants)")
+	command -v c++ >/dev/null 2>&1                    || missing+=("c++  (apt: g++; PIC target aggregates)")
+	[ -f "$gpsim_inc/sim_context.h" ]                 || missing+=("libgpsim headers at $gpsim_inc  (apt: gpsim-dev; PIC target aggregates)")
+	pkg-config --exists glib-2.0 2>/dev/null          || missing+=("glib-2.0  (apt: libglib2.0-dev; PIC target aggregates)")
 	if [ "${#missing[@]}" -gt 0 ]; then
-		log "PIC toolchain incomplete -- the pic/pic10f320/pic12f675 targets would silently SKIP, not fail:"
+		log "PIC toolchain incomplete -- the pic10f322/pic10f320/pic12f675 targets would silently SKIP, not fail:"
 		for m in "${missing[@]}"; do log "  - $m"; done
 		die "install the above (see TOOLCHAIN.adoc), or --skip-pic (no longer mirrors CI)."
 	fi
@@ -535,13 +535,17 @@ fi
 if [ "$PR_MODE" -eq 1 ]; then
 	run_step "verify job: make test" make test
 else
-	# test-long contains mutation testing. Keep every host/AVR optional gate under
-	# STRICT_TOOLS=1, but honor either explicit target-toolchain skip by selecting
-	# the mutation driver's explicitly partial mode; its summary still reports
-	# PIC and ATtiny202 skips separately.
-	if [ "$SKIP_PIC" -eq 1 ] || [ "$SKIP_ATTINY202" -eq 1 ]; then
+	# test-long contains mutation testing. Keep every unskipped substrate strict,
+	# and authorize only the target toolchain(s) the caller explicitly skipped.
+	if [ "$SKIP_PIC" -eq 1 ] && [ "$SKIP_ATTINY202" -eq 1 ]; then
 		run_step "verify + stress: make test-long (skipped-target mutations may skip)" \
-			make test-long MUTATION_ALLOW_SKIP=1
+			make test-long MUTATION_ALLOW_SKIP=PIC,ATtiny202
+	elif [ "$SKIP_PIC" -eq 1 ]; then
+		run_step "verify + stress: make test-long (PIC mutations may skip)" \
+			make test-long MUTATION_ALLOW_SKIP=PIC
+	elif [ "$SKIP_ATTINY202" -eq 1 ]; then
+		run_step "verify + stress: make test-long (ATtiny202 mutations may skip)" \
+			make test-long MUTATION_ALLOW_SKIP=ATtiny202
 	else
 		run_step "verify + stress: make test-long" \
 			make test-long MUTATION_ALLOW_SKIP=0
@@ -561,9 +565,14 @@ done
 printf '  %s%-44s%s %ss\n' "$BOLD" "total" "$RST" "$total" >&2
 log ""
 if [ "$SKIP_PIC" -eq 1 ]; then
-	warn "PIC job was skipped (10F322 AND 10F320) -- CI will still run both. Push with that in mind."
+	warn "PIC job was skipped (10F322, 10F320, and 12F675) -- CI will still run all three. Push with that in mind."
 fi
 if [ "$SKIP_ATTINY202" -eq 1 ]; then
 	warn "ATtiny202 job was skipped -- CI will still run it. Push with that in mind."
 fi
-ok "Local CI reproduction complete. Safe to push."
+if [ "$SKIP_PIC" -eq 1 ] || [ "$SKIP_ATTINY202" -eq 1 ] \
+		|| [ "$DO_CLEAN" -eq 0 ]; then
+	ok "Requested partial local CI run complete. This was not a full push reproduction."
+else
+	ok "Local CI reproduction complete. Safe to push."
+fi

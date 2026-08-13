@@ -146,7 +146,7 @@ jobs:
   # return-stack prerequisites fail closed. The "Assert PIC toolchain present"
   # step fails loud so a broken install can never masquerade as a pass;
   # the cache is only SAVED after that assert, so a half-baked install is never
-  # cached. Both device headers are asserted: the DFP ships both parts, but a
+  # cached. All three device headers are asserted: the DFP ships all three, but a
   # truncated unzip could leave one behind.
   #
   # NOTE: confirm the XC8 download URL and the unattended-installer flags
@@ -222,7 +222,7 @@ jobs:
           echo "gpsim:"  && (gpsim --version 2>&1 | head -1 || true)
           echo "cppcheck:" && cppcheck --version
 
-      - name: PIC pre-hardware gate
+      - name: PIC10F322 pre-hardware gate (make pic10f322-test)
         # STRICT_TOOLS=1: the assert step above proved XC8/DFP/gpsim are present,
         # so the pic10f322-test sub-gates must run, not skip. (Consistent with that assert.)
         run: |
@@ -233,7 +233,7 @@ jobs:
       # Fail-closed target aggregate (libgpsim), every variant. The aggregate
       # itself requires explicit PASS sentinels from fault, lock-step, and I/O;
       # a silent skip or partial run is therefore a failure.
-      - name: PIC target aggregate (make pic10f322-test-target-variants)
+      - name: PIC10F322 target aggregate (make pic10f322-test-target-variants)
         run: |
           make pic10f322-test-target-variants STRICT_TOOLS=1 \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \

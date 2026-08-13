@@ -463,7 +463,7 @@ below so a green gate means every PIC layer actually ran.
 | Release provenance contract | `test-release-provenance` | Final images are rechecked immediately before staging, including a final classic-AVR HEX digest regenerated from the validated ELFs and a post-copy comparison that dominates `SHA256SUMS`. Exact rename/change evidence compares against baseline checksum bytes whose detached signature first verifies against the pinned release key. Modified manifests and missing, empty, symlinked, malformed, or wrong-key signatures fail before any baseline hash is parsed. Tag CI independently regenerates applicable evidence from its clean-build image paths, requires a byte-identical committed report, and publishes the digest-rechecked frozen copy. | Bash + GnuPG + isolated release fixtures |
 | Release history/signature contract | `test-release-history` | The tag event must peel to an artifact-only, single-parent child of the exact qualified source. `SHA256SUMS.asc` and the exact remote annotated tag must verify against the pinned full-fingerprint key in an isolated keyring; altered bytes, missing/malformed/wrong-key signatures, lightweight/unsigned/same-target-replaced tags, and moved tags are rejected immediately before publication. | Bash + GnuPG + scratch Git repositories |
 | yasimavr venv fetch safety | `test-fetch-yasimavr` | Caller-selected destinations are canonicalized and cannot name roots, symlinks, files, or unstamped directories. Offline fake tools prove failed builds preserve the old owned venv and only a fully verified sibling tree is renamed into place. | Bash + synthetic toolchain |
-| External supply-chain integrity | `test-supply-chain` | XC8 and PIC DFP bytes must match reviewed hashes before `sudo`; restored ATtiny_DFP files are re-hashed; yasimavr dependencies are wheel/hash-locked and built without dependency resolution; both workflows use one installer and hash-sensitive cache keys. | Bash + synthetic downloads/toolchains |
+| External supply-chain integrity | `test-supply-chain` | XC8 and PIC DFP bytes must match reviewed hashes before `sudo`; installation must produce all three required PIC device headers; restored ATtiny_DFP files are re-hashed; yasimavr dependencies are wheel/hash-locked and built without dependency resolution; both workflows use one installer and hash-sensitive cache keys. | Bash + synthetic downloads/toolchains |
 
 `pic10f322-test-gpsim` now samples one non-settled point, `PRESS1_EARLY`, roughly
 6 ms (3,000 instruction cycles) after the first press edge. A correct 1 ms tick
@@ -482,10 +482,9 @@ variant matrix before starting its first target, so an empty, malformed, or
 incomplete matrix cannot report an all-variants PASS or leave a partial run.
 
 Both of this part's aggregates run in CI's shared `pic` job and in
-`scripts/ci-local.sh`, and `test-workflow-syntax` compares the two files'
-per-part lane sets in both directions — the job-list check above is at job
-granularity, and one job now carries three parts, so a part could otherwise be
-dropped from either side with every other gate green.
+`scripts/ci-local.sh`. `test-workflow-syntax` independently pins all six required
+PIC aggregate goals, their five command groupings, strict/tool arguments,
+enabled state, uniqueness, and the four downstream `needs: pic` edges.
 
 `pic12f675-test-target-variants` is the same gate for that part, built from the
 same two regressions above, and `pic12f675-test` is its pre-hardware aggregate:
@@ -651,15 +650,16 @@ failing.
 libgpsim, plus ATtiny202 mutants whose kill targets need the vendored ATtiny_DFP
 and the patched yasimavr venv. A local host without those tools may run an
 explicitly partial mutation suite with `MUTATION_ALLOW_SKIP=1`; that is the
-non-strict default so development on one substrate stays practical.
+non-strict default so development on one substrate stays practical. Selective
+partial runs use `MUTATION_ALLOW_SKIP=PIC`, `ATtiny202`, or the canonical combined
+value `PIC,ATtiny202`.
 `STRICT_TOOLS=1` changes the default to fail closed, and full-tool CI also pins
 `MUTATION_ALLOW_SKIP=0`. An explicit `MUTATION_ALLOW_SKIP` value takes
-precedence: `ci-local.sh --skip-pic` retains strict host/AVR gates but
-deliberately passes `1` for its partial mutation run, as does
-`--skip-attiny202`; specifying either or both target-toolchain skips must not
-make the intentionally partial `test-long` fail closed. The summary counts PIC
-and ATtiny202 skips separately, so a partial run always says which substrate
-went unexercised rather than reporting one anonymous number.
+precedence: `ci-local.sh --skip-pic` authorizes only PIC mutation skips, while
+`--skip-attiny202` authorizes only ATtiny202 skips; combining the flags authorizes
+both. Thus skipping one toolchain cannot hide loss of the other substrate. The
+summary counts PIC and ATtiny202 skips separately, so a partial run always says
+which substrate went unexercised rather than reporting one anonymous number.
 
 The PIC mutation set includes target-level faults for the new coverage: collapsed
 TMR2IF cadence, exact-TRISA predicate removal, output-latch mask narrowing,
@@ -737,7 +737,7 @@ can enable the tool-dependent PIC10F320 mutants. The host-only
 including the wrappers' executable mode, and covers inventory, conservation,
 record/command parsing, atomic publication, checker-status classification,
 PIC12F675 behavioral signatures, source substitutions and baseline reasons, and
-result grammar in 110 checks. `MUTATION_TIMEOUT_S` defaults only when unset and
+result grammar in 127 checks. `MUTATION_TIMEOUT_S` defaults only when unset and
 accepts `0.001..86400` seconds with at most three fractional digits; zero,
 negative, empty, malformed, under-resolution, and over-limit values fail before
 any Make or tool probe. Every bounded checker owns a registered process session,

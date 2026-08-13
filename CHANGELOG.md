@@ -32,6 +32,14 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- Local CI mutation skips are now authorized per substrate: `--skip-pic` cannot
+  hide a missing ATtiny202 lane, and `--skip-attiny202` cannot hide missing PIC
+  coverage. Partial runs no longer claim they are safe-to-push reproductions.
+  Workflow validation independently pins the six PIC aggregates, their five
+  exact Make invocations, strict/tool arguments, enabled state, uniqueness, and
+  all four downstream `needs: pic` edges. The shared PIC installer now rejects a
+  DFP missing `pic12f675.h`, with an offline supply-chain regression.
+
 - The Makefile name contract now walks every shell statement produced by a lone
   Make-variable expansion instead of inspecting only its first statement. A
   shell-local prefix in the first statement stays local, while real environment

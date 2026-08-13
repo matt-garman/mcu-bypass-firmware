@@ -402,10 +402,10 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   # skip cleanly and the AVR `make test` is unaffected.  Release/CI use
   # STRICT_TOOLS=1 plus `make pic10f322-test-target-variants`, where any skip fails.
 
-  Mutation tests that require the PIC target toolchain may be allowed to skip
-  locally with `MUTATION_ALLOW_SKIP=1` (the default).  Full-toolchain and release
-  runs use `MUTATION_ALLOW_SKIP=0` or `STRICT_TOOLS=1`, so a skipped PIC mutant
-  is treated as a failed gate.
+  Mutation tests may be allowed to skip locally with `MUTATION_ALLOW_SKIP=1`
+  (the non-strict default).  Selective partial runs use `PIC`, `ATtiny202`, or
+  `PIC,ATtiny202`; an unlisted substrate remains fail-closed. Full-toolchain and
+  release runs use `MUTATION_ALLOW_SKIP=0` or `STRICT_TOOLS=1`.
 
   ATtiny202 (AVR-XT) build + dynamic harness (`make attiny202`,
   `attiny202-sim` / -fault / -lockstep / -soak; run in normal CI, in release

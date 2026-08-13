@@ -862,8 +862,9 @@ All three verified directly:
   cleanly at `-std=c99 -O2` (§3).
 - **PIC10-12Fxxx DFP v1.9.189** — the pack already pinned for the 10F32x targets —
   ships `pic12f675.h`, `pic12f675.inc`, `12f675.cgen.inc`, `pic/dat/ini/12f675.ini`
-  and `edc/PIC12F675.PIC`. No new download, no new hash to add to
-  `test-supply-chain`.
+  and `edc/PIC12F675.PIC`. No new download or hash is needed, but the shared
+  installer and `test-supply-chain` require the extracted `pic12f675.h` before
+  declaring that DFP installation complete.
 - **cppcheck 2.13.0** has the `pic8` platform (classic mid-range) alongside the
   `pic8-enhanced` platform used for the 322 — both confirmed present. The
   `pic10f322-analyze-cppcheck` / `-misra` recipes port with a platform swap and a

@@ -109,9 +109,13 @@ if ! PIC12F675_MUTATION_CC=${PIC_CC:-$("$MUTATION_MAKE" -s --no-print-directory 
         -C "$PROJ_DIR" print-PIC_CC)} \
         || ! PIC12F675_MUTATION_DFP=${PIC_DFP:-$("$MUTATION_MAKE" -s \
         --no-print-directory -C "$PROJ_DIR" print-PIC_DFP)} \
+        || ! PIC10F320_MUTATION_CC=${PIC10F320_CC:-$("$MUTATION_MAKE" -s \
+        --no-print-directory -C "$PROJ_DIR" print-PIC10F320_CC)} \
+        || ! PIC10F320_MUTATION_DFP=${PIC10F320_DFP:-$("$MUTATION_MAKE" -s \
+        --no-print-directory -C "$PROJ_DIR" print-PIC10F320_DFP)} \
         || ! PIC12F675_MUTATION_PYTHON=${PIC12F675_PYTHON:-$("$MUTATION_MAKE" -s \
         --no-print-directory -C "$PROJ_DIR" print-PIC12F675_PYTHON)}; then
-    echo "ERROR: could not resolve PIC12F675 mutation tool inputs from Make" >&2
+    echo "ERROR: could not resolve PIC mutation tool inputs from Make" >&2
     exit 2
 fi
 
@@ -379,6 +383,16 @@ probe_pic10f322_gpsim_baseline() {
     PIC_GPSIM_OK=0
     PIC_GPSIM_WHY="tools absent"
 
+    # ci-local keeps STRICT_TOOLS=1 for every unskipped lane. Detect the shared
+    # compiler/DFP inputs before Make so an explicitly authorized PIC omission
+    # remains a genuine tools-absent skip rather than becoming a failed build.
+    # Once the tools exist, any build failure is still a baseline failure.
+    if ! mutation_command_is_available "$PIC12F675_MUTATION_CC" \
+            || [ ! -f "$PIC12F675_MUTATION_DFP/pic/include/proc/pic10f322.h" ]; then
+        echo "XC8/DFP absent -> PIC-shell mutants SKIPPED"
+        return 1
+    fi
+
     mutation_bounded "$MUTATION_MAKE" -C "$root" pic10f322 >/dev/null 2>&1
     build_rc=$?
     if [ "$build_rc" -ne 0 ]; then
@@ -413,6 +427,21 @@ mutation_command_is_available() {
         *[[:space:]]*) return 1 ;;
         *) command -v "$command_name" >/dev/null 2>&1 ;;
     esac
+}
+mutation_command_for_sandbox() {
+    local command_name=$1 path dir base resolved_dir
+    case "$command_name" in
+        /*) path=$command_name ;;
+        */*) path="$PROJ_DIR/$command_name" ;;
+        *) printf '%s\n' "$command_name"; return 0 ;;
+    esac
+    dir=${path%/*}
+    base=${path##*/}
+    if resolved_dir=$(cd "$dir" 2>/dev/null && pwd -P); then
+        printf '%s/%s\n' "$resolved_dir" "$base"
+    else
+        printf '%s\n' "$path"
+    fi
 }
 # Short soak window for the WDT-liveness mutant: must exceed one gpsim WDT period
 # (~1.057s at WDTPS=0x08, per the soak's own note) so an un-pet dog actually
@@ -457,6 +486,25 @@ case "$xt_yasimavr_venv_input" in
     *)  xt_yasimavr_venv_abs="$PROJ_DIR/$xt_yasimavr_venv_input" ;;
 esac
 XT_MCU="${XT_MCU:-attiny202}"
+XT_MUTATION_OBJDUMP=$(mutation_command_for_sandbox "${OBJDUMP:-avr-objdump}")
+XT_MUTATION_NM=$(mutation_command_for_sandbox "${AVR_NM:-avr-nm}")
+# sim_attiny202.py reads AVR_NM from the environment. Anchor path-qualified
+# selections before Make enters a sandbox and preserve the command-name form for
+# PATH lookup; AVR_NM is intentionally not a Make command-line override.
+export AVR_NM="$XT_MUTATION_NM"
+mutation_attiny202_tools_are_available() {
+    local dfp=$1 venv=$2
+    [ -f "$dfp/gcc/dev/$XT_MCU/device-specs/specs-$XT_MCU" ] \
+        && [ -f "$dfp/gcc/dev/$XT_MCU/avrxmega3/short-calls/crt$XT_MCU.o" ] \
+        && [ -f "$dfp/gcc/dev/$XT_MCU/avrxmega3/short-calls/lib$XT_MCU.a" ] \
+        && [ -f "$dfp/include/avr/iotn202.h" ] \
+        && [ -x "$venv/bin/python" ] \
+        && "$venv/bin/python" -c \
+            "from yasimavr.device_library import load_device; assert load_device('attiny202').find_peripheral('WDT') is not None" \
+            >/dev/null 2>&1 \
+        && mutation_command_is_available "$XT_MUTATION_OBJDUMP" \
+        && mutation_command_is_available "$XT_MUTATION_NM"
+}
 # Soak window for the WDT-liveness mutant. The ATtiny202's fuse-locked WDT
 # period is ~256 ms (WDTCFG=0x06), so this is many periods: an un-pet dog resets
 # well inside it while the baseline (pet) run stays quick. Simulated time, and
@@ -1290,9 +1338,12 @@ probe_pic12f675_baseline() {
 }
 
 mutation_partial_result_is_allowed() {
-    local skipped=$1 allow_skip=$2 baseline_failed=$3
+    local pic_skipped=$1 xt_skipped=$2 allow_skip=$3 baseline_failed=$4
     [ "$baseline_failed" -eq 0 ] \
-        && { [ "$skipped" -eq 0 ] || [ "$allow_skip" -eq 1 ]; }
+        && { [ "$pic_skipped" -eq 0 ] \
+            || mutation_skip_is_allowed PIC "$allow_skip"; } \
+        && { [ "$xt_skipped" -eq 0 ] \
+            || mutation_skip_is_allowed ATtiny202 "$allow_skip"; }
 }
 
 unpack_mutation_job_spec() {
@@ -1451,7 +1502,9 @@ run_mutant() {
             label="$arg"
             mutation_bounded "$MUTATION_MAKE" -C "$work" $arg \
                 XT_DFP="$xt_dfp_abs" \
-                YASIMAVR_VENV="$xt_yasimavr_venv_abs" >/dev/null 2>&1; rc=$?
+                YASIMAVR_VENV="$xt_yasimavr_venv_abs" \
+                OBJDUMP="$XT_MUTATION_OBJDUMP" \
+                >/dev/null 2>&1; rc=$?
             ;;
         pic12f675)
             pic12_signature=${arg%%|*}
@@ -2337,12 +2390,64 @@ EOF
         echo "ERROR: PIC12F675 soak completion accepted the wrong duration" >&2
         exit 1
     }
-    mutation_partial_result_is_allowed "$MUTATION_EXPECTED_PIC12F675" 1 0 || {
-        echo "ERROR: explicit partial policy rejected a tools-absent PIC12F675 lane" >&2
-        exit 1
-    }
-    if mutation_partial_result_is_allowed "$MUTATION_EXPECTED_PIC12F675" 1 1; then
-        echo "ERROR: explicit partial policy accepted a failed PIC12F675 baseline" >&2
+    for policy in PIC PIC,ATtiny202 1; do
+        mutation_partial_result_is_allowed "$MUTATION_EXPECTED_PIC12F675" 0 \
+            "$policy" 0 || {
+            echo "ERROR: policy $policy rejected a tools-absent PIC lane" >&2
+            exit 1
+        }
+    done
+    for policy in ATtiny202 PIC,ATtiny202 1; do
+        mutation_partial_result_is_allowed 0 "$MUTATION_EXPECTED_XT" \
+            "$policy" 0 || {
+            echo "ERROR: policy $policy rejected a tools-absent ATtiny202 lane" >&2
+            exit 1
+        }
+    done
+    for policy in 0 ATtiny202; do
+        if mutation_partial_result_is_allowed "$MUTATION_EXPECTED_PIC12F675" 0 \
+                "$policy" 0; then
+            echo "ERROR: policy $policy accepted an unauthorized PIC skip" >&2
+            exit 1
+        fi
+    done
+    for policy in 0 PIC; do
+        if mutation_partial_result_is_allowed 0 "$MUTATION_EXPECTED_XT" \
+                "$policy" 0; then
+            echo "ERROR: policy $policy accepted an unauthorized ATtiny202 skip" >&2
+            exit 1
+        fi
+    done
+    for policy in 0 1 PIC ATtiny202 PIC,ATtiny202; do
+        if mutation_partial_result_is_allowed 1 0 "$policy" 1; then
+            echo "ERROR: policy $policy accepted a failed baseline" >&2
+            exit 1
+        fi
+    done
+    xt_policy_dfp="$RESULT_DIR/xt-policy-dfp"
+    xt_policy_venv="$RESULT_DIR/xt-policy-venv"
+    xt_policy_bin="$RESULT_DIR/xt-policy-bin"
+    mkdir -p "$xt_policy_dfp/gcc/dev/$XT_MCU/device-specs" \
+        "$xt_policy_dfp/gcc/dev/$XT_MCU/avrxmega3/short-calls" \
+        "$xt_policy_dfp/include/avr" "$xt_policy_venv/bin" "$xt_policy_bin"
+    : > "$xt_policy_dfp/gcc/dev/$XT_MCU/device-specs/specs-$XT_MCU"
+    : > "$xt_policy_dfp/gcc/dev/$XT_MCU/avrxmega3/short-calls/crt$XT_MCU.o"
+    : > "$xt_policy_dfp/gcc/dev/$XT_MCU/avrxmega3/short-calls/lib$XT_MCU.a"
+    : > "$xt_policy_dfp/include/avr/iotn202.h"
+    for tool in python avr-objdump avr-nm; do
+        printf '#!/usr/bin/env bash\nexit 0\n' > "$xt_policy_bin/$tool"
+        chmod 750 "$xt_policy_bin/$tool"
+    done
+    cp "$xt_policy_bin/python" "$xt_policy_venv/bin/python"
+    XT_MUTATION_OBJDUMP="$xt_policy_bin/avr-objdump" \
+        XT_MUTATION_NM="$xt_policy_bin/avr-nm" \
+        mutation_attiny202_tools_are_available "$xt_policy_dfp" "$xt_policy_venv" \
+        || { echo "ERROR: complete ATtiny202 policy fixture was rejected" >&2; exit 1; }
+    if STRICT_TOOLS=1 XT_MUTATION_OBJDUMP="$RESULT_DIR/missing-objdump" \
+            XT_MUTATION_NM="$xt_policy_bin/avr-nm" \
+            mutation_attiny202_tools_are_available "$xt_policy_dfp" \
+                "$xt_policy_venv"; then
+        echo "ERROR: absent ATtiny202 binutils was accepted under strict mode" >&2
         exit 1
     fi
     saved_pic12_cc=$PIC12F675_MUTATION_CC
@@ -2471,6 +2576,7 @@ EOF
     cat > "$fake_make" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "${MUTATION_MAKE_LOG:?}"
+[ -z "${MUTATION_NM_LOG:-}" ] || printf '%s\n' "${AVR_NM-}" > "$MUTATION_NM_LOG"
 EOF
     chmod 750 "$fake_make"
     real_mutation_make=$MUTATION_MAKE
@@ -2485,15 +2591,54 @@ EOF
     [ "${make_argv[*]}" = "${expected_make_argv[*]}" ] || {
         echo "ERROR: mutation Make runner forwarded incorrect argv" >&2; exit 1
     }
+    nm_log="$RESULT_DIR/fake-make-nm.log"
+    MUTATION_MAKE=$fake_make MUTATION_MAKE_LOG=$make_log \
+        MUTATION_NM_LOG=$nm_log run_mutation_make_command /fixture \
+            attiny202-delay-oracle || exit 1
+    [ "$(<"$nm_log")" = "$XT_MUTATION_NM" ] \
+        && ! grep -q '^AVR_NM=' "$make_log" || {
+        echo "ERROR: selected AVR_NM did not cross the sandbox as environment only" >&2
+        exit 1
+    }
+    relative_nm=$(mutation_command_for_sandbox test/run_mutation_tests.sh)
+    [ "$relative_nm" = "$PROJ_DIR/test/run_mutation_tests.sh" ] || {
+        echo "ERROR: relative mutation tool path was not anchored to the repository" >&2
+        exit 1
+    }
+
+    fake_pic_make="$RESULT_DIR/fake-pic-baseline-make"
+    fake_gpsim="$RESULT_DIR/fake-gpsim"
+    fake_pic_dfp="$RESULT_DIR/fake-pic-dfp"
+    stale_hex_root="$RESULT_DIR/pic-baseline"
+    gpsim_log="$RESULT_DIR/fake-gpsim.log"
+    pic_probe_log="$RESULT_DIR/pic-baseline.log"
+
+    # An authorized PIC omission remains tools-absent under inherited strict
+    # mode: the probe must stop before Make turns the missing compiler into a
+    # failed baseline.
+    strict_absent_log="$RESULT_DIR/pic-strict-absent.log"
+    rm -rf "$stale_hex_root"
+    mkdir -p "$stale_hex_root"
+    PIC_GPSIM_OK=1
+    PIC_GPSIM_WHY="fixture"
+    MUT_BASELINE_FAILED=0
+    pic_probe_rc=0
+    STRICT_TOOLS=1 MUTATION_MAKE="$fake_pic_make" \
+        PIC12F675_MUTATION_CC="$RESULT_DIR/missing-xc8" \
+        probe_pic10f322_gpsim_baseline "$stale_hex_root" \
+            >"$strict_absent_log" 2>&1 || pic_probe_rc=$?
+    [ "$pic_probe_rc" -ne 0 ] && [ "$PIC_GPSIM_OK" -eq 0 ] \
+        && [ "$PIC_GPSIM_WHY" = "tools absent" ] \
+        && [ "$MUT_BASELINE_FAILED" -eq 0 ] \
+        && [ ! -e "$stale_hex_root/$PIC10F322_MUTATION_HEX" ] \
+        && grep -Fq 'XC8/DFP absent' "$strict_absent_log" || {
+        echo "ERROR: strict authorized PIC omission became a baseline failure" >&2
+        exit 1
+    }
 
     # A failed baseline build must dominate a stale, apparently usable HEX. Use
     # an ordinary nonzero status (which is a legitimate kill for a mutant) to
     # prove it is treated as baseline infrastructure here, before dispatch.
-    fake_pic_make="$RESULT_DIR/fake-pic-baseline-make"
-    fake_gpsim="$RESULT_DIR/fake-gpsim"
-    stale_hex_root="$RESULT_DIR/pic-baseline"
-    gpsim_log="$RESULT_DIR/fake-gpsim.log"
-    pic_probe_log="$RESULT_DIR/pic-baseline.log"
     cat > "$fake_pic_make" <<'EOF'
 #!/usr/bin/env bash
 root=
@@ -2526,7 +2671,10 @@ lata = 0x0
 SNAPSHOTS
 exit 0
 EOF
+    mkdir -p "$fake_pic_dfp/pic/include/proc"
+    : > "$fake_pic_dfp/pic/include/proc/pic10f322.h"
     chmod 750 "$fake_pic_make" "$fake_gpsim"
+    rm -rf "$stale_hex_root"
     mkdir -p "$stale_hex_root"
     PIC_GPSIM_OK=1
     PIC_GPSIM_WHY="tools absent"
@@ -2534,6 +2682,8 @@ EOF
     pic_probe_rc=0
     MUTATION_MAKE="$fake_pic_make" \
         PIC_BASELINE_STALE_HEX="$PIC10F322_MUTATION_HEX" \
+        PIC12F675_MUTATION_CC="$fake_gpsim" \
+        PIC12F675_MUTATION_DFP="$fake_pic_dfp" \
         GPSIM="$fake_gpsim" PIC_GPSIM_SELFTEST_LOG="$gpsim_log" \
         probe_pic10f322_gpsim_baseline "$stale_hex_root" \
             >"$pic_probe_log" 2>&1 || pic_probe_rc=$?
@@ -2598,7 +2748,7 @@ EOF
             "$RESULT_DIR/selftest-no-newline.status" >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted an unterminated status" >&2; exit 1
     fi
-    echo "mutation sandbox/accounting validation: 110 checks, 0 failures"
+    echo "mutation sandbox/accounting validation: 127 checks, 0 failures"
     exit 0
 fi
 
@@ -2744,11 +2894,20 @@ if ! validate_pic10f320_sandbox "$P320_BASE"; then
 fi
 echo "PIC10F320 mutation sandbox helpers: PASS"
 
-if mutation_bounded "$MUTATION_MAKE" -C "$P320_BASE" pic10f320-variants >/dev/null 2>&1 \
-   && command -v "$GPSIM" >/dev/null 2>&1 \
-   && command -v "$PIC10F320_SOAK_CXX" >/dev/null 2>&1 \
-   && [ -f "$PIC10F320_SOAK_GPSIM_INC/sim_context.h" ] \
-   && pkg-config --exists glib-2.0 2>/dev/null; then
+if ! mutation_command_is_available "$PIC10F320_MUTATION_CC" \
+        || [ ! -f "$PIC10F320_MUTATION_DFP/pic/include/proc/pic10f320.h" ] \
+        || ! mutation_command_is_available "$GPSIM" \
+        || ! mutation_command_is_available "$PIC10F320_SOAK_CXX" \
+        || ! mutation_command_is_available pkg-config \
+        || [ ! -f "$PIC10F320_SOAK_GPSIM_INC/sim_context.h" ] \
+        || ! pkg-config --exists glib-2.0 2>/dev/null; then
+    echo "XC8/gpsim/libgpsim absent -> PIC10F320 tool mutants SKIPPED"
+elif ! mutation_bounded "$MUTATION_MAKE" -C "$P320_BASE" \
+        pic10f320-variants >/dev/null 2>&1; then
+    PIC10F320_TOOL_WHY="baseline FAILED"
+    MUT_BASELINE_FAILED=1
+    echo "PIC10F320 baseline build failed -> its tool mutants SKIPPED"
+else
     P320_BASELINES_OK=1
     for target in "${PIC10F320_BASE_TARGETS[@]}"; do
         # Intentional word splitting: each field contains optional VAR=value
@@ -2770,8 +2929,6 @@ if mutation_bounded "$MUTATION_MAKE" -C "$P320_BASE" pic10f320-variants >/dev/nu
         MUT_BASELINE_FAILED=1
         echo "a PIC10F320 kill-target baseline failed -> its tool mutants SKIPPED"
     fi
-else
-    echo "XC8/gpsim/libgpsim absent -> PIC10F320 tool mutants SKIPPED"
 fi
 rm -rf "$P320_BASE"
 
@@ -2834,16 +2991,16 @@ if ! validate_avr_xt_sandbox "$XT_BASE"; then
 fi
 echo "AVR-XT mutation sandbox files: PASS"
 
-if [ -f "$xt_dfp_abs/gcc/dev/$XT_MCU/device-specs/specs-$XT_MCU" ] \
-   && [ -x "$xt_yasimavr_venv_abs/bin/python" ] \
-   && "$xt_yasimavr_venv_abs/bin/python" -c "import yasimavr" >/dev/null 2>&1; then
+if mutation_attiny202_tools_are_available "$xt_dfp_abs" \
+        "$xt_yasimavr_venv_abs"; then
     XT_BASELINES_OK=1
     while IFS= read -r target; do
         # Intentional word splitting: each field is optional VAR=value
         # assignments followed by one Make target, never shell metacharacters.
         if mutation_bounded "$MUTATION_MAKE" -C "$XT_BASE" $target \
                 XT_DFP="$xt_dfp_abs" \
-                YASIMAVR_VENV="$xt_yasimavr_venv_abs" >/dev/null 2>&1; then
+                YASIMAVR_VENV="$xt_yasimavr_venv_abs" \
+                OBJDUMP="$XT_MUTATION_OBJDUMP" >/dev/null 2>&1; then
             echo "baseline $target: PASS"
         else
             echo "baseline $target: FAIL"
@@ -2859,7 +3016,7 @@ if [ -f "$xt_dfp_abs/gcc/dev/$XT_MCU/device-specs/specs-$XT_MCU" ] \
         echo "an ATtiny202 kill-target baseline failed -> its mutants SKIPPED"
     fi
 else
-    echo "ATtiny_DFP and/or patched yasimavr absent -> ATtiny202 mutants SKIPPED"
+    echo "ATtiny_DFP, patched yasimavr, and/or binutils-avr absent -> ATtiny202 mutants SKIPPED"
 fi
 rm -rf "$XT_BASE"
 
@@ -3055,9 +3212,9 @@ if [ "$survived" -ne 0 ] || [ "$errored" -ne 0 ] \
         || [ "$accounting_failed" -ne 0 ]; then
     exit 1
 fi
-if ! mutation_partial_result_is_allowed "$skipped" "$MUTATION_ALLOW_SKIP" \
-        "$MUT_BASELINE_FAILED"; then
-    echo "ERROR: $skipped mutant(s) skipped; complete mutation gate did not run." >&2
+if ! mutation_partial_result_is_allowed "$pic_skipped" "$xt_skipped" \
+        "$MUTATION_ALLOW_SKIP" "$MUT_BASELINE_FAILED"; then
+    echo "ERROR: mutation skips exceeded MUTATION_ALLOW_SKIP=$MUTATION_ALLOW_SKIP ($pic_skipped PIC, $xt_skipped ATtiny202)." >&2
     if [ "$MUT_BASELINE_FAILED" -eq 1 ]; then
         echo "       At least one lane skipped because its BASELINE FAILED, not because a" >&2
         echo "       tool is missing: the UNMUTATED tree did not pass a kill target. Do not" >&2
@@ -3067,7 +3224,8 @@ if ! mutation_partial_result_is_allowed "$skipped" "$MUTATION_ALLOW_SKIP" \
     else
         echo "       Install the PIC toolchain/libgpsim stack (PIC lanes) and/or run" >&2
         echo "       scripts/fetch_attiny_dfp.sh + scripts/fetch_yasimavr.sh (ATtiny202" >&2
-        echo "       lane), or set MUTATION_ALLOW_SKIP=1 for an explicitly partial run." >&2
+        echo "       lane), or authorize only the unavailable substrate with" >&2
+        echo "       MUTATION_ALLOW_SKIP=PIC or MUTATION_ALLOW_SKIP=ATtiny202." >&2
     fi
     exit 1
 fi

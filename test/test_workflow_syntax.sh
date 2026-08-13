@@ -436,45 +436,210 @@ if check(os.path.isfile(ci_local), "scripts/ci-local.sh: missing"):
                 f"ci-local.sh maps '{entry}', which is not a job in ci.yml",
             )
 
-# --- the pic job's PART LANES must match ci-local.sh's, both ways -------------
-# The job-list check above is at JOB granularity, and the pic job is one job for
-# three parts (ci.yml decision D3). So a part can be dropped from either side --
-# or added to only one -- with every other gate green, and the failure mode is
-# the quiet one: a clean local run that no longer implies a green CI run, or a
-# CI lane nobody can reproduce locally. Compare the SETS of per-part Make
-# targets, not their order: the two files are free to sequence them differently.
-    ci_doc = docs.get("ci.yml")
-    if isinstance(ci_doc, dict) and isinstance(ci_doc.get("jobs"), dict) \
-            and isinstance(ci_doc["jobs"].get("pic"), dict):
-        pat = re.compile(r"\b(pic[0-9a-z]+-test(?:-target-variants)?)\b")
-        yml_lanes = set()
-        pic12_lines = []
-        for step in ci_doc["jobs"]["pic"].get("steps") or []:
-            if isinstance(step, dict) and isinstance(step.get("run"), str):
-                yml_lanes.update(pat.findall(step["run"]))
-                pic12_lines.extend(
-                    line.strip() for line in step["run"].splitlines()
-                    if "pic12f675-test" in line
-                )
-        local_lanes = set()
-        for line in lines:
-            if "run_step" in line and "pic job:" in line:
-                local_lanes.update(pat.findall(line))
-        check(bool(yml_lanes), "ci.yml pic job: no per-part Make lanes found")
+# --- pin the complete PIC CI contract independently of ci-local.sh ------------
+# Set equality is not enough here: both files could lose one part together, and
+# sets erase duplicates. These are five Make processes containing six required
+# aggregates; PIC12F675's two goals deliberately share one retained matrix.
+PIC_COMMANDS = (
+    (
+        ("pic10f322-test",),
+        {
+            "STRICT_TOOLS": "1",
+            "PIC_CC": "${XC8_DIR}/bin/xc8-cc",
+            "PIC_DFP": "${XC8_DFP_ROOT}/xc8",
+        },
+    ),
+    (
+        ("pic10f322-test-target-variants",),
+        {
+            "STRICT_TOOLS": "1",
+            "PIC_CC": "${XC8_DIR}/bin/xc8-cc",
+            "PIC_DFP": "${XC8_DFP_ROOT}/xc8",
+        },
+    ),
+    (
+        ("pic10f320-test",),
+        {
+            "STRICT_TOOLS": "1",
+            "PIC10F320_CC": "${XC8_DIR}/bin/xc8-cc",
+            "PIC10F320_DFP": "${XC8_DFP_ROOT}/xc8",
+        },
+    ),
+    (
+        ("pic10f320-test-target-variants",),
+        {
+            "STRICT_TOOLS": "1",
+            "PIC10F320_CC": "${XC8_DIR}/bin/xc8-cc",
+            "PIC10F320_DFP": "${XC8_DFP_ROOT}/xc8",
+        },
+    ),
+    (
+        ("pic12f675-test", "pic12f675-test-target-variants"),
+        {
+            "STRICT_TOOLS": "1",
+            "PIC_CC": "${XC8_DIR}/bin/xc8-cc",
+            "PIC_DFP": "${XC8_DFP_ROOT}/xc8",
+        },
+    ),
+)
+PIC_GOALS = tuple(goal for goals, _ in PIC_COMMANDS for goal in goals)
+
+
+def make_command(tokens):
+    if tokens[:1] != ["make"]:
+        return None
+    goals = []
+    assignments = {}
+    duplicate_assignment = False
+    for token in tokens[1:]:
+        match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", token)
+        if match:
+            if match.group(1) in assignments:
+                duplicate_assignment = True
+            assignments[match.group(1)] = match.group(2)
+        else:
+            goals.append(token)
+    return tuple(goals), assignments, duplicate_assignment
+
+
+ci_doc = docs.get("ci.yml")
+ci_jobs = ci_doc.get("jobs") if isinstance(ci_doc, dict) else None
+pic_job = ci_jobs.get("pic") if isinstance(ci_jobs, dict) else None
+if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
+    check("if" not in pic_job, "ci.yml: job 'pic' must be unconditional")
+    check(
+        pic_job.get("continue-on-error", False) is False,
+        "ci.yml: job 'pic' may continue after failure",
+    )
+    pic_invocations = []
+    for idx, step in enumerate(pic_job.get("steps") or [], 1):
+        run = step.get("run") if isinstance(step, dict) else None
+        commands = shell_tokens(run) if isinstance(run, str) else []
+        for tokens in commands:
+            parsed = make_command(tokens)
+            if parsed is not None and any(goal in PIC_GOALS for goal in parsed[0]):
+                pic_invocations.append((idx, step, len(commands), parsed, tokens))
+
+    for idx, step, command_count, parsed, tokens in pic_invocations:
+        goals, assignments, duplicate_assignment = parsed
         check(
-            len(pic12_lines) == 1 and re.match(
-                r"^make\s+pic12f675-test\s+"
-                r"pic12f675-test-target-variants(?:\s|$)",
-                pic12_lines[0],
-            ) is not None,
-            "ci.yml pic job: PIC12F675 aggregates must share one Make command",
+            not duplicate_assignment and (goals, assignments) in PIC_COMMANDS,
+            f"ci.yml: pic step {idx} has a noncanonical aggregate command: "
+            f"{' '.join(tokens)}",
         )
-        for lane in sorted(yml_lanes - local_lanes):
-            check(False, f"ci.yml pic job runs '{lane}', which ci-local.sh's pic job does not")
-        for lane in sorted(local_lanes - yml_lanes):
-            check(False, f"ci-local.sh's pic job runs '{lane}', which ci.yml's pic job does not")
-        for lane in sorted(yml_lanes & local_lanes):
-            check(True, f"pic lane '{lane}' runs in both")
+        check(
+            command_count == 1,
+            f"ci.yml: pic aggregate step {idx} must contain only its direct Make command",
+        )
+        check("if" not in step, f"ci.yml: pic aggregate step {idx} is conditional")
+        check(
+            step.get("continue-on-error", False) is False,
+            f"ci.yml: pic aggregate step {idx} may continue after failure",
+        )
+
+    for goals, assignments in PIC_COMMANDS:
+        matches = sum(
+            not parsed[2] and parsed[:2] == (goals, assignments)
+            for _, _, _, parsed, _ in pic_invocations
+        )
+        check(
+            matches == 1,
+            f"ci.yml: PIC command {' '.join(goals)} appears canonically "
+            f"{matches} time(s), expected 1",
+        )
+    for goal in PIC_GOALS:
+        occurrences = sum(
+            parsed[0].count(goal) for _, _, _, parsed, _ in pic_invocations
+        )
+        check(
+            occurrences == 1,
+            f"ci.yml: PIC aggregate '{goal}' occurs {occurrences} time(s), expected 1",
+        )
+
+    for job_id in ("verify", "attiny202", "build-matrix", "stress"):
+        job = ci_jobs.get(job_id)
+        needs = job.get("needs", []) if isinstance(job, dict) else []
+        if isinstance(needs, str):
+            needs = [needs]
+        check(
+            isinstance(needs, list) and "pic" in needs,
+            f"ci.yml: job '{job_id}' must declare needs: pic",
+        )
+
+    # Local CI has the same hard-coded five process boundary, but obtains tool
+    # paths from Make/environment defaults and exports strictness once globally.
+    local_commands = tuple(goals for goals, _ in PIC_COMMANDS)
+    local_invocations = []
+    local_shell = shell_tokens("\n".join(lines))
+    for tokens in local_shell:
+        if len(tokens) >= 4 and tokens[0] == "run_step" \
+                and tokens[1].startswith("pic job:") and tokens[2] == "make":
+            local_invocations.append(tuple(tokens[3:]))
+    for goals in local_invocations:
+        check(
+            goals in local_commands,
+            f"scripts/ci-local.sh: noncanonical PIC job command: make {' '.join(goals)}",
+        )
+    for goals in local_commands:
+        occurrences = local_invocations.count(goals)
+        check(
+            occurrences == 1,
+            f"scripts/ci-local.sh: PIC command {' '.join(goals)} occurs "
+            f"{occurrences} time(s), expected 1",
+        )
+    strict_exports = sum(tokens == ["export", "STRICT_TOOLS=1"] for tokens in local_shell)
+    check(
+        strict_exports == 1,
+        f"scripts/ci-local.sh: export STRICT_TOOLS=1 occurs {strict_exports} "
+        "time(s), expected 1",
+    )
+
+
+# Normal CI must reject a DFP missing any device header required by its shared
+# three-part PIC job. The release workflow intentionally asserts only its two
+# release-supported parts; its installer cache key changes with the installer's
+# three-header postcondition.
+required_pic_headers = ("pic10f322", "pic10f320", "pic12f675")
+for workflow_name, job_id in (("ci.yml", "pic"),):
+    doc = docs.get(workflow_name)
+    jobs = doc.get("jobs") if isinstance(doc, dict) else None
+    job = jobs.get(job_id) if isinstance(jobs, dict) else None
+    loops = []
+    body_checks = []
+    for step in job.get("steps", []) if isinstance(job, dict) else []:
+        run = step.get("run") if isinstance(step, dict) else None
+        if not isinstance(run, str):
+            continue
+        for tokens in shell_tokens(run):
+            if tokens[:3] != ["for", "d", "in"]:
+                continue
+            devices = []
+            for token in tokens[3:]:
+                token = token.rstrip(";")
+                if token == "do":
+                    break
+                devices.append(token)
+            if any(device in required_pic_headers for device in devices):
+                loops.append(tuple(devices))
+                body_checks.append(re.search(
+                    r'(?m)^\s*for d in pic10f322 pic10f320 pic12f675; do\s*$'
+                    r'\n\s*dev="\$\{XC8_DFP_ROOT\}/xc8/pic/include/proc/'
+                    r'\$\{d\}\.h"\s*$'
+                    r'\n\s*test -f "\$\{dev\}" \|\| \{ echo '
+                    r'"::error::DFP missing: \$\{dev\}"; exit 1; \}\s*$'
+                    r'\n\s*done\s*$',
+                    run,
+                ) is not None)
+    check(
+        loops == [required_pic_headers],
+        f"{workflow_name}: active PIC-header assertion loops are {loops!r}, "
+        f"expected {[required_pic_headers]!r}",
+    )
+    check(
+        body_checks == [True],
+        f"{workflow_name}: PIC-header loop does not fail on a missing "
+        "${XC8_DFP_ROOT}/xc8/pic/include/proc/${d}.h",
+    )
 
 for msg in failures:
     print(f"FAIL: {msg}", file=sys.stderr)

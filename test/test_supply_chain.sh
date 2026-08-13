@@ -87,6 +87,8 @@ case "$1" in
 		mkdir -p "$destination/xc8/pic/include/proc"
 		: > "$destination/xc8/pic/include/proc/pic10f322.h"
 		: > "$destination/xc8/pic/include/proc/pic10f320.h"
+		[ "${FAKE_OMIT_PIC12F675:-0}" = 1 ] \
+			|| : > "$destination/xc8/pic/include/proc/pic12f675.h"
 		;;
 	*) exit 3 ;;
 esac
@@ -116,6 +118,10 @@ run_pic_installer() {
 		"$PIC_INSTALL"
 }
 
+run_pic_installer_without_pic12f675() {
+	FAKE_OMIT_PIC12F675=1 run_pic_installer "$@"
+}
+
 rm -f "$sudo_log" "$chmod_log"
 expect_fail "corrupt XC8 download" "XC8 SHA-256 mismatch" \
 	run_pic_installer 'changed XC8 bytes' "$trusted_dfp"
@@ -132,11 +138,23 @@ checks=$((checks + 1))
 
 rm -rf "$work/xc8" "$work/pic-dfp"
 rm -f "$sudo_log" "$chmod_log"
+expect_fail "PIC DFP missing PIC12F675 header" \
+	"DFP installation did not create $work/pic-dfp/xc8/pic/include/proc/pic12f675.h" \
+	run_pic_installer_without_pic12f675 "$trusted_xc8" "$trusted_dfp"
+[ -f "$work/pic-dfp/xc8/pic/include/proc/pic10f322.h" ] \
+	&& [ -f "$work/pic-dfp/xc8/pic/include/proc/pic10f320.h" ] \
+	&& [ ! -e "$work/pic-dfp/xc8/pic/include/proc/pic12f675.h" ] \
+	|| fail "missing-PIC12F675 fixture did not isolate that header"
+checks=$((checks + 1))
+
+rm -rf "$work/xc8" "$work/pic-dfp"
+rm -f "$sudo_log" "$chmod_log"
 run_pic_installer "$trusted_xc8" "$trusted_dfp" >/dev/null 2>&1 \
 	|| fail "verified PIC toolchain fixture did not install"
 [ -x "$work/xc8/bin/xc8-cc" ] \
 	&& [ -f "$work/pic-dfp/xc8/pic/include/proc/pic10f322.h" ] \
 	&& [ -f "$work/pic-dfp/xc8/pic/include/proc/pic10f320.h" ] \
+	&& [ -f "$work/pic-dfp/xc8/pic/include/proc/pic12f675.h" ] \
 	|| fail "verified PIC toolchain install was incomplete"
 [ -s "$sudo_log" ] || fail "verified PIC fixture never reached installation"
 checks=$((checks + 1))

@@ -11,8 +11,17 @@ resolve_mutation_allow_skip() {
 	fi
 
 	case "$value" in
-		0|1) printf '%s\n' "$value" ;;
-		*) printf "ERROR: MUTATION_ALLOW_SKIP must be 0 or 1 (got '%s')\n" \
+		0|1|PIC|ATtiny202|PIC,ATtiny202) printf '%s\n' "$value" ;;
+		*) printf "ERROR: MUTATION_ALLOW_SKIP must be 0, 1, PIC, ATtiny202, or PIC,ATtiny202 (got '%s')\n" \
 			"$value" >&2; return 2 ;;
+	esac
+}
+
+mutation_skip_is_allowed() {
+	local substrate=$1 policy=$2
+	case "$policy:$substrate" in
+		1:PIC|1:ATtiny202|PIC:PIC|ATtiny202:ATtiny202|PIC,ATtiny202:PIC|PIC,ATtiny202:ATtiny202)
+			return 0 ;;
+		*) return 1 ;;
 	esac
 }

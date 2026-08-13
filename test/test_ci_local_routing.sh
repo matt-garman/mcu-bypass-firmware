@@ -151,6 +151,18 @@ run_ci() {
 		"$CI_LOCAL" --no-clean "$@" 2>&1
 }
 
+run_ci_clean() {
+	: > "$log"
+	env PATH="$fakebin:$PATH" FAKE_REPO_ROOT="$ROOT" FAKE_MAKE_LOG="$log" \
+		REAL_MAKE="$REAL_MAKE" \
+		PIC_CC="$work/xc8" PIC_DFP="$work/dfp" \
+		PIC10F320_CC="$work/xc8" PIC10F320_DFP="$work/dfp" \
+		PIC_SOAK_GPSIM_INC="$work/gpsim-inc" \
+		SIMAVR_INC="$work/simavr-inc" \
+		XT_DFP="$work/xt-dfp" YASIMAVR_VENV="$work/yasimavr-venv" \
+		"$CI_LOCAL" "$@" 2>&1
+}
+
 expect_calls() {
 	local label=$1 index=0
 	shift
@@ -179,7 +191,9 @@ xt_calls=(
 )
 build_call=$'STRICT_TOOLS=1\tattiny13a\tattiny85\tattiny45'
 strict_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=0'
-partial_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=1'
+pic_partial_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=PIC'
+xt_partial_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=ATtiny202'
+both_partial_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=PIC,ATtiny202'
 
 if ! output=$(run_ci); then
 	fail "push without skips failed: $output"
@@ -189,22 +203,36 @@ expect_calls "push without skips" "${pic_calls[@]}" "$build_call" \
 	"${xt_calls[@]}" "$strict_stress"
 [[ "$output" != *"job was skipped"* ]] \
 	|| fail "push without skips emitted a skipped-job warning"
+[[ "$output" != *"Safe to push"* && "$output" == *"not a full push reproduction"* ]] \
+	|| fail "push --no-clean claimed to be a clean push reproduction"
+checks=$((checks + 1))
+
+if ! output=$(run_ci_clean); then
+	fail "clean push without skips failed: $output"
+fi
+mapfile -t calls < "$log"
+expect_calls "clean push without skips" $'STRICT_TOOLS=1\tclean' \
+	"${pic_calls[@]}" "$build_call" "${xt_calls[@]}" "$strict_stress"
+[[ "$output" == *"Safe to push"* && "$output" != *"not a full push reproduction"* ]] \
+	|| fail "clean push without skips omitted the safe-to-push verdict"
 checks=$((checks + 1))
 
 if ! output=$(run_ci --skip-pic); then
 	fail "push --skip-pic failed: $output"
 fi
 mapfile -t calls < "$log"
-expect_calls "push --skip-pic" "$build_call" "${xt_calls[@]}" "$partial_stress"
+expect_calls "push --skip-pic" "$build_call" "${xt_calls[@]}" "$pic_partial_stress"
 [[ "$output" == *"PIC job was skipped"* && "$output" != *"ATtiny202 job was skipped"* ]] \
 	|| fail "push --skip-pic emitted the wrong skipped-job warnings"
+[[ "$output" != *"Safe to push"* && "$output" == *"not a full push reproduction"* ]] \
+	|| fail "push --skip-pic claimed to be a full push reproduction"
 checks=$((checks + 1))
 
 if ! output=$(run_ci --skip-attiny202); then
 	fail "push --skip-attiny202 failed: $output"
 fi
 mapfile -t calls < "$log"
-expect_calls "push --skip-attiny202" "${pic_calls[@]}" "$build_call" "$partial_stress"
+expect_calls "push --skip-attiny202" "${pic_calls[@]}" "$build_call" "$xt_partial_stress"
 [[ "$output" == *"ATtiny202 job was skipped"* && "$output" != *"PIC job was skipped"* ]] \
 	|| fail "push --skip-attiny202 emitted the wrong skipped-job warnings"
 checks=$((checks + 1))
@@ -213,7 +241,7 @@ if ! output=$(run_ci --skip-pic --skip-attiny202); then
 	fail "push with both target toolchains skipped failed: $output"
 fi
 mapfile -t calls < "$log"
-expect_calls "push with both skips" "$build_call" "$partial_stress"
+expect_calls "push with both skips" "$build_call" "$both_partial_stress"
 [[ "$output" == *"PIC job was skipped"* && "$output" == *"ATtiny202 job was skipped"* ]] \
 	|| fail "push with both skips omitted a skipped-job warning"
 checks=$((checks + 1))
@@ -231,6 +259,20 @@ mapfile -t calls < "$log"
 	|| fail "PR mode unexpectedly configured mutation testing"
 checks=$((checks + 1))
 
+for policy in 0 1 PIC ATtiny202 PIC,ATtiny202; do
+	resolved=$("$REAL_MAKE" -s --no-print-directory -C "$ROOT" \
+		_test-mutation-policy-probe MUTATION_ALLOW_SKIP="$policy" 2>/dev/null)
+	[ "$resolved" = "$policy" ] \
+		|| fail "mutation policy changed explicit value '$policy' to '$resolved'"
+done
+for policy in '' invalid pic ATtiny202,PIC PIC,PIC; do
+	if output=$("$REAL_MAKE" -s --no-print-directory -C "$ROOT" \
+			_test-mutation-policy-probe MUTATION_ALLOW_SKIP="$policy" 2>&1); then
+		fail "mutation policy accepted invalid explicit value '$policy'"
+	fi
+	[[ "$output" == *"MUTATION_ALLOW_SKIP must be 0, 1, PIC, ATtiny202, or PIC,ATtiny202"* ]] \
+		|| fail "mutation policy produced the wrong invalid-value diagnostic: $output"
+done
 resolved=$("$REAL_MAKE" -s --no-print-directory -C "$ROOT" \
 	_test-mutation-policy-probe STRICT_TOOLS= 2>/dev/null)
 [ "$resolved" = 1 ] \
@@ -239,12 +281,6 @@ resolved=$("$REAL_MAKE" -s --no-print-directory -C "$ROOT" \
 	_test-mutation-policy-probe STRICT_TOOLS=1 2>/dev/null)
 [ "$resolved" = 0 ] \
 	|| fail "strict mutation policy did not default to fail-closed: $resolved"
-if output=$("$REAL_MAKE" -s --no-print-directory -C "$ROOT" \
-		_test-mutation-policy-probe MUTATION_ALLOW_SKIP=invalid 2>&1); then
-	fail "mutation policy accepted an invalid explicit value"
-fi
-[[ "$output" == *"MUTATION_ALLOW_SKIP must be 0 or 1"* ]] \
-	|| fail "mutation policy produced the wrong invalid-value diagnostic: $output"
 checks=$((checks + 1))
 
 printf 'ci-local routing validation: %d checks, 0 failures\n' "$checks"
