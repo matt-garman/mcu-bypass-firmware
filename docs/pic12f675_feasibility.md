@@ -1324,8 +1324,9 @@ ISR alternative is reconsidered; steps 2 through 9 are implemented — step 9
 re-derived the holds through the tick period rather than letting the slack absorb
 the 1.024 ms stretch (§4.4.1). Step 10 is done: `pic12f675-test` and
 `pic12f675-test-target{,-variants}` are implemented and carry the third leg of
-`test-target-matrix` and `test-target-lane-markers`, and 14 mutants with their
-own toolchain probe and sandbox validator take the mutation inventory to 112;
+`test-target-matrix` and `test-target-lane-markers`, and 20 mutants with their
+own toolchain probe, named behavioral signatures and sandbox validator take the
+mutation inventory to 118;
 and both aggregates now run in CI's shared `pic` job with the two mirrors —
 `scripts/ci-local.sh` and `test-ci-local-routing` — extended alongside. Step 10
 is complete. Step 11 is partly done: the user-facing documentation landed, and

@@ -32,6 +32,15 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- PIC12F675 mutation results now fail closed by reason. Each of its 20 rows must
+  produce a named gpsim, fault-injection, lock-step, target-I/O, or soak failure
+  before receiving kill credit; XC8 compile failures, timeouts, incomplete
+  checker output, and unrelated nonzero exits are errors. Broken unmutated
+  simulator-image or kill-target baselines remain fatal even in partial mode,
+  while genuine tool absence remains skippable. Six new rows pin T0IF re-arming,
+  exact OPTION_REG and ADC/global-pull-up guards, and both previously uncovered
+  context write-backs, taking the complete mutation inventory from 112 to 118.
+
 - The direct PIC12F675 soak-binary target now builds and validates its simulator
   image and `.sym` inputs before deriving `PIC_SHADOW_ADDR`, so it works from a
   clean tree. Its 1.024 ms tick and per-variant 0/5/12 ms blocking times are
@@ -89,8 +98,8 @@ file is the human-readable summary of *what changed*.
   hardware return-stack bound, gpsim CLI functional tests, and libgpsim
   target-I/O, lock-step, fault-injection and long-duration soak lanes, behind
   the fail-closed `pic12f675-test` and `pic12f675-test-target-variants`
-  aggregates. 14 mutants with their own toolchain probe take the mutation
-  inventory to 112. Both aggregates run in CI and in `scripts/ci-local.sh`.
+  aggregates. 20 mutants with their own toolchain probe take the mutation
+  inventory to 118. Both aggregates run in CI and in `scripts/ci-local.sh`.
 
   Two things are deliberately absent. Simulator images are **derived**: an
   oscillator calibration word is injected into a *copy*, because an erased
@@ -168,8 +177,9 @@ file is the human-readable summary of *what changed*.
   to 85.
 
   A dedicated mutant tautologizes only shadow-versus-expected while retaining
-  both operands, taking the PIC12F675 category to 14 and the complete mutation
-  inventory to 112. The pulled shell refactor moved main-loop source lines
+  both operands; later fail-closed mutation-result work took the PIC12F675
+  category to 20 and the complete mutation inventory to 118. The pulled shell
+  refactor moved main-loop source lines
   without changing executable-line coverage; the gcov oracle and its negative
   probe were re-pointed from the old 556-589 anchors to 569-602 so they stopped
   rejecting live HEAD. They no longer carry line numbers at all -- see below.

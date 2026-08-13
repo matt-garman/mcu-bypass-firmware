@@ -94,8 +94,8 @@ readonly MUTATION_EXPECTED_PIC_TARGET=8
 readonly MUTATION_EXPECTED_PIC_SOAK=1
 readonly MUTATION_EXPECTED_PIC320_HOST=29
 readonly MUTATION_EXPECTED_PIC320_TOOL=11
-readonly MUTATION_EXPECTED_PIC12F675=14
-readonly MUTATION_EXPECTED_TOTAL=112
+readonly MUTATION_EXPECTED_PIC12F675=20
+readonly MUTATION_EXPECTED_TOTAL=118
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
@@ -103,7 +103,17 @@ GPSIM="${GPSIM:-gpsim}"
 MUTATION_MAKE="${MUTATION_MAKE:-make}"
 PIC_SOAK_CXX="${PIC_SOAK_CXX:-c++}"
 PIC10F320_SOAK_CXX="${PIC10F320_SOAK_CXX:-$PIC_SOAK_CXX}"
+PIC12F675_MUTATION_HOSTCC=${HOSTCC:-cc}
 export PIC_SOAK_CXX PIC10F320_SOAK_CXX
+if ! PIC12F675_MUTATION_CC=${PIC_CC:-$("$MUTATION_MAKE" -s --no-print-directory \
+        -C "$PROJ_DIR" print-PIC_CC)} \
+        || ! PIC12F675_MUTATION_DFP=${PIC_DFP:-$("$MUTATION_MAKE" -s \
+        --no-print-directory -C "$PROJ_DIR" print-PIC_DFP)} \
+        || ! PIC12F675_MUTATION_PYTHON=${PIC12F675_PYTHON:-$("$MUTATION_MAKE" -s \
+        --no-print-directory -C "$PROJ_DIR" print-PIC12F675_PYTHON)}; then
+    echo "ERROR: could not resolve PIC12F675 mutation tool inputs from Make" >&2
+    exit 2
+fi
 
 # The PIC10F322 image the two PIC-shell lanes drive, resolved ONCE from the
 # Makefile rather than recomposed from restated defaults.
@@ -393,6 +403,16 @@ probe_pic10f322_gpsim_baseline() {
 
     PIC_GPSIM_OK=1
     echo "gpsim + XC8 present, baseline PASS -> PIC gpsim mutants ENABLED"
+}
+
+mutation_command_is_available() {
+    local command_name=$1
+    [ -n "$command_name" ] || return 1
+    case "$command_name" in
+        */*) [ -x "$command_name" ] ;;
+        *[[:space:]]*) return 1 ;;
+        *) command -v "$command_name" >/dev/null 2>&1 ;;
+    esac
 }
 # Short soak window for the WDT-liveness mutant: must exceed one gpsim WDT period
 # (~1.057s at WDTPS=0x08, per the soak's own note) so an un-pet dog actually
@@ -1015,6 +1035,266 @@ run_mutation_make_command() {
     mutation_bounded "$MUTATION_MAKE" -C "$root" "$@" "${MUTATION_MAKE_ARGS[@]}"
 }
 
+# PIC12F675 mutants need positive evidence that the named oracle observed the
+# intended behavior. A bare nonzero Make status is not enough: XC8 rejecting the
+# mutated source, a host-harness compile failure, or an incomplete simulator run
+# all fail too, and none demonstrates that the firmware fault was detected.
+mutation_command_assignment() {
+    local command=$1 wanted=$2 i last
+    MUTATION_COMMAND_ASSIGNMENT=
+    split_mutation_make_command assignment "$command" || return 1
+    last=$((${#MUTATION_MAKE_ARGS[@]} - 1))
+    for ((i = 0; i < last; i++)); do
+        case "${MUTATION_MAKE_ARGS[i]}" in
+            "$wanted="*)
+                [ -z "$MUTATION_COMMAND_ASSIGNMENT" ] || return 1
+                MUTATION_COMMAND_ASSIGNMENT=${MUTATION_MAKE_ARGS[i]#*=}
+                ;;
+        esac
+    done
+    [ -n "$MUTATION_COMMAND_ASSIGNMENT" ]
+}
+
+pic12f675_gpsim_results_complete() {
+    local mode=$1 log=$2 line path variant status pass_count=0 fail_count=0
+    local -a results=()
+    local -A variant_count=()
+    mapfile -t results < <(grep '^RESULT: ' "$log" || true)
+    [ "${#results[@]}" -eq 6 ] || return 1
+    for line in "${results[@]}"; do
+        if [[ $line =~ ^RESULT:\ PASS\ \((.*)\)$ ]]; then
+            status=pass; path=${BASH_REMATCH[1]}; pass_count=$((pass_count + 1))
+        elif [[ $line =~ ^RESULT:\ ([1-9][0-9]*)\ check\(s\)\ FAILED\ for\ (.*)$ ]]; then
+            status=fail; path=${BASH_REMATCH[2]}; fail_count=$((fail_count + 1))
+        else
+            return 1
+        fi
+        case "${path##*/}" in
+            bypass-pic12f675-cd4053_simple_simcal.hex) variant=cd4053_simple ;;
+            bypass-pic12f675-cd4053_with_mute_simcal.hex) variant=cd4053_with_mute ;;
+            bypass-pic12f675-tq2_l2_5v_relay_simcal.hex) variant=tq2_l2_5v_relay ;;
+            *) return 1 ;;
+        esac
+        variant_count["$variant"]=$((${variant_count["$variant"]:-0} + 1))
+    done
+    for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
+        [ "${variant_count["$variant"]:-0}" -eq 2 ] || return 1
+    done
+    case "$mode" in
+        pass) [ "$pass_count" -eq 6 ] && [ "$fail_count" -eq 0 ] ;;
+        fail) [ "$fail_count" -gt 0 ] ;;
+        *) return 2 ;;
+    esac
+}
+
+pic12f675_soak_result_complete() {
+    local mode=$1 command=$2 log=$3 line variant requested_duration
+    local liveness combination status duration checks failures watchdog liveness_failures
+    local -a records=()
+    mutation_command_assignment "$command" PIC12F675_SOAK_VARIANT || return 1
+    variant=$MUTATION_COMMAND_ASSIGNMENT
+    mutation_command_assignment "$command" PIC12F675_SOAK_DURATION_MS || return 1
+    requested_duration=$MUTATION_COMMAND_ASSIGNMENT
+    mutation_command_assignment "$command" PIC12F675_SOAK_LIVENESS_INTERVAL_MS || return 1
+    liveness=$MUTATION_COMMAND_ASSIGNMENT
+    mutation_command_assignment "$command" PIC12F675_SOAK_COMBINATION_NAME || return 1
+    combination=$MUTATION_COMMAND_ASSIGNMENT
+    [ "$variant" = cd4053_simple ] \
+        && [[ $requested_duration =~ ^[1-9][0-9]*$ ]] \
+        && [[ $liveness =~ ^[1-9][0-9]*$ ]] || return 1
+    mapfile -t records < <(grep '^SOAK_RESULT ' "$log" || true)
+    [ "${#records[@]}" -eq 1 ] || return 1
+    line=${records[0]}
+    if [[ $line =~ ^SOAK_RESULT\ format=1\ status=(pass|fail)\ combination=([^[:space:]]+)\ duration_ms=([0-9]+)\ liveness_interval_ms=([0-9]+)\ checks=([0-9]+)\ failures=([0-9]+)\ watchdog_failures=([0-9]+)\ liveness_failures=([0-9]+)$ ]]; then
+        status=${BASH_REMATCH[1]}; [ "${BASH_REMATCH[2]}" = "$combination" ] || return 1
+        duration=${BASH_REMATCH[3]}; [ "${BASH_REMATCH[4]}" = "$liveness" ] || return 1
+        checks=${BASH_REMATCH[5]}; failures=${BASH_REMATCH[6]}
+        watchdog=${BASH_REMATCH[7]}; liveness_failures=${BASH_REMATCH[8]}
+    else
+        return 1
+    fi
+    case "$mode" in
+        pass)
+            [ "$status" = pass ] && [ "$duration" = "$requested_duration" ] \
+                && [ "$checks" -gt 0 ] && [ "$failures" -eq 0 ] \
+                && [ "$watchdog" -eq 0 ] && [ "$liveness_failures" -eq 0 ]
+            ;;
+        fail)
+            [ "$status" = fail ] && [ "$duration" = "$requested_duration" ] \
+                && [ "$checks" -gt 0 ] && [ "$failures" -gt 0 ] \
+                && [ "$watchdog" -gt 0 ]
+            ;;
+        *) return 2 ;;
+    esac
+}
+
+pic12f675_mutation_has_signature() {
+    local signature=$1 command=$2 log=$3 fault_label assertion variant
+    case "$signature" in
+        fault:*)
+            fault_label=${signature#fault:}
+            mutation_command_assignment "$command" PIC12F675_TARGET_VARIANT || return 1
+            variant=$MUTATION_COMMAND_ASSIGNMENT
+            awk -v label="$fault_label" '
+                BEGIN {
+                    prefix = "inject " label
+                    failure = "FAIL: 0 resets in 2000 ms (want exactly 1)  [gate did not fire?]"
+                }
+                {
+                    line = $0
+                    sub(/^[[:space:]]*/, "", line)
+                    if (index(line, prefix) == 1 &&
+                            substr(line, length(prefix) + 1, 1) ~ /[[:space:]]/) {
+                        if (getline > 0 && index($0, failure) > 0) found = 1
+                    }
+                }
+                END { exit(found ? 0 : 1) }
+            ' "$log" \
+                && grep -Eq "^PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=${variant} status=fail checks=37 failures=[1-9][0-9]*$" "$log"
+            ;;
+        gpsim:press-led)
+            assertion='FAIL: PRESS1: LED (GP0) should be on mid-press (toggle-on-press)'
+            grep -Fq "$assertion" "$log" \
+                && pic12f675_gpsim_results_complete fail "$log"
+            ;;
+        gpsim:press-early)
+            assertion='FAIL: PRESS1_EARLY: LED (GP0) on too early'
+            grep -Fq "$assertion" "$log" \
+                && pic12f675_gpsim_results_complete fail "$log"
+            ;;
+        lockstep:divergence)
+            mutation_command_assignment "$command" PIC12F675_TARGET_VARIANT || return 1
+            variant=$MUTATION_COMMAND_ASSIGNMENT
+            grep -Fq 'FAIL: lock-step divergence at iter ' "$log" \
+                && grep -Eq "^PIC_TARGET_RESULT format=1 device=pic12f675 lane=lockstep variant=${variant} status=fail checks=3005 failures=[1-9][0-9]*$" "$log"
+            ;;
+        io:relay-minimum)
+            mutation_command_assignment "$command" PIC12F675_TARGET_VARIANT || return 1
+            variant=$MUTATION_COMMAND_ASSIGNMENT
+            grep -Fq 'FAIL: relay pulse is shorter than the 4 ms datasheet minimum' "$log" \
+                && [ "$variant" = tq2_l2_5v_relay ] \
+                && grep -Eq '^PIC_TARGET_RESULT format=1 device=pic12f675 lane=io variant=tq2_l2_5v_relay status=fail checks=36 failures=[1-9][0-9]*$' "$log"
+            ;;
+        soak:wdt-reset)
+            grep -Fq 'SOAK FAIL [' "$log" \
+                && grep -Fq 'unexpected WDT reset' "$log" \
+                && pic12f675_soak_result_complete fail "$command" "$log"
+            ;;
+        *) return 2 ;;
+    esac
+}
+
+pic12f675_mutation_completed_cleanly() {
+    local command=$1 log=$2 variant
+    case "$command" in
+        pic12f675-test-gpsim)
+            pic12f675_gpsim_results_complete pass "$log"
+            ;;
+        *pic12f675-test-target)
+            mutation_command_assignment "$command" PIC12F675_TARGET_VARIANT || return 1
+            variant=$MUTATION_COMMAND_ASSIGNMENT
+            grep -Fq "=== PIC12F675 target fault/lock-step/I-O PASS (variant $variant): PIC12F675_MATRIX_SHA256 " "$log"
+            ;;
+        *pic12f675-test-soak)
+            pic12f675_soak_result_complete pass "$command" "$log"
+            ;;
+        *) return 2 ;;
+    esac
+}
+
+pic12f675_classify_checker_result() {
+    local rc=$1 signature=$2 command=$3 log=$4
+    PIC12F675_CHECKER_OUTCOME=checker-error
+    if mutation_checker_status_is_infrastructure_error "$rc"; then
+        PIC12F675_CHECKER_OUTCOME=infrastructure-error
+    elif grep -Eq '^FAIL: variant (cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay) did not compile for PIC12F675$' \
+            "$log"; then
+        PIC12F675_CHECKER_OUTCOME=compile-error
+    elif [ "$rc" -eq 0 ]; then
+        if pic12f675_mutation_completed_cleanly "$command" "$log"; then
+            PIC12F675_CHECKER_OUTCOME=survived
+        fi
+    elif pic12f675_mutation_has_signature "$signature" "$command" "$log"; then
+        PIC12F675_CHECKER_OUTCOME=killed
+    fi
+}
+
+probe_pic12f675_baseline() {
+    local root=$1 simcal_log target baseline_log rc
+    PIC12F675_OK=0
+    PIC12F675_WHY="tools absent"
+
+    if ! mutation_command_is_available "$PIC12F675_MUTATION_CC" \
+            || [ ! -f "$PIC12F675_MUTATION_DFP/pic/include/proc/pic12f675.h" ] \
+            || ! mutation_command_is_available "$PIC12F675_MUTATION_PYTHON" \
+            || ! mutation_command_is_available python3; then
+        echo "XC8/DFP/Python absent -> PIC12F675 mutants SKIPPED"
+        return 1
+    fi
+
+    simcal_log="$root/.mutation-pic12f675-simcal-baseline.log"
+    mutation_bounded "$MUTATION_MAKE" -C "$root" pic12f675-simcal STRICT_TOOLS=1 \
+        >"$simcal_log" 2>&1
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        MUT_BASELINE_FAILED=1
+        if [ "$rc" -eq 124 ]; then
+            PIC12F675_WHY="pic12f675-simcal baseline TIMEOUT"
+        else
+            PIC12F675_WHY="pic12f675-simcal baseline FAILED"
+        fi
+        echo "PIC12F675 simulator-image baseline failed (status $rc) -> mutants DISABLED"
+        return 1
+    fi
+    if ! grep -Fq '=== PIC12F675 simulator images derived in ' "$simcal_log"; then
+        MUT_BASELINE_FAILED=1
+        PIC12F675_WHY="pic12f675-simcal baseline INCOMPLETE"
+        echo "PIC12F675 simulator-image baseline emitted no completion record -> mutants DISABLED"
+        return 1
+    fi
+
+    if ! mutation_command_is_available "$GPSIM" \
+            || ! mutation_command_is_available "$PIC_SOAK_CXX" \
+            || ! mutation_command_is_available "$PIC12F675_MUTATION_HOSTCC" \
+            || ! mutation_command_is_available pkg-config \
+            || [ ! -f "$PIC_SOAK_GPSIM_INC/sim_context.h" ] \
+            || ! pkg-config --exists glib-2.0 2>/dev/null; then
+        echo "gpsim/libgpsim/glib/C++ tools absent -> PIC12F675 mutants SKIPPED"
+        return 1
+    fi
+
+    for target in "${PIC12F675_BASE_TARGETS[@]}"; do
+        baseline_log="$root/.mutation-pic12f675-kill-target-baseline.log"
+        run_mutation_make_command "$root" "$target" \
+            "GPSIM=$GPSIM" STRICT_TOOLS=1 >"$baseline_log" 2>&1
+        rc=$?
+        if [ "$rc" -eq 0 ] \
+                && pic12f675_mutation_completed_cleanly "$target" "$baseline_log"; then
+            echo "baseline $target: PASS"
+            continue
+        fi
+        MUT_BASELINE_FAILED=1
+        if [ "$rc" -eq 124 ]; then
+            PIC12F675_WHY="kill-target baseline TIMEOUT"
+        elif [ "$rc" -eq 0 ]; then
+            PIC12F675_WHY="kill-target baseline INCOMPLETE"
+        else
+            PIC12F675_WHY="kill-target baseline FAILED"
+        fi
+        echo "baseline $target: FAIL (status $rc, $PIC12F675_WHY)"
+        return 1
+    done
+
+    PIC12F675_OK=1
+    echo "XC8 + gpsim + libgpsim present, all baselines PASS -> PIC12F675 mutants ENABLED"
+}
+
+mutation_partial_result_is_allowed() {
+    local skipped=$1 allow_skip=$2 baseline_failed=$3
+    [ "$baseline_failed" -eq 0 ] \
+        && { [ "$skipped" -eq 0 ] || [ "$allow_skip" -eq 1 ]; }
+}
+
 unpack_mutation_job_spec() {
     local spec=$1 rest field
     local -a fields=()
@@ -1038,7 +1318,7 @@ unpack_mutation_job_spec() {
     # kind this validator has never heard of would abort the whole run with no
     # diagnostic at all. That is exactly what a newly added lane looks like.
     case "$kind" in
-        make|pictarget|avrxt) [ -n "$arg" ] ;;
+        make|pictarget|avrxt|pic12f675) [ -n "$arg" ] ;;
         picgpsim|picsoak) [ -z "$arg" ] ;;
         *)  echo "ERROR: packed mutation job has an unknown kind: $kind" >&2
             return 1 ;;
@@ -1079,8 +1359,9 @@ publish_mutation_result() {
 
 # Apply one mutation in a throwaway sandbox and run the mapped checker.
 #   $1 idx  : 1-based mutant number (stable, assigned at dispatch time)
-#   $2 kind : make | picgpsim | picsoak | pictarget
-#   $3 arg  : make target (kind=make), PIC variant (kind=pictarget), ignored otherwise
+#   $2 kind : make | picgpsim | picsoak | pictarget | pic12f675
+#   $3 arg  : make target (kind=make), PIC variant (kind=pictarget),
+#             signature|make-command (kind=pic12f675), ignored otherwise
 #   $4 file ; $5 sed-expr ; $6 description
 # Runs in the background under the dispatch() pool, so it must NOT touch shared
 # shell state. It records its verdict to two files under $RESULT_DIR, keyed by a
@@ -1137,9 +1418,10 @@ run_mutant() {
             ;;
     esac
 
-    # Run the mapped checker. Killed == nonzero exit (a build OR a test failure
-    # both count as "the suite did not silently accept the fault").
-    local label rc
+    # Run the mapped checker. PIC12F675 is stricter than the legacy lanes: its
+    # row names a behavioral signature, and only that signature can earn kill
+    # credit. Other lanes retain their established nonzero-exit contract.
+    local label rc checker_log pic12_signature pic12_command
     case "$kind" in
         make)
             label="$arg"
@@ -1171,6 +1453,22 @@ run_mutant() {
                 XT_DFP="$xt_dfp_abs" \
                 YASIMAVR_VENV="$xt_yasimavr_venv_abs" >/dev/null 2>&1; rc=$?
             ;;
+        pic12f675)
+            pic12_signature=${arg%%|*}
+            pic12_command=${arg#*|}
+            if [ "$pic12_signature" = "$arg" ] || [ -z "$pic12_signature" ] \
+                    || [ -z "$pic12_command" ]; then
+                publish_mutation_result "$stem" errored \
+                    "[$idx] ERROR  malformed PIC12F675 signature/command: $desc"
+                local publish_rc=$?
+                rm -rf "$work" || true
+                return "$publish_rc"
+            fi
+            label="$pic12_command [$pic12_signature]"
+            checker_log="$work/pic12f675-mutation-checker.log"
+            run_mutation_make_command "$work" "$pic12_command" \
+                "GPSIM=$GPSIM" STRICT_TOOLS=1 >"$checker_log" 2>&1; rc=$?
+            ;;
         *)
             publish_mutation_result "$stem" errored \
                 "[$idx] ERROR  unknown mutation checker kind '$kind': $desc"
@@ -1180,9 +1478,39 @@ run_mutant() {
             ;;
     esac
 
-    if mutation_checker_status_is_infrastructure_error "$rc"; then
+    if [ "$kind" != pic12f675 ] \
+            && mutation_checker_status_is_infrastructure_error "$rc"; then
         publish_mutation_result "$stem" errored \
             "[$idx] ERROR  checker infrastructure status $rc ($label): $desc"
+        local publish_rc=$?
+        rm -rf "$work" || true
+        return "$publish_rc"
+    fi
+    if [ "$kind" = pic12f675 ]; then
+        pic12f675_classify_checker_result "$rc" "$pic12_signature" \
+            "$pic12_command" "$checker_log"
+        case "$PIC12F675_CHECKER_OUTCOME" in
+            killed)
+                publish_mutation_result "$stem" killed \
+                    "[$idx] killed   ($label): $desc"
+                ;;
+            survived)
+                publish_mutation_result "$stem" survived \
+                    "[$idx] SURVIVED ($label): $desc" "$file: $desc"
+                ;;
+            infrastructure-error)
+                publish_mutation_result "$stem" errored \
+                    "[$idx] ERROR  checker infrastructure status $rc ($label): $desc"
+                ;;
+            compile-error)
+                publish_mutation_result "$stem" errored \
+                    "[$idx] ERROR  mutant did not compile ($label): $desc"
+                ;;
+            checker-error)
+                publish_mutation_result "$stem" errored \
+                    "[$idx] ERROR  checker did not produce the named complete verdict ($label): $desc"
+                ;;
+        esac
         local publish_rc=$?
         rm -rf "$work" || true
         return "$publish_rc"
@@ -1312,24 +1640,33 @@ PIC_SOAK_MUTATIONS=(
 # Copying the 322's list verbatim would have re-proved the shared pure core and
 # left every one of those unexercised.
 #
-# Each entry: file<TAB>sed-expression<TAB>make-args<TAB>description. The make
+# Each entry: file<TAB>sed-expression<TAB>make-args<TAB>behavior-signature<TAB>
+# description. The make
 # args are the same shape as the PIC10F320 tool table's: optional VAR=value
 # assignments followed by exactly one target, tokenized by the shared helper.
+# The signature names positive oracle output required before a failed checker can
+# earn kill credit. Compile failures and unrelated nonzero exits are errors.
 PIC12F675_MUTATIONS=(
-"src/bypass_mcu_pic12f675.c	s@(shadow_high_mask == expected_high_mask) &&@((shadow_high_mask == expected_high_mask) || (shadow_high_mask != expected_high_mask)) \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET shadow-versus-expected guard tautologized while retaining both operands; the valid ENGAGED context mismatch leaves BYPASS shadow/GPIO matching and must still recover"
-"src/bypass_mcu_pic12f675.c	s@gpio_shadow_ |= (uint8_t)(1U << LED_PIN);@gpio_shadow_ \&= (uint8_t)~(1U << LED_PIN);@	pic12f675-test-gpsim	FW set_engaged LED inverted at the shadow (GP0 stays dark); the ENGAGED checkpoint catches it"
-"src/bypass_mcu_pic12f675.c	s@(0U == (GPIO & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (GPIO \& (uint8_t)(1U << FOOTSW_PIN)))@	pic12f675-test-gpsim	FW footswitch read polarity inverted (GP5 sense flipped -> toggles on release); PRESS1 toggle-on-press checkpoint catches it"
-"src/bypass_mcu_pic12f675.c	s@#define TMR0_SUBTICKS_PER_TICK (4U)@#define TMR0_SUBTICKS_PER_TICK (1U)@	pic12f675-test-gpsim	FW software sub-tick count 4->1: the tick becomes 256us, debounce completes 4x early; PRESS1_EARLY cadence checkpoint catches it (no PIC10F322 counterpart -- that part has a period register)"
-"src/bypass_mcu_pic12f675.c	/void hw_pin_set_high/,/^}/s@GPIO = gpio_shadow_;@/* MUTANT: shadow never reaches the port */@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET control-pin write never reaches GPIO -- a fault only a part with an SRAM shadow can express. The shell's own port-follows-shadow guard then resets every iteration, and lock-step sees the ctx_ divergence"
-"src/bypass_mcu_pic12f675.c	s@        (uint8_t)(GPIO & (uint8_t)BYPASS_OUTPUT_DDR_MASK);@        (uint8_t)(gpio_shadow_ \& (uint8_t)BYPASS_OUTPUT_DDR_MASK);@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET port-follows-shadow guard reads the shadow twice, making the comparison a tautology; physical-pin fault injections stop recovering"
-"src/bypass_mcu_pic12f675.c	s@(actual_direction_mask == expected_direction_mask) &&@(1U != 0U) \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET exact-TRISIO predicate removed: parked-spare GP4 direction corruption evades the remaining required-subset check"
-"src/bypass_mcu_pic12f675.c	s@wpu_latches == (uint8_t)(1U << FOOTSW_PIN)@0U != (wpu_latches \& (uint8_t)(1U << FOOTSW_PIN))@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET exact WPU guard weakened to GP5-present only; extra output-pin pull-up latches go undetected"
-"src/bypass_mcu_pic12f675.c	s@ansel   = (uint8_t)(ANSEL & ANSEL_OUTPUT_MASK);@ansel   = (uint8_t)(ANSEL \& 0x07U);@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET ANSEL guard narrowed to ANS0..ANS2, dropping ANS3; GP4 re-selected analog goes undetected (GPIO bit 4 maps to ANSEL bit 3, so this is the mapping's own mutant)"
-"src/bypass_mcu_pic12f675.c	s@(CMCON_COMPARATOR_OFF == cmcon)  &&@(1U != 0U)  \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET comparator-off guard defeated; a CMCON upset re-takes GP0..GP2 with no reset (no PIC10F322 counterpart -- that part has no comparator)"
-"src/bypass_mcu_pic12f675.c	s@(osccal_snapshot_     == osccal);@(1U != 0U);@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET oscillator-trim guard defeated; a corrupt OSCCAL never forces a reset (no PIC10F322 counterpart -- that part compares OSCCON against a constant)"
-"src/bypass_mcu_pic12f675.c	s@        ctx_.effect_state  = res.effect_state;@@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	TARGET effect_state write-back dropped: the pins still follow res, so only the ctx_ lock-step against the pure model diverges"
-"src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	TARGET relay coil pulse shortened below the datasheet minimum; the target-I/O pulse-width check catches it on this part's 1.024 ms tick as it does on the 322's 1.000 ms one"
-"src/bypass_mcu_pic12f675.c	s@static void hw_wdt_pet(void) { CLRWDT(); }@static void hw_wdt_pet(void) { (void)0; /* MUTANT: no WDT pet */ }@	PIC12F675_SOAK_VARIANT=cd4053_simple PIC12F675_SOAK_DURATION_MS=$PIC_SOAK_MUT_MS PIC12F675_SOAK_LIVENESS_INTERVAL_MS=$PIC_SOAK_MUT_LIVENESS_MS pic12f675-test-soak	SOAK main-loop WDT pet removed; the soak's reset notifier catches the un-pet watchdog inside the short mutation window (this part's period is ~288 ms, well inside it)"
+"src/bypass_mcu_pic12f675.c	s@(shadow_high_mask == expected_high_mask) &&@((shadow_high_mask == expected_high_mask) || (shadow_high_mask != expected_high_mask)) \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:ctx.expected	TARGET shadow-versus-expected guard tautologized while retaining both operands; the valid ENGAGED context mismatch leaves BYPASS shadow/GPIO matching and must still recover"
+"src/bypass_mcu_pic12f675.c	s@gpio_shadow_ |= (uint8_t)(1U << LED_PIN);@gpio_shadow_ \&= (uint8_t)~(1U << LED_PIN);@	pic12f675-test-gpsim	gpsim:press-led	FW set_engaged LED inverted at the shadow (GP0 stays dark); the PRESS1 toggle-on-press assertion catches it"
+"src/bypass_mcu_pic12f675.c	s@(0U == (GPIO & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (GPIO \& (uint8_t)(1U << FOOTSW_PIN)))@	pic12f675-test-gpsim	gpsim:press-led	FW footswitch read polarity inverted (GP5 sense flipped -> toggles on release); PRESS1 toggle-on-press checkpoint catches it"
+"src/bypass_mcu_pic12f675.c	s@#define TMR0_SUBTICKS_PER_TICK (4U)@#define TMR0_SUBTICKS_PER_TICK (1U)@	pic12f675-test-gpsim	gpsim:press-early	FW software sub-tick count 4->1: the tick becomes 256us, debounce completes 4x early; PRESS1_EARLY cadence checkpoint catches it (no PIC10F322 counterpart -- that part has a period register)"
+"src/bypass_mcu_pic12f675.c	/static void hw_wait_for_tick/,/^}/s@        INTCONbits.T0IF = 0;@        (void)0; /* MUTANT: T0IF not cleared after sub-tick */@	pic12f675-test-gpsim	gpsim:press-early	FW T0IF re-arm removed from the polling loop: after the first overflow all remaining sub-ticks free-run and PRESS1_EARLY catches the collapsed debounce cadence"
+"src/bypass_mcu_pic12f675.c	/void hw_pin_set_high/,/^}/s@GPIO = gpio_shadow_;@/* MUTANT: shadow never reaches the port */@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET control-pin write never reaches GPIO -- a fault only a part with an SRAM shadow can express. The shell's own port-follows-shadow guard then resets every iteration, and lock-step sees the ctx_ divergence"
+"src/bypass_mcu_pic12f675.c	s@        (uint8_t)(GPIO & (uint8_t)BYPASS_OUTPUT_DDR_MASK);@        (uint8_t)(gpio_shadow_ \& (uint8_t)BYPASS_OUTPUT_DDR_MASK);@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:GPIO.GP0	TARGET port-follows-shadow guard reads the shadow twice, making the comparison a tautology; physical-pin fault injections stop recovering"
+"src/bypass_mcu_pic12f675.c	s@(actual_direction_mask == expected_direction_mask) &&@(1U != 0U) \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:TRISIO.GP4	TARGET exact-TRISIO predicate removed: parked-spare GP4 direction corruption evades the remaining required-subset check"
+"src/bypass_mcu_pic12f675.c	s@wpu_latches == (uint8_t)(1U << FOOTSW_PIN)@0U != (wpu_latches \& (uint8_t)(1U << FOOTSW_PIN))@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:WPU.GP0	TARGET exact WPU guard weakened to GP5-present only; extra output-pin pull-up latches go undetected"
+"src/bypass_mcu_pic12f675.c	s@ansel   = (uint8_t)(ANSEL & ANSEL_OUTPUT_MASK);@ansel   = (uint8_t)(ANSEL \& 0x07U);@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:ANSEL.ANS3	TARGET ANSEL guard narrowed to ANS0..ANS2, dropping ANS3; GP4 re-selected analog goes undetected (GPIO bit 4 maps to ANSEL bit 3, so this is the mapping's own mutant)"
+"src/bypass_mcu_pic12f675.c	s@(CMCON_COMPARATOR_OFF == cmcon)  &&@(1U != 0U)  \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:CMCON.CM0	TARGET comparator-off guard defeated; a CMCON upset re-takes GP0..GP2 with no reset (no PIC10F322 counterpart -- that part has no comparator)"
+"src/bypass_mcu_pic12f675.c	s@(OPTION_REG_CONFIG    == option) &&@((OPTION_REG_CONFIG \& 0xAFU) == (option \& 0xAFU)) \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:OPTION.INTEDG	TARGET exact OPTION_REG comparison weakened to ignore INTEDG and T0SE; both otherwise-silent bit upsets stop forcing reset while PS remains guarded"
+"src/bypass_mcu_pic12f675.c	s@(0U                   == adon)   &&@((0U == adon) || (0U != adon)) \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:ADCON0.ADON	TARGET ADC-on guard tautologized while retaining the volatile-derived operand; an ADON upset no longer forces reset"
+"src/bypass_mcu_pic12f675.c	s@(OPTION_REG_CONFIG    == option) &&@((OPTION_REG_CONFIG \& 0x7FU) == (option \& 0x7FU)) \&\&@;s@(0U == wpu_global);@((0U == wpu_global) || (0U != wpu_global));@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:OPTION.nGPPU	TARGET global pull-up enable detection defeated in both its exact OPTION_REG and dedicated nGPPU checks; the isolated nGPPU injection no longer forces reset"
+"src/bypass_mcu_pic12f675.c	s@(osccal_snapshot_     == osccal);@(1U != 0U);@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:OSCCAL.CAL0	TARGET oscillator-trim guard defeated; a corrupt OSCCAL never forces a reset (no PIC10F322 counterpart -- that part compares OSCCON against a constant)"
+"src/bypass_mcu_pic12f675.c	s@        ctx_.program_state = res.program_state;@        (void)res.program_state; /* MUTANT: program-state write-back dropped */@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET program_state write-back dropped: the context never enters release lockout and lock-step diverges from the pure model"
+"src/bypass_mcu_pic12f675.c	s@        ctx_.effect_state  = res.effect_state;@@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET effect_state write-back dropped: the pins still follow res, so only the ctx_ lock-step against the pure model diverges"
+"src/bypass_mcu_pic12f675.c	s@            ctx_.debounce_counter = res.lockout_value;@            (void)res.lockout_value; /* MUTANT: lockout reload dropped */@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET debounce lockout write-back dropped: the context retains its integrated threshold instead of RELEASE_THRESH and lock-step diverges"
+"src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	io:relay-minimum	TARGET relay coil pulse shortened below the datasheet minimum; the target-I/O pulse-width check catches it on this part's 1.024 ms tick as it does on the 322's 1.000 ms one"
+"src/bypass_mcu_pic12f675.c	s@static void hw_wdt_pet(void) { CLRWDT(); }@static void hw_wdt_pet(void) { (void)0; /* MUTANT: no WDT pet */ }@	PIC12F675_SOAK_VARIANT=cd4053_simple PIC12F675_SOAK_DURATION_MS=$PIC_SOAK_MUT_MS PIC12F675_SOAK_LIVENESS_INTERVAL_MS=$PIC_SOAK_MUT_LIVENESS_MS PIC12F675_SOAK_COMBINATION_NAME=mutation-wdt pic12f675-test-soak	soak:wdt-reset	SOAK main-loop WDT pet removed; the soak's reset notifier catches the un-pet watchdog inside the short mutation window (this part's period is ~288 ms, well inside it)"
 )
 
 # --- AVR-XT shell mutants (src/bypass_mcu_avr_xt.c) ---------------------------
@@ -1430,7 +1767,7 @@ validate_mutation_inventory PIC10F320_HOST_MUTATIONS PIC10F320-host \
 validate_mutation_inventory PIC10F320_TOOL_MUTATIONS PIC10F320-tool \
     "$MUTATION_EXPECTED_PIC320_TOOL" 4 || exit 2
 validate_mutation_inventory PIC12F675_MUTATIONS PIC12F675 \
-    "$MUTATION_EXPECTED_PIC12F675" 4 || exit 2
+    "$MUTATION_EXPECTED_PIC12F675" 5 || exit 2
 validate_mutation_inventory XT_MUTATIONS ATtiny202 "$MUTATION_EXPECTED_XT" 4 || exit 2
 inventory_total=$((${#MUTATIONS[@]} + ${#XT_MUTATIONS[@]} \
     + ${#PIC_GPSIM_MUTATIONS[@]} \
@@ -1465,7 +1802,7 @@ collect_baseline_targets PIC10F320_HOST_MUTATIONS PIC10F320-host 4 2 \
     PIC10F320_HOST_BASE_TARGETS || exit 2
 collect_baseline_targets PIC10F320_TOOL_MUTATIONS PIC10F320-tool 4 2 \
     PIC10F320_BASE_TARGETS || exit 2
-collect_baseline_targets PIC12F675_MUTATIONS PIC12F675 4 2 \
+collect_baseline_targets PIC12F675_MUTATIONS PIC12F675 5 2 \
     PIC12F675_BASE_TARGETS || exit 2
 
 HOST_BASE_TARGETS=()
@@ -1482,21 +1819,36 @@ if [ "$SANDBOX_SELFTEST_DONE" -eq 1 ]; then
         echo "ERROR: mutation result root is not absolute: $RESULT_DIR" >&2
         exit 1
     }
-    # Fully provisioned, then the two partial shapes the skip accounting can
-    # produce: every simulator absent (only the 53 host mutants dispatch), and
-    # the ATtiny202 lane alone absent. The second is the case this file's
-    # combined `skipped` exists for -- a box with the PIC stack but no vendored
-    # DFP/yasimavr -- so the totals check must accept a skip that is not PIC's.
-    mutation_validate_totals 98 98 0 98 0 0 0 0 || exit 1
-    mutation_validate_totals 98 53 45 53 0 0 0 0 || exit 1
-    mutation_validate_totals 98 79 19 79 0 0 0 0 || exit 1
-    if mutation_validate_totals 98 52 45 52 0 0 0 0 >/dev/null 2>&1; then
+    # Fully provisioned, then three partial shapes: every optional simulator
+    # absent (only the host mutants dispatch), ATtiny202 alone absent, and the
+    # eighth category (PIC12F675) alone absent. These conservation cases are
+    # derived from the category pins so a new category cannot leave an old total
+    # looking authoritative.
+    always_dispatched=$((MUTATION_EXPECTED_CORE + MUTATION_EXPECTED_PIC320_HOST))
+    optional_mutants=$((MUTATION_EXPECTED_TOTAL - always_dispatched))
+    without_xt=$((MUTATION_EXPECTED_TOTAL - MUTATION_EXPECTED_XT))
+    without_pic12f675=$((MUTATION_EXPECTED_TOTAL - MUTATION_EXPECTED_PIC12F675))
+    mutation_validate_totals "$MUTATION_EXPECTED_TOTAL" \
+        "$MUTATION_EXPECTED_TOTAL" 0 "$MUTATION_EXPECTED_TOTAL" 0 0 0 0 || exit 1
+    mutation_validate_totals "$MUTATION_EXPECTED_TOTAL" "$always_dispatched" \
+        "$optional_mutants" "$always_dispatched" 0 0 0 0 || exit 1
+    mutation_validate_totals "$MUTATION_EXPECTED_TOTAL" "$without_xt" \
+        "$MUTATION_EXPECTED_XT" "$without_xt" 0 0 0 0 || exit 1
+    mutation_validate_totals "$MUTATION_EXPECTED_TOTAL" "$without_pic12f675" \
+        "$MUTATION_EXPECTED_PIC12F675" "$without_pic12f675" 0 0 0 0 || exit 1
+    if mutation_validate_totals "$MUTATION_EXPECTED_TOTAL" \
+            "$((always_dispatched - 1))" "$optional_mutants" \
+            "$((always_dispatched - 1))" 0 0 0 0 >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a dropped dispatch" >&2; exit 1
     fi
-    if mutation_validate_totals 98 53 45 52 0 0 0 0 >/dev/null 2>&1; then
+    if mutation_validate_totals "$MUTATION_EXPECTED_TOTAL" "$always_dispatched" \
+            "$optional_mutants" "$((always_dispatched - 1))" 0 0 0 0 \
+            >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a missing result" >&2; exit 1
     fi
-    if mutation_validate_totals 98 53 45 53 0 0 1 0 >/dev/null 2>&1; then
+    if mutation_validate_totals "$MUTATION_EXPECTED_TOTAL" "$always_dispatched" \
+            "$optional_mutants" "$always_dispatched" 0 0 1 0 \
+            >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted a failed worker" >&2; exit 1
     fi
     # Pin the public timeout grammar, including the distinction between unset
@@ -1823,6 +2175,278 @@ EOF
         echo "ERROR: mutation accounting rejected an ordinary mutation kill status" >&2
         exit 1
     fi
+    signature_log="$RESULT_DIR/pic12-signature.log"
+    write_pic12_gpsim_fixture() {
+        local failing_assertion=${1-} failing_variant=${2-}
+        local variant wrapper
+        [ -z "$failing_assertion" ] || printf '  %s\n' "$failing_assertion"
+        for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
+            for wrapper in toggle power-on; do
+                if [ "$variant" = "$failing_variant" ] && [ "$wrapper" = toggle ]; then
+                    printf 'RESULT: 1 check(s) FAILED for /fixture/bypass-pic12f675-%s_simcal.hex\n' \
+                        "$variant"
+                else
+                    printf 'RESULT: PASS (/fixture/bypass-pic12f675-%s_simcal.hex)\n' \
+                        "$variant"
+                fi
+            done
+        done
+    }
+    printf '%s\n' \
+        '  inject ADCON0.ADON       @0x01f: 0x00 -> 0x01  (fixture)' \
+        '    FAIL: 0 resets in 2000 ms (want exactly 1)  [gate did not fire?]' \
+        'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=cd4053_simple status=fail checks=37 failures=1' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 2 fault:ADCON0.ADON \
+        'PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target' \
+        "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = killed ] || {
+        echo "ERROR: PIC12F675 named behavioral failure was not classified as killed" >&2
+        exit 1
+    }
+    pic12f675_classify_checker_result 2 fault:OPTION.nGPPU \
+        'PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target' \
+        "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = checker-error ] || {
+        echo "ERROR: PIC12F675 wrong behavioral signature received kill credit" >&2
+        exit 1
+    }
+    write_pic12_gpsim_fixture \
+        'FAIL: PRESS1_EARLY: LED (GP0) on too early, GPIO=0x3' \
+        cd4053_simple > "$signature_log"
+    pic12f675_classify_checker_result 1 gpsim:press-early \
+        pic12f675-test-gpsim "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = killed ] || {
+        echo "ERROR: PIC12F675 gpsim behavioral signature was not classified as killed" >&2
+        exit 1
+    }
+    printf '%s\n' \
+        '  FAIL: PRESS1_EARLY: LED (GP0) on too early, GPIO=0x3' \
+        'RESULT: 1 check(s) FAILED for /fixture/bypass-pic12f675-cd4053_simple_simcal.hex' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 1 gpsim:press-early \
+        pic12f675-test-gpsim "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = checker-error ] || {
+        echo "ERROR: incomplete PIC12F675 gpsim failure received kill credit" >&2
+        exit 1
+    }
+    write_pic12_gpsim_fixture \
+        'FAIL: PRESS1: LED (GP0) should be on mid-press (toggle-on-press), GPIO=0x0' \
+        cd4053_simple > "$signature_log"
+    pic12f675_classify_checker_result 1 gpsim:press-led \
+        pic12f675-test-gpsim "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = killed ] || {
+        echo "ERROR: PIC12F675 gpsim press signature was not classified as killed" >&2
+        exit 1
+    }
+    printf '%s\n' \
+        'FAIL: lock-step divergence at iter 7 (in=1): fw(ps=0 es=0 dc=8) != model(ps=1 es=1 dc=25)' \
+        'PIC_TARGET_RESULT format=1 device=pic12f675 lane=lockstep variant=cd4053_simple status=fail checks=3005 failures=1' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 1 lockstep:divergence \
+        'PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target' \
+        "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = killed ] || {
+        echo "ERROR: PIC12F675 lock-step signature was not classified as killed" >&2
+        exit 1
+    }
+    printf '%s\n' \
+        'FAIL: relay pulse is shorter than the 4 ms datasheet minimum' \
+        'PIC_TARGET_RESULT format=1 device=pic12f675 lane=io variant=tq2_l2_5v_relay status=fail checks=36 failures=1' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 1 io:relay-minimum \
+        'PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target' \
+        "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = killed ] || {
+        echo "ERROR: PIC12F675 target-I/O signature was not classified as killed" >&2
+        exit 1
+    }
+    printf '%s\n' \
+        'SOAK FAIL [0.0001 h]: unexpected WDT reset (cumulative: 1)' \
+        'SOAK_RESULT format=1 status=fail combination=mutation-wdt duration_ms=2500 liveness_interval_ms=1000 checks=1 failures=1 watchdog_failures=1 liveness_failures=0' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 1 soak:wdt-reset \
+        'PIC12F675_SOAK_VARIANT=cd4053_simple PIC12F675_SOAK_DURATION_MS=2500 PIC12F675_SOAK_LIVENESS_INTERVAL_MS=1000 PIC12F675_SOAK_COMBINATION_NAME=mutation-wdt pic12f675-test-soak' \
+        "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = killed ] || {
+        echo "ERROR: PIC12F675 soak signature was not classified as killed" >&2
+        exit 1
+    }
+    printf '%s\n' 'FAIL: variant cd4053_simple did not compile for PIC12F675' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 2 fault:ADCON0.ADON \
+        'PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target' \
+        "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = compile-error ] || {
+        echo "ERROR: PIC12F675 compile failure was not classified as an error" >&2
+        exit 1
+    }
+    : > "$signature_log"
+    pic12f675_classify_checker_result 124 fault:ADCON0.ADON \
+        'PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target' \
+        "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = infrastructure-error ] || {
+        echo "ERROR: PIC12F675 timeout was not classified as infrastructure" >&2
+        exit 1
+    }
+    pic12f675_classify_checker_result 0 fault:ADCON0.ADON \
+        'PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target' \
+        "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = checker-error ] || {
+        echo "ERROR: PIC12F675 zero exit without a completion record was accepted" >&2
+        exit 1
+    }
+    printf '%s\n' \
+        '=== PIC12F675 target fault/lock-step/I-O PASS (variant cd4053_simple): PIC12F675_MATRIX_SHA256 format=1 fixture ===' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 0 fault:ADCON0.ADON \
+        'PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target' \
+        "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = survived ] || {
+        echo "ERROR: PIC12F675 complete zero-exit checker was not classified as survived" >&2
+        exit 1
+    }
+    pic12f675_classify_checker_result 0 fault:ADCON0.ADON \
+        'PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target' \
+        "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = checker-error ] || {
+        echo "ERROR: PIC12F675 target completion accepted the wrong variant" >&2
+        exit 1
+    }
+    write_pic12_gpsim_fixture > "$signature_log"
+    pic12f675_classify_checker_result 0 gpsim:press-led \
+        pic12f675-test-gpsim "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = survived ] || {
+        echo "ERROR: PIC12F675 complete gpsim checker was not classified as survived" >&2
+        exit 1
+    }
+    printf '%s\n' \
+        'SOAK_RESULT format=1 status=pass combination=mutation-wdt duration_ms=2500 liveness_interval_ms=1000 checks=2 failures=0 watchdog_failures=0 liveness_failures=0' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 0 soak:wdt-reset \
+        'PIC12F675_SOAK_VARIANT=cd4053_simple PIC12F675_SOAK_DURATION_MS=2500 PIC12F675_SOAK_LIVENESS_INTERVAL_MS=1000 PIC12F675_SOAK_COMBINATION_NAME=mutation-wdt pic12f675-test-soak' \
+        "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = survived ] || {
+        echo "ERROR: PIC12F675 complete soak checker was not classified as survived" >&2
+        exit 1
+    }
+    pic12f675_classify_checker_result 0 soak:wdt-reset \
+        'PIC12F675_SOAK_VARIANT=cd4053_simple PIC12F675_SOAK_DURATION_MS=2000 PIC12F675_SOAK_LIVENESS_INTERVAL_MS=1000 PIC12F675_SOAK_COMBINATION_NAME=mutation-wdt pic12f675-test-soak' \
+        "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = checker-error ] || {
+        echo "ERROR: PIC12F675 soak completion accepted the wrong duration" >&2
+        exit 1
+    }
+    mutation_partial_result_is_allowed "$MUTATION_EXPECTED_PIC12F675" 1 0 || {
+        echo "ERROR: explicit partial policy rejected a tools-absent PIC12F675 lane" >&2
+        exit 1
+    }
+    if mutation_partial_result_is_allowed "$MUTATION_EXPECTED_PIC12F675" 1 1; then
+        echo "ERROR: explicit partial policy accepted a failed PIC12F675 baseline" >&2
+        exit 1
+    fi
+    saved_pic12_cc=$PIC12F675_MUTATION_CC
+    saved_pic12_dfp=$PIC12F675_MUTATION_DFP
+    saved_pic12_python=$PIC12F675_MUTATION_PYTHON
+    saved_mutation_make=$MUTATION_MAKE
+    saved_mutation_timeout=$MUTATION_TIMEOUT_S
+    PIC12F675_MUTATION_CC="$RESULT_DIR/missing-xc8"
+    PIC12F675_MUTATION_DFP="$RESULT_DIR/missing-dfp"
+    PIC12F675_MUTATION_PYTHON="$RESULT_DIR/missing-python"
+    PIC12F675_OK=1; PIC12F675_WHY=fixture; MUT_BASELINE_FAILED=0
+    probe_pic12f675_baseline "$RESULT_DIR" >"$RESULT_DIR/pic12-absent.log" 2>&1
+    pic12_probe_rc=$?
+    if [ "$pic12_probe_rc" -eq 0 ] || [ "$PIC12F675_OK" -ne 0 ] \
+            || [ "$PIC12F675_WHY" != 'tools absent' ] \
+            || [ "$MUT_BASELINE_FAILED" -ne 0 ]; then
+        echo "ERROR: PIC12F675 absent-tool probe unexpectedly enabled its lane" >&2
+        exit 1
+    fi
+    fake_pic12_tools="$RESULT_DIR/pic12-baseline-tools"
+    fake_pic12_dfp="$RESULT_DIR/pic12-baseline-dfp"
+    fake_pic12_make="$RESULT_DIR/pic12-baseline-make"
+    fake_pic12_root="$RESULT_DIR/pic12-baseline-root"
+    mkdir -p "$fake_pic12_tools" "$fake_pic12_dfp/pic/include/proc" \
+        "$fake_pic12_root"
+    : > "$fake_pic12_dfp/pic/include/proc/pic12f675.h"
+    cat > "$fake_pic12_tools/tool" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+    cat > "$fake_pic12_make" <<'EOF'
+#!/usr/bin/env bash
+case "${FAKE_PIC12_BASELINE_MODE:?}" in
+    fail) exit 42 ;;
+    timeout) sleep 30 ;;
+    incomplete) exit 0 ;;
+    *) exit 96 ;;
+esac
+EOF
+    chmod 750 "$fake_pic12_tools/tool" "$fake_pic12_make"
+    PIC12F675_MUTATION_CC="$fake_pic12_tools/tool"
+    PIC12F675_MUTATION_DFP="$fake_pic12_dfp"
+    PIC12F675_MUTATION_PYTHON="$fake_pic12_tools/tool"
+    MUTATION_MAKE="$fake_pic12_make"
+    for pic12_fixture in fail timeout incomplete; do
+        MUT_BASELINE_FAILED=0; PIC12F675_OK=1; PIC12F675_WHY=fixture
+        if [ "$pic12_fixture" = timeout ]; then MUTATION_TIMEOUT_S=0.1; else MUTATION_TIMEOUT_S=1; fi
+        export FAKE_PIC12_BASELINE_MODE=$pic12_fixture
+        probe_pic12f675_baseline "$fake_pic12_root" \
+            >"$RESULT_DIR/pic12-$pic12_fixture.log" 2>&1
+        pic12_probe_rc=$?
+        case "$pic12_fixture" in
+            fail) expected_pic12_reason='pic12f675-simcal baseline FAILED' ;;
+            timeout) expected_pic12_reason='pic12f675-simcal baseline TIMEOUT' ;;
+            incomplete) expected_pic12_reason='pic12f675-simcal baseline INCOMPLETE' ;;
+        esac
+        if [ "$pic12_probe_rc" -eq 0 ] || [ "$PIC12F675_OK" -ne 0 ] \
+                || [ "$PIC12F675_WHY" != "$expected_pic12_reason" ] \
+                || [ "$MUT_BASELINE_FAILED" -ne 1 ]; then
+            echo "ERROR: PIC12F675 $pic12_fixture baseline classification failed" >&2
+            exit 1
+        fi
+    done
+    [ -f "$fake_pic12_root/.mutation-pic12f675-simcal-baseline.log" ] \
+        && [ ! -e "$RESULT_DIR/.mutation-pic12f675-simcal-baseline.log" ] || {
+        echo "ERROR: PIC12F675 baseline log escaped its disposable sandbox" >&2
+        exit 1
+    }
+    unset FAKE_PIC12_BASELINE_MODE
+    PIC12F675_MUTATION_CC=$saved_pic12_cc
+    PIC12F675_MUTATION_DFP=$saved_pic12_dfp
+    PIC12F675_MUTATION_PYTHON=$saved_pic12_python
+    MUTATION_MAKE=$saved_mutation_make
+    MUTATION_TIMEOUT_S=$saved_mutation_timeout
+    pic12_source_fixture="$RESULT_DIR/pic12-source-mutations"
+    mkdir "$pic12_source_fixture"
+    pic12_mutation_index=0
+    for entry in "${PIC12F675_MUTATIONS[@]}"; do
+        pic12_mutation_index=$((pic12_mutation_index + 1))
+        mutation_parse_record "PIC12F675 source selftest" 5 "$entry" || exit 1
+        file=${MUTATION_RECORD_FIELDS[0]}
+        sed_expr=${MUTATION_RECORD_FIELDS[1]}
+        signature=${MUTATION_RECORD_FIELDS[3]}
+        case "$signature" in
+            fault:*|gpsim:press-led|gpsim:press-early|lockstep:divergence|\
+            io:relay-minimum|soak:wdt-reset) ;;
+            *) echo "ERROR: PIC12F675 mutation has an unknown signature: $signature" >&2
+               exit 1 ;;
+        esac
+        mutation_fixture="$pic12_source_fixture/$pic12_mutation_index.c"
+        cp "$PROJ_DIR/$file" "$mutation_fixture" || exit 1
+        sed -i "$sed_expr" "$mutation_fixture" || {
+            echo "ERROR: PIC12F675 self-test could not apply mutation $pic12_mutation_index" >&2
+            exit 1
+        }
+        if cmp -s "$mutation_fixture" "$PROJ_DIR/$file"; then
+            echo "ERROR: PIC12F675 mutation $pic12_mutation_index did not change $file" >&2
+            exit 1
+        fi
+    done
+    [ "$pic12_mutation_index" -eq "$MUTATION_EXPECTED_PIC12F675" ] || {
+        echo "ERROR: PIC12F675 source mutation self-test count drifted" >&2
+        exit 1
+    }
     if mutation_parse_record selftest 4 $'a\tb\t\td' >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted an empty record field" >&2; exit 1
     fi
@@ -1974,7 +2598,7 @@ EOF
             "$RESULT_DIR/selftest-no-newline.status" >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted an unterminated status" >&2; exit 1
     fi
-    echo "mutation sandbox/accounting validation: 62 checks, 0 failures"
+    echo "mutation sandbox/accounting validation: 110 checks, 0 failures"
     exit 0
 fi
 
@@ -2159,6 +2783,13 @@ rm -rf "$P320_BASE"
 # from the table itself rather than written out here -- a mutant whose kill
 # command was never baselined is a mutant whose nonzero status could mean
 # "sandbox broken" rather than "fault detected".
+#
+# Tool absence is the ONLY skippable outcome. A producer or kill-target baseline
+# that times out, fails, or returns zero without its completion record latches
+# MUT_BASELINE_FAILED and makes the final run fail even in explicit partial mode.
+# This distinction matters most for pic12f675-simcal: the old compound `if`
+# called every nonzero producer result "tools absent" and hid a broken unmutated
+# baseline whenever MUTATION_ALLOW_SKIP=1.
 PIC12F675_OK=0
 PIC12F675_WHY="tools absent"
 echo
@@ -2178,34 +2809,7 @@ if ! validate_pic12f675_sandbox "$P675_BASE"; then
 fi
 echo "PIC12F675 mutation sandbox helpers: PASS"
 
-if mutation_bounded "$MUTATION_MAKE" -C "$P675_BASE" pic12f675-simcal >/dev/null 2>&1 \
-   && command -v "$GPSIM" >/dev/null 2>&1 \
-   && command -v "$PIC_SOAK_CXX" >/dev/null 2>&1 \
-   && [ -f "$PIC_SOAK_GPSIM_INC/sim_context.h" ] \
-   && pkg-config --exists glib-2.0 2>/dev/null; then
-    P675_BASELINES_OK=1
-    for target in "${PIC12F675_BASE_TARGETS[@]}"; do
-        # Intentional word splitting, as in the PIC10F320 probe: each field is
-        # optional VAR=value assignments followed by one Make target.
-        if run_mutation_make_command "$P675_BASE" "$target" \
-                "GPSIM=$GPSIM" >/dev/null 2>&1; then
-            echo "baseline $target: PASS"
-        else
-            echo "baseline $target: FAIL"
-            P675_BASELINES_OK=0
-        fi
-    done
-    if [ "$P675_BASELINES_OK" -eq 1 ]; then
-        PIC12F675_OK=1
-        echo "XC8 + gpsim + libgpsim present, all baselines PASS -> PIC12F675 mutants ENABLED"
-    else
-        PIC12F675_WHY="baseline FAILED"
-        MUT_BASELINE_FAILED=1
-        echo "a PIC12F675 kill-target baseline failed -> its mutants SKIPPED"
-    fi
-else
-    echo "XC8/gpsim/libgpsim absent -> PIC12F675 mutants SKIPPED"
-fi
+probe_pic12f675_baseline "$P675_BASE" || true
 rm -rf "$P675_BASE"
 
 # --- AVR-XT toolchain probe ---------------------------------------------------
@@ -2303,10 +2907,11 @@ fi
 if [ "$PIC12F675_OK" -eq 1 ]; then
     p675_cat="${#PIC12F675_MUTATIONS[@]} PIC12F675 mutants (gpsim/target aggregate/soak)"
     for entry in "${PIC12F675_MUTATIONS[@]}"; do
-        mutation_parse_record "PIC12F675 collection" 4 "$entry" || exit 2
+        mutation_parse_record "PIC12F675 collection" 5 "$entry" || exit 2
         file=${MUTATION_RECORD_FIELDS[0]}; sed_expr=${MUTATION_RECORD_FIELDS[1]}
-        target=${MUTATION_RECORD_FIELDS[2]}; desc=${MUTATION_RECORD_FIELDS[3]}
-        job_specs+=("$p675_cat$US""make$US$target$US$file$US$sed_expr$US$desc")
+        target=${MUTATION_RECORD_FIELDS[2]}; signature=${MUTATION_RECORD_FIELDS[3]}
+        desc=${MUTATION_RECORD_FIELDS[4]}
+        job_specs+=("$p675_cat$US""pic12f675$US$signature|$target$US$file$US$sed_expr$US$desc")
     done
 fi
 
@@ -2450,7 +3055,8 @@ if [ "$survived" -ne 0 ] || [ "$errored" -ne 0 ] \
         || [ "$accounting_failed" -ne 0 ]; then
     exit 1
 fi
-if [ "$skipped" -ne 0 ] && [ "$MUTATION_ALLOW_SKIP" -ne 1 ]; then
+if ! mutation_partial_result_is_allowed "$skipped" "$MUTATION_ALLOW_SKIP" \
+        "$MUT_BASELINE_FAILED"; then
     echo "ERROR: $skipped mutant(s) skipped; complete mutation gate did not run." >&2
     if [ "$MUT_BASELINE_FAILED" -eq 1 ]; then
         echo "       At least one lane skipped because its BASELINE FAILED, not because a" >&2

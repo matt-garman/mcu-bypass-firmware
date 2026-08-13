@@ -683,7 +683,7 @@ gives the Classic AVR the soak-lane mutant the PIC and ATtiny202 families
 already had.
 
 **PIC12F675 mutants are one table, not three, and are chosen for what this part
-has that the 10F32x parts do not.** All 14 need XC8 plus gpsim or libgpsim plus
+has that the 10F32x parts do not.** All 20 need XC8 plus gpsim or libgpsim plus
 the derived simulator images, so there is no host-only lane for them to fall
 back to and nothing to split. Copying the 322's list would mostly have re-proved
 the shared pure core, so the set targets the SRAM output shadow (a severed
@@ -692,9 +692,19 @@ turned into a tautology, and physical divergence the 322 cannot express because
 its port and latch are two views of one register),
 the software sub-tick counter that stands in for the period register this part
 lacks, the comparator and OSCCAL-trim guards that have no 322 counterpart, and
-ANSEL's off-by-one mapping (GPIO bit 4 selects ANS3). Kill targets are assigned
+ANSEL's off-by-one mapping (GPIO bit 4 selects ANS3). Dedicated rows additionally
+pin T0IF re-arming, exact OPTION_REG comparison, ADC-on rejection, global pull-up
+enable across its two redundant guards, and the program-state and lockout-counter
+write-backs. Kill targets are assigned
 by what each fault actually perturbs and that assignment is load-bearing: moved
 to the gpsim CLI lane, the defeated comparator guard survives.
+
+PIC12F675 kill credit is also stricter than an ordinary nonzero Make status.
+Every row names an exact gpsim assertion, fault injection, lock-step divergence,
+target-I/O minimum, or soak reset signature. A failed XC8 compile, timeout,
+missing completion record, or checker failure without that named signature is an
+error rather than a kill. Tool absence may still produce an explicitly partial
+run; a failed unmutated simulator-image or kill-target baseline may not.
 
 **PIC10F320 mutants are split by what they NEED, not by what they test.** 29 of
 them are killed by the host lanes and require only a C compiler, so they ride
@@ -713,8 +723,8 @@ kill, and the sandbox gaps that briefly cut it to 56 — is recorded in
 
 The driver independently pins the eight mutation categories at **24 core/AVR +
 19 AVR-XT + 29 PIC10F320 host + 11 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 8
-PIC target + 14 PIC12F675 = 112**. It rejects category drift before probing, then
-requires dispatched + skipped = 112 and killed + survived + errored = dispatched. Every
+PIC target + 20 PIC12F675 = 118**. It rejects category drift before probing, then
+requires dispatched + skipped = 118 and killed + survived + errored = dispatched. Every
 worker status is checked; result status/output pairs are atomically published
 and accepted only with exact text grammar and no missing, hidden, or extra
 artifacts.
@@ -725,8 +735,9 @@ to reach `test/pic10f320/{equiv,actuation,fault,gpsim}/` and the folded `.sh` an
 can enable the tool-dependent PIC10F320 mutants. The host-only
 `test-mutation-sandbox` regression exercises the same copy routine in `make test`,
 including the wrappers' executable mode, and covers inventory, conservation,
-record/command parsing, atomic publication, checker-status classification, and
-result grammar in 62 checks. `MUTATION_TIMEOUT_S` defaults only when unset and
+record/command parsing, atomic publication, checker-status classification,
+PIC12F675 behavioral signatures, source substitutions and baseline reasons, and
+result grammar in 110 checks. `MUTATION_TIMEOUT_S` defaults only when unset and
 accepts `0.001..86400` seconds with at most three fractional digits; zero,
 negative, empty, malformed, under-resolution, and over-limit values fail before
 any Make or tool probe. Every bounded checker owns a registered process session,
