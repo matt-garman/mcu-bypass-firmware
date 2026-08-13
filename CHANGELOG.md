@@ -32,6 +32,14 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- The Makefile name contract now walks every shell statement produced by a lone
+  Make-variable expansion instead of inspecting only its first statement. A
+  shell-local prefix in the first statement stays local, while real environment
+  channels in later statements are checked against their own child commands.
+  Prefix and suffix tokens surrounding the expansion attach only where the
+  reconstructed shell text permits. Boundary fixtures plus a later-statement
+  `PIC_GPSIM_PROC` severance probe move the gate from 45 to 48 checks.
+
 - PIC12F675 mutation results now fail closed by reason. Each of its 20 rows must
   produce a named gpsim, fault-injection, lock-step, target-I/O, or soak failure
   before receiving kill credit; XC8 compile failures, timeouts, incomplete

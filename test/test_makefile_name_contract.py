@@ -1524,10 +1524,14 @@ EXTERNAL_CONSUMERS = {
     "PYTHONWARNINGS": "read by CPython at startup, inside cppcheck's addon runner",
 }
 
-# A word that introduces a command without being one, so an assignment after it
-# is still in prefix position.
-PREFIX_TRANSPARENT = {"export", "env", "then", "do", "else", "{", "(", "!",
-                      "time", "nice", "nohup"}
+# Shell grammar words that introduce a command without becoming that command, so
+# an assignment after one is still in prefix position. `env` needs option-aware
+# handling and `time` is the project /bin/sh reserved word; both live in
+# split_prefix(). `export`, `nice` and `nohup`
+# are deliberately absent: each is a command, and `NAME=1` after it is an
+# argument/command name rather than a shell environment prefix for a later child.
+PREFIX_TRANSPARENT = {"if", "elif", "while", "until", "then", "do", "else",
+                      "{", "(", "!"}
 
 # A token that is exactly one make expansion, e.g. `$(XT_FUSE_ENV)`. Resolved
 # through `make print-`, because a command or an env prefix hidden behind a make
@@ -1547,12 +1551,54 @@ _FILE_TEXT = {}
 
 
 def make_expand(name):
-    """`make -s print-<name>`, cached. Empty string if make fails."""
+    """A recursively expanded Make value, cached and trimmed for path use."""
+    return make_expand_raw(name).strip()
+
+
+def make_expand_raw(name):
+    """A recursively expanded Make value with its shell boundaries intact.
+
+    The public print-% rule uses `echo '$($*)'`, which is intentionally pleasant
+    for operator queries and not a byte-safe API: a value containing a single
+    quote or shell operator can make the query fail. Use GNU Make's own `file`
+    function in a private included makefile instead, after pre-seeding the
+    worktree-lock token so the query reads the real graph rather than re-entering
+    through the serialization wrapper. `file` adds one record newline; remove
+    exactly that byte and preserve any newlines belonging to a multiline value.
+    """
     if name not in _EXPANDED:
-        done = subprocess.run(["make", "-s", "--no-print-directory",
-                               "print-" + name], cwd=ROOT,
-                              capture_output=True, text=True)
-        _EXPANDED[name] = done.stdout.strip() if done.returncode == 0 else ""
+        if not re.match(r"\A[A-Za-z_][A-Za-z0-9_]*\Z", name):
+            sys.exit(f"FAIL: unsafe Make variable expansion request: {name!r}")
+        stat = os.stat(ROOT)
+        lock_id = f"{stat.st_dev}:{stat.st_ino}"
+        with tempfile.TemporaryDirectory() as tmp:
+            fragment = os.path.join(tmp, "expand.mk")
+            output = os.path.join(tmp, "value")
+            begin = "__MCU_BYPASS_NAME_CONTRACT_BEGIN__"
+            end = "__MCU_BYPASS_NAME_CONTRACT_END__"
+            with open(fragment, "w", encoding="utf-8") as fh:
+                fh.write(f"override _MAKE_SERIAL_LOCK_HELD := {lock_id}\n")
+                fh.write(f"include {os.path.join(ROOT, 'Makefile')}\n")
+                fh.write(f"$(file >{output},{begin}$({name}){end})\n")
+                fh.write(".PHONY: __name_contract_expand\n")
+                fh.write("__name_contract_expand: ; @:\n")
+            done = subprocess.run(
+                ["make", "-s", "--no-print-directory", "-f", fragment,
+                 "__name_contract_expand"], cwd=ROOT,
+                capture_output=True, text=True,
+            )
+            if done.returncode != 0:
+                sys.exit(f"FAIL: could not expand Make variable {name}:\n"
+                         + done.stderr.strip())
+            try:
+                with open(output, "rb") as fh:
+                    raw = fh.read().decode("utf-8", errors="surrogateescape")
+            except OSError as exc:
+                sys.exit(f"FAIL: Make produced no expansion for {name}: {exc}")
+        record = raw[:-1] if raw.endswith("\n") else raw
+        if not record.startswith(begin) or not record.endswith(end):
+            sys.exit(f"FAIL: Make expansion framing failed for {name}")
+        _EXPANDED[name] = record[len(begin):-len(end)]
     return _EXPANDED[name]
 
 
@@ -1621,19 +1667,19 @@ def recipe_statements(body):
                 token += body[i:j + 1]
                 i = j + 1
                 continue
-        if char.isspace():
-            if token:
-                statement.append(token)
-                token = ""
-            i += 1
-            continue
-        if char in ";|&<>\n":
+        if char == "\n" or char in ";|&<>":
             if token:
                 statement.append(token)
                 token = ""
             if statement:
                 out.append(statement)
                 statement = []
+            i += 1
+            continue
+        if char.isspace():
+            if token:
+                statement.append(token)
+                token = ""
             i += 1
             continue
         token += char
@@ -1645,48 +1691,103 @@ def recipe_statements(body):
     return out
 
 
-def split_prefix(statement, depth=0):
-    """(channel names written, the command tokens that follow them).
+def expanded_recipe_statements(body):
+    """Shell statements after one authoritative expansion of lone `$(VAR)`s.
 
-    A lone `$(VAR)` in prefix position is expanded and walked, because
-    `$(XT_FUSE_ENV) $(YASIMAVR_PY) $(XT_SIM_DRIVER)` hides seven
-    ATTINY202_FUSE_* channels behind one make variable. Reading only the
-    literal text of the recipe finds none of them.
+    Make expands the complete recipe text before the shell parses it. Rebuild
+    that order here: tokenize an outer statement, replace every word that is
+    exactly one simple Make expansion with its raw value, then tokenize again.
+    This handles variables in prefix, command and suffix position uniformly and
+    preserves separators/newlines introduced by multiline `define` values.
+
+    make_expand_raw() already asks Make for a recursively expanded value. Any
+    `$(...)` that survives in the result was deliberately escaped for the shell;
+    expanding it again would fabricate Make semantics and turn `$$(A)` into a
+    false cycle. Sequential sibling expansions are all replaced in this pass.
     """
+    complete = []
+    for statement in recipe_statements(body):
+        replaced, changed = [], False
+        for token in statement:
+            lone = LONE_MAKEVAR.match(token)
+            if lone:
+                replaced.append(make_expand_raw(lone.group(1)))
+                changed = True
+            else:
+                replaced.append(token)
+        if not changed:
+            complete.append(statement)
+            continue
+        for words in recipe_statements(" ".join(replaced)):
+            complete.append(words)
+    return complete
+
+
+def split_prefix(statement):
+    """The channel names and command tokens in one expanded statement."""
     names, i = [], 0
     while i < len(statement):
         token = statement[i]
         if token in PREFIX_TRANSPARENT:
             i += 1
             continue
+        if token == "time":
+            i += 1
+            while i < len(statement) and statement[i] == "-p":
+                i += 1
+            continue
+        if token == "env":
+            i += 1
+            while i < len(statement):
+                option = statement[i]
+                if option in ("-", "-i", "--ignore-environment"):
+                    names = []
+                    i += 1
+                    continue
+                if option == "--":
+                    i += 1
+                    break
+                if option in ("-u", "--unset") and i + 1 < len(statement):
+                    names = [name for name in names if name != statement[i + 1]]
+                    i += 2
+                    continue
+                if option.startswith("--unset="):
+                    names = [name for name in names
+                             if name != option.partition("=")[2]]
+                    i += 1
+                    continue
+                if option in ("-C", "--chdir") and i + 1 < len(statement):
+                    i += 2
+                    continue
+                if option in ("-S", "--split-string") \
+                        or option.startswith("--split-string="):
+                    sys.exit("FAIL: axis E does not parse assignments inside "
+                             "env --split-string; use ordinary env prefixes or "
+                             "extend the parser before adding this recipe")
+                if option.startswith("--chdir=") \
+                        or option in ("-0", "--null", "-v", "--debug"):
+                    i += 1
+                    continue
+                if option.startswith("-"):
+                    sys.exit(f"FAIL: axis E does not recognize env option {option!r}; "
+                             "extend the parser rather than skipping channels")
+                break
+            continue
         assigned = re.match(r"([A-Za-z_][A-Za-z0-9_]*)=", token)
         if assigned:
             names.append(assigned.group(1))
             i += 1
             continue
-        lone = LONE_MAKEVAR.match(token)
-        if lone and depth < 3:
-            # Re-tokenize the expansion with the same statement-aware splitter
-            # the recipe went through, rather than str.split(). A make variable
-            # in prefix position is not always a prefix: a `define` holding a
-            # whole shell fragment expands to SEVERAL statements, the first of
-            # which may be a plain assignment -- `simcal_count=0; for ... done`.
-            # Split naively, that reads as the channel simcal_count written for
-            # the command `for`, and demands that some file in the repository
-            # read a shell local through its environment. Which nothing does,
-            # because `x=0; cmd` does not put x in cmd's environment at all;
-            # only `x=0 cmd` does, and that is one statement.
-            expanded = recipe_statements(make_expand(lone.group(1)))
-            words = expanded[0] if expanded else []
-            if words and re.match(r"[A-Za-z_][A-Za-z0-9_]*=", words[0]):
-                # The recipe text after this token continues the FIRST statement
-                # only when the expansion was one statement. Otherwise the
-                # expansion ended in a `;` and what follows is its own command.
-                tail = statement[i + 1:] if len(expanded) == 1 else []
-                more, rest = split_prefix(words + tail, depth + 1)
-                return names + more, rest
         break
     return names, statement[i:]
+
+
+def env_prefix_pairs(body):
+    """Every nonempty environment-prefix/command pair in shell text."""
+    for statement in expanded_recipe_statements(body):
+        names, command = split_prefix(statement)
+        if names and command:
+            yield names, command
 
 
 def env_channel_writes():
@@ -1711,10 +1812,7 @@ def env_channel_writes():
         if not line.startswith("\t"):
             continue
         body = line.lstrip("\t").lstrip().lstrip("@-+")
-        for statement in recipe_statements(body):
-            names, command = split_prefix(statement)
-            if not names or not command:
-                continue
+        for names, command in env_prefix_pairs(body):
             for name in names:
                 writes.setdefault(name, []).append((lineno, tuple(command)))
     return writes
@@ -1723,9 +1821,6 @@ def env_channel_writes():
 def repo_path(token):
     """The repo file a token names, if any."""
     text = token.strip("\"'")
-    lone = LONE_MAKEVAR.match(text)
-    if lone:
-        text = make_expand(lone.group(1))
     text = text.strip("\"'").lstrip("./")
     if text in _UNIVERSE:
         return text
@@ -1741,10 +1836,10 @@ def repo_path(token):
 
 def resolve_child(command):
     """(repo files the command runs, kind). Empty set means unresolved."""
-    words = []
-    for token in command:
-        lone = LONE_MAKEVAR.match(token.strip("\"'"))
-        words.extend(make_expand(lone.group(1)).split() if lone else [token])
+    # env_prefix_pairs() already performed Make's one authoritative expansion.
+    # Any $(...) surviving here was escaped for the shell; interpreting it as a
+    # second Make expansion fabricates a child that the recipe does not run.
+    words = list(command)
     for token in words:
         found = repo_path(token)
         if found:
@@ -1834,6 +1929,137 @@ def check_axis_e():
         sys.exit(f"FAIL: axis E harvested only {len(writes)} env channels from "
                  "the Makefile; the recipe tokenizer or the prefix walk has "
                  "rotted, and a harvest this small cannot be checking much")
+    checks += 1
+
+    # A Make expansion is raw shell text, not one prefix-sized token. Exercise
+    # every boundary: one statement, middle statements, a leading separator, a
+    # trailing separator, nesting, and the motivating shell-local-then-channel
+    # shape. The expected pairs pin where outer prefix/suffix tokens may attach.
+    expansion_fixtures = {
+        "NAME_CONTRACT_ONE": "INNER=1 ./one.sh",
+        "NAME_CONTRACT_MANY": "FIRST=1 ./first.sh; LAST=1",
+        "NAME_CONTRACT_LEADING": "; LEADING=1",
+        "NAME_CONTRACT_TRAILING": "TRAILING=1 ./trailing.sh;",
+        "NAME_CONTRACT_A": "A=1",
+        "NAME_CONTRACT_B": "B=1",
+        "NAME_CONTRACT_C": "C=1",
+        "NAME_CONTRACT_D": "D=1",
+        "NAME_CONTRACT_COMMAND_TAIL": "; COMMAND_TAIL=1 ./tail.sh",
+        "NAME_CONTRACT_MULTILINE": "MULTI_LOCAL=0\nMULTI_REAL=1 ./multi.sh\n",
+        # Make already consumed the escaping by the time this authoritative
+        # value reaches the parser; the surviving expansion is for the shell.
+        "NAME_CONTRACT_LITERAL": "$(LITERAL_FOR_SHELL)",
+        "NAME_CONTRACT_LATER": "shell_local=0; PIC_GPSIM_PROC=probe "
+                               "./test/pic/run_gpsim_test.sh",
+    }
+    expansion_cases = [
+        ("OUTER=1 $(NAME_CONTRACT_ONE) tail",
+         [(('OUTER', 'INNER'), ('./one.sh', 'tail'))]),
+        ("OUTER=1 $(NAME_CONTRACT_MANY) ./last.sh",
+         [(('OUTER', 'FIRST'), ('./first.sh',)),
+          (('LAST',), ('./last.sh',))]),
+        ("OUTER=1 $(NAME_CONTRACT_LEADING) ./leading.sh",
+         [(('LEADING',), ('./leading.sh',))]),
+        ("OUTER=1 $(NAME_CONTRACT_TRAILING) AFTER=1 ./after.sh",
+         [(('OUTER', 'TRAILING'), ('./trailing.sh',)),
+          (('AFTER',), ('./after.sh',))]),
+        ("$(NAME_CONTRACT_A) $(NAME_CONTRACT_B) $(NAME_CONTRACT_C) "
+         "$(NAME_CONTRACT_D) ./siblings.sh",
+         [(('A', 'B', 'C', 'D'), ('./siblings.sh',))]),
+        ("OUTER=1 ./first.sh $(NAME_CONTRACT_COMMAND_TAIL)",
+         [(('OUTER',), ('./first.sh',)),
+          (('COMMAND_TAIL',), ('./tail.sh',))]),
+        ("OUTER=1 $(NAME_CONTRACT_MULTILINE) AFTER_MULTI=1 ./after-multi.sh",
+         [(('MULTI_REAL',), ('./multi.sh',)),
+          (('AFTER_MULTI',), ('./after-multi.sh',))]),
+        ("OUTER=1 $(NAME_CONTRACT_LITERAL) tail",
+         [(('OUTER',), ('$(LITERAL_FOR_SHELL)', 'tail'))]),
+        ("env -i ENV_REAL=1 ./env.sh",
+         [(('ENV_REAL',), ('./env.sh',))]),
+        ("env - ENV_DASH=1 ./env-dash.sh",
+         [(('ENV_DASH',), ('./env-dash.sh',))]),
+        ("env -- -i NOT_ENV=1 ./not-a-child.sh", []),
+        ("env -C /tmp ENV_CHDIR=1 ./env-chdir.sh",
+         [(('ENV_CHDIR',), ('./env-chdir.sh',))]),
+        ("env -u OLD ENV_UNSET=1 ./env-unset.sh",
+         [(('ENV_UNSET',), ('./env-unset.sh',))]),
+        ("time TIME_REAL=1 ./time.sh",
+         [(('TIME_REAL',), ('./time.sh',))]),
+        ("time -p env TIME_PORTABLE=1 ./time-portable.sh",
+         [(('TIME_PORTABLE',), ('./time-portable.sh',))]),
+        ("if IF_REAL=1 ./if.sh; then :; fi",
+         [(('IF_REAL',), ('./if.sh',))]),
+        ("export NOT_ENV=1 ./not-a-child.sh", []),
+        ("nice NOT_ENV=1 ./not-a-child.sh", []),
+        ("nohup NOT_ENV=1 ./not-a-child.sh", []),
+        ("$(NAME_CONTRACT_LATER)",
+         [(('PIC_GPSIM_PROC',), ('./test/pic/run_gpsim_test.sh',))]),
+    ]
+    saved_expansions = {name: _EXPANDED.get(name) for name in expansion_fixtures}
+    missing_expansions = set(expansion_fixtures) - set(_EXPANDED)
+    try:
+        _EXPANDED.update(expansion_fixtures)
+        for body, expected in expansion_cases:
+            actual = [(tuple(names), tuple(command))
+                      for names, command in env_prefix_pairs(body)]
+            if actual != expected:
+                sys.exit("FAIL: expanded Make-variable statements attached "
+                         f"environment prefixes incorrectly for {body!r}: "
+                         f"got {actual!r}, expected {expected!r}")
+    finally:
+        for name in missing_expansions:
+            _EXPANDED.pop(name, None)
+        for name in set(expansion_fixtures) - missing_expansions:
+            _EXPANDED[name] = saved_expansions[name]
+    checks += 1
+
+    # Exercise the real Make-query path, not just the seeded cache. An
+    # environment-origin variable can carry a trailing newline; the framing
+    # sentinels must preserve it rather than guessing which final newline came
+    # from `$(file ...)`.
+    query_name = "NAME_CONTRACT_QUERY_BOUNDARY"
+    saved_query_env = os.environ.get(query_name)
+    _EXPANDED.pop(query_name, None)
+    try:
+        os.environ[query_name] = "QUERY_REAL=1 ./query.sh\n"
+        if make_expand_raw(query_name) != "QUERY_REAL=1 ./query.sh\n":
+            sys.exit("FAIL: authoritative Make expansion lost a trailing newline")
+    finally:
+        _EXPANDED.pop(query_name, None)
+        if saved_query_env is None:
+            os.environ.pop(query_name, None)
+        else:
+            os.environ[query_name] = saved_query_env
+    checks += 1
+
+    # Acceptance probe: retain the assignment-only first statement as a shell
+    # local, harvest the real channel in the expansion's later statement, and
+    # prove that renaming the downstream read severs that exact harvested link.
+    later_names, later_command = expansion_cases[-1][1][0]
+    children, kind = resolve_child(list(later_command))
+    if kind != "file" or children != {"test/pic/run_gpsim_test.sh"}:
+        sys.exit("FAIL: later-statement channel fixture did not resolve its child")
+    literal_children, literal_kind = resolve_child(
+        ['$(LITERAL_FOR_SHELL)', 'tail'])
+    if literal_children or literal_kind != "external:$(LITERAL_FOR_SHELL)":
+        sys.exit("FAIL: child resolver re-expanded Make text escaped for the shell")
+    closure = reader_closure(children)
+    if not any(reads_channel(rel, "PIC_GPSIM_PROC")[0] for rel in closure):
+        sys.exit("FAIL: later-statement channel fixture does not reach its reader")
+    wrapper = "test/pic/gpsim_wrapper_common.sh"
+    original_wrapper = file_text(wrapper)
+    severed_wrapper = original_wrapper.replace(
+        "${PIC_GPSIM_PROC:-", "${PIC_GPSIM_PROC_RENAMED:-", 1)
+    if severed_wrapper == original_wrapper:
+        sys.exit("FAIL: later-statement severance fixture could not rename the read")
+    try:
+        _FILE_TEXT[wrapper] = severed_wrapper
+        if any(reads_channel(rel, "PIC_GPSIM_PROC")[0] for rel in closure):
+            sys.exit("FAIL: later-statement channel severance was not detected")
+    finally:
+        _FILE_TEXT[wrapper] = original_wrapper
+    if later_names != ('PIC_GPSIM_PROC',):
+        sys.exit("FAIL: shell-local first statement leaked into the later channel")
     checks += 1
 
     # EVERY write site is checked, not just one per name. Each
