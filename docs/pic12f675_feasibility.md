@@ -1096,16 +1096,20 @@ They are listed worst-first; item 9 was opened after this list was first
 numbered and is appended rather than inserted, so that the cross-references to
 these numbers elsewhere in the repository stay valid.
 
-**Status 2026-08-11.** Items 4, 5 and 6 are CLOSED — all three were datasheet
-reads rather than bench work, and DS41190G answers them; item 4's own stated
-assumption turned out to be wrong in the unsafe direction, and its conclusion
-survives anyway. Items 1, 2 and 9 are the ones that need silicon. Items 1 and 2
-now have a fail-closed baseline/write/readback workflow, but no real-hardware
-result has been retained. Item 9 was opened on 2026-08-11 in review of the port
-branch; it also needs silicon, but a meter rather than a programmer. Items 3 and
-7 are Model-B-inapplicable and lane-local respectively. **What is left is a
-bench**, tracked in `TODO.md` as `T3-pic12f675-bench` together with the graduation
-diff that follows it.
+**Status 2026-08-13.** Items 4, 5, 6 and 7 are CLOSED. Items 4, 5 and 6 were
+datasheet reads rather than bench work, and DS41190G answers them; item 4's own
+stated assumption turned out to be wrong in the unsafe direction, and its
+conclusion survives anyway. Item 7 closed on the shipping lane's own standing
+evidence rather than on a document. Item 3 is Model-B-inapplicable.
+
+That leaves items 1, 2, 8 and 9, and every one of them needs silicon — the same
+four `TODO.md` tracks as `T3-pic12f675-bench`. Items 1 and 2 now have a
+fail-closed baseline/write/readback workflow, but no real-hardware result has
+been retained. Item 8 is established only as far as the pinned pack's parity
+with the PIC10F322's hardware-tool set goes; neither programmer binary has ever
+been run against this part. Item 9 was opened on 2026-08-11 in review of the port branch;
+it also needs silicon, but a meter rather than a programmer. **What is left is a
+bench**, tracked together with the graduation diff that follows it.
 
 1. **Bandgap calibration bits in the CONFIG word (`BG<1:0>`).** These are
    factory-calibrated per device and set the BOD/POR trip voltages. XC8 emitted
@@ -1238,14 +1242,33 @@ diff that follows it.
    oscillator-derived figure is asserting against the *typical* device, never
    the worst-case one. The lanes assert relative cadences and bounded windows
    for this reason.
-7. **`asynchronous_stimulus` initial state.** In the spike, a stimulus declared
-   `initial_state 1` read **low** on `gpio5` at a checkpoint before its first
-   listed transition, while the same firmware with no stimulus attached read the
-   pin high via the internal pull-up. The libgpsim harnesses drive via `set_Vth`
-   with a low `Zth` (which the repository already documents as the correct
-   mechanism, `putState` being a no-op for this purpose) and would not hit this —
-   but the `.stc`-driven `pic12f675-test-gpsim` lane would, and the behaviour
-   needs to be understood rather than worked around by moving checkpoints.
+7. **`asynchronous_stimulus` initial state.** *CLOSED 2026-08-13 — the shipping
+   lane asserts the disputed read head-on, and it holds.* In the spike, a
+   stimulus declared `initial_state 1` read **low** on `gpio5` at a checkpoint
+   before its first listed transition, while the same firmware with no stimulus
+   attached read the pin high via the internal pull-up. The libgpsim harnesses
+   drive via `set_Vth` with a low `Zth` (which the repository already documents
+   as the correct mechanism, `putState` being a no-op for this purpose) and
+   would not hit this — but the `.stc`-driven `pic12f675-test-gpsim` lane would.
+
+   It does not, and the lane is arranged so that this is a *result* rather than
+   an avoidance. `test/pic/pic12f675_footswitch_toggle.stc` declares
+   `initial_state 1`, attaches the stimulus to `gpio5`, and then breaks at cycle
+   **23040** — 2560 cycles **before** the stimulus' first listed transition at
+   25600. That is precisely the window the spike observation describes. At that
+   checkpoint `test/pic/run_gpsim_test.sh` asserts `GP5 == 1` outright, and the
+   assertion passes on all three variants (`INIT: footswitch released (GP5=1)`).
+   The checkpoint was not moved to dodge the condition; it sits inside it, on
+   every run of a gated aggregate.
+
+   What closes the item is therefore a standing check, not an explanation: the
+   spike's tree was not retained, so the two configurations cannot be diffed and
+   no root cause for the original reading is claimed here. The residual risk is
+   bounded the right way round — if the behaviour ever appears, the failure is
+   this `INIT_BYPASS` footswitch assertion going red in CI, not a silently
+   relocated checkpoint. Anyone adding a `.stc` checkpoint ahead of a stimulus'
+   first transition on this part should keep asserting the pin there for the
+   same reason.
 8. **Programmer device support.** PICkit 2 supports this family well. Whether the
    current `ipecmd` path still runs against PIC12F675 must be confirmed at the
    bench.

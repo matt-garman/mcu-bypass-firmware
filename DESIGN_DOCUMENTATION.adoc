@@ -1108,19 +1108,22 @@ formal proofs exercise it directly. Nothing about it is per-MCU. PIC10F320 does
 not compile it into its image; equivalence and lock-step compare the
 self-contained firmware with this same core.
 
-**The main loop is NOT shared.** Each of the three modular shell files owns its
+**The main loop is NOT shared.** Each of the four modular shell files owns its
 own `main()`, tick mechanism and watchdog-liveness model; the self-contained
-PIC10F320 file owns a fourth. Only the modular output-driver leaf operations are
+PIC10F320 file owns a fifth. Only the modular output-driver leaf operations are
 abstracted. This is deliberate: one portable `main()` parameterized by an
 interface looks cleaner and is wrong here.
 
 The AVR Classic design samples the footswitch *inside* the 1 ms Timer0 ISR
 while `main()` sleeps, and proves liveness through the `timer_isr_called_`
-ISR-to-main handshake. Both PIC implementations use a fundamentally different
-model: no tick ISR, but a polled loop that waits on `TMR2IF`, samples, updates
-and pets the watchdog, where reaching `CLRWDT` *is* the liveness proof. The
-PIC10F322 version is the modular shell; PIC10F320 writes the same model into its
-self-contained source. A single shared `main()` cannot express both timing
+ISR-to-main handshake. All three PIC implementations use a fundamentally
+different model: no tick ISR, but a polled loop that waits on a timer flag,
+samples, updates and pets the watchdog, where reaching `CLRWDT` *is* the
+liveness proof. The PIC10F322 and PIC12F675 versions are modular shells;
+PIC10F320 writes the same model into its self-contained source. The flag is not
+the same one: the 10F32x parts wait on a single `TMR2IF` per 1 ms tick, while
+the PIC12F675 counts four `T0IF` rollovers per 1.024 ms tick, for the reason
+given above. A single shared `main()` cannot express both timing
 models without changing AVR's ISR sampling and invalidating lock-step,
 ISR-jitter and handshake tests.
 
@@ -1131,7 +1134,7 @@ IDLE via `SLPCTRL`, and the watchdog is fuse-locked by `WDTCFG` so `hw_wdt_pet()
 is a bare `wdr` with nothing to arm. Because it integrates in the ISR, it
 shares the classic lane's blocking-actuation timing property: the ISR keeps
 sampling through a blocking relay or mute pulse, so no ticks are lost. The two
-AVR generations and two polled PIC
+AVR generations and three polled PIC
 implementations therefore qualify press timing differently (see Asymmetric
 Debounce Timing). This is the clearest illustration of why the modular shells
 are separate: AVR-XT and AVR Classic share a *model* and none of their register
