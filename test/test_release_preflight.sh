@@ -608,8 +608,11 @@ grep -Fq 'printf '\''  %q %q %q\n'\'' "$YASIMAVR_PY_ABS"' "$RELEASE" \
 	|| fail "ATtiny202 release soak wrapper does not execute the absolute yasimavr interpreter"
 checks=$((checks + 1))
 
-grep -Fq 'command -v "$PIC_SOAK_CXX"' "$MUTATION" \
-	&& grep -Fq 'command -v "$PIC10F320_SOAK_CXX"' "$MUTATION" \
+# The contract is that the selected command is qualified before use, not which
+# helper does the qualifying: `command -v` and the path-aware
+# mutation_command_is_available wrapper both satisfy it.
+grep -Eq '(command -v|mutation_command_is_available) "\$PIC_SOAK_CXX"' "$MUTATION" \
+	&& grep -Eq '(command -v|mutation_command_is_available) "\$PIC10F320_SOAK_CXX"' "$MUTATION" \
 	&& grep -Fq '${XT_DFP:-${XT_DFP_ABS:-third_party/attiny_dfp}}' "$MUTATION" \
 	&& grep -Fq '${YASIMAVR_VENV:-${XT_YASIMAVR_VENV_ABS:-third_party/yasimavr/venv}}' "$MUTATION" \
 	&& grep -Fq 'PIC10F320_SOAK_GPSIM_INC="${PIC10F320_SOAK_GPSIM_INC:-$PIC_SOAK_GPSIM_INC}"' "$MUTATION" \
