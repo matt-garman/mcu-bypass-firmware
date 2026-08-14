@@ -5940,8 +5940,9 @@ pic12f675-test-soak: variant-selectors-valid pic12f675-simcal
 #
 # The table is NOT the 10F32x's with the names changed. Two of this part's fields
 # have no 10F32x counterpart at all -- CPD, and the BG<1:0> bandgap calibration
-# bits, which the build must leave ERASED because they are factory trim the
-# programmer preserves (the CONFIG-word sibling of the OSCCAL story below). And
+# bits, which the build must leave ERASED so the image does not replace factory
+# trim (the CONFIG-word sibling of the OSCCAL story below). The programmer must
+# preserve the device value; this build-side check cannot prove that it does. And
 # FOSC widens from one bit to three, which promotes it to a design-intent check:
 # seven of the eight settings hand GP4 and/or GP5 to an oscillator. Six claim
 # footswitch GP5; the remaining one claims parked-output GP4. Only INTRCIO
@@ -5963,8 +5964,9 @@ pic12f675-test-config: pic12f675 test/pic/test_config_pic12f675
 # THE SHIPPING IMAGE CANNOT RUN IN A SIMULATOR, and that is not a defect. On this
 # part the oscillator trim lives in FLASH at the last program word (0x3FF, the
 # device pack's ".oscval" CalDataZone) and is written at the factory; XC8 emits a
-# `CALL 0x3FF` in startup and expects a `RETLW k` waiting there. A programmer
-# preserves that word, so a built HEX never contains it -- in gpsim the program
+# `CALL 0x3FF` in startup and expects a `RETLW k` waiting there. A built HEX
+# deliberately leaves that word absent so a programmer can preserve the device
+# value; real preservation remains hardware-unvalidated. In gpsim the program
 # counter runs off the end of flash and the part watchdog-resets in a LOOP, with
 # main() never reached. Every simulator lane for this part therefore runs against
 # a DERIVED image carrying an injected calibration word.
@@ -7109,11 +7111,13 @@ RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(XT_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(
 # ONE OF THEM IS NOT purely a 1.x.y nicety, though: losing word 0x3FF or the
 # BG bits yields a device that runs WRONG while still appearing to work, and that
 # is a flashing-time footgun the other parts do not have. The software mitigation
-# already exists (pic12f675-program refuses to clobber 0x3FF and does before/
-# after readback), but the published flashing procedure in release/README.md MUST
-# carry the calibration-word preservation requirement. Treat that as a gate on
-# the release, not a nicety -- an image shipped without the warning is a device
-# with an untrimmed oscillator that still appears to work.
+# already exists (pic12f675-program rejects an image that explicitly programs
+# 0x3FF, compares the live device with a baseline immediately before writing, and
+# records mandatory post-write trim/readback). That detects programmer-induced
+# loss only after the write, so the published procedure in release/README.md MUST
+# carry the complete guarded transaction and hardware-validation boundary. Treat
+# that as a gate on the release, not a nicety -- an image shipped without the
+# warning can leave an untrimmed device that still appears to work.
 
 # Canonical release-soak and retained-evidence inventories. These are explicit,
 # immutable publication contracts rather than observations of whichever loops or
@@ -7228,9 +7232,11 @@ help:
 	@echo "                        (PIC12F675_TARGET_VARIANT); pic12f675-test-target-variants runs all"
 	@echo "  pic12f675-preflight   read-only factory-trim capture (PIC12F675_READ_PROG=pk2cmd,"
 	@echo "                        PIC12F675_TRIM_EVIDENCE= new retained JSON path)"
-	@echo "  pic12f675-program     flash one fresh variant and require matching before/after trim reads"
+	@echo "  pic12f675-program     after preflight, flash one fresh variant and record mandatory readback"
 	@echo "                        (VARIANT=, PIC12F675_PROG=, PIC12F675_PROG_KIND=pk2cmd|ipecmd,"
 	@echo "                        PIC12F675_TRIM_EVIDENCE=, PIC12F675_BENCH_RESULT= new directory)"
+	@echo "                        Checks/records preservation; real programmer behavior remains hardware-unvalidated."
+	@echo "                        ipecmd routing is software-only; no safe hardware attachment/handoff is published."
 	@echo "PIC10F320 (constrained 256-word target; docs/pic10f320_special_case.md):"
 	@echo "  pic10f320          build one PIC10F320 variant + 256-word and HW-stack gates"
 	@echo "                     (PIC10F320_VARIANT=cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay)"

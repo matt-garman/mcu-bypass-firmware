@@ -7,8 +7,9 @@ WHY THIS EXISTS. On the PIC12F675 the oscillator trim value lives in FLASH, at
 the last program word, and it is programmed at the factory -- the device pack
 declares word 0x3FF as the ".oscval" CalDataZone. XC8's startup code emits a
 `CALL <calibration word>` and expects a `RETLW k` to be waiting there. A freshly
-built .hex does not contain that word, because on real silicon the programmer
-preserves it rather than writing it.
+built .hex deliberately does not contain that word so it cannot replace the
+per-device value. Whether a real programmer preserves the word during
+erase/write is a separate, hardware-unvalidated question.
 
 In a simulator there is no factory trim, so the word is simply absent: the
 program counter runs off the end of flash, the part watchdog-resets, and it does
@@ -25,9 +26,10 @@ shipping an image carrying a fake calibration value, or baselining an image that
 cannot run in any lane.
 
 A SECOND JOB, THE INVERSE. `--assert-preserves-calibration` injects nothing: it
-requires that an image LEAVES the calibration word alone. That is the question a
-device programmer has to answer, and `pic12f675-program` asks it before writing
-any HEX to real silicon -- because getting a DERIVED image onto a device
+requires that an image LEAVES the calibration word alone. This answers only the
+image-side question; it cannot prove what erase/write does to the device word.
+`pic12f675-program` asks it before writing any HEX to real silicon -- because
+getting a DERIVED image onto a device
 overwrites the factory oscillator trim with the fabricated constant above,
 irreversibly, and silently, since the part still appears to work afterwards. The
 two modes share one definition of where the word is and of what "programmed"

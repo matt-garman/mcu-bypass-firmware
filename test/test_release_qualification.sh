@@ -21,7 +21,9 @@ fail() {
 # shellcheck source=../scripts/release-documentation.sh
 source "$RENDER"
 for function in release_render_scope release_render_validation \
-		release_render_pic_toolchain_rows release_render_reproduction_commands \
+		release_render_pic_toolchain_rows release_render_pic12f675_flashing \
+		release_render_flashing \
+		release_render_reproduction_commands \
 		release_render_commit_message; do
 	declare -F "$function" >/dev/null \
 		|| fail "release documentation renderer omitted $function"
@@ -34,6 +36,7 @@ for wiring in \
 	$'\trelease_render_validation "$hours"' \
 	$'\trelease_render_pic_toolchain_rows "$PIC_CC" "$TC_XC8_322"' \
 	$'\t\t"$PIC10F320_CC" "$TC_XC8_320" "$PIC_DFP" "$PIC10F320_DFP"' \
+	$'\trelease_render_flashing "$WORK/flashcmds.txt" "$VERSION"' \
 	$'\trelease_render_reproduction_commands "$VERSION" "$RELEASE_IMAGE_DIRS"' \
 	$'\t\t"$AVR_BUILD_DIR" "$XT_BUILD_DIR" "$PIC10F322_BUILD_DIR"' \
 	$'\t\t"$PIC10F320_BUILD_DIR" "$PIC12F675_BUILD_DIR"' \
@@ -317,6 +320,38 @@ mkdir -p "$render_bin" "$render_fixture/scripts"
 cat > "$render_bin/git" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [ -n "${GIT_SAFETY_LOG:-}" ]; then
+	printf 'git' >> "$GIT_SAFETY_LOG"
+	printf '\t%s' "$@" >> "$GIT_SAFETY_LOG"
+	printf '\n' >> "$GIT_SAFETY_LOG"
+	if [ "$#" -eq 2 ] && [ "$1" = rev-parse ] && [ "$2" = --show-toplevel ]; then
+		[ "${GIT_COMMAND_FAIL:-}" != root ] || exit 92
+		printf '%s\n' "$PWD"
+		exit 0
+	fi
+	if [ "$#" -eq 5 ] && [ "$1" = -C ] && [ "$3" = rev-parse ] \
+			&& [ "$4" = --verify ]; then
+		if [ "${GIT_COMMAND_FAIL:-}" = head ] && [ "$5" = 'HEAD^{commit}' ]; then
+			exit 92
+		fi
+		if [ "${GIT_COMMAND_FAIL:-}" = tag ] && [ "$5" != 'HEAD^{commit}' ]; then
+			exit 92
+		fi
+		if [ "${GIT_TAG_MISMATCH:-0}" -eq 1 ] && [ "$5" != 'HEAD^{commit}' ]; then
+			printf '%s\n' ffffffffffffffffffffffffffffffffffffffff
+			exit 0
+		fi
+		printf '%s\n' 0123456789abcdef0123456789abcdef01234567
+		exit 0
+	fi
+	if [ "$#" -eq 5 ] && [ "$1" = -C ] && [ "$3" = status ]; then
+		[ "${GIT_COMMAND_FAIL:-}" != status ] || exit 92
+		[ "${GIT_WORKTREE_DIRTY:-0}" -eq 0 ] \
+			|| printf '%s\n' ' M src/changed.c'
+		exit 0
+	fi
+	exit 91
+fi
 printf 'git' >> "${RENDER_LOG:?}"
 printf '\t%s' "$@" >> "$RENDER_LOG"
 printf '\n' >> "$RENDER_LOG"
@@ -327,6 +362,11 @@ set -euo pipefail
 printf 'make' >> "${RENDER_LOG:?}"
 printf '\t%s' "$@" >> "$RENDER_LOG"
 printf '\n' >> "$RENDER_LOG"
+if [ "${TEST_PREFLIGHT_FAIL:-0}" -eq 1 ]; then
+	for argument in "$@"; do
+		[ "$argument" != pic12f675-preflight ] || exit 97
+	done
+fi
 EOF
 cat > "$render_fixture/scripts/verify-release-images.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -399,6 +439,144 @@ if release_render_reproduction_commands v0.9.9 \
 		"$selected_pic320_cc" "$selected_pic320_dfp" >/dev/null; then
 	fail "reproduction renderer accepted build roots that disagree with RELEASE_IMAGE_DIRS"
 fi
+checks=$((checks + 1))
+
+# The generated PIC12F675 flashing block is an executable guarded transaction,
+# not an abbreviated writer command. Run it from a path with spaces and require
+# fail-stop ordering between the read-only baseline and the write.
+flashing="$work/rendered-pic12f675-flashing.md"
+flashing_commands="$work/rendered-pic12f675-flashing.sh"
+flashing_fixture="$work/rendered-flashcmds.txt"
+git_safety_log="$work/rendered-pic12f675-git.log"
+flash_fixture="$work/flash fixture with spaces"
+mkdir -p "$flash_fixture"
+printf '%s\t%s\n' \
+	'bypass-attiny13a-cd4053_simple.hex' 'avrdude -c test-programmer' \
+	'bypass-pic10f322-cd4053_simple.hex' 'pk2cmd -PPIC10F322 -Fimage.hex -M -Y -R' \
+	> "$flashing_fixture"
+release_render_flashing "$flashing_fixture" v0.9.9 > "$flashing"
+awk '/^```sh$/ { capture=1; next }
+	/^```$/ && capture { exit }
+	capture { print }' "$flashing" > "$flashing_commands"
+[ -s "$flashing_commands" ] \
+	|| fail "rendered PIC12F675 flashing guidance has no shell command block"
+bash -n "$flashing_commands" \
+	|| fail "rendered PIC12F675 flashing commands are not valid shell"
+for required in PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT \
+		'checked and recorded' 'hardware-unvalidated' \
+		'may already have damaged the device' 'clean checkout of this exact release tag' \
+		'does not consume a downloaded' 'No ipecmd hardware'; do
+	grep -Fq "$required" "$flashing" \
+		|| fail "rendered PIC12F675 flashing guidance omits: $required"
+done
+if grep -Fiq 'preserves factory OSCCAL/BG' "$flashing" \
+		|| grep -Fq 'pk2cmd -PPIC12F675' "$flashing" \
+		|| grep -Eq '(^|[[:space:]])ipecmd[[:space:]]+-' "$flashing"; then
+	fail "rendered PIC12F675 flashing guidance claims preservation or publishes a raw writer command"
+fi
+grep -Fq 'flashcmd="" ;;' "$RELEASE" \
+	|| fail "release producer still emits a per-image PIC12F675 flashing shortcut"
+if grep -Fiq 'preserves factory OSCCAL/BG' "$RELEASE" \
+		|| grep -Fq 'pk2cmd -PPIC12F675' "$RELEASE"; then
+	fail "release producer still contains unsafe PIC12F675 flashing guidance outside the renderer"
+fi
+: > "$render_log"
+: > "$git_safety_log"
+(
+	cd "$flash_fixture"
+	PATH="$render_bin:$PATH" RENDER_LOG="$render_log" \
+		GIT_SAFETY_LOG="$git_safety_log" bash "$flashing_commands"
+) || fail "rendered PIC12F675 guarded flashing transaction did not execute"
+mapfile -t flashing_log < "$render_log"
+[ "${#flashing_log[@]}" -eq 2 ] \
+	|| fail "rendered PIC12F675 transaction ran ${#flashing_log[@]} Make commands, expected 2"
+baseline="$flash_fixture/pic12f675-factory-baseline.json"
+result="$flash_fixture/pic12f675-program-result"
+expected=$(printf '%s\t%s\t%s\t%s\t%s=%s\t%s=%s' make -C "$flash_fixture" \
+	pic12f675-preflight \
+	PIC12F675_READ_PROG pk2cmd PIC12F675_TRIM_EVIDENCE "$baseline")
+[ "${flashing_log[0]}" = "$expected" ] \
+	|| fail "rendered PIC12F675 preflight command is incomplete: ${flashing_log[0]}"
+expected=$(printf '%s\t%s\t%s\t%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s' \
+	make -C "$flash_fixture" pic12f675-program VARIANT cd4053_simple \
+	PIC12F675_PROG pk2cmd PIC12F675_PROG_KIND pk2cmd \
+	PIC12F675_READ_PROG pk2cmd PIC12F675_TRIM_EVIDENCE "$baseline" \
+	PIC12F675_BENCH_RESULT "$result")
+[ "${flashing_log[1]}" = "$expected" ] \
+	|| fail "rendered PIC12F675 program command is incomplete: ${flashing_log[1]}"
+mapfile -t git_safety_calls < "$git_safety_log"
+[ "${#git_safety_calls[@]}" -eq 4 ] \
+	&& [ "${git_safety_calls[0]}" = $'git\trev-parse\t--show-toplevel' ] \
+	&& [ "${git_safety_calls[1]}" = "git"$'\t-C\t'"$flash_fixture"$'\trev-parse\t--verify\tHEAD^{commit}' ] \
+	&& [ "${git_safety_calls[2]}" = "git"$'\t-C\t'"$flash_fixture"$'\trev-parse\t--verify\trefs/tags/v0.9.9^{commit}' ] \
+	&& [ "${git_safety_calls[3]}" = "git"$'\t-C\t'"$flash_fixture"$'\tstatus\t--porcelain=v1\t--untracked-files=normal' ] \
+	|| fail "rendered PIC12F675 transaction did not enforce exact-tag clean-source checks"
+checks=$((checks + 1))
+
+for failure in root head tag status; do
+	: > "$render_log"
+	: > "$git_safety_log"
+	if (
+		cd "$flash_fixture"
+		PATH="$render_bin:$PATH" RENDER_LOG="$render_log" \
+			GIT_SAFETY_LOG="$git_safety_log" GIT_COMMAND_FAIL="$failure" \
+			bash "$flashing_commands"
+	); then
+		fail "rendered PIC12F675 transaction accepted failed Git $failure inspection"
+	fi
+	[ ! -s "$render_log" ] \
+		|| fail "failed Git $failure inspection reached a PIC12F675 Make target"
+done
+checks=$((checks + 1))
+
+: > "$render_log"
+: > "$git_safety_log"
+if (
+	cd "$flash_fixture"
+	PATH="$render_bin:$PATH" RENDER_LOG="$render_log" \
+		GIT_SAFETY_LOG="$git_safety_log" GIT_WORKTREE_DIRTY=1 \
+		bash "$flashing_commands"
+); then
+	fail "rendered PIC12F675 transaction accepted a dirty release-tag checkout"
+fi
+[ ! -s "$render_log" ] \
+	|| fail "dirty release-tag checkout reached a PIC12F675 Make target"
+checks=$((checks + 1))
+
+: > "$render_log"
+: > "$git_safety_log"
+if (
+	cd "$flash_fixture"
+	PATH="$render_bin:$PATH" RENDER_LOG="$render_log" \
+		GIT_SAFETY_LOG="$git_safety_log" GIT_TAG_MISMATCH=1 \
+		bash "$flashing_commands"
+); then
+	fail "rendered PIC12F675 transaction accepted a checkout that was not the release tag"
+fi
+[ ! -s "$render_log" ] \
+	|| fail "release-tag mismatch reached a PIC12F675 Make target"
+checks=$((checks + 1))
+
+printf '%s\t%s\n' 'bypass-pic12f675-cd4053_simple.hex' \
+	'pk2cmd -PPIC12F675 -Fimage.hex -M -Y -R' > "$flashing_fixture"
+if release_render_flashing "$flashing_fixture" v0.9.9 >/dev/null; then
+	fail "assembled flashing renderer accepted a per-image PIC12F675 writer command"
+fi
+checks=$((checks + 1))
+
+: > "$render_log"
+if (
+	cd "$flash_fixture"
+	PATH="$render_bin:$PATH" RENDER_LOG="$render_log" \
+		GIT_SAFETY_LOG="$git_safety_log" TEST_PREFLIGHT_FAIL=1 \
+		bash "$flashing_commands"
+); then
+	fail "rendered PIC12F675 transaction continued after a failed preflight"
+fi
+mapfile -t flashing_log < "$render_log"
+[ "${#flashing_log[@]}" -eq 1 ] \
+	&& [[ "${flashing_log[0]}" == $'make\t-C\t'*$'\tpic12f675-preflight\t'* ]] \
+	|| fail "failed rendered preflight did not stop before programming"
 checks=$((checks + 1))
 
 # Every directory handed to the verifier must have a corresponding build in the

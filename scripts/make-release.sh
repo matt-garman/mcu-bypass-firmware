@@ -240,7 +240,9 @@ declare -F release_stage_classic_avr_images >/dev/null \
 source "$REPO_ROOT/scripts/release-documentation.sh" \
 	|| die "release documentation helper could not be loaded"
 for renderer in release_render_scope release_render_validation \
-		release_render_pic_toolchain_rows release_render_reproduction_commands \
+		release_render_pic_toolchain_rows release_render_pic12f675_flashing \
+		release_render_flashing \
+		release_render_reproduction_commands \
 		release_render_commit_message; do
 	declare -F "$renderer" >/dev/null \
 		|| die "release documentation helper did not define $renderer"
@@ -1580,11 +1582,10 @@ img_row() {
 			# own build log, so it can never be a stale hand-copied number.
 			used=$("$AWK" -v f="$base" '$0 ~ ("/" f " :") { for (i = 1; i <= NF; i++) if ($i == "words") { print $(i-1) " / '"$PIC12F675_FLASH_WORDS"' words"; exit } }' \
 				"$EVID/build-pic12f675.log" 2>/dev/null)
-			# Prefer the guarded target: it refuses to overwrite the factory OSCCAL
-			# (flash word 0x3FF) or the BG bandgap bits, which a bulk-erase pk2cmd
-			# invocation can silently drop. release/README.md carries the mandatory
-			# preservation procedure; a device that loses either still appears to work.
-			flashcmd="make pic12f675-program VARIANT=<v>  (preserves factory OSCCAL/BG -- see release/README.md; or, only with OSCCAL/BG preserved: pk2cmd -PPIC12F675 -F$base -M -Y -R)" ;;
+			# A writer may erase factory trim even when the image leaves it untouched.
+			# Publish no per-image shortcut: the generated procedure below performs the
+			# mandatory baseline, immediate comparison, write and retained readback.
+			flashcmd="" ;;
 		${FW_BASE}-${XT_TAG}-*.hex)
 			mcu="ATtiny202"; clk="${XT_CLK_MHZ} MHz (internal, OSCCFG 16 MHz / 8)"
 			# AVR8X replaces lfuse/hfuse with seven individually named memories;
@@ -1626,7 +1627,7 @@ img_row() {
 		*) die "release image '$base' names no MCU this manifest generator knows; refusing to describe it" ;;
 	esac
 	printf '| `%s` | %s | %s | %s | %s | `%s` |\n' "$base" "$mcu" "$clk" "${used:-n/a}" "$fuses" "$sha"
-	printf '%s\t%s\n' "$base" "$flashcmd" >> "$WORK/flashcmds.txt"
+	[ -z "$flashcmd" ] || printf '%s\t%s\n' "$base" "$flashcmd" >> "$WORK/flashcmds.txt"
 }
 
 # Soak evidence summary table.
@@ -1720,12 +1721,7 @@ REL_BANNER=""
 	printf '> its watchdog reset); they are covered by the full test-long suite and by\n'
 	printf '> the soak of the core-identical tinyx5 family. See DESIGN_DOCUMENTATION.adoc.\n\n'
 
-	printf '## Flashing\n\n'
-	printf 'AVR images require the design fuse bytes in addition to the flash write\n'
-	printf '(the table above lists them per image). PIC images embed their CONFIG word.\n\n'
-	printf '```\n'
-	sort "$WORK/flashcmds.txt" | while IFS=$'\t' read -r f cmd; do printf '# %s\n%s\n\n' "$f" "$cmd"; done
-	printf '```\n\n'
+	release_render_flashing "$WORK/flashcmds.txt" "$VERSION"
 
 	printf '## Soak evidence\n\n'
 	printf '| combo | result |\n|---|---|\n'

@@ -7,6 +7,13 @@ documentation marks them as superseded. Each release lives in its own
 `vX.Y.Z/` subdirectory and is also published as a
 [GitHub Release](https://github.com/matt-garman/mcu-bypass-firmware/releases).
 
+PIC12F675 is the safety exception: do not pass its downloaded HEX directly to a
+writer. Its guarded workflow currently requires a clean source checkout of the
+same release tag and the pinned XC8/DFP toolchain, then rebuilds and checks the
+image before writing. The prebuilt file remains the signed/reproducible release
+artifact, but there is not yet a no-compiler path that safely admits it to the
+device-specific trim-evidence transaction.
+
 > **Current availability:** `v0.9.8` is the current release, with 18 prebuilt
 > firmware images covering all six release targets and three output stages.
 > `v0.9.6` was the first unified 18-image release and introduced the first
@@ -150,21 +157,24 @@ ATtiny202 uses UPDI, and its fuses are seven individually named AVR8X memories
 rather than the classic `lfuse`/`hfuse` pair. `MANIFEST.md` lists all seven per
 image and gives the exact `avrdude` command.
 
-**PIC12F675 — preserve the factory calibration words when flashing.** Unlike
-every other part here, the PIC12F675 carries two per-device factory-trimmed
-values that its firmware and reset behaviour depend on and that a careless
-programming step can destroy silently: the oscillator calibration word (a
-`RETLW` at the top of flash, word `0x3FF`) and the `BG<1:0>` bandgap bits in the
-CONFIG word. A device that loses either **still appears to work** — it just runs
-at the wrong clock (wrong tick cadence, wrong relay coil-pulse widths) or with
-the wrong brown-out/POR trip voltages. Program with **`make pic12f675-program
-VARIANT=<v>`**, which reads the factory values before the write and requires them
-to match immediately after; it refuses to run an image that would overwrite word
-`0x3FF`. If you flash with a raw `pk2cmd`/`ipecmd` invocation instead, you MUST
-use its device-family OSCCAL/BG-preservation option and confirm both values are
-unchanged afterward — a bulk erase that drops them yields a bad device that
-passes a smoke test. This is the one silicon-only risk that cannot be caught in
-simulation; see `docs/pic12f675_feasibility.md` section 8, items 1 and 2.
+**PIC12F675 — use the guarded transaction below for every write.** Unlike every
+other part here, the PIC12F675 carries two per-device factory-trimmed values that
+its firmware and reset behaviour depend on and that a careless programming step
+can destroy silently: the oscillator calibration word (a `RETLW` at the top of
+flash, word `0x3FF`) and the `BG<1:0>` bandgap bits in the CONFIG word. A device
+that loses either **still appears to work** — it just runs at the wrong clock
+(wrong tick cadence, wrong relay coil-pulse widths) or with the wrong
+brown-out/POR trip voltages.
+
+The shipping image leaves word `0x3FF` unprogrammed and requires the BG field to
+remain erased. That is necessary but does not prove what a real programmer does
+during erase/write. The guarded workflow captures a read-only baseline, compares
+the live device immediately before writing, and records mandatory post-write
+OSCCAL, BG, identity, CONFIG, and programmed-byte results. A failure is detected
+only after the write and may already have damaged the device. Do not substitute
+a raw `pk2cmd` or `ipecmd` writer command. Real preservation and actual ipecmd
+operation remain hardware-unvalidated until the `1.x.y` bench pass; see
+`docs/pic12f675_feasibility.md` section 8, items 1 and 2.
 
 ### Renamed in v0.9.8 (`v0.9.7` and earlier used different names)
 
@@ -243,8 +253,9 @@ older `MANIFEST.md` may name a goal that no longer exists:
 and now builds every part (lanes whose cross-toolchain is not installed skip
 with a message). `attiny202-*` goals were already part-named and did not move.
 
-The per-release `MANIFEST.md` lists every image with its MCU, clock, flash
-usage, fuse bytes, and exact flashing command.
+The per-release `MANIFEST.md` lists every image with its MCU, clock, flash usage,
+and fuse/config bytes. It gives exact per-image commands where a direct write is
+qualified; PIC12F675 instead carries the mandatory guarded transaction below.
 
 ## Verify a download
 
@@ -304,6 +315,50 @@ pk2cmd -PPIC10F320 -Fbypass-pic10f320-cd4053_simple.hex -M -Y -R   # PICkit 2
 
 There is no `make pic10f320-program` convenience target yet; <!-- name-contract: exempt (documents an absent goal) --> flash it with the
 programmer command above.
+
+**PIC12F675** — do not issue a raw writer command. The board must be externally
+powered. For each device, choose new baseline and result paths whose parent
+directory already exists. `pic12f675-preflight` is read-only and does not take
+`VARIANT`; only program after it succeeds, using the same baseline:
+
+```sh
+# Replace with the release being flashed, for example v0.9.9.
+release_tag=vX.Y.Z &&
+repo=$(git rev-parse --show-toplevel) &&
+head_commit=$(git -C "$repo" rev-parse --verify "HEAD^{commit}") &&
+tag_commit=$(git -C "$repo" rev-parse --verify \
+  "refs/tags/$release_tag^{commit}") &&
+worktree_status=$(git -C "$repo" status --porcelain=v1 --untracked-files=normal) &&
+test "$head_commit" = "$tag_commit" && test -z "$worktree_status" &&
+baseline="$repo/pic12f675-factory-baseline.json" &&
+result="$repo/pic12f675-program-result" &&
+test ! -e "$baseline" && test ! -e "$result" &&
+make -C "$repo" pic12f675-preflight \
+  PIC12F675_READ_PROG=pk2cmd \
+  PIC12F675_TRIM_EVIDENCE="$baseline" &&
+make -C "$repo" pic12f675-program \
+  VARIANT=cd4053_simple \
+  PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \
+  PIC12F675_READ_PROG=pk2cmd \
+  PIC12F675_TRIM_EVIDENCE="$baseline" \
+  PIC12F675_BENCH_RESULT="$result"
+```
+
+Replace `cd4053_simple` with `cd4053_with_mute` or `tq2_l2_5v_relay` when
+needed. A baseline belongs to one device before its first write; do not reuse it
+for another device or a later reflash.
+
+Run the transaction from a clean checkout of this release's tag with the pinned
+XC8/DFP toolchain. The target rebuilds and checks the tagged source; it does not
+consume the downloaded HEX in this directory. The retained PASS/FAIL result
+checks and records the before/after values; it does not convert untested
+programmer behavior into a preservation guarantee.
+
+No ipecmd hardware procedure is qualified. The software-tested route requires
+pk2cmd reads immediately before and after the IPE write, but no safe
+dual-programmer attachment or handoff has been validated. Do not infer one from
+the internal `PIC12F675_PROG_KIND=ipecmd` routing until the `1.x.y` bench pass
+publishes the required hardware setup and retained result.
 
 ## Reproduce the images bit-for-bit
 

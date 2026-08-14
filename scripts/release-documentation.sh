@@ -32,6 +32,87 @@ release_render_pic_toolchain_rows() {
 	printf -- '| PIC10F320 DFP (`PIC10F320_DFP`) | %s |\n' "$pic10f320_dfp"
 }
 
+release_render_pic12f675_flashing() {
+	[ "$#" -eq 1 ] || return 2
+	local release_tag=$1
+	printf '%s\n' \
+		'### PIC12F675 guarded programming' \
+		'' \
+		'Externally power the board; this workflow does not request programmer-supplied Vdd.' \
+		'Do not invoke a raw programmer write for this part. For each device, choose' \
+		'new baseline and result paths whose parent directory already exists, then run' \
+		'the read-only preflight and program steps as one fail-stop transaction. Replace' \
+		'`cd4053_simple` with one supported output stage when needed:' \
+		'`cd4053_simple`, `cd4053_with_mute`, or `tq2_l2_5v_relay`.' \
+		'' \
+		'```sh' \
+		"release_tag=$(printf '%q' "$release_tag") &&" \
+		'repo=$(git rev-parse --show-toplevel) &&' \
+		'head_commit=$(git -C "$repo" rev-parse --verify "HEAD^{commit}") &&' \
+		'tag_commit=$(git -C "$repo" rev-parse --verify "refs/tags/$release_tag^{commit}") &&' \
+		'worktree_status=$(git -C "$repo" status --porcelain=v1 --untracked-files=normal) &&' \
+		'test "$head_commit" = "$tag_commit" && test -z "$worktree_status" &&' \
+		'baseline="$repo/pic12f675-factory-baseline.json" &&' \
+		'result="$repo/pic12f675-program-result" &&' \
+		'test ! -e "$baseline" && test ! -e "$result" &&' \
+		'make -C "$repo" pic12f675-preflight \' \
+		'  PIC12F675_READ_PROG=pk2cmd \' \
+		'  PIC12F675_TRIM_EVIDENCE="$baseline" &&' \
+		'make -C "$repo" pic12f675-program \' \
+		'  VARIANT=cd4053_simple \' \
+		'  PIC12F675_PROG=pk2cmd \' \
+		'  PIC12F675_PROG_KIND=pk2cmd \' \
+		'  PIC12F675_READ_PROG=pk2cmd \' \
+		'  PIC12F675_TRIM_EVIDENCE="$baseline" \' \
+		'  PIC12F675_BENCH_RESULT="$result"' \
+		'```' \
+		'' \
+		'The guarded workflow rejects an image that explicitly programs OSCCAL word' \
+		'`0x3FF`, requires the image BG field to remain erased, compares the live device' \
+		'with the baseline immediately before writing.' \
+		'Post-write identity, OSCCAL, BG, CONFIG, and programmed bytes are checked and recorded' \
+		'as mandatory evidence.' \
+		'This does not prove that a real pk2cmd or ipecmd erase/program operation preserves' \
+		'factory trim: preservation remains hardware-unvalidated until the `1.x.y` bench' \
+		'pass. A failure is detected only after the write and may already have damaged the device.' \
+		'The device may still appear to work with wrong timing or BOR/POR thresholds.' \
+		'The fail-stop checks above require a clean checkout of this exact release tag.' \
+		'The target rebuilds with the pinned toolchain; it does not consume a downloaded' \
+		'release HEX. No ipecmd hardware' \
+		'procedure is qualified: its software-tested write route would also require a' \
+		'pk2cmd reader before and after the write, and no safe attachment/handoff has been' \
+		'validated.' \
+		''
+}
+
+release_render_flashing() {
+	[ "$#" -eq 2 ] || return 2
+	local flash_commands=$1 release_tag=$2 image command
+	[ -s "$flash_commands" ] && [ -f "$flash_commands" ] \
+		&& [ ! -L "$flash_commands" ] || return 2
+	while IFS=$'\t' read -r image command; do
+		[ -n "$image" ] && [ -n "$command" ] || return 2
+		case "$image" in
+			*-pic12f675-*.hex) return 2 ;;
+		esac
+	done < "$flash_commands"
+
+	printf '%s\n' \
+		'## Flashing' \
+		'' \
+		'AVR images require the design fuse bytes in addition to the flash write' \
+		'(the table above lists them per image). PIC images embed their CONFIG word.' \
+		'PIC12F675 has no per-image shortcut because every write requires the guarded' \
+		'device-specific transaction below.' \
+		'' \
+		'```'
+	sort "$flash_commands" | while IFS=$'\t' read -r image command; do
+		printf '# %s\n%s\n\n' "$image" "$command"
+	done
+	printf '```\n\n'
+	release_render_pic12f675_flashing "$release_tag"
+}
+
 release_render_reproduction_commands() {
 	[ "$#" -eq 11 ] || return 2
 	local version=$1 release_image_dirs=$2

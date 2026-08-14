@@ -63,10 +63,10 @@
 // BG<1:0> is FACTORY BANDGAP CALIBRATION, not a setting. The cfgdata implements
 // the bits but declares no CSETTING for them, because nothing in a #pragma
 // config block is supposed to write them: like the OSCCAL word at 0x3FF, they
-// are trim the programmer must PRESERVE across an erase. What this table asserts
-// is therefore the opposite of a design intent -- that the build leaves them
-// ERASED (0b11), i.e. that the toolchain is not quietly programming a
-// calibration value of its own over the factory one on every device flashed.
+// are trim the programmer must preserve across an erase. This table proves only
+// the build-side half: the image leaves them ERASED (0b11), so the toolchain is
+// not quietly programming a calibration value of its own over every device.
+// Whether a real programmer preserves the device value is hardware-unvalidated.
 #define BG_MASK     0x3000u
 #define BG_ERASED   0x3000u
 
@@ -95,8 +95,8 @@ static void pic_config_check_fields(uint16_t impl) {
           "CPD must be OFF (no data-memory code protection); got field 0x%04X", (unsigned)(impl & CPD_MASK));
     CHECK((impl & BG_MASK)    == BG_ERASED,
           "BG must be left ERASED (0x3000): the bandgap bits are factory calibration "
-          "the programmer preserves, and a build that writes them overwrites that "
-          "trim on every device flashed; got field 0x%04X", (unsigned)(impl & BG_MASK));
+          "outside the image; a build that writes them replaces that trim on every "
+          "device, while programmer preservation requires hardware evidence; got field 0x%04X", (unsigned)(impl & BG_MASK));
 }
 
 // -------------------------------------------------------------------------

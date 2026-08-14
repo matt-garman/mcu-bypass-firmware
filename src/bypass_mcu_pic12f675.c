@@ -63,13 +63,13 @@
 // word (0x3FF, the pack's ".oscval" CalDataZone) as a RETLW, and XC8's
 // startup code calls it. A bulk erase that does not preserve that word leaves
 // an untrimmed oscillator, i.e. wrong tick cadence and wrong __delay_ms()
-// coil-pulse widths on a device that still appears to work.  make
-// pic12f675-program refuses any image that programs word 0x3FF and prints the
-// read-back procedure before every write; the risk itself is stated in
-// docs/pic12f675_feasibility.md section 8 item 2. The flashing procedure that
-// preserves this word now lives in release/README.md (the "preserve the
-// factory calibration words when flashing" note beside the image table).
-
+// coil-pulse widths on a device that still appears to work. The guarded
+// pic12f675-program workflow rejects an image that explicitly programs word
+// 0x3FF, requires a matching baseline and immediate pre-write read, and
+// records mandatory post-write trim/readback evidence. It detects
+// programmer-induced loss only after the write; real preservation remains
+// hardware-unvalidated. See release/README.md and
+// docs/pic12f675_feasibility.md section 8 item 2.
 
 
 

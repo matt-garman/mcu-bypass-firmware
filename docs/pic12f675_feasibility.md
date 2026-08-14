@@ -1129,8 +1129,9 @@ bench**, tracked together with the graduation diff that follows it.
 
 1. **Bandgap calibration bits in the CONFIG word (`BG<1:0>`).** These are
    factory-calibrated per device and set the BOD/POR trip voltages. XC8 emitted
-   `BG = 0b11` in the measured CONFIG word (`0x31CC`), i.e. it writes the field
-   rather than leaving it alone. Whether `pk2cmd` (PICkit 2) and `ipecmd`
+   the erased `BG = 0b11` encoding in the measured CONFIG word (`0x31CC`), so the
+   shipping image leaves the field outside its programmed intent rather than
+   supplying a calibration value. Whether `pk2cmd` (PICkit 2) and `ipecmd`
    (PICkit 3/4/5) *preserve* the factory value on program is **untested here** and
    is a silicon-only failure mode — invisible to every simulator lane, which is
    exactly the class of defect `pic12f675-test-config` would exist to catch, and

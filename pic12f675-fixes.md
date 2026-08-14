@@ -39,15 +39,15 @@ The PIC12F675 implementation is substantially at software-validation parity:
 - No nominal-path PIC12F675 firmware defect was found in the meta-review.
 
 The branch is not yet merge-ready as a completed release-support change because
-its generated flashing documentation, programming claims, and several current
-documents do not agree with the implemented 21-image/18-soak release contract.
+its private programming storage and several current documents do not yet meet
+the implemented release and development-environment contracts.
 
 ## Priority Summary
 
 | ID | Priority | Item | Status |
 |---|---:|---|---|
 | P12-1 | Blocker | Make generated reproduction instructions build PIC12F675 | Implemented; P12-8 pending |
-| P12-2 | Blocker | Correct PIC12F675 flashing instructions and trim claims | Open |
+| P12-2 | Blocker | Correct PIC12F675 flashing instructions and trim claims | Implemented; P12-8 pending |
 | P12-3 | High | Complete generated release metadata and commit message | Implemented; P12-8 pending |
 | P12-4 | High | Reconcile the feasibility document's support status | Open |
 | P12-5 | High | Correct stale design, safety, test, and help documentation | Open |
@@ -106,27 +106,27 @@ regression correctly models that behavior; the release wording is the defect.
 
 ### Required Work
 
-- [ ] Replace the abbreviated generated command with either the complete
+- [x] Replace the abbreviated generated command with either the complete
       preflight/program sequence or an unambiguous pointer to the complete
       mandatory procedure.
-- [ ] State that the guarded workflow checks, verifies, and records OSCCAL/BG
+- [x] State that the guarded workflow checks, verifies, and records OSCCAL/BG
       before and after programming.
-- [ ] Do not claim that an unqualified programmer command preserves trim.
-- [ ] State explicitly that actual programmer preservation remains unvalidated
+- [x] Do not claim that an unqualified programmer command preserves trim.
+- [x] State explicitly that actual programmer preservation remains unvalidated
       until the v1.x hardware pass.
-- [ ] Keep the warning that trim loss can leave a device apparently functional
+- [x] Keep the warning that trim loss can leave a device apparently functional
       but with wrong timing or BOR/POR thresholds.
-- [ ] Reconcile `README.md`, `release/README.md`, `TOOLCHAIN.adoc`, generated
+- [x] Reconcile `README.md`, `release/README.md`, `TOOLCHAIN.adoc`, generated
       `MANIFEST.md`, Make help, and source/Makefile comments to one precise claim.
 
 ### Acceptance
 
-- [ ] Every published PIC12F675 flashing example includes or requires preflight
+- [x] Every published PIC12F675 flashing example includes or requires preflight
       evidence and a new result directory.
-- [ ] No current release-facing text says the unvalidated command "preserves"
+- [x] No current release-facing text says the unvalidated command "preserves"
       OSCCAL/BG.
-- [ ] The software-vs-hardware boundary is stated consistently everywhere.
-- [ ] The fake programmer tests still cover baseline mismatch, post-write trim
+- [x] The software-vs-hardware boundary is stated consistently everywhere.
+- [x] The fake programmer tests still cover baseline mismatch, post-write trim
       change, no-op/failed write, readback failure, and retained PASS/FAIL data.
 
 ## P12-3 - Generated Release Metadata
@@ -158,7 +158,7 @@ human-readable artifacts still describe the pre-PIC12F675 release:
 - [x] Attribute shared `PIC_CC`/`PIC_DFP` provenance to both PIC10F322 and
       PIC12F675 without pretending they are independently selected tools.
 - [x] Add PIC12F675 to generated release commit-message scope and validation.
-- [ ] Correct the `scripts/make-release.sh:32-45` header comment to the current
+- [x] Correct the `scripts/make-release.sh:32-45` header comment to the current
       three-PIC build scope, both PIC12F675 gates, and 18 soak combinations.
 
 ### Acceptance
@@ -247,7 +247,7 @@ mechanical sweep is wrong.
 - [ ] Correct `test/check_stack_depth_pic.sh:11-22` ("the one resource bound on
       the PIC10F320" / "Both supported parts ... PIC10F32{0,2}") to include the
       third PIC part that now runs this gate.
-- [ ] Correct the `src/bypass_compile_checks.h:8-11` header comment, which still
+- [x] Correct the `src/bypass_compile_checks.h:8-11` header comment, which still
       says the shared contract is "Included by the three modular hardware shells
       (avr_classic, avr_xt and pic10f322)"; PIC12F675 now includes it as a fourth
       shell. (Firmware source -- user edit; the matching test lives in P12-7.)
@@ -303,7 +303,7 @@ the development environment's rule that no files may be created under `/tmp`.
 - [x] Assert generated validation prose names both PIC12F675 aggregates.
 - [x] Assert generated compiler/DFP attribution includes PIC12F675.
 - [x] Assert generated `commit_msg.txt` includes PIC12F675 scope and validation.
-- [ ] Assert generated flashing guidance does not claim unvalidated trim
+- [x] Assert generated flashing guidance does not claim unvalidated trim
       preservation and cannot omit required preflight/result inputs.
 - [ ] Add a temporary-root regression proving the PIC12F675 bench workflow does
       not hard-code `/tmp`.
@@ -343,6 +343,26 @@ The focused qualification regression was also run with the release producer from
 `a87416e`; it failed because that producer did not consume the corrected rendered
 documentation sections. Full cross-toolchain release generation remains part of
 P12-8 and is intentionally unchecked above.
+
+### Completed Trim-Guidance Chunk Evidence
+
+The flashing-instructions and trim-claim chunk (P12-2 and its P12-7 regression)
+passed:
+
+- Generated release qualification/documentation: 44 checks.
+- Generic, PIC10F320, and PIC12F675 fake build/programming contracts: 36, 75,
+  and 88 checks respectively.
+- Release preflight: 30 checks and 82 Makefile queries.
+- Release provenance: 78 checks.
+- Makefile name contract: 48 checks.
+- Bash syntax and `git diff --check`.
+
+The generated transaction is fail-stop on repository discovery, exact tag
+commit identity, clean worktree state, preflight failure, and per-image shortcut
+injection. It deliberately publishes no ipecmd hardware procedure: the routing
+is software-tested, but safe reader/writer attachment or handoff remains part of
+the `1.x.y` hardware pass. P12-6 remains open and separately owns the workflow's
+private temporary-storage implementation.
 
 ## P12-8 - Full Software Qualification
 
