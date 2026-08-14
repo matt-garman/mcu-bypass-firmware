@@ -4,7 +4,7 @@
 
 **Reviewed branch:** `pic12f675-support`
 
-**Reviewed tip:** `3d0f53a` (`docs: reconcile PIC12F675 support status`)
+**Reviewed tip:** `1aac444` (`docs: distinguish PIC12F675 timing and BOR`)
 
 **Last updated:** 2026-08-14
 
@@ -39,8 +39,8 @@ The PIC12F675 implementation is substantially at software-validation parity:
 - No nominal-path PIC12F675 firmware defect was found in the meta-review.
 
 The branch is not yet merge-ready as a completed release-support change because
-its current test/help/comment documentation still needs reconciliation and the
-complete equipped-host software qualification remains pending.
+the complete equipped-host software qualification and final branch hygiene
+remain pending.
 
 ## Priority Summary
 
@@ -50,7 +50,7 @@ complete equipped-host software qualification remains pending.
 | P12-2 | Blocker | Correct PIC12F675 flashing instructions and trim claims | Implemented; P12-8 pending |
 | P12-3 | High | Complete generated release metadata and commit message | Implemented; P12-8 pending |
 | P12-4 | High | Reconcile the feasibility document's support status | Implemented |
-| P12-5 | High | Correct stale design, safety, test, and help documentation | In progress |
+| P12-5 | High | Correct stale design, safety, test, and help documentation | Implemented |
 | P12-6 | High | Remove hard-coded `/tmp` use from the programming workflow | Implemented |
 | P12-7 | High | Add regressions for the review gaps | Implemented; P12-8 pending |
 | P12-8 | Gate | Run the complete software qualification on the equipped host | Open |
@@ -221,20 +221,21 @@ mechanical sweep is wrong.
 - [x] Reconcile the six-target/three-generation introduction near
       `DESIGN_DOCUMENTATION.adoc:1094-1104` with the seventh target and fourth
       core generation.
-- [ ] Correct `test/README.md:455` so the PIC12F675 return-stack gate is included.
-- [ ] Correct `test/README.md:461` from 28 evidence files/15 soaks to the current
+- [x] Correct `test/README.md:455` so the PIC12F675 return-stack gate is included.
+- [x] Correct `test/README.md:461` from 28 evidence files/15 soaks to the current
       34/18 contract.
-- [ ] Scope the PIC hardware-gap section at `test/README.md:786-824` to the
+- [x] Scope the PIC hardware-gap section at `test/README.md:786-824` to the
       PIC10F32x pair, then add or point to the distinct PIC12F675 hardware gaps.
-- [ ] Update `test/pic/gpsim_bootstrap.h` from two PIC parts to all three at both
+- [x] Update `test/pic/gpsim_bootstrap.h` from two PIC parts to all three at both
       `:4-6` and `:34` ("the footswitch pin is RA3 on both supported parts").
-- [ ] Update stale release comments/help at `Makefile:6959-6961`,
+- [x] Update stale release comments/help at `Makefile:6959-6961`,
       `Makefile:7004`, and `Makefile:7356-7358`.
-- [ ] Correct the genuinely three-way-stale Makefile comments the classifying
+- [x] Correct the genuinely three-way-stale Makefile comments the classifying
       pass has confirmed, keeping any 320+322-pair wording intact:
       - `Makefile:981-990` -- the central `PIC_*` naming rule ("SHARED BY BOTH
         PIC PARTS ... behind both chips"); PIC12F675 shares `PIC_CC`, `PIC_DFP`,
-        `PIC_SOAK_SRC`, and the gpsim bootstrap, so this is now all three.
+        the sampling/pin/bootstrap helpers, and other generic mechanism, while
+        retaining a distinct TMR0-aware soak adapter source.
       - `Makefile:1296-1297` -- the gpsim CLI shared preflight "BOTH PIC chips";
         `pic12f675-test-gpsim` uses the same `gpsim_wrapper_preflight`.
       - `Makefile:1399` and `Makefile:1410` -- the return-stack gate "(BOTH
@@ -244,27 +245,27 @@ mechanical sweep is wrong.
         BOTH parts"; PIC12F675 has all four harnesses.
       - `Makefile:5045` -- "Both chips' harnesses print the identical markers";
         the PIC12F675 harnesses emit them too.
-- [ ] Correct `test/check_stack_depth_pic.sh:11-22` ("the one resource bound on
+- [x] Correct `test/check_stack_depth_pic.sh:11-22` ("the one resource bound on
       the PIC10F320" / "Both supported parts ... PIC10F32{0,2}") to include the
       third PIC part that now runs this gate.
 - [x] Correct the `src/bypass_compile_checks.h:8-11` header comment, which still
       says the shared contract is "Included by the three modular hardware shells
       (avr_classic, avr_xt and pic10f322)"; PIC12F675 now includes it as a fourth
       shell. (Firmware source -- user edit; the matching test lives in P12-7.)
-- [ ] Add PIC12F675 to the top-level README's built-image validation summary.
-- [ ] Correct `release/README.md:49`, which calls the six v0.9.6-v0.9.8 targets
+- [x] Add PIC12F675 to the top-level README's built-image validation summary.
+- [x] Correct `release/README.md:49`, which calls the six v0.9.6-v0.9.8 targets
       the "first four parts".
 
 ### Acceptance
 
-- [ ] Current documents consistently state seven parts, three PIC targets, 21
+- [x] Current documents consistently state seven parts, three PIC targets, 21
       images, 18 soak combinations, and 34 retained evidence files where counts
       are relevant.
 - [x] Timing text distinguishes the 1.024 ms PIC12F675 tick from 1.000 ms targets.
 - [x] Primary safety guidance includes the PIC12F675 BOR limitation.
-- [ ] No comment describing a fact now shared by all three PIC parts still says
-      "both"/"two"; every remaining "both"/"32x" comment is verified specific to
-      the PIC10F320+PIC10F322 pair.
+- [x] No comment describing a fact now shared by all three PIC parts still says
+      "both"/"two"; every remaining target-cardinality "both"/"32x" comment is
+      verified specific to the PIC10F320+PIC10F322 pair.
 
 ## P12-6 - Private Temporary Data
 
@@ -435,7 +436,30 @@ Verification passed:
 - Independent focused review, Bash syntax, and `git diff --check`.
 
 `asciidoctor` is not installed on this host, so rendered AsciiDoc validation was
-not available. The remaining P12-5 test/help/comment parity work stays open.
+not available.
+
+### Completed Test/Help/Comment Parity Chunk Evidence
+
+The remaining P12-5 pass now presents the current seven-part,
+four-core-generation, three-PIC, 21-image, 18-soak, and 34-evidence topology in
+the top-level, release, and test documentation and in user-facing Make help. It
+adds PIC12F675 to the shared gpsim and return-stack descriptions while preserving
+PIC10F32x-pair wording where the implementation or hardware gap is genuinely
+pair-specific. The release instructions retain the six-target, 18-image
+v0.9.6-v0.9.8 boundary and provide separate current reproduction commands.
+
+The semantic regression pins the current reader-facing inventories and the
+historical 18-image/15-soak/28-evidence boundary. Verification passed:
+
+- Generated release qualification/documentation: 47 checks.
+- Release preflight: 30 checks and 82 Makefile queries.
+- Release provenance: 78 checks.
+- Makefile name contract: 48 checks.
+- Independent focused review, Bash syntax, stale-scope classification, and
+  `git diff --check`.
+
+The missing cross-toolchain qualification remains P12-8 rather than a P12-5
+documentation blocker.
 
 ## P12-8 - Full Software Qualification
 

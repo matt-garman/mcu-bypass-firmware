@@ -8,20 +8,20 @@ set -euo pipefail
 # test-stack-bound uses -fstack-usage to bound the AVR's DATA stack in bytes.
 # The PIC14 core has no data stack at all -- XC8 allocates locals into a static,
 # non-reentrant compiled-stack overlay, which is why that gate has nothing to
-# measure here. What this part does have is a fixed-size HARDWARE RETURN STACK,
-# and it is the one resource bound on the PIC10F320 that no gate observed.
+# measure here. All three supported PIC targets have a fixed-size HARDWARE RETURN
+# STACK. This gate was introduced when PIC10F320 made that previously unobserved
+# bound release-critical and now measures every PIC target's generated assembly.
 #
 # Depth is 8 levels. That is read from the device pack rather than written down
 # here, because a hardcoded budget silently goes stale if a chip is re-pinned --
-# the same failure §5.6 of the merge plan calls out for PIC10F322_FLASH_WORDS. Both
-# supported parts declare it identically and independently:
-#     <DFP>/xc8/pic/dat/ini/10f32{0,2}.ini   STACKDEPTH=8   (XC8's own device data)
-#     <DFP>/edc/PIC10F32{0,2}.PIC            edc:hwstackdepth="8"
-# Overflow on this core is silent: the stack wraps and the return address is
-# lost, so a program returns to the wrong place. There is no STKPTR, no
-# TOSL/TOSH, and no STKOVF/STKUNF bit in PCON on this part -- the enhanced
-# mid-range stack-overflow reset does not exist here, and neither does a CONFIG
-# STVREN bit to enable it. Nothing at runtime can detect this. It has to be
+# the same failure §5.6 of the merge plan calls out for PIC10F322_FLASH_WORDS.
+# All three parts declare it identically and independently:
+#     <DFP>/xc8/pic/dat/ini/{10f320,10f322,12f675}.ini   STACKDEPTH=8
+#     <DFP>/edc/{PIC10F320,PIC10F322,PIC12F675}.PIC      edc:hwstackdepth="8"
+# Overflow on these cores is silent: the stack wraps and the return address is
+# lost, so a program returns to the wrong place. These parts expose no STKPTR,
+# TOSL/TOSH, STKOVF/STKUNF bit, stack-overflow reset, or CONFIG STVREN bit.
+# Nothing at runtime can detect this. It has to be
 # bounded statically, which is what this script does.
 #
 # WHY IT DOES NOT JUST READ XC8's NUMBER

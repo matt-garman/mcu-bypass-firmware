@@ -53,7 +53,8 @@ below its image table explains: [`v0.9.0`](v0.9.0/MANIFEST.md#images),
 
 The current Makefile's canonical product set is AVR Classic (ATtiny13a/45/85),
 ATtiny202 (AVR-XT), PIC10F322, PIC10F320 and — release-supported from `v0.9.9` —
-PIC12F675. Unified releases `v0.9.6`–`v0.9.8` shipped the first four parts only.
+PIC12F675. Unified releases `v0.9.6`–`v0.9.8` shipped the six pre-PIC12F675
+targets only.
 
 That set is not a description of whatever a build happened to produce — it is
 declared once in the Makefile as `RELEASE_IMAGES` and enforced. The verifier
@@ -150,7 +151,8 @@ bypass-attiny85-cd4053_with_mute.hex
 | `cd4053_with_mute` | CD4053 / TMUX4053 with mute-before-switch (3 sections) |
 | `tq2_l2_5v_relay` | Panasonic TQ2-L2-5V latching relay |
 
-Every combination exists, so a release is exactly 7 x 3 = 21 images.
+From `v0.9.9`, every combination exists, so a release is exactly 7 x 3 = 21
+images. `v0.9.8` uses the same naming scheme for its six targets and 18 images.
 
 ATtiny202 images are the only AVR images **not** programmed over ISP: the
 ATtiny202 uses UPDI, and its fuses are seven individually named AVR8X memories
@@ -370,19 +372,19 @@ publishes the required hardware setup and retained result.
 
 ## Reproduce the images bit-for-bit
 
-### Unified releases (v0.9.8 or later)
+### Unified releases (v0.9.9 or later)
 
 A freshly built release HEX lands under `build_avr_classic/`, `build_avr_xt/`,
-`build_pic10f322/` and `build_pic10f320/`, not in the release directory, so run the
-checksum list against those fresh bytes — running it from the repo root would only
-re-verify the committed copies against themselves.
+`build_pic10f322/`, `build_pic10f320/`, and `build_pic12f675/`, not in the release
+directory, so run the checksum list against those fresh bytes — running it from
+the repo root would only re-verify the committed copies against themselves.
 
 ```sh
 git checkout vX.Y.Z
 # install the pinned toolchain (see TOOLCHAIN.adoc), then:
 scripts/verify-release-qualification.sh release/vX.Y.Z vX.Y.Z
 make clean && make attiny13a attiny85 attiny45 && make attiny202
-make pic10f322 && make pic10f320-variants
+make pic10f322 && make pic10f320-variants && make pic12f675
 scripts/verify-release-images.sh release/vX.Y.Z $(make -s print-RELEASE_IMAGE_DIRS)
 ```
 
@@ -400,6 +402,20 @@ Byte-exact reproduction requires the same `avr-gcc` and `binutils-avr` versions,
 plus the target-qualified XC8 compiler and DFP recorded for each PIC family in
 the manifest. A different toolchain may produce functionally identical but not
 byte-identical images.
+
+### Unified release v0.9.8
+
+The same naming and verifier contract applies, but this historical release has
+the six-target, 18-image set and no PIC12F675 build directory. Use its tree's
+four fresh roots and build commands:
+
+```sh
+git checkout v0.9.8
+scripts/verify-release-qualification.sh release/v0.9.8 v0.9.8
+make clean && make attiny13a attiny85 attiny45 && make attiny202
+make pic10f322 && make pic10f320-variants
+scripts/verify-release-images.sh release/v0.9.8 $(make -s print-RELEASE_IMAGE_DIRS)
+```
 
 ### Unified releases v0.9.6 and v0.9.7
 

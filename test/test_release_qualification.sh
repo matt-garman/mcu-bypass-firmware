@@ -6,6 +6,9 @@ VERIFY="$ROOT/scripts/verify-release-qualification.sh"
 RENDER="$ROOT/scripts/release-documentation.sh"
 PIC12F675_FEASIBILITY="$ROOT/docs/pic12f675_feasibility.md"
 DESIGN_DOCUMENTATION="$ROOT/DESIGN_DOCUMENTATION.adoc"
+PROJECT_README="$ROOT/README.md"
+RELEASE_README="$ROOT/release/README.md"
+TEST_README="$ROOT/test/README.md"
 RELEASE=${RELEASE:-$ROOT/scripts/make-release.sh}
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-qualification.XXXXXX")
 release="$work/release"
@@ -24,6 +27,9 @@ fail() {
 	|| fail "PIC12F675 feasibility document is missing"
 [ -r "$DESIGN_DOCUMENTATION" ] \
 	|| fail "design documentation is missing"
+for document in "$PROJECT_README" "$RELEASE_README" "$TEST_README"; do
+	[ -r "$document" ] || fail "release-facing documentation is missing: $document"
+done
 # shellcheck source=../scripts/release-documentation.sh
 source "$RENDER"
 for function in release_render_scope release_render_validation \
@@ -112,6 +118,43 @@ if grep -Eiq 'All targets use a nominal 1ms timer-derived sample cadence|while b
 		<<<"$design_contract"; then
 	fail "design documentation still describes the pre-PIC12F675 timing/topology"
 fi
+checks=$((checks + 1))
+
+# Current reader-facing inventories must agree with the canonical seven-part,
+# three-PIC, 21-image, 18-soak, and 34-evidence contract while preserving the
+# explicitly historical six-target releases.
+project_contract=$(tr '\n' ' ' < "$PROJECT_README" | tr -s ' ')
+release_contract=$(tr '\n' ' ' < "$RELEASE_README" | tr -s ' ')
+test_contract=$(tr '\n' ' ' < "$TEST_README" | tr -s ' ')
+for required in \
+		'seven release parts across four microcontroller core generations' \
+		'PIC10F322, PIC10F320, and PIC12F675 provide functional, fault-injection' \
+		'PIC12F675 is release-supported from `v0.9.9`, raising the canonical set to 21 images'; do
+	grep -Fq "$required" <<<"$project_contract" \
+		|| fail "top-level README omits current release scope: $required"
+done
+for required in \
+		'Unified releases `v0.9.6`–`v0.9.8` shipped the six pre-PIC12F675 targets only' \
+		'From `v0.9.9`, every combination exists, so a release is exactly 7 x 3 = 21 images' \
+		'six-target, 18-image set and no PIC12F675 build directory' \
+		'### Unified releases (v0.9.9 or later)' \
+		'`build_pic10f320/`, and `build_pic12f675/`' \
+		'make pic10f322 && make pic10f320-variants && make pic12f675'; do
+	grep -Fq "$required" <<<"$release_contract" \
+		|| fail "release README omits current/historical release scope: $required"
+done
+for required in \
+		'`pic10f320-test-stack-bound`, `pic12f675-test-stack-bound`' \
+		'exact canonical 34-file evidence set' \
+		'each of 18 release soak combinations' \
+		'historical 28-file/15-soak boundary for v0.9.6-v0.9.8' \
+		'36 PIC10F322, 75 PIC10F320, and 89 PIC12F675 checks' \
+		'## Known gaps (PIC — hardware-bench only)' \
+		'### PIC10F32x hardware gaps' \
+		'### PIC12F675 hardware gaps'; do
+	grep -Fq "$required" <<<"$test_contract" \
+		|| fail "test README omits current PIC/release scope: $required"
+done
 checks=$((checks + 1))
 
 for wiring in \

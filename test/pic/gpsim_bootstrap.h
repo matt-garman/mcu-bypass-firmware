@@ -2,8 +2,8 @@
 #define TEST_PIC_GPSIM_BOOTSTRAP_H
 
 // Shared libgpsim bring-up for the four PIC harnesses -- io, lock-step, fault
-// and soak -- across both parts (PIC10F322 and PIC10F320, which build the same
-// sources through their own adapters).
+// and soak -- across all three PIC targets, which build the shared harness cores
+// through their own adapters.
 //
 // D1 factored the io/lock-step/fault BODIES into three shared cores but left
 // each one carrying its own copy of the ~30-line bring-up prologue, and the soak
@@ -31,8 +31,8 @@
 
 #include "pic/find_pin_exact.h"
 
-// The footswitch pin is RA3 on both supported parts. A part adapter may override
-// it by defining FOOTSW_PIN_NAME before including this header.
+// RA3 is the default for the PIC10F322/PIC10F320 pair. PIC12F675's adapter
+// overrides it with "gpio5" by defining FOOTSW_PIN_NAME before including this header.
 #ifndef FOOTSW_PIN_NAME
 #  define FOOTSW_PIN_NAME "ra3"
 #endif
@@ -81,7 +81,7 @@ static bool gpsim_attach_footswitch(const char *pin_name, const char *proc_name)
     }
     g_fsw_src = new source_stimulus();
     g_fsw_src->set_digital();
-    g_fsw_src->set_Zth(250.0);                   // dominate RA3's weak pull-up
+    g_fsw_src->set_Zth(250.0);                   // dominate the pin's weak pull-up
     g_fsw_src->set_Vth(5.0);                     // released at power-on
     g_fsw_node = new Stimulus_Node("fsw");
     g_fsw_node->attach_stimulus(g_fsw_src);
@@ -89,15 +89,14 @@ static bool gpsim_attach_footswitch(const char *pin_name, const char *proc_name)
     return true;
 }
 
-// Drive the footswitch input: 1 = PRESSED (RA3 driven low), 0 = RELEASED (high).
-// The firmware sees a pressed switch as a low on RA3, so a pressed stimulus is
-// 0.0 V.
+// Drive the footswitch input: 1 = PRESSED (selected pin low), 0 = RELEASED (high).
+// Every PIC target sees a pressed switch as a low, so a pressed stimulus is 0.0 V.
 //
 // A bare source_stimulus presents a constant get_Vth(), so the driven level is
 // modulated directly via set_Vth -- NOT putState, which only flips an unused
 // digital-state flag on the base class. Zth is set low in
 // gpsim_attach_footswitch() so this source dominates the firmware's internal
-// weak pull-up on RA3.
+// weak pull-up on the selected pin.
 static void footsw_set(int pressed) {
     g_fsw_src->set_Vth(pressed ? 0.0 : 5.0);
     g_fsw_node->update();

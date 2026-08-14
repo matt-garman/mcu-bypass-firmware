@@ -211,7 +211,8 @@ SIZE     = avr-size
 READELF  ?= readelf
 IHEX_VALIDATOR ?= scripts/validate-ihex.sh
 # Presence check for IHEX_VALIDATOR, shared by every phony recipe that runs it
-# (`pic10f322`, `attiny202`, `pic10f320-size`). The .hex FILE rules do not need it: they
+# (`pic10f322`, `attiny202`, `pic10f320-size`, `pic12f675`,
+# `pic12f675-preflight`, and `pic12f675-program`). The .hex FILE rules do not need it: they
 # carry $(IHEX_VALIDATOR) as a real prerequisite, so Make refuses to run them if
 # it is missing. A phony recipe gets no such protection, and it must not build an
 # image it then cannot validate.
@@ -312,8 +313,9 @@ src_tq2_l2_5v_relay  = src/bypass_output_tq2_l2_5v_relay.c
 # ABSENT, because a bare `bypass_cd4053.hex` silently meant "the ATtiny13a one".
 # That last case was the real hazard: nothing in the filename stopped a builder
 # from flashing the 1.2 MHz ATtiny13a image onto an ATtiny85. The MCU field is
-# now mandatory on every image, so the 6 x 3 product matrix is visible in a
-# plain directory listing and no image is identified by omission.
+# now mandatory on every image. At the v0.9.8 migration point the 6 x 3 product
+# matrix was visible in a plain directory listing; the same rule now exposes the
+# 7 x 3 matrix, and no image is identified by omission.
 #
 # Longest resulting name is 37 characters (bypass-pic10f320-cd4053_with_mute.hex),
 # one SHORTER than the 38-character worst case this scheme replaced, so the
@@ -978,15 +980,17 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_BUILD_TARGETS,$(n))))
 # XC8 scatters intermediates (startup.*, *.p1, *.d, .elf/.cmf/.hxl/.sym/.sdb)
 # into its working directory, so the build runs inside PIC10F322_BUILD_DIR to keep the
 # repo root clean; `clean` just removes that directory.
-# NAMING RULE for every PIC variable, in both lanes: a PIC_* name with no part
-# in it is SHARED BY BOTH PIC PARTS; a part fact is spelled PIC10F322_* or
-# PIC10F320_*. There is exactly one XC8, one device pack, one C++ compiler and
-# one gpsim harness source behind both chips, so those keep the family prefix
-# (PIC_CC, PIC_DFP, PIC_XC8_INCLUDE, PIC_SOAK_CXX, PIC_SOAK_GPSIM_INC,
-# PIC_SOAK_SRC, PIC_SOAK_SAMPLING_HDR, PIC_PIN_LOOKUP_HDR,
-# PIC_GPSIM_BOOTSTRAP_HDR), as do the env-var names the shared wrapper scripts
-# read (PIC_GPSIM_PROC, PIC_GPSIM_STC, PIC_DEVICE_NAME, PIC_RECIPE_PID) --
-# each lane passes its own part's value through them.
+# NAMING RULE for every PIC variable across all three lanes: a PIC_* name with no
+# part identifies shared mechanism; a part fact is spelled PIC10F322_*,
+# PIC10F320_*, or PIC12F675_*. There is exactly one XC8, one device pack, one C++
+# compiler, one sampling helper, one pin lookup, and one gpsim bootstrap behind
+# all three targets, so those keep the family prefix (PIC_CC, PIC_DFP,
+# PIC_XC8_INCLUDE, PIC_SOAK_CXX, PIC_SOAK_GPSIM_INC, PIC_SOAK_SAMPLING_HDR,
+# PIC_PIN_LOOKUP_HDR, PIC_GPSIM_BOOTSTRAP_HDR), as do the env-var names the shared
+# wrapper scripts read (PIC_GPSIM_PROC, PIC_GPSIM_STC, PIC_DEVICE_NAME,
+# PIC_RECIPE_PID) -- each lane passes its own part's value through them.
+# PIC_SOAK_SRC is a retained legacy name for the PIC10F32x adapter source;
+# PIC12F675 has a distinct adapter because its TMR0 timebase differs.
 #
 # Anything whose VALUE is a property of one chip must carry that chip's name.
 # A mis-scoped chip variable produces no compile error and no failing test, it
@@ -1293,14 +1297,14 @@ pic10f322-analyze-misra: src/bypass_mcu_pic10f322.c $(PIC10F322_HEADERS) $(MISRA
 # engage until a genuine release + fresh press. Both run per variant. Depends on
 # `pic10f322` to build the HEX; skips cleanly when gpsim or the HEX is absent.
 
-# Preflight shared by the CLI-gpsim lanes of BOTH PIC chips, and shared
-# deliberately: the two lanes drive the SAME two wrapper scripts and the SAME
+# Preflight shared by the CLI-gpsim lanes of all three PIC targets, and shared
+# deliberately: the three lanes drive the SAME two wrapper scripts and the SAME
 # $(GPSIM) binary, so a guard that lives in only one of them is not a guard.
 # That is not hypothetical -- it is how the PIC10F320 lane shipped from the merge
 # with no tool probe at all, where `make pic10f320-test STRICT_TOOLS=1` printed
 # "all PIC10F320 pre-hardware checks complete" on a host without gpsim having run
 # zero of its six scenarios (the wrappers exit 0 on a missing gpsim by design, so
-# nothing below the Make level could catch it). One definition, two callers.
+# nothing below the Make level could catch it). One definition, three callers.
 #
 # The two wrapper checks answer DIFFERENT questions and are therefore both
 # unconditional-where-meaningful rather than chained: `-x` asks whether this
@@ -1396,7 +1400,7 @@ pic10f322-test: pic10f322-test-config pic10f322-analyze pic10f322-coverage-check
           pic10f322-test-stack-bound
 	@echo "=== all PIC10F322 pre-hardware checks complete ==="
 
-# --- PIC hardware return-stack depth (BOTH chips) ----------------------------
+# --- PIC hardware return-stack depth (all three targets) ----------------------
 # The PIC counterpart of test-stack-bound, and deliberately a different gate.
 # test-stack-bound bounds the AVR's DATA stack in bytes via -fstack-usage; the
 # PIC14 core has no data stack to bound (XC8 uses a static compiled-stack
@@ -1407,11 +1411,11 @@ pic10f322-test: pic10f322-test-config pic10f322-analyze pic10f322-coverage-check
 #
 # The budget is READ FROM THE DEVICE PACK, never written down here: a hardcoded
 # depth is the same silent-staleness hazard as a hardcoded PIC10F322_FLASH_WORDS
-# (merge plan §5.6). Both parts declare STACKDEPTH=8 independently.
+# (merge plan §5.6). All three parts declare STACKDEPTH=8 independently.
 #
 # The reserve is held back from the budget for two reasons worth stating: an
-# in-circuit debugger consumes a stack level during bench bring-up, and neither
-# shell has an ISR today -- if one is added it costs a level plus its own tree,
+# in-circuit debugger consumes a stack level during bench bring-up, and no
+# current PIC implementation has an ISR -- if one is added it costs a level plus its own tree,
 # which the gate accounts for but which should not consume the last of the
 # headroom before anyone notices.
 PIC10F322_DEVICE_INI     ?= $(PIC_DFP)/pic/dat/ini/$(shell printf '%s' '$(PIC10F322_CHIP)' | tr 'A-Z' 'a-z').ini
@@ -1506,7 +1510,7 @@ PIC10F322_SOAK_PROGRESS_INTERVAL_MS ?= 3600000
 PIC10F322_SOAK_COMBINATION_NAME ?= standalone
 PIC_PIN_LOOKUP_HDR = test/pic/find_pin_exact.h
 # Shared libgpsim bring-up consumed by ALL FOUR harnesses (io, lock-step, fault,
-# soak) on BOTH parts. It is a prerequisite of every one of them below: an edit
+# soak) on all three PIC targets. It is a prerequisite of every one below: an edit
 # here changes what every PIC gpsim binary does, so none may be stale for it.
 PIC_GPSIM_BOOTSTRAP_HDR = test/pic/gpsim_bootstrap.h
 # Shared by all three fault adapters, and named for that rather than for the
@@ -2185,7 +2189,7 @@ XT_SOAK_PROGRESS_INTERVAL_MS ?= 600000
 # Combination label bound into the driver's SOAK_RESULT record (the shared
 # release contract). Empty means "derive it per variant" -- attiny202_<variant>,
 # which is exactly what RELEASE_SOAK_NAMES declares. The release orchestrator
-# pins it explicitly, one combination per run, as it does for both PIC soaks.
+# pins it explicitly, one combination per run, as it does for all three PIC soaks.
 XT_SOAK_COMBINATION_NAME ?=
 
 # Shell guard shared by every harness target: skip cleanly (exit 0 out of the
@@ -2534,7 +2538,7 @@ attiny202-test: test-fuses attiny202-smoke attiny202 attiny202-analyze attiny202
 
 # The yasimavr target-level aggregate, over EVERY variant: functional + physical
 # output trace, fault injection, and ctx_-vs-model lock-step. The AVR-XT
-# counterpart of pic10f322-test-target-variants / pic10f320-test-target-variants, and what
+# counterpart of the three PIC target-variant aggregates, and what
 # release qualification runs (with STRICT_TOOLS=1, which turns each sub-target's
 # clean skip into a hard failure -- a release must never accept "the simulator
 # was missing" as evidence).
@@ -3121,7 +3125,8 @@ test-mutation-sandbox:
 # skipped/incomplete target-level lanes.
 test-target-matrix:
 	./test/test_target_matrix.sh
-	@# Same regression, PIC10F320 contract. One script, two chips (§4 FOLD).
+	@# Same parameterized regression, PIC10F320 contract; the next invocation
+	@# adds PIC12F675, so one script covers all three PIC targets (§4 FOLD).
 	TM_LABEL='PIC10F320' \
 	TM_TARGET='pic10f320-test-target-variants' \
 	TM_PER_VARIANT_TARGET='pic10f320-test-target' \
@@ -3200,7 +3205,7 @@ test-target-matrix:
 # because every lane exits 0 through $(SKIP) when its tool is absent -- so an
 # aggregate reading only exit status reports a full green sweep having run
 # nothing. pic10f320-test-target shipped in exactly that shape; see the script
-# header. Two chips, one script (§4 FOLD).
+# header. Three PIC targets, one script (§4 FOLD).
 test-target-lane-markers:
 	./test/test_target_lane_markers.sh
 	@# The PIC10F320 contract. LM_REQUIRE_ARG pins the second half of that fix:
@@ -4077,9 +4082,10 @@ coverage-clean:
 # exists, and it is why its lanes are separate from the PIC10F322 ones rather
 # than parameterized alongside them.
 #
-# NAMING: the two PIC lanes are equally-explicit siblings -- `pic10f322-*` and
-# `pic10f320-*` -- and a goal named `pic-*` means BOTH parts (test-pic-build,
-# test-lockstep-progress, test-stack-bound-pic-regression). This supersedes
+# NAMING: all three PIC lanes are equally-explicit siblings -- `pic10f322-*`,
+# `pic10f320-*`, and `pic12f675-*` -- and a goal named `pic-*` covers shared PIC
+# mechanism (test-pic-build, test-lockstep-progress,
+# test-stack-bound-pic-regression). This supersedes
 # merge-plan §15 D1, which kept the bare `pic-` prefix for the 322 because it
 # got here first; that made `pic-` read as a qualifier rather than a part and
 # put the two chips one near-name apart. Do NOT add a PIC-shaped variable here
@@ -4894,7 +4900,7 @@ pic10f320-test-gpsim: variant-selectors-valid pic10f320 $(PIC10F32X_GPSIM_REGS)
 # host fault, firmware coverage, build+budget, expected-image hashes, CONFIG word,
 # final-HEX return-stack proof, static analysis and the CLI-gpsim register-level
 # test. The PIC10F320 counterpart of `pic10f322-test`, and the single target the CI
-# `pic` job -- which covers BOTH PIC parts -- invokes for this chip (merge plan
+# `pic` job -- which covers all three PIC targets -- invokes for this chip (merge plan
 # §11, D3).
 #
 # It sweeps all three variants, because the per-variant lanes are per-variant for
@@ -5042,8 +5048,8 @@ pic10f320-test-fault-variants:
 #
 # Requiring each lane's explicit PASS marker is what closes it: a skip, a missing
 # ctx_ symbol, a partial run or a crashed simulator all fail here instead of
-# masquerading as green. Both chips' harnesses print the identical markers
-# (test/pic{,10f320}/**/test_{fault,lockstep,io}_pic.cc all emit
+# masquerading as green. The shared harness cores for all three chips print the
+# same markers (test/pic/test_{fault,lockstep,io}_pic_core.h emit
 # "<LANE> %s: %u checks" with PASS/FAIL), so this is the PIC10F322 driver at
 # `pic10f322-test-target` above, verbatim in structure, with the PIC10F320_ names.
 #
@@ -7064,8 +7070,8 @@ origins:
 #      release must never green-light on a tool that silently did nothing);
 #   2. clean-builds all AVR + PIC variant images;
 #   3. runs `make test-long`, both ATtiny202 qualification aggregates, and both
-#      pre-hardware and real-target aggregates for PIC10F322 and PIC10F320, then
-#      ALL 15 soak combos in parallel;
+#      pre-hardware and real-target aggregates for PIC10F322, PIC10F320, and
+#      PIC12F675, then ALL 18 soak combos in parallel;
 #   4. rechecks source HEAD + worktree cleanliness, then stages
 #      release/<VERSION>/ with the .hex images, SHA256SUMS, a provenance MANIFEST
 #      (toolchain versions, per-image fuse bytes / CONFIG word, flashing command,
@@ -7108,7 +7114,7 @@ origins:
 # sets, not the caller's VARIANTS or PIC10F320_VARIANTS_ALL request, so an abbreviated
 # build override cannot shorten this independent release contract with the build.
 #
-# Every entry is composed by $(call fw_image,<variant>,<mcu-tag>), so all six
+# Every entry is composed by $(call fw_image,<variant>,<mcu-tag>), so all seven
 # parts share ONE basename convention -- bypass-<mcu>-<output stage>.hex -- and
 # this list cannot spell an image differently from the rule that builds it. The
 # five divergent conventions that used to be reconciled here by hand (merge plan
@@ -7422,7 +7428,7 @@ help:
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
 	@echo "  test-release-preflight  step-0 tool/input checks run to completion without build or staging"
 	@echo "  test-release-provenance  release source/compiler provenance checks"
-	@echo "  test-release-qualification  exact release evidence + 15-soak publication checks"
+	@echo "  test-release-qualification  exact release evidence + 18-soak publication checks"
 	@echo "  test-release-history  bind release history + checksum/tag signatures"
 	@echo "  test-build-serialization  worktree Make/release lock regression"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
@@ -7466,8 +7472,8 @@ help:
 	@echo "  release-preflight  check every release prerequisite without cleaning, building or staging"
 	@echo "                     (optional VERSION=vX.Y.Z also checks tag/output state as warnings)"
 	@echo "  release         VERSION=vX.Y.Z: build+validate every release image -- AVR Classic"
-	@echo "                  + ATtiny202 + PIC10F322 + PIC10F320, the canonical RELEASE_IMAGES"
-	@echo "                  set (incl. 24-h soak of all 15 combos) + stage release/<ver>/."
+	@echo "                  + ATtiny202 + PIC10F322 + PIC10F320 + PIC12F675, the canonical"
+	@echo "                  RELEASE_IMAGES set (incl. 24-h soak of all 18 combos) + stage release/<ver>/."
 	@echo "                  RELEASE_ARGS='--dry-run' shortens the soak; see"
 	@echo "                  scripts/make-release.sh"
 	@echo "Clean:"

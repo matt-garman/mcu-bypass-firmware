@@ -3,14 +3,12 @@
 
 [![CI](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml)
 
-The source tree covers six release parts across three microcontroller core
-generations: the "AVR Classic" parts (ATtiny13a, ATtiny45, ATtiny85), the AVR-XT
-ATtiny202, and the Microchip PIC10F322 and PIC10F320. Release `v0.9.6` is the
-first unified release covering all six: 18 prebuilt images qualified from the
-final source, including ATtiny202 and PIC10F320 for the first time.
-
-A seventh part, the Microchip PIC12F675, is release-supported from `v0.9.9` —
-see the table below.
+The source tree covers seven release parts across four microcontroller core
+generations: the "AVR Classic" parts (ATtiny13a, ATtiny45, ATtiny85), AVR-XT
+ATtiny202, enhanced mid-range PIC10F322/PIC10F320, and classic mid-range
+PIC12F675. Release `v0.9.6` was the first unified release, covering the first six
+parts with 18 prebuilt images. PIC12F675 is release-supported from `v0.9.9`,
+raising the canonical set to 21 images; see the table below.
 
 ## Targets
 
@@ -77,13 +75,15 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
   - Core debounce algorithm written as pure functionality, thus
     host-compilable for exhaustive fuzz testing
   - Built-image simulator validation: simavr for AVR Classic and gpsim/libgpsim
-    for PIC10F322 provide functional, fault-injection, lock-step, target-I/O,
-    and soak tests; yasimavr for AVR-XT (ATtiny202) provides functional,
+    for PIC10F322, PIC10F320, and PIC12F675 provide functional, fault-injection,
+    lock-step, target-I/O, and soak tests; yasimavr for AVR-XT (ATtiny202) provides functional,
     fault-injection, lock-step, PA2/PA3 transition ordering, polarity,
     pulse-presence, and soak tests. A separate built-image disassembly oracle
     verifies the compiled 5 ms mute and 12 ms relay delay-body cycle counts. The
     PIC10F320's directly implemented algorithm is additionally compared with the
-    verified core, tick for tick, by scoped host and real-image lock-step lanes
+    verified core, tick for tick, by scoped host and real-image lock-step lanes.
+    PIC12F675 additionally proves that its simulator-only calibration derivation
+    leaves all three shipping images byte-identical
   - Mutation tests (deliberately break code to prove tests catch
     firmware errors)
   - Simulated fault-injection tests to verify WDT functioning
