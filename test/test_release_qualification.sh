@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 VERIFY="$ROOT/scripts/verify-release-qualification.sh"
 RENDER="$ROOT/scripts/release-documentation.sh"
+PIC12F675_FEASIBILITY="$ROOT/docs/pic12f675_feasibility.md"
 RELEASE=${RELEASE:-$ROOT/scripts/make-release.sh}
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-qualification.XXXXXX")
 release="$work/release"
@@ -18,6 +19,8 @@ fail() {
 }
 
 [ -r "$RENDER" ] || fail "release documentation renderer is missing"
+[ -r "$PIC12F675_FEASIBILITY" ] \
+	|| fail "PIC12F675 feasibility document is missing"
 # shellcheck source=../scripts/release-documentation.sh
 source "$RENDER"
 for function in release_render_scope release_render_validation \
@@ -27,6 +30,56 @@ for function in release_render_scope release_render_validation \
 		release_render_commit_message; do
 	declare -F "$function" >/dev/null \
 		|| fail "release documentation renderer omitted $function"
+done
+checks=$((checks + 1))
+
+# The feasibility assessment preserves prospective design history, but its
+# current disposition must agree with the release contract and keep silicon-only
+# residual risk explicit. Pin only those semantics, not incidental prose.
+if ! current_pic12f675_status=$(awk '
+	$0 == "<!-- current-status:start -->" {
+		starts++
+		if (starts != 1 || current || NR != 3) bad=1
+		current=1
+		next
+	}
+	$0 == "<!-- current-status:end -->" {
+		ends++
+		if (ends != 1 || !current) bad=1
+		current=0
+		next
+	}
+	current { print }
+	END { exit !(starts == 1 && ends == 1 && !current && !bad) }
+' "$PIC12F675_FEASIBILITY"); then
+	fail "PIC12F675 feasibility document must have one opening current-status block"
+fi
+[ -n "$current_pic12f675_status" ] \
+	|| fail "PIC12F675 feasibility document has no bounded current-status section"
+current_pic12f675_status_one_line=$(printf '%s\n' "$current_pic12f675_status" \
+	| tr '\n' ' ' | tr -s ' ')
+for required in \
+		'**Current status (v0.9.9;' \
+		'PIC12F675 is **release-supported from `v0.9.9`**' \
+		'included in the default `all` goal, both CI aggregates' \
+		'21-image release set, the 18-combination release soak, and the 34-file retained evidence inventory' \
+		'Section 8 items 1, 2, 8, and 9 remain explicitly deferred to the `1.x.y` hardware-validation pass' \
+		'provides no real-programmer factory-trim preservation guarantee'; do
+	grep -Fq "$required" <<<"$current_pic12f675_status_one_line" \
+		|| fail "PIC12F675 current-status section omits release semantics: $required"
+done
+if grep -Eiq '(PIC12F675|the part|this part) (is|remains) (intentionally )?(not release-supported|(absent from|excluded from|not included in) (the )?(default `all` goal|CI|release integration|(canonical )?([0-9]+-image )?release set))|(^|[.!?] )((the|this|a) )?(workflow|programmer|pk2cmd|ipecmd) (preserves|guarantees|ensures)([ .]|$)|(^|[.!?] )(factory trim|factory values|OSCCAL|BG) (is|are) preserved([ .]|$)' \
+		<<<"$current_pic12f675_status_one_line"; then
+	fail "PIC12F675 current-status section contradicts its release-supported disposition"
+fi
+for required in \
+		'| Implemented integration | default `all`, both CI aggregates' \
+		'**Status 2026-08-13 (v0.9.9 disposition).**' \
+		'**Current implementation status (v0.9.9):**' \
+		'## 9. Historical effort and suggested sequencing' \
+		'## 11. Historical documentation plan'; do
+	grep -Fq "$required" "$PIC12F675_FEASIBILITY" \
+		|| fail "PIC12F675 feasibility document omits a current/historical boundary: $required"
 done
 checks=$((checks + 1))
 

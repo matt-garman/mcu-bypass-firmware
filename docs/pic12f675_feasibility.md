@@ -1,6 +1,7 @@
 # PIC12F675 feasibility — porting the reference architecture to a classic mid-range PIC
 
-**Status (2026-08-11): staged standalone implementation; not release-supported.**
+<!-- current-status:start -->
+**Current status (v0.9.9; updated 2026-08-14): release-supported in software.**
 The repository now contains the production Model-B PIC12F675 shell and pin map,
 the complete three-variant build and flash-budget lane, static analysis,
 shipping-source coverage, production-image return-stack and CONFIG gates,
@@ -9,22 +10,24 @@ selected-variant libgpsim I/O, lock-step and fault-injection lanes, the
 long-duration soak, both authoritative aggregates over them, and the guarded
 bench programming target.
 
-PIC12F675 is intentionally absent from the default `all` goal, release
-integration, and hardware-bench validation, and is therefore not
-release-supported. Programming is the one bench-facing integration that does
-exist: `make pic12f675-program` flashes a single validated variant behind a
-pre-flash gate, but it publishes no images and is not a release path. The part
-*is* gated by CI: both aggregates run in the shared `pic` job, deliberately,
-because a staged part exercised only when someone remembers to run it by hand
-is a part whose lanes rot. What CI does not do is upload its images —
-publishing a downloadable HEX belongs with release integration, where this
-part's OSCCAL-preservation flashing procedure is documented (§8 item 2).
+PIC12F675 is **release-supported from `v0.9.9`** as the seventh software-validated
+part. It is included in the default `all` goal, both CI aggregates, the canonical
+21-image release set, the 18-combination release soak, and the 34-file retained
+evidence inventory. The tag workflow rebuilds and requalifies its three shipping
+images with the pinned PIC toolchain before publication.
+
+Like every current part, it has not run on silicon. Section 8 items 1, 2, 8, and
+9 remain explicitly deferred to the `1.x.y` hardware-validation pass. The
+guarded preflight/program/readback workflow detects and records OSCCAL/BG changes
+and provides no real-programmer factory-trim preservation guarantee.
+<!-- current-status:end -->
 
 The 2026-08-05 assessment, design rationale, spike provenance and proposed
-sequencing are retained below. Unless explicitly marked as a current or dated
-implementation note, implementation-status, prospective and open-risk wording
-describes that preimplementation state and is not a statement of the current
-repository boundary.
+sequencing are retained below as history. Sections 1 through 7, the original
+sequence in §9, and the documentation plan in §11 intentionally retain their
+preimplementation reasoning and prospective tense. Explicit current/v0.9.9
+status notes override that historical text; it is not a statement that current
+targets, tests, CI, or release integration are absent.
 
 **What the 2026-08-05 assessment established:**
 
@@ -1068,7 +1071,7 @@ serves multiple parts, part name where the repository builds exactly one:
 | Build dir | `build_pic12f675/` |
 | Image stem | `bypass-pic12f675-<variant>` |
 | Implemented target families | build, analysis, coverage, stack, CONFIG, calibration, CLI gpsim, selected-variant libgpsim I/O, lock-step and fault, the long-duration soak, the pre-hardware and fail-closed target aggregates, guarded bench programming, and the mutation topology |
-| Deferred integration | default `all` and release integration (CI gates both aggregates; it does not upload images) |
+| Implemented integration | default `all`, both CI aggregates, canonical release images/soaks/evidence, tag-workflow rebuild and qualification, and generated release documentation |
 
 **Name-length contract:** `bypass-pic12f675-cd4053_with_mute.hex` is 37
 characters — **exactly** the current longest name
@@ -1083,7 +1086,7 @@ in `pic12f629.h`). gpsim supports `p12f629` too. So a family shell
 (`bypass_mcu_pic12f6xx.c`, `BYPASS_MCU_PIC12F6XX`) guarding the `ANSEL`/`ADCON0`
 writes and the corresponding two sanity checks behind one `#if` would cover both
 parts for very little extra work — and the 629 is the cheaper, more available
-part. The staged implementation selected a single-part `pic12f675` shell;
+part. The implementation selected a single-part `pic12f675` shell;
 PIC12F629 family generalization remains deferred.
 
 ---
@@ -1343,9 +1346,11 @@ bench**, tracked together with the graduation diff that follows it.
 
 ---
 
-## 9. Effort and suggested sequencing
+## 9. Historical effort and suggested sequencing
 
-Ordered so that each step is independently green and independently revertible.
+The 2026-08-05 assessment proposed the order below so each step would be
+independently green and independently revertible. It is retained as implementation
+history, not as a list of currently absent features.
 
 **Implementation sequencing note (2026-08-10).** Work spanning steps 2 through 7
 landed together in `64b4d2d`, so that implementation commit does not satisfy the
@@ -1356,10 +1361,11 @@ The sequencing requirement is therefore waived for that implementation commit
 only. Its commit message retains the per-gate commands, results and negative
 probes, while the subsequent isolation, target-I/O, lock-step, coverage, gpsim,
 fault, matrix, clean-contract, spare-pin and rationale commits retain focused
-review and verification evidence. Remaining work must follow the independently
-green, independently revertible sequencing below.
+review and verification evidence. The original sequencing rule remains useful
+review history; the only unfinished work in this section is the `1.x.y` hardware
+bench identified in §8.
 
-**Current staged status (2026-08-10):** step 0 selected the 1.024 ms TMR0 design,
+**Current implementation status (v0.9.9):** step 0 selected the 1.024 ms TMR0 design,
 a single-part PIC12F675 shell, and Model B. Step 1 is not applicable unless the
 ISR alternative is reconsidered; steps 2 through 9 are implemented — step 9
 re-derived the holds through the tick period rather than letting the slack absorb
@@ -1403,10 +1409,11 @@ dependency order rather than claiming every row is open.
 | 8 | libgpsim adapters: io, lockstep, fault | Rides on step 2 |
 | 9 | Soak + re-derived timing budgets | Rides on §4.4.1; simpler under the ISR model (§4.3.1) |
 | 10 | Aggregates, mutation topology, CI routing | |
-| 11 | Docs, release integration, hardware bench (§8 items 1, 2, 8, 9) | The §8 risks close here or nowhere |
+| 11 | Docs, release integration, hardware bench (§8 items 1, 2, 8, 9) | Docs and v0.9.9 release integration are complete; the four §8 risks remain for the `1.x.y` hardware pass |
 
-Firmware is roughly a day of design plus implementation. The test infrastructure
-is the bulk of the calendar time, and step 2 gates most of it.
+The historical estimate assigned roughly a day to firmware design and
+implementation, with test infrastructure expected to dominate the calendar and
+step 2 expected to gate most of it.
 
 **Why step 1 sits where it does.** Every other test item can be built after the
 shell and fixed independently of it. The return-stack bound cannot: it is a
@@ -1536,10 +1543,12 @@ complete gate output; the old parser failure is not stack evidence.
 
 ---
 
-## 11. Where the rest of it would live
+## 11. Historical documentation plan
 
-If this port is taken, the documents it would produce or amend, mirroring the
-structure the PIC10F320 work established:
+The 2026-08-05 assessment expected the port to produce or amend the documents
+below, mirroring the structure established by the PIC10F320 work. The table is
+retained as planning history; the current support disposition is stated at the
+top of this document.
 
 | Topic | Document |
 |---|---|

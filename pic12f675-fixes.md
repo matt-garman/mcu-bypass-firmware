@@ -4,7 +4,7 @@
 
 **Reviewed branch:** `pic12f675-support`
 
-**Reviewed tip:** `d246794` (`fix: keep PIC12F675 bench data private`)
+**Reviewed tip:** `379ffc4` (`test: derive the shared-check shell census`)
 
 **Last updated:** 2026-08-14
 
@@ -39,8 +39,8 @@ The PIC12F675 implementation is substantially at software-validation parity:
 - No nominal-path PIC12F675 firmware defect was found in the meta-review.
 
 The branch is not yet merge-ready as a completed release-support change because
-its current support/design/test documents still need reconciliation and the
-complete equipped-host software qualification remains pending.
+its current design/test documents still need reconciliation and the complete
+equipped-host software qualification remains pending.
 
 ## Priority Summary
 
@@ -49,10 +49,10 @@ complete equipped-host software qualification remains pending.
 | P12-1 | Blocker | Make generated reproduction instructions build PIC12F675 | Implemented; P12-8 pending |
 | P12-2 | Blocker | Correct PIC12F675 flashing instructions and trim claims | Implemented; P12-8 pending |
 | P12-3 | High | Complete generated release metadata and commit message | Implemented; P12-8 pending |
-| P12-4 | High | Reconcile the feasibility document's support status | Open |
+| P12-4 | High | Reconcile the feasibility document's support status | Implemented |
 | P12-5 | High | Correct stale design, safety, test, and help documentation | Open |
 | P12-6 | High | Remove hard-coded `/tmp` use from the programming workflow | Implemented |
-| P12-7 | High | Add regressions for the review gaps | In progress |
+| P12-7 | High | Add regressions for the review gaps | Implemented; P12-8 pending |
 | P12-8 | Gate | Run the complete software qualification on the equipped host | Open |
 | P12-9 | Gate | Perform final branch and merge hygiene | Open |
 
@@ -179,15 +179,15 @@ integrated.
 
 ### Required Work
 
-- [ ] Replace the opening status with the current v0.9.9 disposition.
-- [ ] Preserve the preimplementation history, but label historical/prospective
+- [x] Replace the opening status with the current v0.9.9 disposition.
+- [x] Preserve the preimplementation history, but label historical/prospective
       statements so they cannot be mistaken for current status.
-- [ ] Keep items 1, 2, 8, and 9 classified as v1.x hardware work.
+- [x] Keep items 1, 2, 8, and 9 classified as v1.x hardware work.
 
 ### Acceptance
 
-- [ ] A reader can determine current support status from the opening section.
-- [ ] No current-tense section says the target is excluded from `all`, CI, or
+- [x] A reader can determine current support status from the opening section.
+- [x] No current-tense section says the target is excluded from `all`, CI, or
       release integration.
 
 ## P12-5 - Current Documentation Parity
@@ -317,7 +317,7 @@ the development environment's rule that no files may be created under `/tmp`.
       check. (The contract itself is still enforced for PIC12F675 by the dynamic
       `find_shells_missing_shared_checks` sweep; this closes the meta-coverage
       parity gap, not an enforcement hole.)
-- [ ] Add narrow semantic documentation checks only where the safety/release
+- [x] Add narrow semantic documentation checks only where the safety/release
       contract justifies maintaining them; avoid pinning incidental prose.
 
 ### Acceptance
@@ -399,6 +399,23 @@ tested. Bash syntax, the focused review, and `git diff --check` passed.
 This host does not provide `avr-gcc`, so the same script stopped at its first
 AVR compile control after all topology/census checks passed. The complete
 compiler-backed guard-mutation run remains part of P12-8 on the equipped host.
+
+### Completed Feasibility-Status Chunk Evidence
+
+The feasibility reconciliation (P12-4 and the final P12-7 documentation
+regression) now opens with the v0.9.9 software-release disposition, current
+default-build/CI/release counts, and the explicit `1.x.y` boundary for hardware
+items 1, 2, 8, and 9. The retained 2026-08-05 assessment, sequencing, and
+documentation plan are labeled as historical rather than silently rewritten.
+
+The release-qualification regression uses one explicit opening-status boundary,
+binds all four residual items to the hardware pass, requires an explicit
+statement that preservation is not guaranteed, and rejects only current release
+exclusions or affirmative trim-preservation claims. Verification passed:
+
+- Generated release qualification/documentation: 45 checks.
+- Makefile name contract: 48 checks.
+- Independent focused review, Bash syntax, and `git diff --check`.
 
 ## P12-8 - Full Software Qualification
 
