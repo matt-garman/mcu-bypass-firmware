@@ -348,6 +348,23 @@ PIC10F320_DFP=$(mkv PIC10F320_DFP)
 PIC10F320_CC=$(tool_from_repo "$PIC10F320_CC")
 PIC10F320_DFP=$(path_from_repo "$PIC10F320_DFP")
 
+# --- PIC12F675, the classic mid-range release target -------------------------
+# Read through its OWN variables, like the two 10F32x parts. It shares this
+# repo's PIC_CC/PIC_DFP install with the PIC10F322 -- one XC8 + one DFP serve all
+# three PICs today -- but its geometry, clock, CONFIG map and, uniquely, its
+# DERIVED simulator image are its own. The soak drives that derived "simcal"
+# image (the shipped HEX with a fabricated oscillator-calibration word injected
+# into flash word 0x3FF), never the shipped HEX itself, so this part is threaded
+# like the ATtiny202 above: a shipped artifact (HEX) and a distinct soaked
+# artifact (the simcal HEX), each hashed and checked in its own array, bound
+# together by the pic12f675-test-calibration gate that runs in section 2.
+PIC12F675_BUILD_DIR=$(mkv PIC12F675_BUILD_DIR)     # build_pic12f675
+PIC12F675_TAG=$(mkv PIC12F675_TAG)                 # pic12f675
+PIC12F675_XTAL=$(mkv PIC12F675_XTAL)               # 4000000UL
+PIC12F675_FLASH_WORDS=$(mkv PIC12F675_FLASH_WORDS) # 1024
+PIC12F675_GPSIM_PROC=$(mkv PIC12F675_GPSIM_PROC)   # p12f675
+PIC12F675_SIMCAL_DIR=$(mkv PIC12F675_SIMCAL_DIR)   # build_pic12f675/simcal
+
 # --- host / AVR / analysis tools, read through their Makefile variables -------
 # The preconditions below assert these, and the manifest records their versions.
 # Both must name the tool the BUILD will actually run: every one of these is a
@@ -374,6 +391,8 @@ PIC10F322_DFP_INCLUDE=$(mkv PIC10F322_DFP_INCLUDE)
 PIC10F320_DFP_INCLUDE=$(mkv PIC10F320_DFP_INCLUDE)
 PIC10F322_DEVICE_INI=$(mkv PIC10F322_DEVICE_INI)
 PIC10F320_DEVICE_INI=$(mkv PIC10F320_DEVICE_INI)
+PIC12F675_DFP_INCLUDE=$(mkv PIC12F675_DFP_INCLUDE)
+PIC12F675_DEVICE_INI=$(mkv PIC12F675_DEVICE_INI)
 XT_IO_HEADER=$(mkv XT_IO_HEADER)
 PIC10F320_HOST_CC=$(mkv PIC10F320_HOST_CC)
 PIC_SOAK_CXX=$(mkv PIC_SOAK_CXX)
@@ -389,6 +408,8 @@ PIC10F322_DFP_INCLUDE=$(path_from_repo "$PIC10F322_DFP_INCLUDE")
 PIC10F320_DFP_INCLUDE=$(path_from_repo "$PIC10F320_DFP_INCLUDE")
 PIC10F322_DEVICE_INI=$(path_from_repo "$PIC10F322_DEVICE_INI")
 PIC10F320_DEVICE_INI=$(path_from_repo "$PIC10F320_DEVICE_INI")
+PIC12F675_DFP_INCLUDE=$(path_from_repo "$PIC12F675_DFP_INCLUDE")
+PIC12F675_DEVICE_INI=$(path_from_repo "$PIC12F675_DEVICE_INI")
 XT_IO_HEADER=$(path_from_repo "$XT_IO_HEADER")
 PIC_SOAK_GPSIM_INC=$(path_from_repo "$PIC_SOAK_GPSIM_INC")
 PIC10F320_SOAK_GPSIM_INC=$(path_from_repo "$PIC10F320_SOAK_GPSIM_INC")
@@ -420,6 +441,7 @@ export CLANG CPPCHECK CBMC GCOV GPSIM SIMAVR_INC
 export ANALYZE_CMD AVR_NM MUTATION_MAKE
 export PIC_CC PIC_DFP PIC_XC8_INCLUDE PIC10F322_DFP_INCLUDE PIC10F322_DEVICE_INI
 export PIC10F320_CC PIC10F320_DFP PIC10F320_XC8_INCLUDE PIC10F320_DFP_INCLUDE PIC10F320_DEVICE_INI
+export PIC12F675_DFP_INCLUDE PIC12F675_DEVICE_INI
 export PIC10F320_HOST_CC PIC_SOAK_CXX PIC10F320_SOAK_CXX
 export PIC_SOAK_GPSIM_INC PIC10F320_SOAK_GPSIM_INC XT_DFP
 export YASIMAVR_VENV="$(dirname "$(dirname "$YASIMAVR_PY_ABS")")"
@@ -683,6 +705,15 @@ req_file "$PIC10F320_DFP/pic/include/proc/pic10f320.h"  "PIC10F320 device header
 req_file "$PIC10F320_XC8_INCLUDE/xc.h"                   "XC8 base header (PIC10F320_XC8_INCLUDE=)"
 req_file "$PIC10F320_DFP_INCLUDE/proc/pic10f320.h"       "PIC10F320 analysis header (PIC10F320_DFP_INCLUDE=)"
 req_file "$PIC10F320_DEVICE_INI"                        "PIC10F320 device geometry (PIC10F320_DEVICE_INI=)"
+# ...and the PIC12F675's, through its own analysis pair and the shared DFP. Same
+# reasoning as the 320 above: one DFP ships all three device headers, so a
+# truncated unpack (or a re-pinned include) is the case where this lane would
+# otherwise skip cleanly and the release would ship 18 images while claiming 21.
+# The build shares PIC_CC/PIC_DFP, asserted above; the soak reuses PIC_SOAK_CXX
+# and PIC_SOAK_GPSIM_INC, also asserted above, so only the analysis inputs are new.
+req_file "$PIC_DFP/pic/include/proc/pic12f675.h"        "PIC12F675 device header (PIC_DFP=)"
+req_file "$PIC12F675_DFP_INCLUDE/proc/pic12f675.h"      "PIC12F675 analysis header (PIC12F675_DFP_INCLUDE=)"
+req_file "$PIC12F675_DEVICE_INI"                        "PIC12F675 device geometry (PIC12F675_DEVICE_INI=)"
 req_cmd "$GPSIM"       "apt: gpsim (pic10f322-test-gpsim, pic10f320-test-gpsim)"
 req_cmd "$PIC_SOAK_CXX"       "host C++ compiler selected by PIC_SOAK_CXX"
 req_cmd "$PIC10F320_SOAK_CXX" "host C++ compiler selected by PIC10F320_SOAK_CXX"
@@ -774,6 +805,7 @@ fi
 PIC10F322_CLK_MHZ=$("$AWK" -v h="${PIC10F322_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
 XT_CLK_MHZ=$("$AWK" -v h="${XT_F_CPU//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
 PIC10F320_CLK_MHZ=$("$AWK" -v h="${PIC10F320_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
+PIC12F675_CLK_MHZ=$("$AWK" -v h="${PIC12F675_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
 if [ "$PREFLIGHT" -eq 1 ]; then
 	ok "all required release tools, headers, imports and staging-path capabilities are present."
 else
@@ -861,6 +893,13 @@ make pic10f322 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/build-pic10f322.log" 
 make pic10f320-variants PIC10F320_CC="$PIC10F320_CC" PIC10F320_DFP="$PIC10F320_DFP" \
 	>"$EVID/build-pic10f320.log" 2>&1 \
 	|| { cat "$EVID/build-pic10f320.log" >&2; die "PIC10F320 build failed."; }
+# PIC12F675 shares PIC_CC/PIC_DFP with the 322. `make pic12f675` builds all three
+# shipped HEXes + the 1024-word budget gate and, like the 322, removes its whole
+# product set on any failure rather than leaving a partial matrix behind. The
+# DERIVED simcal images the soak needs are NOT built here; they are produced by
+# the soak-binary dependency in section 3, from these exact shipped HEXes.
+make pic12f675 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/build-pic12f675.log" 2>&1 \
+	|| { cat "$EVID/build-pic12f675.log" >&2; die "PIC12F675 build failed."; }
 
 # Enumerate the expected image set and assert each exists.
 IMAGES=()
@@ -870,6 +909,13 @@ XT_IMAGES=()
 XT_ELFS=()
 PIC_IMAGES=()
 PIC10F320_IMAGES=()
+# PIC12F675 kept in its own arrays, out of PIC_IMAGES, for the same reason the
+# ATtiny202 is kept out of AVR_IMAGES: PIC_IMAGES is bound to "the image the soak
+# exercised", and the PIC12F675 soak exercises its DERIVED simcal image, not
+# these shipped HEXes. PIC12F675_SIMCAL_IMAGES is populated in section 3 once the
+# soak build has derived them.
+PIC12F675_IMAGES=()
+PIC12F675_SIMCAL_IMAGES=()
 for v in $VARIANTS; do
 	img="$(fw_image "$AVR_BUILD_DIR" "$ATTINY13A_MCU" "$v").hex"
 	elf="${img%.hex}.elf"
@@ -896,6 +942,13 @@ for v in $PIC10F320_VARIANTS; do
 	img="$(fw_image "$PIC10F320_BUILD_DIR" "$PIC10F320_TAG" "$v").hex"
 	IMAGES+=("$img"); PIC_IMAGES+=("$img"); PIC10F320_IMAGES+=("$img")
 done
+# PIC12F675 shipped HEXes join the master IMAGES set (so they are enumerated,
+# cross-checked against RELEASE_IMAGES, staged and checksummed like everything
+# else) but NOT PIC_IMAGES (see the array declaration above).
+for v in $VARIANTS; do
+	img="$(fw_image "$PIC12F675_BUILD_DIR" "$PIC12F675_TAG" "$v").hex"
+	IMAGES+=("$img"); PIC12F675_IMAGES+=("$img")
+done
 for img in "${IMAGES[@]}"; do [ -f "$img" ] || die "expected image not produced: $img"; done
 
 # Cross-check the enumeration against the canonical set BEFORE any validation
@@ -921,6 +974,11 @@ for img in "${PIC10F320_IMAGES[@]}"; do
 		|| die "PIC10F320 image failed Intel-HEX validation: $img"
 done
 ok "all ${#PIC10F320_IMAGES[@]} PIC10F320 images are structurally valid Intel HEX."
+for img in "${PIC12F675_IMAGES[@]}"; do
+	scripts/validate-ihex.sh "$img" >/dev/null \
+		|| die "PIC12F675 image failed Intel-HEX validation: $img"
+done
+ok "all ${#PIC12F675_IMAGES[@]} PIC12F675 images are structurally valid Intel HEX."
 
 # Exact rename/change evidence against the previous release: 17 images must be
 # byte-identical and the one documented PIC10F320 relay correction must differ.
@@ -1067,6 +1125,25 @@ make pic10f320-test-target-variants STRICT_TOOLS=1 \
 ok "pic10f320-test-target-variants passed."
 validated_pic_image_hashes=$(hash_pic_image_set "${PIC_IMAGES[@]}")
 
+# PIC12F675 pre-hardware gate: build + 1024-word budget, CONFIG decode, cppcheck +
+# MISRA, host-gcov source coverage, the 8-level return-stack bound, gpsim CLI, and
+# -- load-bearing for the soak below -- pic12f675-test-calibration, which proves
+# the simcal derivation touches only word 0x3FF and leaves the shipped HEX
+# byte-identical. That gate is what lets the soak run the simcal image and still
+# count as evidence about the shipped one.
+log "running make pic12f675-test (CONFIG + analyze + coverage + stack + gpsim + calibration)..."
+make pic12f675-test STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
+	>"$EVID/pic12f675-test.log" 2>&1 \
+	|| { tail -60 "$EVID/pic12f675-test.log" >&2; die "make pic12f675-test FAILED."; }
+ok "pic12f675-test passed."
+
+log "running make pic12f675-test-target-variants (fault + lock-step + target I/O on the simcal images)..."
+make pic12f675-test-target-variants STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
+	>"$EVID/pic12f675-test-target-variants.log" 2>&1 \
+	|| { tail -60 "$EVID/pic12f675-test-target-variants.log" >&2; die "make pic12f675-test-target-variants FAILED."; }
+ok "pic12f675-test-target-variants passed."
+validated_pic12f675_image_hashes=$(hash_pic_image_set "${PIC12F675_IMAGES[@]}")
+
 # ============================================================================
 # 3. PARALLEL SOAK -- every release combo, full duration
 # ============================================================================
@@ -1167,6 +1244,34 @@ for v in $PIC10F320_VARIANTS; do
 	SOAK_CWD[$name]="$rundir"      # absolute FW_PATH; isolates gpsim.log per combo
 	SOAK_LOG[$name]="$EVID/soak-$name.log"
 done
+# Three more combos, one per PIC12F675 output stage. UNIQUE to this part: the soak
+# drives a DERIVED simcal image, not the shipped HEX. The `$(PIC12F675_SOAK_BIN)`
+# target builds pic12f675-simcal FIRST (its _pic12f675-build-soak prerequisite),
+# so the binary is compiled with FW_PATH pointing at build_pic12f675/simcal/ and
+# reads gpio_shadow_ out of the build .sym -- a loop copied from the 10F32x arms
+# above would compile against a nonexistent shadow address and fail closed here,
+# an hour in. PIC_CC/PIC_DFP are passed because deriving simcal walks back to the
+# shipped build, which is XC8's. Record the derived image so it can be pinned
+# unchanged across the soak, exactly as the ATtiny202 ELF is.
+for v in $VARIANTS; do
+	name="pic12f675_${v}"; bin="$SOAKDIR/test_soak_pic12f675_${v}"
+	make "$bin" PIC12F675_SOAK_BIN="$bin" PIC12F675_SOAK_VARIANT="$v" \
+		PIC12F675_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
+		PIC12F675_SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
+		PIC12F675_SOAK_COMBINATION_NAME="$name" \
+		PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
+		>>"$EVID/soak-build.log" 2>&1 || die "failed to build PIC12F675 soak $name"
+	PIC12F675_SIMCAL_IMAGES+=("$(fw_image "$PIC12F675_SIMCAL_DIR" "$PIC12F675_TAG" "$v")_simcal.hex")
+	rundir="$SOAKDIR/run-$name"; mkdir -p "$rundir"
+	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
+	SOAK_CWD[$name]="$rundir"      # absolute FW_PATH; isolates gpsim.log per combo
+	SOAK_LOG[$name]="$EVID/soak-$name.log"
+done
+# Baseline the derived simcal images now that they exist. The shipped HEXes were
+# already hashed after their gate; both sets are re-checked unchanged across the
+# soak below, and the gate proved simcal = shipped-HEX with only word 0x3FF
+# changed -- so a stable pair here means the soak exercised the shipped firmware.
+validated_pic12f675_simcal_hashes=$(hash_pic_image_set "${PIC12F675_SIMCAL_IMAGES[@]}")
 
 # Soak harness compilation must not replace the ELFs that test-long exercised.
 current_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
@@ -1175,6 +1280,9 @@ current_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
 current_pic_image_hashes=$(hash_pic_image_set "${PIC_IMAGES[@]}")
 [ "$current_pic_image_hashes" = "$validated_pic_image_hashes" ] \
 	|| die "a PIC image changed while compiling its soak harness"
+current_pic12f675_image_hashes=$(hash_pic_image_set "${PIC12F675_IMAGES[@]}")
+[ "$current_pic12f675_image_hashes" = "$validated_pic12f675_image_hashes" ] \
+	|| die "a PIC12F675 shipped image changed while compiling its soak harness"
 current_xt_image_hashes=$(hash_xt_image_set "${XT_IMAGES[@]}")
 current_xt_elf_hashes=$(hash_xt_image_set "${XT_ELFS[@]}")
 { [ "$current_xt_image_hashes" = "$validated_xt_image_hashes" ] \
@@ -1269,6 +1377,12 @@ current_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
 current_pic_image_hashes=$(hash_pic_image_set "${PIC_IMAGES[@]}")
 [ "$current_pic_image_hashes" = "$validated_pic_image_hashes" ] \
 	|| die "a PIC image changed while its soak was running"
+current_pic12f675_image_hashes=$(hash_pic_image_set "${PIC12F675_IMAGES[@]}")
+[ "$current_pic12f675_image_hashes" = "$validated_pic12f675_image_hashes" ] \
+	|| die "a PIC12F675 shipped image changed while its soak was running"
+current_pic12f675_simcal_hashes=$(hash_pic_image_set "${PIC12F675_SIMCAL_IMAGES[@]}")
+[ "$current_pic12f675_simcal_hashes" = "$validated_pic12f675_simcal_hashes" ] \
+	|| die "a PIC12F675 simcal image changed while its soak was running"
 current_xt_image_hashes=$(hash_xt_image_set "${XT_IMAGES[@]}")
 current_xt_elf_hashes=$(hash_xt_image_set "${XT_ELFS[@]}")
 { [ "$current_xt_image_hashes" = "$validated_xt_image_hashes" ] \
@@ -1297,6 +1411,9 @@ done
 current_pic_image_hashes=$(hash_pic_image_set "${PIC_IMAGES[@]}")
 [ "$current_pic_image_hashes" = "$validated_pic_image_hashes" ] \
 	|| die "a validated PIC image changed before staging"
+current_pic12f675_image_hashes=$(hash_pic_image_set "${PIC12F675_IMAGES[@]}")
+[ "$current_pic12f675_image_hashes" = "$validated_pic12f675_image_hashes" ] \
+	|| die "a validated PIC12F675 image changed before staging"
 ok "all validated release images are present and nonempty."
 
 # Replace the early fail-fast report with one computed from the exact final
@@ -1326,7 +1443,7 @@ mkdir -p "$OUTPUT_DIR/evidence"
 release_stage_classic_avr_images "$OUTPUT_DIR" "$final_avr_image_hashes" \
 	"${AVR_IMAGES[@]}" \
 	|| die "a staged classic AVR image differs from the final HEX regenerated from its validated ELF"
-for img in "${XT_IMAGES[@]}" "${PIC_IMAGES[@]}"; do
+for img in "${XT_IMAGES[@]}" "${PIC_IMAGES[@]}" "${PIC12F675_IMAGES[@]}"; do
 	cp -p -- "$img" "$OUTPUT_DIR/"
 done
 STAGED_PIC_IMAGES=()
@@ -1334,6 +1451,16 @@ for img in "${PIC_IMAGES[@]}"; do STAGED_PIC_IMAGES+=("$OUTPUT_DIR/$(basename "$
 staged_pic_image_hashes=$(hash_pic_image_set "${STAGED_PIC_IMAGES[@]}")
 [ "$staged_pic_image_hashes" = "$validated_pic_image_hashes" ] \
 	|| die "a staged PIC image differs from the image exercised by the soak"
+# PIC12F675 is bound separately, like the ATtiny202: its soak exercised the
+# derived simcal image, so the shipped HEX is bound to what its GATES validated
+# (section 2, including pic12f675-test-calibration, which pins simcal to this
+# exact HEX modulo word 0x3FF), and the simcal image is bound unchanged across
+# the soak above. The two chains meet at the calibration gate.
+STAGED_PIC12F675_IMAGES=()
+for img in "${PIC12F675_IMAGES[@]}"; do STAGED_PIC12F675_IMAGES+=("$OUTPUT_DIR/$(basename "$img")"); done
+staged_pic12f675_image_hashes=$(hash_pic_image_set "${STAGED_PIC12F675_IMAGES[@]}")
+[ "$staged_pic12f675_image_hashes" = "$validated_pic12f675_image_hashes" ] \
+	|| die "a staged PIC12F675 image differs from the one its gates validated and its soak's calibration preimage"
 STAGED_XT_IMAGES=()
 for img in "${XT_IMAGES[@]}"; do STAGED_XT_IMAGES+=("$OUTPUT_DIR/$(basename "$img")"); done
 staged_xt_image_hashes=$(hash_xt_image_set "${STAGED_XT_IMAGES[@]}")
@@ -1434,6 +1561,17 @@ img_row() {
 		${FW_BASE}-${PIC10F322_TAG}-*.hex)
 			mcu="PIC10F322"; clk="${PIC10F322_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
 			flashcmd="pk2cmd -PPIC10F322 -F$base -M -Y -R   (or: make pic10f322-program VARIANT=<v>)" ;;
+		${FW_BASE}-${PIC12F675_TAG}-*.hex)
+			mcu="PIC12F675"; clk="${PIC12F675_CLK_MHZ} MHz (INTOSC, factory OSCCAL)"; fuses="CONFIG word embedded in HEX"
+			# XC8 reports program space in WORDS; the figure comes from this run's
+			# own build log, so it can never be a stale hand-copied number.
+			used=$("$AWK" -v f="$base" '$0 ~ ("/" f " :") { for (i = 1; i <= NF; i++) if ($i == "words") { print $(i-1) " / '"$PIC12F675_FLASH_WORDS"' words"; exit } }' \
+				"$EVID/build-pic12f675.log" 2>/dev/null)
+			# Prefer the guarded target: it refuses to overwrite the factory OSCCAL
+			# (flash word 0x3FF) or the BG bandgap bits, which a bulk-erase pk2cmd
+			# invocation can silently drop. release/README.md carries the mandatory
+			# preservation procedure; a device that loses either still appears to work.
+			flashcmd="make pic12f675-program VARIANT=<v>  (preserves factory OSCCAL/BG -- see release/README.md; or, only with OSCCAL/BG preserved: pk2cmd -PPIC12F675 -F$base -M -Y -R)" ;;
 		${FW_BASE}-${XT_TAG}-*.hex)
 			mcu="ATtiny202"; clk="${XT_CLK_MHZ} MHz (internal, OSCCFG 16 MHz / 8)"
 			# AVR8X replaces lfuse/hfuse with seven individually named memories;

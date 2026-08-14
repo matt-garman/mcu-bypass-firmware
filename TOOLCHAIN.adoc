@@ -58,8 +58,9 @@ two Makefile variable pairs (`PIC_CC`/`PIC_DFP` for the 10F322 and the 12F675,
 different compiler or pack without silently moving the other two; by default the
 320's variables track the 322's. The release manifest probes and records both
 selected compiler paths and versions independently, even when they resolve to
-the same installation. The PIC12F675 is staged and not release-supported, so it
-has no manifest entry; it is gated in CI on the same installation.
+the same installation. The PIC12F675 is release-supported from `v0.9.9` and
+shares the 322's `PIC_CC`/`PIC_DFP` pair; the release manifest records its
+images alongside the other PICs, and it is gated in CI on the same installation.
 
 The PIC10F322 port (`make pic10f322`, `make pic10f322-test`,
 `make pic10f322-test-target-variants`) is a SEPARATE, optional toolchain, entirely
@@ -170,8 +171,9 @@ aggregate so missing PIC tooling cannot produce a false green release gate.
                  against an installed IPE and hardware. Neither programmer is
                  installed on this build host, so fake-tool coverage validates
                  command routing and fail-closed evidence handling, not silicon
-                 preservation. The part remains staged until a real result is
-                 retained and reviewed.
+                 preservation. That silicon preservation is the `1.x.y`
+                 hardware-validation pass (TODO `T3-pic12f675-bench`), which every
+                 part in this repository still awaits.
                 `make test-pic10f320-return-stack-oracle` runs deterministic parser and
                 control-flow fixtures in the normal `make test` / `test-long`
                 graph. Every successful `make pic10f320` build applies the oracle

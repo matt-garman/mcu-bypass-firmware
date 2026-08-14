@@ -44,9 +44,9 @@ below its image table explains: [`v0.9.0`](v0.9.0/MANIFEST.md#images),
 [`v0.9.3`](v0.9.3/MANIFEST.md#images), and
 [`v0.9.4`](v0.9.4/MANIFEST.md#images).
 
-The current Makefile's canonical product set matches the unified releases from
-`v0.9.6` onward: AVR Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT), PIC10F322
-and PIC10F320.
+The current Makefile's canonical product set is AVR Classic (ATtiny13a/45/85),
+ATtiny202 (AVR-XT), PIC10F322, PIC10F320 and — release-supported from `v0.9.9` —
+PIC12F675. Unified releases `v0.9.6`–`v0.9.8` shipped the first four parts only.
 
 That set is not a description of whatever a build happened to produce — it is
 declared once in the Makefile as `RELEASE_IMAGES` and enforced. The verifier
@@ -66,17 +66,20 @@ validation suite — backs these binaries, through two mechanisms:
    source commit, pinned toolchain versions, per-image fuse bytes / CONFIG word,
    and its validation evidence. Beginning with `v0.9.6`, a machine-readable
    `QUALIFICATION` record is checked
-   against the exact 28-file retained-evidence inventory and every one of the 15
-   soak logs before publication; each log must identify its canonical
+   against that release's exact retained-evidence inventory (34 files from
+   `v0.9.9`, 28 in `v0.9.6`–`v0.9.8`) and every one of its soak logs (18 from
+   `v0.9.9`, 15 before the PIC12F675 graduated) before publication; each log must
+   identify its canonical
    combination and report the configured duration, expected nonzero
    liveness-check count, and zero failure counters. The current unified pipeline
    requires `make test-long`, both ATtiny202 gates (`make attiny202-test` and
    `make attiny202-test-target`), both PIC10F322 gates (`make pic10f322-test` and
    `make pic10f322-test-target-variants`), both PIC10F320 gates (`make pic10f320-test` and
-   `make pic10f320-test-target-variants`), and a **24-hour soak of every release
+   `make pic10f320-test-target-variants`), both PIC12F675 gates (`make pic12f675-test` and
+   `make pic12f675-test-target-variants`), and a **24-hour soak of every release
    soak combination**. Releases `v0.9.0` through `v0.9.5` predate
    `QUALIFICATION` and use the manifest/evidence contract recorded in their own
-   tags; they must not be judged against the later 15-soak/28-file inventory.
+   tags; they must not be judged against the later `QUALIFICATION` inventories.
    Because the gates are long-running, release orchestration
    rechecks both the recorded source `HEAD` and worktree cleanliness immediately
    before staging artifacts. Only explicitly non-publishable dry runs may proceed
@@ -132,6 +135,7 @@ bypass-attiny85-cd4053_with_mute.hex
 | `attiny202` | ATtiny202, 2 MHz (AVR-XT, UPDI) |
 | `pic10f322` | Microchip PIC10F322, 2 MHz (HFINTOSC) |
 | `pic10f320` | Microchip PIC10F320, 2 MHz (HFINTOSC) |
+| `pic12f675` | Microchip PIC12F675, 4 MHz (INTOSC, factory OSCCAL) |
 
 | `<output stage>` | switching hardware |
 |---|---|
@@ -139,12 +143,28 @@ bypass-attiny85-cd4053_with_mute.hex
 | `cd4053_with_mute` | CD4053 / TMUX4053 with mute-before-switch (3 sections) |
 | `tq2_l2_5v_relay` | Panasonic TQ2-L2-5V latching relay |
 
-Every combination exists, so a release is exactly 6 x 3 = 18 images.
+Every combination exists, so a release is exactly 7 x 3 = 21 images.
 
 ATtiny202 images are the only AVR images **not** programmed over ISP: the
 ATtiny202 uses UPDI, and its fuses are seven individually named AVR8X memories
 rather than the classic `lfuse`/`hfuse` pair. `MANIFEST.md` lists all seven per
 image and gives the exact `avrdude` command.
+
+**PIC12F675 — preserve the factory calibration words when flashing.** Unlike
+every other part here, the PIC12F675 carries two per-device factory-trimmed
+values that its firmware and reset behaviour depend on and that a careless
+programming step can destroy silently: the oscillator calibration word (a
+`RETLW` at the top of flash, word `0x3FF`) and the `BG<1:0>` bandgap bits in the
+CONFIG word. A device that loses either **still appears to work** — it just runs
+at the wrong clock (wrong tick cadence, wrong relay coil-pulse widths) or with
+the wrong brown-out/POR trip voltages. Program with **`make pic12f675-program
+VARIANT=<v>`**, which reads the factory values before the write and requires them
+to match immediately after; it refuses to run an image that would overwrite word
+`0x3FF`. If you flash with a raw `pk2cmd`/`ipecmd` invocation instead, you MUST
+use its device-family OSCCAL/BG-preservation option and confirm both values are
+unchanged afterward — a bulk erase that drops them yields a bad device that
+passes a smoke test. This is the one silicon-only risk that cannot be caught in
+simulation; see `docs/pic12f675_feasibility.md` section 8, items 1 and 2.
 
 ### Renamed in v0.9.8 (`v0.9.7` and earlier used different names)
 

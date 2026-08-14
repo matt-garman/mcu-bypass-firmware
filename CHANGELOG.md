@@ -73,7 +73,7 @@ file is the human-readable summary of *what changed*.
 
 ### Added
 
-- **PIC12F675 support, staged and not release-supported.** A fourth core
+- **PIC12F675 support, release-supported from `v0.9.9`.** A fourth core
   generation (Microchip *classic* mid-range, beside AVR Classic, AVR-XT and the
   enhanced mid-range PIC10F32x) and a fourth modular shell,
   `src/bypass_mcu_pic12f675.c`, over the same compiled `src/bypass_pure.c`
@@ -117,12 +117,17 @@ file is the human-readable summary of *what changed*.
   aggregates. 20 mutants with their own toolchain probe take the mutation
   inventory to 118. Both aggregates run in CI and in `scripts/ci-local.sh`.
 
-  Two things are deliberately absent. Simulator images are **derived**: an
-  oscillator calibration word is injected into a *copy*, because an erased
-  image never reaches `main()` in gpsim — and `pic12f675-test-calibration`
-  proves the injection leaves the shipping images byte-identical. And there are
-  **no release images and no hardware-bench validation**, which is what "not
-  release-supported" means here. See `docs/pic12f675_feasibility.md`.
+  One thing is structurally unusual, and one is deferred. Simulator images are
+  **derived**: an oscillator calibration word is injected into a *copy*, because
+  an erased image never reaches `main()` in gpsim — and `pic12f675-test-calibration`
+  proves the injection leaves the shipping images byte-identical, which is what
+  lets the release soak run the derived image and still bind to the shipped HEX.
+  And like every other part in this repository, the PIC12F675 has **not** run on
+  silicon: its release rests on simulation, formal proof and static analysis,
+  and its three silicon-only residual risks (programmer OSCCAL/BG preservation,
+  and GP2's Schmitt-Trigger readback margin) are the `1.x.y` hardware-validation
+  pass, tracked as `T3-pic12f675-bench`, not `0.9.x` release blockers. See
+  `docs/pic12f675_feasibility.md` section 8.
 
 - **`make pic12f675-program`**, so the part can be put on real silicon. Same
   shape as `pic10f322-program` — one `VARIANT`, the CONFIG word carried inside
@@ -161,26 +166,29 @@ file is the human-readable summary of *what changed*.
   pk2cmd is the only pinned readback dialect. ipecmd remains available for the
   write, but must be paired with `PIC12F675_READ_PROG=<pk2cmd>` for the baseline
   and before/after reads; the Makefile does not guess an untested IPE read argv.
-  Fake-tool coverage exercises the transaction, not silicon preservation. The
-  part stays staged until a real retained result passes.
+  Fake-tool coverage exercises the transaction, not silicon preservation, so it
+  enables the `1.x.y` bench check without standing in for it.
 
-- **The PIC12F675's exclusion from the release set is now declared and
-  enforced, not incidental.** `RELEASE_IMAGES` exists because an incomplete
-  release and a complete one look identical to any check that observes the
-  tree; a staged part is that hazard's twin, since an image missing on purpose
-  and one missing by mistake are equally silent. `RELEASE_STAGED_IMAGES` names
-  the three images this repository builds and deliberately does not ship, the
-  two sets are asserted disjoint at Make parse time, and the Makefile carries
-  the graduation checklist.
+- **The PIC12F675 is fully integrated into the release pipeline.** Its three
+  shipped HEXes join `RELEASE_IMAGES` (18 → 21) and `RELEASE_IMAGE_DIRS`, its
+  three soak combinations join `RELEASE_SOAK_NAMES` (15 → 18), and its build and
+  both aggregate logs join the retained-evidence inventory (28 → 34 files).
+  `scripts/make-release.sh` gains a full arm — preflight device/analysis
+  assertions, a build step, both qualification gates, a soak loop, and a
+  manifest generator arm — and `.github/workflows/release.yml` rebuilds the part
+  and re-runs its lanes on the pinned runner. Because the release soak drives the
+  part's **derived** simcal image rather than the shipped HEX, the part is
+  threaded like the ATtiny202 (whose soak drives the ELF, not the HEX): the
+  shipped image is bound to what its gates validated — including
+  `pic12f675-test-calibration`, which pins the simcal to the shipped HEX modulo
+  word `0x3FF` — and the simcal image is pinned unchanged across the soak.
 
-  `test-release-images` grew 53 → 93 checks around that: the staged images are
-  named rather than counted, `RELEASE_IMAGE_DIRS` must not contain the staged
-  build tree, and every arm of `make-release.sh`'s manifest generator is
-  cross-checked against the canonical set in both directions — every released
-  image has an arm, every arm describes a released image, and **no** arm
-  matches a staged image. That last one is the trip-wire: the generator refuses
-  to describe an image whose MCU it does not recognize, so a graduation that
-  forgets its manifest arm fails the release instead of publishing a PIC
+  The staging apparatus that had withheld the part (`RELEASE_STAGED_IMAGES` and
+  its parse-time disjoint-with-`RELEASE_IMAGES` guard) is retired with the
+  graduation; `test-release-images` continues to cross-check the manifest
+  generator's arms against the canonical set in both directions — every released
+  image has an arm, every arm describes a released image — so a future part added
+  without its manifest arm still fails the release instead of publishing a PIC
   labelled as an ATtiny with AVR fuse bytes.
 
 - **The PIC12F675 output-integrity predicate is now exercised one clause at a

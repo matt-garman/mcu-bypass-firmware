@@ -191,10 +191,10 @@ jobs:
       - name: Assert PIC toolchain present (fail loud, do NOT skip)
         run: |
           test -x "${XC8_DIR}/bin/xc8-cc" || { echo "::error::XC8 missing"; exit 1; }
-          # Both device headers. One DFP ships both parts, but a truncated
+          # All three device headers. One DFP ships every part, but a truncated
           # unpack would leave one chip's lane skipping silently -- and this is
           # the public attestation, where a skipped lane must never read green.
-          for d in pic10f322 pic10f320; do
+          for d in pic10f322 pic10f320 pic12f675; do
             dev="${XC8_DFP_ROOT}/xc8/pic/include/proc/${d}.h"
             test -f "$dev" || { echo "::error::DFP missing: $dev"; exit 1; }
           done
@@ -232,6 +232,10 @@ jobs:
           # matrix can never reach the reproducibility gate.
           make pic10f320-variants PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
+          # PIC12F675 shares PIC_CC/PIC_DFP with the 322. Its three shipped HEXes
+          # are in RELEASE_IMAGES, so they must be rebuilt here or the
+          # reproducibility gate below fails on a set short three files.
+          make pic12f675 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
 
       # --- THE reproducibility gate ----------------------------------------
       - name: Verify committed images and rename/change evidence reproduce bit-for-bit
@@ -373,6 +377,22 @@ jobs:
           make pic10f320-test-target-variants STRICT_TOOLS=1 \
             PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
+
+      # The PIC12F675, on identical terms: release-supported since v0.9.9, images
+      # in the release set, so both its aggregates belong in the public
+      # attestation. pic12f675-test carries the calibration contract that binds
+      # the soaked simcal image to the shipped HEX.
+      - name: Re-run make pic12f675-test
+        run: |
+          make pic12f675-test STRICT_TOOLS=1 \
+            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC_DFP="${XC8_DFP_ROOT}/xc8"
+
+      - name: Re-run make pic12f675-test-target-variants (libgpsim, every variant)
+        run: |
+          make pic12f675-test-target-variants STRICT_TOOLS=1 \
+            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC_DFP="${XC8_DFP_ROOT}/xc8"
 
       # --- publish ----------------------------------------------------------
       - name: Publish GitHub Release

@@ -436,10 +436,12 @@ evidence gap.
 
 ### T3-pic12f675-bench - Graduate the PIC12F675 on silicon
 
-The part is built, tested, formally verified and statically analyzed here, and
-has **never run on a device**. It is declared staged rather than released
-(`RELEASE_STAGED_IMAGES`), and four of its open risks are invisible to every
-lane this repository has. They are stated in full as items 1, 2, 8 and 9 of
+The part is built, tested, formally verified, statically analyzed and
+**release-supported from `v0.9.9`** here, and — like every other part in this
+repository — has **never run on a device**. That is the `0.9.x` line: validated
+in software, not on silicon. This item is the PIC12F675's slice of the `1.x.y`
+hardware-validation pass, which closes four open risks that are invisible to
+every lane this repository has. They are stated in full as items 1, 2, 8 and 9 of
 `docs/pic12f675_feasibility.md` section 8:
 
 - **1 - bandgap calibration bits (`BG<1:0>`) preserved on program.** They are
@@ -466,16 +468,19 @@ lane this repository has. They are stated in full as items 1, 2, 8 and 9 of
   fail-safe pulldown a builder may substitute. gpsim models pins ideally, so no
   lane here can see this one at all.
 
-Promotion after that is a code diff, and **the authoritative checklist is the
-`GRADUATING THE PART` comment beside `RELEASE_STAGED_IMAGES` in the Makefile**.
-It is deliberately not restated here: a second copy of a checklist is precisely
-the drift this file's own index gate exists to catch. Each step there names the
-script and line that enforces it.
+The vehicle for the first three is the guarded `pic12f675-preflight` /
+`pic12f675-program` bench workflow, which already records a factory baseline,
+requires it to match immediately before and after a write, and refuses an image
+that would overwrite the calibration word; what is missing is a retained result
+from real silicon. The fourth (GP2) needs a meter on a built `cd4053_with_mute`
+board. Record the measured OSCCAL/BG preservation result into
+`release/README.md`'s flashing procedure once it exists.
 
 Dependencies: a PIC12F675, a PICkit programmer, a meter, and a built board.
-Effort: about half a day at the bench plus 1-2 hours for the graduation diff
-and its reruns. Risk: High; these four close here or nowhere, and the part
-cannot be released until they do.
+Effort: about half a day at the bench plus 1-2 hours to retain and review the
+evidence. Risk: High; these four close here or nowhere. They do not block the
+`0.9.x` software release (the part already ships), but they are the gate to the
+`1.x.y` hardware-validated line — the same gate every other part must pass.
 
 ### T3-ctx-complement - Add complemented debounce-context storage
 
@@ -658,7 +663,7 @@ The stable ID in each row matches exactly one open section above.
 | T25-power-ramp | Power-supply ramp analysis | 2.5 | 2-3 h | Medium |
 | T25-name-contract-shim | Check overrides handed to a routing Make shim | 2.5 | 2-3 h | Low |
 | T3-hw-procedure | Hardware-validation procedure | 3 | 2-3 h | High |
-| T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - blocks release of the part |
+| T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - gates the part's 1.x.y hardware validation |
 | T3-ctx-complement | Complemented debounce-context storage | 3 | 3-6 h | Medium |
 | T3-toolchain | Broader compiler/toolchain portability | 3 | Medium | Medium-High |
 | T3-hil | Behavioral and register-introspection HIL | 3 | 5-8 d | High |

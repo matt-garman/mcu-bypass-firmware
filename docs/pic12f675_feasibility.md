@@ -1091,10 +1091,26 @@ PIC12F629 family generalization remains deferred.
 ## 8. Open risks and unknowns
 
 None blocks the Model B feasibility assessment; item 3 blocks selection of the
-ISR model. All should be closed before the port is declared release-supported.
-They are listed worst-first; item 9 was opened after this list was first
+ISR model. The remaining silicon-only items (1, 2, 8, 9) are the port's slice of
+the **`1.x.y` hardware-validation pass** — the pass *every* part in this
+repository still awaits — and not `0.9.x` release blockers (see the v0.9.9 note
+below). They are listed worst-first; item 9 was opened after this list was first
 numbered and is appended rather than inserted, so that the cross-references to
 these numbers elsewhere in the repository stay valid.
+
+**Status 2026-08-13 (v0.9.9 disposition).** The project's version convention is
+that `0.9.x` means "maximally validated in software" and `1.x.y` begins once a
+design is validated on real hardware — uniformly, for every part, since none has
+run on silicon. Under that convention the PIC12F675 is **release-supported from
+`v0.9.9`** on its software validation alone, exactly like the other six parts,
+and the staging apparatus that had withheld it (`RELEASE_STAGED_IMAGES`) is
+retired. Items 1, 2, 8 and 9 do not disappear; they are reclassified as the same
+residual hardware risk every other part carries un-enumerated, tracked for the
+`1.x.y` pass as `TODO.md` `T3-pic12f675-bench`. The one non-negotiable that the
+software release still owes: `release/README.md`'s flashing procedure MUST carry
+the OSCCAL/BG-preservation requirement (items 1 and 2), because losing those
+words yields a device that runs wrong while appearing to work — a hazard the
+other parts do not have.
 
 **Status 2026-08-13.** Items 4, 5, 6 and 7 are CLOSED. Items 4, 5 and 6 were
 datasheet reads rather than bench work, and DS41190G answers them; item 4's own
@@ -1353,21 +1369,25 @@ own toolchain probe, named behavioral signatures and sandbox validator take the
 mutation inventory to 118;
 and both aggregates now run in CI's shared `pic` job with the two mirrors —
 `scripts/ci-local.sh` and `test-ci-local-routing` — extended alongside. Step 10
-is complete. Step 11 is partly done: the user-facing documentation landed, and
-`pic12f675-program` now exists with a pre-flash gate that refuses any image
-carrying a calibration word, and `pic12f675-preflight` plus mandatory immediate
+is complete. Step 11 is done (v0.9.9): the user-facing documentation landed;
+`pic12f675-program` exists with a pre-flash gate that refuses any image carrying
+a calibration word, and `pic12f675-preflight` plus mandatory immediate
 before/after reads retain the evidence needed to measure §8 items 1 and 2
-(items 1, 2 and 8 state what this still does not close). Release integration is
-done in the only sense available before
-a bench: the part's images are DECLARED as deliberately withheld
-(`RELEASE_STAGED_IMAGES`), the release set and the staged set are asserted
-disjoint at Make parse time, and `test-release-images` pins both the exclusion
-and the fact that the manifest generator has no arm for these images — so a
-graduation that skips a step fails loudly instead of publishing a PIC described
-as an ATtiny. The Makefile carries the graduation checklist. The datasheet half
-of §8 is also closed (items 4, 5 and 6, read 2026-08-11). Shipping the images
-remains blocked on the hardware bench, which is the last open item. The table retains the original dependency order rather than
-claiming every row is open.
+(items 1, 2 and 8 state what this still does not close on this host). Release
+integration is now **complete**, not deferred: the three shipped HEXes are in
+`RELEASE_IMAGES` (18 → 21) and `RELEASE_IMAGE_DIRS`, the three soak combinations
+are in `RELEASE_SOAK_NAMES` (15 → 18), the build and both aggregate logs are in
+the retained-evidence inventory (28 → 34), `scripts/make-release.sh` carries a
+full PIC12F675 arm (preflight assertions, build, both qualification gates, a
+soak loop over the DERIVED simcal image, and a manifest arm), and
+`.github/workflows/release.yml` rebuilds the part and re-runs its lanes on the
+pinned runner. The staging apparatus (`RELEASE_STAGED_IMAGES` and its parse-time
+disjoint guard) is retired; `test-release-images` still cross-checks the manifest
+arms against the canonical set in both directions, so a future part added without
+its arm fails the release. The datasheet half of §8 is closed too (items 4, 5
+and 6, read 2026-08-11). What remains is the `1.x.y` hardware bench (items 1, 2,
+8, 9), which does not block the `0.9.x` release. The table retains the original
+dependency order rather than claiming every row is open.
 
 | # | Step | Notes |
 |---|---|---|

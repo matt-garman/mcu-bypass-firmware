@@ -1037,17 +1037,35 @@ expect_rename_signature_fail "empty signature verifier" \
 cp -p "$ROOT/scripts/verify-release-signature.sh" \
 	"$rename_fixture/scripts/verify-release-signature.sh"
 
+# PIC12F675 graduated at v0.9.9: release-supported, but with no v0.9.7 name it is
+# absent from the rename mapping above (which stays the historical 18-image
+# contract). The reproducibility gate still checks the FULL canonical set, so
+# synthesize its three images into the fresh-build dir and extend the fixture
+# arrays for the reproduction below only -- the rename contract keeps using
+# rename_paths/rename_names untouched.
+pic12f675_repro_names=(
+	bypass-pic12f675-cd4053_simple.hex
+	bypass-pic12f675-cd4053_with_mute.hex
+	bypass-pic12f675-tq2_l2_5v_relay.hex
+)
+for n in "${pic12f675_repro_names[@]}"; do
+	printf 'synthetic pic12f675 reproduction fixture %s\n' "$n" > "$rename_images/$n"
+done
+repro_names=("${rename_names[@]}" "${pic12f675_repro_names[@]}")
+repro_paths=()
+for n in "${repro_names[@]}"; do repro_paths+=("$rename_images/$n"); done
+
 # Preserve the same valid fresh image set as a synthetic committed release for
 # the normal four-way reproducibility gate. The mutation below must be rejected
 # independently by both that gate and tag CI's rename-report regeneration.
 repro_release="$work/reproduction release"
 mkdir -p "$repro_release"
-cp -- "${rename_paths[@]}" "$repro_release/"
+cp -- "${repro_paths[@]}" "$repro_release/"
 (
 	cd "$repro_release"
-	sha256sum -- "${rename_names[@]}" > SHA256SUMS
+	sha256sum -- "${repro_names[@]}" > SHA256SUMS
 )
-ambient_release_expected=${rename_names[0]}
+ambient_release_expected=${repro_names[0]}
 RELEASE_EXPECTED_IMAGES="$ambient_release_expected" \
 	"$RELEASE_IMAGE_VERIFY" "$repro_release" "$rename_images" >/dev/null \
 	|| fail "ambient reduced image set replaced Makefile truth during valid reproduction"

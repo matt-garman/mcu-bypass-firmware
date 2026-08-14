@@ -197,22 +197,23 @@ sed -i 's/^- \*\*Soak combinations:\*\*.*/- **Soak combinations:** 11/' \
 	"$release/MANIFEST.md"
 expect_fail "manifest soak-count mismatch" "soak count does not match"
 
-[ "${#soak_names[@]}" -eq 15 ] \
-	|| fail "canonical release soak set has ${#soak_names[@]} entries, expected 15"
+[ "${#soak_names[@]}" -eq 18 ] \
+	|| fail "canonical release soak set has ${#soak_names[@]} entries, expected 18"
 overridden=$(make -s --no-print-directory -C "$ROOT" \
 	RELEASE_SOAK_NAMES=bad print-RELEASE_SOAK_NAMES)
 [ "$overridden" = "${soak_names[*]}" ] \
 	|| fail "command-line override changed canonical RELEASE_SOAK_NAMES"
 for required in attiny85_cd4053_simple attiny45_cd4053_simple \
 		attiny202_tq2_l2_5v_relay \
-		pic10f322_tq2_l2_5v_relay pic10f320_tq2_l2_5v_relay; do
+		pic10f322_tq2_l2_5v_relay pic10f320_tq2_l2_5v_relay \
+		pic12f675_tq2_l2_5v_relay; do
 	[[ " ${soak_names[*]} " == *" $required "* ]] \
 		|| fail "canonical release soak set is missing $required"
 done
 checks=$((checks + 1))
 
-[ "${#evidence_names[@]}" -eq 28 ] \
-	|| fail "canonical release evidence set has ${#evidence_names[@]} entries, expected 28"
+[ "${#evidence_names[@]}" -eq 34 ] \
+	|| fail "canonical release evidence set has ${#evidence_names[@]} entries, expected 34"
 overridden=$(make -s --no-print-directory -C "$ROOT" \
 	RELEASE_EVIDENCE_FILES=bad print-RELEASE_EVIDENCE_FILES)
 [ "$overridden" = "${evidence_names[*]}" ] \
@@ -223,6 +224,7 @@ for wiring in \
 	'AVR_SOAK_COMBINATION_NAME="$name"' \
 	'PIC10F322_SOAK_COMBINATION_NAME="$name"' \
 	'PIC10F320_SOAK_COMBINATION_NAME="$name"' \
+	'PIC12F675_SOAK_COMBINATION_NAME="$name"' \
 	'ATTINY202_SOAK_COMBINATION_NAME=%q'; do
 	grep -Fq "$wiring" "$ROOT/scripts/make-release.sh" \
 		|| fail "release producer is missing soak identity wiring: $wiring"
@@ -254,6 +256,9 @@ grep -Fq '"$dir/QUALIFICATION"' "$ROOT/.github/workflows/release.yml" \
 grep -Fq 'a staged PIC image differs from the image exercised by the soak' \
 	"$ROOT/scripts/make-release.sh" \
 	|| fail "release producer does not bind staged PIC images to soak inputs"
+grep -Fq "a staged PIC12F675 image differs from the one its gates validated and its soak's calibration preimage" \
+	"$ROOT/scripts/make-release.sh" \
+	|| fail "release producer does not bind staged PIC12F675 images to their gates and simcal soak"
 grep -Fq 'a staged ATtiny202 image differs from the image exercised by its gates and soak' \
 	"$ROOT/scripts/make-release.sh" \
 	|| fail "release producer does not bind staged ATtiny202 images to soak inputs"

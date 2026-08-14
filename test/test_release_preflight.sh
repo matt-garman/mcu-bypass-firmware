@@ -74,10 +74,12 @@ for fixture in \
 	"$toolchain/simavr/avr_ioport.h" \
 	"$toolchain/pic10f322/pic/include/proc/pic10f322.h" \
 	"$toolchain/pic10f320/pic/include/proc/pic10f320.h" \
+	"$toolchain/pic10f322/pic/include/proc/pic12f675.h" \
 	"$toolchain/xc8-322-include/xc.h" \
 	"$toolchain/xc8-320-include/xc.h" \
 	"$toolchain/pic10f322.ini" \
 	"$toolchain/pic10f320.ini" \
+	"$toolchain/pic12f675.ini" \
 	"$toolchain/attiny-dfp/gcc/dev/attiny202/device-specs/specs-attiny202" \
 	"$toolchain/attiny-dfp/gcc/dev/attiny202/avrxmega3/short-calls/crtattiny202.o" \
 	"$toolchain/attiny-dfp/gcc/dev/attiny202/avrxmega3/short-calls/libattiny202.a" \
@@ -264,6 +266,8 @@ exec "${REAL_MAKE:?}" --no-print-directory -s -C "${FAKE_REPO_ROOT:?}" \
 	PIC10F320_DFP_INCLUDE="${TEST_PIC10F320_DFP_INCLUDE:-${FAKE_TOOLCHAIN:?}/pic10f320/pic/include}" \
 	PIC10F322_DEVICE_INI="${FAKE_TOOLCHAIN:?}/pic10f322.ini" \
 	PIC10F320_DEVICE_INI="${FAKE_TOOLCHAIN:?}/pic10f320.ini" \
+	PIC12F675_DFP_INCLUDE="${TEST_PIC12F675_DFP_INCLUDE:-${FAKE_TOOLCHAIN:?}/pic10f322/pic/include}" \
+	PIC12F675_DEVICE_INI="${FAKE_TOOLCHAIN:?}/pic12f675.ini" \
 	PIC10F320_HOST_CC=fake-tool \
 	SIMAVR_INC="${FAKE_TOOLCHAIN:?}/simavr" \
 	XT_DFP="${FAKE_TOOLCHAIN:?}/attiny-dfp" \
@@ -395,8 +399,8 @@ grep -Fxq 'yaml-import' "$tool_log" \
 [ ! -e "$preflight_output" ] \
 	|| fail "preflight created its prospective release output directory"
 query_count=$(wc -l < "$make_log")
-[ "$query_count" -eq 74 ] \
-	|| fail "preflight made $query_count Makefile queries, expected 74"
+[ "$query_count" -eq 82 ] \
+	|| fail "preflight made $query_count Makefile queries, expected 82"
 assert_no_release_scratch
 checks=$((checks + 1))
 

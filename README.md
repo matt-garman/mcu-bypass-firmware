@@ -9,8 +9,8 @@ ATtiny202, and the Microchip PIC10F322 and PIC10F320. Release `v0.9.6` is the
 first unified release covering all six: 18 prebuilt images qualified from the
 final source, including ATtiny202 and PIC10F320 for the first time.
 
-A seventh part, the Microchip PIC12F675, is present and fully gated in CI but
-is **not release-supported** — see the table below.
+A seventh part, the Microchip PIC12F675, is release-supported from `v0.9.9` —
+see the table below.
 
 ## Targets
 
@@ -21,7 +21,7 @@ is **not release-supported** — see the table below.
 | **ATtiny202 (AVR-XT)** | release-supported | first released in `v0.9.6`; 2 KB flash, SOIC-8 only (no DIP), UPDI programming |
 | PIC10F322 | release-supported | 512 words |
 | **PIC10F320** | release-supported | **first released here in `v0.9.6`; constrained exception: 256 words, so the debounce algorithm is implemented directly rather than by compiling the verified core — see [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md)** |
-| PIC12F675 | **staged — not release-supported** | classic mid-range: 1024 words, no `LATx` (the output latch is an SRAM shadow), 1.024 ms tick. Every pre-hardware lane the release parts have, plus a calibration contract they do not need, and all of it gated in CI, plus `pic12f675-program` for bench work — but no release images and **no hardware-bench validation yet**. See [docs/pic12f675_feasibility.md](docs/pic12f675_feasibility.md) |
+| **PIC12F675** | release-supported | **first released here in `v0.9.9`; classic mid-range: 1024 words, no `LATx` (the output latch is an SRAM shadow), 1.024 ms tick. Every pre-hardware lane the release parts have, plus a calibration contract they do not — and, uniquely, a `pk2cmd`/`ipecmd` flashing procedure that must preserve the factory OSCCAL/BG words (see [release/README.md](release/README.md) and `make pic12f675-program`). See [docs/pic12f675_feasibility.md](docs/pic12f675_feasibility.md)** |
 
 Every release target except one compiles the verified core (`src/bypass_pure.c`)
 directly into its shipping image. The release-supported PIC10F320 cannot — its
@@ -191,8 +191,10 @@ do not reuse it for another device or a later reflash. pk2cmd is the pinned
 readback dialect. An
 ipecmd write therefore needs `PIC12F675_READ_PROG` set to the pk2cmd reader used
 for the baseline; no untested IPE read command is guessed. These records enable
-the silicon check but do not replace it: the part remains staged until retained
-real-hardware evidence passes.
+the silicon check but do not replace it: closing §8 items 1 and 2 needs retained
+real-hardware evidence, which is the `1.x.y` hardware-validation pass (TODO
+`T3-pic12f675-bench`) that every part in this repository still awaits — not a
+`0.9.x` release blocker for this one.
 
 These targets are independent of the AVR build. Individual optional-tool targets
 generally skip cleanly if their primary compiler/simulator is absent. The

@@ -165,7 +165,7 @@ unexport _MAKE_SERIAL_CLASSIC_EMPTY _MAKE_SERIAL_CLASSIC_DUPLICATE \
 #
 # COMMON COMMANDS
 #   make                 build every release-supported part's variant images
-#                        (.hex) + sizes; PIC12F675 is staged standalone
+#                        (.hex) + sizes
 #   make test            fast full test suite (all variants) -- use constantly
 #   make test-long       exhaustive test suite (minutes) -- before release/HW
 #   make attiny13a-trace emit build_avr_classic/bypass_trace.vcd (VARIANT=, GTKWave)
@@ -790,18 +790,17 @@ $(foreach n,$(TINYX5),$(eval ATTINY$(n)_ELFS := $(foreach v,$(VARIANTS),$(AVR_FW
 $(foreach n,$(TINYX5),$(eval ATTINY$(n)_HEXES := $(foreach v,$(VARIANTS),$(AVR_FW)$(call fw_image_tail,$(v),$(mmcu_$(n))).hex)))
 
 # Default goal: build every release-supported part, not just the one that got
-# here first. PIC12F675 is staged standalone and intentionally omitted until
-# its aggregate qualification and default integration are added. A
-# default-integrated lane whose cross-toolchain is absent (XC8 for either
-# release PIC, the ATtiny_DFP for the ATtiny202) prints a named skip and does
-# not fail the build, so a bare `make` stays useful on an AVR-only machine;
+# here first. A default-integrated lane whose cross-toolchain is absent (XC8 for
+# any of the three PICs, the ATtiny_DFP for the ATtiny202) prints a named skip
+# and does not fail the build, so a bare `make` stays useful on an AVR-only
+# machine;
 # STRICT_TOOLS=1 turns each skip into an error, as release and CI require.
 #
 # Composed from $(TINYX5) rather than spelled out, so adding a tinyx5 chip
 # reaches the default goal without a second edit here.
 all: all-request-valid \
      attiny13a $(foreach n,$(TINYX5),attiny$(n)) \
-     attiny202 pic10f322 pic10f320-variants
+     attiny202 pic10f322 pic10f320-variants pic12f675
 
 # `all` builds the FULL output-stage matrix, because the PIC lanes require
 # every supported stage -- a partial PIC image set is not something this
@@ -6487,15 +6486,17 @@ pic12f675-test-target-variants: pic12f675-target-selector-valid variant-selector
 # no image or whole-command override: both could separate checked bytes from the
 # bytes the programmer consumes.
 #
-# THIS PART IS STAGED, NOT RELEASE-SUPPORTED, AND THIS TARGET IS HOW THAT
-# CHANGES. docs/pic12f675_feasibility.md section 8 items 1 and 2 -- whether a
-# programmer preserves the factory bandgap trim in CONFIG and the oscillator
-# calibration word in flash -- are silicon-only risks. No simulator lane can
-# reach them; they close at a bench, with this command, or not at all. So the
-# target now makes their bench measurement the transaction: a read-only baseline
-# must exist, the live device must still match it immediately before the write,
-# and a post-write readback/result is mandatory. This enables the silicon check;
-# it does not promote the part without retained real-hardware evidence.
+# THIS TARGET IS THE PIC12F675 BENCH-PROGRAMMING WORKFLOW, AND HOW ITS 1.x.y
+# HARDWARE VALIDATION GETS DONE. docs/pic12f675_feasibility.md section 8 items 1
+# and 2 -- whether a programmer preserves the factory bandgap trim in CONFIG and
+# the oscillator calibration word in flash -- are silicon-only risks. No
+# simulator lane can reach them; they close at a bench, with this command, or not
+# at all. The part is release-supported in software at 0.9.x like every other
+# target -- none of which has run on silicon either -- and these residual risks
+# are the 1.x.y hardware pass, tracked as TODO.md T3-pic12f675-bench. So the
+# target makes their bench measurement the transaction: a read-only baseline must
+# exist, the live device must still match it immediately before the write, and a
+# post-write readback/result is mandatory.
 #
 # ON TOOL SUPPORT (section 8 item 8). PICkit 2 has long covered this family, and
 # the pinned device pack registers PIC12F675 with the same MPLAB hardware-tool
@@ -7066,97 +7067,53 @@ TINYX5_RELEASE_IMAGES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(foreach n,$
 XT_RELEASE_IMAGES     := $(foreach v,$(XT_VARIANTS_SUPPORTED),$(call fw_image,$(v),$(XT_TAG)).hex)
 PIC10F322_RELEASE_IMAGES    := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(call fw_image,$(v),$(PIC10F322_TAG)).hex)
 PIC10F320_RELEASE_IMAGES := $(foreach v,$(PIC10F320_VARIANTS_SUPPORTED),$(call fw_image,$(v),$(PIC10F320_TAG)).hex)
+PIC12F675_RELEASE_IMAGES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(call fw_image,$(v),$(PIC12F675_TAG)).hex)
 
 RELEASE_IMAGES := \
 	$(ATTINY13A_RELEASE_IMAGES) \
 	$(TINYX5_RELEASE_IMAGES) \
 	$(XT_RELEASE_IMAGES) \
 	$(PIC10F322_RELEASE_IMAGES) \
-	$(PIC10F320_RELEASE_IMAGES)
+	$(PIC10F320_RELEASE_IMAGES) \
+	$(PIC12F675_RELEASE_IMAGES)
 
 # The build directories those images are produced into, in the order a
 # reproduction run should pass them to scripts/verify-release-images.sh. Kept
 # beside the set so a new target cannot add images without also declaring where
 # they come from.
-RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(XT_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(PIC10F320_BUILD_DIR)
+RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(XT_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(PIC10F320_BUILD_DIR) $(PIC12F675_BUILD_DIR)
 
-# --- what this repository builds and deliberately does NOT release ------------
-# The sets above say what a release CONTAINS. This one says what is missing ON
-# PURPOSE, which is a different statement from silence.
+# --- nothing is staged: every part this repository builds is released ---------
+# There is no longer a "built but deliberately withheld" set. The PIC12F675 was
+# the one staged part, and it graduated into RELEASE_IMAGES above alongside the
+# other six MCU targets. RELEASE_STAGED_IMAGES and its parse-time
+# disjoint-with-RELEASE_IMAGES guard are gone with it; the pattern for staging a
+# future part (name the images, pin the exclusion from both sides in
+# test-release-images, keep a graduation checklist here) is recoverable from the
+# git history of that graduation if it is ever needed again.
 #
-# WHY AN ABSENCE NEEDS DECLARING. The block above exists because an omission and
-# a complete set look identical to any check that observes the tree. A STAGED
-# part is that hazard's twin: `bypass-pic12f675-*.hex` is absent from
-# RELEASE_IMAGES for a reason, and nothing here could tell that reason from
-# somebody having forgotten the lane. Naming the images gives the intent a
-# place to live, gives test-release-images something to pin, and makes the
-# graduation a diff in one obvious spot rather than an archaeology exercise.
+# WHAT "RELEASED" MEANS HERE, AND WHAT IT DOES NOT. Everything this repository
+# ships is validated in software -- simulation, formal proof and static analysis
+# -- and none of it has run on silicon. That is the whole 0.9.x line, uniformly:
+# see the versioning note at the top of CHANGELOG.md. Real-hardware validation is
+# what the 1.x.y line will add, for EVERY part, and until then each target
+# carries residual silicon-only risks that no lane here can see. The PIC12F675's
+# happen to be enumerated (docs/pic12f675_feasibility.md section 8, items 1, 2,
+# 8 and 9: whether a programmer preserves the factory oscillator trim in flash
+# word 0x3FF and the BG<1:0> bandgap bits in the CONFIG word, whether ipecmd runs
+# against the part, and GP2's Schmitt-Trigger readback margin). They are the same
+# CLASS as every other part's un-bench-validated behaviour, tracked for the 1.x.y
+# hardware pass as TODO.md T3-pic12f675-bench, and NOT release-blockers under the
+# 0.9.x convention.
 #
-# WHY THE PIC12F675 IS NOT RELEASED. It has never run on silicon. Every claim
-# this project makes about it comes from simulation, formal proof and static
-# analysis -- thorough, and not the same claim as "it has run on the part".
-# Three of its open risks are specifically invisible to all of that: whether a
-# programmer preserves the factory oscillator trim in flash word 0x3FF, whether
-# it preserves the BG<1:0> bandgap bits in the CONFIG word, and whether GP2 --
-# the one output pin whose input buffer is a Schmitt Trigger -- reads back above
-# 0.8*VDD where cd4053_with_mute holds it high, which the per-tick
-# port-follows-shadow guard requires and which gpsim's ideal pin model cannot
-# test. A device that lost either of the first two still appears to work; one
-# that fails the third watchdog-resets forever. See
-# docs/pic12f675_feasibility.md section 8, items 1, 2 and 9. The guarded
-# preflight/program workflow measures the first two and retains the result; only
-# a real PASS closes them. The third is closed with a meter.
-#
-# GRADUATING THE PART means, together and in this order:
-#   0. close section 8 items 1, 2 and 9 at a bench, on real silicon;
-#   1. move PIC12F675_STAGED_IMAGES into RELEASE_IMAGES, and add
-#      $(PIC12F675_BUILD_DIR) to RELEASE_IMAGE_DIRS above;
-#   2. extend the two publication inventories immediately below: the three
-#      soak combinations into RELEASE_SOAK_NAMES, and build-pic12f675.log,
-#      pic12f675-test.log and pic12f675-test-target-variants.log into
-#      RELEASE_FIXED_EVIDENCE_FILES. Both fail closed and both fail LATE:
-#      scripts/make-release.sh compares its actual soak set against the first
-#      BEFORE starting the 24-hour phase, and
-#      scripts/verify-release-qualification.sh requires the retained evidence
-#      to match the second exactly AFTER that phase ends;
-#   3. in scripts/make-release.sh: preflight req_file lines for
-#      PIC12F675_DFP_INCLUDE and PIC12F675_DEVICE_INI -- asserted through this
-#      part's OWN variables, for the reason the PIC10F320 pair states there;
-#      the soak's compiler and libgpsim requirements need nothing new, since
-#      this part reuses PIC_SOAK_CXX and PIC_SOAK_GPSIM_INC -- then a build
-#      step, a qualification step, a soak-combo loop producing the step 2
-#      names, and an img_row manifest arm. That generator refuses to describe
-#      an image whose MCU it does not recognize, so a missed arm fails the
-#      release loudly (test-release-images pins that no arm matches a staged
-#      image today). The soak loop must build pic12f675-simcal FIRST -- one
-#      prerequisite gets both halves, since it depends on pic12f675. This is
-#      the only part whose soak runs a DERIVED image and reads _gpio_shadow_
-#      out of the build's .sym, so a loop copied from the PIC10F32x arms
-#      compiles with no shadow address and fails closed at soak-build time,
-#      an hour into the run;
-#   4. in .github/workflows/release.yml: build the part on the pinned runner
-#      and re-run its lanes there. The reproducibility gate compares the
-#      rebuilt set against the Makefile's RELEASE_IMAGES, so a part added in
-#      step 1 and absent here fails the tag build -- the latest and most
-#      expensive place anything in this list can fail;
-#   5. record the flashing procedure in release/README.md, INCLUDING the
-#      calibration-word preservation requirement -- an image published without
-#      it is a device with an untrimmed oscillator that still appears to work.
-#      Re-point the OSCCAL note in src/bypass_mcu_pic12f675.c at it in the same
-#      change: that comment names this step as where the procedure lands, and
-#      it is the pointer someone at a bench reads;
-#   6. update the pinned counts in test/test_release_images.sh (18 -> 21).
-PIC12F675_STAGED_IMAGES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(call fw_image,$(v),$(PIC12F675_TAG)).hex)
-RELEASE_STAGED_IMAGES := $(PIC12F675_STAGED_IMAGES)
-
-# The two sets are claims about the same namespace, so they must not overlap:
-# an image cannot be both shipped and deliberately withheld. Checked at parse
-# time, on every make invocation, because the failure it guards against is a
-# half-finished graduation -- exactly the state in which someone is least
-# likely to run the release gates.
-ifneq ($(filter $(RELEASE_STAGED_IMAGES),$(RELEASE_IMAGES)),)
-$(error release set and staged set overlap: $(filter $(RELEASE_STAGED_IMAGES),$(RELEASE_IMAGES)) -- a graduating image must be REMOVED from RELEASE_STAGED_IMAGES as it is added to RELEASE_IMAGES)
-endif
+# ONE OF THEM IS NOT purely a 1.x.y nicety, though: losing word 0x3FF or the
+# BG bits yields a device that runs WRONG while still appearing to work, and that
+# is a flashing-time footgun the other parts do not have. The software mitigation
+# already exists (pic12f675-program refuses to clobber 0x3FF and does before/
+# after readback), but the published flashing procedure in release/README.md MUST
+# carry the calibration-word preservation requirement. Treat that as a gate on
+# the release, not a nicety -- an image shipped without the warning is a device
+# with an untrimmed oscillator that still appears to work.
 
 # Canonical release-soak and retained-evidence inventories. These are explicit,
 # immutable publication contracts rather than observations of whichever loops or
@@ -7174,15 +7131,17 @@ override RELEASE_SOAK_NAMES := \
 	attiny85_tq2_l2_5v_relay attiny45_tq2_l2_5v_relay \
 	attiny202_cd4053_simple attiny202_cd4053_with_mute attiny202_tq2_l2_5v_relay \
 	pic10f322_cd4053_simple pic10f322_cd4053_with_mute pic10f322_tq2_l2_5v_relay \
-	pic10f320_cd4053_simple pic10f320_cd4053_with_mute pic10f320_tq2_l2_5v_relay
+	pic10f320_cd4053_simple pic10f320_cd4053_with_mute pic10f320_tq2_l2_5v_relay \
+	pic12f675_cd4053_simple pic12f675_cd4053_with_mute pic12f675_tq2_l2_5v_relay
 
 override RELEASE_FIXED_EVIDENCE_FILES := \
 	build-avr-classic.log build-avr-xt.log \
-	build-pic10f322.log build-pic10f320.log \
+	build-pic10f322.log build-pic10f320.log build-pic12f675.log \
 	final-image-build.log \
 	attiny202-test.log attiny202-test-target.log \
 	pic10f322-test.log pic10f322-test-target-variants.log \
 	pic10f320-test.log pic10f320-test-target-variants.log \
+	pic12f675-test.log pic12f675-test-target-variants.log \
 	soak-build.log test-long.summary.txt
 override RELEASE_EVIDENCE_FILES := $(RELEASE_FIXED_EVIDENCE_FILES) \
 	$(addprefix soak-,$(addsuffix .log,$(RELEASE_SOAK_NAMES)))
@@ -7222,11 +7181,9 @@ release:
 # One-line summary of the most useful targets.
 help:
 	@echo "Variants: $(VARIANTS)  (select with VARIANT=<name>; default $(VARIANT))"
-	@echo "MCUs: release-supported: ATtiny13a/45/85 + ATtiny202 + PIC10F322 + PIC10F320"
-	@echo "      staged standalone: PIC12F675"
+	@echo "MCUs: release-supported: ATtiny13a/45/85 + ATtiny202 + PIC10F322 + PIC10F320 + PIC12F675"
 	@echo "Build:"
 	@echo "  all (default)   build every release-supported part's variant images (.hex) + sizes."
-	@echo "                  PIC12F675 remains staged standalone; use make pic12f675."
 	@echo "                  Missing optional PIC/ATtiny202 toolchains skip by name; STRICT_TOOLS=1 makes that fatal."
 	@echo "  attiny13a       build all variant firmwares for ATtiny13a"
 	@echo "  attiny85 / attiny45   build all variant firmwares for that tinyx5 chip"
@@ -7247,8 +7204,8 @@ help:
 	@echo "  pic10f322-test-target fail-closed fault + lock-step + target-I/O for one PIC variant"
 	@echo "                        (PIC10F322_TARGET_VARIANT); pic10f322-test-target-variants runs all"
 	@echo "  pic10f322-program     flash one PIC variant to hardware (VARIANT=, PIC10F322_PROG=pk2cmd|ipecmd)"
-	@echo "PIC12F675 staged standalone target (not release-supported; omitted from all/release):"
-	@echo "  CI-gated, and programmable at a bench with retained trim evidence; no release integration."
+	@echo "PIC12F675 (classic mid-range, 1024 words; release-supported, built by all/release):"
+	@echo "  Full CI-gated pre-hardware validation, plus a bench-programming workflow with trim evidence."
 	@echo "  pic12f675-test        all PIC12F675 pre-hardware checks (CONFIG + analysis + source"
 	@echo "                        coverage + calibration contract + gpsim + stack bound)"
 	@echo "  pic12f675             build all variants for PIC12F675 (XC8) + 1024-word budget gate"

@@ -20,11 +20,14 @@ free tier restricts the options that are available. PIC10F320's 256-word flash
 also requires the self-contained architecture documented in
 `docs/pic10f320_special_case.md`.
 
-A third PIC, the PIC12F675, is present on the same toolchain but is **staged and
-not release-supported**: no release images, no place in the default `all` goal,
-and no hardware-bench validation. It does have a guarded bench programming
-target (`make pic12f675-program`), which publishes nothing. It is a *classic*
-mid-range core rather than the 32x's enhanced mid-range, which is why it needs
+A third PIC, the PIC12F675, is **release-supported from `v0.9.9`** on the same
+toolchain: release images, a place in the default `all` goal, and the full
+release pipeline, plus a guarded bench programming target (`make
+pic12f675-program`). Like every part here it has **not** run on silicon — its
+release rests on simulation, formal proof and static analysis, with real-hardware
+validation deferred to the `1.x.y` pass (TODO `T3-pic12f675-bench`). It is a
+*classic* mid-range core rather than the 32x's enhanced mid-range, which is why
+it needs
 its own shell — no `LATx` output latch, no `OSCCON`, no `TMR2`/`PR2` period
 register, and one shared prescaler that must be given to either the timer or
 the watchdog but not both. The design consequences of each are recorded in
@@ -733,7 +736,7 @@ See TOOLCHAIN.adoc for details.  Summary:
       ** PIC10-12Fxxx_DFP device pack
       ** gpsim/libgpsim
       ** PIC10F320 uses its self-contained constrained-target implementation
-    * PIC12F675 (staged, not release-supported)
+    * PIC12F675 (release-supported from v0.9.9)
       ** the same XC8 / PIC10-12Fxxx_DFP / gpsim toolchain
       ** classic mid-range core: no LATx, so the output latch is an SRAM shadow
       ** 1.024 ms software tick (TMR0, four unprescaled rollovers)
@@ -1096,7 +1099,7 @@ the register level. Five targets use the modular architecture through three
 shell source files: `src/bypass_mcu_avr_classic.c` serves ATtiny13a/45/85,
 `src/bypass_mcu_avr_xt.c` serves ATtiny202, and
 `src/bypass_mcu_pic10f322.c` serves PIC10F322. PIC10F320 is the sixth,
-self-contained implementation described below. The staged PIC12F675 is a
+self-contained implementation described below. The PIC12F675 is a
 seventh target and a fourth core generation (classic mid-range); it is modular,
 so `src/bypass_mcu_pic12f675.c` is a fourth shell over the same compiled core.
 The modular split has two rules.

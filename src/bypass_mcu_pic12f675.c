@@ -66,9 +66,11 @@
 // coil-pulse widths on a device that still appears to work.  make
 // pic12f675-program refuses any image that programs word 0x3FF and prints the
 // read-back procedure before every write; the risk itself is stated in
-// docs/pic12f675_feasibility.md section 8 item 2. That procedure moves into
-// release/README.md when this part is released (step 5 of the Makefile's
-// GRADUATING THE PART list).
+// docs/pic12f675_feasibility.md section 8 item 2. The flashing procedure that
+// preserves this word now lives in release/README.md (the "preserve the
+// factory calibration words when flashing" note beside the image table).
+
+
 
 
 #include "bypass_config.h"        // PRESSED_THRESH / RELEASE_THRESH
