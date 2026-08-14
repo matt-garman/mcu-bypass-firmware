@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 real_make=$(command -v make)
-work=$(mktemp -d "${TMPDIR:-/tmp}/test-pic-build.XXXXXX")
+test_temp_root=${TMPDIR:-${XDG_RUNTIME_DIR:-${HOME:?HOME is required when TMPDIR and XDG_RUNTIME_DIR are unset}}}
+work=$(mktemp -d -- "$test_temp_root/test-pic-build.XXXXXX")
 cleanup_work() {
 	chmod -R u+w "$work" 2>/dev/null || :
 	rm -rf "$work"
@@ -83,7 +84,7 @@ case "$PB_TARGET" in
 		# complete-matrix production/consumption and the hardware-programming
 		# calibration guard.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=88
+		expected_checks=89
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -1269,6 +1270,11 @@ EOF
 	program_transaction="$work/pic12f675-current-transaction"
 	program_device_state="$work/pic12f675-device-programmed"
 	program_evidence="$work/pic12f675-trim-baseline.json"
+	pic12_temp_root="$work/PIC12F675 private temporary root"
+	pic12_temp_cleanup_failure="$work/pic12f675-temp-cleanup-failed"
+	mkdir -p "$pic12_temp_root"
+	chmod 700 "$pic12_temp_root"
+	rm -f "$pic12_temp_cleanup_failure"
 	programmer="$tools/pic12f675-programmer"
 	cat > "$programmer" <<'EOF'
 #!/usr/bin/env bash
@@ -1406,11 +1412,28 @@ esac
 EOF
 	chmod 750 "$programmer" "$repo/test/pic/test_config_pic12f675"
 
+	assert_pic12_temp_root_empty() (
+		[[ -d "$pic12_temp_root" && ! -L "$pic12_temp_root" ]] || {
+			: > "$pic12_temp_cleanup_failure"
+			printf 'FAIL: PIC12F675 workflow removed or replaced its caller-owned temporary root\n' >&2
+			return 1
+		}
+		shopt -s nullglob dotglob
+		entries=("$pic12_temp_root"/*)
+		((${#entries[@]} == 0)) || {
+			: > "$pic12_temp_cleanup_failure"
+			printf 'FAIL: PIC12F675 workflow left transient data under its private root\n' >&2
+			return 1
+		}
+	)
+
 	run_program_make() {
 		local build_dir=$1 variant=$2
 		local result_path="$work/result-${BASHPID}-${RANDOM}.json"
+		local make_rc=0
 		shift 2
 		rm -f "$program_transaction" "$program_device_state" "$program_capture"
+		TMPDIR="${PIC12F675_TEST_TMPDIR:-$pic12_temp_root}" \
 		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
 		PIC12F675_PROGRAM_LOG="$program_log" \
 		PIC12F675_HARDWARE_LOG="$hardware_log" \
@@ -1439,10 +1462,14 @@ EOF
 				PIC12F675_PART=PIC10F322 \
 				PIC12F675_CAL_INJECTOR="$tools/noop-oracle.py" \
 				PIC12F675_CAL_CHECKER="$tools/noop-oracle.py" \
-				STRICT_TOOLS=1 "$@"
+				STRICT_TOOLS=1 "$@" || make_rc=$?
+		assert_pic12_temp_root_empty || return 99
+		return "$make_rc"
 	}
 
 	run_preflight_make() {
+		local make_rc=0
+		TMPDIR="${PIC12F675_TEST_TMPDIR:-$pic12_temp_root}" \
 		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
 		PIC12F675_PROGRAMMER_MODE="${PIC12F675_PROGRAMMER_MODE:-read}" \
 		PIC12F675_HARDWARE_LOG="$hardware_log" \
@@ -1454,7 +1481,9 @@ EOF
 			make --no-print-directory -C "$repo" pic12f675-preflight \
 				PIC12F675_READ_PROG="$programmer" \
 				PIC12F675_TRIM_EVIDENCE="$program_evidence" \
-				PIC12F675_PART=PIC10F322 STRICT_TOOLS=1 "$@"
+				PIC12F675_PART=PIC10F322 STRICT_TOOLS=1 "$@" || make_rc=$?
+		assert_pic12_temp_root_empty || return 99
+		return "$make_rc"
 	}
 
 	run_simcal_consumer_make() {
@@ -1724,12 +1753,15 @@ EOF
 	: > "$program_log"
 	rm -f "$program_evidence" "$program_device_state" "$program_transaction"
 	preflight_output=$(run_preflight_make)
+	printf -v expected_preflight_prefix '%q' \
+		"-GF$pic12_temp_root/pic12f675-preflight."
 	[[ "$preflight_output" == *"pk2cmd fixture version 1.21"* \
 		&& "$preflight_output" == *"PIC12F675_TRIM_BASELINE PASS evidence=$program_evidence"* \
 		&& -f "$program_evidence" && ! -L "$program_evidence" \
 		&& ! -s "$program_log" \
 		&& "$(<"$hardware_log")" == *"[ -\?V ]"* \
-		&& "$(<"$hardware_log")" == *"[ -PPIC12F675 -I -GF"*" -R ]"* ]] \
+		&& "$(<"$hardware_log")" == *"[ -PPIC12F675 -I -GF"*" -R ]"* \
+		&& "$(<"$hardware_log")" == *"$expected_preflight_prefix"*"/device-read.hex"* ]] \
 		|| { printf 'FAIL: PIC12F675 read-only preflight did not retain the expected baseline: %s\n' \
 			"$preflight_output" >&2; exit 1; }
 	python3 - "$program_evidence" <<'PY'
@@ -1744,6 +1776,91 @@ assert record["osccal_word"] == "0x34A5"
 assert record["config_word"] == "0x11FF"
 assert record["bg_bits"] == "0x1000"
 PY
+	checks=$((checks + 1))
+
+	# Shared temporary roots are rejected before a read or write, even when the
+	# caller explicitly exports one. Normal scenarios in this lane all use the
+	# whitespace-bearing private root above and the wrappers assert it is empty
+	# after every success, failure, and signal interruption.
+	shared_root_evidence="$work/shared-root-evidence.json"
+	: > "$hardware_log"
+	if shared_root_output=$(PIC12F675_TEST_TMPDIR=/tmp run_preflight_make \
+			"PIC12F675_TRIM_EVIDENCE=$shared_root_evidence" 2>&1); then
+		printf 'FAIL: PIC12F675 preflight accepted shared /tmp storage\n' >&2
+		exit 1
+	fi
+	[[ "$shared_root_output" == *"refusing shared temporary root /tmp"* \
+		&& ! -s "$hardware_log" && ! -e "$shared_root_evidence" ]] \
+		|| { printf 'FAIL: shared temporary root reached preflight hardware or failed for the wrong reason: %s\n' \
+			"$shared_root_output" >&2; exit 1; }
+	if shared_root_output=$(PIC12F675_TEST_TMPDIR=//tmp run_preflight_make \
+			"PIC12F675_TRIM_EVIDENCE=$shared_root_evidence" 2>&1); then
+		printf 'FAIL: PIC12F675 preflight accepted aliased shared //tmp storage\n' >&2
+		exit 1
+	fi
+	[[ "$shared_root_output" == *"refusing shared temporary root /tmp"* \
+		&& ! -s "$hardware_log" && ! -e "$shared_root_evidence" ]] \
+		|| { printf 'FAIL: aliased shared temporary root failed open or for the wrong reason: %s\n' \
+			"$shared_root_output" >&2; exit 1; }
+	insecure_temp_root="$work/insecure temporary root"
+	mkdir -p "$insecure_temp_root"
+	chmod 755 "$insecure_temp_root"
+	if shared_root_output=$(PIC12F675_TEST_TMPDIR="$insecure_temp_root" run_preflight_make \
+			"PIC12F675_TRIM_EVIDENCE=$shared_root_evidence" 2>&1); then
+		printf 'FAIL: PIC12F675 preflight accepted a group/other-accessible temporary root\n' >&2
+		exit 1
+	fi
+	[[ "$shared_root_output" == *"must be owned by the current user with no group/other access"* \
+		&& ! -s "$hardware_log" && ! -e "$shared_root_evidence" ]] \
+		|| { printf 'FAIL: accessible temporary root failed open or for the wrong reason: %s\n' \
+			"$shared_root_output" >&2; exit 1; }
+	unsafe_temp_root="$work/unsafe\$temporary-root"
+	mkdir -p "$unsafe_temp_root"
+	chmod 700 "$unsafe_temp_root"
+	if shared_root_output=$(PIC12F675_TEST_TMPDIR="$unsafe_temp_root" run_preflight_make \
+			"PIC12F675_TRIM_EVIDENCE=$shared_root_evidence" 2>&1); then
+		printf 'FAIL: PIC12F675 preflight accepted Make/shell metacharacters in its temporary root\n' >&2
+		exit 1
+	fi
+	[[ "$shared_root_output" == *"contains unsupported path characters"* \
+		&& ! -s "$hardware_log" && ! -e "$shared_root_evidence" ]] \
+		|| { printf 'FAIL: metacharacter temporary root failed open or for the wrong reason: %s\n' \
+			"$shared_root_output" >&2; exit 1; }
+	unsafe_ancestor="$work/group-writable-ancestor"
+	ancestor_temp_root="$unsafe_ancestor/private child"
+	mkdir -p "$ancestor_temp_root"
+	chmod 777 "$unsafe_ancestor"
+	chmod 700 "$ancestor_temp_root"
+	if shared_root_output=$(PIC12F675_TEST_TMPDIR="$ancestor_temp_root" run_preflight_make \
+			"PIC12F675_TRIM_EVIDENCE=$shared_root_evidence" 2>&1); then
+		printf 'FAIL: PIC12F675 preflight accepted a group/other-writable temporary-root ancestor\n' >&2
+		exit 1
+	fi
+	[[ "$shared_root_output" == *"has a group/other-writable ancestor"* \
+		&& ! -s "$hardware_log" && ! -e "$shared_root_evidence" ]] \
+		|| { printf 'FAIL: writable temporary-root ancestor failed open or for the wrong reason: %s\n' \
+			"$shared_root_output" >&2; exit 1; }
+	shared_root_result="$work/shared-root-result"
+	for rejected_root in \
+		"/tmp|refusing shared temporary root /tmp" \
+		"//tmp|refusing shared temporary root /tmp" \
+		"$insecure_temp_root|must be owned by the current user with no group/other access" \
+		"$unsafe_temp_root|contains unsupported path characters" \
+		"$ancestor_temp_root|has a group/other-writable ancestor"; do
+		temp_root=${rejected_root%%|*}
+		reason=${rejected_root#*|}
+		rm -rf "$shared_root_result"
+		if shared_root_output=$(PIC12F675_TEST_TMPDIR="$temp_root" run_program_make \
+				"$PB_BUILD_DIR" "$program_variant" \
+				"PIC12F675_BENCH_RESULT=$shared_root_result" 2>&1); then
+			printf 'FAIL: PIC12F675 programming accepted unsafe temporary root %s\n' "$temp_root" >&2
+			exit 1
+		fi
+		[[ "$shared_root_output" == *"$reason"* \
+			&& ! -s "$hardware_log" && ! -e "$shared_root_result" ]] \
+			|| { printf 'FAIL: unsafe temporary root reached programming hardware or failed for the wrong reason: %s\n' \
+				"$shared_root_output" >&2; exit 1; }
+	done
 	checks=$((checks + 1))
 
 	# A read whose export RELOCATES addresses must be refused, not
@@ -1888,7 +2005,7 @@ PY
 		&& "$program_output" == *"PIC12F675_TRIM_PREWRITE PASS evidence=$program_evidence"* \
 		&& "$program_output" == *"PIC12F675_TRIM_RESULT PASS evidence=$program_result/result.json"* \
 		&& "$program_output" == *"selected variant $program_variant from the fresh build matrix"* \
-		&& "$program_snapshot" == */pic12f675-program.*/"image snapshot.hex" \
+		&& "$program_snapshot" == "$pic12_temp_root"/pic12f675-program.*/"image snapshot.hex" \
 		&& ! -e "$program_snapshot" \
 		&& -f "$program_capture" && -f "$program_result/reservation.json" \
 		&& -f "$program_result/result.json" ]] \
@@ -2071,7 +2188,7 @@ PY
 	program_snapshot=${program_args[3]#-F}
 	[[ "$program_output" == *"PIC12F675_CALIBRATION_CHECK PASS image=$program_snapshot word=0x3FF"* \
 		&& "$program_output" == *"selected variant $space_variant from the fresh build matrix"* \
-		&& "$program_snapshot" == */pic12f675-program.*/"image snapshot.hex" \
+		&& "$program_snapshot" == "$pic12_temp_root"/pic12f675-program.*/"image snapshot.hex" \
 		&& ! -e "$program_snapshot" ]] \
 		|| { printf 'FAIL: path-qualified ipecmd did not preserve its argv or selected variant: %s\n' \
 			"$program_output" >&2; exit 1; }
@@ -2427,6 +2544,8 @@ PY
 		|| { printf 'FAIL: PIC12F675 shipping-image/missing-Python failure reported the wrong result: %s\n' \
 			"$cal_output" >&2; exit 1; }
 	checks=$((checks + 1))
+	[ ! -e "$pic12_temp_cleanup_failure" ] \
+		|| { printf 'FAIL: an expected-failure scenario masked leaked PIC12F675 transient data\n' >&2; exit 1; }
 fi
 
 [ -z "$expected_checks" ] || [ "$checks" -eq "$expected_checks" ] \

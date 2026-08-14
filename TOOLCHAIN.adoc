@@ -165,6 +165,18 @@ aggregate so missing PIC tooling cannot produce a false green release gate.
                  write, failed post-read, or changed trim produces retained
                  FAIL evidence and a failing Make target.
 
+                 Transient full-device reads and the private programming build
+                 use `TMPDIR` when set, otherwise `XDG_RUNTIME_DIR`, otherwise
+                 `HOME`. The selected root must already exist, be owned by the
+                 current user, grant no group/other access, and have no
+                 ancestors except those owned by the current user or root; those
+                 ancestors must not be group/other-writable. Shared `/tmp` and
+                 `/var/tmp` roots are rejected. Its path may contain letters,
+                 digits, spaces, `/`, `.`, `_`, and `-`. The transient
+                 directories are created mode 0700 and removed on success,
+                 failure, or a handled signal. Only the explicitly requested
+                 baseline and result paths are retained.
+
                  ipecmd remains a software-tested write dialect only. The current
                  target would require pk2cmd reads immediately before and after
                  the IPE write; no safe dual-programmer attachment or handoff is

@@ -166,6 +166,15 @@ make -C "$repo" pic12f675-program \
 new baseline and a new result directory path. The parents of both paths must
 already exist.
 
+Transient full-device reads and the private programming build use `TMPDIR` when
+set, otherwise `XDG_RUNTIME_DIR`, otherwise `HOME`. The selected root must
+already exist, be owned by the current user, grant no group/other access, and
+have only current-user- or root-owned, non-group/other-writable ancestors;
+shared `/tmp` and `/var/tmp` roots are rejected. Its path may contain letters,
+digits, spaces, `/`, `.`, `_`, and `-`. Success, failure, and handled-signal
+paths remove those transient directories; only the explicitly requested
+baseline and result paths are retained.
+
 Run this workflow only from a clean checkout of the intended release tag with
 the pinned XC8/DFP toolchain. `pic12f675-program` rebuilds and checks the image
 from that source; it does not consume a downloaded release HEX. No ipecmd

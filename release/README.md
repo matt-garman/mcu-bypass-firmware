@@ -348,6 +348,14 @@ Replace `cd4053_simple` with `cd4053_with_mute` or `tq2_l2_5v_relay` when
 needed. A baseline belongs to one device before its first write; do not reuse it
 for another device or a later reflash.
 
+Transient full-device reads and the private programming build use `TMPDIR` when
+set, otherwise `XDG_RUNTIME_DIR`, otherwise `HOME`. The selected root must
+already exist, be owned by the current user, grant no group/other access, and
+have only current-user- or root-owned, non-group/other-writable ancestors;
+shared `/tmp` and `/var/tmp` roots are rejected. Its path may contain letters,
+digits, spaces, `/`, `.`, `_`, and `-`. Only the explicitly requested baseline
+and result paths survive normal, failed, or handled-interruption cleanup.
+
 Run the transaction from a clean checkout of this release's tag with the pinned
 XC8/DFP toolchain. The target rebuilds and checks the tagged source; it does not
 consume the downloaded HEX in this directory. The retained PASS/FAIL result

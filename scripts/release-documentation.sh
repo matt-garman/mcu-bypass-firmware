@@ -78,7 +78,12 @@ release_render_pic12f675_flashing() {
 		'The device may still appear to work with wrong timing or BOR/POR thresholds.' \
 		'The fail-stop checks above require a clean checkout of this exact release tag.' \
 		'The target rebuilds with the pinned toolchain; it does not consume a downloaded' \
-		'release HEX. No ipecmd hardware' \
+		'release HEX. Transient reads and the private build use `TMPDIR` when set,' \
+		'otherwise `XDG_RUNTIME_DIR`, otherwise `HOME`. The selected root must exist, be' \
+		'current-user-private, and have only root/current-user-owned non-writable ancestors.' \
+		'Shared `/tmp` and `/var/tmp` roots are rejected; the path is limited to letters,' \
+		'digits, spaces, `/`, `.`, `_`, and `-`.' \
+		'Handled exits remove the transient directories. No ipecmd hardware' \
 		'procedure is qualified: its software-tested write route would also require a' \
 		'pk2cmd reader before and after the write, and no safe attachment/handoff has been' \
 		'validated.' \

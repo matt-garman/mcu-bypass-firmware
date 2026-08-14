@@ -2838,7 +2838,7 @@ test-supply-chain:
 	./test/test_supply_chain.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 36/75/88
+# image/host rebuild triggering. The script enforces the canonical 36/75/89
 # counts, so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
@@ -5311,18 +5311,22 @@ pic12f675: $(PIC12F675_CORE_SRC) $(PIC12F675_HEADERS) $(foreach v,$(CLASSIC_VARI
 	if [ "$(if $(filter-out $(VARIANTS),$(CLASSIC_VARIANTS_SUPPORTED)),yes,no)" = yes ]; then \
 		echo "FAIL: VARIANTS must contain every supported name; required: $(CLASSIC_VARIANTS_SUPPORTED)"; exit 2; \
 	fi
-	@rm -f $(PIC12F675_BUILD_PRODUCTS)
+	@rm -f "$(PIC12F675_BUILD_DIR)"/"$(FW_BASE)-$(PIC12F675_TAG)-"*.hex \
+		"$(PIC12F675_BUILD_DIR)"/"$(FW_BASE)-$(PIC12F675_TAG)-"*.s \
+		"$(PIC12F675_BUILD_DIR)"/"$(FW_BASE)-$(PIC12F675_TAG)-"*.sym
 	@if [ ! -x "$(PIC_CC)" ] && ! command -v $(PIC_CC) >/dev/null 2>&1; then \
 		echo "XC8 not found at $(PIC_CC); skipping PIC build (override with PIC_CC=...)"; \
 		$(SKIP); \
 	fi; \
 	$(IHEX_VALIDATOR_CHECK); \
-	mkdir -p $(PIC12F675_BUILD_DIR); \
+	mkdir -p "$(PIC12F675_BUILD_DIR)"; \
 	pic_complete=0; \
 	cleanup_pic_products() { \
 		rc=$$?; \
 		if [ $$rc -ne 0 ] || [ $$pic_complete -ne 1 ]; then \
-			rm -f $(PIC12F675_BUILD_PRODUCTS) || rc=1; \
+			rm -f "$(PIC12F675_BUILD_DIR)"/"$(FW_BASE)-$(PIC12F675_TAG)-"*.hex \
+				"$(PIC12F675_BUILD_DIR)"/"$(FW_BASE)-$(PIC12F675_TAG)-"*.s \
+				"$(PIC12F675_BUILD_DIR)"/"$(FW_BASE)-$(PIC12F675_TAG)-"*.sym || rc=1; \
 			[ $$rc -ne 0 ] || rc=1; \
 		fi; \
 		trap - 0 1 2 15; exit $$rc; \
@@ -5350,13 +5354,13 @@ pic12f675: $(PIC12F675_CORE_SRC) $(PIC12F675_HEADERS) $(foreach v,$(CLASSIC_VARI
 			*)                m=CD4053_SIMPLE;    drv=src/bypass_output_cd4053_simple.c ;; \
 		esac; \
 		stem=`fw_image_of "$$v" $(PIC12F675_TAG)`; name=$$stem.hex; \
-		hex=$(PIC12F675_BUILD_DIR)/$$name; asm=$(PIC12F675_BUILD_DIR)/$$stem.s; sym=$(PIC12F675_BUILD_DIR)/$$stem.sym; \
+		hex="$(PIC12F675_BUILD_DIR)/$$name"; asm="$(PIC12F675_BUILD_DIR)/$$stem.s"; sym="$(PIC12F675_BUILD_DIR)/$$stem.sym"; \
 		if ! rm -f "$$hex" "$$asm" "$$sym"; then \
 			echo "FAIL: could not remove stale PIC12F675 products for variant $$v before compiling"; fail=1; continue; \
 		fi; \
-		out=`cd $(PIC12F675_BUILD_DIR) && $(PIC_CC) $(PIC12F675_CFLAGS) -D$$m \
+		out=`cd "$(PIC12F675_BUILD_DIR)" && $(PIC_CC) $(PIC12F675_CFLAGS) -D$$m \
 			$(addprefix $(CURDIR)/,$(PIC12F675_CORE_SRC)) $(CURDIR)/$$drv \
-			-o $$name 2>&1` \
+			-o "$$name" 2>&1` \
 			|| { printf '%s\n' "$$out"; echo "FAIL: variant $$v did not compile for PIC12F675"; rm -f "$$hex"; fail=1; continue; }; \
 		if [ ! -s "$$hex" ]; then \
 			echo "FAIL: XC8 reported success but did not produce a nonempty $$hex"; \
@@ -6525,6 +6529,9 @@ export PIC12F675_PART PIC12F675_PROG PIC12F675_PROG_KIND PIC12F675_PROG_TOOL \
 # programmer version and device transcripts, target Device ID/revision, complete
 # read HEX digest, word 0x3FF, CONFIG and BG<1:0> are retained in one exclusive
 # evidence file. The output path is mandatory and may not already exist.
+# Transient full-device reads use TMPDIR when set, otherwise XDG_RUNTIME_DIR,
+# otherwise HOME. The root must already exist, be current-user-private, and may
+# not be shared /tmp or /var/tmp.
 .PHONY: pic12f675-preflight
 pic12f675-preflight: $(PIC12F675_TRIM_EVIDENCE_TOOL)
 	@if [ "$(if $(filter undefined,$(origin PIC12F675_PROG_HEX)),0,1)" -ne 0 ]; then \
@@ -6558,9 +6565,6 @@ pic12f675-preflight: $(PIC12F675_TRIM_EVIDENCE_TOOL)
 	if ! command -v python3 >/dev/null 2>&1; then \
 		echo "ERROR: python3 is required to create trim evidence."; exit 1; \
 	fi; \
-	if ! command -v mktemp >/dev/null 2>&1; then \
-		echo "ERROR: mktemp is required to capture trim evidence privately."; exit 1; \
-	fi; \
 	if ! command -v sha256sum >/dev/null 2>&1; then \
 		echo "ERROR: sha256sum is required to bind the reader executable to its evidence."; exit 1; \
 	fi; \
@@ -6572,13 +6576,66 @@ pic12f675-preflight: $(PIC12F675_TRIM_EVIDENCE_TOOL)
 		[ $${#hash_digest} -eq 64 ] || return 1; \
 		printf '%s' "$$hash_digest"; \
 	}; \
-	bench_dir=`mktemp -d "/tmp/pic12f675-preflight.XXXXXX"` || exit 1; \
-	chmod 700 "$$bench_dir" || { rm -rf -- "$$bench_dir"; exit 1; }; \
-	cleanup_preflight() { rc=$$1; trap - 0 1 2 15; rm -rf -- "$$bench_dir" || rc=1; exit $$rc; }; \
+	temp_root=$${TMPDIR:-$${XDG_RUNTIME_DIR:-$${HOME:-}}}; \
+	if [ -z "$$temp_root" ] || [ ! -d "$$temp_root" ]; then \
+		echo "ERROR: set TMPDIR, XDG_RUNTIME_DIR, or HOME to an existing private temporary root."; \
+		exit 1; \
+	fi; \
+	temp_root=`CDPATH= cd -- "$$temp_root" && pwd -P` || exit 1; \
+	while [ "$${temp_root#//}" != "$$temp_root" ]; do temp_root=/$${temp_root#//}; done; \
+	case "$$temp_root" in \
+		/tmp|/tmp/*|/var/tmp|/var/tmp/*) \
+			echo "ERROR: refusing shared temporary root $$temp_root; select private TMPDIR."; exit 1 ;; \
+		*[!A-Za-z0-9_./\ -]*) \
+			echo "ERROR: private temporary root contains unsupported path characters: $$temp_root"; exit 1 ;; \
+	esac; \
+	temp_root_uid=`stat -Lc '%u' -- "$$temp_root"` || exit 1; \
+	current_uid=`id -u` || exit 1; \
+	temp_root_mode=`stat -Lc '%a' -- "$$temp_root"` || exit 1; \
+	case "$$temp_root_mode" in ''|*[!0-7]*) \
+		echo "ERROR: could not determine private temporary root permissions."; exit 1 ;; \
+	esac; \
+	if [ "$$temp_root_uid" != "$$current_uid" ] || [ $$((0$$temp_root_mode & 077)) -ne 0 ]; then \
+		echo "ERROR: private temporary root must be owned by the current user with no group/other access: $$temp_root"; \
+		exit 1; \
+	fi; \
+	ancestor=$$temp_root; \
+	while [ "$$ancestor" != / ]; do \
+		ancestor=$${ancestor%/*}; [ -n "$$ancestor" ] || ancestor=/; \
+		ancestor_mode=`stat -Lc '%a' -- "$$ancestor"` || exit 1; \
+		ancestor_uid=`stat -Lc '%u' -- "$$ancestor"` || exit 1; \
+		case "$$ancestor_mode" in ''|*[!0-7]*) \
+			echo "ERROR: could not determine temporary-root ancestor permissions."; exit 1 ;; \
+		esac; \
+		if [ "$$ancestor_uid" != 0 ] && [ "$$ancestor_uid" != "$$current_uid" ]; then \
+			echo "ERROR: private temporary root has an ancestor not owned by root or the current user: $$ancestor"; exit 1; \
+		fi; \
+		if [ $$((0$$ancestor_mode & 022)) -ne 0 ]; then \
+			echo "ERROR: private temporary root has a group/other-writable ancestor: $$ancestor"; exit 1; \
+		fi; \
+	done; \
+	bench_dir="$$temp_root/pic12f675-preflight.$$$$"; bench_created=0; \
+	setup_in_progress=1; pending_signal=0; \
+	cleanup_preflight() { \
+		rc=$$1; trap - 0 1 2 15; \
+		if [ "$$bench_created" -eq 1 ]; then rm -rf -- "$$bench_dir" || rc=1; fi; \
+		exit $$rc; \
+	}; \
+	handle_preflight_signal() { \
+		if [ "$$setup_in_progress" -eq 1 ]; then pending_signal=$$1; return; fi; \
+		cleanup_preflight $$1; \
+	}; \
 	trap 'cleanup_preflight $$?' 0; \
-	trap 'cleanup_preflight 129' 1; \
-	trap 'cleanup_preflight 130' 2; \
-	trap 'cleanup_preflight 143' 15; \
+	trap 'handle_preflight_signal 129' 1; \
+	trap 'handle_preflight_signal 130' 2; \
+	trap 'handle_preflight_signal 143' 15; \
+	if (trap '' 1 2 15; umask 077 && mkdir -- "$$bench_dir"); then bench_created=1; else \
+		setup_in_progress=0; \
+		if [ "$$pending_signal" -ne 0 ]; then cleanup_preflight "$$pending_signal"; fi; \
+		echo "ERROR: could not exclusively create a private preflight directory."; exit 1; \
+	fi; \
+	setup_in_progress=0; \
+	if [ "$$pending_signal" -ne 0 ]; then cleanup_preflight "$$pending_signal"; fi; \
 	version_log="$$bench_dir/pk2cmd-version.log"; \
 	read_log="$$bench_dir/device-read.log"; \
 	read_hex="$$bench_dir/device-read.hex"; \
@@ -6707,10 +6764,6 @@ pic12f675-program: variant-selectors-valid \
 		echo "ERROR: sha256sum is required to bind pre-flash checks to the programmed snapshot."; \
 		exit 1; \
 	fi; \
-	if ! command -v mktemp >/dev/null 2>&1; then \
-		echo "ERROR: mktemp is required to create a private programming snapshot."; \
-		exit 1; \
-	fi; \
 	$(IHEX_VALIDATOR_CHECK); \
 	baseline_check=`python3 "$(PIC12F675_TRIM_EVIDENCE_TOOL)" inspect \
 		--baseline "$$evidence"` || exit 1; \
@@ -6726,26 +6779,78 @@ pic12f675-program: variant-selectors-valid \
 		[ $${#hash_digest} -eq 64 ] || return 1; \
 		printf '%s' "$$hash_digest"; \
 	}; \
-	program_dir=`mktemp -d "/tmp/pic12f675-program.XXXXXX"` || { \
-		echo "ERROR: could not create a private programming directory."; exit 1; \
-	}; \
-	chmod 700 "$$program_dir" || { rm -rf -- "$$program_dir"; exit 1; }; \
-	bench_dir=`mktemp -d "/tmp/pic12f675-bench.XXXXXX"` || { \
-		rm -rf -- "$$program_dir"; \
-		echo "ERROR: could not create a private bench-record directory."; exit 1; \
-	}; \
-	chmod 700 "$$bench_dir" || { rm -rf -- "$$program_dir" "$$bench_dir"; exit 1; }; \
+	temp_root=$${TMPDIR:-$${XDG_RUNTIME_DIR:-$${HOME:-}}}; \
+	if [ -z "$$temp_root" ] || [ ! -d "$$temp_root" ]; then \
+		echo "ERROR: set TMPDIR, XDG_RUNTIME_DIR, or HOME to an existing private temporary root."; \
+		exit 1; \
+	fi; \
+	temp_root=`CDPATH= cd -- "$$temp_root" && pwd -P` || exit 1; \
+	while [ "$${temp_root#//}" != "$$temp_root" ]; do temp_root=/$${temp_root#//}; done; \
+	case "$$temp_root" in \
+		/tmp|/tmp/*|/var/tmp|/var/tmp/*) \
+			echo "ERROR: refusing shared temporary root $$temp_root; select private TMPDIR."; exit 1 ;; \
+		*[!A-Za-z0-9_./\ -]*) \
+			echo "ERROR: private temporary root contains unsupported path characters: $$temp_root"; exit 1 ;; \
+	esac; \
+	temp_root_uid=`stat -Lc '%u' -- "$$temp_root"` || exit 1; \
+	current_uid=`id -u` || exit 1; \
+	temp_root_mode=`stat -Lc '%a' -- "$$temp_root"` || exit 1; \
+	case "$$temp_root_mode" in ''|*[!0-7]*) \
+		echo "ERROR: could not determine private temporary root permissions."; exit 1 ;; \
+	esac; \
+	if [ "$$temp_root_uid" != "$$current_uid" ] || [ $$((0$$temp_root_mode & 077)) -ne 0 ]; then \
+		echo "ERROR: private temporary root must be owned by the current user with no group/other access: $$temp_root"; \
+		exit 1; \
+	fi; \
+	ancestor=$$temp_root; \
+	while [ "$$ancestor" != / ]; do \
+		ancestor=$${ancestor%/*}; [ -n "$$ancestor" ] || ancestor=/; \
+		ancestor_mode=`stat -Lc '%a' -- "$$ancestor"` || exit 1; \
+		ancestor_uid=`stat -Lc '%u' -- "$$ancestor"` || exit 1; \
+		case "$$ancestor_mode" in ''|*[!0-7]*) \
+			echo "ERROR: could not determine temporary-root ancestor permissions."; exit 1 ;; \
+		esac; \
+		if [ "$$ancestor_uid" != 0 ] && [ "$$ancestor_uid" != "$$current_uid" ]; then \
+			echo "ERROR: private temporary root has an ancestor not owned by root or the current user: $$ancestor"; exit 1; \
+		fi; \
+		if [ $$((0$$ancestor_mode & 022)) -ne 0 ]; then \
+			echo "ERROR: private temporary root has a group/other-writable ancestor: $$ancestor"; exit 1; \
+		fi; \
+	done; \
+	program_dir="$$temp_root/pic12f675-program.$$$$"; \
+	bench_dir="$$temp_root/pic12f675-bench.$$$$"; \
+	program_created=0; bench_created=0; \
+	setup_in_progress=1; pending_signal=0; \
 	cleanup_program_snapshot() { \
 		rc=$$1; \
 		trap - 0 1 2 15; \
-		chmod 700 "$$program_dir" 2>/dev/null || :; \
-		rm -rf -- "$$program_dir" "$$bench_dir" || rc=1; \
+		if [ "$$program_created" -eq 1 ]; then \
+			chmod 700 "$$program_dir" 2>/dev/null || :; \
+			rm -rf -- "$$program_dir" || rc=1; \
+		fi; \
+		if [ "$$bench_created" -eq 1 ]; then rm -rf -- "$$bench_dir" || rc=1; fi; \
 		exit $$rc; \
 	}; \
+	handle_program_signal() { \
+		if [ "$$setup_in_progress" -eq 1 ]; then pending_signal=$$1; return; fi; \
+		cleanup_program_snapshot $$1; \
+	}; \
 	trap 'cleanup_program_snapshot $$?' 0; \
-	trap 'cleanup_program_snapshot 129' 1; \
-	trap 'cleanup_program_snapshot 130' 2; \
-	trap 'cleanup_program_snapshot 143' 15; \
+	trap 'handle_program_signal 129' 1; \
+	trap 'handle_program_signal 130' 2; \
+	trap 'handle_program_signal 143' 15; \
+	if (trap '' 1 2 15; umask 077 && mkdir -- "$$program_dir"); then program_created=1; else \
+		setup_in_progress=0; \
+		if [ "$$pending_signal" -ne 0 ]; then cleanup_program_snapshot "$$pending_signal"; fi; \
+		echo "ERROR: could not exclusively create a private programming directory."; exit 1; \
+	fi; \
+	if (trap '' 1 2 15; umask 077 && mkdir -- "$$bench_dir"); then bench_created=1; else \
+		setup_in_progress=0; \
+		if [ "$$pending_signal" -ne 0 ]; then cleanup_program_snapshot "$$pending_signal"; fi; \
+		echo "ERROR: could not exclusively create a private bench-record directory."; exit 1; \
+	fi; \
+	setup_in_progress=0; \
+	if [ "$$pending_signal" -ne 0 ]; then cleanup_program_snapshot "$$pending_signal"; fi; \
 	program_build="$$program_dir/build"; \
 	if ! $(MAKE) --no-print-directory pic12f675 \
 			PIC12F675_BUILD_DIR="$$program_build" \
@@ -7235,6 +7340,7 @@ help:
 	@echo "  pic12f675-program     after preflight, flash one fresh variant and record mandatory readback"
 	@echo "                        (VARIANT=, PIC12F675_PROG=, PIC12F675_PROG_KIND=pk2cmd|ipecmd,"
 	@echo "                        PIC12F675_TRIM_EVIDENCE=, PIC12F675_BENCH_RESULT= new directory)"
+	@echo "                        Transients use private TMPDIR=, else XDG_RUNTIME_DIR/HOME; shared roots are rejected."
 	@echo "                        Checks/records preservation; real programmer behavior remains hardware-unvalidated."
 	@echo "                        ipecmd routing is software-only; no safe hardware attachment/handoff is published."
 	@echo "PIC10F320 (constrained 256-word target; docs/pic10f320_special_case.md):"

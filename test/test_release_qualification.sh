@@ -465,7 +465,8 @@ bash -n "$flashing_commands" \
 for required in PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT \
 		'checked and recorded' 'hardware-unvalidated' \
 		'may already have damaged the device' 'clean checkout of this exact release tag' \
-		'does not consume a downloaded' 'No ipecmd hardware'; do
+		'does not consume a downloaded' 'Shared `/tmp` and `/var/tmp` roots' \
+		'No ipecmd hardware'; do
 	grep -Fq "$required" "$flashing" \
 		|| fail "rendered PIC12F675 flashing guidance omits: $required"
 done

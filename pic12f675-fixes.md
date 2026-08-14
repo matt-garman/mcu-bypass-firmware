@@ -4,7 +4,7 @@
 
 **Reviewed branch:** `pic12f675-support`
 
-**Reviewed tip:** `a87416e` (`feat: release-support the PIC12F675`)
+**Reviewed tip:** `156e326` (`fix: require guarded PIC12F675 flashing`)
 
 **Last updated:** 2026-08-14
 
@@ -39,8 +39,8 @@ The PIC12F675 implementation is substantially at software-validation parity:
 - No nominal-path PIC12F675 firmware defect was found in the meta-review.
 
 The branch is not yet merge-ready as a completed release-support change because
-its private programming storage and several current documents do not yet meet
-the implemented release and development-environment contracts.
+its current support/design/test documents still need reconciliation and the
+complete equipped-host software qualification remains pending.
 
 ## Priority Summary
 
@@ -51,7 +51,7 @@ the implemented release and development-environment contracts.
 | P12-3 | High | Complete generated release metadata and commit message | Implemented; P12-8 pending |
 | P12-4 | High | Reconcile the feasibility document's support status | Open |
 | P12-5 | High | Correct stale design, safety, test, and help documentation | Open |
-| P12-6 | High | Remove hard-coded `/tmp` use from the programming workflow | Open |
+| P12-6 | High | Remove hard-coded `/tmp` use from the programming workflow | Implemented |
 | P12-7 | High | Add regressions for the review gaps | In progress |
 | P12-8 | Gate | Run the complete software qualification on the equipped host | Open |
 | P12-9 | Gate | Perform final branch and merge hygiene | Open |
@@ -277,20 +277,20 @@ the development environment's rule that no files may be created under `/tmp`.
 
 ### Required Work
 
-- [ ] Move baseline, program snapshot, and transient bench data to an explicitly
+- [x] Move baseline, program snapshot, and transient bench data to an explicitly
       controlled private location.
-- [ ] Honor a caller-selected safe temporary root where practical.
-- [ ] Do not fall back to `/tmp` in this environment.
-- [ ] Preserve mode-0700 directories, exclusive result creation, traps, digest
+- [x] Honor a caller-selected safe temporary root where practical.
+- [x] Do not fall back to `/tmp` in this environment.
+- [x] Preserve mode-0700 directories, exclusive result creation, traps, digest
       checks, and interruption evidence.
-- [ ] Ensure diagnostics do not print sensitive full-device contents.
+- [x] Ensure diagnostics do not print sensitive full-device contents.
 
 ### Acceptance
 
-- [ ] `pic12f675-preflight` and `pic12f675-program` create no `/tmp` content.
-- [ ] Success, failure, and signal-interruption paths remove transient data while
+- [x] `pic12f675-preflight` and `pic12f675-program` create no `/tmp` content.
+- [x] Success, failure, and signal-interruption paths remove transient data while
       retaining only the explicitly requested evidence/result paths.
-- [ ] Existing programming transaction tests pass with a temporary root that
+- [x] Existing programming transaction tests pass with a temporary root that
       contains spaces.
 
 ## P12-7 - Regression Coverage for Meta-Review Gaps
@@ -305,7 +305,7 @@ the development environment's rule that no files may be created under `/tmp`.
 - [x] Assert generated `commit_msg.txt` includes PIC12F675 scope and validation.
 - [x] Assert generated flashing guidance does not claim unvalidated trim
       preservation and cannot omit required preflight/result inputs.
-- [ ] Add a temporary-root regression proving the PIC12F675 bench workflow does
+- [x] Add a temporary-root regression proving the PIC12F675 bench workflow does
       not hard-code `/tmp`.
 - [ ] Close the shared-compile-check shell-census gap: `bypass_mcu_pic12f675.c`
       now actively includes `bypass_compile_checks.h`, but
@@ -361,8 +361,30 @@ The generated transaction is fail-stop on repository discovery, exact tag
 commit identity, clean worktree state, preflight failure, and per-image shortcut
 injection. It deliberately publishes no ipecmd hardware procedure: the routing
 is software-tested, but safe reader/writer attachment or handoff remains part of
-the `1.x.y` hardware pass. P12-6 remains open and separately owns the workflow's
-private temporary-storage implementation.
+the `1.x.y` hardware pass. The completed private temporary-storage implementation
+and its evidence are recorded below.
+
+### Completed Private-Temporary-Data Chunk Evidence
+
+The programming temporary-storage chunk (P12-6 and its P12-7 regression) passed:
+
+- Generic, PIC10F320, and PIC12F675 fake build/programming contracts: 36, 75,
+  and 89 checks respectively.
+- Generated release qualification/documentation: 44 checks.
+- Release image verification: 90 checks.
+- Release preflight: 30 checks and 82 Makefile queries.
+- Release provenance: 78 checks.
+- Makefile name contract: 48 checks.
+- Bash syntax, independent focused review, and `git diff --check`.
+
+Both programming targets use a current-user-private caller-selected root, reject
+shared `/tmp`/`/var/tmp`, unsafe permissions/ownership ancestry, and path text
+that cannot safely cross recursive Make. Transient directories are exclusively
+created mode 0700 only after cleanup traps know their paths. The regression runs
+the complete transaction suite under a root containing spaces, requires cleanup
+after every success/failure/signal path, and exercises each unsafe-root rejection
+through both preflight and programming. Only the requested baseline and result
+paths remain durable.
 
 ## P12-8 - Full Software Qualification
 
