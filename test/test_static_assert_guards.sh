@@ -101,12 +101,16 @@ ACTIVE_SHARED_INCLUDE_RE='^[[:space:]]*#[[:space:]]*include[[:space:]]+"bypass_c
 find_shells_missing_shared_checks() {
 	local source_root=$1 shell base
 	local -a shells=("$source_root"/bypass_mcu_*.c)
+	ACTIVE_SHARED_CHECK_SHELLS=()
 	MISSING_SHARED_CHECK_SHELLS=()
 	[ -e "${shells[0]}" ] \
 		|| fail "no MCU shells found under $source_root"
 	for shell in "${shells[@]}"; do
 		base=${shell##*/}
-		grep -Eq -- "$ACTIVE_SHARED_INCLUDE_RE" "$shell" && continue
+		if grep -Eq -- "$ACTIVE_SHARED_INCLUDE_RE" "$shell"; then
+			ACTIVE_SHARED_CHECK_SHELLS+=("$base")
+			continue
+		fi
 		[[ " $SHELLS_WITH_OWN_COPY " == *" $base "* ]] && continue
 		MISSING_SHARED_CHECK_SHELLS+=("$base")
 	done
@@ -120,12 +124,12 @@ checks=$((checks + 1))
 # The lexical contract must reject the exact false-positive that prompted this
 # gate hardening. Exercise every modular shell independently against the same
 # function used above; requiring the exact basename prevents one unrelated
-# missing include from satisfying all three cases.
-SHARED_CHECK_SHELLS=(
-	bypass_mcu_avr_classic.c
-	bypass_mcu_avr_xt.c
-	bypass_mcu_pic10f322.c
-)
+# missing include from satisfying every case. Derive this list from the active
+# direct includes classified above so a new modular shell cannot silently miss
+# the negative fixture while still passing the positive topology sweep.
+SHARED_CHECK_SHELLS=("${ACTIVE_SHARED_CHECK_SHELLS[@]}")
+[ "${#SHARED_CHECK_SHELLS[@]}" -gt 0 ] \
+	|| fail "no MCU shell actively includes bypass_compile_checks.h"
 for base in "${SHARED_CHECK_SHELLS[@]}"; do
 	tree="$work/include-$base"
 	plant "$tree"

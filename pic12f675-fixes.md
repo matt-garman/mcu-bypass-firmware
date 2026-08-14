@@ -4,7 +4,7 @@
 
 **Reviewed branch:** `pic12f675-support`
 
-**Reviewed tip:** `156e326` (`fix: require guarded PIC12F675 flashing`)
+**Reviewed tip:** `d246794` (`fix: keep PIC12F675 bench data private`)
 
 **Last updated:** 2026-08-14
 
@@ -307,9 +307,9 @@ the development environment's rule that no files may be created under `/tmp`.
       preservation and cannot omit required preflight/result inputs.
 - [x] Add a temporary-root regression proving the PIC12F675 bench workflow does
       not hard-code `/tmp`.
-- [ ] Close the shared-compile-check shell-census gap: `bypass_mcu_pic12f675.c`
-      now actively includes `bypass_compile_checks.h`, but
-      `test/test_static_assert_guards.sh`'s `SHARED_CHECK_SHELLS` still lists only
+- [x] Close the shared-compile-check shell-census gap: `bypass_mcu_pic12f675.c`
+      actively included `bypass_compile_checks.h`, but
+      `test/test_static_assert_guards.sh`'s `SHARED_CHECK_SHELLS` listed only
       `avr_classic`, `avr_xt`, and `pic10f322`, so the negative-include
       meta-fixture never exercises the PIC12F675 shell. Add it, and derive the
       census from "every shell that actively includes the header" rather than a
@@ -385,6 +385,20 @@ the complete transaction suite under a root containing spaces, requires cleanup
 after every success/failure/signal path, and exercises each unsafe-root rejection
 through both preflight and programming. Only the requested baseline and result
 paths remain durable.
+
+### Completed Shared-Check Census Chunk Evidence
+
+The shared compile-check shell-census regression (P12-7) now derives its
+negative-fixture set from every `bypass_mcu_*.c` shell with an active direct
+include of `bypass_compile_checks.h`; it no longer maintains a three-shell
+literal. The host-independent topology section exercised the AVR-classic,
+AVR-XT, PIC10F322, and PIC12F675 shells independently, and an independent review
+confirmed that a temporary fifth active shell was automatically included and
+tested. Bash syntax, the focused review, and `git diff --check` passed.
+
+This host does not provide `avr-gcc`, so the same script stopped at its first
+AVR compile control after all topology/census checks passed. The complete
+compiler-backed guard-mutation run remains part of P12-8 on the equipped host.
 
 ## P12-8 - Full Software Qualification
 
