@@ -4,7 +4,7 @@
 
 **Reviewed branch:** `pic12f675-support`
 
-**Reviewed tip:** `379ffc4` (`test: derive the shared-check shell census`)
+**Reviewed tip:** `3d0f53a` (`docs: reconcile PIC12F675 support status`)
 
 **Last updated:** 2026-08-14
 
@@ -39,8 +39,8 @@ The PIC12F675 implementation is substantially at software-validation parity:
 - No nominal-path PIC12F675 firmware defect was found in the meta-review.
 
 The branch is not yet merge-ready as a completed release-support change because
-its current design/test documents still need reconciliation and the complete
-equipped-host software qualification remains pending.
+its current test/help/comment documentation still needs reconciliation and the
+complete equipped-host software qualification remains pending.
 
 ## Priority Summary
 
@@ -50,7 +50,7 @@ equipped-host software qualification remains pending.
 | P12-2 | Blocker | Correct PIC12F675 flashing instructions and trim claims | Implemented; P12-8 pending |
 | P12-3 | High | Complete generated release metadata and commit message | Implemented; P12-8 pending |
 | P12-4 | High | Reconcile the feasibility document's support status | Implemented |
-| P12-5 | High | Correct stale design, safety, test, and help documentation | Open |
+| P12-5 | High | Correct stale design, safety, test, and help documentation | In progress |
 | P12-6 | High | Remove hard-coded `/tmp` use from the programming workflow | Implemented |
 | P12-7 | High | Add regressions for the review gaps | Implemented; P12-8 pending |
 | P12-8 | Gate | Run the complete software qualification on the equipped host | Open |
@@ -211,14 +211,14 @@ mechanical sweep is wrong.
 
 ### Required Work
 
-- [ ] Correct `DESIGN_DOCUMENTATION.adoc:137-140` so PIC12F675's 1.024 ms tick is
+- [x] Correct `DESIGN_DOCUMENTATION.adoc:137-140` so PIC12F675's 1.024 ms tick is
       not described as nominally 1.000 ms.
-- [ ] Correct `DESIGN_DOCUMENTATION.adoc:158-168` and later references from two
+- [x] Correct `DESIGN_DOCUMENTATION.adoc:158-168` and later references from two
       polled PIC implementations to three, with PIC12F675 timing kept distinct.
-- [ ] Add PIC12F675 to the primary BOR table at
+- [x] Add PIC12F675 to the primary BOR table at
       `DESIGN_DOCUMENTATION.adoc:225-246`, including its approximately 2.1 V
       threshold and inability to enforce a >4 V peripheral-safe floor.
-- [ ] Reconcile the six-target/three-generation introduction near
+- [x] Reconcile the six-target/three-generation introduction near
       `DESIGN_DOCUMENTATION.adoc:1094-1104` with the seventh target and fourth
       core generation.
 - [ ] Correct `test/README.md:455` so the PIC12F675 return-stack gate is included.
@@ -260,8 +260,8 @@ mechanical sweep is wrong.
 - [ ] Current documents consistently state seven parts, three PIC targets, 21
       images, 18 soak combinations, and 34 retained evidence files where counts
       are relevant.
-- [ ] Timing text distinguishes the 1.024 ms PIC12F675 tick from 1.000 ms targets.
-- [ ] Primary safety guidance includes the PIC12F675 BOR limitation.
+- [x] Timing text distinguishes the 1.024 ms PIC12F675 tick from 1.000 ms targets.
+- [x] Primary safety guidance includes the PIC12F675 BOR limitation.
 - [ ] No comment describing a fact now shared by all three PIC parts still says
       "both"/"two"; every remaining "both"/"32x" comment is verified specific to
       the PIC10F320+PIC10F322 pair.
@@ -416,6 +416,26 @@ exclusions or affirmative trim-preservation claims. Verification passed:
 - Generated release qualification/documentation: 45 checks.
 - Makefile name contract: 48 checks.
 - Independent focused review, Bash syntax, and `git diff --check`.
+
+### Completed Design-Safety Parity Chunk Evidence
+
+The safety-critical portion of P12-5 now distinguishes PIC12F675's four-rollover
+1.024 ms tick throughout the sample cadence, clean-input bounds, blocked-output
+re-arm budgets, and architecture discussion. It also records the fixed
+2.025-2.175 V BOD range, lack of `BORV`, external >4 V supervision requirement,
+and the seven-target/four-generation/six-modular-target architecture.
+
+The semantic regression pins the 0.931-1.138 ms tolerance range, 9.11 ms latency
+bound, 6.52 ms single-pulse bound, first-of-four pending-`T0IF` behavior, distinct
+PIC10F32x/PIC12F675 re-arm budgets, BOR limitation, and architecture census.
+Verification passed:
+
+- Generated release qualification/documentation: 46 checks.
+- Makefile name contract: 48 checks.
+- Independent focused review, Bash syntax, and `git diff --check`.
+
+`asciidoctor` is not installed on this host, so rendered AsciiDoc validation was
+not available. The remaining P12-5 test/help/comment parity work stays open.
 
 ## P12-8 - Full Software Qualification
 

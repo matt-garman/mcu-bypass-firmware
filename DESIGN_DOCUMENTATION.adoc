@@ -134,12 +134,13 @@ adverse conditions:
 
 
 == Caveats and Limitations
-    * All targets use a nominal 1ms timer-derived sample cadence: the two AVR
-      generations sample in timer ISRs, while both PIC implementations poll the
-      timer flag. Internal-oscillator tolerance can move the actual period; the
-      conservative +/-10% timing envelope used here gives roughly 0.9-1.1ms.
-      The algorithm still holds, and variation of this magnitude is not
-      perceptible to the user.
+    * Six targets use a nominal 1ms timer-derived sample cadence. PIC12F675 uses
+      1.024ms: four unprescaled 256us TMR0 rollovers counted in software. The two
+      AVR generations sample in timer ISRs, while all three PIC implementations
+      poll their timer flags. Under the conservative +/-10% frequency envelope,
+      the 1ms targets span roughly 0.909-1.111ms per sample and PIC12F675 spans
+      roughly 0.931-1.138ms. The algorithm counts samples and still holds; the
+      resulting wall-time variation is not perceptible to the user.
     * Pop/click suppression is provided by the "4053 with muting"
       variant; the other two schemes (simple 4053, relay) do not
       have explicit pop/click suppression
@@ -155,17 +156,16 @@ adverse conditions:
       1ms tick this is called a 33ms qualification budget, not an exact physical
       minimum: the first through last sample span one fewer interval, and the
       first sample's phase puts ideal press-onset-to-re-arm time at roughly
-      32-33ms. Both polled PIC implementations use conservative nominal
-      simple/mute/relay budgets of 33ms/38ms/45ms because mute and relay
-      actuation block sampling for 5ms/12ms after the toggle. The latched timer
-      flag normally
-      preserves one pending sample after a block, so an ideal simulated
-      mute/relay path can re-arm roughly one tick sooner than those conservative
-      budgets (pending-aware upper-end nominal budgets of about 37ms/44ms);
-      instruction overhead and sample phase make the exact physical minimum
-      non-integral. Noise and old switches lengthen recognition, while oscillator
-      tolerance moves wall time in either direction.
-    * On both PIC parts, the footswitch loop is polled (Model B: a polled
+      32-33ms. The polled PIC10F32x implementations use conservative nominal
+      simple/mute/relay budgets of 33ms/38ms/45ms. PIC12F675's corresponding
+      1.024ms-tick budgets are about 33.8ms/38.8ms/45.8ms. Mute and relay
+      actuation block sampling for 5ms/12ms after the toggle. A PIC10F32x
+      `TMR2IF` latched during that block can make the next sample immediate;
+      PIC12F675's latched `T0IF` supplies only the first of four required 256us
+      rollover observations. These are conservative qualification budgets, not
+      exact physical minima. Noise and old switches lengthen recognition, while
+      oscillator tolerance moves wall time in either direction.
+    * On all three PIC parts, the footswitch loop is polled (Model B: a polled
       hardware timer tick with the watchdog kept as a pure fault watchdog,
       no timer interrupt; the decision and its alternatives are recorded in
       `docs/phase2_pic_shell.md` §1), so while a blocking
@@ -178,16 +178,17 @@ adverse conditions:
       immediately, those first 5ms/12ms of physical release occur while the
       mute/relay routine is still blocking and cannot drain the counter. The
       conservative release hold budget is therefore block + RELEASE_THRESH
-      nominal sample periods before re-arm. TMR2 continues during the block and
-      its latched flag normally supplies one immediate post-block sample, so the
-      ideal earliest path can be about one tick shorter; the full-block budget
-      remains robust to instruction overhead and sample phase. From one press
-      onset to the next, use PRESSED_THRESH + block + RELEASE_THRESH as the
-      conservative nominal qualification budget: 33ms simple, 38ms mute, and
-      45ms relay. These are sample-count-derived budgets, not exact physical
-      minima. A normal physical tap clears them comfortably. AVR Classic and
-      AVR-XT are unaffected because their timer ISRs keep integrating through
-      the blocking pulse. The driver
+      nominal sample periods before re-arm. The hardware timer continues during
+      the block. On PIC10F32x, a latched `TMR2IF` normally supplies one immediate
+      post-block sample. On PIC12F675, a latched `T0IF` satisfies the first of the
+      four rollover observations that form one sample, after which up to three
+      more 256us rollovers remain. From one press onset to the next, use
+      PRESSED_THRESH + block + RELEASE_THRESH as the conservative nominal
+      qualification budget: 33ms/38ms/45ms for PIC10F32x and approximately
+      33.8ms/38.8ms/45.8ms for PIC12F675. These are sample-count-derived budgets,
+      not exact physical minima. A normal physical tap clears them comfortably.
+      AVR Classic and AVR-XT are unaffected because their timer ISRs keep
+      integrating through the blocking pulse. The driver
       compile-time assertions bound block < RELEASE_THRESH, which keeps the
       conservative PIC release/re-arm wall-time budget below
       2 * RELEASE_THRESH; they do not make the block disappear from that budget.
@@ -237,13 +238,17 @@ PIC10F322:: BOR is enabled at the highest available trip
   (`BORV=HI`), but the PIC10F322's trip points are only ~2.4v (LO) /
   ~2.7v (HI). The PIC therefore *cannot* enforce a >4v floor in
   firmware -- this is a hardware-design limitation. A build on
-  either PIC part that drives >4v peripherals must guarantee the
+  either PIC10F32x part that drives >4v peripherals must guarantee the
   peripheral-safe supply in hardware (e.g. regulator dropout /
   supervisor), not rely on the MCU's BOR.
 PIC10F320:: same silicon family and the same BOR configuration as
   the PIC10F322 (`BOREN=ON`, `LPBOR=OFF`, `BORV=HI`), so the same
   ~2.4v (LO) / ~2.7v (HI) trip points and *exactly the same caveat*
   apply.
+PIC12F675:: BOD is enabled (`BOREN=ON`) at a fixed 2.025-2.175v trip
+  range; this part has no `BORV` selection. It therefore cannot enforce the
+  >4v peripheral-safe floor either. External supply supervision is required
+  when the connected circuit must stop operating above the PIC12F675 BOD range.
 
     * Watchdog timeout (WDT): while the program flow has been
       exhaustively tested/simulated, including formal
@@ -268,16 +273,19 @@ user.  The release-debounce, or lock-out period, is longer so as to
 "hide" additional debounce latency from the user.
 
     * PRESSED_THRESH upper bound (latency constraint):
-      The slow-clock extreme is -10% frequency, so one nominal 1ms tick can
-      last 1/0.9 = 1.111ms. (+10% frequency shortens the tick to 1/1.1 =
-      0.909ms; it is the favorable latency extreme, not the worst case.) If
-      `N` accepted samples are required, their sample instants span `N-1`
+      The slow-clock extreme is -10% frequency, so a nominal 1ms tick can last
+      1/0.9 = 1.111ms; PIC12F675's nominal 1.024ms tick can last
+      1.024/0.9 = 1.138ms. (+10% frequency shortens those ticks to 0.909ms and
+      0.931ms respectively; it is the favorable latency extreme, not the worst
+      case.) If `N` accepted samples are required, their sample instants span `N-1`
       intervals and an arbitrarily phased physical edge adds less than one
       interval. Ignoring sub-tick instruction overhead, clean edge-to-toggle
       latency is therefore from about `(N-1)*T` to less than `N*T`.
       `PRESSED_THRESH=8` gives a worst-phase, -10%-frequency upper bound below
-      8 * 1.111ms = 8.89ms. A threshold of 9 would approach 10ms with no
-      oscillator/sample-period margin; 10 would violate the <10ms goal.
+      8 * 1.111ms = 8.89ms on the 1ms targets and below
+      8 * 1.138ms = 9.11ms on PIC12F675. A threshold of 9 would approach 10ms
+      with no margin on the 1ms targets and exceed 10ms on PIC12F675; 10 would
+      violate the <10ms goal everywhere.
       Bounce or EMI/RFI can subtract counter progress and make recognition take
       longer than this clean-input bound.
 
@@ -290,12 +298,13 @@ user.  The release-debounce, or lock-out period, is longer so as to
       `PRESSED_THRESH=8` is a sample-count threshold, not an 8ms persistence
       threshold. Eight low sample instants span seven tick intervals. At the
       +10%-frequency extreme, a favorably phased continuous low pulse just over
-      7 * 0.909ms = 6.36ms can therefore be sampled low eight times and
-      register. Starting from counter zero, any isolated low pulse at the MCU
-      digital input shorter than 6.36ms is guaranteed not to register under the
-      stated clock tolerance; between that bound and the
-      worst-phase recognition bound (less than 8.89ms), the outcome depends on
-      sample phase and oscillator frequency. Noncontiguous low samples can also
+      7 * 0.909ms = 6.36ms can therefore be sampled low eight times on a 1ms
+      target; the PIC12F675 counterpart is 7 * 0.931ms = 6.52ms. Starting from
+      counter zero, any isolated low pulse at the MCU digital input shorter than
+      the target's corresponding bound is guaranteed not to register under the
+      stated clock tolerance; between that bound and the worst-phase recognition
+      bound (less than 8.89ms or 9.11ms), the outcome depends on sample phase and
+      oscillator frequency. Noncontiguous low samples can also
       accumulate if intervening high samples do not fully drain the integrator,
       so there is no universal physical "must persist" duration for arbitrary
       noise. Even the guaranteed single-pulse bound is more than 60 times the
@@ -308,11 +317,14 @@ user.  The release-debounce, or lock-out period, is longer so as to
       nominal 33ms
       qualification budget; physical press-onset-to-re-arm timing is roughly
       32-33 tick periods because 33 sample instants span 32 intervals and the
-      first sample has arbitrary phase. For both polled PIC implementations,
-      conservative qualification adds the full blocking output actuation after the toggle:
-      33ms simple, 38ms mute, 45ms relay at nominal timing. A pending TMR2 flag
-      can make the ideal mute/relay path roughly one tick shorter, so these are
-      robust sample-count budgets rather than exact physical minima.
+      first sample has arbitrary phase. For all three polled PIC implementations,
+      conservative qualification adds the full blocking output actuation after
+      the toggle. The PIC10F32x nominal simple/mute/relay budgets are
+      33ms/38ms/45ms; PIC12F675's are approximately 33.8ms/38.8ms/45.8ms. A
+      pending PIC10F32x `TMR2IF` can make the next sample immediate. A pending
+      PIC12F675 `T0IF` supplies one of four 256us rollover observations, so its
+      next sample still waits for up to three more. These are robust
+      sample-count budgets rather than exact physical minima.
 
 
 == GPIO Pin Assignment, Simple CD4053 Scheme
@@ -1093,16 +1105,15 @@ section 4.4.1.
 
 == Multi-MCU Architecture: Shared Core, Per-MCU Shell
 
-The firmware has six MCU release targets across three core generations -- AVR
-Classic, AVR-XT and PIC10F32x -- that share one debounce design but differ at
-the register level. Five targets use the modular architecture through three
-shell source files: `src/bypass_mcu_avr_classic.c` serves ATtiny13a/45/85,
-`src/bypass_mcu_avr_xt.c` serves ATtiny202, and
-`src/bypass_mcu_pic10f322.c` serves PIC10F322. PIC10F320 is the sixth,
-self-contained implementation described below. The PIC12F675 is a
-seventh target and a fourth core generation (classic mid-range); it is modular,
-so `src/bypass_mcu_pic12f675.c` is a fourth shell over the same compiled core.
-The modular split has two rules.
+The firmware has seven MCU release targets across four core generations -- AVR
+Classic, AVR-XT, enhanced mid-range PIC10F32x, and classic mid-range PIC12F675 --
+that share one debounce design but differ at the register level. Six targets use
+the modular architecture through four shell source files:
+`src/bypass_mcu_avr_classic.c` serves ATtiny13a/45/85,
+`src/bypass_mcu_avr_xt.c` serves ATtiny202,
+`src/bypass_mcu_pic10f322.c` serves PIC10F322, and
+`src/bypass_mcu_pic12f675.c` serves PIC12F675. PIC10F320 is the seventh,
+self-contained implementation described below. The modular split has two rules.
 
 **The modular targets share one compiled core.** `src/bypass_pure.c` is
 the functional core: no hardware access, no globals, no side effects. Every
@@ -1138,17 +1149,18 @@ is a bare `wdr` with nothing to arm. Because it integrates in the ISR, it
 shares the classic lane's blocking-actuation timing property: the ISR keeps
 sampling through a blocking relay or mute pulse, so no ticks are lost. The two
 AVR generations and three polled PIC
-implementations therefore qualify press timing differently (see Asymmetric
-Debounce Timing). This is the clearest illustration of why the modular shells
-are separate: AVR-XT and AVR Classic share a *model* and none of their register
-code.
+implementations therefore have different release/re-arm timing on the blocking
+mute and relay variants (see Asymmetric Debounce Timing); PIC12F675's 1.024ms
+tick separately lengthens every sample-count-derived wall-time figure. This is
+the clearest illustration of why the modular shells are separate: AVR-XT and AVR
+Classic share a *model* and none of their register code.
 
 So `main()`, the tick source, `init()` as orchestrator and the reset path stay
 file-static inside each implementation. The consequences are visible elsewhere
-in this document: both polled PIC implementations qualify press timing
-differently from both ISR-driven AVR generations (see Asymmetric Debounce
-Timing), and neither PIC carries a `timer_isr_called_` byte (see Resource
-Utilization).
+in this document: all three polled PIC implementations pause sampling during a
+blocking output actuation while both ISR-driven AVR generations continue (see
+Asymmetric Debounce Timing), PIC12F675 has the distinct 1.024ms cadence, and no
+PIC carries a `timer_isr_called_` byte (see Resource Utilization).
 
 **What the shared interface does cover.** `src/bypass_hw_iface.h` is the
 *output-driver* boundary only: the GPIO leaf operations a shell provides to a

@@ -5,6 +5,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 VERIFY="$ROOT/scripts/verify-release-qualification.sh"
 RENDER="$ROOT/scripts/release-documentation.sh"
 PIC12F675_FEASIBILITY="$ROOT/docs/pic12f675_feasibility.md"
+DESIGN_DOCUMENTATION="$ROOT/DESIGN_DOCUMENTATION.adoc"
 RELEASE=${RELEASE:-$ROOT/scripts/make-release.sh}
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-qualification.XXXXXX")
 release="$work/release"
@@ -21,6 +22,8 @@ fail() {
 [ -r "$RENDER" ] || fail "release documentation renderer is missing"
 [ -r "$PIC12F675_FEASIBILITY" ] \
 	|| fail "PIC12F675 feasibility document is missing"
+[ -r "$DESIGN_DOCUMENTATION" ] \
+	|| fail "design documentation is missing"
 # shellcheck source=../scripts/release-documentation.sh
 source "$RENDER"
 for function in release_render_scope release_render_validation \
@@ -81,6 +84,34 @@ for required in \
 	grep -Fq "$required" "$PIC12F675_FEASIBILITY" \
 		|| fail "PIC12F675 feasibility document omits a current/historical boundary: $required"
 done
+checks=$((checks + 1))
+
+# Pin the safety-relevant multi-MCU distinctions: PIC12F675's longer sample
+# period, all three polled PIC implementations, and the fixed low BOD threshold.
+# Normalize wrapping so AsciiDoc line breaks remain editorial rather than API.
+design_contract=$(tr '\n' ' ' < "$DESIGN_DOCUMENTATION" | tr -s ' ')
+for required in \
+		'Six targets use a nominal 1ms timer-derived sample cadence. PIC12F675 uses 1.024ms' \
+		'all three PIC implementations poll their timer flags' \
+		'the 1ms targets span roughly 0.909-1.111ms per sample and PIC12F675 spans roughly 0.931-1.138ms' \
+		'8 * 1.138ms = 9.11ms on PIC12F675' \
+		'the PIC12F675 counterpart is 7 * 0.931ms = 6.52ms' \
+		'33ms/38ms/45ms for PIC10F32x and approximately 33.8ms/38.8ms/45.8ms for PIC12F675' \
+		'latched `T0IF` supplies only the first of four required 256us rollover observations' \
+		'PIC12F675:: BOD is enabled (`BOREN=ON`) at a fixed 2.025-2.175v trip range' \
+		'this part has no `BORV` selection' \
+		'It therefore cannot enforce the >4v peripheral-safe floor either' \
+		'External supply supervision is required' \
+		'seven MCU release targets across four core generations' \
+		'Six targets use the modular architecture through four shell source files' \
+		'all three polled PIC implementations pause sampling during a blocking output actuation'; do
+	grep -Fq "$required" <<<"$design_contract" \
+		|| fail "design documentation omits PIC12F675 safety/topology semantics: $required"
+done
+if grep -Eiq 'All targets use a nominal 1ms timer-derived sample cadence|while both PIC implementations poll|On both PIC parts, the footswitch loop|For both polled PIC implementations|six MCU release targets across three core generations|both polled PIC implementations qualify press timing|PIC12F675[^.]*T0IF[^.]*(next sample|post-block sample)[^.]*immediate|PIC12F675[^.]*immediate[^.]*T0IF' \
+		<<<"$design_contract"; then
+	fail "design documentation still describes the pre-PIC12F675 timing/topology"
+fi
 checks=$((checks + 1))
 
 for wiring in \
