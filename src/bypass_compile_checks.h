@@ -5,10 +5,11 @@
 #define BYPASS_COMPILE_CHECKS_H__
 
 // Shared, MCU-NEUTRAL compile-time contract for the debounce thresholds.
-// Included by the three modular hardware shells
-// (bypass_mcu_avr_classic.c, bypass_mcu_avr_xt.c and
-// bypass_mcu_pic10f322.c) so the invariant lives in one place for all of
-// them and cannot drift between them.
+//
+// Included by the four modular hardware shells (bypass_mcu_avr_classic.c,
+// bypass_mcu_avr_xt.c, bypass_mcu_pic10f322.c and bypass_mcu_pic12f675.c) so
+// the invariant lives in one place for all of them and cannot drift between
+// them.
 //
 // bypass_mcu_pic10f320.c is deliberately NOT among them: at 256 words of
 // flash it is a single self-contained file that shares no headers with
