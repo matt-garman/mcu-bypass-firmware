@@ -143,6 +143,11 @@ human-readable artifacts still describe the pre-PIC12F675 release:
   PIC10F322.
 - `scripts/make-release.sh:1781-1788` omits PIC12F675 from generated
   `commit_msg.txt` scope and validation.
+- `scripts/make-release.sh:32-45` (the script's own header comment) still
+  describes the pre-PIC12F675 release: "PIC10F322 and PIC10F320" build scope, a
+  gate list missing `pic12f675-test` and `pic12f675-test-target-variants`, and
+  "= 15 combos". It is not generated output, but it misdescribes what the
+  producer now does and is the same defect class as the generated body above.
 
 ### Required Work
 
@@ -153,6 +158,8 @@ human-readable artifacts still describe the pre-PIC12F675 release:
 - [x] Attribute shared `PIC_CC`/`PIC_DFP` provenance to both PIC10F322 and
       PIC12F675 without pretending they are independently selected tools.
 - [x] Add PIC12F675 to generated release commit-message scope and validation.
+- [ ] Correct the `scripts/make-release.sh:32-45` header comment to the current
+      three-PIC build scope, both PIC12F675 gates, and 18 soak combinations.
 
 ### Acceptance
 
@@ -191,6 +198,17 @@ Several current documents still encode the old six-part, two-PIC, 15-soak, or
 28-evidence topology. Some are cosmetic, but the timing and BOR text is
 safety-relevant.
 
+The stale "both PIC parts / BOTH chips / two PIC lanes" comments are broader than
+the three Makefile spots first listed here, so this item is a *classifying pass*,
+not a fixed list. Each such comment must be judged individually, because it
+cannot be blanket-swept: the project deliberately keeps "both"/"32x" wording
+where a fact is specific to the PIC10F320+PIC10F322 pair (the
+`pic-naming-322-vs-32x` convention), and only the comments describing something
+now shared by all three PIC parts are stale. The confirmed three-way-stale
+locations are enumerated below; the must-keep contrast (e.g.
+`Makefile:4090-4091`, scoped to the `PIC10F320_CC ?= $(PIC_CC)` default) is why a
+mechanical sweep is wrong.
+
 ### Required Work
 
 - [ ] Correct `DESIGN_DOCUMENTATION.adoc:137-140` so PIC12F675's 1.024 ms tick is
@@ -208,9 +226,31 @@ safety-relevant.
       34/18 contract.
 - [ ] Scope the PIC hardware-gap section at `test/README.md:786-824` to the
       PIC10F32x pair, then add or point to the distinct PIC12F675 hardware gaps.
-- [ ] Update `test/pic/gpsim_bootstrap.h:4-6` from two PIC parts to all three.
+- [ ] Update `test/pic/gpsim_bootstrap.h` from two PIC parts to all three at both
+      `:4-6` and `:34` ("the footswitch pin is RA3 on both supported parts").
 - [ ] Update stale release comments/help at `Makefile:6959-6961`,
       `Makefile:7004`, and `Makefile:7356-7358`.
+- [ ] Correct the genuinely three-way-stale Makefile comments the classifying
+      pass has confirmed, keeping any 320+322-pair wording intact:
+      - `Makefile:981-990` -- the central `PIC_*` naming rule ("SHARED BY BOTH
+        PIC PARTS ... behind both chips"); PIC12F675 shares `PIC_CC`, `PIC_DFP`,
+        `PIC_SOAK_SRC`, and the gpsim bootstrap, so this is now all three.
+      - `Makefile:1296-1297` -- the gpsim CLI shared preflight "BOTH PIC chips";
+        `pic12f675-test-gpsim` uses the same `gpsim_wrapper_preflight`.
+      - `Makefile:1399` and `Makefile:1410` -- the return-stack gate "(BOTH
+        chips)" / "Both parts declare STACKDEPTH=8"; `pic12f675-test-stack-bound`
+        runs the same generic gate.
+      - `Makefile:1508-1509` -- the gpsim bootstrap "ALL FOUR harnesses ... on
+        BOTH parts"; PIC12F675 has all four harnesses.
+      - `Makefile:5045` -- "Both chips' harnesses print the identical markers";
+        the PIC12F675 harnesses emit them too.
+- [ ] Correct `test/check_stack_depth_pic.sh:11-22` ("the one resource bound on
+      the PIC10F320" / "Both supported parts ... PIC10F32{0,2}") to include the
+      third PIC part that now runs this gate.
+- [ ] Correct the `src/bypass_compile_checks.h:8-11` header comment, which still
+      says the shared contract is "Included by the three modular hardware shells
+      (avr_classic, avr_xt and pic10f322)"; PIC12F675 now includes it as a fourth
+      shell. (Firmware source -- user edit; the matching test lives in P12-7.)
 - [ ] Add PIC12F675 to the top-level README's built-image validation summary.
 - [ ] Correct `release/README.md:49`, which calls the six v0.9.6-v0.9.8 targets
       the "first four parts".
@@ -222,6 +262,9 @@ safety-relevant.
       are relevant.
 - [ ] Timing text distinguishes the 1.024 ms PIC12F675 tick from 1.000 ms targets.
 - [ ] Primary safety guidance includes the PIC12F675 BOR limitation.
+- [ ] No comment describing a fact now shared by all three PIC parts still says
+      "both"/"two"; every remaining "both"/"32x" comment is verified specific to
+      the PIC10F320+PIC10F322 pair.
 
 ## P12-6 - Private Temporary Data
 
@@ -264,6 +307,16 @@ the development environment's rule that no files may be created under `/tmp`.
       preservation and cannot omit required preflight/result inputs.
 - [ ] Add a temporary-root regression proving the PIC12F675 bench workflow does
       not hard-code `/tmp`.
+- [ ] Close the shared-compile-check shell-census gap: `bypass_mcu_pic12f675.c`
+      now actively includes `bypass_compile_checks.h`, but
+      `test/test_static_assert_guards.sh`'s `SHARED_CHECK_SHELLS` still lists only
+      `avr_classic`, `avr_xt`, and `pic10f322`, so the negative-include
+      meta-fixture never exercises the PIC12F675 shell. Add it, and derive the
+      census from "every shell that actively includes the header" rather than a
+      hand-maintained literal, so a future shell cannot silently drop out of the
+      check. (The contract itself is still enforced for PIC12F675 by the dynamic
+      `find_shells_missing_shared_checks` sweep; this closes the meta-coverage
+      parity gap, not an enforcement hole.)
 - [ ] Add narrow semantic documentation checks only where the safety/release
       contract justifies maintaining them; avoid pinning incidental prose.
 
