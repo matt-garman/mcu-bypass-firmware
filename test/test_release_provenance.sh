@@ -1113,13 +1113,12 @@ mapfile -t xc8_320_lines < <(grep -nF \
 	'TC_XC8_320=$(release_tool_version_line "PIC10F320 XC8 (PIC10F320_CC=$PIC10F320_CC)" "$PIC10F320_CC")' \
 	"$RELEASE")
 mapfile -t clean_lines < <(grep -nF 'make clean >/dev/null' "$RELEASE")
-mapfile -t manifest_322_lines < <(grep -nF 'PIC10F322 XC8 (`PIC_CC=%s`)' "$RELEASE")
-mapfile -t manifest_320_lines < <(grep -nF 'PIC10F320 XC8 (`PIC10F320_CC=%s`)' "$RELEASE")
+mapfile -t manifest_renderer_lines < <(grep -nF \
+	'release_render_pic_toolchain_rows "$PIC_CC" "$TC_XC8_322"' "$RELEASE")
 [ "${#xc8_322_lines[@]}" -eq 1 ] \
 	&& [ "${#xc8_320_lines[@]}" -eq 1 ] \
 	&& [ "${#clean_lines[@]}" -eq 1 ] \
-	&& [ "${#manifest_322_lines[@]}" -eq 1 ] \
-	&& [ "${#manifest_320_lines[@]}" -eq 1 ] \
+	&& [ "${#manifest_renderer_lines[@]}" -eq 1 ] \
 	|| fail "release compiler provenance wiring is missing or ambiguous"
 xc8_322_line=${xc8_322_lines[0]%%:*}
 xc8_320_line=${xc8_320_lines[0]%%:*}
@@ -1127,9 +1126,9 @@ clean_line=${clean_lines[0]%%:*}
 [ "$xc8_322_line" -lt "$clean_line" ] && [ "$xc8_320_line" -lt "$clean_line" ] \
 	|| fail "release compiler identity is not captured before the clean build"
 grep -Fq '"$PIC_CC" "$TC_XC8_322"' "$RELEASE" \
-	|| fail "PIC10F322 manifest row does not use its selected compiler and version"
+	|| fail "manifest renderer does not receive the shared selected compiler and version"
 grep -Fq '"$PIC10F320_CC" "$TC_XC8_320"' "$RELEASE" \
-	|| fail "PIC10F320 manifest row does not use its selected compiler and version"
+	|| fail "manifest renderer does not receive the PIC10F320 selected compiler and version"
 if grep -Fq "printf -- '| XC8 |" "$RELEASE"; then
 	fail "release manifest still contains an ambiguous generic XC8 row"
 fi

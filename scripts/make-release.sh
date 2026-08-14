@@ -14,8 +14,8 @@
 #     1. PROVENANCE -- every released image carries a MANIFEST recording the git
 #        commit, the exact toolchain versions, the per-image fuse bytes / CONFIG
 #        word, and the validation evidence (test-long + both ATtiny202 gates +
-#        both pre-hardware and real-target PIC aggregates + 15-combination 24-h
-#        soak).
+#        both pre-hardware and real-target aggregates for all three PIC parts +
+#        18-combination 24-h soak).
 #     2. REPRODUCIBILITY -- the Intel-HEX images are byte-deterministic for a
 #        fixed toolchain (objcopy ihex carries only code/data bytes, no
 #        timestamps/paths). SHA256SUMS pins those bytes; the tag-triggered CI
@@ -30,19 +30,21 @@
 #      cleanly when a tool is missing), a release FAILS LOUD on any absence -- a
 #      gate must never go green on a check that silently did nothing.
 #   1. Clean-build every release-supported image: AVR Classic, ATtiny202,
-#      PIC10F322 and PIC10F320. The built set is then cross-checked against the
-#      CANONICAL set the Makefile declares (RELEASE_IMAGES). This independent
+#      PIC10F322, PIC10F320, and PIC12F675. The built set is then cross-checked
+#      against the CANONICAL set the Makefile declares (RELEASE_IMAGES). This independent
 #      check catches a forgotten build step -- an enumeration derived from the same
 #      variant matrices as the build commands shrinks in lock-step with an
 #      omission and agrees with itself (merge plan §10, §14.8).
 #   2. Run `make test-long`, `make attiny202-test`,
 #      `make attiny202-test-target`, `make pic10f322-test`,
-#      `make pic10f322-test-target-variants`, `make pic10f320-test`, and
-#      `make pic10f320-test-target-variants` (the full qualification gates for
+#      `make pic10f322-test-target-variants`, `make pic10f320-test`,
+#      `make pic10f320-test-target-variants`, `make pic12f675-test`, and
+#      `make pic12f675-test-target-variants` (the full qualification gates for
 #      every release-supported target).
 #   3. Run ALL release soak combinations IN PARALLEL for the full
 #      duration, collecting a pass/fail verdict and evidence from each. That is
-#      6 AVR Classic + 3 AVR-XT + 3 PIC10F322 + 3 PIC10F320 = 15 combos.
+#      6 AVR Classic + 3 AVR-XT + 3 PIC10F322 + 3 PIC10F320 + 3 PIC12F675 = 18
+#      combos.
 #   4. Recheck source HEAD + cleanliness, then stage release/<VERSION>/ : the
 #      .hex images, SHA256SUMS, a provenance MANIFEST, a README, the
 #      soak/validation evidence, and a commit message.
@@ -232,6 +234,17 @@ declare -F release_hash_classic_avr_images >/dev/null \
 	|| die "release provenance checker did not define its classic-AVR image hash function"
 declare -F release_stage_classic_avr_images >/dev/null \
 	|| die "release provenance checker did not define its classic-AVR staging function"
+# Keep generated release prose in pure stdout renderers so focused regressions
+# can execute the same document bytes without running the release pipeline.
+# shellcheck source=release-documentation.sh
+source "$REPO_ROOT/scripts/release-documentation.sh" \
+	|| die "release documentation helper could not be loaded"
+for renderer in release_render_scope release_render_validation \
+		release_render_pic_toolchain_rows release_render_reproduction_commands \
+		release_render_commit_message; do
+	declare -F "$renderer" >/dev/null \
+		|| die "release documentation helper did not define $renderer"
+done
 # shellcheck source=release-signing-policy.sh
 source "$REPO_ROOT/scripts/release-signing-policy.sh" \
 	|| die "release signing policy could not be loaded"
@@ -1642,8 +1655,7 @@ REL_BANNER=""
 		printf 'Prebuilt, fully-validated firmware images. Verify integrity with\n'
 	fi
 	printf '`sha256sum -c SHA256SUMS`; reproduce from source per "Reproducing" below.\n\n'
-	printf 'Release scope: AVR Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT),\n'
-	printf 'PIC10F322 and PIC10F320.\n\n'
+	release_render_scope
 
 	printf '## PIC10F320 -- the constrained target\n\n'
 	printf 'The PIC10F320 has 256 words of flash, half the PIC10F322. The pure/result-struct\n'
@@ -1678,7 +1690,7 @@ REL_BANNER=""
 	printf -- '- **Soak combinations:** %s\n' "$NCOMBOS"
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
-	printf -- '- **Validation:** `make test-long` + `make attiny202-test` + `make attiny202-test-target` + `make pic10f322-test` + `make pic10f322-test-target-variants` + `make pic10f320-test` + `make pic10f320-test-target-variants` (real-image fault handling, firmware/model ctx_ lock-step, and physical-output checks across AVR-XT and both PIC parts) + %s-h parallel soak of every release soak combination (see evidence/).\n' "$hours"
+	release_render_validation "$hours"
 	printf -- '- **Release set:** %d images, checked against the canonical `RELEASE_IMAGES` set declared in the Makefile -- not against whatever the build happened to produce.\n' "${#IMAGES[@]}"
 	if [ -n "$RENAME_IDENTITY_DOC" ]; then
 		printf -- '- **Rename/change evidence:** every renamed image was hashed against its counterpart in the previous release, through the old-to-new table and exact intentional-change declaration in `release/README.md`. The report requires 17 identities and the one documented PIC10F320 relay change: `RENAME_IDENTITY.md`.\n'
@@ -1691,10 +1703,8 @@ REL_BANNER=""
 	printf -- '| binutils-avr (objcopy) | %s |\n' "$TC_AVR_BU"
 	printf -- '| avr-libc (pkg) | %s |\n' "$TC_AVR_LIBC"
 	printf -- '| host cc | %s |\n' "$TC_HOST_CC"
-	printf -- '| PIC10F322 XC8 (`PIC_CC=%s`) | %s |\n' "$PIC_CC" "$TC_XC8_322"
-	printf -- '| PIC10F320 XC8 (`PIC10F320_CC=%s`) | %s |\n' "$PIC10F320_CC" "$TC_XC8_320"
-	printf -- '| PIC10F322 DFP | %s |\n' "$PIC_DFP"
-	printf -- '| PIC10F320 DFP | %s |\n' "$PIC10F320_DFP"
+	release_render_pic_toolchain_rows "$PIC_CC" "$TC_XC8_322" \
+		"$PIC10F320_CC" "$TC_XC8_320" "$PIC_DFP" "$PIC10F320_DFP"
 	printf -- '| gpsim | %s |\n' "$TC_GPSIM"
 	printf -- '| libsimavr-dev (pkg) | %s |\n' "$TC_SIMAVR"
 	printf -- '| cppcheck | %s |\n' "$TC_CPPCHECK"
@@ -1730,11 +1740,10 @@ REL_BANNER=""
 	printf 'fresh bytes (running it from the repo root would just re-verify the\n'
 	printf 'committed copies against themselves).\n\n'
 	printf '```\n'
-	printf 'git checkout %s\n' "$VERSION"
-	printf '# install the pinned toolchain (see TOOLCHAIN.adoc), then:\n'
-	printf 'make clean && make attiny13a attiny85 attiny45 && make attiny202\n'
-	printf 'make pic10f322 && make pic10f320-variants\n'
-	printf 'scripts/verify-release-images.sh release/%s %s\n' "$VERSION" "$RELEASE_IMAGE_DIRS"
+	release_render_reproduction_commands "$VERSION" "$RELEASE_IMAGE_DIRS" \
+		"$AVR_BUILD_DIR" "$XT_BUILD_DIR" "$PIC10F322_BUILD_DIR" \
+		"$PIC10F320_BUILD_DIR" "$PIC12F675_BUILD_DIR" \
+		"$PIC_CC" "$PIC_DFP" "$PIC10F320_CC" "$PIC10F320_DFP"
 	printf '```\n'
 	printf 'A passing verifier proves four things agree: the committed files, the checksum\n'
 	printf 'entries, the freshly built files, and the canonical `RELEASE_IMAGES` set the\n'
@@ -1770,25 +1779,8 @@ scripts/verify-release-qualification.sh "${qualification_args[@]}" "$OUTPUT_DIR"
 ok "release qualification metadata and evidence verified."
 
 # Commit message for the human to use verbatim (git commit -F ...).
-{
-	printf 'release: firmware %s\n\n' "$VERSION"
-	if [ "$DRY_RUN" -eq 1 ]; then
-		printf 'Non-publishable dry-run rehearsal images for %s.\n\n' "$VERSION"
-	else
-		printf 'Prebuilt, fully-validated firmware images for %s.\n\n' "$VERSION"
-	fi
-	printf 'Built from %s with the toolchain pinned in TOOLCHAIN.adoc.\n' "$GIT_SHORT"
-	printf 'Scope: AVR Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT), PIC10F322 and\n'
-	printf 'PIC10F320 -- %d images, checked against the canonical RELEASE_IMAGES set the\n' "${#IMAGES[@]}"
-	printf 'Makefile declares rather than against whatever the build produced.\n\n'
-	printf 'Validation: make test-long + make attiny202-test + make attiny202-test-target\n'
-	printf '+ make pic10f322-test + make pic10f322-test-target-variants\n'
-	printf '+ make pic10f320-test + make pic10f320-test-target-variants\n'
-	printf '+ %s-h parallel soak of every release soak combination (evidence under\n' "$hours"
-	printf 'release/%s/evidence/).\n\n' "$VERSION"
-	printf 'Reproducibility is pinned by release/%s/SHA256SUMS and verified on a\n' "$VERSION"
-	printf 'clean runner by .github/workflows/release.yml when the tag is pushed.\n'
-} > "$OUTPUT_DIR/commit_msg.txt"
+release_render_commit_message "$VERSION" "$RELEASE_MODE" "$GIT_SHORT" \
+	"${#IMAGES[@]}" "$hours" > "$OUTPUT_DIR/commit_msg.txt"
 
 # Fold evidence in and finish.
 ls -1 "$OUTPUT_DIR" >&2

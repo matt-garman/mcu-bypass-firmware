@@ -39,20 +39,20 @@ The PIC12F675 implementation is substantially at software-validation parity:
 - No nominal-path PIC12F675 firmware defect was found in the meta-review.
 
 The branch is not yet merge-ready as a completed release-support change because
-its generated release documentation, programming claims, and several current
+its generated flashing documentation, programming claims, and several current
 documents do not agree with the implemented 21-image/18-soak release contract.
 
 ## Priority Summary
 
 | ID | Priority | Item | Status |
 |---|---:|---|---|
-| P12-1 | Blocker | Make generated reproduction instructions build PIC12F675 | Open |
+| P12-1 | Blocker | Make generated reproduction instructions build PIC12F675 | Implemented; P12-8 pending |
 | P12-2 | Blocker | Correct PIC12F675 flashing instructions and trim claims | Open |
-| P12-3 | High | Complete generated release metadata and commit message | Open |
+| P12-3 | High | Complete generated release metadata and commit message | Implemented; P12-8 pending |
 | P12-4 | High | Reconcile the feasibility document's support status | Open |
 | P12-5 | High | Correct stale design, safety, test, and help documentation | Open |
 | P12-6 | High | Remove hard-coded `/tmp` use from the programming workflow | Open |
-| P12-7 | High | Add regressions for the review gaps | Open |
+| P12-7 | High | Add regressions for the review gaps | In progress |
 | P12-8 | Gate | Run the complete software qualification on the equipped host | Open |
 | P12-9 | Gate | Perform final branch and merge hygiene | Open |
 
@@ -72,10 +72,10 @@ to match it.
 
 ### Required Work
 
-- [ ] Add the PIC12F675 three-image build to the generated reproduction block.
-- [ ] Ensure the command uses the selected/pinned `PIC_CC` and `PIC_DFP` contract
+- [x] Add the PIC12F675 three-image build to the generated reproduction block.
+- [x] Ensure the command uses the selected/pinned `PIC_CC` and `PIC_DFP` contract
       consistently with the rest of the generated procedure.
-- [ ] Keep the generated build list and `RELEASE_IMAGE_DIRS` in exact agreement.
+- [x] Keep the generated build list and `RELEASE_IMAGE_DIRS` in exact agreement.
 - [ ] Confirm the instructions succeed from a clean checkout with no prior
       PIC12F675 artifacts.
 
@@ -146,19 +146,19 @@ human-readable artifacts still describe the pre-PIC12F675 release:
 
 ### Required Work
 
-- [ ] Add PIC12F675 to generated release scope.
-- [ ] Add `pic12f675-test` and `pic12f675-test-target-variants` to the generated
+- [x] Add PIC12F675 to generated release scope.
+- [x] Add `pic12f675-test` and `pic12f675-test-target-variants` to the generated
       validation statement.
-- [ ] Change old two-PIC wording to accurately describe all three PIC targets.
-- [ ] Attribute shared `PIC_CC`/`PIC_DFP` provenance to both PIC10F322 and
+- [x] Change old two-PIC wording to accurately describe all three PIC targets.
+- [x] Attribute shared `PIC_CC`/`PIC_DFP` provenance to both PIC10F322 and
       PIC12F675 without pretending they are independently selected tools.
-- [ ] Add PIC12F675 to generated release commit-message scope and validation.
+- [x] Add PIC12F675 to generated release commit-message scope and validation.
 
 ### Acceptance
 
 - [ ] A v0.9.9 dry-run manifest names all seven MCU parts, all required target
       gates, 21 images, 18 soak combinations, and the correct selected tools.
-- [ ] The generated release commit message reports the same scope.
+- [x] The generated release commit message reports the same scope.
 - [ ] Human-readable metadata agrees with `QUALIFICATION` and retained evidence.
 
 ## P12-4 - Feasibility Document Status
@@ -254,12 +254,12 @@ the development environment's rule that no files may be created under `/tmp`.
 
 ### Required Work
 
-- [ ] Extend release tests to prove the generated reproduction block builds every
+- [x] Extend release tests to prove the generated reproduction block builds every
       directory represented by `RELEASE_IMAGE_DIRS`.
-- [ ] Assert generated manifest scope includes PIC12F675.
-- [ ] Assert generated validation prose names both PIC12F675 aggregates.
-- [ ] Assert generated compiler/DFP attribution includes PIC12F675.
-- [ ] Assert generated `commit_msg.txt` includes PIC12F675 scope and validation.
+- [x] Assert generated manifest scope includes PIC12F675.
+- [x] Assert generated validation prose names both PIC12F675 aggregates.
+- [x] Assert generated compiler/DFP attribution includes PIC12F675.
+- [x] Assert generated `commit_msg.txt` includes PIC12F675 scope and validation.
 - [ ] Assert generated flashing guidance does not claim unvalidated trim
       preservation and cannot omit required preflight/result inputs.
 - [ ] Add a temporary-root regression proving the PIC12F675 bench workflow does
@@ -269,10 +269,27 @@ the development environment's rule that no files may be created under `/tmp`.
 
 ### Acceptance
 
-- [ ] Each newly added test fails against `a87416e` for its intended reason.
-- [ ] Each test passes only after the corresponding production/documentation fix.
-- [ ] The tests exercise generated output, not merely source-string presence,
+- [x] Each newly added test fails against `a87416e` for its intended reason.
+- [x] Each test passes only after the corresponding production/documentation fix.
+- [x] The tests exercise generated output, not merely source-string presence,
       wherever practical.
+
+### Completed Chunk Evidence
+
+The release-generation and metadata chunk (P12-1, P12-3, and the first five
+P12-7 regressions) passed:
+
+- Release qualification: 38 checks.
+- Release image verification: 90 checks.
+- Release preflight: 30 checks and 82 Makefile queries.
+- Release provenance: 78 checks.
+- Makefile name contract: 48 checks.
+- Bash syntax and `git diff --check`.
+
+The focused qualification regression was also run with the release producer from
+`a87416e`; it failed because that producer did not consume the corrected rendered
+documentation sections. Full cross-toolchain release generation remains part of
+P12-8 and is intentionally unchecked above.
 
 ## P12-8 - Full Software Qualification
 
