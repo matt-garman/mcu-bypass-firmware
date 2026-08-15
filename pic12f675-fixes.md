@@ -4,7 +4,7 @@
 
 **Reviewed branch:** `pic12f675-support`
 
-**Reviewed tip:** `1aac444` (`docs: distinguish PIC12F675 timing and BOR`)
+**Reviewed tip:** `fc59dbd` (`docs: align PIC12F675 release inventories`)
 
 **Last updated:** 2026-08-14
 
@@ -46,14 +46,14 @@ remain pending.
 
 | ID | Priority | Item | Status |
 |---|---:|---|---|
-| P12-1 | Blocker | Make generated reproduction instructions build PIC12F675 | Implemented; P12-8 pending |
-| P12-2 | Blocker | Correct PIC12F675 flashing instructions and trim claims | Implemented; P12-8 pending |
-| P12-3 | High | Complete generated release metadata and commit message | Implemented; P12-8 pending |
+| P12-1 | Blocker | Make generated reproduction instructions build PIC12F675 | Implemented |
+| P12-2 | Blocker | Correct PIC12F675 flashing instructions and trim claims | Implemented |
+| P12-3 | High | Complete generated release metadata and commit message | Implemented |
 | P12-4 | High | Reconcile the feasibility document's support status | Implemented |
 | P12-5 | High | Correct stale design, safety, test, and help documentation | Implemented |
 | P12-6 | High | Remove hard-coded `/tmp` use from the programming workflow | Implemented |
-| P12-7 | High | Add regressions for the review gaps | Implemented; P12-8 pending |
-| P12-8 | Gate | Run the complete software qualification on the equipped host | Open |
+| P12-7 | High | Add regressions for the review gaps | Implemented |
+| P12-8 | Gate | Run the complete software qualification on the equipped host | Complete (dry-run) |
 | P12-9 | Gate | Perform final branch and merge hygiene | Open |
 
 ## P12-1 - Generated Reproduction Instructions
@@ -76,14 +76,14 @@ to match it.
 - [x] Ensure the command uses the selected/pinned `PIC_CC` and `PIC_DFP` contract
       consistently with the rest of the generated procedure.
 - [x] Keep the generated build list and `RELEASE_IMAGE_DIRS` in exact agreement.
-- [ ] Confirm the instructions succeed from a clean checkout with no prior
+- [x] Confirm the instructions succeed from a clean checkout with no prior
       PIC12F675 artifacts.
 
 ### Acceptance
 
-- [ ] A generated v0.9.9 dry-run `MANIFEST.md` includes the PIC12F675 build.
-- [ ] Following the generated commands from a clean tree produces all 21 images.
-- [ ] `scripts/verify-release-images.sh` passes over the generated build paths.
+- [x] A generated v0.9.9 dry-run `MANIFEST.md` includes the PIC12F675 build.
+- [x] Following the generated commands from a clean tree produces all 21 images.
+- [x] `scripts/verify-release-images.sh` passes over the generated build paths.
 
 ## P12-2 - Flashing Instructions and Trim Claims
 
@@ -163,10 +163,10 @@ human-readable artifacts still describe the pre-PIC12F675 release:
 
 ### Acceptance
 
-- [ ] A v0.9.9 dry-run manifest names all seven MCU parts, all required target
+- [x] A v0.9.9 dry-run manifest names all seven MCU parts, all required target
       gates, 21 images, 18 soak combinations, and the correct selected tools.
 - [x] The generated release commit message reports the same scope.
-- [ ] Human-readable metadata agrees with `QUALIFICATION` and retained evidence.
+- [x] Human-readable metadata agrees with `QUALIFICATION` and retained evidence.
 
 ## P12-4 - Feasibility Document Status
 
@@ -467,26 +467,74 @@ Run this only after the fixes above are committed, from the fully equipped host
 with the repository's pinned toolchain. Use the actual selected XC8/DFP paths if
 they differ from Makefile defaults.
 
-- [ ] `git diff --check main...HEAD`
-- [ ] `make clean`
-- [ ] `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0`
-- [ ] `make pic12f675-test pic12f675-test-target-variants STRICT_TOOLS=1`
-- [ ] `make release-preflight VERSION=v0.9.9`
-- [ ] `make release VERSION=v0.9.9 RELEASE_ARGS='--dry-run'`
-- [ ] Confirm the PIC12F675 aggregates share one qualified immutable matrix when
+- [x] `git diff --check main...HEAD`
+- [x] `make clean`
+- [x] `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0`
+- [x] `make pic12f675-test pic12f675-test-target-variants STRICT_TOOLS=1`
+- [x] `make release-preflight VERSION=v0.9.9`
+- [x] `make release VERSION=v0.9.9 RELEASE_ARGS='--dry-run'`
+- [x] Confirm the PIC12F675 aggregates share one qualified immutable matrix when
       requested in one Make invocation.
-- [ ] Confirm all three PIC12F675 variants pass build, CONFIG, stack, analysis,
+- [x] Confirm all three PIC12F675 variants pass build, CONFIG, stack, analysis,
       source coverage, calibration, gpsim, fault, lock-step, target-I/O, mutation,
       and shortened dry-run soak gates with no skips.
-- [ ] Inspect generated `MANIFEST.md`, `QUALIFICATION`, evidence inventory,
+- [x] Inspect generated `MANIFEST.md`, `QUALIFICATION`, evidence inventory,
       image table, flashing section, reproduction section, and `commit_msg.txt`.
-- [ ] Confirm the dry run stages exactly 21 canonical images, 18 soak logs, and
+- [x] Confirm the dry run stages exactly 21 canonical images, 18 soak logs, and
       34 retained evidence files.
 
 A production 24-hour release run is not required merely to merge the support
 branch, but the complete dry-run orchestration must pass. The production v0.9.9
 run should be performed from the final release source after merge according to
 the normal release process.
+
+### Completed Full-Qualification Chunk Evidence
+
+P12-8 ran to completion on this fully equipped host (avr-gcc 7.3.0, XC8 V3.10 at
+the pinned `/opt/microchip/xc8/v3.10`, DFP 1.9.189, gpsim/libgpsim, yasimavr,
+asciidoctor, cppcheck 2.13, cbmc; only `avrdude` is absent, which is v1.x
+hardware-only). The Makefile `PIC_CC`/`PIC_DFP` defaults matched the installed
+toolchain exactly, so no path overrides were needed. All commands ran from a
+clean `fc59dbd` worktree.
+
+- `git diff --check main...HEAD`: clean.
+- `make clean`: clean tree.
+- `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0`: passed. Mutation
+  summary 118 killed, 0 survived, 0 errored, 0 PIC skipped, 0 ATtiny202 skipped,
+  with every toolchain probe ENABLED (the 20 PIC12F675 mutants ran). Verified
+  core `src/bypass_pure.c` line coverage 100.00%, golden-model 99.39%. Embedded
+  release contracts: image 90, preflight 30 (82 Makefile queries), provenance
+  78, qualification 47, PIC12F675 build 89, target-variant matrix 13, target-lane
+  18; strict optional-tool validation (host + all three PIC parts) 30.
+- `make pic12f675-test pic12f675-test-target-variants STRICT_TOOLS=1`: passed.
+  All three variants green -- fault-inject 37, lock-step 3005 (3000 iterations,
+  27 toggles, 0 mismatches, 66/66 reachable model states), target-I/O 36. The
+  two aggregates emitted one identical immutable `PIC12F675_MATRIX_SHA256` (a
+  single unique payload across all emissions) in the one Make invocation, and its
+  shipping hashes match the staged release images.
+- `make release-preflight VERSION=v0.9.9`: passed ("this host can start a
+  release").
+- `make release VERSION=v0.9.9 RELEASE_ARGS='--dry-run'`: passed. Built 21 images
+  (set matches canonical `RELEASE_IMAGES` exactly; all three PIC12F675 are
+  structurally valid Intel HEX), ran `test-long` + ATtiny202 + both PIC10F32x +
+  both PIC12F675 gates, and all 18 soak combos PASS (including the three
+  PIC12F675 combos). Staged exactly 21 images, 18 soak result logs, and 34
+  retained evidence files. Generated `QUALIFICATION` records
+  `soak_combination_count=18` at `soak_duration_ms=60000`; `MANIFEST.md` and
+  `commit_msg.txt` name all seven parts, both PIC12F675 gates, and 21 images; the
+  flashing section requires the guarded preflight/result transaction, makes no
+  trim-preservation claim, and keeps the hardware-unvalidated and
+  wrong-timing/BOR warnings; the reproduction section builds PIC12F675.
+- Reproduction confirmation: running the generated reproduction build commands
+  from a clean tree produced 21 fresh images (9 AVR-classic + 3 AVR-XT + 3
+  PIC10F322 + 3 PIC10F320 + 3 PIC12F675), and `scripts/verify-release-images.sh`
+  reported "REPRODUCED: 21 committed, listed, and freshly built images match the
+  canonical set exactly."
+
+The dry-run staging area is the release script's own `mktemp` root, which is
+distinct from the P12-6 programming workflow. A production 24-hour soak is a
+post-merge release step, not a merge blocker; the complete dry-run orchestration
+passed. Only P12-9 branch hygiene now remains before merge.
 
 ## P12-9 - Final Branch Preparation
 
