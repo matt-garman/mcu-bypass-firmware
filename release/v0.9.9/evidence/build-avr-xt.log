@@ -1,0 +1,6 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
+=== ATtiny202 (avrxmega3) build + flash-budget (2048 B) ===
+OK:   cd4053_simple -> build_avr_xt/bypass-attiny202-cd4053_simple.hex : 848 B (41.4%) of 2048 B
+OK:   cd4053_with_mute -> build_avr_xt/bypass-attiny202-cd4053_with_mute.hex : 888 B (43.4%) of 2048 B
+OK:   tq2_l2_5v_relay -> build_avr_xt/bypass-attiny202-tq2_l2_5v_relay.hex : 888 B (43.4%) of 2048 B
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware'

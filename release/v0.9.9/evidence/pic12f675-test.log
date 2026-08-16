@@ -1,0 +1,167 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
+=== PIC12F675 build + flash-budget (1024 words) ===
+OK:   cd4053_simple -> build_pic12f675/bypass-pic12f675-cd4053_simple.hex : 495 words (48.3%) of 1024
+OK:   cd4053_with_mute -> build_pic12f675/bypass-pic12f675-cd4053_with_mute.hex : 521 words (50.9%) of 1024
+OK:   tq2_l2_5v_relay -> build_pic12f675/bypass-pic12f675-tq2_l2_5v_relay.hex : 523 words (51.1%) of 1024
+calibration word: RETLW 0x80 (opcode 0x3480) at word 0x3FF -> build_pic12f675/simcal/bypass-pic12f675-cd4053_simple_simcal.hex
+calibration word: RETLW 0x80 (opcode 0x3480) at word 0x3FF -> build_pic12f675/simcal/bypass-pic12f675-cd4053_with_mute_simcal.hex
+calibration word: RETLW 0x80 (opcode 0x3480) at word 0x3FF -> build_pic12f675/simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex
+=== PIC12F675 simulator images derived in build_pic12f675/simcal/ ===
+=== PIC12F675 build + flash-budget (1024 words) ===
+OK:   cd4053_simple -> build_pic12f675.qualify.j108Ie/bypass-pic12f675-cd4053_simple.hex : 495 words (48.3%) of 1024
+OK:   cd4053_with_mute -> build_pic12f675.qualify.j108Ie/bypass-pic12f675-cd4053_with_mute.hex : 521 words (50.9%) of 1024
+OK:   tq2_l2_5v_relay -> build_pic12f675.qualify.j108Ie/bypass-pic12f675-tq2_l2_5v_relay.hex : 523 words (51.1%) of 1024
+PIC calibration-word injection selftest: 56 checks, 0 failures
+CALIBRATION PASS [cd4053_simple]: :0207FE00803445 injected, shipping image unchanged
+CALIBRATION PASS [cd4053_with_mute]: :0207FE00803445 injected, shipping image unchanged
+CALIBRATION PASS [tq2_l2_5v_relay]: :0207FE00803445 injected, shipping image unchanged
+=== PIC12F675 calibration contract holds for all 3 variants ===
+=== PIC12F675 retained matrix qualified: PIC12F675_MATRIX_SHA256 format=1 shipping_cd4053_simple=e2bf82f2348a39b54cf1dff159012ff8ffee0660ac17ed8189d83f17fe57ba74 simcal_cd4053_simple=8e8673076c91e6374f75fd4e7facd88a00aff9c9020a3525552c4a313beba5fd shipping_cd4053_with_mute=cbc07ee2f962842714743747b8a662bb0b85aade9d42a5daa8d6f326f9d2557c simcal_cd4053_with_mute=8ce63b4b537ec3488fb1eb65ff73f5db8a3a7e8652275d4d91930e718ed89ab7 shipping_tq2_l2_5v_relay=828dfcb760fb20d610f0ae52dd96ef1bdf55cc61c376068be5aaebcf430484f7 simcal_tq2_l2_5v_relay=8c8daaa23a15beb78282a669ff830d6263158df3fda2a9fd071276418a05c084 ===
+cc -std=c11 -Wall -Wextra -Werror -Wconversion -fsanitize=undefined,address -fno-sanitize-recover=all -Itest -DPIC_DEVICE_NAME='"PIC12F675"' test/pic/test_config_pic12f675.c -o test/pic/test_config_pic12f675
+PIC12F675 CONFIG-word verification (word addr 0x2007 / byte 0x400E):
+  build_pic12f675/bypass-pic12f675-cd4053_simple.hex: CONFIG=0x31CC (implemented bits 0x31CC)
+  build_pic12f675/bypass-pic12f675-cd4053_with_mute.hex: CONFIG=0x31CC (implemented bits 0x31CC)
+  build_pic12f675/bypass-pic12f675-tq2_l2_5v_relay.hex: CONFIG=0x31CC (implemented bits 0x31CC)
+CONFIG checks: 42 checks, 0 failures
+cppcheck (PIC, pic8): cppcheck src/bypass_mcu_pic12f675.c
+Checking src/bypass_mcu_pic12f675.c ...
+Checking src/bypass_mcu_pic12f675.c: __XC8=1;_12F675=1;_XTAL_FREQ=4000000UL;BYPASS_MCU_PIC12F675=1...
+MISRA-C:2012 analysis -- PIC shell (cppcheck + misra addon, pic8)
+Checking src/bypass_mcu_pic12f675.c ...
+Checking src/bypass_mcu_pic12f675.c: __XC8=1;_12F675=1;_XTAL_FREQ=4000000UL;BYPASS_MCU_PIC12F675=1...
+MISRA-C:2012 (PIC shell): clean (documented deviations waived per MISRA_COMPLIANCE.md)
+=== PIC static analysis (cppcheck + MISRA) complete ===
+PIC shipping-source coverage harness: 85 checks, 0 failures
+PIC shipping-source coverage harness: 85 checks, 0 failures
+PIC shipping-source coverage harness: 85 checks, 0 failures
+  anchors located in bypass_mcu_pic12f675.c.gcov: range gate L571/L572/L573, live reset L580, unreachable reset L604
+bypass_mcu_pic12f675.c.gcov: 106/107 executable lines, 1 allowed, 0 disallowed
+bypass_pure.c.gcov: 35/35 executable lines, 0 allowed, 0 disallowed
+bypass_output_cd4053_simple.c.gcov: 20/20 executable lines, 0 allowed, 0 disallowed
+bypass_output_cd4053_with_mute.c.gcov: 26/26 executable lines, 0 allowed, 0 disallowed
+bypass_output_tq2_l2_5v_relay.c.gcov: 31/31 executable lines, 0 allowed, 0 disallowed
+OK: all PIC shipping-source lines are covered except the documented reset path.
+PIC12F675 coverage-oracle negative probe: PASS (source line 604)
+--- gpsim register-level test: PIC12F675 variant cd4053_simple ---
+gpsim register-level test: build_pic12f675/simcal/bypass-pic12f675-cd4053_simple_simcal.hex (proc p12f675)
+  INIT_BYPASS    gpio=0x20
+  PRESS1_EARLY   gpio=0x0
+  PRESS1_LOW     gpio=0x3
+  ENGAGED        gpio=0x23
+  BYPASS_AGAIN   gpio=0x20
+  ok:   INIT: LED off (bypass)
+  ok:   INIT: full GPIO == 0x0 (bypass control pins)
+  ok:   INIT: footswitch released (GP5=1)
+  ok:   PRESS1_EARLY: footswitch pressed (GP5=0)
+  ok:   PRESS1_EARLY: LED still off (tick cadence intact)
+  ok:   PRESS1: footswitch pressed (GP5=0)
+  ok:   PRESS1: LED on (toggled on the press)
+  ok:   ENGAGED: LED on (latched)
+  ok:   ENGAGED: footswitch released (GP5=1)
+  ok:   ENGAGED: full GPIO == 0x3 (variant control pins)
+  ok:   BYPASS_AGAIN: LED off (toggled back)
+  ok:   BYPASS_AGAIN: full GPIO == 0x0 (bypass control pins)
+  ok:   BYPASS_AGAIN: footswitch released (GP5=1)
+RESULT: PASS (build_pic12f675/simcal/bypass-pic12f675-cd4053_simple_simcal.hex)
+gpsim power-on-pressed test: build_pic12f675/simcal/bypass-pic12f675-cd4053_simple_simcal.hex (proc p12f675)
+  PON_HELD       gpio=0x0
+  PON_RELEASED   gpio=0x20
+  PON_ENGAGED    gpio=0x23
+  ok:   PON_HELD: LED off (held switch did not engage)
+  ok:   PON_HELD: footswitch pressed (GP5=0)
+  ok:   PON_RELEASED: still bypass (release did not toggle)
+  ok:   PON_RELEASED: footswitch released (GP5=1)
+  ok:   PON_ENGAGED: LED on (fresh press toggled, latched)
+  ok:   PON_ENGAGED: footswitch released (GP5=1)
+RESULT: PASS (build_pic12f675/simcal/bypass-pic12f675-cd4053_simple_simcal.hex)
+--- gpsim register-level test: PIC12F675 variant cd4053_with_mute ---
+gpsim register-level test: build_pic12f675/simcal/bypass-pic12f675-cd4053_with_mute_simcal.hex (proc p12f675)
+  INIT_BYPASS    gpio=0x20
+  PRESS1_EARLY   gpio=0x0
+  PRESS1_LOW     gpio=0x7
+  ENGAGED        gpio=0x27
+  BYPASS_AGAIN   gpio=0x20
+  ok:   INIT: LED off (bypass)
+  ok:   INIT: full GPIO == 0x0 (bypass control pins)
+  ok:   INIT: footswitch released (GP5=1)
+  ok:   PRESS1_EARLY: footswitch pressed (GP5=0)
+  ok:   PRESS1_EARLY: LED still off (tick cadence intact)
+  ok:   PRESS1: footswitch pressed (GP5=0)
+  ok:   PRESS1: LED on (toggled on the press)
+  ok:   ENGAGED: LED on (latched)
+  ok:   ENGAGED: footswitch released (GP5=1)
+  ok:   ENGAGED: full GPIO == 0x7 (variant control pins)
+  ok:   BYPASS_AGAIN: LED off (toggled back)
+  ok:   BYPASS_AGAIN: full GPIO == 0x0 (bypass control pins)
+  ok:   BYPASS_AGAIN: footswitch released (GP5=1)
+RESULT: PASS (build_pic12f675/simcal/bypass-pic12f675-cd4053_with_mute_simcal.hex)
+gpsim power-on-pressed test: build_pic12f675/simcal/bypass-pic12f675-cd4053_with_mute_simcal.hex (proc p12f675)
+  PON_HELD       gpio=0x0
+  PON_RELEASED   gpio=0x20
+  PON_ENGAGED    gpio=0x27
+  ok:   PON_HELD: LED off (held switch did not engage)
+  ok:   PON_HELD: footswitch pressed (GP5=0)
+  ok:   PON_RELEASED: still bypass (release did not toggle)
+  ok:   PON_RELEASED: footswitch released (GP5=1)
+  ok:   PON_ENGAGED: LED on (fresh press toggled, latched)
+  ok:   PON_ENGAGED: footswitch released (GP5=1)
+RESULT: PASS (build_pic12f675/simcal/bypass-pic12f675-cd4053_with_mute_simcal.hex)
+--- gpsim register-level test: PIC12F675 variant tq2_l2_5v_relay ---
+gpsim register-level test: build_pic12f675/simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex (proc p12f675)
+  INIT_BYPASS    gpio=0x20
+  PRESS1_EARLY   gpio=0x0
+  PRESS1_LOW     gpio=0x5
+  ENGAGED        gpio=0x21
+  BYPASS_AGAIN   gpio=0x20
+  ok:   INIT: LED off (bypass)
+  ok:   INIT: full GPIO == 0x0 (bypass control pins)
+  ok:   INIT: footswitch released (GP5=1)
+  ok:   PRESS1_EARLY: footswitch pressed (GP5=0)
+  ok:   PRESS1_EARLY: LED still off (tick cadence intact)
+  ok:   PRESS1: footswitch pressed (GP5=0)
+  ok:   PRESS1: LED on (toggled on the press)
+  ok:   ENGAGED: LED on (latched)
+  ok:   ENGAGED: footswitch released (GP5=1)
+  ok:   ENGAGED: full GPIO == 0x1 (variant control pins)
+  ok:   BYPASS_AGAIN: LED off (toggled back)
+  ok:   BYPASS_AGAIN: full GPIO == 0x0 (bypass control pins)
+  ok:   BYPASS_AGAIN: footswitch released (GP5=1)
+RESULT: PASS (build_pic12f675/simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex)
+gpsim power-on-pressed test: build_pic12f675/simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex (proc p12f675)
+  PON_HELD       gpio=0x0
+  PON_RELEASED   gpio=0x20
+  PON_ENGAGED    gpio=0x21
+  ok:   PON_HELD: LED off (held switch did not engage)
+  ok:   PON_HELD: footswitch pressed (GP5=0)
+  ok:   PON_RELEASED: still bypass (release did not toggle)
+  ok:   PON_RELEASED: footswitch released (GP5=1)
+  ok:   PON_ENGAGED: LED on (fresh press toggled, latched)
+  ok:   PON_ENGAGED: footswitch released (GP5=1)
+RESULT: PASS (build_pic12f675/simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex)
+PIC hardware-stack depth [PIC12F675 cd4053_simple]
+  device depth  : 8 level(s)   (/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8/pic/dat/ini/12f675.ini)
+  reserve       : 2 level(s)
+  measured peak : 3 level(s)
+  XC8 callstack : 5 level(s) remaining -> 3 used (agrees)
+    reset tree _main: 3 level(s)
+      _main -> _init -> _hw_init_output_pins -> _hw_configure_output_pins
+STACK-DEPTH PASS [PIC12F675 cd4053_simple]: 3 + 2 reserve <= 8 levels (3 spare)
+PIC hardware-stack depth [PIC12F675 cd4053_with_mute]
+  device depth  : 8 level(s)   (/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8/pic/dat/ini/12f675.ini)
+  reserve       : 2 level(s)
+  measured peak : 3 level(s)
+  XC8 callstack : 5 level(s) remaining -> 3 used (agrees)
+    reset tree _main: 3 level(s)
+      _main -> _init -> _hw_init_output_pins -> _hw_configure_output_pins
+STACK-DEPTH PASS [PIC12F675 cd4053_with_mute]: 3 + 2 reserve <= 8 levels (3 spare)
+PIC hardware-stack depth [PIC12F675 tq2_l2_5v_relay]
+  device depth  : 8 level(s)   (/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8/pic/dat/ini/12f675.ini)
+  reserve       : 2 level(s)
+  measured peak : 4 level(s)
+  XC8 callstack : 4 level(s) remaining -> 4 used (agrees)
+    reset tree _main: 4 level(s)
+      _main -> _init -> _hw_set_bypass_state -> _set_relay_coils_low -> _hw_pin_set_low
+STACK-DEPTH PASS [PIC12F675 tq2_l2_5v_relay]: 4 + 2 reserve <= 8 levels (2 spare)
+=== PIC12F675 hardware stack bounded for every variant ===
+=== all PIC12F675 pre-hardware checks complete: PIC12F675_MATRIX_SHA256 format=1 shipping_cd4053_simple=e2bf82f2348a39b54cf1dff159012ff8ffee0660ac17ed8189d83f17fe57ba74 simcal_cd4053_simple=8e8673076c91e6374f75fd4e7facd88a00aff9c9020a3525552c4a313beba5fd shipping_cd4053_with_mute=cbc07ee2f962842714743747b8a662bb0b85aade9d42a5daa8d6f326f9d2557c simcal_cd4053_with_mute=8ce63b4b537ec3488fb1eb65ff73f5db8a3a7e8652275d4d91930e718ed89ab7 shipping_tq2_l2_5v_relay=828dfcb760fb20d610f0ae52dd96ef1bdf55cc61c376068be5aaebcf430484f7 simcal_tq2_l2_5v_relay=8c8daaa23a15beb78282a669ff830d6263158df3fda2a9fd071276418a05c084 ===
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware'

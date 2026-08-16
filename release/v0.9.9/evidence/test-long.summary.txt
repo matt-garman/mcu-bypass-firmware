@@ -1,0 +1,88 @@
+# test-long summary -- the full log is in the release CI run.
+
+43:MISRA-C:2012 analysis (cppcheck + misra addon)
+54:MISRA-C:2012: clean (documented deviations waived per MISRA_COMPLIANCE.md)
+55:=== static analysis (clang-tidy + cppcheck + clang-analyzer + MISRA) clean ===
+72:cbmc: prove_integrate
+187:cbmc: prove_debounce_step
+302:cbmc: prove_corrupt_state_faults
+417:cbmc: prove_init_context
+532:cbmc: prove_step_transition
+647:cbmc: prove_oor_recovery_step
+762:cbmc: prove_press_liveness (--unwind 50)
+903:cbmc: prove_release_liveness (--unwind 50)
+1047:cbmc: prove_oor_recovery_bounded (--unwind 257)
+1418:=== CBMC: all debounce-core proofs SUCCESSFUL ===
+1427:=== -fstack-usage static bound (limit: 32 B/frame) ===
+1453:OK: 5 fresh reports; all frames <= 32 B
+1466:--- fault-injection (ATtiny45) variant: cd4053_simple ---
+1468:--- fault-injection (ATtiny85) variant: cd4053_simple ---
+1470:--- fault-injection (ATtiny45) variant: tq2_l2_5v_relay ---
+1472:--- fault-injection (ATtiny45) variant: cd4053_with_mute ---
+1474:--- fault-injection (ATtiny85) variant: tq2_l2_5v_relay ---
+1476:--- fault-injection (ATtiny85) variant: cd4053_with_mute ---
+1718:===================== PIC10F320 HOST VARIANT cd4053_simple =====================
+1735:OK: every firmware line is covered except the allowlisted watchdog-reset fault path.
+1736:=== all PIC10F320 host lanes passed (variant cd4053_simple) ===
+1737:===================== PIC10F320 HOST VARIANT cd4053_with_mute =====================
+1754:OK: every firmware line is covered except the allowlisted watchdog-reset fault path.
+1755:=== all PIC10F320 host lanes passed (variant cd4053_with_mute) ===
+1756:===================== PIC10F320 HOST VARIANT tq2_l2_5v_relay =====================
+1773:OK: every firmware line is covered except the allowlisted watchdog-reset fault path.
+1774:=== all PIC10F320 host lanes passed (variant tq2_l2_5v_relay) ===
+1775:=== PIC10F320 host equivalence/actuation/fault/coverage validated for all variants ===
+1930:=== mutation testing: baseline sanity check ===
+1945:=== PIC toolchain probe (gates the PIC-shell mutants) ===
+1950:=== PIC10F320 toolchain probe (gates its tool-dependent mutants) ===
+1959:=== PIC12F675 toolchain probe (gates its mutants) ===
+1967:=== AVR-XT toolchain probe (gates the ATtiny202 mutants) ===
+1977:=== running 118 mutants across up to 16 parallel job(s) ===
+1979:=== 24 core/AVR mutants ===
+2005:=== 29 PIC10F320 host mutants (equiv/actuation/fault) ===
+2036:=== 11 PIC10F320 target mutants (gpsim/libgpsim/soak) ===
+2049:=== 6 PIC-shell mutants (gpsim register-level) ===
+2057:=== 1 PIC-shell mutant (WDT liveness, libgpsim soak 2500ms) ===
+2060:=== 8 PIC target mutants (fault + lock-step + target I/O) ===
+2070:=== 20 PIC12F675 mutants (gpsim/target aggregate/soak) ===
+2092:=== 19 ATtiny202 shell mutants (yasimavr sim/lock-step/fault/soak + delay oracle) ===
+2117:=== mutation summary: 118 killed, 0 survived, 0 errored, 0 PIC skipped, 0 ATtiny202 skipped ===
+2122:=== flash-utilization budget (attiny13a: 90% of 1024 B = 921 B) ===
+2123:OK:   build_avr_classic/bypass-attiny13a-cd4053_simple.elf uses 716 B (69.9%) of 1024 B
+2124:OK:   build_avr_classic/bypass-attiny13a-cd4053_with_mute.elf uses 756 B (73.8%) of 1024 B
+2125:OK:   build_avr_classic/bypass-attiny13a-tq2_l2_5v_relay.elf uses 756 B (73.8%) of 1024 B
+2126:OK: measured all 3 firmware images; each is within the 921 B limit.
+2130:--- sim (ATtiny13a) variant: cd4053_simple ---
+2132:--- sim (ATtiny13a) variant: tq2_l2_5v_relay ---
+2134:--- sim (ATtiny13a) variant: cd4053_with_mute ---
+2674:--- sim (ATtiny45) variant: cd4053_simple ---
+2676:--- sim (ATtiny45) variant: cd4053_with_mute ---
+2678:--- sim (ATtiny45) variant: tq2_l2_5v_relay ---
+2680:--- sim (ATtiny85) variant: cd4053_simple ---
+2682:--- sim (ATtiny85) variant: cd4053_with_mute ---
+2684:--- sim (ATtiny85) variant: tq2_l2_5v_relay ---
+4029:MISRA authored-output contract: 44 checks, 0 failures
+4038:--- soak reset witness: variant=cd4053_simple  MCU=attiny85 ---
+4059:golden-model line coverage: 99.39% (floor 90%)
+4061:=== all FULL (exhaustive) pre-hardware tests passed ===
+
+# --- last 20 lines ---
+AVR_SOAK_WITNESS_FW="build_avr_classic/bypass-attiny85-cd4053_simple.elf" \
+AVR_SOAK_WITNESS_MCU="attiny85" \
+AVR_SOAK_WITNESS_F_CPU="1000000UL" \
+AVR_SOAK_WITNESS_DURATION_MS="3000" \
+AVR_SOAK_WITNESS_LIVENESS_MS="1000" \
+AVR_SOAK_WITNESS_KILL_TIMER_MS="1500" \
+./test/test_soak_reset_witness.sh
+soak reset witness: 16 checks, 0 failures (un-pet run recorded 1 reset(s))
+./test/test_strict_tools.sh
+strict optional-tool validation (host + all three PIC parts): 30 checks, 0 failures
+./test/test_workload_rebuild.sh
+make[3]: warning: -j1 forced in submake: resetting jobserver mode.
+make[3]: warning: -j1 forced in submake: resetting jobserver mode.
+workload rebuild validation: 23 checks, 0 failures
+./test/test_pic_rebuild.sh
+PIC soak rebuild determinism: 28 checks, 0 failures
+golden-model line coverage: 99.39% (floor 90%)
+verified-core line coverage (src/bypass_pure.c): 100.00% (floor 95%)
+=== all FULL (exhaustive) pre-hardware tests passed ===
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
