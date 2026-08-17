@@ -293,13 +293,18 @@ def main():
     except FileNotFoundError:
         pass
     hostile = [
+        ("VARIANT", f"$(shell touch {marker})"),
+        ("VARIANT", f"`touch {marker}`"),
+        ("VARIANT", f"x'; touch {marker}; : '"),
         ("PIC12F675_TARGET_VARIANT", f"$(shell touch {marker})"),
         ("PIC12F675_TARGET_VARIANT", f"`touch {marker}`"),
         ("PIC12F675_TARGET_VARIANT", f"x'; touch {marker}; : '"),
     ]
     for selector, value in hostile:
         override = f"{selector}={value}"
-        for target in (GUARD, "pic12f675-target-selector-valid"):
+        targets = ((GUARD,) if selector == "VARIANT" else
+                   (GUARD, "pic12f675-target-selector-valid"))
+        for target in targets:
             rc, out = run_make(target, override)
             if rc == 0 or not any(reason in out for reason in (
                     "is not supported", "names more than one value")):

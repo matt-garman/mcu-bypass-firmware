@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import sys
 import tempfile
@@ -42,6 +43,24 @@ RESERVATION_KEYS = frozenset({
     "writer_realpath", "writer_sha256", "writer_version_base64",
     "writer_version_sha256",
 })
+RESULT_KEYS = frozenset({
+    "schema", "record_type", "finalization_mode", "created_utc", "status",
+    "failures", "part", "variant", "image_sha256",
+    "programmed_image_bytes_verified", "baseline_sha256", "reservation_sha256",
+    "baseline_osccal_word", "baseline_osccal_value", "baseline_config_word",
+    "baseline_bg_bits", "prewrite_osccal_word", "prewrite_osccal_value",
+    "prewrite_config_word", "prewrite_bg_bits", "post_osccal_word",
+    "post_osccal_value", "post_config_word", "post_bg_bits", "device_id",
+    "device_revision", "post_device_id", "post_device_revision", "reader_path",
+    "reader_realpath", "reader_sha256", "reader_version_base64",
+    "reader_version_sha256", "prewrite_read_base64", "prewrite_read_sha256",
+    "prewrite_hex_base64", "prewrite_hex_sha256", "writer_kind", "writer_path",
+    "writer_realpath", "writer_sha256", "writer_version_base64",
+    "writer_version_sha256", "program_exit", "program_base64", "program_sha256",
+    "post_read_exit", "post_read_base64", "post_read_sha256",
+    "post_read_hex_base64", "post_read_hex_sha256",
+})
+RECOVERY_RESULT_KEYS = RESULT_KEYS | frozenset({"reader_version_exit"})
 
 
 class EvidenceError(Exception):
@@ -221,7 +240,7 @@ def extract_trim_bytes(data, label):
     return extract_trim_memory(parse_hex_bytes(data, label), label)
 
 
-def verify_programmed_image(image_data, post_read_path):
+def verify_programmed_image_memory(image_data, actual):
     # Proves: every byte the checked image requests arrived at the address it
     # requested, and CONFIG matches outside the factory BG<1:0> field.
     #
@@ -231,7 +250,6 @@ def verify_programmed_image(image_data, post_read_path):
     # the reader exports for unprogrammed regions, which no lane here can
     # establish without a device.
     expected = parse_hex_bytes(image_data, "reserved programming image")
-    actual = parse_hex(post_read_path, "post-program read HEX")
     config_byte = CONFIG_WORD_ADDR * 2
     compared = 0
     for address, value in expected.items():
@@ -255,6 +273,16 @@ def verify_programmed_image(image_data, post_read_path):
             "post-program CONFIG differs outside factory BG<1:0>: expected 0x%04X, got 0x%04X"
             % (expected_config, actual_config))
     return compared + 2
+
+
+def verify_programmed_image(image_data, post_read_path):
+    actual = parse_hex(post_read_path, "post-program read HEX")
+    return verify_programmed_image_memory(image_data, actual)
+
+
+def verify_programmed_image_bytes(image_data, post_read_data):
+    actual = parse_hex_bytes(post_read_data, "terminal post-read HEX")
+    return verify_programmed_image_memory(image_data, actual)
 
 
 def utc_now():
@@ -299,33 +327,104 @@ def publish_json(path, record, label):
     handle = tempfile.NamedTemporaryFile(
         mode="w", encoding="ascii", dir=directory, prefix=".trim-evidence-",
         delete=False)
+    linked = False
+
+    def rollback():
+        for candidate in (handle.name, destination if linked else None):
+            if candidate is not None:
+                try:
+                    os.unlink(candidate)
+                except OSError:
+                    pass
+        if linked:
+            try:
+                fsync_directory(directory)
+            except EvidenceError:
+                pass
+
     try:
         with handle:
             handle.write(text)
         os.chmod(handle.name, 0o400)
         fsync_file(handle.name)
         os.link(handle.name, destination)
+        linked = True
         os.unlink(handle.name)
         fsync_directory(directory)
     except FileExistsError as exc:
-        try:
-            os.unlink(handle.name)
-        except OSError:
-            pass
+        rollback()
         raise EvidenceError("%s appeared while it was being published: %s"
                             % (label, path)) from exc
     except EvidenceError:
-        try:
-            os.unlink(handle.name)
-        except OSError:
-            pass
+        rollback()
         raise
     except OSError as exc:
-        try:
-            os.unlink(handle.name)
-        except OSError:
-            pass
+        rollback()
         raise EvidenceError("could not publish %s: %s" % (label, exc)) from exc
+
+
+def publish_bytes(path, data, label):
+    destination = os.path.abspath(path)
+    directory = os.path.dirname(destination) or "."
+    if not os.path.isdir(directory):
+        raise EvidenceError("output directory does not exist: %s" % directory)
+    if os.path.lexists(destination):
+        raise EvidenceError("%s already exists: %s" % (label, path))
+    handle = tempfile.NamedTemporaryFile(
+        mode="wb", dir=directory, prefix=".trim-evidence-", delete=False)
+    linked = False
+
+    def rollback():
+        for candidate in (handle.name, destination if linked else None):
+            if candidate is not None:
+                try:
+                    os.unlink(candidate)
+                except OSError:
+                    pass
+        if linked:
+            try:
+                fsync_directory(directory)
+            except EvidenceError:
+                pass
+
+    try:
+        with handle:
+            handle.write(data)
+        os.chmod(handle.name, 0o400)
+        fsync_file(handle.name)
+        os.link(handle.name, destination)
+        linked = True
+        os.unlink(handle.name)
+        fsync_directory(directory)
+    except FileExistsError as exc:
+        rollback()
+        raise EvidenceError("%s appeared while it was being published: %s"
+                            % (label, path)) from exc
+    except EvidenceError:
+        rollback()
+        raise
+    except OSError as exc:
+        rollback()
+        raise EvidenceError("could not publish %s: %s" % (label, exc)) from exc
+
+
+def seal_result_directory(output_dir, result_path):
+    directory = os.path.abspath(output_dir)
+    parent = os.path.dirname(directory) or "."
+    try:
+        os.chmod(directory, 0o500)
+        fsync_directory(directory)
+        fsync_directory(parent)
+    except (EvidenceError, OSError) as exc:
+        # Do not leave a visible verdict alongside a failed finalization command.
+        try:
+            os.chmod(directory, 0o700)
+            os.unlink(result_path)
+            fsync_directory(directory)
+            fsync_directory(parent)
+        except (EvidenceError, OSError):
+            pass
+        raise EvidenceError("could not seal terminal result directory: %s" % exc) from exc
 
 
 def load_baseline(path):
@@ -403,6 +502,254 @@ def load_reservation(path):
             raise EvidenceError("reserved %s does not match its read HEX" % key)
     parse_hex_bytes(decoded_fields["image_base64"], "reserved programming image")
     return record, raw
+
+
+def validated_record_file(record, base64_key, sha256_key, label,
+                          allow_none=False, allow_empty=False):
+    encoded = record[base64_key]
+    digest = record[sha256_key]
+    if encoded is None or digest is None:
+        if allow_none and encoded is None and digest is None:
+            return None
+        raise EvidenceError("terminal program result has incomplete %s" % label)
+    if not isinstance(encoded, str) or not isinstance(digest, str) \
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise EvidenceError("terminal program result has invalid %s metadata" % label)
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except (TypeError, ValueError) as exc:
+        raise EvidenceError("terminal program result has invalid %s data" % label) from exc
+    if (not data and not allow_empty) or sha256_bytes(data) != digest:
+        raise EvidenceError("terminal program result %s does not match its digest" % label)
+    return data
+
+
+def validate_terminal_result(path, baseline, baseline_raw,
+                             reservation, reservation_raw):
+    raw = read_regular_bytes(path, "terminal program result")
+    try:
+        record = json.loads(raw.decode("ascii"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise EvidenceError("terminal program result is not valid ASCII JSON: %s" % exc) from exc
+    expected_keys = (RECOVERY_RESULT_KEYS if isinstance(record, dict)
+                     and record.get("finalization_mode") == "recovery"
+                     else RESULT_KEYS)
+    required = {
+        "schema": SCHEMA,
+        "record_type": "program-result",
+        "part": PART,
+        "variant": reservation["variant"],
+        "image_sha256": reservation["image_sha256"],
+        "baseline_sha256": sha256_bytes(baseline_raw),
+        "reservation_sha256": sha256_bytes(reservation_raw),
+    }
+    if not isinstance(record, dict) or frozenset(record) != expected_keys \
+            or record.get("status") not in ("PASS", "FAIL") \
+            or record.get("finalization_mode") not in ("direct", "recovery") \
+            or any(record.get(key) != value for key, value in required.items()):
+        raise EvidenceError("terminal program result does not match its reservation")
+    failures = record["failures"]
+    if not isinstance(failures, list) \
+            or any(not isinstance(item, str) or not item for item in failures) \
+            or (record["status"] == "PASS") != (not failures):
+        raise EvidenceError("terminal program result status contradicts its failures")
+    if type(record["post_read_exit"]) is not int \
+            or type(record["programmed_image_bytes_verified"]) is not int \
+            or record["programmed_image_bytes_verified"] < 0:
+        raise EvidenceError("terminal program result has invalid numeric fields")
+    if record["finalization_mode"] == "direct":
+        if type(record["program_exit"]) is not int:
+            raise EvidenceError("direct program result has invalid program exit status")
+    elif record["program_exit"] is not None \
+            or type(record["reader_version_exit"]) is not int:
+        raise EvidenceError("recovery result has invalid execution status fields")
+
+    reservation_fields = {
+        "reader_path": "reader_path",
+        "reader_realpath": "reader_realpath",
+        "reader_sha256": "reader_sha256",
+        "reader_version_base64": "reader_version_base64",
+        "reader_version_sha256": "reader_version_sha256",
+        "prewrite_read_base64": "device_read_base64",
+        "prewrite_read_sha256": "device_read_sha256",
+        "prewrite_hex_base64": "read_hex_base64",
+        "prewrite_hex_sha256": "read_hex_sha256",
+        "writer_kind": "writer_kind",
+        "writer_path": "writer_path",
+        "writer_realpath": "writer_realpath",
+        "writer_sha256": "writer_sha256",
+        "writer_version_base64": "writer_version_base64",
+        "writer_version_sha256": "writer_version_sha256",
+        "prewrite_osccal_word": "osccal_word",
+        "prewrite_osccal_value": "osccal_value",
+        "prewrite_config_word": "config_word",
+        "prewrite_bg_bits": "bg_bits",
+    }
+    if any(record[result_key] != reservation[reservation_key]
+           for result_key, reservation_key in reservation_fields.items()):
+        raise EvidenceError("terminal program result identities differ from reservation")
+    baseline_fields = (
+        "osccal_word", "osccal_value", "config_word", "bg_bits",
+    )
+    if record["device_id"] != baseline["device_id"] \
+            or record["device_revision"] != baseline["device_revision"] \
+            or any(record["baseline_" + key] != baseline[key]
+                   for key in baseline_fields):
+        raise EvidenceError("terminal program result baseline fields are inconsistent")
+
+    validated_record_file(
+        record, "reader_version_base64", "reader_version_sha256",
+        "reader version transcript")
+    validated_record_file(
+        record, "prewrite_read_base64", "prewrite_read_sha256",
+        "pre-write transcript")
+    validated_record_file(
+        record, "prewrite_hex_base64", "prewrite_hex_sha256", "pre-write HEX")
+    validated_record_file(
+        record, "writer_version_base64", "writer_version_sha256",
+        "writer version transcript")
+    validated_record_file(
+        record, "program_base64", "program_sha256", "program transcript",
+        allow_none=True, allow_empty=True)
+    post_read = validated_record_file(
+        record, "post_read_base64", "post_read_sha256", "post-read transcript",
+        allow_empty=True)
+    post_hex = validated_record_file(
+        record, "post_read_hex_base64", "post_read_hex_sha256", "post-read HEX",
+        allow_none=True)
+    post_trim_fields = tuple(record["post_" + key] for key in baseline_fields)
+    if record["post_read_exit"] != 0:
+        if post_hex is not None or record["post_device_id"] is not None \
+                or record["post_device_revision"] is not None \
+                or any(value is not None for value in post_trim_fields):
+            raise EvidenceError("failed post-read has contradictory retained fields")
+    else:
+        try:
+            post_device_id, post_revision = parse_device_report(
+                post_read, "terminal post-read transcript")
+        except EvidenceError:
+            if record["status"] == "PASS" \
+                    or record["post_device_id"] is not None \
+                    or record["post_device_revision"] is not None:
+                raise
+            post_device_id = None
+            post_revision = None
+        if record["post_device_id"] != post_device_id \
+                or record["post_device_revision"] != post_revision:
+            raise EvidenceError("terminal program result post-read identity is inconsistent")
+        post_trim = None
+        if post_hex is not None:
+            try:
+                post_trim = extract_trim_memory(
+                    parse_hex_bytes(post_hex, "terminal post-read HEX"),
+                    "terminal post-read HEX")
+            except EvidenceError:
+                if record["status"] == "PASS" \
+                        or any(value is not None for value in post_trim_fields):
+                    raise
+        if post_trim is None:
+            if record["status"] == "PASS" \
+                    or any(value is not None for value in post_trim_fields):
+                raise EvidenceError("terminal result has inconsistent post-read trim fields")
+        elif any(record["post_" + key] != post_trim[key]
+                 for key in baseline_fields):
+            raise EvidenceError("terminal program result post-read trim is inconsistent")
+
+    if record["status"] == "PASS":
+        if record["post_read_exit"] != 0 or post_hex is None \
+                or (record["finalization_mode"] == "direct"
+                    and record["program_exit"] != 0) \
+                or (record["finalization_mode"] == "recovery"
+                    and record["reader_version_exit"] != 0):
+            raise EvidenceError("terminal PASS has unsuccessful execution status")
+        image_data = base64.b64decode(reservation["image_base64"], validate=True)
+        compared = verify_programmed_image_bytes(image_data, post_hex)
+        if compared != record["programmed_image_bytes_verified"] \
+                or record["post_device_id"] != baseline["device_id"] \
+                or record["post_device_revision"] != baseline["device_revision"] \
+                or record["post_osccal_word"] != baseline["osccal_word"] \
+                or record["post_bg_bits"] != baseline["bg_bits"]:
+            raise EvidenceError("terminal PASS does not replay its safety checks")
+
+
+def seal_existing_result_directory(output_dir, result_path):
+    directory = os.path.abspath(output_dir)
+    parent = os.path.dirname(directory) or "."
+    try:
+        os.chmod(result_path, 0o400)
+        fsync_file(result_path)
+        os.chmod(directory, 0o500)
+        fsync_directory(directory)
+        fsync_directory(parent)
+    except (EvidenceError, OSError) as exc:
+        raise EvidenceError("could not seal existing terminal result: %s" % exc) from exc
+
+
+def recovery_context(args):
+    baseline, baseline_raw = load_baseline(args.baseline)
+    reservation, reservation_raw = load_reservation(args.reservation)
+    output_dir = os.path.abspath(args.output_dir)
+    try:
+        output_info = os.lstat(output_dir)
+    except OSError as exc:
+        raise EvidenceError("pending transaction directory is unavailable: %s" % exc) from exc
+    if stat.S_ISLNK(output_info.st_mode) or not stat.S_ISDIR(output_info.st_mode):
+        raise EvidenceError("pending transaction path is not a real directory: %s"
+                            % args.output_dir)
+    expected_reservation = os.path.join(output_dir, "reservation.json")
+    if os.path.abspath(args.reservation) != expected_reservation:
+        raise EvidenceError("reservation is not inside the selected transaction directory")
+    result_path = os.path.join(output_dir, "result.json")
+    if os.path.lexists(result_path):
+        validate_terminal_result(
+            result_path, baseline, baseline_raw, reservation, reservation_raw)
+        seal_existing_result_directory(output_dir, result_path)
+        raise EvidenceError("pending transaction already has result.json")
+    retained_image = read_regular_bytes(
+        os.path.join(output_dir, "image.hex"), "retained recovery image")
+    try:
+        reserved_image = base64.b64decode(reservation["image_base64"], validate=True)
+    except (TypeError, ValueError) as exc:
+        raise EvidenceError("reservation has invalid programming image data") from exc
+    if retained_image != reserved_image \
+            or sha256_bytes(retained_image) != reservation["image_sha256"]:
+        raise EvidenceError("retained recovery image differs from reservation")
+    if reservation["baseline_sha256"] != sha256_bytes(baseline_raw):
+        raise EvidenceError("reservation baseline digest differs from selected baseline")
+    if args.part != PART or reservation["part"] != args.part:
+        raise EvidenceError("reservation part differs from selected part")
+    if reservation["variant"] != args.variant:
+        raise EvidenceError("reservation variant differs from selected variant")
+    reader_path, reader_realpath, reader_sha = executable_identity(args.reader_path)
+    if reservation["reader_path"] != reader_path \
+            or reservation["reader_realpath"] != reader_realpath \
+            or reservation["reader_sha256"] != reader_sha:
+        raise EvidenceError("reservation reader identity differs from selected reader")
+    writer_path, writer_realpath, writer_sha = executable_identity(args.writer_path)
+    if reservation["writer_kind"] != args.writer_kind \
+            or reservation["writer_path"] != writer_path \
+            or reservation["writer_realpath"] != writer_realpath \
+            or reservation["writer_sha256"] != writer_sha:
+        raise EvidenceError("reservation writer identity differs from selected writer")
+    return {
+        "baseline": baseline,
+        "baseline_raw": baseline_raw,
+        "reservation": reservation,
+        "reservation_raw": reservation_raw,
+        "reader_path": reader_path,
+        "reader_realpath": reader_realpath,
+        "reader_sha256": reader_sha,
+        "writer_path": writer_path,
+        "writer_realpath": writer_realpath,
+        "writer_sha256": writer_sha,
+    }
+
+
+def optional_encoded_file(path, label):
+    if not os.path.lexists(path):
+        return None, None
+    encoded, digest, _data = encoded_file(path, label, allow_empty=True)
+    return encoded, digest
 
 
 def current_reader(args):
@@ -515,11 +862,18 @@ def reserve_command(args):
         "writer_version_base64": writer_version_b64,
         "writer_version_sha256": writer_version_sha,
     }
+    retained_image = os.path.join(output_dir, "image.hex")
+    reservation_path = os.path.join(output_dir, "reservation.json")
     try:
-        publish_json(os.path.join(output_dir, "reservation.json"), record,
-                     "program reservation")
+        publish_bytes(retained_image, image_data, "retained programming image")
+        publish_json(reservation_path, record, "program reservation")
         fsync_directory(parent)
     except EvidenceError:
+        for path in (reservation_path, retained_image):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
         try:
             os.rmdir(output_dir)
         except OSError:
@@ -598,6 +952,7 @@ def result_command(args):
     record = {
         "schema": SCHEMA,
         "record_type": "program-result",
+        "finalization_mode": "direct",
         "created_utc": utc_now(),
         "status": "FAIL" if failures else "PASS",
         "failures": failures,
@@ -647,17 +1002,183 @@ def result_command(args):
         "post_read_hex_base64": post_hex_b64,
         "post_read_hex_sha256": post_hex_sha,
     }
-    output = os.path.join(args.output_dir, "result.json")
-    publish_json(output, record, "program result evidence")
-    for name in ("program.log", "postread.log", "postread.hex"):
+    for name in ("image.hex", "program.log", "postread.log", "postread.hex"):
         path = os.path.join(args.output_dir, name)
         if os.path.isfile(path):
             os.chmod(path, 0o400)
             fsync_file(path)
-    os.chmod(args.output_dir, 0o500)
     fsync_directory(args.output_dir)
+    output = os.path.join(args.output_dir, "result.json")
+    publish_json(output, record, "program result evidence")
+    seal_result_directory(args.output_dir, output)
     status = record["status"]
     print("PIC12F675_TRIM_RESULT %s evidence=%s" % (status, output))
+    if failures:
+        for failure in failures:
+            print("FAIL: %s" % failure, file=sys.stderr)
+        return 1
+    return 0
+
+
+def recovery_check_command(args):
+    recovery_context(args)
+    print("PIC12F675_TRIM_RECOVERY_READY PASS evidence-dir=%s" % args.output_dir)
+
+
+def recovery_version_check_command(args):
+    context = recovery_context(args)
+    version_b64, version_sha, version_data = encoded_file(
+        args.version_log, "recovery reader version transcript", allow_empty=True)
+    if args.version_exit != 0:
+        raise EvidenceError(
+            "recovery reader version query exited %d" % args.version_exit)
+    if b"PK2CMD" not in version_data.upper():
+        raise EvidenceError(
+            "recovery reader version transcript does not identify pk2cmd")
+    reservation = context["reservation"]
+    if reservation["reader_version_base64"] != version_b64 \
+            or reservation["reader_version_sha256"] != version_sha:
+        raise EvidenceError("recovery reader version differs from reservation")
+    print("PIC12F675_TRIM_RECOVERY_READER PASS evidence-dir=%s" % args.output_dir)
+
+
+def recovery_result_command(args):
+    context = recovery_context(args)
+    baseline = context["baseline"]
+    baseline_raw = context["baseline_raw"]
+    reservation = context["reservation"]
+    reservation_raw = context["reservation_raw"]
+    failures = []
+
+    version_b64, version_sha, version_data = encoded_file(
+        args.version_log, "recovery reader version transcript", allow_empty=True)
+    if args.version_exit != 0:
+        failures.append("recovery reader version query exited %d" % args.version_exit)
+    elif b"PK2CMD" not in version_data.upper():
+        failures.append("recovery reader version transcript does not identify pk2cmd")
+    if reservation["reader_version_base64"] != version_b64 \
+            or reservation["reader_version_sha256"] != version_sha:
+        failures.append("recovery reader version differs from reservation")
+
+    post_b64, post_sha, post_data = encoded_file(
+        args.read_log, "recovery device read transcript", allow_empty=True)
+    post_hex_b64 = None
+    post_hex_sha = None
+    post_trim = {
+        "osccal_word": None, "osccal_value": None,
+        "config_word": None, "bg_bits": None,
+    }
+    post_device_id = None
+    post_revision = None
+    compared_image_bytes = 0
+    if args.read_exit != 0:
+        failures.append("recovery device read exited %d" % args.read_exit)
+    else:
+        try:
+            post_device_id, post_revision = parse_device_report(
+                post_data, "recovery device read transcript")
+            post_hex_b64, post_hex_sha, _post_hex_data = encoded_file(
+                args.read_hex, "recovery device read HEX")
+            post_trim = extract_trim(args.read_hex, "recovery device read HEX")
+            image_data = base64.b64decode(reservation["image_base64"], validate=True)
+            compared_image_bytes = verify_programmed_image(image_data, args.read_hex)
+            if post_device_id != baseline["device_id"]:
+                failures.append("recovery Device ID differs from baseline")
+            if post_revision != baseline["device_revision"]:
+                failures.append("recovery Device Revision differs from baseline")
+            if post_trim["osccal_word"] != baseline["osccal_word"]:
+                failures.append("recovery OSCCAL word differs from baseline")
+            if post_trim["bg_bits"] != baseline["bg_bits"]:
+                failures.append("recovery BG<1:0> differs from baseline")
+        except EvidenceError as exc:
+            failures.append(str(exc))
+            compared_image_bytes = 0
+
+    program_b64, program_sha = optional_encoded_file(
+        args.program_log, "retained program transcript")
+    record = {
+        "schema": SCHEMA,
+        "record_type": "program-result",
+        "finalization_mode": "recovery",
+        "created_utc": utc_now(),
+        "status": "FAIL" if failures else "PASS",
+        "failures": failures,
+        "part": PART,
+        "variant": reservation["variant"],
+        "image_sha256": reservation["image_sha256"],
+        "programmed_image_bytes_verified": compared_image_bytes,
+        "baseline_sha256": sha256_bytes(baseline_raw),
+        "reservation_sha256": sha256_bytes(reservation_raw),
+        "baseline_osccal_word": baseline["osccal_word"],
+        "baseline_osccal_value": baseline["osccal_value"],
+        "baseline_config_word": baseline["config_word"],
+        "baseline_bg_bits": baseline["bg_bits"],
+        "prewrite_osccal_word": reservation["osccal_word"],
+        "prewrite_osccal_value": reservation["osccal_value"],
+        "prewrite_config_word": reservation["config_word"],
+        "prewrite_bg_bits": reservation["bg_bits"],
+        "post_osccal_word": post_trim["osccal_word"],
+        "post_osccal_value": post_trim["osccal_value"],
+        "post_config_word": post_trim["config_word"],
+        "post_bg_bits": post_trim["bg_bits"],
+        "device_id": baseline["device_id"],
+        "device_revision": baseline["device_revision"],
+        "post_device_id": post_device_id,
+        "post_device_revision": post_revision,
+        "reader_path": context["reader_path"],
+        "reader_realpath": context["reader_realpath"],
+        "reader_sha256": context["reader_sha256"],
+        "reader_version_base64": version_b64,
+        "reader_version_sha256": version_sha,
+        "reader_version_exit": args.version_exit,
+        "prewrite_read_base64": reservation["device_read_base64"],
+        "prewrite_read_sha256": reservation["device_read_sha256"],
+        "prewrite_hex_base64": reservation["read_hex_base64"],
+        "prewrite_hex_sha256": reservation["read_hex_sha256"],
+        "writer_kind": reservation["writer_kind"],
+        "writer_path": context["writer_path"],
+        "writer_realpath": context["writer_realpath"],
+        "writer_sha256": context["writer_sha256"],
+        "writer_version_base64": reservation["writer_version_base64"],
+        "writer_version_sha256": reservation["writer_version_sha256"],
+        "program_exit": None,
+        "program_base64": program_b64,
+        "program_sha256": program_sha,
+        "post_read_exit": args.read_exit,
+        "post_read_base64": post_b64,
+        "post_read_sha256": post_sha,
+        "post_read_hex_base64": post_hex_b64,
+        "post_read_hex_sha256": post_hex_sha,
+    }
+    attempt_dir = os.path.abspath(args.attempt_dir)
+    output_dir = os.path.abspath(args.output_dir)
+    if os.path.dirname(attempt_dir) != output_dir \
+            or not os.path.basename(attempt_dir).startswith(".recovery-"):
+        raise EvidenceError("recovery attempt directory is outside the transaction")
+    try:
+        attempt_info = os.lstat(attempt_dir)
+    except OSError as exc:
+        raise EvidenceError("recovery attempt directory is unavailable: %s" % exc) from exc
+    if stat.S_ISLNK(attempt_info.st_mode) or not stat.S_ISDIR(attempt_info.st_mode):
+        raise EvidenceError("recovery attempt path is not a real directory")
+    for path in (args.version_log, args.read_log, args.read_hex):
+        if os.path.dirname(os.path.abspath(path)) != attempt_dir:
+            raise EvidenceError("recovery transcript path escaped its private attempt")
+    try:
+        shutil.rmtree(attempt_dir)
+    except OSError as exc:
+        raise EvidenceError("could not remove private recovery attempt: %s" % exc) from exc
+    for name in ("image.hex", "program.log", "reservation.json"):
+        path = os.path.join(args.output_dir, name)
+        if os.path.isfile(path):
+            os.chmod(path, 0o400)
+            fsync_file(path)
+    fsync_directory(args.output_dir)
+    output = os.path.join(args.output_dir, "result.json")
+    publish_json(output, record, "recovered program result evidence")
+    seal_result_directory(args.output_dir, output)
+    status = record["status"]
+    print("PIC12F675_TRIM_RECOVERY_RESULT %s evidence=%s" % (status, output))
     if failures:
         for failure in failures:
             print("FAIL: %s" % failure, file=sys.stderr)
@@ -670,6 +1191,17 @@ def add_reader_arguments(parser):
     parser.add_argument("--version-log", required=True)
     parser.add_argument("--read-log", required=True)
     parser.add_argument("--read-hex", required=True)
+
+
+def add_recovery_identity_arguments(parser):
+    parser.add_argument("--baseline", required=True)
+    parser.add_argument("--reservation", required=True)
+    parser.add_argument("--part", required=True)
+    parser.add_argument("--variant", required=True)
+    parser.add_argument("--reader-path", required=True)
+    parser.add_argument("--writer-kind", choices=("pk2cmd", "ipecmd"), required=True)
+    parser.add_argument("--writer-path", required=True)
+    parser.add_argument("--output-dir", required=True)
 
 
 def parse_args(argv):
@@ -712,6 +1244,24 @@ def parse_args(argv):
     result.add_argument("--post-read-hex", required=True)
     result.add_argument("--post-read-exit", type=int, required=True)
     result.add_argument("--output-dir", required=True)
+
+    recovery_check = subparsers.add_parser("recovery-check")
+    add_recovery_identity_arguments(recovery_check)
+
+    recovery_version_check = subparsers.add_parser("recovery-version-check")
+    add_recovery_identity_arguments(recovery_version_check)
+    recovery_version_check.add_argument("--version-log", required=True)
+    recovery_version_check.add_argument("--version-exit", type=int, required=True)
+
+    recovery_result = subparsers.add_parser("recovery-result")
+    add_recovery_identity_arguments(recovery_result)
+    recovery_result.add_argument("--version-log", required=True)
+    recovery_result.add_argument("--version-exit", type=int, required=True)
+    recovery_result.add_argument("--read-log", required=True)
+    recovery_result.add_argument("--read-hex", required=True)
+    recovery_result.add_argument("--read-exit", type=int, required=True)
+    recovery_result.add_argument("--program-log", required=True)
+    recovery_result.add_argument("--attempt-dir", required=True)
     args = parser.parse_args(argv)
     if args.command is None:
         parser.error("a command is required")
@@ -729,8 +1279,14 @@ def main(argv=None):
             verify_command(args)
         elif args.command == "reserve":
             reserve_command(args)
-        else:
+        elif args.command == "result":
             return result_command(args)
+        elif args.command == "recovery-check":
+            recovery_check_command(args)
+        elif args.command == "recovery-version-check":
+            recovery_version_check_command(args)
+        else:
+            return recovery_result_command(args)
     except EvidenceError as exc:
         print("FAIL: %s" % exc, file=sys.stderr)
         return 1

@@ -69,6 +69,27 @@ release_render_pic12f675_flashing() {
 		'  PIC12F675_BENCH_RESULT="$result"' \
 		'```' \
 		'' \
+		'If an interruption leaves `reservation.json` but no `result.json`, the' \
+		'transaction is **PENDING**. Keep physical custody of the same attached device.' \
+		'Do not write, reflash, capture a new baseline, or reuse the result path. From' \
+		'this same release checkout, resolve it with the same variant and tool identities:' \
+		'' \
+		'```sh' \
+		'make -C "$repo" pic12f675-finalize \' \
+		'  VARIANT=cd4053_simple \' \
+		'  PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \' \
+		'  PIC12F675_READ_PROG=pk2cmd \' \
+		'  PIC12F675_TRIM_EVIDENCE="$baseline" \' \
+		'  PIC12F675_BENCH_RESULT="$result"' \
+		'```' \
+		'' \
+		'Finalization validates every reserved identity and the separately retained image' \
+		'before hardware access and never invokes writer arguments. It verifies the reader' \
+		'version before a full-device read, uses retry-safe private attempts, and exclusively' \
+		'publishes the recovered PASS/FAIL `result.json`; FAIL is a' \
+		'resolved forensic record, not permission to retry the write, and an existing result' \
+		'is immutable.' \
+		'' \
 		'The guarded workflow rejects an image that explicitly programs OSCCAL word' \
 		'`0x3FF`, requires the image BG field to remain erased, compares the live device' \
 		'with the baseline immediately before writing.' \

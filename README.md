@@ -163,6 +163,26 @@ make -C "$repo" pic12f675-release-program \
   PIC12F675_BENCH_RESULT="$result"
 ```
 
+If an interruption leaves `reservation.json` but no `result.json`, the
+transaction is **PENDING**. Keep physical custody of the same attached device;
+do not write, reflash, capture a new baseline, or reuse the result path. From the
+same source checkout, resolve it with the same variant and tool identities:
+
+```sh
+make -C "$repo" pic12f675-finalize \
+  VARIANT=cd4053_simple \
+  PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \
+  PIC12F675_READ_PROG=pk2cmd \
+  PIC12F675_TRIM_EVIDENCE="$baseline" \
+  PIC12F675_BENCH_RESULT="$result"
+```
+
+Finalization never invokes writer arguments. It validates the reservation and
+separately retained image first, verifies the reader version before a full-device
+read, and exclusively publishes the recovered PASS/FAIL `result.json`. Private
+read attempts are retry-safe after interruption. A FAIL is a resolved forensic
+record, not permission to retry the write. An existing result is immutable.
+
 `pic12f675-preflight` is read-only and device-specific; it does not take
 `VARIANT`. Only run the program step after preflight succeeds, using the same
 new baseline and a new result directory path. The parents of both paths must
@@ -221,7 +241,9 @@ device again afterwards, and publishes an exclusive result containing the raw
 transcripts, programmed-byte comparison, and before/after values. The
 `PIC12F675_BENCH_RESULT` path is reserved as a new directory before the write;
 `reservation.json` remains useful after interruption and `result.json` records
-the final PASS/FAIL. A baseline is a one-device, pre-first-write record: the
+the final PASS/FAIL. Until a PENDING reservation is finalized, keep the same
+device under physical custody and prohibit another write or baseline. A baseline
+is a one-device, pre-first-write record: the
 immediate read must match its complete exported HEX as well as identity/trim, so
 do not reuse it for another device or a later reflash. pk2cmd is the pinned
 readback dialect. The software-tested ipecmd write route would require pk2cmd

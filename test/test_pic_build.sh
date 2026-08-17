@@ -84,7 +84,7 @@ case "$PB_TARGET" in
 		# complete-matrix production/consumption and the hardware-programming
 		# calibration guard.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=103
+		expected_checks=121
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -1323,6 +1323,10 @@ printf '[' >> "${PIC12F675_HARDWARE_LOG:?}"
 printf ' %q' "$@" >> "$PIC12F675_HARDWARE_LOG"
 printf ' ]\n' >> "$PIC12F675_HARDWARE_LOG"
 if [[ "${1:-}" == '-?V' ]]; then
+	if [[ "${PIC12F675_PROGRAMMER_MODE:-read}" == recovery-version-mismatch ]]; then
+		printf 'pk2cmd fixture version 1.22\n'
+		exit 0
+	fi
 	printf 'pk2cmd fixture version 1.21\n'
 	exit 0
 fi
@@ -1349,6 +1353,8 @@ if [[ -n "$read_hex" ]]; then
 	fi
 	osccal=:0207FE00A53420
 	config=:02400E00FF11A0
+	device_id=0x0FC0
+	device_revision=0x0001
 	if [[ -e "${PIC12F675_DEVICE_STATE:?}" ]]; then
 		config=:02400E00CC11D3
 	fi
@@ -1361,6 +1367,7 @@ if [[ -n "$read_hex" ]]; then
 			change-osccal) osccal=:0207FE00A6341F ;;
 			change-bg) config=:02400E00CC21C3 ;;
 			wrong-config) config=:02400E00CD11D2 ;;
+			change-identity) device_id=0x0FC1 ;;
 		esac
 	fi
 	program_record=
@@ -1387,7 +1394,18 @@ if [[ -n "$read_hex" ]]; then
 	else
 		printf '%s\n' "$base" "$osccal" "$config" ':00000001FF' > "$read_hex"
 	fi
-	printf 'Target PIC12F675\nDevice ID = 0x0FC0\nDevice Revision = 0x0001\n'
+	if [[ -e "$PIC12F675_PROGRAM_TRANSACTION" \
+			&& "${PIC12F675_PROGRAMMER_MODE:-read}" == malformed-recovery-read ]]; then
+		printf '%s\n' "$base" "$program_record" "$osccal" ':00000001FF' > "$read_hex"
+	fi
+	if [[ -e "$PIC12F675_PROGRAM_TRANSACTION" \
+			&& "${PIC12F675_PROGRAMMER_MODE:-read}" == signal-recovery-read ]]; then
+		kill -TERM "$PPID"
+		sleep 1
+		exit 96
+	fi
+	printf 'Target PIC12F675\nDevice ID = %s\nDevice Revision = %s\n' \
+		"$device_id" "$device_revision"
 	exit 0
 fi
 [[ -n "$image" && -f "$image" && ! -L "$image" && -s "$image" ]] \
@@ -1543,6 +1561,28 @@ EOF
 				PIC12F675_CAL_CHECKER="$tools/noop-oracle.py" \
 				STRICT_TOOLS=1 "$@" || make_rc=$?
 		assert_pic12_temp_root_empty || return 99
+		return "$make_rc"
+	}
+
+	run_finalize_make() {
+		local result_dir=$1 variant=$2
+		local make_rc=0
+		shift 2
+		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+		PIC12F675_PROGRAM_LOG="$program_log" \
+		PIC12F675_HARDWARE_LOG="$hardware_log" \
+		PIC12F675_PROGRAM_CAPTURE="$program_capture" \
+		PIC12F675_PROGRAMMER_MARKER="$program_late_marker" \
+		PIC12F675_PROGRAM_TRANSACTION="$program_transaction" \
+		PIC12F675_DEVICE_STATE="$program_device_state" \
+		PIC12F675_PROGRAMMER_MODE="${PIC12F675_PROGRAMMER_MODE:-read}" \
+			make --no-print-directory -C "$repo" pic12f675-finalize \
+				CC=true HOSTCC=true VARIANT="$variant" \
+				PIC12F675_PROG="$programmer" PIC12F675_PROG_KIND=pk2cmd \
+				PIC12F675_READ_PROG="$programmer" \
+				PIC12F675_TRIM_EVIDENCE="$program_evidence" \
+				PIC12F675_BENCH_RESULT="$result_dir" \
+				PIC12F675_PART=PIC10F322 STRICT_TOOLS=1 "$@" || make_rc=$?
 		return "$make_rc"
 	}
 
@@ -2091,6 +2131,7 @@ PY
 		&& ! -e "$program_snapshot" \
 		&& -f "$program_capture" && ! -e "$stale_config_marker" \
 		&& -f "$program_result/reservation.json" \
+		&& -f "$program_result/image.hex" \
 		&& -f "$program_result/result.json" ]] \
 		|| { printf 'FAIL: pk2cmd programming did not bind the selected image to its private checked snapshot: %s\n' \
 			"$program_output" >&2; exit 1; }
@@ -2140,13 +2181,320 @@ PY
 		printf 'FAIL: interrupted PIC12F675 writer returned success\n' >&2
 		exit 1
 	fi
-	[[ -f "$signal_result/reservation.json" \
+	[[ -f "$signal_result/reservation.json" && -f "$signal_result/image.hex" \
 		&& -f "$signal_result/program.log" \
 		&& "$(<"$signal_result/program.log")" == *"program bytes consumed before forced signal"* \
 		&& ! -e "$signal_result/result.json" ]] \
 		|| { printf 'FAIL: interrupted writer lost its reserved transaction: %s\n' \
 			"$program_output" >&2; exit 1; }
 	checks=$((checks + 1))
+
+	# Recovery rejects every caller-selected identity mismatch before even the
+	# read-only hardware operations. The image and part probes mutate copies of
+	# the reservation itself; its strict parser must reject both.
+	different_baseline="$work/different-pic12f675-baseline.json"
+	cp "$program_evidence" "$different_baseline"
+	chmod 600 "$different_baseline"
+	python3 - "$different_baseline" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+record["created_utc"] = "2000-01-01T00:00:00Z"
+with open(sys.argv[1], "w", encoding="ascii") as handle:
+    json.dump(record, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+	chmod 400 "$different_baseline"
+	different_reader="$tools/different-pic12f675-reader"
+	different_writer="$tools/different-pic12f675-writer"
+	cp "$programmer" "$different_reader"
+	cp "$programmer" "$different_writer"
+	chmod 750 "$different_reader" "$different_writer"
+	for mismatch in baseline variant reader writer; do
+		: > "$hardware_log"
+		case "$mismatch" in
+			baseline)
+			reason="reservation baseline digest differs from selected baseline"
+			finalize_args=("PIC12F675_TRIM_EVIDENCE=$different_baseline")
+			finalize_variant=$program_variant
+			;;
+			variant)
+			reason="reservation variant differs from selected variant"
+			finalize_args=()
+			finalize_variant=cd4053_with_mute
+			;;
+			reader)
+			reason="reservation reader identity differs from selected reader"
+			finalize_args=("PIC12F675_READ_PROG=$different_reader")
+			finalize_variant=$program_variant
+			;;
+			writer)
+			reason="reservation writer identity differs from selected writer"
+			finalize_args=("PIC12F675_PROG=$different_writer")
+			finalize_variant=$program_variant
+			;;
+		esac
+		if recovery_output=$(run_finalize_make "$signal_result" "$finalize_variant" \
+				"${finalize_args[@]}" 2>&1); then
+			printf 'FAIL: recovery accepted a different %s\n' "$mismatch" >&2
+			exit 1
+		fi
+		[[ "$recovery_output" == *"$reason"* && ! -s "$hardware_log" \
+			&& ! -e "$signal_result/result.json" ]] \
+			|| { printf 'FAIL: different recovery %s reached hardware or failed for the wrong reason: %s\n' \
+				"$mismatch" "$recovery_output" >&2; exit 1; }
+		checks=$((checks + 1))
+	done
+
+	for mutation in part image; do
+		mutated_result="$work/recovery-$mutation-mismatch"
+		cp -a "$signal_result" "$mutated_result"
+		chmod 700 "$mutated_result"
+		chmod 600 "$mutated_result/reservation.json"
+		python3 - "$mutated_result/reservation.json" "$mutation" <<'PY'
+import base64
+import hashlib
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+if sys.argv[2] == "part":
+    record["part"] = "PIC12F683"
+else:
+    image = b":00000001FF\n"
+    record["image_base64"] = base64.b64encode(image).decode("ascii")
+    record["image_sha256"] = hashlib.sha256(image).hexdigest()
+with open(sys.argv[1], "w", encoding="ascii") as handle:
+    json.dump(record, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+		chmod 400 "$mutated_result/reservation.json"
+		: > "$hardware_log"
+		if recovery_output=$(run_finalize_make "$mutated_result" "$program_variant" 2>&1); then
+			printf 'FAIL: recovery accepted a different reserved %s\n' "$mutation" >&2
+			exit 1
+		fi
+		case "$mutation" in
+			part) reason="program reservation has the wrong schema, type, status, or part" ;;
+			image) reason="retained recovery image differs from reservation" ;;
+		esac
+		[[ "$recovery_output" == *"$reason"* && ! -s "$hardware_log" \
+			&& ! -e "$mutated_result/result.json" ]] \
+			|| { printf 'FAIL: different reserved %s reached hardware or failed for the wrong reason: %s\n' \
+				"$mutation" "$recovery_output" >&2; exit 1; }
+		checks=$((checks + 1))
+	done
+
+	# The reader version must still match the reservation before the device read.
+	# A handled interruption during that read removes only its private attempt and
+	# leaves the transaction retryable; an abandoned attempt from SIGKILL/power loss
+	# is safely removed by the next invocation.
+	: > "$hardware_log"
+	if recovery_output=$(PIC12F675_PROGRAMMER_MODE=recovery-version-mismatch \
+			run_finalize_make "$signal_result" "$program_variant" 2>&1); then
+		printf 'FAIL: recovery accepted a changed reader version\n' >&2
+		exit 1
+	fi
+	mapfile -t recovery_hardware < "$hardware_log"
+	[[ "$recovery_output" == *"recovery reader version differs from reservation"* \
+		&& "${#recovery_hardware[@]}" -eq 1 \
+		&& "${recovery_hardware[0]}" == *"[ -\\?V ]"* \
+		&& ! -e "$signal_result/result.json" ]] \
+		|| { printf 'FAIL: changed recovery reader version reached the device: %s\n' \
+			"$recovery_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	: > "$hardware_log"
+	if recovery_output=$(PIC12F675_PROGRAMMER_MODE=signal-recovery-read \
+			run_finalize_make "$signal_result" "$program_variant" 2>&1); then
+		printf 'FAIL: interrupted finalization returned success\n' >&2
+		exit 1
+	fi
+	if compgen -G "$signal_result/.recovery-*" >/dev/null; then
+		printf 'FAIL: handled finalization interruption left a private attempt\n' >&2
+		exit 1
+	fi
+	[[ ! -e "$signal_result/result.json" ]] \
+		|| { printf 'FAIL: interrupted finalization published a result\n' >&2; exit 1; }
+	checks=$((checks + 1))
+	mkdir "$signal_result/.recovery-stale"
+	printf 'abandoned recovery attempt\n' > "$signal_result/.recovery-stale/read.log"
+
+	# Matching live state resolves the original PENDING transaction using exactly
+	# one version query and one read. The writer argv log must remain byte-identical.
+	pending_program_log="$work/pending-program-argv.log"
+	cp "$program_log" "$pending_program_log"
+	: > "$hardware_log"
+	recovery_output=$(run_finalize_make "$signal_result" "$program_variant")
+	cmp -s "$pending_program_log" "$program_log" \
+		|| { printf 'FAIL: read-only recovery invoked writer arguments\n' >&2; exit 1; }
+	mapfile -t recovery_hardware < "$hardware_log"
+	[[ "$recovery_output" == *"PIC12F675_TRIM_RECOVERY_RESULT PASS evidence=$signal_result/result.json"* \
+		&& -f "$signal_result/result.json" \
+		&& ! -e "$signal_result/.recovery-stale" \
+		&& "${#recovery_hardware[@]}" -eq 2 \
+		&& "${recovery_hardware[0]}" == *"[ -\\?V ]"* \
+		&& "${recovery_hardware[1]}" == *"[ -PPIC12F675 -I -GF"*" -R ]"* \
+		&& "$recovery_output" != *"Programming PIC12F675"* ]] \
+		|| { printf 'FAIL: interrupted transaction recovery was not strictly read-only: %s\n' \
+			"$recovery_output" >&2; exit 1; }
+	python3 - "$signal_result/result.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+assert record["status"] == "PASS"
+assert record["finalization_mode"] == "recovery"
+assert record["program_exit"] is None
+assert record["post_read_exit"] == record["reader_version_exit"] == 0
+assert record["programmed_image_bytes_verified"] > 2
+PY
+	checks=$((checks + 1))
+
+	# An unsealed terminal record is repaired only after complete schema, digest,
+	# identity, and status/failure validation. Contradictory evidence stays
+	# unsealed and cannot trigger another hardware read.
+	contradictory_result="$work/contradictory-terminal-result"
+	cp -a "$signal_result" "$contradictory_result"
+	chmod 700 "$contradictory_result"
+	chmod 600 "$contradictory_result/result.json"
+	python3 - "$contradictory_result/result.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+record["failures"].append("contradictory injected failure")
+with open(sys.argv[1], "w", encoding="ascii") as handle:
+    json.dump(record, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+	: > "$hardware_log"
+	if recovery_output=$(run_finalize_make "$contradictory_result" "$program_variant" 2>&1); then
+		printf 'FAIL: recovery sealed contradictory terminal evidence\n' >&2
+		exit 1
+	fi
+	contradictory_mode=$(stat -Lc '%a' -- "$contradictory_result")
+	[[ "$recovery_output" == *"status contradicts its failures"* \
+		&& ! -s "$hardware_log" && "$contradictory_mode" = 700 ]] \
+		|| { printf 'FAIL: contradictory terminal evidence was not rejected safely: %s\n' \
+			"$recovery_output" >&2; exit 1; }
+	checks=$((checks + 1))
+	altered_pass_result="$work/altered-pass-terminal-result"
+	cp -a "$signal_result" "$altered_pass_result"
+	chmod 700 "$altered_pass_result"
+	chmod 600 "$altered_pass_result/result.json"
+	python3 - "$altered_pass_result/result.json" <<'PY'
+import base64
+import hashlib
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+post_hex = base64.b64decode(record["post_read_hex_base64"], validate=True)
+old = b":040000000000FF23DA"
+new = b":040000000300FF23D7"
+assert old in post_hex
+post_hex = post_hex.replace(old, new, 1)
+record["post_read_hex_base64"] = base64.b64encode(post_hex).decode("ascii")
+record["post_read_hex_sha256"] = hashlib.sha256(post_hex).hexdigest()
+with open(sys.argv[1], "w", encoding="ascii") as handle:
+    json.dump(record, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+	: > "$hardware_log"
+	if recovery_output=$(run_finalize_make "$altered_pass_result" "$program_variant" 2>&1); then
+		printf 'FAIL: recovery sealed a PASS with altered programmed bytes\n' >&2
+		exit 1
+	fi
+	altered_pass_mode=$(stat -Lc '%a' -- "$altered_pass_result")
+	[[ "$recovery_output" == *"post-program image byte differs at 0x0000"* \
+		&& ! -s "$hardware_log" && "$altered_pass_mode" = 700 ]] \
+		|| { printf 'FAIL: altered terminal PASS was not replayed safely: %s\n' \
+			"$recovery_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# Once result.json exists, finalization is immutable and fails before another
+	# reader query. Simulate a crash after publication but before sealing; the next
+	# invocation validates the terminal record and repairs the directory first.
+	chmod 700 "$signal_result"
+	: > "$hardware_log"
+	if recovery_output=$(run_finalize_make "$signal_result" "$program_variant" 2>&1); then
+		printf 'FAIL: recovery replaced an existing final result\n' >&2
+		exit 1
+	fi
+	result_mode=$(stat -Lc '%a' -- "$signal_result")
+	[[ "$recovery_output" == *"pending transaction already has result.json"* \
+		&& ! -s "$hardware_log" && -f "$signal_result/result.json" \
+		&& "$result_mode" = 500 ]] \
+		|| { printf 'FAIL: repeated finalization reached hardware or failed for the wrong reason: %s\n' \
+			"$recovery_output" >&2; exit 1; }
+	if rm -f -- "$signal_result/result.json" 2>/dev/null; then
+		printf 'FAIL: terminal recovery directory allowed result.json removal\n' >&2
+		exit 1
+	fi
+	checks=$((checks + 1))
+
+	# A recovery read that finds changed trim, CONFIG, identity, or program bytes
+	# still resolves the PENDING state, but exclusively as durable FAIL evidence.
+	for spec in \
+		"change-osccal|recovery OSCCAL word differs from baseline" \
+		"change-bg|recovery BG<1:0> differs from baseline" \
+		"wrong-config|post-program CONFIG differs outside factory BG<1:0>" \
+		"wrong-program-byte|post-program image byte differs at 0x0000" \
+		"change-identity|recovery Device ID differs from baseline" \
+		"malformed-recovery-read|contains no complete CONFIG"; do
+		recovery_mode=${spec%%|*}
+		recovery_reason=${spec#*|}
+		recovery_result="$work/recovery-$recovery_mode-result"
+		rm -rf "$recovery_result"
+		: > "$program_log"
+		: > "$hardware_log"
+		if program_output=$(PIC12F675_PROGRAMMER_MODE=signal-after-write \
+				run_program_make "$PB_BUILD_DIR" "$program_variant" \
+				"PIC12F675_BENCH_RESULT=$recovery_result" 2>&1); then
+			printf 'FAIL: recovery %s fixture did not interrupt its writer\n' "$recovery_mode" >&2
+			exit 1
+		fi
+		[[ -f "$recovery_result/reservation.json" \
+			&& ! -e "$recovery_result/result.json" ]] \
+			|| { printf 'FAIL: recovery %s fixture did not leave PENDING evidence\n' \
+				"$recovery_mode" >&2; exit 1; }
+		: > "$hardware_log"
+		if recovery_output=$(PIC12F675_PROGRAMMER_MODE="$recovery_mode" \
+				run_finalize_make "$recovery_result" "$program_variant" 2>&1); then
+			printf 'FAIL: recovery accepted %s live state\n' "$recovery_mode" >&2
+			exit 1
+		fi
+		[[ "$recovery_output" == *"$recovery_reason"* \
+			&& "$recovery_output" == *"PIC12F675_TRIM_RECOVERY_RESULT FAIL evidence=$recovery_result/result.json"* \
+			&& -f "$recovery_result/result.json" ]] \
+			|| { printf 'FAIL: recovery %s did not publish its durable failure: %s\n' \
+				"$recovery_mode" "$recovery_output" >&2; exit 1; }
+		python3 - "$recovery_result/result.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+assert record["status"] == "FAIL"
+assert record["finalization_mode"] == "recovery"
+assert record["program_exit"] is None
+PY
+		if [ "$recovery_mode" = malformed-recovery-read ]; then
+			chmod 700 "$recovery_result"
+			: > "$hardware_log"
+			if recovery_output=$(run_finalize_make "$recovery_result" "$program_variant" 2>&1); then
+				printf 'FAIL: malformed-read FAIL evidence was finalized twice\n' >&2
+				exit 1
+			fi
+			recovery_mode_bits=$(stat -Lc '%a' -- "$recovery_result")
+			[[ "$recovery_output" == *"pending transaction already has result.json"* \
+				&& ! -s "$hardware_log" && "$recovery_mode_bits" = 500 ]] \
+				|| { printf 'FAIL: legitimate malformed-read FAIL evidence was not self-healed: %s\n' \
+					"$recovery_output" >&2; exit 1; }
+		fi
+		checks=$((checks + 1))
+	done
 
 	# The live read immediately before the write must still match the retained
 	# baseline. A changed chip/trim cannot reach the programming argv.

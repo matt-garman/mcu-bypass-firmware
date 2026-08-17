@@ -11,8 +11,8 @@ Measured at `c81e6a9` (2026-08-12), branch `pic12f675-support`, GNU Make 4.3.
 
 **Decision reaffirmed for `v0.9.9-polish` (2026-08-17):** the repository owner
 explicitly chose to accept the localized P-series additions in the monolithic
-Makefile rather than sequence a split first. After P1 and the pending P2 change,
-the file is 7,646 lines. Those additions extend the existing PIC12F675 and
+Makefile rather than sequence a split first. After P1, P2, and the pending P3
+change, the file is 7,798 lines. Those additions extend the existing PIC12F675 and
 release sections; they do not remove the fourteen-consumer migration cost in
 section 3 or change the split ordering in section 4. The split therefore remains
 deliberately deferred under the revisit triggers in section 7.
