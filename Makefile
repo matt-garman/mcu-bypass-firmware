@@ -2865,7 +2865,7 @@ test-supply-chain:
 	./test/test_supply_chain.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 36/75/95
+# image/host rebuild triggering. The script enforces the canonical 36/75/103
 # counts, so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
@@ -6715,9 +6715,11 @@ pic12f675-preflight: $(PIC12F675_TRIM_EVIDENCE_TOOL)
 # image/word success record proves the check actually ran before the programmer
 # becomes reachable; exit status zero alone is insufficient.
 #
-# The CONFIG word is decoded from the same private snapshot rather than from the
-# build glob `pic12f675-test-config` walks. That check is what covers the BG<1:0>
-# half of item 1 -- the build must leave the factory bandgap bits erased.
+# The CONFIG checker is compiled unconditionally inside the private transaction
+# directory and decodes the same private snapshot rather than consuming the
+# ignored repository-adjacent executable or the build glob `pic12f675-test-config`
+# walks. Its exact image/word record covers the BG<1:0> half of item 1 -- the build
+# must leave the factory bandgap bits erased -- and proves the private checker ran.
 #
 # EVERY oracle capture below compares STDOUT ONLY, and compares it for exact
 # equality. Do NOT fold stderr in with `2>&1`: a deprecation warning, a tracing
@@ -6727,16 +6729,18 @@ pic12f675-preflight: $(PIC12F675_TRIM_EVIDENCE_TOOL)
 # reasons to stderr, which reaches the terminal live either way.
 .PHONY: pic12f675-program pic12f675-release-program
 pic12f675-program: variant-selectors-valid \
-                  test/pic/test_config_pic12f675 $(PIC12F675_CAL_CHECKER) \
+                  test/pic/test_config_pic12f675.c $(PIC_CONFIG_CORE_HDR) \
+                  $(PIC12F675_CONFIG_HDR) $(PIC12F675_CAL_CHECKER) \
                   $(PIC12F675_TRIM_EVIDENCE_TOOL)
 pic12f675-release-program: variant-selectors-valid \
-                          test/pic/test_config_pic12f675 $(PIC12F675_CAL_CHECKER) \
+                          test/pic/test_config_pic12f675.c $(PIC_CONFIG_CORE_HDR) \
+                          $(PIC12F675_CONFIG_HDR) $(PIC12F675_CAL_CHECKER) \
                           $(PIC12F675_TRIM_EVIDENCE_TOOL) \
                           $(PIC12F675_RELEASE_IMAGE_CHECKER) \
                           scripts/verify-release-signature.sh \
                           scripts/verify-release-images.sh \
                           scripts/release-signing-policy.sh
-pic12f675-program pic12f675-release-program:
+pic12f675-program pic12f675-release-program: variant-selectors-valid
 	@if [ "$(if $(filter undefined,$(origin PIC12F675_PROG_HEX)),0,1)" -ne 0 ]; then \
 		echo "ERROR: PIC12F675_PROG_HEX is not supported; the image is derived from validated VARIANT."; \
 		exit 1; \
@@ -6934,6 +6938,18 @@ pic12f675-program pic12f675-release-program:
 		fi; \
 		printf '%s\n' "$$release_source_check"; \
 	fi; \
+	config_checker="$$program_dir/config checker"; \
+	if ! $(HOSTCC) $(HOST_CFLAGS) -Itest \
+			-DPIC_DEVICE_NAME='"PIC$(PIC12F675_CHIP)"' \
+			test/pic/test_config_pic12f675.c -o "$$config_checker"; then \
+		echo "ERROR: could not compile the private PIC12F675 CONFIG checker."; exit 1; \
+	fi; \
+	if [ ! -f "$$config_checker" ] || [ -L "$$config_checker" ] || [ ! -s "$$config_checker" ] || \
+			[ ! -x "$$config_checker" ]; then \
+		echo "ERROR: private PIC12F675 CONFIG checker is missing, empty, a symlink, or not executable."; \
+		exit 1; \
+	fi; \
+	chmod 500 "$$config_checker" || exit 1; \
 	program_build="$$program_dir/build"; \
 	if ! $(MAKE) --no-print-directory pic12f675 \
 			PIC12F675_BUILD_DIR="$$program_build" \
@@ -6985,7 +7001,26 @@ pic12f675-program pic12f675-release-program:
 		exit 1; \
 	fi; \
 	printf '%s\n' "$$calibration_check"; \
-	./test/pic/test_config_pic12f675 "$$snapshot" || exit 1; \
+	config_checker_digest_before=`hash_file "$$config_checker"` || exit 1; \
+	if ! config_check=`"$$config_checker" --programming-record "$$snapshot"`; then \
+		echo "ERROR: refusing to program selected variant $$variant."; \
+		echo "       The private CONFIG checker rejected the selected snapshot."; exit 1; \
+	fi; \
+	if [ ! -f "$$config_checker" ] || [ -L "$$config_checker" ] || [ ! -s "$$config_checker" ] || \
+			[ ! -x "$$config_checker" ]; then \
+		echo "ERROR: private PIC12F675 CONFIG checker changed type while running."; exit 1; \
+	fi; \
+	config_checker_digest_after=`hash_file "$$config_checker"` || exit 1; \
+	if [ "$$config_checker_digest_before" != "$$config_checker_digest_after" ]; then \
+		echo "ERROR: private PIC12F675 CONFIG checker changed while running."; exit 1; \
+	fi; \
+	expected_config_check="PIC_CONFIG_CHECK PASS device=PIC12F675 image=$$snapshot word=0x31CC"; \
+	if [ "$$config_check" != "$$expected_config_check" ]; then \
+		echo "ERROR: refusing to program selected variant $$variant."; \
+		echo "       The private CONFIG checker did not emit its exact image-bound success record."; \
+		exit 1; \
+	fi; \
+	printf '%s\n' "$$config_check"; \
 	if [ "$$release_mode" -eq 1 ]; then \
 		release_image_check=`TMPDIR="$$program_dir" "$(PIC12F675_RELEASE_IMAGE_CHECKER)" \
 			image "$$release_tag" "$$variant" "$$snapshot"` || exit 1; \

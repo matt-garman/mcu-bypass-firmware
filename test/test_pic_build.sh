@@ -84,7 +84,7 @@ case "$PB_TARGET" in
 		# complete-matrix production/consumption and the hardware-programming
 		# calibration guard.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=95
+		expected_checks=103
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -149,6 +149,24 @@ write_valid_hex() {
 			;;
 		bad-config)
 			printf '%s\n' "$program_record" ':02400E00CD31B2' ':00000001FF'
+			;;
+		bad-fosc)
+			printf '%s\n' "$program_record" ':02400E00CD31B2' ':00000001FF'
+			;;
+		bad-wdte)
+			printf '%s\n' "$program_record" ':02400E00C431BB' ':00000001FF'
+			;;
+		bad-mclre)
+			printf '%s\n' "$program_record" ':02400E00EC3193' ':00000001FF'
+			;;
+		bad-boren)
+			printf '%s\n' "$program_record" ':02400E008C31F3' ':00000001FF'
+			;;
+		bad-bg)
+			printf '%s\n' "$program_record" ':02400E00CC21C3' ':00000001FF'
+			;;
+		bad-full-word)
+			printf '%s\n' "$program_record" ':02400E00CC33B1' ':00000001FF'
 			;;
 		overlap)
 			printf '%s\n' "$program_record" ':02000200FF23DA' \
@@ -1054,6 +1072,13 @@ if [ "$PB_TARGET" = pic12f675 ]; then
 	# these checks isolate derived-set publication and consumption rather than
 	# rebuilding the shipping images whose contract was established above.
 	mkdir -p "$repo/test/pic" "$repo/$PB_BUILD_DIR"
+	cp "$ROOT/test/.gitignore" "$repo/test/.gitignore"
+	cp "$ROOT/test/pic/test_config_pic12f675.c" \
+		"$repo/test/pic/test_config_pic12f675.c"
+	cp "$ROOT/test/pic/test_config_pic_core.h" \
+		"$repo/test/pic/test_config_pic_core.h"
+	cp "$ROOT/test/pic/pic12f675_config.h" \
+		"$repo/test/pic/pic12f675_config.h"
 	cp "$ROOT/test/pic/inject_calibration_word.py" \
 		"$repo/test/pic/inject_calibration_word.py"
 	cp "$ROOT/test/pic/pic12f675_trim_evidence.py" \
@@ -1408,21 +1433,62 @@ EOF
 	cc -std=c11 -O2 -Wall -Wextra -Werror -I"$ROOT/test" \
 		-DPIC_DEVICE_NAME='"PIC12F675"' \
 		"$ROOT/test/pic/test_config_pic12f675.c" -o "$real_config_checker"
-	cat > "$repo/test/pic/test_config_pic12f675" <<'EOF'
+	config_host_cc="$tools/pic12f675-config-host-cc"
+	cat > "$config_host_cc" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-image=${1:?}
-"${PIC12F675_REAL_CONFIG_CHECKER:?}" "$image"
+out=
+compile_args=()
+while (($#)); do
+	if [[ "$1" == -o ]]; then
+		out=${2:?}
+		compile_args+=("$1" "$2.real")
+		shift 2
+	else
+		compile_args+=("$1")
+		shift
+	fi
+done
+[[ -n "$out" ]] || { printf 'fixture CONFIG compiler received no output path\n' >&2; exit 2; }
 case "${PIC12F675_CONFIG_MODE:-check}" in
-	check) ;;
+	check|replace) "${PIC12F675_REAL_HOSTCC:?}" "${compile_args[@]}" ;;
+	no-output|near-match|wrong-image) ;;
+	*) printf 'unknown fixture CONFIG mode\n' >&2; exit 93 ;;
+esac
+cat > "$out" <<'RUNNER'
+#!/usr/bin/env bash
+set -euo pipefail
+image=${!#}
+case "${PIC12F675_CONFIG_MODE:-check}" in
+	check) exec "$0.real" "$@" ;;
 	replace)
+		"$0.real" "$@"
 		mv -- "$image" "$image.checked"
 		cp -- "${PIC12F675_CONFIG_REPLACEMENT:?}" "$image"
 		;;
-	*) printf 'unknown fixture CONFIG mode\n' >&2; exit 93 ;;
+	no-output) exit 0 ;;
+	near-match)
+		printf 'PIC_CONFIG_CHECK PASS device=PIC12F675 image=%s word=0x31CC trailing-output\n' "$image"
+		;;
+	wrong-image)
+		printf 'PIC_CONFIG_CHECK PASS device=PIC12F675 image=%s.wrong word=0x31CC\n' "$image"
+		;;
+	*) exit 93 ;;
 esac
+RUNNER
+chmod 750 "$out"
 EOF
-	chmod 750 "$programmer" "$repo/test/pic/test_config_pic12f675"
+	stale_config_marker="$work/stale-config-checker-ran"
+	cat > "$repo/test/pic/test_config_pic12f675" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+image=${!#}
+: > "${PIC12F675_STALE_CONFIG_MARKER:?}"
+printf 'PIC_CONFIG_CHECK PASS device=PIC12F675 image=%s word=0x31CC\n' "$image"
+EOF
+	chmod 750 "$programmer" "$config_host_cc" \
+		"$repo/test/pic/test_config_pic12f675"
+	rm -f "$stale_config_marker"
 
 	assert_pic12_temp_root_empty() (
 		[[ -d "$pic12_temp_root" && ! -L "$pic12_temp_root" ]] || {
@@ -1458,13 +1524,13 @@ EOF
 		PIC12F675_PROGRAMMER_REPLACEMENT="${PIC12F675_PROGRAMMER_REPLACEMENT:-}" \
 		PIC12F675_CONFIG_MODE="${PIC12F675_CONFIG_MODE:-check}" \
 		PIC12F675_CONFIG_REPLACEMENT="${PIC12F675_CONFIG_REPLACEMENT:-}" \
-		PIC12F675_REAL_CONFIG_CHECKER="$real_config_checker" \
+		PIC12F675_REAL_HOSTCC=cc \
+		PIC12F675_STALE_CONFIG_MARKER="$stale_config_marker" \
 		FAKE_XC8_PIC12F675_MODE="${PIC12F675_PROGRAM_IMAGE_MODE:-shipping}" \
 		FAKE_XC8_MODE="${PIC12F675_PROGRAM_XC8_MODE:-pass}" \
 			make --no-print-directory -C "$repo" \
-				--old-file=test/pic/test_config_pic12f675 \
 				"$program_target" \
-				CC=true HOSTCC=true PIC12F675_BUILD_DIR="$build_dir" \
+				CC=true HOSTCC="$config_host_cc" PIC12F675_BUILD_DIR="$build_dir" \
 				PIC_CC="$tools/xc8" \
 				FW_BASE="$PB_FW_BASE" PIC12F675_TAG="$PB_TAG" \
 				PIC12F675_FLASH_WORDS="$PB_FLASH_WORDS" \
@@ -2014,14 +2080,17 @@ PY
 		|| { printf 'FAIL: pk2cmd received unexpected PIC12F675 argv\n' >&2; exit 1; }
 	program_snapshot=${program_args[1]#-F}
 	expected_program_check="PIC12F675_CALIBRATION_CHECK PASS image=$program_snapshot word=0x3FF"
+	expected_config_check="PIC_CONFIG_CHECK PASS device=PIC12F675 image=$program_snapshot word=0x31CC"
 	[[ "$program_output" == *"$expected_program_check"* \
+		&& "$program_output" == *"$expected_config_check"* \
 		&& "$program_output" == *"development/bench programming is not bound to signed release bytes"* \
 		&& "$program_output" == *"PIC12F675_TRIM_PREWRITE PASS evidence=$program_evidence"* \
 		&& "$program_output" == *"PIC12F675_TRIM_RESULT PASS evidence=$program_result/result.json"* \
 		&& "$program_output" == *"selected variant $program_variant from the fresh build matrix"* \
 		&& "$program_snapshot" == "$pic12_temp_root"/pic12f675-program.*/"image snapshot.hex" \
 		&& ! -e "$program_snapshot" \
-		&& -f "$program_capture" && -f "$program_result/reservation.json" \
+		&& -f "$program_capture" && ! -e "$stale_config_marker" \
+		&& -f "$program_result/reservation.json" \
 		&& -f "$program_result/result.json" ]] \
 		|| { printf 'FAIL: pk2cmd programming did not bind the selected image to its private checked snapshot: %s\n' \
 			"$program_output" >&2; exit 1; }
@@ -2293,18 +2362,48 @@ PY
 	checks=$((checks + 1))
 
 	# The remaining hostile images are emitted by the private fresh build itself.
-	# Each must fail its own pre-flash layer before the fake programmer is reachable.
-	: > "$program_log"
-	if program_output=$(PIC12F675_PROGRAM_IMAGE_MODE=bad-config \
-			run_program_make "$PB_BUILD_DIR" "$program_variant" 2>&1); then
-		printf 'FAIL: PIC12F675 programming accepted a bad CONFIG word\n' >&2
-		exit 1
-	fi
-	[[ "$program_output" == *"CONFIG checks:"* \
-		&& ! -s "$program_log" ]] \
-		|| { printf 'FAIL: bad CONFIG reached the programmer or failed for the wrong reason: %s\n' \
-			"$program_output" >&2; exit 1; }
-	checks=$((checks + 1))
+	# Every safety-critical CONFIG field must fail its named check before any
+	# hardware command; whole-word equality then protects the remaining fields.
+	for spec in \
+		"bad-fosc|FOSC must be INTRCIO" \
+		"bad-wdte|WDTE must be ON" \
+		"bad-mclre|MCLRE must be OFF" \
+		"bad-boren|BOREN must be ON" \
+		"bad-bg|BG must be left ERASED" \
+		"bad-full-word|built CONFIG word must equal 0x31CC"; do
+		config_mode=${spec%%|*}
+		config_reason=${spec#*|}
+		: > "$program_log"
+		: > "$hardware_log"
+		if program_output=$(PIC12F675_PROGRAM_IMAGE_MODE="$config_mode" \
+				run_program_make "$PB_BUILD_DIR" "$program_variant" 2>&1); then
+			printf 'FAIL: PIC12F675 programming accepted CONFIG mode %s\n' "$config_mode" >&2
+			exit 1
+		fi
+		[[ "$program_output" == *"$config_reason"* \
+			&& ! -s "$program_log" && ! -s "$hardware_log" ]] \
+			|| { printf 'FAIL: CONFIG mode %s reached hardware or failed for the wrong reason: %s\n' \
+				"$config_mode" "$program_output" >&2; exit 1; }
+		checks=$((checks + 1))
+	done
+
+	# A hostile host compiler can still produce an exit-zero executable, but no
+	# no-output, near-match, or wrong-image record can satisfy the exact gate.
+	for config_mode in no-output near-match wrong-image; do
+		: > "$program_log"
+		: > "$hardware_log"
+		if program_output=$(PIC12F675_CONFIG_MODE="$config_mode" \
+				run_program_make "$PB_BUILD_DIR" "$program_variant" 2>&1); then
+			printf 'FAIL: PIC12F675 programming trusted CONFIG checker mode %s\n' \
+				"$config_mode" >&2
+			exit 1
+		fi
+		[[ "$program_output" == *"did not emit its exact image-bound success record"* \
+			&& ! -s "$program_log" && ! -s "$hardware_log" ]] \
+			|| { printf 'FAIL: CONFIG checker mode %s reached hardware or failed for the wrong reason: %s\n' \
+				"$config_mode" "$program_output" >&2; exit 1; }
+		checks=$((checks + 1))
+	done
 
 	: > "$program_log"
 	if program_output=$(PIC12F675_PROGRAM_IMAGE_MODE=overlap \

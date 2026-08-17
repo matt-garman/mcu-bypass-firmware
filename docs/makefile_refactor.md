@@ -9,6 +9,14 @@ be justified.
 
 Measured at `c81e6a9` (2026-08-12), branch `pic12f675-support`, GNU Make 4.3.
 
+**Decision reaffirmed for `v0.9.9-polish` (2026-08-17):** the repository owner
+explicitly chose to accept the localized P-series additions in the monolithic
+Makefile rather than sequence a split first. After P1 and the pending P2 change,
+the file is 7,646 lines. Those additions extend the existing PIC12F675 and
+release sections; they do not remove the fourteen-consumer migration cost in
+section 3 or change the split ordering in section 4. The split therefore remains
+deliberately deferred under the revisit triggers in section 7.
+
 **What this document establishes:**
 
 1. **The headline number overstates the problem.** 7337 lines is 2446 full-line
@@ -173,9 +181,11 @@ mechanical refactor, and why the sequencing in §4 puts the safety net first.
    gates stay green — this is a no-op commit, and it is worth doing on its own
    merits even if no split ever follows, because it removes a hardcoded
    assumption from fourteen places.
-2. **Move one section as a canary: PIC12F675.** Largest (1668 lines), most
-   recently churned, and *excluded from the release set* — so a mistake cannot
-   reach a shipped image.
+2. **Move one section as a canary: PIC12F675.** It was the largest (1668 lines)
+   and most recently churned section at the original measurement. It is now a
+   release-supported target, so the earlier reduced-publication-blast-radius
+   rationale no longer applies: a split must preserve and reverify its release
+   semantics in addition to the make-database equivalence check below.
 3. **Verify with `make -rRn --print-data-base`.** Before and after must be
    identical modulo file/line attribution. `test/test_clean_contract.sh:65`
    already uses that oracle, so it is known to work in this tree. It is a
