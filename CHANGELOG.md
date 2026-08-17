@@ -56,6 +56,16 @@ file is the human-readable summary of *what changed*.
   rejects a missing requested-version changelog section or stale bounded
   current-release declarations before creating scratch space or building.
 
+- **The release workflow now revalidates every frozen publication asset
+  immediately before upload.** The canonical image set plus fixed and optional
+  metadata are installed into a root-owned read-only bundle and recorded in a
+  canonical descriptor-based inventory whose digest is carried independently.
+  Publication rechecks the exact file set, types, sizes, identities, and hashes;
+  re-verifies the detached checksum signature and strict image checksums from
+  that same directory; rechecks the inventory again; and then invokes `gh`
+  without an intervening command. Added, removed, renamed, empty, symlinked,
+  non-regular, or byte-modified assets fail before upload.
+
 ## [0.9.9] - 2026-08-15
 
 ### Fixed

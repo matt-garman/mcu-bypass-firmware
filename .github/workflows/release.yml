@@ -26,10 +26,9 @@ name: Release
 #      `make pic10f322-test-target-variants` + `make pic10f320-test` +
 #      `make pic10f320-test-target-variants` on the clean runner -- the same gates
 #      the MANIFEST claims;
-#   5. rechecks the protected remote tag's object, pinned-key signature and
-#      target, then publishes a GitHub Release with the images, SHA256SUMS.asc,
-#      MANIFEST, the machine-verified QUALIFICATION record, and the verified
-#      RENAME_IDENTITY.md when the one-shot rename check applies.
+#   5. rechecks the protected remote tag and the complete frozen publication
+#      inventory, then re-verifies the detached checksum signature and image
+#      checksums from the exact directory passed to `gh release create`.
 #
 # The runner is pinned to ubuntu-24.04 so the toolchain matches TOOLCHAIN.adoc;
 # byte-exact reproduction depends on that pin (esp. avr-gcc + binutils-avr).
@@ -256,10 +255,14 @@ jobs:
           ((${#image_dirs[@]} > 0)) \
             || { echo "::error::Makefile RELEASE_IMAGE_DIRS is empty"; exit 1; }
           fresh_root="${RUNNER_TEMP}/fresh-release-images"
-          publish="${RUNNER_TEMP}/verified-release"
+          publish_stage="${RUNNER_TEMP}/verified-release-stage"
+          frozen_root=/opt/mcu-bypass-publication
+          publish="$frozen_root/bundle"
           rename_status="${RUNNER_TEMP}/rename-identity.status"
-          rm -rf "$fresh_root" "$publish" "$rename_status"
-          mkdir -p "$fresh_root" "$publish"
+          inventory="$frozen_root/inventory.json"
+          rm -rf "$fresh_root" "$publish_stage" "$rename_status"
+          sudo rm -rf -- "$frozen_root"
+          mkdir -p "$fresh_root" "$publish_stage"
           fresh_dirs=()
           images=()
           shopt -s nullglob dotglob
@@ -275,7 +278,7 @@ jobs:
           ((${#images[@]} > 0)) \
             || { echo "::error::clean rebuild produced no release images"; exit 1; }
           scripts/verify-rename-identity.sh --compare-report "$dir" \
-            "$publish/RENAME_IDENTITY.md" "$RELEASE_TAG" "${images[@]}" \
+            "$publish_stage/RENAME_IDENTITY.md" "$RELEASE_TAG" "${images[@]}" \
             > "$rename_status"
           mapfile -t rename_fields < "$rename_status"
           [ "${#rename_fields[@]}" -eq 2 ] \
@@ -299,7 +302,7 @@ jobs:
             ;;
           esac
 
-          frozen_rename="$publish/RENAME_IDENTITY.md"
+          frozen_rename="$publish_stage/RENAME_IDENTITY.md"
           if [ "$rename_applicable" -eq 1 ]; then
             test -f "$frozen_rename" && test ! -L "$frozen_rename" \
               && test -s "$frozen_rename" \
@@ -324,14 +327,38 @@ jobs:
           # list, so adding a target cannot leave this call on a stale set.
           scripts/verify-release-images.sh "$dir" "${fresh_dirs[@]}"
 
+          release_images_text=$(make -s --no-print-directory print-RELEASE_IMAGES)
+          read -r -a expected_assets <<< "$release_images_text"
+          ((${#expected_assets[@]} > 0)) \
+            || { echo "::error::Makefile RELEASE_IMAGES is empty"; exit 1; }
+          expected_assets+=(SHA256SUMS SHA256SUMS.asc MANIFEST.md QUALIFICATION)
+          if [ "$rename_applicable" -eq 1 ]; then
+            expected_assets+=(RENAME_IDENTITY.md)
+          fi
+
           # Freeze the verified release assets before later test targets run.
           # Publication consumes only this snapshot, never the mutable tree.
           test -f "$dir/MANIFEST.md" && test ! -L "$dir/MANIFEST.md" \
             || { echo "::error::$dir/MANIFEST.md is missing or not a regular file"; exit 1; }
           cp -p -- "$dir"/*.hex "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \
-            "$dir/MANIFEST.md" "$dir/QUALIFICATION" "$publish"/
+            "$dir/MANIFEST.md" "$dir/QUALIFICATION" "$publish_stage"/
+          sudo install -d -o root -g root -m 0700 -- "$frozen_root" "$publish"
+          for asset in "${expected_assets[@]}"; do
+            sudo install -o root -g root -m 0444 -- \
+              "$publish_stage/$asset" "$publish/$asset"
+          done
+          inventory_sha256=$(sudo python3 scripts/verify_release_publication.py \
+            record "$publish" "$inventory" "${expected_assets[@]}")
+          [[ "$inventory_sha256" =~ ^[0-9a-f]{64}$ ]] \
+            || { echo "::error::publication inventory returned an invalid digest"; exit 1; }
+          sudo chmod 0444 -- "$inventory"
+          sudo chmod 0555 -- "$publish" "$frozen_root"
+          python3 scripts/verify_release_publication.py verify \
+            "$publish" "$inventory" "$inventory_sha256"
           {
             echo "dir=$publish"
+            echo "inventory=$inventory"
+            echo "inventory_sha256=$inventory_sha256"
             echo "rename_identity_applicable=$rename_applicable"
             echo "rename_identity_sha256=$rename_sha256"
           } >> "$GITHUB_OUTPUT"
@@ -399,6 +426,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_DIR: ${{ steps.repro.outputs.dir }}
+          RELEASE_INVENTORY: ${{ steps.repro.outputs.inventory }}
+          RELEASE_INVENTORY_SHA256: ${{ steps.repro.outputs.inventory_sha256 }}
           RELEASE_TAG: ${{ github.ref_name }}
           VERIFIED_RELEASE_COMMIT: ${{ steps.rel.outputs.commit }}
           RENAME_IDENTITY_APPLICABLE: ${{ steps.repro.outputs.rename_identity_applicable }}
@@ -438,6 +467,13 @@ jobs:
             exit 1
             ;;
           esac
+          python3 scripts/verify_release_publication.py verify \
+            "$dir" "$RELEASE_INVENTORY" "$RELEASE_INVENTORY_SHA256"
+          scripts/verify-release-signature.sh detached \
+            "$dir/SHA256SUMS.asc" "$dir/SHA256SUMS"
+          (cd "$dir" && sha256sum --check --strict -- SHA256SUMS)
+          python3 scripts/verify_release_publication.py verify \
+            "$dir" "$RELEASE_INVENTORY" "$RELEASE_INVENTORY_SHA256"
           gh release create "$tag" \
             --title "Firmware $tag" \
             --notes-file "$notes" \

@@ -6,6 +6,7 @@ RELEASE="$ROOT/scripts/make-release.sh"
 RELEASE_WORKFLOW="$ROOT/.github/workflows/release.yml"
 RENAME_VERIFY="$ROOT/scripts/verify-rename-identity.sh"
 RELEASE_IMAGE_VERIFY="$ROOT/scripts/verify-release-images.sh"
+PUBLICATION_VERIFY="$ROOT/scripts/verify_release_publication.py"
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-provenance.XXXXXX")
 repo="$work/repo with spaces"
 log="$work/check.log"
@@ -410,7 +411,7 @@ mapfile -t ci_snapshot_lines < <(grep -nF \
 mapfile -t ci_rename_lines < <(grep -nF \
 	'scripts/verify-rename-identity.sh --compare-report "$dir" \' "$RELEASE_WORKFLOW")
 mapfile -t ci_frozen_rename_lines < <(grep -nF \
-	'"$publish/RENAME_IDENTITY.md" "$RELEASE_TAG" "${images[@]}" \' \
+	'"$publish_stage/RENAME_IDENTITY.md" "$RELEASE_TAG" "${images[@]}" \' \
 	"$RELEASE_WORKFLOW")
 mapfile -t ci_repro_lines < <(grep -nF \
 	'scripts/verify-release-images.sh "$dir"' "$RELEASE_WORKFLOW")
@@ -465,23 +466,32 @@ for required in \
 	'image_dirs_text=$(make -s print-RELEASE_IMAGE_DIRS)' \
 	'shopt -s nullglob dotglob' \
 	'cp -a -- "${image_dirs[$i]}"/. "$fresh_dir"/' \
-	'"$publish/RENAME_IDENTITY.md" "$RELEASE_TAG" "${images[@]}"' \
+	'"$publish_stage/RENAME_IDENTITY.md" "$RELEASE_TAG" "${images[@]}"' \
 	'mapfile -t rename_fields < "$rename_status"' \
 	'rename_identity_applicable=1)' \
 	'rename_identity_applicable=0)' \
 	'[ "$frozen_rename_sha256" = "$rename_sha256" ]' \
 	'echo "rename_identity_applicable=$rename_applicable"' \
 	'echo "rename_identity_sha256=$rename_sha256"' \
-	'scripts/verify-release-images.sh "$dir" "${fresh_dirs[@]}"'; do
+	'scripts/verify-release-images.sh "$dir" "${fresh_dirs[@]}"' \
+	'frozen_root=/opt/mcu-bypass-publication' \
+	'sudo install -d -o root -g root -m 0700 -- "$frozen_root" "$publish"' \
+	'record "$publish" "$inventory" "${expected_assets[@]}"' \
+	'sudo chmod 0555 -- "$publish" "$frozen_root"'; do
 	[[ "$ci_rename_block" == *"$required"* ]] \
 		|| fail "tag-CI rename step omits required clean-image wiring: $required"
 done
 for required in \
 	'RENAME_IDENTITY_APPLICABLE: ${{ steps.repro.outputs.rename_identity_applicable }}' \
 	'RENAME_IDENTITY_SHA256: ${{ steps.repro.outputs.rename_identity_sha256 }}' \
+	'RELEASE_INVENTORY: ${{ steps.repro.outputs.inventory }}' \
+	'RELEASE_INVENTORY_SHA256: ${{ steps.repro.outputs.inventory_sha256 }}' \
 	'case "$RENAME_IDENTITY_APPLICABLE" in' \
 	'[ "$actual_rename_sha256" = "$RENAME_IDENTITY_SHA256" ]' \
 	'assets+=("$rename_report")' \
+	'python3 scripts/verify_release_publication.py verify' \
+	'scripts/verify-release-signature.sh detached' \
+	'sha256sum --check --strict -- SHA256SUMS' \
 	'"${assets[@]}"' \
 	'inapplicable release contains a frozen rename report'; do
 	[[ "$ci_publish_block" == *"$required"* ]] \
@@ -520,11 +530,26 @@ publish_assets="$publish_fixture/frozen assets"
 publish_bin="$publish_fixture/bin"
 publish_args="$publish_fixture/gh.args"
 mkdir -p "$publish_fixture/scripts" "$publish_assets" "$publish_bin"
+cp "$PUBLICATION_VERIFY" "$publish_fixture/scripts/verify_release_publication.py"
 cat > "$publish_fixture/scripts/verify-release-tag-target.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 [ "$#" -eq 3 ]
+[ "${TEST_TAG_VERIFY_FAIL:-0}" -eq 0 ] \
+	|| { printf 'tag verification fixture failure\n' >&2; exit 91; }
 printf '%s\n' "$*" > "$TAG_VERIFY_LOG"
+EOF
+cat > "$publish_fixture/scripts/verify-release-signature.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$#" -eq 3 ] && [ "$1" = detached ]
+[ "$2" = "$RELEASE_DIR/SHA256SUMS.asc" ]
+[ "$3" = "$RELEASE_DIR/SHA256SUMS" ]
+[ "${TEST_SIGNATURE_FAIL:-0}" -eq 0 ] \
+	|| { printf 'signature verification fixture failure\n' >&2; exit 92; }
+if [ "${TEST_SIGNATURE_MUTATE:-0}" -eq 1 ]; then
+	printf 'post-signature mutation\n' >> "$RELEASE_DIR/MANIFEST.md"
+fi
 EOF
 cat > "$publish_bin/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -532,9 +557,11 @@ set -euo pipefail
 printf '%s\n' "$@" > "$GH_ARGS"
 EOF
 chmod 750 "$publish_fixture/scripts/verify-release-tag-target.sh" \
+	"$publish_fixture/scripts/verify-release-signature.sh" \
 	"$publish_bin/gh"
 printf ':00000001FF\n' > "$publish_assets/a.hex"
-printf 'dummy sums\n' > "$publish_assets/SHA256SUMS"
+publish_image_hash=$(sha256sum -- "$publish_assets/a.hex")
+printf '%s  a.hex\n' "${publish_image_hash%% *}" > "$publish_assets/SHA256SUMS"
 printf 'dummy signature\n' > "$publish_assets/SHA256SUMS.asc"
 printf '# Test release\n' > "$publish_assets/MANIFEST.md"
 printf 'dummy qualification\n' > "$publish_assets/QUALIFICATION"
@@ -544,6 +571,20 @@ printf '# Verified rename report\n' > "$saved_publish_report"
 publish_hash=$(sha256sum -- "$saved_publish_report")
 publish_hash=${publish_hash%% *}
 tag_verify_log="$work/tag-verify.log"
+publish_inventory="$publish_fixture/publication.inventory.json"
+publish_inventory_sha256=
+
+record_publish_inventory() {
+	local -a expected=(a.hex SHA256SUMS SHA256SUMS.asc MANIFEST.md QUALIFICATION)
+	[ -e "$publish_report" ] || [ -L "$publish_report" ] || :
+	if [ -f "$publish_report" ] && [ ! -L "$publish_report" ]; then
+		expected+=(RENAME_IDENTITY.md)
+	fi
+	rm -f "$publish_inventory"
+	publish_inventory_sha256=$(python3 "$PUBLICATION_VERIFY" record \
+		"$publish_assets" "$publish_inventory" "${expected[@]}") \
+		|| fail "could not record publication-shell fixture inventory"
+}
 
 run_publish_step() {
 	local applicable=$1 digest=$2
@@ -553,9 +594,14 @@ run_publish_step() {
 		PATH="$publish_bin:$PATH" GH_ARGS="$publish_args" \
 			TAG_VERIFY_LOG="$tag_verify_log" \
 			RELEASE_DIR="$publish_assets" RELEASE_TAG=v0.9.8 \
+			RELEASE_INVENTORY="$publish_inventory" \
+			RELEASE_INVENTORY_SHA256="$publish_inventory_sha256" \
 			VERIFIED_RELEASE_COMMIT=0000000000000000000000000000000000000000 \
 			RENAME_IDENTITY_APPLICABLE="$applicable" \
 			RENAME_IDENTITY_SHA256="$digest" \
+			TEST_TAG_VERIFY_FAIL="${TEST_TAG_VERIFY_FAIL:-0}" \
+			TEST_SIGNATURE_FAIL="${TEST_SIGNATURE_FAIL:-0}" \
+			TEST_SIGNATURE_MUTATE="${TEST_SIGNATURE_MUTATE:-0}" \
 			bash "$publish_step"
 	)
 }
@@ -574,6 +620,7 @@ expect_publish_fail() {
 }
 
 cp "$saved_publish_report" "$publish_report"
+record_publish_inventory
 run_publish_step 1 "$publish_hash" >"$work/publish.out" 2>"$work/publish.err" \
 	|| fail "applicable frozen report did not publish: $(<"$work/publish.err")"
 [ "$(grep -Fxc "$publish_report" "$publish_args")" -eq 1 ] \
@@ -587,6 +634,7 @@ done
 checks=$((checks + 1))
 
 rm "$publish_report"
+record_publish_inventory
 run_publish_step 0 '' >"$work/publish.out" 2>"$work/publish.err" \
 	|| fail "inapplicable release without a report did not publish: $(<"$work/publish.err")"
 if grep -Fxq "$publish_report" "$publish_args"; then
@@ -614,6 +662,30 @@ rm "$publish_report"
 
 expect_publish_fail "invalid frozen applicability" invalid '' \
 	"invalid frozen rename applicability state"
+
+TEST_TAG_VERIFY_FAIL=1 expect_publish_fail "failed final tag verification" 0 '' \
+	"tag verification fixture failure"
+
+TEST_SIGNATURE_FAIL=1 expect_publish_fail "failed final checksum signature" 0 '' \
+	"signature verification fixture failure"
+
+printf 'post-freeze mutation\n' >> "$publish_assets/MANIFEST.md"
+expect_publish_fail "failed first final inventory verification" 0 '' \
+	"frozen publication bundle differs from its inventory"
+printf '# Test release\n' > "$publish_assets/MANIFEST.md"
+record_publish_inventory
+
+printf 'malformed checksum record\n' > "$publish_assets/SHA256SUMS"
+record_publish_inventory
+expect_publish_fail "failed strict image checksum verification" 0 '' \
+	"no properly formatted SHA256 checksum lines found"
+printf '%s  a.hex\n' "${publish_image_hash%% *}" > "$publish_assets/SHA256SUMS"
+record_publish_inventory
+
+TEST_SIGNATURE_MUTATE=1 expect_publish_fail "failed post-signature inventory verification" \
+	0 '' "frozen publication bundle differs from its inventory"
+printf '# Test release\n' > "$publish_assets/MANIFEST.md"
+record_publish_inventory
 
 # Exercise the temporal defect directly. The published contract requires one
 # exact PIC10F320 relay change and 17 identities. An all-identical fixture must

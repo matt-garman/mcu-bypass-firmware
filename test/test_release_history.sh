@@ -6,6 +6,7 @@ SOURCE_VERIFY="$ROOT/scripts/verify-release-history.sh"
 TAG_VERIFY_SOURCE="$ROOT/scripts/verify-release-tag-target.sh"
 SIGNATURE_VERIFY_SOURCE="$ROOT/scripts/verify-release-signature.sh"
 PINNED_SIGNATURE_VERIFY="$SIGNATURE_VERIFY_SOURCE"
+PUBLICATION_VERIFY="$ROOT/scripts/verify_release_publication.py"
 WORKFLOW="$ROOT/.github/workflows/release.yml"
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-history.XXXXXX")
 repo="$work/repo"
@@ -251,14 +252,33 @@ grep -Fq 'cp -p -- "$dir"/*.hex "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \' "$WOR
 	|| fail "release workflow does not snapshot the verified checksum signature"
 grep -Fq 'assets=( "$dir"/*.hex "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \' "$WORKFLOW" \
 	|| fail "release workflow does not publish the verified checksum signature"
-checksum_verify_line=$(grep -nF 'scripts/verify-release-signature.sh detached \' "$WORKFLOW" | cut -d: -f1)
+grep -Fq 'inventory_sha256=$(sudo python3 scripts/verify_release_publication.py \' "$WORKFLOW" \
+	|| fail "release workflow does not inventory the frozen publication bundle"
+grep -Fq 'RELEASE_INVENTORY_SHA256: ${{ steps.repro.outputs.inventory_sha256 }}' "$WORKFLOW" \
+	|| fail "release workflow does not route the independently recorded inventory digest"
+mapfile -t checksum_verify_lines \
+	< <(grep -nF 'scripts/verify-release-signature.sh detached \' "$WORKFLOW" | cut -d: -f1)
+[ "${#checksum_verify_lines[@]}" -eq 2 ] \
+	|| fail "release workflow must verify the detached checksum signature exactly twice"
 snapshot_line=$(grep -nF 'cp -p -- "$dir"/*.hex' "$WORKFLOW" | cut -d: -f1)
+inventory_record_line=$(grep -nF 'inventory_sha256=$(sudo python3 scripts/verify_release_publication.py \' "$WORKFLOW" | cut -d: -f1)
 tag_verify_line=$(grep -nF 'scripts/verify-release-tag-target.sh origin' "$WORKFLOW" | cut -d: -f1)
+mapfile -t inventory_verify_lines \
+	< <(grep -nF 'python3 scripts/verify_release_publication.py verify \' "$WORKFLOW" | cut -d: -f1)
+[ "${#inventory_verify_lines[@]}" -eq 3 ] \
+	|| fail "release workflow must verify the frozen bundle once after recording and twice before publication"
+strict_checksum_line=$(grep -nF '(cd "$dir" && sha256sum --check --strict -- SHA256SUMS)' "$WORKFLOW" | cut -d: -f1)
 publish_line=$(grep -nF 'gh release create "$tag"' "$WORKFLOW" | cut -d: -f1)
-[ "$checksum_verify_line" -lt "$snapshot_line" ] \
-	&& [ "$snapshot_line" -lt "$tag_verify_line" ] \
-	&& [ "$tag_verify_line" -lt "$publish_line" ] \
-	|| fail "release signature verification does not precede snapshot/publication"
+[ "${checksum_verify_lines[0]}" -lt "$snapshot_line" ] \
+	&& [ "$snapshot_line" -lt "$inventory_record_line" ] \
+	&& [ "$inventory_record_line" -lt "${inventory_verify_lines[0]}" ] \
+	&& [ "${inventory_verify_lines[0]}" -lt "$tag_verify_line" ] \
+	&& [ "$tag_verify_line" -lt "${inventory_verify_lines[1]}" ] \
+	&& [ "${inventory_verify_lines[1]}" -lt "${checksum_verify_lines[1]}" ] \
+	&& [ "${checksum_verify_lines[1]}" -lt "$strict_checksum_line" ] \
+	&& [ "$strict_checksum_line" -lt "${inventory_verify_lines[2]}" ] \
+	&& [ "${inventory_verify_lines[2]}" -lt "$publish_line" ] \
+	|| fail "release signature/inventory/checksum verification does not dominate publication"
 locate_block=$(awk '/- name: Locate the committed release directory/ { in_block=1 }
 	/# --- toolchains/ { in_block=0 }
 	in_block { print }' "$WORKFLOW")
@@ -269,7 +289,186 @@ publish_block=$(awk '/- name: Publish GitHub Release/ { in_block=1 }
 	|| fail "checksum-signature workflow verification is not fail-closed"
 [[ "$publish_block" == *'set -euo pipefail'* ]] \
 	&& [[ "$publish_block" != *'verify-release-tag-target.sh'*'|| true'* ]] \
+	&& [[ "$publish_block" != *'verify_release_publication.py verify'*'|| true'* ]] \
+	&& [[ "$publish_block" != *'verify-release-signature.sh detached'*'|| true'* ]] \
+	&& [[ "$publish_block" != *'sha256sum --check --strict'*'|| true'* ]] \
 	|| fail "tag-signature workflow verification is not fail-closed"
+checks=$((checks + 1))
+
+[ -f "$PUBLICATION_VERIFY" ] && [ ! -L "$PUBLICATION_VERIFY" ] \
+	|| fail "publication-bundle verifier is missing or symlinked"
+publication_dir="$work/publication-bundle"
+publication_inventory="$work/publication.inventory.json"
+publication_log="$work/publication.log"
+publication_files=(
+	firmware.hex
+	SHA256SUMS
+	SHA256SUMS.asc
+	MANIFEST.md
+	QUALIFICATION
+	RENAME_IDENTITY.md
+)
+
+setup_publication_bundle() {
+	local include_rename=${1:-1} name
+	local -a expected_assets=()
+	rm -rf "$publication_dir" "$publication_inventory"
+	mkdir "$publication_dir"
+	for name in "${publication_files[@]}"; do
+		[ "$include_rename" -eq 1 ] || [ "$name" != RENAME_IDENTITY.md ] || continue
+		printf 'publication fixture: %s\n' "$name" > "$publication_dir/$name"
+		expected_assets+=("$name")
+	done
+	publication_inventory_sha256=$(python3 "$PUBLICATION_VERIFY" record \
+		"$publication_dir" "$publication_inventory" "${expected_assets[@]}") \
+		|| fail "could not record valid publication fixture"
+	[[ "$publication_inventory_sha256" =~ ^[0-9a-f]{64}$ ]] \
+		|| fail "publication recorder returned a malformed inventory digest"
+}
+
+verify_publication_bundle() {
+	python3 "$PUBLICATION_VERIFY" verify "$publication_dir" \
+		"$publication_inventory" "$publication_inventory_sha256"
+}
+
+expect_publication_fail() {
+	local label=$1 expected=$2
+	if verify_publication_bundle >"$publication_log" 2>&1; then
+		fail "$label: invalid frozen publication bundle was accepted"
+	fi
+	grep -Fq "$expected" "$publication_log" \
+		|| fail "$label failed for the wrong reason: $(<"$publication_log")"
+	checks=$((checks + 1))
+}
+
+setup_publication_bundle
+verify_publication_bundle >/dev/null \
+	|| fail "valid publication bundle was rejected"
+checks=$((checks + 1))
+
+setup_publication_bundle 0
+verify_publication_bundle >/dev/null \
+	|| fail "valid publication bundle without rename evidence was rejected"
+checks=$((checks + 1))
+
+for publication_asset in "${publication_files[@]}"; do
+	setup_publication_bundle
+	printf 'post-freeze mutation\n' >> "$publication_dir/$publication_asset"
+	expect_publication_fail "mutated $publication_asset" \
+		"frozen publication bundle differs from its inventory"
+done
+
+setup_publication_bundle
+printf 'unexpected\n' > "$publication_dir/EXTRA.md"
+expect_publication_fail "added publication asset" \
+	"frozen publication bundle differs from its inventory"
+
+setup_publication_bundle
+rm "$publication_dir/MANIFEST.md"
+expect_publication_fail "removed publication asset" \
+	"frozen publication bundle differs from its inventory"
+
+setup_publication_bundle
+mv "$publication_dir/MANIFEST.md" "$publication_dir/NOTES.md"
+expect_publication_fail "renamed publication asset" \
+	"frozen publication bundle differs from its inventory"
+
+setup_publication_bundle
+rm "$publication_dir/MANIFEST.md"
+ln -s QUALIFICATION "$publication_dir/MANIFEST.md"
+expect_publication_fail "symlinked publication asset" "could not open frozen asset"
+
+setup_publication_bundle
+rm "$publication_dir/MANIFEST.md"
+mkfifo "$publication_dir/MANIFEST.md"
+expect_publication_fail "FIFO publication asset" "is not a regular file"
+
+setup_publication_bundle
+rm "$publication_dir/MANIFEST.md"
+mkdir "$publication_dir/MANIFEST.md"
+expect_publication_fail "directory publication asset" "is not a regular file"
+
+setup_publication_bundle
+: > "$publication_dir/MANIFEST.md"
+expect_publication_fail "empty publication asset" "frozen asset is empty"
+
+setup_publication_bundle
+printf 'hidden\n' > "$publication_dir/.hidden"
+expect_publication_fail "hidden publication asset" "unsafe or hidden name"
+
+setup_publication_bundle
+printf 'unsafe\n' > "$publication_dir/unsafe name"
+expect_publication_fail "unsafe publication asset name" "unsafe or hidden name"
+
+setup_publication_bundle
+chmod 600 "$publication_inventory"
+printf 'inventory mutation\n' >> "$publication_inventory"
+expect_publication_fail "mutated publication inventory" "inventory digest changed"
+
+setup_publication_bundle
+mv "$publication_inventory" "$publication_inventory.real"
+ln -s "$publication_inventory.real" "$publication_inventory"
+expect_publication_fail "symlinked publication inventory" \
+	"could not open publication inventory"
+rm -f "$publication_inventory.real"
+
+setup_publication_bundle
+chmod 600 "$publication_inventory"
+printf '{\n' > "$publication_inventory"
+publication_inventory_sha256=$(sha256sum "$publication_inventory")
+publication_inventory_sha256=${publication_inventory_sha256%% *}
+expect_publication_fail "malformed publication inventory" \
+	"inventory is not canonical JSON"
+
+setup_publication_bundle
+if python3 "$PUBLICATION_VERIFY" record "$publication_dir" "$publication_inventory" \
+		"${publication_files[@]}" \
+		>"$publication_log" 2>&1; then
+	fail "publication recorder replaced an existing inventory"
+fi
+grep -Fq 'inventory path already exists' "$publication_log" \
+	|| fail "existing publication inventory failed for the wrong reason"
+checks=$((checks + 1))
+
+setup_publication_bundle
+if python3 "$PUBLICATION_VERIFY" record "$publication_dir" \
+		"$publication_dir/inventory.json" "${publication_files[@]}" \
+		>"$publication_log" 2>&1; then
+	fail "publication recorder admitted its inventory into the frozen bundle"
+fi
+grep -Fq 'inventory must be stored outside' "$publication_log" \
+	|| fail "in-bundle publication inventory failed for the wrong reason"
+checks=$((checks + 1))
+
+setup_publication_bundle
+cp "$publication_inventory" "$work/publication-order-a.json"
+rm -rf "$publication_dir" "$publication_inventory"
+mkdir "$publication_dir"
+for ((publication_index=${#publication_files[@]} - 1; publication_index >= 0; publication_index--)); do
+	publication_asset=${publication_files[$publication_index]}
+	printf 'publication fixture: %s\n' "$publication_asset" \
+		> "$publication_dir/$publication_asset"
+done
+python3 "$PUBLICATION_VERIFY" record "$publication_dir" "$publication_inventory" \
+	"${publication_files[@]}" \
+	>/dev/null || fail "could not record reverse-order publication fixture"
+cmp -s "$work/publication-order-a.json" "$publication_inventory" \
+	|| fail "publication inventory depends on asset creation order"
+checks=$((checks + 1))
+
+rm -rf "$publication_dir" "$publication_inventory"
+mkdir "$publication_dir"
+for publication_asset in "${publication_files[@]}"; do
+	printf 'publication fixture: %s\n' "$publication_asset" \
+		> "$publication_dir/$publication_asset"
+done
+printf 'pre-record addition\n' > "$publication_dir/EXTRA.md"
+if python3 "$PUBLICATION_VERIFY" record "$publication_dir" "$publication_inventory" \
+		"${publication_files[@]}" >"$publication_log" 2>&1; then
+	fail "publication recorder admitted an extra pre-record asset"
+fi
+grep -Fq 'differs from the expected publication asset set' "$publication_log" \
+	|| fail "pre-record asset addition failed for the wrong reason"
 checks=$((checks + 1))
 
 # The checked-in trust root must still verify both the first signed fixture used
