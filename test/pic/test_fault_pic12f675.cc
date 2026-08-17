@@ -33,13 +33,58 @@
 #define PIC_FAULT_DEFAULT_PROC_NAME "p12f675"
 // 1024 words of flash, matching this part's budget in the Makefile.
 #define PIC_FAULT_PROGRAM_WORDS 0x400u
-#define PIC_FAULT_EXPECTED_CHECKS 37u
+// Output-stage fault policy is variant-split (see docs/relay_coil_fault_correction.md).
+//
+// Relay variant: hw_outputs_reassert_safe() re-drives set_relay_coils_low() at
+// the top of every serviced tick, before the sanity gate. Because this part has
+// no LATx and writes the WHOLE shadow to GPIO, that re-assert (a) clears the
+// coil bits in the shadow and (b) refreshes the ENTIRE physical port from the
+// shadow. So a coil SHADOW upset and ANY physical-PORT upset are corrected
+// within one iteration with no reset; only a non-coil SHADOW (intent) upset and
+// the expected-mask (effect_state) upset still reset. A persistent port fault
+// (pin will not follow the refresh) is still caught by port-follows-shadow.
+//
+// CD4053 variants: hw_outputs_reassert_safe() is a no-op, so every output upset
+// still resets, exactly as before.
+#if defined(TQ2_L2_5V_RELAY)
+// expected_resets=0 asserts "corrected, no reset." That transitively proves
+// within-one-tick correction: an uncorrected coil/port bit would diverge from
+// the shadow and trip the port-follows-shadow gate at the next tick -> reset.
+// A shadow coil injection never drives the port high on this part (the re-assert
+// clears the shadow bit before the next GPIO=shadow write), so we cannot use the
+// 320-style inject_relay_correction_case, whose observed_port==mask precondition
+// only holds where the latch drives the port.
+#  define PIC_FAULT_EXPECTED_CHECKS 45u
+#  define PIC_FAULT_EXTRA_OUTPUT_INJECTIONS() do { \
+    inject_case("shadow.GP0", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x01, 1, \
+                "GP0 LED shadow (intent) corruption still resets"); \
+    inject_case("shadow.GP4", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x10, 1, \
+                "parked GP4 shadow (intent) corruption still resets"); \
+    inject_case("shadow.GP1", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x02, 0, \
+                "GP1 RESET-coil shadow corrected low each tick, no reset"); \
+    inject_case("shadow.GP2", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x04, 0, \
+                "GP2 SET-coil shadow corrected low each tick, no reset"); \
+    inject_case("GPIO.GP0", PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, false, 0x01, 0, \
+                "GP0 LED port glitch refreshed low from shadow, no reset"); \
+    inject_case("GPIO.GP1", PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, false, 0x02, 0, \
+                "GP1 RESET-coil port energized, refreshed low from shadow, no reset"); \
+    inject_case("GPIO.GP2", PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, false, 0x04, 0, \
+                "GP2 SET-coil port energized, refreshed low from shadow, no reset"); \
+    inject_case("GPIO.coils", PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, false, 0x06, 0, \
+                "both coil ports energized, refreshed low from shadow, no reset"); \
+    inject_case("GPIO.GP4", PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, false, 0x10, 0, \
+                "parked GP4 port glitch refreshed low from shadow, no reset"); \
+    inject_case("ctx.expected", CTX_EFFECT_STATE, nullptr, true, 0x01, 1, \
+                "BYPASS shadow/GPIO stay matching; ENGAGED expectation isolates shadow mismatch"); \
+} while (0)
+#else
+#  define PIC_FAULT_EXPECTED_CHECKS 37u
 // The shadow cases make both output-integrity clauses false. The GPIO cases
 // isolate port-follows-shadow: the shadow still matches settled BYPASS. The
 // final context case does the converse: valid ENGAGED changes only the expected
 // mask while settled BYPASS shadow/GPIO remain matching, so only
 // shadow-versus-expected can explain its reset.
-#define PIC_FAULT_EXTRA_OUTPUT_INJECTIONS() do { \
+#  define PIC_FAULT_EXTRA_OUTPUT_INJECTIONS() do { \
     inject_case("shadow.GP0", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x01, 1, \
                 "GP0 LED shadow changed from settled low to high"); \
     inject_case("shadow.GP1", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x02, 1, \
@@ -59,6 +104,7 @@
     inject_case("ctx.expected", CTX_EFFECT_STATE, nullptr, true, 0x01, 1, \
                 "BYPASS shadow/GPIO stay matching; ENGAGED expectation isolates shadow mismatch"); \
 } while (0)
+#endif
 #define PIC_FAULT_PROGRAM_STATE_NOTE \
     "0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault)"
 

@@ -351,6 +351,8 @@ __attribute__((OS_main)) int main(void) {
 
     for (;;) {
 
+        hw_outputs_reassert_safe();
+
         // sanity checks against outlier events (cosmic rays, extreme EMI);
         // always checked; force a WDT reset on any violation.
         if ( (ctx_.program_state > RELEASE_DEBOUNCE_WAIT) ||

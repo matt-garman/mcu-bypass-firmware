@@ -563,6 +563,7 @@ void main(void) {
 
         // pause until the next 1.024ms TMR0 tick (polled; no sleep on Model B)
         hw_wait_for_tick();
+        hw_outputs_reassert_safe();
 
         // basic sanity checks against outlier events (cosmic rays, extreme EMI);
         // always checked, regardless of state; force a WDT reset on any

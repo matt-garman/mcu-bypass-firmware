@@ -69,3 +69,6 @@ void hw_set_engaged_state(void) {
     set_relay_coils_low();
 }
 
+void hw_outputs_reassert_safe(void) {
+    set_relay_coils_low();
+}

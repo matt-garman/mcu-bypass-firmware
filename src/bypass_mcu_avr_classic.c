@@ -360,6 +360,8 @@ __attribute__((OS_main)) int main(void) {
 
     while (1) {
 
+        hw_outputs_reassert_safe();
+
         // basic sanity checks against outlier events (cosmic rays, extreme
         // EMI)
         // always called, regardless of state

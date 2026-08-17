@@ -63,3 +63,4 @@ void hw_set_engaged_state(void) {  // ...coming from BYPASS (0,0)
     hw_pin_set_high(CD4053_CTL1);  // ENGAGE (1,1)
 }
 
+void hw_outputs_reassert_safe(void) { }
