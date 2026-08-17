@@ -52,14 +52,16 @@ release_render_pic12f675_flashing() {
 		'tag_commit=$(git -C "$repo" rev-parse --verify "refs/tags/$release_tag^{commit}") &&' \
 		'worktree_status=$(git -C "$repo" status --porcelain=v1 --untracked-files=normal) &&' \
 		'test "$head_commit" = "$tag_commit" && test -z "$worktree_status" &&' \
-		'baseline="$repo/pic12f675-factory-baseline.json" &&' \
-		'result="$repo/pic12f675-program-result" &&' \
+		'evidence_root=$(dirname "$repo") &&' \
+		'baseline="$evidence_root/pic12f675-factory-baseline.json" &&' \
+		'result="$evidence_root/pic12f675-program-result" &&' \
 		'test ! -e "$baseline" && test ! -e "$result" &&' \
 		'make -C "$repo" pic12f675-preflight \' \
 		'  PIC12F675_READ_PROG=pk2cmd \' \
 		'  PIC12F675_TRIM_EVIDENCE="$baseline" &&' \
-		'make -C "$repo" pic12f675-program \' \
+		'make -C "$repo" pic12f675-release-program \' \
 		'  VARIANT=cd4053_simple \' \
+		'  PIC12F675_RELEASE_TAG="$release_tag" \' \
 		'  PIC12F675_PROG=pk2cmd \' \
 		'  PIC12F675_PROG_KIND=pk2cmd \' \
 		'  PIC12F675_READ_PROG=pk2cmd \' \
@@ -76,9 +78,11 @@ release_render_pic12f675_flashing() {
 		'factory trim: preservation remains hardware-unvalidated until the `1.x.y` bench' \
 		'pass. A failure is detected only after the write and may already have damaged the device.' \
 		'The device may still appear to work with wrong timing or BOR/POR thresholds.' \
-		'The fail-stop checks above require a clean checkout of this exact release tag.' \
-		'The target rebuilds with the pinned toolchain; it does not consume a downloaded' \
-		'release HEX. Transient reads and the private build use `TMPDIR` when set,' \
+		'The release target rechecks a clean checkout of this exact annotated release tag,' \
+		'verifies the pinned tag and checksum signatures, and requires the private fresh' \
+		'build to match the selected digest in the complete signed release image set.' \
+		'It does not consume a downloaded release HEX. Baseline and result evidence stay' \
+		'outside the worktree so those checks remain exact. Transient reads and the private build use `TMPDIR` when set,' \
 		'otherwise `XDG_RUNTIME_DIR`, otherwise `HOME`. The selected root must exist, be' \
 		'current-user-private, and have only root/current-user-owned non-writable ancestors.' \
 		'Shared `/tmp` and `/var/tmp` roots are rejected; the path is limited to letters,' \

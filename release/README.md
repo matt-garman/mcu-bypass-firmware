@@ -324,7 +324,7 @@ directory already exists. `pic12f675-preflight` is read-only and does not take
 `VARIANT`; only program after it succeeds, using the same baseline:
 
 ```sh
-# Replace with the release being flashed, for example v0.9.9.
+# Replace with the intended release tag containing pic12f675-release-program.
 release_tag=vX.Y.Z &&
 repo=$(git rev-parse --show-toplevel) &&
 head_commit=$(git -C "$repo" rev-parse --verify "HEAD^{commit}") &&
@@ -332,14 +332,16 @@ tag_commit=$(git -C "$repo" rev-parse --verify \
   "refs/tags/$release_tag^{commit}") &&
 worktree_status=$(git -C "$repo" status --porcelain=v1 --untracked-files=normal) &&
 test "$head_commit" = "$tag_commit" && test -z "$worktree_status" &&
-baseline="$repo/pic12f675-factory-baseline.json" &&
-result="$repo/pic12f675-program-result" &&
+evidence_root=$(dirname "$repo") &&
+baseline="$evidence_root/pic12f675-factory-baseline.json" &&
+result="$evidence_root/pic12f675-program-result" &&
 test ! -e "$baseline" && test ! -e "$result" &&
 make -C "$repo" pic12f675-preflight \
   PIC12F675_READ_PROG=pk2cmd \
   PIC12F675_TRIM_EVIDENCE="$baseline" &&
-make -C "$repo" pic12f675-program \
+make -C "$repo" pic12f675-release-program \
   VARIANT=cd4053_simple \
+  PIC12F675_RELEASE_TAG="$release_tag" \
   PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \
   PIC12F675_READ_PROG=pk2cmd \
   PIC12F675_TRIM_EVIDENCE="$baseline" \
@@ -350,6 +352,9 @@ Replace `cd4053_simple` with `cd4053_with_mute` or `tq2_l2_5v_relay` when
 needed. A baseline belongs to one device before its first write; do not reuse it
 for another device or a later reflash.
 
+The immutable `v0.9.9` tag predates `pic12f675-release-program`; this target
+protects release tags that contain it and is generated into their manifests.
+
 Transient full-device reads and the private programming build use `TMPDIR` when
 set, otherwise `XDG_RUNTIME_DIR`, otherwise `HOME`. The selected root must
 already exist, be owned by the current user, grant no group/other access, and
@@ -358,11 +363,15 @@ shared `/tmp` and `/var/tmp` roots are rejected. Its path may contain letters,
 digits, spaces, `/`, `.`, `_`, and `-`. Only the explicitly requested baseline
 and result paths survive normal, failed, or handled-interruption cleanup.
 
-Run the transaction from a clean checkout of this release's tag with the pinned
-XC8/DFP toolchain. The target rebuilds and checks the tagged source; it does not
-consume the downloaded HEX in this directory. The retained PASS/FAIL result
-checks and records the before/after values; it does not convert untested
-programmer behavior into a preservation guarantee.
+Run the transaction from a clean checkout of this release's annotated tag with
+the pinned XC8/DFP toolchain. The release target verifies the pinned tag and
+`SHA256SUMS` signatures, validates the complete signed release image set, and
+requires the private fresh-build snapshot to match the selected signed digest.
+It does not consume the downloaded HEX in this directory. Baseline and result
+paths are outside the worktree so the target can recheck exact source cleanliness
+immediately before and after the build. The retained PASS/FAIL result checks and
+records the before/after values; it does not convert untested programmer behavior
+into a preservation guarantee.
 
 No ipecmd hardware procedure is qualified. The software-tested route requires
 pk2cmd reads immediately before and after the IPE write, but no safe

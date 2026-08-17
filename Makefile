@@ -28,6 +28,29 @@ _MAKE_SERIAL_PIC12F675_TARGET_VARIANT_EMPTY_COMPUTED := $(if $(strip $(_MAKE_SER
 _MAKE_SERIAL_PIC12F675_TARGET_VARIANT_MULTI_COMPUTED := $(if $(word 2,$(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_REQUESTED)),1,0)
 _MAKE_SERIAL_PIC12F675_TARGET_VARIANT_UNKNOWN_COMPUTED := $(if $(filter-out $(CLASSIC_VARIANTS_SUPPORTED),$(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_REQUESTED)),1,0)
 
+# Preserve the release-programming tag as literal data across the serialization
+# submake. A dollar cannot occur in a valid release tag; reject it before GNU
+# Make could reinterpret a command-line value in the child process.
+_MAKE_SERIAL_PIC12F675_RELEASE_TAG_ORIGIN := $(origin PIC12F675_RELEASE_TAG)
+ifeq ($(_MAKE_SERIAL_PIC12F675_RELEASE_TAG_ORIGIN),undefined)
+_MAKE_SERIAL_PIC12F675_RELEASE_TAG_REQUESTED :=
+else
+_MAKE_SERIAL_PIC12F675_RELEASE_TAG_REQUESTED := $(value PIC12F675_RELEASE_TAG)
+endif
+_MAKE_SERIAL_DOLLAR := $$
+ifneq ($(filter pic12f675-release-program,$(MAKECMDGOALS)),)
+ifneq ($(findstring $(_MAKE_SERIAL_DOLLAR),$(_MAKE_SERIAL_PIC12F675_RELEASE_TAG_REQUESTED)),)
+$(error PIC12F675_RELEASE_TAG must not contain dollar signs)
+endif
+endif
+ifneq ($(filter pic12f675-program,$(MAKECMDGOALS)),)
+ifneq ($(filter pic12f675-release-program,$(MAKECMDGOALS)),)
+$(error request only one PIC12F675 programming target per Make invocation)
+endif
+endif
+override PIC12F675_RELEASE_TAG := $(_MAKE_SERIAL_PIC12F675_RELEASE_TAG_REQUESTED)
+export PIC12F675_RELEASE_TAG
+
 _MAKE_SERIAL_VARIANTS_ORIGIN := $(origin VARIANTS)
 ifeq ($(_MAKE_SERIAL_VARIANTS_ORIGIN),undefined)
 _MAKE_SERIAL_VARIANTS_REQUESTED := $(CLASSIC_VARIANTS_SUPPORTED)
@@ -212,7 +235,7 @@ READELF  ?= readelf
 IHEX_VALIDATOR ?= scripts/validate-ihex.sh
 # Presence check for IHEX_VALIDATOR, shared by every phony recipe that runs it
 # (`pic10f322`, `attiny202`, `pic10f320-size`, `pic12f675`,
-# `pic12f675-preflight`, and `pic12f675-program`). The .hex FILE rules do not need it: they
+# `pic12f675-preflight`, `pic12f675-program`, and `pic12f675-release-program`). The .hex FILE rules do not need it: they
 # carry $(IHEX_VALIDATOR) as a real prerequisite, so Make refuses to run them if
 # it is missing. A phony recipe gets no such protection, and it must not build an
 # image it then cannot validate.
@@ -2842,7 +2865,7 @@ test-supply-chain:
 	./test/test_supply_chain.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 36/75/89
+# image/host rebuild triggering. The script enforces the canonical 36/75/95
 # counts, so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
@@ -6528,8 +6551,10 @@ PIC12F675_READ_PROG ?= $(if $(filter pk2cmd,$(PIC12F675_PROG_KIND)),$(PIC12F675_
 PIC12F675_TRIM_EVIDENCE ?=
 PIC12F675_BENCH_RESULT ?=
 override PIC12F675_TRIM_EVIDENCE_TOOL := test/pic/pic12f675_trim_evidence.py
+override PIC12F675_RELEASE_IMAGE_CHECKER := scripts/verify-release-program-image.sh
 export PIC12F675_PART PIC12F675_PROG PIC12F675_PROG_KIND PIC12F675_PROG_TOOL \
-       PIC12F675_READ_PROG PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT
+       PIC12F675_READ_PROG PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT \
+       PIC12F675_RELEASE_TAG
 
 # Capture the factory values without issuing any erase/write option. The raw
 # programmer version and device transcripts, target Device ID/revision, complete
@@ -6700,10 +6725,18 @@ pic12f675-preflight: $(PIC12F675_TRIM_EVIDENCE_TOOL)
 # PASS record and turn a successful bench write into a reported failure -- after
 # the device has already been programmed. The evidence tool prints its own FAIL
 # reasons to stderr, which reaches the terminal live either way.
-.PHONY: pic12f675-program
+.PHONY: pic12f675-program pic12f675-release-program
 pic12f675-program: variant-selectors-valid \
                   test/pic/test_config_pic12f675 $(PIC12F675_CAL_CHECKER) \
                   $(PIC12F675_TRIM_EVIDENCE_TOOL)
+pic12f675-release-program: variant-selectors-valid \
+                          test/pic/test_config_pic12f675 $(PIC12F675_CAL_CHECKER) \
+                          $(PIC12F675_TRIM_EVIDENCE_TOOL) \
+                          $(PIC12F675_RELEASE_IMAGE_CHECKER) \
+                          scripts/verify-release-signature.sh \
+                          scripts/verify-release-images.sh \
+                          scripts/release-signing-policy.sh
+pic12f675-program pic12f675-release-program:
 	@if [ "$(if $(filter undefined,$(origin PIC12F675_PROG_HEX)),0,1)" -ne 0 ]; then \
 		echo "ERROR: PIC12F675_PROG_HEX is not supported; the image is derived from validated VARIANT."; \
 		exit 1; \
@@ -6711,6 +6744,16 @@ pic12f675-program: variant-selectors-valid \
 	if [ "$(if $(filter undefined,$(origin PIC12F675_PROG_CMD)),0,1)" -ne 0 ]; then \
 		echo "ERROR: PIC12F675_PROG_CMD is not supported; guarded argv is constructed by the target."; \
 		exit 1; \
+	fi; \
+	program_target='$@'; \
+	release_mode=0; release_tag=; \
+	if [ "$$program_target" = pic12f675-release-program ]; then \
+		release_mode=1; release_tag=$$PIC12F675_RELEASE_TAG; \
+		if [ -z "$$release_tag" ]; then \
+			echo "ERROR: PIC12F675_RELEASE_TAG is required for signed-release programming."; exit 1; \
+		fi; \
+	else \
+		echo "WARNING: PIC12F675 development/bench programming is not bound to signed release bytes."; \
 	fi; \
 	variant="$(VARIANT)"; \
 	prog=$$PIC12F675_PROG; \
@@ -6731,6 +6774,25 @@ pic12f675-program: variant-selectors-valid \
 	if [ -e "$$result" ] || [ -L "$$result" ]; then \
 		echo "ERROR: bench-result output already exists; refusing to overwrite: $$result"; \
 		exit 1; \
+	fi; \
+	if [ "$$release_mode" -eq 1 ]; then \
+		repo_root=`git rev-parse --show-toplevel 2>/dev/null` || { \
+			echo "ERROR: signed-release programming must run inside a Git worktree."; exit 1; \
+		}; \
+		repo_root=`CDPATH= cd -- "$$repo_root" && pwd -P` || exit 1; \
+		for retained_path in "$$evidence" "$$result"; do \
+			retained_parent=`dirname -- "$$retained_path"` || exit 1; \
+			retained_base=`basename -- "$$retained_path"` || exit 1; \
+			retained_parent=`CDPATH= cd -- "$$retained_parent" 2>/dev/null && pwd -P` || { \
+				echo "ERROR: release evidence parent directory does not exist: $$retained_path"; exit 1; \
+			}; \
+			retained_abs="$$retained_parent/$$retained_base"; \
+			case "$$retained_abs" in \
+				"$$repo_root"|"$$repo_root"/*) \
+					echo "ERROR: signed-release baseline and result paths must be outside the worktree: $$retained_path"; \
+					exit 1 ;; \
+			esac; \
+		done; \
 	fi; \
 	case "$$prog_kind" in \
 		pk2cmd|ipecmd) : ;; \
@@ -6792,6 +6854,12 @@ pic12f675-program: variant-selectors-valid \
 	fi; \
 	temp_root=`CDPATH= cd -- "$$temp_root" && pwd -P` || exit 1; \
 	while [ "$${temp_root#//}" != "$$temp_root" ]; do temp_root=/$${temp_root#//}; done; \
+	if [ "$$release_mode" -eq 1 ]; then \
+		case "$$temp_root" in \
+			"$$repo_root"|"$$repo_root"/*) \
+				echo "ERROR: signed-release temporary storage must be outside the worktree: $$temp_root"; exit 1 ;; \
+		esac; \
+	fi; \
 	case "$$temp_root" in \
 		/tmp|/tmp/*|/var/tmp|/var/tmp/*) \
 			echo "ERROR: refusing shared temporary root $$temp_root; select private TMPDIR."; exit 1 ;; \
@@ -6857,6 +6925,15 @@ pic12f675-program: variant-selectors-valid \
 	fi; \
 	setup_in_progress=0; \
 	if [ "$$pending_signal" -ne 0 ]; then cleanup_program_snapshot "$$pending_signal"; fi; \
+	if [ "$$release_mode" -eq 1 ]; then \
+		release_source_check=`TMPDIR="$$program_dir" "$(PIC12F675_RELEASE_IMAGE_CHECKER)" \
+			source "$$release_tag"` || exit 1; \
+		expected_release_source="PIC12F675_RELEASE_SOURCE_CHECK PASS tag=$$release_tag"; \
+		if [ "$$release_source_check" != "$$expected_release_source" ]; then \
+			echo "ERROR: release source checker did not emit its exact success record."; exit 1; \
+		fi; \
+		printf '%s\n' "$$release_source_check"; \
+	fi; \
 	program_build="$$program_dir/build"; \
 	if ! $(MAKE) --no-print-directory pic12f675 \
 			PIC12F675_BUILD_DIR="$$program_build" \
@@ -6909,6 +6986,15 @@ pic12f675-program: variant-selectors-valid \
 	fi; \
 	printf '%s\n' "$$calibration_check"; \
 	./test/pic/test_config_pic12f675 "$$snapshot" || exit 1; \
+	if [ "$$release_mode" -eq 1 ]; then \
+		release_image_check=`TMPDIR="$$program_dir" "$(PIC12F675_RELEASE_IMAGE_CHECKER)" \
+			image "$$release_tag" "$$variant" "$$snapshot"` || exit 1; \
+		expected_release_image="PIC12F675_RELEASE_IMAGE_CHECK PASS tag=$$release_tag variant=$$variant image=$$snapshot sha256=$$snapshot_digest_before"; \
+		if [ "$$release_image_check" != "$$expected_release_image" ]; then \
+			echo "ERROR: release image checker did not emit its exact success record."; exit 1; \
+		fi; \
+		printf '%s\n' "$$release_image_check"; \
+	fi; \
 	chmod 500 "$$program_dir" || exit 1; \
 	if [ ! -f "$$snapshot" ] || [ -L "$$snapshot" ] || [ ! -s "$$snapshot" ]; then \
 		echo "ERROR: private programming snapshot changed type during pre-flash checks."; exit 1; \
@@ -7343,9 +7429,11 @@ help:
 	@echo "                        (PIC12F675_TARGET_VARIANT); pic12f675-test-target-variants runs all"
 	@echo "  pic12f675-preflight   read-only factory-trim capture (PIC12F675_READ_PROG=pk2cmd,"
 	@echo "                        PIC12F675_TRIM_EVIDENCE= new retained JSON path)"
-	@echo "  pic12f675-program     after preflight, flash one fresh variant and record mandatory readback"
+	@echo "  pic12f675-program     development/bench path: flash one fresh variant and record mandatory readback"
 	@echo "                        (VARIANT=, PIC12F675_PROG=, PIC12F675_PROG_KIND=pk2cmd|ipecmd,"
 	@echo "                        PIC12F675_TRIM_EVIDENCE=, PIC12F675_BENCH_RESULT= new directory)"
+	@echo "  pic12f675-release-program  same guarded transaction, plus clean signed-tag and signed-image binding"
+	@echo "                        (PIC12F675_RELEASE_TAG=vX.Y.Z; baseline/result paths must be outside the worktree)"
 	@echo "                        Transients use private TMPDIR=, else XDG_RUNTIME_DIR/HOME; shared roots are rejected."
 	@echo "                        Checks/records preservation; real programmer behavior remains hardware-unvalidated."
 	@echo "                        ipecmd routing is software-only; no safe hardware attachment/handoff is published."
@@ -7483,7 +7571,8 @@ help:
 	@echo "Overrides: VARIANT=, AVR_PROGRAMMER=, COVERAGE_MIN=, HOSTCC=, HOST_DEFS=, SIM_DEFS=, AVR_BUILD_DIR="
 	@echo "PIC overrides: PIC_CC=, PIC10F322_PROG=pk2cmd|ipecmd, PIC10F322_PROG_TOOL=PK3|PK4|PK5, PIC10F322_PROG_CMD="
 	@echo "               PIC12F675_PROG=, PIC12F675_PROG_KIND=pk2cmd|ipecmd, PIC12F675_PROG_TOOL=PK3|PK4|PK5,"
-	@echo "               PIC12F675_READ_PROG=pk2cmd, PIC12F675_TRIM_EVIDENCE=, PIC12F675_BENCH_RESULT="
+	@echo "               PIC12F675_READ_PROG=pk2cmd, PIC12F675_TRIM_EVIDENCE=, PIC12F675_BENCH_RESULT=,"
+	@echo "               PIC12F675_RELEASE_TAG=vX.Y.Z (pic12f675-release-program only)"
 
 else
 
@@ -7513,6 +7602,7 @@ _make-serialized-invocation:
 		MAKE='$(MAKE)' \
 		$(if $(filter command line,$(_MAKE_SERIAL_VARIANTS_ORIGIN)),VARIANTS=$(call _make_shell_quote,$(_MAKE_SERIAL_VARIANTS_SAFE))) \
 		$(if $(filter command line,$(_MAKE_SERIAL_PIC320_VARIANTS_ORIGIN)),PIC10F320_VARIANTS_ALL=$(call _make_shell_quote,$(_MAKE_SERIAL_PIC320_VARIANTS_SAFE))) \
+		$(if $(filter command line,$(_MAKE_SERIAL_PIC12F675_RELEASE_TAG_ORIGIN)),PIC12F675_RELEASE_TAG=$(call _make_shell_quote,$(_MAKE_SERIAL_PIC12F675_RELEASE_TAG_REQUESTED))) \
 		$(_MAKE_REQUESTED_GOALS)
 
 endif

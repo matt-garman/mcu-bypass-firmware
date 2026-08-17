@@ -84,7 +84,7 @@ case "$PB_TARGET" in
 		# complete-matrix production/consumption and the hardware-programming
 		# calibration guard.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=89
+		expected_checks=95
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -139,6 +139,12 @@ write_valid_hex() {
 	esac
 	case "${FAKE_XC8_PIC12F675_MODE:-default}" in
 		shipping)
+			printf '%s\n' "$program_record" ':02400E00CC31B3' ':00000001FF'
+			;;
+		byte-different)
+			case "${out:-}" in
+				*-cd4053_simple.hex) program_record=:040000000300FF23D7 ;;
+			esac
 			printf '%s\n' "$program_record" ':02400E00CC31B3' ':00000001FF'
 			;;
 		bad-config)
@@ -1054,6 +1060,12 @@ if [ "$PB_TARGET" = pic12f675 ]; then
 		"$repo/test/pic/pic12f675_trim_evidence.py"
 	cp "$ROOT/test/pic/pic12f675_matrix_evidence.py" \
 		"$repo/test/pic/pic12f675_matrix_evidence.py"
+	cp "$ROOT/scripts/verify-release-program-image.sh" \
+		"$repo/scripts/verify-release-program-image.sh"
+	cp "$ROOT/scripts/verify-release-images.sh" \
+		"$repo/scripts/verify-release-images.sh"
+	cp "$ROOT/scripts/release-signing-policy.sh" \
+		"$repo/scripts/release-signing-policy.sh"
 
 	cal_shipping=()
 	cal_sim=()
@@ -1430,6 +1442,7 @@ EOF
 	run_program_make() {
 		local build_dir=$1 variant=$2
 		local result_path="$work/result-${BASHPID}-${RANDOM}.json"
+		local program_target=${PIC12F675_PROGRAM_TARGET:-pic12f675-program}
 		local make_rc=0
 		shift 2
 		rm -f "$program_transaction" "$program_device_state" "$program_capture"
@@ -1450,7 +1463,7 @@ EOF
 		FAKE_XC8_MODE="${PIC12F675_PROGRAM_XC8_MODE:-pass}" \
 			make --no-print-directory -C "$repo" \
 				--old-file=test/pic/test_config_pic12f675 \
-				pic12f675-program \
+				"$program_target" \
 				CC=true HOSTCC=true PIC12F675_BUILD_DIR="$build_dir" \
 				PIC_CC="$tools/xc8" \
 				FW_BASE="$PB_FW_BASE" PIC12F675_TAG="$PB_TAG" \
@@ -2002,6 +2015,7 @@ PY
 	program_snapshot=${program_args[1]#-F}
 	expected_program_check="PIC12F675_CALIBRATION_CHECK PASS image=$program_snapshot word=0x3FF"
 	[[ "$program_output" == *"$expected_program_check"* \
+		&& "$program_output" == *"development/bench programming is not bound to signed release bytes"* \
 		&& "$program_output" == *"PIC12F675_TRIM_PREWRITE PASS evidence=$program_evidence"* \
 		&& "$program_output" == *"PIC12F675_TRIM_RESULT PASS evidence=$program_result/result.json"* \
 		&& "$program_output" == *"selected variant $program_variant from the fresh build matrix"* \
@@ -2543,6 +2557,181 @@ PY
 	[[ "$cal_output" == *"required by the PIC12F675 calibration-word injector"* ]] \
 		|| { printf 'FAIL: PIC12F675 shipping-image/missing-Python failure reported the wrong result: %s\n' \
 			"$cal_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# Release programming composes the same private snapshot transaction with a
+	# clean annotated-tag check and the selected digest from signed SHA256SUMS.
+	# The signature leaf is synthetic here; production GPG policy is covered by
+	# test_release_history.sh.
+	release_tag=v1.0.0
+	release_dir="$repo/release/$release_tag"
+	release_signature_log="$work/pic12f675-release-signature.log"
+	mkdir -p "$release_dir"
+	cp "$ROOT/.gitignore" "$repo/.gitignore"
+	cat > "$repo/scripts/verify-release-signature.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source "$(dirname "$0")/release-signing-policy.sh"
+printf '%s\0' "$@" >> "${PIC12F675_SIGNATURE_LOG:?}"
+[ "${PIC12F675_SIGNATURE_MODE:-pass}" != "fail-${1:-}" ] || {
+	printf 'fixture signature rejection\n' >&2
+	exit 1
+}
+case "${1:-}" in
+	tag|detached)
+		printf 'SIGNATURE-VALID: %s signature made by %s.\n' \
+			"$1" "$RELEASE_SIGNING_FINGERPRINT"
+		;;
+	*) exit 2 ;;
+esac
+EOF
+	chmod 755 "$repo/scripts/verify-release-signature.sh"
+	release_images=$(_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+		make -s --no-print-directory -C "$repo" print-RELEASE_IMAGES CC=true) \
+		|| { printf 'FAIL: could not read release image set for PIC12F675 programming fixture\n' >&2; exit 1; }
+	for image in $release_images; do
+		case "$image" in
+			bypass-pic12f675-cd4053_simple.hex)
+				write_program_fixture "$release_dir/$image" cd4053_simple ;;
+			bypass-pic12f675-cd4053_with_mute.hex)
+				write_program_fixture "$release_dir/$image" cd4053_with_mute ;;
+			bypass-pic12f675-tq2_l2_5v_relay.hex)
+				write_program_fixture "$release_dir/$image" tq2_l2_5v_relay ;;
+			*) printf 'fixture release bytes for %s\n' "$image" > "$release_dir/$image" ;;
+		esac
+	done
+	(
+		cd "$release_dir"
+		sha256sum $release_images > SHA256SUMS
+	)
+	printf 'fixture detached signature\n' > "$release_dir/SHA256SUMS.asc"
+	git -C "$repo" init -q
+	git -C "$repo" config user.name 'PIC Build Test'
+	git -C "$repo" config user.email 'pic-build@example.invalid'
+	git -C "$repo" add .
+	git -C "$repo" -c commit.gpgsign=false commit -qm fixture
+	git -C "$repo" tag -a -m fixture "$release_tag"
+	: > "$release_signature_log"
+	: > "$program_log"
+	: > "$hardware_log"
+	release_result="$work/pic12f675-release-program-result"
+	rm -rf "$release_result"
+	release_output=$(PIC12F675_PROGRAM_TARGET=pic12f675-release-program \
+		PIC12F675_SIGNATURE_LOG="$release_signature_log" \
+		run_program_make "$PB_BUILD_DIR" "$program_variant" \
+		"PIC12F675_RELEASE_TAG=$release_tag" \
+		"PIC12F675_BENCH_RESULT=$release_result")
+	mapfile -d '' -t program_args < "$program_log"
+	[[ "${#program_args[@]}" -eq 5 && "${program_args[1]}" == -F* ]] \
+		|| { printf 'FAIL: signed-release target did not reach the guarded writer argv\n' >&2; exit 1; }
+	release_snapshot=${program_args[1]#-F}
+	release_digest=$(sha256sum "$release_dir/bypass-pic12f675-cd4053_simple.hex")
+	release_digest=${release_digest%% *}
+	expected_release_check="PIC12F675_RELEASE_IMAGE_CHECK PASS tag=$release_tag variant=$program_variant image=$release_snapshot sha256=$release_digest"
+	mapfile -d '' -t release_signature_args < "$release_signature_log"
+	[[ "$release_output" == *"PIC12F675_RELEASE_SOURCE_CHECK PASS tag=$release_tag"* \
+		&& "$release_output" == *"$expected_release_check"* \
+		&& "$release_snapshot" == "$pic12_temp_root"/pic12f675-program.*/"image snapshot.hex" \
+		&& ! -e "$release_snapshot" \
+		&& "${#release_signature_args[@]}" -eq 9 \
+		&& "${release_signature_args[0]}" = tag \
+		&& "${release_signature_args[3]}" = tag \
+		&& "${release_signature_args[6]}" = detached ]] \
+		|| { printf 'FAIL: signed-release programming did not authenticate and bind its snapshot: %s\n' \
+			"$release_output" >&2; exit 1; }
+	cmp -s "$release_dir/bypass-pic12f675-cd4053_simple.hex" "$program_capture" \
+		|| { printf 'FAIL: signed-release writer did not consume the checked release bytes\n' >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# A tracked mutation after preflight fails the target's internal clean-source
+	# check before any reader or writer operation.
+	source_backup="$work/bypass_pure.c.release-backup"
+	cp "$repo/src/bypass_pure.c" "$source_backup"
+	printf '\n/* tracked release-program mutation */\n' >> "$repo/src/bypass_pure.c"
+	: > "$program_log"
+	: > "$hardware_log"
+	if release_output=$(PIC12F675_PROGRAM_TARGET=pic12f675-release-program \
+			PIC12F675_SIGNATURE_LOG="$release_signature_log" \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_RELEASE_TAG=$release_tag" 2>&1); then
+		printf 'FAIL: signed-release programming accepted a tracked source mutation\n' >&2
+		exit 1
+	fi
+	[[ "$release_output" == *"release-programming worktree is not clean"* \
+		&& ! -s "$program_log" && ! -s "$hardware_log" ]] \
+		|| { printf 'FAIL: tracked release mutation reached hardware or failed for the wrong reason: %s\n' \
+			"$release_output" >&2; exit 1; }
+	cp "$source_backup" "$repo/src/bypass_pure.c"
+	git -C "$repo" diff --quiet \
+		|| { printf 'FAIL: release source fixture did not restore cleanly\n' >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# Valid Intel HEX with safe calibration and CONFIG fields still cannot pass if
+	# its program bytes differ from the selected signed digest.
+	: > "$program_log"
+	: > "$hardware_log"
+	if release_output=$(PIC12F675_PROGRAM_TARGET=pic12f675-release-program \
+			PIC12F675_PROGRAM_IMAGE_MODE=byte-different \
+			PIC12F675_SIGNATURE_LOG="$release_signature_log" \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_RELEASE_TAG=$release_tag" 2>&1); then
+		printf 'FAIL: signed-release programming accepted byte-different compiler output\n' >&2
+		exit 1
+	fi
+	[[ "$release_output" == *"PIC12F675_CALIBRATION_CHECK PASS"* \
+		&& "$release_output" == *"candidate image does not match the signed release image set"* \
+		&& ! -s "$program_log" && ! -s "$hardware_log" ]] \
+		|| { printf 'FAIL: byte-different release image reached hardware or failed for the wrong reason: %s\n' \
+			"$release_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	: > "$program_log"
+	: > "$hardware_log"
+	if release_output=$(PIC12F675_PROGRAM_TARGET=pic12f675-release-program \
+			PIC12F675_SIGNATURE_LOG="$release_signature_log" \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			PIC12F675_RELEASE_TAG=v1.0.1 2>&1); then
+		printf 'FAIL: signed-release programming accepted a mismatched release tag\n' >&2
+		exit 1
+	fi
+	[[ "$release_output" == *"release tag does not exist: v1.0.1"* \
+		&& ! -s "$program_log" && ! -s "$hardware_log" ]] \
+		|| { printf 'FAIL: mismatched release tag reached hardware or failed for the wrong reason: %s\n' \
+			"$release_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	: > "$program_log"
+	: > "$hardware_log"
+	inside_result="$repo/pic12f675-release-result"
+	if release_output=$(PIC12F675_PROGRAM_TARGET=pic12f675-release-program \
+			PIC12F675_SIGNATURE_LOG="$release_signature_log" \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_RELEASE_TAG=$release_tag" \
+			"PIC12F675_BENCH_RESULT=$inside_result" 2>&1); then
+		printf 'FAIL: signed-release programming accepted worktree-local evidence\n' >&2
+		exit 1
+	fi
+	[[ "$release_output" == *"baseline and result paths must be outside the worktree"* \
+		&& ! -s "$program_log" && ! -s "$hardware_log" && ! -e "$inside_result" ]] \
+		|| { printf 'FAIL: worktree-local release evidence reached hardware or failed for the wrong reason: %s\n' \
+			"$release_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	: > "$program_log"
+	: > "$hardware_log"
+	if release_output=$(PIC12F675_PROGRAM_TARGET=pic12f675-release-program \
+			PIC12F675_SIGNATURE_MODE=fail-detached \
+			PIC12F675_SIGNATURE_LOG="$release_signature_log" \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_RELEASE_TAG=$release_tag" 2>&1); then
+		printf 'FAIL: signed-release programming accepted a bad checksum signature\n' >&2
+		exit 1
+	fi
+	[[ "$release_output" == *"release checksum signature verification failed"* \
+		&& ! -s "$program_log" && ! -s "$hardware_log" ]] \
+		|| { printf 'FAIL: bad release checksum signature reached hardware or failed for the wrong reason: %s\n' \
+			"$release_output" >&2; exit 1; }
 	checks=$((checks + 1))
 	[ ! -e "$pic12_temp_cleanup_failure" ] \
 		|| { printf 'FAIL: an expected-failure scenario masked leaked PIC12F675 transient data\n' >&2; exit 1; }
