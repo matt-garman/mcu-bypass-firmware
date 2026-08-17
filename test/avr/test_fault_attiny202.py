@@ -60,9 +60,10 @@ RAM = "ram"              # SRAM byte     (write_ram, addr resolved per variant)
 GATE = "gate"            # expected mechanism: per-tick sanity gate
 LIVE = "live"            # expected mechanism: WDT liveness (or the gate)
 RETRY_GATE = "retry_gate"  # phase-swept reinjection for ISR-rewritten state
+CORRECT = "correct"      # relay coil re-driven low in place each tick, no reset
 
 
-def _fault_cases(sim):
+def _fault_cases(sim, is_relay):
     """(name, kind, addr, corrupt_value, mechanism) for each injectable guard.
 
     SRAM addresses come from the resolved symbols on `sim`; I/O addresses are the
@@ -92,8 +93,17 @@ def _fault_cases(sim):
         ("PORTA.DIR(footswitch)",  REG,  S.REG_PORTA_DIR,         0xCE,   GATE),
         ("PORTA.DIR(spare PA6)",   REG,  S.REG_PORTA_DIR,         0x0E,   GATE),
         ("PORTA.OUT(PA1 LED)",     REG,  S.REG_PORTA_OUT,         0x02,   GATE),
-        ("PORTA.OUT(PA2 control)", REG,  S.REG_PORTA_OUT,         0x04,   GATE),
-        ("PORTA.OUT(PA3 control)", REG,  S.REG_PORTA_OUT,         0x08,   GATE),
+        # Relay: PA2/PA3 are the coils; hw_outputs_reassert_safe() re-drives them
+        # low (PORTA.OUTCLR) at the top of every serviced tick, before the gate,
+        # so a coil-bit upset self-heals with no reset (see
+        # docs/relay_coil_fault_correction.md). CD4053: PA2/PA3 are control lines
+        # (the op is a no-op), so their upsets still reset via the gate.
+        ("PORTA.OUT(PA2 %s)" % ("RESET-coil" if is_relay else "control"),
+                                   REG,  S.REG_PORTA_OUT,         0x04,
+                                   CORRECT if is_relay else GATE),
+        ("PORTA.OUT(PA3 %s)" % ("SET-coil" if is_relay else "control"),
+                                   REG,  S.REG_PORTA_OUT,         0x08,
+                                   CORRECT if is_relay else GATE),
         ("PORTA.OUT(PA6 spare)",   REG,  S.REG_PORTA_OUT,         0x40,   GATE),
         ("ctx_.program_state",    RAM,   sim.addr_ctx + 0,        0xFF,   GATE),
         ("ctx_.effect_state",     RAM,   sim.addr_ctx + 1,        0xFF,   GATE),
@@ -204,6 +214,20 @@ def _run_case(elf, name, kind, addr, corrupt, mech, ck):
         return
     ck.injected()
 
+    if mech == CORRECT:
+        # Coil re-driven low in place by the next tick's OUTCLR re-assert, before
+        # the gate: no force-reset, and the injected bit returns to healthy (low).
+        at = sim.run_until_force_reset(GATE_MS)
+        if at is not None:
+            ck.result(False, "%s corrupted -> unexpected force reset (+%d ms); "
+                             "coil should self-correct in place" % (name, at))
+            return
+        out = sim.read_ioreg(addr)
+        ck.result((out & corrupt) == 0,
+                  "%s corrupted -> coil re-driven low in place, no reset "
+                  "(OUT=0x%02x)" % (name, out))
+        return
+
     if mech == RETRY_GATE:
         elapsed_cycles = 0
         max_cycles = S.F_CPU_HZ * RETRY_GATE_MS // 1000
@@ -284,11 +308,13 @@ def _run_negative_control(elf, ck):
 
 def main(argv):
     elf = S.resolve_elf(argv[1] if len(argv) > 1 else None)
-    print("FAULT START: fw=%s  F_CPU=%d Hz" % (elf, S.F_CPU_HZ))
+    is_relay = "tq2_l2_5v_relay" in elf
+    print("FAULT START: fw=%s  F_CPU=%d Hz  variant=%s"
+          % (elf, S.F_CPU_HZ, "relay" if is_relay else "cd4053"))
 
     ck = Checker()
     probe = S.Sim(elf)                 # one instance just to resolve the case list
-    cases = _fault_cases(probe)
+    cases = _fault_cases(probe, is_relay)
     for name, kind, addr, corrupt, mech in cases:
         _run_case(elf, name, kind, addr, corrupt, mech, ck)
     _run_negative_control(elf, ck)

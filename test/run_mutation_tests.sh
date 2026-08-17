@@ -87,15 +87,15 @@ source "$SCRIPT_DIR/mutation_accounting.sh"
 # constraints (allowlist, no Git) that any edit to it must preserve.
 source "$SCRIPT_DIR/scratch_tree.sh"
 
-readonly MUTATION_EXPECTED_CORE=24
-readonly MUTATION_EXPECTED_XT=19
+readonly MUTATION_EXPECTED_CORE=25
+readonly MUTATION_EXPECTED_XT=21
 readonly MUTATION_EXPECTED_PIC_GPSIM=6
-readonly MUTATION_EXPECTED_PIC_TARGET=8
+readonly MUTATION_EXPECTED_PIC_TARGET=9
 readonly MUTATION_EXPECTED_PIC_SOAK=1
 readonly MUTATION_EXPECTED_PIC320_HOST=29
 readonly MUTATION_EXPECTED_PIC320_TOOL=11
-readonly MUTATION_EXPECTED_PIC12F675=20
-readonly MUTATION_EXPECTED_TOTAL=118
+readonly MUTATION_EXPECTED_PIC12F675=21
+readonly MUTATION_EXPECTED_TOTAL=123
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
@@ -748,6 +748,7 @@ drain_workers() {
 # Each entry: file<TAB>sed-expression<TAB>make-target<TAB>description
 # The sed expression uses '@' as delimiter to avoid clashing with C operators.
 MUTATIONS=(
+"src/bypass_mcu_avr_classic.c	s@hw_outputs_reassert_safe();@@	test-fault-inject-tq2_l2_5v_relay-attiny85	relay coil re-assert call removed from the main loop; the fault-inject coil-correction case sees the injected coil latch reset instead of self-heal"
 # --- core debounce algorithm (bypass_pure.c) -----------------------------------
 "src/bypass_pure.c	s@{ ++counter; }@{ --counter; }@	test-sim-cd4053_simple-attiny13a	ISR integrator: increment-on-press becomes decrement (counter never rises -> never toggles)"
 "src/bypass_pure.c	s@ctx.debounce_counter >= PRESSED_THRESH@ctx.debounce_counter > PRESSED_THRESH@	test-sim-cd4053_simple-attiny13a	press threshold off-by-one (>= becomes >); test_minimum_press_toggles catches the 1-tick divergence"
@@ -1228,6 +1229,13 @@ pic12f675_mutation_has_signature() {
                 && grep -Fq 'unexpected WDT reset' "$log" \
                 && pic12f675_soak_result_complete fail "$command" "$log"
             ;;
+        correct:coil)
+            mutation_command_assignment "$command" PIC12F675_TARGET_VARIANT || return 1
+            variant=$MUTATION_COMMAND_ASSIGNMENT
+            [ "$variant" = tq2_l2_5v_relay ] \
+                && grep -Eq 'FAIL: [1-9][0-9]* resets in 2000 ms \(want exactly 0\)  \[unexpected reset path fired\]' "$log" \
+                && grep -Eq "^PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=45 failures=[1-9][0-9]*$" "$log"
+            ;;
         *) return 2 ;;
     esac
 }
@@ -1605,6 +1613,7 @@ PIC_GPSIM_MUTATIONS=(
 # Mutants killed by the fail-closed PIC target aggregate (fault + lock-step +
 # target I/O). Each entry: file<TAB>sed-expression<TAB>variant<TAB>description.
 PIC_TARGET_MUTATIONS=(
+"src/bypass_mcu_pic10f322.c	s@hw_outputs_reassert_safe();@@	tq2_l2_5v_relay	relay coil re-assert call removed from the main loop; inject_relay_correction_case sees the injected LATA coil reset instead of self-heal"
 "src/bypass_mcu_pic10f322.c	s@WPUA = (uint8_t)(1U << FOOTSW_PIN);@WPUA |= (uint8_t)(1U << FOOTSW_PIN);@	cd4053_simple	PIC pull-up init regressed to read-modify-write; exact WPUA state can preserve unexpected output-pin latches"
 "src/bypass_mcu_pic10f322.c	s@wpua_latches == (uint8_t)(1U << FOOTSW_PIN)@0U != (wpua_latches \& (uint8_t)(1U << FOOTSW_PIN))@	cd4053_simple	PIC exact WPUA guard weakened to RA3-present only; extra RA0..RA2 latches go undetected"
 "src/bypass_mcu_pic10f322.c	s@(actual_direction_mask == expected_direction_mask)@(1U != 0U)@	cd4053_simple	PIC exact-TRISA predicate removed: spare RA2 direction corruption evades the remaining required-subset check"
@@ -1700,6 +1709,7 @@ PIC_SOAK_MUTATIONS=(
 # The signature names positive oracle output required before a failed checker can
 # earn kill credit. Compile failures and unrelated nonzero exits are errors.
 PIC12F675_MUTATIONS=(
+"src/bypass_mcu_pic12f675.c	s@hw_outputs_reassert_safe();@@	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	correct:coil	FW relay coil re-assert call removed; the correct-in-place fault cases (expected_resets=0) reset instead of self-healing, failing the relay fault lane at checks=45"
 "src/bypass_mcu_pic12f675.c	s@(shadow_high_mask == expected_high_mask) &&@((shadow_high_mask == expected_high_mask) || (shadow_high_mask != expected_high_mask)) \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:ctx.expected	TARGET shadow-versus-expected guard tautologized while retaining both operands; the valid ENGAGED context mismatch leaves BYPASS shadow/GPIO matching and must still recover"
 "src/bypass_mcu_pic12f675.c	s@gpio_shadow_ |= (uint8_t)(1U << LED_PIN);@gpio_shadow_ \&= (uint8_t)~(1U << LED_PIN);@	pic12f675-test-gpsim	gpsim:press-led	FW set_engaged LED inverted at the shadow (GP0 stays dark); the PRESS1 toggle-on-press assertion catches it"
 "src/bypass_mcu_pic12f675.c	s@(0U == (GPIO & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (GPIO \& (uint8_t)(1U << FOOTSW_PIN)))@	pic12f675-test-gpsim	gpsim:press-led	FW footswitch read polarity inverted (GP5 sense flipped -> toggles on release); PRESS1 toggle-on-press checkpoint catches it"
@@ -1739,6 +1749,8 @@ PIC12F675_MUTATIONS=(
 #
 # Each entry: file<TAB>sed-expression<TAB>make-args<TAB>description.
 XT_MUTATIONS=(
+"src/bypass_mcu_avr_xt.c	s@hw_outputs_reassert_safe();@@	XT_SIM_VARIANT=tq2_l2_5v_relay attiny202-fault	relay coil re-assert call removed from the main loop; the CORRECT fault mechanism sees PA2/PA3 reset instead of self-heal"
+"src/bypass_output_tq2_l2_5v_relay.c	/void hw_outputs_reassert_safe/,/^}/s@    set_relay_coils_low();@@	XT_SIM_VARIANT=tq2_l2_5v_relay attiny202-fault	relay coil-clear removed from hw_outputs_reassert_safe (the op becomes a no-op); the CORRECT fault mechanism sees the coil stay energized and reset"
 # -- observable behaviour: killed by the functional + output-trace driver ------
 "src/bypass_mcu_avr_xt.c	s@void hw_led_pin_set_high(void) { PORTA.OUTSET = (uint8_t)(1U << LED_PIN); }@void hw_led_pin_set_high(void) { PORTA.OUTCLR = (uint8_t)(1U << LED_PIN); }@	XT_SIM_VARIANT=cd4053_simple attiny202-sim	XT set_engaged LED inverted (OUTSET becomes OUTCLR; PA1 never lights); toggle assertions catch it"
 "src/bypass_mcu_avr_xt.c	s@void hw_led_pin_set_low(void)  { PORTA.OUTCLR = (uint8_t)(1U << LED_PIN); }@void hw_led_pin_set_low(void)  { PORTA.OUTSET = (uint8_t)(1U << LED_PIN); }@	XT_SIM_VARIANT=cd4053_simple attiny202-sim	XT set_bypass LED clear inverted (PA1 stuck lit); boot-dark and alternating-toggle checks catch it"
@@ -2264,6 +2276,18 @@ EOF
         echo "ERROR: PIC12F675 wrong behavioral signature received kill credit" >&2
         exit 1
     }
+    printf '%s\n' \
+        '  inject GPIO.GP1           @0x005: 0x20 -> 0x22  (fixture)' \
+        '    FAIL: 1 resets in 2000 ms (want exactly 0)  [unexpected reset path fired]' \
+        'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=45 failures=1' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 2 correct:coil \
+        'PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target' \
+        "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = killed ] || {
+        echo "ERROR: PIC12F675 correct:coil behavioral failure was not classified as killed" >&2
+        exit 1
+    }
     write_pic12_gpsim_fixture \
         'FAIL: PRESS1_EARLY: LED (GP0) on too early, GPIO=0x3' \
         cd4053_simple > "$signature_log"
@@ -2533,7 +2557,7 @@ EOF
         signature=${MUTATION_RECORD_FIELDS[3]}
         case "$signature" in
             fault:*|gpsim:press-led|gpsim:press-early|lockstep:divergence|\
-            io:relay-minimum|soak:wdt-reset) ;;
+            io:relay-minimum|soak:wdt-reset|correct:coil) ;;
             *) echo "ERROR: PIC12F675 mutation has an unknown signature: $signature" >&2
                exit 1 ;;
         esac

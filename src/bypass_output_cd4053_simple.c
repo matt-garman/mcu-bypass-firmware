@@ -50,3 +50,4 @@ void hw_set_engaged_state(void) {
 }
 
 
+void hw_outputs_reassert_safe(void) { }

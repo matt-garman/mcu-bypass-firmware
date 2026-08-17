@@ -39,6 +39,7 @@
 #include "sim_elf.h"
 #include "avr_ioport.h"
 #include "sim_irq.h"
+#include "sim_cycle_timers.h"
 #include "sim_vcd_file.h"
 
 // Pull PRESSED_THRESH / RELEASE_THRESH directly from the firmware's
@@ -340,13 +341,31 @@ static uint32_t xorshift32(uint32_t *state) {
     return x;
 }
 
-// Drive the footswitch pin. pressed != 0 => drive LOW (pressed).
+// The external switch level the harness intends (1 = high/released, 0 =
+// low/pressed).
+static int g_footsw_intended = 1;
+
+// Drive the footswitch as a PERSISTENT external pull on PB0 via simavr's
+// SET_EXTERNAL ioctl (the ioport's external.pull_mask/pull_value). This models a
+// real footswitch -- a switch to ground: closed, it drives the pin low and beats
+// the MCU's weak internal pull-up. Unlike a one-shot avr_raise_irq (which a later
+// firmware PORTB write re-asserting the pull-up overrides -- the failure the
+// relay shell's per-tick coil re-assert exposed), the external pull is resolved
+// on every read and survives PORT writes. pressed != 0 => drive LOW.
 static void footsw_set(int pressed) {
-    avr_irq_t *pin = avr_io_getirq(g_avr,
-                                   AVR_IOCTL_IOPORT_GETIRQ('B'),
-                                   FOOTSW_PIN);
-    // pin level: 1 = high (released), 0 = low (pressed)
-    avr_raise_irq(pin, pressed ? 0 : 1);
+    g_footsw_intended = pressed ? 0 : 1;
+    // Persistent external pull: survives firmware PORTB writes; but SET_EXTERNAL
+    // alone lands on the NEXT port sync, a one-tick input latency the lock-step
+    // model catches. So also raise the pin IRQ now for a zero-latency edge; the
+    // external pull then holds that level across subsequent PORT writes.
+    avr_ioport_external_t ext = {
+        .name  = 'B',
+        .mask  = (uint8_t)(1U << FOOTSW_PIN),
+        .value = (uint8_t)((unsigned)g_footsw_intended << FOOTSW_PIN),
+    };
+    avr_ioctl(g_avr, AVR_IOCTL_IOPORT_SET_EXTERNAL('B'), &ext);
+    avr_raise_irq(avr_io_getirq(g_avr, AVR_IOCTL_IOPORT_GETIRQ('B'), FOOTSW_PIN),
+                  (uint32_t)g_footsw_intended);
 }
 
 // Run the simulation for `ms` milliseconds of simulated time.
@@ -509,6 +528,8 @@ static int sim_reset_raw(int footsw_pressed_at_power_on, int settle) {
     avr_irq_register_notify(
         avr_io_getirq(g_avr, AVR_IOCTL_IOPORT_GETIRQ('B'), PB3),
         ctl_hook, (void *)(intptr_t)CTL_PB3);
+    // The footswitch is driven as a persistent external pull (see footsw_set),
+    // so it survives firmware PORTB writes -- no per-write re-drive needed.
 
     // Establish the footswitch level BEFORE the firmware samples it in init().
     footsw_set(footsw_pressed_at_power_on);
@@ -1650,10 +1671,66 @@ static void inject_output_latch_bit(uint8_t const pin, const char *what) {
     expect_fault_response(what);
 }
 
+#if defined(TQ2_L2_5V_RELAY)
+// Relay coil correction (see docs/relay_coil_fault_correction.md):
+// hw_outputs_reassert_safe() re-drives the coils low at the TOP of the next
+// serviced tick, before the sanity gate, so an energized-coil upset self-heals
+// within one tick with NO reset and no disruption to the engaged state.
+//
+// Inject while the core is asleep (bottom of the loop, after this tick's gate)
+// so the next wake runs the re-assert before the next gate fires -- the
+// deterministic analogue of the PIC harness's advance_to_loop_clrwdt(). A
+// mutant that drops the re-assert leaves the coil energized: the next gate then
+// resets (tinyx5: g_resets rises, LED darkens) or wedges force_wdt_reset()
+// (t13a: no further sleep), so every assertion below flips.
+static void inject_coil_correction(uint8_t const pin, const char *what) {
+    if (sim_reset(0) != 0) { g_failures++; return; }
+    footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
+    CHECK(g_led_level == 1, "coil-correct [%s]: normal press engages", what);
+
+    if (run_until_first_sleep((avr_cycle_count_t)(4UL * CYCLES_PER_MS)) == 0) {
+        g_failures++;
+        printf("  FAIL: coil-correct [%s]: core never slept before injection\n", what);
+        return;
+    }
+
+    // Corrupt the PORTB output latch (the coil bit) -- the same fault site the
+    // firmware's output-intact gate reads. avr_core_watch_write updates the data
+    // latch but does not re-drive the pin IRQ, so assert on the latch, not on the
+    // pin-level watcher (g_ctl_level), exactly as inject_output_latch_bit does.
+    uint32_t const resets_before = g_resets;
+    uint8_t const bad = (uint8_t)(g_avr->data[PORTB_MEM_ADDR] | (uint8_t)(1U << pin));
+    avr_core_watch_write(g_avr, PORTB_MEM_ADDR, bad);
+    CHECK((g_avr->data[PORTB_MEM_ADDR] & (uint8_t)(1U << pin)) != 0,
+          "coil-correct [%s]: coil latch injection did not stick", what);
+
+    g_saw_sleep = 0;
+    run_ms(20); // several ticks: the re-assert fires and the loop keeps running
+
+    CHECK((g_avr->data[PORTB_MEM_ADDR] & (uint8_t)(1U << pin)) == 0,
+          "coil-correct [%s]: coil latch re-driven low within the window", what);
+    CHECK(g_resets == resets_before,
+          "coil-correct [%s]: no WDT reset (corrected in place), saw %u resets",
+          what, (unsigned)(g_resets - resets_before));
+    CHECK(g_saw_sleep == 1,
+          "coil-correct [%s]: firmware kept running (not wedged in force_wdt_reset)",
+          what);
+    CHECK(g_led_level == 1,
+          "coil-correct [%s]: engaged state preserved (LED still lit)", what);
+}
+#endif
+
 static void test_fault_inject_output_latches(void) {
+    // Coil-only correction on the relay variant: PB2/PB3 (coils) self-heal;
+    // PB1 (LED) and PB4 (spare) still reset. CD4053 variants: all reset.
     inject_output_latch_bit(PB1, "PORTB.PB1 LED latch");
-    inject_output_latch_bit(PB2, "PORTB.PB2 control/coil latch");
-    inject_output_latch_bit(PB3, "PORTB.PB3 control/coil/spare latch");
+#if defined(TQ2_L2_5V_RELAY)
+    inject_coil_correction(PB2, "PORTB.PB2 RESET-coil latch");
+    inject_coil_correction(PB3, "PORTB.PB3 SET-coil latch");
+#else
+    inject_output_latch_bit(PB2, "PORTB.PB2 control latch");
+    inject_output_latch_bit(PB3, "PORTB.PB3 control latch");
+#endif
     inject_output_latch_bit(PB4, "PORTB.PB4 spare latch");
 }
 

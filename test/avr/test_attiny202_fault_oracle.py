@@ -87,9 +87,23 @@ expected_cases = (
     ("TCB0.CTRLA(tick)",       "reg", 0x0A40, 0x00, "live"),
     ("TCB0.INTCTRL(tick)",     "reg", 0x0A45, 0x00, "live"),
 )
-cases = driver._fault_cases(Probe())
+# CD4053 variants: PA2/PA3 are control lines -> gate/reset (the default list).
+cases = driver._fault_cases(Probe(), is_relay=False)
 check(tuple(cases) == expected_cases,
-      "fault kind/address/value/mechanism must match the independent contract")
+      "cd4053 fault kind/address/value/mechanism must match the independent contract")
+
+# Relay variant: PA2/PA3 are the coils -> corrected in place each tick (no reset).
+expected_cases_relay = tuple(
+    ("PORTA.OUT(PA2 RESET-coil)", "reg", 0x0404, 0x04, "correct")
+        if c[0] == "PORTA.OUT(PA2 control)"
+    else ("PORTA.OUT(PA3 SET-coil)", "reg", 0x0404, 0x08, "correct")
+        if c[0] == "PORTA.OUT(PA3 control)"
+    else c
+    for c in expected_cases
+)
+cases_relay = driver._fault_cases(Probe(), is_relay=True)
+check(tuple(cases_relay) == expected_cases_relay,
+      "relay variant: coil OUT faults must be the correct-in-place contract")
 sim_path = Path(__file__).with_name("sim_attiny202.py")
 expected_sim_constants = {
     "REG_PORTA_PIN1CTRL": 0x0411,

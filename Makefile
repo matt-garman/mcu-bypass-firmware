@@ -6461,17 +6461,20 @@ pic12f675-test-target: pic12f675-target-selector-valid variant-selectors-valid _
 	$(pic12f675_load_matrix_sh); \
 	set -e; \
 	for spec in \
-		"pic12f675-test-fault PIC12F675_FAULT_VARIANT=$(PIC12F675_TARGET_VARIANT)|fault|FAULT-INJECT|37" \
+		"pic12f675-test-fault PIC12F675_FAULT_VARIANT=$(PIC12F675_TARGET_VARIANT)|fault|FAULT-INJECT|variant" \
 		"pic12f675-test-lockstep PIC12F675_LOCKSTEP_VARIANT=$(PIC12F675_TARGET_VARIANT)|lockstep|LOCK-STEP|3005" \
 		"pic12f675-test-io PIC12F675_IO_VARIANT=$(PIC12F675_TARGET_VARIANT)|io|TARGET-IO|variant"; do \
 		target=$${spec%%|*}; fields=$${spec#*|}; lane=$${fields%%|*}; \
 		fields=$${fields#*|}; human=$${fields%%|*}; checks=$${fields#*|}; \
 		if [ "$$checks" = variant ]; then \
-			case "$(PIC12F675_TARGET_VARIANT)" in \
-				cd4053_simple) checks=25 ;; \
-				cd4053_with_mute) checks=26 ;; \
-				tq2_l2_5v_relay) checks=36 ;; \
-				*) echo "FAIL: no target-I/O check count for $(PIC12F675_TARGET_VARIANT)"; exit 2 ;; \
+			case "$$lane:$(PIC12F675_TARGET_VARIANT)" in \
+				fault:cd4053_simple) checks=37 ;; \
+				fault:cd4053_with_mute) checks=37 ;; \
+				fault:tq2_l2_5v_relay) checks=45 ;; \
+				io:cd4053_simple) checks=25 ;; \
+				io:cd4053_with_mute) checks=26 ;; \
+				io:tq2_l2_5v_relay) checks=36 ;; \
+				*) echo "FAIL: no check count for $$lane/$(PIC12F675_TARGET_VARIANT)"; exit 2 ;; \
 			esac; \
 		fi; \
 		expected="PIC_TARGET_RESULT format=1 device=pic12f675 lane=$$lane variant=$(PIC12F675_TARGET_VARIANT) status=pass checks=$$checks failures=0"; \

@@ -59,6 +59,12 @@ uint8_t hw_is_sanity_check_failed(effect_state_t const effect_state);
 void hw_init_output_pins(void);
 
 
+// introduced with the mechanical relay output in mind: under ordinary
+// circumstances, this function would *not* be needed; the original design
+// intent is as a safeguard, to force relay coil(s) to their de-energized
+// state.
+void hw_outputs_reassert_safe(void);
+
 
 
 #endif // BYPASS_HW_IFACE_H__
