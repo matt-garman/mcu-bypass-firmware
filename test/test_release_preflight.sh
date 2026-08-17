@@ -10,6 +10,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 RELEASE="$ROOT/scripts/make-release.sh"
+RENDER="$ROOT/scripts/release-documentation.sh"
 MUTATION="$ROOT/test/run_mutation_tests.sh"
 lock_id=$(stat -Lc '%d:%i' "$ROOT") || { printf 'FAIL: could not identify the worktree lock\n' >&2; exit 1; }
 if [ "${_MAKE_SERIAL_LOCK_HELD:-}" != "$lock_id" ]; then
@@ -23,13 +24,18 @@ REAL_BASH=$(command -v bash) || { printf 'FAIL: bash is required\n' >&2; exit 1;
 REAL_DIRNAME=$(command -v dirname) || { printf 'FAIL: dirname is required\n' >&2; exit 1; }
 REAL_STAT=$(command -v stat) || { printf 'FAIL: stat is required\n' >&2; exit 1; }
 REAL_CP=$(command -v cp) || { printf 'FAIL: cp is required\n' >&2; exit 1; }
+REAL_MKTEMP=$(command -v mktemp) || { printf 'FAIL: mktemp is required\n' >&2; exit 1; }
 # shellcheck source=scripts/release-provenance.sh
 source "$ROOT/scripts/release-provenance.sh"
+# shellcheck source=scripts/release-documentation.sh
+source "$RENDER"
 if ! declare -F release_hash_classic_avr_images >/dev/null \
 		|| ! declare -F release_stage_classic_avr_images >/dev/null; then
 	printf 'FAIL: classic-AVR release binding helpers are missing\n' >&2
 	exit 1
 fi
+declare -F release_validate_current_documentation >/dev/null \
+	|| { printf 'FAIL: release documentation validator is missing\n' >&2; exit 1; }
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-preflight.XXXXXX")
 fakebin="$work/bin"
 bootstrap_bin="$work/bootstrap-bin"
@@ -118,6 +124,14 @@ cat > "$fakebin/fake-awk" <<'EOF'
 exec "${REAL_AWK:?}" "$@"
 EOF
 
+cat > "$fakebin/mktemp" <<'EOF'
+#!/usr/bin/env bash
+if [ -n "${TEST_MKTEMP_MARKER:-}" ]; then
+	printf 'mktemp reached\n' > "$TEST_MKTEMP_MARKER"
+fi
+exec "${REAL_MKTEMP:?}" "$@"
+EOF
+
 # The test process owns the real worktree lock. Injection checks use this shim
 # to exercise the outer serialization recipe and its recursive Make without
 # deadlocking on that already-held lock.
@@ -183,6 +197,11 @@ EOF
 
 cat > "$fakebin/git" <<'EOF'
 #!/usr/bin/env bash
+if [ "${1:-}" = rev-parse ] && [ "${2:-}" = --show-toplevel ] \
+		&& [ -n "${TEST_RELEASE_REPO_ROOT:-}" ]; then
+	printf '%s\n' "$TEST_RELEASE_REPO_ROOT"
+	exit 0
+fi
 if [ "${TEST_GIT_STATUS_FAIL:-0}" -eq 1 ] && [ "${1:-}" = status ]; then
 	exit 71
 fi
@@ -301,7 +320,7 @@ run_preflight() {
 		unset VERSION RELEASE_ARGS
 		export PATH="$fakebin:$PATH"
 		export TMPDIR="$work"
-		export REAL_MAKE REAL_PYTHON REAL_GIT REAL_AWK
+		export REAL_MAKE REAL_PYTHON REAL_GIT REAL_AWK REAL_MKTEMP
 		export FAKE_REPO_ROOT="$ROOT" FAKE_TOOLCHAIN="$toolchain"
 		export FAKE_BIN="$fakebin"
 		export MAKE_LOG="$make_log" TOOL_LOG="$tool_log"
@@ -401,6 +420,133 @@ grep -Fxq 'yaml-import' "$tool_log" \
 query_count=$(wc -l < "$make_log")
 [ "$query_count" -eq 82 ] \
 	|| fail "preflight made $query_count Makefile queries, expected 82"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+# Versionless preflight remains a host-capability probe. Supplying a production
+# version additionally exercises the actual checked-in documentation contract.
+run_preflight v0.9.9 >"$output" 2>&1 \
+	|| fail "valid versioned preflight failed: $(<"$output")"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+documentation_root="$work/documentation-root"
+write_documentation_fixture() {
+	local declaration_version=$1 image_count=$2 soak_count=$3
+	local modular_targets=$4 shell_files=$5 changelog_release=${6:-1.2.3}
+	local release_entry=${7:-- Finalized release documentation.}
+	local unreleased_heading=${8:-'## [Unreleased]'}
+	local declaration
+	declaration="**Current release contract:** \`$declaration_version\`; seven release parts; $image_count images; $soak_count soak combinations; $modular_targets modular targets; $shell_files shell source files."
+	rm -rf "$documentation_root"
+	mkdir -p "$documentation_root/release" "$documentation_root/docs"
+	cat > "$documentation_root/CHANGELOG.md" <<EOF
+# Changelog
+
+$unreleased_heading
+
+## [$changelog_release] - 2026-08-17
+
+### Fixed
+
+$release_entry
+
+## [1.2.2] - 2026-08-16
+
+### Fixed
+
+- Prior release.
+
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v1.2.2...v1.2.3
+[1.2.2]: https://github.com/matt-garman/mcu-bypass-firmware/releases/tag/v1.2.2
+EOF
+	for document in release/README.md TODO.md docs/pic10f320_special_case.md \
+			docs/pic10f320_validation.md; do
+		cat > "$documentation_root/$document" <<EOF
+<!-- current-release:start -->
+$declaration
+<!-- current-release:end -->
+EOF
+	done
+}
+
+assert_documentation_rejected() {
+	local description=$1
+	if release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
+			>"$output" 2>&1; then
+		fail "documentation validator accepted $description"
+	fi
+	grep -Fq 'release documentation:' "$output" \
+		|| fail "$description failed without a documentation diagnostic"
+	checks=$((checks + 1))
+}
+
+write_documentation_fixture v1.2.3 21 18 six four
+release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
+	|| fail "documentation validator rejected a finalized fixture"
+checks=$((checks + 1))
+
+write_documentation_fixture v1.2.3 21 18 six four 1.2.4
+assert_documentation_rejected 'a missing requested-version changelog section'
+
+write_documentation_fixture v1.2.3 21 18 six four 1.2.3 \
+	'- Finalized release documentation.' '## [Draft]'
+assert_documentation_rejected 'a missing Unreleased heading'
+
+write_documentation_fixture v1.2.3 21 18 six four 1.2.3 \
+	'Finalized release documentation.'
+assert_documentation_rejected 'an empty requested-version changelog section'
+
+write_documentation_fixture v1.2.30 21 18 six four
+assert_documentation_rejected 'a prefix-matching stale current-release version'
+
+write_documentation_fixture v1.2.3 121 18 six four
+assert_documentation_rejected 'a superset stale current-release image count'
+
+write_documentation_fixture v1.2.3 21 118 six four
+assert_documentation_rejected 'a superset stale current-release soak count'
+
+write_documentation_fixture v1.2.3 21 18 five four
+assert_documentation_rejected 'a stale modular-target count'
+
+write_documentation_fixture v1.2.3 21 18 six fourteen
+assert_documentation_rejected 'a stale modular-shell count'
+
+write_documentation_fixture v1.2.3 21 18 six four
+cat >> "$documentation_root/release/README.md" <<'EOF'
+<!-- current-release:start -->
+duplicate block
+<!-- current-release:end -->
+EOF
+assert_documentation_rejected 'duplicate current-release markers'
+
+# Explicitly historical prose outside the bounded block must remain permitted.
+write_documentation_fixture v1.2.3 21 18 six four
+printf '%s\n' 'Historical v1.0.0 release: five targets, 15 images, 12 soaks.' \
+	>> "$documentation_root/release/README.md"
+release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
+	|| fail "documentation validator treated historical prose as current status"
+checks=$((checks + 1))
+
+# Run the real preflight against a shadow documentation root. A stale bounded
+# declaration must stop the script before its first release-scratch mktemp.
+write_documentation_fixture v1.2.30 21 18 six four
+shadow_root="$work/stale-release-root"
+mkdir -p "$shadow_root/scripts"
+cp -R "$documentation_root/." "$shadow_root/"
+cp "$ROOT/scripts/release-provenance.sh" \
+	"$ROOT/scripts/release-documentation.sh" \
+	"$ROOT/scripts/release-signing-policy.sh" "$shadow_root/scripts/"
+mktemp_marker="$work/release-mktemp-reached"
+if TEST_RELEASE_REPO_ROOT="$shadow_root" TEST_MKTEMP_MARKER="$mktemp_marker" \
+		run_preflight v1.2.3 >"$output" 2>&1; then
+	fail "versioned preflight accepted stale bounded release documentation"
+fi
+grep -Fq 'current release documentation is not finalized for v1.2.3' "$output" \
+	|| fail "stale full preflight failed without its finalization diagnostic"
+[ ! -e "$mktemp_marker" ] \
+	|| fail "stale release documentation reached release scratch creation"
 assert_no_release_scratch
 checks=$((checks + 1))
 
@@ -556,28 +702,28 @@ grep -Fq 'could not inspect working-tree status' "$output" \
 assert_no_release_scratch
 checks=$((checks + 1))
 
-TEST_GIT_LOCAL_TAG_FAIL=1 run_preflight v99.0.0 >"$output" 2>&1 \
+TEST_GIT_LOCAL_TAG_FAIL=1 run_preflight v0.9.9 >"$output" 2>&1 \
 	|| fail "versioned preflight treated a failed local-tag query as a host-capability failure"
-grep -Fq 'could not check local tag v99.0.0 (git rev-parse exited 74).' "$output" \
+grep -Fq 'could not check local tag v0.9.9 (git rev-parse exited 74).' "$output" \
 	|| fail "versioned preflight silently treated a local-tag query failure as absence"
 assert_no_release_scratch
 checks=$((checks + 1))
 
-TEST_GIT_REMOTE_CONFIG_FAIL=1 run_preflight v99.0.0 >"$output" 2>&1 \
+TEST_GIT_REMOTE_CONFIG_FAIL=1 run_preflight v0.9.9 >"$output" 2>&1 \
 	|| fail "versioned preflight treated failed origin inspection as a host-capability failure"
-grep -Fq 'could not inspect origin for tag v99.0.0 (git remote get-url exited 73).' "$output" \
+grep -Fq 'could not inspect origin for tag v0.9.9 (git remote get-url exited 73).' "$output" \
 	|| fail "versioned preflight silently treated failed origin inspection as no remote"
 assert_no_release_scratch
 checks=$((checks + 1))
 
-TEST_GIT_REMOTE_FAIL=1 run_preflight v99.0.0 >"$output" 2>&1 \
+TEST_GIT_REMOTE_FAIL=1 run_preflight v0.9.9 >"$output" 2>&1 \
 	|| fail "versioned preflight treated an unavailable remote as a host-capability failure"
-grep -Fq 'could not check tag v99.0.0 on origin (git ls-remote exited 72).' "$output" \
+grep -Fq 'could not check tag v0.9.9 on origin (git ls-remote exited 72).' "$output" \
 	|| fail "versioned preflight silently treated a remote failure as tag absence"
 assert_no_release_scratch
 checks=$((checks + 1))
 
-TEST_GIT_NO_ORIGIN=1 run_preflight v99.0.0 >"$output" 2>&1 \
+TEST_GIT_NO_ORIGIN=1 run_preflight v0.9.9 >"$output" 2>&1 \
 	|| fail "versioned preflight rejected a repository without origin: $(<"$output")"
 if grep -Fq 'could not inspect origin' "$output"; then
 	fail "an absent origin was misreported as an operational failure"

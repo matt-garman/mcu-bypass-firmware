@@ -1,11 +1,13 @@
 # PIC10F320 — the constrained target
 
-**Status:** release-supported since `v0.9.6` and production-qualified in the
-current `v0.9.8` release. The target remains architecturally different from every
-other target in this repository. This document is the single authoritative
-statement of that difference; execution evidence, its exact scope, release
-history and current qualification status live in
-`docs/pic10f320_validation.md`.
+<!-- current-release:start -->
+**Current release contract:** `v0.9.9`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
+
+**Status:** PIC10F320 is release-supported since `v0.9.6` and remains the
+self-contained exception. This document is the single authoritative statement
+of that difference; execution evidence, its exact scope, release history, and
+current qualification status live in `docs/pic10f320_validation.md`.
+<!-- current-release:end -->
 
 **Read this if** you are choosing an MCU, reviewing the assurance argument, or
 wondering why one firmware file looks unlike the rest of `src/`.
@@ -17,14 +19,16 @@ wondering why one firmware file looks unlike the rest of `src/`.
 The PIC10F320 has **256 words of program flash — exactly half the PIC10F322's
 512**. Everything below follows from that one number.
 
-The other five release targets use one modular architecture through three shell
+The other six release targets use one modular architecture through four shell
 source files. `src/bypass_mcu_avr_classic.c` serves ATtiny13a/45/85,
 `src/bypass_mcu_avr_xt.c` serves ATtiny202, and
-`src/bypass_mcu_pic10f322.c` serves PIC10F322. Each shell handles pins, timers and
-the watchdog and calls `src/bypass_pure.c`, the pure, side-effect-free debounce
-core that the host, property, exhaustive, symbolic and CBMC suites verify. The
-same reviewed core implementation is compiled and linked directly into all five
-shipping image sets; it is not a vendored copy or a reimplementation.
+`src/bypass_mcu_pic10f322.c` serves PIC10F322, while
+`src/bypass_mcu_pic12f675.c` serves PIC12F675. Each shell handles pins, timers,
+and the watchdog and calls `src/bypass_pure.c`, the pure, side-effect-free
+debounce core that the host, property, exhaustive, symbolic, and CBMC suites
+verify. The same reviewed core implementation is compiled and linked directly
+into all six modular shipping image sets; it is not a vendored copy or a
+reimplementation.
 
 That architecture does not fit in 256 words. This is measured, not assumed:
 `docs/pic10f320_feasibility.md` records the full analysis — the modular firmware

@@ -14,10 +14,22 @@ image before writing. The prebuilt file remains the signed/reproducible release
 artifact, but there is not yet a no-compiler path that safely admits it to the
 device-specific trim-evidence transaction.
 
-> **Current availability:** `v0.9.8` is the current release, with 18 prebuilt
-> firmware images covering all six release targets and three output stages.
-> `v0.9.6` was the first unified 18-image release and introduced the first
-> ATtiny202 and PIC10F320 images in this release line.
+<!-- current-release:start -->
+> **Current release contract:** `v0.9.9`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
+> The images cover three output stages; PIC10F320 is the self-contained target.
+<!-- current-release:end -->
+
+`v0.9.6` was the first unified 18-image release and introduced the first
+ATtiny202 and PIC10F320 images in this release line.
+
+## v0.9.9 tag-local documentation erratum
+
+The immutable signed `v0.9.9` tag's `MANIFEST.md` links to the tag-local
+`docs/pic10f320_special_case.md`, whose opening current-status prose still names
+`v0.9.8` and the pre-PIC12F675 topology. The signed release metadata itself
+correctly records 21 images and 18 soak combinations. The tag and its release
+artifacts remain unchanged; this HEAD documentation corrects the live status
+without moving or rewriting the signed tag.
 
 ## Safety warning: v0.9.0-v0.9.2 TMUX images
 

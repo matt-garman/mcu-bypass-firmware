@@ -7350,7 +7350,7 @@ origins:
 # bit-for-bit, and publishes the GitHub Release.
 #
 #   make release-preflight                 # capability check, no build/staging
-#   make release-preflight VERSION=v1.0.0  # also warn on tag/output state
+#   make release-preflight VERSION=v1.0.0  # require final docs; warn on tag/output state
 #   make release VERSION=v1.0.0
 #   make release VERSION=v1.0.0 RELEASE_ARGS='--dry-run'   # skip the 24-h soak
 
@@ -7741,7 +7741,7 @@ help:
 	@echo "  attiny13a-program / attiny<n>-program  fuses + flash (fresh chip)"
 	@echo "Release:"
 	@echo "  release-preflight  check every release prerequisite without cleaning, building or staging"
-	@echo "                     (optional VERSION=vX.Y.Z also checks tag/output state as warnings)"
+	@echo "                     (VERSION=vX.Y.Z requires final docs; tag/output state remains warnings)"
 	@echo "  release         VERSION=vX.Y.Z: build+validate every release image -- AVR Classic"
 	@echo "                  + ATtiny202 + PIC10F322 + PIC10F320 + PIC12F675, the canonical"
 	@echo "                  RELEASE_IMAGES set (incl. 24-h soak of all 18 combos) + stage release/<ver>/."

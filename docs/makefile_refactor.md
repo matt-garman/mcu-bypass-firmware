@@ -198,7 +198,7 @@ mechanical refactor, and why the sequencing in §4 puts the safety net first.
 
 What the file actually does:
 
-- **A real dependency graph** producing 15 release images across five
+- **A real dependency graph** producing 21 release images across five
   cross-toolchains, with incremental rebuild. Make's home turf.
 - **A task runner** for ~90 phony gates that mostly shell out to `test/*.sh` and
   `test/*.py`. Make's weakest use — but the heavy logic has already been moved

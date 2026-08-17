@@ -1,6 +1,122 @@
 #!/usr/bin/env bash
-# Pure renderers for release metadata. Each function writes only document bytes
-# to stdout so production and host-only regressions exercise the same output.
+# Release metadata helpers. Renderers write only document bytes to stdout; the
+# validator reads bounded source documentation without modifying it.
+
+_release_documentation_error() {
+	printf 'release documentation: %s\n' "$*" >&2
+	return 1
+}
+
+_release_current_block() {
+	[ "$#" -eq 1 ] || return 2
+	awk '
+		$0 == "<!-- current-release:start -->" {
+			starts++
+			if (starts != 1 || current) bad=1
+			current=1
+			next
+		}
+		$0 == "<!-- current-release:end -->" {
+			ends++
+			if (ends != 1 || !current) bad=1
+			current=0
+			next
+		}
+		current { print }
+		END { exit !(starts == 1 && ends == 1 && !current && !bad) }
+	' "$1"
+}
+
+release_validate_current_documentation() {
+	[ "$#" -eq 4 ] || return 2
+	local repo_root=$1 version=$2 image_count=$3 soak_count=$4
+	local release_number=${version#v} changelog="$repo_root/CHANGELOG.md"
+	local document block contract_line section_count previous_version link_count
+	local -a current_documents=(
+		"$repo_root/release/README.md"
+		"$repo_root/TODO.md"
+		"$repo_root/docs/pic10f320_special_case.md"
+		"$repo_root/docs/pic10f320_validation.md"
+	)
+
+	[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
+		|| _release_documentation_error "requested version is not vX.Y.Z: $version" || return
+	[[ "$image_count" =~ ^[1-9][0-9]*$ && "$soak_count" =~ ^[1-9][0-9]*$ ]] \
+		|| _release_documentation_error "canonical image/soak counts are invalid" || return
+	[ -f "$changelog" ] && [ -s "$changelog" ] && [ ! -L "$changelog" ] \
+		|| _release_documentation_error "CHANGELOG.md is not a regular nonempty file" || return
+
+	section_count=$(awk -v release="$release_number" '
+		/^## \[[^]]+\] - [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ {
+			name=$0
+			sub(/^## \[/, "", name)
+			sub(/\] - .*/, "", name)
+			if (name == release) count++
+		}
+		END { print count + 0 }
+	' "$changelog") || return
+	[ "$section_count" -eq 1 ] \
+		|| _release_documentation_error "CHANGELOG.md must contain one dated [$release_number] section" || return
+	if ! awk -v release="$release_number" '
+		$0 == "## [Unreleased]" {
+			unreleased++
+			waiting=1
+			next
+		}
+		/^## \[[^]]+\] - [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ {
+			name=$0
+			sub(/^## \[/, "", name)
+			sub(/\] - .*/, "", name)
+			if (waiting) {
+				first_after_unreleased=name
+				waiting=0
+			}
+			current=(name == release)
+			if (current) requested++
+			next
+		}
+		current && /^### (Added|Changed|Deprecated|Removed|Fixed|Security)$/ { categories++ }
+		current && /^- / { entries++ }
+		END {
+			exit !(unreleased == 1 && first_after_unreleased == release \
+				&& requested == 1 && categories > 0 && entries > 0)
+		}
+	' "$changelog"; then
+		_release_documentation_error "CHANGELOG.md must put one nonempty dated [$release_number] section immediately after one Unreleased heading" || return
+	fi
+
+	previous_version=$(awk -v heading="## [$release_number] - " '
+		index($0, heading) == 1 { current=1; next }
+		current && /^## \[[^]]+\] - / {
+			name=$0
+			sub(/^## \[/, "", name)
+			sub(/\] - .*/, "", name)
+			print "v" name
+			exit
+		}
+	' "$changelog") || return
+	[[ "$previous_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
+		|| _release_documentation_error "CHANGELOG.md [$release_number] section has no preceding-release section" || return
+	link_count=$(grep -Fxc "[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/$version...HEAD" "$changelog" || true)
+	[ "$link_count" -eq 1 ] \
+		|| _release_documentation_error "CHANGELOG.md has no exact $version...HEAD Unreleased link" || return
+	link_count=$(grep -Fxc "[$release_number]: https://github.com/matt-garman/mcu-bypass-firmware/compare/$previous_version...$version" "$changelog" || true)
+	[ "$link_count" -eq 1 ] \
+		|| _release_documentation_error "CHANGELOG.md has no exact $previous_version...$version release link" || return
+
+	contract_line="**Current release contract:** \`$version\`; seven release parts; $image_count images; $soak_count soak combinations; six modular targets; four shell source files."
+	for document in "${current_documents[@]}"; do
+		[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
+			|| _release_documentation_error "designated current-release document is not a regular nonempty file: ${document#$repo_root/}" || return
+		if ! block=$(_release_current_block "$document"); then
+			_release_documentation_error "${document#$repo_root/} must contain one bounded current-release block" || return
+		fi
+		link_count=$(awk '{ sub(/^>[[:space:]]*/, ""); print }' <<<"$block" \
+			| grep -Fxc "$contract_line" || true)
+		[ "$link_count" -eq 1 ] \
+			|| _release_documentation_error "${document#$repo_root/} must contain the exact current release contract: $contract_line" || return
+	done
+}
 
 release_render_scope() {
 	[ "$#" -eq 0 ] || return 2

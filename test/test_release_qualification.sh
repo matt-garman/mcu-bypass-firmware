@@ -32,7 +32,8 @@ for document in "$PROJECT_README" "$RELEASE_README" "$TEST_README"; do
 done
 # shellcheck source=../scripts/release-documentation.sh
 source "$RENDER"
-for function in release_render_scope release_render_validation \
+for function in release_validate_current_documentation \
+		release_render_scope release_render_validation \
 		release_render_pic_toolchain_rows release_render_pic12f675_flashing \
 		release_render_flashing \
 		release_render_reproduction_commands \
@@ -159,6 +160,7 @@ checks=$((checks + 1))
 
 for wiring in \
 	'source "$REPO_ROOT/scripts/release-documentation.sh"' \
+	'release_validate_current_documentation "$REPO_ROOT" "$VERSION"' \
 	$'\trelease_render_scope' \
 	$'\trelease_render_validation "$hours"' \
 	$'\trelease_render_pic_toolchain_rows "$PIC_CC" "$TC_XC8_322"' \

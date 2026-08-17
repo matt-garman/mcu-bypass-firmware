@@ -32,6 +32,34 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- **PIC12F675 release programming is bound to the signed release bytes.** The
+  guarded release target verifies the annotated tag and checksum signature,
+  requires a clean checkout at that exact tag, and admits the private fresh
+  build to the device transaction only when it matches the selected digest in
+  the complete 21-image signed release set.
+
+- **The PIC12F675 CONFIG gate no longer consumes a stale ignored executable.**
+  Each programming transaction builds the tracked checker privately, pins its
+  identity, and requires an exact image-bound CONFIG verdict before hardware is
+  reachable.
+
+- **Interrupted PIC12F675 writes now have a read-only finalization path.** A
+  retained PENDING transaction validates its baseline, part, variant, tools, and
+  independently retained image before one device read publishes an exclusive,
+  sealed PASS/FAIL result. Recovery never invokes writer arguments, and
+  interrupted private attempts remain safely retryable.
+
+- **Current release documentation now identifies v0.9.9 consistently.** The
+  changelog, release availability, TODO status, and PIC10F320 qualification
+  documents agree on seven release parts, 21 images, 18 soak combinations, and
+  the six-target/four-shell modular topology. Versioned release preflight now
+  rejects a missing requested-version changelog section or stale bounded
+  current-release declarations before creating scratch space or building.
+
+## [0.9.9] - 2026-08-15
+
+### Fixed
+
 - Local CI mutation skips are now authorized per substrate: `--skip-pic` cannot
   hide a missing ATtiny202 lane, and `--skip-attiny202` cannot hide missing PIC
   coverage. Partial runs no longer claim they are safe-to-push reproductions.
@@ -2826,7 +2854,8 @@ file is the human-readable summary of *what changed*.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.8...HEAD
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.9...HEAD
+[0.9.9]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.8...v0.9.9
 [0.9.8]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.7...v0.9.8
 [0.9.7]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.6...v0.9.7
 [0.9.6]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.5...v0.9.6

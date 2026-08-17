@@ -13,13 +13,22 @@ deliberately one-shot gate whose original child-tree baseline was deleted. Its
 reviewed successor digests now drive a standing gate, while the migration proof
 and its provenance remain durable only here.
 
-**Qualification status (2026-08-08):** `v0.9.8` is the current
-production-qualified release. Its authoritative `QUALIFICATION`, manifest,
-image checksums, rename-identity result and exact lane/soak evidence live under
-`release/v0.9.8/`; that retained record, rather than this summary, identifies
-the qualified source commit and measured results.
+<!-- current-release:start -->
+**Current release contract:** `v0.9.9`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
 
-The preceding `v0.9.7` production record identifies source commit `1d2fc877`,
+**Qualification status (2026-08-17):** PIC10F320 remains the self-contained
+exception. The authoritative `QUALIFICATION`, manifest, image checksums, and
+exact 34-file lane/soak evidence live under `release/v0.9.9/`; that retained
+record, rather than this summary, identifies the qualified source commit and
+measured results.
+<!-- current-release:end -->
+
+The preceding `v0.9.8` production record retains all 18 then-canonical images,
+15 full-duration soak combinations, and the rename-identity evidence that pins
+17 renamed images byte-identical while recording the intentional PIC10F320 relay
+change under `release/v0.9.8/`.
+
+The earlier `v0.9.7` production record identifies source commit `1d2fc877`,
 all 18 then-canonical images, and 15 full-duration soak combinations under
 `release/v0.9.7/`.
 
