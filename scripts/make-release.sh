@@ -239,7 +239,8 @@ declare -F release_stage_classic_avr_images >/dev/null \
 # shellcheck source=release-documentation.sh
 source "$REPO_ROOT/scripts/release-documentation.sh" \
 	|| die "release documentation helper could not be loaded"
-for renderer in release_render_scope release_render_validation \
+for renderer in release_validate_current_documentation \
+		release_render_scope release_render_validation \
 		release_render_pic_toolchain_rows release_render_pic12f675_flashing \
 		release_render_flashing \
 		release_render_reproduction_commands \
@@ -481,6 +482,17 @@ RELEASE_SOAK_NAMES=$(mkv RELEASE_SOAK_NAMES)
 RELEASE_EVIDENCE_FILES=$(mkv RELEASE_EVIDENCE_FILES)
 [ -n "${RELEASE_EVIDENCE_FILES// /}" ] \
 	|| die "Makefile RELEASE_EVIDENCE_FILES is empty"
+
+# A production or versioned rehearsal must start from finalized release prose.
+# Validate before scratch creation so a stale declaration cannot consume tools,
+# build an image, or leave a release work directory behind.
+if [ "$VERSION_WAS_SUPPLIED" -eq 1 ]; then
+	read -r -a DOCUMENT_RELEASE_IMAGES <<<"$RELEASE_IMAGES"
+	read -r -a DOCUMENT_RELEASE_SOAKS <<<"$RELEASE_SOAK_NAMES"
+	release_validate_current_documentation "$REPO_ROOT" "$VERSION" \
+		"${#DOCUMENT_RELEASE_IMAGES[@]}" "${#DOCUMENT_RELEASE_SOAKS[@]}" \
+		|| die "current release documentation is not finalized for $VERSION"
+fi
 
 # Scratch area for evidence + per-combo soak run dirs. Preserved on failure so a
 # crashed/failed run can be inspected; folded into the release on success.

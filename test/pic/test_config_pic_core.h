@@ -38,10 +38,13 @@
 //
 // USAGE
 //   <adapter> <file.hex> [<file.hex> ...]
+//   <adapter> --programming-record <file.hex>
 // The Makefile's `<part>-test-config` target builds the HEX and runs the adapter
 // against every image the part produced. All output variants of a part share the
 // same shell and the same #pragma config, so every variant's CONFIG word must be
-// identical; checking them all also catches any accidental divergence.
+// identical; checking them all also catches any accidental divergence. The
+// programming mode accepts exactly one image and emits one exact image-bound PASS
+// record, so an exit-zero/no-output executable cannot satisfy the hardware gate.
 
 #ifndef TEST_PIC_TEST_CONFIG_PIC_CORE_H
 #define TEST_PIC_TEST_CONFIG_PIC_CORE_H
@@ -246,10 +249,12 @@ static int read_config_word(const char *path, uint8_t *out_lo, uint8_t *out_hi) 
 // Field decode + design-intent verification
 //////////////////////////////////////////////////////////////////////////////
 
-static void verify_config(const char *path, uint16_t word) {
+static void verify_config(const char *path, uint16_t word, int verbose) {
     uint16_t impl = (uint16_t)(word & PIC_CONFIG_IMPL_MASK);
 
-    printf("  %s: CONFIG=0x%04X (implemented bits 0x%04X)\n", path, word, impl);
+    if (verbose) {
+        printf("  %s: CONFIG=0x%04X (implemented bits 0x%04X)\n", path, word, impl);
+    }
 
     // --- field-by-field against the documented design intent (device table) ---
     pic_config_check_fields(impl);
@@ -267,15 +272,29 @@ static void verify_config(const char *path, uint16_t word) {
 }
 
 int main(int argc, char **argv) {
+    int programming_record = 0;
+    int first_path = 1;
+    uint16_t programming_word = 0u;
+
+    if (argc >= 2 && strcmp(argv[1], "--programming-record") == 0) {
+        if (argc != 3) {
+            fprintf(stderr, "usage: %s --programming-record <file.hex>\n", argv[0]);
+            return 2;
+        }
+        programming_record = 1;
+        first_path = 2;
+    }
     if (argc < 2) {
         fprintf(stderr, "usage: %s <file.hex> [<file.hex> ...]\n", argv[0]);
         return 2;
     }
 
-    printf(PIC_DEVICE_NAME " CONFIG-word verification (word addr 0x%04X / byte 0x%04X):\n",
-           (unsigned)PIC_CONFIG_WORD_ADDR, (unsigned)CONFIG_BYTE_ADDR);
+    if (!programming_record) {
+        printf(PIC_DEVICE_NAME " CONFIG-word verification (word addr 0x%04X / byte 0x%04X):\n",
+               (unsigned)PIC_CONFIG_WORD_ADDR, (unsigned)CONFIG_BYTE_ADDR);
+    }
 
-    for (int a = 1; a < argc; a++) {
+    for (int a = first_path; a < argc; a++) {
         uint8_t lo = 0, hi = 0;
         int r = read_config_word(argv[a], &lo, &hi);
         if (r != 1) {
@@ -283,10 +302,19 @@ int main(int argc, char **argv) {
             continue;
         }
         uint16_t word = (uint16_t)((uint16_t)lo | ((uint16_t)hi << 8));
-        verify_config(argv[a], word);
+        verify_config(argv[a], word, !programming_record);
+        programming_word = word;
     }
 
-    printf("CONFIG checks: %d checks, %d failures\n", g_checks, g_failures);
+    if (programming_record) {
+        if (g_failures == 0) {
+            printf("PIC_CONFIG_CHECK PASS device=" PIC_DEVICE_NAME
+                   " image=%s word=0x%04X\n",
+                   argv[first_path], (unsigned)programming_word);
+        }
+    } else {
+        printf("CONFIG checks: %d checks, %d failures\n", g_checks, g_failures);
+    }
     return g_failures ? 1 : 0;
 }
 

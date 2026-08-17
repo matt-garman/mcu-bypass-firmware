@@ -32,7 +32,8 @@ for document in "$PROJECT_README" "$RELEASE_README" "$TEST_README"; do
 done
 # shellcheck source=../scripts/release-documentation.sh
 source "$RENDER"
-for function in release_render_scope release_render_validation \
+for function in release_validate_current_documentation \
+		release_render_scope release_render_validation \
 		release_render_pic_toolchain_rows release_render_pic12f675_flashing \
 		release_render_flashing \
 		release_render_reproduction_commands \
@@ -148,7 +149,7 @@ for required in \
 		'exact canonical 34-file evidence set' \
 		'each of 18 release soak combinations' \
 		'historical 28-file/15-soak boundary for v0.9.6-v0.9.8' \
-		'36 PIC10F322, 75 PIC10F320, and 89 PIC12F675 checks' \
+		'36 PIC10F322, 75 PIC10F320, and 121 PIC12F675 checks' \
 		'## Known gaps (PIC — hardware-bench only)' \
 		'### PIC10F32x hardware gaps' \
 		'### PIC12F675 hardware gaps'; do
@@ -159,6 +160,7 @@ checks=$((checks + 1))
 
 for wiring in \
 	'source "$REPO_ROOT/scripts/release-documentation.sh"' \
+	'release_validate_current_documentation "$REPO_ROOT" "$VERSION"' \
 	$'\trelease_render_scope' \
 	$'\trelease_render_validation "$hours"' \
 	$'\trelease_render_pic_toolchain_rows "$PIC_CC" "$TC_XC8_322"' \
@@ -573,6 +575,7 @@ checks=$((checks + 1))
 # fail-stop ordering between the read-only baseline and the write.
 flashing="$work/rendered-pic12f675-flashing.md"
 flashing_commands="$work/rendered-pic12f675-flashing.sh"
+recovery_commands="$work/rendered-pic12f675-recovery.sh"
 flashing_fixture="$work/rendered-flashcmds.txt"
 git_safety_log="$work/rendered-pic12f675-git.log"
 flash_fixture="$work/flash fixture with spaces"
@@ -585,14 +588,26 @@ release_render_flashing "$flashing_fixture" v0.9.9 > "$flashing"
 awk '/^```sh$/ { capture=1; next }
 	/^```$/ && capture { exit }
 	capture { print }' "$flashing" > "$flashing_commands"
+awk '/^```sh$/ { blocks++; capture=(blocks == 2); next }
+	/^```$/ && capture { exit }
+	capture { print }' "$flashing" > "$recovery_commands"
 [ -s "$flashing_commands" ] \
 	|| fail "rendered PIC12F675 flashing guidance has no shell command block"
+[ -s "$recovery_commands" ] \
+	|| fail "rendered PIC12F675 flashing guidance has no recovery command block"
 bash -n "$flashing_commands" \
 	|| fail "rendered PIC12F675 flashing commands are not valid shell"
-for required in PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT \
+bash -n "$recovery_commands" \
+	|| fail "rendered PIC12F675 recovery commands are not valid shell"
+	for required in PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT \
+		PIC12F675_RELEASE_TAG pic12f675-release-program pic12f675-finalize \
+		'transaction is **PENDING**' 'physical custody' \
+		'never invokes writer arguments' 'existing result' \
 		'checked and recorded' 'hardware-unvalidated' \
-		'may already have damaged the device' 'clean checkout of this exact release tag' \
-		'does not consume a downloaded' 'Shared `/tmp` and `/var/tmp` roots' \
+		'may already have damaged the device' 'clean checkout of this exact annotated release tag' \
+		'pinned tag and checksum signatures' 'complete signed release image set' \
+		'does not consume a downloaded' 'outside the worktree' \
+		'Shared `/tmp` and `/var/tmp` roots' \
 		'No ipecmd hardware'; do
 	grep -Fq "$required" "$flashing" \
 		|| fail "rendered PIC12F675 flashing guidance omits: $required"
@@ -618,20 +633,39 @@ fi
 mapfile -t flashing_log < "$render_log"
 [ "${#flashing_log[@]}" -eq 2 ] \
 	|| fail "rendered PIC12F675 transaction ran ${#flashing_log[@]} Make commands, expected 2"
-baseline="$flash_fixture/pic12f675-factory-baseline.json"
-result="$flash_fixture/pic12f675-program-result"
+baseline="$(dirname "$flash_fixture")/pic12f675-factory-baseline.json"
+result="$(dirname "$flash_fixture")/pic12f675-program-result"
 expected=$(printf '%s\t%s\t%s\t%s\t%s=%s\t%s=%s' make -C "$flash_fixture" \
 	pic12f675-preflight \
 	PIC12F675_READ_PROG pk2cmd PIC12F675_TRIM_EVIDENCE "$baseline")
 [ "${flashing_log[0]}" = "$expected" ] \
 	|| fail "rendered PIC12F675 preflight command is incomplete: ${flashing_log[0]}"
-expected=$(printf '%s\t%s\t%s\t%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s' \
-	make -C "$flash_fixture" pic12f675-program VARIANT cd4053_simple \
+expected=$(printf '%s\t%s\t%s\t%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s' \
+	make -C "$flash_fixture" pic12f675-release-program VARIANT cd4053_simple \
+	PIC12F675_RELEASE_TAG v0.9.9 \
 	PIC12F675_PROG pk2cmd PIC12F675_PROG_KIND pk2cmd \
 	PIC12F675_READ_PROG pk2cmd PIC12F675_TRIM_EVIDENCE "$baseline" \
 	PIC12F675_BENCH_RESULT "$result")
 [ "${flashing_log[1]}" = "$expected" ] \
 	|| fail "rendered PIC12F675 program command is incomplete: ${flashing_log[1]}"
+if grep -Fq $'\tpic12f675-program\t' "$render_log"; then
+	fail "rendered release guidance invoked the unsigned development programming goal"
+fi
+: > "$render_log"
+repo="$flash_fixture" baseline="$baseline" result="$result" \
+	PATH="$render_bin:$PATH" RENDER_LOG="$render_log" \
+	bash "$recovery_commands" \
+	|| fail "rendered PIC12F675 recovery command did not execute"
+mapfile -t recovery_log < "$render_log"
+[ "${#recovery_log[@]}" -eq 1 ] \
+	|| fail "rendered PIC12F675 recovery ran ${#recovery_log[@]} commands, expected 1"
+expected=$(printf '%s\t%s\t%s\t%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s' \
+	make -C "$flash_fixture" pic12f675-finalize \
+	VARIANT cd4053_simple PIC12F675_PROG pk2cmd PIC12F675_PROG_KIND pk2cmd \
+	PIC12F675_READ_PROG pk2cmd PIC12F675_TRIM_EVIDENCE "$baseline" \
+	PIC12F675_BENCH_RESULT "$result")
+[ "${recovery_log[0]}" = "$expected" ] \
+	|| fail "rendered PIC12F675 recovery command is incomplete: ${recovery_log[0]}"
 mapfile -t git_safety_calls < "$git_safety_log"
 [ "${#git_safety_calls[@]}" -eq 4 ] \
 	&& [ "${git_safety_calls[0]}" = $'git\trev-parse\t--show-toplevel' ] \

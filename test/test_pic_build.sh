@@ -84,7 +84,7 @@ case "$PB_TARGET" in
 		# complete-matrix production/consumption and the hardware-programming
 		# calibration guard.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=89
+		expected_checks=121
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -141,8 +141,32 @@ write_valid_hex() {
 		shipping)
 			printf '%s\n' "$program_record" ':02400E00CC31B3' ':00000001FF'
 			;;
+		byte-different)
+			case "${out:-}" in
+				*-cd4053_simple.hex) program_record=:040000000300FF23D7 ;;
+			esac
+			printf '%s\n' "$program_record" ':02400E00CC31B3' ':00000001FF'
+			;;
 		bad-config)
 			printf '%s\n' "$program_record" ':02400E00CD31B2' ':00000001FF'
+			;;
+		bad-fosc)
+			printf '%s\n' "$program_record" ':02400E00CD31B2' ':00000001FF'
+			;;
+		bad-wdte)
+			printf '%s\n' "$program_record" ':02400E00C431BB' ':00000001FF'
+			;;
+		bad-mclre)
+			printf '%s\n' "$program_record" ':02400E00EC3193' ':00000001FF'
+			;;
+		bad-boren)
+			printf '%s\n' "$program_record" ':02400E008C31F3' ':00000001FF'
+			;;
+		bad-bg)
+			printf '%s\n' "$program_record" ':02400E00CC21C3' ':00000001FF'
+			;;
+		bad-full-word)
+			printf '%s\n' "$program_record" ':02400E00CC33B1' ':00000001FF'
 			;;
 		overlap)
 			printf '%s\n' "$program_record" ':02000200FF23DA' \
@@ -1048,12 +1072,25 @@ if [ "$PB_TARGET" = pic12f675 ]; then
 	# these checks isolate derived-set publication and consumption rather than
 	# rebuilding the shipping images whose contract was established above.
 	mkdir -p "$repo/test/pic" "$repo/$PB_BUILD_DIR"
+	cp "$ROOT/test/.gitignore" "$repo/test/.gitignore"
+	cp "$ROOT/test/pic/test_config_pic12f675.c" \
+		"$repo/test/pic/test_config_pic12f675.c"
+	cp "$ROOT/test/pic/test_config_pic_core.h" \
+		"$repo/test/pic/test_config_pic_core.h"
+	cp "$ROOT/test/pic/pic12f675_config.h" \
+		"$repo/test/pic/pic12f675_config.h"
 	cp "$ROOT/test/pic/inject_calibration_word.py" \
 		"$repo/test/pic/inject_calibration_word.py"
 	cp "$ROOT/test/pic/pic12f675_trim_evidence.py" \
 		"$repo/test/pic/pic12f675_trim_evidence.py"
 	cp "$ROOT/test/pic/pic12f675_matrix_evidence.py" \
 		"$repo/test/pic/pic12f675_matrix_evidence.py"
+	cp "$ROOT/scripts/verify-release-program-image.sh" \
+		"$repo/scripts/verify-release-program-image.sh"
+	cp "$ROOT/scripts/verify-release-images.sh" \
+		"$repo/scripts/verify-release-images.sh"
+	cp "$ROOT/scripts/release-signing-policy.sh" \
+		"$repo/scripts/release-signing-policy.sh"
 
 	cal_shipping=()
 	cal_sim=()
@@ -1286,6 +1323,10 @@ printf '[' >> "${PIC12F675_HARDWARE_LOG:?}"
 printf ' %q' "$@" >> "$PIC12F675_HARDWARE_LOG"
 printf ' ]\n' >> "$PIC12F675_HARDWARE_LOG"
 if [[ "${1:-}" == '-?V' ]]; then
+	if [[ "${PIC12F675_PROGRAMMER_MODE:-read}" == recovery-version-mismatch ]]; then
+		printf 'pk2cmd fixture version 1.22\n'
+		exit 0
+	fi
 	printf 'pk2cmd fixture version 1.21\n'
 	exit 0
 fi
@@ -1312,6 +1353,8 @@ if [[ -n "$read_hex" ]]; then
 	fi
 	osccal=:0207FE00A53420
 	config=:02400E00FF11A0
+	device_id=0x0FC0
+	device_revision=0x0001
 	if [[ -e "${PIC12F675_DEVICE_STATE:?}" ]]; then
 		config=:02400E00CC11D3
 	fi
@@ -1324,6 +1367,7 @@ if [[ -n "$read_hex" ]]; then
 			change-osccal) osccal=:0207FE00A6341F ;;
 			change-bg) config=:02400E00CC21C3 ;;
 			wrong-config) config=:02400E00CD11D2 ;;
+			change-identity) device_id=0x0FC1 ;;
 		esac
 	fi
 	program_record=
@@ -1350,7 +1394,18 @@ if [[ -n "$read_hex" ]]; then
 	else
 		printf '%s\n' "$base" "$osccal" "$config" ':00000001FF' > "$read_hex"
 	fi
-	printf 'Target PIC12F675\nDevice ID = 0x0FC0\nDevice Revision = 0x0001\n'
+	if [[ -e "$PIC12F675_PROGRAM_TRANSACTION" \
+			&& "${PIC12F675_PROGRAMMER_MODE:-read}" == malformed-recovery-read ]]; then
+		printf '%s\n' "$base" "$program_record" "$osccal" ':00000001FF' > "$read_hex"
+	fi
+	if [[ -e "$PIC12F675_PROGRAM_TRANSACTION" \
+			&& "${PIC12F675_PROGRAMMER_MODE:-read}" == signal-recovery-read ]]; then
+		kill -TERM "$PPID"
+		sleep 1
+		exit 96
+	fi
+	printf 'Target PIC12F675\nDevice ID = %s\nDevice Revision = %s\n' \
+		"$device_id" "$device_revision"
 	exit 0
 fi
 [[ -n "$image" && -f "$image" && ! -L "$image" && -s "$image" ]] \
@@ -1396,21 +1451,62 @@ EOF
 	cc -std=c11 -O2 -Wall -Wextra -Werror -I"$ROOT/test" \
 		-DPIC_DEVICE_NAME='"PIC12F675"' \
 		"$ROOT/test/pic/test_config_pic12f675.c" -o "$real_config_checker"
-	cat > "$repo/test/pic/test_config_pic12f675" <<'EOF'
+	config_host_cc="$tools/pic12f675-config-host-cc"
+	cat > "$config_host_cc" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-image=${1:?}
-"${PIC12F675_REAL_CONFIG_CHECKER:?}" "$image"
+out=
+compile_args=()
+while (($#)); do
+	if [[ "$1" == -o ]]; then
+		out=${2:?}
+		compile_args+=("$1" "$2.real")
+		shift 2
+	else
+		compile_args+=("$1")
+		shift
+	fi
+done
+[[ -n "$out" ]] || { printf 'fixture CONFIG compiler received no output path\n' >&2; exit 2; }
 case "${PIC12F675_CONFIG_MODE:-check}" in
-	check) ;;
+	check|replace) "${PIC12F675_REAL_HOSTCC:?}" "${compile_args[@]}" ;;
+	no-output|near-match|wrong-image) ;;
+	*) printf 'unknown fixture CONFIG mode\n' >&2; exit 93 ;;
+esac
+cat > "$out" <<'RUNNER'
+#!/usr/bin/env bash
+set -euo pipefail
+image=${!#}
+case "${PIC12F675_CONFIG_MODE:-check}" in
+	check) exec "$0.real" "$@" ;;
 	replace)
+		"$0.real" "$@"
 		mv -- "$image" "$image.checked"
 		cp -- "${PIC12F675_CONFIG_REPLACEMENT:?}" "$image"
 		;;
-	*) printf 'unknown fixture CONFIG mode\n' >&2; exit 93 ;;
+	no-output) exit 0 ;;
+	near-match)
+		printf 'PIC_CONFIG_CHECK PASS device=PIC12F675 image=%s word=0x31CC trailing-output\n' "$image"
+		;;
+	wrong-image)
+		printf 'PIC_CONFIG_CHECK PASS device=PIC12F675 image=%s.wrong word=0x31CC\n' "$image"
+		;;
+	*) exit 93 ;;
 esac
+RUNNER
+chmod 750 "$out"
 EOF
-	chmod 750 "$programmer" "$repo/test/pic/test_config_pic12f675"
+	stale_config_marker="$work/stale-config-checker-ran"
+	cat > "$repo/test/pic/test_config_pic12f675" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+image=${!#}
+: > "${PIC12F675_STALE_CONFIG_MARKER:?}"
+printf 'PIC_CONFIG_CHECK PASS device=PIC12F675 image=%s word=0x31CC\n' "$image"
+EOF
+	chmod 750 "$programmer" "$config_host_cc" \
+		"$repo/test/pic/test_config_pic12f675"
+	rm -f "$stale_config_marker"
 
 	assert_pic12_temp_root_empty() (
 		[[ -d "$pic12_temp_root" && ! -L "$pic12_temp_root" ]] || {
@@ -1430,6 +1526,7 @@ EOF
 	run_program_make() {
 		local build_dir=$1 variant=$2
 		local result_path="$work/result-${BASHPID}-${RANDOM}.json"
+		local program_target=${PIC12F675_PROGRAM_TARGET:-pic12f675-program}
 		local make_rc=0
 		shift 2
 		rm -f "$program_transaction" "$program_device_state" "$program_capture"
@@ -1445,13 +1542,13 @@ EOF
 		PIC12F675_PROGRAMMER_REPLACEMENT="${PIC12F675_PROGRAMMER_REPLACEMENT:-}" \
 		PIC12F675_CONFIG_MODE="${PIC12F675_CONFIG_MODE:-check}" \
 		PIC12F675_CONFIG_REPLACEMENT="${PIC12F675_CONFIG_REPLACEMENT:-}" \
-		PIC12F675_REAL_CONFIG_CHECKER="$real_config_checker" \
+		PIC12F675_REAL_HOSTCC=cc \
+		PIC12F675_STALE_CONFIG_MARKER="$stale_config_marker" \
 		FAKE_XC8_PIC12F675_MODE="${PIC12F675_PROGRAM_IMAGE_MODE:-shipping}" \
 		FAKE_XC8_MODE="${PIC12F675_PROGRAM_XC8_MODE:-pass}" \
 			make --no-print-directory -C "$repo" \
-				--old-file=test/pic/test_config_pic12f675 \
-				pic12f675-program \
-				CC=true HOSTCC=true PIC12F675_BUILD_DIR="$build_dir" \
+				"$program_target" \
+				CC=true HOSTCC="$config_host_cc" PIC12F675_BUILD_DIR="$build_dir" \
 				PIC_CC="$tools/xc8" \
 				FW_BASE="$PB_FW_BASE" PIC12F675_TAG="$PB_TAG" \
 				PIC12F675_FLASH_WORDS="$PB_FLASH_WORDS" \
@@ -1464,6 +1561,28 @@ EOF
 				PIC12F675_CAL_CHECKER="$tools/noop-oracle.py" \
 				STRICT_TOOLS=1 "$@" || make_rc=$?
 		assert_pic12_temp_root_empty || return 99
+		return "$make_rc"
+	}
+
+	run_finalize_make() {
+		local result_dir=$1 variant=$2
+		local make_rc=0
+		shift 2
+		_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+		PIC12F675_PROGRAM_LOG="$program_log" \
+		PIC12F675_HARDWARE_LOG="$hardware_log" \
+		PIC12F675_PROGRAM_CAPTURE="$program_capture" \
+		PIC12F675_PROGRAMMER_MARKER="$program_late_marker" \
+		PIC12F675_PROGRAM_TRANSACTION="$program_transaction" \
+		PIC12F675_DEVICE_STATE="$program_device_state" \
+		PIC12F675_PROGRAMMER_MODE="${PIC12F675_PROGRAMMER_MODE:-read}" \
+			make --no-print-directory -C "$repo" pic12f675-finalize \
+				CC=true HOSTCC=true VARIANT="$variant" \
+				PIC12F675_PROG="$programmer" PIC12F675_PROG_KIND=pk2cmd \
+				PIC12F675_READ_PROG="$programmer" \
+				PIC12F675_TRIM_EVIDENCE="$program_evidence" \
+				PIC12F675_BENCH_RESULT="$result_dir" \
+				PIC12F675_PART=PIC10F322 STRICT_TOOLS=1 "$@" || make_rc=$?
 		return "$make_rc"
 	}
 
@@ -2001,13 +2120,18 @@ PY
 		|| { printf 'FAIL: pk2cmd received unexpected PIC12F675 argv\n' >&2; exit 1; }
 	program_snapshot=${program_args[1]#-F}
 	expected_program_check="PIC12F675_CALIBRATION_CHECK PASS image=$program_snapshot word=0x3FF"
+	expected_config_check="PIC_CONFIG_CHECK PASS device=PIC12F675 image=$program_snapshot word=0x31CC"
 	[[ "$program_output" == *"$expected_program_check"* \
+		&& "$program_output" == *"$expected_config_check"* \
+		&& "$program_output" == *"development/bench programming is not bound to signed release bytes"* \
 		&& "$program_output" == *"PIC12F675_TRIM_PREWRITE PASS evidence=$program_evidence"* \
 		&& "$program_output" == *"PIC12F675_TRIM_RESULT PASS evidence=$program_result/result.json"* \
 		&& "$program_output" == *"selected variant $program_variant from the fresh build matrix"* \
 		&& "$program_snapshot" == "$pic12_temp_root"/pic12f675-program.*/"image snapshot.hex" \
 		&& ! -e "$program_snapshot" \
-		&& -f "$program_capture" && -f "$program_result/reservation.json" \
+		&& -f "$program_capture" && ! -e "$stale_config_marker" \
+		&& -f "$program_result/reservation.json" \
+		&& -f "$program_result/image.hex" \
 		&& -f "$program_result/result.json" ]] \
 		|| { printf 'FAIL: pk2cmd programming did not bind the selected image to its private checked snapshot: %s\n' \
 			"$program_output" >&2; exit 1; }
@@ -2057,13 +2181,320 @@ PY
 		printf 'FAIL: interrupted PIC12F675 writer returned success\n' >&2
 		exit 1
 	fi
-	[[ -f "$signal_result/reservation.json" \
+	[[ -f "$signal_result/reservation.json" && -f "$signal_result/image.hex" \
 		&& -f "$signal_result/program.log" \
 		&& "$(<"$signal_result/program.log")" == *"program bytes consumed before forced signal"* \
 		&& ! -e "$signal_result/result.json" ]] \
 		|| { printf 'FAIL: interrupted writer lost its reserved transaction: %s\n' \
 			"$program_output" >&2; exit 1; }
 	checks=$((checks + 1))
+
+	# Recovery rejects every caller-selected identity mismatch before even the
+	# read-only hardware operations. The image and part probes mutate copies of
+	# the reservation itself; its strict parser must reject both.
+	different_baseline="$work/different-pic12f675-baseline.json"
+	cp "$program_evidence" "$different_baseline"
+	chmod 600 "$different_baseline"
+	python3 - "$different_baseline" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+record["created_utc"] = "2000-01-01T00:00:00Z"
+with open(sys.argv[1], "w", encoding="ascii") as handle:
+    json.dump(record, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+	chmod 400 "$different_baseline"
+	different_reader="$tools/different-pic12f675-reader"
+	different_writer="$tools/different-pic12f675-writer"
+	cp "$programmer" "$different_reader"
+	cp "$programmer" "$different_writer"
+	chmod 750 "$different_reader" "$different_writer"
+	for mismatch in baseline variant reader writer; do
+		: > "$hardware_log"
+		case "$mismatch" in
+			baseline)
+			reason="reservation baseline digest differs from selected baseline"
+			finalize_args=("PIC12F675_TRIM_EVIDENCE=$different_baseline")
+			finalize_variant=$program_variant
+			;;
+			variant)
+			reason="reservation variant differs from selected variant"
+			finalize_args=()
+			finalize_variant=cd4053_with_mute
+			;;
+			reader)
+			reason="reservation reader identity differs from selected reader"
+			finalize_args=("PIC12F675_READ_PROG=$different_reader")
+			finalize_variant=$program_variant
+			;;
+			writer)
+			reason="reservation writer identity differs from selected writer"
+			finalize_args=("PIC12F675_PROG=$different_writer")
+			finalize_variant=$program_variant
+			;;
+		esac
+		if recovery_output=$(run_finalize_make "$signal_result" "$finalize_variant" \
+				"${finalize_args[@]}" 2>&1); then
+			printf 'FAIL: recovery accepted a different %s\n' "$mismatch" >&2
+			exit 1
+		fi
+		[[ "$recovery_output" == *"$reason"* && ! -s "$hardware_log" \
+			&& ! -e "$signal_result/result.json" ]] \
+			|| { printf 'FAIL: different recovery %s reached hardware or failed for the wrong reason: %s\n' \
+				"$mismatch" "$recovery_output" >&2; exit 1; }
+		checks=$((checks + 1))
+	done
+
+	for mutation in part image; do
+		mutated_result="$work/recovery-$mutation-mismatch"
+		cp -a "$signal_result" "$mutated_result"
+		chmod 700 "$mutated_result"
+		chmod 600 "$mutated_result/reservation.json"
+		python3 - "$mutated_result/reservation.json" "$mutation" <<'PY'
+import base64
+import hashlib
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+if sys.argv[2] == "part":
+    record["part"] = "PIC12F683"
+else:
+    image = b":00000001FF\n"
+    record["image_base64"] = base64.b64encode(image).decode("ascii")
+    record["image_sha256"] = hashlib.sha256(image).hexdigest()
+with open(sys.argv[1], "w", encoding="ascii") as handle:
+    json.dump(record, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+		chmod 400 "$mutated_result/reservation.json"
+		: > "$hardware_log"
+		if recovery_output=$(run_finalize_make "$mutated_result" "$program_variant" 2>&1); then
+			printf 'FAIL: recovery accepted a different reserved %s\n' "$mutation" >&2
+			exit 1
+		fi
+		case "$mutation" in
+			part) reason="program reservation has the wrong schema, type, status, or part" ;;
+			image) reason="retained recovery image differs from reservation" ;;
+		esac
+		[[ "$recovery_output" == *"$reason"* && ! -s "$hardware_log" \
+			&& ! -e "$mutated_result/result.json" ]] \
+			|| { printf 'FAIL: different reserved %s reached hardware or failed for the wrong reason: %s\n' \
+				"$mutation" "$recovery_output" >&2; exit 1; }
+		checks=$((checks + 1))
+	done
+
+	# The reader version must still match the reservation before the device read.
+	# A handled interruption during that read removes only its private attempt and
+	# leaves the transaction retryable; an abandoned attempt from SIGKILL/power loss
+	# is safely removed by the next invocation.
+	: > "$hardware_log"
+	if recovery_output=$(PIC12F675_PROGRAMMER_MODE=recovery-version-mismatch \
+			run_finalize_make "$signal_result" "$program_variant" 2>&1); then
+		printf 'FAIL: recovery accepted a changed reader version\n' >&2
+		exit 1
+	fi
+	mapfile -t recovery_hardware < "$hardware_log"
+	[[ "$recovery_output" == *"recovery reader version differs from reservation"* \
+		&& "${#recovery_hardware[@]}" -eq 1 \
+		&& "${recovery_hardware[0]}" == *"[ -\\?V ]"* \
+		&& ! -e "$signal_result/result.json" ]] \
+		|| { printf 'FAIL: changed recovery reader version reached the device: %s\n' \
+			"$recovery_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	: > "$hardware_log"
+	if recovery_output=$(PIC12F675_PROGRAMMER_MODE=signal-recovery-read \
+			run_finalize_make "$signal_result" "$program_variant" 2>&1); then
+		printf 'FAIL: interrupted finalization returned success\n' >&2
+		exit 1
+	fi
+	if compgen -G "$signal_result/.recovery-*" >/dev/null; then
+		printf 'FAIL: handled finalization interruption left a private attempt\n' >&2
+		exit 1
+	fi
+	[[ ! -e "$signal_result/result.json" ]] \
+		|| { printf 'FAIL: interrupted finalization published a result\n' >&2; exit 1; }
+	checks=$((checks + 1))
+	mkdir "$signal_result/.recovery-stale"
+	printf 'abandoned recovery attempt\n' > "$signal_result/.recovery-stale/read.log"
+
+	# Matching live state resolves the original PENDING transaction using exactly
+	# one version query and one read. The writer argv log must remain byte-identical.
+	pending_program_log="$work/pending-program-argv.log"
+	cp "$program_log" "$pending_program_log"
+	: > "$hardware_log"
+	recovery_output=$(run_finalize_make "$signal_result" "$program_variant")
+	cmp -s "$pending_program_log" "$program_log" \
+		|| { printf 'FAIL: read-only recovery invoked writer arguments\n' >&2; exit 1; }
+	mapfile -t recovery_hardware < "$hardware_log"
+	[[ "$recovery_output" == *"PIC12F675_TRIM_RECOVERY_RESULT PASS evidence=$signal_result/result.json"* \
+		&& -f "$signal_result/result.json" \
+		&& ! -e "$signal_result/.recovery-stale" \
+		&& "${#recovery_hardware[@]}" -eq 2 \
+		&& "${recovery_hardware[0]}" == *"[ -\\?V ]"* \
+		&& "${recovery_hardware[1]}" == *"[ -PPIC12F675 -I -GF"*" -R ]"* \
+		&& "$recovery_output" != *"Programming PIC12F675"* ]] \
+		|| { printf 'FAIL: interrupted transaction recovery was not strictly read-only: %s\n' \
+			"$recovery_output" >&2; exit 1; }
+	python3 - "$signal_result/result.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+assert record["status"] == "PASS"
+assert record["finalization_mode"] == "recovery"
+assert record["program_exit"] is None
+assert record["post_read_exit"] == record["reader_version_exit"] == 0
+assert record["programmed_image_bytes_verified"] > 2
+PY
+	checks=$((checks + 1))
+
+	# An unsealed terminal record is repaired only after complete schema, digest,
+	# identity, and status/failure validation. Contradictory evidence stays
+	# unsealed and cannot trigger another hardware read.
+	contradictory_result="$work/contradictory-terminal-result"
+	cp -a "$signal_result" "$contradictory_result"
+	chmod 700 "$contradictory_result"
+	chmod 600 "$contradictory_result/result.json"
+	python3 - "$contradictory_result/result.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+record["failures"].append("contradictory injected failure")
+with open(sys.argv[1], "w", encoding="ascii") as handle:
+    json.dump(record, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+	: > "$hardware_log"
+	if recovery_output=$(run_finalize_make "$contradictory_result" "$program_variant" 2>&1); then
+		printf 'FAIL: recovery sealed contradictory terminal evidence\n' >&2
+		exit 1
+	fi
+	contradictory_mode=$(stat -Lc '%a' -- "$contradictory_result")
+	[[ "$recovery_output" == *"status contradicts its failures"* \
+		&& ! -s "$hardware_log" && "$contradictory_mode" = 700 ]] \
+		|| { printf 'FAIL: contradictory terminal evidence was not rejected safely: %s\n' \
+			"$recovery_output" >&2; exit 1; }
+	checks=$((checks + 1))
+	altered_pass_result="$work/altered-pass-terminal-result"
+	cp -a "$signal_result" "$altered_pass_result"
+	chmod 700 "$altered_pass_result"
+	chmod 600 "$altered_pass_result/result.json"
+	python3 - "$altered_pass_result/result.json" <<'PY'
+import base64
+import hashlib
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+post_hex = base64.b64decode(record["post_read_hex_base64"], validate=True)
+old = b":040000000000FF23DA"
+new = b":040000000300FF23D7"
+assert old in post_hex
+post_hex = post_hex.replace(old, new, 1)
+record["post_read_hex_base64"] = base64.b64encode(post_hex).decode("ascii")
+record["post_read_hex_sha256"] = hashlib.sha256(post_hex).hexdigest()
+with open(sys.argv[1], "w", encoding="ascii") as handle:
+    json.dump(record, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+	: > "$hardware_log"
+	if recovery_output=$(run_finalize_make "$altered_pass_result" "$program_variant" 2>&1); then
+		printf 'FAIL: recovery sealed a PASS with altered programmed bytes\n' >&2
+		exit 1
+	fi
+	altered_pass_mode=$(stat -Lc '%a' -- "$altered_pass_result")
+	[[ "$recovery_output" == *"post-program image byte differs at 0x0000"* \
+		&& ! -s "$hardware_log" && "$altered_pass_mode" = 700 ]] \
+		|| { printf 'FAIL: altered terminal PASS was not replayed safely: %s\n' \
+			"$recovery_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# Once result.json exists, finalization is immutable and fails before another
+	# reader query. Simulate a crash after publication but before sealing; the next
+	# invocation validates the terminal record and repairs the directory first.
+	chmod 700 "$signal_result"
+	: > "$hardware_log"
+	if recovery_output=$(run_finalize_make "$signal_result" "$program_variant" 2>&1); then
+		printf 'FAIL: recovery replaced an existing final result\n' >&2
+		exit 1
+	fi
+	result_mode=$(stat -Lc '%a' -- "$signal_result")
+	[[ "$recovery_output" == *"pending transaction already has result.json"* \
+		&& ! -s "$hardware_log" && -f "$signal_result/result.json" \
+		&& "$result_mode" = 500 ]] \
+		|| { printf 'FAIL: repeated finalization reached hardware or failed for the wrong reason: %s\n' \
+			"$recovery_output" >&2; exit 1; }
+	if rm -f -- "$signal_result/result.json" 2>/dev/null; then
+		printf 'FAIL: terminal recovery directory allowed result.json removal\n' >&2
+		exit 1
+	fi
+	checks=$((checks + 1))
+
+	# A recovery read that finds changed trim, CONFIG, identity, or program bytes
+	# still resolves the PENDING state, but exclusively as durable FAIL evidence.
+	for spec in \
+		"change-osccal|recovery OSCCAL word differs from baseline" \
+		"change-bg|recovery BG<1:0> differs from baseline" \
+		"wrong-config|post-program CONFIG differs outside factory BG<1:0>" \
+		"wrong-program-byte|post-program image byte differs at 0x0000" \
+		"change-identity|recovery Device ID differs from baseline" \
+		"malformed-recovery-read|contains no complete CONFIG"; do
+		recovery_mode=${spec%%|*}
+		recovery_reason=${spec#*|}
+		recovery_result="$work/recovery-$recovery_mode-result"
+		rm -rf "$recovery_result"
+		: > "$program_log"
+		: > "$hardware_log"
+		if program_output=$(PIC12F675_PROGRAMMER_MODE=signal-after-write \
+				run_program_make "$PB_BUILD_DIR" "$program_variant" \
+				"PIC12F675_BENCH_RESULT=$recovery_result" 2>&1); then
+			printf 'FAIL: recovery %s fixture did not interrupt its writer\n' "$recovery_mode" >&2
+			exit 1
+		fi
+		[[ -f "$recovery_result/reservation.json" \
+			&& ! -e "$recovery_result/result.json" ]] \
+			|| { printf 'FAIL: recovery %s fixture did not leave PENDING evidence\n' \
+				"$recovery_mode" >&2; exit 1; }
+		: > "$hardware_log"
+		if recovery_output=$(PIC12F675_PROGRAMMER_MODE="$recovery_mode" \
+				run_finalize_make "$recovery_result" "$program_variant" 2>&1); then
+			printf 'FAIL: recovery accepted %s live state\n' "$recovery_mode" >&2
+			exit 1
+		fi
+		[[ "$recovery_output" == *"$recovery_reason"* \
+			&& "$recovery_output" == *"PIC12F675_TRIM_RECOVERY_RESULT FAIL evidence=$recovery_result/result.json"* \
+			&& -f "$recovery_result/result.json" ]] \
+			|| { printf 'FAIL: recovery %s did not publish its durable failure: %s\n' \
+				"$recovery_mode" "$recovery_output" >&2; exit 1; }
+		python3 - "$recovery_result/result.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+assert record["status"] == "FAIL"
+assert record["finalization_mode"] == "recovery"
+assert record["program_exit"] is None
+PY
+		if [ "$recovery_mode" = malformed-recovery-read ]; then
+			chmod 700 "$recovery_result"
+			: > "$hardware_log"
+			if recovery_output=$(run_finalize_make "$recovery_result" "$program_variant" 2>&1); then
+				printf 'FAIL: malformed-read FAIL evidence was finalized twice\n' >&2
+				exit 1
+			fi
+			recovery_mode_bits=$(stat -Lc '%a' -- "$recovery_result")
+			[[ "$recovery_output" == *"pending transaction already has result.json"* \
+				&& ! -s "$hardware_log" && "$recovery_mode_bits" = 500 ]] \
+				|| { printf 'FAIL: legitimate malformed-read FAIL evidence was not self-healed: %s\n' \
+					"$recovery_output" >&2; exit 1; }
+		fi
+		checks=$((checks + 1))
+	done
 
 	# The live read immediately before the write must still match the retained
 	# baseline. A changed chip/trim cannot reach the programming argv.
@@ -2279,18 +2710,48 @@ PY
 	checks=$((checks + 1))
 
 	# The remaining hostile images are emitted by the private fresh build itself.
-	# Each must fail its own pre-flash layer before the fake programmer is reachable.
-	: > "$program_log"
-	if program_output=$(PIC12F675_PROGRAM_IMAGE_MODE=bad-config \
-			run_program_make "$PB_BUILD_DIR" "$program_variant" 2>&1); then
-		printf 'FAIL: PIC12F675 programming accepted a bad CONFIG word\n' >&2
-		exit 1
-	fi
-	[[ "$program_output" == *"CONFIG checks:"* \
-		&& ! -s "$program_log" ]] \
-		|| { printf 'FAIL: bad CONFIG reached the programmer or failed for the wrong reason: %s\n' \
-			"$program_output" >&2; exit 1; }
-	checks=$((checks + 1))
+	# Every safety-critical CONFIG field must fail its named check before any
+	# hardware command; whole-word equality then protects the remaining fields.
+	for spec in \
+		"bad-fosc|FOSC must be INTRCIO" \
+		"bad-wdte|WDTE must be ON" \
+		"bad-mclre|MCLRE must be OFF" \
+		"bad-boren|BOREN must be ON" \
+		"bad-bg|BG must be left ERASED" \
+		"bad-full-word|built CONFIG word must equal 0x31CC"; do
+		config_mode=${spec%%|*}
+		config_reason=${spec#*|}
+		: > "$program_log"
+		: > "$hardware_log"
+		if program_output=$(PIC12F675_PROGRAM_IMAGE_MODE="$config_mode" \
+				run_program_make "$PB_BUILD_DIR" "$program_variant" 2>&1); then
+			printf 'FAIL: PIC12F675 programming accepted CONFIG mode %s\n' "$config_mode" >&2
+			exit 1
+		fi
+		[[ "$program_output" == *"$config_reason"* \
+			&& ! -s "$program_log" && ! -s "$hardware_log" ]] \
+			|| { printf 'FAIL: CONFIG mode %s reached hardware or failed for the wrong reason: %s\n' \
+				"$config_mode" "$program_output" >&2; exit 1; }
+		checks=$((checks + 1))
+	done
+
+	# A hostile host compiler can still produce an exit-zero executable, but no
+	# no-output, near-match, or wrong-image record can satisfy the exact gate.
+	for config_mode in no-output near-match wrong-image; do
+		: > "$program_log"
+		: > "$hardware_log"
+		if program_output=$(PIC12F675_CONFIG_MODE="$config_mode" \
+				run_program_make "$PB_BUILD_DIR" "$program_variant" 2>&1); then
+			printf 'FAIL: PIC12F675 programming trusted CONFIG checker mode %s\n' \
+				"$config_mode" >&2
+			exit 1
+		fi
+		[[ "$program_output" == *"did not emit its exact image-bound success record"* \
+			&& ! -s "$program_log" && ! -s "$hardware_log" ]] \
+			|| { printf 'FAIL: CONFIG checker mode %s reached hardware or failed for the wrong reason: %s\n' \
+				"$config_mode" "$program_output" >&2; exit 1; }
+		checks=$((checks + 1))
+	done
 
 	: > "$program_log"
 	if program_output=$(PIC12F675_PROGRAM_IMAGE_MODE=overlap \
@@ -2543,6 +3004,181 @@ PY
 	[[ "$cal_output" == *"required by the PIC12F675 calibration-word injector"* ]] \
 		|| { printf 'FAIL: PIC12F675 shipping-image/missing-Python failure reported the wrong result: %s\n' \
 			"$cal_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# Release programming composes the same private snapshot transaction with a
+	# clean annotated-tag check and the selected digest from signed SHA256SUMS.
+	# The signature leaf is synthetic here; production GPG policy is covered by
+	# test_release_history.sh.
+	release_tag=v1.0.0
+	release_dir="$repo/release/$release_tag"
+	release_signature_log="$work/pic12f675-release-signature.log"
+	mkdir -p "$release_dir"
+	cp "$ROOT/.gitignore" "$repo/.gitignore"
+	cat > "$repo/scripts/verify-release-signature.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source "$(dirname "$0")/release-signing-policy.sh"
+printf '%s\0' "$@" >> "${PIC12F675_SIGNATURE_LOG:?}"
+[ "${PIC12F675_SIGNATURE_MODE:-pass}" != "fail-${1:-}" ] || {
+	printf 'fixture signature rejection\n' >&2
+	exit 1
+}
+case "${1:-}" in
+	tag|detached)
+		printf 'SIGNATURE-VALID: %s signature made by %s.\n' \
+			"$1" "$RELEASE_SIGNING_FINGERPRINT"
+		;;
+	*) exit 2 ;;
+esac
+EOF
+	chmod 755 "$repo/scripts/verify-release-signature.sh"
+	release_images=$(_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+		make -s --no-print-directory -C "$repo" print-RELEASE_IMAGES CC=true) \
+		|| { printf 'FAIL: could not read release image set for PIC12F675 programming fixture\n' >&2; exit 1; }
+	for image in $release_images; do
+		case "$image" in
+			bypass-pic12f675-cd4053_simple.hex)
+				write_program_fixture "$release_dir/$image" cd4053_simple ;;
+			bypass-pic12f675-cd4053_with_mute.hex)
+				write_program_fixture "$release_dir/$image" cd4053_with_mute ;;
+			bypass-pic12f675-tq2_l2_5v_relay.hex)
+				write_program_fixture "$release_dir/$image" tq2_l2_5v_relay ;;
+			*) printf 'fixture release bytes for %s\n' "$image" > "$release_dir/$image" ;;
+		esac
+	done
+	(
+		cd "$release_dir"
+		sha256sum $release_images > SHA256SUMS
+	)
+	printf 'fixture detached signature\n' > "$release_dir/SHA256SUMS.asc"
+	git -C "$repo" init -q
+	git -C "$repo" config user.name 'PIC Build Test'
+	git -C "$repo" config user.email 'pic-build@example.invalid'
+	git -C "$repo" add .
+	git -C "$repo" -c commit.gpgsign=false commit -qm fixture
+	git -C "$repo" tag -a -m fixture "$release_tag"
+	: > "$release_signature_log"
+	: > "$program_log"
+	: > "$hardware_log"
+	release_result="$work/pic12f675-release-program-result"
+	rm -rf "$release_result"
+	release_output=$(PIC12F675_PROGRAM_TARGET=pic12f675-release-program \
+		PIC12F675_SIGNATURE_LOG="$release_signature_log" \
+		run_program_make "$PB_BUILD_DIR" "$program_variant" \
+		"PIC12F675_RELEASE_TAG=$release_tag" \
+		"PIC12F675_BENCH_RESULT=$release_result")
+	mapfile -d '' -t program_args < "$program_log"
+	[[ "${#program_args[@]}" -eq 5 && "${program_args[1]}" == -F* ]] \
+		|| { printf 'FAIL: signed-release target did not reach the guarded writer argv\n' >&2; exit 1; }
+	release_snapshot=${program_args[1]#-F}
+	release_digest=$(sha256sum "$release_dir/bypass-pic12f675-cd4053_simple.hex")
+	release_digest=${release_digest%% *}
+	expected_release_check="PIC12F675_RELEASE_IMAGE_CHECK PASS tag=$release_tag variant=$program_variant image=$release_snapshot sha256=$release_digest"
+	mapfile -d '' -t release_signature_args < "$release_signature_log"
+	[[ "$release_output" == *"PIC12F675_RELEASE_SOURCE_CHECK PASS tag=$release_tag"* \
+		&& "$release_output" == *"$expected_release_check"* \
+		&& "$release_snapshot" == "$pic12_temp_root"/pic12f675-program.*/"image snapshot.hex" \
+		&& ! -e "$release_snapshot" \
+		&& "${#release_signature_args[@]}" -eq 9 \
+		&& "${release_signature_args[0]}" = tag \
+		&& "${release_signature_args[3]}" = tag \
+		&& "${release_signature_args[6]}" = detached ]] \
+		|| { printf 'FAIL: signed-release programming did not authenticate and bind its snapshot: %s\n' \
+			"$release_output" >&2; exit 1; }
+	cmp -s "$release_dir/bypass-pic12f675-cd4053_simple.hex" "$program_capture" \
+		|| { printf 'FAIL: signed-release writer did not consume the checked release bytes\n' >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# A tracked mutation after preflight fails the target's internal clean-source
+	# check before any reader or writer operation.
+	source_backup="$work/bypass_pure.c.release-backup"
+	cp "$repo/src/bypass_pure.c" "$source_backup"
+	printf '\n/* tracked release-program mutation */\n' >> "$repo/src/bypass_pure.c"
+	: > "$program_log"
+	: > "$hardware_log"
+	if release_output=$(PIC12F675_PROGRAM_TARGET=pic12f675-release-program \
+			PIC12F675_SIGNATURE_LOG="$release_signature_log" \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_RELEASE_TAG=$release_tag" 2>&1); then
+		printf 'FAIL: signed-release programming accepted a tracked source mutation\n' >&2
+		exit 1
+	fi
+	[[ "$release_output" == *"release-programming worktree is not clean"* \
+		&& ! -s "$program_log" && ! -s "$hardware_log" ]] \
+		|| { printf 'FAIL: tracked release mutation reached hardware or failed for the wrong reason: %s\n' \
+			"$release_output" >&2; exit 1; }
+	cp "$source_backup" "$repo/src/bypass_pure.c"
+	git -C "$repo" diff --quiet \
+		|| { printf 'FAIL: release source fixture did not restore cleanly\n' >&2; exit 1; }
+	checks=$((checks + 1))
+
+	# Valid Intel HEX with safe calibration and CONFIG fields still cannot pass if
+	# its program bytes differ from the selected signed digest.
+	: > "$program_log"
+	: > "$hardware_log"
+	if release_output=$(PIC12F675_PROGRAM_TARGET=pic12f675-release-program \
+			PIC12F675_PROGRAM_IMAGE_MODE=byte-different \
+			PIC12F675_SIGNATURE_LOG="$release_signature_log" \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_RELEASE_TAG=$release_tag" 2>&1); then
+		printf 'FAIL: signed-release programming accepted byte-different compiler output\n' >&2
+		exit 1
+	fi
+	[[ "$release_output" == *"PIC12F675_CALIBRATION_CHECK PASS"* \
+		&& "$release_output" == *"candidate image does not match the signed release image set"* \
+		&& ! -s "$program_log" && ! -s "$hardware_log" ]] \
+		|| { printf 'FAIL: byte-different release image reached hardware or failed for the wrong reason: %s\n' \
+			"$release_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	: > "$program_log"
+	: > "$hardware_log"
+	if release_output=$(PIC12F675_PROGRAM_TARGET=pic12f675-release-program \
+			PIC12F675_SIGNATURE_LOG="$release_signature_log" \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			PIC12F675_RELEASE_TAG=v1.0.1 2>&1); then
+		printf 'FAIL: signed-release programming accepted a mismatched release tag\n' >&2
+		exit 1
+	fi
+	[[ "$release_output" == *"release tag does not exist: v1.0.1"* \
+		&& ! -s "$program_log" && ! -s "$hardware_log" ]] \
+		|| { printf 'FAIL: mismatched release tag reached hardware or failed for the wrong reason: %s\n' \
+			"$release_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	: > "$program_log"
+	: > "$hardware_log"
+	inside_result="$repo/pic12f675-release-result"
+	if release_output=$(PIC12F675_PROGRAM_TARGET=pic12f675-release-program \
+			PIC12F675_SIGNATURE_LOG="$release_signature_log" \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_RELEASE_TAG=$release_tag" \
+			"PIC12F675_BENCH_RESULT=$inside_result" 2>&1); then
+		printf 'FAIL: signed-release programming accepted worktree-local evidence\n' >&2
+		exit 1
+	fi
+	[[ "$release_output" == *"baseline and result paths must be outside the worktree"* \
+		&& ! -s "$program_log" && ! -s "$hardware_log" && ! -e "$inside_result" ]] \
+		|| { printf 'FAIL: worktree-local release evidence reached hardware or failed for the wrong reason: %s\n' \
+			"$release_output" >&2; exit 1; }
+	checks=$((checks + 1))
+
+	: > "$program_log"
+	: > "$hardware_log"
+	if release_output=$(PIC12F675_PROGRAM_TARGET=pic12f675-release-program \
+			PIC12F675_SIGNATURE_MODE=fail-detached \
+			PIC12F675_SIGNATURE_LOG="$release_signature_log" \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_RELEASE_TAG=$release_tag" 2>&1); then
+		printf 'FAIL: signed-release programming accepted a bad checksum signature\n' >&2
+		exit 1
+	fi
+	[[ "$release_output" == *"release checksum signature verification failed"* \
+		&& ! -s "$program_log" && ! -s "$hardware_log" ]] \
+		|| { printf 'FAIL: bad release checksum signature reached hardware or failed for the wrong reason: %s\n' \
+			"$release_output" >&2; exit 1; }
 	checks=$((checks + 1))
 	[ ! -e "$pic12_temp_cleanup_failure" ] \
 		|| { printf 'FAIL: an expected-failure scenario masked leaked PIC12F675 transient data\n' >&2; exit 1; }

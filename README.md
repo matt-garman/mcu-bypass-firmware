@@ -19,7 +19,7 @@ raising the canonical set to 21 images; see the table below.
 | **ATtiny202 (AVR-XT)** | release-supported | first released in `v0.9.6`; 2 KB flash, SOIC-8 only (no DIP), UPDI programming |
 | PIC10F322 | release-supported | 512 words |
 | **PIC10F320** | release-supported | **first released here in `v0.9.6`; constrained exception: 256 words, so the debounce algorithm is implemented directly rather than by compiling the verified core — see [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md)** |
-| **PIC12F675** | release-supported | **first released here in `v0.9.9`; classic mid-range: 1024 words, no `LATx` (the output latch is an SRAM shadow), 1.024 ms tick. Every pre-hardware lane the release parts have, plus a calibration contract they do not — and, uniquely, a guarded pk2cmd flashing procedure that checks and records factory OSCCAL/BG before and after writing. Real preservation and the software-only ipecmd route remain hardware-unvalidated (see [release/README.md](release/README.md) and `make pic12f675-program`). See [docs/pic12f675_feasibility.md](docs/pic12f675_feasibility.md)** |
+| **PIC12F675** | release-supported | **first released here in `v0.9.9`; classic mid-range: 1024 words, no `LATx` (the output latch is an SRAM shadow), 1.024 ms tick. Every pre-hardware lane the release parts have, plus a calibration contract they do not — and, uniquely, guarded development and signed-release programming procedures that check and record factory OSCCAL/BG before and after writing. Real preservation and the software-only ipecmd route remain hardware-unvalidated (see [release/README.md](release/README.md) and `make pic12f675-release-program`). See [docs/pic12f675_feasibility.md](docs/pic12f675_feasibility.md)** |
 
 Every release target except one compiles the verified core (`src/bypass_pure.c`)
 directly into its shipping image. The release-supported PIC10F320 cannot — its
@@ -139,7 +139,7 @@ make pic12f675-test pic12f675-test-target-variants
                                     # one retained hash-qualified matrix across
                                     # CONFIG, analysis, coverage, calibration,
                                     # gpsim, stack, and all libgpsim variants
-# Replace with the intended release, for example v0.9.9.
+# Replace with the intended release tag containing pic12f675-release-program.
 release_tag=vX.Y.Z &&
 repo=$(git rev-parse --show-toplevel) &&
 head_commit=$(git -C "$repo" rev-parse --verify "HEAD^{commit}") &&
@@ -147,19 +147,41 @@ tag_commit=$(git -C "$repo" rev-parse --verify \
   "refs/tags/$release_tag^{commit}") &&
 worktree_status=$(git -C "$repo" status --porcelain=v1 --untracked-files=normal) &&
 test "$head_commit" = "$tag_commit" && test -z "$worktree_status" &&
-baseline="$repo/pic12f675-factory-baseline.json" &&
-result="$repo/pic12f675-program-result" &&
+evidence_root=$(dirname "$repo") &&
+baseline="$evidence_root/pic12f675-factory-baseline.json" &&
+result="$evidence_root/pic12f675-program-result" &&
 test ! -e "$baseline" && test ! -e "$result" &&
 make -C "$repo" pic12f675-preflight \
   PIC12F675_READ_PROG=pk2cmd \
   PIC12F675_TRIM_EVIDENCE="$baseline" &&
-make -C "$repo" pic12f675-program \
+make -C "$repo" pic12f675-release-program \
+  VARIANT=cd4053_simple \
+  PIC12F675_RELEASE_TAG="$release_tag" \
+  PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \
+  PIC12F675_READ_PROG=pk2cmd \
+  PIC12F675_TRIM_EVIDENCE="$baseline" \
+  PIC12F675_BENCH_RESULT="$result"
+```
+
+If an interruption leaves `reservation.json` but no `result.json`, the
+transaction is **PENDING**. Keep physical custody of the same attached device;
+do not write, reflash, capture a new baseline, or reuse the result path. From the
+same source checkout, resolve it with the same variant and tool identities:
+
+```sh
+make -C "$repo" pic12f675-finalize \
   VARIANT=cd4053_simple \
   PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \
   PIC12F675_READ_PROG=pk2cmd \
   PIC12F675_TRIM_EVIDENCE="$baseline" \
   PIC12F675_BENCH_RESULT="$result"
 ```
+
+Finalization never invokes writer arguments. It validates the reservation and
+separately retained image first, verifies the reader version before a full-device
+read, and exclusively publishes the recovered PASS/FAIL `result.json`. Private
+read attempts are retry-safe after interruption. A FAIL is a resolved forensic
+record, not permission to retry the write. An existing result is immutable.
 
 `pic12f675-preflight` is read-only and device-specific; it does not take
 `VARIANT`. Only run the program step after preflight succeeds, using the same
@@ -175,12 +197,15 @@ digits, spaces, `/`, `.`, `_`, and `-`. Success, failure, and handled-signal
 paths remove those transient directories; only the explicitly requested
 baseline and result paths are retained.
 
-Run this workflow only from a clean checkout of the intended release tag with
-the pinned XC8/DFP toolchain. `pic12f675-program` rebuilds and checks the image
-from that source; it does not consume a downloaded release HEX. No ipecmd
-hardware procedure is published yet. Its software-tested route needs pk2cmd
-reads immediately before and after the IPE write, and no safe dual-programmer
-attachment or handoff has been validated.
+Run this workflow only from a clean checkout of the intended annotated release
+tag with the pinned XC8/DFP toolchain. `pic12f675-release-program` verifies the
+pinned tag and checksum signatures, validates the complete release image set,
+and requires its private fresh build to match the selected signed digest. It
+does not consume a downloaded release HEX. `pic12f675-program` remains an
+explicit development/bench path and does not claim signed-release provenance.
+No ipecmd hardware procedure is published yet. Its software-tested route needs
+pk2cmd reads immediately before and after the IPE write, and no safe
+dual-programmer attachment or handoff has been validated.
 
 Its simulator lanes run *derived* images: `make pic12f675-simcal` injects the
 oscillator calibration word that a real device carries in its last program word
@@ -197,7 +222,7 @@ consumer. Every aggregate PASS names the same six image hashes. Separate
 invocations remain valid standalone qualifications, but necessarily create
 separate retained matrices and therefore cannot be combined as one evidence set.
 
-The same asymmetry is why `make pic12f675-program` rebuilds the complete matrix,
+The same asymmetry is why both PIC12F675 programming goals rebuild the complete matrix,
 derives one image only from validated `VARIANT`, and checks a private read-only
 snapshot before writing it. A derived image carries a *fabricated* calibration
 value, and putting one on a real device would overwrite that device's factory
@@ -205,7 +230,8 @@ oscillator trim irreversibly — and silently, since the part still runs
 afterwards. The snapshot must leave that word unprogrammed, carry the intended
 CONFIG, and retain one SHA-256 digest through every check; the programmer gets
 that same snapshot through directly constructed argv. External image and
-whole-command overrides are deliberately unsupported.
+whole-command overrides are deliberately unsupported. The release goal adds the
+signed-byte gate; the development/bench goal deliberately does not impersonate it.
 
 Programming also requires a baseline made by the read-only
 `pic12f675-preflight` target. It records the exact reader binary/version and
@@ -215,7 +241,9 @@ device again afterwards, and publishes an exclusive result containing the raw
 transcripts, programmed-byte comparison, and before/after values. The
 `PIC12F675_BENCH_RESULT` path is reserved as a new directory before the write;
 `reservation.json` remains useful after interruption and `result.json` records
-the final PASS/FAIL. A baseline is a one-device, pre-first-write record: the
+the final PASS/FAIL. Until a PENDING reservation is finalized, keep the same
+device under physical custody and prohibit another write or baseline. A baseline
+is a one-device, pre-first-write record: the
 immediate read must match its complete exported HEX as well as identity/trim, so
 do not reuse it for another device or a later reflash. pk2cmd is the pinned
 readback dialect. The software-tested ipecmd write route would require pk2cmd

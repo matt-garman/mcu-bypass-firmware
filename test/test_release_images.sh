@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 VERIFY="$ROOT/scripts/verify-release-images.sh"
+BIND_VERIFY_SOURCE="$ROOT/scripts/verify-release-program-image.sh"
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-images.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 release="$work/release"
@@ -478,5 +479,179 @@ done
 [[ "$canonical" != *tmux4053* ]] \
 	|| fail "canonical release set contains a retired tmux4053 image"
 checks=$((checks + 1))
+
+# Compose the signed tag, detached checksum, exact-set, and selected-image gates
+# over a scratch Git repository. The production signature verifier has its own
+# real-GPG regression; this fixture replaces only that cryptographic leaf so the
+# byte-binding behavior can be exercised without the maintainer's private key.
+binding_repo="$work/release-program-binding"
+binding_temp="$work/release-program-temp"
+binding_tag=v1.0.0
+binding_variant=cd4053_simple
+binding_image=bypass-pic12f675-cd4053_simple.hex
+binding_canonical='a.hex bypass-pic12f675-cd4053_simple.hex bypass-pic12f675-cd4053_with_mute.hex bypass-pic12f675-tq2_l2_5v_relay.hex'
+
+setup_binding_fixture() {
+	local mutation=${1:-none} binding_release="$binding_repo/release/$binding_tag"
+	rm -rf "$binding_repo" "$binding_temp"
+	mkdir -p "$binding_repo/scripts" "$binding_release" "$binding_temp"
+	chmod 700 "$binding_temp"
+	cp -p "$BIND_VERIFY_SOURCE" "$binding_repo/scripts/verify-release-program-image.sh"
+	cp -p "$VERIFY" "$binding_repo/scripts/verify-release-images.sh"
+	cp -p "$ROOT/scripts/release-signing-policy.sh" \
+		"$binding_repo/scripts/release-signing-policy.sh"
+	cat > "$binding_repo/scripts/verify-release-signature.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source "$(dirname "$0")/release-signing-policy.sh"
+[ "${BINDING_SIGNATURE_MODE:-pass}" != "fail-${1:-}" ] || {
+	printf 'fixture signature rejection\n' >&2
+	exit 1
+}
+case "${1:-}" in
+	tag|detached) \
+		printf 'SIGNATURE-VALID: %s signature made by %s.\n' \
+			"$1" "$RELEASE_SIGNING_FINGERPRINT" ;;
+	*) exit 2 ;;
+esac
+EOF
+	chmod 755 "$binding_repo/scripts/verify-release-signature.sh"
+	cat > "$binding_repo/Makefile" <<EOF
+override RELEASE_IMAGES := $binding_canonical
+.PHONY: print-RELEASE_IMAGES
+print-RELEASE_IMAGES:
+	@printf '%s\\n' "\$(RELEASE_IMAGES)"
+EOF
+	printf 'unrelated release bytes\n' > "$binding_release/a.hex"
+	printf 'selected release bytes\n' > "$binding_release/$binding_image"
+	printf 'mute release bytes\n' \
+		> "$binding_release/bypass-pic12f675-cd4053_with_mute.hex"
+	printf 'relay release bytes\n' \
+		> "$binding_release/bypass-pic12f675-tq2_l2_5v_relay.hex"
+	(
+		cd "$binding_release"
+		sha256sum $binding_canonical > SHA256SUMS
+	)
+	printf 'fixture detached signature\n' > "$binding_release/SHA256SUMS.asc"
+	case "$mutation" in
+		none) ;;
+		missing-checksum)
+			while IFS= read -r line; do
+				case "$line" in *"  $binding_image") ;; *) printf '%s\n' "$line" ;; esac
+			done < "$binding_release/SHA256SUMS" \
+				> "$binding_release/SHA256SUMS.new"
+			mv "$binding_release/SHA256SUMS.new" "$binding_release/SHA256SUMS"
+			;;
+		wrong-checksum)
+			while IFS= read -r line; do
+				case "$line" in
+					*"  $binding_image") printf '%064d  %s\n' 0 "$binding_image" ;;
+					*) printf '%s\n' "$line" ;;
+				esac
+			done < "$binding_release/SHA256SUMS" \
+				> "$binding_release/SHA256SUMS.new"
+			mv "$binding_release/SHA256SUMS.new" "$binding_release/SHA256SUMS"
+			;;
+		duplicate-checksum)
+			while IFS= read -r line; do
+				case "$line" in *"  $binding_image") printf '%s\n' "$line"; break ;; esac
+			done < "$binding_release/SHA256SUMS" >> "$binding_release/SHA256SUMS"
+			;;
+		missing-image) rm "$binding_release/a.hex" ;;
+		extra-image) printf 'extra\n' > "$binding_release/extra.hex" ;;
+		*) fail "unknown release-program binding fixture mutation: $mutation" ;;
+	esac
+	git -C "$binding_repo" init -q
+	git -C "$binding_repo" config user.name 'Release Image Test'
+	git -C "$binding_repo" config user.email 'release-image@example.invalid'
+	git -C "$binding_repo" add .
+	git -C "$binding_repo" -c commit.gpgsign=false commit -qm fixture
+	git -C "$binding_repo" tag -a -m fixture "$binding_tag"
+	printf 'selected release bytes\n' > "$work/release-program-candidate.hex"
+}
+
+run_binding_verify() {
+	TMPDIR="$binding_temp" \
+		"$binding_repo/scripts/verify-release-program-image.sh" "$@"
+}
+
+expect_binding_fail() {
+	local label=$1 expected=$2 output
+	shift 2
+	if output=$(run_binding_verify "$@" 2>&1); then
+		fail "$label: invalid release-program binding was accepted"
+	fi
+	[[ "$output" == *"$expected"* ]] \
+		|| fail "$label: failed for the wrong reason: $output"
+	checks=$((checks + 1))
+}
+
+setup_binding_fixture
+binding_source_output=$(run_binding_verify source "$binding_tag") \
+	|| fail "valid release source binding was rejected"
+[ "$binding_source_output" = \
+		"PIC12F675_RELEASE_SOURCE_CHECK PASS tag=$binding_tag" ] \
+	|| fail "release source binding emitted the wrong success record: $binding_source_output"
+binding_output=$(run_binding_verify image "$binding_tag" "$binding_variant" \
+	"$work/release-program-candidate.hex") \
+	|| fail "valid signed release image binding was rejected"
+binding_digest=$(sha256sum "$work/release-program-candidate.hex")
+binding_digest=${binding_digest%% *}
+[ "$binding_output" = \
+		"PIC12F675_RELEASE_IMAGE_CHECK PASS tag=$binding_tag variant=$binding_variant image=$work/release-program-candidate.hex sha256=$binding_digest" ] \
+	|| fail "release image binding emitted the wrong success record: $binding_output"
+checks=$((checks + 1))
+
+printf 'byte-different but regular candidate\n' > "$work/release-program-candidate.hex"
+expect_binding_fail "byte-different candidate" \
+	"candidate image does not match the signed release image set" \
+	image "$binding_tag" "$binding_variant" "$work/release-program-candidate.hex"
+
+setup_binding_fixture
+expect_binding_fail "wrong selected variant" \
+	"candidate image does not match the signed release image set" \
+	image "$binding_tag" cd4053_with_mute "$work/release-program-candidate.hex"
+
+for spec in \
+	"missing-checksum|SHA256SUMS entries do not exactly match" \
+	"wrong-checksum|committed image checksum verification failed" \
+	"duplicate-checksum|duplicate SHA256SUMS image entry" \
+	"missing-image|committed release image set" \
+	"extra-image|committed release image set"; do
+	mutation=${spec%%|*}
+	expected_failure=${spec#*|}
+	setup_binding_fixture "$mutation"
+	expect_binding_fail "$mutation" "$expected_failure" \
+		image "$binding_tag" "$binding_variant" "$work/release-program-candidate.hex"
+done
+
+setup_binding_fixture
+if output=$(BINDING_SIGNATURE_MODE=fail-detached run_binding_verify image "$binding_tag" \
+		"$binding_variant" "$work/release-program-candidate.hex" 2>&1); then
+	fail "failed detached signature reached release-image acceptance"
+fi
+[[ "$output" == *"release checksum signature verification failed"* ]] \
+	|| fail "failed signature was rejected for the wrong reason: $output"
+checks=$((checks + 1))
+
+expect_binding_fail "missing release tag" "release tag does not exist" \
+	source v1.0.1
+
+setup_binding_fixture
+git -C "$binding_repo" tag v1.0.1 HEAD
+expect_binding_fail "lightweight release tag" "release tag is not an annotated tag" \
+	source v1.0.1
+
+setup_binding_fixture
+tag_object=$(git -C "$binding_repo" rev-parse "refs/tags/$binding_tag^{object}")
+git -C "$binding_repo" update-ref refs/tags/v1.0.1 "$tag_object"
+expect_binding_fail "aliased annotated tag object" \
+	"annotated release tag name does not match requested tag" source v1.0.1
+
+setup_binding_fixture
+printf '\n# tracked mutation\n' >> "$binding_repo/Makefile"
+expect_binding_fail "dirty tagged source" "release-programming worktree is not clean" \
+	source "$binding_tag"
 
 printf 'release image verification: %d checks, 0 failures\n' "$checks"

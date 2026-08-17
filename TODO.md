@@ -1,12 +1,14 @@
 # Remaining work toward textbook reference quality
 
-**Status (2026-08-08):** No nominal-path firmware correctness defect is
-currently known. Release `v0.9.8` closes the PIC10F320 relay idle-latch gap;
-bounded relay fault-abort hardening below remains open. Its authoritative
-full-toolchain, target, stack, mutation, soak and final-image evidence is retained
-under `release/v0.9.8/`. The PIC10F320 relay image is the one intentional binary
-change from `v0.9.7`; rename-identity evidence pins the other 17 images as
-byte-identical.
+<!-- current-release:start -->
+**Current release contract:** `v0.9.9`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
+
+**Status (2026-08-17):** No nominal-path firmware correctness defect is
+currently known. PIC10F320 remains the self-contained exception. Authoritative
+full-toolchain, target, stack, mutation, soak, and final-image evidence is
+retained under `release/v0.9.9/`; bounded relay fault-abort hardening below
+remains open.
+<!-- current-release:end -->
 
 This file contains open actions only. Completed work is removed rather than
 kept as implementation journals; Git history and `CHANGELOG.md` are the record.

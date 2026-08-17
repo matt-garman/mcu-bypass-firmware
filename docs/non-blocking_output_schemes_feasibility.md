@@ -388,7 +388,7 @@ existing complexity exists only to accommodate blocking, and would be deleted:
 The interface gets wider (two functions where there was one call site) and the
 ordinary debounce-timing model gets narrower (one sampling story instead of
 two). That is a real simplification, but it is not a net-complexity result by
-itself. The scheduler must be expressed in three modular shells and again in the
+itself. The scheduler must be expressed in four modular shells and again in the
 manually maintained PIC10F320 shell; output sanity becomes phase-aware; startup,
 fault entry and watchdog eligibility gain new policy; and several validation
 lanes lose their current observation boundary. Deleting the delay shim and soak
