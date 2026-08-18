@@ -105,3 +105,11 @@ debounce_context_t debounce_init_context(pin_state_t const pin_state)
 
     return ctx;
 }
+
+
+uint8_t debounce_ctx_check_word(debounce_context_t const ctx) {
+    return (uint8_t)~(uint8_t)(
+            (uint8_t)ctx.program_state
+            ^ (uint8_t)ctx.effect_state
+            ^ ctx.debounce_counter);
+}

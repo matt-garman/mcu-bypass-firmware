@@ -686,10 +686,19 @@ CLANG              ?= clang
 # -Werror -Wall -Wextra -Wconversion : strict; -Wconversion catches narrowing
 # Flags common to every firmware build; the -mmcu and F_CPU differ per target and are
 # prepended in CFLAGS (t13a) / CFLAGS85 (t85).
+# F2 in-range context-SEU detection (docs/context_seu_detection.md) is a
+# compile-time opt-in.  It is enabled on every shell that links the pure core
+# and has flash headroom: PIC10F322, PIC12F675, and both AVR families (classic
+# and XT, which share CFLAGS_COMMON below).  PIC10F320 is deliberately excluded
+# -- it does not link the pure core and even a one-byte fold overflows its
+# 256-word flash -- so this flag is NOT added to PIC10F320_CFLAGS.
+BYPASS_CTX_CHECK_FLAG := -DBYPASS_CTX_CHECK
+
 CFLAGS_COMMON = -Os \
           -fshort-enums -funsigned-char \
           -ffunction-sections -fdata-sections \
-          -Werror -Wall -Wextra -Wconversion -std=c11
+          -Werror -Wall -Wextra -Wconversion -std=c11 \
+          $(BYPASS_CTX_CHECK_FLAG)
 
 # Primary (ATtiny13a). The tinyx5 family's per-chip flags are computed inline in
 # the build/sim templates from mmcu_<n> + TINYX5_F_CPU + CFLAGS_COMMON.
@@ -1081,7 +1090,8 @@ PIC10F322_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h
 # XC8 compile flags: select the PIC10F322 + its DFP, C99 (no C11 in XC8), the
 # PIC pin map, and _XTAL_FREQ for __delay_ms.
 PIC10F322_CFLAGS = -mcpu=$(PIC10F322_CHIP) -mdfp=$(PIC_DFP) -std=c99 -O2 \
-             -DBYPASS_MCU_PIC10F322 -D_XTAL_FREQ=$(PIC10F322_XTAL)
+             -DBYPASS_MCU_PIC10F322 -D_XTAL_FREQ=$(PIC10F322_XTAL) \
+             $(BYPASS_CTX_CHECK_FLAG)
 
 # --- PIC static analysis (cppcheck + MISRA addon) ----------------------------
 # The cppcheck/MISRA register-correct parse of the PIC shell needs the real XC8
@@ -5301,7 +5311,8 @@ PIC12F675_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h
 # XC8 compile flags: select the PIC12F675 + its DFP, C99 (no C11 in XC8), the
 # PIC pin map, and _XTAL_FREQ for __delay_ms.
 override PIC12F675_CFLAGS := -mcpu=$(PIC12F675_CHIP) -mdfp=$(PIC_DFP) -std=c99 -O2 \
-             -DBYPASS_MCU_PIC12F675 -D_XTAL_FREQ=$(PIC12F675_XTAL)
+             -DBYPASS_MCU_PIC12F675 -D_XTAL_FREQ=$(PIC12F675_XTAL) \
+             $(BYPASS_CTX_CHECK_FLAG)
 
 # --- PIC static analysis (cppcheck + MISRA addon) ----------------------------
 # The cppcheck/MISRA register-correct parse of the PIC shell needs the real XC8

@@ -268,6 +268,12 @@ static void hw_wait_for_tick(void) {
 // the AVR shell's resource-budget story.
 static debounce_context_t ctx_;
 
+#if defined(BYPASS_CTX_CHECK)
+// debounce_context_t checksum; see debounce_ctx_check_word()
+static uint8_t ctx_check_;
+#endif
+
+
 
 //////////////////////////////////////////////////////////////////////////////
 // INIT + MAIN
@@ -321,6 +327,10 @@ static void init(void) {
     // initialize global switch state from the current footswitch level
     ctx_ = debounce_init_context(hw_read_footswitch());
 
+#if defined(BYPASS_CTX_CHECK)
+    ctx_check_ = debounce_ctx_check_word(ctx_);
+#endif
+
     // LAST: start + clear the tick, immediately before the loop, so no compare
     // match accumulated during init is mistaken for the first real tick.
     hw_tick_timer_start();
@@ -344,7 +354,11 @@ void main(void) {
         // always checked, regardless of state; force a WDT reset on any
         // violation. (No timer_isr_called_ guard as on AVR -- the PIC has no
         // ISR; main-loop liveness is proven by reaching hw_wdt_pet() below.)
-        if (    (ctx_.program_state > RELEASE_DEBOUNCE_WAIT) ||
+        if (    
+#if defined(BYPASS_CTX_CHECK)
+                (ctx_check_ != debounce_ctx_check_word(ctx_)) ||
+#endif
+                (ctx_.program_state > RELEASE_DEBOUNCE_WAIT) ||
                 (ctx_.debounce_counter > RELEASE_THRESH) ||
                 (ctx_.effect_state > ENGAGED) ||
                 // assert footswitch pull-up still enabled
@@ -373,6 +387,9 @@ void main(void) {
         if (res.reload_lockout) {
             ctx_.debounce_counter = res.lockout_value;
         }
+#if defined(BYPASS_CTX_CHECK)
+        ctx_check_ = debounce_ctx_check_word(ctx_);
+#endif
 
         // note: the fault condition is defense-in-depth/belt-and-suspenders with
         // the sanity checks above

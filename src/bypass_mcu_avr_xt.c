@@ -68,6 +68,7 @@
 #include <avr/io.h>        // AVR8X SFRs, PORTA, TCB0, WDT, CLKCTRL, CPU_CCP, ...
 #include <avr/interrupt.h> // ISR(), sei(), cli()
 #include <avr/sleep.h>     // set_sleep_mode(), sleep_mode()
+#include <util/atomic.h>   // ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
 #include <stdint.h>
 
 
@@ -100,6 +101,11 @@ static volatile timer_isr_called_t timer_isr_called_;
 
 // overall debounce context (volatile + file-static: shared with the ISR)
 static volatile debounce_context_t ctx_;
+
+#if defined(BYPASS_CTX_CHECK)
+static volatile uint8_t ctx_check_;   // complemented XOR-fold shadow of ctx_
+static volatile uint8_t ctx_fault_;   // set by the ISR, consumed by main's gate
+#endif
 
 
 //////////////////////////////////////////////////////////////////////////////
@@ -279,11 +285,25 @@ static void hw_wait_for_tick(void) { sleep_mode(); }
 // TCB0 periodic (CAPT) interrupt; fires every 1ms.  AVR-XT analogue of the
  // classic shell's TIM0_COMPA_vect.
 ISR(TCB0_INT_vect) {
+
     TCB0.INTFLAGS = TCB_CAPT_bm; // clear the capture/timeout flag
     timer_isr_called_ = TIMER_ISR_CALLED;
+
+#if defined(BYPASS_CTX_CHECK)
+    if (ctx_check_ != debounce_ctx_check_word(ctx_)) {
+        ctx_fault_ = 1U;
+        return; // main()'s gate forces recovery next tick
+    }
+#endif
+
     ctx_.debounce_counter = debounce_integrate(
             hw_read_footswitch(),
             ctx_.debounce_counter);
+
+#if defined(BYPASS_CTX_CHECK)
+    ctx_check_ = debounce_ctx_check_word(ctx_);
+#endif
+
 }
 
 
@@ -332,6 +352,12 @@ static void init(void) {
     // initialize global switch state from the current footswitch level.
     ctx_ = debounce_init_context(hw_read_footswitch());
 
+#if defined(BYPASS_CTX_CHECK)
+    // initialize context checksum
+    ctx_check_ = debounce_ctx_check_word(ctx_);
+    ctx_fault_ = 0U;
+#endif
+
     // ISR/main handshake seed.
     timer_isr_called_ = TIMER_ISR_NOT_CALLED;
 
@@ -352,6 +378,12 @@ __attribute__((OS_main)) int main(void) {
     for (;;) {
 
         hw_outputs_reassert_safe();
+
+#if defined(BYPASS_CTX_CHECK)
+        if (ctx_fault_ != 0U) {
+            hw_force_wdt_reset();
+        }
+#endif
 
         // sanity checks against outlier events (cosmic rays, extreme EMI);
         // always checked; force a WDT reset on any violation.
@@ -375,11 +407,22 @@ __attribute__((OS_main)) int main(void) {
 
             debounce_step_result_t const res = debounce_step(ctx_);
 
+#if defined(BYPASS_CTX_CHECK)
+            ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+                ctx_.program_state = res.program_state;
+                ctx_.effect_state  = res.effect_state;
+                if (res.reload_lockout) {
+                    ctx_.debounce_counter = res.lockout_value;
+                }
+                ctx_check_ = debounce_ctx_check_word(ctx_);
+            }
+#else
             ctx_.program_state = res.program_state;
             ctx_.effect_state  = res.effect_state;
             if (res.reload_lockout) {
                 ctx_.debounce_counter = res.lockout_value;
             }
+#endif
 
             if (res.fault) {
                 hw_force_wdt_reset();
