@@ -48,7 +48,7 @@ def check(condition, message):
         sys.stderr.write("FAIL: %s\n" % message)
 
 
-def finalize(declared, results=23, injections=22, skips=0):
+def finalize(declared, results=24, injections=23, skips=0):
     checker = driver.Checker()
     checker.results = results
     checker.injections = injections
@@ -81,6 +81,7 @@ expected_cases = (
     ("ctx_.program_state",     "ram", 0x3F80, 0xFF, "gate"),
     ("ctx_.effect_state",      "ram", 0x3F81, 0xFF, "gate"),
     ("ctx_.debounce_counter",  "ram", 0x3F82, 0xFF, "gate"),
+    ("ctx_.debounce_counter(in-range F2)", "ram", 0x3F82, 0x10, "retry_gate"),
     ("timer_isr_called_",       "ram", 0x3F83, 0xFF, "retry_gate"),
     ("TCB0.CTRLB(mode)",       "reg",   0x0A41, 0x10,   "gate"),
     ("TCB0.CCMP(period)",      "reg16", 0x0A4C, 0x0FFF, "gate"),
@@ -131,17 +132,17 @@ check((direction_values["PORTA.DIR(footswitch)"] & 0x0E) == 0x0E
       and (direction_values["PORTA.DIR(spare PA6)"] & 0x0E) == 0x0E,
       "exact-direction faults must preserve every caller-requested output bit")
 
-check(driver.EXPECTED_FAULT_CASES == 22 and driver.EXPECTED_TOTAL_RESULTS == 23,
-      "driver must pin twenty-two injections plus one negative control")
-check(finalize(22) == 0, "complete twenty-two-injection plus control run must pass")
-check(finalize(21) == 1, "short declared case list must fail")
-check(finalize(23) == 1, "long declared case list must fail")
-check(finalize(22, results=22) == 1, "missing result must fail")
-check(finalize(22, results=24) == 1, "extra result must fail")
-check(finalize(22, injections=21) == 1, "missing successful injection must fail")
-check(finalize(22, injections=23) == 1, "extra successful injection must fail")
-check(finalize(22, skips=1) == 1, "any skipped injection must fail")
-check(finalize(22, injections=0, skips=22) == 2,
+check(driver.EXPECTED_FAULT_CASES == 23 and driver.EXPECTED_TOTAL_RESULTS == 24,
+      "driver must pin twenty-three injections plus one negative control")
+check(finalize(23) == 0, "complete twenty-three-injection plus control run must pass")
+check(finalize(22) == 1, "short declared case list must fail")
+check(finalize(24) == 1, "long declared case list must fail")
+check(finalize(23, results=23) == 1, "missing result must fail")
+check(finalize(23, results=25) == 1, "extra result must fail")
+check(finalize(23, injections=22) == 1, "missing successful injection must fail")
+check(finalize(23, injections=24) == 1, "extra successful injection must fail")
+check(finalize(23, skips=1) == 1, "any skipped injection must fail")
+check(finalize(23, injections=0, skips=23) == 2,
       "all-skipped run must fail both injection and skip invariants")
 
 checker = driver.Checker()

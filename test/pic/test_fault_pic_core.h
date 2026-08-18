@@ -616,6 +616,24 @@ int main() {
     inject_case("ctx.debounce_counter", CTX_DEBOUNCE_COUNTER, nullptr, true, 0xFF, 1,
                 "->255: > RELEASE_THRESH (gate-only)");
 
+#if defined(BYPASS_CTX_CHECK)
+    // F2 context-SEU: an IN-RANGE single-bit flip the range clauses above cannot
+    // see. 0x10 = 16, with PRESSED_THRESH(8) <= 16 <= RELEASE_THRESH(25), so the
+    // gate's `ctx_.debounce_counter > RELEASE_THRESH` clause stays FALSE -- the
+    // pre-F2 firmware would have silently phantom-toggled on this value. The only
+    // clause that fires is the complemented XOR-fold shadow mismatch
+    // (ctx_check_ != debounce_ctx_check_word(ctx_)), which is first in the gate
+    // (see bypass_mcu_pic10f322.c / bypass_mcu_pic12f675.c). inject_case parks the
+    // write at the loop CLRWDT, AFTER the tick's shadow refresh and BEFORE the
+    // next gate, so that gate reads the corrupted counter against the stale
+    // shadow -> exactly one WDT reset. Compiled only where the firmware opts into
+    // BYPASS_CTX_CHECK (PIC10F322 / PIC12F675); PIC10F320 is EXCLUDED and never
+    // defines the macro (docs/context_seu_detection.md), so this case and its
+    // EXPECTED_CHECKS contribution both vanish there.
+    inject_case("ctx.debounce.inrange", CTX_DEBOUNCE_COUNTER, nullptr, true, 0x10, 1,
+                "->16: in range, only the F2 XOR-fold shadow catches");
+#endif
+
     if (g_checks != EXPECTED_CHECKS) {
         g_fails++;
         fprintf(stderr, "FAIL: executed %u checks, expected %u for this variant\n",

@@ -1199,7 +1199,7 @@ pic12f675_mutation_has_signature() {
                 }
                 END { exit(found ? 0 : 1) }
             ' "$log" \
-                && grep -Eq "^PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=${variant} status=fail checks=37 failures=[1-9][0-9]*$" "$log"
+                && grep -Eq "^PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=${variant} status=fail checks=38 failures=[1-9][0-9]*$" "$log"
             ;;
         gpsim:press-led)
             assertion='FAIL: PRESS1: LED (GP0) should be on mid-press (toggle-on-press)'
@@ -1234,7 +1234,7 @@ pic12f675_mutation_has_signature() {
             variant=$MUTATION_COMMAND_ASSIGNMENT
             [ "$variant" = tq2_l2_5v_relay ] \
                 && grep -Eq 'FAIL: [1-9][0-9]* resets in 2000 ms \(want exactly 0\)  \[unexpected reset path fired\]' "$log" \
-                && grep -Eq "^PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=45 failures=[1-9][0-9]*$" "$log"
+                && grep -Eq "^PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=46 failures=[1-9][0-9]*$" "$log"
             ;;
         *) return 2 ;;
     esac
@@ -1709,7 +1709,7 @@ PIC_SOAK_MUTATIONS=(
 # The signature names positive oracle output required before a failed checker can
 # earn kill credit. Compile failures and unrelated nonzero exits are errors.
 PIC12F675_MUTATIONS=(
-"src/bypass_mcu_pic12f675.c	s@hw_outputs_reassert_safe();@@	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	correct:coil	FW relay coil re-assert call removed; the correct-in-place fault cases (expected_resets=0) reset instead of self-healing, failing the relay fault lane at checks=45"
+"src/bypass_mcu_pic12f675.c	s@hw_outputs_reassert_safe();@@	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	correct:coil	FW relay coil re-assert call removed; the correct-in-place fault cases (expected_resets=0) reset instead of self-healing, failing the relay fault lane at checks=46"
 "src/bypass_mcu_pic12f675.c	s@(shadow_high_mask == expected_high_mask) &&@((shadow_high_mask == expected_high_mask) || (shadow_high_mask != expected_high_mask)) \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:ctx.expected	TARGET shadow-versus-expected guard tautologized while retaining both operands; the valid ENGAGED context mismatch leaves BYPASS shadow/GPIO matching and must still recover"
 "src/bypass_mcu_pic12f675.c	s@gpio_shadow_ |= (uint8_t)(1U << LED_PIN);@gpio_shadow_ \&= (uint8_t)~(1U << LED_PIN);@	pic12f675-test-gpsim	gpsim:press-led	FW set_engaged LED inverted at the shadow (GP0 stays dark); the PRESS1 toggle-on-press assertion catches it"
 "src/bypass_mcu_pic12f675.c	s@(0U == (GPIO & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (GPIO \& (uint8_t)(1U << FOOTSW_PIN)))@	pic12f675-test-gpsim	gpsim:press-led	FW footswitch read polarity inverted (GP5 sense flipped -> toggles on release); PRESS1 toggle-on-press checkpoint catches it"
@@ -2260,7 +2260,7 @@ EOF
     printf '%s\n' \
         '  inject ADCON0.ADON       @0x01f: 0x00 -> 0x01  (fixture)' \
         '    FAIL: 0 resets in 2000 ms (want exactly 1)  [gate did not fire?]' \
-        'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=cd4053_simple status=fail checks=37 failures=1' \
+        'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=cd4053_simple status=fail checks=38 failures=1' \
         > "$signature_log"
     pic12f675_classify_checker_result 2 fault:ADCON0.ADON \
         'PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target' \
@@ -2279,7 +2279,7 @@ EOF
     printf '%s\n' \
         '  inject GPIO.GP1           @0x005: 0x20 -> 0x22  (fixture)' \
         '    FAIL: 1 resets in 2000 ms (want exactly 0)  [unexpected reset path fired]' \
-        'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=45 failures=1' \
+        'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=46 failures=1' \
         > "$signature_log"
     pic12f675_classify_checker_result 2 correct:coil \
         'PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target' \

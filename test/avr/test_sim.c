@@ -1529,6 +1529,51 @@ static void test_fault_inject_effect_state(void) {
     expect_fault_response("effect_state_");
 }
 
+// F2 context-SEU (BYPASS_CTX_CHECK): corrupt debounce_counter_ to an IN-RANGE
+// value that the main-loop range gate cannot see. 0x10 = 16, with
+// PRESSED_THRESH(8) <= 16 <= RELEASE_THRESH(25), so `debounce_counter >
+// RELEASE_THRESH` stays false -- the pre-F2 firmware would silently phantom-
+// toggle on this. The ONLY detector is the ISR-side complemented XOR-fold
+// shadow: once poked, ctx_check_ != debounce_ctx_check_word(ctx_), so the next
+// timer ISR sets ctx_fault_ and main's loop-top gate forces the reset. This
+// exercises the ISR-side F2 path specifically (the sibling range/SFR cases above
+// are all caught by main()'s polled gate).
+//
+// The poke MUST land while the core is IDLE-asleep right after a serviced tick
+// -- run_one_tick_settled(0) leaves it exactly there with the shadow synced --
+// so the very next event is the timer ISR, which performs the F2 comparison
+// BEFORE main can re-derive and re-sync the shadow. An in-range value is
+// invisible to the range gate, so injecting at an arbitrary phase would risk
+// main's ATOMIC_BLOCK re-derive laundering the poke (or a transient phantom
+// toggle); anchoring to the sleep boundary makes detection deterministic.
+static void test_fault_inject_ctx_debounce_inrange(void) {
+    if (sim_reset(0) != 0) { g_failures++; return; }
+    CHECK(g_addr_debounce != 0,
+          "fault-inject: could not resolve debounce_counter address");
+    if (g_addr_debounce == 0) return;
+
+    // Prove normal operation first, then settle released at a tick boundary:
+    // debounce_counter == 0, shadow synced, core asleep.
+    footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
+    CHECK(g_led_level == 1,
+          "fault-inject [ctx.debounce in-range]: normal press engages");
+    if (g_led_level != 1) return;
+
+    CHECK(run_one_tick_settled(0) == 0,
+          "fault-inject [ctx.debounce in-range]: could not settle at tick boundary");
+    CHECK(g_avr->data[g_addr_debounce] == 0,
+          "fault-inject [ctx.debounce in-range]: counter not settled to 0 (got %u)",
+          (unsigned)g_avr->data[g_addr_debounce]);
+
+    // Single-bit in-range flip (bit 4): 0 -> 0x10.
+    avr_core_watch_write(g_avr, g_addr_debounce, 0x10);
+    CHECK(g_avr->data[g_addr_debounce] == 0x10,
+          "fault-inject [ctx.debounce in-range]: injection did not stick (got 0x%02x)",
+          (unsigned)g_avr->data[g_addr_debounce]);
+
+    expect_fault_response("ctx.debounce_counter in-range (F2 shadow)");
+}
+
 // Corrupt timer_isr_called_ to an out-of-range value
 // (> TIMER_ISR_NOT_CALLED).
 //
@@ -1932,6 +1977,7 @@ static void test_boot_loop_persistent_fault(void) {
 static void run_fault_injection_suite(void) {
     test_fault_inject_program_state();
     test_fault_inject_effect_state();
+    test_fault_inject_ctx_debounce_inrange(); // F2 ISR-path (both families)
 #ifdef TARGET_TINYX5
     test_fault_inject_timer_isr_flag();
     test_fault_inject_stack_pointer();

@@ -36,7 +36,7 @@
 #
 # Usage:   make attiny202-fault  (supplies the ELF and required production fuses)
 # Exit:    0 = PASS, 1 = a case failed, 2 = bad invocation / missing image.
-# Completeness: exactly 22 independently pinned injections plus one long healthy
+# Completeness: exactly 23 independently pinned injections plus one long healthy
 # negative control must finish; any rejected/re-latched injection is a failure.
 
 import sys
@@ -50,7 +50,7 @@ NEG_CONTROL_MS = 650     # >2x WDT period: healthy firmware must keep petting it
 LIVE_STEP_MS = 5
 RETRY_GATE_MS = 50
 RETRY_GATE_STEP_CYCLES = 137  # coprime with the 2,000-cycle tick
-EXPECTED_FAULT_CASES = 22
+EXPECTED_FAULT_CASES = 23
 EXPECTED_TOTAL_RESULTS = EXPECTED_FAULT_CASES + 1  # injections + negative control
 RESET_SENTINEL = 0xA5
 
@@ -108,6 +108,17 @@ def _fault_cases(sim, is_relay):
         ("ctx_.program_state",    RAM,   sim.addr_ctx + 0,        0xFF,   GATE),
         ("ctx_.effect_state",     RAM,   sim.addr_ctx + 1,        0xFF,   GATE),
         ("ctx_.debounce_counter", RAM,   sim.addr_ctx + 2,        0xFF,   GATE),
+        # F2 context-SEU: an IN-RANGE flip (0x10 = 16, PRESSED_THRESH <= 16 <=
+        # RELEASE_THRESH) the range gate cannot see -- `debounce_counter >
+        # RELEASE_THRESH` stays false, so the pre-F2 shell would phantom-toggle.
+        # Only the ISR-side complemented XOR-fold shadow catches it (ctx_check_
+        # stops equalling debounce_ctx_check_word(ctx_)). RETRY_GATE, not GATE:
+        # an in-range value is invisible to the range gate, so a single poke that
+        # happens to land while main() is mid ATOMIC_BLOCK re-derive can re-sync
+        # the shadow (or transiently phantom-toggle) instead of resetting.
+        # Phase-swept reinjection guarantees a poke that survives into an ISR
+        # gate, which latches ctx_fault_ and forces the reset.
+        ("ctx_.debounce_counter(in-range F2)", RAM, sim.addr_ctx + 2, 0x10, RETRY_GATE),
         ("timer_isr_called_",      RAM,  sim.addr_timer_isr,      0xFF,   RETRY_GATE),
         ("TCB0.CTRLB(mode)",      REG,   S.REG_TCB0_CTRLB,        0x10,   GATE),
         ("TCB0.CCMP(period)",     REG16, S.REG_TCB0_CCMP_L,       0x0FFF, GATE),
