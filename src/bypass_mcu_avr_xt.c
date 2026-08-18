@@ -292,16 +292,17 @@ ISR(TCB0_INT_vect) {
 #if defined(BYPASS_CTX_CHECK)
     if (ctx_check_ != debounce_ctx_check_word(ctx_)) {
         ctx_fault_ = 1U;
-        return; // main()'s gate forces recovery next tick
     }
+    else {
 #endif
 
-    ctx_.debounce_counter = debounce_integrate(
-            hw_read_footswitch(),
-            ctx_.debounce_counter);
+        ctx_.debounce_counter = debounce_integrate(
+                hw_read_footswitch(),
+                ctx_.debounce_counter);
 
 #if defined(BYPASS_CTX_CHECK)
-    ctx_check_ = debounce_ctx_check_word(ctx_);
+        ctx_check_ = debounce_ctx_check_word(ctx_);
+    }
 #endif
 
 }

@@ -108,8 +108,14 @@ debounce_context_t debounce_init_context(pin_state_t const pin_state)
 
 
 uint8_t debounce_ctx_check_word(debounce_context_t const ctx) {
-    return (uint8_t)~(uint8_t)(
-            (uint8_t)ctx.program_state
-            ^ (uint8_t)ctx.effect_state
-            ^ ctx.debounce_counter);
+    // the 0xFFU XOR is to avoid CBMC error:
+    //   [debounce_ctx_check_word.overflow.2] arithmetic overflow on signed to unsigned type conversion...
+    //
+    // this is due to standard C promotion rules: ~(uint8_t)x promotes to a
+    // negative signed int, and narrowing that back to uint8_t trips CBMC's
+    // --conversion-check.
+    return (uint8_t)(0xFFU ^ (uint8_t)(
+                (uint8_t)ctx.program_state
+                ^ (uint8_t)ctx.effect_state
+                ^ ctx.debounce_counter));
 }

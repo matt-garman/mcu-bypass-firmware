@@ -584,7 +584,7 @@ AVR_ARCH           := $(shell $(CC) -mmcu=$(ATTINY13A_MCU) -dM -E - < /dev/null 
 # the firmware exactly as the AVR build sees it.
 CLANG_AVR_FLAGS    ?= -target avr -mmcu=$(ATTINY13A_MCU) -DF_CPU=$(ATTINY13A_F_CPU) -D__AVR__ -D__AVR_ATtiny13A__ \
                       -D__AVR_DEVICE_NAME__=$(ATTINY13A_MCU) $(if $(AVR_ARCH),-D__AVR_ARCH__=$(AVR_ARCH)) \
-                      -D__AVR_HAVE_PRR_PRTIM0 \
+                      -D__AVR_HAVE_PRR_PRTIM0 $(BYPASS_CTX_CHECK_FLAG) \
                       -Wno-macro-redefined \
 					  -fshort-enums \
                       $(if $(AVR_LIBC_INCLUDE),-I$(AVR_LIBC_INCLUDE)) \
@@ -621,7 +621,9 @@ CPPCHECK_FLAGS     ?= --enable=warning,style,performance,portability \
                       --suppress=missingIncludeSystem \
                       --suppress=unmatchedSuppression \
                       --suppress=unusedStructMember \
+                      $(BYPASS_CTX_CHECK_UNREAD_SUPP_CLASSIC) \
                       -D__AVR__ -D__AVR_ATtiny13A__ -DF_CPU=$(ATTINY13A_F_CPU) \
+                      $(BYPASS_CTX_CHECK_FLAG) \
                       $(if $(AVR_LIBC_INCLUDE),'--suppress=*:$(AVR_LIBC_INCLUDE)/*' -I$(AVR_LIBC_INCLUDE)) \
                       $(if $(AVR_GCC_INCLUDE),'--suppress=*:$(AVR_GCC_INCLUDE)/*' -I$(AVR_GCC_INCLUDE))
 
@@ -670,7 +672,8 @@ MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 --platform=avr8 \
                       --suppress=unmatchedSuppression \
                       $(if $(MISRA_AVR_INCLUDE),'--suppress=*:$(MISRA_AVR_INCLUDE)/*' -I$(MISRA_AVR_INCLUDE)) \
                       $(if $(AVR_GCC_INCLUDE),'--suppress=*:$(AVR_GCC_INCLUDE)/*' -I$(AVR_GCC_INCLUDE)) \
-                      -D__AVR__ -D__AVR_ATtiny13A__ -DF_CPU=$(ATTINY13A_F_CPU)
+                      -D__AVR__ -D__AVR_ATtiny13A__ -DF_CPU=$(ATTINY13A_F_CPU) \
+                      $(BYPASS_CTX_CHECK_FLAG)
 
 # Clang static analyzer (deep symbolic-execution path analysis). This is the
 # stand-in for `gcc -fanalyzer`: the system avr-gcc (7.3.0) predates -fanalyzer
@@ -693,6 +696,15 @@ CLANG              ?= clang
 # -- it does not link the pure core and even a one-byte fold overflows its
 # 256-word flash -- so this flag is NOT added to PIC10F320_CFLAGS.
 BYPASS_CTX_CHECK_FLAG := -DBYPASS_CTX_CHECK
+# When F2 is enabled, the two AVR ISR shells use avr-libc's ATOMIC_BLOCK
+# (<util/atomic.h>).  That vendor macro trips MISRA 12.3/14.2 (waived in
+# test/misra_suppressions.txt, MISRA_COMPLIANCE.md D-5) and cppcheck's native
+# unreadVariable on the macro's internal SREG-save local.  The MISRA lanes waive
+# via the suppressions file; the parallel non-MISRA cppcheck lanes do not read
+# that file, so they carry the unreadVariable waiver inline here.  Kept beside
+# the feature flag so the whole F2 analysis coupling lives in one place.
+BYPASS_CTX_CHECK_UNREAD_SUPP_CLASSIC := --suppress=unreadVariable:src/bypass_mcu_avr_classic.c
+BYPASS_CTX_CHECK_UNREAD_SUPP_XT      := --suppress=unreadVariable:src/bypass_mcu_avr_xt.c
 
 CFLAGS_COMMON = -Os \
           -fshort-enums -funsigned-char \
@@ -1108,6 +1120,7 @@ PIC10F322_CHIP_MACRO   ?= _$(PIC10F322_CHIP)
 # bypass_output_common.h, and add the XC8 + DFP header search paths.
 PIC10F322_CPPCHECK_CPPFLAGS = -D__XC8 -D$(PIC10F322_CHIP_MACRO) -D_XTAL_FREQ=$(PIC10F322_XTAL) \
                         -DBYPASS_MCU_PIC10F322 -U__AVR__ -UBYPASS_MCU_AVR_CLASSIC \
+                        $(BYPASS_CTX_CHECK_FLAG) \
                         -Isrc -I$(PIC10F322_DFP_INCLUDE) -I$(PIC10F322_DFP_INCLUDE)/proc -I$(PIC_XC8_INCLUDE)
 
 # Plain bug-finding pass (parallel to analyze-cppcheck for the AVR build).
@@ -2489,7 +2502,7 @@ XT_ARCH ?= 103
 XT_CPPCHECK_CPPFLAGS = -D__AVR__ -D__AVR_XMEGA__ -D__AVR_MEGA__ \
                        -D__AVR_ATtiny202__ -D__AVR_ARCH__=$(XT_ARCH) \
                        -D__AVR_DEV_LIB_NAME__=$(XT_DEVLIB) \
-                       -DBYPASS_MCU_AVR_XT -DF_CPU=$(XT_F_CPU) \
+                       -DBYPASS_MCU_AVR_XT -DF_CPU=$(XT_F_CPU) $(BYPASS_CTX_CHECK_FLAG) \
                        -UBYPASS_MCU_PIC10F322 -UBYPASS_MCU_AVR_CLASSIC \
                        -Isrc $(if $(AVR_LIBC_INCLUDE),-I$(AVR_LIBC_INCLUDE)) \
                        -I$(XT_INC) $(if $(AVR_GCC_INCLUDE),-I$(AVR_GCC_INCLUDE))
@@ -2501,6 +2514,7 @@ XT_CPPCHECK_FLAGS ?= --enable=warning,style,performance,portability \
                      --suppress=missingIncludeSystem \
                      --suppress=unmatchedSuppression \
                      --suppress=unusedStructMember \
+                     $(BYPASS_CTX_CHECK_UNREAD_SUPP_XT) \
                      $(if $(AVR_LIBC_INCLUDE),'--suppress=*:$(AVR_LIBC_INCLUDE)/*') \
                      $(if $(AVR_GCC_INCLUDE),'--suppress=*:$(AVR_GCC_INCLUDE)/*') \
                      '--suppress=*:$(XT_INC)/*' \
@@ -3422,7 +3436,8 @@ CBMC_CHECKS = --bounds-check --pointer-check --div-by-zero-check \
 # fully unrolled at --unwind 50, > every harness's fixed horizon; the unwinding
 # assertion proves the bound is real, not assumed).
 CBMC_PROOFS      = prove_integrate prove_debounce_step prove_corrupt_state_faults \
-                   prove_init_context prove_step_transition prove_oor_recovery_step
+                   prove_init_context prove_step_transition prove_oor_recovery_step \
+                   prove_ctx_check_single_bit_detected prove_ctx_check_definition
 CBMC_PROOFS_LOOP = prove_press_liveness prove_release_liveness
 # Deep-loop proof: out-of-range counter recovery unrolls the worst-case 255 -> 0
 # descent, so it needs an unwind > 256 (the shorter --unwind 50 above is < the
@@ -5330,6 +5345,7 @@ PIC12F675_CHIP_MACRO   ?= _$(PIC12F675_CHIP)
 # bypass_output_common.h, and add the XC8 + DFP header search paths.
 PIC12F675_CPPCHECK_CPPFLAGS = -D__XC8 -D$(PIC12F675_CHIP_MACRO) -D_XTAL_FREQ=$(PIC12F675_XTAL) \
                         -DBYPASS_MCU_PIC12F675 -U__AVR__ -UBYPASS_MCU_AVR_CLASSIC \
+                        $(BYPASS_CTX_CHECK_FLAG) \
                         -Isrc -I$(PIC12F675_DFP_INCLUDE) -I$(PIC12F675_DFP_INCLUDE)/proc -I$(PIC_XC8_INCLUDE)
 
 # Plain bug-finding pass (parallel to analyze-cppcheck for the AVR build).

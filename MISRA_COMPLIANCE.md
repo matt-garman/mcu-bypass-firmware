@@ -157,7 +157,10 @@ hardware-facing code that uses avr-libc register definitions. PIC register
 access does not produce that finding family. D-2 and D-3 record cppcheck
 artifacts for declarations that are used elsewhere in the project; they are not
 source-level noncompliance. D-4 records PIC analyzer accommodations, not actual
-MISRA deviations.
+MISRA deviations. D-5 is a second actual deviation family, also AVR-only and also
+forced by an adopted avr-libc macro (`ATOMIC_BLOCK`), reached only when the F2
+context-SEU feature (`BYPASS_CTX_CHECK`) is enabled; the PIC shells use no such
+macro.
 
 ### Suppression review
 
@@ -377,6 +380,50 @@ files; the output gate fails the same diagnostic in another authored source or
 header. All other MISRA rule IDs remain visible. The Rule 2.5 entry necessarily
 also covers a future genuine Rule 2.5 finding in the PIC10F320 file, so changes
 to its macro set require an unsuppressed inventory review.
+
+### D-5 — avr-libc `ATOMIC_BLOCK` vendor macro (Rules 12.3, 14.2, `unreadVariable`)
+
+**Finding IDs:** **Rule 12.3** (comma operator, Advisory), **Rule 14.2** (a for
+loop shall be well formed, Required), and `unreadVariable` (a native cppcheck
+`--enable=style` diagnostic, not a MISRA rule).
+
+**Suppression scope:** each ID is file-scoped to `src/bypass_mcu_avr_classic.c`
+and `src/bypass_mcu_avr_xt.c` — the two AVR ISR shells — and covers every finding
+with that ID attributed to those files. The PIC shells and the output drivers are
+outside this record.
+
+**What happens.** The F2 in-range context-SEU feature (`BYPASS_CTX_CHECK`, see
+`docs/context_seu_detection.md`) keeps the debounce integrator in the timer ISR,
+so `main()`'s apply-and-re-derive of the context must be atomic with respect to
+that ISR. Both AVR shells express this with avr-libc's
+`ATOMIC_BLOCK(ATOMIC_RESTORESTATE)` from `<util/atomic.h>`, the library's
+documented idiom for interrupt-atomic sections. The macro expands to a run-once
+`for` loop whose init clause saves `SREG` into a `__cleanup__`-attributed local
+using the comma operator. That expansion trips **12.3** (the comma operator),
+**14.2** (a `for` used as a run-once block is not well formed), and cppcheck's
+native `unreadVariable` — the vendor's save local (`sreg_save`) looks written but
+never read because the `__cleanup__` restore is invisible to the analyzer.
+
+**Why it is not a code defect.** The construct is entirely inside an adopted
+avr-libc macro, not authored control flow — the same category as D-1, where
+avr-libc's `_SFR_*` register macros force Rules 11.4 / 10.1 / 10.8. Hand-rolling
+the `SREG`-save / `cli()` / restore sequence to dodge the macro would be more
+error-prone, would still rely on the D-1 register-access deviation for the `SREG`
+write, and would discard the portable, reviewed library idiom. Only the two AVR
+shells compile this path, and only under `BYPASS_CTX_CHECK`.
+
+**Cross-lane note.** The artifacts surface in both cppcheck-based lanes. The MISRA
+lane consumes this suppression file, so its 12.3 / 14.2 / `unreadVariable` waivers
+live here. The parallel native-cppcheck lane (`analyze-cppcheck`,
+`attiny202-analyze-cppcheck`) does **not** read this file; it waives the same
+`unreadVariable` through an inline `--suppress=unreadVariable:<shell>` on its
+command line (`CPPCHECK_FLAGS`, `XT_CPPCHECK_FLAGS`). The clang-tidy and
+clang-analyzer lanes report nothing for the construct.
+
+**Scope control.** File-scoped like the rest of the list: a new instance of any of
+these IDs in another authored source or header re-fails its lane. Because the
+entries also cover a future genuine 12.3 / 14.2 / `unreadVariable` in the two named
+shells, changes to their ISR/atomic code require an unsuppressed inventory review.
 
 ## Notes on specific constructs
 

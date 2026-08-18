@@ -378,3 +378,76 @@ void prove_oor_recovery_bounded(void) {
     // ...and in fact has floored at 0 (a fully released line drains completely).
     __CPROVER_assert(dc == 0U, "(C7b) released hold did not drain the counter to 0");
 }
+
+//////////////////////////////////////////////////////////////////////////////
+// (C8) F2 in-range SEU detection: debounce_ctx_check_word() -- the complemented
+// XOR-fold the shells persist as ctx_check_ -- changes under EVERY single-bit
+// flip of ANY context member. This is the pure-core guarantee behind the shell
+// shadow. The per-tick range gate rejects only OUT-OF-range members, so an upset
+// that flips an idle debounce_counter 0 -> 8 or 0 -> 16 (both <= RELEASE_THRESH,
+// so the range gate admits them, and both >= PRESSED_THRESH, so the next
+// debounce_step() would phantom-toggle the effect) slips past every existing
+// guard. The fold diverges on that flip, the stored shadow no longer matches the
+// re-derived word, and the shell forces a watchdog reset before the tick acts.
+// Proved over the FULL byte domain of every member (no range assumption), so it
+// also covers single-bit flips that leave the valid range.
+//////////////////////////////////////////////////////////////////////////////
+void prove_ctx_check_single_bit_detected(void) {
+    uint8_t ps  = nondet_uint8();
+    uint8_t es  = nondet_uint8();
+    uint8_t dc  = nondet_uint8();
+    uint8_t sel = nondet_uint8(); // which member flips: 0=program,1=effect,2=counter
+    uint8_t bit = nondet_uint8(); // which bit (0..7) of that member flips
+    __CPROVER_assume(sel <= 2U);
+    __CPROVER_assume(bit <= 7U);
+
+    debounce_context_t good;
+    good.program_state    = (program_state_t)ps;
+    good.effect_state     = (effect_state_t)es;
+    good.debounce_counter = dc;
+
+    uint8_t const mask = (uint8_t)(1U << bit);
+    debounce_context_t bad = good;
+    if (sel == 0U) {
+        bad.program_state = (program_state_t)(uint8_t)(ps ^ mask);
+    } else if (sel == 1U) {
+        bad.effect_state = (effect_state_t)(uint8_t)(es ^ mask);
+    } else {
+        bad.debounce_counter = (uint8_t)(dc ^ mask);
+    }
+
+    __CPROVER_assert(
+        debounce_ctx_check_word(good) != debounce_ctx_check_word(bad),
+        "(C8) a single-bit context flip did not change the check word");
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// (C9) F2 fold definition + the complement's stuck-at guard: the check word is
+// the bitwise complement of the three-member XOR, so an all-zeros context folds
+// to 0xFF, never 0x00. A shadow byte cleared to zero by an upset therefore
+// cannot masquerade as the fold of an (also-zeroed) context -- the complement is
+// what makes the trivial all-zeros stuck-at case detectable.
+//////////////////////////////////////////////////////////////////////////////
+void prove_ctx_check_definition(void) {
+    uint8_t ps = nondet_uint8();
+    uint8_t es = nondet_uint8();
+    uint8_t dc = nondet_uint8();
+
+    debounce_context_t ctx;
+    ctx.program_state    = (program_state_t)ps;
+    ctx.effect_state     = (effect_state_t)es;
+    ctx.debounce_counter = dc;
+
+    // Complement written as XOR with 0xFF so the harness's own arithmetic stays
+    // unsigned and in range; the shipping function uses ~, identical over a byte.
+    uint8_t const expect = (uint8_t)(0xFFU ^ (uint8_t)(ps ^ es ^ dc));
+    __CPROVER_assert(debounce_ctx_check_word(ctx) == expect,
+                     "(C9) check word is not the complemented XOR-fold of its members");
+
+    debounce_context_t zero;
+    zero.program_state    = (program_state_t)0;
+    zero.effect_state     = (effect_state_t)0;
+    zero.debounce_counter = 0U;
+    __CPROVER_assert(debounce_ctx_check_word(zero) == 0xFFU,
+                     "(C9) all-zeros context did not fold to 0xFF (complement lost)");
+}
