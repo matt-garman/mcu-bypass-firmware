@@ -290,6 +290,180 @@ def shell_tokens(run):
     return parsed
 
 
+release_doc = docs.get("release.yml")
+release_jobs = release_doc.get("jobs") if isinstance(release_doc, dict) else None
+release_job = release_jobs.get("release") if isinstance(release_jobs, dict) else None
+release_steps = release_job.get("steps") if isinstance(release_job, dict) else None
+if check(isinstance(release_steps, list), "release.yml: release job has no step list"):
+    repro_steps = [
+        step for step in release_steps
+        if isinstance(step, dict)
+        and step.get("name") == "Verify committed images and rename/change evidence reproduce bit-for-bit"
+    ]
+    publish_steps = [
+        step for step in release_steps
+        if isinstance(step, dict) and step.get("name") == "Publish GitHub Release"
+    ]
+    check(len(repro_steps) == 1, "release.yml: frozen-bundle producer step is not unique")
+    check(len(publish_steps) == 1, "release.yml: publication step is not unique")
+
+    if len(repro_steps) == 1:
+        repro_run = repro_steps[0].get("run")
+        check(isinstance(repro_run, str), "release.yml: frozen-bundle producer has no shell body")
+        if isinstance(repro_run, str):
+            commands = shell_tokens(repro_run)
+            private_dir_command = [
+                "sudo", "install", "-d", "-o", "root", "-g", "root", "-m",
+                "0700", "--", "$frozen_root", "$publish",
+            ]
+            asset_install_command = [
+                "sudo", "install", "-o", "root", "-g", "root", "-m", "0444",
+                "--", "$publish_stage/$asset", "$publish/$asset",
+            ]
+            inventory_mode_command = [
+                "sudo", "chmod", "0444", "--", "$inventory",
+            ]
+            harden_command = [
+                "sudo", "chmod", "0555", "--", "$publish", "$frozen_root",
+            ]
+            initial_verify_command = [
+                "python3", "scripts/verify_release_publication.py", "verify",
+                "$publish", "$inventory", "$inventory_sha256",
+            ]
+            private_dir_indices = [
+                i for i, command in enumerate(commands) if command == private_dir_command
+            ]
+            asset_install_indices = [
+                i for i, command in enumerate(commands) if command == asset_install_command
+            ]
+            record_indices = [
+                i for i, command in enumerate(commands)
+                if command == [
+                    "inventory_sha256=$(sudo", "python3",
+                    "scripts/verify_release_publication.py", "record", "$publish",
+                    "$inventory", "${expected_assets[@]})",
+                ]
+            ]
+            inventory_mode_indices = [
+                i for i, command in enumerate(commands) if command == inventory_mode_command
+            ]
+            harden_indices = [
+                i for i, command in enumerate(commands) if command == harden_command
+            ]
+            initial_verify_indices = [
+                i for i, command in enumerate(commands) if command == initial_verify_command
+            ]
+            output_indices = [
+                i for i, command in enumerate(commands) if command == ["echo", "inventory=$inventory"]
+            ]
+            check(
+                commands[:1] == [["set", "-euo", "pipefail"]]
+                and not any(command[:2] in (["set", "+e"], ["set", "+u"])
+                            or command == ["set", "+o", "pipefail"] for command in commands),
+                "release.yml: frozen-bundle producer does not retain strict shell mode",
+            )
+            check(
+                len(private_dir_indices) == 1 and len(asset_install_indices) == 1
+                and len(record_indices) == 1 and len(inventory_mode_indices) == 1
+                and len(harden_indices) == 1
+                and len(initial_verify_indices) == 1 and len(output_indices) == 1,
+                "release.yml: active root-owned freeze commands are not exact",
+            )
+            if private_dir_indices and asset_install_indices and record_indices \
+                    and inventory_mode_indices and harden_indices \
+                    and initial_verify_indices and output_indices:
+                check(
+                    private_dir_indices[0] < asset_install_indices[0] < record_indices[0]
+                    < inventory_mode_indices[0] < harden_indices[0]
+                    < initial_verify_indices[0] < output_indices[0],
+                    "release.yml: root-owned publication inventory is not hardened and verified before outputs",
+                )
+            check(
+                ["frozen_root=/opt/mcu-bypass-publication"] in commands
+                and ["echo", "inventory_sha256=$inventory_sha256"] in commands,
+                "release.yml: frozen-bundle producer omits the inventory digest output",
+            )
+
+    if len(publish_steps) == 1:
+        publish = publish_steps[0]
+        publish_env = publish.get("env")
+        publish_run = publish.get("run")
+        check(isinstance(publish_env, dict), "release.yml: publication step has no environment")
+        if isinstance(publish_env, dict):
+            check(
+                publish_env.get("RELEASE_INVENTORY") == "${{ steps.repro.outputs.inventory }}",
+                "release.yml: publication inventory path is not routed through step output/env",
+            )
+            check(
+                publish_env.get("RELEASE_INVENTORY_SHA256")
+                == "${{ steps.repro.outputs.inventory_sha256 }}",
+                "release.yml: publication inventory digest is not routed through step output/env",
+            )
+        check(isinstance(publish_run, str), "release.yml: publication step has no shell body")
+        if isinstance(publish_run, str):
+            commands = shell_tokens(publish_run)
+            tag_command = [
+                "scripts/verify-release-tag-target.sh", "origin", "$tag",
+                "$VERIFIED_RELEASE_COMMIT",
+            ]
+            inventory_command = [
+                "python3", "scripts/verify_release_publication.py", "verify", "$dir",
+                "$RELEASE_INVENTORY", "$RELEASE_INVENTORY_SHA256",
+            ]
+            signature_command = [
+                "scripts/verify-release-signature.sh", "detached",
+                "$dir/SHA256SUMS.asc", "$dir/SHA256SUMS",
+            ]
+            checksum_command = [
+                "(cd", "$dir", "&&", "sha256sum", "--check", "--strict", "--",
+                "SHA256SUMS)",
+            ]
+            tag_indices = [i for i, command in enumerate(commands) if command == tag_command]
+            inventory_indices = [
+                i for i, command in enumerate(commands) if command == inventory_command
+            ]
+            signature_indices = [
+                i for i, command in enumerate(commands) if command == signature_command
+            ]
+            checksum_indices = [
+                i for i, command in enumerate(commands) if command == checksum_command
+            ]
+            publish_indices = [
+                i for i, command in enumerate(commands)
+                if command == [
+                    "gh", "release", "create", "$tag", "--title", "Firmware $tag",
+                    "--notes-file", "$notes", "--verify-tag", "${assets[@]}",
+                ]
+            ]
+            rename_indices = [
+                i for i, command in enumerate(commands)
+                if command[:2] == ["case", "$RENAME_IDENTITY_APPLICABLE"]
+            ]
+            check(
+                len(tag_indices) == 1 and len(rename_indices) == 1
+                and len(inventory_indices) == 2 and len(signature_indices) == 1
+                and len(checksum_indices) == 1 and len(publish_indices) == 1,
+                "release.yml: active final publication command inventory is not exact",
+            )
+            if tag_indices and rename_indices and len(inventory_indices) == 2 \
+                    and signature_indices and checksum_indices and publish_indices:
+                check(
+                    tag_indices[0] < rename_indices[0] < inventory_indices[0]
+                    < signature_indices[0] < checksum_indices[0] < inventory_indices[1]
+                    and publish_indices[0] == inventory_indices[1] + 1,
+                    "release.yml: active final checks do not dominate immediate gh publication",
+                )
+            check(
+                commands[:1] == [["set", "-euo", "pipefail"]]
+                and not any(command[:2] in (["set", "+e"], ["set", "+u"])
+                            or command == ["set", "+o", "pipefail"] for command in commands)
+                and "|| true" not in publish_run,
+                "release.yml: publication shell does not retain strict fail-closed mode",
+            )
+            check(
+                publish.get("continue-on-error", False) is False,
+                "release.yml: publication step may continue after verification failure",
+            )
 def apt_packages(step):
     run = step.get("run") if isinstance(step, dict) else None
     packages = set()
