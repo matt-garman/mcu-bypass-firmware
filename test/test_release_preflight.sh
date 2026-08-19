@@ -546,6 +546,70 @@ release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
 	|| fail "documentation validator treated historical prose as current status"
 checks=$((checks + 1))
 
+# H1: the actual release-staging path must refuse a tree that still CONTAINS or
+# still REFERENCES a branch-only working document (root-level v*-polish.md). This
+# gate is deliberately OUTSIDE release_validate_current_documentation -- the
+# versioned preflight above legitimately validates the live polish branch, where
+# the document still exists during branch work -- and runs only on the real
+# release-staging path (make-release.sh, after the preflight exit). Exercised
+# here as a unit against throwaway trees.
+polish_root="$work/branch-only-doc"
+assert_polish_gate_rejects() {
+	local description=$1
+	if release_reject_branch_only_documents "$polish_root" >"$output" 2>&1; then
+		fail "branch-only-document gate accepted $description"
+	fi
+	grep -Fq 'release documentation:' "$output" \
+		|| fail "$description was rejected without a diagnostic"
+	checks=$((checks + 1))
+}
+
+rm -rf "$polish_root"; mkdir -p "$polish_root/docs"
+# A clean tree passes.
+release_reject_branch_only_documents "$polish_root" \
+	|| fail "branch-only-document gate rejected a clean release tree"
+checks=$((checks + 1))
+
+# The retained docs/<ver>_post_release_polish.md must NOT be mistaken for a
+# branch-only document: it is under docs/ (not root) and uses `_polish`, not
+# `-polish`.
+: > "$polish_root/docs/v0.9.6_post_release_polish.md"
+release_reject_branch_only_documents "$polish_root" \
+	|| fail "branch-only-document gate wrongly flagged the retained docs/ polish document"
+checks=$((checks + 1))
+
+# A root-level v*-polish.md present -> rejected.
+: > "$polish_root/v1.2.3-polish.md"
+assert_polish_gate_rejects 'a tree containing a root-level v*-polish.md'
+rm -f "$polish_root/v1.2.3-polish.md"
+
+# A durable file naming such a document -> rejected (the reference would dangle
+# once the document is deleted).
+printf 'See `v1.2.3-polish.md` item F1 for context.\n' > "$polish_root/docs/notes.md"
+assert_polish_gate_rejects 'a durable reference to a branch-only v*-polish.md'
+rm -f "$polish_root/docs/notes.md"
+
+# ... and the tree passes again once both violations are gone.
+release_reject_branch_only_documents "$polish_root" \
+	|| fail "branch-only-document gate rejected a tree after the violations were removed"
+checks=$((checks + 1))
+
+# Wiring: make-release.sh must invoke the gate on the REAL release path -- after
+# the `--preflight` capability probe exits -- so the preflight (which runs
+# against the live polish branch, where the document still exists) is unaffected
+# while a real release is gated. Pin the ordering, since placing it in the
+# preflight path instead would silently break every versioned preflight probe.
+release_script="$ROOT/scripts/make-release.sh"
+preflight_exit_line=$(grep -n 'preflight passed: this host can start a release' \
+	"$release_script" | head -1 | cut -d: -f1)
+gate_call_line=$(grep -Fn 'release_reject_branch_only_documents "$REPO_ROOT"' \
+	"$release_script" | head -1 | cut -d: -f1)
+[ -n "$preflight_exit_line" ] && [ -n "$gate_call_line" ] \
+	|| fail "could not locate the preflight exit and the branch-only-document gate call in make-release.sh"
+[ "$gate_call_line" -gt "$preflight_exit_line" ] \
+	|| fail "branch-only-document gate must run AFTER the preflight exit (gate at line $gate_call_line, preflight exit at line $preflight_exit_line)"
+checks=$((checks + 1))
+
 # Run the real preflight against a shadow documentation root. A stale bounded
 # declaration must stop the script before its first release-scratch mktemp.
 write_documentation_fixture v1.2.30 21 18 six four

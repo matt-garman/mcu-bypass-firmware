@@ -240,6 +240,7 @@ declare -F release_stage_classic_avr_images >/dev/null \
 source "$REPO_ROOT/scripts/release-documentation.sh" \
 	|| die "release documentation helper could not be loaded"
 for renderer in release_validate_current_documentation \
+		release_reject_branch_only_documents \
 		release_render_scope release_render_validation \
 		release_render_pic_toolchain_rows release_render_pic12f675_flashing \
 		release_render_flashing \
@@ -907,6 +908,15 @@ if [ "$PREFLIGHT" -eq 1 ]; then
 	ok "preflight passed: this host can start a release."
 	exit 0
 fi
+
+# A real release is cut from main, where any branch-only working document
+# (root-level v*-polish.md) must already be deleted and de-referenced. Enforce
+# that here -- after the preflight capability probe, which legitimately runs
+# against a live polish branch, and before any build -- so a release started
+# from an un-merged polish branch fails fast instead of trusting the manual
+# pre-merge checklist.
+release_reject_branch_only_documents "$REPO_ROOT" \
+	|| die "refusing to release: a branch-only polish document is still present or referenced (see the diagnostic above)."
 
 # ============================================================================
 # 1. CLEAN BUILD -- every image

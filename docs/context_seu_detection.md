@@ -318,7 +318,7 @@ revisit 322 (its pre-blessed fallback is an in-shell inline-macro version at
 - **Budgets**: re-verify flash (322 at the edge), RAM, stack, and MISRA for every
   enabled part/variant (F2 acceptance criterion 5).
 
-## Acceptance-criteria mapping (F2 in `v0.9.9-polish.md`)
+## Acceptance-criteria mapping (F2)
 
 1. In-range single-bit flips of `program_state`, `effect_state`, and
    `debounce_counter` force recovery before an unintended output transition —
@@ -340,9 +340,9 @@ revisit 322 (its pre-blessed fallback is an in-shell inline-macro version at
 - `CHANGELOG.md` / Git history — the durable record of this work. The
   `TODO.md` `T3-ctx-complement` task that tracked it was removed on completion,
   per that file's "completed work is removed" convention.
-- `v0.9.9-polish.md` F2 / F3 — the review items; F3 carries the "cover
-  `debounce_counter` and equivalently exposed members, not the fail-safe
-  single-byte guards" constraint, satisfied here by folding exactly the three
-  context members.
+- The F2 / F3 review items, recorded in `CHANGELOG.md` and Git history — F3
+  carries the "cover `debounce_counter` and equivalently exposed members, not
+  the fail-safe single-byte guards" constraint, satisfied here by folding
+  exactly the three context members.
 - `docs/relay_coil_fault_correction.md` — F1, the sibling fault-hardening item
   (correct-in-place vs. this detect-and-reset).

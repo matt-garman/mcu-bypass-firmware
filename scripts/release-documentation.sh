@@ -118,6 +118,44 @@ release_validate_current_documentation() {
 	done
 }
 
+# Reject a release cut from a tree that still contains -- or still references --
+# a branch-only working document (root-level `v*-polish.md`, e.g.
+# v0.9.9-polish.md). Such a document exists ONLY on a polish branch and must be
+# deleted, and de-referenced, in the final pre-merge commit; a production
+# release is cut from main, so none may remain.
+#
+# Deliberately SEPARATE from release_validate_current_documentation: that
+# validator runs in `--preflight`, which exercises the live checked-in tree
+# (where the polish document legitimately still exists during branch work). This
+# gate is invoked only on the actual release-staging path, after preflight has
+# exited, so it fails a real release closed without breaking the preflight
+# capability probe. The retained docs/v0.9.6_post_release_polish.md is under
+# docs/ and does not match the root pattern, so it is unaffected.
+release_reject_branch_only_documents() {
+	[ "$#" -eq 1 ] || return 2
+	local repo_root=$1 branch_doc reference_file
+	local -a present_polish_docs=() polish_doc_references=()
+
+	while IFS= read -r branch_doc; do
+		[ -n "$branch_doc" ] && present_polish_docs+=("${branch_doc#$repo_root/}")
+	done < <(find "$repo_root" -maxdepth 1 -type f -name 'v*-polish.md' 2>/dev/null)
+	[ "${#present_polish_docs[@]}" -eq 0 ] \
+		|| _release_documentation_error "branch-only polish document(s) must be deleted before release: ${present_polish_docs[*]}" || return
+
+	# A durable file that still NAMES such a document (v<ver>-polish.md) dangles
+	# once it is deleted. Exclude this checker and its regression, which
+	# necessarily carry the pattern as tooling -- the same self-reference the
+	# Makefile name contract allowlists.
+	while IFS= read -r reference_file; do
+		[ -n "$reference_file" ] && polish_doc_references+=("${reference_file#$repo_root/}")
+	done < <(grep -rlIE 'v[0-9][0-9.]*-polish\.md' "$repo_root" \
+		--exclude-dir=.git \
+		--exclude='release-documentation.sh' \
+		--exclude='test_release_preflight.sh' 2>/dev/null || true)
+	[ "${#polish_doc_references[@]}" -eq 0 ] \
+		|| _release_documentation_error "durable file(s) still reference a branch-only polish document (repoint to CHANGELOG.md / Git history): ${polish_doc_references[*]}" || return
+}
+
 release_render_scope() {
 	[ "$#" -eq 0 ] || return 2
 	printf 'Release scope: AVR Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT),\n'

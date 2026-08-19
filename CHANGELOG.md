@@ -52,6 +52,15 @@ file is the human-readable summary of *what changed*.
   recovery on the last case would have scored as a pass. Every case, the final
   one included, now carries the same explicit liveness guarantee.
 
+- **A branch-only working document can no longer slip into a release.** The
+  release now refuses to stage if the tree still contains a root-level
+  `v*-polish.md` working document, or still references one by name, machine-
+  enforcing the previously manual "delete before merge" and "no references
+  remain" steps. The gate runs on the actual release-staging path — not the
+  preflight capability probe, which legitimately validates a live polish branch
+  — so a release started from an un-merged polish branch fails fast, while the
+  retained `docs/*_post_release_polish.md` history is unaffected.
+
 - **PIC12F675 release programming is bound to the signed release bytes.** The
   guarded release target verifies the annotated tag and checksum signature,
   requires a clean checkout at that exact tag, and admits the private fresh
