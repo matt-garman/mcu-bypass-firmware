@@ -150,7 +150,10 @@ PIC gpsim/shadow harnesses were never affected.
 
 ## Related
 
-- `TODO.md` `T25-relay-fault-abort` — the durable task this closes.
+- `CHANGELOG.md` / Git history — the durable record of this work. The
+  `TODO.md` `T25-relay-fault-abort` task that tracked it (framed around the
+  earlier, rejected abort-path model) was removed on completion, per that file's
+  "completed work is removed" convention.
 - `docs/phase2_pic_shell.md` — the PIC Model-B polled-loop design the PIC shells
   share.
 - `src/bypass_mcu_pic12f675.c` header comment — the GPIO-shadow rationale.

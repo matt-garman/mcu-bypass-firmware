@@ -144,22 +144,6 @@ Dependencies: PIC baseline instruction semantics and XC8 startup behavior.
 Effort: High. Risk if deferred: Low-Medium because the existing assembly gate
 already bounds PIC10F322 stack use; this would add a second independent witness.
 
-### T25-relay-fault-abort - De-energize relay coils on detected faults
-
-Classic AVR, AVR-XT, and PIC10F322 validate stable output-latch state, but a
-detected relay-coil upset can remain physically driven while the fault handler
-waits for watchdog reset. Add a relay-aware abort step that clears both coil
-drivers before entering the reset wait, then prove the physical outputs become
-inactive immediately without creating a normal-path edge or weakening the
-watchdog backstop. Keep this separate from PIC10F320 idle re-drive: that target's
-current gap is non-detection, while this item shortens an already bounded fault.
-Firmware edits must be made by the owner.
-
-Dependencies: per-shell fault-handler ordering and target fault-injection
-visibility. Effort: Medium including host/target faults and deletion/one-coil
-mutations. Risk: Medium-High under the SEU/EMI model because watchdog reset
-bounds the current interval but does not remove drive immediately.
-
 ### T25-output-formal - Formally verify output-driver sequencing
 
 Model the relay, mute, and CD4053 drivers as small state machines and prove that
@@ -628,7 +612,6 @@ The stable ID in each row matches exactly one open section above.
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
 | T25-wdt-margin-assert | Enforce tick+pulse < WDT floor at compile time | 2.5 | Low | Low now, Medium on any timing change |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
-| T25-relay-fault-abort | De-energize relay coils on detected faults | 2.5 | Medium | Medium-High |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |
 | T25-delay-formal | Blocking-delay safety argument | 2.5 | 1-2 h | Medium |
 | T25-golden-cross | Independent-model/direct-core cross-validation | 2.5 | 1-2 h | Medium |

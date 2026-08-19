@@ -337,7 +337,9 @@ revisit 322 (its pre-blessed fallback is an in-shell inline-macro version at
 
 ## Related
 
-- `TODO.md` `T3-ctx-complement` — the durable task this closes.
+- `CHANGELOG.md` / Git history — the durable record of this work. The
+  `TODO.md` `T3-ctx-complement` task that tracked it was removed on completion,
+  per that file's "completed work is removed" convention.
 - `v0.9.9-polish.md` F2 / F3 — the review items; F3 carries the "cover
   `debounce_counter` and equivalently exposed members, not the fail-safe
   single-byte guards" constraint, satisfied here by folding exactly the three
