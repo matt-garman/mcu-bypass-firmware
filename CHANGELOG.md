@@ -32,6 +32,26 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- **The watchdog-margin invariant is now enforced at compile time on every
+  shell.** Previously only `src/bypass_mcu_pic10f320.c` static_asserted `(tick +
+  longest blocking pulse) < de-rated WDT floor`; the other four shells carried
+  the argument in comments only. Each part now defines a datasheet-derived
+  `WDT_MIN_PERIOD_MS` (PIC12F675 and PIC10F322 160 ms, classic-AVR 100 ms,
+  ATtiny202 128 ms) and a `TICK_PERIOD_MS` in its pin map, and the shared
+  blocking output drivers assert the bound against them — so a future prescaler,
+  tick, or coil/mute-pulse change that erodes the margin now fails the build
+  rather than eroding it silently. A focused static-assert regression mutates
+  the floor below the bound and confirms the guard fires. This closes the
+  deferred `TODO.md` T25-wdt-margin-assert across all shells.
+
+- **PIC fault injection now proves post-reset liveness, not just the reset.**
+  After each expected watchdog recovery the harness requires the restarted image
+  to reach its main-loop `CLRWDT` again before the case passes. Earlier cases had
+  this only implicitly — the next case's setup would have stalled on a dead
+  recovery — but the final injection had no successor, so a reset-then-wedge
+  recovery on the last case would have scored as a pass. Every case, the final
+  one included, now carries the same explicit liveness guarantee.
+
 - **PIC12F675 release programming is bound to the signed release bytes.** The
   guarded release target verifies the annotated tag and checksum signature,
   requires a clean checkout at that exact tag, and admits the private fresh

@@ -50,5 +50,16 @@
 //   PA7 => footswitch input
 #define BYPASS_OUTPUT_DDR_MASK (0x4EU) // PA1|PA2|PA3|PA6
 
+
+
+// Watchdog margin floor, consumed by the shared blocking output drivers: one
+// tick + the longest blocking actuation must stay under the WORST-CASE WDT
+// period (de-rated minima, never nominal). Asserted in bypass_output_*.c.
+#define TICK_PERIOD_MS    (1U)    // 1 ms TCB0 periodic tick
+#define WDT_MIN_PERIOD_MS (128U)  // PERIOD=256CLK ~256 ms nom; de-rate by ATtiny202
+                                  // OSCULP32K accuracy (datasheet). 128U is a safe
+                                  // ~-50%; ~180U if you cite the typical +/-30%.
+ 
+
 #endif // BYPASS_PINS_AVR_XT_H__
 

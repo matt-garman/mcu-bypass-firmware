@@ -173,8 +173,8 @@ done
 GUARD_CENSUS=(
 	"bypass_compile_checks.h 5"
 	"bypass_mcu_avr_classic.c 17"
-	"bypass_output_cd4053_with_mute.c 1"
-	"bypass_output_tq2_l2_5v_relay.c 1"
+	"bypass_output_cd4053_with_mute.c 2"
+	"bypass_output_tq2_l2_5v_relay.c 2"
 )
 guards=0
 for row in "${GUARD_CENSUS[@]}"; do
@@ -206,6 +206,15 @@ MUTATIONS=(
 	"pin ordinal|bypass_pins_avr_classic.h|s/^#define FOOTSW_PIN (0U)/#define FOOTSW_PIN (4U)/|bypass_mcu_avr_classic.c|CD4053_SIMPLE|FOOTSW_PIN must be PB0"
 	"mute delay budget|bypass_output_cd4053_with_mute.h|s/^#define CD4053_MUTE_DELAY_MS (5U)/#define CD4053_MUTE_DELAY_MS (25U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|mute delay must be shorter than RELEASE_THRESH"
 	"relay pulse budget|bypass_output_tq2_l2_5v_relay.h|s/^#define TQ2_L2_5V_PULSE_MS (12U)/#define TQ2_L2_5V_PULSE_MS (25U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|relay coil pulse must be shorter than RELEASE_THRESH"
+	# The watchdog-margin guards (TICK+pulse < WDT_MIN_PERIOD_MS). These mutate the
+	# FLOOR, not the pulse: on every shipped part RELEASE_THRESH (25) < the WDT
+	# floor (100-160), so a pulse grown past the floor trips the RELEASE_THRESH
+	# guard FIRST and can never isolate this one. Dropping the floor below
+	# TICK+pulse while the pulse stays < RELEASE_THRESH fires ONLY the margin guard,
+	# which is what a prescaler/tick regression looks like. avr-classic's is the
+	# floor the standalone driver compile resolves (__AVR__ -> bypass_pins_avr_classic.h).
+	"relay WDT floor|bypass_pins_avr_classic.h|s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (5U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|one tick + relay coil pulse must stay under the worst-case"
+	"mute WDT floor|bypass_pins_avr_classic.h|s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (5U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|one tick + mute pulse must stay under the worst-case"
 	"enum width flag||-fshort-enums|bypass_mcu_avr_classic.c|CD4053_SIMPLE|sizeof(effect_state_t) != 1, use -fshort-enums&&sizeof(program_state_t) != 1&&sizeof(timer_isr_called_t) != 1"
 )
 

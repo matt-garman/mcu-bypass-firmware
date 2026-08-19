@@ -90,41 +90,6 @@ Dependencies: an upstream release containing the three fixes. Effort: about
 1 hour. Risk: Low; this retires vendored third-party modifications and a
 simulator-fidelity caveat rather than closing a firmware gap.
 
-### T25-wdt-margin-assert - Enforce the tick+pulse < WDT floor at compile time
-
-Every shell states the same safety invariant: one tick plus the longest blocking
-actuation must stay well under the watchdog's WORST-CASE (shortest) period, or a
-healthy main loop can trip the dog. Exactly one shell enforces it.
-`src/bypass_mcu_pic10f320.c` defines `TICK_PERIOD_MS` and `WDT_MIN_PERIOD_MS`
-(160 ms, its ~256 ms nominal de-rated by the datasheet's worst-case −37%) and
-static_asserts `(TICK_PERIOD_MS + <pulse>) < WDT_MIN_PERIOD_MS` once per
-blocking variant, beside the existing "pulse < RELEASE_THRESH" check. Measured
-2026-08-11: the other four shells -- AVR classic, AVR-XT, PIC10F322 and
-PIC12F675 -- define neither macro and carry the argument in comments only.
-
-No shell is close to its floor today; the PIC12F675's is the narrowest case at
-13.024 ms nominal (13.68 ms at the −5% INTOSC corner of DS41190G Table 12-2)
-against a 160 ms floor, a factor of 11.7. The gap is that a future edit erodes
-the margin silently: lengthening a coil pulse, adding a blocking stage, slowing
-a tick, or changing a prescaler each move one side of an inequality nothing
-checks. The PIC12F675's floor is already derived and cited in its `OPTION_REG`
-comment (DS41190G Table 12-4 parameter 31, 10 ms unprescaled minimum x 16), so
-for that part this is a transcription into a `static_assert`, not new analysis.
-
-The AVR shells need their own de-rated floors read from their datasheets first;
-the PIC10F322's is already quoted in its own comments. Note the floor must be
-the DE-RATED minimum, never the nominal -- a margin argument built on a typical
-figure is not a margin argument.
-
-Acceptance test: raise a blocking pulse past the floor in a scratch tree and
-confirm each affected variant fails to COMPILE, per shell. Related but distinct:
-T25-wdt-rate measures the healthy pet cadence at run time; this pins the
-worst-case bound at build time, and neither substitutes for the other.
-
-Dependencies: none for the PIC parts. Effort: Low. Risk if deferred: Low today
-(every margin is an order of magnitude), Medium for any future timing change --
-which is exactly the change this would catch.
-
 ### T25-pic322-hex-stack - Extend the final-HEX stack oracle to PIC10F322
 
 The PIC10F320 oracle decodes every reachable word in the shipped HEX and is
@@ -610,7 +575,6 @@ The stable ID in each row matches exactly one open section above.
 |---|---|---:|---:|---|
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
-| T25-wdt-margin-assert | Enforce tick+pulse < WDT floor at compile time | 2.5 | Low | Low now, Medium on any timing change |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |
 | T25-delay-formal | Blocking-delay safety argument | 2.5 | 1-2 h | Medium |

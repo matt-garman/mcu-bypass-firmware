@@ -336,6 +336,28 @@ static bool advance_to_loop_clrwdt(void) {
     return false;
 }
 
+// A watchdog reset is only half the recovery contract: the restarted image must
+// resume PETTING the dog. This proves the recovered core reaches its main-loop
+// CLRWDT again -- so a reset-then-die recovery (init() completes, main loop never
+// re-arms the pet) is caught rather than scored as a pass. Earlier cases get this
+// implicitly from the next case's entry preamble (SETTLE + advance_to_loop_clrwdt),
+// but the FINAL injection has no successor, so without this call a loop that
+// resets and then wedges would pass. It reuses advance_to_loop_clrwdt() -- the
+// same liveness probe every case already trusts at entry -- and is FOLDED into
+// the caller's existing check slot (deliberately no g_checks++), so the
+// per-variant EXPECTED_CHECKS totals stay hand-verifiable across all three
+// adapters; a dead recovery flips the case through g_fails.
+static void prove_post_reset_liveness(void) {
+    if (!run_ms(SETTLE_MS) || !advance_to_loop_clrwdt()) {
+        g_fails++;
+        fprintf(stderr,
+                "    FAIL: no renewed loop-pet liveness after the recovery reset\n");
+        return;
+    }
+    printf("    PASS: recovered image reached its loop CLRWDT again"
+           " (renewed liveness)\n");
+}
+
 // PIC10F320 relay-only policy: a stable-state coil latch upset is corrected, not
 // reset. Inject at the trailing loop CLRWDT, then stop at its next occurrence.
 // That is exactly one serviced iteration and places the verdict before its pet.
@@ -497,6 +519,12 @@ static void inject_case(const char *label, unsigned addr, const char *token,
     if (delta == expected_resets) {
         printf("    PASS: observed exactly %u WDT reset%s\n", expected_resets,
                expected_resets == 1u ? "" : "s");
+        // A reset fired as required; now require the recovered image to live.
+        // (Skipped for the expected_resets == 0 negative controls below, whose
+        // whole point is that no reset happened and the loop never stopped.)
+        if (expected_resets >= 1u) {
+            prove_post_reset_liveness();
+        }
     } else {
         g_fails++;
         char const *reason = expected_resets == 0u
@@ -565,6 +593,7 @@ static void inject_shadow_expected_case(const char *label, unsigned val,
     g_checks++;
     if (delta == 1u) {
         printf("    PASS: observed exactly 1 WDT reset\n");
+        prove_post_reset_liveness();
     } else {
         g_fails++;
         char const *reason = (delta > 1u)

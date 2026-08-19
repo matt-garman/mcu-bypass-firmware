@@ -48,4 +48,11 @@
 #define BYPASS_OUTPUT_DDR_MASK (0x07U)  // RA0|RA1|RA2
 
 
+// Watchdog margin floor, consumed by the shared blocking output drivers: one
+// tick + the longest blocking actuation must stay under the WORST-CASE WDT
+// period (de-rated minima, never nominal). Asserted in bypass_output_*.c.
+#define TICK_PERIOD_MS    (1U)    // ~1 ms TMR2 tick
+#define WDT_MIN_PERIOD_MS (160U)  // WDTPS=0x08 ~256 ms nom; param 31 (-37%) -> ~160 ms floor
+
+
 #endif // BYPASS_PINS_PIC10F322_H__

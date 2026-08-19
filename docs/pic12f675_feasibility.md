@@ -1211,9 +1211,12 @@ bench**, tracked together with the graduation diff that follows it.
      They cite the section that states 18 ms, they match what the simulator
      models, and the safety argument rests on the 160 ms floor either way.
 
-   Residual: none for the period itself. The margin is stated in prose on this
-   part rather than enforced at compile time as it is on the PIC10F320; filed
-   as `TODO.md` T25-wdt-margin-assert.
+   Residual: none for the period itself. The margin is now enforced at compile
+   time on this part as on the PIC10F320: `bypass_pins_pic12f675.h` defines the
+   de-rated `WDT_MIN_PERIOD_MS` (160 ms) and `TICK_PERIOD_MS`, and the shared
+   blocking output drivers static_assert `(tick + pulse) < WDT_MIN_PERIOD_MS`
+   against them, so a future prescaler, tick, or pulse change that erodes the
+   margin fails the build (v0.9.9 post-release polish; see CHANGELOG.md).
 5. **Brown-out trip point.** *CLOSED 2026-08-11 — read; the expected limitation
    is confirmed, with numbers.* DS41190G Table 12-4, `BVDD` "Brown-out Detect
    Voltage": **2.025 V min, 2.175 V max** (no typical given; the hysteresis is
