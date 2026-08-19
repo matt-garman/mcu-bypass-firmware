@@ -129,10 +129,24 @@ expected_checks=$((duration_num / liveness_num))
 # the test-release-qualification gate, which `make release` reaches through a
 # sub-make -- there the directory banner became the first canonical soak name
 # and this script rejected a VALID qualification for a count mismatch.
-canonical_soaks_raw=$(make -s --no-print-directory -C "$repo_root" \
+#
+# CC=: is a silent placeholder for the AVR compiler. The Makefile discovers
+# avr-libc header paths at PARSE time via unconditional `$(shell $(CC)
+# -print-file-name ...)`/`-dM` probes (for the static analyzers); on a host
+# without avr-gcc those probes print "avr-gcc: command not found" to stderr on
+# EVERY make invocation, including this metadata-only query. That noise would
+# reach a documented tool-independent path and could mask a real warning or
+# trip automation that treats stderr as failure. RELEASE_SOAK_NAMES and
+# RELEASE_EVIDENCE_FILES are `override :=` literal inventories with no compiler
+# dependence, so `:` (the shell null utility) satisfies the probes silently
+# without changing the result. It cannot weaken the canonical set: `override`
+# ignores command-line assignments, and CC is not an inventory variable. This
+# must be a command-line assignment -- the Makefile's `CC = avr-gcc` overrides
+# the environment, so only `make CC=:` takes effect.
+canonical_soaks_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
 	print-RELEASE_SOAK_NAMES) \
 	|| die "cannot read RELEASE_SOAK_NAMES from the Makefile"
-canonical_evidence_raw=$(make -s --no-print-directory -C "$repo_root" \
+canonical_evidence_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
 	print-RELEASE_EVIDENCE_FILES) \
 	|| die "cannot read RELEASE_EVIDENCE_FILES from the Makefile"
 read -r -a canonical_soaks <<<"$canonical_soaks_raw"

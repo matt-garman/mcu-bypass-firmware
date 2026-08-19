@@ -250,6 +250,36 @@ expect_fail() {
 reset_fixture
 expect_pass "complete production qualification"
 
+# T3: the verifier documents `make` as its only tool prerequisite for reading
+# the canonical inventory, but the Makefile probes the AVR compiler at parse
+# time to locate avr-libc headers for the analyzers. On a host without avr-gcc
+# that leaked "command not found" onto this documented tool-independent path.
+# The verifier now passes CC=: to its metadata queries, so the compiler is
+# never invoked. Prove it with a tripwire avr-gcc that fails loudly if run: a
+# valid qualification must still pass, with no compiler diagnostics on stderr.
+# This reproduces the real trigger because the Makefile's `CC = avr-gcc`
+# overrides the environment -- only the command-line CC=: bypasses the shim.
+tripwire_bin="$work/tripwire-bin"
+mkdir -p "$tripwire_bin"
+cat > "$tripwire_bin/avr-gcc" <<'SH'
+#!/bin/sh
+echo "TRIPWIRE: avr-gcc must not be invoked by the metadata-only verifier" >&2
+exit 1
+SH
+chmod +x "$tripwire_bin/avr-gcc"
+reset_fixture
+if ! tripwire_err=$(PATH="$tripwire_bin:$PATH" "$VERIFY" "$release" "$version" \
+		2>&1 >/dev/null); then
+	fail "tool-independent verification failed when avr-gcc was shadowed by a tripwire"
+fi
+case "$tripwire_err" in
+	*TRIPWIRE*|*"command not found"*|*"No such file"*)
+		fail "verifier invoked the AVR compiler on the metadata-only path: $tripwire_err" ;;
+esac
+[ -z "$tripwire_err" ] \
+	|| fail "verifier emitted unexpected diagnostics on the tool-independent path: $tripwire_err"
+checks=$((checks + 1))
+
 if output=$("$VERIFY" "$release" v99.0.0.rc1 2>&1); then
 	fail "qualification verifier accepted a version the release workflow does not trigger"
 fi
