@@ -30,7 +30,7 @@ PIC_DFP_SHA256=${PIC_DFP_SHA256:-add68db8b76705557a99647bde5b149d17caf259d968f59
 
 is_sha256 "$XC8_INSTALLER_SHA256" || die "invalid XC8_INSTALLER_SHA256"
 is_sha256 "$PIC_DFP_SHA256" || die "invalid PIC_DFP_SHA256"
-for tool in wget sha256sum sudo unzip; do
+for tool in wget sha256sum sudo unzip find sort xargs; do
     have "$tool" || die "$tool not found"
 done
 
@@ -75,4 +75,49 @@ for device in pic10f322 pic10f320 pic12f675; do
     header="$XC8_DFP_ROOT/xc8/pic/include/proc/${device}.h"
     [ -f "$header" ] || die "DFP installation did not create $header"
 done
+
+# ---------------------------------------------------------------------------
+# Freeze a restore-time integrity manifest for the just-installed tree.
+#
+# CI caches this extracted tree and a later job restores it WITHOUT re-running
+# this SHA-verified installer. Record the digest-verified state now so
+# verify_pic_toolchain_cache.sh can reject a corrupted or incomplete RESTORED
+# cache before any build or test consumes it.
+# ---------------------------------------------------------------------------
+XC8_CACHE_DIR=${XC8_CACHE_DIR:-/opt/microchip}
+xc8_stamp="$XC8_CACHE_DIR/.xc8_toolchain.stamp"
+xc8_manifest="$XC8_CACHE_DIR/.xc8_toolchain.manifest"
+
+# The walk is scoped to READABLE files and prunes unreadable directories. The
+# XC8 installer leaves a few root-only bookkeeping files (Uninstall-*.dat,
+# rollbackBackupDirectory) that this script -- run as the non-root CI user after
+# sudo-installing -- cannot read. Those are never build inputs: the build runs as
+# the same user, so every file it can actually consume IS readable and IS
+# captured here. Permissions are preserved across the CI cache save/restore, so
+# verify_ sees the identical readable set. A regular file that is unreadable is
+# excluded (it cannot be a build input); a symlink among the readable tree is
+# refused outright.
+syms=$(find "$XC8_DIR" "$XC8_DFP_ROOT" \
+        \( -type d ! -readable -prune \) -o \( -type l -print \)) \
+    || die "could not scan the installed tree for symlinks"
+[ -z "$syms" ] || die "refusing to record a manifest for a tree with symlinks:
+$syms"
+
+# Deterministic (LC_ALL=C) digest of every readable regular file under both
+# roots. The stamp and manifest sit at XC8_CACHE_DIR level -- above both roots --
+# so they never appear in this walk. verify_ regenerates this identically.
+manifest_body=$(find "$XC8_DIR" "$XC8_DFP_ROOT" \
+        \( -type d ! -readable -prune \) -o \( -type f -readable -print0 \) \
+    | LC_ALL=C sort -z | xargs -0 -r sha256sum) \
+    || die "could not compute the XC8/DFP cache manifest"
+
+write_cache_file() {  # usage: printf ... | write_cache_file TARGET
+    _dir=$(dirname "$1")
+    if [ -w "$_dir" ]; then cat > "$1"; else sudo tee "$1" >/dev/null; fi
+}
+printf '%s %s %s %s\n' "$XC8_VERSION" "$DFP_VERSION" \
+    "$XC8_INSTALLER_SHA256" "$PIC_DFP_SHA256" | write_cache_file "$xc8_stamp"
+printf '%s\n' "$manifest_body" | write_cache_file "$xc8_manifest"
+
 log "Installed verified XC8 ${XC8_VERSION} and PIC DFP ${DFP_VERSION}"
+log "Recorded XC8/DFP cache integrity manifest ($xc8_manifest)"

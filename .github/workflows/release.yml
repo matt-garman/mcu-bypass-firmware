@@ -30,8 +30,16 @@ name: Release
 #      inventory, then re-verifies the detached checksum signature and image
 #      checksums from the exact directory passed to `gh release create`.
 #
-# The runner is pinned to ubuntu-24.04 so the toolchain matches TOOLCHAIN.adoc;
-# byte-exact reproduction depends on that pin (esp. avr-gcc + binutils-avr).
+# `ubuntu-24.04` is a MOVING hosted-runner label, and the apt tools below install
+# without version constraints -- so the runner and the apt toolchain are RECORDED,
+# not pinned. What the release actually enforces: (1) every published image is
+# reproduced and compared BYTE-FOR-BYTE against the signed SHA256SUMS (the final,
+# independent gate); (2) the image-defining compilers are version-pinned and
+# preflight-enforced -- XC8 V3.10 + PIC10-12Fxxx_DFP 1.9.189 by digest here, and
+# avr-gcc 7.3.0 by scripts/make-release.sh (hard fail on drift); (3) the XC8/DFP
+# cache is integrity-verified on every restore (verify_pic_toolchain_cache.sh).
+# Analyzer/simulator versions ride the runner and are recorded in the MANIFEST,
+# not pinned. See TOOLCHAIN.adoc "What the release enforces".
 
 on:
   push:
@@ -135,6 +143,12 @@ jobs:
       - name: Install XC8 (free tier) + DFP
         if: steps.cache-xc8.outputs.cache-hit != 'true'
         run: scripts/install_pic_toolchain.sh
+
+      # Runs on EVERY path (hit or miss): a restored cache bypasses the
+      # SHA-verified installer, so this read-only check rejects a corrupted or
+      # incomplete /opt/microchip before any build/test consumes it.
+      - name: Verify XC8 + DFP cache integrity
+        run: scripts/verify_pic_toolchain_cache.sh
 
       # --- toolchain: ATtiny_DFP + patched yasimavr (ATtiny202 lane) --------
       # The DFP is needed to BUILD the three ATtiny202 images the reproducibility

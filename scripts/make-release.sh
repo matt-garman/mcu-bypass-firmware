@@ -885,17 +885,22 @@ TC_CLANG=$(release_tool_version_line "Clang (CLANG=$CLANG)" "$CLANG") \
 TC_PY=$(release_tool_version_line "Python" python3) \
 	|| die "could not record the Python provenance"
 
+# These three tools define the released image bytes, so their versions are the
+# release contract, not advisory. Reject drift here -- at preflight, before any
+# build or soak -- rather than warning and relying on the CI repro-verify to fail
+# a day later. Analyzer/simulator versions are recorded (below, into the MANIFEST)
+# but deliberately NOT pinned; see TOOLCHAIN.adoc "What the release enforces".
 case "$TC_AVR_GCC" in
 	*7.3.0*) : ;;
-	*) warn "avr-gcc is not the pinned 7.3.0 ($TC_AVR_GCC). Images may not reproduce the CI build; the release.yml repro-verify will catch a mismatch." ;;
+	*) die "avr-gcc is not the pinned 7.3.0 ($TC_AVR_GCC). The released images are byte-gated against this exact compiler; refusing to start a release with a drifted image-defining toolchain. Install avr-gcc 7.3.0 or point CC at it." ;;
 esac
 case "$TC_XC8_322" in
 	*V3.10*|*v3.10*) : ;;
-	*) warn "PIC10F322 XC8 is not the pinned V3.10 ($TC_XC8_322). Images may not reproduce the CI build; the release.yml repro-verify will catch a mismatch." ;;
+	*) die "PIC10F322 XC8 is not the pinned V3.10 ($TC_XC8_322). The released images are byte-gated against this exact compiler; refusing to start a release with a drifted image-defining toolchain. Install XC8 V3.10 or point PIC_CC at it." ;;
 esac
 case "$TC_XC8_320" in
 	*V3.10*|*v3.10*) : ;;
-	*) warn "PIC10F320 XC8 is not the pinned V3.10 ($TC_XC8_320). Images may not reproduce the CI build; the release.yml repro-verify will catch a mismatch." ;;
+	*) die "PIC10F320 XC8 is not the pinned V3.10 ($TC_XC8_320). The released images are byte-gated against this exact compiler; refusing to start a release with a drifted image-defining toolchain. Install XC8 V3.10 or point PIC10F320_CC at it." ;;
 esac
 
 if [ "$PREFLIGHT" -eq 1 ]; then

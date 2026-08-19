@@ -73,6 +73,7 @@ docs = {}
 checkout_steps = []
 token_steps = []
 pic_installer_steps = []
+pic_verify_steps = []
 pic_cache_steps = []
 attiny_cache_steps = []
 yasimavr_cache_steps = []
@@ -180,6 +181,8 @@ for name, doc in docs.items():
                 run = step.get("run")
                 if run == "scripts/install_pic_toolchain.sh":
                     pic_installer_steps.append((name, job_id, idx))
+                if run == "scripts/verify_pic_toolchain_cache.sh":
+                    pic_verify_steps.append((name, job_id, idx, "if" in step))
 
                 env = step.get("env")
                 if isinstance(env, dict) and "GH_TOKEN" in env:
@@ -210,6 +213,24 @@ for workflow_name in REQUIRED:
         count == 1,
         f"{workflow_name}: shared PIC installer appears in {count} active steps, expected 1",
     )
+
+# The XC8/DFP cache-integrity verify must run once per workflow and be
+# UNCONDITIONAL: a restored cache bypasses the SHA-verified installer, so a
+# verify gated on a cache miss (the exact case it exists to catch) would never
+# check a restored tree.
+for workflow_name in REQUIRED:
+    matches = [s for s in pic_verify_steps if s[0] == workflow_name]
+    check(
+        len(matches) == 1,
+        f"{workflow_name}: XC8 cache-integrity verify appears in "
+        f"{len(matches)} active steps, expected 1",
+    )
+    for _, job_id, idx, has_if in matches:
+        check(
+            not has_if,
+            f"{workflow_name}: job '{job_id}' verify step {idx} is conditional; "
+            "it must run on every restore (hit or miss)",
+        )
 
 check(len(pic_cache_steps) == 4, f"found {len(pic_cache_steps)} PIC cache steps, expected 4")
 for name, job_id, idx, key in pic_cache_steps:

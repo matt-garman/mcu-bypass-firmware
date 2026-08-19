@@ -118,6 +118,23 @@ fi
 exit 0
 EOF
 
+# Dedicated fake avr-gcc that reports the pinned 7.3.0 version. make-release.sh
+# now HARD FAILS at preflight on avr-gcc drift (the image-defining compiler), so
+# the happy path needs a compliant version banner -- mirroring the xc8-322/320
+# fakes that already report V3.10. It still carries fake-tool's avr-libc
+# preprocess probe (-mmcu=attiny13a -E) so header-missing injection still works.
+cat > "$fakebin/fake-avr-gcc" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = --version ]; then
+	printf 'avr-gcc (GCC) 7.3.0\n'
+	printf 'Copyright (C) 2017 Free Software Foundation, Inc.\n'
+fi
+if [[ " $* " == *" -mmcu=attiny13a "* ]] && [[ " $* " == *" -E "* ]]; then
+	[ "${TEST_AVR_LIBC_FAIL:-0}" -eq 0 ] || exit 81
+fi
+exit 0
+EOF
+
 cat > "$fakebin/fake-awk" <<'EOF'
 #!/usr/bin/env bash
 [ "${TEST_AWK_FAIL:-0}" -eq 0 ] || exit 84
@@ -270,7 +287,7 @@ case "$3" in
 esac
 printf '%s\n' "$goal" >> "${MAKE_LOG:?}"
 exec "${REAL_MAKE:?}" --no-print-directory -s -C "${FAKE_REPO_ROOT:?}" \
-	CC=fake-tool OBJCOPY=fake-tool SIZE=fake-tool HOSTCC=fake-tool \
+	CC=fake-avr-gcc OBJCOPY=fake-tool SIZE=fake-tool HOSTCC=fake-tool \
 	OBJDUMP="${TEST_OBJDUMP:-fake-tool}" READELF=fake-tool \
 	IHEX_VALIDATOR="${TEST_IHEX_VALIDATOR:-${FAKE_BIN:?}/fake-tool}" AWK="${FAKE_BIN:?}/fake-awk" \
 	CLANG=fake-tool CLANG_TIDY=fake-tool CPPCHECK=fake-tool CBMC=fake-tool \

@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PIC_INSTALL="$ROOT/scripts/install_pic_toolchain.sh"
+PIC_VERIFY="$ROOT/scripts/verify_pic_toolchain_cache.sh"
 ATTINY_FETCH="$ROOT/scripts/fetch_attiny_dfp.sh"
 YASIMAVR_FETCH="$ROOT/scripts/fetch_yasimavr.sh"
 YASIMAVR_LOCK="$ROOT/scripts/yasimavr-build-requirements.txt"
@@ -115,6 +116,7 @@ run_pic_installer() {
 		XC8_INSTALLER_SHA256="$trusted_xc8_sha" \
 		PIC_DFP_SHA256="$trusted_dfp_sha" \
 		XC8_DIR="$work/xc8" XC8_DFP_ROOT="$work/pic-dfp" \
+		XC8_CACHE_DIR="$work" \
 		"$PIC_INSTALL"
 }
 
@@ -158,6 +160,69 @@ run_pic_installer "$trusted_xc8" "$trusted_dfp" >/dev/null 2>&1 \
 	|| fail "verified PIC toolchain install was incomplete"
 [ -s "$sudo_log" ] || fail "verified PIC fixture never reached installation"
 checks=$((checks + 1))
+
+# --- restored-cache integrity verification (verify_pic_toolchain_cache.sh) ----
+# install_pic_toolchain.sh froze a stamp + manifest of the just-installed tree.
+# CI restores that tree WITHOUT re-running the SHA-verified installer, so a
+# read-only verify must reject a corrupted, incomplete, or symlinked restore
+# before any build/test consumes it.
+[ -f "$work/.xc8_toolchain.stamp" ] && [ -f "$work/.xc8_toolchain.manifest" ] \
+	|| fail "install did not record the XC8/DFP integrity stamp + manifest"
+checks=$((checks + 1))
+
+run_pic_verify() {
+	env XC8_DIR="$work/xc8" XC8_DFP_ROOT="$work/pic-dfp" XC8_CACHE_DIR="$work" \
+		XC8_INSTALLER_SHA256="$trusted_xc8_sha" PIC_DFP_SHA256="$trusted_dfp_sha" \
+		"$PIC_VERIFY"
+}
+reinstall_pic() {
+	rm -rf "$work/xc8" "$work/pic-dfp" \
+		"$work/.xc8_toolchain.stamp" "$work/.xc8_toolchain.manifest"
+	run_pic_installer "$trusted_xc8" "$trusted_dfp" >/dev/null 2>&1 \
+		|| fail "clean PIC reinstall failed"
+}
+
+# A clean, freshly-recorded cache verifies.
+verify_out=$(run_pic_verify 2>&1) \
+	|| fail "verified XC8/DFP cache was rejected: $verify_out"
+[[ "$verify_out" == *"cache verified"* ]] \
+	|| fail "XC8/DFP verify did not confirm the manifest match: $verify_out"
+checks=$((checks + 1))
+
+# A corrupted file (same name, different bytes) is caught by the manifest diff.
+printf 'corrupted compiler bytes\n' > "$work/xc8/bin/xc8-cc"
+expect_fail "corrupt XC8 cache file" "corrupted, incomplete, or tampered" run_pic_verify
+
+# An unexpected extra file under a root is rejected (no manifest line for it).
+reinstall_pic
+printf 'unexpected input\n' > "$work/pic-dfp/xc8/pic/include/proc/extra.h"
+expect_fail "extra XC8 cache file" "corrupted, incomplete, or tampered" run_pic_verify
+
+# A missing critical device header is an incomplete restore.
+reinstall_pic
+rm -f "$work/pic-dfp/xc8/pic/include/proc/pic12f675.h"
+expect_fail "incomplete XC8 cache" "missing device header" run_pic_verify
+
+# A symlinked component root is refused outright.
+reinstall_pic
+mv "$work/xc8" "$work/xc8.real"
+ln -s "$work/xc8.real" "$work/xc8"
+expect_fail "symlinked XC8 root" "root is a symlink" run_pic_verify
+rm -rf "$work/xc8" "$work/xc8.real"
+
+# A stamp that does not name the pinned (compiler, DFP) pair is rejected.
+reinstall_pic
+printf '9.99 0.0.0 %s %s\n' "$trusted_xc8_sha" "$trusted_dfp_sha" \
+	> "$work/.xc8_toolchain.stamp"
+expect_fail "wrong XC8 cache stamp" "does not match the pinned toolchain" run_pic_verify
+
+# A missing manifest (incomplete restore) is rejected.
+reinstall_pic
+rm -f "$work/.xc8_toolchain.manifest"
+expect_fail "missing XC8 manifest" "missing integrity manifest" run_pic_verify
+
+# Leave a clean, verifiable cache behind.
+reinstall_pic
 
 grep -Fq '628803b96f468a5981d6bc1d0a5e6c7fa809e4d87e3cca961805e2a857f5846e' \
 	"$PIC_INSTALL" || fail "reviewed XC8 digest is missing"

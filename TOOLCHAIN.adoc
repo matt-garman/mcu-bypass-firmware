@@ -480,3 +480,43 @@ it as dubious ownership. It does not write Git configuration. For the
 authoritative, tested command set, use `scripts/ci-local.sh` (it mirrors the CI
 job order).
 ....
+
+== What the release enforces
+
+The sections above are a REQUIREMENTS and historical-environment record, not a
+claim that the release job pins the runner image or every tool. That distinction
+matters, so here is exactly what a signed release ENFORCES versus what it merely
+RECORDS.
+
+Enforced -- a release cannot ship otherwise:
+
+* *Image bytes.* Every published `.hex` is rebuilt on a clean runner and compared
+  BYTE-FOR-BYTE against the signed `SHA256SUMS`. This is the final, independent
+  gate; it does not depend on trusting any tool-version claim.
+* *Image-defining compilers, version-pinned and preflight-enforced.* avr-gcc
+  7.3.0 and XC8 V3.10 (both PIC10F322 and PIC10F320). `scripts/make-release.sh`
+  HARD FAILS at preflight -- before any build or soak -- if any of these three
+  drifts from its pin, rather than warning and leaving it to the byte gate.
+* *XC8 + PIC10-12Fxxx_DFP provenance and cache integrity.*
+  `scripts/install_pic_toolchain.sh` installs only after both downloads match
+  reviewed SHA-256 digests (the XC8 installer and the 1.9.189 atpack), then
+  freezes an integrity manifest of the extracted tree.
+  `scripts/verify_pic_toolchain_cache.sh` re-checks the RESTORED cache against
+  that manifest on every CI restore -- the cache bypasses the SHA-verified
+  installer -- and rejects a corrupted, incomplete, or symlinked tree before any
+  build or test. The ATtiny_DFP cache is self-verified the same way by
+  `scripts/fetch_attiny_dfp.sh`; the patched yasimavr venv is pinned by sdist
+  version + SHA + patch-set SHA.
+
+Recorded but deliberately NOT pinned:
+
+* The hosted-runner label (`ubuntu-24.04`) is a MOVING image, and the apt tools
+  install without version constraints.
+* Analyzer and simulator versions (cppcheck, clang-tidy, CBMC, simavr, gpsim,
+  binutils-avr, avr-libc, host gcc, Python) ride whatever that runner ships.
+  `scripts/make-release.sh` reads each one THROUGH its Makefile variable and
+  records the exact version into the signed provenance MANIFEST, so runner or
+  package drift cannot silently change which analyzer/simulator supplied a given
+  release's evidence: the version that ran is attested even though it is not
+  pinned. Byte-for-byte image reproduction remains the final artifact gate
+  regardless.
