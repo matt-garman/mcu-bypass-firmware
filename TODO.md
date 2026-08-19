@@ -369,6 +369,41 @@ across the whole tree. Risk if deferred: Low -- each of those five harnesses
 asserts on the argument list its shim was called with, so a severed override
 there would most likely surface as a loud harness failure rather than silently.
 
+### T25-cbmc-proof-count - Cross-check the dispatched CBMC proof count against the source
+
+`test/test_strict_tools.sh` asserts that `test-cbmc` under `STRICT_TOOLS=1`
+issues a fixed number of `cbmc` invocations, restating that number as a literal.
+It has now drifted once: F2 added `prove_ctx_check_single_bit_detected` and
+`prove_ctx_check_definition`, the Makefile's three proof lists grew to eleven
+entries, and the assertion still said nine, so the gate went red on an addition
+that was entirely correct.
+
+The tempting repair is the wrong one. Deriving the expected count from
+`CBMC_PROOFS`, `CBMC_PROOFS_LOOP` and `CBMC_PROOFS_DEEP` makes the assertion
+self-fulfilling: a proof accidentally dropped from a dispatch list would lower
+the expectation by exactly as much as it lowers the count, and the gate would
+stay green while the proof stopped running. The literal is doing real pinning
+work -- it is the only thing in the tree that would notice a silently
+undispatched proof -- and that property must survive any rewrite.
+
+What removes the drift without losing the pin is to derive the expectation from
+the other side: `grep -c '^void prove_' test/formal/test_cbmc.c` counts the
+proofs that are *defined*, the fake-`cbmc` log counts the proofs that are
+*dispatched*, and asserting the two are equal catches both failure directions.
+A proof defined but left out of a Makefile list fails as a coverage gap -- a
+case the current literal cannot detect at all -- and a new proof added properly
+to both sides needs no edit here. Today those numbers agree at eleven.
+
+Acceptance test: adding a proof to `test/formal/test_cbmc.c` and to a dispatch
+list keeps the gate green with no edit to the assertion; adding it to the source
+only turns the gate red naming the undispatched proof; the existing
+STRICT_TOOLS=1 negative cases are unaffected.
+
+Dependencies: none. Effort: 30-45 minutes, most of it confirming the definition
+scan cannot be fooled by a commented-out or conditionally compiled proof. Risk
+if deferred: Low -- the literal is correct as of this writing and a future
+mismatch fails loudly and names the count, exactly as it did this time.
+
 ---
 
 ## Tier 3 - platinum-grade hardening and silicon validation
@@ -593,6 +628,7 @@ The stable ID in each row matches exactly one open section above.
 | T25-poweron-sim | Power-on-pressed simulator fidelity | 2.5 | 1-2 h | Low |
 | T25-power-ramp | Power-supply ramp analysis | 2.5 | 2-3 h | Medium |
 | T25-name-contract-shim | Check overrides handed to a routing Make shim | 2.5 | 2-3 h | Low |
+| T25-cbmc-proof-count | Cross-check dispatched CBMC proof count against source | 2.5 | 30-45 min | Low-Medium |
 | T3-hw-procedure | Hardware-validation procedure | 3 | 2-3 h | High |
 | T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - gates the part's 1.x.y hardware validation |
 | T3-toolchain | Broader compiler/toolchain portability | 3 | Medium | Medium-High |

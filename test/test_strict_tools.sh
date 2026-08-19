@@ -174,8 +174,8 @@ if ! output=$(FAKE_TOOL_LOG="$cbmc_log" run_make test-cbmc STRICT_TOOLS=1 \
 		"CBMC=$fake_cbmc" 2>&1); then
 	fail "test-cbmc rejected an available tool under STRICT_TOOLS=1: $output"
 fi
-[ "$(wc -l < "$cbmc_log")" -eq 9 ] \
-	|| fail "test-cbmc did not execute all 9 proof commands"
+[ "$(wc -l < "$cbmc_log")" -eq 11 ] \
+	|| fail "test-cbmc did not execute all 11 proof commands"
 [[ "$output" == *"all debounce-core proofs SUCCESSFUL"* ]] \
 	|| fail "test-cbmc omitted its completion sentinel"
 checks=$((checks + 1))
