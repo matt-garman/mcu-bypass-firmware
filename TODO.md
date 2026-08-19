@@ -484,24 +484,6 @@ evidence. Risk: High; these four close here or nowhere. They do not block the
 `0.9.x` software release (the part already ships), but they are the gate to the
 `1.x.y` hardware-validated line — the same gate every other part must pass.
 
-### T3-ctx-complement - Add complemented debounce-context storage
-
-Range checks cannot detect an in-range bit flip in `program_state`,
-`effect_state`, or `debounce_counter`. Evaluate a complemented shell-owned
-shadow that is updated at every write and checked each tick, forcing watchdog
-recovery on mismatch while leaving `bypass_pure.c` unchanged.
-
-On AVR, avoid false mismatches when the ISR updates the counter: either shadow
-only main-owned state bytes or use pair update plus retry. Do not disable
-interrupts around the check. PIC10F322 can use a full shadow if it fits;
-PIC10F320 likely cannot and any omission must be explicit. Add in-range fault
-injections and a mutation that removes one shadow update. Firmware edits must be
-made by the owner.
-
-Dependencies: per-target flash/RAM budgets and race-safe ownership design.
-Effort: about 3-6 hours including tests. Risk: Medium; closes undetected
-single-bit corruption under the project's SEU/EMI model.
-
 ### T3-toolchain - Broaden compiler and toolchain portability
 
 Document a modern reproducible FSF AVR toolchain (binutils 2.41+, GCC 13+ AVR,
@@ -666,7 +648,6 @@ The stable ID in each row matches exactly one open section above.
 | T25-name-contract-shim | Check overrides handed to a routing Make shim | 2.5 | 2-3 h | Low |
 | T3-hw-procedure | Hardware-validation procedure | 3 | 2-3 h | High |
 | T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - gates the part's 1.x.y hardware validation |
-| T3-ctx-complement | Complemented debounce-context storage | 3 | 3-6 h | Medium |
 | T3-toolchain | Broader compiler/toolchain portability | 3 | Medium | Medium-High |
 | T3-hil | Behavioral and register-introspection HIL | 3 | 5-8 d | High |
 | T3-provenance | Optional embedded source URL | 3 | 1-2 h | Low |
