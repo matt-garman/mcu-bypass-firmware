@@ -51,7 +51,7 @@
 // coil bits in the shadow and (b) refreshes the ENTIRE physical port from the
 // shadow. So a coil SHADOW upset and ANY physical-PORT upset are corrected
 // within one iteration with no reset; only a non-coil SHADOW (intent) upset and
-// the expected-mask (effect_state) upset still reset. A persistent port fault
+// the shadow-vs-expected upset (shadow.expected) still resets. A persistent port fault
 // (pin will not follow the refresh) is still caught by port-follows-shadow.
 //
 // CD4053 variants: hw_outputs_reassert_safe() is a no-op, so every output upset
@@ -84,16 +84,17 @@
                 "both coil ports energized, refreshed low from shadow, no reset"); \
     inject_case("GPIO.GP4", PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, false, 0x10, 0, \
                 "parked GP4 port glitch refreshed low from shadow, no reset"); \
-    inject_case("ctx.expected", CTX_EFFECT_STATE, nullptr, true, 0x01, 1, \
-                "BYPASS shadow/GPIO stay matching; ENGAGED expectation isolates shadow mismatch"); \
+    inject_shadow_expected_case("shadow.expected", 0x01, \
+                "shadow+port GP0 high vs BYPASS expected: isolates shadow-vs-expected, F2-blind (ctx_ untouched)"); \
 } while (0)
 #else
 #  define PIC_FAULT_EXPECTED_CHECKS (37u + PIC_FAULT_CTX_INRANGE)
 // The shadow cases make both output-integrity clauses false. The GPIO cases
 // isolate port-follows-shadow: the shadow still matches settled BYPASS. The
-// final context case does the converse: valid ENGAGED changes only the expected
-// mask while settled BYPASS shadow/GPIO remain matching, so only
-// shadow-versus-expected can explain its reset.
+// final shadow.expected case does the converse: it drives shadow AND port to
+// the same high value while ctx_ (hence the expected mask) stays settled
+// BYPASS, so shadow-versus-expected is the sole trip and -- ctx_ being
+// untouched -- the F2 fold cannot mask it.
 #  define PIC_FAULT_EXTRA_OUTPUT_INJECTIONS() do { \
     inject_case("shadow.GP0", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x01, 1, \
                 "GP0 LED shadow changed from settled low to high"); \
@@ -111,8 +112,8 @@
                 "GP2 pin driven high with its shadow low: port stopped following"); \
     inject_case("GPIO.GP4",   PIC_REG_PORT_ADDR,  PIC_REG_PORT_TOKEN,  false, 0x10, 1, \
                 "parked GP4 pin high with its shadow low: port stopped following"); \
-    inject_case("ctx.expected", CTX_EFFECT_STATE, nullptr, true, 0x01, 1, \
-                "BYPASS shadow/GPIO stay matching; ENGAGED expectation isolates shadow mismatch"); \
+    inject_shadow_expected_case("shadow.expected", 0x01, \
+                "shadow+port GP0 high vs BYPASS expected: isolates shadow-vs-expected, F2-blind (ctx_ untouched)"); \
 } while (0)
 #endif
 #define PIC_FAULT_PROGRAM_STATE_NOTE \

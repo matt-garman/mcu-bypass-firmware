@@ -509,6 +509,64 @@ static void inject_case(const char *label, unsigned addr, const char *token,
     fflush(stdout);
 }
 
+// ---- Isolate the shadow-versus-expected clause, F2-blind ---------------------
+// Drives BOTH the output shadow and the physical port to the same value while
+// leaving ctx_ untouched, so hw_output_state_intact()'s port-follows-shadow
+// clause stays satisfied (port == shadow), its shadow-vs-expected clause is the
+// SOLE trip (shadow != expected(ctx_.effect_state)), and the F2 context-check
+// fold is blind (ctx_ unchanged). Since F2 was added, poking effect_state is
+// caught redundantly by the fold, so it can no longer isolate this clause; a
+// single-address shadow poke does not isolate it either (cd4053's empty reassert
+// leaves the port low, so port-follows-shadow also trips). Contributes exactly
+// one check, matching the inject_case it replaced.
+[[maybe_unused]]
+static void inject_shadow_expected_case(const char *label, unsigned val,
+                                        const char *note) {
+    footsw_set(0);
+    if (!run_ms(SETTLE_MS))        { g_checks++; g_fails++; return; }
+    if (!advance_to_loop_clrwdt()) { g_checks++; g_fails++; return; }
+
+    Register *sh = fetch_sfr(PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN);
+    Register *po = fetch_sfr(PIC_REG_PORT_ADDR,  PIC_REG_PORT_TOKEN);
+    if (sh == nullptr || po == nullptr) { g_checks++; g_fails++; return; }
+
+    unsigned cur_sh = sh->get_value() & 0xFFu;
+    unsigned cur_po = po->get_value() & 0xFFu;
+    unsigned bad_sh = (cur_sh | (val & 0xFFu));   // intent bit(s) high ...
+    unsigned bad_po = (cur_po | (val & 0xFFu));   // ... and the port, so port==shadow
+
+    guint64 before = g_resets;
+    sh->put_value(bad_sh);
+    po->put_value(bad_po);
+    printf("  inject %-18s " PIC_REG_LATCH_LC "@0x%03x " PIC_REG_PORT_LC
+           "@0x%03x: +0x%02x  (%s)\n",
+           label, PIC_REG_LATCH_ADDR, PIC_REG_PORT_ADDR, val & 0xFFu, note);
+    fflush(stdout);
+
+    if ((sh->get_value() & 0xFFu) != bad_sh || (po->get_value() & 0xFFu) != bad_po) {
+        g_checks++;
+        g_fails++;
+        fprintf(stderr, "    FAIL: shadow/port injection did not stick\n");
+        return;
+    }
+
+    if (!run_ms(WDT_RESET_WINDOW_MS)) { g_checks++; g_fails++; return; }
+    guint64 delta = g_resets - before;
+
+    g_checks++;
+    if (delta == 1u) {
+        printf("    PASS: observed exactly 1 WDT reset\n");
+    } else {
+        g_fails++;
+        char const *reason = (delta > 1u)
+            ? "  [reset-loop: is gpsim retaining the corrupted watchdog-period register?]"
+            : "  [gate did not fire?]";
+        printf("    FAIL: %" G_GUINT64_FORMAT " resets in %u ms (want exactly 1)%s\n",
+               delta, WDT_RESET_WINDOW_MS, reason);
+    }
+    fflush(stdout);
+}
+
 // No-injection control: a quiescent device must NOT reset in a full window.
 static void control_case(void) {
     footsw_set(0);

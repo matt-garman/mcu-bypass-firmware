@@ -1571,7 +1571,20 @@ static void test_fault_inject_ctx_debounce_inrange(void) {
           "fault-inject [ctx.debounce in-range]: injection did not stick (got 0x%02x)",
           (unsigned)g_avr->data[g_addr_debounce]);
 
-    expect_fault_response("ctx.debounce_counter in-range (F2 shadow)");
+    // A genuine F2 detection forces a WDT reset. Assert the reset DIRECTLY via
+    // g_resets rather than through expect_fault_response()'s LED-dark heuristic:
+    // an undetected in-range SEU does not merely fail to reset, it phantom-
+    // toggles the effect state, and from the ENGAGED setup that toggle darkens
+    // the LED -- indistinguishable from a reset's reinit-to-BYPASS. Only the
+    // reset counter separates the two. (Mirrors the timer_isr_called_ case.)
+    g_resets = 0;
+    run_ms(500); // > WDT 250ms timeout
+    CHECK(g_resets != 0,
+          "fault-inject [ctx.debounce in-range]: F2 shadow did not force a WDT "
+          "reset (an undetected in-range SEU phantom-toggles instead)");
+    CHECK(g_led_level == 0,
+          "fault-inject [ctx.debounce in-range]: reset recovered, LED dark "
+          "(reinit BYPASS)");
 }
 
 // Corrupt timer_isr_called_ to an out-of-range value

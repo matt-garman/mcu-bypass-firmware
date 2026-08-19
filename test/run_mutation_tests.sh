@@ -87,15 +87,15 @@ source "$SCRIPT_DIR/mutation_accounting.sh"
 # constraints (allowlist, no Git) that any edit to it must preserve.
 source "$SCRIPT_DIR/scratch_tree.sh"
 
-readonly MUTATION_EXPECTED_CORE=25
-readonly MUTATION_EXPECTED_XT=21
+readonly MUTATION_EXPECTED_CORE=28
+readonly MUTATION_EXPECTED_XT=22
 readonly MUTATION_EXPECTED_PIC_GPSIM=6
-readonly MUTATION_EXPECTED_PIC_TARGET=9
+readonly MUTATION_EXPECTED_PIC_TARGET=10
 readonly MUTATION_EXPECTED_PIC_SOAK=1
 readonly MUTATION_EXPECTED_PIC320_HOST=29
 readonly MUTATION_EXPECTED_PIC320_TOOL=11
-readonly MUTATION_EXPECTED_PIC12F675=21
-readonly MUTATION_EXPECTED_TOTAL=123
+readonly MUTATION_EXPECTED_PIC12F675=22
+readonly MUTATION_EXPECTED_TOTAL=129
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
@@ -798,6 +798,13 @@ MUTATIONS=(
 # moved into test/formal/test_model_check.c, and it is retargeted from the dead
 # vendored copy to the single verified core.
 "src/bypass_pure.c	s@res.fault = true;@res.fault = false;@	test-model-check	MODEL corrupt-state fault suppressed (verify_corrupt_state_faults catches it)"
+# --- F2 context-SEU detection (BYPASS_CTX_CHECK) ------------------------------
+# Three mutants for the complemented XOR-fold context check. The PIC10F322,
+# PIC12F675 and ATtiny202 shells get their own F2 mutants in the tables below;
+# PIC10F320 is F2-EXCLUDED (asserted after the inventory build).
+"src/bypass_mcu_avr_classic.c	s@                ctx_check_ = debounce_ctx_check_word(ctx_);@                (void)0; /* MUTANT: main-loop shadow re-derive dropped */@	test-sim-cd4053_simple-attiny13a	F2 main-loop shadow re-derive dropped (the ATOMIC_BLOCK re-sync after debounce_step). The ISR-side re-sync is healed by main every serviced tick, so ONLY this one is load-bearing: the shadow goes stale on the first state change, the next ISR F2 check false-positives, and the forced reset wedges the WDT-less attiny13a so no round-trip toggle ever completes."
+"src/bypass_mcu_avr_classic.c	s@ctx_fault_ = 1U;@ctx_fault_ = 0U; /* MUTANT: F2 fault never raised */@	test-fault-inject-cd4053_simple-attiny85	F2 detect defeated: the ISR clears the context-fault flag instead of raising it, so an in-range debounce SEU is never signalled and main never resets. The fault-inject ctx.debounce in-range case (g_resets witness) sees no WDT reset -- proves the simavr in-range case has teeth."
+"src/bypass_pure.c	s@                ^ ctx.debounce_counter))@                ))@	test-fault-inject-tq2_l2_5v_relay-attiny85	F2 fold weakened: the complemented XOR-fold drops the debounce_counter term, so the shadow no longer covers the counter and an in-range counter SEU is invisible to it. The fault-inject in-range case sees no WDT reset -- proves the fold actually covers the counter."
 )
 
 # Files copied into each sandbox: all firmware sources + headers, the Makefile,
@@ -1622,6 +1629,8 @@ PIC_TARGET_MUTATIONS=(
 "src/bypass_output_cd4053_with_mute.c	s@hw_led_pin_set_low();          // dark status LED@hw_pin_set_high(CD4053_CTL1);  // MUTANT: reassert ENGAGED at startup\\n    hw_pin_set_high(CD4053_CTL2);\\n\\n    hw_led_pin_set_low();          // dark status LED@	cd4053_with_mute	PIC cd4053_with_mute startup reasserts ENGAGED before MUTE; target I/O startup trace catches it"
 "src/bypass_output_cd4053_with_mute.c	s@BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS)@BYPASS_DELAY_MS(1)@g	cd4053_with_mute	PIC cd4053_with_mute pre-switch mute window shortened; target I/O pulse-width check catches it"
 "src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	tq2_l2_5v_relay	PIC relay coil pulse shortened below datasheet minimum; target I/O pulse-width check catches it"
+# F2 context-SEU: delete the polled shadow clause; killed by the aggregate fault leg.
+"src/bypass_mcu_pic10f322.c	s@(ctx_check_ != debounce_ctx_check_word(ctx_)) ||@(0U != 0U) ||@	cd4053_simple	PIC F2 shadow clause deleted from the polled sanity gate (the FIRST clause, before integrate); the in-range debounce SEU is no longer caught and the target fault leg ctx.debounce.inrange case sees 0 resets."
 )
 
 # WDT-liveness mutant: gpsim's ~200ms functional run is too short to see an
@@ -1710,7 +1719,7 @@ PIC_SOAK_MUTATIONS=(
 # earn kill credit. Compile failures and unrelated nonzero exits are errors.
 PIC12F675_MUTATIONS=(
 "src/bypass_mcu_pic12f675.c	s@hw_outputs_reassert_safe();@@	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	correct:coil	FW relay coil re-assert call removed; the correct-in-place fault cases (expected_resets=0) reset instead of self-healing, failing the relay fault lane at checks=46"
-"src/bypass_mcu_pic12f675.c	s@(shadow_high_mask == expected_high_mask) &&@((shadow_high_mask == expected_high_mask) || (shadow_high_mask != expected_high_mask)) \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:ctx.expected	TARGET shadow-versus-expected guard tautologized while retaining both operands; the valid ENGAGED context mismatch leaves BYPASS shadow/GPIO matching and must still recover"
+"src/bypass_mcu_pic12f675.c	s@(shadow_high_mask == expected_high_mask) &&@((shadow_high_mask == expected_high_mask) || (shadow_high_mask != expected_high_mask)) \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:shadow.expected	TARGET shadow-versus-expected guard tautologized while retaining both operands; the shadow.expected fault (shadow+port driven high, ctx_ untouched) isolates this clause F2-blind, so only it catches the reset"
 "src/bypass_mcu_pic12f675.c	s@gpio_shadow_ |= (uint8_t)(1U << LED_PIN);@gpio_shadow_ \&= (uint8_t)~(1U << LED_PIN);@	pic12f675-test-gpsim	gpsim:press-led	FW set_engaged LED inverted at the shadow (GP0 stays dark); the PRESS1 toggle-on-press assertion catches it"
 "src/bypass_mcu_pic12f675.c	s@(0U == (GPIO & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (GPIO \& (uint8_t)(1U << FOOTSW_PIN)))@	pic12f675-test-gpsim	gpsim:press-led	FW footswitch read polarity inverted (GP5 sense flipped -> toggles on release); PRESS1 toggle-on-press checkpoint catches it"
 "src/bypass_mcu_pic12f675.c	s@#define TMR0_SUBTICKS_PER_TICK (4U)@#define TMR0_SUBTICKS_PER_TICK (1U)@	pic12f675-test-gpsim	gpsim:press-early	FW software sub-tick count 4->1: the tick becomes 256us, debounce completes 4x early; PRESS1_EARLY cadence checkpoint catches it (no PIC10F322 counterpart -- that part has a period register)"
@@ -1730,6 +1739,8 @@ PIC12F675_MUTATIONS=(
 "src/bypass_mcu_pic12f675.c	s@            ctx_.debounce_counter = res.lockout_value;@            (void)res.lockout_value; /* MUTANT: lockout reload dropped */@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET debounce lockout write-back dropped: the context retains its integrated threshold instead of RELEASE_THRESH and lock-step diverges"
 "src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	io:relay-minimum	TARGET relay coil pulse shortened below the datasheet minimum; the target-I/O pulse-width check catches it on this part's 1.024 ms tick as it does on the 322's 1.000 ms one"
 "src/bypass_mcu_pic12f675.c	s@static void hw_wdt_pet(void) { CLRWDT(); }@static void hw_wdt_pet(void) { (void)0; /* MUTANT: no WDT pet */ }@	PIC12F675_SOAK_VARIANT=cd4053_simple PIC12F675_SOAK_DURATION_MS=$PIC_SOAK_MUT_MS PIC12F675_SOAK_LIVENESS_INTERVAL_MS=$PIC_SOAK_MUT_LIVENESS_MS PIC12F675_SOAK_COMBINATION_NAME=mutation-wdt pic12f675-test-soak	soak:wdt-reset	SOAK main-loop WDT pet removed; the soak's reset notifier catches the un-pet watchdog inside the short mutation window (this part's period is ~288 ms, well inside it)"
+# F2 context-SEU: delete the polled shadow clause; killed by the fault leg.
+"src/bypass_mcu_pic12f675.c	s@(ctx_check_ != debounce_ctx_check_word(ctx_)) ||@(0U != 0U) ||@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:ctx.debounce.inrange	PIC12F675 F2 shadow clause deleted from the polled sanity gate; the in-range debounce SEU is no longer caught and the target fault leg ctx.debounce.inrange case sees 0 resets at checks=38."
 )
 
 # --- AVR-XT shell mutants (src/bypass_mcu_avr_xt.c) ---------------------------
@@ -1787,6 +1798,8 @@ XT_MUTATIONS=(
 # defect (see test/avr/test_attiny202_delay_oracle.py).
 "src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	attiny202-delay-oracle	XT relay coil pulse shortened below the 4 ms datasheet minimum; the image's _delay_ms loop no longer matches the 12 ms design"
 "src/bypass_output_cd4053_with_mute.c	s@BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS)@BYPASS_DELAY_MS(1)@g	attiny202-delay-oracle	XT cd4053_with_mute pre-switch mute window shortened from 5 ms; the disassembled delay loop no longer matches the design"
+# -- F2 context-SEU: killed by fault injection into the running image -----------
+"src/bypass_mcu_avr_xt.c	s@ctx_fault_ = 1U;@ctx_fault_ = 0U; /* MUTANT: F2 fault never raised */@	XT_SIM_VARIANT=cd4053_simple attiny202-fault	XT F2 detect defeated: the ISR clears the context-fault flag instead of raising it; the yasimavr in-range debounce SEU (RETRY_GATE) never forces a reset -- proves the ATtiny202 in-range case has teeth."
 )
 
 # Combined work list, filled in mutant order (core/AVR first, then any enabled
@@ -1840,6 +1853,25 @@ inventory_total=$((${#MUTATIONS[@]} + ${#XT_MUTATIONS[@]} \
     + ${#PIC10F320_HOST_MUTATIONS[@]} + ${#PIC10F320_TOOL_MUTATIONS[@]} \
     + ${#PIC12F675_MUTATIONS[@]}))
 mutation_require_count total "$MUTATION_EXPECTED_TOTAL" "$inventory_total" || exit 2
+
+# F2 exclusion invariant: PIC10F320 is capacity-excluded from the context-SEU
+# check (256-word flash; see Makefile BYPASS_CTX_CHECK_FLAG, NOT added to
+# PIC10F320_CFLAGS). Its shell must therefore reference NEITHER the pure fold
+# nor the opt-in macro -- which is why the four F2 mutants above have no
+# PIC10F320 counterpart and could not be built there even in principle. Assert
+# that statically on every run (real and --sandbox self-test) so a future edit
+# that wires F2 into the 320 shell fails loudly here.
+pic10f320_f2_shell="$PROJ_DIR/src/bypass_mcu_pic10f320.c"
+if [ ! -f "$pic10f320_f2_shell" ]; then
+    echo "ERROR: PIC10F320 shell not found for the F2-exclusion assertion: $pic10f320_f2_shell" >&2
+    exit 2
+fi
+if pic10f320_f2_hits=$(grep -nE 'debounce_ctx_check_word|BYPASS_CTX_CHECK' "$pic10f320_f2_shell"); then
+    echo "ERROR: PIC10F320 is F2-EXCLUDED but its shell references the context-check" >&2
+    echo "       machinery (BYPASS_CTX_CHECK / debounce_ctx_check_word):" >&2
+    printf '%s\n' "$pic10f320_f2_hits" >&2
+    exit 2
+fi
 
 collect_baseline_targets() {
     local array_name=$1 label=$2 field_count=$3 target_index=$4 output_name=$5
