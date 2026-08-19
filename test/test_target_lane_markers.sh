@@ -111,7 +111,7 @@ printf 'CALL' >> "${FAKE_MAKE_LOG:?}"
 printf ' <%s>' "$@" >> "$FAKE_MAKE_LOG"
 printf '\n' >> "$FAKE_MAKE_LOG"
 case "$lane" in
-	fault)    marker='FAULT-INJECT PASS'; lane_name=fault; checks=37 ;;
+	fault)    marker='FAULT-INJECT PASS'; lane_name=fault; checks=38 ;;
 	lockstep) marker='LOCK-STEP PASS'; lane_name=lockstep; checks=3005 ;;
 	io)       marker='TARGET-IO PASS'; lane_name=io; checks=${FAKE_IO_CHECKS:-42} ;;
 	*)  printf 'fake-make: could not classify a lane from: %s\n' "$*" >&2

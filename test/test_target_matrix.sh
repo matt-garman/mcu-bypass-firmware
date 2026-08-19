@@ -90,7 +90,7 @@ printf '\n' >> "$FAKE_MAKE_LOG"
 if [ -n "$target" ] && [ "${FAKE_OMIT_MARKER:-}" != "$target" ]; then
 	if [ "${FAKE_EXACT_RESULTS:-0}" -eq 1 ] && [ -n "$marker" ]; then
 		case "$target" in
-			"$FAKE_FAULT_TARGET") lane=fault; checks=37 ;;
+			"$FAKE_FAULT_TARGET") lane=fault; checks=38 ;;
 			"$FAKE_LOCKSTEP_TARGET") lane=lockstep; checks=3005 ;;
 			"$FAKE_IO_TARGET") lane=io; checks=26 ;;
 		esac
