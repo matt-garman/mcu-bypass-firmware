@@ -1344,6 +1344,60 @@ bench**, tracked together with the graduation diff that follows it.
    builder may substitute. The requirement is stated in
    `src/bypass_pins_pic12f675.h` alongside the GP3 and GP4 pin policies.
 
+### Audited and found sound: the nominal-path firmware argument
+
+The v0.9.9 second-pass review found **no nominal-path PIC12F675 firmware
+defect**. For a reference-grade artifact that verdict is only as good as the
+reasoning behind it, so the defense-in-depth chain that backs it is recorded
+here rather than left implicit. Corruption of the persisted context is caught
+before it can drive a wrong output:
+
+- **`program_state`** is rejected two independent ways. `debounce_step()`'s
+  `default:` arm returns `res.fault = true` -- commented "should be impossible
+  (but let caller know)" in `src/bypass_pure.c` -- and the shell's per-tick
+  sanity gate independently rejects `program_state > RELEASE_DEBOUNCE_WAIT`
+  (`src/bypass_mcu_pic12f675.c`).
+- **`effect_state`** is rejected by the fail-closed `else` arm of
+  `hw_is_sanity_check_failed()`, which treats any value that is neither
+  `BYPASS` nor `ENGAGED` as a failure ("invalid logical state fails closed",
+  `src/bypass_output_*.c`), backed by the shell gate's `effect_state > ENGAGED`
+  term.
+- **Single-byte shell guards fail safe.** Every range and intactness term in
+  that gate -- `debounce_counter > RELEASE_THRESH`, footswitch pull-up intact,
+  output-latch intact, critical SFRs intact -- funnels to
+  `hw_force_wdt_reset()`, so a corrupted control byte forces a clean recovery
+  reset rather than an acted-upon wrong state.
+- **The blocking relay coil pulse always terminates de-energized.** Both
+  `hw_set_bypass_state()` and `hw_set_engaged_state()` call
+  `set_relay_coils_low()` after the `BYPASS_DELAY_MS` pulse, and
+  `hw_outputs_reassert_safe()` re-asserts it every tick
+  (`src/bypass_output_tq2_l2_5v_relay.c`), so a fault during actuation cannot
+  leave a latching coil energized.
+
+The one nominal-path case those range and actuation guards do **not** cover is
+an *in-range* single-bit upset of `debounce_counter` -- a flip that stays
+within `[0, RELEASE_THRESH]` yet crosses `PRESSED_THRESH`, fabricating a
+phantom toggle with no footswitch press. On the shipped PIC12F675 that case is
+closed, not open: `PIC12F675_CFLAGS` defines `-DBYPASS_CTX_CHECK`, so the gate's
+first term compares the persisted context against `debounce_ctx_check_word()`
+and forces a watchdog reset on any single-bit divergence (see
+`docs/context_seu_detection.md`, which owns this in-range-SEU analysis). Under
+the single-event threat model that leaves **no uncovered nominal-path defect**;
+the only residual is the shared `1.x.y` silicon-validation pass every part in
+this repository still awaits (items 1, 2, 8 and 9 above).
+
+**Why the ported tests are trusted to be distinct.** Porting the PIC10F322
+lanes to the PIC12F675 carries a copy-paste risk: a lane that still compiled
+but no longer exercised part-specific behavior would pass vacuously. The
+retained mutation record refutes that. The PIC12F675 lane contributes its own
+mutants (20, per the step-10 status in §9) -- raising the repository mutation
+inventory to **118** -- weighted toward the `GPIO` shadow, sub-tick timing,
+comparator/`CMCON`, `OSCCAL` and ANSEL-mapping guards the PIC10F322 has no
+counterpart for (§6.5). Each carries its own toolchain probe, named
+behavioral signature and sandbox validator, and a mutant that survived would
+fail the lane. A copy-paste port that did not actually drive 12F675-specific
+behavior could therefore not stay green.
+
 ---
 
 ## 9. Historical effort and suggested sequencing
