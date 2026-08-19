@@ -141,7 +141,7 @@ ground overrides the weak internal pull-up, and re-writing an already-enabled
 pull-up is a no-op.
 
 The harness now drives the footswitch as a **persistent external pull** via
-simavr's `AVR_IOCTL_IOPORT_SET_EXTERNAL`, plus an immediate `avr_raise_irq` for
+simavr's `AVR_IOCTL_IOPORT_SET_EXTERNAL`, <!-- name-contract: exempt (AVR_IOCTL_IOPORT_SET_EXTERNAL is a simavr C macro, not a make variable) --> plus an immediate `avr_raise_irq` for
 zero-latency edges (`footsw_set` in `test/avr/test_sim.c`). The external pull
 survives PORT writes (the switch beats the pull-up, as on hardware); the raise
 avoids the one-tick input latency the persistent-pull-alone path introduced. The

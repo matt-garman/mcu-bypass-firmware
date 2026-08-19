@@ -81,13 +81,17 @@
 // and `pic10f320-test-target-variants` aggregates run their respective adapter
 // for every supported output variant.
 //
-// IMPORTANT (gpsim WDT calibration; see test_soak_pic.cc): on the PIC10F32x
-// gpsim honors WDTCON.WDTPS but does NOT match the datasheet -- at that
-// firmware's WDTPS=0x08 the gpsim WDT period is ~1.057 s, not the silicon
-// ~256 ms. The recovery reset therefore takes ~1.06 s of simulated time there;
-// WDT_RESET_WINDOW_MS carries margin over it. This test asserts nothing about
-// WDT TIMING, only that the reset happens within a generous window -- which is
-// what lets one window serve parts whose watchdog models differ.
+// IMPORTANT (gpsim WDT calibration; see test_soak_pic.cc): gpsim's watchdog
+// model differs per part, so each adapter supplies its own PIC_FAULT_WDT_NOTE
+// (printed into retained evidence) rather than the core baking one in. On the
+// PIC10F32x gpsim honors WDTCON.WDTPS but does NOT match the datasheet -- at
+// that firmware's WDTPS=0x08 the gpsim WDT period is ~1.057 s, not the silicon
+// ~256 ms -- while the PIC12F675 has no WDTCON and at OPTION_REG=0x0C models
+// ~288 ms (160 ms datasheet floor). The recovery reset therefore takes up to
+// ~1.06 s of simulated time on the slowest part; WDT_RESET_WINDOW_MS carries
+// margin over that. This test asserts nothing about WDT TIMING, only that the
+// reset happens within a generous window -- which is what lets one window serve
+// parts whose watchdog models differ.
 
 #ifndef TEST_PIC_TEST_FAULT_PIC_CORE_H
 #define TEST_PIC_TEST_FAULT_PIC_CORE_H
@@ -143,6 +147,9 @@
 #ifndef PIC_FAULT_PROGRAM_STATE_NOTE
 #  error "PIC_FAULT_PROGRAM_STATE_NOTE must be defined by the part adapter"
 #endif
+#ifndef PIC_FAULT_WDT_NOTE
+#  error "PIC_FAULT_WDT_NOTE must be defined by the part adapter"
+#endif
 // FW_PATH names an output STAGE, which the Makefile selects per run -- unlike
 // PROC_NAME below, which names the PART and so is legitimately the adapter's to
 // default. An adapter default for FW_PATH looked like the same thing and was
@@ -187,8 +194,10 @@
 // reset. Must exceed init()'s worst-case blocking bypass actuation (relay coil
 // pulse, 12 ms) plus margin.
 #define SETTLE_MS  30u
-// One WDT window to observe the recovery reset. gpsim's WDT@WDTPS=0x08 is
-// ~1.057 s (see header note); 2000 ms carries margin AND is long enough that a
+// One WDT window to observe the recovery reset, sized for the SLOWEST modeled
+// period across supported parts -- the PIC10F32x WDTCON.WDTPS=0x08 ~1.057 s (see
+// header note); the PIC12F675 at OPTION_REG=0x0C models a much shorter ~288 ms.
+// 2000 ms carries margin over the slowest AND is long enough that a
 // (WDTPS-corrupted, hence faster) reset-LOOP would show as delta >> 1.
 #define WDT_RESET_WINDOW_MS  2000u
 // Safety cap: max run() resumes to cover one ms. A genuinely wedged core (PC
@@ -638,8 +647,9 @@ int main() {
     get_bp().set_notify_break(g_cpu, 0x000, &g_reset_notifier);
 
     printf("FAULT-INJECT START: fw=%s proc=%s FOSC=%lu window=%u ms\n"
-           "  (NB: gpsim WDT@WDTPS=0x08 ~1.057s -- recovery reset, not 256ms silicon)\n",
-           FW_PATH, PROC_NAME, (unsigned long)F_CPU_HZ, WDT_RESET_WINDOW_MS);
+           "  %s\n",
+           FW_PATH, PROC_NAME, (unsigned long)F_CPU_HZ, WDT_RESET_WINDOW_MS,
+           PIC_FAULT_WDT_NOTE);
     fflush(stdout);
 
     // Negative control first, then one case per guarded location.

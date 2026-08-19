@@ -52,6 +52,12 @@
 #endif
 #define PIC_FAULT_PROGRAM_STATE_NOTE \
     "0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault)"
+// gpsim honors WDTCON.WDTPS on this part but its calibration does not match the
+// datasheet: at WDTPS=0x08 the modeled period is ~1.057 s, not the silicon
+// ~256 ms. Descriptive only -- the gate asserts a reset within a generous
+// window, never a period (see test_soak_pic.cc for the matching soak note).
+#define PIC_FAULT_WDT_NOTE \
+    "(NB: gpsim WDT@WDTPS=0x08 ~1.057s -- recovery reset, not 256ms silicon)"
 
 #if (defined(CD4053_SIMPLE) + defined(CD4053_WITH_MUTE) + \
      defined(TQ2_L2_5V_RELAY)) != 1

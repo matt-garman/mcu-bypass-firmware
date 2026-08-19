@@ -28,6 +28,12 @@
 #endif
 #define PIC_FAULT_PROGRAM_STATE_NOTE \
     "0->2: > RELEASE_DEBOUNCE_WAIT (also the switch default: path)"
+// Shares the PIC10F32x watchdog note with PIC10F322: gpsim honors WDTCON.WDTPS
+// but its calibration does not match the datasheet -- at WDTPS=0x08 the modeled
+// period is ~1.057 s, not the silicon ~256 ms. Descriptive only; the gate
+// asserts a reset within a generous window, never a period.
+#define PIC_FAULT_WDT_NOTE \
+    "(NB: gpsim WDT@WDTPS=0x08 ~1.057s -- recovery reset, not 256ms silicon)"
 
 #if (defined(OUTPUT_CD4053_SIMPLE) + defined(OUTPUT_CD4053_WITH_MUTE) + \
      defined(OUTPUT_TQ2_RELAY)) != 1

@@ -31,6 +31,19 @@ correctly records 21 images and 18 soak combinations. The tag and its release
 artifacts remain unchanged; this HEAD documentation corrects the live status
 without moving or rewriting the signed tag.
 
+## v0.9.9 retained fault-evidence watchdog-note erratum
+
+The retained PIC12F675 fault evidence
+(`release/v0.9.9/evidence/pic12f675-test-target-variants.log`) prints the
+PIC10F32x watchdog note (`gpsim WDT@WDTPS=0x08 ~1.057s ... 256ms silicon`) for
+the PIC12F675 lane. That part has no `WDTCON`; at `OPTION_REG=0x0C` gpsim models
+an approximately 288 ms watchdog and the datasheet floor is 160 ms. The note is
+descriptive only -- the fault gate asserts that a recovery reset occurs within a
+deliberately generous window, never a watchdog period -- so the recorded PASS is
+unaffected. HEAD corrects the live harness to emit each part's own note; the
+signed `v0.9.9` tag and its retained evidence remain unchanged and are not
+rewritten.
+
 ## Safety warning: v0.9.0-v0.9.2 TMUX images
 
 The `bypass_cd4053_tmux*.hex` and `bypass_mute_tmux*.hex` images in releases

@@ -118,6 +118,14 @@
 #endif
 #define PIC_FAULT_PROGRAM_STATE_NOTE \
     "0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault)"
+// Unlike the 10F32x lanes, this part has no WDTCON: its prescaler is OPTION_REG,
+// and at 0x0C (PSA=1, 1:16) gpsim models ~288 ms = 18 ms x 16, matching the
+// datasheet nominal. The characterized silicon MINIMUM at this ratio is 160 ms,
+// and no simulator models the RC spread that produces it. Descriptive only --
+// the gate asserts a reset within a generous window, never a period (see
+// test_soak_pic12f675.cc for the matching soak note).
+#define PIC_FAULT_WDT_NOTE \
+    "(NB: gpsim WDT ~288ms = 1:16 nominal at OPTION_REG=0x0C; silicon min 160ms -- recovery reset, not RC spread)"
 
 #if (defined(CD4053_SIMPLE) + defined(CD4053_WITH_MUTE) + \
      defined(TQ2_L2_5V_RELAY)) != 1

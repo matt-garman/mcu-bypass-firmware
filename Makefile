@@ -750,7 +750,7 @@ FORCE:
 		test-pic-target-result-records \
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
-        test-variant-map-contract test-makefile-name-contract test-todo-index \
+        test-variant-map-contract test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
         test-pinout-alignment test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract test-static-assert-guards \
@@ -2816,7 +2816,7 @@ TEST_GATES_LATE = \
 		test-build-serialization test-target-matrix \
 		test-target-lane-markers test-pic-target-result-records \
 		test-lockstep-progress test-soak-timing \
-        test-variant-map-contract test-makefile-name-contract test-todo-index \
+        test-variant-map-contract test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
         test-pinout-alignment test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract \
@@ -3058,6 +3058,13 @@ test-ci-local-routing:
 # require_variant_map guard. The guard catches a registered map whose keys go
 # stale; this catches a map that was never registered, which is the half that
 # let pic_soak_block_* sever silently through the whole v0.9.8 rename.
+# Host-only source contract for the per-part gpsim watchdog note the
+# libgpsim fault harness prints into retained evidence: each adapter must
+# supply its own PIC_FAULT_WDT_NOTE and the core must consume it, so the
+# PIC12F675 lane no longer reports the PIC10F32x period. Reads source only.
+test-fault-wdt-note-contract:
+	./test/test_fault_wdt_note_contract.sh
+
 test-variant-map-contract:
 	./test/test_variant_map_contract.sh
 
@@ -7743,6 +7750,7 @@ help:
 	@echo "  test-lockstep-progress  all three PIC exact-pin/stall-propagation checks"
 	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
 	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
+	@echo "  test-fault-wdt-note-contract  each PIC fault adapter supplies its own gpsim watchdog note (included in test)"
 	@echo "  test-makefile-name-contract  every make goal, variable and child-environment name a file or doc uses really exists (included in test)"
 	@echo "  test-todo-index    TODO.md's priority summary matches its open sections, both ways (included in test)"
 	@echo "  test-pinout-alignment  every ASCII package-pinout diagram draws a square box (included in test)"
