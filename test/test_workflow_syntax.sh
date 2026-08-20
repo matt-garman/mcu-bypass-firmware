@@ -435,9 +435,16 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
                 "scripts/verify-release-signature.sh", "detached",
                 "$dir/SHA256SUMS.asc", "$dir/SHA256SUMS",
             ]
+            # The strict checksum command carries its own ::error:: handler: the
+            # tool is third-party and its failure wording is not stable (coreutils
+            # 9.x dropped the "SHA256" token), so the workflow emits a
+            # project-owned annotation that the provenance test can assert on.
+            # shlex glues the trailing ";" onto the preceding quoted token.
             checksum_command = [
                 "(cd", "$dir", "&&", "sha256sum", "--check", "--strict", "--",
-                "SHA256SUMS)",
+                "SHA256SUMS)", "||", "{", "echo",
+                "::error::strict image checksum verification failed;",
+                "exit", "1;", "}",
             ]
             tag_indices = [i for i, command in enumerate(commands) if command == tag_command]
             inventory_indices = [

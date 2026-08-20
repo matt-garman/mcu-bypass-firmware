@@ -485,7 +485,12 @@ jobs:
             "$dir" "$RELEASE_INVENTORY" "$RELEASE_INVENTORY_SHA256"
           scripts/verify-release-signature.sh detached \
             "$dir/SHA256SUMS.asc" "$dir/SHA256SUMS"
-          (cd "$dir" && sha256sum --check --strict -- SHA256SUMS)
+          # The checksum tool is third-party, so its failure text is not ours to
+          # rely on: coreutils 9.x dropped the "SHA256" token from this very
+          # message. Emit our own annotation so a strict-verification failure
+          # surfaces as a GitHub error and is assertable by project-owned text.
+          (cd "$dir" && sha256sum --check --strict -- SHA256SUMS) \
+            || { echo "::error::strict image checksum verification failed"; exit 1; }
           python3 scripts/verify_release_publication.py verify \
             "$dir" "$RELEASE_INVENTORY" "$RELEASE_INVENTORY_SHA256"
           gh release create "$tag" \

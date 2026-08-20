@@ -677,8 +677,11 @@ record_publish_inventory
 
 printf 'malformed checksum record\n' > "$publish_assets/SHA256SUMS"
 record_publish_inventory
+# Assert on the WORKFLOW's own annotation, not on sha256sum's text: the tool is
+# third-party and coreutils 9.x dropped the "SHA256" token from its message,
+# which broke this assertion once already.
 expect_publish_fail "failed strict image checksum verification" 0 '' \
-	"no properly formatted SHA256 checksum lines found"
+	"::error::strict image checksum verification failed"
 printf '%s  a.hex\n' "${publish_image_hash%% *}" > "$publish_assets/SHA256SUMS"
 record_publish_inventory
 
