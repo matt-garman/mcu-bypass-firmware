@@ -578,7 +578,7 @@ void main(void) {
         // always checked, regardless of state; force a WDT reset on any
         // violation. (No timer_isr_called_ guard as on AVR -- the PIC has no
         // ISR; main-loop liveness is proven by reaching hw_wdt_pet() below.)
-        if (    
+        if (
 #if defined(BYPASS_CTX_CHECK)
                 (ctx_check_ != debounce_ctx_check_word(ctx_)) ||
 #endif

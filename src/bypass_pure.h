@@ -55,12 +55,15 @@ debounce_step_result_t debounce_step(debounce_context_t const ctx);
 
 // derive what is effectively a checksum of context data: runtime sanity
 // checks can only check the range of valid value; some bitflips (i.e. SEU)
-// could affect debouce timing, but still produce valid values.  This checksum
-// adds an additional safety layer to increase the chances of being able to
-// detect such an event.
+// could affect debounce timing, but still produce valid values.  This
+// checksum adds an additional safety layer to increase the chances of being
+// able to detect such an event.
 //
 // returns:
-//   the logical XOR of the members of ctx
+//   the bitwise complement of the XOR-fold of ctx's members.  Complemented so
+//   an all-zeros context folds to 0xFF rather than 0x00: a shadow byte
+//   cleared by an upset then cannot masquerade as the fold of an equally
+//   cleared context.  Proved by CBMC C9.
 uint8_t debounce_ctx_check_word(debounce_context_t const ctx);
 
 

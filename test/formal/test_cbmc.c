@@ -438,8 +438,10 @@ void prove_ctx_check_definition(void) {
     ctx.effect_state     = (effect_state_t)es;
     ctx.debounce_counter = dc;
 
-    // Complement written as XOR with 0xFF so the harness's own arithmetic stays
-    // unsigned and in range; the shipping function uses ~, identical over a byte.
+    // Complement written as XOR with 0xFF rather than ~, so this harness's own
+    // arithmetic stays unsigned and in range. The shipping function writes it
+    // the same way and for the same reason: ~(uint8_t)x promotes to a negative
+    // signed int, and narrowing that back to uint8_t trips --conversion-check.
     uint8_t const expect = (uint8_t)(0xFFU ^ (uint8_t)(ps ^ es ^ dc));
     __CPROVER_assert(debounce_ctx_check_word(ctx) == expect,
                      "(C9) check word is not the complemented XOR-fold of its members");
