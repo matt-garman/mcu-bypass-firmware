@@ -1625,8 +1625,8 @@ PIC_GPSIM_MUTATIONS=(
 PIC_TARGET_MUTATIONS=(
 "src/bypass_mcu_pic10f322.c	s@hw_outputs_reassert_safe();@@	tq2_l2_5v_relay	relay coil re-assert call removed from the main loop; inject_relay_correction_case sees the injected LATA coil reset instead of self-heal"
 "src/bypass_mcu_pic10f322.c	s@WPUA = (uint8_t)(1U << FOOTSW_PIN);@WPUA |= (uint8_t)(1U << FOOTSW_PIN);@	cd4053_simple	PIC pull-up init regressed to read-modify-write; exact WPUA state can preserve unexpected output-pin latches"
-"src/bypass_mcu_pic10f322.c	s@wpua_latches == (uint8_t)(1U << FOOTSW_PIN)@0U != (wpua_latches \& (uint8_t)(1U << FOOTSW_PIN))@	cd4053_simple	PIC exact WPUA guard weakened to RA3-present only; extra RA0..RA2 latches go undetected"
-"src/bypass_mcu_pic10f322.c	s@(actual_direction_mask == expected_direction_mask)@(1U != 0U)@	cd4053_simple	PIC exact-TRISA predicate removed: spare RA2 direction corruption evades the remaining required-subset check"
+"src/bypass_mcu_pic10f322.c	s@(uint8_t)(WPUA & 0x0FU)@(uint8_t)(WPUA \& (uint8_t)(1U << FOOTSW_PIN))@	cd4053_simple	PIC exact WPUA guard weakened to RA3-present only; extra RA0..RA2 latches go undetected"
+"src/bypass_mcu_pic10f322.c	s@(uint8_t)(0x0FU ^ BYPASS_OUTPUT_DDR_MASK));@actual_direction_mask);@	cd4053_simple	PIC exact-TRISA predicate removed: spare RA2 direction corruption evades the remaining required-subset check"
 "src/bypass_mcu_pic10f322.c	s@LATA & (uint8_t)BYPASS_OUTPUT_DDR_MASK@LATA \& (uint8_t)0x03U@	cd4053_simple	PIC output-latch mask omits RA2; an unexpected high spare/control/coil latch goes undetected"
 "src/bypass_mcu_pic10f322.c	s@ANSELA & BYPASS_OUTPUT_DDR_MASK@ANSELA \& 0x01U@	cd4053_simple	PIC ANSELA sanity mask narrowed to RA0 only; RA1/RA2 analog re-selection undetected"
 "src/bypass_output_cd4053_with_mute.c	s@hw_led_pin_set_low();          // dark status LED@hw_pin_set_high(CD4053_CTL1);  // MUTANT: reassert ENGAGED at startup\\n    hw_pin_set_high(CD4053_CTL2);\\n\\n    hw_led_pin_set_low();          // dark status LED@	cd4053_with_mute	PIC cd4053_with_mute startup reasserts ENGAGED before MUTE; target I/O startup trace catches it"
