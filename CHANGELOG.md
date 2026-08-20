@@ -32,6 +32,44 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- **An upset relay coil is now corrected in place, once per tick.** Every
+  relay-capable shell re-asserts the safe coil state at the top of each serviced
+  iteration, before the sanity gate, so a transient bit flip in the coil drive
+  is corrected within a single tick — about 1 ms — with no reset and no audio
+  dropout. Previously the only available response was `hw_force_wdt_reset()`,
+  which left the coil energized for a full watchdog period, about 160–480 ms on
+  the PIC12F675, and interrupted the signal path. A persistent fault (a pin that
+  will not follow, a skewed direction register) survives the re-assert and still
+  resets exactly once, deterministically. The CD4053 variants link an explicit
+  no-op and are byte-for-byte unchanged. This brings the four modular shells to
+  the in-place correction `src/bypass_mcu_pic10f320.c` already performed. The
+  trade-off is deliberate and worth stating plainly: on parts with no telemetry
+  a transient coil upset is now silent — corrected, but neither counted nor
+  reported. Design: `docs/relay_coil_fault_correction.md`.
+
+- **A single-bit upset of the debounce context is now detected while it is still
+  in range.** The per-tick sanity gate previously rejected only out-of-range
+  context, so an in-range flip passed unnoticed: with `PRESSED_THRESH = 8` and
+  `RELEASE_THRESH = 25`, an idle `debounce_counter` whose bit 3 or bit 4 flips
+  becomes 8 or 16 — both inside the accepted range, and both enough to make the
+  next `debounce_step()` toggle the effect. That is a phantom bypass or engage
+  with nobody touching the footswitch. Each shell now keeps a complemented
+  XOR-fold shadow byte over the context and verifies it once per tick,
+  immediately before that tick's integrate; any single-bit flip of any member,
+  or of the shadow itself, forces a watchdog reset. The fold is the pure
+  function `debounce_ctx_check_word()` in `src/bypass_pure.c`, proved by CBMC
+  over the full byte domain of every member: single-bit detection (C8), and the
+  fold definition plus its all-zeros stuck-at guard (C9) — the latter being why
+  the fold is complemented at all. Enabled by `BYPASS_CTX_CHECK` on the
+  PIC12F675, PIC10F322, classic-AVR and AVR-XT shells. **The PIC10F320 is
+  excluded**: it links no pure core, and even the cheapest fold overflows its
+  256 words of flash, so its range-only gate stays — documented and statically
+  asserted. The tightest budget that did fit is the PIC10F322 relay variant at
+  507 of 512 words. On AVR the integrator stays in the ISR, so the check runs at
+  the top of the ISR and `main()`'s apply-and-re-derive is one `ATOMIC_BLOCK`,
+  which is the source of MISRA deviation D-5. Design:
+  `docs/context_seu_detection.md`.
+
 - **The watchdog-margin invariant is now enforced at compile time on every
   shell.** Previously only `src/bypass_mcu_pic10f320.c` static_asserted `(tick +
   longest blocking pulse) < de-rated WDT floor`; the other four shells carried
@@ -94,6 +132,20 @@ file is the human-readable summary of *what changed*.
   that same directory; rechecks the inventory again; and then invokes `gh`
   without an intervening command. Added, removed, renamed, empty, symlinked,
   non-regular, or byte-modified assets fail before upload.
+
+- **Release-environment pinning is now described factually.** `ubuntu-24.04` is
+  a moving hosted-runner label and the apt-installed tools carry no version
+  constraint, so the runner image and that part of the toolchain are recorded,
+  not pinned — the workflow header and `TOOLCHAIN.adoc` now say exactly that
+  rather than implying otherwise. Both also state what the release does enforce:
+  every published image is rebuilt and compared byte-for-byte against the signed
+  `SHA256SUMS`; the compilers that define those bytes are version-pinned and
+  checked before anything is built (XC8 V3.10 and PIC10-12Fxxx_DFP 1.9.189 by
+  digest, avr-gcc 7.3.0 by `scripts/make-release.sh`, with a hard failure on
+  drift); and the XC8/DFP cache is integrity-verified on every restore by the
+  new `scripts/verify_pic_toolchain_cache.sh`, closing a path where a restored
+  cache bypassed the SHA-verified installer entirely. Analyzer and simulator
+  versions ride the runner and are recorded in each release `MANIFEST.md`.
 
 ## [0.9.9] - 2026-08-15
 
