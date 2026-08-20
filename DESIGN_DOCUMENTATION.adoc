@@ -207,8 +207,10 @@ adverse conditions:
 
 == Failsafe Mechanisms
 
-The firmware takes advantage of two microcontroller features in
-order to fail gracefully in the face of extraordinary circumstances:
+The firmware fails gracefully in the face of extraordinary
+circumstances by layering four mechanisms.  Two are microcontroller
+features; the other two are firmware behaviours that decide whether
+a detected fault is corrected in place or escalated to a reset:
 
     * Brownout detection (BOD), essentially low voltage detection.
       The hardware design assumes an LP2950 or AP7375 regulator to
@@ -262,6 +264,68 @@ PIC12F675:: BOD is enabled (`BOREN=ON`) at a fixed 2.025-2.175v trip
       firmware to reset (force to bypass).  Note that the WDT reset
       triggers only under highly improbable, "should be impossible"
       circumstances that are beyond the control of the firmware.
+      The watchdog is also the deliberate escalation path for the
+      integrity check described next: a corrupted context that the
+      firmware detects but cannot correct is turned into a reset
+      rather than being acted upon.
+
+    * Runtime state-integrity checking: the two hardware mechanisms
+      above catch a supply that has left spec and a program that has
+      stopped making progress, but neither notices a corrupted
+      *value* inside a program that is still running normally.
+      Every serviced tick therefore re-validates the debounce
+      context before acting on it.  A range check rejects any of
+      `program_state`, `effect_state` or `debounce_counter` that has
+      left its legal domain.  A flip that lands *inside* the legal
+      range is caught by a checksum: the firmware keeps a
+      complemented XOR fold of the three context members
+      (`debounce_ctx_check_word()`) and verifies it once per tick,
+      immediately before that tick's integrate step.  Any single-bit
+      flip of any member -- or of the stored fold itself -- fails
+      that comparison and escalates to the watchdog reset above.
+      The in-range case is not a harmless one: with a press
+      threshold of 8 samples, an idle counter whose bit 3 flips
+      already reads as a completed press, and would toggle the
+      effect with nobody touching the footswitch.
++
+NOTE: The checksum is a firmware mechanism rather than an MCU
+feature, so its availability follows flash capacity rather than
+silicon family:
++
+[horizontal]
+AVR Classic (ATtiny13a/45/85), ATtiny202, PIC10F322, PIC12F675::
+  enabled (`BYPASS_CTX_CHECK`).  The tightest fit is the PIC10F322
+  relay variant, at 507 of 512 words.
+PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
+  shared pure core, so this shell inlines the debounce logic by hand
+  and has no `debounce_ctx_check_word()` to call; even the cheapest
+  in-line fold overflows the relay variant.  The range check still
+  applies, so out-of-range corruption is caught here exactly as on
+  every other part -- only the in-range case goes undetected.  The
+  exclusion is deliberate rather than an oversight: the mutation
+  suite scans this shell on every run and fails if it ever
+  references the context-check machinery, so the difference cannot
+  be silently erased in either direction.
+
+    * Correction in place, before escalation: a reset is the
+      response of last resort, not the first one.  Where a fault is
+      in an *output* that the firmware can simply re-drive, it is
+      corrected without interrupting audio.  Every relay-capable
+      build re-asserts the safe coil state at the top of each
+      serviced iteration, ahead of the checks above, so a transient
+      upset of a coil drive pin is corrected within a single tick --
+      about 1ms -- with no reset and no dropout.  A fault that is
+      *not* transient (a pin that will not follow, a direction
+      register that has been skewed) survives the re-assert, fails
+      the sanity check on the same tick, and still resets exactly
+      once.
++
+NOTE: This trade-off is deliberate and worth stating.  A transient
+coil upset corrected in place leaves no trace on parts that have no
+telemetry: it is fixed, but neither counted nor reported.  The
+alternative -- resetting on every transient -- would hold the coil
+energized for a full watchdog period and interrupt the signal path
+each time.
 
 
 == Asymmetric Debounce Timing
