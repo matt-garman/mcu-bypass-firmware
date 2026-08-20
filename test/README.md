@@ -418,10 +418,18 @@ and each `T0IF` access supplies the next of the four polled TMR0 subticks. Runti
 checks pin the implementation-defined host bitfield layout before it can count
 as firmware evidence.
 
-Every output variant runs an exact 86-check base predicate, fault, happy-path,
-and post-check transaction matrix. The relay variant runs 92 checks because its
-six correct-in-place cases each add a settled-output assertion. The coverage
-oracle then requires every executable line in all five
+On PIC12F675 every output variant runs an exact 86-check base predicate, fault,
+happy-path, and post-check transaction matrix. The relay variant runs 104
+checks: six settled-state correct-in-place cases each add an output assertion,
+and 12 active-pulse cases characterize active-low and inactive-high faults at
+1, 6, and 11 ms in both SET and RESET. The same shared-driver matrix raises the
+PIC10F322 relay count from its 53-check base plus two settled corrections to 67.
+The active-pulse cases record and check the actual modeled injection offset,
+count every post-injection millisecond, require the injected state to persist
+through that interval, and require the modeled outputs to finish low. They
+explicitly do not claim that an external output accepts the command or that
+mechanical actuation or audio disruption is prevented. The coverage oracle then
+requires every executable line in all five
 shipping sources except one exact, documented defense-in-depth call: invalid
 context is caught by the main-loop range gate before `debounce_step()` can
 return `res.fault`. The live sanity-gate call to `hw_force_wdt_reset()` is a
@@ -558,7 +566,7 @@ targets are always fail-closed rather than skip-clean.
 |---|---|---|---|
 | Firmware↔core equivalence | `pic10f320-test-equiv` | The real firmware, host-compiled, stepped tick-for-tick against `src/bypass_pure.c` over 266,144 stimulus sequences, visiting all 66 reachable model states, with zero divergence. This is the layer that closes the inlining seam. | host C |
 | Actuation sequence | `pic10f320-test-actuation` | Each variant's full *settled* `LATA` at every tick, plus the mute/relay *mid-actuation* sequencing and pulse width that a settled snapshot cannot see. | host C |
-| Host fault injection | `pic10f320-test-fault-host` | Corrupting a guarded SFR or the debounce context forces the sanity gate to take the watchdog-reset path. The relay variant additionally injects RESET, SET, and both coil-latch bits and requires correction within one completed iteration without a press or reset: 41 / 41 / 59 checks. | host C |
+| Host fault injection | `pic10f320-test-fault-host` | Corrupting a guarded SFR or the debounce context forces the sanity gate to take the watchdog-reset path. The relay variant additionally injects settled-state RESET, SET, and both coil-latch bits and requires correction within one completed iteration without a press or reset: 41 / 41 / 59 checks. | host C |
 | Shipping-source coverage | `pic10f320-coverage-check-fw` | An **exact** property, not a percentage floor: every line of the real firmware is host-executed except an enumerated, justified watchdog-reset path. Run per variant, because the three output stages give 84 / 95 / 100 executable lines. | host gcov with the mock `xc.h` |
 | All-variant host aggregate | `pic10f320-test-host-variants` | The four layers above across all three variants, with the complete supported matrix required first. **This is the member of `make test`.** | Makefile wrapper |
 | Return-stack oracle regression | `test-pic10f320-return-stack-oracle` | 149 deterministic checks: passing depths through 8, recursion/depth-9 rejection, independently required skip edges and operand boundaries, classic alias ranges, all 16,384 legality decisions, every destination writer against PCL/INDF/INTCON, 9-bit PC/physical-fetch aliasing, literal HEX layout, and fail-closed parser/file cases. Includes ten device-geometry checks: `--program-words` is validated as a power of two inside the 9-bit PC space, and fixtures whose verdict *differs* between the 256- and 512-word geometries pin the fetch alias in both directions — an image with code above word `0x0FF` is rejected when 256 words are declared, and one that relies on the fold is rejected when 512 are. **This is also a member of `make test`.** | dependency-free Python 3 |
@@ -568,7 +576,7 @@ targets are always fail-closed rather than skip-clean.
 | Hardware return stack | every `pic10f320` build; `pic10f320-test-return-stack` | The base build strictly parses and traverses its final HEX before marking that image complete, so gpsim/target/soak/release rebuilds use the same fail-closed gate. The explicit target rebuilds the supported matrix and rechecks all three together, reporting each maximum and witness. | dependency-free Python 3 over final HEX |
 | Static analysis | `pic10f320-analyze` | cppcheck + MISRA over the shell, **swept across all three variants** — each compiles a different `#if defined(OUTPUT_*)` branch, so one run would leave two thirds unanalyzed. | host tools |
 | Register-level functional | `pic10f320-test-gpsim` | Real HEX toggles on press and handles a power-on-held switch via the shared wrappers, with the processor and chip-specific toggle-cadence stimulus overridden. | gpsim CLI |
-| Fault recovery | `pic10f320-test-fault-target` | The host fault argument re-made on the real emitted image: every guarded SFR/SRAM location and required `TRISA` direction, plus relay-only RESET, SET, and both-coil physical `PORTA` correction within one serviced iteration and without reset: 22 / 22 / 25 checks. | libgpsim |
+| Fault recovery | `pic10f320-test-fault-target` | The host fault argument re-made on the real emitted image: every guarded SFR/SRAM location and required `TRISA` direction, plus relay-only settled-state RESET, SET, and both-coil physical `PORTA` correction within one serviced iteration and without reset: 22 / 22 / 25 checks. | libgpsim |
 | HEX/model lock-step | `pic10f320-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches `src/bypass_pure.c` after every completed main-loop iteration — 3,005 checks per variant, 66/66 states. | libgpsim |
 | Target I/O timing | `pic10f320-test-io` | Exact `TRISA`, physical `PORTA` following every `LATA` transition, each variant's complete transition sequence, and mute/relay pulse widths from simulator cycles. | libgpsim |
 | Fail-closed aggregate | `pic10f320-test-target-variants` | Rejects any matrix other than the complete supported set, then requires fault, lock-step and target-I/O PASS sentinels for every variant. | Makefile wrapper |

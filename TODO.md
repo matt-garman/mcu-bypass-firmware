@@ -111,13 +111,13 @@ already bounds PIC10F322 stack use; this would add a second independent witness.
 
 ### T25-output-formal - Formally verify output-driver sequencing
 
-Model the relay, mute, and CD4053 drivers as small state machines and prove that
-relay coils are never simultaneously energized, coils are parked low after a
-pulse, and analog-switch controls never enter an invalid combination. Existing
-scenario and target-I/O tests remain valuable but do not exhaustively prove
-these sequence properties. Stub blocking delays as timing events or no-ops when
-proving pin-order logic; keep absolute timing in its existing image/runtime
-oracles.
+Model the relay, mute, and CD4053 drivers as small state machines and prove that,
+on the nominal fault-free path, relay coils are never simultaneously energized,
+coils are commanded low after a pulse, and analog-switch controls never enter an
+invalid combination. Existing scenario and target-I/O tests remain valuable but
+do not exhaustively prove these sequence properties. Stub blocking delays as
+timing events or no-ops when proving pin-order logic; keep absolute timing in its
+existing image/runtime oracles.
 
 Dependencies: a driver harness that preserves each target's pin semantics.
 Effort: about 3-4 hours. Risk: Medium; closes a formal-coverage gap in safety-
@@ -416,8 +416,9 @@ the PIC12F675 target -- yet both are reachable only through the standalone
 because their *other* lanes do need those tools.
 
 The cost of that arrangement was paid on 2026-08-20. F1 taught both gpsim fault
-adapters that a relay coil upset is corrected in place rather than reset, and F2
-added the context-check clause; neither updated `test/pic/fw_coverage/`. The
+adapters that a settled-state relay coil upset is corrected in place rather than
+reset, and F2 added the context-check clause; neither updated
+`test/pic/fw_coverage/`. The
 host harness went on demanding a reset (2 failures on the PIC10F322, 6 on the
 PIC12F675); the gate never compiled with `BYPASS_CTX_CHECK`, so it was not
 measuring the shipping configuration and `debounce_ctx_check_word()` was dead
@@ -451,8 +452,8 @@ question, deliberately not folded in here.
 Acceptance test: on a host with no XC8, no DFP and no gpsim, `make test` runs
 both gates and reports their check counts and coverage lines; in a scratch tree,
 removing `hw_outputs_reassert_safe()` from a relay shell turns `make test` red
-naming the corrected-in-place cases; `pic10f322-test` and `pic12f675-test` still
-run the gates standalone.
+naming the settled-state corrected-in-place cases; `pic10f322-test` and
+`pic12f675-test` still run the gates standalone.
 
 Dependencies: none. Effort: 30-45 minutes, most of it confirming a clean run on
 a host with no PIC toolchain installed and re-timing the aggregate. Risk if

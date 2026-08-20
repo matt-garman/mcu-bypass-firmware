@@ -99,7 +99,8 @@ cases = driver._fault_cases(Probe(), is_relay=False)
 check(tuple(cases) == expected_cases,
       "cd4053 fault kind/address/value/mechanism must match the independent contract")
 
-# Relay variant: PA2/PA3 are the coils -> corrected in place each tick (no reset).
+# Relay variant: settled PA2/PA3 coil faults are corrected each tick (no reset).
+# Active-pulse faults are outside this oracle.
 expected_cases_relay = tuple(
     ("PORTA.OUT(PA2 RESET-coil)", "reg", 0x0404, 0x04, "correct")
         if c[0] == "PORTA.OUT(PA2 control)"

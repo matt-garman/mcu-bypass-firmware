@@ -7,6 +7,13 @@
 #include "xc.h"
 #include "fw_coverage_harness.h"
 #include "bypass_pure.h"
+#if defined(TQ2_L2_5V_RELAY)
+#include "bypass_output_tq2_l2_5v_relay.h"
+#include "bypass_output_common.h"
+#define FW_RELAY_COIL_MASK ((uint8_t)( \
+        (uint8_t)(1u << RELAY_SET_PIN) | \
+        (uint8_t)(1u << RELAY_RESET_PIN)))
+#endif
 
 static int g_checks;
 static int g_failures;
@@ -231,10 +238,9 @@ static void expect_no_reset(fw_inject_t inj, const char *what) {
 }
 
 #if defined(TQ2_L2_5V_RELAY)
-// Relay variants correct an energized coil IN PLACE instead of resetting: the
-// shell calls hw_outputs_reassert_safe() at the top of every serviced tick,
-// before the sanity gate, so the injected upset is already gone when the gate
-// looks (F1; docs/relay_coil_fault_correction.md).
+// Settled-state relay faults are corrected in place instead of resetting: these
+// injections occur after actuation, and the next serviced tick re-asserts both
+// coils low before the sanity gate (F1; docs/relay_coil_fault_correction.md).
 //
 // "No reset" on its own would be a weak assertion -- an injection that silently
 // failed to apply would satisfy it too -- so also require the outputs to be
@@ -290,10 +296,12 @@ static void test_faults(void) {
     expect_reset(FWI_GP4_PIN_TO_INPUT, "parked GP4 direction fault");
     expect_reset(FWI_GP5_PIN_TO_OUTPUT, "GP5 direction fault");
 #if defined(TQ2_L2_5V_RELAY)
-    // GP1/GP2 are the coils.  This part has no LATx, so the re-assert writes the
+    // Settled-state case: GP1/GP2 are the coils. This part has no LATx, so the
+    // re-assert writes the
     // WHOLE shadow to GPIO: it clears the coil bits AND refreshes every physical
     // output.  A coil shadow upset and ANY physical-port upset therefore correct
-    // within one tick; a non-coil shadow (intent) upset still resets.
+    // within one tick; a non-coil shadow (intent) upset still resets. The active
+    // 12 ms pulse is characterized separately below.
     expect_reset(FWI_SHADOW_GP0_HIGH, "GP0 LED shadow (intent) fault");
     expect_corrected(FWI_SHADOW_GP1_HIGH, "GP1 RESET-coil shadow fault");
     expect_corrected(FWI_SHADOW_GP2_HIGH, "GP2 SET-coil shadow fault");
@@ -388,6 +396,70 @@ static void test_happy_path(void) {
     CHECK(fw_drive(stimulus, n) == 0x01u, "fresh press after release should engage");
 }
 
+#if defined(TQ2_L2_5V_RELAY)
+static void test_relay_pulse_fault_window(void) {
+    static const uint8_t offsets_ms[] = { 1u, 6u, 11u };
+    size_t i;
+    int engaged;
+    int inactive_high;
+
+    for (engaged = 0; engaged <= 1; ++engaged) {
+        for (inactive_high = 0; inactive_high <= 1; ++inactive_high) {
+            for (i = 0u; i < sizeof offsets_ms / sizeof offsets_ms[0]; ++i) {
+                fw_relay_pulse_observation_t observation;
+                uint8_t expected_physical;
+                uint8_t expected_intent;
+                int const result = fw_relay_pulse_fault_run(engaged,
+                        inactive_high, offsets_ms[i], &observation);
+
+                expected_physical =
+                    inactive_high != 0 ? FW_RELAY_COIL_MASK : 0u;
+#if defined(BYPASS_MCU_PIC12F675)
+                // A physical GPIO upset does not corrupt the authoritative SRAM
+                // shadow; the normal post-pulse writes reconcile both views.
+                expected_intent = observation.active_mask;
+#else
+                // PIC10F322 has no independent physical readback in this shell;
+                // its writable and observable output state is LATA.
+                expected_intent = expected_physical;
+#endif
+                CHECK(result == 0 &&
+                      observation.delay_ms == TQ2_L2_5V_PULSE_MS &&
+                      observation.offset_ms == offsets_ms[i] &&
+                      observation.entry_intent == observation.active_mask &&
+                      observation.entry_physical == observation.active_mask &&
+                      observation.injected_intent == expected_intent &&
+                      observation.injected_physical == expected_physical &&
+                      observation.injections == 1u &&
+                      observation.injected_at_ms == offsets_ms[i] &&
+                      observation.remaining_ms ==
+                          (uint8_t)(TQ2_L2_5V_PULSE_MS - offsets_ms[i]) &&
+                      observation.persistence_samples ==
+                          observation.remaining_ms &&
+                      observation.persisted_to_delay_end != 0u &&
+                      observation.final_intent == 0u &&
+                      observation.final_physical == 0u,
+                      "%s pulse %s fault at %u ms must persist through the blocking "
+                      "window and finish with both coils low "
+                      "(r=%d delay=%u entry=%02x/%02x injected=%02x/%02x "
+                      "count=%u at=%u remaining=%u samples=%u persisted=%u "
+                      "final=%02x/%02x)",
+                      engaged != 0 ? "SET" : "RESET",
+                      inactive_high != 0 ? "inactive-high" : "active-low",
+                      offsets_ms[i], result, observation.delay_ms,
+                      observation.entry_intent, observation.entry_physical,
+                      observation.injected_intent, observation.injected_physical,
+                      observation.injections,
+                      observation.injected_at_ms, observation.remaining_ms,
+                      observation.persistence_samples,
+                      observation.persisted_to_delay_end,
+                      observation.final_intent, observation.final_physical);
+            }
+        }
+    }
+}
+#endif
+
 static void test_pure_fault_path(void) {
     debounce_context_t ctx;
     ctx.program_state = (program_state_t)2;
@@ -404,9 +476,10 @@ static void test_pure_fault_path(void) {
 // PIC10F322, and on the PIC12F675 the 2 coil-shadow cases plus all 4
 // physical-port cases that the whole-port refresh heals.  Expressed as
 // base + count rather than a fresh magic number, so the delta stays tied to the
-// cases above. The base includes one post-check persisted-context transaction
-// case on every variant. Mirrors PIC_FAULT_EXPECTED_CHECKS in the gpsim fault
-// adapters apart from this host-only instruction-independent transaction probe.
+// cases above. The relay variant also adds the 12-case active-pulse
+// characterization matrix. The base includes one post-check persisted-context
+// transaction case on every variant. Mirrors PIC_FAULT_EXPECTED_CHECKS in the
+// gpsim fault adapters apart from the host-only transaction and pulse probes.
 #if defined(BYPASS_MCU_PIC12F675)
 #define FW_DEVICE_NAME     "PIC12F675"
 #define FW_BASE_CHECKS     86
@@ -417,7 +490,9 @@ static void test_pure_fault_path(void) {
 #define FW_CORRECTED_CASES 2
 #endif
 #if defined(TQ2_L2_5V_RELAY)
-#define FW_EXPECTED_CHECKS (FW_BASE_CHECKS + FW_CORRECTED_CASES)
+#define FW_RELAY_PULSE_CASES 12
+#define FW_EXPECTED_CHECKS \
+    (FW_BASE_CHECKS + FW_CORRECTED_CASES + FW_RELAY_PULSE_CASES)
 #else
 #define FW_EXPECTED_CHECKS FW_BASE_CHECKS
 #endif
@@ -426,6 +501,9 @@ int main(void) {
     test_predicates();
     test_faults();
     test_happy_path();
+#if defined(TQ2_L2_5V_RELAY)
+    test_relay_pulse_fault_window();
+#endif
     test_pure_fault_path();
     if (g_checks != FW_EXPECTED_CHECKS) {
         g_failures++;

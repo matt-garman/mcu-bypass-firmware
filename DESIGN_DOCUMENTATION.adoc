@@ -314,25 +314,30 @@ PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
   references the context-check machinery, so the difference cannot
   be silently erased in either direction.
 
-    * Correction in place, before escalation: a reset is the
-      response of last resort, not the first one.  Where a fault is
-      in an *output* that the firmware can simply re-drive, it is
-      corrected without interrupting audio.  Every relay-capable
-      build re-asserts the safe coil state at the top of each
-      serviced iteration, ahead of the checks above, so a transient
-      upset of a coil drive pin is corrected within a single tick --
-      about 1ms -- with no reset and no dropout.  A fault that is
-      *not* transient (a pin that will not follow, a direction
-      register that has been skewed) survives the re-assert, fails
-      the sanity check on the same tick, and still resets exactly
-      once.
+    * Correction in place, before escalation: between relay
+      actuations, every relay-capable build re-asserts both coils low
+      at the top of each serviced iteration, ahead of the checks
+      above.  A transient upset in writable coil state during this
+      settled period is corrected at the next healthy loop-top
+      service -- nominally about 1ms, or 1.024ms on PIC12F675, plus
+      execution latency -- without reset or a logical state change.
+      A mismatch that remains observable after the re-assert reaches
+      the existing sanity response.  Only PIC12F675 compares physical
+      GPIO against an independent output shadow; the other parts do
+      not claim universal external stuck-pin detection.
++
+      This correction does not run during the 12ms blocking relay
+      pulse.  An upset in that window can shorten the intended pulse
+      or energize the inactive or both coils for nearly the remaining
+      delay.  The normal epilogue commands both coil outputs low if
+      execution completes, but missed or spurious relay actuation,
+      audio disruption, and an external output path that does not
+      accept that command remain residual risks.
 +
 NOTE: This trade-off is deliberate and worth stating.  A transient
-coil upset corrected in place leaves no trace on parts that have no
-telemetry: it is fixed, but neither counted nor reported.  The
-alternative -- resetting on every transient -- would hold the coil
-energized for a full watchdog period and interrupt the signal path
-each time.
+settled-state coil upset corrected in place leaves no trace on parts
+that have no telemetry: it is fixed, but neither counted nor
+reported.  Active-pulse faults are outside that correction guarantee.
 
 
 == Asymmetric Debounce Timing

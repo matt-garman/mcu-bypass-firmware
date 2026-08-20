@@ -61,7 +61,7 @@ RAM = "ram"              # SRAM byte     (write_ram, addr resolved per variant)
 GATE = "gate"            # expected mechanism: per-tick sanity gate
 LIVE = "live"            # expected mechanism: WDT liveness (or the gate)
 RETRY_GATE = "retry_gate"  # phase-swept reinjection for ISR-rewritten state
-CORRECT = "correct"      # relay coil re-driven low in place each tick, no reset
+CORRECT = "correct"      # settled relay coil fault re-driven low, no reset
 TRANSACTION_ISR = "transaction_isr"    # one post-check persisted-context upset
 TRANSACTION_MAIN = "transaction_main"  # one post-check persisted-context upset
 
@@ -96,11 +96,12 @@ def _fault_cases(sim, is_relay):
         ("PORTA.DIR(footswitch)",  REG,  S.REG_PORTA_DIR,         0xCE,   GATE),
         ("PORTA.DIR(spare PA6)",   REG,  S.REG_PORTA_DIR,         0x0E,   GATE),
         ("PORTA.OUT(PA1 LED)",     REG,  S.REG_PORTA_OUT,         0x02,   GATE),
-        # Relay: PA2/PA3 are the coils; hw_outputs_reassert_safe() re-drives them
-        # low (PORTA.OUTCLR) at the top of every serviced tick, before the gate,
-        # so a coil-bit upset self-heals with no reset (see
-        # docs/relay_coil_fault_correction.md). CD4053: PA2/PA3 are control lines
-        # (the op is a no-op), so their upsets still reset via the gate.
+        # Relay settled-state case: PA2/PA3 are the coils;
+        # hw_outputs_reassert_safe() re-drives them low (PORTA.OUTCLR) at the top
+        # of every serviced tick, before the gate, so a post-actuation coil-bit
+        # upset self-heals with no reset. This does not inject during the 12 ms
+        # pulse (see docs/relay_coil_fault_correction.md). CD4053: PA2/PA3 are
+        # control lines (the op is a no-op), so their upsets reset via the gate.
         ("PORTA.OUT(PA2 %s)" % ("RESET-coil" if is_relay else "control"),
                                    REG,  S.REG_PORTA_OUT,         0x04,
                                    CORRECT if is_relay else GATE),

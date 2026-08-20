@@ -1370,12 +1370,13 @@ before it can drive a wrong output:
   output-latch intact, critical SFRs intact -- funnels to
   `hw_force_wdt_reset()`, so a corrupted control byte forces a clean recovery
   reset rather than an acted-upon wrong state.
-- **The blocking relay coil pulse always terminates de-energized.** Both
+- **The nominal blocking relay coil pulse ends by commanding both coils low.** Both
   `hw_set_bypass_state()` and `hw_set_engaged_state()` call
-  `set_relay_coils_low()` after the `BYPASS_DELAY_MS` pulse, and
-  `hw_outputs_reassert_safe()` re-asserts it every tick
-  (`src/bypass_output_tq2_l2_5v_relay.c`), so a fault during actuation cannot
-  leave a latching coil energized.
+  `set_relay_coils_low()` after the `BYPASS_DELAY_MS` pulse. The loop-top
+  `hw_outputs_reassert_safe()` covers subsequent settled operation but cannot
+  run during the delay (`src/bypass_output_tq2_l2_5v_relay.c`). A coil-state
+  upset during that pulse can alter the intended or inactive coil until the
+  post-pulse clear and may affect the mechanical relay.
 
 The one nominal-path case those range and actuation guards do **not** cover is
 an *in-range* single-bit upset of `debounce_counter` -- a flip that stays

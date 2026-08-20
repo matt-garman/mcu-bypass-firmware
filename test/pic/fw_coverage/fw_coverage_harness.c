@@ -16,6 +16,13 @@
 #include "xc.h"
 #include "fw_coverage_harness.h"
 #include "bypass_pure.h"
+#if defined(TQ2_L2_5V_RELAY)
+#include "bypass_output_tq2_l2_5v_relay.h"
+#include "bypass_output_common.h"
+#define FW_RELAY_COIL_MASK ((uint8_t)( \
+        (uint8_t)(1u << RELAY_SET_PIN) | \
+        (uint8_t)(1u << RELAY_RESET_PIN)))
+#endif
 
 #define FW_FAULT_TIMEOUT_MS 120
 #define FW_DRIVE_TIMEOUT_MS 2000
@@ -55,9 +62,12 @@ PIR1bits_t *bypass_pir1(void) {
 }
 #endif
 
-void bypass_on_delay_ms(unsigned ms) { (void)ms; }
-
-typedef enum { MODE_DRIVE, MODE_FAULT, MODE_CTX_WINDOW } harness_mode_t;
+typedef enum {
+    MODE_DRIVE,
+    MODE_FAULT,
+    MODE_CTX_WINDOW,
+    MODE_RELAY_PULSE
+} harness_mode_t;
 static harness_mode_t g_mode;
 static sigjmp_buf      g_jmp;
 static int             g_clrwdt_calls;
@@ -69,6 +79,14 @@ static int             g_inject;
 static int             g_ctx_check_calls;
 static int             g_ctx_window_injections;
 static int             g_ctx_window_result;
+#if defined(TQ2_L2_5V_RELAY)
+static fw_relay_pulse_observation_t *g_relay_observation;
+static uint8_t         g_relay_active_mask;
+static uint8_t         g_relay_inactive_mask;
+static uint8_t         g_relay_offset_ms;
+static int             g_relay_inactive_high;
+static int             g_relay_pulse_error;
+#endif
 
 static void set_footswitch(int pressed) {
 #if defined(BYPASS_MCU_PIC12F675)
@@ -148,6 +166,82 @@ static uint8_t fwp_ctx_check_word(debounce_context_t ctx);
 #  include "../../../src/bypass_mcu_pic10f322.c"
 #endif
 #undef debounce_ctx_check_word
+
+#if defined(TQ2_L2_5V_RELAY)
+static uint8_t relay_intent_state(void) {
+#if defined(BYPASS_MCU_PIC12F675)
+    return (uint8_t)(gpio_shadow_ & FW_RELAY_COIL_MASK);
+#else
+    return (uint8_t)(g_lata & FW_RELAY_COIL_MASK);
+#endif
+}
+
+static uint8_t relay_physical_state(void) {
+#if defined(BYPASS_MCU_PIC12F675)
+    return (uint8_t)(g_gpio & FW_RELAY_COIL_MASK);
+#else
+    // The PIC10F322 shell can observe only its output latch, so the host model's
+    // physical view is the same latch. PIC12F675 keeps the views independent.
+    return (uint8_t)(g_lata & FW_RELAY_COIL_MASK);
+#endif
+}
+
+static void inject_relay_physical_state(uint8_t value) {
+#if defined(BYPASS_MCU_PIC12F675)
+    g_gpio = (uint8_t)((g_gpio & (uint8_t)~FW_RELAY_COIL_MASK) |
+            (value & FW_RELAY_COIL_MASK));
+#else
+    g_lata = (uint8_t)((g_lata & (uint8_t)~FW_RELAY_COIL_MASK) |
+            (value & FW_RELAY_COIL_MASK));
+#endif
+}
+#endif
+
+void bypass_on_delay_ms(unsigned ms) {
+#if defined(TQ2_L2_5V_RELAY)
+    unsigned elapsed;
+    uint8_t injected_physical;
+
+    if (g_mode != MODE_RELAY_PULSE) return;
+
+    g_relay_observation->delay_ms = (uint8_t)ms;
+    g_relay_observation->entry_intent = relay_intent_state();
+    g_relay_observation->entry_physical = relay_physical_state();
+    if (ms != TQ2_L2_5V_PULSE_MS || g_relay_offset_ms == 0u ||
+            g_relay_offset_ms >= ms) {
+        g_relay_pulse_error = 1;
+        return;
+    }
+
+    injected_physical = relay_physical_state();
+    g_relay_observation->persisted_to_delay_end = 1u;
+    for (elapsed = 0u; elapsed < ms; ++elapsed) {
+        if (elapsed == g_relay_offset_ms) {
+            if (g_relay_inactive_high != 0) {
+                injected_physical |= g_relay_inactive_mask;
+            }
+            else {
+                injected_physical &= (uint8_t)~g_relay_active_mask;
+            }
+            inject_relay_physical_state(injected_physical);
+            g_relay_observation->injections++;
+            g_relay_observation->injected_at_ms = (uint8_t)elapsed;
+            g_relay_observation->remaining_ms = (uint8_t)(ms - elapsed);
+            g_relay_observation->injected_intent = relay_intent_state();
+            g_relay_observation->injected_physical = relay_physical_state();
+        }
+        if (elapsed >= g_relay_offset_ms &&
+                relay_physical_state() != injected_physical) {
+            g_relay_observation->persisted_to_delay_end = 0u;
+        }
+        if (elapsed >= g_relay_offset_ms) {
+            g_relay_observation->persistence_samples++;
+        }
+    }
+#else
+    (void)ms;
+#endif
+}
 
 static uint8_t fwp_ctx_check_word(debounce_context_t ctx) {
     uint8_t const word = debounce_ctx_check_word(ctx);
@@ -352,6 +446,44 @@ int fw_ctx_window_run(void) {
     if (sj == 2) return -1;
     return g_ctx_window_result;
 }
+
+#if defined(TQ2_L2_5V_RELAY)
+int fw_relay_pulse_fault_run(int engaged, int inactive_high,
+        uint8_t offset_ms, fw_relay_pulse_observation_t *observation) {
+    if (observation == NULL || (engaged != 0 && engaged != 1) ||
+            (inactive_high != 0 && inactive_high != 1)) {
+        return -1;
+    }
+
+    reset_sfrs_power_on();
+#if defined(BYPASS_MCU_PIC12F675)
+    fwp_set_output_state(0u, 0u);
+#else
+    g_lata = 0u;
+#endif
+    memset(observation, 0, sizeof *observation);
+    g_mode = MODE_RELAY_PULSE;
+    g_relay_observation = observation;
+    g_relay_active_mask = (uint8_t)(1u <<
+            (engaged != 0 ? RELAY_SET_PIN : RELAY_RESET_PIN));
+    g_relay_inactive_mask =
+        (uint8_t)(FW_RELAY_COIL_MASK ^ g_relay_active_mask);
+    g_relay_offset_ms = offset_ms;
+    g_relay_inactive_high = inactive_high;
+    g_relay_pulse_error = 0;
+    observation->active_mask = g_relay_active_mask;
+    observation->offset_ms = offset_ms;
+
+    if (engaged != 0) hw_set_engaged_state();
+    else              hw_set_bypass_state();
+
+    observation->final_intent = relay_intent_state();
+    observation->final_physical = relay_physical_state();
+    g_relay_observation = NULL;
+    g_mode = MODE_DRIVE;
+    return g_relay_pulse_error == 0 ? 0 : -1;
+}
+#endif
 
 uint8_t fw_drive(const uint8_t *fsw, int n) {
     reset_sfrs_power_on();

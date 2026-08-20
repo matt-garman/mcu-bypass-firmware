@@ -64,9 +64,32 @@ typedef enum {
     FWI_HARNESS_STALL
 } fw_inject_t;
 
+#if defined(TQ2_L2_5V_RELAY)
+typedef struct {
+    uint8_t active_mask;
+    uint8_t delay_ms;
+    uint8_t offset_ms;
+    uint8_t entry_intent;
+    uint8_t entry_physical;
+    uint8_t injected_intent;
+    uint8_t injected_physical;
+    uint8_t injections;
+    uint8_t injected_at_ms;
+    uint8_t remaining_ms;
+    uint8_t persistence_samples;
+    uint8_t persisted_to_delay_end;
+    uint8_t final_intent;
+    uint8_t final_physical;
+} fw_relay_pulse_observation_t;
+#endif
+
 int fw_fault_run(fw_inject_t inj);
 uint8_t fw_drive(const uint8_t *fsw, int n);
 int fw_ctx_window_run(void);
+#if defined(TQ2_L2_5V_RELAY)
+int fw_relay_pulse_fault_run(int engaged, int inactive_high,
+        uint8_t offset_ms, fw_relay_pulse_observation_t *observation);
+#endif
 int fwp_output_state_intact(uint8_t required_mask, uint8_t expected_high_mask);
 int fwp_sanity_failed(effect_state_t effect_state);
 int fwp_pullup_intact(void);

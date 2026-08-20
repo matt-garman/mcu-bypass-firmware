@@ -907,7 +907,8 @@ to bounded hardware energy.
 
 ### 7.4 The blocking form is not as safe as it feels
 
-The intuition holds for the *pulse* and fails for the *steady state*.
+The intuition holds for nominal pulse completion and fails for the *steady
+state*. Active-pulse fault behavior is scoped separately below.
 
 Through `v0.9.7`, if an SEU set a coil bit in `LATA` after the pulse completed,
 the PIC10F320 re-drove `LATA` only on a debounced press. For the relay that was an
@@ -926,18 +927,13 @@ was not a failure of the blocking delay and did not require non-blocking
 actuation to fix; it was the direct consequence of omitting both stable-latch
 validation and an idle safe-state rewrite.
 
-On the PIC10F322 it is caught: `hw_output_state_intact()` compares the exact latch
-against the expected mask every tick and forces a watchdog reset. That is the one
-defensive check the PIC10F320 omits for flash — the same omission that made §6.3
-cheap. It cuts both ways, and here it cuts against the current design.
-
-"Caught" still means bounded by reset, not immediately de-energized. The current
-PIC10F322 and AVR fault functions enter a watchdog-reset spin without first
-changing output drive, so a latch upset that energizes a coil can remain active
-for the remaining watchdog interval, potentially almost a complete period.
-Whether that interval is thermally safe is the same unanswered hardware question
-as §7.8. An explicit fault-abort operation would improve the blocking firmware
-too.
+Current PIC10F322 and AVR relay builds also re-drive both coils low at the next
+healthy loop-top service before evaluating their sanity gates. A transient
+writable coil-state upset arising after actuation is therefore corrected rather
+than left energized until watchdog reset. This is a settled-state mitigation:
+neither the loop-top repair nor the main-loop sanity gate executes during the
+12 ms blocking pulse, so an upset there can persist until the normal epilogue and
+may alter relay actuation.
 
 So the idle re-drive from §7.3 **closed an existing hole**, not merely a risk in
 the proposed redesign. On this specific axis, `v0.9.8` is safer than the prior
@@ -1055,9 +1051,9 @@ BYPASS before reset. The fault lanes should inject every guarded fault at every
 active tick and assert the physical relay pins become inactive within a fixed
 instruction/tick bound.
 
-This primitive could improve today's blocking design too: §7.4's post-actuation
-latch upset is detected on the full shells, but their present fault path waits for
-reset before removing the resulting drive.
+This primitive could improve today's blocking design too. The loop-top rewrite
+now corrects a transient post-actuation writable coil-state upset, but no
+equivalent correction or abort runs inside the blocking pulse.
 
 ### 7.10 The tick source becomes safety-critical
 

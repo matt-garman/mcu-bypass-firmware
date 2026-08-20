@@ -1813,8 +1813,9 @@ static void inject_output_latch_bit(uint8_t const pin, const char *what) {
 #if defined(TQ2_L2_5V_RELAY)
 // Relay coil correction (see docs/relay_coil_fault_correction.md):
 // hw_outputs_reassert_safe() re-drives the coils low at the TOP of the next
-// serviced tick, before the sanity gate, so an energized-coil upset self-heals
-// within one tick with NO reset and no disruption to the engaged state.
+// serviced tick, before the sanity gate, so a settled-state energized-coil
+// upset self-heals within one tick with no reset or logical state change. This
+// case does not inject during the blocking relay pulse.
 //
 // Inject while the core is asleep (bottom of the loop, after this tick's gate)
 // so the next wake runs the re-assert before the next gate fires -- the

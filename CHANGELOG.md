@@ -32,20 +32,20 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
-- **An upset relay coil is now corrected in place, once per tick.** Every
-  relay-capable shell re-asserts the safe coil state at the top of each serviced
-  iteration, before the sanity gate, so a transient bit flip in the coil drive
-  is corrected within a single tick — about 1 ms — with no reset and no audio
-  dropout. Previously the only available response was `hw_force_wdt_reset()`,
-  which left the coil energized for a full watchdog period, about 160–480 ms on
-  the PIC12F675, and interrupted the signal path. A persistent fault (a pin that
-  will not follow, a skewed direction register) survives the re-assert and still
-  resets exactly once, deterministically. The CD4053 variants link an explicit
-  no-op and are byte-for-byte unchanged. This brings the four modular shells to
-  the in-place correction `src/bypass_mcu_pic10f320.c` already performed. The
-  trade-off is deliberate and worth stating plainly: on parts with no telemetry
-  a transient coil upset is now silent — corrected, but neither counted nor
-  reported. Design: `docs/relay_coil_fault_correction.md`.
+- **A settled-state relay-coil upset is now corrected in place, once per
+  serviced iteration.** Between actuations, every relay-capable shell re-asserts
+  both coils low before the sanity gate, so a transient writable coil-state
+  upset is corrected at the next healthy loop-top service without reset or a
+  logical state change. The guarantee excludes the 12 ms blocking actuation
+  pulse, when the loop-top repair cannot run: a fault there can shorten the
+  intended pulse or energize the inactive or both coils until the normal
+  post-pulse clear, with missed or spurious actuation and audio disruption as
+  residual risks. Shipping-source tests characterize active-coil-low and
+  inactive-coil-high faults at actual recorded offsets of 1, 6, and 11 ms in
+  both SET and RESET pulses. They prove modeled persistence and final low output
+  state, not that an external output accepts the command or that mechanical
+  behavior is safe. The CD4053 variants retain an explicit no-op. Design:
+  `docs/relay_coil_fault_correction.md`.
 
 - **A single-bit upset of the debounce context is now detected while it is still
   in range.** The per-tick sanity gate previously rejected only out-of-range

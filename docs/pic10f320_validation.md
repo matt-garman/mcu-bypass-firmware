@@ -435,8 +435,8 @@ Stated so nobody has to infer it:
   flags. Neither establishes that arbitrary XC8 versions or environments emit
   identical bytes.
 - **The general output-latch integrity check is absent** (§4). The relay-only
-  idle safe-state rewrite bounds coil-bit upsets; LED and analog-control latch
-  upsets remain outside that mitigation.
+  idle safe-state rewrite bounds settled-state coil-bit upsets; active-pulse,
+  LED, and analog-control latch upsets remain outside that mitigation.
 - **Hardware-bench properties are simulated, not proven**: WDT timing and
   brown-out behaviour, absolute tick period, and real-silicon pulse timing. These
   are shared with the PIC10F322 build, since both are validated in the same gpsim
