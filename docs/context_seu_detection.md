@@ -120,18 +120,35 @@ between those stores in these single-owner loops.
 **Flash margin note (PIC10F322):** the pre-transaction F2 image used 507/512
 words in the relay variant, so the transaction did not fit as first written. The
 snapshot and publication struct copies cost 18 words -- 12 in `main()`, 6 in
-`init()` -- taking the relay variant to 525/512. Folding the three pure-read
-integrity checks in `bypass_mcu_pic10f322.c` (`hw_critical_sfrs_intact()`,
-`hw_footswitch_pullup_intact()` and `hw_output_state_intact()`) from `&&` chains
-into branchless XOR-then-OR accumulators recovered 20 words: XC8's free-mode
-codegen spends roughly 5 program words of branch scaffolding on every
-short-circuit term, and every term in those three functions is a pure SFR read,
-so the fold is exactly equivalent, and constant-time as a bonus. The same trick
-applied to `main()`'s sanity `||` chain costs 32 words rather than saving them
--- its terms are calls and comparisons that need an explicit `? 1U : 0U` -- so
-that chain is deliberately left short-circuit. The transactional image measures
-505/512 words in the relay variant, two words better than the pre-transaction
-image; see Resource qualification below for every variant.
+`init()` -- taking the simple/mute/relay variants to 496/522/525 of 512 and
+overflowing the two larger images. The transaction itself stayed intact. Folding
+the three pure-read integrity checks in `bypass_mcu_pic10f322.c`
+(`hw_critical_sfrs_intact()`, `hw_footswitch_pullup_intact()` and
+`hw_output_state_intact()`) from `&&` chains into branchless XOR-then-OR
+accumulators recovered 20 words: XC8's free-mode codegen spends roughly 5
+program words of branch scaffolding on every short-circuit term, and every term
+in those three functions is a pure SFR read, so the fold is exactly equivalent,
+and constant-time as a bonus. The same trick applied to `main()`'s sanity `||`
+chain costs 32 words rather than saving them -- its terms are calls and
+comparisons that need an explicit `? 1U : 0U` -- so that chain is deliberately
+left short-circuit. The folded image measures 476/502/505 words, two words
+better in the relay variant than the pre-transaction image; see Resource
+qualification below.
+
+That margin is thin enough that the *spelling* of the fold matters, not just its
+logic, and the accumulator must stay `diff |= term`. Respelling it as the
+explicit `diff = (uint8_t)(diff | term)` costs one program word per term under
+XC8 free mode -- 10 words across the three functions, which puts the mute and
+relay variants back over 512 -- and hoisting each term into a named local ahead
+of a single closing fold costs 12. Both were measured, not estimated.
+
+That respelling was tried once, to silence a `-Wconversion` diagnostic which
+GCC 8.5.0 raises on the compound-assignment form. Supporting a host compiler
+that old is not a project goal: GCC 13.3.0 accepts `diff |= (uint8_t)term`
+without complaint, because the result of OR-ing two `uint8_t` values provably
+fits the destination. The fold therefore keeps the compact spelling and the
+rewrite was reverted. Any future rewrite of these three functions must be
+re-measured against the 512-word gate rather than assumed free.
 
 ## Shell wiring — AVR ISR shells (`avr_classic`, `avr_xt`)
 
@@ -208,36 +225,35 @@ function regardless (the host suite links it unconditionally).
 
 ## Resource qualification
 
-Measured on the transactional image: XC8 v3.10 (free mode, `-O2`) for the PIC
-parts, avr-gcc for the AVR parts. Every figure below is enforced by a build
-gate, not a one-off reading.
+Measured on the transactional image with the OR-folded integrity checks: XC8
+v3.10 (free mode, `-O2`) for the PIC parts, avr-gcc for the AVR parts. Every
+figure below is enforced by a build gate, not a one-off reading.
 
-| Part | Budget | Pre-transaction F2 image | Transactional image | Free |
-| --- | --- | --- | --- | --- |
-| PIC10F322 relay | 512 words | 507 words | 505 words | 7 words |
-| PIC10F322 mute | 512 words | 504 words | 502 words | 10 words |
-| PIC10F322 simple | 512 words | 478 words | 476 words | 36 words |
-| PIC12F675 relay | 1024 words | -- | 575 words | 449 words |
-| PIC12F675 mute | 1024 words | -- | 572 words | 452 words |
-| PIC12F675 simple | 1024 words | -- | 546 words | 478 words |
-| PIC10F320 relay | 256 words | Fold overflowed | 245 words, F2 excluded | 11 words |
-| ATtiny13a relay | 921 B | -- | 874 B | 47 B |
-| ATtiny202 relay | 2048 B | -- | 1004 B | 1044 B |
+| Part | Budget | Simple / mute / relay | Tightest margin |
+| --- | --- | --- | --- |
+| PIC10F322 | 512 words | 476 / 502 / 505 words | 7 words (relay) |
+| PIC12F675 | 1024 words | 546 / 572 / 575 words | 449 words (relay) |
+| ATtiny13a (AVR classic) | 921 B | 834 / 874 / 874 B | 47 B |
+| ATtiny202 (AVR-XT) | 2048 B | 964 / 1004 / 1004 B | 1044 B |
+| PIC10F320 | 256 words | 220 / 241 / 245 words | 11 words; F2 excluded |
 
 PIC10F322 is the binding constraint, and it stays inside 512 words in every
 variant only because the integrity-check fold pays for the transaction -- see
-the flash margin note above. The ATtiny13a budget is the gate's 90%-of-1024
-utilisation limit, not the raw device size. PIC10F320 carries no F2 at all; its
-row records that the part still builds and where its own margin sits.
+the flash margin note above, including the one-word-per-term cost of respelling
+that fold. The ATtiny13a budget is the gate's 90%-of-1024 utilisation limit, not
+the raw device size. PIC10F320 carries no F2 at all; its row records that the
+part still builds and where its own margin sits.
 
 RAM and stack: the AVR `next_ctx` snapshot is an automatic, so it lands on the
 stack. The stack high-water gate in the simulator suite (`make test-long`, not
 `make test`) measures 31-33 B used across every classic-AVR variant and part.
 The tightest margin is the ATtiny13a, whose 64 B of SRAM leaves 26 B free
 between the deepest stack push and the 5 B of static data, against the gate's
-8 B floor. PIC10F322 return-stack depth is unchanged at 3
-levels (`cd4053_simple`, `cd4053_with_mute`) and 4 (`tq2_l2_5v_relay`), each
-carrying a 2-level reserve inside the part's 8 hardware levels.
+8 B floor. PIC10F322 return-stack depth is unchanged at 3 levels
+(`cd4053_simple`, `cd4053_with_mute`) and 4 (`tq2_l2_5v_relay`), each carrying a
+2-level reserve inside the part's 8 hardware levels. The image, RAM, stack and
+static-analysis gates all passed with the automatic `next_ctx`/`res` objects in
+place.
 
 The transaction also removes the former AVR `ctx_fault_`, so persistent F2
 storage is one check byte rather than two bytes.
@@ -263,9 +279,10 @@ storage is one check byte rather than two bytes.
   reference `debounce_ctx_check_word` and that `BYPASS_CTX_CHECK` is undefined
   there.
 
-The host PIC coverage lanes and host-only ATtiny fault-oracle validation pass on
-the follow-up host. simavr, yasimavr, avr-gcc, XC8, gpsim, CBMC, target resource
-gates, and the complete mutation run still require a fully provisioned host.
+The initial host PIC coverage and ATtiny fault-oracle checks passed. A subsequent
+fully provisioned run passed the AVR/XC8 builds and resource gates,
+simavr/yasimavr/gpsim lanes, CBMC and static analysis, and the complete mutation
+suite: 131 killed, 0 survived, 0 errored, and no skipped PIC or ATtiny202 rows.
 
 ## Acceptance-criteria mapping (F2)
 
@@ -273,13 +290,13 @@ gates, and the complete mutation run still require a fully provisioned host.
    safely overwritten; no transaction consumes and re-folds the upset.
 2. Output actuation is based only on `res` from a validated local snapshot.
 3. AVR ISR and main transactions cannot interleave because main's complete
-   transaction is inside `ATOMIC_BLOCK`; clean dynamic simulation must confirm
-   that this introduces no false reset.
+   transaction is inside `ATOMIC_BLOCK`; clean dynamic simulation confirms that
+   this introduces no false reset.
 4. One-shot post-check probes and transaction-seam mutants provide the temporal
    evidence; repeated favorable-phase injection is not accepted as proof.
-5. Full flash, RAM, stack, MISRA, mutation, simulator, and shipping-source
-   qualification remains required. In particular, no pre-transaction
-   PIC10F322 size can establish the 512-word fit.
+5. Flash, RAM, stack, MISRA, mutation, simulator, and shipping-source
+   qualification passed on the provisioned host. PIC10F322 remains the binding
+   capacity case at 505/512 words for the relay variant.
 
 ## Related
 

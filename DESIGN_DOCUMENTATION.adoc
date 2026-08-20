@@ -301,8 +301,8 @@ silicon family:
 [horizontal]
 AVR Classic (ATtiny13a/45/85), ATtiny202, PIC10F322, PIC12F675::
   enabled (`BYPASS_CTX_CHECK`).  PIC10F322 is the binding capacity
-  case; the transactional image must be measured against its
-  512-word limit during release qualification.
+  case; the measured transactional images use 476/502/505 of 512
+  words for the simple/mute/relay variants.
 PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
   shared pure core, so this shell inlines the debounce logic by hand
   and has no `debounce_ctx_check_word()` to call; even the cheapest
