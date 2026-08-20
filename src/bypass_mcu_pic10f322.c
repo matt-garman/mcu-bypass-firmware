@@ -115,11 +115,14 @@ uint8_t hw_output_state_intact(
     uint8_t diff = 0U;
 
     // 0x0FU ^ BYPASS_OUTPUT_DDR_MASK = 0x08: only RA3 remains an input
-    diff |= (uint8_t)(actual_direction_mask ^
-                      (uint8_t)(0x0FU ^ BYPASS_OUTPUT_DDR_MASK));
-    diff |= (uint8_t)(actual_direction_mask & required_output_mask);
-    diff |= (uint8_t)((uint8_t)(LATA & (uint8_t)BYPASS_OUTPUT_DDR_MASK) ^
-                      expected_high_mask);
+    diff = (uint8_t)(diff |
+            (uint8_t)(actual_direction_mask ^ (uint8_t)(0x0FU ^ BYPASS_OUTPUT_DDR_MASK)));
+
+    diff = (uint8_t)(diff |
+            (uint8_t)(actual_direction_mask & required_output_mask));
+
+    diff = (uint8_t)(diff |
+            (uint8_t)((uint8_t)(LATA & (uint8_t)BYPASS_OUTPUT_DDR_MASK) ^ expected_high_mask));
 
     return (uint8_t)((0U == diff) ? 1U : 0U);
 }
@@ -160,11 +163,20 @@ static uint8_t hw_critical_sfrs_intact(void) {
     // the && chain it replaces.
     uint8_t diff = 0U;
 
-    diff |= (uint8_t)(HFINTOSC_2MHZ_IRCF ^ (uint8_t)OSCCONbits.IRCF);
-    diff |= (uint8_t)(WDT_WDTPS_256MS    ^ (uint8_t)WDTCONbits.WDTPS);
-    diff |= (uint8_t)(TMR2_PR2_PERIOD    ^ (uint8_t)PR2);
-    diff |= (uint8_t)(TMR2_T2CON_CONFIG  ^ (uint8_t)T2CON);
-    diff |= (uint8_t)(ANSELA & BYPASS_OUTPUT_DDR_MASK); // 0 = pins still digital
+    diff = (uint8_t)(diff |
+            (uint8_t)(HFINTOSC_2MHZ_IRCF ^ (uint8_t)OSCCONbits.IRCF));
+
+    diff = (uint8_t)(diff |
+            (uint8_t)(WDT_WDTPS_256MS    ^ (uint8_t)WDTCONbits.WDTPS));
+
+    diff = (uint8_t)(diff |
+            (uint8_t)(TMR2_PR2_PERIOD    ^ (uint8_t)PR2));
+
+    diff = (uint8_t)(diff |
+            (uint8_t)(TMR2_T2CON_CONFIG  ^ (uint8_t)T2CON));
+
+    diff = (uint8_t)(diff |
+            (uint8_t)(ANSELA & BYPASS_OUTPUT_DDR_MASK)); // 0 = pins still digital
 
     return (uint8_t)((0U == diff) ? 1U : 0U);
 }
@@ -217,8 +229,11 @@ static uint8_t hw_footswitch_pullup_intact(void) {
 
     uint8_t diff = 0U;
 
-    diff |= (uint8_t)((uint8_t)(WPUA & 0x0FU) ^ (uint8_t)(1U << FOOTSW_PIN));
-    diff |= (uint8_t)OPTION_REGbits.nWPUEN; // 0 = enabled
+    diff = (uint8_t)(diff |
+            (uint8_t)((uint8_t)(WPUA & 0x0FU) ^ (uint8_t)(1U << FOOTSW_PIN)));
+
+    diff = (uint8_t)(diff |
+            (uint8_t)OPTION_REGbits.nWPUEN); // 0 = enabled
 
     return (uint8_t)((0U == diff) ? 1U : 0U);
 }

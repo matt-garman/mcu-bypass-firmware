@@ -117,10 +117,11 @@ context/check pair mismatches and recovery follows. The publication order
 briefly leaves two different generations in SRAM, but no check or consumer runs
 between those stores in these single-owner loops.
 
-**Flash margin note (PIC10F322):** the previous non-transactional F2 image used
-507/512 words in the relay variant. The transactional image must be rebuilt with
-XC8 for every variant before F2 is considered qualified; that measurement was
-not available on the host used for this follow-up.
+**Flash margin note (PIC10F322):** the first transactional build used
+496/522/525 of 512 words for the simple/mute/relay variants, overflowing the two
+larger images. The transaction itself remains intact. Replacing three
+side-effect-free `&&` integrity predicates with equivalent XOR/OR difference
+folds recovered enough code space; the measured images use 476/502/505 words.
 
 ## Shell wiring — AVR ISR shells (`avr_classic`, `avr_xt`)
 
@@ -197,19 +198,19 @@ function regardless (the host suite links it unconditionally).
 
 ## Resource qualification
 
-The last XC8 v3.10 measurement predates the transaction fix:
+The fully provisioned post-transaction build measured:
 
-| Part | Budget | Pre-transaction F2 image | Status now |
+| Part | Budget | Simple / mute / relay | Result |
 | --- | --- | --- | --- |
-| PIC10F322 relay | 512 words | 507 words | Transactional image not yet measured |
-| PIC10F322 mute | 512 words | 504 words | Transactional image not yet measured |
-| PIC10F322 simple | 512 words | 478 words | Transactional image not yet measured |
-| PIC10F320 relay | 256 words | Fold overflowed | Excluded, unchanged |
+| PIC10F322 | 512 words | 476 / 502 / 505 words | PASS; 7 words minimum free |
+| PIC12F675 | 1024 words | 546 / 572 / 575 words | PASS |
+| AVR Classic ATtiny13a | 921-byte project ceiling | 834 / 874 / 874 bytes | PASS |
+| AVR-XT ATtiny202 | 2048 bytes | 964 / 1004 / 1004 bytes | PASS |
+| PIC10F320 | 256 words | 220 / 241 / 245 words | F2 excluded; unchanged |
 
 The transaction removes the former AVR `ctx_fault_`, so persistent F2 storage is
-one check byte rather than two bytes. Automatic `next_ctx`/`res` objects may
-change stack and code size; AVR image/RAM/stack gates and every XC8 image-size
-gate must therefore be rerun rather than inferred from the previous build.
+one check byte rather than two. The provisioned image, RAM, stack, and static-
+analysis gates passed with the automatic `next_ctx`/`res` objects in place.
 
 ## Test and mutation evidence
 
@@ -232,9 +233,14 @@ gate must therefore be rerun rather than inferred from the previous build.
   reference `debounce_ctx_check_word` and that `BYPASS_CTX_CHECK` is undefined
   there.
 
-The host PIC coverage lanes and host-only ATtiny fault-oracle validation pass on
-the follow-up host. simavr, yasimavr, avr-gcc, XC8, gpsim, CBMC, target resource
-gates, and the complete mutation run still require a fully provisioned host.
+The initial host PIC coverage and ATtiny fault-oracle checks passed. A subsequent
+fully provisioned run passed the AVR/XC8 builds and resource gates,
+simavr/yasimavr/gpsim lanes, CBMC and static analysis, and the complete mutation
+suite: 131 killed, 0 survived, 0 errored, and no skipped PIC or ATtiny202 rows.
+Post-merge review on GCC 8.5.0 then found a `-Wconversion` failure in four
+PIC10F322 integrity-fold compound assignments. Final qualification remains
+pending the explicit-conversion source correction and rerun described in the
+local follow-up tracker.
 
 ## Acceptance-criteria mapping (F2)
 
@@ -242,13 +248,14 @@ gates, and the complete mutation run still require a fully provisioned host.
    safely overwritten; no transaction consumes and re-folds the upset.
 2. Output actuation is based only on `res` from a validated local snapshot.
 3. AVR ISR and main transactions cannot interleave because main's complete
-   transaction is inside `ATOMIC_BLOCK`; clean dynamic simulation must confirm
-   that this introduces no false reset.
+   transaction is inside `ATOMIC_BLOCK`; clean dynamic simulation confirms that
+   this introduces no false reset.
 4. One-shot post-check probes and transaction-seam mutants provide the temporal
    evidence; repeated favorable-phase injection is not accepted as proof.
-5. Full flash, RAM, stack, MISRA, mutation, simulator, and shipping-source
-   qualification remains required. In particular, no pre-transaction
-   PIC10F322 size can establish the 512-word fit.
+5. Flash, RAM, stack, MISRA, mutation, simulator, and shipping-source
+   qualification passed on the provisioned host, but the GCC 8.5.0 portability
+   finding above must be corrected and rerun before closure. PIC10F322 remains
+   the binding capacity case at 505/512 words for the relay variant.
 
 ## Related
 

@@ -72,8 +72,8 @@ file is the human-readable summary of *what changed*.
   asserted. On AVR the integrator stays in the ISR, so both the ISR and
   `main()` perform complete local transactions; main's snapshot-through-publish
   sequence is one `ATOMIC_BLOCK`, which is the source of MISRA deviation D-5.
-  PIC10F322's transactional image must be remeasured against its 512-word limit
-  before release qualification. Design:
+  XC8 v3.10 measures the PIC10F322 transactional images at
+  476/502/505 of 512 words for the simple/mute/relay variants. Design:
   `docs/context_seu_detection.md`.
 
 - **The watchdog-margin invariant is now enforced at compile time on every
