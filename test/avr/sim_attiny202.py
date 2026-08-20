@@ -274,7 +274,10 @@ class Sim:
         # jump-to-self opcode; hw_force_wdt_reset is static and inlined.)
         syms = _read_symbols(elf_path)
         self.addr_ctx = _symbol_addr(syms, "ctx_") & DATA_ADDR_MASK
+        self.addr_ctx_check = _symbol_addr(syms, "ctx_check_") & DATA_ADDR_MASK
         self.addr_timer_isr = _symbol_addr(syms, "timer_isr_called_") & DATA_ADDR_MASK
+        self.addr_ctx_check_fn = _symbol_addr(syms, "debounce_ctx_check_word")
+        self.addr_debounce_step_fn = _symbol_addr(syms, "debounce_step")
 
         # Build the device from a descriptor with every production fuse applied
         # (see the module header). create_from_model returns a fresh descriptor;
@@ -317,6 +320,34 @@ class Sim:
     def run_cycles(self, cycles):
         """Advance by an exact cycle count for output-transition tracing."""
         self.loop.run(cycles)
+
+    def run_until_sleep(self, max_cycles, stride=8):
+        """Stop once the device reaches IDLE sleep, within a cycle budget."""
+        spent = 0
+        while spent < max_cycles:
+            if self.dev.state() == _core.Device.State.Sleeping:
+                return True
+            step = min(stride, max_cycles - spent)
+            self.loop.run(step)
+            spent += step
+            if self.is_done():
+                return False
+        return self.dev.state() == _core.Device.State.Sleeping
+
+    def run_until_pc(self, address, max_steps):
+        """Stop before `address`, using instruction steps rather than timing."""
+        steps = 0
+        while steps < max_steps:
+            if self.pc() == address:
+                return True
+            # yasimavr 0.1.6's run(1) rewinds cycle overshoot. That is unsuitable
+            # for timing, but it exposes every instruction PC and this helper
+            # intentionally measures only a bounded instruction count.
+            self.loop.run(1)
+            steps += 1
+            if self.is_done():
+                return False
+        return self.pc() == address
 
     def cycle(self):
         return self.loop.cycle()

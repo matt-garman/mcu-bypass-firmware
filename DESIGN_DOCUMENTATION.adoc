@@ -273,16 +273,22 @@ PIC12F675:: BOD is enabled (`BOREN=ON`) at a fixed 2.025-2.175v trip
       above catch a supply that has left spec and a program that has
       stopped making progress, but neither notices a corrupted
       *value* inside a program that is still running normally.
-      Every serviced tick therefore re-validates the debounce
+      Every serviced tick therefore snapshots and re-validates the debounce
       context before acting on it.  A range check rejects any of
       `program_state`, `effect_state` or `debounce_counter` that has
       left its legal domain.  A flip that lands *inside* the legal
       range is caught by a checksum: the firmware keeps a
       complemented XOR fold of the three context members
-      (`debounce_ctx_check_word()`) and verifies it once per tick,
-      immediately before that tick's integrate step.  Any single-bit
-      flip of any member -- or of the stored fold itself -- fails
-      that comparison and escalates to the watchdog reset above.
+      (`debounce_ctx_check_word()`).  Each enabled shell validates a
+      local snapshot, computes only from that validated value, and
+      then publishes the successor context and fold.  A single-bit
+      flip confined to persisted `ctx_` or `ctx_check_` either fails
+      validation, is safely overwritten by a transaction already
+      based on a valid snapshot, or remains a mismatch for the next
+      check.  It cannot be consumed and then legitimized by folding
+      live corrupt state.  This is a persisted-state guarantee; it
+      does not claim coverage of automatic locals, CPU registers,
+      code, or control flow.
       The in-range case is not a harmless one: with a press
       threshold of 8 samples, an idle counter whose bit 3 flips
       already reads as a completed press, and would toggle the
@@ -294,8 +300,9 @@ silicon family:
 +
 [horizontal]
 AVR Classic (ATtiny13a/45/85), ATtiny202, PIC10F322, PIC12F675::
-  enabled (`BYPASS_CTX_CHECK`).  The tightest fit is the PIC10F322
-  relay variant, at 507 of 512 words.
+  enabled (`BYPASS_CTX_CHECK`).  PIC10F322 is the binding capacity
+  case; the transactional image must be measured against its
+  512-word limit during release qualification.
 PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
   shared pure core, so this shell inlines the debounce logic by hand
   and has no `debounce_ctx_check_word()` to call; even the cheapest

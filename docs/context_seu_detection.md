@@ -1,10 +1,9 @@
 # In-range debounce-context SEU detection (F2)
 
-> **Implementation spec / design record.** The firmware edits below are authored
-> by the repository owner. Test, Makefile, and mutation scaffolding follow the
-> firmware, prepared under the owner's guidance (as with F1). Measured numbers
-> come from throwaway scratch builds; no repository firmware was modified to
-> produce them.
+> **Design and evidence record.** The repository owner authored the firmware
+> changes. This document distinguishes the final transaction design and locally
+> executed host evidence from target-toolchain qualification that is still
+> pending.
 
 ## Summary
 
@@ -18,14 +17,23 @@ or bit 4 flips becomes `8` or `16` — both `<= 25` (passes the range gate) and
 That is a **phantom bypass/engage switch with no footswitch press**, invisible to
 every existing guard.
 
-F2 adds a **complemented XOR-fold** shadow of the debounce context, maintained
-alongside the persisted context and verified once per tick, immediately before
-that tick's integrate. Any single-bit flip of any context member — or of the
-shadow byte itself — diverges from the fold and forces a watchdog reset. The
-fold arithmetic lives in the **pure core** (`bypass_pure.c`), so it is
-host-compiled and CBMC/unit-testable in isolation; only the shadow's *storage*,
-the *reset*, and the AVR *ISR/main atomicity* stay in the shells, because those
-are inherently stateful/hardware concerns the stateless pure core cannot own.
+F2 adds a **complemented XOR-fold** shadow of the debounce context and makes
+every enabled shell's use of persisted state transactional. A tick snapshots
+`ctx_`, validates that snapshot against `ctx_check_`, computes only from the
+validated local value, then publishes the successor context and its check word.
+A single-bit upset confined to persisted `ctx_` or `ctx_check_` therefore either
+fails validation and forces watchdog recovery, is safely overwritten by a
+successor derived from the earlier valid snapshot, or remains as a mismatch for
+the next validation. It is never consumed and then legitimized by re-folding
+the corrupted persisted value.
+
+The guarantee is intentionally bounded. It assumes program code, control flow,
+registers, and automatic local objects execute correctly; it does not claim to
+cover a fault in `next_ctx`, `res`, the stack, a CPU register, or an output
+peripheral. The fold arithmetic lives in the **pure core** (`bypass_pure.c`), so
+its static single-bit property is host-compiled and CBMC/unit-testable. Storage,
+transaction boundaries, watchdog recovery, and AVR ISR/main atomicity remain in
+the hardware shells.
 
 ## Decisions (2026-08-17)
 
@@ -33,8 +41,8 @@ are inherently stateful/hardware concerns the stateless pure core cannot own.
 | --- | --- | --- |
 | Representation | Complemented XOR-fold: one byte `= ~(program_state ^ effect_state ^ debounce_counter)` | Detects every single-bit flip in any member or the shadow — identical detection to per-member complement under the single-event threat model — at one byte and one check instead of three. The complement makes the all-zeros stuck-at case non-trivial. |
 | Location of the math | Pure function `debounce_ctx_check_word()` in `bypass_pure.c` | Host- and CBMC-testable single source of truth. |
-| Storage / recovery / atomicity | Shell | The pure core is stateless (takes `ctx` by value, returns a result); it cannot own the SRAM byte that dwells between ticks, nor reset the MCU. It already signals faults via `res.fault`. |
-| Recovery action | `hw_force_wdt_reset()` — reset, **not** restore | When value and shadow disagree, neither is known-good, so there is no safe value to restore to (unlike F1's coil, which has a known idle). |
+| Storage / transaction / recovery | Shell | The pure core is stateless. Each shell owns the persisted pair, snapshots it, validates the snapshot, computes locally, and publishes the successor. |
+| Recovery action | Reset on mismatch; safe overwrite after a valid snapshot | A mismatch has no known-good persisted member. A later upset that was not consumed may instead be overwritten by the already validated transaction. |
 | Member scope | All three members | The fold covers the whole context uniformly. |
 | Enablement | Compile-time opt-in macro `BYPASS_CTX_CHECK` | Makes the per-part decision explicit and lets the mutation harness build a feature-off baseline. |
 | Part scope | **PIC12F675, AVR classic, AVR-XT, PIC10F322** | Every part that links the pure core and has flash room. |
@@ -72,189 +80,99 @@ exercises it) and is referenced by the shells only under `BYPASS_CTX_CHECK`.
 
 ## Shell wiring — PIC polled shells (`pic10f322`, `pic12f675`)
 
-These two are structurally identical (single-owner polled loop, no ISR). The
-unifying rule is: **check the shadow immediately before this tick's integrate;
-re-derive it immediately after all of this tick's mutations.** In the polled
-loop both happen in `main()`.
+These shells have one owner and no ISR. `ctx_` and `ctx_check_` are volatile so
+the transaction performs an actual persisted snapshot and publication. Each
+tick follows this sequence:
 
-**Flash margin note (PIC10F322):** the relay variant lands at 507/512 words —
-**5 free**. To stay within that, follow the shape below exactly. In particular
-fold the new check into the existing `if (...)` OR chain as its **first term**
-(not a separate `if`); a separate branch costs extra words 322 does not have.
+1. Copy `ctx_` to `next_ctx` exactly once.
+2. Compare `ctx_check_` with `debounce_ctx_check_word(next_ctx)` and apply every
+   range/output/SFR guard to `next_ctx`.
+3. Integrate and call `debounce_step()` using only `next_ctx`.
+4. Apply the returned state and lockout to `next_ctx`.
+5. Derive the check from `next_ctx`, then publish `next_ctx` to `ctx_`.
+6. Act on `res` only after that transaction has completed.
 
-1. Storage — after `static debounce_context_t ctx_;`:
+The essential shape is:
 
-   ```c
-   #if defined(BYPASS_CTX_CHECK)
-   // F2 complemented XOR-fold shadow of ctx_ (see debounce_ctx_check_word()).
-   static uint8_t ctx_check_;
-   #endif
-   ```
+```c
+debounce_context_t next_ctx = ctx_;
+if ((ctx_check_ != debounce_ctx_check_word(next_ctx)) ||
+        /* range and hardware guards using next_ctx */) {
+    hw_force_wdt_reset();
+}
 
-2. `init()` — seed the shadow right after `ctx_ = debounce_init_context(...)`:
+next_ctx.debounce_counter = debounce_integrate(
+        hw_read_footswitch(), next_ctx.debounce_counter);
+debounce_step_result_t res = debounce_step(next_ctx);
+/* apply res to next_ctx */
+ctx_check_ = debounce_ctx_check_word(next_ctx);
+ctx_ = next_ctx;
+/* act on res */
+```
 
-   ```c
-   #if defined(BYPASS_CTX_CHECK)
-       ctx_check_ = debounce_ctx_check_word(ctx_);
-   #endif
-   ```
+If persisted SRAM changes after a byte has already been copied, the local
+snapshot remains the computation source and publication overwrites the upset.
+If the changed value enters the snapshot, or survives after publication, the
+context/check pair mismatches and recovery follows. The publication order
+briefly leaves two different generations in SRAM, but no check or consumer runs
+between those stores in these single-owner loops.
 
-3. Sanity gate — add the check as the **first** term of the existing OR chain
-   (before `hw_wait_for_tick()`'s integrate that follows the gate):
-
-   ```c
-           if (
-   #if defined(BYPASS_CTX_CHECK)
-                   (ctx_check_ != debounce_ctx_check_word(ctx_)) ||
-   #endif
-                   (ctx_.program_state > RELEASE_DEBOUNCE_WAIT) ||
-                   (ctx_.debounce_counter > RELEASE_THRESH) ||
-                   /* ...existing terms unchanged... */
-                   (0U == hw_critical_sfrs_intact())
-              ) {
-               hw_force_wdt_reset();
-           }
-   ```
-
-   Putting the guarded term first avoids a dangling trailing `||` when the macro
-   is off.
-
-4. Re-derive — after the state machine is applied for this tick (right after the
-   `if (res.reload_lockout)` block, before the `res.fault`/`res.toggled`
-   handling):
-
-   ```c
-   #if defined(BYPASS_CTX_CHECK)
-           ctx_check_ = debounce_ctx_check_word(ctx_);
-   #endif
-   ```
-
-The gate runs before the integrate, so it validates the value that dwelled since
-the previous tick. The re-derivation runs after integrate + `debounce_step`, so
-the shadow tracks every legitimate change. Between them the shadow is briefly
-stale, but no check runs there.
+**Flash margin note (PIC10F322):** the previous non-transactional F2 image used
+507/512 words in the relay variant. The transactional image must be rebuilt with
+XC8 for every variant before F2 is considered qualified; that measurement was
+not available on the host used for this follow-up.
 
 ## Shell wiring — AVR ISR shells (`avr_classic`, `avr_xt`)
 
-The AVR shells keep the integrator **in the timer ISR** (deliberately — the
-relay's 12 ms block would otherwise starve main-loop sampling). This changes
-where the check must live and is the reason the AVR wiring is more involved than
-the PIC's:
+The AVR shells keep integration in the timer ISR so a blocking relay pulse does
+not starve sampling. Both the ISR and `main()` therefore own a complete
+transaction:
 
-- The ISR reads-modifies-writes `debounce_counter` every tick. If the shadow
-  were re-derived unconditionally after the integrate, a dwell-time SEU on the
-  counter would be folded in and **blessed** — F2 defeated. So the check must
-  run **at the top of the ISR, before the integrate**, on the value that
-  dwelled.
-- `main()` legitimately changes `program_state`/`effect_state` (and the lockout
-  counter) after `debounce_step()`. That makes the shadow stale until re-derived;
-  if the ISR fired mid-update it would see a half-applied legitimate change as
-  corruption. So `main()`'s apply-and-re-derive must be **atomic** w.r.t. the
-  ISR.
+- The ISR snapshots `ctx_`, validates that snapshot, integrates only the local
+  counter, derives the check from the local successor, and publishes only the
+  counter. A mismatch skips integration and publication. `main()` then observes
+  the unchanged mismatched pair and enters watchdog recovery.
+- `main()` enters `ATOMIC_BLOCK(ATOMIC_RESTORESTATE)` before taking its snapshot.
+  The block validates, runs `debounce_step()`, applies the result locally,
+  derives the check from the local successor, and publishes the whole context.
+  Disabling interrupts makes this one transaction with respect to the ISR.
+- The watchdog is petted only after a valid main transaction. Output actuation
+  uses `res`, which was derived from that validated local snapshot.
 
-Both AVR shells have ample flash and RAM for this (+2 SRAM bytes). Use the
-"ISR sets a fault flag, main acts" handshake already used for `timer_isr_called_`,
-so every reset still originates in `main()`.
+The essential ISR shape is:
 
-1. Include (top of file, near `<avr/interrupt.h>`):
+```c
+debounce_context_t next_ctx = ctx_;
+if (ctx_check_ == debounce_ctx_check_word(next_ctx)) {
+    next_ctx.debounce_counter = debounce_integrate(
+            hw_read_footswitch(), next_ctx.debounce_counter);
+    ctx_check_ = debounce_ctx_check_word(next_ctx);
+    ctx_.debounce_counter = next_ctx.debounce_counter;
+}
+```
 
-   ```c
-   #include <util/atomic.h>   // ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-   ```
+The essential main-loop shape is:
 
-2. Storage — alongside `ctx_` (both `volatile`, shared with the ISR):
+```c
+debounce_step_result_t res;
+ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    debounce_context_t next_ctx = ctx_;
+    timer_isr_called_ = TIMER_ISR_NOT_CALLED;
+    if (ctx_check_ != debounce_ctx_check_word(next_ctx)) {
+        hw_force_wdt_reset();
+    }
+    res = debounce_step(next_ctx);
+    /* apply res to next_ctx */
+    ctx_check_ = debounce_ctx_check_word(next_ctx);
+    ctx_ = next_ctx;
+}
+hw_wdt_pet();
+/* act on res */
+```
 
-   ```c
-   #if defined(BYPASS_CTX_CHECK)
-   static volatile uint8_t ctx_check_;   // complemented XOR-fold shadow of ctx_
-   static volatile uint8_t ctx_fault_;   // set by the ISR, consumed by main's gate
-   #endif
-   ```
-
-3. `init()` — seed the shadow after `ctx_ = debounce_init_context(...)` (interrupts
-   are still off here, so no atomic block is needed):
-
-   ```c
-   #if defined(BYPASS_CTX_CHECK)
-       ctx_check_ = debounce_ctx_check_word(ctx_);
-       ctx_fault_ = 0U;
-   #endif
-   ```
-
-4. Timer ISR — check the dwelled context **before** integrating; on mismatch
-   raise the fault flag and skip this tick's integrate/re-derive (so nothing acts
-   on known-bad data); otherwise integrate and re-derive:
-
-   ```c
-   ISR(TIM0_COMPA_vect) {              // TCB0_INT_vect on avr_xt
-       timer_isr_called_ = TIMER_ISR_CALLED;
-   #if defined(BYPASS_CTX_CHECK)
-       if (ctx_check_ != debounce_ctx_check_word(ctx_)) {
-           ctx_fault_ = 1U;
-           return;                     // main's gate forces recovery next tick
-       }
-   #endif
-       ctx_.debounce_counter = debounce_integrate(
-               hw_read_footswitch(),
-               ctx_.debounce_counter);
-   #if defined(BYPASS_CTX_CHECK)
-       ctx_check_ = debounce_ctx_check_word(ctx_);
-   #endif
-   }
-   ```
-
-5. `main()` gate — consume the flag (a single-byte volatile read is atomic on
-   AVR, so no atomic block is needed here). Place it as the first check, before
-   the existing range gate:
-
-   ```c
-   #if defined(BYPASS_CTX_CHECK)
-           if (ctx_fault_ != 0U) {
-               hw_force_wdt_reset();
-           }
-   #endif
-           if ( (ctx_.program_state > RELEASE_DEBOUNCE_WAIT) ||
-                /* ...existing range gate unchanged... */ ) {
-               hw_force_wdt_reset();
-           }
-   ```
-
-6. `main()` service block — wrap the apply-and-re-derive in one atomic block so
-   the ISR cannot observe a half-applied legitimate change:
-
-   ```c
-           if (TIMER_ISR_CALLED == timer_isr_called_) {
-               timer_isr_called_ = TIMER_ISR_NOT_CALLED;
-               hw_wdt_pet();
-
-               debounce_step_result_t const res = debounce_step(ctx_);
-
-   #if defined(BYPASS_CTX_CHECK)
-               ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-                   ctx_.program_state = res.program_state;
-                   ctx_.effect_state  = res.effect_state;
-                   if (res.reload_lockout) {
-                       ctx_.debounce_counter = res.lockout_value;
-                   }
-                   ctx_check_ = debounce_ctx_check_word(ctx_);
-               }
-   #else
-               ctx_.program_state = res.program_state;
-               ctx_.effect_state  = res.effect_state;
-               if (res.reload_lockout) {
-                   ctx_.debounce_counter = res.lockout_value;
-               }
-   #endif
-
-               if (res.fault) { hw_force_wdt_reset(); }
-               else if (res.toggled) { /* ...unchanged... */ }
-               else { /* ...unchanged... */ }
-           }
-   ```
-
-The ISR's top-of-ISR check and the PIC's gate check are the same principle —
-"validate the dwelled context immediately before integrating it" — placed
-wherever the integrate happens (main on PIC, ISR on AVR).
+This design needs only `ctx_check_`; the former `ctx_fault_` handshake is gone.
+The atomic block is still required, but now encloses snapshot, validation,
+computation, and publication rather than only apply-and-re-derive.
 
 ## PIC10F320 — excluded, and why that is safe
 
@@ -270,70 +188,67 @@ symbol. Mixing the feature onto only 320's lighter `cd4053_simple` variant
 (36 free) was considered and rejected: per-variant-within-a-part inconsistency is
 worse than a clean part-level line.
 
-## Enablement (Makefile, mine, under owner guidance)
+## Enablement
 
-Add `-DBYPASS_CTX_CHECK` to the CFLAGS of the four enabled parts only:
+`-DBYPASS_CTX_CHECK` is present in the CFLAGS of the four enabled parts:
 `PIC10F322_CFLAGS`, `PIC12F675_CFLAGS`, and the AVR classic + AVR-XT flag sets.
 Do **not** add it to `PIC10F320_CFLAGS`. `bypass_pure.c` always compiles the pure
 function regardless (the host suite links it unconditionally).
 
-## Measured flash / RAM budget (XC8 v3.10 `-O2`, worst-case relay variant)
+## Resource qualification
 
-| Part | Budget | Baseline | With F2 | Free | Notes |
-| --- | --- | --- | --- | --- | --- |
-| PIC10F322 relay | 512 w | 476 | **507** | **5** | at the edge — the shape above is required |
-| PIC10F322 mute | 512 w | 473 | 504 | 8 | |
-| PIC10F322 simple | 512 w | 447 | 478 | 34 | |
-| PIC12F675 (all) | 1024 w | ~526 | ~557 | ~467 | comfortable |
-| AVR classic (tiny13a) | 1024 B | 760 B | fits | >100 B under ceiling | +2 SRAM bytes |
-| AVR-XT (tiny202) | 2048 B | — | fits | ample | +2 SRAM bytes |
-| PIC10F320 | 256 w | 245 | **overflow** | — | **excluded** |
+The last XC8 v3.10 measurement predates the transaction fix:
 
-The `+31`-word PIC figure is implementation-shape-specific. **The owner must
-rebuild PIC10F322 immediately after implementing** and confirm relay is still
-`<= 512`; if it comes in heavier than the prototype, we trim the shape or
-revisit 322 (its pre-blessed fallback is an in-shell inline-macro version at
-14 free, or deferral).
+| Part | Budget | Pre-transaction F2 image | Status now |
+| --- | --- | --- | --- |
+| PIC10F322 relay | 512 words | 507 words | Transactional image not yet measured |
+| PIC10F322 mute | 512 words | 504 words | Transactional image not yet measured |
+| PIC10F322 simple | 512 words | 478 words | Transactional image not yet measured |
+| PIC10F320 relay | 256 words | Fold overflowed | Excluded, unchanged |
 
-## Test & mutation plan (mine, after the firmware lands)
+The transaction removes the former AVR `ctx_fault_`, so persistent F2 storage is
+one check byte rather than two bytes. Automatic `next_ctx`/`res` objects may
+change stack and code size; AVR image/RAM/stack gates and every XC8 image-size
+gate must therefore be rerun rather than inferred from the previous build.
 
-- **Host/CBMC (`debounce_ctx_check_word`)**: unit-test the fold value and the
-  complement; prove that flipping any single bit of any member changes the
-  returned word (single-bit detection). This is the payoff of putting the math in
-  the pure core.
-- **gpsim (`pic10f322`, `pic12f675`)**: add an **in-range** injection case
-  alongside the existing out-of-range `0xFF` case — flip `debounce_counter`
-  `0 -> 0x10` (bit 4; `16 <= RELEASE_THRESH`, so it passes the range gate) and
-  assert a reset via the new fold term. The Makefile extracts the `ctx_check_`
-  SRAM address from the `.sym`, as it already does for `CTX_ADDR`.
-- **simavr (`avr_classic`) / yasimavr (`attiny202`)**: inject an in-range counter
-  flip and assert the ISR-side check forces recovery; confirm no false reset in a
-  clean soak (the atomicity is correct).
-- **Mutation** (`test/run_mutation_tests.sh`): delete the check (in-range flip
-  survives -> phantom toggle, no reset -> killed by the new in-range test); delete
-  a re-derivation (init / ISR / main -> false reset in normal operation -> killed
-  by the clean soak/sim); weaken the comparison -> killed. Update expected counts.
-- **320 exclusion**: assert the PIC10F320 images do not reference
-  `debounce_ctx_check_word` and that `BYPASS_CTX_CHECK` is undefined there.
-- **Budgets**: re-verify flash (322 at the edge), RAM, stack, and MISRA for every
-  enabled part/variant (F2 acceptance criterion 5).
+## Test and mutation evidence
+
+- **Pure host/CBMC:** existing unit and formal checks prove the fold changes for
+  each single-bit context-member upset and equals the specified complemented
+  XOR expression. This is a static pair-at-validation property, not the temporal
+  transaction proof.
+- **PIC shipping-source host harness:** a one-shot bit-4 counter upset is injected
+  from inside the successful check call, after the healthy by-value argument was
+  captured. Both PIC shells must overwrite it without an output change or a
+  live-global re-fold.
+- **Classic AVR simavr:** one-shot cases stop at the ISR check call and at
+  `debounce_step()` in main, covering both transaction owners.
+- **AVR-XT yasimavr:** equivalent ISR and main one-shot mechanisms are pinned in
+  the 24-injection fault matrix, plus the healthy negative control.
+- **Mutation:** transaction-seam mutants make AVR integration consume live
+  `ctx_` and make each PIC publication re-fold live `ctx_`; the one-shot probes
+  must kill them. Existing fold and missing-check mutants remain.
+- **PIC10F320 exclusion:** the mutation runner asserts that its shell does not
+  reference `debounce_ctx_check_word` and that `BYPASS_CTX_CHECK` is undefined
+  there.
+
+The host PIC coverage lanes and host-only ATtiny fault-oracle validation pass on
+the follow-up host. simavr, yasimavr, avr-gcc, XC8, gpsim, CBMC, target resource
+gates, and the complete mutation run still require a fully provisioned host.
 
 ## Acceptance-criteria mapping (F2)
 
-1. In-range single-bit flips of `program_state`, `effect_state`, and
-   `debounce_counter` force recovery before an unintended output transition —
-   the fold covers all three; the check runs before the integrate/step that could
-   act on them.
-2. Every legitimate update maintains the redundant representation — re-derivation
-   after init, after the PIC loop's mutations, and (AVR) in the ISR after
-   integrate and in `main()`'s atomic apply.
-3. AVR ISR/main interleavings cannot produce a false mismatch — the ISR is the
-   sole counter+shadow writer per tick (check-then-integrate-then-re-derive with
-   early-out), and `main()`'s apply+re-derive is atomic.
-4. Mutation kills a missing update and a weakened comparison — see the mutation
-   plan.
-5. Flash, RAM, stack, MISRA, and qualification stay within budget — measured;
-   322 is the binding case at 5 free and must be re-verified on landing.
+1. A single-bit upset confined to persisted `ctx_`/`ctx_check_` is detected or
+   safely overwritten; no transaction consumes and re-folds the upset.
+2. Output actuation is based only on `res` from a validated local snapshot.
+3. AVR ISR and main transactions cannot interleave because main's complete
+   transaction is inside `ATOMIC_BLOCK`; clean dynamic simulation must confirm
+   that this introduces no false reset.
+4. One-shot post-check probes and transaction-seam mutants provide the temporal
+   evidence; repeated favorable-phase injection is not accepted as proof.
+5. Full flash, RAM, stack, MISRA, mutation, simulator, and shipping-source
+   qualification remains required. In particular, no pre-transaction
+   PIC10F322 size can establish the 512-word fit.
 
 ## Related
 

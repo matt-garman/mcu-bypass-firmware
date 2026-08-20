@@ -15,6 +15,7 @@
 
 #include "xc.h"
 #include "fw_coverage_harness.h"
+#include "bypass_pure.h"
 
 #define FW_FAULT_TIMEOUT_MS 120
 #define FW_DRIVE_TIMEOUT_MS 2000
@@ -56,7 +57,7 @@ PIR1bits_t *bypass_pir1(void) {
 
 void bypass_on_delay_ms(unsigned ms) { (void)ms; }
 
-typedef enum { MODE_DRIVE, MODE_FAULT } harness_mode_t;
+typedef enum { MODE_DRIVE, MODE_FAULT, MODE_CTX_WINDOW } harness_mode_t;
 static harness_mode_t g_mode;
 static sigjmp_buf      g_jmp;
 static int             g_clrwdt_calls;
@@ -65,6 +66,9 @@ static int             g_n;
 static int             g_tick;
 static uint8_t         g_last_lata;
 static int             g_inject;
+static int             g_ctx_check_calls;
+static int             g_ctx_window_injections;
+static int             g_ctx_window_result;
 
 static void set_footswitch(int pressed) {
 #if defined(BYPASS_MCU_PIC12F675)
@@ -133,11 +137,32 @@ static int disarm_timer(void) {
     return setitimer(ITIMER_REAL, &it, NULL) == 0;
 }
 
+static uint8_t fwp_ctx_check_word(debounce_context_t ctx);
+
+// Interpose on the shell's check-word calls. The real pure-core function stays
+// separately linked and is called by the wrapper below.
+#define debounce_ctx_check_word fwp_ctx_check_word
 #if defined(BYPASS_MCU_PIC12F675)
 #  include "../../../src/bypass_mcu_pic12f675.c"
 #else
 #  include "../../../src/bypass_mcu_pic10f322.c"
 #endif
+#undef debounce_ctx_check_word
+
+static uint8_t fwp_ctx_check_word(debounce_context_t ctx) {
+    uint8_t const word = debounce_ctx_check_word(ctx);
+
+    g_ctx_check_calls++;
+    if (g_mode == MODE_CTX_WINDOW && g_ctx_check_calls == 2) {
+        // The argument above already captured the healthy context. Corrupt the
+        // persisted counter before the shell's next operation. The old shell
+        // consumes and re-folds this value; a transaction must use its local
+        // validated snapshot and safely overwrite or retain a mismatch.
+        ctx_.debounce_counter ^= 0x10u;
+        g_ctx_window_injections++;
+    }
+    return word;
+}
 
 // FWI_VALID_ENGAGED is the one injection that must NOT be caught: it writes a
 // state the firmware could legitimately be in. That means writing F2's check
@@ -260,6 +285,25 @@ void bypass_coverage_on_clrwdt(void) {
         return;
     }
 
+    if (g_mode == MODE_CTX_WINDOW) {
+        uint8_t output_high;
+#if defined(BYPASS_MCU_PIC12F675)
+        output_high = (uint8_t)(GPIO & 0x01u);
+#else
+        output_high = (uint8_t)(LATA & 0x01u);
+#endif
+        g_ctx_window_result =
+            (g_ctx_window_injections == 1 &&
+             g_ctx_check_calls >= 3 &&
+             ctx_.program_state == PRESS_DEBOUNCE_WAIT &&
+             ctx_.effect_state == BYPASS &&
+             ctx_.debounce_counter == 0u &&
+             output_high == 0u &&
+             ctx_check_ == debounce_ctx_check_word(ctx_)) ? 0 : 1;
+        disarm_timer();
+        siglongjmp(g_jmp, 1);
+    }
+
     if (g_clrwdt_calls == 2) {
         apply_injection(g_inject);
         return;
@@ -285,6 +329,28 @@ int fw_fault_run(fw_inject_t inj) {
     if (!disarm_timer()) return -1;
     if (sj == 2) return (INTCONbits.GIE == 0u) ? 1 : -1;
     return 0;
+}
+
+int fw_ctx_window_run(void) {
+    reset_sfrs_power_on();
+    g_mode = MODE_CTX_WINDOW;
+    g_clrwdt_calls = 0;
+    g_ctx_check_calls = 0;
+    g_ctx_window_injections = 0;
+    g_ctx_window_result = -1;
+    set_footswitch(0);
+    if (!install_alarm()) return -1;
+
+    int sj = sigsetjmp(g_jmp, 1);
+    if (sj == 0) {
+        if (!arm_timer_ms(FW_DRIVE_TIMEOUT_MS)) return -1;
+        fw_main();
+        (void)disarm_timer();
+        return -1;
+    }
+    if (!disarm_timer()) return -1;
+    if (sj == 2) return -1;
+    return g_ctx_window_result;
 }
 
 uint8_t fw_drive(const uint8_t *fsw, int n) {

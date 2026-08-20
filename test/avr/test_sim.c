@@ -281,6 +281,9 @@ static uint32_t    g_addr_debounce      = 0;
 // state as a single file-scope context object (`ctx`) instead of three separate
 // globals. The per-field addresses above are then derived from this base.
 static uint32_t    g_addr_ctx           = 0;
+static uint32_t    g_addr_ctx_check     = 0;
+static uint32_t    g_addr_ctx_check_fn  = 0;
+static uint32_t    g_addr_debounce_step_fn = 0;
 // First SRAM byte ABOVE the static data (.data + .bss), from the linker's
 // __bss_end / _end. This is the ceiling the stack must not reach, and it is the
 // reference point for the stack high-water-mark margin. Taken from the ELF
@@ -406,6 +409,23 @@ static void run_cycles(avr_cycle_count_t cycles) {
     }
 }
 
+// Stop before executing the instruction at `pc`. Used by the F2 transaction
+// test to inject after debounce_ctx_check_word() has received its healthy
+// by-value argument but before the shell resumes and consumes persisted SRAM.
+static int run_until_pc(uint32_t pc, avr_cycle_count_t cycle_budget)
+    __attribute__((unused));
+static int run_until_pc(uint32_t pc, avr_cycle_count_t cycle_budget) {
+    avr_cycle_count_t const deadline = g_avr->cycle + cycle_budget;
+    while (g_avr->cycle < deadline) {
+        if (g_avr->pc == pc) return 0;
+        int const st = avr_run(g_avr);
+        if (st == cpu_Sleeping) { g_saw_sleep = 1; }
+        if (st == cpu_Crashed)  { g_saw_crash = 1; return -1; }
+        if (st == cpu_Done) return -1;
+    }
+    return (g_avr->pc == pc) ? 0 : -1;
+}
+
 // Run until the CPU first enters IDLE sleep (which only happens in the main
 // loop AFTER init() completes and the state machine has nothing to do), or
 // until `cycle_budget` cycles elapse. Returns the cycle count at which sleep
@@ -465,6 +485,8 @@ static int sim_reset_raw(int footsw_pressed_at_power_on, int settle) {
     // SRAM index used by g_avr->data[].
     g_addr_program_state = g_addr_effect_state = 0;
     g_addr_timer_isr = g_addr_debounce = g_addr_ctx = 0;
+    g_addr_ctx_check = g_addr_ctx_check_fn = 0;
+    g_addr_debounce_step_fn = 0;
     g_addr_bss_end = 0;
 #if defined(ELF_SYMBOLS) && ELF_SYMBOLS
     uint32_t addr_end_fallback = 0;
@@ -477,6 +499,11 @@ static int sim_reset_raw(int footsw_pressed_at_power_on, int settle) {
         else if (strcmp(name, "debounce_counter_") == 0) g_addr_debounce      = a;
         else if (strcmp(name, "ctx")               == 0) g_addr_ctx           = a;
         else if (strcmp(name, "ctx_")              == 0) g_addr_ctx           = a;
+        else if (strcmp(name, "ctx_check_")        == 0) g_addr_ctx_check     = a;
+        else if (strcmp(name, "debounce_ctx_check_word") == 0)
+            g_addr_ctx_check_fn = a;
+        else if (strcmp(name, "debounce_step")           == 0)
+            g_addr_debounce_step_fn = a;
         // Top of the static data. avr-libc's linker script emits both; prefer
         // __bss_end and keep _end only as a fallback, since _end also moves with
         // the (unused here) heap base on parts that have one.
@@ -1533,19 +1560,16 @@ static void test_fault_inject_effect_state(void) {
 // value that the main-loop range gate cannot see. 0x10 = 16, with
 // PRESSED_THRESH(8) <= 16 <= RELEASE_THRESH(25), so `debounce_counter >
 // RELEASE_THRESH` stays false -- the pre-F2 firmware would silently phantom-
-// toggle on this. The ONLY detector is the ISR-side complemented XOR-fold
-// shadow: once poked, ctx_check_ != debounce_ctx_check_word(ctx_), so the next
-// timer ISR sets ctx_fault_ and main's loop-top gate forces the reset. This
-// exercises the ISR-side F2 path specifically (the sibling range/SFR cases above
-// are all caught by main()'s polled gate).
+// toggle on this. The next ISR snapshots the mismatched persisted pair and skips
+// integration; its timer handshake wakes main, whose atomic transaction validates
+// the same pair and forces reset. This exercises the retained-fault path (the
+// sibling range/SFR cases above are caught by main()'s polled gate).
 //
 // The poke MUST land while the core is IDLE-asleep right after a serviced tick
 // -- run_one_tick_settled(0) leaves it exactly there with the shadow synced --
 // so the very next event is the timer ISR, which performs the F2 comparison
-// BEFORE main can re-derive and re-sync the shadow. An in-range value is
-// invisible to the range gate, so injecting at an arbitrary phase would risk
-// main's ATOMIC_BLOCK re-derive laundering the poke (or a transient phantom
-// toggle); anchoring to the sleep boundary makes detection deterministic.
+// before any legitimate transaction can overwrite it. This remains the
+// favorable-phase control beside the post-check transaction test below.
 static void test_fault_inject_ctx_debounce_inrange(void) {
     if (sim_reset(0) != 0) { g_failures++; return; }
     CHECK(g_addr_debounce != 0,
@@ -1585,6 +1609,63 @@ static void test_fault_inject_ctx_debounce_inrange(void) {
     CHECK(g_led_level == 0,
           "fault-inject [ctx.debounce in-range]: reset recovered, LED dark "
           "(reinit BYPASS)");
+}
+
+// Inject one in-range counter upset after a healthy by-value argument has been
+// captured. The ISR case stops in its successful check-word call; the main case
+// stops in debounce_step() after validation and snapshot capture. Both
+// transactions must finish from that local snapshot and safely overwrite the
+// persisted upset. The old implementation resumed by consuming or folding live
+// ctx_, which legitimized the corruption and eventually phantom-toggled.
+static void test_fault_inject_ctx_transaction_phase(int main_phase) {
+    if (sim_reset(0) != 0) { g_failures++; return; }
+    CHECK(g_addr_ctx != 0 && g_addr_ctx_check != 0 &&
+               g_addr_ctx_check_fn != 0 && g_addr_debounce_step_fn != 0,
+          "fault-inject [ctx transaction]: required symbols were not resolved");
+    if (g_addr_ctx == 0 || g_addr_ctx_check == 0 ||
+            g_addr_ctx_check_fn == 0 || g_addr_debounce_step_fn == 0) return;
+
+    char const *const phase = main_phase ? "main post-check" : "ISR post-check";
+    uint32_t const target = main_phase ? g_addr_debounce_step_fn
+                                       : g_addr_ctx_check_fn;
+
+    CHECK(run_one_tick_settled(0) == 0,
+          "fault-inject [ctx %s]: could not settle at tick boundary", phase);
+    CHECK(g_avr->data[g_addr_program_state] == 0U &&
+               g_avr->data[g_addr_effect_state] == 0U &&
+               g_avr->data[g_addr_debounce] == 0U &&
+               g_avr->data[g_addr_ctx_check] == 0xFFU,
+          "fault-inject [ctx %s]: initial context/check not canonical", phase);
+
+    uint32_t const led_changes_before = g_led_changes;
+    uint32_t const ctl2_changes_before = g_ctl_changes[CTL_PB2];
+    uint32_t const ctl3_changes_before = g_ctl_changes[CTL_PB3];
+    CHECK(run_until_pc(target,
+                        (avr_cycle_count_t)(2UL * CYCLES_PER_MS)) == 0,
+          "fault-inject [ctx %s]: transaction seam not reached", phase);
+    if (g_avr->pc != target) return;
+
+    // Exactly one persisted single-bit flip after the healthy argument capture.
+    avr_core_watch_write(g_avr, g_addr_debounce, 0x10U);
+    CHECK(g_avr->data[g_addr_debounce] == 0x10U,
+          "fault-inject [ctx %s]: injection did not stick", phase);
+    run_ms(20);
+
+    CHECK(g_avr->data[g_addr_program_state] == 0U &&
+               g_avr->data[g_addr_effect_state] == 0U &&
+               g_avr->data[g_addr_debounce] == 0U &&
+               g_avr->data[g_addr_ctx_check] == 0xFFU,
+          "fault-inject [ctx %s]: upset changed or was folded into context", phase);
+    CHECK(g_led_level == 0 && g_led_changes == led_changes_before,
+          "fault-inject [ctx %s]: LED changed before safe overwrite", phase);
+    CHECK(g_ctl_changes[CTL_PB2] == ctl2_changes_before &&
+               g_ctl_changes[CTL_PB3] == ctl3_changes_before,
+          "fault-inject [ctx %s]: control output changed before safe overwrite", phase);
+}
+
+static void test_fault_inject_ctx_postcheck_transaction(void) {
+    test_fault_inject_ctx_transaction_phase(0);
+    test_fault_inject_ctx_transaction_phase(1);
 }
 
 // Corrupt timer_isr_called_ to an out-of-range value
@@ -1991,6 +2072,7 @@ static void run_fault_injection_suite(void) {
     test_fault_inject_program_state();
     test_fault_inject_effect_state();
     test_fault_inject_ctx_debounce_inrange(); // F2 ISR-path (both families)
+    test_fault_inject_ctx_postcheck_transaction(); // F2 post-check window
 #ifdef TARGET_TINYX5
     test_fault_inject_timer_isr_flag();
     test_fault_inject_stack_pointer();

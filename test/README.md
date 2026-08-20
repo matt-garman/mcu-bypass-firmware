@@ -335,7 +335,7 @@ The split mirrors the PIC lanes: **the host-only rows below are members of
 | Coil-pulse width | `attiny202-delay-oracle` | Compiled relay (12 ms) and mute (5 ms) delay-body cycle counts, recovered from the disassembled `_delay_ms` loop in the built image, match design and clear the 4 ms datasheet minimum. Timer-ISR preemption makes the edge-to-edge pin-high interval slightly longer. Every recognized loop candidate must provide a decodable 16-bit seed; no candidate can be dropped as missing evidence. | host, over real image |
 | Static analysis | `attiny202-analyze` | cppcheck + MISRA pass over the AVR-XT shell with real DFP/avr-libc headers. | host tools |
 | Register-level functional | `attiny202-sim` | The real image toggles on debounced press, boots dark with the WDT locked and `PORTA.DIR` exact, stays stable at idle, handles a switch held through power-on, and drives the correct PA2/PA3 sequence per variant. | yasimavr |
-| Fault recovery | `attiny202-fault` | 22 guarded SFR/latch/state/pin-polarity corruptions each produce the correct response — the sanity gate's force-reset path, or a witnessed watchdog reset for the tick timer itself. Includes an independent `INVEN` injection on all five bonded application pins, which `OUT` readback alone cannot see. Zero skips, exact completion accounting over 23 results. | yasimavr |
+| Fault recovery | `attiny202-fault` | 24 guarded SFR/latch/state/pin-polarity corruptions each produce the correct response — the sanity gate's force-reset path, a witnessed watchdog reset for the tick timer itself, or safe overwrite at the ISR/main persisted-context transaction seams. Includes an independent `INVEN` injection on all five bonded application pins. Zero skips, exact completion accounting over 25 results. | yasimavr |
 | Firmware/model lock-step | `attiny202-lockstep` | `ctx_` in simulated SRAM equals the shipping core's state after **every settled tick**, over both boot scenarios, plus LED and settled control-line agreement. Catches a shell defect on the tick it happens rather than as a wrong output later. | yasimavr + host core via ctypes |
 <!-- name-contract: exempt (SOAK_RESULT is the driver's stdout token, not a make variable) -->
 | Liveness soak | `attiny202-soak` | Over a long run the watchdog never resets the device (GPR0 reset witness), the sanity gate never force-resets, and a periodic 2-press round-trip still toggles. Emits the shared `SOAK_RESULT` release contract. | yasimavr |
@@ -355,7 +355,7 @@ ultimately validated on a real part at the bench.
   one instruction's worth of cycles per call, and at `run(1)` every instruction
   is billed exactly 1 cycle.
 
-  Nothing in the suite advances that way any more. The output tracer used to
+  No timing or pulse-width assertion advances that way any more. The output tracer used to
   sample pin state one cycle at a time, which made a busy-wait `_delay_ms` loop
   trace at about half its real duration (a 12 ms coil pulse as ~6 ms); it now
   free-runs in millisecond budgets and timestamps pin edges from a signal hook,
@@ -378,7 +378,11 @@ ultimately validated on a real part at the bench.
   Earlier revisions of this note attributed the halving to a "flat one cycle per
   instruction" core with no multi-cycle timing model — that diagnosis was wrong,
   and was itself an artifact of measuring by single-stepping through the same
-  bug.
+  bug. The fault driver has one deliberate non-timing exception: its persisted-
+  context transaction probe uses `run(1)` only to expose every instruction PC
+  and stop at an exact function-entry seam. Its bound is an instruction-step
+  count, and all behavioral/output observations run afterward in normal
+  millisecond budgets; no timing claim is derived from those steps.
 - **The force-reset spin cannot be observed completing.** The shell's
   unrecoverable path is `cli; for(;;){}`, and yasimavr treats an interrupts-off
   infinite loop as a terminal halt, stopping before the ~256 ms watchdog would
@@ -414,8 +418,10 @@ and each `T0IF` access supplies the next of the four polled TMR0 subticks. Runti
 checks pin the implementation-defined host bitfield layout before it can count
 as firmware evidence.
 
-Every output variant runs an exact 85-check predicate, fault, and happy-path
-matrix. The coverage oracle then requires every executable line in all five
+Every output variant runs an exact 86-check base predicate, fault, happy-path,
+and post-check transaction matrix. The relay variant runs 92 checks because its
+six correct-in-place cases each add a settled-output assertion. The coverage
+oracle then requires every executable line in all five
 shipping sources except one exact, documented defense-in-depth call: invalid
 context is caught by the main-loop range gate before `debounce_step()` can
 return `res.fault`. The live sanity-gate call to `hw_force_wdt_reset()` is a
@@ -687,10 +693,12 @@ the reset. The soak's reset witness records it in `watchdog_failures`. This
 gives the Classic AVR the soak-lane mutant the PIC and ATtiny202 families
 already had.
 
-**PIC12F675 mutants are one table, not three, and are chosen for what this part
-has that the 10F32x parts do not.** All 20 need XC8 plus gpsim or libgpsim plus
-the derived simulator images, so there is no host-only lane for them to fall
-back to and nothing to split. Copying the 322's list would mostly have re-proved
+**PIC12F675's target-tool mutants are one table, not three, and are chosen for
+what this part has that the 10F32x parts do not.** All 22 need XC8 plus gpsim or
+libgpsim plus the derived simulator images, so there is nothing useful to split
+within that table. F2 separately adds one transaction-seam mutant to the
+core/host table because the shipping-source coverage harness can now kill that
+specific shell fault without XC8. Copying the 322's target list would mostly have re-proved
 the shared pure core, so the set targets the SRAM output shadow (a severed
 write-back, each of shadow-versus-expected and port-versus-shadow independently
 turned into a tautology, and physical divergence the 322 cannot express because
@@ -726,10 +734,10 @@ current shape — the merge-time 74-mutant run, the audit that invalidated one
 kill, and the sandbox gaps that briefly cut it to 56 — is recorded in
 `docs/pic10f320_validation.md` §5.
 
-The driver independently pins the eight mutation categories at **24 core/AVR +
-19 AVR-XT + 29 PIC10F320 host + 11 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 8
-PIC target + 20 PIC12F675 = 118**. It rejects category drift before probing, then
-requires dispatched + skipped = 118 and killed + survived + errored = dispatched. Every
+The driver independently pins the eight mutation categories at **30 core/host +
+22 AVR-XT + 29 PIC10F320 host + 11 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 10
+PIC target + 22 PIC12F675 = 131**. It rejects category drift before probing, then
+requires dispatched + skipped = 131 and killed + survived + errored = dispatched. Every
 worker status is checked; result status/output pairs are atomically published
 and accepted only with exact text grammar and no missing, hidden, or extra
 artifacts.

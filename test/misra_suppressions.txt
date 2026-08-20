@@ -112,8 +112,9 @@ misra-c2012-2.5:src/bypass_mcu_pic10f320.c
 
 # --- D-5: avr-libc ATOMIC_BLOCK vendor macro (Rules 12.3, 14.2; unreadVariable) ---
 # The F2 context-SEU feature (BYPASS_CTX_CHECK, docs/context_seu_detection.md)
-# needs main()'s apply-and-re-derive to be atomic w.r.t. the timer ISR, so the two
-# AVR ISR shells use avr-libc's ATOMIC_BLOCK(ATOMIC_RESTORESTATE) from
+# needs main()'s snapshot-through-publish transaction to be atomic w.r.t. the
+# timer ISR, so the two AVR ISR shells use avr-libc's
+# ATOMIC_BLOCK(ATOMIC_RESTORESTATE) from
 # <util/atomic.h> -- the recommended idiom for interrupt-atomic access. It expands
 # to a run-once for-loop whose init clause uses the comma operator (12.3) and a
 # __cleanup__-attributed SREG-save local, so the addon reports a non-well-formed

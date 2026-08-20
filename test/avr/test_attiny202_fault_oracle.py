@@ -48,7 +48,7 @@ def check(condition, message):
         sys.stderr.write("FAIL: %s\n" % message)
 
 
-def finalize(declared, results=24, injections=23, skips=0):
+def finalize(declared, results=25, injections=24, skips=0):
     checker = driver.Checker()
     checker.results = results
     checker.injections = injections
@@ -60,6 +60,9 @@ def finalize(declared, results=24, injections=23, skips=0):
 
 class Probe:
     addr_ctx = 0x3F80
+    addr_ctx_check = 0x3F84
+    addr_ctx_check_fn = 0x0200
+    addr_debounce_step_fn = 0x0300
     addr_timer_isr = 0x3F83
 
 
@@ -81,7 +84,10 @@ expected_cases = (
     ("ctx_.program_state",     "ram", 0x3F80, 0xFF, "gate"),
     ("ctx_.effect_state",      "ram", 0x3F81, 0xFF, "gate"),
     ("ctx_.debounce_counter",  "ram", 0x3F82, 0xFF, "gate"),
-    ("ctx_.debounce_counter(in-range F2)", "ram", 0x3F82, 0x10, "retry_gate"),
+    ("ctx_.debounce_counter(in-range F2 ISR)", "ram", 0x3F82, 0x10,
+     "transaction_isr"),
+    ("ctx_.debounce_counter(in-range F2 main)", "ram", 0x3F82, 0x10,
+     "transaction_main"),
     ("timer_isr_called_",       "ram", 0x3F83, 0xFF, "retry_gate"),
     ("TCB0.CTRLB(mode)",       "reg",   0x0A41, 0x10,   "gate"),
     ("TCB0.CCMP(period)",      "reg16", 0x0A4C, 0x0FFF, "gate"),
@@ -132,17 +138,17 @@ check((direction_values["PORTA.DIR(footswitch)"] & 0x0E) == 0x0E
       and (direction_values["PORTA.DIR(spare PA6)"] & 0x0E) == 0x0E,
       "exact-direction faults must preserve every caller-requested output bit")
 
-check(driver.EXPECTED_FAULT_CASES == 23 and driver.EXPECTED_TOTAL_RESULTS == 24,
-      "driver must pin twenty-three injections plus one negative control")
-check(finalize(23) == 0, "complete twenty-three-injection plus control run must pass")
-check(finalize(22) == 1, "short declared case list must fail")
-check(finalize(24) == 1, "long declared case list must fail")
-check(finalize(23, results=23) == 1, "missing result must fail")
-check(finalize(23, results=25) == 1, "extra result must fail")
-check(finalize(23, injections=22) == 1, "missing successful injection must fail")
-check(finalize(23, injections=24) == 1, "extra successful injection must fail")
-check(finalize(23, skips=1) == 1, "any skipped injection must fail")
-check(finalize(23, injections=0, skips=23) == 2,
+check(driver.EXPECTED_FAULT_CASES == 24 and driver.EXPECTED_TOTAL_RESULTS == 25,
+      "driver must pin twenty-four injections plus one negative control")
+check(finalize(24) == 0, "complete twenty-four-injection plus control run must pass")
+check(finalize(23) == 1, "short declared case list must fail")
+check(finalize(25) == 1, "long declared case list must fail")
+check(finalize(24, results=24) == 1, "missing result must fail")
+check(finalize(24, results=26) == 1, "extra result must fail")
+check(finalize(24, injections=23) == 1, "missing successful injection must fail")
+check(finalize(24, injections=25) == 1, "extra successful injection must fail")
+check(finalize(24, skips=1) == 1, "any skipped injection must fail")
+check(finalize(24, injections=0, skips=24) == 2,
       "all-skipped run must fail both injection and skip invariants")
 
 checker = driver.Checker()
@@ -240,6 +246,108 @@ check(retry_caught.fails == 0 and retry_caught.injections == 1,
 retry_missed = run_retry_gate(False)
 check(retry_missed.fails == 1 and retry_missed.injections == 1,
       "phase-swept handshake corruption must fail if never caught")
+
+
+class EdgeLog:
+    def __init__(self):
+        self.events = []
+
+    def drain(self):
+        events = self.events
+        self.events = []
+        return events
+
+
+class TransactionSim:
+    def __init__(self, safe):
+        self.safe = safe
+        self.addr_ctx = 0x3F80
+        self.addr_ctx_check = 0x3F84
+        self.addr_ctx_check_fn = 0x0200
+        self.addr_debounce_step_fn = 0x0300
+        self.ram = {
+            0x3F80: 0x00, 0x3F81: 0x00, 0x3F82: 0x00, 0x3F84: 0xFF,
+        }
+        self.injected = False
+        self.pc_target = None
+        self.led = False
+        self.control = 0
+        self.edges = EdgeLog()
+
+    def cycles(self, milliseconds):
+        return milliseconds * 2_000
+
+    def run_ms(self, _milliseconds):
+        if not self.injected:
+            return
+        if self.safe:
+            self.ram[0x3F82] = 0x00
+            self.ram[0x3F84] = 0xFF
+        else:
+            self.ram[0x3F80] = 0x01
+            self.ram[0x3F81] = 0x01
+            self.ram[0x3F82] = 0x19
+            self.ram[0x3F84] = 0xE6
+            self.led = True
+            self.control = 1
+            self.edges.events.append((1, 2, 1))
+
+    def in_force_reset(self):
+        return False
+
+    def run_until_sleep(self, _max_cycles):
+        return True
+
+    def run_until_pc(self, address, _max_cycles):
+        self.pc_target = address
+        return address in (self.addr_ctx_check_fn, self.addr_debounce_step_fn)
+
+    def read_ram(self, addr, size):
+        return bytes(self.ram.get(addr + offset, 0) for offset in range(size))
+
+    def write_ram(self, addr, values):
+        self.ram[addr] = values[0]
+        self.injected = True
+
+    def led_on(self):
+        return self.led
+
+    def control_state(self):
+        return self.control
+
+    def control_edges(self):
+        return self.edges
+
+
+def run_transaction_case(safe, mechanism):
+    transaction_sim = TransactionSim(safe)
+    sim_stub.Sim = lambda _elf: transaction_sim
+    checker = driver.Checker()
+    with contextlib.redirect_stdout(io.StringIO()), \
+            contextlib.redirect_stderr(io.StringIO()):
+        driver._run_case("fake.elf", "ctx transaction", driver.RAM, 0x3F82,
+                         0x10, mechanism, checker)
+    return checker, transaction_sim
+
+
+for transaction_mechanism in (driver.TRANSACTION_ISR, driver.TRANSACTION_MAIN):
+    transaction_safe, transaction_sim = run_transaction_case(
+        True, transaction_mechanism)
+    check(transaction_safe.fails == 0 and transaction_safe.injections == 1,
+          "%s one-shot upset must pass when safely overwritten"
+          % transaction_mechanism)
+    expected_target = (transaction_sim.addr_ctx_check_fn
+                       if transaction_mechanism == driver.TRANSACTION_ISR
+                       else transaction_sim.addr_debounce_step_fn)
+    check(transaction_sim.pc_target == expected_target,
+          "%s must stop at its distinct transaction seam"
+          % transaction_mechanism)
+    transaction_laundered, _ = run_transaction_case(
+        False, transaction_mechanism)
+    check(transaction_laundered.fails == 1 and
+          transaction_laundered.injections == 1,
+          "%s one-shot upset must reject a phantom output/re-fold"
+          % transaction_mechanism)
 
 
 class NegativeSim:

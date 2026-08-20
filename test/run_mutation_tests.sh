@@ -87,7 +87,7 @@ source "$SCRIPT_DIR/mutation_accounting.sh"
 # constraints (allowlist, no Git) that any edit to it must preserve.
 source "$SCRIPT_DIR/scratch_tree.sh"
 
-readonly MUTATION_EXPECTED_CORE=28
+readonly MUTATION_EXPECTED_CORE=30
 readonly MUTATION_EXPECTED_XT=22
 readonly MUTATION_EXPECTED_PIC_GPSIM=6
 readonly MUTATION_EXPECTED_PIC_TARGET=10
@@ -95,7 +95,7 @@ readonly MUTATION_EXPECTED_PIC_SOAK=1
 readonly MUTATION_EXPECTED_PIC320_HOST=29
 readonly MUTATION_EXPECTED_PIC320_TOOL=11
 readonly MUTATION_EXPECTED_PIC12F675=22
-readonly MUTATION_EXPECTED_TOTAL=129
+readonly MUTATION_EXPECTED_TOTAL=131
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
@@ -799,12 +799,15 @@ MUTATIONS=(
 # vendored copy to the single verified core.
 "src/bypass_pure.c	s@res.fault = true;@res.fault = false;@	test-model-check	MODEL corrupt-state fault suppressed (verify_corrupt_state_faults catches it)"
 # --- F2 context-SEU detection (BYPASS_CTX_CHECK) ------------------------------
-# Three mutants for the complemented XOR-fold context check. The PIC10F322,
-# PIC12F675 and ATtiny202 shells get their own F2 mutants in the tables below;
-# PIC10F320 is F2-EXCLUDED (asserted after the inventory build).
-"src/bypass_mcu_avr_classic.c	s@                ctx_check_ = debounce_ctx_check_word(ctx_);@                (void)0; /* MUTANT: main-loop shadow re-derive dropped */@	test-sim-cd4053_simple-attiny13a	F2 main-loop shadow re-derive dropped (the ATOMIC_BLOCK re-sync after debounce_step). The ISR-side re-sync is healed by main every serviced tick, so ONLY this one is load-bearing: the shadow goes stale on the first state change, the next ISR F2 check false-positives, and the forced reset wedges the WDT-less attiny13a so no round-trip toggle ever completes."
-"src/bypass_mcu_avr_classic.c	s@ctx_fault_ = 1U;@ctx_fault_ = 0U; /* MUTANT: F2 fault never raised */@	test-fault-inject-cd4053_simple-attiny85	F2 detect defeated: the ISR clears the context-fault flag instead of raising it, so an in-range debounce SEU is never signalled and main never resets. The fault-inject ctx.debounce in-range case (g_resets witness) sees no WDT reset -- proves the simavr in-range case has teeth."
+# Transaction-seam mutants for the complemented XOR-fold context check. The
+# post-check probes must reject any shell that resumes from a validated local
+# snapshot but then consumes or re-folds live persisted SRAM. PIC10F320 is
+# F2-EXCLUDED (asserted after the inventory build).
+"src/bypass_mcu_avr_classic.c	s@                ctx_check_ = debounce_ctx_check_word(next_ctx);@                (void)0; /* MUTANT: main-loop transaction check dropped */@	test-sim-cd4053_simple-attiny13a	F2 main-loop transaction publication dropped. The shadow goes stale on the first state change, so the next ISR rejects the pair and the functional round trip cannot complete."
+"src/bypass_mcu_avr_classic.c	s@                next_ctx.debounce_counter);@                ctx_.debounce_counter); /* MUTANT: consume live persisted SRAM */@	test-fault-inject-cd4053_simple-attiny85	F2 ISR transaction defeated after validation: integration consumes live ctx_ instead of the validated snapshot. The one-shot post-check injection is then applied and folded into a phantom transition."
 "src/bypass_pure.c	s@                ^ ctx.debounce_counter))@                ))@	test-fault-inject-tq2_l2_5v_relay-attiny85	F2 fold weakened: the complemented XOR-fold drops the debounce_counter term, so the shadow no longer covers the counter and an in-range counter SEU is invisible to it. The fault-inject in-range case sees no WDT reset -- proves the fold actually covers the counter."
+"src/bypass_mcu_pic10f322.c	s@        ctx_check_ = debounce_ctx_check_word(next_ctx);@        ctx_check_ = debounce_ctx_check_word(ctx_); /* MUTANT: re-fold live persisted SRAM */@	pic10f322-coverage-check-fw	PIC10F322 F2 transaction defeated after validation: publication re-folds live ctx_ rather than the intended successor. The host one-shot post-check injection proves the upset cannot be legitimized."
+"src/bypass_mcu_pic12f675.c	s@        ctx_check_ = debounce_ctx_check_word(next_ctx);@        ctx_check_ = debounce_ctx_check_word(ctx_); /* MUTANT: re-fold live persisted SRAM */@	pic12f675-coverage-check-fw	PIC12F675 F2 transaction defeated after validation: publication re-folds live ctx_ rather than the intended successor. The host one-shot post-check injection proves the upset cannot be legitimized."
 )
 
 # Files copied into each sandbox: all firmware sources + headers, the Makefile,
@@ -1630,7 +1633,7 @@ PIC_TARGET_MUTATIONS=(
 "src/bypass_output_cd4053_with_mute.c	s@BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS)@BYPASS_DELAY_MS(1)@g	cd4053_with_mute	PIC cd4053_with_mute pre-switch mute window shortened; target I/O pulse-width check catches it"
 "src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	tq2_l2_5v_relay	PIC relay coil pulse shortened below datasheet minimum; target I/O pulse-width check catches it"
 # F2 context-SEU: delete the polled shadow clause; killed by the aggregate fault leg.
-"src/bypass_mcu_pic10f322.c	s@(ctx_check_ != debounce_ctx_check_word(ctx_)) ||@(0U != 0U) ||@	cd4053_simple	PIC F2 shadow clause deleted from the polled sanity gate (the FIRST clause, before integrate); the in-range debounce SEU is no longer caught and the target fault leg ctx.debounce.inrange case sees 0 resets."
+"src/bypass_mcu_pic10f322.c	s@(ctx_check_ != debounce_ctx_check_word(next_ctx)) ||@(0U != 0U) ||@	cd4053_simple	PIC F2 shadow clause deleted from the polled sanity gate (the FIRST clause, before integrate); the in-range debounce SEU is no longer caught and the target fault leg ctx.debounce.inrange case sees 0 resets."
 )
 
 # WDT-liveness mutant: gpsim's ~200ms functional run is too short to see an
@@ -1734,13 +1737,13 @@ PIC12F675_MUTATIONS=(
 "src/bypass_mcu_pic12f675.c	s@(0U                   == adon)   &&@((0U == adon) || (0U != adon)) \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:ADCON0.ADON	TARGET ADC-on guard tautologized while retaining the volatile-derived operand; an ADON upset no longer forces reset"
 "src/bypass_mcu_pic12f675.c	s@(OPTION_REG_CONFIG    == option) &&@((OPTION_REG_CONFIG \& 0x7FU) == (option \& 0x7FU)) \&\&@;s@(0U == wpu_global);@((0U == wpu_global) || (0U != wpu_global));@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:OPTION.nGPPU	TARGET global pull-up enable detection defeated in both its exact OPTION_REG and dedicated nGPPU checks; the isolated nGPPU injection no longer forces reset"
 "src/bypass_mcu_pic12f675.c	s@(osccal_snapshot_     == osccal);@(1U != 0U);@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:OSCCAL.CAL0	TARGET oscillator-trim guard defeated; a corrupt OSCCAL never forces a reset (no PIC10F322 counterpart -- that part compares OSCCON against a constant)"
-"src/bypass_mcu_pic12f675.c	s@        ctx_.program_state = res.program_state;@        (void)res.program_state; /* MUTANT: program-state write-back dropped */@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET program_state write-back dropped: the context never enters release lockout and lock-step diverges from the pure model"
-"src/bypass_mcu_pic12f675.c	s@        ctx_.effect_state  = res.effect_state;@@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET effect_state write-back dropped: the pins still follow res, so only the ctx_ lock-step against the pure model diverges"
-"src/bypass_mcu_pic12f675.c	s@            ctx_.debounce_counter = res.lockout_value;@            (void)res.lockout_value; /* MUTANT: lockout reload dropped */@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET debounce lockout write-back dropped: the context retains its integrated threshold instead of RELEASE_THRESH and lock-step diverges"
+"src/bypass_mcu_pic12f675.c	s@        next_ctx.program_state = res.program_state;@        (void)res.program_state; /* MUTANT: program-state write-back dropped */@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET program_state write-back dropped: the context never enters release lockout and lock-step diverges from the pure model"
+"src/bypass_mcu_pic12f675.c	s@        next_ctx.effect_state  = res.effect_state;@@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET effect_state write-back dropped: the pins still follow res, so only the ctx_ lock-step against the pure model diverges"
+"src/bypass_mcu_pic12f675.c	s@            next_ctx.debounce_counter = res.lockout_value;@            (void)res.lockout_value; /* MUTANT: lockout reload dropped */@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET debounce lockout write-back dropped: the context retains its integrated threshold instead of RELEASE_THRESH and lock-step diverges"
 "src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	io:relay-minimum	TARGET relay coil pulse shortened below the datasheet minimum; the target-I/O pulse-width check catches it on this part's 1.024 ms tick as it does on the 322's 1.000 ms one"
 "src/bypass_mcu_pic12f675.c	s@static void hw_wdt_pet(void) { CLRWDT(); }@static void hw_wdt_pet(void) { (void)0; /* MUTANT: no WDT pet */ }@	PIC12F675_SOAK_VARIANT=cd4053_simple PIC12F675_SOAK_DURATION_MS=$PIC_SOAK_MUT_MS PIC12F675_SOAK_LIVENESS_INTERVAL_MS=$PIC_SOAK_MUT_LIVENESS_MS PIC12F675_SOAK_COMBINATION_NAME=mutation-wdt pic12f675-test-soak	soak:wdt-reset	SOAK main-loop WDT pet removed; the soak's reset notifier catches the un-pet watchdog inside the short mutation window (this part's period is ~288 ms, well inside it)"
 # F2 context-SEU: delete the polled shadow clause; killed by the fault leg.
-"src/bypass_mcu_pic12f675.c	s@(ctx_check_ != debounce_ctx_check_word(ctx_)) ||@(0U != 0U) ||@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:ctx.debounce.inrange	PIC12F675 F2 shadow clause deleted from the polled sanity gate; the in-range debounce SEU is no longer caught and the target fault leg ctx.debounce.inrange case sees 0 resets at checks=38."
+"src/bypass_mcu_pic12f675.c	s@(ctx_check_ != debounce_ctx_check_word(next_ctx)) ||@(0U != 0U) ||@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:ctx.debounce.inrange	PIC12F675 F2 shadow clause deleted from the polled sanity gate; the in-range debounce SEU is no longer caught and the target fault leg ctx.debounce.inrange case sees 0 resets at checks=38."
 )
 
 # --- AVR-XT shell mutants (src/bypass_mcu_avr_xt.c) ---------------------------
@@ -1769,9 +1772,9 @@ XT_MUTATIONS=(
 "src/bypass_mcu_avr_xt.c	s@void hw_pin_set_high(uint8_t const pin) { PORTA.OUTSET = (uint8_t)(1U << pin); }@void hw_pin_set_high(uint8_t const pin) { PORTA.OUTCLR = (uint8_t)(1U << pin); }@	XT_SIM_VARIANT=tq2_l2_5v_relay attiny202-sim	XT control-pin drive inverted (coil/CTL bit never set); PA2/PA3 transition trace catches it"
 "src/bypass_mcu_avr_xt.c	s@    PORTA.OUTCLR = output_mask; // selected outputs -> low latch@    PORTA.OUTSET = output_mask; // MUTANT: outputs latched HIGH before DIR@	XT_SIM_VARIANT=tq2_l2_5v_relay attiny202-sim	XT output pins latched high before the DIR write (glitch: both relay coils driven at startup); startup trace catches the unsafe pre-config high"
 # -- internal trajectory: killed by the ctx_-vs-model lock-step co-simulation --
-"src/bypass_mcu_avr_xt.c	s@ctx_.debounce_counter = res.lockout_value;@(void)0; /* MUTANT: lockout reload dropped */@	XT_SIM_VARIANT=cd4053_simple attiny202-lockstep	XT anti-retrigger lockout reload dropped; counter keeps its integrated value instead of RELEASE_THRESH"
-"src/bypass_mcu_avr_xt.c	s@ctx_.program_state = res.program_state;@(void)0; /* MUTANT: program_state write-back dropped */@	XT_SIM_VARIANT=cd4053_simple attiny202-lockstep	XT program_state write-back dropped; the state machine never advances out of PRESS_DEBOUNCE_WAIT"
-"src/bypass_mcu_avr_xt.c	s@ctx_.effect_state  = res.effect_state;@(void)0; /* MUTANT: effect_state write-back dropped */@	XT_SIM_VARIANT=cd4053_simple attiny202-lockstep	XT effect_state write-back dropped; ctx_ diverges from the model even where the LED briefly agrees"
+"src/bypass_mcu_avr_xt.c	s@next_ctx.debounce_counter = res.lockout_value;@(void)0; /* MUTANT: lockout reload dropped */@	XT_SIM_VARIANT=cd4053_simple attiny202-lockstep	XT anti-retrigger lockout reload dropped; counter keeps its integrated value instead of RELEASE_THRESH"
+"src/bypass_mcu_avr_xt.c	s@next_ctx.program_state = res.program_state;@(void)0; /* MUTANT: program_state write-back dropped */@	XT_SIM_VARIANT=cd4053_simple attiny202-lockstep	XT program_state write-back dropped; the state machine never advances out of PRESS_DEBOUNCE_WAIT"
+"src/bypass_mcu_avr_xt.c	s@next_ctx.effect_state  = res.effect_state;@(void)0; /* MUTANT: effect_state write-back dropped */@	XT_SIM_VARIANT=cd4053_simple attiny202-lockstep	XT effect_state write-back dropped; ctx_ diverges from the model even where the LED briefly agrees"
 # -- guards: killed by fault injection into the running image ------------------
 "src/bypass_mcu_avr_xt.c	s@if ( (ctx_.program_state > RELEASE_DEBOUNCE_WAIT)@if ( 0 \&\& (ctx_.program_state > RELEASE_DEBOUNCE_WAIT)@	XT_SIM_VARIANT=cd4053_simple attiny202-fault	XT per-tick sanity gate disabled wholesale; no corruption ever forces the reset path"
 "src/bypass_mcu_avr_xt.c	s@(actual_direction_mask == (uint8_t)BYPASS_OUTPUT_DDR_MASK) &&@(1U != 0U) \&\&@	XT_SIM_VARIANT=cd4053_simple attiny202-fault	XT exact PORTA.DIR predicate removed; a footswitch pin turned output (or a spare turned input) evades the required-subset check"
@@ -1799,7 +1802,7 @@ XT_MUTATIONS=(
 "src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	attiny202-delay-oracle	XT relay coil pulse shortened below the 4 ms datasheet minimum; the image's _delay_ms loop no longer matches the 12 ms design"
 "src/bypass_output_cd4053_with_mute.c	s@BYPASS_DELAY_MS(CD4053_MUTE_DELAY_MS)@BYPASS_DELAY_MS(1)@g	attiny202-delay-oracle	XT cd4053_with_mute pre-switch mute window shortened from 5 ms; the disassembled delay loop no longer matches the design"
 # -- F2 context-SEU: killed by fault injection into the running image -----------
-"src/bypass_mcu_avr_xt.c	s@ctx_fault_ = 1U;@ctx_fault_ = 0U; /* MUTANT: F2 fault never raised */@	XT_SIM_VARIANT=cd4053_simple attiny202-fault	XT F2 detect defeated: the ISR clears the context-fault flag instead of raising it; the yasimavr in-range debounce SEU (RETRY_GATE) never forces a reset -- proves the ATtiny202 in-range case has teeth."
+"src/bypass_mcu_avr_xt.c	s@                next_ctx.debounce_counter);@                ctx_.debounce_counter); /* MUTANT: consume live persisted SRAM */@	XT_SIM_VARIANT=cd4053_simple attiny202-fault	XT F2 ISR transaction defeated after validation: integration consumes live ctx_ instead of the validated snapshot. The one-shot transaction case then observes a phantom transition instead of a safe overwrite."
 )
 
 # Combined work list, filled in mutant order (core/AVR first, then any enabled

@@ -7737,7 +7737,7 @@ help:
 	@echo "  attiny202-test   all ATtiny202 pre-hardware checks (fuses + smoke + build + analyze + delay)"
 	@echo "  attiny202-sim    yasimavr functional + PA2/PA3 transition/pulse-presence test"
 	@echo "                   (standalone; needs scripts/fetch_yasimavr.sh; XT_SIM_VARIANT=)"
-	@echo "  attiny202-fault  yasimavr fault-inject: 22 guarded SFR/latch/state corruptions,"
+	@echo "  attiny202-fault  yasimavr fault-inject: 24 guarded SFR/latch/state corruptions,"
 	@echo "                   zero skips, exact completion (standalone; XT_SIM_VARIANT=)"
 	@echo "  attiny202-soak   yasimavr soak: long run, assert no WDT reset + stays responsive"
 	@echo "                   (standalone; XT_SOAK_DURATION_MS=, XT_SIM_VARIANT=)"

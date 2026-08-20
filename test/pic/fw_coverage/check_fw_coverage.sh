@@ -212,13 +212,13 @@ for gcov_file in "$@"; do
         # draft required a same-line `if (` prefix, which held only while the
         # whole condition opened on one line; F2 put the context-check clause
         # first, under its own #if, and the gate silently located zero lines.
-        guard_check '\(ctx_check_ != debounce_ctx_check_word\(ctx_\)\) \|\|[[:space:]]*$' \
+        guard_check '\(ctx_check_ != debounce_ctx_check_word\(next_ctx\)\) \|\|[[:space:]]*$' \
                     "context-check guard"
-        guard_check '\(ctx_\.program_state > RELEASE_DEBOUNCE_WAIT\) \|\|[[:space:]]*$' \
+        guard_check '\(next_ctx\.program_state > RELEASE_DEBOUNCE_WAIT\) \|\|[[:space:]]*$' \
                     "program-state range guard"
-        guard_check '\(ctx_\.debounce_counter > RELEASE_THRESH\) \|\|[[:space:]]*$' \
+        guard_check '\(next_ctx\.debounce_counter > RELEASE_THRESH\) \|\|[[:space:]]*$' \
                     "debounce-counter range guard"
-        guard_check '\(ctx_\.effect_state > ENGAGED\) \|\|[[:space:]]*$' \
+        guard_check '\(next_ctx\.effect_state > ENGAGED\) \|\|[[:space:]]*$' \
                     "effect-state range guard"
         if rec_uncovered "$LIVE_RESET_REC"; then
             echo "  FAIL: live sanity-gate reset call at source line $LIVE_RESET_LINE is not covered"

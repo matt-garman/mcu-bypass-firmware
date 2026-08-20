@@ -66,6 +66,7 @@ typedef enum {
 
 int fw_fault_run(fw_inject_t inj);
 uint8_t fw_drive(const uint8_t *fsw, int n);
+int fw_ctx_window_run(void);
 int fwp_output_state_intact(uint8_t required_mask, uint8_t expected_high_mask);
 int fwp_sanity_failed(effect_state_t effect_state);
 int fwp_pullup_intact(void);

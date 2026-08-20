@@ -265,6 +265,8 @@ static void expect_corrected(fw_inject_t inj, const char *what) {
 #endif
 
 static void test_faults(void) {
+    CHECK(fw_ctx_window_run() == 0,
+          "post-check context upset must not change output or become re-folded");
 #if defined(BYPASS_MCU_PIC12F675)
     expect_no_reset(FWI_NONE, "clean state");
     CHECK(WPU == 0x20u, "init must replace WPU reset state with GP5-only");
@@ -402,14 +404,16 @@ static void test_pure_fault_path(void) {
 // PIC10F322, and on the PIC12F675 the 2 coil-shadow cases plus all 4
 // physical-port cases that the whole-port refresh heals.  Expressed as
 // base + count rather than a fresh magic number, so the delta stays tied to the
-// cases above.  Mirrors PIC_FAULT_EXPECTED_CHECKS in the gpsim fault adapters.
+// cases above. The base includes one post-check persisted-context transaction
+// case on every variant. Mirrors PIC_FAULT_EXPECTED_CHECKS in the gpsim fault
+// adapters apart from this host-only instruction-independent transaction probe.
 #if defined(BYPASS_MCU_PIC12F675)
 #define FW_DEVICE_NAME     "PIC12F675"
-#define FW_BASE_CHECKS     85
+#define FW_BASE_CHECKS     86
 #define FW_CORRECTED_CASES 6
 #else
 #define FW_DEVICE_NAME     "PIC10F322"
-#define FW_BASE_CHECKS     52
+#define FW_BASE_CHECKS     53
 #define FW_CORRECTED_CASES 2
 #endif
 #if defined(TQ2_L2_5V_RELAY)

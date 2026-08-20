@@ -53,10 +53,15 @@ file is the human-readable summary of *what changed*.
   `RELEASE_THRESH = 25`, an idle `debounce_counter` whose bit 3 or bit 4 flips
   becomes 8 or 16 — both inside the accepted range, and both enough to make the
   next `debounce_step()` toggle the effect. That is a phantom bypass or engage
-  with nobody touching the footswitch. Each shell now keeps a complemented
-  XOR-fold shadow byte over the context and verifies it once per tick,
-  immediately before that tick's integrate; any single-bit flip of any member,
-  or of the shadow itself, forces a watchdog reset. The fold is the pure
+  with nobody touching the footswitch. Each enabled shell now treats persisted
+  context use as a transaction: snapshot `ctx_`, validate the snapshot against
+  a complemented XOR-fold shadow byte, compute only from that local value, then
+  publish the successor and its check. A single-bit flip confined to persisted
+  `ctx_` or `ctx_check_` therefore forces recovery, is safely overwritten by a
+  previously validated transaction, or remains a mismatch for the next check;
+  it cannot be consumed and then legitimized by folding the live corrupt value.
+  This guarantee deliberately excludes automatic locals, registers, code and
+  control flow. The fold is the pure
   function `debounce_ctx_check_word()` in `src/bypass_pure.c`, proved by CBMC
   over the full byte domain of every member: single-bit detection (C8), and the
   fold definition plus its all-zeros stuck-at guard (C9) — the latter being why
@@ -64,10 +69,11 @@ file is the human-readable summary of *what changed*.
   PIC12F675, PIC10F322, classic-AVR and AVR-XT shells. **The PIC10F320 is
   excluded**: it links no pure core, and even the cheapest fold overflows its
   256 words of flash, so its range-only gate stays — documented and statically
-  asserted. The tightest budget that did fit is the PIC10F322 relay variant at
-  507 of 512 words. On AVR the integrator stays in the ISR, so the check runs at
-  the top of the ISR and `main()`'s apply-and-re-derive is one `ATOMIC_BLOCK`,
-  which is the source of MISRA deviation D-5. Design:
+  asserted. On AVR the integrator stays in the ISR, so both the ISR and
+  `main()` perform complete local transactions; main's snapshot-through-publish
+  sequence is one `ATOMIC_BLOCK`, which is the source of MISRA deviation D-5.
+  PIC10F322's transactional image must be remeasured against its 512-word limit
+  before release qualification. Design:
   `docs/context_seu_detection.md`.
 
 - **The watchdog-margin invariant is now enforced at compile time on every

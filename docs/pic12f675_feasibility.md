@@ -1382,19 +1382,23 @@ an *in-range* single-bit upset of `debounce_counter` -- a flip that stays
 within `[0, RELEASE_THRESH]` yet crosses `PRESSED_THRESH`, fabricating a
 phantom toggle with no footswitch press. On the shipped PIC12F675 that case is
 closed, not open: `PIC12F675_CFLAGS` defines `-DBYPASS_CTX_CHECK`, so the gate's
-first term compares the persisted context against `debounce_ctx_check_word()`
-and forces a watchdog reset on any single-bit divergence (see
-`docs/context_seu_detection.md`, which owns this in-range-SEU analysis). Under
-the single-event threat model that leaves **no uncovered nominal-path defect**;
-the only residual is the shared `1.x.y` silicon-validation pass every part in
-this repository still awaits (items 1, 2, 8 and 9 above).
+first term compares a persisted-context snapshot against
+`debounce_ctx_check_word()`. The shell then computes and publishes only from the
+validated snapshot, so a single-bit upset confined to persisted `ctx_` or
+`ctx_check_` is detected, safely overwritten, or left mismatched for the next
+check instead of being consumed and re-folded (see
+`docs/context_seu_detection.md`). This bounded guarantee excludes locals,
+registers, code and control flow. The transaction follow-up still requires XC8
+resource checks, target simulation, the complete mutation gate and the shared
+`1.x.y` silicon-validation pass.
 
 **Why the ported tests are trusted to be distinct.** Porting the PIC10F322
 lanes to the PIC12F675 carries a copy-paste risk: a lane that still compiled
 but no longer exercised part-specific behavior would pass vacuously. The
-retained mutation record refutes that. The PIC12F675 lane contributes its own
-mutants (20, per the step-10 status in §9) -- raising the repository mutation
-inventory to **118** -- weighted toward the `GPIO` shadow, sub-tick timing,
+retained mutation record refutes that. The PIC12F675 target-tool lane contributes
+22 mutants (per the step-10 status in §9), and the F2 transaction seam adds one
+PIC12F675 shell mutant to the host-available core table. The repository mutation
+inventory is **131**, weighted toward the `GPIO` shadow, sub-tick timing,
 comparator/`CMCON`, `OSCCAL` and ANSEL-mapping guards the PIC10F322 has no
 counterpart for (§6.5). Each carries its own toolchain probe, named
 behavioral signature and sandbox validator, and a mutant that survived would
@@ -1428,9 +1432,9 @@ ISR alternative is reconsidered; steps 2 through 9 are implemented — step 9
 re-derived the holds through the tick period rather than letting the slack absorb
 the 1.024 ms stretch (§4.4.1). Step 10 is done: `pic12f675-test` and
 `pic12f675-test-target{,-variants}` are implemented and carry the third leg of
-`test-target-matrix` and `test-target-lane-markers`, and 20 mutants with their
+`test-target-matrix` and `test-target-lane-markers`, and 22 mutants with their
 own toolchain probe, named behavioral signatures and sandbox validator take the
-mutation inventory to 118;
+mutation inventory to 131;
 and both aggregates now run in CI's shared `pic` job with the two mirrors —
 `scripts/ci-local.sh` and `test-ci-local-routing` — extended alongside. Step 10
 is complete. Step 11 is done (v0.9.9): the user-facing documentation landed;

@@ -88,7 +88,6 @@ static volatile debounce_context_t ctx_;
 
 #if defined(BYPASS_CTX_CHECK)
 static volatile uint8_t ctx_check_;   // complemented XOR-fold shadow of ctx_
-static volatile uint8_t ctx_fault_;   // set by the ISR, consumed by main's gate
 #endif
 
 
@@ -292,19 +291,19 @@ ISR(TIM0_COMPA_vect) {
     timer_isr_called_ = TIMER_ISR_CALLED; // used by main() to reset WDT
 
 #if defined(BYPASS_CTX_CHECK)
-    if (ctx_check_ != debounce_ctx_check_word(ctx_)) {
-        ctx_fault_ = 1U;
-    }
-    else {
-#endif
-
-        ctx_.debounce_counter = debounce_integrate(
+    debounce_context_t next_ctx = ctx_;
+    if (ctx_check_ == debounce_ctx_check_word(next_ctx)) {
+        next_ctx.debounce_counter = debounce_integrate(
                 hw_read_footswitch(),
-                ctx_.debounce_counter);
-
-#if defined(BYPASS_CTX_CHECK)
-        ctx_check_ = debounce_ctx_check_word(ctx_);
+                next_ctx.debounce_counter);
+        // Publish only values derived from the validated snapshot.
+        ctx_check_ = debounce_ctx_check_word(next_ctx);
+        ctx_.debounce_counter = next_ctx.debounce_counter;
     }
+#else
+    ctx_.debounce_counter = debounce_integrate(
+            hw_read_footswitch(),
+            ctx_.debounce_counter);
 #endif
 
 }
@@ -358,14 +357,15 @@ static void init(void) {
     // driver: default bypass (may block on relay/mute pulse)
     hw_set_bypass_state();
 
-    // initialize global switch state
-    ctx_ = debounce_init_context(hw_read_footswitch());
+    // Build one intended initial context while interrupts remain disabled, then
+    // publish its check and bytes.
+    debounce_context_t const initial_ctx =
+        debounce_init_context(hw_read_footswitch());
 
 #if defined(BYPASS_CTX_CHECK)
-    // initialize context checksum
-    ctx_check_ = debounce_ctx_check_word(ctx_);
-    ctx_fault_ = 0U;
+    ctx_check_ = debounce_ctx_check_word(initial_ctx);
 #endif
+    ctx_ = initial_ctx;
 
     // ISR-main() WDT handshake: let ISR set this to called when timer is
     // activated
@@ -388,12 +388,6 @@ __attribute__((OS_main)) int main(void) {
     while (1) {
 
         hw_outputs_reassert_safe();
-
-#if defined(BYPASS_CTX_CHECK)
-        if (ctx_fault_ != 0U) {
-            hw_force_wdt_reset();
-        }
-#endif
 
         // basic sanity checks against outlier events (cosmic rays, extreme
         // EMI)
@@ -420,21 +414,26 @@ __attribute__((OS_main)) int main(void) {
         //   one timer ISR update, but will be correct on next loop iteration,
         //   so will not trigger WDT timeout
         if (TIMER_ISR_CALLED == timer_isr_called_) {
-            timer_isr_called_ = TIMER_ISR_NOT_CALLED;
-            hw_wdt_pet(); // WDT reset ("pet the dog")
-
-            debounce_step_result_t const res = debounce_step(ctx_);
-
 #if defined(BYPASS_CTX_CHECK)
+            debounce_step_result_t res;
             ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-                ctx_.program_state = res.program_state;
-                ctx_.effect_state  = res.effect_state;
-                if (res.reload_lockout) {
-                    ctx_.debounce_counter = res.lockout_value;
+                debounce_context_t next_ctx = ctx_;
+                timer_isr_called_ = TIMER_ISR_NOT_CALLED;
+                if (ctx_check_ != debounce_ctx_check_word(next_ctx)) {
+                    hw_force_wdt_reset();
                 }
-                ctx_check_ = debounce_ctx_check_word(ctx_);
+                res = debounce_step(next_ctx);
+                next_ctx.program_state = res.program_state;
+                next_ctx.effect_state  = res.effect_state;
+                if (res.reload_lockout) {
+                    next_ctx.debounce_counter = res.lockout_value;
+                }
+                ctx_check_ = debounce_ctx_check_word(next_ctx);
+                ctx_ = next_ctx;
             }
 #else
+            timer_isr_called_ = TIMER_ISR_NOT_CALLED;
+            debounce_step_result_t const res = debounce_step(ctx_);
             ctx_.program_state = res.program_state;
             ctx_.effect_state = res.effect_state;
             if (res.reload_lockout)
@@ -442,6 +441,8 @@ __attribute__((OS_main)) int main(void) {
                 ctx_.debounce_counter = res.lockout_value;
             }
 #endif
+            // A pet now proves both ISR progress and a valid context transaction.
+            hw_wdt_pet(); // WDT reset ("pet the dog")
 
             // note: the fault condition is
             // defense-in-depth/belt-and-suspenders with the sanity checks

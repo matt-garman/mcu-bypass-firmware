@@ -262,15 +262,14 @@ static void hw_wait_for_tick(void) {
 // PROGRAM GLOBALS
 //////////////////////////////////////////////////////////////////////////////
 
-// overall debounce context. Unlike the AVR shell this need NOT be volatile or
-// file-static for ISR sharing -- the PIC shell has no ISR; the single main loop
-// is the sole owner. Kept at file scope (off main()'s stack) for parity with
-// the AVR shell's resource-budget story.
-static debounce_context_t ctx_;
+// Persisted debounce context. The PIC has no ISR, but volatile is load-bearing
+// for the F2 transaction: each tick must take one real snapshot and publish one
+// real successor rather than let the compiler reuse live global values.
+static volatile debounce_context_t ctx_;
 
 #if defined(BYPASS_CTX_CHECK)
 // debounce_context_t checksum; see debounce_ctx_check_word()
-static uint8_t ctx_check_;
+static volatile uint8_t ctx_check_;
 #endif
 
 
@@ -324,12 +323,15 @@ static void init(void) {
     // shorter than one WDT period)
     hw_set_bypass_state();
 
-    // initialize global switch state from the current footswitch level
-    ctx_ = debounce_init_context(hw_read_footswitch());
+    // Build one intended initial context, then publish its check and bytes.
+    // XC8 rejects a runtime-initialized const local, so this is non-const.
+    debounce_context_t next_ctx =
+        debounce_init_context(hw_read_footswitch());
 
 #if defined(BYPASS_CTX_CHECK)
-    ctx_check_ = debounce_ctx_check_word(ctx_);
+    ctx_check_ = debounce_ctx_check_word(next_ctx);
 #endif
+    ctx_ = next_ctx;
 
     // LAST: start + clear the tick, immediately before the loop, so no compare
     // match accumulated during init is mistaken for the first real tick.
@@ -349,6 +351,7 @@ void main(void) {
         // pause until the next 1ms TMR2 tick (polled; no sleep on Model B)
         hw_wait_for_tick();
         hw_outputs_reassert_safe();
+        debounce_context_t next_ctx = ctx_;
 
         // basic sanity checks against outlier events (cosmic rays, extreme EMI);
         // always checked, regardless of state; force a WDT reset on any
@@ -356,40 +359,43 @@ void main(void) {
         // ISR; main-loop liveness is proven by reaching hw_wdt_pet() below.)
         if (
 #if defined(BYPASS_CTX_CHECK)
-                (ctx_check_ != debounce_ctx_check_word(ctx_)) ||
+                (ctx_check_ != debounce_ctx_check_word(next_ctx)) ||
 #endif
-                (ctx_.program_state > RELEASE_DEBOUNCE_WAIT) ||
-                (ctx_.debounce_counter > RELEASE_THRESH) ||
-                (ctx_.effect_state > ENGAGED) ||
+                (next_ctx.program_state > RELEASE_DEBOUNCE_WAIT) ||
+                (next_ctx.debounce_counter > RELEASE_THRESH) ||
+                (next_ctx.effect_state > ENGAGED) ||
                 // assert footswitch pull-up still enabled
                 (0U == hw_footswitch_pullup_intact()) ||
                 // config-specific runtime sanity checks
-                hw_is_sanity_check_failed(ctx_.effect_state) ||
+                hw_is_sanity_check_failed(next_ctx.effect_state) ||
                 (0U == hw_critical_sfrs_intact())
            ) {
             hw_force_wdt_reset();
         }
 
         // sample + integrate this tick (in the main loop, not an ISR)
-        ctx_.debounce_counter = debounce_integrate(
+        next_ctx.debounce_counter = debounce_integrate(
                 hw_read_footswitch(),
-                ctx_.debounce_counter);
+                next_ctx.debounce_counter);
 
         // advance the debounce state machine.
         // NOTE: NOT const-qualified (unlike the AVR shell). XC8 places
         // const-qualified objects in program ROM, so a const local initialized
         // from a runtime call is rejected ("initializer element is not a
         // compile-time constant"). A required PIC/XC8 deviation.
-        debounce_step_result_t res = debounce_step(ctx_);
+        debounce_step_result_t res = debounce_step(next_ctx);
 
-        ctx_.program_state = res.program_state;
-        ctx_.effect_state  = res.effect_state;
+        next_ctx.program_state = res.program_state;
+        next_ctx.effect_state  = res.effect_state;
         if (res.reload_lockout) {
-            ctx_.debounce_counter = res.lockout_value;
+            next_ctx.debounce_counter = res.lockout_value;
         }
 #if defined(BYPASS_CTX_CHECK)
-        ctx_check_ = debounce_ctx_check_word(ctx_);
+        // Derive from the validated intended successor, never live persisted
+        // SRAM: a post-snapshot upset is overwritten or remains a mismatch.
+        ctx_check_ = debounce_ctx_check_word(next_ctx);
 #endif
+        ctx_ = next_ctx;
 
         // note: the fault condition is defense-in-depth/belt-and-suspenders with
         // the sanity checks above

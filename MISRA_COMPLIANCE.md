@@ -394,8 +394,9 @@ outside this record.
 
 **What happens.** The F2 in-range context-SEU feature (`BYPASS_CTX_CHECK`, see
 `docs/context_seu_detection.md`) keeps the debounce integrator in the timer ISR,
-so `main()`'s apply-and-re-derive of the context must be atomic with respect to
-that ISR. Both AVR shells express this with avr-libc's
+so `main()`'s persisted-context transaction (snapshot, validate, step and
+publish) must be atomic with respect to that ISR. Both AVR shells express this
+with avr-libc's
 `ATOMIC_BLOCK(ATOMIC_RESTORESTATE)` from `<util/atomic.h>`, the library's
 documented idiom for interrupt-atomic sections. The macro expands to a run-once
 `for` loop whose init clause saves `SREG` into a `__cleanup__`-attributed local

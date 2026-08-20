@@ -36,7 +36,7 @@
 #
 # Usage:   make attiny202-fault  (supplies the ELF and required production fuses)
 # Exit:    0 = PASS, 1 = a case failed, 2 = bad invocation / missing image.
-# Completeness: exactly 23 independently pinned injections plus one long healthy
+# Completeness: exactly 24 independently pinned injections plus one long healthy
 # negative control must finish; any rejected/re-latched injection is a failure.
 
 import sys
@@ -50,7 +50,8 @@ NEG_CONTROL_MS = 650     # >2x WDT period: healthy firmware must keep petting it
 LIVE_STEP_MS = 5
 RETRY_GATE_MS = 50
 RETRY_GATE_STEP_CYCLES = 137  # coprime with the 2,000-cycle tick
-EXPECTED_FAULT_CASES = 23
+TRANSACTION_MAX_STEPS = 4_000  # exact-PC search; deliberately not a time budget
+EXPECTED_FAULT_CASES = 24
 EXPECTED_TOTAL_RESULTS = EXPECTED_FAULT_CASES + 1  # injections + negative control
 RESET_SENTINEL = 0xA5
 
@@ -61,6 +62,8 @@ GATE = "gate"            # expected mechanism: per-tick sanity gate
 LIVE = "live"            # expected mechanism: WDT liveness (or the gate)
 RETRY_GATE = "retry_gate"  # phase-swept reinjection for ISR-rewritten state
 CORRECT = "correct"      # relay coil re-driven low in place each tick, no reset
+TRANSACTION_ISR = "transaction_isr"    # one post-check persisted-context upset
+TRANSACTION_MAIN = "transaction_main"  # one post-check persisted-context upset
 
 
 def _fault_cases(sim, is_relay):
@@ -111,14 +114,14 @@ def _fault_cases(sim, is_relay):
         # F2 context-SEU: an IN-RANGE flip (0x10 = 16, PRESSED_THRESH <= 16 <=
         # RELEASE_THRESH) the range gate cannot see -- `debounce_counter >
         # RELEASE_THRESH` stays false, so the pre-F2 shell would phantom-toggle.
-        # Only the ISR-side complemented XOR-fold shadow catches it (ctx_check_
-        # stops equalling debounce_ctx_check_word(ctx_)). RETRY_GATE, not GATE:
-        # an in-range value is invisible to the range gate, so a single poke that
-        # happens to land while main() is mid ATOMIC_BLOCK re-derive can re-sync
-        # the shadow (or transiently phantom-toggle) instead of resetting.
-        # Phase-swept reinjection guarantees a poke that survives into an ISR
-        # gate, which latches ctx_fault_ and forces the reset.
-        ("ctx_.debounce_counter(in-range F2)", RAM, sim.addr_ctx + 2, 0x10, RETRY_GATE),
+        # Stop at two transaction seams after their healthy by-value arguments
+        # have been captured, then flip persisted bit 4 exactly once. The ISR
+        # case covers check-to-integrate; the main case covers check-to-step and
+        # publication. Both must finish from the local snapshot.
+        ("ctx_.debounce_counter(in-range F2 ISR)", RAM, sim.addr_ctx + 2,
+         0x10, TRANSACTION_ISR),
+        ("ctx_.debounce_counter(in-range F2 main)", RAM, sim.addr_ctx + 2,
+         0x10, TRANSACTION_MAIN),
         ("timer_isr_called_",      RAM,  sim.addr_timer_isr,      0xFF,   RETRY_GATE),
         ("TCB0.CTRLB(mode)",      REG,   S.REG_TCB0_CTRLB,        0x10,   GATE),
         ("TCB0.CCMP(period)",     REG16, S.REG_TCB0_CCMP_L,       0x0FFF, GATE),
@@ -210,6 +213,43 @@ def _run_case(elf, name, kind, addr, corrupt, mech, ck):
     sim.run_ms(SETTLE_MS)
     if sim.in_force_reset():
         ck.result(False, "%s: device already force-reset before injection" % name)
+        return
+
+    if mech in (TRANSACTION_ISR, TRANSACTION_MAIN):
+        before_ctx = bytes(sim.read_ram(sim.addr_ctx, 3))
+        before_check = sim.read_ram(sim.addr_ctx_check, 1)[0]
+        before_led = sim.led_on()
+        before_control = sim.control_state()
+        edges = sim.control_edges()
+        edges.drain()
+        if before_ctx != bytes((0, 0, 0)) or before_check != 0xFF:
+            ck.result(False, "%s: context/check not canonical before injection" % name)
+            return
+        if not sim.run_until_sleep(sim.cycles(2)):
+            ck.result(False, "%s: device did not settle in IDLE" % name)
+            return
+        target = (sim.addr_ctx_check_fn if mech == TRANSACTION_ISR
+                  else sim.addr_debounce_step_fn)
+        if not sim.run_until_pc(target, TRANSACTION_MAX_STEPS):
+            ck.result(False, "%s: transaction seam was not reached" % name)
+            return
+        if not _inject(sim, kind, addr, corrupt):
+            ck.result(True, "%s: injection was rejected/re-latched" % name,
+                      skipped=True)
+            return
+        ck.injected()
+        sim.run_ms(GATE_MS)
+        after_ctx = bytes(sim.read_ram(sim.addr_ctx, 3))
+        after_check = sim.read_ram(sim.addr_ctx_check, 1)[0]
+        control_events = edges.drain()
+        safe = (not sim.in_force_reset() and
+                after_ctx == bytes((0, 0, 0)) and after_check == 0xFF and
+                sim.led_on() == before_led and
+                sim.control_state() == before_control and not control_events)
+        ck.result(safe,
+                  "%s corrupted once after check capture -> %s"
+                  % (name, "safely overwritten, no output"
+                     if safe else "context/output changed or fault persisted"))
         return
 
     healthy = (sim.read_ioreg(addr) if kind in (REG, REG16)
