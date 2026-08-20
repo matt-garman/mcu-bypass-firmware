@@ -399,6 +399,98 @@ static void verify_nondeterministic_scheduling(void) {
            "k={0,1,2} main-passes per ISR verified\n", total_reachable);
 }
 
+// Host oracle for the F2 context check word, mirroring CBMC proofs C8 and C9 so
+// the two agree. CBMC *proves* these properties but produces no gcov data, so
+// without this function debounce_ctx_check_word() ships in the verified core
+// with no host execution at all -- which is what dropped coverage-check-core
+// below its floor when F2 landed.
+//
+// Both sweeps run the FULL byte domain of every member, with no valid-range
+// assumption, exactly as C8/C9 do: an upset that corrupts a member out of range
+// is precisely the case the check word exists to catch, so restricting the
+// domain here would test the wrong thing. That is 256^3 triples for the fold
+// identity and 24 single-bit flips on each of them -- about 9 s under the
+// sanitized standalone build, 4 s under --coverage.
+//
+// Failures are counted locally and folded into one CHECK per property rather
+// than one CHECK per case: 400M CHECK calls would bury the harness's own check
+// tally under a meaningless number. The first failing case is reported, which
+// is what a debugger actually needs.
+static void verify_ctx_check_word(void) {
+    unsigned long fold_bad = 0;
+    unsigned long flip_bad = 0;
+    unsigned first_fold[3] = {0u, 0u, 0u};
+    unsigned first_flip[5] = {0u, 0u, 0u, 0u, 0u};
+
+    for (unsigned ps = 0u; ps < 256u; ++ps) {
+        for (unsigned es = 0u; es < 256u; ++es) {
+            for (unsigned dc = 0u; dc < 256u; ++dc) {
+                debounce_context_t good;
+                good.program_state    = (program_state_t)ps;
+                good.effect_state     = (effect_state_t)es;
+                good.debounce_counter = (uint8_t)dc;
+
+                // (C9) the word is the COMPLEMENTED three-member XOR fold.
+                uint8_t const got    = debounce_ctx_check_word(good);
+                uint8_t const expect = (uint8_t)(0xFFu ^ (uint8_t)(ps ^ es ^ dc));
+                if (got != expect) {
+                    if (fold_bad == 0u) {
+                        first_fold[0] = ps; first_fold[1] = es; first_fold[2] = dc;
+                    }
+                    fold_bad++;
+                }
+
+                // (C8) flipping ANY single bit of ANY member changes the word.
+                for (unsigned sel = 0u; sel < 3u; ++sel) {
+                    for (unsigned bit = 0u; bit < 8u; ++bit) {
+                        uint8_t const mask = (uint8_t)(1u << bit);
+                        debounce_context_t bad = good;
+                        if (sel == 0u) {
+                            bad.program_state = (program_state_t)(uint8_t)(ps ^ mask);
+                        } else if (sel == 1u) {
+                            bad.effect_state = (effect_state_t)(uint8_t)(es ^ mask);
+                        } else {
+                            bad.debounce_counter = (uint8_t)(dc ^ mask);
+                        }
+                        if (debounce_ctx_check_word(bad) == got) {
+                            if (flip_bad == 0u) {
+                                first_flip[0] = ps;  first_flip[1] = es;
+                                first_flip[2] = dc;  first_flip[3] = sel;
+                                first_flip[4] = bit;
+                            }
+                            flip_bad++;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    CHECK(fold_bad == 0u,
+          "(C9 mirror) check word is not the complemented XOR fold in %lu of "
+          "16777216 contexts; first at program_state=%u effect_state=%u "
+          "counter=%u", fold_bad, first_fold[0], first_fold[1], first_fold[2]);
+    CHECK(flip_bad == 0u,
+          "(C8 mirror) a single-bit flip left the check word unchanged in %lu of "
+          "402653184 cases; first at program_state=%u effect_state=%u counter=%u "
+          "member=%u bit=%u", flip_bad, first_flip[0], first_flip[1],
+          first_flip[2], first_flip[3], first_flip[4]);
+
+    // (C9) the complement's stuck-at guard, called out separately because it is
+    // the whole reason the fold is complemented: a shadow byte cleared to 0x00
+    // by an upset must not match the fold of an also-cleared context.
+    debounce_context_t zero;
+    zero.program_state    = (program_state_t)0;
+    zero.effect_state     = (effect_state_t)0;
+    zero.debounce_counter = 0u;
+    CHECK(debounce_ctx_check_word(zero) == 0xFFu,
+          "(C9 mirror) all-zeros context folded to 0x%02X, expected 0xFF "
+          "(complement lost)", debounce_ctx_check_word(zero));
+
+    printf("  context check word: 2^24 fold identities + 24 single-bit flips "
+           "each verified over the full byte domain\n");
+}
+
 // Direct oracle for debounce_init_context(): the simavr harness cannot reliably
 // inject a "switch held at power-on" state (PORTB write during init() resets the
 // simavr IRQ-driven pin), so the init-path mutations are killed here instead.
@@ -465,6 +557,7 @@ int main(void) {
     verify_nondeterministic_scheduling();
     verify_init_context();
     verify_corrupt_state_faults();
+    verify_ctx_check_word();
 
     printf("state-space model check: %d checks, %d failures\n",
            g_checks, g_failures);
