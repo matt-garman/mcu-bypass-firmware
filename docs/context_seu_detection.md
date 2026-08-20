@@ -117,10 +117,21 @@ context/check pair mismatches and recovery follows. The publication order
 briefly leaves two different generations in SRAM, but no check or consumer runs
 between those stores in these single-owner loops.
 
-**Flash margin note (PIC10F322):** the previous non-transactional F2 image used
-507/512 words in the relay variant. The transactional image must be rebuilt with
-XC8 for every variant before F2 is considered qualified; that measurement was
-not available on the host used for this follow-up.
+**Flash margin note (PIC10F322):** the pre-transaction F2 image used 507/512
+words in the relay variant, so the transaction did not fit as first written. The
+snapshot and publication struct copies cost 18 words -- 12 in `main()`, 6 in
+`init()` -- taking the relay variant to 525/512. Folding the three pure-read
+integrity checks in `bypass_mcu_pic10f322.c` (`hw_critical_sfrs_intact()`,
+`hw_footswitch_pullup_intact()` and `hw_output_state_intact()`) from `&&` chains
+into branchless XOR-then-OR accumulators recovered 20 words: XC8's free-mode
+codegen spends roughly 5 program words of branch scaffolding on every
+short-circuit term, and every term in those three functions is a pure SFR read,
+so the fold is exactly equivalent, and constant-time as a bonus. The same trick
+applied to `main()`'s sanity `||` chain costs 32 words rather than saving them
+-- its terms are calls and comparisons that need an explicit `? 1U : 0U` -- so
+that chain is deliberately left short-circuit. The transactional image measures
+505/512 words in the relay variant, two words better than the pre-transaction
+image; see Resource qualification below for every variant.
 
 ## Shell wiring — AVR ISR shells (`avr_classic`, `avr_xt`)
 
@@ -197,19 +208,39 @@ function regardless (the host suite links it unconditionally).
 
 ## Resource qualification
 
-The last XC8 v3.10 measurement predates the transaction fix:
+Measured on the transactional image: XC8 v3.10 (free mode, `-O2`) for the PIC
+parts, avr-gcc for the AVR parts. Every figure below is enforced by a build
+gate, not a one-off reading.
 
-| Part | Budget | Pre-transaction F2 image | Status now |
-| --- | --- | --- | --- |
-| PIC10F322 relay | 512 words | 507 words | Transactional image not yet measured |
-| PIC10F322 mute | 512 words | 504 words | Transactional image not yet measured |
-| PIC10F322 simple | 512 words | 478 words | Transactional image not yet measured |
-| PIC10F320 relay | 256 words | Fold overflowed | Excluded, unchanged |
+| Part | Budget | Pre-transaction F2 image | Transactional image | Free |
+| --- | --- | --- | --- | --- |
+| PIC10F322 relay | 512 words | 507 words | 505 words | 7 words |
+| PIC10F322 mute | 512 words | 504 words | 502 words | 10 words |
+| PIC10F322 simple | 512 words | 478 words | 476 words | 36 words |
+| PIC12F675 relay | 1024 words | -- | 575 words | 449 words |
+| PIC12F675 mute | 1024 words | -- | 572 words | 452 words |
+| PIC12F675 simple | 1024 words | -- | 546 words | 478 words |
+| PIC10F320 relay | 256 words | Fold overflowed | 245 words, F2 excluded | 11 words |
+| ATtiny13a relay | 921 B | -- | 874 B | 47 B |
+| ATtiny202 relay | 2048 B | -- | 1004 B | 1044 B |
 
-The transaction removes the former AVR `ctx_fault_`, so persistent F2 storage is
-one check byte rather than two bytes. Automatic `next_ctx`/`res` objects may
-change stack and code size; AVR image/RAM/stack gates and every XC8 image-size
-gate must therefore be rerun rather than inferred from the previous build.
+PIC10F322 is the binding constraint, and it stays inside 512 words in every
+variant only because the integrity-check fold pays for the transaction -- see
+the flash margin note above. The ATtiny13a budget is the gate's 90%-of-1024
+utilisation limit, not the raw device size. PIC10F320 carries no F2 at all; its
+row records that the part still builds and where its own margin sits.
+
+RAM and stack: the AVR `next_ctx` snapshot is an automatic, so it lands on the
+stack. The stack high-water gate in the simulator suite (`make test-long`, not
+`make test`) measures 31-33 B used across every classic-AVR variant and part.
+The tightest margin is the ATtiny13a, whose 64 B of SRAM leaves 26 B free
+between the deepest stack push and the 5 B of static data, against the gate's
+8 B floor. PIC10F322 return-stack depth is unchanged at 3
+levels (`cd4053_simple`, `cd4053_with_mute`) and 4 (`tq2_l2_5v_relay`), each
+carrying a 2-level reserve inside the part's 8 hardware levels.
+
+The transaction also removes the former AVR `ctx_fault_`, so persistent F2
+storage is one check byte rather than two bytes.
 
 ## Test and mutation evidence
 

@@ -2313,6 +2313,45 @@ static void test_stack_high_water_mark(void) {
 // built with.
 //////////////////////////////////////////////////////////////////////////////
 
+//////////////////////////////////////////////////////////////////////////////
+// Busy-wait width band (shared by the relay-pulse and mute-window checks)
+//
+// hw_set_*_state() holds its control lines with BYPASS_DELAY_MS(), an avr-libc
+// _delay_ms() busy loop. _delay_ms() counts FOREGROUND cycles, so the 1 ms tick
+// ISR that preempts the loop never pays into the loop's own budget -- every
+// preemption adds its cycles on top of the wall-clock width a scope, and this
+// harness, actually observes. The overhead is therefore PROPORTIONAL to the
+// delay (a longer delay is preempted proportionally more often), which is what
+// this harness measures: at the tinyx5's 1 MHz the 12 ms coil pulse arrives at
+// 14.03 ms and the 5 ms mute window at 5.87 ms -- +16.9% and +17.4%, the same
+// overhead expressed two ways. The ATtiny13a's faster 1.2 MHz clock fits more
+// foreground cycles between ticks and lands near +13%.
+//
+// A fixed +/- ms band cannot express that: the same physics left the 5 ms mute
+// window 23% of headroom and the 12 ms coil pulse under 1%, so the longest
+// delay in the matrix sat one small ISR change away from failing with no
+// defect present. PULSE_PREEMPTION_MARGIN bounds the overhead as a fraction
+// of the design width instead, exactly as test_sim_attiny202.py does for the
+// XT part (which needs only 0.10 -- at 2 MHz its tick ISR costs about 5.5%).
+//
+// 25% is roughly 1.5x the worst measured overhead, which leaves the tick ISR
+// (footswitch sample, debounce integrate and, under BYPASS_CTX_CHECK, the
+// persisted-context validate + refresh) room to grow before this gate trips,
+// while still rejecting a halved, doubled or clock-mis-scaled delay by a wide
+// margin. Nothing else checks the delivered width on these parts -- the classic
+// AVR has no compiled-image delay oracle -- so the band stays no looser.
+//
+// Preemption can only LENGTHEN the observed width, so the lower edge stays
+// tight against the design value; it allows only avr-libc loop-count rounding.
+#define PULSE_PREEMPTION_MARGIN  0.25
+#define BUSY_WAIT_MIN_MS(design_ms) ((double)(design_ms) - 0.5)
+#define BUSY_WAIT_MAX_MS(design_ms) \
+    ((double)(design_ms) * (1.0 + PULSE_PREEMPTION_MARGIN))
+// Observed width as a percentage over (or under) the design width. Directly
+// comparable to PULSE_PREEMPTION_MARGIN.
+#define PREEMPTION_PCT(observed_ms, design_ms) \
+    (((observed_ms) / (double)(design_ms) - 1.0) * 100.0)
+
 #if defined(TQ2_L2_5V_RELAY)
 // TQ2-L2-5V latching relay: a toggle must pulse exactly one coil for the
 // configured duration, leave the other coil idle, and PARK BOTH COILS LOW
@@ -2323,14 +2362,23 @@ static void check_coil_pulse(int pulse_idx, int idle_idx, const char *what) {
     double pulse_ms =
         (double)(g_ctl_fall_cycle[pulse_idx] - g_ctl_rise_cycle[pulse_idx])
         / (double)CYCLES_PER_MS;
-    printf("  relay %s pulse: %.2f ms (datasheet min 4ms, design %d ms)\n",
-           what, pulse_ms, TQ2_L2_5V_PULSE_MS);
+    printf("  relay %s pulse: %.2f ms (datasheet min 4ms, design %d ms; "
+           "tick-ISR preemption %+.1f%%, budget %+.0f%%)\n",
+           what, pulse_ms, TQ2_L2_5V_PULSE_MS,
+           PREEMPTION_PCT(pulse_ms, TQ2_L2_5V_PULSE_MS),
+           PULSE_PREEMPTION_MARGIN * 100.0);
     CHECK(pulse_ms >= 4.0,
           "relay %s pulse %.2f ms below 4ms datasheet minimum", what, pulse_ms);
-    CHECK(pulse_ms >= (double)TQ2_L2_5V_PULSE_MS - 1.0 &&
-          pulse_ms <= (double)TQ2_L2_5V_PULSE_MS + 2.0,
-          "relay %s pulse %.2f ms not near design %d ms",
-          what, pulse_ms, TQ2_L2_5V_PULSE_MS);
+    CHECK(pulse_ms >= BUSY_WAIT_MIN_MS(TQ2_L2_5V_PULSE_MS) &&
+          pulse_ms <= BUSY_WAIT_MAX_MS(TQ2_L2_5V_PULSE_MS),
+          "relay %s pulse %.2f ms (%+.1f%% vs the %d ms design) outside "
+          "[%.2f, %.2f] ms: tick-ISR preemption may stretch a busy-wait by at "
+          "most %+.0f%%",
+          what, pulse_ms, PREEMPTION_PCT(pulse_ms, TQ2_L2_5V_PULSE_MS),
+          TQ2_L2_5V_PULSE_MS,
+          BUSY_WAIT_MIN_MS(TQ2_L2_5V_PULSE_MS),
+          BUSY_WAIT_MAX_MS(TQ2_L2_5V_PULSE_MS),
+          PULSE_PREEMPTION_MARGIN * 100.0);
     CHECK(g_ctl_level[pulse_idx] == 0 && g_ctl_level[idle_idx] == 0,
           "relay %s: both coils must be parked low after the pulse "
           "(PB2=%d PB3=%d)", what, g_ctl_level[CTL_PB2], g_ctl_level[CTL_PB3]);
@@ -2397,12 +2445,21 @@ static void test_control_mute_sequence(void) {
     double mute_engage_ms =
         (double)(X4053_CTL_EDGE_CYCLE(CTL_PB2, 1) - X4053_CTL_EDGE_CYCLE(CTL_PB3, 1))
         / (double)CYCLES_PER_MS;
-    printf("  mute window (engage): %.2f ms (design %d ms)\n",
-           mute_engage_ms, CD4053_MUTE_DELAY_MS);
-    CHECK(mute_engage_ms >= (double)CD4053_MUTE_DELAY_MS - 1.0 &&
-          mute_engage_ms <= (double)CD4053_MUTE_DELAY_MS + 2.0,
-          "mute window (engage) %.2f ms not near design %d ms",
-          mute_engage_ms, CD4053_MUTE_DELAY_MS);
+    printf("  mute window (engage): %.2f ms (design %d ms; "
+           "tick-ISR preemption %+.1f%%, budget %+.0f%%)\n",
+           mute_engage_ms, CD4053_MUTE_DELAY_MS,
+           PREEMPTION_PCT(mute_engage_ms, CD4053_MUTE_DELAY_MS),
+           PULSE_PREEMPTION_MARGIN * 100.0);
+    CHECK(mute_engage_ms >= BUSY_WAIT_MIN_MS(CD4053_MUTE_DELAY_MS) &&
+          mute_engage_ms <= BUSY_WAIT_MAX_MS(CD4053_MUTE_DELAY_MS),
+          "mute window (engage) %.2f ms (%+.1f%% vs the %d ms design) outside "
+          "[%.2f, %.2f] ms: tick-ISR preemption may stretch a busy-wait by at "
+          "most %+.0f%%",
+          mute_engage_ms, PREEMPTION_PCT(mute_engage_ms, CD4053_MUTE_DELAY_MS),
+          CD4053_MUTE_DELAY_MS,
+          BUSY_WAIT_MIN_MS(CD4053_MUTE_DELAY_MS),
+          BUSY_WAIT_MAX_MS(CD4053_MUTE_DELAY_MS),
+          PULSE_PREEMPTION_MARGIN * 100.0);
 
     // --- Bypass: CTL1 (PB2) asserts mute first, CTL2 (PB3) un-mutes after the
     //     settle delay. End state: both at the BYPASS level. ---
@@ -2415,11 +2472,19 @@ static void test_control_mute_sequence(void) {
     double mute_bypass_ms =
         (double)(X4053_CTL_EDGE_CYCLE(CTL_PB3, 0) - X4053_CTL_EDGE_CYCLE(CTL_PB2, 0))
         / (double)CYCLES_PER_MS;
-    printf("  mute window (bypass): %.2f ms\n", mute_bypass_ms);
-    CHECK(mute_bypass_ms >= (double)CD4053_MUTE_DELAY_MS - 1.0 &&
-          mute_bypass_ms <= (double)CD4053_MUTE_DELAY_MS + 2.0,
-          "mute window (bypass) %.2f ms not near design %d ms",
-          mute_bypass_ms, CD4053_MUTE_DELAY_MS);
+    printf("  mute window (bypass): %.2f ms (tick-ISR preemption %+.1f%%)\n",
+           mute_bypass_ms,
+           PREEMPTION_PCT(mute_bypass_ms, CD4053_MUTE_DELAY_MS));
+    CHECK(mute_bypass_ms >= BUSY_WAIT_MIN_MS(CD4053_MUTE_DELAY_MS) &&
+          mute_bypass_ms <= BUSY_WAIT_MAX_MS(CD4053_MUTE_DELAY_MS),
+          "mute window (bypass) %.2f ms (%+.1f%% vs the %d ms design) outside "
+          "[%.2f, %.2f] ms: tick-ISR preemption may stretch a busy-wait by at "
+          "most %+.0f%%",
+          mute_bypass_ms, PREEMPTION_PCT(mute_bypass_ms, CD4053_MUTE_DELAY_MS),
+          CD4053_MUTE_DELAY_MS,
+          BUSY_WAIT_MIN_MS(CD4053_MUTE_DELAY_MS),
+          BUSY_WAIT_MAX_MS(CD4053_MUTE_DELAY_MS),
+          PULSE_PREEMPTION_MARGIN * 100.0);
 }
 
 #else // CD4053_SIMPLE (default)
