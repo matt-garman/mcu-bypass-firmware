@@ -84,7 +84,7 @@ case "$PB_TARGET" in
 		# complete-matrix production/consumption and the hardware-programming
 		# calibration guard.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=121
+		expected_checks=123
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -2148,6 +2148,8 @@ assert record["baseline_bg_bits"] == record["post_bg_bits"] == "0x1000"
 assert record["baseline_config_word"] == "0x11FF"
 assert record["post_config_word"] == "0x11CC"
 assert record["writer_kind"] == "pk2cmd"
+assert record["release_tag"] is None
+assert record["release_source_commit"] is None
 assert record["program_exit"] == record["post_read_exit"] == 0
 assert record["programmed_image_bytes_verified"] > 2
 PY
@@ -2346,6 +2348,8 @@ with open(sys.argv[1], "r", encoding="ascii") as handle:
     record = json.load(handle)
 assert record["status"] == "PASS"
 assert record["finalization_mode"] == "recovery"
+assert record["release_tag"] is None
+assert record["release_source_commit"] is None
 assert record["program_exit"] is None
 assert record["post_read_exit"] == record["reader_version_exit"] == 0
 assert record["programmed_image_bytes_verified"] > 2
@@ -3059,6 +3063,7 @@ EOF
 	git -C "$repo" add .
 	git -C "$repo" -c commit.gpgsign=false commit -qm fixture
 	git -C "$repo" tag -a -m fixture "$release_tag"
+	release_commit=$(git -C "$repo" rev-parse --verify "refs/tags/$release_tag^{commit}")
 	: > "$release_signature_log"
 	: > "$program_log"
 	: > "$hardware_log"
@@ -3089,6 +3094,81 @@ EOF
 			"$release_output" >&2; exit 1; }
 	cmp -s "$release_dir/bypass-pic12f675-cd4053_simple.hex" "$program_capture" \
 		|| { printf 'FAIL: signed-release writer did not consume the checked release bytes\n' >&2; exit 1; }
+	python3 - "$release_result/reservation.json" "$release_result/result.json" \
+		"$release_tag" "$release_commit" <<'PY'
+import json
+import sys
+for path in sys.argv[1:3]:
+    with open(path, "r", encoding="ascii") as handle:
+        record = json.load(handle)
+    assert record["release_tag"] == sys.argv[3]
+    assert record["release_source_commit"] == sys.argv[4]
+PY
+	checks=$((checks + 1))
+
+	# If the signed-release writer is interrupted after consuming the image, the
+	# PENDING reservation retains the exact tag/source identity. Recovery without
+	# that identity fails before hardware; matching recovery revalidates the signed
+	# source and retained image before its read-only device operations.
+	release_pending="$work/pic12f675-release-pending-result"
+	rm -rf "$release_pending"
+	: > "$program_log"
+	: > "$hardware_log"
+	if release_output=$(PIC12F675_PROGRAM_TARGET=pic12f675-release-program \
+			PIC12F675_PROGRAMMER_MODE=signal-after-write \
+			PIC12F675_SIGNATURE_LOG="$release_signature_log" \
+			run_program_make "$PB_BUILD_DIR" "$program_variant" \
+			"PIC12F675_RELEASE_TAG=$release_tag" \
+			"PIC12F675_BENCH_RESULT=$release_pending" 2>&1); then
+		printf 'FAIL: interrupted signed-release writer returned success\n' >&2
+		exit 1
+	fi
+	[[ -f "$release_pending/reservation.json" \
+		&& ! -e "$release_pending/result.json" ]] \
+		|| { printf 'FAIL: interrupted signed-release writer lost its PENDING evidence: %s\n' \
+			"$release_output" >&2; exit 1; }
+	python3 - "$release_pending/reservation.json" "$release_tag" "$release_commit" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+assert record["release_tag"] == sys.argv[2]
+assert record["release_source_commit"] == sys.argv[3]
+PY
+	: > "$hardware_log"
+	if release_output=$(run_finalize_make "$release_pending" "$program_variant" 2>&1); then
+		printf 'FAIL: signed-release recovery accepted a missing release identity\n' >&2
+		exit 1
+	fi
+	[[ "$release_output" == *"reservation release identity differs from selected release"* \
+		&& ! -s "$hardware_log" && ! -e "$release_pending/result.json" ]] \
+		|| { printf 'FAIL: missing release recovery identity reached hardware or failed for the wrong reason: %s\n' \
+			"$release_output" >&2; exit 1; }
+	checks=$((checks + 1))
+	pending_program_log="$work/release-pending-program-argv.log"
+	cp "$program_log" "$pending_program_log"
+	: > "$hardware_log"
+	release_output=$(PIC12F675_SIGNATURE_LOG="$release_signature_log" \
+		run_finalize_make "$release_pending" "$program_variant" \
+		"PIC12F675_RELEASE_TAG=$release_tag")
+	cmp -s "$pending_program_log" "$program_log" \
+		|| { printf 'FAIL: signed-release recovery invoked writer arguments\n' >&2; exit 1; }
+	[[ "$release_output" == *"PIC12F675_RELEASE_SOURCE_CHECK PASS tag=$release_tag"* \
+		&& "$release_output" == *"PIC12F675_RELEASE_IMAGE_CHECK PASS tag=$release_tag variant=$program_variant image=$release_pending/image.hex"* \
+		&& "$release_output" == *"PIC12F675_TRIM_RECOVERY_RESULT PASS evidence=$release_pending/result.json"* \
+		&& -f "$release_pending/result.json" ]] \
+		|| { printf 'FAIL: signed-release recovery did not revalidate source/image provenance: %s\n' \
+			"$release_output" >&2; exit 1; }
+	python3 - "$release_pending/result.json" "$release_tag" "$release_commit" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="ascii") as handle:
+    record = json.load(handle)
+assert record["status"] == "PASS"
+assert record["finalization_mode"] == "recovery"
+assert record["release_tag"] == sys.argv[2]
+assert record["release_source_commit"] == sys.argv[3]
+PY
 	checks=$((checks + 1))
 
 	# A tracked mutation after preflight fails the target's internal clean-source

@@ -758,6 +758,34 @@ if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
             f"ci.yml: PIC aggregate '{goal}' occurs {occurrences} time(s), expected 1",
         )
 
+    expected_uploads = {
+        "firmware-pic10f322": "build_pic10f322/*.hex",
+        "firmware-pic10f320": "build_pic10f320/*.hex",
+        "firmware-pic12f675": "build_pic12f675/*.hex",
+    }
+    actual_uploads = []
+    for step in pic_job.get("steps") or []:
+        if not isinstance(step, dict) \
+                or not str(step.get("uses", "")).startswith("actions/upload-artifact@"):
+            continue
+        options = step.get("with") or {}
+        actual_uploads.append((
+            options.get("name"), options.get("path"),
+            options.get("if-no-files-found"),
+        ))
+    check(
+        len(actual_uploads) == len(expected_uploads),
+        f"ci.yml: PIC job has {len(actual_uploads)} firmware uploads, "
+        f"expected {len(expected_uploads)}",
+    )
+    for artifact, path in expected_uploads.items():
+        matches = [upload for upload in actual_uploads if upload[0] == artifact]
+        check(
+            matches == [(artifact, path, "error")],
+            f"ci.yml: PIC artifact {artifact} must upload {path} exactly once "
+            "with if-no-files-found: error",
+        )
+
     for job_id in ("verify", "attiny202", "build-matrix", "stress"):
         job = ci_jobs.get(job_id)
         needs = job.get("needs", []) if isinstance(job, dict) else []
@@ -798,9 +826,8 @@ if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
 
 
 # Normal CI must reject a DFP missing any device header required by its shared
-# three-part PIC job. The release workflow intentionally asserts only its two
-# release-supported parts; its installer cache key changes with the installer's
-# three-header postcondition.
+# three-part PIC job. The installer's cache key changes with the same three-header
+# postcondition.
 required_pic_headers = ("pic10f322", "pic10f320", "pic12f675")
 for workflow_name, job_id in (("ci.yml", "pic"),):
     doc = docs.get(workflow_name)

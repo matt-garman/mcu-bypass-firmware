@@ -133,12 +133,15 @@ release_validate_current_documentation() {
 # docs/ and does not match the root pattern, so it is unaffected.
 release_reject_branch_only_documents() {
 	[ "$#" -eq 1 ] || return 2
-	local repo_root=$1 branch_doc reference_file
+	local repo_root=$1 branch_doc reference_file find_pid grep_output grep_status
 	local -a present_polish_docs=() polish_doc_references=()
 
-	while IFS= read -r branch_doc; do
+	while IFS= read -r -d '' branch_doc; do
 		[ -n "$branch_doc" ] && present_polish_docs+=("${branch_doc#$repo_root/}")
-	done < <(find "$repo_root" -maxdepth 1 -type f -name 'v*-polish.md' 2>/dev/null)
+	done < <(find "$repo_root" -maxdepth 1 -type f -name 'v*-polish.md' -print0)
+	find_pid=$!
+	wait "$find_pid" \
+		|| _release_documentation_error "could not scan for branch-only polish documents" || return
 	[ "${#present_polish_docs[@]}" -eq 0 ] \
 		|| _release_documentation_error "branch-only polish document(s) must be deleted before release: ${present_polish_docs[*]}" || return
 
@@ -146,12 +149,18 @@ release_reject_branch_only_documents() {
 	# once it is deleted. Exclude this checker and its regression, which
 	# necessarily carry the pattern as tooling -- the same self-reference the
 	# Makefile name contract allowlists.
-	while IFS= read -r reference_file; do
-		[ -n "$reference_file" ] && polish_doc_references+=("${reference_file#$repo_root/}")
-	done < <(grep -rlIE 'v[0-9][0-9.]*-polish\.md' "$repo_root" \
+	if grep_output=$(grep -rlIE 'v[0-9][0-9.]*-polish\.md' "$repo_root" \
 		--exclude-dir=.git \
 		--exclude='release-documentation.sh' \
-		--exclude='test_release_preflight.sh' 2>/dev/null || true)
+		--exclude='test_release_preflight.sh'); then
+		while IFS= read -r reference_file; do
+			[ -n "$reference_file" ] && polish_doc_references+=("${reference_file#$repo_root/}")
+		done <<<"$grep_output"
+	else
+		grep_status=$?
+		[ "$grep_status" -eq 1 ] \
+			|| _release_documentation_error "could not scan for branch-only polish-document references" || return
+	fi
 	[ "${#polish_doc_references[@]}" -eq 0 ] \
 		|| _release_documentation_error "durable file(s) still reference a branch-only polish document (repoint to CHANGELOG.md / Git history): ${polish_doc_references[*]}" || return
 }
@@ -231,13 +240,15 @@ release_render_pic12f675_flashing() {
 		'```sh' \
 		'make -C "$repo" pic12f675-finalize \' \
 		'  VARIANT=cd4053_simple \' \
+		"  PIC12F675_RELEASE_TAG=$(printf '%q' "$release_tag") \\" \
 		'  PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \' \
 		'  PIC12F675_READ_PROG=pk2cmd \' \
 		'  PIC12F675_TRIM_EVIDENCE="$baseline" \' \
 		'  PIC12F675_BENCH_RESULT="$result"' \
 		'```' \
 		'' \
-		'Finalization validates every reserved identity and the separately retained image' \
+		'Finalization revalidates the same signed release tag and image, every reserved' \
+		'identity, and the separately retained image' \
 		'before hardware access and never invokes writer arguments. It verifies the reader' \
 		'version before a full-device read, uses retry-safe private attempts, and exclusively' \
 		'publishes the recovered PASS/FAIL `result.json`; FAIL is a' \

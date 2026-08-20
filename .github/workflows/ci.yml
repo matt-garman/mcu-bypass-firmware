@@ -376,9 +376,8 @@ jobs:
             PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
 
-      # Two release-supported chips, two separately named artifacts -- never one
-      # merged upload. (The 12F675 gate above builds images too; they are not
-      # uploaded, per the staging note in this job's header.)
+      # Three release-supported chips, three separately named artifacts -- never
+      # one merged upload.
       # The release machinery keys on image basename. Those basenames now carry
       # the MCU (`bypass-pic10f322-<stage>.hex` vs `bypass-pic10f320-<stage>.hex`),
       # so a flattened upload would no longer silently collide -- but keep them
@@ -396,6 +395,13 @@ jobs:
         with:
           name: firmware-pic10f320
           path: build_pic10f320/*.hex
+          if-no-files-found: error
+
+      - name: Upload PIC12F675 firmware images
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: firmware-pic12f675
+          path: build_pic12f675/*.hex
           if-no-files-found: error
 
   # -------------------------------------------------------------------------

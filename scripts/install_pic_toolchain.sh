@@ -21,6 +21,13 @@ XC8_VERSION=${XC8_VERSION:-3.10}
 DFP_VERSION=${DFP_VERSION:-1.9.189}
 XC8_DIR=${XC8_DIR:-/opt/microchip/xc8/v3.10}
 XC8_DFP_ROOT=${XC8_DFP_ROOT:-/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189}
+XC8_CACHE_DIR=${XC8_CACHE_DIR:-/opt/microchip}
+
+# Reject a pre-existing redirected cache boundary before privileged installation.
+[ ! -L "$XC8_CACHE_DIR" ] || die "XC8 cache root is a symlink: $XC8_CACHE_DIR"
+if [ -e "$XC8_CACHE_DIR" ]; then
+    [ -d "$XC8_CACHE_DIR" ] || die "XC8 cache root is not a directory: $XC8_CACHE_DIR"
+fi
 
 # XC8 has no published SHA-256 sidecar; this digest was reviewed from two
 # independent byte-identical HTTPS downloads. The DFP digest is published by
@@ -84,9 +91,23 @@ done
 # verify_pic_toolchain_cache.sh can reject a corrupted or incomplete RESTORED
 # cache before any build or test consumes it.
 # ---------------------------------------------------------------------------
-XC8_CACHE_DIR=${XC8_CACHE_DIR:-/opt/microchip}
 xc8_stamp="$XC8_CACHE_DIR/.xc8_toolchain.stamp"
 xc8_manifest="$XC8_CACHE_DIR/.xc8_toolchain.manifest"
+
+[ -e "$XC8_CACHE_DIR" ] || die "XC8 installation did not create $XC8_CACHE_DIR"
+[ ! -L "$XC8_CACHE_DIR" ] || die "XC8 cache root became a symlink: $XC8_CACHE_DIR"
+[ -d "$XC8_CACHE_DIR" ] || die "XC8 cache root is not a directory: $XC8_CACHE_DIR"
+cache_real=$(CDPATH= cd -- "$XC8_CACHE_DIR" && pwd -P) \
+    || die "could not resolve XC8 cache root: $XC8_CACHE_DIR"
+for root in "$XC8_DIR" "$XC8_DFP_ROOT"; do
+    [ ! -L "$root" ] || die "installed component root is a symlink: $root"
+    root_real=$(CDPATH= cd -- "$root" && pwd -P) \
+        || die "could not resolve installed component root: $root"
+    case "$root_real" in
+        "$cache_real"/*) ;;
+        *) die "installed component escapes $XC8_CACHE_DIR: $root" ;;
+    esac
+done
 
 # The walk is scoped to READABLE files and prunes unreadable directories. The
 # XC8 installer leaves a few root-only bookkeeping files (Uninstall-*.dat,
@@ -97,7 +118,7 @@ xc8_manifest="$XC8_CACHE_DIR/.xc8_toolchain.manifest"
 # verify_ sees the identical readable set. A regular file that is unreadable is
 # excluded (it cannot be a build input); a symlink among the readable tree is
 # refused outright.
-syms=$(find "$XC8_DIR" "$XC8_DFP_ROOT" \
+syms=$(find "$XC8_CACHE_DIR" \
         \( -type d ! -readable -prune \) -o \( -type l -print \)) \
     || die "could not scan the installed tree for symlinks"
 [ -z "$syms" ] || die "refusing to record a manifest for a tree with symlinks:

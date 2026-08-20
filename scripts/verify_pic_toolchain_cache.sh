@@ -45,17 +45,28 @@ done
 xc8_stamp="$XC8_CACHE_DIR/.xc8_toolchain.stamp"
 xc8_manifest="$XC8_CACHE_DIR/.xc8_toolchain.manifest"
 
-# --- component roots: real directories, no symlinks anywhere ------------------
+# --- cache boundary + component roots: real directories, no symlinks ----------
+[ -e "$XC8_CACHE_DIR" ] || die "restored cache is incomplete: missing $XC8_CACHE_DIR"
+[ ! -L "$XC8_CACHE_DIR" ] || die "restored cache root is a symlink: $XC8_CACHE_DIR"
+[ -d "$XC8_CACHE_DIR" ] || die "restored cache root is not a directory: $XC8_CACHE_DIR"
+cache_real=$(CDPATH= cd -- "$XC8_CACHE_DIR" && pwd -P) \
+    || die "could not resolve restored cache root: $XC8_CACHE_DIR"
 for root in "$XC8_DIR" "$XC8_DFP_ROOT"; do
     [ -e "$root" ] || die "restored cache is incomplete: missing $root"
     [ ! -L "$root" ] || die "restored cache root is a symlink: $root"
     [ -d "$root" ] || die "restored cache root is not a directory: $root"
+    root_real=$(CDPATH= cd -- "$root" && pwd -P) \
+        || die "could not resolve restored cache component root: $root"
+    case "$root_real" in
+        "$cache_real"/*) ;;
+        *) die "restored cache component escapes $XC8_CACHE_DIR: $root" ;;
+    esac
 done
 # Scoped to READABLE files, pruning unreadable dirs -- identical to the walk
 # install_pic_toolchain.sh recorded with (see its comment: root-only installer
 # bookkeeping is not a build input, and permissions survive the cache
 # save/restore, so both walks see the same readable set).
-syms=$(find "$XC8_DIR" "$XC8_DFP_ROOT" \
+syms=$(find "$XC8_CACHE_DIR" \
         \( -type d ! -readable -prune \) -o \( -type l -print \)) \
     || die "could not scan the restored tree for symlinks"
 [ -z "$syms" ] || die "restored cache contains symlinks (rejected):

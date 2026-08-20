@@ -224,6 +224,8 @@ declare -F release_source_is_unchanged >/dev/null \
 	|| die "release provenance checker did not define its required function"
 declare -F release_tool_version_line >/dev/null \
 	|| die "release provenance checker did not define its tool-version function"
+declare -F release_require_main_branch >/dev/null \
+	|| die "release provenance checker did not define its main-branch function"
 declare -F release_output_path_is_safe >/dev/null \
 	|| die "release provenance checker did not define its output-path function"
 declare -F release_terminate_workers >/dev/null \
@@ -914,7 +916,12 @@ fi
 # that here -- after the preflight capability probe, which legitimately runs
 # against a live polish branch, and before any build -- so a release started
 # from an un-merged polish branch fails fast instead of trusting the manual
-# pre-merge checklist.
+# pre-merge checklist. Dry runs remain branch-safe rehearsals; only production
+# staging requires the checked-out main ref.
+if [ "$RELEASE_MODE" = production ]; then
+	release_require_main_branch "$REPO_ROOT" \
+		|| die "refusing production release outside the main branch (see the diagnostic above)."
+fi
 release_reject_branch_only_documents "$REPO_ROOT" \
 	|| die "refusing to release: a branch-only polish document is still present or referenced (see the diagnostic above)."
 

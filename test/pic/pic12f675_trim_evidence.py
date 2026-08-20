@@ -16,7 +16,7 @@ import sys
 import tempfile
 
 
-SCHEMA = "mcu-bypass-pic12f675-trim-evidence-v1"
+SCHEMA = "mcu-bypass-pic12f675-trim-evidence-v2"
 PART = "PIC12F675"
 MAX_FILE_BYTES = 1024 * 1024
 CAL_WORD_ADDR = 0x03FF
@@ -34,6 +34,7 @@ BASELINE_KEYS = frozenset({
 })
 RESERVATION_KEYS = frozenset({
     "schema", "record_type", "status", "created_utc", "part", "variant",
+    "release_tag", "release_source_commit",
     "baseline_sha256", "image_base64", "image_sha256",
     "reader_path", "reader_realpath", "reader_sha256",
     "reader_version_base64", "reader_version_sha256",
@@ -45,7 +46,8 @@ RESERVATION_KEYS = frozenset({
 })
 RESULT_KEYS = frozenset({
     "schema", "record_type", "finalization_mode", "created_utc", "status",
-    "failures", "part", "variant", "image_sha256",
+    "failures", "part", "variant", "release_tag", "release_source_commit",
+    "image_sha256",
     "programmed_image_bytes_verified", "baseline_sha256", "reservation_sha256",
     "baseline_osccal_word", "baseline_osccal_value", "baseline_config_word",
     "baseline_bg_bits", "prewrite_osccal_word", "prewrite_osccal_value",
@@ -90,6 +92,21 @@ def read_regular_bytes(path, label, allow_empty=False):
 
 def sha256_bytes(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def release_identity(release_tag, release_source_commit):
+    tag = None if release_tag in (None, "") else release_tag
+    commit = None if release_source_commit in (None, "") else release_source_commit
+    if (tag is None) != (commit is None):
+        raise EvidenceError("release tag and source commit must be supplied together")
+    if tag is None:
+        return None, None
+    if not isinstance(tag, str) or re.fullmatch(
+            r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?", tag) is None:
+        raise EvidenceError("release tag is invalid")
+    if not isinstance(commit, str) or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        raise EvidenceError("release source commit is not a full lowercase SHA-1")
+    return tag, commit
 
 
 def parse_hex_bytes(raw, label):
@@ -434,7 +451,7 @@ def load_baseline(path):
     except (UnicodeDecodeError, ValueError) as exc:
         raise EvidenceError("baseline evidence is not valid ASCII JSON: %s" % exc) from exc
     if not isinstance(record, dict) or frozenset(record) != BASELINE_KEYS:
-        raise EvidenceError("baseline evidence does not have the exact v1 field set")
+        raise EvidenceError("baseline evidence does not have the exact v2 field set")
     if record["schema"] != SCHEMA or record["record_type"] != "baseline" \
             or record["part"] != PART or record["reader_kind"] != "pk2cmd":
         raise EvidenceError("baseline evidence has the wrong schema, type, part, or reader")
@@ -471,10 +488,11 @@ def load_reservation(path):
     except (UnicodeDecodeError, ValueError) as exc:
         raise EvidenceError("program reservation is not valid ASCII JSON: %s" % exc) from exc
     if not isinstance(record, dict) or frozenset(record) != RESERVATION_KEYS:
-        raise EvidenceError("program reservation does not have the exact v1 field set")
+        raise EvidenceError("program reservation does not have the exact v2 field set")
     if record["schema"] != SCHEMA or record["record_type"] != "program-reservation" \
             or record["status"] != "PENDING" or record["part"] != PART:
         raise EvidenceError("program reservation has the wrong schema, type, status, or part")
+    release_identity(record["release_tag"], record["release_source_commit"])
     for key in ("baseline_sha256", "image_sha256", "reader_sha256",
                 "reader_version_sha256", "device_read_sha256", "read_hex_sha256",
                 "writer_sha256", "writer_version_sha256"):
@@ -539,6 +557,8 @@ def validate_terminal_result(path, baseline, baseline_raw,
         "record_type": "program-result",
         "part": PART,
         "variant": reservation["variant"],
+        "release_tag": reservation["release_tag"],
+        "release_source_commit": reservation["release_source_commit"],
         "image_sha256": reservation["image_sha256"],
         "baseline_sha256": sha256_bytes(baseline_raw),
         "reservation_sha256": sha256_bytes(reservation_raw),
@@ -720,6 +740,11 @@ def recovery_context(args):
         raise EvidenceError("reservation part differs from selected part")
     if reservation["variant"] != args.variant:
         raise EvidenceError("reservation variant differs from selected variant")
+    release_tag, release_source_commit = release_identity(
+        args.release_tag, args.release_source_commit)
+    if reservation["release_tag"] != release_tag \
+            or reservation["release_source_commit"] != release_source_commit:
+        raise EvidenceError("reservation release identity differs from selected release")
     reader_path, reader_realpath, reader_sha = executable_identity(args.reader_path)
     if reservation["reader_path"] != reader_path \
             or reservation["reader_realpath"] != reader_realpath \
@@ -834,6 +859,8 @@ def reserve_command(args):
     image_b64, image_sha, image_data = encoded_file(
         args.image_hex, "programming image")
     parse_hex_bytes(image_data, "programming image")
+    release_tag, release_source_commit = release_identity(
+        args.release_tag, args.release_source_commit)
     output_dir = os.path.abspath(args.output_dir)
     parent = os.path.dirname(output_dir) or "."
     if not os.path.isdir(parent):
@@ -851,6 +878,8 @@ def reserve_command(args):
         "created_utc": utc_now(),
         "part": PART,
         "variant": args.variant,
+        "release_tag": release_tag,
+        "release_source_commit": release_source_commit,
         "baseline_sha256": sha256_bytes(baseline_raw),
         "image_base64": image_b64,
         "image_sha256": image_sha,
@@ -958,6 +987,8 @@ def result_command(args):
         "failures": failures,
         "part": PART,
         "variant": reservation["variant"],
+        "release_tag": reservation["release_tag"],
+        "release_source_commit": reservation["release_source_commit"],
         "image_sha256": reservation["image_sha256"],
         "programmed_image_bytes_verified": compared_image_bytes,
         "baseline_sha256": sha256_bytes(baseline_raw),
@@ -1105,6 +1136,8 @@ def recovery_result_command(args):
         "failures": failures,
         "part": PART,
         "variant": reservation["variant"],
+        "release_tag": reservation["release_tag"],
+        "release_source_commit": reservation["release_source_commit"],
         "image_sha256": reservation["image_sha256"],
         "programmed_image_bytes_verified": compared_image_bytes,
         "baseline_sha256": sha256_bytes(baseline_raw),
@@ -1201,6 +1234,8 @@ def add_recovery_identity_arguments(parser):
     parser.add_argument("--reader-path", required=True)
     parser.add_argument("--writer-kind", choices=("pk2cmd", "ipecmd"), required=True)
     parser.add_argument("--writer-path", required=True)
+    parser.add_argument("--release-tag", default="")
+    parser.add_argument("--release-source-commit", default="")
     parser.add_argument("--output-dir", required=True)
 
 
@@ -1229,6 +1264,8 @@ def parse_args(argv):
     reserve.add_argument("--writer-version-log", required=True)
     reserve.add_argument("--image-hex", required=True)
     reserve.add_argument("--variant", required=True)
+    reserve.add_argument("--release-tag", default="")
+    reserve.add_argument("--release-source-commit", default="")
     reserve.add_argument("--output-dir", required=True)
 
     result = subparsers.add_parser("result")

@@ -124,6 +124,17 @@ run_pic_installer_without_pic12f675() {
 	FAKE_OMIT_PIC12F675=1 run_pic_installer "$@"
 }
 
+run_pic_installer_via_cache_link() {
+	env PATH="$fakebin:$PATH" FAKE_SUDO_LOG="$sudo_log" \
+		FAKE_CHMOD_LOG="$chmod_log" REAL_CHMOD="$real_chmod" \
+		FAKE_XC8_PAYLOAD="$1" FAKE_DFP_PAYLOAD="$2" \
+		XC8_INSTALLER_SHA256="$trusted_xc8_sha" \
+		PIC_DFP_SHA256="$trusted_dfp_sha" \
+		XC8_DIR="$work/cache-link/xc8" XC8_DFP_ROOT="$work/cache-link/pic-dfp" \
+		XC8_CACHE_DIR="$work/cache-link" \
+		"$PIC_INSTALL"
+}
+
 rm -f "$sudo_log" "$chmod_log"
 expect_fail "corrupt XC8 download" "XC8 SHA-256 mismatch" \
 	run_pic_installer 'changed XC8 bytes' "$trusted_dfp"
@@ -136,6 +147,14 @@ expect_fail "corrupt PIC DFP download" "DFP SHA-256 mismatch" \
 	run_pic_installer "$trusted_xc8" 'changed DFP bytes'
 [ ! -e "$sudo_log" ] || fail "corrupt DFP bytes reached sudo"
 [ ! -e "$chmod_log" ] || fail "corrupt DFP bytes reached chmod"
+checks=$((checks + 1))
+
+ln -s . "$work/cache-link"
+rm -f "$sudo_log" "$chmod_log"
+expect_fail "symlinked PIC install cache root" "XC8 cache root is a symlink" \
+	run_pic_installer_via_cache_link "$trusted_xc8" "$trusted_dfp"
+[ ! -e "$sudo_log" ] || fail "symlinked PIC install cache root reached sudo"
+rm "$work/cache-link"
 checks=$((checks + 1))
 
 rm -rf "$work/xc8" "$work/pic-dfp"
@@ -175,6 +194,12 @@ run_pic_verify() {
 		XC8_INSTALLER_SHA256="$trusted_xc8_sha" PIC_DFP_SHA256="$trusted_dfp_sha" \
 		"$PIC_VERIFY"
 }
+run_pic_verify_via_cache_link() {
+	env XC8_DIR="$work/cache-link/xc8" XC8_DFP_ROOT="$work/cache-link/pic-dfp" \
+		XC8_CACHE_DIR="$work/cache-link" \
+		XC8_INSTALLER_SHA256="$trusted_xc8_sha" PIC_DFP_SHA256="$trusted_dfp_sha" \
+		"$PIC_VERIFY"
+}
 reinstall_pic() {
 	rm -rf "$work/xc8" "$work/pic-dfp" \
 		"$work/.xc8_toolchain.stamp" "$work/.xc8_toolchain.manifest"
@@ -209,6 +234,15 @@ mv "$work/xc8" "$work/xc8.real"
 ln -s "$work/xc8.real" "$work/xc8"
 expect_fail "symlinked XC8 root" "root is a symlink" run_pic_verify
 rm -rf "$work/xc8" "$work/xc8.real"
+
+# The cache boundary itself is part of the trust contract, not just its final
+# component roots. Accessing an otherwise valid tree through a root symlink must
+# fail before stamp or manifest validation.
+reinstall_pic
+ln -s . "$work/cache-link"
+expect_fail "symlinked XC8 cache root" "cache root is a symlink" \
+	run_pic_verify_via_cache_link
+rm "$work/cache-link"
 
 # A stamp that does not name the pinned (compiler, DFP) pair is rejected.
 reinstall_pic

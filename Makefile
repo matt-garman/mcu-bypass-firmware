@@ -6760,11 +6760,13 @@ pic12f675-preflight: $(PIC12F675_TRIM_EVIDENCE_TOOL)
 
 # Resolve a retained PENDING transaction without issuing an erase/write command.
 # The reservation binds the original baseline, image, part, variant, reader and
-# writer identities. Validate all of them before touching hardware, then perform
-# only a pk2cmd version query and full-device read. The recovery oracle publishes
-# result.json exclusively, including a durable FAIL when the live state differs.
+# writer identities plus signed-release tag/source identity when applicable.
+# Validate all of them before touching hardware, then perform only a pk2cmd
+# version query and full-device read. The recovery oracle publishes result.json
+# exclusively, including a durable FAIL when the live state differs.
 .PHONY: pic12f675-finalize
-pic12f675-finalize: variant-selectors-valid $(PIC12F675_TRIM_EVIDENCE_TOOL)
+pic12f675-finalize: variant-selectors-valid $(PIC12F675_TRIM_EVIDENCE_TOOL) \
+                    $(PIC12F675_RELEASE_IMAGE_CHECKER)
 	@if [ "$(if $(filter undefined,$(origin PIC12F675_PROG_HEX)),0,1)" -ne 0 ]; then \
 		echo "ERROR: PIC12F675_PROG_HEX is not supported by read-only finalization."; exit 1; \
 	fi; \
@@ -6778,6 +6780,7 @@ pic12f675-finalize: variant-selectors-valid $(PIC12F675_TRIM_EVIDENCE_TOOL)
 	writer_kind=$$PIC12F675_PROG_KIND; \
 	part=$$PIC12F675_PART; \
 	variant="$(VARIANT)"; \
+	release_tag=$$PIC12F675_RELEASE_TAG; release_source_commit=; \
 	if [ -z "$$evidence" ]; then \
 		echo "ERROR: PIC12F675_TRIM_EVIDENCE is required for transaction finalization."; exit 1; \
 	fi; \
@@ -6806,6 +6809,15 @@ pic12f675-finalize: variant-selectors-valid $(PIC12F675_TRIM_EVIDENCE_TOOL)
 	if [ -z "$$writer_path" ] || [ ! -f "$$writer_path" ] || [ ! -x "$$writer_path" ]; then \
 		echo "ERROR: reserved writer '$$writer' not found or not executable."; exit 1; \
 	fi; \
+	if [ -n "$$release_tag" ]; then \
+		release_source_commit=`git rev-parse --verify "refs/tags/$$release_tag^{commit}" 2>/dev/null` || { \
+			echo "ERROR: cannot resolve selected PIC12F675 release tag: $$release_tag"; exit 1; \
+		}; \
+		case "$$release_source_commit" in \
+			????????????????????????????????????????) : ;; \
+			*) echo "ERROR: selected PIC12F675 release commit is not a full SHA-1."; exit 1 ;; \
+		esac; \
+	fi; \
 	if ! command -v python3 >/dev/null 2>&1; then \
 		echo "ERROR: python3 is required to finalize PIC12F675 evidence."; exit 1; \
 	fi; \
@@ -6814,6 +6826,7 @@ pic12f675-finalize: variant-selectors-valid $(PIC12F675_TRIM_EVIDENCE_TOOL)
 		--baseline "$$evidence" --reservation "$$reservation" \
 		--part "$$part" --variant "$$variant" --reader-path "$$reader_path" \
 		--writer-kind "$$writer_kind" --writer-path "$$writer_path" \
+		--release-tag "$$release_tag" --release-source-commit "$$release_source_commit" \
 		--output-dir "$$result"` || exit 1; \
 	expected_ready="PIC12F675_TRIM_RECOVERY_READY PASS evidence-dir=$$result"; \
 	if [ "$$recovery_ready" != "$$expected_ready" ]; then \
@@ -6839,6 +6852,31 @@ pic12f675-finalize: variant-selectors-valid $(PIC12F675_TRIM_EVIDENCE_TOOL)
 	}; \
 	trap 'cleanup_recovery_attempt $$?' 0; \
 	trap 'exit 129' 1; trap 'exit 130' 2; trap 'exit 143' 15; \
+	if [ -n "$$release_tag" ]; then \
+		release_source_check=`TMPDIR="$$attempt" "$(PIC12F675_RELEASE_IMAGE_CHECKER)" \
+			source "$$release_tag"` || exit 1; \
+		expected_release_source="PIC12F675_RELEASE_SOURCE_CHECK PASS tag=$$release_tag"; \
+		if [ "$$release_source_check" != "$$expected_release_source" ]; then \
+			echo "ERROR: release source checker did not emit its exact success record."; exit 1; \
+		fi; \
+		verified_source_commit=`git rev-parse --verify "refs/tags/$$release_tag^{commit}" 2>/dev/null` || exit 1; \
+		if [ "$$verified_source_commit" != "$$release_source_commit" ]; then \
+			echo "ERROR: selected PIC12F675 release tag changed during finalization."; exit 1; \
+		fi; \
+		retained_digest_line=`sha256sum -- "$$result/image.hex"` || exit 1; \
+		retained_digest=$${retained_digest_line%% *}; \
+		case "$$retained_digest" in \
+			????????????????????????????????????????????????????????????????) : ;; \
+			*) echo "ERROR: could not identify retained PIC12F675 image digest."; exit 1 ;; \
+		esac; \
+		release_image_check=`TMPDIR="$$attempt" "$(PIC12F675_RELEASE_IMAGE_CHECKER)" \
+			image "$$release_tag" "$$variant" "$$result/image.hex"` || exit 1; \
+		expected_release_image="PIC12F675_RELEASE_IMAGE_CHECK PASS tag=$$release_tag variant=$$variant image=$$result/image.hex sha256=$$retained_digest"; \
+		if [ "$$release_image_check" != "$$expected_release_image" ]; then \
+			echo "ERROR: release image checker did not emit its exact success record."; exit 1; \
+		fi; \
+		printf '%s\n%s\n' "$$release_source_check" "$$release_image_check"; \
+	fi; \
 	version_log="$$attempt/reader-version.log"; \
 	read_log="$$attempt/device-read.log"; \
 	read_hex="$$attempt/device-read.hex"; \
@@ -6848,6 +6886,7 @@ pic12f675-finalize: variant-selectors-valid $(PIC12F675_TRIM_EVIDENCE_TOOL)
 		--baseline "$$evidence" --reservation "$$reservation" \
 		--part "$$part" --variant "$$variant" --reader-path "$$reader_path" \
 		--writer-kind "$$writer_kind" --writer-path "$$writer_path" \
+		--release-tag "$$release_tag" --release-source-commit "$$release_source_commit" \
 		--version-log "$$version_log" --version-exit "$$version_rc" \
 		--output-dir "$$result"` || exit 1; \
 	expected_reader="PIC12F675_TRIM_RECOVERY_READER PASS evidence-dir=$$result"; \
@@ -6864,6 +6903,7 @@ pic12f675-finalize: variant-selectors-valid $(PIC12F675_TRIM_EVIDENCE_TOOL)
 		--baseline "$$evidence" --reservation "$$reservation" \
 		--part "$$part" --variant "$$variant" --reader-path "$$reader_path" \
 		--writer-kind "$$writer_kind" --writer-path "$$writer_path" \
+		--release-tag "$$release_tag" --release-source-commit "$$release_source_commit" \
 		--version-log "$$version_log" --version-exit "$$version_rc" \
 		--read-log "$$read_log" --read-hex "$$read_hex" --read-exit "$$read_rc" \
 		--program-log "$$result/program.log" --attempt-dir "$$attempt" \
@@ -6935,7 +6975,7 @@ pic12f675-program pic12f675-release-program: variant-selectors-valid
 		exit 1; \
 	fi; \
 	program_target='$@'; \
-	release_mode=0; release_tag=; \
+	release_mode=0; release_tag=; release_source_commit=; \
 	if [ "$$program_target" = pic12f675-release-program ]; then \
 		release_mode=1; release_tag=$$PIC12F675_RELEASE_TAG; \
 		if [ -z "$$release_tag" ]; then \
@@ -7214,6 +7254,13 @@ pic12f675-program pic12f675-release-program: variant-selectors-valid
 			echo "ERROR: release image checker did not emit its exact success record."; exit 1; \
 		fi; \
 		printf '%s\n' "$$release_image_check"; \
+		release_source_commit=`git rev-parse --verify "refs/tags/$$release_tag^{commit}" 2>/dev/null` || { \
+			echo "ERROR: cannot retain signed-release source commit."; exit 1; \
+		}; \
+		case "$$release_source_commit" in \
+			????????????????????????????????????????) : ;; \
+			*) echo "ERROR: signed-release source commit is not a full SHA-1."; exit 1 ;; \
+		esac; \
 	fi; \
 	chmod 500 "$$program_dir" || exit 1; \
 	if [ ! -f "$$snapshot" ] || [ -L "$$snapshot" ] || [ ! -s "$$snapshot" ]; then \
@@ -7268,7 +7315,9 @@ pic12f675-program pic12f675-release-program: variant-selectors-valid
 		--version-log "$$reader_version_log" --read-log "$$prewrite_log" \
 		--read-hex "$$prewrite_hex" --writer-kind "$$prog_kind" \
 		--writer-path "$$prog_path" --writer-version-log "$$writer_version_log" \
-		--image-hex "$$snapshot" --variant "$$variant" --output-dir "$$result"` || exit 1; \
+		--image-hex "$$snapshot" --variant "$$variant" \
+		--release-tag "$$release_tag" --release-source-commit "$$release_source_commit" \
+		--output-dir "$$result"` || exit 1; \
 	expected_reservation="PIC12F675_TRIM_RESERVATION PASS evidence-dir=$$result"; \
 	if [ "$$reservation_output" != "$$expected_reservation" ] || \
 			[ ! -f "$$result/reservation.json" ] || [ -L "$$result/reservation.json" ]; then \

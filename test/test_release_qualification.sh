@@ -689,9 +689,10 @@ repo="$flash_fixture" baseline="$baseline" result="$result" \
 mapfile -t recovery_log < "$render_log"
 [ "${#recovery_log[@]}" -eq 1 ] \
 	|| fail "rendered PIC12F675 recovery ran ${#recovery_log[@]} commands, expected 1"
-expected=$(printf '%s\t%s\t%s\t%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s' \
+expected=$(printf '%s\t%s\t%s\t%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s' \
 	make -C "$flash_fixture" pic12f675-finalize \
-	VARIANT cd4053_simple PIC12F675_PROG pk2cmd PIC12F675_PROG_KIND pk2cmd \
+	VARIANT cd4053_simple PIC12F675_RELEASE_TAG v0.9.9 \
+	PIC12F675_PROG pk2cmd PIC12F675_PROG_KIND pk2cmd \
 	PIC12F675_READ_PROG pk2cmd PIC12F675_TRIM_EVIDENCE "$baseline" \
 	PIC12F675_BENCH_RESULT "$result")
 [ "${recovery_log[0]}" = "$expected" ] \

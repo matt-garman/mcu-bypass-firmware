@@ -33,6 +33,24 @@ release_tool_version_line() {
 	printf '%s\n' "$first_line"
 }
 
+release_require_main_branch() {
+	if [ "$#" -ne 1 ]; then
+		printf 'FATAL: release_require_main_branch requires the repository root\n' >&2
+		return 2
+	fi
+	local repo_root=$1 branch_ref
+
+	branch_ref=$(git -C "$repo_root" symbolic-ref --quiet HEAD) || {
+		printf 'FATAL: production release requires the main branch; HEAD is detached or unreadable\n' >&2
+		return 1
+	}
+	if [ "$branch_ref" != refs/heads/main ]; then
+		printf 'FATAL: production release requires refs/heads/main; checked out %s\n' \
+			"$branch_ref" >&2
+		return 1
+	fi
+}
+
 release_output_path_is_safe() {
 	if [ "$#" -ne 4 ]; then
 		printf 'FATAL: release_output_path_is_safe requires repo root, output path, release mode, and version\n' >&2

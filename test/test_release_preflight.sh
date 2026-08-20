@@ -36,6 +36,8 @@ if ! declare -F release_hash_classic_avr_images >/dev/null \
 fi
 declare -F release_validate_current_documentation >/dev/null \
 	|| { printf 'FAIL: release documentation validator is missing\n' >&2; exit 1; }
+declare -F release_require_main_branch >/dev/null \
+	|| { printf 'FAIL: release main-branch validator is missing\n' >&2; exit 1; }
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-preflight.XXXXXX")
 fakebin="$work/bin"
 bootstrap_bin="$work/bootstrap-bin"
@@ -594,6 +596,47 @@ release_reject_branch_only_documents "$polish_root" \
 	|| fail "branch-only-document gate rejected a tree after the violations were removed"
 checks=$((checks + 1))
 
+# Discovery failures are policy failures, not an empty result set.
+if gate_diagnostic=$(find() { return 73; }; release_reject_branch_only_documents "$polish_root" 2>&1); then
+	fail "branch-only-document gate accepted a failed document scan"
+fi
+[[ "$gate_diagnostic" == *"could not scan for branch-only polish documents"* ]] \
+	|| fail "failed branch-document scan produced the wrong diagnostic: $gate_diagnostic"
+checks=$((checks + 1))
+if gate_diagnostic=$(grep() { return 74; }; release_reject_branch_only_documents "$polish_root" 2>&1); then
+	fail "branch-only-document gate accepted a failed reference scan"
+fi
+[[ "$gate_diagnostic" == *"could not scan for branch-only polish-document references"* ]] \
+	|| fail "failed branch-reference scan produced the wrong diagnostic: $gate_diagnostic"
+checks=$((checks + 1))
+
+# Production staging is branch-bound independently of the polish-document
+# heuristic. The helper accepts only the exact local main ref and fails closed
+# for both another branch and detached HEAD.
+branch_root="$work/release-branch"
+mkdir "$branch_root"
+"$REAL_GIT" -C "$branch_root" init -q
+"$REAL_GIT" -C "$branch_root" symbolic-ref HEAD refs/heads/main
+"$REAL_GIT" -C "$branch_root" -c user.name='Release Branch Test' \
+	-c user.email='release-branch@example.invalid' \
+	-c commit.gpgsign=false commit --allow-empty -qm fixture
+release_require_main_branch "$branch_root" \
+	|| fail "main-branch validator rejected refs/heads/main"
+"$REAL_GIT" -C "$branch_root" symbolic-ref HEAD refs/heads/v1.2.3-polish
+if release_require_main_branch "$branch_root" >"$output" 2>&1; then
+	fail "main-branch validator accepted a polish branch"
+fi
+grep -Fq 'production release requires refs/heads/main' "$output" \
+	|| fail "non-main branch failed without its production-release diagnostic"
+"$REAL_GIT" -C "$branch_root" symbolic-ref HEAD refs/heads/main
+"$REAL_GIT" -C "$branch_root" checkout -q --detach
+if release_require_main_branch "$branch_root" >"$output" 2>&1; then
+	fail "main-branch validator accepted detached HEAD"
+fi
+grep -Fq 'HEAD is detached or unreadable' "$output" \
+	|| fail "detached HEAD failed without its production-release diagnostic"
+checks=$((checks + 1))
+
 # Wiring: make-release.sh must invoke the gate on the REAL release path -- after
 # the `--preflight` capability probe exits -- so the preflight (which runs
 # against the live polish branch, where the document still exists) is unaffected
@@ -604,8 +647,12 @@ preflight_exit_line=$(grep -n 'preflight passed: this host can start a release' 
 	"$release_script" | head -1 | cut -d: -f1)
 gate_call_line=$(grep -Fn 'release_reject_branch_only_documents "$REPO_ROOT"' \
 	"$release_script" | head -1 | cut -d: -f1)
-[ -n "$preflight_exit_line" ] && [ -n "$gate_call_line" ] \
-	|| fail "could not locate the preflight exit and the branch-only-document gate call in make-release.sh"
+main_call_line=$(grep -Fn 'release_require_main_branch "$REPO_ROOT"' \
+	"$release_script" | head -1 | cut -d: -f1)
+[ -n "$preflight_exit_line" ] && [ -n "$main_call_line" ] && [ -n "$gate_call_line" ] \
+	|| fail "could not locate the preflight exit and production release gates in make-release.sh"
+[ "$main_call_line" -gt "$preflight_exit_line" ] \
+	|| fail "main-branch gate must run AFTER the preflight exit (gate at line $main_call_line, preflight exit at line $preflight_exit_line)"
 [ "$gate_call_line" -gt "$preflight_exit_line" ] \
 	|| fail "branch-only-document gate must run AFTER the preflight exit (gate at line $gate_call_line, preflight exit at line $preflight_exit_line)"
 checks=$((checks + 1))
