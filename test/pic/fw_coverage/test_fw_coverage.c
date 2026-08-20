@@ -230,6 +230,40 @@ static void expect_no_reset(fw_inject_t inj, const char *what) {
     CHECK(r == 0, "%s must not force reset (got %d)", what, r);
 }
 
+#if defined(TQ2_L2_5V_RELAY)
+// Relay variants correct an energized coil IN PLACE instead of resetting: the
+// shell calls hw_outputs_reassert_safe() at the top of every serviced tick,
+// before the sanity gate, so the injected upset is already gone when the gate
+// looks (F1; docs/relay_coil_fault_correction.md).
+//
+// "No reset" on its own would be a weak assertion -- an injection that silently
+// failed to apply would satisfy it too -- so also require the outputs to be
+// settled low afterwards, which is the correction itself.  The teeth on the
+// other side are already in test_predicates(): that same latch/port state DOES
+// trip fwp_sanity_failed(), so the loop survives here only because the
+// re-assert ran first.
+//
+// Nor can a dead injection hide here: apply_injection()'s arms are not
+// variant-conditional, and the two CD4053 variants -- run from this same gate
+// invocation -- still expect_reset() on these very injection codes, so an arm
+// that stopped applying fails there.
+//
+// This is the host-gcov mirror of the expected_resets=0 cases in the gpsim
+// lanes (test/pic/test_fault_pic.cc, test/pic/test_fault_pic12f675.cc).
+#if defined(BYPASS_MCU_PIC12F675)
+#define FW_OUTPUT_REQUIRED_MASK 0x17u // GP0|GP1|GP2|GP4
+#else
+#define FW_OUTPUT_REQUIRED_MASK 0x07u // RA0|RA1|RA2
+#endif
+
+static void expect_corrected(fw_inject_t inj, const char *what) {
+    int r = fw_fault_run(inj);
+    CHECK(r == 0, "%s must be corrected in place, not reset (got %d)", what, r);
+    CHECK(fwp_output_state_intact(FW_OUTPUT_REQUIRED_MASK, 0x00u) != 0,
+          "%s must leave the outputs settled low after correction", what);
+}
+#endif
+
 static void test_faults(void) {
 #if defined(BYPASS_MCU_PIC12F675)
     expect_no_reset(FWI_NONE, "clean state");
@@ -253,6 +287,21 @@ static void test_faults(void) {
     expect_reset(FWI_GP2_PIN_TO_INPUT, "GP2 direction fault");
     expect_reset(FWI_GP4_PIN_TO_INPUT, "parked GP4 direction fault");
     expect_reset(FWI_GP5_PIN_TO_OUTPUT, "GP5 direction fault");
+#if defined(TQ2_L2_5V_RELAY)
+    // GP1/GP2 are the coils.  This part has no LATx, so the re-assert writes the
+    // WHOLE shadow to GPIO: it clears the coil bits AND refreshes every physical
+    // output.  A coil shadow upset and ANY physical-port upset therefore correct
+    // within one tick; a non-coil shadow (intent) upset still resets.
+    expect_reset(FWI_SHADOW_GP0_HIGH, "GP0 LED shadow (intent) fault");
+    expect_corrected(FWI_SHADOW_GP1_HIGH, "GP1 RESET-coil shadow fault");
+    expect_corrected(FWI_SHADOW_GP2_HIGH, "GP2 SET-coil shadow fault");
+    expect_reset(FWI_SHADOW_GP4_HIGH, "parked GP4 shadow (intent) fault");
+    expect_corrected(FWI_GPIO_GP0_HIGH, "physical GP0 divergence");
+    expect_corrected(FWI_GPIO_GP1_HIGH, "physical GP1 divergence");
+    expect_corrected(FWI_GPIO_GP2_HIGH, "physical GP2 divergence");
+    expect_corrected(FWI_GPIO_GP4_HIGH, "physical GP4 divergence");
+#else
+    // hw_outputs_reassert_safe() is a no-op here, so every output upset resets.
     expect_reset(FWI_SHADOW_GP0_HIGH, "GP0 shadow-latch fault");
     expect_reset(FWI_SHADOW_GP1_HIGH, "GP1 shadow-latch fault");
     expect_reset(FWI_SHADOW_GP2_HIGH, "GP2 shadow-latch fault");
@@ -261,6 +310,7 @@ static void test_faults(void) {
     expect_reset(FWI_GPIO_GP1_HIGH, "physical GP1 divergence");
     expect_reset(FWI_GPIO_GP2_HIGH, "physical GP2 divergence");
     expect_reset(FWI_GPIO_GP4_HIGH, "physical GP4 divergence");
+#endif
     expect_reset(FWI_OPTION_REG_SKEW, "OPTION_REG configuration fault");
     expect_reset(FWI_CMCON_SKEW, "comparator configuration fault");
     expect_reset(FWI_ADCON0_ADON_SET, "ADC enable fault");
@@ -286,9 +336,19 @@ static void test_faults(void) {
     expect_reset(FWI_LED_PIN_TO_INPUT, "RA0 direction fault");
     expect_reset(FWI_CTL1_PIN_TO_INPUT, "RA1 direction fault");
     expect_reset(FWI_RA2_PIN_TO_INPUT, "RA2 direction fault");
+    // RA0 is the LED on every variant: an intent upset always resets.
     expect_reset(FWI_LATA_RA0_HIGH, "RA0 output-latch fault");
+#if defined(TQ2_L2_5V_RELAY)
+    // RA1/RA2 are the coils.  This part keeps a LATx latch and never rewrites
+    // the whole port, so correction is coil-only -- the RA0 case above still
+    // resets, and there are no port-only injections to correct.
+    expect_corrected(FWI_LATA_RA1_HIGH, "RA1 RESET-coil latch fault");
+    expect_corrected(FWI_LATA_RA2_HIGH, "RA2 SET-coil latch fault");
+#else
+    // hw_outputs_reassert_safe() is a no-op here, so every output upset resets.
     expect_reset(FWI_LATA_RA1_HIGH, "RA1 output-latch fault");
     expect_reset(FWI_LATA_RA2_HIGH, "RA2 output-latch fault");
+#endif
     expect_reset(FWI_OSCCON_IRCF_SKEW, "oscillator configuration fault");
     expect_reset(FWI_WDTPS_SKEW, "watchdog configuration fault");
     expect_reset(FWI_PR2_SKEW, "timer period fault");
@@ -335,24 +395,39 @@ static void test_pure_fault_path(void) {
     CHECK(result.fault, "pure core must flag an invalid program state");
 }
 
+// The total assertion count is pinned so a variant that silently stops running
+// a case cannot pass.  Reset cases assert once; each correct-in-place case
+// asserts twice (no reset, plus outputs settled low), so the relay variant adds
+// exactly one check per corrected case -- the 2 coil-latch cases on the
+// PIC10F322, and on the PIC12F675 the 2 coil-shadow cases plus all 4
+// physical-port cases that the whole-port refresh heals.  Expressed as
+// base + count rather than a fresh magic number, so the delta stays tied to the
+// cases above.  Mirrors PIC_FAULT_EXPECTED_CHECKS in the gpsim fault adapters.
+#if defined(BYPASS_MCU_PIC12F675)
+#define FW_DEVICE_NAME     "PIC12F675"
+#define FW_BASE_CHECKS     85
+#define FW_CORRECTED_CASES 6
+#else
+#define FW_DEVICE_NAME     "PIC10F322"
+#define FW_BASE_CHECKS     52
+#define FW_CORRECTED_CASES 2
+#endif
+#if defined(TQ2_L2_5V_RELAY)
+#define FW_EXPECTED_CHECKS (FW_BASE_CHECKS + FW_CORRECTED_CASES)
+#else
+#define FW_EXPECTED_CHECKS FW_BASE_CHECKS
+#endif
+
 int main(void) {
     test_predicates();
     test_faults();
     test_happy_path();
     test_pure_fault_path();
-#if defined(BYPASS_MCU_PIC12F675)
-    if (g_checks != 85) {
+    if (g_checks != FW_EXPECTED_CHECKS) {
         g_failures++;
-        fprintf(stderr, "FAIL: PIC12F675 coverage harness ran %d checks, expected 85\n",
-                g_checks);
+        fprintf(stderr, "FAIL: %s coverage harness ran %d checks, expected %d\n",
+                FW_DEVICE_NAME, g_checks, FW_EXPECTED_CHECKS);
     }
-#else
-    if (g_checks != 52) {
-        g_failures++;
-        fprintf(stderr, "FAIL: PIC10F322 coverage harness ran %d checks, expected 52\n",
-                g_checks);
-    }
-#endif
     printf("PIC shipping-source coverage harness: %d checks, %d failures\n",
            g_checks, g_failures);
     return g_failures ? 1 : 0;

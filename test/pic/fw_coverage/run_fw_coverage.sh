@@ -43,6 +43,11 @@ common=(
     -std=c11 -O0 -Wall -Wextra -Werror -Wconversion
     -fshort-enums -funsigned-char --coverage
     "${device_flags[@]}"
+    # Both parts SHIP with F2's context check on -- the Makefile's
+    # BYPASS_CTX_CHECK_FLAG is unconditional -- so measure that configuration.
+    # Without it the shell's check clause compiles out, debounce_ctx_check_word()
+    # becomes dead code, and this gate silently stops covering the real firmware.
+    -DBYPASS_CTX_CHECK
     -I"$ROOT/test/pic/fw_coverage" -I"$ROOT/test" -I"$ROOT/src"
 )
 

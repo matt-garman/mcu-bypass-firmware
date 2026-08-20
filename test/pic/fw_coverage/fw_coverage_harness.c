@@ -139,6 +139,13 @@ static int disarm_timer(void) {
 #  include "../../../src/bypass_mcu_pic10f322.c"
 #endif
 
+// FWI_VALID_ENGAGED is the one injection that must NOT be caught: it writes a
+// state the firmware could legitimately be in. That means writing F2's check
+// word alongside the context, exactly as the shell does -- a stale ctx_check_
+// would trip the context-check clause and reset, and the case would assert the
+// opposite of what it is named for. run_fw_coverage.sh always defines
+// BYPASS_CTX_CHECK (both parts ship with it), so ctx_check_ always exists;
+// dropping that flag is a compile error here, by design.
 static void apply_injection(int inj) {
 #if defined(BYPASS_MCU_PIC12F675)
     switch (inj) {
@@ -153,6 +160,7 @@ static void apply_injection(int inj) {
 #else
             fwp_set_output_state(0x01u, 0x01u);
 #endif
+            ctx_check_ = debounce_ctx_check_word(ctx_);
             break;
         case FWI_PROGRAM_STATE_OOR:    ctx_.program_state = (program_state_t)2; break;
         case FWI_EFFECT_STATE_OOR:     ctx_.effect_state = (effect_state_t)2; break;
@@ -202,6 +210,7 @@ static void apply_injection(int inj) {
 #else
             LATA = 0x01u;
 #endif
+            ctx_check_ = debounce_ctx_check_word(ctx_);
             break;
         case FWI_PROGRAM_STATE_OOR:    ctx_.program_state = (program_state_t)2; break;
         case FWI_EFFECT_STATE_OOR:     ctx_.effect_state = (effect_state_t)2; break;

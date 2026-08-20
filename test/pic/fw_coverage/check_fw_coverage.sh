@@ -208,7 +208,13 @@ for gcov_file in "$@"; do
         anchors="$anchors, unreachable reset L$FAULT_RESET_LINE"
     elif [ "$base" = "bypass_mcu_pic12f675.c.gcov" ]; then
         guards=""
-        guard_check 'if \([[:space:]]*\(ctx_\.program_state > RELEASE_DEBOUNCE_WAIT\) \|\|[[:space:]]*$' \
+        # Anchored on the clause alone, like its two siblings below. An earlier
+        # draft required a same-line `if (` prefix, which held only while the
+        # whole condition opened on one line; F2 put the context-check clause
+        # first, under its own #if, and the gate silently located zero lines.
+        guard_check '\(ctx_check_ != debounce_ctx_check_word\(ctx_\)\) \|\|[[:space:]]*$' \
+                    "context-check guard"
+        guard_check '\(ctx_\.program_state > RELEASE_DEBOUNCE_WAIT\) \|\|[[:space:]]*$' \
                     "program-state range guard"
         guard_check '\(ctx_\.debounce_counter > RELEASE_THRESH\) \|\|[[:space:]]*$' \
                     "debounce-counter range guard"
