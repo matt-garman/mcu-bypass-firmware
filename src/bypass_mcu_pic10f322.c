@@ -107,16 +107,21 @@ uint8_t hw_output_state_intact(
         uint8_t const required_output_mask,
         uint8_t const expected_high_mask) {
 
-    uint8_t expected_direction_mask =
-        0x0FU ^ BYPASS_OUTPUT_DDR_MASK; // = 0x08: only RA3 remains an input
     uint8_t actual_direction_mask = (uint8_t)(TRISA & 0x0FU);
-    uint8_t actual_high_mask =
-        (uint8_t)(LATA & (uint8_t)BYPASS_OUTPUT_DDR_MASK);
 
-    return
-        (actual_direction_mask == expected_direction_mask) &&
-        (0U == (actual_direction_mask & required_output_mask)) &&
-        (actual_high_mask == expected_high_mask);
+    // OR-fold, not a chain of && (see hw_critical_sfrs_intact() for the full
+    // rationale): every term is a pure read, so folding is equivalent, and it
+    // drops XC8's per-&&-term branch scaffolding.
+    uint8_t diff = 0U;
+
+    // 0x0FU ^ BYPASS_OUTPUT_DDR_MASK = 0x08: only RA3 remains an input
+    diff |= (uint8_t)(actual_direction_mask ^
+                      (uint8_t)(0x0FU ^ BYPASS_OUTPUT_DDR_MASK));
+    diff |= (uint8_t)(actual_direction_mask & required_output_mask);
+    diff |= (uint8_t)((uint8_t)(LATA & (uint8_t)BYPASS_OUTPUT_DDR_MASK) ^
+                      expected_high_mask);
+
+    return (uint8_t)((0U == diff) ? 1U : 0U);
 }
 
 // sanity-check utility: return non-zero ("true") IFF all the critical pin
@@ -135,18 +140,33 @@ static uint8_t hw_critical_sfrs_intact(void) {
     // (test_config_pic / the fault-injection CONFIG check).
     // (Datasheet DS40001585, Register 5-1.)
 
-    uint8_t ircf   = (uint8_t)OSCCONbits.IRCF;
-    uint8_t wdtps  = (uint8_t)WDTCONbits.WDTPS;
-    uint8_t pr2    = (uint8_t)PR2;
-    uint8_t t2con  = (uint8_t)T2CON;
-    uint8_t ansela = (uint8_t)(ANSELA & BYPASS_OUTPUT_DDR_MASK); // 0 = output pins still digital
+    // Each term is XORed against its expected value and OR-folded into a
+    // single accumulator, rather than combined with &&. Three reasons:
+    //
+    //  1. FLASH. XC8 (free-mode codegen) spends ~5 program words of branch
+    //     scaffolding on EVERY && / || term; the fold costs ~3 words per term
+    //     total. Across this function, hw_footswitch_pullup_intact() and
+    //     hw_output_state_intact() that is the ~20 words that keep the relay
+    //     variant inside the PIC10F322's 512.
+    //  2. Constant time. No early exit, so a sanity sweep costs the same
+    //     whether it passes or fails -- one less data-dependent timing path in
+    //     the tick budget.
+    //  3. MISRA. Every statement below performs exactly ONE volatile SFR read,
+    //     so Rule 13.5 (persistent side effect in the right-hand operand of &&)
+    //     cannot arise and Rule 13.2 (order of evaluation) is satisfied without
+    //     needing the intermediate non-volatile locals the && form required.
+    //
+    // diff == 0 IFF every term matched, so the fold is exactly equivalent to
+    // the && chain it replaces.
+    uint8_t diff = 0U;
 
-    return
-        (HFINTOSC_2MHZ_IRCF == ircf)  &&
-        (WDT_WDTPS_256MS    == wdtps) &&
-        (TMR2_PR2_PERIOD    == pr2)   &&
-        (TMR2_T2CON_CONFIG  == t2con) &&
-        (0U                 == ansela);
+    diff |= (uint8_t)(HFINTOSC_2MHZ_IRCF ^ (uint8_t)OSCCONbits.IRCF);
+    diff |= (uint8_t)(WDT_WDTPS_256MS    ^ (uint8_t)WDTCONbits.WDTPS);
+    diff |= (uint8_t)(TMR2_PR2_PERIOD    ^ (uint8_t)PR2);
+    diff |= (uint8_t)(TMR2_T2CON_CONFIG  ^ (uint8_t)T2CON);
+    diff |= (uint8_t)(ANSELA & BYPASS_OUTPUT_DDR_MASK); // 0 = pins still digital
+
+    return (uint8_t)((0U == diff) ? 1U : 0U);
 }
 
 
@@ -185,21 +205,22 @@ static pin_state_t hw_read_footswitch(void) {
 // bit that IS its pull-up enable; checking both here restores SEU-detection
 // parity under the project's cosmic-ray/EMI threat model.)
 //
-// The two volatile SFRs are read into locals first so the && combines two plain
-// (non-volatile) booleans: this keeps MISRA Rule 13.5 clean (no persistent side
-// effect on the right operand of &&), which the project does not deviate.
+// The two terms are OR-folded rather than combined with && (see
+// hw_critical_sfrs_intact() for the rationale). Each statement performs exactly
+// one volatile SFR read, so MISRA Rule 13.5 (no persistent side effect on the
+// right operand of &&), which the project does not deviate, cannot arise.
 static uint8_t hw_footswitch_pullup_intact(void) {
 
     // Exact pull-up configuration integrity: RA3 latch set, RA0..RA2 clear,
     // and global weak pull-ups enabled.  Extra output-pin latches are faults
     // because a TRISA upset would make them electrically active.
 
-    uint8_t wpua_latches = (uint8_t)(WPUA & 0x0FU);
-    uint8_t wpu_global   = (uint8_t)OPTION_REGbits.nWPUEN; // 0 = enabled
+    uint8_t diff = 0U;
 
-    return
-        (wpua_latches == (uint8_t)(1U << FOOTSW_PIN)) &&
-        (0U == wpu_global);
+    diff |= (uint8_t)((uint8_t)(WPUA & 0x0FU) ^ (uint8_t)(1U << FOOTSW_PIN));
+    diff |= (uint8_t)OPTION_REGbits.nWPUEN; // 0 = enabled
+
+    return (uint8_t)((0U == diff) ? 1U : 0U);
 }
 
 
