@@ -100,9 +100,17 @@ static volatile uint8_t ctx_check_;   // complemented XOR-fold shadow of ctx_
 // this function is designed for critical, unrecoverable errors (presumably by
 // ultra-rare events, e.g. cosmic rays, extreme EMI)
 //
+// The FIRST act is hw_outputs_reassert_safe(): any output with a
+// continuous-energization hazard (the relay coils) is driven to its
+// de-energized idle BEFORE the spin, so no fault can hold a coil energized for
+// the length of the watchdog period. The reset then re-runs init(), whose
+// full-width BYPASS actuation re-synchronizes the physical relay with the
+// logical state and the LED.
+//
 // IMPORTANT: this function relies on the watchdog being active; calling this
 // without an active WDT will lock up the MCU
 __attribute__((noreturn)) static void hw_force_wdt_reset(void) {
+    hw_outputs_reassert_safe();
     cli();
     while (1) {}
 }
@@ -390,12 +398,17 @@ __attribute__((OS_main)) int main(void) {
 
     while (1) {
 
-        hw_outputs_reassert_safe();
-
         // basic sanity checks against outlier events (cosmic rays, extreme
         // EMI)
         // always called, regardless of state
         // force WDT timeout if fail
+        //
+        // hw_is_sanity_check_failed() is also the relay coil guard: it compares
+        // the complete PORTB output latch, so an unexpectedly energized coil is
+        // a latch mismatch and escalates here. Nothing re-drives the coils
+        // ahead of this check -- a below-minimum pulse cannot be proven
+        // mechanically harmless, so recovery, not a silent clear, decides the
+        // relay position.
         if ( (ctx_.program_state > RELEASE_DEBOUNCE_WAIT) ||
                 (ctx_.effect_state > ENGAGED) ||
                 (timer_isr_called_ > TIMER_ISR_NOT_CALLED) ||

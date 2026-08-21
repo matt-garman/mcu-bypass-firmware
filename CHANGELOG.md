@@ -45,22 +45,45 @@ file is the human-readable summary of *what changed*.
   operation; PIC10F320 remains unchanged because it has no independent shadow
   replay path.
 
-- **Relay builds now re-assert both coils low at every serviced loop top.** A
-  one-shot writable coil-state upset already present when that operation runs is
-  cleared before the following sanity gate, without reset or a logical state
-  change. This is not an all-instruction-phase guarantee: a fault arising after
-  the re-assert but before that gate may instead be observed and escalated on
-  shells with output-state integrity checks. The guarantee excludes the complete
-  blocking actuation sequence, from its pre-pulse clear through its post-pulse
-  clear; a fault there can shorten the intended pulse or energize the inactive
-  or both coils, with missed or spurious actuation and audio disruption as
-  residual risks. Shipping-source tests characterize active-coil-low and
-  inactive-coil-high faults at actual recorded offsets of 1, 6, and 11 ms inside
-  both SET and RESET delays. They do not exhaustively cover instruction-boundary
-  faults around coil assertion or clearing, and prove modeled persistence and
-  final low output state, not that an external output accepts the command or
-  that mechanical behavior is safe. The CD4053 variants retain an explicit
-  no-op. Design:
+- **An unexpectedly energized relay coil is now a fault, and recovery
+  resynchronizes the relay.** Earlier `0.9.x` builds re-asserted both coils low
+  at every serviced loop top and let the loop continue. That cleared the coil,
+  but the stray pulse it permitted -- roughly one tick -- is only *below* the
+  Panasonic TQ2-L2-5V 4 ms minimum for guaranteed actuation, which is not the
+  same as proven mechanically harmless. The firmware therefore could not know
+  whether the latching relay had moved, and if it had, the audio route was left
+  permanently disagreeing with the effect state and the LED.
+
+  The loop-top re-assert is gone. An energized coil is now caught by each
+  shell's existing output-state integrity check and escalated:
+  `hw_force_wdt_reset()` drives both coils to their de-energized idle *before*
+  it spins, so no fault holds a coil energized for a watchdog period, and the
+  recovery re-runs `init()`, whose complete 12 ms RESET-coil actuation restores
+  agreement between logical state, LED and physical relay in the known BYPASS
+  state. The price, accepted deliberately, is that a stray coil upset now costs
+  an audible interruption and a return to BYPASS even when the pulse would not
+  have moved the relay.
+
+  PIC10F322, PIC12F675, AVR classic and AVR-XT needed no new detection code.
+  PIC10F320 cannot afford a general output-latch comparison in 256 words and
+  instead guards exactly the two coil latch bits, giving it full parity on the
+  coil guarantee while keeping its documented gap for other latch upsets. Flash
+  cost is zero on all three PIC parts except three words on PIC10F320, and four
+  bytes on each AVR image. As a side effect PIC12F675's port-follows-shadow
+  clause becomes load-bearing at the settled seam, where the old whole-port
+  refresh used to pre-empt it.
+
+  Fault tests on all six substrates now assert the two halves separately --
+  de-energization before the spin, and a measured full-width recovery pulse
+  where the simulator models the reset -- and deliver every coil fault in both
+  settled states (BYPASS with an unintended SET, ENGAGED with an unintended
+  RESET). The blocking actuation sequence remains excluded from every guarantee:
+  shipping-source tests characterize active-coil-low and inactive-coil-high
+  faults at actual recorded offsets of 1, 6, and 11 ms inside both SET and RESET
+  delays, but do not cover every instruction boundary and prove modeled
+  persistence and final low output state, not that an external output accepts
+  the command or that mechanical behavior is safe. The CD4053 variants retain an
+  explicit no-op. Design:
   `docs/relay_coil_fault_correction.md`.
 
 - **A single-bit upset of the debounce context is now detected while it is still

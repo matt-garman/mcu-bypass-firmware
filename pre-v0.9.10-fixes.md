@@ -233,20 +233,50 @@ guarantee, so this is the less conservative choice.
 Actual firmware-source changes under this item are to be made by the repository
 owner, consistent with project policy.
 
+**Selected disposition (recorded by the repository owner)**
+
+Fail-safe resynchronization, implemented as watchdog recovery to the known
+BYPASS initialization state. The policy and its rationale are recorded in
+`docs/relay_coil_fault_correction.md`; `DESIGN_DOCUMENTATION.adoc` and
+`CHANGELOG.md` carry the same statement.
+
+The loop-top `hw_outputs_reassert_safe()` call is removed from all four modular
+shells and from PIC10F320's inline equivalent. An energized coil is now detected
+by each shell's existing output-state integrity gate and escalated;
+`hw_force_wdt_reset()` calls `hw_outputs_reassert_safe()` (PIC10F320:
+`set_relay_coils_low()`) as its first act, so both coils are de-energized before
+the spin, and the recovery re-runs `init()`, whose complete 12 ms RESET-coil
+actuation restores agreement between logical state, LED, and physical relay.
+
+Measured cost, relay variant then all variants:
+
+| Part | Before | After |
+| --- | --- | --- |
+| PIC10F322 | 493 words | 493 words (476 / 502 unchanged) |
+| PIC10F320 | 245 words | 248 words (220 / 241 unchanged) |
+| PIC12F675 | 563 words | 563 words (546 / 572 unchanged) |
+| ATtiny13A | 864 B | 868 B (+4 B each variant) |
+| ATtiny202 | 994 B | 998 B (+4 B each variant) |
+
+Only PIC10F320 pays anything: three words for the coil-only `LATA` term that
+gives it parity on the coil guarantee within its 256-word budget. Its documented
+general output-latch gap is unchanged, and is now pinned by a negative-control
+fault case rather than only described.
+
 **Acceptance criteria**
 
-- [ ] The repository owner records the selected policy and rationale.
-- [ ] Every relay-capable shell has a clearly stated correction and
+- [x] The repository owner records the selected policy and rationale.
+- [x] Every relay-capable shell has a clearly stated correction and
   resynchronization guarantee, including the PIC10F320 exception if capacity
   prevents parity.
-- [ ] Tests distinguish coil de-energization from physical relay-state
+- [x] Tests distinguish coil de-energization from physical relay-state
   synchronization instead of treating final-low output alone as full recovery.
-- [ ] Fault tests cover BYPASS plus unintended SET and ENGAGED plus unintended
+- [x] Fault tests cover BYPASS plus unintended SET and ENGAGED plus unintended
   RESET outcomes.
-- [ ] Active-pulse and instruction-phase exclusions remain explicit.
-- [ ] Flash, RAM, stack, timing, watchdog-margin, simulator, fault, mutation,
+- [x] Active-pulse and instruction-phase exclusions remain explicit.
+- [x] Flash, RAM, stack, timing, watchdog-margin, simulator, fault, mutation,
   coverage, and target-result gates pass for all affected variants.
-- [ ] Documentation states what simulation cannot prove about relay mechanics.
+- [x] Documentation states what simulation cannot prove about relay mechanics.
 
 ### T1 - Restore PIC10F322 host-coverage compiler portability
 
@@ -531,7 +561,7 @@ Record each completed item with its commit ID and decisive validation command.
 | R1 | OPEN | | |
 | R2 | OPEN | | |
 | R3 | OPEN | | |
-| F1 | OPEN | | |
+| F1 | DONE | (pending) | `make test`; relay fault + coverage lanes on all six substrates; PIC/AVR flash-budget gates |
 | T1 | OPEN | | |
 | T2 | OPEN | | |
 | D1 | OPEN | | |

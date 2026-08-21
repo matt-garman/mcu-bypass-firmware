@@ -48,8 +48,8 @@ def check(condition, message):
         sys.stderr.write("FAIL: %s\n" % message)
 
 
-def finalize(declared, results=25, injections=24, skips=0):
-    checker = driver.Checker()
+def finalize(declared, results=25, injections=24, skips=0, expected=24):
+    checker = driver.Checker(expected)
     checker.results = results
     checker.injections = injections
     checker.skips = skips
@@ -99,19 +99,30 @@ cases = driver._fault_cases(Probe(), is_relay=False)
 check(tuple(cases) == expected_cases,
       "cd4053 fault kind/address/value/mechanism must match the independent contract")
 
-# Relay variant: settled PA2/PA3 coil faults are corrected each tick (no reset).
-# Active-pulse faults are outside this oracle.
+# Relay variant: a settled PA2/PA3 coil fault escalates like every other output
+# mismatch, with the coils de-energized before the reset spin -- and is delivered
+# in a settled ENGAGED state as well as in BYPASS, so both directions of the
+# desynchronization hazard are covered. The ENGAGED values carry the lit-LED bit
+# because the driver injects absolutely. Active-pulse faults are outside this
+# oracle (see docs/relay_coil_fault_correction.md).
 expected_cases_relay = tuple(
-    ("PORTA.OUT(PA2 RESET-coil)", "reg", 0x0404, 0x04, "correct")
+    ("PORTA.OUT(PA2 RESET-coil)", "reg", 0x0404, 0x04, "resync")
         if c[0] == "PORTA.OUT(PA2 control)"
-    else ("PORTA.OUT(PA3 SET-coil)", "reg", 0x0404, 0x08, "correct")
+    else ("PORTA.OUT(PA3 SET-coil)", "reg", 0x0404, 0x08, "resync")
         if c[0] == "PORTA.OUT(PA3 control)"
     else c
     for c in expected_cases
+) + (
+    ("PORTA.OUT(PA2 RESET-coil, ENGAGED)", "reg", 0x0404, 0x06, "resync_engaged"),
+    ("PORTA.OUT(PA3 SET-coil, ENGAGED)",   "reg", 0x0404, 0x0A, "resync_engaged"),
 )
 cases_relay = driver._fault_cases(Probe(), is_relay=True)
 check(tuple(cases_relay) == expected_cases_relay,
-      "relay variant: coil OUT faults must be the correct-in-place contract")
+      "relay variant: coil OUT faults must be the fail-safe resync contract"
+      " in both settled states")
+check(len({case[0] for case in cases_relay})
+      == driver.EXPECTED_FAULT_CASES_RELAY,
+      "relay fault case names must be unique")
 sim_path = Path(__file__).with_name("sim_attiny202.py")
 expected_sim_constants = {
     "REG_PORTA_PIN1CTRL": 0x0411,
@@ -130,7 +141,7 @@ for node in ast.parse(sim_path.read_text(encoding="utf-8"), filename=str(sim_pat
         actual_sim_constants[node.targets[0].id] = ast.literal_eval(node.value)
 check(actual_sim_constants == expected_sim_constants,
       "production simulator pin-control addresses/masks must match the datasheet")
-check(len({case[0] for case in cases}) == driver.EXPECTED_FAULT_CASES,
+check(len({case[0] for case in cases}) == driver.EXPECTED_FAULT_CASES_CD4053,
       "fault case names must be unique")
 direction_values = {
     case[0]: case[3] for case in cases if case[0].startswith("PORTA.DIR(")
@@ -139,8 +150,15 @@ check((direction_values["PORTA.DIR(footswitch)"] & 0x0E) == 0x0E
       and (direction_values["PORTA.DIR(spare PA6)"] & 0x0E) == 0x0E,
       "exact-direction faults must preserve every caller-requested output bit")
 
-check(driver.EXPECTED_FAULT_CASES == 24 and driver.EXPECTED_TOTAL_RESULTS == 25,
-      "driver must pin twenty-four injections plus one negative control")
+check(driver.EXPECTED_FAULT_CASES_CD4053 == 24
+      and driver.EXPECTED_FAULT_CASES_RELAY == 26,
+      "driver must pin twenty-four CD4053 injections and twenty-six relay ones,"
+      " each plus one negative control")
+check(finalize(26, results=27, injections=26, expected=26) == 0,
+      "complete twenty-six-injection relay run must pass")
+check(finalize(24, results=25, injections=24, expected=26) == 3,
+      "a relay run that silently dropped the two ENGAGED coil cases must fail"
+      " every completion invariant")
 check(finalize(24) == 0, "complete twenty-four-injection plus control run must pass")
 check(finalize(23) == 1, "short declared case list must fail")
 check(finalize(25) == 1, "long declared case list must fail")
@@ -152,7 +170,7 @@ check(finalize(24, skips=1) == 1, "any skipped injection must fail")
 check(finalize(24, injections=0, skips=24) == 2,
       "all-skipped run must fail both injection and skip invariants")
 
-checker = driver.Checker()
+checker = driver.Checker(driver.EXPECTED_FAULT_CASES_CD4053)
 with contextlib.redirect_stdout(io.StringIO()), \
         contextlib.redirect_stderr(io.StringIO()):
     checker.result(True, "pass")
@@ -189,7 +207,7 @@ class LiveSim:
 
 def run_live_case(witness_reset):
     sim_stub.Sim = lambda _elf: LiveSim(witness_reset)
-    checker = driver.Checker()
+    checker = driver.Checker(driver.EXPECTED_FAULT_CASES_CD4053)
     with contextlib.redirect_stdout(io.StringIO()), \
             contextlib.redirect_stderr(io.StringIO()):
         driver._run_case("fake.elf", "live", driver.REG, 0x1234, 0x00,
@@ -231,7 +249,7 @@ class RetryGateSim:
 
 def run_retry_gate(catches):
     sim_stub.Sim = lambda _elf: RetryGateSim(catches)
-    checker = driver.Checker()
+    checker = driver.Checker(driver.EXPECTED_FAULT_CASES_CD4053)
     with contextlib.redirect_stdout(io.StringIO()), \
             contextlib.redirect_stderr(io.StringIO()):
         driver._run_case("fake.elf", "timer flag", driver.RAM, 0x3F83, 0xFF,
@@ -323,7 +341,7 @@ class TransactionSim:
 def run_transaction_case(safe, mechanism):
     transaction_sim = TransactionSim(safe)
     sim_stub.Sim = lambda _elf: transaction_sim
-    checker = driver.Checker()
+    checker = driver.Checker(driver.EXPECTED_FAULT_CASES_CD4053)
     with contextlib.redirect_stdout(io.StringIO()), \
             contextlib.redirect_stderr(io.StringIO()):
         driver._run_case("fake.elf", "ctx transaction", driver.RAM, 0x3F82,
@@ -377,7 +395,7 @@ class NegativeSim:
 
 def run_negative(mode):
     sim_stub.Sim = lambda _elf: NegativeSim(mode)
-    checker = driver.Checker()
+    checker = driver.Checker(driver.EXPECTED_FAULT_CASES_CD4053)
     with contextlib.redirect_stdout(io.StringIO()), \
             contextlib.redirect_stderr(io.StringIO()):
         driver._run_negative_control("fake.elf", checker)

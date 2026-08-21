@@ -168,12 +168,23 @@ static void test_fault_injection(void) {
 }
 
 #if defined(OUTPUT_TQ2_RELAY)
-static void expect_relay_coils_corrected(uint8_t mask, const char *what) {
+// F1 fail-safe policy (docs/relay_coil_fault_correction.md): an unexpectedly
+// energized relay coil is a fault, because a pulse shorter than the TQ2-L2-5V
+// 4 ms minimum is not proven mechanically harmless and the firmware therefore
+// cannot know whether the latching relay moved. The gate escalates it, and
+// hw_force_wdt_reset() de-energizes both coils before it spins.
+//
+// This lane proves escalation and de-energization on the shipping source. It
+// deliberately does NOT claim recovery: final-low coils alone are not
+// resynchronization. The gpsim lane measures the recovery's full-width
+// RESET-coil actuation on the real image, and no simulator proves what a
+// below-minimum pulse does to relay mechanics.
+static void expect_relay_coil_fault_escalates(uint8_t mask, const char *what) {
     fw_relay_fault_result_t result;
     int const status = fw_relay_fault_run(mask, &result);
 
-    CHECK(status == 0,
-          "relay latch fault [%s] must be corrected without watchdog reset (got r=%d)",
+    CHECK(status == 1,
+          "relay latch fault [%s] must force a watchdog reset (got r=%d)",
           what, status);
     CHECK(result.injected_coils == mask,
           "relay latch fault [%s] did not inject exactly 0x%02X (got 0x%02X)",
@@ -182,19 +193,20 @@ static void expect_relay_coils_corrected(uint8_t mask, const char *what) {
           "relay latch fault [%s] observed coil mask 0x%02X, expected exactly 0x%02X",
           what, (unsigned)result.observed_coils, (unsigned)mask);
     CHECK(result.final_coils == 0u,
-          "relay latch fault [%s] left coil mask 0x%02X after one iteration",
-          what, (unsigned)result.final_coils);
-    CHECK(result.completed_iterations == 1u,
-          "relay latch fault [%s] completed %u post-injection iterations, expected one",
+          "relay latch fault [%s] entered the reset spin with coil mask 0x%02X"
+          " still energized", what, (unsigned)result.final_coils);
+    CHECK(result.completed_iterations == 0u,
+          "relay latch fault [%s] completed %u further clean iteration(s):"
+          " the gate did not escalate",
           what, (unsigned)result.completed_iterations);
     CHECK(result.footswitch_stayed_released != 0u,
-          "relay latch fault [%s] correction depended on a footswitch press", what);
+          "relay latch fault [%s] escalation depended on a footswitch press", what);
 }
 
-static void test_relay_idle_fault_correction(void) {
-    expect_relay_coils_corrected(0x02u, "RESET/RA1 high");
-    expect_relay_coils_corrected(0x04u, "SET/RA2 high");
-    expect_relay_coils_corrected(0x06u, "RESET+SET/RA1+RA2 high");
+static void test_relay_coil_fault_escalation(void) {
+    expect_relay_coil_fault_escalates(0x02u, "RESET/RA1 high");
+    expect_relay_coil_fault_escalates(0x04u, "SET/RA2 high");
+    expect_relay_coil_fault_escalates(0x06u, "RESET+SET/RA1+RA2 high");
 }
 #endif
 
@@ -239,7 +251,7 @@ int main(void) {
     test_predicates();
     test_fault_injection();
 #if defined(OUTPUT_TQ2_RELAY)
-    test_relay_idle_fault_correction();
+    test_relay_coil_fault_escalation();
 #endif
     test_happy_path();
     {

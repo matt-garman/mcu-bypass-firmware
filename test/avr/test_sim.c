@@ -96,6 +96,12 @@
 // main loop for this long is not mistaken for a hung core.
 #if defined(TQ2_L2_5V_RELAY)
 #  define CTL_DELAY_MS  TQ2_L2_5V_PULSE_MS
+// Panasonic TQ2-L2-5V specified minimum coil pulse for GUARANTEED actuation.
+// The firmware drives TQ2_L2_5V_PULSE_MS (12 ms, 3x margin); this is the floor a
+// pulse must clear to count as an actuation rather than a disturbance, and it is
+// what the fail-safe recovery has to deliver for its resynchronization to be a
+// guarantee. Simulation proves the PULSE, never the relay mechanics.
+#  define TQ2_L2_5V_MIN_PULSE_MS 4U
 #elif defined(CD4053_WITH_MUTE)
 #  define CTL_DELAY_MS  CD4053_MUTE_DELAY_MS
 #else
@@ -1811,26 +1817,49 @@ static void inject_output_latch_bit(uint8_t const pin, const char *what) {
 }
 
 #if defined(TQ2_L2_5V_RELAY)
-// Relay coil correction (see docs/relay_coil_fault_correction.md):
-// hw_outputs_reassert_safe() re-drives the coils low at the TOP of the next
-// serviced tick, before the sanity gate, so a settled-state energized-coil
-// upset self-heals within one tick with no reset or logical state change. This
-// case does not inject during the blocking relay pulse.
+// Relay coil fail-safe resynchronization (docs/relay_coil_fault_correction.md).
+//
+// An unexpectedly energized coil is a FAULT: a pulse below the TQ2-L2-5V 4 ms
+// minimum is not proven mechanically harmless, so the firmware cannot know
+// whether the latching relay moved, and a latching relay that moved without the
+// firmware's knowledge leaves the audio route disagreeing with the effect state
+// and the LED. The sanity gate escalates it like any other PORTB latch
+// mismatch, and hw_force_wdt_reset() de-energizes BOTH coils before it spins.
+//
+// Two halves, asserted separately -- final-low output alone is not recovery:
+//
+//   1. DE-ENERGIZATION, which both classic parts can show: after the gate
+//      fires, neither coil latch is still driven.
+//   2. RESYNCHRONIZATION, the recovery's complete BYPASS actuation. Only the
+//      tinyx5 build can show it: simavr does not model the ATtiny13A watchdog
+//      SYSTEM RESET, so on t13a the firmware is (correctly) observed wedged in
+//      the cli()+spin loop and the reset that would follow on silicon simply
+//      does not happen in the model. That gap is a simulator limitation, stated
+//      here and in the docs, not a firmware exclusion.
+//
+// `engaged` selects the settled state the fault arrives in, so both directions
+// of the desynchronization hazard are covered: BYPASS with an unintended SET,
+// and ENGAGED with an unintended RESET.
 //
 // Inject while the core is asleep (bottom of the loop, after this tick's gate)
-// so the next wake runs the re-assert before the next gate fires -- the
-// deterministic analogue of the PIC harness's advance_to_loop_clrwdt(). A
-// mutant that drops the re-assert leaves the coil energized: the next gate then
-// resets (tinyx5: g_resets rises, LED darkens) or wedges force_wdt_reset()
-// (t13a: no further sleep), so every assertion below flips.
-static void inject_coil_correction(uint8_t const pin, const char *what) {
+// so the next wake runs the gate on the injected latch -- the deterministic
+// analogue of the PIC harness's advance_to_loop_clrwdt(). This case never
+// injects during the blocking relay pulse; that window is excluded by design.
+static void inject_coil_resync(uint8_t const pin, int const engaged,
+                               const char *what) {
     if (sim_reset(0) != 0) { g_failures++; return; }
-    footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
-    CHECK(g_led_level == 1, "coil-correct [%s]: normal press engages", what);
+    if (engaged) {
+        footsw_set(1); run_ms(50); footsw_set(0); run_ms(50);
+        CHECK(g_led_level == 1, "coil-resync [%s]: normal press engages", what);
+    }
+    else {
+        footsw_set(0); run_ms(20);
+        CHECK(g_led_level == 0, "coil-resync [%s]: settled BYPASS, LED dark", what);
+    }
 
     if (run_until_first_sleep((avr_cycle_count_t)(4UL * CYCLES_PER_MS)) == 0) {
         g_failures++;
-        printf("  FAIL: coil-correct [%s]: core never slept before injection\n", what);
+        printf("  FAIL: coil-resync [%s]: core never slept before injection\n", what);
         return;
     }
 
@@ -1839,34 +1868,96 @@ static void inject_coil_correction(uint8_t const pin, const char *what) {
     // latch but does not re-drive the pin IRQ, so assert on the latch, not on the
     // pin-level watcher (g_ctl_level), exactly as inject_output_latch_bit does.
     uint32_t const resets_before = g_resets;
+    uint8_t const coil_mask = (uint8_t)((1U << PB2) | (1U << PB3));
     uint8_t const bad = (uint8_t)(g_avr->data[PORTB_MEM_ADDR] | (uint8_t)(1U << pin));
     avr_core_watch_write(g_avr, PORTB_MEM_ADDR, bad);
     CHECK((g_avr->data[PORTB_MEM_ADDR] & (uint8_t)(1U << pin)) != 0,
-          "coil-correct [%s]: coil latch injection did not stick", what);
+          "coil-resync [%s]: coil latch injection did not stick", what);
 
-    g_saw_sleep = 0;
-    run_ms(20); // several ticks: the re-assert fires and the loop keeps running
+    uint32_t const rst_changes_before = g_ctl_changes[CTL_PB2];
+    uint32_t const set_changes_before = g_ctl_changes[CTL_PB3];
 
-    CHECK((g_avr->data[PORTB_MEM_ADDR] & (uint8_t)(1U << pin)) == 0,
-          "coil-correct [%s]: coil latch re-driven low within the window", what);
-    CHECK(g_resets == resets_before,
-          "coil-correct [%s]: no WDT reset (corrected in place), saw %u resets",
+    // A fault injected while the core sleeps is seen by the NEXT tick's gate, so
+    // allow a bounded settle before judging anything (the same discipline
+    // expect_fault_response() uses). Watching g_saw_sleep any earlier would
+    // observe the sleep the core was ALREADY in at injection time.
+    run_ms(10);
+
+    // Half 1, on BOTH parts: the escalation path drove both coils low before it
+    // spun. A mutant that spins with a coil still driven fails here.
+    CHECK((g_avr->data[PORTB_MEM_ADDR] & coil_mask) == 0,
+          "coil-resync [%s]: both coil latches de-energized on the escalation path"
+          " (PORTB=0x%02x)", what, (unsigned)g_avr->data[PORTB_MEM_ADDR]);
+
+#ifdef TARGET_TINYX5
+    // Half 2, tinyx5 only: simavr models this part's WDT SYSTEM RESET, so the
+    // recovery actually runs and can be measured. init() re-initializes to
+    // BYPASS, which means a complete RESET-coil actuation -- one rise, one fall,
+    // at least the datasheet minimum apart -- with the SET coil never driven.
+    // THAT is the resynchronization; the clear in half 1 is not.
+    //
+    // The injected latch bit never reached the pin (avr_core_watch_write does
+    // not re-drive the pin IRQ), so every transition counted below is one the
+    // firmware itself drove.
+    run_ms(500); // > WDT 250 ms timeout
+    CHECK(g_resets > resets_before,
+          "coil-resync [%s]: watchdog recovery fired (saw %u resets)",
           what, (unsigned)(g_resets - resets_before));
-    CHECK(g_saw_sleep == 1,
-          "coil-correct [%s]: firmware kept running (not wedged in force_wdt_reset)",
+    CHECK((g_ctl_changes[CTL_PB2] - rst_changes_before) == 2,
+          "coil-resync [%s]: recovery drove exactly one RESET-coil pulse"
+          " (saw %u edges)", what,
+          (unsigned)(g_ctl_changes[CTL_PB2] - rst_changes_before));
+    if ((g_ctl_changes[CTL_PB2] - rst_changes_before) == 2) {
+        double const pulse_ms =
+            (double)(g_ctl_fall_cycle[CTL_PB2] - g_ctl_rise_cycle[CTL_PB2])
+            / (double)CYCLES_PER_MS;
+        CHECK(pulse_ms >= (double)TQ2_L2_5V_MIN_PULSE_MS,
+              "coil-resync [%s]: recovery RESET-coil pulse %.2f ms >= %u ms"
+              " datasheet minimum", what, pulse_ms,
+              (unsigned)TQ2_L2_5V_MIN_PULSE_MS);
+    }
+    CHECK((g_ctl_changes[CTL_PB3] - set_changes_before) == 0,
+          "coil-resync [%s]: SET coil never driven during recovery (saw %u edges)",
+          what, (unsigned)(g_ctl_changes[CTL_PB3] - set_changes_before));
+    CHECK(g_led_level == 0,
+          "coil-resync [%s]: recovered image settled in BYPASS (LED dark)", what);
+    CHECK((g_avr->data[PORTB_MEM_ADDR] & coil_mask) == 0,
+          "coil-resync [%s]: recovered image left both coils idle", what);
+#else
+    // ATtiny13A: simavr has NO watchdog system-reset model for this part, so
+    // half 2 simply cannot be observed here -- a simulator limitation, not a
+    // firmware exclusion (see docs/relay_coil_fault_correction.md). What this
+    // part can prove is that the firmware is PERMANENTLY wedged in the
+    // cli()+spin loop, which on silicon is exactly what the watchdog turns into
+    // the reset the tinyx5 branch measures, and that the coils stay de-energized
+    // for the whole spin.
+    (void)resets_before;
+    (void)rst_changes_before;
+    (void)set_changes_before;
+    g_saw_sleep = 0;
+    run_ms(200);
+    CHECK(g_saw_sleep == 0,
+          "coil-resync [%s]: ATtiny13 stuck in force_wdt_reset loop"
+          " (no sleep with cli active)", what);
+    CHECK((g_avr->data[PORTB_MEM_ADDR] & coil_mask) == 0,
+          "coil-resync [%s]: coils stayed de-energized for the whole reset spin",
           what);
-    CHECK(g_led_level == 1,
-          "coil-correct [%s]: engaged state preserved (LED still lit)", what);
+#endif
 }
 #endif
 
 static void test_fault_inject_output_latches(void) {
-    // Coil-only correction on the relay variant: PB2/PB3 (coils) self-heal;
-    // PB1 (LED) and PB4 (spare) still reset. CD4053 variants: all reset.
+    // Every PORTB latch bit resets on every variant. On the relay variant the
+    // two coil bits additionally have to be de-energized before the reset spin
+    // and resynchronized by the recovery, and the fault is delivered in both
+    // settled states so BYPASS+unintended-SET and ENGAGED+unintended-RESET are
+    // both covered.
     inject_output_latch_bit(PB1, "PORTB.PB1 LED latch");
 #if defined(TQ2_L2_5V_RELAY)
-    inject_coil_correction(PB2, "PORTB.PB2 RESET-coil latch");
-    inject_coil_correction(PB3, "PORTB.PB3 SET-coil latch");
+    inject_coil_resync(PB2, 1, "PORTB.PB2 RESET-coil latch, ENGAGED");
+    inject_coil_resync(PB3, 1, "PORTB.PB3 SET-coil latch, ENGAGED");
+    inject_coil_resync(PB2, 0, "PORTB.PB2 RESET-coil latch, BYPASS");
+    inject_coil_resync(PB3, 0, "PORTB.PB3 SET-coil latch, BYPASS");
 #else
     inject_output_latch_bit(PB2, "PORTB.PB2 control latch");
     inject_output_latch_bit(PB3, "PORTB.PB3 control latch");

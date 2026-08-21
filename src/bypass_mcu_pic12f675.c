@@ -152,10 +152,12 @@
 // So every write goes shadow -> GPIO, and GPIO is never read-modify-written.
 //
 // The shadow is SRAM, which the project's cosmic-ray/EMI threat model says can
-// flip. A non-coil shadow upset, or any shadow/port mismatch still present when
-// hw_output_state_intact() runs, reaches the sanity gate. On the relay variant,
-// hw_outputs_reassert_safe() deliberately clears settled GP1/GP2 coil-shadow
-// upsets at loop top before that check.
+// flip. EVERY shadow upset, and every shadow/port mismatch, reaches the sanity
+// gate: nothing re-drives the port ahead of that check, so the
+// port-follows-shadow clause sees the port exactly as the previous tick left
+// it. An unexpectedly energized coil is therefore escalated rather than
+// silently refreshed, and hw_outputs_reassert_safe() de-energizes both coils
+// on the way into the reset.
 static uint8_t gpio_shadow_;
 
 // Snapshot of the factory oscillator trim, captured in hw_mcu_init() and
@@ -313,9 +315,17 @@ static uint8_t hw_critical_sfrs_intact(void) {
 // errors (presumably ultra-rare events: cosmic rays, extreme EMI). Disables
 // interrupts first so nothing can pet the dog.
 //
+// The FIRST act is hw_outputs_reassert_safe(): any output with a
+// continuous-energization hazard (the relay coils) is driven to its
+// de-energized idle BEFORE the spin, so no fault can hold a coil energized for
+// the length of the watchdog period. The reset then re-runs init(), whose
+// full-width BYPASS actuation re-synchronizes the physical relay with the
+// logical state and the LED.
+//
 // IMPORTANT: relies on the watchdog being active (WDTE=ON in CONFIG); without
 // it this would lock up the MCU.
 __attribute__((noreturn)) static void hw_force_wdt_reset(void) {
+    hw_outputs_reassert_safe();
     INTCONbits.GIE = 0;
     for (;;) { }
 }
@@ -579,7 +589,6 @@ void main(void) {
 
         // pause until the next 1.024ms TMR0 tick (polled; no sleep on Model B)
         hw_wait_for_tick();
-        hw_outputs_reassert_safe();
         debounce_context_t next_ctx = ctx_;
 
         // basic sanity checks against outlier events (cosmic rays, extreme EMI);

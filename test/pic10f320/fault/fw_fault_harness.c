@@ -224,13 +224,12 @@ void bypass_equiv_on_clrwdt(void) {
         return;
     }
     // Reaching here means a SECOND clean iteration completed: the sanity gate did
-    // NOT fire for this injection.
+    // NOT fire for this injection. For a relay-coil injection that is now a
+    // FAILURE (the caller requires completed_iterations == 0), so record it
+    // rather than treating the surviving loop as evidence of correction.
 #if defined(OUTPUT_TQ2_RELAY)
     if (g_relay_fault_active != 0u) {
         g_relay_result.observed_coils |= (uint8_t)(g_lata & RELAY_COIL_MASK);
-        g_relay_result.final_coils = (uint8_t)(g_lata & RELAY_COIL_MASK);
-        g_relay_result.footswitch_stayed_released &=
-            (uint8_t)((PORTA & (uint8_t)(1u << 3)) != 0u);
         g_relay_result.completed_iterations = 1u;
     }
 #endif
@@ -281,6 +280,16 @@ int fw_relay_fault_run(uint8_t coil_mask, fw_relay_fault_result_t *result) {
     memset(&g_relay_result, 0, sizeof g_relay_result);
 
     int const status = run_fault_mode();
+
+    // Sample the coil latch where it matters: the moment the harness abandoned
+    // the reset spin. hw_force_wdt_reset() de-energizes BEFORE clearing GIE and
+    // spinning, so a correct image leaves 0 here; an image that spins with a
+    // coil still driven leaves the injected mask, which is exactly the fault
+    // this policy exists to prevent.
+    g_relay_result.final_coils = (uint8_t)(g_lata & RELAY_COIL_MASK);
+    g_relay_result.footswitch_stayed_released &=
+        (uint8_t)((PORTA & (uint8_t)(1u << 3)) != 0u);
+
     *result = g_relay_result;
     g_relay_fault_active = 0u;
     g_relay_fault_requested = 0u;

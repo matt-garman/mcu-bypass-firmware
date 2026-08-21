@@ -5,11 +5,10 @@
 // program words, and an output "latch" that is not a register at all: this part
 // has no LATx, so the shell keeps gpio_shadow_ in SRAM and writes shadow ->
 // GPIO. The core's per-part output hook therefore injects nine output cases for
-// each CD4053 variant and ten for relay, versus three CD4053 or four relay cases
-// on PIC10F322: four shadow faults, four modeled-GPIO faults, a valid
-// effect-state mismatch that leaves both views untouched, and one relay-only
-// both-coil GPIO case. Those groups isolate expected-vs-shadow and
-// shadow-vs-port independently.
+// each CD4053 variant and twelve for relay, versus three CD4053 or six relay
+// cases on PIC10F322: shadow faults, modeled-GPIO faults, and a valid
+// effect-state mismatch that leaves both views untouched. Those groups isolate
+// expected-vs-shadow and shadow-vs-port independently.
 //
 // Everything else this part guards, and the two OPTION_REG bits it deliberately
 // does not, live in the injection matrix beside this file.
@@ -45,50 +44,52 @@
 #else
 #  define PIC_FAULT_CTX_INRANGE 0u
 #endif
-// Output-stage fault policy is variant-split (see docs/relay_coil_fault_correction.md).
+// Output-stage fault policy (see docs/relay_coil_fault_correction.md). Nothing
+// re-drives the port ahead of the gate on any variant now, so EVERY modeled
+// output injection at this pre-gate seam resets -- which is also what finally
+// makes this part's unique port-follows-shadow clause load-bearing at the
+// settled seam instead of pre-empted by a refresh.
 //
-// Relay variant: hw_outputs_reassert_safe() calls the masked coil clear at the
-// top of every serviced tick, before the sanity gate. Because this part has no
-// LATx, that operation clears BOTH coil bits in the shadow before one whole-port
-// GPIO write. It therefore (a) cannot replay the other coil's corrupt shadow bit
-// as an intermediate high and (b) refreshes the entire modeled GPIO from the
-// shadow. At the reviewed trailing-CLRWDT seam, one-shot coil-shadow and GPIO
-// injections are rewritten before the first gate with no reset; non-coil shadow
-// (intent) and shadow-vs-expected injections still reset. A settled persistent
-// port mismatch observable after refresh is still caught by port-follows-shadow.
-//
-// CD4053 variants: hw_outputs_reassert_safe() is a no-op, so every modeled
-// output injection at this pre-gate seam still resets.
+// The relay variant adds the second half of the F1 contract on top of that
+// shared response: the escalation path must de-energize both coils before the
+// spin, and the watchdog recovery must drive a complete RESET-coil actuation
+// back to BYPASS. Both the shadow (intent) and modeled-GPIO (physical) coil
+// views are injected, because on this part they fail independently: a shadow
+// coil bit trips shadow-vs-expected without the pin ever being energized, while
+// a GPIO coil bit energizes the pin with the shadow still clean and trips
+// port-follows-shadow.
 #if defined(TQ2_L2_5V_RELAY)
-// expected_resets=0 asserts "corrected, no reset." At this trailing-CLRWDT seam,
-// an uncorrected coil/port bit would diverge from the shadow and trip the
-// port-follows-shadow clause at the first following gate.
-// The shipping-source host oracle separately proves RESET, SET, and both-coil
-// shadow injections cause exactly one modeled whole-port write with no
-// intermediate high GPIO write. This target lane checks the final
-// correction/no-reset result; it cannot use the 320-style
-// inject_relay_correction_case, whose
-// observed_port==mask precondition only holds where a latch drives the port.
-#  define PIC_FAULT_EXPECTED_CHECKS (45u + PIC_FAULT_CTX_INRANGE)
+// Twelve output checks: two shadow (intent) resets, two GPIO (port) resets, the
+// shadow-vs-expected isolator, and seven relay resynchronization cases covering
+// both coils in both views and a coil fault arriving in a settled ENGAGED state
+// as well as in BYPASS. Three fewer than the CD4053 branch's 37 + 9 = 46 might
+// suggest, because every relay case now costs ONE check: the retired
+// zero-reset cases each spent a second check on the restore-and-verify branch
+// that only no-reset cases need.
+#  define PIC_FAULT_EXPECTED_CHECKS (40u + PIC_FAULT_CTX_INRANGE)
 #  define PIC_FAULT_EXTRA_OUTPUT_INJECTIONS() do { \
     inject_case("shadow.GP0", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x01, 1, \
-                "GP0 LED shadow (intent) corruption still resets"); \
+                "GP0 LED shadow (intent) corruption resets"); \
     inject_case("shadow.GP4", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x10, 1, \
-                "parked GP4 shadow (intent) corruption still resets"); \
-    inject_case("shadow.GP1", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x02, 0, \
-                "GP1 RESET-coil shadow corrected low each tick, no reset"); \
-    inject_case("shadow.GP2", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x04, 0, \
-                "GP2 SET-coil shadow corrected low each tick, no reset"); \
-    inject_case("GPIO.GP0", PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, false, 0x01, 0, \
-                "GP0 LED port glitch refreshed low from shadow, no reset"); \
-    inject_case("GPIO.GP1", PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, false, 0x02, 0, \
-                "GP1 RESET-coil port energized, refreshed low from shadow, no reset"); \
-    inject_case("GPIO.GP2", PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, false, 0x04, 0, \
-                "GP2 SET-coil port energized, refreshed low from shadow, no reset"); \
-    inject_case("GPIO.coils", PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, false, 0x06, 0, \
-                "both coil ports energized, refreshed low from shadow, no reset"); \
-    inject_case("GPIO.GP4", PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, false, 0x10, 0, \
-                "parked GP4 port glitch refreshed low from shadow, no reset"); \
+                "parked GP4 shadow (intent) corruption resets"); \
+    inject_case("GPIO.GP0", PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, false, 0x01, 1, \
+                "GP0 LED pin high with its shadow low: port stopped following"); \
+    inject_case("GPIO.GP4", PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, false, 0x10, 1, \
+                "parked GP4 pin high with its shadow low: port stopped following"); \
+    inject_relay_resync_case(PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, \
+                             0x02u, false, "GP1 RESET-coil shadow (intent) forced high"); \
+    inject_relay_resync_case(PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, \
+                             0x04u, false, "GP2 SET-coil shadow (intent) forced high"); \
+    inject_relay_resync_case(PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, \
+                             0x02u, false, "GP1 RESET-coil pin energized"); \
+    inject_relay_resync_case(PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, \
+                             0x04u, false, "GP2 SET-coil pin energized"); \
+    inject_relay_resync_case(PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, \
+                             0x06u, false, "both coil pins energized"); \
+    inject_relay_resync_case(PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, \
+                             0x02u, true, "GP1 RESET-coil pin energized"); \
+    inject_relay_resync_case(PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, \
+                             0x04u, true, "GP2 SET-coil pin energized"); \
     inject_shadow_expected_case("shadow.expected", 0x01, \
                 "shadow+port GP0 high vs BYPASS expected: isolates shadow-vs-expected, F2-blind (ctx_ untouched)"); \
 } while (0)

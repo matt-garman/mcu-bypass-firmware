@@ -287,10 +287,14 @@ CLI wrappers, the soak adapter (`pic/test_soak_pic.cc`), all four libgpsim harne
 cores, and — most importantly — `src/bypass_pure.c` itself. Thin per-part adapters
 keep processor/image defaults and output-macro vocabularies explicit. The fault
 adapters additionally pin each part's program-space limit, independent expected
-check count, and output-latch policy: PIC10F322 runs three reset-producing LATA
+check count, and output-latch guard SCOPE: PIC10F322 runs reset-producing LATA
 injections because it has a general latch-integrity guard. PIC10F320 omits that
-general guard; its relay adapter instead runs three no-reset coil-latch cases
-that require the safe idle state to be restored within one serviced iteration.
+general guard and guards only the two relay coil latch bits. The RESPONSE no
+longer differs between them -- an energized coil resets on every part -- so both
+relay adapters run the same five `inject_relay_resync_case()` cases, which
+require de-energization before the reset spin and a measured full-width
+RESET-coil actuation after the recovery, delivered from both a settled BYPASS and
+a settled ENGAGED start.
 
 Build artifacts (compiled binaries, `*.bc`) are written next to their sources in
 each subdirectory and are git-ignored; see `.gitignore`. KLEE output directories
@@ -334,7 +338,7 @@ The split mirrors the PIC lanes: **the host-only rows below are members of
 | Coil-pulse width | `attiny202-delay-oracle` | Compiled relay (12 ms) and mute (5 ms) delay-body cycle counts, recovered from the disassembled `_delay_ms` loop in the built image, match design and clear the 4 ms datasheet minimum. Timer-ISR preemption makes the edge-to-edge pin-high interval slightly longer. Every recognized loop candidate must provide a decodable 16-bit seed; no candidate can be dropped as missing evidence. | host, over real image |
 | Static analysis | `attiny202-analyze` | cppcheck + MISRA pass over the AVR-XT shell with real DFP/avr-libc headers. | host tools |
 | Register-level functional | `attiny202-sim` | The real image toggles on debounced press, boots dark with the WDT locked and `PORTA.DIR` exact, stays stable at idle, handles a switch held through power-on, and drives the correct PA2/PA3 sequence per variant. | yasimavr |
-| Fault response | `attiny202-fault` | 24 selected SFR/latch/state/pin-polarity corruptions each produce the correct response — the sanity gate's force-reset path, a witnessed watchdog reset for the tick timer itself, safe overwrite at the ISR/main persisted-context transaction seams, or settled relay-coil correction. Includes an independent `INVEN` injection on all five bonded application pins. Zero skips, exact completion accounting over 25 results. | yasimavr |
+| Fault response | `attiny202-fault` | 24 selected SFR/latch/state/pin-polarity corruptions (26 on the relay variant) each produce the correct response — the sanity gate's force-reset path, a witnessed watchdog reset for the tick timer itself, safe overwrite at the ISR/main persisted-context transaction seams, or relay-coil escalation with both coils de-energized before the spin and nothing else re-driven, delivered from both BYPASS and ENGAGED. Includes an independent `INVEN` injection on all five bonded application pins. Zero skips, exact completion accounting over 25 (27) results. | yasimavr |
 | Firmware/model lock-step | `attiny202-lockstep` | `ctx_` in simulated SRAM equals the shipping core's state after **every settled tick**, over both boot scenarios, plus LED and settled control-line agreement. Catches a shell defect on the tick it happens rather than as a wrong output later. | yasimavr + host core via ctypes |
 <!-- name-contract: exempt (SOAK_RESULT is the driver's stdout token, not a make variable) -->
 | Liveness soak | `attiny202-soak` | Over a long run the watchdog never resets the device (GPR0 reset witness), the sanity gate never force-resets, and a periodic 2-press round-trip still toggles. Emits the shared `SOAK_RESULT` release contract. | yasimavr |
@@ -418,13 +422,14 @@ checks pin the implementation-defined host bitfield layout before it can count
 as firmware evidence.
 
 On PIC12F675 every output variant runs an exact 86-check base predicate, fault,
-happy-path, and post-check transaction matrix. The relay variant runs 107
-checks: six settled-state correct-in-place cases each add an output assertion,
-12 active-pulse cases characterize active-low and inactive-high faults at 1, 6,
-and 11 ms in both SET and RESET, and three shadow-order cases require RESET, SET,
-or both coil bits to clear before one whole-port write with no intermediate
-high modeled-GPIO write. The same shared-driver pulse matrix raises the PIC10F322
-relay count from its 53-check base plus two settled corrections to 67.
+happy-path, and post-check transaction matrix. The relay variant runs 105
+checks: four coil-escalation cases each add a de-energization assertion on top of
+their reset assertion, 12 active-pulse cases characterize active-low and
+inactive-high faults at 1, 6, and 11 ms in both SET and RESET, and three
+shadow-order cases require RESET, SET, or both coil bits to clear before one
+whole-port write with no intermediate high modeled-GPIO write. The same
+shared-driver pulse matrix raises the PIC10F322 relay count from its 53-check
+base plus two coil-escalation assertions to 67.
 The active-pulse cases record and check the actual modeled injection offset,
 count every post-injection millisecond, require the injected state to persist
 through that interval, and require the modeled outputs to finish low. They
@@ -463,7 +468,7 @@ below so a green gate means every PIC layer actually ran.
 | Shipping-source coverage | `pic10f322-coverage-check-fw` | Every executable line in the real PIC shell, shared pure core, and all three output drivers is host-executed except the documented non-returning reset path. | host gcov with PIC SFR mock |
 | Register-level functional | `pic10f322-test-gpsim` | Real HEX toggles on press, handles power-on-held switch, keeps settled LATA/PORTA expectations, and includes the mid-debounce `PRESS1_EARLY` tick-cadence check. | gpsim CLI |
 | gpsim process gate | `test-gpsim-wrappers` | Both functional wrappers require a positive decimal timeout, reject nonzero or killed gpsim runs even after complete snapshots, prove routed stimuli contain one exact footswitch attachment, and fail rather than skip missing gpsim under `STRICT_TOOLS=1`. All three public lanes are additionally probed end-to-end: each must reach gpsim with its own part's processor, so a severed `PIC_GPSIM_PROC=` cannot leave a lane simulating another chip. The PIC12F675 route exhausts all six nonempty partial simulator-image subsets and rejects empty, symlinked, or unexpected members before gpsim runs. | Bash + fake gpsim |
-| Fault response | `pic10f322-test-fault` | Runtime direction, settled-output-latch, configuration, pull-up, and `ctx_` corruptions produce the variant-appropriate in-place correction or WDT recovery response. | libgpsim |
+| Fault response | `pic10f322-test-fault` | Runtime direction, settled-output-latch, configuration, pull-up, and `ctx_` corruptions all produce WDT recovery; the relay variant additionally requires both coils de-energized before the spin and a measured full-width RESET-coil actuation after it. | libgpsim |
 | HEX/model lock-step | `pic10f322-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches the shared pure model after every completed main-loop iteration. | libgpsim |
 | PIC simulator progress regression | `test-lockstep-progress` | All three chip routes bind their exact footswitch pin despite substring decoys and abort lock-step stalls during settle, calibration, or completion immediately. The same fake-gpsim API wedges every PIC soak adapter after startup and requires bounded failure, one short-duration result, exact advanced-cycle/time evidence, and no full-duration claim. | host C++ + fake gpsim API |
 | Target I/O timing | `pic10f322-test-io` | TRISA/ANSELA/LATA/PORTA transitions, relay coil exclusion, and mute/relay pulse widths match the design. | libgpsim |
@@ -567,7 +572,7 @@ targets are always fail-closed rather than skip-clean.
 |---|---|---|---|
 | Firmware↔core equivalence | `pic10f320-test-equiv` | The real firmware, host-compiled, stepped tick-for-tick against `src/bypass_pure.c` over 266,144 stimulus sequences, visiting all 66 reachable model states, with zero divergence. This is the layer that closes the inlining seam. | host C |
 | Actuation sequence | `pic10f320-test-actuation` | Each variant's full *settled* `LATA` at every tick, plus the mute/relay *mid-actuation* sequencing and pulse width that a settled snapshot cannot see. | host C |
-| Host fault injection | `pic10f320-test-fault-host` | Corrupting a guarded SFR or the debounce context forces the sanity gate to take the watchdog-reset path. The relay variant additionally injects settled-state RESET, SET, and both coil-latch bits and requires correction within one completed iteration without a press or reset: 41 / 41 / 59 checks. | host C |
+| Host fault injection | `pic10f320-test-fault-host` | Corrupting a guarded SFR or the debounce context forces the sanity gate to take the watchdog-reset path. The relay variant additionally injects settled-state RESET, SET, and both coil-latch bits and requires the same escalation with both coils already de-energized where the reset spin was abandoned: 41 / 41 / 59 checks. | host C |
 | Shipping-source coverage | `pic10f320-coverage-check-fw` | An **exact** property, not a percentage floor: every line of the real firmware is host-executed except an enumerated, justified watchdog-reset path. Run per variant, because the three output stages give 84 / 95 / 100 executable lines. | host gcov with the mock `xc.h` |
 | All-variant host aggregate | `pic10f320-test-host-variants` | The four layers above across all three variants, with the complete supported matrix required first. **This is the member of `make test`.** | Makefile wrapper |
 | Return-stack oracle regression | `test-pic10f320-return-stack-oracle` | 149 deterministic checks: passing depths through 8, recursion/depth-9 rejection, independently required skip edges and operand boundaries, classic alias ranges, all 16,384 legality decisions, every destination writer against PCL/INDF/INTCON, 9-bit PC/physical-fetch aliasing, literal HEX layout, and fail-closed parser/file cases. Includes ten device-geometry checks: `--program-words` is validated as a power of two inside the 9-bit PC space, and fixtures whose verdict *differs* between the 256- and 512-word geometries pin the fetch alias in both directions — an image with code above word `0x0FF` is rejected when 256 words are declared, and one that relies on the fold is rejected when 512 are. **This is also a member of `make test`.** | dependency-free Python 3 |
@@ -577,7 +582,7 @@ targets are always fail-closed rather than skip-clean.
 | Hardware return stack | every `pic10f320` build; `pic10f320-test-return-stack` | The base build strictly parses and traverses its final HEX before marking that image complete, so gpsim/target/soak/release rebuilds use the same fail-closed gate. The explicit target rebuilds the supported matrix and rechecks all three together, reporting each maximum and witness. | dependency-free Python 3 over final HEX |
 | Static analysis | `pic10f320-analyze` | cppcheck + MISRA over the shell, **swept across all three variants** — each compiles a different `#if defined(OUTPUT_*)` branch, so one run would leave two thirds unanalyzed. | host tools |
 | Register-level functional | `pic10f320-test-gpsim` | Real HEX toggles on press and handles a power-on-held switch via the shared wrappers, with the processor and chip-specific toggle-cadence stimulus overridden. | gpsim CLI |
-| Fault response | `pic10f320-test-fault-target` | The host fault argument re-made on the real emitted image: every guarded SFR/SRAM location and required `TRISA` direction, plus relay-only RESET, SET, and both-coil `LATA` injections at the reviewed trailing-`CLRWDT` seam. Modeled `PORTA` must follow the latch low within one serviced iteration and without reset: 22 / 22 / 25 checks. | libgpsim |
+| Fault response | `pic10f320-test-fault-target` | The host fault argument re-made on the real emitted image: every guarded SFR/SRAM location and required `TRISA` direction, plus a negative control proving the documented unguarded RA0 LED latch does *not* reset, plus relay-only RESET, SET, and both-coil `LATA` injections at the reviewed trailing-`CLRWDT` seam, from both BYPASS and ENGAGED. Each coil case must de-energize both coils, force exactly one reset, and be followed by a recovery RESET-coil pulse of at least the datasheet minimum with SET dark: 24 / 24 / 29 checks. | libgpsim |
 | HEX/model lock-step | `pic10f320-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches `src/bypass_pure.c` after every completed main-loop iteration — 3,005 checks per variant, 66/66 states. | libgpsim |
 | Target I/O timing | `pic10f320-test-io` | Exact `TRISA`, modeled `PORTA` following every `LATA` transition, each variant's complete transition sequence, and mute/relay pulse widths from simulator cycles. | libgpsim |
 | Fail-closed aggregate | `pic10f320-test-target-variants` | Rejects any matrix other than the complete supported set, then requires fault, lock-step and target-I/O PASS sentinels for every variant. | Makefile wrapper |
@@ -685,7 +690,8 @@ The PIC mutation set includes target-level faults for the new coverage: collapse
 TMR2IF cadence, exact-TRISA predicate removal, output-latch mask narrowing,
 exact WPUA pull-up state, ANSELA mask narrowing, muted-CD4053 startup
 reassertion, mute-window shortening, relay pulse shortening, and removal or
-one-coil weakening of the PIC10F320 relay idle safe-state rewrite.
+one-coil weakening of the PIC10F320 relay coil guard and its fail-safe
+de-energization.
 
 **Which lane owns the Classic AVR watchdog matters, and is easy to get wrong.**
 The two long-standing watchdog-handshake mutants both run on `test-sim-cd4053_simple-attiny13a`,

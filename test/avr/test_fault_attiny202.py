@@ -50,10 +50,22 @@ NEG_CONTROL_MS = 650     # >2x WDT period: healthy firmware must keep petting it
 LIVE_STEP_MS = 5
 RETRY_GATE_MS = 50
 RETRY_GATE_STEP_CYCLES = 137  # coprime with the 2,000-cycle tick
+# One debounced toggle: the press must outlast PRESSED_THRESH (8 ticks) plus the
+# 12 ms blocking actuation, and the release must outlast RELEASE_THRESH (25).
+ENGAGE_PRESS_MS = 40
+ENGAGE_RELEASE_MS = 80
 TRANSACTION_MAX_STEPS = 4_000  # exact-PC search; deliberately not a time budget
-EXPECTED_FAULT_CASES = 24
-EXPECTED_TOTAL_RESULTS = EXPECTED_FAULT_CASES + 1  # injections + negative control
+# The relay variant carries two extra cases: a coil fault has to be delivered in
+# a settled ENGAGED state as well as in BYPASS, so both directions of the
+# desynchronization hazard are covered.
+EXPECTED_FAULT_CASES_CD4053 = 24
+EXPECTED_FAULT_CASES_RELAY = 26
 RESET_SENTINEL = 0xA5
+# Panasonic TQ2-L2-5V minimum coil pulse for guaranteed actuation; the shell
+# drives 12 ms. Used only in diagnostics here -- see the RESYNC note below for
+# why this substrate cannot measure the recovery pulse.
+TQ2_L2_5V_MIN_PULSE_MS = 4
+PORTA_COIL_MASK = 0x0C  # PA2 (RESET coil) | PA3 (SET coil)
 
 REG = "reg"              # I/O register        (write_ioreg, one byte)
 REG16 = "reg16"          # 16-bit I/O register  (write_ioreg low then high)
@@ -61,7 +73,8 @@ RAM = "ram"              # SRAM byte     (write_ram, addr resolved per variant)
 GATE = "gate"            # expected mechanism: per-tick sanity gate
 LIVE = "live"            # expected mechanism: WDT liveness (or the gate)
 RETRY_GATE = "retry_gate"  # phase-swept reinjection for ISR-rewritten state
-CORRECT = "correct"      # settled relay coil fault re-driven low, no reset
+RESYNC = "resync"        # relay coil fault: gate resets, coils de-energized first
+RESYNC_ENGAGED = "resync_engaged"  # same, delivered in a settled ENGAGED state
 TRANSACTION_ISR = "transaction_isr"    # one post-check persisted-context upset
 TRANSACTION_MAIN = "transaction_main"  # one post-check persisted-context upset
 
@@ -96,18 +109,21 @@ def _fault_cases(sim, is_relay):
         ("PORTA.DIR(footswitch)",  REG,  S.REG_PORTA_DIR,         0xCE,   GATE),
         ("PORTA.DIR(spare PA6)",   REG,  S.REG_PORTA_DIR,         0x0E,   GATE),
         ("PORTA.OUT(PA1 LED)",     REG,  S.REG_PORTA_OUT,         0x02,   GATE),
-        # Relay settled-state case: PA2/PA3 are the coils;
-        # hw_outputs_reassert_safe() re-drives them low (PORTA.OUTCLR) at the top
-        # of every serviced tick, before the gate, so a post-actuation coil-bit
-        # upset self-heals with no reset. This does not inject during the 12 ms
-        # pulse (see docs/relay_coil_fault_correction.md). CD4053: PA2/PA3 are
-        # control lines (the op is a no-op), so their upsets reset via the gate.
+        # Relay settled-state case: PA2/PA3 are the coils. An energized coil is
+        # a FAULT -- a pulse below the TQ2-L2-5V 4 ms minimum is not proven
+        # mechanically harmless, so the firmware cannot know whether the
+        # latching relay moved -- and the gate escalates it exactly like any
+        # other PORTA.OUT mismatch, after hw_force_wdt_reset() has driven both
+        # coils low (see docs/relay_coil_fault_correction.md). This does not
+        # inject during the 12 ms pulse; that window is excluded by design.
+        # CD4053: PA2/PA3 are control lines, so their upsets reset via the gate
+        # with nothing coil-specific to add.
         ("PORTA.OUT(PA2 %s)" % ("RESET-coil" if is_relay else "control"),
                                    REG,  S.REG_PORTA_OUT,         0x04,
-                                   CORRECT if is_relay else GATE),
+                                   RESYNC if is_relay else GATE),
         ("PORTA.OUT(PA3 %s)" % ("SET-coil" if is_relay else "control"),
                                    REG,  S.REG_PORTA_OUT,         0x08,
-                                   CORRECT if is_relay else GATE),
+                                   RESYNC if is_relay else GATE),
         ("PORTA.OUT(PA6 spare)",   REG,  S.REG_PORTA_OUT,         0x40,   GATE),
         ("ctx_.program_state",    RAM,   sim.addr_ctx + 0,        0xFF,   GATE),
         ("ctx_.effect_state",     RAM,   sim.addr_ctx + 1,        0xFF,   GATE),
@@ -129,11 +145,28 @@ def _fault_cases(sim, is_relay):
         # --- caught by WDT liveness (disabling the tick kills the wake source) ---
         ("TCB0.CTRLA(tick)",      REG,   S.REG_TCB0_CTRLA,        0x00,   LIVE),
         ("TCB0.INTCTRL(tick)",    REG,   S.REG_TCB0_INTCTRL,      0x00,   LIVE),
-    ]
+    ] + ([
+        # The same two coil faults delivered while the shell believes it is
+        # ENGAGED. That is the other direction of the desynchronization hazard:
+        # an unintended RESET pulse can knock a latching relay to BYPASS while
+        # the firmware and the LED still say ENGAGED.
+        #
+        # _inject() writes the corrupt value ABSOLUTELY, so these two carry the
+        # lit-LED bit (PA1, 0x02) alongside the coil bit. Without it the
+        # injection would also darken the LED and stop being a pure coil fault
+        # -- and the post-escalation assertion would no longer show that the
+        # de-energization touched the coils and nothing else.
+        ("PORTA.OUT(PA2 RESET-coil, ENGAGED)", REG, S.REG_PORTA_OUT, 0x02 | 0x04,
+         RESYNC_ENGAGED),
+        ("PORTA.OUT(PA3 SET-coil, ENGAGED)",   REG, S.REG_PORTA_OUT, 0x02 | 0x08,
+         RESYNC_ENGAGED),
+    ] if is_relay else [])
 
 
 class Checker:
-    def __init__(self):
+    def __init__(self, expected_cases):
+        self.expected_cases = expected_cases
+        self.expected_results = expected_cases + 1  # injections + negative control
         self.fails = 0
         self.skips = 0
         self.results = 0
@@ -163,20 +196,20 @@ class Checker:
         sys.stderr.write("[fault] FAIL  %s\n" % msg)
 
     def finalize(self, declared_cases):
-        if declared_cases != EXPECTED_FAULT_CASES:
+        if declared_cases != self.expected_cases:
             self._completion_failure(
                 "fault case list has %d entries; expected exactly %d"
-                % (declared_cases, EXPECTED_FAULT_CASES)
+                % (declared_cases, self.expected_cases)
             )
-        if self.results != EXPECTED_TOTAL_RESULTS:
+        if self.results != self.expected_results:
             self._completion_failure(
                 "recorded %d result(s); expected exactly %d"
-                % (self.results, EXPECTED_TOTAL_RESULTS)
+                % (self.results, self.expected_results)
             )
-        if self.injections != EXPECTED_FAULT_CASES:
+        if self.injections != self.expected_cases:
             self._completion_failure(
                 "completed %d injectable fault(s); expected exactly %d"
-                % (self.injections, EXPECTED_FAULT_CASES)
+                % (self.injections, self.expected_cases)
             )
         if self.skips != 0:
             self._completion_failure(
@@ -215,6 +248,19 @@ def _run_case(elf, name, kind, addr, corrupt, mech, ck):
     if sim.in_force_reset():
         ck.result(False, "%s: device already force-reset before injection" % name)
         return
+
+    if mech == RESYNC_ENGAGED:
+        # One debounced press and release, then confirm via the LED that the
+        # shell really is ENGAGED -- injecting into an unknown state would test
+        # the case the name does not claim.
+        sim.press()
+        sim.run_ms(ENGAGE_PRESS_MS)
+        sim.release()
+        sim.run_ms(ENGAGE_RELEASE_MS)
+        if not sim.led_on():
+            ck.result(False, "%s: shell did not reach ENGAGED before injection"
+                             % name)
+            return
 
     if mech in (TRANSACTION_ISR, TRANSACTION_MAIN):
         before_ctx = bytes(sim.read_ram(sim.addr_ctx, 3))
@@ -266,18 +312,29 @@ def _run_case(elf, name, kind, addr, corrupt, mech, ck):
         return
     ck.injected()
 
-    if mech == CORRECT:
-        # Coil re-driven low in place by the next tick's OUTCLR re-assert, before
-        # the gate: no force-reset, and the injected bit returns to healthy (low).
+    if mech in (RESYNC, RESYNC_ENGAGED):
+        # The gate escalates the energized coil, and hw_force_wdt_reset() drives
+        # BOTH coils low before it spins. Two assertions, one result: the reset
+        # happened, and the coils are idle at the moment it happened.
+        #
+        # What this substrate CANNOT show is the other half of the contract --
+        # the recovery's full-width RESET-coil actuation, which is what actually
+        # resynchronizes the physical relay. yasimavr treats the interrupts-off
+        # spin as a terminal halt (see sim_attiny202.in_force_reset), so the
+        # ~250 ms WDT never completes the reset in the model. The gpsim PIC
+        # lanes measure that pulse on real images; the simavr tinyx5 lane
+        # measures it on a classic AVR. No simulator speaks to relay mechanics.
         at = sim.run_until_force_reset(GATE_MS)
-        if at is not None:
-            ck.result(False, "%s corrupted -> unexpected force reset (+%d ms); "
-                             "coil should self-correct in place" % (name, at))
+        if at is None:
+            ck.result(False, "%s corrupted -> gate did NOT force reset within %d ms"
+                             % (name, GATE_MS))
             return
-        out = sim.read_ioreg(addr)
-        ck.result((out & corrupt) == 0,
-                  "%s corrupted -> coil re-driven low in place, no reset "
-                  "(OUT=0x%02x)" % (name, out))
+        out = sim.read_ioreg(S.REG_PORTA_OUT)
+        led_expected = 0x02 if mech == RESYNC_ENGAGED else 0x00
+        ck.result((out & PORTA_COIL_MASK) == 0 and (out & 0x02) == led_expected,
+                  "%s corrupted -> gate forced reset (+%d ms) with both coils"
+                  " de-energized and nothing else re-driven (OUT=0x%02x)"
+                  % (name, at, out))
         return
 
     if mech == RETRY_GATE:
@@ -364,7 +421,8 @@ def main(argv):
     print("FAULT START: fw=%s  F_CPU=%d Hz  variant=%s"
           % (elf, S.F_CPU_HZ, "relay" if is_relay else "cd4053"))
 
-    ck = Checker()
+    ck = Checker(EXPECTED_FAULT_CASES_RELAY if is_relay
+                 else EXPECTED_FAULT_CASES_CD4053)
     probe = S.Sim(elf)                 # one instance just to resolve the case list
     cases = _fault_cases(probe, is_relay)
     for name, kind, addr, corrupt, mech in cases:
@@ -375,8 +433,8 @@ def main(argv):
     verdict = "PASS" if ck.fails == 0 else "FAIL"
     print("\nFAULT %s: %d failed, %d skipped, %d/%d injections, %d/%d results."
           % (verdict, ck.fails, ck.skips,
-             ck.injections, EXPECTED_FAULT_CASES,
-             ck.results, EXPECTED_TOTAL_RESULTS))
+             ck.injections, ck.expected_cases,
+             ck.results, ck.expected_results))
     return 0 if ck.fails == 0 else 1
 
 

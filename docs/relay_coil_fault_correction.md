@@ -1,213 +1,238 @@
-# Relay coil fault correction (correct-in-place model)
+# Relay coil fault policy (fail-safe resynchronization)
 
-## Summary
+## Policy
 
-At every serviced loop top, each relay-capable build commands both coils low
-*before* its sanity gate. A one-shot writable coil-state upset already present
-when that operation executes -- including the deterministic settled seams used
-by the fault tests -- is cleared before the following gate, without changing the
-logical effect state or requiring reset.
+**An unexpectedly energized relay coil is a fault. The firmware de-energizes
+both coils immediately, then forces watchdog recovery, so that logical state,
+LED state and physical relay position are driven back into agreement.**
 
-This is not an all-instruction-phase guarantee. An upset arising after the
-re-assert but before the current gate may instead remain observable and be
-escalated on PIC10F322, PIC12F675, AVR classic, and AVR-XT. PIC10F320 has no
-general output-latch integrity check; its rule is correction-only for the relay
-coil bits.
+This replaces the correct-in-place model that shipped on PIC10F320 in v0.9.8 and
+on the four modular shells in `93f637b`. Nothing is re-driven ahead of a sanity
+gate any more; the loop-top re-assert is gone, and `hw_outputs_reassert_safe()`
+now runs as the first act of every shell's `hw_force_wdt_reset()`.
 
-The correction guarantee also excludes the complete actuation sequence, from
-the routine's pre-pulse clear through its post-pulse clear, especially the 12 ms
-blocking delay. An upset there can shorten the intended pulse or energize the
-inactive or both coils. The normal post-pulse clear commands both coil outputs
-low if execution completes, but missed or spurious relay actuation, audio
-disruption, and an external output path that does not accept that command remain
-residual risks.
+Selected and recorded by the repository owner before v0.9.10.
 
-PIC10F320 gained its relay-only loop-top re-assert in `f78d168` and first shipped
-it in v0.9.8. The four modular shells gained the shared-interface equivalent in
-`93f637b`; that cross-shell change first ships in v0.9.10.
+### Why
 
-## Why correct-in-place, not de-energize-then-reset
+The old model cleared an energized coil silently and let the loop continue. The
+intended pulse was bounded to roughly one tick at the tested settled seams,
+which is below the Panasonic TQ2-L2-5V **4 ms minimum pulse for guaranteed
+actuation** — but "below the guaranteed-actuation minimum" is not "proven
+mechanically harmless". No datasheet parameter, and no simulation, says what a
+1 ms pulse does to a particular relay at a particular voltage, temperature and
+armature position.
 
-- **It is a no-op on the nominal path.** Every actuation already ends in
-  `set_relay_coils_low()`, and nothing drives a coil high between actuations, so
-  the re-assert only does anything once an upset has set a coil bit. It is
-  redundant in normal operation and load-bearing only under fault.
-- **It corrects before escalation at the tested seam.** A fault already present
-  when the loop-top operation runs is cleared before the following gate. A
-  mismatch that remains observable reaches the architecture's existing sanity
-  response. Only PIC12F675 compares physical GPIO against independent shadow
-  intent; the other shells do not claim universal detection of an external
-  stuck pin. PIC10F320 does not independently detect general stable-`LATA`
-  mismatches at all.
-- **It bounds the characterized settled-state pulses.** At the deterministic
-  post-gate injection seams, the next re-assert is nominally ~1 ms away (1.024 ms
-  on PIC12F675), below the relay's specified 4 ms minimum pulse for guaranteed
-  actuation. That specification does not prove a shorter pulse is mechanically
-  harmless, and the tests do not sweep every instruction phase. During the
-  legitimate actuation sequence, loop-top correction is unavailable and
-  unintended relay motion remains possible.
-- **The coil is the only output that needs it.** The relay coil is the one
-  output with a continuous-energization / spurious-actuation hazard. The LED and
-  the CD4053 control lines have no such hazard, so correction is coil-only (with
-  the PIC12F675 caveat below). On the modular shells their observable latch
-  upsets retain the reset behavior; PIC10F320 retains its documented broader
-  latch-integrity gap.
+So the firmware cannot know whether the latching relay moved. If it did, silent
+clearing leaves the physical audio route disagreeing with the effect state and
+the LED, permanently, with nothing in the system able to notice or repair it.
+That is the single failure this policy exists to remove:
 
-The trade-off accepted deliberately: a transient coil upset corrected by the
-loop-top operation is **silent** (no reset, no count). That is the intended
-minimum-disruption behaviour on parts with no telemetry.
+| | correct in place (old) | fail-safe resynchronization (now) |
+| --- | --- | --- |
+| coil de-energized | yes, ≤ 1 tick | yes, ≤ 1 tick |
+| logical/physical convergence if the pulse DID actuate | never | guaranteed by the recovery |
+| disruption when it did NOT actuate | none | ~0.26 s dropout, returns to BYPASS |
+| firmware has to know whether the relay moved | yes (it cannot) | no |
+
+The old model minimized disruption on the assumption the pulse was harmless.
+The new model gives that up — a cosmic-ray-class coil upset now costs an audible
+interruption and a return to BYPASS — in exchange for never depending on an
+assumption the project cannot substantiate. For a bypass switch whose entire
+purpose is that the audio path matches what the player sees, that is the
+conservative trade.
+
+The alternative disposition — retaining silent correction — would have required
+the release to accept possible permanent logical/physical desynchronization and
+to add hardware characterization across representative relays, supply voltage,
+temperature and pulse phase. Testing samples cannot turn a below-minimum pulse
+into a datasheet guarantee, so that path was not taken.
+
+### Cost
+
+Measured, all variants, before → after:
+
+| Part | Relay variant | Other variants |
+| --- | --- | --- |
+| PIC10F322 | 493 → 493 words of 512 | unchanged (476, 502) |
+| PIC10F320 | 245 → 248 words of 256 | unchanged (220, 241) |
+| PIC12F675 | 563 → 563 words of 1024 | unchanged (546, 572) |
+| ATtiny13A | 864 → 868 B of 1024 | +4 B each |
+| ATtiny202 | 994 → 998 B of 2048 | +4 B each |
+
+It is nearly free because the escalation **reuses the sanity gate that already
+compares the complete output latch**. Only PIC10F320, which cannot afford that
+general comparison, pays anything: three words for a coil-only `LATA` term.
 
 ## Mechanism
 
-`bypass_hw_iface.h` declares one operation:
+### The two halves
 
-```c
-void hw_outputs_reassert_safe(void);
-```
+The contract has two halves, and the tests assert them separately because
+final-low coils are *not* recovery:
 
-Each output driver implements it:
+1. **De-energization.** `hw_force_wdt_reset()` calls
+   `hw_outputs_reassert_safe()` *before* it disables interrupts and spins, so a
+   fault can never hold a coil energized for the length of the watchdog period.
+   The relay driver's implementation is one masked clear — both coils down in a
+   single write.
+2. **Resynchronization.** The watchdog reset re-runs `init()`, whose
+   `hw_set_bypass_state()` drives a complete 12 ms RESET-coil actuation
+   (`TQ2_L2_5V_PULSE_MS`, 3× the datasheet minimum). *That* is what puts the
+   physical relay back in agreement with the logical state and the LED. The
+   device comes up in BYPASS with the LED dark.
 
-| Driver | Body | Rationale |
+### Detection, per shell
+
+| Shell | What the gate compares | Coil coverage |
 | --- | --- | --- |
-| `bypass_output_tq2_l2_5v_relay.c` | `set_relay_coils_low();` | drive both coils to their de-energized idle |
-| `bypass_output_cd4053_simple.c` | *(no-op)* | control level tracks the effect state; no fixed safe idle to re-assert |
-| `bypass_output_cd4053_with_mute.c` | *(no-op)* | same |
+| `bypass_mcu_pic10f322.c` | complete `LATA` output latch vs. expected | full |
+| `bypass_mcu_avr_classic.c` | complete `PORTB` output latch vs. expected | full |
+| `bypass_mcu_avr_xt.c` | complete `PORTA.OUT` latch vs. expected | full |
+| `bypass_mcu_pic12f675.c` | shadow vs. expected **and** port-follows-shadow | full, both views |
+| `bypass_mcu_pic10f320.c` | exact `TRISA`, plus the two `LATA` coil bits | **coil-only (see below)** |
 
-Each modular shell calls it at the top of every serviced iteration, immediately
-before the sanity gate (`bypass_mcu_pic10f322.c`, `bypass_mcu_pic12f675.c` right
-after `hw_wait_for_tick()`; `bypass_mcu_avr_classic.c`, `bypass_mcu_avr_xt.c` as
-the first statement of the main loop). The call is unconditional — the linked
-driver decides whether it does anything — so no shell carries a per-variant
-`#if`. PIC10F320 retains its separate inline
-`#if defined(OUTPUT_TQ2_RELAY)` implementation.
+The four modular shells needed no new detection code: an energized coil is an
+output-latch mismatch, which `hw_is_sanity_check_failed()` already rejects.
 
-These loop-top calls are not serviced anywhere inside `hw_set_bypass_state()` or
-`hw_set_engaged_state()`. The shared driver clears both coils, energizes one,
-blocks for 12 ms, and only then clears both again.
+**PIC12F675** gains rather than loses here. Its port-follows-shadow clause is
+unique in the project — it compares intent against reality, catching a driver,
+pin or bus fault the other parts cannot see at all — and the old loop-top
+whole-port refresh *pre-empted* it at exactly the settled seam where it was
+supposed to bite. With the refresh gone, the clause is load-bearing: a coil bit
+that appears on the port without the shadow asking for it now escalates, and so
+does a non-coil port divergence that used to be silently rewritten.
 
-## Per-architecture behaviour
+### The PIC10F320 exception
 
-The following scope describes what one loop-top re-assert writes; it applies when
-the injected state reaches that operation before a sanity check. It does not
-describe faults elsewhere in the actuation sequence. The correction is
-**coil-only** on every part except PIC12F675, and the difference follows from
-each part's output-write primitive:
+PIC10F320 has 256 words and no room for the modular shells' complete
+output-latch comparison; that gap was accepted when the part was added and is
+unchanged. What the relay variant does buy is the one part of the latch that
+carries a physical hazard: `hw_output_pins_intact()` OR-folds
+`LATA & (RELAY_RESET | RELAY_SET)` into its exact-`TRISA` check, under
+`#if defined(OUTPUT_TQ2_RELAY)` so the CD4053 variants pay nothing (`LATA` is
+volatile — a masked-by-zero read would still be emitted). `hw_force_wdt_reset()`
+calls `set_relay_coils_low()` directly, since this shell links no output driver.
 
-| Part | Relay coil-clear operation | Correction scope |
-| --- | --- | --- |
-| PIC10F320 | two `LATA` single-pin clears | coil-only |
-| PIC10F322 | one masked `LATA` read-modify-write | coil-only |
-| AVR classic (ATtiny13a/45/85) | one masked `PORTB` read-modify-write | coil-only |
-| AVR-XT (ATtiny202) | one mask write to `PORTA.OUTCLR` | coil-only |
-| **PIC12F675** | **clear both shadow bits, then write the whole `GPIO` byte once** | **coil + whole-port refresh** |
+So the 320 has **full parity on the coil guarantee** and retains its documented
+gap elsewhere: an LED or spare output-latch upset still goes undetected on that
+part until the next accepted actuation rewrites it. That exception is now
+*asserted*, not merely described — its gpsim adapter injects the RA0 LED latch
+and requires **no** reset, so the gap cannot widen unnoticed (the coil cases
+would fail) and cannot silently close either (this case would fail, forcing the
+documentation to be updated alongside the firmware).
 
-### PIC12F675 whole-port refresh (inescapable, and safe)
+## Exclusions
 
-The classic mid-range core has **no `LATx` register**. To avoid the classic
-read-modify-write-on-pins defect, the shell keeps an SRAM `gpio_shadow_` and
-writes `GPIO = gpio_shadow_` — the *entire* port byte — on every output change.
-So re-asserting the coils necessarily **refreshes the whole physical port from
-the shadow** each tick. Consequences on the relay variant:
+These are properties of the design, not gaps in the tests, and they are
+unchanged by this policy.
 
-The relay driver uses the masked-clear interface for every pre-pulse,
-post-pulse, and settled-state clear. On PIC12F675 the implementation removes both
-coil bits from `gpio_shadow_` before its single `GPIO = gpio_shadow_` assignment.
-This ordering is load-bearing: two sequential single-pin clears could replay the
-other coil's corrupt shadow bit onto the physical port before the second clear.
-
-- A one-shot modeled **coil** upset in the shadow or GPIO readback is rewritten.
-- A one-shot modeled GPIO upset on the LED or parked spare is also rewritten,
-  because the whole-port write re-drives every output bit from the shadow.
-- A non-coil **shadow** (intent) upset still resets — the shadow is authoritative
-  and its corruption is a genuine fault.
-- A settled-state physical-port mismatch that remains observable after refresh
-  is caught deterministically by the shell's unique port-follows-shadow check →
-  reset. A stuck-low coil during actuation can prevent motion and then match the
-  expected settled-low state; it is not covered by that check.
-
-This whole-port refresh is **not optional**: rewriting modeled GPIO state from
-the authoritative shadow requires a whole-byte port write, and on this
-architecture that write refreshes every output pin. A persistent external
-mismatch is not "corrected" by the test; if it remains readable after refresh at
-a settled check, PIC12F675's port-follows-shadow clause resets. Active-pulse
-stuck-low behavior remains outside that check.
-
-Fault posture at the reviewed pre-gate injection seam, PIC12F675 relay variant:
-
-```
-shadow.GP1 / shadow.GP2 (coil intent)      -> corrected, no reset
-GPIO.GP1 / GPIO.GP2      (coil port)        -> corrected, no reset
-GPIO.GP0 / GPIO.GP4      (LED / spare port) -> corrected, no reset  (whole-port refresh)
-shadow.GP0 / shadow.GP4  (LED / spare intent) -> RESET
-settled persistent observable mismatch      -> RESET (port-follows-shadow)
-active-pulse coil stuck low                 -> may evade the settled check
-SFRs / pull-up / context corruption         -> RESET
-```
-
-On PIC10F322, AVR classic and AVR-XT only writable coil state is re-driven. Other
-observable output-latch mismatches retain their existing reset behavior; these
-shells do not independently compare physical pins with intent. PIC10F320 is the
-exception: it re-drives relay coil bits but does not detect general stable-`LATA`
-mismatches, so non-coil output-latch upsets may persist until the next accepted
-actuation.
+- **The blocking actuation sequence.** From the pre-pulse clear through the
+  12 ms delay to the post-pulse clear, no sanity gate runs. An upset there can
+  shorten the intended pulse or energize the inactive coil or both coils. The
+  normal post-pulse clear commands both coils low if execution completes, but
+  missed or spurious relay actuation, audio disruption, and an external output
+  path that does not accept that command remain residual risks. This window is
+  *characterized* by the shipping-source host harness (below), not guarded.
+- **Instruction phase.** The fault tests inject at reviewed, deterministic
+  settled seams. They do not sweep every instruction boundary.
+- **Detection latency.** An upset arriving just after a gate stays energized
+  until the next gate — one tick, 1 ms (1.024 ms on PIC12F675). That is the same
+  exposure the old loop-top re-assert had, and it is bounded by the tick, not by
+  the watchdog period.
+- **A stuck external pin.** Only PIC12F675 compares physical port against
+  independent shadow intent. The other shells guard writable state; they do not
+  claim to detect an output that refuses to follow it.
+- **Relay mechanics.** No simulator models an armature. Every measurement below
+  is of the *electrical pulse the firmware drives*. Whether a given relay,
+  at a given voltage and temperature, moves for a below-minimum pulse — or fails
+  to move for an above-minimum one — is a bench question, and the project's
+  `1.x.y` hardware-validation pass is where it belongs.
 
 ## Test coverage
 
-The correction cases below inject at reviewed, deterministic settled seams. The
-PIC LATx cases directly delimit one completed iteration, while PIC12F675 derives
-first-gate correction from its port-follows-shadow check. The AVR cases verify
-final low state and no reset inside multi-tick observation windows; source
-ordering locates the re-assert, but those harnesses do not timestamp the edge or
-sweep injection phase.
+Five independent harnesses across eight part/substrate rows. Each names which
+half of the contract it can prove on its substrate, and none of them claims the
+other.
 
-| Substrate | Harness | Coil correction assertion |
-| --- | --- | --- |
-| PIC10F320 (host) | `test/pic10f320/fault/test_fault.c` | RESET, SET, and both latch bits are low after the next completed iteration; 41/41/59 exact checks |
-| PIC10F320 (gpsim) | `test/pic10f320/gpsim/test_fault_pic.cc` | `inject_relay_correction_case` writes `LATA` and observes modeled `PORTA` follow it low within one iteration; 22/22/25 exact checks |
-| PIC10F322 (gpsim) | `test/pic/test_fault_pic.cc` | `inject_relay_correction_case` — coil high then low within one iteration, `reset_delta == 0` |
-| PIC12F675 (gpsim) | `test/pic/test_fault_pic12f675.cc` | coil + all-port cases as `inject_case(..., expected_resets=0)`; at the tested seam an uncleared mismatch would trip port-follows-shadow at the first gate |
-| AVR classic (simavr) | `test/avr/test_sim.c` `inject_coil_correction` | inject coil latch high while asleep; assert latch re-driven low, no reset, LED still lit, still running |
-| AVR-XT (yasimavr) | `test/avr/test_fault_attiny202.py` `CORRECT` mechanism | inject `PORTA.OUT` coil high; assert `OUTCLR` re-clears it with no force-reset |
+| Substrate | Harness | De-energization | Resynchronization |
+| --- | --- | --- | --- |
+| PIC10F322 (gpsim) | `test/pic/test_fault_pic.cc` → `inject_relay_resync_case` | cycle-timed, ≤ 3 ms | RESET-coil pulse measured on modeled `PORTA`, ≥ 4 ms, SET dark, settles BYPASS |
+| PIC10F320 (gpsim) | `test/pic10f320/gpsim/test_fault_pic.cc` (same case) | same | same |
+| PIC12F675 (gpsim) | `test/pic/test_fault_pic12f675.cc` (same case) | same, shadow **and** modeled GPIO | same |
+| AVR classic, tinyx5 (simavr) | `test/avr/test_sim.c` → `inject_coil_resync` | `PORTB` coil bits low after the gate | edge-timed RESET-coil pulse ≥ 4 ms, SET never driven, LED dark |
+| AVR classic, ATtiny13A (simavr) | same | same | **not observable**: simavr has no WDT system-reset model for this part, so the case asserts a permanent `cli()`+spin wedge with the coils held idle |
+| ATtiny202 (yasimavr) | `test/avr/test_fault_attiny202.py` → `RESYNC` | `PORTA.OUT` coils low, LED untouched | **not observable**: yasimavr treats the interrupts-off spin as a terminal halt, so the WDT never completes the reset in the model |
+| PIC10F322 / PIC12F675 host source | `test/pic/fw_coverage/test_fw_coverage.c` → `expect_coil_fault_escalates` | all outputs settled low after the run | not claimed (the mock elides `__delay_ms` and aborts the spin on a timer) |
+| PIC10F320 host source | `test/pic10f320/fault/test_fault.c` → `expect_relay_coil_fault_escalates` | coil latch sampled where the spin was abandoned | not claimed, for the same reason |
 
-Deleting the loop-top re-assert (or its coil clear) is killed behaviorally on
-every substrate. PIC10F322, PIC12F675, AVR classic, and AVR-XT let the uncleared
-state reach their existing sanity response, violating the no-reset result.
-PIC10F320 has no general latch guard, so its explicit final-low correction
-assertion fails without requiring a reset.
+Every relay case is delivered in **both settled states**: BYPASS with an
+unintended SET (the relay may move to ENGAGED while the firmware believes
+BYPASS) and ENGAGED with an unintended RESET (the mirror). Both must converge on
+BYPASS.
 
-The PIC shipping-source host harness separately characterizes the excluded
-active-pulse window in the shared production relay driver. For both SET and
-RESET it injects active-coil-low and inactive-coil-high faults at 1, 6, and
-11 ms into the 12 ms delay. They do not cover the instruction boundaries between
-the pre-clear, coil assertion, delay, and post-clear. PIC10F322 observes its LATA
-state; PIC12F675 observes independent SRAM-shadow intent and modeled
-GPIO/readback. The harness records the actual injection offset and counts every
-modeled post-injection millisecond, not merely the requested case. All 12 cases per device
-show no correction during the remaining blocking interval and a final modeled
-low state; the inactive-high cases make the post-pulse clear load-bearing on
-PIC10F322. These are residual-risk characterizations, not evidence that an
-external output accepts the write or that the relay cannot move.
+Measured recovery pulses at the reviewed seam, against a 12 ms design pulse:
+10.8 ms (PIC10F322), 11.2 ms (PIC10F320), 11.3 ms (PIC12F675). The shortfall is
+the harness's 1 ms reset-detection step, not the firmware's. The tinyx5 case
+times the same pulse from pin edges and requires only that it clear the 4 ms
+minimum; the separate width oracle, which measures the *design* pulse rather
+than a recovery, reports 13.5 ms on the classic AVR, where the 1 ms tick ISR
+preempts the busy-wait.
 
-Three additional PIC12F675 shipping-source cases start with RESET, SET, or both
-coil shadow bits high while both modeled GPIO coil bits are low. Each requires
-exactly one modeled whole-port write, no intermediate high GPIO write, final low
-modeled coil state, and the expected all-port refresh. A mutation that restores
-the former sequential whole-port writes is killed by this matrix.
+### Mutation resistance
+
+Both directions are killed, verified on PIC10F322:
+
+- **Remove the de-energize from `hw_force_wdt_reset()`** → de-energization
+  latency never observed, and in the SET-coil cases the injected coil is still
+  driven when the recovery begins.
+- **Restore the old silent correction** → no reset, no recovery pulse, and the
+  ENGAGED cases can no longer even reach the state they claim to test.
+- **Weaken the PIC10F320 coil guard to one bit** → the unguarded coil is never
+  detected and stays energized for the whole observation window.
+
+One consequence worth naming: because the recovery pulse is now measured, a
+mutant that shortens the *design* pulse below the datasheet minimum is caught by
+the fault lane as well as by the target-I/O minimum check. The PIC aggregates
+are fail-closed and run fault before io, so that mutant's verdict now comes from
+the fault lane — the mutation harness's `resync:minimum-pulse` signature says
+so. The io minimum check still runs, and still passes, on every clean run.
+
+### The excluded window, characterized
+
+`test_relay_pulse_fault_window()` in the PIC shipping-source host harness injects
+active-coil-low and inactive-coil-high faults at 1, 6 and 11 ms into the 12 ms
+delay, for both SET and RESET: 12 cases per device. It records the actual
+injection offset and counts every modeled post-injection millisecond. All cases
+show no correction during the remaining blocking interval and a final modeled low
+state; the inactive-high cases make the post-pulse clear load-bearing on
+PIC10F322. These are residual-risk characterizations. They are not evidence that
+an external output accepts the write, and not evidence that the relay cannot
+move.
+
+### PIC12F675 whole-port write
+
+The classic mid-range core has **no `LATx` register**, so the shell keeps an SRAM
+`gpio_shadow_` and writes `GPIO = gpio_shadow_` — the entire port byte — on every
+output change. The relay driver's masked clear therefore removes both coil bits
+from the shadow before its single `GPIO = gpio_shadow_` assignment. That ordering
+is load-bearing and unchanged by this policy: two sequential single-pin clears
+could replay the other coil's corrupt shadow bit onto the physical port between
+them. `test_relay_reassert_atomic_clear()` requires exactly one whole-port write
+with no intermediate high, and kills a mutation back to the sequential form.
 
 ## Test-harness note: faithful footswitch on the AVR classic (simavr)
 
 The classic-AVR harness accounts for a **simavr fidelity gap**, not a firmware
-behavior. The masked clear is a full-`PORTB` read-modify-write, so the relay shell
-re-writes `PORTB` every tick. simavr, left alone, lets that write
-(which re-asserts PB0's internal pull-up) override the externally driven
-footswitch level, so presses
-stopped registering. On real hardware this cannot happen — a footswitch closed to
-ground overrides the weak internal pull-up, and re-writing an already-enabled
-pull-up is a no-op.
+behavior. The masked clear is a full-`PORTB` read-modify-write, so it re-asserts
+PB0's internal pull-up. simavr, left alone, lets that write override the
+externally driven footswitch level, so presses stopped registering. On real
+hardware this cannot happen — a footswitch closed to ground overrides the weak
+internal pull-up, and re-writing an already-enabled pull-up is a no-op.
 
-The harness drives the footswitch as a **persistent external pull** via
-simavr's `AVR_IOCTL_IOPORT_SET_EXTERNAL`, <!-- name-contract: exempt (AVR_IOCTL_IOPORT_SET_EXTERNAL is a simavr C macro, not a make variable) --> plus an immediate `avr_raise_irq` for
-zero-latency edges (`footsw_set` in `test/avr/test_sim.c`). The external pull
+The harness drives the footswitch as a **persistent external pull** via simavr's
+`AVR_IOCTL_IOPORT_SET_EXTERNAL`, <!-- name-contract: exempt (AVR_IOCTL_IOPORT_SET_EXTERNAL is a simavr C macro, not a make variable) --> plus an immediate `avr_raise_irq`
+for zero-latency edges (`footsw_set` in `test/avr/test_sim.c`). The external pull
 survives PORT writes (the switch beats the pull-up, as on hardware); the raise
 avoids the one-tick input latency the persistent-pull-alone path introduced. The
 AVR-XT (yasimavr) already models this faithfully (`set_external_state`), and the
@@ -215,8 +240,15 @@ PIC gpsim/shadow harnesses were never affected.
 
 ## Related
 
-- `CHANGELOG.md` and commits `f78d168`, `93f637b`, and `712589c` record the
-  introduction and masked-clear refinement history.
+- `CHANGELOG.md` and commits `f78d168`, `93f637b`, `712589c` record the
+  correct-in-place model this policy replaces.
+- `docs/context_seu_detection.md` — the sibling fault-hardening item (F2).
 - `docs/phase2_pic_shell.md` — the PIC Model-B polled-loop design the PIC shells
   share.
 - `src/bypass_mcu_pic12f675.c` header comment — the GPIO-shadow rationale.
+- `src/bypass_hw_iface.h` — the `hw_outputs_reassert_safe()` contract.
+
+> Filename note: this file is still `relay_coil_fault_correction.md` because a
+> rename would touch every reference to it in the tree for no behavioural gain.
+> Its subject is the relay coil fault *policy*, of which correct-in-place was the
+> earlier answer.

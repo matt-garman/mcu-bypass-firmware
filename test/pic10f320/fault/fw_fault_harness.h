@@ -65,10 +65,21 @@ typedef enum {
 int fw_fault_run(fw_inject_t inj);
 
 #if defined(OUTPUT_TQ2_RELAY)
-// Result of injecting one or both relay-coil latch bits after a clean iteration
-// and observing the next completed iteration. The host mock proves the firmware
-// latch behavior; the libgpsim fault lane separately observes modeled PORTA
-// following the injected latch.
+// Result of injecting one or both relay-coil latch bits after a clean iteration.
+// Under the F1 fail-safe policy (docs/relay_coil_fault_correction.md) an
+// energized coil is a FAULT: the next gate escalates it, and
+// hw_force_wdt_reset() drives both coils low before it spins.
+//
+// This host lane proves the FIRST half of that contract -- escalation, and
+// de-energization ahead of the spin -- against the shipping source. It does not
+// and cannot prove the second half (a complete resynchronizing RESET-coil
+// actuation after the watchdog reset), because the mock elides __delay_ms() and
+// aborts the spin on a timer rather than modelling a reset. The libgpsim fault
+// lane (test/pic10f320/gpsim/test_fault_pic.cc) measures that pulse on the real
+// image; simulation still proves nothing about relay MECHANICS.
+//
+//   final_coils          -- the coil latch bits when the reset spin was aborted
+//   completed_iterations -- must be 0: no further clean iteration may run
 typedef struct {
     uint8_t injected_coils;
     uint8_t observed_coils;
@@ -78,7 +89,8 @@ typedef struct {
 } fw_relay_fault_result_t;
 
 // `coil_mask` must select RESET/RA1, SET/RA2, or both (0x02/0x04/0x06).
-// Returns the same reset/no-reset status as fw_fault_run().
+// Returns the same reset/no-reset status as fw_fault_run(); an energized coil
+// must now return 1.
 int fw_relay_fault_run(uint8_t coil_mask, fw_relay_fault_result_t *result);
 #endif
 

@@ -128,10 +128,10 @@ counts are tabulated in `docs/pic10f320_validation.md` §4.
 
 Taking the general latch-match guard on `cd4053_simple` alone was considered and
 rejected. A partial version of that general defense would make the same class of
-fault depend on the selected output stage. The relay-only safe-state rewrite
-described below is different: it does not claim general latch integrity, and it
-exists because a high relay-coil bit has a hardware-energy consequence that an
-LED or analog-control mismatch does not.
+fault depend on the selected output stage. The relay-only coil guard described
+below is different: it does not claim general latch integrity, and it exists
+because a high relay-coil bit has a hardware-energy consequence, and a
+relay-position consequence, that an LED or analog-control mismatch does not.
 
 **What the omission means in practice.** The firmware still range-checks
 `ctx_.effect_state` in the main-loop sanity gate before acting on it, and the
@@ -159,25 +159,37 @@ consequence: a post-actuation upset that raised RA1 or RA2 could leave a coil
 energized without bound while the otherwise healthy loop continued to pet the
 watchdog. That unintended drive was not limited by the normal 12 ms pulse.
 
-The relay variant has a narrower safety rule as of `v0.9.8`. Immediately after
-accepting and clearing each timer event, before the sanity decision and watchdog
-pet, it reasserts `set_relay_coils_low()`. An RA1 or RA2 latch upset already
-present when that operation runs is corrected without requiring a footswitch
-event or watchdog reset. This is not an arbitrary-instruction-phase bound: the
-fault tests inject at the trailing `CLRWDT` seam and delimit the next completed
-iteration. Host fault injection covers RESET, SET and both bits; the real-image
-fault lane writes `LATA`, observes modeled `PORTA` follow it, and requires that a
-one-bit injection never raises the other coil. Existing exact host and target-I/O
-traces require the defensive low-to-low writes to add no normal-path edge.
+The relay variant has a narrower safety rule. `v0.9.8` gave it a loop-top
+`set_relay_coils_low()` that corrected such an upset in place; `v0.9.10` replaces
+that with the project-wide fail-safe policy
+(`docs/relay_coil_fault_correction.md`), because a stray sub-4 ms pulse is only
+*below* the TQ2-L2-5V guaranteed-actuation minimum, not proven harmless, so the
+firmware cannot know whether the latching relay moved.
 
-This is correction, not detection: it does not restore a relay that an accidental
-pulse mechanically switched, and it does not make the PIC10F320 equivalent to the
-PIC10F322's full expected-mask check. It closes the unbounded coil-energy path
-while leaving the broader documented latch-integrity limitation intact. That
-remaining distinction is why §6 still says to prefer another part when the
-choice is yours. The external driver, flyback network, supply and PCB are outside
-this generic firmware's definition; each adopter must validate the bounded pulse
-and simultaneous-driver transient on the actual circuit.
+What the relay variant now buys, within its 256 words, is exactly the two coil
+latch bits: `hw_output_pins_intact()` OR-folds `LATA & (RA1|RA2)` into its
+exact-`TRISA` check under `#if defined(OUTPUT_TQ2_RELAY)`, at a cost of three
+words and nothing at all on the CD4053 variants. An RA1 or RA2 upset therefore
+escalates through `hw_force_wdt_reset()`, which drives both coils low before it
+spins, and the recovery re-runs `init()` — whose complete 12 ms RESET-coil
+actuation is what restores agreement between logical state, LED and physical
+relay.
+
+This is not an arbitrary-instruction-phase bound: the fault tests inject at the
+trailing `CLRWDT` seam, from both a settled BYPASS and a settled ENGAGED start.
+Host fault injection covers RESET, SET and both bits and requires the coils to be
+idle where the reset spin was abandoned; the real-image fault lane writes `LATA`,
+measures the recovery pulse on modeled `PORTA`, and requires the SET coil to stay
+dark throughout it. Existing exact host and target-I/O traces require the
+defensive low-to-low writes to add no normal-path edge.
+
+So the coil guarantee is now at full parity with the modular shells. What remains
+unequal is everything else: the PIC10F320 still has no general expected-mask
+check, so a wrong LED or analog signal path can persist until the next accepted
+press. That remaining distinction is why §6 still says to prefer another part
+when the choice is yours. The external driver, flyback network, supply and PCB
+are outside this generic firmware's definition; each adopter must validate the
+bounded pulse and simultaneous-driver transient on the actual circuit.
 
 ## 5. Keeping it in step: the shared surface
 

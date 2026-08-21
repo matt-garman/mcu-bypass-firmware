@@ -182,9 +182,17 @@ static uint8_t hw_critical_sfrs_intact(void) {
 // errors (presumably ultra-rare events: cosmic rays, extreme EMI). Disables
 // interrupts first so nothing can pet the dog.
 //
+// The FIRST act is hw_outputs_reassert_safe(): any output with a
+// continuous-energization hazard (the relay coils) is driven to its
+// de-energized idle BEFORE the spin, so no fault can hold a coil energized
+// for the whole ~256ms watchdog period. The reset then re-runs init(), whose
+// full-width BYPASS actuation re-synchronizes the physical relay with the
+// logical state and the LED.
+//
 // IMPORTANT: relies on the watchdog being active (WDTE=ON in CONFIG); without
 // it this would lock up the MCU.
 __attribute__((noreturn)) static void hw_force_wdt_reset(void) {
+    hw_outputs_reassert_safe();
     INTCONbits.GIE = 0;
     for (;;) { }
 }
@@ -374,13 +382,19 @@ void main(void) {
 
         // pause until the next 1ms TMR2 tick (polled; no sleep on Model B)
         hw_wait_for_tick();
-        hw_outputs_reassert_safe();
         debounce_context_t next_ctx = ctx_;
 
         // basic sanity checks against outlier events (cosmic rays, extreme EMI);
         // always checked, regardless of state; force a WDT reset on any
         // violation. (No timer_isr_called_ guard as on AVR -- the PIC has no
         // ISR; main-loop liveness is proven by reaching hw_wdt_pet() below.)
+        //
+        // hw_is_sanity_check_failed() is also the relay coil guard: it compares
+        // the complete output latch, so an unexpectedly energized coil is an
+        // output-latch mismatch and escalates here. Nothing re-drives the coils
+        // ahead of this check -- a below-minimum pulse cannot be proven
+        // mechanically harmless, so recovery, not a silent clear, decides the
+        // relay position.
         if (
 #if defined(BYPASS_CTX_CHECK)
                 (ctx_check_ != debounce_ctx_check_word(next_ctx)) ||

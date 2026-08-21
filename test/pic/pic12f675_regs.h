@@ -122,6 +122,11 @@
 #define PIC_REG_FOOTSW_MASK  0x20u
 // The two relay coil bits (RELAY_RESET_PIN | RELAY_SET_PIN) = GP1|GP2.
 #define PIC_REG_COIL_MASK    0x06u
+// The two coils separately: the relay resynchronization cases require the
+// recovery actuation to be a RESET-coil pulse (the known BYPASS position) and
+// require the SET coil to stay dark throughout it.
+#define PIC_REG_RESET_COIL_MASK 0x02u
+#define PIC_REG_SET_COIL_MASK   0x04u
 
 // Exact steady-state TRISIO after init(): GP3/GP5 inputs, GP0..GP2/GP4 outputs.
 // GP3 reads back as an input on this part whatever is written to it; GP4 is the

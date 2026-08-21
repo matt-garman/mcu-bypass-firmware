@@ -125,7 +125,15 @@ static inline void hw_wdt_pet(void) { __asm__ __volatile__("wdr"); }
 // infinite loop to force a WDT reset on a critical, unrecoverable event (cosmic
 // ray / extreme EMI).  Disables interrupts first so nothing can pet the dog.
 // Relies on the fuse-locked WDT being active (it always is on this part).
+//
+// The FIRST act is hw_outputs_reassert_safe(): any output with a
+// continuous-energization hazard (the relay coils) is driven to its
+// de-energized idle BEFORE the spin, so no fault can hold a coil energized for
+// the length of the watchdog period. The reset then re-runs init(), whose
+// full-width BYPASS actuation re-synchronizes the physical relay with the
+// logical state and the LED.
 __attribute__((noreturn)) static void hw_force_wdt_reset(void) {
+    hw_outputs_reassert_safe();
     cli();
     for (;;) { }
 }
@@ -381,10 +389,15 @@ __attribute__((OS_main)) int main(void) {
 
     for (;;) {
 
-        hw_outputs_reassert_safe();
-
         // sanity checks against outlier events (cosmic rays, extreme EMI);
         // always checked; force a WDT reset on any violation.
+        //
+        // hw_is_sanity_check_failed() is also the relay coil guard: it compares
+        // the complete PORTA.OUT latch, so an unexpectedly energized coil is a
+        // latch mismatch and escalates here. Nothing re-drives the coils ahead
+        // of this check -- a below-minimum pulse cannot be proven mechanically
+        // harmless, so recovery, not a silent clear, decides the relay
+        // position.
         if ( (ctx_.program_state > RELEASE_DEBOUNCE_WAIT) ||
                 (ctx_.effect_state > ENGAGED) ||
                 (timer_isr_called_ > TIMER_ISR_NOT_CALLED) ||

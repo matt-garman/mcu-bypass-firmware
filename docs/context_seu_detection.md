@@ -310,5 +310,6 @@ suite: 132 killed, 0 survived, 0 errored, and no skipped PIC or ATtiny202 rows.
   carries the "cover `debounce_counter` and equivalently exposed members, not
   the fail-safe single-byte guards" constraint, satisfied here by folding
   exactly the three context members.
-- `docs/relay_coil_fault_correction.md` — F1, the sibling fault-hardening item
-  (correct-in-place vs. this detect-and-reset).
+- `docs/relay_coil_fault_correction.md` — F1, the sibling fault-hardening item.
+  It now shares this one's detect-and-reset shape: an energized relay coil is
+  escalated to a fail-safe recovery rather than corrected in place.

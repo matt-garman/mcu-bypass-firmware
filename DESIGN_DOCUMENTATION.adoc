@@ -209,8 +209,8 @@ adverse conditions:
 
 The firmware fails gracefully in the face of extraordinary
 circumstances by layering four mechanisms.  Two are microcontroller
-features; the other two are firmware behaviours that decide whether
-a detected fault is corrected in place or escalated to a reset:
+features; the other two are firmware behaviours that detect a fault
+and escalate it to a fail-safe recovery:
 
     * Brownout detection (BOD), essentially low voltage detection.
       The hardware design assumes an LP2950 or AP7375 regulator to
@@ -314,21 +314,32 @@ PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
   references the context-check machinery, so the difference cannot
   be silently erased in either direction.
 
-    * Correction in place, before escalation: between relay
-      actuations, every relay-capable build re-asserts both coils low
-      at the top of each serviced iteration, ahead of the checks
-      above.  A one-shot writable coil-state upset already present
-      when that operation executes is cleared before the following
-      gate, without reset or a logical state change.  This is not an
-      all-instruction-phase guarantee: an upset arising after the
-      re-assert but before that gate may instead be observed and
-      escalated on shells with output-state integrity checks.  A
-      mismatch that remains observable after the re-assert reaches
-      the architecture's existing sanity response.  Only PIC12F675
+    * Fail-safe relay resynchronization: an unexpectedly energized
+      relay coil is treated as a fault, never cleared quietly.  The
+      intended stray pulse is bounded to about one tick, which is
+      below the Panasonic TQ2-L2-5V 4ms minimum for guaranteed
+      actuation -- but below the guaranteed-actuation minimum is not
+      proven mechanically harmless, so the firmware cannot know
+      whether the latching relay moved.  Silently clearing it would
+      therefore risk leaving the audio route permanently disagreeing
+      with the effect state and the LED.
++
+      So the sanity gate escalates it.  The forced-reset path drives
+      both coils to their de-energized idle *before* it spins, so no
+      fault holds a coil energized for a whole watchdog period, and
+      the recovery re-runs initialization -- whose complete 12ms
+      RESET-coil actuation is what puts logical state, LED and
+      physical relay back into agreement, in the known BYPASS state.
++
+      Detection reuses each shell's existing output-state integrity
+      check, so an energized coil is simply an output-latch
+      mismatch.  PIC10F320 cannot afford that general check within
+      256 words and instead guards exactly the two coil latch bits,
+      giving it full parity on the coil guarantee while retaining its
+      documented gap for other output-latch upsets.  Only PIC12F675
       compares physical GPIO against an independent output shadow;
       the other parts do not claim universal external stuck-pin
-      detection.  PIC10F320 is correction-only for relay coil bits
-      and has no general stable-output-latch check.
+      detection.
 +
       Relay coil clears use one masked target operation.  On
       PIC12F675 this clears both coil bits in the SRAM shadow before
@@ -336,10 +347,10 @@ PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
       bit from being replayed as an intermediate physical high while
       preserving the required all-port refresh.
 +
-      This correction does not run during the complete blocking relay
-      actuation sequence, from its pre-pulse clear through its
-      post-pulse clear.  An upset in that sequence can shorten the
-      intended pulse or energize the inactive or both coils.  The
+      No gate runs during the complete blocking relay actuation
+      sequence, from its pre-pulse clear through its post-pulse
+      clear.  An upset in that sequence can shorten the intended
+      pulse or energize the inactive or both coils.  The
       characterized cases cover 1, 6 and 11ms inside the 12ms delay,
       not every instruction boundary around assertion and clearing.
       The normal epilogue commands both coil outputs low if execution
@@ -347,11 +358,15 @@ PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
       disruption, and an external output path that does not accept
       that command remain residual risks.
 +
-NOTE: This trade-off is deliberate and worth stating.  A transient
-coil upset that reaches the loop-top re-assert before a sanity check
-leaves no trace on parts that have no telemetry: it is fixed, but
-neither counted nor reported.  Faults elsewhere in the actuation
-sequence are outside that correction guarantee.
+NOTE: This trade-off is deliberate and worth stating.  A stray coil
+upset now costs an audible interruption and a return to BYPASS even
+when the pulse would not have moved the relay at all.  That price is
+accepted because the alternative -- silent correction -- depends on
+an assumption about relay mechanics that only bench characterization
+could substantiate, and its failure mode is a permanent, undetectable
+disagreement between what the player hears and what the LED shows.
+Faults inside the actuation sequence remain outside every guarantee
+above.  See `docs/relay_coil_fault_correction.md`.
 
 
 == Asymmetric Debounce Timing

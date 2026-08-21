@@ -226,12 +226,42 @@ static void hw_led_pin_set_low(void)  { LATA &= (uint8_t)~(1U << LED_PIN); }
 
 
 // sanity-check utility: return non-zero IFF the complete direction
-// configuration still matches initialization: RA0..RA2 outputs, RA3 input.
+// configuration still matches initialization (RA0..RA2 outputs, RA3 input)
+// AND, on the relay variant, neither coil latch is energized.
 // Exact TRISA subsumes the former per-variant "every required pin is still an
 // output" test, so the variant gates need no mask argument.
+//
+// RELAY COIL GUARD: this part has no room for the modular shells' complete
+// output-latch comparison, so the relay variant buys the one latch bit-pair
+// that carries a physical hazard. An unexpectedly energized coil is a FAULT --
+// a below-minimum pulse cannot be proven mechanically harmless, so the
+// firmware cannot know whether the latching relay moved -- and escalating it
+// to hw_force_wdt_reset() de-energizes both coils and lets recovery re-drive a
+// full-width BYPASS actuation. The two terms are OR-folded rather than
+// &&-chained to avoid XC8's per-term branch scaffolding in a 256-word budget,
+// and the coil read is #if'd out entirely on the CD4053 variants so those pay
+// nothing (LATA is volatile: a masked-by-zero read would still be emitted).
+// This narrows -- it does not close -- the documented PIC10F320 gap: non-coil
+// output-latch upsets still go undetected here.
 static uint8_t hw_output_pins_intact(void) {
+#if defined(OUTPUT_TQ2_RELAY)
+    uint8_t diff = (uint8_t)((uint8_t)(TRISA & 0x0FU) ^
+                             (uint8_t)(0x0FU ^ BYPASS_OUTPUT_DDR_MASK));
+
+    diff |= (uint8_t)(LATA & (uint8_t)((1U << RELAY_RESET_PIN) |
+                                       (1U << RELAY_SET_PIN)));
+
+    return (uint8_t)((0U == diff) ? 1U : 0U);
+#else
+    // Deliberately the ORIGINAL expression rather than a `diff` fold with the
+    // coil term compiled out. Both are the same comparison, but XC8 emits
+    // different instructions for them, and this is a relay-only policy: writing
+    // it this way keeps the two CD4053 images BYTE-IDENTICAL to the reviewed
+    // baseline in test/pic10f320/expected_images.sha256, so the rebaseline that
+    // ships with it names exactly one changed image.
     return ((uint8_t)(TRISA & 0x0FU) ==
             (uint8_t)(0x0FU ^ BYPASS_OUTPUT_DDR_MASK));
+#endif
 }
 
 
@@ -421,9 +451,20 @@ static void hw_set_engaged_state(void) {
 // errors (presumably ultra-rare events: cosmic rays, extreme EMI).  Disables
 // interrupts first so nothing can pet the dog.
 //
+// The FIRST act on the relay variant is set_relay_coils_low(): the coils are
+// driven to their de-energized idle BEFORE the spin, so no fault can hold a
+// coil energized for the whole ~256ms watchdog period. The reset then re-runs
+// init(), whose full-width BYPASS actuation re-synchronizes the physical relay
+// with the logical state and the LED. (The modular shells reach the same
+// operation through hw_outputs_reassert_safe(); this shell has no linked
+// output driver, hence the direct call.)
+//
 // IMPORTANT: relies on the watchdog being active (WDTE=ON in CONFIG); without
 // it this would lock up the MCU.
 __attribute__((noreturn)) static void hw_force_wdt_reset(void) {
+#if defined(OUTPUT_TQ2_RELAY)
+    set_relay_coils_low();
+#endif
     INTCONbits.GIE = 0;
     for (;;) { }
 }
@@ -612,9 +653,6 @@ void main(void) {
         // TMR2IF (no sleep)
         while (0U == PIR1bits.TMR2IF) { }
         PIR1bits.TMR2IF = 0;
-#if defined(OUTPUT_TQ2_RELAY)
-        set_relay_coils_low(); // reassert the safe idle state every serviced iteration
-#endif
 
 
 
@@ -622,6 +660,11 @@ void main(void) {
         // EMI); always checked, regardless of state; force a WDT reset on any
         // violation.
         // main-loop liveness is proven by reaching CLRWDT() below.
+        //
+        // On the relay variant hw_is_sanity_check_failed() is also the coil
+        // guard (see hw_output_pins_intact()): an unexpectedly energized coil
+        // escalates here rather than being silently re-driven low, so recovery
+        // -- not a below-minimum pulse -- decides the relay position.
         if ( (ctx_.program_state > RELEASE_DEBOUNCE_WAIT) ||
                 (ctx_.effect_state > ENGAGED) ||
                 (ctx_.debounce_counter > RELEASE_THRESH) ||

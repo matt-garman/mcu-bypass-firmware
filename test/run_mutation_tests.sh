@@ -748,7 +748,7 @@ drain_workers() {
 # Each entry: file<TAB>sed-expression<TAB>make-target<TAB>description
 # The sed expression uses '@' as delimiter to avoid clashing with C operators.
 MUTATIONS=(
-"src/bypass_mcu_avr_classic.c	s@hw_outputs_reassert_safe();@@	test-fault-inject-tq2_l2_5v_relay-attiny85	relay coil re-assert call removed from the main loop; the fault-inject coil-correction case sees the injected coil latch reset instead of self-heal"
+"src/bypass_mcu_avr_classic.c	s@hw_outputs_reassert_safe();@@	test-fault-inject-tq2_l2_5v_relay-attiny85	fail-safe coil de-energization removed from hw_force_wdt_reset(); inject_coil_resync sees the injected coil latch still driven when the escalation path spins"
 # --- core debounce algorithm (bypass_pure.c) -----------------------------------
 "src/bypass_pure.c	s@{ ++counter; }@{ --counter; }@	test-sim-cd4053_simple-attiny13a	ISR integrator: increment-on-press becomes decrement (counter never rises -> never toggles)"
 "src/bypass_pure.c	s@ctx.debounce_counter >= PRESSED_THRESH@ctx.debounce_counter > PRESSED_THRESH@	test-sim-cd4053_simple-attiny13a	press threshold off-by-one (>= becomes >); test_minimum_press_toggles catches the 1-tick divergence"
@@ -1228,24 +1228,35 @@ pic12f675_mutation_has_signature() {
             grep -Fq 'FAIL: lock-step divergence at iter ' "$log" \
                 && grep -Eq "^PIC_TARGET_RESULT format=1 device=pic12f675 lane=lockstep variant=${variant} status=fail checks=3005 failures=[1-9][0-9]*$" "$log"
             ;;
-        io:relay-minimum)
+        # NB: deliberately NOT named fault:* -- the generic fault:*) case above
+        # matches that whole prefix first and would swallow this signature.
+        #
+        # Two independent oracles now enforce the 4 ms floor on this part: the
+        # target-I/O lane's explicit minimum check, and the fault lane's
+        # measurement of the recovery actuation the F1 policy depends on
+        # (docs/relay_coil_fault_correction.md). The aggregate is fail-closed
+        # and runs fault BEFORE io, so a sub-minimum pulse is reported by the
+        # fault lane and the io lane never runs -- which is why this signature
+        # names the fault lane. The io minimum check still runs, and still
+        # passes, on every clean invocation of the aggregate.
+        resync:minimum-pulse)
             mutation_command_assignment "$command" PIC12F675_TARGET_VARIANT || return 1
             variant=$MUTATION_COMMAND_ASSIGNMENT
-            grep -Fq 'FAIL: relay pulse is shorter than the 4 ms datasheet minimum' "$log" \
-                && [ "$variant" = tq2_l2_5v_relay ] \
-                && grep -Eq '^PIC_TARGET_RESULT format=1 device=pic12f675 lane=io variant=tq2_l2_5v_relay status=fail checks=36 failures=[1-9][0-9]*$' "$log"
+            [ "$variant" = tq2_l2_5v_relay ] \
+                && grep -Eq 'FAIL: init=0x[0-9a-f]{2} write=0x[0-9a-f]{2} deenergize-cycles=[1-9][0-9]* resets=1 reset-coil-ms=[0-3]\.[0-9]{3} ' "$log" \
+                && grep -Eq "^PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=41 failures=[1-9][0-9]*$" "$log"
             ;;
         soak:wdt-reset)
             grep -Fq 'SOAK FAIL [' "$log" \
                 && grep -Fq 'unexpected WDT reset' "$log" \
                 && pic12f675_soak_result_complete fail "$command" "$log"
             ;;
-        correct:coil)
+        resync:coil)
             mutation_command_assignment "$command" PIC12F675_TARGET_VARIANT || return 1
             variant=$MUTATION_COMMAND_ASSIGNMENT
             [ "$variant" = tq2_l2_5v_relay ] \
-                && grep -Eq 'FAIL: [1-9][0-9]* resets in 2000 ms \(want exactly 0\)  \[unexpected reset path fired\]' "$log" \
-                && grep -Eq "^PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=46 failures=[1-9][0-9]*$" "$log"
+                && grep -Eq 'FAIL: init=0x[0-9a-f]{2} write=0x[0-9a-f]{2} deenergize-cycles=0 ' "$log" \
+                && grep -Eq "^PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=41 failures=[1-9][0-9]*$" "$log"
             ;;
         host:atomic-clear)
             [ "$command" = pic12f675-coverage-check-fw ] || return 1
@@ -1257,7 +1268,7 @@ pic12f675_mutation_has_signature() {
                 && grep -Fq 'relay reassert from shadow coils 06 must clear both bits' "$log" \
                 && [ "$(grep -c 'relay reassert from shadow coils .* must clear both bits' \
                     "$log" || true)" -eq 3 ] \
-                && grep -Fq 'PIC shipping-source coverage harness: 107 checks, 3 failures' "$log"
+                && grep -Fq 'PIC shipping-source coverage harness: 105 checks, 3 failures' "$log"
             ;;
         *) return 2 ;;
     esac
@@ -1281,7 +1292,7 @@ pic12f675_mutation_completed_cleanly() {
             count=$(grep -c '^PIC shipping-source coverage harness: 86 checks, 0 failures$' \
                 "$log" || true)
             [ "$count" -eq 2 ] \
-                && grep -Fq 'PIC shipping-source coverage harness: 107 checks, 0 failures' "$log" \
+                && grep -Fq 'PIC shipping-source coverage harness: 105 checks, 0 failures' "$log" \
                 && grep -Fq 'OK: all PIC shipping-source lines are covered except the documented reset path.' "$log" \
                 && grep -Fq 'PIC12F675 coverage-oracle negative probe: PASS' "$log"
             ;;
@@ -1647,7 +1658,7 @@ PIC_GPSIM_MUTATIONS=(
 # Mutants killed by the fail-closed PIC target aggregate (fault + lock-step +
 # target I/O). Each entry: file<TAB>sed-expression<TAB>variant<TAB>description.
 PIC_TARGET_MUTATIONS=(
-"src/bypass_mcu_pic10f322.c	s@hw_outputs_reassert_safe();@@	tq2_l2_5v_relay	relay coil re-assert call removed from the main loop; inject_relay_correction_case sees the injected LATA coil reset instead of self-heal"
+"src/bypass_mcu_pic10f322.c	s@hw_outputs_reassert_safe();@@	tq2_l2_5v_relay	fail-safe coil de-energization removed from hw_force_wdt_reset(); inject_relay_resync_case never observes the coils go low before the reset spin"
 "src/bypass_mcu_pic10f322.c	s@WPUA = (uint8_t)(1U << FOOTSW_PIN);@WPUA |= (uint8_t)(1U << FOOTSW_PIN);@	cd4053_simple	PIC pull-up init regressed to read-modify-write; exact WPUA state can preserve unexpected output-pin latches"
 "src/bypass_mcu_pic10f322.c	s@(uint8_t)(WPUA & 0x0FU)@(uint8_t)(WPUA \& (uint8_t)(1U << FOOTSW_PIN))@	cd4053_simple	PIC exact WPUA guard weakened to RA3-present only; extra RA0..RA2 latches go undetected"
 "src/bypass_mcu_pic10f322.c	s@(uint8_t)(0x0FU ^ BYPASS_OUTPUT_DDR_MASK));@actual_direction_mask);@	cd4053_simple	PIC exact-TRISA predicate removed: spare RA2 direction corruption evades the remaining required-subset check"
@@ -1695,8 +1706,8 @@ PIC10F320_HOST_MUTATIONS=(
 "src/bypass_mcu_pic10f320.c	s@(0U == (PORTA & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (PORTA \& (uint8_t)(1U << FOOTSW_PIN)))@	pic10f320-test-equiv	FW footswitch read polarity inverted (toggles on release, not press)"
 "src/bypass_mcu_pic10f320.c	s@hw_relay_set_pin_set_high(); // pulse set coil@hw_relay_reset_pin_set_high(); // MUTANT@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-actuation	FW relay ENGAGE pulses the RESET coil instead of SET (relay latches backwards; settles to same LATA, so equiv/gpsim miss it)"
 "src/bypass_mcu_pic10f320.c	s@hw_relay_reset_pin_set_high(); // pulse reset coil@hw_relay_set_pin_set_high(); // MUTANT@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-actuation	FW relay BYPASS pulses the SET coil instead of RESET (relay latches backwards)"
-"src/bypass_mcu_pic10f320.c	/void main(void)/,\$s@        set_relay_coils_low(); // reassert the safe idle state every serviced iteration@@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-fault-host	FW relay idle coil-low re-drive removed; host latch injections remain energized after the next serviced iteration"
-"src/bypass_mcu_pic10f320.c	/void main(void)/,\$s@        set_relay_coils_low(); // reassert the safe idle state every serviced iteration@        hw_relay_reset_pin_set_low(); // MUTANT: clear RESET only@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-fault-host	FW relay idle re-drive clears RESET only; an injected SET coil remains energized"
+"src/bypass_mcu_pic10f320.c	/hw_force_wdt_reset(void)/,/^}/s@    set_relay_coils_low();@@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-fault-host	FW fail-safe coil de-energization removed from hw_force_wdt_reset(); host latch injections are still energized where the reset spin is abandoned"
+"src/bypass_mcu_pic10f320.c	s@    diff |= (uint8_t)(LATA & (uint8_t)((1U << RELAY_RESET_PIN) |@    diff |= (uint8_t)(LATA \& (uint8_t)((0U \& RELAY_RESET_PIN) |@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-fault-host	FW relay coil guard weakened to the SET bit only; an injected RESET coil no longer escalates"
 "src/bypass_mcu_pic10f320.c	s@#  define CD4053_MUTE_DELAY_MS (5U)@#  define CD4053_MUTE_DELAY_MS (0U)@	PIC10F320_VARIANT=cd4053_with_mute pic10f320-test-actuation	FW cd4053_with_mute pre-switch mute window defeated (5->0 ms): audible click on every switch"
 "src/bypass_mcu_pic10f320.c	s@#  define CD4053_CTL1     (1U) // RA1@#  define CD4053_CTL1     (2U) // MUTANT@;s@#  define CD4053_CTL2     (2U) // RA2@#  define CD4053_CTL2     (1U) // MUTANT@	PIC10F320_VARIANT=cd4053_with_mute pic10f320-test-actuation	FW cd4053_with_mute CTL1/CTL2 pins swapped (mute applied to wrong control; mid-mute LATA pattern wrong, settles to same LATA so equiv/gpsim miss it)"
 "src/bypass_mcu_pic10f320.c	s@    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@    hw_x4053_ctl1_low(); // MUTANT: reassert ENGAGED at startup\\n    hw_x4053_ctl2_low();\\n\\n    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@	PIC10F320_VARIANT=cd4053_with_mute pic10f320-test-actuation	FW cd4053_with_mute startup reasserts ENGAGED before MUTE, traversing INVALID/ENGAGED routing instead of remaining continuously in BYPASS"
@@ -1711,8 +1722,8 @@ PIC10F320_TOOL_MUTATIONS=(
 "src/bypass_mcu_pic10f320.c	s@    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@    hw_x4053_ctl1_low(); // MUTANT: reassert ENGAGED at startup\n    hw_x4053_ctl2_low();\n\n    hw_x4053_ctl1_high(); // ENGAGED -> MUTE@	PIC10F320_VARIANT=cd4053_with_mute PIC10F320_TARGET_VARIANT=cd4053_with_mute pic10f320-test-target	TARGET mute startup reasserts ENGAGED before MUTE; physical startup transition trace catches it"
 "src/bypass_mcu_pic10f320.c	s@#  define CD4053_MUTE_DELAY_MS (5U)@#  define CD4053_MUTE_DELAY_MS (1U)@	PIC10F320_VARIANT=cd4053_with_mute PIC10F320_TARGET_VARIANT=cd4053_with_mute pic10f320-test-target	TARGET mute window shortened below 5ms; cycle-exact target I/O timing catches it"
 "src/bypass_mcu_pic10f320.c	s@#  define TQ2_L2_5V_PULSE_MS (12U)@#  define TQ2_L2_5V_PULSE_MS (1U)@	PIC10F320_VARIANT=tq2_l2_5v_relay PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay pic10f320-test-target	TARGET relay pulse shortened below the 4ms datasheet minimum; cycle-exact target I/O timing catches it"
-"src/bypass_mcu_pic10f320.c	/void main(void)/,\$s@        set_relay_coils_low(); // reassert the safe idle state every serviced iteration@@	PIC10F320_VARIANT=tq2_l2_5v_relay PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay pic10f320-test-target	TARGET relay idle coil-low re-drive removed; physical PORTA injections remain energized past the next serviced iteration"
-"src/bypass_mcu_pic10f320.c	/void main(void)/,\$s@        set_relay_coils_low(); // reassert the safe idle state every serviced iteration@        hw_relay_set_pin_set_low(); // MUTANT: clear SET only@	PIC10F320_VARIANT=tq2_l2_5v_relay PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay pic10f320-test-target	TARGET relay idle re-drive clears SET only; an injected RESET coil remains physically energized"
+"src/bypass_mcu_pic10f320.c	/hw_force_wdt_reset(void)/,/^}/s@    set_relay_coils_low();@@	PIC10F320_VARIANT=tq2_l2_5v_relay PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay pic10f320-test-target	TARGET fail-safe coil de-energization removed from hw_force_wdt_reset(); the real image spins out its watchdog with modeled PORTA still energized, so the resync cases never see the coils go low"
+"src/bypass_mcu_pic10f320.c	s@(1U << RELAY_SET_PIN)));@(0U \& RELAY_SET_PIN)));@	PIC10F320_VARIANT=tq2_l2_5v_relay PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay pic10f320-test-target	TARGET relay coil guard weakened to the RESET bit only; an injected SET coil no longer escalates (mirror of the host-lane mutant that drops the RESET bit)"
 "src/bypass_mcu_pic10f320.c	/void main(void)/,\$s@CLRWDT();@(void)0; /* MUTANT: no main-loop WDT pet */@	PIC10F320_VARIANT=cd4053_simple PIC10F320_SOAK_DURATION_MS=$PIC_SOAK_MUT_MS PIC10F320_SOAK_LIVENESS_INTERVAL_MS=$PIC_SOAK_MUT_MS pic10f320-test-soak	SOAK main-loop WDT pet removed; reset notifier catches the un-pet watchdog within the short mutation window"
 )
 
@@ -1746,7 +1757,7 @@ PIC_SOAK_MUTATIONS=(
 # The signature names positive oracle output required before a failed checker can
 # earn kill credit. Compile failures and unrelated nonzero exits are errors.
 PIC12F675_MUTATIONS=(
-"src/bypass_mcu_pic12f675.c	s@hw_outputs_reassert_safe();@@	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	correct:coil	FW relay coil re-assert call removed; the correct-in-place fault cases (expected_resets=0) reset instead of self-healing, failing the relay fault lane at checks=46"
+"src/bypass_mcu_pic12f675.c	s@hw_outputs_reassert_safe();@@	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	resync:coil	FW fail-safe coil de-energization removed from hw_force_wdt_reset(); the relay resynchronization cases never observe the coils go low before the reset spin, failing the relay fault lane at checks=41"
 "src/bypass_mcu_pic12f675.c	s@(shadow_high_mask == expected_high_mask) &&@((shadow_high_mask == expected_high_mask) || (shadow_high_mask != expected_high_mask)) \&\&@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:shadow.expected	TARGET shadow-versus-expected guard tautologized while retaining both operands; the shadow.expected fault (shadow+port driven high, ctx_ untouched) isolates this clause F2-blind, so only it catches the reset"
 "src/bypass_mcu_pic12f675.c	s@gpio_shadow_ |= (uint8_t)(1U << LED_PIN);@gpio_shadow_ \&= (uint8_t)~(1U << LED_PIN);@	pic12f675-test-gpsim	gpsim:press-led	FW set_engaged LED inverted at the shadow (GP0 stays dark); the PRESS1 toggle-on-press assertion catches it"
 "src/bypass_mcu_pic12f675.c	s@(0U == (GPIO & (uint8_t)(1U << FOOTSW_PIN)))@(0U != (GPIO \& (uint8_t)(1U << FOOTSW_PIN)))@	pic12f675-test-gpsim	gpsim:press-led	FW footswitch read polarity inverted (GP5 sense flipped -> toggles on release); PRESS1 toggle-on-press checkpoint catches it"
@@ -1765,7 +1776,7 @@ PIC12F675_MUTATIONS=(
 "src/bypass_mcu_pic12f675.c	s@        next_ctx.program_state = res.program_state;@        (void)res.program_state; /* MUTANT: program-state write-back dropped */@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET program_state write-back dropped: the context never enters release lockout and lock-step diverges from the pure model"
 "src/bypass_mcu_pic12f675.c	s@        next_ctx.effect_state  = res.effect_state;@@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET effect_state write-back dropped: the pins still follow res, so only the ctx_ lock-step against the pure model diverges"
 "src/bypass_mcu_pic12f675.c	s@            next_ctx.debounce_counter = res.lockout_value;@            (void)res.lockout_value; /* MUTANT: lockout reload dropped */@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET debounce lockout write-back dropped: the context retains its integrated threshold instead of RELEASE_THRESH and lock-step diverges"
-"src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	io:relay-minimum	TARGET relay coil pulse shortened below the datasheet minimum; the target-I/O pulse-width check catches it on this part's 1.024 ms tick as it does on the 322's 1.000 ms one"
+"src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	resync:minimum-pulse	TARGET relay coil pulse shortened below the datasheet minimum; the fail-safe recovery actuation is then too short to resynchronize the relay, so the fault lane reports it before the target-I/O minimum check gets to run"
 "src/bypass_mcu_pic12f675.c	s@static void hw_wdt_pet(void) { CLRWDT(); }@static void hw_wdt_pet(void) { (void)0; /* MUTANT: no WDT pet */ }@	PIC12F675_SOAK_VARIANT=cd4053_simple PIC12F675_SOAK_DURATION_MS=$PIC_SOAK_MUT_MS PIC12F675_SOAK_LIVENESS_INTERVAL_MS=$PIC_SOAK_MUT_LIVENESS_MS PIC12F675_SOAK_COMBINATION_NAME=mutation-wdt pic12f675-test-soak	soak:wdt-reset	SOAK main-loop WDT pet removed; the soak's reset notifier catches the un-pet watchdog inside the short mutation window (this part's period is ~288 ms, well inside it)"
 # F2 context-SEU: delete the polled shadow clause; killed by the fault leg.
 "src/bypass_mcu_pic12f675.c	s@(ctx_check_ != debounce_ctx_check_word(next_ctx)) ||@(0U != 0U) ||@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:ctx.debounce.inrange	PIC12F675 F2 shadow clause deleted from the polled sanity gate; the in-range debounce SEU is no longer caught and the target fault leg ctx.debounce.inrange case sees 0 resets at checks=38."
@@ -1788,7 +1799,7 @@ PIC12F675_MUTATIONS=(
 #
 # Each entry: file<TAB>sed-expression<TAB>make-args<TAB>description.
 XT_MUTATIONS=(
-"src/bypass_mcu_avr_xt.c	s@hw_outputs_reassert_safe();@@	XT_SIM_VARIANT=tq2_l2_5v_relay attiny202-fault	relay coil re-assert call removed from the main loop; the CORRECT fault mechanism sees PA2/PA3 reset instead of self-heal"
+"src/bypass_mcu_avr_xt.c	s@hw_outputs_reassert_safe();@@	XT_SIM_VARIANT=tq2_l2_5v_relay attiny202-fault	fail-safe coil de-energization removed from hw_force_wdt_reset(); the RESYNC fault mechanism sees PA2/PA3 still driven when the gate forces the reset"
 "src/bypass_output_tq2_l2_5v_relay.c	/void hw_outputs_reassert_safe/,/^}/s@    set_relay_coils_low();@@	XT_SIM_VARIANT=tq2_l2_5v_relay attiny202-fault	relay coil-clear removed from hw_outputs_reassert_safe (the op becomes a no-op); the CORRECT fault mechanism sees the coil stay energized and reset"
 # -- observable behaviour: killed by the functional + output-trace driver ------
 "src/bypass_mcu_avr_xt.c	s@void hw_led_pin_set_high(void) { PORTA.OUTSET = (uint8_t)(1U << LED_PIN); }@void hw_led_pin_set_high(void) { PORTA.OUTCLR = (uint8_t)(1U << LED_PIN); }@	XT_SIM_VARIANT=cd4053_simple attiny202-sim	XT set_engaged LED inverted (OUTSET becomes OUTCLR; PA1 never lights); toggle assertions catch it"
@@ -2340,15 +2351,15 @@ EOF
         exit 1
     }
     printf '%s\n' \
-        '  inject GPIO.GP1           @0x005: 0x20 -> 0x22  (fixture)' \
-        '    FAIL: 1 resets in 2000 ms (want exactly 0)  [unexpected reset path fired]' \
-        'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=46 failures=1' \
+        '  inject relay coils    @0x005: 0x20 -> 0x22  (fixture, from BYPASS)' \
+        '    FAIL: init=0x20 write=0x22 deenergize-cycles=0 resets=1 reset-coil-ms=11.312 set-coil-ms=0.000 final-gpio=0x20 clean=1' \
+        'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=41 failures=1' \
         > "$signature_log"
-    pic12f675_classify_checker_result 2 correct:coil \
+    pic12f675_classify_checker_result 2 resync:coil \
         'PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target' \
         "$signature_log"
     [ "$PIC12F675_CHECKER_OUTCOME" = killed ] || {
-        echo "ERROR: PIC12F675 correct:coil behavioral failure was not classified as killed" >&2
+        echo "ERROR: PIC12F675 resync:coil behavioral failure was not classified as killed" >&2
         exit 1
     }
     printf '%s\n' \
@@ -2357,7 +2368,7 @@ EOF
         'FAIL fixture: relay reassert from shadow coils 02 must clear both bits' \
         'FAIL fixture: relay reassert from shadow coils 04 must clear both bits' \
         'FAIL fixture: relay reassert from shadow coils 06 must clear both bits' \
-        'PIC shipping-source coverage harness: 107 checks, 3 failures' \
+        'PIC shipping-source coverage harness: 105 checks, 3 failures' \
         > "$signature_log"
     pic12f675_classify_checker_result 2 host:atomic-clear \
         pic12f675-coverage-check-fw "$signature_log"
@@ -2370,7 +2381,7 @@ EOF
         'PIC shipping-source coverage harness: 86 checks, 0 failures' \
         'FAIL fixture: relay reassert from shadow coils 02 must clear both bits' \
         'FAIL fixture: relay reassert from shadow coils 04 must clear both bits' \
-        'PIC shipping-source coverage harness: 107 checks, 3 failures' \
+        'PIC shipping-source coverage harness: 105 checks, 3 failures' \
         > "$signature_log"
     pic12f675_classify_checker_result 2 host:atomic-clear \
         pic12f675-coverage-check-fw "$signature_log"
@@ -2390,7 +2401,7 @@ EOF
     printf '%s\n' \
         'PIC shipping-source coverage harness: 86 checks, 0 failures' \
         'PIC shipping-source coverage harness: 86 checks, 0 failures' \
-        'PIC shipping-source coverage harness: 107 checks, 0 failures' \
+        'PIC shipping-source coverage harness: 105 checks, 0 failures' \
         'OK: all PIC shipping-source lines are covered except the documented reset path.' \
         'PIC12F675 coverage-oracle negative probe: PASS (source line 631)' \
         > "$signature_log"
@@ -2440,14 +2451,30 @@ EOF
         exit 1
     }
     printf '%s\n' \
-        'FAIL: relay pulse is shorter than the 4 ms datasheet minimum' \
-        'PIC_TARGET_RESULT format=1 device=pic12f675 lane=io variant=tq2_l2_5v_relay status=fail checks=36 failures=1' \
+        '  inject relay coils    @0x005: 0x20 -> 0x22  (fixture, from BYPASS)' \
+        '    FAIL: init=0x20 write=0x22 deenergize-cycles=826 resets=1 reset-coil-ms=0.960 set-coil-ms=0.000 final-gpio=0x20 clean=1' \
+        'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=41 failures=1' \
         > "$signature_log"
-    pic12f675_classify_checker_result 1 io:relay-minimum \
+    pic12f675_classify_checker_result 1 resync:minimum-pulse \
         'PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target' \
         "$signature_log"
     [ "$PIC12F675_CHECKER_OUTCOME" = killed ] || {
-        echo "ERROR: PIC12F675 target-I/O signature was not classified as killed" >&2
+        echo "ERROR: PIC12F675 relay-minimum signature was not classified as killed" >&2
+        exit 1
+    }
+    # A recovery pulse that still clears the 4 ms floor must NOT satisfy this
+    # signature: the regex is what separates "too short to resynchronize" from
+    # any other fault-lane failure.
+    printf '%s\n' \
+        '  inject relay coils    @0x005: 0x20 -> 0x22  (fixture, from BYPASS)' \
+        '    FAIL: init=0x20 write=0x22 deenergize-cycles=826 resets=1 reset-coil-ms=11.312 set-coil-ms=0.000 final-gpio=0x20 clean=1' \
+        'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=41 failures=1' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 1 resync:minimum-pulse \
+        'PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target' \
+        "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = checker-error ] || {
+        echo "ERROR: an above-minimum recovery pulse satisfied the relay-minimum signature" >&2
         exit 1
     }
     printf '%s\n' \
@@ -2669,7 +2696,7 @@ EOF
         signature=${MUTATION_RECORD_FIELDS[3]}
         case "$signature" in
             fault:*|gpsim:press-led|gpsim:press-early|lockstep:divergence|\
-            io:relay-minimum|soak:wdt-reset|correct:coil) ;;
+            resync:minimum-pulse|soak:wdt-reset|resync:coil) ;;
             *) echo "ERROR: PIC12F675 mutation has an unknown signature: $signature" >&2
                exit 1 ;;
         esac

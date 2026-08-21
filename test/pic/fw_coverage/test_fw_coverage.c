@@ -238,35 +238,36 @@ static void expect_no_reset(fw_inject_t inj, const char *what) {
 }
 
 #if defined(TQ2_L2_5V_RELAY)
-// Settled-state relay faults are corrected in place instead of resetting: these
-// injections occur after actuation, and the next serviced tick re-asserts both
-// coils low before the sanity gate (F1; docs/relay_coil_fault_correction.md).
+// A relay coil found energized is a FAULT, not something to clear quietly: a
+// pulse below the TQ2-L2-5V 4 ms minimum is not proven mechanically harmless,
+// so the firmware cannot know whether the latching relay moved (F1;
+// docs/relay_coil_fault_correction.md). The gate escalates it like any other
+// output-state mismatch, and hw_force_wdt_reset() de-energizes both coils
+// before it spins.
 //
-// "No reset" on its own would be a weak assertion -- an injection that silently
-// failed to apply would satisfy it too -- so also require the outputs to be
-// settled low afterwards, which is the correction itself.  The teeth on the
-// other side are already in test_predicates(): that same latch/port state DOES
-// trip fwp_sanity_failed(), so the loop survives here only because the
-// re-assert ran first.
+// "Forced a reset" on its own would not distinguish this from any other guarded
+// fault, so the second assertion is the one that is coil-specific: after the
+// run, every output must be settled LOW. That is the de-energization, observed
+// on the shipping source. It is deliberately NOT called recovery -- final-low
+// coils are not resynchronization. The gpsim lanes
+// (test/pic/test_fault_pic.cc, test/pic/test_fault_pic12f675.cc) measure the
+// recovery's full-width RESET-coil actuation on the real image, and nothing in
+// any simulator speaks to relay mechanics.
 //
-// Nor can a dead injection hide here: apply_injection()'s arms are not
+// A dead injection cannot hide here: apply_injection()'s arms are not
 // variant-conditional, and the two CD4053 variants -- run from this same gate
-// invocation -- still expect_reset() on these very injection codes, so an arm
-// that stopped applying fails there.
-//
-// This is the host-gcov mirror of the expected_resets=0 cases in the gpsim
-// lanes (test/pic/test_fault_pic.cc, test/pic/test_fault_pic12f675.cc).
+// invocation -- expect_reset() on these very injection codes.
 #if defined(BYPASS_MCU_PIC12F675)
 #define FW_OUTPUT_REQUIRED_MASK 0x17u // GP0|GP1|GP2|GP4
 #else
 #define FW_OUTPUT_REQUIRED_MASK 0x07u // RA0|RA1|RA2
 #endif
 
-static void expect_corrected(fw_inject_t inj, const char *what) {
+static void expect_coil_fault_escalates(fw_inject_t inj, const char *what) {
     int r = fw_fault_run(inj);
-    CHECK(r == 0, "%s must be corrected in place, not reset (got %d)", what, r);
+    CHECK(r == 1, "%s must force the fail-safe reset (got %d)", what, r);
     CHECK(fwp_output_state_intact(FW_OUTPUT_REQUIRED_MASK, 0x00u) != 0,
-          "%s must leave the outputs settled low after correction", what);
+          "%s must leave both coils de-energized before the reset spin", what);
 }
 #endif
 
@@ -295,32 +296,26 @@ static void test_faults(void) {
     expect_reset(FWI_GP2_PIN_TO_INPUT, "GP2 direction fault");
     expect_reset(FWI_GP4_PIN_TO_INPUT, "parked GP4 direction fault");
     expect_reset(FWI_GP5_PIN_TO_OUTPUT, "GP5 direction fault");
-#if defined(TQ2_L2_5V_RELAY)
-    // Settled-state case: GP1/GP2 are the coils. This part has no LATx, so the
-    // re-assert writes the WHOLE shadow to GPIO: it clears the coil bits and
-    // refreshes every modeled output. At this deterministic pre-gate seam, a
-    // one-shot coil-shadow or GPIO-readback upset is rewritten; a non-coil shadow
-    // (intent) upset still resets. The actuation sequence is characterized
-    // separately below.
+    // Nothing re-drives the port ahead of the gate on any variant, so every
+    // modeled output injection at this pre-gate seam resets -- which is also
+    // what makes this part's port-follows-shadow clause load-bearing at the
+    // settled seam instead of pre-empted by a refresh. On the relay variant the
+    // two coil bits additionally have to be de-energized before the spin; the
+    // blocking actuation window is characterized separately below.
     expect_reset(FWI_SHADOW_GP0_HIGH, "GP0 LED shadow (intent) fault");
-    expect_corrected(FWI_SHADOW_GP1_HIGH, "GP1 RESET-coil shadow fault");
-    expect_corrected(FWI_SHADOW_GP2_HIGH, "GP2 SET-coil shadow fault");
     expect_reset(FWI_SHADOW_GP4_HIGH, "parked GP4 shadow (intent) fault");
-    expect_corrected(FWI_GPIO_GP0_HIGH, "physical GP0 divergence");
-    expect_corrected(FWI_GPIO_GP1_HIGH, "physical GP1 divergence");
-    expect_corrected(FWI_GPIO_GP2_HIGH, "physical GP2 divergence");
-    expect_corrected(FWI_GPIO_GP4_HIGH, "physical GP4 divergence");
+    expect_reset(FWI_GPIO_GP0_HIGH, "physical GP0 divergence");
+    expect_reset(FWI_GPIO_GP4_HIGH, "physical GP4 divergence");
+#if defined(TQ2_L2_5V_RELAY)
+    expect_coil_fault_escalates(FWI_SHADOW_GP1_HIGH, "GP1 RESET-coil shadow fault");
+    expect_coil_fault_escalates(FWI_SHADOW_GP2_HIGH, "GP2 SET-coil shadow fault");
+    expect_coil_fault_escalates(FWI_GPIO_GP1_HIGH, "physical GP1 coil divergence");
+    expect_coil_fault_escalates(FWI_GPIO_GP2_HIGH, "physical GP2 coil divergence");
 #else
-    // hw_outputs_reassert_safe() is a no-op here, so every modeled output
-    // injection at this pre-gate seam resets.
-    expect_reset(FWI_SHADOW_GP0_HIGH, "GP0 shadow-latch fault");
     expect_reset(FWI_SHADOW_GP1_HIGH, "GP1 shadow-latch fault");
     expect_reset(FWI_SHADOW_GP2_HIGH, "GP2 shadow-latch fault");
-    expect_reset(FWI_SHADOW_GP4_HIGH, "parked GP4 shadow-latch fault");
-    expect_reset(FWI_GPIO_GP0_HIGH, "physical GP0 divergence");
     expect_reset(FWI_GPIO_GP1_HIGH, "physical GP1 divergence");
     expect_reset(FWI_GPIO_GP2_HIGH, "physical GP2 divergence");
-    expect_reset(FWI_GPIO_GP4_HIGH, "physical GP4 divergence");
 #endif
     expect_reset(FWI_OPTION_REG_SKEW, "OPTION_REG configuration fault");
     expect_reset(FWI_CMCON_SKEW, "comparator configuration fault");
@@ -350,14 +345,11 @@ static void test_faults(void) {
     // RA0 is the LED on every variant: this pre-gate intent injection resets.
     expect_reset(FWI_LATA_RA0_HIGH, "RA0 output-latch fault");
 #if defined(TQ2_L2_5V_RELAY)
-    // RA1/RA2 are the coils.  This part keeps a LATx latch and never rewrites
-    // the whole port, so correction is coil-only -- the RA0 case above still
-    // resets, and there are no port-only injections to correct.
-    expect_corrected(FWI_LATA_RA1_HIGH, "RA1 RESET-coil latch fault");
-    expect_corrected(FWI_LATA_RA2_HIGH, "RA2 SET-coil latch fault");
+    // RA1/RA2 are the coils: the same reset every other latch bit gets, plus the
+    // de-energization that has to happen before the spin.
+    expect_coil_fault_escalates(FWI_LATA_RA1_HIGH, "RA1 RESET-coil latch fault");
+    expect_coil_fault_escalates(FWI_LATA_RA2_HIGH, "RA2 SET-coil latch fault");
 #else
-    // hw_outputs_reassert_safe() is a no-op here, so every modeled output
-    // injection at this pre-gate seam resets.
     expect_reset(FWI_LATA_RA1_HIGH, "RA1 output-latch fault");
     expect_reset(FWI_LATA_RA2_HIGH, "RA2 output-latch fault");
 #endif
@@ -399,6 +391,14 @@ static void test_happy_path(void) {
 }
 
 #if defined(TQ2_L2_5V_RELAY)
+// The EXCLUDED window, characterized rather than guarded. Between the shared
+// driver's pre-pulse clear and its post-pulse clear -- the 12 ms blocking
+// actuation included -- no sanity gate runs, so an upset arriving there is not
+// escalated and not corrected. These cases record what the shipping driver
+// actually does across that window; they are residual-risk evidence, not a
+// claim that an external output accepts the write or that the relay cannot
+// move. They do not cover the instruction boundaries between the pre-clear,
+// the coil assertion, the delay, and the post-clear.
 static void test_relay_pulse_fault_window(void) {
     static const uint8_t offsets_ms[] = { 1u, 6u, 11u };
     size_t i;
@@ -463,6 +463,13 @@ static void test_relay_pulse_fault_window(void) {
 }
 
 #if defined(BYPASS_MCU_PIC12F675)
+// hw_outputs_reassert_safe() now runs on the escalation path rather than at
+// loop top, but WHAT it must do is unchanged and is unique to this part: with
+// no LATx, two sequential single-pin clears could replay the other coil's
+// corrupt shadow bit onto the physical port between them. One masked clear --
+// both shadow bits down, then exactly one whole-port write -- is the only
+// ordering that cannot. A mutation restoring the sequential form is killed
+// here.
 static void test_relay_reassert_atomic_clear(void) {
     static const uint8_t initial_coils[] = {
         (uint8_t)(1u << RELAY_RESET_PIN),
@@ -509,24 +516,27 @@ static void test_pure_fault_path(void) {
 }
 
 // The total assertion count is pinned so a variant that silently stops running
-// a case cannot pass.  Reset cases assert once; each correct-in-place case
-// asserts twice (no reset, plus outputs settled low), so the relay variant adds
-// exactly one check per corrected case -- the 2 coil-latch cases on the
-// PIC10F322, and on the PIC12F675 the 2 coil-shadow cases plus all 4
-// physical-port cases that the whole-port refresh heals.  Expressed as
-// base + count rather than a fresh magic number, so the delta stays tied to the
-// cases above. The relay variant also adds the 12-case active-pulse
+// a case cannot pass.  Reset cases assert once; each coil-escalation case
+// asserts twice (forced reset, plus outputs settled low -- the de-energization),
+// so the relay variant adds exactly one check per coil case: the 2 coil-latch
+// cases on the PIC10F322, and on the PIC12F675 the 2 coil-shadow plus 2
+// coil-port cases.  Expressed as base + count rather than a fresh magic number,
+// so the delta stays tied to the cases above. The relay variant also adds the 12-case active-pulse
 // characterization matrix. The base includes one post-check persisted-context
 // transaction case on every variant. Mirrors PIC_FAULT_EXPECTED_CHECKS in the
 // gpsim fault adapters apart from the host-only transaction and pulse probes.
 #if defined(BYPASS_MCU_PIC12F675)
 #define FW_DEVICE_NAME     "PIC12F675"
 #define FW_BASE_CHECKS     86
-#define FW_CORRECTED_CASES 6
+// Coil-escalation cases spend a SECOND check on the de-energization assertion;
+// every other injection contributes exactly one. Four here (both coils in both
+// the shadow and modeled-GPIO views), two on the PIC10F322, which has a real
+// latch and therefore no port-only injections.
+#define FW_COIL_ESCALATION_CASES 4
 #else
 #define FW_DEVICE_NAME     "PIC10F322"
 #define FW_BASE_CHECKS     53
-#define FW_CORRECTED_CASES 2
+#define FW_COIL_ESCALATION_CASES 2
 #endif
 #if defined(TQ2_L2_5V_RELAY)
 #define FW_RELAY_PULSE_CASES 12
@@ -536,7 +546,7 @@ static void test_pure_fault_path(void) {
 #define FW_RELAY_REASSERT_CASES 0
 #endif
 #define FW_EXPECTED_CHECKS \
-    (FW_BASE_CHECKS + FW_CORRECTED_CASES + FW_RELAY_PULSE_CASES + \
+    (FW_BASE_CHECKS + FW_COIL_ESCALATION_CASES + FW_RELAY_PULSE_CASES + \
      FW_RELAY_REASSERT_CASES)
 #else
 #define FW_EXPECTED_CHECKS FW_BASE_CHECKS

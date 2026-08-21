@@ -414,9 +414,10 @@ the PIC12F675 target -- yet both are reachable only through the standalone
 `pic10f322-test` and `pic12f675-test` aggregates, which sit outside `make test`
 because their *other* lanes do need those tools.
 
-The cost of that arrangement was paid on 2026-08-20. F1 taught both gpsim fault
-adapters that a settled-state relay coil upset is corrected in place rather than
-reset, and F2 added the context-check clause; neither updated
+The cost of that arrangement was paid on 2026-08-20. F1 (then still the
+correct-in-place model) taught both gpsim fault adapters that a settled-state
+relay coil upset is corrected rather than reset, and F2 added the context-check
+clause; neither updated
 `test/pic/fw_coverage/`. The
 host harness went on demanding a reset (2 failures on the PIC10F322, 6 on the
 PIC12F675); the gate never compiled with `BYPASS_CTX_CHECK`, so it was not
@@ -451,7 +452,8 @@ question, deliberately not folded in here.
 Acceptance test: on a host with no XC8, no DFP and no gpsim, `make test` runs
 both gates and reports their check counts and coverage lines; in a scratch tree,
 removing `hw_outputs_reassert_safe()` from a relay shell turns `make test` red
-naming the settled-state corrected-in-place cases; `pic10f322-test` and
+naming the coil-escalation cases that no longer see the coils de-energized;
+`pic10f322-test` and
 `pic12f675-test` still run the gates standalone.
 
 Dependencies: none. Effort: 30-45 minutes, most of it confirming a clean run on

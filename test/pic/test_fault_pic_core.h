@@ -10,9 +10,10 @@
 // simulator logic.
 //
 // This test links libgpsim, drives a real built HEX, and corrupts a selected
-// location at runtime (an SEU/EMI single-event-upset model). Each adapter pins
-// the required response: watchdog recovery for guarded faults, or no-reset
-// correction for reviewed settled relay-coil cases.
+// location at runtime (an SEU/EMI single-event-upset model). Every guarded
+// fault -- relay coils included -- requires watchdog recovery; the relay cases
+// additionally require the two halves of the F1 fail-safe contract
+// (de-energization, then a complete resynchronizing actuation).
 //
 // COMMON COVERAGE (the register sets are the family matrix's to name; this core
 // only sequences them):
@@ -25,25 +26,27 @@
 //                         are the only injections still written out below)
 // The output-latch policy is the per-PART hook, and the three consumers show
 // why it has to be: PIC10F322 injects its latch bits because that firmware
-// guards the settled latch; PIC10F320 deliberately omits that general guard for
-// flash budget and its relay adapter instead injects coil latch bits and requires
-// modeled PORTA to follow their idle safe-state rewrite within one serviced
-// iteration, without a reset; and PIC12F675 has no latch REGISTER
-// at all, so it injects into the SRAM shadow that serves as one and into modeled
-// GPIO/readback state, which the gate requires to follow it. The literal
-// per-part expected counts ensure a missing case cannot silently reduce any lane.
+// guards the complete settled latch; PIC10F320 deliberately omits that general
+// guard for flash budget and guards only the two coil latch bits its relay
+// variant cannot afford to lose; and PIC12F675 has no latch REGISTER at all, so
+// it injects into the SRAM shadow that serves as one and into modeled
+// GPIO/readback state, which the gate requires to follow it. What is now COMMON
+// across all three is the response: an energized coil resets. The literal
+// per-part expected counts ensure a missing case cannot silently reduce any
+// lane.
 //
 // CTX_ADDR is required. The Makefile extracts _ctx_'s data address from the XC8
 // .sym so the test self-adjusts per variant and cannot pass with SRAM cases
 // silently omitted.
 //
 // WHY RESET-PRODUCING CASES MIRROR THE SOAK (test/pic/test_soak_pic.cc): when
-// the per-tick gate sees a guarded fault it calls hw_force_wdt_reset(), clears
-// GIE and spins in for(;;){} -- it simply STOPS petting the dog, so the fault
-// surfaces as a WDT reset that re-vectors to 0x000. That is the identical event
-// the soak's ResetNotifier detects, except the soak treats a reset as failure
-// while these cases require exactly one. Relay correction cases run before the
-// gate and deliberately take the separate zero-reset path.
+// the per-tick gate sees a guarded fault it calls hw_force_wdt_reset(), which
+// de-energizes the relay coils, clears GIE and spins in for(;;){} -- it simply
+// STOPS petting the dog, so the fault surfaces as a WDT reset that re-vectors
+// to 0x000. That is the identical event the soak's ResetNotifier detects,
+// except the soak treats a reset as failure while these cases require exactly
+// one. Relay cases require that same single reset and additionally measure the
+// recovery actuation (inject_relay_resync_case).
 //
 // SCENARIO (`inject_case()` reset and correction cases):
 //   1. Hold the footswitch RELEASED so the device is quiescent -- the debounce
@@ -52,21 +55,23 @@
 //   2. Snapshot the cumulative reset count.
 //   3. put_value() a corrupt value into the selected location (an SEU bit-flip).
 //   4. Run one WDT window.
-//   5. Assert the adapter's exact reset delta: one for reset-producing faults or
-//      zero for deliberate correction cases. "Exactly one" -- not ">=1" -- also
+//   5. Assert the adapter's exact reset delta: one for guarded locations, zero
+//      for a deliberate NEGATIVE control at a location the part documents as
+//      unguarded (PIC10F320's LED latch). "Exactly one" -- not ">=1" -- also
 //      catches a reset-LOOP (the only gpsim-modeling risk; see the WDTCON note
 //      below), which would otherwise pass silently.
-// `inject_relay_correction_case()` instead stops after exactly one serviced
-// iteration and checks latch plus modeled-port correction directly.
+// `inject_relay_resync_case()` asserts the same single reset, but brackets it:
+// both coils low BEFORE the spin, and a full-width RESET-coil pulse AFTER the
+// recovery, from either a settled BYPASS or a settled ENGAGED start.
 //
 // A no-injection CONTROL case runs first and asserts delta == 0: a quiescent
 // device must NOT reset in a full window, proving the window is not catching
 // phantom resets and the gate does not fire spuriously.
 //
-// The matrix chooses reset versus correction. Exact direction/output checks
-// bring each spare output inside the guarded policy, including PIC12F675 GP4 and
-// its non-isomorphic ANSEL.ANS3 mapping; relay coil and modeled-port cases are
-// the explicit zero-reset exceptions.
+// The matrix chooses which cases are plain reset cases and which are relay
+// resynchronization cases. Exact direction/output checks bring each spare output
+// inside the guarded policy, including PIC12F675 GP4 and its non-isomorphic
+// ANSEL.ANS3 mapping.
 //
 // CORRUPTION VALUES are chosen so the main loop keeps running and the GATE is
 // the sole reset path. That confound analysis is per-register and therefore
@@ -204,6 +209,32 @@
 // Safety cap: max run() resumes to cover one ms. A genuinely wedged core (PC
 // stuck, never reaching the cycle break) trips this instead of hanging forever.
 #define MAX_RESUMES_PER_MS 64
+// ---- Relay resynchronization case (see inject_relay_resync_case) ------------
+// Budget for the escalation path to drive both coils low: the gate that detects
+// the injected coil runs at the next tick (1 ms, 1.024 ms on PIC12F675) and
+// hw_force_wdt_reset() de-energizes before its spin, so 3 ms is one tick plus
+// generous slack -- and short enough that a mutant which only clears the coils
+// on the NEXT loop top (i.e. never, since the spin never returns) fails.
+#define RESYNC_DEENERGIZE_MS 3u
+// Window over which the recovery actuation is observed, comfortably wider than
+// the 12 ms TQ2_L2_5V_PULSE_MS it must contain.
+#define RESYNC_OBSERVE_MS 30u
+// Sampling interval for that observation. 16 instruction cycles is 32 us at
+// 2 MHz FOSC and 16 us at 4 MHz -- more than two orders of magnitude below the
+// datasheet minimum pulse, so it cannot mistake a real actuation for a glitch
+// or vice versa, while keeping the case ~940 resumes instead of ~15000.
+#define RESYNC_SAMPLE_CYCLES 16u
+// Panasonic TQ2-L2-5V specified minimum coil pulse for GUARANTEED actuation.
+// The firmware drives 12 ms (TQ2_L2_5V_PULSE_MS, 3x margin); this is the floor
+// the recovery pulse must clear for the resynchronization to be a guarantee
+// rather than a hope. Simulation proves the PULSE, never the mechanics.
+#define RELAY_MIN_PULSE_MS 4u
+// Footswitch drive used to reach a settled ENGAGED state before injecting.
+// Press must exceed PRESSED_THRESH (8) ticks plus the 12 ms blocking actuation
+// the polled loop spends not counting ticks; release must exceed
+// RELEASE_THRESH (25) ticks by the same kind of margin.
+#define TOGGLE_PRESS_MS   40u
+#define TOGGLE_RELEASE_MS 80u
 // Injections are parked at the behaviorally identified loop CLRWDT so the
 // corruption lands at a DETERMINISTIC
 // loop phase: CLRWDT is the last thing before looping back to the tick poll, so
@@ -276,6 +307,25 @@ static bool run_ms(unsigned ms) {
     return true;
 }
 
+// Advance the simulation by exactly `cycles` instruction cycles. Same resume
+// discipline as run_ms(); used by the relay resynchronization case, which needs
+// a sampling interval finer than one millisecond.
+static bool run_cycles(guint64 cycles) {
+    guint64 target = get_cycles().get() + cycles;
+    get_cycles().set_break(target);
+    int resumes = 0;
+    while (get_cycles().get() < target) {
+        g_cpu->run(false);
+        if (++resumes > MAX_RESUMES_PER_MS) {
+            fprintf(stderr, "FATAL: core not advancing (wedged?) at run_cycles\n");
+            get_cycles().clear_break(target);
+            return false;
+        }
+    }
+    get_cycles().clear_break(target);
+    return true;
+}
+
 // Identify the loop CLRWDT behaviorally. init() and the main loop each contain
 // one, and their addresses are not reliably ordered; after settle only the loop
 // site fires repeatedly.
@@ -337,6 +387,31 @@ static bool advance_to_loop_clrwdt(void) {
     return false;
 }
 
+// Put the device in a known SETTLED effect state and prove it got there by
+// reading the LED bit on the modeled port -- the same observable a bench
+// technician would use. Reads the current state and toggles only if needed
+// rather than assuming entry is BYPASS: with correct firmware every case here
+// ends in a recovery reset (hence BYPASS), but a MUTANT that skips the reset
+// would leave the device engaged, and the next case must then still reach the
+// state it says it is testing instead of silently testing the other one.
+// Returning false means the state was never reached, which the caller reports
+// rather than injecting into an unknown state.
+static bool drive_effect_state(bool engaged) {
+    footsw_set(0);
+    if (!run_ms(SETTLE_MS)) { return false; }
+
+    Register *port = fetch_sfr(PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN);
+    if (port == nullptr) { return false; }
+
+    if (((port->get_value() & PIC_REG_LED_MASK) != 0u) != engaged) {
+        footsw_set(1);
+        if (!run_ms(TOGGLE_PRESS_MS)) { return false; }
+        footsw_set(0);
+        if (!run_ms(TOGGLE_RELEASE_MS)) { return false; }
+    }
+    return ((port->get_value() & PIC_REG_LED_MASK) != 0u) == engaged;
+}
+
 // A watchdog reset is only half the recovery contract: the restarted image must
 // resume PETTING the dog. This proves the recovered core reaches its main-loop
 // CLRWDT again -- so a reset-then-die recovery (init() completes, main loop never
@@ -359,115 +434,172 @@ static void prove_post_reset_liveness(void) {
            " (renewed liveness)\n");
 }
 
-// LATx PIC relay policy at the reviewed stable seam: inject a coil latch upset at
-// the trailing loop CLRWDT, then stop at its next occurrence.
-// That is exactly one serviced iteration and places the verdict before its pet.
-static void inject_relay_correction_case(unsigned mask, const char *note) {
+// ---- Relay fail-safe RESYNCHRONIZATION case ---------------------------------
+// F1 policy (docs/relay_coil_fault_correction.md): an unexpectedly energized
+// relay coil is a FAULT, not something to clear quietly. A pulse shorter than
+// the Panasonic TQ2-L2-5V 4 ms minimum is not proven mechanically harmless, so
+// the firmware cannot know whether the latching relay moved -- and a latching
+// relay that moved without the firmware's knowledge leaves the audio route
+// disagreeing with both the logical effect state and the LED.
+//
+// The contract this case pins therefore has TWO halves, and it asserts them
+// separately on purpose. Final-low output alone is NOT full recovery:
+//
+//   1. DE-ENERGIZATION. hw_force_wdt_reset() calls hw_outputs_reassert_safe()
+//      BEFORE it spins, so both coils go low within one tick of the gate that
+//      detected them -- never held energized for the whole watchdog period.
+//   2. RESYNCHRONIZATION. The watchdog recovery re-runs init(), whose BYPASS
+//      actuation drives a COMPLETE RESET-coil pulse. That, and not the clear
+//      in (1), is what puts the physical relay back in agreement with the
+//      logical state. This case measures that pulse and requires it to exceed
+//      the datasheet minimum, and requires the SET coil to stay dark for the
+//      whole recovery.
+//
+// EXCLUSIONS, unchanged and deliberate. The injection lands at the trailing
+// loop CLRWDT -- one reviewed, deterministic settled seam. It does not sweep
+// instruction phase, and it never injects inside the blocking actuation
+// sequence (pre-clear, coil assertion, 12 ms delay, post-clear), where the gate
+// does not run at all. Nothing here can prove what a below-minimum pulse does
+// to real relay mechanics; only bench characterization can.
+//
+// `engaged` selects the settled state the fault arrives in, so the matrix can
+// cover BYPASS plus an unintended SET (the relay may move to ENGAGED while the
+// firmware believes BYPASS) and ENGAGED plus an unintended RESET (the mirror).
+// Contributes exactly ONE check, with every assertion folded into the verdict,
+// so each adapter's EXPECTED_CHECKS stays hand-verifiable.
+static void inject_relay_resync_case(unsigned addr, const char *token,
+                                     unsigned mask, bool engaged,
+                                     const char *note) {
     static unsigned const coil_mask = PIC_REG_COIL_MASK;
-    footsw_set(0);
-    if (!run_ms(SETTLE_MS) || !advance_to_loop_clrwdt()) {
-        g_checks++;
-        g_fails++;
-        return;
-    }
-
-    Register *latch = fetch_sfr(PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN);
-    Register *port = fetch_sfr(PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN);
-    if (latch == nullptr || port == nullptr) {
-        g_checks++;
-        g_fails++;
-        return;
-    }
-
-    unsigned const initial_latch = latch->get_value() & 0xFFu;
-    unsigned const injected = initial_latch | mask;
-    guint64 const resets_before = g_resets;
-    guint64 const injection_cycle = get_cycles().get();
-    guint64 correction_cycle = 0u;
-    latch->put_value(injected);
-    unsigned const written = latch->get_value() & 0xFFu;
-    unsigned observed_latch = written & coil_mask;
-    unsigned observed_port = port->get_value() & coil_mask;
-    bool footswitch_released = (port->get_value() & PIC_REG_FOOTSW_MASK) != 0u;
-    bool left_clrwdt = false;
-    bool completed_iteration = false;
-
-    printf("  inject relay coils    @0x%03x: 0x%02x -> 0x%02x  (%s)\n",
-           PIC_REG_LATCH_ADDR, initial_latch, injected, note);
-    fflush(stdout);
-
-    for (int i = 0; i < 8000; ++i) {
-        unsigned const pc = g_cpu->pc->get_value();
-        if (left_clrwdt && pc == g_loop_clrwdt_addr) {
-            completed_iteration = true;
-            break;
-        }
-
-        guint64 const cycle = get_cycles().get() + 1;
-        get_cycles().set_break(cycle);
-        g_cpu->run(false);
-        get_cycles().clear_break(cycle);
-
-        if (g_cpu->pc->get_value() != g_loop_clrwdt_addr) {
-            left_clrwdt = true;
-        }
-        observed_latch |= latch->get_value() & coil_mask;
-        observed_port |= port->get_value() & coil_mask;
-        if (correction_cycle == 0u &&
-                (latch->get_value() & coil_mask) == 0u &&
-                (port->get_value() & coil_mask) == 0u) {
-            correction_cycle = get_cycles().get();
-        }
-        footswitch_released = footswitch_released &&
-                              ((port->get_value() & PIC_REG_FOOTSW_MASK) != 0u);
-    }
-
-    unsigned const final_latch = latch->get_value() & coil_mask;
-    unsigned const final_port = port->get_value() & coil_mask;
-    guint64 const reset_delta = g_resets - resets_before;
-    guint64 const correction_cycles = correction_cycle > injection_cycle
-        ? correction_cycle - injection_cycle : 0u;
-    bool const pass = (initial_latch & coil_mask) == 0u &&
-                      written == injected &&
-                      observed_latch == mask && observed_port == mask &&
-                      correction_cycles > 0u && completed_iteration &&
-                      final_latch == 0u &&
-                      final_port == 0u && reset_delta == 0u &&
-                      footswitch_released;
-
-    // Keep cases independent even when exercising a mutant that fails to clear
-    // the injected state. The verdict above already captured the modeled-port
-    // and latch failure; the next case must still begin from the quiescent
-    // contract.
-    latch->put_value((latch->get_value() & 0xFFu) & ~coil_mask);
 
     g_checks++;
+
+    if (!drive_effect_state(engaged)) {
+        g_fails++;
+        fprintf(stderr, "    FAIL: could not reach settled %s before injection\n",
+                engaged ? "ENGAGED" : "BYPASS");
+        return;
+    }
+    if (!advance_to_loop_clrwdt()) {
+        g_fails++;
+        return;
+    }
+
+    Register *target = fetch_sfr(addr, token);
+    Register *latch  = fetch_sfr(PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN);
+    Register *port   = fetch_sfr(PIC_REG_PORT_ADDR,  PIC_REG_PORT_TOKEN);
+    if (target == nullptr || latch == nullptr || port == nullptr) {
+        g_fails++;
+        return;
+    }
+
+    unsigned const before_val    = target->get_value() & 0xFFu;
+    unsigned const injected      = before_val | mask;
+    guint64  const resets_before = g_resets;
+
+    printf("  inject relay coils    @0x%03x: 0x%02x -> 0x%02x  (%s, from %s)\n",
+           addr, before_val, injected, note, engaged ? "ENGAGED" : "BYPASS");
+    fflush(stdout);
+
+    target->put_value(injected);
+    unsigned const written = target->get_value() & 0xFFu;
+
+    // -- half 1: both coils de-energized on the escalation path, before the spin
+    guint64  const inject_cycle    = get_cycles().get();
+    guint64        deenergize_cycle = 0u;
+    unsigned const deenergize_cap  =
+        (unsigned)(RESYNC_DEENERGIZE_MS * CYCLES_PER_MS);
+    for (unsigned i = 0; i < deenergize_cap; ++i) {
+        if (((latch->get_value() & coil_mask) == 0u) &&
+                ((port->get_value() & coil_mask) == 0u)) {
+            deenergize_cycle = get_cycles().get();
+            break;
+        }
+        if (!run_cycles(1u)) { break; }
+    }
+
+    // -- the recovery reset itself. Polled in 1 ms steps rather than one long
+    // window so the observation below starts as close to the reset vector as
+    // the step allows; the recovery pulse is 12 ms, so at most one step of it
+    // is missed and the datasheet-minimum assertion still has ~8 ms of margin.
+    unsigned elapsed_ms = 0u;
+    bool     ran_clean  = true;
+    while ((elapsed_ms < WDT_RESET_WINDOW_MS) && (g_resets == resets_before)) {
+        if (!run_ms(1u)) { ran_clean = false; break; }
+        elapsed_ms++;
+    }
+    guint64 const reset_delta = g_resets - resets_before;
+
+    // -- half 2: the recovery actuation, sampled on the MODELED PORT. Sampling
+    // (not single-stepping) keeps the case cheap; one sample is well under the
+    // shortest pulse any relay could act on, so a SET assertion narrower than a
+    // sample is not a physical hazard this test needs to see.
+    guint64  reset_coil_cycles = 0u;
+    guint64  set_coil_cycles   = 0u;
+    unsigned const samples =
+        (unsigned)((RESYNC_OBSERVE_MS * CYCLES_PER_MS) / RESYNC_SAMPLE_CYCLES);
+    for (unsigned i = 0; ran_clean && (i < samples); ++i) {
+        unsigned const p = port->get_value() & 0xFFu;
+        if ((p & PIC_REG_RESET_COIL_MASK) != 0u) {
+            reset_coil_cycles += RESYNC_SAMPLE_CYCLES;
+        }
+        if ((p & PIC_REG_SET_COIL_MASK) != 0u) {
+            set_coil_cycles += RESYNC_SAMPLE_CYCLES;
+        }
+        if (!run_cycles(RESYNC_SAMPLE_CYCLES)) { ran_clean = false; }
+    }
+
+    // -- and the settled result: BYPASS, LED dark, both coils idle.
+    if (ran_clean && !run_ms(SETTLE_MS)) { ran_clean = false; }
+    unsigned const final_port = port->get_value() & 0xFFu;
+    guint64  const min_pulse_cycles =
+        (guint64)RELAY_MIN_PULSE_MS * (guint64)CYCLES_PER_MS;
+
+    bool const pass = ran_clean &&
+                      ((before_val & mask) == 0u) &&
+                      (written == injected) &&
+                      (deenergize_cycle > inject_cycle) &&
+                      (reset_delta == 1u) &&
+                      (reset_coil_cycles >= min_pulse_cycles) &&
+                      (set_coil_cycles == 0u) &&
+                      ((final_port & coil_mask) == 0u) &&
+                      ((final_port & PIC_REG_LED_MASK) == 0u);
+
     if (pass) {
-        printf("    PASS: modeled-port/latch coil mask 0x%02x cleared in %" G_GUINT64_FORMAT
-               " cycles (%.3f ms), within one iteration and without reset\n",
-               mask, correction_cycles,
-               (double)correction_cycles / (double)CYCLES_PER_MS);
+        printf("    PASS: coils de-energized in %" G_GUINT64_FORMAT " cycles (%.3f ms),"
+               " 1 reset, recovery drove a %.3f ms RESET-coil pulse"
+               " (>= %u ms datasheet minimum) with SET dark, settled in BYPASS\n",
+               deenergize_cycle - inject_cycle,
+               (double)(deenergize_cycle - inject_cycle) / (double)CYCLES_PER_MS,
+               (double)reset_coil_cycles / (double)CYCLES_PER_MS,
+               RELAY_MIN_PULSE_MS);
+        // Folded into this same check slot (deliberately no g_checks++).
+        prove_post_reset_liveness();
     } else {
         g_fails++;
         fprintf(stderr,
-                "    FAIL: init=0x%02x write=0x%02x seen-" PIC_REG_LATCH_LC "=0x%02x "
-                "seen-" PIC_REG_PORT_LC "=0x%02x final-" PIC_REG_LATCH_LC "=0x%02x "
-                "final-" PIC_REG_PORT_LC "=0x%02x "
-                "completed=%u correction-cycles=%" G_GUINT64_FORMAT
-                " resets=%" G_GUINT64_FORMAT " released=%u\n",
-                initial_latch & coil_mask, written & coil_mask, observed_latch,
-                observed_port, final_latch, final_port,
-                completed_iteration ? 1u : 0u, correction_cycles, reset_delta,
-                footswitch_released ? 1u : 0u);
+                "    FAIL: init=0x%02x write=0x%02x deenergize-cycles=%" G_GUINT64_FORMAT
+                " resets=%" G_GUINT64_FORMAT " reset-coil-ms=%.3f set-coil-ms=%.3f"
+                " final-" PIC_REG_PORT_LC "=0x%02x clean=%u\n",
+                before_val, written,
+                deenergize_cycle > inject_cycle ? deenergize_cycle - inject_cycle : 0u,
+                reset_delta,
+                (double)reset_coil_cycles / (double)CYCLES_PER_MS,
+                (double)set_coil_cycles / (double)CYCLES_PER_MS,
+                final_port, ran_clean ? 1u : 0u);
+        // Leave the next case a quiescent device even after a failed verdict.
+        target->put_value(before_val);
     }
     fflush(stdout);
 }
 
 // ---- One injection case -----------------------------------------------------
 // absolute=true writes `val`; absolute=false writes (current ^ val), i.e. an
-// SEU bit-flip of the bits in `val`. Most call sites require one reset; deliberate
-// relay correction cases require zero. The restore-and-verify branch keeps those
-// zero-reset cases independent and proves restoration succeeds.
+// SEU bit-flip of the bits in `val`. Nearly every call site requires one reset.
+// expected_resets == 0 is the negative-control form, used where a part
+// DOCUMENTS a location as unguarded and the test exists to pin that exception
+// so it cannot widen or close unnoticed. The restore-and-verify branch keeps
+// those cases independent and proves restoration succeeds.
 static void inject_case(const char *label, unsigned addr, const char *token,
                         bool absolute, unsigned val, unsigned expected_resets,
                         const char *note) {
@@ -692,10 +824,10 @@ int main() {
     // Output directions (hw_is_sanity_check_failed).
     PIC_FAULT_DIRECTION_INJECTIONS();
 
-    // The output latch, whose guard policy is the one thing that differs
-    // BETWEEN parts of a family rather than between families: PIC10F322 guards
-    // its settled latch, PIC10F320 has no general latch guard but its relay
-    // adapter requires idle correction of both coil bits.
+    // The output latch, whose guard SCOPE is the one thing that differs BETWEEN
+    // parts of a family rather than between families: PIC10F322 guards its
+    // complete settled latch, PIC10F320 guards only the two relay coil bits.
+    // The RESPONSE no longer differs -- every energized coil resets.
     PIC_FAULT_EXTRA_OUTPUT_INJECTIONS();
 
     // Clock / tick / analog config SFRs (hw_critical_sfrs_intact).

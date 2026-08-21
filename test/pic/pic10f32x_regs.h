@@ -83,6 +83,11 @@
 #define PIC_REG_FOOTSW_MASK  0x08u
 // The two relay coil bits (RELAY_RESET_PIN | RELAY_SET_PIN) = RA1|RA2.
 #define PIC_REG_COIL_MASK    0x06u
+// The two coils separately: the relay resynchronization cases require the
+// recovery actuation to be a RESET-coil pulse (the known BYPASS position) and
+// require the SET coil to stay dark throughout it.
+#define PIC_REG_RESET_COIL_MASK 0x02u
+#define PIC_REG_SET_COIL_MASK   0x04u
 
 // Exact steady-state TRISA after init(): RA3 input, RA0..RA2 outputs.
 #define PIC_REG_TRIS_INIT      0x08u

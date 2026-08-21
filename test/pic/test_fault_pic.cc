@@ -2,8 +2,9 @@
 // Copyright (c) Matthew Garman
 
 // PIC10F322 adapter for the shared libgpsim fault-injection harness. This part
-// has 512 program words and guards its settled output latch, so the common fault
-// matrix is extended with three LATA injections.
+// has 512 program words and guards its complete settled output latch, so the
+// common fault matrix is extended with three LATA injections on the CD4053
+// variants and six relay-coil cases on the relay variant.
 
 /* name-contract: exempt-begin (PIC_REG_ and PIC_FAULT_ names are C macro
    families, not make vars) */
@@ -23,21 +24,31 @@
 #else
 #  define PIC_FAULT_CTX_INRANGE 0u
 #endif
-// Output-stage fault policy is variant-split (see docs/relay_coil_fault_correction.md).
-// Relay: RA1/RA2 are the coils. hw_outputs_reassert_safe() re-drives them low at
-// the top of every serviced tick, before the sanity gate, so a coil LATCH upset
-// is corrected on both latch and port within one iteration with no reset. LATA
-// drives PORTA in hardware, so the 320-style correction assertion applies
-// directly. This part keeps a LATx latch and never rewrites the whole port, so
-// correction is coil-only: the RA0 LED latch (intent) upset still resets.
+// Output-stage fault policy (see docs/relay_coil_fault_correction.md). Every
+// LATA upset resets on every variant; what the relay variant adds is the
+// SECOND half of the F1 contract. RA1/RA2 are the coils, and an energized coil
+// is a fault the firmware cannot silently clear -- it cannot know whether a
+// below-minimum pulse moved the latching relay. So the relay cases require the
+// escalation path to de-energize both coils before the spin AND the watchdog
+// recovery to drive a complete RESET-coil actuation back to BYPASS. Six output
+// checks instead of three: the LED latch, then coil faults arriving in both
+// settled states (BYPASS with an unintended SET, ENGAGED with an unintended
+// RESET, and their mirrors).
 #if defined(TQ2_L2_5V_RELAY)
-#  define PIC_FAULT_EXPECTED_CHECKS (26u + PIC_FAULT_CTX_INRANGE)
+#  define PIC_FAULT_EXPECTED_CHECKS (28u + PIC_FAULT_CTX_INRANGE)
 #  define PIC_FAULT_EXTRA_OUTPUT_INJECTIONS() do { \
     inject_case("LATA.RA0", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x01, 1, \
                 "RA0 LED latch (intent) corruption still resets"); \
-    inject_relay_correction_case(0x02u, "RA1 RESET-coil latch forced high"); \
-    inject_relay_correction_case(0x04u, "RA2 SET-coil latch forced high"); \
-    inject_relay_correction_case(0x06u, "both relay-coil latches forced high"); \
+    inject_relay_resync_case(PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, \
+                             0x02u, false, "RA1 RESET-coil latch forced high"); \
+    inject_relay_resync_case(PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, \
+                             0x04u, false, "RA2 SET-coil latch forced high"); \
+    inject_relay_resync_case(PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, \
+                             0x06u, false, "both relay-coil latches forced high"); \
+    inject_relay_resync_case(PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, \
+                             0x02u, true, "RA1 RESET-coil latch forced high"); \
+    inject_relay_resync_case(PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, \
+                             0x04u, true, "RA2 SET-coil latch forced high"); \
 } while (0)
 #else
 #  define PIC_FAULT_EXPECTED_CHECKS (25u + PIC_FAULT_CTX_INRANGE)

@@ -165,6 +165,37 @@ the harness does not sweep that phase. The result does not prove that an
 accidental short pulse cannot mechanically switch the relay, nor characterize
 the board-specific shared-supply transient when both drivers are upset together.
 
+**Run 5 — the `v0.9.10` fail-safe relay resynchronization.** That in-place
+correction was replaced, for the reason stated in
+`docs/relay_coil_fault_correction.md`: the stray pulse it permitted is only
+*below* the TQ2-L2-5V guaranteed-actuation minimum, not proven harmless, so the
+firmware could not know whether the latching relay had moved. The loop-top
+rewrite is gone; the two coil latch bits joined `hw_output_pins_intact()` under
+`#if defined(OUTPUT_TQ2_RELAY)`, and `hw_force_wdt_reset()` de-energizes both
+coils before it spins.
+
+This is again a relay-only change, and the build proves it: the CD4053 predicate
+is deliberately left as its original comparison rather than the relay branch's
+fold, so both analog-switch images stay **byte-identical to runs 2, 3 and 4** and
+exactly one hash moves.
+
+```
+e48ed8e50e89a7f2c2e145603d16c25099925269ea0b29b31becc9c02eb2143f  bypass-pic10f320-cd4053_simple.hex
+1cc2cbf6572a876b1a0a5d19e2e3179a41c7a46bd1b7419d2b5e72aa2aec27a7  bypass-pic10f320-cd4053_with_mute.hex
+9544b31efdacef22e6bd2c413a33f2faae03cd9279c54a4af4fcb6b3cdbe2b59  bypass-pic10f320-tq2_l2_5v_relay.hex
+```
+
+The relay grew from 245 to 248 words (8 free of 256) and retained its 4/8
+return-stack maximum. Real-image `LATA` injection at the same trailing `CLRWDT`
+seam, now from a settled ENGAGED start as well as BYPASS, measures both coils
+de-energized in 472-482 instruction cycles (0.944-0.964 ms) followed by exactly
+one watchdog reset and an 11.2 ms recovery RESET-coil pulse with the SET coil
+dark. The measured pulse is short of the emitted 12 ms only by the harness's
+1 ms reset-detection step. The exclusions are unchanged and the same sentence
+still applies: none of this proves that an accidental short pulse cannot
+mechanically switch the relay, nor characterizes the board-specific
+shared-supply transient when both drivers are upset together.
+
 R1 closes at the firmware boundary on that evidence. This project does not
 specify the external coil-driver topology, power supply, flyback network or PCB,
 so adopters must validate relay motion and the simultaneous-driver supply
@@ -374,12 +405,16 @@ considered and rejected: a defensive layer that differs between variants of one
 firmware is worse than a uniform documented omission. See
 `docs/pic10f320_special_case.md` §4 for what the omission means in practice.
 
-`v0.9.8` adds a narrower relay-only safe-state rewrite rather than a partial
-latch-match guard. Once per serviced iteration, before the sanity decision and
-watchdog pet, both coil bits are forced low. RESET, SET and both-bit injections
-must therefore clear in one iteration without a footswitch event or reset. This
-does not detect or repair LED/analog-control latch mismatches and does not change
-the general omission above. It costs one relay word: 245/256, with 11 free.
+`v0.9.8` added a narrower relay-only safe-state rewrite rather than a partial
+latch-match guard, and `v0.9.10` turned it into the project-wide fail-safe policy
+(`docs/relay_coil_fault_correction.md`). The two coil latch bits are now guarded
+inside `hw_output_pins_intact()`, so an RA1/RA2 upset forces the watchdog
+recovery that re-drives a complete BYPASS actuation, and `hw_force_wdt_reset()`
+de-energizes both coils before it spins. RESET, SET and both-bit injections must
+therefore escalate, from a settled ENGAGED start as well as BYPASS. This still
+does not detect LED/analog-control latch mismatches and does not change the
+general omission above -- which is now pinned by a negative-control injection
+requiring RA0 *not* to reset. It costs three relay words: 248/256, with 8 free.
 
 ## 5. Mutation topology
 
@@ -439,9 +474,11 @@ Stated so nobody has to infer it:
   flags. Neither establishes that arbitrary XC8 versions or environments emit
   identical bytes.
 - **The general output-latch integrity check is absent** (§4). The relay-only
-  idle safe-state rewrite corrects coil-bit upsets that reach it before the
-  following gate; actuation-sequence, LED, and analog-control latch upsets remain
-  outside that mitigation.
+  coil guard escalates coil-bit upsets that reach a gate, and the fail-safe
+  recovery resynchronizes the relay; actuation-sequence, LED, and analog-control
+  latch upsets remain outside that mitigation. The LED half of that gap is
+  asserted rather than merely stated: the gpsim fault lane injects RA0 and
+  requires no reset.
 - **Hardware-bench properties are simulated, not proven**: WDT timing and
   brown-out behaviour, absolute tick period, and real-silicon pulse timing. These
   are shared with the PIC10F322 build, since both are validated in the same gpsim

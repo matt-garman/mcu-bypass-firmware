@@ -1378,11 +1378,12 @@ before it can drive a wrong output:
   reset rather than an acted-upon wrong state.
 - **The nominal blocking relay coil pulse ends by commanding both coils low.** Both
   `hw_set_bypass_state()` and `hw_set_engaged_state()` call
-  `set_relay_coils_low()` after the `BYPASS_DELAY_MS` pulse. The loop-top
-  `hw_outputs_reassert_safe()` covers subsequent settled operation but cannot
-  run during the delay (`src/bypass_output_tq2_l2_5v_relay.c`). A coil-state
-  upset during that pulse can alter the intended or inactive coil until the
-  post-pulse clear and may affect the mechanical relay.
+  `set_relay_coils_low()` after the `BYPASS_DELAY_MS` pulse. Settled operation is
+  covered by the per-tick sanity gate, which escalates an energized coil to a
+  fail-safe recovery (`docs/relay_coil_fault_correction.md`); no gate runs during
+  the delay (`src/bypass_output_tq2_l2_5v_relay.c`). A coil-state upset during
+  that pulse can alter the intended or inactive coil until the post-pulse clear
+  and may affect the mechanical relay.
 
 The one nominal-path case those range and actuation guards do **not** cover is
 an *in-range* single-bit upset of `debounce_counter` -- a flip that stays
