@@ -84,7 +84,7 @@ case "$PB_TARGET" in
 		# complete-matrix production/consumption and the hardware-programming
 		# calibration guard.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=123
+		expected_checks=126
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -1669,16 +1669,70 @@ EOF
 	: > "$xc8_log"
 	: > "$matrix_injector_log"
 	: > "$matrix_lane_log"
-	matrix_output=$(run_matrix_combined)
+	matrix_combined_output=$(run_matrix_combined)
 	matrix_record=$(python3 "$repo/test/pic/pic12f675_matrix_evidence.py" verify \
 		--build-dir "$repo/$PB_BUILD_DIR" --fw-base "$PB_FW_BASE" --tag "$PB_TAG")
-	[[ "$matrix_output" == *"retained matrix qualified: $matrix_record"* \
-		&& "$matrix_output" == *"all PIC12F675 pre-hardware checks complete: $matrix_record"* \
-		&& "$matrix_output" == *"validated for all variants: $matrix_record"* \
+	set -- $matrix_record
+	[[ "$1" = PIC12F675_MATRIX_SHA256 && "$2" = format=2 && "$#" -eq 14 ]] \
+		|| { printf 'FAIL: PIC12F675 matrix identity is not one format-2 twelve-artifact record: %s\n' \
+			"$matrix_record" >&2; exit 1; }
+	for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
+		for prefix in shipping assembly symbols simcal; do
+			field="${prefix}_${variant}"
+			[[ " $matrix_record " =~ [[:space:]]${field}=[0-9a-f]{64}[[:space:]] ]] \
+				|| { printf 'FAIL: PIC12F675 matrix identity omits %s_%s: %s\n' \
+					"$prefix" "$variant" "$matrix_record" >&2; exit 1; }
+		done
+	done
+	checks=$((checks + 1))
+
+	# Assembly and symbol sidecars are target-lane inputs, not incidental compiler
+	# output. Mutating either must invalidate the same retained identity that the
+	# aggregate PASS records expose.
+	for sidecar in "${cal_shipping[0]%.hex}.s" "${cal_shipping[0]%.hex}.sym"; do
+		sidecar_backup="$work/$(basename "$sidecar").matrix-backup"
+		cp -p -- "$sidecar" "$sidecar_backup"
+		printf 'sidecar mutation\n' >> "$sidecar"
+		if matrix_output=$(python3 "$repo/test/pic/pic12f675_matrix_evidence.py" verify \
+				--build-dir "$repo/$PB_BUILD_DIR" --fw-base "$PB_FW_BASE" \
+				--tag "$PB_TAG" 2>&1); then
+			printf 'FAIL: PIC12F675 matrix oracle accepted changed sidecar %s\n' "$sidecar" >&2
+			exit 1
+		fi
+		[[ "$matrix_output" == *"qualified matrix artifact changed:"* ]] \
+			|| { printf 'FAIL: changed PIC12F675 sidecar failed for the wrong reason: %s\n' \
+				"$matrix_output" >&2; exit 1; }
+		cp -p -- "$sidecar_backup" "$sidecar"
+		[ "$(python3 "$repo/test/pic/pic12f675_matrix_evidence.py" verify \
+			--build-dir "$repo/$PB_BUILD_DIR" --fw-base "$PB_FW_BASE" \
+			--tag "$PB_TAG")" = "$matrix_record" ] \
+			|| { printf 'FAIL: restored PIC12F675 sidecar did not restore matrix identity\n' >&2; exit 1; }
+	done
+	checks=$((checks + 1))
+
+	# Release soak-harness compilation marks this phony producer old. Exercise the
+	# exact GNU Make mechanism and prove it cannot invoke XC8 or replace the
+	# already-qualified matrix.
+	xc8_before_soak_suppression=$(wc -l < "$xc8_log")
+	_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+		make --no-print-directory -C "$repo" \
+			--old-file=_pic12f675-build-soak _pic12f675-build-soak \
+			CC=true HOSTCC=true PIC_CC="$tools/xc8" \
+			PIC12F675_BUILD_DIR="$PB_BUILD_DIR" FW_BASE="$PB_FW_BASE" \
+			PIC12F675_TAG="$PB_TAG" STRICT_TOOLS=1 >/dev/null
+	[[ "$(wc -l < "$xc8_log")" -eq "$xc8_before_soak_suppression" \
+		&& "$(python3 "$repo/test/pic/pic12f675_matrix_evidence.py" verify \
+			--build-dir "$repo/$PB_BUILD_DIR" --fw-base "$PB_FW_BASE" \
+			--tag "$PB_TAG")" = "$matrix_record" ]] \
+		|| { printf 'FAIL: --old-file did not preserve the qualified PIC12F675 soak matrix\n' >&2; exit 1; }
+	checks=$((checks + 1))
+	[[ "$matrix_combined_output" == *"retained matrix qualified: $matrix_record"* \
+		&& "$matrix_combined_output" == *"all PIC12F675 pre-hardware checks complete: $matrix_record"* \
+		&& "$matrix_combined_output" == *"validated for all variants: $matrix_record"* \
 		&& -f "$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json" \
 		&& ! -e "$repo/$PB_BUILD_DIR/.pic12f675-qualified-matrix.json.staged" ]] \
 		|| { printf 'FAIL: combined PIC12F675 graph omitted retained hash evidence: %s\n' \
-			"$matrix_output" >&2; exit 1; }
+			"$matrix_combined_output" >&2; exit 1; }
 	[ "$(wc -l < "$xc8_log")" -eq 6 ] \
 		|| { printf 'FAIL: combined PIC12F675 graph ran XC8 %s times, expected 6\n' \
 			"$(wc -l < "$xc8_log")" >&2; exit 1; }

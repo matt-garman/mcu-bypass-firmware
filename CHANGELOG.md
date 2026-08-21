@@ -138,6 +138,15 @@ file is the human-readable summary of *what changed*.
   sealed PASS/FAIL result. Recovery never invokes writer arguments, and
   interrupted private attempts remain safely retryable.
 
+- **PIC12F675 release evidence now binds both aggregate suites to one retained
+  matrix.** Local staging and clean-runner attestation request the pre-hardware
+  and all-variant target aggregates in one Make graph, so their shared qualifier
+  runs once. The retained format-2 JSON identifies all six shipping/simulator
+  images and six consumed assembly/symbol sidecars; its digest is recorded in
+  `QUALIFICATION` and `MANIFEST.md`, and publication verification requires every
+  aggregate PASS, final shipped HEX, and corresponding `SHA256SUMS` entry to
+  match it. Soak-harness compilation reuses rather than rebuilds that matrix.
+
 - **Current release documentation now identifies v0.9.10 consistently.** The
   changelog, release availability, TODO status, and PIC10F320 qualification
   documents agree on seven release parts, 21 images, 18 soak combinations, and

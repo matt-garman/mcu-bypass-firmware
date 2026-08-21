@@ -12,7 +12,7 @@ import sys
 import uuid
 
 
-FORMAT = 1
+FORMAT = 2
 MANIFEST_NAME = ".pic12f675-qualified-matrix.json"
 STAGED_MANIFEST_NAME = MANIFEST_NAME + ".staged"
 VARIANTS = (
@@ -44,6 +44,15 @@ def entry_specs(fw_base, tag):
              os.path.join("simcal", stem + "_simcal.hex"), True),
         ))
     return specs
+
+
+def reject_duplicate_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise EvidenceError("matrix evidence contains duplicate JSON key: %s" % key)
+        result[key] = value
+    return result
 
 
 def file_identity(info):
@@ -242,7 +251,7 @@ def collect_entries(build_dir, fw_base, tag, directory=None):
 def matrix_record(entries):
     fields = ["PIC12F675_MATRIX_SHA256", "format=%d" % FORMAT]
     for variant in VARIANTS:
-        for prefix in ("shipping", "simcal"):
+        for prefix in ("shipping", "assembly", "symbols", "simcal"):
             name = "%s_%s" % (prefix, variant)
             fields.append("%s=%s" % (name, entries[name]["sha256"]))
     return " ".join(fields)
@@ -315,25 +324,12 @@ def record_manifest(build_dir, fw_base, tag, staged=False):
         os.close(directory)
 
 
-def read_manifest(build_dir, fw_base, tag, staged=False, directory=None,
-                  observed=None):
-    name = STAGED_MANIFEST_NAME if staged else MANIFEST_NAME
-    path = manifest_path(build_dir, staged=staged)
-    owns_directory = directory is None
-    if owns_directory:
-        directory, identity = open_directory(build_dir, "build directory")
+def parse_manifest(payload, path, fw_base, tag):
     try:
-        manifest = json.loads(
-            read_regular_file(directory, name, "matrix evidence",
-                              observed=observed).decode("ascii"))
-        if owns_directory:
-            check_directory_path(build_dir, directory, identity,
-                                 "build directory")
-    except (OSError, UnicodeError, ValueError) as exc:
+        manifest = json.loads(payload.decode("ascii"),
+                              object_pairs_hook=reject_duplicate_keys)
+    except (UnicodeError, ValueError) as exc:
         raise EvidenceError("cannot read strict matrix evidence %s: %s" % (path, exc))
-    finally:
-        if owns_directory:
-            os.close(directory)
 
     expected_keys = {"format", "device", "fw_base", "tag", "variants", "entries", "record"}
     if not isinstance(manifest, dict) or set(manifest) != expected_keys:
@@ -360,6 +356,153 @@ def read_manifest(build_dir, fw_base, tag, staged=False, directory=None,
     if manifest["record"] != expected_record:
         raise EvidenceError("matrix evidence record does not match its artifact hashes")
     return manifest
+
+
+def read_manifest(build_dir, fw_base, tag, staged=False, directory=None,
+                  observed=None):
+    name = STAGED_MANIFEST_NAME if staged else MANIFEST_NAME
+    path = manifest_path(build_dir, staged=staged)
+    owns_directory = directory is None
+    if owns_directory:
+        directory, identity = open_directory(build_dir, "build directory")
+    try:
+        payload = read_regular_file(directory, name, "matrix evidence",
+                                    observed=observed)
+        if owns_directory:
+            check_directory_path(build_dir, directory, identity,
+                                 "build directory")
+    except OSError as exc:
+        raise EvidenceError("cannot read strict matrix evidence %s: %s" % (path, exc))
+    finally:
+        if owns_directory:
+            os.close(directory)
+
+    return parse_manifest(payload, path, fw_base, tag)
+
+
+def read_manifest_file(path, fw_base, tag):
+    path = os.path.abspath(os.path.normpath(path))
+    parent = os.path.dirname(path)
+    name = os.path.basename(path)
+    validate_component(name, "matrix evidence filename")
+    directory, identity = open_directory(parent, "matrix evidence directory")
+    try:
+        payload = read_regular_file(directory, name, "matrix evidence")
+        check_directory_path(parent, directory, identity,
+                             "matrix evidence directory")
+    finally:
+        os.close(directory)
+    return parse_manifest(payload, path, fw_base, tag)
+
+
+def verify_qualification_log(payload, matrix_record):
+    try:
+        text = payload.decode("ascii")
+    except UnicodeError as exc:
+        raise EvidenceError("PIC12F675 qualification log is not ASCII: %s" % exc)
+    if "\r" in text:
+        raise EvidenceError("PIC12F675 qualification log contains a carriage return")
+    lines = text.splitlines()
+    expected = [
+        "=== PIC12F675 retained matrix qualified: %s ===" % matrix_record,
+        "=== all PIC12F675 pre-hardware checks complete: %s ===" % matrix_record,
+    ]
+    expected.extend(
+        "=== PIC12F675 target fault/lock-step/I-O PASS (variant %s): %s ===" %
+        (variant, matrix_record) for variant in VARIANTS)
+    expected.append(
+        "=== PIC12F675 target fault/lock-step/I-O validated for all variants: %s ===" %
+        matrix_record)
+    for record in expected:
+        if lines.count(record) != 1:
+            raise EvidenceError(
+                "PIC12F675 qualification log does not contain one exact "
+                "matrix-bound PASS: %s" % record)
+    matrix_lines = [line for line in lines if "PIC12F675_MATRIX_SHA256" in line]
+    if len(matrix_lines) != len(expected):
+        raise EvidenceError(
+            "PIC12F675 qualification log has unexpected or duplicate matrix records")
+
+
+def verify_release_manifest(manifest_path, qualification_log, release_dir,
+                            expected_manifest_sha256, fw_base, tag):
+    manifest_path = os.path.abspath(os.path.normpath(manifest_path))
+    qualification_log = os.path.abspath(os.path.normpath(qualification_log))
+    evidence_dir = os.path.dirname(manifest_path)
+    if os.path.dirname(qualification_log) != evidence_dir:
+        raise EvidenceError(
+            "PIC12F675 matrix manifest and qualification log do not share one directory")
+    manifest_name = os.path.basename(manifest_path)
+    log_name = os.path.basename(qualification_log)
+    validate_component(manifest_name, "matrix evidence filename")
+    validate_component(log_name, "qualification log filename")
+    if (len(expected_manifest_sha256) != 64
+            or any(ch not in "0123456789abcdef"
+                   for ch in expected_manifest_sha256)):
+        raise EvidenceError("expected matrix manifest SHA-256 is malformed")
+
+    evidence_directory, evidence_identity = open_directory(
+        evidence_dir, "matrix evidence directory")
+    release_dir = os.path.abspath(os.path.normpath(release_dir))
+    directory = None
+    observed = []
+    try:
+        directory, identity = open_directory(release_dir, "release directory")
+        manifest_payload = read_regular_file(
+            evidence_directory, manifest_name, "matrix evidence",
+            observed=observed)
+        manifest_digest = hashlib.sha256(manifest_payload).hexdigest()
+        if manifest_digest != expected_manifest_sha256:
+            raise EvidenceError(
+                "retained PIC12F675 matrix digest does not match QUALIFICATION")
+        manifest = parse_manifest(
+            manifest_payload, manifest_path, fw_base, tag)
+        log_payload = read_regular_file(
+            evidence_directory, log_name, "PIC12F675 qualification log",
+            observed=observed)
+        verify_qualification_log(log_payload, manifest["record"])
+
+        checksum_payload = read_regular_file(
+            directory, "SHA256SUMS", "release checksums", observed=observed)
+        try:
+            checksum_text = checksum_payload.decode("ascii")
+        except UnicodeError as exc:
+            raise EvidenceError("release checksums are not ASCII: %s" % exc)
+        if "\r" in checksum_text:
+            raise EvidenceError("release checksums contain a carriage return")
+        checksums = {}
+        for line_no, line in enumerate(checksum_text.splitlines(), 1):
+            if (len(line) < 67 or line[64:66] != "  "
+                    or any(ch not in "0123456789abcdef" for ch in line[:64])):
+                raise EvidenceError("malformed SHA256SUMS line %d" % line_no)
+            name = line[66:]
+            validate_component(name, "SHA256SUMS filename")
+            if name in checksums:
+                raise EvidenceError("duplicate SHA256SUMS filename: %s" % name)
+            checksums[name] = line[:64]
+
+        for name, relative, is_image in entry_specs(fw_base, tag):
+            if not is_image or not name.startswith("shipping_"):
+                continue
+            filename = os.path.basename(relative)
+            digest = hashlib.sha256(read_regular_file(
+                directory, filename, "released %s" % name,
+                observed=observed)).hexdigest()
+            expected = manifest["entries"][name]["sha256"]
+            if digest != expected:
+                raise EvidenceError("released image does not match qualified matrix: %s" % filename)
+            if checksums.get(filename) != expected:
+                raise EvidenceError("SHA256SUMS does not match qualified matrix: %s" % filename)
+        check_observed_files(observed)
+        check_directory_path(evidence_dir, evidence_directory,
+                             evidence_identity, "matrix evidence directory")
+        check_directory_path(release_dir, directory, identity,
+                             "release directory")
+    finally:
+        if directory is not None:
+            os.close(directory)
+        os.close(evidence_directory)
+    return manifest["record"]
 
 
 def verify_manifest(build_dir, fw_base, tag, staged=False, directory=None):
@@ -443,17 +586,34 @@ def parse_args(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=(
         "record", "stage", "verify", "verify-staged", "compare-shipping",
-        "compare-shipping-staged", "promote"))
-    parser.add_argument("--build-dir", required=True)
+        "compare-shipping-staged", "promote", "verify-file", "verify-release"))
+    parser.add_argument("--build-dir")
     parser.add_argument("--candidate-build-dir")
+    parser.add_argument("--manifest")
+    parser.add_argument("--qualification-log")
+    parser.add_argument("--release-dir")
+    parser.add_argument("--expected-manifest-sha256")
     parser.add_argument("--fw-base", required=True)
     parser.add_argument("--tag", required=True)
     args = parser.parse_args(argv)
     validate_component(args.fw_base, "--fw-base")
     validate_component(args.tag, "--tag")
-    args.build_dir = os.path.abspath(os.path.normpath(args.build_dir))
-    build_fd, _ = open_directory(args.build_dir, "build directory")
-    os.close(build_fd)
+    build_commands = {
+        "record", "stage", "verify", "verify-staged", "compare-shipping",
+        "compare-shipping-staged", "promote",
+    }
+    if args.command in build_commands:
+        if not args.build_dir:
+            parser.error("%s requires --build-dir" % args.command)
+        if (args.manifest or args.qualification_log or args.release_dir
+                or args.expected_manifest_sha256):
+            parser.error("release evidence arguments are not valid for build commands")
+        args.build_dir = os.path.abspath(os.path.normpath(args.build_dir))
+        build_fd, _ = open_directory(args.build_dir, "build directory")
+        os.close(build_fd)
+    elif args.build_dir or args.candidate_build_dir:
+        parser.error("--build-dir/--candidate-build-dir require a build command")
+
     if args.command in ("compare-shipping", "compare-shipping-staged"):
         if not args.candidate_build_dir:
             parser.error("compare-shipping requires --candidate-build-dir")
@@ -464,13 +624,32 @@ def parse_args(argv):
         os.close(candidate_fd)
     elif args.candidate_build_dir:
         parser.error("--candidate-build-dir is valid only for compare-shipping")
+    if args.command == "verify-file":
+        if (not args.manifest or args.qualification_log or args.release_dir
+                or args.expected_manifest_sha256):
+            parser.error("verify-file requires only --manifest")
+    elif args.command == "verify-release":
+        if (not args.manifest or not args.qualification_log
+                or not args.release_dir or not args.expected_manifest_sha256):
+            parser.error(
+                "verify-release requires --manifest, --qualification-log, "
+                "--release-dir, and --expected-manifest-sha256")
+    elif (args.manifest or args.qualification_log or args.release_dir
+          or args.expected_manifest_sha256):
+        parser.error("release evidence arguments require verify-file or verify-release")
     return args
 
 
 def main(argv=None):
     try:
         args = parse_args(argv)
-        if args.command == "record":
+        if args.command == "verify-file":
+            record = read_manifest_file(args.manifest, args.fw_base, args.tag)["record"]
+        elif args.command == "verify-release":
+            record = verify_release_manifest(
+                args.manifest, args.qualification_log, args.release_dir,
+                args.expected_manifest_sha256, args.fw_base, args.tag)
+        elif args.command == "record":
             record = record_manifest(args.build_dir, args.fw_base, args.tag)
         elif args.command == "stage":
             record = record_manifest(

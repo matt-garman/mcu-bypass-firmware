@@ -9,9 +9,11 @@ DESIGN_DOCUMENTATION="$ROOT/DESIGN_DOCUMENTATION.adoc"
 PROJECT_README="$ROOT/README.md"
 RELEASE_README="$ROOT/release/README.md"
 TEST_README="$ROOT/test/README.md"
+MATRIX_TOOL="$ROOT/test/pic/pic12f675_matrix_evidence.py"
 RELEASE=${RELEASE:-$ROOT/scripts/make-release.sh}
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-qualification.XXXXXX")
 release="$work/release"
+matrix_build="$work/pic12f675-matrix"
 sha=0123456789abcdef0123456789abcdef01234567
 version=v99.0.0
 checks=0
@@ -23,6 +25,7 @@ fail() {
 }
 
 [ -r "$RENDER" ] || fail "release documentation renderer is missing"
+[ -r "$MATRIX_TOOL" ] || fail "PIC12F675 matrix evidence helper is missing"
 [ -r "$PIC12F675_FEASIBILITY" ] \
 	|| fail "PIC12F675 feasibility document is missing"
 [ -r "$DESIGN_DOCUMENTATION" ] \
@@ -149,7 +152,7 @@ for required in \
 		'exact canonical 34-file evidence set' \
 		'each of 18 release soak combinations' \
 		'historical 28-file/15-soak boundary for v0.9.6-v0.9.8' \
-		'36 PIC10F322, 75 PIC10F320, and 123 PIC12F675 checks' \
+		'36 PIC10F322, 75 PIC10F320, and 126 PIC12F675 checks' \
 		'## Known gaps (PIC — hardware-bench only)' \
 		'### PIC10F32x hardware gaps' \
 		'### PIC12F675 hardware gaps'; do
@@ -184,21 +187,61 @@ checks=$((checks + 1))
 # serialization wrapper that would supply the flag never runs -- and the
 # directory banner would then be parsed as the first name in each set.
 read -r -a soak_names \
-	<<<"$(make -s --no-print-directory -C "$ROOT" print-RELEASE_SOAK_NAMES)"
+	<<<"$(make -s --no-print-directory -C "$ROOT" CC=: print-RELEASE_SOAK_NAMES)"
 read -r -a evidence_names \
-	<<<"$(make -s --no-print-directory -C "$ROOT" print-RELEASE_EVIDENCE_FILES)"
+	<<<"$(make -s --no-print-directory -C "$ROOT" CC=: print-RELEASE_EVIDENCE_FILES)"
+fw_base=$(make -s --no-print-directory -C "$ROOT" CC=: print-FW_BASE)
+pic12f675_tag=$(make -s --no-print-directory -C "$ROOT" CC=: print-PIC12F675_TAG)
+read -r -a pic12f675_variants \
+	<<<"$(make -s --no-print-directory -C "$ROOT" CC=: print-CLASSIC_VARIANTS_SUPPORTED)"
 
 reset_fixture() {
 	local mode=${1:-production}
 	local duration=${2:-86400000}
 	local liveness=${3:-60000}
 	local dirty=${4:-0}
-	local expected_checks=$((duration / liveness)) name file
-	rm -rf "$release"
-	mkdir -p "$release/evidence"
+	local expected_checks=$((duration / liveness)) name file variant stem
+	local matrix_record matrix_digest
+	rm -rf "$release" "$matrix_build"
+	mkdir -p "$release/evidence" "$matrix_build/simcal"
 	for file in "${evidence_names[@]}"; do
 		printf 'retained evidence: %s\n' "$file" > "$release/evidence/$file"
 	done
+	for variant in "${pic12f675_variants[@]}"; do
+		stem="$fw_base-$pic12f675_tag-$variant"
+		printf 'shipping fixture: %s\n' "$variant" > "$matrix_build/$stem.hex"
+		printf 'assembly fixture: %s\n' "$variant" > "$matrix_build/$stem.s"
+		printf 'symbol fixture: %s\n' "$variant" > "$matrix_build/$stem.sym"
+		printf 'simcal fixture: %s\n' "$variant" \
+			> "$matrix_build/simcal/${stem}_simcal.hex"
+	done
+	python3 "$MATRIX_TOOL" record --build-dir "$matrix_build" \
+		--fw-base "$fw_base" --tag "$pic12f675_tag" >/dev/null
+	matrix_record=$(python3 "$MATRIX_TOOL" verify --build-dir "$matrix_build" \
+		--fw-base "$fw_base" --tag "$pic12f675_tag")
+	cp -p -- "$matrix_build/.pic12f675-qualified-matrix.json" \
+		"$release/evidence/pic12f675-qualified-matrix.json"
+	for variant in "${pic12f675_variants[@]}"; do
+		stem="$fw_base-$pic12f675_tag-$variant"
+		cp -p -- "$matrix_build/$stem.hex" "$release/"
+	done
+	(
+		cd "$release"
+		sha256sum -- "$fw_base-$pic12f675_tag-"*.hex > SHA256SUMS
+	)
+	matrix_digest=$(sha256sum -- \
+		"$release/evidence/pic12f675-qualified-matrix.json")
+	matrix_digest=${matrix_digest%% *}
+	{
+		printf '=== PIC12F675 retained matrix qualified: %s ===\n' "$matrix_record"
+		printf '=== all PIC12F675 pre-hardware checks complete: %s ===\n' "$matrix_record"
+		for variant in "${pic12f675_variants[@]}"; do
+			printf '=== PIC12F675 target fault/lock-step/I-O PASS (variant %s): %s ===\n' \
+				"$variant" "$matrix_record"
+		done
+		printf '=== PIC12F675 target fault/lock-step/I-O validated for all variants: %s ===\n' \
+			"$matrix_record"
+	} > "$release/evidence/pic12f675-qualification.log"
 	for name in "${soak_names[@]}"; do
 		cat > "$release/evidence/soak-$name.log" <<EOF
 SOAK START: synthetic qualification fixture
@@ -207,7 +250,7 @@ SOAK_RESULT format=1 status=pass combination=$name duration_ms=$duration livenes
 EOF
 	done
 	cat > "$release/QUALIFICATION" <<EOF
-format=1
+format=2
 version=$version
 release_mode=$mode
 source_commit=$sha
@@ -215,6 +258,7 @@ source_dirty=$dirty
 soak_duration_ms=$duration
 soak_liveness_interval_ms=$liveness
 soak_combination_count=${#soak_names[@]}
+pic12f675_matrix_sha256=$matrix_digest
 EOF
 	{
 		printf '# Firmware release %s\n\n' "$version"
@@ -224,7 +268,19 @@ EOF
 		printf -- '- **Source commit:** `%s`\n' "$sha"
 		printf -- '- **Soak duration per combination:** %s ms\n' "$duration"
 		printf -- '- **Soak combinations:** %s\n' "${#soak_names[@]}"
+		printf -- '- **PIC12F675 qualified matrix:** `evidence/pic12f675-qualified-matrix.json` (SHA-256 `%s`)\n' \
+			"$matrix_digest"
 	} > "$release/MANIFEST.md"
+}
+
+refresh_matrix_digest() {
+	local old_digest new_digest
+	old_digest=$(awk -F= '$1 == "pic12f675_matrix_sha256" { print $2 }' \
+		"$release/QUALIFICATION")
+	new_digest=$(sha256sum -- "$release/evidence/pic12f675-qualified-matrix.json")
+	new_digest=${new_digest%% *}
+	sed -i "s/$old_digest/$new_digest/g" \
+		"$release/QUALIFICATION" "$release/MANIFEST.md"
 }
 
 expect_pass() {
@@ -250,13 +306,12 @@ expect_fail() {
 reset_fixture
 expect_pass "complete production qualification"
 
-# T3: the verifier documents `make` as its only tool prerequisite for reading
-# the canonical inventory, but the Makefile probes the AVR compiler at parse
-# time to locate avr-libc headers for the analyzers. On a host without avr-gcc
-# that leaked "command not found" onto this documented tool-independent path.
-# The verifier now passes CC=: to its metadata queries, so the compiler is
-# never invoked. Prove it with a tripwire avr-gcc that fails loudly if run: a
-# valid qualification must still pass, with no compiler diagnostics on stderr.
+# The verifier uses Make for canonical inventory and Python for the retained
+# matrix, but needs no target compiler. The Makefile probes avr-gcc at parse time
+# to locate analyzer headers; on a host without avr-gcc that once leaked
+# "command not found" onto this metadata-only path. The verifier passes CC=: to
+# every query, so prove with a tripwire avr-gcc that a valid qualification still
+# passes with no compiler diagnostics on stderr.
 # This reproduces the real trigger because the Makefile's `CC = avr-gcc`
 # overrides the environment -- only the command-line CC=: bypasses the shim.
 tripwire_bin="$work/tripwire-bin"
@@ -301,8 +356,12 @@ printf 'extra=value\n' >> "$release/QUALIFICATION"
 expect_fail "unknown qualification key" "unknown QUALIFICATION key"
 
 reset_fixture
-printf 'format=1\n' >> "$release/QUALIFICATION"
+printf 'format=2\n' >> "$release/QUALIFICATION"
 expect_fail "duplicate qualification key" "duplicate QUALIFICATION key"
+
+reset_fixture
+sed -i 's/^format=2$/format=1/' "$release/QUALIFICATION"
+expect_fail "obsolete qualification format" "unsupported QUALIFICATION format"
 
 reset_fixture
 sed -i 's/^version=.*/version=v99.0.1/' "$release/QUALIFICATION"
@@ -337,6 +396,94 @@ expect_fail "hidden extra evidence" "invalid name"
 reset_fixture
 : > "$release/evidence/${evidence_names[0]}"
 expect_fail "empty evidence file" "empty or not regular"
+
+reset_fixture
+rm "$release/evidence/pic12f675-qualified-matrix.json"
+expect_fail "missing PIC12F675 matrix evidence" "does not exactly match RELEASE_EVIDENCE_FILES"
+
+reset_fixture
+mv "$release/evidence/pic12f675-qualified-matrix.json" \
+	"$release/evidence/real-pic12f675-qualified-matrix.json"
+ln -s real-pic12f675-qualified-matrix.json \
+	"$release/evidence/pic12f675-qualified-matrix.json"
+expect_fail "symlink PIC12F675 matrix evidence" "empty or not regular"
+
+reset_fixture
+sed -i 's/^pic12f675_matrix_sha256=.*/pic12f675_matrix_sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/' \
+	"$release/QUALIFICATION"
+expect_fail "wrong qualified-matrix digest" "matrix digest does not match QUALIFICATION"
+
+reset_fixture
+sed -i 's/(SHA-256 `[0-9a-f]\{64\}`)/(SHA-256 `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`)/' \
+	"$release/MANIFEST.md"
+expect_fail "wrong manifest matrix digest" "MANIFEST.md PIC12F675 matrix digest"
+
+reset_fixture
+sed -i 's/{"device"/{"device":"PIC12F675","device"/' \
+	"$release/evidence/pic12f675-qualified-matrix.json"
+refresh_matrix_digest
+expect_fail "duplicate matrix JSON key" "duplicate JSON key"
+
+reset_fixture
+printf 'not-json\n' > "$release/evidence/pic12f675-qualified-matrix.json"
+refresh_matrix_digest
+expect_fail "malformed matrix JSON" "cannot read strict matrix evidence"
+
+reset_fixture
+python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); del d["entries"]["assembly_cd4053_simple"]; open(p,"w").write(json.dumps(d,sort_keys=True,separators=(",",":"))+"\n")' \
+	"$release/evidence/pic12f675-qualified-matrix.json"
+refresh_matrix_digest
+expect_fail "incomplete matrix artifact inventory" "artifact inventory is not exact"
+
+reset_fixture
+printf 'changed released image\n' \
+	> "$release/$fw_base-$pic12f675_tag-cd4053_simple.hex"
+expect_fail "released image differs from qualified matrix" \
+	"released image does not match qualified matrix"
+
+reset_fixture
+sed -i "/  $fw_base-$pic12f675_tag-cd4053_simple.hex$/s/^[0-9a-f]\{64\}/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/" \
+	"$release/SHA256SUMS"
+expect_fail "release checksum differs from qualified matrix" \
+	"SHA256SUMS does not match qualified matrix"
+
+reset_fixture
+sed -i '/all PIC12F675 pre-hardware checks complete/s/shipping_cd4053_simple=[0-9a-f]\{64\}/shipping_cd4053_simple=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/' \
+	"$release/evidence/pic12f675-qualification.log"
+expect_fail "split PIC12F675 matrix identities" "one exact matrix-bound PASS"
+
+reset_fixture
+sed -i '/all PIC12F675 pre-hardware checks complete/d' \
+	"$release/evidence/pic12f675-qualification.log"
+expect_fail "missing PIC12F675 pre-hardware PASS" "one exact matrix-bound PASS"
+
+reset_fixture
+sed -i '/retained matrix qualified/d' \
+	"$release/evidence/pic12f675-qualification.log"
+expect_fail "missing PIC12F675 qualifier PASS" "one exact matrix-bound PASS"
+
+reset_fixture
+sed -i '/PASS (variant cd4053_with_mute)/d' \
+	"$release/evidence/pic12f675-qualification.log"
+expect_fail "missing PIC12F675 target-variant PASS" "one exact matrix-bound PASS"
+
+reset_fixture
+sed -i '/validated for all variants/d' \
+	"$release/evidence/pic12f675-qualification.log"
+expect_fail "missing PIC12F675 all-variant PASS" "one exact matrix-bound PASS"
+
+reset_fixture
+matrix_line=$(grep 'retained matrix qualified' \
+	"$release/evidence/pic12f675-qualification.log")
+printf '%s\n' "$matrix_line" >> "$release/evidence/pic12f675-qualification.log"
+expect_fail "duplicate PIC12F675 matrix record" "one exact matrix-bound PASS"
+
+reset_fixture
+matrix_line=$(grep 'retained matrix qualified' \
+	"$release/evidence/pic12f675-qualification.log")
+printf '%s conflict\n' "$matrix_line" >> "$release/evidence/pic12f675-qualification.log"
+expect_fail "conflicting extra PIC12F675 matrix record" \
+	"unexpected or duplicate matrix records"
 
 reset_fixture
 first_soak=${soak_names[0]}
@@ -406,6 +553,14 @@ checks=$((checks + 1))
 
 [ "${#evidence_names[@]}" -eq 34 ] \
 	|| fail "canonical release evidence set has ${#evidence_names[@]} entries, expected 34"
+for required in pic12f675-qualification.log pic12f675-qualified-matrix.json; do
+	[[ " ${evidence_names[*]} " == *" $required "* ]] \
+		|| fail "canonical release evidence set is missing $required"
+done
+for retired in pic12f675-test.log pic12f675-test-target-variants.log; do
+	[[ " ${evidence_names[*]} " != *" $retired "* ]] \
+		|| fail "canonical release evidence set still retains split PIC12F675 log $retired"
+done
 overridden=$(make -s --no-print-directory -C "$ROOT" \
 	RELEASE_EVIDENCE_FILES=bad print-RELEASE_EVIDENCE_FILES)
 [ "$overridden" = "${evidence_names[*]}" ] \
@@ -457,6 +612,18 @@ grep -Fq 'a staged ATtiny202 image differs from the image exercised by its gates
 grep -Fq 'a staged classic AVR image differs from the final HEX regenerated from its validated ELF' \
 	"$RELEASE" \
 	|| fail "release producer does not bind staged classic AVR images to validated ELFs"
+for wiring in \
+	'make pic12f675-test pic12f675-test-target-variants \' \
+	'python3 "$PIC12F675_MATRIX_EVIDENCE" verify-release \' \
+	'make --old-file=_pic12f675-build-soak "$bin"'; do
+	grep -Fq "$wiring" "$RELEASE" \
+		|| fail "release producer omits one-matrix PIC12F675 wiring: $wiring"
+done
+for retired in '$EVID/pic12f675-test.log' \
+		'$EVID/pic12f675-test-target-variants.log'; do
+	! grep -Fq "$retired" "$RELEASE" \
+		|| fail "release producer still writes split PIC12F675 evidence: $retired"
+done
 checks=$((checks + 1))
 
 # Render and execute the generated reproduction recipe with paths containing
@@ -805,11 +972,13 @@ rendered_manifest="$work/rendered-manifest-sections.md"
 grep -Fq 'PIC10F322, PIC10F320, and PIC12F675.' "$rendered_manifest" \
 	|| fail "rendered release scope omits PIC12F675"
 for target in pic10f322-test pic10f322-test-target-variants \
-		pic10f320-test pic10f320-test-target-variants \
-		pic12f675-test pic12f675-test-target-variants; do
+		pic10f320-test pic10f320-test-target-variants; do
 	grep -Fq "\`make $target\`" "$rendered_manifest" \
 		|| fail "rendered validation prose omits $target"
 done
+grep -Fq '`make pic12f675-test pic12f675-test-target-variants` (one retained matrix)' \
+	"$rendered_manifest" \
+	|| fail "rendered validation prose does not bind both PIC12F675 aggregates to one graph"
 grep -Fq 'all three PIC parts' "$rendered_manifest" \
 	|| fail "rendered validation prose does not describe all three PIC parts"
 grep -Fq "| PIC10F322/PIC12F675 XC8 (\`PIC_CC=$selected_pic_cc\`) | XC8 shared version |" \
@@ -825,10 +994,9 @@ release_render_commit_message v0.9.9 production abc1234 21 24 \
 	> "$rendered_commit"
 grep -Fq 'PIC10F320, and PIC12F675 -- 21 images' "$rendered_commit" \
 	|| fail "rendered release commit message omits PIC12F675 scope"
-for target in pic12f675-test pic12f675-test-target-variants; do
-	grep -Fq "make $target" "$rendered_commit" \
-		|| fail "rendered release commit message omits $target"
-done
+grep -Fq 'make pic12f675-test pic12f675-test-target-variants (one retained matrix)' \
+	"$rendered_commit" \
+	|| fail "rendered release commit message does not bind both PIC12F675 aggregates to one graph"
 grep -Fq 'Prebuilt, fully-validated firmware images for v0.9.9.' "$rendered_commit" \
 	|| fail "rendered production commit message has the wrong release mode"
 release_render_commit_message v0.9.9 dry-run abc1234 21 24 \

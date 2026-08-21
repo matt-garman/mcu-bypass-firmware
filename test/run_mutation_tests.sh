@@ -2486,7 +2486,7 @@ EOF
         exit 1
     }
     printf '%s\n' \
-        '=== PIC12F675 target fault/lock-step/I-O PASS (variant cd4053_simple): PIC12F675_MATRIX_SHA256 format=1 fixture ===' \
+        '=== PIC12F675 target fault/lock-step/I-O PASS (variant cd4053_simple): PIC12F675_MATRIX_SHA256 format=2 fixture ===' \
         > "$signature_log"
     pic12f675_classify_checker_result 0 fault:ADCON0.ADON \
         'PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target' \

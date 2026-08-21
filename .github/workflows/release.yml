@@ -12,8 +12,8 @@ name: Release
 #   1. verifies the checksum signature against the pinned maintainer key, then
 #      verifies the retained qualification belongs to the tag event's commit:
 #      an artifact-only child whose sole parent is the qualified source;
-#   2. rebuilds every release image from the TAGGED source on a clean, pinned
-#      runner (AVR Classic + ATtiny202 + PIC10F322 + PIC10F320), then regenerates
+#   2. rebuilds every release image from the TAGGED source on a clean runner
+#      (AVR Classic + ATtiny202 + PIC10F322 + PIC10F320 + PIC12F675), then regenerates
 #      and byte-compares one-shot rename/change evidence when the table applies;
 #   3. REPRODUCIBILITY GATE: asserts the committed files, SHA256SUMS entries,
 #      freshly built files, AND the canonical RELEASE_IMAGES set the Makefile
@@ -24,8 +24,8 @@ name: Release
 #   4. re-runs `make test-long` + `make attiny202-test` +
 #      `make attiny202-test-target` + `make pic10f322-test` +
 #      `make pic10f322-test-target-variants` + `make pic10f320-test` +
-#      `make pic10f320-test-target-variants` on the clean runner -- the same gates
-#      the MANIFEST claims;
+#      `make pic10f320-test-target-variants` + both PIC12F675 aggregates in one
+#      Make graph on the clean runner -- the same gates the MANIFEST claims;
 #   5. rechecks the protected remote tag and the complete frozen publication
 #      inventory, then re-verifies the detached checksum signature and image
 #      checksums from the exact directory passed to `gh release create`.
@@ -421,17 +421,12 @@ jobs:
 
       # The PIC12F675, on identical terms: release-supported since v0.9.9, images
       # in the release set, so both its aggregates belong in the public
-      # attestation. pic12f675-test carries the calibration contract that binds
-      # the soaked simcal image to the shipped HEX.
-      - name: Re-run make pic12f675-test
+      # attestation. They must share one Make graph and therefore one retained
+      # shipping/simulator/sidecar matrix; pic12f675-test also carries the
+      # calibration contract that binds simcal to the shipped HEX.
+      - name: Re-run PIC12F675 qualification (one retained matrix)
         run: |
-          make pic12f675-test STRICT_TOOLS=1 \
-            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC_DFP="${XC8_DFP_ROOT}/xc8"
-
-      - name: Re-run make pic12f675-test-target-variants (libgpsim, every variant)
-        run: |
-          make pic12f675-test-target-variants STRICT_TOOLS=1 \
+          make pic12f675-test pic12f675-test-target-variants STRICT_TOOLS=1 \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC_DFP="${XC8_DFP_ROOT}/xc8"
 

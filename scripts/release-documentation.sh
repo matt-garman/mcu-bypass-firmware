@@ -177,7 +177,7 @@ release_render_validation() {
 	printf -- '- **Validation:** `make test-long` + `make attiny202-test` + `make attiny202-test-target`'
 	printf ' + `make pic10f322-test` + `make pic10f322-test-target-variants`'
 	printf ' + `make pic10f320-test` + `make pic10f320-test-target-variants`'
-	printf ' + `make pic12f675-test` + `make pic12f675-test-target-variants`'
+	printf ' + `make pic12f675-test pic12f675-test-target-variants` (one retained matrix)'
 	printf ' (real-image fault handling, firmware/model ctx_ lock-step, and physical-output checks across AVR-XT and all three PIC parts)'
 	printf ' + %s-h parallel soak of every release soak combination (see evidence/).\n' "$hours"
 }
@@ -368,7 +368,7 @@ release_render_commit_message() {
 	printf 'Validation: make test-long + make attiny202-test + make attiny202-test-target\n'
 	printf '+ make pic10f322-test + make pic10f322-test-target-variants\n'
 	printf '+ make pic10f320-test + make pic10f320-test-target-variants\n'
-	printf '+ make pic12f675-test + make pic12f675-test-target-variants\n'
+	printf '+ make pic12f675-test pic12f675-test-target-variants (one retained matrix)\n'
 	printf '+ %s-h parallel soak of every release soak combination (evidence under\n' "$hours"
 	printf 'release/%s/evidence/).\n\n' "$version"
 	printf 'Reproducibility is pinned by release/%s/SHA256SUMS and verified on a\n' "$version"
