@@ -85,13 +85,13 @@ actuations. It does not describe faults arising during the blocking pulse. The
 correction is **coil-only** on every part except the PIC12F675, and the difference
 is a direct consequence of each part's output-write primitive:
 
-| Part | `hw_pin_set_low` writes | Coil correction scope |
+| Part | Relay coil-clear operation | Correction scope |
 | --- | --- | --- |
-| PIC10F320 | `LATA` latch (read-modify-write) | coil-only |
-| PIC10F322 | `LATA` latch (read-modify-write) | coil-only |
-| AVR classic (ATtiny13a/25/45/85) | `PORTB` (read-modify-write) | coil-only |
-| AVR-XT (ATtiny202) | `PORTA.OUTCLR` (atomic single-bit) | coil-only |
-| **PIC12F675** | **whole `GPIO` byte from an SRAM shadow** | **coil + whole-port refresh** |
+| PIC10F320 | two `LATA` single-pin clears | coil-only |
+| PIC10F322 | one masked `LATA` read-modify-write | coil-only |
+| AVR classic (ATtiny13a/25/45/85) | one masked `PORTB` read-modify-write | coil-only |
+| AVR-XT (ATtiny202) | one mask write to `PORTA.OUTCLR` | coil-only |
+| **PIC12F675** | **clear both shadow bits, then write the whole `GPIO` byte once** | **coil + whole-port refresh** |
 
 ### PIC12F675 whole-port refresh (inescapable, and safe)
 
@@ -100,6 +100,12 @@ read-modify-write-on-pins defect, the shell keeps an SRAM `gpio_shadow_` and
 writes `GPIO = gpio_shadow_` — the *entire* port byte — on every output change.
 So re-asserting the coils necessarily **refreshes the whole physical port from
 the shadow** each tick. Consequences on the relay variant:
+
+The relay driver uses the masked-clear interface for every pre-pulse,
+post-pulse, and settled-state clear. On PIC12F675 the implementation removes both
+coil bits from `gpio_shadow_` before its single `GPIO = gpio_shadow_` assignment.
+This ordering is load-bearing: two sequential single-pin clears could replay the
+other coil's corrupt shadow bit onto the physical port before the second clear.
 
 - A settled-state **coil** upset (shadow *or* physical port) is corrected.
 - **Any** physical-port upset (LED, parked spare) is *also* corrected, because
@@ -163,13 +169,19 @@ cases make the post-pulse clear load-bearing on PIC10F322. These are residual-ri
 characterizations, not evidence that the physical output accepts the write or
 that the relay cannot move.
 
+Three additional PIC12F675 shipping-source cases start with RESET, SET, or both
+coil shadow bits high while both modeled GPIO coil bits are low. Each requires
+exactly one modeled whole-port write, no intermediate high GPIO write, final low modeled
+coil state, and the expected all-port refresh. A mutation that restores the former sequential
+whole-port writes is killed by this matrix.
+
 ## Test-harness note: faithful footswitch on the AVR classic (simavr)
 
 The per-tick re-assert exposed a **simavr fidelity gap**, not a firmware bug. On
-the classic AVR, `hw_pin_set_low` takes a runtime pin, so `PORTB &= ~(1<<pin)`
-compiles to a full-`PORTB` read-modify-write; the relay shell therefore re-writes
-`PORTB` every tick. simavr, left alone, lets that write (which re-asserts PB0's
-internal pull-up) override the externally driven footswitch level, so presses
+the classic AVR, the masked clear is a full-`PORTB` read-modify-write, so the
+relay shell re-writes `PORTB` every tick. simavr, left alone, lets that write
+(which re-asserts PB0's internal pull-up) override the externally driven
+footswitch level, so presses
 stopped registering. On real hardware this cannot happen — a footswitch closed to
 ground overrides the weak internal pull-up, and re-writing an already-enabled
 pull-up is a no-op.

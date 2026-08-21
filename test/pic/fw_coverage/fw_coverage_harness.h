@@ -81,6 +81,16 @@ typedef struct {
     uint8_t final_intent;
     uint8_t final_physical;
 } fw_relay_pulse_observation_t;
+#if defined(BYPASS_MCU_PIC12F675)
+typedef struct {
+    uint8_t entry_shadow;
+    uint8_t entry_gpio;
+    uint8_t gpio_writes;
+    uint8_t physical_coil_high_samples;
+    uint8_t final_shadow;
+    uint8_t final_gpio;
+} fw_relay_reassert_observation_t;
+#endif
 #endif
 
 int fw_fault_run(fw_inject_t inj);
@@ -89,6 +99,10 @@ int fw_ctx_window_run(void);
 #if defined(TQ2_L2_5V_RELAY)
 int fw_relay_pulse_fault_run(int engaged, int inactive_high,
         uint8_t offset_ms, fw_relay_pulse_observation_t *observation);
+#if defined(BYPASS_MCU_PIC12F675)
+int fw_relay_reassert_run(uint8_t initial_coil_shadow,
+        fw_relay_reassert_observation_t *observation);
+#endif
 #endif
 int fwp_output_state_intact(uint8_t required_mask, uint8_t expected_high_mask);
 int fwp_sanity_failed(effect_state_t effect_state);

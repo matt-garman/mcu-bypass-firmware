@@ -458,6 +458,42 @@ static void test_relay_pulse_fault_window(void) {
         }
     }
 }
+
+#if defined(BYPASS_MCU_PIC12F675)
+static void test_relay_reassert_atomic_clear(void) {
+    static const uint8_t initial_coils[] = {
+        (uint8_t)(1u << RELAY_RESET_PIN),
+        (uint8_t)(1u << RELAY_SET_PIN),
+        FW_RELAY_COIL_MASK
+    };
+    uint8_t const led_mask = (uint8_t)(1u << LED_PIN);
+    uint8_t const spare_mask = (uint8_t)(1u << SPARE_OUTPUT_PIN);
+    size_t i;
+
+    for (i = 0u; i < sizeof initial_coils / sizeof initial_coils[0]; ++i) {
+        fw_relay_reassert_observation_t observation;
+        int const result =
+            fw_relay_reassert_run(initial_coils[i], &observation);
+
+        CHECK(result == 0 &&
+              observation.entry_shadow ==
+                  (uint8_t)(led_mask | initial_coils[i]) &&
+              observation.entry_gpio == spare_mask &&
+              observation.gpio_writes == 1u &&
+              observation.physical_coil_high_samples == 0u &&
+              observation.final_shadow == led_mask &&
+              observation.final_gpio == led_mask,
+              "relay reassert from shadow coils %02x must clear both bits "
+              "before one whole-port write and preserve full-port refresh "
+              "(r=%d entry=%02x/%02x writes=%u high=%u final=%02x/%02x)",
+              initial_coils[i], result,
+              observation.entry_shadow, observation.entry_gpio,
+              observation.gpio_writes,
+              observation.physical_coil_high_samples,
+              observation.final_shadow, observation.final_gpio);
+    }
+}
+#endif
 #endif
 
 static void test_pure_fault_path(void) {
@@ -491,8 +527,14 @@ static void test_pure_fault_path(void) {
 #endif
 #if defined(TQ2_L2_5V_RELAY)
 #define FW_RELAY_PULSE_CASES 12
+#if defined(BYPASS_MCU_PIC12F675)
+#define FW_RELAY_REASSERT_CASES 3
+#else
+#define FW_RELAY_REASSERT_CASES 0
+#endif
 #define FW_EXPECTED_CHECKS \
-    (FW_BASE_CHECKS + FW_CORRECTED_CASES + FW_RELAY_PULSE_CASES)
+    (FW_BASE_CHECKS + FW_CORRECTED_CASES + FW_RELAY_PULSE_CASES + \
+     FW_RELAY_REASSERT_CASES)
 #else
 #define FW_EXPECTED_CHECKS FW_BASE_CHECKS
 #endif
@@ -503,6 +545,9 @@ int main(void) {
     test_happy_path();
 #if defined(TQ2_L2_5V_RELAY)
     test_relay_pulse_fault_window();
+#if defined(BYPASS_MCU_PIC12F675)
+    test_relay_reassert_atomic_clear();
+#endif
 #endif
     test_pure_fault_path();
     if (g_checks != FW_EXPECTED_CHECKS) {

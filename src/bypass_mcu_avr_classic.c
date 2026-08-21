@@ -118,6 +118,9 @@ void hw_led_pin_set_low(void)  { PORTB &= (uint8_t)~(1 << LED_PIN); }
 // - assumes pin was previously configured as output
 void hw_pin_set_high(uint8_t const pin) { PORTB |=  (uint8_t)(1 << pin); }
 void hw_pin_set_low(uint8_t const pin)  { PORTB &= (uint8_t)~(1 << pin); }
+void hw_pin_mask_set_low(uint8_t const pin_mask) {
+    PORTB &= (uint8_t)~pin_mask;
+}
 
 
 // configure exactly the pins in output_mask as outputs; all other pins are

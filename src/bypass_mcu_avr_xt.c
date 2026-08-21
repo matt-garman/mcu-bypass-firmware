@@ -143,6 +143,9 @@ void hw_led_pin_set_low(void)  { PORTA.OUTCLR = (uint8_t)(1U << LED_PIN); }
 // - set a GPIO pin high or low (assumes pin was previously configured output)
 void hw_pin_set_high(uint8_t const pin) { PORTA.OUTSET = (uint8_t)(1U << pin); }
 void hw_pin_set_low(uint8_t const pin)  { PORTA.OUTCLR = (uint8_t)(1U << pin); }
+void hw_pin_mask_set_low(uint8_t const pin_mask) {
+    PORTA.OUTCLR = pin_mask;
+}
 
 // configure exactly the pins in output_mask as outputs (PORTA.DIR bit = 1); all
 // other pins are left as inputs.  Selected pins are driven low first (OUTCLR)

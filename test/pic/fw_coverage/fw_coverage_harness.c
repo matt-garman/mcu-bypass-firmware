@@ -34,10 +34,21 @@ uint8_t TRISIO, ANSEL, WPU, CMCON, OSCCAL, TMR0;
 bypass_option_reg_t bypass_option_reg;
 bypass_adcon0_reg_t bypass_adcon0_reg;
 static volatile INTCONbits_t g_intcon;
+#if defined(TQ2_L2_5V_RELAY)
+static fw_relay_reassert_observation_t *g_relay_reassert_observation;
+#endif
 
 uint8_t *bypass_gpio_access(void) {
     if (g_footswitch_pressed) { g_gpio &= (uint8_t)~0x20u; }
     else                      { g_gpio |= (uint8_t) 0x20u; }
+#if defined(TQ2_L2_5V_RELAY)
+    if (g_relay_reassert_observation != NULL) {
+        g_relay_reassert_observation->gpio_writes++;
+        if ((g_gpio & FW_RELAY_COIL_MASK) != 0u) {
+            g_relay_reassert_observation->physical_coil_high_samples++;
+        }
+    }
+#endif
     return &g_gpio;
 }
 
@@ -455,13 +466,22 @@ int fw_relay_pulse_fault_run(int engaged, int inactive_high,
         return -1;
     }
 
+    memset(observation, 0, sizeof *observation);
     reset_sfrs_power_on();
 #if defined(BYPASS_MCU_PIC12F675)
     fwp_set_output_state(0u, 0u);
 #else
+    g_lata = FW_RELAY_COIL_MASK;
+    hw_pin_set_low(RELAY_RESET_PIN);
+    if (relay_intent_state() != (uint8_t)(1u << RELAY_SET_PIN)) {
+        return -1;
+    }
+    hw_pin_set_low(RELAY_SET_PIN);
+    if (relay_intent_state() != 0u) {
+        return -1;
+    }
     g_lata = 0u;
 #endif
-    memset(observation, 0, sizeof *observation);
     g_mode = MODE_RELAY_PULSE;
     g_relay_observation = observation;
     g_relay_active_mask = (uint8_t)(1u <<
@@ -483,6 +503,50 @@ int fw_relay_pulse_fault_run(int engaged, int inactive_high,
     g_mode = MODE_DRIVE;
     return g_relay_pulse_error == 0 ? 0 : -1;
 }
+
+#if defined(BYPASS_MCU_PIC12F675)
+int fw_relay_reassert_run(uint8_t initial_coil_shadow,
+        fw_relay_reassert_observation_t *observation) {
+    uint8_t const led_mask = (uint8_t)(1u << LED_PIN);
+    uint8_t const spare_mask = (uint8_t)(1u << SPARE_OUTPUT_PIN);
+
+    if (observation == NULL || initial_coil_shadow == 0u ||
+            (initial_coil_shadow & (uint8_t)~FW_RELAY_COIL_MASK) != 0u) {
+        return -1;
+    }
+
+    memset(observation, 0, sizeof *observation);
+    g_relay_reassert_observation = NULL;
+    reset_sfrs_power_on();
+    fwp_set_output_state(FW_RELAY_COIL_MASK, FW_RELAY_COIL_MASK);
+    hw_pin_set_low(RELAY_RESET_PIN);
+    if (relay_intent_state() != (uint8_t)(1u << RELAY_SET_PIN) ||
+            relay_physical_state() != (uint8_t)(1u << RELAY_SET_PIN)) {
+        return -1;
+    }
+    hw_pin_set_low(RELAY_SET_PIN);
+    if (relay_intent_state() != 0u || relay_physical_state() != 0u) {
+        return -1;
+    }
+
+    fwp_set_output_state((uint8_t)(led_mask | initial_coil_shadow),
+            spare_mask);
+    observation->entry_shadow =
+        (uint8_t)(gpio_shadow_ & (uint8_t)BYPASS_OUTPUT_DDR_MASK);
+    observation->entry_gpio =
+        (uint8_t)(g_gpio & (uint8_t)BYPASS_OUTPUT_DDR_MASK);
+
+    g_relay_reassert_observation = observation;
+    hw_outputs_reassert_safe();
+    g_relay_reassert_observation = NULL;
+
+    observation->final_shadow =
+        (uint8_t)(gpio_shadow_ & (uint8_t)BYPASS_OUTPUT_DDR_MASK);
+    observation->final_gpio =
+        (uint8_t)(g_gpio & (uint8_t)BYPASS_OUTPUT_DDR_MASK);
+    return 0;
+}
+#endif
 #endif
 
 uint8_t fw_drive(const uint8_t *fsw, int n) {

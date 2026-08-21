@@ -1397,14 +1397,15 @@ resource checks, target simulation, the complete mutation gate and the shared
 lanes to the PIC12F675 carries a copy-paste risk: a lane that still compiled
 but no longer exercised part-specific behavior would pass vacuously. The
 retained mutation record refutes that. The PIC12F675 target-tool lane contributes
-22 mutants (per the step-10 status in §9), and the F2 transaction seam adds one
-PIC12F675 shell mutant to the host-available core table. The repository mutation
-inventory is **131**, weighted toward the `GPIO` shadow, sub-tick timing,
+22 mutants (per the step-10 status in §9), while the F2 transaction seam and the
+relay shadow-clear ordering each add a PIC12F675 shell mutant to the
+host-available core table. The repository mutation
+inventory is **132**, weighted toward the `GPIO` shadow, sub-tick timing,
 comparator/`CMCON`, `OSCCAL` and ANSEL-mapping guards the PIC10F322 has no
-counterpart for (§6.5). Each carries its own toolchain probe, named
-behavioral signature and sandbox validator, and a mutant that survived would
-fail the lane. A copy-paste port that did not actually drive 12F675-specific
-behavior could therefore not stay green.
+counterpart for (§6.5). Each of the 22 target-tool mutants carries its own
+toolchain probe, named behavioral signature and sandbox validator, and a mutant
+that survived would fail the lane. A copy-paste port that did not actually drive
+12F675-specific behavior could therefore not stay green.
 
 ---
 
@@ -1433,9 +1434,9 @@ ISR alternative is reconsidered; steps 2 through 9 are implemented — step 9
 re-derived the holds through the tick period rather than letting the slack absorb
 the 1.024 ms stretch (§4.4.1). Step 10 is done: `pic12f675-test` and
 `pic12f675-test-target{,-variants}` are implemented and carry the third leg of
-`test-target-matrix` and `test-target-lane-markers`, and 22 mutants with their
-own toolchain probe, named behavioral signatures and sandbox validator take the
-mutation inventory to 131;
+`test-target-matrix` and `test-target-lane-markers`; 22 target-tool mutants with
+their own toolchain probe, named behavioral signatures and sandbox validator,
+plus two host-available shell mutants, take the mutation inventory to 132;
 and both aggregates now run in CI's shared `pic` job with the two mirrors —
 `scripts/ci-local.sh` and `test-ci-local-routing` — extended alongside. Step 10
 is complete. Step 11 is done (v0.9.9): the user-facing documentation landed;

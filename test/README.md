@@ -419,11 +419,13 @@ checks pin the implementation-defined host bitfield layout before it can count
 as firmware evidence.
 
 On PIC12F675 every output variant runs an exact 86-check base predicate, fault,
-happy-path, and post-check transaction matrix. The relay variant runs 104
+happy-path, and post-check transaction matrix. The relay variant runs 107
 checks: six settled-state correct-in-place cases each add an output assertion,
-and 12 active-pulse cases characterize active-low and inactive-high faults at
-1, 6, and 11 ms in both SET and RESET. The same shared-driver matrix raises the
-PIC10F322 relay count from its 53-check base plus two settled corrections to 67.
+12 active-pulse cases characterize active-low and inactive-high faults at 1, 6,
+and 11 ms in both SET and RESET, and three shadow-order cases require RESET, SET,
+or both coil bits to clear before one whole-port write with no intermediate
+high modeled-GPIO write. The same shared-driver pulse matrix raises the PIC10F322
+relay count from its 53-check base plus two settled corrections to 67.
 The active-pulse cases record and check the actual modeled injection offset,
 count every post-injection millisecond, require the injected state to persist
 through that interval, and require the modeled outputs to finish low. They
@@ -704,9 +706,9 @@ already had.
 **PIC12F675's target-tool mutants are one table, not three, and are chosen for
 what this part has that the 10F32x parts do not.** All 22 need XC8 plus gpsim or
 libgpsim plus the derived simulator images, so there is nothing useful to split
-within that table. F2 separately adds one transaction-seam mutant to the
-core/host table because the shipping-source coverage harness can now kill that
-specific shell fault without XC8. Copying the 322's target list would mostly have re-proved
+within that table. The core/host table separately carries the F2 transaction-seam
+and relay masked-clear-order mutants because shipping-source coverage can kill
+those two shell faults without XC8. Copying the 322's target list would mostly have re-proved
 the shared pure core, so the set targets the SRAM output shadow (a severed
 write-back, each of shadow-versus-expected and port-versus-shadow independently
 turned into a tautology, and physical divergence the 322 cannot express because
@@ -742,10 +744,10 @@ current shape — the merge-time 74-mutant run, the audit that invalidated one
 kill, and the sandbox gaps that briefly cut it to 56 — is recorded in
 `docs/pic10f320_validation.md` §5.
 
-The driver independently pins the eight mutation categories at **30 core/host +
+The driver independently pins the eight mutation categories at **31 core/host +
 22 AVR-XT + 29 PIC10F320 host + 11 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 10
-PIC target + 22 PIC12F675 = 131**. It rejects category drift before probing, then
-requires dispatched + skipped = 131 and killed + survived + errored = dispatched. Every
+PIC target + 22 PIC12F675 = 132**. It rejects category drift before probing, then
+requires dispatched + skipped = 132 and killed + survived + errored = dispatched. Every
 worker status is checked; result status/output pairs are atomically published
 and accepted only with exact text grammar and no missing, hidden, or extra
 artifacts.
@@ -758,7 +760,7 @@ can enable the tool-dependent PIC10F320 mutants. The host-only
 including the wrappers' executable mode, and covers inventory, conservation,
 record/command parsing, atomic publication, checker-status classification,
 PIC12F675 behavioral signatures, source substitutions and baseline reasons, and
-result grammar in 127 checks. `MUTATION_TIMEOUT_S` defaults only when unset and
+result grammar in 131 checks. `MUTATION_TIMEOUT_S` defaults only when unset and
 accepts `0.001..86400` seconds with at most three fractional digits; zero,
 negative, empty, malformed, under-resolution, and over-limit values fail before
 any Make or tool probe. Every bounded checker owns a registered process session,

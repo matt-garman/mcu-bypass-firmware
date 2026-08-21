@@ -16,6 +16,11 @@
 void hw_pin_set_high(uint8_t const pin);
 void hw_pin_set_low(uint8_t const pin);
 
+// - set every GPIO pin selected by pin_mask low in one target operation
+// - assumes selected pins were previously configured as outputs
+// - pin_mask contains bit masks, unlike the pin-number argument above
+void hw_pin_mask_set_low(uint8_t const pin_mask);
+
 
 // LED_PIN high = status LED lit
 // LED_PIN low = status LED dark

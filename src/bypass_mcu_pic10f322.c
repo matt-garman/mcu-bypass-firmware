@@ -81,6 +81,9 @@ void hw_led_pin_set_low(void)  { LATA &= (uint8_t)~(1U << LED_PIN); }
 // - assumes pin was previously configured as output
 void hw_pin_set_high(uint8_t const pin) { LATA |=  (uint8_t)(1U << pin); }
 void hw_pin_set_low(uint8_t const pin)  { LATA &= (uint8_t)~(1U << pin); }
+void hw_pin_mask_set_low(uint8_t const pin_mask) {
+    LATA &= (uint8_t)~pin_mask;
+}
 
 
 // configure exactly the pins in output_mask as outputs (TRISA bit = 0); all

@@ -191,6 +191,10 @@ void hw_pin_set_low(uint8_t const pin) {
     gpio_shadow_ &= (uint8_t)~(1U << pin);
     GPIO = gpio_shadow_;
 }
+void hw_pin_mask_set_low(uint8_t const pin_mask) {
+    gpio_shadow_ &= (uint8_t)~pin_mask;
+    GPIO = gpio_shadow_;
+}
 
 
 // configure exactly the pins in output_mask as outputs (TRISIO bit = 0); all

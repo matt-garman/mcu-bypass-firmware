@@ -16,10 +16,12 @@ case "$device" in
     pic10f322)
         device_flags=(-D_XTAL_FREQ=2000000UL -DBYPASS_MCU_PIC10F322)
         shell_annotation=bypass_mcu_pic10f322.c.gcov
+        shell_profile=shell_tq2_l2_5v_relay
         ;;
     pic12f675)
         device_flags=(-D_XTAL_FREQ=4000000UL -DBYPASS_MCU_PIC12F675)
         shell_annotation=bypass_mcu_pic12f675.c.gcov
+        shell_profile=shell_tq2_l2_5v_relay
         ;;
     *)
         echo "FAIL: unsupported PIC firmware coverage device: $device" >&2
@@ -76,7 +78,7 @@ for spec in "${variants[@]}"; do
     "$work/test_$variant"
 done
 
-for profile in pure shell_cd4053_simple driver_cd4053_simple \
+for profile in pure "$shell_profile" driver_cd4053_simple \
 		driver_cd4053_with_mute driver_tq2_l2_5v_relay; do
     if [ ! -f "$work/$profile.gcda" ] || [ ! -s "$work/$profile.gcda" ]; then
         echo "FAIL: missing fresh PIC firmware profile: $profile.gcda" >&2

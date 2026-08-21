@@ -326,6 +326,12 @@ PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
       GPIO against an independent output shadow; the other parts do
       not claim universal external stuck-pin detection.
 +
+      Relay coil clears use one masked target operation.  On
+      PIC12F675 this clears both coil bits in the SRAM shadow before
+      one whole-port GPIO write, preventing a corrupt uncleared coil
+      bit from being replayed as an intermediate physical high while
+      preserving the required all-port refresh.
++
       This correction does not run during the 12ms blocking relay
       pulse.  An upset in that window can shorten the intended pulse
       or energize the inactive or both coils for nearly the remaining

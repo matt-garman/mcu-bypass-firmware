@@ -87,7 +87,7 @@ source "$SCRIPT_DIR/mutation_accounting.sh"
 # constraints (allowlist, no Git) that any edit to it must preserve.
 source "$SCRIPT_DIR/scratch_tree.sh"
 
-readonly MUTATION_EXPECTED_CORE=30
+readonly MUTATION_EXPECTED_CORE=31
 readonly MUTATION_EXPECTED_XT=22
 readonly MUTATION_EXPECTED_PIC_GPSIM=6
 readonly MUTATION_EXPECTED_PIC_TARGET=10
@@ -95,7 +95,7 @@ readonly MUTATION_EXPECTED_PIC_SOAK=1
 readonly MUTATION_EXPECTED_PIC320_HOST=29
 readonly MUTATION_EXPECTED_PIC320_TOOL=11
 readonly MUTATION_EXPECTED_PIC12F675=22
-readonly MUTATION_EXPECTED_TOTAL=131
+readonly MUTATION_EXPECTED_TOTAL=132
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
@@ -787,6 +787,7 @@ MUTATIONS=(
 "src/bypass_output_cd4053_simple.c	s@hw_pin_set_low(CD4053_PIN)@hw_pin_set_high(CD4053_PIN)@	test-sim-cd4053_simple-attiny13a	bypass routes CD4053 the wrong way (PB2 stuck high); power-on control-output test catches it"
 "src/bypass_output_cd4053_simple.c	s@hw_pin_set_high(CD4053_PIN)@hw_pin_set_low(CD4053_PIN)@	test-sim-cd4053_simple-attiny13a	engaged routes CD4053 the wrong way (PB2 stuck low); control-output test catches it"
 # --- TQ2 relay output driver ---------------------------------------------------
+"src/bypass_mcu_pic12f675.c	/void hw_pin_mask_set_low/,/^}/s@gpio_shadow_ &= (uint8_t)~pin_mask;@(void)pin_mask;\n    gpio_shadow_ \&= (uint8_t)~(1U << RELAY_RESET_PIN);\n    GPIO = gpio_shadow_;\n    gpio_shadow_ \&= (uint8_t)~(1U << RELAY_SET_PIN);@	host:atomic-clear|pic12f675-coverage-check-fw	PIC12F675 relay masked clear restored to sequential whole-port writes; RESET/SET/both shadow cases require both coil bits clear before one GPIO write with no intermediate modeled-GPIO high"
 "src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	test-sim-tq2_l2_5v_relay-attiny13a	relay coil pulse shortened to 1ms (< 4ms datasheet min); pulse-width test catches it"
 "src/bypass_output_tq2_l2_5v_relay.c	s@pin_set_high(RELAY_SET_PIN)@pin_set_high(RELAY_RESET_PIN)@	test-sim-tq2_l2_5v_relay-attiny13a	engage pulses the wrong (RESET) coil; relay test catches SET-not-pulsed / RESET-moved"
 # --- CD4053 with-mute output driver --------------------------------------------
@@ -1188,7 +1189,7 @@ pic12f675_soak_result_complete() {
 }
 
 pic12f675_mutation_has_signature() {
-    local signature=$1 command=$2 log=$3 fault_label assertion variant
+    local signature=$1 command=$2 log=$3 fault_label assertion variant count
     case "$signature" in
         fault:*)
             fault_label=${signature#fault:}
@@ -1246,12 +1247,24 @@ pic12f675_mutation_has_signature() {
                 && grep -Eq 'FAIL: [1-9][0-9]* resets in 2000 ms \(want exactly 0\)  \[unexpected reset path fired\]' "$log" \
                 && grep -Eq "^PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=46 failures=[1-9][0-9]*$" "$log"
             ;;
+        host:atomic-clear)
+            [ "$command" = pic12f675-coverage-check-fw ] || return 1
+            count=$(grep -c '^PIC shipping-source coverage harness: 86 checks, 0 failures$' \
+                "$log" || true)
+            [ "$count" -eq 2 ] \
+                && grep -Fq 'relay reassert from shadow coils 02 must clear both bits' "$log" \
+                && grep -Fq 'relay reassert from shadow coils 04 must clear both bits' "$log" \
+                && grep -Fq 'relay reassert from shadow coils 06 must clear both bits' "$log" \
+                && [ "$(grep -c 'relay reassert from shadow coils .* must clear both bits' \
+                    "$log" || true)" -eq 3 ] \
+                && grep -Fq 'PIC shipping-source coverage harness: 107 checks, 3 failures' "$log"
+            ;;
         *) return 2 ;;
     esac
 }
 
 pic12f675_mutation_completed_cleanly() {
-    local command=$1 log=$2 variant
+    local command=$1 log=$2 variant count
     case "$command" in
         pic12f675-test-gpsim)
             pic12f675_gpsim_results_complete pass "$log"
@@ -1264,6 +1277,14 @@ pic12f675_mutation_completed_cleanly() {
         *pic12f675-test-soak)
             pic12f675_soak_result_complete pass "$command" "$log"
             ;;
+        pic12f675-coverage-check-fw)
+            count=$(grep -c '^PIC shipping-source coverage harness: 86 checks, 0 failures$' \
+                "$log" || true)
+            [ "$count" -eq 2 ] \
+                && grep -Fq 'PIC shipping-source coverage harness: 107 checks, 0 failures' "$log" \
+                && grep -Fq 'OK: all PIC shipping-source lines are covered except the documented reset path.' "$log" \
+                && grep -Fq 'PIC12F675 coverage-oracle negative probe: PASS' "$log"
+            ;;
         *) return 2 ;;
     esac
 }
@@ -1275,6 +1296,9 @@ pic12f675_classify_checker_result() {
         PIC12F675_CHECKER_OUTCOME=infrastructure-error
     elif grep -Eq '^FAIL: variant (cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay) did not compile for PIC12F675$' \
             "$log"; then
+        PIC12F675_CHECKER_OUTCOME=compile-error
+    elif [ "$signature" = host:atomic-clear ] \
+            && grep -Eq ': (fatal )?error:|undefined reference|collect2: error:' "$log"; then
         PIC12F675_CHECKER_OUTCOME=compile-error
     elif [ "$rc" -eq 0 ]; then
         if pic12f675_mutation_completed_cleanly "$command" "$log"; then
@@ -1697,10 +1721,11 @@ PIC_SOAK_MUTATIONS=(
 )
 
 # --- PIC12F675 mutants --------------------------------------------------------
-# One table, not three, because this part has ONE toolchain gate: every kill
+# One target-tool table, not three, because this part has ONE toolchain gate: every kill
 # target below needs XC8 plus gpsim or libgpsim, and pic12f675-simcal on top of
-# that. Splitting by lane the way the PIC10F322 tables do would buy nothing --
-# there is no host-only PIC12F675 lane for a mutant to fall back to.
+# that. Splitting this table by lane the way the PIC10F322 tables do would buy
+# nothing. Two PIC12F675 shell faults that shipping-source coverage can prove
+# without XC8 live in the always-run core/host table instead.
 #
 # Chosen for what each fault actually perturbs, and weighted toward what this
 # part has that the 10F32x parts do not:
@@ -1885,6 +1910,9 @@ collect_baseline_targets() {
     for entry in "${entries[@]}"; do
         mutation_parse_record "$label baseline" "$field_count" "$entry" || return 1
         target=${MUTATION_RECORD_FIELDS[target_index]}
+        case "$target" in
+            host:*'|'*) target=${target#*|} ;;
+        esac
         split_mutation_make_command "$label baseline" "$target" || return 1
         if [[ -z ${seen["$target"]+x} ]]; then
             seen["$target"]=1
@@ -2321,6 +2349,55 @@ EOF
         "$signature_log"
     [ "$PIC12F675_CHECKER_OUTCOME" = killed ] || {
         echo "ERROR: PIC12F675 correct:coil behavioral failure was not classified as killed" >&2
+        exit 1
+    }
+    printf '%s\n' \
+        'PIC shipping-source coverage harness: 86 checks, 0 failures' \
+        'PIC shipping-source coverage harness: 86 checks, 0 failures' \
+        'FAIL fixture: relay reassert from shadow coils 02 must clear both bits' \
+        'FAIL fixture: relay reassert from shadow coils 04 must clear both bits' \
+        'FAIL fixture: relay reassert from shadow coils 06 must clear both bits' \
+        'PIC shipping-source coverage harness: 107 checks, 3 failures' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 2 host:atomic-clear \
+        pic12f675-coverage-check-fw "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = killed ] || {
+        echo "ERROR: PIC12F675 host atomic-clear failure was not classified as killed" >&2
+        exit 1
+    }
+    printf '%s\n' \
+        'PIC shipping-source coverage harness: 86 checks, 0 failures' \
+        'PIC shipping-source coverage harness: 86 checks, 0 failures' \
+        'FAIL fixture: relay reassert from shadow coils 02 must clear both bits' \
+        'FAIL fixture: relay reassert from shadow coils 04 must clear both bits' \
+        'PIC shipping-source coverage harness: 107 checks, 3 failures' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 2 host:atomic-clear \
+        pic12f675-coverage-check-fw "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = checker-error ] || {
+        echo "ERROR: incomplete PIC12F675 host atomic-clear failure received kill credit" >&2
+        exit 1
+    }
+    printf '%s\n' \
+        '/fixture/bypass_mcu_pic12f675.c:194: error: compile fixture' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 2 host:atomic-clear \
+        pic12f675-coverage-check-fw "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = compile-error ] || {
+        echo "ERROR: PIC12F675 host atomic-clear compile failure received kill credit" >&2
+        exit 1
+    }
+    printf '%s\n' \
+        'PIC shipping-source coverage harness: 86 checks, 0 failures' \
+        'PIC shipping-source coverage harness: 86 checks, 0 failures' \
+        'PIC shipping-source coverage harness: 107 checks, 0 failures' \
+        'OK: all PIC shipping-source lines are covered except the documented reset path.' \
+        'PIC12F675 coverage-oracle negative probe: PASS (source line 631)' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 0 host:atomic-clear \
+        pic12f675-coverage-check-fw "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = survived ] || {
+        echo "ERROR: complete PIC12F675 host atomic-clear checker was not classified as survived" >&2
         exit 1
     }
     write_pic12_gpsim_fixture \
@@ -2807,7 +2884,7 @@ EOF
             "$RESULT_DIR/selftest-no-newline.status" >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted an unterminated status" >&2; exit 1
     fi
-    echo "mutation sandbox/accounting validation: 127 checks, 0 failures"
+    echo "mutation sandbox/accounting validation: 131 checks, 0 failures"
     exit 0
 fi
 
@@ -2850,7 +2927,10 @@ for entry in "${MUTATIONS[@]}"; do
     mutation_parse_record "core/AVR collection" 4 "$entry" || exit 2
     file=${MUTATION_RECORD_FIELDS[0]}; sed_expr=${MUTATION_RECORD_FIELDS[1]}
     target=${MUTATION_RECORD_FIELDS[2]}; desc=${MUTATION_RECORD_FIELDS[3]}
-    job_specs+=("$core_cat$US""make$US$target$US$file$US$sed_expr$US$desc")
+    case "$target" in
+        host:*'|'*) job_specs+=("$core_cat$US""pic12f675$US$target$US$file$US$sed_expr$US$desc") ;;
+        *) job_specs+=("$core_cat$US""make$US$target$US$file$US$sed_expr$US$desc") ;;
+    esac
 done
 
 # PIC10F320 host-lane mutants: only a C compiler is required, so these ride with

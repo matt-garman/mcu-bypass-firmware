@@ -45,14 +45,15 @@
 #endif
 // Output-stage fault policy is variant-split (see docs/relay_coil_fault_correction.md).
 //
-// Relay variant: hw_outputs_reassert_safe() re-drives set_relay_coils_low() at
-// the top of every serviced tick, before the sanity gate. Because this part has
-// no LATx and writes the WHOLE shadow to GPIO, that re-assert (a) clears the
-// coil bits in the shadow and (b) refreshes the ENTIRE physical port from the
-// shadow. So a coil SHADOW upset and ANY physical-PORT upset are corrected
-// within one iteration with no reset; only a non-coil SHADOW (intent) upset and
-// the shadow-vs-expected upset (shadow.expected) still resets. A persistent port fault
-// (pin will not follow the refresh) is still caught by port-follows-shadow.
+// Relay variant: hw_outputs_reassert_safe() calls the masked coil clear at the
+// top of every serviced tick, before the sanity gate. Because this part has no
+// LATx, that operation clears BOTH coil bits in the shadow before one whole-port
+// GPIO write. It therefore (a) cannot replay the other coil's corrupt shadow bit
+// as an intermediate high and (b) refreshes the entire physical port from the
+// shadow. A coil SHADOW upset and any physical-PORT upset are corrected within
+// one iteration with no reset; only a non-coil SHADOW (intent) upset and the
+// shadow-vs-expected upset (shadow.expected) still reset. A settled persistent
+// port mismatch is still caught by port-follows-shadow.
 //
 // CD4053 variants: hw_outputs_reassert_safe() is a no-op, so every output upset
 // still resets, exactly as before.
@@ -60,10 +61,12 @@
 // expected_resets=0 asserts "corrected, no reset." That transitively proves
 // within-one-tick correction: an uncorrected coil/port bit would diverge from
 // the shadow and trip the port-follows-shadow gate at the next tick -> reset.
-// A shadow coil injection never drives the port high on this part (the re-assert
-// clears the shadow bit before the next GPIO=shadow write), so we cannot use the
-// 320-style inject_relay_correction_case, whose observed_port==mask precondition
-// only holds where the latch drives the port.
+// The shipping-source host oracle separately proves RESET, SET, and both-coil
+// shadow injections cause exactly one modeled whole-port write with no
+// intermediate high GPIO write. This target lane checks the final
+// correction/no-reset result; it cannot use the 320-style
+// inject_relay_correction_case, whose
+// observed_port==mask precondition only holds where a latch drives the port.
 #  define PIC_FAULT_EXPECTED_CHECKS (45u + PIC_FAULT_CTX_INRANGE)
 #  define PIC_FAULT_EXTRA_OUTPUT_INJECTIONS() do { \
     inject_case("shadow.GP0", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x01, 1, \

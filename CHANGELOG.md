@@ -32,6 +32,17 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- **PIC12F675 relay coil clears now commit through one whole-port write.** The
+  shared relay driver clears both coil bits with one masked hardware-interface
+  operation. On PIC12F675, that operation removes both bits from the SRAM output
+  shadow before writing `GPIO` once, so a SET or both-coil shadow upset cannot be
+  replayed as an intermediate physical high while RESET is cleared first. Three
+  shipping-source cases cover RESET, SET, and both shadow bits, preserve the
+  all-port refresh, and kill a mutant restoring the sequential writes. The other
+  modular shells implement the same interface as one masked latch/OUTCLR
+  operation; PIC10F320 remains unchanged because it has no independent shadow
+  replay path.
+
 - **A settled-state relay-coil upset is now corrected in place, once per
   serviced iteration.** Between actuations, every relay-capable shell re-asserts
   both coils low before the sanity gate, so a transient writable coil-state
