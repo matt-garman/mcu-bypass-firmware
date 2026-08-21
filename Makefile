@@ -3302,11 +3302,13 @@ test-target-lane-markers:
 	@# The PIC12F675 contract. No LM_REQUIRE_ARG: its lanes share one build
 	@# prerequisite (pic12f675-simcal) that derives every variant's image, so
 	@# there is no second variable to thread and nothing for it to pin.
-	LM_LABEL='PIC12F675' \
-	LM_TARGET='pic12f675-test-target' \
-	LM_VARIANT_ARG='PIC12F675_TARGET_VARIANT' \
-	LM_VARIANT='cd4053_with_mute' \
-		./test/test_target_lane_markers.sh
+	@for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do \
+		LM_LABEL='PIC12F675' \
+		LM_TARGET='pic12f675-test-target' \
+		LM_VARIANT_ARG='PIC12F675_TARGET_VARIANT' \
+		LM_VARIANT="$$variant" \
+			./test/test_target_lane_markers.sh || exit; \
+	done
 
 test-pic-target-result-records:
 	PIC_SOAK_CXX="$(PIC_SOAK_CXX)" ./test/test_pic_target_result_records.sh

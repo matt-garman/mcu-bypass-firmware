@@ -37,6 +37,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-target-lane-markers.XXXXXX")
 trap 'rm -rf "$work"' EXIT
+. "$ROOT/test/pic/pic12f675_target_counts.sh"
 fake_make="$work/fake-make"
 log="$work/make.log"
 checks=0
@@ -57,13 +58,24 @@ LM_SUCCESS_MARKER=${LM_SUCCESS_MARKER:-target fault/lock-step/I-O PASS}
 # variant's HEX.
 LM_REQUIRE_ARG=${LM_REQUIRE_ARG:-}
 
+fail() {
+	printf 'FAIL: %s %s\n' "$LM_LABEL" "$*" >&2
+	exit 1
+}
+
 read -r -a MAKE_CMD <<<"${PROJECT_MAKE:-make}"
 [ "${#MAKE_CMD[@]}" -gt 0 ] \
 	|| { printf 'FAIL: PROJECT_MAKE must name a Make command\n' >&2; exit 1; }
 real_make=$(command -v make)
 matrix_contract_args=()
 expected_matrix_record=
+fake_fault_checks=38
+fake_lockstep_checks=3005
+fake_io_checks=26
 if [ "$LM_LABEL" = PIC12F675 ]; then
+	read -r fake_fault_checks fake_lockstep_checks fake_io_checks \
+		< <(pic12f675_target_counts "$LM_VARIANT") \
+		|| fail "no canonical result counts for variant '$LM_VARIANT'"
 	matrix_dir="$work/pic12f675-matrix"
 	mkdir -p "$matrix_dir/simcal"
 	for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
@@ -78,11 +90,6 @@ if [ "$LM_LABEL" = PIC12F675 ]; then
 	matrix_contract_args=(--old-file=_pic12f675-qualify-matrix \
 		"PIC12F675_BUILD_DIR=$matrix_dir")
 fi
-
-fail() {
-	printf 'FAIL: %s %s\n' "$LM_LABEL" "$*" >&2
-	exit 1
-}
 
 # The stand-in lane runner. It classifies which lane it was asked for from its
 # own argv -- the target name is the only argument that can carry "test-fault",
@@ -111,9 +118,9 @@ printf 'CALL' >> "${FAKE_MAKE_LOG:?}"
 printf ' <%s>' "$@" >> "$FAKE_MAKE_LOG"
 printf '\n' >> "$FAKE_MAKE_LOG"
 case "$lane" in
-	fault)    marker='FAULT-INJECT PASS'; lane_name=fault; checks=38 ;;
-	lockstep) marker='LOCK-STEP PASS'; lane_name=lockstep; checks=3005 ;;
-	io)       marker='TARGET-IO PASS'; lane_name=io; checks=${FAKE_IO_CHECKS:-42} ;;
+	fault)    marker='FAULT-INJECT PASS'; lane_name=fault; checks=${FAKE_FAULT_CHECKS:?} ;;
+	lockstep) marker='LOCK-STEP PASS'; lane_name=lockstep; checks=${FAKE_LOCKSTEP_CHECKS:?} ;;
+	io)       marker='TARGET-IO PASS'; lane_name=io; checks=${FAKE_IO_CHECKS:?} ;;
 	*)  printf 'fake-make: could not classify a lane from: %s\n' "$*" >&2
 	    exit 3 ;;
 esac
@@ -179,7 +186,10 @@ run_aggregate() {
 		REAL_PROJECT_MAKE="$real_make" LM_ENTER_REAL_MAKE=1 \
 		FAKE_MAKE_LOG="$log" FAKE_MODE="$mode" FAKE_MODE_LANE="$mode_lane" \
 		FAKE_EXACT_RESULTS="$([ "$LM_LABEL" = PIC12F675 ] && printf 1 || printf 0)" \
-		FAKE_VARIANT="$LM_VARIANT" FAKE_IO_CHECKS=26 \
+		FAKE_VARIANT="$LM_VARIANT" \
+		FAKE_FAULT_CHECKS="$fake_fault_checks" \
+		FAKE_LOCKSTEP_CHECKS="$fake_lockstep_checks" \
+		FAKE_IO_CHECKS="$fake_io_checks" \
 			"$fake_make" --no-print-directory -C "$ROOT" \
 			MAKE="$fake_make" PROJECT_MAKE=true "${matrix_contract_args[@]}" \
 			"$LM_VARIANT_ARG=$LM_VARIANT" "$LM_TARGET"
