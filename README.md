@@ -91,6 +91,10 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
 
 # Quickstart
 
+Flashing a downloaded release image needs no toolchain at all: see
+[FLASHING.md](FLASHING.md) for the per-part `avrdude` and `ipecmd` command
+templates. The rest of this section is about building from source.
+
 Requires avrtools, assumes a USBtiny programmer, and a fresh
 ATtiny13a chip (see `make help` for how to build/program other
 MCUs):
