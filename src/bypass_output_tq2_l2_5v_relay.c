@@ -48,8 +48,8 @@ void hw_init_output_pins(void) {
 
 // force both coils low
 static void set_relay_coils_low(void) {
-    hw_pin_mask_set_low((uint8_t)(
-            (1U << RELAY_RESET_PIN) | (1U << RELAY_SET_PIN)));
+    hw_pin_mask_set_low(
+            (1U << RELAY_RESET_PIN) | (1U << RELAY_SET_PIN));
 }
 
 void hw_set_bypass_state(void) {
