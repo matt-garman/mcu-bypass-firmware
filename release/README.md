@@ -14,6 +14,12 @@ image before writing. The prebuilt file remains the signed/reproducible release
 artifact, but there is not yet a no-compiler path that safely admits it to the
 device-specific trim-evidence transaction.
 
+From `v0.9.10`, PIC12F675 release qualification runs its pre-hardware and target
+aggregates in one Make graph against one retained matrix. The release evidence
+keeps the combined aggregate log and the complete twelve-artifact matrix JSON;
+`QUALIFICATION` and `MANIFEST.md` bind that JSON's digest to the final three
+shipped HEX files and their `SHA256SUMS` entries.
+
 <!-- current-release:start -->
 > **Current release contract:** `v0.9.10`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
 > The images cover three output stages; PIC10F320 is the self-contained target.

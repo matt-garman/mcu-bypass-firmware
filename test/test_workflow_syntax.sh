@@ -825,6 +825,56 @@ if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
     )
 
 
+# The public release attestation must use the same five-process PIC boundary as
+# normal CI. In particular, PIC12F675's two goals must occupy one command so GNU
+# Make executes their shared matrix qualifier once.
+if check(isinstance(release_job, dict), "release.yml: required job 'release' is missing"):
+    release_pic_invocations = []
+    for idx, step in enumerate(release_job.get("steps") or [], 1):
+        run = step.get("run") if isinstance(step, dict) else None
+        commands = shell_tokens(run) if isinstance(run, str) else []
+        for tokens in commands:
+            parsed = make_command(tokens)
+            if parsed is not None and any(goal in PIC_GOALS for goal in parsed[0]):
+                release_pic_invocations.append((idx, step, len(commands), parsed, tokens))
+
+    for idx, step, command_count, parsed, tokens in release_pic_invocations:
+        goals, assignments, duplicate_assignment = parsed
+        check(
+            not duplicate_assignment and (goals, assignments) in PIC_COMMANDS,
+            f"release.yml: PIC step {idx} has a noncanonical aggregate command: "
+            f"{' '.join(tokens)}",
+        )
+        check(
+            command_count == 1,
+            f"release.yml: PIC aggregate step {idx} must contain only its direct Make command",
+        )
+        check("if" not in step, f"release.yml: PIC aggregate step {idx} is conditional")
+        check(
+            step.get("continue-on-error", False) is False,
+            f"release.yml: PIC aggregate step {idx} may continue after failure",
+        )
+
+    for goals, assignments in PIC_COMMANDS:
+        matches = sum(
+            not parsed[2] and parsed[:2] == (goals, assignments)
+            for _, _, _, parsed, _ in release_pic_invocations
+        )
+        check(
+            matches == 1,
+            f"release.yml: PIC command {' '.join(goals)} appears canonically "
+            f"{matches} time(s), expected 1",
+        )
+    for goal in PIC_GOALS:
+        occurrences = sum(
+            parsed[0].count(goal) for _, _, _, parsed, _ in release_pic_invocations
+        )
+        check(
+            occurrences == 1,
+            f"release.yml: PIC aggregate '{goal}' occurs {occurrences} time(s), expected 1",
+        )
+
+
 # Normal CI must reject a DFP missing any device header required by its shared
 # three-part PIC job. The installer's cache key changes with the same three-header
 # postcondition.

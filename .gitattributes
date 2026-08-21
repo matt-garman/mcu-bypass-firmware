@@ -30,3 +30,4 @@ Makefile text eol=lf
 *.sha256 -text
 SHA256SUMS -text
 QUALIFICATION -text
+release/**/evidence/pic12f675-qualified-matrix.json -text

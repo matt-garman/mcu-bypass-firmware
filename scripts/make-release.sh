@@ -38,9 +38,9 @@
 #   2. Run `make test-long`, `make attiny202-test`,
 #      `make attiny202-test-target`, `make pic10f322-test`,
 #      `make pic10f322-test-target-variants`, `make pic10f320-test`,
-#      `make pic10f320-test-target-variants`, `make pic12f675-test`, and
-#      `make pic12f675-test-target-variants` (the full qualification gates for
-#      every release-supported target).
+#      `make pic10f320-test-target-variants`, and one two-goal Make graph for
+#      `pic12f675-test pic12f675-test-target-variants` (the full qualification
+#      gates for every release-supported target).
 #   3. Run ALL release soak combinations IN PARALLEL for the full
 #      duration, collecting a pass/fail verdict and evidence from each. That is
 #      6 AVR Classic + 3 AVR-XT + 3 PIC10F322 + 3 PIC10F320 + 3 PIC12F675 = 18
@@ -383,6 +383,10 @@ PIC12F675_XTAL=$(mkv PIC12F675_XTAL)               # 4000000UL
 PIC12F675_FLASH_WORDS=$(mkv PIC12F675_FLASH_WORDS) # 1024
 PIC12F675_GPSIM_PROC=$(mkv PIC12F675_GPSIM_PROC)   # p12f675
 PIC12F675_SIMCAL_DIR=$(mkv PIC12F675_SIMCAL_DIR)   # build_pic12f675/simcal
+PIC12F675_MATRIX_EVIDENCE=$(mkv PIC12F675_MATRIX_EVIDENCE)
+PIC12F675_MATRIX_MANIFEST=$(mkv PIC12F675_MATRIX_MANIFEST)
+PIC12F675_MATRIX_EVIDENCE=$(path_from_repo "$PIC12F675_MATRIX_EVIDENCE")
+PIC12F675_MATRIX_MANIFEST=$(path_from_repo "$PIC12F675_MATRIX_MANIFEST")
 
 # --- host / AVR / analysis tools, read through their Makefile variables -------
 # The preconditions below assert these, and the manifest records their versions.
@@ -1174,23 +1178,55 @@ make pic10f320-test-target-variants STRICT_TOOLS=1 \
 ok "pic10f320-test-target-variants passed."
 validated_pic_image_hashes=$(hash_pic_image_set "${PIC_IMAGES[@]}")
 
-# PIC12F675 pre-hardware gate: build + 1024-word budget, CONFIG decode, cppcheck +
-# MISRA, host-gcov source coverage, the 8-level return-stack bound, gpsim CLI, and
-# -- load-bearing for the soak below -- pic12f675-test-calibration, which proves
-# the simcal derivation touches only word 0x3FF and leaves the shipped HEX
-# byte-identical. That gate is what lets the soak run the simcal image and still
-# count as evidence about the shipped one.
-log "running make pic12f675-test (CONFIG + analyze + coverage + stack + gpsim + calibration)..."
-make pic12f675-test STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
-	>"$EVID/pic12f675-test.log" 2>&1 \
-	|| { tail -60 "$EVID/pic12f675-test.log" >&2; die "make pic12f675-test FAILED."; }
-ok "pic12f675-test passed."
+# PIC12F675's pre-hardware and target aggregates must run in ONE Make graph.
+# Their shared phony prerequisite then qualifies one shipping/simulator/sidecar
+# matrix exactly once, and every consumer names that same complete identity. A
+# second Make process would silently replace the retained matrix and make the two
+# logs evidence about different bytes.
+PIC12F675_QUALIFICATION_LOG="$EVID/pic12f675-qualification.log"
+PIC12F675_QUALIFIED_MATRIX="$EVID/pic12f675-qualified-matrix.json"
+log "running one PIC12F675 qualification graph (pre-hardware + all target variants)..."
+make pic12f675-test pic12f675-test-target-variants \
+	STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
+	>"$PIC12F675_QUALIFICATION_LOG" 2>&1 \
+	|| { tail -60 "$PIC12F675_QUALIFICATION_LOG" >&2; die "combined PIC12F675 qualification FAILED."; }
+qualified_pic12f675_matrix_record=$(python3 "$PIC12F675_MATRIX_EVIDENCE" verify \
+	--build-dir "$PIC12F675_BUILD_DIR" --fw-base "$FW_BASE" \
+	--tag "$PIC12F675_TAG") \
+	|| die "could not verify the PIC12F675 matrix after its combined qualification"
+cp -p -- "$PIC12F675_MATRIX_MANIFEST" "$PIC12F675_QUALIFIED_MATRIX" \
+	|| die "could not retain the qualified PIC12F675 matrix manifest"
+retained_pic12f675_matrix_record=$(python3 "$PIC12F675_MATRIX_EVIDENCE" verify-file \
+	--manifest "$PIC12F675_QUALIFIED_MATRIX" --fw-base "$FW_BASE" \
+	--tag "$PIC12F675_TAG") \
+	|| die "retained PIC12F675 matrix manifest is invalid"
+[ "$retained_pic12f675_matrix_record" = "$qualified_pic12f675_matrix_record" ] \
+	|| die "retained PIC12F675 matrix identity differs from the qualified build"
+pic12f675_matrix_sha256=$(sha256sum -- "$PIC12F675_QUALIFIED_MATRIX") \
+	|| die "could not hash the retained PIC12F675 matrix manifest"
+pic12f675_matrix_sha256=${pic12f675_matrix_sha256%% *}
 
-log "running make pic12f675-test-target-variants (fault + lock-step + target I/O on the simcal images)..."
-make pic12f675-test-target-variants STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
-	>"$EVID/pic12f675-test-target-variants.log" 2>&1 \
-	|| { tail -60 "$EVID/pic12f675-test-target-variants.log" >&2; die "make pic12f675-test-target-variants FAILED."; }
-ok "pic12f675-test-target-variants passed."
+require_pic12f675_matrix_line() {
+	local expected=$1 count
+	count=$(grep -cFx -- "$expected" "$PIC12F675_QUALIFICATION_LOG" || true)
+	[ "$count" -eq 1 ] \
+		|| die "combined PIC12F675 qualification did not emit one exact matrix-bound PASS: $expected"
+}
+require_pic12f675_matrix_line \
+	"=== PIC12F675 retained matrix qualified: $qualified_pic12f675_matrix_record ==="
+require_pic12f675_matrix_line \
+	"=== all PIC12F675 pre-hardware checks complete: $qualified_pic12f675_matrix_record ==="
+for v in $VARIANTS; do
+	require_pic12f675_matrix_line \
+		"=== PIC12F675 target fault/lock-step/I-O PASS (variant $v): $qualified_pic12f675_matrix_record ==="
+done
+require_pic12f675_matrix_line \
+	"=== PIC12F675 target fault/lock-step/I-O validated for all variants: $qualified_pic12f675_matrix_record ==="
+matrix_line_count=$(grep -c 'PIC12F675_MATRIX_SHA256' \
+	"$PIC12F675_QUALIFICATION_LOG" || true)
+[ "$matrix_line_count" -eq 6 ] \
+	|| die "combined PIC12F675 qualification emitted unexpected or duplicate matrix records"
+ok "both PIC12F675 aggregates passed against one retained matrix."
 validated_pic12f675_image_hashes=$(hash_pic_image_set "${PIC12F675_IMAGES[@]}")
 
 # ============================================================================
@@ -1294,22 +1330,27 @@ for v in $PIC10F320_VARIANTS; do
 	SOAK_LOG[$name]="$EVID/soak-$name.log"
 done
 # Three more combos, one per PIC12F675 output stage. UNIQUE to this part: the soak
-# drives a DERIVED simcal image, not the shipped HEX. The `$(PIC12F675_SOAK_BIN)`
-# target builds pic12f675-simcal FIRST (its _pic12f675-build-soak prerequisite),
-# so the binary is compiled with FW_PATH pointing at build_pic12f675/simcal/ and
-# reads gpio_shadow_ out of the build .sym -- a loop copied from the 10F32x arms
-# above would compile against a nonexistent shadow address and fail closed here,
-# an hour in. PIC_CC/PIC_DFP are passed because deriving simcal walks back to the
-# shipped build, which is XC8's. Record the derived image so it can be pinned
-# unchanged across the soak, exactly as the ATtiny202 ELF is.
+# drives a DERIVED simcal image, not the shipped HEX. The direct binary target's
+# normal prerequisite rebuilds pic12f675-simcal, so release staging marks that
+# producer old: the harness must compile from the exact matrix already qualified
+# above, never replace it with a later build. Reverify all twelve artifacts after
+# every harness compile. Record each derived image so it is also pinned unchanged
+# across the soak, exactly as the ATtiny202 ELF is.
 for v in $VARIANTS; do
 	name="pic12f675_${v}"; bin="$SOAKDIR/test_soak_pic12f675_${v}"
-	make "$bin" PIC12F675_SOAK_BIN="$bin" PIC12F675_SOAK_VARIANT="$v" \
+	make --old-file=_pic12f675-build-soak "$bin" \
+		PIC12F675_SOAK_BIN="$bin" PIC12F675_SOAK_VARIANT="$v" \
 		PIC12F675_SOAK_DURATION_MS="$SOAK_DURATION_MS" \
 		PIC12F675_SOAK_LIVENESS_INTERVAL_MS="$SOAK_LIVENESS_INTERVAL_MS" \
 		PIC12F675_SOAK_COMBINATION_NAME="$name" \
 		PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
 		>>"$EVID/soak-build.log" 2>&1 || die "failed to build PIC12F675 soak $name"
+	current_pic12f675_matrix_record=$(python3 "$PIC12F675_MATRIX_EVIDENCE" verify \
+		--build-dir "$PIC12F675_BUILD_DIR" --fw-base "$FW_BASE" \
+		--tag "$PIC12F675_TAG") \
+		|| die "PIC12F675 matrix changed while compiling soak $name"
+	[ "$current_pic12f675_matrix_record" = "$qualified_pic12f675_matrix_record" ] \
+		|| die "PIC12F675 soak $name was compiled from a different qualified matrix"
 	PIC12F675_SIMCAL_IMAGES+=("$(fw_image "$PIC12F675_SIMCAL_DIR" "$PIC12F675_TAG" "$v")_simcal.hex")
 	rundir="$SOAKDIR/run-$name"; mkdir -p "$rundir"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
@@ -1432,6 +1473,12 @@ current_pic12f675_image_hashes=$(hash_pic_image_set "${PIC12F675_IMAGES[@]}")
 current_pic12f675_simcal_hashes=$(hash_pic_image_set "${PIC12F675_SIMCAL_IMAGES[@]}")
 [ "$current_pic12f675_simcal_hashes" = "$validated_pic12f675_simcal_hashes" ] \
 	|| die "a PIC12F675 simcal image changed while its soak was running"
+current_pic12f675_matrix_record=$(python3 "$PIC12F675_MATRIX_EVIDENCE" verify \
+	--build-dir "$PIC12F675_BUILD_DIR" --fw-base "$FW_BASE" \
+	--tag "$PIC12F675_TAG") \
+	|| die "the qualified PIC12F675 matrix changed while its soak was running"
+[ "$current_pic12f675_matrix_record" = "$qualified_pic12f675_matrix_record" ] \
+	|| die "the PIC12F675 soak completed against a different qualified matrix"
 current_xt_image_hashes=$(hash_xt_image_set "${XT_IMAGES[@]}")
 current_xt_elf_hashes=$(hash_xt_image_set "${XT_ELFS[@]}")
 { [ "$current_xt_image_hashes" = "$validated_xt_image_hashes" ] \
@@ -1463,6 +1510,12 @@ current_pic_image_hashes=$(hash_pic_image_set "${PIC_IMAGES[@]}")
 current_pic12f675_image_hashes=$(hash_pic_image_set "${PIC12F675_IMAGES[@]}")
 [ "$current_pic12f675_image_hashes" = "$validated_pic12f675_image_hashes" ] \
 	|| die "a validated PIC12F675 image changed before staging"
+current_pic12f675_matrix_record=$(python3 "$PIC12F675_MATRIX_EVIDENCE" verify \
+	--build-dir "$PIC12F675_BUILD_DIR" --fw-base "$FW_BASE" \
+	--tag "$PIC12F675_TAG") \
+	|| die "the qualified PIC12F675 matrix changed before staging"
+[ "$current_pic12f675_matrix_record" = "$qualified_pic12f675_matrix_record" ] \
+	|| die "the final PIC12F675 matrix differs from the retained qualification"
 ok "all validated release images are present and nonempty."
 
 # Replace the early fail-fast report with one computed from the exact final
@@ -1566,12 +1619,30 @@ for f in "$EVID"/*.log; do
 		*) cp -p "$f" "$OUTPUT_DIR/evidence/" ;;
 	esac
 done
+cp -p -- "$PIC12F675_QUALIFIED_MATRIX" \
+	"$OUTPUT_DIR/evidence/pic12f675-qualified-matrix.json" \
+	|| die "could not stage the qualified PIC12F675 matrix manifest"
+staged_pic12f675_matrix_record=$(python3 "$PIC12F675_MATRIX_EVIDENCE" verify-release \
+	--manifest "$OUTPUT_DIR/evidence/pic12f675-qualified-matrix.json" \
+	--qualification-log "$OUTPUT_DIR/evidence/pic12f675-qualification.log" \
+	--release-dir "$OUTPUT_DIR" --fw-base "$FW_BASE" \
+	--tag "$PIC12F675_TAG" \
+	--expected-manifest-sha256 "$pic12f675_matrix_sha256") \
+	|| die "staged PIC12F675 images are not bound to the qualified matrix"
+[ "$staged_pic12f675_matrix_record" = "$qualified_pic12f675_matrix_record" ] \
+	|| die "staged PIC12F675 matrix identity differs from qualification"
+staged_pic12f675_matrix_sha256=$(sha256sum -- \
+	"$OUTPUT_DIR/evidence/pic12f675-qualified-matrix.json") \
+	|| die "could not hash the staged PIC12F675 matrix manifest"
+staged_pic12f675_matrix_sha256=${staged_pic12f675_matrix_sha256%% *}
+[ "$staged_pic12f675_matrix_sha256" = "$pic12f675_matrix_sha256" ] \
+	|| die "staged PIC12F675 matrix manifest differs from retained qualification"
 
 # Compact machine-readable attestation. The verifier parses this as data (never
 # sources it), then cross-checks it against the canonical evidence inventory,
 # every terminal soak record, and the human-readable manifest.
 {
-	printf 'format=1\n'
+	printf 'format=2\n'
 	printf 'version=%s\n' "$VERSION"
 	printf 'release_mode=%s\n' "$RELEASE_MODE"
 	printf 'source_commit=%s\n' "$GIT_SHA"
@@ -1579,6 +1650,7 @@ done
 	printf 'soak_duration_ms=%s\n' "$SOAK_DURATION_MS"
 	printf 'soak_liveness_interval_ms=%s\n' "$SOAK_LIVENESS_INTERVAL_MS"
 	printf 'soak_combination_count=%s\n' "$NCOMBOS"
+	printf 'pic12f675_matrix_sha256=%s\n' "$pic12f675_matrix_sha256"
 } > "$OUTPUT_DIR/QUALIFICATION"
 
 # --- per-image facts for the manifest (target, clock, fuses, flashing cmd) ----
@@ -1723,6 +1795,8 @@ REL_BANNER=""
 	printf -- '- **Source commit:** `%s`\n' "$GIT_SHA"
 	printf -- '- **Soak duration per combination:** %s ms\n' "$SOAK_DURATION_MS"
 	printf -- '- **Soak combinations:** %s\n' "$NCOMBOS"
+	printf -- '- **PIC12F675 qualified matrix:** `evidence/pic12f675-qualified-matrix.json` (SHA-256 `%s`)\n' \
+		"$pic12f675_matrix_sha256"
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
 	release_render_validation "$hours"

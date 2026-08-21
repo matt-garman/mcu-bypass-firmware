@@ -2915,7 +2915,7 @@ test-supply-chain:
 	./test/test_supply_chain.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 36/75/123
+# image/host rebuild triggering. The script enforces the canonical 36/75/126
 # counts, so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
@@ -6121,7 +6121,8 @@ fi
 endef
 
 # Recompute every shipping/derived image and consumed .s/.sym sidecar, then
-# compare the resulting six-image record with the one captured by the wrapper.
+# compare the resulting twelve-artifact record with the one captured by the
+# wrapper.
 define pic12f675_verify_matrix_sh
 current_matrix_record=`$(call pic12f675_matrix_evidence_cmd,verify)` || { \
 	rm -f "$(PIC12F675_MATRIX_MANIFEST)"; exit 1; \
@@ -7610,7 +7611,7 @@ override RELEASE_FIXED_EVIDENCE_FILES := \
 	attiny202-test.log attiny202-test-target.log \
 	pic10f322-test.log pic10f322-test-target-variants.log \
 	pic10f320-test.log pic10f320-test-target-variants.log \
-	pic12f675-test.log pic12f675-test-target-variants.log \
+	pic12f675-qualification.log pic12f675-qualified-matrix.json \
 	soak-build.log test-long.summary.txt
 override RELEASE_EVIDENCE_FILES := $(RELEASE_FIXED_EVIDENCE_FILES) \
 	$(addprefix soak-,$(addsuffix .log,$(RELEASE_SOAK_NAMES)))

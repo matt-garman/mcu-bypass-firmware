@@ -99,15 +99,15 @@ hashed and staged after qualification.
 
 **Acceptance criteria**
 
-- [ ] One release Make graph qualifies the matrix exactly once and runs both
+- [x] One release Make graph qualifies the matrix exactly once and runs both
   PIC12F675 aggregates against it.
-- [ ] Local release staging retains evidence that identifies that one matrix.
-- [ ] The clean-runner release workflow uses the same one-graph contract.
-- [ ] Qualification verification fails closed on split, missing, duplicate,
+- [x] Local release staging retains evidence that identifies that one matrix.
+- [x] The clean-runner release workflow uses the same one-graph contract.
+- [x] Qualification verification fails closed on split, missing, duplicate,
   conflicting, stale, or image-unbound matrix evidence.
-- [ ] `README.md`, `release/README.md`, workflow comments, and test
+- [x] `README.md`, `release/README.md`, workflow comments, and test
   documentation describe the implemented evidence contract accurately.
-- [ ] Focused Make, release-qualification, workflow-syntax, release-history,
+- [x] Focused Make, release-qualification, workflow-syntax, release-history,
   and release-provenance tests pass.
 
 ### R2 - Make image-defining compiler pins exact
@@ -558,7 +558,7 @@ Record each completed item with its commit ID and decisive validation command.
 
 | Item | Status | Commit | Decisive validation |
 | --- | --- | --- | --- |
-| R1 | OPEN | | |
+| R1 | IMPLEMENTED | `7dab4db` | `make CC=: test-pic-build`; `test/test_release_qualification.sh`; `test/test_workflow_syntax.sh` |
 | R2 | OPEN | | |
 | R3 | OPEN | | |
 | F1 | DONE | (pending) | `make test`; relay fault + coverage lanes on all six substrates; PIC/AVR flash-budget gates |

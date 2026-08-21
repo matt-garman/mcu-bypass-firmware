@@ -522,11 +522,17 @@ done
 	|| fail "autocrlf checkout invalidated the historical checksum signature"
 checks=$((checks + 1))
 
-# QUALIFICATION first appears in the next release, so assert its prospective
-# path directly. Also pin the LF policy on each executable/source text class.
+# QUALIFICATION and the retained PIC12F675 matrix are byte-hashed release data,
+# so assert prospective paths directly. Also pin the LF policy on each
+# executable/source text class.
 attribute=$(git -C "$ROOT" check-attr text -- release/v99.0.0/QUALIFICATION)
 [ "$attribute" = "release/v99.0.0/QUALIFICATION: text: unset" ] \
 	|| fail "QUALIFICATION is not marked byte-exact: $attribute"
+checks=$((checks + 1))
+matrix_path=release/v99.0.0/evidence/pic12f675-qualified-matrix.json
+attribute=$(git -C "$ROOT" check-attr text -- "$matrix_path")
+[ "$attribute" = "$matrix_path: text: unset" ] \
+	|| fail "PIC12F675 qualified matrix is not marked byte-exact: $attribute"
 checks=$((checks + 1))
 for path in Makefile src/bypass_pure.c src/bypass_pure.h \
 		test/avr/sim_attiny202.py test/test_release_history.sh \

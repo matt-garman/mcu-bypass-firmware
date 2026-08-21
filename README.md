@@ -218,11 +218,13 @@ proves the injection leaves the shipping images byte-identical. That is why this
 part has one aggregate lane the others do not.
 
 Request the two PIC12F675 aggregates in one Make invocation as shown above. Make
-then builds one retained shipping/derived matrix and stages SHA-256 for all six
-images and the assembly/symbol sidecars consumed by the target lanes. It
+then builds one retained shipping/derived matrix and records SHA-256 for all six
+images plus the six assembly/symbol sidecars consumed by the target lanes. It
 promotes that record to the qualified manifest only after the discarded private
 compiler build and calibration probes agree, then rechecks it after every
-consumer. Every aggregate PASS names the same six image hashes. Separate
+consumer. Every aggregate PASS names the same twelve-artifact identity. Release
+qualification retains that JSON manifest and binds its digest, the final shipped
+HEX bytes, and their `SHA256SUMS` entries into one verified evidence chain. Separate
 invocations remain valid standalone qualifications, but necessarily create
 separate retained matrices and therefore cannot be combined as one evidence set.
 

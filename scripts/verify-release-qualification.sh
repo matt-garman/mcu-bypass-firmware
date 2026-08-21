@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Verify the retained local release qualification before tag CI publishes it.
 # This does not rerun the 24-hour soak. It fails unless the committed evidence
-# has the exact canonical inventory and every soak log carries one complete,
-# machine-readable result matching the producer's qualification metadata.
+# has the exact canonical inventory, PIC12F675's aggregate evidence names one
+# retained matrix matching the released bytes, and every soak log carries one
+# complete machine-readable result matching the qualification metadata.
 set -euo pipefail
 LC_ALL=C
 export LC_ALL
@@ -39,6 +40,8 @@ repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P) \
 	|| die "cannot locate repository root"
 command -v make >/dev/null 2>&1 \
 	|| die "make is required to read the canonical release qualification set"
+command -v python3 >/dev/null 2>&1 \
+	|| die "python3 is required to verify retained PIC12F675 matrix evidence"
 
 qualification="$release_dir/QUALIFICATION"
 manifest="$release_dir/MANIFEST.md"
@@ -54,7 +57,8 @@ evidence_dir="$release_dir/evidence"
 # to a privileged workflow and must remain data, not shell code.
 declare -A q=()
 required_keys=(format version release_mode source_commit source_dirty \
-	soak_duration_ms soak_liveness_interval_ms soak_combination_count)
+	soak_duration_ms soak_liveness_interval_ms soak_combination_count \
+	pic12f675_matrix_sha256)
 line_no=0
 while IFS= read -r line || [ -n "$line" ]; do
 	line_no=$((line_no + 1))
@@ -77,11 +81,13 @@ done
 [ "${#q[@]}" -eq "${#required_keys[@]}" ] \
 	|| die "QUALIFICATION does not contain the exact required schema"
 
-[ "${q[format]}" = 1 ] || die "unsupported QUALIFICATION format: ${q[format]}"
+[ "${q[format]}" = 2 ] || die "unsupported QUALIFICATION format: ${q[format]}"
 [ "${q[version]}" = "$expected_version" ] \
 	|| die "QUALIFICATION version ${q[version]} does not match $expected_version"
 [[ "${q[source_commit]}" =~ ^[0-9a-f]{40}$ ]] \
 	|| die "QUALIFICATION source_commit is not a full lowercase SHA-1"
+[[ "${q[pic12f675_matrix_sha256]}" =~ ^[0-9a-f]{64}$ ]] \
+	|| die "QUALIFICATION pic12f675_matrix_sha256 is not a lowercase SHA-256"
 
 case "${q[release_mode]}" in
 	production)
@@ -149,10 +155,30 @@ canonical_soaks_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
 canonical_evidence_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
 	print-RELEASE_EVIDENCE_FILES) \
 	|| die "cannot read RELEASE_EVIDENCE_FILES from the Makefile"
+matrix_tool_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
+	print-PIC12F675_MATRIX_EVIDENCE) \
+	|| die "cannot read PIC12F675_MATRIX_EVIDENCE from the Makefile"
+fw_base=$(make -s --no-print-directory CC=: -C "$repo_root" print-FW_BASE) \
+	|| die "cannot read FW_BASE from the Makefile"
+pic12f675_tag=$(make -s --no-print-directory CC=: -C "$repo_root" \
+	print-PIC12F675_TAG) \
+	|| die "cannot read PIC12F675_TAG from the Makefile"
+pic12f675_variants_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
+	print-CLASSIC_VARIANTS_SUPPORTED) \
+	|| die "cannot read CLASSIC_VARIANTS_SUPPORTED from the Makefile"
+case "$matrix_tool_raw" in
+	/*) matrix_tool=$matrix_tool_raw ;;
+	*) matrix_tool="$repo_root/$matrix_tool_raw" ;;
+esac
+[ -f "$matrix_tool" ] && [ ! -L "$matrix_tool" ] && [ -s "$matrix_tool" ] \
+	|| die "PIC12F675 matrix evidence verifier is missing, empty, or not regular"
 read -r -a canonical_soaks <<<"$canonical_soaks_raw"
 read -r -a canonical_evidence <<<"$canonical_evidence_raw"
+read -r -a pic12f675_variants <<<"$pic12f675_variants_raw"
 [ "${#canonical_soaks[@]}" -gt 0 ] || die "canonical release soak set is empty"
 [ "${#canonical_evidence[@]}" -gt 0 ] || die "canonical release evidence set is empty"
+[ "${#pic12f675_variants[@]}" -eq 3 ] \
+	|| die "canonical PIC12F675 variant set does not contain exactly three entries"
 [ "${q[soak_combination_count]}" -eq "${#canonical_soaks[@]}" ] \
 	|| die "soak_combination_count does not match the canonical set"
 
@@ -170,6 +196,7 @@ validate_canonical_names() {
 }
 validate_canonical_names "canonical release soak set" "${canonical_soaks[@]}"
 validate_canonical_names "canonical release evidence set" "${canonical_evidence[@]}"
+validate_canonical_names "canonical PIC12F675 variant set" "${pic12f675_variants[@]}"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/release-qualification.XXXXXX")
 trap 'rm -rf "$work"' EXIT
@@ -192,6 +219,17 @@ sort -o "$actual_list" "$actual_list"
 if ! diff -u "$expected_list" "$actual_list"; then
 	die "retained evidence does not exactly match RELEASE_EVIDENCE_FILES"
 fi
+
+matrix_manifest="$evidence_dir/pic12f675-qualified-matrix.json"
+matrix_log="$evidence_dir/pic12f675-qualification.log"
+matrix_record=$(python3 "$matrix_tool" verify-release \
+	--manifest "$matrix_manifest" --qualification-log "$matrix_log" \
+	--release-dir "$release_dir" --fw-base "$fw_base" \
+	--tag "$pic12f675_tag" \
+	--expected-manifest-sha256 "${q[pic12f675_matrix_sha256]}") \
+	|| die "retained PIC12F675 matrix does not match the released images and checksums"
+[[ "$matrix_record" == "PIC12F675_MATRIX_SHA256 format=2 "* ]] \
+	|| die "retained PIC12F675 matrix verifier returned an invalid identity record"
 
 for combination in "${canonical_soaks[@]}"; do
 	log="$evidence_dir/soak-$combination.log"
@@ -219,6 +257,8 @@ grep -Fxq -- "- **Soak duration per combination:** $duration ms" "$manifest" \
 	|| die "MANIFEST.md soak duration does not match QUALIFICATION"
 grep -Fxq -- "- **Soak combinations:** ${q[soak_combination_count]}" "$manifest" \
 	|| die "MANIFEST.md soak count does not match QUALIFICATION"
+grep -Fxq -- "- **PIC12F675 qualified matrix:** \`evidence/pic12f675-qualified-matrix.json\` (SHA-256 \`${q[pic12f675_matrix_sha256]}\`)" "$manifest" \
+	|| die "MANIFEST.md PIC12F675 matrix digest does not match QUALIFICATION"
 if [ "${q[release_mode]}" = production ]; then
 	if grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$manifest"; then
 		die "production MANIFEST.md contains the dry-run banner"
