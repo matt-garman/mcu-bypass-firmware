@@ -528,7 +528,7 @@ Record each completed item with its commit ID and decisive validation command.
 
 | Item | Status | Commit | Decisive validation |
 | --- | --- | --- | --- |
-| R1 | IMPLEMENTED | pending | `make CC=: test-pic-build`; `test/test_release_qualification.sh`; `test/test_workflow_syntax.sh` |
+| R1 | IMPLEMENTED | `7dab4db` | `make CC=: test-pic-build`; `test/test_release_qualification.sh`; `test/test_workflow_syntax.sh` |
 | R2 | OPEN | | |
 | R3 | OPEN | | |
 | F1 | OPEN | | |
