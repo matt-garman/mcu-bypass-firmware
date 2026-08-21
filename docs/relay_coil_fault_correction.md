@@ -24,7 +24,7 @@ residual risks.
 
 PIC10F320 gained its relay-only loop-top re-assert in `f78d168` and first shipped
 it in v0.9.8. The four modular shells gained the shared-interface equivalent in
-`93f637b`; that cross-shell change is post-v0.9.9 and currently Unreleased.
+`93f637b`; that cross-shell change first ships in v0.9.10.
 
 ## Why correct-in-place, not de-energize-then-reset
 

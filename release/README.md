@@ -15,7 +15,7 @@ artifact, but there is not yet a no-compiler path that safely admits it to the
 device-specific trim-evidence transaction.
 
 <!-- current-release:start -->
-> **Current release contract:** `v0.9.9`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
+> **Current release contract:** `v0.9.10`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
 > The images cover three output stages; PIC10F320 is the self-contained target.
 <!-- current-release:end -->
 

@@ -1,7 +1,7 @@
 # PIC12F675 feasibility — porting the reference architecture to a classic mid-range PIC
 
 <!-- current-status:start -->
-**Current status (v0.9.9; updated 2026-08-21): release-supported in software.**
+**Current status (v0.9.10; updated 2026-08-21): release-supported in software.**
 The repository now contains the production Model-B PIC12F675 shell and pin map,
 the complete three-variant build and flash-budget lane, static analysis,
 shipping-source coverage, production-image return-stack and CONFIG gates,
@@ -16,7 +16,7 @@ part. It is included in the default `all` goal, both CI aggregates, the canonica
 evidence inventory. The tag workflow rebuilds and requalifies its three shipping
 images with the pinned PIC toolchain before publication.
 
-The current Unreleased build uses 546/572/563 of 1024 program words for the
+The current v0.9.10 build uses 546/572/563 of 1024 program words for the
 simple/mute/relay variants. Persistent firmware state is 6 bytes (`ctx_`,
 `ctx_check_`, `gpio_shadow_`, and `osccal_snapshot_`); a current XC8 total Data
 Space reservation was not retained and is therefore not inferred from older
@@ -31,8 +31,8 @@ and provides no real-programmer factory-trim preservation guarantee.
 The 2026-08-05 assessment, design rationale, spike provenance and proposed
 sequencing are retained below as history. Sections 1 through 7, the original
 sequence in §9, and the documentation plan in §11 intentionally retain their
-preimplementation reasoning and prospective tense. Explicit current/v0.9.9
-status notes override that historical text; it is not a statement that current
+preimplementation reasoning and prospective tense. Explicit current-status
+notes override that historical text; it is not a statement that current
 targets, tests, CI, or release integration are absent.
 
 **What the 2026-08-05 assessment established:**
@@ -1387,7 +1387,7 @@ before it can drive a wrong output:
 The one nominal-path case those range and actuation guards do **not** cover is
 an *in-range* single-bit upset of `debounce_counter` -- a flip that stays
 within `[0, RELEASE_THRESH]` yet crosses `PRESSED_THRESH`, fabricating a
-phantom toggle with no footswitch press. On the current Unreleased PIC12F675
+phantom toggle with no footswitch press. On the current v0.9.10 PIC12F675
 build that case is closed, not open: `PIC12F675_CFLAGS` defines
 `-DBYPASS_CTX_CHECK`, so the gate's first term compares a persisted-context
 snapshot against `debounce_ctx_check_word()`. The shell then computes and
@@ -1435,7 +1435,7 @@ review and verification evidence. The original sequencing rule remains useful
 review history; the only unfinished work in this section is the `1.x.y` hardware
 bench identified in §8.
 
-**Current implementation status (v0.9.9):** step 0 selected the 1.024 ms TMR0 design,
+**Current implementation status (v0.9.10):** step 0 selected the 1.024 ms TMR0 design,
 a single-part PIC12F675 shell, and Model B. Step 1 is not applicable unless the
 ISR alternative is reconsidered; steps 2 through 9 are implemented — step 9
 re-derived the holds through the tick period rather than letting the slack absorb

@@ -14,16 +14,19 @@ reviewed successor digests now drive a standing gate, while the migration proof
 and its provenance remain durable only here.
 
 <!-- current-release:start -->
-**Current release contract:** `v0.9.9`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
+**Current release contract:** `v0.9.10`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
 
-**Qualification status (2026-08-17):** PIC10F320 remains the self-contained
+**Qualification status (2026-08-21):** PIC10F320 remains the self-contained
 exception. The authoritative `QUALIFICATION`, manifest, image checksums, and
-exact 34-file lane/soak evidence live under `release/v0.9.9/`; that retained
+exact 34-file lane/soak evidence live under `release/v0.9.10/`; that retained
 record, rather than this summary, identifies the qualified source commit and
 measured results.
 <!-- current-release:end -->
 
-The preceding `v0.9.8` production record retains all 18 then-canonical images,
+The preceding `v0.9.9` production record retains all 21 canonical images and 18
+full-duration soak combinations under `release/v0.9.9/`.
+
+The earlier `v0.9.8` production record retains all 18 then-canonical images,
 15 full-duration soak combinations, and the rename-identity evidence that pins
 17 renamed images byte-identical while recording the intentional PIC10F320 relay
 change under `release/v0.9.8/`.

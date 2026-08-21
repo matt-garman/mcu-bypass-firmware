@@ -1,7 +1,7 @@
 # PIC10F320 — the constrained target
 
 <!-- current-release:start -->
-**Current release contract:** `v0.9.9`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
+**Current release contract:** `v0.9.10`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
 
 **Status:** PIC10F320 is release-supported since `v0.9.6` and remains the
 self-contained exception. This document is the single authoritative statement

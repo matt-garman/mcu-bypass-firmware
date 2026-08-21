@@ -30,6 +30,8 @@ file is the human-readable summary of *what changed*.
 
 ## [Unreleased]
 
+## [0.9.10] - 2026-08-21
+
 ### Fixed
 
 - **PIC12F675 relay coil clears now commit through one whole-port write.** The
@@ -136,7 +138,7 @@ file is the human-readable summary of *what changed*.
   sealed PASS/FAIL result. Recovery never invokes writer arguments, and
   interrupted private attempts remain safely retryable.
 
-- **Current release documentation now identifies v0.9.9 consistently.** The
+- **Current release documentation now identifies v0.9.10 consistently.** The
   changelog, release availability, TODO status, and PIC10F320 qualification
   documents agree on seven release parts, 21 images, 18 soak combinations, and
   the six-target/four-shell modular topology. Versioned release preflight now
@@ -2965,7 +2967,8 @@ file is the human-readable summary of *what changed*.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.9...HEAD
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.10...HEAD
+[0.9.10]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.9...v0.9.10
 [0.9.9]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.8...v0.9.9
 [0.9.8]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.7...v0.9.8
 [0.9.7]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.6...v0.9.7

@@ -1,12 +1,12 @@
 # Remaining work toward textbook reference quality
 
 <!-- current-release:start -->
-**Current release contract:** `v0.9.9`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
+**Current release contract:** `v0.9.10`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
 
 **Status (2026-08-21):** No nominal-path firmware correctness defect is
 currently known. PIC10F320 remains the self-contained exception.
-`release/v0.9.9/` retains the authoritative evidence for the released v0.9.9
-source; post-v0.9.9 changes remain Unreleased. Open work is enumerated below.
+`release/v0.9.10/` retains the authoritative evidence for the released v0.9.10
+source. Open work is enumerated below.
 <!-- current-release:end -->
 
 This file contains open actions only. Completed work is removed rather than
