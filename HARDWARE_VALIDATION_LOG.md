@@ -31,5 +31,8 @@ actual hardware.
 
 ## Additional Notes
 
+  - For PIC flashing, I have a knock-off PICKit3 (amusingly labled "PCKit 3"): note that starting with MPLab 6.25, PICKit 3 support was removed; I had to download MPLab 6.20, which is the latest version that works with the PICKit 3
+  - I used a `usbasp` programmer with a SOIC-8 clip to program the surface-mount ATtiny13a for my Quasi-IC module
+  - I used a `usbtiny` programmer to program through-hole AVR classic chips
   - The AVR Classic parts (ATtiny13a, ATtiny45, ATtiny85) have the same pinout and can be used interchangeably
   - The PIC10F32x parts have the same pinout and can be used interchangeably
