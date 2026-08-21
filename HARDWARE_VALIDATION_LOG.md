@@ -5,6 +5,7 @@ This document logs which firmware has been flashed-to and tested on
 actual hardware.
 
 | MCU       | Output Scheme   | Firmware Version | Notes |
+| :-------- | :-------------- | :--------------- | :---- |
 | ATtiny13a | CD4053 Simple   | pre-v0.9.0       | [Build report](https://forum.pedalpcb.com/threads/custom-barber-ltd-sr-w-microcontroller-bypass.29615/) |
 | ATtiny13a | CD4053 Muting   | v0.9.9           | [Quasi-IC](https://www.diystompboxes.com/smfforum/index.php?msg=1312340), [Build report](https://forum.pedalpcb.com/threads/dynamic-haircut-v2-0-barber-gain-changer.29479/post-393071) |
 | ATtiny13a | TQ2-L2-5V Relay |                  |       |
