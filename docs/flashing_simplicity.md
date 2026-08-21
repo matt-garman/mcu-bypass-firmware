@@ -22,6 +22,11 @@ The **flash-only user**. They have:
 - a downloaded release from
   [GitHub Releases](https://github.com/matt-garman/mcu-bypass-firmware/releases).
 
+If signature verification is a required pre-flash step, then `gpg` and the
+platform's SHA-256 tool are also user prerequisites unless the release bundle
+provides a separately qualified helper. The design must state those
+dependencies explicitly rather than introduce them halfway through the guide.
+
 They do **not** have, and must not be required to obtain:
 
 - `avr-gcc`, `binutils-avr`, or the vendored ATtiny device pack,
@@ -30,31 +35,53 @@ They do **not** have, and must not be required to obtain:
 - necessarily even a clone of this repository.
 
 For this person, "painless" has a concrete definition worth holding the design
-to: **read one file, run one command per chip, with no substitutions to work
-out for themselves.** Every placeholder they must resolve — `<prog>`, `<port>`,
-which of 21 images is theirs — is friction, and friction here is measured
-against a hobbyist at a bench with a soldering iron in the other hand.
+to: **read one file, select one clearly labelled hardware profile, and paste one
+complete programming command per chip without editing it.** Every placeholder
+they must resolve — `<prog>`, `<port>`, which of 21 images is theirs — is
+friction, and friction here is measured against a hobbyist at a bench with a
+soldering iron in the other hand.
 
-The existing per-part `-program` goals do not serve this person. They are
-developer conveniences: `attiny13a-program` (`Makefile:2762`),
-`pic10f322-program` (`Makefile:1967`) and `attiny202-program`
-(`Makefile:2489`) all *build first*, which pulls in the entire cross-toolchain
-for that part. That is correct for a developer at a bench and useless for
-someone who only wants the bytes on the chip.
+That definition needs one honest qualification. A static release document
+cannot know which serial port exists on the reader's machine, whether a bare
+chip is powered by the programmer, or which of several attached programmers is
+the intended one. Literal zero-input operation therefore requires an
+interactive helper that discovers or asks for those facts. The practical
+static-document target is narrower: the user chooses a row that already matches
+their MCU, output stage, programmer, operating system and power arrangement,
+then copies its command unchanged. If even that one profile-selection step is
+too much, a wrapper is not optional; it is the next design.
+
+"One command" here means one shell command line for the programming operation.
+Download verification remains a separate prerequisite. A command line may be a
+fail-stop sequence such as `fuse-command && flash-command`; it need not be one
+process or one argv vector.
+
+The existing per-part `-program` goals still do not serve this person. They are
+developer conveniences that require a source checkout and the cross-toolchain.
+There is also a correctness issue to repair before treating those goals as the
+programming oracle: `pic10f322-program` (`Makefile:1967`) builds before its
+writer recipe, but the AVR goals express fuses and flash as separate
+prerequisites (`Makefile:2475-2489`, `Makefile:2752-2777`). Under the Makefile's
+serialized `-j1` invocation, the fuse prerequisite runs before the flash
+prerequisite performs its build. A failed build can therefore leave changed
+fuses and no matching firmware. The source-tree convenience path must build and
+validate before either hardware side effect.
 
 ## 2. Current state, measured
 
-The good news is that the architecture for solving this is already in the tree,
-and it is the right one.
+The good news is that much of the architecture for solving this is already in
+the tree, and extending it is the right direction.
 
 `scripts/make-release.sh:1585-1664` generates a per-image **Flashing** section
-into each release's `MANIFEST.md` at release time. Critically, it does not
-hand-copy the values: `mkv()` at `scripts/make-release.sh:272` is
+into each release's `MANIFEST.md` at release time. Most of its device values
+are not hand-copied: `mkv()` at `scripts/make-release.sh:272` is
 `make -s --no-print-directory print-<VAR>`, so the fuse bytes
 (`ATTINY13A_LFUSE`, `ATTINY13A_HFUSE`, `TINYX5_LFUSE`, `TINYX5_HFUSE`, and the
-seven ATtiny202 memories from `XT_FUSE_WDTCFG` through `XT_FUSE_BOOTEND`), the
-avrdude part names, the default programmer, and the image basenames all come
-from Makefile truth at generation time. The result is visible at
+seven ATtiny202 memories from `XT_FUSE_WDTCFG` through `XT_FUSE_BOOTEND`) and
+the avrdude part names come from Makefile truth at generation time. The script
+also deliberately composes an independent image inventory and cross-checks it
+against `RELEASE_IMAGES`, rather than deriving both sides of the completeness
+check from one list. The result is visible at
 `release/v0.9.9/MANIFEST.md:87-150`.
 
 So "generate a per-release programming document from the Makefile at release
@@ -64,11 +91,14 @@ document that would immediately become a duplicate.
 
 There is also good prose in `release/README.md` ("Flash a chip", "Which image
 do I want?", "Verify a download") and a short per-release `README.md` carrying
-the `sha256sum -c` step.
+the `sha256sum -c` step. The published `MANIFEST.md` itself opens with that
+basic checksum instruction and is used as the GitHub Release body. What the
+asset-only user does not receive is the complete signature bootstrap,
+selection-first presentation, or copyable profile-specific commands.
 
 ## 3. What blocks "painless" today
 
-### G1 — The audience never receives the document written for them
+### G1 — The release landing page is written for an auditor
 
 `.github/workflows/release.yml:348` fixes the published asset set to the image
 files plus `SHA256SUMS`, `SHA256SUMS.asc`, `MANIFEST.md` and `QUALIFICATION`
@@ -76,10 +106,12 @@ files plus `SHA256SUMS`, `SHA256SUMS.asc`, `MANIFEST.md` and `QUALIFICATION`
 (`:357`) and the final asset array (`:453`) match it.
 
 Neither `release/README.md` nor the per-release `release/vX.Y.Z/README.md` is
-in that set. **Someone who downloads from GitHub Releases — the exact person
-this document is about — receives a 17 KB provenance document and no
-instruction to verify the bytes before writing them.** This is the single
-largest gap, and it is also the cheapest to close.
+in that set. More importantly, `.github/workflows/release.yml:453-455` and
+`:496-499` make `MANIFEST.md` the rendered GitHub Release body. **Someone who
+opens the release — the exact person this document is about — lands on a 17 KB
+provenance document rather than a start-here flashing procedure.** They do see
+the basic `sha256sum` instruction, but not the signed-checksum trust bootstrap
+or the selection and programming guidance from `release/README.md`.
 
 ### G2 — Flashing is buried inside a provenance document
 
@@ -89,7 +121,7 @@ reproduction instructions. Flashing is one section in the middle. That ordering
 is right for an auditor and wrong for the flash-only user, who wants the
 opposite emphasis.
 
-### G3 — The command *shape* is duplicated, even though the values are not
+### G3 — The command *shape* is duplicated and not yet defined consistently
 
 The fuse bytes are single-sourced. The argv structure is not. Compare:
 
@@ -101,118 +133,253 @@ The fuse bytes are single-sourced. The argv structure is not. Compare:
 Change the recipe's flags and the manifest keeps confidently publishing the old
 shape. Nothing detects it. The same applies to the ATtiny202 arm
 (`make-release.sh:1636-1640` vs `Makefile:2475-2489`) and both classic-AVR arms.
+For AVR the two paths are not merely duplicated: the Makefile executes separate
+fuse and flash invocations, while the manifest prints one combined `avrdude`
+invocation. There is no single argv to expose until the intended programming
+operation is defined.
 
 This is the duplication that actually matters, and it is worth being precise
 about it: the risk is not that a *value* goes stale — that is already solved —
 but that a *command* does.
 
-### G4 — Coverage is not uniform, and cannot be made so
+### G4 — Published commands are templates, not pasteable commands
+
+The current generated commands contain `<prog>`, `<port>` and `<v>`, and some
+append literal `(or: make ...)` prose to the executable line. Angle brackets
+are shell metacharacters and the parenthetical is shell syntax, not a comment.
+Those lines are references for an informed developer, not safe copy/paste
+instructions for the stated audience.
+
+The missing inputs are real configuration, not only documentation omissions:
+
+- USBtiny and USBasp can have complete classic-AVR profiles, but serial ISP
+  programmers may also need a port and baud rate.
+- A serial-UPDI adapter necessarily has a host-specific Linux, macOS or Windows
+  port, and selecting the first detected serial device would be unsafe.
+- PICkit 2 `pk2cmd` and PICkit 3/4/5 `ipecmd` use different command dialects.
+- The default PIC10F322 command deliberately does not source target Vdd
+  (`Makefile:1948-1950`), while the audience includes both bare chips and
+  externally powered finished boards.
+
+The guide must name the qualified profiles and their power assumptions rather
+than imply that changing only `-c` makes every programmer interchangeable.
+
+### G5 — The safety-critical guide would not be authenticated
+
+`scripts/make-release.sh:1519-1529` writes `SHA256SUMS` over the HEX images
+only, and `scripts/verify-release-images.sh:49-50` deliberately accepts only
+`.hex` records. Adding `PROGRAMMING.md` to the publication array would not bind
+its fuse values or commands to `SHA256SUMS.asc`. A substituted guide could
+prescribe wrong fuse bytes while the selected image still verifies correctly.
+
+Verification also does not match the one-image download path. `SHA256SUMS`
+names all 21 images, so `sha256sum -c SHA256SUMS` reports the other 20 files as
+missing when the user downloads only one HEX. `gpg --verify` additionally needs
+the signing key, which is not in the current published asset set, and plain
+signature validity does not itself enforce the documented pinned fingerprint.
+macOS and Windows do not necessarily provide GNU `sha256sum` either.
+
+### G6 — Coverage is not uniform, and cannot be made so
 
 - **PIC10F320** has no `-program` goal at all. `release/README.md` documents
   the raw `pk2cmd` line and carries a name-contract exemption marker saying so.
-- **PIC12F675** cannot be flashed from a downloaded HEX at all, by design.
-  This is not an oversight and is not something the flashing-simplicity work
-  should try to paper over. Section 5 covers it in full.
+- **PIC12F675** has no qualified direct-from-download workflow. This is not an
+  oversight and is not something the flashing-simplicity work should try to
+  paper over. Section 5 covers it in full.
 
-Six of the seven parts can be made genuinely one-command. The seventh cannot,
-today. A document that hides that distinction would be optimising the metric
-instead of the goal.
+Six of the seven parts can have a one-command path within supported programmer,
+platform and power profiles. The seventh cannot today. A document that hides
+that distinction would be optimising the metric instead of the goal.
 
-## 4. Proposal
+## 4. Refined proposal
 
-### 4.1 Fix the direction of truth: let the Makefile emit the argv
+### 4.1 Define the supported profiles before generating commands
 
-Rather than have `make-release.sh` reconstruct commands, add command-printing
-emitters to the Makefile that print exactly the argv the corresponding recipe
-would execute, accepting an image-path parameter so the release generator can
-point them at release basenames instead of `build_*` paths. The recipe and the
-generated document then consume one emitter.
+The first deliverable is a small, explicit support matrix, not code. For every
+advertised profile it must state:
 
-Proposed goal spellings, which deliberately **do not exist yet** — this
-document is the proposal for them:
+- MCU and programmer/backend;
+- operating-system shell and any required port policy;
+- whether the target must be externally powered or may be programmer-powered;
+- the programmer/tool versions against which the command has been qualified;
+- whether the command writes configuration/fuses as well as flash.
+
+The first version should stay within the CLI audience already declared in §1.
+USBtiny and USBasp for classic AVR and qualified `pk2cmd`/`ipecmd` PIC paths are
+reasonable candidates; a profile should not be published merely because a tool
+appears to support it. Serialupdi can claim a complete static profile only if
+the OS-specific command discovers exactly one eligible port and fails on zero
+or multiple matches. Otherwise ATtiny202 retains one explicit local input until
+the interactive-helper phase. GUI screenshots for MPLAB IPE, Microchip Studio
+and avrdudess are a separate documentation project, not a prerequisite for
+improving the existing CLI path.
+
+### 4.2 Fix the direction of truth: share a programming specification
+
+First repair the AVR source-tree goals so the selected image is built and
+validated before fuses or flash are touched. Then define shared Makefile
+constructors for the programming operation: executable, common arguments,
+part, port policy, fuse operations, image operand and verification flags. The
+hardware recipe and release renderer should consume those constructors
+directly. Neither should execute text printed by the other through `eval`.
+
+Expose one bulk, machine-readable release record rather than a family of
+arbitrary-path emitters. A record should be keyed by canonical release image and
+programmer profile and should distinguish `direct` from `guarded`. One possible
+interface, deliberately **not implemented yet**, is:
 
 <!-- name-contract: exempt-begin (proposed goals; they deliberately do not
      exist yet, and this document is the proposal to create them) -->
 ```
-make attiny13a-program-command
-make pic10f322-program-command
+make release-programming-records
 make pic10f320-program
 ```
 <!-- name-contract: exempt-end -->
 
-This also delivers, for free, the "Makefile targets that just print the
-command" idea considered as a standalone option — but as a *byproduct* of
-single-sourcing rather than as a fourth place to keep the same string.
+The first goal is part of the release architecture. The second is only a
+separate developer-convenience symmetry fix; because it would build from
+source, it does not improve the flash-only path.
 
-### 4.2 Generate a per-release `PROGRAMMING.md`, and publish it
+The release record must use immutable canonical profile defaults, distinct
+from developer-overridable bench variables such as `AVR_PROGRAMMER` and
+`XT_PROGRAMMER`. Release metadata queries must clear inherited `MAKEFLAGS`,
+`MAKEFILES`, `MAKEOVERRIDES` and related ambient state, following the pattern in
+`scripts/verify-release-images.sh:62-70`. A clean source tree must not produce
+different published instructions because the release host exported a local
+programmer preference.
+
+For AVR, call the result a programming *operation* or shell command line, not a
+single argv. Keeping fuse and flash operations separate and joining them with
+`&&` is compatible with the one-command user goal and makes fail-stop ordering
+explicit.
+
+### 4.3 Generate `PROGRAMMING.md` as the release landing page
 
 Promote the flashing content out of `MANIFEST.md` into a dedicated generated
-file, ordered for the flash-only user:
+file ordered for the flash-only user:
 
-1. **Verify first.** `gpg --verify SHA256SUMS.asc SHA256SUMS`, then
-   `sha256sum -c SHA256SUMS`. Currently this instruction reaches nobody who
-   downloads assets.
-2. **Which image is mine?** The MCU × output-stage table, reproduced from
-   `RELEASE_IMAGES` rather than retyped.
-3. **One command per image**, emitted per section 4.1.
-4. **Resolve the placeholders for them.** `-c <prog>` is currently unexplained.
-   List the common programmer values (`usbtiny`, `usbasp`, `avrisp2`,
-   `stk500v1`) and, for the ATtiny202, what `XT_UPDI_PORT` looks like on Linux,
-   macOS and Windows. This is a small change with a large share of the
-   real-world friction behind it.
-5. **The PIC12F675 exception**, stated plainly and early enough that nobody
-   reaches for a raw writer command.
+1. **Start here and stop conditions.** State the supported CLI/tool/power scope
+   and put the PIC12F675 guarded-workflow warning before any generic matrix.
+2. **Verify the download or bundle.** Provide complete Linux, macOS and Windows
+   instructions, including key import, pinned-fingerprint policy and the exact
+   selected-file or bundle check.
+3. **Which image is mine?** Ask only for the exact MCU and switching circuit,
+   then map that pair to one exact basename and release-asset link.
+4. **Choose the programmer profile.** Each supported row contains a complete,
+   pasteable command and a clear power assumption. No executable block may
+   contain `<prog>`, `<port>`, `<v>` or appended prose.
+5. **PIC12F675 guarded procedure.** Keep it visibly separate and publish no raw
+   writer shortcut.
 
-Then add it to all three asset lists in `.github/workflows/release.yml` (`:348`,
-`:357`, `:453`). Leave a pointer in `MANIFEST.md` so the auditor path still
-works.
+Generate the image matrix from `RELEASE_IMAGES`, but do not pretend that a list
+of filenames contains the human meaning of `cd4053_simple`,
+`cd4053_with_mute` and `tq2_l2_5v_relay`. Maintain a small keyed description
+table and gate its MCU and output-stage keys for exact equality with the
+supported sets.
 
-The dependency question the discussion started from resolves itself here. The
-*generated artifact* has zero dependencies — it is plain text sitting beside
-the hex files. GNU Make is a dependency only for the maintainer, at release
-time, on a host that by definition already has the full toolchain installed.
+Publish the frozen `PROGRAMMING.md` bytes as both an asset and the GitHub
+Release body (`--notes-file`). Keep `MANIFEST.md` as the provenance asset and
+link to it from the guide; leave a reciprocal pointer in the manifest. The user
+should not have to discover the guide in a collapsed asset list.
 
-### 4.3 Gate it, or it is only a nicer copy
+The generated artifact itself is plain text and needs no build tool to read.
+GNU Make and the cross-toolchains remain maintainer dependencies at release
+generation time, not flash-only-user dependencies.
 
-Two checks turn this from a convenience into something that fits the project's
-stated bar:
+### 4.4 Authenticate and package the complete user payload
 
-- At release time, assert every filename appearing in a generated command is a
-  member of `RELEASE_IMAGES`, and every make goal named in the document exists.
-- As a host test, compare each emitter's output against a `make -n` dry run of
-  the corresponding program target, so the printed command and the executed
-  command cannot diverge.
+The programming guide is safety-critical release content and must be covered by
+an independently verifiable signature. The cleanest user contract is one signed
+checksum manifest covering every user-consumed payload while the release
+verifier separately enforces that its `.hex` subset equals `RELEASE_IMAGES`.
+That preserves the existing four-way image-set guarantee without leaving the
+commands unauthenticated. It requires a two-phase generator: compute an
+internal image hash map for rendering, render the documents, then write and
+sign the final payload checksum list.
 
-`test/test_makefile_name_contract.py` already polices goal names appearing in
-documents; the exemption marker sitting over the absent `pic10f320-program` in
-`release/README.md` is exactly the kind of drift that should be repaired rather
-than annotated.
+The release must also provide the public key and pinned full fingerprint
+instructions. Supplying the key beside the signature helps installation but is
+not an independent trust path; the guide must say that the fingerprint needs a
+separately trusted source.
 
-### 4.4 Considered and rejected
+Make a deterministic cross-platform ZIP the primary download. It should contain
+`PROGRAMMING.md`, all images, the signed checksum material and the public key.
+One bundle removes asset-picking friction and makes a full checksum pass
+meaningful because all 21 images are present. ZIP is preferable to `.tar.gz`
+for this audience because Linux, macOS and Windows can all open it without an
+additional archive tool. Keep raw HEX and metadata assets for advanced users
+and auditors.
 
-**A static "typical programming commands" section in the top-level `README.md`.**
-It cannot be per-release-accurate, and nothing gates it. The `v0.9.8` rename
-invalidated every image name and most goal names in one release; a static
-section would have silently survived that.
+The archive does not remove the need to define its authentication boundary. Its
+contents must either be covered by the signed internal payload inventory, with
+an exact-content check, or the archive itself must have a detached signature.
+That analysis belongs in the implementation design, but it is no longer a
+reason to leave the archive unevaluated: the bundle directly advances the
+primary objective and fixes the all-images checksum mismatch.
 
-**Shipping a generated `flash.sh` in the release.** More convenient, and
-tempting against a simplicity goal. Rejected on two grounds: it places an
-executable inside a signed artifact set, and it runs against the posture the
-PIC12F675 work established, which is that a human should see the command before
-silicon is touched. A printed command that the user copies keeps the operator in
-the loop. This is a genuine cost to the simplicity goal, accepted knowingly.
+### 4.5 Gate behavior, not rendered text alone
 
-**A single downloadable archive per release** (one `.tar.gz` instead of
-picking assets individually) is *not* rejected — it is unevaluated. It would
-measurably reduce steps for the flash-only user, but it changes what the
-detached signature covers, so it needs its own analysis before adoption.
+The generated record and staged guide should have exact, fail-closed checks:
+
+- the projection of direct records onto image keys equals `RELEASE_IMAGES`
+  minus `PIC12F675_RELEASE_IMAGES`, with each required `(image, profile)` pair
+  present exactly once;
+- guarded keys equal `PIC12F675_RELEASE_IMAGES`, with no raw writer command;
+- each command's image operand equals its record key rather than merely naming
+  some member of `RELEASE_IMAGES`;
+- no executable command contains an angle-bracket placeholder, developer
+  `VARIANT` placeholder or un-commented prose;
+- every generated goal reference exists in the Makefile used for that release;
+- poisoned Make environment variables cannot change canonical release records;
+- a failed source build reaches no hardware tool.
+
+Do not use `make -n` as the principal command-equivalence oracle. The program
+targets include build prerequisites, validation recipes, recursive Make output
+and, for AVR, multiple programmer invocations; dry-run text also depends on
+which artifacts already exist. Instead, put fake `avrdude`, `pk2cmd` and
+`ipecmd` executables on `PATH`, execute the real programming surface against
+them, capture the actual argument vector, and compare it with the canonical
+record. This tests what the operating system receives rather than Make's
+diagnostic rendering.
+
+`test/test_makefile_name_contract.py` remains useful for live documents, but it
+deliberately excludes immutable `release/vX.Y.Z/` artifacts
+(`test/test_makefile_name_contract.py:873-877`). The release generator must
+therefore validate goal references in the staged guide directly.
+
+### 4.6 Alternatives and scope decisions
+
+**A static "typical programming commands" section in the top-level `README.md`**
+remains rejected. It cannot be per-release-accurate, and nothing gates it. The
+`v0.9.8` rename invalidated every image name and most goal names in one release;
+a static section would have silently survived that.
+
+**Publishing the existing per-release README as an interim fix** is also not
+worth doing. It points to a repository-relative parent document that is absent
+when downloaded alone, presents checksum verification before later saying the
+signature is required first, and contains no image-selection or programming
+procedure. Making `PROGRAMMING.md` the release body solves the actual
+discoverability problem rather than adding another pointer.
+
+**A generated flashing helper** is deferred, not categorically rejected. An
+executable being signed is not itself a defect, and a helper can print the exact
+command and require confirmation before touching silicon. The real costs are
+downloaded-code trust, Bash/PowerShell portability, dependency burden, port and
+programmer detection ambiguity, and a larger test matrix. Never select the
+first serial device silently. If literal zero-substitution remains the
+acceptance criterion after the static profile guide ships, a fail-closed,
+display-and-confirm helper is the only realistic next step.
+
+**GUI programming instructions** are deferred. The audience in §1 already has
+the CLI programming tool installed. Screenshot-level GUI guidance can be added
+later without blocking the narrower path.
 
 ## 5. The PIC12F675 caveat
 
-This part is the one place where flashing simplicity is not achievable today,
-and where pursuing it carelessly can destroy a user's device. The full
-reasoning follows, because "just use the guarded workflow" is not a rationale
-anyone can act on or challenge.
+This part is the one place where a qualified direct-from-download path is not
+available today, and where pursuing it carelessly can destroy a user's device.
+The full reasoning follows, because "just use the guarded workflow" is not a
+rationale anyone can act on or challenge.
 
 ### 5.1 What is physically different about this part
 
@@ -238,11 +405,15 @@ destroy device state the firmware depends on.
 
 ### 5.2 Why the failure mode is uniquely dangerous
 
-It is silent. A device that loses its calibration word still boots and still
-switches — it simply runs at an untrimmed oscillator, which on this design
-means the wrong tick cadence and the wrong `__delay_ms()` relay coil-pulse
-widths. Losing `BG<1:0>` means the wrong brown-out and power-on-reset
-thresholds. Nothing announces itself; the pedal appears to work.
+The outcomes depend on how the trim is damaged, and both are unacceptable. An
+erased or malformed calibration word can produce the observed run-off and
+watchdog-reset loop before `main()`. A wrong but syntactically valid `RETLW`
+value can allow startup to return and load an incorrect oscillator calibration;
+the device may then appear to switch while running with the wrong tick cadence
+and wrong `__delay_ms()` relay coil-pulse widths. Losing `BG<1:0>` can likewise
+leave an apparently functional device with the wrong brown-out and
+power-on-reset thresholds. The dangerous cases are either immediate failure or
+plausible operation with a silent hardware error, not one universal symptom.
 
 That is why the workflow is a **transaction** — read-only baseline, compare the
 live device immediately before the write, mandatory post-write readback — and
@@ -276,11 +447,13 @@ bytes (`Makefile:6970`). An arbitrary downloaded file has no binding into that
 chain.
 
 **3. What the release check actually proves.**
-`scripts/verify-release-program-image.sh image` does not bless the downloaded
-HEX. It takes the *freshly built candidate* and proves it reproduces the signed
-release set — tag signature, detached `SHA256SUMS.asc` signature, and a full
-canonical-set match. The signed digest confirms that the local build reproduces
-the release; it is not an admission ticket for a download.
+`scripts/verify-release-program-image.sh image` accepts a candidate path and
+proves that candidate matches the signed release set — tag signature, detached
+`SHA256SUMS.asc` signature, and a full canonical-set match. The verifier does
+not itself know whether the candidate came from a build or a download. The
+current Make target supplies a freshly built private snapshot, and that caller
+establishes the build provenance and custody chain. No current caller admits a
+downloaded file into the programming transaction.
 
 So the position is **not** "the prebuilt PIC12F675 HEX is suspect". It is
 byte-identical and reproducible, and release CI proves that on every release.
@@ -315,20 +488,24 @@ A transaction that admitted a downloaded HEX by verifying it against the signed
 checksum list *inside* the same snapshot / hash / custody discipline would drop
 XC8 and the device pack entirely. Sketch:
 
-1. Verify `SHA256SUMS.asc` against the pinned key, via the existing
+1. Snapshot the selected download immediately to a private read-only file, as
+   the current target does; every subsequent check and the writer use that path.
+2. Verify `SHA256SUMS.asc` against the pinned key, via the existing
    `scripts/verify-release-signature.sh`.
-2. Verify the downloaded HEX's digest against the verified `SHA256SUMS`.
-3. Snapshot to a private read-only file and hash it, as the current target does.
+3. Verify the snapshot's digest against the verified `SHA256SUMS`.
 4. Run the calibration checker and CONFIG checker against the snapshot.
-5. Proceed into the unchanged baseline / pre-write compare / write / readback
-   transaction.
+5. Re-verify the snapshot hash, then proceed into the unchanged baseline /
+   pre-write compare / write / readback transaction.
 
 **Be honest about what this does and does not buy.** It removes by far the
-heaviest dependency — a Microchip compiler and device pack — but it does not
-reach zero dependencies: `git`, `gpg`, `python3` and GNU Make are all still
-required, because the checkers and the signature policy live in the repository.
-So the PIC12F675 would move from "needs the full PIC toolchain" to "needs a
-clone plus common tools", not to "download and run one command".
+heaviest dependency — a Microchip compiler and device pack — but the current
+repository-local pieces still require `git`, `gpg`, `python3`, `sha256sum`, GNU
+Make, the programmer/reader tools, and a host C compiler for the CONFIG checker.
+So the first PIC12F675 improvement would move from "needs the full PIC
+toolchain" to "needs a clone plus common development tools", not to "download
+and run one command". A later packaged transaction helper could remove some of
+those organisational dependencies, but only after preserving and testing the
+same end-to-end custody properties.
 
 That is still a large improvement, and it would let the part appear in the
 generated programming document as a real procedure rather than an exception.
@@ -338,8 +515,9 @@ has to be preserved end to end.
 
 ## 6. The tension, resolved
 
-Six parts can be made genuinely one-command. The seventh cannot. The temptation
-in either direction should be named so it can be refused:
+Six parts can have a one-command direct path within each explicitly supported
+programmer, platform and power profile. The seventh cannot today. The
+temptation in either direction should be named so it can be refused:
 
 - **Do not degrade the six to match the seventh.** Wrapping every part in a
   guarded transaction because one part needs it would spend the whole
@@ -355,37 +533,50 @@ part rather than inventing one.
 
 ## 7. Suggested sequencing
 
-Smallest useful change first; each step is independently shippable.
+Use the smallest *safe* increments. The command source and its behavioral gate
+land together; the guide and its authentication land together.
 
-1. **Publish what already exists.** Add the per-release `README.md` (or a
-   pointer to `release/README.md`'s flashing prose) to the asset lists in
-   `.github/workflows/release.yml`. Closes G1, the largest gap, at near-zero
-   cost and with no new generator.
-2. **Resolve the placeholders.** Add the programmer-name and UPDI-port guidance
-   to the generated flashing section. Highest friction reduction per line
-   changed.
-3. **Add the argv emitters** (§4.1) and switch `make-release.sh` to consume
-   them. Closes G3.
-4. **Split out `PROGRAMMING.md`** and publish it (§4.2). Closes G2.
-5. **Add the drift gates** (§4.3).
-6. **Close G4's first half:** add a `pic10f320` programming goal so the
-   name-contract exemption can be removed.
+1. **Define the acceptance contract and support matrix.** Decide the exact
+   programmer/backend, operating-system and power profiles that may claim a
+   pasteable command. State that GUI instructions are out of initial scope.
+2. **Repair build-before-hardware semantics.** Make every source-tree program
+   target build and validate before either fuse or flash side effects, and
+   choose the canonical AVR operation shape.
+3. **Add shared command constructors and the bulk release record.** Add the
+   exact-set, environment-poisoning and fake-programmer argv tests in the same
+   change. Do not publish a new command surface before its gate exists.
+4. **Generate and authenticate `PROGRAMMING.md`.** Validate the staged result,
+   include it in the signed payload boundary, publish it as an asset, and use
+   the same frozen bytes as the GitHub Release body.
+5. **Publish the deterministic ZIP as the primary download.** Keep raw assets,
+   test archive reproducibility and exact contents, and give each supported OS
+   a complete verification path.
+6. **Add `pic10f320-program` if desired.** This removes a developer-interface
+   asymmetry and the live-document name exemption, but is not on the critical
+   path for the flash-only user.
 7. **Evaluate the PIC12F675 no-compiler path** (§5.5) as a separate `TODO.md`
-   item. It is the largest piece of work here and the only one that touches a
-   safety-critical transaction.
+   item. It is the only item here that changes a safety-critical transaction and
+   must remain subordinate to hardware qualification.
 
-## 8. Open questions
+## 8. Decisions and remaining questions
 
-- **GUI programmers.** A meaningful share of hobbyists use MPLAB IPE,
-  Microchip Studio or avrdudess rather than a CLI. A document containing only
-  Linux command lines is not "painless" for them. Does the goal extend to
-  screenshot-level GUI guidance, or is CLI the declared scope?
-- **Single-archive downloads** (§4.4) — worth the signing-scope analysis?
-- **Where should `PROGRAMMING.md` live in the repository** between releases:
-  generated only into `release/vX.Y.Z/`, or also rendered at HEAD so that the
-  content is reviewable on `main` without cutting a release?
-- **Does step 1 alone satisfy the goal well enough** to defer steps 3-5? The
-  project's standing preference at a fork like this — take the smallest change
-  that works now and file the clean redesign as a `TODO.md` item — argues for
-  shipping 1 and 2, then re-measuring the friction before building the
-  generator.
+The analysis resolves several earlier questions:
+
+- **Initial scope is CLI.** GUI documentation can follow independently.
+- **A deterministic ZIP is worth doing.** It directly reduces downloads and
+  fixes whole-list verification for a user who would otherwise choose one HEX.
+- **`PROGRAMMING.md` is generated only into `release/vX.Y.Z/`.** Keep the
+  renderer, a deterministic preview command and rendered-output tests at HEAD;
+  do not commit a second mutable "current release" copy that can drift.
+- **Publishing the existing README alone is not a useful stopping point.** It
+  does not solve discoverability, pasteability, authentication or selection.
+- **A helper is deferred, not forbidden.** Revisit it only if the profile-based
+  static guide fails the measured simplicity goal or literal zero-substitution
+  remains mandatory.
+
+Implementation still has concrete decisions to make: the exact qualified tool
+versions and programmer/power profiles, the machine-readable record format,
+whether the signed boundary is a complete payload checksum list or an archive
+signature, and the cross-platform verification commands. Those decisions
+should be made against real programmer behavior and testability, not by adding
+more placeholders to the generated prose.
