@@ -152,14 +152,15 @@ e48ed8e50e89a7f2c2e145603d16c25099925269ea0b29b31becc9c02eb2143f  bypass-pic10f3
 The relay grew from 244 to 245 words and retained its 4/8 return-stack maximum.
 The exact host actuation trace remained 115 checks and the real-image target-I/O
 trace remained 36 checks, with no added edge. At the deterministic trailing
-`CLRWDT` injection seam, physical-output fault injection measured RESET, SET and
-both-bit correction in 364-366 instruction cycles (0.728-0.732 ms at nominal
+`CLRWDT` injection seam, real-image `LATA` fault injection measured RESET, SET
+and both-bit correction in 364-366 instruction cycles (0.728-0.732 ms at nominal
 2 MHz), versus the emitted image's 12.024-12.036 ms intentional coil pulses. An
-upset at an arbitrary idle phase has the more general bound of one actual timer
-period plus the short two-pin rewrite, still far less per-channel energy than a
-normal pulse. This does not prove that an accidental short pulse cannot
-mechanically switch the relay, nor characterize the board-specific shared-supply
-transient when both drivers are upset together.
+injection at that reviewed seam is corrected inside one iteration, with modeled
+`PORTA` observed following the latch. This is not an arbitrary idle-phase bound:
+an upset after the loop-top rewrite has a different instruction ordering, and
+the harness does not sweep that phase. The result does not prove that an
+accidental short pulse cannot mechanically switch the relay, nor characterize
+the board-specific shared-supply transient when both drivers are upset together.
 
 R1 closes at the firmware boundary on that evidence. This project does not
 specify the external coil-driver topology, power supply, flyback network or PCB,
@@ -435,8 +436,9 @@ Stated so nobody has to infer it:
   flags. Neither establishes that arbitrary XC8 versions or environments emit
   identical bytes.
 - **The general output-latch integrity check is absent** (§4). The relay-only
-  idle safe-state rewrite bounds settled-state coil-bit upsets; active-pulse,
-  LED, and analog-control latch upsets remain outside that mitigation.
+  idle safe-state rewrite corrects coil-bit upsets that reach it before the
+  following gate; actuation-sequence, LED, and analog-control latch upsets remain
+  outside that mitigation.
 - **Hardware-bench properties are simulated, not proven**: WDT timing and
   brown-out behaviour, absolute tick period, and real-silicon pulse timing. These
   are shared with the PIC10F322 build, since both are validated in the same gpsim

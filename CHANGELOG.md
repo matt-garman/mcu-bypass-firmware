@@ -43,19 +43,22 @@ file is the human-readable summary of *what changed*.
   operation; PIC10F320 remains unchanged because it has no independent shadow
   replay path.
 
-- **A settled-state relay-coil upset is now corrected in place, once per
-  serviced iteration.** Between actuations, every relay-capable shell re-asserts
-  both coils low before the sanity gate, so a transient writable coil-state
-  upset is corrected at the next healthy loop-top service without reset or a
-  logical state change. The guarantee excludes the 12 ms blocking actuation
-  pulse, when the loop-top repair cannot run: a fault there can shorten the
-  intended pulse or energize the inactive or both coils until the normal
-  post-pulse clear, with missed or spurious actuation and audio disruption as
+- **Relay builds now re-assert both coils low at every serviced loop top.** A
+  one-shot writable coil-state upset already present when that operation runs is
+  cleared before the following sanity gate, without reset or a logical state
+  change. This is not an all-instruction-phase guarantee: a fault arising after
+  the re-assert but before that gate may instead be observed and escalated on
+  shells with output-state integrity checks. The guarantee excludes the complete
+  blocking actuation sequence, from its pre-pulse clear through its post-pulse
+  clear; a fault there can shorten the intended pulse or energize the inactive
+  or both coils, with missed or spurious actuation and audio disruption as
   residual risks. Shipping-source tests characterize active-coil-low and
-  inactive-coil-high faults at actual recorded offsets of 1, 6, and 11 ms in
-  both SET and RESET pulses. They prove modeled persistence and final low output
-  state, not that an external output accepts the command or that mechanical
-  behavior is safe. The CD4053 variants retain an explicit no-op. Design:
+  inactive-coil-high faults at actual recorded offsets of 1, 6, and 11 ms inside
+  both SET and RESET delays. They do not exhaustively cover instruction-boundary
+  faults around coil assertion or clearing, and prove modeled persistence and
+  final low output state, not that an external output accepts the command or
+  that mechanical behavior is safe. The CD4053 variants retain an explicit
+  no-op. Design:
   `docs/relay_coil_fault_correction.md`.
 
 - **A single-bit upset of the debounce context is now detected while it is still
@@ -83,8 +86,8 @@ file is the human-readable summary of *what changed*.
   asserted. On AVR the integrator stays in the ISR, so both the ISR and
   `main()` perform complete local transactions; main's snapshot-through-publish
   sequence is one `ATOMIC_BLOCK`, which is the source of MISRA deviation D-5.
-  XC8 v3.10 measures the PIC10F322 transactional images at
-  476/502/505 of 512 words for the simple/mute/relay variants. Design:
+  XC8 v3.10 measures the current PIC10F322 images at 476/502/493 of 512
+  words for the simple/mute/relay variants. Design:
   `docs/context_seu_detection.md`.
 
 - **The watchdog-margin invariant is now enforced at compile time on every

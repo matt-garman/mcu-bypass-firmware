@@ -3,11 +3,10 @@
 <!-- current-release:start -->
 **Current release contract:** `v0.9.9`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
 
-**Status (2026-08-17):** No nominal-path firmware correctness defect is
-currently known. PIC10F320 remains the self-contained exception. Authoritative
-full-toolchain, target, stack, mutation, soak, and final-image evidence is
-retained under `release/v0.9.9/`; bounded relay fault-abort hardening below
-remains open.
+**Status (2026-08-21):** No nominal-path firmware correctness defect is
+currently known. PIC10F320 remains the self-contained exception.
+`release/v0.9.9/` retains the authoritative evidence for the released v0.9.9
+source; post-v0.9.9 changes remain Unreleased. Open work is enumerated below.
 <!-- current-release:end -->
 
 This file contains open actions only. Completed work is removed rather than
@@ -235,13 +234,13 @@ not complete call depth. Once measured, update the stale gap notes in
 
 Dependencies: pinned avr-gcc plus the fetched, SHA-verified ATtiny_DFP device
 specs and headers. Effort: about 2-3 hours including negative regressions. Risk:
-Low and completeness-focused: ATtiny202 has 128 bytes of SRAM with only 4 bytes
-of static data, while the ATtiny13A has half the SRAM and a measured 31-byte
-whole-program peak that still leaves about 29 bytes free.
+Low and completeness-focused: ATtiny202 has 128 bytes of SRAM with 5 bytes of
+static data, while the ATtiny13A has half the SRAM and a tightest measured
+33-byte stack high-water mark that still leaves 26 bytes free after static data.
 
 ### T25-pic320-thresholds - Optionally centralize PIC10F320 thresholds
 
-After `v0.9.8`, consider including `bypass_config.h` and
+As optional cleanup, consider including `bypass_config.h` and
 `bypass_compile_checks.h` from the self-contained PIC10F320 translation unit,
 then remove its duplicate thresholds, counter maximum, and five invariant
 assertions. This leaves the inlined algorithm and single-TU architecture intact.
@@ -565,7 +564,7 @@ the reference is free.
 
 Gate the feature per target: readable ASCII costs roughly one PIC program word
 per character, so PIC10F320 cannot carry the full repository URL within its
-current 12-36-word margins. Do not substitute a fragile URL shortener. Firmware
+current 11-36-word margins. Do not substitute a fragile URL shortener. Firmware
 edits must be made by the owner.
 
 Dependencies: per-image flash budgets and final-HEX string verification.
@@ -685,7 +684,7 @@ The stable ID in each row matches exactly one open section above.
 | T25-poweron-sim | Power-on-pressed simulator fidelity | 2.5 | 1-2 h | Low |
 | T25-power-ramp | Power-supply ramp analysis | 2.5 | 2-3 h | Medium |
 | T25-name-contract-shim | Check overrides handed to a routing Make shim | 2.5 | 2-3 h | Low |
-| T25-cbmc-proof-count | Cross-check dispatched CBMC proof count against source | 2.5 | 30-45 min | Low-Medium |
+| T25-cbmc-proof-count | Cross-check dispatched CBMC proof count against source | 2.5 | 30-45 min | Low |
 | T25-fw-coverage-in-test | Run the host PIC coverage gates from `make test` | 2.5 | 30-45 min | Medium |
 | T3-hw-procedure | Hardware-validation procedure | 3 | 2-3 h | High |
 | T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - gates the part's 1.x.y hardware validation |

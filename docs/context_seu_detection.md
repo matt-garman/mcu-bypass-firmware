@@ -131,16 +131,19 @@ in those three functions is a pure SFR read, so the fold is exactly equivalent,
 and constant-time as a bonus. The same trick applied to `main()`'s sanity `||`
 chain costs 32 words rather than saving them -- its terms are calls and
 comparisons that need an explicit `? 1U : 0U` -- so that chain is deliberately
-left short-circuit. The folded image measures 476/502/505 words, two words
-better in the relay variant than the pre-transaction image; see Resource
-qualification below.
+left short-circuit. At F2 landing the folded image measured 476/502/505 words,
+two words better in the relay variant than the pre-transaction image. The later
+masked relay-coil clear reduced only the relay image, leaving the current matrix
+at 476/502/493; see Resource qualification below.
 
 That margin is thin enough that the *spelling* of the fold matters, not just its
 logic, and the accumulator must stay `diff |= term`. Respelling it as the
 explicit `diff = (uint8_t)(diff | term)` costs one program word per term under
-XC8 free mode -- 10 words across the three functions, which puts the mute and
-relay variants back over 512 -- and hoisting each term into a named local ahead
-of a single closing fold costs 12. Both were measured, not estimated.
+XC8 free mode -- 10 words across the three functions. At F2 landing that
+exhausted the mute image's 512 words and put relay over capacity; the current
+relay image has since become smaller for an unrelated reason. Hoisting each term
+into a named local ahead of a single closing fold costs 12. Both were measured,
+not estimated.
 
 That respelling was tried once, to silence a `-Wconversion` diagnostic which
 GCC 8.5.0 raises on the compound-assignment form. Supporting a host compiler
@@ -231,10 +234,10 @@ figure below is enforced by a build gate, not a one-off reading.
 
 | Part | Budget | Simple / mute / relay | Tightest margin |
 | --- | --- | --- | --- |
-| PIC10F322 | 512 words | 476 / 502 / 505 words | 7 words (relay) |
-| PIC12F675 | 1024 words | 546 / 572 / 575 words | 449 words (relay) |
-| ATtiny13a (AVR classic) | 921 B | 834 / 874 / 874 B | 47 B |
-| ATtiny202 (AVR-XT) | 2048 B | 964 / 1004 / 1004 B | 1044 B |
+| PIC10F322 | 512 words | 476 / 502 / 493 words | 10 words (mute) |
+| PIC12F675 | 1024 words | 546 / 572 / 563 words | 452 words (mute) |
+| ATtiny13a (AVR classic) | 921 B | 834 / 874 / 864 B | 47 B (mute) |
+| ATtiny202 (AVR-XT) | 2048 B | 964 / 1004 / 994 B | 1044 B (mute) |
 | PIC10F320 | 256 words | 220 / 241 / 245 words | 11 words; F2 excluded |
 
 PIC10F322 is the binding constraint, and it stays inside 512 words in every
@@ -246,9 +249,9 @@ part still builds and where its own margin sits.
 
 RAM and stack: the AVR `next_ctx` snapshot is an automatic, so it lands on the
 stack. The stack high-water gate in the simulator suite (`make test-long`, not
-`make test`) measures 31-33 B used across every classic-AVR variant and part.
-The tightest margin is the ATtiny13a, whose 64 B of SRAM leaves 26 B free
-between the deepest stack push and the 5 B of static data, against the gate's
+`make test`) measures 31-33 B of stack use across every classic-AVR variant and
+part. With 5 B of static data, aggregate occupancy is 36-38 B. The tightest
+margin is the ATtiny13a, whose 64 B of SRAM leaves 26 B free, against the gate's
 8 B floor. PIC10F322 return-stack depth is unchanged at 3 levels
 (`cd4053_simple`, `cd4053_with_mute`) and 4 (`tq2_l2_5v_relay`), each carrying a
 2-level reserve inside the part's 8 hardware levels. The image, RAM, stack and
@@ -282,7 +285,7 @@ storage is one check byte rather than two bytes.
 The initial host PIC coverage and ATtiny fault-oracle checks passed. A subsequent
 fully provisioned run passed the AVR/XC8 builds and resource gates,
 simavr/yasimavr/gpsim lanes, CBMC and static analysis, and the complete mutation
-suite: 131 killed, 0 survived, 0 errored, and no skipped PIC or ATtiny202 rows.
+suite: 132 killed, 0 survived, 0 errored, and no skipped PIC or ATtiny202 rows.
 
 ## Acceptance-criteria mapping (F2)
 
@@ -296,7 +299,7 @@ suite: 131 killed, 0 survived, 0 errored, and no skipped PIC or ATtiny202 rows.
    evidence; repeated favorable-phase injection is not accepted as proof.
 5. Flash, RAM, stack, MISRA, mutation, simulator, and shipping-source
    qualification passed on the provisioned host. PIC10F322 remains the binding
-   capacity case at 505/512 words for the relay variant.
+   capacity case at 502/512 words for the mute variant.
 
 ## Related
 

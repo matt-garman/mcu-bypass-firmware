@@ -152,9 +152,10 @@
 // So every write goes shadow -> GPIO, and GPIO is never read-modify-written.
 //
 // The shadow is SRAM, which the project's cosmic-ray/EMI threat model says can
-// flip -- but it guards ITSELF: an upset in the shadow diverges it from either
-// the expected mask or the physical port, and hw_output_state_intact() below
-// checks both directions, so either way the sanity gate fires.
+// flip. A non-coil shadow upset, or any shadow/port mismatch still present when
+// hw_output_state_intact() runs, reaches the sanity gate. On the relay variant,
+// hw_outputs_reassert_safe() deliberately clears settled GP1/GP2 coil-shadow
+// upsets at loop top before that check.
 static uint8_t gpio_shadow_;
 
 // Snapshot of the factory oscillator trim, captured in hw_mcu_init() and

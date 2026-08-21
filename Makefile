@@ -462,10 +462,9 @@ SANITIZE    ?= -fsanitize=undefined,address -fno-sanitize-recover=all
 
 # --- Resource-budget gate thresholds -----------------------------------------
 # Per-function stack-frame ceiling for test-stack-bound (-fstack-usage).
-# This gates individual frames, not total depth.  The largest frame today is
-# the 19 B timer ISR (__vector_6); the whole-program runtime high-water mark
-# is 29 B (cd4053_simple) / 31 B (the relay and mute variants), measured
-# separately by test-sim-attiny13a.
+# This gates individual frames, not total depth; test-stack-bound remeasures
+# them. The whole-program runtime high-water mark is 31-33 B across the variants,
+# measured separately by test-sim-attiny13a.
 # Run `make test-stack-bound` to re-measure every frame.  Any individual frame
 # above this threshold signals unintended bloat (e.g. an accidental local
 # array).
@@ -477,10 +476,10 @@ override AVR_STACK_SOURCES := src/bypass_mcu_avr_classic.c src/bypass_pure.c \
                           src/bypass_output_tq2_l2_5v_relay.c
 
 # ATtiny13a flash-budget ceiling for test-flash-budget (percentage of 1 KB).
-# Firmware is at 73.8% today (the relay and mute variants; cd4053_simple is
-# 69.9%), so the 90%
-# ceiling leaves 16.2 points of margin.  Run `make test-flash-budget` to
-# re-measure -- it prints the per-variant percentages, so this comment can be
+# Firmware is at 81.4/85.4/84.4% today for simple/mute/relay, so the 90%
+# ceiling leaves 4.6 points of margin at the tightest image. Run
+# `make test-flash-budget` to re-measure -- it prints the per-variant
+# percentages, so this comment can be
 # checked rather than trusted.  A future accidental bloat passes silently
 # without this gate.
 ATTINY13A_FLASH_BUDGET ?= 90
@@ -2916,7 +2915,7 @@ test-supply-chain:
 	./test/test_supply_chain.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 36/75/121
+# image/host rebuild triggering. The script enforces the canonical 36/75/123
 # counts, so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
@@ -3550,9 +3549,8 @@ test/avr/test_fuses: test/avr/test_fuses.c Makefile FORCE
 # the flag, collect the per-function .su files, and fail if any single frame
 # exceeds AVR_STACK_MAX_FRAME bytes.  Complements the runtime HWM test (test-sim-attiny13a)
 # with a compile-time structural upper bound that does not depend on exercising
-# the deepest call path.  Override: make test-stack-bound AVR_STACK_MAX_FRAME=24
-# (24 is the tightest round ceiling the current 19 B ISR frame still clears;
-# the previous 16 example no longer passes).
+# the deepest call path. Override `AVR_STACK_MAX_FRAME` only with a reviewed
+# ceiling; the target generates fresh `.su` reports and validates every frame.
 test-stack-bound:
 	@stack_dir="$(AVR_STACK_BUILD_DIR)"; remove_dir=0; \
 	if [ -z "$$stack_dir" ]; then \
@@ -3635,11 +3633,10 @@ test-stack-bound-regression:
 
 # Flash-utilization budget assertion: run avr-size on every ATtiny13a variant
 # ELF and fail if flash (Program bytes) exceeds ATTINY13A_FLASH_BUDGET% of 1024 B.
-# Firmware is at 73.8% today (the relay and mute variants; cd4053_simple is
-# 69.9%), inside the 90%
-# default ceiling by 16.2 points.  The target prints the measured per-variant
-# percentages, so this figure can be re-checked by running it.  A future
-# accidental bloat would otherwise pass silently.
+# Firmware is at 81.4/85.4/84.4% today for simple/mute/relay, inside the 90%
+# default ceiling by 4.6 points at the tightest image. The target prints the
+# measured per-variant percentages, so this figure can be re-checked by running
+# it. A future accidental bloat would otherwise pass silently.
 # Override: make test-flash-budget ATTINY13A_FLASH_BUDGET=80
 test-flash-budget:
 	@if [ "$(ATTINY13A_MCU)" != "$(ATTINY13A_FLASH_MCU)" ] || [ "$(FW_BASE)" != "bypass" ] \
@@ -5311,8 +5308,8 @@ override PIC12F675_SYMBOLS := $(PIC12F675_HEXES:.hex=.sym)
 override PIC12F675_BUILD_PRODUCTS := $(PIC12F675_HEXES) $(PIC12F675_ASSEMBLIES) $(PIC12F675_SYMBOLS)
 # PIC12F675 device budget: 1024 words flash / 64 B RAM. TWICE the PIC10F322's
 # flash, which is the measured reason the modular architecture fits here (the
-# largest variant lands near 51%, against the 322's 92%) -- see
-# docs/pic12f675_feasibility.md section 3.
+# tightest variant lands at 55.9%, against the 322's 98.0%) -- see
+# DESIGN_DOCUMENTATION.adoc, "Resource Utilization".
 PIC12F675_FLASH_WORDS ?= 1024
 # NB: GPSIM, GPSIM_TIMEOUT_SECONDS and PIC_XC8_INCLUDE are SHARED across every
 # PIC part and are declared once in the PIC10F322 section above -- per the

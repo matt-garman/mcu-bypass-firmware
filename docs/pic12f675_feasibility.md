@@ -1,7 +1,7 @@
 # PIC12F675 feasibility — porting the reference architecture to a classic mid-range PIC
 
 <!-- current-status:start -->
-**Current status (v0.9.9; updated 2026-08-14): release-supported in software.**
+**Current status (v0.9.9; updated 2026-08-21): release-supported in software.**
 The repository now contains the production Model-B PIC12F675 shell and pin map,
 the complete three-variant build and flash-budget lane, static analysis,
 shipping-source coverage, production-image return-stack and CONFIG gates,
@@ -15,6 +15,12 @@ part. It is included in the default `all` goal, both CI aggregates, the canonica
 21-image release set, the 18-combination release soak, and the 34-file retained
 evidence inventory. The tag workflow rebuilds and requalifies its three shipping
 images with the pinned PIC toolchain before publication.
+
+The current Unreleased build uses 546/572/563 of 1024 program words for the
+simple/mute/relay variants. Persistent firmware state is 6 bytes (`ctx_`,
+`ctx_check_`, `gpio_shadow_`, and `osccal_snapshot_`); a current XC8 total Data
+Space reservation was not retained and is therefore not inferred from older
+builds.
 
 Like every current part, it has not run on silicon. Section 8 items 1, 2, 8, and
 9 remain explicitly deferred to the `1.x.y` hardware-validation pass. The
@@ -1381,17 +1387,18 @@ before it can drive a wrong output:
 The one nominal-path case those range and actuation guards do **not** cover is
 an *in-range* single-bit upset of `debounce_counter` -- a flip that stays
 within `[0, RELEASE_THRESH]` yet crosses `PRESSED_THRESH`, fabricating a
-phantom toggle with no footswitch press. On the shipped PIC12F675 that case is
-closed, not open: `PIC12F675_CFLAGS` defines `-DBYPASS_CTX_CHECK`, so the gate's
-first term compares a persisted-context snapshot against
-`debounce_ctx_check_word()`. The shell then computes and publishes only from the
+phantom toggle with no footswitch press. On the current Unreleased PIC12F675
+build that case is closed, not open: `PIC12F675_CFLAGS` defines
+`-DBYPASS_CTX_CHECK`, so the gate's first term compares a persisted-context
+snapshot against `debounce_ctx_check_word()`. The shell then computes and
+publishes only from the
 validated snapshot, so a single-bit upset confined to persisted `ctx_` or
 `ctx_check_` is detected, safely overwritten, or left mismatched for the next
 check instead of being consumed and re-folded (see
 `docs/context_seu_detection.md`). This bounded guarantee excludes locals,
-registers, code and control flow. The transaction follow-up still requires XC8
-resource checks, target simulation, the complete mutation gate and the shared
-`1.x.y` silicon-validation pass.
+registers, code and control flow. XC8 resource checks, target simulation, and
+the complete mutation gate have passed; the shared `1.x.y` silicon-validation
+pass remains open.
 
 **Why the ported tests are trusted to be distinct.** Porting the PIC10F322
 lanes to the PIC12F675 carries a copy-paste risk: a lane that still compiled

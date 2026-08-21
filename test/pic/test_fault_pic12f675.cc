@@ -4,10 +4,12 @@
 // PIC12F675 adapter for the shared libgpsim fault-injection harness. 1024
 // program words, and an output "latch" that is not a register at all: this part
 // has no LATx, so the shell keeps gpio_shadow_ in SRAM and writes shadow ->
-// GPIO. The core's per-part output hook therefore injects NINE cases where the
-// PIC10F322 injects three: four shadow faults, four physical-port faults, and a
-// valid effect-state mismatch that leaves both shadow and port untouched. Those
-// groups isolate expected-vs-shadow and shadow-vs-port independently.
+// GPIO. The core's per-part output hook therefore injects nine output cases for
+// each CD4053 variant and ten for relay, versus three CD4053 or four relay cases
+// on PIC10F322: four shadow faults, four modeled-GPIO faults, a valid
+// effect-state mismatch that leaves both views untouched, and one relay-only
+// both-coil GPIO case. Those groups isolate expected-vs-shadow and
+// shadow-vs-port independently.
 //
 // Everything else this part guards, and the two OPTION_REG bits it deliberately
 // does not, live in the injection matrix beside this file.
@@ -49,18 +51,18 @@
 // top of every serviced tick, before the sanity gate. Because this part has no
 // LATx, that operation clears BOTH coil bits in the shadow before one whole-port
 // GPIO write. It therefore (a) cannot replay the other coil's corrupt shadow bit
-// as an intermediate high and (b) refreshes the entire physical port from the
-// shadow. A coil SHADOW upset and any physical-PORT upset are corrected within
-// one iteration with no reset; only a non-coil SHADOW (intent) upset and the
-// shadow-vs-expected upset (shadow.expected) still reset. A settled persistent
-// port mismatch is still caught by port-follows-shadow.
+// as an intermediate high and (b) refreshes the entire modeled GPIO from the
+// shadow. At the reviewed trailing-CLRWDT seam, one-shot coil-shadow and GPIO
+// injections are rewritten before the first gate with no reset; non-coil shadow
+// (intent) and shadow-vs-expected injections still reset. A settled persistent
+// port mismatch observable after refresh is still caught by port-follows-shadow.
 //
-// CD4053 variants: hw_outputs_reassert_safe() is a no-op, so every output upset
-// still resets, exactly as before.
+// CD4053 variants: hw_outputs_reassert_safe() is a no-op, so every modeled
+// output injection at this pre-gate seam still resets.
 #if defined(TQ2_L2_5V_RELAY)
-// expected_resets=0 asserts "corrected, no reset." That transitively proves
-// within-one-tick correction: an uncorrected coil/port bit would diverge from
-// the shadow and trip the port-follows-shadow gate at the next tick -> reset.
+// expected_resets=0 asserts "corrected, no reset." At this trailing-CLRWDT seam,
+// an uncorrected coil/port bit would diverge from the shadow and trip the
+// port-follows-shadow clause at the first following gate.
 // The shipping-source host oracle separately proves RESET, SET, and both-coil
 // shadow injections cause exactly one modeled whole-port write with no
 // intermediate high GPIO write. This target lane checks the final

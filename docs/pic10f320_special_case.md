@@ -161,13 +161,14 @@ watchdog. That unintended drive was not limited by the normal 12 ms pulse.
 
 The relay variant has a narrower safety rule as of `v0.9.8`. Immediately after
 accepting and clearing each timer event, before the sanity decision and watchdog
-pet, it reasserts `set_relay_coils_low()`. A post-actuation RA1 or RA2 latch upset
-is therefore corrected by the next serviced iteration without requiring a
-footswitch event or watchdog reset. Host fault injection covers RESET, SET and
-both bits; the real-image fault lane additionally observes physical `PORTA` and
-requires that a one-bit injection never raises the other coil. Existing exact
-host and target-I/O traces require the defensive low-to-low writes to add no
-normal-path edge.
+pet, it reasserts `set_relay_coils_low()`. An RA1 or RA2 latch upset already
+present when that operation runs is corrected without requiring a footswitch
+event or watchdog reset. This is not an arbitrary-instruction-phase bound: the
+fault tests inject at the trailing `CLRWDT` seam and delimit the next completed
+iteration. Host fault injection covers RESET, SET and both bits; the real-image
+fault lane writes `LATA`, observes modeled `PORTA` follow it, and requires that a
+one-bit injection never raises the other coil. Existing exact host and target-I/O
+traces require the defensive low-to-low writes to add no normal-path edge.
 
 This is correction, not detection: it does not restore a relay that an accidental
 pulse mechanically switched, and it does not make the PIC10F320 equivalent to the

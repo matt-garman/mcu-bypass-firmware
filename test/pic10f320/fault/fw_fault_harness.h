@@ -67,7 +67,8 @@ int fw_fault_run(fw_inject_t inj);
 #if defined(OUTPUT_TQ2_RELAY)
 // Result of injecting one or both relay-coil latch bits after a clean iteration
 // and observing the next completed iteration. The host mock proves the firmware
-// latch behavior; the libgpsim fault lane separately proves physical PORTA.
+// latch behavior; the libgpsim fault lane separately observes modeled PORTA
+// following the injected latch.
 typedef struct {
     uint8_t injected_coils;
     uint8_t observed_coils;
@@ -85,7 +86,7 @@ int fw_relay_fault_run(uint8_t coil_mask, fw_relay_fault_result_t *result);
 // released). fsw[0] is the power-on level init() samples. Returns the final
 // status-LED bit RA0 (LATA & 0x01): 1 == ENGAGED, 0 == BYPASS (0xFF on an
 // unexpected hang). RA0 is the variant-independent effect witness; the variant-
-// specific RA1/RA2 control pins are asserted on silicon by the gpsim test. Used
+// specific RA1/RA2 levels are asserted in modeled PORTA by the gpsim test. Used
 // to drive the firmware's happy-path lines for the coverage gate (and as a light
 // behavioural cross-check; the equivalence test remains the behavioural oracle).
 uint8_t fw_drive(const uint8_t *fsw, int n);

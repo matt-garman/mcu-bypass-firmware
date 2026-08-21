@@ -9,9 +9,10 @@
 // makes accidental cross-part drift visible while eliminating duplicated
 // simulator logic.
 //
-// This test links libgpsim, drives a real built HEX, corrupts a guarded location
-// at runtime (an SEU/EMI single-event-upset model), and asserts that the firmware
-// detects the corruption and recovers via a watchdog reset on the simulated core.
+// This test links libgpsim, drives a real built HEX, and corrupts a selected
+// location at runtime (an SEU/EMI single-event-upset model). Each adapter pins
+// the required response: watchdog recovery for guarded faults, or no-reset
+// correction for reviewed settled relay-coil cases.
 //
 // COMMON COVERAGE (the register sets are the family matrix's to name; this core
 // only sequences them):
@@ -25,47 +26,47 @@
 // The output-latch policy is the per-PART hook, and the three consumers show
 // why it has to be: PIC10F322 injects its latch bits because that firmware
 // guards the settled latch; PIC10F320 deliberately omits that general guard for
-// flash budget and its relay adapter instead injects coil bits and requires
-// their idle safe-state rewrite to correct both latch and physical port within
-// one serviced iteration, without a reset; and PIC12F675 has no latch REGISTER
-// at all, so it injects into the SRAM shadow that serves as one AND into the
-// pins, which the gate requires to follow it. The literal per-part expected
-// counts ensure a missing case cannot silently reduce any lane.
+// flash budget and its relay adapter instead injects coil latch bits and requires
+// modeled PORTA to follow their idle safe-state rewrite within one serviced
+// iteration, without a reset; and PIC12F675 has no latch REGISTER
+// at all, so it injects into the SRAM shadow that serves as one and into modeled
+// GPIO/readback state, which the gate requires to follow it. The literal
+// per-part expected counts ensure a missing case cannot silently reduce any lane.
 //
 // CTX_ADDR is required. The Makefile extracts _ctx_'s data address from the XC8
 // .sym so the test self-adjusts per variant and cannot pass with SRAM cases
 // silently omitted.
 //
-// WHY THIS IS THE MIRROR IMAGE OF THE SOAK (test/pic/test_soak_pic.cc):
-// the polled PIC firmware has no recovery path OTHER than the watchdog. When the
-// per-tick gate sees a skewed SFR it calls hw_force_wdt_reset(), which clears
+// WHY RESET-PRODUCING CASES MIRROR THE SOAK (test/pic/test_soak_pic.cc): when
+// the per-tick gate sees a guarded fault it calls hw_force_wdt_reset(), clears
 // GIE and spins in for(;;){} -- it simply STOPS petting the dog, so the fault
 // surfaces as a WDT reset that re-vectors to 0x000. That is the identical event
-// the soak's ResetNotifier detects, EXCEPT the soak treats a reset as a FAILURE
-// while this test treats exactly one reset as the expected PASS. So this driver
-// reuses the soak's proven notify-break-at-0x000 machinery and inverts the
-// verdict.
+// the soak's ResetNotifier detects, except the soak treats a reset as failure
+// while these cases require exactly one. Relay correction cases run before the
+// gate and deliberately take the separate zero-reset path.
 //
-// SCENARIO (per guarded positive injection case):
+// SCENARIO (`inject_case()` reset and correction cases):
 //   1. Hold the footswitch RELEASED so the device is quiescent -- the debounce
-//      context stays in range and the pull-up stays intact, so ONLY the injected
-//      SFR can trip the gate (clean fault isolation).
+//      context stays in range and the pull-up stays intact, so only the selected
+//      register or storage location can trip the gate (clean fault isolation).
 //   2. Snapshot the cumulative reset count.
-//   3. put_value() a corrupt value into the target SFR (an SEU bit-flip).
+//   3. put_value() a corrupt value into the selected location (an SEU bit-flip).
 //   4. Run one WDT window.
-//   5. Assert EXACTLY ONE reset fired (delta == 1). "Exactly one" -- not ">=1" --
-//      also catches a reset-LOOP (the only gpsim-modeling risk; see the WDTCON
-//      note below), which would otherwise pass silently.
+//   5. Assert the adapter's exact reset delta: one for reset-producing faults or
+//      zero for deliberate correction cases. "Exactly one" -- not ">=1" -- also
+//      catches a reset-LOOP (the only gpsim-modeling risk; see the WDTCON note
+//      below), which would otherwise pass silently.
+// `inject_relay_correction_case()` instead stops after exactly one serviced
+// iteration and checks latch plus modeled-port correction directly.
+//
 // A no-injection CONTROL case runs first and asserts delta == 0: a quiescent
 // device must NOT reset in a full window, proving the window is not catching
 // phantom resets and the gate does not fire spuriously.
 //
-// Whether any OTHER delta == 0 case exists is the matrix's call, not this
-// core's. Every current part now guards every injected location: the exact
-// direction/output checks brought each spare output inside the policy, including
-// PIC12F675 GP4 and its non-isomorphic ANSEL.ANS3 mapping. The zero-expectation
-// support remains because a future deliberate non-guard must be pinned rather
-// than assumed.
+// The matrix chooses reset versus correction. Exact direction/output checks
+// bring each spare output inside the guarded policy, including PIC12F675 GP4 and
+// its non-isomorphic ANSEL.ANS3 mapping; relay coil and modeled-port cases are
+// the explicit zero-reset exceptions.
 //
 // CORRUPTION VALUES are chosen so the main loop keeps running and the GATE is
 // the sole reset path. That confound analysis is per-register and therefore
@@ -358,8 +359,8 @@ static void prove_post_reset_liveness(void) {
            " (renewed liveness)\n");
 }
 
-// PIC10F320 relay-only policy: a stable-state coil latch upset is corrected, not
-// reset. Inject at the trailing loop CLRWDT, then stop at its next occurrence.
+// LATx PIC relay policy at the reviewed stable seam: inject a coil latch upset at
+// the trailing loop CLRWDT, then stop at its next occurrence.
 // That is exactly one serviced iteration and places the verdict before its pet.
 static void inject_relay_correction_case(unsigned mask, const char *note) {
     static unsigned const coil_mask = PIC_REG_COIL_MASK;
@@ -435,13 +436,14 @@ static void inject_relay_correction_case(unsigned mask, const char *note) {
                       footswitch_released;
 
     // Keep cases independent even when exercising a mutant that fails to clear
-    // the injected state. The verdict above already captured the physical and
-    // latch failure; the next case must still begin from the quiescent contract.
+    // the injected state. The verdict above already captured the modeled-port
+    // and latch failure; the next case must still begin from the quiescent
+    // contract.
     latch->put_value((latch->get_value() & 0xFFu) & ~coil_mask);
 
     g_checks++;
     if (pass) {
-        printf("    PASS: physical/latch coil mask 0x%02x cleared in %" G_GUINT64_FORMAT
+        printf("    PASS: modeled-port/latch coil mask 0x%02x cleared in %" G_GUINT64_FORMAT
                " cycles (%.3f ms), within one iteration and without reset\n",
                mask, correction_cycles,
                (double)correction_cycles / (double)CYCLES_PER_MS);
@@ -463,16 +465,13 @@ static void inject_relay_correction_case(unsigned mask, const char *note) {
 
 // ---- One injection case -----------------------------------------------------
 // absolute=true writes `val`; absolute=false writes (current ^ val), i.e. an
-// SEU bit-flip of the bits in `val`. Every call site passes expected_resets == 1
-// since the exact-direction port made all three variants guard the same pins;
-// the parameter and its restore-and-verify branch below are kept because a
-// zero-expectation case is exactly what a future unguarded location would need,
-// and because that branch is what proved the old RA2 negative control genuinely
-// left the register unchanged rather than silently failing to inject.
+// SEU bit-flip of the bits in `val`. Most call sites require one reset; deliberate
+// relay correction cases require zero. The restore-and-verify branch keeps those
+// zero-reset cases independent and proves restoration succeeds.
 static void inject_case(const char *label, unsigned addr, const char *token,
                         bool absolute, unsigned val, unsigned expected_resets,
                         const char *note) {
-    footsw_set(0);                 // released: quiescent, only the SFR can trip
+    footsw_set(0);                 // released: quiescent, only this location can trip
     if (!run_ms(SETTLE_MS)) {      // (re)reach the main loop after any prior reset
         g_checks++;
         g_fails++;
@@ -520,8 +519,8 @@ static void inject_case(const char *label, unsigned addr, const char *token,
         printf("    PASS: observed exactly %u WDT reset%s\n", expected_resets,
                expected_resets == 1u ? "" : "s");
         // A reset fired as required; now require the recovered image to live.
-        // (Skipped for the expected_resets == 0 negative controls below, whose
-        // whole point is that no reset happened and the loop never stopped.)
+        // (Skipped for expected_resets == 0 correction cases, whose contract is
+        // that no reset happened and the loop never stopped.)
         if (expected_resets >= 1u) {
             prove_post_reset_liveness();
         }
@@ -536,18 +535,18 @@ static void inject_case(const char *label, unsigned addr, const char *token,
                delta, WDT_RESET_WINDOW_MS, expected_resets, reason);
     }
     if (expected_resets == 0u) {
-        r->put_value(cur); // restore negative-control faults that intentionally do not reset
+        r->put_value(cur); // restore correction cases that intentionally do not reset
         g_checks++;
         if ((r->get_value() & 0xFFu) != cur) {
             g_fails++;
-            fprintf(stderr, "    FAIL: could not restore register after negative control\n");
+            fprintf(stderr, "    FAIL: could not restore register after correction case\n");
         }
     }
     fflush(stdout);
 }
 
 // ---- Isolate the shadow-versus-expected clause, F2-blind ---------------------
-// Drives BOTH the output shadow and the physical port to the same value while
+// Drives BOTH the output shadow and modeled GPIO to the same value while
 // leaving ctx_ untouched, so hw_output_state_intact()'s port-follows-shadow
 // clause stays satisfied (port == shadow), its shadow-vs-expected clause is the
 // SOLE trip (shadow != expected(ctx_.effect_state)), and the F2 context-check

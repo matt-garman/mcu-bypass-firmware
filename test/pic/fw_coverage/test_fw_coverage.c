@@ -297,11 +297,11 @@ static void test_faults(void) {
     expect_reset(FWI_GP5_PIN_TO_OUTPUT, "GP5 direction fault");
 #if defined(TQ2_L2_5V_RELAY)
     // Settled-state case: GP1/GP2 are the coils. This part has no LATx, so the
-    // re-assert writes the
-    // WHOLE shadow to GPIO: it clears the coil bits AND refreshes every physical
-    // output.  A coil shadow upset and ANY physical-port upset therefore correct
-    // within one tick; a non-coil shadow (intent) upset still resets. The active
-    // 12 ms pulse is characterized separately below.
+    // re-assert writes the WHOLE shadow to GPIO: it clears the coil bits and
+    // refreshes every modeled output. At this deterministic pre-gate seam, a
+    // one-shot coil-shadow or GPIO-readback upset is rewritten; a non-coil shadow
+    // (intent) upset still resets. The actuation sequence is characterized
+    // separately below.
     expect_reset(FWI_SHADOW_GP0_HIGH, "GP0 LED shadow (intent) fault");
     expect_corrected(FWI_SHADOW_GP1_HIGH, "GP1 RESET-coil shadow fault");
     expect_corrected(FWI_SHADOW_GP2_HIGH, "GP2 SET-coil shadow fault");
@@ -311,7 +311,8 @@ static void test_faults(void) {
     expect_corrected(FWI_GPIO_GP2_HIGH, "physical GP2 divergence");
     expect_corrected(FWI_GPIO_GP4_HIGH, "physical GP4 divergence");
 #else
-    // hw_outputs_reassert_safe() is a no-op here, so every output upset resets.
+    // hw_outputs_reassert_safe() is a no-op here, so every modeled output
+    // injection at this pre-gate seam resets.
     expect_reset(FWI_SHADOW_GP0_HIGH, "GP0 shadow-latch fault");
     expect_reset(FWI_SHADOW_GP1_HIGH, "GP1 shadow-latch fault");
     expect_reset(FWI_SHADOW_GP2_HIGH, "GP2 shadow-latch fault");
@@ -346,7 +347,7 @@ static void test_faults(void) {
     expect_reset(FWI_LED_PIN_TO_INPUT, "RA0 direction fault");
     expect_reset(FWI_CTL1_PIN_TO_INPUT, "RA1 direction fault");
     expect_reset(FWI_RA2_PIN_TO_INPUT, "RA2 direction fault");
-    // RA0 is the LED on every variant: an intent upset always resets.
+    // RA0 is the LED on every variant: this pre-gate intent injection resets.
     expect_reset(FWI_LATA_RA0_HIGH, "RA0 output-latch fault");
 #if defined(TQ2_L2_5V_RELAY)
     // RA1/RA2 are the coils.  This part keeps a LATx latch and never rewrites
@@ -355,7 +356,8 @@ static void test_faults(void) {
     expect_corrected(FWI_LATA_RA1_HIGH, "RA1 RESET-coil latch fault");
     expect_corrected(FWI_LATA_RA2_HIGH, "RA2 SET-coil latch fault");
 #else
-    // hw_outputs_reassert_safe() is a no-op here, so every output upset resets.
+    // hw_outputs_reassert_safe() is a no-op here, so every modeled output
+    // injection at this pre-gate seam resets.
     expect_reset(FWI_LATA_RA1_HIGH, "RA1 output-latch fault");
     expect_reset(FWI_LATA_RA2_HIGH, "RA2 output-latch fault");
 #endif
@@ -415,12 +417,13 @@ static void test_relay_pulse_fault_window(void) {
                 expected_physical =
                     inactive_high != 0 ? FW_RELAY_COIL_MASK : 0u;
 #if defined(BYPASS_MCU_PIC12F675)
-                // A physical GPIO upset does not corrupt the authoritative SRAM
-                // shadow; the normal post-pulse writes reconcile both views.
+                // A modeled GPIO/readback upset does not corrupt the
+                // authoritative SRAM shadow; the normal post-pulse writes
+                // reconcile both views.
                 expected_intent = observation.active_mask;
 #else
-                // PIC10F322 has no independent physical readback in this shell;
-                // its writable and observable output state is LATA.
+                // PIC10F322 has no independent modeled port readback in this
+                // shell; its writable and observable output state is LATA.
                 expected_intent = expected_physical;
 #endif
                 CHECK(result == 0 &&

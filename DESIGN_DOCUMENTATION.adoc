@@ -47,7 +47,7 @@ set.  It is the modern-silicon member of the supported set.
     * Current production part rather than a mature/legacy one, with a
       correspondingly long expected availability horizon
     * 2 KB flash and 128 bytes SRAM: roughly double the ATtiny13a's flash and
-      SRAM, so the firmware sits at 41-43% of flash instead of 70-74%
+      SRAM, so the firmware sits at 47-49% of flash instead of 81-85%
     * An **AEC-Q100 automotive-qualified** variant of this family exists
       (125 °C), which is a meaningfully stronger environmental rating than any
       other supported part carries
@@ -301,8 +301,8 @@ silicon family:
 [horizontal]
 AVR Classic (ATtiny13a/45/85), ATtiny202, PIC10F322, PIC12F675::
   enabled (`BYPASS_CTX_CHECK`).  PIC10F322 is the binding capacity
-  case; the measured transactional images use 476/502/505 of 512
-  words for the simple/mute/relay variants.
+  case; the current images use 476/502/493 of 512 words for the
+  simple/mute/relay variants.
 PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
   shared pure core, so this shell inlines the debounce logic by hand
   and has no `debounce_ctx_check_word()` to call; even the cheapest
@@ -317,14 +317,18 @@ PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
     * Correction in place, before escalation: between relay
       actuations, every relay-capable build re-asserts both coils low
       at the top of each serviced iteration, ahead of the checks
-      above.  A transient upset in writable coil state during this
-      settled period is corrected at the next healthy loop-top
-      service -- nominally about 1ms, or 1.024ms on PIC12F675, plus
-      execution latency -- without reset or a logical state change.
-      A mismatch that remains observable after the re-assert reaches
-      the existing sanity response.  Only PIC12F675 compares physical
-      GPIO against an independent output shadow; the other parts do
-      not claim universal external stuck-pin detection.
+      above.  A one-shot writable coil-state upset already present
+      when that operation executes is cleared before the following
+      gate, without reset or a logical state change.  This is not an
+      all-instruction-phase guarantee: an upset arising after the
+      re-assert but before that gate may instead be observed and
+      escalated on shells with output-state integrity checks.  A
+      mismatch that remains observable after the re-assert reaches
+      the architecture's existing sanity response.  Only PIC12F675
+      compares physical GPIO against an independent output shadow;
+      the other parts do not claim universal external stuck-pin
+      detection.  PIC10F320 is correction-only for relay coil bits
+      and has no general stable-output-latch check.
 +
       Relay coil clears use one masked target operation.  On
       PIC12F675 this clears both coil bits in the SRAM shadow before
@@ -332,18 +336,22 @@ PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
       bit from being replayed as an intermediate physical high while
       preserving the required all-port refresh.
 +
-      This correction does not run during the 12ms blocking relay
-      pulse.  An upset in that window can shorten the intended pulse
-      or energize the inactive or both coils for nearly the remaining
-      delay.  The normal epilogue commands both coil outputs low if
-      execution completes, but missed or spurious relay actuation,
-      audio disruption, and an external output path that does not
-      accept that command remain residual risks.
+      This correction does not run during the complete blocking relay
+      actuation sequence, from its pre-pulse clear through its
+      post-pulse clear.  An upset in that sequence can shorten the
+      intended pulse or energize the inactive or both coils.  The
+      characterized cases cover 1, 6 and 11ms inside the 12ms delay,
+      not every instruction boundary around assertion and clearing.
+      The normal epilogue commands both coil outputs low if execution
+      completes, but missed or spurious relay actuation, audio
+      disruption, and an external output path that does not accept
+      that command remain residual risks.
 +
 NOTE: This trade-off is deliberate and worth stating.  A transient
-settled-state coil upset corrected in place leaves no trace on parts
-that have no telemetry: it is fixed, but neither counted nor
-reported.  Active-pulse faults are outside that correction guarantee.
+coil upset that reaches the loop-top re-assert before a sanity check
+leaves no trace on parts that have no telemetry: it is fixed, but
+neither counted nor reported.  Faults elsewhere in the actuation
+sequence are outside that correction guarantee.
 
 
 == Asymmetric Debounce Timing
@@ -964,62 +972,57 @@ Specific tests verify specific requirements, as shown in the following table:
 
 == Resource Utilization
 
-Resource use spans a wide range across the supported parts: the same behaviour
-occupies 9.1% of an ATtiny85's flash and 95.7% of a PIC10F320's. Headroom is
-generous on the roomier parts and deliberately tight at the bottom of that
-range -- the 256-word PIC10F320 leaves 11 words free on its largest variant,
-which is why that target is built differently from every other one and is
-documented as a special case (see `docs/pic10f320_special_case.md`). Every
-family carries a build-time flash-budget gate, so an overshoot fails the build
-rather than reaching hardware. Measured figures per MCU family follow.
+Among retained current measurements, resource use spans from 47.1% of an
+ATtiny202's flash to 98.0% of a PIC10F322's; that target's mute image is the
+current binding build with 10 words free. PIC10F320 has the smallest absolute
+capacity and leaves 11 of 256 words free on its largest variant, which is why it
+is built differently from every other target and documented as a special case
+(see `docs/pic10f320_special_case.md`). Every family carries a build-time
+flash-budget gate, so an overshoot fails the build rather than reaching hardware.
+Measured figures per MCU family follow.
 
 === AVR Classic family
 
 Flash figures below are reported by `avr-size`; static data comprises
-two global variables, `timer_isr_called_` (1 byte, shared between main and
-the timer ISR) and `ctx_` (3-byte `debounce_context_t` struct containing
-`program_state`, `effect_state`, and `debounce_counter`), totalling 4 bytes;
-and peak stack is the empirical high-water mark measured by the simavr
+`timer_isr_called_` (1 byte, shared between main and the timer ISR), `ctx_`
+(the 3-byte `debounce_context_t`), and the 1-byte `ctx_check_`, totalling 5
+bytes. Peak stack is the empirical high-water mark measured by the simavr
 stack-canary test (see Testing and Validation above).
 
 .Table Flash Utilization by Variant (measured, `avr-size`)
 |===
 | Part      | Variant | Flash               | of device flash
 
-| ATtiny13a | cd4053_simple     | 716 bytes | 69.9% of 1 KB
-| ATtiny13a | tq2_l2_5v_relay   | 756 bytes | 73.8% of 1 KB
-| ATtiny13a | cd4053_with_mute  | 756 bytes | 73.8% of 1 KB
-| ATtiny45  | cd4053_simple     | 742 bytes | 18.1% of 4 KB
-| ATtiny45  | tq2_l2_5v_relay   | 782 bytes | 19.1% of 4 KB
-| ATtiny45  | cd4053_with_mute  | 782 bytes | 19.1% of 4 KB
-| ATtiny85  | cd4053_simple     | 742 bytes | 9.1% of 8 KB
-| ATtiny85  | tq2_l2_5v_relay   | 782 bytes | 9.5% of 8 KB
-| ATtiny85  | cd4053_with_mute  | 782 bytes | 9.5% of 8 KB
+| ATtiny13a | cd4053_simple     | 834 bytes | 81.4% of 1 KB
+| ATtiny13a | tq2_l2_5v_relay   | 864 bytes | 84.4% of 1 KB
+| ATtiny13a | cd4053_with_mute  | 874 bytes | 85.4% of 1 KB
 |===
 
-SRAM use is dominated by 4 bytes of static data; peak stack measured 31 bytes
-(`tq2_l2_5v_relay` and `cd4053_with_mute`) and 29 bytes (`cd4053_simple`). On the
-most constrained part,
-the ATtiny13a, with 64 bytes of SRAM: worst-case consumption is 35 bytes
-(4 static + 31 stack), leaving 29 bytes of free headroom. The tinyx5
-family has far more of both flash and SRAM (the ATtiny85 uses approximately
-9% of flash and approximately 7% of its 512 bytes of SRAM).
+The exact post-transaction ATtiny45/85 flash readings were not retained; their
+rows are omitted rather than deriving current values from the ATtiny13a. Their
+builds remain subject to the device flash gate, and release qualification must
+remeasure them before publishing a current exact table.
+
+Peak stack measures 31-33 bytes across the variants. On the most constrained
+part, the ATtiny13a with 64 bytes of SRAM, aggregate occupancy is 36-38 bytes
+(5 static + 31-33 stack), leaving 28-26 bytes of free headroom. The tinyx5 family
+has substantially more SRAM.
 
 That SRAM headroom is a deliberate design property, and it is gated rather
 than merely stated: `test_stack_high_water_mark()` in `test/avr/test_sim.c`
 paints SRAM with a canary, exercises the deepest call paths, and fails
 `make test-sim-attiny13a` if fewer than 8 free bytes separate the deepest stack pointer
-from the top of the static data. Measured today: 29 free bytes on
-`tq2_l2_5v_relay` and `cd4053_with_mute`, 31 on `cd4053_simple` — the same
-figures as above. The top of static data is read
+from the top of the static data. Measured today: 26-28 free bytes across the
+variants. The top of static data is read
 from the firmware ELF's `__bss_end` rather than assumed, so a future static
 variable tightens the gate on its own; if that symbol cannot be resolved the
 test fails rather than falling back to a looser reference point.
 
 Flash, not SRAM, is the tighter resource on the ATtiny13a, and it has its own
-gate: 73.8% of 1 KB against the 90% ceiling enforced by
-`make test-flash-budget`. Both are comfortable margins on this part; neither
-is unlimited.
+gate: at most 85.4% of 1 KB against the 90% ceiling enforced by
+`make test-flash-budget`, leaving 47 bytes or 4.6 percentage points at the
+tightest image. Both flash and SRAM remain inside their gates; neither margin is
+unlimited.
 
 === ATtiny202 (AVR-XT build)
 
@@ -1034,23 +1037,24 @@ device-aware mode: binutils 2.26 does not recognise `avrxmega3` parts, so
 |===
 | Variant | Flash     | of 2 KB | Free
 
-| cd4053_simple     | 848 bytes | 41.4% | 1200 bytes
-| cd4053_with_mute  | 888 bytes | 43.4% | 1160 bytes
-| tq2_l2_5v_relay   | 888 bytes | 43.4% | 1160 bytes
+| cd4053_simple     | 964 bytes | 47.1% | 1084 bytes
+| cd4053_with_mute  | 1004 bytes | 49.0% | 1044 bytes
+| tq2_l2_5v_relay   | 994 bytes | 48.5% | 1054 bytes
 |===
 
-Static data is 4 bytes, identical to the AVR Classic figure and for the same
-reason: the AVR-XT shell keeps the same two globals, `ctx_` (the 3-byte
-`debounce_context_t`) and the 1-byte `timer_isr_called_` ISR-to-main handshake.
-Against 128 bytes of SRAM that is 3.1%, leaving the whole remainder for stack.
+Static data is 5 bytes, identical to the AVR Classic figure and for the same
+reason: the AVR-XT shell keeps `ctx_` (3 bytes), `ctx_check_` (1 byte), and the
+1-byte `timer_isr_called_` ISR-to-main handshake. Against 128 bytes of SRAM that
+is 3.9%, leaving 123 bytes before stack; this is not a measured peak-free-RAM
+claim.
 
 NOTE: the `-fstack-usage` static frame bound (`make test-stack-bound`) covers
 the verified core and all three output drivers — which the AVR-XT build shares
 unchanged — but not `bypass_mcu_avr_xt.c` itself, whose own frames are not yet
 measured. The margin here is large enough that this is a completeness gap rather
-than a risk (the ATtiny13a, with half the SRAM and a measured 31-byte peak,
-still leaves ~29 bytes free), but it is a real difference from the classic lane
-and is tracked as such.
+than a risk (the ATtiny13a, with half the SRAM and a measured 33-byte tightest
+peak, still leaves 26 bytes free), but it is a real difference from the classic
+lane and is tracked as such.
 
 === PIC10F322 (XC8 build)
 
@@ -1060,30 +1064,28 @@ compiler), not bytes. `make pic10f322` enforces the flash-word budget per varian
 
 .Table PIC10F322 Utilization by Variant (measured, XC8 V3.10)
 |===
-| Variant | Program (flash) | of 512 words | Data (RAM) | of 64 bytes
+| Variant | Program (flash) | of 512 words | Free
 
-| cd4053_simple     | 445 words | 86.9% | 34 bytes | 53.1%
-| tq2_l2_5v_relay   | 473 words | 92.4% | 34 bytes | 53.1%
-| cd4053_with_mute  | 471 words | 92.0% | 34 bytes | 53.1%
+| cd4053_simple     | 476 words | 93.0% | 36 words
+| tq2_l2_5v_relay   | 493 words | 96.3% | 19 words
+| cd4053_with_mute  | 502 words | 98.0% | 10 words
 |===
 
-The 34-byte data figure is XC8's total reservation, not just the firmware's
-state: the single live global is `ctx_` (the 3-byte `debounce_context_t`; the
-PIC's polled Model-B loop has no `timer_isr_called_` handshake, unlike the
-AVR ISR design), and the remainder is the XC8 runtime's scratch and temporaries.
-Against the 512-word limit the margin is real but not generous: the largest
-variant, `tq2_l2_5v_relay`, leaves 39 words free (7.6%), and `cd4053_simple`
-leaves 67 (13.1%). That
-is enough for maintenance work, not for a substantial new feature. `make pic10f322`
-gates every variant against the budget on every build, so an overshoot fails
-the build rather than reaching hardware.
+Persistent firmware state is 4 bytes: the 3-byte `ctx_` and 1-byte
+`ctx_check_`. The PIC's polled Model-B loop has no `timer_isr_called_` handshake.
+A current XC8 total Data Space reservation was not retained, so the older
+34-byte total is not presented as current. Against the 512-word limit the flash
+margin is real but not generous: the binding mute variant leaves 10 words
+(2.0%), relay leaves 19, and simple leaves 36. That is enough for maintenance
+work, not a substantial new feature. `make pic10f322` gates every variant
+against the budget on every build, so an overshoot fails before hardware.
 
 === PIC10F320 (XC8 build)
 
 The PIC10F320 is the same silicon family with **half** the flash: 256 fourteen-bit
-program words. It is the most flash-constrained supported part by a wide margin,
-and it is the reason its firmware is structured differently from every other
-target (see "The one target that does not follow this rule" below, and
+program words. It is the smallest-capacity supported part and the reason its
+firmware is structured differently from every other target (see "The one target
+that does not follow this rule" below, and
 `docs/pic10f320_special_case.md`). `make pic10f320` enforces the 256-word budget per
 variant and fails the build on any overshoot.
 
@@ -1096,7 +1098,7 @@ variant and fails the build on any overshoot.
 | tq2_l2_5v_relay  | 245 words | 95.7% | 11 words
 |===
 
-Data (RAM) use is 10 bytes of 64 (15.6%); the single live global is the same
+Data (RAM) use is 10 bytes of 64 (15.6%); persistent firmware state is the
 3-byte `ctx_`, with the remainder XC8 runtime scratch.
 
 Those margins are the whole story of this target. The general output-latch
@@ -1114,24 +1116,25 @@ bytes of RAM, plus 128 bytes of data EEPROM the firmware does not use.
 
 .Table PIC12F675 Utilization by Variant (measured, XC8 V3.10)
 |===
-| Variant | Program (flash) | of 1024 words | Data (RAM) | of 64 bytes
+| Variant | Program (flash) | of 1024 words | Free
 
-| cd4053_simple    | 495 words | 48.3% | 36 bytes | 56.2%
-| cd4053_with_mute | 521 words | 50.9% | 36 bytes | 56.2%
-| tq2_l2_5v_relay  | 523 words | 51.1% | 36 bytes | 56.2%
+| cd4053_simple    | 546 words | 53.3% | 478 words
+| cd4053_with_mute | 572 words | 55.9% | 452 words
+| tq2_l2_5v_relay  | 563 words | 55.0% | 461 words
 |===
 
-Roughly half the flash free on every variant — the only PIC target here with
-room to spare. Two of those 36 RAM bytes are this part's own: `gpio_shadow_`,
-the software output latch the classic mid-range core has no `LATx` for, and
-`osccal_snapshot_`, the factory oscillator trim captured at init so a later
-change can be detected. The 322 needs neither: it has a real output latch, and
-compares `OSCCON` against a compile-time constant instead of a captured value.
+Roughly half the flash remains free on every variant. Persistent firmware state
+is 6 bytes: the 3-byte `ctx_`, `ctx_check_`, `gpio_shadow_` (the software output
+latch this core needs), and `osccal_snapshot_` (the factory oscillator trim
+captured at init). A current XC8 total Data Space reservation was not retained,
+so the older 36-byte total is not presented as current. The 322 needs neither of
+the final two bytes: it has a real output latch and compares `OSCCON` against a
+compile-time constant instead of a captured value.
 
 The comfortable margin is a consequence of the part, not of a leaner build. The
 comparison that isolates it is `tq2_l2_5v_relay`, which compiles the same core
-and the same driver on both parts: 523 words here against the PIC10F322's 473.
-The extra ~50 words are shell, and they buy the work this core makes necessary —
+and the same driver on both parts: 563 words here against the PIC10F322's 493.
+The extra 70 words are shell, and they buy the work this core makes necessary —
 turning off a comparator and an ADC the 32x parts do not have, routing every
 output write through the shadow, and counting four timer rollovers in software
 to make the tick.
