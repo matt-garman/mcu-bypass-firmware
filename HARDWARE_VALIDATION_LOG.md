@@ -5,6 +5,7 @@ This document logs which firmware has been flashed-to and tested on
 actual hardware.
 
 | MCU       | Output Scheme   | Firmware Version | Notes |
+| :-------- | :-------------- | :--------------- | :---- |
 | ATtiny13a | CD4053 Simple   | pre-v0.9.0       | [Build report](https://forum.pedalpcb.com/threads/custom-barber-ltd-sr-w-microcontroller-bypass.29615/) |
 | ATtiny13a | CD4053 Muting   | v0.9.9           | [Quasi-IC](https://www.diystompboxes.com/smfforum/index.php?msg=1312340), [Build report](https://forum.pedalpcb.com/threads/dynamic-haircut-v2-0-barber-gain-changer.29479/post-393071) |
 | ATtiny13a | TQ2-L2-5V Relay |                  |       |
@@ -30,5 +31,8 @@ actual hardware.
 
 ## Additional Notes
 
+  - For PIC flashing, I have a knock-off PICKit3 (amusingly labled "PCKit 3"): note that starting with MPLab 6.25, PICKit 3 support was removed; I had to download MPLab 6.20, which is the latest version that works with the PICKit 3
+  - I used a `usbasp` programmer with a SOIC-8 clip to program the surface-mount ATtiny13a for my Quasi-IC module
+  - I used a `usbtiny` programmer to program through-hole AVR classic chips
   - The AVR Classic parts (ATtiny13a, ATtiny45, ATtiny85) have the same pinout and can be used interchangeably
   - The PIC10F32x parts have the same pinout and can be used interchangeably
