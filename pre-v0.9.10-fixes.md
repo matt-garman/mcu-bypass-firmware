@@ -139,14 +139,47 @@ the intended banners but not prefix, suffix, or malformed-token collisions.
 
 **Acceptance criteria**
 
-- [ ] Exactly avr-gcc `7.3.0` is accepted; prefix/suffix collisions fail.
-- [ ] Exactly XC8 `V3.10` is accepted independently for PIC10F322/PIC12F675 and
+- [x] Exactly avr-gcc `7.3.0` is accepted; prefix/suffix collisions fail.
+- [x] Exactly XC8 `V3.10` is accepted independently for PIC10F322/PIC12F675 and
   PIC10F320; prefix/suffix collisions fail.
-- [ ] Diagnostics name the selected tool, observed banner, expected version,
+- [x] Diagnostics name the selected tool, observed banner, expected version,
   and corrective action.
-- [ ] Preflight rejects drift before scratch creation, builds, or soaks.
-- [ ] `test-release-preflight`, `test-workflow-syntax`, and documentation
+- [x] Preflight rejects drift before scratch creation, builds, or soaks.
+- [x] `test-release-preflight`, `test-workflow-syntax`, and documentation
   contract tests pass.
+
+**Implementation note**
+
+The comparison lives in `release_pinned_version_matches()`
+(`scripts/release-provenance.sh`). It removes parenthesised segments -- GCC's
+distributor blob, `avr-gcc (Ubuntu 7.3.0-16ubuntu3) 7.3.0`, which is not the
+compiler version and must not be mistaken for it or make the line ambiguous --
+then splits on whitespace alone, so a version token keeps whatever was attached
+to it and is compared whole. `7.3.0.1` is one token rather than a `7.3.0`
+prefix, and `V3.100` is one token rather than `V3.10` plus a digit. A banner
+must yield exactly one version-shaped token: none (prose-only or malformed) and
+several (ambiguous) both fail, so the check cannot pick a version out of a
+banner form it does not recognize.
+
+Of the four drifted versions this item names, the substring patterns accepted
+three. `V13.10` was already rejected, because `*V3.10*` does not match it; it is
+covered anyway so the reverse collision is pinned on both XC8 selectors.
+
+Coverage is split by cost. `test_release_provenance.sh` enumerates 21 banner
+forms directly against the helper, where each case is free, and additionally
+requires each of the three pins to name its own selected tool and to run before
+the preflight exit and the clean build. `test_release_preflight.sh` proves the
+wiring end to end -- one drifted banner per selector, a compiler that reports no
+version at all, and a distributor-blob banner that must still pass -- at the
+cost of a whole preflight each.
+
+While building this, two gate runs failed with exit 1 and no output at all. The
+cause was in the harness, not the change: most cases run the release as
+`run_preflight >"$output" 2>&1`, so a `fail()` raised INSIDE `run_preflight` --
+the worktree-mutation and forbidden-invocation guards -- was written into a
+scratch log that `cleanup()` then deleted. `fail()` now writes to the shell's
+original stderr, so those guards report themselves. (What actually tripped them
+was editing a tracked file while the suite ran.)
 
 ### R3 - Repair signed-release PIC12F675 recovery instructions
 
@@ -559,9 +592,9 @@ Record each completed item with its commit ID and decisive validation command.
 | Item | Status | Commit | Decisive validation |
 | --- | --- | --- | --- |
 | R1 | IMPLEMENTED | `7dab4db` | `make CC=: test-pic-build`; `test/test_release_qualification.sh`; `test/test_workflow_syntax.sh` |
-| R2 | OPEN | | |
+| R2 | DONE | (pending) | `test/test_release_preflight.sh`; `test/test_release_provenance.sh`; `make test-workflow-syntax test-release-history` |
 | R3 | OPEN | | |
-| F1 | DONE | (pending) | `make test`; relay fault + coverage lanes on all six substrates; PIC/AVR flash-budget gates |
+| F1 | DONE | `a8fe23d`, `b14cd7a` | `make test`; relay fault + coverage lanes on all six substrates; PIC/AVR flash-budget gates |
 | T1 | OPEN | | |
 | T2 | OPEN | | |
 | D1 | OPEN | | |

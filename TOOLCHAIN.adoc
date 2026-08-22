@@ -494,9 +494,18 @@ Enforced -- a release cannot ship otherwise:
   BYTE-FOR-BYTE against the signed `SHA256SUMS`. This is the final, independent
   gate; it does not depend on trusting any tool-version claim.
 * *Image-defining compilers, version-pinned and preflight-enforced.* avr-gcc
-  7.3.0 and XC8 V3.10 (both PIC10F322 and PIC10F320). `scripts/make-release.sh`
-  HARD FAILS at preflight -- before any build or soak -- if any of these three
-  drifts from its pin, rather than warning and leaving it to the byte gate.
+  7.3.0 and XC8 V3.10 (PIC10F322 and PIC12F675 share one XC8 selector, PIC_CC;
+  PIC10F320 has its own, PIC10F320_CC). `scripts/make-release.sh` HARD FAILS at
+  preflight -- before any build or soak -- if any of these three drifts from its
+  pin, rather than warning and leaving it to the byte gate.
++
+The comparison is EXACT: a whole version token is parsed out of the banner of
+the tool each Make variable actually selects, and compared for equality. A
+version that merely CONTAINS the pin is drift and is rejected -- avr-gcc 17.3.0
+and 7.3.0.1 do not satisfy the 7.3.0 pin, and XC8 V3.100 and V13.10 do not
+satisfy the V3.10 pin -- as is a banner carrying no version token at all, or
+more than one. Until v0.9.10 these three checks were shell substring patterns,
+which accepted the first three of those four drifted versions.
 * *XC8 + PIC10-12Fxxx_DFP provenance and cache integrity.*
   `scripts/install_pic_toolchain.sh` installs only after both downloads match
   reviewed SHA-256 digests (the XC8 installer and the 1.9.189 atpack), then

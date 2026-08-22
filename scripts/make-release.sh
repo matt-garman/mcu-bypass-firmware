@@ -224,6 +224,8 @@ declare -F release_source_is_unchanged >/dev/null \
 	|| die "release provenance checker did not define its required function"
 declare -F release_tool_version_line >/dev/null \
 	|| die "release provenance checker did not define its tool-version function"
+declare -F release_pinned_version_matches >/dev/null \
+	|| die "release provenance checker did not define its version-pin function"
 declare -F release_require_main_branch >/dev/null \
 	|| die "release provenance checker did not define its main-branch function"
 declare -F release_output_path_is_safe >/dev/null \
@@ -897,18 +899,32 @@ TC_PY=$(release_tool_version_line "Python" python3) \
 # build or soak -- rather than warning and relying on the CI repro-verify to fail
 # a day later. Analyzer/simulator versions are recorded (below, into the MANIFEST)
 # but deliberately NOT pinned; see TOOLCHAIN.adoc "What the release enforces".
-case "$TC_AVR_GCC" in
-	*7.3.0*) : ;;
-	*) die "avr-gcc is not the pinned 7.3.0 ($TC_AVR_GCC). The released images are byte-gated against this exact compiler; refusing to start a release with a drifted image-defining toolchain. Install avr-gcc 7.3.0 or point CC at it." ;;
-esac
-case "$TC_XC8_322" in
-	*V3.10*|*v3.10*) : ;;
-	*) die "PIC10F322 XC8 is not the pinned V3.10 ($TC_XC8_322). The released images are byte-gated against this exact compiler; refusing to start a release with a drifted image-defining toolchain. Install XC8 V3.10 or point PIC_CC at it." ;;
-esac
-case "$TC_XC8_320" in
-	*V3.10*|*v3.10*) : ;;
-	*) die "PIC10F320 XC8 is not the pinned V3.10 ($TC_XC8_320). The released images are byte-gated against this exact compiler; refusing to start a release with a drifted image-defining toolchain. Install XC8 V3.10 or point PIC10F320_CC at it." ;;
-esac
+#
+# The comparison is EXACT. It used to be a shell substring pattern, which
+# accepted any banner CONTAINING the pin -- avr-gcc 17.3.0 satisfied *7.3.0*
+# and XC8 V3.100 satisfied *V3.10* -- so the enforcement TOOLCHAIN.adoc and the
+# release workflow header promise was weaker than advertised for exactly the
+# neighbouring versions a drifting host is most likely to have. See
+# release_pinned_version_matches() for what counts as a version token.
+#
+# Each check reads the banner of the tool the preconditions actually selected
+# ($AVR_CC / $PIC_CC / $PIC10F320_CC), not of a default name on PATH, so an
+# overridden compiler is the one that gets pinned. PIC12F675 shares PIC_CC with
+# the PIC10F322, so that one check covers both image families.
+require_pinned_compiler() {
+	local what=$1 selector=$2 tool=$3 banner=$4 pin=$5 display=$6
+	release_pinned_version_matches "$banner" "$pin" && return 0
+	die "$what is not the pinned $display.
+      selected tool:     $tool (via $selector)
+      observed banner:   $banner
+      expected version:  exactly $display, compared as a whole token -- 1$pin, ${pin}0 and $pin.1 are all rejected
+      corrective action: install $what $display, or point $selector at an installation that is exactly $display
+The released images are byte-gated against this exact compiler; refusing to start a release with a drifted image-defining toolchain."
+}
+
+require_pinned_compiler "avr-gcc" CC "$AVR_CC" "$TC_AVR_GCC" 7.3.0 7.3.0
+require_pinned_compiler "PIC10F322/PIC12F675 XC8" PIC_CC "$PIC_CC" "$TC_XC8_322" 3.10 V3.10
+require_pinned_compiler "PIC10F320 XC8" PIC10F320_CC "$PIC10F320_CC" "$TC_XC8_320" 3.10 V3.10
 
 if [ "$PREFLIGHT" -eq 1 ]; then
 	ok "preflight passed: this host can start a release."

@@ -33,6 +33,58 @@ release_tool_version_line() {
 	printf '%s\n' "$first_line"
 }
 
+# Exact-equality test for an image-defining compiler's version pin.
+#
+# The predecessor of this check used shell substring patterns (*7.3.0*,
+# *V3.10*), which accept any banner CONTAINING the pin. avr-gcc 17.3.0 passed
+# the 7.3.0 check and XC8 V3.100 passed the V3.10 check, as would 7.3.0.1 or
+# V13.10. Released image bytes are gated on the exact compiler, so a check that
+# accepts a neighbouring version is worse than no check: it reports an
+# enforcement the release does not actually have.
+#
+# $1 is the compiler's own first version line; $2 is the pinned version WITHOUT
+# any V/v prefix ("7.3.0", "3.10"). Succeeds only when the banner yields exactly
+# one version-shaped token and that token equals the pin.
+#
+# TOKENIZATION. Parenthesised segments are removed first: that is where GCC
+# writes its packaging blob ("avr-gcc (Ubuntu 7.3.0-16ubuntu3) 7.3.0"), and it
+# must not be able to masquerade as the compiler version or make an otherwise
+# exact banner ambiguous. What remains is split on whitespace ALONE, so a
+# version token keeps whatever was attached to it and is compared whole:
+# "7.3.0.1" is one token rather than a "7.3.0" prefix, and "V3.100" is one token
+# rather than "V3.10" plus a stray digit. A candidate is any token that opens
+# like a dotted decimal version, with the optional V/v that XC8 writes.
+#
+# Zero candidates (prose-only or malformed output) and two or more (ambiguous)
+# both fail, so this cannot silently pick a version out of an unrecognized
+# banner form. Rejecting an unfamiliar-but-valid banner is a loud failure whose
+# diagnostic names what it saw; accepting a drifted one ships wrong bytes.
+release_pinned_version_matches() {
+	if [ "$#" -ne 2 ]; then
+		printf 'FATAL: release_pinned_version_matches requires a version line and a pinned version\n' >&2
+		return 2
+	fi
+	local banner=$1 expected=$2
+	local word token found=0 matched=0
+	local -a words
+
+	# Drop parenthesised segments, innermost first; each pass removes at least
+	# the two delimiters, so this terminates. An unbalanced parenthesis matches
+	# nothing and stays attached to its word, which then cannot open like a
+	# version and is simply not a candidate.
+	while [[ "$banner" =~ ^(.*)\([^()]*\)(.*)$ ]]; do
+		banner="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+	done
+	read -r -a words <<<"$banner"
+	for word in ${words[@]+"${words[@]}"}; do
+		[[ "$word" =~ ^[Vv]?[0-9]+\. ]] || continue
+		found=$((found + 1))
+		token=${word#[Vv]}
+		[ "$token" = "$expected" ] && matched=$((matched + 1))
+	done
+	[ "$found" -eq 1 ] && [ "$matched" -eq 1 ]
+}
+
 release_require_main_branch() {
 	if [ "$#" -ne 1 ]; then
 		printf 'FATAL: release_require_main_branch requires the repository root\n' >&2

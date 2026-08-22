@@ -36,6 +36,8 @@ declare -F release_source_is_unchanged >/dev/null \
 	|| fail "release provenance helper was not defined"
 declare -F release_tool_version_line >/dev/null \
 	|| fail "release tool-version helper was not defined"
+declare -F release_pinned_version_matches >/dev/null \
+	|| fail "release version-pin helper was not defined"
 declare -F release_output_path_is_safe >/dev/null \
 	|| fail "release output-path helper was not defined"
 declare -F release_terminate_workers >/dev/null \
@@ -231,6 +233,61 @@ if output=$(release_tool_version_line "PIC10F320 XC8" "$tools/xc8-empty" 2>&1); 
 fi
 [[ "$output" == *"PIC10F320 XC8"* && "$output" == *"returned no version line"* ]] \
 	|| fail "empty compiler probe produced the wrong diagnostic: $output"
+checks=$((checks + 1))
+
+# The three image-defining compiler pins compare an exact version TOKEN. They
+# were shell substring patterns until v0.9.10, which accepted any banner
+# CONTAINING the pin -- so avr-gcc 17.3.0 satisfied the 7.3.0 pin and XC8
+# V3.100 satisfied the V3.10 pin, which are exactly the versions a drifting
+# host has. The boundary is pinned here, at the helper, because these cost
+# nothing to run and can enumerate banner forms the end-to-end preflight cases
+# (test_release_preflight.sh) only sample.
+pin_cases=0
+while read -r verdict pin banner; do
+	pin_cases=$((pin_cases + 1))
+	if release_pinned_version_matches "$banner" "$pin"; then
+		[ "$verdict" = accept ] \
+			|| fail "version pin $pin accepted a drifted banner: [$banner]"
+	else
+		[ "$verdict" = reject ] \
+			|| fail "version pin $pin rejected its own banner: [$banner]"
+	fi
+done <<'PIN_CASES'
+accept 7.3.0 avr-gcc (GCC) 7.3.0
+accept 7.3.0 avr-gcc (Ubuntu 7.3.0-16ubuntu3) 7.3.0
+accept 7.3.0 avr-gcc (GCC) 7.3.0 20180101 (prerelease)
+reject 7.3.0 avr-gcc (GCC) 17.3.0
+reject 7.3.0 avr-gcc (GCC) 7.3.01
+reject 7.3.0 avr-gcc (GCC) 7.3.0.1
+reject 7.3.0 avr-gcc (GCC) 7.3.0-1
+reject 7.3.0 avr-gcc (GCC) 7.4.0
+reject 7.3.0 avr-gcc (GCC) 6.3.0
+reject 7.3.0 avr-gcc (GCC) 7.3.0 (GCC) 7.4.0
+reject 7.3.0 avr-gcc: version information unavailable
+reject 7.3.0
+accept 3.10 Microchip MPLAB XC8 C Compiler V3.10
+accept 3.10 Microchip MPLAB XC8 C Compiler v3.10
+accept 3.10 Microchip MPLAB XC8 C Compiler V3.10 (Free license)
+reject 3.10 Microchip MPLAB XC8 C Compiler V3.100
+reject 3.10 Microchip MPLAB XC8 C Compiler V13.10
+reject 3.10 Microchip MPLAB XC8 C Compiler V3.1
+reject 3.10 Microchip MPLAB XC8 C Compiler V3.10.1
+reject 3.10 Microchip MPLAB XC8 C Compiler V3.10 V3.11
+reject 3.10 Microchip MPLAB XC8 C Compiler
+PIN_CASES
+[ "$pin_cases" -eq 21 ] \
+	|| fail "version-pin table ran $pin_cases cases, expected 21"
+checks=$((checks + 1))
+
+# Called wrong, the pin helper must report a usage error (2) rather than a
+# verdict: a caller that silently drops an argument would otherwise compare a
+# banner against the empty string and, on reaching the `found -eq 1` test, look
+# exactly like an ordinary rejection.
+release_pinned_version_matches "avr-gcc (GCC) 7.3.0" >"$log" 2>&1 && rc=0 || rc=$?
+[ "$rc" -eq 2 ] \
+	|| fail "version-pin helper returned $rc for a missing argument, expected 2"
+grep -Fq 'requires a version line and a pinned version' "$log" \
+	|| fail "version-pin arity error lacked its diagnostic: $(<"$log")"
 checks=$((checks + 1))
 
 # Both compiler-selection checks below assert a rule that lives in the Makefile
@@ -1214,6 +1271,38 @@ version_assignments=$(grep -Ec '^TC_[A-Z0-9_]+=\$\(release_tool_version_line ' "
 	|| fail "release has $version_assignments fail-closed executable version probes, expected 10"
 ! grep -Fq 'v1()' "$RELEASE" \
 	|| fail "release still contains the fail-open v1 tool-version helper"
+checks=$((checks + 1))
+
+# The three image-defining compiler pins. Their POSITION is part of the
+# contract: each must run after the banner it judges is captured and before the
+# preflight exit, which puts it ahead of every scratch tree, build and soak on
+# the --preflight path and the real one alike. Their ARGUMENTS are too: each
+# names the selected tool the preconditions resolved rather than a default on
+# PATH, and carries its own pin, so one compiler cannot satisfy another's check.
+mapfile -t preflight_exit_lines < <(grep -nF \
+	'ok "preflight passed: this host can start a release."' "$RELEASE")
+[ "${#preflight_exit_lines[@]}" -eq 1 ] \
+	|| fail "release preflight success marker is missing or ambiguous"
+preflight_exit_line=${preflight_exit_lines[0]%%:*}
+for pin_call in \
+		'require_pinned_compiler "avr-gcc" CC "$AVR_CC" "$TC_AVR_GCC" 7.3.0 7.3.0' \
+		'require_pinned_compiler "PIC10F322/PIC12F675 XC8" PIC_CC "$PIC_CC" "$TC_XC8_322" 3.10 V3.10' \
+		'require_pinned_compiler "PIC10F320 XC8" PIC10F320_CC "$PIC10F320_CC" "$TC_XC8_320" 3.10 V3.10'; do
+	mapfile -t pin_lines < <(grep -nFx "$pin_call" "$RELEASE")
+	[ "${#pin_lines[@]}" -eq 1 ] \
+		|| fail "image-defining compiler pin is missing or ambiguous: $pin_call"
+	pin_line=${pin_lines[0]%%:*}
+	[ "$pin_line" -lt "$preflight_exit_line" ] && [ "$pin_line" -lt "$clean_line" ] \
+		|| fail "image-defining compiler pin runs after the preflight exit or the clean build: $pin_call"
+done
+# The substring patterns these replaced accepted any banner CONTAINING the pin,
+# which is how avr-gcc 17.3.0 and XC8 V3.100 passed. Keep them out of the CODE
+# -- comments still quote them, which is why this reads uncommented lines only.
+for stale_pattern in '*7.3.0*' '*V3.10*' '*v3.10*'; do
+	if grep -vE '^[[:space:]]*#' "$RELEASE" | grep -Fq "$stale_pattern"; then
+		fail "release still matches a compiler pin as the substring pattern $stale_pattern"
+	fi
+done
 checks=$((checks + 1))
 
 # The producer guard must run after the output path is selected and again between

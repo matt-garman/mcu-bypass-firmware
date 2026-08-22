@@ -49,8 +49,16 @@ preflight_output="$ROOT/release/v0.0.0-preflight"
 OUTPUT_PATH_OWNED=0
 checks=0
 
+# Diagnostics go to the shell's ORIGINAL stderr, not to whatever stderr is in
+# force where fail() is called. Most cases invoke the release through
+# `run_preflight >"$output" 2>&1`, so a fail() raised INSIDE run_preflight --
+# the worktree-mutation and forbidden-invocation guards -- would otherwise be
+# written into a scratch log under $work that cleanup() then deletes, and the
+# gate would exit 1 with no output at all. That is exactly what a concurrent
+# edit to a tracked file looks like while this suite runs.
+exec {REAL_STDERR}>&2
 fail() {
-	printf 'FAIL: %s\n' "$*" >&2
+	printf 'FAIL: %s\n' "$*" >&"$REAL_STDERR"
 	exit 1
 }
 
@@ -121,21 +129,37 @@ exit 0
 EOF
 
 # Dedicated fake avr-gcc that reports the pinned 7.3.0 version. make-release.sh
-# now HARD FAILS at preflight on avr-gcc drift (the image-defining compiler), so
-# the happy path needs a compliant version banner -- mirroring the xc8-322/320
-# fakes that already report V3.10. It still carries fake-tool's avr-libc
-# preprocess probe (-mmcu=attiny13a -E) so header-missing injection still works.
-cat > "$fakebin/fake-avr-gcc" <<'EOF'
-#!/usr/bin/env bash
-if [ "${1:-}" = --version ]; then
-	printf 'avr-gcc (GCC) 7.3.0\n'
-	printf 'Copyright (C) 2017 Free Software Foundation, Inc.\n'
-fi
-if [[ " $* " == *" -mmcu=attiny13a "* ]] && [[ " $* " == *" -E "* ]]; then
-	[ "${TEST_AVR_LIBC_FAIL:-0}" -eq 0 ] || exit 81
-fi
-exit 0
-EOF
+# HARD FAILS at preflight on avr-gcc drift (the image-defining compiler), so the
+# happy path needs a compliant version banner -- mirroring the xc8-322/320 fakes
+# that report V3.10. It still carries fake-tool's avr-libc preprocess probe
+# (-mmcu=attiny13a -E) so header-missing injection still works.
+#
+# Written by a generator because the version pin needs SEVERAL of these: one
+# compliant, and one per drifted banner form. Forking the body per banner would
+# let a drifted copy fall out of step with the capability probes above and fail
+# a pin test for the wrong reason -- these must reach the pin and fail only
+# there. The banner argument is the whole first line, or empty for a compiler
+# that prints no version at all.
+write_avr_gcc_fake() {
+	local path=$1 banner=$2
+	{
+		printf '%s\n' '#!/usr/bin/env bash'
+		printf '%s\n' 'if [ "${1:-}" = --version ]; then'
+		if [ -n "$banner" ]; then
+			printf '\tprintf %s\n' "'${banner}\\n'"
+			printf '\tprintf %s\n' "'Copyright (C) 2017 Free Software Foundation, Inc.\\n'"
+		else
+			printf '\t%s\n' ':'   # a compiler that answers --version with nothing
+		fi
+		printf '%s\n' 'fi'
+		printf '%s\n' 'if [[ " $* " == *" -mmcu=attiny13a "* ]] && [[ " $* " == *" -E "* ]]; then'
+		printf '\t%s\n' '[ "${TEST_AVR_LIBC_FAIL:-0}" -eq 0 ] || exit 81'
+		printf '%s\n' 'fi'
+		printf '%s\n' 'exit 0'
+	} > "$path"
+	chmod 750 "$path"
+}
+write_avr_gcc_fake "$fakebin/fake-avr-gcc" 'avr-gcc (GCC) 7.3.0'
 
 cat > "$fakebin/fake-awk" <<'EOF'
 #!/usr/bin/env bash
@@ -162,14 +186,21 @@ shift
 exec "$@"
 EOF
 
-cat > "$toolchain/xc8-322" <<'EOF'
-#!/usr/bin/env bash
-printf 'Microchip MPLAB XC8 C Compiler V3.10\n'
-EOF
-cat > "$toolchain/xc8-320" <<'EOF'
-#!/usr/bin/env bash
-printf 'Microchip MPLAB XC8 C Compiler V3.10\n'
-EOF
+# Same reasoning as write_avr_gcc_fake: the XC8 pin needs one compliant banner
+# and several drifted ones, and they must differ ONLY in that banner.
+write_xc8_fake() {
+	local path=$1 banner=$2
+	{
+		printf '%s\n' '#!/usr/bin/env bash'
+		if [ -n "$banner" ]; then
+			printf 'printf %s\n' "'${banner}\\n'"
+		fi
+		printf '%s\n' 'exit 0'
+	} > "$path"
+	chmod 750 "$path"
+}
+write_xc8_fake "$toolchain/xc8-322" 'Microchip MPLAB XC8 C Compiler V3.10'
+write_xc8_fake "$toolchain/xc8-320" 'Microchip MPLAB XC8 C Compiler V3.10'
 
 cat > "$toolchain/yasimavr/bin/python" <<'EOF'
 #!/usr/bin/env bash
@@ -289,13 +320,13 @@ case "$3" in
 esac
 printf '%s\n' "$goal" >> "${MAKE_LOG:?}"
 exec "${REAL_MAKE:?}" --no-print-directory -s -C "${FAKE_REPO_ROOT:?}" \
-	CC=fake-avr-gcc OBJCOPY=fake-tool SIZE=fake-tool HOSTCC=fake-tool \
+	CC="${TEST_CC:-fake-avr-gcc}" OBJCOPY=fake-tool SIZE=fake-tool HOSTCC=fake-tool \
 	OBJDUMP="${TEST_OBJDUMP:-fake-tool}" READELF=fake-tool \
 	IHEX_VALIDATOR="${TEST_IHEX_VALIDATOR:-${FAKE_BIN:?}/fake-tool}" AWK="${FAKE_BIN:?}/fake-awk" \
 	CLANG=fake-tool CLANG_TIDY=fake-tool CPPCHECK=fake-tool CBMC=fake-tool \
 	GCOV=fake-tool GPSIM=fake-tool \
 	PIC_CC="${TEST_PIC_CC:-${FAKE_TOOLCHAIN:?}/xc8-322}" \
-	PIC10F320_CC="${FAKE_TOOLCHAIN:?}/xc8-320" \
+	PIC10F320_CC="${TEST_PIC10F320_CC:-${FAKE_TOOLCHAIN:?}/xc8-320}" \
 	PIC_DFP="${FAKE_TOOLCHAIN:?}/pic10f322" \
 	PIC10F320_DFP="${FAKE_TOOLCHAIN:?}/pic10f320" \
 	PIC_XC8_INCLUDE="${FAKE_TOOLCHAIN:?}/xc8-322-include" \
@@ -821,6 +852,109 @@ TEST_PIC_CC=xc8-322-path run_preflight >"$output" 2>&1 \
 	|| fail "preflight rejected a PATH-selected executable PIC_CC: $(<"$output")"
 assert_no_release_scratch
 checks=$((checks + 1))
+
+# --------------------------------------------------------------------------
+# The three image-defining compiler pins are EXACT.
+#
+# They were shell substring patterns, so any banner CONTAINING the pin
+# satisfied them: `avr-gcc (GCC) 17.3.0` passed the 7.3.0 check and XC8
+# `V3.100` passed the V3.10 check. A neighbouring version is precisely what a
+# drifting host has, and every released image byte is gated on the exact
+# compiler -- so the enforcement TOOLCHAIN.adoc and the release workflow header
+# promise was wider than the code delivered.
+#
+# Each fake below differs from the compliant one ONLY in its version banner, so
+# it clears every capability probe above and can fail at the pin alone. The
+# selectors are exercised separately because they are separate checks against
+# separately installed compilers; PIC12F675 rides PIC_CC with the PIC10F322.
+pin_fake_avr="$fakebin/fake-avr-gcc-pin"
+pin_fake_xc8="$toolchain/xc8-pin"
+
+run_preflight_with_pin_fake() {
+	local selector=$1 banner=$2
+	case "$selector" in
+		CC)
+			write_avr_gcc_fake "$pin_fake_avr" "$banner"
+			TEST_CC=fake-avr-gcc-pin run_preflight >"$output" 2>&1
+			;;
+		PIC_CC)
+			write_xc8_fake "$pin_fake_xc8" "$banner"
+			TEST_PIC_CC="$pin_fake_xc8" run_preflight >"$output" 2>&1
+			;;
+		PIC10F320_CC)
+			write_xc8_fake "$pin_fake_xc8" "$banner"
+			TEST_PIC10F320_CC="$pin_fake_xc8" run_preflight >"$output" 2>&1
+			;;
+		*) fail "unknown compiler selector in a pin case: $selector" ;;
+	esac
+}
+
+assert_pin_rejects() {
+	local selector=$1 banner=$2 note=$3
+	if run_preflight_with_pin_fake "$selector" "$banner"; then
+		fail "preflight accepted $note ($selector banner: $banner)"
+	fi
+	grep -Fq 'is not the pinned' "$output" \
+		|| fail "$note was rejected without the version-pin diagnostic: $(<"$output")"
+	grep -Fq "(via $selector)" "$output" \
+		|| fail "$note: pin diagnostic did not name the selected tool and $selector: $(<"$output")"
+	grep -Fq "observed banner:   $banner" "$output" \
+		|| fail "$note: pin diagnostic did not quote the observed banner: $(<"$output")"
+	grep -Fq 'expected version:  exactly' "$output" \
+		|| fail "$note: pin diagnostic did not state the expected version: $(<"$output")"
+	grep -Fq 'corrective action: install' "$output" \
+		|| fail "$note: pin diagnostic did not state a corrective action: $(<"$output")"
+	! grep -Fq 'preflight passed' "$output" \
+		|| fail "$note printed the preflight success line after a pin rejection"
+	assert_no_release_scratch
+	checks=$((checks + 1))
+}
+
+assert_pin_accepts() {
+	local selector=$1 banner=$2 note=$3
+	run_preflight_with_pin_fake "$selector" "$banner" \
+		|| fail "preflight rejected $note ($selector banner: $banner): $(<"$output")"
+	grep -Fq 'preflight passed: this host can start a release.' "$output" \
+		|| fail "$note did not reach the preflight success line: $(<"$output")"
+	assert_no_release_scratch
+	checks=$((checks + 1))
+}
+
+# Each end-to-end case costs a whole preflight, so this file proves the WIRING
+# -- that all three selectors are separately pinned, that a rejection produces
+# the operator-facing diagnostic, and that it happens before any scratch tree --
+# while test_release_provenance.sh enumerates the banner forms directly against
+# the comparison helper, where the cases are free.
+#
+# The first two are the exact collisions the substring patterns accepted.
+assert_pin_rejects CC 'avr-gcc (GCC) 17.3.0' \
+	'an avr-gcc whose version merely ends in the pin'
+assert_pin_rejects PIC_CC 'Microchip MPLAB XC8 C Compiler V3.100' \
+	'a PIC10F322/PIC12F675 XC8 whose version merely starts with the pin'
+# The PIC10F320 compiler is a separate installation behind a separate selector,
+# so its pin is proved separately: a green 322 check must not stand in for it.
+assert_pin_rejects PIC10F320_CC 'Microchip MPLAB XC8 C Compiler V13.10' \
+	'a PIC10F320 XC8 whose version merely ends in the pin'
+
+# A compiler that answers --version with nothing never reaches the pin: the
+# provenance probe rejects it first, and must say so in its own terms.
+if run_preflight_with_pin_fake CC ''; then
+	fail "preflight accepted a compiler that reports no version at all"
+fi
+grep -Fq 'returned no version line' "$output" \
+	|| fail "a silent compiler was rejected without its provenance diagnostic: $(<"$output")"
+grep -Fq 'could not record the AVR compiler provenance' "$output" \
+	|| fail "a silent compiler did not fail the AVR provenance record: $(<"$output")"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+# Exactness is about the version TOKEN, not the whole banner: GCC's
+# parenthesised packaging blob is not the compiler version and must neither be
+# mistaken for it nor make the line ambiguous. This case also proves the
+# generated fakes above are compliant in every respect except their banner --
+# without it, a rejection could be some unrelated capability failure.
+assert_pin_accepts CC 'avr-gcc (Ubuntu 7.3.0-16ubuntu3) 7.3.0' \
+	'a pinned avr-gcc carrying a distributor packaging blob'
 
 if TEST_GIT_STATUS_FAIL=1 run_preflight >"$output" 2>&1; then
 	fail "preflight accepted a failed git status as a clean tree"

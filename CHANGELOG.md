@@ -201,6 +201,23 @@ file is the human-readable summary of *what changed*.
   cache bypassed the SHA-verified installer entirely. Analyzer and simulator
   versions ride the runner and are recorded in each release `MANIFEST.md`.
 
+- **The image-defining compiler pins are now exact.** The three preflight checks
+  that enforce avr-gcc 7.3.0 and XC8 V3.10 were shell substring patterns, so any
+  banner *containing* the pin satisfied them: `avr-gcc (GCC) 17.3.0` passed the
+  7.3.0 check, and XC8 `V3.100` passed the V3.10 check, as would `7.3.0.1`. A
+  neighbouring version is exactly what a drifting host has, and every published
+  image byte is gated on the exact compiler, so the enforcement `TOOLCHAIN.adoc`
+  and the release workflow header promised was wider than the code delivered.
+  Each check now parses a whole version token out of the selected tool's own
+  banner and compares it for equality, and fails on a banner carrying no version
+  token or more than one. GCC's parenthesised distributor blob is discarded
+  first, so `avr-gcc (Ubuntu 7.3.0-16ubuntu3) 7.3.0` is still the pinned
+  compiler. The checks continue to read the commands `CC`, `PIC_CC` and
+  `PIC10F320_CC` actually select — PIC12F675 shares `PIC_CC` with the
+  PIC10F322 — and to run before any scratch tree, build or soak; a rejection
+  names the selected tool, the observed banner, the expected version and the
+  corrective action.
+
 ## [0.9.9] - 2026-08-15
 
 ### Fixed
