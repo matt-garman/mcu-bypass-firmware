@@ -218,6 +218,26 @@ file is the human-readable summary of *what changed*.
   names the selected tool, the observed banner, the expected version and the
   corrective action.
 
+- **The published PIC12F675 recovery instructions can now finalize the
+  transaction they describe.** `make pic12f675-finalize` passes the
+  caller-selected release identity to the recovery oracle, which compares it
+  against the identity the reservation recorded. Both static examples --
+  `README.md` and `release/README.md` -- omitted `PIC12F675_RELEASE_TAG`, so
+  following either one rejected a valid PENDING signed-release transaction
+  instead of resolving it, at the worst possible moment: after an interrupted
+  write, holding a device whose factory trim is already at stake. The generated
+  per-release documentation carried the argument, which is how the two drifted
+  apart unnoticed. Both examples now carry it, `make help` no longer describes
+  the variable as programming-only, and a new documentation contract holds every
+  published finalization command -- static and generated, by the same oracle --
+  to the identity of the transaction it recovers: every reserved argument must
+  repeat the preceding command's value, not merely its name, and the release tag
+  is required after a `pic12f675-release-program` command and refused after a
+  `pic12f675-program` one, since a development reservation records no release
+  identity. Documents that publish the command are discovered rather than
+  enumerated, so a new one is covered when it is written; shipped
+  `release/<version>/` directories are excluded as immutable artifacts.
+
 ## [0.9.9] - 2026-08-15
 
 ### Fixed

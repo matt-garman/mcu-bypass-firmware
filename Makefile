@@ -7704,7 +7704,9 @@ help:
 	@echo "  pic12f675-release-program  same guarded transaction, plus clean signed-tag and signed-image binding"
 	@echo "                        (PIC12F675_RELEASE_TAG=vX.Y.Z; baseline/result paths must be outside the worktree)"
 	@echo "  pic12f675-finalize    read-only resolution of a retained PENDING transaction"
-	@echo "                        (same VARIANT, reader/writer identities, baseline, and result directory)"
+	@echo "                        (same VARIANT, reader/writer identities, baseline, and result directory;"
+	@echo "                        a transaction reserved by pic12f675-release-program must be finalized with"
+	@echo "                        the same PIC12F675_RELEASE_TAG=vX.Y.Z it reserved)"
 	@echo "                        Transients use private TMPDIR=, else XDG_RUNTIME_DIR/HOME; shared roots are rejected."
 	@echo "                        Checks/records preservation; real programmer behavior remains hardware-unvalidated."
 	@echo "                        ipecmd routing is software-only; no safe hardware attachment/handoff is published."
@@ -7844,7 +7846,8 @@ help:
 	@echo "PIC overrides: PIC_CC=, PIC10F322_PROG=pk2cmd|ipecmd, PIC10F322_PROG_TOOL=PK3|PK4|PK5, PIC10F322_PROG_CMD="
 	@echo "               PIC12F675_PROG=, PIC12F675_PROG_KIND=pk2cmd|ipecmd, PIC12F675_PROG_TOOL=PK3|PK4|PK5,"
 	@echo "               PIC12F675_READ_PROG=pk2cmd, PIC12F675_TRIM_EVIDENCE=, PIC12F675_BENCH_RESULT=,"
-	@echo "               PIC12F675_RELEASE_TAG=vX.Y.Z (pic12f675-release-program only)"
+	@echo "               PIC12F675_RELEASE_TAG=vX.Y.Z (pic12f675-release-program, and pic12f675-finalize"
+	@echo "               when recovering a transaction that goal reserved)"
 
 else
 

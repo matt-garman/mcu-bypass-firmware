@@ -3198,7 +3198,24 @@ PY
 		&& ! -s "$hardware_log" && ! -e "$release_pending/result.json" ]] \
 		|| { printf 'FAIL: missing release recovery identity reached hardware or failed for the wrong reason: %s\n' \
 			"$release_output" >&2; exit 1; }
+
+	# ... and a resolvable but DIFFERENT release tag is rejected by the same
+	# comparison, also before any device read. Omission and substitution are the
+	# two ways a published recovery command can carry the wrong identity, so both
+	# are pinned here.
+	git -C "$repo" -c tag.gpgSign=false tag -a -m fixture v9.9.9 "$release_commit"
+	: > "$hardware_log"
+	if release_output=$(run_finalize_make "$release_pending" "$program_variant" \
+			PIC12F675_RELEASE_TAG=v9.9.9 2>&1); then
+		printf 'FAIL: signed-release recovery accepted a substituted release identity\n' >&2
+		exit 1
+	fi
+	[[ "$release_output" == *"reservation release identity differs from selected release"* \
+		&& ! -s "$hardware_log" && ! -e "$release_pending/result.json" ]] \
+		|| { printf 'FAIL: substituted release recovery identity reached hardware or failed for the wrong reason: %s\n' \
+			"$release_output" >&2; exit 1; }
 	checks=$((checks + 1))
+
 	pending_program_log="$work/release-pending-program-argv.log"
 	cp "$program_log" "$pending_program_log"
 	: > "$hardware_log"

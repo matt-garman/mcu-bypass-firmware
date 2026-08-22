@@ -864,6 +864,15 @@ expected=$(printf '%s\t%s\t%s\t%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=
 	PIC12F675_BENCH_RESULT "$result")
 [ "${recovery_log[0]}" = "$expected" ] \
 	|| fail "rendered PIC12F675 recovery command is incomplete: ${recovery_log[0]}"
+# The generated recovery command is held to the same published-finalization
+# contract as the static documentation, by the same oracle -- the two drifted
+# apart before v0.9.10 precisely because only the generated document carried
+# PIC12F675_RELEASE_TAG.
+release_validate_pic12f675_finalization_document "$flashing" \
+	'rendered release flashing guidance' \
+	|| fail "rendered PIC12F675 guidance fails the published-finalization contract"
+checks=$((checks + 1))
+
 mapfile -t git_safety_calls < "$git_safety_log"
 [ "${#git_safety_calls[@]}" -eq 4 ] \
 	&& [ "${git_safety_calls[0]}" = $'git\trev-parse\t--show-toplevel' ] \

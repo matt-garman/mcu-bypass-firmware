@@ -245,6 +245,8 @@ source "$REPO_ROOT/scripts/release-documentation.sh" \
 	|| die "release documentation helper could not be loaded"
 for renderer in release_validate_current_documentation \
 		release_reject_branch_only_documents \
+		release_validate_pic12f675_finalization \
+		release_validate_pic12f675_finalization_document \
 		release_render_scope release_render_validation \
 		release_render_pic_toolchain_rows release_render_pic12f675_flashing \
 		release_render_flashing \
@@ -501,6 +503,12 @@ if [ "$VERSION_WAS_SUPPLIED" -eq 1 ]; then
 	release_validate_current_documentation "$REPO_ROOT" "$VERSION" \
 		"${#DOCUMENT_RELEASE_IMAGES[@]}" "${#DOCUMENT_RELEASE_SOAKS[@]}" \
 		|| die "current release documentation is not finalized for $VERSION"
+	# Published recovery instructions must actually recover the transaction the
+	# published programming command reserves. Checked here, on the live tree, so
+	# a drifted static example fails on a polish branch rather than after a
+	# builder has already lost a PENDING signed-release transaction.
+	release_validate_pic12f675_finalization "$REPO_ROOT" "$VERSION" \
+		|| die "published PIC12F675 finalization commands do not match the transaction they recover"
 fi
 
 # Scratch area for evidence + per-combo soak run dirs. Preserved on failure so a

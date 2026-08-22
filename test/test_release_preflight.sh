@@ -688,6 +688,311 @@ main_call_line=$(grep -Fn 'release_require_main_branch "$REPO_ROOT"' \
 	|| fail "branch-only-document gate must run AFTER the preflight exit (gate at line $gate_call_line, preflight exit at line $preflight_exit_line)"
 checks=$((checks + 1))
 
+# R3: a PUBLISHED PIC12F675 finalization command must carry the identity of the
+# transaction it recovers. `make pic12f675-finalize` passes the CALLER-selected
+# identity to the recovery oracle, which compares it against what the reservation
+# recorded -- so a signed-release example missing PIC12F675_RELEASE_TAG rejects
+# the transaction it claims to recover, and a development example carrying one
+# rejects a reservation that holds no release identity. Both directions are
+# checked, in both the static and the generated documentation.
+finalization_root="$work/finalization-docs"
+
+# $1 path, $2 programming goal, then the finalize command's arguments. The
+# terminating PIC12F675_PART is neither a goal nor a required identity, so any
+# required argument can be dropped without leaving a dangling continuation.
+write_finalization_doc() {
+	local path=$1 program_goal=$2 arg
+	shift 2
+	mkdir -p "$(dirname "$path")"
+	{
+		printf '%s\n' 'Guarded transaction:' '' '```sh'
+		printf '%s\n' "make -C \"\$repo\" $program_goal \\" \
+			'  VARIANT=cd4053_simple \'
+		[ "$program_goal" = pic12f675-program ] \
+			|| printf '%s\n' '  PIC12F675_RELEASE_TAG="$release_tag" \'
+		printf '%s\n' '  PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \' \
+			'  PIC12F675_READ_PROG=pk2cmd \' \
+			'  PIC12F675_TRIM_EVIDENCE="$baseline" \' \
+			'  PIC12F675_BENCH_RESULT="$result"' \
+			'```' '' 'Recovery of a PENDING transaction:' '' '```sh' \
+			'make -C "$repo" pic12f675-finalize \'
+		for arg in "$@"; do
+			printf '  %s \\\n' "$arg"
+		done
+		printf '%s\n' '  PIC12F675_PART=PIC12F675' '```'
+	} > "$path"
+}
+
+FINALIZE_RELEASE_ARGS=(
+	'VARIANT=cd4053_simple'
+	'PIC12F675_RELEASE_TAG="$release_tag"'
+	'PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd'
+	'PIC12F675_READ_PROG=pk2cmd'
+	'PIC12F675_TRIM_EVIDENCE="$baseline"'
+	'PIC12F675_BENCH_RESULT="$result"'
+)
+
+# Both anchors valid; individual cases then spoil exactly one of them.
+write_finalization_fixture() {
+	rm -rf "$finalization_root"
+	write_finalization_doc "$finalization_root/README.md" \
+		pic12f675-release-program "${FINALIZE_RELEASE_ARGS[@]}"
+	write_finalization_doc "$finalization_root/release/README.md" \
+		pic12f675-release-program "${FINALIZE_RELEASE_ARGS[@]}"
+}
+
+assert_finalization_accepts() {
+	local description=$1
+	release_validate_pic12f675_finalization "$finalization_root" v1.2.3 >"$output" 2>&1 \
+		|| fail "finalization contract rejected $description: $(<"$output")"
+	checks=$((checks + 1))
+}
+
+assert_finalization_rejects() {
+	local description=$1 expected=$2
+	if release_validate_pic12f675_finalization "$finalization_root" v1.2.3 \
+			>"$output" 2>&1; then
+		fail "finalization contract accepted $description"
+	fi
+	grep -Fq 'release documentation:' "$output" \
+		|| fail "$description was rejected without a documentation diagnostic"
+	grep -Fq "$expected" "$output" \
+		|| fail "$description was rejected for the wrong reason: $(<"$output")"
+	checks=$((checks + 1))
+}
+
+write_finalization_fixture
+assert_finalization_accepts 'a correctly published signed-release recovery'
+
+# The exact pre-v0.9.10 defect, in each anchor independently.
+write_finalization_fixture
+write_finalization_doc "$finalization_root/README.md" pic12f675-release-program \
+	'VARIANT=cd4053_simple' \
+	'PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd' \
+	'PIC12F675_READ_PROG=pk2cmd' \
+	'PIC12F675_TRIM_EVIDENCE="$baseline"' \
+	'PIC12F675_BENCH_RESULT="$result"'
+assert_finalization_rejects 'README.md finalizing a signed release without its tag' \
+	'README.md finalizes a pic12f675-release-program transaction without PIC12F675_RELEASE_TAG'
+
+write_finalization_fixture
+write_finalization_doc "$finalization_root/release/README.md" pic12f675-release-program \
+	'VARIANT=cd4053_simple' \
+	'PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd' \
+	'PIC12F675_READ_PROG=pk2cmd' \
+	'PIC12F675_TRIM_EVIDENCE="$baseline"' \
+	'PIC12F675_BENCH_RESULT="$result"'
+assert_finalization_rejects 'release/README.md finalizing a signed release without its tag' \
+	'release/README.md finalizes a pic12f675-release-program transaction without PIC12F675_RELEASE_TAG'
+
+# The opposite direction: a development reservation records no release identity,
+# so passing one is equally wrong. This is why the rule is anchored to the
+# preceding programming goal instead of simply requiring the tag everywhere.
+write_finalization_fixture
+write_finalization_doc "$finalization_root/README.md" pic12f675-program \
+	"${FINALIZE_RELEASE_ARGS[@]}"
+assert_finalization_rejects 'a development transaction finalized with a release tag' \
+	'README.md finalizes a pic12f675-program transaction with PIC12F675_RELEASE_TAG'
+
+# ... and the same development pair without the tag is correct.
+write_finalization_fixture
+write_finalization_doc "$finalization_root/README.md" pic12f675-program \
+	'VARIANT=cd4053_simple' \
+	'PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd' \
+	'PIC12F675_READ_PROG=pk2cmd' \
+	'PIC12F675_TRIM_EVIDENCE="$baseline"' \
+	'PIC12F675_BENCH_RESULT="$result"'
+assert_finalization_accepts 'a development transaction finalized without a release tag'
+
+# Every reserved identity is required, not just the release tag.
+# PIC12F675_PROG and PIC12F675_PROG_KIND share one published line, so dropping
+# either removes both and the scan must report both -- word-level parsing, not
+# line-level.
+for dropped in VARIANT PIC12F675_PROG PIC12F675_PROG_KIND PIC12F675_READ_PROG \
+		PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT; do
+	write_finalization_fixture
+	finalize_args=()
+	for finalize_arg in "${FINALIZE_RELEASE_ARGS[@]}"; do
+		case "$finalize_arg" in
+			"$dropped"=*|*" $dropped"=*) continue ;;
+		esac
+		finalize_args+=("$finalize_arg")
+	done
+	write_finalization_doc "$finalization_root/README.md" \
+		pic12f675-release-program "${finalize_args[@]}"
+	assert_finalization_rejects "a recovery command missing $dropped" \
+		"README.md publishes a pic12f675-finalize command without $dropped"
+done
+
+# Naming the right variables is not enough: a published recovery that points at
+# a different variant or a different result path cannot resolve the transaction
+# it follows, which is the same failure as omitting the argument outright.
+write_finalization_fixture
+write_finalization_doc "$finalization_root/README.md" pic12f675-release-program \
+	'VARIANT=cd4053_with_mute' \
+	'PIC12F675_RELEASE_TAG="$release_tag"' \
+	'PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd' \
+	'PIC12F675_READ_PROG=pk2cmd' \
+	'PIC12F675_TRIM_EVIDENCE="$baseline"' \
+	'PIC12F675_BENCH_RESULT="$result"'
+assert_finalization_rejects 'a recovery command selecting a different variant' \
+	'README.md recovers with VARIANT=cd4053_with_mute but the transaction it follows reserved cd4053_simple'
+
+write_finalization_fixture
+write_finalization_doc "$finalization_root/README.md" pic12f675-release-program \
+	'VARIANT=cd4053_simple' \
+	'PIC12F675_RELEASE_TAG="$release_tag"' \
+	'PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd' \
+	'PIC12F675_READ_PROG=pk2cmd' \
+	'PIC12F675_TRIM_EVIDENCE="$baseline"' \
+	'PIC12F675_BENCH_RESULT="$other_result"'
+assert_finalization_rejects 'a recovery command naming a different result directory' \
+	'README.md recovers with PIC12F675_BENCH_RESULT=$other_result but the transaction it follows reserved $result'
+
+# An unanchored example cannot be checked against a reservation at all, so it is
+# rejected rather than silently accepted in whichever mode the scan happens to
+# be in.
+write_finalization_fixture
+{
+	printf '%s\n' 'Recovery:' '' '```sh' 'make -C "$repo" pic12f675-finalize \'
+	printf '  %s \\\n' "${FINALIZE_RELEASE_ARGS[@]}"
+	printf '%s\n' '  PIC12F675_PART=PIC12F675' '```'
+} > "$finalization_root/README.md"
+assert_finalization_rejects 'a recovery example with no transaction to recover' \
+	'README.md publishes a pic12f675-finalize command with no preceding'
+
+# Deleting the recovery instructions outright is a failure too: the two static
+# documents are scanned whether or not discovery finds a command in them.
+write_finalization_fixture
+printf '%s\n' 'Programming is documented elsewhere.' > "$finalization_root/README.md"
+assert_finalization_rejects 'a document that dropped its recovery instructions' \
+	'README.md publishes no pic12f675-finalize command'
+
+# Prose that merely names the goal is not a published command. test/README.md
+# names all three goals this way, so treating a mention as a command would fail
+# the live tree.
+write_finalization_fixture
+printf '%s\n' '' 'Recover retained evidence with make pic12f675-finalize as shown above.' \
+	>> "$finalization_root/README.md"
+mkdir -p "$finalization_root/test"
+# Both shapes the live test/README.md uses inside its layout block: a wrapped
+# cell whose line happens to begin with `make`, and a goal named mid-sentence
+# with punctuation attached.
+printf '%s\n' 'Layout:' '' '```' '     evidence (make pic12f675-program or' \
+	'     make pic12f675-release-program; recover PENDING' \
+	'     evidence with make pic12f675-finalize)' '```' \
+	> "$finalization_root/test/README.md"
+assert_finalization_accepts 'prose that names the finalization goal without publishing it'
+
+# Drift-proofing: a NEW document that publishes the command is discovered and
+# held to the same rule, without being named anywhere.
+write_finalization_fixture
+write_finalization_doc "$finalization_root/docs/programming.md" pic12f675-release-program \
+	'VARIANT=cd4053_simple' \
+	'PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd' \
+	'PIC12F675_READ_PROG=pk2cmd' \
+	'PIC12F675_TRIM_EVIDENCE="$baseline"' \
+	'PIC12F675_BENCH_RESULT="$result"'
+assert_finalization_rejects 'a newly added document publishing a defective recovery' \
+	'docs/programming.md finalizes a pic12f675-release-program transaction without PIC12F675_RELEASE_TAG'
+
+# Shipped release directories are immutable artifacts of past releases:
+# release/v0.9.9/MANIFEST.md legitimately publishes the older unsigned
+# pic12f675-program transaction and must not be rewritten to satisfy a contract
+# introduced later.
+write_finalization_fixture
+write_finalization_doc "$finalization_root/release/v0.9.9/MANIFEST.md" \
+	pic12f675-release-program 'VARIANT=cd4053_simple'
+assert_finalization_accepts 'a shipped release directory holding older guidance'
+
+# The generated per-release documentation is held to the same rule by the same
+# oracle, so the static and generated instructions cannot drift apart -- which is
+# precisely how the defect survived: the generated document carried the argument
+# while both static examples did not.
+write_finalization_fixture
+if (
+	release_render_pic12f675_flashing() {
+		printf '%s\n' '```sh' 'make -C "$repo" pic12f675-release-program \' \
+			'  VARIANT=cd4053_simple \' \
+			"  PIC12F675_RELEASE_TAG=$1" \
+			'```' '' '```sh' 'make -C "$repo" pic12f675-finalize \' \
+			'  VARIANT=cd4053_simple \' \
+			'  PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \' \
+			'  PIC12F675_READ_PROG=pk2cmd \' \
+			'  PIC12F675_TRIM_EVIDENCE="$baseline" \' \
+			'  PIC12F675_BENCH_RESULT="$result"' '```'
+	}
+	release_validate_pic12f675_finalization "$finalization_root" v1.2.3
+) >"$output" 2>&1; then
+	fail "finalization contract accepted generated documentation missing the release tag"
+fi
+grep -Fq 'generated release documentation finalizes a pic12f675-release-program transaction without PIC12F675_RELEASE_TAG' \
+	"$output" \
+	|| fail "defective generated documentation was rejected for the wrong reason: $(<"$output")"
+checks=$((checks + 1))
+
+# `make help` is the other place the scope of PIC12F675_RELEASE_TAG is published,
+# and it claimed the variable was programming-only while read-only finalization
+# consumed it. Pin both halves: the retired claim is gone, and the finalize entry
+# names the variable it needs.
+makefile_help=$(awk '/^help:/ { capture=1 } capture { print } capture && /^$/ { exit }' \
+	"$ROOT/Makefile")
+if grep -Fq 'PIC12F675_RELEASE_TAG=vX.Y.Z (pic12f675-release-program only)' "$ROOT/Makefile"; then
+	fail "make help still describes PIC12F675_RELEASE_TAG as release-program-only"
+fi
+grep -Fq 'PIC12F675_RELEASE_TAG' <<<"$makefile_help" \
+	|| fail "make help no longer documents PIC12F675_RELEASE_TAG"
+awk '/^\t@echo "  pic12f675-finalize/ { capture=1 }
+	capture && /PIC12F675_RELEASE_TAG/ { found=1 }
+	capture && /^\t@echo "  [a-z]/ && !/pic12f675-finalize/ { exit }
+	END { exit !found }' "$ROOT/Makefile" \
+	|| fail "the make help entry for pic12f675-finalize does not name PIC12F675_RELEASE_TAG"
+checks=$((checks + 1))
+
+# A failed discovery scan is a policy failure, not an empty result set: the two
+# named documents would still be checked and a drifted third would pass unseen.
+write_finalization_fixture
+if (find() { return 73; }; \
+		release_validate_pic12f675_finalization "$finalization_root" v1.2.3) \
+		>"$output" 2>&1; then
+	fail "finalization contract accepted a failed document scan"
+fi
+grep -Fq 'could not scan for published finalization commands' "$output" \
+	|| fail "a failed finalization scan produced the wrong diagnostic: $(<"$output")"
+checks=$((checks + 1))
+
+# Argument guards: a caller mistake must not pass vacuously.
+write_finalization_fixture
+finalization_rc=0
+release_validate_pic12f675_finalization "$finalization_root" >"$output" 2>&1 \
+	|| finalization_rc=$?
+[ "$finalization_rc" -eq 2 ] \
+	|| fail "finalization contract accepted a missing version argument"
+finalization_rc=0
+release_validate_pic12f675_finalization_document "$finalization_root/README.md" \
+	>"$output" 2>&1 || finalization_rc=$?
+[ "$finalization_rc" -eq 2 ] \
+	|| fail "per-document finalization contract accepted a missing label"
+if release_validate_pic12f675_finalization "$finalization_root" 1.2.3 >"$output" 2>&1; then
+	fail "finalization contract accepted a version that is not vX.Y.Z"
+fi
+grep -Fq 'requested version is not vX.Y.Z: 1.2.3' "$output" \
+	|| fail "a malformed version was rejected without its diagnostic"
+if release_validate_pic12f675_finalization_document \
+		"$finalization_root/missing.md" 'missing.md' >"$output" 2>&1; then
+	fail "per-document finalization contract accepted a missing document"
+fi
+grep -Fq 'finalization document is not a regular nonempty file: missing.md' "$output" \
+	|| fail "a missing document was rejected without its diagnostic"
+checks=$((checks + 1))
+
+# The live checked-in tree must satisfy the contract, including the generated
+# documentation this repository would render today. This is the check that
+# actually pins README.md and release/README.md.
+release_validate_pic12f675_finalization "$ROOT" v0.9.10 >"$output" 2>&1 \
+	|| fail "the checked-in tree fails the PIC12F675 finalization contract: $(<"$output")"
+checks=$((checks + 1))
+
 # Run the real preflight against a shadow documentation root. A stale bounded
 # declaration must stop the script before its first release-scratch mktemp.
 write_documentation_fixture v1.2.30 21 18 six four

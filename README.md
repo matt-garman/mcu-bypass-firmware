@@ -170,22 +170,25 @@ make -C "$repo" pic12f675-release-program \
 If an interruption leaves `reservation.json` but no `result.json`, the
 transaction is **PENDING**. Keep physical custody of the same attached device;
 do not write, reflash, capture a new baseline, or reuse the result path. From the
-same source checkout, resolve it with the same variant and tool identities:
+same source checkout, resolve it with the same release identity, variant, and
+tool identities:
 
 ```sh
 make -C "$repo" pic12f675-finalize \
   VARIANT=cd4053_simple \
+  PIC12F675_RELEASE_TAG="$release_tag" \
   PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \
   PIC12F675_READ_PROG=pk2cmd \
   PIC12F675_TRIM_EVIDENCE="$baseline" \
   PIC12F675_BENCH_RESULT="$result"
 ```
 
-Finalization never invokes writer arguments. It validates the reservation and
-separately retained image first, verifies the reader version before a full-device
-read, and exclusively publishes the recovered PASS/FAIL `result.json`. Private
-read attempts are retry-safe after interruption. A FAIL is a resolved forensic
-record, not permission to retry the write. An existing result is immutable.
+Finalization never invokes writer arguments. It revalidates the selected release
+identity, the reservation, and the separately retained image first, verifies the
+reader version before a full-device read, and exclusively publishes the recovered
+PASS/FAIL `result.json`. Private read attempts are retry-safe after interruption.
+A FAIL is a resolved forensic record, not permission to retry the write. An
+existing result is immutable.
 
 `pic12f675-preflight` is read-only and device-specific; it does not take
 `VARIANT`. Only run the program step after preflight succeeds, using the same

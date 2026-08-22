@@ -165,6 +165,199 @@ release_reject_branch_only_documents() {
 		|| _release_documentation_error "durable file(s) still reference a branch-only polish document (repoint to CHANGELOG.md / Git history): ${polish_doc_references[*]}" || return
 }
 
+# Every PUBLISHED PIC12F675 finalization command must carry the complete identity
+# of the transaction it recovers.
+#
+# `make pic12f675-finalize` is read-only recovery of a PENDING transaction, and it
+# passes the CALLER-selected identity to the recovery oracle, which compares it
+# against the identity the reservation recorded. A transaction reserved by
+# pic12f675-release-program records the release tag and its source commit; one
+# reserved by pic12f675-program records neither. So the rule is not "always pass
+# the release tag" but "pass the identity of the goal that reserved it", and the
+# two directions fail in opposite ways:
+#
+#   * a signed-release example that OMITS PIC12F675_RELEASE_TAG rejects the very
+#     transaction it claims to recover (this is exactly what README.md and
+#     release/README.md published before v0.9.10, while the generated per-release
+#     documentation carried the argument -- the drift this contract exists to
+#     prevent); and
+#   * a development example that ADDS it rejects a reservation that holds no
+#     release identity.
+#
+# Each finalization command is therefore anchored to the nearest programming
+# command published before it in the same document, and must repeat that
+# command's arguments with the SAME VALUES -- naming the right variables is not
+# enough when the published recovery points at a different variant or a different
+# result path than the transaction it follows.
+#
+# A "published command" is a line inside a fenced block that begins a `make`
+# invocation, continuations included. Prose that merely names the goal mid
+# sentence is not a command and is not checked; test/README.md names all three
+# goals that way.
+_release_pic12f675_finalization_scan() {
+	[ "$#" -eq 1 ] || return 2
+	local label=$1
+	local line command word name value goal mode='' fenced=0 building=0 found=0 rc=0
+	local -a words
+	local -a required=(VARIANT PIC12F675_PROG PIC12F675_PROG_KIND \
+		PIC12F675_READ_PROG PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT)
+	local -A given reserved
+
+	command=''
+	while IFS= read -r line || [ -n "$line" ]; do
+		if [ "$building" -eq 0 ] && [[ "$line" == '```'* ]]; then
+			fenced=$((1 - fenced))
+			continue
+		fi
+		[ "$fenced" -eq 1 ] || continue
+		if [ "$building" -eq 0 ]; then
+			[[ "$line" =~ ^[[:space:]]*make([[:space:]]|$) ]] || continue
+			building=1
+			command=''
+		fi
+		if [[ "$line" =~ ^(.*)\\[[:space:]]*$ ]]; then
+			command+=" ${BASH_REMATCH[1]}"
+			continue
+		fi
+		command+=" $line"
+		building=0
+
+		read -r -a words <<<"$command"
+		given=()
+		goal=''
+		for word in ${words[@]+"${words[@]}"}; do
+			case "$word" in
+				pic12f675-release-program|pic12f675-program|pic12f675-finalize)
+					goal=$word
+					;;
+				[A-Za-z_]*=*)
+					name=${word%%=*}
+					value=${word#*=}
+					value=${value%\"}
+					given[$name]=${value#\"}
+					;;
+			esac
+		done
+		case "$goal" in
+			pic12f675-release-program|pic12f675-program)
+				mode=$goal
+				reserved=()
+				if [ "${#given[@]}" -gt 0 ]; then
+					for name in "${!given[@]}"; do
+						reserved[$name]=${given[$name]}
+					done
+				fi
+				continue
+				;;
+			pic12f675-finalize) : ;;
+			*) continue ;;
+		esac
+		found=$((found + 1))
+
+		# Same argument, same VALUE: recovery must select the transaction the
+		# preceding command reserved, not merely name the right variables.
+		for name in "${required[@]}"; do
+			if [ -z "${given[$name]+set}" ]; then
+				_release_documentation_error \
+					"$label publishes a pic12f675-finalize command without $name" || rc=1
+			elif [ "${given[$name]}" != "${reserved[$name]-}" ]; then
+				_release_documentation_error \
+					"$label recovers with $name=${given[$name]} but the transaction it follows reserved ${reserved[$name]-<nothing>}" || rc=1
+			fi
+		done
+		# The release tag is checked for presence, not text: the generated
+		# per-release documentation deliberately embeds the resolved tag in its
+		# recovery block so recovery does not depend on a shell variable
+		# surviving from the programming block, while the static examples carry
+		# the same "$release_tag" both times.
+		case "$mode" in
+			pic12f675-release-program)
+				[ -n "${given[PIC12F675_RELEASE_TAG]:-}" ] \
+					|| _release_documentation_error \
+						"$label finalizes a pic12f675-release-program transaction without PIC12F675_RELEASE_TAG; that reservation records the release identity, so the published recovery would be rejected" \
+					|| rc=1
+				;;
+			pic12f675-program)
+				[ -z "${given[PIC12F675_RELEASE_TAG]+set}" ] \
+					|| _release_documentation_error \
+						"$label finalizes a pic12f675-program transaction with PIC12F675_RELEASE_TAG; that reservation records no release identity" \
+					|| rc=1
+				;;
+			*)
+				_release_documentation_error \
+					"$label publishes a pic12f675-finalize command with no preceding pic12f675-program or pic12f675-release-program command to recover" || rc=1
+				;;
+		esac
+	done
+
+	[ "$building" -eq 0 ] \
+		|| _release_documentation_error "$label ends inside an unterminated make command" || rc=1
+	[ "$found" -gt 0 ] \
+		|| _release_documentation_error "$label publishes no pic12f675-finalize command" || rc=1
+	return "$rc"
+}
+
+release_validate_pic12f675_finalization_document() {
+	[ "$#" -eq 2 ] || return 2
+	local document=$1 label=$2
+	[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
+		|| _release_documentation_error "finalization document is not a regular nonempty file: $label" || return
+	_release_pic12f675_finalization_scan "$label" < "$document"
+}
+
+# Validate every published finalization command in the CURRENT tree, plus the
+# generated per-release documentation, against the same oracle.
+#
+# The two static documents are named because deleting the recovery example from
+# either must fail; any other current markdown that publishes such a command is
+# DISCOVERED, so a new document is covered the day it is written. Shipped
+# release directories (release/vX.Y.Z/) are excluded: they are immutable
+# artifacts of past releases, and release/v0.9.9/MANIFEST.md legitimately
+# publishes the older unsigned pic12f675-program transaction.
+release_validate_pic12f675_finalization() {
+	[ "$#" -eq 2 ] || return 2
+	local repo_root=$1 version=$2
+	local document label rendered find_pid rc=0
+	# Always scanned, so deleting the recovery example from either is a failure
+	# with a precise diagnostic rather than a silently empty scan.
+	local -a publishers=("README.md" "release/README.md")
+
+	[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
+		|| _release_documentation_error "requested version is not vX.Y.Z: $version" || return
+
+	while IFS= read -r -d '' document; do
+		label=${document#$repo_root/}
+		case "$label" in
+			README.md|release/README.md) continue ;;
+			# Root-level working documents quote the defective form of a command
+			# while describing the defect; they are deleted before release.
+			v*-polish.md|pre-v*-fixes.md) continue ;;
+		esac
+		# A published command, not a prose mention. This finds a NEW document the
+		# day it is written; the two named above are scanned either way, so a
+		# command this pattern cannot see still fails inside the scan.
+		grep -Eq '^[[:space:]]*make([[:space:]].*)?[[:space:]]pic12f675-finalize([[:space:]]|\\|$)' \
+			"$document" || continue
+		publishers+=("$label")
+	done < <(find "$repo_root" \
+		\( -name .git -o -path "$repo_root/release/v[0-9]*" \) -prune -o \
+		-type f -name '*.md' -print0)
+	find_pid=$!
+	# A failed scan is a policy failure, not an empty result set: the two named
+	# documents would still be checked and a drifted third would pass unseen.
+	wait "$find_pid" \
+		|| _release_documentation_error "could not scan for published finalization commands" || return
+
+	for label in "${publishers[@]}"; do
+		release_validate_pic12f675_finalization_document "$repo_root/$label" "$label" || rc=1
+	done
+
+	rendered=$(release_render_pic12f675_flashing "$version") \
+		|| _release_documentation_error "generated PIC12F675 flashing guidance could not be rendered" || return
+	_release_pic12f675_finalization_scan "generated release documentation" <<<"$rendered" || rc=1
+	return "$rc"
+}
+
 release_render_scope() {
 	[ "$#" -eq 0 ] || return 2
 	printf 'Release scope: AVR Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT),\n'
@@ -235,7 +428,8 @@ release_render_pic12f675_flashing() {
 		'If an interruption leaves `reservation.json` but no `result.json`, the' \
 		'transaction is **PENDING**. Keep physical custody of the same attached device.' \
 		'Do not write, reflash, capture a new baseline, or reuse the result path. From' \
-		'this same release checkout, resolve it with the same variant and tool identities:' \
+		'this same release checkout, resolve it with the same release identity, variant,' \
+		'and tool identities:' \
 		'' \
 		'```sh' \
 		'make -C "$repo" pic12f675-finalize \' \

@@ -210,13 +210,58 @@ release-program-only even though read-only finalization consumes it.
 
 **Acceptance criteria**
 
-- [ ] Both static examples can finalize a transaction created by the preceding
+- [x] Both static examples can finalize a transaction created by the preceding
   signed-release programming example.
-- [ ] Generated and static instructions carry the same release identity.
-- [ ] `make help` describes the variable's complete supported scope.
-- [ ] Documentation contracts detect a future omission or drift.
-- [ ] PIC12F675 trim-evidence, release-program-image, release-preflight, and
+- [x] Generated and static instructions carry the same release identity.
+- [x] `make help` describes the variable's complete supported scope.
+- [x] Documentation contracts detect a future omission or drift.
+- [x] PIC12F675 trim-evidence, release-program-image, release-preflight, and
   static documentation tests pass.
+
+**Implementation note**
+
+`release_validate_pic12f675_finalization` in `scripts/release-documentation.sh`
+scans every PUBLISHED finalization command -- a `make` invocation inside a fenced
+block, continuations joined, parsed into words -- and anchors each one to the
+nearest programming command published before it in the same document. The rule
+is therefore not "always pass the release tag" but "pass the identity of the goal
+that reserved the transaction": required after `pic12f675-release-program`,
+refused after `pic12f675-program`, whose reservation records no release identity.
+Every other reserved argument must repeat the preceding command's VALUE, not just
+its name -- a recovery pointing at a different variant or result directory fails
+the same way an omitted one does. The release tag is the one exception, checked
+for presence only: the generated recovery block deliberately embeds the resolved
+tag so recovery does not depend on a shell variable surviving from the
+programming block, while both static examples carry `"$release_tag"` twice.
+It runs in `--preflight`, on the live tree, so a drifted example fails on a
+polish branch rather than after a builder has already lost a PENDING transaction.
+
+`README.md` and `release/README.md` are always scanned, so deleting the example
+fails; any other current markdown that publishes the command is discovered rather
+than enumerated. Shipped `release/<version>/` directories are excluded --
+`release/v0.9.9/MANIFEST.md` legitimately publishes the older unsigned
+`pic12f675-program` transaction and must not be rewritten to satisfy a contract
+introduced after it shipped. Prose that merely names a goal is not a command;
+`test/README.md` names all three that way, including one line that begins with
+`make`, so a line-level match would have failed the live tree.
+
+`make help` is pinned separately, since it is the other place the variable's
+scope is published: the retired "(pic12f675-release-program only)" claim must be
+gone, and the `pic12f675-finalize` entry must name the variable it needs.
+
+Negative controls, since a documentation contract is easy to write vacuously.
+Restoring `README.md` to its defective form makes the real
+`scripts/make-release.sh --preflight v0.9.10` exit 1 by name. Weakening the
+recovery oracle to compare only `release_source_commit` lets the substituted-tag
+recovery reach `PIC12F675_TRIM_RECOVERY_READY PASS` and fails the new
+`test_pic_build.sh` case -- which the pre-existing omitted-identity case does not
+catch, because omission also drops the commit. Reverting each half of the help
+text independently fires its own guard.
+
+The new PIC12F675 case is folded into the existing check slot rather than
+incrementing the count: `expected_checks=126` is mirrored in a `Makefile`
+comment, and both assertions test one contract (the recovery identity must match
+the reservation) in the same block.
 
 ### F1 - Resolve the silent relay-state desynchronization risk
 
@@ -592,8 +637,8 @@ Record each completed item with its commit ID and decisive validation command.
 | Item | Status | Commit | Decisive validation |
 | --- | --- | --- | --- |
 | R1 | IMPLEMENTED | `7dab4db` | `make CC=: test-pic-build`; `test/test_release_qualification.sh`; `test/test_workflow_syntax.sh` |
-| R2 | DONE | (pending) | `test/test_release_preflight.sh`; `test/test_release_provenance.sh`; `make test-workflow-syntax test-release-history` |
-| R3 | OPEN | | |
+| R2 | DONE | `7b54dea` | `test/test_release_preflight.sh`; `test/test_release_provenance.sh`; `make test-workflow-syntax test-release-history` |
+| R3 | DONE | (pending) | `make test-pic-build test-release-preflight test-release-qualification`; `scripts/make-release.sh --preflight v0.9.10` |
 | F1 | DONE | `a8fe23d`, `b14cd7a` | `make test`; relay fault + coverage lanes on all six substrates; PIC/AVR flash-budget gates |
 | T1 | OPEN | | |
 | T2 | OPEN | | |
