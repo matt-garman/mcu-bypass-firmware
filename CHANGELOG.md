@@ -328,6 +328,52 @@ file is the human-readable summary of *what changed*.
   `release/<version>/` artifacts and root-level branch-only working documents are
   pruned outright. `test-release-preflight`: 85 -> 101 checks.
 
+- **Four stale evidence and simulator claims are corrected.**
+  `docs/context_seu_detection.md` opened by calling target-toolchain
+  qualification "still pending" while its own evidence section recorded a fully
+  provisioned run that passed the AVR/XC8 builds and resource gates, the
+  simavr/yasimavr/gpsim lanes, CBMC, static analysis and the complete mutation
+  suite. Those are statements about two different things and neither said which:
+  the run is complete, and it is *local*. What does not exist yet is retained
+  release evidence -- a signed `v0.9.10` MANIFEST binding those gates to one
+  published commit. The record now draws that line in both places, and points at
+  `HARDWARE_VALIDATION_LOG.md` for the third claim it does not make either.
+
+  `test/README.md`'s mutation-mapping section still said the ATtiny202 output
+  tracer calls `SimLoop.run(1)`, and repeated the superseded "one cycle per
+  instruction" explanation that the same file corrects 450 lines earlier. The
+  tracer free-runs in millisecond budgets and timestamps pin edges from a signal
+  hook, so it asserts delivered width as well as ordering, polarity, exclusion
+  and presence, and the pinned yasimavr's cycle rewind reaches no timing
+  assertion; the fault driver's non-timing transaction-seam probe is the one
+  deliberate `run(1)` caller left. The delay oracle's role is restated
+  accurately too: it is the tightest absolute-width witness because it recovers
+  the *compiled* width from the disassembled image, which makes it
+  simulator-independent -- not because it is the only route to a width.
+
+  Simulator observations are no longer described as physical-hardware ones.
+  `docs/pic10f320_special_case.md` said its target-I/O lane asserted "physical
+  `PORTA`" and that "the output lanes do observe real pin state"; both are gpsim
+  or host-compiled observations, and they now say modeled `PORTA` and name what
+  they are. The same correction is applied to the PIC12F675 I/O and fault-lane
+  descriptions in the Makefile and to the built-image lane list in
+  `docs/non-blocking_output_schemes_feasibility.md`. Where "physical port" names
+  the *register* semantics that classic mid-range and PIC10F32x parts have --
+  `GPIO`/`PORTA` reading pins where a shadow or `LATA` holds the latch -- it is
+  left alone: that is a datasheet distinction, not an evidence claim.
+
+  `.github/workflows/ci.yml`'s header called the runner "pinned to ubuntu-24.04"
+  -- a moving hosted-runner label whose apt packages carry no version constraint
+  -- and listed a `make test` matrix that predated the ATtiny202 host oracles and
+  both PIC shipping-source coverage gates. It now matches `release.yml`: the
+  runner and its apt toolchain are recorded, not pinned, and what *is* pinned is
+  named (every third-party action by commit SHA; XC8 V3.10 +
+  PIC10-12Fxxx_DFP 1.9.189, SHA-verified on install and integrity-checked on
+  every cache restore). Its inventory and the `verify` job's now cover the
+  host-side lanes of all seven parts. `release.yml`'s header needed no change --
+  the PIC12F675 additions and the moving-runner note landed with the release
+  provenance and compiler-pin work earlier in this cycle.
+
 ## [0.9.9] - 2026-08-15
 
 ### Fixed

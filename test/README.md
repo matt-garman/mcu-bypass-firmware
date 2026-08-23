@@ -830,10 +830,15 @@ control pin to `attiny202-sim`, a dropped `ctx_` write-back to
 `attiny202-lockstep`, a defeated SFR/direction/pull-up guard to
 `attiny202-fault`, a missing WDT pet or broken ISR handshake to
 `attiny202-soak`, and a shortened coil pulse to `attiny202-delay-oracle` — the
-AVR-XT's only route to an absolute pulse width. As described under "Known gaps"
-above, the output tracer calls `SimLoop.run(1)`; the pinned yasimavr rewinds any
-instruction overshoot on return, effectively billing every traced instruction
-one cycle even though its core models multi-cycle instructions.
+AVR-XT's tightest absolute-width witness, because it recovers the *compiled*
+width from the disassembled image instead of timing a trace, which makes it
+simulator-independent. As described under "Known gaps" above, the output tracer
+no longer single-steps: it free-runs in millisecond budgets and timestamps pin
+edges from a signal hook, so it asserts delivered width as well as ordering,
+polarity, exclusion and presence, and the pinned yasimavr's `SimLoop.run(n)`
+cycle rewind reaches no timing assertion. The one deliberate `run(1)` caller
+left is the fault driver's non-timing transaction-seam probe, whose bound is an
+instruction-step count and from which no timing claim is derived.
 
 
 ## Known gaps (PIC — hardware-bench only)

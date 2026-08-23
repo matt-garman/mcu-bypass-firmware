@@ -1,9 +1,13 @@
 # In-range debounce-context SEU detection (F2)
 
 > **Design and evidence record.** The repository owner authored the firmware
-> changes. This document distinguishes the final transaction design and locally
-> executed host evidence from target-toolchain qualification that is still
-> pending.
+> changes. The evidence below is a complete local run on a fully provisioned
+> host — target toolchains, simulators and the mutation suite included — and is
+> reported as observed. What does not exist yet is *retained release* evidence:
+> a `v0.9.10` MANIFEST and signed image set binding these gates to one published
+> commit. Local completion and retained release qualification are separate
+> claims, and this record makes only the first. Neither is hardware
+> qualification — see [HARDWARE_VALIDATION_LOG.md](../HARDWARE_VALIDATION_LOG.md).
 
 ## Summary
 
@@ -286,6 +290,9 @@ The initial host PIC coverage and ATtiny fault-oracle checks passed. A subsequen
 fully provisioned run passed the AVR/XC8 builds and resource gates,
 simavr/yasimavr/gpsim lanes, CBMC and static analysis, and the complete mutation
 suite: 132 killed, 0 survived, 0 errored, and no skipped PIC or ATtiny202 rows.
+Both were local runs on the maintainer's provisioned host. The same gates become
+*retained* release evidence only when a `make release` cut records them in a
+signed `v0.9.10` MANIFEST bound to one commit; that has not happened yet.
 
 ## Acceptance-criteria mapping (F2)
 

@@ -1156,11 +1156,11 @@ specification can exhaustively prove:
 - settled outputs agreeing with `ctx_.effect_state`.
 
 Built-image lanes must still establish what the abstract model cannot: real edge
-ordering, cycle-level lower/upper pulse width, startup behavior, physical port
-following the latch, watchdog withholding, fault abort and reset recovery. The
-mutation set should include `N-1`/`N+1` loads, missing decrement, missing `_post`,
-idle published early, wrong direction, duplicate request, active sanity
-suppression and both countdown-zero/high corruption.
+ordering, cycle-level lower/upper pulse width, startup behavior, the port
+register following the latch, watchdog withholding, fault abort and reset
+recovery. The mutation set should include `N-1`/`N+1` loads, missing decrement,
+missing `_post`, idle published early, wrong direction, duplicate request,
+active sanity suppression and both countdown-zero/high corruption.
 
 ### 7.14 Secondary gains and behavior changes
 

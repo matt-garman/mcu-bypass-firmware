@@ -73,7 +73,7 @@ described as core-equivalence comparisons.
 | **Expected image bytes** | The complete three-image matrix must exactly match the committed, reviewed SHA-256 baseline from the pinned XC8/DFP build; byte drift fails until an intentional rebaseline |
 | **Real-HEX lock-step** | The actual emitted image, running in a simulated PIC10F320, must track the verified core for the configured sequence; any divergence fails |
 | **Target fault injection** | The same defensive-layer argument on the real image in libgpsim: corrupting every guarded SFR/SRAM location and the required `TRISA` directions forces exactly one real watchdog reset |
-| **Target I/O** | Exact `TRISA`, physical `PORTA` following every `LATA` transition, each variant's complete startup/engage/bypass sequence, and mute/relay pulse widths measured from simulator cycles |
+| **Target I/O** | Exact `TRISA`, modeled `PORTA` following every `LATA` transition, each variant's complete startup/engage/bypass sequence, and mute/relay pulse widths measured from simulator cycles |
 | **CONFIG word** | The emitted CONFIG word matches design intent — a wrong bit is invisible to every other test and would only bite on silicon |
 | **Hardware return stack** | The 8-level return stack is bounded by two independent witnesses — the emitted assembly and the shipped HEX — because overflow is silent on this core |
 | **Static analysis** | cppcheck + MISRA-C:2012 swept across all three output branches |
@@ -135,12 +135,14 @@ relay-position consequence, that an LED or analog-control mismatch does not.
 
 **What the omission means in practice.** The firmware still range-checks
 `ctx_.effect_state` in the main-loop sanity gate before acting on it, and the
-output lanes do observe real pin state: `pic10f320-test-actuation` asserts the full
-settled `LATA` at every tick on the host, and `pic10f320-test-io` asserts each
-variant's exact `LATA` transition sequence, the physical `PORTA` levels that
-follow it, and the pulse widths between edges on the emitted image.
-(`pic10f320-test-lockstep` compares `ctx_`, not the output latch.) Every one of
-those catches firmware that *writes* the wrong latch.
+output lanes do observe the port register rather than the latch alone:
+`pic10f320-test-actuation` asserts the full settled `LATA` at every tick on the
+host, and `pic10f320-test-io` asserts each variant's exact `LATA` transition
+sequence, the modeled `PORTA` levels that follow it, and the pulse widths
+between edges on the emitted image. (`pic10f320-test-lockstep` compares `ctx_`,
+not the output latch.) Every one of those catches firmware that *writes* the
+wrong latch. All of them are host-compiled or simulated observations, though;
+none is a bench measurement.
 
 What is still missing is a different thing: the firmware's own in-line self-check that
 its output latch still matches what its state says it should be — a defence

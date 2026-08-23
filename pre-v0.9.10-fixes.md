@@ -761,11 +761,94 @@ runs the validator against the live checked-in tree, which is what pins
 
 **Acceptance criteria**
 
-- [ ] Qualification state is consistent within each design/evidence record.
-- [ ] Simulator evidence is never described as a physical-hardware observation.
-- [ ] Current tracer mechanics are described consistently.
-- [ ] Workflow headers match the actual gates and pinning model.
-- [ ] Workflow-syntax and documentation contract tests pass.
+- [x] Qualification state is consistent within each design/evidence record.
+- [x] Simulator evidence is never described as a physical-hardware observation.
+- [x] Current tracer mechanics are described consistently.
+- [x] Workflow headers match the actual gates and pinning model.
+- [x] Workflow-syntax and documentation contract tests pass.
+
+**Implementation note (2026-08-23).** Resolved. Two of the four bullets were
+already closed by earlier items in this cycle and are recorded below as verified
+rather than changed; the other two were corrected, and the sweep behind them
+found three more instances of the same category error.
+
+*Local completion is not retained release evidence.* `docs/context_seu_detection.md`
+opened by calling target-toolchain qualification "still pending" while its own
+evidence section recorded a fully provisioned run that passed the AVR/XC8 builds
+and resource gates, the simavr/yasimavr/gpsim lanes, CBMC, static analysis and
+all 132 mutants with nothing skipped. Neither statement is false about the thing
+it means; the header simply used one phrase for two different claims. The
+distinction now stated in both places is the same one D1 drew for hardware: the
+run is *complete* and it is *local*, and what does not exist yet is *retained*
+release evidence -- a signed `v0.9.10` MANIFEST binding those gates to one
+published commit. The header also now points at `HARDWARE_VALIDATION_LOG.md`,
+because the third claim this record does not make is a hardware one.
+
+*The tracer description contradicted its own file.* `test/README.md:833-836` said
+the ATtiny202 output tracer calls `SimLoop.run(1)` and repeated the superseded
+"one cycle per instruction" account, 450 lines after the same file corrects it.
+That correction is the one recorded in the `yasimavr-flat-instruction-timing`
+note: the halving was an artifact of measuring by single-stepping, not a core
+defect. The mutation-mapping paragraph now matches the "Known gaps" account --
+millisecond budgets, edges timestamped from a signal hook, delivered width
+asserted alongside ordering/polarity/exclusion/presence, and the fault driver's
+non-timing transaction-seam probe as the one deliberate `run(1)` caller left.
+The delay oracle's justification was stale in a second way: it was called "the
+AVR-XT's only route to an absolute pulse width", which stopped being true when
+the tracer gained delivered width. Its real claim is stronger and unaffected --
+it recovers the *compiled* width from the disassembled image, so it is
+simulator-independent and tighter than any trace.
+
+*A register is never physical.* `docs/pic10f320_special_case.md` described its
+target-I/O lane as observing "physical `PORTA`" and its output lanes as
+observing "real pin state". Both run in gpsim or on the host. They now say
+modeled `PORTA` and say what they are. Sweeping the same phrasing repo-wide
+found three more evidence claims of the same shape and left the rest alone,
+which is the part worth recording: "physical port" is *also* the correct name
+for a datasheet distinction on these parts -- `GPIO` and `PORTA` read pins where
+a shadow or `LATA` holds the latch -- so the phrase cannot simply be banned. The
+test is what the sentence is about. Firmware behaviour and register semantics
+keep it (`docs/pic12f675_feasibility.md`, `docs/relay_coil_fault_correction.md`,
+`CHANGELOG.md`, `Makefile:5851`'s note that the 12F675 fault lane injects into
+the port as well as the latch -- reworded to "port register" because that one
+sentence is also describing a lane); claims about what a lane *observed* do not
+(`Makefile`'s `pic12f675-test-io` help text and the built-image lane list in
+`docs/non-blocking_output_schemes_feasibility.md`). Released `CHANGELOG.md`
+sections that carry the old phrasing were left untouched: they are the record of
+what was said at the time, and `test-release-history` treats them as immutable.
+
+*No new validator, deliberately.* D1 added `release_validate_hardware_claims`
+because its criterion was a classification that had to hold for every future
+document. This item's criteria are not mechanically separable in the same way.
+The one phrase worth banning outright -- "physical" qualifying a register name
+in a code span -- appears in a shipped `[0.9.8]` changelog section, so the guard
+would either fire on immutable history or need a prune rule wide enough to blind
+it to the current section too. The existing gates already cover what is
+checkable here: `test-workflow-syntax` holds both workflows to their real job
+lists and toolchain assertions, `test-ci-local-routing` keeps `ci-local.sh` in
+step with `ci.yml`, and D1's vocabulary scan already refuses the conflated
+hardware idiom in every durable document. Adding a fragile prose matcher on top
+of those would cost more than it caught.
+
+*Two bullets were already closed.* The item asks for the PIC10F320 relay
+correction to be described as appropriate to that variant; F1 (`a8fe23d`) did
+exactly that -- `docs/pic10f320_special_case.md:162-176` now records that
+`v0.9.10` replaces the `v0.9.8` correct-in-place guard with the project-wide
+fail-safe policy, and why. It also asks that `release.yml`'s header include
+PIC12F675 and stop calling a moving runner pinned; R1 (`7dab4db`) added the part
+to both the rebuild list and the re-run list, and R2 (`53c1289`) added the
+`ubuntu-24.04` MOVING-label paragraph. `ci.yml` was the twin that never got
+either fix, and it had drifted further: its `make test` inventory predated the
+ATtiny202 host oracles and both PIC shipping-source coverage gates (T2,
+`130b22f`). Its header and the `verify` job's inventory now name the host-side
+lanes of all seven parts, and its pinning paragraph matches `release.yml`'s,
+naming what actually is pinned -- every third-party action by commit SHA, and
+XC8 V3.10 + PIC10-12Fxxx_DFP 1.9.189, SHA-verified on install and
+integrity-checked on every cache restore.
+
+*Verification.* `make test-workflow-syntax test-ci-local-routing
+test-release-preflight test-release-qualification test-release-history
+test-todo-index test-makefile-name-contract`, then the full local CI run.
 
 ### D3 - Control the pre-release metadata transition
 
@@ -893,8 +976,8 @@ Record each completed item with its commit ID and decisive validation command.
 | F1 | DONE | `a8fe23d`, `b14cd7a` | `make test`; relay fault + coverage lanes on all six substrates; PIC/AVR flash-budget gates |
 | T1 | DONE | `fd9aa28` | `make test`; `make pic10f322-coverage-check-fw HOSTCC=gcc-10`; `test/test_release_preflight.sh` |
 | T2 | DONE | `130b22f` | `make test`; `test/test_workload_rebuild.sh`; mutated-tree `make test` reaching the PIC12F675 host oracle |
-| D1 | DONE | (pending) | `make test-release-preflight` (85 -> 101 checks, 12 negative controls); `make test-release-qualification test-todo-index test-makefile-name-contract test-release-history` |
-| D2 | OPEN | | |
+| D1 | DONE | `ed5b654` | `make test-release-preflight` (85 -> 101 checks, 12 negative controls); `make test-release-qualification test-todo-index test-makefile-name-contract test-release-history` |
+| D2 | DONE | (pending) | `make test-workflow-syntax test-ci-local-routing test-release-preflight test-release-qualification test-release-history test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
 | D3 | OPEN | | |
 | G1 | OPEN | | |
 | Final validation | OPEN | | |

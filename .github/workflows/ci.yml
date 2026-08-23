@@ -4,19 +4,35 @@ name: CI
 #
 # The goal of this workflow is reproducibility: it proves that the full
 # build + verification suite passes on a clean machine, not just on the
-# developer's box. The runner is pinned to ubuntu-24.04 so the installed
-# toolchain matches TOOLCHAIN.adoc (avr-gcc 7.3, gcc 13, clang/clang-tidy 18,
-# cppcheck 2.13, simavr 1.6) as closely as the distro packages allow.
+# developer's box.
+#
+# `ubuntu-24.04` is a MOVING hosted-runner label, and the apt tools below install
+# without version constraints -- so the runner and its apt toolchain are
+# RECORDED, not pinned: the `verify`, `pic` and `attiny202` jobs each print the
+# versions they actually got, so drift surfaces as a changed version line in the
+# log rather than silently. The label is chosen because its packages sit closest
+# to TOOLCHAIN.adoc (avr-gcc 7.3, gcc 13, clang/clang-tidy 18, cppcheck 2.13,
+# simavr 1.6). What IS pinned here: every third-party action by commit SHA, and
+# the image-defining PIC toolchain -- XC8 V3.10 + PIC10-12Fxxx_DFP 1.9.189,
+# SHA-verified by the installer and integrity-checked on every cache restore
+# (see the `pic` job). The release pipeline enforces more; see TOOLCHAIN.adoc
+# "What the release enforces".
 #
 # Most of the matrix lives inside the Makefile: a single `make test` already
 # exercises all three variants (cd4053_simple, cd4053_with_mute,
-# tq2_l2_5v_relay) across the ATtiny13a and
-# the tinyx5 family, plus every analysis gate (clang-tidy, cppcheck,
-# clang-analyzer, MISRA-C:2012), the PIC10F320 host lanes (firmware<->core
-# equivalence, actuation, host fault injection and firmware line coverage, all
-# three variants -- host compiler only, no XC8), and the coverage gates. The jobs
-# below wrap that, surface the per-MCU build matrix as discrete checks, and run
-# the slower exhaustive/mutation suite off the PR hot path.
+# tq2_l2_5v_relay) across the ATtiny13a and the tinyx5 family, plus every
+# analysis gate (clang-tidy, cppcheck, clang-analyzer, MISRA-C:2012), the
+# ATtiny202 host-side oracles (fail-closed build regression, the output/delay/
+# fault parsers and the golden-model FFI bridge), the PIC10F320 host lanes
+# (firmware<->core equivalence, actuation, host fault injection and firmware
+# line coverage, all three variants), the PIC10F322 and PIC12F675 shipping-
+# source coverage gates, the simavr functional and fault-injection lanes, and
+# the coverage gates. None of that needs a vendor toolchain: it runs on the host
+# compiler, avr-gcc and simavr, all from apt. The jobs below wrap it, surface
+# the per-MCU build matrix as discrete checks, add the lanes `make test` cannot
+# reach without a vendor toolchain (XC8 + gpsim for all three PICs,
+# ATtiny_DFP + patched yasimavr for the ATtiny202), and run the slower
+# exhaustive/mutation suite off the PR hot path.
 
 on:
   push:
@@ -44,6 +60,11 @@ jobs:
   #             + CBMC SAT/SMT proof of the real bypass_pure.c core
   #             + PIC10F320 host lanes, all three variants (equivalence against
   #               that same core, actuation, host fault, firmware line coverage)
+  #             + PIC10F322 and PIC12F675 shipping-source coverage gates
+  #               (both shells, host compiler, no XC8)
+  #             + ATtiny202 host-side oracles (fail-closed build regression,
+  #               output/delay/fault parsers, golden-model FFI bridge -- no
+  #               ATtiny_DFP and no yasimavr; the attiny202 job runs those)
   #             + simavr functional + fault-injection across all variants,
   #               ATtiny13a and tinyx5
   #             + golden-model and verified-core coverage gates.

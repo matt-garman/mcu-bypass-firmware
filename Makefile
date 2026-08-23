@@ -5848,7 +5848,7 @@ pic12f675-test-lockstep: variant-selectors-valid pic12f675-simcal
 #      defaulting: no default can be right for a per-build address, and the
 #      obvious one is actively wrong -- register 0x000 is INDF, so a write
 #      through it lands wherever FSR points.
-#   2. IT INJECTS INTO THE PHYSICAL PORT AS WELL AS THE LATCH. With the shadow
+#   2. IT INJECTS INTO THE PORT REGISTER AS WELL AS THE LATCH. With the shadow
 #      left correct and GPIO driven high, the only clause of the gate that can
 #      explain the reset is "the port still follows the shadow" -- the check
 #      this part can make and the PIC10F322 cannot.
@@ -7729,7 +7729,7 @@ help:
 	@echo "  pic12f675             build all variants for PIC12F675 (XC8) + 1024-word budget gate"
 	@echo "  pic12f675-test-config build PIC12F675 HEX, then verify each CONFIG word vs design intent"
 	@echo "  pic12f675-test-gpsim  drive the footswitch in gpsim, assert GPIO on the simcal images"
-	@echo "  pic12f675-test-io     libgpsim GPIO transition + pulse timing, and the physical port"
+	@echo "  pic12f675-test-io     libgpsim GPIO transition + pulse timing, and the modeled port"
 	@echo "                        against the SRAM output shadow (PIC12F675_IO_VARIANT)"
 	@echo "  pic12f675-test-lockstep  libgpsim HEX-vs-model ctx_ lock-step (PIC12F675_LOCKSTEP_VARIANT)"
 	@echo "  pic12f675-test-fault  libgpsim SEU injection into the guarded SFRs, the SRAM output"
