@@ -408,6 +408,26 @@ file is the human-readable summary of *what changed*.
   `test-release-history`: 88 -> 89, adding a release commit that restates a
   bounded declaration to the paths it already refuses.
 
+- **The release gate no longer chases working-document names.** The
+  branch-only-document guard refused a root-level `v*-polish.md` and nothing
+  else, so a root-level pre-release fix list -- a working document of exactly
+  the same kind, kept on a branch and deleted before merge -- was invisible to
+  it, and so would be the next such document under any other name. Release
+  staging now governs the whole root-level Markdown set as an allowlist: the
+  durable documents ship, both branch-only families are recognized by name for a
+  diagnostic that identifies them, and any other root-level document fails the
+  release until it is deleted or deliberately added to the durable set. The
+  reference half, which must search by name because a deleted document leaves
+  nothing else to search for, covers both families, so no durable file is left
+  pointing at a document the release removed.
+
+  Release preflight is unchanged and stays usable on a live branch, where the
+  working document legitimately exists: this gate runs only on the real
+  release-staging path, after the preflight capability probe exits.
+  `test-release-preflight`: 113 -> 118 checks, including the live tree held to
+  the same durable set so the allowlist cannot drift unnoticed until release
+  day.
+
 ## [0.9.9] - 2026-08-15
 
 ### Fixed

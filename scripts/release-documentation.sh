@@ -185,50 +185,93 @@ release_validate_staged_documentation() {
 }
 
 # Reject a release cut from a tree that still contains -- or still references --
-# a branch-only working document (root-level `v*-polish.md`, e.g.
-# v0.9.9-polish.md). Such a document exists ONLY on a polish branch and must be
-# deleted, and de-referenced, in the final pre-merge commit; a production
-# release is cut from main, so none may remain.
+# a branch-only working document. Two kinds must fail, for different reasons:
+#
+#   * A KNOWN branch-only name: root-level `v*-polish.md` (e.g. v0.9.9-polish.md)
+#     or root-level `pre-v*-fixes.md` (a pre-release fix list). Such a document
+#     exists ONLY on a branch and must be deleted, and de-referenced, in the
+#     final pre-merge commit; a production release is cut from main, so none may
+#     remain.
+#   * ANY other root-level Markdown document outside the durable set below.
+#     Adding one name pattern per working document is precisely how this gate
+#     came to miss `pre-v*-fixes.md`, so the root document set is an allowlist
+#     rather than a blocklist: the durable documents ship, and any other
+#     root-level document fails the release until it is deleted -- or added to
+#     the set here, deliberately, because it now ships too.
+#
+# The reference half necessarily stays name-pattern based: once a document is
+# deleted, its name is the only thing left to search for.
 #
 # Deliberately SEPARATE from release_validate_current_documentation: that
 # validator runs in `--preflight`, which exercises the live checked-in tree
-# (where the polish document legitimately still exists during branch work). This
+# (where a working document legitimately still exists during branch work). This
 # gate is invoked only on the actual release-staging path, after preflight has
 # exited, so it fails a real release closed without breaking the preflight
 # capability probe. The retained docs/v0.9.6_post_release_polish.md is under
-# docs/ and does not match the root pattern, so it is unaffected.
+# docs/, not root-level, so it is unaffected.
 release_reject_branch_only_documents() {
 	[ "$#" -eq 1 ] || return 2
-	local repo_root=$1 branch_doc reference_file find_pid grep_output grep_status
-	local -a present_polish_docs=() polish_doc_references=()
+	local repo_root=$1 root_doc label durable_doc durable reference_file
+	local find_pid grep_output grep_status
+	local -a present_branch_docs=() undeclared_root_docs=() branch_doc_references=()
+	# Every root-level Markdown document a release is allowed to ship.
+	local -a durable_root_docs=(
+		AGENTS.md
+		CHANGELOG.md
+		CLAUDE.md
+		FLASHING.md
+		HARDWARE_VALIDATION_LOG.md
+		MISRA_COMPLIANCE.md
+		README.md
+		TODO.md
+	)
 
-	while IFS= read -r -d '' branch_doc; do
-		[ -n "$branch_doc" ] && present_polish_docs+=("${branch_doc#$repo_root/}")
-	done < <(find "$repo_root" -maxdepth 1 -type f -name 'v*-polish.md' -print0)
+	while IFS= read -r -d '' root_doc; do
+		[ -n "$root_doc" ] || continue
+		label=${root_doc#$repo_root/}
+		case "$label" in
+			v*-polish.md|pre-v*-fixes.md)
+				present_branch_docs+=("$label")
+				continue
+				;;
+		esac
+		durable=0
+		for durable_doc in "${durable_root_docs[@]}"; do
+			if [ "$label" = "$durable_doc" ]; then
+				durable=1
+				break
+			fi
+		done
+		if [ "$durable" -eq 0 ]; then
+			undeclared_root_docs+=("$label")
+		fi
+	done < <(find "$repo_root" -maxdepth 1 -type f -name '*.md' -print0)
 	find_pid=$!
 	wait "$find_pid" \
-		|| _release_documentation_error "could not scan for branch-only polish documents" || return
-	[ "${#present_polish_docs[@]}" -eq 0 ] \
-		|| _release_documentation_error "branch-only polish document(s) must be deleted before release: ${present_polish_docs[*]}" || return
+		|| _release_documentation_error "could not scan for branch-only working documents" || return
+	[ "${#present_branch_docs[@]}" -eq 0 ] \
+		|| _release_documentation_error "branch-only working document(s) must be deleted before release: ${present_branch_docs[*]}" || return
+	[ "${#undeclared_root_docs[@]}" -eq 0 ] \
+		|| _release_documentation_error "root-level document(s) outside the durable root-document set must be deleted before release, or added to that set in release-documentation.sh if they now ship: ${undeclared_root_docs[*]}" || return
 
-	# A durable file that still NAMES such a document (v<ver>-polish.md) dangles
-	# once it is deleted. Exclude this checker and its regression, which
-	# necessarily carry the pattern as tooling -- the same self-reference the
-	# Makefile name contract allowlists.
-	if grep_output=$(grep -rlIE 'v[0-9][0-9.]*-polish\.md' "$repo_root" \
+	# A durable file that still NAMES such a document (v<ver>-polish.md or
+	# pre-v<ver>-fixes.md) dangles once it is deleted. Exclude this checker and
+	# its regression, which necessarily carry the patterns as tooling -- the same
+	# self-reference the Makefile name contract allowlists.
+	if grep_output=$(grep -rlIE 'v[0-9][0-9.]*-polish\.md|pre-v[0-9][0-9.]*-fixes\.md' "$repo_root" \
 		--exclude-dir=.git \
 		--exclude='release-documentation.sh' \
 		--exclude='test_release_preflight.sh'); then
 		while IFS= read -r reference_file; do
-			[ -n "$reference_file" ] && polish_doc_references+=("${reference_file#$repo_root/}")
+			[ -n "$reference_file" ] && branch_doc_references+=("${reference_file#$repo_root/}")
 		done <<<"$grep_output"
 	else
 		grep_status=$?
 		[ "$grep_status" -eq 1 ] \
-			|| _release_documentation_error "could not scan for branch-only polish-document references" || return
+			|| _release_documentation_error "could not scan for branch-only working-document references" || return
 	fi
-	[ "${#polish_doc_references[@]}" -eq 0 ] \
-		|| _release_documentation_error "durable file(s) still reference a branch-only polish document (repoint to CHANGELOG.md / Git history): ${polish_doc_references[*]}" || return
+	[ "${#branch_doc_references[@]}" -eq 0 ] \
+		|| _release_documentation_error "durable file(s) still reference a branch-only working document (repoint to CHANGELOG.md / Git history): ${branch_doc_references[*]}" || return
 }
 
 # Blank every Markdown code span and every double-quoted span, so a phrase a

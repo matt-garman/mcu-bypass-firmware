@@ -978,13 +978,61 @@ will not detect a forgotten copy or reference.
 
 **Acceptance criteria**
 
-- [ ] The release-staging path fails when this document exists.
-- [ ] The release-staging path fails when a tracked file still references its
+- [x] The release-staging path fails when this document exists.
+- [x] The release-staging path fails when a tracked file still references its
   basename after deletion.
-- [ ] The branch-safe capability preflight remains usable while the document
+- [x] The branch-safe capability preflight remains usable while the document
   exists.
-- [ ] Negative and positive branch-document contract tests pass.
+- [x] Negative and positive branch-document contract tests pass.
 - [ ] This document and all references are absent from the merge candidate.
+
+**Implementation note (2026-08-23).** Implemented. The fifth criterion is the
+pre-merge deletion itself and stays open until that commit.
+
+*The defect is the mechanism, not the name.* The guard matched one glob,
+`v*-polish.md`, so it saw the previous working document and nothing else. Adding
+`pre-v*-fixes.md` beside it would close this instance and leave the mechanism --
+one name pattern per document, written after that document already exists --
+exactly as able to miss the next one. The presence half is therefore an
+allowlist: the eight durable root-level Markdown documents ship, and any other
+root-level Markdown document fails release staging until it is deleted or
+deliberately added to the set. Both branch-only families are still matched by
+name first, so the diagnostic names the kind of document it found instead of
+reporting only that something unexpected is present.
+
+*What each half can know.* The reference half cannot be an allowlist. Once a
+document is deleted its name is the only thing left to search for, so that scan
+stays pattern-based and now covers both families -- a durable file still naming
+either one is refused, because the reference would dangle the moment the
+document goes. A root-level file that is not Markdown is not governed at all,
+which keeps `commit_msg.txt` and the like out of the gate's business.
+
+*Phase, unchanged.* The gate is still called only from the real release-staging
+path, after the preflight capability probe exits, so `scripts/make-release.sh
+--preflight v0.9.10` remains usable on this branch with the document present --
+re-verified, not assumed. One consequence to expect: from this commit a full
+`--dry-run` from this branch fails at step 0 until the document is deleted.
+That is criterion 1 in operation, and it is the contract the final validation
+gate already states ("A release dry run passes after this branch-only document
+is deleted").
+
+*Test coverage.* The branch-document contract now proves both directions for
+both families and for the allowlist: the durable set is accepted alongside a
+root-level non-Markdown file, a root-level `v*-polish.md` and a root-level
+`pre-v*-fixes.md` are each refused with the offending name in the diagnostic, a
+root-level document in neither family is refused as outside the durable set, a
+durable file naming either family is refused, and the tree passes again once
+every violation is gone. The retained `docs/<ver>_post_release_polish.md` still
+passes, being neither root-level nor `-polish`. A failed document or reference
+scan remains a policy failure rather than an empty result set. One further case
+holds the LIVE repository to the same durable set, so the allowlist cannot drift
+until release day is the first thing to notice.
+
+*Verification.* `make test-release-preflight` (113 -> 118 checks);
+`scripts/make-release.sh --preflight v0.9.10` still passes on this branch;
+`make test-release-qualification test-release-history test-todo-index
+test-makefile-name-contract`; full `scripts/ci-local.sh`. No firmware source was
+touched.
 
 ## Final validation and release gate
 
@@ -1047,9 +1095,9 @@ Record each completed item with its commit ID and decisive validation command.
 | T1 | DONE | `fd9aa28` | `make test`; `make pic10f322-coverage-check-fw HOSTCC=gcc-10`; `test/test_release_preflight.sh` |
 | T2 | DONE | `130b22f` | `make test`; `test/test_workload_rebuild.sh`; mutated-tree `make test` reaching the PIC12F675 host oracle |
 | D1 | DONE | `ed5b654` | `make test-release-preflight` (85 -> 101 checks, 12 negative controls); `make test-release-qualification test-todo-index test-makefile-name-contract test-release-history` |
-| D2 | DONE | (pending) | `make test-workflow-syntax test-ci-local-routing test-release-preflight test-release-qualification test-release-history test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
-| D3 | DONE | (pending) | `make test-release-preflight` (101 -> 113 checks); `make test-release-qualification test-release-history` (88 -> 89); `make test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
-| G1 | OPEN | | |
+| D2 | DONE | `3a6c67d` | `make test-workflow-syntax test-ci-local-routing test-release-preflight test-release-qualification test-release-history test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
+| D3 | DONE | `cbc57be` | `make test-release-preflight` (101 -> 113 checks); `make test-release-qualification test-release-history` (88 -> 89); `make test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
+| G1 | IMPLEMENTED | (pending) | `make test-release-preflight` (113 -> 118 checks); `scripts/make-release.sh --preflight v0.9.10`; `make test-release-qualification test-release-history test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
 | Final validation | OPEN | | |
 
 ## Merge decision

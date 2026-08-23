@@ -700,64 +700,109 @@ rm -f "$staged_root"/*.hex
 assert_staged_rejected 'a staging that contains no images' 'contains no images'
 
 # H1: the actual release-staging path must refuse a tree that still CONTAINS or
-# still REFERENCES a branch-only working document (root-level v*-polish.md). This
-# gate is deliberately OUTSIDE release_validate_current_documentation -- the
-# versioned preflight above legitimately validates the live polish branch, where
-# the document still exists during branch work -- and runs only on the real
-# release-staging path (make-release.sh, after the preflight exit). Exercised
-# here as a unit against throwaway trees.
-polish_root="$work/branch-only-doc"
-assert_polish_gate_rejects() {
-	local description=$1
-	if release_reject_branch_only_documents "$polish_root" >"$output" 2>&1; then
+# still REFERENCES a branch-only working document -- a root-level v*-polish.md,
+# a root-level pre-v*-fixes.md, or any other root-level document outside the
+# durable set. This gate is deliberately OUTSIDE
+# release_validate_current_documentation -- the versioned preflight above
+# legitimately validates the live polish branch, where such a document still
+# exists during branch work -- and runs only on the real release-staging path
+# (make-release.sh, after the preflight exit). Exercised here as a unit against
+# throwaway trees.
+branch_doc_root="$work/branch-only-doc"
+assert_branch_doc_gate_rejects() {
+	local description=$1 expected=${2-}
+	if release_reject_branch_only_documents "$branch_doc_root" >"$output" 2>&1; then
 		fail "branch-only-document gate accepted $description"
 	fi
 	grep -Fq 'release documentation:' "$output" \
 		|| fail "$description was rejected without a diagnostic"
+	[ -z "$expected" ] || grep -Fq -- "$expected" "$output" \
+		|| fail "$description was rejected without naming the offender: $(cat "$output")"
 	checks=$((checks + 1))
 }
 
-rm -rf "$polish_root"; mkdir -p "$polish_root/docs"
+rm -rf "$branch_doc_root"; mkdir -p "$branch_doc_root/docs"
 # A clean tree passes.
-release_reject_branch_only_documents "$polish_root" \
+release_reject_branch_only_documents "$branch_doc_root" \
 	|| fail "branch-only-document gate rejected a clean release tree"
+checks=$((checks + 1))
+
+# Every durable root-level document ships, and a root-level file that is not
+# Markdown is not a document this gate governs at all.
+for durable_doc in AGENTS.md CHANGELOG.md CLAUDE.md FLASHING.md \
+	HARDWARE_VALIDATION_LOG.md MISRA_COMPLIANCE.md README.md TODO.md; do
+	: > "$branch_doc_root/$durable_doc"
+done
+: > "$branch_doc_root/commit_msg.txt"
+release_reject_branch_only_documents "$branch_doc_root" \
+	|| fail "branch-only-document gate rejected the durable root-level document set"
 checks=$((checks + 1))
 
 # The retained docs/<ver>_post_release_polish.md must NOT be mistaken for a
 # branch-only document: it is under docs/ (not root) and uses `_polish`, not
 # `-polish`.
-: > "$polish_root/docs/v0.9.6_post_release_polish.md"
-release_reject_branch_only_documents "$polish_root" \
+: > "$branch_doc_root/docs/v0.9.6_post_release_polish.md"
+release_reject_branch_only_documents "$branch_doc_root" \
 	|| fail "branch-only-document gate wrongly flagged the retained docs/ polish document"
 checks=$((checks + 1))
 
 # A root-level v*-polish.md present -> rejected.
-: > "$polish_root/v1.2.3-polish.md"
-assert_polish_gate_rejects 'a tree containing a root-level v*-polish.md'
-rm -f "$polish_root/v1.2.3-polish.md"
+: > "$branch_doc_root/v1.2.3-polish.md"
+assert_branch_doc_gate_rejects 'a tree containing a root-level v*-polish.md' \
+	'v1.2.3-polish.md'
+rm -f "$branch_doc_root/v1.2.3-polish.md"
+
+# ... and so is a pre-release fix list, whose name the polish pattern cannot
+# see. That miss is the defect this case pins: one name pattern per working
+# document is a blocklist, and the next document's name is never in it.
+: > "$branch_doc_root/pre-v1.2.3-fixes.md"
+assert_branch_doc_gate_rejects 'a tree containing a root-level pre-v*-fixes.md' \
+	'pre-v1.2.3-fixes.md'
+rm -f "$branch_doc_root/pre-v1.2.3-fixes.md"
+
+# ... and so is a working document neither family anticipates, which is why the
+# root document set is an allowlist rather than a pattern chase.
+: > "$branch_doc_root/merge-notes.md"
+assert_branch_doc_gate_rejects 'a tree containing a root-level document outside the durable set' \
+	'outside the durable root-document set'
+rm -f "$branch_doc_root/merge-notes.md"
 
 # A durable file naming such a document -> rejected (the reference would dangle
-# once the document is deleted).
-printf 'See `v1.2.3-polish.md` item F1 for context.\n' > "$polish_root/docs/notes.md"
-assert_polish_gate_rejects 'a durable reference to a branch-only v*-polish.md'
-rm -f "$polish_root/docs/notes.md"
+# once the document is deleted), for both branch-only families.
+printf 'See `v1.2.3-polish.md` item F1 for context.\n' > "$branch_doc_root/docs/notes.md"
+assert_branch_doc_gate_rejects 'a durable reference to a branch-only v*-polish.md' \
+	'docs/notes.md'
+printf 'See `pre-v1.2.3-fixes.md` item G1 for context.\n' > "$branch_doc_root/docs/notes.md"
+assert_branch_doc_gate_rejects 'a durable reference to a branch-only pre-v*-fixes.md' \
+	'docs/notes.md'
+rm -f "$branch_doc_root/docs/notes.md"
 
-# ... and the tree passes again once both violations are gone.
-release_reject_branch_only_documents "$polish_root" \
+# ... and the tree passes again once every violation is gone.
+release_reject_branch_only_documents "$branch_doc_root" \
 	|| fail "branch-only-document gate rejected a tree after the violations were removed"
 checks=$((checks + 1))
 
+# Against the LIVE repository the gate may fail only for the branch-only working
+# document a polish branch legitimately carries -- never because a root-level
+# document this project actually ships is missing from the durable set. That
+# pins the allowlist to the real tree instead of letting it drift until the
+# release-staging path is the first thing to notice.
+release_reject_branch_only_documents "$ROOT" >"$output" 2>&1 || true
+! grep -Fq 'outside the durable root-document set' "$output" \
+	|| fail "the durable root-document set has drifted from the live tree: $(cat "$output")"
+checks=$((checks + 1))
+
 # Discovery failures are policy failures, not an empty result set.
-if gate_diagnostic=$(find() { return 73; }; release_reject_branch_only_documents "$polish_root" 2>&1); then
+if gate_diagnostic=$(find() { return 73; }; release_reject_branch_only_documents "$branch_doc_root" 2>&1); then
 	fail "branch-only-document gate accepted a failed document scan"
 fi
-[[ "$gate_diagnostic" == *"could not scan for branch-only polish documents"* ]] \
+[[ "$gate_diagnostic" == *"could not scan for branch-only working documents"* ]] \
 	|| fail "failed branch-document scan produced the wrong diagnostic: $gate_diagnostic"
 checks=$((checks + 1))
-if gate_diagnostic=$(grep() { return 74; }; release_reject_branch_only_documents "$polish_root" 2>&1); then
+if gate_diagnostic=$(grep() { return 74; }; release_reject_branch_only_documents "$branch_doc_root" 2>&1); then
 	fail "branch-only-document gate accepted a failed reference scan"
 fi
-[[ "$gate_diagnostic" == *"could not scan for branch-only polish-document references"* ]] \
+[[ "$gate_diagnostic" == *"could not scan for branch-only working-document references"* ]] \
 	|| fail "failed branch-reference scan produced the wrong diagnostic: $gate_diagnostic"
 checks=$((checks + 1))
 

@@ -971,7 +971,8 @@ if [ "$PREFLIGHT" -eq 1 ]; then
 fi
 
 # A real release is cut from main, where any branch-only working document
-# (root-level v*-polish.md) must already be deleted and de-referenced. Enforce
+# (root-level v*-polish.md or pre-v*-fixes.md, and any other root-level document
+# outside the durable set) must already be deleted and de-referenced. Enforce
 # that here -- after the preflight capability probe, which legitimately runs
 # against a live polish branch, and before any build -- so a release started
 # from an un-merged polish branch fails fast instead of trusting the manual
@@ -982,7 +983,7 @@ if [ "$RELEASE_MODE" = production ]; then
 		|| die "refusing production release outside the main branch (see the diagnostic above)."
 fi
 release_reject_branch_only_documents "$REPO_ROOT" \
-	|| die "refusing to release: a branch-only polish document is still present or referenced (see the diagnostic above)."
+	|| die "refusing to release: a branch-only working document is still present or referenced (see the diagnostic above)."
 
 # ============================================================================
 # 1. CLEAN BUILD -- every image
