@@ -1474,11 +1474,18 @@ Phases 7 and 8.*
   absorbing a whole additional MCU target is a minor-version-shaped change. That
   reasoning imported a semver instinct the project does not actually follow: the
   criterion for leaving `0.9.x` is **validation on real hardware**, not feature
-  size, and none of these designs has run on a part yet. A `0.10.0` would have
-  signalled a maturity step the evidence does not support, which is the same
-  species of overclaim §8 and §14.1 exist to prevent — so `0.9.6`, with `1.x.y`
-  once bench validation lands. `CHANGELOG.md`'s header now states that criterion
-  explicitly so the next release does not have to re-derive it.
+  size, and none of these designs has been qualified on a part yet. (The
+  original sentence made the weaker claim that none had ever executed on a chip;
+  corrected 2026-08-23, because builders had already flashed released images and
+  reported them working before this was written. The criterion was and remains
+  *controlled qualification* — a bench run whose procedure, configuration bytes
+  and measurements are retained — which is what none of these designs has.
+  `HARDWARE_VALIDATION_LOG.md` now keeps the two kinds of evidence apart.) A
+  `0.10.0` would have signalled a maturity step the evidence does not support,
+  which is the same species of overclaim §8 and §14.1 exist to prevent — so
+  `0.9.6`, with `1.x.y` once bench validation lands. `CHANGELOG.md`'s header
+  now states that criterion explicitly so the next release does not have to
+  re-derive it.
 
   The constraint the `v0.10.0` recommendation existed to satisfy is untouched
   and still met: `v0.9.6` is greater than both historical lines, reuses neither,

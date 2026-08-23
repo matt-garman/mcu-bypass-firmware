@@ -23,17 +23,18 @@ also requires the self-contained architecture documented in
 A third PIC, the PIC12F675, is **release-supported from `v0.9.9`** on the same
 toolchain: release images, a place in the default `all` goal, and the full
 release pipeline, plus a guarded bench programming target (`make
-pic12f675-program`). Like every part here it has **not** run on silicon — its
-release rests on simulation, formal proof and static analysis, with real-hardware
-validation deferred to the `1.x.y` pass (TODO `T3-pic12f675-bench`). It is a
-*classic* mid-range core rather than the 32x's enhanced mid-range, which is why
-it needs
-its own shell — no `LATx` output latch, no `OSCCON`, no `TMR2`/`PR2` period
-register, and one shared prescaler that must be given to either the timer or
-the watchdog but not both. The design consequences of each are recorded in
-`docs/pic12f675_feasibility.md`; the two that reach this document are the SRAM
-output shadow (below) and the 1.024 ms tick that follows from the prescaler
-decision.
+pic12f675-program`). Like every part here it has **not** completed controlled
+hardware qualification — its release rests on simulation, formal proof and
+static analysis, with that qualification deferred to the `1.x.y` pass (TODO
+`T3-pic12f675-bench`). No field-use report exists for this part either; for the
+parts that have one, see `HARDWARE_VALIDATION_LOG.md`, which keeps the two kinds
+of evidence apart. It is a *classic* mid-range core rather than the 32x's
+enhanced mid-range, which is why it needs its own shell — no `LATx` output
+latch, no `OSCCON`, no `TMR2`/`PR2` period register, and one shared prescaler
+that must be given to either the timer or the watchdog but not both. The design
+consequences of each are recorded in `docs/pic12f675_feasibility.md`; the two
+that reach this document are the SRAM output shadow (below) and the 1.024 ms
+tick that follows from the prescaler decision.
 
 
 == Why ATtiny202 (AVR-XT):

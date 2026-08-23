@@ -88,12 +88,25 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
     firmware errors)
   - Simulated fault-injection tests to verify WDT functioning
 
+Every item above runs on a host or in a simulator. **No part has completed
+controlled hardware qualification** — a bench run against a written procedure
+whose source/image identity, configuration bytes, instrument readings and
+acceptance result are retained. That is what the `1.x.y` line adds, and it is
+the criterion for leaving `0.9.x`. Released images *have* been flashed onto real
+parts and reported working by builders;
+[HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md) records those field-use
+reports, keeps them separate from qualification records, and states what a
+qualification record must retain.
+
 
 # Quickstart
 
 Flashing a downloaded release image needs no toolchain at all: see
 [FLASHING.md](FLASHING.md) for the per-part `avrdude` and `ipecmd` command
-templates. The rest of this section is about building from source.
+templates, and [HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md) for
+which combinations builders have reported working and why a shared pinout does
+not make two parts interchangeable to flash. The rest of this section is about
+building from source.
 
 Requires avrtools, assumes a USBtiny programmer, and a fresh
 ATtiny13a chip (see `make help` for how to build/program other

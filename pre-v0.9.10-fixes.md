@@ -638,13 +638,105 @@ opened or independently assessed.
 
 **Acceptance criteria**
 
-- [ ] Every hardware claim is classified as field report or controlled
+- [x] Every hardware claim is classified as field report or controlled
   qualification.
-- [ ] No project document contradicts the hardware log.
-- [ ] Controlled records require reproducible source/image and procedure data.
-- [ ] Pin-compatible parts are not described as firmware/programming-
+- [x] No project document contradicts the hardware log.
+- [x] Controlled records require reproducible source/image and procedure data.
+- [x] Pin-compatible parts are not described as firmware/programming-
   interchangeable without qualification.
-- [ ] Documentation and source-contract tests pass.
+- [x] Documentation and source-contract tests pass.
+
+**Implementation note (2026-08-23).** Resolved. The log now carries two bounded
+sections; the `1.x.y` criterion is restated project-wide as *controlled hardware
+qualification*; the interchangeability notes are replaced by the actual
+constraint; and `release_validate_hardware_claims` enforces all of it from
+`--preflight`, which runs on the live tree inside `make test`.
+
+*What the contradiction actually was.* Both sides of it were wrong, which is why
+neither could simply be deleted. `HARDWARE_VALIDATION_LOG.md:4-5` said the table
+recorded "which firmware has been flashed-to and tested on actual hardware" over
+three rows of forum links, which claims qualification the project never
+performed. `CHANGELOG.md`, `DESIGN_DOCUMENTATION.adoc`, `TODO.md`, the
+`Makefile`, `docs/pic12f675_feasibility.md` and `docs/pic10f320_merge_plan.md`
+said no part had ever run on a chip, which is false: builders really have
+flashed released ATtiny13a and PIC10F320 images and reported them working. A
+reader could take
+whichever suited them, and the repository would support either. The fix is not
+to pick a side but to stop using a vocabulary in which one sentence has to cover
+both — hence *field-use report* and *controlled hardware qualification* as
+separate, separately-evidenced terms.
+
+*Criterion 3, made structural.* Section 2 defines eleven fields (Date, Operator,
+Source commit, Image, Part, Board, Programmer, Configuration, Procedure,
+Observations, Result) and the validator requires each one to be defined there
+and present in every record. So the first record anyone writes cannot be a build
+report with a heading on it: an entry carrying a date and a verdict is rejected
+field by field, naming each thing it does not retain. That is the substitution
+this split exists to prevent, and it is the one that would otherwise happen
+years from now, quietly, by someone acting in good faith.
+
+*Ordering, stated rather than papered over.* The **Procedure** field references a
+document that does not exist — `T3-hw-procedure`. So no record can currently be
+complete, and both the log and that TODO item now say so. The alternative was to
+weaken the field list until a record could be written today, which is the
+failure mode in miniature.
+
+*The vocabulary check, and why it is a sound proxy.* The validator forbids the
+`run on silicon / run on a part` idiom in every durable `.md`, `.adoc` and the
+`Makefile`, in **either polarity**. That is not prudishness about phrasing: the
+idiom is precisely the claim that cannot be true and false at once here. Its
+negation is falsified by the field reports; its affirmation asserts the
+qualification nobody performed. Any accurate sentence in this area has to name
+which kind of evidence it means, so the idiom's absence is a mechanical proxy for
+the distinction being drawn. Shipped `release/vX.Y.Z/` artifacts and root-level
+branch-only working documents are pruned — both legitimately quote the retired
+wording, this file among them.
+
+*Interchangeability.* `HARDWARE_VALIDATION_LOG.md:37-38` asserted that the AVR
+classic trio and the PIC10F32x pair "can be used interchangeably", unqualified.
+Pin compatibility is a **board** property. The AVR trio needs a different image
+*and different fuse bytes* per part — ATtiny13a at 1.2 MHz (`0x4a`/`0xf9`), the
+tinyx5 pair at 1.0 MHz (`0x62`/`0xcc`) — so a chip swap without both gives wrong
+debounce and wrong pulse widths on a device that still appears to work, which is
+the same failure signature as PIC12F675 trim loss. The PIC pair needs each
+part's own image with its own CONFIG word and a matching programmer part name;
+they are not even the same firmware, since the PIC10F320's 256 words force the
+self-contained build. The exact retired sentence is pinned by the validator,
+because that is what a revert restores.
+
+*One historical document was corrected rather than rewritten.*
+`docs/pic10f320_merge_plan.md`'s dated 2026-07-27 renumbering rationale asserted
+that none of these designs had run on a part. It was already inaccurate when
+written — the ATtiny13a pre-v0.9.0 build report predates it. The decision and
+its reasoning are preserved; a bracketed correction records what the criterion
+actually was and points at the log. Rewriting a dated maintainer rationale to
+match today's vocabulary would have destroyed the record it exists to be.
+
+*Naming a retired phrase is not using it.* The first full run caught this, and
+it caught it in my own prose: the vocabulary scan failed on `CHANGELOG.md` and
+`test/README.md`, both of which quote the retired idiom in the course of
+describing its retirement. That is not a false positive to be waived — it is a
+real distinction the contract had not drawn. Code spans and double-quoted spans
+are now blanked before matching, so only surviving prose counts. A bare
+assertion sharing a line with an unrelated quotation is still caught, and both
+directions are pinned by cases.
+
+*Verification.* `test-release-preflight` 85 -> 101 checks. Twelve of the sixteen
+new checks are negative controls run against a fixture copy of the shipped log,
+each confirmed to fail with its own diagnostic: a part row outside both sections;
+a duplicated marker; a dropped field definition; a record standing under the
+no-record declaration; a field report wearing a qualification heading (rejected
+for all eight fields it omits); a section 2 that neither declares nor records; a
+removed pin-compatibility qualification; the retired idiom in another document;
+the retired interchangeability sentence; a bare assertion beside a quotation; a
+missing log; and a missing argument (rc 2, not a vacuous pass). Two controls run
+the other way: shipped `release/v0.9.9/MANIFEST.md` and root-level
+`pre-v*-fixes.md` / `v*-polish.md` fixtures carrying the retired wording must
+still be accepted, or this contract could not have been introduced at all, and
+so must a document that quotes both retired forms to retire them. The last check
+runs the validator against the live checked-in tree, which is what pins
+`README.md`, `CHANGELOG.md`, `DESIGN_DOCUMENTATION.adoc`, `TODO.md`, the
+`Makefile` and everything under `docs/`.
 
 ### D2 - Reconcile remaining evidence and simulator wording
 
@@ -800,8 +892,8 @@ Record each completed item with its commit ID and decisive validation command.
 | R3 | DONE | `9a7c479` | `make test-pic-build test-release-preflight test-release-qualification`; `scripts/make-release.sh --preflight v0.9.10` |
 | F1 | DONE | `a8fe23d`, `b14cd7a` | `make test`; relay fault + coverage lanes on all six substrates; PIC/AVR flash-budget gates |
 | T1 | DONE | `fd9aa28` | `make test`; `make pic10f322-coverage-check-fw HOSTCC=gcc-10`; `test/test_release_preflight.sh` |
-| T2 | DONE | (pending) | `make test`; `test/test_workload_rebuild.sh`; mutated-tree `make test` reaching the PIC12F675 host oracle |
-| D1 | OPEN | | |
+| T2 | DONE | `130b22f` | `make test`; `test/test_workload_rebuild.sh`; mutated-tree `make test` reaching the PIC12F675 host oracle |
+| D1 | DONE | (pending) | `make test-release-preflight` (85 -> 101 checks, 12 negative controls); `make test-release-qualification test-todo-index test-makefile-name-contract test-release-history` |
 | D2 | OPEN | | |
 | D3 | OPEN | | |
 | G1 | OPEN | | |

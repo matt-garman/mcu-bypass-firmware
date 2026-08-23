@@ -245,6 +245,7 @@ source "$REPO_ROOT/scripts/release-documentation.sh" \
 	|| die "release documentation helper could not be loaded"
 for renderer in release_validate_current_documentation \
 		release_reject_branch_only_documents \
+		release_validate_hardware_claims \
 		release_validate_pic12f675_finalization \
 		release_validate_pic12f675_finalization_document \
 		release_render_scope release_render_validation \
@@ -509,6 +510,13 @@ if [ "$VERSION_WAS_SUPPLIED" -eq 1 ]; then
 	# builder has already lost a PENDING signed-release transaction.
 	release_validate_pic12f675_finalization "$REPO_ROOT" "$VERSION" \
 		|| die "published PIC12F675 finalization commands do not match the transaction they recover"
+	# Field use and controlled qualification are different claims, and this
+	# repository holds only the first. Checked here, on the live tree, so a
+	# document that promotes a forum build report into bench evidence -- or that
+	# denies the field use outright -- fails during branch work rather than in a
+	# release that then reads as qualified hardware.
+	release_validate_hardware_claims "$REPO_ROOT" \
+		|| die "hardware evidence is not correctly classified as field use or controlled qualification"
 fi
 
 # Scratch area for evidence + per-combo soak run dirs. Preserved on failure so a

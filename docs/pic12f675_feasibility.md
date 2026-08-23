@@ -22,10 +22,13 @@ simple/mute/relay variants. Persistent firmware state is 6 bytes (`ctx_`,
 Space reservation was not retained and is therefore not inferred from older
 builds.
 
-Like every current part, it has not run on silicon. Section 8 items 1, 2, 8, and
-9 remain explicitly deferred to the `1.x.y` hardware-validation pass. The
-guarded preflight/program/readback workflow detects and records OSCCAL/BG changes
-and provides no real-programmer factory-trim preservation guarantee.
+Like every current part, it has no controlled hardware-qualification record;
+unlike some, it has no field-use report either (see
+`HARDWARE_VALIDATION_LOG.md`, which keeps the two kinds of evidence apart).
+Section 8 items 1, 2, 8, and 9 remain explicitly deferred to the `1.x.y`
+hardware-validation pass. The guarded preflight/program/readback workflow
+detects and records OSCCAL/BG changes and provides no real-programmer
+factory-trim preservation guarantee.
 <!-- current-status:end -->
 
 The 2026-08-05 assessment, design rationale, spike provenance and proposed
@@ -1109,15 +1112,18 @@ these numbers elsewhere in the repository stay valid.
 
 **Status 2026-08-13 (v0.9.9 disposition).** The project's version convention is
 that `0.9.x` means "maximally validated in software" and `1.x.y` begins once a
-design is validated on real hardware — uniformly, for every part, since none has
-run on silicon. Under that convention the PIC12F675 is **release-supported from
-`v0.9.9`** on its software validation alone, exactly like the other six parts,
-and the staging apparatus that had withheld it (`RELEASE_STAGED_IMAGES`) is
-retired. Items 1, 2, 8 and 9 do not disappear; they are reclassified as the same
-residual hardware risk every other part carries un-enumerated, tracked for the
-`1.x.y` pass as `TODO.md` `T3-pic12f675-bench`. The one non-negotiable that the
-software release still owes: `release/README.md`'s flashing procedure MUST carry
-the OSCCAL/BG-preservation requirement (items 1 and 2), because losing those
+design completes controlled hardware qualification — uniformly, for every part,
+since none has such a record. Field-use reports exist for some other parts and
+are not that; `HARDWARE_VALIDATION_LOG.md` states the difference and what a
+controlled record must retain. Under that convention the PIC12F675 is
+**release-supported from `v0.9.9`** on its software validation alone, exactly
+like the other six parts, and the staging apparatus that had withheld it
+(`RELEASE_STAGED_IMAGES`) is retired. Items 1, 2, 8 and 9 do not disappear; they
+are reclassified as the same residual hardware risk every other part carries
+un-enumerated, tracked for the `1.x.y` pass as `TODO.md` `T3-pic12f675-bench`.
+The one non-negotiable that the software release still owes:
+`release/README.md`'s flashing procedure MUST carry the OSCCAL/BG-preservation
+requirement (items 1 and 2), because losing those
 words yields a device that runs wrong while appearing to work — a hazard the
 other parts do not have.
 

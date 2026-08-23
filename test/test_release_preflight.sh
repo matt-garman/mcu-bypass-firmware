@@ -37,6 +37,8 @@ if ! declare -F release_hash_classic_avr_images >/dev/null \
 fi
 declare -F release_validate_current_documentation >/dev/null \
 	|| { printf 'FAIL: release documentation validator is missing\n' >&2; exit 1; }
+declare -F release_validate_hardware_claims >/dev/null \
+	|| { printf 'FAIL: hardware evidence classifier is missing\n' >&2; exit 1; }
 declare -F release_require_main_branch >/dev/null \
 	|| { printf 'FAIL: release main-branch validator is missing\n' >&2; exit 1; }
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-preflight.XXXXXX")
@@ -992,6 +994,190 @@ checks=$((checks + 1))
 # actually pins README.md and release/README.md.
 release_validate_pic12f675_finalization "$ROOT" v0.9.10 >"$output" 2>&1 \
 	|| fail "the checked-in tree fails the PIC12F675 finalization contract: $(<"$output")"
+checks=$((checks + 1))
+
+# --- hardware-evidence classification ----------------------------------------
+# Field use and controlled qualification are different claims, and conflating
+# them is what HARDWARE_VALIDATION_LOG.md said before v0.9.10: a table of forum
+# build reports under the heading "which firmware has been flashed-to and tested
+# on actual hardware", while four other documents said no part had ever run on a
+# chip. The validator pins the split; these cases pin the validator, because a
+# checker for a documentation contract is exactly the kind of code that can pass
+# vacuously and never be noticed.
+#
+# The fixture root holds a COPY of the real log, so each case starts from the
+# shipped document and spoils one property of it. The scan walks the whole
+# fixture root, so a second file can be added to a case to test the
+# cross-document half without touching the live tree.
+hardware_root="$work/hardware-claims"
+declare -F release_validate_hardware_claims >/dev/null \
+	|| fail "hardware evidence classifier is missing"
+
+write_hardware_fixture() {
+	rm -rf "$hardware_root"
+	mkdir -p "$hardware_root/docs"
+	cp "$ROOT/HARDWARE_VALIDATION_LOG.md" "$hardware_root/HARDWARE_VALIDATION_LOG.md"
+}
+
+assert_hardware_accepts() {
+	local description=$1
+	release_validate_hardware_claims "$hardware_root" >"$output" 2>&1 \
+		|| fail "hardware evidence contract rejected $description: $(<"$output")"
+	checks=$((checks + 1))
+}
+
+assert_hardware_rejects() {
+	local description=$1 expected=$2
+	if release_validate_hardware_claims "$hardware_root" >"$output" 2>&1; then
+		fail "hardware evidence contract accepted $description"
+	fi
+	grep -Fq 'release documentation:' "$output" \
+		|| fail "$description was rejected without a documentation diagnostic"
+	grep -Fq "$expected" "$output" \
+		|| fail "$description was rejected for the wrong reason: $(<"$output")"
+	checks=$((checks + 1))
+}
+
+write_hardware_fixture
+assert_hardware_accepts 'the shipped hardware validation log'
+
+# 1. STRUCTURE. A part row written outside both bounded sections is a hardware
+# claim with no classification at all, which is the pre-v0.9.10 defect in its
+# purest form -- a table that says a combination works and never says on what
+# evidence.
+write_hardware_fixture
+printf '| ATtiny85 | CD4053 Simple | v0.9.10 | qualified on the bench |\n' \
+	>> "$hardware_root/HARDWARE_VALIDATION_LOG.md"
+assert_hardware_rejects 'a part row outside both sections' \
+	'a part row sits outside both sections and is therefore unclassified'
+
+write_hardware_fixture
+"$REAL_AWK" '{ print } $0 == "<!-- field-reports:end -->" && !done {
+		print ""; print "<!-- field-reports:start -->"
+		print "<!-- field-reports:end -->"; done=1 }' \
+	"$ROOT/HARDWARE_VALIDATION_LOG.md" > "$hardware_root/HARDWARE_VALIDATION_LOG.md"
+assert_hardware_rejects 'a duplicated section marker' \
+	'field-reports:start is duplicated or nested'
+
+# 2. RECORD CONTRACT. The field list IS the definition of the term; dropping one
+# field silently widens what may be called a controlled record.
+write_hardware_fixture
+"$REAL_AWK" '!/^- \*\*Operator\*\*/' "$ROOT/HARDWARE_VALIDATION_LOG.md" \
+	> "$hardware_root/HARDWARE_VALIDATION_LOG.md"
+assert_hardware_rejects 'a dropped record-field definition' \
+	'does not define the required record field: Operator'
+
+# The declaration and a record cannot both stand: one of them is false.
+write_hardware_fixture
+"$REAL_AWK" '$0 == "<!-- controlled-qualification:end -->" {
+		print "### ATtiny13a / CD4053 Muting / 2026-09-01"; print ""
+		print "Worked great on my board."; print "" } { print }' \
+	"$ROOT/HARDWARE_VALIDATION_LOG.md" > "$hardware_root/HARDWARE_VALIDATION_LOG.md"
+assert_hardware_rejects 'a record standing under the no-record declaration' \
+	'declares that no record exists while carrying one'
+
+# The case this contract exists for: the first record anyone writes. A build
+# report promoted to a qualification heading carries a date and a verdict and
+# none of the identity or measurement data, and must be named field by field.
+write_hardware_fixture
+"$REAL_AWK" '
+	/^\*\*No controlled hardware-qualification record exists for any part\.\*\*$/ {
+		print "Records follow."; next }
+	$0 == "<!-- controlled-qualification:end -->" {
+		print "### ATtiny13a / CD4053 Muting / 2026-09-01"; print ""
+		print "- **Date** - 2026-09-01"; print "- **Operator** - a builder"
+		print "- **Result** - PASS"; print "" } { print }' \
+	"$ROOT/HARDWARE_VALIDATION_LOG.md" > "$hardware_root/HARDWARE_VALIDATION_LOG.md"
+assert_hardware_rejects 'a field report wearing a qualification heading' \
+	'record "ATtiny13a / CD4053 Muting / 2026-09-01" omits the required field: Image'
+release_validate_hardware_claims "$hardware_root" >"$output" 2>&1 || true
+for field in 'Source commit' Part Board Programmer Configuration Procedure \
+		Observations; do
+	grep -Fq "omits the required field: $field" "$output" \
+		|| fail "an incomplete record was not diagnosed for its missing $field field"
+done
+checks=$((checks + 1))
+
+# Removing the declaration without adding a record leaves section 2 saying
+# nothing, which reads as "not applicable" rather than "not done".
+write_hardware_fixture
+"$REAL_AWK" '
+	/^\*\*No controlled hardware-qualification record exists for any part\.\*\*$/ { next }
+	{ print }' \
+	"$ROOT/HARDWARE_VALIDATION_LOG.md" > "$hardware_root/HARDWARE_VALIDATION_LOG.md"
+assert_hardware_rejects 'a section 2 that neither declares nor records' \
+	'neither declares that no record exists nor carries one'
+
+# Pin compatibility is a board property. The retired note asserted it as
+# firmware and programming interchangeability, which is false for both families.
+write_hardware_fixture
+"$REAL_AWK" '{ sub(/^### On pin compatibility$/, "### Notes"); print }' \
+	"$ROOT/HARDWARE_VALIDATION_LOG.md" > "$hardware_root/HARDWARE_VALIDATION_LOG.md"
+assert_hardware_rejects 'a removed pin-compatibility qualification' \
+	'has no nonempty "On pin compatibility" section'
+
+# 3. VOCABULARY, across every durable document rather than only this one. The
+# idiom is the thing that cannot be true and false at once, so its reappearance
+# anywhere means the two claims have been folded back together.
+write_hardware_fixture
+printf '# Notes\n\nLike every part here it has not run on silicon.\n' \
+	> "$hardware_root/docs/drifted.md"
+assert_hardware_rejects 'the conflated idiom in another document' \
+	'still use the conflated "run on silicon" idiom'
+
+write_hardware_fixture
+printf 'The PIC10F32x parts have the same pinout and can be used interchangeably\n' \
+	> "$hardware_root/docs/drifted.adoc"
+assert_hardware_rejects 'the retired interchangeability sentence' \
+	'restate the retired unqualified interchangeability sentence'
+
+# NAMING the retired wording is not USING it, and the distinction has to hold or
+# the contract cannot be described anywhere -- CHANGELOG.md, test/README.md and
+# the validator's own comments all quote both retired forms in order to retire
+# them. Code spans and quoted spans are blanked before matching; a bare
+# assertion sharing a line with an unrelated quotation is still caught.
+write_hardware_fixture
+{
+	printf 'The retired "run on silicon" idiom is gone, and so is the `run on a part`\n'
+	printf 'form. The old note said they "have the same pinout and can be used\n'
+	printf 'interchangeably", which was never true of the images or the fuses.\n'
+} > "$hardware_root/docs/history.md"
+assert_hardware_accepts 'quoted mentions of both retired forms'
+
+write_hardware_fixture
+printf 'We used to say "something else"; it has not run on silicon.\n' \
+	> "$hardware_root/docs/drifted.md"
+assert_hardware_rejects 'a bare assertion sharing a line with a quotation' \
+	'still use the conflated'
+
+# Shipped release directories are immutable artifacts of past releases and
+# branch-only working documents quote retired wording in order to retire it.
+# Both must be pruned, or this contract cannot be introduced at all.
+write_hardware_fixture
+mkdir -p "$hardware_root/release/v0.9.9"
+printf 'None of these designs has run on silicon.\n' \
+	> "$hardware_root/release/v0.9.9/MANIFEST.md"
+printf 'The old wording said it had never run on a device.\n' \
+	> "$hardware_root/pre-v9.9.9-fixes.md"
+printf 'The old wording said it had never run on a device.\n' \
+	> "$hardware_root/v9.9.9-polish.md"
+assert_hardware_accepts 'shipped release artifacts and branch-only working documents'
+
+# Argument and input guards: a caller mistake must not pass vacuously.
+write_hardware_fixture
+hardware_rc=0
+release_validate_hardware_claims >"$output" 2>&1 || hardware_rc=$?
+[ "$hardware_rc" -eq 2 ] \
+	|| fail "hardware evidence contract accepted a missing repository argument"
+rm -f "$hardware_root/HARDWARE_VALIDATION_LOG.md"
+assert_hardware_rejects 'a missing hardware validation log' \
+	'HARDWARE_VALIDATION_LOG.md is not a regular nonempty file'
+
+# The live checked-in tree must satisfy the contract. This is the check that
+# actually pins README.md, CHANGELOG.md, DESIGN_DOCUMENTATION.adoc, TODO.md, the
+# Makefile and every document under docs/.
+release_validate_hardware_claims "$ROOT" >"$output" 2>&1 \
+	|| fail "the checked-in tree fails the hardware evidence contract: $(<"$output")"
 checks=$((checks + 1))
 
 # Run the real preflight against a shadow documentation root. A stale bounded

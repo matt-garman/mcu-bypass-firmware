@@ -6632,9 +6632,12 @@ pic12f675-test-target-variants: pic12f675-target-selector-valid variant-selector
 # the oscillator calibration word in flash -- are silicon-only risks. No
 # simulator lane can reach them; they close at a bench, with this command, or not
 # at all. The part is release-supported in software at 0.9.x like every other
-# target -- none of which has run on silicon either -- and these residual risks
-# are the 1.x.y hardware pass, tracked as TODO.md T3-pic12f675-bench. So the
-# target makes their bench measurement the transaction: a read-only baseline must
+# target -- none of which carries a controlled hardware-qualification record
+# either (HARDWARE_VALIDATION_LOG.md section 2; the field-use reports in its
+# section 1 are a different kind of evidence and close nothing here) -- and these
+# residual risks are the 1.x.y hardware pass, tracked as TODO.md
+# T3-pic12f675-bench. So the target makes their bench measurement the
+# transaction: a read-only baseline must
 # exist, the live device must still match it immediately before the write, and a
 # post-write readback/result is mandatory.
 #
@@ -7602,12 +7605,16 @@ RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(XT_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(
 #
 # WHAT "RELEASED" MEANS HERE, AND WHAT IT DOES NOT. Everything this repository
 # ships is validated in software -- simulation, formal proof and static analysis
-# -- and none of it has run on silicon. That is the whole 0.9.x line, uniformly:
-# see the versioning note at the top of CHANGELOG.md. Real-hardware validation is
-# what the 1.x.y line will add, for EVERY part, and until then each target
-# carries residual silicon-only risks that no lane here can see. The PIC12F675's
-# happen to be enumerated (docs/pic12f675_feasibility.md section 8, items 1, 2,
-# 8 and 9: whether a programmer preserves the factory oscillator trim in flash
+# -- and none of it has completed controlled hardware qualification. That is the
+# whole 0.9.x line, uniformly: see the versioning note at the top of CHANGELOG.md.
+# Builders have flashed released images and reported them working, and those
+# field-use reports are recorded in HARDWARE_VALIDATION_LOG.md section 1; they are
+# evidence that the firmware runs on real silicon, and they are NOT qualification,
+# because they retain no image identity, procedure or measurement. Controlled
+# qualification is what the 1.x.y line will add, for EVERY part, and until then
+# each target carries residual silicon-only risks that no lane here can see. The
+# PIC12F675's happen to be enumerated (docs/pic12f675_feasibility.md section 8,
+# items 1, 2, 8 and 9: whether a programmer preserves the factory oscillator trim in flash
 # word 0x3FF and the BG<1:0> bandgap bits in the CONFIG word, whether ipecmd runs
 # against the part, and GP2's Schmitt-Trigger readback margin). They are the same
 # CLASS as every other part's un-bench-validated behaviour, tracked for the 1.x.y

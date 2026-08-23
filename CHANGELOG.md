@@ -5,12 +5,17 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project stays on the `0.9.x` pre-1.0 series while the firmware and its
 validation suite settle. The criterion for leaving it is explicit: **`1.x.y`
-begins once these designs are validated on real hardware.** Everything shipped
-so far is validated by simulation, formal proof and static analysis — thorough,
-and not the same claim as "it has run on the part". Until that changes, new
-work lands as `0.9.x` however large it is; the merge of a whole additional MCU
-target in `0.9.6` rather than `0.10.0` is that rule applied, not an
-oversight.
+begins once these designs complete controlled hardware qualification.**
+Everything shipped so far is validated by simulation, formal proof and static
+analysis — thorough, and not the same claim as "this part passed a bench run
+whose procedure, configuration bytes and measurements are on file". Released
+images have been flashed and reported working by builders, and those field-use
+reports are recorded in
+[HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md); that file also states
+what a controlled record must retain, and that no part has one. Until that
+changes, new work lands as `0.9.x` however large it is; the merge of a whole
+additional MCU target in `0.9.6` rather than `0.10.0` is that rule applied, not
+an oversight.
 
 Per-release provenance (source commit, pinned toolchain, image hashes, flash
 usage, and validation evidence) lives in `release/<version>/MANIFEST.md`; this
@@ -281,6 +286,47 @@ file is the human-readable summary of *what changed*.
   `test-mutation`, neither aggregate may name a gate twice, and both coverage
   gates must appear exactly once. The comparison is made against Make's own
   prerequisite sets rather than the text of the two lists.
+
+- **Field-use reports and controlled hardware qualification are now separate
+  claims.** `HARDWARE_VALIDATION_LOG.md` described its table of community build
+  reports as "which firmware has been flashed-to and tested on actual hardware",
+  while this file, `DESIGN_DOCUMENTATION.adoc`, `TODO.md`, the Makefile and two
+  design documents simultaneously said no part had ever run on a chip. Both were
+  wrong, in opposite directions: builders really have flashed released images
+  onto ATtiny13a and PIC10F320 parts and reported them working, and none of
+  those reports retains the source/image identity, board revision,
+  programmer, configuration bytes, procedure, measurements or acceptance result
+  that a qualification record needs.
+
+  The log now carries two bounded sections. Section 1 keeps the field reports,
+  labelled as self-reported and uncorroborated -- the linked threads were not
+  opened or independently assessed here. Section 2 defines the eleven fields a
+  controlled record must retain and states that no part has one. The `1.x.y`
+  criterion is restated across the project as *controlled hardware
+  qualification* rather than "has run on silicon", which is the phrasing that
+  could not be true and false at once. `T3-hw-procedure` is now recorded as
+  gating section 2 for every part, since the **Procedure** field has nothing to
+  reference until it exists.
+
+  The unqualified "same pinout, can be used interchangeably" notes are replaced
+  by the actual constraint: a shared pinout is a *board* property. The AVR
+  classic trio needs a different image and different fuse bytes per part
+  (ATtiny13a at 1.2 MHz, ATtiny45/85 at 1.0 MHz) or the device runs on the wrong
+  clock and still appears to work; the PIC10F32x pair needs each part's own
+  image with its own CONFIG word and a matching programmer part name.
+
+  `release_validate_hardware_claims` enforces all of this from `--preflight`, so
+  it runs on the live tree inside `make test`: the sections must exist exactly
+  once in order with no part row outside them, section 2 must define every field
+  and then either declare that no record exists or hold records carrying all of
+  them, the pin-compatibility qualification must name both families and both
+  mechanisms, and no durable document may assert the retired idiom or the
+  retired interchangeability sentence. Naming a retired phrase is not using it,
+  so code spans and quoted spans are blanked before matching -- this paragraph
+  and `test/README.md` both have to quote both forms in order to retire them --
+  while a bare assertion sharing a line with a quotation is still caught. Shipped
+  `release/<version>/` artifacts and root-level branch-only working documents are
+  pruned outright. `test-release-preflight`: 85 -> 101 checks.
 
 ## [0.9.9] - 2026-08-15
 

@@ -8,8 +8,11 @@ Images: <https://github.com/matt-garman/mcu-bypass-firmware/releases>, named
 
 Variants: `cd4053_simple`, `cd4053_with_mute`, `tq2_l2_5v_relay`.
 
-What has actually been flashed on real hardware is recorded in
-[HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md).
+Which combinations have been flashed and reported working by builders is
+recorded in [HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md). Those are
+self-reported field-use reports, not controlled qualification: no part in this
+repository has completed a controlled hardware-qualification run, and the same
+file says what one would have to retain.
 
 
 ## AVR classic — ATtiny13a / ATtiny45 / ATtiny85

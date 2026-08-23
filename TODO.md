@@ -415,6 +415,11 @@ within the allowed window. Include power-on glitches and BOD behavior. This is
 the no-rig fallback for the HIL item because simavr cannot model ATtiny13A
 watchdog system reset directly.
 
+This is also the document that `HARDWARE_VALIDATION_LOG.md`'s **Procedure**
+field has to reference. Until it exists, no controlled qualification record can
+be complete for any part, so this item gates section 2 of that file rather than
+only the ATtiny13A.
+
 Dependencies: representative hardware and oscilloscope/logic analyzer. Effort:
 about 2-3 hours. Risk: High verification value; closes a primary-part silicon
 evidence gap.
@@ -423,11 +428,15 @@ evidence gap.
 
 The part is built, tested, formally verified, statically analyzed and
 **release-supported from `v0.9.9`** here, and — like every other part in this
-repository — has **never run on a device**. That is the `0.9.x` line: validated
-in software, not on silicon. This item is the PIC12F675's slice of the `1.x.y`
-hardware-validation pass, which closes four open risks that are invisible to
-every lane this repository has. They are stated in full as items 1, 2, 8 and 9 of
-`docs/pic12f675_feasibility.md` section 8:
+repository — has **no controlled hardware-qualification record**. That is the
+`0.9.x` line: validated in software, with no bench run whose procedure,
+configuration bytes and measurements are on file. (Some parts do have
+self-reported field-use reports; this one does not. `HARDWARE_VALIDATION_LOG.md`
+keeps the two apart and states what a controlled record must retain.) This item
+is the PIC12F675's slice of the `1.x.y` hardware-validation pass, which closes
+four open risks that are invisible to every lane this repository has. They are
+stated in full as items 1, 2, 8 and 9 of `docs/pic12f675_feasibility.md`
+section 8:
 
 - **1 - bandgap calibration bits (`BG<1:0>`) preserved on program.** They are
   factory-set per device and fix the BOR/POR trip voltages.

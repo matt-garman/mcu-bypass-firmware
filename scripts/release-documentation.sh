@@ -165,6 +165,225 @@ release_reject_branch_only_documents() {
 		|| _release_documentation_error "durable file(s) still reference a branch-only polish document (repoint to CHANGELOG.md / Git history): ${polish_doc_references[*]}" || return
 }
 
+# Blank every Markdown code span and every double-quoted span, so a phrase a
+# document merely NAMES cannot be mistaken for a phrase it asserts.
+_release_unquoted_prose() {
+	[ "$#" -eq 1 ] || return 2
+	sed -e 's/`[^`]*`/ /g' -e 's/"[^"]*"/ /g' -- "$1"
+}
+
+# Extract one bounded section of HARDWARE_VALIDATION_LOG.md by marker name.
+_release_hardware_block() {
+	[ "$#" -eq 2 ] || return 2
+	awk -v marker="$1" '
+		$0 == "<!-- " marker ":start -->" {
+			starts++
+			if (starts != 1 || inside) bad=1
+			inside=1
+			next
+		}
+		$0 == "<!-- " marker ":end -->" {
+			ends++
+			if (ends != 1 || !inside) bad=1
+			inside=0
+			next
+		}
+		inside { print }
+		END { exit !(starts == 1 && ends == 1 && !inside && !bad) }
+	' "$2"
+}
+
+# Keep the two kinds of hardware evidence this project holds from being read as
+# one kind.
+#
+# HARDWARE_VALIDATION_LOG.md carries both. Section 1 is self-reported community
+# field use: real parts, real circuits, and no retained image identity,
+# procedure or measurement. Section 2 is controlled project qualification, which
+# no part has yet. Before v0.9.10 the file presented the first AS the second --
+# "which firmware has been flashed-to and tested on actual hardware" over a table
+# of forum links -- while CHANGELOG.md, DESIGN_DOCUMENTATION.adoc, TODO.md, the
+# Makefile and two design documents simultaneously said no part had ever run on
+# a chip. Both statements were wrong, in opposite directions, and a reader could
+# take whichever suited them.
+#
+# Three properties, one per way the reconciliation can rot:
+#
+#   1. STRUCTURE. Both sections exist, exactly once, in order, and every table
+#      row naming a part sits inside one of them. A hardware claim written into
+#      loose prose is unclassified by construction, which is the original defect
+#      reappearing rather than a formatting lapse.
+#   2. RECORD CONTRACT. Section 2 defines every field a controlled record must
+#      retain, and then either declares that no record exists or holds records
+#      that each carry all of those fields. So the first record anyone writes
+#      cannot be a field report wearing a qualification heading -- the exact
+#      substitution this split exists to prevent -- and the declaration cannot
+#      sit above a record contradicting it.
+#   3. VOCABULARY. No durable document uses the "run on silicon / run on a part"
+#      idiom in either polarity, and none restates the retired unqualified
+#      interchangeability sentence. The idiom is what cannot be true and false at
+#      once: field use makes its negation false, and its affirmation claims the
+#      qualification nobody performed. Saying anything accurate here requires the
+#      words "field-use report" and "controlled hardware qualification", so the
+#      idiom's absence is a sound mechanical proxy for the distinction being
+#      drawn. The interchangeability sentence is pinned by its exact retired
+#      wording because that is what a revert restores.
+#
+# Scanned on the LIVE tree from --preflight, so a drifted claim fails during
+# branch work rather than inside a shipped release. Shipped release/vX.Y.Z/
+# directories are immutable artifacts of past releases and are pruned; so are the
+# root-level branch-only working documents, which quote retired wording in order
+# to describe retiring it.
+release_validate_hardware_claims() {
+	[ "$#" -eq 1 ] || return 2
+	local repo_root=$1
+	local log="$repo_root/HARDWARE_VALIDATION_LOG.md"
+	local block pin_block record heading structure document label field required
+	local find_pid rc=0 record_count
+	local sentinel='**No controlled hardware-qualification record exists for any part.**'
+	# The definition of "controlled hardware qualification" as this project uses
+	# the term. A run missing any one of these is a field-use report, however
+	# careful, because a later reader can neither reproduce it nor bound what it
+	# did not cover.
+	local -a required_fields=(Date Operator "Source commit" Image Part Board \
+		Programmer Configuration Procedure Observations Result)
+	local -a idiom_offenders=() interchange_offenders=()
+	# Either polarity of the conflated idiom, and the retired sentence verbatim.
+	local retired_idiom='run on (silicon|a part|a device|the part)'
+	local retired_interchange='pinout and can be used interchangeably'
+
+	[ -f "$log" ] && [ -s "$log" ] && [ ! -L "$log" ] \
+		|| _release_documentation_error "HARDWARE_VALIDATION_LOG.md is not a regular nonempty file" || return
+
+	structure=$(awk '
+		$0 == "<!-- field-reports:start -->" {
+			field_starts++
+			if (!bad && (field_starts != 1 || in_field || in_controlled)) bad="field-reports:start is duplicated or nested"
+			in_field=1
+			next
+		}
+		$0 == "<!-- field-reports:end -->" {
+			field_ends++
+			if (!bad && (field_ends != 1 || !in_field)) bad="field-reports:end is duplicated or unopened"
+			in_field=0
+			next
+		}
+		$0 == "<!-- controlled-qualification:start -->" {
+			controlled_starts++
+			if (!bad && (controlled_starts != 1 || field_ends != 1 || in_field || in_controlled)) bad="controlled-qualification:start is duplicated, nested, or precedes the field-report section"
+			in_controlled=1
+			next
+		}
+		$0 == "<!-- controlled-qualification:end -->" {
+			controlled_ends++
+			if (!bad && (controlled_ends != 1 || !in_controlled)) bad="controlled-qualification:end is duplicated or unopened"
+			in_controlled=0
+			next
+		}
+		/^\| *(ATtiny|PIC1[02]F)/ {
+			if (!in_field && !in_controlled && !bad) \
+				bad="a part row sits outside both sections and is therefore unclassified: " $0
+		}
+		END {
+			if (!bad && (field_starts != 1 || field_ends != 1 \
+					|| controlled_starts != 1 || controlled_ends != 1)) \
+				bad="both bounded sections must appear exactly once"
+			if (!bad && (in_field || in_controlled)) bad="a bounded section is unterminated"
+			if (bad) print bad
+		}
+	' "$log") || _release_documentation_error "HARDWARE_VALIDATION_LOG.md could not be scanned" || return
+	[ -z "$structure" ] \
+		|| _release_documentation_error "HARDWARE_VALIDATION_LOG.md classification is broken: $structure" || return
+
+	block=$(_release_hardware_block controlled-qualification "$log") \
+		|| _release_documentation_error "HARDWARE_VALIDATION_LOG.md has no bounded controlled-qualification section" || return
+	for field in "${required_fields[@]}"; do
+		grep -Fq -- "- **$field**" <<<"$block" \
+			|| _release_documentation_error "controlled-qualification section does not define the required record field: $field" || rc=1
+	done
+
+	if grep -Fxq -- "$sentinel" <<<"$block"; then
+		# The declaration and a record cannot both stand.
+		if grep -Eq '^### ' <<<"$block"; then
+			_release_documentation_error "controlled-qualification section declares that no record exists while carrying one" || rc=1
+		fi
+		if grep -Eq '^\| *(ATtiny|PIC1[02]F)' <<<"$block"; then
+			_release_documentation_error "controlled-qualification section declares that no record exists while tabulating a part" || rc=1
+		fi
+	else
+		record_count=$(grep -Ec '^### ' <<<"$block" || true)
+		if [ "$record_count" -eq 0 ]; then
+			_release_documentation_error "controlled-qualification section neither declares that no record exists nor carries one" || rc=1
+		fi
+		while IFS= read -r heading; do
+			[ -n "$heading" ] || continue
+			record=$(awk -v want="$heading" '
+				$0 == want { seen++; if (seen == 1) { keep=1; next } }
+				keep && /^### / { exit }
+				keep { print }
+			' <<<"$block")
+			for field in "${required_fields[@]}"; do
+				grep -Fq -- "**$field**" <<<"$record" \
+					|| _release_documentation_error "controlled-qualification record \"${heading#'### '}\" omits the required field: $field" || rc=1
+			done
+		done < <(grep -E '^### ' <<<"$block" || true)
+	fi
+
+	# Pin compatibility is a BOARD property. The retired note said the AVR classic
+	# parts and the PIC10F32x parts "can be used interchangeably", full stop,
+	# which reads as firmware and programming interchangeability and is false in
+	# both cases: each part needs its own image, and the AVR trio needs different
+	# fuse bytes for its different clock while the PIC pair carries CONFIG inside
+	# each part's own HEX. Require the qualification to name both families and
+	# both mechanisms.
+	pin_block=$(awk '
+		/^### On pin compatibility$/ { keep=1; next }
+		keep && /^#{1,3} / { exit }
+		keep { print }
+	' "$log") || _release_documentation_error "HARDWARE_VALIDATION_LOG.md could not be scanned for its pin-compatibility section" || return
+	[ -n "$pin_block" ] \
+		|| _release_documentation_error "HARDWARE_VALIDATION_LOG.md has no nonempty \"On pin compatibility\" section" || rc=1
+	for required in ATtiny13a PIC10F320 'own image' fuse CONFIG; do
+		grep -Fq -- "$required" <<<"$pin_block" \
+			|| _release_documentation_error "pin-compatibility section does not qualify interchangeability with: $required" || rc=1
+	done
+
+	while IFS= read -r -d '' document; do
+		label=${document#$repo_root/}
+		case "$label" in
+			v*-polish.md|pre-v*-fixes.md) continue ;;
+		esac
+		# NAMING the retired wording is not USING it. A document that writes
+		# `run on silicon` or "run on silicon" is quoting a phrase in order to
+		# retire it -- which CHANGELOG.md, test/README.md and this file all have
+		# to do -- while a document that writes it bare is making the claim. So
+		# code spans and quoted spans are blanked before matching, and only the
+		# surviving prose counts. The first grep is the fast path and the binary
+		# guard; the second decides.
+		if grep -EIqi -- "$retired_idiom" "$document" \
+				&& _release_unquoted_prose "$document" \
+					| grep -Eqi -- "$retired_idiom"; then
+			idiom_offenders+=("$label")
+		fi
+		if grep -FIqi -- "$retired_interchange" "$document" \
+				&& _release_unquoted_prose "$document" \
+					| grep -Fqi -- "$retired_interchange"; then
+			interchange_offenders+=("$label")
+		fi
+	done < <(find "$repo_root" \
+		\( -name .git -o -path "$repo_root/release/v[0-9]*" \) -prune -o \
+		-type f \( -name '*.md' -o -name '*.adoc' -o -name 'Makefile' \) -print0)
+	find_pid=$!
+	# A failed scan is a policy failure, not an empty result set.
+	wait "$find_pid" \
+		|| _release_documentation_error "could not scan durable documentation for retired hardware wording" || return
+	[ "${#idiom_offenders[@]}" -eq 0 ] \
+		|| _release_documentation_error "durable file(s) still use the conflated \"run on silicon\" idiom; say \"field-use report\" or \"controlled hardware qualification\" (HARDWARE_VALIDATION_LOG.md): ${idiom_offenders[*]}" || rc=1
+	[ "${#interchange_offenders[@]}" -eq 0 ] \
+		|| _release_documentation_error "durable file(s) restate the retired unqualified interchangeability sentence; pin compatibility is not image/fuse/CONFIG compatibility: ${interchange_offenders[*]}" || rc=1
+
+	return "$rc"
+}
+
 # Every PUBLISHED PIC12F675 finalization command must carry the complete identity
 # of the transaction it recovers.
 #
