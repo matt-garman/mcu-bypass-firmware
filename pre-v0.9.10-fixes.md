@@ -501,13 +501,105 @@ documented/default host compiler.
 
 **Acceptance criteria**
 
-- [ ] `make test` on a host without PIC target tools executes both shipping-
+- [x] `make test` on a host without PIC target tools executes both shipping-
   source coverage gates and reports their exact check/coverage results.
-- [ ] `make test-long` executes the same gates exactly once.
-- [ ] A mutation removing relay correction or context-check integration turns
+- [x] `make test-long` executes the same gates exactly once.
+- [x] A mutation removing relay correction or context-check integration turns
   the default aggregate red through the relevant host oracle.
-- [ ] Standalone PIC aggregates still execute and verify the gates.
-- [ ] Aggregate routing, workload, rebuild, and clean-contract tests pass.
+- [x] Standalone PIC aggregates still execute and verify the gates.
+- [x] Aggregate routing, workload, rebuild, and clean-contract tests pass.
+
+**Implementation note**
+
+Resolved as recommended: both gates were added to the one shared `TEST_GATES`
+inventory, closing `TEST_GATES_EARLY` immediately after the PIC10F320 host
+lanes. No firmware source was touched. `test` and `test-long` both pick them up
+from the same variable, which is the property the shared inventory exists to
+provide, so no second prerequisite line was written.
+
+*Why the tool contract permits it.* `test/pic/fw_coverage/run_fw_coverage.sh`
+needs a host C compiler, `gcov` and Bash, all already required by `make test`,
+and reads no HEX. It has no skip path at all -- it runs under `set -euo
+pipefail`, so a missing tool is a failure, not a silent pass. Principle 5 is
+therefore satisfied rather than bent, exactly as it was for
+`pic10f320-test-host-variants`. Measured cost on this host: 8.5 s for the
+PIC10F322 gate and 11.9 s for the PIC12F675 gate, against the ~19 s the item
+predicted.
+
+*Criterion 1, run literally.* `make test PIC_CC=/nonexistent/xc8-cc
+PIC_DFP=/nonexistent/dfp GPSIM=/nonexistent/gpsim` exits 0 with both gates
+reporting their exact results -- 53 / 53 / 67 harness checks and the full gcov
+line table for the PIC10F322, 86 / 86 / 105 plus the coverage-oracle negative
+probe for the PIC12F675. No gate in the aggregate so much as tried to reach the
+missing tools, which is the property being claimed: `run_fw_coverage.sh` names
+XC8, the DFP and gpsim nowhere, and calls only `$CC`, `$GCOV` and its own
+harness.
+
+*What the PIC12F675 case actually was.* Worse than "standalone". The
+`pic12f675-test` aggregate skips **as a whole** when XC8 has qualified no matrix
+("no qualified PIC12F675 matrix (XC8 absent?)"), which is correct for every
+other lane -- each reads a real HEX -- but meant the one lane needing nothing
+XC8 provides did not run on precisely the hosts where it was the only PIC
+evidence obtainable. Direct membership fixes that; the aggregate still lists the
+lane, so nothing was moved out of it.
+
+*Routing assertions.* Folded into `test/test_workload_rebuild.sh` (23 -> 28
+checks) rather than given a new gate, because that file already owns the
+"ask Make for the aggregate's ACTUAL prerequisite set" idea and states why a
+textual check of the two lists would miss the failure. Three properties, all
+compared against Make's own resolved variables:
+
+1. `test` and `test-long` resolve to the same gate set apart from
+   `test-mutation`, in **both** directions -- a gate added to one aggregate only,
+   or dropped from one only, fails naming itself.
+2. Neither aggregate names any gate twice. A duplicate is not a double
+   execution (Make runs a phony prerequisite once); it is the fingerprint of a
+   hand edit against a list that already had the entry, and the next hand edit
+   removes only one copy.
+3. Both coverage gates appear exactly once, named explicitly because they are
+   the two that were mis-routed.
+
+Property 1 is new coverage: nothing previously checked that the two aggregates
+agree. Negative controls, each run in a scratch tree: adding `test-soak` to
+`TEST_LONG_GATES` alone fails with `test and test-long do not run the same
+gates: > test-soak`; listing `pic10f322-coverage-check-fw` twice fails with
+`TEST_GATES lists a gate more than once`; dropping it fails with `appears 0
+times in the shared gate inventory, expected exactly 1`.
+
+*The oracle demonstration, and what the control actually showed.* In a scratch
+tree with `hw_outputs_reassert_safe()` removed from the PIC12F675 shell's fault
+path, `make test` now exits nonzero at `pic12f675-coverage-check-fw` with
+`PIC shipping-source coverage harness: 105 checks, 4 failures`, naming the four
+coil-escalation cases (`GP1`/`GP2` shadow faults and both physical coil
+divergences) that no longer see the coils de-energized before the reset spin.
+
+The same mutation was then run against a `git archive HEAD` tree, and the
+control is worth recording precisely because it is not the simple "was green,
+now red" it was expected to be. That tree ran the **whole of
+`TEST_GATES_EARLY` green** -- no gate in the fast half saw the defect -- and the
+only failure in a 3,869-line log came far into the LATE half, at
+`test-mutation-sandbox`, as `PIC12F675 mutation 1 did not change
+src/bypass_mcu_pic12f675.c`. That is not detection: it is the sandbox selftest
+noticing that a hand-mutated working tree collides with a catalogued mutant, and
+it names nothing about relay behaviour.
+
+The collision is the finding. `PIC12F675_MUTATIONS[1]` is literally
+`s@hw_outputs_reassert_safe();@@`, so this defect was already catalogued -- but
+its kill target is `PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay
+pic12f675-test-target`, which needs XC8, gpsim and libgpsim and runs only under
+`test-mutation`, i.e. only in `test-long` and only on a fully equipped host. On
+the AVR-only host this item is about, the defect's sole oracle was unavailable
+and would be reported skipped. After this change a pure host oracle inside
+`make test` covers it, which is the whole point of the item.
+
+*Documentation.* `test/README.md` now states that membership follows the tool
+contract rather than the part, that all three `*-coverage-check-fw` gates are
+members, and what the previous routing cost; both contract-table rows are marked
+`make test` members, and the PIC10F322 row also records that the gate compiles
+with `BYPASS_CTX_CHECK` because that is what ships. `make help` marks both. The
+two standalone-aggregate comments in the Makefile explain why each keeps a lane
+that `make test` also runs. `TODO.md` item `T25-fw-coverage-in-test` and its
+index row are removed (`test-todo-index`: 93 -> 90 checks).
 
 ### D1 - Separate field-use reports from controlled hardware qualification
 
@@ -707,8 +799,8 @@ Record each completed item with its commit ID and decisive validation command.
 | R2 | DONE | `7b54dea` | `test/test_release_preflight.sh`; `test/test_release_provenance.sh`; `make test-workflow-syntax test-release-history` |
 | R3 | DONE | `9a7c479` | `make test-pic-build test-release-preflight test-release-qualification`; `scripts/make-release.sh --preflight v0.9.10` |
 | F1 | DONE | `a8fe23d`, `b14cd7a` | `make test`; relay fault + coverage lanes on all six substrates; PIC/AVR flash-budget gates |
-| T1 | DONE | (pending) | `make test`; `make pic10f322-coverage-check-fw HOSTCC=gcc-10`; `test/test_release_preflight.sh` |
-| T2 | OPEN | | |
+| T1 | DONE | `fd9aa28` | `make test`; `make pic10f322-coverage-check-fw HOSTCC=gcc-10`; `test/test_release_preflight.sh` |
+| T2 | DONE | (pending) | `make test`; `test/test_workload_rebuild.sh`; mutated-tree `make test` reaching the PIC12F675 host oracle |
 | D1 | OPEN | | |
 | D2 | OPEN | | |
 | D3 | OPEN | | |

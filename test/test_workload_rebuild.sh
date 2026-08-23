@@ -267,6 +267,52 @@ case "$long_gates" in
 esac
 checks=$((checks + 2))
 
+# The shared inventory's whole purpose is that `test` and `test-long` run the
+# SAME gates, so assert that directly rather than trusting the two variables to
+# have been edited together. test-long is test plus test-mutation and nothing
+# else, in either direction: a gate added to only one aggregate, or dropped from
+# only one, fails here naming itself. The omission this guards against is
+# usually silent in the direction that matters least visibly -- test-long is the
+# release gate, where a missing gate reads as a green run.
+fast_gates=$(run_make -s print-TEST_GATES | tr ' ' '\n' | grep -v '^$' | sort)
+long_only=$(printf '%s\n' "$long_gates" | tr ' ' '\n' | grep -v '^$' \
+	| grep -Fxv test-mutation | sort)
+[ -n "$fast_gates" ] \
+	|| { printf 'FAIL: could not read test prerequisites from Make\n' >&2; exit 1; }
+if ! diff_out=$(diff <(printf '%s\n' "$fast_gates") \
+		<(printf '%s\n' "$long_only")); then
+	printf 'FAIL: test and test-long do not run the same gates:\n%s\n' \
+		"$diff_out" >&2
+	exit 1
+fi
+checks=$((checks + 1))
+
+# No gate may appear twice in either aggregate. Make would still run a phony
+# prerequisite once, so a duplicate is not a double execution -- it is the
+# fingerprint of a gate that was added by hand to a list that already had it,
+# and the next hand edit removes only one of the two copies.
+for aggregate in TEST_GATES TEST_LONG_GATES; do
+	dupes=$(run_make -s print-"$aggregate" | tr ' ' '\n' | grep -v '^$' \
+		| sort | uniq -d)
+	[ -z "$dupes" ] \
+		|| { printf 'FAIL: %s lists a gate more than once: %s\n' \
+			"$aggregate" "$(printf '%s' "$dupes" | tr '\n' ' ')" >&2; exit 1; }
+done
+checks=$((checks + 2))
+
+# The two PIC shipping-source coverage gates are named explicitly because they
+# are the ones that were reachable ONLY through standalone full-tool aggregates,
+# and because they are the reason `make test` can catch a PIC host-oracle
+# regression at all. Both need nothing beyond the host compiler, gcov and Bash
+# that `test` already requires, so neither has an excuse to leave the inventory.
+for gate in pic10f322-coverage-check-fw pic12f675-coverage-check-fw; do
+	found=$(printf '%s\n' "$fast_gates" | grep -Fxc "$gate" || true)
+	[ "$found" = 1 ] \
+		|| { printf 'FAIL: %s appears %s times in the shared gate inventory, expected exactly 1\n' \
+			"$gate" "$found" >&2; exit 1; }
+done
+checks=$((checks + 2))
+
 outside="$work/external-build"
 run_make test-sim-cd4053_simple-attiny13a AVR_BUILD_DIR="$outside" SIM_DEFS=-DISOLATED=1 >/dev/null
 [ ! -e "$outside/bypass-attiny13a-cd4053_simple.elf" ] \

@@ -413,7 +413,8 @@ ultimately validated on a real part at the bench.
 `bypass_mcu_pic12f675.c`, shared pure core, and all three unmodified output
 drivers under gcov. It needs only Bash, a host C compiler (GCC 10 or
 newer, or Clang), and matching gcov; XC8, the device pack, and gpsim are not
-involved.
+involved. **This is a member of `make test`**, which is why the absence of a PIC
+toolchain does not exempt a PIC12F675 change from this oracle.
 
 The shared coverage harness selects a PIC12F675 mock `<xc.h>` that preserves the
 classic-PIC distinctions the firmware depends on: GPIO intent and physical pin
@@ -463,12 +464,30 @@ newer, or Clang -- `host-compiler-valid` is a prerequisite of all three
 `*-coverage-check-fw` targets), and matching gcov. CI/release use `STRICT_TOOLS=1` plus the fail-closed aggregate described
 below so a green gate means every PIC layer actually ran.
 
+The line that decides membership is the **tool contract, not the part**. All
+three `*-coverage-check-fw` gates need only that host compiler, gcov and Bash,
+so all three are members of `make test` and `make test-long` and run on every
+push whether or not a PIC toolchain is installed: `pic10f320-coverage-check-fw`
+through the `pic10f320-test-host-variants` wrapper, and
+`pic10f322-coverage-check-fw` and `pic12f675-coverage-check-fw` directly in the
+shared gate inventory. The two direct members cost about 8 s and 12 s.
+
+This is a correction, not a convenience. Both were previously reachable only
+through the standalone `pic10f322-test` / `pic12f675-test` aggregates, whose
+*other* lanes do need XC8 and gpsim -- and `pic12f675-test` skips its whole
+matrix when XC8 has qualified nothing, so on an AVR-only host the PIC12F675
+coverage gate did not run at all despite needing nothing XC8 provides. A stale
+host fault oracle, a compile configuration that was not the shipping one, and a
+`check_fw_coverage.sh` anchor matching zero lines all coexisted with a green
+`make test` for the length of a polish branch as a result. The standalone
+aggregates still run both gates, so nothing was moved out of them.
+
 | layer | target | what it proves | substrate |
 |---|---|---|---|
 | Image generation | `test-pic-build` | Missing, partial, malformed, or non-regular XC8 output cannot become a PIC firmware image; malformed/zero budgets, huge usage counts, and arithmetic-tool failures are rejected. The PIC10F322 and PIC12F675 producers require immutable complete matrices. PIC12F675 additionally proves exact simulator derivation, complete-set cleanup/consumption, and variant-bound hardware programming through a digest-checked private snapshot. Its fake programmer pins read-only baseline capture, immediate pre-write identity/trim comparison, exact pk2cmd/ipecmd write argv, post-write OSCCAL/BG comparison, retained pass/fail records, and refusal of a device export that relocates addresses. Same-stem `.s`/`.sym` are invalidated with the HEX, and a current HEX without fresh assembly fails the stack target rather than skipping. | host fake-XC8 regression |
 | CONFIG word | `pic10f322-test-config` | The XC8-emitted CONFIG word matches the documented oscillator/WDT/BOR/MCLR/LVP design intent. | host parser over HEX |
 | Static analysis | `pic10f322-analyze` | cppcheck + MISRA pass over the PIC shell with real XC8/DFP register headers. | host tools |
-| Shipping-source coverage | `pic10f322-coverage-check-fw` | Every executable line in the real PIC shell, shared pure core, and all three output drivers is host-executed except the documented non-returning reset path. | host gcov with PIC SFR mock |
+| Shipping-source coverage | `pic10f322-coverage-check-fw` | Every executable line in the real PIC shell, shared pure core, and all three output drivers is host-executed except the documented non-returning reset path. Compiled with `BYPASS_CTX_CHECK`, because that is what ships. **This is a member of `make test`.** | host gcov with PIC SFR mock |
 | Register-level functional | `pic10f322-test-gpsim` | Real HEX toggles on press, handles power-on-held switch, keeps settled LATA/PORTA expectations, and includes the mid-debounce `PRESS1_EARLY` tick-cadence check. | gpsim CLI |
 | gpsim process gate | `test-gpsim-wrappers` | Both functional wrappers require a positive decimal timeout, reject nonzero or killed gpsim runs even after complete snapshots, prove routed stimuli contain one exact footswitch attachment, and fail rather than skip missing gpsim under `STRICT_TOOLS=1`. All three public lanes are additionally probed end-to-end: each must reach gpsim with its own part's processor, so a severed `PIC_GPSIM_PROC=` cannot leave a lane simulating another chip. The PIC12F675 route exhausts all six nonempty partial simulator-image subsets and rejects empty, symlinked, or unexpected members before gpsim runs. | Bash + fake gpsim |
 | Fault response | `pic10f322-test-fault` | Runtime direction, settled-output-latch, configuration, pull-up, and `ctx_` corruptions all produce WDT recovery; the relay variant additionally requires both coils de-energized before the spin and a measured full-width RESET-coil actuation after it. | libgpsim |

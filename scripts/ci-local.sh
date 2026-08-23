@@ -75,9 +75,12 @@
 #                    runs host/AVR and ATtiny202 mutation strictly but permits
 #                    unavailable PIC mutants to be reported skipped instead of
 #                    failing; this no longer mirrors CI, so it warns.
-#                    NOTE: it does not skip the PIC10F320 HOST lanes -- those
-#                    need only a host compiler and run inside `make test` /
-#                    `make test-long` regardless.
+#                    NOTE: it does not skip the PIC HOST lanes of any part --
+#                    the PIC10F320 host sweep and the PIC10F322/PIC12F675
+#                    shipping-source coverage gates need only a host compiler
+#                    and gcov, and run inside `make test` / `make test-long`
+#                    regardless. Skipping the PIC job drops the XC8, gpsim and
+#                    libgpsim evidence, not the host oracles.
 #     --skip-attiny202  skip the ATtiny202 (DFP/yasimavr) job -- ONLY if you lack
 #                    that toolchain; this no longer mirrors CI, so it warns loudly
 #     -h | --help    this help

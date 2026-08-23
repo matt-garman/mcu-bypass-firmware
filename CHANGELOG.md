@@ -257,6 +257,31 @@ file is the human-readable summary of *what changed*.
   publish the floor, and a contract test holds all three in agreement with the
   enforced constant.
 
+- **`make test` now runs both PIC shipping-source coverage gates.**
+  `pic10f322-coverage-check-fw` and `pic12f675-coverage-check-fw` compile the
+  real PIC shells, the shared pure core and all three output drivers under gcov
+  and gate the annotations exactly. Neither needs XC8, the device pack, gpsim or
+  a built HEX -- only the host compiler, gcov and Bash that `make test` already
+  requires -- yet both were reachable only through `pic10f322-test` and
+  `pic12f675-test`, standalone aggregates whose *other* lanes do need those
+  tools. `pic12f675-test` is worse than merely standalone: it skips its entire
+  matrix when XC8 has qualified nothing, so on a host without a PIC toolchain
+  that coverage gate did not run at all.
+
+  The cost of that routing was already paid once. A stale host fault oracle, a
+  compile configuration that was not the shipping one (the gate never defined
+  `BYPASS_CTX_CHECK`, leaving `debounce_ctx_check_word()` dead), and a coverage
+  anchor matching zero lines all coexisted with a green `make test` for the
+  length of a polish branch. Both gates now sit in the one shared gate
+  inventory, so `test` and `test-long` pick them up together; the standalone
+  aggregates still run them. Measured cost is about 8 s and 12 s.
+
+  `test-workload-rebuild` gained the routing assertions that keep this true:
+  `test` and `test-long` must resolve to the same gate set apart from
+  `test-mutation`, neither aggregate may name a gate twice, and both coverage
+  gates must appear exactly once. The comparison is made against Make's own
+  prerequisite sets rather than the text of the two lists.
+
 ## [0.9.9] - 2026-08-15
 
 ### Fixed

@@ -1466,6 +1466,12 @@ pic10f322-coverage-check-fw: host-compiler-valid
 # analysis, shipping-source coverage, gpsim functional). Standalone -- NOT part
 # of `make test`, which is the AVR pre-hardware gate (XC8/gpsim may be absent in
 # CI). Each external-tool sub-target skips cleanly when its tool is missing.
+#
+# One lane is the exception and is listed here anyway: this aggregate keeps
+# running pic10f322-coverage-check-fw even though `make test` now runs it too.
+# The gate needs no PIC tool, so it belongs in the default suite; standing here
+# as well is what keeps `pic10f322-test` a complete statement of the part's
+# pre-hardware evidence rather than a set of leftovers.
 .PHONY: pic10f322-test
 pic10f322-test: pic10f322-test-config pic10f322-analyze pic10f322-coverage-check-fw pic10f322-test-gpsim \
           pic10f322-test-stack-bound
@@ -2795,6 +2801,18 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # the PIC10F320 host lanes and the simulator lanes; run order affects when a
 # failure is reported, not whether it is caught. A new gate may go in either
 # half, and lands in both aggregates either way.
+#
+# The two PIC shipping-source coverage gates that close the EARLY half are here
+# on the same grounds pic10f320-test-host-variants is, and the grounds are the
+# TOOL CONTRACT, not the part: run_fw_coverage.sh needs a host C compiler, gcov
+# and Bash, all of which `test` already requires, and needs neither XC8, the
+# DFP, gpsim nor a built HEX (Principle 5, docs/pic10f320_merge_plan.md).
+# Reaching them only through pic10f322-test / pic12f675-test -- standalone
+# aggregates whose OTHER lanes do need those tools -- is what let a stale host
+# fault oracle, a non-shipping compile configuration and a dead coverage anchor
+# sit on a branch under a green `make test` (TODO.md history, 2026-08-20).
+# Membership is asserted from Make's own prerequisite sets in
+# test/test_workload_rebuild.sh, not left to inspection of these two lists.
 TEST_GATES_EARLY = \
         python-version-valid host-compiler-valid analyze test-static-assert-guards \
         test-host test-model-check test-symbolic test-cbmc \
@@ -2802,7 +2820,8 @@ TEST_GATES_EARLY = \
         test-stack-bound-pic-regression test-flash-budget-regression \
         test-fault-inject pic10f320-test-host-variants \
         test-pic10f320-return-stack-oracle test-pic10f320-expected-images \
-        test-pic10f320-coverage-archive
+        test-pic10f320-coverage-archive \
+        pic10f322-coverage-check-fw pic12f675-coverage-check-fw
 TEST_GATES_LATE = \
         test-sim-attiny13a test-sim-tinyx5 test-attiny202-build \
         test-attiny202-output-oracle test-attiny202-delay-oracle \
@@ -6459,6 +6478,13 @@ _pic12f675-qualify-matrix: pic12f675-target-selector-valid pic12f675-simcal $(PI
 # The soak is in NEITHER, exactly as on both 10F32x parts: an hour of simulated
 # time per variant is a long-duration command, not a pre-hardware check.
 #
+# The host coverage lane is ALSO a direct member of `make test`, and has to be.
+# This aggregate skips as a whole when XC8 has qualified no matrix -- correct for
+# every other lane, since each one reads a real HEX -- which left the one lane
+# that needs no XC8 unrun on exactly the hosts where it was the only PIC evidence
+# available. Listing it here as well costs a few seconds and keeps this aggregate
+# the complete pre-hardware statement for the part.
+#
 # WHY THE CALIBRATION CONTRACT IS LISTED HERE and not left implied by the lanes.
 # Every simulator lane for this part depends on pic12f675-simcal, so the derived
 # images get PRODUCED whatever else runs; what no other lane checks is that
@@ -7678,6 +7704,7 @@ help:
 	@echo "  pic10f322-test-config build PIC HEX, then verify each CONFIG word vs design intent"
 	@echo "  pic10f322-analyze     cppcheck + MISRA on the PIC shell (XC8/DFP headers; standalone)"
 	@echo "  pic10f322-coverage-check-fw  exact host-gcov gate over PIC shell, core, and drivers"
+	@echo "                        (host compiler + gcov only, so \`make test\` runs it)"
 	@echo "  pic10f322-test-gpsim  drive the footswitch in gpsim, assert PORTA/LATA toggle"
 	@echo "  pic10f322-test-soak   libgpsim soak: WDT liveness + responsiveness (standalone; needs"
 	@echo "                        gpsim-dev+libglib2.0-dev; PIC10F322_SOAK_VARIANT, PIC10F322_SOAK_DURATION_MS)"
@@ -7705,6 +7732,7 @@ help:
 	@echo "                        PIC12F675_SOAK_VARIANT, PIC12F675_SOAK_DURATION_MS)"
 	@echo "  pic12f675-analyze     cppcheck + MISRA on the PIC12F675 shell (pic8 platform; standalone)"
 	@echo "  pic12f675-coverage-check-fw  exact host-gcov gate over the shell, core, and drivers"
+	@echo "                        (host compiler + gcov only, so \`make test\` runs it)"
 	@echo "  pic12f675-test-stack-bound  bound the 8-level hardware return stack for every variant"
 	@echo "  pic12f675-simcal      derive simulator images with the oscillator calibration word"
 	@echo "  pic12f675-test-calibration  prove the calibration injection leaves the shipping HEX alone"

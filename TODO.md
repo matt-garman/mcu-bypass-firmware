@@ -405,65 +405,6 @@ mismatch fails loudly and names the count, exactly as it did this time.
 
 ---
 
-### T25-fw-coverage-in-test - Run the host PIC coverage gates from `make test`
-
-`pic10f322-coverage-check-fw` and `pic12f675-coverage-check-fw` compile the PIC
-shipping sources with the host compiler and gate the resulting gcov annotations
-exactly. Neither needs XC8, the DFP or a simulator -- the Makefile says so at
-the PIC12F675 target -- yet both are reachable only through the standalone
-`pic10f322-test` and `pic12f675-test` aggregates, which sit outside `make test`
-because their *other* lanes do need those tools.
-
-The cost of that arrangement was paid on 2026-08-20. F1 (then still the
-correct-in-place model) taught both gpsim fault adapters that a settled-state
-relay coil upset is corrected rather than reset, and F2 added the context-check
-clause; neither updated
-`test/pic/fw_coverage/`. The
-host harness went on demanding a reset (2 failures on the PIC10F322, 6 on the
-PIC12F675); the gate never compiled with `BYPASS_CTX_CHECK`, so it was not
-measuring the shipping configuration and `debounce_ctx_check_word()` was dead
-code; and F2's reformatting left a `check_fw_coverage.sh` anchor matching zero
-lines. All of it sat on the branch from those commits until
-`scripts/ci-local.sh` ran, with `make test` green throughout. Because
-`run_fw_coverage.sh` runs under `set -e`, the first failure also masked the
-second until it was fixed.
-
-The PIC12F675 side is worse than merely absent from the aggregate.
-`pic12f675-test` skips its whole matrix when XC8 has qualified nothing ("no
-qualified PIC12F675 matrix (XC8 absent?)"), so on a host without XC8 that
-coverage gate does not run at all -- despite needing nothing XC8 provides.
-
-The precedent for the repair is already in the tree. `pic10f320-test-host`
-bundles the PIC10F320 host lanes, its own `pic10f320-coverage-check-fw` among
-them, and joined `test` and `test-long` on the stated grounds that `cc` and
-`gcov` are already inside the aggregate's tool contract. Wiring these two gates
-in the same way preserves Principle 5 (`docs/pic10f320_merge_plan.md:181`)
-rather than bending it, because the tool contract does not change. Measured cost
-on this host is 8.2 s + 11.1 s, so roughly 19 s added to `make test`.
-
-Scope note: this shortens detection for the host oracle only. Three independent
-PIC fault oracles exist -- `test/pic/test_fault_pic.cc`,
-`test/pic/test_fault_pic12f675.cc`, and this host harness -- and nothing
-compares them, which is exactly how F1 and F2 each updated some and missed
-others. The two gpsim adapters genuinely require XC8 and cannot join `make
-test`, so a cross-oracle consistency check is a separate and larger design
-question, deliberately not folded in here.
-
-Acceptance test: on a host with no XC8, no DFP and no gpsim, `make test` runs
-both gates and reports their check counts and coverage lines; in a scratch tree,
-removing `hw_outputs_reassert_safe()` from a relay shell turns `make test` red
-naming the coil-escalation cases that no longer see the coils de-energized;
-`pic10f322-test` and
-`pic12f675-test` still run the gates standalone.
-
-Dependencies: none. Effort: 30-45 minutes, most of it confirming a clean run on
-a host with no PIC toolchain installed and re-timing the aggregate. Risk if
-deferred: Medium -- this is the lane that already concealed two regressions for
-the length of a polish branch, and the next one would be equally invisible to
-`make test`.
-
----
-
 ## Tier 3 - platinum-grade hardening and silicon validation
 
 ### T3-hw-procedure - Document a hardware-validation procedure
@@ -687,7 +628,6 @@ The stable ID in each row matches exactly one open section above.
 | T25-power-ramp | Power-supply ramp analysis | 2.5 | 2-3 h | Medium |
 | T25-name-contract-shim | Check overrides handed to a routing Make shim | 2.5 | 2-3 h | Low |
 | T25-cbmc-proof-count | Cross-check dispatched CBMC proof count against source | 2.5 | 30-45 min | Low |
-| T25-fw-coverage-in-test | Run the host PIC coverage gates from `make test` | 2.5 | 30-45 min | Medium |
 | T3-hw-procedure | Hardware-validation procedure | 3 | 2-3 h | High |
 | T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - gates the part's 1.x.y hardware validation |
 | T3-toolchain | Broader compiler/toolchain portability | 3 | Medium | Medium-High |
