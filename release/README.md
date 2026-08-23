@@ -156,6 +156,50 @@ Publication fails if either signature is absent, invalid, or made by another
 key; verification uses an isolated keyring containing only the pinned key rather
 than trusting whatever keys happen to be installed on the CI runner.
 
+## How a release is sequenced
+
+A release is not one commit. Four steps produce it, in this order, and the
+separation between the first and the third is enforced rather than conventional.
+
+1. **Source finalization.** One ordinary commit on `main` finalizes
+   [`CHANGELOG.md`](../CHANGELOG.md) and the four bounded current-release
+   declarations — this file, [`TODO.md`](../TODO.md),
+   [`docs/pic10f320_special_case.md`](../docs/pic10f320_special_case.md) and
+   [`docs/pic10f320_validation.md`](../docs/pic10f320_validation.md) — for
+   `vX.Y.Z`. This commit is the **source contract**, and it is the commit the
+   qualification run measures.
+2. **Production staging.** `scripts/make-release.sh vX.Y.Z` builds every image,
+   runs every gate, soaks every combination for 24 hours, and stages
+   `release/vX.Y.Z/`. It refuses to start unless step 1 is already committed,
+   and it stages without committing anything. Before handing off it re-checks
+   the bounded declarations against the inventory it actually staged, so "21
+   images; 18 soak combinations" is verified against 21 files and 18 soak
+   records rather than against the Makefile that predicted them.
+3. **Artifact commit.** One commit whose sole parent is the qualified source
+   commit and which changes only `release/vX.Y.Z/`.
+4. **Signed tag and push.** The annotated tag names the artifact commit; tag CI
+   rebuilds from it and publishes only if the image bytes reproduce.
+
+Steps 1 and 3 cannot be collapsed into one commit:
+`scripts/verify-release-history.sh` rejects a release whose qualified source
+commit already contains `release/vX.Y.Z/QUALIFICATION`. The source tree that
+*declares* a release therefore never contains that release's retained evidence,
+and the two identities stay distinct: the **source commit** is what was
+qualified, the **artifact commit** is what the tag publishes.
+
+**The pre-tag window.** Between steps 1 and 4, `main` carries the `vX.Y.Z`
+contract while `release/vX.Y.Z/` is unpublished. That window is intended and is
+bounded by the qualification run. Two things keep it honest:
+
+- The bounded declarations are written to be true throughout it. They state the
+  source contract, and where they name the release directory they carry a fixed
+  pre-tag transition line recording that the release cut creates it. Release
+  preflight rejects a declaration that names any *other* release directory this
+  tree does not contain.
+- **If the release is abandoned or postponed, the source-finalization commit is
+  reverted or corrected on `main`.** A `vX.Y.Z` declaration must never stand on
+  `main` with no `vX.Y.Z` tag in prospect.
+
 ## Which image do I want?
 
 **From `v0.9.8` onward** every image is named the same way, with three

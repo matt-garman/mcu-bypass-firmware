@@ -880,13 +880,83 @@ until the artifact commit and tag exist.
 
 **Acceptance criteria**
 
-- [ ] The release sequence has no ambiguous source or artifact identity.
-- [ ] A failed or postponed release cannot leave `main` indefinitely claiming
+- [x] The release sequence has no ambiguous source or artifact identity.
+- [x] A failed or postponed release cannot leave `main` indefinitely claiming
   nonexistent retained evidence.
-- [ ] The tagged release contains accurate final wording and the claimed
+- [x] The tagged release contains accurate final wording and the claimed
   evidence inventory.
-- [ ] Versioned release-preflight and release-history tests cover the selected
+- [x] Versioned release-preflight and release-history tests cover the selected
   transition.
+
+**Implementation note (2026-08-23).** Resolved. The item reads as a wording
+problem and is not one: source finalization and the artifact commit are
+*necessarily* different commits, so the tree that declares a release provably
+never contains it, and the pre-release window is a structural property of the
+release model rather than an accident of drafting.
+
+*Why the window cannot be closed.* `scripts/verify-release-history.sh` rejects a
+release whose qualified source commit already contains
+`release/<version>/QUALIFICATION`, and requires the artifact commit's sole parent
+to be that source commit and to change nothing outside `release/<version>/`. Tag
+CI runs it. So the declaration must be committed before the directory it names
+can exist, and it cannot be amended afterwards without breaking the artifact
+commit's shape. Wording that is true only after the tag is therefore wording
+that is false in the tree that ships it -- which is exactly what
+`TODO.md` and `docs/pic10f320_validation.md` carried: "`release/v0.9.10/`
+retains the authoritative evidence for the released v0.9.10 source", in a tree
+with no such directory and no such tag.
+
+*The sequence, written down.* `release/README.md` gains "How a release is
+sequenced": source finalization (one ordinary commit on `main` that finalizes
+the changelog and the four bounded declarations -- the source contract, and the
+commit qualification measures), production staging (`scripts/make-release.sh`,
+which stages without committing), the artifact commit, and the signed tag. It
+names which identity each step fixes, states why steps 1 and 3 cannot be
+collapsed, and states the rollback rule: an abandoned or postponed release has
+its source-finalization commit reverted or corrected on `main`, never left
+standing. `scripts/make-release.sh` carries the same sequence in its header and
+in the hand-off it prints, where the human reads it at the moment it applies.
+
+*Declarations are now checked, not trusted.* Acceptance criterion 2 asks that a
+failed release cannot leave `main` claiming nonexistent evidence
+*indefinitely* -- and a check that only runs during `make release` cannot
+deliver that, because an abandoned release never runs it. The rule therefore
+went into the live-tree preflight validator: a bounded current-release block may
+not name a release directory this tree does not contain. The one exception is
+the version being released, whose directory a source commit provably cannot
+carry, and naming it requires the exact pre-tag transition line recording that
+the release cut creates it. That keeps the check exact rather than a prose
+matcher -- a path token and a directory test, plus the same exact-line technique
+the contract line already uses -- which is why this item warranted a validator
+where D2 did not. The rule caught the live defect on first run before either
+document was touched.
+
+*Staged inventory closes the loop.* Before the build, the strongest available
+statement is that four documents agree with what the Makefile *predicts* a
+release will contain. `release_validate_staged_documentation` re-runs the same
+validator after staging with counts taken from the staged directory instead:
+images counted as files, soak combinations counted by the machine soak-result
+record each log carries rather than by filename, since
+`evidence/soak-build.log` would pad a name-based count. Its position is pinned -- after the staged-qualification verifier,
+before the commit/tag hand-off -- because both ends matter: earlier and it has
+nothing to read, later and the human has already committed.
+
+*Test coverage.* `test-release-preflight` 101 -> 113: an undisclosed claim on
+the not-yet-staged directory is rejected, a disclosed one accepted, another
+version's absent directory rejected *even behind the transition line*, a present
+one accepted, prose outside the bounds still unconstrained, the line read
+through `release/README.md`'s blockquote, a matching staged inventory accepted,
+one-short image and soak sets rejected by their staged counts, and empty
+image/evidence stagings rejected. `test-release-history` 88 -> 89: a release
+commit that also restates a bounded declaration is refused exactly as a
+source-path change is, which is the history-side statement of the same rule --
+the wording a tag carries is the wording that was qualified. The existing
+"qualified source already contains release record" case was already the
+structural fact this item rests on and needed no change.
+
+*Verification.* `make test-release-preflight test-release-qualification
+test-release-history test-todo-index test-makefile-name-contract`; full
+`scripts/ci-local.sh`.
 
 ### G1 - Extend the branch-only document guard to this file
 
@@ -978,7 +1048,7 @@ Record each completed item with its commit ID and decisive validation command.
 | T2 | DONE | `130b22f` | `make test`; `test/test_workload_rebuild.sh`; mutated-tree `make test` reaching the PIC12F675 host oracle |
 | D1 | DONE | `ed5b654` | `make test-release-preflight` (85 -> 101 checks, 12 negative controls); `make test-release-qualification test-todo-index test-makefile-name-contract test-release-history` |
 | D2 | DONE | (pending) | `make test-workflow-syntax test-ci-local-routing test-release-preflight test-release-qualification test-release-history test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
-| D3 | OPEN | | |
+| D3 | DONE | (pending) | `make test-release-preflight` (101 -> 113 checks); `make test-release-qualification test-release-history` (88 -> 89); `make test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
 | G1 | OPEN | | |
 | Final validation | OPEN | | |
 

@@ -37,6 +37,8 @@ if ! declare -F release_hash_classic_avr_images >/dev/null \
 fi
 declare -F release_validate_current_documentation >/dev/null \
 	|| { printf 'FAIL: release documentation validator is missing\n' >&2; exit 1; }
+declare -F release_validate_staged_documentation >/dev/null \
+	|| { printf 'FAIL: staged release documentation validator is missing\n' >&2; exit 1; }
 declare -F release_validate_hardware_claims >/dev/null \
 	|| { printf 'FAIL: hardware evidence classifier is missing\n' >&2; exit 1; }
 declare -F release_require_main_branch >/dev/null \
@@ -582,6 +584,121 @@ release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
 	|| fail "documentation validator treated historical prose as current status"
 checks=$((checks + 1))
 
+# D3: a bounded declaration states the SOURCE contract, so it must not claim
+# retained evidence this tree does not contain. The version being released is the
+# one exception -- a qualified source commit provably cannot carry its own
+# release directory, because verify-release-history.sh rejects a release whose
+# source commit already contains release/<version>/QUALIFICATION -- and naming it
+# during that window is permitted only alongside the exact transition line that
+# discloses it.
+transition_line='**Pre-tag transition:** `release/v1.2.3/` is created by the release cut and published with the signed `v1.2.3` tag, so the source tree that declares this contract does not contain it yet.'
+
+declare_in_block() {
+	local document=$1 line=$2 target="$documentation_root/$document"
+	awk -v line="$line" '
+		$0 == "<!-- current-release:end -->" { print line }
+		{ print }
+	' "$target" > "$target.new" || fail "could not extend $document"
+	mv "$target.new" "$target"
+}
+
+write_documentation_fixture v1.2.3 21 18 six four
+declare_in_block TODO.md 'Evidence is retained under `release/v1.2.3/`.'
+assert_documentation_rejected 'an undisclosed claim on the not-yet-staged release directory'
+
+write_documentation_fixture v1.2.3 21 18 six four
+declare_in_block TODO.md 'Evidence is retained under `release/v1.2.3/`.'
+declare_in_block TODO.md "$transition_line"
+release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
+	|| fail "documentation validator rejected a disclosed pre-tag transition"
+checks=$((checks + 1))
+
+# The disclosure covers ONLY the version being released. Any other release
+# directory a block names is evidence claimed to be retained now, so an abandoned
+# or postponed cut cannot leave the claim standing behind the transition line.
+write_documentation_fixture v1.2.3 21 18 six four
+declare_in_block TODO.md 'Evidence is retained under `release/v1.2.2/`.'
+declare_in_block TODO.md "$transition_line"
+assert_documentation_rejected 'a bounded claim on a release directory that does not exist'
+
+write_documentation_fixture v1.2.3 21 18 six four
+mkdir -p "$documentation_root/release/v1.2.2"
+declare_in_block TODO.md 'Evidence is retained under `release/v1.2.2/`.'
+release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
+	|| fail "documentation validator rejected a present retained-evidence directory"
+checks=$((checks + 1))
+
+# Historical prose outside the bounds stays unconstrained, as it is for every
+# other field of the declaration.
+write_documentation_fixture v1.2.3 21 18 six four
+printf '%s\n' 'The abandoned `release/v9.9.9/` cut was never published.' \
+	>> "$documentation_root/TODO.md"
+release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
+	|| fail "documentation validator treated prose outside the bounds as a declaration"
+checks=$((checks + 1))
+
+# release/README.md carries its block as a blockquote, so the transition line
+# must be read through the same `> ` strip as the contract line.
+write_documentation_fixture v1.2.3 21 18 six four
+declare_in_block release/README.md '> Evidence is retained under `release/v1.2.3/`.'
+declare_in_block release/README.md "> $transition_line"
+release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
+	|| fail "documentation validator did not read a blockquoted transition line"
+checks=$((checks + 1))
+
+# D3: after staging, the same declarations are held to the inventory that was
+# actually staged rather than to the canonical set the Makefile predicted. This
+# is the last documentation check before the artifact commit and the tag.
+staged_root="$work/staged-release"
+write_staged_fixture() {
+	local images=$1 soaks=$2 i
+	rm -rf "$staged_root"
+	mkdir -p "$staged_root/evidence"
+	for ((i = 1; i <= images; i++)); do
+		printf ':00000001FF\n' > "$staged_root/image-$i.hex"
+	done
+	for ((i = 1; i <= soaks; i++)); do
+		printf 'SOAK_RESULT format=1 status=pass combination=c%d\n' "$i" \
+			> "$staged_root/evidence/soak-c$i.log"
+	done
+	# evidence/ also retains logs that are not soak records. A name-based count
+	# would fold this one in; a record-based count must not.
+	printf 'building soak binaries\n' > "$staged_root/evidence/soak-build.log"
+}
+
+assert_staged_rejected() {
+	local description=$1 expected=$2
+	if release_validate_staged_documentation "$documentation_root" "$staged_root" \
+			v1.2.3 >"$output" 2>&1; then
+		fail "staged documentation validator accepted $description"
+	fi
+	grep -Fq "$expected" "$output" \
+		|| fail "$description failed without naming the staged inventory: $(<"$output")"
+	checks=$((checks + 1))
+}
+
+write_documentation_fixture v1.2.3 21 18 six four
+declare_in_block TODO.md 'Evidence is retained under `release/v1.2.3/`.'
+declare_in_block TODO.md "$transition_line"
+write_staged_fixture 21 18
+release_validate_staged_documentation "$documentation_root" "$staged_root" v1.2.3 \
+	|| fail "staged documentation validator rejected a matching inventory"
+checks=$((checks + 1))
+
+write_staged_fixture 20 18
+assert_staged_rejected 'a staging that is one image short' '20 images'
+
+write_staged_fixture 21 17
+assert_staged_rejected 'a staging that is one soak combination short' '17 soak combinations'
+
+write_staged_fixture 21 18
+rm -rf "$staged_root/evidence"
+assert_staged_rejected 'a staging that retains no evidence' 'retains no evidence/'
+
+write_staged_fixture 21 18
+rm -f "$staged_root"/*.hex
+assert_staged_rejected 'a staging that contains no images' 'contains no images'
+
 # H1: the actual release-staging path must refuse a tree that still CONTAINS or
 # still REFERENCES a branch-only working document (root-level v*-polish.md). This
 # gate is deliberately OUTSIDE release_validate_current_documentation -- the
@@ -689,6 +806,25 @@ main_call_line=$(grep -Fn 'release_require_main_branch "$REPO_ROOT"' \
 	|| fail "main-branch gate must run AFTER the preflight exit (gate at line $main_call_line, preflight exit at line $preflight_exit_line)"
 [ "$gate_call_line" -gt "$preflight_exit_line" ] \
 	|| fail "branch-only-document gate must run AFTER the preflight exit (gate at line $gate_call_line, preflight exit at line $preflight_exit_line)"
+checks=$((checks + 1))
+
+# D3: the staged-inventory check is the mirror image -- it can only run once a
+# release directory exists, so pin it after the qualification verifier and before
+# the hand-off that tells the human to commit and tag. Placing it in step 0 would
+# make it a duplicate of the pre-build check against the Makefile and would leave
+# the staged bytes unbound to the declarations.
+qualification_call_line=$(grep -Fn 'scripts/verify-release-qualification.sh "${qualification_args[@]}"' \
+	"$release_script" | head -1 | cut -d: -f1)
+staged_call_line=$(grep -Fn 'release_validate_staged_documentation "$REPO_ROOT" "$OUTPUT_DIR" "$VERSION"' \
+	"$release_script" | head -1 | cut -d: -f1)
+handoff_line=$(grep -Fn 'staged -- next steps (run by hand)' \
+	"$release_script" | head -1 | cut -d: -f1)
+[ -n "$qualification_call_line" ] && [ -n "$staged_call_line" ] && [ -n "$handoff_line" ] \
+	|| fail "could not locate the staging, staged-documentation and hand-off steps in make-release.sh"
+[ "$staged_call_line" -gt "$qualification_call_line" ] \
+	|| fail "staged-documentation check must run AFTER staging is verified (check at line $staged_call_line, qualification at line $qualification_call_line)"
+[ "$staged_call_line" -lt "$handoff_line" ] \
+	|| fail "staged-documentation check must run BEFORE the commit/tag hand-off (check at line $staged_call_line, hand-off at line $handoff_line)"
 checks=$((checks + 1))
 
 # R3: a PUBLISHED PIC12F675 finalization command must carry the identity of the

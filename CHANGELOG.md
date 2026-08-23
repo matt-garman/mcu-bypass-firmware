@@ -374,6 +374,40 @@ file is the human-readable summary of *what changed*.
   the PIC12F675 additions and the moving-runner note landed with the release
   provenance and compiler-pin work earlier in this cycle.
 
+- **The pre-release metadata window is now explicit and bounded.** Release
+  documentation identified `v0.9.10` as released and pointed at
+  `release/v0.9.10/` for its authoritative evidence, in a tree that contained
+  neither. That is not a slip in one sentence: source finalization and the
+  artifact commit are necessarily *different* commits, because
+  `scripts/verify-release-history.sh` rejects a release whose qualified source
+  commit already contains `release/<version>/QUALIFICATION`. The tree that
+  declares a release therefore never contains it, and the declaration has to be
+  written to be true across that window.
+
+  `release/README.md` now documents the four-step sequence -- source
+  finalization, production staging, artifact commit, signed tag -- says which
+  identity each step fixes, and states the rollback rule: if a release is
+  abandoned or postponed, the source-finalization commit is reverted or
+  corrected on `main` rather than left standing. `scripts/make-release.sh`
+  carries the same sequence in its header and in the hand-off it prints.
+
+  The declarations themselves are now checked rather than trusted. A bounded
+  current-release block may not name a release directory the tree does not
+  contain; the one exception is the version being released, and naming it
+  requires the exact pre-tag transition line recording that the release cut
+  creates it. `TODO.md` and `docs/pic10f320_validation.md` carry that line and
+  state the source contract they are, where the earlier wording asserted
+  retained evidence.
+
+  After staging, the same declarations are re-validated against the inventory
+  actually staged rather than against the canonical set the Makefile predicted:
+  images counted as files, soak combinations counted as machine records so a
+  build log sharing the soak naming cannot pad the count. That is the last
+  documentation check before the artifact commit and the tag, and its position
+  is pinned. `test-release-preflight`: 101 -> 113 checks;
+  `test-release-history`: 88 -> 89, adding a release commit that restates a
+  bounded declaration to the paths it already refuses.
+
 ## [0.9.9] - 2026-08-15
 
 ### Fixed

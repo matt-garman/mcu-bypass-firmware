@@ -3,10 +3,15 @@
 <!-- current-release:start -->
 **Current release contract:** `v0.9.10`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
 
-**Status (2026-08-21):** No nominal-path firmware correctness defect is
-currently known. PIC10F320 remains the self-contained exception.
-`release/v0.9.10/` retains the authoritative evidence for the released v0.9.10
-source. Open work is enumerated below.
+**Status (2026-08-23):** No nominal-path firmware correctness defect is
+currently known. PIC10F320 remains the self-contained exception. This tree is
+the `v0.9.10` *source* contract; the authoritative evidence for the release it
+qualifies is retained under `release/v0.9.10/`, and that retained record --
+not this file -- identifies the qualified source commit and measured results.
+
+**Pre-tag transition:** `release/v0.9.10/` is created by the release cut and published with the signed `v0.9.10` tag, so the source tree that declares this contract does not contain it yet.
+
+Open work is enumerated below.
 <!-- current-release:end -->
 
 This file contains open actions only. Completed work is removed rather than

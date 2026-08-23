@@ -32,6 +32,7 @@ release_validate_current_documentation() {
 	local repo_root=$1 version=$2 image_count=$3 soak_count=$4
 	local release_number=${version#v} changelog="$repo_root/CHANGELOG.md"
 	local document block contract_line section_count previous_version link_count
+	local transition_line referenced
 	local -a current_documents=(
 		"$repo_root/release/README.md"
 		"$repo_root/TODO.md"
@@ -105,6 +106,18 @@ release_validate_current_documentation() {
 		|| _release_documentation_error "CHANGELOG.md has no exact $previous_version...$version release link" || return
 
 	contract_line="**Current release contract:** \`$version\`; seven release parts; $image_count images; $soak_count soak combinations; six modular targets; four shell source files."
+	# A bounded declaration states the SOURCE contract; retained evidence lives
+	# in a release directory that a source commit provably cannot carry. The cut
+	# creates release/<version>/, and scripts/verify-release-history.sh rejects a
+	# release whose qualified source commit already contains
+	# release/<version>/QUALIFICATION -- so between source finalization and the
+	# artifact commit the declared version's directory legitimately does not
+	# exist. A block may name it during that window only alongside the exact line
+	# that says when it starts to exist. EVERY OTHER release directory a block
+	# names is evidence claimed to be retained now and must be present, so an
+	# abandoned or postponed release cannot leave a declaration standing on main
+	# that points at nothing.
+	transition_line="**Pre-tag transition:** \`release/$version/\` is created by the release cut and published with the signed \`$version\` tag, so the source tree that declares this contract does not contain it yet."
 	for document in "${current_documents[@]}"; do
 		[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
 			|| _release_documentation_error "designated current-release document is not a regular nonempty file: ${document#$repo_root/}" || return
@@ -115,7 +128,60 @@ release_validate_current_documentation() {
 			| grep -Fxc "$contract_line" || true)
 		[ "$link_count" -eq 1 ] \
 			|| _release_documentation_error "${document#$repo_root/} must contain the exact current release contract: $contract_line" || return
+		while IFS= read -r referenced; do
+			[ -n "$referenced" ] || continue
+			if [ -d "$repo_root/release/$referenced" ]; then
+				continue
+			fi
+			if [ "$referenced" != "$version" ]; then
+				_release_documentation_error "${document#$repo_root/} declares retained evidence under release/$referenced/, which this tree does not contain" || return
+			fi
+			link_count=$(awk '{ sub(/^>[[:space:]]*/, ""); print }' <<<"$block" \
+				| grep -Fxc "$transition_line" || true)
+			[ "$link_count" -eq 1 ] \
+				|| _release_documentation_error "${document#$repo_root/} names the not-yet-staged release/$version/ and must carry the exact pre-tag transition line: $transition_line" || return
+		done < <(grep -oE 'release/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?/' <<<"$block" \
+			| sed -e 's#^release/##' -e 's#/$##' | sort -u)
 	done
+}
+
+# Bind the bounded current-release declarations to the inventory that was
+# actually STAGED, not to the canonical Makefile set that predicted it.
+# release_validate_current_documentation runs before any build, so the strongest
+# statement it can make is that four documents agree with what the Makefile says
+# a release will contain. This one runs on the staged directory and closes the
+# loop a human would otherwise close by eye: "21 images; 18 soak combinations"
+# in four documents against 21 files and 18 soak records on disk. It is the last
+# documentation check before the artifact commit and the tag.
+release_validate_staged_documentation() {
+	[ "$#" -eq 3 ] || return 2
+	local repo_root=$1 release_dir=$2 version=$3
+	local evidence_dir="$release_dir/evidence" path
+	local -a staged_images=() staged_soaks=()
+
+	[ -d "$release_dir" ] \
+		|| _release_documentation_error "staged release directory not found: $release_dir" || return
+	[ -d "$evidence_dir" ] \
+		|| _release_documentation_error "staged release directory retains no evidence/: $release_dir" || return
+
+	while IFS= read -r -d '' path; do
+		[ -n "$path" ] && staged_images+=("$path")
+	done < <(find "$release_dir" -maxdepth 1 -type f -name '*.hex' -print0)
+	# A soak combination is identified by the machine record its log carries, not
+	# by a filename pattern: evidence/ also retains build and aggregate logs, and
+	# soak-build.log would match any name-based count.
+	while IFS= read -r -d '' path; do
+		[ -n "$path" ] && staged_soaks+=("$path")
+	done < <(find "$evidence_dir" -maxdepth 1 -type f \
+		-exec grep -lZ '^SOAK_RESULT ' {} +)
+
+	[ "${#staged_images[@]}" -gt 0 ] \
+		|| _release_documentation_error "staged release directory contains no images: $release_dir" || return
+	[ "${#staged_soaks[@]}" -gt 0 ] \
+		|| _release_documentation_error "staged release directory retains no soak records: $release_dir" || return
+
+	release_validate_current_documentation "$repo_root" "$version" \
+		"${#staged_images[@]}" "${#staged_soaks[@]}" || return
 }
 
 # Reject a release cut from a tree that still contains -- or still references --

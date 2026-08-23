@@ -36,6 +36,7 @@ done
 # shellcheck source=../scripts/release-documentation.sh
 source "$RENDER"
 for function in release_validate_current_documentation \
+		release_validate_staged_documentation \
 		release_validate_hardware_claims \
 		release_render_scope release_render_validation \
 		release_render_pic_toolchain_rows release_render_pic12f675_flashing \

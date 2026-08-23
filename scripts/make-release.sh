@@ -47,10 +47,32 @@
 #      combos.
 #   4. Recheck source HEAD + cleanliness, then stage release/<VERSION>/ : the
 #      .hex images, SHA256SUMS, a provenance MANIFEST, a README, the
-#      soak/validation evidence, and a commit message.
+#      soak/validation evidence, and a commit message. Re-validate the bounded
+#      current-release declarations against the inventory actually staged.
 #   5. STOP. Print the exact git + signing commands for the human to run. This
 #      script NEVER commits, tags, signs, or pushes -- per project policy all
 #      modifying git operations are done by hand.
+#
+# WHERE THIS SITS IN THE RELEASE SEQUENCE
+#   A release is a four-step sequence spanning two commits and a signed tag.
+#   This script owns exactly one of those steps:
+#     1. SOURCE FINALIZATION -- an ordinary commit on main that finalizes
+#        CHANGELOG.md and the four bounded current-release declarations for
+#        vX.Y.Z. This commit is the source contract and is what gets qualified.
+#     2. PRODUCTION STAGING -- this script. It refuses to start unless step 1 is
+#        already committed (step 0 validates the declarations), and it stages
+#        release/<VERSION>/ without committing anything.
+#     3. ARTIFACT COMMIT -- one commit whose sole parent is the qualified source
+#        commit and which changes only release/<VERSION>/.
+#     4. SIGNED TAG + PUSH -- the tag names the artifact commit; tag CI rebuilds
+#        and republishes from it.
+#   Steps 1 and 3 are necessarily separate commits: verify-release-history.sh
+#   rejects a release whose qualified source commit ALREADY contains
+#   release/<VERSION>/QUALIFICATION. So between step 1 and step 3 main carries
+#   the vX.Y.Z contract while release/vX.Y.Z/ does not yet exist. That window is
+#   intended and is bounded by the qualification run; if the release is
+#   abandoned or postponed, step 1 must be reverted or corrected on main rather
+#   than left standing. See release/README.md, "How a release is sequenced".
 #
 # USAGE
 #   scripts/make-release.sh [options] <version>
@@ -244,6 +266,7 @@ declare -F release_stage_classic_avr_images >/dev/null \
 source "$REPO_ROOT/scripts/release-documentation.sh" \
 	|| die "release documentation helper could not be loaded"
 for renderer in release_validate_current_documentation \
+		release_validate_staged_documentation \
 		release_reject_branch_only_documents \
 		release_validate_hardware_claims \
 		release_validate_pic12f675_finalization \
@@ -1914,6 +1937,15 @@ scripts/verify-release-qualification.sh "${qualification_args[@]}" "$OUTPUT_DIR"
 	|| die "staged release qualification failed verification"
 ok "release qualification metadata and evidence verified."
 
+# Step 0 validated the bounded current-release declarations against the
+# canonical set the Makefile PREDICTS a release will contain. Re-validate them
+# here against what was actually staged, so the last documentation check before
+# the artifact commit and the tag is that four documents and one directory
+# agree on the same inventory.
+release_validate_staged_documentation "$REPO_ROOT" "$OUTPUT_DIR" "$VERSION" \
+	|| die "staged release inventory does not match the bounded current-release declarations"
+ok "bounded current-release declarations match the staged inventory."
+
 # Commit message for the human to use verbatim (git commit -F ...).
 release_render_commit_message "$VERSION" "$RELEASE_MODE" "$GIT_SHORT" \
 	"${#IMAGES[@]}" "$hours" > "$OUTPUT_DIR/commit_msg.txt"
@@ -1942,8 +1974,12 @@ runner and publishes the GitHub Release.
 
 The release commit must contain ONLY $OUTPUT_DIR. Tag CI requires its sole
 parent to be the source commit qualified above and rejects every changed path
-outside release/$VERSION/. Finalize changelog/status documentation before
-starting the production run. Ensure the remote protects v* tags from update and
+outside release/$VERSION/, so changelog/status documentation is finalized in the
+PRECEDING commit -- as it already was, or this run would not have started.
+Until the tag below is pushed, main carries the $VERSION contract while
+release/$VERSION/ is unpublished; if you abandon or postpone the release from
+here, revert or correct that source-finalization commit rather than leaving the
+declaration standing. Ensure the remote protects v* tags from update and
 deletion; CI rechecks the remote target immediately before publication, but no
 workflow can make two separate GitHub API operations atomic.
 

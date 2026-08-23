@@ -114,7 +114,9 @@ setup_fixture() {
 	git -C "$repo" config user.name "Release History Test"
 	git -C "$repo" config user.email "release-history@example.invalid"
 	printf 'base\n' > "$repo/base.txt"
-	git -C "$repo" add base.txt scripts/verify-release-history.sh
+	printf '<!-- current-release:start -->\ndeclaration\n<!-- current-release:end -->\n' \
+		> "$repo/TODO.md"
+	git -C "$repo" add base.txt TODO.md scripts/verify-release-history.sh
 	git -C "$repo" -c commit.gpgsign=false commit -qm base
 	base_sha=$(git -C "$repo" rev-parse HEAD)
 	primary=$(git -C "$repo" symbolic-ref --short HEAD)
@@ -159,6 +161,13 @@ setup_fixture() {
 		mkdir -p "$repo/release/other"
 		printf 'wrong release\n' > "$repo/release/other/file.txt"
 		git -C "$repo" add release/other/file.txt
+	elif [ "$extra_path" = documentation ]; then
+		# D3: the wording a tag carries must be the wording that was qualified.
+		# Source finalization is a SEPARATE, earlier commit precisely so the
+		# artifact commit cannot restate a bounded current-release declaration
+		# that no qualification run ever measured.
+		printf 'restated release contract\n' >> "$repo/TODO.md"
+		git -C "$repo" add TODO.md
 	fi
 	git -C "$repo" -c commit.gpgsign=false commit -qm release
 	if [ "$merge_mode" = merge ]; then
@@ -206,6 +215,10 @@ expect_fail "release commit changes source path" "outside release/$version/" \
 
 setup_fixture source sibling
 expect_fail "release commit changes another release" "outside release/$version/" \
+	"$snapshot" "$version" "$release_sha"
+
+setup_fixture source documentation
+expect_fail "release commit restates a bounded declaration" "outside release/$version/" \
 	"$snapshot" "$version" "$release_sha"
 
 setup_fixture source none merge
