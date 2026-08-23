@@ -1458,7 +1458,7 @@ pic10f322-test-gpsim: pic10f322 $(PIC10F32X_GPSIM_REGS)
 # pure core, and all three output drivers. This complements the independent
 # golden-model percentage gate and the real-HEX gpsim/libgpsim behavior gates.
 .PHONY: pic10f322-coverage-check-fw
-pic10f322-coverage-check-fw:
+pic10f322-coverage-check-fw: host-compiler-valid
 	@HOSTCC="$(HOSTCC)" GCOV="$(GCOV)" COVERAGE_DIR="$(abspath $(COVERAGE_DIR))" \
 		test/pic/fw_coverage/run_fw_coverage.sh pic10f322
 
@@ -2796,7 +2796,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # failure is reported, not whether it is caught. A new gate may go in either
 # half, and lands in both aggregates either way.
 TEST_GATES_EARLY = \
-        python-version-valid analyze test-static-assert-guards \
+        python-version-valid host-compiler-valid analyze test-static-assert-guards \
         test-host test-model-check test-symbolic test-cbmc \
         test-fuses test-stack-bound test-stack-bound-regression \
         test-stack-bound-pic-regression test-flash-budget-regression \
@@ -2827,12 +2827,26 @@ TEST_LONG_GATES = $(TEST_GATES_EARLY) test-mutation $(TEST_GATES_LATE)
 # The mandatory host gates use subprocess.run(capture_output=..., text=...),
 # both added in Python 3.7. Keep this first in each aggregate so an unsupported
 # host gets the actionable contract diagnostic before any Python child gate.
+# host-compiler-valid follows it for the same reason, covering the C side.
 python-version-valid:
 	@if ! command -v python3 >/dev/null 2>&1; then \
 		echo "FAIL: Python 3.7 or newer is required by the repository host gates; python3 was not found." >&2; \
 		exit 1; \
 	fi
 	@python3 test/python_version.py
+
+# The C counterpart of python-version-valid, and second in each aggregate for
+# the same reason: every host gate that compiles firmware sources natively uses
+# -Werror -Wconversion, and GCC 9 and older report a false narrowing there (see
+# test/host_compiler_version.sh). Without this the host would instead meet a
+# wall of -Werror output from whichever gate happened to run first.
+#
+# Probed, never assumed: this is NOT a parse-time $(HOSTCC) probe. One of those
+# leaks a compiler-not-found error into every make invocation, including
+# `make print-%` (see the STRICT_TOOLS notes), so the check lives in a recipe.
+.PHONY: host-compiler-valid
+host-compiler-valid:
+	@HOSTCC="$(HOSTCC)" test/host_compiler_version.sh "$(HOSTCC)"
 
 # Default `make test`: FAST workload. Runs static analysis, the host golden
 # model, the exhaustive state-space model check, the symbolic single-step proof,
@@ -4358,7 +4372,7 @@ pic10f320-test-fault-host:
 # Runs per variant: the firmware's #ifdef output stages give the three variants
 # 84 / 95 / 100 executable lines, so a single-variant run would leave real
 # firmware logic unmeasured. pic10f320-test-host-variants sweeps all three.
-pic10f320-coverage-check-fw: variant-selectors-valid
+pic10f320-coverage-check-fw: variant-selectors-valid host-compiler-valid
 	@# Local executability is required everywhere, including source archives.
 	@# Inside a worktree, also verify what CI will receive from the Git index.
 	@if [ ! -x "$(PIC10F320_COVERAGE_FW_GATE)" ]; then \
@@ -5546,7 +5560,7 @@ pic12f675-analyze-misra: src/bypass_mcu_pic12f675.c $(PIC12F675_HEADERS) $(MISRA
 # pure core, and all three unmodified output drivers. Uses a classic-PIC SFR mock
 # and needs no XC8, DFP or simulator installation.
 .PHONY: pic12f675-coverage-check-fw
-pic12f675-coverage-check-fw:
+pic12f675-coverage-check-fw: host-compiler-valid
 	@HOSTCC="$(HOSTCC)" GCOV="$(GCOV)" COVERAGE_DIR="$(abspath $(COVERAGE_DIR))" \
 		test/pic/fw_coverage/run_fw_coverage.sh pic12f675
 

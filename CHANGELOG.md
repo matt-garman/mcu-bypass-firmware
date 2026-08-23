@@ -238,6 +238,25 @@ file is the human-readable summary of *what changed*.
   enumerated, so a new one is covered when it is written; shipped
   `release/<version>/` directories are excluded as immutable artifacts.
 
+- **The host C compiler now has a published, enforced minimum: GCC 10, or any
+  Clang.** GCC 9 and older report a false narrowing on the PIC shells' OR-folded
+  integrity checks -- they fold an explicit `(uint8_t)` cast away whenever the
+  operand provably fits in eight bits (a narrow bitfield read, or a read masked
+  with a small constant) and then blame the compound assignment that writes the
+  folded result back. Every host gate compiles firmware with `-Werror
+  -Wconversion`, so on those compilers `pic10f322-coverage-check-fw` failed over
+  correct firmware; measured here, GCC 9.5.0 reports four such errors and GCC
+  10.5.0 none, on identical sources. Rewriting the casts to satisfy GCC 9 was
+  measured at four PIC10F322 words, which the 512-word `cd4053_with_mute`
+  variant cannot spare, so the floor is enforced instead of paid for. The new
+  `host-compiler-valid` gate runs second in every aggregate, right after
+  `python-version-valid`, and is a prerequisite of all three
+  `*-coverage-check-fw` targets and of the local-CI preflight; it probes the
+  construct itself rather than parsing a version banner, so a compiler is judged
+  by what it accepts. `README.md`, `TOOLCHAIN.adoc`, and `test/README.md`
+  publish the floor, and a contract test holds all three in agreement with the
+  enforced constant.
+
 ## [0.9.9] - 2026-08-15
 
 ### Fixed

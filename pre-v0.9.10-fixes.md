@@ -390,14 +390,81 @@ owner.
 
 **Acceptance criteria**
 
-- [ ] `pic10f322-coverage-check-fw` passes with the documented minimum host
+- [x] `pic10f322-coverage-check-fw` passes with the documented minimum host
   compiler and all strict conversion warnings enabled.
-- [ ] The target XC8 build remains warning-clean and within every variant's
+- [x] The target XC8 build remains warning-clean and within every variant's
   flash budget.
-- [ ] No cast suppresses a real narrowing or changes the integrity predicate.
-- [ ] Source coverage still measures the shipping configuration with
+- [x] No cast suppresses a real narrowing or changes the integrity predicate.
+- [x] Source coverage still measures the shipping configuration with
   `BYPASS_CTX_CHECK` enabled.
-- [ ] Relevant static analysis, model, target, mutation, and build tests pass.
+- [x] Relevant static analysis, model, target, mutation, and build tests pass.
+
+**Implementation note**
+
+Resolved by the item's third bullet -- a defined, documented and enforced host
+compiler floor -- rather than by changing the firmware. No shipping source was
+touched, so the last four criteria hold by construction: the images are
+byte-identical to `9a7c479`.
+
+*The defect, reproduced.* No GCC 8.5 exists on the implementation host, so the
+Ubuntu `gcc-9` 9.5.0 packages were unpacked into a scratch prefix (not
+installed). GCC 9 shares the pre-GCC-10 behaviour and reports **exactly four**
+errors, all in `src/bypass_mcu_pic10f322.c` -- lines 166, 167, 170 and 232 --
+matching the review's count and both ranges it cited. A full host-suite sweep
+under GCC 9 found no other diagnostic anywhere in the repository; the PIC12F675
+lane is clean, as the review also reported.
+
+*Why those four.* The casts are already present. GCC 9 and older fold an
+explicit `(uint8_t)` cast away whenever the operand provably fits in eight bits
+-- a narrow bitfield read (`OSCCONbits.IRCF`, `WDTCONbits.WDTPS`,
+`OPTION_REGbits.nWPUEN`) or a read masked with a small constant (`ANSELA &
+BYPASS_OUTPUT_DDR_MASK`) -- leaving an `int`-typed tree, and then report the
+compound assignment that narrows it back. Lines 168, 169 and 231 survive
+because their outermost cast is not foldable. GCC 10 stopped reporting it;
+measured on identical sources, GCC 9.5.0 gives four errors and GCC 10.5.0 gives
+none, which is what fixes the floor at 10 rather than 9.
+
+*Why not the source change.* Making the writeback explicit
+(`diff = (uint8_t)(diff | X)`) costs exactly one PIC10F322 word per converted
+site: `IORWF f,F` becomes `IORWF f,W` plus `MOVWF f`. Five candidates were
+built and measured against the 512-word budget (all GCC 9 clean, all passing
+`make pic10f322-test`):
+
+| candidate | simple | mute | relay |
+| --- | --- | --- | --- |
+| unchanged | 476 | 502 | 493 |
+| all ten folds explicit | 486 | **overflows** | 503 |
+| the four hoisted into `uint8_t` locals | 485 | 511 | 502 |
+| uniform: first term initializes, folds explicit | 480 | 506 | 497 |
+| minimal: only the four diagnosed sites | 476 | 502 | 493 |
+
+The uniform rewrite is the only readable one that fits, and it spends four of
+the ten words `cd4053_with_mute` has left to satisfy a compiler that has been
+superseded for five years. The minimal rewrite is free but leaves two lines in
+a block differing from their neighbours for a reason no reader can see, and
+re-breaks on any edit that makes another term's cast foldable.
+
+*What is enforced.* `test/host_compiler_version.sh`, the C counterpart of
+`test/python_version.py`, and the `host-compiler-valid` gate that runs it. It
+**probes the construct** rather than parsing a version banner, so a compiler is
+judged by what it accepts and a hypothetical backport would be accepted
+correctly; `MINIMUM_GCC` exists to make the diagnostic actionable and to be the
+number the documentation publishes. The gate is second in `TEST_GATES_EARLY`
+(right after `python-version-valid`, whose comment explains the position), a
+prerequisite of `pic10f322-`, `pic12f675-` and `pic10f320-coverage-check-fw`
+for direct invocation, and part of `assert_host_toolchain` so a local CI
+reproduction says so in PREFLIGHT instead of twelve minutes into the PIC job.
+Verified end to end: on GCC 9 all three entry points stop with the diagnostic
+naming the compiler, its version, its own error text and the corrective action;
+on GCC 10.5.0 `pic10f322-coverage-check-fw` runs green.
+
+*Drift.* Five contract checks in `test/test_release_preflight.sh` (85 total,
+was 80). Each was confirmed to bite by reverting the thing it guards: dropping
+the gate from the aggregate, dropping the prerequisite from a coverage target,
+bumping `MINIMUM_GCC` without republishing it, making the gate accept every
+compiler, and removing the corrective action from the diagnostic. The published
+floor is matched against the document with its line wrapping collapsed, so
+reflowing the paragraph that carries it is not a failure.
 
 ### T2 - Put both modular PIC shipping-source coverage gates in `make test`
 
@@ -638,9 +705,9 @@ Record each completed item with its commit ID and decisive validation command.
 | --- | --- | --- | --- |
 | R1 | IMPLEMENTED | `7dab4db` | `make CC=: test-pic-build`; `test/test_release_qualification.sh`; `test/test_workflow_syntax.sh` |
 | R2 | DONE | `7b54dea` | `test/test_release_preflight.sh`; `test/test_release_provenance.sh`; `make test-workflow-syntax test-release-history` |
-| R3 | DONE | (pending) | `make test-pic-build test-release-preflight test-release-qualification`; `scripts/make-release.sh --preflight v0.9.10` |
+| R3 | DONE | `9a7c479` | `make test-pic-build test-release-preflight test-release-qualification`; `scripts/make-release.sh --preflight v0.9.10` |
 | F1 | DONE | `a8fe23d`, `b14cd7a` | `make test`; relay fault + coverage lanes on all six substrates; PIC/AVR flash-budget gates |
-| T1 | OPEN | | |
+| T1 | DONE | (pending) | `make test`; `make pic10f322-coverage-check-fw HOSTCC=gcc-10`; `test/test_release_preflight.sh` |
 | T2 | OPEN | | |
 | D1 | OPEN | | |
 | D2 | OPEN | | |

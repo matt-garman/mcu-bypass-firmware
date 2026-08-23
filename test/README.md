@@ -29,6 +29,7 @@ test/
   check_flash_budget.sh     shared: exact flash-budget checker
   check_stack_depth_pic.sh  shared: PIC hardware return-stack depth gate
   python_version.py         shared: Python 3.7+ host-gate prerequisite
+  host_compiler_version.sh  shared: GCC 10+/Clang host-gate prerequisite
   test_attiny202_build.sh   shared: fail-closed AVR-XT build checks
   test_avr_build_rebuild.sh shared: classic AVR rebuild/partial-output checks
   test_ci_local_routing.sh  shared: local-CI skip-option command routing
@@ -410,8 +411,9 @@ ultimately validated on a real part at the bench.
 
 `make pic12f675-coverage-check-fw` host-compiles the real
 `bypass_mcu_pic12f675.c`, shared pure core, and all three unmodified output
-drivers under gcov. It needs only Bash, a host C compiler, and matching gcov;
-XC8, the device pack, and gpsim are not involved.
+drivers under gcov. It needs only Bash, a host C compiler (GCC 10 or
+newer, or Clang), and matching gcov; XC8, the device pack, and gpsim are not
+involved.
 
 The shared coverage harness selects a PIC12F675 mock `<xc.h>` that preserves the
 classic-PIC distinctions the firmware depends on: GPIO intent and physical pin
@@ -456,8 +458,9 @@ Real-tool PIC targets are intentionally outside the default AVR `make test` path
 XC8, the PIC10-12Fxxx DFP, gpsim, and libgpsim may be absent on a normal AVR
 development machine. The fake-XC8 `test-pic-build` regression is host-only and
 is included in `make test`; targets needing external PIC tools may skip cleanly.
-The host source-coverage gate requires Bash, a host C compiler, and matching
-gcov. CI/release use `STRICT_TOOLS=1` plus the fail-closed aggregate described
+The host source-coverage gate requires Bash, a host C compiler (GCC 10 or
+newer, or Clang -- `host-compiler-valid` is a prerequisite of all three
+`*-coverage-check-fw` targets), and matching gcov. CI/release use `STRICT_TOOLS=1` plus the fail-closed aggregate described
 below so a green gate means every PIC layer actually ran.
 
 | layer | target | what it proves | substrate |

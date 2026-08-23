@@ -26,14 +26,24 @@ mkdir -p "$archive" "$tools"
 # Use the same byte/mode transport as a published source archive. Overlay the
 # working Makefile so this regression can validate an uncommitted fix; after the
 # fix is committed, the bytes are identical to the archived copy.
+#
+# host_compiler_version.sh rides along for the same reason and must: it backs
+# the host-compiler-valid prerequisite the overlaid Makefile gives every
+# *-coverage-check-fw target, so an uncommitted change to that pair would
+# otherwise fail here as a missing interpreter rather than as itself. -p keeps
+# the executable mode `git archive` would have carried.
 if command -v git >/dev/null 2>&1 \
 		&& git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 	git -C "$ROOT" archive --format=tar HEAD | tar -xf - -C "$archive"
 	cp "$ROOT/Makefile" "$archive/Makefile"
+	cp -p "$ROOT/test/host_compiler_version.sh" \
+		"$archive/test/host_compiler_version.sh"
 else
 	# Running `make test` from an extracted archive must remain possible too.
 	mkdir -p "$archive/test/pic10f320/fault"
 	cp -p "$ROOT/Makefile" "$archive/Makefile"
+	cp -p "$ROOT/test/host_compiler_version.sh" \
+		"$archive/test/host_compiler_version.sh"
 	cp -p "$ROOT/test/pic10f320/fault/check_fw_coverage.sh" \
 		"$archive/test/pic10f320/fault/check_fw_coverage.sh"
 fi

@@ -431,6 +431,12 @@ assert_host_toolchain() {
 		die "install the above (see TOOLCHAIN.adoc). There is no --skip for these:
       the build matrix and \`make test\`/\`test-long\` run unconditionally."
 	fi
+	# Present is not the same as usable: every host gate compiles firmware with
+	# -Werror -Wconversion, which GCC 9 and older fail on the PIC shells. Same
+	# contract `make host-compiler-valid` enforces, run here so a full local CI
+	# reproduction says so in PREFLIGHT instead of ~12 minutes into the PIC job.
+	"$REPO_ROOT/test/host_compiler_version.sh" "$hostcc" \
+		|| die "host C compiler too old (see TOOLCHAIN.adoc, \"Host toolchain\")."
 	ok "Host/AVR toolchain present ($cc + $hostcc + simavr + $cppcheck_bin + Python/PyYAML + gpg + $cbmc + analyzer + $gcov)."
 }
 

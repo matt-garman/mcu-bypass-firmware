@@ -25,6 +25,7 @@ REAL_DIRNAME=$(command -v dirname) || { printf 'FAIL: dirname is required\n' >&2
 REAL_STAT=$(command -v stat) || { printf 'FAIL: stat is required\n' >&2; exit 1; }
 REAL_CP=$(command -v cp) || { printf 'FAIL: cp is required\n' >&2; exit 1; }
 REAL_MKTEMP=$(command -v mktemp) || { printf 'FAIL: mktemp is required\n' >&2; exit 1; }
+REAL_CC=$(command -v "${HOSTCC:-cc}") || { printf 'FAIL: a host C compiler is required\n' >&2; exit 1; }
 # shellcheck source=scripts/release-provenance.sh
 source "$ROOT/scripts/release-provenance.sh"
 # shellcheck source=scripts/release-documentation.sh
@@ -1057,6 +1058,92 @@ if grep -Fxq 'yaml-import' "$tool_log"; then
 	fail "old-Python preflight continued into the PyYAML child probe"
 fi
 assert_no_release_scratch
+checks=$((checks + 1))
+
+# --- host C compiler floor ---------------------------------------------------
+# The C counterpart of the Python minimum above. GCC 9 and older report a FALSE
+# narrowing on the PIC shells' OR-folded integrity checks, so every host gate
+# that compiles firmware under -Werror -Wconversion fails on them over correct
+# sources. The floor is PROBED, never assumed from a version string, so these
+# checks drive the probe itself.
+host_cc_gate="$ROOT/test/host_compiler_version.sh"
+[ -x "$host_cc_gate" ] \
+	|| fail "test/host_compiler_version.sh is missing or not executable"
+"$host_cc_gate" >"$output" 2>&1 \
+	|| fail "the compiler running this suite fails the floor it publishes: $(cat "$output")"
+checks=$((checks + 1))
+
+# The aggregate must diagnose an unusable compiler before any gate compiles,
+# and the three shipping-source coverage gates -- the ones that actually break
+# on an old GCC -- must do the same when invoked directly, outside `make test`.
+read -r first_gate second_gate _rest <<<"$early_gates"
+{ [ "$first_gate" = python-version-valid ] && [ "$second_gate" = host-compiler-valid ]; } \
+	|| fail "the host-minimum gates are not the first two aggregate gates (got '$first_gate' '$second_gate')"
+for target in pic10f322-coverage-check-fw pic12f675-coverage-check-fw \
+		pic10f320-coverage-check-fw; do
+	grep -Eq "^${target}:.*host-compiler-valid" "$ROOT/Makefile" \
+		|| fail "$target does not enforce the host compiler minimum when run directly"
+done
+checks=$((checks + 1))
+
+# Enforced floor and published floor cannot drift: bumping MINIMUM_GCC without
+# republishing it (or the reverse) fails here rather than in a user's build.
+minimum_gcc=$(sed -n 's/^MINIMUM_GCC=\([0-9][0-9]*\)$/\1/p' "$host_cc_gate")
+[ -n "$minimum_gcc" ] \
+	|| fail "could not read MINIMUM_GCC from test/host_compiler_version.sh"
+# Matched against the document with its line wrapping collapsed: the published
+# floor must survive a reflow of the paragraph that carries it.
+for document in README.md TOOLCHAIN.adoc test/README.md; do
+	tr '\n' ' ' < "$ROOT/$document" | tr -s '[:space:]' ' ' > "$work/floor-prose.txt"
+	grep -Fq "GCC $minimum_gcc or newer" "$work/floor-prose.txt" \
+		|| grep -Fq "Minimum host gcc version: $minimum_gcc" "$work/floor-prose.txt" \
+		|| fail "$document does not publish the enforced host compiler floor (GCC $minimum_gcc)"
+done
+checks=$((checks + 1))
+
+# A compiler that rejects the construct is refused with an actionable
+# diagnostic. The fake forwards EVERYTHING except the probe compile, so the
+# version it reports is genuinely detected rather than fabricated by the fake.
+fake_cc="$work/fake-old-cc"
+cat > "$fake_cc" <<FAKE
+#!/usr/bin/env bash
+for arg in "\$@"; do
+	case "\$arg" in
+	*probe.c)
+		echo "\$arg:13:13: error: conversion from 'int' to 'uint8_t' may change value [-Werror=conversion]" >&2
+		exit 1
+		;;
+	esac
+done
+exec "$REAL_CC" "\$@"
+FAKE
+chmod +x "$fake_cc"
+host_cc_rc=0
+"$host_cc_gate" "$fake_cc" >"$output" 2>&1 || host_cc_rc=$?
+[ "$host_cc_rc" -eq 1 ] \
+	|| fail "an unusable host compiler was not rejected (rc=$host_cc_rc)"
+grep -Fq "GCC $minimum_gcc or newer" "$output" \
+	|| fail "old-compiler diagnostic omitted the required minimum"
+grep -Fq "HOSTCC=gcc-$minimum_gcc" "$output" \
+	|| fail "old-compiler diagnostic omitted the corrective action"
+grep -Fq 'may change value' "$output" \
+	|| fail "old-compiler diagnostic omitted the compiler's own explanation"
+grep -Eq 'found (gcc|clang) [0-9]+\.' "$output" \
+	|| fail "old-compiler diagnostic omitted the detected compiler and version"
+checks=$((checks + 1))
+
+# A compiler that is absent, and a malformed invocation, are distinguished from
+# a compiler that is merely too old.
+host_cc_rc=0
+"$host_cc_gate" "$work/definitely-not-a-compiler" >"$output" 2>&1 || host_cc_rc=$?
+[ "$host_cc_rc" -eq 1 ] \
+	|| fail "a missing host compiler was not rejected (rc=$host_cc_rc)"
+grep -Fq 'was not found' "$output" \
+	|| fail "missing host compiler failed without its own diagnostic"
+host_cc_rc=0
+"$host_cc_gate" one two >"$output" 2>&1 || host_cc_rc=$?
+[ "$host_cc_rc" -eq 2 ] \
+	|| fail "host compiler gate did not reject a malformed invocation with rc 2"
 checks=$((checks + 1))
 
 # Independent missing capabilities are aggregated exactly as the real preflight

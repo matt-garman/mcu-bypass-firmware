@@ -363,6 +363,24 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   Either compiler works for all test/* host binaries.  The Makefile uses gcc
   by default (HOSTCC ?= gcc); set HOSTCC=clang to override.
 
+  Minimum host gcc version: 10 (any Clang).  Every host gate compiles firmware
+  sources with -Werror -Wconversion, and gcc 9 and older report a FALSE
+  narrowing there: they fold an explicit (uint8_t) cast away whenever the
+  operand provably fits in eight bits -- a narrow bitfield read, or a read
+  masked with a small constant -- and then blame the compound assignment that
+  writes the folded result back.  The PIC10F322 shell's OR-folded integrity
+  checks use exactly that shape, so gcc 9 rejects
+  pic10f322-coverage-check-fw over correct firmware.  gcc 10 (2020) fixed the
+  diagnostic; measured here, gcc 9.5.0 reports four such errors and gcc 10.5.0
+  reports none, on identical sources.  Writing the casts to satisfy gcc 9 costs
+  PIC10F322 flash the 512-word cd4053_with_mute variant cannot spare, so the
+  floor is enforced instead: `make host-compiler-valid` probes the construct
+  itself (test/host_compiler_version.sh) and every aggregate runs it second,
+  right after python-version-valid.
+
+  Note this is a floor on the HOST compiler only.  It says nothing about the
+  image-defining avr-gcc/XC8 pins below, which are exact-version contracts.
+
 == Static analysis
 
   clang-tidy:   18.1.3  (from LLVM 18 packages)
