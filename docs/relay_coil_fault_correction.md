@@ -127,9 +127,17 @@ required off mode, taken from DS41190G Figure 6-2:
 
 | `CM<2:0>` | One-bit transition from `111` | GP2 owner | Relay fixture |
 | --- | --- | --- | --- |
-| `110` | clear CM0 | `COUT` | both `CINV` settings; physical GP2 must follow comparator output before escalation and be low at the spin |
-| `101` | clear CM1 | GPIO | both `CINV` settings; physical GP2 must remain at the settled-low GPIO level |
-| `011` | clear CM2 | GPIO | both `CINV` settings; physical GP2 must remain at the settled-low GPIO level |
+| `110` | clear CM0 | `COUT` | GP0 driven low/high; physical GP2 must follow both comparator output states before escalation and be low at the spin |
+| `101` | clear CM1 | GPIO | bounded GP0-low/high ownership fixtures; physical GP2 must remain at the settled-low GPIO level |
+| `011` | clear CM2 | GPIO | bounded GP0-low/high ownership fixtures; physical GP2 must remain at the settled-low GPIO level |
+
+Only mode `110` continues into the firmware gate and escalation: it is the
+reachable mode that can energize the GP2 relay coil and therefore carries the
+complete de-energization/reset/recovery proof. In the observed mode-110
+fixtures, gpsim stores `CINV` but does not invert its modeled `COUT`; it also crashes if
+execution continues with mode `101` active. The `101`/`011` cases therefore
+establish ownership and pin voltage over two settling cycles, restore
+comparator-off before the firmware gate, and make no reset-path claim.
 
 The brief input intervals rely on the board's fail-safe pull-downs. These paths
 are bounded responses to detected register-state faults; they do not claim to
@@ -267,10 +275,10 @@ The physical-pin extensions add independent negative controls:
 
 The AVR-XT matrix also exercises each coil's pull-up, one-bit direction upset,
 and a combined input/stale-OUT/PULLUPEN+INVEN state. The PIC12F675 relay matrix
-covers all three comparator modes one bit away from off (`110`, `101`, `011`); mode
-`110`, the reachable mode that owns GP2, is run with both comparator output
-polarities. These are modeled electrical pin checks, not relay-mechanical or
-bench evidence.
+covers all three comparator modes one bit away from off (`110`, `101`, `011`);
+mode `110`, the reachable mode that owns GP2, is run with both comparator output
+states through full escalation. These are modeled electrical pin checks, not
+relay-mechanical or bench evidence.
 
 One consequence worth naming: because the recovery pulse is now measured, a
 mutant that shortens the *design* pulse below the datasheet minimum is caught by

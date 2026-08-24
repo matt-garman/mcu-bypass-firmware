@@ -191,11 +191,13 @@ test/
                                    single-bit comparator-mode neighborhood, so
                                    low GPIO intent cannot masquerade as a
                                    de-energized pad. CD4053 lanes retain the
-                                   representative mode-110 guard case; gpsim's
-                                   p12f675 model was observed to crash when mode
-                                   101 remained active through the non-relay
-                                   watchdog spin, while mode 011 adds no distinct
-                                   guard coverage there.
+                                   representative mode-110 guard case. The relay
+                                   lane drives GP0 low/high and runs mode 110
+                                   through full escalation for both COUT states;
+                                   modes 101/011 are bounded ownership fixtures
+                                   restored after two settling cycles and before
+                                   the firmware gate because gpsim's p12f675
+                                   model crashes with mode 101 active.
                                    Parked GP4 is injected through its direction,
                                    shadow, pin and ANS3 guard paths
                                                      (make pic12f675-test-fault)

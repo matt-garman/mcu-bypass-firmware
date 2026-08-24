@@ -63,9 +63,10 @@
 // Exact libgpsim pin names for physical relay-coil and comparator observation.
 // GPIO register readback is insufficient when COUT owns GP2, so the fault lane
 // attaches nodes to both package pins and measures their voltages directly. GP0
-// also receives a passive node because modes 101/011 use GP0/GP1 as comparator
-// inputs, ensuring gpsim evaluates the complete relay fixture with defined
-// analog nodes on both inputs.
+// also receives a normally high-impedance source that the fault lane drives low
+// and high while the comparator fixture is active; this supplies both modeled
+// output states without relying on the observed mode-110 behavior where gpsim
+// stores CINV but does not invert its modeled COUT.
 #define PIC_REG_COMPARATOR_INPUT_PIN_NAME "gpio0"
 #define PIC_REG_RESET_COIL_PIN_NAME "gpio1"
 #define PIC_REG_SET_COIL_PIN_NAME   "gpio2"
