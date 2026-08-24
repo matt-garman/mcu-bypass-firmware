@@ -17,6 +17,15 @@ This document is the work-detail, planning, and TODO record for closing those
 items. Check an item only after its implementation, focused regression tests,
 and relevant aggregate validation have passed.
 
+A second-pass review of HEAD `dd26fdf` on 2026-08-24 found additional work.
+Most of the first-pass items below are complete, but two fault-escalation paths
+do not yet deliver the physical coil-de-energization guarantee that F1 claims;
+the static PIC12F675 flashing guide contradicts the guarded programming policy;
+and the AVR convenience programming goals can touch hardware before proving the
+selected image builds. The second-pass items are recorded after G1. They reopen
+the final candidate gate even though the earlier `fe8ecc8` gate run remains
+valuable historical evidence.
+
 ## Review scope and baseline
 
 - Compared branch head `694d918` with `main`/the signed `v0.9.9` source commit
@@ -1036,20 +1045,447 @@ test-makefile-name-contract`; and, as part of the final validation gate, `make
 test` and `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0`. No firmware
 source was touched.
 
+## Second-pass review (2026-08-24, HEAD `dd26fdf`)
+
+The first-pass work substantially improves the project, and the host and
+release-contract suites remain strong. The findings below are nevertheless
+release-significant because they expose physical-pin behavior and published
+hardware procedures that the current tests do not observe. Complete every
+release-blocking item before merge. Complete or explicitly disposition the
+lower-priority hardening items before declaring the overall release process
+finished.
+
+### F2 - Make relay escalation safe under pin-polarity and peripheral-ownership faults
+
+**Priority:** Firmware safety/correctness release blocker
+
+**Problem**
+
+F1 correctly changed an unexpectedly energized relay coil from silent
+correction to watchdog recovery, and requires `hw_force_wdt_reset()` to
+de-energize both coils before the watchdog spin. Two MCU-specific fault paths do
+not satisfy that physical guarantee:
+
+- AVR-XT detects nonzero `PORTA.PIN2CTRL` and `PORTA.PIN3CTRL`, including
+  `INVEN`, in `hw_output_state_intact()`. Its escalation path then clears the
+  corresponding `PORTA.OUT` bits. With `INVEN` set, a zero output latch drives
+  the physical pad high, so the affected relay coil can remain energized for
+  the watchdog interval even though `PORTA.OUT` reads low.
+- PIC12F675 detects a changed `CMCON`, but its escalation path only clears the
+  SRAM GPIO shadow and writes `GPIO`. A comparator mode that routes `COUT` onto
+  GP2 owns the SET-coil pad; a GPIO write alone cannot force that pad low. The
+  comparator can therefore hold the coil high until reset.
+
+The current AVR-XT fault driver classifies coil-pin `INVEN` injections as
+generic gate cases and observes reset entry or `PORTA.OUT`, not physical
+PA2/PA3. The PIC12F675 matrix proves a `CMCON` fault is detected, but does not
+prove GP2 is de-energized while comparator output owns the pad. Both tests can
+pass while the physical safety claim is false.
+
+**Recommended change**
+
+- Add MCU-specific emergency output quiescence to the escalation path. It must
+  neutralize polarity inversion, pull-up, direction, and peripheral ownership
+  that can defeat a low latch before waiting for the watchdog.
+- Define and review the write order against each datasheet so restoring GPIO
+  ownership cannot expose a stale high latch or enable an internal pull-up.
+- Preserve the output-driver abstraction for ordinary actuation; the emergency
+  path may be shell-specific because these are MCU register hazards, not output
+  stage policy.
+- On AVR-XT, inject `INVEN` on both relay-coil pins and assert the modeled
+  physical PA2/PA3 levels are inactive before reset entry, not merely that the
+  `OUT` bits are zero.
+- On PIC12F675, exercise every single-bit-reachable `CMCON` configuration. For
+  every mode where comparator output can own GP2, exercise both comparator
+  output states and require physical GP1/GP2 de-energization before the reset
+  spin.
+- Add negative controls that fail if the emergency path is reduced back to a
+  latch-only clear.
+
+Actual firmware-source changes under this item are to be made by the repository
+owner, consistent with project policy.
+
+**Acceptance criteria**
+
+- [ ] AVR-XT relay escalation de-energizes physical PA2 and PA3 under coil-pin
+  `INVEN`, pull-up, direction, and relevant combined register-state fixtures
+  before the watchdog spin.
+- [ ] PIC12F675 relay escalation de-energizes physical GP1 and GP2 when a
+  detected comparator mode owns GP2, before the watchdog spin.
+- [ ] Tests observe modeled physical pin state and kill latch-only-clear mutants.
+- [ ] The ordinary relay fault cases still produce exactly one watchdog reset
+  and one complete recovery RESET-coil pulse where the simulator models reset.
+- [ ] Flash, RAM, stack, timing, watchdog, static-analysis, target-simulator,
+  source-coverage, and mutation gates pass for both affected targets.
+- [ ] F1 documentation is updated to describe the implemented MCU-specific
+  emergency quiescence and its tested fault scope without overclaiming hardware
+  or relay-mechanical evidence.
+
+### F3 - Resolve the PIC10F320 two-write relay-coil clear
+
+**Priority:** Firmware consistency/hardening before release
+
+**Problem**
+
+`set_relay_coils_low()` in the space-constrained PIC10F320 shell clears RESET
+and SET through two separate `LATA` read-modify-writes. When both bits are high,
+one coil remains energized for one additional write; when only SET is high, the
+RESET clear delays the useful de-energization. This is an instruction-scale
+exposure, not a watchdog-scale one, but it is weaker than the one-operation
+clear used by the modular shells and should not be hidden by project-wide parity
+language.
+
+**Recommended change**
+
+- Build and measure a constant-mask, one-write `LATA` clear for the relay
+  variant.
+- Prefer that implementation if all three images remain within the 256-word
+  budget and the reviewed return-stack limit.
+- If it cannot fit, record an explicit repository-owner disposition accepting
+  the instruction-scale exception, qualify the parity claim, and retain tests
+  that expose the intermediate state rather than treating two writes as one.
+
+Actual firmware-source changes under this item are to be made by the repository
+owner.
+
+**Acceptance criteria**
+
+- [ ] The owner either adopts one constant-mask clear or records why the
+  measured resource cost requires retaining the two-write exception.
+- [ ] Target-level evidence observes the write sequence and fails if the chosen
+  contract regresses.
+- [ ] PIC10F320 flash, return-stack, image-baseline, fault, target-I/O, coverage,
+  and mutation gates pass.
+- [ ] Documentation states the exact PIC10F320 behavior and does not imply
+  stronger cross-shell parity than the implementation provides.
+
+### F4 - Make watchdog-margin assertions cover wall-clock execution
+
+**Priority:** Firmware timing hardening before release
+
+**Problem**
+
+The shared relay and muting drivers assert only `TICK_PERIOD_MS +
+blocking_delay < WDT_MIN_PERIOD_MS`. That omits sanity/context-processing
+overhead and, on interrupt-driven AVRs, ISR preemption that stretches a busy
+delay in wall time. Current margins are wide and measured pulse elongation does
+not approach the watchdog floor, but a future near-bound configuration could
+pass the assertion while violating the real pet-to-pet bound.
+
+**Recommended change**
+
+- Define a conservative per-target wall-clock upper bound that includes the
+  blocking delay, tick scheduling, bounded loop work, and AVR ISR elongation.
+- Assert that bound against the de-rated watchdog minimum used by each target.
+- Extend the static-assert mutation gate with a near-bound case, not only an
+  obviously impossible watchdog floor.
+- Keep measured simulator/disassembly timing as corroborating evidence; do not
+  present it as a substitute for the conservative compile-time inequality.
+
+Actual firmware-source changes under this item are to be made by the repository
+owner.
+
+**Acceptance criteria**
+
+- [ ] Every modular shell has a documented conservative pet-to-pet upper bound.
+- [ ] Compile-time guards fail at the true wall-clock boundary for relay and
+  muting variants.
+- [ ] Static-assert negative controls prove the overhead/preemption term is
+  load-bearing.
+- [ ] Existing timing, pulse-width, watchdog-liveness, and resource gates pass.
+
+### P1 - Remove the unsafe static PIC12F675 flashing path
+
+**Priority:** User-facing hardware safety release blocker
+
+**Problem**
+
+`README.md` currently says every downloaded release image can be flashed with no
+toolchain and sends the user to `FLASHING.md`. That document publishes raw
+PIC12F675 `ipecmd` read/write commands while also admitting that trim
+preservation and readback are not hardware-validated. This contradicts the
+guarded transaction required by `README.md` and `release/README.md`, which
+correctly prohibit substituting a raw writer because bulk erase can silently
+destroy per-device OSCCAL and BG trim.
+
+The generated release guidance is contract-tested, but the static
+`FLASHING.md` path is not governed by the same safety contract. The suite is
+therefore green while two durable instructions disagree about whether the raw
+write is permitted.
+
+**Recommended change**
+
+- Remove the raw PIC12F675 programming recipe from `FLASHING.md`.
+- Make the no-toolchain quickstart explicitly exclude PIC12F675 until a safe,
+  hardware-validated downloaded-image procedure exists.
+- Direct PIC12F675 users to the guarded `pic12f675-preflight` plus
+  `pic12f675-release-program` transaction and state its pinned source/toolchain
+  requirements plainly.
+- Extend the documentation/source contract to scan every durable static guide,
+  not only generated release guidance, for forbidden raw PIC12F675 writer
+  commands and contradictory no-toolchain claims.
+- Add negative fixtures restoring the current unsafe block and prove preflight
+  rejects them by name.
+
+**Acceptance criteria**
+
+- [ ] No durable current document publishes a raw PIC12F675 writer command.
+- [ ] The downloaded-image/no-toolchain claim names PIC12F675 as an exception.
+- [ ] All published PIC12F675 release writes use the guarded transaction and
+  repeat the required release identity for recovery.
+- [ ] Documentation contracts fail on raw `ipecmd`/`pk2cmd` writers, omission of
+  the exception, or disagreement between `README.md`, `FLASHING.md`, and
+  `release/README.md`.
+- [ ] Release preflight, qualification, programming-image, recovery, and static
+  documentation tests pass.
+
+### P2 - Build and validate AVR images before writing fuses
+
+**Priority:** User-facing hardware safety release blocker
+
+**Problem**
+
+The ATtiny202, ATtiny13A, and generated tinyx5 `*-program` goals list the fuse
+goal before the flash goal. The global serialization wrapper forces `-j1`, so
+Make performs the fuse write first. The selected firmware image is only a
+prerequisite of the later flash goal. A compile, link, size, or HEX-validation
+failure can therefore leave a device with changed clock/watchdog/BOD fuses and
+no matching firmware image.
+
+This sequencing defect predates the polish branch, but the current quickstart
+and flashing documentation recommend the convenience goals. Reference-quality
+programming commands must establish every software precondition before the
+first hardware mutation.
+
+**Recommended change**
+
+- Restructure every AVR `*-program` goal so the selected image is built and
+  validated before either fuse or flash commands can invoke `avrdude`.
+- Preserve the required hardware order after that software gate: fuses first,
+  flash second, with no parallel programmer invocations.
+- Add a fake-compiler/fake-`avrdude` regression proving a failed image build or
+  validation invokes no programmer command.
+- Add a success-path ordering check proving build/validation precedes fuse and
+  fuse precedes flash for ATtiny202, ATtiny13A, ATtiny45, and ATtiny85.
+- Update quickstart/flashing prose to state the transaction order.
+
+**Acceptance criteria**
+
+- [ ] Every AVR `*-program` goal proves the selected HEX exists and passes its
+  normal validation before touching hardware.
+- [ ] A failed build, size gate, or IHEX validation results in zero `avrdude`
+  invocations.
+- [ ] Successful programming performs exactly one ordered fuse transaction and
+  one flash transaction for the selected part and variant.
+- [ ] Serialization, rebuild, variant-selector, fuse-injection, flashing
+  documentation, and normal build tests pass.
+
+### D4 - Refresh v0.9.10 metadata and current measurements
+
+**Priority:** Documentation correctness before merge
+
+**Problem**
+
+The changelog dates `v0.9.10` to 2026-08-21 even though candidate commits were
+made later and the release has not occurred. Current resource tables still show
+pre-F1 AVR and PIC10F320 values, while the F1 design record reports the later
+measurements. The PIC10F320 validation document says the standing expected-image
+manifest contains the run-4 relay digest, but the checked-in manifest contains
+the run-5 fail-safe-resynchronization digest.
+
+**Recommended change**
+
+- Set the v0.9.10 changelog date to the actual source-finalization date, after
+  the final code/documentation changes and before production staging.
+- Regenerate and publish resource figures from the final candidate builds; do
+  not copy the current intermediate values if F2-F4 change them again.
+- Update the resource summary, per-family tables, free-space prose, and any
+  binding-image statements together.
+- Describe the PIC10F320 standing manifest as the run-5 baseline and preserve
+  the earlier run transcripts as historical evidence.
+- Add or extend contracts that compare current exact tables and baseline prose
+  with retained build/image evidence where practical.
+
+**Acceptance criteria**
+
+- [ ] The changelog carries the real v0.9.10 source-finalization date.
+- [ ] Every current resource figure matches a retained final-candidate build.
+- [ ] PIC10F320 free-space and binding-image prose matches the final relay image.
+- [ ] The expected-image manifest is described as run 5 or a later intentional
+  rebaseline, never run 4.
+- [ ] Changelog, release-history, current-release declaration, image-baseline,
+  and documentation contract tests pass.
+
+### D5 - Reconcile remaining simulator and toolchain wording
+
+**Priority:** Documentation polish before merge
+
+**Problem**
+
+Several current statements still describe the superseded yasimavr timing model:
+`DESIGN_DOCUMENTATION.adoc` says an unpatched cycle defect prevents
+in-simulator width measurement, and `TODO.md` describes moving to signal hooks
+as future work, while the current tracer already timestamps every edge from a
+signal hook and checks delivered width. Workflow comments also call simulator
+traces "physical" output timing. Separately, `TOOLCHAIN.adoc` promises a
+`get-pip` fallback that the fetcher and its tests deliberately removed.
+
+**Recommended change**
+
+- Make all current yasimavr descriptions distinguish compiled delay-body width
+  from delivered signal-hook width and state what each gate proves.
+- Replace "physical" simulator claims with modeled-pin/output wording while
+  preserving legitimate datasheet uses of "physical port".
+- Remove the stale future-work text for the signal-hook migration.
+- Make the venv/pip prerequisite match `scripts/fetch_yasimavr.sh`: pip must be
+  supplied by `python3-venv`; there is no unhashed `get-pip` fallback.
+
+**Acceptance criteria**
+
+- [ ] No current document says delivered width cannot be measured in yasimavr.
+- [ ] No simulator lane is represented as hardware or physical-relay evidence.
+- [ ] The TODO describes only remaining upstream/re-pinning work.
+- [ ] TOOLCHAIN prerequisites match the enforced fetch path and supply-chain
+  tests.
+- [ ] Workflow-syntax, fetch-yasimavr, supply-chain, TODO-index, and durable
+  documentation tests pass.
+
+### R4 - Publish suffixed tags as prereleases
+
+**Priority:** Release automation correctness; not specific to stable v0.9.10
+
+**Problem**
+
+The release script accepts `vX.Y.Z-suffix`, and the release workflow triggers on
+that tag shape, but `gh release create` is not passed `--prerelease`. A tag such
+as `v1.0.0-rc.1` would therefore be published as an ordinary release and could
+affect latest-release selection.
+
+**Recommended change**
+
+- Detect the already-validated suffix in the workflow and pass `--prerelease`
+  exactly for suffixed versions.
+- Keep stable `vX.Y.Z` publication unchanged.
+- Add workflow/source-contract cases for stable, `-rc.1`, and malformed tags.
+
+**Acceptance criteria**
+
+- [ ] Suffixed valid tags create GitHub prereleases.
+- [ ] Unsuffixed valid tags create ordinary releases.
+- [ ] Malformed tags remain rejected before build or publication.
+- [ ] Workflow syntax and release publication tests prove both command forms.
+
+### R5 - Make XC8 cache manifest generation fail closed
+
+**Priority:** Release supply-chain hardening
+
+**Problem**
+
+The install and cache-verification scripts compute the readable-file manifest
+with `find | sort | xargs` under `/bin/sh` and `set -eu`. POSIX shell reports the
+pipeline status of `xargs`, so a failed `find` or `sort` can be hidden by a
+successful final stage and yield a partial manifest. That weakens the promise
+that every readable compiler/DFP input is inventoried.
+
+**Recommended change**
+
+- Use a shell with `pipefail`, or split the walk, ordering, and hashing into
+  independently status-checked stages.
+- Preserve NUL-delimited filenames and deterministic `LC_ALL=C` ordering.
+- Add fixtures where `find`, `sort`, and `sha256sum` fail independently, and
+  require both installation and restored-cache verification to reject each one.
+
+**Acceptance criteria**
+
+- [ ] Failure of any manifest pipeline stage fails installation/verification.
+- [ ] No partial manifest is written or accepted after a scan/order/hash error.
+- [ ] Spaces and unusual non-NUL path bytes remain handled correctly.
+- [ ] Supply-chain, cache-restore, workflow-syntax, and release-preflight tests
+  pass.
+
+### R6 - Pin production release identity independently of development overrides
+
+**Priority:** Release reproducibility hardening
+
+**Problem**
+
+Development variables such as `FW_BASE`, the tinyx5 membership, and several MCU
+tags remain command-line/environment overridable. Both the Makefile
+`RELEASE_IMAGES` set and the release script's nominally independent enumeration
+consume those selected values, so their cross-check can agree on an overridden
+identity. Current v0.9.10 declaration/count checks reject common deviations,
+but the invariant should not depend on release-specific prose or on a later tag
+workflow discovering that production was staged under noncanonical names.
+
+**Recommended change**
+
+- Separate immutable production release identity/membership from useful
+  developer build overrides.
+- Make production staging reject any override that changes canonical image
+  basenames, MCU tags, part membership, or variant membership before cleaning,
+  building, or creating scratch state.
+- Keep build-directory and tool-path overrides available where they do not
+  change artifact identity.
+- Add direct and indirect environment/Make command-line tests for `FW_BASE`,
+  `TINYX5`, MCU tags, and supported-variant sets.
+
+**Acceptance criteria**
+
+- [ ] Production release staging always means the reviewed seven-part,
+  21-image, 18-soak v0.9.10 identity regardless of inherited Make variables.
+- [ ] Identity-changing overrides fail before any build, soak, or staging work.
+- [ ] Legitimate tool and build-directory overrides continue to work.
+- [ ] Release-image, preflight, documentation, name-contract, and publication
+  tests cover direct and inherited override attempts.
+
+### Second-pass validation already performed
+
+The review host is not the fully provisioned release host. These results locate
+the findings relative to the currently passing host contracts; they do not
+close any second-pass item:
+
+- `git diff --check main...HEAD`: passed.
+- Host golden model: 988 checks passed.
+- Exhaustive state model: 2,160 checks passed.
+- Symbolic single-step model: 1,332 checks passed.
+- PIC10F320 host variant lanes and both modular PIC shipping-source coverage
+  gates passed with no failures.
+- Release images (103), preflight (118), provenance (86), qualification (66),
+  history (89), supply-chain (30), matrix, serialization, target-result, soak,
+  rebuild, name-contract, TODO-index, and watchdog-note contract tests passed.
+- Workflow syntax skipped because PyYAML is absent on the review host.
+- Full `make test` could not complete because `avr-gcc` is absent and the local
+  clang-tidy setup lacks 32-bit glibc headers.
+
+The green results are compatible with F2 and P1: current fault tests observe
+latches/reset entry rather than the affected physical pin modes, and current
+release documentation tests govern generated PIC12F675 guidance without
+rejecting the contradictory static `FLASHING.md` block.
+
 ## Final validation and release gate
 
-Complete these only after R1-R3, the F1 disposition, T1-T2, and D1-D3 are done.
+Complete these only after R1-R6, F1-F4, P1-P2, T1-T2, and D1-D5 are done or an
+explicit owner disposition recorded where an item permits one. The checked
+`fe8ecc8` run below is historical evidence, not final-candidate evidence; the
+pre-merge rows are reopened because F2-P2 require source, test, and documentation
+changes.
 
-- [x] `git diff --check main...HEAD` passes.
-- [x] `make test` passes on a host meeting the documented host-tool contract.
-- [x] `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` passes on the fully
+- [ ] `git diff --check main...HEAD` passes after every second-pass change.
+- [ ] `make test` passes on a host meeting the documented host-tool contract.
+- [ ] `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` passes on the fully
   provisioned release host with no skipped target rows.
-- [x] AVR Classic, AVR-XT, PIC10F322, PIC10F320, and PIC12F675 builds pass all
+- [ ] AVR Classic, AVR-XT, PIC10F322, PIC10F320, and PIC12F675 builds pass all
   flash, RAM, stack, fuse/CONFIG, timing, static-analysis, simulator, fault,
   lock-step, target-I/O, source-coverage, and mutation gates.
+- [ ] AVR-XT `INVEN` and PIC12F675 comparator-ownership fault cases prove
+  physical coil-pin de-energization before the watchdog spin.
+- [ ] AVR programming negative controls prove no fuse or flash command runs
+  before a successful selected-image build and validation.
+- [ ] Durable documentation contracts reject the retired raw PIC12F675 flashing
+  path and all contradictory no-toolchain claims.
 - [ ] PIC12F675's two authoritative aggregates visibly share one retained matrix
   identity in local and clean-runner release paths.
-- [x] `scripts/make-release.sh --preflight v0.9.10` rejects version drift and
+- [ ] `scripts/make-release.sh --preflight v0.9.10` rejects version drift and
   accepts the exact pinned release environment.
 - [ ] A release dry run passes after this branch-only document is deleted.
 - [ ] Current-release declarations match the staged canonical set: seven parts,
@@ -1077,21 +1513,15 @@ coverage 99.39% (floor 90%); verified-core `src/bypass_pure.c` 100.00% (floor
 `--preflight v0.9.11` rejected at "CHANGELOG.md must contain one dated [0.9.11]
 section", so version drift fails before any staging work.
 
-The five open rows are release-time by construction and cannot be closed from
-this branch. The dry-run row additionally waits on the deletion of this
-document, which the merge decision below sequences before the release cut: from
-commit `fe8ecc8` the staging path refuses a tree that still contains it, which
-is that guard working as specified rather than a blocker. PIC12F675's matrix
-identity is proved on the local path by `test/test_pic_build.sh` (one combined
-Make graph, one format-2 twelve-artifact record) and
-`test/test_release_qualification.sh`, both green in the run above; its
-clean-runner half is held by `test/test_workflow_syntax.sh` against
-`ci.yml` and `release.yml` and is exercised for real when the tag workflow runs.
-`scripts/ci-local.sh` also reproduced the whole `ci.yml` job set on this tree
-(ALL STEPS PASSED, 1238s, including the `pic job: PIC12F675 immutable-matrix
-aggregates` step and a second 132-killed/0-survived mutation run), but that
-script deliberately does not reproduce the tag-triggered `release` workflow, so
-it does not close this row either.
+The production qualification, artifact-commit, signed-tag, and clean-runner
+publication rows are release-time by construction. The dry-run row waits on the
+deletion of this document, which the merge decision below sequences before the
+release cut: the staging path's refusal while this file exists is the G1 guard
+working as specified. All other pre-merge rows must be reclosed on the actual
+second-pass candidate. PIC12F675's matrix identity was proved on the earlier
+local path by `test/test_pic_build.sh` and
+`test/test_release_qualification.sh`; its clean-runner half remains release-time
+evidence and must be exercised for real by the tag workflow.
 
 ## Review validation already performed
 
@@ -1129,13 +1559,25 @@ Record each completed item with its commit ID and decisive validation command.
 | D2 | DONE | `3a6c67d` | `make test-workflow-syntax test-ci-local-routing test-release-preflight test-release-qualification test-release-history test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
 | D3 | DONE | `cbc57be` | `make test-release-preflight` (101 -> 113 checks); `make test-release-qualification test-release-history` (88 -> 89); `make test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
 | G1 | DONE | `fe8ecc8` | `make test-release-preflight` (113 -> 118 checks); `scripts/make-release.sh --preflight v0.9.10` accepted with the document present; `make test-release-qualification test-release-history test-release-provenance test-release-images test-soak-timing test-build-serialization test-todo-index test-makefile-name-contract`; `make test`; `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` |
-| Final validation | PARTIAL | | Six of eleven rows closed on `fe8ecc8`: `git diff --check`, `make test`, `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` (132 mutants killed, 0 survived, 0 skipped), the per-family gate row, and both halves of the preflight row. The remaining five are release-time |
+| F2 | OPEN | | AVR-XT polarity and PIC12F675 peripheral-ownership escalation fixes plus physical-pin fault tests |
+| F3 | OPEN | | PIC10F320 one-write measurement and implementation or explicit owner disposition |
+| F4 | OPEN | | Conservative wall-clock watchdog assertions and near-bound negative controls |
+| P1 | OPEN | | Static PIC12F675 flashing guidance and durable documentation contract |
+| P2 | OPEN | | Build-before-hardware AVR programming order and fake-programmer regression |
+| D4 | OPEN | | Final release date, resource tables, and PIC10F320 run-5 baseline wording |
+| D5 | OPEN | | Simulator timing/physical-language and pip prerequisite reconciliation |
+| R4 | OPEN | | Suffixed-tag prerelease publication semantics |
+| R5 | OPEN | | Fail-closed XC8 cache manifest pipelines |
+| R6 | OPEN | | Immutable production artifact identity independent of development overrides |
+| Final validation | REOPENED | | The `fe8ecc8` run remains historical evidence; rerun every pre-merge gate after F2-P2 and documentation/release changes |
 
 ## Merge decision
 
-Do not merge `v0.9.9-polish` or begin production `v0.9.10` qualification while
-R1, R2, or R3 is open. Resolve F1 explicitly before describing the relay fault
-posture as reference-grade. Complete T1 and T2 before relying on a green default
-suite for the final candidate. Reconcile the documentation items, delete this
-file and all references, run the final validation gate, and only then merge and
-cut `v0.9.10`.
+Do not merge `v0.9.9-polish` or begin production `v0.9.10` qualification until
+F2, P1, P2, and D4 are complete. Complete or explicitly disposition F3 and F4;
+finish D5 and the release hardening items appropriate to the project's claimed
+release contract; then rerun every reopened pre-merge gate. Finally delete this
+file and all references, run the release dry run on the actual candidate, and
+only then merge and begin production qualification. Production soaks, the
+artifact-only release commit, signed tag, and clean-runner byte-for-byte
+reproduction remain post-merge release-time gates.
