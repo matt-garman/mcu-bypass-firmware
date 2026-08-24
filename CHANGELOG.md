@@ -39,6 +39,30 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- **PIC10F320 de-energizes both relay coils in one write.** The
+  space-constrained shell's `set_relay_coils_low()` cleared RESET and then SET
+  through two separate `LATA` read-modify-writes. Both orders settle in the same
+  place; they differ in the transient, and with *both* coil bits high -- the
+  latch upset the sanity gate escalates on -- the per-bit clear left the second
+  coil driven for the whole of the first write, on the one path whose purpose is
+  to stop driving them. This was an instruction-scale exposure, not a
+  watchdog-scale one, but it was weaker than the single masked write the four
+  modular shells reach through `hw_pin_mask_set_low()`, and project-wide parity
+  language did not say so.
+
+  The clear is now one constant-mask `LATA` write. The two per-bit low helpers
+  it replaced had no other caller, so the stronger form is also the cheaper one:
+  the relay image went from 248 to **242** of 256 program words and its
+  worst-case return-stack depth from 4 to **3** of 8. Both CD4053 images are
+  byte-identical to the previous release. The write sequence itself is now
+  asserted rather than assumed, by two oracles that fail on a return to the
+  per-bit form -- the host fault harness (which sees every firmware `LATA`
+  access) and the gpsim resynchronization cases (which step the real image one
+  instruction at a time). Both are load-bearing on the both-coils injection, and
+  that is the whole of what is observable: with a single coil energized, a
+  per-bit clear delays the useful de-energization by one write without passing
+  through a distinct state.
+
 - **The watchdog margin is now asserted against wall-clock execution, not
   against the delay constant alone.** Every shell used to assert only
   `TICK_PERIOD_MS + blocking_delay < WDT_MIN_PERIOD_MS`. That sum omits two real

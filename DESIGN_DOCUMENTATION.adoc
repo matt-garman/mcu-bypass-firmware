@@ -1083,7 +1083,7 @@ Specific tests verify specific requirements, as shown in the following table:
 Among retained current measurements, resource use spans from 47.1% of an
 ATtiny202's flash to 98.0% of a PIC10F322's; that target's mute image is the
 current binding build with 10 words free. PIC10F320 has the smallest absolute
-capacity and leaves 11 of 256 words free on its largest variant, which is why it
+capacity and leaves 14 of 256 words free on its largest variant, which is why it
 is built differently from every other target and documented as a special case
 (see `docs/pic10f320_special_case.md`). Every family carries a build-time
 flash-budget gate, so an overshoot fails the build rather than reaching hardware.
@@ -1203,18 +1203,24 @@ variant and fails the build on any overshoot.
 
 | cd4053_simple    | 220 words | 85.9% | 36 words
 | cd4053_with_mute | 241 words | 94.1% | 15 words
-| tq2_l2_5v_relay  | 245 words | 95.7% | 11 words
+| tq2_l2_5v_relay  | 242 words | 94.5% | 14 words
 |===
 
 Data (RAM) use is 10 bytes of 64 (15.6%); persistent firmware state is the
 3-byte `ctx_`, with the remainder XC8 runtime scratch.
 
-Those margins are the whole story of this target. The general output-latch
-integrity check was measured before the relay rewrite and already exceeded the
-256-word budget on `cd4053_with_mute` and `tq2_l2_5v_relay`; the combined current form has
-not been re-priced because there is less headroom, not more. The exact-`TRISA`
-check and relay-only idle coil-low rewrite, each costing one word, were worth
-porting. Those decisions are recorded in `docs/pic10f320_special_case.md`.
+Those margins are the whole story of this target, and they have moved in both
+directions. The general output-latch integrity check was measured against an
+earlier image and already exceeded the 256-word budget on `cd4053_with_mute` and
+`tq2_l2_5v_relay`, so it remains unported; the exact-`TRISA` check and the
+relay-only coil-latch term, costing one and three words, were affordable and
+were. Going the other way, making the relay's coil clear a single masked `LATA`
+write returned six words by removing two per-bit helpers that had no other
+caller, which is why the relay variant is smaller here than it was when the
+latch check was last priced. That does not by itself reopen the question --
+`cd4053_with_mute`, which is unaffected by any of it, is the variant the check
+overflowed first -- but a re-pricing would now start from a different number.
+Those decisions are recorded in `docs/pic10f320_special_case.md`.
 
 === PIC12F675 (XC8 build)
 

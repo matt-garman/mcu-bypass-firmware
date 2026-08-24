@@ -505,13 +505,45 @@ static void inject_relay_resync_case(unsigned addr, const char *token,
     unsigned const written = target->get_value() & 0xFFu;
 
     // -- half 1: both coils de-energized on the escalation path, before the spin
+    //
+    // Sampled every instruction, which makes this an observation of the coil
+    // clear's WRITE SEQUENCE and not only of its settled result. Each shell's
+    // clear is contracted to drive both coil bits low in ONE output write; a
+    // clear that walked them one at a time would reach the same idle through a
+    // transient in which one coil is still driven after the firmware began
+    // de-energizing the pair. `partial_clear` catches exactly that: a coil
+    // field with strictly fewer bits than the one before it, but not none.
+    //
+    // Both views are tracked because they can move a step apart: where the
+    // output latch is an SRAM shadow the port is written from it a moment
+    // later (PIC_REG_PORT_SKEW_SAMPLES), so a shadow that is already idle over
+    // a port that is not is normal -- while EITHER of them shedding its coil
+    // bits one at a time is not. It is the both-coils-energized injection that
+    // carries this; with one coil energized a per-bit clear delays the useful
+    // de-energization by a write but passes through no distinct state, so
+    // nothing observing STATE can see it.
     guint64  const inject_cycle    = get_cycles().get();
     guint64        deenergize_cycle = 0u;
+    bool           partial_clear   = false;
+    unsigned       prev_latch_coils = latch->get_value() & coil_mask;
+    unsigned       prev_port_coils  = port->get_value() & coil_mask;
     unsigned const deenergize_cap  =
         (unsigned)(RESYNC_DEENERGIZE_MS * CYCLES_PER_MS);
     for (unsigned i = 0; i < deenergize_cap; ++i) {
-        if (((latch->get_value() & coil_mask) == 0u) &&
-                ((port->get_value() & coil_mask) == 0u)) {
+        unsigned const latch_coils = latch->get_value() & coil_mask;
+        unsigned const port_coils  = port->get_value() & coil_mask;
+        if ((latch_coils != 0u) && (latch_coils != prev_latch_coils) &&
+                ((latch_coils & prev_latch_coils) == latch_coils)) {
+            partial_clear = true;
+        }
+        if ((port_coils != 0u) && (port_coils != prev_port_coils) &&
+                ((port_coils & prev_port_coils) == port_coils)) {
+            partial_clear = true;
+        }
+        prev_latch_coils = latch_coils;
+        prev_port_coils  = port_coils;
+
+        if ((latch_coils == 0u) && (port_coils == 0u)) {
             deenergize_cycle = get_cycles().get();
             break;
         }
@@ -559,6 +591,7 @@ static void inject_relay_resync_case(unsigned addr, const char *token,
                       ((before_val & mask) == 0u) &&
                       (written == injected) &&
                       (deenergize_cycle > inject_cycle) &&
+                      !partial_clear &&
                       (reset_delta == 1u) &&
                       (reset_coil_cycles >= min_pulse_cycles) &&
                       (set_coil_cycles == 0u) &&
@@ -566,7 +599,8 @@ static void inject_relay_resync_case(unsigned addr, const char *token,
                       ((final_port & PIC_REG_LED_MASK) == 0u);
 
     if (pass) {
-        printf("    PASS: coils de-energized in %" G_GUINT64_FORMAT " cycles (%.3f ms),"
+        printf("    PASS: coils de-energized in %" G_GUINT64_FORMAT " cycles (%.3f ms)"
+               " with no partially cleared coil latch,"
                " 1 reset, recovery drove a %.3f ms RESET-coil pulse"
                " (>= %u ms datasheet minimum) with SET dark, settled in BYPASS\n",
                deenergize_cycle - inject_cycle,
@@ -579,10 +613,12 @@ static void inject_relay_resync_case(unsigned addr, const char *token,
         g_fails++;
         fprintf(stderr,
                 "    FAIL: init=0x%02x write=0x%02x deenergize-cycles=%" G_GUINT64_FORMAT
+                " partial-clear=%u"
                 " resets=%" G_GUINT64_FORMAT " reset-coil-ms=%.3f set-coil-ms=%.3f"
                 " final-" PIC_REG_PORT_LC "=0x%02x clean=%u\n",
                 before_val, written,
                 deenergize_cycle > inject_cycle ? deenergize_cycle - inject_cycle : 0u,
+                partial_clear ? 1u : 0u,
                 reset_delta,
                 (double)reset_coil_cycles / (double)CYCLES_PER_MS,
                 (double)set_coil_cycles / (double)CYCLES_PER_MS,

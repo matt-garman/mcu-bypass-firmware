@@ -92,10 +92,10 @@ readonly MUTATION_EXPECTED_XT=22
 readonly MUTATION_EXPECTED_PIC_GPSIM=6
 readonly MUTATION_EXPECTED_PIC_TARGET=10
 readonly MUTATION_EXPECTED_PIC_SOAK=1
-readonly MUTATION_EXPECTED_PIC320_HOST=29
-readonly MUTATION_EXPECTED_PIC320_TOOL=11
+readonly MUTATION_EXPECTED_PIC320_HOST=30
+readonly MUTATION_EXPECTED_PIC320_TOOL=12
 readonly MUTATION_EXPECTED_PIC12F675=22
-readonly MUTATION_EXPECTED_TOTAL=132
+readonly MUTATION_EXPECTED_TOTAL=134
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
@@ -1707,6 +1707,7 @@ PIC10F320_HOST_MUTATIONS=(
 "src/bypass_mcu_pic10f320.c	s@hw_relay_set_pin_set_high(); // pulse set coil@hw_relay_reset_pin_set_high(); // MUTANT@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-actuation	FW relay ENGAGE pulses the RESET coil instead of SET (relay latches backwards; settles to same LATA, so equiv/gpsim miss it)"
 "src/bypass_mcu_pic10f320.c	s@hw_relay_reset_pin_set_high(); // pulse reset coil@hw_relay_set_pin_set_high(); // MUTANT@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-actuation	FW relay BYPASS pulses the SET coil instead of RESET (relay latches backwards)"
 "src/bypass_mcu_pic10f320.c	/hw_force_wdt_reset(void)/,/^}/s@    set_relay_coils_low();@@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-fault-host	FW fail-safe coil de-energization removed from hw_force_wdt_reset(); host latch injections are still energized where the reset spin is abandoned"
+"src/bypass_mcu_pic10f320.c	s@    LATA \&= (uint8_t)~((1U << RELAY_RESET_PIN) | (1U << RELAY_SET_PIN));@    LATA \&= (uint8_t)~(1U << RELAY_RESET_PIN); LATA \&= (uint8_t)~(1U << RELAY_SET_PIN); /* MUTANT: per-bit clear */@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-fault-host	FW one-write coil clear regressed to a per-bit clear of RESET then SET; with both coil latches injected the SET coil is still driven after the clear began, which the host lane sees as a partially cleared coil latch"
 "src/bypass_mcu_pic10f320.c	s@    diff |= (uint8_t)(LATA & (uint8_t)((1U << RELAY_RESET_PIN) |@    diff |= (uint8_t)(LATA \& (uint8_t)((0U \& RELAY_RESET_PIN) |@	PIC10F320_VARIANT=tq2_l2_5v_relay pic10f320-test-fault-host	FW relay coil guard weakened to the SET bit only; an injected RESET coil no longer escalates"
 "src/bypass_mcu_pic10f320.c	s@#  define CD4053_MUTE_DELAY_MS (5U)@#  define CD4053_MUTE_DELAY_MS (0U)@	PIC10F320_VARIANT=cd4053_with_mute pic10f320-test-actuation	FW cd4053_with_mute pre-switch mute window defeated (5->0 ms): audible click on every switch"
 "src/bypass_mcu_pic10f320.c	s@#  define CD4053_CTL1     (1U) // RA1@#  define CD4053_CTL1     (2U) // MUTANT@;s@#  define CD4053_CTL2     (2U) // RA2@#  define CD4053_CTL2     (1U) // MUTANT@	PIC10F320_VARIANT=cd4053_with_mute pic10f320-test-actuation	FW cd4053_with_mute CTL1/CTL2 pins swapped (mute applied to wrong control; mid-mute LATA pattern wrong, settles to same LATA so equiv/gpsim miss it)"
@@ -1723,6 +1724,7 @@ PIC10F320_TOOL_MUTATIONS=(
 "src/bypass_mcu_pic10f320.c	s@#  define CD4053_MUTE_DELAY_MS (5U)@#  define CD4053_MUTE_DELAY_MS (1U)@	PIC10F320_VARIANT=cd4053_with_mute PIC10F320_TARGET_VARIANT=cd4053_with_mute pic10f320-test-target	TARGET mute window shortened below 5ms; cycle-exact target I/O timing catches it"
 "src/bypass_mcu_pic10f320.c	s@#  define TQ2_L2_5V_PULSE_MS (12U)@#  define TQ2_L2_5V_PULSE_MS (1U)@	PIC10F320_VARIANT=tq2_l2_5v_relay PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay pic10f320-test-target	TARGET relay pulse shortened below the 4ms datasheet minimum; cycle-exact target I/O timing catches it"
 "src/bypass_mcu_pic10f320.c	/hw_force_wdt_reset(void)/,/^}/s@    set_relay_coils_low();@@	PIC10F320_VARIANT=tq2_l2_5v_relay PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay pic10f320-test-target	TARGET fail-safe coil de-energization removed from hw_force_wdt_reset(); the real image spins out its watchdog with modeled PORTA still energized, so the resync cases never see the coils go low"
+"src/bypass_mcu_pic10f320.c	s@    LATA \&= (uint8_t)~((1U << RELAY_RESET_PIN) | (1U << RELAY_SET_PIN));@    LATA \&= (uint8_t)~(1U << RELAY_RESET_PIN); LATA \&= (uint8_t)~(1U << RELAY_SET_PIN); /* MUTANT: per-bit clear */@	PIC10F320_VARIANT=tq2_l2_5v_relay PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay pic10f320-test-target	TARGET one-write coil clear regressed to a per-bit clear of RESET then SET; the real image sheds the two injected coil bits on separate instructions and the instruction-granular resync sampling catches the intermediate state"
 "src/bypass_mcu_pic10f320.c	s@(1U << RELAY_SET_PIN)));@(0U \& RELAY_SET_PIN)));@	PIC10F320_VARIANT=tq2_l2_5v_relay PIC10F320_TARGET_VARIANT=tq2_l2_5v_relay pic10f320-test-target	TARGET relay coil guard weakened to the RESET bit only; an injected SET coil no longer escalates (mirror of the host-lane mutant that drops the RESET bit)"
 "src/bypass_mcu_pic10f320.c	/void main(void)/,\$s@CLRWDT();@(void)0; /* MUTANT: no main-loop WDT pet */@	PIC10F320_VARIANT=cd4053_simple PIC10F320_SOAK_DURATION_MS=$PIC_SOAK_MUT_MS PIC10F320_SOAK_LIVENESS_INTERVAL_MS=$PIC_SOAK_MUT_MS pic10f320-test-soak	SOAK main-loop WDT pet removed; reset notifier catches the un-pet watchdog within the short mutation window"
 )

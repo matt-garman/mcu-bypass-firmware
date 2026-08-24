@@ -65,13 +65,28 @@ INTCONbits_t     INTCONbits;
 static uint8_t g_relay_fault_active;
 static uint8_t g_relay_fault_requested;
 static uint8_t g_relay_injected_mask;
+static uint8_t g_relay_prev_coils;
 static fw_relay_fault_result_t g_relay_result;
 #endif
 
+// The mock xc.h defines LATA as *bypass_lata_access(), so this runs once per
+// firmware LATA read-modify-write and sees the value the PREVIOUS write left --
+// i.e. the coil latch's write sequence, one step at a time.
 uint8_t *bypass_lata_access(void) {
 #if defined(OUTPUT_TQ2_RELAY)
     if (g_relay_fault_active != 0u) {
-        g_relay_result.observed_coils |= (uint8_t)(g_lata & RELAY_COIL_MASK);
+        uint8_t const coils = (uint8_t)(g_lata & RELAY_COIL_MASK);
+        g_relay_result.observed_coils |= coils;
+        // A PARTIALLY cleared coil latch: a proper nonzero subset of what the
+        // previous access saw. Bits went away, but not all of them, so one coil
+        // is still driven after the firmware began de-energizing the pair --
+        // exactly what a per-bit clear of RESET and then SET produces, and what
+        // one masked write cannot. (See fw_relay_fault_result_t.)
+        if ((coils != 0u) && (coils != g_relay_prev_coils) &&
+                ((uint8_t)(coils & g_relay_prev_coils) == coils)) {
+            g_relay_result.partial_clear_coils = coils;
+        }
+        g_relay_prev_coils = coils;
     }
 #endif
     return &g_lata;
@@ -216,6 +231,10 @@ void bypass_equiv_on_clrwdt(void) {
             g_relay_result.observed_coils |= g_relay_result.injected_coils;
             g_relay_result.footswitch_stayed_released =
                 (uint8_t)((PORTA & (uint8_t)(1u << 3)) != 0u);
+            // Seed the write-sequence tracker with what the injection left, so
+            // the very first access after it is compared against the right
+            // predecessor rather than against a zero it never passed through.
+            g_relay_prev_coils = g_relay_result.injected_coils;
             g_relay_fault_active = 1u;
             return;
         }
@@ -277,6 +296,7 @@ int fw_relay_fault_run(uint8_t coil_mask, fw_relay_fault_result_t *result) {
     g_relay_fault_active = 0u;
     g_relay_fault_requested = 1u;
     g_relay_injected_mask = coil_mask;
+    g_relay_prev_coils = 0u;
     memset(&g_relay_result, 0, sizeof g_relay_result);
 
     int const status = run_fault_mode();

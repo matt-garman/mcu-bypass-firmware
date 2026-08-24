@@ -179,6 +179,11 @@ static void test_fault_injection(void) {
 // resynchronization. The gpsim lane measures the recovery's full-width
 // RESET-coil actuation on the real image, and no simulator proves what a
 // below-minimum pulse does to relay mechanics.
+//
+// It also proves HOW the coils go low, not only that they end low: the mock
+// routes every LATA access through the harness, so a clear that walked the two
+// coil bits one at a time would show up as partial_clear_coils. The
+// both-coils-high case is where that bites -- see fw_relay_fault_result_t.
 static void expect_relay_coil_fault_escalates(uint8_t mask, const char *what) {
     fw_relay_fault_result_t result;
     int const status = fw_relay_fault_run(mask, &result);
@@ -195,6 +200,10 @@ static void expect_relay_coil_fault_escalates(uint8_t mask, const char *what) {
     CHECK(result.final_coils == 0u,
           "relay latch fault [%s] entered the reset spin with coil mask 0x%02X"
           " still energized", what, (unsigned)result.final_coils);
+    CHECK(result.partial_clear_coils == 0u,
+          "relay latch fault [%s] cleared the coil latch one bit at a time:"
+          " coil mask 0x%02X was still driven after the clear began",
+          what, (unsigned)result.partial_clear_coils);
     CHECK(result.completed_iterations == 0u,
           "relay latch fault [%s] completed %u further clean iteration(s):"
           " the gate did not escalate",
@@ -256,7 +265,7 @@ int main(void) {
     test_happy_path();
     {
 #if defined(OUTPUT_TQ2_RELAY)
-        int const expected_checks = 59;
+        int const expected_checks = 62;
 #else
         int const expected_checks = 41;
 #endif

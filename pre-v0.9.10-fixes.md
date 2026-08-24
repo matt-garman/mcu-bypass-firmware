@@ -1150,14 +1150,96 @@ owner.
 
 **Acceptance criteria**
 
-- [ ] The owner either adopts one constant-mask clear or records why the
+- [x] The owner either adopts one constant-mask clear or records why the
   measured resource cost requires retaining the two-write exception.
-- [ ] Target-level evidence observes the write sequence and fails if the chosen
+- [x] Target-level evidence observes the write sequence and fails if the chosen
   contract regresses.
-- [ ] PIC10F320 flash, return-stack, image-baseline, fault, target-I/O, coverage,
+- [x] PIC10F320 flash, return-stack, image-baseline, fault, target-I/O, coverage,
   and mutation gates pass.
-- [ ] Documentation states the exact PIC10F320 behavior and does not imply
+- [x] Documentation states the exact PIC10F320 behavior and does not imply
   stronger cross-shell parity than the implementation provides.
+
+**Resolution.** The one-write clear was adopted, and the measurement made the
+choice unambiguous rather than close: it *frees* resources. The two per-bit
+helpers `hw_relay_reset_pin_set_low()` and `hw_relay_set_pin_set_low()` had no
+caller besides `set_relay_coils_low()`, so folding them into a single
+constant-mask `LATA &= ~((1U << RELAY_RESET_PIN) | (1U << RELAY_SET_PIN))`
+deleted two functions and a call level. Under the pinned XC8 V3.10 / DFP 1.9.189
+`-O2` build the relay image went **248 -> 242** of 256 program words (8 -> 14
+free) and its worst-case return-stack depth **4 -> 3** of 8 (2 -> 3 spare); the
+two CD4053 images are byte-identical to the shipped baseline, since these
+helpers live under `#if defined(OUTPUT_TQ2_RELAY)`. The disposition branch of
+this item is therefore not exercised, and no exception is recorded. The
+high-side helpers stay per-bit: only one coil is ever energized at a time, so
+there is no intermediate state to remove there.
+
+The write sequence is now asserted by two independent oracles, each of which
+fails on a return to the per-bit form:
+
+- **Host** -- `test/pic10f320/fault/`. The mock `<xc.h>` already routed every
+  firmware `LATA` access through the harness, so the transient is directly
+  observable: `fw_relay_fault_result_t.partial_clear_coils` records a coil field
+  with strictly fewer bits than the previous one but not none. Relay-variant
+  checks 59 -> 62.
+- **Target** -- `test/pic/test_fault_pic_core.h`. The resynchronization cases
+  already stepped the real image one instruction at a time waiting for
+  de-energization; they now also fail if the output latch or the modeled port
+  sheds its coil bits across more than one step. This is in the shared core, so
+  PIC10F322 and PIC12F675 assert it too, which is what makes the parity claim in
+  `docs/relay_coil_fault_correction.md` a tested statement rather than a
+  description. The shadow-latch part is unaffected by the port lagging the
+  shadow, because each view is tracked separately.
+
+Both are load-bearing only on the **both-coils-energized** injection, and that is
+the whole of what is observable: with a single coil energized a per-bit clear
+delays the useful de-energization by one write but passes through no distinct
+state, so no oracle at the state level can see it. That limit is stated in the
+harnesses and in the documentation rather than papered over. Two
+mutation-inventory entries (host and target lanes) restore the per-bit clear;
+both are killed, and the inventory total moves 132 -> 134.
+
+Documentation: `docs/relay_coil_fault_correction.md` now states the one-write
+contract per shell -- the modular four through `hw_pin_mask_set_low()`, the 320
+directly -- and says where it is asserted and where it cannot be;
+`docs/pic10f320_validation.md` gains run 6 with the resource table and the new
+digest. The 320's relay call chain is now 3 levels, so the places that recorded
+4 are corrected: that document's return-stack section (which also claimed the
+two PIC chips were identical -- the 322 is still 4), its two-witness paragraph,
+and `test/check_stack_depth_pic.sh`, whose documented XC8-disagreement example
+was measured on the exact chain this change removes and is reframed as the
+historical measurement it is.
+
+Three further documents carried the relay's flash figure as a current fact and
+were **already** stale by F1's coil-latch term before this change:
+`DESIGN_DOCUMENTATION.adoc` (utilization table and headroom sentence),
+`docs/context_seu_detection.md` (F2 resource table) and
+`docs/non-blocking_output_schemes_feasibility.md`. All three now read 242/256.
+Two of them draw conclusions *from* that margin -- F2's PIC10F320 exclusion, and
+the feasibility study's §6.4 finding that range-checking a countdown state puts
+the relay exactly on 256 and does not link -- so each carries a scoped note that
+the baseline moved and the question needs re-pricing rather than citing the old
+paragraph. Neither conclusion is reversed here: that would need its own
+measurement, and `cd4053_with_mute`, untouched by this change, is the variant
+both costs overflowed first. `docs/pic10f320_special_case.md`, `test/README.md`
+(host-fault check count and per-variant executable-line count) and
+`CHANGELOG.md` carry the same facts.
+
+*Verification.* `test/pic10f320/expected_images.sha256` rebaselined for the
+relay image only; both CD4053 digests unchanged, so exactly one hash moves.
+PIC10F320 gates on the new image: flash 242/256, return stack 3/8 with witness,
+`pic10f320-test-host-variants` 41 / 41 / 62 host fault checks,
+`pic10f320-test-target-variants` 24 / 24 / 29 fault, 3005 lock-step and
+25 / 26 / 36 target-I/O checks, `pic10f320-coverage-check-fw` 96/99 executable
+lines with the same three allowlisted fault-path lines, and `pic10f320-analyze`
+(cppcheck + MISRA) clean across all three variants. The shared-core change was
+re-run against the unmodified PIC10F322 (29 fault checks) and PIC12F675 (41)
+relay images with no false positive from the shadow/port skew. Negative controls:
+with the per-bit clear restored, the host lane reports exactly 1 failure of 62
+and the target lane exactly 1 of 29, both on the both-coils case and both naming
+the coil left driven. All three coil pulses on the target-I/O trace are now 6010
+cycles, where the per-bit clear made the SET pulse 6 cycles longer than the
+RESET pulse. Firmware source changes were made by the repository owner,
+consistent with project policy.
 
 ### F4 - Make watchdog-margin assertions cover wall-clock execution
 
@@ -1599,7 +1681,7 @@ Record each completed item with its commit ID and decisive validation command.
 | D3 | DONE | `cbc57be` | `make test-release-preflight` (101 -> 113 checks); `make test-release-qualification test-release-history` (88 -> 89); `make test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
 | G1 | DONE | `fe8ecc8` | `make test-release-preflight` (113 -> 118 checks); `scripts/make-release.sh --preflight v0.9.10` accepted with the document present; `make test-release-qualification test-release-history test-release-provenance test-release-images test-soak-timing test-build-serialization test-todo-index test-makefile-name-contract`; `make test`; `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` |
 | F2 | OPEN | | AVR-XT polarity and PIC12F675 peripheral-ownership escalation fixes plus physical-pin fault tests |
-| F3 | OPEN | | PIC10F320 one-write measurement and implementation or explicit owner disposition |
+| F3 | IMPLEMENTED | (pending) | One-write constant-mask `LATA` coil clear adopted; relay image 248 -> 242 words and return stack 4 -> 3, CD4053 images byte-identical; write sequence asserted by host (59 -> 62 checks) and gpsim resync oracles; 2 new mutants (132 -> 134) |
 | F4 | IMPLEMENTED | (pending) | All 21 images rebuild byte-identical; `make test-static-assert-guards` (39 -> 68 checks, 11 near-bound FIRES/CLEAN fixtures); the new `test/avr/test_sim.c` pet-budget check on both classic parts and all three variants; all five MISRA lanes clean |
 | P1 | OPEN | | Static PIC12F675 flashing guidance and durable documentation contract |
 | P2 | OPEN | | Build-before-hardware AVR programming order and fake-programmer regression |

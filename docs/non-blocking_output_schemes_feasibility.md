@@ -37,9 +37,11 @@ unpriced — so the decision to start (or not start) can be taken on evidence.
    functional or qualification lanes (§6, especially §6.8): +0 / +8 / +8 words,
    the return stack unchanged, and §5's phase-aware latch-check adaptation cost is
    *zero* because this part already omits the output-latch check that the cost
-   falls on. What does not fit is
-   range-checking the new state variable: that costs 4 words and puts the relay
-   variant exactly on 256, unlinkable (§6.4).
+   falls on. What did not fit, against the 248-word relay image these figures
+   were measured on, is range-checking the new state variable: that costs 4 words
+   and put the relay variant exactly on 256, unlinkable. `v0.9.10`'s one-write
+   coil clear has since freed six words on that image, so that particular finding
+   needs re-measuring (§6.4).
 7. **It drops a relay-coil safety property that nothing else in the original
    assessment noticed.** The blocking form cannot pet the watchdog while a coil
    is energized; the naive non-blocking form pets it twelve times. The coil-on
@@ -687,6 +689,19 @@ This is the decision this section exists to surface. It is the difference betwee
 "fits" and "does not", and it should be settled before any code is written rather
 than discovered at link time.
 
+> **Re-measure before relying on this table (added `v0.9.10`).** Every figure
+> above is an increment over a 248-word shipping relay image, and that image no
+> longer exists: folding the 320's two per-bit coil-clear helpers into one masked
+> `LATA` write took the relay to **242** words (`docs/pic10f320_validation.md`,
+> run 6). That is six words of headroom found *without* reopening the §2/§9
+> trade — nothing was ablated, a call layer was removed — which is precisely
+> what option 3 above was assumed to require. The arithmetic here shifts down
+> with the baseline, so the "does not link" finding is no longer established;
+> re-run the ablation against the current image before choosing among the three
+> options. Nothing else in this section changes: the +4-word cost of the range
+> check, and the reasons options 1 and 2 are unattractive, are independent of the
+> baseline.
+
 ### 6.5 The return stack does not move
 
 Both oracles of `test/check_stack_depth_pic.sh` — the emitted instruction stream
@@ -703,6 +718,11 @@ The independent HEX-based oracle (`test/pic10f320/return_stack_oracle.py`)
 produces the same witnesses. Splitting one actuation function into two does not
 deepen the graph: the `_pre` half inherits the chain the original had, and the
 `_post` half is shallower.
+
+The relay's *shipping* column is the `v0.9.9` figure this study measured;
+`v0.9.10`'s one-write coil clear removed that variant's fourth level, so it is
+3 with 3 spare today. That only widens the margin this section reports, and the
+"does not move" finding -- a delta, not an absolute -- is unaffected.
 
 ### 6.6 What conversion buys on this part specifically
 

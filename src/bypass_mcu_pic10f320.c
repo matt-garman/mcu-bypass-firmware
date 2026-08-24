@@ -426,18 +426,32 @@ static uint8_t hw_is_sanity_check_failed(void) {
 // see the comment below hw_output_pins_intact() for why.  No polarity
 // indirection needed here (the relay coils are not an x4053 control input).
 static void hw_relay_reset_pin_set_high(void) { LATA |=  (uint8_t)(1U << RELAY_RESET_PIN); }
-static void hw_relay_reset_pin_set_low(void)  { LATA &= (uint8_t)~(1U << RELAY_RESET_PIN); }
 static void hw_relay_set_pin_set_high(void)   { LATA |=  (uint8_t)(1U << RELAY_SET_PIN); }
-static void hw_relay_set_pin_set_low(void)    { LATA &= (uint8_t)~(1U << RELAY_SET_PIN); }
 
-// force both coils low
+// force both coils low, in ONE constant-mask LATA read-modify-write
 // - it's not strictly necessary to set both low; but we do this as part of
 //   the project's overall defense-in-depth/belt-and-suspenders paradigm
 // - the intent is to prevent accidentally leaving the relay coil active too
 //   long (e.g. programmer mistake)
+// - ONE write, and not a per-bit clear of RESET followed by SET.  The two are
+//   the same settled result and a different transient: whenever BOTH bits are
+//   high -- the coil-latch upset hw_output_pins_intact() escalates on -- a
+//   per-bit clear leaves the second coil energized for the whole of the first
+//   write.  On the escalation path (hw_force_wdt_reset() below) that is a coil
+//   still driven after the firmware has decided to de-energize it, which is
+//   the one thing that path exists to prevent.  A single masked write has no
+//   such intermediate state, so this shell now makes the same guarantee the
+//   four modular shells make through hw_pin_mask_set_low(): both coils reach
+//   their de-energized idle in one output write, from any starting state.
+// - folding the two per-bit low helpers into this one write also COSTS LESS on
+//   the part that can least afford it: measured with the pinned XC8 V3.10 -O2
+//   build, the relay image went 248 -> 242 of 256 program words and its
+//   worst-case return-stack depth 4 -> 3 of 8.  The two CD4053 images are
+//   untouched (these helpers are relay-only).  The high-side helpers stay
+//   per-bit: only one coil is ever energized at a time, so there is no
+//   intermediate state to remove there, and a masked pair would be wrong.
 static void set_relay_coils_low(void) {
-    hw_relay_reset_pin_set_low();
-    hw_relay_set_pin_set_low();
+    LATA &= (uint8_t)~((1U << RELAY_RESET_PIN) | (1U << RELAY_SET_PIN));
 }
 
 // wrap this into a function to save firmware space
@@ -480,9 +494,10 @@ static void hw_set_engaged_state(void) {
 // errors (presumably ultra-rare events: cosmic rays, extreme EMI).  Disables
 // interrupts first so nothing can pet the dog.
 //
-// The FIRST act on the relay variant is set_relay_coils_low(): the coils are
-// driven to their de-energized idle BEFORE the spin, so no fault can hold a
-// coil energized for the whole ~256ms watchdog period. The reset then re-runs
+// The FIRST act on the relay variant is set_relay_coils_low(): both coils are
+// driven to their de-energized idle -- in ONE LATA write, so neither is left
+// energized while the other is cleared -- BEFORE the spin, so no fault can hold
+// a coil energized for the whole ~256ms watchdog period. The reset then re-runs
 // init(), whose full-width BYPASS actuation re-synchronizes the physical relay
 // with the logical state and the LED. (The modular shells reach the same
 // operation through hw_outputs_reassert_safe(); this shell has no linked
