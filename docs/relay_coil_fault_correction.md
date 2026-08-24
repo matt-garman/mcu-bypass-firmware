@@ -266,8 +266,8 @@ The physical-pin extensions add independent negative controls:
   the SRAM coil intent is low.
 
 The AVR-XT matrix also exercises each coil's pull-up, one-bit direction upset,
-and a combined input/stale-OUT/PULLUPEN+INVEN state. The PIC12F675 matrix covers
-all three comparator modes one bit away from off (`110`, `101`, `011`); mode
+and a combined input/stale-OUT/PULLUPEN+INVEN state. The PIC12F675 relay matrix
+covers all three comparator modes one bit away from off (`110`, `101`, `011`); mode
 `110`, the reachable mode that owns GP2, is run with both comparator output
 polarities. These are modeled electrical pin checks, not relay-mechanical or
 bench evidence.

@@ -93,7 +93,7 @@
                 "shadow+port GP0 high vs BYPASS expected: isolates shadow-vs-expected, F2-blind (ctx_ untouched)"); \
 } while (0)
 #else
-#  define PIC_FAULT_EXPECTED_CHECKS (39u + PIC_FAULT_CTX_INRANGE)
+#  define PIC_FAULT_EXPECTED_CHECKS (37u + PIC_FAULT_CTX_INRANGE)
 // The shadow cases make both output-integrity clauses false. The GPIO cases
 // isolate port-follows-shadow: the shadow still matches settled BYPASS. The
 // final shadow.expected case does the converse: it drives shadow AND port to

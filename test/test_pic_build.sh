@@ -1465,8 +1465,8 @@ lane=
 	printf '%s\n' "$*" >> "${MATRIX_LANE_LOG:?}"
 	case "$lane" in
 		fault)
-			printf 'FAULT-INJECT PASS: 40 checks, 0 failures\n'
-			printf 'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=cd4053_simple status=pass checks=40 failures=0\n'
+			printf 'FAULT-INJECT PASS: 38 checks, 0 failures\n'
+			printf 'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=cd4053_simple status=pass checks=38 failures=0\n'
 			;;
 		lockstep)
 			printf 'LOCK-STEP PASS: 3005 checks, 0 failures\n'

@@ -261,6 +261,7 @@ static unsigned  g_checks  = 0;
 static unsigned  g_fails   = 0;
 static unsigned  g_loop_clrwdt_addr = 0;
 #if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
+static Stimulus_Node *g_comparator_input_node = nullptr;
 static Stimulus_Node *g_reset_coil_node = nullptr;
 static Stimulus_Node *g_set_coil_node   = nullptr;
 #endif
@@ -301,26 +302,36 @@ static Register *fetch_sfr(unsigned addr, const char *token) {
 }
 
 #if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
-#  if !defined(PIC_REG_RESET_COIL_PIN_NAME) || !defined(PIC_REG_SET_COIL_PIN_NAME)
-#    error "physical relay checks require exact reset/set coil pin names"
+#  if !defined(PIC_REG_COMPARATOR_INPUT_PIN_NAME) || \
+      !defined(PIC_REG_RESET_COIL_PIN_NAME) || !defined(PIC_REG_SET_COIL_PIN_NAME)
+#    error "physical relay checks require exact comparator/reset/set pin names"
 #  endif
 
 // Attach passive nodes to the package pins. Unlike GPIO readback, these nodes
 // continue to report the pad voltage while an analog peripheral owns the pin.
+// The GP0 node completes the comparator's two-input fixture; only GP1/GP2 are
+// measured as relay coils.
 static bool attach_relay_coil_observers(const char *proc_name) {
+    IOPIN *comparator_input_pin =
+        find_pin_exact(g_cpu, PIC_REG_COMPARATOR_INPUT_PIN_NAME);
     IOPIN *reset_pin = find_pin_exact(g_cpu, PIC_REG_RESET_COIL_PIN_NAME);
     IOPIN *set_pin   = find_pin_exact(g_cpu, PIC_REG_SET_COIL_PIN_NAME);
-    if (reset_pin == nullptr || set_pin == nullptr) {
-        fprintf(stderr, "FATAL: relay pin %s/%s not found on %s\n",
+    if (comparator_input_pin == nullptr || reset_pin == nullptr ||
+            set_pin == nullptr) {
+        fprintf(stderr, "FATAL: comparator/relay pin %s/%s/%s not found on %s\n",
+                PIC_REG_COMPARATOR_INPUT_PIN_NAME,
                 PIC_REG_RESET_COIL_PIN_NAME, PIC_REG_SET_COIL_PIN_NAME,
                 proc_name);
         return false;
     }
 
+    g_comparator_input_node = new Stimulus_Node("comparator-input-pin");
     g_reset_coil_node = new Stimulus_Node("relay-reset-pin");
     g_set_coil_node   = new Stimulus_Node("relay-set-pin");
+    g_comparator_input_node->attach_stimulus(comparator_input_pin);
     g_reset_coil_node->attach_stimulus(reset_pin);
     g_set_coil_node->attach_stimulus(set_pin);
+    g_comparator_input_node->update();
     g_reset_coil_node->update();
     g_set_coil_node->update();
     return true;

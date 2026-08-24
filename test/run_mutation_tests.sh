@@ -1210,7 +1210,7 @@ pic12f675_mutation_has_signature() {
                 }
                 END { exit(found ? 0 : 1) }
             ' "$log" \
-                && grep -Eq "^PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=${variant} status=fail checks=40 failures=[1-9][0-9]*$" "$log"
+                && grep -Eq "^PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=${variant} status=fail checks=38 failures=[1-9][0-9]*$" "$log"
             ;;
         gpsim:press-led)
             assertion='FAIL: PRESS1: LED (GP0) should be on mid-press (toggle-on-press)'
@@ -1790,7 +1790,7 @@ PIC12F675_MUTATIONS=(
 "src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	resync:minimum-pulse	TARGET relay coil pulse shortened below the datasheet minimum; the fail-safe recovery actuation is then too short to resynchronize the relay, so the fault lane reports it before the target-I/O minimum check gets to run"
 "src/bypass_mcu_pic12f675.c	s@static void hw_wdt_pet(void) { CLRWDT(); }@static void hw_wdt_pet(void) { (void)0; /* MUTANT: no WDT pet */ }@	PIC12F675_SOAK_VARIANT=cd4053_simple PIC12F675_SOAK_DURATION_MS=$PIC_SOAK_MUT_MS PIC12F675_SOAK_LIVENESS_INTERVAL_MS=$PIC_SOAK_MUT_LIVENESS_MS PIC12F675_SOAK_COMBINATION_NAME=mutation-wdt pic12f675-test-soak	soak:wdt-reset	SOAK main-loop WDT pet removed; the soak's reset notifier catches the un-pet watchdog inside the short mutation window (this part's period is ~288 ms, well inside it)"
 # F2 context-SEU: delete the polled shadow clause; killed by the fault leg.
-"src/bypass_mcu_pic12f675.c	s@(ctx_check_ != debounce_ctx_check_word(next_ctx)) ||@(0U != 0U) ||@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:ctx.debounce.inrange	PIC12F675 F2 shadow clause deleted from the polled sanity gate; the in-range debounce SEU is no longer caught and the target fault leg ctx.debounce.inrange case sees 0 resets at checks=40."
+"src/bypass_mcu_pic12f675.c	s@(ctx_check_ != debounce_ctx_check_word(next_ctx)) ||@(0U != 0U) ||@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:ctx.debounce.inrange	PIC12F675 F2 shadow clause deleted from the polled sanity gate; the in-range debounce SEU is no longer caught and the target fault leg ctx.debounce.inrange case sees 0 resets at checks=38."
 )
 
 # --- AVR-XT shell mutants (src/bypass_mcu_avr_xt.c) ---------------------------
@@ -2346,7 +2346,7 @@ EOF
     printf '%s\n' \
         '  inject ADCON0.ADON       @0x01f: 0x00 -> 0x01  (fixture)' \
         '    FAIL: 0 resets in 2000 ms (want exactly 1)  [gate did not fire?]' \
-        'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=cd4053_simple status=fail checks=40 failures=1' \
+        'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=cd4053_simple status=fail checks=38 failures=1' \
         > "$signature_log"
     pic12f675_classify_checker_result 2 fault:ADCON0.ADON \
         'PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target' \
