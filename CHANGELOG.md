@@ -39,6 +39,31 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- **Suffixed release tags now publish as prereleases.**
+  `scripts/make-release.sh` and every release verifier have accepted
+  `vX.Y.Z-suffix` since the producer and verifier grammars were aligned, and the
+  workflow's `on:` trigger matches that shape -- but `gh release create` was
+  never told, so a `v1.0.0-rc.1` would have been published as an ordinary
+  release and could have taken latest-release selection away from the newest
+  stable version. The publication step now decides the kind from the tag alone:
+  a bare `vX.Y.Z` publishes exactly as before, every accepted suffix adds
+  `--prerelease`, and a shape outside the version grammar aborts before `gh` is
+  reached rather than defaulting to either kind. That last branch is not
+  redundant with the existing gate, it is the alarm on it: malformed tags are
+  already rejected in the locate step before any build, so one arriving at
+  publication means that gate was bypassed.
+
+  Both halves are proved by execution rather than by inspection.
+  `test-release-provenance` runs the workflow's own publication shell against a
+  recording `gh` stub and requires the flag absent for `v0.9.8`, present exactly
+  once for `v0.9.8-rc.1`, and `gh` never reached for six malformed shapes --
+  including the `v0.9.8-` that the trigger globs admit and the grammar does not
+  (86 -> 94 checks). `test-workflow-syntax` extracts both classification
+  patterns from the YAML and requires that together they accept exactly what
+  `scripts/make-release.sh` accepts, that they do not overlap, and that they
+  split that grammar stable-versus-suffixed, so this additional copy of the
+  version grammar cannot drift away from the producer's (375 -> 381 checks).
+
 - **PIC10F320 de-energizes both relay coils in one write.** The
   space-constrained shell's `set_relay_coils_low()` cleared RESET and then SET
   through two separate `LATA` read-modify-writes. Both orders settle in the same

@@ -28,7 +28,9 @@ name: Release
 #      Make graph on the clean runner -- the same gates the MANIFEST claims;
 #   5. rechecks the protected remote tag and the complete frozen publication
 #      inventory, then re-verifies the detached checksum signature and image
-#      checksums from the exact directory passed to `gh release create`.
+#      checksums from the exact directory passed to `gh release create`, which
+#      publishes a bare `vX.Y.Z` as an ordinary release and any accepted suffix
+#      (`v1.0.0-rc.1`) as a prerelease.
 #
 # `ubuntu-24.04` is a MOVING hosted-runner label, and the apt tools below install
 # without version constraints -- so the runner and the apt toolchain are RECORDED,
@@ -448,6 +450,24 @@ jobs:
           assets=( "$dir"/*.hex "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \
             "$dir/MANIFEST.md" "$dir/QUALIFICATION" )
           notes="$dir/MANIFEST.md"; [ -f "$notes" ] || notes=/dev/null
+          # Publication kind, decided from the tag alone. A bare vX.Y.Z is an
+          # ordinary release; every accepted suffix (v1.0.0-rc.1) publishes as a
+          # GitHub PRERELEASE, so a candidate can never take latest-release
+          # selection away from the newest stable version. The two branches below
+          # partition exactly the version grammar scripts/make-release.sh and
+          # scripts/verify-release-qualification.sh enforce -- the latter already
+          # rejected a malformed tag in the locate step, before any build -- so an
+          # unrecognized shape reaching here means that gate was bypassed: fail
+          # closed rather than defaulting to either kind.
+          prerelease_flag=()
+          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            :
+          elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*$ ]]; then
+            prerelease_flag=( --prerelease )
+          else
+            echo "::error::tag '$tag' is not vX.Y.Z (optionally -suffix)"
+            exit 1
+          fi
           scripts/verify-release-tag-target.sh origin "$tag" "$VERIFIED_RELEASE_COMMIT"
           rename_report="$dir/RENAME_IDENTITY.md"
           case "$RENAME_IDENTITY_APPLICABLE" in
@@ -492,4 +512,5 @@ jobs:
             --title "Firmware $tag" \
             --notes-file "$notes" \
             --verify-tag \
+            "${prerelease_flag[@]}" \
             "${assets[@]}"

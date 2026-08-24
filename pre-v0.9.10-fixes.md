@@ -1491,10 +1491,62 @@ affect latest-release selection.
 
 **Acceptance criteria**
 
-- [ ] Suffixed valid tags create GitHub prereleases.
-- [ ] Unsuffixed valid tags create ordinary releases.
-- [ ] Malformed tags remain rejected before build or publication.
-- [ ] Workflow syntax and release publication tests prove both command forms.
+- [x] Suffixed valid tags create GitHub prereleases.
+- [x] Unsuffixed valid tags create ordinary releases.
+- [x] Malformed tags remain rejected before build or publication.
+- [x] Workflow syntax and release publication tests prove both command forms.
+
+**Resolution**
+
+Adopted. The publication step of `.github/workflows/release.yml` now derives the
+publication kind from the tag alone, before the final verification chain and
+therefore before `gh` is reached. A bare `vX.Y.Z` publishes exactly as before; a
+tag matching the suffixed half of the producer grammar adds `--prerelease` to
+the `gh release create` argument vector; anything else annotates
+`::error::tag '<tag>' is not vX.Y.Z (optionally -suffix)` and exits. Stable
+publication is byte-for-byte the command it was, because the flag is carried in
+a separate array that expands to nothing for a stable tag -- `--verify-tag`,
+`--title`, `--notes-file` and the asset vector are untouched.
+
+The two classification branches are a further copy of the project's version
+grammar, which is the risk this change introduces rather than removes, so they
+are held to the original: `test-workflow-syntax` extracts both patterns from the
+YAML and the producer's pattern from `scripts/make-release.sh`, then requires
+over a table of 18 stable, prerelease and malformed shapes that the union of the
+two accept exactly what the producer accepts, that they do not overlap, and that
+they split that grammar stable-versus-suffixed.
+
+The third branch is not redundant with the existing gate; it is the alarm on it.
+A malformed tag is already rejected before any build, in the locate step, by the
+version check inside `scripts/verify-release-qualification.sh` -- so a shape
+arriving at publication means that gate was bypassed, and silently defaulting it
+to either kind is the failure mode worth refusing.
+
+*Verification.* `test-release-provenance` executes the workflow's own publication
+shell -- extracted from `release.yml` and run against stub tag/signature
+verifiers and a `gh` that records its argv -- once per command form: `v0.9.8`
+publishes with no `--prerelease` and `--verify-tag` intact, `v0.9.8-rc.1`
+publishes with `--prerelease` exactly once and under its own tag, and six
+malformed shapes (`v0.9.8-`, `v0.9.8-rc..1`, `v0.9.8--rc`, `v0.9.8+1`, `v0.9`,
+`0.9.8`) abort with `gh` never invoked; 86 -> 94 checks. The stable case also
+requires that no *empty* argument reach `gh`, which is the one runner-shell
+assumption the empty flag array carries: bash before 4.4 expands an empty array
+under `set -u` to a single empty word, and `gh` would read that as an empty
+asset path. `test-workflow-syntax` adds the grammar and fail-closed contracts
+above; 375 -> 381 checks. Five
+negative controls were run against both suites on a scratch copy of the tree:
+removing the classification entirely -- the pre-R4 workflow -- fails six
+workflow-syntax checks and the prerelease publication case; letting an
+unrecognized shape fall through as a stable release fails the fail-closed check
+and the first malformed case; widening the suffixed branch to `-.*` fails the
+grammar-agreement and classification checks on exactly the four shapes the
+producer rejects; inverting the two branches fails the classification check and
+the stable publication case; and appending one quoted empty word to the `gh`
+argument vector fails the empty-argument check. `make test-workflow-syntax
+test-release-provenance test-release-history test-release-qualification
+test-release-images test-release-preflight test-supply-chain
+test-ci-local-routing` pass on the final tree, with preflight unchanged at 118
+checks. No firmware source is involved.
 
 ### R5 - Make XC8 cache manifest generation fail closed
 
@@ -1687,7 +1739,7 @@ Record each completed item with its commit ID and decisive validation command.
 | P2 | OPEN | | Build-before-hardware AVR programming order and fake-programmer regression |
 | D4 | OPEN | | Final release date, resource tables, and PIC10F320 run-5 baseline wording |
 | D5 | OPEN | | Simulator timing/physical-language and pip prerequisite reconciliation |
-| R4 | OPEN | | Suffixed-tag prerelease publication semantics |
+| R4 | IMPLEMENTED | (pending) | Tag-derived publication kind in `release.yml`; `test-release-provenance` executes the publication shell for stable, `-rc.1`, and six malformed tags (86 -> 94 checks); `test-workflow-syntax` pins both branches against the `scripts/make-release.sh` grammar (375 -> 381 checks) |
 | R5 | OPEN | | Fail-closed XC8 cache manifest pipelines |
 | R6 | OPEN | | Immutable production artifact identity independent of development overrides |
 | Final validation | REOPENED | | The `fe8ecc8` run remains historical evidence; rerun every pre-merge gate after F2-P2 and documentation/release changes |
