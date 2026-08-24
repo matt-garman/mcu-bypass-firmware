@@ -90,6 +90,25 @@ case "$1" in
 		: > "$destination/xc8/pic/include/proc/pic10f320.h"
 		[ "${FAKE_OMIT_PIC12F675:-0}" = 1 ] \
 			|| : > "$destination/xc8/pic/include/proc/pic12f675.h"
+		# Eight file names that exercise every path byte the NUL-delimited
+		# walk is supposed to survive: whitespace, both quote characters, a
+		# backslash, shell metacharacters, a leading dash, non-ASCII UTF-8,
+		# and an embedded newline (which sha256sum escapes rather than
+		# emitting raw, so the recorded and recomputed forms must agree).
+		if [ "${FAKE_ODD_PATHS:-0}" = 1 ]; then
+			odd="$destination/xc8/pic/include/odd"
+			mkdir -p "$odd"
+			printf 'odd 1\n' > "$odd/with space.h"
+			printf 'odd 2\n' > "$odd/with'apostrophe.h"
+			printf 'odd 3\n' > "$odd/with\"quote.h"
+			printf 'odd 4\n' > "$odd/with\\backslash.h"
+			printf 'odd 5\n' > "$odd/with\$dollar and *glob?.h"
+			printf 'odd 6\n' > "$odd/-leading-dash.h"
+			utf8=$(printf 'caf\303\251-\303\237')
+			printf 'odd 7\n' > "$odd/$utf8.h"
+			newline=$(printf 'with\nnewline')
+			printf 'odd 8\n' > "$odd/$newline.h"
+		fi
 		;;
 	*) exit 3 ;;
 esac
@@ -254,6 +273,154 @@ expect_fail "wrong XC8 cache stamp" "does not match the pinned toolchain" run_pi
 reinstall_pic
 rm -f "$work/.xc8_toolchain.manifest"
 expect_fail "missing XC8 manifest" "missing integrity manifest" run_pic_verify
+
+# --- manifest generation fails closed at every stage --------------------------
+# The manifest is produced by a scan, an ordering and a hashing stage. Under
+# /bin/sh a single pipeline reports only its LAST stage's status, so a find or
+# sort that emitted part of the tree and then died would be masked by the
+# sha256sum that succeeded over that fragment -- freezing (install) or accepting
+# (verify) a silently partial inventory. Each stage is failed independently
+# below, in both scripts, and each must be rejected by name.
+stagebin="$work/stage-fakebin"
+mkdir "$stagebin"
+real_find=$(command -v find) || fail "find is required"
+real_sort=$(command -v sort) || fail "sort is required"
+real_sha256sum=$(command -v sha256sum) || fail "sha256sum is required"
+# A real find that cannot read part of a tree prints what it did find and THEN
+# exits non-zero, so the stub emits one genuine readable path before failing:
+# that fragment is precisely what the later stages would happily digest. Only
+# the NUL-delimited manifest walk is failed -- the symlink scan uses -print and
+# must still run, so the manifest stage is the one that breaks.
+cat > "$stagebin/find" <<'EOF'
+#!/bin/sh
+set -u
+manifest=0
+for arg in "$@"; do
+	if [ "$arg" = -print0 ]; then manifest=1; fi
+done
+if [ "$manifest" = 1 ]; then
+	case "${FAKE_FAIL_STAGE:-}" in
+		scan) printf '%s\0' "$FAKE_STAGE_WITNESS"; exit 1 ;;
+		empty) exit 0 ;;
+	esac
+fi
+exec "$REAL_FIND" "$@"
+EOF
+cat > "$stagebin/sort" <<'EOF'
+#!/bin/sh
+set -u
+if [ "${FAKE_FAIL_STAGE:-}" = order ]; then
+	printf '%s\0' "$FAKE_STAGE_WITNESS"
+	exit 2
+fi
+exec "$REAL_SORT" "$@"
+EOF
+# Fail only for manifest inputs: the installer also hashes its two downloads,
+# which live in its own private temporary directory outside the cache root.
+cat > "$stagebin/sha256sum" <<'EOF'
+#!/bin/sh
+set -u
+if [ "${FAKE_FAIL_STAGE:-}" = hash ]; then
+	case "${1:-}" in
+		"$FAKE_STAGE_ROOT"/*) exit 1 ;;
+	esac
+fi
+exec "$REAL_SHA256SUM" "$@"
+EOF
+chmod +x "$stagebin/find" "$stagebin/sort" "$stagebin/sha256sum"
+
+stage_env=(
+	REAL_FIND="$real_find" REAL_SORT="$real_sort"
+	REAL_SHA256SUM="$real_sha256sum"
+	FAKE_STAGE_WITNESS="$work/xc8/bin/xc8-cc" FAKE_STAGE_ROOT="$work"
+)
+run_pic_installer_failing_stage() {
+	env PATH="$stagebin:$fakebin:$PATH" FAKE_SUDO_LOG="$sudo_log" \
+		FAKE_CHMOD_LOG="$chmod_log" REAL_CHMOD="$real_chmod" \
+		FAKE_XC8_PAYLOAD="$trusted_xc8" FAKE_DFP_PAYLOAD="$trusted_dfp" \
+		XC8_INSTALLER_SHA256="$trusted_xc8_sha" \
+		PIC_DFP_SHA256="$trusted_dfp_sha" \
+		XC8_DIR="$work/xc8" XC8_DFP_ROOT="$work/pic-dfp" \
+		XC8_CACHE_DIR="$work" \
+		"${stage_env[@]}" FAKE_FAIL_STAGE="$1" \
+		"$PIC_INSTALL"
+}
+run_pic_verify_failing_stage() {
+	env PATH="$stagebin:$PATH" \
+		XC8_DIR="$work/xc8" XC8_DFP_ROOT="$work/pic-dfp" XC8_CACHE_DIR="$work" \
+		XC8_INSTALLER_SHA256="$trusted_xc8_sha" PIC_DFP_SHA256="$trusted_dfp_sha" \
+		"${stage_env[@]}" FAKE_FAIL_STAGE="$1" \
+		"$PIC_VERIFY"
+}
+
+# Installation: no stamp and no manifest may survive a stage failure. The tree
+# itself is fully installed by this point -- the fragment the stub emits is a
+# real file under it -- so an unchecked stage would record a one-line manifest
+# and exit 0.
+for stage_case in \
+	'scan:could not scan the installed tree for manifest inputs' \
+	'order:could not order the installed-tree manifest inputs' \
+	'hash:could not hash the installed-tree manifest inputs' \
+	'empty:refusing to record an empty XC8/DFP cache manifest'
+do
+	stage=${stage_case%%:*}
+	rm -rf "$work/xc8" "$work/pic-dfp" \
+		"$work/.xc8_toolchain.stamp" "$work/.xc8_toolchain.manifest"
+	expect_fail "install manifest $stage stage" "${stage_case#*:}" \
+		run_pic_installer_failing_stage "$stage"
+	[ ! -e "$work/.xc8_toolchain.manifest" ] && [ ! -e "$work/.xc8_toolchain.stamp" ] \
+		|| fail "install recorded a cache record after a manifest $stage failure"
+	checks=$((checks + 1))
+done
+
+# Restored-cache verification: a partial recomputation must be reported as the
+# scan/order/hash failure it is, not as a cache mismatch -- the two are not the
+# same finding, and a fragment that happens to match an equally partial recorded
+# manifest would otherwise verify clean.
+reinstall_pic
+for stage_case in \
+	'scan:could not scan the restored tree for manifest inputs' \
+	'order:could not order the restored-tree manifest inputs' \
+	'hash:could not hash the restored-tree manifest inputs' \
+	'empty:restored tree produced an empty manifest'
+do
+	expect_fail "verify manifest ${stage_case%%:*} stage" "${stage_case#*:}" \
+		run_pic_verify_failing_stage "${stage_case%%:*}"
+done
+
+# An empty recorded manifest matches an empty recomputation, so it is refused
+# outright rather than compared.
+: > "$work/.xc8_toolchain.manifest"
+expect_fail "empty XC8 manifest" "integrity manifest is empty" run_pic_verify
+
+# --- unusual (non-NUL) path bytes are inventoried, not dropped ----------------
+# Spaces, quotes, backslashes, globs, a leading dash, UTF-8 and an embedded
+# newline all survive find -print0 | sort -z | xargs -0 unchanged, and both
+# scripts must agree byte-for-byte on how sha256sum renders them.
+rm -rf "$work/xc8" "$work/pic-dfp" \
+	"$work/.xc8_toolchain.stamp" "$work/.xc8_toolchain.manifest"
+FAKE_ODD_PATHS=1 run_pic_installer "$trusted_xc8" "$trusted_dfp" >/dev/null 2>&1 \
+	|| fail "install failed on a tree containing unusual path bytes"
+odd_dir="$work/pic-dfp/xc8/pic/include/odd"
+odd_files=$(find "$odd_dir" -type f -printf 'x\n' | wc -l)
+[ "$odd_files" -eq 8 ] || fail "unusual-path fixture created $odd_files files, expected 8"
+[ "$(grep -c '/odd/' "$work/.xc8_toolchain.manifest")" -eq 8 ] \
+	|| fail "manifest did not inventory all 8 unusually-named files"
+verify_out=$(run_pic_verify 2>&1) \
+	|| fail "cache with unusual path bytes was rejected: $verify_out"
+checks=$((checks + 1))
+
+# Those entries are compared, not merely carried: tampering with one is caught.
+printf 'tampered\n' > "$odd_dir/with space.h"
+expect_fail "corrupt unusually-named cache file" "corrupted, incomplete, or tampered" \
+	run_pic_verify
+
+# An extra file whose name sha256sum must escape is caught the same way, which
+# is what proves the escaped manifest lines take part in the comparison.
+printf 'odd 1\n' > "$odd_dir/with space.h"
+printf 'unexpected input\n' > "$odd_dir/$(printf 'extra\nnewline').h"
+expect_fail "extra unusually-named cache file" "corrupted, incomplete, or tampered" \
+	run_pic_verify
 
 # Leave a clean, verifiable cache behind.
 reinstall_pic

@@ -1570,11 +1570,84 @@ that every readable compiler/DFP input is inventoried.
 
 **Acceptance criteria**
 
-- [ ] Failure of any manifest pipeline stage fails installation/verification.
-- [ ] No partial manifest is written or accepted after a scan/order/hash error.
-- [ ] Spaces and unusual non-NUL path bytes remain handled correctly.
-- [ ] Supply-chain, cache-restore, workflow-syntax, and release-preflight tests
+- [x] Failure of any manifest pipeline stage fails installation/verification.
+- [x] No partial manifest is written or accepted after a scan/order/hash error.
+- [x] Spaces and unusual non-NUL path bytes remain handled correctly.
+- [x] Supply-chain, cache-restore, workflow-syntax, and release-preflight tests
   pass.
+
+**Resolution**
+
+Adopted, by splitting rather than by changing shells. Both scripts stay
+`#!/bin/sh`: the walk, the ordering and the hashing are now three separately
+status-checked stages, staged through NUL-delimited files in a private
+`mktemp -d`, so no stage's status can be reported as the next one's. The
+`|| die` on each names the stage that failed -- `could not scan/order/hash the
+installed tree` in `scripts/install_pic_toolchain.sh`, the same three against
+`the restored tree` in `scripts/verify_pic_toolchain_cache.sh`. `pipefail`
+would also have worked, but only by moving both scripts to `bash`; the split
+needs nothing that POSIX `sh` does not already promise.
+
+The defect is not hypothetical and not subtle once instrumented. Driven with a
+`find` that emits one genuine readable path and then exits non-zero -- exactly
+what a real one does over a subtree it cannot read -- the previous installer
+exited **0** having recorded **1 of 9** files as the frozen integrity manifest
+of the tree a later job would trust.
+
+What makes that worth a fix rather than a note is which way it fails. A
+partial record is usually caught at restore time, because the verifier's full
+walk disagrees with it -- but the walks are over the same tree with the same
+permissions, so a condition that truncates one can truncate the other
+identically, and two agreeing fragments verify clean. That is the whole
+failure: a cache accepted as completely inventoried when most of it was never
+hashed. Two consequences follow, and both are now enforced. Neither script may
+record or accept an *empty* inventory, which is the limit case of the same
+thing (an empty manifest matches an empty recomputation). And the verifier
+reports a scan/order/hash failure by name instead of as a cache mismatch:
+before this change a broken scanner was reported as a corrupted cache, which
+is a different finding with a different response, and only one of the two
+means the cache is bad.
+
+Manifest content is unchanged, so nothing already recorded is invalidated: over
+the 3603 files of the real XC8 3.10 + PIC10-12Fxxx DFP 1.9.189 install on this
+host, the staged form reproduces the old pipeline's output byte for byte. (The
+CI cache key is `hashFiles('scripts/install_pic_toolchain.sh')` in any case, so
+editing the installer rotates the key and the next run installs fresh.) One
+unrelated pipeline in the installer, `sha256sum ... | cut`, was deliberately
+left alone: a masked failure there yields an empty digest that cannot equal a
+pinned one, so it already fails closed.
+
+*Verification.* `test-supply-chain` fails each stage independently, in both
+scripts, through a `PATH` shim over `find`, `sort` and `sha256sum`: the `find`
+stub breaks only the NUL-delimited manifest walk, so the symlink scan still
+runs and the manifest stage is what breaks, and it emits a real readable file
+before failing so that the later stages succeed over the fragment -- the
+masking condition itself. Installation must reject all four cases (scan,
+order, hash, empty) and leave *neither* stamp nor manifest behind;
+verification must reject the same four by name, plus an empty recorded
+manifest. Eight fixture files whose names carry spaces, both quote characters,
+a backslash, shell metacharacters, a leading dash, UTF-8 and an embedded
+newline are installed, inventoried (all eight appear in the recorded
+manifest), verified, and caught both when one is tampered with and when a
+ninth escaped-name file is added -- the same eight reduce to 2 entries and an
+`xargs: unmatched double quote` error under a newline-delimited pipeline.
+30 -> 46 checks.
+
+Nine negative controls were run against a scratch copy of the tree. Restoring
+the pre-R5 pipeline to both scripts, or to the installer alone, fails the
+install scan-stage case as *accepted*; restoring it to the verifier alone
+fails all four verify cases for the wrong reason (`does not match its recorded
+manifest` instead of the stage). Keeping the staging but dropping one `|| die`
+fails that stage's case the same way, so the status check is load-bearing and
+not merely the restructuring. Removing either empty-inventory guard fails its
+case; removing the empty-recorded-manifest guard fails that one. Reverting to
+newline delimiting fails the suite outright, and pruning just the
+unusually-named directory from the installer's walk fails the eight-entry
+inventory check exactly. `make test-supply-chain test-workflow-syntax
+test-release-preflight test-todo-index` pass on the final tree, with
+workflow-syntax unchanged at 381 checks and preflight unchanged at 118. The
+restored-cache half of the criterion is `test-supply-chain`'s verify section:
+there is no separate cache-restore target. No firmware source is involved.
 
 ### R6 - Pin production release identity independently of development overrides
 
@@ -1740,7 +1813,7 @@ Record each completed item with its commit ID and decisive validation command.
 | D4 | OPEN | | Final release date, resource tables, and PIC10F320 run-5 baseline wording |
 | D5 | OPEN | | Simulator timing/physical-language and pip prerequisite reconciliation |
 | R4 | IMPLEMENTED | (pending) | Tag-derived publication kind in `release.yml`; `test-release-provenance` executes the publication shell for stable, `-rc.1`, and six malformed tags (86 -> 94 checks); `test-workflow-syntax` pins both branches against the `scripts/make-release.sh` grammar (375 -> 381 checks) |
-| R5 | OPEN | | Fail-closed XC8 cache manifest pipelines |
+| R5 | IMPLEMENTED | (pending) | XC8 cache manifest split into three separately status-checked NUL-delimited stages in both `install_pic_toolchain.sh` and `verify_pic_toolchain_cache.sh`; neither records nor accepts a partial or empty inventory, and the verifier names the failing stage instead of reporting a cache mismatch; `test-supply-chain` fails each stage independently in both scripts and inventories 8 unusually-named files (30 -> 46 checks) |
 | R6 | OPEN | | Immutable production artifact identity independent of development overrides |
 | Final validation | REOPENED | | The `fe8ecc8` run remains historical evidence; rerun every pre-merge gate after F2-P2 and documentation/release changes |
 

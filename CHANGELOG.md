@@ -39,6 +39,38 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- **The XC8 cache manifest can no longer be frozen from a partial scan.** The
+  installer records a SHA-256 inventory of every readable file in the
+  just-installed compiler and device pack, and the restored-cache verifier
+  regenerates it and requires an exact match -- that manifest is what stands
+  between a corrupted CI cache restore and a build, because a restore never
+  re-runs the digest-verified installer. Both computed it as one
+  `find | sort | xargs sha256sum` pipeline under `/bin/sh`, which reports only
+  the LAST stage's status: a `find` that emitted part of the tree and then died
+  was masked by the `sha256sum` that succeeded over that fragment. Measured on a
+  synthetic install, the old installer exited 0 having recorded 1 of 9 files.
+
+  The walk, the ordering and the hashing are now three separately
+  status-checked stages in both scripts, NUL-delimited end to end, and neither
+  will record or accept an empty inventory. The dangerous case was never the
+  loud one: a partial record is not caught at restore time if the condition that
+  truncated the install-time walk truncates the verify-time walk the same way,
+  and the two fragments then agree. For the same reason the verifier now reports
+  a scan/order/hash failure by name rather than as a cache mismatch -- they are
+  not the same finding, and only one of them means the cache is bad.
+
+  `test-supply-chain` fails each stage independently, in both scripts, against a
+  `find` stub that emits a genuine readable path before failing exactly as a
+  real one does over an unreadable subtree; installation must leave neither
+  stamp nor manifest behind, and verification must name the stage. Eight fixture
+  files whose names carry spaces, both quote characters, a backslash, shell
+  metacharacters, a leading dash, UTF-8 and an embedded newline are inventoried,
+  compared and caught when tampered with -- the same eight reduce to 2 entries
+  and an error under a newline-delimited pipeline (30 -> 46 checks). Manifest
+  content is unchanged: over the 3603 files of a real XC8 3.10 + PIC10-12Fxxx
+  DFP 1.9.189 install, the staged form reproduces the pipeline's output byte for
+  byte.
+
 - **Suffixed release tags now publish as prereleases.**
   `scripts/make-release.sh` and every release verifier have accepted
   `vX.Y.Z-suffix` since the producer and verifier grammars were aligned, and the
