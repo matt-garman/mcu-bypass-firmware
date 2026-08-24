@@ -7663,6 +7663,118 @@ override RELEASE_FIXED_EVIDENCE_FILES := \
 override RELEASE_EVIDENCE_FILES := $(RELEASE_FIXED_EVIDENCE_FILES) \
 	$(addprefix soak-,$(addsuffix .log,$(RELEASE_SOAK_NAMES)))
 
+# --- the immutable production release identity -------------------------------
+# WHAT A RELEASE IS, written as literal text that no caller can move.
+#
+# RELEASE_IMAGES above is the canonical set, but it is COMPOSED from the same
+# variables the build rules use: $(FW_BASE), the per-part MCU tags, the tinyx5
+# membership. Most of those are overridable on purpose -- test/test_pic_build.sh
+# builds whole synthetic matrices under FW_BASE=, PIC12F675_TAG= and
+# PIC12F675_CHIP= precisely because a name and a die are things a DEVELOPMENT
+# target has to be able to vary. scripts/make-release.sh enumerates the release
+# from those same variables, read back through print-<VAR>.
+#
+# Two opinions that consume one overridden input agree with each other about the
+# overridden identity. `make release FW_BASE=other` staged, cross-checked and
+# published a complete, internally consistent set of images that nobody had
+# reviewed, and the enumeration-vs-RELEASE_IMAGES check a few dozen lines above
+# passed, because both sides had been moved the same way. An exported
+# PIC12F675_TAG did the same thing without appearing on any command line at all:
+# the per-part tags are `?=`, so the environment wins them.
+#
+# This block is the third statement, and it is DATA. Literal words, `override`
+# so neither the command line nor the environment can reach them, and derived
+# from nothing that a build override can move -- a pin computed from FW_BASE
+# would agree with the very thing it exists to check. The redundancy between
+# the field table and the part/variant lists below is deliberate for the same
+# reason: they are both literals, so they cannot disagree at run time, and an
+# edit that changes one and forgets the other fails one of the two comparisons.
+#
+# WHAT IS PINNED: the fields that decide an image's NAME (FW_BASE, the MCU tag
+# fields), the DIE that name is compiled for (the -mmcu/-mcpu selectors), the
+# CLOCK its timing evidence was measured at, and the part/variant/soak
+# MEMBERSHIP. The die and clock fields are here because an image called
+# bypass-pic10f322-cd4053_simple.hex that was built for another chip, or at
+# another clock, is the same defect wearing a reviewed name -- and the classic
+# AVR clock is not even disclosed by the MANIFEST, which spells "1.2 MHz" and
+# "1.0 MHz" as literals rather than reading F_CPU.
+#
+# WHAT IS NOT PINNED, and must not be: build directories (AVR_BUILD_DIR,
+# PIC10F322_BUILD_DIR, ...) and every tool path (CC, PIC_CC, GPSIM, ...). Those
+# do not change what an artifact IS, a release host legitimately relocates them,
+# and make-release.sh already asserts and records the tool it actually selected.
+# Fuse/CONFIG bytes are likewise not pinned here: they are read from Makefile
+# truth into the signed MANIFEST, so they are disclosed rather than silently
+# substituted.
+#
+# TO CHANGE THE RELEASE IDENTITY -- add a part, retire a variant, re-clock a
+# chip -- edit this block. That edit is the review: it cannot be done from a
+# command line, and a release whose selected values no longer match it stops
+# before it cleans, builds, soaks or stages anything.
+_RELEASE_IDENTITY_EMPTY :=
+_RELEASE_IDENTITY_SPACE := $(_RELEASE_IDENTITY_EMPTY) $(_RELEASE_IDENTITY_EMPTY)
+_RELEASE_IDENTITY_COMMA := ,
+# Join a list value into ONE word, so a multi-word field stays a single entry
+# and cannot desynchronize the pinned table from the selected one.
+_release_identity_join = $(subst $(_RELEASE_IDENTITY_SPACE),$(_RELEASE_IDENTITY_COMMA),$(strip $(1)))
+
+# <make variable>=<reviewed value>, one word per field, list values
+# comma-joined. RELEASE_IDENTITY_SELECTED below reads the SAME names out of the
+# live Makefile; make-release.sh compares the two field by field.
+override RELEASE_IDENTITY_PINNED := \
+	FW_BASE=bypass \
+	ATTINY13A_MCU=attiny13a \
+	ATTINY13A_F_CPU=1200000UL \
+	TINYX5=85,45 \
+	TINYX5_PARTS=attiny85,attiny45 \
+	TINYX5_F_CPU=1000000UL \
+	XT_TAG=attiny202 \
+	XT_MCU=attiny202 \
+	XT_F_CPU=2000000UL \
+	PIC10F322_TAG=pic10f322 \
+	PIC10F322_CHIP=10F322 \
+	PIC10F322_XTAL=2000000UL \
+	PIC10F320_TAG=pic10f320 \
+	PIC10F320_CHIP=10F320 \
+	PIC10F320_XTAL=2000000UL \
+	PIC12F675_TAG=pic12f675 \
+	PIC12F675_CHIP=12F675 \
+	PIC12F675_XTAL=4000000UL \
+	VARIANTS=cd4053_simple,cd4053_with_mute,tq2_l2_5v_relay \
+	CLASSIC_VARIANTS_SUPPORTED=cd4053_simple,cd4053_with_mute,tq2_l2_5v_relay \
+	XT_VARIANTS_SUPPORTED=cd4053_simple,cd4053_with_mute,tq2_l2_5v_relay \
+	PIC10F320_VARIANTS_ALL=cd4053_simple,cd4053_with_mute,tq2_l2_5v_relay \
+	PIC10F320_VARIANTS_SUPPORTED=cd4053_simple,cd4053_with_mute,tq2_l2_5v_relay
+
+override RELEASE_IDENTITY_NAMES := $(foreach f,$(RELEASE_IDENTITY_PINNED),\
+	$(firstword $(subst =,$(_RELEASE_IDENTITY_SPACE),$(f))))
+override RELEASE_IDENTITY_SELECTED := $(foreach n,$(RELEASE_IDENTITY_NAMES),\
+	$(n)=$(call _release_identity_join,$($(n))))
+
+# The reviewed membership, spelled out. attiny13a is absent from the soak set
+# because simavr does not model its watchdog system reset; the tinyx5 siblings
+# carry that coverage for the classic family (see the TINYX5 note near the top).
+override RELEASE_IDENTITY_PARTS := \
+	attiny13a attiny85 attiny45 attiny202 pic10f322 pic10f320 pic12f675
+override RELEASE_IDENTITY_SOAK_PARTS := \
+	attiny85 attiny45 attiny202 pic10f322 pic10f320 pic12f675
+override RELEASE_IDENTITY_VARIANTS := \
+	cd4053_simple cd4053_with_mute tq2_l2_5v_relay
+override RELEASE_IDENTITY_IMAGES := $(foreach m,$(RELEASE_IDENTITY_PARTS),\
+	$(foreach v,$(RELEASE_IDENTITY_VARIANTS),bypass-$(m)-$(v).hex))
+override RELEASE_IDENTITY_SOAKS := $(foreach m,$(RELEASE_IDENTITY_SOAK_PARTS),\
+	$(foreach v,$(RELEASE_IDENTITY_VARIANTS),$(m)_$(v)))
+
+# Every way the live tree can differ from the pin, as one compact word list: the
+# moved <name>=<value> fields, plus the bare name of a whole set that no longer
+# matches. Naming the set rather than diffing it here keeps the parse-time error
+# readable -- one moved FW_BASE moves all 21 image names with it, and
+# make-release.sh is where the member-by-member report belongs.
+override RELEASE_IDENTITY_DRIFT := $(strip \
+	$(filter-out $(RELEASE_IDENTITY_PINNED),$(RELEASE_IDENTITY_SELECTED)) \
+	$(if $(filter-out $(RELEASE_IDENTITY_IMAGES),$(RELEASE_IMAGES))$(filter-out $(RELEASE_IMAGES),$(RELEASE_IDENTITY_IMAGES)),RELEASE_IMAGES) \
+	$(if $(filter-out $(RELEASE_IDENTITY_SOAKS),$(RELEASE_SOAK_NAMES))$(filter-out $(RELEASE_SOAK_NAMES),$(RELEASE_IDENTITY_SOAKS)),RELEASE_SOAK_NAMES))
+
 .PHONY: release release-preflight
 # Keep release arguments in the recipe environment, never in shell source. The
 # script validates VERSION and safely splits the documented RELEASE_ARGS words.
@@ -7682,6 +7794,16 @@ export VERSION RELEASE_ARGS
 ifneq ($(filter release release-preflight,$(MAKECMDGOALS)),)
 ifneq ($(findstring $(_RELEASE_DOLLAR),$(_RELEASE_VERSION_LITERAL)$(_RELEASE_ARGS_LITERAL)),)
 $(error VERSION and RELEASE_ARGS must not contain dollar signs)
+endif
+# A release goal means the reviewed production identity, and nothing else. Fail
+# at PARSE time -- before the recipe runs, before the worktree lock is taken,
+# before make-release.sh creates a scratch directory -- so an identity-changing
+# override costs nothing and leaves nothing behind. make-release.sh repeats the
+# comparison for its own account (it is also run directly, and it names the
+# $(origin) of each moved variable); this is the outer half, and it is the one
+# that catches `make release FW_BASE=other` without starting a release at all.
+ifneq ($(RELEASE_IDENTITY_DRIFT),)
+$(error refusing a release goal under an overridden production release identity: $(RELEASE_IDENTITY_DRIFT). A release always means the reviewed identity declared by RELEASE_IDENTITY_PINNED -- seven parts, 21 images, 18 soak combinations. Re-run without those overrides; build-directory and tool-path overrides stay available)
 endif
 endif
 

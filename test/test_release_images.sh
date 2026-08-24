@@ -25,13 +25,24 @@ mkdir -p "$fixture_root/scripts"
 cp -p "$VERIFY" "$fixture_verify"
 cat > "$fixture_root/Makefile" <<'EOF'
 override RELEASE_IMAGES := $(shell cat expected-images.txt)
-.PHONY: print-RELEASE_IMAGES
+override RELEASE_IDENTITY_IMAGES := $(shell cat expected-identity.txt)
+.PHONY: print-RELEASE_IMAGES print-RELEASE_IDENTITY_IMAGES
 print-RELEASE_IMAGES:
 	@printf '%s\n' "$(RELEASE_IMAGES)"
+print-RELEASE_IDENTITY_IMAGES:
+	@printf '%s\n' "$(RELEASE_IDENTITY_IMAGES)"
 EOF
 
+# The canonical set and the pinned identity agree in every synthetic case except
+# the one that exists to make them differ, so the rest of this file keeps
+# exercising the comparisons it was written for.
 set_fixture_expected_images() {
 	printf '%s\n' "$1" > "$fixture_root/expected-images.txt"
+	printf '%s\n' "$1" > "$fixture_root/expected-identity.txt"
+}
+
+set_fixture_identity_images() {
+	printf '%s\n' "$1" > "$fixture_root/expected-identity.txt"
 }
 
 reset_fixture() {
@@ -257,6 +268,33 @@ set_fixture_expected_images 'a.hex b.hex a.hex'
 expect_fail "duplicate in canonical set" \
 	"canonical release image set has a duplicate image name"
 
+# The canonical set is composed from FW_BASE and the per-part MCU tags, all of
+# which a caller can move; RELEASE_IDENTITY_IMAGES is the `override` pin that
+# no channel reaches. A reproduction run whose canonical set has drifted from
+# that pin is verifying the wrong release, however perfectly its three observed
+# sets agree with each other -- so it is rejected in BOTH directions.
+reset_fixture
+set_fixture_identity_images 'a.hex'
+expect_fail "canonical set wider than the pinned identity" \
+	"does not match the pinned production release identity"
+
+reset_fixture
+set_fixture_identity_images 'a.hex b.hex c.hex'
+expect_fail "canonical set narrower than the pinned identity" \
+	"does not match the pinned production release identity"
+
+# Fail closed here too: an empty pin must not silently disable the comparison.
+reset_fixture
+set_fixture_identity_images ''
+expect_fail "empty pinned identity" \
+	"pinned release image identity is empty"
+
+# Same members, different order: identity is a SET, and a reordered declaration
+# is not drift.
+reset_fixture
+set_fixture_identity_images 'b.hex a.hex'
+expect_pass "pinned identity declared in another order"
+
 # Drive the production verifier with no hostile ambient value against a fixture
 # that cannot match, and require the failure to name the Makefile as the source.
 # Otherwise a broken `make -s print-RELEASE_IMAGES` could leave the gate reading
@@ -407,6 +445,222 @@ pic12f675_dir=$(cd "$ROOT" && make -s --no-print-directory print-PIC12F675_BUILD
 checks=$((checks + 1))
 
 # ---------------------------------------------------------------------------
+# The production release identity is PINNED, and neither channel can move it.
+#
+# Everything above reads the canonical set out of the Makefile -- and the
+# canonical set is composed from $(FW_BASE), the per-part MCU tags and the
+# tinyx5 membership, every one of which a caller can override. So is
+# scripts/make-release.sh's independent enumeration, which reads the same
+# variables through print-<VAR>. Two opinions built from one overridden input
+# agree with each other, so `make release FW_BASE=other` used to stage and
+# publish a complete, self-consistent set of images nobody had reviewed.
+#
+# The two channels are NOT equivalent and both are exercised below. A command
+# line reaches a sub-make through MAKEOVERRIDES and beats a plain `=`
+# assignment; the environment cannot move a plain `=` but DOES win every `?=`,
+# which is how all four per-part MCU tags are declared -- an exported
+# PIC12F675_TAG changes the release without appearing in any command anyone
+# typed.
+# ---------------------------------------------------------------------------
+identity_images=$(cd "$ROOT" && make -s --no-print-directory print-RELEASE_IDENTITY_IMAGES) \
+	|| fail "could not read RELEASE_IDENTITY_IMAGES from the Makefile"
+read -r -a identity_arr <<<"$identity_images"
+[ "${#identity_arr[@]}" -eq 21 ] \
+	|| fail "pinned release identity has ${#identity_arr[@]} images, expected 21"
+checks=$((checks + 1))
+
+# The pin and the canonical set are computed from disjoint inputs -- literal
+# words versus the live build variables -- so requiring them to agree is a real
+# cross-check, and it is what makes every count assertion above meaningful.
+[ "$(printf '%s\n' "${identity_arr[@]}" | LC_ALL=C sort)" \
+	= "$(printf '%s\n' "${canonical_arr[@]}" | LC_ALL=C sort)" ] \
+	|| fail "RELEASE_IMAGES does not match the pinned RELEASE_IDENTITY_IMAGES"
+checks=$((checks + 1))
+
+identity_soaks=$(cd "$ROOT" && make -s --no-print-directory print-RELEASE_IDENTITY_SOAKS) \
+	|| fail "could not read RELEASE_IDENTITY_SOAKS from the Makefile"
+read -r -a identity_soak_arr <<<"$identity_soaks"
+[ "${#identity_soak_arr[@]}" -eq 18 ] \
+	|| fail "pinned release identity has ${#identity_soak_arr[@]} soak combinations, expected 18"
+checks=$((checks + 1))
+
+release_soaks=$(cd "$ROOT" && make -s --no-print-directory print-RELEASE_SOAK_NAMES) \
+	|| fail "could not read RELEASE_SOAK_NAMES from the Makefile"
+read -r -a release_soak_arr <<<"$release_soaks"
+[ "$(printf '%s\n' "${identity_soak_arr[@]}" | LC_ALL=C sort)" \
+	= "$(printf '%s\n' "${release_soak_arr[@]}" | LC_ALL=C sort)" ] \
+	|| fail "RELEASE_SOAK_NAMES does not match the pinned RELEASE_IDENTITY_SOAKS"
+checks=$((checks + 1))
+
+# The pin itself must be unreachable from both channels, or it is just another
+# selected value wearing the word "identity".
+for pinned_var in RELEASE_IDENTITY_PINNED RELEASE_IDENTITY_IMAGES \
+		RELEASE_IDENTITY_SOAKS RELEASE_IDENTITY_PARTS RELEASE_IDENTITY_VARIANTS; do
+	pinned_value=$(cd "$ROOT" && make -s --no-print-directory print-"$pinned_var") \
+		|| fail "could not read $pinned_var from the Makefile"
+	[ -n "$pinned_value" ] || fail "Makefile $pinned_var is empty"
+	checks=$((checks + 1))
+
+	moved=$(cd "$ROOT" && make -s --no-print-directory "$pinned_var=hijacked" \
+		print-"$pinned_var") \
+		|| fail "could not read $pinned_var under a command-line override"
+	[ "$moved" = "$pinned_value" ] \
+		|| fail "a command-line assignment moved the pinned $pinned_var"
+	checks=$((checks + 1))
+
+	moved=$(cd "$ROOT" && env "$pinned_var=hijacked" make -s --no-print-directory \
+		print-"$pinned_var") \
+		|| fail "could not read $pinned_var under an environment override"
+	[ "$moved" = "$pinned_value" ] \
+		|| fail "an inherited environment value moved the pinned $pinned_var"
+	checks=$((checks + 1))
+done
+
+# A canonical tree drifts from nothing.
+drift=$(cd "$ROOT" && make -s --no-print-directory print-RELEASE_IDENTITY_DRIFT) \
+	|| fail "could not read RELEASE_IDENTITY_DRIFT from the Makefile"
+[ -z "$drift" ] \
+	|| fail "an unmodified tree reports release identity drift: $drift"
+checks=$((checks + 1))
+
+# `make -n release` parses the Makefile and prints the recipe without running
+# it, so it exercises the parse-time guard -- the outermost enforcement point,
+# which fires before the worktree lock and before make-release.sh exists as a
+# process -- at no cost and with no side effect.
+expect_release_goal_accepted() {   # usage: <label> <channel> [assignment ...]
+	local label=$1 channel=$2
+	shift 2
+	local output rc=0
+	case "$channel" in
+		command-line) output=$(cd "$ROOT" && make -n release "$@" 2>&1) || rc=$? ;;
+		environment)  output=$(cd "$ROOT" && env "$@" make -n release 2>&1) || rc=$? ;;
+		*) fail "unknown override channel: $channel" ;;
+	esac
+	[ "$rc" -eq 0 ] \
+		|| fail "$label ($channel) was refused by the release identity guard: $output"
+	[[ "$output" == *"scripts/make-release.sh"* ]] \
+		|| fail "$label ($channel) did not reach the release recipe: $output"
+	checks=$((checks + 1))
+}
+
+expect_release_goal_refused() {   # usage: <label> <named variable> <channel> [assignment ...]
+	local label=$1 named=$2 channel=$3
+	shift 3
+	local output rc=0
+	case "$channel" in
+		command-line) output=$(cd "$ROOT" && make -n release "$@" 2>&1) || rc=$? ;;
+		environment)  output=$(cd "$ROOT" && env "$@" make -n release 2>&1) || rc=$? ;;
+		*) fail "unknown override channel: $channel" ;;
+	esac
+	[ "$rc" -ne 0 ] \
+		|| fail "$label ($channel) staged a release under an overridden identity"
+	[[ "$output" == *"overridden production release identity"* ]] \
+		|| fail "$label ($channel) was refused for the wrong reason: $output"
+	[[ "$output" == *"$named"* ]] \
+		|| fail "$label ($channel) did not name $named in its diagnostic: $output"
+	[[ "$output" != *"scripts/make-release.sh"* ]] \
+		|| fail "$label ($channel) reached the release recipe before failing: $output"
+	checks=$((checks + 1))
+}
+
+expect_release_goal_accepted "an unmodified release goal" command-line
+
+# Both channels, over every field the acceptance criteria name: the basename,
+# the tinyx5 membership, all seven MCU tags, and the three variant sets.
+for spec in \
+		"FW_BASE=hijacked|FW_BASE" \
+		"ATTINY13A_MCU=attiny13|ATTINY13A_MCU" \
+		"TINYX5=85|TINYX5" \
+		"mmcu_85=attiny861|TINYX5_PARTS" \
+		"XT_TAG=attiny402|XT_TAG" \
+		"XT_MCU=attiny402|XT_MCU" \
+		"PIC10F322_TAG=pic10f322a|PIC10F322_TAG" \
+		"PIC10F322_CHIP=10F320|PIC10F322_CHIP" \
+		"PIC10F320_TAG=pic10f320a|PIC10F320_TAG" \
+		"PIC10F320_CHIP=10F322|PIC10F320_CHIP" \
+		"PIC12F675_TAG=pic12f629|PIC12F675_TAG" \
+		"TINYX5_F_CPU=8000000UL|TINYX5_F_CPU" \
+		"PIC10F320_XTAL=8000000UL|PIC10F320_XTAL" \
+		"VARIANTS=cd4053_simple|VARIANTS" \
+		"PIC10F320_VARIANTS_ALL=cd4053_simple|PIC10F320_VARIANTS_ALL" \
+		"ATTINY13A_F_CPU=9600000UL|ATTINY13A_F_CPU" \
+		"XT_F_CPU=3333333UL|XT_F_CPU" \
+		"PIC12F675_XTAL=8000000UL|PIC12F675_XTAL" ; do
+	assignment=${spec%%|*}
+	named=${spec##*|}
+	expect_release_goal_refused "an overridden ${assignment%%=*}" "$named" \
+		command-line "$assignment"
+done
+
+# The environment moves only what the Makefile declares with `?=`, which is
+# exactly the set a reader is least likely to suspect: the per-part MCU tags and
+# die selectors are all `?=`, so they change a release from an export. The
+# plain-`=` names below are inert from the environment, and asserting that is
+# what keeps the two channels from being confused for each other.
+for spec in \
+		"XT_TAG=attiny402|XT_TAG" \
+		"XT_MCU=attiny402|XT_MCU" \
+		"PIC10F322_TAG=pic10f322a|PIC10F322_TAG" \
+		"PIC10F322_CHIP=10F320|PIC10F322_CHIP" \
+		"PIC10F320_TAG=pic10f320a|PIC10F320_TAG" \
+		"PIC10F320_CHIP=10F322|PIC10F320_CHIP" \
+		"PIC12F675_TAG=pic12f629|PIC12F675_TAG" \
+		"PIC12F675_XTAL=8000000UL|PIC12F675_XTAL" \
+		"XT_F_CPU=3333333UL|XT_F_CPU" \
+		"PIC10F320_XTAL=8000000UL|PIC10F320_XTAL" \
+		"PIC10F322_XTAL=8000000UL|PIC10F322_XTAL" ; do
+	assignment=${spec%%|*}
+	named=${spec##*|}
+	expect_release_goal_refused "an inherited ${assignment%%=*}" "$named" \
+		environment "$assignment"
+done
+
+for assignment in FW_BASE=hijacked ATTINY13A_MCU=attiny13 TINYX5=85 \
+		ATTINY13A_F_CPU=9600000UL TINYX5_F_CPU=8000000UL; do
+	expect_release_goal_accepted "an inherited ${assignment%%=*} (a plain = assignment the environment cannot move)" \
+		environment "$assignment"
+done
+
+# Four identity fields are already unreachable from both channels because the
+# Makefile declares them with `override`. The pin still names them: it is what
+# catches a SOURCE edit -- the one channel `override` does not defend against --
+# and it is why this loop asserts the value rather than a refusal.
+for immutable_var in PIC12F675_CHIP CLASSIC_VARIANTS_SUPPORTED \
+		XT_VARIANTS_SUPPORTED PIC10F320_VARIANTS_SUPPORTED; do
+	immutable_value=$(cd "$ROOT" && make -s --no-print-directory print-"$immutable_var") \
+		|| fail "could not read $immutable_var from the Makefile"
+	[ -n "$immutable_value" ] || fail "Makefile $immutable_var is empty"
+	moved=$(cd "$ROOT" && make -s --no-print-directory "$immutable_var=hijacked" \
+		print-"$immutable_var") \
+		|| fail "could not read $immutable_var under a command-line override"
+	[ "$moved" = "$immutable_value" ] \
+		|| fail "a command-line assignment moved $immutable_var, which the Makefile overrides"
+	checks=$((checks + 1))
+	moved=$(cd "$ROOT" && env "$immutable_var=hijacked" make -s --no-print-directory \
+		print-"$immutable_var") \
+		|| fail "could not read $immutable_var under an environment override"
+	[ "$moved" = "$immutable_value" ] \
+		|| fail "an inherited environment value moved $immutable_var, which the Makefile overrides"
+	checks=$((checks + 1))
+	expect_release_goal_accepted "an attempted $immutable_var override" \
+		command-line "$immutable_var=hijacked"
+done
+
+# Build directories and tool paths do not change what an artifact IS, a release
+# host legitimately relocates them, and make-release.sh asserts and records the
+# tool it actually selected. They must keep working.
+expect_release_goal_accepted "relocated build directories" command-line \
+	AVR_BUILD_DIR=out/avr PIC10F322_BUILD_DIR=out/322 \
+	PIC10F320_BUILD_DIR=out/320 PIC12F675_BUILD_DIR=out/675 XT_BUILD_DIR=out/xt
+expect_release_goal_accepted "relocated tool paths" command-line \
+	CC=/opt/avr/bin/avr-gcc PIC_CC=/opt/xc8/bin/xc8-cc GPSIM=/opt/gpsim/bin/gpsim \
+	CPPCHECK=/opt/cppcheck/bin/cppcheck
+expect_release_goal_accepted "relocated tool paths" environment \
+	OBJDUMP=/opt/avr/bin/avr-objdump READELF=/opt/bin/readelf
+expect_release_goal_accepted "a single-target VARIANT selection" command-line \
+	VARIANT=tq2_l2_5v_relay
+
+# ---------------------------------------------------------------------------
 # The manifest generator's arms, cross-checked against the canonical set.
 # scripts/make-release.sh's img_row describes each released image by matching
 # its MCU field, and refuses outright to describe a name it does not recognize.
@@ -519,9 +773,12 @@ EOF
 	chmod 755 "$binding_repo/scripts/verify-release-signature.sh"
 	cat > "$binding_repo/Makefile" <<EOF
 override RELEASE_IMAGES := $binding_canonical
-.PHONY: print-RELEASE_IMAGES
+override RELEASE_IDENTITY_IMAGES := $binding_canonical
+.PHONY: print-RELEASE_IMAGES print-RELEASE_IDENTITY_IMAGES
 print-RELEASE_IMAGES:
 	@printf '%s\\n' "\$(RELEASE_IMAGES)"
+print-RELEASE_IDENTITY_IMAGES:
+	@printf '%s\\n' "\$(RELEASE_IDENTITY_IMAGES)"
 EOF
 	printf 'unrelated release bytes\n' > "$binding_release/a.hex"
 	printf 'selected release bytes\n' > "$binding_release/$binding_image"

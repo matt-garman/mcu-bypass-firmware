@@ -317,7 +317,11 @@ set -euo pipefail
 	exit 97
 }
 case "$3" in
-	print-*) goal=$3 ;;
+	# origin-<VAR> is the introspection companion of print-<VAR>, declared beside
+	# it and equally read-only. The release identity guard resolves it -- and only
+	# on the path where it is already refusing to start -- to say whether a moved
+	# variable arrived on a command line or through an inherited export.
+	print-*|origin-*) goal=$3 ;;
 	*)
 		printf 'forbidden non-query Make invocation: %s\n' "$*" >> "${MAKE_LOG:?}"
 		exit 97
@@ -351,6 +355,7 @@ exec "${REAL_MAKE:?}" --no-print-directory -s -C "${FAKE_REPO_ROOT:?}" \
 	PIC_SOAK_GPSIM_INC="${FAKE_TOOLCHAIN:?}/pic10f322-gpsim" \
 	PIC10F320_SOAK_GPSIM_INC="${FAKE_TOOLCHAIN:?}/pic10f320-gpsim" \
 	ANALYZE_CMD="${TEST_ANALYZE_CMD:-fake-tool --checks=fake}" \
+	${TEST_EXTRA_MAKE_VAR:+"$TEST_EXTRA_MAKE_VAR"} \
 	"$goal"
 EOF
 chmod 750 "$fakebin/make"
@@ -473,8 +478,8 @@ grep -Fxq 'yaml-import' "$tool_log" \
 [ ! -e "$preflight_output" ] \
 	|| fail "preflight created its prospective release output directory"
 query_count=$(wc -l < "$make_log")
-[ "$query_count" -eq 84 ] \
-	|| fail "preflight made $query_count Makefile queries, expected 84"
+[ "$query_count" -eq 88 ] \
+	|| fail "preflight made $query_count Makefile queries, expected 88"
 assert_no_release_scratch
 checks=$((checks + 1))
 
@@ -482,6 +487,94 @@ checks=$((checks + 1))
 # version additionally exercises the actual checked-in documentation contract.
 run_preflight v0.9.10 >"$output" 2>&1 \
 	|| fail "valid versioned preflight failed: $(<"$output")"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+# --------------------------------------------------------------------------
+# The production release identity is pinned, and a run that does not match it
+# stops before it can consume anything.
+#
+# This is the SECOND enforcement point. The Makefile refuses a `make release`
+# goal at parse time, but make-release.sh is also run directly -- CI and the
+# documented recipe both do -- so it re-derives the comparison for its own
+# account, from the pinned RELEASE_IDENTITY_PINNED table against the values it
+# actually selected. Preflight is checked too: a capability probe answered for
+# the wrong release answers the wrong question.
+#
+# The two channels differ, and both are exercised. A command line reaches the
+# script's print-<VAR> queries through MAKEOVERRIDES; the environment cannot
+# move a plain `=` assignment but wins every `?=`, which is how all four
+# per-part MCU tags are declared. The second case is the one nobody types.
+run_preflight >"$output" 2>&1 \
+	|| fail "valid preflight failed before the identity check: $(<"$output")"
+grep -Fq 'production release identity matches the pinned declaration:' "$output" \
+	|| fail "preflight did not record the release identity it verified"
+grep -Fq '21 images, 18 soak combinations' "$output" \
+	|| fail "preflight recorded a release identity other than the reviewed 21/18 set"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+expect_identity_refusal() {   # usage: <label> <named variable> <origin phrase>
+	local label=$1 named=$2 origin=$3
+	grep -Fq 'refusing to run a release under an overridden production identity' "$output" \
+		|| fail "$label was not refused by the release identity guard: $(<"$output")"
+	grep -Fq "$named:" "$output" \
+		|| fail "$label did not name $named in its diagnostic: $(<"$output")"
+	grep -Fq "Make origin: $origin" "$output" \
+		|| fail "$label did not report $named with Make origin '$origin': $(<"$output")"
+	if grep -Fq 'production release identity matches the pinned declaration:' "$output"; then
+		fail "$label recorded a matching identity as well as a refusal"
+	fi
+	if grep -Fq 'all required release tools' "$output"; then
+		fail "$label reached the tool preconditions before failing"
+	fi
+	[ ! -e "$preflight_output" ] \
+		|| fail "$label created the prospective release output directory"
+	assert_no_release_scratch
+	checks=$((checks + 1))
+}
+
+if TEST_EXTRA_MAKE_VAR=FW_BASE=hijacked run_preflight >"$output" 2>&1; then
+	fail "preflight accepted a command-line FW_BASE override"
+fi
+expect_identity_refusal "a command-line FW_BASE override" FW_BASE 'command line'
+
+if PIC12F675_TAG=pic12f629 run_preflight >"$output" 2>&1; then
+	fail "preflight accepted an inherited PIC12F675_TAG override"
+fi
+expect_identity_refusal "an inherited PIC12F675_TAG override" PIC12F675_TAG environment
+
+if TEST_EXTRA_MAKE_VAR=VARIANTS=cd4053_simple run_preflight >"$output" 2>&1; then
+	fail "preflight accepted an abbreviated command-line VARIANTS override"
+fi
+# VARIANTS and PIC10F320_VARIANTS_ALL are re-declared by the Makefile with
+# `override` after filtering the caller's request to supported names, so
+# $(origin) reports the re-declaration rather than the channel. That is what the
+# diagnostic's closing note is for; what matters here is that the abbreviated
+# request is caught at all.
+expect_identity_refusal "an abbreviated VARIANTS override" VARIANTS override
+
+if TEST_EXTRA_MAKE_VAR=TINYX5=85 run_preflight >"$output" 2>&1; then
+	fail "preflight accepted a reduced tinyx5 membership"
+fi
+expect_identity_refusal "a reduced tinyx5 membership" TINYX5 'command line'
+
+# A die selector moves no image NAME at all: the release would stage twenty-one
+# canonically named images, three of which were compiled for another chip.
+if PIC10F322_CHIP=10F320 run_preflight >"$output" 2>&1; then
+	fail "preflight accepted an inherited PIC10F322_CHIP override"
+fi
+expect_identity_refusal "an inherited PIC10F322_CHIP override" PIC10F322_CHIP environment
+
+# Build directories are not identity, and the whole fake toolchain this gate
+# runs on is itself a pile of tool-path overrides -- so a legitimate relocation
+# must still reach the end of preflight.
+TEST_EXTRA_MAKE_VAR=AVR_BUILD_DIR=relocated-avr run_preflight >"$output" 2>&1 \
+	|| fail "preflight rejected a relocated build directory: $(<"$output")"
+grep -Fq 'production release identity matches the pinned declaration:' "$output" \
+	|| fail "a relocated build directory changed the verified release identity"
+grep -Fq 'preflight passed: this host can start a release.' "$output" \
+	|| fail "preflight with a relocated build directory did not reach its success record"
 assert_no_release_scratch
 checks=$((checks + 1))
 

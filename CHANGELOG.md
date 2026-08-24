@@ -39,6 +39,45 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- **A production release can no longer be staged under a development
+  override.** `RELEASE_IMAGES` is the canonical statement of what a complete
+  release contains, and `scripts/make-release.sh` enumerates the same set
+  independently and cross-checks the two -- but both are composed from the very
+  variables a caller can move. `make release FW_BASE=other` reached the script
+  through `MAKEOVERRIDES`, so every `print-<VAR>` query answered with the
+  overridden value, both opinions agreed, and a complete, internally consistent,
+  never-reviewed set of images staged and published. An exported
+  `PIC12F675_TAG`, `PIC10F322_CHIP` or `XT_MCU` did the same thing without
+  appearing in any command anyone typed: the per-part MCU tags and die selectors
+  are `?=`, and the environment wins those.
+
+  The Makefile now pins the reviewed identity as literal `override` text --
+  seven parts, 21 images, 18 soak combinations, one basename convention --
+  covering the image basename, the tinyx5 membership, every MCU tag, every die
+  and clock selector, and the variant sets. A `make release` or
+  `make release-preflight` goal fails at parse time against that pin, before the
+  worktree lock; `scripts/make-release.sh` repeats the comparison for its own
+  account, because it is also run directly, and stops before the documentation
+  validators, the scratch directory, and any clean, build, soak or staged byte.
+  The diagnostic names each drifted field, its pinned and selected values, and
+  the Make origin it arrived on. `scripts/verify-release-images.sh` gained the
+  same cross-check, which closes the reproduction leg: it already discarded
+  inherited command-line assignments, but not the environment.
+
+  Build-directory and tool-path overrides are unaffected and stay available:
+  they do not change what an artifact IS, and the release already asserts and
+  records the tool it actually selected. Clock selectors are pinned because the
+  classic-AVR manifest spells "1.2 MHz" and "1.0 MHz" as literals rather than
+  reading `F_CPU`, so a re-clocked image would have shipped under a canonical
+  name and an undisturbed provenance record.
+
+  `test-release-images` (103 -> 178 checks) holds the real Makefile to the
+  pinned identity on both channels -- they are not equivalent, since a command
+  line beats a plain `=` assignment and only the environment reaches a `?=` --
+  and proves the pin itself unreachable from either. `test-release-preflight`
+  (118 -> 125) drives the real step 0 into each refusal and requires it to leave
+  no scratch directory or output path behind.
+
 - **The XC8 cache manifest can no longer be frozen from a partial scan.** The
   installer records a SHA-256 inventory of every readable file in the
   just-installed compiler and device pack, and the restored-cache verifier

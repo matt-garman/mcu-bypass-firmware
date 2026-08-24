@@ -1677,12 +1677,127 @@ workflow discovering that production was staged under noncanonical names.
 
 **Acceptance criteria**
 
-- [ ] Production release staging always means the reviewed seven-part,
+- [x] Production release staging always means the reviewed seven-part,
   21-image, 18-soak v0.9.10 identity regardless of inherited Make variables.
-- [ ] Identity-changing overrides fail before any build, soak, or staging work.
-- [ ] Legitimate tool and build-directory overrides continue to work.
-- [ ] Release-image, preflight, documentation, name-contract, and publication
+- [x] Identity-changing overrides fail before any build, soak, or staging work.
+- [x] Legitimate tool and build-directory overrides continue to work.
+- [x] Release-image, preflight, documentation, name-contract, and publication
   tests cover direct and inherited override attempts.
+
+**Resolution**
+
+Adopted, by adding a third statement rather than by freezing the development
+variables. `FW_BASE`, the tinyx5 membership and the MCU tags stay overridable:
+`test/test_pic_build.sh` builds whole synthetic matrices under `FW_BASE=`,
+`PIC12F675_TAG=` and `PIC10F320_TAG=`, and a name and a die are things a
+development target has to be able to vary. What changed is that a *production*
+release no longer consumes those selected values without checking them against
+a pin.
+
+The pin is data. `RELEASE_IDENTITY_PINNED` in the Makefile is a literal
+`<variable>=<reviewed value>` table, `override` so neither the command line nor
+the environment reaches it, and it is derived from nothing a build override can
+move -- a pin computed from `FW_BASE` would agree with exactly the thing it
+exists to check. Beside it, `RELEASE_IDENTITY_IMAGES` and
+`RELEASE_IDENTITY_SOAKS` spell the reviewed 21-image and 18-soak membership out
+of literal part and variant lists. `RELEASE_IDENTITY_SELECTED` reads the same
+names back out of the live tree, and `RELEASE_IDENTITY_DRIFT` is the
+difference.
+
+Both enforcement points fail before anything is consumed. A `make release` or
+`make release-preflight` goal fails at PARSE time, so the recipe never runs,
+the worktree lock is never taken and `scripts/make-release.sh` never becomes a
+process. The script repeats the comparison for its own account -- it is also
+run directly, by CI and by the documented recipe -- immediately after it reads
+the release inventories and before the documentation validators, the `mktemp
+-d` scratch directory, and any clean, build, soak or staged byte. It reports
+each drifted field with its pinned value, its selected value and the
+`$(origin)` of the name, resolved only on the path where it is already refusing
+to start. Preflight and dry runs are checked too: a capability probe answered
+for the wrong release answers the wrong question.
+
+The two channels are not equivalent, and the second one is the reason this is
+not merely tidy. A command-line assignment reaches the script's `print-<VAR>`
+queries through `MAKEOVERRIDES` and beats a plain `=` assignment. The
+environment cannot move a plain `=`, but it wins every `?=` -- and all four
+per-part MCU tags, all three PIC die selectors, `XT_MCU` and three of the four
+clock selectors are declared `?=`. An exported `PIC12F675_TAG` therefore
+changed the release identity without appearing in any command anyone typed, and
+neither the Makefile's canonical set nor the script's independent enumeration
+could see it, because both were composed from it.
+
+`scripts/verify-release-images.sh` gained the same cross-check. It already
+discarded `MAKEFLAGS`, `MAKEOVERRIDES` and injected makefiles before reading
+`RELEASE_IMAGES`, but not the environment, so the reproduction leg -- the
+tag-triggered rebuild that is the public attestation that a published binary IS
+the tagged source -- could have verified an identity an export had moved.
+
+Scope, and two deliberate extensions beyond the literal list in the recommended
+change. Pinned: the fields that decide an image's NAME (`FW_BASE`, the seven
+MCU tag fields, the tinyx5 membership), the DIE that name is compiled for
+(`XT_MCU`, `PIC10F322_CHIP`, `PIC10F320_CHIP`, `PIC12F675_CHIP`), the CLOCK its
+timing evidence was measured at, and the variant sets. The die selectors are
+here because an image named `bypass-pic10f322-cd4053_simple.hex` that was
+compiled for another chip is the same defect wearing a reviewed name; the clock
+selectors because the MANIFEST spells the classic-AVR clocks `1.2 MHz` and `1.0
+MHz` as literals rather than reading `F_CPU`, so a re-clocked classic image
+would have shipped under a canonical name and an undisturbed provenance record.
+Both were free: the guard is table-driven.
+
+Not pinned, and must not be: build directories and every tool path. Those do
+not change what an artifact IS, a release host legitimately relocates them, and
+the release already asserts and records the tool it actually selected -- the
+preflight gate itself runs entirely on relocated tool paths. Fuse and CONFIG
+bytes are likewise not pinned: they are read from Makefile truth into the
+signed MANIFEST, so they are disclosed rather than silently substituted, which
+is the property the clock fields lacked. `VARIANT` (singular) selects a
+single-target action no release uses and is left alone.
+
+Four fields in the table were already unreachable from both channels because
+the Makefile declares them `override`: `PIC12F675_CHIP`,
+`CLASSIC_VARIANTS_SUPPORTED`, `XT_VARIANTS_SUPPORTED` and
+`PIC10F320_VARIANTS_SUPPORTED`. Naming them anyway is not redundant -- the pin
+is what catches a SOURCE edit, the one channel `override` does not defend
+against.
+
+*Verification.* `test-release-images` (103 -> 178 checks) holds the real
+Makefile to the reviewed identity: the pin and the canonical set are computed
+from disjoint inputs and must agree as sets, the pin carries exactly 21 images
+and 18 soak combinations, and none of the five pinned variables moves under a
+command-line assignment or an inherited export. Eighteen identity-changing
+command-line overrides and eleven inherited ones are each refused by the
+parse-time guard, which must name the affected variable and must not reach the
+release recipe; the plain-`=` names are separately asserted INERT from the
+environment, so the two channels cannot be confused for one another, and the
+four `override`-declared fields are asserted immovable rather than refused.
+Relocated build directories, relocated tool paths and a single-target `VARIANT`
+selection still reach the recipe. Four synthetic cases drive the production
+`verify-release-images.sh` against a canonical set wider than the pin, narrower
+than it, an empty pin, and a reordered one that must still pass.
+`test-release-preflight` (118 -> 125 checks, 84 -> 88 Makefile queries) drives
+the real step 0 into five refusals -- a command-line `FW_BASE`, an inherited
+`PIC12F675_TAG`, an inherited `PIC10F322_CHIP`, a reduced tinyx5 membership and
+an abbreviated `VARIANTS` -- and requires each to name the field, its pinned
+and selected values and its Make origin, to stop before the tool preconditions,
+and to leave no scratch directory or prospective output path; a relocated build
+directory must still reach the terminal success record. The name-contract gate
+(axes A and C) covers the new variable names, since the script reads them
+through `print-<VAR>`.
+
+Five negative controls were run against a scratch copy of the tree, each
+failing exactly where it should. Removing the parse-time guard fails the first
+command-line `make -n release` case in `test-release-images` while
+`test-release-preflight` stays green at 125 checks; removing the script's
+comparison inverts that precisely -- `test-release-images` stays green at 178
+and preflight fails on its command-line `FW_BASE` case -- so the two
+enforcement points are independently load-bearing rather than one guard
+reported twice. Dropping the `override` keyword from `RELEASE_IDENTITY_PARTS`
+fails the immovability loop at exactly that name. Dropping `PIC10F322_CHIP`
+from the pinned table leaves both its command-line case and its inherited
+preflight case accepted while every name field still passes, so the die
+selectors catch something no name field does. Reverting
+`verify-release-images.sh` accepts a canonical set wider than the pin. No
+firmware source is involved.
 
 ### Second-pass validation already performed
 
@@ -1814,7 +1929,7 @@ Record each completed item with its commit ID and decisive validation command.
 | D5 | OPEN | | Simulator timing/physical-language and pip prerequisite reconciliation |
 | R4 | IMPLEMENTED | (pending) | Tag-derived publication kind in `release.yml`; `test-release-provenance` executes the publication shell for stable, `-rc.1`, and six malformed tags (86 -> 94 checks); `test-workflow-syntax` pins both branches against the `scripts/make-release.sh` grammar (375 -> 381 checks) |
 | R5 | IMPLEMENTED | (pending) | XC8 cache manifest split into three separately status-checked NUL-delimited stages in both `install_pic_toolchain.sh` and `verify_pic_toolchain_cache.sh`; neither records nor accepts a partial or empty inventory, and the verifier names the failing stage instead of reporting a cache mismatch; `test-supply-chain` fails each stage independently in both scripts and inventories 8 unusually-named files (30 -> 46 checks) |
-| R6 | OPEN | | Immutable production artifact identity independent of development overrides |
+| R6 | IMPLEMENTED | (pending) | Reviewed production identity pinned as literal `override` data in the Makefile (`RELEASE_IDENTITY_PINNED` plus the 21-image/18-soak sets), enforced at parse time on the release goals and again inside `make-release.sh` before its scratch directory, and cross-checked by `verify-release-images.sh` on the reproduction leg; `test-release-images` refuses 18 command-line and 11 inherited identity overrides while build-directory and tool-path overrides still reach the recipe (103 -> 178 checks) and `test-release-preflight` drives step 0 into five refusals that leave no scratch state (118 -> 125 checks) |
 | Final validation | REOPENED | | The `fe8ecc8` run remains historical evidence; rerun every pre-merge gate after F2-P2 and documentation/release changes |
 
 ## Merge decision

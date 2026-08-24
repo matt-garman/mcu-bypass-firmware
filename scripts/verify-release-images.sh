@@ -59,19 +59,42 @@ repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P) \
 	|| die "could not locate the repository root"
 command -v make >/dev/null 2>&1 \
 	|| die "make is required to read the canonical release image set"
-expected_raw=$(
+mkv_from_repo() {
 	# Do not inherit recursive-Make flags, command-line variable assignments, or
 	# injected makefiles from the caller. The tracked repository Makefile is the
 	# oracle, not ambient GNU Make process state.
 	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES MAKEOVERRIDES
 	cd "$repo_root" \
 		&& make --no-print-directory -s -f "$repo_root/Makefile" \
-			print-RELEASE_IMAGES
-) || die "could not read RELEASE_IMAGES from the Makefile"
+			print-"$1"
+}
+expected_raw=$(mkv_from_repo RELEASE_IMAGES) \
+	|| die "could not read RELEASE_IMAGES from the Makefile"
 
 read -r -a expected_images <<<"$expected_raw"
 [ "${#expected_images[@]}" -gt 0 ] \
 	|| die "the canonical release image set is empty ($expected_source)"
+
+# The unset above strips command-line assignments, but NOT the environment, and
+# the per-part MCU tags are `?=` -- an exported PIC12F675_TAG moves RELEASE_IMAGES
+# in this very process. Reproduction is the public attestation that a published
+# binary IS the tagged source, so it may not accept whatever set the ambient
+# environment happens to select. RELEASE_IDENTITY_IMAGES is the same Makefile's
+# `override` pin: literal image names that no channel can move. Requiring the
+# two to agree is what makes the comparisons below a check on the RELEASE rather
+# than on the environment that ran the verifier.
+identity_raw=$(mkv_from_repo RELEASE_IDENTITY_IMAGES) \
+	|| die "could not read RELEASE_IDENTITY_IMAGES from the Makefile"
+read -r -a identity_images <<<"$identity_raw"
+[ "${#identity_images[@]}" -gt 0 ] \
+	|| die "the pinned release image identity is empty (Makefile RELEASE_IDENTITY_IMAGES)"
+canonical_sorted=$(printf '%s\n' "${expected_images[@]}" | LC_ALL=C sort)
+identity_sorted=$(printf '%s\n' "${identity_images[@]}" | LC_ALL=C sort)
+[ "$canonical_sorted" = "$identity_sorted" ] \
+	|| die "$expected_source does not match the pinned production release identity (Makefile RELEASE_IDENTITY_IMAGES).
+  canonical: $expected_raw
+  pinned:    $identity_raw
+An identity-changing Make override was in effect; a reproduction must be run without it."
 
 expected="$work/expected.txt"
 : > "$expected"

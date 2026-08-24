@@ -524,6 +524,20 @@ and 7.3.0.1 do not satisfy the 7.3.0 pin, and XC8 V3.100 and V13.10 do not
 satisfy the V3.10 pin -- as is a banner carrying no version token at all, or
 more than one. Until v0.9.10 these three checks were shell substring patterns,
 which accepted the first three of those four drifted versions.
+* *Production release identity.* A release always means the reviewed
+  seven-part, 21-image, 18-soak-combination product set under one basename
+  convention. The Makefile pins that identity as literal `override` text
+  (`RELEASE_IDENTITY_PINNED` and the image/soak sets beside it), and both a
+  `make release` goal and `scripts/make-release.sh` itself refuse to start if
+  the values the run actually selected differ from it -- before any clean,
+  build, soak, staging or scratch directory. That covers the image basename,
+  the tinyx5 membership, every MCU tag, every die and clock selector, and the
+  variant sets, on BOTH channels: a command-line assignment and an inherited
+  export, the latter because the per-part tags and die selectors are `?=` and
+  the environment wins those without appearing in any command. Build-directory
+  and tool-path overrides are unaffected and stay available -- they do not
+  change what an artifact IS, and the selected tool is asserted and recorded
+  separately.
 * *XC8 + PIC10-12Fxxx_DFP provenance and cache integrity.*
   `scripts/install_pic_toolchain.sh` installs only after both downloads match
   reviewed SHA-256 digests (the XC8 installer and the 1.9.189 atpack), then

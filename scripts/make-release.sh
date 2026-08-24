@@ -518,6 +518,116 @@ RELEASE_EVIDENCE_FILES=$(mkv RELEASE_EVIDENCE_FILES)
 [ -n "${RELEASE_EVIDENCE_FILES// /}" ] \
 	|| die "Makefile RELEASE_EVIDENCE_FILES is empty"
 
+# --- the production release identity is pinned, not selected -----------------
+# Everything above this line was READ: the build directories, the tool paths,
+# the per-part tags, the variant matrices. Most of those Make variables are
+# deliberately overridable -- a developer relocates a build directory, a release
+# host points PIC_CC at its own XC8 -- and the two that decide what an artifact
+# IS travel by the same channel. `make release FW_BASE=other` reaches this
+# script through MAKEOVERRIDES, so every mkv above answers with the overridden
+# value; an exported PIC12F675_TAG never appears on a command line at all,
+# because the per-part tags are `?=` and the environment wins those.
+#
+# The enumeration/RELEASE_IMAGES cross-check in section 1 cannot see either one.
+# It compares this script's opinion with the Makefile's, and BOTH are composed
+# from the moved variable, so they agree -- on an identity nobody reviewed --
+# and a complete, self-consistent, wrongly-named release stages and publishes.
+#
+# RELEASE_IDENTITY_PINNED is the third statement: literal text in the Makefile,
+# `override` so neither channel can reach it. Compare it with what this run
+# actually selected, and stop here if they differ -- before the documentation
+# validators, before the scratch directory, before a clean, a build, a soak or
+# a staged byte. Preflight and dry runs are checked too: a capability probe for
+# the wrong release answers the wrong question, and a rehearsal of it rehearses
+# nothing.
+RELEASE_IDENTITY_PINNED=$(mkv RELEASE_IDENTITY_PINNED)
+RELEASE_IDENTITY_SELECTED=$(mkv RELEASE_IDENTITY_SELECTED)
+RELEASE_IDENTITY_IMAGES=$(mkv RELEASE_IDENTITY_IMAGES)
+RELEASE_IDENTITY_SOAKS=$(mkv RELEASE_IDENTITY_SOAKS)
+for identity_var in RELEASE_IDENTITY_PINNED RELEASE_IDENTITY_SELECTED \
+		RELEASE_IDENTITY_IMAGES RELEASE_IDENTITY_SOAKS; do
+	[ -n "${!identity_var// /}" ] \
+		|| die "Makefile $identity_var is empty; the pinned release identity is unusable"
+done
+
+# Report which member names a set gained and lost rather than printing both
+# sets: one moved FW_BASE renames all 21 images, and the useful sentence is
+# "these are extra, those are missing". Pure bash -- this runs before section 0
+# has established that any external tool exists.
+identity_set_drift() {   # usage: identity_set_drift LABEL PINNED SELECTED
+	local label=$1 name status=0
+	local -A want=() got=()
+	local -a extra=() missing=()
+	for name in $2; do want[$name]=1; done
+	for name in $3; do got[$name]=1; done
+	for name in "${!got[@]}"; do
+		[ -n "${want[$name]:-}" ] || extra+=("$name")
+	done
+	for name in "${!want[@]}"; do
+		[ -n "${got[$name]:-}" ] || missing+=("$name")
+	done
+	if [ "${#extra[@]}" -gt 0 ]; then
+		log "  $label has ${#extra[@]} entries the pinned identity does not: $(printf '%s ' "${extra[@]}")"
+		status=1
+	fi
+	if [ "${#missing[@]}" -gt 0 ]; then
+		log "  $label is missing ${#missing[@]} pinned entries: $(printf '%s ' "${missing[@]}")"
+		status=1
+	fi
+	return "$status"
+}
+
+read -r -a identity_pinned_fields <<<"$RELEASE_IDENTITY_PINNED"
+read -r -a identity_selected_fields <<<"$RELEASE_IDENTITY_SELECTED"
+# List values are comma-joined in the Makefile so one field is always one word.
+# A count mismatch therefore means the two tables no longer describe the same
+# fields -- a Makefile edit, not an override -- and is its own failure.
+[ "${#identity_pinned_fields[@]}" -eq "${#identity_selected_fields[@]}" ] \
+	|| die "the pinned release identity lists ${#identity_pinned_fields[@]} fields but ${#identity_selected_fields[@]} were selected.
+      RELEASE_IDENTITY_PINNED and RELEASE_IDENTITY_SELECTED must describe the same fields in the same order."
+
+IDENTITY_DRIFT=()
+IDENTITY_SET_DRIFT=0
+for ((identity_i = 0; identity_i < ${#identity_pinned_fields[@]}; identity_i++)); do
+	pinned_field=${identity_pinned_fields[identity_i]}
+	selected_field=${identity_selected_fields[identity_i]}
+	[ "$pinned_field" = "$selected_field" ] && continue
+	identity_name=${pinned_field%%=*}
+	[ "${selected_field%%=*}" = "$identity_name" ] \
+		|| die "the pinned and selected release identity fields are not in the same order ($pinned_field vs $selected_field)."
+	# Only reached when a release is already refusing to start, so the extra
+	# Make query costs nothing on a good run -- and "command line" versus
+	# "environment" is the whole difference between an argument the operator
+	# can see and an export they cannot.
+	identity_origin=$(make -s --no-print-directory origin-"$identity_name" 2>/dev/null) \
+		|| identity_origin=
+	IDENTITY_DRIFT+=("$identity_name: pinned '${pinned_field#*=}', selected '${selected_field#*=}' (Make origin: ${identity_origin:-unknown})")
+done
+
+if [ "${#IDENTITY_DRIFT[@]}" -gt 0 ]; then
+	log "Production release identity does not match the pinned Makefile declaration:"
+	for identity_line in "${IDENTITY_DRIFT[@]}"; do log "  $identity_line"; done
+fi
+identity_set_drift RELEASE_IMAGES "$RELEASE_IDENTITY_IMAGES" "$RELEASE_IMAGES" \
+	|| IDENTITY_SET_DRIFT=1
+identity_set_drift RELEASE_SOAK_NAMES "$RELEASE_IDENTITY_SOAKS" "$RELEASE_SOAK_NAMES" \
+	|| IDENTITY_SET_DRIFT=1
+if [ "${#IDENTITY_DRIFT[@]}" -gt 0 ] || [ "$IDENTITY_SET_DRIFT" -ne 0 ]; then
+	die "refusing to run a release under an overridden production identity.
+      A release always means the reviewed identity that RELEASE_IDENTITY_PINNED declares:
+      seven parts, 21 images, 18 soak combinations, one basename convention.
+      Re-run with none of the variables above set. Build-directory and tool-path
+      overrides are unaffected and remain available.
+      Make origin names the channel a value arrived on -- 'command line' is an
+      argument someone typed, 'environment' is an inherited export that appears
+      in no command at all, and 'override' means the Makefile recomputed the
+      variable from a caller's request (VARIANTS and PIC10F320_VARIANTS_ALL are
+      filtered that way, so their request is what to withdraw)."
+fi
+read -r -a identity_pinned_images <<<"$RELEASE_IDENTITY_IMAGES"
+read -r -a identity_pinned_soaks <<<"$RELEASE_IDENTITY_SOAKS"
+ok "production release identity matches the pinned declaration: ${#identity_pinned_fields[@]} fields, ${#identity_pinned_images[@]} images, ${#identity_pinned_soaks[@]} soak combinations."
+
 # A production or versioned rehearsal must start from finalized release prose.
 # Validate before scratch creation so a stale declaration cannot consume tools,
 # build an image, or leave a release work directory behind.
