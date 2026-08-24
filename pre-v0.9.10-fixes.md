@@ -1030,24 +1030,26 @@ until release day is the first thing to notice.
 
 *Verification.* `make test-release-preflight` (113 -> 118 checks);
 `scripts/make-release.sh --preflight v0.9.10` still passes on this branch;
-`make test-release-qualification test-release-history test-todo-index
-test-makefile-name-contract`; full `scripts/ci-local.sh`. No firmware source was
-touched.
+`make test-release-qualification test-release-history test-release-provenance
+test-release-images test-soak-timing test-build-serialization test-todo-index
+test-makefile-name-contract`; and, as part of the final validation gate, `make
+test` and `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0`. No firmware
+source was touched.
 
 ## Final validation and release gate
 
 Complete these only after R1-R3, the F1 disposition, T1-T2, and D1-D3 are done.
 
-- [ ] `git diff --check main...HEAD` passes.
-- [ ] `make test` passes on a host meeting the documented host-tool contract.
-- [ ] `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` passes on the fully
+- [x] `git diff --check main...HEAD` passes.
+- [x] `make test` passes on a host meeting the documented host-tool contract.
+- [x] `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` passes on the fully
   provisioned release host with no skipped target rows.
-- [ ] AVR Classic, AVR-XT, PIC10F322, PIC10F320, and PIC12F675 builds pass all
+- [x] AVR Classic, AVR-XT, PIC10F322, PIC10F320, and PIC12F675 builds pass all
   flash, RAM, stack, fuse/CONFIG, timing, static-analysis, simulator, fault,
   lock-step, target-I/O, source-coverage, and mutation gates.
 - [ ] PIC12F675's two authoritative aggregates visibly share one retained matrix
   identity in local and clean-runner release paths.
-- [ ] `scripts/make-release.sh --preflight v0.9.10` rejects version drift and
+- [x] `scripts/make-release.sh --preflight v0.9.10` rejects version drift and
   accepts the exact pinned release environment.
 - [ ] A release dry run passes after this branch-only document is deleted.
 - [ ] Current-release declarations match the staged canonical set: seven parts,
@@ -1061,6 +1063,30 @@ Complete these only after R1-R3, the F1 disposition, T1-T2, and D1-D3 are done.
 - [ ] The annotated `v0.9.10` tag points to the artifact commit and the clean
   release workflow reproduces every signed image byte-for-byte before
   publication.
+
+**Gate run (2026-08-23, HEAD `fe8ecc8`, clean tree).** `git diff --check
+main...HEAD` clean. `make test`: 84 summary lines, 0 failures, "all fast
+pre-hardware tests passed". `make test-long STRICT_TOOLS=1
+MUTATION_ALLOW_SKIP=0`: 84 summary lines, 0 failures, "all FULL (exhaustive)
+pre-hardware tests passed"; mutation summary 132 killed, 0 survived, 0 errored,
+0 PIC skipped, 0 ATtiny202 skipped, with every target row reporting RAN
+(PIC shell, PIC10F320, PIC12F675, ATtiny202) rather than skipped -- which is
+what `STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` exists to prove. Golden-model line
+coverage 99.39% (floor 90%); verified-core `src/bypass_pure.c` 100.00% (floor
+95%). `scripts/make-release.sh --preflight v0.9.10` accepted on the clean tree;
+`--preflight v0.9.11` rejected at "CHANGELOG.md must contain one dated [0.9.11]
+section", so version drift fails before any staging work.
+
+The five open rows are release-time by construction and cannot be closed from
+this branch. The dry-run row additionally waits on the deletion of this
+document, which the merge decision below sequences before the release cut: from
+commit `fe8ecc8` the staging path refuses a tree that still contains it, which
+is that guard working as specified rather than a blocker. PIC12F675's matrix
+identity is proved on the local path by `test/test_pic_build.sh` (one combined
+Make graph, one format-2 twelve-artifact record) and
+`test/test_release_qualification.sh`, both green in the run above; its
+clean-runner half is held by `test/test_workflow_syntax.sh` against
+`ci.yml` and `release.yml` and is exercised for real when the tag workflow runs.
 
 ## Review validation already performed
 
@@ -1097,8 +1123,8 @@ Record each completed item with its commit ID and decisive validation command.
 | D1 | DONE | `ed5b654` | `make test-release-preflight` (85 -> 101 checks, 12 negative controls); `make test-release-qualification test-todo-index test-makefile-name-contract test-release-history` |
 | D2 | DONE | `3a6c67d` | `make test-workflow-syntax test-ci-local-routing test-release-preflight test-release-qualification test-release-history test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
 | D3 | DONE | `cbc57be` | `make test-release-preflight` (101 -> 113 checks); `make test-release-qualification test-release-history` (88 -> 89); `make test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
-| G1 | IMPLEMENTED | (pending) | `make test-release-preflight` (113 -> 118 checks); `scripts/make-release.sh --preflight v0.9.10`; `make test-release-qualification test-release-history test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
-| Final validation | OPEN | | |
+| G1 | DONE | `fe8ecc8` | `make test-release-preflight` (113 -> 118 checks); `scripts/make-release.sh --preflight v0.9.10` accepted with the document present; `make test-release-qualification test-release-history test-release-provenance test-release-images test-soak-timing test-build-serialization test-todo-index test-makefile-name-contract`; `make test`; `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` |
+| Final validation | PARTIAL | | Six of eleven rows closed on `fe8ecc8`: `git diff --check`, `make test`, `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` (132 mutants killed, 0 survived, 0 skipped), the per-family gate row, and both halves of the preflight row. The remaining five are release-time |
 
 ## Merge decision
 
