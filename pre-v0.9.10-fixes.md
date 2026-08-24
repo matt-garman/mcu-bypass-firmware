@@ -1087,6 +1087,11 @@ Make graph, one format-2 twelve-artifact record) and
 `test/test_release_qualification.sh`, both green in the run above; its
 clean-runner half is held by `test/test_workflow_syntax.sh` against
 `ci.yml` and `release.yml` and is exercised for real when the tag workflow runs.
+`scripts/ci-local.sh` also reproduced the whole `ci.yml` job set on this tree
+(ALL STEPS PASSED, 1238s, including the `pic job: PIC12F675 immutable-matrix
+aggregates` step and a second 132-killed/0-survived mutation run), but that
+script deliberately does not reproduce the tag-triggered `release` workflow, so
+it does not close this row either.
 
 ## Review validation already performed
 
