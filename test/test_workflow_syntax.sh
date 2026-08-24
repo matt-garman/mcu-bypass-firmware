@@ -797,6 +797,7 @@ PIC_COMMANDS = (
             "STRICT_TOOLS": "1",
             "PIC_CC": "${XC8_DIR}/bin/xc8-cc",
             "PIC_DFP": "${XC8_DFP_ROOT}/xc8",
+            "PIC12F675_DATA_LIMIT": "48",
         },
     ),
 )
@@ -914,20 +915,35 @@ if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
 
     # Local CI has the same hard-coded five process boundary, but obtains tool
     # paths from Make/environment defaults and exports strictness once globally.
-    local_commands = tuple(goals for goals, _ in PIC_COMMANDS)
+    # The production data limit remains pinned on the PIC12F675 invocation.
+    local_commands = tuple(
+        (
+            goals,
+            {"PIC12F675_DATA_LIMIT": "48"}
+            if "pic12f675-test" in goals else {},
+        )
+        for goals, _ in PIC_COMMANDS
+    )
     local_invocations = []
     local_shell = shell_tokens("\n".join(lines))
     for tokens in local_shell:
         if len(tokens) >= 4 and tokens[0] == "run_step" \
                 and tokens[1].startswith("pic job:") and tokens[2] == "make":
-            local_invocations.append(tuple(tokens[3:]))
-    for goals in local_invocations:
+            parsed = make_command(tokens[2:])
+            if parsed is not None:
+                local_invocations.append(parsed)
+    for goals, assignments, duplicate_assignment in local_invocations:
         check(
-            goals in local_commands,
-            f"scripts/ci-local.sh: noncanonical PIC job command: make {' '.join(goals)}",
+            not duplicate_assignment and (goals, assignments) in local_commands,
+            "scripts/ci-local.sh: noncanonical PIC job command: make "
+            f"{' '.join(goals)}"
+            + "".join(f" {key}={value}" for key, value in assignments.items()),
         )
-    for goals in local_commands:
-        occurrences = local_invocations.count(goals)
+    for goals, assignments in local_commands:
+        occurrences = sum(
+            not parsed[2] and parsed[:2] == (goals, assignments)
+            for parsed in local_invocations
+        )
         check(
             occurrences == 1,
             f"scripts/ci-local.sh: PIC command {' '.join(goals)} occurs "
