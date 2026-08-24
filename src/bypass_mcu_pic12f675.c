@@ -311,21 +311,38 @@ static uint8_t hw_critical_sfrs_intact(void) {
 // SHELL-INTERNAL HELPERS (file-static; NOT part of bypass_hw_iface.h)
 //////////////////////////////////////////////////////////////////////////////
 
-// infinite-loop function to force a watchdog reset, for critical, unrecoverable
-// errors (presumably ultra-rare events: cosmic rays, extreme EMI). Disables
-// interrupts first so nothing can pet the dog.
-//
-// The FIRST act is hw_outputs_reassert_safe(): any output with a
-// continuous-energization hazard (the relay coils) is driven to its
-// de-energized idle BEFORE the spin, so no fault can hold a coil energized for
-// the length of the watchdog period. The reset then re-runs init(), whose
-// full-width BYPASS actuation re-synchronizes the physical relay with the
-// logical state and the LED.
-//
-// IMPORTANT: relies on the watchdog being active (WDTE=ON in CONFIG); without
-// it this would lock up the MCU.
-__attribute__((noreturn)) static void hw_force_wdt_reset(void) {
+static void hw_emergency_outputs_quiesce(void) {
+#if defined(TQ2_L2_5V_RELAY)
+    uint8_t const coil_mask =
+        (uint8_t)((uint8_t)(1U << RELAY_RESET_PIN) |
+                (uint8_t)(1U << RELAY_SET_PIN));
+
+    WPU &= (uint8_t)~coil_mask;
+    TRISIO |= coil_mask;
+    ADCON0 = ADCON0_ADC_OFF;
+    ANSEL &= (uint8_t)~ANSEL_OUTPUT_MASK;
+    CMCON = CMCON_COMPARATOR_OFF;
     hw_outputs_reassert_safe();
+    TRISIO &= (uint8_t)~coil_mask;
+#else
+    hw_outputs_reassert_safe();
+#endif
+}
+
+
+// infinite loop to force a WDT reset on a critical, unrecoverable event
+// (cosmic ray / extreme EMI). Quiesces hazardous outputs first, then disables
+// interrupts so nothing can pet the dog during the watchdog spin. Relies on
+// the fuse-locked WDT being active (it always is on this part).
+//
+// First: hw_emergency_outputs_quiesce() (and hw_outputs_reassert_safe(),
+// implicitly): any output with a continuous-energization hazard (the relay
+// coils) is driven to its de-energized idle BEFORE the spin, so no fault can
+// hold a coil energized for the length of the watchdog period. The reset then
+// re-runs init(), whose full-width BYPASS actuation re-synchronizes the
+// physical relay with the logical state and the LED.
+__attribute__((noreturn)) static void hw_force_wdt_reset(void) {
+    hw_emergency_outputs_quiesce(); // calls hw_outputs_reassert_safe()
     INTCONbits.GIE = 0;
     for (;;) { }
 }

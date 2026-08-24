@@ -1117,9 +1117,53 @@ owner, consistent with project policy.
   and one complete recovery RESET-coil pulse where the simulator models reset.
 - [ ] Flash, RAM, stack, timing, watchdog, static-analysis, target-simulator,
   source-coverage, and mutation gates pass for both affected targets.
-- [ ] F1 documentation is updated to describe the implemented MCU-specific
+- [x] F1 documentation is updated to describe the implemented MCU-specific
   emergency quiescence and its tested fault scope without overclaiming hardware
   or relay-mechanical evidence.
+
+**Implementation status (2026-08-24, provisioned validation pending)**
+
+- The repository owner added shell-specific emergency quiescence. AVR-XT
+  removes coil pull-ups, disconnects direction, clears inversion and stale
+  `OUT`, then restores low output drive. PIC12F675 removes coil pull-ups,
+  disconnects direction, disables analog/comparator ownership, clears the
+  shadow/GPIO latch state, then restores low output drive. The ordinary output
+  driver remains responsible only for latch intent.
+- The AVR-XT relay matrix now has 32 injections. It observes physical PA2/PA3
+  plus exact `OUT`, `DIR`, `PIN2CTRL`, and `PIN3CTRL` state under both coils'
+  `INVEN`, pull-up, one-bit direction, combined input/stale-OUT/control, and
+  settled-state OUT fixtures. Host negative controls reject an OUT-only clear.
+- The PIC12F675 relay matrix now has 46 checks. It directly observes modeled
+  GP1/GP2 node voltage at the watchdog spin and runs both `CINV` settings for
+  all three comparator modes one bit from off (`110`, `101`, `011`). Mode `110`
+  must make GP2 follow `COUT`; modes `101` and `011` must leave GP2 under GPIO.
+  The high-`COUT` fixture proves a latch-only clear leaves physical GP2 high.
+- Reviewed source-order checks pin pull-up removal before input direction,
+  peripheral/polarity neutralization before latch clearing, and low latch state
+  before output direction is restored. F2's new latch-only mutants raised its
+  then-current pinned inventory from 132 to 134; combined with F3's independent
+  PIC10F320 additions, the merged inventory is 136.
+- Resource coverage is now explicit. ATtiny202 requires one exact flash/static-
+  RAM report, enforces 2048 B flash and 16/128 B static RAM, and compiles the
+  AVR-XT shell under all three production selectors with a 32 B per-frame
+  ceiling. PIC12F675 requires one consistent XC8 Data-space report per variant
+  and enforces an inclusive 48/64 B limit. Both have fail-closed fake-tool
+  regressions; actual values still require the provisioned compilers.
+- Available host validation passes: `test-attiny202-fault-oracle` (48 checks),
+  `test-stack-bound-regression` (23 checks), `test-attiny202-build` (52 checks),
+  `pic12f675-coverage-check-fw`, `test-pic-target-result-records`,
+  `test-target-matrix`, `test-target-lane-markers`, `test-mutation-sandbox`
+  (132 checks), `test-pic-build` (36/75/156 checks),
+  `test-pic-build-rebuild` (28 checks), release
+  preflight/qualification/history, TODO-index, Makefile-name, and watchdog-note
+  contracts; `git diff --check` is clean.
+- Target evidence is not claimed on this host. Strict AVR-XT execution stops
+  because `third_party/attiny_dfp` is absent; strict PIC12F675 execution stops
+  because XC8/DFP/libgpsim are absent. The repository-wide `make test` also
+  stops in the pre-existing host setup at missing `gnu/stubs-32.h` during
+  Classic-AVR clang-tidy. Keep the first five acceptance boxes open until the
+  real-image target lanes, actual resource/stack measurements, timing/static
+  gates, and complete 136-mutant run pass on the provisioned validation host.
 
 ### F3 - Resolve the PIC10F320 two-write relay-coil clear
 
@@ -1196,7 +1240,8 @@ delays the useful de-energization by one write but passes through no distinct
 state, so no oracle at the state level can see it. That limit is stated in the
 harnesses and in the documentation rather than papered over. Two
 mutation-inventory entries (host and target lanes) restore the per-bit clear;
-both are killed, and the inventory total moves 132 -> 134.
+both are killed. They moved F3's then-current inventory 132 -> 134; combined
+with F2's independent additions, the merged inventory is 136.
 
 Documentation: `docs/relay_coil_fault_correction.md` now states the one-write
 contract per shell -- the modular four through `hw_pin_mask_set_low()`, the 320
@@ -1315,50 +1360,191 @@ mutation testing at 132 killed, 0 survived, 0 errored, 0 skipped;
 `make test-release-preflight` remains 118 checks. Firmware source changes were
 made by the repository owner, consistent with project policy.
 
-### P1 - Remove the unsafe static PIC12F675 flashing path
+### P1 - Replace the raw PIC12F675 path with a lightweight guarded helper
 
 **Priority:** User-facing hardware safety release blocker
 
 **Problem**
 
-`README.md` currently says every downloaded release image can be flashed with no
-toolchain and sends the user to `FLASHING.md`. That document publishes raw
-PIC12F675 `ipecmd` read/write commands while also admitting that trim
-preservation and readback are not hardware-validated. This contradicts the
-guarded transaction required by `README.md` and `release/README.md`, which
-correctly prohibit substituting a raw writer because bulk erase can silently
-destroy per-device OSCCAL and BG trim.
+`FLASHING.md` was created for a legitimate use case: program a downloaded
+release image on a machine that has the programmer but not the firmware build
+toolchain or a repository checkout. Its PIC12F675 block recognizes that this
+part is not an ordinary flash-and-forget target. It reads and archives the
+device, asks the operator to record OSCCAL and BG, writes the common release
+image, then reads the device again and asks the operator to compare both
+per-device values.
 
-The generated release guidance is contract-tested, but the static
-`FLASHING.md` path is not governed by the same safety contract. The suite is
-therefore green while two durable instructions disagree about whether the raw
-write is permitted.
+Those are the right conceptual stages, but the published command sequence is
+not yet a safe implementation of them. Parsing and comparison are manual; the
+write is not mechanically conditional on a valid baseline; no durable PENDING
+reservation exists before the hardware mutation; the recovery text covers an
+erased OSCCAL word but not changed BG; and the exact PICkit 3/MPLAB X 6.20
+`ipecmd` read, erase, calibration-preservation, program and export behavior has
+not been validated on hardware. A post-write comparison can detect damage after
+it occurs, but cannot by itself establish that the writer preserves the trim.
 
-**Recommended change**
+This also contradicts the guarded transaction required by `README.md` and
+`release/README.md`, which prohibits a raw writer because bulk erase can
+silently destroy per-device OSCCAL and BG trim. The generated release guidance
+is contract-tested, but the static `FLASHING.md` path is not governed by the
+same safety contract. The suite is therefore green while two durable
+instructions disagree about whether the raw write is permitted.
 
-- Remove the raw PIC12F675 programming recipe from `FLASHING.md`.
-- Make the no-toolchain quickstart explicitly exclude PIC12F675 until a safe,
-  hardware-validated downloaded-image procedure exists.
-- Direct PIC12F675 users to the guarded `pic12f675-preflight` plus
-  `pic12f675-release-program` transaction and state its pinned source/toolchain
-  requirements plainly.
-- Extend the documentation/source contract to scan every durable static guide,
-  not only generated release guidance, for forbidden raw PIC12F675 writer
-  commands and contradictory no-toolchain claims.
-- Add negative fixtures restoring the current unsafe block and prove preflight
-  rejects them by name.
+The full `pic12f675-release-program` transaction is not the right end-user
+answer to this use case. Its private rebuild, pinned XC8/DFP checks, Git release
+identity and source-worktree requirements provide strong development and
+release-provenance guarantees, but the PIC12F675 does not fundamentally require
+a compiler to program a released image. The common release HEX deliberately
+omits word `0x3FF` and leaves BG outside its programmed intent; safe field
+programming requires that image plus the attached device's factory trim and a
+validated preservation/verification transaction.
+
+**Selected direction (recorded by the repository owner)**
+
+Replace the raw static recipe with a standalone Python helper for PICkit 3 and
+MPLAB X 6.20 `ipecmd`. Ship the helper with each release so a flashing machine
+needs only Python 3, the downloaded release bundle and its existing programmer
+CLI. It must not require Make, Git, XC8, the DFP, a simulator, a source checkout,
+or a firmware rebuild.
+
+The documentation claim should be precise rather than use "typically" as an
+implicit escape clause:
+
+> Programming a downloaded release does not require the firmware development
+> toolchain or a repository checkout. Most targets require only the released
+> HEX and programmer CLI. PIC12F675 additionally requires Python 3 and the
+> release's flashing helper because its per-device factory calibration must be
+> preserved and verified.
+
+The PIC12F675 heading in `FLASHING.md` must say directly that it is not a raw
+write target and that the release HEX must be passed to the helper, not directly
+to `ipecmd`.
+
+**Helper and release contract**
+
+- Implement one self-contained standard-library Python entry point with a
+  narrow command line: selected release HEX, MPLAB X 6.20 `ipecmd` executable or
+  JAR, and a caller-selected new evidence path. Invoke every subprocess through
+  an argv list, never a shell or caller-supplied whole-command string.
+- Fix the first supported hardware identity to PIC12F675, PICkit 3, and MPLAB X
+  6.20 `ipecmd`. Reject a different part, tool kind, or unrecognized version
+  before a device write. Support only the direct executable and Java/JAR forms
+  that are exercised by tests and the retained bench procedure.
+- Make target power an explicit part of the validated procedure. Default to the
+  conservative externally powered arrangement; do not expose `-W5` or another
+  programmer-powered mode until that exact voltage/interface setup is included
+  in retained hardware evidence.
+- Stage the helper in every release bundle and bind its exact bytes into the
+  signed release checksum/provenance contract. Preserve the canonical count of
+  21 firmware images by making release verifiers distinguish the required
+  helper artifact from the exact `*.hex` image set rather than treating every
+  checksum entry as a firmware image.
+- Consume a downloaded shipping HEX directly. Require its exact basename and
+  digest in the release's signed `SHA256SUMS`, then validate strict Intel HEX
+  structure, PIC12F675 address range, expected CONFIG intent, absence of word
+  `0x3FF`, and absence of any other calibration-writing record before opening a
+  write path. Snapshot and hash the accepted bytes; all later checks and the
+  programmer invocation must consume that same immutable snapshot.
+
+**Programming transaction**
+
+- Create a new private evidence directory exclusively and refuse an existing,
+  empty, symlinked or unsafe output path. Retain the image digest, helper
+  identity, exact programmer executable/JAR identity and version, selected
+  power mode, command transcripts, Device ID/revision, complete exported HEX,
+  OSCCAL word/value, CONFIG and BG bits.
+- Before any erase/write argument is reachable, perform a full-device baseline
+  read and fail unless word `0x3FF` is a valid `RETLW <cal>` instruction and all
+  required CONFIG/BG and device-identity fields are present. Perform an
+  immediate second pre-write read and require it to match the baseline exactly.
+- Write and durably publish a `reservation.json` record before invoking
+  `ipecmd` with any erase/program option. It must bind the baseline, immediate
+  read, image, helper, programmer, part, tool, power and command identities. An
+  interruption after reservation is PENDING, never an implicit success or
+  permission to issue another write.
+- Construct the one validated PICkit 3 write argv internally. Do not accept an
+  external image override, part override, whole-command override, extra writer
+  arguments, or an option that enables calibration-memory programming.
+- Attempt a full-device readback even when the writer reports failure. Verify
+  the programmed addresses against the immutable release snapshot, verify the
+  intended non-BG CONFIG bits, and require OSCCAL and BG to equal both pre-write
+  reads. Publish exactly one immutable `result.json` with PASS or detailed FAIL;
+  a FAIL is a forensic result, not permission for an automatic retry.
+- Provide a read-only finalization mode for a PENDING transaction. It may
+  revalidate identities and retry only the final full-device read and result
+  publication; it must never construct or invoke writer arguments.
+- Preserve the original complete device export independently of PASS/FAIL so an
+  operator is not left without the only copy of per-device trim if the first
+  hardware trial exposes destructive programmer behavior.
+
+**Hardware-validation gate**
+
+The helper automates the transaction but does not make untested `ipecmd`
+behavior safe by assertion. Before the helper is published as a supported
+release path, retain a controlled PICkit 3/MPLAB X 6.20 bench run that proves:
+
+- the chosen read/export command returns complete program, CONFIG, Device ID,
+  revision, OSCCAL and BG data in the form the helper parses;
+- the exact write command and calibration-memory-disabled setting preserve both
+  OSCCAL and BG on an initial program and a repeat program;
+- programmed code and non-BG CONFIG bits read back exactly as expected;
+- the documented external-power arrangement and release/reset behavior are
+  correct; and
+- an interrupted/PENDING transaction can be finalized read-only without a
+  second write.
+
+If MPLAB X 6.20 cannot enforce or report calibration-memory protection through
+the supported CLI path, or the bench result shows either trim value changes,
+do not publish the helper as safe and do not silently add automatic repair. A
+per-device trim-aware image or explicit restoration transaction would be a new
+design requiring its own review, fail-closed binding and hardware validation.
+
+**Test and documentation changes**
+
+- Add a stateful fake-`ipecmd` regression that proves the exact order is
+  baseline read, immediate read, durable reservation, one write and final read.
+  Assert zero writer invocations on every failed image, tool, baseline,
+  immediate-read, identity, path, checksum or reservation precondition.
+- Cover malformed/duplicate/out-of-range Intel HEX, programmed word `0x3FF`,
+  wrong CONFIG intent, invalid `RETLW`, missing BG/device identity, tool/version
+  drift, image or executable mutation, baseline mismatch, writer failure,
+  readback failure, programmed-byte mismatch, OSCCAL/BG mismatch, existing or
+  symlinked evidence, interruption at each boundary, immutable-result reuse and
+  read-only PENDING finalization. Negative controls must prove each guard is
+  load-bearing.
+- Replace the raw PIC12F675 commands in `FLASHING.md` with the helper invocation
+  and its special-case explanation. Keep the full-toolchain guarded target
+  documented as the development/qualification path, not as a requirement for
+  flashing downloaded release bytes.
+- Extend the durable documentation/source contract to reject user-facing raw
+  PIC12F675 `ipecmd`/`pk2cmd` writer commands, a missing helper requirement,
+  claims that every part needs only HEX plus CLI, an unbound helper artifact, or
+  disagreement among `README.md`, `FLASHING.md`, `release/README.md` and the
+  generated per-release guidance.
+- Add negative fixtures restoring the current raw block and each contradictory
+  quickstart form; prove release preflight rejects the offending document and
+  claim by name.
 
 **Acceptance criteria**
 
-- [ ] No durable current document publishes a raw PIC12F675 writer command.
-- [ ] The downloaded-image/no-toolchain claim names PIC12F675 as an exception.
-- [ ] All published PIC12F675 release writes use the guarded transaction and
-  repeat the required release identity for recovery.
-- [ ] Documentation contracts fail on raw `ipecmd`/`pk2cmd` writers, omission of
-  the exception, or disagreement between `README.md`, `FLASHING.md`, and
-  `release/README.md`.
-- [ ] Release preflight, qualification, programming-image, recovery, and static
-  documentation tests pass.
+- [ ] A release-shipped, signed-checksum-bound Python helper programs the
+  downloaded PIC12F675 HEX with no source checkout or firmware development
+  toolchain.
+- [ ] The helper fails closed before writing on every image, trim, identity,
+  tool/version, power-mode, path, checksum, mutation and reservation error.
+- [ ] A durable reservation precedes the sole write; PASS requires exact code,
+  CONFIG, OSCCAL and BG readback; interrupted transactions have a read-only
+  finalization path.
+- [ ] Retained hardware evidence validates the exact PICkit 3/MPLAB X 6.20
+  `ipecmd` read/write/export and external-power procedure on initial and repeat
+  programming.
+- [ ] No durable current document publishes a raw PIC12F675 writer command;
+  every downloaded-image path names the Python helper and the calibration
+  special case explicitly.
+- [ ] The 21-image release identity remains exact while the required helper is
+  staged, checksummed, reproduced and published as a distinct release artifact.
+- [ ] Fake-programmer, interruption, release-image, preflight, qualification,
+  recovery, packaging and durable-documentation negative controls pass.
 
 ### P2 - Build and validate AVR images before writing fuses
 
@@ -1842,8 +2028,9 @@ changes.
   physical coil-pin de-energization before the watchdog spin.
 - [ ] AVR programming negative controls prove no fuse or flash command runs
   before a successful selected-image build and validation.
-- [ ] Durable documentation contracts reject the retired raw PIC12F675 flashing
-  path and all contradictory no-toolchain claims.
+- [ ] The release-shipped PIC12F675 helper passes its fake-programmer and
+  packaging contracts; retained PICkit 3/MPLAB X 6.20 evidence validates its
+  exact hardware path; durable documentation rejects every retired raw writer.
 - [ ] PIC12F675's two authoritative aggregates visibly share one retained matrix
   identity in local and clean-runner release paths.
 - [ ] `scripts/make-release.sh --preflight v0.9.10` rejects version drift and
@@ -1920,10 +2107,10 @@ Record each completed item with its commit ID and decisive validation command.
 | D2 | DONE | `3a6c67d` | `make test-workflow-syntax test-ci-local-routing test-release-preflight test-release-qualification test-release-history test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
 | D3 | DONE | `cbc57be` | `make test-release-preflight` (101 -> 113 checks); `make test-release-qualification test-release-history` (88 -> 89); `make test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
 | G1 | DONE | `fe8ecc8` | `make test-release-preflight` (113 -> 118 checks); `scripts/make-release.sh --preflight v0.9.10` accepted with the document present; `make test-release-qualification test-release-history test-release-provenance test-release-images test-soak-timing test-build-serialization test-todo-index test-makefile-name-contract`; `make test`; `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` |
-| F2 | OPEN | | AVR-XT polarity and PIC12F675 peripheral-ownership escalation fixes plus physical-pin fault tests |
-| F3 | IMPLEMENTED | (pending) | One-write constant-mask `LATA` coil clear adopted; relay image 248 -> 242 words and return stack 4 -> 3, CD4053 images byte-identical; write sequence asserted by host (59 -> 62 checks) and gpsim resync oracles; 2 new mutants (132 -> 134) |
+| F2 | IN PROGRESS | | Implementation and host contracts complete; provisioned AVR-XT/PIC12F675 target, resource, and merged 136-mutant validation pending |
+| F3 | IMPLEMENTED | (pending) | One-write constant-mask `LATA` coil clear adopted; relay image 248 -> 242 words and return stack 4 -> 3, CD4053 images byte-identical; write sequence asserted by host (59 -> 62 checks) and gpsim resync oracles; 2 new PIC10F320 mutants, with the merged inventory now 136 |
 | F4 | IMPLEMENTED | (pending) | All 21 images rebuild byte-identical; `make test-static-assert-guards` (39 -> 68 checks, 11 near-bound FIRES/CLEAN fixtures); the new `test/avr/test_sim.c` pet-budget check on both classic parts and all three variants; all five MISRA lanes clean |
-| P1 | OPEN | | Static PIC12F675 flashing guidance and durable documentation contract |
+| P1 | OPEN | | Standalone PIC12F675 release helper, PICkit 3/IPE validation, packaging, and durable documentation contract |
 | P2 | OPEN | | Build-before-hardware AVR programming order and fake-programmer regression |
 | D4 | OPEN | | Final release date, resource tables, and PIC10F320 run-5 baseline wording |
 | D5 | OPEN | | Simulator timing/physical-language and pip prerequisite reconciliation |

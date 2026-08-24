@@ -36,8 +36,9 @@
 #
 # Usage:   make attiny202-fault  (supplies the ELF and required production fuses)
 # Exit:    0 = PASS, 1 = a case failed, 2 = bad invocation / missing image.
-# Completeness: exactly 24 independently pinned injections plus one long healthy
-# negative control must finish; any rejected/re-latched injection is a failure.
+# Completeness: exactly 24 CD4053 or 32 relay independently pinned injections
+# plus one long healthy negative control must finish; any rejected/re-latched
+# injection is a failure.
 
 import sys
 
@@ -55,20 +56,20 @@ RETRY_GATE_STEP_CYCLES = 137  # coprime with the 2,000-cycle tick
 ENGAGE_PRESS_MS = 40
 ENGAGE_RELEASE_MS = 80
 TRANSACTION_MAX_STEPS = 4_000  # exact-PC search; deliberately not a time budget
-# The relay variant carries two extra cases: a coil fault has to be delivered in
-# a settled ENGAGED state as well as in BYPASS, so both directions of the
-# desynchronization hazard are covered.
+# The relay variant carries eight extra cases: six physical-pin configuration
+# faults plus delivery of both coil-OUT faults in settled ENGAGED as well as
+# BYPASS, covering both directions of the desynchronization hazard.
 EXPECTED_FAULT_CASES_CD4053 = 24
-EXPECTED_FAULT_CASES_RELAY = 26
+EXPECTED_FAULT_CASES_RELAY = 32
 RESET_SENTINEL = 0xA5
 # Panasonic TQ2-L2-5V minimum coil pulse for guaranteed actuation; the shell
 # drives 12 ms. Used only in diagnostics here -- see the RESYNC note below for
 # why this substrate cannot measure the recovery pulse.
 TQ2_L2_5V_MIN_PULSE_MS = 4
-PORTA_COIL_MASK = 0x0C  # PA2 (RESET coil) | PA3 (SET coil)
 
 REG = "reg"              # I/O register        (write_ioreg, one byte)
 REG16 = "reg16"          # 16-bit I/O register  (write_ioreg low then high)
+COIL_STATE = "coil_state"  # relay pin input + stale OUT high + PINnCTRL upset
 RAM = "ram"              # SRAM byte     (write_ram, addr resolved per variant)
 GATE = "gate"            # expected mechanism: per-tick sanity gate
 LIVE = "live"            # expected mechanism: WDT liveness (or the gate)
@@ -100,8 +101,10 @@ def _fault_cases(sim, is_relay):
         ("CLKCTRL.MCLKCTRLB",     REG,   S.REG_CLKCTRL_MCLKCTRLB, 0x00,   GATE),
         ("PORTA.PIN7CTRL(pullup)", REG,  S.REG_PORTA_PIN7CTRL,    0x00,   GATE),
         ("PORTA.PIN1CTRL(INVEN)",  REG,  S.REG_PORTA_PIN1CTRL,    S.PORT_INVEN_bm, GATE),
-        ("PORTA.PIN2CTRL(INVEN)",  REG,  S.REG_PORTA_PIN2CTRL,    S.PORT_INVEN_bm, GATE),
-        ("PORTA.PIN3CTRL(INVEN)",  REG,  S.REG_PORTA_PIN3CTRL,    S.PORT_INVEN_bm, GATE),
+        ("PORTA.PIN2CTRL(INVEN)",  REG,  S.REG_PORTA_PIN2CTRL,    S.PORT_INVEN_bm,
+         RESYNC if is_relay else GATE),
+        ("PORTA.PIN3CTRL(INVEN)",  REG,  S.REG_PORTA_PIN3CTRL,    S.PORT_INVEN_bm,
+         RESYNC if is_relay else GATE),
         ("PORTA.PIN6CTRL(INVEN)",  REG,  S.REG_PORTA_PIN6CTRL,    S.PORT_INVEN_bm, GATE),
         ("PORTA.PIN7CTRL(INVEN)",  REG,  S.REG_PORTA_PIN7CTRL,
          S.PORT_PULLUPEN_bm | S.PORT_INVEN_bm, GATE),
@@ -146,6 +149,27 @@ def _fault_cases(sim, is_relay):
         ("TCB0.CTRLA(tick)",      REG,   S.REG_TCB0_CTRLA,        0x00,   LIVE),
         ("TCB0.INTCTRL(tick)",    REG,   S.REG_TCB0_INTCTRL,      0x00,   LIVE),
     ] + ([
+        # Relay-only physical-pin faults. PULLUPEN and a one-bit DIR upset each
+        # exercise a distinct register state the emergency path must
+        # canonicalize.
+        # The combined fixtures model a plausible multi-register stale state:
+        # first make one pin an input, then leave its OUT latch High and enable
+        # PULLUPEN|INVEN. The emergency path must canonicalize the pin itself,
+        # not merely clear its OUT latch.
+        ("PORTA.PIN2CTRL(PULLUPEN RESET-coil)", REG, S.REG_PORTA_PIN2CTRL,
+         S.PORT_PULLUPEN_bm, RESYNC),
+        ("PORTA.PIN3CTRL(PULLUPEN SET-coil)", REG, S.REG_PORTA_PIN3CTRL,
+         S.PORT_PULLUPEN_bm, RESYNC),
+        ("PORTA.DIR(PA2 RESET-coil input)", REG, S.REG_PORTA_DIR,
+         S.PORTA_DIR_EXPECTED & ~0x04, RESYNC),
+        ("PORTA.DIR(PA3 SET-coil input)", REG, S.REG_PORTA_DIR,
+         S.PORTA_DIR_EXPECTED & ~0x08, RESYNC),
+        ("PORTA.PA2 RESET-coil(combined input/stale-OUT/PULLUPEN|INVEN)",
+         COIL_STATE, S.REG_PORTA_PIN2CTRL,
+         S.PORT_PULLUPEN_bm | S.PORT_INVEN_bm, RESYNC),
+        ("PORTA.PA3 SET-coil(combined input/stale-OUT/PULLUPEN|INVEN)",
+         COIL_STATE, S.REG_PORTA_PIN3CTRL,
+         S.PORT_PULLUPEN_bm | S.PORT_INVEN_bm, RESYNC),
         # The same two coil faults delivered while the shell believes it is
         # ENGAGED. That is the other direction of the desynchronization hazard:
         # an unintended RESET pulse can knock a latching relay to BYPASS while
@@ -238,6 +262,21 @@ def _inject(sim, kind, addr, value):
         lo = sim.read_ioreg(addr)
         hi = sim.read_ioreg(addr + 1)
         return ((hi << 8) | lo) == value
+    if kind == COIL_STATE:
+        coil_mask = (0x04 if addr == S.REG_PORTA_PIN2CTRL else
+                     0x08 if addr == S.REG_PORTA_PIN3CTRL else 0x00)
+        if coil_mask == 0:
+            return False
+        direction = sim.read_ioreg(S.REG_PORTA_DIR) & ~coil_mask
+        out = sim.read_ioreg(S.REG_PORTA_OUT) | coil_mask
+        # Release the pin before making the stale OUT latch High, so fixture
+        # construction itself does not fabricate an output pulse.
+        sim.write_ioreg(S.REG_PORTA_DIR, direction)
+        sim.write_ioreg(S.REG_PORTA_OUT, out)
+        sim.write_ioreg(addr, value)
+        return (sim.read_ioreg(S.REG_PORTA_DIR) == direction and
+                sim.read_ioreg(S.REG_PORTA_OUT) == out and
+                sim.read_ioreg(addr) == value)
     sim.write_ram(addr, [value])
     return sim.read_ram(addr, 1)[0] == value
 
@@ -299,7 +338,7 @@ def _run_case(elf, name, kind, addr, corrupt, mech, ck):
                      if safe else "context/output changed or fault persisted"))
         return
 
-    healthy = (sim.read_ioreg(addr) if kind in (REG, REG16)
+    healthy = (sim.read_ioreg(addr) if kind in (REG, REG16, COIL_STATE)
                else sim.read_ram(addr, 1)[0])
     if mech == LIVE:
         sim.write_ioreg(S.REG_GPR0, RESET_SENTINEL)
@@ -313,9 +352,10 @@ def _run_case(elf, name, kind, addr, corrupt, mech, ck):
     ck.injected()
 
     if mech in (RESYNC, RESYNC_ENGAGED):
-        # The gate escalates the energized coil, and hw_force_wdt_reset() drives
-        # BOTH coils low before it spins. Two assertions, one result: the reset
-        # happened, and the coils are idle at the moment it happened.
+        # The gate escalates the coil-pin fault, and hw_force_wdt_reset() makes
+        # BOTH physical pins driven Low before it spins. Assert the physical
+        # pins and every register that determines that state; OUT alone cannot
+        # detect an inverted, pulled-up or input-direction coil pin.
         #
         # What this substrate CANNOT show is the other half of the contract --
         # the recovery's full-width RESET-coil actuation, which is what actually
@@ -329,12 +369,23 @@ def _run_case(elf, name, kind, addr, corrupt, mech, ck):
             ck.result(False, "%s corrupted -> gate did NOT force reset within %d ms"
                              % (name, GATE_MS))
             return
+        levels = sim.control_levels()
         out = sim.read_ioreg(S.REG_PORTA_OUT)
+        direction = sim.read_ioreg(S.REG_PORTA_DIR)
+        pin2ctrl = sim.read_ioreg(S.REG_PORTA_PIN2CTRL)
+        pin3ctrl = sim.read_ioreg(S.REG_PORTA_PIN3CTRL)
         led_expected = 0x02 if mech == RESYNC_ENGAGED else 0x00
-        ck.result((out & PORTA_COIL_MASK) == 0 and (out & 0x02) == led_expected,
-                  "%s corrupted -> gate forced reset (+%d ms) with both coils"
-                  " de-energized and nothing else re-driven (OUT=0x%02x)"
-                  % (name, at, out))
+        quiescent = (levels == (0, 0) and out == led_expected and
+                     direction == S.PORTA_DIR_EXPECTED and
+                     pin2ctrl == 0 and pin3ctrl == 0)
+        ck.result(quiescent,
+                  "%s corrupted -> gate forced reset (+%d ms) with %s"
+                  " (physical=%s, OUT=0x%02x, DIR=0x%02x,"
+                  " PIN2CTRL=0x%02x, PIN3CTRL=0x%02x)"
+                  % (name, at,
+                     "both coils physically quiescent" if quiescent
+                     else "NON-QUIESCENT coil state",
+                     levels, out, direction, pin2ctrl, pin3ctrl))
         return
 
     if mech == RETRY_GATE:

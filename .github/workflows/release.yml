@@ -240,7 +240,7 @@ jobs:
           make attiny13a attiny85 attiny45
           # STRICT_TOOLS=1: an absent ATtiny_DFP must fail the reproducibility
           # gate, never skip it into an image set that is short three files.
-          make attiny202 STRICT_TOOLS=1
+          make attiny202 STRICT_TOOLS=1 XT_STATIC_RAM_LIMIT=16
           make pic10f322 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
           # pic10f320-variants, not pic10f320: it builds all three output stages and
           # removes the whole image set if any one of them fails, so a partial
@@ -250,7 +250,8 @@ jobs:
           # PIC12F675 shares PIC_CC/PIC_DFP with the 322. Its three shipped HEXes
           # are in RELEASE_IMAGES, so they must be rebuilt here or the
           # reproducibility gate below fails on a set short three files.
-          make pic12f675 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
+          make pic12f675 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8" \
+            PIC12F675_DATA_LIMIT=48
 
       # --- THE reproducibility gate ----------------------------------------
       - name: Verify committed images and rename/change evidence reproduce bit-for-bit
@@ -383,15 +384,16 @@ jobs:
       # STRICT_TOOLS=1 throughout: this is THE public attestation, so every gate
       # must actually run -- a silently-skipped tool must fail the release.
       - name: Re-run make test-long
-        run: make test-long STRICT_TOOLS=1
+        run: make test-long STRICT_TOOLS=1 XT_STATIC_RAM_LIMIT=16 \
+          XT_STACK_MAX_FRAME=32 PIC12F675_DATA_LIMIT=48
 
       - name: Re-run make attiny202-test
-        run: make attiny202-test STRICT_TOOLS=1
+        run: make attiny202-test STRICT_TOOLS=1 XT_STATIC_RAM_LIMIT=16 XT_STACK_MAX_FRAME=32
 
       # The AVR-XT target aggregate: functional + physical output trace, fault
       # injection, and firmware/model ctx_ lock-step on the real built image.
       - name: Re-run make attiny202-test-target (yasimavr, every variant)
-        run: make attiny202-test-target STRICT_TOOLS=1
+        run: make attiny202-test-target STRICT_TOOLS=1 XT_STATIC_RAM_LIMIT=16 XT_STACK_MAX_FRAME=32
 
       - name: Re-run make pic10f322-test
         run: make pic10f322-test STRICT_TOOLS=1 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
@@ -430,7 +432,7 @@ jobs:
         run: |
           make pic12f675-test pic12f675-test-target-variants STRICT_TOOLS=1 \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC_DFP="${XC8_DFP_ROOT}/xc8"
+            PIC_DFP="${XC8_DFP_ROOT}/xc8" PIC12F675_DATA_LIMIT=48
 
       # --- publish ----------------------------------------------------------
       - name: Publish GitHub Release

@@ -64,19 +64,14 @@ uint8_t hw_is_sanity_check_failed(effect_state_t const effect_state);
 void hw_init_output_pins(void);
 
 
-// Fail-safe output de-energization, on the ESCALATION PATH ONLY.
+// Driver-level fail-safe latch-intent clear, on the escalation path only.
 //
-// Forces every output carrying a continuous-energization or spurious-actuation
-// hazard -- today, the relay coils -- to its de-energized idle. Each shell
-// calls it as the first act of its hw_force_wdt_reset(), so no fault can hold
-// a coil energized for the length of the deliberate watchdog spin.
+// For the relay output stage, clears both coil intent bits through one
+// masked logical operation. This alone does not guarantee a low physical
+// pad when pin polarity, direction, pull-up, or peripheral ownership is
+// corrupt; AVR-XT and PIC12F675 wrap it in shell-specific emergency
+// quiescence.
 //
-// It is NOT a loop-top corrector. An unexpectedly energized coil is a FAULT
-// and is escalated by the shell's sanity gate rather than silently re-driven
-// low: a below-minimum coil pulse cannot be proven mechanically harmless, so
-// the firmware cannot know whether the latching relay moved. What restores
-// agreement between logical state, LED and physical relay position is the
-// recovery itself -- init() drives a complete BYPASS actuation.
 // See docs/relay_coil_fault_correction.md.
 void hw_outputs_reassert_safe(void);
 

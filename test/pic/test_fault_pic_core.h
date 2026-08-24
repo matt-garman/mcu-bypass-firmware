@@ -229,6 +229,13 @@
 // the recovery pulse must clear for the resynchronization to be a guarantee
 // rather than a hope. Simulation proves the PULSE, never the mechanics.
 #define RELAY_MIN_PULSE_MS 4u
+#if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
+// gpsim drives digital outputs at the rails. Keep the assertions in the
+// datasheet-defined low/high regions rather than treating any nonzero float as
+// an energized relay pin.
+#  define PHYSICAL_LOW_MAX_V  0.8
+#  define PHYSICAL_HIGH_MIN_V 4.0
+#endif
 // Footswitch drive used to reach a settled ENGAGED state before injecting.
 // Press must exceed PRESSED_THRESH (8) ticks plus the 12 ms blocking actuation
 // the polled loop spends not counting ticks; release must exceed
@@ -253,6 +260,11 @@ static guint64   g_resets  = 0;   // incremented by ResetNotifier at 0x000
 static unsigned  g_checks  = 0;
 static unsigned  g_fails   = 0;
 static unsigned  g_loop_clrwdt_addr = 0;
+#if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
+static Stimulus_Node *g_comparator_input_node = nullptr;
+static Stimulus_Node *g_reset_coil_node = nullptr;
+static Stimulus_Node *g_set_coil_node   = nullptr;
+#endif
 
 // ---- Reset detection (identical to the soak; verdict inverted at the call
 // site). A NOTIFY breakpoint at the reset vector fires WITHOUT halting the run,
@@ -288,6 +300,65 @@ static Register *fetch_sfr(unsigned addr, const char *token) {
     }
     return r;
 }
+
+#if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
+#  if !defined(PIC_REG_COMPARATOR_INPUT_PIN_NAME) || \
+      !defined(PIC_REG_RESET_COIL_PIN_NAME) || !defined(PIC_REG_SET_COIL_PIN_NAME)
+#    error "physical relay checks require exact comparator/reset/set pin names"
+#  endif
+
+// Attach passive nodes to the package pins. Unlike GPIO readback, these nodes
+// continue to report the pad voltage while an analog peripheral owns the pin.
+// The GP0 node completes the comparator's two-input fixture; only GP1/GP2 are
+// measured as relay coils.
+static bool attach_relay_coil_observers(const char *proc_name) {
+    IOPIN *comparator_input_pin =
+        find_pin_exact(g_cpu, PIC_REG_COMPARATOR_INPUT_PIN_NAME);
+    IOPIN *reset_pin = find_pin_exact(g_cpu, PIC_REG_RESET_COIL_PIN_NAME);
+    IOPIN *set_pin   = find_pin_exact(g_cpu, PIC_REG_SET_COIL_PIN_NAME);
+    if (comparator_input_pin == nullptr || reset_pin == nullptr ||
+            set_pin == nullptr) {
+        fprintf(stderr, "FATAL: comparator/relay pin %s/%s/%s not found on %s\n",
+                PIC_REG_COMPARATOR_INPUT_PIN_NAME,
+                PIC_REG_RESET_COIL_PIN_NAME, PIC_REG_SET_COIL_PIN_NAME,
+                proc_name);
+        return false;
+    }
+
+    g_comparator_input_node = new Stimulus_Node("comparator-input-pin");
+    g_reset_coil_node = new Stimulus_Node("relay-reset-pin");
+    g_set_coil_node   = new Stimulus_Node("relay-set-pin");
+    g_comparator_input_node->attach_stimulus(comparator_input_pin);
+    g_reset_coil_node->attach_stimulus(reset_pin);
+    g_set_coil_node->attach_stimulus(set_pin);
+    g_comparator_input_node->update();
+    g_reset_coil_node->update();
+    g_set_coil_node->update();
+    return true;
+}
+
+static void relay_coil_voltages(double *reset_v, double *set_v) {
+    g_reset_coil_node->update();
+    g_set_coil_node->update();
+    *reset_v = g_reset_coil_node->get_nodeVoltage();
+    *set_v   = g_set_coil_node->get_nodeVoltage();
+}
+
+static bool relay_coils_physically_inactive(double *reset_v, double *set_v) {
+    relay_coil_voltages(reset_v, set_v);
+    return *reset_v <= PHYSICAL_LOW_MAX_V && *set_v <= PHYSICAL_LOW_MAX_V;
+}
+
+// XC8 emits the empty watchdog wait as a classic-mid-range GOTO-to-self. The
+// check is behavioral rather than symbol-based, so it remains valid when the
+// file-static helper moves in program memory between output variants.
+static bool at_watchdog_spin(void) {
+    unsigned const pc = g_cpu->pc->get_value();
+    unsigned const opcode = g_cpu->pma->get_opcode(pc);
+    return (opcode & 0x3800u) == 0x2800u &&
+           (opcode & 0x07FFu) == (pc & 0x07FFu);
+}
+#endif
 
 // Advance the simulation by `ms` ms of simulated time. Cycle break at the
 // target; resume run() until the target cycle is reached (a WDT reset may halt
@@ -445,9 +516,10 @@ static void prove_post_reset_liveness(void) {
 // The contract this case pins therefore has TWO halves, and it asserts them
 // separately on purpose. Final-low output alone is NOT full recovery:
 //
-//   1. DE-ENERGIZATION. hw_force_wdt_reset() calls hw_outputs_reassert_safe()
-//      BEFORE it spins, so both coils go low within one tick of the gate that
-//      detected them -- never held energized for the whole watchdog period.
+//   1. DE-ENERGIZATION. hw_force_wdt_reset() runs the target's emergency output
+//      quiescence BEFORE it spins, so both coils go low within one tick of the
+//      gate that detected them -- never held energized for the whole watchdog
+//      period.
 //   2. RESYNCHRONIZATION. The watchdog recovery re-runs init(), whose BYPASS
 //      actuation drives a COMPLETE RESET-coil pulse. That, and not the clear
 //      in (1), is what puts the physical relay back in agreement with the
@@ -467,11 +539,179 @@ static void prove_post_reset_liveness(void) {
 // firmware believes BYPASS) and ENGAGED plus an unintended RESET (the mirror).
 // Contributes exactly ONE check, with every assertion folded into the verdict,
 // so each adapter's EXPECTED_CHECKS stays hand-verifiable.
+static void finish_relay_resync_case(Register *target, Register *latch,
+                                     Register *port, unsigned before_val,
+                                     unsigned injected, unsigned written,
+                                     bool injection_ok,
+                                     bool require_deenergize_transition,
+                                     guint64 resets_before,
+                                     guint64 inject_cycle) {
+    static unsigned const coil_mask = PIC_REG_COIL_MASK;
+
+    // -- half 1: both coils de-energized on the escalation path, before the
+    // spin. Sampled every instruction so `partial_clear` observes the write
+    // sequence, not only its settled result. A clear that walked the two bits
+    // separately would transiently leave one energized.
+    //
+    // Both register views are tracked because an SRAM shadow and its port write
+    // can move a step apart. PIC12F675's physical-pin lane additionally follows
+    // the watchdog GOTO-to-self and proves GP1/GP2 are Low there; GPIO readback
+    // alone aliases COUT and is not proof.
+    bool            deenergized       = false;
+    bool            partial_clear     = false;
+    guint64         deenergize_cycle  = 0u;
+    unsigned        prev_latch_coils  = latch->get_value() & coil_mask;
+    unsigned        prev_port_coils   = port->get_value() & coil_mask;
+    unsigned const  deenergize_cap    =
+        (unsigned)(RESYNC_DEENERGIZE_MS * CYCLES_PER_MS);
+#if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
+    bool            spin_seen         = false;
+    bool            spin_physical_low = false;
+    guint64         spin_cycle        = 0u;
+    double          reset_pin_v       = 0.0;
+    double          set_pin_v         = 0.0;
+#endif
+
+    for (unsigned i = 0; i < deenergize_cap; ++i) {
+        unsigned const latch_coils = latch->get_value() & coil_mask;
+        unsigned const port_coils  = port->get_value() & coil_mask;
+        if ((latch_coils != 0u) && (latch_coils != prev_latch_coils) &&
+                ((latch_coils & prev_latch_coils) == latch_coils)) {
+            partial_clear = true;
+        }
+        if ((port_coils != 0u) && (port_coils != prev_port_coils) &&
+                ((port_coils & prev_port_coils) == port_coils)) {
+            partial_clear = true;
+        }
+        prev_latch_coils = latch_coils;
+        prev_port_coils  = port_coils;
+
+        bool const registers_idle = (latch_coils == 0u) && (port_coils == 0u);
+#if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
+        double sample_reset_v = 0.0;
+        double sample_set_v   = 0.0;
+        bool const physical_idle = relay_coils_physically_inactive(
+            &sample_reset_v, &sample_set_v);
+        if (!deenergized && registers_idle && physical_idle) {
+            deenergized = true;
+            deenergize_cycle = get_cycles().get();
+        }
+        if (at_watchdog_spin()) {
+            spin_seen = true;
+            spin_cycle = get_cycles().get();
+            reset_pin_v = sample_reset_v;
+            set_pin_v = sample_set_v;
+            spin_physical_low = physical_idle;
+            break;
+        }
+#else
+        if (registers_idle) {
+            deenergized = true;
+            deenergize_cycle = get_cycles().get();
+            break;
+        }
+#endif
+        if (!run_cycles(1u)) { break; }
+    }
+
+    // -- the recovery reset itself. Polled in 1 ms steps rather than one long
+    // window so the observation below starts as close to the reset vector as
+    // the step allows; the recovery pulse is 12 ms, so at most one step of it
+    // is missed and the datasheet-minimum assertion still has ~8 ms of margin.
+    unsigned elapsed_ms = 0u;
+    bool     ran_clean  = true;
+    while ((elapsed_ms < WDT_RESET_WINDOW_MS) && (g_resets == resets_before)) {
+        if (!run_ms(1u)) { ran_clean = false; break; }
+        elapsed_ms++;
+    }
+    guint64 const reset_delta = g_resets - resets_before;
+
+    // -- half 2: the ordinary recovery actuation oracle, unchanged in scope.
+    guint64  reset_coil_cycles = 0u;
+    guint64  set_coil_cycles   = 0u;
+    unsigned const samples =
+        (unsigned)((RESYNC_OBSERVE_MS * CYCLES_PER_MS) / RESYNC_SAMPLE_CYCLES);
+    for (unsigned i = 0; ran_clean && (i < samples); ++i) {
+        unsigned const p = port->get_value() & 0xFFu;
+        if ((p & PIC_REG_RESET_COIL_MASK) != 0u) {
+            reset_coil_cycles += RESYNC_SAMPLE_CYCLES;
+        }
+        if ((p & PIC_REG_SET_COIL_MASK) != 0u) {
+            set_coil_cycles += RESYNC_SAMPLE_CYCLES;
+        }
+        if (!run_cycles(RESYNC_SAMPLE_CYCLES)) { ran_clean = false; }
+    }
+
+    // -- and the settled result: BYPASS, LED dark, both coils idle.
+    if (ran_clean && !run_ms(SETTLE_MS)) { ran_clean = false; }
+    unsigned const final_port = port->get_value() & 0xFFu;
+    guint64  const min_pulse_cycles =
+        (guint64)RELAY_MIN_PULSE_MS * (guint64)CYCLES_PER_MS;
+    bool const deenergize_order_ok = deenergized &&
+        (!require_deenergize_transition || deenergize_cycle > inject_cycle);
+#if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
+    bool const physical_spin_ok = spin_seen && spin_physical_low &&
+                                  spin_cycle >= deenergize_cycle;
+#else
+    bool const physical_spin_ok = true;
+#endif
+
+    bool const pass = ran_clean && injection_ok && deenergize_order_ok &&
+                      !partial_clear && physical_spin_ok &&
+                      (reset_delta == 1u) &&
+                      (reset_coil_cycles >= min_pulse_cycles) &&
+                      (set_coil_cycles == 0u) &&
+                      ((final_port & coil_mask) == 0u) &&
+                      ((final_port & PIC_REG_LED_MASK) == 0u);
+
+    if (pass) {
+        printf("    PASS: coils inactive in %" G_GUINT64_FORMAT " cycles (%.3f ms)"
+               " with no partially cleared coil latch,",
+               deenergize_cycle >= inject_cycle ? deenergize_cycle - inject_cycle : 0u,
+               (double)(deenergize_cycle >= inject_cycle
+                            ? deenergize_cycle - inject_cycle : 0u) /
+                   (double)CYCLES_PER_MS);
+#if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
+        printf(" physical GP1=%.3fV/GP2=%.3fV at watchdog spin,", reset_pin_v,
+               set_pin_v);
+#endif
+        printf(" 1 reset, recovery drove a %.3f ms RESET-coil pulse"
+               " (>= %u ms datasheet minimum) with SET dark, settled in BYPASS\n",
+               (double)reset_coil_cycles / (double)CYCLES_PER_MS,
+               RELAY_MIN_PULSE_MS);
+        // Folded into this same check slot (deliberately no g_checks++).
+        prove_post_reset_liveness();
+    } else {
+        g_fails++;
+        fprintf(stderr,
+                "    FAIL: init=0x%02x requested=0x%02x read=0x%02x"
+                " injection=%u deenergized=%u deenergize-cycles=%" G_GUINT64_FORMAT
+                " partial-clear=%u",
+                before_val, injected, written, injection_ok ? 1u : 0u,
+                deenergized ? 1u : 0u,
+                deenergized && deenergize_cycle >= inject_cycle
+                    ? deenergize_cycle - inject_cycle : 0u,
+                partial_clear ? 1u : 0u);
+#if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
+        fprintf(stderr, " spin=%u GP1=%.3fV GP2=%.3fV",
+                spin_seen ? 1u : 0u, reset_pin_v, set_pin_v);
+#endif
+        fprintf(stderr,
+                " resets=%" G_GUINT64_FORMAT " reset-coil-ms=%.3f set-coil-ms=%.3f"
+                " final-" PIC_REG_PORT_LC "=0x%02x clean=%u\n",
+                reset_delta,
+                (double)reset_coil_cycles / (double)CYCLES_PER_MS,
+                (double)set_coil_cycles / (double)CYCLES_PER_MS,
+                final_port, ran_clean ? 1u : 0u);
+        // Leave the next case a quiescent device even after a failed verdict.
+        target->put_value(before_val);
+    }
+    fflush(stdout);
+}
+
 static void inject_relay_resync_case(unsigned addr, const char *token,
                                      unsigned mask, bool engaged,
                                      const char *note) {
-    static unsigned const coil_mask = PIC_REG_COIL_MASK;
-
     g_checks++;
 
     if (!drive_effect_state(engaged)) {
@@ -502,143 +742,152 @@ static void inject_relay_resync_case(unsigned addr, const char *token,
     fflush(stdout);
 
     target->put_value(injected);
+    unsigned const written     = target->get_value() & 0xFFu;
+    guint64  const inject_cycle = get_cycles().get();
+    bool const injection_ok = ((before_val & mask) == 0u) &&
+                              (written == injected);
+
+    finish_relay_resync_case(target, latch, port, before_val, injected,
+                             written, injection_ok, true, resets_before,
+                             inject_cycle);
+}
+
+#if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
+// Every single-bit-reachable mode is run with CINV clear and set. CINV is
+// installed while the comparator is still OFF, where it cannot own a pin; only
+// then is one CM<2:0> bit cleared. Each pair must produce opposite COUT states.
+// The COUT-on-GP2 mode must make package voltage agree; GPIO-owned modes must
+// keep GP2 low even for the high-COUT half of the pair.
+//
+// When COUT is High, the harness also performs the old latch-only emergency
+// action (clear the SRAM shadow and write zero to the GPIO coil bits) and proves
+// GP2 remains physically High. This is a target-realistic negative control over
+// the actual gpsim comparator/pin model, not a fake firmware implementation.
+static void inject_comparator_relay_resync_case(unsigned mode, bool inverted,
+                                                bool owns_gp2,
+                                                const char *label) {
+    static int cout_with_cinv_clear[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+    static unsigned const coil_mask = PIC_REG_COIL_MASK;
+
+    g_checks++;
+
+    // ENGAGED supplies a real, settled GP0-high/GP1-low comparator input
+    // fixture while both relay coils are idle.
+    if (!drive_effect_state(true)) {
+        g_fails++;
+        fprintf(stderr, "    FAIL: could not reach settled ENGAGED comparator fixture\n");
+        return;
+    }
+    if (!advance_to_loop_clrwdt()) {
+        g_fails++;
+        return;
+    }
+
+    Register *target = fetch_sfr(PIC_REG_CMCON_ADDR, "cmcon");
+    Register *latch  = fetch_sfr(PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN);
+    Register *port   = fetch_sfr(PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN);
+    if (target == nullptr || latch == nullptr || port == nullptr) {
+        g_fails++;
+        return;
+    }
+
+    unsigned const before_val = target->get_value() & 0xFFu;
+    unsigned const cinv = inverted ? PIC_FAULT_CMCON_CINV_MASK : 0u;
+    unsigned const fixture_off = PIC_FAULT_CMCON_OFF | cinv;
+    unsigned const injected = (mode & PIC_FAULT_CMCON_MODE_MASK) | cinv;
+    unsigned const changed_mode_bits =
+        (PIC_FAULT_CMCON_OFF ^ mode) & PIC_FAULT_CMCON_MODE_MASK;
+
+    // Establish polarity while comparator-off still owns no output, then make
+    // the single mode-bit injection at the deterministic trailing CLRWDT seam.
+    target->put_value(fixture_off);
+    unsigned const fixture_written = target->get_value() & 0xFFu;
+    guint64  const resets_before = g_resets;
+    guint64  const inject_cycle  = get_cycles().get();
+    target->put_value(injected);
+    bool const fixture_ran = run_cycles(2u);
     unsigned const written = target->get_value() & 0xFFu;
 
-    // -- half 1: both coils de-energized on the escalation path, before the spin
-    //
-    // Sampled every instruction, which makes this an observation of the coil
-    // clear's WRITE SEQUENCE and not only of its settled result. Each shell's
-    // clear is contracted to drive both coil bits low in ONE output write; a
-    // clear that walked them one at a time would reach the same idle through a
-    // transient in which one coil is still driven after the firmware began
-    // de-energizing the pair. `partial_clear` catches exactly that: a coil
-    // field with strictly fewer bits than the one before it, but not none.
-    //
-    // Both views are tracked because they can move a step apart: where the
-    // output latch is an SRAM shadow the port is written from it a moment
-    // later (PIC_REG_PORT_SKEW_SAMPLES), so a shadow that is already idle over
-    // a port that is not is normal -- while EITHER of them shedding its coil
-    // bits one at a time is not. It is the both-coils-energized injection that
-    // carries this; with one coil energized a per-bit clear delays the useful
-    // de-energization by a write but passes through no distinct state, so
-    // nothing observing STATE can see it.
-    guint64  const inject_cycle    = get_cycles().get();
-    guint64        deenergize_cycle = 0u;
-    bool           partial_clear   = false;
-    unsigned       prev_latch_coils = latch->get_value() & coil_mask;
-    unsigned       prev_port_coils  = port->get_value() & coil_mask;
-    unsigned const deenergize_cap  =
-        (unsigned)(RESYNC_DEENERGIZE_MS * CYCLES_PER_MS);
-    for (unsigned i = 0; i < deenergize_cap; ++i) {
-        unsigned const latch_coils = latch->get_value() & coil_mask;
-        unsigned const port_coils  = port->get_value() & coil_mask;
-        if ((latch_coils != 0u) && (latch_coils != prev_latch_coils) &&
-                ((latch_coils & prev_latch_coils) == latch_coils)) {
-            partial_clear = true;
-        }
-        if ((port_coils != 0u) && (port_coils != prev_port_coils) &&
-                ((port_coils & prev_port_coils) == port_coils)) {
-            partial_clear = true;
-        }
-        prev_latch_coils = latch_coils;
-        prev_port_coils  = port_coils;
-
-        if ((latch_coils == 0u) && (port_coils == 0u)) {
-            deenergize_cycle = get_cycles().get();
-            break;
-        }
-        if (!run_cycles(1u)) { break; }
-    }
-
-    // -- the recovery reset itself. Polled in 1 ms steps rather than one long
-    // window so the observation below starts as close to the reset vector as
-    // the step allows; the recovery pulse is 12 ms, so at most one step of it
-    // is missed and the datasheet-minimum assertion still has ~8 ms of margin.
-    unsigned elapsed_ms = 0u;
-    bool     ran_clean  = true;
-    while ((elapsed_ms < WDT_RESET_WINDOW_MS) && (g_resets == resets_before)) {
-        if (!run_ms(1u)) { ran_clean = false; break; }
-        elapsed_ms++;
-    }
-    guint64 const reset_delta = g_resets - resets_before;
-
-    // -- half 2: the recovery actuation, sampled on the MODELED PORT. Sampling
-    // (not single-stepping) keeps the case cheap; one sample is well under the
-    // shortest pulse any relay could act on, so a SET assertion narrower than a
-    // sample is not a physical hazard this test needs to see.
-    guint64  reset_coil_cycles = 0u;
-    guint64  set_coil_cycles   = 0u;
-    unsigned const samples =
-        (unsigned)((RESYNC_OBSERVE_MS * CYCLES_PER_MS) / RESYNC_SAMPLE_CYCLES);
-    for (unsigned i = 0; ran_clean && (i < samples); ++i) {
-        unsigned const p = port->get_value() & 0xFFu;
-        if ((p & PIC_REG_RESET_COIL_MASK) != 0u) {
-            reset_coil_cycles += RESYNC_SAMPLE_CYCLES;
-        }
-        if ((p & PIC_REG_SET_COIL_MASK) != 0u) {
-            set_coil_cycles += RESYNC_SAMPLE_CYCLES;
-        }
-        if (!run_cycles(RESYNC_SAMPLE_CYCLES)) { ran_clean = false; }
-    }
-
-    // -- and the settled result: BYPASS, LED dark, both coils idle.
-    if (ran_clean && !run_ms(SETTLE_MS)) { ran_clean = false; }
-    unsigned const final_port = port->get_value() & 0xFFu;
-    guint64  const min_pulse_cycles =
-        (guint64)RELAY_MIN_PULSE_MS * (guint64)CYCLES_PER_MS;
-
-    bool const pass = ran_clean &&
-                      ((before_val & mask) == 0u) &&
-                      (written == injected) &&
-                      (deenergize_cycle > inject_cycle) &&
-                      !partial_clear &&
-                      (reset_delta == 1u) &&
-                      (reset_coil_cycles >= min_pulse_cycles) &&
-                      (set_coil_cycles == 0u) &&
-                      ((final_port & coil_mask) == 0u) &&
-                      ((final_port & PIC_REG_LED_MASK) == 0u);
-
-    if (pass) {
-        printf("    PASS: coils de-energized in %" G_GUINT64_FORMAT " cycles (%.3f ms)"
-               " with no partially cleared coil latch,"
-               " 1 reset, recovery drove a %.3f ms RESET-coil pulse"
-               " (>= %u ms datasheet minimum) with SET dark, settled in BYPASS\n",
-               deenergize_cycle - inject_cycle,
-               (double)(deenergize_cycle - inject_cycle) / (double)CYCLES_PER_MS,
-               (double)reset_coil_cycles / (double)CYCLES_PER_MS,
-               RELAY_MIN_PULSE_MS);
-        // Folded into this same check slot (deliberately no g_checks++).
-        prove_post_reset_liveness();
+    double reset_pin_v = 0.0;
+    double set_pin_v = 0.0;
+    relay_coil_voltages(&reset_pin_v, &set_pin_v);
+    bool const cout_high = (written & PIC_FAULT_CMCON_COUT_MASK) != 0u;
+    bool const gp1_low = reset_pin_v <= PHYSICAL_LOW_MAX_V;
+    bool const gp2_state_ok = owns_gp2
+        ? (cout_high ? set_pin_v >= PHYSICAL_HIGH_MIN_V
+                     : set_pin_v <= PHYSICAL_LOW_MAX_V)
+        : set_pin_v <= PHYSICAL_LOW_MAX_V;
+    bool const before_escalation = (g_resets == resets_before) &&
+                                   !at_watchdog_spin();
+    bool const one_mode_bit = changed_mode_bits == 0x01u ||
+                              changed_mode_bits == 0x02u ||
+                              changed_mode_bits == 0x04u;
+    bool pair_ok = true;
+    if (!inverted) {
+        cout_with_cinv_clear[mode & PIC_FAULT_CMCON_MODE_MASK] =
+            cout_high ? 1 : 0;
     } else {
-        g_fails++;
-        fprintf(stderr,
-                "    FAIL: init=0x%02x write=0x%02x deenergize-cycles=%" G_GUINT64_FORMAT
-                " partial-clear=%u"
-                " resets=%" G_GUINT64_FORMAT " reset-coil-ms=%.3f set-coil-ms=%.3f"
-                " final-" PIC_REG_PORT_LC "=0x%02x clean=%u\n",
-                before_val, written,
-                deenergize_cycle > inject_cycle ? deenergize_cycle - inject_cycle : 0u,
-                partial_clear ? 1u : 0u,
-                reset_delta,
-                (double)reset_coil_cycles / (double)CYCLES_PER_MS,
-                (double)set_coil_cycles / (double)CYCLES_PER_MS,
-                final_port, ran_clean ? 1u : 0u);
-        // Leave the next case a quiescent device even after a failed verdict.
-        target->put_value(before_val);
+        int const first = cout_with_cinv_clear[mode & PIC_FAULT_CMCON_MODE_MASK];
+        pair_ok = first >= 0 && first != (cout_high ? 1 : 0);
+    }
+
+    bool latch_only_rejected = true;
+    if (owns_gp2 && cout_high) {
+        // This exactly models the superseded emergency action on this part:
+        // coil shadow clear followed by one whole-port GPIO write. GPIO reads
+        // the comparator-owned pad, so only the SRAM shadow can attest intent;
+        // the node voltage is the load-bearing physical observation.
+        unsigned const safe_shadow =
+            (latch->get_value() & 0xFFu) & ~coil_mask;
+        latch->put_value(safe_shadow);
+        port->put_value(safe_shadow);
+        relay_coil_voltages(&reset_pin_v, &set_pin_v);
+        latch_only_rejected =
+            ((latch->get_value() & coil_mask) == 0u) &&
+            ((target->get_value() & PIC_FAULT_CMCON_COUT_MASK) != 0u) &&
+            (set_pin_v >= PHYSICAL_HIGH_MIN_V);
+    }
+
+    bool const fixture_ok = fixture_ran && one_mode_bit &&
+        ((before_val & PIC_FAULT_CMCON_MODE_MASK) == PIC_FAULT_CMCON_OFF) &&
+        ((fixture_written &
+          (PIC_FAULT_CMCON_MODE_MASK | PIC_FAULT_CMCON_CINV_MASK)) == fixture_off) &&
+        ((written &
+          (PIC_FAULT_CMCON_MODE_MASK | PIC_FAULT_CMCON_CINV_MASK)) == injected) &&
+        gp1_low && gp2_state_ok && before_escalation && pair_ok &&
+        latch_only_rejected;
+
+    printf("  inject %-18s @0x%03x: mode=0b%u%u%u CINV=%u -> COUT=%s,"
+           " GP2-owner=%s, physical GP1=%.3fV GP2=%.3fV (from ENGAGED)\n",
+           label, PIC_REG_CMCON_ADDR, (mode >> 2) & 1u, (mode >> 1) & 1u,
+           mode & 1u,
+           inverted ? 1u : 0u, cout_high ? "HIGH" : "LOW",
+           owns_gp2 ? "COUT" : "GPIO", reset_pin_v, set_pin_v);
+    if (owns_gp2 && cout_high) {
+        printf("    fixture: COUT and physical GP2 were HIGH before escalation;"
+               " latch-only clear left GP2 at %.3fV\n", set_pin_v);
     }
     fflush(stdout);
+
+    finish_relay_resync_case(target, latch, port, before_val, injected,
+                             written, fixture_ok, owns_gp2 && cout_high,
+                             resets_before,
+                             inject_cycle);
 }
+#endif
 
 // ---- One injection case -----------------------------------------------------
 // absolute=true writes `val`; absolute=false writes (current ^ val), i.e. an
 // SEU bit-flip of the bits in `val`. Nearly every call site requires one reset.
+// `readback_mask` defaults to the complete byte; CMCON cases narrow it to the
+// writable mode field because COUT is a live, read-only status bit.
 // expected_resets == 0 is the negative-control form, used where a part
 // DOCUMENTS a location as unguarded and the test exists to pin that exception
 // so it cannot widen or close unnoticed. The restore-and-verify branch keeps
 // those cases independent and proves restoration succeeds.
 static void inject_case(const char *label, unsigned addr, const char *token,
-                        bool absolute, unsigned val, unsigned expected_resets,
-                        const char *note) {
+                         bool absolute, unsigned val, unsigned expected_resets,
+                         const char *note, unsigned readback_mask = 0xFFu) {
     footsw_set(0);                 // released: quiescent, only this location can trip
     if (!run_ms(SETTLE_MS)) {      // (re)reach the main loop after any prior reset
         g_checks++;
@@ -664,12 +913,12 @@ static void inject_case(const char *label, unsigned addr, const char *token,
            label, addr, cur, bad, note);
     fflush(stdout);
 
-    if (written != bad) {
+    if ((written & readback_mask) != (bad & readback_mask)) {
         g_checks++;
         g_fails++;
         fprintf(stderr,
-                "    FAIL: injection did not stick (read 0x%02x, wanted 0x%02x)\n",
-                written, bad);
+                "    FAIL: injection did not stick (read 0x%02x, wanted 0x%02x,"
+                " mask 0x%02x)\n", written, bad, readback_mask);
         r->put_value(cur);
         return;
     }
@@ -833,6 +1082,9 @@ static void check_startup_tris(void) {
 int main() {
     if (!gpsim_bootstrap_cpu(FW_PATH, PROC_NAME))            return 1;
     if (!gpsim_attach_footswitch(FOOTSW_PIN_NAME, PROC_NAME)) return 1;
+#if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
+    if (!attach_relay_coil_observers(PROC_NAME))              return 1;
+#endif
 
     footsw_set(0);                              // released at power-on
     if (!run_ms(SETTLE_MS)) {                   // let init() settle, reach main loop

@@ -111,6 +111,24 @@ static volatile uint8_t ctx_check_;   // complemented XOR-fold shadow of ctx_
 // SHELL-INTERNAL HELPERS
 //////////////////////////////////////////////////////////////////////////////
 
+static void hw_emergency_outputs_quiesce(void) {
+#if defined(TQ2_L2_5V_RELAY)
+    uint8_t const coil_mask =
+        (uint8_t)((uint8_t)(1U << RELAY_RESET_PIN) |
+                (uint8_t)(1U << RELAY_SET_PIN));
+
+    PORTA.PIN2CTRL &= (uint8_t)PORT_INVEN_bm;
+    PORTA.PIN3CTRL &= (uint8_t)PORT_INVEN_bm;
+    PORTA.DIRCLR = coil_mask;
+    PORTA.PIN2CTRL = 0U;
+    PORTA.PIN3CTRL = 0U;
+    hw_outputs_reassert_safe();
+    PORTA.DIRSET = coil_mask;
+#else
+    hw_outputs_reassert_safe();
+#endif
+}
+
 // unlock helper for CCP-protected registers (CLKCTRL).  A protected write must
 // follow CPU_CCP = CCP_IOREG_gc within 4 instructions; keep the store adjacent.
 static inline void ccp_write_io(volatile uint8_t *addr, uint8_t value) {
@@ -122,18 +140,19 @@ static inline void ccp_write_io(volatile uint8_t *addr, uint8_t value) {
 // there is nothing to arm -- a bare wdr is the whole story.
 static inline void hw_wdt_pet(void) { __asm__ __volatile__("wdr"); }
 
-// infinite loop to force a WDT reset on a critical, unrecoverable event (cosmic
-// ray / extreme EMI).  Disables interrupts first so nothing can pet the dog.
-// Relies on the fuse-locked WDT being active (it always is on this part).
+// infinite loop to force a WDT reset on a critical, unrecoverable event
+// (cosmic ray / extreme EMI). Quiesces hazardous outputs first, then disables
+// interrupts so nothing can pet the dog during the watchdog spin. Relies on
+// the fuse-locked WDT being active (it always is on this part).
 //
-// The FIRST act is hw_outputs_reassert_safe(): any output with a
-// continuous-energization hazard (the relay coils) is driven to its
-// de-energized idle BEFORE the spin, so no fault can hold a coil energized for
-// the length of the watchdog period. The reset then re-runs init(), whose
-// full-width BYPASS actuation re-synchronizes the physical relay with the
-// logical state and the LED.
+// First: hw_emergency_outputs_quiesce() (and hw_outputs_reassert_safe(),
+// implicitly): any output with a continuous-energization hazard (the relay
+// coils) is driven to its de-energized idle BEFORE the spin, so no fault can
+// hold a coil energized for the length of the watchdog period. The reset then
+// re-runs init(), whose full-width BYPASS actuation re-synchronizes the
+// physical relay with the logical state and the LED.
 __attribute__((noreturn)) static void hw_force_wdt_reset(void) {
-    hw_outputs_reassert_safe();
+    hw_emergency_outputs_quiesce(); // calls hw_outputs_reassert_safe()
     cli();
     for (;;) { }
 }

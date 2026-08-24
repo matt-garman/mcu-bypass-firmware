@@ -1103,8 +1103,10 @@ make clean >/dev/null
 make attiny13a attiny85 attiny45 >"$EVID/build-avr-classic.log" 2>&1 || { cat "$EVID/build-avr-classic.log" >&2; die "AVR build failed."; }
 # ATtiny202: STRICT_TOOLS=1 so an absent ATtiny_DFP is a hard failure here rather
 # than a clean skip that would leave build_avr_xt/ empty and be caught much later
-# as three missing images.
-make attiny202 STRICT_TOOLS=1 XT_DFP="$XT_DFP" >"$EVID/build-avr-xt.log" 2>&1 \
+# as three missing images. The build enforces both flash and static-RAM limits;
+# the later attiny202-test qualification adds the shell frame gate.
+make attiny202 STRICT_TOOLS=1 XT_DFP="$XT_DFP" XT_STATIC_RAM_LIMIT=16 \
+	>"$EVID/build-avr-xt.log" 2>&1 \
 	|| { cat "$EVID/build-avr-xt.log" >&2; die "ATtiny202 build failed."; }
 make pic10f322 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/build-pic10f322.log" 2>&1 || { cat "$EVID/build-pic10f322.log" >&2; die "PIC build failed."; }
 # pic10f320-variants builds all three and, on any failure, removes the WHOLE image
@@ -1113,11 +1115,13 @@ make pic10f320-variants PIC10F320_CC="$PIC10F320_CC" PIC10F320_DFP="$PIC10F320_D
 	>"$EVID/build-pic10f320.log" 2>&1 \
 	|| { cat "$EVID/build-pic10f320.log" >&2; die "PIC10F320 build failed."; }
 # PIC12F675 shares PIC_CC/PIC_DFP with the 322. `make pic12f675` builds all three
-# shipped HEXes + the 1024-word budget gate and, like the 322, removes its whole
-# product set on any failure rather than leaving a partial matrix behind. The
+# shipped HEXes plus the 1024-word flash and 48/64-byte Data-space gates and,
+# like the 322, removes its whole product set on any failure rather than leaving
+# a partial matrix behind. The
 # DERIVED simcal images the soak needs are NOT built here; they are produced by
 # the soak-binary dependency in section 3, from these exact shipped HEXes.
-make pic12f675 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/build-pic12f675.log" 2>&1 \
+make pic12f675 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" PIC12F675_DATA_LIMIT=48 \
+	>"$EVID/build-pic12f675.log" 2>&1 \
 	|| { cat "$EVID/build-pic12f675.log" >&2; die "PIC12F675 build failed."; }
 
 # Enumerate the expected image set and assert each exists.
@@ -1289,6 +1293,7 @@ make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 \
 	PIC_SOAK_GPSIM_INC="$PIC_SOAK_GPSIM_INC" \
 	PIC10F320_SOAK_GPSIM_INC="$PIC10F320_SOAK_GPSIM_INC" \
 	XT_DFP="$XT_DFP" YASIMAVR_VENV="$YASIMAVR_VENV" \
+	XT_STATIC_RAM_LIMIT=16 XT_STACK_MAX_FRAME=32 PIC12F675_DATA_LIMIT=48 \
 	>"$EVID/test-long.log" 2>&1 \
 	|| { tail -40 "$EVID/test-long.log" >&2; die "make test-long FAILED."; }
 ok "test-long passed."
@@ -1298,6 +1303,7 @@ validated_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
 # MISRA, and the coil-pulse width oracle read back out of the built image.
 log "running make attiny202-test (fuses + build/budget + analysis + delay oracle)..."
 make attiny202-test STRICT_TOOLS=1 XT_DFP="$XT_DFP" \
+	XT_STATIC_RAM_LIMIT=16 XT_STACK_MAX_FRAME=32 \
 	>"$EVID/attiny202-test.log" 2>&1 \
 	|| { tail -40 "$EVID/attiny202-test.log" >&2; die "make attiny202-test FAILED."; }
 ok "attiny202-test passed."
@@ -1308,7 +1314,7 @@ ok "attiny202-test passed."
 # STRICT_TOOLS=1 converts each driver's clean skip into a hard failure.
 log "running make attiny202-test-target (sim + fault + lock-step on the real image)..."
 make attiny202-test-target STRICT_TOOLS=1 XT_DFP="$XT_DFP" \
-	YASIMAVR_VENV="$YASIMAVR_VENV" \
+	YASIMAVR_VENV="$YASIMAVR_VENV" XT_STATIC_RAM_LIMIT=16 XT_STACK_MAX_FRAME=32 \
 	>"$EVID/attiny202-test-target.log" 2>&1 \
 	|| { tail -60 "$EVID/attiny202-test-target.log" >&2; die "make attiny202-test-target FAILED."; }
 ok "attiny202-test-target passed."
@@ -1353,7 +1359,7 @@ PIC12F675_QUALIFICATION_LOG="$EVID/pic12f675-qualification.log"
 PIC12F675_QUALIFIED_MATRIX="$EVID/pic12f675-qualified-matrix.json"
 log "running one PIC12F675 qualification graph (pre-hardware + all target variants)..."
 make pic12f675-test pic12f675-test-target-variants \
-	STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
+	STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" PIC12F675_DATA_LIMIT=48 \
 	>"$PIC12F675_QUALIFICATION_LOG" 2>&1 \
 	|| { tail -60 "$PIC12F675_QUALIFICATION_LOG" >&2; die "combined PIC12F675 qualification FAILED."; }
 qualified_pic12f675_matrix_record=$(python3 "$PIC12F675_MATRIX_EVIDENCE" verify \

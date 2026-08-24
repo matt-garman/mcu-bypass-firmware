@@ -8,8 +8,10 @@ LED state and physical relay position are driven back into agreement.**
 
 This replaces the correct-in-place model that shipped on PIC10F320 in v0.9.8 and
 on the four modular shells in `93f637b`. Nothing is re-driven ahead of a sanity
-gate any more; the loop-top re-assert is gone, and `hw_outputs_reassert_safe()`
-now runs as the first act of every shell's `hw_force_wdt_reset()`.
+gate any more, and the loop-top re-assert is gone. Each forced-reset path now
+clears the relay driver's latch intent before the watchdog spin; AVR-XT and
+PIC12F675 first neutralize MCU-specific pin-control hazards that can prevent a
+low latch from reaching the package pin.
 
 Selected and recorded by the repository owner before v0.9.10.
 
@@ -50,7 +52,8 @@ into a datasheet guarantee, so that path was not taken.
 
 ### Cost
 
-Measured, all variants, before → after:
+The F1 baseline measured all variants before and after the original latch-level
+resynchronization change:
 
 | Part | Relay variant | Other variants |
 | --- | --- | --- |
@@ -59,6 +62,11 @@ Measured, all variants, before → after:
 | PIC12F675 | 563 → 563 words of 1024 | unchanged (546, 572) |
 | ATtiny13A | 864 → 868 B of 1024 | +4 B each |
 | ATtiny202 | 994 → 998 B of 2048 | +4 B each |
+
+Those are historical F1 deltas, not final F2 resource figures. The AVR-XT and
+PIC12F675 relay images must be remeasured after the emergency physical-pin path;
+the release resource table is updated from that final build rather than
+projecting compiler output here.
 
 It is nearly free because the escalation **reuses the sanity gate that already
 compares the complete output latch**. Only PIC10F320, which cannot afford that
@@ -76,22 +84,56 @@ adopted at all -- and its worst-case return-stack depth dropped from 4 to 3 of 8
 The contract has two halves, and the tests assert them separately because
 final-low coils are *not* recovery:
 
-1. **De-energization.** `hw_force_wdt_reset()` calls
-   `hw_outputs_reassert_safe()` *before* it disables interrupts and spins, so a
-   fault can never hold a coil energized for the length of the watchdog period.
-   The implementation is one masked clear — both coils down in a single write —
-   on **every** shell: the four modular ones reach it through the relay driver's
+1. **De-energization.** `hw_force_wdt_reset()` runs its emergency output path
+   *before* it disables interrupts and spins, so a fault cannot hold a coil
+   energized for the watchdog period. The implementation clears both coils in
+   one masked output write on **every** shell: the four modular ones reach it
+   through the relay driver's
    `hw_pin_mask_set_low()`, and PIC10F320, which links no driver, writes the same
    constant mask itself. A per-bit clear of RESET and then SET would settle
    identically and differ in the transient: with both coil bits high, the second
    coil stays driven for the whole of the first write, on the one path whose
-   purpose is to stop driving them. That is asserted rather than assumed — see
-   *The PIC10F320 exception* below.
+   purpose is to stop driving them. That is asserted rather than assumed - see
+   *The PIC10F320 exception* below. On AVR-XT and PIC12F675 the masked clear is
+   deliberately sequenced between shell-specific pin teardown and safe
+   output-direction restoration.
 2. **Resynchronization.** The watchdog reset re-runs `init()`, whose
    `hw_set_bypass_state()` drives a complete 12 ms RESET-coil actuation
    (`TQ2_L2_5V_PULSE_MS`, 3× the datasheet minimum). *That* is what puts the
    physical relay back in agreement with the logical state and the LED. The
    device comes up in BYPASS with the LED dark.
+
+### Physical-pin emergency paths
+
+The ordinary relay driver can clear output intent, but it cannot know whether an
+MCU peripheral has taken ownership of the pad or whether an output-polarity bit
+has inverted the meaning of that intent. The two affected shells therefore wrap
+the shared clear:
+
+- **AVR-XT:** clear each coil pin's pull-up and input-sense fields while
+  preserving its current inversion, disconnect both output drivers, clear the
+  remaining `PINnCTRL` inversion, clear both `PORTA.OUT` latch bits, then restore
+  output direction. This prevents a pull-up from becoming active during the
+  high-impedance interval and prevents a stale latch from being exposed while
+  polarity is restored.
+- **PIC12F675:** clear the coil weak-pull-up latches, make both coil pins inputs,
+  disable the ADC/analog selections/comparator, clear the SRAM shadow and write
+  GPIO once, then restore output direction. In particular, comparator mode 110
+  can route `COUT` onto GP2; GPIO writes cannot force that pad low until `CMCON`
+  returns ownership to GPIO.
+
+The PIC12F675 comparator scope is the complete single-bit neighborhood of the
+required off mode, taken from DS41190G Figure 6-2:
+
+| `CM<2:0>` | One-bit transition from `111` | GP2 owner | Relay fixture |
+| --- | --- | --- | --- |
+| `110` | clear CM0 | `COUT` | both `CINV` settings; physical GP2 must follow comparator output before escalation and be low at the spin |
+| `101` | clear CM1 | GPIO | both `CINV` settings; physical GP2 must remain at the settled-low GPIO level |
+| `011` | clear CM2 | GPIO | both `CINV` settings; physical GP2 must remain at the settled-low GPIO level |
+
+The brief input intervals rely on the board's fail-safe pull-downs. These paths
+are bounded responses to detected register-state faults; they do not claim to
+survive arbitrary CPU, bus, or package failure.
 
 ### Detection, per shell
 
@@ -182,17 +224,18 @@ other.
 | --- | --- | --- | --- |
 | PIC10F322 (gpsim) | `test/pic/test_fault_pic.cc` → `inject_relay_resync_case` | cycle-timed, ≤ 3 ms | RESET-coil pulse measured on modeled `PORTA`, ≥ 4 ms, SET dark, settles BYPASS |
 | PIC10F320 (gpsim) | `test/pic10f320/gpsim/test_fault_pic.cc` (same case) | same | same |
-| PIC12F675 (gpsim) | `test/pic/test_fault_pic12f675.cc` (same case) | same, shadow **and** modeled GPIO | same |
+| PIC12F675 (gpsim) | `test/pic/test_fault_pic12f675.cc` (same case) | direct modeled GP1/GP2 node voltage at the watchdog spin, including comparator-owned GP2 | same |
 | AVR classic, tinyx5 (simavr) | `test/avr/test_sim.c` → `inject_coil_resync` | `PORTB` coil bits low after the gate | edge-timed RESET-coil pulse ≥ 4 ms, SET never driven, LED dark |
 | AVR classic, ATtiny13A (simavr) | same | same | **not observable**: simavr has no WDT system-reset model for this part, so the case asserts a permanent `cli()`+spin wedge with the coils held idle |
-| ATtiny202 (yasimavr) | `test/avr/test_fault_attiny202.py` → `RESYNC` | `PORTA.OUT` coils low, LED untouched | **not observable**: yasimavr treats the interrupts-off spin as a terminal halt, so the WDT never completes the reset in the model |
+| ATtiny202 (yasimavr) | `test/avr/test_fault_attiny202.py` → `RESYNC` | physical PA2/PA3 low plus canonical OUT/DIR/PINnCTRL at the spin | **not observable**: yasimavr treats the interrupts-off spin as a terminal halt, so the WDT never completes the reset in the model |
 | PIC10F322 / PIC12F675 host source | `test/pic/fw_coverage/test_fw_coverage.c` → `expect_coil_fault_escalates` | all outputs settled low after the run | not claimed (the mock elides `__delay_ms` and aborts the spin on a timer) |
 | PIC10F320 host source | `test/pic10f320/fault/test_fault.c` → `expect_relay_coil_fault_escalates` | coil latch sampled where the spin was abandoned | not claimed, for the same reason |
 
-Every relay case is delivered in **both settled states**: BYPASS with an
-unintended SET (the relay may move to ENGAGED while the firmware believes
+The directional coil-output cases cover both settled-state hazards: BYPASS with
+an unintended SET (the relay may move to ENGAGED while the firmware believes
 BYPASS) and ENGAGED with an unintended RESET (the mirror). Both must converge on
-BYPASS.
+BYPASS. Pin-configuration fixtures use the one settled state needed to isolate
+their register and physical-pad mechanism.
 
 Measured recovery pulses at the reviewed seam, against a 12 ms design pulse:
 10.8 ms (PIC10F322), 11.2 ms (PIC10F320), 11.3 ms (PIC12F675). The shortfall is
@@ -204,7 +247,7 @@ preempts the busy-wait.
 
 ### Mutation resistance
 
-Both directions are killed, verified on PIC10F322:
+Both policy directions are killed, verified on PIC10F322:
 
 - **Remove the de-energize from `hw_force_wdt_reset()`** → de-energization
   latency never observed, and in the SET-coil cases the injected coil is still
@@ -213,6 +256,21 @@ Both directions are killed, verified on PIC10F322:
   ENGAGED cases can no longer even reach the state they claim to test.
 - **Weaken the PIC10F320 coil guard to one bit** → the unguarded coil is never
   detected and stays energized for the whole observation window.
+
+The physical-pin extensions add independent negative controls:
+
+- **Reduce the AVR-XT emergency path to `PORTA.OUT` clearing** -> an `INVEN`
+  fixture leaves physical PA2 or PA3 high even though the latch reads low.
+- **Reduce the PIC12F675 emergency path to shadow/GPIO clearing** -> the
+  high-`COUT` fixture leaves physical GP2 high at the watchdog spin even though
+  the SRAM coil intent is low.
+
+The AVR-XT matrix also exercises each coil's pull-up, one-bit direction upset,
+and a combined input/stale-OUT/PULLUPEN+INVEN state. The PIC12F675 relay matrix
+covers all three comparator modes one bit away from off (`110`, `101`, `011`); mode
+`110`, the reachable mode that owns GP2, is run with both comparator output
+polarities. These are modeled electrical pin checks, not relay-mechanical or
+bench evidence.
 
 One consequence worth naming: because the recovery pulse is now measured, a
 mutant that shortens the *design* pulse below the datasheet minimum is caught by

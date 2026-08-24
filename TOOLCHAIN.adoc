@@ -232,6 +232,14 @@ Device budgets, both gated per variant on every build:
 
   PIC10F322:  512 words of flash, 64 bytes of RAM   (`make pic10f322`)
   PIC10F320:  256 words of flash, 64 bytes of RAM   (`make pic10f320`)
+  PIC12F675: 1024 words of flash, 64 bytes of RAM   (`make pic12f675`)
+
+The PIC12F675 build additionally parses XC8's exact `Data space used` summary,
+cross-checks hexadecimal and decimal usage plus the 64-byte capacity, and
+enforces an inclusive 48-byte policy limit for every variant. Missing,
+duplicate, malformed, inconsistent, or over-limit summaries delete the complete
+image matrix. The 16-byte remainder is allocation headroom; XC8's Data-space
+total already accounts for statically overlaid automatic storage.
 
 See "Resource Utilization" in DESIGN_DOCUMENTATION.adoc for the measured
 figures, which own the per-variant word counts.  The 320's margins there are
@@ -348,8 +356,11 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
                 liveness reset (out of SLEEP) is observed directly.  The fault
                 matrix also corrupts each application pin's PORTA.PINnCTRL.INVEN
                 bit, including PA7 with its pull-up preserved, so polarity faults
-                cannot pass through latch/direction checks.  The pure debounce
-                core keeps its full host + formal coverage regardless.
+                cannot pass through latch/direction checks.  Relay cases observe
+                physical PA2/PA3 at the reset spin and additionally cover coil
+                pull-up, one-bit direction and combined stale-register states;
+                a low OUT latch alone is not accepted as quiescence.  The pure
+                debounce core keeps its full host + formal coverage regardless.
                 See test/avr/sim_attiny202.py.
   builds on:    the ATtiny_DFP device files (scripts/fetch_attiny_dfp.sh, pinned
                 atpack) that `make attiny202` needs to COMPILE the image; those

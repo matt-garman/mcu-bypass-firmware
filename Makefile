@@ -755,7 +755,7 @@ FORCE:
         test-clean-contract test-fuse-injection-contract test-static-assert-guards \
 		pic12f675-target-selector-valid \
         pic10f322-test-target pic10f322-test-target-variants pic10f322-test-io pic10f322-test-lockstep \
-        test-stack-bound test-stack-bound-regression test-flash-budget \
+        test-stack-bound attiny202-test-stack-bound test-stack-bound-regression test-flash-budget \
         test-flash-budget-regression test-soak test-soak-reset-witness \
         analyze analyze-tidy analyze-cppcheck analyze-deep \
         coverage coverage-check coverage-clean
@@ -2016,9 +2016,16 @@ XT_INC      = $(XT_DFP)/include
 # ATtiny202: 2 KB flash / 128 B SRAM. Budget the smoke against the full 2 KB;
 # the shipping build below enforces the same limit independently. NOTE:
 # avr-size --mcu=attiny202 prints "Device: Unknown" under binutils 2.26 but STILL
-# reports the Program: byte count, so the awk parse below works (same tactic as
-# the PIC word parse).
+# reports Program:/Data: byte counts (without percentage suffixes), so the awk
+# parse below accepts both unknown-device and recognized-device forms.
 XT_FLASH_BYTES ?= 2048
+# The device capacity is silicon, not policy, and cannot be overridden. Static
+# data is held to a separately reviewed 16 B ceiling so 112 B remains available
+# for the runtime stack and interrupt context.
+override XT_SRAM_BYTES := 128
+# Override only when deliberately reviewing a tighter or experimental policy;
+# the release/default limit remains 16 B.
+XT_STATIC_RAM_LIMIT ?= 16
 # The vendored device files that must exist for the build (the fetch script's
 # output); their absence -> skip cleanly with a fetch hint.
 XT_SPEC_FILE = $(XT_SPEC_DIR)/device-specs/specs-$(XT_MCU)
@@ -2064,15 +2071,16 @@ attiny202-smoke: $(XT_SMOKE_SRC) | $(AVR_BUILD_DIR)
 # contract as the classic-AVR and PIC shells and links the UNCHANGED pure core
 # (bypass_pure.c) + one output driver -- exactly like `attiny13a` / `pic10f322`. Like the
 # PIC build it consumes a vendored DFP and gates every variant on the device's
-# 2 KB flash budget. Developer invocations skip cleanly when the DFP is absent;
+# 2 KB flash and reviewed static-RAM budgets. Developer invocations skip cleanly
+# when the DFP is absent;
 # CI/release gates use STRICT_TOOLS=1 so missing prerequisites fail closed.
 #
 # simavr/QEMU do not model AVR8X, but yasimavr DOES: the `attiny202-sim` /
 # -soak / -fault targets below run the real built image on a patched yasimavr
 # (scripts/fetch_yasimavr.sh), giving the shell register-level dynamic coverage
 # close to the classic simavr harness. The shell is thus validated by (1) this
-# strict-flag cross-build, (2) the flash-budget gate, (3) cppcheck + MISRA
-# static analysis (attiny202-analyze), and (4) the yasimavr harness. Real
+# strict-flag cross-build, (2) the flash/static-RAM and frame gates, (3) cppcheck
+# + MISRA static analysis (attiny202-analyze), and (4) the yasimavr harness. Real
 # hardware-bench validation remains a documented gap. The pure core keeps full
 # host + formal coverage via `make test`.
 XT_BUILD_DIR ?= build_avr_xt
@@ -2123,9 +2131,20 @@ attiny202: | $(XT_BUILD_DIR)
 		$(SKIP); \
 	fi; \
 	$(IHEX_VALIDATOR_CHECK); \
-	echo "=== ATtiny202 (avrxmega3) build + flash-budget ($(XT_FLASH_BYTES) B) ==="; \
+	echo "=== ATtiny202 (avrxmega3) build + resource budgets (flash $(XT_FLASH_BYTES) B, static RAM $(XT_STATIC_RAM_LIMIT)/$(XT_SRAM_BYTES) B) ==="; \
 	if ! awk -v t="$(XT_FLASH_BYTES)" 'BEGIN {exit !(t ~ /^[0-9]+$$/ && t ~ /[1-9]/)}'; then \
 		echo "FAIL: XT_FLASH_BYTES must be a positive decimal integer"; exit 2; \
+	fi; \
+	if ! awk -v t="$(XT_STATIC_RAM_LIMIT)" -v s="$(XT_SRAM_BYTES)" ' \
+		function decimal_gt(a, b) { \
+			sub(/^0+/, "", a); sub(/^0+/, "", b); \
+			if (a == "") a = "0"; if (b == "") b = "0"; \
+			if (length(a) != length(b)) return length(a) > length(b); \
+			return ("x" a) > ("x" b); \
+		} \
+		BEGIN { exit !(t ~ /^[0-9]+$$/ && t ~ /[1-9]/ \
+			&& s ~ /^[0-9]+$$/ && s ~ /[1-9]/ && !decimal_gt(t, s)) }'; then \
+		echo "FAIL: XT_STATIC_RAM_LIMIT must be a positive decimal integer no greater than the $(XT_SRAM_BYTES) B device SRAM"; exit 2; \
 	fi; \
 	if [ "$(CLASSIC_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
 		echo "FAIL: VARIANTS is empty; no ATtiny202 images requested"; exit 2; \
@@ -2177,11 +2196,30 @@ attiny202: | $(XT_BUILD_DIR)
 			echo "FAIL: could not measure Program size for ATtiny202 variant $$v"; \
 			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
 		fi; \
-		used=`printf '%s\n' "$$size_out" | awk '/^Program:/ {print $$2; exit}'`; \
-		case "$$used" in ''|*[!0-9]*) \
-			echo "FAIL: invalid Program size for ATtiny202 variant $$v: '$$used'"; \
-			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue ;; \
-		esac; \
+		size_records=`printf '%s\n' "$$size_out" | awk ' \
+			/^[[:space:]]*Program:/ { \
+				program_count++; \
+				if ($$0 !~ /^[[:space:]]*Program:[[:space:]]+[0-9]+[[:space:]]+bytes([[:space:]]+\([0-9]+([.][0-9]+)?%[[:space:]]+Full\))?$$/) bad = "malformed Program size record: " $$0; \
+				program = $$2; \
+			} \
+			/^[[:space:]]*Data:/ { \
+				data_count++; \
+				if ($$0 !~ /^[[:space:]]*Data:[[:space:]]+[0-9]+[[:space:]]+bytes([[:space:]]+\([0-9]+([.][0-9]+)?%[[:space:]]+Full\))?$$/) bad = "malformed Data size record: " $$0; \
+				data = $$2; \
+			} \
+			END { \
+				if (bad != "") { print bad; exit 1 } \
+				if (program_count != 1) { printf "expected exactly one Program size record, found %d\n", program_count; exit 1 } \
+				if (data_count != 1) { printf "expected exactly one Data size record, found %d\n", data_count; exit 1 } \
+				if (program !~ /^[0-9]+$$/ || program !~ /[1-9]/) { print "Program size must be a positive decimal integer"; exit 1 } \
+				if (data !~ /^[0-9]+$$/ || data !~ /[1-9]/) { print "Data size must be a positive decimal integer"; exit 1 } \
+				print program, data \
+			}'`; \
+		if [ $$? -ne 0 ]; then \
+			echo "FAIL: invalid avr-size output for ATtiny202 variant $$v: $$size_records"; \
+			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
+		fi; \
+		set -- $$size_records; used=$$1; data_used=$$2; \
 		if awk -v u="$$used" -v t="$(XT_FLASH_BYTES)" 'BEGIN { \
 			sub(/^0+/, "", u); sub(/^0+/, "", t); \
 			if (u == "") u = "0"; if (t == "") t = "0"; \
@@ -2191,6 +2229,16 @@ attiny202: | $(XT_BUILD_DIR)
 		}'; then \
 			pct=`awk -v u="$$used" -v t="$(XT_FLASH_BYTES)" 'BEGIN{printf "%.1f", u*100/t}'`; \
 			echo "FAIL: $$v uses $$used B ($${pct}%) -- exceeds $(XT_FLASH_BYTES) B"; \
+			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
+		fi; \
+		if awk -v u="$$data_used" -v t="$(XT_STATIC_RAM_LIMIT)" 'BEGIN { \
+			sub(/^0+/, "", u); sub(/^0+/, "", t); \
+			if (u == "") u = "0"; if (t == "") t = "0"; \
+			if (length(u) > length(t)) exit 0; \
+			if (length(u) < length(t)) exit 1; \
+			exit !(("x" u) > ("x" t)); \
+		}'; then \
+			echo "FAIL: $$v static RAM uses $$data_used B -- exceeds $(XT_STATIC_RAM_LIMIT) B policy limit ($(XT_SRAM_BYTES) B device SRAM)"; \
 			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
 		fi; \
 		pct=`awk -v u="$$used" -v t="$(XT_FLASH_BYTES)" 'BEGIN{printf "%.1f", u*100/t}'`; \
@@ -2207,9 +2255,82 @@ attiny202: | $(XT_BUILD_DIR)
 			rm -f "$$elf" "$$hex" "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
 		fi; \
 		rm -f "$$log"; \
-		echo "OK:   $$v -> $$hex : $$used B ($${pct}%) of $(XT_FLASH_BYTES) B"; \
+		echo "OK:   $$v -> $$hex : flash $$used B ($${pct}%) of $(XT_FLASH_BYTES) B; static RAM $$data_used/$(XT_STATIC_RAM_LIMIT) B ($(XT_SRAM_BYTES) B device)"; \
 	done; \
 	exit $$fail
+
+# Compile the AVR-XT shell once for each immutable production variant using the
+# shipping compile flags plus -fstack-usage. This is deliberately separate from
+# the classic AVR frame gate: the shell and ABI are different, and a caller's
+# development VARIANTS subset must not reduce production evidence.
+# Match the existing reviewed AVR per-frame policy unless explicitly tightening
+# it for an investigation.
+XT_STACK_MAX_FRAME ?= 32
+XT_STACK_BUILD_DIR ?=
+override XT_STACK_SOURCE := src/bypass_mcu_avr_xt.c
+
+attiny202-test-stack-bound: $(XT_STACK_SOURCE)
+	@if [ ! -f test/check_stack_usage.sh ] || [ -L test/check_stack_usage.sh ] \
+			|| [ ! -x test/check_stack_usage.sh ]; then \
+		echo "FAIL: canonical stack-usage checker is missing, symlinked, or not executable"; exit 1; \
+	fi
+	@stack_dir="$(XT_STACK_BUILD_DIR)"; remove_dir=0; \
+	if [ -z "$$stack_dir" ]; then \
+		stack_dir=$$(mktemp -d "$${TMPDIR:-$(HOME)}/mcu-xt-stack-bound.XXXXXX") \
+			|| { echo "FAIL: could not create private AVR-XT stack-evidence directory"; exit 1; }; \
+		remove_dir=1; \
+	elif ! mkdir -p "$$stack_dir"; then \
+		echo "FAIL: could not create AVR-XT stack-evidence directory $$stack_dir"; exit 1; \
+	fi; \
+	cleanup_xt_stack_bound() { \
+		rc=$$?; \
+		rm -f "$$stack_dir"/stack_*.o "$$stack_dir"/stack_*.su || rc=1; \
+		if [ "$$remove_dir" -eq 1 ]; then rmdir "$$stack_dir" || rc=1; fi; \
+		trap - 0; exit $$rc; \
+	}; \
+	trap cleanup_xt_stack_bound 0; \
+	if ! rm -f "$$stack_dir"/stack_*.o "$$stack_dir"/stack_*.su; then \
+		echo "FAIL: could not remove stale AVR-XT stack evidence"; exit 1; \
+	fi; \
+	if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
+		echo "ATtiny_DFP device files not found under XT_DFP=$(XT_DFP); skipping ATtiny202 stack bound."; \
+		echo "  Fetch them with: scripts/fetch_attiny_dfp.sh $(XT_DFP)"; \
+		$(SKIP); \
+	fi; \
+	if ! awk -v max="$(XT_STACK_MAX_FRAME)" 'BEGIN {exit !(max ~ /^[0-9]+$$/ && max ~ /[1-9]/)}'; then \
+		echo "FAIL: XT_STACK_MAX_FRAME must be a positive decimal integer"; exit 2; \
+	fi; \
+	echo "=== ATtiny202 -fstack-usage static bound (limit: $(XT_STACK_MAX_FRAME) B/frame) ==="; \
+	expected=0; \
+	for v in $(XT_VARIANTS_SUPPORTED); do \
+		case $$v in \
+			cd4053_simple)    m=CD4053_SIMPLE ;; \
+			cd4053_with_mute) m=CD4053_WITH_MUTE ;; \
+			tq2_l2_5v_relay)  m=TQ2_L2_5V_RELAY ;; \
+			*) echo "FAIL: unsupported immutable ATtiny202 stack variant '$$v'"; exit 2 ;; \
+		esac; \
+		obj="$$stack_dir/stack_xt_$${v}.o"; su="$${obj%.o}.su"; \
+		expected=$$((expected + 1)); \
+		if ! $(CC) $(XT_FW_CFLAGS) -D$$m -fstack-usage -c "$(XT_STACK_SOURCE)" -o "$$obj"; then \
+			echo "FAIL: compilation error during ATtiny202 -fstack-usage build: $$v"; exit 1; \
+		fi; \
+		if [ ! -s "$$obj" ]; then \
+			echo "FAIL: compiler produced no AVR-XT stack-check object for $$v"; exit 1; \
+		fi; \
+		if [ ! -s "$$su" ]; then \
+			echo "FAIL: compiler produced no AVR-XT stack-usage report for $$v"; exit 1; \
+		fi; \
+	done; \
+	set -- "$$stack_dir"/stack_*.o; actual_obj=$$#; [ -e "$$1" ] || actual_obj=0; \
+	if [ "$$actual_obj" -ne "$$expected" ]; then \
+		echo "FAIL: expected $$expected AVR-XT stack-check objects, found $$actual_obj"; exit 1; \
+	fi; \
+	set -- "$$stack_dir"/stack_*.su; actual_su=$$#; [ -e "$$1" ] || actual_su=0; \
+	if [ "$$actual_su" -ne "$$expected" ]; then \
+		echo "FAIL: expected $$expected AVR-XT stack-usage reports, found $$actual_su"; exit 1; \
+	fi; \
+	if ! test/check_stack_usage.sh "$(XT_STACK_MAX_FRAME)" "$$@"; then exit 1; fi; \
+	echo "OK: $$actual_su fresh AVR-XT reports; all frames <= $(XT_STACK_MAX_FRAME) B"
 
 # --- ATtiny202 production fuses (programmer + checker + simulator) -----------
 # One source of truth for every consumer. test-fuses injects these bytes into
@@ -2607,12 +2728,12 @@ attiny202-delay-oracle: attiny202
 	done; \
 	OBJDUMP=$(OBJDUMP) python3 test/avr/test_attiny202_delay_oracle.py $$elves
 
-# Aggregate: every ATtiny202 pre-hardware check (fuses + smoke + build/budget +
-# analysis + coil-pulse width oracle). It is not part of `make test` because the
+# Aggregate: every ATtiny202 pre-hardware check (fuses + smoke + build/budgets +
+# stack + analysis + coil-pulse width oracle). It is not part of `make test` because the
 # vendored DFP may be absent; each sub-target skips cleanly for developers, while
 # release qualification invokes this aggregate with STRICT_TOOLS=1.
 .PHONY: attiny202-test
-attiny202-test: test-fuses attiny202-smoke attiny202 attiny202-analyze attiny202-delay-oracle
+attiny202-test: test-fuses attiny202-smoke attiny202 attiny202-test-stack-bound attiny202-analyze attiny202-delay-oracle
 	@echo "=== all ATtiny202 pre-hardware checks complete ==="
 
 # The yasimavr target-level aggregate, over EVERY variant: functional + physical
@@ -2948,7 +3069,7 @@ test-supply-chain:
 	./test/test_supply_chain.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 36/75/126
+# image/host rebuild triggering. The script enforces the canonical 36/75/156
 # counts, so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
 test-pic-build:
 	./test/test_pic_build.sh
@@ -3269,6 +3390,7 @@ test-target-matrix:
 	TM_UNSUPPORTED='tmux4053-simple' \
 	TM_FAULT_TARGET='pic12f675-test-fault' \
 	TM_FAULT_VARIANT_ARG='PIC12F675_FAULT_VARIANT' \
+	TM_EXACT_FAULT_CHECKS='38' \
 	TM_LOCKSTEP_TARGET='pic12f675-test-lockstep' \
 	TM_LOCKSTEP_VARIANT_ARG='PIC12F675_LOCKSTEP_VARIANT' \
 	TM_IO_TARGET='pic12f675-test-io' \
@@ -3585,9 +3707,13 @@ test/avr/test_fuses: test/avr/test_fuses.c Makefile FORCE
 # the deepest call path. Override `AVR_STACK_MAX_FRAME` only with a reviewed
 # ceiling; the target generates fresh `.su` reports and validates every frame.
 test-stack-bound:
+	@if [ ! -f test/check_stack_usage.sh ] || [ -L test/check_stack_usage.sh ] \
+			|| [ ! -x test/check_stack_usage.sh ]; then \
+		echo "FAIL: canonical stack-usage checker is missing, symlinked, or not executable"; exit 1; \
+	fi
 	@stack_dir="$(AVR_STACK_BUILD_DIR)"; remove_dir=0; \
 	if [ -z "$$stack_dir" ]; then \
-		stack_dir=$$(mktemp -d "$${TMPDIR:-/tmp}/mcu-stack-bound.XXXXXX") \
+		stack_dir=$$(mktemp -d "$${TMPDIR:-$(HOME)}/mcu-stack-bound.XXXXXX") \
 			|| { echo "FAIL: could not create private stack-evidence directory"; exit 1; }; \
 		remove_dir=1; \
 	elif ! mkdir -p "$$stack_dir"; then \
@@ -3638,26 +3764,7 @@ test-stack-bound:
 	if [ "$$actual_su" -ne "$$expected" ]; then \
 		echo "FAIL: expected $$expected stack-usage reports, found $$actual_su"; exit 1; \
 	fi; \
-	echo "Per-function stack frames:"; \
-	if ! cat "$$@"; then echo "FAIL: could not read stack-usage reports"; exit 1; fi; \
-	if ! awk -F'\t' -v max="$(AVR_STACK_MAX_FRAME)" ' \
-		function decimal_gt(a, b) { \
-			sub(/^0+/, "", a); sub(/^0+/, "", b); \
-			if (a == "") a = "0"; if (b == "") b = "0"; \
-			if (length(a) != length(b)) return length(a) > length(b); \
-			return ("x" a) > ("x" b) \
-		} \
-		BEGIN { bad = 0; records = 0 } \
-		NF != 3 || $$1 == "" || $$2 !~ /^[0-9]+$$/ || $$3 != "static" { \
-			printf "invalid stack-usage record: %s\n", $$0 > "/dev/stderr"; bad = 1; next \
-		} \
-		{ records++; if (decimal_gt($$2, max)) { \
-			printf "frame exceeds %s B: %s\n", max, $$0 > "/dev/stderr"; bad = 1 \
-		} } \
-		END { if (records == 0) { print "no stack-usage records" > "/dev/stderr"; bad = 1 } \
-			exit bad }' "$$@"; then \
-		echo "FAIL: invalid or oversized stack frame evidence"; exit 1; \
-	fi; \
+	if ! test/check_stack_usage.sh "$(AVR_STACK_MAX_FRAME)" "$$@"; then exit 1; fi; \
 	echo "OK: $$actual_su fresh reports; all frames <= $(AVR_STACK_MAX_FRAME) B"
 
 # Fake-compiler regression checks for stale, missing, and malformed .su evidence.
@@ -5315,15 +5422,17 @@ pic10f320-clean:
 # PIC10F322 and unlike the hand-inlined PIC10F320.
 #
 # `make pic12f675` builds every variant and gates each on the device's
-# 1024-word flash budget. STANDALONE, like its PIC10F322 sibling: deliberately
-# not part of `make test`, and it skips cleanly when XC8 is absent.
+# 1024-word flash and reviewed 48-byte data-space budgets. STANDALONE, like its
+# PIC10F322 sibling: deliberately not part of `make test`, and it skips cleanly
+# when XC8 is absent.
 #
 # NAMING follows the rule stated in the PIC10F322 section: a PIC_* name with no
 # part in it is shared by every PIC part; anything whose VALUE is a property of
 # this chip is spelled PIC12F675_*. Two values here are the ones that must never
 # be inherited from a sibling, because a wrong one produces a PASSING test
-# rather than a failing one: PIC12F675_FLASH_WORDS (1024, not 512) and
-# PIC12F675_XTAL (4 MHz fixed INTOSC, not the 322's 2 MHz).
+# rather than a failing one: PIC12F675_FLASH_WORDS (1024, not 512), the immutable
+# 64-byte data capacity, and PIC12F675_XTAL (4 MHz fixed INTOSC, not the 322's
+# 2 MHz).
 #
 # THE UL SUFFIX ON PIC12F675_XTAL IS LOAD-BEARING. _XTAL_FREQ reaches the shell's
 # static_assert(_XTAL_FREQ == 4000000UL, ...); a bare 4000000 is essentially
@@ -5344,6 +5453,14 @@ override PIC12F675_BUILD_PRODUCTS := $(PIC12F675_HEXES) $(PIC12F675_ASSEMBLIES) 
 # tightest variant lands at 55.9%, against the 322's 98.0%) -- see
 # DESIGN_DOCUMENTATION.adoc, "Resource Utilization".
 PIC12F675_FLASH_WORDS ?= 1024
+# Silicon capacity is immutable. The policy limit is separately reviewable and
+# inclusive, preserving 16 bytes of allocation headroom at its default setting;
+# XC8's Data-space total already includes its statically overlaid automatic
+# storage. The canonical transcript parser is not a tool extension point:
+# command-line values cannot replace it with a weaker gate.
+override PIC12F675_DATA_BYTES := 64
+PIC12F675_DATA_LIMIT ?= 48
+override PIC12F675_DATA_BUDGET_GATE := test/check_pic_data_budget.sh
 # NB: GPSIM, GPSIM_TIMEOUT_SECONDS and PIC_XC8_INCLUDE are SHARED across every
 # PIC part and are declared once in the PIC10F322 section above -- per the
 # naming rule there, a PIC_* name with no part in it belongs to all of them.
@@ -5414,7 +5531,7 @@ PIC12F675_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 --platform=pi
                       '--suppress=*:$(PIC12F675_DFP_INCLUDE)/*' \
                       $(PIC12F675_CPPCHECK_CPPFLAGS)
 
-# Build every PIC variant and enforce the flash-word budget. The variant -D
+# Build every PIC variant and enforce the flash-word and data-space budgets. The variant -D
 # selector and driver source are chosen inline (the same case-pattern the AVR
 # analyze/budget recipes use, since $(macro_<v>)/$(src_<v>) cannot expand inside
 # a shell loop). Sources are passed as make-time absolute paths so the compiler
@@ -5436,6 +5553,11 @@ pic12f675: $(PIC12F675_CORE_SRC) $(PIC12F675_HEADERS) $(foreach v,$(CLASSIC_VARI
 	@rm -f "$(PIC12F675_BUILD_DIR)"/"$(FW_BASE)-$(PIC12F675_TAG)-"*.hex \
 		"$(PIC12F675_BUILD_DIR)"/"$(FW_BASE)-$(PIC12F675_TAG)-"*.s \
 		"$(PIC12F675_BUILD_DIR)"/"$(FW_BASE)-$(PIC12F675_TAG)-"*.sym
+	@if [ ! -f "$(PIC12F675_DATA_BUDGET_GATE)" ] \
+			|| [ -L "$(PIC12F675_DATA_BUDGET_GATE)" ] \
+			|| [ ! -x "$(PIC12F675_DATA_BUDGET_GATE)" ]; then \
+		echo "FAIL: canonical PIC12F675 data-budget gate is missing, symlinked, or not executable"; exit 1; \
+	fi
 	@if [ ! -x "$(PIC_CC)" ] && ! command -v $(PIC_CC) >/dev/null 2>&1; then \
 		echo "XC8 not found at $(PIC_CC); skipping PIC build (override with PIC_CC=...)"; \
 		$(SKIP); \
@@ -5457,6 +5579,7 @@ pic12f675: $(PIC12F675_CORE_SRC) $(PIC12F675_HEADERS) $(foreach v,$(CLASSIC_VARI
 	export PIC_RECIPE_PID=$$$$; \
 	LC_ALL=C; export LC_ALL; \
 	budget="$(PIC12F675_FLASH_WORDS)"; \
+	data_limit="$(PIC12F675_DATA_LIMIT)"; \
 	case "$$budget" in \
 		''|*[!0-9]*) echo "FAIL: PIC12F675_FLASH_WORDS must be a positive decimal integer"; exit 1 ;; \
 	esac; \
@@ -5466,7 +5589,7 @@ pic12f675: $(PIC12F675_CORE_SRC) $(PIC12F675_HEADERS) $(foreach v,$(CLASSIC_VARI
 	if [ "$$budget" = 0 ]; then \
 		echo "FAIL: PIC12F675_FLASH_WORDS must be a positive decimal integer"; exit 1; \
 	fi; \
-	echo "=== PIC12F675 build + flash-budget ($$budget words) ==="; \
+	echo "=== PIC12F675 build + resource budgets (flash $$budget words, data $$data_limit/$(PIC12F675_DATA_BYTES) bytes) ==="; \
 	$(fw_image_sh); \
 	fail=0; \
 	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
@@ -5490,6 +5613,12 @@ pic12f675: $(PIC12F675_CORE_SRC) $(PIC12F675_HEADERS) $(foreach v,$(CLASSIC_VARI
 		fi; \
 		if ! $(IHEX_VALIDATOR) "$$hex"; then \
 			echo "FAIL: XC8 produced an invalid Intel HEX image for variant $$v"; \
+			rm -f "$$hex"; fail=1; continue; \
+		fi; \
+		data_record=`printf '%s\n' "$$out" \
+			| "$(PIC12F675_DATA_BUDGET_GATE)" "$$v" "$$data_limit"`; data_rc=$$?; \
+		if [ $$data_rc -ne 0 ]; then \
+			echo "FAIL: $$v: invalid or over-budget PIC12F675 data-space usage"; \
 			rm -f "$$hex"; fail=1; continue; \
 		fi; \
 		dec=`printf '%s\n' "$$out" | grep -E 'Program space' \
@@ -5532,6 +5661,7 @@ pic12f675: $(PIC12F675_CORE_SRC) $(PIC12F675_HEADERS) $(foreach v,$(CLASSIC_VARI
 			echo "FAIL: $$v uses $$dec words ($${pct}%) -- exceeds $$budget"; rm -f "$$hex"; fail=1; \
 		else \
 			echo "OK:   $$v -> $$hex : $$dec words ($${pct}%) of $$budget"; \
+			printf '%s\n' "$$data_record"; \
 		fi; \
 	done; \
 	[ $$fail -ne 0 ] || pic_complete=1; \
@@ -6546,7 +6676,7 @@ pic12f675-test-target: pic12f675-target-selector-valid variant-selectors-valid _
 			case "$$lane:$(PIC12F675_TARGET_VARIANT)" in \
 				fault:cd4053_simple) checks=38 ;; \
 				fault:cd4053_with_mute) checks=38 ;; \
-				fault:tq2_l2_5v_relay) checks=41 ;; \
+				fault:tq2_l2_5v_relay) checks=46 ;; \
 				io:cd4053_simple) checks=25 ;; \
 				io:cd4053_with_mute) checks=26 ;; \
 				io:tq2_l2_5v_relay) checks=36 ;; \
@@ -7848,7 +7978,7 @@ help:
 	@echo "  Full CI-gated pre-hardware validation, plus a bench-programming workflow with trim evidence."
 	@echo "  pic12f675-test        all PIC12F675 pre-hardware checks (CONFIG + analysis + source"
 	@echo "                        coverage + calibration contract + gpsim + stack bound)"
-	@echo "  pic12f675             build all variants for PIC12F675 (XC8) + 1024-word budget gate"
+	@echo "  pic12f675             build all variants; enforce 1024-word flash and $(PIC12F675_DATA_LIMIT)/$(PIC12F675_DATA_BYTES)-byte data limits"
 	@echo "  pic12f675-test-config build PIC12F675 HEX, then verify each CONFIG word vs design intent"
 	@echo "  pic12f675-test-gpsim  drive the footswitch in gpsim, assert GPIO on the simcal images"
 	@echo "  pic12f675-test-io     libgpsim GPIO transition + pulse timing, and the modeled port"
@@ -7904,13 +8034,14 @@ help:
 	@echo "  scripts/fetch_attiny_dfp.sh [DIR]  vendor the pinned device files (default XT_DFP=$(XT_DFP))"
 	@echo "  attiny202-smoke  toolchain/device-pack gate: compile/link the peripheral smoke image, assert"
 	@echo "                   avrxmega3 + $(XT_FLASH_BYTES) B budget (standalone; skips if XT_DFP absent)"
-	@echo "  attiny202        build all variants for ATtiny202 + 2 KB flash-budget gate"
+	@echo "  attiny202        build all variants; enforce 2 KB flash and $(XT_STATIC_RAM_LIMIT)/$(XT_SRAM_BYTES) B static-RAM limits"
 	@echo "  attiny202-analyze  cppcheck + MISRA on the AVR-XT shell (DFP+avr-libc; standalone)"
 	@echo "  attiny202-delay-oracle  verify coil-pulse widths from the disassembled _delay_ms loop"
-	@echo "  attiny202-test   all ATtiny202 pre-hardware checks (fuses + smoke + build + analyze + delay)"
+	@echo "  attiny202-test   all ATtiny202 pre-hardware checks (fuses + smoke + build + stack + analyze + delay)"
+	@echo "  attiny202-test-stack-bound  shipping-flag frame bound for all immutable variants ($(XT_STACK_MAX_FRAME) B)"
 	@echo "  attiny202-sim    yasimavr functional + PA2/PA3 transition/pulse-presence test"
 	@echo "                   (standalone; needs scripts/fetch_yasimavr.sh; XT_SIM_VARIANT=)"
-	@echo "  attiny202-fault  yasimavr fault-inject: 24 guarded SFR/latch/state corruptions,"
+	@echo "  attiny202-fault  yasimavr fault-inject: 24 guarded corruptions (32 relay),"
 	@echo "                   zero skips, exact completion (standalone; XT_SIM_VARIANT=)"
 	@echo "  attiny202-soak   yasimavr soak: long run, assert no WDT reset + stays responsive"
 	@echo "                   (standalone; XT_SOAK_DURATION_MS=, XT_SIM_VARIANT=)"

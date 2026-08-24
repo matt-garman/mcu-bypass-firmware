@@ -342,6 +342,26 @@ PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
       the other parts do not claim universal external stuck-pin
       detection.
 +
+      A low output latch is not by itself a physical-pad guarantee when
+      pin configuration is corrupt.  AVR-XT can invert a coil pad through
+      `PORTA.PINnCTRL.INVEN`; PIC12F675 can route comparator `COUT` onto
+      GP2, outside GPIO ownership.  Their forced-reset paths therefore
+      wrap the shared latch clear in an MCU-specific emergency sequence.
+      AVR-XT removes pull-ups, disconnects direction, clears inversion and
+      stale OUT state, then restores the low outputs.  PIC12F675 removes
+      coil pull-ups, changes the pins to inputs, disables analog and
+      comparator ownership, clears shadow/GPIO, then restores output
+      direction.  Board fail-safe pull-downs hold the pins inactive during
+      the brief input interval.
++
+      Target fault tests observe modeled package pins rather than inferring
+      them from latches: physical PA2/PA3 on AVR-XT and direct GP1/GP2 node
+      voltage on PIC12F675.  The latter covers every comparator mode one
+      bit from off and both comparator output states where COUT can own
+      GP2.  Latch-only mutants are rejected.  This is simulator electrical
+      evidence; it does not validate PCB loading, silicon behavior or relay
+      mechanics.
++
       Relay coil clears use one masked target operation.  On
       PIC12F675 this clears both coil bits in the SRAM shadow before
       one whole-port GPIO write, preventing a corrupt uncleared coil
@@ -1137,9 +1157,11 @@ unlimited.
 The ATtiny202 has 2 KB of flash and 128 bytes of SRAM — roughly double the
 ATtiny13a on both — so it is the least constrained AVR part in the set. Flash
 figures are reported by the build itself (`make attiny202`), which gates every
-variant against the 2048-byte device size. They do not come from `avr-size`'s
-device-aware mode: binutils 2.26 does not recognise `avrxmega3` parts, so
-`avr-size -C --mcu=attiny202` reports "Device: Unknown" and no percentage.
+variant against the 2048-byte device size and requires static `Data:` use at or
+below 16 of the device's 128 SRAM bytes. They do not come from `avr-size`'s
+device-aware percentages: binutils 2.26 does not recognise `avrxmega3` parts, so
+`avr-size -C --mcu=attiny202` reports "Device: Unknown" while still reporting
+the exact `Program:` and `Data:` byte counts the gate consumes.
 
 .Table ATtiny202 Utilization by Variant (measured, avr-gcc 7.3.0 + ATtiny_DFP)
 |===
@@ -1150,19 +1172,19 @@ device-aware mode: binutils 2.26 does not recognise `avrxmega3` parts, so
 | tq2_l2_5v_relay   | 994 bytes | 48.5% | 1054 bytes
 |===
 
-Static data is 5 bytes, identical to the AVR Classic figure and for the same
-reason: the AVR-XT shell keeps `ctx_` (3 bytes), `ctx_check_` (1 byte), and the
-1-byte `timer_isr_called_` ISR-to-main handshake. Against 128 bytes of SRAM that
-is 3.9%, leaving 123 bytes before stack; this is not a measured peak-free-RAM
-claim.
+The last retained static-data measurement is 5 bytes, identical to the AVR
+Classic figure and for the same reason: the AVR-XT shell keeps `ctx_` (3 bytes),
+`ctx_check_` (1 byte), and the 1-byte `timer_isr_called_` ISR-to-main handshake.
+The 16-byte build limit leaves at least 112 bytes outside static allocation.
+Neither figure is a measured peak-free-RAM claim; the final F2 compiler run must
+refresh the per-variant `Data:` values.
 
-NOTE: the `-fstack-usage` static frame bound (`make test-stack-bound`) covers
-the verified core and all three output drivers — which the AVR-XT build shares
-unchanged — but not `bypass_mcu_avr_xt.c` itself, whose own frames are not yet
-measured. The margin here is large enough that this is a completeness gap rather
-than a risk (the ATtiny13a, with half the SRAM and a measured 33-byte tightest
-peak, still leaves 26 bytes free), but it is a real difference from the classic
-lane and is tracked as such.
+`attiny202-test-stack-bound` now compiles `bypass_mcu_avr_xt.c` under every
+immutable production selector with the shipping flags plus `-fstack-usage` and
+rejects any frame above 32 bytes. `test-stack-bound` continues to cover the
+shared core and drivers. These gates bound individual compiler frames, not the
+complete call-chain plus interrupt high-water mark; the first provisioned F2 run
+must retain the actual per-variant maxima before release.
 
 === PIC10F322 (XC8 build)
 
@@ -1226,7 +1248,9 @@ Those decisions are recorded in `docs/pic10f320_special_case.md`.
 
 The PIC12F675 is the roomiest PIC here: 1024 fourteen-bit program words, 64
 bytes of RAM, plus 128 bytes of data EEPROM the firmware does not use.
-`make pic12f675` enforces the 1024-word budget per variant.
+`make pic12f675` enforces the 1024-word flash budget and an inclusive 48-byte
+XC8 Data-space limit per variant. The latter preserves 16 bytes of allocation
+headroom and includes XC8's statically overlaid automatic storage.
 
 .Table PIC12F675 Utilization by Variant (measured, XC8 V3.10)
 |===
@@ -1241,7 +1265,9 @@ Roughly half the flash remains free on every variant. Persistent firmware state
 is 6 bytes: the 3-byte `ctx_`, `ctx_check_`, `gpio_shadow_` (the software output
 latch this core needs), and `osccal_snapshot_` (the factory oscillator trim
 captured at init). A current XC8 total Data Space reservation was not retained,
-so the older 36-byte total is not presented as current. The 322 needs neither of
+so the older 36-byte total is not presented as current. The build now requires
+one internally consistent XC8 summary and fails above 48/64 bytes; the final F2
+run must record all three actual totals. The 322 needs neither of
 the final two bytes: it has a real output latch and compares `OSCCON` against a
 compile-time constant instead of a captured value.
 

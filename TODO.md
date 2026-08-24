@@ -211,6 +211,13 @@ adds a third independent witness for the Classic AVR stack bound.
 
 ### T25-avr-xt-stack - Bound AVR-XT shell stack frames
 
+**Implementation present on the F2 branch; provisioned measurement pending.**
+`attiny202-test-stack-bound` now compiles the shell under all three immutable
+production selectors, shares the Classic AVR `.su` parser, enforces 32 bytes per
+frame, and has a toolchain-free 23-check regression. Keep this item open until a
+pinned avr-gcc/ATtiny_DFP run records the actual maxima and the final resource
+documentation is refreshed.
+
 Add an ATtiny202-specific `-fstack-usage` lane for
 `src/bypass_mcu_avr_xt.c`. The existing `test-stack-bound` gate compiles the
 Classic AVR shell plus the shared core and output drivers under Classic
