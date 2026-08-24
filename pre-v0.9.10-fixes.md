@@ -1134,9 +1134,13 @@ owner, consistent with project policy.
   `INVEN`, pull-up, one-bit direction, combined input/stale-OUT/control, and
   settled-state OUT fixtures. Host negative controls reject an OUT-only clear.
 - The PIC12F675 relay matrix now has 46 checks. It directly observes modeled
-  GP1/GP2 node voltage at the watchdog spin and runs both `CINV` settings for
-  all three comparator modes one bit from off (`110`, `101`, `011`). Mode `110`
-  must make GP2 follow `COUT`; modes `101` and `011` must leave GP2 under GPIO.
+  GP1/GP2 node voltage and drives GP0 low/high for all three comparator modes one
+  bit from off (`110`, `101`, `011`). Mode `110` must make GP2 follow both
+  `COUT` states, then de-energize it at the watchdog spin; modes `101` and `011`
+  are bounded ownership fixtures that must leave GP2 under GPIO and restore
+  comparator-off after two settling cycles but before the firmware gate. This
+  split avoids treating gpsim's observed mode-110 `CINV` behavior (stored bit,
+  unchanged modeled `COUT`) and mode-101 execution crash as firmware evidence.
   The high-`COUT` fixture proves a latch-only clear leaves physical GP2 high.
 - Reviewed source-order checks pin pull-up removal before input direction,
   peripheral/polarity neutralization before latch clearing, and low latch state

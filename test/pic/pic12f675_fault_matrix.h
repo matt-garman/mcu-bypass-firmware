@@ -94,7 +94,6 @@
 #define PIC_REG_OSCCAL_ADDR  0x090u  // factory trim, snapshotted at init
 #define PIC_FAULT_CMCON_MODE_MASK 0x07u
 #define PIC_FAULT_CMCON_OFF       0x07u
-#define PIC_FAULT_CMCON_CINV_MASK 0x10u
 #define PIC_FAULT_CMCON_COUT_MASK 0x40u
 // OSCCAL implements CAL5:CAL0 in bits 7:2; bits 1:0 are unimplemented and read
 // zero on silicon. Toggle CAL0 for the smallest physically realizable trim upset.
@@ -131,26 +130,24 @@
 //
 // Clearing any one mode bit from comparator-off 111 reaches 110, 101 or 011.
 // Of those, DS41190G Figure 6-2 routes COUT to GP2 in mode 110; modes 101 and
-// 011 leave GP2 under the GPIO output driver. Relay builds physically exercise
-// both CINV settings for all three modes: mode 110 must make GP2 track COUT,
-// while modes 101/011 must leave the settled-low GPIO pad unchanged.
+// 011 leave GP2 under the GPIO output driver. Relay builds drive GP0 low/high
+// for all three modes: mode 110 must make GP2 track both COUT states, while
+// bounded modes 101/011 fixtures must leave the settled-low GPIO pad unchanged.
 //
 // The other output stages retain the established mode-110 reset case. That one
 // case is sufficient to make the exact comparator-off guard load-bearing; the
-// complete neighborhood belongs to the relay's physical-pin contract. It also
-// avoids asking gpsim to execute through a watchdog spin with mode 101 still
-// active, an observed p12f675-model crash rather than firmware evidence; the
-// analogous non-relay mode-011 transition adds no guard coverage. The relay
-// emergency path disables the comparator before its spin, so its complete
-// physical matrix does not depend on that unsupported transition.
+// complete neighborhood belongs to the relay's physical-pin contract. gpsim
+// crashes if mode 101 remains active long enough to reach the firmware gate, so
+// relay modes 101/011 are bounded two-cycle ownership fixtures restored before
+// the gate. Only mode 110, which can own GP2, continues through escalation.
 #if defined(TQ2_L2_5V_RELAY)
 #  define PIC_FAULT_COMPARATOR_INJECTIONS() do { \
-    inject_comparator_relay_resync_case(0x06u, false, true,  "CMCON.CM0.CINV0"); \
-    inject_comparator_relay_resync_case(0x06u, true,  true,  "CMCON.CM0.CINV1"); \
-    inject_comparator_relay_resync_case(0x05u, false, false, "CMCON.CM1.CINV0"); \
-    inject_comparator_relay_resync_case(0x05u, true,  false, "CMCON.CM1.CINV1"); \
-    inject_comparator_relay_resync_case(0x03u, false, false, "CMCON.CM2.CINV0"); \
-    inject_comparator_relay_resync_case(0x03u, true,  false, "CMCON.CM2.CINV1"); \
+    inject_comparator_relay_resync_case(0x06u, false, true,  "CMCON.CM0.INPUT0"); \
+    inject_comparator_relay_resync_case(0x06u, true,  true,  "CMCON.CM0.INPUT1"); \
+    inject_comparator_relay_resync_case(0x05u, false, false, "CMCON.CM1.INPUT0"); \
+    inject_comparator_relay_resync_case(0x05u, true,  false, "CMCON.CM1.INPUT1"); \
+    inject_comparator_relay_resync_case(0x03u, false, false, "CMCON.CM2.INPUT0"); \
+    inject_comparator_relay_resync_case(0x03u, true,  false, "CMCON.CM2.INPUT1"); \
 } while (0)
 #else
 #  define PIC_FAULT_COMPARATOR_INJECTIONS() do { \
