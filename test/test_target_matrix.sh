@@ -35,6 +35,7 @@ TM_IO_MARKER_COUNT=${TM_IO_MARKER_COUNT:-1}
 TM_IO_EXTRA_MARKER=${TM_IO_EXTRA_MARKER:-}
 TM_IO_EXTRA_MARKER_COUNT=${TM_IO_EXTRA_MARKER_COUNT:-0}
 TM_AGGREGATE_LANES=${TM_AGGREGATE_LANES:-0}
+TM_EXACT_FAULT_CHECKS=${TM_EXACT_FAULT_CHECKS:-38}
 read -r -a supported <<<"$TM_SUPPORTED"
 read -r -a MAKE_CMD <<<"${PROJECT_MAKE:-make}"
 [ "${#MAKE_CMD[@]}" -gt 0 ] \
@@ -90,7 +91,7 @@ printf '\n' >> "$FAKE_MAKE_LOG"
 if [ -n "$target" ] && [ "${FAKE_OMIT_MARKER:-}" != "$target" ]; then
 	if [ "${FAKE_EXACT_RESULTS:-0}" -eq 1 ] && [ -n "$marker" ]; then
 		case "$target" in
-			"$FAKE_FAULT_TARGET") lane=fault; checks=38 ;;
+			"$FAKE_FAULT_TARGET") lane=fault; checks=${FAKE_EXACT_FAULT_CHECKS:?} ;;
 			"$FAKE_LOCKSTEP_TARGET") lane=lockstep; checks=3005 ;;
 			"$FAKE_IO_TARGET") lane=io; checks=26 ;;
 		esac
@@ -142,6 +143,7 @@ run_matrix() {
 		FAKE_IO_MARKER_COUNT="$TM_IO_MARKER_COUNT" \
 		FAKE_IO_EXTRA_MARKER="$TM_IO_EXTRA_MARKER" \
 		FAKE_IO_EXTRA_MARKER_COUNT="$TM_IO_EXTRA_MARKER_COUNT" \
+		FAKE_EXACT_FAULT_CHECKS="$TM_EXACT_FAULT_CHECKS" \
 		FAKE_OMIT_MARKER="$omit_marker" \
 		FAKE_OMIT_EXTRA="$omit_extra" \
 		FAKE_EXACT_RESULTS="$([ "$TM_LABEL" = PIC12F675 ] && printf 1 || printf 0)" \
@@ -171,6 +173,7 @@ run_target() {
 		FAKE_IO_MARKER_COUNT="$TM_IO_MARKER_COUNT" \
 		FAKE_IO_EXTRA_MARKER="$TM_IO_EXTRA_MARKER" \
 		FAKE_IO_EXTRA_MARKER_COUNT="$TM_IO_EXTRA_MARKER_COUNT" \
+		FAKE_EXACT_FAULT_CHECKS="$TM_EXACT_FAULT_CHECKS" \
 		FAKE_OMIT_MARKER="$omit_marker" \
 		FAKE_EXACT_RESULTS="$([ "$TM_LABEL" = PIC12F675 ] && printf 1 || printf 0)" \
 		FAKE_RESULT_VARIANT="$TM_SUBSET" \

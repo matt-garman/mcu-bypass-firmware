@@ -505,7 +505,8 @@ else
 	run_step "pic job: pic10f320-test-target-variants" make pic10f320-test-target-variants
 	# One Make graph is load-bearing: the two goals share one qualified retained
 	# PIC12F675 matrix and verify its hashes after every consumer lane.
-	run_step "pic job: PIC12F675 immutable-matrix aggregates" make pic12f675-test pic12f675-test-target-variants
+	run_step "pic job: PIC12F675 immutable-matrix aggregates" make \
+		pic12f675-test pic12f675-test-target-variants PIC12F675_DATA_LIMIT=48
 fi
 
 run_step "build-matrix: make attiny13a attiny85 attiny45" make attiny13a attiny85 attiny45
@@ -521,24 +522,25 @@ else
 	XT_N=$(make -s --no-print-directory print-XT_VARIANTS_SUPPORTED | wc -w)
 	[ "$XT_N" -gt 0 ] || die "XT_VARIANTS_SUPPORTED is empty; nothing would be gated"
 
-	run_step "attiny202 job: make attiny202-test" make attiny202-test
+	run_step "attiny202 job: make attiny202-test" make attiny202-test \
+		XT_STATIC_RAM_LIMIT=16 XT_STACK_MAX_FRAME=32
 	run_step "attiny202 job: make attiny202-sim" \
-		xt_gate "SIM PASS" "$XT_N" -- make attiny202-sim
+		xt_gate "SIM PASS" "$XT_N" -- make attiny202-sim XT_STATIC_RAM_LIMIT=16
 	# Hardcoded 3, exactly as ci.yml does: an independent cross-check on
 	# XT_VARIANTS_SUPPORTED rather than a second reading of it.
 	run_step "attiny202 job: make attiny202-fault" \
-		xt_gate "FAULT PASS" 3 -- make attiny202-fault
+		xt_gate "FAULT PASS" 3 -- make attiny202-fault XT_STATIC_RAM_LIMIT=16
 	# Each variant co-simulates BOTH boot scenarios, so a scenario that bailed
 	# out early cannot hide behind a green per-variant verdict.
 	run_step "attiny202 job: make attiny202-lockstep" \
 		xt_gate "LOCKSTEP PASS" "$XT_N" "co-simulated" "$(( XT_N * 2 ))" \
-		-- make attiny202-lockstep
+		-- make attiny202-lockstep XT_STATIC_RAM_LIMIT=16
 	# CI runs a 5-minute simulated soak smoke, with the progress interval set to
 	# the full duration so the log carries one progress line per variant.
 	run_step "attiny202 job: make attiny202-soak" \
 		xt_gate "SOAK PASS" "$XT_N" -- \
 		make attiny202-soak XT_SOAK_DURATION_MS=300000 \
-			XT_SOAK_PROGRESS_INTERVAL_MS=300000
+			XT_SOAK_PROGRESS_INTERVAL_MS=300000 XT_STATIC_RAM_LIMIT=16
 fi
 
 if [ "$PR_MODE" -eq 1 ]; then

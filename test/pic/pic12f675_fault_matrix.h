@@ -92,6 +92,10 @@
 #define PIC_REG_CMCON_ADDR   0x019u  // CM<2:0> = bits 2:0; 111 = comparator off
 #define PIC_REG_ADCON0_ADDR  0x01Fu  // ADON = bit 0
 #define PIC_REG_OSCCAL_ADDR  0x090u  // factory trim, snapshotted at init
+#define PIC_FAULT_CMCON_MODE_MASK 0x07u
+#define PIC_FAULT_CMCON_OFF       0x07u
+#define PIC_FAULT_CMCON_CINV_MASK 0x10u
+#define PIC_FAULT_CMCON_COUT_MASK 0x40u
 // OSCCAL implements CAL5:CAL0 in bits 7:2; bits 1:0 are unimplemented and read
 // zero on silicon. Toggle CAL0 for the smallest physically realizable trim upset.
 #define PIC_FAULT_OSCCAL_CAL0_MASK 0x04u
@@ -124,6 +128,36 @@
 //
 // The ANSEL cases cover all four analog-capable outputs. ANS3 maps to GPIO GP4,
 // not GPIO bit 3; keeping it explicit pins the non-isomorphic register mapping.
+//
+// Clearing any one mode bit from comparator-off 111 reaches 110, 101 or 011.
+// Of those, DS41190G Figure 6-2 routes COUT to GP2 in mode 110; modes 101 and
+// 011 leave GP2 under the GPIO output driver. Relay builds physically exercise
+// both CINV settings for all three modes: mode 110 must make GP2 track COUT,
+// while modes 101/011 must leave the settled-low GPIO pad unchanged. The other
+// output stages retain ordinary reset coverage for all three modes.
+#if defined(TQ2_L2_5V_RELAY)
+#  define PIC_FAULT_COMPARATOR_INJECTIONS() do { \
+    inject_comparator_relay_resync_case(0x06u, false, true,  "CMCON.CM0.CINV0"); \
+    inject_comparator_relay_resync_case(0x06u, true,  true,  "CMCON.CM0.CINV1"); \
+    inject_comparator_relay_resync_case(0x05u, false, false, "CMCON.CM1.CINV0"); \
+    inject_comparator_relay_resync_case(0x05u, true,  false, "CMCON.CM1.CINV1"); \
+    inject_comparator_relay_resync_case(0x03u, false, false, "CMCON.CM2.CINV0"); \
+    inject_comparator_relay_resync_case(0x03u, true,  false, "CMCON.CM2.CINV1"); \
+} while (0)
+#else
+#  define PIC_FAULT_COMPARATOR_INJECTIONS() do { \
+    inject_case("CMCON.CM0", PIC_REG_CMCON_ADDR, "cmcon", false, 0x01, 1, \
+                "CM<2:0> 111->110: single-bit comparator-mode fault", \
+                PIC_FAULT_CMCON_MODE_MASK); \
+    inject_case("CMCON.CM1", PIC_REG_CMCON_ADDR, "cmcon", false, 0x02, 1, \
+                "CM<2:0> 111->101: single-bit comparator-mode fault", \
+                PIC_FAULT_CMCON_MODE_MASK); \
+    inject_case("CMCON.CM2", PIC_REG_CMCON_ADDR, "cmcon", false, 0x04, 1, \
+                "CM<2:0> 111->011: single-bit comparator-mode fault", \
+                PIC_FAULT_CMCON_MODE_MASK); \
+} while (0)
+#endif
+
 #define PIC_FAULT_CONFIG_INJECTIONS() do { \
     inject_case("OPTION.INTEDG", PIC_REG_OPTION_ADDR, PIC_REG_OPTION_TOKEN, false, 0x40, 1, \
                 "INTEDG 0->1: INT edge select skewed (else silent, INT unused)"); \
@@ -131,8 +165,7 @@
                 "T0SE 0->1: TMR0 edge select skewed (else silent, T0CS=0)"); \
     inject_case("OPTION.PS",     PIC_REG_OPTION_ADDR, PIC_REG_OPTION_TOKEN, false, 0x01, 1, \
                 "PS 0b100->0b101: WDT 1:16->1:32 (~288ms->~576ms), tick preserved"); \
-    inject_case("CMCON.CM0",     PIC_REG_CMCON_ADDR,  "cmcon",  false, 0x01, 1, \
-                "CM<2:0> 111->110: comparator back on, owning GP0..GP2"); \
+    PIC_FAULT_COMPARATOR_INJECTIONS(); \
     inject_case("ADCON0.ADON",   PIC_REG_ADCON0_ADDR, "adcon0", false, 0x01, 1, \
                 "ADON 0->1: ADC on, an output pin taken analog"); \
     inject_case("ANSEL.ANS0",    PIC_REG_ANSEL_ADDR, PIC_REG_ANSEL_TOKEN, false, 0x01, 1, \

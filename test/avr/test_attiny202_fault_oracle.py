@@ -24,6 +24,7 @@ sim_stub.PORT_PULLUPEN_bm = 0x08
 sim_stub.PORT_INVEN_bm = 0x80
 sim_stub.REG_PORTA_DIR = 0x0400
 sim_stub.REG_PORTA_OUT = 0x0404
+sim_stub.PORTA_DIR_EXPECTED = 0x4E
 sim_stub.REG_TCB0_CTRLA = 0x0A40
 sim_stub.REG_TCB0_CTRLB = 0x0A41
 sim_stub.REG_TCB0_INTCTRL = 0x0A45
@@ -48,6 +49,24 @@ def check(condition, message):
         sys.stderr.write("FAIL: %s\n" % message)
 
 
+def function_body(source, signature):
+    start = source.find(signature)
+    check(source.count(signature) == 1,
+          "%s must occur exactly once for the order oracle" % signature)
+    if start < 0:
+        return ""
+    end = source.find("\n}", start)
+    check(end >= 0, "%s must have a bounded function body" % signature)
+    return source[start:end] if end >= 0 else ""
+
+
+def check_order(body, operations, message):
+    positions = [body.find(operation) for operation in operations]
+    check(all(position >= 0 for position in positions) and
+          positions == sorted(positions) and len(set(positions)) == len(positions),
+          message)
+
+
 def finalize(declared, results=25, injections=24, skips=0, expected=24):
     checker = driver.Checker(expected)
     checker.results = results
@@ -56,6 +75,39 @@ def finalize(declared, results=25, injections=24, skips=0, expected=24):
     with contextlib.redirect_stderr(io.StringIO()):
         checker.finalize(declared)
     return checker.fails
+
+
+# The physical simulators prove the final pad state. Pin the reviewed write
+# order independently so a later cleanup cannot activate a pull-up during the
+# high-impedance interval or reconnect a stale high latch before it is cleared.
+root = Path(__file__).parents[2]
+avr_source = (root / "src/bypass_mcu_avr_xt.c").read_text(encoding="utf-8")
+avr_quiesce = function_body(
+    avr_source, "static void hw_emergency_outputs_quiesce(void) {")
+check_order(avr_quiesce, (
+    "PORTA.PIN2CTRL &= (uint8_t)PORT_INVEN_bm;",
+    "PORTA.PIN3CTRL &= (uint8_t)PORT_INVEN_bm;",
+    "PORTA.DIRCLR = coil_mask;",
+    "PORTA.PIN2CTRL = 0U;",
+    "PORTA.PIN3CTRL = 0U;",
+    "hw_outputs_reassert_safe();",
+    "PORTA.DIRSET = coil_mask;",
+), "AVR-XT emergency order must remove pull-ups, disconnect drive, clear"
+   " inversion/latches, then restore direction")
+
+pic_source = (root / "src/bypass_mcu_pic12f675.c").read_text(encoding="utf-8")
+pic_quiesce = function_body(
+    pic_source, "static void hw_emergency_outputs_quiesce(void) {")
+check_order(pic_quiesce, (
+    "WPU &= (uint8_t)~coil_mask;",
+    "TRISIO |= coil_mask;",
+    "ADCON0 = ADCON0_ADC_OFF;",
+    "ANSEL &= (uint8_t)~ANSEL_OUTPUT_MASK;",
+    "CMCON = CMCON_COMPARATOR_OFF;",
+    "hw_outputs_reassert_safe();",
+    "TRISIO &= (uint8_t)~coil_mask;",
+), "PIC12F675 emergency order must remove pull-ups, disconnect drive, restore"
+   " GPIO ownership, clear latches, then restore direction")
 
 
 class Probe:
@@ -99,32 +151,42 @@ cases = driver._fault_cases(Probe(), is_relay=False)
 check(tuple(cases) == expected_cases,
       "cd4053 fault kind/address/value/mechanism must match the independent contract")
 
-# Relay variant: a settled PA2/PA3 coil fault escalates like every other output
-# mismatch, with the coils de-energized before the reset spin -- and is delivered
-# in a settled ENGAGED state as well as in BYPASS, so both directions of the
-# desynchronization hazard are covered. The ENGAGED values carry the lit-LED bit
-# because the driver injects absolutely. Active-pulse faults are outside this
-# oracle (see docs/relay_coil_fault_correction.md).
+# Relay variant: every coil-pin fault must leave physical PA2/PA3 quiescent
+# before the reset spin. Existing INVEN and OUT cases are reclassified, and six
+# relay-only cases pin PULLUPEN, one-bit direction, and combined register-state
+# fixtures. The ENGAGED values carry the lit-LED bit because the driver injects
+# absolutely. Active-pulse faults are outside this oracle.
 expected_cases_relay = tuple(
     ("PORTA.OUT(PA2 RESET-coil)", "reg", 0x0404, 0x04, "resync")
         if c[0] == "PORTA.OUT(PA2 control)"
     else ("PORTA.OUT(PA3 SET-coil)", "reg", 0x0404, 0x08, "resync")
         if c[0] == "PORTA.OUT(PA3 control)"
+    else (c[0], c[1], c[2], c[3], "resync")
+        if c[0] in ("PORTA.PIN2CTRL(INVEN)", "PORTA.PIN3CTRL(INVEN)")
     else c
     for c in expected_cases
 ) + (
+    ("PORTA.PIN2CTRL(PULLUPEN RESET-coil)", "reg", 0x0412, 0x08, "resync"),
+    ("PORTA.PIN3CTRL(PULLUPEN SET-coil)", "reg", 0x0413, 0x08, "resync"),
+    ("PORTA.DIR(PA2 RESET-coil input)", "reg", 0x0400, 0x4A, "resync"),
+    ("PORTA.DIR(PA3 SET-coil input)", "reg", 0x0400, 0x46, "resync"),
+    ("PORTA.PA2 RESET-coil(combined input/stale-OUT/PULLUPEN|INVEN)",
+     "coil_state", 0x0412, 0x88, "resync"),
+    ("PORTA.PA3 SET-coil(combined input/stale-OUT/PULLUPEN|INVEN)",
+     "coil_state", 0x0413, 0x88, "resync"),
     ("PORTA.OUT(PA2 RESET-coil, ENGAGED)", "reg", 0x0404, 0x06, "resync_engaged"),
     ("PORTA.OUT(PA3 SET-coil, ENGAGED)",   "reg", 0x0404, 0x0A, "resync_engaged"),
 )
 cases_relay = driver._fault_cases(Probe(), is_relay=True)
 check(tuple(cases_relay) == expected_cases_relay,
-      "relay variant: coil OUT faults must be the fail-safe resync contract"
-      " in both settled states")
+      "relay fault identities must pin every physical quiescence fixture and"
+      " both settled-state OUT hazards")
 check(len({case[0] for case in cases_relay})
       == driver.EXPECTED_FAULT_CASES_RELAY,
       "relay fault case names must be unique")
 sim_path = Path(__file__).with_name("sim_attiny202.py")
 expected_sim_constants = {
+    "PORTA_DIR_EXPECTED": 0x4E,
     "REG_PORTA_PIN1CTRL": 0x0411,
     "REG_PORTA_PIN2CTRL": 0x0412,
     "REG_PORTA_PIN3CTRL": 0x0413,
@@ -151,13 +213,13 @@ check((direction_values["PORTA.DIR(footswitch)"] & 0x0E) == 0x0E
       "exact-direction faults must preserve every caller-requested output bit")
 
 check(driver.EXPECTED_FAULT_CASES_CD4053 == 24
-      and driver.EXPECTED_FAULT_CASES_RELAY == 26,
-      "driver must pin twenty-four CD4053 injections and twenty-six relay ones,"
+      and driver.EXPECTED_FAULT_CASES_RELAY == 32,
+      "driver must pin twenty-four CD4053 injections and thirty-two relay ones,"
       " each plus one negative control")
-check(finalize(26, results=27, injections=26, expected=26) == 0,
-      "complete twenty-six-injection relay run must pass")
-check(finalize(24, results=25, injections=24, expected=26) == 3,
-      "a relay run that silently dropped the two ENGAGED coil cases must fail"
+check(finalize(32, results=33, injections=32, expected=32) == 0,
+      "complete thirty-two-injection relay run must pass")
+check(finalize(26, results=27, injections=26, expected=32) == 3,
+      "a relay run that silently dropped the six new coil-pin cases must fail"
       " every completion invariant")
 check(finalize(24) == 0, "complete twenty-four-injection plus control run must pass")
 check(finalize(23) == 1, "short declared case list must fail")
@@ -265,6 +327,76 @@ check(retry_caught.fails == 0 and retry_caught.injections == 1,
 retry_missed = run_retry_gate(False)
 check(retry_missed.fails == 1 and retry_missed.injections == 1,
       "phase-swept handshake corruption must fail if never caught")
+
+
+class LatchOnlyQuiesceSim:
+    """Fake emergency path that clears OUT but leaves INVEN active."""
+
+    def __init__(self):
+        self.regs = {
+            sim_stub.REG_PORTA_DIR: sim_stub.PORTA_DIR_EXPECTED,
+            sim_stub.REG_PORTA_OUT: 0x00,
+            sim_stub.REG_PORTA_PIN2CTRL: 0x00,
+            sim_stub.REG_PORTA_PIN3CTRL: 0x00,
+        }
+        self.trapped = False
+
+    def run_ms(self, _milliseconds):
+        pass
+
+    def in_force_reset(self):
+        return self.trapped
+
+    def read_ioreg(self, addr):
+        return self.regs[addr]
+
+    def write_ioreg(self, addr, value):
+        self.regs[addr] = value
+
+    def run_until_force_reset(self, _max_ms):
+        # This is the implementation the physical-pin assertion must kill:
+        # clearing only the latches leaves an inverted output physically High.
+        self.regs[sim_stub.REG_PORTA_OUT] &= ~0x0C
+        self.trapped = True
+        return 1
+
+    def control_levels(self):
+        levels = []
+        for mask, ctrl_addr in (
+                (0x04, sim_stub.REG_PORTA_PIN2CTRL),
+                (0x08, sim_stub.REG_PORTA_PIN3CTRL)):
+            level = 1 if self.regs[sim_stub.REG_PORTA_OUT] & mask else 0
+            if self.regs[ctrl_addr] & sim_stub.PORT_INVEN_bm:
+                level ^= 1
+            levels.append(level)
+        return tuple(levels)
+
+
+def run_latch_only_quiescence(pinctrl_addr):
+    fake = LatchOnlyQuiesceSim()
+    sim_stub.Sim = lambda _elf: fake
+    checker = driver.Checker(driver.EXPECTED_FAULT_CASES_RELAY)
+    name = ("PORTA.PIN2CTRL(INVEN)" if
+            pinctrl_addr == sim_stub.REG_PORTA_PIN2CTRL else
+            "PORTA.PIN3CTRL(INVEN)")
+    with contextlib.redirect_stdout(io.StringIO()), \
+            contextlib.redirect_stderr(io.StringIO()):
+        driver._run_case("fake.elf", name, driver.REG, pinctrl_addr,
+                         sim_stub.PORT_INVEN_bm, driver.RESYNC, checker)
+    return checker, fake
+
+
+for coil_addr, high_levels, coil_name in (
+        (sim_stub.REG_PORTA_PIN2CTRL, (1, 0), "PA2 RESET-coil"),
+        (sim_stub.REG_PORTA_PIN3CTRL, (0, 1), "PA3 SET-coil")):
+    latch_only, latch_only_sim = run_latch_only_quiescence(coil_addr)
+    check((latch_only_sim.read_ioreg(sim_stub.REG_PORTA_OUT) & 0x0C) == 0
+          and latch_only_sim.control_levels() == high_levels,
+          "%s host negative control must have OUT Low but its physical pin High"
+          % coil_name)
+    check(latch_only.fails == 1 and latch_only.injections == 1,
+          "%s INVEN case must reject a latch-only emergency implementation"
+          % coil_name)
 
 
 class EdgeLog:

@@ -298,7 +298,7 @@ jobs:
         run: |
           make pic12f675-test pic12f675-test-target-variants STRICT_TOOLS=1 \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC_DFP="${XC8_DFP_ROOT}/xc8"
+            PIC_DFP="${XC8_DFP_ROOT}/xc8" PIC12F675_DATA_LIMIT=48
 
       # The mutation driver also runs its core AVR and ATtiny202 mutants. Keep
       # their extra toolchain and the minutes-long gate off the pull-request hot
@@ -497,7 +497,7 @@ jobs:
             || { echo "::error::MISRA analysis inputs missing"; exit 1; }
 
       - name: ATtiny202 pre-hardware gate (make attiny202-test)
-        run: make attiny202-test STRICT_TOOLS=1
+        run: make attiny202-test STRICT_TOOLS=1 XT_STATIC_RAM_LIMIT=16 XT_STACK_MAX_FRAME=32
 
       - name: Assert ATtiny202 images built (fail loud, do NOT skip)
         run: |

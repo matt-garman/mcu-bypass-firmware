@@ -59,14 +59,13 @@
 // a GPIO coil bit energizes the pin with the shadow still clean and trips
 // port-follows-shadow.
 #if defined(TQ2_L2_5V_RELAY)
-// Twelve output checks: two shadow (intent) resets, two GPIO (port) resets, the
-// shadow-vs-expected isolator, and seven relay resynchronization cases covering
-// both coils in both views and a coil fault arriving in a settled ENGAGED state
-// as well as in BYPASS. Three fewer than the CD4053 branch's 37 + 9 = 46 might
-// suggest, because every relay case now costs ONE check: the retired
-// zero-reset cases each spent a second check on the restore-and-verify branch
-// that only no-reset cases need.
-#  define PIC_FAULT_EXPECTED_CHECKS (40u + PIC_FAULT_CTX_INRANGE)
+// Twelve output checks plus six physical comparator checks: both CINV settings
+// for every mode one bit from off. Mode 110 must drive GP2 from COUT; modes
+// 101/011 must leave GP2 under its settled-low GPIO driver. Every relay case
+// costs one check, with physical quiescence, reset, recovery pulse, settlement
+// and liveness folded into that verdict.
+#  define PIC_FAULT_EXPECTED_CHECKS (45u + PIC_FAULT_CTX_INRANGE)
+#  define PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE 1
 #  define PIC_FAULT_EXTRA_OUTPUT_INJECTIONS() do { \
     inject_case("shadow.GP0", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x01, 1, \
                 "GP0 LED shadow (intent) corruption resets"); \
@@ -94,7 +93,7 @@
                 "shadow+port GP0 high vs BYPASS expected: isolates shadow-vs-expected, F2-blind (ctx_ untouched)"); \
 } while (0)
 #else
-#  define PIC_FAULT_EXPECTED_CHECKS (37u + PIC_FAULT_CTX_INRANGE)
+#  define PIC_FAULT_EXPECTED_CHECKS (39u + PIC_FAULT_CTX_INRANGE)
 // The shadow cases make both output-integrity clauses false. The GPIO cases
 // isolate port-follows-shadow: the shadow still matches settled BYPASS. The
 // final shadow.expected case does the converse: it drives shadow AND port to

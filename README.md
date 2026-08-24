@@ -151,7 +151,7 @@ The PIC12F675 has its own lane on the same XC8 installation (`pic12f675-*`
 targets, `PIC12F675_*` variables, and the 322's `PIC_CC`/`PIC_DFP` pair):
 
 ```
-make pic12f675                      # build all variants + 1024-word flash-budget gate
+make pic12f675                      # build all variants + 1024-word flash/48-byte data gates
 make pic12f675-test pic12f675-test-target-variants
                                     # one retained hash-qualified matrix across
                                     # CONFIG, analysis, coverage, calibration,
@@ -293,8 +293,8 @@ toolchain plus the fetched-on-demand Microchip device files and a patched
 `yasimavr` simulator built by `scripts/fetch_yasimavr.sh`):
 
 ```
-make attiny202             # build all variants + 2 KB flash-budget gate
-make attiny202-test        # all pre-hardware checks (fuses, budget, analysis, pulse widths)
+make attiny202             # build all variants + 2 KB flash/16-byte static-RAM gates
+make attiny202-test        # pre-hardware checks (fuses, resources, stack, analysis, widths)
 make attiny202-sim         # yasimavr functional + PA2/PA3 transition/pulse-presence test
 make attiny202-fault       # fault-injection: corrupt a guarded SFR/state, assert recovery
 make attiny202-lockstep    # ctx_-vs-verified-core co-simulation, every settled tick

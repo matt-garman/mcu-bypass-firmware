@@ -27,6 +27,8 @@ test/
   scratch_tree.sh           shared: throwaway repo-copy builder for sandbox harnesses
   soak_timing_config.h      shared: native soak timing bounds
   check_flash_budget.sh     shared: exact flash-budget checker
+  check_pic_data_budget.sh  shared: exact XC8 Data-space budget checker
+  check_stack_usage.sh      shared: GCC -fstack-usage record/frame checker
   check_stack_depth_pic.sh  shared: PIC hardware return-stack depth gate
   python_version.py         shared: Python 3.7+ host-gate prerequisite
   host_compiler_version.sh  shared: GCC 10+/Clang host-gate prerequisite
@@ -175,12 +177,14 @@ test/
                                   to hard-code
                                                   (make pic12f675-test-lockstep)
             test_fault_pic12f675.cc
-                                  PIC12F675 fault adapter. Its per-part output
-                                  policy injects into BOTH the SRAM shadow and
-                                  the pins: with the shadow left correct, only
-                                  "the port still follows it" can explain the
-                                  reset. Parked GP4 is injected through its
-                                  direction, shadow, pin and ANS3 guard paths
+                                   PIC12F675 fault adapter. Its per-part output
+                                   policy injects into BOTH the SRAM shadow and
+                                   the pins. Relay cases also attach directly to
+                                   physical GP1/GP2 nodes and cover comparator
+                                   ownership of GP2, so low GPIO intent cannot
+                                   masquerade as a de-energized pad. Parked GP4
+                                   is injected through its direction, shadow,
+                                   pin and ANS3 guard paths
                                                      (make pic12f675-test-fault)
             test_{fault,lockstep,io,soak}_pic_core.h
                                   shared libgpsim harness implementations,
@@ -331,15 +335,16 @@ The split mirrors the PIC lanes: **the host-only rows below are members of
 
 | layer | target | what it proves | substrate |
 |---|---|---|---|
-| Image generation | `test-attiny202-build` | Missing, partial, or malformed avr-gcc output cannot become an ATtiny202 image; the flash budget is enforced per variant. | host fake-compiler regression |
+| Image generation | `test-attiny202-build` | Missing, partial, or malformed avr-gcc output cannot become an ATtiny202 image; exactly one valid `Program:` and `Data:` record is required, with 2048-byte flash and 16-of-128-byte static-RAM limits enforced per variant. | host fake-compiler regression |
+| Shell stack frames | `attiny202-test-stack-bound`; `test-stack-bound-regression` | The real AVR-XT shell is compiled once per immutable production variant with shipping flags plus `-fstack-usage`; every fresh static frame must fit 32 bytes. The host regression pins exact routing and rejects missing, malformed, dynamic, stale, extra, and oversized evidence without requiring the DFP. | avr-gcc + ATtiny_DFP; host fake compiler |
 | Fuse configuration | `test-fuses` | All seven AVR8X fuse bytes match design intent, and the simulator's descriptor is patched to those exact production values rather than falling back to defaults. | host parser |
 | Golden-model bridge | `test-attiny202-model-ffi` | The ctypes bridge reaches the shipping pure core and behaves correctly at the `>=` press-threshold boundary, both saturation bounds, the lock-out, and a full round trip — independent hard-coded expectations, not another comparison against the model. | host |
 | Output-sequence oracle | `test-attiny202-output-oracle` | The PA2/PA3 transition, ordering and pulse-presence checker itself is correct. | host |
-| Fault accounting oracle | `test-attiny202-fault-oracle` | The fault driver's run accounting cannot silently under-count injections. | host |
+| Fault accounting oracle | `test-attiny202-fault-oracle` | The fault driver's run accounting cannot silently under-count injections, latch-only physical-pin handling is rejected, and the reviewed AVR-XT/PIC12F675 emergency register-write order is pinned. | host |
 | Coil-pulse width | `attiny202-delay-oracle` | Compiled relay (12 ms) and mute (5 ms) delay-body cycle counts, recovered from the disassembled `_delay_ms` loop in the built image, match design and clear the 4 ms datasheet minimum. Timer-ISR preemption makes the edge-to-edge pin-high interval slightly longer. Every recognized loop candidate must provide a decodable 16-bit seed; no candidate can be dropped as missing evidence. | host, over real image |
 | Static analysis | `attiny202-analyze` | cppcheck + MISRA pass over the AVR-XT shell with real DFP/avr-libc headers. | host tools |
 | Register-level functional | `attiny202-sim` | The real image toggles on debounced press, boots dark with the WDT locked and `PORTA.DIR` exact, stays stable at idle, handles a switch held through power-on, and drives the correct PA2/PA3 sequence per variant. | yasimavr |
-| Fault response | `attiny202-fault` | 24 selected SFR/latch/state/pin-polarity corruptions (26 on the relay variant) each produce the correct response — the sanity gate's force-reset path, a witnessed watchdog reset for the tick timer itself, safe overwrite at the ISR/main persisted-context transaction seams, or relay-coil escalation with both coils de-energized before the spin and nothing else re-driven, delivered from both BYPASS and ENGAGED. Includes an independent `INVEN` injection on all five bonded application pins. Zero skips, exact completion accounting over 25 (27) results. | yasimavr |
+| Fault response | `attiny202-fault` | 24 selected SFR/latch/state/pin-polarity corruptions (32 on the relay variant) each produce the correct response: the sanity gate's force-reset path, a witnessed watchdog reset for the tick timer itself, safe overwrite at the ISR/main persisted-context transaction seams, or relay-coil escalation with physical PA2/PA3 low and OUT/DIR/PINnCTRL canonical before the spin. Relay fixtures cover both coils' INVEN, pull-up, direction, combined stale-register state, and OUT faults from BYPASS and ENGAGED. Zero skips, exact completion accounting over 25 (33) results. | yasimavr |
 | Firmware/model lock-step | `attiny202-lockstep` | `ctx_` in simulated SRAM equals the shipping core's state after **every settled tick**, over both boot scenarios, plus LED and settled control-line agreement. Catches a shell defect on the tick it happens rather than as a wrong output later. | yasimavr + host core via ctypes |
 <!-- name-contract: exempt (SOAK_RESULT is the driver's stdout token, not a make variable) -->
 | Liveness soak | `attiny202-soak` | Over a long run the watchdog never resets the device (GPR0 reset witness), the sanity gate never force-resets, and a periodic 2-press round-trip still toggles. Emits the shared `SOAK_RESULT` release contract. | yasimavr |
@@ -400,9 +405,10 @@ ultimately validated on a real part at the bench.
   watchdog. Both are carried as vendored patches (reported upstream), so AVR-XT
   dynamic evidence rests on a project-local build rather than a stock tool. The
   functional test doubles as the in-harness regression for the second bug.
-- **No stack bound for the shell.** `make test-stack-bound` covers the pure core
-  and all three output drivers, which this build shares unchanged, but not
-  `bypass_mcu_avr_xt.c` itself.
+- **No complete AVR-XT call-depth bound.** `attiny202-test-stack-bound` now
+  constrains every AVR-XT shell frame, while `test-stack-bound` covers the shared
+  core and drivers. Like any `-fstack-usage` gate, these are per-function frame
+  limits rather than a whole call-chain/interrupt high-water measurement.
 - **UPDI programming is untested on silicon.** The `attiny202-program` recipe and
   its fuse writes have not been exercised against a real part.
 
@@ -497,7 +503,7 @@ aggregates still run both gates, so nothing was moved out of them.
 | Fail-closed aggregate | `pic10f322-test-target-variants` | Requires the complete supported matrix — empty, duplicate, unsupported, and incomplete requests are all rejected — then runs fault recovery, lock-step, and target-I/O for every PIC variant and requires each PASS sentinel. | Makefile wrapper |
 | Aggregate regression | `test-target-matrix` | Proves complete matrices run exactly once per variant, that empty, duplicate, unsupported, and incomplete matrices fail before any target invocation, and that all three PIC target aggregates require explicit fault, lock-step, and I/O completion markers. | Bash + fake recursive Make |
 | Aggregate fail-closed regression | `test-target-lane-markers` | Proves the PIC10F32x aggregates require each lane's explicit `PASS` marker and exercises every PIC12F675 variant-specific count-map branch against one reviewed count table. The PIC12F675 aggregate requires exactly one canonical terminal machine-result record: duplicate, malformed, diagnostic-only, wrong-device/lane/variant, zero-check, nonzero-failure, contradictory and trailing-output records are rejected. A skipped, crashed, or failing-but-zero-exit lane withholds aggregate success. | Bash + fake recursive Make |
-| PIC target result producer | `test-pic-target-result-records` | Compiles the shared result emitter for all three PIC12F675 variants and pins the canonical fault/lock-step/I-O records: 38/3005/25 for simple, 38/3005/26 for mute, and 41/3005/36 for relay. It also requires each production core to emit its lane record exactly once, outside nested preprocessor conditions. | C++17 host test + Python source contract |
+| PIC target result producer | `test-pic-target-result-records` | Compiles the shared result emitter for all three PIC12F675 variants and pins the canonical fault/lock-step/I-O records: 40/3005/25 for simple, 40/3005/26 for mute, and 46/3005/36 for relay. It also requires each production core to emit its lane record exactly once, outside nested preprocessor conditions. | C++17 host test + Python source contract |
 | Fault-evidence watchdog note | `test-fault-wdt-note-contract` | Each libgpsim fault adapter supplies its own `PIC_FAULT_WDT_NOTE`, and the core's exact multiline banner call must pass that macro as the `%s` argument. Required per-part facts must occur inside the macro definition, not merely in comments or elsewhere in the adapter; negative fixtures pin both exclusions and reject a wrong banner argument. The core still `#error`s if an adapter omits the note, and neither part's facts may leak into the other's. | Python structural source contract | <!-- name-contract: exempt (PIC_FAULT_WDT_NOTE is a C macro, not a make variable) -->
 | Hardware return-stack depth | `pic10f322-test-stack-bound`, `pic10f320-test-stack-bound`, `pic12f675-test-stack-bound` | Bounds the **8-level hardware return stack** — the PIC counterpart of the AVR's byte-valued `test-stack-bound`, and a different quantity: the PIC14 core has no data stack, and hardware-stack overflow on these parts is silent (no `STKPTR`, no `STKOVF`, no overflow reset). Computes the deepest call chain from the freshly generated instruction stream, cross-checks it against XC8's own `callstack` directives, and rejects missing/current-image assembly, recursion, indirect calls, and an over-budget build. Every variant, all three PIC targets. | XC8-generated `.s` + awk |
 | Stack-depth gate regression | `test-stack-bound-pic-regression` | Proves that gate rejects each way the analysis can be wrong — over budget, recursion, an overflowing build, the two oracles disagreeing, every unresolvable direct-call spelling/opcode, an indirect call, malformed function-psect ownership, no entry point, and a device pack declaring no depth — and that it still *accepts* the psect scaffolding XC8 really emits, including the mid-body re-selection that follows every inline-asm escape. Fixtures reproduce the full declaration/marker/re-selection sequence, so a rule that cannot read a real image fails here first. Synthetic, so it needs no toolchain. | Bash + awk |
@@ -601,7 +607,7 @@ targets are always fail-closed rather than skip-clean.
 | Shipping-source coverage | `pic10f320-coverage-check-fw` | An **exact** property, not a percentage floor: every line of the real firmware is host-executed except an enumerated, justified watchdog-reset path. Run per variant, because the three output stages give 84 / 95 / 100 executable lines. | host gcov with the mock `xc.h` |
 | All-variant host aggregate | `pic10f320-test-host-variants` | The four layers above across all three variants, with the complete supported matrix required first. **This is the member of `make test`.** | Makefile wrapper |
 | Return-stack oracle regression | `test-pic10f320-return-stack-oracle` | 149 deterministic checks: passing depths through 8, recursion/depth-9 rejection, independently required skip edges and operand boundaries, classic alias ranges, all 16,384 legality decisions, every destination writer against PCL/INDF/INTCON, 9-bit PC/physical-fetch aliasing, literal HEX layout, and fail-closed parser/file cases. Includes ten device-geometry checks: `--program-words` is validated as a power of two inside the 9-bit PC space, and fixtures whose verdict *differs* between the 256- and 512-word geometries pin the fetch alias in both directions — an image with code above word `0x0FF` is rejected when 256 words are declared, and one that relies on the fold is rejected when 512 are. **This is also a member of `make test`.** | dependency-free Python 3 |
-| Image generation | `test-pic-build` | 36 PIC10F322, 75 PIC10F320, and 126 PIC12F675 checks. All three runs prove missing-XC8 skips remove the complete product matrix despite attempted inventory overrides, stale assembly/symbol sidecars cannot survive a current-HEX-only build, and shell syntax in matrix text is rejected without execution. The 322 run additionally rejects recursively self-whitelisting GNU Make input; the 320 run covers selector rebuilds, deletion of reachable-RETFIE and depth-9 images despite attempted oracle/limit overrides, exact per-output XC8/host-compiler rebuild invocations with current clock/variant/host flags, and matching/mismatching/malformed/missing expected-image gate inputs. The 675 run adds exact simulator-image publication, retained aggregate matrix hashing, compiler/injector nondeterminism rejection, post-consumer verification, selected-variant/private-snapshot programming, signed-release tag/checksum/set binding, tracked-source and byte-drift rejection, worktree-local release-evidence refusal, read-only trim baseline capture, required/malformed/unreservable evidence rejection, immediate pre-write comparison, a freshly private-compiled CONFIG checker immune to the ignored repository executable, exact image/word record enforcement against no-op/near-match/wrong-image checkers, unsafe FOSC/WDTE/MCLRE/BOREN/BG fixtures, and whole-word-only drift, exact pk2cmd/ipecmd write argv, post-read programmed-byte/CONFIG verification, no-op/failed/interrupted-writer rejection, retry-safe read-only PENDING-transaction finalization bound to every reserved identity and a separately retained image, refusal of both an omitted and a substituted release identity before any device read, pre-read version validation, immutable and self-healing recovered PASS/FAIL evidence with full safety-oracle replay across trim/CONFIG/device/program-byte and malformed-read cases, retained OSCCAL/BG pass/fail evidence, acceptance of a zero-base extended-address record and refusal of a relocating one, external image/command refusal, overlap and path-replacement rejection, CLI, target-I/O, lock-step, fault-injection, soak, failed-producer cleanup, signal cleanup, and zero-image skip/strict checks including Python-probe ordering. | host fake-XC8/fake-CC regression |
+| Image generation | `test-pic-build` | 36 PIC10F322, 75 PIC10F320, and 156 PIC12F675 checks. All three runs prove missing-XC8 skips remove the complete product matrix despite attempted inventory overrides, stale assembly/symbol sidecars cannot survive a current-HEX-only build, and shell syntax in matrix text is rejected without execution. The 322 run additionally rejects recursively self-whitelisting GNU Make input; the 320 run covers selector rebuilds, deletion of reachable-RETFIE and depth-9 images despite attempted oracle/limit overrides, exact per-output XC8/host-compiler rebuild invocations with current clock/variant/host flags, and matching/mismatching/malformed/missing expected-image gate inputs. The 675 run additionally requires one exact, internally consistent XC8 Data-space record per variant, enforces the 48-of-64-byte policy, rejects malformed/duplicate/over-limit evidence and gate replacement, and proves late failure removes the complete matrix. It also covers exact simulator-image publication, retained aggregate matrix hashing, compiler/injector nondeterminism rejection, post-consumer verification, selected-variant/private-snapshot programming, signed-release tag/checksum/set binding, tracked-source and byte-drift rejection, worktree-local release-evidence refusal, read-only trim baseline capture, required/malformed/unreservable evidence rejection, immediate pre-write comparison, a freshly private-compiled CONFIG checker immune to the ignored repository executable, exact image/word record enforcement against no-op/near-match/wrong-image checkers, unsafe FOSC/WDTE/MCLRE/BOREN/BG fixtures, and whole-word-only drift, exact pk2cmd/ipecmd write argv, post-read programmed-byte/CONFIG verification, no-op/failed/interrupted-writer rejection, retry-safe read-only PENDING-transaction finalization bound to every reserved identity and a separately retained image, refusal of both an omitted and a substituted release identity before any device read, pre-read version validation, immutable and self-healing recovered PASS/FAIL evidence with full safety-oracle replay across trim/CONFIG/device/program-byte and malformed-read cases, retained OSCCAL/BG pass/fail evidence, acceptance of a zero-base extended-address record and refusal of a relocating one, external image/command refusal, overlap and path-replacement rejection, CLI, target-I/O, lock-step, fault-injection, soak, failed-producer cleanup, signal cleanup, and zero-image skip/strict checks including Python-probe ordering. | host fake-XC8/fake-CC regression |
 | Expected image bytes | `test-pic10f320-expected-images`; `pic10f320-test-build` | The dependency-free checker pins exact manifest grammar and fail-closed file handling in `make test`; the full-tool target rebuilds the immutable three-variant matrix and compares each raw HEX file with the reviewed XC8 V3.10 / DFP 1.9.189 SHA-256 baseline. Kept out of mutation kill targets so a broad byte mismatch cannot mask a weak behavioural oracle. | Python 3; pinned XC8/DFP for the real-image comparison |
 | CONFIG word | `pic10f320-test-config` | The emitted CONFIG word matches design intent, over every built image. Uses the shared checker with a device-accurate label. | host parser over HEX |
 | Hardware return stack | every `pic10f320` build; `pic10f320-test-return-stack` | The base build strictly parses and traverses its final HEX before marking that image complete, so gpsim/target/soak/release rebuilds use the same fail-closed gate. The explicit target rebuilds the supported matrix and rechecks all three together, reporting each maximum and witness. | dependency-free Python 3 over final HEX |
@@ -619,7 +625,7 @@ The shared stale-sidecar and matrix cases run in all three parameterized
 The script itself requires
 `PB_REBUILD_REQUIRED=1` for canonical `PB_TARGET=pic10f320` and enforces exactly 75
 final checks; canonical `PB_TARGET=pic10f322` enforces 36 and
-`PB_TARGET=pic12f675` enforces 89. A missing or misspelled rebuild/matrix arm
+`PB_TARGET=pic12f675` enforces 156. A missing or misspelled rebuild/matrix arm
 assignment therefore fails instead of reporting a smaller subset as green.
 
 In a fresh temporary repository the arm proves that identical requests reinvoke
@@ -734,7 +740,7 @@ gives the Classic AVR the soak-lane mutant the PIC and ATtiny202 families
 already had.
 
 **PIC12F675's target-tool mutants are one table, not three, and are chosen for
-what this part has that the 10F32x parts do not.** All 22 need XC8 plus gpsim or
+what this part has that the 10F32x parts do not.** All 23 need XC8 plus gpsim or
 libgpsim plus the derived simulator images, so there is nothing useful to split
 within that table. The core/host table separately carries the F2 transaction-seam
 and relay masked-clear-order mutants because shipping-source coverage can kill
@@ -775,9 +781,9 @@ kill, and the sandbox gaps that briefly cut it to 56 — is recorded in
 `docs/pic10f320_validation.md` §5.
 
 The driver independently pins the eight mutation categories at **31 core/host +
-22 AVR-XT + 29 PIC10F320 host + 11 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 10
-PIC target + 22 PIC12F675 = 132**. It rejects category drift before probing, then
-requires dispatched + skipped = 132 and killed + survived + errored = dispatched. Every
+23 AVR-XT + 29 PIC10F320 host + 11 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 10
+PIC target + 23 PIC12F675 = 134**. It rejects category drift before probing, then
+requires dispatched + skipped = 134 and killed + survived + errored = dispatched. Every
 worker status is checked; result status/output pairs are atomically published
 and accepted only with exact text grammar and no missing, hidden, or extra
 artifacts.
@@ -790,7 +796,7 @@ can enable the tool-dependent PIC10F320 mutants. The host-only
 including the wrappers' executable mode, and covers inventory, conservation,
 record/command parsing, atomic publication, checker-status classification,
 PIC12F675 behavioral signatures, source substitutions and baseline reasons, and
-result grammar in 131 checks. `MUTATION_TIMEOUT_S` defaults only when unset and
+result grammar in 132 checks. `MUTATION_TIMEOUT_S` defaults only when unset and
 accepts `0.001..86400` seconds with at most three fractional digits; zero,
 negative, empty, malformed, under-resolution, and over-limit values fail before
 any Make or tool probe. Every bounded checker owns a registered process session,

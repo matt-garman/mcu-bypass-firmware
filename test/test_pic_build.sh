@@ -84,7 +84,7 @@ case "$PB_TARGET" in
 		# complete-matrix production/consumption and the hardware-programming
 		# calibration guard.
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=126
+		expected_checks=156
 		;;
 	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
 esac
@@ -104,6 +104,7 @@ sym=${hex%.hex}.sym
 size_probe_stem="$repo/$PB_BUILD_DIR/size_probe_$PB_VARIANT"
 checks=0
 unset FAKE_XC8_MODE FAKE_XC8_FAIL_NAME FAKE_XC8_SIGNAL_MARKER \
+	FAKE_XC8_DATA_MODE FAKE_XC8_DATA_FAIL_NAME \
 	PIC12F675_PART PIC12F675_PROG PIC12F675_PROG_KIND PIC12F675_PROG_TOOL \
 	PIC12F675_READ_PROG PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT \
 	PIC12F675_PROG_HEX PIC12F675_PROG_CMD \
@@ -114,6 +115,7 @@ mkdir -p "$repo/src" "$repo/scripts" "$repo/test/pic10f320/equiv" \
 cp "$ROOT/Makefile" "$repo/Makefile"
 cp "$ROOT/scripts/validate-ihex.sh" "$repo/scripts/validate-ihex.sh"
 cp "$ROOT/test/check_stack_depth_pic.sh" "$repo/test/check_stack_depth_pic.sh"
+cp "$ROOT/test/check_pic_data_budget.sh" "$repo/test/check_pic_data_budget.sh"
 cp "$ROOT/test/pic10f320/return_stack_oracle.py" \
 	"$repo/test/pic10f320/return_stack_oracle.py"
 cp "$ROOT/test/pic10f320/check_expected_images.py" \
@@ -219,6 +221,48 @@ _ctx_:
 ASM
 	printf '_ctx_ 005D\n' > "${out%.hex}.sym"
 }
+write_data_summary() {
+	local data_mode=${FAKE_XC8_DATA_MODE:-pass}
+	if [ -n "${FAKE_XC8_DATA_FAIL_NAME:-}" ] \
+			&& [ "$out" = "$FAKE_XC8_DATA_FAIL_NAME" ]; then
+		data_mode=over-limit
+	fi
+	case "$data_mode" in
+		missing) ;;
+		duplicate)
+			printf '%s\n' \
+				'Data space used 20h (32) of 40h bytes (50.0%)' \
+				'Data space used 20h (32) of 40h bytes (50.0%)'
+			;;
+		malformed) printf 'Data space used 20h 32 of 40h bytes (50.0%%)\n' ;;
+		bad-percent) printf 'Data space used 20h (32) of 40h bytes (50.%%)\n' ;;
+		percent-mismatch) printf 'Data space used 20h (32) of 40h bytes (99.9%%)\n' ;;
+		mixed-malformed)
+			printf '%s\n' \
+				'Data space used 20h (32) of 40h bytes (50.0%)' \
+				'Data   space used 20h (32) of 40h bytes (50.0%) trailing'
+			;;
+		trailing) printf 'Data space used 20h (32) of 40h bytes (50.0%%) trailing\n' ;;
+		wrong-unit) printf 'Data space used 20h (32) of 40h words (50.0%%)\n' ;;
+		zero) printf 'Data space used 0h (0) of 40h bytes (0.0%%)\n' ;;
+		over-limit) printf 'Data space used 31h (49) of 40h bytes (76.6%%)\n' ;;
+		huge)
+			printf 'Data space used 9999999999999999999999999999999999999999h (9999999999999999999999999999999999999999) of 40h bytes (9999999999999999999999999999999999999999%%)\n'
+			;;
+		used-mismatch) printf 'Data space used 20h (33) of 40h bytes (51.6%%)\n' ;;
+		capacity-hex) printf 'Data space used 20h (32) of 41h bytes (49.2%%)\n' ;;
+		boundary) printf 'Data space used 30h (48) of 40h bytes (75.0%%)\n' ;;
+		xc8-tie) printf 'Data space used 24h (36) of 40h bytes (56.2%%)\n' ;;
+		spaced) printf '  Data   space used 020h ( 0032 ) of 040h bytes ( 050.0 %% )  \n' ;;
+		*)
+			case "$out" in
+				*-cd4053_with_mute.hex) printf 'Data space used 21h (33) of 40h bytes (51.6%%)\n' ;;
+				*-tq2_l2_5v_relay.hex) printf 'Data space used 22h (34) of 40h bytes (53.1%%)\n' ;;
+				*) printf 'Data space used 20h (32) of 40h bytes (50.0%%)\n' ;;
+			esac
+			;;
+	esac
+}
 out=
 args=$*
 while [ "$#" -gt 0 ]; do
@@ -234,6 +278,7 @@ case "$mode" in
 	leading-count) printf 'Program space used (00042)\n' ;;
 	*) printf 'Program space used (42)\n' ;;
 esac
+write_data_summary
 if [ -n "${FAKE_XC8_FAIL_NAME:-}" ] && [ "$out" = "$FAKE_XC8_FAIL_NAME" ]; then
 	mode=fail
 fi
@@ -306,6 +351,8 @@ cat > "$tools/noop-oracle.py" <<'EOF'
 raise SystemExit(0)
 EOF
 chmod 640 "$tools/noop-oracle.py"
+printf '#!/usr/bin/env sh\nexit 0\n' > "$tools/noop-data-gate"
+chmod 750 "$tools/noop-data-gate"
 
 # The PIC10F320 byte-identity target must compare the fake compiler's canonical
 # output with a sandbox-local baseline rather than the production XC8 hashes.
@@ -405,6 +452,36 @@ command_has_arg() {
 	case " $1 " in *" $2 "*) return 0 ;; *) return 1 ;; esac
 }
 
+count_exact_lines() {
+	local expected=$1 text=$2 line count=0
+	while IFS= read -r line || [ -n "$line" ]; do
+		if [ "$line" = "$expected" ]; then count=$((count + 1)); fi
+	done <<< "$text"
+	printf '%d\n' "$count"
+}
+
+assert_pic12f675_resource_records() {
+	local output=$1 mode=$2 variant used data_record flash_record
+	for variant in $PB_MATRIX_VARIANTS; do
+		case "$mode:$variant" in
+			boundary:*) used=48 ;;
+			xc8-tie:*) used=36 ;;
+			spaced:*) used=32 ;;
+			*:cd4053_with_mute) used=33 ;;
+			*:tq2_l2_5v_relay) used=34 ;;
+			*) used=32 ;;
+		esac
+		data_record="PIC12F675_DATA_BUDGET PASS variant=$variant used=$used limit=48 capacity=64"
+		[ "$(count_exact_lines "$data_record" "$output")" -eq 1 ] \
+			|| { printf 'FAIL: PIC12F675 build did not emit exactly one normalized data record: %s\n' \
+				"$data_record" >&2; exit 1; }
+		flash_record="OK:   $variant -> $PB_BUILD_DIR/$PB_FW_BASE-$PB_TAG-$variant.hex : 42 words (4.1%) of 1024"
+		[ "$(count_exact_lines "$flash_record" "$output")" -eq 1 ] \
+			|| { printf 'FAIL: PIC12F675 flash OK grammar changed or was duplicated: %s\n' \
+				"$flash_record" >&2; exit 1; }
+	done
+}
+
 assert_host_output_counts() {
 	local expected=$1 label=$2 output actual
 	shift 2
@@ -477,6 +554,17 @@ remove_matrix_images() {
 	done
 }
 
+seed_stale_matrix_products() {
+	local image ext path
+	mkdir -p "$repo/$PB_BUILD_DIR"
+	for image in $PB_MATRIX_IMAGES; do
+		for ext in hex s sym; do
+			path="$repo/$PB_BUILD_DIR/${image%.hex}.$ext"
+			printf 'stale product\n' > "$path"
+		done
+	done
+}
+
 assert_no_matrix_products() {
 	local label=$1 image ext path
 	for image in $PB_MATRIX_IMAGES; do
@@ -513,6 +601,35 @@ expect_build_matrix_rejected() {
 		|| { printf 'FAIL: %s build matrix reported the wrong %s error: %s\n' \
 			"$PB_LABEL" "$label" "$output" >&2; exit 1; }
 	assert_no_matrix_products "rejected $PB_LABEL matrix"
+	checks=$((checks + 1))
+}
+
+expect_data_mode_rejected() {
+	local mode=$1 label=$2 output
+	shift 2
+	seed_stale_matrix_products
+	if output=$(export FAKE_XC8_DATA_MODE="$mode"; run_matrix_make "$@" 2>&1); then
+		printf 'FAIL: PIC12F675 data gate accepted %s\n' "$label" >&2
+		exit 1
+	fi
+	[[ "$output" == *"PIC12F675 data-budget gate:"* ]] \
+		|| { printf 'FAIL: PIC12F675 %s failed outside the canonical data gate: %s\n' \
+			"$label" "$output" >&2; exit 1; }
+	assert_no_matrix_products "rejected PIC12F675 data transcript ($label)"
+	checks=$((checks + 1))
+}
+
+expect_data_limit_rejected() {
+	local label=$1 value=$2 output
+	seed_stale_matrix_products
+	if output=$(run_matrix_make "PIC12F675_DATA_LIMIT=$value" 2>&1); then
+		printf 'FAIL: PIC12F675 data gate accepted %s policy limit\n' "$label" >&2
+		exit 1
+	fi
+	[[ "$output" == *"policy limit must be a positive decimal integer no greater than 64"* ]] \
+		|| { printf 'FAIL: PIC12F675 %s policy limit failed for the wrong reason: %s\n' \
+			"$label" "$output" >&2; exit 1; }
+	assert_no_matrix_products "rejected PIC12F675 data limit ($label)"
 	checks=$((checks + 1))
 }
 
@@ -569,7 +686,7 @@ expect_oracle_image_rejected() {
 	checks=$((checks + 1))
 }
 
-run_make >/dev/null
+build_output=$(run_make)
 "$repo/scripts/validate-ihex.sh" "$hex"
 for sidecar in "$asm" "$sym"; do
 	[[ -f "$sidecar" && ! -L "$sidecar" && -s "$sidecar" ]] \
@@ -577,6 +694,117 @@ for sidecar in "$asm" "$sym"; do
 			"$PB_LABEL" "$sidecar" >&2; exit 1; }
 done
 checks=$((checks + 1))
+
+if [ "$PB_TARGET" = pic12f675 ]; then
+	assert_pic12f675_resource_records "$build_output" default
+	checks=$((checks + 1))
+
+	boundary_output=$(export FAKE_XC8_DATA_MODE=boundary; run_matrix_make)
+	assert_pic12f675_resource_records "$boundary_output" boundary
+	checks=$((checks + 1))
+
+	spaced_output=$(export FAKE_XC8_DATA_MODE=spaced; run_matrix_make)
+	assert_pic12f675_resource_records "$spaced_output" spaced
+	checks=$((checks + 1))
+
+	xc8_tie_output=$(export FAKE_XC8_DATA_MODE=xc8-tie; run_matrix_make)
+	assert_pic12f675_resource_records "$xc8_tie_output" xc8-tie
+	checks=$((checks + 1))
+
+	immutable_output=$(run_matrix_make PIC12F675_DATA_BYTES=999)
+	assert_pic12f675_resource_records "$immutable_output" default
+	checks=$((checks + 1))
+
+	for spec in \
+		'missing:missing record' \
+		'duplicate:duplicate records' \
+		'malformed:malformed record' \
+		'bad-percent:malformed percentage' \
+		'percent-mismatch:inconsistent percentage' \
+		'mixed-malformed:extra malformed record' \
+		'trailing:trailing record text' \
+		'wrong-unit:wrong data-space unit' \
+		'zero:zero usage' \
+		'over-limit:over-limit usage' \
+		'huge:huge usage' \
+		'used-mismatch:mismatched used counts' \
+		'capacity-hex:wrong hexadecimal capacity'; do
+		mode=${spec%%:*}; label=${spec#*:}
+		expect_data_mode_rejected "$mode" "$label"
+	done
+
+	expect_data_limit_rejected empty ''
+	expect_data_limit_rejected malformed malformed
+	expect_data_limit_rejected negative -1
+	expect_data_limit_rejected fractional 48.0
+	expect_data_limit_rejected zero 0
+	expect_data_limit_rejected over-capacity 65
+	expect_data_limit_rejected huge 9999999999999999999999999999999999999999
+
+	expect_data_mode_rejected malformed 'an attempted parser override' \
+		"PIC12F675_DATA_BUDGET_GATE=$tools/noop-data-gate"
+
+	canonical_gate="$repo/test/check_pic_data_budget.sh"
+	moved_gate="$tools/check_pic_data_budget.sh"
+	mv "$canonical_gate" "$moved_gate"
+	ln -s "$moved_gate" "$canonical_gate"
+	seed_stale_matrix_products
+	if symlink_output=$(run_matrix_make 2>&1); then
+		symlink_accepted=1
+	else
+		symlink_accepted=0
+	fi
+	rm -f "$canonical_gate"
+	mv "$moved_gate" "$canonical_gate"
+	[ "$symlink_accepted" -eq 0 ] \
+		|| { printf 'FAIL: PIC12F675 build accepted a symlinked canonical data gate\n' >&2; exit 1; }
+	[[ "$symlink_output" == *"canonical PIC12F675 data-budget gate is missing, symlinked, or not executable"* ]] \
+		|| { printf 'FAIL: symlinked PIC12F675 data gate failed for the wrong reason: %s\n' \
+			"$symlink_output" >&2; exit 1; }
+	assert_no_matrix_products 'symlinked canonical PIC12F675 data gate'
+	checks=$((checks + 1))
+
+	mv "$canonical_gate" "$moved_gate"
+	seed_stale_matrix_products
+	if missing_output=$(run_matrix_make 2>&1); then
+		missing_accepted=1
+	else
+		missing_accepted=0
+	fi
+	mv "$moved_gate" "$canonical_gate"
+	[ "$missing_accepted" -eq 0 ] \
+		|| { printf 'FAIL: PIC12F675 build accepted a missing canonical data gate\n' >&2; exit 1; }
+	[[ "$missing_output" == *"canonical PIC12F675 data-budget gate is missing, symlinked, or not executable"* ]] \
+		|| { printf 'FAIL: missing PIC12F675 data gate failed for the wrong reason: %s\n' \
+			"$missing_output" >&2; exit 1; }
+	assert_no_matrix_products 'missing canonical PIC12F675 data gate'
+	checks=$((checks + 1))
+
+	chmod 640 "$canonical_gate"
+	seed_stale_matrix_products
+	if nonexec_output=$(run_matrix_make 2>&1); then
+		nonexec_accepted=1
+	else
+		nonexec_accepted=0
+	fi
+	chmod 750 "$canonical_gate"
+	[ "$nonexec_accepted" -eq 0 ] \
+		|| { printf 'FAIL: PIC12F675 build accepted a non-executable canonical data gate\n' >&2; exit 1; }
+	[[ "$nonexec_output" == *"canonical PIC12F675 data-budget gate is missing, symlinked, or not executable"* ]] \
+		|| { printf 'FAIL: non-executable PIC12F675 data gate failed for the wrong reason: %s\n' \
+			"$nonexec_output" >&2; exit 1; }
+	assert_no_matrix_products 'non-executable canonical PIC12F675 data gate'
+	checks=$((checks + 1))
+
+	seed_stale_matrix_products
+	if (export FAKE_XC8_DATA_FAIL_NAME="$PB_MATRIX_FAIL_IMAGE"; \
+			run_matrix_make) >/dev/null 2>&1; then
+		printf 'FAIL: late PIC12F675 data-budget failure was accepted\n' >&2
+		exit 1
+	fi
+	assert_no_matrix_products 'late PIC12F675 matrix data-budget failure'
+	checks=$((checks + 1))
+fi
 
 # PIC12F675 simulator images carry a fabricated oscillator-calibration word and
 # must never sit beside shipping images. The producer derives its directory from
@@ -1237,8 +1465,8 @@ lane=
 	printf '%s\n' "$*" >> "${MATRIX_LANE_LOG:?}"
 	case "$lane" in
 		fault)
-			printf 'FAULT-INJECT PASS: 38 checks, 0 failures\n'
-			printf 'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=cd4053_simple status=pass checks=38 failures=0\n'
+			printf 'FAULT-INJECT PASS: 40 checks, 0 failures\n'
+			printf 'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=cd4053_simple status=pass checks=40 failures=0\n'
 			;;
 		lockstep)
 			printf 'LOCK-STEP PASS: 3005 checks, 0 failures\n'

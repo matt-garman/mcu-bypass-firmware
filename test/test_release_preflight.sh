@@ -10,6 +10,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 RELEASE="$ROOT/scripts/make-release.sh"
+RELEASE_WORKFLOW="$ROOT/.github/workflows/release.yml"
 RENDER="$ROOT/scripts/release-documentation.sh"
 MUTATION="$ROOT/test/run_mutation_tests.sh"
 lock_id=$(stat -Lc '%d:%i' "$ROOT") || { printf 'FAIL: could not identify the worktree lock\n' >&2; exit 1; }
@@ -1790,6 +1791,18 @@ grep -Eq '(command -v|mutation_command_is_available) "\$PIC_SOAK_CXX"' "$MUTATIO
 	|| fail "mutation qualification does not consume the selected PIC/AVR-XT tool paths"
 grep -Fq 'PIC10F320_SOAK_GPSIM_INC="$PIC10F320_SOAK_GPSIM_INC"' "$RELEASE" \
 	|| fail "release does not pass the selected PIC10F320 gpsim headers to test-long"
+[[ $(grep -cF 'XT_STATIC_RAM_LIMIT=16' "$RELEASE") -eq 4 ]] \
+	|| fail "release does not pin the 16-byte AVR-XT static-RAM policy at every build/qualification consumer"
+[[ $(grep -cF 'XT_STACK_MAX_FRAME=32' "$RELEASE") -eq 3 ]] \
+	|| fail "release does not pin the 32-byte AVR-XT frame policy at every qualification consumer"
+[[ $(grep -cF 'PIC12F675_DATA_LIMIT=48' "$RELEASE") -eq 3 ]] \
+	|| fail "release does not pin the 48-byte PIC12F675 Data-space policy at every build/qualification consumer"
+[[ $(grep -cF 'XT_STATIC_RAM_LIMIT=16' "$RELEASE_WORKFLOW") -eq 4 ]] \
+	|| fail "tag workflow does not pin the 16-byte AVR-XT static-RAM policy at every build/qualification consumer"
+[[ $(grep -cF 'XT_STACK_MAX_FRAME=32' "$RELEASE_WORKFLOW") -eq 3 ]] \
+	|| fail "tag workflow does not pin the 32-byte AVR-XT frame policy at every qualification consumer"
+[[ $(grep -cF 'PIC12F675_DATA_LIMIT=48' "$RELEASE_WORKFLOW") -eq 3 ]] \
+	|| fail "tag workflow does not pin the 48-byte PIC12F675 Data-space policy at every build/qualification consumer"
 if grep -Eq '^[[:space:]]*mutation_bounded[[:space:]]+make[[:space:]]+-C' "$MUTATION"; then
 	fail "a specialized mutation branch bypasses selected MUTATION_MAKE"
 fi

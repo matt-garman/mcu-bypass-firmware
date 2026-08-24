@@ -180,14 +180,14 @@ pic_calls=(
 	$'STRICT_TOOLS=1\tpic10f322-test-target-variants'
 	$'STRICT_TOOLS=1\tpic10f320-test'
 	$'STRICT_TOOLS=1\tpic10f320-test-target-variants'
-	$'STRICT_TOOLS=1\tpic12f675-test\tpic12f675-test-target-variants'
+	$'STRICT_TOOLS=1\tpic12f675-test\tpic12f675-test-target-variants\tPIC12F675_DATA_LIMIT=48'
 )
 xt_calls=(
-	$'STRICT_TOOLS=1\tattiny202-test'
-	$'STRICT_TOOLS=1\tattiny202-sim'
-	$'STRICT_TOOLS=1\tattiny202-fault'
-	$'STRICT_TOOLS=1\tattiny202-lockstep'
-	$'STRICT_TOOLS=1\tattiny202-soak\tXT_SOAK_DURATION_MS=300000\tXT_SOAK_PROGRESS_INTERVAL_MS=300000'
+	$'STRICT_TOOLS=1\tattiny202-test\tXT_STATIC_RAM_LIMIT=16\tXT_STACK_MAX_FRAME=32'
+	$'STRICT_TOOLS=1\tattiny202-sim\tXT_STATIC_RAM_LIMIT=16'
+	$'STRICT_TOOLS=1\tattiny202-fault\tXT_STATIC_RAM_LIMIT=16'
+	$'STRICT_TOOLS=1\tattiny202-lockstep\tXT_STATIC_RAM_LIMIT=16'
+	$'STRICT_TOOLS=1\tattiny202-soak\tXT_SOAK_DURATION_MS=300000\tXT_SOAK_PROGRESS_INTERVAL_MS=300000\tXT_STATIC_RAM_LIMIT=16'
 )
 build_call=$'STRICT_TOOLS=1\tattiny13a\tattiny85\tattiny45'
 strict_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=0'

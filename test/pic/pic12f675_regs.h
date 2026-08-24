@@ -60,6 +60,12 @@
 #  define FOOTSW_PIN_NAME "gpio5"
 #endif
 
+// Exact libgpsim pin names for physical relay-coil observation. GPIO register
+// readback is insufficient when COUT owns GP2, so the fault lane attaches nodes
+// to both package pins and measures their voltages directly.
+#define PIC_REG_RESET_COIL_PIN_NAME "gpio1"
+#define PIC_REG_SET_COIL_PIN_NAME   "gpio2"
+
 // ---- Port / direction / latch / analog-select -------------------------------
 #define PIC_REG_PORT_ADDR    0x005u   // GPIO: physical pin levels (no separate latch)
 #define PIC_REG_PORT_NAME    "GPIO"

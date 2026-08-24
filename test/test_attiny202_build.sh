@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-work=$(mktemp -d "${TMPDIR:-/tmp}/test-attiny202-build.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-$HOME}/test-attiny202-build.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 tools="$work/tools"
 dfp="$work/dfp"
@@ -12,7 +12,7 @@ mkdir -p "$tools" "$dfp/gcc/dev/attiny202/device-specs" "$dfp/include/avr"
 : > "$dfp/include/avr/iotn202.h"
 checks=0
 unset FAKE_CC_MODE FAKE_READELF_MODE FAKE_SIZE_MODE FAKE_OBJCOPY_MODE
-unset TEST_VARIANTS TEST_DFP XT_FLASH_BYTES
+unset TEST_VARIANTS TEST_DFP XT_FLASH_BYTES XT_STATIC_RAM_LIMIT XT_SRAM_BYTES
 # The skip-policy checks below pin STRICT_TOOLS explicitly; clear any ambient
 # value (scripts/ci-local.sh exports STRICT_TOOLS=1) so nothing inherits it.
 unset STRICT_TOOLS
@@ -49,11 +49,21 @@ set -euo pipefail
 case "${FAKE_SIZE_MODE:-pass}" in
 	fail) printf 'size failed\n' >&2; exit 1 ;;
 	empty) exit 0 ;;
-	malformed) printf 'Program: nope bytes\n' ;;
-	over) printf 'Program: 4096 bytes\n' ;;
-	huge) printf 'Program: 999999999999999999999999999999999999 bytes\n' ;;
-	adjacent) printf 'Program: 999999999999999999999999999999999999 bytes\n' ;;
-	*) printf 'Program: 100 bytes\n' ;;
+	malformed) printf 'Program: nope bytes (4.9%% Full)\nData: 8 bytes (6.2%% Full)\n' ;;
+	program_duplicate) printf 'Program: 100 bytes (4.9%% Full)\nProgram: 100 bytes (4.9%% Full)\nData: 8 bytes (6.2%% Full)\n' ;;
+	program_trailing) printf 'Program: 100 bytes (4.9%% Full) garbage\nData: 8 bytes (6.2%% Full)\n' ;;
+	program_zero) printf 'Program: 0 bytes (0.0%% Full)\nData: 8 bytes (6.2%% Full)\n' ;;
+	over) printf 'Program: 4096 bytes (200.0%% Full)\nData: 8 bytes (6.2%% Full)\n' ;;
+	huge|adjacent) printf 'Program: 999999999999999999999999999999999999 bytes (100.0%% Full)\nData: 8 bytes (6.2%% Full)\n' ;;
+	ram_missing) printf 'Program: 100 bytes (4.9%% Full)\n' ;;
+	ram_duplicate) printf 'Program: 100 bytes (4.9%% Full)\nData: 8 bytes (6.2%% Full)\nData: 8 bytes (6.2%% Full)\n' ;;
+	ram_malformed) printf 'Program: 100 bytes (4.9%% Full)\nData: nope bytes (6.2%% Full)\n' ;;
+	ram_trailing) printf 'Program: 100 bytes (4.9%% Full)\nData: 8 bytes (6.2%% Full) garbage\n' ;;
+	ram_zero) printf 'Program: 100 bytes (4.9%% Full)\nData: 0 bytes (0.0%% Full)\n' ;;
+	ram_boundary) printf 'Program: 100 bytes (4.9%% Full)\nData: 16 bytes (12.5%% Full)\n' ;;
+	ram_over) printf 'Program: 100 bytes (4.9%% Full)\nData: 17 bytes (13.3%% Full)\n' ;;
+	ram_huge) printf 'Program: 100 bytes (4.9%% Full)\nData: 999999999999999999999999999999999999 bytes (100.0%% Full)\n' ;;
+	*) printf 'AVR Memory Usage\nDevice: Unknown\n\nProgram: 100 bytes\nData: 8 bytes\n' ;;
 esac
 EOF
 
@@ -94,6 +104,12 @@ assert_no_artifacts() {
 		|| { printf 'FAIL: %s left a stale ELF\n' "$1" >&2; exit 1; }
 	[ ! -e "$build/bypass-attiny202-cd4053_simple.hex" ] \
 		|| { printf 'FAIL: %s left a stale HEX\n' "$1" >&2; exit 1; }
+	[ ! -e "$build/bypass-attiny202-cd4053_simple.elf.tmp" ] \
+		|| { printf 'FAIL: %s left a temporary ELF\n' "$1" >&2; exit 1; }
+	[ ! -e "$build/bypass-attiny202-cd4053_simple.hex.tmp" ] \
+		|| { printf 'FAIL: %s left a temporary HEX\n' "$1" >&2; exit 1; }
+	[ ! -e "$build/cd4053_simple.log" ] \
+		|| { printf 'FAIL: %s left a compiler log\n' "$1" >&2; exit 1; }
 }
 
 expect_failure() {
@@ -107,6 +123,22 @@ expect_failure() {
 	[[ "$output" == *"$expected"* ]] \
 		|| { printf 'FAIL: %s failed for the wrong reason: %s\n' "$label" "$output" >&2; exit 1; }
 	assert_no_artifacts "$label"
+	checks=$((checks + 1))
+}
+
+expect_success() {
+	local label=$1 expected=$2 output
+	shift 2
+	seed_stale
+	if ! output=$(export "$@"; run_build 2>&1); then
+		printf 'FAIL: %s was rejected: %s\n' "$label" "$output" >&2
+		exit 1
+	fi
+	[[ "$output" == *"$expected"* ]] \
+		|| { printf 'FAIL: %s omitted expected result: %s\n' "$label" "$output" >&2; exit 1; }
+	[ -s "$build/bypass-attiny202-cd4053_simple.elf" ] \
+		&& [ -s "$build/bypass-attiny202-cd4053_simple.hex" ] \
+		|| { printf 'FAIL: %s did not publish both artifacts\n' "$label" >&2; exit 1; }
 	checks=$((checks + 1))
 }
 
@@ -134,12 +166,25 @@ expect_failure "empty compiler output" "produced no ELF" FAKE_CC_MODE=empty
 expect_failure "readelf failure" "could not inspect ELF" FAKE_READELF_MODE=fail
 expect_failure "wrong architecture" "is not avrxmega3" FAKE_READELF_MODE=wrong
 expect_failure "size command failure" "could not measure Program size" FAKE_SIZE_MODE=fail
-expect_failure "missing size output" "invalid Program size" FAKE_SIZE_MODE=empty
-expect_failure "malformed size output" "invalid Program size" FAKE_SIZE_MODE=malformed
+expect_failure "missing size output" "expected exactly one Program size record" FAKE_SIZE_MODE=empty
+expect_failure "malformed size output" "malformed Program size record" FAKE_SIZE_MODE=malformed
+expect_failure "duplicate Program record" "expected exactly one Program size record, found 2" FAKE_SIZE_MODE=program_duplicate
+expect_failure "trailing Program garbage" "malformed Program size record" FAKE_SIZE_MODE=program_trailing
+expect_failure "zero Program usage" "Program size must be a positive decimal integer" FAKE_SIZE_MODE=program_zero
 expect_failure "flash budget overflow" "exceeds 2048 B" FAKE_SIZE_MODE=over
 expect_failure "huge size overflow" "exceeds 2048 B" FAKE_SIZE_MODE=huge
 expect_failure "adjacent huge size overflow" "exceeds 999999999999999999999999999999999998 B" \
 	FAKE_SIZE_MODE=adjacent XT_FLASH_BYTES=999999999999999999999999999999999998
+
+expect_failure "missing Data record" "expected exactly one Data size record, found 0" FAKE_SIZE_MODE=ram_missing
+expect_failure "duplicate Data record" "expected exactly one Data size record, found 2" FAKE_SIZE_MODE=ram_duplicate
+expect_failure "malformed Data record" "malformed Data size record" FAKE_SIZE_MODE=ram_malformed
+expect_failure "trailing Data garbage" "malformed Data size record" FAKE_SIZE_MODE=ram_trailing
+expect_failure "zero static RAM usage" "Data size must be a positive decimal integer" FAKE_SIZE_MODE=ram_zero
+expect_success "static RAM policy boundary" "static RAM 16/16 B (128 B device)" FAKE_SIZE_MODE=ram_boundary
+expect_failure "static RAM policy overflow" "exceeds 16 B policy limit" FAKE_SIZE_MODE=ram_over
+expect_failure "huge static RAM overflow" "exceeds 16 B policy limit" FAKE_SIZE_MODE=ram_huge
+expect_success "immutable device SRAM" "static RAM 8/16 B (128 B device)" XT_SRAM_BYTES=1
 expect_failure "objcopy failure" "could not generate HEX" FAKE_OBJCOPY_MODE=fail
 expect_failure "empty HEX output" "empty or invalid HEX" FAKE_OBJCOPY_MODE=empty
 expect_failure "invalid HEX output" "empty or invalid HEX" FAKE_OBJCOPY_MODE=invalid
@@ -181,6 +226,11 @@ expect_missing_validator "non-executable Intel HEX validator" \
 
 expect_failure "zero flash budget" "positive decimal integer" XT_FLASH_BYTES=0
 expect_failure "malformed flash budget" "positive decimal integer" XT_FLASH_BYTES=invalid
+expect_failure "zero static RAM policy" "positive decimal integer no greater than the 128 B device SRAM" XT_STATIC_RAM_LIMIT=0
+expect_failure "malformed static RAM policy" "positive decimal integer no greater than the 128 B device SRAM" XT_STATIC_RAM_LIMIT=invalid
+expect_failure "static RAM policy above device" "positive decimal integer no greater than the 128 B device SRAM" XT_STATIC_RAM_LIMIT=129
+expect_failure "huge static RAM policy" "positive decimal integer no greater than the 128 B device SRAM" \
+	XT_STATIC_RAM_LIMIT=999999999999999999999999999999999999
 expect_failure "unsupported variant" "unsupported ATtiny202 variant" TEST_VARIANTS=bogus
 expect_failure "redirect-like variant" "unsupported ATtiny202 variant" \
 	"TEST_VARIANTS=cd4053_simple >$work/injected"

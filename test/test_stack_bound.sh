@@ -2,19 +2,27 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-work=$(mktemp -d "${TMPDIR:-/tmp}/test-stack-bound.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-$HOME}/test-stack-bound.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 tools="$work/tools"
 build="$work/build"
-mkdir -p "$tools" "$build"
+xt_build="$work/xt-build"
+dfp="$work/dfp"
+mkdir -p "$tools" "$build" "$xt_build" \
+	"$dfp/gcc/dev/attiny202/device-specs" "$dfp/include/avr"
+: > "$dfp/gcc/dev/attiny202/device-specs/specs-attiny202"
+: > "$dfp/include/avr/iotn202.h"
 checks=0
 log="$work/compile.log"
-unset FAKE_STACK_MODE FAKE_STACK_LOG TEST_STACK_MAX
+args_log="$work/compile-args.log"
+unset FAKE_STACK_MODE FAKE_STACK_LOG FAKE_STACK_ARGS_LOG TEST_STACK_MAX
+unset TEST_DFP STRICT_TOOLS
 
 cat > "$tools/cc" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [ "${1:-}" = --version ]; then printf 'fake avr-gcc 1\n'; exit 0; fi
+original_args=$*
 out=
 source_file= macro=
 while [ "$#" -gt 0 ]; do
@@ -27,6 +35,7 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$out" ] || exit 2
 [ -z "${FAKE_STACK_LOG:-}" ] || printf '%s\t%s\n' "$source_file" "$macro" >> "$FAKE_STACK_LOG"
+[ -z "${FAKE_STACK_ARGS_LOG:-}" ] || printf '%s\n' "$original_args" >> "$FAKE_STACK_ARGS_LOG"
 su=${out%.o}.su
 mode=${FAKE_STACK_MODE:-pass}
 if [ "$mode" = compile_fail ]; then exit 1; fi
@@ -60,6 +69,12 @@ run_gate_private() {
 		AVR_STACK_MAX_FRAME="${TEST_STACK_MAX-32}" CC="$tools/cc"
 }
 
+run_xt_gate() {
+	make --no-print-directory -C "$ROOT" attiny202-test-stack-bound \
+		XT_STACK_BUILD_DIR="$xt_build" XT_DFP="${TEST_DFP-$dfp}" \
+		XT_STACK_MAX_FRAME="${TEST_STACK_MAX-32}" CC="$tools/cc" "$@"
+}
+
 seed_stale() {
 	: > "$log"
 	printf 'stale object\n' > "$build/stack_stale.o"
@@ -75,6 +90,22 @@ assert_clean() {
 		|| { printf 'FAIL: %s left stack artifacts\n' "$1" >&2; exit 1; }
 }
 
+seed_xt_stale() {
+	: > "$log"
+	: > "$args_log"
+	printf 'stale object\n' > "$xt_build/stack_stale.o"
+	printf 'stale.c:1:1:stale\t1\tstatic\n' > "$xt_build/stack_stale.su"
+}
+
+assert_xt_clean() {
+	local -a artifacts
+	shopt -s nullglob
+	artifacts=("$xt_build"/stack_*.o "$xt_build"/stack_*.su)
+	shopt -u nullglob
+	[ "${#artifacts[@]}" -eq 0 ] \
+		|| { printf 'FAIL: %s left AVR-XT stack artifacts\n' "$1" >&2; exit 1; }
+}
+
 expect_failure() {
 	local label=$1 expected=$2 output
 	shift 2
@@ -86,6 +117,20 @@ expect_failure() {
 	[[ "$output" == *"$expected"* ]] \
 		|| { printf 'FAIL: %s failed for the wrong reason: %s\n' "$label" "$output" >&2; exit 1; }
 	assert_clean "$label"
+	checks=$((checks + 1))
+}
+
+expect_xt_failure() {
+	local label=$1 expected=$2 output
+	shift 2
+	seed_xt_stale
+	if output=$(export "$@"; run_xt_gate 2>&1); then
+		printf 'FAIL: %s was accepted\n' "$label" >&2
+		exit 1
+	fi
+	[[ "$output" == *"$expected"* ]] \
+		|| { printf 'FAIL: %s failed for the wrong reason: %s\n' "$label" "$output" >&2; exit 1; }
+	assert_xt_clean "$label"
 	checks=$((checks + 1))
 }
 
@@ -124,5 +169,75 @@ expect_failure "unexpected extra report" "expected 5 stack-usage reports" FAKE_S
 expect_failure "unexpected extra object" "expected 5 stack-check objects" FAKE_STACK_MODE=extra_obj
 expect_failure "zero frame limit" "positive decimal integer" TEST_STACK_MAX=0
 expect_failure "malformed frame limit" "positive decimal integer" TEST_STACK_MAX=invalid
+
+# The AVR-XT gate is a production matrix, not a caller-selected development
+# subset. It must compile only the shipping shell, once under each selector,
+# with the same flags used by the image build plus -fstack-usage.
+seed_xt_stale
+output=$(export FAKE_STACK_LOG="$log" FAKE_STACK_ARGS_LOG="$args_log"; \
+	run_xt_gate VARIANTS=cd4053_simple XT_VARIANTS_SUPPORTED=bogus)
+[[ "$output" == *"OK: 3 fresh AVR-XT reports"* ]] \
+	|| { printf 'FAIL: valid AVR-XT reports did not produce the expected verdict\n' >&2; exit 1; }
+expected_xt_matrix=$'src/bypass_mcu_avr_xt.c\tCD4053_SIMPLE\nsrc/bypass_mcu_avr_xt.c\tCD4053_WITH_MUTE\nsrc/bypass_mcu_avr_xt.c\tTQ2_L2_5V_RELAY'
+actual_xt_matrix=$(LC_ALL=C sort "$log")
+[[ "$actual_xt_matrix" == "$expected_xt_matrix" ]] \
+	|| { printf 'FAIL: wrong AVR-XT stack compile matrix:\n%s\n' "$actual_xt_matrix" >&2; exit 1; }
+expected_common="-DF_CPU=2000000UL -DBYPASS_MCU_AVR_XT -mmcu=attiny202 -B $dfp/gcc/dev/attiny202 -I $dfp/include -Os -fshort-enums -funsigned-char -ffunction-sections -fdata-sections -Werror -Wall -Wextra -Wconversion -std=c11 -DBYPASS_CTX_CHECK"
+for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
+	case "$variant" in
+		cd4053_simple) macro=CD4053_SIMPLE ;;
+		cd4053_with_mute) macro=CD4053_WITH_MUTE ;;
+		tq2_l2_5v_relay) macro=TQ2_L2_5V_RELAY ;;
+	esac
+	expected_args="$expected_common -D$macro -fstack-usage -c src/bypass_mcu_avr_xt.c -o $xt_build/stack_xt_$variant.o"
+	grep -Fqx -- "$expected_args" "$args_log" \
+		|| { printf 'FAIL: AVR-XT %s stack compile did not use exact shipping flags\n' "$variant" >&2; exit 1; }
+done
+[ "$(wc -l < "$args_log")" -eq 3 ] \
+	|| { printf 'FAIL: AVR-XT stack matrix issued an unexpected number of compiler commands\n' >&2; exit 1; }
+assert_xt_clean "successful AVR-XT gate"
+checks=$((checks + 1))
+
+# This target belongs to the full-tool ATtiny202 aggregate only. The ordinary
+# host TEST_GATES inventory exercises this fake regression, not the real DFP
+# compile itself.
+ordinary_gates=$(make --no-print-directory -s -C "$ROOT" print-TEST_GATES CC="$tools/cc")
+case " $ordinary_gates " in
+	*" attiny202-test-stack-bound "*)
+		printf 'FAIL: AVR-XT real-tool stack gate leaked into ordinary TEST_GATES\n' >&2
+		exit 1 ;;
+esac
+attiny202_rule=$(make --no-print-directory -np -C "$ROOT" attiny202-test \
+	CC="$tools/cc" 2>/dev/null | awk '/^attiny202-test:/ && !found { print; found = 1 }')
+case " $attiny202_rule " in
+	*" attiny202-test-stack-bound "*) ;;
+	*) printf 'FAIL: attiny202-test does not route through attiny202-test-stack-bound\n' >&2
+		exit 1 ;;
+esac
+checks=$((checks + 1))
+
+seed_xt_stale
+output=$(export TEST_DFP="$work/missing-dfp" FAKE_STACK_LOG="$log"; \
+	run_xt_gate STRICT_TOOLS= 2>&1) \
+	|| { printf 'FAIL: absent DFP did not skip AVR-XT stack gate cleanly: %s\n' "$output" >&2; exit 1; }
+[[ "$output" == *"skipping ATtiny202 stack bound"* ]] \
+	|| { printf 'FAIL: absent DFP stack skip missing its reason: %s\n' "$output" >&2; exit 1; }
+[ ! -s "$log" ] || { printf 'FAIL: absent DFP stack skip invoked the compiler\n' >&2; exit 1; }
+assert_xt_clean "absent DFP AVR-XT stack skip"
+checks=$((checks + 1))
+
+seed_xt_stale
+if output=$(export TEST_DFP="$work/missing-dfp"; run_xt_gate STRICT_TOOLS=1 2>&1); then
+	printf 'FAIL: absent DFP under STRICT_TOOLS=1 did not fail AVR-XT stack gate\n' >&2
+	exit 1
+fi
+[[ "$output" == *"STRICT_TOOLS=1"* ]] \
+	|| { printf 'FAIL: strict absent-DFP stack failure had the wrong reason: %s\n' "$output" >&2; exit 1; }
+assert_xt_clean "absent DFP strict AVR-XT stack gate"
+checks=$((checks + 1))
+
+expect_xt_failure "malformed AVR-XT report" "invalid stack-usage record" FAKE_STACK_MODE=malformed
+expect_xt_failure "dynamic AVR-XT frame" "invalid stack-usage record" FAKE_STACK_MODE=dynamic
+expect_xt_failure "oversized AVR-XT frame" "frame exceeds 32 B" FAKE_STACK_MODE=over
 
 printf 'stack-bound gate validation: %d checks, 0 failures\n' "$checks"

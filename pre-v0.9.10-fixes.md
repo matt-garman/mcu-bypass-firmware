@@ -1142,19 +1142,27 @@ owner, consistent with project policy.
   peripheral/polarity neutralization before latch clearing, and low latch state
   before output direction is restored. New latch-only mutants raise the pinned
   inventory from 132 to 134.
+- Resource coverage is now explicit. ATtiny202 requires one exact flash/static-
+  RAM report, enforces 2048 B flash and 16/128 B static RAM, and compiles the
+  AVR-XT shell under all three production selectors with a 32 B per-frame
+  ceiling. PIC12F675 requires one consistent XC8 Data-space report per variant
+  and enforces an inclusive 48/64 B limit. Both have fail-closed fake-tool
+  regressions; actual values still require the provisioned compilers.
 - Available host validation passes: `test-attiny202-fault-oracle` (48 checks),
+  `test-stack-bound-regression` (23 checks), `test-attiny202-build` (52 checks),
   `pic12f675-coverage-check-fw`, `test-pic-target-result-records`,
   `test-target-matrix`, `test-target-lane-markers`, `test-mutation-sandbox`
-  (132 checks), `test-pic-build`, release preflight/qualification/history,
-  TODO-index, Makefile-name, and watchdog-note contracts; `git diff --check` is
-  clean.
+  (132 checks), `test-pic-build` (36/75/156 checks),
+  `test-pic-build-rebuild` (28 checks), release
+  preflight/qualification/history, TODO-index, Makefile-name, and watchdog-note
+  contracts; `git diff --check` is clean.
 - Target evidence is not claimed on this host. Strict AVR-XT execution stops
   because `third_party/attiny_dfp` is absent; strict PIC12F675 execution stops
   because XC8/DFP/libgpsim are absent. The repository-wide `make test` also
   stops in the pre-existing host setup at missing `gnu/stubs-32.h` during
   Classic-AVR clang-tidy. Keep the first five acceptance boxes open until the
-  real-image target lanes, resource/stack/timing/static gates, and complete 134
-  mutant run pass on the provisioned validation host.
+  real-image target lanes, actual resource/stack measurements, timing/static
+  gates, and complete 134-mutant run pass on the provisioned validation host.
 
 ### F3 - Resolve the PIC10F320 two-write relay-coil clear
 

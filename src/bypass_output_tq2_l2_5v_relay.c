@@ -74,11 +74,6 @@ void hw_set_engaged_state(void) {
     set_relay_coils_low();
 }
 
-// Fail-safe de-energization on the escalation path (see bypass_hw_iface.h):
-// one masked clear drives both coils to their de-energized idle in a single
-// write, before the shell spins out its watchdog timeout. The reset that
-// follows re-runs init(), whose full-width BYPASS actuation -- not this clear
-// -- is what re-synchronizes the physical relay with the logical state.
 void hw_outputs_reassert_safe(void) {
     set_relay_coils_low();
 }

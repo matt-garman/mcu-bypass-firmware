@@ -78,11 +78,20 @@ file is the human-readable summary of *what changed*.
   clause becomes load-bearing at the settled seam, where the old whole-port
   refresh used to pre-empt it.
 
+  AVR-XT and PIC12F675 now add shell-specific emergency pin quiescence around
+  the shared latch clear. AVR-XT removes coil pull-ups, disconnects the output
+  drivers, clears `PINnCTRL` inversion and stale `OUT`, and restores direction
+  only after both latches are low. PIC12F675 removes coil pull-ups, makes the
+  pins inputs, disables analog/comparator ownership, clears shadow/GPIO, and
+  then restores output direction. This closes cases where `INVEN` makes a low
+  AVR latch drive high or comparator `COUT` owns PIC GP2 and ignores GPIO
+  writes.
+
   Fault tests on all six substrates now assert the two halves separately --
   de-energization before the spin, and a measured full-width recovery pulse
-  where the simulator models the reset -- and deliver every coil fault in both
-  settled states (BYPASS with an unintended SET, ENGAGED with an unintended
-  RESET). The blocking actuation sequence remains excluded from every guarantee:
+  where the simulator models the reset. Directional coil-output faults cover
+  both settled-state hazards: BYPASS with an unintended SET and ENGAGED with an
+  unintended RESET. The blocking actuation sequence remains excluded from every guarantee:
   shipping-source tests characterize active-coil-low and inactive-coil-high
   faults at actual recorded offsets of 1, 6, and 11 ms inside both SET and RESET
   delays, but do not cover every instruction boundary and prove modeled
@@ -90,6 +99,24 @@ file is the human-readable summary of *what changed*.
   the command or that mechanical behavior is safe. The CD4053 variants retain an
   explicit no-op. Design:
   `docs/relay_coil_fault_correction.md`.
+
+  The AVR-XT relay fault matrix observes physical PA2/PA3, not only `OUT`, under
+  inversion, pull-up, direction, combined stale-register, and ordinary latch
+  faults. The PIC12F675 matrix enumerates all comparator modes one bit from off
+  and directly measures modeled GP1/GP2 voltage for both `COUT` states in the
+  reachable GP2-output mode. Latch-only negative controls fail on both targets.
+  These simulator checks are electrical pin-model evidence, not hardware or
+  relay-mechanical evidence.
+
+  Resource gates now cover the two affected shells explicitly. ATtiny202 builds
+  require one exact `Program:` and `Data:` record, enforce 2048 bytes of flash
+  and at most 16 of 128 bytes of static RAM, and compile the AVR-XT shell under
+  all three production selectors with a 32-byte per-frame `-fstack-usage` limit.
+  PIC12F675 builds require one internally consistent XC8 Data-space summary per
+  variant and enforce an inclusive 48-of-64-byte limit. Toolchain-free
+  regressions reject missing, duplicate, malformed, stale, dynamic,
+  inconsistent, and over-limit evidence before release qualification can rely
+  on either gate.
 
 - **A single-bit upset of the debounce context is now detected while it is still
   in range.** The per-tick sanity gate previously rejected only out-of-range

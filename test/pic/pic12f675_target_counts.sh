@@ -5,9 +5,9 @@
 # Makefile count-map branch is checked against one test-side source of truth.
 pic12f675_target_count_table() {
 	printf '%s\n' \
-		'cd4053_simple 38 3005 25' \
-		'cd4053_with_mute 38 3005 26' \
-		'tq2_l2_5v_relay 41 3005 36'
+		'cd4053_simple 40 3005 25' \
+		'cd4053_with_mute 40 3005 26' \
+		'tq2_l2_5v_relay 46 3005 36'
 }
 
 pic12f675_target_counts() {

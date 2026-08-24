@@ -32,7 +32,7 @@ set -euo pipefail
 # Parameterized so ONE regression covers both chips (merge plan §4 FOLD).
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-work=$(mktemp -d "${TMPDIR:-/tmp}/test-pic-rebuild.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-${HOME:?HOME is required when TMPDIR is unset}}/test-pic-rebuild.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 repo="$work/repo"
 tools="$work/tools"
@@ -160,6 +160,7 @@ printf '%s\n' ':020000000028D6' ':02400E009E38DA' ':00000001FF' > "$out"
 printf 'fake assembly\n' > "${out%.hex}.s"
 printf '_gpio_shadow_ 0020\n' > "${out%.hex}.sym"
 printf 'Program space used (42)\n'
+printf 'Data space used 20h (32) of 40h bytes (50.0%%)\n'
 EOF
 chmod 755 "$tools/cxx" "$tools/pkg-config" "$tools/timing-python" "$tools/xc8"
 
