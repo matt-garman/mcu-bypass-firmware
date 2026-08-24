@@ -50,7 +50,7 @@ the hardware shells.
 | Member scope | All three members | The fold covers the whole context uniformly. |
 | Enablement | Compile-time opt-in macro `BYPASS_CTX_CHECK` | Makes the per-part decision explicit and lets the mutation harness build a feature-off baseline. |
 | Part scope | **PIC12F675, AVR classic, AVR-XT, PIC10F322** | Every part that links the pure core and has flash room. |
-| **PIC10F320 excluded** | Capacity limit | 320 does not link `bypass_pure.c` at all (self-contained inlined logic), and even the cheapest fold overflows its 256-word flash on the relay variant. Its range-only gate stays; the exclusion is documented and tested. |
+| **PIC10F320 excluded** | Capacity limit | 320 does not link `bypass_pure.c` at all (self-contained inlined logic), and when this was priced even the cheapest fold overflowed its 256-word flash on the relay variant. Its range-only gate stays; the exclusion is documented and tested. The relay image has since shrunk, so the margin that decision rested on has moved -- see "PIC10F320 -- excluded, and why that is safe". |
 
 ## The pure-core addition
 
@@ -213,10 +213,19 @@ computation, and publication rather than only apply-and-re-derive.
 
 PIC10F320 is the self-contained special-case shell: it does not link
 `bypass_pure.c`, inlining its own `debounce_integrate`/`debounce_step` to fit
-256 words. Its relay variant already sits at 245/256 (11 free), and even the
-one-byte XOR-fold overflows the device (linker: `can't find words for psect ...
-CODE`). So 320 keeps its existing range-only gate and does **not** define
-`BYPASS_CTX_CHECK`. This is recorded as a per-target capacity difference (per the
+256 words. When this was priced its relay variant sat at 245/256 (11 free), and
+even the one-byte XOR-fold overflowed the device (linker: `can't find words for
+psect ... CODE`). So 320 keeps its existing range-only gate and does **not**
+define `BYPASS_CTX_CHECK`.
+
+> The relay figure has moved twice since, and the current one is 242/256
+> (14 free): `v0.9.10` added three words for the coil-latch integrity term and
+> then returned six by making the coil clear a single masked `LATA` write. The
+> exclusion is **not** re-opened on that basis here -- doing so would need the
+> fold re-priced against the current image on all three variants, and
+> `cd4053_with_mute` at 241/256 is untouched by any of it -- but the margin this
+> decision was made against no longer holds, so re-price rather than cite the
+> paragraph above if the question is raised again. This is recorded as a per-target capacity difference (per the
 review's "document and test per-target differences rather than silently weaken
 one target"), and a focused test asserts the 320 images never reference the F2
 symbol. Mixing the feature onto only 320's lighter `cd4053_simple` variant
@@ -242,7 +251,7 @@ figure below is enforced by a build gate, not a one-off reading.
 | PIC12F675 | 1024 words | 546 / 572 / 563 words | 452 words (mute) |
 | ATtiny13a (AVR classic) | 921 B | 834 / 874 / 864 B | 47 B (mute) |
 | ATtiny202 (AVR-XT) | 2048 B | 964 / 1004 / 994 B | 1044 B (mute) |
-| PIC10F320 | 256 words | 220 / 241 / 245 words | 11 words; F2 excluded |
+| PIC10F320 | 256 words | 220 / 241 / 242 words | 14 words; F2 excluded |
 
 PIC10F322 is the binding constraint, and it stays inside 512 words in every
 variant only because the integrity-check fold pays for the transaction -- see

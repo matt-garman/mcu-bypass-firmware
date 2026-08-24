@@ -48,11 +48,26 @@
 #define BYPASS_OUTPUT_DDR_MASK (0x07U)  // RA0|RA1|RA2
 
 
-// Watchdog margin floor, consumed by the shared blocking output drivers: one
-// tick + the longest blocking actuation must stay under the WORST-CASE WDT
-// period (de-rated minima, never nominal). Asserted in bypass_output_*.c.
+// Watchdog pet-to-pet budget, consumed by the shared output drivers through
+// WDT_PET_TO_PET_MAX_MS() (bypass_output_common.h): the worst-case WALL-CLOCK
+// interval between two watchdog pets must stay under the WORST-CASE WDT period
+// (de-rated minima, never nominal). Asserted in bypass_output_*.c. See
+// "Watchdog pet-to-pet budget" in DESIGN_DOCUMENTATION.adoc for the derivation
+// and the measured corroboration of each term below.
 #define TICK_PERIOD_MS    (1U)    // ~1 ms TMR2 tick
 #define WDT_MIN_PERIOD_MS (160U)  // WDTPS=0x08 ~256 ms nom; param 31 (-37%) -> ~160 ms floor
+
+// Bounded non-blocking work in the pet-to-pet window: init()'s configuration on
+// the boot path, or sanity gate + integrate + step between the polled TMR2IF
+// tick and the CLRWDT in steady state. One whole tick is the allowance; a body
+// that outran a tick would stop being tick-gated at all, which the gpsim
+// free-run checkpoint fails on.
+#define WDT_LOOP_WORK_MS  (1U)
+
+// No ISR preemption term: this shell is a single POLLED loop with GIE clear and
+// no interrupt service routine, so nothing can stretch a __delay_ms() in wall
+// time. A shell that acquired an interrupt would have to re-derive this.
+#define WDT_ISR_STRETCH_PCT (0U)
 
 
 #endif // BYPASS_PINS_PIC10F322_H__

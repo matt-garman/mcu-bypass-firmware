@@ -537,12 +537,21 @@ static void finish_relay_resync_case(Register *target, Register *latch,
                                      guint64 inject_cycle) {
     static unsigned const coil_mask = PIC_REG_COIL_MASK;
 
-    // -- half 1: both coils de-energized on the escalation path. PIC12F675's
-    // physical-pin lane continues through the watchdog GOTO-to-self and proves
-    // GP1/GP2 are Low there; GPIO readback alone aliases COUT and is not proof.
-    bool            deenergized      = false;
-    guint64         deenergize_cycle = 0u;
-    unsigned const  deenergize_cap   =
+    // -- half 1: both coils de-energized on the escalation path, before the
+    // spin. Sampled every instruction so `partial_clear` observes the write
+    // sequence, not only its settled result. A clear that walked the two bits
+    // separately would transiently leave one energized.
+    //
+    // Both register views are tracked because an SRAM shadow and its port write
+    // can move a step apart. PIC12F675's physical-pin lane additionally follows
+    // the watchdog GOTO-to-self and proves GP1/GP2 are Low there; GPIO readback
+    // alone aliases COUT and is not proof.
+    bool            deenergized       = false;
+    bool            partial_clear     = false;
+    guint64         deenergize_cycle  = 0u;
+    unsigned        prev_latch_coils  = latch->get_value() & coil_mask;
+    unsigned        prev_port_coils   = port->get_value() & coil_mask;
+    unsigned const  deenergize_cap    =
         (unsigned)(RESYNC_DEENERGIZE_MS * CYCLES_PER_MS);
 #if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
     bool            spin_seen         = false;
@@ -553,9 +562,20 @@ static void finish_relay_resync_case(Register *target, Register *latch,
 #endif
 
     for (unsigned i = 0; i < deenergize_cap; ++i) {
-        bool const registers_idle =
-            ((latch->get_value() & coil_mask) == 0u) &&
-            ((port->get_value() & coil_mask) == 0u);
+        unsigned const latch_coils = latch->get_value() & coil_mask;
+        unsigned const port_coils  = port->get_value() & coil_mask;
+        if ((latch_coils != 0u) && (latch_coils != prev_latch_coils) &&
+                ((latch_coils & prev_latch_coils) == latch_coils)) {
+            partial_clear = true;
+        }
+        if ((port_coils != 0u) && (port_coils != prev_port_coils) &&
+                ((port_coils & prev_port_coils) == port_coils)) {
+            partial_clear = true;
+        }
+        prev_latch_coils = latch_coils;
+        prev_port_coils  = port_coils;
+
+        bool const registers_idle = (latch_coils == 0u) && (port_coils == 0u);
 #if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
         double sample_reset_v = 0.0;
         double sample_set_v   = 0.0;
@@ -626,14 +646,16 @@ static void finish_relay_resync_case(Register *target, Register *latch,
 #endif
 
     bool const pass = ran_clean && injection_ok && deenergize_order_ok &&
-                      physical_spin_ok && (reset_delta == 1u) &&
+                      !partial_clear && physical_spin_ok &&
+                      (reset_delta == 1u) &&
                       (reset_coil_cycles >= min_pulse_cycles) &&
                       (set_coil_cycles == 0u) &&
                       ((final_port & coil_mask) == 0u) &&
                       ((final_port & PIC_REG_LED_MASK) == 0u);
 
     if (pass) {
-        printf("    PASS: coils inactive in %" G_GUINT64_FORMAT " cycles (%.3f ms),",
+        printf("    PASS: coils inactive in %" G_GUINT64_FORMAT " cycles (%.3f ms)"
+               " with no partially cleared coil latch,",
                deenergize_cycle >= inject_cycle ? deenergize_cycle - inject_cycle : 0u,
                (double)(deenergize_cycle >= inject_cycle
                             ? deenergize_cycle - inject_cycle : 0u) /
@@ -652,11 +674,13 @@ static void finish_relay_resync_case(Register *target, Register *latch,
         g_fails++;
         fprintf(stderr,
                 "    FAIL: init=0x%02x requested=0x%02x read=0x%02x"
-                " injection=%u deenergized=%u deenergize-cycles=%" G_GUINT64_FORMAT,
+                " injection=%u deenergized=%u deenergize-cycles=%" G_GUINT64_FORMAT
+                " partial-clear=%u",
                 before_val, injected, written, injection_ok ? 1u : 0u,
                 deenergized ? 1u : 0u,
                 deenergized && deenergize_cycle >= inject_cycle
-                    ? deenergize_cycle - inject_cycle : 0u);
+                    ? deenergize_cycle - inject_cycle : 0u,
+                partial_clear ? 1u : 0u);
 #if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
         fprintf(stderr, " spin=%u GP1=%.3fV GP2=%.3fV",
                 spin_seen ? 1u : 0u, reset_pin_v, set_pin_v);

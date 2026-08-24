@@ -644,13 +644,13 @@ record_publish_inventory() {
 }
 
 run_publish_step() {
-	local applicable=$1 digest=$2
+	local applicable=$1 digest=$2 tag=${3:-v0.9.8}
 	rm -f "$publish_args" "$tag_verify_log"
 	(
 		cd "$publish_fixture"
 		PATH="$publish_bin:$PATH" GH_ARGS="$publish_args" \
 			TAG_VERIFY_LOG="$tag_verify_log" \
-			RELEASE_DIR="$publish_assets" RELEASE_TAG=v0.9.8 \
+			RELEASE_DIR="$publish_assets" RELEASE_TAG="$tag" \
 			RELEASE_INVENTORY="$publish_inventory" \
 			RELEASE_INVENTORY_SHA256="$publish_inventory_sha256" \
 			VERIFIED_RELEASE_COMMIT=0000000000000000000000000000000000000000 \
@@ -664,8 +664,8 @@ run_publish_step() {
 }
 
 expect_publish_fail() {
-	local label=$1 applicable=$2 digest=$3 expected=$4
-	if run_publish_step "$applicable" "$digest" \
+	local label=$1 applicable=$2 digest=$3 expected=$4 tag=${5:-v0.9.8}
+	if run_publish_step "$applicable" "$digest" "$tag" \
 			>"$work/publish-fail.out" 2>&1; then
 		fail "$label: invalid frozen publication state was accepted"
 	fi
@@ -698,6 +698,44 @@ if grep -Fxq "$publish_report" "$publish_args"; then
 	fail "inapplicable publication passed RENAME_IDENTITY.md to gh"
 fi
 checks=$((checks + 1))
+
+# Publication kind. The same verified bundle must publish as an ordinary
+# release under a bare vX.Y.Z and as a GitHub PRERELEASE under any accepted
+# suffix, so a candidate can never win latest-release selection. A shape
+# outside the version grammar must abort before gh is reached: the locate step
+# already rejected it before any build, so one arriving here means that gate
+# was bypassed, and defaulting to either kind would publish it.
+run_publish_step 0 '' v0.9.8 >"$work/publish.out" 2>"$work/publish.err" \
+	|| fail "stable tag did not publish: $(<"$work/publish.err")"
+if grep -Fxq -- '--prerelease' "$publish_args"; then
+	fail "stable vX.Y.Z publication marked the release a prerelease"
+fi
+grep -Fxq -- '--verify-tag' "$publish_args" \
+	|| fail "stable publication dropped --verify-tag"
+grep -Fxq -- 'v0.9.8' "$publish_args" \
+	|| fail "stable publication did not publish under its own tag"
+# The flag lives in an array that is EMPTY for a stable tag. Under `set -u` a
+# shell older than bash 4.4 expands that to one empty word, which gh would read
+# as an empty asset path -- so require that no empty argument reaches it.
+if grep -qx '' "$publish_args"; then
+	fail "stable publication passed an empty argument to gh"
+fi
+checks=$((checks + 1))
+
+run_publish_step 0 '' v0.9.8-rc.1 >"$work/publish.out" 2>"$work/publish.err" \
+	|| fail "suffixed tag did not publish: $(<"$work/publish.err")"
+[ "$(grep -Fxc -- '--prerelease' "$publish_args")" -eq 1 ] \
+	|| fail "suffixed publication did not mark the release a prerelease exactly once"
+grep -Fxq -- '--verify-tag' "$publish_args" \
+	|| fail "suffixed publication dropped --verify-tag"
+grep -Fxq -- 'v0.9.8-rc.1' "$publish_args" \
+	|| fail "suffixed publication did not publish under its own tag"
+checks=$((checks + 1))
+
+for malformed_tag in 'v0.9.8-' 'v0.9.8-rc..1' 'v0.9.8--rc' 'v0.9.8+1' 'v0.9' '0.9.8'; do
+	expect_publish_fail "malformed tag '$malformed_tag'" 0 '' \
+		"is not vX.Y.Z (optionally -suffix)" "$malformed_tag"
+done
 
 expect_publish_fail "missing applicable frozen report" 1 "$publish_hash" \
 	"frozen rename report is missing, empty, or not a regular file"

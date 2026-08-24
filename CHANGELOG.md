@@ -39,6 +39,122 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- **The XC8 cache manifest can no longer be frozen from a partial scan.** The
+  installer records a SHA-256 inventory of every readable file in the
+  just-installed compiler and device pack, and the restored-cache verifier
+  regenerates it and requires an exact match -- that manifest is what stands
+  between a corrupted CI cache restore and a build, because a restore never
+  re-runs the digest-verified installer. Both computed it as one
+  `find | sort | xargs sha256sum` pipeline under `/bin/sh`, which reports only
+  the LAST stage's status: a `find` that emitted part of the tree and then died
+  was masked by the `sha256sum` that succeeded over that fragment. Measured on a
+  synthetic install, the old installer exited 0 having recorded 1 of 9 files.
+
+  The walk, the ordering and the hashing are now three separately
+  status-checked stages in both scripts, NUL-delimited end to end, and neither
+  will record or accept an empty inventory. The dangerous case was never the
+  loud one: a partial record is not caught at restore time if the condition that
+  truncated the install-time walk truncates the verify-time walk the same way,
+  and the two fragments then agree. For the same reason the verifier now reports
+  a scan/order/hash failure by name rather than as a cache mismatch -- they are
+  not the same finding, and only one of them means the cache is bad.
+
+  `test-supply-chain` fails each stage independently, in both scripts, against a
+  `find` stub that emits a genuine readable path before failing exactly as a
+  real one does over an unreadable subtree; installation must leave neither
+  stamp nor manifest behind, and verification must name the stage. Eight fixture
+  files whose names carry spaces, both quote characters, a backslash, shell
+  metacharacters, a leading dash, UTF-8 and an embedded newline are inventoried,
+  compared and caught when tampered with -- the same eight reduce to 2 entries
+  and an error under a newline-delimited pipeline (30 -> 46 checks). Manifest
+  content is unchanged: over the 3603 files of a real XC8 3.10 + PIC10-12Fxxx
+  DFP 1.9.189 install, the staged form reproduces the pipeline's output byte for
+  byte.
+
+- **Suffixed release tags now publish as prereleases.**
+  `scripts/make-release.sh` and every release verifier have accepted
+  `vX.Y.Z-suffix` since the producer and verifier grammars were aligned, and the
+  workflow's `on:` trigger matches that shape -- but `gh release create` was
+  never told, so a `v1.0.0-rc.1` would have been published as an ordinary
+  release and could have taken latest-release selection away from the newest
+  stable version. The publication step now decides the kind from the tag alone:
+  a bare `vX.Y.Z` publishes exactly as before, every accepted suffix adds
+  `--prerelease`, and a shape outside the version grammar aborts before `gh` is
+  reached rather than defaulting to either kind. That last branch is not
+  redundant with the existing gate, it is the alarm on it: malformed tags are
+  already rejected in the locate step before any build, so one arriving at
+  publication means that gate was bypassed.
+
+  Both halves are proved by execution rather than by inspection.
+  `test-release-provenance` runs the workflow's own publication shell against a
+  recording `gh` stub and requires the flag absent for `v0.9.8`, present exactly
+  once for `v0.9.8-rc.1`, and `gh` never reached for six malformed shapes --
+  including the `v0.9.8-` that the trigger globs admit and the grammar does not
+  (86 -> 94 checks). `test-workflow-syntax` extracts both classification
+  patterns from the YAML and requires that together they accept exactly what
+  `scripts/make-release.sh` accepts, that they do not overlap, and that they
+  split that grammar stable-versus-suffixed, so this additional copy of the
+  version grammar cannot drift away from the producer's (375 -> 381 checks).
+
+- **PIC10F320 de-energizes both relay coils in one write.** The
+  space-constrained shell's `set_relay_coils_low()` cleared RESET and then SET
+  through two separate `LATA` read-modify-writes. Both orders settle in the same
+  place; they differ in the transient, and with *both* coil bits high -- the
+  latch upset the sanity gate escalates on -- the per-bit clear left the second
+  coil driven for the whole of the first write, on the one path whose purpose is
+  to stop driving them. This was an instruction-scale exposure, not a
+  watchdog-scale one, but it was weaker than the single masked write the four
+  modular shells reach through `hw_pin_mask_set_low()`, and project-wide parity
+  language did not say so.
+
+  The clear is now one constant-mask `LATA` write. The two per-bit low helpers
+  it replaced had no other caller, so the stronger form is also the cheaper one:
+  the relay image went from 248 to **242** of 256 program words and its
+  worst-case return-stack depth from 4 to **3** of 8. Both CD4053 images are
+  byte-identical to the previous release. The write sequence itself is now
+  asserted rather than assumed, by two oracles that fail on a return to the
+  per-bit form -- the host fault harness (which sees every firmware `LATA`
+  access) and the gpsim resynchronization cases (which step the real image one
+  instruction at a time). Both are load-bearing on the both-coils injection, and
+  that is the whole of what is observable: with a single coil energized, a
+  per-bit clear delays the useful de-energization by one write without passing
+  through a distinct state.
+
+- **The watchdog margin is now asserted against wall-clock execution, not
+  against the delay constant alone.** Every shell used to assert only
+  `TICK_PERIOD_MS + blocking_delay < WDT_MIN_PERIOD_MS`. That sum omits two real
+  costs: the bounded loop work between a tick and the pet that follows it, and
+  -- on the interrupt-driven AVRs -- the tick ISR preempting the busy-wait
+  inside a blocking actuation, which makes the actuation longer in wall time
+  than the delay body it compiles to. Shipped margins were wide enough that
+  neither omission mattered, but a future near-bound configuration could have
+  satisfied the assertion while violating the real pet-to-pet bound.
+
+  Each pin map now declares its own `WDT_LOOP_WORK_MS` and
+  `WDT_ISR_STRETCH_PCT`, and the shared `WDT_PET_TO_PET_MAX_MS()` in
+  `bypass_output_common.h` combines them with the blocking delay and one tick of
+  scheduling latency into a conservative wall-clock upper bound, asserted
+  against the de-rated watchdog floor. The boot path -- `init()` arms the
+  watchdog and then performs the same blocking actuation before `main()` reaches
+  its first pet -- is inside that bound rather than beside it. The simple CD4053
+  variant, which blocks nowhere and previously carried no watchdog assertion at
+  all, is now covered too: the floor has to clear the loop itself, not just a
+  pulse. The self-contained PIC10F320 carries its own copy, as it does for every
+  other shared invariant. No image changed: all 21 images across the six targets
+  rebuild byte-identical, because the change is entirely compile-time.
+
+  Two gates hold the budget to something real. `test-static-assert-guards` pins
+  each variant's bound to its exact millisecond and proves the two new terms are
+  load-bearing: a watchdog floor set inside the gap between the old `tick +
+  pulse` sum and the full bound must fail the build, and must go back to
+  compiling the moment the term under test is zeroed -- eleven fixtures, each
+  asserting FIRES or CLEAN rather than only that something failed. The classic
+  AVR simavr suite then measures the real image, recording the longest interval
+  between `wdr` executions across boot and across toggles in both directions and
+  requiring it to fit the same budget the firmware compiled against. Worst
+  measured: 14.002 ms of a 17 ms budget on the ATtiny13A relay build, 15.003 ms
+  of 17 ms on the ATtiny85, against a 100 ms de-rated floor.
+
 - **PIC12F675 relay coil clears now commit through one whole-port write.** The
   shared relay driver clears both coil bits with one masked hardware-interface
   operation. On PIC12F675, that operation removes both bits from the SRAM output

@@ -173,9 +173,10 @@ latch bits: `hw_output_pins_intact()` OR-folds `LATA & (RA1|RA2)` into its
 exact-`TRISA` check under `#if defined(OUTPUT_TQ2_RELAY)`, at a cost of three
 words and nothing at all on the CD4053 variants. An RA1 or RA2 upset therefore
 escalates through `hw_force_wdt_reset()`, which drives both coils low before it
-spins, and the recovery re-runs `init()` — whose complete 12 ms RESET-coil
-actuation is what restores agreement between logical state, LED and physical
-relay.
+spins — in one constant-mask `LATA` write, so a fault that raised *both* bits
+cannot leave the second coil driven while the first is cleared — and the recovery
+re-runs `init()`, whose complete 12 ms RESET-coil actuation is what restores
+agreement between logical state, LED and physical relay.
 
 This is not an arbitrary-instruction-phase bound: the fault tests inject at the
 trailing `CLRWDT` seam, from both a settled BYPASS and a settled ENGAGED start.

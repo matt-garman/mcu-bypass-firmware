@@ -1228,10 +1228,13 @@ bench**, tracked together with the graduation diff that follows it.
 
    Residual: none for the period itself. The margin is now enforced at compile
    time on this part as on the PIC10F320: `bypass_pins_pic12f675.h` defines the
-   de-rated `WDT_MIN_PERIOD_MS` (160 ms) and `TICK_PERIOD_MS`, and the shared
-   blocking output drivers static_assert `(tick + pulse) < WDT_MIN_PERIOD_MS`
-   against them, so a future prescaler, tick, or pulse change that erodes the
-   margin fails the build (v0.9.9 post-release polish; see CHANGELOG.md).
+   de-rated `WDT_MIN_PERIOD_MS` (160 ms), `TICK_PERIOD_MS`, and the part's
+   `WDT_LOOP_WORK_MS` / `WDT_ISR_STRETCH_PCT` terms, and the shared output
+   drivers static_assert `WDT_PET_TO_PET_MAX_MS(pulse) < WDT_MIN_PERIOD_MS`
+   against them -- the whole worst-case wall-clock pet-to-pet window, not the
+   pulse alone -- so a future prescaler, tick, or pulse change that erodes the
+   margin fails the build (v0.9.9 post-release polish; see CHANGELOG.md and
+   "Watchdog Pet-to-Pet Budget" in DESIGN_DOCUMENTATION.adoc).
 5. **Brown-out trip point.** *CLOSED 2026-08-11 — read; the expected limitation
    is confirmed, with numbers.* DS41190G Table 12-4, `BVDD` "Brown-out Detect
    Voltage": **2.025 V min, 2.175 V max** (no typical given; the hysteresis is
@@ -1406,23 +1409,25 @@ validated snapshot, so a single-bit upset confined to persisted `ctx_` or
 `ctx_check_` is detected, safely overwritten, or left mismatched for the next
 check instead of being consumed and re-folded (see
 `docs/context_seu_detection.md`). This bounded guarantee excludes locals,
-registers, code and control flow. XC8 resource checks, target simulation, and
-the complete mutation gate have passed; the shared `1.x.y` silicon-validation
-pass remains open.
+registers, code and control flow. Before the F2/F3 additions, XC8 resource
+checks, target simulation, and the then-current 132-mutant gate passed. The
+merged physical-pin target/resource evidence and complete 136-mutant run remain
+pending, as does the shared `1.x.y` silicon-validation pass.
 
 **Why the ported tests are trusted to be distinct.** Porting the PIC10F322
 lanes to the PIC12F675 carries a copy-paste risk: a lane that still compiled
 but no longer exercised part-specific behavior would pass vacuously. The
-retained mutation record refutes that. The PIC12F675 target-tool lane contributes
+mutation design addresses that risk, with its final merged run still pending.
+The PIC12F675 target-tool lane contributes
 23 mutants (per the step-10 status in §9), while the F2 transaction seam and the
 relay shadow-clear ordering each add a PIC12F675 shell mutant to the
 host-available core table. The repository mutation
-inventory is **134**, weighted toward the `GPIO` shadow, sub-tick timing,
+inventory is **136**, weighted toward the `GPIO` shadow, sub-tick timing,
 comparator/`CMCON`, `OSCCAL` and ANSEL-mapping guards the PIC10F322 has no
 counterpart for (§6.5). Each of the 23 target-tool mutants carries its own
-toolchain probe, named behavioral signature and sandbox validator, and a mutant
-that survived would fail the lane. A copy-paste port that did not actually drive
-12F675-specific behavior could therefore not stay green.
+toolchain probe, named behavioral signature and sandbox validator. A complete
+run requires every mutant to be killed, so a copy-paste port that did not
+actually drive 12F675-specific behavior could not stay green.
 
 ---
 
@@ -1453,7 +1458,8 @@ the 1.024 ms stretch (§4.4.1). Step 10 is done: `pic12f675-test` and
 `pic12f675-test-target{,-variants}` are implemented and carry the third leg of
 `test-target-matrix` and `test-target-lane-markers`; 23 target-tool mutants with
 their own toolchain probe, named behavioral signatures and sandbox validator,
-plus two host-available shell mutants, take the mutation inventory to 134;
+plus two host-available shell mutants, contribute to a combined mutation
+inventory of 136 after the F2 and F3 additions;
 and both aggregates now run in CI's shared `pic` job with the two mirrors —
 `scripts/ci-local.sh` and `test-ci-local-routing` — extended alongside. Step 10
 is complete. Step 11 is done (v0.9.9): the user-facing documentation landed;

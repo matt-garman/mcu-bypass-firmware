@@ -442,10 +442,12 @@ static void hw_mcu_init(void) {
     // giving 288ms nominal (18ms x 16). DS41190G Table 12-4 parameter 31 gives
     // a 10ms unprescaled minimum, so the characterized minimum here is 160ms.
     // This is the closest analogue to the PIC10F322's ~256ms and the AVR
-    // shell's 250ms. The dominant nominal pet-to-pet interval is one 1.024ms
-    // tick plus the longest blocking actuation, the 12ms relay coil pulse:
-    // 13.024ms plus small loop overhead, comfortably below the 160ms minimum.
-    // The prescaler choice therefore retains ample margin at the fast WDT end.
+    // shell's 250ms. The worst-case pet-to-pet window WDT_PET_TO_PET_MAX_MS()
+    // asserts is the longest blocking actuation -- the 12ms relay coil pulse --
+    // plus one tick of scheduling latency and one pass of bounded loop work:
+    // 16ms with this map's conservative 2ms ceiling on the 1.024ms tick,
+    // comfortably below the 160ms minimum. The prescaler choice therefore
+    // retains ample margin at the fast WDT end.
     OPTION_REG = OPTION_REG_CONFIG;
 
     // Capture the factory oscillator trim AFTER bring-up, for the per-tick

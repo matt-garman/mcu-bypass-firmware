@@ -205,16 +205,63 @@ so adopters must validate relay motion and the simultaneous-driver supply
 transient against their hardware. That responsibility is not evidence for
 leaving the firmware's former unbounded energy path open.
 
+**Run 6 — the `v0.9.10` one-write relay-coil clear.** `set_relay_coils_low()`
+cleared RESET and then SET through two separate `LATA` read-modify-writes. Both
+orders settle identically; they differ in the transient, and with **both** coil
+bits high — the upset the run-5 guard escalates on — the per-bit clear leaves the
+second coil driven for the whole of the first write. That is an instruction-scale
+exposure on the escalation path, not a watchdog-scale one, but it was weaker than
+the one masked write the four modular shells reach through
+`hw_pin_mask_set_low()`, and the measurement said the stronger form is also the
+cheaper one here. The two per-bit low helpers had no other caller, so folding
+them into a single constant-mask write **removed** code:
+
+| | run 5 | run 6 |
+| --- | --- | --- |
+| relay program words | 248 of 256 (8 free) | **242 of 256 (14 free)** |
+| relay return-stack peak | 4 of 8 (2 spare) | **3 of 8 (3 spare)** |
+
+Relay-only again, and again exactly one hash moves — both analog-switch images
+stay byte-identical to runs 2, 3, 4 and 5:
+
+```
+e48ed8e50e89a7f2c2e145603d16c25099925269ea0b29b31becc9c02eb2143f  bypass-pic10f320-cd4053_simple.hex
+1cc2cbf6572a876b1a0a5d19e2e3179a41c7a46bd1b7419d2b5e72aa2aec27a7  bypass-pic10f320-cd4053_with_mute.hex
+8193aa0db4bc4839e1d4304dac7dd91e313b73bc93b0401732613e6f5f9f2e86  bypass-pic10f320-tq2_l2_5v_relay.hex
+```
+
+The write sequence itself is now asserted, by two oracles that fail on a return
+to the per-bit form:
+
+- **Host** (`pic10f320-test-fault-host`, 62 checks on the relay variant, up from
+  59). The mock `<xc.h>` routes every firmware `LATA` access through the harness,
+  so `fw_relay_fault_result_t.partial_clear_coils` records a coil field with
+  strictly fewer bits than the previous one but not none.
+- **Target** (`pic10f320-test-fault-target`). The resynchronization cases already
+  step the real image one instruction at a time waiting for de-energization; they
+  now also fail if either the `LATA` latch or the modeled `PORTA` sheds its coil
+  bits across more than one step.
+
+Both are load-bearing only on the **both-coils** injection, and that is the whole
+of what is observable: with a single coil energized, a per-bit clear delays the
+useful de-energization by one write but passes through no distinct state. Two
+mutation-inventory entries (host and target) restore the per-bit clear and are
+killed. Coil de-energization at the trailing `CLRWDT` seam measures 470-474
+instruction cycles (0.940-0.948 ms), the recovery pulse is unchanged at 11.2 ms,
+and the real-image target-I/O trace still reports 36 checks — with all three coil
+pulses now 6010 cycles, where the per-bit clear had made the SET pulse 6 cycles
+longer than the RESET pulse.
+
 **Standing regression added after the merge audit.** The original gate was
 deliberately retired as a one-shot migration check because its reference images
-lived under the deleted import prefix. The reviewed run-4 digests above now live
+lived under the deleted import prefix. The reviewed digests above now live
 in `test/pic10f320/expected_images.sha256`. `pic10f320-test-build` rebuilds
 the complete immutable variant matrix and requires all three raw HEX files to
 match; it runs through `pic10f320-test` in CI and release qualification. The
 checker and manifest parser also run without XC8 inside `make test`.
 
 The first two digests remain byte-for-byte the run-2 ones; the relay digest is
-the intentional run-4 rebaseline. The older transcripts keep the names those
+the intentional run-6 rebaseline. The older transcripts keep the names those
 runs actually emitted, which is what makes them evidence rather than a
 restatement.
 
@@ -291,23 +338,29 @@ pack's `edc:hwstackdepth="8"`. The gate reads the budget from the pack rather
 than hardcoding it.
 
 **"Inlined, so it cannot recurse" would have been the wrong answer.** The
-debounce logic is inlined into `main()`, but the *output stages* are not. The
-relay variant reaches four levels:
+debounce logic is inlined into `main()`, but the *output stages* are not. Every
+variant reaches the output stage from `init()`:
 
 ```
 _main -> _init -> _hw_set_bypass_state -> _set_relay_coils_low
-      -> _hw_relay_reset_pin_set_low
 ```
 
-Measured peak is 3 levels for the CD4053 variants and 4 for the relay — on
-**both** PIC chips, whose figures are identical. Real headroom, but not zero and
-not structural.
+Measured peak is 3 levels on this part for all three variants. The relay reached
+**four** until `v0.9.10`, through a fourth `fcall` to a per-bit coil-clear helper
+(`_hw_relay_reset_pin_set_low`); folding that clear into one masked `LATA` write
+removed the level. The two PIC chips therefore no longer agree here: the
+PIC10F322 relay still measures 4, because its clear goes through the shared
+driver's `_hw_pin_mask_set_low` and it has the flash to afford the call. Real
+headroom on both, but not zero and not structural.
 
 **XC8's own estimate is not a safe upper bound, and its overflow check is only a
 warning.** XC8 prints `;; Hardware stack levels required when called: N` per
-function; on the shipping tq2-relay image it reports **3** where the emitted
-instruction stream contains a verified **4**-deep chain of real `fcall`s, each
-confirmed against its enclosing psect. Synthetic chains reproduce correctly, so
+function; on the `v0.9.9` tq2-relay image it reported **3** where the emitted
+instruction stream contained a verified **4**-deep chain of real `fcall`s, each
+confirmed against its enclosing psect. XC8 agrees with the gate on both parts
+today — the chain that produced the discrepancy is gone (above) — which changes
+nothing about the argument: the number was wrong once on a real program, and a
+gate that reads it back would have been wrong with it. Synthetic chains reproduce correctly, so
 this is a property of the real program rather than of the annotation format. The
 gate therefore computes the depth itself from the instruction stream and uses
 XC8's `callstack` directives — which *do* agree, at 4 — as a cross-check that
@@ -321,8 +374,10 @@ That is the fail-open `pic10f320-test-stack-bound` closes.
 **Two witnesses, deliberately.** The gate above measures the *emitted assembly*
 and enforces the policy budget (peak + reserve). §3b re-derives the same quantity
 from the *shipped HEX* by a wholly different method. Both run in `pic10f320-test`,
-and they agree — 3 / 3 / 4 entries for simple / mute / relay. A disagreement
-between them would itself be the finding.
+and they agree — **3 / 3 / 3** entries for simple / mute / relay since `v0.9.10`
+folded the relay's coil clear into one masked write (run 6 above); the relay read
+4 through `v0.9.9`, which is the figure the older transcripts below record. A
+disagreement between the two witnesses would itself be the finding.
 
 ### 3b. Final-HEX hardware return-stack gate
 
@@ -417,7 +472,10 @@ de-energizes both coils before it spins. RESET, SET and both-bit injections must
 therefore escalate, from a settled ENGAGED start as well as BYPASS. This still
 does not detect LED/analog-control latch mismatches and does not change the
 general omission above -- which is now pinned by a negative-control injection
-requiring RA0 *not* to reset. It costs three relay words: 248/256, with 8 free.
+requiring RA0 *not* to reset. It cost three relay words, taking the image to
+248/256 with 8 free; the one-write coil clear that followed it in the same
+release gave six of those back, so the shipping figure is 242/256 with 14 free
+(run 6 above).
 
 ## 5. Mutation topology
 

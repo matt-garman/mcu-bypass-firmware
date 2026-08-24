@@ -72,6 +72,11 @@ It is nearly free because the escalation **reuses the sanity gate that already
 compares the complete output latch**. Only PIC10F320, which cannot afford that
 general comparison, pays anything: three words for a coil-only `LATA` term.
 
+The 320 then gave those back and more. Making its coil clear one masked write
+(below) removed two per-bit helpers that had no other caller, so the shipping
+relay image is **242** words of 256 -- three fewer than before this policy was
+adopted at all -- and its worst-case return-stack depth dropped from 4 to 3 of 8.
+
 ## Mechanism
 
 ### The two halves
@@ -80,11 +85,18 @@ The contract has two halves, and the tests assert them separately because
 final-low coils are *not* recovery:
 
 1. **De-energization.** `hw_force_wdt_reset()` runs its emergency output path
-   *before* it disables interrupts and spins, so a detected fault cannot hold a
-   coil energized for the watchdog period. The shared relay operation clears
-   both latch-intent bits in one masked operation. On AVR-XT and PIC12F675 that
-   operation is deliberately sequenced between shell-specific pin teardown and
-   safe output-direction restoration.
+   *before* it disables interrupts and spins, so a fault cannot hold a coil
+   energized for the watchdog period. The implementation clears both coils in
+   one masked output write on **every** shell: the four modular ones reach it
+   through the relay driver's
+   `hw_pin_mask_set_low()`, and PIC10F320, which links no driver, writes the same
+   constant mask itself. A per-bit clear of RESET and then SET would settle
+   identically and differ in the transient: with both coil bits high, the second
+   coil stays driven for the whole of the first write, on the one path whose
+   purpose is to stop driving them. That is asserted rather than assumed - see
+   *The PIC10F320 exception* below. On AVR-XT and PIC12F675 the masked clear is
+   deliberately sequenced between shell-specific pin teardown and safe
+   output-direction restoration.
 2. **Resynchronization.** The watchdog reset re-runs `init()`, whose
    `hw_set_bypass_state()` drives a complete 12 ms RESET-coil actuation
    (`TQ2_L2_5V_PULSE_MS`, 3× the datasheet minimum). *That* is what puts the
@@ -155,8 +167,20 @@ carries a physical hazard: `hw_output_pins_intact()` OR-folds
 volatile — a masked-by-zero read would still be emitted). `hw_force_wdt_reset()`
 calls `set_relay_coils_low()` directly, since this shell links no output driver.
 
-So the 320 has **full parity on the coil guarantee** and retains its documented
-gap elsewhere: an LED or spare output-latch upset still goes undetected on that
+That direct call is a single constant-mask `LATA` write, matching half 1 above.
+It cleared the two bits separately until `v0.9.10`; folding them into one write
+freed six program words and a return-stack level on the part with the least of
+both (`docs/pic10f320_validation.md`, run 6). Both fault lanes now observe the
+**write sequence** and not only the settled result: injecting both coil latches
+and finding one still driven after the clear began fails the host lane
+(`partial_clear_coils`) and the gpsim lane (instruction-granular sampling of
+`LATA` and modeled `PORTA`). With only one coil energized there is nothing for
+either to see — a per-bit clear would delay the useful de-energization by one
+write without passing through a distinct state — so the both-coils injection is
+where the contract is pinned.
+
+So the 320 has **full parity on the coil guarantee**, in the transient as well as
+the settled state, and retains its documented gap elsewhere: an LED or spare output-latch upset still goes undetected on that
 part until the next accepted actuation rewrites it. That exception is now
 *asserted*, not merely described — its gpsim adapter injects the RA0 LED latch
 and requires **no** reset, so the gap cannot widen unnoticed (the coil cases

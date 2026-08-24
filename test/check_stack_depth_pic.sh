@@ -28,17 +28,22 @@ set -euo pipefail
 # --------------------------------------
 # XC8 does its own analysis and prints, per function,
 #     ;; Hardware stack levels required when called: N
-# It is not a safe upper bound. Measured on the shipping tq2_l2_5v_relay image, XC8
-# reports 3 for _main while the emitted instruction stream contains a genuine
-# 4-deep chain:
+# It is not a safe upper bound. Measured on the v0.9.9 PIC10F320 tq2_l2_5v_relay
+# image, XC8 reported 3 for _main while the emitted instruction stream contained
+# a genuine 4-deep chain:
 #     _main -> _init -> _hw_set_bypass_state -> _set_relay_coils_low
 #           -> _hw_relay_reset_pin_set_low
-# Every edge is a real `fcall` (no tail-call folding), each verified by its
-# enclosing psect. XC8's own `callstack` directives agree with 4, not with 3.
-# The prose annotation is therefore deliberately NOT used as the measurement;
-# synthetic call chains reproduce it correctly, so this is a property of the
-# real program rather than of the annotation format in general -- which is
-# exactly the situation where a re-derivation earns its keep.
+# Every edge was a real `fcall` (no tail-call folding), each verified by its
+# enclosing psect. XC8's own `callstack` directives agreed with 4, not with 3.
+#
+# That image is gone: v0.9.10 folded the 320's two per-bit coil-clear helpers
+# into one masked LATA write, which removed the fourth level, and XC8 now agrees
+# with this script on both PIC parts. The discrepancy was real when it was
+# measured, though, and nothing in the toolchain rules out the next one -- so
+# the prose annotation is still deliberately NOT used as the measurement.
+# Synthetic call chains reproduce it correctly, so it was a property of the real
+# program rather than of the annotation format in general, which is exactly the
+# situation where a re-derivation earns its keep.
 #
 # XC8 does detect true overflow -- "(1393) possible hardware stack overflow
 # detected" -- but only as a WARNING, and it still exits 0 and emits a HEX. A

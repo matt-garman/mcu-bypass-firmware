@@ -1140,8 +1140,9 @@ owner, consistent with project policy.
   The high-`COUT` fixture proves a latch-only clear leaves physical GP2 high.
 - Reviewed source-order checks pin pull-up removal before input direction,
   peripheral/polarity neutralization before latch clearing, and low latch state
-  before output direction is restored. New latch-only mutants raise the pinned
-  inventory from 132 to 134.
+  before output direction is restored. F2's new latch-only mutants raised its
+  then-current pinned inventory from 132 to 134; combined with F3's independent
+  PIC10F320 additions, the merged inventory is 136.
 - Resource coverage is now explicit. ATtiny202 requires one exact flash/static-
   RAM report, enforces 2048 B flash and 16/128 B static RAM, and compiles the
   AVR-XT shell under all three production selectors with a 32 B per-frame
@@ -1162,7 +1163,7 @@ owner, consistent with project policy.
   stops in the pre-existing host setup at missing `gnu/stubs-32.h` during
   Classic-AVR clang-tidy. Keep the first five acceptance boxes open until the
   real-image target lanes, actual resource/stack measurements, timing/static
-  gates, and complete 134-mutant run pass on the provisioned validation host.
+  gates, and complete 136-mutant run pass on the provisioned validation host.
 
 ### F3 - Resolve the PIC10F320 two-write relay-coil clear
 
@@ -1193,14 +1194,97 @@ owner.
 
 **Acceptance criteria**
 
-- [ ] The owner either adopts one constant-mask clear or records why the
+- [x] The owner either adopts one constant-mask clear or records why the
   measured resource cost requires retaining the two-write exception.
-- [ ] Target-level evidence observes the write sequence and fails if the chosen
+- [x] Target-level evidence observes the write sequence and fails if the chosen
   contract regresses.
-- [ ] PIC10F320 flash, return-stack, image-baseline, fault, target-I/O, coverage,
+- [x] PIC10F320 flash, return-stack, image-baseline, fault, target-I/O, coverage,
   and mutation gates pass.
-- [ ] Documentation states the exact PIC10F320 behavior and does not imply
+- [x] Documentation states the exact PIC10F320 behavior and does not imply
   stronger cross-shell parity than the implementation provides.
+
+**Resolution.** The one-write clear was adopted, and the measurement made the
+choice unambiguous rather than close: it *frees* resources. The two per-bit
+helpers `hw_relay_reset_pin_set_low()` and `hw_relay_set_pin_set_low()` had no
+caller besides `set_relay_coils_low()`, so folding them into a single
+constant-mask `LATA &= ~((1U << RELAY_RESET_PIN) | (1U << RELAY_SET_PIN))`
+deleted two functions and a call level. Under the pinned XC8 V3.10 / DFP 1.9.189
+`-O2` build the relay image went **248 -> 242** of 256 program words (8 -> 14
+free) and its worst-case return-stack depth **4 -> 3** of 8 (2 -> 3 spare); the
+two CD4053 images are byte-identical to the shipped baseline, since these
+helpers live under `#if defined(OUTPUT_TQ2_RELAY)`. The disposition branch of
+this item is therefore not exercised, and no exception is recorded. The
+high-side helpers stay per-bit: only one coil is ever energized at a time, so
+there is no intermediate state to remove there.
+
+The write sequence is now asserted by two independent oracles, each of which
+fails on a return to the per-bit form:
+
+- **Host** -- `test/pic10f320/fault/`. The mock `<xc.h>` already routed every
+  firmware `LATA` access through the harness, so the transient is directly
+  observable: `fw_relay_fault_result_t.partial_clear_coils` records a coil field
+  with strictly fewer bits than the previous one but not none. Relay-variant
+  checks 59 -> 62.
+- **Target** -- `test/pic/test_fault_pic_core.h`. The resynchronization cases
+  already stepped the real image one instruction at a time waiting for
+  de-energization; they now also fail if the output latch or the modeled port
+  sheds its coil bits across more than one step. This is in the shared core, so
+  PIC10F322 and PIC12F675 assert it too, which is what makes the parity claim in
+  `docs/relay_coil_fault_correction.md` a tested statement rather than a
+  description. The shadow-latch part is unaffected by the port lagging the
+  shadow, because each view is tracked separately.
+
+Both are load-bearing only on the **both-coils-energized** injection, and that is
+the whole of what is observable: with a single coil energized a per-bit clear
+delays the useful de-energization by one write but passes through no distinct
+state, so no oracle at the state level can see it. That limit is stated in the
+harnesses and in the documentation rather than papered over. Two
+mutation-inventory entries (host and target lanes) restore the per-bit clear;
+both are killed. They moved F3's then-current inventory 132 -> 134; combined
+with F2's independent additions, the merged inventory is 136.
+
+Documentation: `docs/relay_coil_fault_correction.md` now states the one-write
+contract per shell -- the modular four through `hw_pin_mask_set_low()`, the 320
+directly -- and says where it is asserted and where it cannot be;
+`docs/pic10f320_validation.md` gains run 6 with the resource table and the new
+digest. The 320's relay call chain is now 3 levels, so the places that recorded
+4 are corrected: that document's return-stack section (which also claimed the
+two PIC chips were identical -- the 322 is still 4), its two-witness paragraph,
+and `test/check_stack_depth_pic.sh`, whose documented XC8-disagreement example
+was measured on the exact chain this change removes and is reframed as the
+historical measurement it is.
+
+Three further documents carried the relay's flash figure as a current fact and
+were **already** stale by F1's coil-latch term before this change:
+`DESIGN_DOCUMENTATION.adoc` (utilization table and headroom sentence),
+`docs/context_seu_detection.md` (F2 resource table) and
+`docs/non-blocking_output_schemes_feasibility.md`. All three now read 242/256.
+Two of them draw conclusions *from* that margin -- F2's PIC10F320 exclusion, and
+the feasibility study's §6.4 finding that range-checking a countdown state puts
+the relay exactly on 256 and does not link -- so each carries a scoped note that
+the baseline moved and the question needs re-pricing rather than citing the old
+paragraph. Neither conclusion is reversed here: that would need its own
+measurement, and `cd4053_with_mute`, untouched by this change, is the variant
+both costs overflowed first. `docs/pic10f320_special_case.md`, `test/README.md`
+(host-fault check count and per-variant executable-line count) and
+`CHANGELOG.md` carry the same facts.
+
+*Verification.* `test/pic10f320/expected_images.sha256` rebaselined for the
+relay image only; both CD4053 digests unchanged, so exactly one hash moves.
+PIC10F320 gates on the new image: flash 242/256, return stack 3/8 with witness,
+`pic10f320-test-host-variants` 41 / 41 / 62 host fault checks,
+`pic10f320-test-target-variants` 24 / 24 / 29 fault, 3005 lock-step and
+25 / 26 / 36 target-I/O checks, `pic10f320-coverage-check-fw` 96/99 executable
+lines with the same three allowlisted fault-path lines, and `pic10f320-analyze`
+(cppcheck + MISRA) clean across all three variants. The shared-core change was
+re-run against the unmodified PIC10F322 (29 fault checks) and PIC12F675 (41)
+relay images with no false positive from the shadow/port skew. Negative controls:
+with the per-bit clear restored, the host lane reports exactly 1 failure of 62
+and the target lane exactly 1 of 29, both on the both-coils case and both naming
+the coil left driven. All three coil pulses on the target-I/O trace are now 6010
+cycles, where the per-bit clear made the SET pulse 6 cycles longer than the
+RESET pulse. Firmware source changes were made by the repository owner,
+consistent with project policy.
 
 ### F4 - Make watchdog-margin assertions cover wall-clock execution
 
@@ -1230,12 +1314,51 @@ owner.
 
 **Acceptance criteria**
 
-- [ ] Every modular shell has a documented conservative pet-to-pet upper bound.
-- [ ] Compile-time guards fail at the true wall-clock boundary for relay and
+- [x] Every modular shell has a documented conservative pet-to-pet upper bound.
+- [x] Compile-time guards fail at the true wall-clock boundary for relay and
   muting variants.
-- [ ] Static-assert negative controls prove the overhead/preemption term is
+- [x] Static-assert negative controls prove the overhead/preemption term is
   load-bearing.
-- [ ] Existing timing, pulse-width, watchdog-liveness, and resource gates pass.
+- [x] Existing timing, pulse-width, watchdog-liveness, and resource gates pass.
+
+**Resolution.** Each pin map now declares `WDT_LOOP_WORK_MS` and
+`WDT_ISR_STRETCH_PCT` beside its existing `TICK_PERIOD_MS` and de-rated
+`WDT_MIN_PERIOD_MS`; `WDT_PET_TO_PET_MAX_MS()` in `bypass_output_common.h`
+combines all four with the variant's blocking delay into one conservative
+wall-clock upper bound, and each output driver asserts that bound against the
+floor. The self-contained PIC10F320 carries its own copy of the constants and
+the arithmetic, as it does for every other shared invariant. The simple CD4053
+variant, which blocks nowhere and previously carried no watchdog assertion,
+is now covered as well: the floor must clear the loop itself, not only a pulse.
+The boot path is inside the bound rather than beside it -- `init()` arms the
+watchdog and then performs the same blocking actuation before `main()` reaches
+its first pet -- and on the non-blocking variants it is the longest window
+there is, which the measurement below is what established.
+
+Per-target bounds, in milliseconds (relay / mute / simple against the floor):
+AVR Classic 17 / 9 / 2 against 100; AVR-XT 17 / 9 / 2 against 128; PIC10F322 and
+PIC10F320 14 / 7 / 2 against 160; PIC12F675 16 / 9 / 4 against 160. Derivation
+and the measured corroboration are in "Watchdog Pet-to-Pet Budget" in
+`DESIGN_DOCUMENTATION.adoc`.
+
+*Verification.* All 21 images across the six targets rebuild byte-identical to
+the current baselines, so the change is entirely compile-time and no image
+rebaseline is required. `make test-static-assert-guards` 39 -> 68 checks: eleven
+near-bound fixtures pin each variant's bound to its exact millisecond and assert
+FIRES or CLEAN rather than only that something failed, so a guard reverted to
+the old `tick + pulse` sum fails the FIRES half and a term that is present but
+unreachable fails the CLEAN half. `test/avr/test_sim.c` gained a pet-budget
+check that measures the longest `wdr`-to-`wdr` interval on the real image and
+requires it to fit the compile-time budget: worst measured 14.002 / 15.003 ms of
+a 17 ms relay budget on ATtiny13A / ATtiny85, 6.402 / 7.004 of 9 for mute, and
+1.377 / 1.464 of 2 for simple, all against a 100 ms floor. All five MISRA lanes
+clean after one new D-2 Rule 2.5 entry for `bypass_output_common.h`, whose
+shared macro the modular shells include but do not expand. `make test`: 84
+summary lines, 0 failures. Full `scripts/ci-local.sh` green end to end (1253s),
+including `make test-long MUTATION_ALLOW_SKIP=0` under `STRICT_TOOLS=1` with
+mutation testing at 132 killed, 0 survived, 0 errored, 0 skipped;
+`make test-release-preflight` remains 118 checks. Firmware source changes were
+made by the repository owner, consistent with project policy.
 
 ### P1 - Replace the raw PIC12F675 path with a lightweight guarded helper
 
@@ -1554,10 +1677,62 @@ affect latest-release selection.
 
 **Acceptance criteria**
 
-- [ ] Suffixed valid tags create GitHub prereleases.
-- [ ] Unsuffixed valid tags create ordinary releases.
-- [ ] Malformed tags remain rejected before build or publication.
-- [ ] Workflow syntax and release publication tests prove both command forms.
+- [x] Suffixed valid tags create GitHub prereleases.
+- [x] Unsuffixed valid tags create ordinary releases.
+- [x] Malformed tags remain rejected before build or publication.
+- [x] Workflow syntax and release publication tests prove both command forms.
+
+**Resolution**
+
+Adopted. The publication step of `.github/workflows/release.yml` now derives the
+publication kind from the tag alone, before the final verification chain and
+therefore before `gh` is reached. A bare `vX.Y.Z` publishes exactly as before; a
+tag matching the suffixed half of the producer grammar adds `--prerelease` to
+the `gh release create` argument vector; anything else annotates
+`::error::tag '<tag>' is not vX.Y.Z (optionally -suffix)` and exits. Stable
+publication is byte-for-byte the command it was, because the flag is carried in
+a separate array that expands to nothing for a stable tag -- `--verify-tag`,
+`--title`, `--notes-file` and the asset vector are untouched.
+
+The two classification branches are a further copy of the project's version
+grammar, which is the risk this change introduces rather than removes, so they
+are held to the original: `test-workflow-syntax` extracts both patterns from the
+YAML and the producer's pattern from `scripts/make-release.sh`, then requires
+over a table of 18 stable, prerelease and malformed shapes that the union of the
+two accept exactly what the producer accepts, that they do not overlap, and that
+they split that grammar stable-versus-suffixed.
+
+The third branch is not redundant with the existing gate; it is the alarm on it.
+A malformed tag is already rejected before any build, in the locate step, by the
+version check inside `scripts/verify-release-qualification.sh` -- so a shape
+arriving at publication means that gate was bypassed, and silently defaulting it
+to either kind is the failure mode worth refusing.
+
+*Verification.* `test-release-provenance` executes the workflow's own publication
+shell -- extracted from `release.yml` and run against stub tag/signature
+verifiers and a `gh` that records its argv -- once per command form: `v0.9.8`
+publishes with no `--prerelease` and `--verify-tag` intact, `v0.9.8-rc.1`
+publishes with `--prerelease` exactly once and under its own tag, and six
+malformed shapes (`v0.9.8-`, `v0.9.8-rc..1`, `v0.9.8--rc`, `v0.9.8+1`, `v0.9`,
+`0.9.8`) abort with `gh` never invoked; 86 -> 94 checks. The stable case also
+requires that no *empty* argument reach `gh`, which is the one runner-shell
+assumption the empty flag array carries: bash before 4.4 expands an empty array
+under `set -u` to a single empty word, and `gh` would read that as an empty
+asset path. `test-workflow-syntax` adds the grammar and fail-closed contracts
+above; 375 -> 381 checks. Five
+negative controls were run against both suites on a scratch copy of the tree:
+removing the classification entirely -- the pre-R4 workflow -- fails six
+workflow-syntax checks and the prerelease publication case; letting an
+unrecognized shape fall through as a stable release fails the fail-closed check
+and the first malformed case; widening the suffixed branch to `-.*` fails the
+grammar-agreement and classification checks on exactly the four shapes the
+producer rejects; inverting the two branches fails the classification check and
+the stable publication case; and appending one quoted empty word to the `gh`
+argument vector fails the empty-argument check. `make test-workflow-syntax
+test-release-provenance test-release-history test-release-qualification
+test-release-images test-release-preflight test-supply-chain
+test-ci-local-routing` pass on the final tree, with preflight unchanged at 118
+checks. No firmware source is involved.
 
 ### R5 - Make XC8 cache manifest generation fail closed
 
@@ -1581,11 +1756,84 @@ that every readable compiler/DFP input is inventoried.
 
 **Acceptance criteria**
 
-- [ ] Failure of any manifest pipeline stage fails installation/verification.
-- [ ] No partial manifest is written or accepted after a scan/order/hash error.
-- [ ] Spaces and unusual non-NUL path bytes remain handled correctly.
-- [ ] Supply-chain, cache-restore, workflow-syntax, and release-preflight tests
+- [x] Failure of any manifest pipeline stage fails installation/verification.
+- [x] No partial manifest is written or accepted after a scan/order/hash error.
+- [x] Spaces and unusual non-NUL path bytes remain handled correctly.
+- [x] Supply-chain, cache-restore, workflow-syntax, and release-preflight tests
   pass.
+
+**Resolution**
+
+Adopted, by splitting rather than by changing shells. Both scripts stay
+`#!/bin/sh`: the walk, the ordering and the hashing are now three separately
+status-checked stages, staged through NUL-delimited files in a private
+`mktemp -d`, so no stage's status can be reported as the next one's. The
+`|| die` on each names the stage that failed -- `could not scan/order/hash the
+installed tree` in `scripts/install_pic_toolchain.sh`, the same three against
+`the restored tree` in `scripts/verify_pic_toolchain_cache.sh`. `pipefail`
+would also have worked, but only by moving both scripts to `bash`; the split
+needs nothing that POSIX `sh` does not already promise.
+
+The defect is not hypothetical and not subtle once instrumented. Driven with a
+`find` that emits one genuine readable path and then exits non-zero -- exactly
+what a real one does over a subtree it cannot read -- the previous installer
+exited **0** having recorded **1 of 9** files as the frozen integrity manifest
+of the tree a later job would trust.
+
+What makes that worth a fix rather than a note is which way it fails. A
+partial record is usually caught at restore time, because the verifier's full
+walk disagrees with it -- but the walks are over the same tree with the same
+permissions, so a condition that truncates one can truncate the other
+identically, and two agreeing fragments verify clean. That is the whole
+failure: a cache accepted as completely inventoried when most of it was never
+hashed. Two consequences follow, and both are now enforced. Neither script may
+record or accept an *empty* inventory, which is the limit case of the same
+thing (an empty manifest matches an empty recomputation). And the verifier
+reports a scan/order/hash failure by name instead of as a cache mismatch:
+before this change a broken scanner was reported as a corrupted cache, which
+is a different finding with a different response, and only one of the two
+means the cache is bad.
+
+Manifest content is unchanged, so nothing already recorded is invalidated: over
+the 3603 files of the real XC8 3.10 + PIC10-12Fxxx DFP 1.9.189 install on this
+host, the staged form reproduces the old pipeline's output byte for byte. (The
+CI cache key is `hashFiles('scripts/install_pic_toolchain.sh')` in any case, so
+editing the installer rotates the key and the next run installs fresh.) One
+unrelated pipeline in the installer, `sha256sum ... | cut`, was deliberately
+left alone: a masked failure there yields an empty digest that cannot equal a
+pinned one, so it already fails closed.
+
+*Verification.* `test-supply-chain` fails each stage independently, in both
+scripts, through a `PATH` shim over `find`, `sort` and `sha256sum`: the `find`
+stub breaks only the NUL-delimited manifest walk, so the symlink scan still
+runs and the manifest stage is what breaks, and it emits a real readable file
+before failing so that the later stages succeed over the fragment -- the
+masking condition itself. Installation must reject all four cases (scan,
+order, hash, empty) and leave *neither* stamp nor manifest behind;
+verification must reject the same four by name, plus an empty recorded
+manifest. Eight fixture files whose names carry spaces, both quote characters,
+a backslash, shell metacharacters, a leading dash, UTF-8 and an embedded
+newline are installed, inventoried (all eight appear in the recorded
+manifest), verified, and caught both when one is tampered with and when a
+ninth escaped-name file is added -- the same eight reduce to 2 entries and an
+`xargs: unmatched double quote` error under a newline-delimited pipeline.
+30 -> 46 checks.
+
+Nine negative controls were run against a scratch copy of the tree. Restoring
+the pre-R5 pipeline to both scripts, or to the installer alone, fails the
+install scan-stage case as *accepted*; restoring it to the verifier alone
+fails all four verify cases for the wrong reason (`does not match its recorded
+manifest` instead of the stage). Keeping the staging but dropping one `|| die`
+fails that stage's case the same way, so the status check is load-bearing and
+not merely the restructuring. Removing either empty-inventory guard fails its
+case; removing the empty-recorded-manifest guard fails that one. Reverting to
+newline delimiting fails the suite outright, and pruning just the
+unusually-named directory from the installer's walk fails the eight-entry
+inventory check exactly. `make test-supply-chain test-workflow-syntax
+test-release-preflight test-todo-index` pass on the final tree, with
+workflow-syntax unchanged at 381 checks and preflight unchanged at 118. The
+restored-cache half of the criterion is `test-supply-chain`'s verify section:
+there is no separate cache-restore target. No firmware source is involved.
 
 ### R6 - Pin production release identity independently of development overrides
 
@@ -1744,15 +1992,15 @@ Record each completed item with its commit ID and decisive validation command.
 | D2 | DONE | `3a6c67d` | `make test-workflow-syntax test-ci-local-routing test-release-preflight test-release-qualification test-release-history test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
 | D3 | DONE | `cbc57be` | `make test-release-preflight` (101 -> 113 checks); `make test-release-qualification test-release-history` (88 -> 89); `make test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
 | G1 | DONE | `fe8ecc8` | `make test-release-preflight` (113 -> 118 checks); `scripts/make-release.sh --preflight v0.9.10` accepted with the document present; `make test-release-qualification test-release-history test-release-provenance test-release-images test-soak-timing test-build-serialization test-todo-index test-makefile-name-contract`; `make test`; `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` |
-| F2 | IN PROGRESS | | Implementation and host contracts complete; provisioned AVR-XT/PIC12F675 target, resource, and 134-mutant validation pending |
-| F3 | OPEN | | PIC10F320 one-write measurement and implementation or explicit owner disposition |
-| F4 | OPEN | | Conservative wall-clock watchdog assertions and near-bound negative controls |
+| F2 | IN PROGRESS | | Implementation and host contracts complete; provisioned AVR-XT/PIC12F675 target, resource, and merged 136-mutant validation pending |
+| F3 | IMPLEMENTED | (pending) | One-write constant-mask `LATA` coil clear adopted; relay image 248 -> 242 words and return stack 4 -> 3, CD4053 images byte-identical; write sequence asserted by host (59 -> 62 checks) and gpsim resync oracles; 2 new PIC10F320 mutants, with the merged inventory now 136 |
+| F4 | IMPLEMENTED | (pending) | All 21 images rebuild byte-identical; `make test-static-assert-guards` (39 -> 68 checks, 11 near-bound FIRES/CLEAN fixtures); the new `test/avr/test_sim.c` pet-budget check on both classic parts and all three variants; all five MISRA lanes clean |
 | P1 | OPEN | | Standalone PIC12F675 release helper, PICkit 3/IPE validation, packaging, and durable documentation contract |
 | P2 | OPEN | | Build-before-hardware AVR programming order and fake-programmer regression |
 | D4 | OPEN | | Final release date, resource tables, and PIC10F320 run-5 baseline wording |
 | D5 | OPEN | | Simulator timing/physical-language and pip prerequisite reconciliation |
-| R4 | OPEN | | Suffixed-tag prerelease publication semantics |
-| R5 | OPEN | | Fail-closed XC8 cache manifest pipelines |
+| R4 | IMPLEMENTED | (pending) | Tag-derived publication kind in `release.yml`; `test-release-provenance` executes the publication shell for stable, `-rc.1`, and six malformed tags (86 -> 94 checks); `test-workflow-syntax` pins both branches against the `scripts/make-release.sh` grammar (375 -> 381 checks) |
+| R5 | IMPLEMENTED | (pending) | XC8 cache manifest split into three separately status-checked NUL-delimited stages in both `install_pic_toolchain.sh` and `verify_pic_toolchain_cache.sh`; neither records nor accepts a partial or empty inventory, and the verifier names the failing stage instead of reporting a cache mismatch; `test-supply-chain` fails each stage independently in both scripts and inventories 8 unusually-named files (30 -> 46 checks) |
 | R6 | OPEN | | Immutable production artifact identity independent of development overrides |
 | Final validation | REOPENED | | The `fe8ecc8` run remains historical evidence; rerun every pre-merge gate after F2-P2 and documentation/release changes |
 

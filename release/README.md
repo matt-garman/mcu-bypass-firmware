@@ -178,7 +178,11 @@ separation between the first and the third is enforced rather than conventional.
 3. **Artifact commit.** One commit whose sole parent is the qualified source
    commit and which changes only `release/vX.Y.Z/`.
 4. **Signed tag and push.** The annotated tag names the artifact commit; tag CI
-   rebuilds from it and publishes only if the image bytes reproduce.
+   rebuilds from it and publishes only if the image bytes reproduce. A bare
+   `vX.Y.Z` tag publishes as an ordinary GitHub release; an accepted suffixed
+   tag (`vX.Y.Z-rc.1`) publishes as a **prerelease**, so a candidate can never
+   become the latest release. A tag outside that grammar is rejected before any
+   build, and again before publication.
 
 Steps 1 and 3 cannot be collapsed into one commit:
 `scripts/verify-release-history.sh` rejects a release whose qualified source

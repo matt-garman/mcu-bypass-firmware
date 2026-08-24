@@ -156,18 +156,38 @@ static_assert(_XTAL_FREQ ==  2000000UL, "_XTAL_FREQ must be 2 MHz (matches OSCCO
 
 // Watchdog safety margin: formalises the hand-calculated budget described in
 // init()'s WDTCON comment as a build-time invariant.  The longest stretch between
-// two CLRWDT() "pets" is one tick wait plus the longest BLOCKING output actuation
-// in a toggling tick (the relay/mute pulse).  That window must stay safely under
-// the WDT's worst-case (shortest) period, or a healthy main loop could trip the
-// dog.  The per-variant pulse term is asserted next to the existing
-// "pulse < RELEASE_THRESH" check in each hw_is_sanity_check_failed().
+// two CLRWDT() "pets" is the worst-case WALL-CLOCK window a healthy loop can
+// spend there: the longest BLOCKING output actuation in a toggling tick (the
+// relay/mute pulse), one tick of scheduling latency, and one pass of bounded
+// loop work before the CLRWDT.  That window must stay safely under the WDT's
+// worst-case (shortest) period, or a healthy main loop could trip the dog.  The
+// per-variant bound is asserted next to the existing "pulse < RELEASE_THRESH"
+// check in each hw_is_sanity_check_failed().
 //   TICK_PERIOD_MS    : the 1ms TMR2 tick (PR2=124 with the 1:4 prescaler on
 //                       FOSC/4=500kHz -> 125kHz, so 125 counts = 1ms).
 //   WDT_MIN_PERIOD_MS : ~256ms nominal (WDTPS=0x08 = 1:8192 on the ~31kHz
 //                       LFINTOSC), de-rated by the datasheet worst-case -37%
 //                       (param 31) to a ~160ms floor.
-#define TICK_PERIOD_MS    (1U)
-#define WDT_MIN_PERIOD_MS (160U)
+//   WDT_LOOP_WORK_MS  : sanity gate + inlined integrate/step between the polled
+//                       TMR2IF tick and the CLRWDT.  One whole tick is the
+//                       allowance; a body that outran a tick would stop being
+//                       tick-gated, which the gpsim free-run checkpoint fails on.
+//   WDT_ISR_STRETCH_PCT: zero.  This shell is a single POLLED loop with GIE
+//                       clear and no ISR, so nothing stretches __delay_ms() in
+//                       wall time.
+// This file is the 256-word self-contained shell (docs/pic10f320_special_case.md):
+// it shares no headers with src/, so it carries its own copy of the budget that
+// the four modular shells reach through WDT_PET_TO_PET_MAX_MS() in
+// bypass_output_common.h.  The copy is deliberate and must be kept in step.
+#define TICK_PERIOD_MS      (1U)
+#define WDT_MIN_PERIOD_MS   (160U)
+#define WDT_LOOP_WORK_MS    (1U)
+#define WDT_ISR_STRETCH_PCT (0U)
+#define WDT_PET_TO_PET_MAX_MS(blocking_ms)                                     \
+    (   (blocking_ms)                                                          \
+      + ((((blocking_ms) * WDT_ISR_STRETCH_PCT) + 99U) / 100U)                 \
+      + TICK_PERIOD_MS                                                         \
+      + WDT_LOOP_WORK_MS )
 
 
 
@@ -285,6 +305,13 @@ static uint8_t hw_output_pins_intact(void) {
 static uint8_t hw_is_sanity_check_failed(void) {
     static_assert(CD4053_PIN  == _PORTA_RA1_POSN, "CD4053_PIN must be RA1");
 
+    // No blocking actuation on this variant, so the window is scheduling
+    // latency plus bounded loop work alone -- asserted anyway, for the reason
+    // given in bypass_output_cd4053_simple.c.
+    static_assert(WDT_PET_TO_PET_MAX_MS(0U) < WDT_MIN_PERIOD_MS,
+            "cd4053: worst-case wall-clock WDT pet-to-pet interval must stay "
+            "under the de-rated WDT floor");
+
     return (hw_output_pins_intact() == 0U);
 }
 
@@ -325,8 +352,9 @@ static uint8_t hw_is_sanity_check_failed(void) {
             "CD4053 mute delay must be shorter than the release-lockout window, "
             "or the re-arm point can be missed during the blocking actuation");
 
-    static_assert((TICK_PERIOD_MS + CD4053_MUTE_DELAY_MS) < WDT_MIN_PERIOD_MS,
-            "1ms tick + mute pulse must stay under the worst-case WDT period");
+    static_assert(WDT_PET_TO_PET_MAX_MS(CD4053_MUTE_DELAY_MS) < WDT_MIN_PERIOD_MS,
+            "mute: worst-case wall-clock WDT pet-to-pet interval must stay "
+            "under the de-rated WDT floor");
 
     return (0U == hw_output_pins_intact());
 }
@@ -384,8 +412,9 @@ static uint8_t hw_is_sanity_check_failed(void) {
             "relay coil pulse must be shorter than the release-lockout window, "
             "or the re-arm point can be missed during the blocking actuation");
 
-    static_assert((TICK_PERIOD_MS + TQ2_L2_5V_PULSE_MS) < WDT_MIN_PERIOD_MS,
-            "1ms tick + relay coil pulse must stay under the worst-case WDT period");
+    static_assert(WDT_PET_TO_PET_MAX_MS(TQ2_L2_5V_PULSE_MS) < WDT_MIN_PERIOD_MS,
+            "relay: worst-case wall-clock WDT pet-to-pet interval must stay "
+            "under the de-rated WDT floor");
 
     static_assert(RELAY_RESET_PIN == _PORTA_RA1_POSN, "RELAY_RESET_PIN must be RA1");
     static_assert(RELAY_SET_PIN   == _PORTA_RA2_POSN, "RELAY_SET_PIN must be RA2");
@@ -397,18 +426,32 @@ static uint8_t hw_is_sanity_check_failed(void) {
 // see the comment below hw_output_pins_intact() for why.  No polarity
 // indirection needed here (the relay coils are not an x4053 control input).
 static void hw_relay_reset_pin_set_high(void) { LATA |=  (uint8_t)(1U << RELAY_RESET_PIN); }
-static void hw_relay_reset_pin_set_low(void)  { LATA &= (uint8_t)~(1U << RELAY_RESET_PIN); }
 static void hw_relay_set_pin_set_high(void)   { LATA |=  (uint8_t)(1U << RELAY_SET_PIN); }
-static void hw_relay_set_pin_set_low(void)    { LATA &= (uint8_t)~(1U << RELAY_SET_PIN); }
 
-// force both coils low
+// force both coils low, in ONE constant-mask LATA read-modify-write
 // - it's not strictly necessary to set both low; but we do this as part of
 //   the project's overall defense-in-depth/belt-and-suspenders paradigm
 // - the intent is to prevent accidentally leaving the relay coil active too
 //   long (e.g. programmer mistake)
+// - ONE write, and not a per-bit clear of RESET followed by SET.  The two are
+//   the same settled result and a different transient: whenever BOTH bits are
+//   high -- the coil-latch upset hw_output_pins_intact() escalates on -- a
+//   per-bit clear leaves the second coil energized for the whole of the first
+//   write.  On the escalation path (hw_force_wdt_reset() below) that is a coil
+//   still driven after the firmware has decided to de-energize it, which is
+//   the one thing that path exists to prevent.  A single masked write has no
+//   such intermediate state, so this shell now makes the same guarantee the
+//   four modular shells make through hw_pin_mask_set_low(): both coils reach
+//   their de-energized idle in one output write, from any starting state.
+// - folding the two per-bit low helpers into this one write also COSTS LESS on
+//   the part that can least afford it: measured with the pinned XC8 V3.10 -O2
+//   build, the relay image went 248 -> 242 of 256 program words and its
+//   worst-case return-stack depth 4 -> 3 of 8.  The two CD4053 images are
+//   untouched (these helpers are relay-only).  The high-side helpers stay
+//   per-bit: only one coil is ever energized at a time, so there is no
+//   intermediate state to remove there, and a masked pair would be wrong.
 static void set_relay_coils_low(void) {
-    hw_relay_reset_pin_set_low();
-    hw_relay_set_pin_set_low();
+    LATA &= (uint8_t)~((1U << RELAY_RESET_PIN) | (1U << RELAY_SET_PIN));
 }
 
 // wrap this into a function to save firmware space
@@ -451,9 +494,10 @@ static void hw_set_engaged_state(void) {
 // errors (presumably ultra-rare events: cosmic rays, extreme EMI).  Disables
 // interrupts first so nothing can pet the dog.
 //
-// The FIRST act on the relay variant is set_relay_coils_low(): the coils are
-// driven to their de-energized idle BEFORE the spin, so no fault can hold a
-// coil energized for the whole ~256ms watchdog period. The reset then re-runs
+// The FIRST act on the relay variant is set_relay_coils_low(): both coils are
+// driven to their de-energized idle -- in ONE LATA write, so neither is left
+// energized while the other is cleared -- BEFORE the spin, so no fault can hold
+// a coil energized for the whole ~256ms watchdog period. The reset then re-runs
 // init(), whose full-width BYPASS actuation re-synchronizes the physical relay
 // with the logical state and the LED. (The modular shells reach the same
 // operation through hw_outputs_reassert_safe(); this shell has no linked
@@ -594,9 +638,9 @@ static void init(void) {
     // ~256ms (WDTPS = 0b01000 = 1:8192 on the ~31kHz LFINTOSC), mirroring the
     // AVR shell's 250ms.  The LFINTOSC has ±25% tolerance (datasheet OS09)
     // and the WDT period is characterized at -37%/+69% (param 31), so
-    // worst-case it is still ~160ms -- comfortably > the ~13ms worst-case
-    // pet-to-pet window (1ms tick + 12ms relay coil pulse), unlike the prior
-    // 32ms (~1.4x margin).
+    // worst-case it is still ~160ms -- comfortably > the 14ms worst-case
+    // pet-to-pet window asserted above (12ms relay coil pulse + 1ms scheduling
+    // latency + 1ms bounded loop work), unlike the prior 32ms (~1.4x margin).
     WDTCONbits.WDTPS = WDT_WDTPS_256MS;
 
 

@@ -79,11 +79,26 @@ int fw_fault_run(fw_inject_t inj);
 // image; simulation still proves nothing about relay MECHANICS.
 //
 //   final_coils          -- the coil latch bits when the reset spin was aborted
+//   partial_clear_coils  -- see below; must be 0
 //   completed_iterations -- must be 0: no further clean iteration may run
+//
+// partial_clear_coils is this lane's view of the coil clear's WRITE SEQUENCE.
+// set_relay_coils_low() is contracted to drive both coil bits low in ONE
+// output write; a per-bit clear reaches the same settled state through a
+// different transient, and with BOTH coils energized it leaves the second one
+// driven for the whole of the first write. The mock routes every LATA access
+// through the harness, so that transient is directly observable here as a coil
+// field with strictly fewer bits than the previous one but not none -- which is
+// what this field records. It stays 0 for a single masked write.
+//
+// It is the both-coils injection that carries the check: with only one coil
+// energized a per-bit clear delays the useful de-energization by one write but
+// passes through no distinct state, so no oracle at this level can see it.
 typedef struct {
     uint8_t injected_coils;
     uint8_t observed_coils;
     uint8_t final_coils;
+    uint8_t partial_clear_coils;
     uint8_t footswitch_stayed_released;
     uint8_t completed_iterations;
 } fw_relay_fault_result_t;

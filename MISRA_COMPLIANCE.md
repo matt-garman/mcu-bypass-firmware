@@ -291,7 +291,7 @@ unsuppressed-report review.
 | | |
 |---|---|
 | **Rule** | 2.5 (unused macro definition, Advisory) |
-| **Suppression scope** | `bypass_pins_avr_classic.h`, `bypass_pins_pic10f322.h`, `bypass_pins_avr_xt.h`, `bypass_pins_pic12f675.h`, `bypass_config.h` |
+| **Suppression scope** | `bypass_pins_avr_classic.h`, `bypass_pins_pic10f322.h`, `bypass_pins_avr_xt.h`, `bypass_pins_pic12f675.h`, `bypass_config.h`, `bypass_output_common.h` |
 | **Classification** | Per-translation-unit / cross-configuration analyzer artifact, not a project-level unused-macro deviation |
 
 **Rationale.** Each pin-map header is the single source of truth for one MCU.
@@ -307,6 +307,13 @@ consume the debounce thresholds; the mute and relay drivers consume
 `RELEASE_THRESH` in timing assertions but not `PRESSED_THRESH`. A driver-only
 analysis can therefore report the latter as unused even though other project
 translation units consume it.
+
+`bypass_output_common.h` is the header that selects one of the four maps, and it
+carries `WDT_PET_TO_PET_MAX_MS()` — the watchdog pet-to-pet budget whose
+per-target terms those maps supply. All three output-driver translation units
+expand it in a `static_assert`; the four modular shells include the header for
+its map selection and never expand it, so a shell analysis reports it unused.
+That is the same cross-translation-unit split as the maps it selects.
 
 These declarations are used across the complete build matrix and are not dead
 code. Centralizing them prevents target pinouts and timing thresholds from
@@ -354,8 +361,9 @@ attributed to its named file.
 **What happens.** The MISRA addon cannot resolve volatile SFR bitfields at the
 PIC10F322 and PIC12F675 tick-poll read sites. On PIC10F320 it loses the device
 symbol table more broadly: it reports `misra-config` for `PIR1bits` / `TMR2IF`
-in the 1 ms tick wait, and reports `TICK_PERIOD_MS` and `WDT_MIN_PERIOD_MS` as
-unused macros.
+in the 1 ms tick wait, and reports the shell's own watchdog-budget macros
+(`TICK_PERIOD_MS`, `WDT_MIN_PERIOD_MS`, `WDT_LOOP_WORK_MS`,
+`WDT_ISR_STRETCH_PCT`, `WDT_PET_TO_PET_MAX_MS`) as unused.
 
 **Why it is not a code defect.** The declarations are present and correct: the
 PIC SFR declarations are supplied by the selected DFP and compile under XC8. The

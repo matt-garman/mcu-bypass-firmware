@@ -460,7 +460,8 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
                 i for i, command in enumerate(commands)
                 if command == [
                     "gh", "release", "create", "$tag", "--title", "Firmware $tag",
-                    "--notes-file", "$notes", "--verify-tag", "${assets[@]}",
+                    "--notes-file", "$notes", "--verify-tag",
+                    "${prerelease_flag[@]}", "${assets[@]}",
                 ]
             ]
             rename_indices = [
@@ -491,6 +492,121 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
             check(
                 publish.get("continue-on-error", False) is False,
                 "release.yml: publication step may continue after verification failure",
+            )
+
+            # --- publication kind -------------------------------------------
+            # A suffixed tag (v1.0.0-rc.1) must publish as a GitHub prerelease
+            # so a candidate cannot take latest-release selection away from the
+            # newest stable version; a bare vX.Y.Z must not. The workflow
+            # decides that with two regex branches over $tag, which makes this
+            # ANOTHER copy of the project's version grammar -- so do not just
+            # look for the flag: extract both branch patterns and require that
+            # together they accept exactly what scripts/make-release.sh accepts,
+            # and that they split that grammar stable-vs-suffixed.
+            flag_init = ["prerelease_flag=()"]
+            flag_set = ["prerelease_flag=(", "--prerelease", ")"]
+            init_indices = [i for i, command in enumerate(commands) if command == flag_init]
+            set_indices = [i for i, command in enumerate(commands) if command == flag_set]
+            check(
+                len(init_indices) == 1 and len(set_indices) == 1
+                and init_indices[0] < set_indices[0]
+                and bool(publish_indices) and set_indices[0] < publish_indices[0],
+                "release.yml: publication does not build one prerelease flag before publishing",
+            )
+
+            # The suffixed branch must set the flag, and the fall-through must
+            # abort -- not silently publish an unrecognized shape as either kind.
+            publish_lines = [line.strip() for line in publish_run.split("\n")]
+            elif_lines = [
+                i for i, line in enumerate(publish_lines)
+                if line.startswith('elif [[ "$tag" =~ ')
+            ]
+            fail_closed_tail = [
+                "prerelease_flag=( --prerelease )",
+                "else",
+                "echo \"::error::tag '$tag' is not vX.Y.Z (optionally -suffix)\"",
+                "exit 1",
+                "fi",
+            ]
+            check(
+                len(elif_lines) == 1
+                and publish_lines[elif_lines[0] + 1:elif_lines[0] + 6] == fail_closed_tail,
+                "release.yml: unrecognized tag shapes do not fail closed before publication",
+            )
+
+            branch_patterns = re.findall(
+                r'^\s*(?:if|elif) \[\[ "\$tag" =~ (\S+) \]\]; then$',
+                publish_run,
+                re.M,
+            )
+            NEVER = r"(?!)"
+            stable_pattern, suffixed_pattern = (
+                branch_patterns if len(branch_patterns) == 2 else (NEVER, NEVER)
+            )
+            canonical_pattern = NEVER
+            try:
+                with open(os.path.join(root, "scripts", "make-release.sh"), encoding="utf-8") as fh:
+                    canonical_match = re.search(r'\[\[ "\$VERSION" =~ (\S+) \]\]', fh.read())
+                if canonical_match:
+                    canonical_pattern = canonical_match.group(1)
+            except OSError:
+                pass
+            check(
+                canonical_pattern != NEVER and len(branch_patterns) == 2,
+                "release.yml: publication-kind branches or the producer's version "
+                "grammar could not be extracted for comparison",
+            )
+
+            # Stable, prerelease, and malformed shapes, including the ones the
+            # `on:` tag globs admit but the grammar does not (`v1.0.0-`).
+            TAG_CASES = (
+                ("v0.9.10", "stable"),
+                ("v1.0.0", "stable"),
+                ("v10.20.30", "stable"),
+                ("v1.0.0-rc.1", "prerelease"),
+                ("v1.0.0-rc1", "prerelease"),
+                ("v1.0.0-rc-1", "prerelease"),
+                ("v1.0.0-alpha.1.2", "prerelease"),
+                ("v1.0.0-", "rejected"),
+                ("v1.0.0-rc.", "rejected"),
+                ("v1.0.0-rc..1", "rejected"),
+                ("v1.0.0--rc", "rejected"),
+                ("v1.0.0+build", "rejected"),
+                ("v1.0.0.rc1", "rejected"),
+                ("v1.0", "rejected"),
+                ("v1.0.0.0", "rejected"),
+                ("1.0.0", "rejected"),
+                ("v1.0.0 rc1", "rejected"),
+                ("", "rejected"),
+            )
+            overlapping = []
+            disagreeing = []
+            misclassified = []
+            for tag_case, kind in TAG_CASES:
+                stable_ok = re.fullmatch(stable_pattern, tag_case) is not None
+                suffixed_ok = re.fullmatch(suffixed_pattern, tag_case) is not None
+                canonical_ok = re.fullmatch(canonical_pattern, tag_case) is not None
+                if stable_ok and suffixed_ok:
+                    overlapping.append(tag_case)
+                if (stable_ok or suffixed_ok) != canonical_ok:
+                    disagreeing.append(tag_case)
+                expected = {"stable": (True, False), "prerelease": (False, True)}.get(
+                    kind, (False, False))
+                if (stable_ok, suffixed_ok) != expected:
+                    misclassified.append(f"{tag_case or '(empty)'} != {kind}")
+            check(
+                not overlapping,
+                "release.yml: a tag matches both publication-kind branches: "
+                + ", ".join(overlapping),
+            )
+            check(
+                not disagreeing,
+                "release.yml: publication-kind branches disagree with the "
+                "scripts/make-release.sh version grammar on: " + ", ".join(disagreeing),
+            )
+            check(
+                not misclassified,
+                "release.yml: publication kind is wrong for: " + ", ".join(misclassified),
             )
 def apt_packages(step):
     run = step.get("run") if isinstance(step, dict) else None

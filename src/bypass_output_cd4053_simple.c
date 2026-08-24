@@ -3,10 +3,20 @@
 
 #include "bypass_output_common.h"
 #include "bypass_hw_iface.h"
+#include "bypass_static_assert.h" // static_assert()
 
 
 // assert critical pin directions and the complete output latch state hold
 uint8_t hw_is_sanity_check_failed(effect_state_t const effect_state) {
+
+    // This variant performs no blocking actuation, so its pet-to-pet window is
+    // scheduling latency plus bounded loop work alone. Asserted anyway: the
+    // watchdog floor has to cover the loop itself, not just the pulse, and a
+    // tick or floor change that broke that would otherwise be caught only on
+    // the two variants that happen to block.
+    static_assert(WDT_PET_TO_PET_MAX_MS(0U) < WDT_MIN_PERIOD_MS,
+            "cd4053: worst-case wall-clock WDT pet-to-pet interval must stay "
+            "under the de-rated WDT floor, or a healthy loop can trip the dog");
 
     uint8_t const output_mask = (1U << LED_PIN) | (1U << CD4053_PIN);
     uint8_t       intact      = 0U;

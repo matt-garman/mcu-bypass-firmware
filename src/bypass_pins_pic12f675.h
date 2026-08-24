@@ -96,11 +96,23 @@
 #define BYPASS_OUTPUT_DDR_MASK (0x17U)  // GP0|GP1|GP2|GP4
 
 
-// Watchdog margin floor, consumed by the shared blocking output drivers: one
-// tick + the longest blocking actuation must stay under the WORST-CASE WDT
-// period (de-rated minima, never nominal). Asserted in bypass_output_*.c.
+// Watchdog pet-to-pet budget, consumed by the shared output drivers through
+// WDT_PET_TO_PET_MAX_MS() (bypass_output_common.h): the worst-case WALL-CLOCK
+// interval between two watchdog pets must stay under the WORST-CASE WDT period
+// (de-rated minima, never nominal). Asserted in bypass_output_*.c. See
+// "Watchdog pet-to-pet budget" in DESIGN_DOCUMENTATION.adoc for the derivation
+// and the measured corroboration of each term below.
 #define TICK_PERIOD_MS    (2U)    // 1.024 ms TMR0 tick, ceil to a conservative int
 #define WDT_MIN_PERIOD_MS (160U)  // WDTPS=0x0C (1:16) 288 ms nom; DS41190G T12-4 p31 -> 160 ms floor
+
+// Bounded non-blocking work in the pet-to-pet window, as on the PIC10F322. One
+// whole tick is the allowance, and this map's tick is already the conservative
+// 2 ms ceiling of a 1.024 ms tick.
+#define WDT_LOOP_WORK_MS  (2U)
+
+// No ISR preemption term: single polled loop, GIE clear, no interrupt service
+// routine. See the PIC10F322 map.
+#define WDT_ISR_STRETCH_PCT (0U)
 
 
 
