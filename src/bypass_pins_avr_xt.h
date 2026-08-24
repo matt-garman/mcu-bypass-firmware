@@ -52,12 +52,30 @@
 
 
 
-// Watchdog margin floor, consumed by the shared blocking output drivers: one
-// tick + the longest blocking actuation must stay under the WORST-CASE WDT
-// period (de-rated minima, never nominal). Asserted in bypass_output_*.c.
+// Watchdog pet-to-pet budget, consumed by the shared output drivers through
+// WDT_PET_TO_PET_MAX_MS() (bypass_output_common.h): the worst-case WALL-CLOCK
+// interval between two watchdog pets must stay under the WORST-CASE WDT period
+// (de-rated minima, never nominal). Asserted in bypass_output_*.c. See
+// "Watchdog pet-to-pet budget" in DESIGN_DOCUMENTATION.adoc for the derivation
+// and the measured corroboration of each term below.
 #define TICK_PERIOD_MS    (1U)    // 1 ms TCB0 periodic tick
 #define WDT_MIN_PERIOD_MS (128U)  // PERIOD=256CLK ~256 ms nom; de-rated 50% for
                                   // ATtiny202 OSCULP32K accuracy (datasheet)
+
+// Bounded non-blocking work in the pet-to-pet window (boot: init() plus the
+// first loop pass; steady state: one loop pass) -- see the classic-AVR map for
+// the shape of the term. The AVR-XT runs the same code at 2 MHz, so one tick is
+// a wider allowance here than the 0.46 ms measured there.
+#define WDT_LOOP_WORK_MS  (1U)
+
+// ISR preemption allowance. Interrupt-driven, like the classic shell. No
+// cycle-accurate AVR-XT simulator is trusted for this measurement (see the
+// yasimavr stepping note in test/README.md), so the term is bounded from the
+// built image instead: the TCB0 ISR and its callees are 84 instructions, and no
+// AVR-XT instruction the shell emits exceeds 3 cycles, so the ISR cannot exceed
+// 252 of the 2000 cycles in a 1 ms tick at 2 MHz (12.6%). The classic map's
+// 25% therefore bounds this part too, with the same re-derivation duty.
+#define WDT_ISR_STRETCH_PCT (25U)
 
 
 

@@ -1187,12 +1187,51 @@ owner.
 
 **Acceptance criteria**
 
-- [ ] Every modular shell has a documented conservative pet-to-pet upper bound.
-- [ ] Compile-time guards fail at the true wall-clock boundary for relay and
+- [x] Every modular shell has a documented conservative pet-to-pet upper bound.
+- [x] Compile-time guards fail at the true wall-clock boundary for relay and
   muting variants.
-- [ ] Static-assert negative controls prove the overhead/preemption term is
+- [x] Static-assert negative controls prove the overhead/preemption term is
   load-bearing.
-- [ ] Existing timing, pulse-width, watchdog-liveness, and resource gates pass.
+- [x] Existing timing, pulse-width, watchdog-liveness, and resource gates pass.
+
+**Resolution.** Each pin map now declares `WDT_LOOP_WORK_MS` and
+`WDT_ISR_STRETCH_PCT` beside its existing `TICK_PERIOD_MS` and de-rated
+`WDT_MIN_PERIOD_MS`; `WDT_PET_TO_PET_MAX_MS()` in `bypass_output_common.h`
+combines all four with the variant's blocking delay into one conservative
+wall-clock upper bound, and each output driver asserts that bound against the
+floor. The self-contained PIC10F320 carries its own copy of the constants and
+the arithmetic, as it does for every other shared invariant. The simple CD4053
+variant, which blocks nowhere and previously carried no watchdog assertion,
+is now covered as well: the floor must clear the loop itself, not only a pulse.
+The boot path is inside the bound rather than beside it -- `init()` arms the
+watchdog and then performs the same blocking actuation before `main()` reaches
+its first pet -- and on the non-blocking variants it is the longest window
+there is, which the measurement below is what established.
+
+Per-target bounds, in milliseconds (relay / mute / simple against the floor):
+AVR Classic 17 / 9 / 2 against 100; AVR-XT 17 / 9 / 2 against 128; PIC10F322 and
+PIC10F320 14 / 7 / 2 against 160; PIC12F675 16 / 9 / 4 against 160. Derivation
+and the measured corroboration are in "Watchdog Pet-to-Pet Budget" in
+`DESIGN_DOCUMENTATION.adoc`.
+
+*Verification.* All 21 images across the six targets rebuild byte-identical to
+the current baselines, so the change is entirely compile-time and no image
+rebaseline is required. `make test-static-assert-guards` 39 -> 68 checks: eleven
+near-bound fixtures pin each variant's bound to its exact millisecond and assert
+FIRES or CLEAN rather than only that something failed, so a guard reverted to
+the old `tick + pulse` sum fails the FIRES half and a term that is present but
+unreachable fails the CLEAN half. `test/avr/test_sim.c` gained a pet-budget
+check that measures the longest `wdr`-to-`wdr` interval on the real image and
+requires it to fit the compile-time budget: worst measured 14.002 / 15.003 ms of
+a 17 ms relay budget on ATtiny13A / ATtiny85, 6.402 / 7.004 of 9 for mute, and
+1.377 / 1.464 of 2 for simple, all against a 100 ms floor. All five MISRA lanes
+clean after one new D-2 Rule 2.5 entry for `bypass_output_common.h`, whose
+shared macro the modular shells include but do not expand. `make test`: 84
+summary lines, 0 failures. Full `scripts/ci-local.sh` green end to end (1253s),
+including `make test-long MUTATION_ALLOW_SKIP=0` under `STRICT_TOOLS=1` with
+mutation testing at 132 killed, 0 survived, 0 errored, 0 skipped;
+`make test-release-preflight` remains 118 checks. Firmware source changes were
+made by the repository owner, consistent with project policy.
 
 ### P1 - Remove the unsafe static PIC12F675 flashing path
 
@@ -1561,7 +1600,7 @@ Record each completed item with its commit ID and decisive validation command.
 | G1 | DONE | `fe8ecc8` | `make test-release-preflight` (113 -> 118 checks); `scripts/make-release.sh --preflight v0.9.10` accepted with the document present; `make test-release-qualification test-release-history test-release-provenance test-release-images test-soak-timing test-build-serialization test-todo-index test-makefile-name-contract`; `make test`; `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` |
 | F2 | OPEN | | AVR-XT polarity and PIC12F675 peripheral-ownership escalation fixes plus physical-pin fault tests |
 | F3 | OPEN | | PIC10F320 one-write measurement and implementation or explicit owner disposition |
-| F4 | OPEN | | Conservative wall-clock watchdog assertions and near-bound negative controls |
+| F4 | IMPLEMENTED | (pending) | All 21 images rebuild byte-identical; `make test-static-assert-guards` (39 -> 68 checks, 11 near-bound FIRES/CLEAN fixtures); the new `test/avr/test_sim.c` pet-budget check on both classic parts and all three variants; all five MISRA lanes clean |
 | P1 | OPEN | | Static PIC12F675 flashing guidance and durable documentation contract |
 | P2 | OPEN | | Build-before-hardware AVR programming order and fake-programmer regression |
 | D4 | OPEN | | Final release date, resource tables, and PIC10F320 run-5 baseline wording |

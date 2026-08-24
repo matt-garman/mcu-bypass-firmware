@@ -1225,10 +1225,13 @@ bench**, tracked together with the graduation diff that follows it.
 
    Residual: none for the period itself. The margin is now enforced at compile
    time on this part as on the PIC10F320: `bypass_pins_pic12f675.h` defines the
-   de-rated `WDT_MIN_PERIOD_MS` (160 ms) and `TICK_PERIOD_MS`, and the shared
-   blocking output drivers static_assert `(tick + pulse) < WDT_MIN_PERIOD_MS`
-   against them, so a future prescaler, tick, or pulse change that erodes the
-   margin fails the build (v0.9.9 post-release polish; see CHANGELOG.md).
+   de-rated `WDT_MIN_PERIOD_MS` (160 ms), `TICK_PERIOD_MS`, and the part's
+   `WDT_LOOP_WORK_MS` / `WDT_ISR_STRETCH_PCT` terms, and the shared output
+   drivers static_assert `WDT_PET_TO_PET_MAX_MS(pulse) < WDT_MIN_PERIOD_MS`
+   against them -- the whole worst-case wall-clock pet-to-pet window, not the
+   pulse alone -- so a future prescaler, tick, or pulse change that erodes the
+   margin fails the build (v0.9.9 post-release polish; see CHANGELOG.md and
+   "Watchdog Pet-to-Pet Budget" in DESIGN_DOCUMENTATION.adoc).
 5. **Brown-out trip point.** *CLOSED 2026-08-11 — read; the expected limitation
    is confirmed, with numbers.* DS41190G Table 12-4, `BVDD` "Brown-out Detect
    Voltage": **2.025 V min, 2.175 V max** (no typical given; the hysteresis is

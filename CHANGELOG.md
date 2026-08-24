@@ -39,6 +39,41 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- **The watchdog margin is now asserted against wall-clock execution, not
+  against the delay constant alone.** Every shell used to assert only
+  `TICK_PERIOD_MS + blocking_delay < WDT_MIN_PERIOD_MS`. That sum omits two real
+  costs: the bounded loop work between a tick and the pet that follows it, and
+  -- on the interrupt-driven AVRs -- the tick ISR preempting the busy-wait
+  inside a blocking actuation, which makes the actuation longer in wall time
+  than the delay body it compiles to. Shipped margins were wide enough that
+  neither omission mattered, but a future near-bound configuration could have
+  satisfied the assertion while violating the real pet-to-pet bound.
+
+  Each pin map now declares its own `WDT_LOOP_WORK_MS` and
+  `WDT_ISR_STRETCH_PCT`, and the shared `WDT_PET_TO_PET_MAX_MS()` in
+  `bypass_output_common.h` combines them with the blocking delay and one tick of
+  scheduling latency into a conservative wall-clock upper bound, asserted
+  against the de-rated watchdog floor. The boot path -- `init()` arms the
+  watchdog and then performs the same blocking actuation before `main()` reaches
+  its first pet -- is inside that bound rather than beside it. The simple CD4053
+  variant, which blocks nowhere and previously carried no watchdog assertion at
+  all, is now covered too: the floor has to clear the loop itself, not just a
+  pulse. The self-contained PIC10F320 carries its own copy, as it does for every
+  other shared invariant. No image changed: all 21 images across the six targets
+  rebuild byte-identical, because the change is entirely compile-time.
+
+  Two gates hold the budget to something real. `test-static-assert-guards` pins
+  each variant's bound to its exact millisecond and proves the two new terms are
+  load-bearing: a watchdog floor set inside the gap between the old `tick +
+  pulse` sum and the full bound must fail the build, and must go back to
+  compiling the moment the term under test is zeroed -- eleven fixtures, each
+  asserting FIRES or CLEAN rather than only that something failed. The classic
+  AVR simavr suite then measures the real image, recording the longest interval
+  between `wdr` executions across boot and across toggles in both directions and
+  requiring it to fit the same budget the firmware compiled against. Worst
+  measured: 14.002 ms of a 17 ms budget on the ATtiny13A relay build, 15.003 ms
+  of 17 ms on the ATtiny85, against a 100 ms de-rated floor.
+
 - **PIC12F675 relay coil clears now commit through one whole-port write.** The
   shared relay driver clears both coil bits with one masked hardware-interface
   operation. On PIC12F675, that operation removes both bits from the SRAM output

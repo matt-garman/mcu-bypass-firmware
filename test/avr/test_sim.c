@@ -1340,6 +1340,122 @@ static void test_watchdog_not_tripped_normally(void) {
     CHECK((g_led_changes - before) == 1, "still responsive after long idle");
 }
 
+// Watchdog pet-to-pet BUDGET, measured on the real image.
+//
+// The firmware asserts a conservative compile-time inequality: the worst-case
+// WALL-CLOCK interval between two `wdr`s -- blocking actuation, the ISR
+// preemption that stretches it, one tick of scheduling latency and one pass of
+// bounded loop work -- stays under the de-rated watchdog floor
+// (WDT_PET_TO_PET_MAX_MS() in src/bypass_output_common.h). That inequality is
+// arithmetic over per-target constants a human derived. Nothing in it observes
+// the compiled firmware, so a shell whose ISR or loop grew past its declared
+// allowance would keep asserting a bound it no longer meets.
+//
+// So measure it. Step the real image and record the longest interval between
+// consecutive executions of a `wdr`, across boot (whose first interval spans
+// init()'s blocking bypass actuation) and across toggles in both directions.
+// The result must fit the SAME budget the firmware compiled against -- not
+// merely fit under the watchdog floor, which a badly derived constant would
+// also do.
+//
+// This CORROBORATES the compile-time guard; it does not replace it. One
+// simulated run over one stimulus cannot enumerate every path, which is exactly
+// why the conservative inequality is the primary artifact.
+#define MAX_PET_SITES 8
+static uint32_t g_pet_site[MAX_PET_SITES];
+static int      g_pet_sites;
+
+// `wdr` is a single 16-bit opcode with no operands, so its encoding is a
+// constant and the pet sites can be recovered from flash without debug info.
+// (avr-libc's wdt_reset() and the shell's hw_wdt_pet() both compile to it.)
+#define AVR_OPCODE_WDR 0x95a8U
+static void find_pet_sites(void) {
+    g_pet_sites = 0;
+    for (uint32_t a = 0; (a + 1U) <= g_avr->flashend; a += 2U) {
+        uint16_t op = (uint16_t)((uint16_t)g_avr->flash[a] |
+                                 ((uint16_t)g_avr->flash[a + 1U] << 8));
+        if (op != AVR_OPCODE_WDR) { continue; }
+        if (g_pet_sites < MAX_PET_SITES) { g_pet_site[g_pet_sites] = a; }
+        g_pet_sites++;
+    }
+}
+
+static int is_pet_site(uint32_t pc) {
+    for (int i = 0; i < g_pet_sites && i < MAX_PET_SITES; ++i) {
+        if (g_pet_site[i] == pc) { return 1; }
+    }
+    return 0;
+}
+
+static void test_wdt_pet_interval_within_budget(void) {
+    if (sim_reset_raw(0, 0) != 0) { g_failures++; return; }
+    g_saw_crash = 0;
+    g_resets = 0;
+    footsw_set(0);
+
+    find_pet_sites();
+    // Three: wdt_reset() and wdt_enable()'s own pet in init(), plus the one
+    // main() reaches per serviced tick. Pinned so a fourth (or a vanished
+    // third) is reported here rather than silently changing what is measured.
+    CHECK(g_pet_sites == 3,
+          "pet-budget: expected 3 wdr sites in the image, found %d", g_pet_sites);
+    if (g_pet_sites != 3) { return; }
+
+    avr_cycle_count_t const stop = g_avr->cycle +
+        (avr_cycle_count_t)(1200UL * CYCLES_PER_MS);
+    // Two full round trips: each press toggles, and a toggle is what makes the
+    // loop perform its blocking actuation -- the longest interval there is.
+    avr_cycle_count_t next_edge = g_avr->cycle +
+        (avr_cycle_count_t)(200UL * CYCLES_PER_MS);
+    int pressed = 0;
+    int pets = 0;
+    avr_cycle_count_t prev = 0;
+    avr_cycle_count_t worst = 0;
+
+    while (g_avr->cycle < stop) {
+        if (g_avr->cycle >= next_edge) {
+            pressed = !pressed;
+            footsw_set(pressed);
+            next_edge += (avr_cycle_count_t)(200UL * CYCLES_PER_MS);
+        }
+        if (is_pet_site(g_avr->pc)) {
+            if (pets > 0) {
+                avr_cycle_count_t const gap = g_avr->cycle - prev;
+                if (gap > worst) { worst = gap; }
+            }
+            prev = g_avr->cycle;
+            pets++;
+        }
+        int const st = avr_run(g_avr);
+        if (st == cpu_Crashed) { g_saw_crash = 1; break; }
+        if (st == cpu_Done) { break; }
+    }
+
+    CHECK(g_saw_crash == 0, "pet-budget: CPU must not crash while being measured");
+    CHECK(g_resets == 0, "pet-budget: no reset may occur, or a gap would span one");
+    // Well over a thousand ticks in 1200 ms; a run that petted a handful of
+    // times measured nothing and must not pass on a small `worst`.
+    CHECK(pets > 1000, "pet-budget: only %d pets observed, too few to bound anything", pets);
+    // Toggles must actually have happened, or the blocking actuation -- the
+    // longest interval, and the whole point -- was never exercised.
+    CHECK(g_led_changes >= 2,
+          "pet-budget: %u LED transitions, so no toggle blocked the loop",
+          (unsigned)g_led_changes);
+
+    double const worst_ms = (double)worst / (double)CYCLES_PER_MS;
+    unsigned long const budget_ms =
+        (unsigned long)WDT_PET_TO_PET_MAX_MS((unsigned)CTL_DELAY_MS);
+    CHECK(worst_ms <= (double)budget_ms,
+          "pet-budget: worst measured pet-to-pet %.3f ms exceeds the compile-time "
+          "budget of %lu ms the firmware asserted", worst_ms, budget_ms);
+    CHECK(worst_ms < (double)WDT_MIN_PERIOD_MS,
+          "pet-budget: worst measured pet-to-pet %.3f ms reaches the de-rated "
+          "WDT floor of %u ms", worst_ms, (unsigned)WDT_MIN_PERIOD_MS);
+    printf("  [pet-budget] worst measured pet-to-pet %.3f ms; compile-time budget "
+           "%lu ms; de-rated WDT floor %u ms\n",
+           worst_ms, budget_ms, (unsigned)WDT_MIN_PERIOD_MS);
+}
+
 #ifdef TARGET_TINYX5
 // Watchdog BACKSTOP: verify WDT system reset on the tinyx5 family (simavr
 // models the ATtiny25/45/85 watchdog reset).
@@ -2719,6 +2835,7 @@ int main(int argc, char **argv) {
     test_monte_carlo_lockstep();
     test_enters_idle_sleep();
     test_watchdog_not_tripped_normally();
+    test_wdt_pet_interval_within_budget();
 #ifdef TARGET_TINYX5
     test_watchdog_backstop_reset();
     test_watchdog_timeout_within_bound();

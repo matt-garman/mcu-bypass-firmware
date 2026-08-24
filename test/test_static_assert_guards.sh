@@ -173,6 +173,7 @@ done
 GUARD_CENSUS=(
 	"bypass_compile_checks.h 5"
 	"bypass_mcu_avr_classic.c 17"
+	"bypass_output_cd4053_simple.c 1"
 	"bypass_output_cd4053_with_mute.c 2"
 	"bypass_output_tq2_l2_5v_relay.c 2"
 )
@@ -206,15 +207,19 @@ MUTATIONS=(
 	"pin ordinal|bypass_pins_avr_classic.h|s/^#define FOOTSW_PIN (0U)/#define FOOTSW_PIN (4U)/|bypass_mcu_avr_classic.c|CD4053_SIMPLE|FOOTSW_PIN must be PB0"
 	"mute delay budget|bypass_output_cd4053_with_mute.h|s/^#define CD4053_MUTE_DELAY_MS (5U)/#define CD4053_MUTE_DELAY_MS (25U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|mute delay must be shorter than RELEASE_THRESH"
 	"relay pulse budget|bypass_output_tq2_l2_5v_relay.h|s/^#define TQ2_L2_5V_PULSE_MS (12U)/#define TQ2_L2_5V_PULSE_MS (25U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|relay coil pulse must be shorter than RELEASE_THRESH"
-	# The watchdog-margin guards (TICK+pulse < WDT_MIN_PERIOD_MS). These mutate the
-	# FLOOR, not the pulse: on every shipped part RELEASE_THRESH (25) < the WDT
-	# floor (100-160), so a pulse grown past the floor trips the RELEASE_THRESH
-	# guard FIRST and can never isolate this one. Dropping the floor below
-	# TICK+pulse while the pulse stays < RELEASE_THRESH fires ONLY the margin guard,
-	# which is what a prescaler/tick regression looks like. avr-classic's is the
-	# floor the standalone driver compile resolves (__AVR__ -> bypass_pins_avr_classic.h).
-	"relay WDT floor|bypass_pins_avr_classic.h|s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (5U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|one tick + relay coil pulse must stay under the worst-case"
-	"mute WDT floor|bypass_pins_avr_classic.h|s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (5U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|one tick + mute pulse must stay under the worst-case"
+	# The watchdog pet-to-pet guards (WDT_PET_TO_PET_MAX_MS(pulse) <
+	# WDT_MIN_PERIOD_MS). These mutate the FLOOR, not the pulse: on every shipped
+	# part RELEASE_THRESH (25) < the WDT floor (100-160), so a pulse grown past the
+	# floor trips the RELEASE_THRESH guard FIRST and can never isolate this one.
+	# Dropping the floor below the budget while the pulse stays < RELEASE_THRESH
+	# fires ONLY the margin guard, which is what a prescaler/tick regression looks
+	# like. avr-classic's is the floor the standalone driver compile resolves
+	# (__AVR__ -> bypass_pins_avr_classic.h). A floor of 5 is the far-from-bound
+	# case; the near-bound cases that prove the overhead terms are load-bearing are
+	# in NEARBOUND below.
+	"relay WDT floor|bypass_pins_avr_classic.h|s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (5U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|relay: worst-case wall-clock WDT pet-to-pet interval must stay"
+	"mute WDT floor|bypass_pins_avr_classic.h|s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (5U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|mute: worst-case wall-clock WDT pet-to-pet interval must stay"
+	"cd4053 WDT floor|bypass_pins_avr_classic.h|s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (1U)/|bypass_output_cd4053_simple.c|CD4053_SIMPLE|cd4053: worst-case wall-clock WDT pet-to-pet interval must stay"
 	"enum width flag||-fshort-enums|bypass_mcu_avr_classic.c|CD4053_SIMPLE|sizeof(effect_state_t) != 1, use -fshort-enums&&sizeof(program_state_t) != 1&&sizeof(timer_isr_called_t) != 1"
 )
 
@@ -226,6 +231,7 @@ compile() {
 # Control, one per compile configuration used below. Without this every
 # "the build failed" result would be unattributable.
 for spec in "bypass_mcu_avr_classic.c CD4053_SIMPLE" \
+	"bypass_output_cd4053_simple.c CD4053_SIMPLE" \
 	"bypass_output_cd4053_with_mute.c CD4053_WITH_MUTE" \
 	"bypass_output_tq2_l2_5v_relay.c TQ2_L2_5V_RELAY"; do
 	read -r tu macro <<<"$spec"
@@ -271,5 +277,82 @@ for row in "${MUTATIONS[@]}"; do
 	checks=$((checks + 1))
 done
 
-printf 'static_assert guards: %d checks, 0 failures (%d guards counted, %d mutations proven to trip one)\n' \
-	"$checks" "$guards" "${#MUTATIONS[@]}"
+# ---------------------------------------------------------------------------
+# Near-bound watchdog budget.
+# ---------------------------------------------------------------------------
+# The mutations above prove the pet-to-pet guard fires when the watchdog floor
+# collapses to something obviously impossible (5 ms). That is the easy half. It
+# would go on passing if the guard were still the old
+# `TICK_PERIOD_MS + pulse < WDT_MIN_PERIOD_MS`, because a 5 ms floor is below
+# that sum too -- so it cannot tell the weaker inequality from the stronger one,
+# and cannot say whether the ISR-preemption and loop-work terms are doing any
+# work at all.
+#
+# These fixtures do. Each pins the floor to a value inside the gap between the
+# two inequalities and asserts the exact outcome, FIRES or CLEAN. The pair of
+# outcomes on one fixture is the argument: a floor the OLD guard would have
+# accepted must fail now, and must go back to compiling the moment the term
+# under test is zeroed. A guard that had quietly reverted to counting only the
+# tick and the pulse fails the FIRES half; a term that had been added but was
+# never reachable (dead arithmetic, a lost parenthesis) fails the CLEAN half.
+#
+# Budget on the classic-AVR map these compiles resolve, with the shipped
+# TICK_PERIOD_MS=1, WDT_LOOP_WORK_MS=1 and WDT_ISR_STRETCH_PCT=25:
+#   relay  (12 ms pulse): 12 + ceil(12*25/100)=3 + 1 + 1 = 17   (old guard: 13)
+#   mute   ( 5 ms pulse):  5 + ceil( 5*25/100)=2 + 1 + 1 =  9   (old guard:  6)
+#   cd4053 (no blocking):  0 +                  0 + 1 + 1 =  2   (old guard:  1)
+# The exact-boundary rows (17/18, 9/10, 2/3) pin those numbers: a bound that
+# drifts by even 1 ms breaks one half of a pair.
+#
+# Row format, deliberately not the MUTATIONS format above: a fixture needs more
+# than one edit, and its expected outcome is sometimes a clean compile.
+#   label | file@@sed[;file@@sed...] | TU | -D variant | FIRES:<message> or CLEAN
+NEARBOUND=(
+	"relay near-bound floor|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (15U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|FIRES:relay: worst-case wall-clock WDT pet-to-pet interval must stay"
+	"relay preemption term is load-bearing|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (15U)/;bypass_pins_avr_classic.h@@s/^#define WDT_ISR_STRETCH_PCT (25U)/#define WDT_ISR_STRETCH_PCT (0U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|CLEAN"
+	"relay exact bound fires at 17|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (17U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|FIRES:relay: worst-case wall-clock WDT pet-to-pet interval must stay"
+	"relay exact bound clears at 18|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (18U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|CLEAN"
+	"relay loop-work term is load-bearing|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (17U)/;bypass_pins_avr_classic.h@@s/^#define WDT_LOOP_WORK_MS  (1U)/#define WDT_LOOP_WORK_MS  (0U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|CLEAN"
+	"mute near-bound floor|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (8U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|FIRES:mute: worst-case wall-clock WDT pet-to-pet interval must stay"
+	"mute preemption term is load-bearing|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (8U)/;bypass_pins_avr_classic.h@@s/^#define WDT_ISR_STRETCH_PCT (25U)/#define WDT_ISR_STRETCH_PCT (0U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|CLEAN"
+	"mute exact bound fires at 9|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (9U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|FIRES:mute: worst-case wall-clock WDT pet-to-pet interval must stay"
+	"mute exact bound clears at 10|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (10U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|CLEAN"
+	"cd4053 exact bound fires at 2|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (2U)/|bypass_output_cd4053_simple.c|CD4053_SIMPLE|FIRES:cd4053: worst-case wall-clock WDT pet-to-pet interval must stay"
+	"cd4053 exact bound clears at 3|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (3U)/|bypass_output_cd4053_simple.c|CD4053_SIMPLE|CLEAN"
+)
+
+for row in "${NEARBOUND[@]}"; do
+	IFS='|' read -r label sedlist tu macro outcome <<<"$row"
+	tree="$work/nearbound"
+	plant "$tree"
+
+	IFS=';' read -r -a edits <<<"$sedlist"
+	for e in "${edits[@]}"; do
+		file=${e%%@@*}
+		script=${e#*@@}
+		before=$(sha256sum "$tree/$file" | cut -d' ' -f1)
+		sed -i "$script" "$tree/$file"
+		after=$(sha256sum "$tree/$file" | cut -d' ' -f1)
+		[ "$before" != "$after" ] \
+			|| fail "near-bound fixture '$label' changed nothing in $file -- its pattern no longer matches, so the fixture is not testing what it names"
+		checks=$((checks + 1))
+	done
+
+	out=$(compile "$tree" "$tu" "$macro" "$CFLAGS") && built=1 || built=0
+	if [ "$outcome" = CLEAN ]; then
+		[ "$built" -eq 1 ] \
+			|| fail "near-bound fixture '$label' was expected to COMPILE CLEAN but failed; the budget is stricter than this file says, so the paired FIRES row proves nothing about the term it names: $out"
+	else
+		want=${outcome#FIRES:}
+		[ "$built" -eq 0 ] \
+			|| fail "near-bound fixture '$label' compiled CLEAN -- the pet-to-pet guard does not fire at a floor the OLD tick+pulse inequality would have accepted, so the wall-clock overhead terms are not load-bearing"
+		[[ "$out" == *"static assertion failed"* ]] \
+			|| fail "near-bound fixture '$label' failed to build, but not on a static assertion: $out"
+		[[ "$out" == *"$want"* ]] \
+			|| fail "near-bound fixture '$label' did not trip the guard for \"$want\"; it reported: $(printf '%s' "$out" | grep -oE 'static assertion failed: "[^"]*"' | sort -u | tr '\n' ' ')"
+	fi
+	checks=$((checks + 1))
+done
+
+printf 'static_assert guards: %d checks, 0 failures (%d guards counted, %d mutations proven to trip one, %d near-bound watchdog fixtures)\n' \
+	"$checks" "$guards" "${#MUTATIONS[@]}" "${#NEARBOUND[@]}"

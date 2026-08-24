@@ -15,9 +15,9 @@ uint8_t hw_is_sanity_check_failed(effect_state_t const effect_state) {
             "relay coil pulse must be shorter than RELEASE_THRESH so the "
             "polled-core release/re-arm budget stays below 2 * RELEASE_THRESH");
 
-    static_assert((TICK_PERIOD_MS + TQ2_L2_5V_PULSE_MS) < WDT_MIN_PERIOD_MS,
-            "one tick + relay coil pulse must stay under the worst-case "
-            "(de-rated) WDT period, or a healthy loop can trip the dog");
+    static_assert(WDT_PET_TO_PET_MAX_MS(TQ2_L2_5V_PULSE_MS) < WDT_MIN_PERIOD_MS,
+            "relay: worst-case wall-clock WDT pet-to-pet interval must stay "
+            "under the de-rated WDT floor, or a healthy loop can trip the dog");
 
 
     uint8_t const output_mask =

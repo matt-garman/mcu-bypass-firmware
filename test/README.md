@@ -69,7 +69,11 @@ test/
   test_static_assert_guards.sh shared: every modular shell has an anchored,
                                      uncommented direct include of the shared
                                      checks, whose guards fail the build when
-                                     their inputs are broken
+                                     their inputs are broken; near-bound
+                                     fixtures additionally pin the watchdog
+                                     pet-to-pet budget to its exact millisecond
+                                     and prove its ISR-preemption and loop-work
+                                     terms are load-bearing
   test_pic_build.sh         shared: PIC image/size/rebuild-trigger checks
   test_pic10f320_coverage_archive.sh shared: coverage-gate source-archive mode checks
   test_pic_rebuild.sh       shared: PIC soak rebuild determinism
@@ -99,6 +103,9 @@ test/
   avr/     ATtiny-specific tests: the real firmware ELF in simavr, plus fuses.
            attiny202_smoke.c    AVR-XT peripheral compile/link smoke image
            test_sim.c           simavr integration    (make test-sim-<variant>-attiny13a)
+                                (includes the pet-budget check: the longest
+                                 wdr-to-wdr interval measured on the real image
+                                 must fit the compile-time watchdog budget)
            test_soak.c          long-duration soak    (make test-soak)
            test_fuses.c         all-target fuse bytes (make test-fuses)
            attiny202_fuses.py   fail-closed simulator fuse configuration

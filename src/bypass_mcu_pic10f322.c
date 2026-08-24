@@ -261,9 +261,10 @@ static void hw_mcu_init(void) {
     // ~256ms (WDTPS = 0b01000 = 1:8192 on the ~31kHz LFINTOSC), mirroring the
     // AVR shell's 250ms. The LFINTOSC has ±25% tolerance (datasheet OS09) and
     // the WDT period is characterized at -37%/+69% (param 31), so worst-case
-    // it is still ~160ms -- comfortably > the ~14ms worst-case pet-to-pet
-    // window (1ms tick + 12ms relay coil pulse), unlike the prior 32ms (~1.4x
-    // margin).
+    // it is still ~160ms -- comfortably > the 14ms worst-case pet-to-pet
+    // window WDT_PET_TO_PET_MAX_MS() asserts (12ms relay coil pulse + 1ms
+    // scheduling latency + 1ms bounded loop work), unlike the prior 32ms
+    // (~1.4x margin).
     WDTCONbits.WDTPS = WDT_WDTPS_256MS;
 }
 

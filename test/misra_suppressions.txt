@@ -76,6 +76,13 @@ misra-c2012-2.5:src/bypass_pins_avr_xt.h
 # reports three of its macros unused per checked translation unit. Recorded for
 # the same reason and with the same standing as the three above.
 misra-c2012-2.5:src/bypass_pins_pic12f675.h
+# bypass_output_common.h is the header that SELECTS one of those four maps, and
+# it now also carries WDT_PET_TO_PET_MAX_MS() -- the watchdog pet-to-pet budget
+# whose per-target terms the maps supply. All three output-driver TUs expand it;
+# the four modular shells include the header for its map selection and do not,
+# so the shell runs report it unused. Same cross-TU artifact as the maps it
+# selects, recorded under D-2 with them.
+misra-c2012-2.5:src/bypass_output_common.h
 
 # --- D-3: shared algorithm-type header (Rules 2.3, 2.4) ----------------------
 # bypass_types.h is the single source of truth for the debounce/bypass algorithm

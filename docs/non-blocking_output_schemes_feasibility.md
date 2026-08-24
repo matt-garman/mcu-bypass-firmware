@@ -842,17 +842,23 @@ correctly represented:
         }
 ```
 
-The longest healthy un-petted span becomes one tick plus the pulse — 13 ms —
-which is precisely what the existing PIC10F320 local mute/relay assertions already
+The longest healthy un-petted span becomes the pulse plus one tick of scheduling
+latency plus one pass of bounded loop work — 14 ms on this part — which is
+precisely what the existing PIC10F320 local mute/relay assertions already
 guarantee:
 
 ```c
-static_assert((TICK_PERIOD_MS + TQ2_L2_5V_PULSE_MS) < WDT_MIN_PERIOD_MS, ...);
+static_assert(WDT_PET_TO_PET_MAX_MS(TQ2_L2_5V_PULSE_MS) < WDT_MIN_PERIOD_MS, ...);
 ```
 
-The modular shells do not currently carry the equivalent WDT-period assertion in
-their shared drivers; a redesign should add per-target compile-time bounds rather
-than treating the PIC10F320 assertion as project-wide.
+Every shell now carries that assertion, and it bounds the whole worst-case
+wall-clock pet-to-pet window rather than the pulse alone: the blocking
+actuation, the ISR preemption that stretches it on the interrupt-driven AVRs,
+one tick of scheduling latency, and one pass of bounded loop work. The per-target
+terms live in each pin map and the arithmetic in `bypass_output_common.h`; the
+PIC10F320 keeps its own copy of both, as it does for every other shared
+invariant. See "Watchdog Pet-to-Pet Budget" in DESIGN_DOCUMENTATION.adoc. A
+non-blocking redesign would have to re-derive these terms, not inherit them.
 
 That is a third assertion this redesign promotes rather than retires (compare
 §5.2). Withholding makes a stalled or sufficiently prolonged counter observable
