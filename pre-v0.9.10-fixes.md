@@ -1107,21 +1107,21 @@ owner, consistent with project policy.
 
 **Acceptance criteria**
 
-- [ ] AVR-XT relay escalation de-energizes physical PA2 and PA3 under coil-pin
+- [x] AVR-XT relay escalation de-energizes physical PA2 and PA3 under coil-pin
   `INVEN`, pull-up, direction, and relevant combined register-state fixtures
   before the watchdog spin.
-- [ ] PIC12F675 relay escalation de-energizes physical GP1 and GP2 when a
+- [x] PIC12F675 relay escalation de-energizes physical GP1 and GP2 when a
   detected comparator mode owns GP2, before the watchdog spin.
-- [ ] Tests observe modeled physical pin state and kill latch-only-clear mutants.
-- [ ] The ordinary relay fault cases still produce exactly one watchdog reset
+- [x] Tests observe modeled physical pin state and kill latch-only-clear mutants.
+- [x] The ordinary relay fault cases still produce exactly one watchdog reset
   and one complete recovery RESET-coil pulse where the simulator models reset.
-- [ ] Flash, RAM, stack, timing, watchdog, static-analysis, target-simulator,
+- [x] Flash, RAM, stack, timing, watchdog, static-analysis, target-simulator,
   source-coverage, and mutation gates pass for both affected targets.
 - [x] F1 documentation is updated to describe the implemented MCU-specific
   emergency quiescence and its tested fault scope without overclaiming hardware
   or relay-mechanical evidence.
 
-**Implementation status (2026-08-24, provisioned validation pending)**
+**Implementation status (completed 2026-08-25)**
 
 - The repository owner added shell-specific emergency quiescence. AVR-XT
   removes coil pull-ups, disconnects direction, clears inversion and stale
@@ -1169,13 +1169,11 @@ owner, consistent with project policy.
   `test-pic-build-rebuild` (28 checks), release
   preflight/qualification/history, TODO-index, Makefile-name, and watchdog-note
   contracts; `git diff --check` is clean.
-- Target evidence is not claimed on this host. Strict AVR-XT execution stops
-  because `third_party/attiny_dfp` is absent; strict PIC12F675 execution stops
-  because XC8/DFP/libgpsim are absent. The repository-wide `make test` also
-  stops in the pre-existing host setup at missing `gnu/stubs-32.h` during
-  Classic-AVR clang-tidy. Keep the first five acceptance boxes open until the
-  real-image target lanes, actual resource/stack measurements, timing/static
-  gates, and complete 136-mutant run pass on the provisioned validation host.
+- This host still lacks the provisioned target toolchains. The repository owner
+  reports that all tests pass at implementation HEAD `2585ad4` on the fully
+  provisioned validation host. That run closes the real-image target lanes,
+  actual resource/stack measurements, timing/static gates, and complete
+  136-mutant run that were pending in the 2026-08-24 implementation record.
 
 ### F3 - Resolve the PIC10F320 two-write relay-coil clear
 
@@ -1542,7 +1540,7 @@ design requiring its own review, fail-closed binding and hardware validation.
 - [x] A release-shipped, signed-checksum-bound Python helper programs the
   downloaded PIC12F675 HEX with no source checkout or firmware development
   toolchain.
-- [x] The helper fails closed before writing on every image, trim, identity,
+- [ ] The helper fails closed before writing on every image, trim, identity,
   tool/version, power-mode, path, checksum, mutation and reservation error.
 - [x] A durable reservation precedes the sole write; PASS requires exact code,
   CONFIG, OSCCAL and BG readback; interrupted transactions have a read-only
@@ -1558,7 +1556,7 @@ design requiring its own review, fail-closed binding and hardware validation.
   special case explicitly.
 - [x] The 21-image release identity remains exact while the required helper is
   staged, checksummed, reproduced and published as a distinct release artifact.
-- [x] Fake-programmer, interruption, release-image, preflight, qualification,
+- [ ] Fake-programmer, interruption, release-image, preflight, qualification,
   recovery, packaging and durable-documentation negative controls pass.
 
 **Resolution**
@@ -1612,6 +1610,26 @@ detection at all. If the preference is instead to withhold the helper from
 `FLASHING.md` until the bench run exists, that is a documentation change, not a
 code change.
 
+**Review reopening (2026-08-25).** RE-OPENED. Commit `58fb829` implements most
+of the software design, but the mandatory PICkit 3/MPLAB X 6.20 controlled bench
+run remains absent; "cannot be closed from software" does not waive that
+acceptance criterion. Before that destructive run, the helper also needs to:
+
+- require the executing helper's bytes to be bound by the selected bundle's
+  signed `SHA256SUMS` instead of permitting an off-bundle helper;
+- remove pathname replacement windows between identity checks and programmer
+  use, and harden evidence-path creation/finalization against replacement;
+- reject conflicting or incomplete full-device exports and extend the
+  fail-closed matrix to the supported Java/JAR invocation, malformed trim,
+  unsafe paths, and interruption boundaries; and
+- reconcile the contradictory no-toolchain statements in `release/README.md`
+  and stale hypothetical-helper text in `docs/flashing_simplicity.md`, then
+  strengthen the durable raw-writer detector beyond its narrow command forms.
+
+Reclose only after those software findings, the retained initial/repeat
+programming and read-only finalization evidence, and all focused and aggregate
+gates pass.
+
 ### P2 - Build and validate AVR images before writing fuses
 
 **Priority:** User-facing hardware safety release blocker
@@ -1644,13 +1662,13 @@ first hardware mutation.
 
 **Acceptance criteria**
 
-- [x] Every AVR `*-program` goal proves the selected HEX exists and passes its
+- [ ] Every AVR `*-program` goal proves the selected HEX exists and passes its
   normal validation before touching hardware.
-- [x] A failed build, size gate, or IHEX validation results in zero `avrdude`
+- [ ] A failed build, size gate, or IHEX validation results in zero `avrdude`
   invocations.
 - [x] Successful programming performs exactly one ordered fuse transaction and
   one flash transaction for the selected part and variant.
-- [x] Serialization, rebuild, variant-selector, fuse-injection, flashing
+- [ ] Serialization, rebuild, variant-selector, fuse-injection, flashing
   documentation, and normal build tests pass.
 
 **Resolution**
@@ -1692,6 +1710,20 @@ ATtiny202 no-device-pack skip, and a non-executable programmer path each reach
 the programmer zero times. Run against the previous Makefile the same gate
 reports 19 checks, 12 failures -- one per defect it exists to catch.
 
+**Review reopening (2026-08-25).** RE-OPENED. Commit `4cf4804` establishes the
+normal build/validation, fuse, then flash order, but the Classic-AVR goals build
+the `VARIANTS` matrix while selecting the programmed image from independent
+`VARIANT`. If an old selected HEX exists and `VARIANTS` excludes it, ATtiny13A,
+ATtiny45, and ATtiny85 programming accepts and flashes that stale image after
+writing fuses. `AVR_REBUILD_PREREQ` can also be overridden to weaken the forced
+rebuild, and the focused regression uses only the complete default matrix.
+
+Require the selected variant to be rebuilt and validated by the current
+invocation, prevent rebuild-gate overrides from weakening hardware goals, and
+revalidate a regular non-symlink selected HEX immediately before hardware use.
+Add stale-image/mismatched-selector and size-failure zero-`avrdude` cases for
+all Classic parts, then rerun the focused and aggregate gates.
+
 ### D4 - Refresh v0.9.10 metadata and current measurements
 
 **Priority:** Documentation correctness before merge
@@ -1720,8 +1752,8 @@ the run-5 fail-safe-resynchronization digest.
 
 **Acceptance criteria**
 
-- [x] The changelog carries the real v0.9.10 source-finalization date.
-- [x] Every current resource figure matches a retained final-candidate build.
+- [ ] The changelog carries the real v0.9.10 source-finalization date.
+- [ ] Every current resource figure matches a retained final-candidate build.
 - [x] PIC10F320 free-space and binding-image prose matches the final relay image.
 - [x] The expected-image manifest is described as run 5 or a later intentional
   rebaseline, never run 4.
@@ -1793,6 +1825,20 @@ stood report one failure naming the six missing tinyx5 rows, and a tree with
 only the ATtiny13a rows reverted reports eight -- three derived-sentence
 failures, two cross-document failures, and one per measured image. A single
 mistyped percentage, free-space cell or device capacity fails on its own.
+
+**Review reopening (2026-08-25).** RE-OPENED. Commit `2585ad4` reconciles the
+current flash tables after the F2/F3 source changes, but 2026-08-27 is still a
+targeted future date rather than the actual source-finalization date. No retained
+final-candidate build is present, and `test-resource-tables` can pass with 0 of
+21 images measured; its artifact comparison also does not bind the published
+static-RAM, XC8 Data-space, or stack figures.
+
+After all candidate work is complete, set the actual finalization date and
+retain resource evidence against that exact source commit. Add a strict
+final-candidate mode requiring 21 of 21 images and cover every published
+RAM/Data-space/stack figure, or narrow the acceptance and documentation claims
+to the evidence actually checked. Then rerun the named release, image,
+documentation, and final-candidate gates.
 
 ### D5 - Reconcile remaining simulator and toolchain wording
 
@@ -2034,11 +2080,11 @@ workflow discovering that production was staged under noncanonical names.
 
 **Acceptance criteria**
 
-- [x] Production release staging always means the reviewed seven-part,
+- [ ] Production release staging always means the reviewed seven-part,
   21-image, 18-soak v0.9.10 identity regardless of inherited Make variables.
-- [x] Identity-changing overrides fail before any build, soak, or staging work.
+- [ ] Identity-changing overrides fail before any build, soak, or staging work.
 - [x] Legitimate tool and build-directory overrides continue to work.
-- [x] Release-image, preflight, documentation, name-contract, and publication
+- [ ] Release-image, preflight, documentation, name-contract, and publication
   tests cover direct and inherited override attempts.
 
 **Resolution**
@@ -2155,6 +2201,21 @@ preflight case accepted while every name field still passes, so the die
 selectors catch something no name field does. Reverting
 `verify-release-images.sh` accepts a canonical set wider than the pin. No
 firmware source is involved.
+
+**Review reopening (2026-08-25).** RE-OPENED. Commit `470c11d` pins the named
+scalar identity, but production staging still accepts artifact-defining
+overrides such as `CFLAGS`, `XT_CFLAGS`, `CORE_SRC`, and the corresponding
+per-target flag/source variables. It also compares image and soak inventories
+as sets, so duplicate canonical members pass the parse-time and step-0 guards
+and are rejected only after build work starts.
+
+Make release builds consume immutable release-specific source and flag
+declarations, or enforce a fail-closed allowlist of release-time overrides.
+Check inventory cardinality and duplicates before set equality in both early
+guards, and add command-line/inherited negative cases for source and flag
+bundles, injected makefiles/environment precedence, and duplicate image/soak
+inventories. Every case must stop before the recipe, tools, scratch state, or
+build work.
 
 ### Second-pass validation already performed
 
@@ -2282,25 +2343,24 @@ Record each completed item with its commit ID and decisive validation command.
 | D2 | DONE | `3a6c67d` | `make test-workflow-syntax test-ci-local-routing test-release-preflight test-release-qualification test-release-history test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
 | D3 | DONE | `cbc57be` | `make test-release-preflight` (101 -> 113 checks); `make test-release-qualification test-release-history` (88 -> 89); `make test-todo-index test-makefile-name-contract`; full `scripts/ci-local.sh` |
 | G1 | DONE | `fe8ecc8` | `make test-release-preflight` (113 -> 118 checks); `scripts/make-release.sh --preflight v0.9.10` accepted with the document present; `make test-release-qualification test-release-history test-release-provenance test-release-images test-soak-timing test-build-serialization test-todo-index test-makefile-name-contract`; `make test`; `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` |
-| F2 | IN PROGRESS | | Implementation and host contracts complete; provisioned AVR-XT/PIC12F675 target, resource, and merged 136-mutant validation pending |
-| F3 | IMPLEMENTED | (pending) | One-write constant-mask `LATA` coil clear adopted; relay image 248 -> 242 words and return stack 4 -> 3, CD4053 images byte-identical; write sequence asserted by host (59 -> 62 checks) and gpsim resync oracles; 2 new PIC10F320 mutants, with the merged inventory now 136 |
-| F4 | IMPLEMENTED | (pending) | All 21 images rebuild byte-identical; `make test-static-assert-guards` (39 -> 68 checks, 11 near-bound FIRES/CLEAN fixtures); the new `test/avr/test_sim.c` pet-budget check on both classic parts and all three variants; all five MISRA lanes clean |
-| P1 | IMPLEMENTED | (pending) | `scripts/flash-pic12f675.py` staged, checksummed and reproduced as a required non-image release artifact (`RELEASE_HELPER_MAP`), with `RELEASE_IMAGES` still exactly 21; `make test-pic12f675-flash-helper` (172 checks) drives the real helper against a stateful fake `ipecmd`; `test-release-images` 178 -> 190, `test-release-preflight` 125 -> 144, `test-release-provenance` 94 -> 97, `test-release-qualification` 66 -> 67; raw PIC12F675 writer commands retired from every current document and rejected by contract. Retained PICkit 3/MPLAB X 6.20 bench evidence remains open by construction |
-| P2 | IMPLEMENTED | (pending) | Build-before-hardware AVR programming order and fake-programmer regression |
-| D4 | IMPLEMENTED | (pending) | `[0.9.10]` dated 2026-08-27; all 21 images remeasured on the final candidate and every stale table, derived sentence and withheld Data-space total corrected; PIC10F320 free-space prose and the run-6 expected-image manifest reverified against a fresh build; new `make test-resource-tables` (186 checks, 21 of 21 images measured, 1 and 8 failures against the pre-change documents); `make test-release-preflight test-release-provenance test-release-qualification test-release-history test-release-images test-pic10f320-expected-images`; `scripts/make-release.sh --preflight v0.9.10` |
+| F2 | DONE | `f6d9f82`, `f9dd333`, `5deb4e4`, `9999886`, `b6d06d2` | Fully provisioned current-HEAD validation reported passing: AVR-XT's 32-case matrix and PIC12F675's 43-check relay lane prove modeled physical coil-pin quiescence before reset; all affected resource, stack, timing, static, simulator, coverage, recovery, and merged 136-mutant gates pass |
+| F3 | DONE | `df89ec0` | PIC10F320 flash, return-stack, image-baseline, host/target fault, lock-step, target-I/O, coverage, analysis, and mutation gates pass; relay is 242/256 words at stack depth 3/8, both sequence-sensitive mutants are killed, and both CD4053 images are unchanged |
+| F4 | DONE | `fc23e48` | Fully provisioned current-HEAD suite passes; `make test-static-assert-guards` has 68 checks including 11 exact near-bound FIRES/CLEAN fixtures, compiled-image pet intervals fit their bounds, and timing, pulse-width, watchdog-liveness, static-analysis, and resource gates pass |
+| P1 | RE-OPENED | `58fb829` | Helper, packaging, and most software transaction controls landed, but mandatory PICkit 3/MPLAB X 6.20 evidence is absent; helper binding/path-race, JAR/export/interruption coverage, and durable-document consistency/detection findings remain open |
+| P2 | RE-OPENED | `4cf4804` | Normal build/validation -> fuse -> flash ordering landed, but Classic AVR can flash a stale `VARIANT` image when `VARIANTS` excludes it; bind the selected image to the current rebuild, prevent gate override, and add stale-image and size-failure zero-programmer regressions |
+| D4 | RE-OPENED | `2585ad4` | Current flash tables were reconciled, but 2026-08-27 is not yet the actual finalization date, no retained final-candidate evidence exists, and `test-resource-tables` can pass at 0/21 without checking published RAM/Data-space/stack figures |
 | D5 | OPEN | | Simulator timing/physical-language and pip prerequisite reconciliation |
-| R4 | IMPLEMENTED | (pending) | Tag-derived publication kind in `release.yml`; `test-release-provenance` executes the publication shell for stable, `-rc.1`, and six malformed tags (86 -> 94 checks); `test-workflow-syntax` pins both branches against the `scripts/make-release.sh` grammar (375 -> 381 checks) |
-| R5 | IMPLEMENTED | (pending) | XC8 cache manifest split into three separately status-checked NUL-delimited stages in both `install_pic_toolchain.sh` and `verify_pic_toolchain_cache.sh`; neither records nor accepts a partial or empty inventory, and the verifier names the failing stage instead of reporting a cache mismatch; `test-supply-chain` fails each stage independently in both scripts and inventories 8 unusually-named files (30 -> 46 checks) |
-| R6 | IMPLEMENTED | (pending) | Reviewed production identity pinned as literal `override` data in the Makefile (`RELEASE_IDENTITY_PINNED` plus the 21-image/18-soak sets), enforced at parse time on the release goals and again inside `make-release.sh` before its scratch directory, and cross-checked by `verify-release-images.sh` on the reproduction leg; `test-release-images` refuses 18 command-line and 11 inherited identity overrides while build-directory and tool-path overrides still reach the recipe (103 -> 178 checks) and `test-release-preflight` drives step 0 into five refusals that leave no scratch state (118 -> 125 checks) |
-| Final validation | REOPENED | | The `fe8ecc8` run remains historical evidence; rerun every pre-merge gate after F2-P2 and documentation/release changes |
+| R4 | DONE | `ba4d9d6` | `make test-workflow-syntax test-release-provenance test-release-qualification`; stable tags publish normally, suffixed tags add `--prerelease`, and malformed tags stop before build or `gh` |
+| R5 | DONE | `7533d52` | `make test-supply-chain test-workflow-syntax test-release-preflight`; installer and verifier independently reject scan/order/hash/empty inventories while preserving unusual non-NUL filename bytes |
+| R6 | RE-OPENED | `470c11d` | Scalar identity checks landed, but artifact-defining source/flag overrides and duplicate canonical inventories reach the release recipe; reject them before recipe, tools, scratch, or build work and add direct/inherited negative coverage |
+| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; rerun every pre-merge gate after P1, P2, D4, D5, and R6 are closed |
 
 ## Merge decision
 
 Do not merge `v0.9.9-polish` or begin production `v0.9.10` qualification until
-F2, P1, P2, and D4 are complete. Complete or explicitly disposition F3 and F4;
-finish D5 and the release hardening items appropriate to the project's claimed
-release contract; then rerun every reopened pre-merge gate. Finally delete this
-file and all references, run the release dry run on the actual candidate, and
-only then merge and begin production qualification. Production soaks, the
-artifact-only release commit, signed tag, and clean-runner byte-for-byte
-reproduction remain post-merge release-time gates.
+P1, P2, D4, D5, and R6 are complete. F2-F4, R4, and R5 require no further
+action. Then rerun every reopened pre-merge gate, delete this file and all
+references, run the release dry run on the actual candidate, and only then merge
+and begin production qualification. Production soaks, the artifact-only release
+commit, signed tag, and clean-runner byte-for-byte reproduction remain
+post-merge release-time gates.
