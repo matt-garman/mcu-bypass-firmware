@@ -128,6 +128,13 @@ make
 make attiny13a-program
 ```
 
+`attiny13a-program` is one ordered transaction, and the order is deliberate: it
+builds and validates the selected image first, then writes the fuses, then
+flashes. Nothing reaches the chip until an image exists and passes Intel HEX
+validation, so a failed build cannot leave a device carrying the design's
+clock/watchdog/BOD fuses with no matching firmware. `attiny13a-fuses` and
+`attiny13a-flash` remain available when you want exactly one of the two steps.
+
 To build and validate the PIC ports instead requires a host C compiler (GCC 10
 or newer, or Clang — see [TOOLCHAIN](TOOLCHAIN.adoc)), matching `gcov`, Python
 3.7 or newer, and Bash for source coverage, plus the Microchip XC8 compiler,
@@ -307,9 +314,11 @@ make attiny202-test-target # the fail-closed aggregate release qualification run
 ```
 
 Programming is over UPDI rather than ISP. `make attiny202-program VARIANT=<v>
-XT_UPDI_PORT=<port>` writes the seven AVR8X fuse bytes and the flash image; it
-defaults to avrdude's `serialupdi`, which needs only a USB-serial adapter and a
-series resistor.
+XT_UPDI_PORT=<port>` builds and validates the selected image, then writes the
+seven AVR8X fuse bytes, then flashes — the same ordered transaction the AVR
+Classic parts use, so a missing device pack or a failed build reaches no
+programmer at all. It defaults to avrdude's `serialupdi`, which needs only a
+USB-serial adapter and a series resistor.
 
 These targets are also independent of the AVR Classic build and skip cleanly if
 the device pack or the `yasimavr` venv is not present — everywhere except release

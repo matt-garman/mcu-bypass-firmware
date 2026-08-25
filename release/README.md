@@ -382,7 +382,9 @@ avrdude -c usbtiny -p t13 \
         -U flash:w:bypass-attiny13a-cd4053_simple.hex:i
 ```
 
-If you have the source tree, the Makefile does both steps for you:
+If you have the source tree, the Makefile does both steps for you, in one
+ordered transaction — it builds and validates the image first, then writes the
+fuses, then flashes, so a failed build reaches no programmer at all:
 `make attiny13a-program VARIANT=<variant>` (ATtiny13a) or
 `make attiny85-program VARIANT=<variant>` (ATtiny85), etc. `<variant>` is the output-stage name from the table above —
 `cd4053_simple`, `cd4053_with_mute` or `tq2_l2_5v_relay` — the same string that

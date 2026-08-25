@@ -88,6 +88,43 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- **Every AVR `*-program` goal now builds and validates its image before it
+  writes a fuse byte.** `attiny13a-program`, `attiny45-program`,
+  `attiny85-program` and `attiny202-program` were each defined as
+  `*-program: *-fuses *-flash`. That reads like "fuses, then flash", and under
+  the repo's forced `-j1` it ran exactly that way -- with the selected firmware
+  image only a prerequisite of the *later* flash goal. A compile, link, size or
+  Intel HEX failure therefore landed **after** the device's clock, watchdog and
+  BOD fuses had already been rewritten, leaving a part configured for firmware
+  that does not exist. On a fresh chip the window is not academic: the fuse
+  write is what moves it off its factory clock, so the failed state is a device
+  no longer running at the speed its previous firmware assumed. The quickstart
+  and flashing documentation recommended these goals.
+
+  Each `*-program` goal is now one ordered transaction. The per-part build --
+  which compiles, reports sizes, and rejects an image that fails Intel HEX
+  validation -- is a real prerequisite of the goal, so a build failure keeps
+  Make out of the recipe and no `avrdude` runs at all; the recipe then confirms
+  the selected image exists and the programmer is usable while the device is
+  still untouched, and only then writes the fuses and flashes, in that order.
+  The two hardware commands are single-sourced per part, so the single-step
+  `*-fuses` and `*-flash` goals cannot drift from what the transaction performs;
+  those keep their single-step meaning and stay ungated, because asking for one
+  of them is asking for exactly one hardware action. The programmer check uses
+  the same `-x` rule as the Intel HEX validator, since dash's `command -v`
+  succeeds on a merely existing file when the value contains a slash.
+
+  `make test-avr-program-order` is the regression: fake compiler, objcopy and
+  `avrdude` write into one shared event log, so the order is read off the real
+  recipe's real execution rather than from `make -n` text. It pins, for all four
+  parts, that the image is built and converted before the first programmer
+  invocation, that there is exactly one fuse write and exactly one flash write,
+  and that the fuse write comes first; and that a failed compile, an image
+  rejected by HEX validation, a build that legitimately produces nothing (the
+  ATtiny202 skip with no device pack), and an unusable programmer path each
+  reach the programmer zero times. Against the previous Makefile it fails 12 of
+  its 19 checks.
+
 - **A production release can no longer be staged under a development
   override.** `RELEASE_IMAGES` is the canonical statement of what a complete
   release contains, and `scripts/make-release.sh` enumerates the same set

@@ -34,6 +34,8 @@ test/
   host_compiler_version.sh  shared: GCC 10+/Clang host-gate prerequisite
   test_attiny202_build.sh   shared: fail-closed AVR-XT build checks
   test_avr_build_rebuild.sh shared: classic AVR rebuild/partial-output checks
+  test_avr_program_order.sh shared: AVR *-program build/validate-then-fuse-then-
+                                    flash transaction order (fake programmer)
   test_ci_local_routing.sh  shared: local-CI skip-option command routing
   test_workflow_syntax.sh   shared: GitHub workflow YAML + ci-local job-map and
                                     per-part PIC lane checks

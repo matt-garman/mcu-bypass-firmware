@@ -1644,14 +1644,53 @@ first hardware mutation.
 
 **Acceptance criteria**
 
-- [ ] Every AVR `*-program` goal proves the selected HEX exists and passes its
+- [x] Every AVR `*-program` goal proves the selected HEX exists and passes its
   normal validation before touching hardware.
-- [ ] A failed build, size gate, or IHEX validation results in zero `avrdude`
+- [x] A failed build, size gate, or IHEX validation results in zero `avrdude`
   invocations.
-- [ ] Successful programming performs exactly one ordered fuse transaction and
+- [x] Successful programming performs exactly one ordered fuse transaction and
   one flash transaction for the selected part and variant.
-- [ ] Serialization, rebuild, variant-selector, fuse-injection, flashing
+- [x] Serialization, rebuild, variant-selector, fuse-injection, flashing
   documentation, and normal build tests pass.
+
+**Resolution**
+
+Each `*-program` goal is one ordered transaction instead of a two-prerequisite
+convenience alias. The per-part build goal -- `attiny13a`, `attiny45`,
+`attiny85`, `attiny202`, each of which compiles, reports sizes and rejects an
+image that fails Intel HEX validation -- is a real prerequisite of the program
+goal, so a build failure keeps Make out of the recipe entirely and no `avrdude`
+runs. The recipe's first line then confirms, while the device is still
+untouched, that the VARIANT-selected image exists and that the programmer is
+usable; only then does it write the fuses, and only then the flash. Ordering is
+a property of the recipe now, not of Make's left-to-right prerequisite walk
+under a forced `-j1`.
+
+Each part's two hardware commands are single-sourced (`ATTINY13A_FUSE_WRITE` /
+`ATTINY13A_FLASH_WRITE` and the tinyx5 and ATtiny202 equivalents), so the
+single-step goals and the transaction cannot drift apart. `*-fuses` and
+`*-flash` keep their single-step meaning and stay ungated: an operator asking
+for one of them has asked for exactly one hardware action.
+`AVR_PROGRAMMER_CHECK` uses the same `-x` rule as `IHEX_VALIDATOR_CHECK`,
+because dash's `command -v`
+succeeds on a merely existing file whenever the value contains a slash -- the
+defect class this repo already fixed once for the HEX validator.
+
+The ATtiny202 case is the one that was reachable without any tool failure at
+all: its build SKIPs (exit 0, no image) when the device pack is absent, so the
+old goal went straight on to write seven fuse bytes with nothing to flash
+afterwards. That is now a refusal.
+
+*Verification.* `make test-avr-program-order` (19 checks) drives the real
+recipes with a fake compiler, objcopy and `avrdude` sharing one event log, so
+the order is observed rather than parsed out of `make -n`. It pins per part
+that the image is built and converted before the first programmer invocation,
+that
+exactly one fuse write and one flash write occur, and that the fuse write is
+first; and that a failed compile, an image rejected by HEX validation, the
+ATtiny202 no-device-pack skip, and a non-executable programmer path each reach
+the programmer zero times. Run against the previous Makefile the same gate
+reports 19 checks, 12 failures -- one per defect it exists to catch.
 
 ### D4 - Refresh v0.9.10 metadata and current measurements
 
@@ -2181,7 +2220,7 @@ Record each completed item with its commit ID and decisive validation command.
 | F3 | IMPLEMENTED | (pending) | One-write constant-mask `LATA` coil clear adopted; relay image 248 -> 242 words and return stack 4 -> 3, CD4053 images byte-identical; write sequence asserted by host (59 -> 62 checks) and gpsim resync oracles; 2 new PIC10F320 mutants, with the merged inventory now 136 |
 | F4 | IMPLEMENTED | (pending) | All 21 images rebuild byte-identical; `make test-static-assert-guards` (39 -> 68 checks, 11 near-bound FIRES/CLEAN fixtures); the new `test/avr/test_sim.c` pet-budget check on both classic parts and all three variants; all five MISRA lanes clean |
 | P1 | IMPLEMENTED | (pending) | `scripts/flash-pic12f675.py` staged, checksummed and reproduced as a required non-image release artifact (`RELEASE_HELPER_MAP`), with `RELEASE_IMAGES` still exactly 21; `make test-pic12f675-flash-helper` (172 checks) drives the real helper against a stateful fake `ipecmd`; `test-release-images` 178 -> 190, `test-release-preflight` 125 -> 144, `test-release-provenance` 94 -> 97, `test-release-qualification` 66 -> 67; raw PIC12F675 writer commands retired from every current document and rejected by contract. Retained PICkit 3/MPLAB X 6.20 bench evidence remains open by construction |
-| P2 | OPEN | | Build-before-hardware AVR programming order and fake-programmer regression |
+| P2 | IMPLEMENTED | (pending) | Build-before-hardware AVR programming order and fake-programmer regression |
 | D4 | OPEN | | Final release date, resource tables, and PIC10F320 run-5 baseline wording |
 | D5 | OPEN | | Simulator timing/physical-language and pip prerequisite reconciliation |
 | R4 | IMPLEMENTED | (pending) | Tag-derived publication kind in `release.yml`; `test-release-provenance` executes the publication shell for stable, `-rc.1`, and six malformed tags (86 -> 94 checks); `test-workflow-syntax` pins both branches against the `scripts/make-release.sh` grammar (375 -> 381 checks) |

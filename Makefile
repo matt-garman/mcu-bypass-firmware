@@ -215,6 +215,8 @@ unexport _MAKE_SERIAL_VARIANT_EMPTY _MAKE_SERIAL_VARIANT_MULTI \
 #   make test-long       exhaustive test suite (minutes) -- before release/HW
 #   make attiny13a-trace emit build_avr_classic/bypass_trace.vcd (VARIANT=, GTKWave)
 #   make VARIANT=tq2_l2_5v_relay attiny13a-program   set fuses + flash one variant
+#                        (one ordered transaction: the image is built and
+#                        validated first, so a build failure writes no fuses)
 #   make clean           remove all build/test artifacts
 #
 # FAST vs FULL TESTS
@@ -270,6 +272,33 @@ IHEX_VALIDATOR ?= scripts/validate-ihex.sh
 # bare command name.
 IHEX_VALIDATOR_CHECK = case "$(IHEX_VALIDATOR)" in */*) [ -x "$(IHEX_VALIDATOR)" ] ;; *) command -v "$(IHEX_VALIDATOR)" >/dev/null 2>&1 ;; esac || { echo "FAIL: Intel HEX validator not found or not executable at $(IHEX_VALIDATOR)"; exit 1; }
 AVRDUDE  = avrdude
+# Software gate every AVR `*-program` transaction runs BEFORE the first avrdude
+# invocation. A `*-program` goal writes fuses and then flash, so the fuse write
+# is the first hardware mutation, and it sets the clock, watchdog and BOD
+# configuration the part will run under from that moment on. If the image the
+# flash step needs turns out to be missing -- a failed compile, a rejected
+# Intel HEX, a build that never ran -- or if no programmer is installed,
+# discovering it after the fuse write leaves a device carrying the design's
+# fuses with no matching firmware, which is the one outcome a bench session
+# cannot recover from without a second programmer pass.
+#
+# Two things therefore stand between the request and the first `avrdude`. The
+# build that produces AND validates the selected image is a real prerequisite
+# of the goal, so a build failure keeps Make out of the recipe entirely; and
+# these checks run as the recipe's first line, while the device is still
+# untouched. Used as:
+#
+#   hex="<path>"; $(AVR_PROGRAM_IMAGE_CHECK); $(AVR_PROGRAMMER_CHECK); ...
+#
+# by the ATtiny13A, tinyx5 and ATtiny202 program recipes. `*-fuses` and
+# `*-flash` keep their single-step meaning and are NOT gated: a bench operator
+# asking for exactly one of them has asked for exactly one hardware action.
+AVR_PROGRAM_IMAGE_CHECK = [ -f "$$hex" ] || { echo "ERROR: $$hex not found -- no image was built for VARIANT=$(VARIANT)."; echo "       select a variant with VARIANT=<$(VARIANTS)>; no fuse or flash command has run."; exit 1; }
+# Same -x rule as IHEX_VALIDATOR_CHECK above, for the same reason: dash's
+# `command -v` succeeds on a merely EXISTING file when the value contains a
+# slash, so a non-executable AVRDUDE=<path> would pass a PATH-only check and
+# fail with "Permission denied" -- after the fuse write.
+AVR_PROGRAMMER_CHECK = case "$(AVRDUDE)" in */*) [ -x "$(AVRDUDE)" ] ;; *) command -v "$(AVRDUDE)" >/dev/null 2>&1 ;; esac || { echo "ERROR: programmer '$(AVRDUDE)' not found or not executable; no fuse or flash command has run."; echo "       install avrdude, or name another with AVRDUDE=<path>."; exit 1; }
 AVR_ELF_ARCH ?= avr:25
 
 # --- AVR build-artifact directory --------------------------------------------
@@ -740,7 +769,7 @@ FORCE:
         test-attiny202-model-ffi \
         test-pic10f320-return-stack-oracle test-pic10f320-expected-images \
         test-pic10f320-coverage-archive \
-        test-attiny202-build test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-fetch-yasimavr test-supply-chain test-klee-build \
+        test-attiny202-build test-avr-build-rebuild test-avr-program-order test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-fetch-yasimavr test-supply-chain test-klee-build \
         test-pic-build test-release-images test-release-preflight test-release-provenance test-release-qualification test-release-history test-build-serialization \
         test-pic12f675-flash-helper \
         test-make-lock-probe test-make-safe-parallel-probe \
@@ -2599,21 +2628,34 @@ XT_UPDI_PORT    ?= /dev/ttyUSB0
 XT_AVRDUDE_PART ?= t202
 XT_AVRDUDE_FLAGS = -c $(XT_PROGRAMMER) -P $(XT_UPDI_PORT) -p $(XT_AVRDUDE_PART)
 
-.PHONY: attiny202-fuses attiny202-flash attiny202-program
-attiny202-fuses:
-	$(AVRDUDE) $(XT_AVRDUDE_FLAGS) \
+# One definition of each hardware action, so the single-step goals and the
+# ordered transaction below cannot drift apart.
+XT_PROG_HEX = $(XT_BUILD_DIR)/$(call fw_image,$(VARIANT),$(XT_TAG)).hex
+XT_FUSE_WRITE = $(AVRDUDE) $(XT_AVRDUDE_FLAGS) \
 		-U wdtcfg:w:$(XT_FUSE_WDTCFG):m   -U bodcfg:w:$(XT_FUSE_BODCFG):m \
 		-U osccfg:w:$(XT_FUSE_OSCCFG):m   -U syscfg0:w:$(XT_FUSE_SYSCFG0):m \
 		-U syscfg1:w:$(XT_FUSE_SYSCFG1):m -U append:w:$(XT_FUSE_APPEND):m \
 		-U bootend:w:$(XT_FUSE_BOOTEND):m
+XT_FLASH_WRITE = $(AVRDUDE) $(XT_AVRDUDE_FLAGS) -U flash:w:$(XT_PROG_HEX):i
+
+.PHONY: attiny202-fuses attiny202-flash attiny202-program
+attiny202-fuses:
+	$(XT_FUSE_WRITE)
 
 # Flash ONE variant image to hardware (select with VARIANT=<name>); builds first.
 attiny202-flash: variant-selectors-valid attiny202
-	$(AVRDUDE) $(XT_AVRDUDE_FLAGS) \
-		-U flash:w:$(XT_BUILD_DIR)/$(call fw_image,$(VARIANT),$(XT_TAG)).hex:i
+	$(XT_FLASH_WRITE)
 
-# Fresh chip: write the fuses, then flash the selected variant.
-attiny202-program: attiny202-fuses attiny202-flash
+# Fresh chip, as ONE ordered transaction: build and validate the selected image,
+# then write the fuses, then flash it. The build is a prerequisite, not a step,
+# so nothing reaches silicon if it fails; see AVR_PROGRAM_IMAGE_CHECK.
+attiny202-program: variant-selectors-valid attiny202
+	@hex="$(XT_PROG_HEX)"; \
+	$(AVR_PROGRAM_IMAGE_CHECK); \
+	$(AVR_PROGRAMMER_CHECK); \
+	echo "Programming ATtiny202 (variant $(VARIANT)): fuses, then flash $$hex"
+	$(XT_FUSE_WRITE)
+	$(XT_FLASH_WRITE)
 
 # --- ATtiny202 static analysis (cppcheck + MISRA addon) ----------------------
 # Two analyzers over the AVR-XT shell, parallel to analyze-cppcheck/analyze-misra
@@ -2874,19 +2916,34 @@ clean:
 attiny13a-readfuses:
 	$(AVRDUDE) $(ATTINY13A_AVRDUDE_FLAGS) -U lfuse:r:-:h -U hfuse:r:-:h
 
+# One definition of each hardware action, shared by the single-step goals and
+# the ordered transaction below.
+ATTINY13A_PROG_HEX = $(AVR_FW)$(call fw_image_tail,$(VARIANT),$(ATTINY13A_MCU)).hex
+ATTINY13A_FUSE_WRITE = $(AVRDUDE) $(ATTINY13A_AVRDUDE_FLAGS) \
+		-U lfuse:w:$(ATTINY13A_LFUSE):m \
+		-U hfuse:w:$(ATTINY13A_HFUSE):m
+ATTINY13A_FLASH_WRITE = $(AVRDUDE) $(ATTINY13A_AVRDUDE_FLAGS) -U flash:w:$(ATTINY13A_PROG_HEX):i
+
 # Write the design's fuse bytes. Safe: does not touch RSTDISBL/DWEN, so ISP
 # access is preserved. Verify before relying on a board in the field.
 attiny13a-fuses:
-	$(AVRDUDE) $(ATTINY13A_AVRDUDE_FLAGS) \
-		-U lfuse:w:$(ATTINY13A_LFUSE):m \
-		-U hfuse:w:$(ATTINY13A_HFUSE):m
+	$(ATTINY13A_FUSE_WRITE)
 
 # Flash the selected variant's ATtiny13a image to the MCU.
-attiny13a-flash: variant-selectors-valid $(AVR_FW)$(call fw_image_tail,$(VARIANT),$(ATTINY13A_MCU)).hex
-	$(AVRDUDE) $(ATTINY13A_AVRDUDE_FLAGS) -U flash:w:$(AVR_FW)$(call fw_image_tail,$(VARIANT),$(ATTINY13A_MCU)).hex:i
+attiny13a-flash: variant-selectors-valid $(ATTINY13A_PROG_HEX)
+	$(ATTINY13A_FLASH_WRITE)
 
-# Convenience: set fuses, then flash firmware. Use for a fresh chip.
-attiny13a-program: attiny13a-fuses attiny13a-flash
+# Fresh chip, as ONE ordered transaction: build and validate every ATtiny13a
+# variant image (which reports sizes and rejects an invalid HEX), then write the
+# fuses, then flash the selected variant. The build is a prerequisite, not a
+# step, so nothing reaches silicon if it fails; see AVR_PROGRAM_IMAGE_CHECK.
+attiny13a-program: variant-selectors-valid attiny13a
+	@hex="$(ATTINY13A_PROG_HEX)"; \
+	$(AVR_PROGRAM_IMAGE_CHECK); \
+	$(AVR_PROGRAMMER_CHECK); \
+	echo "Programming ATtiny13A (variant $(VARIANT)): fuses, then flash $$hex"
+	$(ATTINY13A_FUSE_WRITE)
+	$(ATTINY13A_FLASH_WRITE)
 
 # Per-tinyx5-chip fuses/flash/program targets: attiny85-fuses/-flash/-program,
 # attiny45-fuses/..., ... All share the tinyx5 fuse bytes and differ only in the
@@ -2894,13 +2951,22 @@ attiny13a-program: attiny13a-fuses attiny13a-flash
 # $(call MCU_X5_FLASH_TARGETS,chip-number)
 define MCU_X5_FLASH_TARGETS
 .PHONY: attiny$(1)-fuses attiny$(1)-flash attiny$(1)-program
-attiny$(1)-fuses:
-	$$(AVRDUDE) -c $$(AVR_PROGRAMMER) -p $$(part_$(1)) \
+ATTINY$(1)_PROG_HEX = $(AVR_FW)$$(call fw_image_tail,$$(VARIANT),$$(mmcu_$(1))).hex
+ATTINY$(1)_FUSE_WRITE = $$(AVRDUDE) -c $$(AVR_PROGRAMMER) -p $$(part_$(1)) \
 		-U lfuse:w:$$(TINYX5_LFUSE):m \
 		-U hfuse:w:$$(TINYX5_HFUSE):m
-attiny$(1)-flash: variant-selectors-valid $(AVR_FW)$$(call fw_image_tail,$$(VARIANT),$$(mmcu_$(1))).hex
-	$$(AVRDUDE) -c $$(AVR_PROGRAMMER) -p $$(part_$(1)) -U flash:w:$(AVR_FW)$$(call fw_image_tail,$$(VARIANT),$$(mmcu_$(1))).hex:i
-attiny$(1)-program: attiny$(1)-fuses attiny$(1)-flash
+ATTINY$(1)_FLASH_WRITE = $$(AVRDUDE) -c $$(AVR_PROGRAMMER) -p $$(part_$(1)) -U flash:w:$$(ATTINY$(1)_PROG_HEX):i
+attiny$(1)-fuses:
+	$$(ATTINY$(1)_FUSE_WRITE)
+attiny$(1)-flash: variant-selectors-valid $$(ATTINY$(1)_PROG_HEX)
+	$$(ATTINY$(1)_FLASH_WRITE)
+attiny$(1)-program: variant-selectors-valid attiny$(1)
+	@hex="$$(ATTINY$(1)_PROG_HEX)"; \
+	$$(AVR_PROGRAM_IMAGE_CHECK); \
+	$$(AVR_PROGRAMMER_CHECK); \
+	echo "Programming ATtiny$(1) (variant $$(VARIANT)): fuses, then flash $$$$hex"
+	$$(ATTINY$(1)_FUSE_WRITE)
+	$$(ATTINY$(1)_FLASH_WRITE)
 endef
 $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 
@@ -2948,7 +3014,8 @@ TEST_GATES_LATE = \
         test-sim-attiny13a test-sim-tinyx5 test-attiny202-build \
         test-attiny202-output-oracle test-attiny202-delay-oracle \
         test-attiny202-fault-oracle test-attiny202-model-ffi \
-        test-avr-build-rebuild test-ci-local-routing test-workflow-syntax \
+        test-avr-build-rebuild test-avr-program-order \
+        test-ci-local-routing test-workflow-syntax \
         test-gpsim-wrappers test-fetch-yasimavr test-supply-chain \
         test-klee-build test-mutation-sandbox test-pic-build \
         test-release-images test-release-preflight test-release-provenance \
@@ -3056,6 +3123,11 @@ test-attiny202-build:
 # Isolated fake-tool proof of classic AVR dependency/configuration invalidation.
 test-avr-build-rebuild:
 	./test/test_avr_build_rebuild.sh
+
+# Fake-programmer proof that every AVR *-program goal builds and validates its
+# image before the first avrdude invocation, and then writes fuses before flash.
+test-avr-program-order:
+	./test/test_avr_program_order.sh
 
 # Fake-gpsim proof that complete snapshots cannot hide process failure/timeout.
 test-gpsim-wrappers:
@@ -8112,6 +8184,7 @@ help:
 	@echo "  test-mutation-sandbox  verify mutation sandbox + inventory/result accounting"
 	@echo "  test-attiny202-build  fail-closed AVR-XT image-generation checks"
 	@echo "  test-avr-build-rebuild  classic AVR stale/config/partial-output checks"
+	@echo "  test-avr-program-order  AVR *-program: build+validate, then fuses, then flash"
 	@echo "  test-gpsim-wrappers  fail-closed gpsim process-status checks"
 	@echo "  test-fetch-yasimavr  safe destination/rebuild/install checks for the yasimavr venv"
 	@echo "  test-supply-chain  external download, cache, dependency and action pin checks"
