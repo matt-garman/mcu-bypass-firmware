@@ -145,9 +145,20 @@ mkdir -p "$fakebin"
 printf '%s\n' \
 	'#!/usr/bin/env bash' \
 	'set -euo pipefail' \
-	'[ "$1" = --no-fork ] || { printf "release flock is not signal-transparent\\n" >&2; exit 97; }' \
-	'[ "$2" = "$EXPECTED_LOCK" ] || { printf "wrong lock path: %s\\n" "$2" >&2; exit 97; }' \
-	': > "$LOCK_ATTEMPT"' \
+	'lock_id() { stat -Lc "%d:%i" "$1" 2>/dev/null; }' \
+	'case "${1-}" in' \
+	'  --no-fork)' \
+	'    # Acquisition: signal-transparent, and on the worktree lock itself.' \
+	'    [ "${2-}" = "$EXPECTED_LOCK" ] || { printf "wrong lock path: %s\\n" "${2-}" >&2; exit 97; }' \
+	'    : > "$LOCK_ATTEMPT" ;;' \
+	'  -n)' \
+	'    # Ownership re-assert on the descriptor inherited from acquisition.' \
+	'    [[ "${2-}" =~ ^[0-9]+$ ]] || { printf "unexpected flock target: %s\\n" "${2-}" >&2; exit 97; }' \
+	'    [ -n "$(lock_id "/proc/self/fd/${2}")" ] || { printf "re-assert on closed descriptor: %s\\n" "$2" >&2; exit 97; }' \
+	'    [ "$(lock_id "/proc/self/fd/${2}")" = "$(lock_id "$EXPECTED_LOCK")" ] || { printf "re-assert on foreign descriptor: %s\\n" "$2" >&2; exit 97; } ;;' \
+	'  *)' \
+	'    printf "release flock is not signal-transparent\\n" >&2; exit 97 ;;' \
+	'esac' \
 	'exec "$REAL_FLOCK" "$@"' \
 	> "$fakebin/flock"
 chmod +x "$fakebin/flock"
