@@ -1145,9 +1145,11 @@ owner, consistent with project policy.
   GPIO level and take the same path. Two simulator limits bound the claims: the
   mode must be installed with `Register::put()` (a `put_value()` to `CMCON`
   never engages the peripheral, unlike the port registers, which override
-  `put_value()`), and gpsim's modeled `COUT` is a pure function of `CM<2:0>` and
-  does not read the CIN+ pad, so no fixture asserts anything about the analog
-  input.
+  `put_value()`; worse, a `put_value()` that selects an output mode leaves
+  gpsim's lazily allocated `cm_source[]` NULL and segfaults `CMCON::get()` on
+  the firmware's next `MOVF CMCON,W`, which `inject_case()` now refuses), and
+  gpsim's modeled `COUT` is a pure function of `CM<2:0>` and does not read the
+  CIN+ pad, so no fixture asserts anything about the analog input.
 - Reviewed source-order checks pin pull-up removal before input direction,
   peripheral/polarity neutralization before latch clearing, and low latch state
   before output direction is restored. F2's new latch-only mutants raised its

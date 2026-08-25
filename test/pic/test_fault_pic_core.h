@@ -932,6 +932,44 @@ static void inject_case(const char *label, unsigned addr, const char *token,
     unsigned cur = r->get_value() & 0xFFu;
     unsigned bad = absolute ? (val & 0xFFu) : (cur ^ val);
 
+#ifdef PIC_REG_CMCON_ADDR
+    // ---- libgpsim crash guard: NOT a firmware claim ------------------------
+    // gpsim 0.32.1's CMCON::get() stores the comparator output drive state
+    // into cm_source[out] with no NULL check, and cm_source[] is allocated
+    // lazily by CMCON::put() -- only on the first put() that selects a mode
+    // routing COUT to a pad (001, 011, 101; 110 has no output stage). The
+    // put_value() below, which is how every case here models an SEU, does not
+    // run that override, so an output mode installed this way leaves the
+    // register image live while cm_source[0] is still NULL, and the firmware's
+    // next MOVF CMCON,W segfaults inside pic_processor::run(). That takes the
+    // whole lane down instead of failing one case, and run_mutation_tests.sh
+    // then scores the mutant ERROR rather than killed. It is also
+    // order-dependent: once ANY earlier case has engaged an output mode
+    // through put(), the pointer stays allocated for the life of the process
+    // and the same injection merely fails cleanly -- so the crash appears and
+    // disappears as cases are reordered. Refuse the write instead.
+    //
+    // Only mode 110 is reachable from the required-off 111 by a single-bit
+    // flip without routing COUT, which is why the shipped CMCON case here uses
+    // mask 0x01. A case that genuinely needs an output mode belongs in
+    // inject_comparator_relay_resync_case(), which installs it with put().
+    if (addr == PIC_REG_CMCON_ADDR) {
+        unsigned const cout_mode = bad & PIC_FAULT_CMCON_MODE_MASK;
+        if (cout_mode == 0x01u || cout_mode == 0x03u || cout_mode == 0x05u) {
+            g_checks++;
+            g_fails++;
+            fprintf(stderr,
+                    "    FAIL: %s would install COUT-routing CMCON mode"
+                    " 0b%u%u%u (0x%02x) with put_value(), which cannot engage"
+                    " the comparator and crashes libgpsim's CMCON::get();"
+                    " install such a mode with Register::put() instead\n",
+                    label, (cout_mode >> 2) & 1u, (cout_mode >> 1) & 1u,
+                    cout_mode & 1u, bad);
+            return;
+        }
+    }
+#endif
+
     guint64 before = g_resets;
     r->put_value(bad);
     unsigned const written = r->get_value() & 0xFFu;
