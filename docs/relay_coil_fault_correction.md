@@ -251,7 +251,7 @@ other.
 | PIC12F675 (gpsim) | `test/pic/test_fault_pic12f675.cc` (same case) | direct modeled GP1/GP2 node voltage at the watchdog spin, including comparator-owned GP2 | same |
 | AVR classic, tinyx5 (simavr) | `test/avr/test_sim.c` → `inject_coil_resync` | `PORTB` coil bits low after the gate | edge-timed RESET-coil pulse ≥ 4 ms, SET never driven, LED dark |
 | AVR classic, ATtiny13A (simavr) | same | same | **not observable**: simavr has no WDT system-reset model for this part, so the case asserts a permanent `cli()`+spin wedge with the coils held idle |
-| ATtiny202 (yasimavr) | `test/avr/test_fault_attiny202.py` → `RESYNC` | physical PA2/PA3 low plus canonical OUT/DIR/PINnCTRL at the spin | **not observable**: yasimavr treats the interrupts-off spin as a terminal halt, so the WDT never completes the reset in the model |
+| ATtiny202 (yasimavr) | `test/avr/test_fault_attiny202.py` → `RESYNC` | modeled PA2/PA3 pin levels low plus canonical OUT/DIR/PINnCTRL at the spin | **not observable**: yasimavr treats the interrupts-off spin as a terminal halt, so the WDT never completes the reset in the model |
 | PIC10F322 / PIC12F675 host source | `test/pic/fw_coverage/test_fw_coverage.c` → `expect_coil_fault_escalates` | all outputs settled low after the run | not claimed (the mock elides `__delay_ms` and aborts the spin on a timer) |
 | PIC10F320 host source | `test/pic10f320/fault/test_fault.c` → `expect_relay_coil_fault_escalates` | coil latch sampled where the spin was abandoned | not claimed, for the same reason |
 
@@ -281,20 +281,20 @@ Both policy directions are killed, verified on PIC10F322:
 - **Weaken the PIC10F320 coil guard to one bit** → the unguarded coil is never
   detected and stays energized for the whole observation window.
 
-The physical-pin extensions add independent negative controls:
+The pin-level extensions add independent negative controls:
 
 - **Reduce the AVR-XT emergency path to `PORTA.OUT` clearing** -> an `INVEN`
-  fixture leaves physical PA2 or PA3 high even though the latch reads low.
+  fixture leaves modeled PA2 or PA3 high even though the latch reads low.
 - **Reduce the PIC12F675 emergency path to shadow/GPIO clearing** -> the
-  high-`COUT` fixture leaves physical GP2 high at the watchdog spin even though
+  high-`COUT` fixture leaves modeled GP2 high at the watchdog spin even though
   the SRAM coil intent is low.
 
 The AVR-XT matrix also exercises each coil's pull-up, one-bit direction upset,
 and a combined input/stale-OUT/PULLUPEN+INVEN state. The PIC12F675 relay matrix
 covers all three comparator modes one bit away from off (`110`, `101`, `011`);
 modes `011` and `101`, the reachable modes that own GP2, are run through full
-escalation with the pad physically driven High by `COUT`. These are modeled electrical pin checks, not
-relay-mechanical or bench evidence.
+escalation with the pad driven high by `COUT` in the model. These are modeled
+electrical pin checks, not relay-mechanical or bench evidence.
 
 One consequence worth naming: because the recovery pulse is now measured, a
 mutant that shortens the *design* pulse below the datasheet minimum is caught by

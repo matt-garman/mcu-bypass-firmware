@@ -429,9 +429,10 @@ jobs:
   # ATtiny202 (AVR-XT) gate: the AVR-XT counterpart of the `pic` job. It is the
   # ONLY place the ATtiny202 is built in CI (build-matrix covers the classic
   # parts), so it runs the 202 fuse, smoke/build-budget, cppcheck, and MISRA
-  # gates before the yasimavr harness -- functional + physical output timing
-  # (attiny202-sim), fault injection (attiny202-fault), and a short soak smoke
-  # (attiny202-soak). Like every CI lane, this is a gate on the branch, NOT
+  # gates before the yasimavr harness -- functional + modeled-pin output
+  # timing, delivered coil-pulse width included (attiny202-sim), fault
+  # injection (attiny202-fault), and a short soak smoke (attiny202-soak).
+  # Like every CI lane, this is a gate on the branch, NOT
   # release qualification: the 24-hour soaks and the fail-closed target
   # aggregate belong to scripts/make-release.sh.
   #

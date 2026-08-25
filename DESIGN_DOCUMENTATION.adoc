@@ -69,12 +69,18 @@ The trade-offs are honest ones and are recorded where they bite:
       pinned; see TOOLCHAIN.adoc.  A modern from-source avr-libc (>= 2.2.0) has
       native ATtiny202 support and would remove this dependency.
     * **Simulation.** Neither simavr nor QEMU models the AVR8X core.  The
-      dynamic harness runs on yasimavr instead, a genuine behavioural simulator
-      that needs three local fixes for this firmware — two vendored patches
-      without which a fuse-locked watchdog cannot run at all, and one unpatched
-      cycle-accounting defect that stops the harness measuring busy-delay widths
-      in-simulation.  See "Known gaps (AVR-XT — hardware-bench only)" in
-      test/README.md for exactly what that does and does not cover.
+      dynamic harness runs on yasimavr instead, a genuine behavioural
+      simulator that needs two vendored patches for this firmware, without
+      which a fuse-locked watchdog cannot run at all.  A third upstream
+      defect — the `SimLoop.run(n)` cycle rewind — is unpatched, and reaches
+      no timing assertion: the output tracer free-runs in millisecond
+      budgets and timestamps every pin edge from a signal hook, so
+      `attiny202-sim` does measure the delivered coil-pulse width
+      in-simulation.  The compiled design width is a separate claim, pinned
+      independently of any simulator by `attiny202-delay-oracle`, which
+      reads it out of the disassembled image.  See "Known gaps (AVR-XT —
+      hardware-bench only)" in test/README.md for exactly what that does
+      and does not cover.
 
 
 == High-Level Functional Description
@@ -473,13 +479,16 @@ The two AVR-classic clock rates bracket the measurement because the
 ISR term is worst at the lower one: the tick ISR is 142 cycles, which
 is 11.8% of a 1.2 MHz tick and 14.2% of a 1.0 MHz tick, against the
 25% the map declares.  The ATtiny202 runs the same code at 2 MHz;
-with no cycle-accurate AVR-XT simulator trusted for this measurement
-(see the yasimavr stepping note in `test/README.md`), its term is
-bounded from the built image instead -- the TCB0 ISR and its callees
-are 84 instructions, and no AVR-XT instruction the shell emits
-exceeds 3 cycles, so the ISR cannot exceed 252 of the 2000 cycles in
-a 1 ms tick (12.6%).  The polled PIC shells have no ISR term to
-measure.
+this interval is measured between consecutive `wdr` executions, which
+needs cycle-granular instruction stepping -- precisely the mode the
+pinned yasimavr's unpatched `SimLoop.run(n)` rewind makes
+untrustworthy, even though the pin edges it timestamps from a signal
+hook are exact (see the yasimavr note in `test/README.md`).  Its term
+is therefore bounded from the built image instead -- the TCB0 ISR and
+its callees are 84 instructions, and no AVR-XT instruction the shell
+emits exceeds 3 cycles, so the ISR cannot exceed 252 of the 2000
+cycles in a 1 ms tick (12.6%).  The polled PIC shells have no ISR
+term to measure.
 
 
 == Asymmetric Debounce Timing

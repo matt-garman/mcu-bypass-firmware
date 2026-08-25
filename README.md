@@ -306,7 +306,7 @@ toolchain plus the fetched-on-demand Microchip device files and a patched
 ```
 make attiny202             # build all variants + 2 KB flash/16-byte static-RAM gates
 make attiny202-test        # pre-hardware checks (fuses, resources, stack, analysis, widths)
-make attiny202-sim         # yasimavr functional + PA2/PA3 transition/pulse-presence test
+make attiny202-sim         # yasimavr functional + PA2/PA3 transition/pulse test (incl. delivered width)
 make attiny202-fault       # fault-injection: corrupt a guarded SFR/state, assert recovery
 make attiny202-lockstep    # ctx_-vs-verified-core co-simulation, every settled tick
 make attiny202-soak        # long-duration liveness soak (XT_SOAK_DURATION_MS=)

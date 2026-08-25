@@ -574,4 +574,44 @@ grep -Fq -- '--no-index --no-build-isolation --no-deps' "$YASIMAVR_FETCH" \
 	|| fail "yasimavr fetcher still uses get-pip.py"
 checks=$((checks + 1))
 
+# The DOCUMENTED prerequisite must be the one the fetcher enforces.
+#
+# Through v0.9.9, TOOLCHAIN.adoc promised the yasimavr build was portable
+# "across a stripped-ensurepip host (creates the venv --without-pip and
+# bootstraps get-pip)". That path was deliberately deleted -- it fetched and ran
+# an unhashed script -- and the two checks above are what keep it deleted. The
+# prose outlived it, so a reader provisioning a host from that line would expect
+# a venv without pip to be recovered; the script fails closed on it instead,
+# telling them to install python3-venv. Nothing compared the two.
+#
+# The invariant is one-directional, because that is the direction that rots:
+# every pip-bootstrap mechanism the document DESCRIBES must exist in the script.
+# The reverse is not required -- the script may hold mechanisms the overview
+# does not enumerate.
+#
+# NAMING a retired mechanism is not PROMISING it: the document has to be able to
+# say the fallback is gone. So, as in scripts/release-documentation.sh, backtick
+# code spans are blanked before matching and only the surviving prose counts.
+#
+# Scoped to the yasimavr entry, not the whole file, so an unrelated tool's
+# prerequisites cannot satisfy this one by coincidence.
+YASIMAVR_DOC="$ROOT/TOOLCHAIN.adoc"
+[ -s "$YASIMAVR_DOC" ] || fail "TOOLCHAIN.adoc is missing or empty"
+yasimavr_doc_prose=$(awk '/^  yasimavr: /{keep=1} keep && /^== /{exit} keep' \
+	"$YASIMAVR_DOC" | sed 's/`[^`]*`//g')
+[ -n "$yasimavr_doc_prose" ] \
+	|| fail "TOOLCHAIN.adoc has no yasimavr entry to compare with the fetcher"
+for mechanism in 'get-pip' '--without-pip'; do
+	grep -Fq -- "$mechanism" <<<"$yasimavr_doc_prose" || continue
+	grep -Fq -- "$mechanism" "$YASIMAVR_FETCH" \
+		|| fail "TOOLCHAIN.adoc promises a pip bootstrap the fetcher does not implement: $mechanism"
+done
+# And the enforced alternative has to be the one the document names, so the
+# reader is sent to the package that actually supplies pip.
+grep -Fq "install 'python3-venv'" "$YASIMAVR_FETCH" \
+	|| fail "yasimavr fetcher no longer names python3-venv as the pip source"
+grep -Fq 'python3-venv' <<<"$yasimavr_doc_prose" \
+	|| fail "TOOLCHAIN.adoc no longer names python3-venv as the pip source"
+checks=$((checks + 1))
+
 printf 'supply-chain validation: %d checks, 0 failures\n' "$checks"

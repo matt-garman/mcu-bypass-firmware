@@ -304,12 +304,14 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
                 Scriptable AVR8X/XT simulator used by the ATtiny202 (AVR-XT)
                 dynamic harness -- `make attiny202-sim` (functional footswitch
                 -> LED plus simulated PA2/PA3 transition ordering, polarity,
-                coil exclusion and complete-pulse presence),
+                coil exclusion, complete-pulse presence, and the DELIVERED
+                pulse width, timestamped from a pin signal hook),
                 `attiny202-fault` (critical-SFR / state fault injection),
                 `attiny202-lockstep` (firmware/model co-simulation), and
-                `attiny202-soak` (long-duration liveness). The compiled 5 ms/12 ms
-                delay-body cycle counts are verified separately from the built image by
-                `make attiny202-delay-oracle`. It is the AVR-XT analogue of
+                `attiny202-soak` (long-duration liveness). The COMPILED
+                5 ms/12 ms delay-body cycle counts are a separate claim, read
+                out of the built image by `make attiny202-delay-oracle` and so
+                independent of any simulator. It is the AVR-XT analogue of
                 simavr for the classic parts and gpsim for the PIC: simavr 1.6
                 and QEMU do not model the AVR8X core, so the ATtiny202 shell
                 would otherwise have no simulated target-output transition,
@@ -333,9 +335,13 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
                 Idempotent (stamped on version + sdist SHA + patch-set SHA).
   needs:        python3 + python3-venv + python3-dev and a C++ compiler (it
                 compiles yasimavr's C++/SIP extension modules from source,
-                ~75 s), plus curl/wget and network access to PyPI.  Portable
-                across a stripped-ensurepip host (creates the venv --without-pip
-                and bootstraps get-pip) and a normal one.
+                ~75 s), plus curl/wget and network access to PyPI.  pip must
+                come from python3-venv's own ensurepip: there is no download
+                fallback, and a host whose venv comes up without pip is failed
+                closed with "install 'python3-venv'" rather than bootstrapped
+                from an unhashed `get-pip.py`.  Every byte the build does
+                install is hash-locked (test/test_supply_chain.sh,
+                test/test_fetch_yasimavr.sh).
   install:      sudo apt install python3 python3-venv python3-dev g++ curl
                 scripts/fetch_yasimavr.sh
   patches:      two upstream yasimavr bugs (reported upstream) block our
@@ -357,10 +363,11 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
                 matrix also corrupts each application pin's PORTA.PINnCTRL.INVEN
                 bit, including PA7 with its pull-up preserved, so polarity faults
                 cannot pass through latch/direction checks.  Relay cases observe
-                physical PA2/PA3 at the reset spin and additionally cover coil
-                pull-up, one-bit direction and combined stale-register states;
-                a low OUT latch alone is not accepted as quiescence.  The pure
-                debounce core keeps its full host + formal coverage regardless.
+                modeled PA2/PA3 pin levels at the reset spin and additionally
+                cover coil pull-up, one-bit direction and combined
+                stale-register states; a low OUT latch alone is not accepted
+                as quiescence.  The pure debounce core keeps its full host +
+                formal coverage regardless.
                 See test/avr/sim_attiny202.py.
   builds on:    the ATtiny_DFP device files (scripts/fetch_attiny_dfp.sh, pinned
                 atpack) that `make attiny202` needs to COMPILE the image; those
