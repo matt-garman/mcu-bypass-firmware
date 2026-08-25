@@ -1630,9 +1630,9 @@ Reclose only after those software findings, the retained initial/repeat
 programming and read-only finalization evidence, and all focused and aggregate
 gates pass.
 
-**Second pass (2026-08-25).** The four software findings are closed. The bench
-run is not, and is not closable here; what that means for the item is stated
-at the end.
+**Second pass (2026-08-25, commit `37b20bd`).** The four software findings are
+closed. The bench run is not, and is not closable here; what that means for
+the item is stated at the end.
 
 *The helper is bound by bytes, not by directory.* `bundle_identity` checked
 the helper's own digest only when
@@ -1851,12 +1851,12 @@ revalidate a regular non-symlink selected HEX immediately before hardware use.
 Add stale-image/mismatched-selector and size-failure zero-`avrdude` cases for
 all Classic parts, then rerun the focused and aggregate gates.
 
-**Follow-up resolution (2026-08-25, commit pending).** The program-request gate
-now rejects a `VARIANT` outside the invocation's `VARIANTS` matrix before any
-build, and Classic-AVR programming refuses every `AVR_REBUILD_PREREQ` value
-except the literal `FORCE`. The selected image must therefore be rebuilt and
-size-checked in the current graph. Classic size loops fail immediately rather
-than allowing a later matrix entry to mask an earlier failure.
+**Follow-up resolution (2026-08-25, commit `6ef8c4d`).** The program-request
+gate now rejects a `VARIANT` outside the invocation's `VARIANTS` matrix before
+any build, and Classic-AVR programming refuses every `AVR_REBUILD_PREREQ`
+value except the literal `FORCE`. The selected image must therefore be rebuilt
+and size-checked in the current graph. Classic size loops fail immediately
+rather than allowing a later matrix entry to mask an earlier failure.
 
 The final published HEX is required to be regular and non-symlinked and is
 revalidated immediately before the programmer check. Tool, programmer, port,
@@ -2000,13 +2000,13 @@ RAM/Data-space/stack figure, or narrow the acceptance and documentation claims
 to the evidence actually checked. Then rerun the named release, image,
 documentation, and final-candidate gates.
 
-**Follow-up resolution (2026-08-25, commit pending).** The changelog now says
-`[0.9.10] - Unreleased` instead of presenting 2026-08-27 as an accomplished
-future event. Versioned preflight accepts that explicit draft state. A
-production run does not: it reads the qualified source commit date and requires
-the changelog's ISO date to equal it before scratch, tools, builds, or staging.
-The final date therefore remains a source-finalization action without allowing
-the branch to claim it early.
+**Follow-up resolution (2026-08-25, commit `18cd7ee`).** The changelog now
+says `[0.9.10] - Unreleased` instead of presenting 2026-08-27 as an
+accomplished future event. Versioned preflight accepts that explicit draft
+state. A production run does not: it reads the qualified source commit date
+and requires the changelog's ISO date to equal it before scratch, tools,
+builds, or staging. The final date therefore remains a source-finalization
+action without allowing the branch to claim it early.
 
 `test-resource-tables` is now explicitly the tool-independent documentation
 contract. It performs 186 structural, arithmetic, cross-document, and
@@ -2643,7 +2643,7 @@ Record each completed item with its commit ID and decisive validation command.
 
 | Item | Status | Commit | Decisive validation |
 | --- | --- | --- | --- |
-| R1 | IMPLEMENTED | `7dab4db` | `make CC=: test-pic-build`; `test/test_release_qualification.sh`; `test/test_workflow_syntax.sh` |
+| R1 | DONE | `7dab4db` | `make CC=: test-pic-build`; `test/test_release_qualification.sh`; `test/test_workflow_syntax.sh` |
 | R2 | DONE | `7b54dea` | `test/test_release_preflight.sh`; `test/test_release_provenance.sh`; `make test-workflow-syntax test-release-history` |
 | R3 | DONE | `9a7c479` | `make test-pic-build test-release-preflight test-release-qualification`; `scripts/make-release.sh --preflight v0.9.10` |
 | F1 | DONE | `a8fe23d`, `b14cd7a` | `make test`; relay fault + coverage lanes on all six substrates; PIC/AVR flash-budget gates |
@@ -2656,22 +2656,22 @@ Record each completed item with its commit ID and decisive validation command.
 | F2 | DONE | `f6d9f82`, `f9dd333`, `5deb4e4`, `9999886`, `b6d06d2` | Fully provisioned current-HEAD validation reported passing: AVR-XT's 32-case matrix and PIC12F675's 43-check relay lane prove modeled physical coil-pin quiescence before reset; all affected resource, stack, timing, static, simulator, coverage, recovery, and merged 136-mutant gates pass |
 | F3 | DONE | `df89ec0` | PIC10F320 flash, return-stack, image-baseline, host/target fault, lock-step, target-I/O, coverage, analysis, and mutation gates pass; relay is 242/256 words at stack depth 3/8, both sequence-sensitive mutants are killed, and both CD4053 images are unchanged |
 | F4 | DONE | `fc23e48` | Fully provisioned current-HEAD suite passes; `make test-static-assert-guards` has 68 checks including 11 exact near-bound FIRES/CLEAN fixtures, compiled-image pet intervals fit their bounds, and timing, pulse-width, watchdog-liveness, static-analysis, and resource gates pass |
-| P1 | SOFTWARE DONE, BENCH OPEN | `58fb829`, (pending) | All four reopened software findings closed: the running helper is bound by digest wherever it lives (three refusals; the old location rule let an edited off-bundle helper reach a write), `ipecmd` and the jar form's Java runtime are pinned by held descriptor and re-proved before every command, evidence I/O moved onto a directory descriptor, and incomplete or self-contradicting device exports are refused before the write and published as named failures after it; `test-pic12f675-flash-helper` 175 -> 257 checks with five disable-one-guard negative controls, `test-release-preflight` 144 -> 158 with the raw-writer detector broadened to writer-basename + part + mutating option across fenced/AsciiDoc/indented/inline contexts in `.md` and `.adoc` plus a superseded-state sweep, and `release/README.md` + `docs/flashing_simplicity.md` reconciled. **Acceptance criterion 4 (controlled PICkit 3 / MPLAB X 6.20 bench run) stays open and needs silicon** |
-| P2 | IMPLEMENTED | (pending) | The selected variant must belong to the current forced rebuild; final regular/non-symlink HEX revalidation and literal argument/action binding precede hardware; `test-avr-program-order` passes 56 exact-order, stale-image, mismatch, size, override, symlink, and stateful-input checks, with all supporting build/selector/fuse/serialization/release-preflight contracts green |
-| D4 | IMPLEMENTED | (pending) | Changelog stays explicitly Unreleased until production requires the qualified source date; ordinary resource checks make no evidence claim at 0/21, while strict release qualification requires and retains source-bound 21-image, AVR-static, Classic/XT-stack, PIC12F675 Data-space, and PIC-stack evidence in a hash-bound 35-file inventory |
-| D5 | IMPLEMENTED | (pending) | Compiled-versus-delivered pulse width distinguished in `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc` and `TODO.md`, each naming the gate that owns its half; T25 reduced to remaining upstream/re-pin work; the pet-to-pet image bound justified by `wdr` stepping rather than blanket distrust; simulator lanes described as modeled pins in both workflows, `scripts/make-release.sh`, `docs/relay_coil_fault_correction.md`, `TOOLCHAIN.adoc`, `test/README.md` and the unreleased changelog section; the retired `get-pip` fallback removed from the documented prerequisites and pinned by a new `test-supply-chain` doc/script pairing (46 -> 47 checks, 3 negative controls) |
+| P1 | SOFTWARE DONE, BENCH OPEN | `58fb829`, `37b20bd` | All four reopened software findings closed: the running helper is bound by digest wherever it lives (three refusals; the old location rule let an edited off-bundle helper reach a write), `ipecmd` and the jar form's Java runtime are pinned by held descriptor and re-proved before every command, evidence I/O moved onto a directory descriptor, and incomplete or self-contradicting device exports are refused before the write and published as named failures after it; `test-pic12f675-flash-helper` 175 -> 257 checks with five disable-one-guard negative controls, `test-release-preflight` 144 -> 158 with the raw-writer detector broadened to writer-basename + part + mutating option across fenced/AsciiDoc/indented/inline contexts in `.md` and `.adoc` plus a superseded-state sweep, and `release/README.md` + `docs/flashing_simplicity.md` reconciled. **Acceptance criterion 4 (controlled PICkit 3 / MPLAB X 6.20 bench run) stays open and needs silicon** |
+| P2 | DONE | `4cf4804`, `6ef8c4d` | The selected variant must belong to the current forced rebuild; final regular/non-symlink HEX revalidation and literal argument/action binding precede hardware; `test-avr-program-order` passes 56 exact-order, stale-image, mismatch, size, override, symlink, and stateful-input checks, with all supporting build/selector/fuse/serialization/release-preflight contracts green |
+| D4 | DONE | `2585ad4`, `18cd7ee` | Changelog stays explicitly Unreleased until production requires the qualified source date; ordinary resource checks make no evidence claim at 0/21, while strict release qualification requires and retains source-bound 21-image, AVR-static, Classic/XT-stack, PIC12F675 Data-space, and PIC-stack evidence in a hash-bound 35-file inventory |
+| D5 | DONE | `f36f085` | Compiled-versus-delivered pulse width distinguished in `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc` and `TODO.md`, each naming the gate that owns its half; T25 reduced to remaining upstream/re-pin work; the pet-to-pet image bound justified by `wdr` stepping rather than blanket distrust; simulator lanes described as modeled pins in both workflows, `scripts/make-release.sh`, `docs/relay_coil_fault_correction.md`, `TOOLCHAIN.adoc`, `test/README.md` and the unreleased changelog section; the retired `get-pip` fallback removed from the documented prerequisites and pinned by a new `test-supply-chain` doc/script pairing (46 -> 47 checks, 3 negative controls) |
 | R4 | DONE | `ba4d9d6` | `make test-workflow-syntax test-release-provenance test-release-qualification`; stable tags publish normally, suffixed tags add `--prerelease`, and malformed tags stop before build or `gh` |
 | R5 | DONE | `7533d52` | `make test-supply-chain test-workflow-syntax test-release-preflight`; installer and verifier independently reject scan/order/hash/empty inventories while preserving unusual non-NUL filename bytes |
 | R6 | RE-OPENED | `470c11d` | Scalar identity checks landed, but artifact-defining source/flag overrides and duplicate canonical inventories reach the release recipe; reject them before recipe, tools, scratch, or build work and add direct/inherited negative coverage |
-| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; record the P1/P2/D4/D5 follow-up commits, close R6, then rerun every pre-merge gate. P1's bench run is a `1.x.y` hardware gate, not a pre-merge one |
+| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; close R6, then rerun every pre-merge gate. P1's bench run is a `1.x.y` hardware gate, not a pre-merge one |
 
 ## Merge decision
 
 Do not merge `v0.9.9-polish` or begin production `v0.9.10` qualification until
-R6 is complete and the P1, P2, D4, and D5 follow-up commits are recorded.
-F2-F4, P2, D4, D5, R4, and R5 require no further implementation action. P1's
-remaining acceptance criterion is the controlled PICkit 3 / MPLAB X 6.20 bench
-run, which needs silicon: it is a `1.x.y` hardware gate tracked in
+R6 is complete. Every other item is closed and recorded in the completion
+record above; only R6 requires further implementation action. P1's remaining
+acceptance criterion is the controlled PICkit 3 / MPLAB X 6.20 bench run,
+which needs silicon: it is a `1.x.y` hardware gate tracked in
 `HARDWARE_VALIDATION_LOG.md` and `TODO.md` `T3-pic12f675-bench`, and it does
 not block this merge -- the helper it qualifies replaced a published raw
 command that carried the same unvalidated question with no detection at all.
