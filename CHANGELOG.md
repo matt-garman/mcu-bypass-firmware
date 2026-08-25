@@ -88,6 +88,90 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- **The PIC12F675 flashing helper binds the tool that runs, not the tool that
+  ships.** A review of the helper found four ways the transaction could still
+  be entered with something other than what it believed it was using, and each
+  was reachable before a device write rather than after it.
+
+  The helper checked its own bytes against the release `SHA256SUMS` only when
+  it was executed from inside the bundle directory. Run from anywhere else it
+  skipped that check entirely, so an EDITED copy could program a correctly
+  signed image -- and the regression that was meant to cover this asserted the
+  skip was intended. The binding is now on bytes rather than location: the
+  running helper's digest must appear in the selected bundle's manifest under
+  its released name, wherever the file sits. A byte-identical copy outside a
+  bundle is still the published tool and still works; an edited copy, a
+  renamed copy and a copy this release never published each get their own
+  refusal. Restoring the old rule lets all three reach a write, which is what
+  the new negative controls measure.
+
+  `ipecmd` was hashed by pathname and then executed by pathname, with the
+  whole transaction in between. The resolved file is now held open: the
+  recorded digest is read through that descriptor, and immediately before
+  every command the pathname in the argv is re-stat'd and required to still
+  name the same inode, whose bytes are re-hashed through the same descriptor.
+  A tool swapped in behind its name, or edited in place, stops the transaction
+  with zero writer invocations. The jar form's Java runtime is pinned,
+  reserved and re-proved the same way, because it is half of what actually
+  runs; `finalize` now requires it to be the reserved one too. The evidence
+  directory is likewise opened once and addressed by descriptor, so replacing
+  the directory behind its name cannot redirect a publication or make a later
+  read observe a different file than the one `ipecmd` produced. Where `dir_fd`
+  is unavailable the pathname discipline stands in and the reservation records
+  which of the two was in force.
+
+  Device exports were parsed leniently enough to hide two ways a reader can
+  lie. A repeated address was folded last-one-wins even when the two records
+  disagreed about its value, and an export that returned only part of program
+  memory was accepted as a trim baseline. Both are now refused before the
+  write, on both pre-write reads: the retained baseline is the only copy of
+  what was on the chip, and an incomplete one is incomplete for exactly the
+  memory the next command erases. After the write the same observations are
+  the result, so they are published as named failures instead of aborting the
+  readback that found them. That the export command returns complete data in
+  the form the helper parses is the first property the outstanding bench run
+  has to establish, and it is now checked rather than assumed.
+
+  The fail-closed matrix grew from 175 to 257 checks, adding the `java -jar`
+  invocation end to end against a fake runtime, malformed trim, unsafe
+  evidence and input paths, the interruption boundaries that were not covered
+  (after the second read, inside the post-write read, and inside a
+  finalization), and the two tool-replacement windows above -- the fake
+  programmer moves its own pathname on cue, which is the only way to reach
+  them at the right instant.
+
+- **The documents disagreed about whether this part has a no-compiler path.**
+  `release/README.md` opened by saying the PIC12F675 guarded workflow needs a
+  clean tagged checkout and the pinned XC8/DFP toolchain, and that no path yet
+  admits a downloaded image to it -- then said the opposite twice further
+  down, where it documents the helper that does exactly that.
+  `docs/flashing_simplicity.md` still argued in the present tense that the
+  part had no qualified direct-from-download path, and its §5.5 sketch of one
+  predicted the first improvement would land at "needs a clone plus common
+  development tools", not "download and run one command". Both are reconciled:
+  the opening states the helper path, and the analysis keeps its reasoning
+  with marked updates saying which of it the helper settled, including that
+  the dependency prediction was wrong in the good direction and that its step
+  2 was deliberately narrowed -- a tool shipped inside a bundle cannot verify
+  that bundle's signature without also shipping the trust root.
+
+  The durable-document detector that should have caught the contradiction was
+  narrower than the commands it was written to forbid. It only looked inside
+  fenced Markdown blocks, only at `.md` files, only recognised a writer as the
+  FIRST word of a line from a list of five names, and only treated a bare `-M`
+  as destructive. It now recognises a writer by the basename of any token --
+  so a full install path, a `sudo` prefix, a `$IPECMD` variable and
+  `ipecmd.sh` are the same command -- treats `-MP` and an erase as
+  destructive, and searches AsciiDoc listing blocks, indented blocks and
+  inline code spans as well as fenced blocks, in `.adoc` as well as `.md`. It
+  requires a writer, this part and a mutating option together, so a read-only
+  `-GF` export, the helper's own invocation, another part's one-liner and
+  prose naming the retired form in order to forbid it all stay publishable. A
+  companion sweep rejects the three superseded sentences about this part in
+  any current document, matched case-insensitively and named exactly, so
+  recording in the past tense how they were retired is not itself a violation.
+  `test-release-preflight` went from 144 to 158 checks.
+
 - **The simulator and toolchain descriptions match what the harness and the
   fetcher actually do.** Four current documents still described a yasimavr
   harness that stopped existing when the ATtiny202 output tracer moved to

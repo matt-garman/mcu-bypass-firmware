@@ -388,10 +388,18 @@ later without blocking the narrower path.
 
 ## 5. The PIC12F675 caveat
 
-This part is the one place where a qualified direct-from-download path is not
-available today, and where pursuing it carelessly can destroy a user's device.
-The full reasoning follows, because "just use the guarded workflow" is not a
-rationale anyone can act on or challenge.
+This part is the one place where pursuing a direct-from-download path carelessly
+can destroy a user's device. The full reasoning follows, because "just use the
+guarded workflow" is not a rationale anyone can act on or challenge.
+
+**Read this section as the analysis that produced the answer, not as the current
+state.** It was written while there was no qualified no-compiler path at all, so
+its present tense describes `v0.9.9`. From `v0.9.10` there is one:
+`scripts/flash-pic12f675.py`, §5.5's sketch built as a standalone
+transaction. The marked updates below say which reasoning each part of it
+settles.
+What has NOT changed is the hazard in 5.1 or the honest limit in 5.4: the
+programmer's real erase behaviour is still unqualified on silicon.
 
 ### 5.1 What is physically different about this part
 
@@ -501,6 +509,9 @@ attachment or handoff has been validated.
 
 ### 5.5 A no-compiler path may be reachable
 
+*(Written before one existed. It does now; the update at the end of this section
+records what the sketch got right and what it got wrong.)*
+
 Worth recording, because it bears directly on the primary goal.
 
 Examining what the checks actually need: the calibration check and the CONFIG
@@ -539,11 +550,43 @@ It has not been designed or gated, and it must not be attempted by loosening
 the existing guards piecemeal — the custody chain in §5.3 is the property that
 has to be preserved end to end.
 
+**Update (v0.9.10): designed, gated, and shipped — as a program, not a Make
+target.** `scripts/flash-pic12f675.py` implements steps 1, 3, 4 and 5 of the
+sketch above directly, and it did preserve the custody chain rather than loosen
+it: the accepted bytes are snapshotted into the evidence directory before any
+check runs, and the writer consumes that snapshot. Two things the sketch
+predicted turned out differently.
+
+*The dependency estimate was wrong, and in the good direction.* The sketch
+concluded the first improvement would move from "needs the full PIC toolchain"
+to "needs a clone plus common development tools", not to "download and run one
+command", because it assumed the transaction would stay a Make target reusing
+repository-local checkers. Rewriting the calibration and CONFIG policy as ~40
+lines of Python inside the tool removed `git`, GNU Make, `sha256sum`, a host C
+compiler and the clone along with XC8 and the device pack. What remains is
+Python 3 and the operator's own `ipecmd`. So the part does now appear in the
+generated programming document as a real procedure.
+
+*Step 2 is not what the helper does.* The sketch had the transaction verify
+`SHA256SUMS.asc` itself with `scripts/verify-release-signature.sh`, which is
+repository-local and pins a key. A tool that ships inside the bundle cannot
+verify that bundle's signature without also shipping the trust root, and a trust
+root distributed with the thing it authenticates proves nothing. The helper
+therefore REQUIRES the detached signature to be present beside the manifest --
+so the instruction "verify it first" is actionable and its absence is a refusal
+-- and leaves verifying it to the operator and `gpg`. That is a deliberate
+narrowing of the sketch, not an omission.
+
+The part of §5.4 that this does not touch is the whole of it: none of this
+establishes what a real PICkit 3 erase does to the trim.
+
 ## 6. The tension, resolved
 
 Six parts can have a one-command direct path within each explicitly supported
-programmer, platform and power profile. The seventh cannot today. The
-temptation in either direction should be named so it can be refused:
+programmer, platform and power profile. The seventh has one command too, from
+`v0.9.10`, but it is a different command: a guarded transaction with an evidence
+directory, not a writer invocation. That distinction is the whole point, and the
+temptation in either direction should still be named so it can be refused:
 
 - **Do not degrade the six to match the seventh.** Wrapping every part in a
   guarded transaction because one part needs it would spend the whole
@@ -582,7 +625,11 @@ land together; the guide and its authentication land together.
    path for the flash-only user.
 7. **Evaluate the PIC12F675 no-compiler path** (§5.5) as a separate `TODO.md`
    item. It is the only item here that changes a safety-critical transaction and
-   must remain subordinate to hardware qualification.
+   must remain subordinate to hardware qualification. *Done in `v0.9.10` as
+   `scripts/flash-pic12f675.py`, and it stayed subordinate: the bench run it
+   needs is an outstanding controlled run in `HARDWARE_VALIDATION_LOG.md`, and
+   the tool, `FLASHING.md` and this document all say a PASS means "no damage was
+   observed on this device", not "this writer preserves calibration".*
 
 ## 8. Decisions and remaining questions
 
@@ -598,7 +645,11 @@ The analysis resolves several earlier questions:
   does not solve discoverability, pasteability, authentication or selection.
 - **A helper is deferred, not forbidden.** Revisit it only if the profile-based
   static guide fails the measured simplicity goal or literal zero-substitution
-  remains mandatory.
+  remains mandatory. *Revisited for one part in `v0.9.10` on neither of those
+  triggers: §5 makes the PIC12F675 a case where a command is the wrong
+  instruction regardless of how simple the guide gets. The general-purpose,
+  detecting, multi-part helper this bullet defers is still deferred; nothing in
+  `flash-pic12f675.py` detects anything or serves another part.*
 
 Implementation still has concrete decisions to make: the exact qualified tool
 versions and programmer/power profiles, the machine-readable record format,

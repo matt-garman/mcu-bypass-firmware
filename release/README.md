@@ -8,11 +8,15 @@ documentation marks them as superseded. Each release lives in its own
 [GitHub Release](https://github.com/matt-garman/mcu-bypass-firmware/releases).
 
 PIC12F675 is the safety exception: do not pass its downloaded HEX directly to a
-writer. Its guarded workflow currently requires a clean source checkout of the
-same release tag and the pinned XC8/DFP toolchain, then rebuilds and checks the
-image before writing. The prebuilt file remains the signed/reproducible release
-artifact, but there is not yet a no-compiler path that safely admits it to the
-device-specific trim-evidence transaction.
+writer. Its per-device factory OSCCAL word and CONFIG `BG<1:0>` trim live in
+memory a programmer erases, so every write goes through a guarded transaction.
+From `v0.9.10` that transaction has a no-compiler path: each bundle also ships
+`flash-pic12f675.py`, covered by the same signed `SHA256SUMS` as the images, and
+it runs the whole transaction on Python 3 plus MPLAB X 6.20 `ipecmd` -- no
+source checkout, no XC8, no device pack. Pass the downloaded HEX to that helper,
+never to `ipecmd`. `make pic12f675-release-program` remains the development and
+release-provenance path, and it is the one that needs the toolchain and a clean
+tagged checkout, because it binds a private fresh build to a signed tag.
 
 From `v0.9.10`, PIC12F675 release qualification runs its pre-hardware and target
 aggregates in one Make graph against one retained matrix. The release evidence

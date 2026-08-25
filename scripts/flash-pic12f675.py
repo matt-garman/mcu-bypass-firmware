@@ -76,6 +76,7 @@ DEVICE_REVISION_RE = re.compile(
     r"(?im)^\s*(?:device\s+)?revision\s*(?:=|:)\s*(?:0x)?([0-9a-f]+)\b")
 
 MAX_FILE_BYTES = 1024 * 1024
+MAX_TOOL_BYTES = 256 * 1024 * 1024
 VERSION_PROBE_TIMEOUT_S = 300
 DEVICE_TIMEOUT_S = 900
 MAX_FINALIZE_ATTEMPTS = 64
@@ -141,9 +142,10 @@ def parse_ihex(raw, label, strict=True):
     strict=True is for the RELEASE IMAGE: only record types 00/01/04 are
     accepted, an extended linear address must select segment 0, every address
     must be written at most once, and the file must end at its single EOF
-    record. A device EXPORT is parsed with strict=False, which tolerates
-    repeated writes of the same address (some readers emit overlapping runs)
-    but nothing else.
+    record. A device EXPORT is parsed with strict=False, which tolerates a
+    repeated address (some readers emit overlapping runs) only while both
+    records agree about its value; an export that contradicts itself is
+    refused rather than folded last-one-wins.
     """
     try:
         text = raw.decode("ascii")
@@ -195,10 +197,20 @@ def parse_ihex(raw, label, strict=True):
                 if address > 0xFFFFFFFF:
                     raise FlashError("%s line %d addresses beyond 32 bits"
                                      % (label, lineno))
-                if strict and address in memory:
-                    raise FlashError(
-                        "%s writes byte address 0x%04X twice (line %d)"
-                        % (label, address, lineno))
+                if address in memory:
+                    if strict:
+                        raise FlashError(
+                            "%s writes byte address 0x%04X twice (line %d)"
+                            % (label, address, lineno))
+                    if memory[address] != value:
+                        # A reader that cannot agree with itself about what is
+                        # on the device cannot establish a trim baseline. Two
+                        # different values for one address is that; folding
+                        # last-one-wins would hide it.
+                        raise FlashError(
+                            "%s reports byte address 0x%04X as both 0x%02X and "
+                            "0x%02X (line %d); this export contradicts itself"
+                            % (label, address, memory[address], value, lineno))
                 memory[address] = value
         elif rtype == 0x01:
             if count != 0:
@@ -240,24 +252,65 @@ def word_at(memory, word_address, label, what):
     return word
 
 
-def image_words(memory, label):
-    """Fold a parsed image into whole 14-bit words, refusing half words."""
+def image_words(memory, label, verb="writes"):
+    """Fold parsed Intel HEX into whole 14-bit words, refusing half words."""
     words = {}
     for address in sorted(memory):
         if address % 2 != 0:
             if address - 1 not in memory:
-                raise FlashError("%s writes the high byte of word 0x%04X "
-                                 "without its low byte" % (label, address // 2))
+                raise FlashError("%s %s the high byte of word 0x%04X "
+                                 "without its low byte"
+                                 % (label, verb, address // 2))
             continue
         if address + 1 not in memory:
-            raise FlashError("%s writes the low byte of word 0x%04X without "
-                             "its high byte" % (label, address // 2))
+            raise FlashError("%s %s the low byte of word 0x%04X without "
+                             "its high byte" % (label, verb, address // 2))
         word = memory[address] | (memory[address + 1] << 8)
         if word & ~0x3FFF:
             raise FlashError("%s word 0x%04X is not a 14-bit value: 0x%04X"
                              % (label, address // 2, word))
         words[address // 2] = word
     return words
+
+
+def export_coverage(memory, label):
+    """Say how much of this part a full-device export actually returned.
+
+    Structural refusal first: a word whose two bytes did not both arrive is a
+    truncated read, and every trim comparison downstream would be reading a
+    fabricated value.
+    """
+    words = image_words(memory, label, verb="reports")
+    missing = [address for address in range(FLASH_WORDS) if address not in words]
+    return {
+        "program_words_read": FLASH_WORDS - len(missing),
+        "missing_program_words": len(missing),
+        "first_missing_word": ("0x%04X" % missing[0]) if missing else None,
+        "config_present": CONFIG_WORD_ADDR in words,
+    }
+
+
+def require_complete_export(coverage, label):
+    """A pre-write export must cover the whole device, or no write happens.
+
+    The retained baseline is the operator's only copy of what this device held.
+    An export that omits program words leaves that copy incomplete for memory
+    the very next command erases, and the omission would be invisible: the
+    post-write comparison only revisits addresses the image supplies.
+    """
+    if coverage["missing_program_words"]:
+        raise FlashError(
+            "%s is not a complete full-device read: it returns %d of %d program "
+            "words and omits %d, first at word %s. The retained trim baseline "
+            "would be incomplete for memory this transaction is about to erase, "
+            "so no write was attempted. That the export command returns complete "
+            "program, CONFIG, Device ID, revision, OSCCAL and BG data in the form "
+            "this helper parses is the first property the controlled bench run in "
+            "HARDWARE_VALIDATION_LOG.md has to establish."
+            % (label, coverage["program_words_read"], FLASH_WORDS,
+               coverage["missing_program_words"], coverage["first_missing_word"]))
+    if not coverage["config_present"]:
+        raise FlashError("%s returns no CONFIG word at 0x2007" % label)
 
 
 def validate_release_image(data, label):
@@ -393,7 +446,9 @@ def bundle_identity(image_path, helper_path):
 
     The digest comes from the bundle's SHA256SUMS, which is what the detached
     signature covers; the operator is told to verify that signature first, and
-    its presence is required so the instruction is actionable.
+    its presence is required so the instruction is actionable. The helper's own
+    bytes are bound the same way, so the tool and the image it writes are
+    covered by one signature.
     """
     image_path = os.path.abspath(image_path)
     image_dir = os.path.dirname(image_path)
@@ -421,26 +476,32 @@ def bundle_identity(image_path, helper_path):
             "%s has %s, SHA256SUMS records %s"
             % (image_name, image_sha256, entries[image_name]))
 
+    # The RUNNING helper is held to the same signature as the image it is about
+    # to write, wherever it happens to live. Location is not the property that
+    # matters -- a copy outside the bundle is fine if it is byte-for-byte the
+    # published tool, and a copy inside one is not fine if it is not. Binding on
+    # location instead let an edited off-bundle helper program a signed image.
     helper_data = read_regular_bytes(helper_path, "flashing helper")
     helper_sha256 = sha256_bytes(helper_data)
     helper_name = os.path.basename(helper_path)
-    helper_bound = False
-    # Compare RESOLVED directories: a bundle reached through a symlinked path
-    # would otherwise silently skip the helper's own checksum binding rather
-    # than fail, which is the wrong direction for a check that exists to catch
-    # a tampered tool.
-    if os.path.dirname(os.path.realpath(image_path)) == os.path.dirname(helper_path):
-        # Running from inside the bundle: the helper is a signed artifact too,
-        # so hold it to the same standard as the image it is about to write.
-        if helper_name not in entries:
-            raise FlashError("release SHA256SUMS does not list the helper %s"
-                             % helper_name)
-        if helper_sha256 != entries[helper_name]:
+    recorded = entries.get(helper_name)
+    if recorded is None:
+        renamed = sorted(name for name, digest in entries.items()
+                         if digest == helper_sha256)
+        if renamed:
             raise FlashError(
-                "flashing helper does not match its signed checksum: %s has "
-                "%s, SHA256SUMS records %s"
-                % (helper_name, helper_sha256, entries[helper_name]))
-        helper_bound = True
+                "this helper is running as %s, but the release publishes these "
+                "exact bytes as %s; run it under its released name so the "
+                "retained evidence names the artifact the signature covers"
+                % (helper_name, ", ".join(renamed)))
+        raise FlashError(
+            "the running helper is not an artifact of this release: SHA256SUMS "
+            "lists no %s. Program a downloaded image with the flash-pic12f675.py "
+            "published beside it." % helper_name)
+    if helper_sha256 != recorded:
+        raise FlashError(
+            "flashing helper does not match its signed checksum: %s has %s, "
+            "SHA256SUMS records %s" % (helper_name, helper_sha256, recorded))
 
     return {
         "image_path": image_path,
@@ -452,7 +513,7 @@ def bundle_identity(image_path, helper_path):
         "helper_name": helper_name,
         "helper_path": helper_path,
         "helper_sha256": helper_sha256,
-        "helper_checksum_bound": helper_bound,
+        "helper_checksum_bound": True,
     }
 
 
@@ -472,34 +533,128 @@ def which(program):
     return None
 
 
+def sha256_fd(fd, label, max_bytes):
+    """Digest a file through a descriptor already held open."""
+    digest = hashlib.sha256()
+    total = 0
+    try:
+        os.lseek(fd, 0, os.SEEK_SET)
+        while True:
+            chunk = os.read(fd, 1 << 20)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                raise FlashError("%s exceeds the %d-byte limit" % (label, max_bytes))
+            digest.update(chunk)
+    except OSError as exc:
+        raise FlashError("%s could not be read: %s" % (label, exc)) from exc
+    if total == 0:
+        raise FlashError("%s is empty" % label)
+    return digest.hexdigest()
+
+
+def open_identity(path, label, max_bytes):
+    """Pin a file that will later be EXECUTED by pathname, and keep its handle.
+
+    Hashing a path and then handing that same path to exec() leaves a window:
+    between the two, the name can be pointed at a different file, or the file
+    can be rewritten underneath it. The descriptor closes the window. The
+    recorded digest is read THROUGH it, and before every invocation the pathname
+    the argv carries is re-stat'd and required to still name this inode, whose
+    bytes are re-hashed through this same descriptor. A tool swapped in behind
+    the name, or edited in place, is refused instead of run.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise FlashError("%s is unavailable: %s" % (label, exc)) from exc
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise FlashError("%s is not a regular file: %s" % (label, path))
+        digest = sha256_fd(fd, label, max_bytes)
+    except BaseException:
+        os.close(fd)
+        raise
+    return {
+        "fd": fd,
+        "path": path,
+        "label": label,
+        "sha256": digest,
+        "ident": (info.st_dev, info.st_ino),
+        "max_bytes": max_bytes,
+    }
+
+
 def programmer_identity(path, java):
-    """Resolve the one supported ipecmd form and hash the exact bytes used."""
+    """Resolve the one supported ipecmd form and pin the exact bytes used.
+
+    Both supported forms are pinned the same way: the direct executable, and the
+    `java -jar ipecmd.jar` form, whose Java runtime is as much a part of what
+    runs as the jar is.
+    """
     invoked = os.path.abspath(path)
     resolved = os.path.realpath(invoked)
-    data = read_regular_bytes(resolved, "ipecmd", max_bytes=256 * 1024 * 1024)
-    if resolved.endswith(".jar"):
-        kind = "jar"
-        java_path = which(java)
-        if java_path is None:
-            raise FlashError(
-                "a .jar ipecmd needs a Java runtime; '%s' was not found on PATH"
-                % java)
-        java_path = os.path.realpath(java_path)
-        prefix = [java_path, "-jar", resolved]
-    else:
-        kind = "executable"
-        if not os.access(resolved, os.X_OK):
-            raise FlashError("ipecmd is not executable: %s" % path)
-        java_path = None
-        prefix = [resolved]
+    handle = open_identity(resolved, "ipecmd", MAX_TOOL_BYTES)
+    java_handle = None
+    try:
+        if resolved.endswith(".jar"):
+            kind = "jar"
+            java_path = which(java)
+            if java_path is None:
+                raise FlashError(
+                    "a .jar ipecmd needs a Java runtime; '%s' is not an "
+                    "executable on PATH" % java)
+            java_path = os.path.realpath(java_path)
+            java_handle = open_identity(java_path, "java runtime", MAX_TOOL_BYTES)
+            if not os.access(java_path, os.X_OK):
+                raise FlashError("java runtime is not executable: %s" % java_path)
+            prefix = [java_path, "-jar", resolved]
+        else:
+            kind = "executable"
+            if not os.access(resolved, os.X_OK):
+                raise FlashError("ipecmd is not executable: %s" % path)
+            java_path = None
+            prefix = [resolved]
+    except BaseException:
+        os.close(handle["fd"])
+        if java_handle is not None:
+            os.close(java_handle["fd"])
+        raise
     return {
         "kind": kind,
         "path": invoked,
         "realpath": resolved,
-        "sha256": sha256_bytes(data),
+        "sha256": handle["sha256"],
         "java": java_path,
+        "java_sha256": None if java_handle is None else java_handle["sha256"],
         "prefix": prefix,
+        "handles": [h for h in (handle, java_handle) if h is not None],
     }
+
+
+def programmer_unchanged(programmer):
+    """Re-prove the pinned identity immediately before an invocation."""
+    for handle in programmer["handles"]:
+        try:
+            info = os.stat(handle["path"])
+        except OSError as exc:
+            raise FlashError(
+                "the %s at %s became unavailable between its identity check and "
+                "its use; no command was issued: %s"
+                % (handle["label"], handle["path"], exc)) from exc
+        if (info.st_dev, info.st_ino) != handle["ident"]:
+            raise FlashError(
+                "the %s at %s was replaced between its identity check and its "
+                "use; no command was issued" % (handle["label"], handle["path"]))
+        if sha256_fd(handle["fd"], handle["label"], handle["max_bytes"]) \
+                != handle["sha256"]:
+            raise FlashError(
+                "the %s at %s changed on disk between its identity check and "
+                "its use; no command was issued"
+                % (handle["label"], handle["path"]))
 
 
 def run_tool(argv, timeout, label):
@@ -514,6 +669,12 @@ def run_tool(argv, timeout, label):
     return completed.returncode, completed.stdout
 
 
+def invoke(programmer, argv, timeout, label):
+    """The only way a tool is started: identity re-proved, then run."""
+    programmer_unchanged(programmer)
+    return run_tool(argv, timeout, label)
+
+
 def probe_version(programmer):
     """Pin the writer to MPLAB X 6.20 before any device access.
 
@@ -522,7 +683,8 @@ def probe_version(programmer):
     names no part, no tool and no file, so it cannot reach the device.
     """
     argv = programmer["prefix"] + ["-?"]
-    exit_code, output = run_tool(argv, VERSION_PROBE_TIMEOUT_S, "ipecmd version probe")
+    exit_code, output = invoke(programmer, argv, VERSION_PROBE_TIMEOUT_S,
+                               "ipecmd version probe")
     text = output.decode("ascii", "replace")
     found = set()
     for line in IPE_BANNER_RE.findall(text):
@@ -572,117 +734,241 @@ def write_argv(programmer, image_path):
 # evidence
 # ---------------------------------------------------------------------------
 
-def create_evidence_dir(path):
-    """Create the evidence directory exclusively, or refuse.
+# `dir_fd` removes the pathname from every evidence operation after the
+# directory is opened. Windows supports neither it nor O_DIRECTORY, so the
+# pathname discipline below is the fallback there and the reservation records
+# which of the two was in force.
+EVIDENCE_DIR_FD = (hasattr(os, "O_DIRECTORY")
+                   and os.open in os.supports_dir_fd
+                   and os.stat in os.supports_dir_fd
+                   and os.chmod in os.supports_dir_fd)
 
-    Exclusive creation is the whole point: an existing directory could already
-    hold another device's transaction, and silently adding to it would destroy
-    the one-directory-one-device binding every later check rests on.
+
+class Evidence(object):
+    """The retained evidence directory, addressed by descriptor where possible.
+
+    A transaction that checks a directory and then writes to it BY NAME can have
+    the directory replaced in between, and every later read would observe the
+    replacement rather than what ipecmd produced. So the directory is opened
+    once, its identity is confirmed against the name it was opened from, and
+    every file inside it is thereafter created, read, and chmod'ed relative to
+    that descriptor.
     """
-    # normpath first: `--evidence-dir ./device-001/` is an ordinary way to type
-    # a directory, and a trailing separator must not read as "no final
-    # component".
-    path = os.path.abspath(os.path.normpath(path))
-    parent = os.path.dirname(path)
-    if os.path.basename(path) in ("", ".", ".."):
-        raise FlashError("evidence path does not name a new directory: %s" % path)
-    try:
-        parent_info = os.stat(parent)
-    except OSError as exc:
-        raise FlashError("evidence directory's parent is unavailable: %s" % exc) from exc
-    if not stat.S_ISDIR(parent_info.st_mode):
-        raise FlashError("evidence directory's parent is not a directory: %s" % parent)
-    if (parent_info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)) \
-            and not (parent_info.st_mode & stat.S_ISVTX):
-        raise FlashError(
-            "evidence directory's parent is group/other-writable without the "
-            "sticky bit; another user could replace the retained evidence: %s"
-            % parent)
-    if os.path.lexists(path):
-        raise FlashError(
-            "evidence path already exists; choose a new one so this device's "
-            "transaction cannot be confused with another: %s" % path)
-    try:
-        os.mkdir(path, 0o700)
-    except OSError as exc:
-        raise FlashError("could not create the evidence directory: %s" % exc) from exc
-    return path
 
+    def __init__(self, path, fd):
+        self.path = path
+        self.fd = fd
 
-def open_evidence_dir(path):
-    path = os.path.abspath(os.path.normpath(path))
-    try:
-        info = os.lstat(path)
-    except OSError as exc:
-        raise FlashError("evidence directory is unavailable: %s" % exc) from exc
-    if stat.S_ISLNK(info.st_mode):
-        raise FlashError("evidence directory is a symbolic link: %s" % path)
-    if not stat.S_ISDIR(info.st_mode):
-        raise FlashError("evidence directory is not a directory: %s" % path)
-    return path
+    @staticmethod
+    def _attach(path):
+        if not EVIDENCE_DIR_FD:
+            return None
+        flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(path, flags)
+        except OSError as exc:
+            raise FlashError("could not open the evidence directory: %s"
+                             % exc) from exc
+        try:
+            named = os.lstat(path)
+            opened = os.fstat(fd)
+        except OSError as exc:
+            os.close(fd)
+            raise FlashError("could not confirm the evidence directory: %s"
+                             % exc) from exc
+        if (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino):
+            os.close(fd)
+            raise FlashError("the evidence directory at %s was replaced while "
+                             "it was being opened" % path)
+        return fd
 
+    @classmethod
+    def create(cls, path):
+        """Create the evidence directory exclusively, or refuse.
 
-def fsync_dir(path):
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except OSError as exc:
-        raise FlashError("could not open the evidence directory: %s" % exc) from exc
-    try:
-        os.fsync(fd)
-    except OSError as exc:
-        raise FlashError("could not flush the evidence directory: %s" % exc) from exc
-    finally:
-        os.close(fd)
+        Exclusive creation is the whole point: an existing directory could
+        already hold another device's transaction, and silently adding to it
+        would destroy the one-directory-one-device binding every later check
+        rests on.
+        """
+        # normpath first: `--evidence-dir ./device-001/` is an ordinary way to
+        # type a directory, and a trailing separator must not read as "no final
+        # component".
+        path = os.path.abspath(os.path.normpath(path))
+        parent = os.path.dirname(path)
+        if os.path.basename(path) in ("", ".", ".."):
+            raise FlashError("evidence path does not name a new directory: %s"
+                             % path)
+        try:
+            parent_info = os.stat(parent)
+        except OSError as exc:
+            raise FlashError("evidence directory's parent is unavailable: %s"
+                             % exc) from exc
+        if not stat.S_ISDIR(parent_info.st_mode):
+            raise FlashError("evidence directory's parent is not a directory: %s"
+                             % parent)
+        if (parent_info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)) \
+                and not (parent_info.st_mode & stat.S_ISVTX):
+            raise FlashError(
+                "evidence directory's parent is group/other-writable without the "
+                "sticky bit; another user could replace the retained evidence: %s"
+                % parent)
+        if os.path.lexists(path):
+            raise FlashError(
+                "evidence path already exists; choose a new one so this device's "
+                "transaction cannot be confused with another: %s" % path)
+        try:
+            os.mkdir(path, 0o700)
+        except OSError as exc:
+            raise FlashError("could not create the evidence directory: %s"
+                             % exc) from exc
+        return cls(path, cls._attach(path))
 
+    @classmethod
+    def open(cls, path):
+        path = os.path.abspath(os.path.normpath(path))
+        try:
+            info = os.lstat(path)
+        except OSError as exc:
+            raise FlashError("evidence directory is unavailable: %s" % exc) from exc
+        if stat.S_ISLNK(info.st_mode):
+            raise FlashError("evidence directory is a symbolic link: %s" % path)
+        if not stat.S_ISDIR(info.st_mode):
+            raise FlashError("evidence directory is not a directory: %s" % path)
+        return cls(path, cls._attach(path))
 
-def publish_bytes(path, data, label):
-    """Write one evidence file exclusively, then flush it and its directory.
+    def filename(self, name):
+        """The pathname form, for an argv ipecmd must be given and for
+        diagnostics. Never used to reach a file this helper reads itself."""
+        return os.path.join(self.path, name)
 
-    O_EXCL is what makes result.json immutable: a second publication attempt
-    fails rather than overwriting a forensic record.
-    """
-    try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400)
-    except FileExistsError as exc:
-        raise FlashError("%s already exists and is immutable: %s"
-                         % (label, path)) from exc
-    except OSError as exc:
-        raise FlashError("could not create %s: %s" % (label, exc)) from exc
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-    except OSError as exc:
-        raise FlashError("could not write %s: %s" % (label, exc)) from exc
-    fsync_dir(os.path.dirname(path))
+    def exists(self, name):
+        try:
+            if self.fd is None:
+                os.lstat(self.filename(name))
+            else:
+                os.lstat(name, dir_fd=self.fd)
+        except OSError:
+            return False
+        return True
 
+    def sync(self):
+        if self.fd is not None:
+            try:
+                os.fsync(self.fd)
+            except OSError as exc:
+                raise FlashError("could not flush the evidence directory: %s"
+                                 % exc) from exc
+            return
+        try:
+            fd = os.open(self.path, os.O_RDONLY)
+        except OSError as exc:
+            raise FlashError("could not open the evidence directory: %s"
+                             % exc) from exc
+        try:
+            os.fsync(fd)
+        except OSError as exc:
+            raise FlashError("could not flush the evidence directory: %s"
+                             % exc) from exc
+        finally:
+            os.close(fd)
 
-def publish_json(path, record, label):
-    data = (json.dumps(record, indent=2, sort_keys=True) + "\n").encode("ascii")
-    publish_bytes(path, data, label)
+    def publish(self, name, data, label):
+        """Write one evidence file exclusively, then flush it and its directory.
 
+        O_EXCL is what makes result.json immutable: a second publication attempt
+        fails rather than overwriting a forensic record.
+        """
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        try:
+            if self.fd is None:
+                fd = os.open(self.filename(name), flags, 0o400)
+            else:
+                fd = os.open(name, flags, 0o400, dir_fd=self.fd)
+        except FileExistsError as exc:
+            raise FlashError("%s already exists and is immutable: %s"
+                             % (label, self.filename(name))) from exc
+        except OSError as exc:
+            raise FlashError("could not create %s: %s" % (label, exc)) from exc
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as exc:
+            raise FlashError("could not write %s: %s" % (label, exc)) from exc
+        self.sync()
 
-def load_json(path, label):
-    data = read_regular_bytes(path, label, max_bytes=8 * MAX_FILE_BYTES)
-    try:
-        record = json.loads(data.decode("ascii"))
-    except (UnicodeDecodeError, ValueError) as exc:
-        raise FlashError("%s is not valid JSON: %s" % (label, exc)) from exc
-    if not isinstance(record, dict):
-        raise FlashError("%s is not a JSON object" % label)
-    return record
+    def publish_json(self, name, record, label):
+        data = (json.dumps(record, indent=2, sort_keys=True) + "\n").encode("ascii")
+        self.publish(name, data, label)
 
+    def read(self, name, label, max_bytes=MAX_FILE_BYTES):
+        """Read a retained file that must be a plain, bounded, non-empty
+        regular file, through the directory descriptor."""
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            if self.fd is None:
+                fd = os.open(self.filename(name), flags)
+            else:
+                fd = os.open(name, flags, dir_fd=self.fd)
+        except OSError as exc:
+            raise FlashError("%s is unavailable: %s" % (label, exc)) from exc
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise FlashError("%s is not a regular file: %s"
+                                 % (label, self.filename(name)))
+            if info.st_size == 0:
+                raise FlashError("%s is empty: %s" % (label, self.filename(name)))
+            if info.st_size > max_bytes:
+                raise FlashError("%s exceeds the %d-byte limit: %s"
+                                 % (label, max_bytes, self.filename(name)))
+            data = b""
+            while True:
+                chunk = os.read(fd, 1 << 20)
+                if not chunk:
+                    break
+                data += chunk
+        except OSError as exc:
+            raise FlashError("%s could not be read: %s" % (label, exc)) from exc
+        finally:
+            os.close(fd)
+        if len(data) != info.st_size:
+            raise FlashError("%s changed size while being read: %s"
+                             % (label, self.filename(name)))
+        return data
 
-def device_read(programmer, evidence_dir, tag, require_retlw=True):
+    def read_json(self, name, label):
+        data = self.read(name, label, max_bytes=8 * MAX_FILE_BYTES)
+        try:
+            record = json.loads(data.decode("ascii"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise FlashError("%s is not valid JSON: %s" % (label, exc)) from exc
+        if not isinstance(record, dict):
+            raise FlashError("%s is not a JSON object" % label)
+        return record
+
+    def protect(self, name):
+        try:
+            if self.fd is None:
+                os.chmod(self.filename(name), 0o400)
+            else:
+                os.chmod(name, 0o400, dir_fd=self.fd)
+        except OSError as exc:
+            raise FlashError("could not protect %s: %s"
+                             % (self.filename(name), exc)) from exc
+def device_read(programmer, evidence, tag, require_retlw=True):
     """One full-device read: transcript, export, and everything parsed from it."""
-    log_path = os.path.join(evidence_dir, tag + ".log")
-    hex_path = os.path.join(evidence_dir, tag + ".hex")
-    if os.path.lexists(hex_path):
-        raise FlashError("a %s export already exists: %s" % (tag, hex_path))
-    argv = read_argv(programmer, hex_path)
-    exit_code, output = run_tool(argv, DEVICE_TIMEOUT_S, "ipecmd device read (%s)" % tag)
-    publish_bytes(log_path, output, "%s transcript" % tag)
+    log_name = tag + ".log"
+    hex_name = tag + ".hex"
+    if evidence.exists(hex_name):
+        raise FlashError("a %s export already exists: %s"
+                         % (tag, evidence.filename(hex_name)))
+    argv = read_argv(programmer, evidence.filename(hex_name))
+    exit_code, output = invoke(programmer, argv, DEVICE_TIMEOUT_S,
+                               "ipecmd device read (%s)" % tag)
+    evidence.publish(log_name, output, "%s transcript" % tag)
     record = {
         "argv": argv,
         "exit": exit_code,
@@ -691,10 +977,11 @@ def device_read(programmer, evidence_dir, tag, require_retlw=True):
     }
     if exit_code != 0:
         raise FlashError("ipecmd %s read failed with exit %d; see %s"
-                         % (tag, exit_code, log_path))
-    export = read_regular_bytes(hex_path, "%s device export" % tag)
-    os.chmod(hex_path, 0o400)
-    memory = parse_ihex(export, "%s device export" % tag, strict=False)
+                         % (tag, exit_code, evidence.filename(log_name)))
+    label = "%s device export" % tag
+    export = evidence.read(hex_name, label)
+    evidence.protect(hex_name)
+    memory = parse_ihex(export, label, strict=False)
     device_id, revision = parse_device_report(output, "%s transcript" % tag)
     record.update({
         "hex_sha256": sha256_bytes(export),
@@ -702,7 +989,19 @@ def device_read(programmer, evidence_dir, tag, require_retlw=True):
         "device_id": device_id,
         "device_revision": revision,
     })
-    record.update(read_trim(memory, "%s device export" % tag, require_retlw))
+    # Trim first, so a device missing its calibration word is diagnosed as that
+    # rather than as a short export.
+    record.update(read_trim(memory, label, require_retlw))
+    coverage = export_coverage(memory, label)
+    record.update({
+        "program_words_read": coverage["program_words_read"],
+        "missing_program_words": coverage["missing_program_words"],
+    })
+    if require_retlw:
+        # Only the two PRE-WRITE reads refuse here. After the write, an
+        # incomplete export is the headline RESULT and has to reach result.json
+        # as a named failure rather than abort the readback that found it.
+        require_complete_export(coverage, label)
     return record, memory
 
 
@@ -750,6 +1049,10 @@ def evaluate(reservation, post, post_memory, program_exit, failures):
 
     if program_exit is not None and program_exit != 0:
         failures.append("ipecmd program/verify reported exit %d" % program_exit)
+    if post.get("missing_program_words"):
+        failures.append(
+            "post-program export is incomplete: %d of %d program words returned"
+            % (post["program_words_read"], FLASH_WORDS))
     compared = verify_programmed(image_memory, post_memory, failures)
 
     for field, human in (("osccal_word", "OSCCAL word"),
@@ -770,7 +1073,7 @@ def evaluate(reservation, post, post_memory, program_exit, failures):
     return compared
 
 
-def publish_result(evidence_dir, reservation, post, compared, failures,
+def publish_result(evidence, reservation, post, compared, failures,
                    program_exit, finalization):
     record = {
         "schema": SCHEMA,
@@ -805,11 +1108,11 @@ def publish_result(evidence_dir, reservation, post, compared, failures,
         "post_read_exit": post["exit"],
         "post_read_log_sha256": post["log_sha256"],
         "post_read_hex_sha256": post.get("hex_sha256"),
+        "post_program_words_read": post.get("program_words_read"),
         "device_id": reservation["baseline_device_id"],
         "device_revision": reservation["baseline_device_revision"],
     }
-    publish_json(os.path.join(evidence_dir, RESULT_NAME), record,
-                 "programming result")
+    evidence.publish_json(RESULT_NAME, record, "programming result")
     return record
 
 
@@ -853,15 +1156,16 @@ def command_program(args, helper_path):
     programmer = programmer_identity(args.ipecmd, args.java)
     version = probe_version(programmer)
 
-    evidence_dir = create_evidence_dir(args.evidence_dir)
+    evidence = Evidence.create(args.evidence_dir)
     # From here on the SNAPSHOT is the image: the file the operator named may
     # change or vanish, and every later comparison must be against the exact
     # bytes that were validated above.
-    snapshot_path = os.path.join(evidence_dir, IMAGE_SNAPSHOT_NAME)
-    publish_bytes(snapshot_path, bundle["image_data"], "retained release image")
+    snapshot_path = evidence.filename(IMAGE_SNAPSHOT_NAME)
+    evidence.publish(IMAGE_SNAPSHOT_NAME, bundle["image_data"],
+                     "retained release image")
 
-    baseline, baseline_memory = device_read(programmer, evidence_dir, "baseline")
-    prewrite, prewrite_memory = device_read(programmer, evidence_dir, "prewrite")
+    baseline, baseline_memory = device_read(programmer, evidence, "baseline")
+    prewrite, prewrite_memory = device_read(programmer, evidence, "prewrite")
     if prewrite_memory != baseline_memory:
         raise FlashError(
             "the device changed between the baseline read and the immediate "
@@ -884,6 +1188,7 @@ def command_program(args, helper_path):
         "ipe_version_probe_sha256": version["probe_sha256"],
         "ipe_version_probe_base64": version["probe_base64"],
         "power_mode": POWER_MODE,
+        "evidence_dir_fd_bound": evidence.fd is not None,
         "image_name": bundle["image_name"],
         "image_path": bundle["image_path"],
         "image_sha256": bundle["image_sha256"],
@@ -900,6 +1205,7 @@ def command_program(args, helper_path):
         "programmer_realpath": programmer["realpath"],
         "programmer_sha256": programmer["sha256"],
         "programmer_java": programmer["java"],
+        "programmer_java_sha256": programmer["java_sha256"],
         "read_argv": read_argv(programmer, "<export>"),
         "write_argv": write_argv(programmer, snapshot_path),
         "baseline_device_id": baseline["device_id"],
@@ -910,33 +1216,34 @@ def command_program(args, helper_path):
         "baseline_bg_bits": baseline["bg_bits"],
         "baseline_hex_sha256": baseline["hex_sha256"],
         "baseline_log_sha256": baseline["log_sha256"],
+        "baseline_program_words_read": baseline["program_words_read"],
         "prewrite_osccal_word": prewrite["osccal_word"],
         "prewrite_osccal_value": prewrite["osccal_value"],
         "prewrite_config_word": prewrite["config_word"],
         "prewrite_bg_bits": prewrite["bg_bits"],
         "prewrite_hex_sha256": prewrite["hex_sha256"],
         "prewrite_log_sha256": prewrite["log_sha256"],
+        "prewrite_program_words_read": prewrite["program_words_read"],
     }
-    reservation_path = os.path.join(evidence_dir, RESERVATION_NAME)
-    publish_json(reservation_path, reservation, "programming reservation")
+    evidence.publish_json(RESERVATION_NAME, reservation,
+                          "programming reservation")
     reservation["_self_sha256"] = sha256_bytes(
-        read_regular_bytes(reservation_path, "programming reservation"))
+        evidence.read(RESERVATION_NAME, "programming reservation"))
     print("PIC12F675_FLASH_RESERVED evidence=%s image=%s" %
-          (evidence_dir, bundle["image_name"]))
+          (evidence.path, bundle["image_name"]))
 
     # The single write. Everything above is reachable without it; nothing below
     # can undo it.
     argv = write_argv(programmer, snapshot_path)
-    program_exit, program_output = run_tool(
-        argv, DEVICE_TIMEOUT_S, "ipecmd program")
-    publish_bytes(os.path.join(evidence_dir, "program.log"), program_output,
-                  "program transcript")
+    program_exit, program_output = invoke(
+        programmer, argv, DEVICE_TIMEOUT_S, "ipecmd program")
+    evidence.publish("program.log", program_output, "program transcript")
 
     failures = []
     # Read back even when the writer reported failure: a failed write is
     # exactly when the operator most needs to know what is now on the device.
     try:
-        post, post_memory = device_read(programmer, evidence_dir, "postread",
+        post, post_memory = device_read(programmer, evidence, "postread",
                                         require_retlw=False)
     except FlashError as exc:
         post = {
@@ -947,37 +1254,36 @@ def command_program(args, helper_path):
         failures.append("post-program readback failed: %s" % exc)
         if program_exit != 0:
             failures.append("ipecmd program/verify reported exit %d" % program_exit)
-        record = publish_result(evidence_dir, reservation, post, 0, failures,
+        record = publish_result(evidence, reservation, post, 0, failures,
                                 program_exit, False)
-        return report(record, evidence_dir)
+        return report(record, evidence.path)
 
     compared = evaluate(reservation, post, post_memory, program_exit, failures)
-    record = publish_result(evidence_dir, reservation, post, compared, failures,
+    record = publish_result(evidence, reservation, post, compared, failures,
                             program_exit, False)
-    return report(record, evidence_dir)
+    return report(record, evidence.path)
 
 
 def command_finalize(args, helper_path):
-    evidence_dir = open_evidence_dir(args.evidence_dir)
-    reservation_path = os.path.join(evidence_dir, RESERVATION_NAME)
-    result_path = os.path.join(evidence_dir, RESULT_NAME)
-    if os.path.lexists(result_path):
+    evidence = Evidence.open(args.evidence_dir)
+    if evidence.exists(RESULT_NAME):
         raise FlashError(
             "this transaction already has a published result and is immutable: "
-            "%s" % result_path)
-    if not os.path.lexists(reservation_path):
+            "%s" % evidence.filename(RESULT_NAME))
+    if not evidence.exists(RESERVATION_NAME):
         raise FlashError(
             "no reservation to finalize: %s holds no %s. An evidence directory "
             "without a reservation records no write."
-            % (evidence_dir, RESERVATION_NAME))
-    reservation = load_json(reservation_path, "programming reservation")
+            % (evidence.path, RESERVATION_NAME))
+    reservation = evidence.read_json(RESERVATION_NAME, "programming reservation")
     reservation["_self_sha256"] = sha256_bytes(
-        read_regular_bytes(reservation_path, "programming reservation"))
+        evidence.read(RESERVATION_NAME, "programming reservation"))
 
     for field in ("schema", "record_type", "status", "part", "tool",
                   "ipe_version", "power_mode", "image_name", "image_sha256",
                   "image_base64", "programmer_kind", "programmer_realpath",
-                  "programmer_sha256", "baseline_device_id",
+                  "programmer_sha256", "programmer_java",
+                  "programmer_java_sha256", "baseline_device_id",
                   "baseline_device_revision", "baseline_osccal_word",
                   "baseline_osccal_value", "baseline_config_word",
                   "baseline_bg_bits", "prewrite_osccal_word",
@@ -995,8 +1301,7 @@ def command_finalize(args, helper_path):
         raise FlashError("reservation records a different part, tool, version, "
                          "or power arrangement than this helper supports")
 
-    retained = read_regular_bytes(os.path.join(evidence_dir, IMAGE_SNAPSHOT_NAME),
-                                  "retained release image")
+    retained = evidence.read(IMAGE_SNAPSHOT_NAME, "retained release image")
     if sha256_bytes(retained) != reservation["image_sha256"] \
             or retained != base64.b64decode(reservation["image_base64"], validate=True):
         raise FlashError("the retained release image differs from the reservation")
@@ -1008,6 +1313,13 @@ def command_finalize(args, helper_path):
         raise FlashError(
             "the supplied ipecmd is not the one this transaction reserved; "
             "finalize with the same programmer installation")
+    # For the jar form the Java runtime is half of what actually ran, so it is
+    # reserved and re-proved exactly like the jar.
+    if programmer["java"] != reservation["programmer_java"] \
+            or programmer["java_sha256"] != reservation["programmer_java_sha256"]:
+        raise FlashError(
+            "the supplied Java runtime is not the one this transaction "
+            "reserved; finalize with the same programmer installation")
     probe_version(programmer)
 
     # Retry-safe: each attempt gets its own private pair of files, so a second
@@ -1016,16 +1328,15 @@ def command_finalize(args, helper_path):
     attempt = 0
     while attempt < MAX_FINALIZE_ATTEMPTS:
         tag = "finalize-%02d" % attempt
-        if not os.path.lexists(os.path.join(evidence_dir, tag + ".hex")) \
-                and not os.path.lexists(os.path.join(evidence_dir, tag + ".log")):
+        if not evidence.exists(tag + ".hex") and not evidence.exists(tag + ".log"):
             break
         attempt += 1
     else:
-        raise FlashError("too many finalization attempts in %s" % evidence_dir)
+        raise FlashError("too many finalization attempts in %s" % evidence.path)
 
     failures = []
     try:
-        post, post_memory = device_read(programmer, evidence_dir, tag,
+        post, post_memory = device_read(programmer, evidence, tag,
                                         require_retlw=False)
     except FlashError as exc:
         raise FlashError(
@@ -1033,9 +1344,9 @@ def command_finalize(args, helper_path):
             "write was attempted." % exc) from exc
 
     compared = evaluate(reservation, post, post_memory, None, failures)
-    record = publish_result(evidence_dir, reservation, post, compared, failures,
+    record = publish_result(evidence, reservation, post, compared, failures,
                             reservation.get("program_exit"), True)
-    return report(record, evidence_dir)
+    return report(record, evidence.path)
 
 
 def build_parser():

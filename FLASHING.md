@@ -142,6 +142,12 @@ repository. Confirm them on the first PICkit 3 run and correct this file.
 it to the release's flashing helper, `flash-pic12f675.py`, which ships in the
 same release bundle and is covered by the same signed `SHA256SUMS`.
 
+Run the copy that bundle publishes. The helper requires its own bytes to
+appear in the selected bundle's `SHA256SUMS` under its released name, so a copy
+that was edited, renamed, or fetched from somewhere else is refused before the
+device is touched: the tool and the image it writes are covered by one
+signature, or neither of them is.
+
 This part is the one target where a correct HEX plus a writer is *not*
 sufficient, because two per-device factory-trimmed values live in memory the
 programmer erases:
@@ -181,6 +187,15 @@ image, checksum, tool-version, trim and path check happens **before** an
 erase/program argument is constructed, so a refusal never reaches the device.
 The complete factory export is retained either way, so the only copy of this
 chip's trim is not lost if the first attempt goes badly.
+
+Both pre-write reads must return a **complete** full-device export that agrees
+with itself. A reader that omits part of program memory, or reports one address
+with two different values, is refused rather than trusted: the retained baseline
+is the only copy of what was on the chip, and an incomplete one would be
+incomplete for exactly the memory the next command erases. The `ipecmd` you name
+is also pinned by content, and re-checked immediately before every command it is
+given, so a tool replaced or edited part-way through a transaction stops it
+instead of running.
 
 A `FAIL` is a forensic record, not permission to retry — keep the evidence
 directory and that device together.

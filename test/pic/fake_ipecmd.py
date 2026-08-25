@@ -7,7 +7,9 @@ Real silicon is the one thing this repository cannot put in CI, so the helper's
 transaction ORDER and its fail-closed preconditions are proved against a
 programmer model instead: a device whose memory persists across invocations, a
 recorded argument vector for every call, and one fault knob per way a real
-PICkit 3 write can damage a device.
+PICkit 3 write can damage a device, per way a reader can return an export the
+helper must not trust, and per way the tool itself can move underneath its own
+pathname mid-transaction.
 
 The model is deliberately literal about the thing that matters -- word 0x3FF and
 CONFIG BG<1:0> survive a program unless a fault says otherwise -- because the
@@ -79,6 +81,19 @@ def record_invocation(argv):
         handle.write("witness=%s\t%s\n" % (present, "\t".join(argv)))
 
 
+def at(fault, name, index):
+    """Is this fault selected for this read?
+
+    `name:<n>` selects one read; `name:*` selects every read. A reader that
+    truncates or contradicts itself does so CONSISTENTLY, and modelling that
+    matters: with the fault on one read only, the helper's "the device changed
+    between the two pre-write reads" check would catch it and the export guard
+    under test would never be the thing that refused.
+    """
+    value = fault.get(name)
+    return value is not None and value in ("*", str(index))
+
+
 def faults():
     raw = os.environ.get("FAKE_IPE_FAULTS", "")
     parsed = {}
@@ -116,45 +131,128 @@ def emit_hex(words):
     return "\n".join(lines) + "\n"
 
 
+def ihex_record(address, rtype, payload):
+    record = [len(payload), (address >> 8) & 0xFF, address & 0xFF, rtype] + list(payload)
+    record.append((-sum(record)) & 0xFF)
+    return ":" + "".join("%02X" % byte for byte in record)
+
+
+def conflicting_record():
+    """Byte address 0 again, with a value the first record did not report."""
+    return ihex_record(0x0000, 0x00, [0x5A, 0x2A])
+
+
+def truncate_last_byte(content):
+    """Shorten one program-memory record by a byte, leaving a half word.
+
+    The record is chosen inside program memory so the gap lands on a word the
+    helper folds, rather than on CONFIG, which has its own diagnostic.
+    """
+    lines = content.splitlines()
+    for index, line in enumerate(lines):
+        record = bytes.fromhex(line[1:])
+        offset = (record[1] << 8) | record[2]
+        if record[3] != 0x00 or record[0] < 2 or offset >= FLASH_WORDS * 2:
+            continue
+        lines[index] = ihex_record(offset, 0x00, list(record[4:-1])[:-1])
+        break
+    return "\n".join(lines) + "\n"
+
+
 def do_read(export_path, state, fault):
     index = state["reads"]
     state["reads"] = index + 1
     version = fault.get("version", "6.20")
 
-    if fault.get("drift") == str(index):
+    if at(fault, "drift", index):
         # The device moved between two reads the helper requires to be equal.
         state["words"]["16"] = 0x0000
 
     lines = [BANNER % version, "Connecting to MPLAB PICkit 3...",
              "Target voltage detected"]
-    if fault.get("noid") != str(index):
+    if not at(fault, "noid", index):
         # Reported from device memory, so a fault that swaps the part is
         # observable the way it would be on a bench: in the transcript.
         lines.append("Device ID = 0x%04X" % state["words"][str(DEVICE_ID_WORD_ADDR)])
         lines.append("Revision = 0x000A")
     lines.append("Device Name = PIC12F675")
 
-    if fault.get("readfail") == str(index):
+    if at(fault, "readfail", index):
         lines.append("Failed to get Device ID")
         save_state(state)
         sys.stdout.write("\n".join(lines) + "\n")
         return 1
 
-    if fault.get("noexport") != str(index):
+    if not at(fault, "noexport", index):
         content = emit_hex(state["words"])
-        if fault.get("badexport") == str(index):
+        if at(fault, "badexport", index):
             content = "this is not intel hex\n"
-        elif fault.get("noosccal") == str(index):
+        elif at(fault, "noosccal", index):
             words = dict(state["words"])
             words.pop(str(CAL_WORD_ADDR), None)
             content = emit_hex(words)
+        elif at(fault, "badcal", index):
+            # Present but not a `RETLW k`: a device with no factory trim to
+            # preserve, which is not the same thing as a short export.
+            words = dict(state["words"])
+            words[str(CAL_WORD_ADDR)] = ERASED
+            content = emit_hex(words)
+        elif at(fault, "noconfig", index):
+            words = dict(state["words"])
+            words.pop(str(CONFIG_WORD_ADDR), None)
+            content = emit_hex(words)
+        elif at(fault, "partialexport", index):
+            # A reader that returns only part of program memory. The trim
+            # baseline it produces is incomplete for memory about to be erased.
+            words = {key: value for key, value in state["words"].items()
+                     if not (0x100 <= int(key) < 0x180)}
+            content = emit_hex(words)
+        elif at(fault, "halfword", index):
+            # One odd-length run, so a 14-bit word arrives with only its low
+            # byte -- a truncated read that must not be folded into a value.
+            content = emit_hex(state["words"])
+            content = truncate_last_byte(content)
+        elif at(fault, "conflict", index):
+            # The same address reported twice with two different values: an
+            # export that contradicts itself about what is on the device.
+            content = emit_hex(state["words"])
+            content = content.replace(
+                ":00000001FF\n", conflicting_record() + "\n:00000001FF\n")
         with open(export_path, "w") as handle:
             handle.write(content)
         lines.append("Read complete")
     save_state(state)
     sys.stdout.write("\n".join(lines) + "\n")
+    mutate_tool(fault, "read%d" % index)
     interrupt(fault, "read%d" % index)
     return 0
+
+
+def mutate_tool(fault, phase):
+    """Move or edit the programmer binary underneath its own pathname.
+
+    A tool that is hashed and then executed BY NAME can be swapped in between,
+    and only the tool itself can do that at the right instant. `replacetool`
+    renames a different file over the path, giving a new inode; `edittool`
+    appends to the file in place, keeping the inode and changing the bytes.
+    The helper has to refuse both before it issues its next command.
+    """
+    path = os.environ.get("FAKE_IPE_SELF")
+    if not path:
+        return
+    if fault.get("edittool") == phase:
+        with open(path, "a") as handle:
+            handle.write("\n# edited in place\n")
+        return
+    if fault.get("replacetool") != phase:
+        return
+    with open(path) as handle:
+        content = handle.read()
+    replacement = path + ".replacement"
+    with open(replacement, "w") as handle:
+        handle.write(content + "\n# a different build\n")
+    os.chmod(replacement, 0o755)
+    os.rename(replacement, path)
 
 
 def interrupt(fault, phase):
@@ -236,6 +334,7 @@ def do_program(image_path, state, fault):
     lines.append("Programming/Verify complete")
     save_state(state)
     sys.stdout.write("\n".join(lines) + "\n")
+    mutate_tool(fault, "program")
     interrupt(fault, "program")
     return 0
 

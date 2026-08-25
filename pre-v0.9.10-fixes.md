@@ -1540,7 +1540,7 @@ design requiring its own review, fail-closed binding and hardware validation.
 - [x] A release-shipped, signed-checksum-bound Python helper programs the
   downloaded PIC12F675 HEX with no source checkout or firmware development
   toolchain.
-- [ ] The helper fails closed before writing on every image, trim, identity,
+- [x] The helper fails closed before writing on every image, trim, identity,
   tool/version, power-mode, path, checksum, mutation and reservation error.
 - [x] A durable reservation precedes the sole write; PASS requires exact code,
   CONFIG, OSCCAL and BG readback; interrupted transactions have a read-only
@@ -1556,7 +1556,7 @@ design requiring its own review, fail-closed binding and hardware validation.
   special case explicitly.
 - [x] The 21-image release identity remains exact while the required helper is
   staged, checksummed, reproduced and published as a distinct release artifact.
-- [ ] Fake-programmer, interruption, release-image, preflight, qualification,
+- [x] Fake-programmer, interruption, release-image, preflight, qualification,
   recovery, packaging and durable-documentation negative controls pass.
 
 **Resolution**
@@ -1629,6 +1629,133 @@ acceptance criterion. Before that destructive run, the helper also needs to:
 Reclose only after those software findings, the retained initial/repeat
 programming and read-only finalization evidence, and all focused and aggregate
 gates pass.
+
+**Second pass (2026-08-25).** The four software findings are closed. The bench
+run is not, and is not closable here; what that means for the item is stated
+at the end.
+
+*The helper is bound by bytes, not by directory.* `bundle_identity` checked
+the helper's own digest only when
+`os.path.dirname(os.path.realpath(image_path))` equalled the helper's
+directory. Run from anywhere else it set `helper_checksum_bound = False` and
+carried on, so an EDITED helper could program a correctly signed image -- and
+the regression asserted that skip was intended ("only the copy that ships
+INSIDE a bundle is held to the bundle's own checksum"). The running helper's
+digest must now appear in the selected bundle's `SHA256SUMS` under its
+released name, wherever the file sits, with three distinguishable refusals: a
+digest that differs from the recorded one, bytes recorded under a different
+name (a rename), and bytes the release never published. A byte-identical copy
+outside a bundle keeps working, which is the case the old rule was trying to
+serve. Restoring the location rule makes all three fixtures reach a device
+write.
+
+*The identity a command uses is re-proved at the instant it is used.* `ipecmd`
+was hashed by pathname and then executed by pathname with a whole transaction
+in between. `open_identity()` now holds the resolved file open, reads the
+recorded digest THROUGH that descriptor, and `programmer_unchanged()` --
+called from `invoke()`, which is the only way a tool is started -- re-stats
+the argv pathname for `(st_dev, st_ino)` and re-hashes through the held
+descriptor before every command. Both failure shapes are covered: a rename
+over the path (new inode) and an in-place edit (same inode, different bytes).
+The jar form's Java runtime gets the same treatment and is reserved in
+`programmer_java_sha256`, because for that form it is half of what runs;
+`finalize` requires it to be the reserved one. Evidence creation and
+finalization moved to an `Evidence` object that opens the directory once,
+confirms `fstat` against the `lstat` of the name it opened, and performs every
+publish, read and chmod with `dir_fd`. Where `dir_fd` is unavailable --
+Windows -- the previous pathname discipline stands in, and
+`evidence_dir_fd_bound` in the reservation records which was in force.
+
+*Exports must be complete and must agree with themselves.* Two lenient parses
+were hiding reader faults. `parse_ihex(strict=False)` folded a repeated
+address last-one-wins even when the two records disagreed about its value; it
+now refuses that outright. And nothing required a "full-device read" to return
+the full device: `export_coverage()` / `require_complete_export()` now hold
+both pre-write reads to all 1024 program words plus CONFIG, with a diagnostic
+that names the count, the first gap, and the bench property it belongs to. The
+reasoning is that the retained baseline is the operator's only copy of what
+was on the chip, and an incomplete one is incomplete for precisely the memory
+the next command erases -- which the post-write comparison cannot recover,
+since it only revisits addresses the image supplies. After the write the same
+two observations are the RESULT, so they are published as named failures
+rather than aborting the readback that found them. Both faults are injected on
+every read (`partialexport:*`, `conflict:*`), not on one: a reader that
+truncates does so consistently, and with the fault on a single read the
+existing "the device changed between the two pre-write reads" check would
+refuse first and the new guard would never be the thing that stopped the
+write.
+
+*The matrix reaches the parts of the tool it did not.* 175 -> 257 checks: the
+`java -jar` form end to end against `test/pic/fake_java.py` (accepted
+transaction, reservation contents, tool-version drift, a pre-write refusal, a
+post-write FAIL, and a read-only finalization that refuses a different
+runtime); malformed trim (`0x3FF` present but not `RETLW`, absent CONFIG);
+unsafe paths (a group/other-writable parent without the sticky bit, a sticky
+one accepted, a path naming no new directory, a parent that is a file, a
+trailing separator, a directory as the image, a symlinked manifest, a
+directory as `ipecmd`, a symlinked evidence directory at finalization); every
+interruption boundary (before the reservation, inside the post-write read,
+inside a finalization, with retry-safety proved by the per-attempt
+`finalize-NN` files); and the two tool replacement windows, which the fake
+reaches by moving its own pathname on cue.
+
+*The documents agree, and the detector sees the commands it forbids.*
+`release/README.md` opened by stating the superseded position -- guarded
+workflow needs a tagged checkout and XC8/DFP, no no-compiler path yet -- and
+contradicted itself twice further down where it documents the helper.
+`docs/flashing_simplicity.md` argued in the present tense that the part had no
+qualified direct-from-download path, and its 5.5 sketch predicted the first
+improvement would stop at "needs a clone plus common development tools". The
+opening is rewritten; the analysis keeps its reasoning and gains marked
+updates at 5, 5.5, 6, 7.7 and 8 saying what the helper settled, including that
+the dependency prediction was wrong in the good direction (rewriting the
+calibration and CONFIG policy inside the tool removed `git`, Make, `sha256sum`
+and a host C compiler along with XC8) and that step 2 was deliberately
+narrowed rather than omitted -- a tool shipped inside a bundle cannot verify
+that bundle's signature without also shipping the trust root.
+
+`_release_pic12f675_raw_writer_scan` was narrower than the commands it
+forbids: fenced Markdown blocks only, `*.md` only, the writer recognized as
+the FIRST word of a line from five names, and only a bare `-M` treated as
+destructive. It now tests a folded command for three things together -- a
+writer recognized by the BASENAME of any token (so an install path, a `sudo`
+prefix, a `$IPECMD` variable and `ipecmd.sh` are all the same command), this
+part, and a mutating option (`-M`, its one-letter selectors, or an erase) --
+across fenced blocks, AsciiDoc listing and literal blocks, indented blocks and
+inline code spans, in `.adoc` as well as `.md`. Requiring all three is what
+keeps a read-only `-GF` export, the helper's own `--ipecmd <path>` invocation,
+another part's one-liner and prose that names the retired form in order to
+forbid it publishable. A companion sweep rejects the three superseded
+sentences in any current document; they are named exactly and matched
+case-insensitively, because `docs/flashing_simplicity.md` legitimately records
+its own retired position in the past tense and a pattern wide enough to catch
+the live claim would fail on the record of its retirement.
+
+*Verification.* `test-pic12f675-flash-helper` 257 checks / 0 failures;
+`test-release-preflight` 144 -> 158 checks / 0 failures. Five negative
+controls were run by disabling one guard at a time in a copy of the helper and
+confirming the corresponding fixtures fail: location-based helper binding
+(three fixtures reach a write), no re-proof of programmer identity (two reach
+a write), no completeness requirement (an export omitting program memory
+reaches a write), no conflicting-duplicate refusal (a self-contradicting
+export reaches a write), and no Java-runtime comparison in `finalize`. The
+detector's own broadening carries eight new rejection fixtures and two
+acceptance fixtures in `test/test_release_preflight.sh`.
+
+*Firmware.* None. This item touches `scripts/flash-pic12f675.py`,
+`scripts/release-documentation.sh`, the two test programs, the fake
+programmer, a new fake Java runtime, and documentation.
+
+**What is still open.** Acceptance criterion 4 -- the controlled PICkit 3 /
+MPLAB X 6.20 bench run -- is unchanged and unchecked. It needs a real device,
+and none of the above is a substitute for it: the helper still DETECTS trim
+damage rather than preventing it, and a PASS still means "no damage was
+observed on this device". The five properties that run must establish are
+enumerated under "Outstanding controlled runs" in
+`HARDWARE_VALIDATION_LOG.md`, along with the rule that a failing result does
+not make the path supported by assertion. The owner decision recorded above --
+publish the helper in `FLASHING.md` now, or withhold it until the bench run
+exists -- is also unchanged, and is a documentation change either way.
 
 ### P2 - Build and validate AVR images before writing fuses
 
@@ -2459,20 +2586,26 @@ Record each completed item with its commit ID and decisive validation command.
 | F2 | DONE | `f6d9f82`, `f9dd333`, `5deb4e4`, `9999886`, `b6d06d2` | Fully provisioned current-HEAD validation reported passing: AVR-XT's 32-case matrix and PIC12F675's 43-check relay lane prove modeled physical coil-pin quiescence before reset; all affected resource, stack, timing, static, simulator, coverage, recovery, and merged 136-mutant gates pass |
 | F3 | DONE | `df89ec0` | PIC10F320 flash, return-stack, image-baseline, host/target fault, lock-step, target-I/O, coverage, analysis, and mutation gates pass; relay is 242/256 words at stack depth 3/8, both sequence-sensitive mutants are killed, and both CD4053 images are unchanged |
 | F4 | DONE | `fc23e48` | Fully provisioned current-HEAD suite passes; `make test-static-assert-guards` has 68 checks including 11 exact near-bound FIRES/CLEAN fixtures, compiled-image pet intervals fit their bounds, and timing, pulse-width, watchdog-liveness, static-analysis, and resource gates pass |
-| P1 | RE-OPENED | `58fb829` | Helper, packaging, and most software transaction controls landed, but mandatory PICkit 3/MPLAB X 6.20 evidence is absent; helper binding/path-race, JAR/export/interruption coverage, and durable-document consistency/detection findings remain open |
+| P1 | SOFTWARE DONE, BENCH OPEN | `58fb829`, (pending) | All four reopened software findings closed: the running helper is bound by digest wherever it lives (three refusals; the old location rule let an edited off-bundle helper reach a write), `ipecmd` and the jar form's Java runtime are pinned by held descriptor and re-proved before every command, evidence I/O moved onto a directory descriptor, and incomplete or self-contradicting device exports are refused before the write and published as named failures after it; `test-pic12f675-flash-helper` 175 -> 257 checks with five disable-one-guard negative controls, `test-release-preflight` 144 -> 158 with the raw-writer detector broadened to writer-basename + part + mutating option across fenced/AsciiDoc/indented/inline contexts in `.md` and `.adoc` plus a superseded-state sweep, and `release/README.md` + `docs/flashing_simplicity.md` reconciled. **Acceptance criterion 4 (controlled PICkit 3 / MPLAB X 6.20 bench run) stays open and needs silicon** |
 | P2 | RE-OPENED | `4cf4804` | Normal build/validation -> fuse -> flash ordering landed, but Classic AVR can flash a stale `VARIANT` image when `VARIANTS` excludes it; bind the selected image to the current rebuild, prevent gate override, and add stale-image and size-failure zero-programmer regressions |
 | D4 | RE-OPENED | `2585ad4` | Current flash tables were reconciled, but 2026-08-27 is not yet the actual finalization date, no retained final-candidate evidence exists, and `test-resource-tables` can pass at 0/21 without checking published RAM/Data-space/stack figures |
 | D5 | IMPLEMENTED | (pending) | Compiled-versus-delivered pulse width distinguished in `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc` and `TODO.md`, each naming the gate that owns its half; T25 reduced to remaining upstream/re-pin work; the pet-to-pet image bound justified by `wdr` stepping rather than blanket distrust; simulator lanes described as modeled pins in both workflows, `scripts/make-release.sh`, `docs/relay_coil_fault_correction.md`, `TOOLCHAIN.adoc`, `test/README.md` and the unreleased changelog section; the retired `get-pip` fallback removed from the documented prerequisites and pinned by a new `test-supply-chain` doc/script pairing (46 -> 47 checks, 3 negative controls) |
 | R4 | DONE | `ba4d9d6` | `make test-workflow-syntax test-release-provenance test-release-qualification`; stable tags publish normally, suffixed tags add `--prerelease`, and malformed tags stop before build or `gh` |
 | R5 | DONE | `7533d52` | `make test-supply-chain test-workflow-syntax test-release-preflight`; installer and verifier independently reject scan/order/hash/empty inventories while preserving unusual non-NUL filename bytes |
 | R6 | RE-OPENED | `470c11d` | Scalar identity checks landed, but artifact-defining source/flag overrides and duplicate canonical inventories reach the release recipe; reject them before recipe, tools, scratch, or build work and add direct/inherited negative coverage |
-| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; rerun every pre-merge gate after P1, P2, D4, D5, and R6 are closed |
+| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; rerun every pre-merge gate after P1's software half, P2, D4, D5, and R6 are closed. P1's bench run is a `1.x.y` hardware gate, not a pre-merge one |
 
 ## Merge decision
 
 Do not merge `v0.9.9-polish` or begin production `v0.9.10` qualification until
-P1, P2, D4, D5, and R6 are complete. F2-F4, R4, and R5 require no further
-action. Then rerun every reopened pre-merge gate, delete this file and all
+P1's software half, P2, D4, D5, and R6 are complete. F2-F4, R4, and R5 require
+no further action. P1's remaining acceptance criterion is the controlled PICkit
+3 / MPLAB X 6.20 bench run, which needs silicon: it is a `1.x.y` hardware gate
+tracked in `HARDWARE_VALIDATION_LOG.md` and `TODO.md` `T3-pic12f675-bench`, and
+it does not block this merge -- the helper it qualifies replaced a published raw
+command that carried the same unvalidated question with no detection at all. If
+the preference is instead to withhold the helper from `FLASHING.md` until that
+run exists, decide that before the merge; it is a documentation change. Then rerun every reopened pre-merge gate, delete this file and all
 references, run the release dry run on the actual candidate, and only then merge
 and begin production qualification. Production soaks, the artifact-only release
 commit, signed tag, and clean-runner byte-for-byte reproduction remain
