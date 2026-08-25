@@ -88,6 +88,64 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- **The simulator and toolchain descriptions match what the harness and the
+  fetcher actually do.** Four current documents still described a yasimavr
+  harness that stopped existing when the ATtiny202 output tracer moved to
+  signal hooks. `DESIGN_DOCUMENTATION.adoc` listed "one unpatched
+  cycle-accounting defect that stops the harness measuring busy-delay widths
+  in-simulation" among the AVR-XT trade-offs, and counted it as one of "three
+  local fixes" although it is not a fix and is not local. `TOOLCHAIN.adoc`
+  enumerated what `attiny202-sim` asserts -- ordering, polarity, coil
+  exclusion, complete-pulse presence -- and omitted the width it now also
+  asserts. `TODO.md` carried the caveat's retirement as future work that
+  "disappears when that tracer moves to the signal-hook pattern" -- written
+  in the very commit that moved it. Only `test/README.md`, corrected in that
+  commit and again under D2, was right.
+
+  The distinction all four now draw is the one that makes the claims
+  compatible. The COMPILED width is a property of the image:
+  `attiny202-delay-oracle` reads the `_delay_ms` loop count out of the
+  disassembly, which is simulator-independent, tighter than any trace, and
+  what pins the absolute design width. The DELIVERED width is what the pin
+  held: `attiny202-sim` free-runs in millisecond budgets, timestamps each
+  edge from a pin signal hook, and measures it -- a few percent longer,
+  because the 1 ms tick ISR preempts the busy loop, which a compile-time
+  count structurally cannot show. The unpatched `SimLoop.run(n)` cycle rewind
+  is still real and still unreleased upstream, and it now reaches no timing
+  assertion at all; the one deliberate `run(1)` caller left is the fault
+  driver's non-timing transaction-seam probe. `TODO.md` accordingly describes
+  only what re-pinning still buys: retiring the two vendored patches and the
+  derived-work notice, not closing a measurement gap.
+
+  One place did have to keep a bound from the image, and now says why rather
+  than distrusting the simulator wholesale: the watchdog pet-to-pet interval
+  is measured between consecutive `wdr` executions, which needs cycle-granular
+  instruction stepping -- precisely the mode the rewind corrupts -- so the
+  ATtiny202's ISR term is derived from the built image while the AVR classic
+  parts are measured in simavr.
+
+  Simulator lanes are also no longer called physical evidence. The workflow
+  and release-script comments describing `attiny202-sim` as "physical output
+  timing" and "physical PA2/PA3 output trace", the ATtiny202 row of the
+  relay-correction evidence table -- the only row saying "physical" where the
+  three gpsim rows say "modeled" -- and its mutation-resistance controls now
+  say modeled pin levels. Datasheet uses of "physical" for the pin-versus-latch
+  distinction are unchanged, because there the word names a register semantic
+  that holds on any substrate.
+
+  Finally, `TOOLCHAIN.adoc` promised the yasimavr build was portable "across a
+  stripped-ensurepip host (creates the venv `--without-pip` and bootstraps
+  get-pip)". That path was deliberately deleted for fetching and running an
+  unhashed script, and two tests keep it deleted; the prose outlived it, so a
+  reader provisioning a host would have expected a recovery the script fails
+  closed on. The entry now states the enforced rule -- pip comes from
+  `python3-venv`, there is no download fallback -- and `test-supply-chain`
+  holds the two together: every pip-bootstrap mechanism the yasimavr entry's
+  prose describes must exist in `scripts/fetch_yasimavr.sh`, and both must
+  name `python3-venv` as the pip source. Code spans are blanked before
+  matching, so naming the retired `get-pip.py` fallback in order to say it is
+  gone is not promising it.
+
 - **Every current resource figure is now measured on the final candidate build,
   and checked against the image it came from.** The flash and RAM numbers for
   the seven release parts are restated in four current documents --
@@ -390,11 +448,11 @@ file is the human-readable summary of *what changed*.
   explicit no-op. Design:
   `docs/relay_coil_fault_correction.md`.
 
-  The AVR-XT relay fault matrix observes physical PA2/PA3, not only `OUT`, under
-  inversion, pull-up, direction, combined stale-register, and ordinary latch
-  faults. The PIC12F675 matrix enumerates all comparator modes one bit from off
-  and directly measures modeled GP1/GP2 voltage for both `COUT` states in the
-  reachable GP2-output mode. Latch-only negative controls fail on both targets.
+  The AVR-XT relay fault matrix observes modeled PA2/PA3 pin levels, not only
+  `OUT`, under inversion, pull-up, direction, combined stale-register, and
+  ordinary latch faults. The PIC12F675 matrix enumerates all comparator modes
+  one bit from off and directly measures modeled GP1/GP2 voltage for both
+  `COUT` states in the reachable GP2-output mode. Latch-only negative controls fail on both targets.
   These simulator checks are electrical pin-model evidence, not hardware or
   relay-mechanical evidence.
 

@@ -409,7 +409,7 @@ jobs:
       - name: Re-run make attiny202-test
         run: make attiny202-test STRICT_TOOLS=1 XT_STATIC_RAM_LIMIT=16 XT_STACK_MAX_FRAME=32
 
-      # The AVR-XT target aggregate: functional + physical output trace, fault
+      # The AVR-XT target aggregate: functional + modeled-pin output trace, fault
       # injection, and firmware/model ctx_ lock-step on the real built image.
       - name: Re-run make attiny202-test-target (yasimavr, every variant)
         run: make attiny202-test-target STRICT_TOOLS=1 XT_STATIC_RAM_LIMIT=16 XT_STACK_MAX_FRAME=32

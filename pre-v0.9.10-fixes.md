@@ -1896,13 +1896,126 @@ traces "physical" output timing. Separately, `TOOLCHAIN.adoc` promises a
 
 **Acceptance criteria**
 
-- [ ] No current document says delivered width cannot be measured in yasimavr.
-- [ ] No simulator lane is represented as hardware or physical-relay evidence.
-- [ ] The TODO describes only remaining upstream/re-pinning work.
-- [ ] TOOLCHAIN prerequisites match the enforced fetch path and supply-chain
+- [x] No current document says delivered width cannot be measured in yasimavr.
+- [x] No simulator lane is represented as hardware or physical-relay evidence.
+- [x] The TODO describes only remaining upstream/re-pinning work.
+- [x] TOOLCHAIN prerequisites match the enforced fetch path and supply-chain
   tests.
-- [ ] Workflow-syntax, fetch-yasimavr, supply-chain, TODO-index, and durable
+- [x] Workflow-syntax, fetch-yasimavr, supply-chain, TODO-index, and durable
   documentation tests pass.
+
+**Resolution**
+
+Adopted. The stale account was one claim, repeated in four places, that stopped
+being true on 2026-08-07, when the ATtiny202 output tracer moved from
+single-cycle sampling to a pin signal hook in `0f53b92`. `test/README.md` was
+corrected in that commit and again under D2; the other three were not.
+
+*What the documents said.* `DESIGN_DOCUMENTATION.adoc` listed, among the AVR-XT
+trade-offs, "one unpatched cycle-accounting defect that stops the harness
+measuring busy-delay widths in-simulation", and counted it as one of "three
+local fixes" although it is neither a fix nor local. `TOOLCHAIN.adoc`
+enumerated what `attiny202-sim` asserts -- ordering, polarity, coil exclusion,
+complete-pulse presence -- and omitted the delivered width it has asserted
+since that change. `TODO.md`'s T25 carried the caveat's retirement as future
+work that "disappears when that tracer moves to the signal-hook pattern the
+upstream author recommends" -- written in `0f53b92` itself, so it described as
+pending the very change it shipped alongside. That is exactly the sentence a
+reader consults to decide whether re-pinning closes a measurement gap. It does
+not.
+
+*What they say now.* All three draw the distinction that makes the claims
+compatible, and name the gate that owns each half. The COMPILED width is a
+property of the image: `attiny202-delay-oracle` recovers the `_delay_ms` loop
+count from the disassembly, so it is simulator-independent, tighter than any
+trace, and pins the absolute design width. The DELIVERED width is what the pin
+held: `attiny202-sim` free-runs in millisecond budgets, timestamps every edge
+from a `CallableSignalHook` on the pin signal, and measures it -- a few percent
+longer, because the 1 ms tick ISR preempts the busy loop, which a compile-time
+count structurally cannot show (`test/avr/test_sim_attiny202.py`,
+`check_pulse_width`). The `SimLoop.run(n)` rewind remains real and unreleased
+upstream; it reaches no timing assertion, and the one deliberate `run(1)` caller
+left is the fault driver's non-timing transaction-seam probe. T25 now describes
+only what a re-pin still buys: retiring the two vendored patches and the
+derived-work notice.
+
+One bound genuinely does come from the image, and the design document now gives
+the reason instead of distrusting the simulator wholesale. The watchdog
+pet-to-pet interval is measured between consecutive `wdr` executions
+(`test/avr/test_sim.c`, `find_pet_sites`), which needs cycle-granular
+instruction stepping -- precisely the mode the rewind corrupts -- so the
+ATtiny202's ISR term is derived from the built image while the two AVR classic
+clock rates are measured in simavr.
+
+*Physical versus modeled.* The sweep D2 ran over the PIC documents had not
+reached the workflow and release-script comments, which described
+`attiny202-sim` as "physical output timing" (`.github/workflows/ci.yml`) and
+"physical PA2/PA3 output trace" (`.github/workflows/release.yml`,
+`scripts/make-release.sh`). In `docs/relay_coil_fault_correction.md` the
+ATtiny202 row was the only row of the resynchronization-evidence table saying
+"physical" where the three gpsim rows say "modeled", and its
+mutation-resistance controls did the same. Those, `TOOLCHAIN.adoc`'s relay
+scope line, `test/README.md`'s AVR-XT fault-response row and the
+still-unreleased `[0.9.10]` changelog paragraph now say modeled pin levels.
+The rule from D2 is unchanged and was applied by hand, not by sweep: where
+"physical" names the datasheet's pin-versus-latch distinction -- `GPIO` reading
+pins on the classic mid-range PIC, PA2/PA3 versus `PORTA.OUT` on AVR-XT, the
+design document's own "observe modeled package pins rather than inferring them
+from latches" -- it is a register semantic that holds on any substrate and it
+stays.
+
+`test/run_mutation_tests.sh` is left alone for the same reason, deliberately.
+Its two AVR-XT and two PIC12F675 entries say "physical" to name the mechanism
+the mutant defeats -- a latch-only clear that leaves the pad driven -- and
+`resync:physical-coil` is a live classification key matched in three places, not
+prose. Neither is a claim about what substrate produced the evidence.
+
+*The pip prerequisite.* `TOOLCHAIN.adoc` promised the yasimavr build was
+portable "across a stripped-ensurepip host (creates the venv --without-pip and
+bootstraps get-pip)". That fallback fetched and ran an unhashed script and was
+deliberately removed; `test/test_supply_chain.sh` and
+`test/test_fetch_yasimavr.sh` have each forbidden its return since `27cee23`,
+shipped in v0.9.7. Only
+the prose survived, so a reader provisioning a host from it would have expected
+a recovery `scripts/fetch_yasimavr.sh` fails closed on with "install
+'python3-venv'". The entry now states the enforced rule.
+
+*Contract.* `test-supply-chain` gains the doc/script pairing (46 -> 47 checks),
+scoped to the yasimavr entry so another tool's prerequisites cannot satisfy it
+by coincidence: every pip-bootstrap mechanism that entry's prose describes must
+exist in the fetcher, and both must name `python3-venv` as the pip source. The
+direction is deliberate -- the script may hold mechanisms the overview does not
+enumerate; it is the promise that rots. Backtick code spans are blanked before
+matching, the same rule `scripts/release-documentation.sh` uses for retired
+hardware wording, so naming the `get-pip.py` fallback in order to say it is gone
+is not promising it.
+
+No comparable contract is added for the width wording, for the reason D2
+recorded when it added none for "physical": the superseded account is quoted
+verbatim in immutable released `CHANGELOG.md` sections and in `test/README.md`'s
+own retraction of it, so a phrase ban would either fire on history or need a
+prune rule wide enough to blind it to the current documents too. What replaces
+it here is that all four descriptions now name the gate that owns each claim,
+so a future reader checks the gate rather than the adjective.
+
+*Verification.* `make test-supply-chain test-fetch-yasimavr test-workflow-syntax
+test-todo-index test-resource-tables test-release-preflight
+test-release-history test-release-qualification test-release-provenance
+test-release-images test-clean-contract test-makefile-name-contract`, then the
+full `make test` and `scripts/ci-local.sh`. `scripts/make-release.sh --preflight
+v0.9.10` exits 0.
+
+Three negative controls prove the new pairing discriminates: restoring the
+retired "creates the venv --without-pip and bootstraps get-pip" promise to the
+yasimavr entry fails on `get-pip`; removing `python3-venv` from the fetcher's
+two diagnostics fails on the script side; renaming it out of the yasimavr entry
+alone -- while the classic-AVR install line 100 lines away still carries it --
+fails on the document side, which is what the scoped extraction buys. The
+current tree, which names `get-pip.py` inside a code span in order to retire it,
+passes.
+
+*Firmware.* No firmware source is touched. No test behaviour changes except the
+one added contract.
 
 ### R4 - Publish suffixed tags as prereleases
 
@@ -2379,7 +2492,7 @@ Record each completed item with its commit ID and decisive validation command.
 | P1 | RE-OPENED | `58fb829` | Helper, packaging, and most software transaction controls landed, but mandatory PICkit 3/MPLAB X 6.20 evidence is absent; helper binding/path-race, JAR/export/interruption coverage, and durable-document consistency/detection findings remain open |
 | P2 | IMPLEMENTED | (pending) | The selected variant must belong to the current forced rebuild; final regular/non-symlink HEX revalidation and literal argument/action binding precede hardware; `test-avr-program-order` passes 56 exact-order, stale-image, mismatch, size, override, symlink, and stateful-input checks, with all supporting build/selector/fuse/serialization/release-preflight contracts green |
 | D4 | RE-OPENED | `2585ad4` | Current flash tables were reconciled, but 2026-08-27 is not yet the actual finalization date, no retained final-candidate evidence exists, and `test-resource-tables` can pass at 0/21 without checking published RAM/Data-space/stack figures |
-| D5 | OPEN | | Simulator timing/physical-language and pip prerequisite reconciliation |
+| D5 | IMPLEMENTED | (pending) | Compiled-versus-delivered pulse width distinguished in `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc` and `TODO.md`, each naming the gate that owns its half; T25 reduced to remaining upstream/re-pin work; the pet-to-pet image bound justified by `wdr` stepping rather than blanket distrust; simulator lanes described as modeled pins in both workflows, `scripts/make-release.sh`, `docs/relay_coil_fault_correction.md`, `TOOLCHAIN.adoc`, `test/README.md` and the unreleased changelog section; the retired `get-pip` fallback removed from the documented prerequisites and pinned by a new `test-supply-chain` doc/script pairing (46 -> 47 checks, 3 negative controls) |
 | R4 | DONE | `ba4d9d6` | `make test-workflow-syntax test-release-provenance test-release-qualification`; stable tags publish normally, suffixed tags add `--prerelease`, and malformed tags stop before build or `gh` |
 | R5 | DONE | `7533d52` | `make test-supply-chain test-workflow-syntax test-release-preflight`; installer and verifier independently reject scan/order/hash/empty inventories while preserving unusual non-NUL filename bytes |
 | R6 | RE-OPENED | `470c11d` | Scalar identity checks landed, but artifact-defining source/flag overrides and duplicate canonical inventories reach the release recipe; reject them before recipe, tools, scratch, or build work and add direct/inherited negative coverage |

@@ -84,11 +84,16 @@ qualified. If it ever becomes necessary, pin the Git commit and verify it with
 `git rev-parse`, which is content-addressed, rather than hashing a generated
 archive.
 
-The in-simulator pulse-width caveat is no longer a reason to re-pin. It is a
-property of the single-cycle sampling in `test/avr/test_sim_attiny202.py` rather
-than of the pinned release, and it disappears when that tracer moves to the
-signal-hook pattern the upstream author recommends. The disassembly-based delay
-oracle remains authoritative either way.
+The in-simulator pulse-width caveat is not a reason to re-pin, and is not
+outstanding work. It was a property of the single-cycle sampling in
+`test/avr/test_sim_attiny202.py` rather than of the pinned release, and it went
+away when that tracer moved to the signal-hook pattern the upstream author
+recommends: it now free-runs in millisecond budgets, timestamps every pin edge
+from the hook, and asserts delivered pulse width alongside ordering, polarity,
+exclusion and presence. The disassembly-based delay oracle remains the
+authoritative *compiled* width either way, and is simulator-independent. So the
+rewind reaches no timing assertion today; re-pinning retires the vendored
+patches and the derived-work notice, not a measurement gap.
 
 Dependencies: an upstream release containing the three fixes. Effort: about
 1 hour. Risk: Low; this retires vendored third-party modifications and a

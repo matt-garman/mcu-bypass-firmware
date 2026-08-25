@@ -1342,7 +1342,7 @@ make attiny202-test STRICT_TOOLS=1 XT_DFP="$XT_DFP" \
 ok "attiny202-test passed."
 
 # Fail-closed AVR-XT target aggregate (yasimavr), the counterpart of the two PIC
-# target aggregates below: per variant, functional + physical PA2/PA3 output
+# target aggregates below: per variant, functional + modeled PA2/PA3 output
 # trace, critical-SFR/state fault injection, and firmware/model ctx_ lock-step.
 # STRICT_TOOLS=1 converts each driver's clean skip into a hard failure.
 log "running make attiny202-test-target (sim + fault + lock-step on the real image)..."
