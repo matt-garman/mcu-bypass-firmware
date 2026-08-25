@@ -1803,6 +1803,104 @@ write_flashing_fixture
 } > "$flashing_root/docs/field_notes.md"
 assert_flashing_accepts 'a read-only export and the helper invocation'
 
+# The forms the first-word-plus-bare-M rule did not see. Each is a way an
+# operator would really write the same destructive command, and each one used to
+# pass: the writer named by an install path or behind sudo or a variable, the
+# `-MP`/`-E` selectors instead of a bare `-M`, and the three command CONTEXTS
+# that are not a fenced Markdown block.
+flashing_raw_case() {
+	local description=$1 name=$2
+	shift 2
+	write_flashing_fixture
+	printf '%s\n' "$@" > "$flashing_root/$name"
+	assert_flashing_rejects "$description" \
+		"$name publishes a raw PIC12F675 writer command"
+}
+
+flashing_raw_case 'a writer named by its full install path' docs/field_notes.md \
+	'# Field notes' '' '```sh' \
+	'/opt/microchip/mplabx/v6.20/mplab_platform/mplab_ipe/ipecmd.sh \' \
+	'  -TPPK3 -PPIC12F675 -Fimage.hex -M -Y -OL' '```'
+
+flashing_raw_case 'a writer behind sudo' docs/field_notes.md \
+	'# Field notes' '' '```sh' \
+	'sudo ipecmd -TPPK3 -PPIC12F675 -Fimage.hex -M -Y -OL' '```'
+
+flashing_raw_case 'a writer behind a shell variable' docs/field_notes.md \
+	'# Field notes' '' '```sh' \
+	'"${IPECMD}" -TPPK3 -PPIC12F675 -Fimage.hex -M -Y -OL' '```'
+
+flashing_raw_case 'the -MP program selector' docs/field_notes.md \
+	'# Field notes' '' '```sh' \
+	'ipecmd -TPPK3 -PPIC12F675 -Fimage.hex -MP -Y' '```'
+
+flashing_raw_case 'a bulk erase' docs/field_notes.md \
+	'# Field notes' '' '```sh' \
+	'pk2cmd -PPIC12F675 -E' '```'
+
+flashing_raw_case 'a raw write in an inline code span' docs/field_notes.md \
+	'# Field notes' '' \
+	'Program it with `ipecmd -TPPK3 -PPIC12F675 -Fimage.hex -M -Y` and reseat it.'
+
+flashing_raw_case 'a raw write in an indented code block' docs/field_notes.md \
+	'# Field notes' '' \
+	'    ipecmd -TPPK3 -PPIC12F675 -Fimage.hex -M -Y -OL'
+
+flashing_raw_case 'a raw write in an AsciiDoc listing block' docs/field_notes.adoc \
+	'= Field notes' '' '[source,sh]' '----' \
+	'ipecmd -TPPK3 -PPIC12F675 -Fimage.hex -M -Y -OL' '----'
+
+# The same broadening must not swallow prose that NAMES the retired command in
+# order to forbid it, nor the six parts that legitimately publish a one-liner.
+write_flashing_fixture
+{
+	printf '# Field notes\n\n'
+	printf 'Do not substitute a raw `pk2cmd` or `ipecmd` writer command for the\n'
+	printf 'PIC12F675 helper; a bulk erase destroys the trim.\n\n'
+	printf 'A `-M` flag programs the device, which is exactly what must not happen\n'
+	printf 'here.\n\n'
+	printf '```sh\n'
+	printf 'pk2cmd -PPIC10F322 -Fbypass-pic10f322-cd4053_simple.hex -M -Y -R\n'
+	printf '```\n'
+} > "$flashing_root/docs/field_notes.md"
+assert_flashing_accepts 'prose naming the retired form and another part'\''s one-liner'
+
+# A current document that still says this part has no no-compiler path
+# contradicts the four that publish the helper, whichever document it is.
+flashing_state_case() {
+	local description=$1 name=$2 sentence=$3
+	write_flashing_fixture
+	printf '# Notes\n\n%s\n' "$sentence" > "$flashing_root/$name"
+	assert_flashing_rejects "$description" \
+		"$name still publishes the superseded PIC12F675 state"
+}
+
+flashing_state_case 'the retired no-compiler-path claim' docs/field_notes.md \
+	'The prebuilt file is reproducible, but there is not yet a no-compiler path that admits it to the transaction.'
+flashing_state_case 'the retired direct-from-download claim' docs/field_notes.md \
+	'It is the one place where a qualified direct-from-download path is not available today.'
+flashing_state_case 'the retired checkout-and-toolchain claim' docs/field_notes.md \
+	'Its guarded workflow requires a clean source checkout of the same release tag and the pinned XC8/DFP toolchain.'
+
+# The three publishers are held to it too -- the reopened defect was one of them
+# disagreeing with the other three.
+write_flashing_fixture
+printf '\n\nThere is not yet a no-compiler path for this part.\n' \
+	>> "$flashing_root/release/README.md"
+assert_flashing_rejects 'a publisher that contradicts the other three' \
+	'release/README.md still publishes the superseded PIC12F675 state'
+
+# Recording HOW that state was retired is not restating it. The analysis in
+# docs/flashing_simplicity.md does exactly this in the past tense, so a pattern
+# wide enough to catch it would make the retirement undocumentable.
+write_flashing_fixture
+{
+	printf '# Notes\n\n'
+	printf 'The position was that no no-compiler path into the transaction had\n'
+	printf 'been designed or gated yet. One has been, from v0.9.10.\n'
+} > "$flashing_root/docs/history.md"
+assert_flashing_accepts 'a past-tense record of the retired position'
+
 # Shipped release directories are immutable artifacts of past releases and
 # legitimately carry the retired raw block; branch-only working documents quote
 # it in order to retire it. Both must be pruned, or the contract cannot be

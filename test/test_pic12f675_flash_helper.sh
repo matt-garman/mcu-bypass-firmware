@@ -112,6 +112,9 @@ new_case() {
 	EVIDENCE="$CASE_DIR/evidence"
 	IMAGE="$BUNDLE/$IMAGE_NAME"
 	BUNDLE_HELPER="$BUNDLE/flash-pic12f675.py"
+	# Only the cases that hand the helper a private copy of the programmer let
+	# the fake move that copy underneath its own pathname.
+	FAKE_SELF=""
 }
 
 # Run one helper invocation against this case's fake device.
@@ -125,6 +128,7 @@ run_helper() {
 	{
 		FAKE_IPE_STATE="$DEVICE" FAKE_IPE_LOG="$ARGVLOG" \
 		FAKE_IPE_WITNESS="$EVIDENCE/reservation.json" \
+		FAKE_IPE_SELF="$FAKE_SELF" \
 		FAKE_IPE_FAULTS="$faults" \
 			python3 "$BUNDLE_HELPER" "$@" \
 				> "$CASE_DIR/stdout.txt" 2> "$CASE_DIR/stderr.txt"
@@ -251,14 +255,45 @@ check "finalizing a completed transaction is refused" \
 check "the refused finalization issued no further write" \
 	"$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
 
-# Running the helper from outside the bundle stays supported: only the copy
-# that ships INSIDE a bundle is held to the bundle's own checksum.
+# The RUNNING helper is bound to the selected bundle's signed checksum wherever
+# it lives. Location is not the property that matters: a byte-identical copy
+# outside the bundle IS the published tool, and a copy inside one is not the
+# published tool if its bytes differ. Binding on location instead let an edited
+# off-bundle helper program a signed image, which is what these four prove.
 new_case
 run_helper '' program --image "$IMAGE" --ipecmd "$FAKE" --evidence-dir "$EVIDENCE"
 BUNDLE_HELPER=$HELPER
 run_helper '' program --image "$IMAGE" --ipecmd "$FAKE" --evidence-dir "$CASE_DIR/evidence2"
-check "the tracked helper outside a bundle programs the same image" \
+check "a byte-identical helper outside the bundle programs the same image" \
 	"$([ "$RC" -eq 0 ] && echo 1 || echo 0)"
+check "the transaction records the helper as checksum-bound" \
+	"$([ "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["helper_checksum_bound"])' "$CASE_DIR/evidence2/reservation.json")" = True ] && echo 1 || echo 0)"
+
+new_case
+cp -- "$HELPER" "$CASE_DIR/flash-pic12f675.py"
+printf '\n# an off-bundle edit\n' >> "$CASE_DIR/flash-pic12f675.py"
+chmod 0755 "$CASE_DIR/flash-pic12f675.py"
+BUNDLE_HELPER="$CASE_DIR/flash-pic12f675.py"
+program_run ''
+assert_rejects "an edited helper run from outside the bundle" \
+	"does not match its signed checksum"
+
+new_case
+cp -- "$BUNDLE_HELPER" "$CASE_DIR/flash.py"
+chmod 0755 "$CASE_DIR/flash.py"
+BUNDLE_HELPER="$CASE_DIR/flash.py"
+program_run ''
+assert_rejects "the published helper running under another name" \
+	"publishes these exact bytes as"
+
+new_case
+cp -- "$HELPER" "$CASE_DIR/other-flasher.py"
+printf '\n# not the published tool\n' >> "$CASE_DIR/other-flasher.py"
+chmod 0755 "$CASE_DIR/other-flasher.py"
+BUNDLE_HELPER="$CASE_DIR/other-flasher.py"
+program_run ''
+assert_rejects "a helper this release never published" \
+	"not an artifact of this release"
 
 # Every shipping variant must be programmable by the tool that ships beside it.
 # An output stage whose image the helper refuses would be a release-blocking
@@ -513,6 +548,172 @@ run_helper '' program --image "$IMAGE" --ipecmd "$FAKE" \
 assert_rejects "an evidence parent that does not exist" "parent is unavailable"
 
 # ---------------------------------------------------------------------------
+# 4b. the supported java -jar form -- the same matrix through a second binary
+# ---------------------------------------------------------------------------
+note '== the supported java -jar form =='
+
+JAVA="$ROOT/test/pic/fake_java.py"
+[ -f "$JAVA" ] && [ -x "$JAVA" ] \
+	|| { printf 'FAIL: fake Java runtime is missing or not executable: %s\n' "$JAVA" >&2; exit 1; }
+
+# A jar is data, never executed directly, so it is deliberately not +x: a helper
+# that required the executable bit here would reject every real ipecmd.jar.
+jar_case() {
+	new_case
+	JAR="$CASE_DIR/ipecmd.jar"
+	cp -- "$FAKE" "$JAR"
+	chmod 0644 "$JAR"
+}
+
+jar_run() {
+	run_helper "$1" program --image "$IMAGE" --ipecmd "$JAR" --java "$JAVA" \
+		--evidence-dir "$EVIDENCE"
+}
+
+jar_case
+jar_run ''
+check "the java -jar form completes the transaction" \
+	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
+check "the jar form writes exactly once" "$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
+check "the reservation records the jar form" \
+	"$([ "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["programmer_kind"])' "$EVIDENCE/reservation.json")" = jar ] && echo 1 || echo 0)"
+check "the reservation pins the Java runtime that ran the jar" \
+	"$(python3 -c 'import hashlib,json,sys; r=json.load(open(sys.argv[1])); print(1 if r["programmer_java_sha256"]==hashlib.sha256(open(sys.argv[2],"rb").read()).hexdigest() else 0)' "$EVIDENCE/reservation.json" "$JAVA")"
+
+jar_case
+run_helper '' program --image "$IMAGE" --ipecmd "$JAR" \
+	--java "$CASE_DIR/absent-java" --evidence-dir "$EVIDENCE"
+assert_rejects "a jar with no Java runtime" "needs a Java runtime"
+
+jar_case
+cp -- "$JAVA" "$CASE_DIR/java"
+chmod 0644 "$CASE_DIR/java"
+run_helper '' program --image "$IMAGE" --ipecmd "$JAR" --java "$CASE_DIR/java" \
+	--evidence-dir "$EVIDENCE"
+assert_rejects "a Java runtime that is not executable" "needs a Java runtime"
+
+jar_case
+jar_run 'version:6.25'
+assert_rejects "MPLAB X 6.25 through the jar form" "this helper supports 6.20"
+
+jar_case
+jar_run 'noosccal:0'
+assert_rejects "a device with no factory trim, through the jar form" \
+	"contains no complete OSCCAL"
+
+jar_case
+jar_run 'eraseosccal:1'
+assert_fail_result "an erased OSCCAL through the jar form" "OSCCAL word changed"
+
+# A PENDING jar transaction reserved a jar AND a Java runtime, and both have to
+# be the ones that come back.
+jar_case
+jar_run 'killparent:program'
+check "an interrupted jar transaction leaves a PENDING reservation" \
+	"$([ -s "$EVIDENCE/reservation.json" ] && [ ! -e "$EVIDENCE/result.json" ] && echo 1 || echo 0)"
+cp -- "$JAVA" "$CASE_DIR/other-java"
+printf '\n# a different runtime\n' >> "$CASE_DIR/other-java"
+chmod 0755 "$CASE_DIR/other-java"
+run_helper '' finalize --evidence-dir "$EVIDENCE" --ipecmd "$JAR" \
+	--java "$CASE_DIR/other-java"
+check "finalizing a jar transaction with a different Java runtime is refused" \
+	"$([ "$RC" -eq 2 ] && [[ "$OUT" == *"Java runtime is not the one this transaction reserved"* ]] && echo 1 || echo 0)"
+check "that refusal published no result" \
+	"$([ ! -e "$EVIDENCE/result.json" ] && echo 1 || echo 0)"
+run_helper '' finalize --evidence-dir "$EVIDENCE" --ipecmd "$JAR" --java "$JAVA"
+check "the reserved jar and Java runtime finalize it read-only" \
+	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
+check "jar finalization never wrote" "$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
+
+# ---------------------------------------------------------------------------
+# 4c. the programmer must still be the programmer at the instant it is used
+# ---------------------------------------------------------------------------
+note '== programmer identity at the instant of use =='
+
+# The fake moves ITS OWN pathname on cue, which is the only way to hit the
+# window between "these bytes were hashed" and "this name was executed". Both
+# cases fire on the pre-write read, so the next command would have been the
+# write: a guard that noticed afterwards would not be a guard.
+tool_case() {
+	new_case
+	TOOL_COPY="$CASE_DIR/ipecmd"
+	cp -- "$FAKE" "$TOOL_COPY"
+	chmod 0755 "$TOOL_COPY"
+	FAKE_SELF=$TOOL_COPY
+}
+
+tool_case
+run_helper 'replacetool:read1' program --image "$IMAGE" --ipecmd "$TOOL_COPY" \
+	--evidence-dir "$EVIDENCE"
+assert_rejects "a programmer replaced behind its own pathname" \
+	"was replaced between its identity check"
+
+tool_case
+run_helper 'edittool:read1' program --image "$IMAGE" --ipecmd "$TOOL_COPY" \
+	--evidence-dir "$EVIDENCE"
+assert_rejects "a programmer edited in place mid-transaction" \
+	"changed on disk between its identity check"
+
+# ---------------------------------------------------------------------------
+# 4d. unsafe evidence and input paths -- none may reach a write
+# ---------------------------------------------------------------------------
+note '== unsafe paths =='
+
+new_case
+mkdir -p "$CASE_DIR/open-parent"
+chmod 0777 "$CASE_DIR/open-parent"
+run_helper '' program --image "$IMAGE" --ipecmd "$FAKE" \
+	--evidence-dir "$CASE_DIR/open-parent/evidence"
+assert_rejects "an evidence parent any user could write into" "group/other-writable"
+
+# ... but the sticky bit is what makes a shared directory safe, and refusing
+# /tmp itself would push operators somewhere worse.
+new_case
+mkdir -p "$CASE_DIR/sticky-parent"
+chmod 1777 "$CASE_DIR/sticky-parent"
+run_helper '' program --image "$IMAGE" --ipecmd "$FAKE" \
+	--evidence-dir "$CASE_DIR/sticky-parent/evidence"
+check "a sticky world-writable parent is accepted" \
+	"$([ "$RC" -eq 0 ] && echo 1 || echo 0)"
+
+new_case
+run_helper '' program --image "$IMAGE" --ipecmd "$FAKE" --evidence-dir /
+assert_rejects "an evidence path naming no new directory" \
+	"does not name a new directory"
+
+new_case
+: > "$CASE_DIR/plain-file"
+run_helper '' program --image "$IMAGE" --ipecmd "$FAKE" \
+	--evidence-dir "$CASE_DIR/plain-file/evidence"
+assert_rejects "an evidence parent that is a regular file" \
+	"parent is not a directory"
+
+new_case
+run_helper '' program --image "$IMAGE" --ipecmd "$FAKE" --evidence-dir "$EVIDENCE/"
+check "a trailing separator still names a new directory" \
+	"$([ "$RC" -eq 0 ] && [ -d "$EVIDENCE" ] && echo 1 || echo 0)"
+
+new_case
+rm -f "$IMAGE"
+mkdir -p "$IMAGE"
+program_run ''
+assert_rejects "an image path that is a directory" \
+	"selected release image is not a regular file"
+
+new_case
+mv "$BUNDLE/SHA256SUMS" "$CASE_DIR/sums"
+ln -s "$CASE_DIR/sums" "$BUNDLE/SHA256SUMS"
+program_run ''
+assert_rejects "a symlinked checksum manifest" \
+	"release SHA256SUMS is a symbolic link"
+
+new_case
+mkdir -p "$CASE_DIR/ipecmd-dir"
+run_helper '' program --image "$IMAGE" --ipecmd "$CASE_DIR/ipecmd-dir" \
+	--evidence-dir "$EVIDENCE"
+assert_rejects "an ipecmd that is a directory" "ipecmd is not a regular file"
+
+# ---------------------------------------------------------------------------
 # 5. pre-write device refusals -- none may reach a write
 # ---------------------------------------------------------------------------
 note '== pre-write device state =='
@@ -545,6 +746,57 @@ new_case
 program_run 'drift:1'
 assert_rejects "a device that changed between the two pre-write reads" \
 	"changed between the baseline read and the immediate"
+
+# ---------------------------------------------------------------------------
+# 5b. full-device export integrity -- a baseline that cannot be trusted is not
+#     a baseline, and no write follows one
+# ---------------------------------------------------------------------------
+note '== full-device export integrity =='
+
+# `*` puts the fault on EVERY read, which is how a reader that truncates or
+# contradicts itself actually behaves. It also removes the shadow: with the
+# fault on one read only, "the device changed between the two pre-write reads"
+# would refuse first and the guard under test would never be reached.
+new_case
+program_run 'partialexport:*'
+assert_rejects "an export that omits program memory" \
+	"is not a complete full-device read"
+
+new_case
+program_run 'partialexport:1'
+assert_rejects "an immediate pre-write export that omits program memory" \
+	"is not a complete full-device read"
+
+new_case
+program_run 'conflict:*'
+assert_rejects "an export that contradicts itself" "contradicts itself"
+
+new_case
+program_run 'halfword:*'
+assert_rejects "an export with a truncated word" "without its high byte"
+
+new_case
+program_run 'badcal:0'
+assert_rejects "a device whose calibration word is not RETLW" "is not RETLW k"
+
+new_case
+program_run 'noconfig:0'
+assert_rejects "a baseline export with no CONFIG word" \
+	"contains no complete CONFIG word"
+
+# After the write the same observations are the RESULT, so they are published as
+# named failures rather than aborting the readback that found them.
+new_case
+program_run 'partialexport:2'
+assert_fail_result "a post-write export that omits program memory" \
+	"post-program export is incomplete"
+check "an incomplete post-write export still wrote exactly once" \
+	"$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
+
+new_case
+program_run 'conflict:2'
+assert_fail_result "a post-write export that contradicts itself" \
+	"post-program readback failed"
 
 # ---------------------------------------------------------------------------
 # 6. post-write damage detection -- exactly one write, published FAIL
@@ -647,6 +899,54 @@ run_helper '' finalize --evidence-dir "$EVIDENCE" --ipecmd "$FAKE"
 check "recovery is retry-safe after a failed read" \
 	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
 check "retried recovery still never wrote" "$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
+
+# The other two boundaries: after the second read but before the reservation,
+# and inside the post-write read.
+new_case
+program_run 'killparent:read1'
+check "an interruption after the second read leaves no reservation" \
+	"$([ ! -e "$EVIDENCE/reservation.json" ] && echo 1 || echo 0)"
+assert_no_write "an interruption after the second read"
+run_helper '' finalize --evidence-dir "$EVIDENCE" --ipecmd "$FAKE"
+check "finalizing an interruption before the reservation is refused" \
+	"$([ "$RC" -eq 2 ] && [[ "$OUT" == *"no reservation to finalize"* ]] && echo 1 || echo 0)"
+
+new_case
+program_run 'killparent:read2'
+check "an interruption inside the post-write read leaves PENDING" \
+	"$([ -s "$EVIDENCE/reservation.json" ] && [ ! -e "$EVIDENCE/result.json" ] && echo 1 || echo 0)"
+check "that interruption still wrote exactly once" \
+	"$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
+run_helper '' finalize --evidence-dir "$EVIDENCE" --ipecmd "$FAKE"
+check "finalization resolves an interruption inside the post-write read" \
+	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
+check "resolving it never wrote" "$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
+
+# An interruption inside FINALIZATION itself. The killed attempt has already
+# created its own private export, so retry-safety here is what proves the
+# per-attempt file naming works rather than merely existing.
+make_pending
+run_helper 'killparent:read2' finalize --evidence-dir "$EVIDENCE" --ipecmd "$FAKE"
+check "an interrupted finalization publishes no result" \
+	"$([ ! -e "$EVIDENCE/result.json" ] && echo 1 || echo 0)"
+check "an interrupted finalization leaves its own attempt export" \
+	"$([ -s "$EVIDENCE/finalize-00.hex" ] && echo 1 || echo 0)"
+run_helper '' finalize --evidence-dir "$EVIDENCE" --ipecmd "$FAKE"
+check "finalization is retry-safe after an interruption" \
+	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
+check "the retry used a private attempt export" \
+	"$([ -s "$EVIDENCE/finalize-01.hex" ] && echo 1 || echo 0)"
+check "neither finalization attempt wrote" "$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
+
+# A PENDING directory reached through a symlink is not this transaction's
+# directory, whatever it points at.
+make_pending
+ln -s "$EVIDENCE" "$CASE_DIR/evidence-link"
+run_helper '' finalize --evidence-dir "$CASE_DIR/evidence-link" --ipecmd "$FAKE"
+check "finalizing through a symlinked evidence path is refused" \
+	"$([ "$RC" -eq 2 ] && [[ "$OUT" == *"evidence directory is a symbolic link"* ]] && echo 1 || echo 0)"
+check "that refusal published no result" \
+	"$([ ! -e "$EVIDENCE/result.json" ] && echo 1 || echo 0)"
 
 # An interruption BEFORE the reservation reserved nothing: there is no
 # transaction to finalize, and finalization must say so rather than read a

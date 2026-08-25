@@ -729,25 +729,103 @@ release_validate_pic12f675_finalization() {
 # option. The helper invocation is a `python3` command that merely passes an
 # ipecmd path, so it is not one -- which is exactly the distinction a
 # substring search for "ipecmd" would get wrong.
+# Does one folded command line publish a raw write of this part?
+#
+# Three independent tokens must all be present, which is what keeps prose that
+# NAMES the retired form -- "do not substitute a raw `pk2cmd` command" -- from
+# reading as a publication of it:
+#
+#   1. a WRITER, recognized by the basename of any token, so a full install
+#      path, a `sudo`/`env` prefix, a `$IPECMD` variable, `ipecmd.sh`, or a
+#      `java -jar .../ipecmd.jar` form is not a way around the check;
+#   2. this PART, so the six flash-and-forget parts keep their one-liners; and
+#   3. a MUTATING option -- `-M` and its `-MP`/`-ME`/`-MI`/`-MC` selectors, or
+#      an erase. A `-GF` export carries none of them and stays publishable:
+#      reading a device is how an operator archives its trim, and the helper's
+#      own `--ipecmd <path>` invocation names a writer without asking for one.
+_release_pic12f675_raw_writer_command() {
+	[ "$#" -eq 1 ] || return 2
+	local command=$1 token base
+	# Splitting the command into tokens must not also glob: `-P*` in a document
+	# would otherwise be expanded against the caller's working directory.
+	local -
+	set -f
+	case "$command" in
+		*12F675*|*12f675*) ;;
+		*) return 1 ;;
+	esac
+	# Program and erase selectors carry at most one suffix letter (-M, -MP, -ME,
+	# -MI, -MC, -E), so the run is bounded: an unbounded [A-Za-z]* would also
+	# match an ordinary path component such as /Evidence.
+	[[ "$command" =~ (^|[[:space:]])[-/](M[A-Za-z]?|E[A-Za-z]?)([[:space:]]|$) ]] \
+		|| return 1
+	for token in $command; do
+		token=${token%%=*}
+		# Quotes come off before the expansion sigils, or "$IPECMD" is left
+		# with a leading quote and the sigil strip does nothing.
+		token=${token#\"}
+		token=${token%\"}
+		token=${token#\'}
+		token=${token%\'}
+		token=${token#\$}
+		token=${token#\{}
+		token=${token%\}}
+		base=${token##*/}
+		base=${base##*\\}
+		case "${base,,}" in
+			pk2cmd|pk2cmd.exe|ipecmd|ipecmd.exe|ipecmd.jar|ipecmd.sh|ipecmd.bat)
+				return 0 ;;
+		esac
+	done
+	return 1
+}
+
+# Command CONTEXTS, not prose: fenced Markdown blocks, AsciiDoc listing and
+# literal blocks, indented code blocks, and inline code spans. A published
+# command lives in one of those; a sentence that mentions a tool does not.
 _release_pic12f675_raw_writer_scan() {
 	[ "$#" -eq 1 ] || return 2
 	local label=$1
-	local line command word fenced=0 building=0 rc=0
+	local line command span fenced=0 listing=0 building=0 rc=0
+
+	_raw_writer_report() {
+		_release_documentation_error \
+			"$label publishes a raw PIC12F675 writer command; a downloaded release image must be passed to flash-pic12f675.py, never to the programmer directly:$1" \
+			|| rc=1
+	}
 
 	command=''
 	while IFS= read -r line || [ -n "$line" ]; do
-		if [ "$building" -eq 0 ] && [[ "$line" == '```'* ]]; then
+		if [ "$building" -eq 0 ] && [ "$listing" -eq 0 ] && [[ "$line" == '```'* ]]; then
 			fenced=$((1 - fenced))
 			continue
 		fi
-		[ "$fenced" -eq 1 ] || continue
-		if [ "$building" -eq 0 ]; then
-			word=${line#"${line%%[![:space:]]*}"}
-			word=${word%%[[:space:]]*}
-			case "$word" in
-				pk2cmd|ipecmd|ipecmd.exe|ipecmd.jar|java) ;;
-				*) continue ;;
+		if [ "$building" -eq 0 ] && [ "$fenced" -eq 0 ]; then
+			# AsciiDoc delimits listing blocks with ---- and literal blocks
+			# with .... on their own line.
+			case "$line" in
+				'----'|'....') listing=$((1 - listing)); continue ;;
 			esac
+		fi
+		if [ "$fenced" -eq 0 ] && [ "$listing" -eq 0 ] && [ "$building" -eq 0 ]; then
+			# Outside a block, two contexts still carry commands: an indented
+			# code block, and any inline code span on a prose line.
+			case "$line" in
+				'    '*|$'\t'*)
+					_release_pic12f675_raw_writer_command "$line" && _raw_writer_report " $line"
+					continue ;;
+			esac
+			span=$line
+			while [[ "$span" == *'`'*'`'* ]]; do
+				span=${span#*\`}
+				_release_pic12f675_raw_writer_command "${span%%\`*}" \
+					&& _raw_writer_report " ${span%%\`*}"
+				span=${span#*\`}
+			done
+			continue
+		fi
+		[ "$fenced" -eq 1 ] || [ "$listing" -eq 1 ] || [ "$building" -eq 1 ] || continue
+		if [ "$building" -eq 0 ]; then
 			building=1
 			command=''
 		fi
@@ -757,20 +835,12 @@ _release_pic12f675_raw_writer_scan() {
 		fi
 		command+=" $line"
 		building=0
-		case "$command" in
-			*12F675*|*12f675*) ;;
-			*) continue ;;
-		esac
-		# -M / /M is the program option. A -GF export is read-only and stays
-		# publishable: reading a device is how an operator archives its trim.
-		if [[ "$command" =~ (^|[[:space:]])[-/]M([[:space:]]|$) ]]; then
-			_release_documentation_error \
-				"$label publishes a raw PIC12F675 writer command; a downloaded release image must be passed to flash-pic12f675.py, never to the programmer directly:${command}" \
-				|| rc=1
-		fi
+		_release_pic12f675_raw_writer_command "$command" \
+			&& _raw_writer_report "$command"
 	done
 	[ "$building" -eq 0 ] \
 		|| _release_documentation_error "$label ends inside an unterminated programmer command" || rc=1
+	unset -f _raw_writer_report
 	return "$rc"
 }
 
@@ -848,21 +918,44 @@ release_validate_pic12f675_flashing_helper() {
 		"$repo_root/FLASHING.md" \
 		|| _release_documentation_error "the FLASHING.md PIC12F675 heading does not state that it is not a raw write target" || rc=1
 
-	# 5. Any OTHER current Markdown document that publishes a raw writer command
-	#    fails the day it is written. Shipped release directories are immutable
-	#    artifacts of past releases and legitimately carry retired wording;
-	#    root-level working documents quote the defective form while describing
-	#    the defect.
+	# 5. Any OTHER current document that publishes a raw writer command fails the
+	#    day it is written, and any current document -- these three included --
+	#    that still says this part has no no-compiler path contradicts them.
+	#    Shipped release directories are immutable artifacts of past releases and
+	#    legitimately carry retired wording; root-level working documents quote
+	#    the defective form while describing the defect.
+	#
+	#    The superseded states are named as exact sentences rather than matched
+	#    by pattern. docs/flashing_simplicity.md legitimately records its own
+	#    retired position IN THE PAST TENSE ("The position was that no
+	#    no-compiler path ... had been designed"), and a pattern wide enough to
+	#    catch the live claim would fail on the record of how it was retired.
+	#    Matched case-insensitively, and so spelled in lower case here: the same
+	#    sentence at the start of a sentence is the same claim.
+	local -a retired_state=(
+		'there is not yet a no-compiler path'
+		'the one place where a qualified direct-from-download path is not available today'
+		'requires a clean source checkout of the same release tag and the pinned xc8/dfp toolchain'
+	)
 	while IFS= read -r -d '' document; do
 		label=${document#$repo_root/}
 		case "$label" in
-			README.md|FLASHING.md|release/README.md) continue ;;
 			v*-polish.md|pre-v*-fixes.md) continue ;;
+		esac
+		flowed=$(_release_flowed_text "$document") || return
+		for retired in "${retired_state[@]}"; do
+			case "${flowed,,}" in
+				*"$retired"*)
+					_release_documentation_error "$label still publishes the superseded PIC12F675 state, which the helper retired: $retired" || rc=1 ;;
+			esac
+		done
+		case "$label" in
+			README.md|FLASHING.md|release/README.md) continue ;;
 		esac
 		_release_pic12f675_raw_writer_scan "$label" < "$document" || rc=1
 	done < <(find "$repo_root" \
 		\( -name .git -o -path "$repo_root/release/v[0-9]*" \) -prune -o \
-		-type f -name '*.md' -print0)
+		-type f \( -name '*.md' -o -name '*.adoc' \) -print0)
 	find_pid=$!
 	wait "$find_pid" \
 		|| _release_documentation_error "could not scan for raw PIC12F675 writer commands" || return
