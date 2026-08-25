@@ -241,16 +241,19 @@ function regardless (the host suite links it unconditionally).
 
 ## Resource qualification
 
-Measured on the transactional image with the OR-folded integrity checks: XC8
-v3.10 (free mode, `-O2`) for the PIC parts, avr-gcc for the AVR parts. Every
-figure below is enforced by a build gate, not a one-off reading.
+Measured on the final `v0.9.10` candidate build, which carries the transaction
+and the OR-folded integrity checks: XC8 v3.10 (free mode, `-O2`) for the PIC
+parts, avr-gcc for the AVR parts. Every figure below is enforced by a build gate,
+not a one-off reading. The PIC10F322 row is the one F2 had to fit inside, but
+every row here has moved since F2 landed, for later firmware work outside this
+design; read them as current occupancy rather than as this change's cost.
 
 | Part | Budget | Simple / mute / relay | Tightest margin |
 | --- | --- | --- | --- |
 | PIC10F322 | 512 words | 476 / 502 / 493 words | 10 words (mute) |
-| PIC12F675 | 1024 words | 546 / 572 / 563 words | 452 words (mute) |
-| ATtiny13a (AVR classic) | 921 B | 834 / 874 / 864 B | 47 B (mute) |
-| ATtiny202 (AVR-XT) | 2048 B | 964 / 1004 / 994 B | 1044 B (mute) |
+| PIC12F675 | 1024 words | 548 / 574 / 583 words | 441 words (relay) |
+| ATtiny13a (AVR classic) | 921 B | 838 / 878 / 868 B | 43 B (mute) |
+| ATtiny202 (AVR-XT) | 2048 B | 968 / 1008 / 1040 B | 1008 B (relay) |
 | PIC10F320 | 256 words | 220 / 241 / 242 words | 14 words; F2 excluded |
 
 PIC10F322 is the binding constraint, and it stays inside 512 words in every

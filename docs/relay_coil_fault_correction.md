@@ -63,10 +63,12 @@ resynchronization change:
 | ATtiny13A | 864 → 868 B of 1024 | +4 B each |
 | ATtiny202 | 994 → 998 B of 2048 | +4 B each |
 
-Those are historical F1 deltas, not final F2 resource figures. The AVR-XT and
-PIC12F675 relay images must be remeasured after the emergency physical-pin path;
-the release resource table is updated from that final build rather than
-projecting compiler output here.
+Those are historical F1 deltas, not current occupancy. The AVR-XT and PIC12F675
+relay images were remeasured after the emergency physical-pin path landed, and
+both grew again; the current figure for every image is in
+`DESIGN_DOCUMENTATION.adoc`'s Resource Utilization tables, which are measured
+from the final `v0.9.10` candidate build and checked against it by
+`make test-resource-tables` rather than projected from the deltas here.
 
 It is nearly free because the escalation **reuses the sanity gate that already
 compares the complete output latch**. Only PIC10F320, which cannot afford that

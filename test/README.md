@@ -56,6 +56,11 @@ test/
                                     sections index each other both ways, with
                                     each ID's tier prefix agreeing with the tier
                                     it is filed under
+  test_resource_tables.py   shared: every documented flash/RAM figure matches
+                                    the image it was measured from, the four
+                                    documents that restate them agree, and the
+                                    percentages, free space and derived
+                                    sentences recompute from the tables
   test_pinout_alignment.py  shared: every ASCII package-pinout diagram draws
                                     a square box -- each row's walls in the
                                     columns the corner rows put them in

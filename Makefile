@@ -780,6 +780,7 @@ FORCE:
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
         test-variant-map-contract test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
+        test-resource-tables \
         test-pinout-alignment test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract test-static-assert-guards \
@@ -3025,6 +3026,7 @@ TEST_GATES_LATE = \
 		test-target-lane-markers test-pic-target-result-records \
 		test-lockstep-progress test-soak-timing \
         test-variant-map-contract test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
+        test-resource-tables \
         test-pinout-alignment test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract \
@@ -3335,6 +3337,27 @@ test-makefile-name-contract: python-version-valid
 .PHONY: test-todo-index
 test-todo-index: python-version-valid test/test_todo_index.py TODO.md
 	@python3 test/test_todo_index.py
+
+# Every current resource figure -- four utilization tables, the sentences derived
+# from them, and the same numbers restated in three other documents -- is checked
+# against the images that produced it. Same family as the two contracts above,
+# and it drifted the same way: at the v0.9.10 candidate the AVR Classic table
+# still held the pre-F1 ATtiny13a images, the ATtiny202 and PIC12F675 tables were
+# several changes behind, the ATtiny45/85 rows were missing outright, and the two
+# derived sentences had been computed from the stale numbers. A reader decides
+# whether a change fits from exactly these figures.
+#
+# It needs no AVR or PIC toolchain: program size is read out of the ELF section
+# headers and the Intel HEX directly (see the module docstring), so the gate
+# measures whatever this tree has already built and says how many of the 21
+# images that was. `make test` runs on a runner with neither XC8 nor the
+# ATtiny_DFP, so demanding all 21 would fail exactly where the AVR-only evidence
+# is still worth having.
+.PHONY: test-resource-tables
+test-resource-tables: python-version-valid test/test_resource_tables.py \
+		DESIGN_DOCUMENTATION.adoc docs/context_seu_detection.md \
+		docs/pic12f675_feasibility.md CHANGELOG.md
+	@python3 test/test_resource_tables.py
 
 # The package pinout diagrams are transcribed from each device pack's own pinout
 # data and are what somebody wires a board from, so a whitespace defect in one is
@@ -8211,6 +8234,7 @@ help:
 	@echo "  test-fault-wdt-note-contract  each PIC fault adapter supplies its own gpsim watchdog note (included in test)"
 	@echo "  test-makefile-name-contract  every make goal, variable and child-environment name a file or doc uses really exists (included in test)"
 	@echo "  test-todo-index    TODO.md's priority summary matches its open sections, both ways (included in test)"
+	@echo "  test-resource-tables  every documented flash/RAM figure matches the image it was measured from (included in test)"
 	@echo "  test-pinout-alignment  every ASCII package-pinout diagram draws a square box (included in test)"
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
 	@echo "  test-misra-output-contract  authored source/header MISRA diagnostics fail every lane (included in test)"

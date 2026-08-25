@@ -1720,13 +1720,79 @@ the run-5 fail-safe-resynchronization digest.
 
 **Acceptance criteria**
 
-- [ ] The changelog carries the real v0.9.10 source-finalization date.
-- [ ] Every current resource figure matches a retained final-candidate build.
-- [ ] PIC10F320 free-space and binding-image prose matches the final relay image.
-- [ ] The expected-image manifest is described as run 5 or a later intentional
+- [x] The changelog carries the real v0.9.10 source-finalization date.
+- [x] Every current resource figure matches a retained final-candidate build.
+- [x] PIC10F320 free-space and binding-image prose matches the final relay image.
+- [x] The expected-image manifest is described as run 5 or a later intentional
   rebaseline, never run 4.
-- [ ] Changelog, release-history, current-release declaration, image-baseline,
+- [x] Changelog, release-history, current-release declaration, image-baseline,
   and documentation contract tests pass.
+
+**Resolution**
+
+The `[0.9.10]` heading reads 2026-08-27, the source-finalization date the
+repository owner is targeting, rather than 2026-08-21, which predated most of
+the candidate commits. If that date moves, the heading moves with it before
+staging; the changelog entry says so, so the obligation lives where the number
+does.
+
+Every current resource figure is regenerated from the final candidate build,
+measured on this host with the pinned toolchains: XC8 v3.10 for the three PIC
+parts, avr-gcc for the four AVR parts. Nothing was projected from a delta. The
+tables were further behind than the problem statement recorded -- F3 had already
+corrected the PIC10F320 rows, but the AVR Classic table still carried the pre-F1
+ATtiny13a images (834/874/864 against a real 838/878/868), the ATtiny202 table
+was several changes behind (964/1004/994 against 968/1008/1040), and the
+PIC12F675 tables were two behind (546/572/563 against 548/574/583). Two
+sentences derived from those tables -- the utilization span and the ATtiny13a's
+distance from its 90% flash ceiling -- had been computed from the stale numbers
+and were wrong in the same direction.
+
+Three figures that were being withheld rather than stated are now measured and
+published. The ATtiny45 and ATtiny85 rows are in the table instead of omitted;
+each of those images is the size of its counterpart on the other part and 26
+bytes larger than the corresponding ATtiny13a image, and the two are not
+byte-identical, so neither is derived from the other. The XC8 total Data-space
+reservations that three sections declined to present as current are stated: 38
+of 64 bytes on the PIC10F322, 40 on the PIC12F675, 10 on the PIC10F320, in every
+variant. What is still genuinely unmeasured is now named as that rather than
+deferred to a compiler run that cannot produce it: no AVR-XT lane measures a
+call-chain-plus-interrupt stack high-water mark, so the ATtiny202's peak stack
+stays an open figure.
+
+The PIC10F320 prose already matched its final relay image and the standing
+manifest was already described as the intentional run-6 rebaseline; F3 did that
+work. Both were verified rather than assumed here -- the three digests in
+`test/pic10f320/expected_images.sha256` were compared against a fresh build of
+all three variants, and the relay row's 242 of 256 words with 14 free was
+remeasured -- so the two criteria are closed on evidence rather than on the
+absence of the run-4 wording.
+
+*Verification.* `make test-resource-tables` (186 checks) is the new contract, in
+three layers. The four `DESIGN_DOCUMENTATION.adoc` utilization tables must cover
+exactly the canonical 21 images, with every percentage and free-space cell
+recomputed from its own size and the datasheet capacity. The four documents that
+restate those figures -- that file, `docs/context_seu_detection.md`,
+`docs/pic12f675_feasibility.md`'s bounded current-status block, and
+`CHANGELOG.md` -- must agree digit for digit, and every derived sentence is
+recomputed rather than string-matched: the span and the parts that hold its
+ends, the binding image's 10 free words, the PIC10F320's 14, the ATtiny13a's
+distance from the 90%-of-1024 limit `test/check_flash_budget.sh` actually
+enforces, and the 90-word PIC12F675 shell premium over the PIC10F322 on the same
+relay driver. Finally, every documented image present in a build directory is
+measured and must match. That last layer needs no AVR or PIC toolchain: program
+size is read out of the ELF section headers and the Intel HEX records directly,
+which reproduces `avr-size`'s `Program:` and XC8's "Program space used" exactly
+on all 21 images, so the gate measures whatever the tree has already built and
+reports how many of the 21 it reached instead of passing vacuously. `make test`
+runs on a runner with neither XC8 nor the ATtiny_DFP, which is why an absent
+build directory is not a failure.
+
+Driven against the pre-change documents the same gate fails: the tables as they
+stood report one failure naming the six missing tinyx5 rows, and a tree with
+only the ATtiny13a rows reverted reports eight -- three derived-sentence
+failures, two cross-document failures, and one per measured image. A single
+mistyped percentage, free-space cell or device capacity fails on its own.
 
 ### D5 - Reconcile remaining simulator and toolchain wording
 
@@ -2221,7 +2287,7 @@ Record each completed item with its commit ID and decisive validation command.
 | F4 | IMPLEMENTED | (pending) | All 21 images rebuild byte-identical; `make test-static-assert-guards` (39 -> 68 checks, 11 near-bound FIRES/CLEAN fixtures); the new `test/avr/test_sim.c` pet-budget check on both classic parts and all three variants; all five MISRA lanes clean |
 | P1 | IMPLEMENTED | (pending) | `scripts/flash-pic12f675.py` staged, checksummed and reproduced as a required non-image release artifact (`RELEASE_HELPER_MAP`), with `RELEASE_IMAGES` still exactly 21; `make test-pic12f675-flash-helper` (172 checks) drives the real helper against a stateful fake `ipecmd`; `test-release-images` 178 -> 190, `test-release-preflight` 125 -> 144, `test-release-provenance` 94 -> 97, `test-release-qualification` 66 -> 67; raw PIC12F675 writer commands retired from every current document and rejected by contract. Retained PICkit 3/MPLAB X 6.20 bench evidence remains open by construction |
 | P2 | IMPLEMENTED | (pending) | Build-before-hardware AVR programming order and fake-programmer regression |
-| D4 | OPEN | | Final release date, resource tables, and PIC10F320 run-5 baseline wording |
+| D4 | IMPLEMENTED | (pending) | `[0.9.10]` dated 2026-08-27; all 21 images remeasured on the final candidate and every stale table, derived sentence and withheld Data-space total corrected; PIC10F320 free-space prose and the run-6 expected-image manifest reverified against a fresh build; new `make test-resource-tables` (186 checks, 21 of 21 images measured, 1 and 8 failures against the pre-change documents); `make test-release-preflight test-release-provenance test-release-qualification test-release-history test-release-images test-pic10f320-expected-images`; `scripts/make-release.sh --preflight v0.9.10` |
 | D5 | OPEN | | Simulator timing/physical-language and pip prerequisite reconciliation |
 | R4 | IMPLEMENTED | (pending) | Tag-derived publication kind in `release.yml`; `test-release-provenance` executes the publication shell for stable, `-rc.1`, and six malformed tags (86 -> 94 checks); `test-workflow-syntax` pins both branches against the `scripts/make-release.sh` grammar (375 -> 381 checks) |
 | R5 | IMPLEMENTED | (pending) | XC8 cache manifest split into three separately status-checked NUL-delimited stages in both `install_pic_toolchain.sh` and `verify_pic_toolchain_cache.sh`; neither records nor accepts a partial or empty inventory, and the verifier names the failing stage instead of reporting a cache mismatch; `test-supply-chain` fails each stage independently in both scripts and inventories 8 unusually-named files (30 -> 46 checks) |

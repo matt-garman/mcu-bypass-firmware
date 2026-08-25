@@ -1,7 +1,7 @@
 # PIC12F675 feasibility — porting the reference architecture to a classic mid-range PIC
 
 <!-- current-status:start -->
-**Current status (v0.9.10; updated 2026-08-21): release-supported in software.**
+**Current status (v0.9.10; updated 2026-08-25): release-supported in software.**
 The repository now contains the production Model-B PIC12F675 shell and pin map,
 the complete three-variant build with flash and 48-of-64-byte Data-space gates,
 static analysis,
@@ -17,13 +17,12 @@ part. It is included in the default `all` goal, both CI aggregates, the canonica
 evidence inventory. The tag workflow rebuilds and requalifies its three shipping
 images with the pinned PIC toolchain before publication.
 
-The current v0.9.10 build uses 546/572/563 of 1024 program words for the
+The final v0.9.10 candidate build uses 548/574/583 of 1024 program words for the
 simple/mute/relay variants. Persistent firmware state is 6 bytes (`ctx_`,
-`ctx_check_`, `gpio_shadow_`, and `osccal_snapshot_`); a current XC8 total Data
-Space reservation was not retained and is therefore not inferred from older
-builds. Every new build now requires one consistent XC8 Data-space summary per
-variant and rejects use above 48 of the device's 64 bytes. The final F2 run must
-record the actual three totals.
+`ctx_check_`, `gpio_shadow_`, and `osccal_snapshot_`); XC8 reserves 40 of the
+device's 64 Data-space bytes in all three variants. Every build requires one
+consistent XC8 Data-space summary per variant and rejects use above 48 of those
+64 bytes.
 
 Like every current part, it has no controlled hardware-qualification record;
 unlike some, it has no field-use report either (see

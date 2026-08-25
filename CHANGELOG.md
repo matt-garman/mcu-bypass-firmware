@@ -35,7 +35,7 @@ file is the human-readable summary of *what changed*.
 
 ## [Unreleased]
 
-## [0.9.10] - 2026-08-21
+## [0.9.10] - 2026-08-27
 
 ### Added
 
@@ -87,6 +87,55 @@ file is the human-readable summary of *what changed*.
   device", not "this writer is known to be safe".
 
 ### Fixed
+
+- **Every current resource figure is now measured on the final candidate build,
+  and checked against the image it came from.** The flash and RAM numbers for
+  the seven release parts are restated in four current documents --
+  `DESIGN_DOCUMENTATION.adoc`'s four utilization tables and the sentences
+  derived from them, `docs/context_seu_detection.md`'s resource-qualification
+  table, `docs/pic12f675_feasibility.md`'s bounded current-status block, and
+  this file -- and nothing compared them with each other or with a build. They
+  had drifted. The AVR Classic table still carried the pre-F1 ATtiny13a images
+  (834/874/864 against a real 838/878/868), the ATtiny202 table was several
+  changes behind (964/1004/994 against 968/1008/1040), the PIC12F675 tables were
+  two behind (546/572/563 against 548/574/583), the ATtiny45 and ATtiny85 rows
+  were absent altogether, and two derived sentences -- the utilization span and
+  the ATtiny13a's distance from its 90% flash ceiling -- had been computed from
+  the stale numbers. These are the figures a reader uses to decide whether a
+  change fits.
+
+  Every table is regenerated from the final `v0.9.10` candidate build. The
+  ATtiny45 and ATtiny85 rows are published rather than omitted: each of those
+  images is the size of its counterpart on the other part and 26 bytes larger
+  than the corresponding ATtiny13a image, so the family's span now runs from
+  10.5% of an ATtiny85 to 85.7% of an ATtiny13a. The XC8 Data-space totals that
+  were previously withheld as unretained are measured and stated -- 38 of 64
+  bytes on the PIC10F322, 40 on the PIC12F675, 10 on the PIC10F320, in every
+  variant -- which closes the last resource figure the release was carrying as
+  an open obligation. What remains genuinely unmeasured is named as such: no
+  AVR-XT lane measures a call-chain-plus-interrupt stack high-water mark, so the
+  ATtiny202's peak stack is still an unretained figure rather than one derived
+  from the ATtiny13a's.
+
+  `make test-resource-tables` is the regression, in three layers. The four
+  tables must cover exactly the canonical 21 images with every percentage and
+  free-space cell recomputed from its own size and the datasheet capacity; the
+  four documents must agree digit for digit, with each derived sentence
+  recomputed rather than string-matched -- the span, the binding image's 10 free
+  words, the PIC10F320's 14, the ATtiny13a's distance from the 90%-of-1024 limit
+  `test/check_flash_budget.sh` actually enforces, and the 90-word PIC12F675
+  shell premium over the PIC10F322 on the same relay driver; and every
+  documented image present in a build directory is measured and must match. That
+  last layer needs no AVR or PIC toolchain: program size is read out of the ELF
+  section headers and the Intel HEX records directly, which reproduces
+  `avr-size`'s `Program:` and XC8's "Program space used" exactly, so it
+  measures whatever the tree has already built and reports how many of the 21 it
+  reached, rather than passing vacuously when it reached none.
+
+- **The `0.9.10` heading carries the release's own date.** It read 2026-08-21
+  while candidate commits were still landing and no release had occurred. It is
+  now 2026-08-27, the source-finalization date this entry describes; if that
+  date moves, the heading moves with it before staging.
 
 - **Every AVR `*-program` goal now builds and validates its image before it
   writes a fuse byte.** `attiny13a-program`, `attiny45-program`,
