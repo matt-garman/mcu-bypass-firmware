@@ -2588,21 +2588,372 @@ close any second-pass item:
 The green results were compatible with F2 and P1: current fault tests observe
 latches/reset entry rather than the affected physical pin modes, and current
 release documentation tests governed generated PIC12F675 guidance without
-rejecting the contradictory static `FLASHING.md` block. P1 closed that second
-half -- `release_validate_pic12f675_flashing_helper` now holds every current
-document, discovered rather than enumerated, to the same rule the generated
-guidance follows -- so these figures predate the counts in the completion record
-below.
+rejecting the contradictory static `FLASHING.md` block. The second review
+temporarily closed that documentation half by broadening
+`release_validate_pic12f675_flashing_helper`, but the third review below found
+new firmware, helper, release-input, and documentation cases that the green
+suite does not exercise. These figures therefore predate both the counts in the
+completion record and the third-review reopenings below.
+
+## Third-review release blockers (2026-08-25)
+
+Review basis: clean `v0.9.9-polish` at `01dd21c`, with local `main` and the
+`v0.9.9` tag both at `16584d8`. The branch was 103 commits ahead and zero behind;
+`git diff --check main...HEAD` passed. The repository owner reported the full
+suite passing, so tests were not rerun during this review. Every finding below
+was checked against the implementation and the test that was expected to cover
+it. Each finding explains why an all-green suite is compatible with the defect.
+
+All six items below are pre-merge release blockers. They are separate from the
+already known final-candidate rerun and branch-document deletion. P1's controlled
+PICkit 3/MPLAB X 6.20 silicon run also remains open, but it is still the declared
+`1.x.y` hardware-qualification gate rather than a `v0.9.10` merge gate. The
+publish-now policy is already selected: ship the helper as software-tested and
+hardware-unqualified. The stale intermediate text above that calls this an owner
+decision still to make is superseded by that recorded direction and will leave
+with this branch-only document.
+
+### B1 - PIC12F675 relay escalation can drive parked GP4 high
+
+**Affected checklist item:** F1 RE-OPENED.
+
+**Failure mechanism**
+
+The PIC12F675 has no LAT register, so `gpio_shadow_` is the write intent for the
+whole GPIO port. GP4 is an unused output that the board contract permits only
+while it is parked low. If a single-event upset changes only
+`gpio_shadow_.GP4` from low to high, physical GP4 remains low until the next
+write. `hw_output_state_intact()` correctly detects both that the shadow no
+longer matches the expected state and that the physical port no longer follows
+the shadow, then enters `hw_force_wdt_reset()`.
+
+The relay escalation path in `hw_emergency_outputs_quiesce()` calls
+`hw_outputs_reassert_safe()`. The relay implementation clears only GP1/GP2, and
+PIC12F675's `hw_pin_mask_set_low()` commits that change by writing the complete
+remaining `gpio_shadow_` to `GPIO`. The corrupt GP4 bit is therefore converted
+from inert SRAM intent into a physical high output for the watchdog-reset
+interval. The CD4053 variants do not reproduce this path because their
+`hw_outputs_reassert_safe()` hooks are no-ops; this is specifically the
+PIC12F675 relay variant plus a shadow-only GP4 upset.
+
+The present tests pass because the generic GP4-shadow injections require a
+watchdog reset but do not sample GP4 at the watchdog spin. The relay-specific
+emergency assertions sample only the two coil pins. The atomic-clear fixture
+also starts from the inverse state -- physical GP4 high with shadow GP4 low --
+where a whole-port refresh correctly makes GP4 low and therefore cannot expose
+this defect.
+
+**Required correction**
+
+- Before the relay emergency path performs its one shadow-to-GPIO commit,
+  canonicalize every safety-constrained output that must be low: both coil bits
+  and parked GP4. Preserve the existing ordering that first disconnects or
+  retakes ownership of the coil pads, clears both coil intents atomically, and
+  only then restores output direction.
+- Do not solve this with a second single-pin GPIO write. The existing one-write
+  guarantee is intentional: sequential whole-port writes can replay the other
+  corrupted coil bit. The final pre-spin state must have GP1, GP2, and GP4 low in
+  both shadow intent and modeled physical pins.
+- Keep the normal CD4053 behavior unchanged; they need no emergency output
+  replay merely to close this relay-only case.
+
+**Acceptance evidence**
+
+- Extend the shipping-source coverage lane's `FWI_SHADOW_GP4_HIGH` relay case to
+  assert GP4 is physically low before the watchdog spin, not merely that reset
+  is entered.
+- Extend the PIC12F675 libgpsim relay fault lane to sample the GP4 node or an
+  equivalent physical-pin witness at the spin, alongside its existing GP1/GP2
+  checks. Post-reset low is not sufficient because reset itself hides the
+  unsafe interval.
+- Add a mutation that removes only GP4 from emergency canonicalization. It must
+  be killed by the pre-spin GP4 observation while the existing coil and reset
+  assertions remain green.
+- Re-run PIC12F675 flash/Data/stack, shipping-source coverage, target fault,
+  lock-step, target-I/O, mutation, and full release gates after the firmware
+  edit.
+
+### B2 - PIC12F675 post-write verification can PASS a no-erase overlay
+
+**Affected checklist item:** P1 SOFTWARE RE-OPENED.
+
+**Failure mechanism**
+
+`device_read()` requires a complete post-write full-device export, but
+`verify_programmed()` iterates only over byte addresses present in the sparse
+release HEX. `evaluate()` therefore proves that requested image bytes arrived,
+CONFIG outside BG agrees, and trim/identity survived, but it never proves that
+program words omitted by the image are erased. Current images use only roughly
+548/574/583 of the part's 1024 words, leaving hundreds of omitted words.
+
+A writer that skips bulk erase, writes every requested image word correctly,
+preserves trim, and leaves stale old instructions in image holes or beyond the
+new program can produce an empty failure list and `PASS`. The fake programmer
+cannot reveal this because its normal write unconditionally erases every program
+word below OSCCAL before overlaying the image. The happy-path test also asserts
+only that `programmed_image_bytes_verified` is greater than zero, so a later
+regression that compares just the first word would satisfy both the positive
+case and the current corruption case at word zero.
+
+**Required correction**
+
+- Compare every fourteen-bit program word from `0x000` through `0x3FE` against
+  one complete expected post-write memory model. A word represented by the
+  release HEX must equal the image; a word omitted from the HEX must equal the
+  erased value `0x3FFF`.
+- Continue treating `0x3FF` as per-device OSCCAL, compared with both pre-write
+  reads rather than with the release image. Continue comparing CONFIG separately
+  outside the factory BG field.
+- Make the result's verification count exact and meaningful. It must be
+  impossible for a partial prefix comparison to publish `PASS` while reporting
+  a positive count.
+
+**Acceptance evidence**
+
+- Add a stateful fake-programmer mode that does not erase and leaves one
+  non-erased word at an address absent from the selected release HEX. All image
+  bytes and trim must otherwise match; the helper must publish `FAIL` naming the
+  stale word after exactly one write.
+- Place a programmed-byte corruption near the final represented image address,
+  not only at word zero, and require the exact expected verification count on
+  every happy-path variant.
+- Exercise all three current PIC12F675 release images. A `v0.9.9` fallback may
+  remain for the host-only ordinary gate, but production/local/tag qualification
+  must prove the current candidate images.
+
+### B3 - ipecmd and its image are re-opened through mutable pathnames
+
+**Affected checklist item:** P1 SOFTWARE RE-OPENED.
+
+**Failure mechanism**
+
+The helper now holds descriptors for the direct `ipecmd` executable, or for both
+Java and the ipecmd JAR, and `programmer_unchanged()` re-stats their pathnames and
+re-hashes the held descriptors immediately before each command. That narrows the
+replacement window but does not close it: `subprocess.run()` subsequently asks
+the operating system to resolve the executable pathname again. A replacement
+between the final check and that resolution executes bytes that were never
+validated.
+
+The retained image has a longer and more consequential version of the same
+window. The helper validates release bytes, publishes `image.hex` through the
+held evidence-directory descriptor, closes the image descriptor, and later
+passes `evidence-dir/image.hex` to ipecmd by pathname. A same-UID process can
+unlink and replace that file after `reservation.json` appears, or rename the
+evidence directory and recreate its old path with another image. Mode 0400 does
+not prevent the directory owner from unlinking a file. The helper continues to
+read the original directory through its held descriptor while ipecmd resolves
+the replacement path. This can bypass checksum, Intel HEX, CONFIG, EEPROM, and
+OSCCAL guards before the physical erase/write; post-write comparison can only
+report damage after it occurs.
+
+The current replacement tests mutate a tool during an earlier completed
+invocation and prove the next pre-command identity check catches it. They do not
+race the final check-to-exec interval. No test replaces the retained image after
+reservation and before ipecmd opens it.
+
+**Required correction**
+
+- Keep each executable/JAR/runtime and the retained image pinned through the
+  operation that consumes it. The child must execute/read the held object by a
+  non-replaceable OS handle, not by re-resolving the checked pathname.
+- On platforms where an inherited descriptor path or descriptor-based exec is
+  available, pass only those inherited descriptors to the child and construct
+  argv from those identities. If a supported platform cannot provide this
+  property, fail closed or document and review a narrower platform contract;
+  another `stat()` immediately before `subprocess.run()` is not closure because
+  it creates the same final race one instruction later.
+- Keep the image descriptor open from validated publication through writer
+  consumption. Evidence-directory descriptor binding protects the helper's own
+  I/O only; it is not proof of what an external process opened by pathname.
+
+**Acceptance evidence**
+
+- Add deterministic synchronization hooks to replace the direct executable,
+  Java runtime, JAR, retained image, and evidence-directory pathname after the
+  helper's final identity proof but before child consumption. The replacement
+  tool/image must never execute or reach a writer invocation.
+- Include a replacement image that would program `0x3FF` or an otherwise
+  forbidden region, proving the pre-write image guards cannot be bypassed by the
+  race.
+- Preserve the existing accepted case for a byte-identical, correctly named
+  helper copy outside the bundle. Binding is to released bytes and name, not to
+  physical helper location.
+
+### B4 - evidence reservation and result publication are not crash-atomic
+
+**Affected checklist item:** P1 SOFTWARE RE-OPENED.
+
+**Failure mechanism**
+
+`Evidence.create()` creates the new evidence directory and opens it, but never
+fsyncs the parent directory that contains the new directory entry. Later fsyncs
+flush the evidence directory itself, not its parent. A system crash after the
+helper announces the reservation and begins programming can therefore lose the
+directory entry that was supposed to make the pre-write reservation durable.
+
+`Evidence.publish()` also creates `result.json` under its final immutable name
+before writing, flushing, and syncing it. A power loss, SIGKILL, short write, or
+I/O error after exclusive creation can leave an empty or truncated final file.
+`finalize` refuses recovery based only on the existence of `result.json`, so the
+transaction can be permanently neither a valid immutable result nor a supported
+PENDING transaction. Existing interruption tests kill during reads and between
+major stages; they do not kill or inject an fsync/write failure inside final
+result publication.
+
+**Required correction**
+
+- Open and retain the evidence parent directory, create the evidence directory
+  relative to it, and fsync the parent immediately after creation. Any inability
+  to make the directory entry durable must fail before device access or a write
+  reservation.
+- Write result bytes to a unique temporary file in the same held evidence
+  directory, flush and fsync that file, then install it atomically under
+  `result.json` with no-replace semantics and fsync the evidence directory.
+  `O_EXCL` on the temporary file is not enough; the final-name publication must
+  be atomic and must still refuse replacement of a valid existing result.
+- A crash before final-name publication must leave a state that `finalize` can
+  retry read-only. A crash after publication must leave one complete parseable
+  immutable result. Temporary publication remnants must never be mistaken for a
+  completed result.
+
+**Acceptance evidence**
+
+- Add injected failures for parent-directory fsync, result write, result-file
+  fsync, final no-replace publication, and final directory fsync. Before a write,
+  each failure must touch no device; after a write, it must leave either a valid
+  result or a retryable PENDING transaction.
+- Add real SIGKILL boundaries inside result publication, not only inside the
+  post-write read/finalization read. A retry must remain read-only and must never
+  issue a second program command.
+- Verify an existing valid result remains immutable and that a malformed file
+  cannot be created under the final name by an interrupted helper publication.
+
+### B5 - GNU Make ignore/recipe-semantic modes bypass release gates
+
+**Affected checklist item:** R6 RE-OPENED.
+
+**Failure mechanism**
+
+The release guards reject assignment-bearing Make flags, `--eval`, and alternate
+makefiles, but do not reject `-i`/`--ignore-errors`. GNU Make exports the compact
+`i` flag through `MAKEFLAGS`; every nested Make in `scripts/make-release.sh`
+inherits it. Failed recipes in `make test-long`, target qualification, builds,
+and other gates are then treated as successful, so the shell's `make ... || die`
+checks receive zero and production staging can continue after a failed gate.
+
+Checking only the long spelling is insufficient because GNU Make normalizes
+options into compact flag words. The direct-script path also needs protection
+from inherited recipe-semantic modes such as dry-run, question, or touch if they
+can make nested builds report success without producing current outputs. The
+release script deliberately supports direct invocation, so it cannot assume the
+outer Make process already consumed these modes safely.
+
+**Required correction**
+
+- Reject `-i`, `--ignore-errors`, compact `i`, and equivalent `MAKEFLAGS`,
+  `MFLAGS`, and `GNUMAKEFLAGS` forms in both the Makefile parse-time guard and
+  the script's first pre-query guard.
+- Audit other modes that suppress or replace recipe execution (`-n`/dry-run,
+  `-q`/question, and `-t`/touch) on the direct-script path. Either reject all
+  semantic modes with an explicit harmless-option allowlist, or clear the Make
+  flag transport before every nested production Make after validating the
+  small set of options the release intentionally supports.
+- Keep ordinary developer targets unchanged; this restriction belongs only to
+  release, release-preflight, and direct production-script configuration.
+
+**Acceptance evidence**
+
+- Add top-level `make release`/`release-preflight` and direct-script negative
+  cases for short, long, compact, inherited, and `GNUMAKEFLAGS` spellings. Every
+  case must stop before recipe/tool/scratch/build/device work.
+- Include a fake failing nested gate under `-i`; the regression must prove the
+  failure cannot be converted into release success.
+- Include direct-script dry-run/touch/question cases with a complete stale image
+  tree so acceptance cannot depend on missing outputs eventually causing a
+  later unrelated failure.
+
+### B6 - durable release documentation still makes contradictory claims
+
+**Affected checklist items:** P1, D4, and D5 RE-OPENED. F2 implementation remains
+closed, but its documented relay count must be corrected.
+
+**Failure mechanism**
+
+The selected policy is "helper published now, software-tested, not
+hardware-qualified." Durable current documents do not consistently say that:
+
+- `FLASHING.md` publishes the downloaded-release helper's MPLAB X 6.20 ipecmd
+  procedure, while `README.md` twice and `TOOLCHAIN.adoc` say no ipecmd user or
+  hardware procedure is published. `release/README.md` has the accurate
+  distinction: the route is published but no ipecmd hardware procedure is
+  qualified.
+- The helper's argument error says the external-power arrangement is
+  "validated," while `HARDWARE_VALIDATION_LOG.md` explicitly lists that
+  arrangement and release-from-reset behavior among the outstanding controlled
+  checks.
+- `scripts/release-documentation.sh` renders "physical-output checks" into the
+  signed manifest/release notes for simulator evidence. The workflows and D5
+  completion record correctly call those modeled-pin/model-port checks.
+- `FLASHING.md` says a helper "fetched from somewhere else" is refused. The
+  implemented and changelog-recorded policy accepts a byte-identical,
+  correctly named copy wherever it lives and refuses edited, renamed, or
+  unpublished bytes.
+
+The completion claims also leave current documentation drift behind:
+
+- `DESIGN_DOCUMENTATION.adoc` summarizes ATtiny202 occupancy as 47-49%, while
+  its current table reaches 50.8% for the relay image.
+- `test/README.md` calls its target-result row authoritative but reports 46
+  PIC12F675 relay fault checks; the reviewed table, Make aggregate, mutation
+  records, and F2 completion entry all use 43.
+- `docs/flashing_simplicity.md` opens with "Nothing here is implemented" and
+  describes AVR build-before-fuse ordering as outstanding, despite its later
+  v0.9.10 implementation updates and P2's completed state.
+
+These contradictions survive deletion of this branch-only checklist. They are
+not a request for another publish/withhold decision; they are stale descriptions
+of the already selected publish-now policy and measured implementation.
+
+**Required correction**
+
+- State everywhere that the downloaded-release helper's ipecmd path is
+  published and software-tested but hardware-unqualified. Distinguish it from
+  the Make-based development/release-provenance ipecmd route and its unqualified
+  dual-programmer handoff.
+- Replace "external power is validated" with the narrower fact: external power
+  is the only supported software configuration, programmer-supplied power is
+  refused, and the documented external arrangement still awaits controlled
+  hardware validation.
+- Render modeled-pin/model-port output checks in generated release evidence.
+- Describe helper identity as a released-name-and-bytes binding, independent of
+  location.
+- Reconcile the ATtiny202 47.3-50.8% summary, the PIC12F675 43-check relay count,
+  and the flashing-simplicity status/current-state text.
+
+**Acceptance evidence**
+
+- Extend the current-document contract to reject the stale "no ipecmd procedure
+  is published" forms while requiring the hardware-unqualified qualification
+  wherever the helper procedure is presented.
+- Exercise the generated `MANIFEST.md` and release-note text and require
+  modeled-pin/model-port wording; reject "physical-output checks" in simulator
+  claims.
+- Extend `test-resource-tables` to derive the ATtiny202 prose range from the
+  current table, and bind the documented PIC12F675 count to
+  `pic12f675_target_count_table()` or another single reviewed oracle.
+- Require the flashing-simplicity status banner and its AVR programming-order
+  discussion to acknowledge the marked v0.9.10 implementation updates.
 
 ## Final validation and release gate
 
 Complete these only after R1-R6, F1-F4, P1-P2, T1-T2, and D1-D5 are done or an
 explicit owner disposition recorded where an item permits one. The checked
 `fe8ecc8` run below is historical evidence, not final-candidate evidence; the
-pre-merge rows are reopened because F2-P2 require source, test, and documentation
-changes.
+pre-merge rows are reopened because B1-B6 require source, test, release-tooling,
+and documentation changes.
 
-- [ ] `git diff --check main...HEAD` passes after every second-pass change.
+- [ ] `git diff --check main...HEAD` passes after every third-review change.
 - [ ] `make test` passes on a host meeting the documented host-tool contract.
 - [ ] `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` passes on the fully
   provisioned release host with no skipped target rows.
@@ -2611,11 +2962,21 @@ changes.
   lock-step, target-I/O, source-coverage, and mutation gates.
 - [ ] AVR-XT `INVEN` and PIC12F675 comparator-ownership fault cases prove
   physical coil-pin de-energization before the watchdog spin.
+- [ ] A PIC12F675 relay `gpio_shadow_.GP4` upset proves physical GP4, GP1, and
+  GP2 are all low before the watchdog spin, with a GP4-specific mutant killed.
 - [ ] AVR programming negative controls prove no fuse or flash command runs
   before a successful selected-image build and validation.
 - [ ] The release-shipped PIC12F675 helper passes its fake-programmer and
-  packaging contracts; retained PICkit 3/MPLAB X 6.20 evidence validates its
-  exact hardware path; durable documentation rejects every retired raw writer.
+  packaging contracts; full-memory readback rejects stale image-absent words;
+  held tool/image identities reach the child without pathname reopening; and
+  every post-write interruption leaves a valid result or retryable PENDING
+  transaction. Retained PICkit 3/MPLAB X 6.20 evidence validates its exact
+  hardware path; durable documentation rejects every retired raw writer.
+- [ ] Release and direct-script configuration reject ignore-errors and every
+  other unsupported recipe-semantic Make mode before tools, scratch, or builds.
+- [ ] Durable and generated documentation agrees that the PIC12F675 helper is
+  published and software-tested but hardware-unqualified, and simulator output
+  evidence is described as modeled rather than physical.
 - [ ] PIC12F675's two authoritative aggregates visibly share one retained matrix
   identity in local and clean-runner release paths.
 - [ ] `scripts/make-release.sh --preflight v0.9.10` rejects version drift and
@@ -2651,8 +3012,8 @@ publication rows are release-time by construction. The dry-run row waits on the
 deletion of this document, which the merge decision below sequences before the
 release cut: the staging path's refusal while this file exists is the G1 guard
 working as specified. All other pre-merge rows must be reclosed on the actual
-second-pass candidate. PIC12F675's matrix identity was proved on the earlier
-local path by `test/test_pic_build.sh` and
+third-review candidate after B1-B6 are resolved. PIC12F675's matrix identity was
+proved on the earlier local path by `test/test_pic_build.sh` and
 `test/test_release_qualification.sh`; its clean-runner half remains release-time
 evidence and must be exercised for real by the tag workflow.
 
@@ -2685,7 +3046,7 @@ Record each completed item with its commit ID and decisive validation command.
 | R1 | DONE | `7dab4db` | `make CC=: test-pic-build`; `test/test_release_qualification.sh`; `test/test_workflow_syntax.sh` |
 | R2 | DONE | `7b54dea` | `test/test_release_preflight.sh`; `test/test_release_provenance.sh`; `make test-workflow-syntax test-release-history` |
 | R3 | DONE | `9a7c479` | `make test-pic-build test-release-preflight test-release-qualification`; `scripts/make-release.sh --preflight v0.9.10` |
-| F1 | DONE | `a8fe23d`, `b14cd7a` | `make test`; relay fault + coverage lanes on all six substrates; PIC/AVR flash-budget gates |
+| F1 | RE-OPENED (B1) | `a8fe23d`, `b14cd7a` | The original relay escalation work and six-substrate validation remain historical evidence. Third review found that PIC12F675 relay escalation replays a corrupt parked-GP4 shadow bit while clearing the coils. Close only after GP1/GP2/GP4 are low before the watchdog spin, the physical GP4 lane and mutation are retained, and all affected firmware/resource gates pass. |
 | T1 | DONE | `fd9aa28` | `make test`; `make pic10f322-coverage-check-fw HOSTCC=gcc-10`; `test/test_release_preflight.sh` |
 | T2 | DONE | `130b22f` | `make test`; `test/test_workload_rebuild.sh`; mutated-tree `make test` reaching the PIC12F675 host oracle |
 | D1 | DONE | `ed5b654` | `make test-release-preflight` (85 -> 101 checks, 12 negative controls); `make test-release-qualification test-todo-index test-makefile-name-contract test-release-history` |
@@ -2695,29 +3056,32 @@ Record each completed item with its commit ID and decisive validation command.
 | F2 | DONE | `f6d9f82`, `f9dd333`, `5deb4e4`, `9999886`, `b6d06d2` | Fully provisioned current-HEAD validation reported passing: AVR-XT's 32-case matrix and PIC12F675's 43-check relay lane prove modeled physical coil-pin quiescence before reset; all affected resource, stack, timing, static, simulator, coverage, recovery, and merged 136-mutant gates pass |
 | F3 | DONE | `df89ec0` | PIC10F320 flash, return-stack, image-baseline, host/target fault, lock-step, target-I/O, coverage, analysis, and mutation gates pass; relay is 242/256 words at stack depth 3/8, both sequence-sensitive mutants are killed, and both CD4053 images are unchanged |
 | F4 | DONE | `fc23e48` | Fully provisioned current-HEAD suite passes; `make test-static-assert-guards` has 68 checks including 11 exact near-bound FIRES/CLEAN fixtures, compiled-image pet intervals fit their bounds, and timing, pulse-width, watchdog-liveness, static-analysis, and resource gates pass |
-| P1 | SOFTWARE DONE, BENCH OPEN | `58fb829`, `37b20bd` | All four reopened software findings closed: the running helper is bound by digest wherever it lives (three refusals; the old location rule let an edited off-bundle helper reach a write), `ipecmd` and the jar form's Java runtime are pinned by held descriptor and re-proved before every command, evidence I/O moved onto a directory descriptor, and incomplete or self-contradicting device exports are refused before the write and published as named failures after it; `test-pic12f675-flash-helper` 175 -> 257 checks with five disable-one-guard negative controls, `test-release-preflight` 144 -> 158 with the raw-writer detector broadened to writer-basename + part + mutating option across fenced/AsciiDoc/indented/inline contexts in `.md` and `.adoc` plus a superseded-state sweep, and `release/README.md` + `docs/flashing_simplicity.md` reconciled. **Acceptance criterion 4 (controlled PICkit 3 / MPLAB X 6.20 bench run) stays open and needs silicon** |
+| P1 | SOFTWARE RE-OPENED (B2-B4, B6); BENCH OPEN | `58fb829`, `37b20bd` | The prior 257-check helper hardening remains historical evidence, but third review found a sparse-image false PASS, mutable-path reopening of the pinned tool/image, non-durable parent/result publication, and contradictory durable claims. Close software only after every B2-B4/B6 acceptance case passes. **Acceptance criterion 4 (controlled PICkit 3 / MPLAB X 6.20 bench run) stays open and needs silicon, but remains the separate `1.x.y` hardware gate.** |
 | P2 | DONE | `4cf4804`, `6ef8c4d` | The selected variant must belong to the current forced rebuild; final regular/non-symlink HEX revalidation and literal argument/action binding precede hardware; `test-avr-program-order` passes 56 exact-order, stale-image, mismatch, size, override, symlink, and stateful-input checks, with all supporting build/selector/fuse/serialization/release-preflight contracts green |
-| D4 | DONE | `2585ad4`, `18cd7ee` | Changelog stays explicitly Unreleased until production requires the qualified source date; ordinary resource checks make no evidence claim at 0/21, while strict release qualification requires and retains source-bound 21-image, AVR-static, Classic/XT-stack, PIC12F675 Data-space, and PIC-stack evidence in a hash-bound 35-file inventory |
-| D5 | DONE | `f36f085` | Compiled-versus-delivered pulse width distinguished in `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc` and `TODO.md`, each naming the gate that owns its half; T25 reduced to remaining upstream/re-pin work; the pet-to-pet image bound justified by `wdr` stepping rather than blanket distrust; simulator lanes described as modeled pins in both workflows, `scripts/make-release.sh`, `docs/relay_coil_fault_correction.md`, `TOOLCHAIN.adoc`, `test/README.md` and the unreleased changelog section; the retired `get-pip` fallback removed from the documented prerequisites and pinned by a new `test-supply-chain` doc/script pairing (46 -> 47 checks, 3 negative controls) |
+| D4 | RE-OPENED (B6) | `2585ad4`, `18cd7ee` | The strict source-bound 35-file resource-evidence gate remains implemented. Third review found the ATtiny202 47-49% summary stale against its 50.8% table row, so the current-resource prose contract and regression are not fully closed. |
+| D5 | RE-OPENED (B6) | `f36f085` | Most simulator/toolchain wording is reconciled, but generated signed release evidence still says "physical-output checks" for modeled simulator pins. Close after generated/static wording and its negative contract agree. |
 | R4 | DONE | `ba4d9d6` | `make test-workflow-syntax test-release-provenance test-release-qualification`; stable tags publish normally, suffixed tags add `--prerelease`, and malformed tags stop before build or `gh` |
 | R5 | DONE | `7533d52` | `make test-supply-chain test-workflow-syntax test-release-preflight`; installer and verifier independently reject scan/order/hash/empty inventories while preserving unusual non-NUL filename bytes |
-| R6 | DONE | `251510b` | Production release configuration rejects non-allowlisted source/flag/validation, Make-precedence/function, injected/noncanonical-makefile, and false-lock inputs before recipe/tool/scratch work; both early guards require unique exact 21-image/18-soak inventories before set equality; release-image and preflight contracts pass 233/160 checks |
-| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; rerun every pre-merge gate. P1's bench run is a `1.x.y` hardware gate, not a pre-merge one |
+| R6 | RE-OPENED (B5) | `251510b` | The allowlist and exact-inventory guards remain implemented, but `-i`/`--ignore-errors` propagates through nested release Makes and can turn failed recipe gates into success. Close after all unsupported recipe-semantic modes fail before tools/scratch/build work in Make and direct-script paths. |
+| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; resolve B1-B6, then rerun every pre-merge gate on the actual final candidate. P1's bench run is a `1.x.y` hardware gate, not a pre-merge one. |
 
 ## Merge decision
 
 Do not merge `v0.9.9-polish` or begin production `v0.9.10` qualification until
-all pre-merge implementation items are closed and recorded in the completion
-record above. P1's remaining
-acceptance criterion is the controlled PICkit 3 / MPLAB X 6.20 bench run,
-which needs silicon: it is a `1.x.y` hardware gate tracked in
-`HARDWARE_VALIDATION_LOG.md` and `TODO.md` `T3-pic12f675-bench`, and it does
-not block this merge -- the helper it qualifies replaced a published raw
-command that carried the same unvalidated question with no detection at all.
-If the preference is instead to withhold the helper from `FLASHING.md` until
-that run exists, decide that before the merge; it is a documentation change.
-Then rerun every reopened pre-merge gate, delete this file and all references,
-run the release dry run on the actual candidate, and only then merge and begin
-production qualification. Production soaks, the artifact-only release commit,
-signed tag, and clean-runner byte-for-byte reproduction remain post-merge
-release-time gates.
+B1-B6 and every other pre-merge implementation item are closed and recorded in
+the completion record above. In particular, F1, P1 software, R6, D4, and D5 are
+reopened; the previously green aggregate suite is not closure because each
+finding above identifies the exact unexercised failure mode.
+
+P1's controlled PICkit 3/MPLAB X 6.20 bench run still needs silicon. It remains
+the `1.x.y` hardware gate tracked in `HARDWARE_VALIDATION_LOG.md` and `TODO.md`
+`T3-pic12f675-bench`, and does not block this merge after P1's software blockers
+are fixed. The owner direction is to publish the helper now with precise
+software-tested/hardware-unqualified language; there is no additional
+publish-versus-withhold decision to make.
+
+After B1-B6 are closed, rerun every reopened pre-merge gate, delete this file
+and all references, run the release dry run on the actual candidate, and only
+then merge and begin production qualification. Production soaks, the
+artifact-only release commit, signed tag, and clean-runner byte-for-byte
+reproduction remain post-merge release-time gates.
