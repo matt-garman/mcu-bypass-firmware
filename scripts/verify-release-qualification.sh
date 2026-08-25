@@ -58,7 +58,7 @@ evidence_dir="$release_dir/evidence"
 declare -A q=()
 required_keys=(format version release_mode source_commit source_dirty \
 	soak_duration_ms soak_liveness_interval_ms soak_combination_count \
-	pic12f675_matrix_sha256)
+	pic12f675_matrix_sha256 resource_tables_sha256)
 line_no=0
 while IFS= read -r line || [ -n "$line" ]; do
 	line_no=$((line_no + 1))
@@ -81,13 +81,15 @@ done
 [ "${#q[@]}" -eq "${#required_keys[@]}" ] \
 	|| die "QUALIFICATION does not contain the exact required schema"
 
-[ "${q[format]}" = 2 ] || die "unsupported QUALIFICATION format: ${q[format]}"
+[ "${q[format]}" = 3 ] || die "unsupported QUALIFICATION format: ${q[format]}"
 [ "${q[version]}" = "$expected_version" ] \
 	|| die "QUALIFICATION version ${q[version]} does not match $expected_version"
 [[ "${q[source_commit]}" =~ ^[0-9a-f]{40}$ ]] \
 	|| die "QUALIFICATION source_commit is not a full lowercase SHA-1"
 [[ "${q[pic12f675_matrix_sha256]}" =~ ^[0-9a-f]{64}$ ]] \
 	|| die "QUALIFICATION pic12f675_matrix_sha256 is not a lowercase SHA-256"
+[[ "${q[resource_tables_sha256]}" =~ ^[0-9a-f]{64}$ ]] \
+	|| die "QUALIFICATION resource_tables_sha256 is not a lowercase SHA-256"
 
 case "${q[release_mode]}" in
 	production)
@@ -231,6 +233,17 @@ matrix_record=$(python3 "$matrix_tool" verify-release \
 [[ "$matrix_record" == "PIC12F675_MATRIX_SHA256 format=2 "* ]] \
 	|| die "retained PIC12F675 matrix verifier returned an invalid identity record"
 
+resource_log="$evidence_dir/resource-tables.log"
+resource_digest=$(sha256sum -- "$resource_log") \
+	|| die "could not hash retained resource evidence"
+resource_digest=${resource_digest%% *}
+[ "$resource_digest" = "${q[resource_tables_sha256]}" ] \
+	|| die "retained resource evidence digest does not match QUALIFICATION"
+resource_result="RESOURCE_TABLES_RESULT format=1 status=pass source_commit=${q[source_commit]} images=21 avr_static=12 classic_stack=9 pic_data=6 pic_stack=9"
+mapfile -t resource_results < <(grep '^RESOURCE_TABLES_RESULT ' "$resource_log" || true)
+[ "${#resource_results[@]}" -eq 1 ] && [ "${resource_results[0]}" = "$resource_result" ] \
+	|| die "retained resource evidence has no exact source-bound complete result"
+
 for combination in "${canonical_soaks[@]}"; do
 	log="$evidence_dir/soak-$combination.log"
 	mapfile -t machine_lines < <(grep '^SOAK_RESULT ' "$log" || true)
@@ -259,6 +272,8 @@ grep -Fxq -- "- **Soak combinations:** ${q[soak_combination_count]}" "$manifest"
 	|| die "MANIFEST.md soak count does not match QUALIFICATION"
 grep -Fxq -- "- **PIC12F675 qualified matrix:** \`evidence/pic12f675-qualified-matrix.json\` (SHA-256 \`${q[pic12f675_matrix_sha256]}\`)" "$manifest" \
 	|| die "MANIFEST.md PIC12F675 matrix digest does not match QUALIFICATION"
+grep -Fxq -- "- **Final resource evidence:** \`evidence/resource-tables.log\` (SHA-256 \`${q[resource_tables_sha256]}\`)" "$manifest" \
+	|| die "MANIFEST.md resource evidence digest does not match QUALIFICATION"
 if [ "${q[release_mode]}" = production ]; then
 	if grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$manifest"; then
 		die "production MANIFEST.md contains the dry-run banner"

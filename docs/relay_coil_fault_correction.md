@@ -67,8 +67,9 @@ Those are historical F1 deltas, not current occupancy. The AVR-XT and PIC12F675
 relay images were remeasured after the emergency physical-pin path landed, and
 both grew again; the current figure for every image is in
 `DESIGN_DOCUMENTATION.adoc`'s Resource Utilization tables, which are measured
-from the final `v0.9.10` candidate build and checked against it by
-`make test-resource-tables` rather than projected from the deltas here.
+from the latest fully provisioned candidate build and checked for consistency by
+`make test-resource-tables` rather than projected from the deltas here. The
+production release's strict mode performs and retains the final 21-image check.
 
 It is nearly free because the escalation **reuses the sanity gate that already
 compares the complete output latch**. Only PIC10F320, which cannot afford that

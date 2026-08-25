@@ -141,12 +141,35 @@ def injected(text):
 
 
 def burned(text):
-    """{variable} written to silicon by an avrdude `-U <mem>:w:$(VAR):m` recipe.
+    """{variable} written to silicon by an avrdude fuse-write recipe.
 
     `:m` is what makes this the fuse set: flash images are written `:i`, and
-    readback recipes use `:r:`, so neither is picked up here.
+    readback recipes use `:r:`, so neither is picked up here. Hardware commands
+    shell-quote literal `_ARG := $(value <public variable>)` aliases so caller
+    text cannot become additional avrdude argv entries; follow and verify that
+    indirection rather than treating the safety alias as a second source of
+    fuse truth.
     """
-    return set(re.findall(r"-U\s+\w+:w:\$\$?\(([A-Za-z_]\w*)\):m", text))
+    aliases = dict(re.findall(
+        r"^override\s+([A-Za-z_]\w*)\s*:=\s*\$\(value\s+([A-Za-z_]\w*)\)\s*$",
+        text, re.M))
+    for alias, public, repeated in re.findall(
+            r"^override\s+([A-Za-z_]\w*)\s*:=\s*"
+            r"\$\(if \$\(findstring ',\$\(value ([A-Za-z_]\w*)\)\),,"
+            r"\$\(value ([A-Za-z_]\w*)\)\)\s*$", text, re.M):
+        if public != repeated:
+            fail(f"literal argument alias {alias} checks {public} but captures "
+                 f"{repeated}")
+        aliases[alias] = public
+    direct = set(re.findall(
+        r"-U\s+\w+:w:\$\$?\(([A-Za-z_]\w*)\):m", text))
+    call_quoted = re.findall(
+        r"-U\s+\w+:w:\$\$?\(call\s+_make_shell_quote,"
+        r"\$\$?\(([A-Za-z_]\w*)\)\):m", text)
+    literal_quoted = re.findall(
+        r"-U\s+\w+:w:'\$\$?\(([A-Za-z_]\w*)\)':m", text)
+    return direct | {aliases.get(alias, alias)
+                     for alias in call_quoted + literal_quoted}
 
 
 def guards(text):

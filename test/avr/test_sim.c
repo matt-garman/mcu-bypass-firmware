@@ -2498,9 +2498,9 @@ static void test_stack_high_water_mark(void) {
     // 0 means the stack reached into (or past) BSS.
     uint32_t margin_bytes = (deepest_sp > bss_end) ? (deepest_sp - bss_end) : 0u;
 
-    printf("  stack HWM: deepest SP=0x%03X, used=%u B, margin=%u B free "
+    printf("  stack HWM [%s]: deepest SP=0x%03X, used=%u B, margin=%u B free "
            "(SRAM 0x%03X-0x%03X, %u B total; static 0x%03X-0x%03X, %u B)\n",
-           deepest_sp, stack_used, margin_bytes,
+           MCU_NAME, deepest_sp, stack_used, margin_bytes,
            sram_bot, sram_top, sram_size,
            sram_bot, bss_end - 1u, static_bytes);
 

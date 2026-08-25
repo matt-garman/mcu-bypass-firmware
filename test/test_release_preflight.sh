@@ -260,6 +260,11 @@ if [ "${1:-}" = rev-parse ] && [ "${2:-}" = --show-toplevel ] \
 	printf '%s\n' "$TEST_RELEASE_REPO_ROOT"
 	exit 0
 fi
+if [ "${1:-}" = show ] && [ "${2:-}" = -s ] \
+		&& [ "${3:-}" = --format=%cs ] && [ "${4:-}" = HEAD ]; then
+	printf '2026-08-17\n'
+	exit 0
+fi
 if [ "${TEST_GIT_STATUS_FAIL:-0}" -eq 1 ] && [ "${1:-}" = status ]; then
 	exit 71
 fi
@@ -281,7 +286,7 @@ if [ "${1:-}" = ls-remote ]; then
 	exit 2
 fi
 case "${1:-}" in
-	check-ref-format|rev-parse|status) exec "${REAL_GIT:?}" "$@" ;;
+	check-ref-format|rev-parse|show|status) exec "${REAL_GIT:?}" "$@" ;;
 	*) printf 'forbidden Git invocation: %s\n' "$*" >> "${TOOL_LOG:?}"; exit 96 ;;
 esac
 EOF
@@ -636,6 +641,33 @@ assert_documentation_rejected() {
 write_documentation_fixture v1.2.3 21 18 six four
 release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
 	|| fail "documentation validator rejected a finalized fixture"
+checks=$((checks + 1))
+
+release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
+	2026-08-17 0 \
+	|| fail "documentation validator rejected a heading matching the source commit date"
+checks=$((checks + 1))
+
+if release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
+		2026-08-18 0 >"$output" 2>&1; then
+	fail "documentation validator accepted a date different from the source commit"
+fi
+grep -Fq 'date must equal source commit date 2026-08-18' "$output" \
+	|| fail "source-date mismatch lacked its exact diagnostic"
+checks=$((checks + 1))
+
+sed -i 's/^## \[1\.2\.3\] - 2026-08-17$/## [1.2.3] - Unreleased/' \
+	"$documentation_root/CHANGELOG.md"
+release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
+	2026-08-17 1 \
+	|| fail "documentation preflight rejected an explicit Unreleased draft"
+checks=$((checks + 1))
+if release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
+		2026-08-17 0 >"$output" 2>&1; then
+	fail "production documentation validation accepted an Unreleased draft"
+fi
+grep -Fq 'is still Unreleased' "$output" \
+	|| fail "Unreleased production refusal lacked its exact diagnostic"
 checks=$((checks + 1))
 
 write_documentation_fixture v1.2.3 21 18 six four 1.2.4

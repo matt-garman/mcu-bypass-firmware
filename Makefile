@@ -27,6 +27,23 @@ _MAKE_SERIAL_VARIANT_SAFE := $(filter $(CLASSIC_VARIANTS_SUPPORTED),$(_MAKE_SERI
 _MAKE_SERIAL_VARIANT_EMPTY_COMPUTED := $(if $(strip $(_MAKE_SERIAL_VARIANT_REQUESTED)),0,1)
 _MAKE_SERIAL_VARIANT_MULTI_COMPUTED := $(if $(word 2,$(_MAKE_SERIAL_VARIANT_REQUESTED)),1,0)
 _MAKE_SERIAL_VARIANT_UNKNOWN_COMPUTED := $(if $(filter-out $(CLASSIC_VARIANTS_SUPPORTED),$(_MAKE_SERIAL_VARIANT_REQUESTED)),1,0)
+
+# AVR_REBUILD_PREREQ is an internal consumer switch, not an arbitrary Make
+# fragment. Capture its literal value before any generated rule can expand it,
+# then expose only the two supported states: FORCE (normal builds) or empty
+# (reviewed consumers of an ELF they already validated). This prevents a
+# command-line $(eval ...) from changing the generated prerequisite list and
+# later making a programming guard report FORCE.
+ifeq ($(origin AVR_REBUILD_PREREQ),undefined)
+_MAKE_SERIAL_AVR_REBUILD_PREREQ_REQUESTED := FORCE
+else
+_MAKE_SERIAL_AVR_REBUILD_PREREQ_REQUESTED := $(value AVR_REBUILD_PREREQ)
+endif
+ifeq ($(_MAKE_SERIAL_AVR_REBUILD_PREREQ_REQUESTED),FORCE)
+override AVR_REBUILD_PREREQ := FORCE
+else
+override AVR_REBUILD_PREREQ :=
+endif
 _MAKE_SERIAL_PIC12F675_TARGET_VARIANT_ORIGIN := $(origin PIC12F675_TARGET_VARIANT)
 ifeq ($(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_ORIGIN),undefined)
 _MAKE_SERIAL_PIC12F675_TARGET_VARIANT_REQUESTED := cd4053_simple
@@ -60,6 +77,27 @@ endif
 endif
 override PIC12F675_RELEASE_TAG := $(_MAKE_SERIAL_PIC12F675_RELEASE_TAG_REQUESTED)
 export PIC12F675_RELEASE_TAG
+
+# AVR hardware transactions accept data values, never GNU Make programs. These
+# inputs are later embedded in tool argv, so reject a dollar before the outer
+# serialization recipe can forward it and before any generated rule can expand
+# it. Literal spaces and punctuation remain safe because the inner graph captures
+# each value with $(value ...) and passes it as one shell-quoted argument.
+_MAKE_SERIAL_AVR_PROGRAM_GOALS := $(filter attiny13a-program attiny45-program attiny85-program attiny202-program,$(MAKECMDGOALS))
+ifneq ($(_MAKE_SERIAL_AVR_PROGRAM_GOALS),)
+_MAKE_SERIAL_AVR_PROGRAM_SENSITIVE_REQUESTED := \
+	$(value IHEX_VALIDATOR)$(value AVRDUDE)$(value AVR_PROGRAMMER) \
+	$(value ATTINY13A_LFUSE)$(value ATTINY13A_HFUSE) \
+	$(value TINYX5_LFUSE)$(value TINYX5_HFUSE) \
+	$(value XT_PROGRAMMER)$(value XT_UPDI_PORT) \
+	$(value XT_FUSE_WDTCFG)$(value XT_FUSE_BODCFG) \
+	$(value XT_FUSE_OSCCFG)$(value XT_FUSE_SYSCFG0) \
+	$(value XT_FUSE_SYSCFG1)$(value XT_FUSE_APPEND) \
+	$(value XT_FUSE_BOOTEND)
+ifneq ($(findstring $(_MAKE_SERIAL_DOLLAR),$(_MAKE_SERIAL_AVR_PROGRAM_SENSITIVE_REQUESTED)),)
+$(error AVR programming tool, programmer, port, and fuse values must not contain dollar signs)
+endif
+endif
 
 _MAKE_SERIAL_VARIANTS_ORIGIN := $(origin VARIANTS)
 ifeq ($(_MAKE_SERIAL_VARIANTS_ORIGIN),undefined)
@@ -257,11 +295,17 @@ OBJDUMP  ?= avr-objdump
 SIZE     = avr-size
 READELF  ?= readelf
 IHEX_VALIDATOR ?= scripts/validate-ihex.sh
+# Capture caller data without recursively expanding it. Recipes place these
+# simple values directly inside shell single quotes; an apostrophe cannot be
+# represented there, so sanitize it to empty and fail closed at the relevant
+# executable/value check.
+override IHEX_VALIDATOR_ARG := $(if $(findstring ',$(value IHEX_VALIDATOR)),,$(value IHEX_VALIDATOR))
 # Presence check for IHEX_VALIDATOR, shared by every phony recipe that runs it
 # (`pic10f322`, `attiny202`, `pic10f320-size`, `pic12f675`,
-# `pic12f675-preflight`, `pic12f675-program`, and `pic12f675-release-program`). The .hex FILE rules do not need it: they
-# carry $(IHEX_VALIDATOR) as a real prerequisite, so Make refuses to run them if
-# it is missing. A phony recipe gets no such protection, and it must not build an
+# `pic12f675-preflight`, `pic12f675-program`, and `pic12f675-release-program`).
+# The .hex FILE rules do not need it: they carry literal
+# $(IHEX_VALIDATOR_ARG) as a real prerequisite, so Make refuses to run them if it
+# is missing. A phony recipe gets no such protection, and it must not build an
 # image it then cannot validate.
 #
 # `command -v` alone is NOT sufficient. For a value containing a slash, dash's
@@ -270,8 +314,11 @@ IHEX_VALIDATOR ?= scripts/validate-ihex.sh
 # denied", after objcopy had already produced the unvalidated image. Require -x
 # whenever the value names a path, and fall back to a PATH lookup only for a
 # bare command name.
-IHEX_VALIDATOR_CHECK = case "$(IHEX_VALIDATOR)" in */*) [ -x "$(IHEX_VALIDATOR)" ] ;; *) command -v "$(IHEX_VALIDATOR)" >/dev/null 2>&1 ;; esac || { echo "FAIL: Intel HEX validator not found or not executable at $(IHEX_VALIDATOR)"; exit 1; }
+override IHEX_VALIDATOR_CHECK = case '$(IHEX_VALIDATOR_ARG)' in */*) [ -x '$(IHEX_VALIDATOR_ARG)' ] ;; *) command -v '$(IHEX_VALIDATOR_ARG)' >/dev/null 2>&1 ;; esac || { echo "FAIL: Intel HEX validator not found or not executable"; exit 1; }
 AVRDUDE  = avrdude
+# Preserve the selected executable as one literal shell word. AVRDUDE is a path
+# override, not a whole-command escape hatch; arguments are derived below.
+override AVRDUDE_ARG := $(if $(findstring ',$(value AVRDUDE)),,$(value AVRDUDE))
 # Software gate every AVR `*-program` transaction runs BEFORE the first avrdude
 # invocation. A `*-program` goal writes fuses and then flash, so the fuse write
 # is the first hardware mutation, and it sets the clock, watchdog and BOD
@@ -282,24 +329,47 @@ AVRDUDE  = avrdude
 # fuses with no matching firmware, which is the one outcome a bench session
 # cannot recover from without a second programmer pass.
 #
-# Two things therefore stand between the request and the first `avrdude`. The
+# Three things therefore stand between the request and the first `avrdude`. The
+# program-request guard requires VARIANT to be in the matrix this invocation
+# rebuilds (and, for Classic AVR, refuses any attempt to disable FORCE). The
 # build that produces AND validates the selected image is a real prerequisite
-# of the goal, so a build failure keeps Make out of the recipe entirely; and
-# these checks run as the recipe's first line, while the device is still
-# untouched. Used as:
+# of the goal, so a build or size failure keeps Make out of the recipe entirely.
+# Finally, these checks reject a missing/symlinked image and revalidate its Intel
+# HEX bytes as the recipe's first line, while the device is still untouched.
+# Used as:
 #
 #   hex="<path>"; $(AVR_PROGRAM_IMAGE_CHECK); $(AVR_PROGRAMMER_CHECK); ...
 #
 # by the ATtiny13A, tinyx5 and ATtiny202 program recipes. `*-fuses` and
 # `*-flash` keep their single-step meaning and are NOT gated: a bench operator
 # asking for exactly one of them has asked for exactly one hardware action.
-AVR_PROGRAM_IMAGE_CHECK = [ -f "$$hex" ] || { echo "ERROR: $$hex not found -- no image was built for VARIANT=$(VARIANT)."; echo "       select a variant with VARIANT=<$(VARIANTS)>; no fuse or flash command has run."; exit 1; }
+override AVR_PROGRAM_IMAGE_CHECK = { [ -f "$$hex" ] && [ ! -L "$$hex" ]; } || { echo "ERROR: $$hex is missing, not regular, or symlinked -- no current image is safe to program."; echo "       select a variant with VARIANT=<$(CLASSIC_VARIANTS_SUPPORTED)>; no fuse or flash command has run."; exit 1; }; $(IHEX_VALIDATOR_CHECK); '$(IHEX_VALIDATOR_ARG)' "$$hex" || { echo "ERROR: $$hex failed final Intel HEX validation; no fuse or flash command has run."; exit 1; }
 # Same -x rule as IHEX_VALIDATOR_CHECK above, for the same reason: dash's
 # `command -v` succeeds on a merely EXISTING file when the value contains a
 # slash, so a non-executable AVRDUDE=<path> would pass a PATH-only check and
 # fail with "Permission denied" -- after the fuse write.
-AVR_PROGRAMMER_CHECK = case "$(AVRDUDE)" in */*) [ -x "$(AVRDUDE)" ] ;; *) command -v "$(AVRDUDE)" >/dev/null 2>&1 ;; esac || { echo "ERROR: programmer '$(AVRDUDE)' not found or not executable; no fuse or flash command has run."; echo "       install avrdude, or name another with AVRDUDE=<path>."; exit 1; }
+override AVR_PROGRAMMER_CHECK = case '$(AVRDUDE_ARG)' in */*) [ -x '$(AVRDUDE_ARG)' ] ;; *) command -v '$(AVRDUDE_ARG)' >/dev/null 2>&1 ;; esac || { echo "ERROR: selected programmer is not found or executable; no fuse or flash command has run."; echo "       install avrdude, or name another executable with AVRDUDE=<path>."; exit 1; }
 AVR_ELF_ARCH ?= avr:25
+
+# A single-image hardware request is valid only when its selected variant is in
+# the matrix the prerequisite build will produce. Otherwise an old HEX with the
+# selected basename could survive while this invocation rebuilt another matrix.
+.PHONY: avr-program-request-valid classic-avr-program-request-valid
+avr-program-request-valid: variant-selectors-valid classic-variant-request-valid
+	@case " $(VARIANTS) " in \
+		*" $(VARIANT) "*) : ;; \
+		*) echo "FAIL: VARIANT=$(VARIANT) is not included in VARIANTS=$(VARIANTS); no fuse or flash command has run."; \
+			echo "      include the selected variant in VARIANTS, or omit VARIANTS to build the full matrix."; exit 2 ;; \
+	esac
+
+# Classic file rules depend on this phony token so current tools, flags and
+# sources are consumed even when an old image exists. It is intentionally an
+# override for validated non-hardware consumers, but never for programming.
+classic-avr-program-request-valid: avr-program-request-valid
+	@if [ "$(AVR_REBUILD_PREREQ)" != FORCE ]; then \
+		echo "FAIL: AVR_REBUILD_PREREQ must remain FORCE for Classic-AVR programming; no fuse or flash command has run."; \
+		exit 2; \
+	fi
 
 # --- AVR build-artifact directory --------------------------------------------
 # Every AVR firmware image (.elf/.hex) and the trace .vcd is written here to
@@ -324,8 +394,8 @@ AVR_FW         = $(AVR_BUILD_DIR)/$(FW_BASE)
 TINYX5     = 85 45
 mmcu_85    = attiny85
 mmcu_45    = attiny45
-part_85    = t85
-part_45    = t45
+override part_85 := t85
+override part_45 := t45
 TINYX5_F_CPU   = 1000000UL
 
 # The same family as full part names. Anything a USER types names a whole part
@@ -445,7 +515,7 @@ VARIANT ?= cd4053_simple
 # Override on the command line if needed, e.g.:
 #   make attiny13a-flash AVR_PROGRAMMER=usbasp
 AVR_PROGRAMMER   ?= usbtiny
-ATTINY13A_AVRDUDE_PART   ?= t13
+override ATTINY13A_AVRDUDE_PART := t13
 
 # Fuse bytes for this design (verified bit-by-bit; see bypass_mcu_avr_classic.c header):
 #   lfuse=0x4A : SPIEN on, CKDIV8 on (1.2MHz), SUT=14CK+64ms, int 9.6MHz RC, WDTON forced on
@@ -459,8 +529,17 @@ ATTINY13A_HFUSE = 0xf9
 TINYX5_LFUSE = 0x62
 TINYX5_HFUSE = 0xcc
 
+# Hardware recipes consume literal, single-argument values. The public fuse
+# variables stay overridable so test-fuses can exercise unsafe configurations,
+# but whitespace or option-like text cannot become another avrdude argv entry.
+override AVR_PROGRAMMER_ARG := $(if $(findstring ',$(value AVR_PROGRAMMER)),,$(value AVR_PROGRAMMER))
+override ATTINY13A_LFUSE_ARG := $(if $(findstring ',$(value ATTINY13A_LFUSE)),,$(value ATTINY13A_LFUSE))
+override ATTINY13A_HFUSE_ARG := $(if $(findstring ',$(value ATTINY13A_HFUSE)),,$(value ATTINY13A_HFUSE))
+override TINYX5_LFUSE_ARG := $(if $(findstring ',$(value TINYX5_LFUSE)),,$(value TINYX5_LFUSE))
+override TINYX5_HFUSE_ARG := $(if $(findstring ',$(value TINYX5_HFUSE)),,$(value TINYX5_HFUSE))
+
 # Common avrdude flags for the ATtiny13a (programmer + part).
-ATTINY13A_AVRDUDE_FLAGS = -c $(AVR_PROGRAMMER) -p $(ATTINY13A_AVRDUDE_PART)
+override ATTINY13A_AVRDUDE_FLAGS = -c '$(AVR_PROGRAMMER_ARG)' -p $(ATTINY13A_AVRDUDE_PART)
 
 # --- Host test-suite compiler / simavr ---------------------------------------
 # Host (PC) compiler for the test suite (NOT the AVR cross-compiler).
@@ -746,7 +825,7 @@ CFLAGS    = -mmcu=$(ATTINY13A_MCU)   -DF_CPU=$(ATTINY13A_F_CPU)   $(CFLAGS_COMMO
 LDFLAGS   = -mmcu=$(ATTINY13A_MCU)   -Wl,--gc-sections
 # Internal sequencing override: normal public builds force current tools/flags;
 # validated consumer phases set this empty to reuse the ELF they just checked.
-AVR_REBUILD_PREREQ ?= FORCE
+# Sanitized from literal caller data before rule generation at the top.
 
 # Always-out-of-date prerequisite used for artifacts whose effective build
 # command includes command-line variables that timestamps cannot represent.
@@ -834,11 +913,11 @@ $(AVR_FW)$(call fw_image_tail,$(1),$(ATTINY13A_MCU)).elf: $$(CORE_SRC) $$(src_$(
 	fi; \
 	if ! mv "$$$$tmp" "$$@"; then rm -f "$$$$tmp"; exit 1; fi
 
-$(AVR_FW)$(call fw_image_tail,$(1),$(ATTINY13A_MCU)).hex: $(AVR_FW)$(call fw_image_tail,$(1),$(ATTINY13A_MCU)).elf $$(IHEX_VALIDATOR)
+$(AVR_FW)$(call fw_image_tail,$(1),$(ATTINY13A_MCU)).hex: $(AVR_FW)$(call fw_image_tail,$(1),$(ATTINY13A_MCU)).elf $$(IHEX_VALIDATOR_ARG)
 	@if ! rm -f "$$@"; then echo "FAIL: could not remove stale artifact for $$@"; exit 1; fi; \
 	tmp=$$$$(mktemp "$$@.tmp.XXXXXX") || exit 1; \
 	if ! $$(OBJCOPY) -O ihex -R .eeprom "$$<" "$$$$tmp"; then rm -f "$$$$tmp"; exit 1; fi; \
-	if ! $$(IHEX_VALIDATOR) "$$$$tmp"; then \
+	if ! '$$(IHEX_VALIDATOR_ARG)' "$$$$tmp"; then \
 		echo "FAIL: objcopy produced an invalid HEX: $$@"; rm -f "$$$$tmp"; exit 1; \
 	fi; \
 	if ! mv "$$$$tmp" "$$@"; then rm -f "$$$$tmp"; exit 1; fi
@@ -867,11 +946,11 @@ $(AVR_FW)$(call fw_image_tail,$(1),$(mmcu_$(2))).elf: $$(CORE_SRC) $$(src_$(1)) 
 	fi; \
 	if ! mv "$$$$tmp" "$$@"; then rm -f "$$$$tmp"; exit 1; fi
 
-$(AVR_FW)$(call fw_image_tail,$(1),$(mmcu_$(2))).hex: $(AVR_FW)$(call fw_image_tail,$(1),$(mmcu_$(2))).elf $$(IHEX_VALIDATOR)
+$(AVR_FW)$(call fw_image_tail,$(1),$(mmcu_$(2))).hex: $(AVR_FW)$(call fw_image_tail,$(1),$(mmcu_$(2))).elf $$(IHEX_VALIDATOR_ARG)
 	@if ! rm -f "$$@"; then echo "FAIL: could not remove stale artifact for $$@"; exit 1; fi; \
 	tmp=$$$$(mktemp "$$@.tmp.XXXXXX") || exit 1; \
 	if ! $$(OBJCOPY) -O ihex -R .eeprom "$$<" "$$$$tmp"; then rm -f "$$$$tmp"; exit 1; fi; \
-	if ! $$(IHEX_VALIDATOR) "$$$$tmp"; then \
+	if ! '$$(IHEX_VALIDATOR_ARG)' "$$$$tmp"; then \
 		echo "FAIL: objcopy produced an invalid HEX: $$@"; rm -f "$$$$tmp"; exit 1; \
 	fi; \
 	if ! mv "$$$$tmp" "$$@"; then rm -f "$$$$tmp"; exit 1; fi
@@ -1043,7 +1122,10 @@ attiny13a: classic-variant-request-valid $(ATTINY13A_HEXES) attiny13a-size
 
 # Report flash/RAM usage of every ATtiny13a variant build.
 attiny13a-size: classic-variant-request-valid $(ATTINY13A_ELFS)
-	@for e in $(ATTINY13A_ELFS); do echo "== $$e =="; $(SIZE) --mcu=$(ATTINY13A_MCU) -C $$e; done
+	@for e in $(ATTINY13A_ELFS); do \
+		echo "== $$e =="; \
+		$(SIZE) --mcu=$(ATTINY13A_MCU) -C "$$e" || exit 1; \
+	done
 
 # Per-tinyx5-chip build + size targets: attiny85/attiny85-size, attiny45/...
 # $(call MCU_X5_BUILD_TARGETS,chip-number)
@@ -1051,7 +1133,10 @@ define MCU_X5_BUILD_TARGETS
 .PHONY: attiny$(1) attiny$(1)-size
 attiny$(1): classic-variant-request-valid $$(ATTINY$(1)_HEXES) attiny$(1)-size
 attiny$(1)-size: classic-variant-request-valid $$(ATTINY$(1)_ELFS)
-	@for e in $$(ATTINY$(1)_ELFS); do echo "== $$$$e =="; $$(SIZE) --mcu=$$(mmcu_$(1)) -C $$$$e; done
+	@for e in $$(ATTINY$(1)_ELFS); do \
+		echo "== $$$$e =="; \
+		$$(SIZE) --mcu=$$(mmcu_$(1)) -C "$$$$e" || exit 1; \
+	done
 endef
 $(foreach n,$(TINYX5),$(eval $(call MCU_X5_BUILD_TARGETS,$(n))))
 
@@ -1249,7 +1334,7 @@ pic10f322: $(PIC10F322_CORE_SRC) $(PIC10F322_HEADERS) $(foreach v,$(CLASSIC_VARI
 			echo "FAIL: XC8 reported success but did not produce a nonempty $$hex"; \
 			printf '%s\n' "$$out"; rm -f "$$hex"; fail=1; continue; \
 		fi; \
-		if ! $(IHEX_VALIDATOR) "$$hex"; then \
+		if ! '$(IHEX_VALIDATOR_ARG)' "$$hex"; then \
 			echo "FAIL: XC8 produced an invalid Intel HEX image for variant $$v"; \
 			rm -f "$$hex"; fail=1; continue; \
 		fi; \
@@ -2277,7 +2362,7 @@ attiny202: | $(XT_BUILD_DIR)
 			echo "FAIL: could not generate HEX for ATtiny202 variant $$v"; \
 			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
 		fi; \
-		if ! $(IHEX_VALIDATOR) "$$hex_tmp"; then \
+		if ! '$(IHEX_VALIDATOR_ARG)' "$$hex_tmp"; then \
 			echo "FAIL: objcopy produced an empty or invalid HEX for ATtiny202 variant $$v"; \
 			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \
 		fi; \
@@ -2626,18 +2711,30 @@ attiny202-lockstep: test-fuses attiny202 $(XT_LOCKSTEP_FFI_LIB)
 # test-fuses. avrdude exposes the AVR8X fuses as named memories.
 XT_PROGRAMMER   ?= serialupdi
 XT_UPDI_PORT    ?= /dev/ttyUSB0
-XT_AVRDUDE_PART ?= t202
-XT_AVRDUDE_FLAGS = -c $(XT_PROGRAMMER) -P $(XT_UPDI_PORT) -p $(XT_AVRDUDE_PART)
+override XT_AVRDUDE_PART := t202
+override XT_PROGRAMMER_ARG := $(if $(findstring ',$(value XT_PROGRAMMER)),,$(value XT_PROGRAMMER))
+override XT_UPDI_PORT_ARG := $(if $(findstring ',$(value XT_UPDI_PORT)),,$(value XT_UPDI_PORT))
+override XT_FUSE_WDTCFG_ARG := $(if $(findstring ',$(value XT_FUSE_WDTCFG)),,$(value XT_FUSE_WDTCFG))
+override XT_FUSE_BODCFG_ARG := $(if $(findstring ',$(value XT_FUSE_BODCFG)),,$(value XT_FUSE_BODCFG))
+override XT_FUSE_OSCCFG_ARG := $(if $(findstring ',$(value XT_FUSE_OSCCFG)),,$(value XT_FUSE_OSCCFG))
+override XT_FUSE_SYSCFG0_ARG := $(if $(findstring ',$(value XT_FUSE_SYSCFG0)),,$(value XT_FUSE_SYSCFG0))
+override XT_FUSE_SYSCFG1_ARG := $(if $(findstring ',$(value XT_FUSE_SYSCFG1)),,$(value XT_FUSE_SYSCFG1))
+override XT_FUSE_APPEND_ARG := $(if $(findstring ',$(value XT_FUSE_APPEND)),,$(value XT_FUSE_APPEND))
+override XT_FUSE_BOOTEND_ARG := $(if $(findstring ',$(value XT_FUSE_BOOTEND)),,$(value XT_FUSE_BOOTEND))
+override XT_AVRDUDE_FLAGS = -c '$(XT_PROGRAMMER_ARG)' -P '$(XT_UPDI_PORT_ARG)' -p $(XT_AVRDUDE_PART)
 
 # One definition of each hardware action, so the single-step goals and the
 # ordered transaction below cannot drift apart.
-XT_PROG_HEX = $(XT_BUILD_DIR)/$(call fw_image,$(VARIANT),$(XT_TAG)).hex
-XT_FUSE_WRITE = $(AVRDUDE) $(XT_AVRDUDE_FLAGS) \
-		-U wdtcfg:w:$(XT_FUSE_WDTCFG):m   -U bodcfg:w:$(XT_FUSE_BODCFG):m \
-		-U osccfg:w:$(XT_FUSE_OSCCFG):m   -U syscfg0:w:$(XT_FUSE_SYSCFG0):m \
-		-U syscfg1:w:$(XT_FUSE_SYSCFG1):m -U append:w:$(XT_FUSE_APPEND):m \
-		-U bootend:w:$(XT_FUSE_BOOTEND):m
-XT_FLASH_WRITE = $(AVRDUDE) $(XT_AVRDUDE_FLAGS) -U flash:w:$(XT_PROG_HEX):i
+override XT_PROG_HEX = $(XT_BUILD_DIR)/$(call fw_image,$(VARIANT),$(XT_TAG)).hex
+override XT_FUSE_WRITE = '$(AVRDUDE_ARG)' $(XT_AVRDUDE_FLAGS) \
+		-U wdtcfg:w:'$(XT_FUSE_WDTCFG_ARG)':m \
+		-U bodcfg:w:'$(XT_FUSE_BODCFG_ARG)':m \
+		-U osccfg:w:'$(XT_FUSE_OSCCFG_ARG)':m \
+		-U syscfg0:w:'$(XT_FUSE_SYSCFG0_ARG)':m \
+		-U syscfg1:w:'$(XT_FUSE_SYSCFG1_ARG)':m \
+		-U append:w:'$(XT_FUSE_APPEND_ARG)':m \
+		-U bootend:w:'$(XT_FUSE_BOOTEND_ARG)':m
+override XT_FLASH_WRITE = '$(AVRDUDE_ARG)' $(XT_AVRDUDE_FLAGS) -U flash:w:'$(XT_PROG_HEX)':i
 
 .PHONY: attiny202-fuses attiny202-flash attiny202-program
 attiny202-fuses:
@@ -2650,7 +2747,7 @@ attiny202-flash: variant-selectors-valid attiny202
 # Fresh chip, as ONE ordered transaction: build and validate the selected image,
 # then write the fuses, then flash it. The build is a prerequisite, not a step,
 # so nothing reaches silicon if it fails; see AVR_PROGRAM_IMAGE_CHECK.
-attiny202-program: variant-selectors-valid attiny202
+attiny202-program: variant-selectors-valid avr-program-request-valid attiny202
 	@hex="$(XT_PROG_HEX)"; \
 	$(AVR_PROGRAM_IMAGE_CHECK); \
 	$(AVR_PROGRAMMER_CHECK); \
@@ -2915,15 +3012,15 @@ clean:
 # Read-only: print the chip's currently programmed fuse bytes. Run this FIRST
 # to record a chip's existing fuses before changing anything.
 attiny13a-readfuses:
-	$(AVRDUDE) $(ATTINY13A_AVRDUDE_FLAGS) -U lfuse:r:-:h -U hfuse:r:-:h
+	'$(AVRDUDE_ARG)' $(ATTINY13A_AVRDUDE_FLAGS) -U lfuse:r:-:h -U hfuse:r:-:h
 
 # One definition of each hardware action, shared by the single-step goals and
 # the ordered transaction below.
-ATTINY13A_PROG_HEX = $(AVR_FW)$(call fw_image_tail,$(VARIANT),$(ATTINY13A_MCU)).hex
-ATTINY13A_FUSE_WRITE = $(AVRDUDE) $(ATTINY13A_AVRDUDE_FLAGS) \
-		-U lfuse:w:$(ATTINY13A_LFUSE):m \
-		-U hfuse:w:$(ATTINY13A_HFUSE):m
-ATTINY13A_FLASH_WRITE = $(AVRDUDE) $(ATTINY13A_AVRDUDE_FLAGS) -U flash:w:$(ATTINY13A_PROG_HEX):i
+override ATTINY13A_PROG_HEX = $(AVR_FW)$(call fw_image_tail,$(VARIANT),$(ATTINY13A_MCU)).hex
+override ATTINY13A_FUSE_WRITE = '$(AVRDUDE_ARG)' $(ATTINY13A_AVRDUDE_FLAGS) \
+		-U lfuse:w:'$(ATTINY13A_LFUSE_ARG)':m \
+		-U hfuse:w:'$(ATTINY13A_HFUSE_ARG)':m
+override ATTINY13A_FLASH_WRITE = '$(AVRDUDE_ARG)' $(ATTINY13A_AVRDUDE_FLAGS) -U flash:w:'$(ATTINY13A_PROG_HEX)':i
 
 # Write the design's fuse bytes. Safe: does not touch RSTDISBL/DWEN, so ISP
 # access is preserved. Verify before relying on a board in the field.
@@ -2938,7 +3035,7 @@ attiny13a-flash: variant-selectors-valid $(ATTINY13A_PROG_HEX)
 # variant image (which reports sizes and rejects an invalid HEX), then write the
 # fuses, then flash the selected variant. The build is a prerequisite, not a
 # step, so nothing reaches silicon if it fails; see AVR_PROGRAM_IMAGE_CHECK.
-attiny13a-program: variant-selectors-valid attiny13a
+attiny13a-program: variant-selectors-valid classic-avr-program-request-valid attiny13a
 	@hex="$(ATTINY13A_PROG_HEX)"; \
 	$(AVR_PROGRAM_IMAGE_CHECK); \
 	$(AVR_PROGRAMMER_CHECK); \
@@ -2952,16 +3049,16 @@ attiny13a-program: variant-selectors-valid attiny13a
 # $(call MCU_X5_FLASH_TARGETS,chip-number)
 define MCU_X5_FLASH_TARGETS
 .PHONY: attiny$(1)-fuses attiny$(1)-flash attiny$(1)-program
-ATTINY$(1)_PROG_HEX = $(AVR_FW)$$(call fw_image_tail,$$(VARIANT),$$(mmcu_$(1))).hex
-ATTINY$(1)_FUSE_WRITE = $$(AVRDUDE) -c $$(AVR_PROGRAMMER) -p $$(part_$(1)) \
-		-U lfuse:w:$$(TINYX5_LFUSE):m \
-		-U hfuse:w:$$(TINYX5_HFUSE):m
-ATTINY$(1)_FLASH_WRITE = $$(AVRDUDE) -c $$(AVR_PROGRAMMER) -p $$(part_$(1)) -U flash:w:$$(ATTINY$(1)_PROG_HEX):i
+override ATTINY$(1)_PROG_HEX = $(AVR_FW)$$(call fw_image_tail,$$(VARIANT),$$(mmcu_$(1))).hex
+override ATTINY$(1)_FUSE_WRITE = '$$(AVRDUDE_ARG)' -c '$$(AVR_PROGRAMMER_ARG)' -p $$(part_$(1)) \
+		-U lfuse:w:'$$(TINYX5_LFUSE_ARG)':m \
+		-U hfuse:w:'$$(TINYX5_HFUSE_ARG)':m
+override ATTINY$(1)_FLASH_WRITE = '$$(AVRDUDE_ARG)' -c '$$(AVR_PROGRAMMER_ARG)' -p $$(part_$(1)) -U flash:w:'$$(ATTINY$(1)_PROG_HEX)':i
 attiny$(1)-fuses:
 	$$(ATTINY$(1)_FUSE_WRITE)
 attiny$(1)-flash: variant-selectors-valid $$(ATTINY$(1)_PROG_HEX)
 	$$(ATTINY$(1)_FLASH_WRITE)
-attiny$(1)-program: variant-selectors-valid attiny$(1)
+attiny$(1)-program: variant-selectors-valid classic-avr-program-request-valid attiny$(1)
 	@hex="$$(ATTINY$(1)_PROG_HEX)"; \
 	$$(AVR_PROGRAM_IMAGE_CHECK); \
 	$$(AVR_PROGRAMMER_CHECK); \
@@ -3338,26 +3435,27 @@ test-makefile-name-contract: python-version-valid
 test-todo-index: python-version-valid test/test_todo_index.py TODO.md
 	@python3 test/test_todo_index.py
 
-# Every current resource figure -- four utilization tables, the sentences derived
-# from them, and the same numbers restated in three other documents -- is checked
-# against the images that produced it. Same family as the two contracts above,
+# Current resource documentation -- four utilization tables, the sentences
+# derived from them, and the same numbers restated elsewhere -- is checked for
+# exact structure, arithmetic and agreement. Same family as the two contracts above,
 # and it drifted the same way: at the v0.9.10 candidate the AVR Classic table
 # still held the pre-F1 ATtiny13a images, the ATtiny202 and PIC12F675 tables were
 # several changes behind, the ATtiny45/85 rows were missing outright, and the two
 # derived sentences had been computed from the stale numbers. A reader decides
 # whether a change fits from exactly these figures.
 #
-# It needs no AVR or PIC toolchain: program size is read out of the ELF section
-# headers and the Intel HEX directly (see the module docstring), so the gate
-# measures whatever this tree has already built and says how many of the 21
-# images that was. `make test` runs on a runner with neither XC8 nor the
-# ATtiny_DFP, so demanding all 21 would fail exactly where the AVR-only evidence
-# is still worth having.
+# It needs no AVR or PIC toolchain. The ordinary `make test` mode checks prose
+# and any existing images without calling that a final-candidate run. Production
+# release staging invokes the script's strict mode after all validation: it
+# requires 21/21 images plus the complete RAM/stack logs and retains one
+# source-commit-bound result.
 .PHONY: test-resource-tables
 test-resource-tables: python-version-valid test/test_resource_tables.py \
+		test/test_resource_tables_contract.py \
 		DESIGN_DOCUMENTATION.adoc docs/context_seu_detection.md \
-		docs/pic12f675_feasibility.md CHANGELOG.md
+		docs/pic12f675_feasibility.md docs/pic10f320_validation.md CHANGELOG.md
 	@python3 test/test_resource_tables.py
+	@python3 test/test_resource_tables_contract.py
 
 # The package pinout diagrams are transcribed from each device pack's own pinout
 # data and are what somebody wires a board from, so a whitespace defect in one is
@@ -4783,7 +4881,7 @@ pic10f320: variant-selectors-valid $(PIC10F320_SRC)
 		echo "FAIL: XC8 reported success but did not produce a nonempty $$hex"; \
 		printf '%s\n' "$$out"; exit 1; \
 	fi; \
-	if ! $(IHEX_VALIDATOR) "$$hex"; then \
+	if ! '$(IHEX_VALIDATOR_ARG)' "$$hex"; then \
 		echo "FAIL: XC8 produced an invalid Intel HEX image: $$hex"; exit 1; \
 	fi; \
 	dec=`printf '%s\n' "$$out" | grep -E 'Program space' \
@@ -4937,7 +5035,7 @@ pic10f320-size: variant-selectors-valid $(PIC10F320_SRC)
 		echo "FAIL: XC8 reported success but did not produce a nonempty $$probe"; \
 		printf '%s\n' "$$out"; exit 1; \
 	fi; \
-	if ! $(IHEX_VALIDATOR) "$$probe"; then \
+	if ! '$(IHEX_VALIDATOR_ARG)' "$$probe"; then \
 		echo "FAIL: XC8 produced an invalid Intel HEX size probe: $$probe"; exit 1; \
 	fi; \
 	if ! printf '%s\n' "$$out" | grep -qE 'Program space'; then \
@@ -5715,7 +5813,7 @@ pic12f675: $(PIC12F675_CORE_SRC) $(PIC12F675_HEADERS) $(foreach v,$(CLASSIC_VARI
 			echo "FAIL: XC8 reported success but did not produce a nonempty $$hex"; \
 			printf '%s\n' "$$out"; rm -f "$$hex"; fail=1; continue; \
 		fi; \
-		if ! $(IHEX_VALIDATOR) "$$hex"; then \
+		if ! '$(IHEX_VALIDATOR_ARG)' "$$hex"; then \
 			echo "FAIL: XC8 produced an invalid Intel HEX image for variant $$v"; \
 			rm -f "$$hex"; fail=1; continue; \
 		fi; \
@@ -6521,7 +6619,7 @@ pic12f675-simcal: pic12f675 $(PIC12F675_CAL_INJECTOR)
 		rm -f "$$sim" || exit 1; \
 		$(PIC12F675_PYTHON) $(PIC12F675_CAL_INJECTOR) --flash-words $(PIC12F675_FLASH_WORDS) \
 			--value $(PIC12F675_CAL_VALUE) "$$hex" "$$sim" || exit 1; \
-		$(IHEX_VALIDATOR) "$$sim" || exit 1; \
+		'$(IHEX_VALIDATOR_ARG)' "$$sim" || exit 1; \
 	done; \
 	$(pic12f675_simcal_matrix_sh); \
 	if [ $$simcal_count -ne 3 ]; then \
@@ -7024,7 +7122,7 @@ pic12f675-preflight: $(PIC12F675_TRIM_EVIDENCE_TOOL)
 		echo "ERROR: pk2cmd reader changed during baseline capture."; exit 1; \
 	fi; \
 	cat "$$version_log"; cat "$$read_log"; \
-	$(IHEX_VALIDATOR) "$$read_hex" || exit 1; \
+	'$(IHEX_VALIDATOR_ARG)' "$$read_hex" || exit 1; \
 	baseline_output=`python3 "$(PIC12F675_TRIM_EVIDENCE_TOOL)" baseline \
 		--reader-path "$$reader_path" --version-log "$$version_log" \
 		--read-log "$$read_log" --read-hex "$$read_hex" --output "$$evidence"` || exit 1; \
@@ -7174,7 +7272,7 @@ pic12f675-finalize: variant-selectors-valid $(PIC12F675_TRIM_EVIDENCE_TOOL) \
 	read_rc=0; \
 	"$$reader_path" "-P$$part" -I "-GF$$read_hex" -R >"$$read_log" 2>&1 || read_rc=$$?; \
 	cat "$$version_log"; cat "$$read_log"; \
-	if [ "$$read_rc" -eq 0 ] && ! $(IHEX_VALIDATOR) "$$read_hex"; then read_rc=125; fi; \
+	if [ "$$read_rc" -eq 0 ] && ! '$(IHEX_VALIDATOR_ARG)' "$$read_hex"; then read_rc=125; fi; \
 	recovery_rc=0; \
 	recovery_output=`python3 "$(PIC12F675_TRIM_EVIDENCE_TOOL)" recovery-result \
 		--baseline "$$evidence" --reservation "$$reservation" \
@@ -7485,7 +7583,7 @@ pic12f675-program pic12f675-release-program: variant-selectors-valid
 		echo "ERROR: selected image changed while its private snapshot was created: $$hex"; \
 		exit 1; \
 	fi; \
-	$(IHEX_VALIDATOR) "$$snapshot" || exit 1; \
+	'$(IHEX_VALIDATOR_ARG)' "$$snapshot" || exit 1; \
 	if ! calibration_check=`python3 "$(PIC12F675_CAL_CHECKER)" \
 			--assert-preserves-calibration \
 			--flash-words $(PIC12F675_FLASH_WORDS) "$$snapshot"`; then \
@@ -7564,7 +7662,7 @@ pic12f675-program pic12f675-release-program: variant-selectors-valid
 		echo "ERROR: pk2cmd reader changed during immediate pre-write capture."; exit 1; \
 	fi; \
 	cat "$$reader_version_log"; cat "$$prewrite_log"; \
-	$(IHEX_VALIDATOR) "$$prewrite_hex" || exit 1; \
+	'$(IHEX_VALIDATOR_ARG)' "$$prewrite_hex" || exit 1; \
 	prewrite_check=`python3 "$(PIC12F675_TRIM_EVIDENCE_TOOL)" verify \
 		--baseline "$$evidence" --reader-path "$$reader_path" \
 		--version-log "$$reader_version_log" --read-log "$$prewrite_log" \
@@ -7624,7 +7722,7 @@ pic12f675-program pic12f675-release-program: variant-selectors-valid
 	"$$reader_path" "-P$$part" -I "-GF$$postread_hex" -R \
 		>"$$postread_log" 2>&1 || postread_rc=$$?; \
 	cat "$$postread_log"; \
-	if [ "$$postread_rc" -eq 0 ] && ! $(IHEX_VALIDATOR) "$$postread_hex"; then \
+	if [ "$$postread_rc" -eq 0 ] && ! '$(IHEX_VALIDATOR_ARG)' "$$postread_hex"; then \
 		postread_rc=125; \
 	fi; \
 	result_rc=0; \
@@ -7910,7 +8008,7 @@ override RELEASE_SOAK_NAMES := \
 override RELEASE_FIXED_EVIDENCE_FILES := \
 	build-avr-classic.log build-avr-xt.log \
 	build-pic10f322.log build-pic10f320.log build-pic12f675.log \
-	final-image-build.log \
+	final-image-build.log resource-tables.log \
 	attiny202-test.log attiny202-test-target.log \
 	pic10f322-test.log pic10f322-test-target-variants.log \
 	pic10f320-test.log pic10f320-test-target-variants.log \
@@ -8235,7 +8333,7 @@ help:
 	@echo "  test-fault-wdt-note-contract  each PIC fault adapter supplies its own gpsim watchdog note (included in test)"
 	@echo "  test-makefile-name-contract  every make goal, variable and child-environment name a file or doc uses really exists (included in test)"
 	@echo "  test-todo-index    TODO.md's priority summary matches its open sections, both ways (included in test)"
-	@echo "  test-resource-tables  every documented flash/RAM figure matches the image it was measured from (included in test)"
+	@echo "  test-resource-tables  resource-document arithmetic/agreement + final-evidence contract regression (included in test)"
 	@echo "  test-pinout-alignment  every ASCII package-pinout diagram draws a square box (included in test)"
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
 	@echo "  test-misra-output-contract  authored source/header MISRA diagnostics fail every lane (included in test)"

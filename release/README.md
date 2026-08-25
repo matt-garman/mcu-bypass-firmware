@@ -109,8 +109,8 @@ validation suite — backs these binaries, through two mechanisms:
    source commit, pinned toolchain versions, per-image fuse bytes / CONFIG word,
    and its validation evidence. Beginning with `v0.9.6`, a machine-readable
    `QUALIFICATION` record is checked
-   against that release's exact retained-evidence inventory (34 files from
-   `v0.9.9`, 28 in `v0.9.6`–`v0.9.8`) and every one of its soak logs (18 from
+   against that release's exact retained-evidence inventory (35 files from
+   `v0.9.10`, 34 in `v0.9.9`, 28 in `v0.9.6`–`v0.9.8`) and every one of its soak logs (18 from
    `v0.9.9`, 15 before the PIC12F675 graduated) before publication; each log must
    identify its canonical
    combination and report the configured duration, expected nonzero

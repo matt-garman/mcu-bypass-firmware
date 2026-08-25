@@ -78,7 +78,7 @@ for required in \
 		'**Current status (v0.9.10;' \
 		'PIC12F675 is **release-supported from `v0.9.9`**' \
 		'included in the default `all` goal, both CI aggregates' \
-		'21-image release set, the 18-combination release soak, and the 34-file retained evidence inventory' \
+		'21-image release set, the 18-combination release soak, and the 35-file retained evidence inventory' \
 		'Section 8 items 1, 2, 8, and 9 remain explicitly deferred to the `1.x.y` hardware-validation pass' \
 		'provides no real-programmer factory-trim preservation guarantee'; do
 	grep -Fq "$required" <<<"$current_pic12f675_status_one_line" \
@@ -128,7 +128,7 @@ fi
 checks=$((checks + 1))
 
 # Current reader-facing inventories must agree with the canonical seven-part,
-# three-PIC, 21-image, 18-soak, and 34-evidence contract while preserving the
+# three-PIC, 21-image, 18-soak, and 35-evidence contract while preserving the
 # explicitly historical six-target releases.
 project_contract=$(tr '\n' ' ' < "$PROJECT_README" | tr -s ' ')
 release_contract=$(tr '\n' ' ' < "$RELEASE_README" | tr -s ' ')
@@ -152,7 +152,7 @@ for required in \
 done
 for required in \
 		'`pic10f320-test-stack-bound`, `pic12f675-test-stack-bound`' \
-		'exact canonical 34-file evidence set' \
+		'exact canonical 35-file evidence set' \
 		'each of 18 release soak combinations' \
 		'historical 28-file/15-soak boundary for v0.9.6-v0.9.8' \
 		'36 PIC10F322, 75 PIC10F320, and 156 PIC12F675 checks' \
@@ -183,6 +183,29 @@ for wiring in \
 done
 checks=$((checks + 1))
 
+# D4: final resource evidence must consume the post-qualification logs and the
+# final regenerated image set, not the initial clean build. Pin both its exact
+# arguments and its position before the final source-provenance check/staging.
+for wiring in \
+	'python3 "$REPO_ROOT/test/test_resource_tables.py" --root "$REPO_ROOT"' \
+	'--require-all-images --evidence-dir "$EVID" --source-commit "$GIT_SHA"' \
+	'>"$EVID/resource-tables.log" 2>&1'; do
+	grep -Fq -- "$wiring" "$RELEASE" \
+		|| fail "release producer omits strict resource-evidence wiring: $wiring"
+done
+final_image_line=$(grep -n 'regenerating classic AVR HEX from the validated ELFs' \
+	"$RELEASE" | cut -d: -f1)
+resource_line=$(grep -n 'python3 "$REPO_ROOT/test/test_resource_tables.py" --root "$REPO_ROOT"' \
+	"$RELEASE" | cut -d: -f1)
+final_source_line=$(grep -n 'if ! release_source_is_unchanged "$GIT_SHA" "$DRY_RUN"' \
+	"$RELEASE" | cut -d: -f1)
+[[ "$final_image_line" =~ ^[0-9]+$ && "$resource_line" =~ ^[0-9]+$ \
+	&& "$final_source_line" =~ ^[0-9]+$ \
+	&& "$final_image_line" -lt "$resource_line" \
+	&& "$resource_line" -lt "$final_source_line" ]] \
+	|| fail "strict resource evidence is not between final image regeneration and the final source check"
+checks=$((checks + 1))
+
 # --no-print-directory is required on every capture here, and -s does not imply
 # it: Make enables -w in a sub-make and propagates a literal w through
 # MAKEFLAGS, where it OVERRIDES -s. `make release` reaches this gate through
@@ -204,12 +227,16 @@ reset_fixture() {
 	local liveness=${3:-60000}
 	local dirty=${4:-0}
 	local expected_checks=$((duration / liveness)) name file variant stem
-	local matrix_record matrix_digest
+	local matrix_record matrix_digest resource_digest
 	rm -rf "$release" "$matrix_build"
 	mkdir -p "$release/evidence" "$matrix_build/simcal"
 	for file in "${evidence_names[@]}"; do
 		printf 'retained evidence: %s\n' "$file" > "$release/evidence/$file"
 	done
+	cat > "$release/evidence/resource-tables.log" <<EOF
+resource tables: fixture checks, 0 failures (21 of 21 documented images measured; complete candidate required)
+RESOURCE_TABLES_RESULT format=1 status=pass source_commit=$sha images=21 avr_static=12 classic_stack=9 pic_data=6 pic_stack=9
+EOF
 	for variant in "${pic12f675_variants[@]}"; do
 		stem="$fw_base-$pic12f675_tag-$variant"
 		printf 'shipping fixture: %s\n' "$variant" > "$matrix_build/$stem.hex"
@@ -235,6 +262,8 @@ reset_fixture() {
 	matrix_digest=$(sha256sum -- \
 		"$release/evidence/pic12f675-qualified-matrix.json")
 	matrix_digest=${matrix_digest%% *}
+	resource_digest=$(sha256sum -- "$release/evidence/resource-tables.log")
+	resource_digest=${resource_digest%% *}
 	{
 		printf '=== PIC12F675 retained matrix qualified: %s ===\n' "$matrix_record"
 		printf '=== all PIC12F675 pre-hardware checks complete: %s ===\n' "$matrix_record"
@@ -253,7 +282,7 @@ SOAK_RESULT format=1 status=pass combination=$name duration_ms=$duration livenes
 EOF
 	done
 	cat > "$release/QUALIFICATION" <<EOF
-format=2
+format=3
 version=$version
 release_mode=$mode
 source_commit=$sha
@@ -262,6 +291,7 @@ soak_duration_ms=$duration
 soak_liveness_interval_ms=$liveness
 soak_combination_count=${#soak_names[@]}
 pic12f675_matrix_sha256=$matrix_digest
+resource_tables_sha256=$resource_digest
 EOF
 	{
 		printf '# Firmware release %s\n\n' "$version"
@@ -273,6 +303,8 @@ EOF
 		printf -- '- **Soak combinations:** %s\n' "${#soak_names[@]}"
 		printf -- '- **PIC12F675 qualified matrix:** `evidence/pic12f675-qualified-matrix.json` (SHA-256 `%s`)\n' \
 			"$matrix_digest"
+		printf -- '- **Final resource evidence:** `evidence/resource-tables.log` (SHA-256 `%s`)\n' \
+			"$resource_digest"
 	} > "$release/MANIFEST.md"
 }
 
@@ -281,6 +313,16 @@ refresh_matrix_digest() {
 	old_digest=$(awk -F= '$1 == "pic12f675_matrix_sha256" { print $2 }' \
 		"$release/QUALIFICATION")
 	new_digest=$(sha256sum -- "$release/evidence/pic12f675-qualified-matrix.json")
+	new_digest=${new_digest%% *}
+	sed -i "s/$old_digest/$new_digest/g" \
+		"$release/QUALIFICATION" "$release/MANIFEST.md"
+}
+
+refresh_resource_digest() {
+	local old_digest new_digest
+	old_digest=$(awk -F= '$1 == "resource_tables_sha256" { print $2 }' \
+		"$release/QUALIFICATION")
+	new_digest=$(sha256sum -- "$release/evidence/resource-tables.log")
 	new_digest=${new_digest%% *}
 	sed -i "s/$old_digest/$new_digest/g" \
 		"$release/QUALIFICATION" "$release/MANIFEST.md"
@@ -359,12 +401,26 @@ printf 'extra=value\n' >> "$release/QUALIFICATION"
 expect_fail "unknown qualification key" "unknown QUALIFICATION key"
 
 reset_fixture
-printf 'format=2\n' >> "$release/QUALIFICATION"
+printf 'format=3\n' >> "$release/QUALIFICATION"
 expect_fail "duplicate qualification key" "duplicate QUALIFICATION key"
 
 reset_fixture
-sed -i 's/^format=2$/format=1/' "$release/QUALIFICATION"
+sed -i 's/^format=3$/format=2/' "$release/QUALIFICATION"
 expect_fail "obsolete qualification format" "unsupported QUALIFICATION format"
+
+reset_fixture
+printf 'changed resource evidence\n' >> "$release/evidence/resource-tables.log"
+expect_fail "changed resource evidence" "resource evidence digest does not match"
+
+reset_fixture
+sed -i 's/images=21/images=20/' "$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "incomplete resource result" "no exact source-bound complete result"
+
+reset_fixture
+sed -i 's/resource-tables.log` (SHA-256 `[0-9a-f]\{64\}`)/resource-tables.log` (SHA-256 `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`)/' \
+	"$release/MANIFEST.md"
+expect_fail "wrong manifest resource digest" "MANIFEST.md resource evidence digest"
 
 reset_fixture
 sed -i 's/^version=.*/version=v99.0.1/' "$release/QUALIFICATION"
@@ -554,8 +610,8 @@ for required in attiny85_cd4053_simple attiny45_cd4053_simple \
 done
 checks=$((checks + 1))
 
-[ "${#evidence_names[@]}" -eq 34 ] \
-	|| fail "canonical release evidence set has ${#evidence_names[@]} entries, expected 34"
+[ "${#evidence_names[@]}" -eq 35 ] \
+	|| fail "canonical release evidence set has ${#evidence_names[@]} entries, expected 35"
 for required in pic12f675-qualification.log pic12f675-qualified-matrix.json; do
 	[[ " ${evidence_names[*]} " == *" $required "* ]] \
 		|| fail "canonical release evidence set is missing $required"
