@@ -188,6 +188,7 @@ EOF
 # deadlocking on that already-held lock.
 cat > "$fakebin/flock" <<'EOF'
 #!/usr/bin/env bash
+if [ "${1:-}" = -n ] && [ "$#" -eq 2 ]; then exit 0; fi
 if [ "${1:-}" = --no-fork ]; then shift; fi
 [ "$#" -ge 2 ] || exit 90
 shift
@@ -336,7 +337,7 @@ case "$3" in
 		;;
 esac
 printf '%s\n' "$goal" >> "${MAKE_LOG:?}"
-exec "${REAL_MAKE:?}" --no-print-directory -s -C "${FAKE_REPO_ROOT:?}" \
+make_output=$("${REAL_MAKE:?}" --no-print-directory -s -C "${FAKE_REPO_ROOT:?}" \
 	CC="${TEST_CC:-fake-avr-gcc}" OBJCOPY=fake-tool SIZE=fake-tool HOSTCC=fake-tool \
 	OBJDUMP="${TEST_OBJDUMP:-fake-tool}" READELF=fake-tool \
 	IHEX_VALIDATOR="${TEST_IHEX_VALIDATOR:-${FAKE_BIN:?}/fake-tool}" AWK="${FAKE_BIN:?}/fake-awk" \
@@ -364,7 +365,24 @@ exec "${REAL_MAKE:?}" --no-print-directory -s -C "${FAKE_REPO_ROOT:?}" \
 	PIC10F320_SOAK_GPSIM_INC="${FAKE_TOOLCHAIN:?}/pic10f320-gpsim" \
 	ANALYZE_CMD="${TEST_ANALYZE_CMD:-fake-tool --checks=fake}" \
 	${TEST_EXTRA_MAKE_VAR:+"$TEST_EXTRA_MAKE_VAR"} \
-	"$goal"
+	"$goal")
+case "$goal" in
+	print-RELEASE_IMAGES)
+		if [ "${TEST_DUPLICATE_RELEASE_IMAGES:-0}" -eq 1 ]; then
+			printf '%s %s\n' "$make_output" "${make_output%% *}"
+		else
+			printf '%s\n' "$make_output"
+		fi
+		;;
+	print-RELEASE_SOAK_NAMES)
+		if [ "${TEST_DUPLICATE_RELEASE_SOAKS:-0}" -eq 1 ]; then
+			printf '%s %s\n' "$make_output" "${make_output%% *}"
+		else
+			printf '%s\n' "$make_output"
+		fi
+		;;
+	*) printf '%s\n' "$make_output" ;;
+esac
 EOF
 chmod 750 "$fakebin/make"
 
@@ -374,6 +392,8 @@ OUTPUT_PATH_OWNED=1
 
 run_preflight() {
 	local status_before status_after output_existed_before output_existed_after rc
+	local release_makeflags=${TEST_RELEASE_MAKEFLAGS-}
+	local release_gnumakeflags=${TEST_RELEASE_GNUMAKEFLAGS-}
 	status_before=$(tree_snapshot) || fail "could not snapshot the working tree"
 	[ -e "$preflight_output" ] && output_existed_before=1 || output_existed_before=0
 	if (
@@ -385,7 +405,11 @@ run_preflight() {
 		# `run_preflight` with no version would silently exercise the
 		# *versioned* path instead. Clearing the names here keeps each case
 		# testing the argument vector it actually passes.
-		unset VERSION RELEASE_ARGS
+		unset VERSION RELEASE_ARGS MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEOVERRIDES MAKELEVEL \
+			STRICT_TOOLS MUTATION_ALLOW_SKIP XT_STATIC_RAM_LIMIT XT_STACK_MAX_FRAME \
+			PIC12F675_DATA_LIMIT
+		[ -z "$release_makeflags" ] || export MAKEFLAGS="$release_makeflags"
+		[ -z "$release_gnumakeflags" ] || export GNUMAKEFLAGS="$release_gnumakeflags"
 		export PATH="$fakebin:$PATH"
 		export TMPDIR="$work"
 		export REAL_MAKE REAL_PYTHON REAL_GIT REAL_AWK REAL_MKTEMP
@@ -486,8 +510,8 @@ grep -Fxq 'yaml-import' "$tool_log" \
 [ ! -e "$preflight_output" ] \
 	|| fail "preflight created its prospective release output directory"
 query_count=$(wc -l < "$make_log")
-[ "$query_count" -eq 89 ] \
-	|| fail "preflight made $query_count Makefile queries, expected 89"
+[ "$query_count" -eq 91 ] \
+	|| fail "preflight made $query_count Makefile queries, expected 91"
 assert_no_release_scratch
 checks=$((checks + 1))
 
@@ -573,6 +597,144 @@ if PIC10F322_CHIP=10F320 run_preflight >"$output" 2>&1; then
 	fail "preflight accepted an inherited PIC10F322_CHIP override"
 fi
 expect_identity_refusal "an inherited PIC10F322_CHIP override" PIC10F322_CHIP environment
+
+# R6: source/flag bundles are development inputs, never production release
+# inputs. The first Make query rejects effective direct/inherited overrides and
+# injected makefiles; duplicate inventories then fail in the script's pure-Bash
+# configuration phase. Every case precedes selected-tool probes and scratch.
+expect_configuration_refusal() { # usage: <label> <name> <diagnostic>
+	local label=$1 name=$2 diagnostic=$3
+	grep -Fq -- "$diagnostic" "$output" \
+		|| fail "$label was refused for the wrong reason: $(<"$output")"
+	grep -Fq -- "$name" "$output" \
+		|| fail "$label did not name $name in its diagnostic: $(<"$output")"
+	if grep -Fq 'all required release tools' "$output"; then
+		fail "$label reached the tool preconditions before failing"
+	fi
+	[ ! -s "$tool_log" ] \
+		|| fail "$label executed a selected release tool before failing: $(<"$tool_log")"
+	[ ! -e "$preflight_output" ] \
+		|| fail "$label created the prospective release output directory"
+	assert_no_release_scratch
+	checks=$((checks + 1))
+}
+
+: > "$tool_log"
+if TEST_EXTRA_MAKE_VAR=CFLAGS=-DINJECTED_CLASSIC_FLAGS \
+		run_preflight >"$output" 2>&1; then
+	fail "preflight accepted a command-line CFLAGS override"
+fi
+expect_configuration_refusal "a command-line CFLAGS override" CFLAGS \
+	'unsupported release overrides'
+
+: > "$tool_log"
+if TEST_EXTRA_MAKE_VAR=XT_CORE_SRC=/dev/null run_preflight >"$output" 2>&1; then
+	fail "preflight accepted a command-line XT_CORE_SRC override"
+fi
+expect_configuration_refusal "a command-line XT_CORE_SRC override" XT_CORE_SRC \
+	'unsupported release overrides'
+
+: > "$tool_log"
+if TEST_RELEASE_MAKEFLAGS=-e PIC10F322_CFLAGS=-DINHERITED_322_FLAGS \
+		run_preflight >"$output" 2>&1; then
+	fail "preflight accepted an inherited PIC10F322_CFLAGS override"
+fi
+expect_configuration_refusal "an inherited PIC10F322_CFLAGS override" \
+	PIC10F322_CFLAGS 'unsupported release overrides'
+
+: > "$tool_log"
+if TEST_RELEASE_GNUMAKEFLAGS=PIC10F320_SRC=/dev/null run_preflight >"$output" 2>&1; then
+	fail "preflight accepted a GNUMAKEFLAGS PIC10F320_SRC override"
+fi
+expect_configuration_refusal "a GNUMAKEFLAGS PIC10F320_SRC override" \
+	PIC10F320_SRC 'unsupported release overrides'
+
+: > "$tool_log"
+if SANITIZE= run_preflight >"$output" 2>&1; then
+	fail "preflight accepted an ordinary inherited SANITIZE override"
+fi
+expect_configuration_refusal "an ordinary inherited SANITIZE override" SANITIZE \
+	'unsupported release overrides'
+
+: > "$tool_log"
+if TEST_RELEASE_MAKEFLAGS='--eval=override\ SANITIZE\ :=' \
+		run_preflight >"$output" 2>&1; then
+	fail "preflight accepted inherited GNU Make --eval"
+fi
+expect_configuration_refusal "inherited GNU Make --eval" --eval \
+	'GNU Make --eval/-f/--file/--makefile options are not supported'
+
+: > "$tool_log"
+if TEST_RELEASE_MAKEFLAGS="-f $work/not-a-release-makefile" \
+		run_preflight >"$output" 2>&1; then
+	fail "preflight accepted an inherited GNU Make -f option"
+fi
+expect_configuration_refusal "an inherited GNU Make -f option" -f \
+	'GNU Make --eval/-f/--file/--makefile options are not supported'
+
+: > "$tool_log"
+if GPSIM_TIMEOUT_SECONDS=1 run_preflight >"$output" 2>&1; then
+	fail "preflight accepted an inherited GPSIM_TIMEOUT_SECONDS override"
+fi
+expect_configuration_refusal "an inherited GPSIM_TIMEOUT_SECONDS override" \
+	GPSIM_TIMEOUT_SECONDS 'not a supported production release override'
+
+injected_release_makefile="$work/injected-release.mk"
+printf 'override CFLAGS := -DINJECTED_MAKEFILE_FLAGS\n' \
+	> "$injected_release_makefile"
+: > "$tool_log"
+if MAKEFILES="$injected_release_makefile" run_preflight >"$output" 2>&1; then
+	fail "preflight accepted an injected release makefile"
+fi
+expect_configuration_refusal "an injected release makefile" MAKEFILES \
+	'MAKEFILES injection'
+
+: > "$tool_log"
+if TEST_DUPLICATE_RELEASE_IMAGES=1 run_preflight >"$output" 2>&1; then
+	fail "preflight accepted duplicate RELEASE_IMAGES"
+fi
+expect_configuration_refusal "duplicate canonical images" RELEASE_IMAGES \
+	'contains duplicate entries'
+
+: > "$tool_log"
+if TEST_DUPLICATE_RELEASE_SOAKS=1 run_preflight >"$output" 2>&1; then
+	fail "preflight accepted duplicate RELEASE_SOAK_NAMES"
+fi
+expect_configuration_refusal "duplicate canonical soaks" RELEASE_SOAK_NAMES \
+	'contains duplicate entries'
+
+# The serialization marker is not a capability token. Spawn with close_fds so
+# the real lock descriptor held by this test's parent Make is absent; the script
+# must reject the marker before its first Make query.
+: > "$tool_log"
+if marker_output_text=$("$REAL_PYTHON" -c '
+import os
+import subprocess
+import sys
+
+env = {
+    "PATH": sys.argv[3],
+    "HOME": os.environ["HOME"],
+    "TMPDIR": os.environ.get("TMPDIR", os.environ["HOME"]),
+    "_MAKE_SERIAL_LOCK_HELD": sys.argv[2],
+}
+result = subprocess.run(
+    [sys.argv[1], "--preflight"],
+    env=env,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    text=True,
+    close_fds=True,
+    check=False,
+)
+sys.stdout.write(result.stdout)
+raise SystemExit(result.returncode)
+' "$RELEASE" "$lock_id" "$fakebin:$PATH" 2>&1); then
+	fail "preflight accepted a serialization marker without an inherited lock descriptor"
+fi
+printf '%s\n' "$marker_output_text" > "$output"
+expect_configuration_refusal "a serialization marker without its lock" \
+	_MAKE_SERIAL_LOCK_HELD 'has no inherited lock descriptor'
 
 # Build directories are not identity, and the whole fake toolchain this gate
 # runs on is itself a pile of tool-path overrides -- so a legitimate relocation
@@ -1837,6 +1999,7 @@ if TEST_AVR_LIBC_FAIL=1 TEST_SIMAVR_LINK_FAIL=1 TEST_AWK_FAIL=1 \
 		TEST_YASIMAVR_IMPORT_FAIL=1 TEST_PYYAML_FAIL=1 \
 		TEST_OBJDUMP=missing-selected-objdump TEST_IHEX_VALIDATOR=fake-tool \
 		TEST_ANALYZE_CMD='missing-selected-analysis --checks=fake' \
+		TEST_EXTRA_MAKE_VAR=PIC12F675_PYTHON=missing-selected-pic12f675-python \
 		AVR_NM=missing-selected-avr-nm MUTATION_MAKE=missing-selected-make \
 		run_preflight >"$output" 2>&1; then
 	fail "preflight accepted an aggregated set of missing release capabilities"
@@ -1854,6 +2017,8 @@ for diagnostic in \
 	'missing-selected-objdump' \
 	'nonempty executable Intel HEX validator file' \
 	'missing-selected-analysis' \
+	'missing-selected-pic12f675-python' \
+	'selected by PIC12F675_PYTHON' \
 	'missing-selected-avr-nm' \
 	'missing-selected-make'; do
 	grep -Fq "$diagnostic" "$output" \
@@ -2125,8 +2290,9 @@ checks=$((checks + 1))
 # The Make target is intentionally versionless by default. Ask Make for the
 # recipe without running it, under the already-held lock path used by recursion.
 target_recipe=$(
-	export _MAKE_SERIAL_LOCK_HELD="$lock_id"
-	PATH="$fakebin:$PATH" "$REAL_MAKE" --no-print-directory -n -C "$ROOT" \
+	env -i PATH="$fakebin:$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-$HOME}" \
+		_MAKE_SERIAL_LOCK_HELD="$lock_id" \
+		"$REAL_MAKE" --no-print-directory -n -C "$ROOT" \
 		CC=fake-tool release-preflight
 )
 [[ "$target_recipe" == *'./scripts/make-release.sh --preflight'* ]] \
@@ -2143,7 +2309,8 @@ if (
 	export REAL_MAKE REAL_PYTHON REAL_GIT REAL_AWK
 	export FAKE_REPO_ROOT="$ROOT" FAKE_TOOLCHAIN="$toolchain" FAKE_BIN="$fakebin"
 	export MAKE_LOG="$make_log" TOOL_LOG="$tool_log"
-	"$REAL_MAKE" --no-print-directory -C "$ROOT" CC=fake-tool MAKE_COMMAND="$REAL_MAKE" \
+	env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-$HOME}" \
+		"$REAL_MAKE" --no-print-directory -C "$ROOT" CC=fake-tool MAKE_COMMAND="$REAL_MAKE" \
 		release-preflight VERSION="v1.2.3\$(shell touch $make_injection_marker)"
 ) >"$output" 2>&1; then
 	fail "make release-preflight accepted a Make-function VERSION"
@@ -2157,7 +2324,8 @@ checks=$((checks + 1))
 if (
 	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL _MAKE_SERIAL_LOCK_HELD
 	export PATH="$fakebin:$PATH"
-	"$REAL_MAKE" --no-print-directory -C "$ROOT" MAKE_COMMAND="$REAL_MAKE" \
+	env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-$HOME}" \
+		"$REAL_MAKE" --no-print-directory -C "$ROOT" MAKE_COMMAND="$REAL_MAKE" \
 		release-preflight VERSION="v1.2.3; touch $shell_injection_marker"
 ) >"$output" 2>&1; then
 	fail "make release-preflight accepted a shell-metacharacter VERSION"
@@ -2173,7 +2341,8 @@ release_args_make_marker="$work/release-args-make-injection-ran"
 if (
 	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL _MAKE_SERIAL_LOCK_HELD
 	export PATH="$fakebin:$PATH"
-	"$REAL_MAKE" --no-print-directory -C "$ROOT" MAKE_COMMAND="$REAL_MAKE" \
+	env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-$HOME}" \
+		"$REAL_MAKE" --no-print-directory -C "$ROOT" MAKE_COMMAND="$REAL_MAKE" \
 		release VERSION=v1.2.3 RELEASE_ARGS="\$(shell touch $release_args_make_marker)"
 ) >"$output" 2>&1; then
 	fail "make release accepted a Make-function RELEASE_ARGS"
@@ -2187,7 +2356,8 @@ checks=$((checks + 1))
 if (
 	unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL _MAKE_SERIAL_LOCK_HELD
 	export PATH="$fakebin:$PATH"
-	"$REAL_MAKE" --no-print-directory -C "$ROOT" MAKE_COMMAND="$REAL_MAKE" \
+	env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-$HOME}" \
+		"$REAL_MAKE" --no-print-directory -C "$ROOT" MAKE_COMMAND="$REAL_MAKE" \
 		release VERSION=v1.2.3 \
 		RELEASE_ARGS="--soak-duration-ms 0; touch $release_args_shell_marker"
 ) >"$output" 2>&1; then
@@ -2205,7 +2375,8 @@ if (
 	export REAL_MAKE REAL_PYTHON REAL_GIT REAL_AWK
 	export FAKE_REPO_ROOT="$ROOT" FAKE_TOOLCHAIN="$toolchain" FAKE_BIN="$fakebin"
 	export MAKE_LOG="$make_log" TOOL_LOG="$tool_log"
-	"$REAL_MAKE" --no-print-directory -C "$ROOT" CC=fake-tool \
+	env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-$HOME}" \
+		"$REAL_MAKE" --no-print-directory -C "$ROOT" CC=fake-tool \
 		release VERSION=v1.2.3 RELEASE_ARGS=v9.9.9
 ) >"$output" 2>&1; then
 	fail "RELEASE_ARGS silently overrode VERSION with a positional value"

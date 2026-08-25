@@ -1318,31 +1318,38 @@ mapfile -t xc8_322_lines < <(grep -nF \
 mapfile -t xc8_320_lines < <(grep -nF \
 	'TC_XC8_320=$(release_tool_version_line "PIC10F320 XC8 (PIC10F320_CC=$PIC10F320_CC)" "$PIC10F320_CC")' \
 	"$RELEASE")
+mapfile -t pic12_python_lines < <(grep -nF \
+	'TC_PIC12F675_PY=$(release_tool_version_line' "$RELEASE")
 mapfile -t clean_lines < <(grep -nF 'make clean >/dev/null' "$RELEASE")
 mapfile -t manifest_renderer_lines < <(grep -nF \
 	'release_render_pic_toolchain_rows "$PIC_CC" "$TC_XC8_322"' "$RELEASE")
 [ "${#xc8_322_lines[@]}" -eq 1 ] \
 	&& [ "${#xc8_320_lines[@]}" -eq 1 ] \
+	&& [ "${#pic12_python_lines[@]}" -eq 1 ] \
 	&& [ "${#clean_lines[@]}" -eq 1 ] \
 	&& [ "${#manifest_renderer_lines[@]}" -eq 1 ] \
 	|| fail "release compiler provenance wiring is missing or ambiguous"
 xc8_322_line=${xc8_322_lines[0]%%:*}
 xc8_320_line=${xc8_320_lines[0]%%:*}
+pic12_python_line=${pic12_python_lines[0]%%:*}
 clean_line=${clean_lines[0]%%:*}
 [ "$xc8_322_line" -lt "$clean_line" ] && [ "$xc8_320_line" -lt "$clean_line" ] \
-	|| fail "release compiler identity is not captured before the clean build"
+	&& [ "$pic12_python_line" -lt "$clean_line" ] \
+	|| fail "release compiler/interpreter identity is not captured before the clean build"
 grep -Fq '"$PIC_CC" "$TC_XC8_322"' "$RELEASE" \
 	|| fail "manifest renderer does not receive the shared selected compiler and version"
 grep -Fq '"$PIC10F320_CC" "$TC_XC8_320"' "$RELEASE" \
 	|| fail "manifest renderer does not receive the PIC10F320 selected compiler and version"
+grep -Fq "printf -- '| PIC12F675 Python | %s |" "$RELEASE" \
+	|| fail "manifest does not record the selected PIC12F675 Python"
 if grep -Fq "printf -- '| XC8 |" "$RELEASE"; then
 	fail "release manifest still contains an ambiguous generic XC8 row"
 fi
 checks=$((checks + 1))
 
 version_assignments=$(grep -Ec '^TC_[A-Z0-9_]+=\$\(release_tool_version_line ' "$RELEASE")
-[ "$version_assignments" -eq 10 ] \
-	|| fail "release has $version_assignments fail-closed executable version probes, expected 10"
+[ "$version_assignments" -eq 11 ] \
+	|| fail "release has $version_assignments fail-closed executable version probes, expected 11"
 ! grep -Fq 'v1()' "$RELEASE" \
 	|| fail "release still contains the fail-open v1 tool-version helper"
 checks=$((checks + 1))

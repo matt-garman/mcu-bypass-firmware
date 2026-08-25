@@ -540,6 +540,17 @@ aggregates still run both gates, so nothing was moved out of them.
 | yasimavr venv fetch safety | `test-fetch-yasimavr` | Caller-selected destinations are canonicalized and cannot name roots, symlinks, files, or unstamped directories. Offline fake tools prove failed builds preserve the old owned venv and only a fully verified sibling tree is renamed into place. | Bash + synthetic toolchain |
 | External supply-chain integrity | `test-supply-chain` | XC8 and PIC DFP bytes must match reviewed hashes before `sudo`; installation must produce all three required PIC device headers; restored ATtiny_DFP files are re-hashed; yasimavr dependencies are wheel/hash-locked and built without dependency resolution; both workflows use one installer and hash-sensitive cache keys. The XC8/DFP cache manifest is produced by three separately status-checked stages, so a scan, ordering or hashing failure is reported by name instead of being masked by the stage after it: each is failed independently, in both the installer and the restored-cache verifier, and neither may record nor accept a partial or empty inventory. Eight fixture files whose names carry spaces, both quote characters, a backslash, shell metacharacters, a leading dash, UTF-8 and an embedded newline must be inventoried, compared, and caught when tampered with. TOOLCHAIN.adoc's yasimavr prerequisites are held to the fetcher: any pip-bootstrap mechanism its prose describes must exist in the script (code spans blanked, so naming the retired `get-pip.py` fallback is not promising it), and both must name `python3-venv` as the pip source. | Bash + synthetic downloads/toolchains |
 
+R6's release-input coverage spans the image and preflight rows above. The real
+Makefile rejects direct source/flag assignments for all five build families,
+ordinary and `-e` environment precedence for release validation controls,
+assignment-bearing `MAKEFLAGS`/`GNUMAKEFLAGS`, `--eval`, dollar-bearing values,
+noncanonical/injected makefiles, and a lock marker without its inherited locked
+descriptor before the release recipe. The direct script cases require the same
+failures before selected-tool probes or scratch creation. Source-mutated image
+and soak inventories prove duplicate detection and exact 21/18 cardinality
+precede set equality; relocated tool and build paths remain accepted, including
+the separately preflighted and recorded `PIC12F675_PYTHON` selector.
+
 `pic10f322-test-gpsim` now samples one non-settled point, `PRESS1_EARLY`, roughly
 6 ms (3,000 instruction cycles) after the first press edge. A correct 1 ms tick
 has not yet accumulated the eight separated pressed samples needed to toggle, so

@@ -277,11 +277,23 @@ file is the human-readable summary of *what changed*.
   reading `F_CPU`, so a re-clocked image would have shipped under a canonical
   name and an undisturbed provenance record.
 
-  `test-release-images` (103 -> 178 checks) holds the real Makefile to the
+  The production boundary now also rejects non-allowlisted, release-relevant
+  Make overrides, so `CFLAGS`, `XT_CFLAGS`, `CORE_SRC`, their per-target
+  source/flag counterparts, validation controls inherited through ordinary
+  `?=` precedence, assignment-bearing Make flags, `--eval`, alternate/injected
+  makefiles, and dollar-bearing values stop before the recipe, selected
+  toolchain, scratch state, or build. Developer targets retain those override
+  surfaces. Both the selected and pinned image and soak inventories must also
+  contain exactly 21/18 unique members before set equality is considered,
+  preventing sorting from erasing duplicate canonical entries. Relocated
+  `PIC12F675_PYTHON` is now preflight-checked, exported to qualification, and
+  recorded separately in the manifest.
+
+  `test-release-images` (103 -> 233 checks) holds the real Makefile to the
   pinned identity on both channels -- they are not equivalent, since a command
   line beats a plain `=` assignment and only the environment reaches a `?=` --
   and proves the pin itself unreachable from either. `test-release-preflight`
-  (118 -> 125) drives the real step 0 into each refusal and requires it to leave
+  (118 -> 160) drives the real step 0 into each refusal and requires it to leave
   no scratch directory or output path behind.
 
 - **The XC8 cache manifest can no longer be frozen from a partial scan.** The

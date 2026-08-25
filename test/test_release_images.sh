@@ -619,8 +619,10 @@ expect_release_goal_accepted() {   # usage: <label> <channel> [assignment ...]
 	shift 2
 	local output rc=0
 	case "$channel" in
-		command-line) output=$(cd "$ROOT" && make -n release "$@" 2>&1) || rc=$? ;;
-		environment)  output=$(cd "$ROOT" && env "$@" make -n release 2>&1) || rc=$? ;;
+		command-line) output=$(cd "$ROOT" && env -i PATH="$PATH" HOME="$HOME" \
+			TMPDIR="${TMPDIR:-$HOME}" make -n release "$@" 2>&1) || rc=$? ;;
+		environment)  output=$(cd "$ROOT" && env -i PATH="$PATH" HOME="$HOME" \
+			TMPDIR="${TMPDIR:-$HOME}" "$@" make -n release 2>&1) || rc=$? ;;
 		*) fail "unknown override channel: $channel" ;;
 	esac
 	[ "$rc" -eq 0 ] \
@@ -635,13 +637,37 @@ expect_release_goal_refused() {   # usage: <label> <named variable> <channel> [a
 	shift 3
 	local output rc=0
 	case "$channel" in
-		command-line) output=$(cd "$ROOT" && make -n release "$@" 2>&1) || rc=$? ;;
-		environment)  output=$(cd "$ROOT" && env "$@" make -n release 2>&1) || rc=$? ;;
+		command-line) output=$(cd "$ROOT" && env -i PATH="$PATH" HOME="$HOME" \
+			TMPDIR="${TMPDIR:-$HOME}" make -n release "$@" 2>&1) || rc=$? ;;
+		environment)  output=$(cd "$ROOT" && env -i PATH="$PATH" HOME="$HOME" \
+			TMPDIR="${TMPDIR:-$HOME}" "$@" make -n release 2>&1) || rc=$? ;;
 		*) fail "unknown override channel: $channel" ;;
 	esac
 	[ "$rc" -ne 0 ] \
 		|| fail "$label ($channel) staged a release under an overridden identity"
 	[[ "$output" == *"overridden production release identity"* ]] \
+		|| fail "$label ($channel) was refused for the wrong reason: $output"
+	[[ "$output" == *"$named"* ]] \
+		|| fail "$label ($channel) did not name $named in its diagnostic: $output"
+	[[ "$output" != *"scripts/make-release.sh"* ]] \
+		|| fail "$label ($channel) reached the release recipe before failing: $output"
+	checks=$((checks + 1))
+}
+
+expect_release_override_refused() { # usage: <label> <named variable> <channel> [assignment ...]
+	local label=$1 named=$2 channel=$3
+	shift 3
+	local output rc=0
+	case "$channel" in
+		command-line) output=$(cd "$ROOT" && env -i PATH="$PATH" HOME="$HOME" \
+			TMPDIR="${TMPDIR:-$HOME}" make -n release "$@" 2>&1) || rc=$? ;;
+		environment)  output=$(cd "$ROOT" && env -i PATH="$PATH" HOME="$HOME" \
+			TMPDIR="${TMPDIR:-$HOME}" "$@" make -n release 2>&1) || rc=$? ;;
+		*) fail "unknown override channel: $channel" ;;
+	esac
+	[ "$rc" -ne 0 ] \
+		|| fail "$label ($channel) reached a release under an unsupported override"
+	[[ "$output" == *"unsupported release overrides"* ]] \
 		|| fail "$label ($channel) was refused for the wrong reason: $output"
 	[[ "$output" == *"$named"* ]] \
 		|| fail "$label ($channel) did not name $named in its diagnostic: $output"
@@ -733,6 +759,200 @@ for immutable_var in PIC12F675_CHIP CLASSIC_VARIANTS_SUPPORTED \
 		command-line "$immutable_var=hijacked"
 done
 
+# Source lists and compile/link flag bundles remain useful development override
+# surfaces, but none is a supported release input. Cover each shipping target,
+# both direct command-line transport and inherited Make precedence, and the two
+# internally immutable PIC12F675 declarations (whose attempted origin would
+# otherwise disappear behind `override`).
+for assignment in \
+		'CFLAGS=-DINJECTED_CLASSIC_FLAGS' \
+		'LDFLAGS=-DINJECTED_CLASSIC_LINK' \
+		'CORE_SRC=/dev/null' \
+		'src_cd4053_simple=/dev/null' \
+		'XT_CFLAGS=-DINJECTED_XT_FLAGS' \
+		'XT_LDFLAGS=-DINJECTED_XT_LINK' \
+		'XT_CORE_SRC=/dev/null' \
+		'PIC10F322_CFLAGS=-DINJECTED_322_FLAGS' \
+		'PIC10F322_CORE_SRC=/dev/null' \
+		'PIC10F320_CFLAGS=-DINJECTED_320_FLAGS' \
+		'PIC10F320_SRC=/dev/null' \
+		'PIC12F675_CFLAGS=-DINJECTED_675_FLAGS' \
+		'PIC12F675_CORE_SRC=/dev/null'; do
+	expect_release_override_refused "an artifact-defining ${assignment%%=*} override" \
+		"${assignment%%=*}" command-line "$assignment"
+done
+
+for assignment in \
+		'CFLAGS=-DINHERITED_CLASSIC_FLAGS' \
+		'CORE_SRC=/dev/null' \
+		'XT_CFLAGS=-DINHERITED_XT_FLAGS' \
+		'XT_CORE_SRC=/dev/null' \
+		'PIC10F322_CFLAGS=-DINHERITED_322_FLAGS' \
+		'PIC10F322_CORE_SRC=/dev/null' \
+		'PIC10F320_CFLAGS=-DINHERITED_320_FLAGS' \
+		'PIC10F320_SRC=/dev/null'; do
+	expect_release_override_refused "an inherited artifact-defining ${assignment%%=*}" \
+		"${assignment%%=*}" environment MAKEFLAGS=-e "$assignment"
+done
+
+# `?=` validation controls move under an ordinary export, without `-e`. They
+# are release inputs just as surely as source/compile flags: accepting them can
+# lower sanitizer, static-analysis, coverage, or workload gates.
+for assignment in 'SANITIZE=' 'COVERAGE_MIN=0' 'CLANG_TIDY_CHECKS=-*'; do
+	expect_release_override_refused "an inherited ${assignment%%=*} validation override" \
+		"${assignment%%=*}" environment "$assignment"
+done
+
+# Assignment-bearing MAKEFLAGS/GNUMAKEFLAGS and a preloaded MAKEFILES fragment
+# are indirect command-line channels. The former must still name the moved
+# source/flag variable; the latter is rejected as injection before its contents
+# can participate in release configuration.
+expect_release_override_refused "a MAKEFLAGS source override" CORE_SRC \
+	environment 'MAKEFLAGS=CORE_SRC=/dev/null'
+expect_release_override_refused "a GNUMAKEFLAGS flag override" XT_CFLAGS \
+	environment 'GNUMAKEFLAGS=XT_CFLAGS=-DINJECTED_XT_FLAGS'
+injected_release_makefile="$work/injected-release.mk"
+printf 'override CFLAGS := -DINJECTED_MAKEFILE_FLAGS\n' \
+	> "$injected_release_makefile"
+expect_release_override_refused "an injected makefile" MAKEFILES \
+	environment "MAKEFILES=$injected_release_makefile"
+
+# GNU Make evaluates --eval before the Makefile. Reject the option itself,
+# including inherited transport, rather than trying to enumerate statements it
+# can install with `override` origin.
+for channel in direct inherited; do
+	rc=0
+	if [ "$channel" = direct ]; then
+		output=$(cd "$ROOT" && env -i PATH="$PATH" HOME="$HOME" \
+			TMPDIR="${TMPDIR:-$HOME}" make --eval='override SANITIZE :=' \
+			-n release 2>&1) || rc=$?
+	else
+		output=$(cd "$ROOT" && env -i PATH="$PATH" HOME="$HOME" \
+			TMPDIR="${TMPDIR:-$HOME}" \
+			'MAKEFLAGS=--eval=override\ SANITIZE\ :=' make -n release 2>&1) || rc=$?
+	fi
+	[ "$rc" -ne 0 ] || fail "$channel --eval reached the release recipe"
+	[[ "$output" == *"unsupported GNU Make options: --eval"* ]] \
+		|| fail "$channel --eval was refused for the wrong reason: $output"
+	[[ "$output" != *"scripts/make-release.sh"* ]] \
+		|| fail "$channel --eval reached the release recipe before failing"
+	checks=$((checks + 1))
+done
+
+make_function_marker="$work/allowlisted-make-function-ran"
+for channel in direct inherited; do
+	rc=0
+	assignment="PIC_CC=\$(shell touch $make_function_marker)"
+	if [ "$channel" = direct ]; then
+		output=$(cd "$ROOT" && env -i PATH="$PATH" HOME="$HOME" \
+			TMPDIR="${TMPDIR:-$HOME}" make -n release "$assignment" 2>&1) || rc=$?
+	else
+		output=$(cd "$ROOT" && env -i PATH="$PATH" HOME="$HOME" \
+			TMPDIR="${TMPDIR:-$HOME}" "$assignment" make -n release 2>&1) || rc=$?
+	fi
+	[ "$rc" -ne 0 ] || fail "$channel Make function in PIC_CC reached the release recipe"
+	[[ "$output" == *"override values must not contain dollar signs or GNU Make functions: PIC_CC"* ]] \
+		|| fail "$channel Make function in PIC_CC was refused for the wrong reason: $output"
+	[ ! -e "$make_function_marker" ] \
+		|| fail "$channel Make function in PIC_CC executed before rejection"
+	[[ "$output" != *"scripts/make-release.sh"* ]] \
+		|| fail "$channel Make function in PIC_CC reached the release recipe before failing"
+	checks=$((checks + 1))
+done
+
+for tool_var in AWK OBJDUMP READELF MAKE; do
+	rm -f "$make_function_marker"
+	assignment="$tool_var=\$(shell touch $make_function_marker)"
+	rc=0
+	output=$(cd "$ROOT" && env -i PATH="$PATH" HOME="$HOME" \
+		TMPDIR="${TMPDIR:-$HOME}" "$assignment" make -n release 2>&1) || rc=$?
+	[ "$rc" -ne 0 ] || fail "inherited Make function in $tool_var reached the release recipe"
+	[[ "$output" == *"override values must not contain dollar signs or GNU Make functions: $tool_var"* ]] \
+		|| fail "inherited Make function in $tool_var was refused for the wrong reason: $output"
+	[ ! -e "$make_function_marker" ] \
+		|| fail "inherited Make function in $tool_var executed before rejection"
+	[[ "$output" != *"scripts/make-release.sh"* ]] \
+		|| fail "inherited Make function in $tool_var reached the release recipe before failing"
+	checks=$((checks + 1))
+done
+
+# A preloaded fragment must not erase its own provenance and leave only its
+# source/flag override behind.
+cat > "$injected_release_makefile" <<'EOF'
+override CFLAGS := -DINJECTED_MAKEFILE_FLAGS
+override MAKEFILES :=
+override MAKEFILE_LIST := Makefile
+EOF
+expect_release_override_refused "a self-erasing injected makefile" MAKEFILES \
+	environment "MAKEFILES=$injected_release_makefile"
+
+alternate_release_makefile="$work/alternate-release.mk"
+cp "$ROOT/Makefile" "$alternate_release_makefile"
+rc=0
+output=$(cd "$ROOT" && env -i PATH="$PATH" HOME="$HOME" \
+	TMPDIR="${TMPDIR:-$HOME}" make -n -f "$alternate_release_makefile" \
+	release 2>&1) || rc=$?
+[ "$rc" -ne 0 ] || fail "an alternate top-level makefile reached the release recipe"
+[[ "$output" == *"noncanonical makefile"* ]] \
+	|| fail "an alternate top-level makefile was refused for the wrong reason: $output"
+[[ "$output" != *"scripts/make-release.sh"* ]] \
+	|| fail "an alternate top-level makefile reached the release recipe before failing"
+checks=$((checks + 1))
+
+expect_duplicate_inventory_refused() { # usage: <variable> <member> <diagnostic>
+	local variable=$1 member=$2 diagnostic=$3
+	local mutated_root="$work/duplicate-$variable" output rc=0
+	local mutated_makefile="$mutated_root/Makefile"
+	mkdir -p "$mutated_root"
+	awk -v append="override $variable += $member" '
+		/^override RELEASE_FIXED_EVIDENCE_FILES :=/ { print append }
+		{ print }
+	' "$ROOT/Makefile" > "$mutated_makefile"
+	output=$(env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-$HOME}" \
+		make -n -C "$mutated_root" release 2>&1) || rc=$?
+	[ "$rc" -ne 0 ] \
+		|| fail "a duplicate $variable member reached the release recipe"
+	[[ "$output" == *"$diagnostic"* ]] \
+		|| fail "a duplicate $variable member was refused for the wrong reason: $output"
+	[[ "$output" != *"scripts/make-release.sh"* ]] \
+		|| fail "a duplicate $variable member reached the release recipe before failing"
+	checks=$((checks + 1))
+}
+
+# Source-level canonical inventory mistakes have no external override origin.
+# They still fail at parse time, with duplicate detection preceding the set
+# equality that would otherwise erase the extra member.
+expect_duplicate_inventory_refused RELEASE_IMAGES "${canonical_arr[0]}" \
+	'canonical RELEASE_IMAGES contains duplicate image names'
+expect_duplicate_inventory_refused RELEASE_SOAK_NAMES "${identity_soak_arr[0]}" \
+	'canonical RELEASE_SOAK_NAMES contains duplicate soak names'
+
+expect_short_inventory_refused() { # usage: <variable> <diagnostic>
+	local variable=$1 diagnostic=$2
+	local mutated_root="$work/short-$variable" output rc=0
+	local mutated_makefile="$mutated_root/Makefile"
+	local append="override $variable := \$(wordlist 2,999,\$($variable))"
+	mkdir -p "$mutated_root"
+	awk -v append="$append" '
+		/^override RELEASE_FIXED_EVIDENCE_FILES :=/ { print append }
+		{ print }
+	' "$ROOT/Makefile" > "$mutated_makefile"
+	output=$(env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-$HOME}" \
+		make -n -C "$mutated_root" release 2>&1) || rc=$?
+	[ "$rc" -ne 0 ] \
+		|| fail "a short $variable inventory reached the release recipe"
+	[[ "$output" == *"$diagnostic"* ]] \
+		|| fail "a short $variable inventory was refused for the wrong reason: $output"
+	[[ "$output" != *"scripts/make-release.sh"* ]] \
+		|| fail "a short $variable inventory reached the release recipe before failing"
+	checks=$((checks + 1))
+}
+
+expect_short_inventory_refused RELEASE_IMAGES \
+	'canonical RELEASE_IMAGES contains 20 images; expected exactly 21'
+expect_short_inventory_refused RELEASE_SOAK_NAMES \
+	'canonical RELEASE_SOAK_NAMES contains 17 soaks; expected exactly 18'
+
 # Build directories and tool paths do not change what an artifact IS, a release
 # host legitimately relocates them, and make-release.sh asserts and records the
 # tool it actually selected. They must keep working.
@@ -744,8 +964,16 @@ expect_release_goal_accepted "relocated tool paths" command-line \
 	CPPCHECK=/opt/cppcheck/bin/cppcheck
 expect_release_goal_accepted "relocated tool paths" environment \
 	OBJDUMP=/opt/avr/bin/avr-objdump READELF=/opt/bin/readelf
+expect_release_goal_accepted "a relocated PIC12F675 Python" command-line \
+	PIC12F675_PYTHON=/opt/python/bin/python3
 expect_release_goal_accepted "a single-target VARIANT selection" command-line \
 	VARIANT=tq2_l2_5v_relay
+
+worktree_lock_id=$(stat -Lc '%d:%i' "$ROOT") \
+	|| fail "could not identify the worktree lock"
+expect_release_override_refused "a caller-supplied serialization marker" \
+	_MAKE_SERIAL_LOCK_HELD command-line \
+	"_MAKE_SERIAL_LOCK_HELD=$worktree_lock_id"
 
 # ---------------------------------------------------------------------------
 # The manifest generator's arms, cross-checked against the canonical set.

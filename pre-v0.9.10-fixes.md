@@ -2263,11 +2263,11 @@ workflow discovering that production was staged under noncanonical names.
 
 **Acceptance criteria**
 
-- [ ] Production release staging always means the reviewed seven-part,
+- [x] Production release staging always means the reviewed seven-part,
   21-image, 18-soak v0.9.10 identity regardless of inherited Make variables.
-- [ ] Identity-changing overrides fail before any build, soak, or staging work.
+- [x] Identity-changing overrides fail before any build, soak, or staging work.
 - [x] Legitimate tool and build-directory overrides continue to work.
-- [ ] Release-image, preflight, documentation, name-contract, and publication
+- [x] Release-image, preflight, documentation, name-contract, and publication
   tests cover direct and inherited override attempts.
 
 **Resolution**
@@ -2400,6 +2400,45 @@ bundles, injected makefiles/environment precedence, and duplicate image/soak
 inventories. Every case must stop before the recipe, tools, scratch state, or
 build work.
 
+**Follow-up resolution (2026-08-25).** Implemented the fail-closed allowlist
+alternative. Development goals retain their source-list and compile/link-flag
+override surfaces, while release configuration accepts only version/options,
+tool paths, build directories, the already pinned identity names, and fuse
+values disclosed in the signed manifest. The Makefile snapshots command-line
+names before later `override` declarations can erase their origin, detects
+effective ordinary/`-e` environment precedence after parsing, and rejects
+assignment-bearing Make flags, `--eval`, dollar-bearing values, noncanonical
+makefiles, and every injected `MAKEFILES` fragment. Release and
+release-preflight parses suppress cross-compiler discovery until these checks
+pass, so a refusal cannot execute the selected toolchain or recipe. A claimed
+inherited worktree lock must carry a matching descriptor on which the script can
+reassert the lock; exporting the marker alone cannot bypass serialization.
+
+`scripts/make-release.sh` now asks for `RELEASE_CONTRACT_VALID` before any other
+Make value, then reads both selected and pinned inventories/identity tables in a
+no-tool parse mode. Both the Make parse guard and this direct-script guard check
+duplicates first, exact 21-image/18-soak cardinality second, and only then set
+equality. A moved scalar identity is still reported first with its pinned and
+selected values and Make origin.
+
+The separately selectable `PIC12F675_PYTHON` remains a legitimate tool-path
+override: preflight checks its executable and Python floor, qualification
+inherits it, and the manifest records the selected interpreter independently of
+the host `python3` used by the general gates.
+
+*Verification.* `test-release-images` (190 -> 233 checks) rejects direct source
+and flag overrides across every shipping build family, inherited `-e` forms,
+assignment-bearing `MAKEFLAGS`/`GNUMAKEFLAGS`, `--eval`, dollar-bearing values,
+noncanonical/self-erasing injected makefiles, validation-control precedence,
+and a caller-supplied lock marker before the recipe. Source-mutated Makefile
+fixtures prove duplicate and short image and soak inventories fail at parse time
+before set equality. `test-release-preflight` (148 -> 160 checks, 89 -> 91
+Makefile queries) drives representative direct, inherited, injected-makefile,
+duplicate-inventory, unsafe-Make-option, validation-control, and lock-marker
+cases through the real script and requires no selected-tool probe, output path,
+or release scratch; the valid relocated-build-directory case still reaches
+terminal success. No firmware source is involved.
+
 ### Second-pass validation already performed
 
 The review host is not the fully provisioned release host. These results locate
@@ -2530,19 +2569,19 @@ Record each completed item with its commit ID and decisive validation command.
 | F3 | DONE | `df89ec0` | PIC10F320 flash, return-stack, image-baseline, host/target fault, lock-step, target-I/O, coverage, analysis, and mutation gates pass; relay is 242/256 words at stack depth 3/8, both sequence-sensitive mutants are killed, and both CD4053 images are unchanged |
 | F4 | DONE | `fc23e48` | Fully provisioned current-HEAD suite passes; `make test-static-assert-guards` has 68 checks including 11 exact near-bound FIRES/CLEAN fixtures, compiled-image pet intervals fit their bounds, and timing, pulse-width, watchdog-liveness, static-analysis, and resource gates pass |
 | P1 | RE-OPENED | `58fb829` | Helper, packaging, and most software transaction controls landed, but mandatory PICkit 3/MPLAB X 6.20 evidence is absent; helper binding/path-race, JAR/export/interruption coverage, and durable-document consistency/detection findings remain open |
-| P2 | IMPLEMENTED | (pending) | The selected variant must belong to the current forced rebuild; final regular/non-symlink HEX revalidation and literal argument/action binding precede hardware; `test-avr-program-order` passes 56 exact-order, stale-image, mismatch, size, override, symlink, and stateful-input checks, with all supporting build/selector/fuse/serialization/release-preflight contracts green |
-| D4 | IMPLEMENTED | (pending) | Changelog stays explicitly Unreleased until production requires the qualified source date; ordinary resource checks make no evidence claim at 0/21, while strict release qualification requires and retains source-bound 21-image, AVR-static, Classic/XT-stack, PIC12F675 Data-space, and PIC-stack evidence in a hash-bound 35-file inventory |
+| P2 | DONE | `6ef8c4d` | The selected variant must belong to the current forced rebuild; final regular/non-symlink HEX revalidation and literal argument/action binding precede hardware; `test-avr-program-order` passes 56 exact-order, stale-image, mismatch, size, override, symlink, and stateful-input checks, with all supporting build/selector/fuse/serialization/release-preflight contracts green |
+| D4 | DONE | `18cd7ee` | Changelog stays explicitly Unreleased until production requires the qualified source date; ordinary resource checks make no evidence claim at 0/21, while strict release qualification requires and retains source-bound 21-image, AVR-static, Classic/XT-stack, PIC12F675 Data-space, and PIC-stack evidence in a hash-bound 35-file inventory |
 | D5 | IMPLEMENTED | (pending) | Compiled-versus-delivered pulse width distinguished in `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc` and `TODO.md`, each naming the gate that owns its half; T25 reduced to remaining upstream/re-pin work; the pet-to-pet image bound justified by `wdr` stepping rather than blanket distrust; simulator lanes described as modeled pins in both workflows, `scripts/make-release.sh`, `docs/relay_coil_fault_correction.md`, `TOOLCHAIN.adoc`, `test/README.md` and the unreleased changelog section; the retired `get-pip` fallback removed from the documented prerequisites and pinned by a new `test-supply-chain` doc/script pairing (46 -> 47 checks, 3 negative controls) |
 | R4 | DONE | `ba4d9d6` | `make test-workflow-syntax test-release-provenance test-release-qualification`; stable tags publish normally, suffixed tags add `--prerelease`, and malformed tags stop before build or `gh` |
 | R5 | DONE | `7533d52` | `make test-supply-chain test-workflow-syntax test-release-preflight`; installer and verifier independently reject scan/order/hash/empty inventories while preserving unusual non-NUL filename bytes |
-| R6 | RE-OPENED | `470c11d` | Scalar identity checks landed, but artifact-defining source/flag overrides and duplicate canonical inventories reach the release recipe; reject them before recipe, tools, scratch, or build work and add direct/inherited negative coverage |
-| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; record the P2/D4/D5 follow-up commits, close P1 and R6, then rerun every pre-merge gate |
+| R6 | IMPLEMENTED | (pending) | Production release configuration rejects non-allowlisted source/flag/validation, Make-precedence/function, injected/noncanonical-makefile, and false-lock inputs before recipe/tool/scratch work; both early guards require unique exact 21-image/18-soak inventories before set equality; release-image and preflight contracts pass 233/160 checks |
+| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; record the D5/R6 follow-up commits, close P1, then rerun every pre-merge gate |
 
 ## Merge decision
 
 Do not merge `v0.9.9-polish` or begin production `v0.9.10` qualification until
-P1 and R6 are complete and the P2, D4, and D5 follow-up commits are recorded.
-F2-F4, P2, D4, D5, R4, and R5 require no further implementation action. Then
+P1 is complete and the D5 and R6 follow-up commits are recorded. F2-F4, P2, D4,
+D5, R4, R5, and R6 require no further implementation action. Then
 rerun every reopened pre-merge gate, delete this file and all references, run
 the release dry run on the actual candidate, and only then merge and begin
 production qualification. Production soaks, the artifact-only release commit,

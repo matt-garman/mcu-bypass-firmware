@@ -200,6 +200,47 @@ command -v git >/dev/null 2>&1 \
 command -v make >/dev/null 2>&1 \
 	|| die "GNU Make is required to read release configuration (print-<VAR>)"
 
+# A marker is not proof of ownership. The serialization wrapper leaves its
+# locked file descriptor inherited by this process; find that exact inode and
+# reassert the nonblocking lock on the inherited open-file description. A caller
+# that merely exports the marker has no descriptor and is refused. If it passes
+# an unlocked descriptor for the right file, this call acquires and retains the
+# lock on that descriptor, so concurrency is still excluded.
+command -v flock >/dev/null 2>&1 \
+	|| die "flock is required to verify the inherited release lock"
+REPO_LOCK_FILE_ID=$(stat -Lc '%d:%i' "$REPO_HINT/.make.lock" 2>/dev/null) \
+	|| die "could not identify the inherited worktree lock"
+REPO_LOCK_FD=
+REPO_LOCK_FD_MATCHED=0
+for candidate_fd in /proc/$$/fd/[0-9]*; do
+	candidate_lock_id=$(stat -Lc '%d:%i' "$candidate_fd" 2>/dev/null) || continue
+	if [ "$candidate_lock_id" = "$REPO_LOCK_FILE_ID" ]; then
+		REPO_LOCK_FD_MATCHED=1
+		candidate_fd_number=${candidate_fd##*/}
+		if flock -n "$candidate_fd_number"; then
+			REPO_LOCK_FD=$candidate_fd_number
+			break
+		fi
+	fi
+done
+if [ -z "$REPO_LOCK_FD" ]; then
+	[ "$REPO_LOCK_FD_MATCHED" -eq 1 ] \
+		&& die "no inherited worktree lock descriptor is exclusively held"
+	die "_MAKE_SERIAL_LOCK_HELD has no inherited lock descriptor"
+fi
+
+# GNU Make consumes these channels before the Makefile can defend itself. Check
+# the script's original environment before the first query so direct execution
+# cannot redirect configuration to another makefile or install `--eval` text.
+[ -z "${MAKEFILES-}" ] \
+	|| die "MAKEFILES injection is not supported by production release configuration"
+release_make_option_text=" ${MAKEFLAGS-} ${GNUMAKEFLAGS-} "
+case "$release_make_option_text" in
+	*" --eval"*|*" --file"*|*" --makefile"*|*" -f"*)
+		die "GNU Make --eval/-f/--file/--makefile options are not supported by production release configuration"
+		;;
+esac
+
 git check-ref-format "refs/tags/$VERSION" >/dev/null 2>&1 \
 	|| die "version '$VERSION' is not a valid Git tag name"
 
@@ -312,6 +353,150 @@ tool_from_repo() {
 	esac
 }
 
+# The parent Makefile globally exports hardware-programming selectors and the
+# gpsim timeout for their standalone targets. They are not release inputs, but
+# without clearing them a nested configuration query sees the parent's canonical
+# defaults as caller environment. Command-line forms remain in MAKEFLAGS and are
+# rejected by the Make guard. For direct script use, only the canonical timeout
+# may be inherited; programming selectors are irrelevant and removed.
+inherited_gpsim_timeout=${GPSIM_TIMEOUT_SECONDS-}
+case "$inherited_gpsim_timeout" in
+	''|60) ;;
+	*) die "GPSIM_TIMEOUT_SECONDS is not a supported production release override" ;;
+esac
+unset MAKE GPSIM_TIMEOUT_SECONDS PIC12F675_PART PIC12F675_PROG \
+	PIC12F675_PROG_KIND PIC12F675_PROG_TOOL PIC12F675_READ_PROG \
+	PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT PIC12F675_RELEASE_TAG
+
+# This is the first Make query. The corresponding parse guard rejects
+# unsupported release overrides, injected makefiles, and malformed canonical
+# inventories without executing a selected toolchain or entering a recipe.
+RELEASE_CONTRACT_VALID=$(mkv RELEASE_CONTRACT_VALID) \
+	|| die "Makefile release configuration guard failed"
+[ "$RELEASE_CONTRACT_VALID" = 1 ] \
+	|| die "Makefile release configuration guard returned an invalid result"
+
+# Read and validate both inventory statements before any tool/configuration
+# query. Set comparisons alone erase duplicates, so cardinality and uniqueness
+# are independent invariants and precede selected-versus-pinned equality.
+RELEASE_IMAGES=$(mkv RELEASE_IMAGES)
+RELEASE_SOAK_NAMES=$(mkv RELEASE_SOAK_NAMES)
+RELEASE_IDENTITY_PINNED=$(mkv RELEASE_IDENTITY_PINNED)
+RELEASE_IDENTITY_SELECTED=$(mkv RELEASE_IDENTITY_SELECTED)
+RELEASE_IDENTITY_IMAGES=$(mkv RELEASE_IDENTITY_IMAGES)
+RELEASE_IDENTITY_SOAKS=$(mkv RELEASE_IDENTITY_SOAKS)
+for identity_var in RELEASE_IMAGES RELEASE_SOAK_NAMES \
+		RELEASE_IDENTITY_PINNED RELEASE_IDENTITY_SELECTED \
+		RELEASE_IDENTITY_IMAGES RELEASE_IDENTITY_SOAKS; do
+	[ -n "${!identity_var// /}" ] \
+		|| die "Makefile $identity_var is empty; the production release contract is unusable"
+done
+
+require_unique_inventory() {   # usage: require_unique_inventory LABEL COUNT VALUE
+	local label=$1 expected=$2 value=$3 entry
+	local -a entries=() duplicates=()
+	local -A seen=()
+	read -r -a entries <<<"$value"
+	for entry in "${entries[@]}"; do
+		if [ -n "${seen[$entry]+set}" ]; then
+			duplicates+=("$entry")
+		else
+			seen[$entry]=1
+		fi
+	done
+	[ "${#duplicates[@]}" -eq 0 ] \
+		|| die "$label contains duplicate entries: ${duplicates[*]}"
+	[ "${#entries[@]}" -eq "$expected" ] \
+		|| die "$label contains ${#entries[@]} entries; expected exactly $expected"
+}
+
+# Report which member names a set gained and lost rather than printing both
+# sets: one moved FW_BASE renames all 21 images, and the useful sentence is
+# "these are extra, those are missing". Pure bash keeps this before external
+# release-tool validation.
+identity_set_drift() {   # usage: identity_set_drift LABEL PINNED SELECTED
+	local label=$1 name status=0
+	local -A want=() got=()
+	local -a extra=() missing=()
+	for name in $2; do want[$name]=1; done
+	for name in $3; do got[$name]=1; done
+	for name in "${!got[@]}"; do
+		[ -n "${want[$name]:-}" ] || extra+=("$name")
+	done
+	for name in "${!want[@]}"; do
+		[ -n "${got[$name]:-}" ] || missing+=("$name")
+	done
+	if [ "${#extra[@]}" -gt 0 ]; then
+		log "  $label has ${#extra[@]} entries the pinned identity does not: $(printf '%s ' "${extra[@]}")"
+		status=1
+	fi
+	if [ "${#missing[@]}" -gt 0 ]; then
+		log "  $label is missing ${#missing[@]} pinned entries: $(printf '%s ' "${missing[@]}")"
+		status=1
+	fi
+	return "$status"
+}
+
+read -r -a identity_pinned_fields <<<"$RELEASE_IDENTITY_PINNED"
+read -r -a identity_selected_fields <<<"$RELEASE_IDENTITY_SELECTED"
+[ "${#identity_pinned_fields[@]}" -eq "${#identity_selected_fields[@]}" ] \
+	|| die "the pinned release identity lists ${#identity_pinned_fields[@]} fields but ${#identity_selected_fields[@]} were selected.
+      RELEASE_IDENTITY_PINNED and RELEASE_IDENTITY_SELECTED must describe the same fields in the same order."
+
+IDENTITY_DRIFT=()
+IDENTITY_SET_DRIFT=0
+for ((identity_i = 0; identity_i < ${#identity_pinned_fields[@]}; identity_i++)); do
+	pinned_field=${identity_pinned_fields[identity_i]}
+	selected_field=${identity_selected_fields[identity_i]}
+	[ "$pinned_field" = "$selected_field" ] && continue
+	identity_name=${pinned_field%%=*}
+	[ "${selected_field%%=*}" = "$identity_name" ] \
+		|| die "the pinned and selected release identity fields are not in the same order ($pinned_field vs $selected_field)."
+	identity_origin=$(make -s --no-print-directory origin-"$identity_name" 2>/dev/null) \
+		|| identity_origin=
+	IDENTITY_DRIFT+=("$identity_name: pinned '${pinned_field#*=}', selected '${selected_field#*=}' (Make origin: ${identity_origin:-unknown})")
+done
+
+if [ "${#IDENTITY_DRIFT[@]}" -gt 0 ]; then
+	log "Production release identity does not match the pinned Makefile declaration:"
+	for identity_line in "${IDENTITY_DRIFT[@]}"; do log "  $identity_line"; done
+	die "refusing to run a release under an overridden production identity.
+      A release always means the reviewed identity that RELEASE_IDENTITY_PINNED declares:
+      seven parts, 21 images, 18 soak combinations, one basename convention.
+      Re-run with none of the variables above set. Build-directory and tool-path
+      overrides are unaffected and remain available.
+      Make origin names the channel a value arrived on -- 'command line' is an
+      argument someone typed, 'environment' is an inherited export that appears
+      in no command at all, and 'override' means the Makefile recomputed the
+      variable from a caller's request (VARIANTS and PIC10F320_VARIANTS_ALL are
+      filtered that way, so their request is what to withdraw)."
+fi
+
+require_unique_inventory RELEASE_IMAGES 21 "$RELEASE_IMAGES"
+require_unique_inventory RELEASE_IDENTITY_IMAGES 21 "$RELEASE_IDENTITY_IMAGES"
+require_unique_inventory RELEASE_SOAK_NAMES 18 "$RELEASE_SOAK_NAMES"
+require_unique_inventory RELEASE_IDENTITY_SOAKS 18 "$RELEASE_IDENTITY_SOAKS"
+
+identity_set_drift RELEASE_IMAGES "$RELEASE_IDENTITY_IMAGES" "$RELEASE_IMAGES" \
+	|| IDENTITY_SET_DRIFT=1
+identity_set_drift RELEASE_SOAK_NAMES "$RELEASE_IDENTITY_SOAKS" "$RELEASE_SOAK_NAMES" \
+	|| IDENTITY_SET_DRIFT=1
+if [ "${#IDENTITY_DRIFT[@]}" -gt 0 ] || [ "$IDENTITY_SET_DRIFT" -ne 0 ]; then
+	die "refusing to run a release under an overridden production identity.
+      A release always means the reviewed identity that RELEASE_IDENTITY_PINNED declares:
+      seven parts, 21 images, 18 soak combinations, one basename convention.
+      Re-run with none of the variables above set. Build-directory and tool-path
+      overrides are unaffected and remain available.
+      Make origin names the channel a value arrived on -- 'command line' is an
+      argument someone typed, 'environment' is an inherited export that appears
+      in no command at all, and 'override' means the Makefile recomputed the
+      variable from a caller's request (VARIANTS and PIC10F320_VARIANTS_ALL are
+      filtered that way, so their request is what to withdraw)."
+fi
+read -r -a identity_pinned_images <<<"$RELEASE_IDENTITY_IMAGES"
+read -r -a identity_pinned_soaks <<<"$RELEASE_IDENTITY_SOAKS"
+ok "production release identity matches the pinned declaration: ${#identity_pinned_fields[@]} fields, ${#identity_pinned_images[@]} images, ${#identity_pinned_soaks[@]} soak combinations."
+
 AWK=$(mkv AWK)
 AWK=$(tool_from_repo "$AWK")
 
@@ -414,8 +599,10 @@ PIC12F675_GPSIM_PROC=$(mkv PIC12F675_GPSIM_PROC)   # p12f675
 PIC12F675_SIMCAL_DIR=$(mkv PIC12F675_SIMCAL_DIR)   # build_pic12f675/simcal
 PIC12F675_MATRIX_EVIDENCE=$(mkv PIC12F675_MATRIX_EVIDENCE)
 PIC12F675_MATRIX_MANIFEST=$(mkv PIC12F675_MATRIX_MANIFEST)
+PIC12F675_PYTHON=$(mkv PIC12F675_PYTHON)
 PIC12F675_MATRIX_EVIDENCE=$(path_from_repo "$PIC12F675_MATRIX_EVIDENCE")
 PIC12F675_MATRIX_MANIFEST=$(path_from_repo "$PIC12F675_MATRIX_MANIFEST")
+PIC12F675_PYTHON=$(tool_from_repo "$PIC12F675_PYTHON")
 
 # --- host / AVR / analysis tools, read through their Makefile variables -------
 # The preconditions below assert these, and the manifest records their versions.
@@ -494,6 +681,7 @@ export ANALYZE_CMD AVR_NM MUTATION_MAKE
 export PIC_CC PIC_DFP PIC_XC8_INCLUDE PIC10F322_DFP_INCLUDE PIC10F322_DEVICE_INI
 export PIC10F320_CC PIC10F320_DFP PIC10F320_XC8_INCLUDE PIC10F320_DFP_INCLUDE PIC10F320_DEVICE_INI
 export PIC12F675_DFP_INCLUDE PIC12F675_DEVICE_INI
+export PIC12F675_PYTHON
 export PIC10F320_HOST_CC PIC_SOAK_CXX PIC10F320_SOAK_CXX
 export PIC_SOAK_GPSIM_INC PIC10F320_SOAK_GPSIM_INC XT_DFP
 export YASIMAVR_VENV="$(dirname "$(dirname "$YASIMAVR_PY_ABS")")"
@@ -504,17 +692,11 @@ export YASIMAVR_VENV="$(dirname "$(dirname "$YASIMAVR_PY_ABS")")"
 # cross-checked before anything is staged. Enumeration alone cannot catch a
 # missing build step -- it would simply enumerate fewer images and agree with
 # itself, which is the whole failure mode §14.8 describes.
-RELEASE_IMAGES=$(mkv RELEASE_IMAGES)
-[ -n "${RELEASE_IMAGES// /}" ] \
-	|| die "Makefile RELEASE_IMAGES is empty; the canonical release set is unusable"
 # The build directories those images come from, so the reproduction instructions
 # this script GENERATES cannot list a stale set of directories.
 RELEASE_IMAGE_DIRS=$(mkv RELEASE_IMAGE_DIRS)
 [ -n "${RELEASE_IMAGE_DIRS// /}" ] \
 	|| die "Makefile RELEASE_IMAGE_DIRS is empty"
-RELEASE_SOAK_NAMES=$(mkv RELEASE_SOAK_NAMES)
-[ -n "${RELEASE_SOAK_NAMES// /}" ] \
-	|| die "Makefile RELEASE_SOAK_NAMES is empty"
 RELEASE_EVIDENCE_FILES=$(mkv RELEASE_EVIDENCE_FILES)
 [ -n "${RELEASE_EVIDENCE_FILES// /}" ] \
 	|| die "Makefile RELEASE_EVIDENCE_FILES is empty"
@@ -543,116 +725,6 @@ for helper_entry in $RELEASE_HELPER_MAP; do
 	RELEASE_HELPER_SOURCE[$helper_base]=$helper_src
 	RELEASE_HELPER_NAMES+=("$helper_base")
 done
-
-# --- the production release identity is pinned, not selected -----------------
-# Everything above this line was READ: the build directories, the tool paths,
-# the per-part tags, the variant matrices. Most of those Make variables are
-# deliberately overridable -- a developer relocates a build directory, a release
-# host points PIC_CC at its own XC8 -- and the two that decide what an artifact
-# IS travel by the same channel. `make release FW_BASE=other` reaches this
-# script through MAKEOVERRIDES, so every mkv above answers with the overridden
-# value; an exported PIC12F675_TAG never appears on a command line at all,
-# because the per-part tags are `?=` and the environment wins those.
-#
-# The enumeration/RELEASE_IMAGES cross-check in section 1 cannot see either one.
-# It compares this script's opinion with the Makefile's, and BOTH are composed
-# from the moved variable, so they agree -- on an identity nobody reviewed --
-# and a complete, self-consistent, wrongly-named release stages and publishes.
-#
-# RELEASE_IDENTITY_PINNED is the third statement: literal text in the Makefile,
-# `override` so neither channel can reach it. Compare it with what this run
-# actually selected, and stop here if they differ -- before the documentation
-# validators, before the scratch directory, before a clean, a build, a soak or
-# a staged byte. Preflight and dry runs are checked too: a capability probe for
-# the wrong release answers the wrong question, and a rehearsal of it rehearses
-# nothing.
-RELEASE_IDENTITY_PINNED=$(mkv RELEASE_IDENTITY_PINNED)
-RELEASE_IDENTITY_SELECTED=$(mkv RELEASE_IDENTITY_SELECTED)
-RELEASE_IDENTITY_IMAGES=$(mkv RELEASE_IDENTITY_IMAGES)
-RELEASE_IDENTITY_SOAKS=$(mkv RELEASE_IDENTITY_SOAKS)
-for identity_var in RELEASE_IDENTITY_PINNED RELEASE_IDENTITY_SELECTED \
-		RELEASE_IDENTITY_IMAGES RELEASE_IDENTITY_SOAKS; do
-	[ -n "${!identity_var// /}" ] \
-		|| die "Makefile $identity_var is empty; the pinned release identity is unusable"
-done
-
-# Report which member names a set gained and lost rather than printing both
-# sets: one moved FW_BASE renames all 21 images, and the useful sentence is
-# "these are extra, those are missing". Pure bash -- this runs before section 0
-# has established that any external tool exists.
-identity_set_drift() {   # usage: identity_set_drift LABEL PINNED SELECTED
-	local label=$1 name status=0
-	local -A want=() got=()
-	local -a extra=() missing=()
-	for name in $2; do want[$name]=1; done
-	for name in $3; do got[$name]=1; done
-	for name in "${!got[@]}"; do
-		[ -n "${want[$name]:-}" ] || extra+=("$name")
-	done
-	for name in "${!want[@]}"; do
-		[ -n "${got[$name]:-}" ] || missing+=("$name")
-	done
-	if [ "${#extra[@]}" -gt 0 ]; then
-		log "  $label has ${#extra[@]} entries the pinned identity does not: $(printf '%s ' "${extra[@]}")"
-		status=1
-	fi
-	if [ "${#missing[@]}" -gt 0 ]; then
-		log "  $label is missing ${#missing[@]} pinned entries: $(printf '%s ' "${missing[@]}")"
-		status=1
-	fi
-	return "$status"
-}
-
-read -r -a identity_pinned_fields <<<"$RELEASE_IDENTITY_PINNED"
-read -r -a identity_selected_fields <<<"$RELEASE_IDENTITY_SELECTED"
-# List values are comma-joined in the Makefile so one field is always one word.
-# A count mismatch therefore means the two tables no longer describe the same
-# fields -- a Makefile edit, not an override -- and is its own failure.
-[ "${#identity_pinned_fields[@]}" -eq "${#identity_selected_fields[@]}" ] \
-	|| die "the pinned release identity lists ${#identity_pinned_fields[@]} fields but ${#identity_selected_fields[@]} were selected.
-      RELEASE_IDENTITY_PINNED and RELEASE_IDENTITY_SELECTED must describe the same fields in the same order."
-
-IDENTITY_DRIFT=()
-IDENTITY_SET_DRIFT=0
-for ((identity_i = 0; identity_i < ${#identity_pinned_fields[@]}; identity_i++)); do
-	pinned_field=${identity_pinned_fields[identity_i]}
-	selected_field=${identity_selected_fields[identity_i]}
-	[ "$pinned_field" = "$selected_field" ] && continue
-	identity_name=${pinned_field%%=*}
-	[ "${selected_field%%=*}" = "$identity_name" ] \
-		|| die "the pinned and selected release identity fields are not in the same order ($pinned_field vs $selected_field)."
-	# Only reached when a release is already refusing to start, so the extra
-	# Make query costs nothing on a good run -- and "command line" versus
-	# "environment" is the whole difference between an argument the operator
-	# can see and an export they cannot.
-	identity_origin=$(make -s --no-print-directory origin-"$identity_name" 2>/dev/null) \
-		|| identity_origin=
-	IDENTITY_DRIFT+=("$identity_name: pinned '${pinned_field#*=}', selected '${selected_field#*=}' (Make origin: ${identity_origin:-unknown})")
-done
-
-if [ "${#IDENTITY_DRIFT[@]}" -gt 0 ]; then
-	log "Production release identity does not match the pinned Makefile declaration:"
-	for identity_line in "${IDENTITY_DRIFT[@]}"; do log "  $identity_line"; done
-fi
-identity_set_drift RELEASE_IMAGES "$RELEASE_IDENTITY_IMAGES" "$RELEASE_IMAGES" \
-	|| IDENTITY_SET_DRIFT=1
-identity_set_drift RELEASE_SOAK_NAMES "$RELEASE_IDENTITY_SOAKS" "$RELEASE_SOAK_NAMES" \
-	|| IDENTITY_SET_DRIFT=1
-if [ "${#IDENTITY_DRIFT[@]}" -gt 0 ] || [ "$IDENTITY_SET_DRIFT" -ne 0 ]; then
-	die "refusing to run a release under an overridden production identity.
-      A release always means the reviewed identity that RELEASE_IDENTITY_PINNED declares:
-      seven parts, 21 images, 18 soak combinations, one basename convention.
-      Re-run with none of the variables above set. Build-directory and tool-path
-      overrides are unaffected and remain available.
-      Make origin names the channel a value arrived on -- 'command line' is an
-      argument someone typed, 'environment' is an inherited export that appears
-      in no command at all, and 'override' means the Makefile recomputed the
-      variable from a caller's request (VARIANTS and PIC10F320_VARIANTS_ALL are
-      filtered that way, so their request is what to withdraw)."
-fi
-read -r -a identity_pinned_images <<<"$RELEASE_IDENTITY_IMAGES"
-read -r -a identity_pinned_soaks <<<"$RELEASE_IDENTITY_SOAKS"
-ok "production release identity matches the pinned declaration: ${#identity_pinned_fields[@]} fields, ${#identity_pinned_images[@]} images, ${#identity_pinned_soaks[@]} soak combinations."
 
 # A production or versioned rehearsal must start from finalized release prose.
 # Validate before scratch creation so a stale declaration cannot consume tools,
@@ -877,6 +949,7 @@ req_cmd "$CLANG"       "apt: clang (analyze-deep)"
 req_cmd "$CPPCHECK"    "apt: cppcheck (analyze + MISRA)"
 req_cmd "$CBMC"        "apt: cbmc (formal proof in test-long)"
 req_cmd python3        "Python 3.7 or newer; host gates and MISRA addon"
+req_exec "$PIC12F675_PYTHON" "PIC12F675 helper interpreter selected by PIC12F675_PYTHON"
 PYTHON_VERSION_OK=0
 if have python3; then
 	if PYTHON_VERSION_ERROR=$(python3 "$REPO_ROOT/test/python_version.py" 2>&1); then
@@ -884,6 +957,10 @@ if have python3; then
 	else
 		MISSING+=("${PYTHON_VERSION_ERROR:-python3 minimum-version probe failed}")
 	fi
+fi
+if have "$PIC12F675_PYTHON" \
+		&& ! "$PIC12F675_PYTHON" "$REPO_ROOT/test/python_version.py" >/dev/null 2>&1; then
+	MISSING+=("$PIC12F675_PYTHON  (PIC12F675_PYTHON must select Python 3.7 or newer)")
 fi
 if [ "$PYTHON_VERSION_OK" -eq 1 ] \
 		&& ! python3 -c 'import yaml' >/dev/null 2>&1; then
@@ -1081,6 +1158,10 @@ TC_CLANG=$(release_tool_version_line "Clang (CLANG=$CLANG)" "$CLANG") \
 	|| die "could not record the Clang provenance"
 TC_PY=$(release_tool_version_line "Python" python3) \
 	|| die "could not record the Python provenance"
+TC_PIC12F675_PY=$(release_tool_version_line \
+	"PIC12F675 Python (PIC12F675_PYTHON=$PIC12F675_PYTHON)" \
+	"$PIC12F675_PYTHON") \
+	|| die "could not record the PIC12F675 Python provenance"
 
 # These three tools define the released image bytes, so their versions are the
 # release contract, not advisory. Reject drift here -- at preflight, before any
@@ -2073,7 +2154,8 @@ REL_BANNER=""
 	printf -- '| cppcheck | %s |\n' "$TC_CPPCHECK"
 	printf -- '| cbmc | %s |\n' "$TC_CBMC"
 	printf -- '| clang | %s |\n' "$TC_CLANG"
-	printf -- '| python3 | %s |\n\n' "$TC_PY"
+	printf -- '| python3 | %s |\n' "$TC_PY"
+	printf -- '| PIC12F675 Python | %s |\n\n' "$TC_PIC12F675_PY"
 
 	printf '## Images\n\n'
 	printf '| image | MCU | clock | flash used | fuses / config | sha256 |\n'

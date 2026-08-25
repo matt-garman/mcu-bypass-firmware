@@ -555,7 +555,15 @@ which accepted the first three of those four drifted versions.
   the environment wins those without appearing in any command. Build-directory
   and tool-path overrides are unaffected and stay available -- they do not
   change what an artifact IS, and the selected tool is asserted and recorded
-  separately.
+  separately. A release-only fail-closed allowlist also rejects source-list,
+  compile/link-flag, and validation-control overrides; assignment-bearing
+  `MAKEFLAGS`/`GNUMAKEFLAGS`; GNU Make `--eval`; noncanonical/injected makefiles;
+  and dollar-bearing values before a selected tool or release recipe runs. The
+  canonical and pinned image/soak inventories must each have exactly 21/18
+  unique members before their sets are compared; sorting cannot hide a
+  duplicate. The separately selectable `PIC12F675_PYTHON` is executable- and
+  minimum-version-checked, passed to qualification, and recorded in the signed
+  manifest.
 * *XC8 + PIC10-12Fxxx_DFP provenance and cache integrity.*
   `scripts/install_pic_toolchain.sh` installs only after both downloads match
   reviewed SHA-256 digests (the XC8 installer and the 1.9.189 atpack), then

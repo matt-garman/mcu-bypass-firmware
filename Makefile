@@ -11,6 +11,23 @@ _MAKE_SERIAL_WORKTREE_ID := $(shell stat -Lc '%d:%i' . 2>/dev/null)
 ifeq ($(_MAKE_SERIAL_WORKTREE_ID),)
 $(error ERROR: stat is required to identify the worktree serialization lock)
 endif
+# Release configuration queries and the two release goals must reach the
+# release guards without first executing the selected cross-compiler through
+# parse-time discovery below. A valid release runs those probes in its nested
+# build graphs after the guards pass; an invalid one stops before any toolchain
+# process, recipe, scratch directory, clean, or build.
+_RELEASE_NO_TOOL_PARSE := $(strip \
+	$(filter release release-preflight,$(MAKECMDGOALS)) \
+	$(filter print-RELEASE_CONTRACT_VALID print-RELEASE_IMAGES \
+		print-RELEASE_SOAK_NAMES print-RELEASE_IDENTITY_PINNED \
+		print-RELEASE_IDENTITY_SELECTED print-RELEASE_IDENTITY_IMAGES \
+		print-RELEASE_IDENTITY_SOAKS origin-%,$(MAKECMDGOALS)))
+# Snapshot caller assignments before later `override` declarations can erase
+# their origin. This distinguishes an attempted production source/flag override
+# from the immutable value that ultimately wins.
+_RELEASE_REQUESTED_COMMAND_LINE_NAMES := $(sort $(foreach n,$(.VARIABLES),\
+	$(if $(filter command,$(firstword $(origin $(n)))),$(n))))
+_RELEASE_REQUESTED_MAKE_FLAGS := $(MAKEFLAGS) $(GNUMAKEFLAGS)
 # Matrix requests can arrive as recursive command-line variables. Preserve their
 # literal words without expanding embedded GNU Make functions, expose only known
 # names to rule generation, and forward safe metadata through the serialization
@@ -676,8 +693,17 @@ SIM_DEFS  ?= $(FAST_SIM_DEFS)
 # that really contains avr/io.h. Result: a verified real path, or empty (the
 # $(if ...) guards below then omit the -I and the analyzers fail loudly on the
 # missing include rather than parsing garbage).
+ifneq ($(_RELEASE_NO_TOOL_PARSE),)
+AVR_IO_HEADER      :=
+AVR_LIBC_INCLUDE   :=
+AVR_GCC_INCLUDE    :=
+AVR_ARCH           :=
+else
 AVR_IO_HEADER      := $(shell $(CC) -print-file-name=avr/io.h)
 AVR_LIBC_INCLUDE   := $(shell echo | $(CC) -xc -E -Wp,-v - 2>&1 | grep -oE '^ /[^ ]+' | tr -d ' ' | while read d; do if [ -f "$$d/avr/io.h" ]; then realpath "$$d" 2>/dev/null || echo "$$d"; break; fi; done)
+AVR_GCC_INCLUDE    := $(shell $(CC) -print-file-name=include)
+AVR_ARCH           := $(shell $(CC) -mmcu=$(ATTINY13A_MCU) -dM -E - < /dev/null | awk '/__AVR_ARCH__/ { print $$3; exit }')
+endif
 ifeq ($(AVR_LIBC_INCLUDE),)
 AVR_LIBC_INCLUDE   := $(patsubst %/avr/, %, $(dir $(AVR_IO_HEADER)))
 # reject a non-path result ("avr/" when -print-file-name found nothing)
@@ -685,8 +711,6 @@ ifeq ($(wildcard $(AVR_LIBC_INCLUDE)/avr/io.h),)
 AVR_LIBC_INCLUDE   :=
 endif
 endif
-AVR_GCC_INCLUDE    := $(shell $(CC) -print-file-name=include)
-AVR_ARCH           := $(shell $(CC) -mmcu=$(ATTINY13A_MCU) -dM -E - < /dev/null | awk '/__AVR_ARCH__/ { print $$3; exit }')
 # Shared clang target/flags so clang-tidy AND the clang static analyzer parse
 # the firmware exactly as the AVR build sees it.
 CLANG_AVR_FLAGS    ?= -target avr -mmcu=$(ATTINY13A_MCU) -DF_CPU=$(ATTINY13A_F_CPU) -D__AVR__ -D__AVR_ATtiny13A__ \
@@ -8059,7 +8083,9 @@ override RELEASE_EVIDENCE_FILES := $(RELEASE_FIXED_EVIDENCE_FILES) \
 # and make-release.sh already asserts and records the tool it actually selected.
 # Fuse/CONFIG bytes are likewise not pinned here: they are read from Makefile
 # truth into the signed MANIFEST, so they are disclosed rather than silently
-# substituted.
+# substituted. Source lists and compile/link flag bundles remain overridable for
+# development targets, but the release-only allowlist below rejects those names
+# from command-line, environment-precedence, and injected-makefile channels.
 #
 # TO CHANGE THE RELEASE IDENTITY -- add a part, retire a variant, re-clock a
 # chip -- edit this block. That edit is the review: it cannot be done from a
@@ -8119,15 +8145,94 @@ override RELEASE_IDENTITY_IMAGES := $(foreach m,$(RELEASE_IDENTITY_PARTS),\
 override RELEASE_IDENTITY_SOAKS := $(foreach m,$(RELEASE_IDENTITY_SOAK_PARTS),\
 	$(foreach v,$(RELEASE_IDENTITY_VARIANTS),$(m)_$(v)))
 
+# A production release permits only inputs that select its version/options,
+# relocate tools or output directories, or alter values deliberately disclosed
+# in the signed manifest (the fuse bytes). Development source/flag override
+# surfaces remain available to every non-release goal. For release goals, every
+# effective command-line assignment and every release-relevant ordinary/`-e`
+# environment value not listed here is rejected. MAKEFLAGS/MFLAGS are included
+# only as transport: assignments they carry still acquire `command line` origin
+# and are checked by name.
+override RELEASE_ALLOWED_OVERRIDE_NAMES := \
+	VERSION RELEASE_ARGS VARIANT \
+	$(RELEASE_IDENTITY_NAMES) \
+	mmcu_85 mmcu_45 \
+	RELEASE_IMAGES RELEASE_SOAK_NAMES \
+	RELEASE_IDENTITY_PINNED RELEASE_IDENTITY_IMAGES \
+	RELEASE_IDENTITY_SOAKS RELEASE_IDENTITY_PARTS \
+	RELEASE_IDENTITY_SOAK_PARTS RELEASE_IDENTITY_VARIANTS \
+	AVR_BUILD_DIR XT_BUILD_DIR PIC10F322_BUILD_DIR \
+	PIC10F320_BUILD_DIR PIC12F675_BUILD_DIR \
+	CC OBJCOPY SIZE OBJDUMP READELF IHEX_VALIDATOR AWK HOSTCC \
+	CLANG CLANG_TIDY ANALYZE_CMD CPPCHECK CBMC GCOV GPSIM SIMAVR_INC \
+	PIC_CC PIC_DFP PIC_XC8_INCLUDE PIC10F322_DFP_INCLUDE \
+	PIC10F322_DEVICE_INI PIC10F320_CC PIC10F320_DFP \
+	PIC10F320_XC8_INCLUDE PIC10F320_DFP_INCLUDE PIC10F320_DEVICE_INI \
+	PIC12F675_DFP_INCLUDE PIC12F675_DEVICE_INI PIC10F320_HOST_CC \
+	PIC_SOAK_CXX PIC10F320_SOAK_CXX PIC_SOAK_GPSIM_INC \
+	PIC10F320_SOAK_GPSIM_INC XT_DFP YASIMAVR_VENV YASIMAVR_PY \
+	PIC12F675_PYTHON KLEE KLEE_CLANG KLEE_INC KLEE_LLVMLINK \
+	AVR_NM MUTATION_MAKE MAKE_COMMAND MAKELEVEL \
+	$(if $(filter print-RELEASE_CONTRACT_VALID,$(MAKECMDGOALS)),\
+		_MAKE_SERIAL_LOCK_HELD) \
+	ATTINY13A_LFUSE ATTINY13A_HFUSE TINYX5_LFUSE TINYX5_HFUSE \
+	XT_FUSE_WDTCFG XT_FUSE_BODCFG XT_FUSE_OSCCFG XT_FUSE_SYSCFG0 \
+	XT_FUSE_SYSCFG1 XT_FUSE_APPEND XT_FUSE_BOOTEND \
+	MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEOVERRIDES
+# Ordinary environment origin matters for `?=` variables: unlike a plain `=`,
+# the file never replaces the inherited value. Cover the project's complete
+# variable vocabularies plus its conventional unprefixed build controls, then
+# subtract the supported release inputs above.
+override RELEASE_ENVIRONMENT_INPUT_PATTERNS := \
+	RELEASE_% AVR_% ATTINY% TINYX5% XT_% YASIMAVR_% \
+	PIC_% PIC10F322_% PIC10F320_% PIC12F675_% FW_% CORE_% \
+	HOSTCC HOST_CFLAGS HOST_DEFS SIMAVR_% SIM_CFLAGS SIM_DEFS SIM_JOBS \
+	ANALYZE_% CLANG% CPPCHECK% MISRA_% CBMC% GCOV% GPSIM% \
+	IHEX_% KLEE% MUTATION_% SERIAL_% SOAK_% VARIANT% \
+	AWK CC MAKE MAKE_COMMAND OBJCOPY OBJDUMP READELF SIZE \
+	CFLAGS CPPFLAGS LDFLAGS SANITIZE COVERAGE_% STRICT_TOOLS
+override RELEASE_PROJECT_ENVIRONMENT_NAMES := $(sort $(foreach n,$(.VARIABLES),\
+	$(if $(and $(filter environment,$(origin $(n))),\
+		$(filter $(RELEASE_ENVIRONMENT_INPUT_PATTERNS),$(n))),$(n))))
+# A preloaded makefile can use `override` and then clear MAKEFILES/MAKEFILE_LIST.
+# These source/flag names normally have file origin; an `override` origin is
+# therefore independent evidence that unreviewed build input was injected.
+override RELEASE_SOURCE_FLAG_NAMES := \
+	CFLAGS CFLAGS_COMMON LDFLAGS CORE_SRC macro_% src_% \
+	XT_CFLAGS XT_LDFLAGS XT_CORE_SRC XT_FW_CFLAGS \
+	PIC10F322_CFLAGS PIC10F322_CORE_SRC PIC10F320_CFLAGS PIC10F320_SRC
+override RELEASE_INJECTED_SOURCE_FLAG_NAMES := $(sort $(foreach n,\
+	$(filter $(RELEASE_SOURCE_FLAG_NAMES),$(.VARIABLES)),\
+	$(if $(filter override,$(origin $(n))),$(n))))
+override RELEASE_EXTERNAL_OVERRIDE_NAMES := $(sort \
+	$(_RELEASE_REQUESTED_COMMAND_LINE_NAMES) \
+	$(RELEASE_PROJECT_ENVIRONMENT_NAMES) \
+	$(RELEASE_INJECTED_SOURCE_FLAG_NAMES) \
+	$(foreach n,$(.VARIABLES),\
+	$(if $(filter command,$(firstword $(origin $(n)))),$(n),\
+		$(if $(and $(filter environment,$(firstword $(origin $(n)))),\
+			$(filter override,$(word 2,$(origin $(n))))),$(n)))))
+override RELEASE_UNSUPPORTED_OVERRIDE_NAMES := $(filter-out \
+	$(RELEASE_ALLOWED_OVERRIDE_NAMES),$(RELEASE_EXTERNAL_OVERRIDE_NAMES))
+
 # Every way the live tree can differ from the pin, as one compact word list: the
 # moved <name>=<value> fields, plus the bare name of a whole set that no longer
 # matches. Naming the set rather than diffing it here keeps the parse-time error
 # readable -- one moved FW_BASE moves all 21 image names with it, and
 # make-release.sh is where the member-by-member report belongs.
+override RELEASE_IDENTITY_FIELD_DRIFT := $(filter-out \
+	$(RELEASE_IDENTITY_PINNED),$(RELEASE_IDENTITY_SELECTED))
 override RELEASE_IDENTITY_DRIFT := $(strip \
-	$(filter-out $(RELEASE_IDENTITY_PINNED),$(RELEASE_IDENTITY_SELECTED)) \
+	$(RELEASE_IDENTITY_FIELD_DRIFT) \
 	$(if $(filter-out $(RELEASE_IDENTITY_IMAGES),$(RELEASE_IMAGES))$(filter-out $(RELEASE_IMAGES),$(RELEASE_IDENTITY_IMAGES)),RELEASE_IMAGES) \
 	$(if $(filter-out $(RELEASE_IDENTITY_SOAKS),$(RELEASE_SOAK_NAMES))$(filter-out $(RELEASE_SOAK_NAMES),$(RELEASE_IDENTITY_SOAKS)),RELEASE_SOAK_NAMES))
+override RELEASE_CONTRACT_VALID := 1
+override RELEASE_CANONICAL_MAKEFILE := $(abspath Makefile)
+override RELEASE_LOADED_MAKEFILE := $(abspath $(lastword $(MAKEFILE_LIST)))
+override RELEASE_DANGEROUS_MAKE_FLAGS := $(strip \
+	$(if $(findstring --eval,$(_RELEASE_REQUESTED_MAKE_FLAGS) $(value MAKEFLAGS) $(value GNUMAKEFLAGS)),--eval) \
+	$(if $(findstring --file,$(_RELEASE_REQUESTED_MAKE_FLAGS) $(value MAKEFLAGS) $(value GNUMAKEFLAGS)),--file) \
+	$(if $(findstring --makefile,$(_RELEASE_REQUESTED_MAKE_FLAGS) $(value MAKEFLAGS) $(value GNUMAKEFLAGS)),--makefile))
 
 .PHONY: release release-preflight
 # Keep release arguments in the recipe environment, never in shell source. The
@@ -8141,6 +8246,10 @@ _RELEASE_DOLLAR := $$
 override VERSION := $(_RELEASE_VERSION_LITERAL)
 override RELEASE_ARGS := $(_RELEASE_ARGS_LITERAL)
 export VERSION RELEASE_ARGS
+override RELEASE_UNSAFE_OVERRIDE_VALUE_NAMES := $(sort $(foreach n,\
+	$(filter-out VERSION RELEASE_ARGS MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEOVERRIDES,\
+		$(RELEASE_EXTERNAL_OVERRIDE_NAMES)),\
+	$(if $(findstring $(_RELEASE_DOLLAR),$(value $(n))),$(n))))
 # Recursive Make otherwise forwards the original command-line spellings through
 # MAKEOVERRIDES, bypassing the literal values above. A dollar cannot occur in a
 # valid release version and is not a supported RELEASE_ARGS expansion syntax, so
@@ -8149,6 +8258,64 @@ ifneq ($(filter release release-preflight,$(MAKECMDGOALS)),)
 ifneq ($(findstring $(_RELEASE_DOLLAR),$(_RELEASE_VERSION_LITERAL)$(_RELEASE_ARGS_LITERAL)),)
 $(error VERSION and RELEASE_ARGS must not contain dollar signs)
 endif
+endif
+# The script asks for this one value before any other Makefile setting. Apply the
+# same release-input and inventory checks to that query so direct script use has
+# the same no-tools/no-scratch failure boundary as `make release`.
+ifneq ($(filter release release-preflight print-RELEASE_CONTRACT_VALID,$(MAKECMDGOALS)),)
+ifneq ($(origin MAKEFILES),default)
+$(error refusing production release configuration under unsupported release overrides: MAKEFILES injects $(MAKEFILES))
+endif
+ifneq ($(words $(MAKEFILE_LIST)),1)
+$(error refusing production release configuration loaded from multiple makefiles: $(MAKEFILE_LIST))
+endif
+ifneq ($(RELEASE_LOADED_MAKEFILE),$(RELEASE_CANONICAL_MAKEFILE))
+$(error refusing production release configuration from noncanonical makefile $(RELEASE_LOADED_MAKEFILE); expected $(RELEASE_CANONICAL_MAKEFILE))
+endif
+ifneq ($(strip $(RELEASE_UNSAFE_OVERRIDE_VALUE_NAMES)),)
+$(error refusing production release configuration: override values must not contain dollar signs or GNU Make functions: $(RELEASE_UNSAFE_OVERRIDE_VALUE_NAMES))
+endif
+ifneq ($(strip $(RELEASE_DANGEROUS_MAKE_FLAGS)),)
+$(error refusing production release configuration under unsupported GNU Make options: $(RELEASE_DANGEROUS_MAKE_FLAGS))
+endif
+ifneq ($(strip $(RELEASE_UNSUPPORTED_OVERRIDE_NAMES)),)
+$(error refusing production release configuration under unsupported release overrides: $(RELEASE_UNSUPPORTED_OVERRIDE_NAMES). Only version/options, tool paths, build directories, and manifest-disclosed fuse values may be overridden)
+endif
+ifneq ($(filter release release-preflight,$(MAKECMDGOALS)),)
+ifneq ($(strip $(RELEASE_IDENTITY_FIELD_DRIFT)),)
+$(error refusing a release goal under an overridden production release identity: $(RELEASE_IDENTITY_FIELD_DRIFT). A release always means the reviewed identity declared by RELEASE_IDENTITY_PINNED -- seven parts, 21 images, 18 soak combinations. Re-run without those overrides; build-directory and tool-path overrides stay available)
+endif
+endif
+# Set equality erases duplicates. Prove uniqueness and the reviewed cardinality
+# before the existing selected-versus-pinned set comparison.
+ifeq ($(strip $(RELEASE_IDENTITY_FIELD_DRIFT)),)
+ifneq ($(words $(RELEASE_IMAGES)),$(words $(sort $(RELEASE_IMAGES))))
+$(error canonical RELEASE_IMAGES contains duplicate image names)
+endif
+ifneq ($(words $(RELEASE_IMAGES)),21)
+$(error canonical RELEASE_IMAGES contains $(words $(RELEASE_IMAGES)) images; expected exactly 21)
+endif
+ifneq ($(words $(RELEASE_IDENTITY_IMAGES)),$(words $(sort $(RELEASE_IDENTITY_IMAGES))))
+$(error pinned RELEASE_IDENTITY_IMAGES contains duplicate image names)
+endif
+ifneq ($(words $(RELEASE_IDENTITY_IMAGES)),21)
+$(error pinned RELEASE_IDENTITY_IMAGES contains $(words $(RELEASE_IDENTITY_IMAGES)) images; expected exactly 21)
+endif
+ifneq ($(words $(RELEASE_SOAK_NAMES)),$(words $(sort $(RELEASE_SOAK_NAMES))))
+$(error canonical RELEASE_SOAK_NAMES contains duplicate soak names)
+endif
+ifneq ($(words $(RELEASE_SOAK_NAMES)),18)
+$(error canonical RELEASE_SOAK_NAMES contains $(words $(RELEASE_SOAK_NAMES)) soaks; expected exactly 18)
+endif
+ifneq ($(words $(RELEASE_IDENTITY_SOAKS)),$(words $(sort $(RELEASE_IDENTITY_SOAKS))))
+$(error pinned RELEASE_IDENTITY_SOAKS contains duplicate soak names)
+endif
+ifneq ($(words $(RELEASE_IDENTITY_SOAKS)),18)
+$(error pinned RELEASE_IDENTITY_SOAKS contains $(words $(RELEASE_IDENTITY_SOAKS)) soaks; expected exactly 18)
+endif
+endif
+endif
+ifneq ($(filter release release-preflight,$(MAKECMDGOALS)),)
 # A release goal means the reviewed production identity, and nothing else. Fail
 # at PARSE time -- before the recipe runs, before the worktree lock is taken,
 # before make-release.sh creates a scratch directory -- so an identity-changing
