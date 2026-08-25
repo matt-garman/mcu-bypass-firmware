@@ -241,12 +241,14 @@ function regardless (the host suite links it unconditionally).
 
 ## Resource qualification
 
-Measured on the final `v0.9.10` candidate build, which carries the transaction
-and the OR-folded integrity checks: XC8 v3.10 (free mode, `-O2`) for the PIC
-parts, avr-gcc for the AVR parts. Every figure below is enforced by a build gate,
-not a one-off reading. The PIC10F322 row is the one F2 had to fit inside, but
-every row here has moved since F2 landed, for later firmware work outside this
-design; read them as current occupancy rather than as this change's cost.
+These are the latest fully provisioned candidate measurements for the build that
+carries the transaction and OR-folded integrity checks: XC8 v3.10 (free mode,
+`-O2`) for the PIC parts, avr-gcc for the AVR parts. They remain working values
+until the production release's strict resource gate remeasures all 21 images and
+retains its source-commit-bound result. The PIC10F322 row is the one F2 had to
+fit inside, but every row here has moved since F2 landed, for later firmware
+work outside this design; read them as current occupancy rather than as this
+change's cost.
 
 | Part | Budget | Simple / mute / relay | Tightest margin |
 | --- | --- | --- | --- |
@@ -264,8 +266,8 @@ the raw device size. PIC10F320 carries no F2 at all; its row records that the
 part still builds and where its own margin sits.
 
 RAM and stack: the AVR `next_ctx` snapshot is an automatic, so it lands on the
-stack. The stack high-water gate in the simulator suite (`make test-long`, not
-`make test`) measures 31-33 B of stack use across every classic-AVR variant and
+stack. The stack high-water gate in the simulator suite (`make test` and
+`make test-long`) measures 31-33 B of stack use across every classic-AVR variant and
 part. With 5 B of static data, aggregate occupancy is 36-38 B. The tightest
 margin is the ATtiny13a, whose 64 B of SRAM leaves 26 B free, against the gate's
 8 B floor. PIC10F322 return-stack depth is unchanged at 3 levels

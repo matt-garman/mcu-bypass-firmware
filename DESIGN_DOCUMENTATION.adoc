@@ -1109,9 +1109,14 @@ Specific tests verify specific requirements, as shown in the following table:
 
 == Resource Utilization
 
-Every figure in this section is measured on the final `v0.9.10` candidate build.
-Resource use spans from 10.5% of an ATtiny85's flash to 98.0% of a PIC10F322's;
-that target's mute image is the current binding build with 10 words free.
+The tables below carry the latest fully provisioned candidate measurements. They
+are working values, not retained final-`v0.9.10` evidence while the release is
+still unreleased. `make test-resource-tables` checks the tables, arithmetic,
+cross-document copies and any images already built; the production release runs
+the strict form against all 21 images and the complete RAM/stack logs, retains
+its source-commit-bound result, and refuses to stage otherwise. Resource use
+currently spans from 10.5% of an ATtiny85's flash to 98.0% of a PIC10F322's;
+that target's mute image is the working binding build with 10 words free.
 PIC10F320 has the smallest absolute capacity and leaves 14 of 256 words free on
 its largest variant, which is why it is built differently from every other
 target and documented as a special case (see `docs/pic10f320_special_case.md`).
@@ -1219,15 +1224,15 @@ compiler), not bytes. `make pic10f322` enforces the flash-word budget per varian
 | cd4053_with_mute  | 502 words | 98.0% | 10 words
 |===
 
-Persistent firmware state is 4 bytes: the 3-byte `ctx_` and 1-byte
-`ctx_check_`. The PIC's polled Model-B loop has no `timer_isr_called_` handshake.
-XC8 reserves 38 of the device's 64 Data-space bytes (59.4%) in all three
-variants; the remainder of that reservation is compiler scratch. Against the
-512-word limit the flash margin is real but not generous: the binding mute
-variant leaves 10 words (2.0%), relay leaves 19, and simple leaves 36. That is
-enough for maintenance work, not a substantial new feature. `make pic10f322`
-gates every variant against the budget on every build, so an overshoot fails
-before hardware.
+Persistent firmware state comprises `ctx_` and `ctx_check_`; the PIC's polled
+Model-B loop has no `timer_isr_called_` handshake. An exact whole-program XC8
+Data-space total is not published for this target: the release retains its
+flash and return-stack measurements but does not yet retain a Data-space record
+that can support that claim. Against the 512-word limit the flash margin is real
+but not generous: the binding mute variant leaves 10 words (2.0%), relay leaves
+19, and simple leaves 36. That is enough for maintenance work, not a substantial
+new feature. `make pic10f322` gates every variant against the budget on every
+build, so an overshoot fails before hardware.
 
 === PIC10F320 (XC8 build)
 
@@ -1247,8 +1252,10 @@ variant and fails the build on any overshoot.
 | tq2_l2_5v_relay  | 242 words | 94.5% | 14 words
 |===
 
-Data (RAM) use is 10 bytes of 64 (15.6%); persistent firmware state is the
-3-byte `ctx_`, with the remainder XC8 runtime scratch.
+The persistent firmware state is `ctx_`. An exact whole-program XC8 Data-space
+total is not published for this target for the same evidence reason as the
+PIC10F322: flash and both return-stack witnesses are retained, but no release
+record currently binds a Data-space total to the qualified source.
 
 Those margins are the whole story of this target, and they have moved in both
 directions. The general output-latch integrity check was measured against an
@@ -1281,9 +1288,9 @@ headroom and includes XC8's statically overlaid automatic storage.
 |===
 
 More than 40% of the flash remains free on every variant. Persistent firmware
-state is 6 bytes: the 3-byte `ctx_`, `ctx_check_`, `gpio_shadow_` (the software
-output latch this core needs), and `osccal_snapshot_` (the factory oscillator
-trim captured at init). XC8 reserves 40 of the device's 64 Data-space bytes
+state comprises `ctx_`, `ctx_check_`, `gpio_shadow_` (the software output latch
+this core needs), and `osccal_snapshot_` (the factory oscillator trim captured
+at init). XC8 reserves 40 of the device's 64 Data-space bytes
 (62.5%) in all three variants, and the build requires one internally consistent
 XC8 summary per variant and fails above 48/64 bytes. The 322 needs neither of
 the final two bytes: it has a real output latch and compares `OSCCON` against a

@@ -18,7 +18,7 @@ and its provenance remain durable only here.
 
 **Qualification status (2026-08-23):** PIC10F320 remains the self-contained
 exception. This document summarizes the `v0.9.10` *source* contract. The
-authoritative `QUALIFICATION`, manifest, image checksums, and exact 34-file
+authoritative `QUALIFICATION`, manifest, image checksums, and exact 35-file
 lane/soak evidence for the release it qualifies are retained under
 `release/v0.9.10/`; that retained record, rather than this summary, identifies
 the qualified source commit and measured results.
@@ -295,7 +295,7 @@ historical evidence from the current retained production record.
 | CLI gpsim functional | PASS ×6 (toggle + power-on-held, all variants) |
 | Fail-closed target aggregate | EXIT=0 |
 | Soak (libgpsim) | PASS on all three |
-| Hardware return-stack depth | **3 / 3 / 4 levels of 8** (cd4053-simple / cd4053-mute / tq2-relay), 2 held in reserve |
+| Historical hardware return-stack depth | **3 / 3 / 4 levels of 8** (cd4053-simple / cd4053-mute / tq2-relay) through `v0.9.9`; superseded by the current 3 / 3 / 3 result in §3a |
 | Mutation | see §5 |
 
 The narrow `v0.9.8` relay-correction rerun updated only the affected current

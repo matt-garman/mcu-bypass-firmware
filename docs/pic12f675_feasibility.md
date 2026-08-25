@@ -13,11 +13,11 @@ bench programming target.
 
 PIC12F675 is **release-supported from `v0.9.9`** as the seventh software-validated
 part. It is included in the default `all` goal, both CI aggregates, the canonical
-21-image release set, the 18-combination release soak, and the 34-file retained
+21-image release set, the 18-combination release soak, and the 35-file retained
 evidence inventory. The tag workflow rebuilds and requalifies its three shipping
 images with the pinned PIC toolchain before publication.
 
-The final v0.9.10 candidate build uses 548/574/583 of 1024 program words for the
+The latest fully provisioned candidate build uses 548/574/583 of 1024 program words for the
 simple/mute/relay variants. Persistent firmware state is 6 bytes (`ctx_`,
 `ctx_check_`, `gpio_shadow_`, and `osccal_snapshot_`); XC8 reserves 40 of the
 device's 64 Data-space bytes in all three variants. Every build requires one

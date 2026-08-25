@@ -660,8 +660,14 @@ ok "production release identity matches the pinned declaration: ${#identity_pinn
 if [ "$VERSION_WAS_SUPPLIED" -eq 1 ]; then
 	read -r -a DOCUMENT_RELEASE_IMAGES <<<"$RELEASE_IMAGES"
 	read -r -a DOCUMENT_RELEASE_SOAKS <<<"$RELEASE_SOAK_NAMES"
+	SOURCE_FINALIZATION_DATE=$(git show -s --format=%cs HEAD) \
+		|| die "could not read the source commit date"
+	[[ "$SOURCE_FINALIZATION_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
+		|| die "source commit date is not canonical YYYY-MM-DD: $SOURCE_FINALIZATION_DATE"
+	ALLOW_UNRELEASED=$PREFLIGHT
 	release_validate_current_documentation "$REPO_ROOT" "$VERSION" \
 		"${#DOCUMENT_RELEASE_IMAGES[@]}" "${#DOCUMENT_RELEASE_SOAKS[@]}" \
+		"$SOURCE_FINALIZATION_DATE" "$ALLOW_UNRELEASED" \
 		|| die "current release documentation is not finalized for $VERSION"
 	# Published recovery instructions must actually recover the transaction the
 	# published programming command reserves. Checked here, on the live tree, so
@@ -1723,6 +1729,19 @@ current_pic12f675_matrix_record=$(python3 "$PIC12F675_MATRIX_EVIDENCE" verify \
 	|| die "the final PIC12F675 matrix differs from the retained qualification"
 ok "all validated release images are present and nonempty."
 
+# Convert the final image set and this run's full resource-bearing logs into one
+# strict, source-bound record before test-long.log is summarized. Ordinary CI
+# may compare zero images; this release path must measure all 21, all 12 AVR
+# static-data records, and every retained stack/Data-space observation.
+python3 "$REPO_ROOT/test/test_resource_tables.py" --root "$REPO_ROOT" \
+	--require-all-images --evidence-dir "$EVID" --source-commit "$GIT_SHA" \
+	>"$EVID/resource-tables.log" 2>&1 \
+	|| { cat "$EVID/resource-tables.log" >&2; die "final resource evidence FAILED."; }
+resource_tables_sha256=$(sha256sum -- "$EVID/resource-tables.log") \
+	|| die "could not hash final resource evidence"
+resource_tables_sha256=${resource_tables_sha256%% *}
+ok "final resource evidence covers all images and retained RAM/stack measurements."
+
 # Replace the early fail-fast report with one computed from the exact final
 # image paths that staging consumes. A rebuild that changed bytes after the
 # early check must fail here, never leave stale evidence beside different files.
@@ -1860,12 +1879,18 @@ staged_pic12f675_matrix_sha256=$(sha256sum -- \
 staged_pic12f675_matrix_sha256=${staged_pic12f675_matrix_sha256%% *}
 [ "$staged_pic12f675_matrix_sha256" = "$pic12f675_matrix_sha256" ] \
 	|| die "staged PIC12F675 matrix manifest differs from retained qualification"
+staged_resource_tables_sha256=$(sha256sum -- \
+	"$OUTPUT_DIR/evidence/resource-tables.log") \
+	|| die "could not hash staged resource evidence"
+staged_resource_tables_sha256=${staged_resource_tables_sha256%% *}
+[ "$staged_resource_tables_sha256" = "$resource_tables_sha256" ] \
+	|| die "staged resource evidence differs from final-candidate measurement"
 
 # Compact machine-readable attestation. The verifier parses this as data (never
 # sources it), then cross-checks it against the canonical evidence inventory,
 # every terminal soak record, and the human-readable manifest.
 {
-	printf 'format=2\n'
+	printf 'format=3\n'
 	printf 'version=%s\n' "$VERSION"
 	printf 'release_mode=%s\n' "$RELEASE_MODE"
 	printf 'source_commit=%s\n' "$GIT_SHA"
@@ -1874,6 +1899,7 @@ staged_pic12f675_matrix_sha256=${staged_pic12f675_matrix_sha256%% *}
 	printf 'soak_liveness_interval_ms=%s\n' "$SOAK_LIVENESS_INTERVAL_MS"
 	printf 'soak_combination_count=%s\n' "$NCOMBOS"
 	printf 'pic12f675_matrix_sha256=%s\n' "$pic12f675_matrix_sha256"
+	printf 'resource_tables_sha256=%s\n' "$resource_tables_sha256"
 } > "$OUTPUT_DIR/QUALIFICATION"
 
 # --- per-image facts for the manifest (target, clock, fuses, flashing cmd) ----
@@ -2023,6 +2049,8 @@ REL_BANNER=""
 	printf -- '- **Soak combinations:** %s\n' "$NCOMBOS"
 	printf -- '- **PIC12F675 qualified matrix:** `evidence/pic12f675-qualified-matrix.json` (SHA-256 `%s`)\n' \
 		"$pic12f675_matrix_sha256"
+	printf -- '- **Final resource evidence:** `evidence/resource-tables.log` (SHA-256 `%s`)\n' \
+		"$resource_tables_sha256"
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
 	release_render_validation "$hours"

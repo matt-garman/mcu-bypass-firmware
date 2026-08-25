@@ -35,7 +35,7 @@ file is the human-readable summary of *what changed*.
 
 ## [Unreleased]
 
-## [0.9.10] - 2026-08-27
+## [0.9.10] - Unreleased
 
 ### Added
 
@@ -146,8 +146,8 @@ file is the human-readable summary of *what changed*.
   matching, so naming the retired `get-pip.py` fallback in order to say it is
   gone is not promising it.
 
-- **Every current resource figure is now measured on the final candidate build,
-  and checked against the image it came from.** The flash and RAM numbers for
+- **Current resource documentation is checked continuously, and final resource
+  evidence can no longer pass vacuously.** The flash and RAM numbers for
   the seven release parts are restated in four current documents --
   `DESIGN_DOCUMENTATION.adoc`'s four utilization tables and the sentences
   derived from them, `docs/context_seu_detection.md`'s resource-qualification
@@ -162,20 +162,22 @@ file is the human-readable summary of *what changed*.
   the stale numbers. These are the figures a reader uses to decide whether a
   change fits.
 
-  Every table is regenerated from the final `v0.9.10` candidate build. The
+  The working tables were regenerated from the latest fully provisioned
+  candidate build. The
   ATtiny45 and ATtiny85 rows are published rather than omitted: each of those
   images is the size of its counterpart on the other part and 26 bytes larger
   than the corresponding ATtiny13a image, so the family's span now runs from
-  10.5% of an ATtiny85 to 85.7% of an ATtiny13a. The XC8 Data-space totals that
-  were previously withheld as unretained are measured and stated -- 38 of 64
-  bytes on the PIC10F322, 40 on the PIC12F675, 10 on the PIC10F320, in every
-  variant -- which closes the last resource figure the release was carrying as
-  an open obligation. What remains genuinely unmeasured is named as such: no
+  10.5% of an ATtiny85 to 85.7% of an ATtiny13a. PIC12F675's gated XC8
+  Data-space total is stated as 40 of 64 bytes in every variant. Exact
+  whole-program Data-space totals for PIC10F322 and PIC10F320 are no longer
+  published: their release logs do not retain the records needed to support
+  those claims. What remains genuinely unmeasured is named as such: no
   AVR-XT lane measures a call-chain-plus-interrupt stack high-water mark, so the
   ATtiny202's peak stack is still an unretained figure rather than one derived
   from the ATtiny13a's.
 
-  `make test-resource-tables` is the regression, in three layers. The four
+  `make test-resource-tables` is the ordinary, tool-independent documentation
+  regression. The four
   tables must cover exactly the canonical 21 images with every percentage and
   free-space cell recomputed from its own size and the datasheet capacity; the
   four documents must agree digit for digit, with each derived sentence
@@ -183,17 +185,28 @@ file is the human-readable summary of *what changed*.
   words, the PIC10F320's 14, the ATtiny13a's distance from the 90%-of-1024 limit
   `test/check_flash_budget.sh` actually enforces, and the 90-word PIC12F675
   shell premium over the PIC10F322 on the same relay driver; and every
-  documented image present in a build directory is measured and must match. That
-  last layer needs no AVR or PIC toolchain: program size is read out of the ELF
+  documented image present in a build directory is measured and must match. It
+  also pins every current static-RAM/Data-space/stack statement and catches the
+  stale PIC10F320 3/3/4 row that contradicted the current 3/3/3 result. The
+  optional image layer needs no AVR or PIC toolchain: program size is read out of the ELF
   section headers and the Intel HEX records directly, which reproduces
   `avr-size`'s `Program:` and XC8's "Program space used" exactly, so it
   measures whatever the tree has already built and reports how many of the 21 it
-  reached, rather than passing vacuously when it reached none.
+  reached without representing a zero-image run as final evidence.
 
-- **The `0.9.10` heading carries the release's own date.** It read 2026-08-21
-  while candidate commits were still landing and no release had occurred. It is
-  now 2026-08-27, the source-finalization date this entry describes; if that
-  date moves, the heading moves with it before staging.
+  Production qualification uses the strict mode after final image regeneration.
+  It requires 21 of 21 regular, non-symlinked images, measures static data in all
+  12 AVR ELFs, and requires the complete Classic-AVR high-water, AVR-XT frame,
+  PIC12F675 Data-space, and PIC return-stack records from that run. Its retained
+  result names the exact source commit and is itself hash-bound into
+  `QUALIFICATION`; missing, partial, substituted, or edited evidence prevents
+  staging or publication.
+
+- **The `0.9.10` heading no longer invents a future finalization date.** It read
+  2026-08-21 and then 2026-08-27 while candidate commits were still landing.
+  Until source finalization it says `Unreleased`; versioned preflight accepts
+  that explicit draft state, while production staging requires the heading's
+  ISO date to equal the qualified source commit date.
 
 - **Every AVR `*-program` goal now builds and validates its image before it
   writes a fuse byte.** `attiny13a-program`, `attiny45-program`,
@@ -947,7 +960,9 @@ file is the human-readable summary of *what changed*.
 - **The PIC12F675 is fully integrated into the release pipeline.** Its three
   shipped HEXes join `RELEASE_IMAGES` (18 → 21) and `RELEASE_IMAGE_DIRS`, its
   three soak combinations join `RELEASE_SOAK_NAMES` (15 → 18), and its build and
-  both aggregate logs join the retained-evidence inventory (28 → 34 files).
+  both aggregate logs initially took the retained-evidence inventory from 28 to
+  34 files; the source-bound resource record added later in this release makes
+  the final inventory 35.
   `scripts/make-release.sh` gains a full arm — preflight device/analysis
   assertions, a build step, both qualification gates, a soak loop, and a
   manifest generator arm — and `.github/workflows/release.yml` rebuilds the part
