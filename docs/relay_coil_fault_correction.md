@@ -118,26 +118,40 @@ the shared clear:
   polarity is restored.
 - **PIC12F675:** clear the coil weak-pull-up latches, make both coil pins inputs,
   disable the ADC/analog selections/comparator, clear the SRAM shadow and write
-  GPIO once, then restore output direction. In particular, comparator mode 110
-  can route `COUT` onto GP2; GPIO writes cannot force that pad low until `CMCON`
-  returns ownership to GPIO.
+  GPIO once, then restore output direction. In particular, comparator modes 011
+  and 101 route `COUT` onto GP2; GPIO writes cannot force that pad low until
+  `CMCON` returns ownership to GPIO.
 
 The PIC12F675 comparator scope is the complete single-bit neighborhood of the
-required off mode, taken from DS41190G Figure 6-2:
+required off mode. DS41190G Figure 6-2 names three of the eight modes "with
+Output", and Section 6.4 confirms `COUT` reaches the GP2 pad in exactly those
+three -- `001`, `011` and `101`. Mode `110` is "Multiplexed Input with Internal
+Reference": it has no output stage and cannot take GP2. Of the three modes one
+bit from off, therefore:
 
-| `CM<2:0>` | One-bit transition from `111` | GP2 owner | Relay fixture |
-| --- | --- | --- | --- |
-| `110` | clear CM0 | `COUT` | GP0 driven low/high; physical GP2 must follow both comparator output states before escalation and be low at the spin |
-| `101` | clear CM1 | GPIO | bounded GP0-low/high ownership fixtures; physical GP2 must remain at the settled-low GPIO level |
-| `011` | clear CM2 | GPIO | bounded GP0-low/high ownership fixtures; physical GP2 must remain at the settled-low GPIO level |
+| `CM<2:0>` | One-bit transition from `111` | Figure 6-2 mode | GP2 owner | Relay fixture |
+| --- | --- | --- | --- | --- |
+| `011` | clear CM2 | Comparator with Output and Internal Reference | `COUT` | physical GP2 must be driven High by `COUT`, survive a latch-only clear, then be de-energized at the spin |
+| `101` | clear CM1 | Multiplexed Input with Internal Reference and Output | `COUT` | physical GP2 must be driven High by `COUT`, survive a latch-only clear, then be de-energized at the spin |
+| `110` | clear CM0 | Multiplexed Input with Internal Reference | GPIO | physical GP2 must remain at the settled-low GPIO level |
 
-Only mode `110` continues into the firmware gate and escalation: it is the
-reachable mode that can energize the GP2 relay coil and therefore carries the
-complete de-energization/reset/recovery proof. In the observed mode-110
-fixtures, gpsim stores `CINV` but does not invert its modeled `COUT`; it also crashes if
-execution continues with mode `101` active. The `101`/`011` cases therefore
-establish ownership and pin voltage over two settling cycles, restore
-comparator-off before the firmware gate, and make no reset-path claim.
+All three continue into the firmware gate and escalation. Modes `011` and `101`
+are the reachable modes that can energize the GP2 relay coil, and they carry the
+complete hazard: `COUT` physically drives the pad High while the firmware's
+shadow and expected state both say BYPASS, the superseded latch-only clear
+cannot pull it down, and only `hw_emergency_outputs_quiesce()` returning
+ownership to GPIO does -- after which the ordinary de-energization, single
+watchdog reset and recovery `RESET`-coil pulse are asserted as usual. Mode `110`
+makes the converse claim: the comparator is genuinely enabled and still does not
+own GP2.
+
+Two simulator limits bound what these cases may claim. gpsim's `p12f675` model
+does not read the CIN+ pad -- its modeled `COUT` is a pure function of `CM<2:0>`
+regardless of the voltage on GP0 -- so no fixture here asserts anything about
+the analog input, and none drives it. And the mode must be installed through
+`Register::put()`: gpsim's port registers override `put_value()`, but `CMCON`
+overrides only `put()`, so a `put_value()` to `CMCON` updates the register image
+without ever engaging the peripheral.
 
 The brief input intervals rely on the board's fail-safe pull-downs. These paths
 are bounded responses to detected register-state faults; they do not claim to
@@ -276,8 +290,8 @@ The physical-pin extensions add independent negative controls:
 The AVR-XT matrix also exercises each coil's pull-up, one-bit direction upset,
 and a combined input/stale-OUT/PULLUPEN+INVEN state. The PIC12F675 relay matrix
 covers all three comparator modes one bit away from off (`110`, `101`, `011`);
-mode `110`, the reachable mode that owns GP2, is run with both comparator output
-states through full escalation. These are modeled electrical pin checks, not
+modes `011` and `101`, the reachable modes that own GP2, are run through full
+escalation with the pad physically driven High by `COUT`. These are modeled electrical pin checks, not
 relay-mechanical or bench evidence.
 
 One consequence worth naming: because the recovery pulse is now measured, a

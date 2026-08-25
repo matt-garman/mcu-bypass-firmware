@@ -59,12 +59,12 @@
 // a GPIO coil bit energizes the pin with the shadow still clean and trips
 // port-follows-shadow.
 #if defined(TQ2_L2_5V_RELAY)
-// Twelve output checks plus six physical comparator checks: driven GP0 low/high
-// for every mode one bit from off. Mode 110 must drive GP2 through both COUT
-// states and complete recovery; bounded modes 101/011 must leave GP2 under its
-// settled-low GPIO driver and restore comparator-off before execution resumes.
-// Every case costs one check.
-#  define PIC_FAULT_EXPECTED_CHECKS (45u + PIC_FAULT_CTX_INRANGE)
+// Twelve output checks plus three physical comparator checks, one per mode one
+// bit from comparator-off. Modes 011 and 101 route COUT to the GP2 pad and must
+// force it High, reject a latch-only clear, and still complete escalation and
+// recovery; mode 110 does not own GP2 and must leave the pad under its
+// settled-low GPIO driver. Every case costs one check.
+#  define PIC_FAULT_EXPECTED_CHECKS (42u + PIC_FAULT_CTX_INRANGE)
 #  define PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE 1
 #  define PIC_FAULT_EXTRA_OUTPUT_INJECTIONS() do { \
     inject_case("shadow.GP0", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x01, 1, \

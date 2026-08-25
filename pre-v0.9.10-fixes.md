@@ -1133,15 +1133,21 @@ owner, consistent with project policy.
   plus exact `OUT`, `DIR`, `PIN2CTRL`, and `PIN3CTRL` state under both coils'
   `INVEN`, pull-up, one-bit direction, combined input/stale-OUT/control, and
   settled-state OUT fixtures. Host negative controls reject an OUT-only clear.
-- The PIC12F675 relay matrix now has 46 checks. It directly observes modeled
-  GP1/GP2 node voltage and drives GP0 low/high for all three comparator modes one
-  bit from off (`110`, `101`, `011`). Mode `110` must make GP2 follow both
-  `COUT` states, then de-energize it at the watchdog spin; modes `101` and `011`
-  are bounded ownership fixtures that must leave GP2 under GPIO and restore
-  comparator-off after two settling cycles but before the firmware gate. This
-  split avoids treating gpsim's observed mode-110 `CINV` behavior (stored bit,
-  unchanged modeled `COUT`) and mode-101 execution crash as firmware evidence.
-  The high-`COUT` fixture proves a latch-only clear leaves physical GP2 high.
+- The PIC12F675 relay matrix now has 43 checks. It directly observes modeled
+  GP1/GP2 node voltage across all three comparator modes one bit from off
+  (`110`, `101`, `011`), one check each. Per DS41190G Figure 6-2 and Section
+  6.4, `COUT` reaches the GP2 pad in exactly the three "with Output" modes
+  (`001`, `011`, `101`), so `011` and `101` are the reachable modes that can own
+  GP2 and `110` cannot; gpsim's model agrees. Modes `011` and `101` must drive
+  physical GP2 High through `COUT`, reject a latch-only clear, and then complete
+  the ordinary de-energization/reset/recovery contract once the firmware's
+  quiesce returns the pad to GPIO. Mode `110` must leave GP2 at its settled-low
+  GPIO level and take the same path. Two simulator limits bound the claims: the
+  mode must be installed with `Register::put()` (a `put_value()` to `CMCON`
+  never engages the peripheral, unlike the port registers, which override
+  `put_value()`), and gpsim's modeled `COUT` is a pure function of `CM<2:0>` and
+  does not read the CIN+ pad, so no fixture asserts anything about the analog
+  input.
 - Reviewed source-order checks pin pull-up removal before input direction,
   peripheral/polarity neutralization before latch clearing, and low latch state
   before output direction is restored. F2's new latch-only mutants raised its

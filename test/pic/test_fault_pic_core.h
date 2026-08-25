@@ -103,7 +103,6 @@
 #define TEST_PIC_TEST_FAULT_PIC_CORE_H
 
 #include <cstdio>
-#include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <cctype>
@@ -263,10 +262,8 @@ static unsigned  g_fails   = 0;
 static unsigned  g_loop_clrwdt_addr = 0;
 #if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
 static Stimulus_Node *g_comparator_input_node = nullptr;
-static source_stimulus *g_comparator_input_src = nullptr;
 static Stimulus_Node *g_reset_coil_node = nullptr;
 static Stimulus_Node *g_set_coil_node   = nullptr;
-static bool g_comparator_input_driven = false;
 #endif
 
 // ---- Reset detection (identical to the soak; verdict inverted at the call
@@ -311,9 +308,18 @@ static Register *fetch_sfr(unsigned addr, const char *token) {
 #  endif
 
 // Attach nodes to the package pins. Unlike GPIO readback, these nodes continue
-// to report pad voltage while an analog peripheral owns the pin. GP0 also gets
-// a normally high-impedance source so comparator fixtures can establish a
-// defined low/high input without driving either relay coil.
+// to report pad voltage while an analog peripheral owns the pin.
+//
+// GP0/CIN+ gets a node too, but a PASSIVE one: nothing drives it. gpsim's
+// p12f675 comparator does not read this pad -- its modeled COUT is a pure
+// function of CM<2:0> (measured: COUT is High for modes 011/100/101/110 and Low
+// for 000/001/010/111, unchanged whether GP0 is held at 0 V or 5 V, whether GP0
+// is an input or an output, and whether the level is established before or
+// after the mode is engaged). An earlier revision drove this pin to make COUT
+// track it; that can never work here, and driving 5 V through 250 ohms against
+// the firmware's own low output driver only produced a 1.875 V contention
+// divider. The node stays as a reported observation of the CIN+ pad, and the
+// comparator cases claim nothing about the analog input.
 static bool attach_relay_coil_observers(const char *proc_name) {
     IOPIN *comparator_input_pin =
         find_pin_exact(g_cpu, PIC_REG_COMPARATOR_INPUT_PIN_NAME);
@@ -328,13 +334,9 @@ static bool attach_relay_coil_observers(const char *proc_name) {
         return false;
     }
 
-    g_comparator_input_src = new source_stimulus();
-    g_comparator_input_src->set_Zth(1.0e12);
-    g_comparator_input_src->set_Vth(0.0);
     g_comparator_input_node = new Stimulus_Node("comparator-input-pin");
     g_reset_coil_node = new Stimulus_Node("relay-reset-pin");
     g_set_coil_node   = new Stimulus_Node("relay-set-pin");
-    g_comparator_input_node->attach_stimulus(g_comparator_input_src);
     g_comparator_input_node->attach_stimulus(comparator_input_pin);
     g_reset_coil_node->attach_stimulus(reset_pin);
     g_set_coil_node->attach_stimulus(set_pin);
@@ -342,21 +344,6 @@ static bool attach_relay_coil_observers(const char *proc_name) {
     g_reset_coil_node->update();
     g_set_coil_node->update();
     return true;
-}
-
-static void comparator_input_drive(bool high) {
-    g_comparator_input_src->set_Vth(high ? 5.0 : 0.0);
-    g_comparator_input_src->set_Zth(250.0);
-    g_comparator_input_node->update();
-    g_comparator_input_driven = true;
-}
-
-static void comparator_input_release(void) {
-    if (g_comparator_input_driven) {
-        g_comparator_input_src->set_Zth(1.0e12);
-        g_comparator_input_node->update();
-        g_comparator_input_driven = false;
-    }
 }
 
 static void relay_coil_voltages(double *reset_v, double *set_v) {
@@ -636,13 +623,6 @@ static void finish_relay_resync_case(Register *target, Register *latch,
         if (!run_cycles(1u)) { break; }
     }
 
-#if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
-    // A comparator fixture may drive GP0 while the peripheral is active. Once
-    // the firmware has reached its spin and physical coil state is recorded,
-    // release that source before reset reinitializes GP0 as the status LED.
-    comparator_input_release();
-#endif
-
     // -- the recovery reset itself. Polled in 1 ms steps rather than one long
     // window so the observation below starts as close to the reset vector as
     // the step allows; the recovery pulse is 12 ms, so at most one step of it
@@ -782,29 +762,49 @@ static void inject_relay_resync_case(unsigned addr, const char *token,
 }
 
 #if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
-// Every single-bit-reachable mode is run with GP0 externally driven low and
-// high while GP1 remains low. The mode-110 pair must produce opposite COUT
-// states, make physical GP2 agree, and complete the firmware escalation path.
-// Modes 101/011 leave GP2 under GPIO; gpsim can evaluate their ownership but was
-// observed to crash if execution continued with mode 101 active, so those
-// bounded fixtures restore comparator-off after two settling cycles and before
-// the firmware reaches its next gate.
+// One case per single-bit-reachable comparator mode: clearing any one CM bit
+// from the required off value 111 reaches 110, 101 or 011.
 //
-// When COUT is High, the harness also performs the old latch-only emergency
-// action (clear the SRAM shadow and write zero to the GPIO coil bits) and proves
-// GP2 remains physically High. This is a target-realistic negative control over
-// the actual gpsim comparator/pin model, not a fake firmware implementation.
-static void inject_comparator_relay_resync_case(unsigned mode, bool input_high,
-                                                 bool owns_gp2,
-                                                 const char *label) {
-    static int cout_with_input_low[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+// DS41190G Figure 6-2 names three of the eight modes "with Output", and only
+// those route COUT to the GP2 pad: 001, 011 and 101. Of the three modes one bit
+// from off, therefore, 011 and 101 can take the SET-coil pad away from GPIO,
+// and 110 ("Multiplexed Input with Internal Reference") cannot. gpsim's model
+// agrees exactly: engaging 011 or 101 drives the GP2 node to 5.000 V while GPIO
+// reads back 0x24; engaging 110 leaves GP2 at its settled GPIO-low level.
+//
+// The mode is installed with Register::put(), NOT put_value(). gpsim's port
+// registers override put_value (ioports.h) so an injected GPIO/TRISIO value
+// really does move the pins, but CMCON (comparator.h) overrides only put() --
+// a put_value() to CMCON updates the register image and never engages the
+// peripheral, so COUT stays clear and GP2 is never taken. Every physical claim
+// below depends on using put().
+//
+// For the two COUT-owning modes this is the complete F1 hazard:
+//   - COUT physically drives the SET-coil pad High while the firmware's own
+//     shadow and expected state both say BYPASS;
+//   - the superseded latch-only emergency action (clear the SRAM shadow, write
+//     zero to the GPIO coil bits) CANNOT pull that pad down -- proved here as a
+//     negative control over the real gpsim comparator/pin model;
+//   - only returning ownership to GPIO can, which is exactly what
+//     hw_emergency_outputs_quiesce() does on the escalation path before the
+//     watchdog spin (coil pull-ups cleared, coils to inputs, ADC/ANSEL/CMCON
+//     off, shadow+GPIO cleared, coils back to outputs).
+// finish_relay_resync_case() then carries the ordinary contract: both coils
+// physically idle at the spin, exactly one watchdog reset, a recovery
+// RESET-coil pulse at or above the datasheet minimum with SET dark, settled in
+// BYPASS.
+//
+// Mode 110 makes the converse claim -- the comparator is genuinely enabled and
+// still does not own GP2, so the pad stays under its settled-low GPIO driver --
+// and then takes the same escalation and recovery path.
+static void inject_comparator_relay_resync_case(unsigned mode, bool owns_gp2,
+                                                const char *label) {
     static unsigned const coil_mask = PIC_REG_COIL_MASK;
 
     g_checks++;
 
-    // BYPASS keeps both relay coils and the GP0 shadow low. The source attached
-    // to GP0 then establishes a defined comparator input without driving either
-    // coil; the low-input mode-110 case consequently isolates the CMCON guard.
+    // BYPASS keeps both relay coils and the GP0 shadow low, so a GP2 pad found
+    // High afterwards can only have come from COUT.
     if (!drive_effect_state(false)) {
         g_fails++;
         fprintf(stderr, "    FAIL: could not reach settled BYPASS comparator fixture\n");
@@ -824,19 +824,14 @@ static void inject_comparator_relay_resync_case(unsigned mode, bool input_high,
     }
 
     unsigned const before_val = target->get_value() & 0xFFu;
-    unsigned const fixture_off = PIC_FAULT_CMCON_OFF;
     unsigned const injected = mode & PIC_FAULT_CMCON_MODE_MASK;
     unsigned const changed_mode_bits =
         (PIC_FAULT_CMCON_OFF ^ mode) & PIC_FAULT_CMCON_MODE_MASK;
 
-    // Establish the external input while comparator-off still owns no output,
-    // then make the single mode-bit injection at the trailing CLRWDT seam.
-    comparator_input_drive(input_high);
-    target->put_value(fixture_off);
-    unsigned const fixture_written = target->get_value() & 0xFFu;
+    // The single mode-bit injection, at the deterministic trailing CLRWDT seam.
     guint64  const resets_before = g_resets;
     guint64  const inject_cycle  = get_cycles().get();
-    target->put_value(injected);
+    target->put(injected);
     bool const fixture_ran = run_cycles(2u);
     unsigned const written = target->get_value() & 0xFFu;
 
@@ -846,30 +841,21 @@ static void inject_comparator_relay_resync_case(unsigned mode, bool input_high,
     relay_coil_voltages(&reset_pin_v, &set_pin_v);
     double const input_pin_v = g_comparator_input_node->get_nodeVoltage();
     bool const cout_high = (written & PIC_FAULT_CMCON_COUT_MASK) != 0u;
-    bool const input_state_ok = input_high
-        ? input_pin_v >= PHYSICAL_HIGH_MIN_V
-        : input_pin_v <= PHYSICAL_LOW_MAX_V;
     bool const gp1_low = reset_pin_v <= PHYSICAL_LOW_MAX_V;
+    // The load-bearing ownership claim, and the reason the pad voltage is read
+    // instead of the GPIO bit: GPIO readback ALIASES COUT while the comparator
+    // owns the pad, so it cannot tell "driven by COUT" from "driven by GPIO".
     bool const gp2_state_ok = owns_gp2
-        ? (cout_high ? set_pin_v >= PHYSICAL_HIGH_MIN_V
-                     : set_pin_v <= PHYSICAL_LOW_MAX_V)
+        ? (cout_high && set_pin_v >= PHYSICAL_HIGH_MIN_V)
         : set_pin_v <= PHYSICAL_LOW_MAX_V;
     bool const before_escalation = (g_resets == resets_before) &&
                                    !at_watchdog_spin();
     bool const one_mode_bit = changed_mode_bits == 0x01u ||
                               changed_mode_bits == 0x02u ||
                               changed_mode_bits == 0x04u;
-    bool pair_ok = true;
-    if (!input_high) {
-        cout_with_input_low[mode & PIC_FAULT_CMCON_MODE_MASK] =
-            cout_high ? 1 : 0;
-    } else {
-        int const first = cout_with_input_low[mode & PIC_FAULT_CMCON_MODE_MASK];
-        pair_ok = first >= 0 && first != (cout_high ? 1 : 0);
-    }
 
     bool latch_only_rejected = true;
-    if (owns_gp2 && cout_high) {
+    if (owns_gp2) {
         // This exactly models the superseded emergency action on this part:
         // coil shadow clear followed by one whole-port GPIO write. GPIO reads
         // the comparator-owned pad, so only the SRAM shadow can attest intent;
@@ -887,54 +873,30 @@ static void inject_comparator_relay_resync_case(unsigned mode, bool input_high,
 
     bool const fixture_ok = fixture_ran && one_mode_bit &&
         ((before_val & PIC_FAULT_CMCON_MODE_MASK) == PIC_FAULT_CMCON_OFF) &&
-        ((fixture_written & PIC_FAULT_CMCON_MODE_MASK) == fixture_off) &&
         ((written & PIC_FAULT_CMCON_MODE_MASK) == injected) &&
-        input_state_ok && gp1_low && gp2_state_ok && before_escalation && pair_ok &&
-        latch_only_rejected;
+        gp1_low && gp2_state_ok && before_escalation && latch_only_rejected;
 
-    printf("  inject %-18s @0x%03x: mode=0b%u%u%u GP0-drive=%s (%.3fV)"
-           " -> COUT=%s, GP2-owner=%s, physical GP1=%.3fV GP2=%.3fV"
-           " (from BYPASS)\n",
+    printf("  inject %-18s @0x%03x: mode=0b%u%u%u -> COUT=%s, GP2-owner=%s,"
+           " physical GP1=%.3fV GP2=%.3fV (CIN+ pad %.3fV, not read by the"
+           " model) (from BYPASS)\n",
            label, PIC_REG_CMCON_ADDR, (mode >> 2) & 1u, (mode >> 1) & 1u,
-           mode & 1u, input_high ? "HIGH" : "LOW", input_pin_v,
-           cout_high ? "HIGH" : "LOW",
-           owns_gp2 ? "COUT" : "GPIO", reset_pin_v, set_pin_v);
-    if (owns_gp2 && cout_high) {
+           mode & 1u, cout_high ? "HIGH" : "LOW",
+           owns_gp2 ? "COUT" : "GPIO", reset_pin_v, set_pin_v, input_pin_v);
+    if (owns_gp2) {
+        // WORDING IS A CONTRACT: test/run_mutation_tests.sh greps this line
+        // verbatim to classify the resync:physical-coil mutant. Change the two
+        // together or that mutant silently degrades to an ERROR.
         printf("    fixture: COUT and physical GP2 were HIGH before escalation;"
                " latch-only clear left GP2 at %.3fV\n", set_pin_v);
     }
     fflush(stdout);
 
-    if (!owns_gp2) {
-        // Do not resume the core with these gpsim-only ownership fixtures
-        // active. Restoring the writable mode bits is sufficient; COUT is live.
-        target->put_value(PIC_FAULT_CMCON_OFF);
-        unsigned const restored = target->get_value() & 0xFFu;
-        comparator_input_release();
-        bool const restored_off =
-            (restored & PIC_FAULT_CMCON_MODE_MASK) == PIC_FAULT_CMCON_OFF;
-        bool const pass = fixture_ok && restored_off;
-        if (pass) {
-            printf("    PASS: GP2 remained GPIO-low; comparator-off restored"
-                   " before execution resumed\n");
-        } else {
-            g_fails++;
-            fprintf(stderr,
-                    "    FAIL: fixture=%u input=%.3fV COUT=%u GP1=%.3fV"
-                    " GP2=%.3fV restored=0x%02x\n",
-                    fixture_ok ? 1u : 0u, input_pin_v, cout_high ? 1u : 0u,
-                    reset_pin_v, set_pin_v, restored);
-            if (!restored_off) {
-                fflush(stderr);
-                std::exit(1);
-            }
-        }
-        fflush(stdout);
-        return;
-    }
-
+    // Both ownership cases continue through the firmware gate: the escalation
+    // path returns GP2 to GPIO, so the ordinary de-energize/reset/recovery
+    // oracle applies unchanged. A COUT-owned pad additionally REQUIRES a real
+    // de-energization transition -- it starts the case energized.
     finish_relay_resync_case(target, latch, port, before_val, injected,
-                             written, fixture_ok, cout_high,
+                             written, fixture_ok, owns_gp2,
                              resets_before,
                              inject_cycle);
 }

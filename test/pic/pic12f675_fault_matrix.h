@@ -129,25 +129,27 @@
 // not GPIO bit 3; keeping it explicit pins the non-isomorphic register mapping.
 //
 // Clearing any one mode bit from comparator-off 111 reaches 110, 101 or 011.
-// Of those, DS41190G Figure 6-2 routes COUT to GP2 in mode 110; modes 101 and
-// 011 leave GP2 under the GPIO output driver. Relay builds drive GP0 low/high
-// for all three modes: mode 110 must make GP2 track both COUT states, while
-// bounded modes 101/011 fixtures must leave the settled-low GPIO pad unchanged.
+// DS41190G Figure 6-2 names three of the eight modes "with Output", and Section
+// 6.4 confirms COUT reaches the GP2 pad in exactly those three: 001, 011 and
+// 101. Of the three modes one bit from off, therefore, 011 and 101 can take the
+// SET-coil pad away from GPIO; 110 ("Multiplexed Input with Internal
+// Reference") is an input-multiplexing mode with no output and cannot. gpsim's
+// p12f675 model agrees exactly -- see the measured evidence in the harness core.
+//
+// Relay builds run all three: 011 and 101 must physically force GP2 High
+// through COUT, reject a latch-only clear, and then complete the ordinary
+// escalation/reset/recovery contract once the firmware's quiesce returns the
+// pad to GPIO; 110 must leave GP2 under its settled-low GPIO driver and take
+// the same path. One check each.
 //
 // The other output stages retain the established mode-110 reset case. That one
 // case is sufficient to make the exact comparator-off guard load-bearing; the
-// complete neighborhood belongs to the relay's physical-pin contract. gpsim
-// crashes if mode 101 remains active long enough to reach the firmware gate, so
-// relay modes 101/011 are bounded two-cycle ownership fixtures restored before
-// the gate. Only mode 110, which can own GP2, continues through escalation.
+// complete neighborhood belongs to the relay's physical-pin contract.
 #if defined(TQ2_L2_5V_RELAY)
 #  define PIC_FAULT_COMPARATOR_INJECTIONS() do { \
-    inject_comparator_relay_resync_case(0x06u, false, true,  "CMCON.CM0.INPUT0"); \
-    inject_comparator_relay_resync_case(0x06u, true,  true,  "CMCON.CM0.INPUT1"); \
-    inject_comparator_relay_resync_case(0x05u, false, false, "CMCON.CM1.INPUT0"); \
-    inject_comparator_relay_resync_case(0x05u, true,  false, "CMCON.CM1.INPUT1"); \
-    inject_comparator_relay_resync_case(0x03u, false, false, "CMCON.CM2.INPUT0"); \
-    inject_comparator_relay_resync_case(0x03u, true,  false, "CMCON.CM2.INPUT1"); \
+    inject_comparator_relay_resync_case(0x06u, false, "CMCON.CM0"); \
+    inject_comparator_relay_resync_case(0x05u, true,  "CMCON.CM1"); \
+    inject_comparator_relay_resync_case(0x03u, true,  "CMCON.CM2"); \
 } while (0)
 #else
 #  define PIC_FAULT_COMPARATOR_INJECTIONS() do { \

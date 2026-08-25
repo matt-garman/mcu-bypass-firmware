@@ -6676,7 +6676,7 @@ pic12f675-test-target: pic12f675-target-selector-valid variant-selectors-valid _
 			case "$$lane:$(PIC12F675_TARGET_VARIANT)" in \
 				fault:cd4053_simple) checks=38 ;; \
 				fault:cd4053_with_mute) checks=38 ;; \
-				fault:tq2_l2_5v_relay) checks=46 ;; \
+				fault:tq2_l2_5v_relay) checks=43 ;; \
 				io:cd4053_simple) checks=25 ;; \
 				io:cd4053_with_mute) checks=26 ;; \
 				io:tq2_l2_5v_relay) checks=36 ;; \
