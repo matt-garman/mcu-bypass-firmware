@@ -474,10 +474,15 @@ section 8:
   fail-safe pulldown a builder may substitute. gpsim models pins ideally, so no
   lane here can see this one at all.
 
-The vehicle for the first three is the guarded `pic12f675-preflight` /
-`pic12f675-program` bench workflow, which already records a factory baseline,
-requires it to match immediately before and after a write, and refuses an image
-that would overwrite the calibration word; what is missing is a retained result
+There are now two vehicles for the first three. The guarded
+`pic12f675-preflight` / `pic12f675-program` bench workflow records a factory
+baseline, requires it to match immediately before and after a write, and refuses
+an image that would overwrite the calibration word; it drives a pk2cmd reader.
+From `v0.9.10` the release-shipped `scripts/flash-pic12f675.py` runs the same
+transaction against PICkit 3 and MPLAB X 6.20 `ipecmd` with no checkout, which
+makes it the vehicle for item 8 as well as items 1 and 2 -- the properties its
+bench run must prove are enumerated under "Outstanding controlled runs" in
+`HARDWARE_VALIDATION_LOG.md`. What is missing in both cases is a retained result
 from real silicon. The fourth (GP2) needs a meter on a built `cd4053_with_mute`
 board. Record the measured OSCCAL/BG preservation result into
 `release/README.md`'s flashing procedure once it exists.

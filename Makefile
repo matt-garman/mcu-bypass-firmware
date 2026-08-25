@@ -742,6 +742,7 @@ FORCE:
         test-pic10f320-coverage-archive \
         test-attiny202-build test-avr-build-rebuild test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-fetch-yasimavr test-supply-chain test-klee-build \
         test-pic-build test-release-images test-release-preflight test-release-provenance test-release-qualification test-release-history test-build-serialization \
+        test-pic12f675-flash-helper \
         test-make-lock-probe test-make-safe-parallel-probe \
         _test-make-safe-parallel-probe-run _test-make-safe-parallel-probe-a \
         _test-make-safe-parallel-probe-b _test-mutation-policy-probe \
@@ -2952,6 +2953,7 @@ TEST_GATES_LATE = \
         test-klee-build test-mutation-sandbox test-pic-build \
         test-release-images test-release-preflight test-release-provenance \
         test-release-qualification test-release-history \
+        test-pic12f675-flash-helper \
 		test-build-serialization test-target-matrix \
 		test-target-lane-markers test-pic-target-result-records \
 		test-lockstep-progress test-soak-timing \
@@ -3135,6 +3137,13 @@ test-release-images:
 # or staging, and validates the actual caller-selected tool paths.
 test-release-preflight:
 	./test/test_release_preflight.sh
+
+# Stateful fake-programmer proof that the release-shipped PIC12F675 flashing
+# helper reaches a device write only through its full guarded transaction, and
+# publishes a FAIL rather than a PASS for every way a writer can destroy this
+# part's factory trim.
+test-pic12f675-flash-helper: python-version-valid
+	./test/test_pic12f675_flash_helper.sh
 
 # Isolated proof of final source identity and per-PIC compiler attribution.
 test-release-provenance:
@@ -7724,6 +7733,28 @@ RELEASE_IMAGES := \
 # they come from.
 RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(XT_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(PIC10F320_BUILD_DIR) $(PIC12F675_BUILD_DIR)
 
+# --- required release artifacts that are NOT firmware images -----------------
+# A release contains exactly 21 firmware images and, since v0.9.10, one tool: the
+# standalone PIC12F675 flashing helper. It is staged, checksummed, signed and
+# reproduced exactly like an image, and it is deliberately NOT a member of
+# RELEASE_IMAGES -- the canonical image count is a reviewed number that a support
+# script must not be able to move. Every verifier therefore reads two sets: the
+# exact image set, and the exact helper set.
+#
+# WHY IT SHIPS AT ALL. Every other part is flash-and-forget, so a released HEX
+# plus the operator's programmer CLI is a complete answer. The PIC12F675 is not:
+# a bulk erase destroys the per-device OSCCAL word and BG<1:0> bandgap trim that
+# no image can supply, so safe field programming needs a transaction, and a
+# transaction needs a program. Shipping it beside the images is what makes
+# "program a downloaded release without a source checkout" true for this part
+# too -- see FLASHING.md and docs/pic12f675_feasibility.md section 8.
+#
+# <staged basename>=<tracked source> so the reproduction leg can prove the
+# staged bytes are the tracked bytes, in one place, for both.
+override RELEASE_HELPER_ARTIFACTS := flash-pic12f675.py
+override RELEASE_HELPER_SOURCES := scripts/flash-pic12f675.py
+override RELEASE_HELPER_MAP := flash-pic12f675.py=scripts/flash-pic12f675.py
+
 # --- nothing is staged: every part this repository builds is released ---------
 # There is no longer a "built but deliberately withheld" set. The PIC12F675 was
 # the one staged part, and it graduated into RELEASE_IMAGES above alongside the
@@ -8093,6 +8124,7 @@ help:
 	@echo "  test-release-provenance  release source/compiler provenance checks"
 	@echo "  test-release-qualification  exact release evidence + 18-soak publication checks"
 	@echo "  test-release-history  bind release history + checksum/tag signatures"
+	@echo "  test-pic12f675-flash-helper  fake-programmer proof of the shipped PIC12F675 flashing helper (included in test)"
 	@echo "  test-build-serialization  worktree Make/release lock regression"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"
 	@echo "  test-target-lane-markers  PIC target aggregates require fail-closed lane results"

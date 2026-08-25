@@ -1319,6 +1319,16 @@ if [ "$PB_TARGET" = pic12f675 ]; then
 		"$repo/scripts/verify-release-images.sh"
 	cp "$ROOT/scripts/release-signing-policy.sh" \
 		"$repo/scripts/release-signing-policy.sh"
+	# A release also ships required non-image artifacts, and the image verifier
+	# proves each staged copy is its tracked source byte for byte. The fixture
+	# repo therefore needs the tracked sources as well as the staged copies
+	# below, or the verifier fails on the fixture rather than on what is under
+	# test.
+	while read -r pb_helper_entry; do
+		[ -n "$pb_helper_entry" ] || continue
+		cp "$ROOT/${pb_helper_entry#*=}" "$repo/${pb_helper_entry#*=}"
+	done < <(make -s --no-print-directory -C "$ROOT" print-RELEASE_HELPER_MAP CC=true \
+		| tr ' ' '\n')
 
 	cal_shipping=()
 	cal_sim=()
@@ -3334,9 +3344,20 @@ EOF
 			*) printf 'fixture release bytes for %s\n' "$image" > "$release_dir/$image" ;;
 		esac
 	done
+	release_helper_names=()
+	while read -r pb_helper_entry; do
+		[ -n "$pb_helper_entry" ] || continue
+		pb_helper_base=${pb_helper_entry%%=*}
+		cp "$repo/${pb_helper_entry#*=}" "$release_dir/$pb_helper_base"
+		release_helper_names+=("$pb_helper_base")
+	done < <(_MAKE_SERIAL_LOCK_HELD="$cal_repo_lock_id" \
+		make -s --no-print-directory -C "$repo" print-RELEASE_HELPER_MAP CC=true \
+		| tr ' ' '\n')
+	[ "${#release_helper_names[@]}" -gt 0 ] \
+		|| { printf 'FAIL: no required release artifacts declared for the PIC12F675 programming fixture\n' >&2; exit 1; }
 	(
 		cd "$release_dir"
-		sha256sum $release_images > SHA256SUMS
+		sha256sum $release_images "${release_helper_names[@]}" > SHA256SUMS
 	)
 	printf 'fixture detached signature\n' > "$release_dir/SHA256SUMS.asc"
 	git -C "$repo" init -q

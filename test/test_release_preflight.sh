@@ -42,6 +42,8 @@ declare -F release_validate_staged_documentation >/dev/null \
 	|| { printf 'FAIL: staged release documentation validator is missing\n' >&2; exit 1; }
 declare -F release_validate_hardware_claims >/dev/null \
 	|| { printf 'FAIL: hardware evidence classifier is missing\n' >&2; exit 1; }
+declare -F release_validate_pic12f675_flashing_helper >/dev/null \
+	|| { printf 'FAIL: PIC12F675 flashing-helper contract is missing\n' >&2; exit 1; }
 declare -F release_require_main_branch >/dev/null \
 	|| { printf 'FAIL: release main-branch validator is missing\n' >&2; exit 1; }
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-preflight.XXXXXX")
@@ -479,8 +481,8 @@ grep -Fxq 'yaml-import' "$tool_log" \
 [ ! -e "$preflight_output" ] \
 	|| fail "preflight created its prospective release output directory"
 query_count=$(wc -l < "$make_log")
-[ "$query_count" -eq 88 ] \
-	|| fail "preflight made $query_count Makefile queries, expected 88"
+[ "$query_count" -eq 89 ] \
+	|| fail "preflight made $query_count Makefile queries, expected 89"
 assert_no_release_scratch
 checks=$((checks + 1))
 
@@ -1455,6 +1457,192 @@ release_validate_hardware_claims "$ROOT" >"$output" 2>&1 \
 	|| fail "the checked-in tree fails the hardware evidence contract: $(<"$output")"
 checks=$((checks + 1))
 
+# ---------------------------------------------------------------------------
+# The PIC12F675 flashing contract.
+#
+# This part is the one target where "download the HEX and run your programmer"
+# is wrong advice, because a bulk erase destroys per-device trim the image
+# cannot supply. From v0.9.10 the answer is the helper the release bundles, and
+# the raw command sequence is retired everywhere.
+#
+# The defect this pins already occurred in the opposite direction and the suite
+# stayed green through it: README.md and release/README.md prohibited a raw
+# writer while FLASHING.md published one, because only the GENERATED per-release
+# guidance was contract-tested. So every case below spoils one property of a
+# COPY of the shipped documents, and the last one runs against the live tree.
+# ---------------------------------------------------------------------------
+flashing_root="$work/pic12f675-flashing"
+declare -F release_validate_pic12f675_flashing_helper >/dev/null \
+	|| fail "PIC12F675 flashing-helper contract is missing"
+
+write_flashing_fixture() {
+	rm -rf "$flashing_root"
+	mkdir -p "$flashing_root/scripts" "$flashing_root/release" "$flashing_root/docs"
+	cp "$ROOT/FLASHING.md" "$flashing_root/FLASHING.md"
+	cp "$ROOT/README.md" "$flashing_root/README.md"
+	cp "$ROOT/release/README.md" "$flashing_root/release/README.md"
+	cp "$ROOT/scripts/flash-pic12f675.py" "$flashing_root/scripts/flash-pic12f675.py"
+	chmod 0755 "$flashing_root/scripts/flash-pic12f675.py"
+	# Only the artifact binding is read out of the Makefile, so the fixture
+	# carries that one line rather than a copy of an 8,000-line file.
+	printf 'override RELEASE_HELPER_MAP := flash-pic12f675.py=scripts/flash-pic12f675.py\n' \
+		> "$flashing_root/Makefile"
+}
+
+assert_flashing_accepts() {
+	local description=$1
+	release_validate_pic12f675_flashing_helper "$flashing_root" v1.2.3 >"$output" 2>&1 \
+		|| fail "PIC12F675 flashing contract rejected $description: $(<"$output")"
+	checks=$((checks + 1))
+}
+
+assert_flashing_rejects() {
+	local description=$1 expected=$2
+	if release_validate_pic12f675_flashing_helper "$flashing_root" v1.2.3 \
+			>"$output" 2>&1; then
+		fail "PIC12F675 flashing contract accepted $description"
+	fi
+	grep -Fq 'release documentation:' "$output" \
+		|| fail "$description was rejected without a documentation diagnostic"
+	grep -Fq "$expected" "$output" \
+		|| fail "$description was rejected for the wrong reason: $(<"$output")"
+	checks=$((checks + 1))
+}
+
+write_flashing_fixture
+assert_flashing_accepts 'the shipped flashing documents'
+
+# 1. The tool itself. Instructions that name a helper the release does not carry
+#    are worse than no instructions: they read as safe and cannot be followed.
+write_flashing_fixture
+rm "$flashing_root/scripts/flash-pic12f675.py"
+assert_flashing_rejects 'a missing flashing helper' \
+	'PIC12F675 flashing helper is missing or not a regular file'
+
+write_flashing_fixture
+chmod 0644 "$flashing_root/scripts/flash-pic12f675.py"
+assert_flashing_rejects 'a non-executable flashing helper' \
+	'flashing helper is not executable'
+
+write_flashing_fixture
+printf 'override RELEASE_HELPER_MAP :=\n' > "$flashing_root/Makefile"
+assert_flashing_rejects 'a helper that no release bundles' \
+	'does not bind flash-pic12f675.py to scripts/flash-pic12f675.py'
+
+# 2. Each publisher names the helper.
+for missing_doc in FLASHING.md README.md release/README.md; do
+	write_flashing_fixture
+	"$REAL_AWK" '{ gsub(/flash-pic12f675\.py/, "some-other-tool.py"); print }' \
+		"$ROOT/$missing_doc" > "$flashing_root/$missing_doc"
+	assert_flashing_rejects "$missing_doc without the helper" \
+		"$missing_doc does not name the release-shipped PIC12F675 flashing helper"
+done
+
+# 3. The precise claim, in the two entry-point documents. "Typically" and
+#    "needs no toolchain at all" are the escape clauses this replaces.
+for claim_doc in FLASHING.md README.md; do
+	write_flashing_fixture
+	"$REAL_AWK" '{ gsub(/PIC12F675 additionally requires Python 3/, "Some parts may require Python 3"); print }' \
+		"$ROOT/$claim_doc" > "$flashing_root/$claim_doc"
+	assert_flashing_rejects "$claim_doc without the exact programming claim" \
+		"$claim_doc does not carry the exact downloaded-release programming claim"
+done
+
+write_flashing_fixture
+printf '\nNeeds only a programmer and its CLI.\n' >> "$flashing_root/FLASHING.md"
+assert_flashing_rejects 'a reinstated universal claim' \
+	'still publishes the retired universal claim'
+
+# 4. The heading a reader skimming for this part actually lands on.
+write_flashing_fixture
+"$REAL_AWK" '{ sub(/^## PIC12F675 .*$/, "## PIC12F675"); print }' \
+	"$ROOT/FLASHING.md" > "$flashing_root/FLASHING.md"
+assert_flashing_rejects 'a heading that no longer states the rule' \
+	'PIC12F675 heading does not state that it is not a raw write target'
+
+# 5. The raw writer itself -- the exact block v0.9.9 published, restored.
+write_flashing_fixture
+{
+	printf '\n## Restored raw block\n\n'
+	printf '```\n'
+	printf 'java -jar "$IPECMD" -TPPK3 -PPIC12F675 \\\n'
+	printf '  -Fbypass-pic12f675-cd4053_simple.hex -M -Y -OL -W5\n'
+	printf '```\n'
+} >> "$flashing_root/FLASHING.md"
+assert_flashing_rejects 'the restored raw ipecmd write' \
+	'FLASHING.md publishes a raw PIC12F675 writer command'
+
+write_flashing_fixture
+{
+	printf '\n## Restored raw block\n\n'
+	printf '```\n'
+	printf 'pk2cmd -PPIC12F675 -Fbypass-pic12f675-cd4053_simple.hex -M -Y -R\n'
+	printf '```\n'
+} >> "$flashing_root/release/README.md"
+assert_flashing_rejects 'the restored raw pk2cmd write' \
+	'release/README.md publishes a raw PIC12F675 writer command'
+
+# A NEW document is covered the day it is written, not the day someone
+# remembers to add it to a list.
+write_flashing_fixture
+{
+	printf '# Field notes\n\n'
+	printf '```\n'
+	printf 'ipecmd -TPPK3 -PPIC12F675 -Fimage.hex -M -Y -OL\n'
+	printf '```\n'
+} > "$flashing_root/docs/field_notes.md"
+assert_flashing_rejects 'a raw write in a newly written document' \
+	'docs/field_notes.md publishes a raw PIC12F675 writer command'
+
+# Reading a device is how an operator ARCHIVES its trim, and stays publishable.
+# So does the helper invocation, which merely passes an ipecmd path.
+write_flashing_fixture
+{
+	printf '# Field notes\n\n'
+	printf '```\n'
+	printf 'java -jar "$IPECMD" -TPPK3 -PPIC12F675 -GFfactory-12f675.hex\n'
+	printf '```\n\n'
+	printf '```sh\n'
+	printf 'python3 flash-pic12f675.py program --image bypass-pic12f675-cd4053_simple.hex \\\n'
+	printf '  --ipecmd /opt/mplabx/v6.20/ipecmd.jar --evidence-dir ./device-001\n'
+	printf '```\n'
+} > "$flashing_root/docs/field_notes.md"
+assert_flashing_accepts 'a read-only export and the helper invocation'
+
+# Shipped release directories are immutable artifacts of past releases and
+# legitimately carry the retired raw block; branch-only working documents quote
+# it in order to retire it. Both must be pruned, or the contract cannot be
+# introduced at all.
+write_flashing_fixture
+mkdir -p "$flashing_root/release/v0.9.9"
+{
+	printf '```\n'
+	printf 'java -jar "$IPECMD" -TPPK3 -PPIC12F675 -Fimage.hex -M -Y -OL\n'
+	printf '```\n'
+} > "$flashing_root/release/v0.9.9/MANIFEST.md"
+cp "$flashing_root/release/v0.9.9/MANIFEST.md" "$flashing_root/pre-v9.9.9-fixes.md"
+cp "$flashing_root/release/v0.9.9/MANIFEST.md" "$flashing_root/v9.9.9-polish.md"
+assert_flashing_accepts 'shipped release artifacts and branch-only working documents'
+
+# Argument guards: a caller mistake must not pass vacuously.
+write_flashing_fixture
+flashing_rc=0
+release_validate_pic12f675_flashing_helper "$flashing_root" >"$output" 2>&1 \
+	|| flashing_rc=$?
+[ "$flashing_rc" -eq 2 ] \
+	|| fail "PIC12F675 flashing contract accepted a missing version argument"
+checks=$((checks + 1))
+release_validate_pic12f675_flashing_helper "$flashing_root" 0.9.10 >"$output" 2>&1 \
+	&& fail "PIC12F675 flashing contract accepted a version that is not vX.Y.Z"
+grep -Fq 'requested version is not vX.Y.Z' "$output" \
+	|| fail "an invalid version was rejected without its diagnostic: $(<"$output")"
+checks=$((checks + 1))
+
+# The live checked-in tree must satisfy the contract.
+release_validate_pic12f675_flashing_helper "$ROOT" v1.2.3 >"$output" 2>&1 \
+	|| fail "the checked-in tree fails the PIC12F675 flashing contract: $(<"$output")"
+checks=$((checks + 1))
+
 # Run the real preflight against a shadow documentation root. A stale bounded
 # declaration must stop the script before its first release-scratch mktemp.
 write_documentation_fixture v1.2.30 21 18 six four
@@ -1463,7 +1651,8 @@ mkdir -p "$shadow_root/scripts"
 cp -R "$documentation_root/." "$shadow_root/"
 cp "$ROOT/scripts/release-provenance.sh" \
 	"$ROOT/scripts/release-documentation.sh" \
-	"$ROOT/scripts/release-signing-policy.sh" "$shadow_root/scripts/"
+	"$ROOT/scripts/release-signing-policy.sh" \
+	"$ROOT/scripts/flash-pic12f675.py" "$shadow_root/scripts/"
 mktemp_marker="$work/release-mktemp-reached"
 if TEST_RELEASE_REPO_ROOT="$shadow_root" TEST_MKTEMP_MARKER="$mktemp_marker" \
 		run_preflight v1.2.3 >"$output" 2>&1; then

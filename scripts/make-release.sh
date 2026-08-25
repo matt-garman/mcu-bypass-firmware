@@ -271,6 +271,7 @@ for renderer in release_validate_current_documentation \
 		release_validate_hardware_claims \
 		release_validate_pic12f675_finalization \
 		release_validate_pic12f675_finalization_document \
+		release_validate_pic12f675_flashing_helper \
 		release_render_scope release_render_validation \
 		release_render_pic_toolchain_rows release_render_pic12f675_flashing \
 		release_render_flashing \
@@ -517,6 +518,31 @@ RELEASE_SOAK_NAMES=$(mkv RELEASE_SOAK_NAMES)
 RELEASE_EVIDENCE_FILES=$(mkv RELEASE_EVIDENCE_FILES)
 [ -n "${RELEASE_EVIDENCE_FILES// /}" ] \
 	|| die "Makefile RELEASE_EVIDENCE_FILES is empty"
+# Required release artifacts that are NOT firmware images: <staged basename>=
+# <tracked source>. Declared separately from RELEASE_IMAGES so shipping a tool
+# beside the images cannot move the reviewed image count, and validated here so
+# a missing or misdeclared source fails before a 24-hour soak, not after it.
+RELEASE_HELPER_MAP=$(mkv RELEASE_HELPER_MAP)
+[ -n "${RELEASE_HELPER_MAP// /}" ] \
+	|| die "Makefile RELEASE_HELPER_MAP is empty; a release must declare its required non-image artifacts"
+declare -A RELEASE_HELPER_SOURCE=()
+RELEASE_HELPER_NAMES=()
+for helper_entry in $RELEASE_HELPER_MAP; do
+	helper_base=${helper_entry%%=*}
+	helper_src=${helper_entry#*=}
+	[ -n "$helper_base" ] && [ -n "$helper_src" ] && [ "$helper_base" != "$helper_entry" ] \
+		|| die "malformed RELEASE_HELPER_MAP entry: $helper_entry"
+	case "$helper_base" in
+		*/*|.*|*.hex) die "invalid staged name for a required release artifact: $helper_base" ;;
+	esac
+	[ -z "${RELEASE_HELPER_SOURCE[$helper_base]+set}" ] \
+		|| die "duplicate required release artifact: $helper_base"
+	[ -f "$REPO_ROOT/$helper_src" ] && [ ! -L "$REPO_ROOT/$helper_src" ] \
+		&& [ -s "$REPO_ROOT/$helper_src" ] \
+		|| die "required release artifact source is missing or not a regular file: $helper_src"
+	RELEASE_HELPER_SOURCE[$helper_base]=$helper_src
+	RELEASE_HELPER_NAMES+=("$helper_base")
+done
 
 # --- the production release identity is pinned, not selected -----------------
 # Everything above this line was READ: the build directories, the tool paths,
@@ -650,6 +676,13 @@ if [ "$VERSION_WAS_SUPPLIED" -eq 1 ]; then
 	# release that then reads as qualified hardware.
 	release_validate_hardware_claims "$REPO_ROOT" \
 		|| die "hardware evidence is not correctly classified as field use or controlled qualification"
+	# The PIC12F675 is not a raw write target, and the release that says so must
+	# also ship the tool that replaces the raw command. Checked here, on the live
+	# tree, so a document that reinstates a raw writer -- or a release that
+	# instructs an operator to use a helper it does not bundle -- fails during
+	# branch work rather than after someone has erased a device's factory trim.
+	release_validate_pic12f675_flashing_helper "$REPO_ROOT" "$VERSION" \
+		|| die "published PIC12F675 flashing instructions do not match the release-shipped helper contract"
 fi
 
 # Scratch area for evidence + per-combo soak run dirs. Preserved on failure so a
@@ -1750,8 +1783,26 @@ staged_xt_image_hashes=$(hash_xt_image_set "${STAGED_XT_IMAGES[@]}")
 # checksum file can be accepted as release evidence.
 release_basenames=()
 for img in "${IMAGES[@]}"; do release_basenames+=("$(basename "$img")"); done
-( cd "$OUTPUT_DIR" && sha256sum -- "${release_basenames[@]}" > SHA256SUMS ) \
-	|| die "could not checksum the staged release images"
+
+# Stage the required non-image artifacts beside the images and prove each is the
+# tracked source byte for byte. No compiler produces these, so the copy IS the
+# only place their identity can be established -- and they are checksummed in
+# the same file, under the same signature, as the firmware they program.
+for helper_base in "${RELEASE_HELPER_NAMES[@]}"; do
+	helper_src="$REPO_ROOT/${RELEASE_HELPER_SOURCE[$helper_base]}"
+	cp -p -- "$helper_src" "$OUTPUT_DIR/$helper_base" \
+		|| die "could not stage required release artifact $helper_base"
+	staged_helper_digest=$(sha256sum -- "$OUTPUT_DIR/$helper_base") \
+		|| die "could not hash staged release artifact $helper_base"
+	source_helper_digest=$(sha256sum -- "$helper_src") \
+		|| die "could not hash release artifact source ${RELEASE_HELPER_SOURCE[$helper_base]}"
+	[ "${staged_helper_digest%% *}" = "${source_helper_digest%% *}" ] \
+		|| die "staged release artifact $helper_base differs from ${RELEASE_HELPER_SOURCE[$helper_base]}"
+done
+
+( cd "$OUTPUT_DIR" && sha256sum -- "${release_basenames[@]}" \
+	"${RELEASE_HELPER_NAMES[@]}" > SHA256SUMS ) \
+	|| die "could not checksum the staged release images and artifacts"
 
 # ...and assert the staging directory holds exactly that set and nothing else,
 # because publication (.github/workflows/release.yml) uploads by glob.
@@ -1765,7 +1816,7 @@ if [ "$staged_sorted" != "$wanted_sorted" ]; then
 	diff -u <(printf '%s\n' "$wanted_sorted") <(printf '%s\n' "$staged_sorted") >&2 || true
 	die "$OUTPUT_DIR holds images that are not part of this release (stale output?)."
 fi
-ok "wrote SHA256SUMS over ${#IMAGES[@]} images; staging directory holds exactly that set."
+ok "wrote SHA256SUMS over ${#IMAGES[@]} images and ${#RELEASE_HELPER_NAMES[@]} required artifact(s); staging directory holds exactly that image set."
 
 # Retain the byte-identity proof beside the images it is about, for the one
 # release it applies to. NOT under evidence/ -- that directory's contents are
@@ -1934,6 +1985,9 @@ REL_BANNER=""
 		printf 'Prebuilt, fully-validated firmware images. Verify integrity with\n'
 	fi
 	printf '`sha256sum -c SHA256SUMS`; reproduce from source per "Reproducing" below.\n\n'
+	printf 'This bundle also ships `flash-pic12f675.py`, covered by the same checksum\n'
+	printf 'file and signature. The PIC12F675 is not a raw write target: pass its image\n'
+	printf 'to that helper, never straight to a programmer. See "PIC12F675 programming".\n\n'
 	release_render_scope
 
 	printf '## PIC10F320 -- the constrained target\n\n'
@@ -2039,6 +2093,10 @@ ok "wrote MANIFEST.md"
 	printf 'fuse bytes / flashing commands, **QUALIFICATION** for the machine-verified\n'
 	printf 'release gate, and evidence/ for the retained logs. See the top-level\n'
 	printf '[release/README.md](../README.md) for the trust model and verification steps.\n\n'
+	printf '**PIC12F675 is not a raw write target.** Its per-device factory OSCCAL and\n'
+	printf 'CONFIG BG trim live in memory a programmer erases, and a device that loses\n'
+	printf 'either still appears to work. Pass its image to `flash-pic12f675.py` in this\n'
+	printf 'directory -- covered by the same SHA256SUMS -- never straight to a programmer.\n\n'
 	if [ -n "$RENAME_IDENTITY_DOC" ]; then
 		printf 'This release renamed its images and changed the PIC10F320 relay image for\n'
 		printf 'idle coil-latch safety. **RENAME_IDENTITY.md** requires the other 17 images\n'

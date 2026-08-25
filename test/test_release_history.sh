@@ -263,7 +263,9 @@ grep -Fq 'scripts/verify-release-signature.sh detached \' "$WORKFLOW" \
 	|| fail "release workflow does not verify the checksum signature"
 grep -Fq 'cp -p -- "$dir"/*.hex "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \' "$WORKFLOW" \
 	|| fail "release workflow does not snapshot the verified checksum signature"
-grep -Fq 'assets=( "$dir"/*.hex "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \' "$WORKFLOW" \
+grep -Fq 'assets=( "$dir"/*.hex "${helper_assets[@]}" \' "$WORKFLOW" \
+	|| fail "release workflow does not publish the images and required artifacts"
+grep -Fq '"$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \' "$WORKFLOW" \
 	|| fail "release workflow does not publish the verified checksum signature"
 grep -Fq 'inventory_sha256=$(sudo python3 scripts/verify_release_publication.py \' "$WORKFLOW" \
 	|| fail "release workflow does not inventory the frozen publication bundle"

@@ -1537,24 +1537,78 @@ design requiring its own review, fail-closed binding and hardware validation.
 
 **Acceptance criteria**
 
-- [ ] A release-shipped, signed-checksum-bound Python helper programs the
+- [x] A release-shipped, signed-checksum-bound Python helper programs the
   downloaded PIC12F675 HEX with no source checkout or firmware development
   toolchain.
-- [ ] The helper fails closed before writing on every image, trim, identity,
+- [x] The helper fails closed before writing on every image, trim, identity,
   tool/version, power-mode, path, checksum, mutation and reservation error.
-- [ ] A durable reservation precedes the sole write; PASS requires exact code,
+- [x] A durable reservation precedes the sole write; PASS requires exact code,
   CONFIG, OSCCAL and BG readback; interrupted transactions have a read-only
   finalization path.
 - [ ] Retained hardware evidence validates the exact PICkit 3/MPLAB X 6.20
   `ipecmd` read/write/export and external-power procedure on initial and repeat
-  programming.
-- [ ] No durable current document publishes a raw PIC12F675 writer command;
+  programming. **Cannot be closed from software.** The required run is written
+  down as an outstanding controlled run in `HARDWARE_VALIDATION_LOG.md`, with the
+  five properties it must prove and the explicit rule that a failing bench result
+  does not become a supported path by assertion.
+- [x] No durable current document publishes a raw PIC12F675 writer command;
   every downloaded-image path names the Python helper and the calibration
   special case explicitly.
-- [ ] The 21-image release identity remains exact while the required helper is
+- [x] The 21-image release identity remains exact while the required helper is
   staged, checksummed, reproduced and published as a distinct release artifact.
-- [ ] Fake-programmer, interruption, release-image, preflight, qualification,
+- [x] Fake-programmer, interruption, release-image, preflight, qualification,
   recovery, packaging and durable-documentation negative controls pass.
+
+**Resolution**
+
+`scripts/flash-pic12f675.py` is a self-contained standard-library entry point
+with two subcommands, `program` and `finalize`. Part, tool and MPLAB X version
+are constants it refuses to have moved (`--part`, `--tool` and `--power` exist so
+that the refusal is testable, not so that the values are selectable), the
+externally powered arrangement is the only one accepted, and `-W5` appears
+nowhere. The write argv is constructed internally from the helper's own snapshot;
+there is no image, part, command or extra-argument override.
+
+The transaction is: validate the image against the bundle's signed `SHA256SUMS`
+and its own strict Intel HEX/address/CONFIG policy, pin the tool through a
+device-free `-?` version probe, create the evidence directory exclusively,
+snapshot the accepted bytes, read the device, read it again and require an exact
+match, publish `reservation.json` durably, write exactly once, then read the
+whole device back -- attempted even when the writer reports failure -- and
+publish one immutable `result.json`. `finalize` re-validates every reserved
+identity, retries only the final read into private per-attempt files, and
+constructs no writer argument at all.
+
+Packaging: `RELEASE_HELPER_MAP` declares `<staged basename>=<tracked source>`
+SEPARATELY from `RELEASE_IMAGES`, so the reviewed 21-image count cannot be moved
+by shipping a tool. `make-release.sh` stages it and checksums it into the same
+`SHA256SUMS`; `verify-release-images.sh` splits the checksum entries by declared
+name, holds the images to the canonical set exactly as before, and proves the
+staged artifact is the tracked source byte for byte -- which is the whole of the
+reproduction claim for a file no compiler produces. The fresh-build leg stays
+image-only. The tag workflow carries the artifact names forward from the step
+that froze them rather than re-reading a mutable Makefile at publication time.
+
+Documentation: `FLASHING.md`'s PIC12F675 section is now "not a raw write target"
+and publishes the helper invocation; `README.md`, `release/README.md` and the
+generated per-release guidance agree, and the `make pic12f675-release-program`
+transaction is described as the development and release-provenance path rather
+than a requirement for flashing downloaded bytes.
+`release_validate_pic12f675_flashing_helper` runs in step 0 against the live tree
+and rejects a raw writer command in ANY current document (discovered, not
+enumerated), a missing helper requirement, the retired universal claim, an
+unbound artifact, and disagreement among the four publishers. A read-only `-GF`
+export and the helper's own `python3 ... --ipecmd <path>` invocation are
+deliberately not writer commands, and both are proved to stay publishable.
+
+**Owner decision still to make.** The helper is documented as the path for a
+downloaded image while the bench row above is open. That is deliberate and
+stated everywhere it appears -- a PASS means "no trim damage was observed on this
+device", never "this writer preserves calibration" -- and it replaces a published
+raw command that carried the same unvalidated preservation question with no
+detection at all. If the preference is instead to withhold the helper from
+`FLASHING.md` until the bench run exists, that is a documentation change, not a
+code change.
 
 ### P2 - Build and validate AVR images before writing fuses
 
@@ -2014,10 +2068,14 @@ close any second-pass item:
 - Full `make test` could not complete because `avr-gcc` is absent and the local
   clang-tidy setup lacks 32-bit glibc headers.
 
-The green results are compatible with F2 and P1: current fault tests observe
+The green results were compatible with F2 and P1: current fault tests observe
 latches/reset entry rather than the affected physical pin modes, and current
-release documentation tests govern generated PIC12F675 guidance without
-rejecting the contradictory static `FLASHING.md` block.
+release documentation tests governed generated PIC12F675 guidance without
+rejecting the contradictory static `FLASHING.md` block. P1 closed that second
+half -- `release_validate_pic12f675_flashing_helper` now holds every current
+document, discovered rather than enumerated, to the same rule the generated
+guidance follows -- so these figures predate the counts in the completion record
+below.
 
 ## Final validation and release gate
 
@@ -2120,7 +2178,7 @@ Record each completed item with its commit ID and decisive validation command.
 | F2 | IN PROGRESS | | Implementation and host contracts complete; provisioned AVR-XT/PIC12F675 target, resource, and merged 136-mutant validation pending |
 | F3 | IMPLEMENTED | (pending) | One-write constant-mask `LATA` coil clear adopted; relay image 248 -> 242 words and return stack 4 -> 3, CD4053 images byte-identical; write sequence asserted by host (59 -> 62 checks) and gpsim resync oracles; 2 new PIC10F320 mutants, with the merged inventory now 136 |
 | F4 | IMPLEMENTED | (pending) | All 21 images rebuild byte-identical; `make test-static-assert-guards` (39 -> 68 checks, 11 near-bound FIRES/CLEAN fixtures); the new `test/avr/test_sim.c` pet-budget check on both classic parts and all three variants; all five MISRA lanes clean |
-| P1 | OPEN | | Standalone PIC12F675 release helper, PICkit 3/IPE validation, packaging, and durable documentation contract |
+| P1 | IMPLEMENTED | (pending) | `scripts/flash-pic12f675.py` staged, checksummed and reproduced as a required non-image release artifact (`RELEASE_HELPER_MAP`), with `RELEASE_IMAGES` still exactly 21; `make test-pic12f675-flash-helper` (172 checks) drives the real helper against a stateful fake `ipecmd`; `test-release-images` 178 -> 190, `test-release-preflight` 125 -> 144, `test-release-provenance` 94 -> 97, `test-release-qualification` 66 -> 67; raw PIC12F675 writer commands retired from every current document and rejected by contract. Retained PICkit 3/MPLAB X 6.20 bench evidence remains open by construction |
 | P2 | OPEN | | Build-before-hardware AVR programming order and fake-programmer regression |
 | D4 | OPEN | | Final release date, resource tables, and PIC10F320 run-5 baseline wording |
 | D5 | OPEN | | Simulator timing/physical-language and pip prerequisite reconciliation |

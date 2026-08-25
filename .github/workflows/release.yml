@@ -348,6 +348,24 @@ jobs:
           read -r -a expected_assets <<< "$release_images_text"
           ((${#expected_assets[@]} > 0)) \
             || { echo "::error::Makefile RELEASE_IMAGES is empty"; exit 1; }
+          # Required non-image artifacts (the PIC12F675 flashing helper). Read
+          # from the same Makefile as the images, declared separately so a tool
+          # cannot move the reviewed image count, and published as assets so a
+          # downloader gets the helper alongside the HEX it is required to use.
+          release_helper_text=$(make -s --no-print-directory print-RELEASE_HELPER_MAP)
+          read -r -a release_helper_entries <<< "$release_helper_text"
+          ((${#release_helper_entries[@]} > 0)) \
+            || { echo "::error::Makefile RELEASE_HELPER_MAP is empty"; exit 1; }
+          release_helper_names=()
+          for entry in "${release_helper_entries[@]}"; do
+            helper_base=${entry%%=*}
+            [ -n "$helper_base" ] && [ "$helper_base" != "$entry" ] \
+              || { echo "::error::malformed RELEASE_HELPER_MAP entry: $entry"; exit 1; }
+            release_helper_names+=("$helper_base")
+            cp -p -- "$dir/$helper_base" "$publish_stage"/ \
+              || { echo "::error::required release artifact is missing: $helper_base"; exit 1; }
+          done
+          expected_assets+=("${release_helper_names[@]}")
           expected_assets+=(SHA256SUMS SHA256SUMS.asc MANIFEST.md QUALIFICATION)
           if [ "$rename_applicable" -eq 1 ]; then
             expected_assets+=(RENAME_IDENTITY.md)
@@ -376,6 +394,7 @@ jobs:
             echo "dir=$publish"
             echo "inventory=$inventory"
             echo "inventory_sha256=$inventory_sha256"
+            echo "helper_assets=${release_helper_names[*]}"
             echo "rename_identity_applicable=$rename_applicable"
             echo "rename_identity_sha256=$rename_sha256"
           } >> "$GITHUB_OUTPUT"
@@ -445,11 +464,29 @@ jobs:
           VERIFIED_RELEASE_COMMIT: ${{ steps.rel.outputs.commit }}
           RENAME_IDENTITY_APPLICABLE: ${{ steps.repro.outputs.rename_identity_applicable }}
           RENAME_IDENTITY_SHA256: ${{ steps.repro.outputs.rename_identity_sha256 }}
+          RELEASE_HELPER_ASSETS: ${{ steps.repro.outputs.helper_assets }}
         run: |
           set -euo pipefail
           dir=$RELEASE_DIR
           tag=$RELEASE_TAG
-          assets=( "$dir"/*.hex "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \
+          # The required non-image artifacts, carried forward from the step that
+          # verified and froze them rather than re-derived here. Re-reading the
+          # Makefile at publication time would let a mutable working tree decide
+          # what a frozen, already-verified bundle publishes.
+          read -r -a helper_names <<< "${RELEASE_HELPER_ASSETS:-}"
+          ((${#helper_names[@]} > 0)) \
+            || { echo "::error::no required release artifacts were carried forward"; exit 1; }
+          helper_assets=()
+          for helper_base in "${helper_names[@]}"; do
+            case "$helper_base" in
+              */*|.*|"") echo "::error::invalid required release artifact: $helper_base"; exit 1 ;;
+            esac
+            test -f "$dir/$helper_base" && test ! -L "$dir/$helper_base" \
+              || { echo "::error::frozen bundle is missing required artifact: $helper_base"; exit 1; }
+            helper_assets+=( "$dir/$helper_base" )
+          done
+          assets=( "$dir"/*.hex "${helper_assets[@]}" \
+            "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \
             "$dir/MANIFEST.md" "$dir/QUALIFICATION" )
           notes="$dir/MANIFEST.md"; [ -f "$notes" ] || notes=/dev/null
           # Publication kind, decided from the tag alone. A bare vX.Y.Z is an

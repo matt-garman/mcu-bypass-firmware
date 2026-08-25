@@ -19,7 +19,7 @@ raising the canonical set to 21 images; see the table below.
 | **ATtiny202 (AVR-XT)** | release-supported | first released in `v0.9.6`; 2 KB flash, SOIC-8 only (no DIP), UPDI programming |
 | PIC10F322 | release-supported | 512 words |
 | **PIC10F320** | release-supported | **first released here in `v0.9.6`; constrained exception: 256 words, so the debounce algorithm is implemented directly rather than by compiling the verified core — see [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md)** |
-| **PIC12F675** | release-supported | **first released here in `v0.9.9`; classic mid-range: 1024 words, no `LATx` (the output latch is an SRAM shadow), 1.024 ms tick. Every pre-hardware lane the release parts have, plus a calibration contract they do not — and, uniquely, guarded development and signed-release programming procedures that check and record factory OSCCAL/BG before and after writing. Real preservation and the software-only ipecmd route remain hardware-unvalidated (see [release/README.md](release/README.md) and `make pic12f675-release-program`). See [docs/pic12f675_feasibility.md](docs/pic12f675_feasibility.md)** |
+| **PIC12F675** | release-supported | **first released here in `v0.9.9`; classic mid-range: 1024 words, no `LATx` (the output latch is an SRAM shadow), 1.024 ms tick. Every pre-hardware lane the release parts have, plus a calibration contract they do not — and, uniquely, guarded development and signed-release programming procedures that check and record factory OSCCAL/BG before and after writing, plus a release-shipped `flash-pic12f675.py` so a downloaded image can be programmed under the same transaction with no source checkout (see [FLASHING.md](FLASHING.md)). Real preservation remains hardware-unvalidated (see [release/README.md](release/README.md) and `make pic12f675-release-program`). See [docs/pic12f675_feasibility.md](docs/pic12f675_feasibility.md)** |
 
 Every release target except one compiles the verified core (`src/bypass_pure.c`)
 directly into its shipping image. The release-supported PIC10F320 cannot — its
@@ -101,12 +101,16 @@ qualification record must retain.
 
 # Quickstart
 
-Flashing a downloaded release image needs no toolchain at all: see
-[FLASHING.md](FLASHING.md) for the per-part `avrdude` and `ipecmd` command
-templates, and [HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md) for
-which combinations builders have reported working and why a shared pinout does
-not make two parts interchangeable to flash. The rest of this section is about
-building from source.
+Programming a downloaded release does not require the firmware development
+toolchain or a repository checkout. Most targets require only the released HEX
+and programmer CLI. PIC12F675 additionally requires Python 3 and the release's
+flashing helper because its per-device factory calibration must be preserved and
+verified. See [FLASHING.md](FLASHING.md) for the per-part `avrdude` and `ipecmd`
+command templates and the PIC12F675 helper invocation, and
+[HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md) for which combinations
+builders have reported working and why a shared pinout does not make two parts
+interchangeable to flash. The rest of this section is about building from
+source.
 
 Requires avrtools, assumes a USBtiny programmer, and a fresh
 ATtiny13a chip (see `make help` for how to build/program other

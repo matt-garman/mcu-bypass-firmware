@@ -686,6 +686,181 @@ release_validate_pic12f675_finalization() {
 	return "$rc"
 }
 
+# The PIC12F675 flashing contract, checked on the LIVE tree.
+#
+# This part is the one target where a correct HEX plus a writer is not a
+# sufficient instruction: a bulk erase destroys the per-device OSCCAL word and
+# the CONFIG BG<1:0> bandgap trim, and a device that loses either still appears
+# to work. From v0.9.10 the answer for a downloaded release is the helper this
+# repository ships INSIDE the release bundle, and the raw command sequence
+# FLASHING.md used to publish is retired.
+#
+# The failure this exists to prevent already happened once, in the other
+# direction: README.md and release/README.md prohibited a raw writer while
+# FLASHING.md published one, and the suite was green because only the GENERATED
+# per-release guidance was contract-tested. So all four publishers are checked
+# together -- the two static documents, the release directory README, and the
+# rendered per-release section -- plus a DISCOVERED scan of every other current
+# Markdown document, which catches a raw command in a file written tomorrow.
+#
+# A "raw writer command" is a fenced line that INVOKES a programmer (pk2cmd,
+# ipecmd, or java running the IPE jar), names this part, and carries a program
+# option. The helper invocation is a `python3` command that merely passes an
+# ipecmd path, so it is not one -- which is exactly the distinction a
+# substring search for "ipecmd" would get wrong.
+_release_pic12f675_raw_writer_scan() {
+	[ "$#" -eq 1 ] || return 2
+	local label=$1
+	local line command word fenced=0 building=0 rc=0
+
+	command=''
+	while IFS= read -r line || [ -n "$line" ]; do
+		if [ "$building" -eq 0 ] && [[ "$line" == '```'* ]]; then
+			fenced=$((1 - fenced))
+			continue
+		fi
+		[ "$fenced" -eq 1 ] || continue
+		if [ "$building" -eq 0 ]; then
+			word=${line#"${line%%[![:space:]]*}"}
+			word=${word%%[[:space:]]*}
+			case "$word" in
+				pk2cmd|ipecmd|ipecmd.exe|ipecmd.jar|java) ;;
+				*) continue ;;
+			esac
+			building=1
+			command=''
+		fi
+		if [[ "$line" =~ ^(.*)\\[[:space:]]*$ ]]; then
+			command+=" ${BASH_REMATCH[1]}"
+			continue
+		fi
+		command+=" $line"
+		building=0
+		case "$command" in
+			*12F675*|*12f675*) ;;
+			*) continue ;;
+		esac
+		# -M / /M is the program option. A -GF export is read-only and stays
+		# publishable: reading a device is how an operator archives its trim.
+		if [[ "$command" =~ (^|[[:space:]])[-/]M([[:space:]]|$) ]]; then
+			_release_documentation_error \
+				"$label publishes a raw PIC12F675 writer command; a downloaded release image must be passed to flash-pic12f675.py, never to the programmer directly:${command}" \
+				|| rc=1
+		fi
+	done
+	[ "$building" -eq 0 ] \
+		|| _release_documentation_error "$label ends inside an unterminated programmer command" || rc=1
+	return "$rc"
+}
+
+# Collapse a document to one whitespace-normalized line, so a required sentence
+# is found whether or not an editor rewrapped it.
+_release_flowed_text() {
+	[ "$#" -eq 1 ] || return 2
+	tr '\n\t' '  ' < "$1" | tr -s ' '
+}
+
+release_validate_pic12f675_flashing_helper() {
+	[ "$#" -eq 2 ] || return 2
+	local repo_root=$1 version=$2
+	local helper_name='flash-pic12f675.py'
+	local helper_source='scripts/flash-pic12f675.py'
+	local claim='PIC12F675 additionally requires Python 3 and the release'\''s flashing helper because its per-device factory calibration must be preserved and verified.'
+	local document label rendered flowed find_pid rc=0
+	# Always scanned, so deleting the helper instruction from any of them is a
+	# failure with a precise diagnostic rather than a silently empty scan.
+	local -a publishers=("README.md" "FLASHING.md" "release/README.md")
+	# Universal claims the helper requirement retires. Each was true of the six
+	# flash-and-forget parts and false of this one.
+	local -a retired_claims=(
+		'Needs only a programmer and its CLI'
+		'needs no toolchain at all'
+		'no build toolchain, no clone of this repository'
+	)
+	local retired
+
+	[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
+		|| _release_documentation_error "requested version is not vX.Y.Z: $version" || return
+
+	# 1. The shipped tool itself.
+	[ -f "$repo_root/$helper_source" ] && [ ! -L "$repo_root/$helper_source" ] \
+		&& [ -s "$repo_root/$helper_source" ] \
+		|| _release_documentation_error "the PIC12F675 flashing helper is missing or not a regular file: $helper_source" || return
+	[ -x "$repo_root/$helper_source" ] \
+		|| _release_documentation_error "the PIC12F675 flashing helper is not executable: $helper_source" || rc=1
+
+	# 2. It is a RELEASE artifact, not merely a file in the tree. Without this
+	#    binding the documents below would instruct an operator to use a tool
+	#    that no release bundle contains.
+	grep -Fq "$helper_name=$helper_source" "$repo_root/Makefile" \
+		|| _release_documentation_error "the Makefile does not bind $helper_name to $helper_source as a required release artifact (RELEASE_HELPER_MAP)" || rc=1
+
+	# 3. Every publisher names the helper, and the two entry-point documents
+	#    carry the precise claim rather than an implicit escape clause.
+	for label in "${publishers[@]}"; do
+		document="$repo_root/$label"
+		[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
+			|| { _release_documentation_error "flashing document is not a regular nonempty file: $label" || rc=1; continue; }
+		grep -Fq "$helper_name" "$document" \
+			|| _release_documentation_error "$label does not name the release-shipped PIC12F675 flashing helper $helper_name" || rc=1
+		flowed=$(_release_flowed_text "$document") || return
+		case "$label" in
+			README.md|FLASHING.md)
+				case "$flowed" in
+					*"$claim"*) ;;
+					*) _release_documentation_error "$label does not carry the exact downloaded-release programming claim (PIC12F675 additionally requires Python 3 and the flashing helper)" || rc=1 ;;
+				esac
+				;;
+		esac
+		for retired in "${retired_claims[@]}"; do
+			case "$flowed" in
+				*"$retired"*)
+					_release_documentation_error "$label still publishes the retired universal claim: $retired" || rc=1 ;;
+			esac
+		done
+		_release_pic12f675_raw_writer_scan "$label" < "$document" || rc=1
+	done
+
+	# 4. FLASHING.md says it in its heading, where a reader skimming for the
+	#    part actually looks.
+	grep -Eq '^#+[[:space:]]+PIC12F675[[:space:]].*not a raw write target' \
+		"$repo_root/FLASHING.md" \
+		|| _release_documentation_error "the FLASHING.md PIC12F675 heading does not state that it is not a raw write target" || rc=1
+
+	# 5. Any OTHER current Markdown document that publishes a raw writer command
+	#    fails the day it is written. Shipped release directories are immutable
+	#    artifacts of past releases and legitimately carry retired wording;
+	#    root-level working documents quote the defective form while describing
+	#    the defect.
+	while IFS= read -r -d '' document; do
+		label=${document#$repo_root/}
+		case "$label" in
+			README.md|FLASHING.md|release/README.md) continue ;;
+			v*-polish.md|pre-v*-fixes.md) continue ;;
+		esac
+		_release_pic12f675_raw_writer_scan "$label" < "$document" || rc=1
+	done < <(find "$repo_root" \
+		\( -name .git -o -path "$repo_root/release/v[0-9]*" \) -prune -o \
+		-type f -name '*.md' -print0)
+	find_pid=$!
+	wait "$find_pid" \
+		|| _release_documentation_error "could not scan for raw PIC12F675 writer commands" || return
+
+	# 6. The generated per-release guidance, held to the same contract.
+	rendered=$(release_render_pic12f675_flashing "$version") \
+		|| _release_documentation_error "generated PIC12F675 flashing guidance could not be rendered" || return
+	case "$rendered" in
+		*"$helper_name"*) ;;
+		*) _release_documentation_error "generated release documentation does not name $helper_name" || rc=1 ;;
+	esac
+	case "$rendered" in
+		*'NOT a raw write target'*) ;;
+		*) _release_documentation_error "generated release documentation does not state that PIC12F675 is not a raw write target" || rc=1 ;;
+	esac
+	_release_pic12f675_raw_writer_scan "generated release documentation" <<<"$rendered" || rc=1
+	return "$rc"
+}
+
 release_render_scope() {
 	[ "$#" -eq 0 ] || return 2
 	printf 'Release scope: AVR Classic (ATtiny13a/45/85), ATtiny202 (AVR-XT),\n'
@@ -720,7 +895,45 @@ release_render_pic12f675_flashing() {
 	[ "$#" -eq 1 ] || return 2
 	local release_tag=$1
 	printf '%s\n' \
-		'### PIC12F675 guarded programming' \
+		'### PIC12F675 programming' \
+		'' \
+		'This part is NOT a raw write target. Its per-device factory OSCCAL word and' \
+		'CONFIG `BG<1:0>` trim live in memory a programmer erases, and a device that' \
+		'loses either still appears to work. Every write therefore goes through a' \
+		'guarded transaction, and there are two of them.' \
+		'' \
+		'**Programming these downloaded images** needs no source checkout and no' \
+		'firmware development toolchain -- only Python 3 and MPLAB X 6.20 `ipecmd`.' \
+		'Pass the release HEX to `flash-pic12f675.py`, which ships beside the images' \
+		'and is covered by the signed `SHA256SUMS` in this release. Externally power the' \
+		'board; the helper never requests programmer-supplied Vdd. Choose a NEW' \
+		'evidence directory per device.' \
+		'' \
+		'```sh' \
+		'python3 flash-pic12f675.py program \' \
+		'  --image bypass-pic12f675-cd4053_simple.hex \' \
+		'  --ipecmd /opt/microchip/mplabx/v6.20/mplab_platform/mplab_ipe/ipecmd.jar \' \
+		'  --evidence-dir ./pic12f675-device-001' \
+		'```' \
+		'' \
+		'It checks the image against the signed checksum, refuses an image that programs' \
+		'word `0x3FF` or moves the CONFIG BG field, pins the tool version, reads the' \
+		'device twice, reserves the write durably, writes exactly once, and publishes one' \
+		'immutable PASS/FAIL `result.json`. A PENDING directory -- a reservation with no' \
+		'result -- is resolved read-only, and that mode never constructs a writer' \
+		'argument:' \
+		'' \
+		'```sh' \
+		'python3 flash-pic12f675.py finalize \' \
+		'  --evidence-dir ./pic12f675-device-001 \' \
+		'  --ipecmd /opt/microchip/mplabx/v6.20/mplab_platform/mplab_ipe/ipecmd.jar' \
+		'```' \
+		'' \
+		'A PASS means no trim damage was OBSERVED on that device. It is not proof that' \
+		'the writer preserves calibration: that remains hardware-unvalidated until the' \
+		'`1.x.y` bench pass, and the helper detects damage only after the write.' \
+		'' \
+		'#### From a source checkout of this tag (development and release provenance)' \
 		'' \
 		'Externally power the board; this workflow does not request programmer-supplied Vdd.' \
 		'Do not invoke a raw programmer write for this part. For each device, choose' \
@@ -820,7 +1033,8 @@ release_render_flashing() {
 		'AVR images require the design fuse bytes in addition to the flash write' \
 		'(the table above lists them per image). PIC images embed their CONFIG word.' \
 		'PIC12F675 has no per-image shortcut because every write requires the guarded' \
-		'device-specific transaction below.' \
+		'device-specific transaction below -- pass its HEX to the' \
+		'`flash-pic12f675.py` shipped in this release, never directly to a programmer.' \
 		'' \
 		'```'
 	sort "$flash_commands" | while IFS=$'\t' read -r image command; do

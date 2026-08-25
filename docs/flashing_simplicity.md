@@ -361,14 +361,26 @@ signature is required first, and contains no image-selection or programming
 procedure. Making `PROGRAMMING.md` the release body solves the actual
 discoverability problem rather than adding another pointer.
 
-**A generated flashing helper** is deferred, not categorically rejected. An
-executable being signed is not itself a defect, and a helper can print the exact
-command and require confirmation before touching silicon. The real costs are
-downloaded-code trust, Bash/PowerShell portability, dependency burden, port and
-programmer detection ambiguity, and a larger test matrix. Never select the
+**A generated flashing helper** was deferred here, not categorically rejected.
+An executable being signed is not itself a defect, and a helper can print the
+exact command and require confirmation before touching silicon. The real costs
+are downloaded-code trust, Bash/PowerShell portability, dependency burden, port
+and programmer detection ambiguity, and a larger test matrix. Never select the
 first serial device silently. If literal zero-substitution remains the
 acceptance criterion after the static profile guide ships, a fail-closed,
 display-and-confirm helper is the only realistic next step.
+
+**Update (v0.9.10).** One shipped, for exactly one part, and the scope is what
+kept the costs above bounded. `scripts/flash-pic12f675.py` is staged into every
+release bundle and listed in its signed `SHA256SUMS`, so downloaded-code trust
+rides on the same signature as the images; it is Python 3 standard library only,
+so there is no portability fork and no dependency burden; and it detects nothing
+— part, tool and power arrangement are fixed constants it REFUSES to have moved,
+and the programmer path is an explicit argument. The test matrix is one gate,
+`test-pic12f675-flash-helper`, driven against a stateful fake `ipecmd`. It is
+not the general-purpose helper this section deferred: it exists because §5 makes
+this one part a case where a command is the wrong instruction, and the same
+reasoning does not extend to the other six.
 
 **GUI programming instructions** are deferred. The audience in §1 already has
 the CLI programming tool installed. Screenshot-level GUI guidance can be added
@@ -457,9 +469,23 @@ downloaded file into the programming transaction.
 
 So the position is **not** "the prebuilt PIC12F675 HEX is suspect". It is
 byte-identical and reproducible, and release CI proves that on every release.
-The position is that no *no-compiler path into the transaction* has been
-designed or gated yet, which is what `release/README.md`'s safety-exception
-paragraph says.
+The position was that no *no-compiler path into the transaction* had been
+designed or gated yet.
+
+**Update (v0.9.10).** One has been. `scripts/flash-pic12f675.py` ships inside
+the release bundle and admits the downloaded HEX by binding it to that bundle
+rather than to a build: the image must be listed in the signed `SHA256SUMS`
+beside it with a matching digest, and the accepted bytes are snapshotted into
+the evidence directory and hashed before any check runs, so the same custody
+property reason 2 describes is established without a compiler. Reason 1 is
+answered by the helper carrying its own copy of the calibration and CONFIG
+policy — an image programming word `0x3FF`, writing EEPROM, a user ID or the
+device ID word, or carrying a CONFIG word other than `0x31CC` is refused before
+an erase argument exists — which is what makes the derived `PIC12F675_SIMCAL_DIR`
+images unwritable through it. The `make pic12f675-release-program` transaction
+described above keeps its own, stronger job: binding a PRIVATE FRESH BUILD to a
+signed tag, which is a provenance claim a downloaded file cannot make and the
+helper does not attempt.
 
 ### 5.4 The honest limit of what the guarded workflow proves
 

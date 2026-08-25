@@ -37,6 +37,55 @@ file is the human-readable summary of *what changed*.
 
 ## [0.9.10] - 2026-08-21
 
+### Added
+
+- **A release-shipped PIC12F675 flashing helper, and the retirement of the raw
+  command sequence that preceded it.** `FLASHING.md` existed for a real use
+  case: program a downloaded release on a machine that has the programmer but
+  no build toolchain and no checkout. For six of the seven parts that is
+  genuinely a command. For the PIC12F675 it is not, because a bulk erase
+  destroys two per-device factory-trimmed values the image cannot supply -- the
+  `RETLW` oscillator calibration word at `0x3FF` and the `BG<1:0>` bandgap field
+  in CONFIG -- and a device that loses either **still appears to work**, running
+  at the wrong tick cadence, the wrong relay coil-pulse widths, or the wrong
+  brown-out threshold.
+
+  The block that shipped through `v0.9.9` had the right stages -- archive, note
+  the two values, write, compare -- but parsing and comparison were manual, the
+  write was not mechanically conditional on a valid baseline, no durable record
+  existed before the hardware mutation, and it contradicted `README.md` and
+  `release/README.md`, which prohibited exactly the raw write it published. The
+  suite was green through that contradiction because only the *generated*
+  per-release guidance was contract-tested.
+
+  Every release from `v0.9.10` now also ships `flash-pic12f675.py`, listed in
+  the same signed `SHA256SUMS` as the images and reproduced from its tracked
+  source byte for byte. It needs Python 3 and MPLAB X 6.20 `ipecmd` -- no Make,
+  Git, XC8, device pack, simulator, checkout or rebuild -- and runs the write as
+  a transaction: validate the image against the signed checksum, refuse one that
+  programs `0x3FF` or moves the CONFIG BG field, pin part, tool and MPLAB X
+  version, read the device, read it again to prove nothing moved, publish a
+  durable `reservation.json`, perform exactly one write, then read the whole
+  device back and publish one immutable PASS/FAIL `result.json`. An interruption
+  is PENDING, never an implicit success, and is resolved by a read-only
+  finalization mode that never constructs a writer argument. The complete
+  factory export is retained whatever the outcome, so a first bad attempt does
+  not leave an operator without the only copy of that chip is trim.
+
+  `test-pic12f675-flash-helper` proves the ordering against a stateful fake
+  programmer, proves that every refusal happens before an erase argument is
+  constructed, and proves that each way a writer can damage this part produces a
+  published FAIL rather than a PASS. A durable documentation contract now rejects
+  a raw PIC12F675 writer command in any current document -- including one written
+  tomorrow -- a missing helper requirement, the retired universal "only a
+  programmer and its CLI" claim, and a helper no release bundles.
+
+  What this does not do is make the write safe by assertion. It DETECTS trim
+  damage after the fact; whether a real PICkit 3 preserves the trim across an
+  erase is still a bench question, and until that controlled run is retained in
+  `HARDWARE_VALIDATION_LOG.md` a PASS means "no damage was observed on this
+  device", not "this writer is known to be safe".
+
 ### Fixed
 
 - **A production release can no longer be staged under a development

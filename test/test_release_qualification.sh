@@ -38,6 +38,7 @@ source "$RENDER"
 for function in release_validate_current_documentation \
 		release_validate_staged_documentation \
 		release_validate_hardware_claims \
+		release_validate_pic12f675_flashing_helper \
 		release_render_scope release_render_validation \
 		release_render_pic_toolchain_rows release_render_pic12f675_flashing \
 		release_render_flashing \
@@ -783,22 +784,65 @@ printf '%s\t%s\n' \
 	'bypass-attiny13a-cd4053_simple.hex' 'avrdude -c test-programmer' \
 	'bypass-pic10f322-cd4053_simple.hex' 'pk2cmd -PPIC10F322 -Fimage.hex -M -Y -R' \
 	> "$flashing_fixture"
+helper_commands="$work/rendered-pic12f675-helper.sh"
+helper_recovery="$work/rendered-pic12f675-helper-recovery.sh"
 release_render_flashing "$flashing_fixture" v0.9.9 > "$flashing"
-awk '/^```sh$/ { capture=1; next }
-	/^```$/ && capture { exit }
-	capture { print }' "$flashing" > "$flashing_commands"
-awk '/^```sh$/ { blocks++; capture=(blocks == 2); next }
-	/^```$/ && capture { exit }
-	capture { print }' "$flashing" > "$recovery_commands"
+# Select each block by what it CONTAINS, not by its ordinal. The section now
+# publishes four: the downloaded-image helper and its recovery, then the
+# source-checkout transaction and its recovery. Positional extraction silently
+# followed the wrong one when the helper blocks were added ahead of them.
+extract_rendered_block() {
+	awk -v want="$2" '
+		/^```sh$/ { capture=1; buf=""; next }
+		/^```$/ && capture {
+			if (index(buf, want)) { printf "%s", buf; exit }
+			capture=0
+			next
+		}
+		capture { buf = buf $0 "\n" }
+	' "$1"
+}
+extract_rendered_block "$flashing" 'pic12f675-release-program' > "$flashing_commands"
+extract_rendered_block "$flashing" 'pic12f675-finalize' > "$recovery_commands"
+extract_rendered_block "$flashing" 'flash-pic12f675.py program' > "$helper_commands"
+extract_rendered_block "$flashing" 'flash-pic12f675.py finalize' > "$helper_recovery"
 [ -s "$flashing_commands" ] \
 	|| fail "rendered PIC12F675 flashing guidance has no shell command block"
 [ -s "$recovery_commands" ] \
 	|| fail "rendered PIC12F675 flashing guidance has no recovery command block"
+[ -s "$helper_commands" ] \
+	|| fail "rendered PIC12F675 flashing guidance has no downloaded-image helper block"
+[ -s "$helper_recovery" ] \
+	|| fail "rendered PIC12F675 flashing guidance has no helper recovery block"
 bash -n "$flashing_commands" \
 	|| fail "rendered PIC12F675 flashing commands are not valid shell"
 bash -n "$recovery_commands" \
 	|| fail "rendered PIC12F675 recovery commands are not valid shell"
-	for required in PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT \
+bash -n "$helper_commands" \
+	|| fail "rendered PIC12F675 helper commands are not valid shell"
+bash -n "$helper_recovery" \
+	|| fail "rendered PIC12F675 helper recovery commands are not valid shell"
+# The published helper invocation must select a released image, name a NEW
+# evidence directory, and carry no programmer write option of its own.
+for required in '--image bypass-pic12f675-' '--ipecmd ' '--evidence-dir '; do
+	grep -Fq -- "$required" "$helper_commands" \
+		|| fail "rendered PIC12F675 helper command omits: $required"
+done
+grep -Fq -- '--evidence-dir' "$helper_recovery" \
+	|| fail "rendered PIC12F675 helper recovery does not select the PENDING directory"
+if grep -Fq -- '--image' "$helper_recovery"; then
+	fail "rendered PIC12F675 helper recovery re-selects an image; recovery is read-only"
+fi
+for block in "$helper_commands" "$helper_recovery"; do
+	if grep -Eq '(^|[[:space:]])-M([[:space:]]|$)' "$block"; then
+		fail "rendered PIC12F675 helper block carries a raw programmer write option"
+	fi
+done
+checks=$((checks + 1))
+	for required in 'flash-pic12f675.py' 'NOT a raw write target' \
+		'no source checkout' 'immutable PASS/FAIL' \
+		'no trim damage was OBSERVED' \
+		PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT \
 		PIC12F675_RELEASE_TAG pic12f675-release-program pic12f675-finalize \
 		'transaction is **PENDING**' 'physical custody' \
 		'never invokes writer arguments' 'existing result' \

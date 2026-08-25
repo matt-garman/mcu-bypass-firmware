@@ -105,6 +105,41 @@ which is the honest state of affairs rather than an accident of ordering.
 <!-- controlled-qualification:end -->
 
 
+## Outstanding controlled runs
+
+### PIC12F675 programmer trim preservation
+
+From `v0.9.10` every release bundles `flash-pic12f675.py`, and `FLASHING.md`
+directs a downloaded PIC12F675 image to it rather than to a programmer. The
+helper runs the write as a transaction and verifies the factory OSCCAL word and
+CONFIG `BG<1:0>` field against two pre-write reads afterwards, so it DETECTS
+damage. It cannot prevent it, and nothing in this repository yet establishes
+that a real PICkit 3 with MPLAB X 6.20 preserves that trim across an erase.
+
+Until a controlled run recorded above proves the following, treat a helper PASS
+as "no damage was observed on this device", not as a validated programming path:
+
+- the read/export command returns complete program, CONFIG, Device ID, revision,
+  OSCCAL and BG data in the form the helper parses;
+- the write command with calibration-memory programming disabled preserves both
+  OSCCAL and BG, on an initial program and on a repeat program of the same part;
+- programmed code and the non-BG CONFIG bits read back exactly as expected;
+- the documented externally powered arrangement and the release-from-reset
+  behaviour are correct; and
+- an interrupted PENDING transaction can be finalized read-only without a second
+  write.
+
+If MPLAB X 6.20 cannot enforce or report calibration-memory protection through
+the supported CLI path, or either trim value changes, the helper does not become
+a supported path by assertion and no automatic repair is to be added quietly: a
+per-device trim-aware image or an explicit restoration transaction would be a new
+design needing its own review, fail-closed binding and hardware validation.
+
+The programmer-powered arrangement stays out of scope for the same reason. The
+helper refuses `--power` values other than `external` because no voltage and
+interface setup for a programmer-supplied supply has been retained here.
+
+
 ## Additional notes
 
   - For PIC flashing, I have a knock-off PICKit3 (amusingly labled "PCKit 3"): note that starting with MPLab 6.25, PICKit 3 support was removed; I had to download MPLab 6.20, which is the latest version that works with the PICKit 3

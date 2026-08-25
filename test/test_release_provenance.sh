@@ -414,8 +414,11 @@ mapfile -t avr_final_hash_lines < <(grep -nF \
 	'final_avr_image_hashes=$(release_hash_classic_avr_images "${AVR_IMAGES[@]}")' "$RELEASE")
 mapfile -t avr_stage_bind_lines < <(grep -nF \
 	'release_stage_classic_avr_images "$OUTPUT_DIR" "$final_avr_image_hashes"' "$RELEASE")
+# Prefix-matched: the checksum command now also covers the required non-image
+# release artifacts and wraps onto a second line. What this marker pins is WHERE
+# checksumming happens relative to staging, not its argument list.
 mapfile -t checksum_lines < <(grep -nF \
-	'( cd "$OUTPUT_DIR" && sha256sum -- "${release_basenames[@]}" > SHA256SUMS )' "$RELEASE")
+	'( cd "$OUTPUT_DIR" && sha256sum -- "${release_basenames[@]}"' "$RELEASE")
 mapfile -t evidence_copy_lines < <(grep -nF \
 	'for f in "$EVID"/*.log; do' "$RELEASE")
 [ "${#avr_final_hash_lines[@]}" -eq 1 ] \
@@ -617,6 +620,12 @@ chmod 750 "$publish_fixture/scripts/verify-release-tag-target.sh" \
 	"$publish_fixture/scripts/verify-release-signature.sh" \
 	"$publish_bin/gh"
 printf ':00000001FF\n' > "$publish_assets/a.hex"
+# The frozen bundle also carries the required non-image artifacts. The
+# publication shell must upload them without re-reading the Makefile, so the
+# fixture supplies them exactly the way the reproduction step does: as a
+# carried-forward name list beside the file itself.
+printf '#!/usr/bin/env python3\n' > "$publish_assets/flash-pic12f675.py"
+publish_helper_assets='flash-pic12f675.py'
 publish_image_hash=$(sha256sum -- "$publish_assets/a.hex")
 printf '%s  a.hex\n' "${publish_image_hash%% *}" > "$publish_assets/SHA256SUMS"
 printf 'dummy signature\n' > "$publish_assets/SHA256SUMS.asc"
@@ -632,7 +641,8 @@ publish_inventory="$publish_fixture/publication.inventory.json"
 publish_inventory_sha256=
 
 record_publish_inventory() {
-	local -a expected=(a.hex SHA256SUMS SHA256SUMS.asc MANIFEST.md QUALIFICATION)
+	local -a expected=(a.hex flash-pic12f675.py SHA256SUMS SHA256SUMS.asc \
+		MANIFEST.md QUALIFICATION)
 	[ -e "$publish_report" ] || [ -L "$publish_report" ] || :
 	if [ -f "$publish_report" ] && [ ! -L "$publish_report" ]; then
 		expected+=(RENAME_IDENTITY.md)
@@ -656,6 +666,7 @@ run_publish_step() {
 			VERIFIED_RELEASE_COMMIT=0000000000000000000000000000000000000000 \
 			RENAME_IDENTITY_APPLICABLE="$applicable" \
 			RENAME_IDENTITY_SHA256="$digest" \
+			RELEASE_HELPER_ASSETS="${TEST_HELPER_ASSETS-$publish_helper_assets}" \
 			TEST_TAG_VERIFY_FAIL="${TEST_TAG_VERIFY_FAIL:-0}" \
 			TEST_SIGNATURE_FAIL="${TEST_SIGNATURE_FAIL:-0}" \
 			TEST_SIGNATURE_MUTATE="${TEST_SIGNATURE_MUTATE:-0}" \
@@ -682,13 +693,24 @@ run_publish_step 1 "$publish_hash" >"$work/publish.out" 2>"$work/publish.err" \
 	|| fail "applicable frozen report did not publish: $(<"$work/publish.err")"
 [ "$(grep -Fxc "$publish_report" "$publish_args")" -eq 1 ] \
 	|| fail "applicable publication did not pass RENAME_IDENTITY.md to gh exactly once"
-for asset in "$publish_assets/a.hex" "$publish_assets/SHA256SUMS" \
+for asset in "$publish_assets/a.hex" "$publish_assets/flash-pic12f675.py" \
+		"$publish_assets/SHA256SUMS" \
 		"$publish_assets/SHA256SUMS.asc" "$publish_assets/MANIFEST.md" \
 		"$publish_assets/QUALIFICATION"; do
 	grep -Fxq "$asset" "$publish_args" \
 		|| fail "applicable publication omitted base asset: $asset"
 done
 checks=$((checks + 1))
+
+# The required non-image artifacts are a fail-closed input, not a convenience.
+# A release that lost them between freezing and publication would otherwise
+# upload firmware for a part whose only safe writer is the missing tool.
+TEST_HELPER_ASSETS='' expect_publish_fail 'no carried-forward artifacts' \
+	1 "$publish_hash" 'no required release artifacts were carried forward'
+TEST_HELPER_ASSETS='../escape.py' expect_publish_fail 'a path-bearing artifact name' \
+	1 "$publish_hash" 'invalid required release artifact'
+TEST_HELPER_ASSETS='absent-helper.py' expect_publish_fail 'an artifact the bundle lacks' \
+	1 "$publish_hash" 'frozen bundle is missing required artifact'
 
 rm "$publish_report"
 record_publish_inventory
@@ -1231,9 +1253,23 @@ for n in "${repro_names[@]}"; do repro_paths+=("$rename_images/$n"); done
 repro_release="$work/reproduction release"
 mkdir -p "$repro_release"
 cp -- "${repro_paths[@]}" "$repro_release/"
+# A committed release also carries the required non-image artifacts, byte for
+# byte from their tracked sources. The fresh build directory does not: a
+# compiler produces images, not tools, and the reproduction leg is image-only.
+repro_helper_names=()
+while read -r repro_helper_entry; do
+	[ -n "$repro_helper_entry" ] || continue
+	repro_helper_base=${repro_helper_entry%%=*}
+	repro_helper_src=${repro_helper_entry#*=}
+	cp -p -- "$ROOT/$repro_helper_src" "$repro_release/$repro_helper_base" \
+		|| fail "could not stage required release artifact $repro_helper_base"
+	repro_helper_names+=("$repro_helper_base")
+done < <(cd "$ROOT" && make -s --no-print-directory print-RELEASE_HELPER_MAP | tr ' ' '\n')
+[ "${#repro_helper_names[@]}" -gt 0 ] \
+	|| fail "Makefile declares no required release artifacts"
 (
 	cd "$repro_release"
-	sha256sum -- "${repro_names[@]}" > SHA256SUMS
+	sha256sum -- "${repro_names[@]}" "${repro_helper_names[@]}" > SHA256SUMS
 )
 ambient_release_expected=${repro_names[0]}
 RELEASE_EXPECTED_IMAGES="$ambient_release_expected" \

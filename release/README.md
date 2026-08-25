@@ -257,6 +257,16 @@ a raw `pk2cmd` or `ipecmd` writer command. Real preservation and actual ipecmd
 operation remain hardware-unvalidated until the `1.x.y` bench pass; see
 `docs/pic12f675_feasibility.md` section 8, items 1 and 2.
 
+There are **two** guarded paths, and which one applies depends on what you have.
+Programming a downloaded release needs neither a source checkout nor the
+firmware development toolchain: from `v0.9.10` every release bundle also ships
+`flash-pic12f675.py`, listed in that release's signed `SHA256SUMS` like an
+image, and it runs the same transaction using only Python 3 and MPLAB X 6.20
+`ipecmd`. The `make pic12f675-release-program` transaction further down is the
+developer and release-provenance path: it rebuilds the image privately and binds
+it to a signed tag, which is why it needs the toolchain, a clean tagged checkout,
+and a pk2cmd reader.
+
 ### Renamed in v0.9.8 (`v0.9.7` and earlier used different names)
 
 <!-- name-contract: exempt-begin (old->new upgrade guidance and redirect tables;
@@ -397,10 +407,33 @@ pk2cmd -PPIC10F320 -Fbypass-pic10f320-cd4053_simple.hex -M -Y -R   # PICkit 2
 There is no `make pic10f320-program` convenience target yet; <!-- name-contract: exempt (documents an absent goal) --> flash it with the
 programmer command above.
 
-**PIC12F675** — do not issue a raw writer command. The board must be externally
-powered. For each device, choose new baseline and result paths whose parent
-directory already exists. `pic12f675-preflight` is read-only and does not take
-`VARIANT`; only program after it succeeds, using the same baseline:
+**PIC12F675** — do not issue a raw writer command; this part is not a raw write
+target. The board must be externally powered in both paths below.
+
+*Programming the downloaded image* (no source checkout, no build toolchain):
+pass the release HEX to this bundle's `flash-pic12f675.py`, never to `ipecmd`.
+It needs Python 3 and MPLAB X 6.20 `ipecmd`, and a NEW evidence directory per
+device:
+
+```sh
+python3 flash-pic12f675.py program \
+  --image bypass-pic12f675-cd4053_simple.hex \
+  --ipecmd /opt/microchip/mplabx/v6.20/mplab_platform/mplab_ipe/ipecmd.jar \
+  --evidence-dir ./pic12f675-device-001
+```
+
+It validates the image against this directory's signed `SHA256SUMS`, refuses an
+image that programs word `0x3FF` or moves the CONFIG BG field, pins the tool to
+MPLAB X 6.20, reads the device twice before reserving the write, performs exactly
+one write, and publishes one immutable `result.json`. A PENDING directory
+(reservation, no result) is resolved read-only with
+`python3 flash-pic12f675.py finalize --evidence-dir ... --ipecmd ...`, which
+never constructs a writer argument. Full details are in `FLASHING.md`.
+
+*Programming from a source checkout of this release's tag* (the development and
+release-provenance path). For each device, choose new baseline and result paths
+whose parent directory already exists. `pic12f675-preflight` is read-only and
+does not take `VARIANT`; only program after it succeeds, using the same baseline:
 
 ```sh
 # Replace with the intended release tag containing pic12f675-release-program.

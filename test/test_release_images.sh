@@ -26,11 +26,14 @@ cp -p "$VERIFY" "$fixture_verify"
 cat > "$fixture_root/Makefile" <<'EOF'
 override RELEASE_IMAGES := $(shell cat expected-images.txt)
 override RELEASE_IDENTITY_IMAGES := $(shell cat expected-identity.txt)
-.PHONY: print-RELEASE_IMAGES print-RELEASE_IDENTITY_IMAGES
+override RELEASE_HELPER_MAP := $(shell cat expected-helpers.txt)
+.PHONY: print-RELEASE_IMAGES print-RELEASE_IDENTITY_IMAGES print-RELEASE_HELPER_MAP
 print-RELEASE_IMAGES:
 	@printf '%s\n' "$(RELEASE_IMAGES)"
 print-RELEASE_IDENTITY_IMAGES:
 	@printf '%s\n' "$(RELEASE_IDENTITY_IMAGES)"
+print-RELEASE_HELPER_MAP:
+	@printf '%s\n' "$(RELEASE_HELPER_MAP)"
 EOF
 
 # The canonical set and the pinned identity agree in every synthetic case except
@@ -45,6 +48,14 @@ set_fixture_identity_images() {
 	printf '%s\n' "$1" > "$fixture_root/expected-identity.txt"
 }
 
+# The required non-image artifacts, declared as <staged basename>=<tracked
+# source>. A release ships tools beside its images, and the verifier must hold
+# them to the tracked bytes without letting them join -- or move -- the image
+# set.
+set_fixture_helper_map() {
+	printf '%s\n' "$1" > "$fixture_root/expected-helpers.txt"
+}
+
 reset_fixture() {
 	rm -rf "$release" "$fresh" "$fresh2" "$release_alias" "$fresh_alias" \
 		"$fakebin"
@@ -52,10 +63,16 @@ reset_fixture() {
 	printf ':0100000001FE\n:00000001FF\n' > "$release/a.hex"
 	printf ':0100000002FD\n:00000001FF\n' > "$release/b.hex"
 	cp "$release/a.hex" "$release/b.hex" "$fresh"/
-	(cd "$release" && sha256sum a.hex b.hex > SHA256SUMS)
+	# The fixture's required non-image artifact and its tracked source. A fresh
+	# build never produces it, so it is staged into the committed release only.
+	printf '#!/usr/bin/env python3\nprint("fixture helper")\n' \
+		> "$fixture_root/scripts/helper.py"
+	cp -p "$fixture_root/scripts/helper.py" "$release/helper.py"
+	(cd "$release" && sha256sum a.hex b.hex helper.py > SHA256SUMS)
 	# Synthetic tests use the production verifier unchanged beside a test-only
 	# Makefile. Production therefore retains exactly one canonical-set input.
 	set_fixture_expected_images 'a.hex b.hex'
+	set_fixture_helper_map 'helper.py=scripts/helper.py'
 }
 
 real_sha256sum=$(command -v sha256sum) \
@@ -213,7 +230,7 @@ expect_fail "fresh directory image" "not a regular file"
 
 reset_fixture
 printf ':00000001FE\n' >> "$release/a.hex"
-expect_fail "committed byte mismatch" "committed image checksum verification failed"
+expect_fail "committed byte mismatch" "committed release checksum verification failed"
 
 reset_fixture
 printf ':00000001FE\n' >> "$fresh/a.hex"
@@ -221,11 +238,81 @@ expect_fail "fresh byte mismatch" "fresh image checksum verification failed"
 
 reset_fixture
 printf '%s\n' "$(sed -n '1p' "$release/SHA256SUMS")" >> "$release/SHA256SUMS"
-expect_fail "duplicate checksum entry" "duplicate SHA256SUMS image entry"
+expect_fail "duplicate checksum entry" "duplicate SHA256SUMS entry"
 
 reset_fixture
 printf 'not a checksum\n' >> "$release/SHA256SUMS"
 expect_fail "malformed checksum entry" "malformed SHA256SUMS entry"
+
+# ---------------------------------------------------------------------------
+# Required release artifacts that are NOT firmware images.
+#
+# A release also ships tools -- as of v0.9.10, the standalone PIC12F675 flashing
+# helper. They are staged, checksummed and signed like an image, and they must
+# be held to the tracked source byte for byte, because no build step produces
+# them and the signature alone says nothing about WHICH bytes were signed.
+#
+# The failure this section exists to prevent is subtler than a missing file: if
+# every checksum entry were treated as a firmware image, adding one tool would
+# silently move the reviewed 21-image count, and the exact-set comparison that
+# catches a whole missing MCU would start accepting whatever the staging
+# directory happened to contain.
+# ---------------------------------------------------------------------------
+
+reset_fixture
+rm "$release/helper.py"
+expect_fail "required artifact absent from the committed release" \
+	"committed release is missing required artifact"
+
+reset_fixture
+(cd "$release" && sha256sum a.hex b.hex > SHA256SUMS)
+expect_fail "required artifact absent from SHA256SUMS" \
+	"do not exactly match the required release artifact set"
+
+reset_fixture
+printf '# staged bytes that are not the tracked source\n' >> "$release/helper.py"
+(cd "$release" && sha256sum a.hex b.hex helper.py > SHA256SUMS)
+expect_fail "staged artifact drifted from its tracked source" \
+	"differs from its tracked source"
+
+reset_fixture
+rm "$fixture_root/scripts/helper.py"
+expect_fail "tracked artifact source missing" \
+	"tracked source for release artifact"
+
+# Fail closed, not open: an empty declaration must be an error rather than a
+# silently disabled artifact gate.
+reset_fixture
+set_fixture_helper_map ''
+expect_fail "empty required artifact set" \
+	"required release artifact set is empty"
+
+reset_fixture
+set_fixture_helper_map 'helper.hex=scripts/helper.py'
+expect_fail "artifact named like a firmware image" \
+	"may not be named like a firmware image"
+
+reset_fixture
+set_fixture_helper_map 'helper.py'
+expect_fail "malformed artifact declaration" \
+	"malformed release artifact declaration"
+
+reset_fixture
+set_fixture_helper_map 'helper.py=scripts/helper.py helper.py=scripts/other.py'
+expect_fail "duplicate artifact declaration" "duplicate release artifact"
+
+# An undeclared non-image entry is not quietly tolerated as "some other
+# artifact": it lands in the image comparison and fails there by name.
+reset_fixture
+printf '%064d  stowaway.txt\n' 0 >> "$release/SHA256SUMS"
+expect_fail "undeclared non-image checksum entry" \
+	"do not exactly match the canonical release product set"
+
+# The reproduction leg rebuilds IMAGES. A tool sitting in a fresh build
+# directory is not part of what a compiler reproduced, and is ignored.
+reset_fixture
+cp "$fixture_root/scripts/helper.py" "$fresh/helper.py"
+expect_pass "a stray tool in the fresh build directory is ignored"
 
 # ---------------------------------------------------------------------------
 # The canonical product set (merge plan §10). Everything above compares the
@@ -240,7 +327,7 @@ expect_fail "malformed checksum entry" "malformed SHA256SUMS entry"
 # existed it PASSED.
 reset_fixture
 rm "$release/b.hex" "$fresh/b.hex"
-(cd "$release" && sha256sum a.hex > SHA256SUMS)
+(cd "$release" && sha256sum a.hex helper.py > SHA256SUMS)
 expect_fail "image omitted from all three observed sets" \
 	"do not exactly match the canonical release product set"
 
@@ -314,7 +401,7 @@ checks=$((checks + 1))
 # to GNU Make's inherited option, variable and injected-makefile channels.
 reset_fixture
 rm "$release/b.hex" "$fresh/b.hex"
-(cd "$release" && sha256sum a.hex > SHA256SUMS)
+(cd "$release" && sha256sum a.hex helper.py > SHA256SUMS)
 injected_makefile="$work/injected-release-images.mk"
 printf 'override RELEASE_IMAGES := a.hex\n' > "$injected_makefile"
 
@@ -744,6 +831,7 @@ binding_tag=v1.0.0
 binding_variant=cd4053_simple
 binding_image=bypass-pic12f675-cd4053_simple.hex
 binding_canonical='a.hex bypass-pic12f675-cd4053_simple.hex bypass-pic12f675-cd4053_with_mute.hex bypass-pic12f675-tq2_l2_5v_relay.hex'
+binding_helper=flash-pic12f675.py
 
 setup_binding_fixture() {
 	local mutation=${1:-none} binding_release="$binding_repo/release/$binding_tag"
@@ -774,12 +862,18 @@ EOF
 	cat > "$binding_repo/Makefile" <<EOF
 override RELEASE_IMAGES := $binding_canonical
 override RELEASE_IDENTITY_IMAGES := $binding_canonical
-.PHONY: print-RELEASE_IMAGES print-RELEASE_IDENTITY_IMAGES
+override RELEASE_HELPER_MAP := $binding_helper=scripts/$binding_helper
+.PHONY: print-RELEASE_IMAGES print-RELEASE_IDENTITY_IMAGES print-RELEASE_HELPER_MAP
 print-RELEASE_IMAGES:
 	@printf '%s\\n' "\$(RELEASE_IMAGES)"
 print-RELEASE_IDENTITY_IMAGES:
 	@printf '%s\\n' "\$(RELEASE_IDENTITY_IMAGES)"
+print-RELEASE_HELPER_MAP:
+	@printf '%s\\n' "\$(RELEASE_HELPER_MAP)"
 EOF
+	printf '#!/usr/bin/env python3\nprint("binding fixture helper")\n' \
+		> "$binding_repo/scripts/$binding_helper"
+	cp -p "$binding_repo/scripts/$binding_helper" "$binding_release/$binding_helper"
 	printf 'unrelated release bytes\n' > "$binding_release/a.hex"
 	printf 'selected release bytes\n' > "$binding_release/$binding_image"
 	printf 'mute release bytes\n' \
@@ -788,7 +882,7 @@ EOF
 		> "$binding_release/bypass-pic12f675-tq2_l2_5v_relay.hex"
 	(
 		cd "$binding_release"
-		sha256sum $binding_canonical > SHA256SUMS
+		sha256sum $binding_canonical "$binding_helper" > SHA256SUMS
 	)
 	printf 'fixture detached signature\n' > "$binding_release/SHA256SUMS.asc"
 	case "$mutation" in
@@ -817,6 +911,15 @@ EOF
 			;;
 		missing-image) rm "$binding_release/a.hex" ;;
 		extra-image) printf 'extra\n' > "$binding_release/extra.hex" ;;
+		missing-helper) rm "$binding_release/$binding_helper" ;;
+		drifted-helper)
+			printf '# staged but not the tracked source\n' \
+				>> "$binding_release/$binding_helper"
+			(
+				cd "$binding_release"
+				sha256sum $binding_canonical "$binding_helper" > SHA256SUMS
+			)
+			;;
 		*) fail "unknown release-program binding fixture mutation: $mutation" ;;
 	esac
 	git -C "$binding_repo" init -q
@@ -872,10 +975,12 @@ expect_binding_fail "wrong selected variant" \
 
 for spec in \
 	"missing-checksum|SHA256SUMS entries do not exactly match" \
-	"wrong-checksum|committed image checksum verification failed" \
-	"duplicate-checksum|duplicate SHA256SUMS image entry" \
+	"wrong-checksum|committed release checksum verification failed" \
+	"duplicate-checksum|duplicate SHA256SUMS entry" \
 	"missing-image|committed release image set" \
-	"extra-image|committed release image set"; do
+	"extra-image|committed release image set" \
+	"missing-helper|committed release is missing required artifact" \
+	"drifted-helper|differs from its tracked source"; do
 	mutation=${spec%%|*}
 	expected_failure=${spec#*|}
 	setup_binding_fixture "$mutation"

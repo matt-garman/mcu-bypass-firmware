@@ -1,10 +1,14 @@
 # Flashing quick reference
 
-Command templates for putting a **released** image on a chip. Needs only a
-programmer and its CLI — no build toolchain, no clone of this repository.
+Command templates for putting a **released** image on a chip. Programming a
+downloaded release does not require the firmware development toolchain or a
+repository checkout. Most targets require only the released HEX and programmer
+CLI. PIC12F675 additionally requires Python 3 and the release's flashing helper
+because its per-device factory calibration must be preserved and verified.
 
 Images: <https://github.com/matt-garman/mcu-bypass-firmware/releases>, named
-`bypass-<mcu>-<variant>.hex`.
+`bypass-<mcu>-<variant>.hex`. Download `SHA256SUMS` and `SHA256SUMS.asc`
+alongside them and verify the signature before programming anything.
 
 Variants: `cd4053_simple`, `cd4053_with_mute`, `tq2_l2_5v_relay`.
 
@@ -132,10 +136,15 @@ documentation and community usage, not from a session logged in this
 repository. Confirm them on the first PICkit 3 run and correct this file.
 
 
-## PIC12F675 — same command, plus factory calibration
+## PIC12F675 — not a raw write target
 
-Programming is the `-PPIC12F675` form of the command above. The extra care is a
-per-chip factory trim that a bulk erase destroys:
+**Do not pass a PIC12F675 release HEX to `ipecmd` or `pk2cmd` directly.** Pass
+it to the release's flashing helper, `flash-pic12f675.py`, which ships in the
+same release bundle and is covered by the same signed `SHA256SUMS`.
+
+This part is the one target where a correct HEX plus a writer is *not*
+sufficient, because two per-device factory-trimmed values live in memory the
+programmer erases:
 
 - **OSCCAL** — the last program word, `0x3FF`, holds `RETLW <cal>` (`0x34xx`),
   which the XC8 startup code calls. Lose it and the INTOSC is untrimmed: wrong
@@ -145,36 +154,67 @@ per-chip factory trim that a bulk erase destroys:
   trip points.
 
 Neither is in the shipping HEX — its last data record ends at word `0x3FE`, and
-its CONFIG record (`:02400E00CC31`, i.e. `0x31CC`) leaves BG erased. Whether
-`ipecmd` preserves them across its erase is **not verified on hardware here**,
-so capture them before the first write.
+its CONFIG record (`:02400E00CC31`, i.e. `0x31CC`) leaves BG erased. So the
+values on your specific chip are the only copy there is, and the write is a
+transaction rather than a command.
 
+### Programming
+
+Needs Python 3, the downloaded release bundle, and MPLAB X 6.20 `ipecmd`.
+**Power the board externally** — the helper does not request programmer-supplied
+Vdd, and no such arrangement has been validated. Choose a NEW evidence directory
+per device; the helper creates it and refuses a path that already exists.
+
+```sh
+IPECMD=/opt/microchip/mplabx/v6.20/mplab_platform/mplab_ipe/ipecmd.jar
+
+python3 flash-pic12f675.py program \
+  --image bypass-pic12f675-cd4053_simple.hex \
+  --ipecmd "$IPECMD" \
+  --evidence-dir ./pic12f675-device-001
 ```
-# 1. archive the virgin device BEFORE anything else
-java -jar "$IPECMD" -TPPK3 -PPIC12F675 -GFfactory-12f675-<id>.hex
 
-# 2. record the two factory values from that file
-#    OSCCAL: the record covering byte address 0x07FE (word 0x3FF),
-#            little-endian -> expect 0x34xx, i.e. RETLW <cal>
-#    BG:     the ':02400E00' CONFIG record, bits 13:12 of the word
+It reads the device, reads it again to prove nothing moved, writes a durable
+`reservation.json`, performs exactly one write, then reads the whole device back
+and publishes one immutable `result.json` with `PASS` or a detailed `FAIL`. Every
+image, checksum, tool-version, trim and path check happens **before** an
+erase/program argument is constructed, so a refusal never reaches the device.
+The complete factory export is retained either way, so the only copy of this
+chip's trim is not lost if the first attempt goes badly.
 
-# 3. program
-java -jar "$IPECMD" -TPPK3 -PPIC12F675 \
-  -Fbypass-pic12f675-cd4053_simple.hex -M -Y -OL -W5
+A `FAIL` is a forensic record, not permission to retry — keep the evidence
+directory and that device together.
 
-# 4. read back and compare those same two values
-java -jar "$IPECMD" -TPPK3 -PPIC12F675 -GFafter-12f675-<id>.hex
+### If it is interrupted
+
+An evidence directory with `reservation.json` and no `result.json` is
+**PENDING**. Keep physical custody of the same device. Do not write, reflash, or
+reuse the directory. Resolve it read-only — this mode never constructs a write
+argument:
+
+```sh
+python3 flash-pic12f675.py finalize \
+  --evidence-dir ./pic12f675-device-001 \
+  --ipecmd "$IPECMD"
 ```
+
+### What a PASS does and does not mean
+
+It means no trim damage was **observed** on that device. It is not proof that
+PICkit 3 / MPLAB X 6.20 preserves calibration across an erase: that preservation
+is **not yet validated on hardware here**, and the helper detects damage after
+the write rather than preventing it. See
+[HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md) for the controlled bench
+run that has to be retained before this path can be called qualified.
 
 In MPLAB IPE leave **"allow ... to program calibration memory" OFF** — that
 setting is what lets a write clobber `0x3FF`.
 
-If step 4 shows `0x3FF` erased to `0x3FFF`, the trim is gone: reprogram that one
-word as `RETLW <saved cal>` (turn the calibration-memory setting on, then back
-off), or recalibrate against a known reference. Either way, record the result —
-it is what closes `docs/pic12f675_feasibility.md` §8 items 1-2.
+### Building from source instead
 
-This repository also has a guarded, evidence-recording version of the whole
-transaction (`make pic12f675-preflight`, then `make pic12f675-release-program`),
-but it needs the full toolchain and a **pk2cmd** reader. See
-[release/README.md](release/README.md).
+The repository also has a guarded, evidence-recording transaction for
+developers (`make pic12f675-preflight`, then `make pic12f675-release-program`).
+It rebuilds the image privately and binds it to a signed tag, so it needs the
+full toolchain, a source checkout, and a **pk2cmd** reader. That is the
+development and release-provenance path, not a requirement for flashing
+downloaded release bytes. See [release/README.md](release/README.md).
