@@ -1662,13 +1662,13 @@ first hardware mutation.
 
 **Acceptance criteria**
 
-- [ ] Every AVR `*-program` goal proves the selected HEX exists and passes its
+- [x] Every AVR `*-program` goal proves the selected HEX exists and passes its
   normal validation before touching hardware.
-- [ ] A failed build, size gate, or IHEX validation results in zero `avrdude`
+- [x] A failed build, size gate, or IHEX validation results in zero `avrdude`
   invocations.
 - [x] Successful programming performs exactly one ordered fuse transaction and
   one flash transaction for the selected part and variant.
-- [ ] Serialization, rebuild, variant-selector, fuse-injection, flashing
+- [x] Serialization, rebuild, variant-selector, fuse-injection, flashing
   documentation, and normal build tests pass.
 
 **Resolution**
@@ -1723,6 +1723,36 @@ invocation, prevent rebuild-gate overrides from weakening hardware goals, and
 revalidate a regular non-symlink selected HEX immediately before hardware use.
 Add stale-image/mismatched-selector and size-failure zero-`avrdude` cases for
 all Classic parts, then rerun the focused and aggregate gates.
+
+**Follow-up resolution (2026-08-25, commit pending).** The program-request gate
+now rejects a `VARIANT` outside the invocation's `VARIANTS` matrix before any
+build, and Classic-AVR programming refuses every `AVR_REBUILD_PREREQ` value
+except the literal `FORCE`. The selected image must therefore be rebuilt and
+size-checked in the current graph. Classic size loops fail immediately rather
+than allowing a later matrix entry to mask an earlier failure.
+
+The final published HEX is required to be regular and non-symlinked and is
+revalidated immediately before the programmer check. Tool, programmer, port,
+part, fuse, image-path, guard, and hardware-action fragments cannot be replaced
+through command-line internal variables; caller data is captured literally,
+shell-quoted as one argument, and dollar-bearing Make syntax is rejected before
+the serialization child or any build/hardware work. The fuse-injection contract
+follows the literal argument aliases back to all eleven public fuse variables,
+so quoting cannot sever the checked-value-to-silicon binding.
+
+`make test-avr-program-order` now reports 56 checks. It covers all four parts'
+exact build/validation -> fuse -> flash order and actual `-U` operation counts;
+valid stale images, mismatched selectors, disabled/redefined rebuild gates,
+single- and multi-variant size failures, final-IHEX rejection, post-build
+symlink substitution, internal command-fragment overrides, and stateful Make
+payloads. Every failure path reaches `avrdude` zero times.
+
+Validation passed: `test-avr-build-rebuild` (30),
+`test-variant-selector-guard` (24), `test-fuse-injection-contract` (18),
+`test-attiny202-build` (52), `test-build-serialization` (6),
+`test-workload-rebuild` (28), `test-clean-contract` (11),
+`test-makefile-name-contract` (48), and `test-release-preflight` (144 checks,
+89 Makefile queries). No target firmware source changed.
 
 ### D4 - Refresh v0.9.10 metadata and current measurements
 
@@ -2347,20 +2377,21 @@ Record each completed item with its commit ID and decisive validation command.
 | F3 | DONE | `df89ec0` | PIC10F320 flash, return-stack, image-baseline, host/target fault, lock-step, target-I/O, coverage, analysis, and mutation gates pass; relay is 242/256 words at stack depth 3/8, both sequence-sensitive mutants are killed, and both CD4053 images are unchanged |
 | F4 | DONE | `fc23e48` | Fully provisioned current-HEAD suite passes; `make test-static-assert-guards` has 68 checks including 11 exact near-bound FIRES/CLEAN fixtures, compiled-image pet intervals fit their bounds, and timing, pulse-width, watchdog-liveness, static-analysis, and resource gates pass |
 | P1 | RE-OPENED | `58fb829` | Helper, packaging, and most software transaction controls landed, but mandatory PICkit 3/MPLAB X 6.20 evidence is absent; helper binding/path-race, JAR/export/interruption coverage, and durable-document consistency/detection findings remain open |
-| P2 | RE-OPENED | `4cf4804` | Normal build/validation -> fuse -> flash ordering landed, but Classic AVR can flash a stale `VARIANT` image when `VARIANTS` excludes it; bind the selected image to the current rebuild, prevent gate override, and add stale-image and size-failure zero-programmer regressions |
+| P2 | IMPLEMENTED | (pending) | The selected variant must belong to the current forced rebuild; final regular/non-symlink HEX revalidation and literal argument/action binding precede hardware; `test-avr-program-order` passes 56 exact-order, stale-image, mismatch, size, override, symlink, and stateful-input checks, with all supporting build/selector/fuse/serialization/release-preflight contracts green |
 | D4 | RE-OPENED | `2585ad4` | Current flash tables were reconciled, but 2026-08-27 is not yet the actual finalization date, no retained final-candidate evidence exists, and `test-resource-tables` can pass at 0/21 without checking published RAM/Data-space/stack figures |
 | D5 | OPEN | | Simulator timing/physical-language and pip prerequisite reconciliation |
 | R4 | DONE | `ba4d9d6` | `make test-workflow-syntax test-release-provenance test-release-qualification`; stable tags publish normally, suffixed tags add `--prerelease`, and malformed tags stop before build or `gh` |
 | R5 | DONE | `7533d52` | `make test-supply-chain test-workflow-syntax test-release-preflight`; installer and verifier independently reject scan/order/hash/empty inventories while preserving unusual non-NUL filename bytes |
 | R6 | RE-OPENED | `470c11d` | Scalar identity checks landed, but artifact-defining source/flag overrides and duplicate canonical inventories reach the release recipe; reject them before recipe, tools, scratch, or build work and add direct/inherited negative coverage |
-| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; rerun every pre-merge gate after P1, P2, D4, D5, and R6 are closed |
+| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; record P2's follow-up commit, close P1, D4, D5, and R6, then rerun every pre-merge gate |
 
 ## Merge decision
 
 Do not merge `v0.9.9-polish` or begin production `v0.9.10` qualification until
-P1, P2, D4, D5, and R6 are complete. F2-F4, R4, and R5 require no further
-action. Then rerun every reopened pre-merge gate, delete this file and all
-references, run the release dry run on the actual candidate, and only then merge
-and begin production qualification. Production soaks, the artifact-only release
-commit, signed tag, and clean-runner byte-for-byte reproduction remain
-post-merge release-time gates.
+P1, D4, D5, and R6 are complete and P2's follow-up commit is recorded. F2-F4,
+P2, R4, and R5 require no further implementation action. Then rerun every
+reopened pre-merge gate, delete this file and all references, run the release
+dry run on the actual candidate, and only then merge and begin production
+qualification. Production soaks, the artifact-only release commit, signed tag,
+and clean-runner byte-for-byte reproduction remain post-merge release-time
+gates.
