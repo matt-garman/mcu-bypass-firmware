@@ -132,6 +132,14 @@ checks=$((checks + 1))
 [ "$pic10f320_budget" = "$shared_budget" ] \
 	|| fail "PIC10F320's self-contained watchdog duty conversion drifted from bypass_output_common.h"
 checks=$((checks + 1))
+if [ "$mixed_control_child" -eq 0 ]; then
+	[[ "$shared_budget" == *'((uint32_t)100U - (uint32_t)WDT_ISR_STRETCH_PCT)'* ]] \
+		|| fail "watchdog denominator must convert each subtraction operand to uint32_t"
+	checks=$((checks + 1))
+	[[ "$shared_budget" != *'(uint32_t)WDT_FOREGROUND_SHARE_PCT'* ]] \
+		|| fail "watchdog formula casts the composite denominator, violating MISRA Rule 10.8"
+	checks=$((checks + 1))
+fi
 
 # ---------------------------------------------------------------------------
 # The shared invariants must actually be shared.
@@ -488,13 +496,13 @@ if [ "$mixed_control_child" -eq 0 ]; then
 	tree="$work/mixed-duty-formula"
 	plant "$tree"
 	for file in bypass_output_common.h bypass_mcu_pic10f320.c; do
-		line='#  define WDT_FOREGROUND_SHARE_PCT (100U - WDT_ISR_STRETCH_PCT)'
+		line='    ((uint32_t)100U - (uint32_t)WDT_ISR_STRETCH_PCT)'
 		[ "$(grep -Fxc "$line" "$tree/$file")" -eq 1 ] \
 			|| fail "mixed-formula control cannot find exactly one duty denominator in $file"
 		sed -i \
-			's/^#  define WDT_FOREGROUND_SHARE_PCT (100U - WDT_ISR_STRETCH_PCT)$/#  define WDT_FOREGROUND_SHARE_PCT (100U)/' \
+			's/^    ((uint32_t)100U - (uint32_t)WDT_ISR_STRETCH_PCT)$/    ((uint32_t)100U)/' \
 			"$tree/$file"
-		grep -Fxq '#  define WDT_FOREGROUND_SHARE_PCT (100U)' "$tree/$file" \
+		grep -Fxq '    ((uint32_t)100U)' "$tree/$file" \
 			|| fail "mixed-formula control did not restore the old denominator in $file"
 		checks=$((checks + 2))
 	done

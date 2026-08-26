@@ -186,9 +186,10 @@ static_assert(_XTAL_FREQ ==  2000000UL, "_XTAL_FREQ must be 2 MHz (matches OSCCO
 
 #if (WDT_ISR_STRETCH_PCT >= 100U)
 #  error "WDT_ISR_STRETCH_PCT must be below 100: it is wall-time ISR duty"
-#  define WDT_FOREGROUND_SHARE_PCT (1U)
+#  define WDT_FOREGROUND_SHARE_PCT ((uint32_t)1U)
 #else
-#  define WDT_FOREGROUND_SHARE_PCT (100U - WDT_ISR_STRETCH_PCT)
+#  define WDT_FOREGROUND_SHARE_PCT                                         \
+    ((uint32_t)100U - (uint32_t)WDT_ISR_STRETCH_PCT)
 #endif
 
 #define WDT_ISR_STRETCH_NUMERATOR(blocking_ms)                                 \
@@ -196,9 +197,9 @@ static_assert(_XTAL_FREQ ==  2000000UL, "_XTAL_FREQ must be 2 MHz (matches OSCCO
 
 #define WDT_ISR_STRETCH_MAX_MS(blocking_ms)                                    \
     (   WDT_ISR_STRETCH_NUMERATOR(blocking_ms)                                 \
-        / (uint32_t)WDT_FOREGROUND_SHARE_PCT                                   \
+        / WDT_FOREGROUND_SHARE_PCT                                             \
       + ((0U != (WDT_ISR_STRETCH_NUMERATOR(blocking_ms)                        \
-                  % (uint32_t)WDT_FOREGROUND_SHARE_PCT))                       \
+                  % WDT_FOREGROUND_SHARE_PCT))                                 \
             ? (uint32_t)1U : (uint32_t)0U) )
 
 #define WDT_PET_TO_PET_MAX_MS(blocking_ms)                                     \

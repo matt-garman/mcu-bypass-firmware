@@ -3704,6 +3704,14 @@ reports a skip rather than producing B9 evidence. Full `make test` also stops in
 the pre-existing clang-tidy host setup because 32-bit glibc's
 `gnu/stubs-32.h` is absent. Neither limitation closes the provisioned rerun above.
 
+A subsequent fully provisioned `ci-local.sh` run reached PIC10F320 MISRA analysis
+and exposed Rule 10.8 at the watchdog assertion: the first implementation cast
+the composite `100U - p` denominator to `uint32_t`. The follow-up keeps both
+formula copies identical but converts each operand before subtraction, making
+the denominator intrinsically 32-bit and removing the composite cast rather
+than suppressing the finding. The mixed-formula negative control follows the
+new source shape; the provisioned rerun remains required.
+
 ## Final validation and release gate
 
 Complete these only after R1-R6, F1-F4, P1-P2, T1-T2, D1-D5, and B1-B9 are done
@@ -3820,7 +3828,7 @@ Record each completed item with its commit ID and decisive validation command.
 | G1 | DONE | `fe8ecc8` | `make test-release-preflight` (113 -> 118 checks); `scripts/make-release.sh --preflight v0.9.10` accepted with the document present; `make test-release-qualification test-release-history test-release-provenance test-release-images test-soak-timing test-build-serialization test-todo-index test-makefile-name-contract`; `make test`; `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` |
 | F2 | DONE | `f6d9f82`, `f9dd333`, `5deb4e4`, `9999886`, `b6d06d2` | Fully provisioned current-HEAD validation reported passing: AVR-XT's 32-case matrix and PIC12F675's 43-check relay lane prove modeled physical coil-pin quiescence before reset; all affected resource, stack, timing, static, simulator, coverage, recovery, and merged 136-mutant gates pass |
 | F3 | DONE | `df89ec0` | PIC10F320 flash, return-stack, image-baseline, host/target fault, lock-step, target-I/O, coverage, analysis, and mutation gates pass; relay is 242/256 words at stack depth 3/8, both sequence-sensitive mutants are killed, and both CD4053 images are unchanged |
-| F4 | CORRECTION IMPLEMENTED; VALIDATION OPEN (B9) | `fc23e48`, `20ce92e` | Wall-time ISR duty now converts through `p/(100-p)` with checked arithmetic; the AVR relay bound is 18 ms and equality fails. Reclose after the 109-check compile gate, 21-image byte comparison, Classic-AVR interval measurements and AVR-XT compiled ISR/delay oracle pass on the provisioned final candidate. |
+| F4 | CORRECTION IMPLEMENTED; VALIDATION OPEN (B9) | `fc23e48`, `20ce92e` | Wall-time ISR duty now converts through `p/(100-p)` with checked arithmetic; the AVR relay bound is 18 ms and equality fails. Reclose after the 111-check compile gate, 21-image byte comparison, Classic-AVR interval measurements and AVR-XT compiled ISR/delay oracle pass on the provisioned final candidate. |
 | P1 | SOFTWARE CLOSED; BENCH OPEN | `58fb829`, `37b20bd`, `64ad036`, `e625c8b`, `bd5f981` | B2, B7 and B8 close the software findings. Child-consumed tool/image bytes are immutable, and evidence creation, attachment, cleanup, parent flush and external exports all stay on retained descriptors under pathname replacement. The controlled PICkit 3/MPLAB X 6.20 bench run remains the separate `1.x.y` hardware gate. |
 | P2 | DONE | `4cf4804`, `6ef8c4d` | The selected variant must belong to the current forced rebuild; final regular/non-symlink HEX revalidation and literal argument/action binding precede hardware; `test-avr-program-order` passes 56 exact-order, stale-image, mismatch, size, override, symlink, and stateful-input checks, with all supporting build/selector/fuse/serialization/release-preflight contracts green |
 | D4 | DONE (B6 closed) | `2585ad4`, `18cd7ee`, `64ad036` | The strict source-bound 35-file resource-evidence gate remains implemented. B6's two stale figures are corrected AND bound to oracles: `DESIGN_DOCUMENTATION.adoc`'s ATtiny202 occupancy summary now reads 47.3-50.8% against 81.8-85.7% with `test-resource-tables` recomputing both halves from their own tables (219 -> 222 checks), and `test/README.md`'s PIC12F675 relay fault count is 43, read back out of the document and compared with `pic12f675_target_count_table()` by `test-pic-target-result-records` (18 -> 24 checks). |
