@@ -264,6 +264,7 @@ static unsigned  g_loop_clrwdt_addr = 0;
 static Stimulus_Node *g_comparator_input_node = nullptr;
 static Stimulus_Node *g_reset_coil_node = nullptr;
 static Stimulus_Node *g_set_coil_node   = nullptr;
+static Stimulus_Node *g_spare_output_node = nullptr;
 #endif
 
 // ---- Reset detection (identical to the soak; verdict inverted at the call
@@ -303,8 +304,9 @@ static Register *fetch_sfr(unsigned addr, const char *token) {
 
 #if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
 #  if !defined(PIC_REG_COMPARATOR_INPUT_PIN_NAME) || \
-      !defined(PIC_REG_RESET_COIL_PIN_NAME) || !defined(PIC_REG_SET_COIL_PIN_NAME)
-#    error "physical relay checks require exact comparator/reset/set pin names"
+      !defined(PIC_REG_RESET_COIL_PIN_NAME) || !defined(PIC_REG_SET_COIL_PIN_NAME) || \
+      !defined(PIC_REG_SPARE_OUTPUT_PIN_NAME) || !defined(PIC_REG_SPARE_OUTPUT_MASK)
+#    error "physical relay checks require exact comparator/reset/set/spare pin names"
 #  endif
 
 // Attach nodes to the package pins. Unlike GPIO readback, these nodes continue
@@ -325,11 +327,13 @@ static bool attach_relay_coil_observers(const char *proc_name) {
         find_pin_exact(g_cpu, PIC_REG_COMPARATOR_INPUT_PIN_NAME);
     IOPIN *reset_pin = find_pin_exact(g_cpu, PIC_REG_RESET_COIL_PIN_NAME);
     IOPIN *set_pin   = find_pin_exact(g_cpu, PIC_REG_SET_COIL_PIN_NAME);
+    IOPIN *spare_pin = find_pin_exact(g_cpu, PIC_REG_SPARE_OUTPUT_PIN_NAME);
     if (comparator_input_pin == nullptr || reset_pin == nullptr ||
-            set_pin == nullptr) {
-        fprintf(stderr, "FATAL: comparator/relay pin %s/%s/%s not found on %s\n",
+            set_pin == nullptr || spare_pin == nullptr) {
+        fprintf(stderr, "FATAL: comparator/relay/spare pin %s/%s/%s/%s not found on %s\n",
                 PIC_REG_COMPARATOR_INPUT_PIN_NAME,
                 PIC_REG_RESET_COIL_PIN_NAME, PIC_REG_SET_COIL_PIN_NAME,
+                PIC_REG_SPARE_OUTPUT_PIN_NAME,
                 proc_name);
         return false;
     }
@@ -337,12 +341,17 @@ static bool attach_relay_coil_observers(const char *proc_name) {
     g_comparator_input_node = new Stimulus_Node("comparator-input-pin");
     g_reset_coil_node = new Stimulus_Node("relay-reset-pin");
     g_set_coil_node   = new Stimulus_Node("relay-set-pin");
+    // Passive, like the CIN+ node: nothing drives GP4, so the voltage read
+    // here is whatever the firmware's own output driver is doing to the pad.
+    g_spare_output_node = new Stimulus_Node("parked-spare-pin");
     g_comparator_input_node->attach_stimulus(comparator_input_pin);
     g_reset_coil_node->attach_stimulus(reset_pin);
     g_set_coil_node->attach_stimulus(set_pin);
+    g_spare_output_node->attach_stimulus(spare_pin);
     g_comparator_input_node->update();
     g_reset_coil_node->update();
     g_set_coil_node->update();
+    g_spare_output_node->update();
     return true;
 }
 
@@ -356,6 +365,15 @@ static void relay_coil_voltages(double *reset_v, double *set_v) {
 static bool relay_coils_physically_inactive(double *reset_v, double *set_v) {
     relay_coil_voltages(reset_v, set_v);
     return *reset_v <= PHYSICAL_LOW_MAX_V && *set_v <= PHYSICAL_LOW_MAX_V;
+}
+
+// The parked spare's PAD voltage. Read on the same footing as the coils and for
+// the same reason: this part's escalation path commits its clear as one
+// whole-port write of the SRAM shadow, so GP4's pad state at the watchdog spin
+// is a property of that write, not of the shadow bit that was injected.
+static double spare_output_voltage(void) {
+    g_spare_output_node->update();
+    return g_spare_output_node->get_nodeVoltage();
 }
 
 // XC8 emits the empty watchdog wait as a classic-mid-range GOTO-to-self. The
@@ -576,9 +594,11 @@ static void finish_relay_resync_case(Register *target, Register *latch,
 #if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
     bool            spin_seen         = false;
     bool            spin_physical_low = false;
+    bool            spin_spare_low    = false;
     guint64         spin_cycle        = 0u;
     double          reset_pin_v       = 0.0;
     double          set_pin_v         = 0.0;
+    double          spare_pin_v       = 0.0;
 #endif
 
     for (unsigned i = 0; i < deenergize_cap; ++i) {
@@ -601,6 +621,7 @@ static void finish_relay_resync_case(Register *target, Register *latch,
         double sample_set_v   = 0.0;
         bool const physical_idle = relay_coils_physically_inactive(
             &sample_reset_v, &sample_set_v);
+        double const sample_spare_v = spare_output_voltage();
         if (!deenergized && registers_idle && physical_idle) {
             deenergized = true;
             deenergize_cycle = get_cycles().get();
@@ -610,7 +631,13 @@ static void finish_relay_resync_case(Register *target, Register *latch,
             spin_cycle = get_cycles().get();
             reset_pin_v = sample_reset_v;
             set_pin_v = sample_set_v;
+            spare_pin_v = sample_spare_v;
             spin_physical_low = physical_idle;
+            // B1: the escalation's ONE whole-port write publishes every shadow
+            // bit, so parked GP4 is a coil-grade safety obligation of that
+            // write. Sampled at the spin, where the hazard actually lives -- a
+            // post-reset read cannot see it, because the reset is what ends it.
+            spin_spare_low = sample_spare_v <= PHYSICAL_LOW_MAX_V;
             break;
         }
 #else
@@ -660,6 +687,7 @@ static void finish_relay_resync_case(Register *target, Register *latch,
         (!require_deenergize_transition || deenergize_cycle > inject_cycle);
 #if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
     bool const physical_spin_ok = spin_seen && spin_physical_low &&
+                                  spin_spare_low &&
                                   spin_cycle >= deenergize_cycle;
 #else
     bool const physical_spin_ok = true;
@@ -681,8 +709,8 @@ static void finish_relay_resync_case(Register *target, Register *latch,
                             ? deenergize_cycle - inject_cycle : 0u) /
                    (double)CYCLES_PER_MS);
 #if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
-        printf(" physical GP1=%.3fV/GP2=%.3fV at watchdog spin,", reset_pin_v,
-               set_pin_v);
+        printf(" physical GP1=%.3fV/GP2=%.3fV and parked GP4=%.3fV"
+               " at watchdog spin,", reset_pin_v, set_pin_v, spare_pin_v);
 #endif
         printf(" 1 reset, recovery drove a %.3f ms RESET-coil pulse"
                " (>= %u ms datasheet minimum) with SET dark, settled in BYPASS\n",
@@ -702,8 +730,8 @@ static void finish_relay_resync_case(Register *target, Register *latch,
                     ? deenergize_cycle - inject_cycle : 0u,
                 partial_clear ? 1u : 0u);
 #if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
-        fprintf(stderr, " spin=%u GP1=%.3fV GP2=%.3fV",
-                spin_seen ? 1u : 0u, reset_pin_v, set_pin_v);
+        fprintf(stderr, " spin=%u GP1=%.3fV GP2=%.3fV GP4=%.3fV",
+                spin_seen ? 1u : 0u, reset_pin_v, set_pin_v, spare_pin_v);
 #endif
         fprintf(stderr,
                 " resets=%" G_GUINT64_FORMAT " reset-coil-ms=%.3f set-coil-ms=%.3f"
@@ -762,6 +790,78 @@ static void inject_relay_resync_case(unsigned addr, const char *token,
 }
 
 #if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
+// ---- Parked spare output, on the escalation path ----------------------------
+// The GP4 counterpart of the coil cases, and it exists because this part has no
+// LATx. hw_emergency_outputs_quiesce() clears the two coil INTENTS and then
+// commits them with ONE whole-port write of the SRAM shadow -- the one-write
+// guarantee that stops a second write replaying the other corrupt coil bit. That
+// same write publishes EVERY OTHER shadow bit too, so a parked-GP4 intent bit
+// flipped low->high by an upset is converted BY THE ESCALATION ITSELF from inert
+// SRAM into a physically driven pad, and held there for the whole watchdog
+// period. The board contract permits GP4 only while it is low
+// (src/bypass_pins_pic12f675.h), so that is a safety obligation of the same
+// write, not a cosmetic one.
+//
+// Two things make this case necessary rather than redundant:
+//   * the ordinary GP4 shadow injection (the CD4053 arm's inject_case) requires
+//     only that a reset happens, and a reset happens either way -- reset is what
+//     ENDS the unsafe interval, so it cannot witness it;
+//   * the coil cases sample GP1/GP2 at the spin but say nothing about GP4, and
+//     the atomic-clear fixture in the host lane starts from the INVERSE state
+//     (pad high, shadow low), where a whole-port refresh correctly drives GP4
+//     low.
+// So the pad is read AT the watchdog spin, before the recovery.
+//
+// The coils are already idle at injection -- this case corrupts a NON-coil bit --
+// so no de-energization TRANSITION can be required of it; everything else in the
+// F1 contract (one reset, a full-width RESET-coil recovery pulse with SET dark,
+// settled BYPASS, renewed liveness) applies unchanged. Contributes exactly ONE
+// check, the same as the inject_case it replaces on this variant.
+static void inject_parked_output_resync_case(const char *note) {
+    g_checks++;
+
+    if (!drive_effect_state(false)) {
+        g_fails++;
+        fprintf(stderr, "    FAIL: could not reach settled BYPASS before injection\n");
+        return;
+    }
+    if (!advance_to_loop_clrwdt()) {
+        g_fails++;
+        return;
+    }
+
+    Register *latch = fetch_sfr(PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN);
+    Register *port  = fetch_sfr(PIC_REG_PORT_ADDR,  PIC_REG_PORT_TOKEN);
+    if (latch == nullptr || port == nullptr) {
+        g_fails++;
+        return;
+    }
+
+    unsigned const before_val    = latch->get_value() & 0xFFu;
+    unsigned const injected      = before_val | PIC_REG_SPARE_OUTPUT_MASK;
+    guint64  const resets_before = g_resets;
+    // Load-bearing fixture claim: the corruption is intent-ONLY. If the pad were
+    // already high the case would prove nothing about the escalation's write.
+    double   const entry_spare_v = spare_output_voltage();
+
+    printf("  inject parked output  @0x%03x: 0x%02x -> 0x%02x  (%s, from BYPASS,"
+           " GP4 pad %.3fV before escalation)\n",
+           PIC_REG_LATCH_ADDR, before_val, injected, note, entry_spare_v);
+    fflush(stdout);
+
+    latch->put_value(injected);
+    unsigned const written      = latch->get_value() & 0xFFu;
+    guint64  const inject_cycle = get_cycles().get();
+    bool const injection_ok =
+        ((before_val & PIC_REG_SPARE_OUTPUT_MASK) == 0u) &&
+        (written == injected) &&
+        (entry_spare_v <= PHYSICAL_LOW_MAX_V);
+
+    finish_relay_resync_case(latch, latch, port, before_val, injected,
+                             written, injection_ok, false, resets_before,
+                             inject_cycle);
+}
+
 // One case per single-bit-reachable comparator mode: clearing any one CM bit
 // from the required off value 111 reaches 110, 101 or 011.
 //

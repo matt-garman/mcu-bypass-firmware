@@ -64,13 +64,20 @@
 // force it High, reject a latch-only clear, and still complete escalation and
 // recovery; mode 110 does not own GP2 and must leave the pad under its
 // settled-low GPIO driver. Every case costs one check.
+//
+// The parked-GP4 shadow case is an inject_parked_output_resync_case() on this
+// variant rather than the CD4053 arm's inject_case: the relay escalation path
+// publishes the whole shadow in one write, so GP4's PAD -- not just the reset --
+// is part of the contract (B1). Same one check either way, so the total below
+// is unchanged by that substitution.
 #  define PIC_FAULT_EXPECTED_CHECKS (42u + PIC_FAULT_CTX_INRANGE)
 #  define PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE 1
 #  define PIC_FAULT_EXTRA_OUTPUT_INJECTIONS() do { \
     inject_case("shadow.GP0", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x01, 1, \
                 "GP0 LED shadow (intent) corruption resets"); \
-    inject_case("shadow.GP4", PIC_REG_LATCH_ADDR, PIC_REG_LATCH_TOKEN, false, 0x10, 1, \
-                "parked GP4 shadow (intent) corruption resets"); \
+    inject_parked_output_resync_case( \
+                "parked GP4 shadow (intent) corruption: reset, and the" \
+                " escalation's one whole-port write must not drive the pad"); \
     inject_case("GPIO.GP0", PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, false, 0x01, 1, \
                 "GP0 LED pin high with its shadow low: port stopped following"); \
     inject_case("GPIO.GP4", PIC_REG_PORT_ADDR, PIC_REG_PORT_TOKEN, false, 0x10, 1, \

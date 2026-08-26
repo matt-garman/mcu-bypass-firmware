@@ -507,6 +507,20 @@ file is the human-readable summary of *what changed*.
   operation; PIC10F320 remains unchanged because it has no independent shadow
   replay path.
 
+  Because that write publishes the whole shadow byte, the PIC12F675 relay
+  emergency path also canonicalizes the parked spare output GP4 in the shadow
+  before calling it. Otherwise an upset that set only `gpio_shadow_`'s GP4 bit --
+  inert until something writes the port -- would be published to the pad by the
+  escalation itself and held there for the watchdog period, on a pin the board
+  contract permits only while it is low. It is the same single write, not a
+  second one: two sequential whole-port writes would reintroduce the coil replay
+  the one-write rule prevents. Both the host shipping-source lane and the
+  libgpsim relay fault lane now observe GP4 *before* the watchdog spin (the reset
+  is what ends the unsafe interval), and a mutant that drops only GP4 from the
+  canonicalization is killed there while the reset and coil assertions stay
+  green. Cost: two program words on the PIC12F675 relay image; the CD4053
+  images are byte-identical.
+
 - **An unexpectedly energized relay coil is now a fault, and recovery
   resynchronizes the relay.** Earlier `0.9.x` builds re-asserted both coils low
   at every serviced loop top and let the loop continue. That cleared the coil,

@@ -2615,7 +2615,7 @@ with this branch-only document.
 
 ### B1 - PIC12F675 relay escalation can drive parked GP4 high
 
-**Affected checklist item:** F1 RE-OPENED.
+**Affected checklist item:** F1 RE-OPENED, now CLOSED (see Resolution below).
 
 **Failure mechanism**
 
@@ -2672,6 +2672,60 @@ this defect.
 - Re-run PIC12F675 flash/Data/stack, shipping-source coverage, target fault,
   lock-step, target-I/O, mutation, and full release gates after the firmware
   edit.
+
+**Resolution**
+
+`hw_emergency_outputs_quiesce()`'s relay branch now clears parked GP4's intent in
+the SRAM shadow -- shadow only, no GPIO write of its own -- immediately before
+calling `hw_outputs_reassert_safe()`. The driver's masked clear removes both coil
+intents and then publishes the whole shadow in its single `GPIO = gpio_shadow_`
+assignment, so GP1, GP2 and GP4 are all low in both intent and modeled pins at
+that one write. The existing ordering is untouched: coil pull-ups cleared, coils
+to inputs, ADC/ANSEL/CMCON off, one write, direction restored. The CD4053
+variants keep their empty `hw_outputs_reassert_safe()` and are unchanged --
+their images are byte-identical.
+
+Rejected alternative: a second single-pin write for GP4. Two sequential
+whole-port writes can replay the other corrupt coil bit between them, which is
+exactly the hazard the one-write guarantee exists to remove.
+
+Cost: PIC12F675 relay 583 -> 585 words (1024 capacity, 439 free); simple 548 and
+mute 574 unchanged; XC8 Data-space 40/48 and return-stack depth 5+2 of 8
+unchanged on every variant. The documented resource tables, their four
+cross-document restatements and the resource-table contract fixture were
+updated to 585.
+
+**Acceptance evidence, as delivered**
+
+- [x] The shipping-source coverage lane's `FWI_SHADOW_GP4_HIGH` relay case reads
+  the modeled pin at the point the harness escapes the watchdog spin and requires
+  GP4 low. Observed red on the pre-fix tree
+  (`105 checks, 1 failures`, `got r=1 gpio=10`) and green after
+  (`105 checks, 0 failures`); the CD4053 arms stay at `86 checks, 0 failures`.
+  The assertion is FOLDED into the single check that arm already spends, so no
+  harness total moved.
+- [x] The libgpsim relay fault lane gained
+  `inject_parked_output_resync_case()`, which attaches a node to the GP4 pad,
+  records it Low before escalation, and requires it Low at the watchdog
+  `GOTO`-to-self alongside the existing GP1/GP2 voltages. Every relay resync case
+  now carries the same GP4-at-spin requirement. Observed red on the pre-fix
+  image (`GP1=0.000V GP2=0.000V GP4=5.000V` at the spin, `43 checks, 1 failures`)
+  and green after (`parked GP4=0.000V at watchdog spin`, `43 checks, 0
+  failures`). It replaces the arm's former `inject_case`, so
+  `PIC_FAULT_EXPECTED_CHECKS` stays 43. <!-- name-contract: exempt (C adapter macro, not a Make variable) -->
+- [x] Mutation `host:parked-output` removes only GP4 from the canonicalization.
+  Verified killed with reset entry and both coil assertions still green. Core
+  table 31 -> 32, inventory 136 -> 137; `make test-mutation-sandbox` passes with
+  the new signature's positive and negative self-test fixtures.
+- [x] Re-run on the patched tree: `make pic12f675` (flash + Data budgets),
+  `pic12f675-test-stack-bound`, `pic12f675-analyze` (cppcheck + MISRA),
+  `pic12f675-coverage-check-fw`, `PIC12F675_FAULT_VARIANT=tq2_l2_5v_relay
+  pic12f675-test-fault`, `PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay
+  pic12f675-test-target` (fault 43, lock-step 3005, I-O 36),
+  `test-resource-tables`, plus shared-header regressions
+  `pic10f322-coverage-check-fw`, `pic10f322-test-fault` and
+  `pic10f320-test-fault-target`. The full aggregate and release gates belong to
+  the final-candidate rerun below.
 
 ### B2 - PIC12F675 post-write verification can PASS a no-erase overlay
 
@@ -3046,7 +3100,7 @@ Record each completed item with its commit ID and decisive validation command.
 | R1 | DONE | `7dab4db` | `make CC=: test-pic-build`; `test/test_release_qualification.sh`; `test/test_workflow_syntax.sh` |
 | R2 | DONE | `7b54dea` | `test/test_release_preflight.sh`; `test/test_release_provenance.sh`; `make test-workflow-syntax test-release-history` |
 | R3 | DONE | `9a7c479` | `make test-pic-build test-release-preflight test-release-qualification`; `scripts/make-release.sh --preflight v0.9.10` |
-| F1 | RE-OPENED (B1) | `a8fe23d`, `b14cd7a` | The original relay escalation work and six-substrate validation remain historical evidence. Third review found that PIC12F675 relay escalation replays a corrupt parked-GP4 shadow bit while clearing the coils. Close only after GP1/GP2/GP4 are low before the watchdog spin, the physical GP4 lane and mutation are retained, and all affected firmware/resource gates pass. |
+| F1 | DONE (B1 closed) | `a8fe23d`, `b14cd7a`, _pending_ | B1's parked-GP4 canonicalization landed in the PIC12F675 relay emergency path. GP1/GP2/GP4 are all low in intent and modeled pins at the escalation's single whole-port write; both the host shipping-source lane and the libgpsim relay lane observe GP4 BEFORE the watchdog spin, and `host:parked-output` kills a GP4-only regression. Decisive validation: `make pic12f675 pic12f675-test-stack-bound pic12f675-analyze pic12f675-coverage-check-fw test-resource-tables test-mutation-sandbox`; `make PIC12F675_FAULT_VARIANT=tq2_l2_5v_relay pic12f675-test-fault`; `make PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target`; shared-header regressions `pic10f322-coverage-check-fw`, `pic10f322-test-fault`, `pic10f320-test-fault-target`. |
 | T1 | DONE | `fd9aa28` | `make test`; `make pic10f322-coverage-check-fw HOSTCC=gcc-10`; `test/test_release_preflight.sh` |
 | T2 | DONE | `130b22f` | `make test`; `test/test_workload_rebuild.sh`; mutated-tree `make test` reaching the PIC12F675 host oracle |
 | D1 | DONE | `ed5b654` | `make test-release-preflight` (85 -> 101 checks, 12 negative controls); `make test-release-qualification test-todo-index test-makefile-name-contract test-release-history` |
@@ -3063,15 +3117,17 @@ Record each completed item with its commit ID and decisive validation command.
 | R4 | DONE | `ba4d9d6` | `make test-workflow-syntax test-release-provenance test-release-qualification`; stable tags publish normally, suffixed tags add `--prerelease`, and malformed tags stop before build or `gh` |
 | R5 | DONE | `7533d52` | `make test-supply-chain test-workflow-syntax test-release-preflight`; installer and verifier independently reject scan/order/hash/empty inventories while preserving unusual non-NUL filename bytes |
 | R6 | RE-OPENED (B5) | `251510b` | The allowlist and exact-inventory guards remain implemented, but `-i`/`--ignore-errors` propagates through nested release Makes and can turn failed recipe gates into success. Close after all unsupported recipe-semantic modes fail before tools/scratch/build work in Make and direct-script paths. |
-| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; resolve B1-B6, then rerun every pre-merge gate on the actual final candidate. P1's bench run is a `1.x.y` hardware gate, not a pre-merge one. |
+| B1 | DONE | _pending_ | Closes F1. See F1's row and the B1 resolution block above. |
+| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; resolve B2-B6, then rerun every pre-merge gate on the actual final candidate. P1's bench run is a `1.x.y` hardware gate, not a pre-merge one. |
 
 ## Merge decision
 
 Do not merge `v0.9.9-polish` or begin production `v0.9.10` qualification until
-B1-B6 and every other pre-merge implementation item are closed and recorded in
-the completion record above. In particular, F1, P1 software, R6, D4, and D5 are
-reopened; the previously green aggregate suite is not closure because each
-finding above identifies the exact unexercised failure mode.
+B2-B6 and every other pre-merge implementation item are closed and recorded in
+the completion record above. B1 is closed, which closes F1; P1 software, R6, D4,
+and D5 remain reopened. The previously green aggregate suite is not closure
+because each remaining finding above identifies the exact unexercised failure
+mode.
 
 P1's controlled PICkit 3/MPLAB X 6.20 bench run still needs silicon. It remains
 the `1.x.y` hardware gate tracked in `HARDWARE_VALIDATION_LOG.md` and `TODO.md`
@@ -3080,7 +3136,7 @@ are fixed. The owner direction is to publish the helper now with precise
 software-tested/hardware-unqualified language; there is no additional
 publish-versus-withhold decision to make.
 
-After B1-B6 are closed, rerun every reopened pre-merge gate, delete this file
+After B2-B6 are closed, rerun every reopened pre-merge gate, delete this file
 and all references, run the release dry run on the actual candidate, and only
 then merge and begin production qualification. Production soaks, the
 artifact-only release commit, signed tag, and clean-runner byte-for-byte

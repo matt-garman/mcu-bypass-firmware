@@ -112,6 +112,11 @@ int fwp_footswitch_is_high(void);
 void fwp_set_footswitch(int pressed);
 #if defined(BYPASS_MCU_PIC12F675)
 void fwp_set_output_state(uint8_t intended, uint8_t physical);
+// The MODELED PIN levels of the guarded output set, independent of the SRAM
+// shadow -- the witness the escalation path's one whole-port write is judged
+// by. fwp_output_state_intact() folds shadow and port together; this returns
+// the port alone, which is what a pre-spin physical assertion needs.
+uint8_t fwp_physical_output_state(void);
 void fwp_capture_osccal(void);
 #endif
 

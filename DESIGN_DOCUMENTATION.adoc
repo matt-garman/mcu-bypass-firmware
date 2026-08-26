@@ -374,6 +374,19 @@ PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
       bit from being replayed as an intermediate physical high while
       preserving the required all-port refresh.
 +
+      That single write publishes every shadow bit, not only the coil
+      bits, so on PIC12F675 the emergency path also canonicalizes the
+      parked spare output GP4 in the shadow first.  Without it the
+      escalation would itself convert a corrupt GP4 intent bit from
+      inert SRAM into a driven pad and hold it for the whole watchdog
+      period, on a pin the board contract permits only while it is
+      low.  A second single-pin write is not an alternative: two
+      sequential whole-port writes reintroduce the coil replay the
+      one-write rule above exists to prevent.  Target fault tests
+      sample the GP4 pad at the watchdog spin, where the hazard is;
+      a post-reset read cannot see it, because the reset is what ends
+      it.
++
       No gate runs during the complete blocking relay actuation
       sequence, from its pre-pulse clear through its post-pulse
       clear.  An upset in that sequence can shorten the intended
@@ -1284,7 +1297,7 @@ headroom and includes XC8's statically overlaid automatic storage.
 
 | cd4053_simple    | 548 words | 53.5% | 476 words
 | cd4053_with_mute | 574 words | 56.1% | 450 words
-| tq2_l2_5v_relay  | 583 words | 56.9% | 441 words
+| tq2_l2_5v_relay  | 585 words | 57.1% | 439 words
 |===
 
 More than 40% of the flash remains free on every variant. Persistent firmware
@@ -1298,8 +1311,8 @@ compile-time constant instead of a captured value.
 
 The comfortable margin is a consequence of the part, not of a leaner build. The
 comparison that isolates it is `tq2_l2_5v_relay`, which compiles the same core
-and the same driver on both parts: 583 words here against the PIC10F322's 493.
-The extra 90 words are shell, and they buy the work this core makes necessary —
+and the same driver on both parts: 585 words here against the PIC10F322's 493.
+The extra 92 words are shell, and they buy the work this core makes necessary —
 turning off a comparator and an ADC the 32x parts do not have, routing every
 output write through the shadow, and counting four timer rollovers in software
 to make the tick.

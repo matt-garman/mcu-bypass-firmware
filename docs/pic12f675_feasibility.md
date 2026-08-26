@@ -17,7 +17,7 @@ part. It is included in the default `all` goal, both CI aggregates, the canonica
 evidence inventory. The tag workflow rebuilds and requalifies its three shipping
 images with the pinned PIC toolchain before publication.
 
-The latest fully provisioned candidate build uses 548/574/583 of 1024 program words for the
+The latest fully provisioned candidate build uses 548/574/585 of 1024 program words for the
 simple/mute/relay variants. Persistent firmware state is 6 bytes (`ctx_`,
 `ctx_check_`, `gpio_shadow_`, and `osccal_snapshot_`); XC8 reserves 40 of the
 device's 64 Data-space bytes in all three variants. Every build requires one
@@ -1410,7 +1410,7 @@ check instead of being consumed and re-folded (see
 `docs/context_seu_detection.md`). This bounded guarantee excludes locals,
 registers, code and control flow. Before the F2/F3 additions, XC8 resource
 checks, target simulation, and the then-current 132-mutant gate passed. The
-merged physical-pin target/resource evidence and complete 136-mutant run remain
+merged physical-pin target/resource evidence and complete 137-mutant run remain
 pending, as does the shared `1.x.y` silicon-validation pass.
 
 **Why the ported tests are trusted to be distinct.** Porting the PIC10F322
@@ -1418,10 +1418,11 @@ lanes to the PIC12F675 carries a copy-paste risk: a lane that still compiled
 but no longer exercised part-specific behavior would pass vacuously. The
 mutation design addresses that risk, with its final merged run still pending.
 The PIC12F675 target-tool lane contributes
-23 mutants (per the step-10 status in §9), while the F2 transaction seam and the
-relay shadow-clear ordering each add a PIC12F675 shell mutant to the
+23 mutants (per the step-10 status in §9), while the F2 transaction seam, the
+relay shadow-clear ordering and the relay escalation's parked-GP4
+canonicalization each add a PIC12F675 shell mutant to the
 host-available core table. The repository mutation
-inventory is **136**, weighted toward the `GPIO` shadow, sub-tick timing,
+inventory is **137**, weighted toward the `GPIO` shadow, sub-tick timing,
 comparator/`CMCON`, `OSCCAL` and ANSEL-mapping guards the PIC10F322 has no
 counterpart for (§6.5). Each of the 23 target-tool mutants carries its own
 toolchain probe, named behavioral signature and sandbox validator. A complete
@@ -1457,8 +1458,8 @@ the 1.024 ms stretch (§4.4.1). Step 10 is done: `pic12f675-test` and
 `pic12f675-test-target{,-variants}` are implemented and carry the third leg of
 `test-target-matrix` and `test-target-lane-markers`; 23 target-tool mutants with
 their own toolchain probe, named behavioral signatures and sandbox validator,
-plus two host-available shell mutants, contribute to a combined mutation
-inventory of 136 after the F2 and F3 additions;
+plus three host-available shell mutants, contribute to a combined mutation
+inventory of 137 after the F2, F3 and B1 additions;
 and both aggregates now run in CI's shared `pic` job with the two mirrors —
 `scripts/ci-local.sh` and `test-ci-local-routing` — extended alongside. Step 10
 is complete. Step 11 is done (v0.9.9): the user-facing documentation landed;

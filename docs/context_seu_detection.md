@@ -253,7 +253,7 @@ change's cost.
 | Part | Budget | Simple / mute / relay | Tightest margin |
 | --- | --- | --- | --- |
 | PIC10F322 | 512 words | 476 / 502 / 493 words | 10 words (mute) |
-| PIC12F675 | 1024 words | 548 / 574 / 583 words | 441 words (relay) |
+| PIC12F675 | 1024 words | 548 / 574 / 585 words | 439 words (relay) |
 | ATtiny13a (AVR classic) | 921 B | 838 / 878 / 868 B | 43 B (mute) |
 | ATtiny202 (AVR-XT) | 2048 B | 968 / 1008 / 1040 B | 1008 B (relay) |
 | PIC10F320 | 256 words | 220 / 241 / 242 words | 14 words; F2 excluded |

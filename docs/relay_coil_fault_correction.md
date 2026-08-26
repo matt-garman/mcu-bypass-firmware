@@ -120,10 +120,24 @@ the shared clear:
   high-impedance interval and prevents a stale latch from being exposed while
   polarity is restored.
 - **PIC12F675:** clear the coil weak-pull-up latches, make both coil pins inputs,
-  disable the ADC/analog selections/comparator, clear the SRAM shadow and write
-  GPIO once, then restore output direction. In particular, comparator modes 011
-  and 101 route `COUT` onto GP2; GPIO writes cannot force that pad low until
-  `CMCON` returns ownership to GPIO.
+  disable the ADC/analog selections/comparator, canonicalize parked GP4 in the
+  shadow, clear the SRAM shadow coil bits and write GPIO once, then restore
+  output direction. In particular, comparator modes 011 and 101 route `COUT`
+  onto GP2; GPIO writes cannot force that pad low until `CMCON` returns
+  ownership to GPIO.
+
+  The parked-GP4 step is part of the *same* single write, not an extra one. Having
+  no `LATx`, this shell publishes the whole shadow byte on every output change, so
+  the one write that de-energizes the coils also drives every other output bit —
+  including a GP4 intent bit an upset flipped low to high, which until that moment
+  was inert SRAM. Without the canonicalization the escalation path would itself
+  create a driven-high GP4 and hold it for the whole watchdog period, on a pin the
+  board contract permits only while it is low
+  (`src/bypass_pins_pic12f675.h`). A second single-pin write is *not* the fix: two
+  sequential whole-port writes can replay the other corrupt coil bit between them,
+  which is what the one-write guarantee exists to prevent. The CD4053 variants have
+  an empty `hw_outputs_reassert_safe()` and never reach this path, so they need no
+  equivalent.
 
 The PIC12F675 comparator scope is the complete single-bit neighborhood of the
 required off mode. DS41190G Figure 6-2 names three of the eight modes "with
@@ -249,7 +263,7 @@ other.
 | --- | --- | --- | --- |
 | PIC10F322 (gpsim) | `test/pic/test_fault_pic.cc` → `inject_relay_resync_case` | cycle-timed, ≤ 3 ms | RESET-coil pulse measured on modeled `PORTA`, ≥ 4 ms, SET dark, settles BYPASS |
 | PIC10F320 (gpsim) | `test/pic10f320/gpsim/test_fault_pic.cc` (same case) | same | same |
-| PIC12F675 (gpsim) | `test/pic/test_fault_pic12f675.cc` (same case) | direct modeled GP1/GP2 node voltage at the watchdog spin, including comparator-owned GP2 | same |
+| PIC12F675 (gpsim) | `test/pic/test_fault_pic12f675.cc` (same case) | direct modeled GP1/GP2 node voltage at the watchdog spin, including comparator-owned GP2, plus parked GP4's pad on every relay case | same |
 | AVR classic, tinyx5 (simavr) | `test/avr/test_sim.c` → `inject_coil_resync` | `PORTB` coil bits low after the gate | edge-timed RESET-coil pulse ≥ 4 ms, SET never driven, LED dark |
 | AVR classic, ATtiny13A (simavr) | same | same | **not observable**: simavr has no WDT system-reset model for this part, so the case asserts a permanent `cli()`+spin wedge with the coils held idle |
 | ATtiny202 (yasimavr) | `test/avr/test_fault_attiny202.py` → `RESYNC` | modeled PA2/PA3 pin levels low plus canonical OUT/DIR/PINnCTRL at the spin | **not observable**: yasimavr treats the interrupts-off spin as a terminal halt, so the WDT never completes the reset in the model |
@@ -289,6 +303,10 @@ The pin-level extensions add independent negative controls:
 - **Reduce the PIC12F675 emergency path to shadow/GPIO clearing** -> the
   high-`COUT` fixture leaves modeled GP2 high at the watchdog spin even though
   the SRAM coil intent is low.
+- **Drop parked GP4 from the PIC12F675 canonicalization** -> the escalation's own
+  whole-port write publishes a corrupt GP4 intent bit to the pad and holds it for
+  the watchdog period. Reset entry and both coil assertions stay green; only the
+  pre-spin pad observation fails (`host:parked-output`).
 
 The AVR-XT matrix also exercises each coil's pull-up, one-bit direction upset,
 and a combined input/stale-OUT/PULLUPEN+INVEN state. The PIC12F675 relay matrix
@@ -326,6 +344,26 @@ is load-bearing and unchanged by this policy: two sequential single-pin clears
 could replay the other coil's corrupt shadow bit onto the physical port between
 them. `test_relay_reassert_atomic_clear()` requires exactly one whole-port write
 with no intermediate high, and kills a mutation back to the sequential form.
+
+That same write has a second obligation, and it points the other way. Because the
+write publishes the whole shadow, every safety-constrained output must already be
+low in the shadow it publishes — the two coils *and* parked GP4. The emergency
+path therefore clears GP4's intent (shadow only, no write of its own) before
+calling the driver's masked clear. Two oracles pin it, both **before** the
+watchdog spin, because the reset is what ends the unsafe interval and so cannot
+witness it:
+
+- the host shipping-source lane's `FWI_SHADOW_GP4_HIGH` relay case reads the
+  modeled pin at the point the harness escapes the spin, folded into the single
+  check the CD4053 arm already spends there;
+- the libgpsim relay fault lane's `inject_parked_output_resync_case()` attaches a
+  node to the GP4 pad and requires it Low at the watchdog `GOTO`-to-self, alongside
+  the GP1/GP2 voltages the coil cases already assert, then takes the ordinary
+  one-reset / full-width `RESET`-coil recovery / settled-BYPASS oracle unchanged.
+
+The mutation harness's `host:parked-output` signature removes only GP4 from the
+canonicalization: reset entry and both coil assertions stay green, and only the
+pre-spin pad observation kills it.
 
 ## Test-harness note: faithful footswitch on the AVR classic (simavr)
 

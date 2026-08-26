@@ -269,6 +269,32 @@ static void expect_coil_fault_escalates(fw_inject_t inj, const char *what) {
     CHECK(fwp_output_state_intact(FW_OUTPUT_REQUIRED_MASK, 0x00u) != 0,
           "%s must leave both coils de-energized before the reset spin", what);
 }
+
+#if defined(BYPASS_MCU_PIC12F675)
+// The parked spare is not a coil, and reaching the reset is not the whole
+// contract for it either. Having no LATx, this part's relay escalation path
+// commits its coil clear as ONE whole-port write of the SRAM shadow, and that
+// write publishes EVERY shadow bit -- so a GP4 intent bit corrupted from low to
+// high is converted by the escalation itself from inert SRAM into a physically
+// driven pad, held for the length of the watchdog period. The board contract
+// permits GP4 only while it is low (src/bypass_pins_pic12f675.h).
+//
+// Reset entry alone cannot witness that: the reset is what ENDS the unsafe
+// interval, so a case that only observes "a reset happened" passes either way.
+// The modeled PIN is therefore read at the point fw_fault_run() escapes the
+// watchdog spin -- before the recovery -- and folded into this case's SINGLE
+// check, deliberately without a second CHECK, so the harness totals stay
+// hand-verifiable against the counts below.
+static void expect_parked_output_fault_escalates(fw_inject_t inj,
+        const char *what) {
+    int const r = fw_fault_run(inj);
+    uint8_t const physical = fwp_physical_output_state();
+    CHECK(r == 1 &&
+          (physical & (uint8_t)(1u << SPARE_OUTPUT_PIN)) == 0u,
+          "%s must force the fail-safe reset with parked GP4 physically low "
+          "before the spin (got r=%d gpio=%02x)", what, r, physical);
+}
+#endif
 #endif
 
 static void test_faults(void) {
@@ -303,7 +329,15 @@ static void test_faults(void) {
     // two coil bits additionally have to be de-energized before the spin; the
     // blocking actuation window is characterized separately below.
     expect_reset(FWI_SHADOW_GP0_HIGH, "GP0 LED shadow (intent) fault");
+#if defined(TQ2_L2_5V_RELAY)
+    // Same single check as the CD4053 arm, with the pre-spin physical-pin
+    // observation folded in: only the relay variant has a non-empty
+    // hw_outputs_reassert_safe(), so only it can publish this shadow bit.
+    expect_parked_output_fault_escalates(FWI_SHADOW_GP4_HIGH,
+            "parked GP4 shadow (intent) fault");
+#else
     expect_reset(FWI_SHADOW_GP4_HIGH, "parked GP4 shadow (intent) fault");
+#endif
     expect_reset(FWI_GPIO_GP0_HIGH, "physical GP0 divergence");
     expect_reset(FWI_GPIO_GP4_HIGH, "physical GP4 divergence");
 #if defined(TQ2_L2_5V_RELAY)
@@ -520,7 +554,10 @@ static void test_pure_fault_path(void) {
 // asserts twice (forced reset, plus outputs settled low -- the de-energization),
 // so the relay variant adds exactly one check per coil case: the 2 coil-latch
 // cases on the PIC10F322, and on the PIC12F675 the 2 coil-shadow plus 2
-// coil-port cases.  Expressed as base + count rather than a fresh magic number,
+// coil-port cases.  The PIC12F675 relay's parked-GP4 shadow case adds NO check:
+// its pre-spin physical-pin observation is folded into the single check the
+// CD4053 arm already spends there, so this total is variant-independent for
+// that case.  Expressed as base + count rather than a fresh magic number,
 // so the delta stays tied to the cases above. The relay variant also adds the 12-case active-pulse
 // characterization matrix. The base includes one post-check persisted-context
 // transaction case on every variant. Mirrors PIC_FAULT_EXPECTED_CHECKS in the

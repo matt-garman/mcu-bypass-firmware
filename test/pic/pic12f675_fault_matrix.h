@@ -29,6 +29,11 @@
 //      its shadow and physical pin must remain low, and ANSEL.ANS3 must remain
 //      clear. GP3 is the externally pulled-up input-only spare; gpsim cannot
 //      model its board resistor, and silicon fixes its direction bit at one.
+//      On the relay variant GP4 additionally carries an ESCALATION obligation,
+//      which is not a fifth detection guard but a property of the response: the
+//      emergency path's single whole-port write publishes every shadow bit, so
+//      the pad must be Low at the watchdog spin (see
+//      inject_parked_output_resync_case() in the shared fault core).
 //   3. ONE BYTE CARRIES THREE SAFETY FIELDS. OPTION_REG holds the watchdog
 //      period, the tick clock source and the global pull-up enable, where the
 //      322 spreads them across WDTCON, T2CON/PR2 and OPTION. One exact

@@ -320,7 +320,10 @@ longer differs between them -- an energized coil resets on every part -- so both
 relay adapters run the same five `inject_relay_resync_case()` cases, which
 require de-energization before the reset spin and a measured full-width
 RESET-coil actuation after the recovery, delivered from both a settled BYPASS and
-a settled ENGAGED start.
+a settled ENGAGED start. PIC12F675 adds one
+`inject_parked_output_resync_case()` on top: with no `LATx`, its escalation
+publishes the whole output shadow in one write, so parked GP4's pad is required
+Low at the watchdog spin alongside the coils.
 
 Build artifacts (compiled binaries, `*.bc`) are written next to their sources in
 each subdirectory and are git-ignored; see `.gitignore`. KLEE output directories
@@ -457,7 +460,11 @@ checks: four coil-escalation cases each add a de-energization assertion on top o
 their reset assertion, 12 active-pulse cases characterize active-low and
 inactive-high faults at 1, 6, and 11 ms in both SET and RESET, and three
 shadow-order cases require RESET, SET, or both coil bits to clear before one
-whole-port write with no intermediate high modeled-GPIO write. The same
+whole-port write with no intermediate high modeled-GPIO write. The relay
+variant's parked-GP4 shadow case adds no check and changes no total: it reads the
+modeled pin where the harness escapes the watchdog spin -- the escalation's one
+whole-port write must not publish a corrupt GP4 intent bit to the pad -- folded
+into the single check the CD4053 arms already spend there. The same
 shared-driver pulse matrix raises the PIC10F322 relay count from its 53-check
 base plus two coil-escalation assertions to 67.
 The active-pulse cases record and check the actual modeled injection offset,
@@ -776,8 +783,8 @@ already had.
 what this part has that the 10F32x parts do not.** All 23 need XC8 plus gpsim or
 libgpsim plus the derived simulator images, so there is nothing useful to split
 within that table. The core/host table separately carries the F2 transaction-seam
-and relay masked-clear-order mutants because shipping-source coverage can kill
-those two shell faults without XC8. Copying the 322's target list would mostly have re-proved
+relay masked-clear-order and relay parked-GP4-canonicalization mutants because
+shipping-source coverage can kill those three shell faults without XC8. Copying the 322's target list would mostly have re-proved
 the shared pure core, so the set targets the SRAM output shadow (a severed
 write-back, each of shadow-versus-expected and port-versus-shadow independently
 turned into a tautology, and physical divergence the 322 cannot express because
@@ -813,10 +820,10 @@ current shape — the merge-time 74-mutant run, the audit that invalidated one
 kill, and the sandbox gaps that briefly cut it to 56 — is recorded in
 `docs/pic10f320_validation.md` §5.
 
-The driver independently pins the eight mutation categories at **31 core/host +
+The driver independently pins the eight mutation categories at **32 core/host +
 23 AVR-XT + 30 PIC10F320 host + 12 PIC10F320 tool + 6 PIC gpsim + 1 PIC soak + 10
-PIC target + 23 PIC12F675 = 136**. It rejects category drift before probing, then
-requires dispatched + skipped = 136 and killed + survived + errored = dispatched. Every
+PIC target + 23 PIC12F675 = 137**. It rejects category drift before probing, then
+requires dispatched + skipped = 137 and killed + survived + errored = dispatched. Every
 worker status is checked; result status/output pairs are atomically published
 and accepted only with exact text grammar and no missing, hidden, or extra
 artifacts.

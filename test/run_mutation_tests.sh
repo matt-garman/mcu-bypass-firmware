@@ -87,7 +87,7 @@ source "$SCRIPT_DIR/mutation_accounting.sh"
 # constraints (allowlist, no Git) that any edit to it must preserve.
 source "$SCRIPT_DIR/scratch_tree.sh"
 
-readonly MUTATION_EXPECTED_CORE=31
+readonly MUTATION_EXPECTED_CORE=32
 readonly MUTATION_EXPECTED_XT=23
 readonly MUTATION_EXPECTED_PIC_GPSIM=6
 readonly MUTATION_EXPECTED_PIC_TARGET=10
@@ -95,7 +95,7 @@ readonly MUTATION_EXPECTED_PIC_SOAK=1
 readonly MUTATION_EXPECTED_PIC320_HOST=30
 readonly MUTATION_EXPECTED_PIC320_TOOL=12
 readonly MUTATION_EXPECTED_PIC12F675=23
-readonly MUTATION_EXPECTED_TOTAL=136
+readonly MUTATION_EXPECTED_TOTAL=137
 
 # PIC build/test knobs (mirror the Makefile defaults; override via env). Used by
 # the PIC-shell mutants and their toolchain probe below.
@@ -788,6 +788,7 @@ MUTATIONS=(
 "src/bypass_output_cd4053_simple.c	s@hw_pin_set_high(CD4053_PIN)@hw_pin_set_low(CD4053_PIN)@	test-sim-cd4053_simple-attiny13a	engaged routes CD4053 the wrong way (PB2 stuck low); control-output test catches it"
 # --- TQ2 relay output driver ---------------------------------------------------
 "src/bypass_mcu_pic12f675.c	/void hw_pin_mask_set_low/,/^}/s@gpio_shadow_ &= (uint8_t)~pin_mask;@(void)pin_mask;\n    gpio_shadow_ \&= (uint8_t)~(1U << RELAY_RESET_PIN);\n    GPIO = gpio_shadow_;\n    gpio_shadow_ \&= (uint8_t)~(1U << RELAY_SET_PIN);@	host:atomic-clear|pic12f675-coverage-check-fw	PIC12F675 relay masked clear restored to sequential whole-port writes; RESET/SET/both shadow cases require both coil bits clear before one GPIO write with no intermediate modeled-GPIO high"
+"src/bypass_mcu_pic12f675.c	/static void hw_emergency_outputs_quiesce/,/^}/s@    gpio_shadow_ &= (uint8_t)~(uint8_t)(1U << SPARE_OUTPUT_PIN);@@	host:parked-output|pic12f675-coverage-check-fw	PIC12F675 relay emergency canonicalization drops parked GP4 and clears only the coils; the escalation's one whole-port write then publishes a corrupt GP4 intent bit to the pad. Reset entry and both coil assertions stay green, so only the pre-spin physical-pin observation kills it"
 "src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	test-sim-tq2_l2_5v_relay-attiny13a	relay coil pulse shortened to 1ms (< 4ms datasheet min); pulse-width test catches it"
 "src/bypass_output_tq2_l2_5v_relay.c	s@pin_set_high(RELAY_SET_PIN)@pin_set_high(RELAY_RESET_PIN)@	test-sim-tq2_l2_5v_relay-attiny13a	engage pulses the wrong (RESET) coil; relay test catches SET-not-pulsed / RESET-moved"
 # --- CD4053 with-mute output driver --------------------------------------------
@@ -1266,6 +1267,21 @@ pic12f675_mutation_has_signature() {
                 && grep -Eq 'FAIL: init=0x[0-9a-f]{2} requested=0x[0-9a-f]{2} read=0x[0-9a-f]{2} injection=1 deenergized=0 deenergize-cycles=0 partial-clear=0 spin=1 GP1=0\.[0-9]{3}V GP2=[4-9]\.[0-9]{3}V ' "$log" \
                 && grep -Eq "^PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=43 failures=[1-9][0-9]*$" "$log"
             ;;
+        # B1. The sibling of host:atomic-clear, on the other obligation of the
+        # SAME single whole-port write: that write publishes every shadow bit,
+        # so parked GP4 must already be low in the shadow it publishes. Only the
+        # pre-spin physical-pin read can fail here -- the reset still fires and
+        # both coils are still cleared -- so this signature names that one
+        # assertion by text and requires the two CD4053 variants clean.
+        host:parked-output)
+            [ "$command" = pic12f675-coverage-check-fw ] || return 1
+            count=$(grep -c '^PIC shipping-source coverage harness: 86 checks, 0 failures$' \
+                "$log" || true)
+            [ "$count" -eq 2 ] \
+                && grep -Fq 'parked GP4 shadow (intent) fault must force the fail-safe reset with parked GP4 physically low before the spin' \
+                    "$log" \
+                && grep -Fq 'PIC shipping-source coverage harness: 105 checks, 1 failures' "$log"
+            ;;
         host:atomic-clear)
             [ "$command" = pic12f675-coverage-check-fw ] || return 1
             count=$(grep -c '^PIC shipping-source coverage harness: 86 checks, 0 failures$' \
@@ -1316,7 +1332,7 @@ pic12f675_classify_checker_result() {
     elif grep -Eq '^FAIL: variant (cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay) did not compile for PIC12F675$' \
             "$log"; then
         PIC12F675_CHECKER_OUTCOME=compile-error
-    elif [ "$signature" = host:atomic-clear ] \
+    elif { [ "$signature" = host:atomic-clear ] || [ "$signature" = host:parked-output ]; } \
             && grep -Eq ': (fatal )?error:|undefined reference|collect2: error:' "$log"; then
         PIC12F675_CHECKER_OUTCOME=compile-error
     elif [ "$rc" -eq 0 ]; then
@@ -2364,7 +2380,7 @@ EOF
     }
     printf '%s\n' \
         '  inject relay coils    @0x005: 0x20 -> 0x22  (fixture, from BYPASS)' \
-        '    FAIL: init=0x20 requested=0x22 read=0x22 injection=1 deenergized=0 deenergize-cycles=0 partial-clear=0 spin=1 GP1=0.000V GP2=5.000V resets=1 reset-coil-ms=11.312 set-coil-ms=0.000 final-gpio=0x20 clean=1' \
+        '    FAIL: init=0x20 requested=0x22 read=0x22 injection=1 deenergized=0 deenergize-cycles=0 partial-clear=0 spin=1 GP1=0.000V GP2=5.000V GP4=0.000V resets=1 reset-coil-ms=11.312 set-coil-ms=0.000 final-gpio=0x20 clean=1' \
         'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=43 failures=1' \
         > "$signature_log"
     pic12f675_classify_checker_result 2 resync:coil \
@@ -2376,7 +2392,7 @@ EOF
     }
     printf '%s\n' \
         '    fixture: COUT and physical GP2 were HIGH before escalation; latch-only clear left GP2 at 5.000V' \
-        '    FAIL: init=0x07 requested=0x06 read=0x46 injection=1 deenergized=0 deenergize-cycles=0 partial-clear=0 spin=1 GP1=0.000V GP2=5.000V resets=1 reset-coil-ms=11.312 set-coil-ms=0.000 final-gpio=0x20 clean=1' \
+        '    FAIL: init=0x07 requested=0x06 read=0x46 injection=1 deenergized=0 deenergize-cycles=0 partial-clear=0 spin=1 GP1=0.000V GP2=5.000V GP4=0.000V resets=1 reset-coil-ms=11.312 set-coil-ms=0.000 final-gpio=0x20 clean=1' \
         'PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=fail checks=43 failures=1' \
         > "$signature_log"
     pic12f675_classify_checker_result 2 resync:physical-coil \
@@ -2433,6 +2449,30 @@ EOF
         pic12f675-coverage-check-fw "$signature_log"
     [ "$PIC12F675_CHECKER_OUTCOME" = survived ] || {
         echo "ERROR: complete PIC12F675 host atomic-clear checker was not classified as survived" >&2
+        exit 1
+    }
+    printf '%s\n' \
+        'PIC shipping-source coverage harness: 86 checks, 0 failures' \
+        'PIC shipping-source coverage harness: 86 checks, 0 failures' \
+        'FAIL fixture: parked GP4 shadow (intent) fault must force the fail-safe reset with parked GP4 physically low before the spin (got r=1 gpio=10)' \
+        'PIC shipping-source coverage harness: 105 checks, 1 failures' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 2 host:parked-output \
+        pic12f675-coverage-check-fw "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = killed ] || {
+        echo "ERROR: PIC12F675 host parked-output failure was not classified as killed" >&2
+        exit 1
+    }
+    printf '%s\n' \
+        'PIC shipping-source coverage harness: 86 checks, 0 failures' \
+        'PIC shipping-source coverage harness: 86 checks, 0 failures' \
+        'FAIL fixture: GP1 RESET-coil shadow fault must leave both coils de-energized before the reset spin' \
+        'PIC shipping-source coverage harness: 105 checks, 1 failures' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 2 host:parked-output \
+        pic12f675-coverage-check-fw "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = checker-error ] || {
+        echo "ERROR: a non-GP4 host coverage failure received parked-output kill credit" >&2
         exit 1
     }
     write_pic12_gpsim_fixture \

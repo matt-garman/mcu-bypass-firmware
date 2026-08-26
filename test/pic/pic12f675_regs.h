@@ -70,6 +70,13 @@
 #define PIC_REG_COMPARATOR_INPUT_PIN_NAME "gpio0"
 #define PIC_REG_RESET_COIL_PIN_NAME "gpio1"
 #define PIC_REG_SET_COIL_PIN_NAME   "gpio2"
+// The parked spare output. It is observed on the same physical footing as the
+// coils because the relay escalation path publishes the WHOLE output shadow in
+// one write (see hw_emergency_outputs_quiesce()), so a corrupt GP4 intent bit
+// becomes a driven pad for the watchdog interval unless the escalation
+// canonicalizes it. A post-reset read cannot see that: the reset is what ends
+// the unsafe interval.
+#define PIC_REG_SPARE_OUTPUT_PIN_NAME "gpio4"
 
 // ---- Port / direction / latch / analog-select -------------------------------
 #define PIC_REG_PORT_ADDR    0x005u   // GPIO: physical pin levels (no separate latch)
@@ -138,6 +145,10 @@
 // require the SET coil to stay dark throughout it.
 #define PIC_REG_RESET_COIL_MASK 0x02u
 #define PIC_REG_SET_COIL_MASK   0x04u
+// The parked spare output bit (SPARE_OUTPUT_PIN): GP4. Guarded low at every
+// settled seam and, since the relay escalation path's single whole-port write,
+// required low at the watchdog spin too.
+#define PIC_REG_SPARE_OUTPUT_MASK 0x10u
 
 // Exact steady-state TRISIO after init(): GP3/GP5 inputs, GP0..GP2/GP4 outputs.
 // GP3 reads back as an input on this part whatever is written to it; GP4 is the

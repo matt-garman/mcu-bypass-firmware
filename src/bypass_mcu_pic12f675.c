@@ -157,7 +157,8 @@
 // port-follows-shadow clause sees the port exactly as the previous tick left
 // it. An unexpectedly energized coil is therefore escalated rather than
 // silently refreshed, and hw_outputs_reassert_safe() de-energizes both coils
-// on the way into the reset.
+// on the way into the reset -- alongside parked GP4, because the one write
+// that publishes the cleared coils publishes every other shadow bit with them.
 static uint8_t gpio_shadow_;
 
 // Snapshot of the factory oscillator trim, captured in hw_mcu_init() and
@@ -322,6 +323,18 @@ static void hw_emergency_outputs_quiesce(void) {
     ADCON0 = ADCON0_ADC_OFF;
     ANSEL &= (uint8_t)~ANSEL_OUTPUT_MASK;
     CMCON = CMCON_COMPARATOR_OFF;
+    // Canonicalize the parked spare BEFORE the driver's clear, in the SHADOW
+    // ONLY (no GPIO write of its own). hw_outputs_reassert_safe() clears the
+    // two coil intents and then publishes the WHOLE shadow in one write, so a
+    // GP4 intent bit left set by an upset would be converted from inert SRAM
+    // into a driven pad for the length of the watchdog period -- the escalation
+    // path would create the very hazard it exists to remove. The fix cannot be
+    // a second single-pin GPIO write: two sequential whole-port writes can
+    // replay the other corrupt coil bit between them, which is exactly what
+    // the one-write guarantee below exists to prevent. One write, with every
+    // safety-constrained output (both coils and parked GP4) already low in the
+    // shadow it publishes.
+    gpio_shadow_ &= (uint8_t)~(uint8_t)(1U << SPARE_OUTPUT_PIN);
     hw_outputs_reassert_safe();
     TRISIO &= (uint8_t)~coil_mask;
 #else
@@ -338,9 +351,13 @@ static void hw_emergency_outputs_quiesce(void) {
 // First: hw_emergency_outputs_quiesce() (and hw_outputs_reassert_safe(),
 // implicitly): any output with a continuous-energization hazard (the relay
 // coils) is driven to its de-energized idle BEFORE the spin, so no fault can
-// hold a coil energized for the length of the watchdog period. The reset then
-// re-runs init(), whose full-width BYPASS actuation re-synchronizes the
-// physical relay with the logical state and the LED.
+// hold a coil energized for the length of the watchdog period. Having no LATx,
+// this part commits that clear as ONE whole-port write of the shadow, so the
+// same step also canonicalizes parked GP4 -- an output the board contract
+// permits only while it is low, and whose corrupt SRAM intent would otherwise
+// be published to the pad by that write. The reset then re-runs init(), whose
+// full-width BYPASS actuation re-synchronizes the physical relay with the
+// logical state and the LED.
 __attribute__((noreturn)) static void hw_force_wdt_reset(void) {
     hw_emergency_outputs_quiesce(); // calls hw_outputs_reassert_safe()
     INTCONbits.GIE = 0;

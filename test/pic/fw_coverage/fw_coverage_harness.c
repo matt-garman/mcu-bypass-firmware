@@ -588,5 +588,6 @@ void fwp_set_output_state(uint8_t intended, uint8_t physical) {
                              (intended & 0x17u));
     g_gpio = (uint8_t)((g_gpio & (uint8_t)~0x17u) | (physical & 0x17u));
 }
+uint8_t fwp_physical_output_state(void) { return (uint8_t)(g_gpio & 0x17u); }
 void fwp_capture_osccal(void) { osccal_snapshot_ = OSCCAL; }
 #endif
