@@ -35,7 +35,7 @@ file is the human-readable summary of *what changed*.
 
 ## [Unreleased]
 
-## [0.9.10] - Unreleased
+## [0.9.10] - 2026-08-27
 
 ### Added
 
