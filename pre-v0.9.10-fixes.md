@@ -3685,8 +3685,9 @@ PIC12F675 remain 14/7/2 and 16/9/4 because zero duty converts to zero stretch.
 - [x] The AVR-XT compiled-image delay oracle also recovers the sole `reti`
   handler and direct call tree, enforces the reviewed 84-instruction ISR ceiling,
   includes a 16-cycle entry/vector allowance in a conservative 352-cycle bound,
-  and fails closed on recursion, unresolved or indirect calls, and backward
-  control flow.
+  and fails closed on recursion, unresolved or indirect transfers, and cyclic
+  intrafunction control flow while accepting acyclic branches to earlier shared
+  epilogues.
 - [x] Design, changelog, MISRA, feasibility and test documentation distinguish
   wall-time duty from additive stretch and publish the corrected bounds.
 - [ ] Rebuild and compare all 21 images; rerun Classic-AVR pet intervals,
@@ -3694,7 +3695,7 @@ PIC12F675 remain 14/7/2 and 16/9/4 because zero duty converts to zero stretch.
   resource, mutation and aggregate gates on a fully provisioned host.
 
 **Available-host validation (2026-08-26).** The delay/ISR parser selftest passes
-23 checks. Host GCC compiles the production watchdog macro through all four
+29 checks. Host GCC compiles the production watchdog macro through all four
 modular pin maps at the independent 18/9/2, 14/7/2 and 16/9/4 results. Resource
 tables pass 196 checks, TODO index 90, Makefile name contract 48, and release
 preflight 207 plus qualification 73; Bash/Python syntax and `git diff --check`
@@ -3711,6 +3712,15 @@ formula copies identical but converts each operand before subtraction, making
 the denominator intrinsically 32-bit and removing the composite cast rather
 than suppressing the finding. The mixed-formula negative control follows the
 new source shape; the provisioned rerun remains required.
+
+The next provisioned run passed ATtiny202 static analysis, then exposed a false
+failure in the new compiled-ISR oracle: AVR code generation branches backward
+to an earlier shared epilogue, but address direction alone does not make that
+acyclic path a loop. The parser now constructs each reached function's control
+flow graph and rejects actual cycles instead. Returning calls, conditional
+fallthrough and AVR skip instructions retain all successors; recursion,
+indirect transfers, unresolved targets and paths leaving the disassembled body
+still fail closed. The provisioned real-image rerun remains required.
 
 ## Final validation and release gate
 

@@ -528,10 +528,11 @@ dispatch bounds the complete response at 352 of the 2000 cycles in a
 1 ms tick (17.6% duty, or at most 21.4% additive stretch).
 `attiny202-delay-oracle` recovers the sole `reti` handler and its direct
 call tree from every built image and enforces that 84-instruction
-ceiling; recursion, unresolved or indirect calls, and backward control
-flow fail closed rather than being undercounted.  Its compiled delay-body oracle
-and delivered-pulse trace complete the corroboration without making an
-untrustworthy full-interval measurement.
+ceiling; recursion, unresolved or indirect transfers, and control-flow cycles
+fail closed rather than being undercounted; acyclic branches to earlier shared
+epilogues remain countable.  Its compiled delay-body oracle and delivered-pulse
+trace complete the corroboration without making an untrustworthy full-interval
+measurement.
 The polled PIC shells have no ISR term to measure.
 
 

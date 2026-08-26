@@ -53,8 +53,10 @@
 #   expected set of pulse widths (and the relay's 4 ms datasheet minimum). It
 #   also identifies the sole `reti` function, follows its direct call tree, and
 #   requires the complete tick ISR to remain within the reviewed 84-instruction
-#   ceiling that underpins WDT_ISR_STRETCH_PCT. Every recognized delay loop must
-#   have a decodable 16-bit seed; none may be discarded:
+#   ceiling that underpins WDT_ISR_STRETCH_PCT. Cyclic control flow fails closed;
+#   an acyclic branch to an earlier shared epilogue remains countable. Every
+#   recognized delay loop must have a decodable 16-bit seed; none may be
+#   discarded:
 #       cd4053_simple    (simple x4053): no coil pulse -> zero delay loops
 #       cd4053_with_mute (muted x4053) : two 5 ms mute windows (engage+bypass)
 #       tq2_l2_5v_relay  (TQ2-L2-5V)   : two 12 ms coil pulses (engage+bypass)
@@ -212,10 +214,10 @@ def parse_isr_instruction_count(objdump_text):
     """Count every instruction in the sole ISR and its direct call tree.
 
     Counting every instruction in each reached function is conservative across
-    acyclic branches because mutually exclusive paths are summed. A backward
-    control-flow edge or recursive call would invalidate that argument and is
-    rejected rather than guessed at. Direct calls and tail jumps must resolve to
-    an objdump symbol so no callee silently disappears from the census.
+    acyclic branches because mutually exclusive paths are summed. A control-flow
+    cycle or recursive call would invalidate that argument and is rejected
+    rather than guessed at. Direct calls and tail jumps must resolve to an
+    objdump symbol so no callee silently disappears from the census.
     """
     functions = {}
     current = None
@@ -250,8 +252,11 @@ def parse_isr_instruction_count(objdump_text):
 
         body = functions[name]
         total = len(body)
-        for address, mnemonic, operands in body:
+        addresses = {address for address, _, _ in body}
+        edges = {address: [] for address in addresses}
+        for index, (address, mnemonic, operands) in enumerate(body):
             symbol = target_symbol(operands)
+            next_address = body[index + 1][0] if index + 1 < len(body) else None
             if mnemonic in ("icall", "eicall", "ijmp", "eijmp"):
                 raise IsrCensusError(
                     "indirect control transfer in ISR call tree at 0x%X" %
@@ -262,18 +267,63 @@ def parse_isr_instruction_count(objdump_text):
                         "unresolved %s in ISR call tree at 0x%X" %
                         (mnemonic, address))
                 total += count_function(symbol, stack + (name,))
-                continue
 
             if mnemonic in ("jmp", "rjmp") and symbol not in (None, name):
                 total += count_function(symbol, stack + (name,))
                 continue
 
-            if mnemonic.startswith("br") or mnemonic in ("jmp", "rjmp"):
-                target = _TARGET_ADDR_RE.search(operands)
-                if target and int(target.group(1), 16) < address:
+            is_branch = mnemonic.startswith("br") and mnemonic != "break"
+            if is_branch or mnemonic in ("jmp", "rjmp"):
+                target_match = _TARGET_ADDR_RE.search(operands)
+                if target_match is None:
                     raise IsrCensusError(
-                        "backward control-flow edge in ISR call tree at 0x%X" %
-                        address)
+                        "unresolved %s target in ISR call tree at 0x%X" %
+                        (mnemonic, address))
+                target = int(target_match.group(1), 16)
+                if target not in addresses:
+                    raise IsrCensusError(
+                        "%s target 0x%X is outside %s's disassembled body" %
+                        (mnemonic, target, name))
+                edges[address].append(target)
+                if is_branch:
+                    if next_address is None:
+                        raise IsrCensusError(
+                            "%s fallthrough leaves %s's disassembled body at "
+                            "0x%X" % (mnemonic, name, address))
+                    edges[address].append(next_address)
+                continue
+
+            if mnemonic in ("ret", "reti"):
+                continue
+
+            if next_address is None:
+                raise IsrCensusError(
+                    "control flow leaves %s's disassembled body after 0x%X" %
+                    (name, address))
+            edges[address].append(next_address)
+            if mnemonic in ("cpse", "sbrc", "sbrs", "sbic", "sbis"):
+                if index + 2 >= len(body):
+                    raise IsrCensusError(
+                        "%s skip leaves %s's disassembled body at 0x%X" %
+                        (mnemonic, name, address))
+                edges[address].append(body[index + 2][0])
+
+        states = {}
+
+        def visit(address):
+            state = states.get(address, 0)
+            if state == 1:
+                raise IsrCensusError(
+                    "control-flow cycle in ISR call tree at 0x%X" % address)
+            if state == 2:
+                return
+            states[address] = 1
+            for target in edges[address]:
+                visit(target)
+            states[address] = 2
+
+        for address in addresses:
+            visit(address)
         return total
 
     return count_function(isrs[0], ())
@@ -471,6 +521,54 @@ def _synthetic_indirect_isr():
     ])
 
 
+def _synthetic_acyclic_backward_isr():
+    """Build an ISR whose later blocks branch to an earlier shared epilogue."""
+    return "\n".join([
+        "00000100 <__vector_3>:",
+        " 100:\t03 c0\trjmp\t.+6      ; 0x108 <__vector_3+0x8>",
+        " 102:\t0f 90\tpop\tr0",
+        " 104:\t18 95\treti",
+        " 106:\t00 00\tnop",
+        " 108:\te1 f7\tbrne\t.-8      ; 0x102 <__vector_3+0x2>",
+        " 10a:\tfb cf\trjmp\t.-10     ; 0x102 <__vector_3+0x2>",
+    ])
+
+
+def _synthetic_unresolved_branch_isr():
+    """Build an ISR whose branch target is absent from objdump output."""
+    return "\n".join([
+        "00000100 <__vector_3>:",
+        " 100:\te1 f7\tbrne\t.-8",
+        " 102:\t18 95\treti",
+    ])
+
+
+def _synthetic_call_cycle_isr():
+    """Build an ISR whose returning call participates in a caller-side cycle."""
+    return "\n".join([
+        "00000100 <__vector_3>:",
+        " 100:\t07 d0\trcall\t.+14     ; 0x110 <tick_helper>",
+        " 102:\tf1 f7\tbrne\t.-4      ; 0x100 <__vector_3>",
+        " 104:\t18 95\treti",
+        "00000110 <tick_helper>:",
+        " 110:\t08 95\tret",
+    ])
+
+
+def _synthetic_truncated_successor_isr(mnemonic):
+    """Build an ISR with a branch or skip path outside its parsed body."""
+    if mnemonic == "brne":
+        body = [" 102:\tf1 f7\tbrne\t.-4      ; 0x100 <__vector_3>"]
+    elif mnemonic == "sbrc":
+        body = [" 102:\t00 fc\tsbrc\tr0, 0", " 104:\t08 95\tret"]
+    else:
+        body = [" 102:\t00 00\tnop"]
+    return "\n".join([
+        "00000100 <__vector_3>:",
+        " 100:\t18 95\treti",
+    ] + body)
+
+
 def selftest():
     ck = Checker()
 
@@ -541,16 +639,29 @@ def selftest():
     ck.check("0x344" in stale_seed_error and "r24, r25" in stale_seed_error,
               "unseeded loop cannot borrow the preceding loop's seed pair")
 
-    # Compiled ISR census: handler + call instruction + callee body is bounded,
-    # while one extra instruction and an unbounded backward edge fail closed.
+    # Compiled ISR census: handler + call instruction + callee body is bounded.
+    # A backward edge into a shared epilogue is acyclic and remains countable;
+    # an actual loop or an unresolved branch target fails closed.
     ck.check(parse_isr_instruction_count(_synthetic_isr(80)) == 84,
              "ISR census follows the direct call tree to exactly 84 instructions")
     ck.check(_isr_census_fails(_synthetic_isr(81)) == 0,
              "85-instruction ISR remains parseable so the ceiling check owns rejection")
     ck.check(_isr_fails(_synthetic_isr(81)) == 1,
              "85-instruction ISR exceeds the reviewed ceiling")
+    ck.check(parse_isr_instruction_count(_synthetic_acyclic_backward_isr()) == 6,
+             "acyclic backward branches to a shared ISR epilogue remain countable")
     ck.check(_isr_census_fails(_synthetic_isr(2, backward_edge=True)) == 1,
-             "backward ISR control flow fails closed instead of being undercounted")
+             "cyclic ISR control flow fails closed instead of being undercounted")
+    ck.check(_isr_census_fails(_synthetic_call_cycle_isr()) == 1,
+             "a caller cycle spanning a returning call fails closed")
+    ck.check(_isr_census_fails(_synthetic_unresolved_branch_isr()) == 1,
+             "an unresolved ISR branch target fails closed")
+    ck.check(_isr_census_fails(_synthetic_truncated_successor_isr("brne")) == 1,
+             "a conditional fallthrough outside the parsed ISR body fails closed")
+    ck.check(_isr_census_fails(_synthetic_truncated_successor_isr("sbrc")) == 1,
+             "a skip path outside the parsed ISR body fails closed")
+    ck.check(_isr_census_fails(_synthetic_truncated_successor_isr("nop")) == 1,
+             "ordinary fallthrough outside the parsed ISR body fails closed")
     ck.check(_isr_census_fails(_synthetic_indirect_isr()) == 1,
              "indirect ISR control flow fails closed instead of being omitted")
     full_cycle_bound = (ISR_INSTRUCTION_LIMIT * ISR_MAX_CYCLES_PER_INSTRUCTION
