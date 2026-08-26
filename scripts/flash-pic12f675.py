@@ -24,6 +24,18 @@ write, and a mandatory full readback. Every precondition is checked before an
 erase/program argument is reachable, and an interruption is PENDING rather than
 an implicit success.
 
+The readback compares the WHOLE device, not just the addresses the image
+supplies. A release image occupies about half this part's 1024 words, and a
+writer that skipped its bulk erase would satisfy every image-address check while
+leaving the other half of the old firmware in place, so each word the image does
+not supply is required to read back erased.
+
+PLATFORM. The tool, any Java runtime, the JAR and the release image are pinned
+by descriptor and handed to ipecmd as /proc/self/fd/<n>, because a name that is
+checked and then re-opened by a child can be pointed at something else in
+between. That makes the guarded transaction a Linux procedure; elsewhere it
+refuses to touch a device rather than run the check it cannot honour.
+
 WHAT IT DOES NOT PROVE. That a real PICkit 3 / MPLAB X 6.20 erase preserves the
 trim. This tool DETECTS damage after the fact; it cannot prevent a writer from
 causing it. Until the controlled bench run recorded in HARDWARE_VALIDATION_LOG.md
@@ -42,6 +54,11 @@ import stat
 import subprocess
 import sys
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - platforms without POSIX fcntl
+    fcntl = None
+
 
 SCHEMA = "mcu-bypass-pic12f675-flash-v1"
 PART = "PIC12F675"
@@ -58,6 +75,15 @@ CAL_WORD_ADDR = 0x3FF
 CONFIG_WORD_ADDR = 0x2007
 BG_MASK = 0x3000
 BG_ERASED = 0x3000
+# Erased flash reads as all ones in fourteen bits. Every program word the
+# release image does NOT supply must equal this after the write; that is the
+# only way a writer which skipped its bulk erase is visible at all, because
+# every word the image DOES supply still arrives correctly. See
+# verify_programmed().
+ERASED_WORD = 0x3FFF
+# The words compared against the image: 0x000 through 0x3FE. Word 0x3FF is
+# per-device OSCCAL and is compared against the two pre-write reads instead.
+PROGRAM_WORDS = FLASH_WORDS - 1
 # The one CONFIG word every shipping PIC12F675 image in this project carries.
 # BG<1:0> is left erased on purpose so the write never overwrites the factory
 # bandgap trim with a value of the image's own.
@@ -80,6 +106,10 @@ MAX_TOOL_BYTES = 256 * 1024 * 1024
 VERSION_PROBE_TIMEOUT_S = 300
 DEVICE_TIMEOUT_S = 900
 MAX_FINALIZE_ATTEMPTS = 64
+# A no-erase overlay can differ in hundreds of words. The result names the first
+# few and counts the rest, so result.json stays a readable forensic record
+# rather than a thousand-line list.
+MAX_REPORTED_WORDS = 8
 
 RESERVATION_NAME = "reservation.json"
 RESULT_NAME = "result.json"
@@ -130,6 +160,62 @@ def read_regular_bytes(path, label, max_bytes=MAX_FILE_BYTES):
 def utc_now():
     return datetime.datetime.now(datetime.timezone.utc).strftime(
         "%Y-%m-%dT%H:%M:%SZ")
+
+
+# ---------------------------------------------------------------------------
+# holding an object open across the instant it is used
+# ---------------------------------------------------------------------------
+
+# Every object this helper validates -- the ipecmd executable, a Java runtime,
+# the ipecmd JAR, the release image -- is ultimately consumed by a CHILD
+# process, which resolves a pathname of its own. Hashing a name and then handing
+# that same name to the child reopens, one instruction later, the exact race the
+# hash was meant to close: in between, the name can be pointed at a different
+# file. So the child is handed /proc/self/fd/<n> instead. The kernel resolves
+# that through the descriptor this process is already holding, to the inode this
+# helper validated, whatever the original name refers to by then.
+DESCRIPTOR_DIR = "/proc/self/fd"
+
+
+def descriptor_path(fd):
+    """The pathname form of one held descriptor, for a child to open or exec."""
+    return "%s/%d" % (DESCRIPTOR_DIR, fd)
+
+
+def descriptor_paths_available():
+    """Does this platform resolve DESCRIPTOR_DIR/<n> to our own descriptors?"""
+    try:
+        probe = os.open(os.devnull, os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        return os.path.samestat(os.stat(descriptor_path(probe)),
+                                os.fstat(probe))
+    except OSError:
+        return False
+    finally:
+        os.close(probe)
+
+
+def require_descriptor_paths():
+    """Refuse to drive a programmer on a platform that cannot pin its inputs.
+
+    This is a deliberately narrow platform contract rather than a best effort.
+    Without descriptor-addressed pathnames the pinned ipecmd and the retained
+    image would have to be re-opened BY NAME at the instant they are used, and a
+    process running as this user can replace either one inside that window --
+    before the physical erase, where every image guard this helper runs would be
+    bypassed and the post-write comparison could only report the damage after it
+    happened.
+    """
+    if descriptor_paths_available():
+        return
+    raise FlashError(
+        "this platform does not resolve %s/<n> to the descriptors this process "
+        "holds, so the pinned ipecmd and the retained image would have to be "
+        "re-opened by name at the instant they are used. That reopening is the "
+        "race this transaction exists to close, so no device command was "
+        "issued. The guarded transaction is supported on Linux." % DESCRIPTOR_DIR)
 
 
 # ---------------------------------------------------------------------------
@@ -555,15 +641,17 @@ def sha256_fd(fd, label, max_bytes):
 
 
 def open_identity(path, label, max_bytes):
-    """Pin a file that will later be EXECUTED by pathname, and keep its handle.
+    """Pin a file that will later be run or read by a child, and keep its handle.
 
-    Hashing a path and then handing that same path to exec() leaves a window:
+    Hashing a path and then handing that same path to a child leaves a window:
     between the two, the name can be pointed at a different file, or the file
-    can be rewritten underneath it. The descriptor closes the window. The
-    recorded digest is read THROUGH it, and before every invocation the pathname
-    the argv carries is re-stat'd and required to still name this inode, whose
-    bytes are re-hashed through this same descriptor. A tool swapped in behind
-    the name, or edited in place, is refused instead of run.
+    can be rewritten underneath it. The descriptor closes both halves. The
+    recorded digest is read THROUGH it; the child is handed descriptor_path() of
+    this same descriptor rather than the name, so what it runs or reads is this
+    inode and not whatever the name has become; and before every invocation the
+    pathname is re-stat'd and these bytes are re-hashed through the descriptor,
+    so a tool swapped in behind the name, or edited in place, is diagnosed and
+    refused rather than silently ignored.
     """
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -611,18 +699,25 @@ def programmer_identity(path, java):
             java_handle = open_identity(java_path, "java runtime", MAX_TOOL_BYTES)
             if not os.access(java_path, os.X_OK):
                 raise FlashError("java runtime is not executable: %s" % java_path)
-            prefix = [java_path, "-jar", resolved]
+            # argv[0] stays the real name so the child, its own logs and the
+            # retained transcript all say what ran; only the two things a child
+            # would otherwise RESOLVE -- the runtime it execs and the jar it
+            # opens -- are addressed by descriptor.
+            prefix = [java_path, "-jar", descriptor_path(handle["fd"])]
+            exec_path = descriptor_path(java_handle["fd"])
         else:
             kind = "executable"
             if not os.access(resolved, os.X_OK):
                 raise FlashError("ipecmd is not executable: %s" % path)
             java_path = None
             prefix = [resolved]
+            exec_path = descriptor_path(handle["fd"])
     except BaseException:
         os.close(handle["fd"])
         if java_handle is not None:
             os.close(java_handle["fd"])
         raise
+    handles = [h for h in (handle, java_handle) if h is not None]
     return {
         "kind": kind,
         "path": invoked,
@@ -631,12 +726,22 @@ def programmer_identity(path, java):
         "java": java_path,
         "java_sha256": None if java_handle is None else java_handle["sha256"],
         "prefix": prefix,
-        "handles": [h for h in (handle, java_handle) if h is not None],
+        "exec_path": exec_path,
+        "pass_fds": tuple(h["fd"] for h in handles),
+        "handles": handles,
     }
 
 
 def programmer_unchanged(programmer):
-    """Re-prove the pinned identity immediately before an invocation."""
+    """Re-prove the pinned identity immediately before an invocation.
+
+    The bytes about to run are the ones behind these descriptors whatever this
+    finds, because that is what the child is handed. What this adds is the
+    DIAGNOSIS: a tool whose name now points somewhere else, or whose inode was
+    edited underneath it, means the operator's installation moved mid-
+    transaction, and continuing to drive a device from it is not something to do
+    quietly.
+    """
     for handle in programmer["handles"]:
         try:
             info = os.stat(handle["path"])
@@ -657,10 +762,19 @@ def programmer_unchanged(programmer):
                 % (handle["label"], handle["path"]))
 
 
-def run_tool(argv, timeout, label):
+def run_tool(argv, timeout, label, executable=None, pass_fds=()):
+    """Start one child on the PINNED objects.
+
+    `executable` is descriptor_path() of the held tool, so the kernel execs the
+    inode this helper hashed rather than re-walking the name in argv[0].
+    `pass_fds` keeps exactly those descriptors open across the exec -- without
+    it subprocess closes them before exec and every /proc/self/fd/<n> in the
+    argv, including the one being exec'd, would resolve to nothing.
+    """
     try:
         completed = subprocess.run(
-            argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            argv, executable=executable, pass_fds=pass_fds,
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, timeout=timeout, shell=False, check=False)
     except subprocess.TimeoutExpired as exc:
         raise FlashError("%s did not finish within %ds" % (label, timeout)) from exc
@@ -669,10 +783,15 @@ def run_tool(argv, timeout, label):
     return completed.returncode, completed.stdout
 
 
-def invoke(programmer, argv, timeout, label):
-    """The only way a tool is started: identity re-proved, then run."""
+def invoke(programmer, argv, timeout, label, pass_fds=()):
+    """The only way a tool is started: identity re-proved, then run.
+
+    `pass_fds` carries whatever else this particular command has to READ by
+    descriptor -- for the single write, the pinned release image.
+    """
     programmer_unchanged(programmer)
-    return run_tool(argv, timeout, label)
+    return run_tool(argv, timeout, label, executable=programmer["exec_path"],
+                    pass_fds=tuple(programmer["pass_fds"]) + tuple(pass_fds))
 
 
 def probe_version(programmer):
@@ -720,10 +839,11 @@ def write_argv(programmer, image_path):
     """The one validated write command.
 
     -M programs the whole device, -Y verifies, -OL releases from reset. -W5 is
-    deliberately absent: the qualified arrangement is an externally powered
+    deliberately absent: the supported arrangement is an externally powered
     board, and no programmer-powered voltage/interface setup has been retained
-    as hardware evidence. Nothing here is caller-supplied except the paths this
-    tool itself snapshotted.
+    as hardware evidence. Nothing here is caller-supplied: `image_path` is
+    descriptor_path() of the pinned image, which is the one argument of this
+    command that a replaced file could otherwise turn into a different write.
     """
     return programmer["prefix"] + [
         TOOL_FLAG + TOOL, "-P" + PART, "-F" + image_path, "-M", "-Y", "-OL",
@@ -744,6 +864,88 @@ EVIDENCE_DIR_FD = (hasattr(os, "O_DIRECTORY")
                    and os.chmod in os.supports_dir_fd)
 
 
+def durable_fsync(fd, what):
+    """Flush one held descriptor to stable storage, or refuse to go on.
+
+    Directories need this as much as files do: fsync on a file does not make the
+    DIRECTORY ENTRY that names it durable, and an entry a crash can still lose
+    is not a reservation.
+    """
+    try:
+        os.fsync(fd)
+    except OSError as exc:
+        raise FlashError("could not flush %s to stable storage: %s"
+                         % (what, exc)) from exc
+
+
+def durable_write(fd, data, what):
+    """Write every byte, or refuse.
+
+    os.write may write fewer bytes than it was given. A short write that nobody
+    noticed would leave a truncated evidence file, and a truncated result is
+    exactly the state this transaction must never publish.
+    """
+    written = 0
+    try:
+        while written < len(data):
+            written += os.write(fd, data[written:])
+    except OSError as exc:
+        raise FlashError("could not write %s: %s" % (what, exc)) from exc
+
+
+def durable_link(source, target, what, dir_fd=None):
+    """Install a fully written file under its final name, atomically.
+
+    link() is the whole reason the temporary file exists: it either creates the
+    final name in one indivisible step or fails because that name is taken. So
+    an evidence file is never observable half-written, and a valid result.json
+    can never be replaced -- not by a second helper run, and not by this one.
+    """
+    try:
+        if dir_fd is None:
+            os.link(source, target)
+        else:
+            os.link(source, target, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    except FileExistsError as exc:
+        raise FlashError("%s already exists and is immutable" % what) from exc
+    except OSError as exc:
+        raise FlashError("could not publish %s: %s" % (what, exc)) from exc
+
+
+def sealed_copy(data, name, label):
+    """An immutable copy of already-validated bytes, addressable by descriptor.
+
+    Holding the retained image.hex open pins it against REPLACEMENT, but not
+    against being rewritten in place: mode 0400 does not stop the owner of a
+    file from restoring write permission and editing the very inode the
+    descriptor names. A sealed anonymous file has no name to replace and no
+    writable path at all, so the bytes the writer consumes are provably the
+    bytes that passed validate_release_image().
+
+    Returns None where the platform cannot seal one; the caller then falls back
+    to the retained evidence file and records which pinning was in force.
+    """
+    if fcntl is None or not hasattr(os, "memfd_create"):
+        return None
+    try:
+        fd = os.memfd_create(name, os.MFD_ALLOW_SEALING | os.MFD_CLOEXEC)
+    except (AttributeError, OSError):  # pragma: no cover - old kernels
+        return None
+    try:
+        durable_write(fd, data, label)
+        fcntl.fcntl(fd, fcntl.F_ADD_SEALS,
+                    fcntl.F_SEAL_WRITE | fcntl.F_SEAL_SHRINK
+                    | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SEAL)
+    except (AttributeError, FlashError, OSError,
+            ValueError):  # pragma: no cover - old kernels
+        os.close(fd)
+        return None
+    if sha256_fd(fd, label, MAX_FILE_BYTES) != sha256_bytes(data):
+        os.close(fd)
+        raise FlashError("%s was not sealed as it was written" % label)
+    return fd
+
+
 class Evidence(object):
     """The retained evidence directory, addressed by descriptor where possible.
 
@@ -755,9 +957,22 @@ class Evidence(object):
     that descriptor.
     """
 
-    def __init__(self, path, fd):
+    def __init__(self, path, fd, parent_fd=None):
         self.path = path
         self.fd = fd
+        # Retained, not merely used and dropped: the entry that names this
+        # directory lives in the parent, and only the parent's descriptor can
+        # make that entry durable or remove it again if it cannot be.
+        self.parent_fd = parent_fd
+
+    @staticmethod
+    def _open_directory(path, what):
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) \
+            | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            return os.open(path, flags)
+        except OSError as exc:
+            raise FlashError("could not open %s: %s" % (what, exc)) from exc
 
     @staticmethod
     def _attach(path):
@@ -817,12 +1032,34 @@ class Evidence(object):
             raise FlashError(
                 "evidence path already exists; choose a new one so this device's "
                 "transaction cannot be confused with another: %s" % path)
+        parent_fd = cls._open_directory(parent, "the evidence directory's parent")
         try:
             os.mkdir(path, 0o700)
         except OSError as exc:
+            os.close(parent_fd)
             raise FlashError("could not create the evidence directory: %s"
                              % exc) from exc
-        return cls(path, cls._attach(path))
+        try:
+            # The new directory ENTRY lives in the parent, and fsync on the new
+            # directory itself does not flush it. Without this, a crash after
+            # the reservation is announced and the write has begun can lose the
+            # directory that was supposed to make that reservation durable --
+            # leaving a programmed device with no record that anything reserved
+            # it. It happens here, before any device is touched, so an inability
+            # to make the entry durable costs nothing but the transaction.
+            durable_fsync(parent_fd, "the evidence directory's parent")
+        except BaseException:
+            try:
+                os.rmdir(path)
+            except OSError:  # pragma: no cover - best effort cleanup
+                pass
+            os.close(parent_fd)
+            raise
+        try:
+            return cls(path, cls._attach(path), parent_fd)
+        except BaseException:
+            os.close(parent_fd)
+            raise
 
     @classmethod
     def open(cls, path):
@@ -842,6 +1079,23 @@ class Evidence(object):
         diagnostics. Never used to reach a file this helper reads itself."""
         return os.path.join(self.path, name)
 
+    def _open(self, name, flags, mode=0o777):
+        if self.fd is None:
+            return os.open(self.filename(name), flags, mode)
+        return os.open(name, flags, mode, dir_fd=self.fd)
+
+    def _discard(self, name):
+        """Remove a publication remnant. Best effort by design: a leftover
+        temporary file is inert -- no reader looks for one -- and failing the
+        transaction over it would turn a tidy-up into an outage."""
+        try:
+            if self.fd is None:
+                os.unlink(self.filename(name))
+            else:
+                os.unlink(name, dir_fd=self.fd)
+        except OSError:  # pragma: no cover - best effort cleanup
+            pass
+
     def exists(self, name):
         try:
             if self.fd is None:
@@ -852,52 +1106,70 @@ class Evidence(object):
             return False
         return True
 
-    def sync(self):
+    def sync(self, what):
         if self.fd is not None:
-            try:
-                os.fsync(self.fd)
-            except OSError as exc:
-                raise FlashError("could not flush the evidence directory: %s"
-                                 % exc) from exc
+            durable_fsync(self.fd, what)
             return
+        fd = self._open_directory(self.path, "the evidence directory")
         try:
-            fd = os.open(self.path, os.O_RDONLY)
-        except OSError as exc:
-            raise FlashError("could not open the evidence directory: %s"
-                             % exc) from exc
-        try:
-            os.fsync(fd)
-        except OSError as exc:
-            raise FlashError("could not flush the evidence directory: %s"
-                             % exc) from exc
+            durable_fsync(fd, what)
         finally:
             os.close(fd)
 
-    def publish(self, name, data, label):
-        """Write one evidence file exclusively, then flush it and its directory.
+    def publish(self, name, data, label, retain=False):
+        """Install one evidence file under its final name, atomically.
 
-        O_EXCL is what makes result.json immutable: a second publication attempt
-        fails rather than overwriting a forensic record.
+        The bytes go to a private temporary file in this same directory, are
+        written in full, are flushed to stable storage, and only THEN acquire
+        the final name in one atomic no-replace link. Creating the final name
+        first and writing into it afterwards -- which is what O_EXCL alone does
+        -- leaves a window in which a crash, a signal, a short write or an I/O
+        error publishes an empty or truncated result.json: a name that is
+        neither a valid immutable result nor a PENDING transaction anything can
+        recover. Here an interrupted publication leaves a temporary file that no
+        reader ever looks for, and the transaction stays exactly PENDING.
+
+        `retain` returns a read-only descriptor on the installed file, verified
+        against the bytes just written, for content a child must later read
+        without re-resolving its name.
         """
+        temporary = "%s.%s.tmp" % (name, os.urandom(8).hex())
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
         try:
-            if self.fd is None:
-                fd = os.open(self.filename(name), flags, 0o400)
-            else:
-                fd = os.open(name, flags, 0o400, dir_fd=self.fd)
-        except FileExistsError as exc:
-            raise FlashError("%s already exists and is immutable: %s"
-                             % (label, self.filename(name))) from exc
+            fd = self._open(temporary, flags, 0o400)
         except OSError as exc:
             raise FlashError("could not create %s: %s" % (label, exc)) from exc
         try:
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(data)
-                handle.flush()
-                os.fsync(handle.fileno())
-        except OSError as exc:
-            raise FlashError("could not write %s: %s" % (label, exc)) from exc
-        self.sync()
+            durable_write(fd, data, label)
+            durable_fsync(fd, label)
+        except BaseException:
+            os.close(fd)
+            self._discard(temporary)
+            raise
+        os.close(fd)
+        try:
+            durable_link(temporary, name, label,
+                         None if self.fd is None else self.fd)
+        except BaseException:
+            self._discard(temporary)
+            raise
+        self._discard(temporary)
+        self.sync("the evidence directory after %s" % label)
+        if not retain:
+            return None
+        return self.hold(name, label, data)
+
+    def hold(self, name, label, data):
+        """Keep an installed evidence file open, and prove it is what we wrote."""
+        fd = self._open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            if sha256_fd(fd, label, MAX_FILE_BYTES) != sha256_bytes(data):
+                raise FlashError("%s does not hold the bytes just published: %s"
+                                 % (label, self.filename(name)))
+        except BaseException:
+            os.close(fd)
+            raise
+        return fd
 
     def publish_json(self, name, record, label):
         data = (json.dumps(record, indent=2, sort_keys=True) + "\n").encode("ascii")
@@ -1005,39 +1277,78 @@ def device_read(programmer, evidence, tag, require_retlw=True):
     return record, memory
 
 
-def verify_programmed(image_memory, actual, failures):
-    """Every byte the image requested arrived where it was requested.
+def verify_programmed(image, actual, failures):
+    """Compare the WHOLE device against one complete expected post-write model.
 
-    CONFIG is compared outside BG<1:0> only: the factory bandgap field is not
-    the image's to assert, and is checked separately against both pre-write
-    reads.
+    Comparing only the addresses the image supplies proves that the requested
+    words arrived and proves nothing whatever about the rest of the part. The
+    current release images occupy about half of this device's 1024 words, so a
+    writer that skips its bulk erase can write every requested word correctly,
+    preserve the trim, satisfy every check that looks at image addresses -- and
+    leave hundreds of stale instructions behind in the image's holes, still
+    reachable by a computed jump or a runaway program counter. Every program
+    word therefore has an expected value here: the image's where the image
+    supplies one, the erased 0x3FFF everywhere else.
+
+    Word 0x3FF is excluded deliberately -- it is per-device OSCCAL, compared
+    against the two pre-write reads by evaluate() -- and CONFIG is compared
+    outside BG<1:0>, the factory bandgap field, which is not the image's to
+    assert either.
+
+    The count returned is what makes PASS mean something: it is the number of
+    words actually observed equal, so a comparison that stopped early cannot
+    report a positive count and an empty failure list at the same time.
     """
-    config_byte = CONFIG_WORD_ADDR * 2
-    compared = 0
-    for address in sorted(image_memory):
-        if address in (config_byte, config_byte + 1):
+    verified = 0
+    differing = 0
+    reported = 0
+    for address in range(PROGRAM_WORDS):
+        expected = image.get(address, ERASED_WORD)
+        found = actual.get(address)
+        if found == expected:
+            verified += 1
             continue
-        if address not in actual:
-            failures.append("post-program read omits image byte address 0x%04X"
+        differing += 1
+        if reported >= MAX_REPORTED_WORDS:
+            continue
+        reported += 1
+        if found is None:
+            failures.append("post-program export omits program word 0x%04X"
                             % address)
-            return compared
-        if actual[address] != image_memory[address]:
+        elif address in image:
             failures.append(
-                "post-program byte differs at 0x%04X: image 0x%02X, device 0x%02X"
-                % (address, image_memory[address], actual[address]))
-            return compared
-        compared += 1
-    if config_byte not in actual or config_byte + 1 not in actual:
+                "post-program word 0x%04X is 0x%04X; the release image programs "
+                "0x%04X there" % (address, found, expected))
+        else:
+            failures.append(
+                "post-program word 0x%04X is 0x%04X; the release image does not "
+                "program that address, so it had to be erased to 0x%04X. The "
+                "writer left this word behind."
+                % (address, found, expected))
+    if differing > reported:
+        failures.append("%d further program words differ from the device this "
+                        "write was supposed to leave behind"
+                        % (differing - reported))
+    if verified != PROGRAM_WORDS:
+        failures.append(
+            "post-program verification observed %d of the %d program words this "
+            "part holds below the calibration word"
+            % (verified, PROGRAM_WORDS))
+
+    config_verified = False
+    found_config = actual.get(CONFIG_WORD_ADDR)
+    expected_config = image.get(CONFIG_WORD_ADDR)
+    if expected_config is None:
+        failures.append("the reserved release image carries no CONFIG word")
+    elif found_config is None:
         failures.append("post-program read omits the CONFIG word")
-        return compared
-    expected_config = image_memory[config_byte] | (image_memory[config_byte + 1] << 8)
-    actual_config = actual[config_byte] | (actual[config_byte + 1] << 8)
-    if (expected_config & ~BG_MASK) != (actual_config & ~BG_MASK):
+    elif (expected_config & ~BG_MASK) != (found_config & ~BG_MASK):
         failures.append(
             "post-program CONFIG differs outside factory BG<1:0>: image 0x%04X, "
-            "device 0x%04X" % (expected_config, actual_config))
-        return compared
-    return compared + 2
+            "device 0x%04X" % (expected_config, found_config))
+    else:
+        config_verified = True
+    return {"program_words": verified, "config_word": config_verified}
 
 
 def evaluate(reservation, post, post_memory, program_exit, failures):
@@ -1046,6 +1357,9 @@ def evaluate(reservation, post, post_memory, program_exit, failures):
     if sha256_bytes(image_data) != reservation["image_sha256"]:
         raise FlashError("reservation image digest does not match its own bytes")
     image_memory = parse_ihex(image_data, "reserved release image", strict=True)
+    image = image_words(image_memory, "reserved release image")
+    actual = image_words(post_memory, "post-program device export",
+                         verb="reports")
 
     if program_exit is not None and program_exit != 0:
         failures.append("ipecmd program/verify reported exit %d" % program_exit)
@@ -1053,7 +1367,7 @@ def evaluate(reservation, post, post_memory, program_exit, failures):
         failures.append(
             "post-program export is incomplete: %d of %d program words returned"
             % (post["program_words_read"], FLASH_WORDS))
-    compared = verify_programmed(image_memory, post_memory, failures)
+    compared = verify_programmed(image, actual, failures)
 
     for field, human in (("osccal_word", "OSCCAL word"),
                          ("osccal_value", "OSCCAL value"),
@@ -1088,7 +1402,14 @@ def publish_result(evidence, reservation, post, compared, failures,
         "power_mode": POWER_MODE,
         "image_name": reservation["image_name"],
         "image_sha256": reservation["image_sha256"],
-        "programmed_image_bytes_verified": compared,
+        # The exact, whole-device count. A PASS is only reachable when every one
+        # of the PROGRAM_WORDS words below the calibration word was observed
+        # equal to the expected post-write device and the CONFIG word matched
+        # outside BG<1:0>; a comparison that covered less than that publishes
+        # both a smaller number here and the failure that explains it.
+        "verified_program_words": compared["program_words"],
+        "required_program_words": PROGRAM_WORDS,
+        "verified_config_word": compared["config_word"],
         "reservation_sha256": reservation["_self_sha256"],
         "program_exit": program_exit,
         "baseline_osccal_word": reservation["baseline_osccal_word"],
@@ -1158,6 +1479,8 @@ def command_program(args, helper_path):
             "hardware evidence, so --power %s is refused"
             % (POWER_MODE, args.power))
 
+    require_descriptor_paths()
+
     bundle = bundle_identity(args.image, helper_path)
     image_facts = validate_release_image(bundle["image_data"],
                                          "selected release image")
@@ -1167,10 +1490,21 @@ def command_program(args, helper_path):
     evidence = Evidence.create(args.evidence_dir)
     # From here on the SNAPSHOT is the image: the file the operator named may
     # change or vanish, and every later comparison must be against the exact
-    # bytes that were validated above.
-    snapshot_path = evidence.filename(IMAGE_SNAPSHOT_NAME)
-    evidence.publish(IMAGE_SNAPSHOT_NAME, bundle["image_data"],
-                     "retained release image")
+    # bytes that were validated above. image.hex is the retained EVIDENCE of
+    # those bytes; the descriptor below is what the writer is actually given, so
+    # that no name -- not the operator's, not this directory's, not image.hex's
+    # -- is resolved again between validation and the erase.
+    retained_fd = evidence.publish(IMAGE_SNAPSHOT_NAME, bundle["image_data"],
+                                   "retained release image", retain=True)
+    sealed_fd = sealed_copy(bundle["image_data"], IMAGE_SNAPSHOT_NAME,
+                            "retained release image")
+    if sealed_fd is None:
+        image_fd = retained_fd
+        image_pinning = "retained-descriptor"
+    else:
+        image_fd = sealed_fd
+        image_pinning = "sealed"
+    snapshot_path = descriptor_path(image_fd)
 
     baseline, baseline_memory = device_read(programmer, evidence, "baseline")
     prewrite, prewrite_memory = device_read(programmer, evidence, "prewrite")
@@ -1199,6 +1533,12 @@ def command_program(args, helper_path):
         "evidence_dir_fd_bound": evidence.fd is not None,
         "image_name": bundle["image_name"],
         "image_path": bundle["image_path"],
+        "image_snapshot_path": evidence.filename(IMAGE_SNAPSHOT_NAME),
+        # Which of the two pinnings the platform allowed. "sealed" is an
+        # anonymous file that cannot be rewritten by anyone, including this
+        # helper; "retained-descriptor" is the retained image.hex held open,
+        # which cannot be REPLACED but whose inode its owner could still edit.
+        "image_pinning": image_pinning,
         "image_sha256": bundle["image_sha256"],
         "image_base64": base64.b64encode(bundle["image_data"]).decode("ascii"),
         "image_program_words": image_facts["program_words"],
@@ -1214,6 +1554,10 @@ def command_program(args, helper_path):
         "programmer_sha256": programmer["sha256"],
         "programmer_java": programmer["java"],
         "programmer_java_sha256": programmer["java_sha256"],
+        # Both argvs are recorded exactly as issued, descriptor pathnames and
+        # all. A /proc/self/fd number is meaningless once this process is gone,
+        # which is precisely why the digests beside it are what identify what
+        # ran and what was written.
         "read_argv": read_argv(programmer, "<export>"),
         "write_argv": write_argv(programmer, snapshot_path),
         "baseline_device_id": baseline["device_id"],
@@ -1242,9 +1586,15 @@ def command_program(args, helper_path):
 
     # The single write. Everything above is reachable without it; nothing below
     # can undo it.
+    if sha256_fd(image_fd, "retained release image", MAX_FILE_BYTES) \
+            != bundle["image_sha256"]:
+        raise FlashError(
+            "the pinned release image no longer holds the bytes this "
+            "transaction reserved; no write was attempted")
     argv = write_argv(programmer, snapshot_path)
     program_exit, program_output = invoke(
-        programmer, argv, DEVICE_TIMEOUT_S, "ipecmd program")
+        programmer, argv, DEVICE_TIMEOUT_S, "ipecmd program",
+        pass_fds=(image_fd,))
     evidence.publish("program.log", program_output, "program transcript")
 
     failures = []
@@ -1262,8 +1612,9 @@ def command_program(args, helper_path):
         failures.append("post-program readback failed: %s" % exc)
         if program_exit != 0:
             failures.append("ipecmd program/verify reported exit %d" % program_exit)
-        record = publish_result(evidence, reservation, post, 0, failures,
-                                program_exit, False)
+        record = publish_result(evidence, reservation, post,
+                                {"program_words": 0, "config_word": False},
+                                failures, program_exit, False)
         return report(record, evidence.path)
 
     compared = evaluate(reservation, post, post_memory, program_exit, failures)
@@ -1273,6 +1624,12 @@ def command_program(args, helper_path):
 
 
 def command_finalize(args, helper_path):
+    # Finalization issues no write, but it does drive a tool whose output
+    # becomes the published result. A programmer swapped in behind its name
+    # could fabricate a passing export, so the same descriptor pinning governs
+    # the read-only path.
+    require_descriptor_paths()
+
     evidence = Evidence.open(args.evidence_dir)
     if evidence.exists(RESULT_NAME):
         raise FlashError(

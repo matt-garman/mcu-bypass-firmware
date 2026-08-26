@@ -168,9 +168,14 @@ transaction rather than a command.
 
 ### Programming
 
-Needs Python 3, the downloaded release bundle, and MPLAB X 6.20 `ipecmd`. The
-helper's `ipecmd` route is published and software-tested, but it is not
-hardware-qualified.
+Needs Linux, Python 3, the downloaded release bundle, and MPLAB X 6.20
+`ipecmd`. The helper's `ipecmd` route is published and software-tested, but it
+is not hardware-qualified. Linux is a hard requirement of the guarded
+transaction, not a preference: the helper hands `ipecmd` its own open
+descriptors as `/proc/self/fd/<n>` pathnames, because a name that is checked and
+then re-opened by another process can be pointed at a different file in between.
+Where that is unavailable it refuses to touch a device rather than run a check
+it cannot honour.
 **Power the board externally** — external power is the only arrangement this
 helper supports, programmer-supplied Vdd is refused, and the documented external
 arrangement itself still awaits controlled hardware validation. Choose a NEW
@@ -194,6 +199,14 @@ erase/program argument is constructed, so a refusal never reaches the device.
 The complete factory export is retained either way, so the only copy of this
 chip's trim is not lost if the first attempt goes badly.
 
+The readback compares the **whole device**, not only the addresses the image
+supplies. A release image occupies about half this part's 1024 words, so every
+word it does not supply is required to read back erased (`0x3FFF`); otherwise a
+writer that skipped its bulk erase would satisfy every image-address check while
+leaving half of the previous firmware in place. `result.json` records the exact
+number of words verified, and a `PASS` is only reachable when that number
+accounts for the whole device.
+
 Both pre-write reads must return a **complete** full-device export that agrees
 with itself. A reader that omits part of program memory, or reports one address
 with two different values, is refused rather than trusted: the retained baseline
@@ -201,7 +214,15 @@ is the only copy of what was on the chip, and an incomplete one would be
 incomplete for exactly the memory the next command erases. The `ipecmd` you name
 is also pinned by content, and re-checked immediately before every command it is
 given, so a tool replaced or edited part-way through a transaction stops it
-instead of running.
+instead of running -- and because the tool, any Java runtime, the JAR and the
+image are handed to the child by descriptor, a file swapped in after that last
+check still never runs and never gets written.
+
+The evidence directory itself is made durable before the device is touched: its
+directory entry is flushed in its parent, and every retained file, `result.json`
+included, is written under a temporary name and then installed atomically. An
+interruption therefore leaves either one complete immutable result or a PENDING
+transaction `finalize` can still resolve -- never a truncated `result.json`.
 
 A `FAIL` is a forensic record, not permission to retry — keep the evidence
 directory and that device together.

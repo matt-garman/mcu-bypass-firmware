@@ -20,6 +20,15 @@
 #   4. PENDING IS RECOVERABLE, READ-ONLY. A genuine SIGKILL between the write
 #      and the readback leaves a reservation with no result; finalization
 #      publishes one without ever constructing a write vector.
+#   5. THE PINNED OBJECT IS THE ONE THAT RUNS. test/pic/flash_hook.py replaces
+#      the tool, the Java runtime, the jar, the retained image and the evidence
+#      directory INSIDE the window between the helper's last identity proof and
+#      the child that consumes them. What the child actually got is read back
+#      out of the fake device, not inferred.
+#   6. PUBLICATION IS ALL OR NOTHING. The same driver fails and SIGKILLs inside
+#      each durable step of result publication. Every outcome must be either one
+#      complete immutable result or a PENDING transaction a read-only
+#      finalization can still resolve -- never a truncated result.json.
 #
 # What it does NOT prove: that a real PICkit 3 preserves the trim. That is a
 # bench question, gated separately in HARDWARE_VALIDATION_LOG.md.
@@ -69,16 +78,44 @@ command -v python3 >/dev/null 2>&1 \
 # The shipping image is built by XC8, which no host gate requires. Prefer a
 # freshly built one; fall back to the newest released image so this gate runs
 # everywhere `make test` does.
+#
+# PIC12F675_FLASH_IMAGES=build removes the fallback. Release qualification sets
+# it, because there the images have just been rebuilt from the tagged source and
+# a silent fall back to the PREVIOUS release's images would qualify the shipped
+# helper against artifacts the candidate is not shipping.
+require_build_images=0
+case "${PIC12F675_FLASH_IMAGES:-}" in
+"") ;;
+build) require_build_images=1 ;;
+*)
+	printf 'FAIL: unsupported PIC12F675_FLASH_IMAGES=%s (expected empty or "build")\n' \
+		"$PIC12F675_FLASH_IMAGES" >&2
+	exit 1
+	;;
+esac
+
+image_candidates() {
+	printf '%s\n' "$ROOT/build_pic12f675/bypass-pic12f675-$1.hex"
+	[ "$require_build_images" -eq 1 ] \
+		|| printf '%s\n' "$ROOT/release/v0.9.9/bypass-pic12f675-$1.hex"
+}
+
 source_image=""
-for candidate in "$ROOT/build_pic12f675/$IMAGE_NAME" \
-		"$ROOT/release/v0.9.9/$IMAGE_NAME"; do
+for candidate in $(image_candidates cd4053_simple); do
 	if [ -f "$candidate" ] && [ ! -L "$candidate" ] && [ -s "$candidate" ]; then
 		source_image=$candidate
 		break
 	fi
 done
-[ -n "$source_image" ] \
-	|| { printf 'FAIL: no PIC12F675 release image available to exercise the helper\n' >&2; exit 1; }
+if [ -z "$source_image" ]; then
+	if [ "$require_build_images" -eq 1 ]; then
+		printf 'FAIL: PIC12F675_FLASH_IMAGES=build requires freshly built images in %s\n' \
+			"$ROOT/build_pic12f675" >&2
+	else
+		printf 'FAIL: no PIC12F675 release image available to exercise the helper\n' >&2
+	fi
+	exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # fixtures
@@ -96,6 +133,16 @@ make_bundle() {
 	printf -- '-----BEGIN PGP SIGNATURE-----\nnot a real signature\n-----END PGP SIGNATURE-----\n' \
 		> "$dir/SHA256SUMS.asc"
 }
+
+# A sealed anonymous image cannot be rewritten by anyone, including the helper;
+# a held image.hex descriptor cannot be REPLACED but its inode remains the
+# owner's to edit. Which of the two the helper reaches for is a property of the
+# host, so the expected value is derived here rather than asserted blind.
+if python3 -c 'import os,sys; sys.exit(0 if hasattr(os, "memfd_create") else 1)'; then
+	EXPECTED_PINNING=sealed
+else
+	EXPECTED_PINNING=retained-descriptor
+fi
 
 case_no=0
 # Per-case private state: a fresh device, a fresh argument-vector log, and a
@@ -115,12 +162,32 @@ new_case() {
 	# Only the cases that hand the helper a private copy of the programmer let
 	# the fake move that copy underneath its own pathname.
 	FAKE_SELF=""
+	hook_reset
 }
+
+# test/pic/flash_hook.py runs the helper as a module and wraps ONE function, so
+# a replacement or an I/O failure can be placed inside a window that has no
+# externally observable edge. HOOK selects it; the FLASH_HOOK_* variables it
+# reads are exported by the case and cleared here so no case inherits another's.
+DRIVER="$ROOT/test/pic/flash_hook.py"
+[ -f "$DRIVER" ] && [ -x "$DRIVER" ] \
+	|| { printf 'FAIL: flashing-helper hook driver is missing or not executable: %s\n' "$DRIVER" >&2; exit 1; }
+
+hook_reset() {
+	HOOK=""
+	unset FLASH_HOOK_SWAPS FLASH_HOOK_FAIL_OP FLASH_HOOK_FAIL \
+		FLASH_HOOK_KILL_OP FLASH_HOOK_KILL
+}
+hook_reset
 
 # Run one helper invocation against this case's fake device.
 run_helper() {
 	local faults=$1
 	shift
+	local -a launcher=(python3 "$BUNDLE_HELPER")
+	# Same helper, same bundle binding -- the driver only wraps a function of the
+	# module it imports, and computes the helper identity from that same file.
+	[ -z "${HOOK:-}" ] || launcher=(python3 "$DRIVER" "$BUNDLE_HELPER")
 	set +e
 	# The interruption cases kill the helper outright, and the shell announces a
 	# signalled child on ITS stderr, not the child's. Send that notice to the
@@ -130,7 +197,7 @@ run_helper() {
 		FAKE_IPE_WITNESS="$EVIDENCE/reservation.json" \
 		FAKE_IPE_SELF="$FAKE_SELF" \
 		FAKE_IPE_FAULTS="$faults" \
-			python3 "$BUNDLE_HELPER" "$@" \
+			"${launcher[@]}" "$@" \
 				> "$CASE_DIR/stdout.txt" 2> "$CASE_DIR/stderr.txt"
 		RC=$?
 	} 2>> "$CASE_DIR/stderr.txt"
@@ -166,9 +233,27 @@ assert_rejects() {
 	assert_no_write "$label"
 }
 
-result_field() {
-	python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' \
-		"$EVIDENCE/result.json" "$1"
+json_field() {
+	python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], "<absent>"))' \
+		"$1" "$2"
+}
+
+result_field() { json_field "$EVIDENCE/result.json" "$1"; }
+
+reservation_field() { json_field "$EVIDENCE/reservation.json" "$1"; }
+
+# What the fake device recorded about the call it actually received: the digest
+# of the image the WRITER opened, and the addresses a fault chose. Read back
+# rather than assumed, which is the only way a swapped-in file is distinguished
+# from the pinned one.
+device_field() { json_field "$DEVICE" "$1"; }
+
+sha256_of() { sha256sum -- "$1" | cut -d' ' -f1; }
+
+# One publication remnant proves the temporary-file route was taken; the absence
+# of the final name proves nothing partial was published under it.
+publication_remnants() {
+	find "$EVIDENCE" -maxdepth 1 -name 'result.json.*.tmp' 2>/dev/null | wc -l
 }
 
 assert_fail_result() {
@@ -215,8 +300,14 @@ check "invocation 4 is the single write" \
 	"$([[ "${vectors[3]}" == *$'\t-M\t-Y\t-OL' ]] && echo 1 || echo 0)"
 check "the write is reached only after a durable reservation exists" \
 	"$([[ "${vectors[3]}" == "witness=1"* ]] && echo 1 || echo 0)"
-check "the write consumes the retained snapshot, not the caller's path" \
-	"$([[ "${vectors[3]}" == *"-F$EVIDENCE/image.hex"* ]] && echo 1 || echo 0)"
+# The write names a DESCRIPTOR this helper is holding open, not a pathname that
+# could be pointed at another file between the last check and the exec. What the
+# writer actually opened is then read back out of the device model, because an
+# argv alone would not distinguish a pinned descriptor from a lucky one.
+check "the write consumes a pinned descriptor, not a replaceable pathname" \
+	"$([[ "${vectors[3]}" == *$'\t-F/proc/self/fd/'* ]] && echo 1 || echo 0)"
+check "the writer received exactly the retained snapshot bytes" \
+	"$([ "$(device_field image_sha256)" = "$(sha256_of "$EVIDENCE/image.hex")" ] && echo 1 || echo 0)"
 check "the write requests no programmer-supplied power" \
 	"$([[ "${vectors[3]}" != *$'\t-W5'* ]] && echo 1 || echo 0)"
 check "invocation 5 is the final full-device read" \
@@ -231,8 +322,16 @@ check "reservation binds the programmer identity" \
 	"$(python3 -c 'import hashlib,json,sys; r=json.load(open(sys.argv[1])); print(1 if r["programmer_sha256"]==hashlib.sha256(open(sys.argv[2],"rb").read()).hexdigest() else 0)' "$EVIDENCE/reservation.json" "$FAKE")"
 check "reservation records the externally powered arrangement" \
 	"$([ "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["power_mode"])' "$EVIDENCE/reservation.json")" = external ] && echo 1 || echo 0)"
-check "result verifies every programmed byte" \
-	"$([ "$(result_field programmed_image_bytes_verified)" -gt 0 ] && echo 1 || echo 0)"
+# Exact, not "greater than zero". The whole point of comparing the WHOLE device
+# is that a PASS accounts for every word this part holds below the calibration
+# word, so the count is checked against the part's geometry; a comparison that
+# stopped early could satisfy "greater than zero" while proving nothing.
+check "result verifies every program word below the calibration word" \
+	"$([ "$(result_field verified_program_words)" = 1023 ] \
+		&& [ "$(result_field required_program_words)" = 1023 ] \
+		&& [ "$(result_field verified_config_word)" = True ] && echo 1 || echo 0)"
+check "the reservation records how the image was pinned for the writer" \
+	"$([ "$(reservation_field image_pinning)" = "$EXPECTED_PINNING" ] && echo 1 || echo 0)"
 check "result carries no failures" \
 	"$([ "$(result_field failures)" = "[]" ] && echo 1 || echo 0)"
 check "the original device export is retained" \
@@ -302,8 +401,7 @@ assert_rejects "a helper this release never published" \
 note '== every shipping variant =='
 for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
 	variant_image=""
-	for candidate in "$ROOT/build_pic12f675/bypass-pic12f675-$variant.hex" \
-			"$ROOT/release/v0.9.9/bypass-pic12f675-$variant.hex"; do
+	for candidate in $(image_candidates "$variant"); do
 		if [ -f "$candidate" ] && [ ! -L "$candidate" ] && [ -s "$candidate" ]; then
 			variant_image=$candidate
 			break
@@ -321,6 +419,12 @@ for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
 	program_run ''
 	check "the shipping $variant image programs to PASS" \
 		"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
+	# Each shipping image occupies a different, sparse part of this device, so the
+	# count that accompanies a PASS has to be the same whole-device total for all
+	# three -- not the number of words that image happens to supply.
+	check "the shipping $variant image verifies every program word" \
+		"$([ "$(result_field verified_program_words)" = 1023 ] \
+			&& [ "$(result_field verified_config_word)" = True ] && echo 1 || echo 0)"
 done
 
 # ---------------------------------------------------------------------------
@@ -655,6 +759,137 @@ assert_rejects "a programmer edited in place mid-transaction" \
 	"changed on disk between its identity check"
 
 # ---------------------------------------------------------------------------
+# 4e. the pinned object is the one that runs -- the check-to-use window
+# ---------------------------------------------------------------------------
+note '== the check-to-use window =='
+
+# 4c proves the helper NOTICES a tool that moved between two invocations. That
+# is a different property from this one. Here the replacement lands after the
+# final identity proof of the invocation about to happen, where no further check
+# can run: the only thing that can still save the transaction is that the child
+# was handed a descriptor rather than a name. Each case therefore asserts what
+# actually ran or was read, and asserts that the replacement really did land, so
+# a case cannot pass by failing to fire.
+swap_after_final_check() {
+	HOOK=1
+	export FLASH_HOOK_SWAPS=$1
+}
+
+make_decoy_tool() {
+	cat > "$1" <<'SH'
+#!/bin/sh
+printf 'DECOY TOOL RAN\n'
+exit 0
+SH
+	chmod 0755 "$1"
+}
+
+# The write transcript is the child's own stdout. A decoy that was exec'd says
+# so there; the pinned fake says "Programming/Verify complete". Requiring BOTH
+# keeps the check from passing because no write happened at all.
+decoy_silent() {
+	if [ -f "$EVIDENCE/program.log" ] \
+			&& grep -q 'Programming/Verify complete' "$EVIDENCE/program.log" \
+			&& ! grep -q 'DECOY TOOL RAN' "$EVIDENCE/program.log"; then
+		echo 1
+	else
+		echo 0
+	fi
+}
+
+# An image that programs word 0x3FF -- precisely what validate_release_image()
+# refuses -- so a swap that reached the writer would destroy the factory trim
+# the whole transaction exists to preserve.
+make_calibration_image() {
+	local cal
+	cal=$(ihex_record 07FE 00 3434)
+	printf '%s\n%s\n%s\n%s\n' "$CODE" "$cal" "$CONFIG" "$EOFREC" > "$1"
+}
+
+tool_case
+make_decoy_tool "$CASE_DIR/decoy"
+# Captured before the run: the swap MOVES the decoy onto the tool's pathname, so
+# afterwards only this digest can still say whether it landed there.
+decoy_sha=$(sha256_of "$CASE_DIR/decoy")
+swap_after_final_check "[[\"$CASE_DIR/decoy\", \"$TOOL_COPY\"]]"
+run_helper '' program --image "$IMAGE" --ipecmd "$TOOL_COPY" \
+	--evidence-dir "$EVIDENCE"
+hook_reset
+# What ran is read out of the retained transcript, which is the child's own
+# stdout: the decoy announces itself there if it is ever exec'd.
+check "an ipecmd replaced after its final identity proof never executes" \
+	"$(decoy_silent)"
+check "the pinned ipecmd performed the write instead" \
+	"$([ "$(writes)" = 1 ] && [ "$(device_field programs)" = 1 ] && echo 1 || echo 0)"
+check "the replacement really did land on the tool's pathname" \
+	"$([ "$(sha256_of "$TOOL_COPY")" = "$decoy_sha" ] && echo 1 || echo 0)"
+check "the moved installation is reported rather than driven further" \
+	"$([ "$RC" -eq 1 ] && [[ "$OUT" == *"was replaced between its identity check"* ]] && echo 1 || echo 0)"
+
+jar_case
+make_decoy_tool "$CASE_DIR/decoy"
+decoy_sha=$(sha256_of "$CASE_DIR/decoy")
+swap_after_final_check "[[\"$CASE_DIR/decoy\", \"$JAR\"]]"
+jar_run ''
+hook_reset
+check "a jar replaced after its final identity proof is never loaded" \
+	"$(decoy_silent)"
+check "the pinned jar performed the write instead" \
+	"$([ "$(writes)" = 1 ] && [ "$(device_field programs)" = 1 ] && echo 1 || echo 0)"
+check "the jar replacement really did land" \
+	"$([ "$(sha256_of "$JAR")" = "$decoy_sha" ] && echo 1 || echo 0)"
+
+jar_case
+cp -- "$JAVA" "$CASE_DIR/java-copy"
+chmod 0755 "$CASE_DIR/java-copy"
+make_decoy_tool "$CASE_DIR/decoy"
+swap_after_final_check "[[\"$CASE_DIR/decoy\", \"$CASE_DIR/java-copy\"]]"
+run_helper '' program --image "$IMAGE" --ipecmd "$JAR" \
+	--java "$CASE_DIR/java-copy" --evidence-dir "$EVIDENCE"
+hook_reset
+check "a Java runtime replaced after its final identity proof never executes" \
+	"$(decoy_silent)"
+check "the pinned Java runtime performed the write instead" \
+	"$([ "$(writes)" = 1 ] && [ "$(device_field programs)" = 1 ] && echo 1 || echo 0)"
+
+new_case
+make_calibration_image "$CASE_DIR/calibration.hex"
+calibration_sha=$(sha256_of "$CASE_DIR/calibration.hex")
+swap_after_final_check "[[\"$CASE_DIR/calibration.hex\", \"$EVIDENCE/image.hex\"]]"
+program_run ''
+hook_reset
+check "an image swapped over the retained snapshot never reaches the writer" \
+	"$([ "$(device_field image_sha256)" = "$(sha256_of "$IMAGE")" ] && echo 1 || echo 0)"
+check "the swapped image really did replace the retained file" \
+	"$([ "$(sha256_of "$EVIDENCE/image.hex")" = "$calibration_sha" ] && echo 1 || echo 0)"
+check "the pre-write image guards are not bypassed by the race" \
+	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
+check "the device's factory calibration word is untouched" \
+	"$([ "$(result_field post_osccal_word)" = "$(result_field baseline_osccal_word)" ] && echo 1 || echo 0)"
+
+# The longest version of the same window: not the file, the DIRECTORY it sits
+# in. Renaming the evidence directory and recreating its name over a decoy makes
+# every remaining pathname in the transaction resolve somewhere else.
+new_case
+mkdir -p "$CASE_DIR/decoy-evidence"
+make_calibration_image "$CASE_DIR/decoy-evidence/image.hex"
+swap_after_final_check \
+	"[[\"$EVIDENCE\", \"$CASE_DIR/moved\"], [\"$CASE_DIR/decoy-evidence\", \"$EVIDENCE\"]]"
+program_run ''
+hook_reset
+check "an evidence directory renamed mid-transaction does not redirect the write" \
+	"$([ "$(device_field image_sha256)" = "$(sha256_of "$IMAGE")" ] && echo 1 || echo 0)"
+check "the rename really did happen" \
+	"$([ -f "$CASE_DIR/moved/reservation.json" ] && echo 1 || echo 0)"
+check "the transaction keeps writing evidence into the directory it opened" \
+	"$([ -f "$CASE_DIR/moved/result.json" ] && [ ! -e "$EVIDENCE/result.json" ] && echo 1 || echo 0)"
+check "a readback it can no longer reach is a published FAIL, not a PASS" \
+	"$([ "$RC" -eq 1 ] \
+		&& [ "$(json_field "$CASE_DIR/moved/result.json" status)" = FAIL ] && echo 1 || echo 0)"
+check "the hijacked directory still wrote exactly once" \
+	"$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
+
+# ---------------------------------------------------------------------------
 # 4d. unsafe evidence and input paths -- none may reach a write
 # ---------------------------------------------------------------------------
 note '== unsafe paths =='
@@ -818,11 +1053,48 @@ assert_fail_result "an erased bandgap field" "BG<1:0> changed"
 
 new_case
 program_run 'corrupt:1'
-assert_fail_result "a corrupted program word" "post-program byte differs"
+assert_fail_result "a corrupted program word" \
+	"post-program word 0x0000 is 0x"
 
 new_case
 program_run 'noprogram:1'
-assert_fail_result "a writer that silently programmed nothing" "post-program byte differs"
+assert_fail_result "a writer that silently programmed nothing" \
+	"post-program word 0x0000 is 0x3FFF"
+
+# The failure a per-image-address comparison cannot see at all. This writer
+# skips its bulk erase, then writes every word the image supplies, correctly,
+# and preserves both factory values. Everything the image asked for is on the
+# device; what is also still on the device is the firmware that was there
+# before, at an address the image does not supply and no image-driven
+# comparison ever visits.
+new_case
+program_run 'noerase:1'
+stale_word=$(device_field stale_word)
+assert_fail_result "a writer that skipped its bulk erase" \
+	"post-program word $stale_word is 0x1234"
+check "the stale word is diagnosed as one the writer failed to erase" \
+	"$([[ "$OUT" == *"The writer left this word behind"* ]] && echo 1 || echo 0)"
+check "a no-erase overlay still wrote exactly once" \
+	"$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
+check "every other program word verified, so the count cannot mask the hole" \
+	"$([ "$(result_field verified_program_words)" = 1022 ] \
+		&& [ "$(result_field verified_config_word)" = True ] && echo 1 || echo 0)"
+check "the trim survived, so the stale word is the only finding" \
+	"$([ "$(result_field post_osccal_word)" = "$(result_field baseline_osccal_word)" ] \
+		&& [ "$(result_field post_bg_bits)" = "$(result_field baseline_bg_bits)" ] && echo 1 || echo 0)"
+
+# The other end of the image. A comparison that walked image addresses in order
+# and stopped at the first mismatch would still catch a corruption at word 0;
+# only one that reaches the LAST word the image represents catches this.
+new_case
+program_run 'corrupthigh:1'
+corrupt_word=$(device_field corrupt_word)
+assert_fail_result "a corruption at the last word the image represents" \
+	"post-program word $corrupt_word is 0x"
+check "the corruption is at the top of the image, not at word zero" \
+	"$([ "$corrupt_word" != 0x0000 ] && echo 1 || echo 0)"
+check "the count reports exactly one unverified word" \
+	"$([ "$(result_field verified_program_words)" = 1022 ] && echo 1 || echo 0)"
 
 new_case
 program_run 'programfail:1'
@@ -964,6 +1236,106 @@ new_case
 run_helper '' finalize --evidence-dir "$CASE_DIR/absent" --ipecmd "$FAKE"
 check "finalizing a directory that does not exist is refused" \
 	"$([ "$RC" -eq 2 ] && [[ "$OUT" == *"evidence directory is unavailable"* ]] && echo 1 || echo 0)"
+
+# ---------------------------------------------------------------------------
+# 8. durable, all-or-nothing evidence publication
+# ---------------------------------------------------------------------------
+note '== durable evidence publication =='
+
+# Section 7 interrupts the transaction where a cable or a Ctrl-C would. This
+# section interrupts it where only an operating system can: inside the four
+# steps that turn bytes into a published record. Each one is failed and then
+# killed at the same point, because "the syscall returned an error" and "the
+# machine stopped here" leave different debris and both have to be recoverable.
+publication_case() {
+	new_case
+	HOOK=1
+	export "FLASH_HOOK_${1}_OP=$2" "FLASH_HOOK_${1}=$3"
+	program_run ''
+	hook_reset
+}
+
+# Whatever went wrong, what must be true afterwards is the same: no result.json
+# under its final name, a reservation that still reads PENDING, and a read-only
+# finalization that can still resolve it without touching the device again.
+assert_recoverable_pending() {
+	local label=$1 remnants=$2
+	check "$label publishes nothing under the final result name" \
+		"$([ ! -e "$EVIDENCE/result.json" ] && echo 1 || echo 0)"
+	check "$label leaves the transaction PENDING" \
+		"$([ -s "$EVIDENCE/reservation.json" ] && echo 1 || echo 0)"
+	check "$label leaves $remnants inert publication remnant(s)" \
+		"$([ "$(publication_remnants)" = "$remnants" ] && echo 1 || echo 0)"
+	run_helper '' finalize --evidence-dir "$EVIDENCE" --ipecmd "$FAKE"
+	check "$label is resolved read-only by finalization" \
+		"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
+	check "$label never issued a second write" \
+		"$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
+}
+
+# The directory ENTRY, not the directory. fsync on the new evidence directory
+# does not flush the entry in its parent that names it, so a crash could leave a
+# programmed device whose reservation directory never existed. It is proved
+# here, before the device is touched at all.
+publication_case FAIL fsync "evidence directory's parent"
+check "an evidence directory entry that cannot be made durable refuses" \
+	"$([ "$RC" -eq 2 ] && [[ "$OUT" == *"could not flush the evidence directory's parent"* ]] && echo 1 || echo 0)"
+assert_no_write "an undurable evidence directory entry"
+check "it refused before any device read as well" \
+	"$([ "$(reads)" = 0 ] && echo 1 || echo 0)"
+check "the directory it could not make durable is not left behind" \
+	"$([ ! -e "$EVIDENCE" ] && echo 1 || echo 0)"
+
+publication_case FAIL write "programming result"
+assert_recoverable_pending "a failed result write" 0
+
+publication_case FAIL fsync "programming result"
+assert_recoverable_pending "a failed result flush" 0
+
+publication_case FAIL link "programming result"
+assert_recoverable_pending "a failed final-name publication" 0
+
+# The same three points, killed outright. The temporary file survives here,
+# which is exactly why the final name is never the one being written into: a
+# remnant nothing looks for is recoverable, a truncated result.json is not.
+publication_case KILL write "programming result"
+assert_recoverable_pending "a SIGKILL inside the result write" 1
+
+publication_case KILL link "programming result"
+assert_recoverable_pending "a SIGKILL before the final-name publication" 1
+
+# Past the atomic install, the record exists and is complete. A later failure
+# owes the operator that record, not a retry.
+publication_case FAIL fsync "the evidence directory after programming result"
+check "a result installed under its final name survives a failed directory flush" \
+	"$([ -s "$EVIDENCE/result.json" ] && [ "$(result_field status)" = PASS ] \
+		&& [ "$(result_field verified_program_words)" = 1023 ] && echo 1 || echo 0)"
+published=$(sha256_of "$EVIDENCE/result.json")
+run_helper '' finalize --evidence-dir "$EVIDENCE" --ipecmd "$FAKE"
+check "that published result is immutable against a later finalization" \
+	"$([ "$RC" -eq 2 ] && [[ "$OUT" == *"already has a published result"* ]] \
+		&& [ "$(sha256_of "$EVIDENCE/result.json")" = "$published" ] && echo 1 || echo 0)"
+check "the refused finalization issued no write" \
+	"$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
+
+publication_case KILL fsync "the evidence directory after programming result"
+check "a SIGKILL after the atomic install still leaves one complete result" \
+	"$([ -s "$EVIDENCE/result.json" ] && [ "$(result_field status)" = PASS ] \
+		&& [ "$(result_field verified_program_words)" = 1023 ] \
+		&& [ "$(result_field record_type)" = result ] && echo 1 || echo 0)"
+run_helper '' finalize --evidence-dir "$EVIDENCE" --ipecmd "$FAKE"
+check "a killed publication that got as far as the final name is not retried" \
+	"$([ "$RC" -eq 2 ] && [[ "$OUT" == *"already has a published result"* ]] && echo 1 || echo 0)"
+
+# A remnant is not a result, whatever it is named after.
+make_pending
+: > "$EVIDENCE/result.json.0123456789abcdef.tmp"
+run_helper '' finalize --evidence-dir "$EVIDENCE" --ipecmd "$FAKE"
+check "a publication remnant is not mistaken for a completed result" \
+	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
+check "and the remnant did not become that result" \
+	"$([ -s "$EVIDENCE/result.json" ] && [ "$(result_field status)" = PASS ] \
+		&& [ "$(result_field verified_program_words)" = 1023 ] && echo 1 || echo 0)"
 
 # ---------------------------------------------------------------------------
 note "== PIC12F675 flashing-helper checks: $checks, failures: $failures =="

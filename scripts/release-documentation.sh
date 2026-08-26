@@ -1166,7 +1166,10 @@ release_render_pic12f675_flashing() {
 		'guarded transaction, and there are two of them.' \
 		'' \
 		'**Programming these downloaded images** needs no source checkout and no' \
-		'firmware development toolchain -- only Python 3 and MPLAB X 6.20 `ipecmd`.' \
+		'firmware development toolchain -- only Linux, Python 3 and MPLAB X 6.20' \
+		'`ipecmd`. Linux is required because the helper hands the programmer its own' \
+		'open descriptors instead of pathnames another process could re-point between' \
+		'the last check and the write; elsewhere it refuses to touch a device.' \
 		'Pass the release HEX to `flash-pic12f675.py`, which ships beside the images' \
 		'and is covered by the signed `SHA256SUMS` in this release. Externally power the' \
 		'board; the helper never requests programmer-supplied Vdd. Choose a NEW' \
@@ -1181,8 +1184,10 @@ release_render_pic12f675_flashing() {
 		'' \
 		'It checks the image against the signed checksum, refuses an image that programs' \
 		'word `0x3FF` or moves the CONFIG BG field, pins the tool version, reads the' \
-		'device twice, reserves the write durably, writes exactly once, and publishes one' \
-		'immutable PASS/FAIL `result.json`. A PENDING directory -- a reservation with no' \
+		'device twice, reserves the write durably, writes exactly once, compares the' \
+		'WHOLE device afterwards -- every word the image does not supply has to read' \
+		'back erased -- and publishes one atomically installed, immutable PASS/FAIL' \
+		'`result.json`. A PENDING directory -- a reservation with no' \
 		'result -- is resolved read-only, and that mode never constructs a writer' \
 		'argument:' \
 		'' \

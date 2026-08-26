@@ -1402,8 +1402,12 @@ hash_xt_image_set() {
 # 2. FULL PRE-HARDWARE GATES
 # ============================================================================
 section "2. validation: test-long + ATtiny202 and both PIC chips' pre-hardware/target gates"
+# PIC12F675_FLASH_IMAGES=build: the flashing-helper gate inside test-long must
+# exercise the images section 1 just rebuilt from this release's source, not
+# fall back to the previous release's HEXes. The fallback exists so `make test`
+# runs on a host with no XC8; a release has no such excuse.
 log "running make test-long (exhaustive AVR suite + mutation)..."
-make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 \
+make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 PIC12F675_FLASH_IMAGES=build \
 	CC="$AVR_CC" OBJCOPY="$AVR_OBJCOPY" SIZE="$AVR_SIZE" \
 	OBJDUMP="$AVR_OBJDUMP" READELF="$READELF" IHEX_VALIDATOR="$IHEX_VALIDATOR" \
 	AWK="$AWK" HOSTCC="$HOST_CC" PIC10F320_HOST_CC="$PIC10F320_HOST_CC" \

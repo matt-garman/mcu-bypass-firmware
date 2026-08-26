@@ -16,6 +16,7 @@ CONFIG BG<1:0> survive a program unless a fault says otherwise -- because the
 helper's whole purpose is detecting when they do not.
 """
 
+import hashlib
 import json
 import os
 import signal
@@ -28,6 +29,9 @@ DEVICE_ID_WORD_ADDR = 0x2006
 BG_MASK = 0x3000
 FLASH_WORDS = 0x400
 ERASED = 0x3FFF
+# What a `noerase` writer leaves behind at an address the image does not supply:
+# a plausible old instruction rather than erased flash.
+STALE_WORD_VALUE = 0x1234
 
 BANNER = "Microchip MPLAB X IPE v%s"
 
@@ -292,9 +296,32 @@ def parse_image(path):
     return words
 
 
+def stale_word_address(image):
+    """The highest program word this image does not supply.
+
+    Chosen from the image actually being written rather than fixed, so the
+    no-erase case keeps testing what it claims to test even if a future image
+    grows into the address a constant would have named.
+    """
+    for candidate in range(FLASH_WORDS - 2, -1, -1):
+        if candidate not in image:
+            return candidate
+    return None
+
+
 def do_program(image_path, state, fault):
     state["programs"] = state["programs"] + 1
     version = fault.get("version", "6.20")
+    # What the writer was actually handed, recorded before anything else: with
+    # the image pinned by descriptor, this digest is how a test tells whether a
+    # file swapped in mid-transaction reached the writer or not.
+    try:
+        with open(image_path, "rb") as handle:
+            state["image_sha256"] = hashlib.sha256(handle.read()).hexdigest()
+    except OSError as exc:
+        sys.stderr.write("fake ipecmd: cannot read %s: %s\n" % (image_path, exc))
+        save_state(state)
+        return 92
     lines = [BANNER % version, "Connecting to MPLAB PICkit 3...",
              "Device Name = PIC12F675", "Device ID = 0x0FC0", "Revision = 0x000A",
              "Erasing...", "Programming...", "Verifying..."]
@@ -309,8 +336,23 @@ def do_program(image_path, state, fault):
         image = parse_image(image_path)
         preserved_cal = state["words"][str(CAL_WORD_ADDR)]
         preserved_bg = state["words"][str(CONFIG_WORD_ADDR)] & BG_MASK
-        for word in range(FLASH_WORDS - 1):
-            state["words"][str(word)] = ERASED
+        if fault.get("noerase") is None:
+            for word in range(FLASH_WORDS - 1):
+                state["words"][str(word)] = ERASED
+        else:
+            # A writer that programs every requested word correctly, preserves
+            # the trim, and never erases. The stale word models the firmware
+            # that was on the device already; because it sits at an address the
+            # image does not supply, only a WHOLE-DEVICE comparison can see that
+            # old code survived this write.
+            stale = stale_word_address(image)
+            if stale is None:
+                sys.stderr.write("fake ipecmd: this image leaves no unwritten "
+                                 "word to go stale\n")
+                save_state(state)
+                return 93
+            state["words"][str(stale)] = STALE_WORD_VALUE
+            state["stale_word"] = "0x%04X" % stale
         for address, value in image.items():
             if address == CONFIG_WORD_ADDR:
                 continue
@@ -329,6 +371,16 @@ def do_program(image_path, state, fault):
             # Word 0 is inside every shipping image, so the corruption lands
             # on a byte the post-write comparison actually covers.
             state["words"]["0"] = (state["words"].get("0", ERASED) ^ 0x0001) & 0x3FFF
+        if fault.get("corrupthigh") is not None:
+            # The other end of the image. A comparison that walked the image in
+            # address order and stopped at the first mismatch would still catch
+            # word 0; only one that reaches the LAST represented word catches
+            # this, which is why both ends are injected.
+            top = max(address for address in image
+                      if address != CONFIG_WORD_ADDR)
+            state["words"][str(top)] = \
+                (state["words"].get(str(top), ERASED) ^ 0x0002) & 0x3FFF
+            state["corrupt_word"] = "0x%04X" % top
         if fault.get("newdevice") is not None:
             state["words"][str(DEVICE_ID_WORD_ADDR)] = 0x0FC2
     lines.append("Programming/Verify complete")

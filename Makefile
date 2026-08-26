@@ -3337,8 +3337,17 @@ test-release-preflight:
 # helper reaches a device write only through its full guarded transaction, and
 # publishes a FAIL rather than a PASS for every way a writer can destroy this
 # part's factory trim.
+#
+# PIC12F675_FLASH_IMAGES=build removes the gate's fallback to the previously
+# released images, so it must exercise images this tree just built. `make test`
+# leaves it empty because the host suite requires no XC8; release qualification
+# sets it, where the images have already been rebuilt from the release source
+# and qualifying the shipped helper against the PREVIOUS release's images would
+# attest to artifacts this candidate does not ship.
+PIC12F675_FLASH_IMAGES ?=
 test-pic12f675-flash-helper: python-version-valid
-	./test/test_pic12f675_flash_helper.sh
+	PIC12F675_FLASH_IMAGES="$(PIC12F675_FLASH_IMAGES)" \
+		./test/test_pic12f675_flash_helper.sh
 
 # Isolated proof of final source identity and per-PIC compiler attribution.
 test-release-provenance:

@@ -421,8 +421,11 @@ pass the release HEX to this release's `flash-pic12f675.py`, never to `ipecmd`.
 The helper is identified by its released name and its bytes in the signed
 `SHA256SUMS`, not by where the file sits, so a byte-identical copy works from
 anywhere and an edited or renamed one is refused wherever it lives. It needs
-Python 3 and MPLAB X 6.20 `ipecmd`, and a NEW evidence directory per device. The
-helper's `ipecmd` route is published and software-tested, but it is not
+Linux, Python 3 and MPLAB X 6.20 `ipecmd`, and a NEW evidence directory per
+device. Linux is required because the helper hands `ipecmd` its own open
+descriptors rather than pathnames a third process could re-point between the
+check and the write; elsewhere it refuses to touch a device. The helper's
+`ipecmd` route is published and software-tested, but it is not
 hardware-qualified.
 
 ```sh
@@ -435,7 +438,12 @@ python3 flash-pic12f675.py program \
 It validates the image against this directory's signed `SHA256SUMS`, refuses an
 image that programs word `0x3FF` or moves the CONFIG BG field, pins the tool to
 MPLAB X 6.20, reads the device twice before reserving the write, performs exactly
-one write, and publishes one immutable `result.json`. A PENDING directory
+one write, and compares the WHOLE device afterwards -- every word the image does
+not supply has to read back erased, so a writer that skipped its bulk erase is a
+FAIL rather than a PASS. It then publishes one immutable `result.json`, written
+under a temporary name and installed atomically so an interruption leaves a
+recoverable PENDING transaction rather than a truncated record. A PENDING
+directory
 (reservation, no result) is resolved read-only with
 `python3 flash-pic12f675.py finalize --evidence-dir ... --ipecmd ...`, which
 never constructs a writer argument. Full details are in `FLASHING.md`.

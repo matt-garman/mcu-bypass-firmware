@@ -88,6 +88,81 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- **A writer that skipped its bulk erase could publish `PASS` over half the
+  previous firmware.** The PIC12F675 flashing helper's post-write comparison
+  walked only the addresses the release image supplies, and the current images
+  occupy 495, 521 and 523 of this part's 1023 program words. A writer that
+  never erased, wrote every requested word correctly and preserved both factory
+  trim values would therefore satisfy every check the transaction made, leave
+  hundreds of stale instructions behind in the image's holes -- still reachable
+  by a computed jump or a runaway program counter -- and publish `PASS`. The
+  fake programmer could not reveal this, because its normal write
+  unconditionally erased every program word before overlaying the image.
+
+  The comparison now runs against one complete expected post-write device: the
+  image's value where the image supplies one, and the erased `0x3FFF`
+  everywhere else, for every word from `0x000` through `0x3FE`. Word `0x3FF`
+  remains per-device OSCCAL, compared against the two pre-write reads rather
+  than the image, and CONFIG remains compared outside the factory `BG<1:0>`
+  field. `result.json` now records `verified_program_words` beside the
+  `required_program_words` total it has to equal, so a comparison that covered
+  less than the whole device cannot report a positive count and an empty
+  failure list at the same time. The fake programmer gained a no-erase mode
+  that leaves one stale word at an address the selected image does not supply,
+  and a second corruption at the LAST word the image represents rather than at
+  word zero; the regression proves both are `FAIL` after exactly one write.
+
+- **The pinned `ipecmd` and the pinned image were re-opened by name at the
+  instant they were used.** The helper held descriptors for the tool, any Java
+  runtime and the JAR, and re-hashed them immediately before each command --
+  but then handed `subprocess.run()` a pathname, which the operating system
+  resolves again. The retained image had a longer version of the same window:
+  it was published to `image.hex`, its descriptor closed, and the PATH given to
+  `ipecmd`, so a process running as the operator could unlink and replace that
+  file, or rename the evidence directory and recreate its name over another
+  one, after `reservation.json` appeared and before the erase. Every checksum,
+  Intel HEX, CONFIG, EEPROM and OSCCAL guard would have been bypassed, and the
+  post-write comparison could only have reported the damage afterwards.
+
+  The child is now handed `/proc/self/fd/<n>` for everything it must execute or
+  read: the kernel resolves that through the descriptor this process already
+  holds, to the inode the helper validated, whatever the name refers to by
+  then. The image is pinned harder still -- a sealed anonymous copy of the
+  validated bytes, which has no name to replace and no writable path at all --
+  and the reservation records which pinning was in force. That makes the
+  guarded transaction a Linux procedure: elsewhere it refuses to touch a device
+  rather than run a check it cannot honour, and `FLASHING.md`,
+  `release/README.md` and the generated release guidance say so.
+  `test/pic/flash_hook.py` drives the helper as a module and replaces the
+  executable, the Java runtime, the JAR, the retained image (with one that
+  programs the calibration word) and the evidence directory itself inside the
+  window between the final identity proof and the child, reading back out of
+  the device model what the writer actually ran and opened.
+
+- **Neither the evidence reservation nor the published result was
+  crash-atomic.** `Evidence.create()` created the evidence directory and opened
+  it, but never flushed the PARENT directory that holds the entry naming it, so
+  a crash after the reservation was announced and the write had begun could
+  lose the directory that was supposed to make that reservation durable.
+  `Evidence.publish()` created `result.json` under its final immutable name and
+  then wrote into it, so a power loss, a `SIGKILL`, a short write or an I/O
+  error could leave an empty or truncated final file -- and `finalize` refuses
+  recovery on the existence of that name alone, leaving a transaction that was
+  neither a valid result nor a recoverable PENDING.
+
+  The parent directory is now opened, the evidence directory is created
+  relative to it, and its entry is flushed before any device command; a
+  directory entry that cannot be made durable removes itself and fails the
+  transaction while nothing has been touched. Every evidence file is now
+  written to a private temporary name in the same directory, written in full,
+  flushed, and only then installed under its final name by an atomic
+  no-replace `link()`. An interrupted publication leaves an inert remnant no
+  reader looks for; a completed one leaves a record that still cannot be
+  replaced. The regression fails and then `SIGKILL`s each of the five durable
+  steps and requires every outcome to be either one complete immutable result
+  or a PENDING transaction a read-only finalization still resolves without a
+  second write.
+
 - **The durable documents disagreed about what the PIC12F675 flashing helper
   is.** `FLASHING.md` published the helper's MPLAB X 6.20 `ipecmd` procedure
   while `README.md` twice and `TOOLCHAIN.adoc` once said no `ipecmd` procedure
