@@ -506,7 +506,7 @@ assert_rejects "a different tool kind" "drives a PICkit 3"
 
 new_case
 program_run '' --power programmer
-assert_rejects "programmer-supplied power" "only the externally powered arrangement"
+assert_rejects "programmer-supplied power" "the externally powered arrangement (--power external) is the only supported one"
 
 new_case
 run_helper '' program --image "$IMAGE" --ipecmd "$CASE_DIR/absent-ipecmd" \

@@ -177,11 +177,15 @@ aggregate so missing PIC tooling cannot produce a false green release gate.
                  failure, or a handled signal. Only the explicitly requested
                  baseline and result paths are retained.
 
-                 ipecmd remains a software-tested write dialect only. The current
-                 target would require pk2cmd reads immediately before and after
-                 the IPE write; no safe dual-programmer attachment or handoff is
-                 hardware-validated, so no ipecmd user procedure is published.
-                 No ipecmd read argv is claimed either. Neither programmer is
+                 ipecmd remains a software-tested write dialect for this Make
+                 route. The current target would require pk2cmd reads immediately
+                 before and after the IPE write; no safe dual-programmer
+                 attachment or handoff is hardware-validated, so this route
+                 offers no operator ipecmd procedure and claims no ipecmd read
+                 argv. The downloaded-release helper is the separate route that
+                 does publish one: the helper's `ipecmd` route is published and
+                 software-tested, but it is not hardware-qualified (see
+                 `FLASHING.md`). Neither programmer is
                  installed on this build host, so fake-tool coverage validates
                  command routing and fail-closed evidence handling, not silicon
                  preservation. That silicon preservation and a safe IPE setup are

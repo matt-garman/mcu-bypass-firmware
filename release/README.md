@@ -417,9 +417,13 @@ programmer command above.
 target. The board must be externally powered in both paths below.
 
 *Programming the downloaded image* (no source checkout, no build toolchain):
-pass the release HEX to this bundle's `flash-pic12f675.py`, never to `ipecmd`.
-It needs Python 3 and MPLAB X 6.20 `ipecmd`, and a NEW evidence directory per
-device:
+pass the release HEX to this release's `flash-pic12f675.py`, never to `ipecmd`.
+The helper is identified by its released name and its bytes in the signed
+`SHA256SUMS`, not by where the file sits, so a byte-identical copy works from
+anywhere and an edited or renamed one is refused wherever it lives. It needs
+Python 3 and MPLAB X 6.20 `ipecmd`, and a NEW evidence directory per device. The
+helper's `ipecmd` route is published and software-tested, but it is not
+hardware-qualified.
 
 ```sh
 python3 flash-pic12f675.py program \

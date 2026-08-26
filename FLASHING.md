@@ -142,11 +142,13 @@ repository. Confirm them on the first PICkit 3 run and correct this file.
 it to the release's flashing helper, `flash-pic12f675.py`, which ships in the
 same release bundle and is covered by the same signed `SHA256SUMS`.
 
-Run the copy that bundle publishes. The helper requires its own bytes to
-appear in the selected bundle's `SHA256SUMS` under its released name, so a copy
-that was edited, renamed, or fetched from somewhere else is refused before the
-device is touched: the tool and the image it writes are covered by one
-signature, or neither of them is.
+The helper binds itself by NAME AND BYTES, not by location. It requires its own
+bytes to appear in the selected bundle's `SHA256SUMS` under its released name, so
+a copy that was edited, renamed, or never published by this release is refused
+before the device is touched: the tool and the image it writes are covered by one
+signature, or neither of them is. Where the copy happens to live is not checked —
+a byte-identical `flash-pic12f675.py` run from anywhere is the released tool, and
+one sitting inside the bundle with a single byte changed is not.
 
 This part is the one target where a correct HEX plus a writer is *not*
 sufficient, because two per-device factory-trimmed values live in memory the
@@ -166,10 +168,14 @@ transaction rather than a command.
 
 ### Programming
 
-Needs Python 3, the downloaded release bundle, and MPLAB X 6.20 `ipecmd`.
-**Power the board externally** — the helper does not request programmer-supplied
-Vdd, and no such arrangement has been validated. Choose a NEW evidence directory
-per device; the helper creates it and refuses a path that already exists.
+Needs Python 3, the downloaded release bundle, and MPLAB X 6.20 `ipecmd`. The
+helper's `ipecmd` route is published and software-tested, but it is not
+hardware-qualified.
+**Power the board externally** — external power is the only arrangement this
+helper supports, programmer-supplied Vdd is refused, and the documented external
+arrangement itself still awaits controlled hardware validation. Choose a NEW
+evidence directory per device; the helper creates it and refuses a path that
+already exists.
 
 ```sh
 IPECMD=/opt/microchip/mplabx/v6.20/mplab_platform/mplab_ipe/ipecmd.jar

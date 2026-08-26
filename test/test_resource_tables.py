@@ -345,6 +345,28 @@ def check_design_prose(prose, figures):
               "the relay comparison calls the difference %s words; it is %d"
               % (shell.group(3), big - small))
 
+    # "Why ATtiny202" opens with the reason the part was chosen, so its
+    # occupancy range is read long before either table.  It stated 47-49%
+    # against a table that had already reached 50.8%, which is the specific
+    # direction that matters: a summary that understates the tightest image is
+    # the one a reader trusts when deciding a change fits.  Both ranges are
+    # recomputed here, each from its own part's table, so neither can be
+    # updated without the other.
+    occupancy = re.search(r"sits at ([0-9]+\.[0-9])-([0-9]+\.[0-9])% of flash "
+                          r"instead of ([0-9]+\.[0-9])-([0-9]+\.[0-9])%", prose)
+    check(occupancy is not None,
+          "the ATtiny202 flash-occupancy summary sentence is missing")
+    if occupancy is not None:
+        for part, low_group, high_group in (("attiny202", 1, 2),
+                                            ("attiny13a", 3, 4)):
+            values = [utilization[(part, variant)] for variant in VARIANTS]
+            check(Decimal(occupancy.group(low_group)) == min(values)
+                  and Decimal(occupancy.group(high_group)) == max(values),
+                  "the ATtiny202 summary puts %s at %s%%-%s%%; its table spans "
+                  "%s%%-%s%%"
+                  % (part, occupancy.group(low_group),
+                     occupancy.group(high_group), min(values), max(values)))
+
 
 # docs/context_seu_detection.md restates five parts as
 # "| <label> | <budget> | simple / mute / relay | <margin> ..." rows.  The

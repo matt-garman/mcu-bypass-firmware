@@ -105,7 +105,9 @@ Programming a downloaded release does not require the firmware development
 toolchain or a repository checkout. Most targets require only the released HEX
 and programmer CLI. PIC12F675 additionally requires Python 3 and the release's
 flashing helper because its per-device factory calibration must be preserved and
-verified. See [FLASHING.md](FLASHING.md) for the per-part `avrdude` and `ipecmd`
+verified. The helper's `ipecmd` route is published and software-tested, but it is
+not hardware-qualified. See [FLASHING.md](FLASHING.md) for the per-part
+`avrdude` and `ipecmd`
 command templates and the PIC12F675 helper invocation, and
 [HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md) for which combinations
 builders have reported working and why a shared pinout does not make two parts
@@ -234,9 +236,12 @@ pinned tag and checksum signatures, validates the complete release image set,
 and requires its private fresh build to match the selected signed digest. It
 does not consume a downloaded release HEX. `pic12f675-program` remains an
 explicit development/bench path and does not claim signed-release provenance.
-No ipecmd hardware procedure is published yet. Its software-tested route needs
-pk2cmd reads immediately before and after the IPE write, and no safe
-dual-programmer attachment or handoff has been validated.
+Neither Make goal offers an operator `ipecmd` procedure, published or qualified:
+that route would need pk2cmd reads immediately before and after the IPE write,
+and no safe dual-programmer attachment or handoff has been validated. That is a
+different route from the downloaded-release helper, whose `ipecmd` procedure
+[FLASHING.md](FLASHING.md) does publish — software-tested, and still not
+hardware-qualified.
 
 Its simulator lanes run *derived* images: `make pic12f675-simcal` injects the
 oscillator calibration word that a real device carries in its last program word
@@ -279,10 +284,12 @@ device under physical custody and prohibit another write or baseline. A baseline
 is a one-device, pre-first-write record: the
 immediate read must match its complete exported HEX as well as identity/trim, so
 do not reuse it for another device or a later reflash. pk2cmd is the pinned
-readback dialect. The software-tested ipecmd write route would require pk2cmd
-reads immediately before and after the write, but no safe dual-programmer
-attachment or handoff has been validated, so no ipecmd hardware procedure is
-published. These records enable the silicon check but do not replace it: closing
+readback dialect. This route's software-tested `ipecmd` write dialect would
+additionally require pk2cmd reads immediately before and after the write, and no
+safe dual-programmer attachment or handoff has been validated, so this route
+offers no operator procedure for it — unlike the downloaded-release helper,
+which publishes one and is separately bounded above. These records enable the
+silicon check but do not replace it: closing
 §8 items 1 and 2 needs retained
 real-hardware evidence, which is the `1.x.y` hardware-validation pass (TODO
 `T3-pic12f675-bench`) that every part in this repository still awaits — not a

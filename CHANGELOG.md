@@ -88,6 +88,64 @@ file is the human-readable summary of *what changed*.
 
 ### Fixed
 
+- **The durable documents disagreed about what the PIC12F675 flashing helper
+  is.** `FLASHING.md` published the helper's MPLAB X 6.20 `ipecmd` procedure
+  while `README.md` twice and `TOOLCHAIN.adoc` once said no `ipecmd` procedure
+  was published at all -- a reader who believed either was misled about the
+  other, and only `release/README.md` drew the distinction the repository
+  actually holds. The selected policy is published now, software-tested, not
+  hardware-qualified, and every publisher now says exactly that in one
+  sentence. The Make-based development and release-provenance route keeps its
+  own, separate statement: it offers no operator `ipecmd` procedure, because
+  the pk2cmd reads it would need immediately before and after the IPE write
+  have no validated dual-programmer handoff. Three further claims are
+  corrected with it. The helper's `--power` diagnostic called the externally
+  powered arrangement "validated" while `HARDWARE_VALIDATION_LOG.md` listed
+  that same arrangement among the outstanding controlled checks; it now says
+  supported, and says the validation is still outstanding. `FLASHING.md` said
+  a helper "fetched from somewhere else" is refused, when the implemented
+  binding is released name plus released bytes and is deliberately
+  location-independent -- an edited copy inside the bundle is refused and a
+  byte-identical copy anywhere is accepted. And the signed `MANIFEST.md`,
+  published verbatim as the GitHub Release body, described simulator lanes as
+  "physical-output checks"; it now says modeled-pin output checks, which is
+  what yasimavr and gpsim observe.
+
+  Both halves are gated. Every helper publisher must carry the exact
+  published/software-tested/not-hardware-qualified sentence, and no current
+  `.md` or `.adoc` may carry the blanket denial in any of its forms, while a
+  claim scoped to the Make route -- and the accurate statement that no
+  `ipecmd` hardware procedure is QUALIFIED -- stay sayable. The rendered
+  release evidence is exercised for the modeled-pin wording and rejected for
+  the retired one.
+
+- **A design document said nothing in it was implemented while its own body
+  said otherwise.** `docs/flashing_simplicity.md` is deliberately frozen in
+  the present tense of the branch it was argued on, and two of its proposals
+  then shipped: the AVR build-before-hardware repair and the PIC12F675
+  no-compiler path. Its status banner still opened with "Nothing here is
+  implemented", and the section describing a failed build leaving changed AVR
+  fuses with no matching firmware still read as an open hardware-safety defect
+  after that defect was repaired. The banner now states what shipped and how
+  to read an un-updated section, and both build-before-hardware statements
+  carry their `v0.9.10` acknowledgement. A new preflight contract,
+  `release_validate_flashing_simplicity_status`, keeps the three in agreement:
+  a body that records an implementation update forces the banner to name that
+  version, and deleting either statement fails rather than satisfying it.
+
+- **Two current figures were checked by eye and had drifted.**
+  `DESIGN_DOCUMENTATION.adoc` summarized ATtiny202 occupancy as 47-49% of
+  flash while its own table reached 50.8%, understating the tightest image --
+  the direction that matters when a reader is deciding whether a change fits.
+  The sentence now gives both ranges to one decimal and
+  `test-resource-tables` recomputes each from its own part's table (219 ->
+  222 checks). `test/README.md` called its target-result row authoritative and
+  reported 46 PIC12F675 relay fault checks where the reviewed count table, the
+  Makefile count map, the mutation records and the adapter all use 43;
+  `test-pic-target-result-records` now reads the row's three triples back out
+  of the document and requires them to equal `pic12f675_target_count_table()`
+  (18 -> 24 checks).
+
 - **The PIC12F675 flashing helper binds the tool that runs, not the tool that
   ships.** A review of the helper found four ways the transaction could still
   be entered with something other than what it believed it was using, and each

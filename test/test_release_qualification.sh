@@ -39,6 +39,7 @@ for function in release_validate_current_documentation \
 		release_validate_staged_documentation \
 		release_validate_hardware_claims \
 		release_validate_pic12f675_flashing_helper \
+		release_validate_flashing_simplicity_status \
 		release_render_scope release_render_validation \
 		release_render_pic_toolchain_rows release_render_pic12f675_flashing \
 		release_render_flashing \
@@ -1092,6 +1093,20 @@ grep -Fq '`make pic12f675-test pic12f675-test-target-variants` (one retained mat
 	|| fail "rendered validation prose does not bind both PIC12F675 aggregates to one graph"
 grep -Fq 'all three PIC parts' "$rendered_manifest" \
 	|| fail "rendered validation prose does not describe all three PIC parts"
+# The signed manifest is published verbatim as the GitHub Release body, so the
+# substrate claim it makes about the output lanes is read by people with no
+# repository context. Every lane it names is a simulator lane (yasimavr, gpsim)
+# observing MODELED pins, and the generated evidence said "physical-output
+# checks" long after the static documents were corrected. Both directions are
+# pinned: the modeled wording must be present, and the retired claim must not
+# reappear under any spelling.
+grep -Fq 'modeled-pin output checks' "$rendered_manifest" \
+	|| fail "rendered validation prose does not call the simulator output lanes modeled-pin checks"
+checks=$((checks + 1))
+if grep -Eqi 'physical[- ](output|pin|port)' "$rendered_manifest"; then
+	fail "rendered validation prose claims physical output evidence for simulator lanes"
+fi
+checks=$((checks + 1))
 grep -Fq "| PIC10F322/PIC12F675 XC8 (\`PIC_CC=$selected_pic_cc\`) | XC8 shared version |" \
 	"$rendered_manifest" \
 	|| fail "rendered toolchain table does not attribute shared XC8 to PIC10F322 and PIC12F675"

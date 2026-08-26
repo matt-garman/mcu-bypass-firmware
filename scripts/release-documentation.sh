@@ -868,6 +868,23 @@ release_validate_pic12f675_flashing_helper() {
 		'needs no toolchain at all'
 		'no build toolchain, no clone of this repository'
 	)
+	# The one sentence that resolves the contradiction B6 found, required
+	# verbatim of every document that presents the helper's procedure.
+	#
+	# The selected policy is "helper published now, software-tested, not
+	# hardware-qualified", and each half of it was being dropped somewhere.
+	# FLASHING.md published the ipecmd procedure while README.md and
+	# TOOLCHAIN.adoc said no ipecmd procedure was published at all -- a reader
+	# who believed either one was misled about the other. This states both
+	# halves in one sentence so a document cannot carry half of it.
+	local helper_status='The helper'"'"'s `ipecmd` route is published and software-tested, but it is not hardware-qualified.'
+	# The blanket denial the sentence above replaces. It is banned as a form
+	# family rather than as three exact sentences, because the same false claim
+	# survives an editor'"'"'s rewrap and an adjective swap; what it deliberately
+	# does NOT ban is a claim SCOPED to a route ("this route offers no operator
+	# ipecmd procedure"), which is true of the Make-based development and
+	# release-provenance goals and must stay sayable.
+	local unscoped_ipecmd_denial='no ipecmd( (hardware|user|write|operator|programming))? procedure is published'
 	local retired
 
 	[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
@@ -909,6 +926,10 @@ release_validate_pic12f675_flashing_helper() {
 					_release_documentation_error "$label still publishes the retired universal claim: $retired" || rc=1 ;;
 			esac
 		done
+		case "$flowed" in
+			*"$helper_status"*) ;;
+			*) _release_documentation_error "$label presents the PIC12F675 flashing helper without the exact published/software-tested/not-hardware-qualified status: $helper_status" || rc=1 ;;
+		esac
 		_release_pic12f675_raw_writer_scan "$label" < "$document" || rc=1
 	done
 
@@ -949,6 +970,22 @@ release_validate_pic12f675_flashing_helper() {
 					_release_documentation_error "$label still publishes the superseded PIC12F675 state, which the helper retired: $retired" || rc=1 ;;
 			esac
 		done
+		# The blanket denial, scanned over EVERY current document rather than
+		# the three publishers: it was TOOLCHAIN.adoc -- which publishes no
+		# procedure of its own -- that carried one of the three offending
+		# sentences, and the next one will be written somewhere else again.
+		#
+		# Backtick CHARACTERS are removed rather than their spans blanked,
+		# which is the opposite of the hardware-claims sweep and deliberate:
+		# every document here writes the tool as `ipecmd`, so blanking the span
+		# would delete the one word the pattern turns on and let the natural
+		# spelling of the denial straight through. Naming this form in order to
+		# forbid it is therefore done by describing it, not by quoting it --
+		# test/README.md says a document may not "deny that any ipecmd
+		# procedure has been published", which is not the form itself.
+		if grep -Eqi -- "$unscoped_ipecmd_denial" <<<"${flowed//\`/}"; then
+			_release_documentation_error "$label denies that any ipecmd procedure is published; the release helper publishes one, so scope the claim to the Make route or say that route is not QUALIFIED" || rc=1
+		fi
 		case "$label" in
 			README.md|FLASHING.md|release/README.md) continue ;;
 		esac
@@ -971,7 +1008,110 @@ release_validate_pic12f675_flashing_helper() {
 		*'NOT a raw write target'*) ;;
 		*) _release_documentation_error "generated release documentation does not state that PIC12F675 is not a raw write target" || rc=1 ;;
 	esac
+	case "$(printf '%s' "$rendered" | tr '\n\t' '  ' | tr -s ' ')" in
+		*"$helper_status"*) ;;
+		*) _release_documentation_error "generated release documentation does not carry the exact helper status: $helper_status" || rc=1 ;;
+	esac
+	if grep -Eqi -- "$unscoped_ipecmd_denial" <<<"${rendered//\`/}"; then
+		_release_documentation_error "generated release documentation denies that any ipecmd procedure is published" || rc=1
+	fi
 	_release_pic12f675_raw_writer_scan "generated release documentation" <<<"$rendered" || rc=1
+	return "$rc"
+}
+
+# docs/flashing_simplicity.md is a DESIGN DISCUSSION, deliberately preserved in
+# the present tense of the branch it was argued on, and parts of it have since
+# shipped. That combination is only safe while the banner says so. The document
+# opened with "Nothing here is implemented" for the whole of the v0.9.10
+# candidate while its own body carried "Update (v0.9.10)" paragraphs recording
+# what had been built -- and a status banner is precisely the line a reader
+# stops at, so the one sentence most likely to be read was the one contradicting
+# the rest of the file.
+#
+# Three anchors, each of them something a later edit has to keep true rather
+# than a phrase to be matched:
+#
+#   1. If the body records ANY implementation update, the banner may not deny
+#      implementation, and must name every version the body says shipped. A
+#      sixth update paragraph for a later version fails until the banner
+#      follows it.
+#   2. The section-1 build-before-hardware defect and
+#   3. the sequencing step that proposes repairing it
+#      describe a hardware-safety defect -- a failed build leaving changed AVR
+#      fuses and no matching firmware -- that was actually repaired. Unmarked,
+#      each reads as an open defect in the current tree, which is the most
+#      expensive thing this document could be wrong about.
+release_validate_flashing_simplicity_status() {
+	[ "$#" -eq 1 ] || return 2
+	local repo_root=$1
+	local label='docs/flashing_simplicity.md'
+	local document="$repo_root/$label"
+	local update_re='\*Update \(v[0-9]+\.[0-9]+\.[0-9]+\)'
+	local banner updates version rc=0
+
+	[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
+		|| _release_documentation_error "$label is not a regular nonempty file" || return
+
+	# The banner is the first **Status:** paragraph, read to its blank line.
+	banner=$(awk '/^\*\*Status:\*\*/ { found=1 } found { if (/^[[:space:]]*$/) exit; print }' \
+		"$document") || return
+	[ -n "$banner" ] \
+		|| _release_documentation_error "$label has no **Status:** banner paragraph" || return
+	banner=$(printf '%s' "$banner" | tr '\n\t' '  ' | tr -s ' ')
+
+	updates=$(grep -Eo -- "$update_re" "$document" \
+		| grep -Eo 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -u) || true
+	if [ -n "$updates" ]; then
+		case "${banner,,}" in
+			*'nothing here is implemented'*)
+				_release_documentation_error "$label records implementation updates but its status banner still says nothing here is implemented" || rc=1 ;;
+		esac
+		while IFS= read -r version; do
+			[ -n "$version" ] || continue
+			case "$banner" in
+				*"$version"*) ;;
+				*) _release_documentation_error "$label records $version implementation updates its status banner does not name" || rc=1 ;;
+			esac
+		done <<<"$updates"
+	fi
+
+	# The two build-before-hardware statements. Each is located by the sentence
+	# that states the defect or proposes the repair, and must carry a version
+	# acknowledgement within the passage that follows it -- not merely somewhere
+	# in a 700-line document.
+	awk -v label="$label" '
+		BEGIN { rc = 0 }
+		index($0, "before either hardware side effect") {
+			defect = NR
+		}
+		index($0, "**Repair build-before-hardware semantics.**") {
+			proposal = NR
+		}
+		defect && NR > defect && NR <= defect + 12 && /v[0-9]+\.[0-9]+\.[0-9]+/ {
+			defect_marked = 1
+		}
+		proposal && NR >= proposal && NR <= proposal + 8 && /v[0-9]+\.[0-9]+\.[0-9]+/ {
+			proposal_marked = 1
+		}
+		END {
+			if (!defect) {
+				printf "release documentation: %s no longer states the build-before-hardware defect this contract tracks\n", label > "/dev/stderr"
+				rc = 1
+			} else if (!defect_marked) {
+				printf "release documentation: %s states the AVR build-before-hardware defect at line %d without acknowledging the release that repaired it\n", label, defect > "/dev/stderr"
+				rc = 1
+			}
+			if (!proposal) {
+				printf "release documentation: %s no longer carries the build-before-hardware sequencing step this contract tracks\n", label > "/dev/stderr"
+				rc = 1
+			} else if (!proposal_marked) {
+				printf "release documentation: %s proposes repairing build-before-hardware semantics at line %d without acknowledging the release that did\n", label, proposal > "/dev/stderr"
+				rc = 1
+			}
+			exit rc
+		}
+	' "$document" || rc=1
+
 	return "$rc"
 }
 
@@ -988,7 +1128,16 @@ release_render_validation() {
 	printf ' + `make pic10f322-test` + `make pic10f322-test-target-variants`'
 	printf ' + `make pic10f320-test` + `make pic10f320-test-target-variants`'
 	printf ' + `make pic12f675-test pic12f675-test-target-variants` (one retained matrix)'
-	printf ' (real-image fault handling, firmware/model ctx_ lock-step, and physical-output checks across AVR-XT and all three PIC parts)'
+	# "modeled-pin", not "physical": every lane this line names runs in a
+	# simulator (yasimavr for AVR-XT, gpsim for the three PIC parts) and
+	# observes MODELED package pins. The distinction matters more here than in
+	# any static document, because this string is signed into MANIFEST.md and
+	# published verbatim as the GitHub Release body, where a reader has no
+	# repository context to correct it against. The register semantics that
+	# legitimately keep the word "physical" -- GPIO reading pins rather than a
+	# latch, PA2/PA3 versus PORTA.OUT -- are properties of the device, not
+	# evidence claims, and none of them is stated here.
+	printf ' (real-image fault handling, firmware/model ctx_ lock-step, and modeled-pin output checks across AVR-XT and all three PIC parts)'
 	printf ' + %s-h parallel soak of every release soak combination (see evidence/).\n' "$hours"
 }
 
@@ -1045,7 +1194,9 @@ release_render_pic12f675_flashing() {
 		'' \
 		'A PASS means no trim damage was OBSERVED on that device. It is not proof that' \
 		'the writer preserves calibration: that remains hardware-unvalidated until the' \
-		'`1.x.y` bench pass, and the helper detects damage only after the write.' \
+		'`1.x.y` bench pass, and the helper detects damage only after the write. The' \
+		"helper's \`ipecmd\` route is published and software-tested, but it is not" \
+		'hardware-qualified.' \
 		'' \
 		'#### From a source checkout of this tag (development and release provenance)' \
 		'' \

@@ -1,9 +1,15 @@
 # Flashing simplicity — getting a release image onto hardware
 
-**Status:** analysis and proposal. **Nothing here is implemented.** This
+**Status:** analysis and proposal, **partly implemented in `v0.9.10`.** This
 document records a design discussion held on 2026-08-21 on branch
 `v0.9.9-polish`, so that the reasoning survives the conversation and does not
-have to be rebuilt from scratch.
+have to be rebuilt from scratch. Its body is preserved as it was argued, in the
+present tense of `v0.9.9`; where `v0.9.10` went on to build what a section
+proposed, an italic ***Update (v0.9.10)*** paragraph says so at that section and
+is the current statement. Two proposals shipped — the build-before-hardware
+repair of §1 and §7.2, and the PIC12F675 no-compiler path of §5.5 and §7.7 — and
+nothing else here has been. Read an un-updated section as a proposal, not as a
+description of the tree.
 
 **The goal, stated once and plainly: make it as quick, easy and painless as
 possible for someone to flash a release image to their hardware.** That is the
@@ -66,6 +72,16 @@ serialized `-j1` invocation, the fuse prerequisite runs before the flash
 prerequisite performs its build. A failed build can therefore leave changed
 fuses and no matching firmware. The source-tree convenience path must build and
 validate before either hardware side effect.
+
+***Update (v0.9.10).*** *Repaired. Every AVR `*-program` goal is now one ordered
+transaction rather than a two-prerequisite alias: the per-part build goal is a
+real prerequisite, the recipe re-confirms the VARIANT-selected image and the
+programmer while the device is still untouched, and only then writes fuses and
+then flash. A failed build, size gate or IHEX validation reaches zero `avrdude`
+invocations, and the ATtiny202 case that used to write seven fuse bytes after a
+device-pack SKIP is a refusal. `make test-avr-program-order` gates the ordering
+and the refusals. The paragraph above stands as the reason the change was made,
+not as a current defect.*
 
 ## 2. Current state, measured
 
@@ -610,7 +626,10 @@ land together; the guide and its authentication land together.
    pasteable command. State that GUI instructions are out of initial scope.
 2. **Repair build-before-hardware semantics.** Make every source-tree program
    target build and validate before either fuse or flash side effects, and
-   choose the canonical AVR operation shape.
+   choose the canonical AVR operation shape. *Done in `v0.9.10` for the AVR
+   goals, gated by `make test-avr-program-order`; see the update in §1. The
+   canonical AVR operation shape is still an open choice — the repair kept fuses
+   and flash as two ordered `avrdude` invocations rather than settling it.*
 3. **Add shared command constructors and the bulk release record.** Add the
    exact-set, environment-poisoning and fake-programmer argv tests in the same
    change. Do not publish a new command surface before its gate exists.

@@ -2037,6 +2037,19 @@ the only C edit tags the existing simulator stack-evidence line with its MCU.
 The fully provisioned strict run remains a production-release gate because this
 host has no AVR/PIC cross-toolchains.
 
+**B6 closure (2026-08-25).** The third review's remaining D4 finding was the
+ATtiny202 occupancy summary, which said 47-49% while its own table reached
+50.8% -- understating the tightest image, which is the direction that matters
+when a reader is deciding whether a change fits. The sentence now gives both
+ranges to one decimal (47.3-50.8% against the ATtiny13a's 81.8-85.7%) and
+`test-resource-tables` recomputes each half from its own part's table rather
+than matching a string, so neither range can be updated without the other
+(219 -> 222 checks). The companion figure B6 named, `test/README.md`'s 46
+PIC12F675 relay fault checks against a reviewed 43, is corrected and bound the
+same way: `test-pic-target-result-records` reads the row's three triples back
+out of the document and requires them to equal `pic12f675_target_count_table()`
+(18 -> 24 checks). See the B6 resolution for the negative controls.
+
 ### D5 - Reconcile remaining simulator and toolchain wording
 
 **Priority:** Documentation polish before merge
@@ -2183,6 +2196,18 @@ passes.
 
 *Firmware.* No firmware source is touched. No test behaviour changes except the
 one added contract.
+
+**B6 closure (2026-08-25).** The sweep had reached the workflows and the static
+documents but not the release RENDERER: `release_render_validation()` still
+wrote "physical-output checks" into `MANIFEST.md`, which is published verbatim
+as the GitHub Release body -- the one place a reader has no repository context
+to correct it against, and every lane it names is a yasimavr or gpsim lane
+observing modeled pins. It now says "modeled-pin output checks", with a comment
+recording why the register semantics that legitimately keep the word "physical"
+are not what this line states. `test-release-qualification` renders the line and
+pins it in both directions: the modeled wording required, and
+`physical[- ](output|pin|port)` rejected, so the retired claim cannot return
+under another spelling (71 -> 73 checks).
 
 ### R4 - Publish suffixed tags as prereleases
 
@@ -2999,6 +3024,113 @@ of the already selected publish-now policy and measured implementation.
 - Require the flashing-simplicity status banner and its AVR programming-order
   discussion to acknowledge the marked v0.9.10 implementation updates.
 
+**Resolution**
+
+Adopted. Five documentation defects, one shipped-tool diagnostic, and three new
+contracts.
+
+*The helper's status, stated the same way everywhere.* The selected policy is
+published now, software-tested, not hardware-qualified. `FLASHING.md` published
+the helper's MPLAB X 6.20 `ipecmd` procedure while `README.md` twice and
+`TOOLCHAIN.adoc` once said no `ipecmd` procedure was published at all; only
+`release/README.md` drew the distinction. Each publisher now carries one exact
+sentence -- "The helper's `ipecmd` route is published and software-tested, but
+it is not hardware-qualified." -- and the two Make-route passages state their own
+position separately: `pic12f675-program` and `pic12f675-release-program` offer no
+operator `ipecmd` procedure, because the pk2cmd reads either would need
+immediately before and after the IPE write have no validated dual-programmer
+handoff. `TOOLCHAIN.adoc` says the same and points at the helper.
+
+*Power.* The helper's `--power` refusal and its `--help` text called the
+externally powered arrangement "validated" at exactly the moment an operator is
+about to write a device, while `HARDWARE_VALIDATION_LOG.md` lists that same
+arrangement, and release-from-reset behaviour with it, among the outstanding
+controlled checks. Both now say it is the only SUPPORTED arrangement, that
+programmer-supplied Vdd is refused, and that the documented arrangement still
+awaits controlled hardware validation. `FLASHING.md`'s power paragraph says the
+same. No behaviour changed; `test-pic12f675-flash-helper`'s rejection assertion
+was retargeted to the new text.
+
+*Helper identity.* `FLASHING.md` said a copy "fetched from somewhere else" is
+refused. `bundle_identity()` binds on released NAME and released BYTES and is
+deliberately location-independent -- binding on location is the defect that once
+let an edited off-bundle helper program a signed image. Both `FLASHING.md` and
+`release/README.md` now state the binding as name-and-bytes and say plainly that
+a byte-identical copy works from anywhere while an edited one inside the bundle
+does not.
+
+*Generated evidence.* `release_render_validation()` wrote "physical-output
+checks" into `MANIFEST.md`, which is published verbatim as the GitHub Release
+body -- the one place a reader has no repository context to correct it against.
+Every lane it names is a simulator lane observing modeled pins, so it now says
+"modeled-pin output checks". D2's rule is unchanged: nothing here was a register
+semantic.
+
+*The design document.* `docs/flashing_simplicity.md` opened with "Nothing here is
+implemented" through the whole candidate while its body carried five
+`Update (v0.9.10)` paragraphs, and its §1 description of a failed build leaving
+changed AVR fuses with no matching firmware read as an open hardware-safety
+defect after P2 repaired it. The banner now says what shipped and how to read an
+un-updated section; §1 and §7 step 2 carry their acknowledgements.
+
+*Two drifted figures.* `DESIGN_DOCUMENTATION.adoc` summarized ATtiny202 occupancy
+as 47-49% while its own table reached 50.8%; it now states 47.3-50.8% against
+81.8-85.7%, both derived. `test/README.md` reported 46 PIC12F675 relay fault
+checks where the reviewed table, the Makefile count map, the mutation records and
+the adapter all use 43.
+
+*Contracts.* Three, each with negative controls.
+`release_validate_pic12f675_flashing_helper` requires the exact status sentence
+of every publisher and of the generated guidance, and rejects the blanket denial
+in any of its forms across every current `.md`/`.adoc` -- while a claim scoped to
+the Make route, and the accurate statement that no `ipecmd` hardware procedure is
+QUALIFIED, both stay sayable. A new
+`release_validate_flashing_simplicity_status` holds that document's banner to its
+own update paragraphs and holds both build-before-hardware statements to the
+release that repaired them; deleting a statement fails rather than satisfying it.
+`test-resource-tables` recomputes the ATtiny202 and ATtiny13a occupancy ranges
+from their own tables, and `test-pic-target-result-records` reads
+`test/README.md`'s three count triples back out of the document and requires them
+to equal `pic12f675_target_count_table()`.
+
+*Firmware.* No firmware source is touched.
+
+**Acceptance evidence, as delivered**
+
+- [x] `release_validate_pic12f675_flashing_helper` requires the exact status
+  sentence of `README.md`, `FLASHING.md`, `release/README.md` and the generated
+  guidance, and rejects the blanket denial across every current `.md`/`.adoc`.
+  Seven negative controls: each publisher with the sentence removed, three
+  spellings of the denial, and the generated guidance without it. One positive
+  control proves a route-scoped denial and a "not QUALIFIED" statement still
+  pass, so the Make route stays describable.
+- [x] `test-release-qualification` renders the manifest validation line and
+  requires "modeled-pin output checks" while rejecting
+  `physical[- ](output|pin|port)` in it. `release_render_validation()` was the
+  last generated claim still saying "physical-output checks"; the workflows and
+  static documents were corrected under D5. 71 -> 73 checks.
+- [x] `test-resource-tables` recomputes both halves of the ATtiny202 occupancy
+  sentence from their own tables. Observed red three ways on a shadow tree: the
+  stale 47-49% range, a stale 81.8-84.8% ATtiny13a half, and the sentence
+  deleted. 219 -> 222 checks.
+- [x] `test-pic-target-result-records` reads the three `<fault>/<lockstep>/<io>
+  for <variant>` triples out of `test/README.md` and requires them to equal
+  `pic12f675_target_count_table()`, with a second pass rejecting a second triple
+  for the same variant. Observed red on the stale 46 and on a stale triple left
+  beside the corrected one. 18 -> 24 checks.
+- [x] `release_validate_flashing_simplicity_status` is new and registered in all
+  four validator registries. Six negative controls: the "Nothing here is
+  implemented" banner, a banner naming no shipped version, each
+  build-before-hardware statement unmarked, and each deleted. Argument and
+  missing-file guards included.
+- [x] Gates re-run on the changed tree: `make test-release-preflight`
+  (174 -> 192 checks), `test-release-qualification` (71 -> 73),
+  `test-pic12f675-flash-helper` (257), `test-resource-tables` (222, 21 of 21
+  images measured), `test-pic-target-result-records` (24), `test-supply-chain`
+  (47), `test-workflow-syntax` (381), `test-todo-index` (90),
+  `test-makefile-name-contract` (48), `test-clean-contract` (11), and the full
+  `make test`.
+
 ## Final validation and release gate
 
 Complete these only after R1-R6, F1-F4, P1-P2, T1-T2, and D1-D5 are done or an
@@ -3100,7 +3232,7 @@ Record each completed item with its commit ID and decisive validation command.
 | R1 | DONE | `7dab4db` | `make CC=: test-pic-build`; `test/test_release_qualification.sh`; `test/test_workflow_syntax.sh` |
 | R2 | DONE | `7b54dea` | `test/test_release_preflight.sh`; `test/test_release_provenance.sh`; `make test-workflow-syntax test-release-history` |
 | R3 | DONE | `9a7c479` | `make test-pic-build test-release-preflight test-release-qualification`; `scripts/make-release.sh --preflight v0.9.10` |
-| F1 | DONE (B1 closed) | `a8fe23d`, `b14cd7a`, _pending_ | B1's parked-GP4 canonicalization landed in the PIC12F675 relay emergency path. GP1/GP2/GP4 are all low in intent and modeled pins at the escalation's single whole-port write; both the host shipping-source lane and the libgpsim relay lane observe GP4 BEFORE the watchdog spin, and `host:parked-output` kills a GP4-only regression. Decisive validation: `make pic12f675 pic12f675-test-stack-bound pic12f675-analyze pic12f675-coverage-check-fw test-resource-tables test-mutation-sandbox`; `make PIC12F675_FAULT_VARIANT=tq2_l2_5v_relay pic12f675-test-fault`; `make PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target`; shared-header regressions `pic10f322-coverage-check-fw`, `pic10f322-test-fault`, `pic10f320-test-fault-target`. |
+| F1 | DONE (B1 closed) | `a8fe23d`, `b14cd7a`, `0110d45` | B1's parked-GP4 canonicalization landed in the PIC12F675 relay emergency path. GP1/GP2/GP4 are all low in intent and modeled pins at the escalation's single whole-port write; both the host shipping-source lane and the libgpsim relay lane observe GP4 BEFORE the watchdog spin, and `host:parked-output` kills a GP4-only regression. Decisive validation: `make pic12f675 pic12f675-test-stack-bound pic12f675-analyze pic12f675-coverage-check-fw test-resource-tables test-mutation-sandbox`; `make PIC12F675_FAULT_VARIANT=tq2_l2_5v_relay pic12f675-test-fault`; `make PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target`; shared-header regressions `pic10f322-coverage-check-fw`, `pic10f322-test-fault`, `pic10f320-test-fault-target`. |
 | T1 | DONE | `fd9aa28` | `make test`; `make pic10f322-coverage-check-fw HOSTCC=gcc-10`; `test/test_release_preflight.sh` |
 | T2 | DONE | `130b22f` | `make test`; `test/test_workload_rebuild.sh`; mutated-tree `make test` reaching the PIC12F675 host oracle |
 | D1 | DONE | `ed5b654` | `make test-release-preflight` (85 -> 101 checks, 12 negative controls); `make test-release-qualification test-todo-index test-makefile-name-contract test-release-history` |
@@ -3110,24 +3242,26 @@ Record each completed item with its commit ID and decisive validation command.
 | F2 | DONE | `f6d9f82`, `f9dd333`, `5deb4e4`, `9999886`, `b6d06d2` | Fully provisioned current-HEAD validation reported passing: AVR-XT's 32-case matrix and PIC12F675's 43-check relay lane prove modeled physical coil-pin quiescence before reset; all affected resource, stack, timing, static, simulator, coverage, recovery, and merged 136-mutant gates pass |
 | F3 | DONE | `df89ec0` | PIC10F320 flash, return-stack, image-baseline, host/target fault, lock-step, target-I/O, coverage, analysis, and mutation gates pass; relay is 242/256 words at stack depth 3/8, both sequence-sensitive mutants are killed, and both CD4053 images are unchanged |
 | F4 | DONE | `fc23e48` | Fully provisioned current-HEAD suite passes; `make test-static-assert-guards` has 68 checks including 11 exact near-bound FIRES/CLEAN fixtures, compiled-image pet intervals fit their bounds, and timing, pulse-width, watchdog-liveness, static-analysis, and resource gates pass |
-| P1 | SOFTWARE RE-OPENED (B2-B4, B6); BENCH OPEN | `58fb829`, `37b20bd` | The prior 257-check helper hardening remains historical evidence, but third review found a sparse-image false PASS, mutable-path reopening of the pinned tool/image, non-durable parent/result publication, and contradictory durable claims. Close software only after every B2-B4/B6 acceptance case passes. **Acceptance criterion 4 (controlled PICkit 3 / MPLAB X 6.20 bench run) stays open and needs silicon, but remains the separate `1.x.y` hardware gate.** |
+| P1 | SOFTWARE RE-OPENED (B2-B4); BENCH OPEN | `58fb829`, `37b20bd` | The prior 257-check helper hardening remains historical evidence, but third review found a sparse-image false PASS, mutable-path reopening of the pinned tool/image, non-durable parent/result publication, and contradictory durable claims. B6's share is closed; close software only after every B2-B4 acceptance case passes. **Acceptance criterion 4 (controlled PICkit 3 / MPLAB X 6.20 bench run) stays open and needs silicon, but remains the separate `1.x.y` hardware gate.** |
 | P2 | DONE | `4cf4804`, `6ef8c4d` | The selected variant must belong to the current forced rebuild; final regular/non-symlink HEX revalidation and literal argument/action binding precede hardware; `test-avr-program-order` passes 56 exact-order, stale-image, mismatch, size, override, symlink, and stateful-input checks, with all supporting build/selector/fuse/serialization/release-preflight contracts green |
-| D4 | RE-OPENED (B6) | `2585ad4`, `18cd7ee` | The strict source-bound 35-file resource-evidence gate remains implemented. Third review found the ATtiny202 47-49% summary stale against its 50.8% table row, so the current-resource prose contract and regression are not fully closed. |
-| D5 | RE-OPENED (B6) | `f36f085` | Most simulator/toolchain wording is reconciled, but generated signed release evidence still says "physical-output checks" for modeled simulator pins. Close after generated/static wording and its negative contract agree. |
+| D4 | DONE (B6 closed) | `2585ad4`, `18cd7ee`, `_pending_` | The strict source-bound 35-file resource-evidence gate remains implemented. B6's two stale figures are corrected AND bound to oracles: `DESIGN_DOCUMENTATION.adoc`'s ATtiny202 occupancy summary now reads 47.3-50.8% against 81.8-85.7% with `test-resource-tables` recomputing both halves from their own tables (219 -> 222 checks), and `test/README.md`'s PIC12F675 relay fault count is 43, read back out of the document and compared with `pic12f675_target_count_table()` by `test-pic-target-result-records` (18 -> 24 checks). |
+| D5 | DONE (B6 closed) | `f36f085`, `_pending_` | `release_render_validation()` was the last generated claim still saying "physical-output checks"; the signed `MANIFEST.md`, published verbatim as the release body, now says "modeled-pin output checks". `test-release-qualification` renders that line and pins it in both directions -- the modeled wording required, `physical[- ](output|pin|port)` rejected (71 -> 73 checks). |
 | R4 | DONE | `ba4d9d6` | `make test-workflow-syntax test-release-provenance test-release-qualification`; stable tags publish normally, suffixed tags add `--prerelease`, and malformed tags stop before build or `gh` |
 | R5 | DONE | `7533d52` | `make test-supply-chain test-workflow-syntax test-release-preflight`; installer and verifier independently reject scan/order/hash/empty inventories while preserving unusual non-NUL filename bytes |
 | R6 | RE-OPENED (B5) | `251510b` | The allowlist and exact-inventory guards remain implemented, but `-i`/`--ignore-errors` propagates through nested release Makes and can turn failed recipe gates into success. Close after all unsupported recipe-semantic modes fail before tools/scratch/build work in Make and direct-script paths. |
-| B1 | DONE | _pending_ | Closes F1. See F1's row and the B1 resolution block above. |
-| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; resolve B2-B6, then rerun every pre-merge gate on the actual final candidate. P1's bench run is a `1.x.y` hardware gate, not a pre-merge one. |
+| B1 | DONE | `0110d45` | Closes F1. See F1's row and the B1 resolution block above. |
+| B6 | DONE | `_pending_` | Closes D4 and D5, and closes P1's documentation share. Every publisher carries the exact published/software-tested/not-hardware-qualified helper status; the Make route states its own position separately; the helper's `--power` diagnostic says supported rather than validated; helper identity is described as released-name-and-bytes, location-independent; generated release evidence says modeled-pin; `docs/flashing_simplicity.md`'s banner and both build-before-hardware statements acknowledge what shipped. Three contracts with negative controls: the extended flashing-helper validator, the new `release_validate_flashing_simplicity_status`, and the two figure oracles. `test-release-preflight` 174 -> 192. |
+| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; resolve B2-B5, then rerun every pre-merge gate on the actual final candidate. P1's bench run is a `1.x.y` hardware gate, not a pre-merge one. |
 
 ## Merge decision
 
 Do not merge `v0.9.9-polish` or begin production `v0.9.10` qualification until
-B2-B6 and every other pre-merge implementation item are closed and recorded in
-the completion record above. B1 is closed, which closes F1; P1 software, R6, D4,
-and D5 remain reopened. The previously green aggregate suite is not closure
-because each remaining finding above identifies the exact unexercised failure
-mode.
+B2-B5 and every other pre-merge implementation item are closed and recorded in
+the completion record above. B1 is closed, which closes F1; B6 is closed, which
+closes D4 and D5 and P1's documentation share. P1's remaining software blockers
+(B2-B4) and R6 remain reopened. The previously green aggregate suite is not
+closure because each remaining finding above identifies the exact unexercised
+failure mode.
 
 P1's controlled PICkit 3/MPLAB X 6.20 bench run still needs silicon. It remains
 the `1.x.y` hardware gate tracked in `HARDWARE_VALIDATION_LOG.md` and `TODO.md`
@@ -3136,7 +3270,7 @@ are fixed. The owner direction is to publish the helper now with precise
 software-tested/hardware-unqualified language; there is no additional
 publish-versus-withhold decision to make.
 
-After B2-B6 are closed, rerun every reopened pre-merge gate, delete this file
+After B2-B5 are closed, rerun every reopened pre-merge gate, delete this file
 and all references, run the release dry run on the actual candidate, and only
 then merge and begin production qualification. Production soaks, the
 artifact-only release commit, signed tag, and clean-runner byte-for-byte

@@ -1144,9 +1144,17 @@ def command_program(args, helper_path):
             "this helper drives a PICkit 3 (%s) only; --tool %s is refused"
             % (TOOL, args.tool))
     if args.power != POWER_MODE:
+        # "supported", not "validated".  The externally powered arrangement is
+        # the only one this tool constructs commands for, and it is the only one
+        # the software tests cover -- but HARDWARE_VALIDATION_LOG.md lists that
+        # same arrangement, and release-from-reset behaviour with it, among the
+        # controlled bench checks that are still outstanding.  Telling an
+        # operator their setup is "validated" at the moment they are about to
+        # write a device is precisely where that overstatement costs something.
         raise FlashError(
-            "only the externally powered arrangement (--power %s) is validated; "
-            "no programmer-powered voltage/interface setup has been retained as "
+            "the externally powered arrangement (--power %s) is the only "
+            "supported one; programmer-supplied Vdd is refused, and no "
+            "programmer-powered voltage/interface setup has been retained as "
             "hardware evidence, so --power %s is refused"
             % (POWER_MODE, args.power))
 
@@ -1370,8 +1378,9 @@ def build_parser():
     program.add_argument("--part", default=PART, help=argparse.SUPPRESS)
     program.add_argument("--tool", default=TOOL, help=argparse.SUPPRESS)
     program.add_argument("--power", default=POWER_MODE,
-                         help="target power arrangement; only '%s' is validated"
-                              % POWER_MODE)
+                         help="target power arrangement; only '%s' is "
+                              "supported, and it still awaits controlled "
+                              "hardware validation" % POWER_MODE)
 
     finalize = subparsers.add_parser(
         "finalize", help="publish the result of an interrupted PENDING "
