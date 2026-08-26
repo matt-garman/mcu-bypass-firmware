@@ -3126,6 +3126,56 @@ outer Make process already consumed these modes safely.
   tree so acceptance cannot depend on missing outputs eventually causing a
   later unrelated failure.
 
+**Resolution**
+
+The two production entry layers now reject the mode at the boundary each one
+owns. The Makefile snapshots `MAKEFLAGS`, `MFLAGS`, and `GNUMAKEFLAGS` before
+the release declarations can alter them, recognizes GNU Make's normalized
+compact `i` as well as `-i` and `--ignore-errors`, and raises a parse-time error
+for `release` and `release-preflight`. The recipe therefore never starts. An
+outer `make -n release` remains a harmless way to inspect and test that
+parse-time contract: it cannot execute the release script and is not the direct-
+script hazard this item identifies.
+
+`scripts/make-release.sh` independently inspects the original three flag
+channels before its first Make query, Git query, selected-tool probe, scratch
+directory, clean, build, or device path. It rejects ignore-errors plus all three
+other GNU Make modes that suppress or replace recipe execution: `-n` and its
+`--dry-run`/`--just-print`/`--recon` aliases, `-q`/`--question`, and
+`-t`/`--touch`. It handles normalized compact flag words and explicit short and
+long forms without interpreting assignment values as options. Ordinary
+development goals do not enter either release-only guard, and benign release
+transport such as `-s`, `-w`, `-j1`, command-line assignments, tool paths, and
+relocated build directories remains available.
+
+**Acceptance evidence, as delivered**
+
+- [x] `test-release-images` drives both `release` and `release-preflight` with
+  direct `-i`, direct `--ignore-errors`, compact and short inherited
+  `MAKEFLAGS`, and inherited `GNUMAKEFLAGS`. Every case fails at parse time,
+  names ignore-errors, and contains no release-script recipe line (233 -> 239
+  checks).
+- [x] `test-release-preflight` first proves the failure mechanism: the same
+  failing nested recipe exits nonzero normally and zero under inherited compact
+  `i`. It then requires the direct script to reject compact, short, and long
+  ignore-errors through `MAKEFLAGS`, plus `MFLAGS` and `GNUMAKEFLAGS`, before
+  the first Make query.
+- [x] The direct-script matrix rejects compact and long dry-run, question, and
+  touch modes with the same no-query/no-tool/no-scratch boundary. All 21
+  canonical stale image basenames are present under relocated family build
+  directories during those cases, so no rejection can be credited to a later
+  missing-output failure (`test-release-preflight` 192 -> 207 checks; Makefile
+  queries unchanged at 91).
+- [x] Focused and supporting gates pass: `test-release-images`,
+  `test-release-preflight`, `test-release-provenance`,
+  `test-release-qualification`, `test-release-history`,
+  `test-makefile-name-contract`, `test-clean-contract`, and `test-todo-index`.
+  `test-workflow-syntax` reaches its expected local skip because PyYAML is not
+  installed. `make test` was attempted and stops in the pre-existing host
+  environment gap before reaching the changed gates: clang-tidy cannot find
+  `/usr/include/gnu/stubs-32.h` (and `avr-gcc` is absent). `git diff --check` is
+  clean. No firmware source changed.
+
 ### B6 - durable release documentation still makes contradictory claims
 
 **Affected checklist items:** P1, D4, and D5 RE-OPENED. F2 implementation remains
@@ -3422,23 +3472,23 @@ Record each completed item with its commit ID and decisive validation command.
 | D5 | DONE (B6 closed) | `f36f085`, `64ad036` | `release_render_validation()` was the last generated claim still saying "physical-output checks"; the signed `MANIFEST.md`, published verbatim as the release body, now says "modeled-pin output checks". `test-release-qualification` renders that line and pins it in both directions -- the modeled wording required, `physical[- ](output|pin|port)` rejected (71 -> 73 checks). |
 | R4 | DONE | `ba4d9d6` | `make test-workflow-syntax test-release-provenance test-release-qualification`; stable tags publish normally, suffixed tags add `--prerelease`, and malformed tags stop before build or `gh` |
 | R5 | DONE | `7533d52` | `make test-supply-chain test-workflow-syntax test-release-preflight`; installer and verifier independently reject scan/order/hash/empty inventories while preserving unusual non-NUL filename bytes |
-| R6 | RE-OPENED (B5) | `251510b` | The allowlist and exact-inventory guards remain implemented, but `-i`/`--ignore-errors` propagates through nested release Makes and can turn failed recipe gates into success. Close after all unsupported recipe-semantic modes fail before tools/scratch/build work in Make and direct-script paths. |
+| R6 | DONE (B5 closed) | `251510b`, pending | The original allowlist and exact-inventory guards remain implemented. B5 adds the missing recipe-semantics boundary: outer release goals reject ignore-errors at parse time, and direct script use rejects ignore-errors, dry-run, question, and touch before its first Make query. `test-release-images` passes 239 checks; `test-release-preflight` passes 207 checks with 91 queries. |
 | B1 | DONE | `0110d45` | Closes F1. See F1's row and the B1 resolution block above. |
 | B6 | DONE | `64ad036` | Closes D4 and D5, and closes P1's documentation share. Every publisher carries the exact published/software-tested/not-hardware-qualified helper status; the Make route states its own position separately; the helper's `--power` diagnostic says supported rather than validated; helper identity is described as released-name-and-bytes, location-independent; generated release evidence says modeled-pin; `docs/flashing_simplicity.md`'s banner and both build-before-hardware statements acknowledge what shipped. Three contracts with negative controls: the extended flashing-helper validator, the new `release_validate_flashing_simplicity_status`, and the two figure oracles. `test-release-preflight` 174 -> 192. |
 | B2 | DONE | `e625c8b` | Closes P1's sparse-image false PASS. `verify_programmed()` compares every word `0x000`-`0x3FE` against one complete expected post-write device -- the image's value where supplied, erased `0x3FFF` elsewhere -- and `result.json` carries `verified_program_words` beside the total it must equal. The fake programmer gained `noerase` (every requested word correct, both trim values preserved, one stale instruction where the image never reaches) and `corrupthigh`. Observed red: the old image-address-only comparison publishes `PASS` over the no-erase overlay. `PIC12F675_FLASH_IMAGES=build` binds release qualification to the images the candidate ships. |
 | B3 | DONE | `e625c8b` | Closes P1's check-to-use race. The child is handed `/proc/self/fd/<n>` for the executable it runs, the Java runtime, the jar and the image; the image is additionally a sealed anonymous copy where the platform allows, recorded as `image_pinning`. `require_descriptor_paths()` refuses on any platform that cannot do this, in `program` and in `finalize`. `test/pic/flash_hook.py` replaces all five targets inside the window, and each case reads back what the writer actually ran and opened. Four negative controls observed red. |
 | B4 | DONE | `e625c8b` | Closes P1's non-durable publication. The evidence parent is opened and its directory entry flushed before any device command, removing the directory and failing if it cannot be. Every evidence file is written to a private temporary name, flushed, and installed by an atomic no-replace `link()`. Five injected failures and two real `SIGKILL`s inside publication; every outcome is one complete immutable result or a recoverable `PENDING`. Observed red: reverting to create-then-write leaves a truncated `result.json` under the final name. |
+| B5 | DONE | pending | Closes R6. Production Make goals reject direct, normalized, and inherited ignore-errors before their recipes; direct script use rejects ignore-errors, dry-run, question, and touch through all three GNU Make flag transports before any query, selected tool, scratch, or build. A failing nested-gate witness and a complete 21-image stale tree make both failure mechanisms explicit. |
 | Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; resolve B5, then rerun every pre-merge gate on the actual final candidate. P1's bench run is a `1.x.y` hardware gate, not a pre-merge one. |
 
 ## Merge decision
 
 Do not merge `v0.9.9-polish` or begin production `v0.9.10` qualification until
-B5 and every other pre-merge implementation item are closed and recorded in the
-completion record above. B1 is closed, which closes F1; B6 is closed, which
-closes D4 and D5 and P1's documentation share; B2-B4 are closed, which closes
-P1's software share. R6 remains reopened, and B5 is its remaining blocker. The
-previously green aggregate suite is not closure because the remaining finding
-above identifies the exact unexercised failure mode.
+the reopened final-candidate gate is complete and recorded above. B1 closes F1;
+B6 closes D4, D5, and P1's documentation share; B2-B4 close P1's software
+share; and B5 closes R6. Every third-review implementation blocker is therefore
+closed, but the earlier aggregate run remains historical evidence rather than a
+substitute for the required rerun on this candidate.
 
 P1's controlled PICkit 3/MPLAB X 6.20 bench run still needs silicon. It remains
 the `1.x.y` hardware gate tracked in `HARDWARE_VALIDATION_LOG.md` and `TODO.md`
@@ -3447,8 +3497,8 @@ blockers are fixed. The owner direction is to publish the helper now with precis
 software-tested/hardware-unqualified language; there is no additional
 publish-versus-withhold decision to make.
 
-After B5 is closed, rerun every reopened pre-merge gate, delete this file
-and all references, run the release dry run on the actual candidate, and only
-then merge and begin production qualification. Production soaks, the
-artifact-only release commit, signed tag, and clean-runner byte-for-byte
-reproduction remain post-merge release-time gates.
+Rerun every reopened pre-merge gate, delete this file and all references, run
+the release dry run on the actual candidate, and only then merge and begin
+production qualification. Production soaks, the artifact-only release commit,
+signed tag, and clean-runner byte-for-byte reproduction remain post-merge
+release-time gates.

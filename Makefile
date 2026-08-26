@@ -27,7 +27,9 @@ _RELEASE_NO_TOOL_PARSE := $(strip \
 # from the immutable value that ultimately wins.
 _RELEASE_REQUESTED_COMMAND_LINE_NAMES := $(sort $(foreach n,$(.VARIABLES),\
 	$(if $(filter command,$(firstword $(origin $(n)))),$(n))))
-_RELEASE_REQUESTED_MAKE_FLAGS := $(MAKEFLAGS) $(GNUMAKEFLAGS)
+_RELEASE_REQUESTED_MAKE_FLAGS := $(MAKEFLAGS) $(MFLAGS) $(GNUMAKEFLAGS)
+_RELEASE_REQUESTED_COMPACT_MAKE_FLAGS := \
+	$(firstword $(MAKEFLAGS)) $(firstword $(MFLAGS)) $(firstword $(GNUMAKEFLAGS))
 # Matrix requests can arrive as recursive command-line variables. Preserve their
 # literal words without expanding embedded GNU Make functions, expose only known
 # names to rule generation, and forward safe metadata through the serialization
@@ -8238,10 +8240,21 @@ override RELEASE_IDENTITY_DRIFT := $(strip \
 override RELEASE_CONTRACT_VALID := 1
 override RELEASE_CANONICAL_MAKEFILE := $(abspath Makefile)
 override RELEASE_LOADED_MAKEFILE := $(abspath $(lastword $(MAKEFILE_LIST)))
-override RELEASE_DANGEROUS_MAKE_FLAGS := $(strip \
+# GNU Make normalizes both `-i` and `--ignore-errors` into an `i` in the
+# compact first word of MAKEFLAGS/MFLAGS. Also inspect explicit short-option
+# words so inherited MFLAGS/GNUMAKEFLAGS forms cannot evade that normalization.
+_release_ignore_errors_short_flags = $(strip $(foreach f,$(filter -%,$(1)),\
+	$(if $(filter --%,$(f)),,$(if $(findstring i,$(f)),-i/--ignore-errors))))
+_release_ignore_errors_compact_flags = $(strip $(foreach f,$(1),\
+	$(if $(filter-out -% --% %=%,$(f)),\
+		$(if $(findstring i,$(f)),-i/--ignore-errors))))
+override RELEASE_DANGEROUS_MAKE_FLAGS := $(sort \
 	$(if $(findstring --eval,$(_RELEASE_REQUESTED_MAKE_FLAGS) $(value MAKEFLAGS) $(value GNUMAKEFLAGS)),--eval) \
 	$(if $(findstring --file,$(_RELEASE_REQUESTED_MAKE_FLAGS) $(value MAKEFLAGS) $(value GNUMAKEFLAGS)),--file) \
-	$(if $(findstring --makefile,$(_RELEASE_REQUESTED_MAKE_FLAGS) $(value MAKEFLAGS) $(value GNUMAKEFLAGS)),--makefile))
+	$(if $(findstring --makefile,$(_RELEASE_REQUESTED_MAKE_FLAGS) $(value MAKEFLAGS) $(value GNUMAKEFLAGS)),--makefile) \
+	$(if $(findstring --ignore-errors,$(_RELEASE_REQUESTED_MAKE_FLAGS)),--ignore-errors) \
+	$(call _release_ignore_errors_short_flags,$(_RELEASE_REQUESTED_MAKE_FLAGS)) \
+	$(call _release_ignore_errors_compact_flags,$(_RELEASE_REQUESTED_COMPACT_MAKE_FLAGS)))
 
 .PHONY: release release-preflight
 # Keep release arguments in the recipe environment, never in shell source. The

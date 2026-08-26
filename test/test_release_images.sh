@@ -839,6 +839,41 @@ for channel in direct inherited; do
 	checks=$((checks + 1))
 done
 
+# Ignore-errors is uniquely unsafe at the outer Make boundary: it converts a
+# parse-approved release recipe's failed nested gates into successful recipes.
+# Exercise both public goals and every spelling/transport GNU Make normalizes.
+expect_release_make_mode_refused() { # usage: <label> <goal> <channel> [option/env ...]
+	local label=$1 goal=$2 channel=$3
+	shift 3
+	local output rc=0
+	case "$channel" in
+		direct) output=$(cd "$ROOT" && env -i PATH="$PATH" HOME="$HOME" \
+			TMPDIR="${TMPDIR:-$HOME}" make "$@" -n "$goal" 2>&1) || rc=$? ;;
+		environment) output=$(cd "$ROOT" && env -i PATH="$PATH" HOME="$HOME" \
+			TMPDIR="${TMPDIR:-$HOME}" "$@" make -n "$goal" 2>&1) || rc=$? ;;
+		*) fail "unknown GNU Make option channel: $channel" ;;
+	esac
+	[ "$rc" -ne 0 ] || fail "$label reached the $goal recipe"
+	[[ "$output" == *"unsupported GNU Make options"* \
+		&& "$output" == *"ignore-errors"* ]] \
+		|| fail "$label was refused for the wrong reason: $output"
+	[[ "$output" != *"scripts/make-release.sh"* ]] \
+		|| fail "$label reached the $goal recipe before failing: $output"
+	checks=$((checks + 1))
+}
+
+expect_release_make_mode_refused "short -i" release direct -i
+expect_release_make_mode_refused "long --ignore-errors" release-preflight \
+	direct --ignore-errors
+expect_release_make_mode_refused "compact inherited i" release environment \
+	MAKEFLAGS=i
+expect_release_make_mode_refused "short inherited -i" release-preflight environment \
+	MAKEFLAGS=-i
+expect_release_make_mode_refused "long inherited --ignore-errors" release environment \
+	MAKEFLAGS=--ignore-errors
+expect_release_make_mode_refused "GNUMAKEFLAGS --ignore-errors" release-preflight \
+	environment GNUMAKEFLAGS=--ignore-errors
+
 make_function_marker="$work/allowlisted-make-function-ran"
 for channel in direct inherited; do
 	rc=0

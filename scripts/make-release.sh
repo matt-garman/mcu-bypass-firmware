@@ -192,6 +192,59 @@ fi
 [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
 	|| die "version '$VERSION' is not vX.Y.Z (optionally -suffix)"
 
+# GNU Make consumes these channels before the Makefile can defend itself. Check
+# the script's original environment before the first query so direct execution
+# cannot redirect configuration, install `--eval` text, or make a failed nested
+# recipe look successful. Long options can arrive here already normalized into
+# the compact first word of MAKEFLAGS/MFLAGS, so inspect both forms.
+[ -z "${MAKEFILES-}" ] \
+	|| die "MAKEFILES injection is not supported by production release configuration"
+release_make_option_text=" ${MAKEFLAGS-} ${MFLAGS-} ${GNUMAKEFLAGS-} "
+case "$release_make_option_text" in
+	*" --eval"*|*" --file"*|*" --makefile"*|*" -f"*)
+		die "GNU Make --eval/-f/--file/--makefile options are not supported by production release configuration"
+		;;
+esac
+release_make_semantic_mode=
+release_make_semantic_channel=
+for release_make_channel in MAKEFLAGS MFLAGS GNUMAKEFLAGS; do
+	release_make_value=${!release_make_channel-}
+	read -r -a release_make_words <<<"$release_make_value"
+	release_make_word_index=0
+	for release_make_word in "${release_make_words[@]}"; do
+		release_make_word_index=$((release_make_word_index + 1))
+		release_make_compact=
+		case "$release_make_word" in
+			--) break ;;
+			--ignore-errors) release_make_semantic_mode='-i/--ignore-errors' ;;
+			--dry-run|--just-print|--recon) release_make_semantic_mode='-n/--dry-run' ;;
+			--question) release_make_semantic_mode='-q/--question' ;;
+			--touch) release_make_semantic_mode='-t/--touch' ;;
+			--*|*=*) continue ;;
+			-*) release_make_compact=${release_make_word#-} ;;
+			*)
+				[ "$release_make_word_index" -eq 1 ] || continue
+				[[ "$release_make_word" =~ ^[A-Za-z]+$ ]] || continue
+				release_make_compact=$release_make_word
+				;;
+		esac
+		if [ -z "$release_make_semantic_mode" ]; then
+			case "$release_make_compact" in
+				*i*) release_make_semantic_mode='-i/--ignore-errors' ;;
+				*n*) release_make_semantic_mode='-n/--dry-run' ;;
+				*q*) release_make_semantic_mode='-q/--question' ;;
+				*t*) release_make_semantic_mode='-t/--touch' ;;
+			esac
+		fi
+		if [ -n "$release_make_semantic_mode" ]; then
+			release_make_semantic_channel=$release_make_channel
+			break 2
+		fi
+	done
+done
+[ -z "$release_make_semantic_mode" ] \
+	|| die "GNU Make recipe-semantic option $release_make_semantic_mode from $release_make_semantic_channel is not supported by production release configuration; rerun without ignore-errors, dry-run, question, or touch flags"
+
 # Bootstrap prerequisites: both are consumed before section 0 can build its
 # complete selected-tool inventory. Keep the explicit inventory entries there
 # too, but diagnose an absent command before its first use here.
@@ -228,18 +281,6 @@ if [ -z "$REPO_LOCK_FD" ]; then
 		&& die "no inherited worktree lock descriptor is exclusively held"
 	die "_MAKE_SERIAL_LOCK_HELD has no inherited lock descriptor"
 fi
-
-# GNU Make consumes these channels before the Makefile can defend itself. Check
-# the script's original environment before the first query so direct execution
-# cannot redirect configuration to another makefile or install `--eval` text.
-[ -z "${MAKEFILES-}" ] \
-	|| die "MAKEFILES injection is not supported by production release configuration"
-release_make_option_text=" ${MAKEFLAGS-} ${GNUMAKEFLAGS-} "
-case "$release_make_option_text" in
-	*" --eval"*|*" --file"*|*" --makefile"*|*" -f"*)
-		die "GNU Make --eval/-f/--file/--makefile options are not supported by production release configuration"
-		;;
-esac
 
 git check-ref-format "refs/tags/$VERSION" >/dev/null 2>&1 \
 	|| die "version '$VERSION' is not a valid Git tag name"

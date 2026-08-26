@@ -395,6 +395,7 @@ OUTPUT_PATH_OWNED=1
 run_preflight() {
 	local status_before status_after output_existed_before output_existed_after rc
 	local release_makeflags=${TEST_RELEASE_MAKEFLAGS-}
+	local release_mflags=${TEST_RELEASE_MFLAGS-}
 	local release_gnumakeflags=${TEST_RELEASE_GNUMAKEFLAGS-}
 	status_before=$(tree_snapshot) || fail "could not snapshot the working tree"
 	[ -e "$preflight_output" ] && output_existed_before=1 || output_existed_before=0
@@ -411,6 +412,7 @@ run_preflight() {
 			STRICT_TOOLS MUTATION_ALLOW_SKIP XT_STATIC_RAM_LIMIT XT_STACK_MAX_FRAME \
 			PIC12F675_DATA_LIMIT
 		[ -z "$release_makeflags" ] || export MAKEFLAGS="$release_makeflags"
+		[ -z "$release_mflags" ] || export MFLAGS="$release_mflags"
 		[ -z "$release_gnumakeflags" ] || export GNUMAKEFLAGS="$release_gnumakeflags"
 		export PATH="$fakebin:$PATH"
 		export TMPDIR="$work"
@@ -673,6 +675,110 @@ if TEST_RELEASE_MAKEFLAGS="-f $work/not-a-release-makefile" \
 fi
 expect_configuration_refusal "an inherited GNU Make -f option" -f \
 	'GNU Make --eval/-f/--file/--makefile options are not supported'
+
+# A failing nested recipe really does become a zero-status Make under `-i`.
+# Prove that premise, then require the production script to stop the same flag
+# before its first configuration query can inherit it.
+ignore_errors_probe="$work/ignore-errors-probe.mk"
+printf '.PHONY: failing-gate\nfailing-gate:\n\t@false\n' > "$ignore_errors_probe"
+if env -u MAKEFLAGS -u MFLAGS -u GNUMAKEFLAGS \
+		"$REAL_MAKE" -s -f "$ignore_errors_probe" failing-gate >/dev/null 2>&1; then
+	fail "failing nested-gate probe succeeded without ignore-errors"
+fi
+if ! env MAKEFLAGS=i MFLAGS= GNUMAKEFLAGS= \
+		"$REAL_MAKE" -s -f "$ignore_errors_probe" failing-gate >/dev/null 2>&1; then
+	fail "GNU Make ignore-errors probe did not convert a failed nested gate to success"
+fi
+checks=$((checks + 1))
+
+expect_recipe_semantic_refusal() { # usage: <label> <channel> <value> <mode>
+	local label=$1 channel=$2 value=$3 mode=$4
+	: > "$make_log"
+	: > "$tool_log"
+	case "$channel" in
+		MAKEFLAGS)
+			if TEST_RELEASE_MAKEFLAGS="$value" run_preflight >"$output" 2>&1; then
+				fail "$label was accepted by direct release preflight"
+			fi
+			;;
+		MFLAGS)
+			if TEST_RELEASE_MFLAGS="$value" run_preflight >"$output" 2>&1; then
+				fail "$label was accepted by direct release preflight"
+			fi
+			;;
+		GNUMAKEFLAGS)
+			if TEST_RELEASE_GNUMAKEFLAGS="$value" run_preflight >"$output" 2>&1; then
+				fail "$label was accepted by direct release preflight"
+			fi
+			;;
+		*) fail "unknown recipe-semantic flag channel: $channel" ;;
+	esac
+	expect_configuration_refusal "$label" "$channel" \
+		"GNU Make recipe-semantic option $mode"
+	[ ! -s "$make_log" ] \
+		|| fail "$label reached a Makefile query before rejection: $(<"$make_log")"
+}
+
+# Compact, short and long ignore-errors forms cover all three inherited flag
+# channels. Dry-run/question/touch are direct-script hazards: unlike an outer
+# `make -n`, they would propagate into the script's later production Makes and
+# can accept a complete but stale output tree without executing current recipes.
+semantic_stale_root="$work/semantic-stale"
+semantic_stale_avr="$semantic_stale_root/avr"
+semantic_stale_xt="$semantic_stale_root/xt"
+semantic_stale_pic322="$semantic_stale_root/pic322"
+semantic_stale_pic320="$semantic_stale_root/pic320"
+semantic_stale_pic675="$semantic_stale_root/pic675"
+mkdir -p "$semantic_stale_avr" "$semantic_stale_xt" \
+	"$semantic_stale_pic322" "$semantic_stale_pic320" "$semantic_stale_pic675"
+for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
+	for part in attiny13a attiny85 attiny45; do
+		printf 'stale image\n' > "$semantic_stale_avr/bypass-$part-$variant.hex"
+	done
+	printf 'stale image\n' > "$semantic_stale_xt/bypass-attiny202-$variant.hex"
+	printf 'stale image\n' > "$semantic_stale_pic322/bypass-pic10f322-$variant.hex"
+	printf 'stale image\n' > "$semantic_stale_pic320/bypass-pic10f320-$variant.hex"
+	printf 'stale image\n' > "$semantic_stale_pic675/bypass-pic12f675-$variant.hex"
+done
+semantic_stale_images=("$semantic_stale_avr"/*.hex "$semantic_stale_xt"/*.hex \
+	"$semantic_stale_pic322"/*.hex "$semantic_stale_pic320"/*.hex \
+	"$semantic_stale_pic675"/*.hex)
+[ "${#semantic_stale_images[@]}" -eq 21 ] \
+	|| fail "recipe-semantic fixture is not a complete 21-image stale tree"
+export AVR_BUILD_DIR="$semantic_stale_avr" XT_BUILD_DIR="$semantic_stale_xt" \
+	PIC10F322_BUILD_DIR="$semantic_stale_pic322" \
+	PIC10F320_BUILD_DIR="$semantic_stale_pic320" \
+	PIC12F675_BUILD_DIR="$semantic_stale_pic675"
+checks=$((checks + 1))
+
+expect_recipe_semantic_refusal "compact MAKEFLAGS ignore-errors" MAKEFLAGS i \
+	'-i/--ignore-errors'
+expect_recipe_semantic_refusal "short MAKEFLAGS ignore-errors" MAKEFLAGS -i \
+	'-i/--ignore-errors'
+expect_recipe_semantic_refusal "long MAKEFLAGS ignore-errors" MAKEFLAGS \
+	--ignore-errors '-i/--ignore-errors'
+expect_recipe_semantic_refusal "MFLAGS ignore-errors" MFLAGS -i \
+	'-i/--ignore-errors'
+expect_recipe_semantic_refusal "GNUMAKEFLAGS ignore-errors" GNUMAKEFLAGS \
+	--ignore-errors '-i/--ignore-errors'
+expect_recipe_semantic_refusal "compact direct-script dry-run" MAKEFLAGS n \
+	'-n/--dry-run'
+expect_recipe_semantic_refusal "long direct-script dry-run" MAKEFLAGS --dry-run \
+	'-n/--dry-run'
+expect_recipe_semantic_refusal "direct-script just-print alias" MAKEFLAGS \
+	--just-print '-n/--dry-run'
+expect_recipe_semantic_refusal "direct-script recon alias" MAKEFLAGS --recon \
+	'-n/--dry-run'
+expect_recipe_semantic_refusal "direct-script question mode" MAKEFLAGS q \
+	'-q/--question'
+expect_recipe_semantic_refusal "long direct-script question mode" MAKEFLAGS \
+	--question '-q/--question'
+expect_recipe_semantic_refusal "direct-script touch mode" MAKEFLAGS t \
+	'-t/--touch'
+expect_recipe_semantic_refusal "long direct-script touch mode" MAKEFLAGS --touch \
+	'-t/--touch'
+unset AVR_BUILD_DIR XT_BUILD_DIR PIC10F322_BUILD_DIR PIC10F320_BUILD_DIR \
+	PIC12F675_BUILD_DIR
 
 : > "$tool_log"
 if GPSIM_TIMEOUT_SECONDS=1 run_preflight >"$output" 2>&1; then
