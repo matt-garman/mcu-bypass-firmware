@@ -69,3 +69,6 @@ coverage/
 
 # clade code
 .claude/
+
+# python byte-compiled files
+__pychache__/
