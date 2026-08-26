@@ -111,7 +111,8 @@
 #define WDT_LOOP_WORK_MS  (2U)
 
 // No ISR preemption term: single polled loop, GIE clear, no interrupt service
-// routine. See the PIC10F322 map.
+// routine. The shared input is wall-time ISR duty, so zero duty converts to
+// exactly zero additive stretch. See the PIC10F322 map.
 #define WDT_ISR_STRETCH_PCT (0U)
 
 

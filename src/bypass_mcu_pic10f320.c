@@ -172,9 +172,9 @@ static_assert(_XTAL_FREQ ==  2000000UL, "_XTAL_FREQ must be 2 MHz (matches OSCCO
 //                       TMR2IF tick and the CLRWDT.  One whole tick is the
 //                       allowance; a body that outran a tick would stop being
 //                       tick-gated, which the gpsim free-run checkpoint fails on.
-//   WDT_ISR_STRETCH_PCT: zero.  This shell is a single POLLED loop with GIE
-//                       clear and no ISR, so nothing stretches __delay_ms() in
-//                       wall time.
+//   WDT_ISR_STRETCH_PCT: wall-time ISR duty, zero here. This shell is a single
+//                       POLLED loop with GIE clear and no ISR, so duty converts
+//                       to exactly zero additive delay stretch.
 // This file is the 256-word self-contained shell (docs/pic10f320_special_case.md):
 // it shares no headers with src/, so it carries its own copy of the budget that
 // the four modular shells reach through WDT_PET_TO_PET_MAX_MS() in
@@ -183,11 +183,29 @@ static_assert(_XTAL_FREQ ==  2000000UL, "_XTAL_FREQ must be 2 MHz (matches OSCCO
 #define WDT_MIN_PERIOD_MS   (160U)
 #define WDT_LOOP_WORK_MS    (1U)
 #define WDT_ISR_STRETCH_PCT (0U)
+
+#if (WDT_ISR_STRETCH_PCT >= 100U)
+#  error "WDT_ISR_STRETCH_PCT must be below 100: it is wall-time ISR duty"
+#  define WDT_FOREGROUND_SHARE_PCT (1U)
+#else
+#  define WDT_FOREGROUND_SHARE_PCT (100U - WDT_ISR_STRETCH_PCT)
+#endif
+
+#define WDT_ISR_STRETCH_NUMERATOR(blocking_ms)                                 \
+    ((uint32_t)(blocking_ms) * (uint32_t)WDT_ISR_STRETCH_PCT)
+
+#define WDT_ISR_STRETCH_MAX_MS(blocking_ms)                                    \
+    (   WDT_ISR_STRETCH_NUMERATOR(blocking_ms)                                 \
+        / (uint32_t)WDT_FOREGROUND_SHARE_PCT                                   \
+      + ((0U != (WDT_ISR_STRETCH_NUMERATOR(blocking_ms)                        \
+                  % (uint32_t)WDT_FOREGROUND_SHARE_PCT))                       \
+            ? (uint32_t)1U : (uint32_t)0U) )
+
 #define WDT_PET_TO_PET_MAX_MS(blocking_ms)                                     \
-    (   (blocking_ms)                                                          \
-      + ((((blocking_ms) * WDT_ISR_STRETCH_PCT) + 99U) / 100U)                 \
-      + TICK_PERIOD_MS                                                         \
-      + WDT_LOOP_WORK_MS )
+    (   (uint32_t)(blocking_ms)                                                \
+      + WDT_ISR_STRETCH_MAX_MS(blocking_ms)                                    \
+      + (uint32_t)TICK_PERIOD_MS                                               \
+      + (uint32_t)WDT_LOOP_WORK_MS )
 
 
 

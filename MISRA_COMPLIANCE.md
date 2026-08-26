@@ -371,8 +371,9 @@ additional PIC10F320 loss was bisected to that file's heavy in-function
 `static_assert` use — stripping those lines makes both diagnostics vanish with
 every other flag unchanged. The two "unused" macros are consumed
 **only inside `static_assert()` expressions**, which the addon cannot see here;
-they are what enforce "1 ms tick + blocking actuation pulse < worst-case WDT
-period" at compile time, so they are the opposite of dead.
+they are what enforce the complete wall-clock pet-to-pet budget -- blocking
+actuation, ISR-duty conversion, tick scheduling, and bounded loop work -- below
+the worst-case WDT period at compile time, so they are the opposite of dead.
 
 **Why it is waived rather than fixed.** The SFRs are valid adopted-header
 declarations and compile with the target compiler; changing clear device-register

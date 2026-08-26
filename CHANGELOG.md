@@ -608,26 +608,33 @@ file is the human-readable summary of *what changed*.
   `WDT_ISR_STRETCH_PCT`, and the shared `WDT_PET_TO_PET_MAX_MS()` in
   `bypass_output_common.h` combines them with the blocking delay and one tick of
   scheduling latency into a conservative wall-clock upper bound, asserted
-  against the de-rated watchdog floor. The boot path -- `init()` arms the
+  against the de-rated watchdog floor. The percentage is explicitly wall-time
+  ISR duty: foreground delay work receives only `100-p`, so its additive
+  overhead is `ceil(blocking_ms * p / (100-p))`. Values at or above 100% are
+  rejected, and 32-bit quotient-plus-remainder arithmetic keeps the ceiling
+  valid over every supported delay. The boot path -- `init()` arms the
   watchdog and then performs the same blocking actuation before `main()` reaches
   its first pet -- is inside that bound rather than beside it. The simple CD4053
   variant, which blocks nowhere and previously carried no watchdog assertion at
   all, is now covered too: the floor has to clear the loop itself, not just a
   pulse. The self-contained PIC10F320 carries its own copy, as it does for every
-  other shared invariant. No image changed: all 21 images across the six targets
-  rebuild byte-identical, because the change is entirely compile-time.
+  other shared invariant. The arithmetic is consumed only by compile-time
+  assertions, so no instruction is intended to change; the final-candidate
+  21-image byte comparison remains the release gate for that claim.
 
-  Two gates hold the budget to something real. `test-static-assert-guards` pins
-  each variant's bound to its exact millisecond and proves the two new terms are
-  load-bearing: a watchdog floor set inside the gap between the old `tick +
-  pulse` sum and the full bound must fail the build, and must go back to
-  compiling the moment the term under test is zeroed -- eleven fixtures, each
-  asserting FIRES or CLEAN rather than only that something failed. The classic
-  AVR simavr suite then measures the real image, recording the longest interval
-  between `wdr` executions across boot and across toggles in both directions and
-  requiring it to fit the same budget the firmware compiled against. Worst
-  measured: 14.002 ms of a 17 ms budget on the ATtiny13A relay build, 15.003 ms
-  of 17 ms on the ATtiny85, against a 100 ms de-rated floor.
+  Two gates hold the budget to something real. `test-static-assert-guards`
+  independently calculates the conversion, pins each variant's bound to its
+  exact millisecond, proves the ISR, tick and loop-work terms are load-bearing,
+  and rejects a negative control restoring the old mixed formula. Equality is
+  unsafe: the AVR relay's 18 ms bound fails against an 18 ms watchdog floor and
+  first compiles at 19 ms. The classic-AVR simavr suite then measures the real
+  image, recording the longest interval between `wdr` executions across boot and
+  toggles in both directions and requiring it to fit the same budget the
+  firmware compiled against. Worst measured: 14.002 ms of an 18 ms budget on
+  the ATtiny13A relay build, 15.003 ms of 18 ms on the ATtiny85, against a 100 ms
+  de-rated floor. AVR-XT uses its compiled ISR and delay-body bounds because the
+  pinned simulator's cycle-stepping defect precludes a trusted full-interval
+  measurement.
 
 - **PIC12F675 relay coil clears now commit through one whole-port write.** The
   shared relay driver clears both coil bits with one masked hardware-interface
@@ -1287,9 +1294,11 @@ file is the human-readable summary of *what changed*.
     the spread was no worse than the PIC10F32x's −37%/+69%; measured, it is
     −41%/+47% and +76% extended — worse at both ends. The assumption was the
     defect, not the design: the prescaler stays at 1:16 because the argument
-    rests on the **minimum** (10 ms × 16 = 160 ms) against a 13.024 ms
-    worst-case pet window, a factor of 12. The shell's citation of that minimum
-    was exact. Note the two nominals are both the datasheet's: §9.6.1 states
+    rests on the **minimum** (10 ms × 16 = 160 ms) against the conservative
+    16 ms compile-time pet bound, a factor of 10. The earlier 13.024 ms figure
+    was a rough pulse-plus-tick estimate, not the formal upper bound. The shell's
+    citation of the watchdog minimum was exact. Note the two nominals are both
+    the datasheet's: §9.6.1 states
     an 18 ms nominal in prose (the figure gpsim models), Table 12-4 gives a
     17 ms characterized typical, and nothing depends on either.
   - **Brown-out** (Table 12-4 `BVDD`): trips at 2.025–2.175 V, with a 100 µs
@@ -1299,9 +1308,10 @@ file is the human-readable summary of *what changed*.
   - **INTOSC accuracy** (Table 12-2 param F10): ±1% at 3.5 V/25 °C, ±2% over
     0–85 °C, **±5%** over the industrial and extended ranges. At the −5% corner
     the relay coil pulse degrades from a 3× to a 2.85× margin over the TQ-L2's
-    4 ms minimum, and the watchdog margin from 12× to 11.7×. Debounce is
-    unaffected in the way that matters — the core counts samples, not
-    milliseconds.
+    4 ms minimum. The rough physical pet estimate becomes 13.68 ms and remains
+    inside the conservative 16 ms compile-time bound, whose margin against the
+    independent watchdog floor is 10×. Debounce is unaffected in the way that
+    matters — the core counts samples, not milliseconds.
 
 - **`TODO.md` T25-wdt-margin-assert.** Found while checking whether the margin
   above is enforced anywhere: `src/bypass_mcu_pic10f320.c` static_asserts

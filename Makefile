@@ -2862,7 +2862,8 @@ attiny202-analyze-misra: src/bypass_mcu_avr_xt.c $(XT_HEADERS) $(MISRA_ADDON) $(
 	rm -f $$out *.dump *.ctu-info cppcheck-addon-ctu-file-list*; \
 	echo "MISRA-C:2012 (ATtiny202 shell): clean (documented deviations waived per MISRA_COMPLIANCE.md)"
 
-# Absolute coil-pulse WIDTH gate, read straight from the compiled image. The
+# Absolute coil-pulse WIDTH and tick-ISR instruction-ceiling gate, read straight
+# from the compiled image. The
 # relay/mute pulses are avr-libc _delay_ms() busy loops, so their duration is a
 # compile-time CPU-cycle count -- read most directly, and independently of any
 # simulator, by disassembly. This gate owns that ABSOLUTE width. The yasimavr
@@ -2870,10 +2871,12 @@ attiny202-analyze-misra: src/bypass_mcu_avr_xt.c $(XT_HEADERS) $(MISRA_ADDON) $(
 # runs a few percent longer because the 1 ms tick ISR preempts the busy loop
 # (see test/avr/test_attiny202_delay_oracle.py and
 # test_sim_attiny202.check_pulse_width); neither check replaces the other.
-# This gate parses the _delay_ms loop count out of `avr-objdump -d`
+# This gate parses the _delay_ms loop count and the sole `reti` call tree out of
+# `avr-objdump -d`
 # and asserts each variant's design widths (tq2_l2_5v_relay 12 ms x2,
 # cd4053_with_mute 5 ms x2, cd4053_simple none) plus the relay's 4 ms datasheet
-# minimum. Needs only binutils-avr
+# minimum, while keeping the ISR at or below its reviewed 84 instructions. Needs
+# only binutils-avr
 # (already required to build), so it runs in the same standalone pre-hardware
 # aggregate; it skips cleanly (STRICT_TOOLS honored) when the DFP is absent.
 .PHONY: attiny202-delay-oracle
@@ -8449,7 +8452,7 @@ help:
 	@echo "                   avrxmega3 + $(XT_FLASH_BYTES) B budget (standalone; skips if XT_DFP absent)"
 	@echo "  attiny202        build all variants; enforce 2 KB flash and $(XT_STATIC_RAM_LIMIT)/$(XT_SRAM_BYTES) B static-RAM limits"
 	@echo "  attiny202-analyze  cppcheck + MISRA on the AVR-XT shell (DFP+avr-libc; standalone)"
-	@echo "  attiny202-delay-oracle  verify coil-pulse widths from the disassembled _delay_ms loop"
+	@echo "  attiny202-delay-oracle  verify disassembled coil-pulse widths + tick-ISR instruction ceiling"
 	@echo "  attiny202-test   all ATtiny202 pre-hardware checks (fuses + smoke + build + stack + analyze + delay)"
 	@echo "  attiny202-test-stack-bound  shipping-flag frame bound for all immutable variants ($(XT_STACK_MAX_FRAME) B)"
 	@echo "  attiny202-sim    yasimavr functional + PA2/PA3 transition/pulse test:"
@@ -8475,7 +8478,7 @@ help:
 	@echo "  test-cbmc       CBMC SAT/SMT proof of the real bypass_pure.c (if installed)"
 	@echo "  test-fuses      decode + verify design fuse bytes (t13a + tinyx5 + ATtiny202)"
 	@echo "  test-attiny202-output-oracle  host regression for PA2/PA3 sequence/pulse-presence checks"
-	@echo "  test-attiny202-delay-oracle  host regression for the coil-pulse width parser (--selftest)"
+	@echo "  test-attiny202-delay-oracle  host regression for delay/ISR disassembly parsers (--selftest)"
 	@echo "  test-attiny202-fault-oracle  host regression for exact fault-run accounting"
 	@echo "  test-attiny202-model-ffi  host gate for the golden-model ctypes bridge"
 	@echo "  test-pic10f320-return-stack-oracle  host Intel-HEX/control-flow oracle selftest"

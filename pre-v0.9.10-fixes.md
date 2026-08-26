@@ -1343,10 +1343,14 @@ owner.
 **Resolution.** Each pin map now declares `WDT_LOOP_WORK_MS` and
 `WDT_ISR_STRETCH_PCT` beside its existing `TICK_PERIOD_MS` and de-rated
 `WDT_MIN_PERIOD_MS`; `WDT_PET_TO_PET_MAX_MS()` in `bypass_output_common.h`
-combines all four with the variant's blocking delay into one conservative
-wall-clock upper bound, and each output driver asserts that bound against the
-floor. The self-contained PIC10F320 carries its own copy of the constants and
-the arithmetic, as it does for every other shared invariant. The simple CD4053
+defines the percentage as wall-time ISR duty and converts the delay overhead as
+`ceil(blocking_ms * p / (100-p))`. It combines that result with the tick and
+loop-work terms into one conservative wall-clock upper bound, and each output
+driver asserts that bound against the floor. Values `p >= 100` are rejected, and
+32-bit quotient-plus-remainder ceiling arithmetic avoids invalid denominators,
+16-bit promotion and round-up overflow. The self-contained PIC10F320 carries an
+exact copy of the constants and arithmetic, as it does for every other shared
+invariant. The simple CD4053
 variant, which blocks nowhere and previously carried no watchdog assertion,
 is now covered as well: the floor must clear the loop itself, not only a pulse.
 The boot path is inside the bound rather than beside it -- `init()` arms the
@@ -1355,7 +1359,7 @@ its first pet -- and on the non-blocking variants it is the longest window
 there is, which the measurement below is what established.
 
 Per-target bounds, in milliseconds (relay / mute / simple against the floor):
-AVR Classic 17 / 9 / 2 against 100; AVR-XT 17 / 9 / 2 against 128; PIC10F322 and
+AVR Classic 18 / 9 / 2 against 100; AVR-XT 18 / 9 / 2 against 128; PIC10F322 and
 PIC10F320 14 / 7 / 2 against 160; PIC12F675 16 / 9 / 4 against 160. Derivation
 and the measured corroboration are in "Watchdog Pet-to-Pet Budget" in
 `DESIGN_DOCUMENTATION.adoc`.
@@ -1369,7 +1373,7 @@ the old `tick + pulse` sum fails the FIRES half and a term that is present but
 unreachable fails the CLEAN half. `test/avr/test_sim.c` gained a pet-budget
 check that measures the longest `wdr`-to-`wdr` interval on the real image and
 requires it to fit the compile-time budget: worst measured 14.002 / 15.003 ms of
-a 17 ms relay budget on ATtiny13A / ATtiny85, 6.402 / 7.004 of 9 for mute, and
+an 18 ms relay budget on ATtiny13A / ATtiny85, 6.402 / 7.004 of 9 for mute, and
 1.377 / 1.464 of 2 for simple, all against a 100 ms floor. All five MISRA lanes
 clean after one new D-2 Rule 2.5 entry for `bypass_output_common.h`, whose
 shared macro the modular shells include but do not expand. `make test`: 84
@@ -3660,13 +3664,53 @@ it can approve one.
   aggregate gates affected by the shared firmware header. Firmware-source edits
   remain owner-authored under repository policy.
 
+**Resolution.** `WDT_ISR_STRETCH_PCT` retains one explicit meaning: percentage
+of wall time owned by the ISR. The shared formula and PIC10F320's deliberate
+copy now add `ceil(blocking_ms * p / (100-p))`, reject `p >= 100` before using
+the denominator, promote multiplication to 32 bits, and round with quotient plus
+nonzero remainder rather than an overflow-prone addition. The owner authored all
+six firmware-source edits. AVR relay/mute/simple bounds are 18/9/2 ms; PIC10 and
+PIC12F675 remain 14/7/2 and 16/9/4 because zero duty converts to zero stretch.
+
+- [x] Independent shell arithmetic pins 25% duty to 18/9/2. A separate compile
+  fixture applies hard-coded results to every production pin map, including the
+  unchanged zero-duty PIC results and a 99%-duty maximum-domain probe below
+  32-bit overflow.
+- [x] The focused compile fixtures require both 100% and 101% duty to fail on
+  the dedicated diagnostic; floor 18 rejects and floor 19 accepts the AVR relay;
+  ISR, tick and loop-work FIRES/CLEAN pairs cover all three output variants.
+- [x] PIC10F320's duplicate is compared exactly with the shared conversion, and
+  a negative control restores the old denominator in both copies and requires
+  the complete exact-bound suite to fail at the 18 ms relay oracle.
+- [x] The AVR-XT compiled-image delay oracle also recovers the sole `reti`
+  handler and direct call tree, enforces the reviewed 84-instruction ISR ceiling,
+  includes a 16-cycle entry/vector allowance in a conservative 352-cycle bound,
+  and fails closed on recursion, unresolved or indirect calls, and backward
+  control flow.
+- [x] Design, changelog, MISRA, feasibility and test documentation distinguish
+  wall-time duty from additive stretch and publish the corrected bounds.
+- [ ] Rebuild and compare all 21 images; rerun Classic-AVR pet intervals,
+  AVR-XT compiled ISR/delay corroboration, static analysis, timing, liveness,
+  resource, mutation and aggregate gates on a fully provisioned host.
+
+**Available-host validation (2026-08-26).** The delay/ISR parser selftest passes
+23 checks. Host GCC compiles the production watchdog macro through all four
+modular pin maps at the independent 18/9/2, 14/7/2 and 16/9/4 results. Resource
+tables pass 196 checks, TODO index 90, Makefile name contract 48, and release
+preflight 207 plus qualification 73; Bash/Python syntax and `git diff --check`
+are clean. This host
+has no `avr-gcc`, XC8, simavr or gpsim, so `test-static-assert-guards` correctly
+reports a skip rather than producing B9 evidence. Full `make test` also stops in
+the pre-existing clang-tidy host setup because 32-bit glibc's
+`gnu/stubs-32.h` is absent. Neither limitation closes the provisioned rerun above.
+
 ## Final validation and release gate
 
 Complete these only after R1-R6, F1-F4, P1-P2, T1-T2, D1-D5, and B1-B9 are done
 or an explicit owner disposition is recorded where an item permits one. The
 checked `fe8ecc8` run below is historical evidence, not final-candidate evidence;
-the pre-merge rows remain reopened because B9 still requires firmware, test, and
-documentation changes after the third-review fixes.
+the B9 firmware, test and documentation correction is implemented, but the
+pre-merge rows remain reopened until its fully provisioned rerun is recorded.
 
 - [ ] `git diff --check main...HEAD` passes after every fourth-review change.
 - [ ] `make test` passes on a host meeting the documented host-tool contract.
@@ -3691,8 +3735,8 @@ documentation changes after the third-review fixes.
   hardware path; durable documentation rejects every retired raw writer.
 - [ ] The watchdog pet-to-pet guard uses one explicitly defined ISR quantity,
   converts it conservatively to wall time, rejects the exact unsafe boundary,
-  and remains corroborated by compiled-image interval measurements on both AVR
-  families.
+  and remains corroborated by Classic-AVR compiled-image interval measurements
+  plus AVR-XT compiled ISR/delay bounds.
 - [ ] Release and direct-script configuration reject ignore-errors and every
   other unsupported recipe-semantic Make mode before tools, scratch, or builds.
 - [ ] Durable and generated documentation agrees that the PIC12F675 helper is
@@ -3776,7 +3820,7 @@ Record each completed item with its commit ID and decisive validation command.
 | G1 | DONE | `fe8ecc8` | `make test-release-preflight` (113 -> 118 checks); `scripts/make-release.sh --preflight v0.9.10` accepted with the document present; `make test-release-qualification test-release-history test-release-provenance test-release-images test-soak-timing test-build-serialization test-todo-index test-makefile-name-contract`; `make test`; `make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0` |
 | F2 | DONE | `f6d9f82`, `f9dd333`, `5deb4e4`, `9999886`, `b6d06d2` | Fully provisioned current-HEAD validation reported passing: AVR-XT's 32-case matrix and PIC12F675's 43-check relay lane prove modeled physical coil-pin quiescence before reset; all affected resource, stack, timing, static, simulator, coverage, recovery, and merged 136-mutant gates pass |
 | F3 | DONE | `df89ec0` | PIC10F320 flash, return-stack, image-baseline, host/target fault, lock-step, target-I/O, coverage, analysis, and mutation gates pass; relay is 242/256 words at stack depth 3/8, both sequence-sensitive mutants are killed, and both CD4053 images are unchanged |
-| F4 | RE-OPENED (B9) | `fc23e48` | The current images retain wide measured watchdog margin, but B9 found that the exact-bound proof mixes wall-time ISR duty with additive delay stretch and underestimates the documented AVR relay bound. Reclose after one quantity is selected, conservatively derived, pinned at the exact boundary, and corroborated against the compiled images. |
+| F4 | CORRECTION IMPLEMENTED; VALIDATION OPEN (B9) | `fc23e48` | Wall-time ISR duty now converts through `p/(100-p)` with checked arithmetic; the AVR relay bound is 18 ms and equality fails. Reclose after the 109-check compile gate, 21-image byte comparison, Classic-AVR interval measurements and AVR-XT compiled ISR/delay oracle pass on the provisioned final candidate. |
 | P1 | SOFTWARE CLOSED; BENCH OPEN | `58fb829`, `37b20bd`, `64ad036`, `e625c8b`, `bd5f981` | B2, B7 and B8 close the software findings. Child-consumed tool/image bytes are immutable, and evidence creation, attachment, cleanup, parent flush and external exports all stay on retained descriptors under pathname replacement. The controlled PICkit 3/MPLAB X 6.20 bench run remains the separate `1.x.y` hardware gate. |
 | P2 | DONE | `4cf4804`, `6ef8c4d` | The selected variant must belong to the current forced rebuild; final regular/non-symlink HEX revalidation and literal argument/action binding precede hardware; `test-avr-program-order` passes 56 exact-order, stale-image, mismatch, size, override, symlink, and stateful-input checks, with all supporting build/selector/fuse/serialization/release-preflight contracts green |
 | D4 | DONE (B6 closed) | `2585ad4`, `18cd7ee`, `64ad036` | The strict source-bound 35-file resource-evidence gate remains implemented. B6's two stale figures are corrected AND bound to oracles: `DESIGN_DOCUMENTATION.adoc`'s ATtiny202 occupancy summary now reads 47.3-50.8% against 81.8-85.7% with `test-resource-tables` recomputing both halves from their own tables (219 -> 222 checks), and `test/README.md`'s PIC12F675 relay fault count is 43, read back out of the document and compared with `pic12f675_target_count_table()` by `test-pic-target-result-records` (18 -> 24 checks). |
@@ -3792,17 +3836,17 @@ Record each completed item with its commit ID and decisive validation command.
 | B5 | DONE | `a3ce797` | Closes R6. Production Make goals reject direct, normalized, and inherited ignore-errors before their recipes; direct script use rejects ignore-errors, dry-run, question, and touch through all three GNU Make flag transports before any query, selected tool, scratch, or build. A failing nested-gate witness and a complete 21-image stale tree make both failure mechanisms explicit. |
 | B7 | DONE | `bd5f981` | Closes B3 and B7's share of P1. Every child-consumed tool/runtime/JAR/image is either a verified sealed copy or an operator-read-only native source preserving origin-relative libraries; the successful mutable-image fallback is removed; libc supports the review host that lacks Python's API; unavailable or incomplete immutability refuses before any command. Four synchronized same-inode regressions and four independent ordinary-descriptor controls prove the boundary. |
 | B8 | DONE | | Closes B4 and P1's software side. One retained parent descriptor governs evidence creation, attachment, guarded cleanup and durability; external exports and later evidence operations use the retained child descriptor. Parent/child replacement races, missing capabilities, failed cleanup and an absolute-path negative control are deterministic; the full focused gate passes 386 checks. |
-| B9 | OPEN | | Reconcile watchdog ISR duty versus additive stretch, correct or re-derive the bound, pin the true exact boundary, and rerun compiled-image timing and aggregate evidence. |
-| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; resolve B9, then rerun every pre-merge gate on the actual final candidate. P1's bench run is a `1.x.y` hardware gate, not a substitute for the remaining software correction. |
+| B9 | IMPLEMENTED; PROVISIONED VALIDATION OPEN | | Wall-time duty has one definition, the exact 18/19 relay boundary and every production map are pinned, the mixed formula is rejected, and AVR-XT's compiled call-tree ceiling includes fixed interrupt overhead. Target builds, image identity, timing, analysis, simulation, mutation and aggregates still require the provisioned host. |
+| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; rerun every pre-merge gate on the actual provisioned final candidate. P1's bench run is a `1.x.y` hardware gate, not a substitute for B9's remaining target evidence. |
 
 ## Merge decision
 
 Do not merge `v0.9.9-polish` or begin production `v0.9.10` qualification until
 the reopened final-candidate gate is complete and recorded above. The
-third-review implementation blockers were closed by B1-B6. B7-B8 now close B3,
-P1's software side and B4; B9 still reopens F4 on the fourth-review candidate.
-The earlier aggregate run remains historical evidence rather than a substitute
-for correcting those blockers and rerunning the required gates.
+third-review implementation blockers were closed by B1-B6. B7-B8 close B3,
+P1's software side and B4; B9's correction is implemented, but B9/F4 remain
+validation-open on the fourth-review candidate. The earlier aggregate run remains
+historical evidence rather than a substitute for the required provisioned rerun.
 
 P1's controlled PICkit 3/MPLAB X 6.20 bench run still needs silicon. It remains
 the `1.x.y` hardware gate tracked in `HARDWARE_VALIDATION_LOG.md` and `TODO.md`

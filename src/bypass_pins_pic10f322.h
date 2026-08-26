@@ -65,8 +65,9 @@
 #define WDT_LOOP_WORK_MS  (1U)
 
 // No ISR preemption term: this shell is a single POLLED loop with GIE clear and
-// no interrupt service routine, so nothing can stretch a __delay_ms() in wall
-// time. A shell that acquired an interrupt would have to re-derive this.
+// no interrupt service routine. The shared input is wall-time ISR duty, so zero
+// duty converts to exactly zero additive stretch. A shell that acquired an
+// interrupt would have to re-derive this.
 #define WDT_ISR_STRETCH_PCT (0U)
 
 

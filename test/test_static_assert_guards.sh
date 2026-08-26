@@ -42,6 +42,14 @@
 # NOT compiled here and would need their own toolchains.
 set -euo pipefail
 
+mixed_control_child=0
+case ${1:-} in
+	"") ;;
+	--mixed-control-child) mixed_control_child=1 ;;
+	*) printf 'FAIL: unknown argument: %s\n' "$1" >&2; exit 1 ;;
+esac
+[ "$#" -le 1 ] || { printf 'FAIL: too many arguments\n' >&2; exit 1; }
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Overridable ONLY so this file's own failure modes can be exercised against a
 # doctored copy of src/ -- removing a guard, rewording its message, reindenting
@@ -79,6 +87,50 @@ CFLAGS=$(read_var CFLAGS)
 	|| fail "print-CC / print-CFLAGS came back empty -- cannot compile anything"
 [[ "$CFLAGS" == *-fshort-enums* ]] \
 	|| fail "CFLAGS no longer carries -fshort-enums; the enum-size guards below cannot be exercised as written"
+checks=$((checks + 1))
+
+# Calculate the duty conversion independently of the firmware macros. `duty`
+# is the ISR-owned fraction of wall time, so foreground delay work receives the
+# denominator 100-duty. Quotient plus nonzero remainder is an upward-rounded
+# division without the overflow-prone numerator+denominator-1 idiom.
+watchdog_budget_ms() {
+	local blocking=$1 duty=$2 tick=$3 loop=$4 denominator numerator overhead
+	[ "$duty" -lt 100 ] || fail "independent watchdog calculation received invalid duty $duty"
+	denominator=$((100 - duty))
+	numerator=$((blocking * duty))
+	overhead=$((numerator / denominator + (numerator % denominator != 0)))
+	printf '%d\n' "$((blocking + overhead + tick + loop))"
+}
+
+check_watchdog_budget() {
+	local label=$1 blocking=$2 duty=$3 tick=$4 loop=$5 expected=$6 actual
+	actual=$(watchdog_budget_ms "$blocking" "$duty" "$tick" "$loop")
+	[ "$actual" -eq "$expected" ] \
+		|| fail "$label independently calculated $actual ms, expected $expected ms"
+	checks=$((checks + 1))
+}
+
+check_watchdog_budget "25% duty relay" 12 25 1 1 18
+check_watchdog_budget "25% duty mute" 5 25 1 1 9
+check_watchdog_budget "25% duty simple" 0 25 1 1 2
+check_watchdog_budget "zero-duty PIC10 relay" 12 0 1 1 14
+check_watchdog_budget "largest supported arithmetic domain" 254 99 2 2 25404
+
+# PIC10F320 is intentionally self-contained. Its duplicate must remain exactly
+# the same checked conversion as the modular header; zero duty would otherwise
+# hide a stale mixed formula from every ordinary PIC boundary.
+budget_formula() {
+	sed -n \
+		'/^#if (WDT_ISR_STRETCH_PCT >= 100U)$/,/^      + (uint32_t)WDT_LOOP_WORK_MS )$/p' \
+		"$1"
+}
+shared_budget=$(budget_formula "$SRC/bypass_output_common.h")
+pic10f320_budget=$(budget_formula "$SRC/bypass_mcu_pic10f320.c")
+[ -n "$shared_budget" ] \
+	|| fail "could not extract the shared watchdog duty conversion"
+checks=$((checks + 1))
+[ "$pic10f320_budget" = "$shared_budget" ] \
+	|| fail "PIC10F320's self-contained watchdog duty conversion drifted from bypass_output_common.h"
 checks=$((checks + 1))
 
 # ---------------------------------------------------------------------------
@@ -228,6 +280,17 @@ compile() {
 	$CC $flags "-D$macro" -I"$tree" -c "$tree/$tu" -o "$tree/out.o" 2>&1
 }
 
+compile_budget_fixture() {
+	local tree=$1 map_define=$2 relay=$3 mute=$4 simple=$5 probe=$6 expected=$7
+	$CC $CFLAGS "$map_define" -I"$tree" \
+		-DTEST_RELAY_BUDGET_MS="$relay" \
+		-DTEST_MUTE_BUDGET_MS="$mute" \
+		-DTEST_SIMPLE_BUDGET_MS="$simple" \
+		-DTEST_PROBE_BLOCKING_MS="$probe" \
+		-DTEST_PROBE_BUDGET_MS="$expected" \
+		-c "$ROOT/test/watchdog_budget_compile.c" -o "$tree/budget.o" 2>&1
+}
+
 # Control, one per compile configuration used below. Without this every
 # "the build failed" result would be unattributable.
 for spec in "bypass_mcu_avr_classic.c CD4053_SIMPLE" \
@@ -277,6 +340,63 @@ for row in "${MUTATIONS[@]}"; do
 	checks=$((checks + 1))
 done
 
+# Compile the production macro itself with every real map. This complements the
+# independent shell calculation above: neither copy can validate the other by
+# construction, and the PIC maps prove zero duty adds no spurious stretch.
+for spec in \
+	"AVR-Classic -DBYPASS_MCU_AVR_CLASSIC 18 9 2 12 18" \
+	"AVR-XT -DBYPASS_MCU_AVR_XT 18 9 2 12 18" \
+	"PIC10F322 -DBYPASS_MCU_PIC10F322 14 7 2 12 14" \
+	"PIC12F675 -DBYPASS_MCU_PIC12F675 16 9 4 12 16"; do
+	read -r label map_define relay mute simple probe expected <<<"$spec"
+	tree="$work/budget-map-$label"
+	plant "$tree"
+	if ! out=$(compile_budget_fixture "$tree" "$map_define" \
+			"$relay" "$mute" "$simple" "$probe" "$expected"); then
+		fail "$label production watchdog budgets differ from the independent exact values: $out"
+	fi
+	checks=$((checks + 1))
+done
+
+# Exercise the largest combined supported integer domain through the production
+# macro, not only through Bash arithmetic: B<=254, p<=99, tick/work<=2.
+tree="$work/budget-domain-max"
+plant "$tree"
+sed -i \
+	's/^#define WDT_ISR_STRETCH_PCT (25U)/#define WDT_ISR_STRETCH_PCT (99U)/; s/^#define TICK_PERIOD_MS    (1U)/#define TICK_PERIOD_MS    (2U)/; s/^#define WDT_LOOP_WORK_MS  (1U)/#define WDT_LOOP_WORK_MS  (2U)/' \
+	"$tree/bypass_pins_avr_classic.h"
+if ! out=$(compile_budget_fixture "$tree" -DBYPASS_MCU_AVR_CLASSIC \
+		1204 504 4 254 25404); then
+	fail "production watchdog arithmetic failed its maximum-domain probe: $out"
+fi
+checks=$((checks + 1))
+
+# At 100% no foreground share remains; values above it are invalid too. Pin both
+# comparisons so weakening >= to == cannot admit wrapped denominators. The
+# fallback denominator must prevent either case from adding divide-by-zero noise.
+for duty in 100 101; do
+	tree="$work/duty-domain-$duty"
+	plant "$tree"
+	before=$(sha256sum "$tree/bypass_pins_avr_classic.h" | cut -d' ' -f1)
+	sed -i \
+		"s/^#define WDT_ISR_STRETCH_PCT (25U)/#define WDT_ISR_STRETCH_PCT (${duty}U)/" \
+		"$tree/bypass_pins_avr_classic.h"
+	after=$(sha256sum "$tree/bypass_pins_avr_classic.h" | cut -d' ' -f1)
+	[ "$before" != "$after" ] \
+		|| fail "invalid-duty $duty fixture changed nothing in bypass_pins_avr_classic.h"
+	checks=$((checks + 1))
+	if out=$(compile "$tree" bypass_output_tq2_l2_5v_relay.c TQ2_L2_5V_RELAY "$CFLAGS"); then
+		fail "$duty% wall-time ISR duty compiled clean despite leaving no valid foreground share"
+	fi
+	checks=$((checks + 1))
+	[[ "$out" == *"WDT_ISR_STRETCH_PCT must be below 100: it is wall-time ISR duty"* ]] \
+		|| fail "$duty% duty missed its dedicated compile guard: $out"
+	checks=$((checks + 1))
+	[[ "$out" != *"division by zero"* ]] \
+		|| fail "$duty% duty reached division by zero instead of only its dedicated guard: $out"
+	checks=$((checks + 1))
+done
+
 # ---------------------------------------------------------------------------
 # Near-bound watchdog budget.
 # ---------------------------------------------------------------------------
@@ -297,12 +417,13 @@ done
 # never reachable (dead arithmetic, a lost parenthesis) fails the CLEAN half.
 #
 # Budget on the classic-AVR map these compiles resolve, with the shipped
-# TICK_PERIOD_MS=1, WDT_LOOP_WORK_MS=1 and WDT_ISR_STRETCH_PCT=25:
-#   relay  (12 ms pulse): 12 + ceil(12*25/100)=3 + 1 + 1 = 17   (old guard: 13)
-#   mute   ( 5 ms pulse):  5 + ceil( 5*25/100)=2 + 1 + 1 =  9   (old guard:  6)
-#   cd4053 (no blocking):  0 +                  0 + 1 + 1 =  2   (old guard:  1)
-# The exact-boundary rows (17/18, 9/10, 2/3) pin those numbers: a bound that
-# drifts by even 1 ms breaks one half of a pair.
+# TICK_PERIOD_MS=1, WDT_LOOP_WORK_MS=1 and WDT_ISR_STRETCH_PCT=25. The
+# percentage is wall-time ISR duty, so additive stretch is p/(100-p):
+#   relay  (12 ms pulse): 12 + ceil(12*25/75)=4 + 1 + 1 = 18   (old guard: 13)
+#   mute   ( 5 ms pulse):  5 + ceil( 5*25/75)=2 + 1 + 1 =  9   (old guard:  6)
+#   cd4053 (no blocking):  0 +                 0 + 1 + 1 =  2   (old guard:  1)
+# The exact-boundary rows (18/19, 9/10, 2/3) pin those numbers: equality with
+# the watchdog floor is rejected, and a drift of even 1 ms breaks one pair.
 #
 # Row format, deliberately not the MUTATIONS format above: a fixture needs more
 # than one edit, and its expected outcome is sometimes a clean compile.
@@ -310,15 +431,20 @@ done
 NEARBOUND=(
 	"relay near-bound floor|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (15U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|FIRES:relay: worst-case wall-clock WDT pet-to-pet interval must stay"
 	"relay preemption term is load-bearing|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (15U)/;bypass_pins_avr_classic.h@@s/^#define WDT_ISR_STRETCH_PCT (25U)/#define WDT_ISR_STRETCH_PCT (0U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|CLEAN"
-	"relay exact bound fires at 17|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (17U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|FIRES:relay: worst-case wall-clock WDT pet-to-pet interval must stay"
-	"relay exact bound clears at 18|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (18U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|CLEAN"
-	"relay loop-work term is load-bearing|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (17U)/;bypass_pins_avr_classic.h@@s/^#define WDT_LOOP_WORK_MS  (1U)/#define WDT_LOOP_WORK_MS  (0U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|CLEAN"
+	"relay exact bound fires at 18|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (18U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|FIRES:relay: worst-case wall-clock WDT pet-to-pet interval must stay"
+	"relay exact bound clears at 19|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (19U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|CLEAN"
+	"relay loop-work term is load-bearing|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (18U)/;bypass_pins_avr_classic.h@@s/^#define WDT_LOOP_WORK_MS  (1U)/#define WDT_LOOP_WORK_MS  (0U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|CLEAN"
+	"relay tick term is load-bearing|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (18U)/;bypass_pins_avr_classic.h@@s/^#define TICK_PERIOD_MS    (1U)/#define TICK_PERIOD_MS    (0U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|CLEAN"
 	"mute near-bound floor|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (8U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|FIRES:mute: worst-case wall-clock WDT pet-to-pet interval must stay"
 	"mute preemption term is load-bearing|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (8U)/;bypass_pins_avr_classic.h@@s/^#define WDT_ISR_STRETCH_PCT (25U)/#define WDT_ISR_STRETCH_PCT (0U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|CLEAN"
 	"mute exact bound fires at 9|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (9U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|FIRES:mute: worst-case wall-clock WDT pet-to-pet interval must stay"
 	"mute exact bound clears at 10|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (10U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|CLEAN"
+	"mute tick term is load-bearing|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (9U)/;bypass_pins_avr_classic.h@@s/^#define TICK_PERIOD_MS    (1U)/#define TICK_PERIOD_MS    (0U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|CLEAN"
+	"mute loop-work term is load-bearing|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (9U)/;bypass_pins_avr_classic.h@@s/^#define WDT_LOOP_WORK_MS  (1U)/#define WDT_LOOP_WORK_MS  (0U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|CLEAN"
 	"cd4053 exact bound fires at 2|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (2U)/|bypass_output_cd4053_simple.c|CD4053_SIMPLE|FIRES:cd4053: worst-case wall-clock WDT pet-to-pet interval must stay"
 	"cd4053 exact bound clears at 3|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (3U)/|bypass_output_cd4053_simple.c|CD4053_SIMPLE|CLEAN"
+	"cd4053 tick term is load-bearing|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (2U)/;bypass_pins_avr_classic.h@@s/^#define TICK_PERIOD_MS    (1U)/#define TICK_PERIOD_MS    (0U)/|bypass_output_cd4053_simple.c|CD4053_SIMPLE|CLEAN"
+	"cd4053 loop-work term is load-bearing|bypass_pins_avr_classic.h@@s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (2U)/;bypass_pins_avr_classic.h@@s/^#define WDT_LOOP_WORK_MS  (1U)/#define WDT_LOOP_WORK_MS  (0U)/|bypass_output_cd4053_simple.c|CD4053_SIMPLE|CLEAN"
 )
 
 for row in "${NEARBOUND[@]}"; do
@@ -353,6 +479,36 @@ for row in "${NEARBOUND[@]}"; do
 	fi
 	checks=$((checks + 1))
 done
+
+# Restore the exact mixed-definition defect in both deliberately duplicated
+# formulas, then run this complete suite against that source. Production-floor
+# controls still compile, but the hard-coded 18 ms AVR-Classic map oracle must
+# reject the tree because the old ceil(blocking*p/100) arithmetic yields 17 ms.
+if [ "$mixed_control_child" -eq 0 ]; then
+	tree="$work/mixed-duty-formula"
+	plant "$tree"
+	for file in bypass_output_common.h bypass_mcu_pic10f320.c; do
+		line='#  define WDT_FOREGROUND_SHARE_PCT (100U - WDT_ISR_STRETCH_PCT)'
+		[ "$(grep -Fxc "$line" "$tree/$file")" -eq 1 ] \
+			|| fail "mixed-formula control cannot find exactly one duty denominator in $file"
+		sed -i \
+			's/^#  define WDT_FOREGROUND_SHARE_PCT (100U - WDT_ISR_STRETCH_PCT)$/#  define WDT_FOREGROUND_SHARE_PCT (100U)/' \
+			"$tree/$file"
+		grep -Fxq '#  define WDT_FOREGROUND_SHARE_PCT (100U)' "$tree/$file" \
+			|| fail "mixed-formula control did not restore the old denominator in $file"
+		checks=$((checks + 2))
+	done
+	log="$work/mixed-duty-formula.log"
+	if STATIC_ASSERT_SRC="$tree" \
+			bash "$ROOT/test/test_static_assert_guards.sh" --mixed-control-child \
+			>"$log" 2>&1; then
+		fail "the complete exact-bound suite accepted the restored mixed duty/stretch formula"
+	fi
+	checks=$((checks + 1))
+	grep -Fq "AVR-Classic production watchdog budgets differ from the independent exact values" "$log" \
+		|| fail "the mixed formula failed for the wrong reason; expected the 18 ms AVR-Classic map oracle: $(tr '\n' ' ' <"$log")"
+	checks=$((checks + 1))
+fi
 
 printf 'static_assert guards: %d checks, 0 failures (%d guards counted, %d mutations proven to trip one, %d near-bound watchdog fixtures)\n' \
 	"$checks" "$guards" "${#MUTATIONS[@]}" "${#NEARBOUND[@]}"

@@ -112,9 +112,9 @@ misra-config:src/bypass_mcu_pic10f320.c
 # Same root cause, rule side: TICK_PERIOD_MS and WDT_MIN_PERIOD_MS are consumed
 # ONLY inside static_assert() expressions, which the addon cannot see for this
 # file, so it reports them as unused macros. They are demonstrably used -- the
-# asserts they feed are what enforce "1 ms tick + blocking pulse < worst-case
-# WDT period" at compile time. Waived explicitly rather than left to pass
-# silently. See MISRA_COMPLIANCE.md D-4.
+# asserts they feed enforce the complete blocking + ISR-duty + tick + loop-work
+# wall-clock budget below the worst-case WDT period at compile time. Waived
+# explicitly rather than left to pass silently. See MISRA_COMPLIANCE.md D-4.
 misra-c2012-2.5:src/bypass_mcu_pic10f320.c
 
 # --- D-5: avr-libc ATOMIC_BLOCK vendor macro (Rules 12.3, 14.2; unreadVariable) ---

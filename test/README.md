@@ -77,12 +77,13 @@ test/
   test_variant_map_contract.sh shared: every per-variant map is guard-registered
   test_static_assert_guards.sh shared: every modular shell has an anchored,
                                      uncommented direct include of the shared
-                                     checks, whose guards fail the build when
-                                     their inputs are broken; near-bound
-                                     fixtures additionally pin the watchdog
-                                     pet-to-pet budget to its exact millisecond
-                                     and prove its ISR-preemption and loop-work
-                                     terms are load-bearing
+                                      checks, whose guards fail the build when
+                                      their inputs are broken; near-bound
+                                      fixtures additionally pin the watchdog
+                                      pet-to-pet budget to its exact millisecond,
+                                      convert wall-time ISR duty independently,
+                                      prove ISR/tick/loop terms are load-bearing,
+                                      and reject the former mixed formula
   test_pic_build.sh         shared: PIC image/size/rebuild-trigger checks
   test_pic10f320_coverage_archive.sh shared: coverage-gate source-archive mode checks
   test_pic_rebuild.sh       shared: PIC soak rebuild determinism
@@ -127,7 +128,8 @@ test/
            test_soak_attiny202.py  long-duration liveness soak
            test_lockstep_attiny202.py  ctx_-vs-golden-model co-simulation
                                                         (make attiny202-lockstep)
-           test_attiny202_delay_oracle.py  compiled-image pulse-width oracle
+           test_attiny202_delay_oracle.py  compiled delay widths + tick-ISR
+                                          instruction ceiling; host parser tests
            model_step_ffi.c/.py  ctypes bridge letting the Python drivers call
                                  the SHIPPING pure core through model_step.h,
                                  so no part of the algorithm is re-implemented
@@ -365,7 +367,7 @@ The split mirrors the PIC lanes: **the host-only rows below are members of
 | Golden-model bridge | `test-attiny202-model-ffi` | The ctypes bridge reaches the shipping pure core and behaves correctly at the `>=` press-threshold boundary, both saturation bounds, the lock-out, and a full round trip — independent hard-coded expectations, not another comparison against the model. | host |
 | Output-sequence oracle | `test-attiny202-output-oracle` | The PA2/PA3 transition, ordering and pulse-presence checker itself is correct. | host |
 | Fault accounting oracle | `test-attiny202-fault-oracle` | The fault driver's run accounting cannot silently under-count injections, latch-only physical-pin handling is rejected, and the reviewed AVR-XT/PIC12F675 emergency register-write order is pinned. | host |
-| Coil-pulse width | `attiny202-delay-oracle` | Compiled relay (12 ms) and mute (5 ms) delay-body cycle counts, recovered from the disassembled `_delay_ms` loop in the built image, match design and clear the 4 ms datasheet minimum. Timer-ISR preemption makes the edge-to-edge pin-high interval slightly longer. Every recognized loop candidate must provide a decodable 16-bit seed; no candidate can be dropped as missing evidence. | host, over real image |
+| Coil-pulse width / ISR ceiling | `attiny202-delay-oracle` | Compiled relay (12 ms) and mute (5 ms) delay-body cycle counts, recovered from the disassembled `_delay_ms` loop in the built image, match design and clear the 4 ms datasheet minimum. The sole `reti` handler and its complete direct call tree stay at or below the reviewed 84-instruction ceiling; recursion, unresolved or indirect calls, and backward edges fail closed. Four cycles per instruction plus a 16-cycle interrupt-entry/vector allowance bounds the complete response at 352 of 2000 tick cycles, below 25% duty. Timer-ISR preemption makes the edge-to-edge pin-high interval slightly longer. Every recognized loop candidate must provide a decodable 16-bit seed; no candidate can be dropped as missing evidence. | host, over real image |
 | Static analysis | `attiny202-analyze` | cppcheck + MISRA pass over the AVR-XT shell with real DFP/avr-libc headers. | host tools |
 | Register-level functional | `attiny202-sim` | The real image toggles on debounced press, boots dark with the WDT locked and `PORTA.DIR` exact, stays stable at idle, handles a switch held through power-on, and drives the correct PA2/PA3 sequence per variant. | yasimavr |
 | Fault response | `attiny202-fault` | 24 selected SFR/latch/state/pin-polarity corruptions (32 on the relay variant) each produce the correct response: the sanity gate's force-reset path, a witnessed watchdog reset for the tick timer itself, safe overwrite at the ISR/main persisted-context transaction seams, or relay-coil escalation with modeled PA2/PA3 pin levels low and OUT/DIR/PINnCTRL canonical before the spin. Relay fixtures cover both coils' INVEN, pull-up, direction, combined stale-register state, and OUT faults from BYPASS and ENGAGED. Zero skips, exact completion accounting over 25 (33) results. | yasimavr |

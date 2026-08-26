@@ -68,13 +68,17 @@
 // a wider allowance here than the 0.46 ms measured there.
 #define WDT_LOOP_WORK_MS  (1U)
 
-// ISR preemption allowance. Interrupt-driven, like the classic shell. No
-// cycle-accurate AVR-XT simulator is trusted for this measurement (see the
-// yasimavr stepping note in test/README.md), so the term is bounded from the
-// built image instead: the TCB0 ISR and its callees are 84 instructions, and no
-// AVR-XT instruction the shell emits exceeds 3 cycles, so the ISR cannot exceed
-// 252 of the 2000 cycles in a 1 ms tick at 2 MHz (12.6%). The classic map's
-// 25% therefore bounds this part too, with the same re-derivation duty.
+// ISR preemption allowance. Interrupt-driven, like the classic shell. This is
+// percentage p of WALL time owned by the ISR, not additive stretch relative to
+// foreground time; p=25% permits at most 25/75 = 33 1/3% additive delay stretch.
+// No cycle-accurate AVR-XT simulator is trusted for this measurement (see the
+// yasimavr stepping note in test/README.md), so the duty is bounded from the
+// built image instead: the TCB0 ISR and its callees are 84 instructions.
+// Charging every instruction a conservative 4 cycles and reserving another 16
+// cycles for interrupt entry and vector dispatch bounds the complete response
+// at 352 of the 2000 cycles in a 1 ms tick (17.6%). The classic map's 25%
+// therefore bounds this part too, with the same re-derivation duty. The compiled
+// call-tree ceiling is enforced by attiny202-delay-oracle.
 #define WDT_ISR_STRETCH_PCT (25U)
 
 

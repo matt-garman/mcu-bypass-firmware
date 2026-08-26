@@ -3,7 +3,8 @@
 # Copyright (c) Matthew Garman
 #
 # test_attiny202_delay_oracle.py -- verify the ABSOLUTE width of the ATtiny202
-# coil-pulse blocking delays directly from the COMPILED IMAGE.
+# coil-pulse blocking delays and the tick-ISR instruction ceiling directly from
+# the COMPILED IMAGE.
 #
 # WHY THIS EXISTS (and how it divides work with the yasimavr harness)
 # ------------------------------------------------------------------
@@ -49,8 +50,11 @@
 #   For each built variant image it disassembles the flash (avr-objdump -d),
 #   finds every avr-libc _delay_ms busy loop, recovers its 16-bit iteration
 #   count, converts that to milliseconds at F_CPU, and asserts the per-variant
-#   expected set of pulse widths (and the relay's 4 ms datasheet minimum). Every
-#   recognized loop must have a decodable 16-bit seed; none may be discarded:
+#   expected set of pulse widths (and the relay's 4 ms datasheet minimum). It
+#   also identifies the sole `reti` function, follows its direct call tree, and
+#   requires the complete tick ISR to remain within the reviewed 84-instruction
+#   ceiling that underpins WDT_ISR_STRETCH_PCT. Every recognized delay loop must
+#   have a decodable 16-bit seed; none may be discarded:
 #       cd4053_simple    (simple x4053): no coil pulse -> zero delay loops
 #       cd4053_with_mute (muted x4053) : two 5 ms mute windows (engage+bypass)
 #       tq2_l2_5v_relay  (TQ2-L2-5V)   : two 12 ms coil pulses (engage+bypass)
@@ -73,6 +77,11 @@ import sys
 F_CPU_HZ = 2_000_000          # 16 MHz OSC / PDIV 8 (see sim_attiny202.F_CPU_HZ)
 DELAY_LOOP_CYCLES = 4         # avr-libc _delay_ms body: SBIW(2) + taken BRNE(2)
 RELAY_MIN_MS = 4              # TQ2-L2-5V coil-set datasheet minimum
+ISR_INSTRUCTION_LIMIT = 84    # reviewed TCB0 ISR + complete direct call tree
+ISR_MAX_CYCLES_PER_INSTRUCTION = 4
+ISR_FIXED_CYCLE_ALLOWANCE = 16  # conservative interrupt entry + vector dispatch
+ISR_TICK_CYCLES = 2000
+ISR_DUTY_LIMIT_PCT = 25
 
 # The absolute width is deterministic (compile-time), so the tolerance only has
 # to absorb avr-libc's few-cycle loop-setup/remainder rounding, not simulator
@@ -114,10 +123,20 @@ _BRNE_RE = re.compile(
     r"^\s*([0-9a-f]+):\s+[0-9a-f ]+\s+brne\s+\.[+-]\d+\s*;\s*0x([0-9a-f]+)", re.I)
 _LDI_RE = re.compile(
     r"^\s*[0-9a-f]+:\s+[0-9a-f ]+\s+ldi\s+r(\d+),\s*0x([0-9a-f]+)", re.I)
+_FUNCTION_RE = re.compile(r"^\s*([0-9a-f]+)\s+<([^>]+)>:\s*$", re.I)
+_INSTRUCTION_RE = re.compile(
+    r"^\s*([0-9a-f]+):\s+(?:[0-9a-f]{2}\s+)+\s*"
+    r"([a-z][a-z0-9.]*)\s*(.*)$", re.I)
+_TARGET_SYMBOL_RE = re.compile(r"<([^>]+)>")
+_TARGET_ADDR_RE = re.compile(r";\s*0x([0-9a-f]+)", re.I)
 
 
 class DelayLoopDecodeError(Exception):
     """A recognized delay-loop candidate has no provable iteration seed."""
+
+
+class IsrCensusError(Exception):
+    """The compiled ISR call tree cannot be conservatively instruction-counted."""
 
 
 def _ldi_value(line, want_reg):
@@ -189,6 +208,77 @@ def loop_ms(count, f_cpu=F_CPU_HZ):
     return count * DELAY_LOOP_CYCLES * 1000.0 / f_cpu
 
 
+def parse_isr_instruction_count(objdump_text):
+    """Count every instruction in the sole ISR and its direct call tree.
+
+    Counting every instruction in each reached function is conservative across
+    acyclic branches because mutually exclusive paths are summed. A backward
+    control-flow edge or recursive call would invalidate that argument and is
+    rejected rather than guessed at. Direct calls and tail jumps must resolve to
+    an objdump symbol so no callee silently disappears from the census.
+    """
+    functions = {}
+    current = None
+    for line in objdump_text.splitlines():
+        label = _FUNCTION_RE.match(line)
+        if label:
+            current = label.group(2)
+            functions.setdefault(current, [])
+            continue
+        insn = _INSTRUCTION_RE.match(line)
+        if insn and current is not None:
+            functions[current].append(
+                (int(insn.group(1), 16), insn.group(2).lower(), insn.group(3)))
+
+    isrs = [name for name, body in functions.items()
+            if any(mnemonic == "reti" for _, mnemonic, _ in body)]
+    if len(isrs) != 1:
+        raise IsrCensusError(
+            "expected exactly one function containing reti, found %d" % len(isrs))
+
+    def target_symbol(operands):
+        match = _TARGET_SYMBOL_RE.search(operands)
+        if not match:
+            return None
+        return match.group(1).split("+", 1)[0]
+
+    def count_function(name, stack):
+        if name in stack:
+            raise IsrCensusError("recursive ISR call tree reaches %s" % name)
+        if name not in functions:
+            raise IsrCensusError("ISR target has no disassembled body: %s" % name)
+
+        body = functions[name]
+        total = len(body)
+        for address, mnemonic, operands in body:
+            symbol = target_symbol(operands)
+            if mnemonic in ("icall", "eicall", "ijmp", "eijmp"):
+                raise IsrCensusError(
+                    "indirect control transfer in ISR call tree at 0x%X" %
+                    address)
+            if mnemonic in ("call", "rcall"):
+                if symbol is None:
+                    raise IsrCensusError(
+                        "unresolved %s in ISR call tree at 0x%X" %
+                        (mnemonic, address))
+                total += count_function(symbol, stack + (name,))
+                continue
+
+            if mnemonic in ("jmp", "rjmp") and symbol not in (None, name):
+                total += count_function(symbol, stack + (name,))
+                continue
+
+            if mnemonic.startswith("br") or mnemonic in ("jmp", "rjmp"):
+                target = _TARGET_ADDR_RE.search(operands)
+                if target and int(target.group(1), 16) < address:
+                    raise IsrCensusError(
+                        "backward control-flow edge in ISR call tree at 0x%X" %
+                        address)
+        return total
+
+    return count_function(isrs[0], ())
+
+
 class Checker:
     def __init__(self):
         self.fails = 0
@@ -252,6 +342,22 @@ def check_disassembly(ck, variant, objdump_text):
         ck.check(False, "%s: delay-loop oracle error: %s" % (variant, exc))
         return
     check_variant(ck, variant, counts)
+    try:
+        isr_instructions = parse_isr_instruction_count(objdump_text)
+    except IsrCensusError as exc:
+        ck.check(False, "%s: tick-ISR census error: %s" % (variant, exc))
+        return
+    ck.check(
+        isr_instructions <= ISR_INSTRUCTION_LIMIT,
+        "%s: tick ISR + call tree uses %d instructions <= reviewed ceiling %d"
+        % (variant, isr_instructions, ISR_INSTRUCTION_LIMIT))
+    isr_cycle_bound = (isr_instructions * ISR_MAX_CYCLES_PER_INSTRUCTION
+                       + ISR_FIXED_CYCLE_ALLOWANCE)
+    duty_cycle_limit = ISR_TICK_CYCLES * ISR_DUTY_LIMIT_PCT // 100
+    ck.check(
+        isr_cycle_bound <= duty_cycle_limit,
+        "%s: conservative ISR bound %d cycles <= %d-cycle duty allowance"
+        % (variant, isr_cycle_bound, duty_cycle_limit))
 
 
 def variant_of(elf_path):
@@ -335,6 +441,36 @@ def _synthetic(loops):
     return "\n".join(out)
 
 
+def _synthetic_isr(helper_instructions=80, backward_edge=False):
+    """Build one ISR whose call tree has 4+helper_instructions instructions."""
+    out = [
+        "00000100 <__vector_3>:",
+        " 100:\t0f 92\tpush\tr0",
+        " 102:\t06 d0\trcall\t.+12     ; 0x110 <tick_helper>",
+        " 104:\t18 95\treti",
+        "00000110 <tick_helper>:",
+    ]
+    address = 0x110
+    for _ in range(helper_instructions):
+        out.append(" %03x:\t00 00\tnop" % address)
+        address += 2
+    if backward_edge:
+        out.append(" %03x:\tf1 f7\tbrne\t.-4      ; 0x%x" %
+                   (address, address - 2))
+    else:
+        out.append(" %03x:\t08 95\tret" % address)
+    return "\n".join(out)
+
+
+def _synthetic_indirect_isr():
+    """Build an ISR whose call target cannot be recovered from disassembly."""
+    return "\n".join([
+        "00000100 <__vector_3>:",
+        " 100:\t09 95\ticall",
+        " 102:\t18 95\treti",
+    ])
+
+
 def selftest():
     ck = Checker()
 
@@ -403,7 +539,26 @@ def selftest():
     else:
         stale_seed_error = ""
     ck.check("0x344" in stale_seed_error and "r24, r25" in stale_seed_error,
-             "unseeded loop cannot borrow the preceding loop's seed pair")
+              "unseeded loop cannot borrow the preceding loop's seed pair")
+
+    # Compiled ISR census: handler + call instruction + callee body is bounded,
+    # while one extra instruction and an unbounded backward edge fail closed.
+    ck.check(parse_isr_instruction_count(_synthetic_isr(80)) == 84,
+             "ISR census follows the direct call tree to exactly 84 instructions")
+    ck.check(_isr_census_fails(_synthetic_isr(81)) == 0,
+             "85-instruction ISR remains parseable so the ceiling check owns rejection")
+    ck.check(_isr_fails(_synthetic_isr(81)) == 1,
+             "85-instruction ISR exceeds the reviewed ceiling")
+    ck.check(_isr_census_fails(_synthetic_isr(2, backward_edge=True)) == 1,
+             "backward ISR control flow fails closed instead of being undercounted")
+    ck.check(_isr_census_fails(_synthetic_indirect_isr()) == 1,
+             "indirect ISR control flow fails closed instead of being omitted")
+    full_cycle_bound = (ISR_INSTRUCTION_LIMIT * ISR_MAX_CYCLES_PER_INSTRUCTION
+                        + ISR_FIXED_CYCLE_ALLOWANCE)
+    ck.check(full_cycle_bound == 352,
+             "84-instruction ceiling plus fixed overhead is bounded at 352 cycles")
+    ck.check(full_cycle_bound * 100 <= ISR_TICK_CYCLES * ISR_DUTY_LIMIT_PCT,
+             "complete 352-cycle bound fits the 25% wall-time duty allowance")
 
     print("[delay] selftest: %d checks, %d failures" % (ck.checks, ck.fails))
     return 1 if ck.fails else 0
@@ -429,6 +584,24 @@ def _disassembly_fails(variant, objdump_text):
             contextlib.redirect_stderr(io.StringIO()):
         check_disassembly(ck, variant, objdump_text)
     return ck.fails
+
+
+def _isr_census_fails(objdump_text):
+    """Return 1 when ISR instruction parsing fails, otherwise zero."""
+    try:
+        parse_isr_instruction_count(objdump_text)
+    except IsrCensusError:
+        return 1
+    return 0
+
+
+def _isr_fails(objdump_text):
+    """Run the production ISR ceiling check without delay-loop assertions."""
+    try:
+        count = parse_isr_instruction_count(objdump_text)
+    except IsrCensusError:
+        return 1
+    return 0 if count <= ISR_INSTRUCTION_LIMIT else 1
 
 
 def main(argv):

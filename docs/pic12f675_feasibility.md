@@ -629,9 +629,11 @@ With the prescaler assigned to the watchdog (`PSA=1`), the available periods are
 | 111 | 1:128 | 2.304 s |
 
 **1:16 → ~288 ms** is the closest analogue to the PIC10F322's ~256 ms and is what
-the spike used. The margin argument mirrors the 322's: worst-case pet-to-pet
-window is one tick (1.024 ms) plus the longest blocking actuation (12 ms relay
-coil pulse) ≈ **13.1 ms**, against a 288 ms nominal period.
+the spike used. Its early rough margin estimate was one tick (1.024 ms) plus the
+longest blocking actuation (12 ms relay coil pulse), or about **13.1 ms**. The
+production compile-time bound is deliberately more conservative: it ceilings
+the tick to 2 ms and adds 2 ms of bounded loop work, for **16 ms** against the
+de-rated floor below.
 
 **The 18 ms base above is a NOMINAL period, and the argument does not rest on
 it** (datasheet read 2026-08-11, §8 item 4). Both figures in play are
@@ -644,8 +646,8 @@ period as **10 ms min / 17 ms typ / 25 ms max** (30 ms max at extended
 temperature), so the characterized typical is 17 ms and 1:16 is 272 ms typical
 rather than 288 ms. A watchdog margin argument may not be built on a nominal or
 a typical at all. The one that matters is the **minimum: 10 ms × 16 = 160 ms**,
-which is what the shell cites and what the 13.1 ms window is judged against — a
-factor of 12.
+which is what the shell cites and what its conservative 16 ms bound is judged
+against -- a factor of 10.
 
 Simulation confirms the model exactly: with `PSA=1, PS=1:16` a starved watchdog
 reset fired at **cycle 288,039**, i.e. 288.0 ms at 1 MIPS — precisely 18 ms × 16
@@ -1210,9 +1212,9 @@ bench**, tracked together with the graduation diff that follows it.
    - **The prescaler choice is unchanged.** The trigger written into this item
      was "if the fast end is materially worse than assumed, move 1:16 → 1:32".
      The fast end *is* worse, and 1:16 still stands by a wide margin: 10 ms × 16
-     = **160 ms** floor against a 13.024 ms worst-case pet-to-pet window, a
-     factor of 12. Doubling to 1:32 would buy margin nothing needs and cost
-     320 ms of fault-detection latency.
+     = **160 ms** floor against the shell's conservative 16 ms worst-case
+     pet-to-pet bound, a factor of 10. Doubling to 1:32 would buy margin nothing
+     needs and cost 320 ms of fault-detection latency.
    - **The shell already cites this correctly, nominal included.**
      `src/bypass_mcu_pic12f675.c` names "DS41190G Table 12-4 parameter 31 … a
      10ms unprescaled minimum, so the characterized minimum here is 160ms".
@@ -1269,10 +1271,11 @@ bench**, tracked together with the graduation diff that follows it.
      Panasonic TQ-L2-5V wants a 4 ms minimum set/reset pulse, so the 3× safety
      factor `src/bypass_output_tq2_l2_5v_relay.h` chose degrades to **2.85×**.
      Intact.
-   - **Watchdog margin.** The pet interval is measured in ticks and stretches
+   - **Watchdog margin.** The earlier rough pulse-plus-tick estimate stretches
      with the oscillator (13.024 ms → **13.68 ms**); the watchdog runs on its own
-     internal RC and does *not*, so the two errors do not correlate away. Against
-     the 160 ms floor of item 4 that is still a factor of **11.7**.
+     internal RC and does *not*, so the two errors do not correlate away. That
+     physical estimate remains inside the shell's conservative 16 ms compile-time
+     bound, which retains a factor of **10** against the 160 ms floor in item 4.
    - **Debounce.** Unaffected in the way that matters. The pure core counts
      samples, not milliseconds, so a ±5% oscillator moves the wall-clock
      debounce window by ±5% and changes no state-machine behaviour at all.

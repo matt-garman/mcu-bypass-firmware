@@ -431,9 +431,11 @@ blocking actuation:: the relay coil pulse (12 ms) or the
 ISR preemption (`WDT_ISR_STRETCH_PCT`):: on the interrupt-driven AVRs
   the 1 ms tick ISR preempts the busy-wait inside that actuation, so
   the actuation is longer in wall time than the delay body it
-  compiles to.  This term is the percentage of each tick the ISR may
-  own.  It is zero on the polled PIC shells, which run with `GIE`
-  clear and have no interrupt service routine to preempt anything.
+  compiles to.  Despite the historical macro name, this input is the
+  percentage `p` of _wall time_ the ISR may own, not additive stretch
+  relative to foreground time.  It is zero on the polled PIC shells,
+  which run with `GIE` clear and have no interrupt service routine to
+  preempt anything.
 scheduling latency (`TICK_PERIOD_MS`):: the actuation ends at an
   arbitrary point inside a tick, and the next pass is gated on the
   next tick -- IDLE-sleep wake on AVR, the `TMR2IF`/`TMR0` poll on
@@ -442,6 +444,23 @@ bounded loop work (`WDT_LOOP_WORK_MS`):: the non-blocking work in the
   window: the sanity gate, the context transaction and the debounce
   step, plus -- on the boot path -- `init()`'s register
   configuration.  One whole tick is the allowance.
+
+If ISR duty is `p`, foreground delay work receives only `100-p` percent
+of wall time.  A delay body requiring `B` milliseconds of foreground
+cycles therefore contributes this conservative wall-time term:
+
+....
+B + ceil(B * p / (100 - p))
+....
+
+The build rejects `p >= 100` before the denominator is used.  The
+ceiling uses quotient plus nonzero remainder rather than the
+overflow-prone `numerator + denominator - 1` idiom, and multiplication
+is promoted to 32 bits.  The supported domain is bounded independently:
+`B < RELEASE_THRESH < UINT8_MAX` and `p < 100`, so its largest
+numerator is only `254 * 99 = 25146`.  At the AVR value `p=25`, the ISR
+may therefore add at most `25/75 = 33 1/3%` of the foreground delay,
+not 25%.
 
 The boot path is inside this bound rather than beside it: `init()`
 arms the watchdog and then performs the same blocking actuation
@@ -452,10 +471,10 @@ headroom on that path rather than a cost.
 
 .Table Per-target watchdog pet-to-pet budget (milliseconds)
 |===
-| Target | Tick | Loop work | ISR stretch | Relay | Mute | Simple | De-rated floor
+| Target | Tick | Loop work | ISR duty | Relay | Mute | Simple | De-rated floor
 
-| AVR Classic (ATtiny13a/45/85) | 1 | 1 | 25% | 17 | 9 | 2 | 100
-| AVR-XT (ATtiny202)            | 1 | 1 | 25% | 17 | 9 | 2 | 128
+| AVR Classic (ATtiny13a/45/85) | 1 | 1 | 25% | 18 | 9 | 2 | 100
+| AVR-XT (ATtiny202)            | 1 | 1 | 25% | 18 | 9 | 2 | 128
 | PIC10F322                     | 1 | 1 |  0% | 14 | 7 | 2 | 160
 | PIC10F320                     | 1 | 1 |  0% | 14 | 7 | 2 | 160
 | PIC12F675                     | 2 | 2 |  0% | 16 | 9 | 4 | 160
@@ -468,12 +487,15 @@ because one simulated run over one stimulus cannot enumerate every
 path.
 
 Two independent gates hold the budget to something real.
-`test/test_static_assert_guards.sh` pins each variant's bound to its
-exact millisecond and proves the ISR-preemption and loop-work terms
-are load-bearing: a watchdog floor set inside the gap between the old
-`tick + pulse` sum and the full wall-clock bound must fail the build,
-and must go back to compiling the moment the term under test is
-zeroed.  `test/avr/test_sim.c` then measures the real image: it steps
+`test/test_static_assert_guards.sh` independently calculates the duty
+conversion, pins each variant's bound to its exact millisecond, and
+proves the ISR-preemption, tick, and loop-work terms are load-bearing:
+a watchdog floor set inside the gap between the old `tick + pulse` sum
+and the full wall-clock bound must fail the build, and must go back to
+compiling the moment the term under test is zeroed.  A negative control
+restores the old mixed duty/additive-stretch denominator and requires
+the 18 ms relay oracle to reject it.  `test/avr/test_sim.c` then measures
+the real Classic-AVR image: it steps
 the compiled firmware, records the longest interval between
 executions of `wdr` across boot and across toggles in both
 directions, and requires the result to fit the same budget the
@@ -484,24 +506,33 @@ floor, which a badly derived constant would also do.
 |===
 | Part | Simple | Mute | Relay | Budget (simple / mute / relay)
 
-| ATtiny13A (1.2 MHz) | 1.377 | 6.402 | 14.002 | 2 / 9 / 17
-| ATtiny85 (1.0 MHz)  | 1.464 | 7.004 | 15.003 | 2 / 9 / 17
+| ATtiny13A (1.2 MHz) | 1.377 | 6.402 | 14.002 | 2 / 9 / 18
+| ATtiny85 (1.0 MHz)  | 1.464 | 7.004 | 15.003 | 2 / 9 / 18
 |===
 
 The two AVR-classic clock rates bracket the measurement because the
 ISR term is worst at the lower one: the tick ISR is 142 cycles, which
 is 11.8% of a 1.2 MHz tick and 14.2% of a 1.0 MHz tick, against the
-25% the map declares.  The ATtiny202 runs the same code at 2 MHz;
+25% wall-time duty the map declares.  The worse measurement converts
+to 14.2/85.8 = 16.6% additive delay stretch, below the configured
+25/75 = 33 1/3% bound.  The ATtiny202 runs the same code at 2 MHz;
 this interval is measured between consecutive `wdr` executions, which
 needs cycle-granular instruction stepping -- precisely the mode the
 pinned yasimavr's unpatched `SimLoop.run(n)` rewind makes
 untrustworthy, even though the pin edges it timestamps from a signal
 hook are exact (see the yasimavr note in `test/README.md`).  Its term
 is therefore bounded from the built image instead -- the TCB0 ISR and
-its callees are 84 instructions, and no AVR-XT instruction the shell
-emits exceeds 3 cycles, so the ISR cannot exceed 252 of the 2000
-cycles in a 1 ms tick (12.6%).  The polled PIC shells have no ISR
-term to measure.
+its callees are 84 instructions.  Charging every instruction four
+cycles and reserving another 16 cycles for interrupt entry and vector
+dispatch bounds the complete response at 352 of the 2000 cycles in a
+1 ms tick (17.6% duty, or at most 21.4% additive stretch).
+`attiny202-delay-oracle` recovers the sole `reti` handler and its direct
+call tree from every built image and enforces that 84-instruction
+ceiling; recursion, unresolved or indirect calls, and backward control
+flow fail closed rather than being undercounted.  Its compiled delay-body oracle
+and delivered-pulse trace complete the corroboration without making an
+untrustworthy full-interval measurement.
+The polled PIC shells have no ISR term to measure.
 
 
 == Asymmetric Debounce Timing

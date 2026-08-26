@@ -374,10 +374,11 @@ existing complexity exists only to accommodate blocking, and would be deleted:
   retained blocking fallback keeps a corresponding qualification branch.
 - **Both watchdogs could tighten.** The PIC's ~256 ms (`WDTPS` 1:8192) and the
   AVR's `WDTO_250MS` are both sized for a worst-case pet-to-pet window dominated
-  by the coil pulse — ~14 ms on the PIC (1 ms tick + 12 ms pulse; the PIC pets at
-  the end of the loop body) and ~13 ms on the AVR (which pets before actuating).
-  A naive non-blocking loop collapses that window to roughly one tick, which
-  would permit a materially shorter watchdog period on both families.
+  by the coil pulse. The conservative compile-time bounds are 14 ms on PIC10
+  (12 ms pulse + 1 ms tick + 1 ms loop work) and 18 ms on AVR (the same base
+  terms plus the 25% wall-time ISR duty converted through `p/(100-p)`). A naive
+  non-blocking loop collapses that window to roughly one tick, which would permit
+  a materially shorter watchdog period on both families.
 
   > **Qualified by §7.7.** Output-progress liveness argues for withholding the
   > pet during every deferred actuation, and relay energy makes that mandatory.

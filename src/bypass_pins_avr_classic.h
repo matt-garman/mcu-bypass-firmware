@@ -70,10 +70,12 @@
 // ISR preemption allowance. This shell is INTERRUPT-DRIVEN: the 1 ms tick ISR
 // preempts the busy-wait inside a blocking actuation, so the actuation is
 // longer in WALL time than the delay body it compiles to. The term is the
-// percentage of each tick the ISR may own.
+// percentage p of WALL time the ISR may own, not additive stretch relative to
+// foreground time. Foreground receives only 100-p, so p=25% permits at most
+// 25/75 = 33 1/3% additive stretch of the delay body.
 // Measured worst case (simavr): 142 ISR cycles per tick = 11.8% at 1.2 MHz
 // (ATtiny13A) and 14.2% at 1.0 MHz (ATtiny25/45/85). 25% keeps ~1.8x margin on
-// the worse of the two and MUST be re-derived if the ISR grows.
+// the worse duty bound and MUST be re-derived if the ISR grows.
 #define WDT_ISR_STRETCH_PCT (25U)
 
 
