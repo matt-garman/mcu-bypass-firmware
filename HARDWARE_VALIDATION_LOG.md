@@ -128,6 +128,9 @@ as "no damage was observed on this device", not as a validated programming path:
   copy of the validated image bytes, not the retained evidence inode. If the
   tool infers the image format from a file extension this is where that shows
   up, and it shows up as a refusal to write rather than as a bad write;
+- `ipecmd` accepts device-export arguments through the retained evidence
+  directory (`-GF/proc/self/fd/<n>/<name>.hex`), so an evidence-parent rename
+  cannot redirect a readback into another directory;
 - programmed code and the non-BG CONFIG bits read back exactly as expected, and
   every program word the image does NOT supply reads back erased -- the helper
   now compares the whole device, so a writer whose `-M` leaves stale words

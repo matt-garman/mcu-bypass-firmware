@@ -938,8 +938,9 @@ def run_tool(argv, timeout, label, executable=None, pass_fds=()):
 def invoke(programmer, argv, timeout, label, pass_fds=()):
     """The only way a tool is started: source re-proved, immutable bytes run.
 
-    `pass_fds` carries whatever else this particular command has to READ by
-    descriptor -- for the single write, the sealed release-image copy.
+    `pass_fds` carries whatever else this command reads or writes through a
+    descriptor -- the sealed image for the write, or the evidence directory for
+    a device export.
     """
     programmer_unchanged(programmer)
     return run_tool(argv, timeout, label, executable=programmer["exec_path"],
@@ -1007,14 +1008,25 @@ def write_argv(programmer, image_path):
 # evidence
 # ---------------------------------------------------------------------------
 
-# `dir_fd` removes the pathname from every evidence operation after the
-# directory is opened. Windows supports neither it nor O_DIRECTORY, so the
-# pathname discipline below is the fallback there and the reservation records
-# which of the two was in force.
-EVIDENCE_DIR_FD = (hasattr(os, "O_DIRECTORY")
-                   and os.open in os.supports_dir_fd
-                   and os.stat in os.supports_dir_fd
-                   and os.chmod in os.supports_dir_fd)
+# Evidence creation and every later evidence operation share directory
+# descriptors. A partial dir_fd implementation is not a safe fallback: mixing a
+# checked parent descriptor with pathname mkdir/rmdir can flush one directory
+# while creating or cleaning up the transaction under another.
+EVIDENCE_DIR_OPERATIONS = (
+    os.open, os.stat, os.chmod, os.unlink, os.link, os.mkdir, os.rmdir,
+)
+
+
+def evidence_dir_fd_available():
+    return (
+        hasattr(os, "O_DIRECTORY")
+        and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "supports_dir_fd")
+        and all(operation in os.supports_dir_fd
+                for operation in EVIDENCE_DIR_OPERATIONS)
+        and hasattr(os, "supports_follow_symlinks")
+        and os.stat in os.supports_follow_symlinks
+    )
 
 
 def durable_fsync(fd, what):
@@ -1046,7 +1058,7 @@ def durable_write(fd, data, what):
         raise FlashError("could not write %s: %s" % (what, exc)) from exc
 
 
-def durable_link(source, target, what, dir_fd=None):
+def durable_link(source, target, what, dir_fd):
     """Install a fully written file under its final name, atomically.
 
     link() is the whole reason the temporary file exists: it either creates the
@@ -1055,10 +1067,7 @@ def durable_link(source, target, what, dir_fd=None):
     can never be replaced -- not by a second helper run, and not by this one.
     """
     try:
-        if dir_fd is None:
-            os.link(source, target)
-        else:
-            os.link(source, target, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        os.link(source, target, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
     except FileExistsError as exc:
         raise FlashError("%s already exists and is immutable" % what) from exc
     except OSError as exc:
@@ -1066,14 +1075,13 @@ def durable_link(source, target, what, dir_fd=None):
 
 
 class Evidence(object):
-    """The retained evidence directory, addressed by descriptor where possible.
+    """The retained evidence directory, addressed only by descriptors.
 
     A transaction that checks a directory and then writes to it BY NAME can have
     the directory replaced in between, and every later read would observe the
     replacement rather than what ipecmd produced. So the directory is opened
-    once, its identity is confirmed against the name it was opened from, and
-    every file inside it is thereafter created, read, and chmod'ed relative to
-    that descriptor.
+    relative to one retained parent descriptor, and every file inside it is
+    thereafter created, read, and chmod'ed relative to the child descriptor.
     """
 
     def __init__(self, path, fd, parent_fd=None):
@@ -1086,35 +1094,64 @@ class Evidence(object):
 
     @staticmethod
     def _open_directory(path, what):
-        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) \
-            | getattr(os, "O_NOFOLLOW", 0)
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         try:
             return os.open(path, flags)
         except OSError as exc:
             raise FlashError("could not open %s: %s" % (what, exc)) from exc
 
     @staticmethod
-    def _attach(path):
-        if not EVIDENCE_DIR_FD:
-            return None
-        flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+    def _require_dir_fd():
+        if not evidence_dir_fd_available():
+            raise FlashError(
+                "this platform lacks the complete descriptor-relative "
+                "mkdir/open/stat/link/unlink/chmod/rmdir operation set required "
+                "for durable evidence; no device command was issued")
+
+    @staticmethod
+    def _attach(parent_fd, name, path, expected=None):
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         try:
-            fd = os.open(path, flags)
+            fd = os.open(name, flags, dir_fd=parent_fd)
         except OSError as exc:
             raise FlashError("could not open the evidence directory: %s"
                              % exc) from exc
         try:
-            named = os.lstat(path)
+            Evidence._verify_entry(parent_fd, name, fd, path, expected)
+        except BaseException:
+            os.close(fd)
+            raise
+        return fd
+
+    @staticmethod
+    def _verify_entry(parent_fd, name, fd, path, expected=None):
+        try:
+            named = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
             opened = os.fstat(fd)
         except OSError as exc:
-            os.close(fd)
             raise FlashError("could not confirm the evidence directory: %s"
                              % exc) from exc
-        if (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino):
-            os.close(fd)
-            raise FlashError("the evidence directory at %s was replaced while "
-                             "it was being opened" % path)
-        return fd
+        named_identity = (named.st_dev, named.st_ino)
+        opened_identity = (opened.st_dev, opened.st_ino)
+        if named_identity != opened_identity:
+            raise FlashError("the evidence path at %s no longer names the "
+                             "directory this transaction attached" % path)
+        if expected is not None and opened_identity != expected:
+            raise FlashError("the evidence directory at %s was replaced after "
+                             "it was created" % path)
+
+    @staticmethod
+    def _cleanup_created(parent_fd, name, expected):
+        """Remove only the created entry, never a replacement at its name."""
+        if expected is None:
+            return
+        try:
+            current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            if (current.st_dev, current.st_ino) != expected:
+                return
+            os.rmdir(name, dir_fd=parent_fd)
+        except OSError:  # best effort; a remnant is safer than redirected cleanup
+            pass
 
     @classmethod
     def create(cls, path):
@@ -1130,35 +1167,66 @@ class Evidence(object):
         # component".
         path = os.path.abspath(os.path.normpath(path))
         parent = os.path.dirname(path)
-        if os.path.basename(path) in ("", ".", ".."):
+        name = os.path.basename(path)
+        if name in ("", ".", ".."):
             raise FlashError("evidence path does not name a new directory: %s"
                              % path)
+        cls._require_dir_fd()
         try:
-            parent_info = os.stat(parent)
+            parent_fd = cls._open_directory(
+                parent, "the evidence directory's parent")
+        except FlashError as exc:
+            cause = exc.__cause__
+            if isinstance(cause, OSError) and cause.errno == errno.ENOENT:
+                raise FlashError("evidence directory's parent is unavailable: %s"
+                                 % cause) from exc
+            if isinstance(cause, OSError) and cause.errno == errno.ENOTDIR:
+                raise FlashError(
+                    "evidence directory's parent is not a directory: %s"
+                    % parent) from exc
+            raise
+        try:
+            parent_info = os.fstat(parent_fd)
         except OSError as exc:
+            os.close(parent_fd)
             raise FlashError("evidence directory's parent is unavailable: %s"
                              % exc) from exc
         if not stat.S_ISDIR(parent_info.st_mode):
+            os.close(parent_fd)
             raise FlashError("evidence directory's parent is not a directory: %s"
                              % parent)
         if (parent_info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)) \
                 and not (parent_info.st_mode & stat.S_ISVTX):
+            os.close(parent_fd)
             raise FlashError(
                 "evidence directory's parent is group/other-writable without the "
                 "sticky bit; another user could replace the retained evidence: %s"
                 % parent)
-        if os.path.lexists(path):
+        created = False
+        fd = None
+        created_identity = None
+        try:
+            os.mkdir(name, 0o700, dir_fd=parent_fd)
+            created = True
+        except FileExistsError as exc:
+            os.close(parent_fd)
             raise FlashError(
                 "evidence path already exists; choose a new one so this device's "
-                "transaction cannot be confused with another: %s" % path)
-        parent_fd = cls._open_directory(parent, "the evidence directory's parent")
-        try:
-            os.mkdir(path, 0o700)
+                "transaction cannot be confused with another: %s" % path) from exc
         except OSError as exc:
             os.close(parent_fd)
             raise FlashError("could not create the evidence directory: %s"
                              % exc) from exc
         try:
+            try:
+                created_info = os.stat(
+                    name, dir_fd=parent_fd, follow_symlinks=False)
+            except OSError as exc:
+                raise FlashError(
+                    "could not confirm the newly created evidence directory: %s"
+                    % exc) from exc
+            created_identity = (created_info.st_dev, created_info.st_ino)
+            fd = cls._attach(parent_fd, name, path, created_identity)
             # The new directory ENTRY lives in the parent, and fsync on the new
             # directory itself does not flush it. Without this, a crash after
             # the reservation is announced and the write has begun can lose the
@@ -1167,40 +1235,57 @@ class Evidence(object):
             # it. It happens here, before any device is touched, so an inability
             # to make the entry durable costs nothing but the transaction.
             durable_fsync(parent_fd, "the evidence directory's parent")
+            # Re-prove the entry after the durability barrier. If it moved
+            # between attachment and fsync, the destination parent was not the
+            # directory just flushed and no device command may follow.
+            cls._verify_entry(
+                parent_fd, name, fd, path, created_identity)
         except BaseException:
-            try:
-                os.rmdir(path)
-            except OSError:  # pragma: no cover - best effort cleanup
-                pass
+            if fd is not None:
+                os.close(fd)
+            if created:
+                cls._cleanup_created(parent_fd, name, created_identity)
             os.close(parent_fd)
             raise
-        try:
-            return cls(path, cls._attach(path), parent_fd)
-        except BaseException:
-            os.close(parent_fd)
-            raise
+        return cls(path, fd, parent_fd)
 
     @classmethod
     def open(cls, path):
         path = os.path.abspath(os.path.normpath(path))
+        parent = os.path.dirname(path)
+        name = os.path.basename(path)
+        cls._require_dir_fd()
         try:
-            info = os.lstat(path)
+            parent_fd = cls._open_directory(
+                parent, "the evidence directory's parent")
+        except FlashError as exc:
+            raise FlashError("evidence directory is unavailable: %s" % exc) from exc
+        try:
+            info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
         except OSError as exc:
+            os.close(parent_fd)
             raise FlashError("evidence directory is unavailable: %s" % exc) from exc
         if stat.S_ISLNK(info.st_mode):
+            os.close(parent_fd)
             raise FlashError("evidence directory is a symbolic link: %s" % path)
         if not stat.S_ISDIR(info.st_mode):
+            os.close(parent_fd)
             raise FlashError("evidence directory is not a directory: %s" % path)
-        return cls(path, cls._attach(path))
+        try:
+            fd = cls._attach(parent_fd, name, path)
+        finally:
+            os.close(parent_fd)
+        return cls(path, fd)
 
     def filename(self, name):
-        """The pathname form, for an argv ipecmd must be given and for
-        diagnostics. Never used to reach a file this helper reads itself."""
+        """The operator-facing pathname form, used only for diagnostics."""
         return os.path.join(self.path, name)
 
+    def child_path(self, name):
+        """Descriptor-addressed child path for an external producer."""
+        return os.path.join(descriptor_path(self.fd), name)
+
     def _open(self, name, flags, mode=0o777):
-        if self.fd is None:
-            return os.open(self.filename(name), flags, mode)
         return os.open(name, flags, mode, dir_fd=self.fd)
 
     def _discard(self, name):
@@ -1208,32 +1293,19 @@ class Evidence(object):
         temporary file is inert -- no reader looks for one -- and failing the
         transaction over it would turn a tidy-up into an outage."""
         try:
-            if self.fd is None:
-                os.unlink(self.filename(name))
-            else:
-                os.unlink(name, dir_fd=self.fd)
+            os.unlink(name, dir_fd=self.fd)
         except OSError:  # pragma: no cover - best effort cleanup
             pass
 
     def exists(self, name):
         try:
-            if self.fd is None:
-                os.lstat(self.filename(name))
-            else:
-                os.lstat(name, dir_fd=self.fd)
+            os.stat(name, dir_fd=self.fd, follow_symlinks=False)
         except OSError:
             return False
         return True
 
     def sync(self, what):
-        if self.fd is not None:
-            durable_fsync(self.fd, what)
-            return
-        fd = self._open_directory(self.path, "the evidence directory")
-        try:
-            durable_fsync(fd, what)
-        finally:
-            os.close(fd)
+        durable_fsync(self.fd, what)
 
     def publish(self, name, data, label, retain=False):
         """Install one evidence file under its final name, atomically.
@@ -1267,8 +1339,7 @@ class Evidence(object):
             raise
         os.close(fd)
         try:
-            durable_link(temporary, name, label,
-                         None if self.fd is None else self.fd)
+            durable_link(temporary, name, label, self.fd)
         except BaseException:
             self._discard(temporary)
             raise
@@ -1299,10 +1370,7 @@ class Evidence(object):
         regular file, through the directory descriptor."""
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         try:
-            if self.fd is None:
-                fd = os.open(self.filename(name), flags)
-            else:
-                fd = os.open(name, flags, dir_fd=self.fd)
+            fd = os.open(name, flags, dir_fd=self.fd)
         except OSError as exc:
             raise FlashError("%s is unavailable: %s" % (label, exc)) from exc
         try:
@@ -1342,10 +1410,7 @@ class Evidence(object):
 
     def protect(self, name):
         try:
-            if self.fd is None:
-                os.chmod(self.filename(name), 0o400)
-            else:
-                os.chmod(name, 0o400, dir_fd=self.fd)
+            os.chmod(name, 0o400, dir_fd=self.fd)
         except OSError as exc:
             raise FlashError("could not protect %s: %s"
                              % (self.filename(name), exc)) from exc
@@ -1356,9 +1421,10 @@ def device_read(programmer, evidence, tag, require_retlw=True):
     if evidence.exists(hex_name):
         raise FlashError("a %s export already exists: %s"
                          % (tag, evidence.filename(hex_name)))
-    argv = read_argv(programmer, evidence.filename(hex_name))
+    argv = read_argv(programmer, evidence.child_path(hex_name))
     exit_code, output = invoke(programmer, argv, DEVICE_TIMEOUT_S,
-                               "ipecmd device read (%s)" % tag)
+                               "ipecmd device read (%s)" % tag,
+                               pass_fds=(evidence.fd,))
     evidence.publish(log_name, output, "%s transcript" % tag)
     record = {
         "argv": argv,
@@ -1643,7 +1709,7 @@ def command_program(args, helper_path):
         "ipe_version_probe_sha256": version["probe_sha256"],
         "ipe_version_probe_base64": version["probe_base64"],
         "power_mode": POWER_MODE,
-        "evidence_dir_fd_bound": evidence.fd is not None,
+        "evidence_dir_fd_bound": True,
         "image_name": bundle["image_name"],
         "image_path": bundle["image_path"],
         "image_snapshot_path": evidence.filename(IMAGE_SNAPSHOT_NAME),

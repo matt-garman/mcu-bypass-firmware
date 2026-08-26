@@ -228,8 +228,11 @@ written. `reservation.json` records the exact `sealed` or
 `operator-read-only-source` mechanism independently for the image, programmer,
 and Java runtime when the JAR form is used.
 
-The evidence directory itself is made durable before the device is touched: its
-directory entry is flushed in its parent, and every retained file, `result.json`
+The evidence directory itself is made durable before the device is touched. The
+helper opens its parent once, then creates, attaches, cleans up and flushes the
+new child relative to that same parent descriptor. Device exports and all later
+evidence operations use the retained child descriptor, so replacing either
+pathname cannot redirect the transaction. Every retained file, `result.json`
 included, is written under a temporary name and then installed atomically. An
 interruption therefore leaves either one complete immutable result or a PENDING
 transaction `finalize` can still resolve -- never a truncated `result.json`.

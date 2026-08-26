@@ -40,7 +40,13 @@ configured entirely by environment, so the helper's own argv stays untouched:
   FLASH_HOOK_UNSEALED  ipecmd|java runtime|image: replace that one sealed copy
                        with its ordinary source descriptor (negative control).
   FLASH_HOOK_UNSEALED_PATH
-                       selected image pathname for the image negative control.
+                        selected image pathname for the image negative control.
+  FLASH_HOOK_PARENT_SWAP JSON object describing an evidence-parent replacement
+                        immediately before mkdir. The fixture also verifies the
+                        parent fsync descriptor; optional fields select absolute
+                        mkdir and pre/post-attachment child-move controls.
+  FLASH_HOOK_MISSING_EVIDENCE_OP
+                        remove one named operation from os.supports_dir_fd.
   FLASH_HOOK_FAIL_OP   one of write|fsync|link: which durable primitive to fail.
   FLASH_HOOK_FAIL      substring of that primitive's subject; the first matching
                        call raises OSError instead of running.
@@ -176,6 +182,73 @@ def install_corrupt_copy(module, needle):
     module.durable_write = hooked
 
 
+def install_parent_swap(module, config):
+    """Replace the evidence parent after it is opened but before child mkdir."""
+    parent = config["parent"]
+    moved = config["moved"]
+    child = config["child"]
+    prepopulate = config.get("prepopulate", False)
+    absolute_mkdir = config.get("absolute_mkdir", False)
+    replace_child = config.get("replace_child_before_attach", False)
+    move_child_before_fsync = config.get("move_child_before_fsync", "")
+    original_mkdir = module.os.mkdir
+    original_fsync = module.durable_fsync
+    original_attach = module.Evidence._attach
+    armed = [True]
+    swapped = [False]
+    moved_child = [False]
+
+    def mkdir_hook(path, mode=0o777, *, dir_fd=None):
+        if armed[0]:
+            armed[0] = False
+            parent_mode = module.os.stat(parent).st_mode & 0o7777
+            module.os.rename(parent, moved)
+            original_mkdir(parent, parent_mode)
+            if prepopulate:
+                decoy_child = module.os.path.join(parent, child)
+                original_mkdir(decoy_child, 0o700)
+                marker = module.os.open(
+                    module.os.path.join(decoy_child, "decoy.marker"),
+                    module.os.O_WRONLY | module.os.O_CREAT | module.os.O_EXCL,
+                    0o600)
+                try:
+                    module.os.write(marker, b"pre-existing decoy evidence\n")
+                finally:
+                    module.os.close(marker)
+            swapped[0] = True
+            if absolute_mkdir:
+                return original_mkdir(module.os.path.join(parent, path), mode)
+        return original_mkdir(path, mode, dir_fd=dir_fd)
+
+    def fsync_hook(fd, what):
+        if swapped[0] and what == "the evidence directory's parent":
+            if move_child_before_fsync and not moved_child[0]:
+                moved_child[0] = True
+                module.os.rename(
+                    child, module.os.path.join(move_child_before_fsync, child),
+                    src_dir_fd=fd)
+                original_mkdir(child, 0o700, dir_fd=fd)
+            try:
+                module.os.stat(child, dir_fd=fd, follow_symlinks=False)
+            except OSError as exc:
+                raise module.FlashError(
+                    "parent fsync descriptor does not contain the created "
+                    "evidence child: %s" % exc) from exc
+        return original_fsync(fd, what)
+
+    def attach_hook(parent_fd, name, path, expected=None):
+        if replace_child and expected is not None:
+            module.os.rename(
+                name, name + ".created", src_dir_fd=parent_fd,
+                dst_dir_fd=parent_fd)
+            original_mkdir(name, 0o700, dir_fd=parent_fd)
+        return original_attach(parent_fd, name, path, expected)
+
+    module.os.mkdir = mkdir_hook
+    module.durable_fsync = fsync_hook
+    module.Evidence._attach = staticmethod(attach_hook)
+
+
 def closed_fd():
     """A descriptor number that is guaranteed not to be open."""
     fd = os.open(os.devnull, os.O_RDONLY)
@@ -282,6 +355,15 @@ def main(argv):
             return 95
         install_unsealed_control(
             module, unsealed, os.environ.get("FLASH_HOOK_UNSEALED_PATH", ""))
+    missing_evidence_op = os.environ.get("FLASH_HOOK_MISSING_EVIDENCE_OP", "")
+    if missing_evidence_op:
+        operation = getattr(module.os, missing_evidence_op, None)
+        if operation not in module.EVIDENCE_DIR_OPERATIONS:
+            sys.stderr.write(
+                "flash_hook: FLASH_HOOK_MISSING_EVIDENCE_OP must name a "
+                "required evidence operation\n")
+            return 96
+        module.os.supports_dir_fd = set(module.os.supports_dir_fd) - {operation}
 
     operation, needle = selected("FLASH_HOOK_FAIL_OP", "FLASH_HOOK_FAIL")
     if operation is not None:
@@ -289,6 +371,25 @@ def main(argv):
     operation, needle = selected("FLASH_HOOK_KILL_OP", "FLASH_HOOK_KILL")
     if operation is not None:
         install_fault(module, operation, needle, kill=True)
+
+    raw = os.environ.get("FLASH_HOOK_PARENT_SWAP", "")
+    if raw:
+        config = json.loads(raw)
+        required = ("parent", "moved", "child")
+        if not isinstance(config, dict) \
+                or any(not isinstance(config.get(key), str) or not config[key]
+                       for key in required) \
+                or any(key in config and not isinstance(config[key], bool)
+                       for key in ("prepopulate", "absolute_mkdir",
+                                   "replace_child_before_attach")) \
+                or ("move_child_before_fsync" in config
+                    and (not isinstance(config["move_child_before_fsync"], str)
+                         or not config["move_child_before_fsync"])):
+            sys.stderr.write(
+                "flash_hook: FLASH_HOOK_PARENT_SWAP must be an object with "
+                "non-empty parent/moved/child strings and boolean options\n")
+            return 97
+        install_parent_swap(module, config)
 
     return module.main(argv[1:])
 

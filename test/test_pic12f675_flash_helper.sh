@@ -28,6 +28,9 @@
 #      each durable step of result publication. Every outcome must be either one
 #      complete immutable result or a PENDING transaction a read-only
 #      finalization can still resolve -- never a truncated result.json.
+#   7. ONE PARENT HOLDS THE EVIDENCE ENTRY. A deterministic replacement after
+#      the parent is opened proves mkdir, child attachment, cleanup and fsync all
+#      concern that retained parent, with an absolute-mkdir negative control.
 #
 # What it does NOT prove: that a real PICkit 3 preserves the trim. That is a
 # bench question, gated separately in HARDWARE_VALIDATION_LOG.md.
@@ -102,6 +105,23 @@ print(1 if rc == 0 and handle["pinning"] == "operator-read-only-source"
 ' "$HELPER" "$native_launcher") || native_origin_probe=0
 check "an operator-read-only native launcher preserves its executable origin" \
 	"$native_origin_probe"
+
+evidence_capability_probe=$(python3 -c '
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("flash_helper", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+required = {os.open, os.stat, os.chmod, os.unlink, os.link, os.mkdir, os.rmdir}
+original = os.supports_dir_fd
+ok = set(module.EVIDENCE_DIR_OPERATIONS) == required
+for operation in required:
+    os.supports_dir_fd = set(original) - {operation}
+    ok = ok and not module.evidence_dir_fd_available()
+os.supports_dir_fd = original
+print(1 if ok else 0)
+' "$HELPER") || evidence_capability_probe=0
+check "every required evidence operation is in the dir-fd capability gate" \
+	"$evidence_capability_probe"
 
 # The shipping image is built by XC8, which no host gate requires. Prefer a
 # freshly built one; fall back to the newest released image so this gate runs
@@ -197,7 +217,8 @@ hook_reset() {
 		FLASH_HOOK_KILL_OP FLASH_HOOK_KILL FLASH_HOOK_REWRITES \
 		FLASH_HOOK_NO_MEMFD FLASH_HOOK_HIDE_OS_MEMFD \
 		FLASH_HOOK_MISSING_SEALS FLASH_HOOK_CORRUPT_COPY \
-		FLASH_HOOK_UNSEALED FLASH_HOOK_UNSEALED_PATH
+		FLASH_HOOK_UNSEALED FLASH_HOOK_UNSEALED_PATH \
+		FLASH_HOOK_PARENT_SWAP FLASH_HOOK_MISSING_EVIDENCE_OP
 }
 hook_reset
 
@@ -316,9 +337,9 @@ check "exactly five tool invocations" \
 check "invocation 1 is the version probe, before any device access" \
 	"$([[ "${vectors[0]}" == *$'\t-?' ]] && echo 1 || echo 0)"
 check "invocation 2 is the baseline read" \
-	"$([[ "${vectors[1]}" == "witness=0"*"-GF$EVIDENCE/baseline.hex" ]] && echo 1 || echo 0)"
+	"$([[ "${vectors[1]}" == "witness=0"*'-GF/proc/self/fd/'*'/baseline.hex' ]] && echo 1 || echo 0)"
 check "invocation 3 is the immediate pre-write read" \
-	"$([[ "${vectors[2]}" == "witness=0"*"-GF$EVIDENCE/prewrite.hex" ]] && echo 1 || echo 0)"
+	"$([[ "${vectors[2]}" == "witness=0"*'-GF/proc/self/fd/'*'/prewrite.hex' ]] && echo 1 || echo 0)"
 check "invocation 4 is the single write" \
 	"$([[ "${vectors[3]}" == *$'\t-M\t-Y\t-OL' ]] && echo 1 || echo 0)"
 check "the write is reached only after a durable reservation exists" \
@@ -334,7 +355,7 @@ check "the writer received exactly the retained snapshot bytes" \
 check "the write requests no programmer-supplied power" \
 	"$([[ "${vectors[3]}" != *$'\t-W5'* ]] && echo 1 || echo 0)"
 check "invocation 5 is the final full-device read" \
-	"$([[ "${vectors[4]}" == *"-GF$EVIDENCE/postread.hex" ]] && echo 1 || echo 0)"
+	"$([[ "${vectors[4]}" == *'-GF/proc/self/fd/'*'/postread.hex' ]] && echo 1 || echo 0)"
 check "exactly one write reached the device" "$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
 
 check "reservation is PENDING" \
@@ -1107,9 +1128,145 @@ check "negative control: an ordinary image descriptor reaches the writer rewritt
 	"$([ "$(writes)" = 1 ] \
 		&& [ "$(device_field image_sha256)" = "$calibration_sha" ] && echo 1 || echo 0)"
 
+# Replace the evidence parent after Evidence.create() has opened it but before
+# mkdir. The production path must create, attach, flush and export under held
+# descriptors, not follow the old pathname into a pre-populated decoy.
+new_case
+evidence_parent="$CASE_DIR/evidence-parent"
+moved_parent="$CASE_DIR/original-parent"
+mkdir -p "$evidence_parent"
+EVIDENCE="$evidence_parent/evidence"
+HOOK=1
+export FLASH_HOOK_PARENT_SWAP
+FLASH_HOOK_PARENT_SWAP=$(python3 -c '
+import json, sys
+print(json.dumps({"parent": sys.argv[1], "moved": sys.argv[2],
+                  "child": "evidence", "prepopulate": True}))
+' "$evidence_parent" "$moved_parent")
+program_run ''
+hook_reset
+check "a replaced evidence parent completes through descriptor-bound evidence" \
+	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
+check "creation, exports and result stay under the retained original parent" \
+	"$([ -f "$moved_parent/evidence/baseline.hex" ] \
+		&& [ "$(json_field "$moved_parent/evidence/result.json" status)" = PASS ] \
+		&& echo 1 || echo 0)"
+check "the pre-populated decoy evidence is neither attached nor modified" \
+	"$([ "$(cat "$evidence_parent/evidence/decoy.marker")" = 'pre-existing decoy evidence' ] \
+		&& [ ! -e "$evidence_parent/evidence/image.hex" ] \
+		&& [ ! -e "$evidence_parent/evidence/baseline.hex" ] \
+		&& [ ! -e "$evidence_parent/evidence/result.json" ] && echo 1 || echo 0)"
+check "the descriptor-bound parent-replacement transaction writes exactly once" \
+	"$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
+
+# The child identity captured immediately after mkdir must still be the one
+# opened for the transaction. Replacing that entry before attachment is refused.
+new_case
+evidence_parent="$CASE_DIR/evidence-parent"
+moved_parent="$CASE_DIR/original-parent"
+mkdir -p "$evidence_parent"
+EVIDENCE="$evidence_parent/evidence"
+HOOK=1
+export FLASH_HOOK_PARENT_SWAP
+FLASH_HOOK_PARENT_SWAP=$(python3 -c '
+import json, sys
+print(json.dumps({"parent": sys.argv[1], "moved": sys.argv[2],
+                  "child": "evidence",
+                  "replace_child_before_attach": True}))
+' "$evidence_parent" "$moved_parent")
+program_run ''
+hook_reset
+check "a child replaced between creation and attachment is refused" \
+	"$([ "$RC" -eq 2 ] \
+		&& [[ "$OUT" == *"was replaced after it was created"* ]] && echo 1 || echo 0)"
+check "child-race cleanup removes neither the original nor its replacement" \
+	"$([ -d "$moved_parent/evidence.created" ] \
+		&& [ -d "$moved_parent/evidence" ] && echo 1 || echo 0)"
+check "a replaced child reaches no device command" \
+	"$([ "$(reads)" = 0 ] && [ "$(writes)" = 0 ] && echo 1 || echo 0)"
+
+# Move the attached child into a different, deliberately unflushed parent just
+# before the retained parent fsync. The post-fsync identity proof must catch that
+# the flushed entry is only a replacement, and cleanup must leave it untouched.
+new_case
+evidence_parent="$CASE_DIR/evidence-parent"
+moved_parent="$CASE_DIR/original-parent"
+child_destination="$CASE_DIR/unflushed-destination"
+mkdir -p "$evidence_parent" "$child_destination"
+EVIDENCE="$evidence_parent/evidence"
+HOOK=1
+export FLASH_HOOK_PARENT_SWAP
+FLASH_HOOK_PARENT_SWAP=$(python3 -c '
+import json, sys
+print(json.dumps({"parent": sys.argv[1], "moved": sys.argv[2],
+                  "child": "evidence", "move_child_before_fsync": sys.argv[3]}))
+' "$evidence_parent" "$moved_parent" "$child_destination")
+program_run ''
+hook_reset
+check "a child moved between attachment and parent fsync is refused" \
+	"$([ "$RC" -eq 2 ] \
+		&& [[ "$OUT" == *"no longer names the directory this transaction attached"* ]] \
+		&& echo 1 || echo 0)"
+check "post-fsync refusal preserves the moved child and the replacement" \
+	"$([ -d "$child_destination/evidence" ] \
+		&& [ -d "$moved_parent/evidence" ] && echo 1 || echo 0)"
+check "an attach-to-fsync child move reaches no device command" \
+	"$([ "$(reads)" = 0 ] && [ "$(writes)" = 0 ] && echo 1 || echo 0)"
+
+# An fsync failure after the same replacement must remove the child through the
+# retained descriptor. Cleanup by absolute pathname would touch the decoy parent
+# instead and leave the real transaction directory behind.
+new_case
+evidence_parent="$CASE_DIR/evidence-parent"
+moved_parent="$CASE_DIR/original-parent"
+mkdir -p "$evidence_parent"
+EVIDENCE="$evidence_parent/evidence"
+HOOK=1
+export FLASH_HOOK_FAIL_OP=fsync
+export FLASH_HOOK_FAIL="evidence directory's parent"
+export FLASH_HOOK_PARENT_SWAP
+FLASH_HOOK_PARENT_SWAP=$(python3 -c '
+import json, sys
+print(json.dumps({"parent": sys.argv[1], "moved": sys.argv[2],
+                  "child": "evidence"}))
+' "$evidence_parent" "$moved_parent")
+program_run ''
+hook_reset
+check "a replaced parent's failed durability flush is reported" \
+	"$([ "$RC" -eq 2 ] \
+		&& [[ "$OUT" == *"could not flush the evidence directory's parent"* ]] && echo 1 || echo 0)"
+check "failed creation is cleaned up under the retained original parent" \
+	"$([ ! -e "$moved_parent/evidence" ] \
+		&& [ ! -e "$evidence_parent/evidence" ] && echo 1 || echo 0)"
+check "descriptor-relative cleanup failure reaches no device command" \
+	"$([ "$(reads)" = 0 ] && [ "$(writes)" = 0 ] && echo 1 || echo 0)"
+
+# Negative control: deliberately restore absolute-path mkdir after the parent
+# replacement. It creates under the decoy and then cannot attach that entry
+# through the retained original parent descriptor.
+new_case
+evidence_parent="$CASE_DIR/evidence-parent"
+moved_parent="$CASE_DIR/original-parent"
+mkdir -p "$evidence_parent"
+EVIDENCE="$evidence_parent/evidence"
+HOOK=1
+export FLASH_HOOK_PARENT_SWAP
+FLASH_HOOK_PARENT_SWAP=$(python3 -c '
+import json, sys
+print(json.dumps({"parent": sys.argv[1], "moved": sys.argv[2],
+                  "child": "evidence", "absolute_mkdir": True}))
+' "$evidence_parent" "$moved_parent")
+program_run ''
+hook_reset
+check "negative control: absolute mkdir creates evidence under the decoy parent" \
+	"$([ "$RC" -eq 2 ] && [ -d "$evidence_parent/evidence" ] \
+		&& [ ! -e "$moved_parent/evidence" ] && echo 1 || echo 0)"
+check "negative control: the mismatched parent is never flushed or used" \
+	"$([ "$(reads)" = 0 ] && [ "$(writes)" = 0 ] && echo 1 || echo 0)"
+
 # The longest version of the same window: not the file, the DIRECTORY it sits
 # in. Renaming the evidence directory and recreating its name over a decoy makes
-# every remaining pathname in the transaction resolve somewhere else.
+# every remaining absolute pathname in the transaction resolve somewhere else.
 new_case
 mkdir -p "$CASE_DIR/decoy-evidence"
 make_calibration_image "$CASE_DIR/decoy-evidence/image.hex"
@@ -1123,9 +1280,12 @@ check "the rename really did happen" \
 	"$([ -f "$CASE_DIR/moved/reservation.json" ] && echo 1 || echo 0)"
 check "the transaction keeps writing evidence into the directory it opened" \
 	"$([ -f "$CASE_DIR/moved/result.json" ] && [ ! -e "$EVIDENCE/result.json" ] && echo 1 || echo 0)"
-check "a readback it can no longer reach is a published FAIL, not a PASS" \
-	"$([ "$RC" -eq 1 ] \
-		&& [ "$(json_field "$CASE_DIR/moved/result.json" status)" = FAIL ] && echo 1 || echo 0)"
+check "descriptor-addressed readback remains a PASS after the rename" \
+	"$([ "$RC" -eq 0 ] \
+		&& [ "$(json_field "$CASE_DIR/moved/result.json" status)" = PASS ] && echo 1 || echo 0)"
+check "the replacement evidence directory receives no device export" \
+	"$([ ! -e "$EVIDENCE/baseline.hex" ] \
+		&& [ ! -e "$EVIDENCE/postread.hex" ] && echo 1 || echo 0)"
 check "the hijacked directory still wrote exactly once" \
 	"$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
 
@@ -1133,6 +1293,18 @@ check "the hijacked directory still wrote exactly once" \
 # 4d. unsafe evidence and input paths -- none may reach a write
 # ---------------------------------------------------------------------------
 note '== unsafe paths =='
+
+new_case
+HOOK=1
+export FLASH_HOOK_MISSING_EVIDENCE_OP=mkdir
+program_run ''
+hook_reset
+check "incomplete descriptor-relative evidence support is refused" \
+	"$([ "$RC" -eq 2 ] \
+		&& [[ "$OUT" == *"lacks the complete descriptor-relative"* ]] && echo 1 || echo 0)"
+check "that platform refusal precedes every device read and write" \
+	"$([ "$(reads)" = 0 ] && [ "$(writes)" = 0 ] \
+		&& [ ! -e "$EVIDENCE" ] && echo 1 || echo 0)"
 
 new_case
 mkdir -p "$CASE_DIR/open-parent"

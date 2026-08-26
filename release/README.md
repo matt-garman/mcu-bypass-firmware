@@ -447,9 +447,11 @@ MPLAB X 6.20, reads the device twice before reserving the write, performs exactl
 one write, and compares the WHOLE device afterwards -- every word the image does
 not supply has to read back erased, so a writer that skipped its bulk erase is a
 FAIL rather than a PASS. It then publishes one immutable `result.json`, written
-under a temporary name and installed atomically so an interruption leaves a
-recoverable PENDING transaction rather than a truncated record. A PENDING
-directory
+under a temporary name and installed atomically. Evidence creation, attachment,
+cleanup, parent flush and device exports all use retained directory descriptors,
+so parent-path replacement cannot redirect or make the transaction durable in a
+different directory. An interruption leaves a recoverable PENDING transaction
+rather than a truncated record. A PENDING directory
 (reservation, no result) is resolved read-only with
 `python3 flash-pic12f675.py finalize --evidence-dir ... --ipecmd ...`, which
 never constructs a writer argument. Full details are in `FLASHING.md`.
