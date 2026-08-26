@@ -49,6 +49,22 @@ run_make() {
 	)
 }
 
+# A release goal is production configuration: the Makefile guard refuses every
+# release-relevant variable it did not review, including the names this same
+# Makefile exports to its own recipes (MAKE, GPSIM_TIMEOUT_SECONDS, the
+# PIC12F675 programming selectors) and anything a CI wrapper exports around the
+# whole run (STRICT_TOOLS, MUTATION_ALLOW_SKIP). This gate itself runs inside
+# such a recipe, so ask for the release from the clean environment an operator
+# actually has, the way test_release_preflight.sh invokes its release goals.
+# The lock contract below is what this case is testing; inherited build
+# configuration is not part of it.
+run_make_release() {
+	(
+		exec env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-$HOME}" \
+			timeout 15 "${MAKE_CMD[@]}" --no-print-directory -C "$repo" "$@"
+	)
+}
+
 run_probe() {
 	local id=$1
 	run_make -j3 test-make-lock-probe SERIAL_PROBE_DIR=build_probe \
@@ -202,7 +218,7 @@ checks=$((checks + 1))
 
 # `make release` already owns the lock. The inherited marker must let the script
 # run without trying to reacquire it and deadlocking.
-if output=$(run_make release VERSION=v99.0.0 \
+if output=$(run_make_release release VERSION=v99.0.0 \
 		RELEASE_ARGS='--soak-duration-ms 0' 2>&1); then
 	fail "Make-driven release accepted an invalid duration"
 fi
