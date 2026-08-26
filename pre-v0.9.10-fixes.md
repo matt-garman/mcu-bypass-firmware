@@ -3368,7 +3368,8 @@ to equal `pic12f675_target_count_table()`.
 
 ### B7 - retained descriptors pin inodes, not immutable child-consumed bytes
 
-**Affected checklist item:** P1/B3 SOFTWARE RE-OPENED.
+**Affected checklist item:** B3 SOFTWARE RE-OPENED, now CLOSED; P1 remains open
+for B8.
 
 **Failure mechanism**
 
@@ -3451,6 +3452,65 @@ pre-write invariant.
 - Preserve the accepted byte-identical off-bundle helper case and all existing
   pathname-replacement, whole-device-readback, interruption and finalization
   contracts.
+
+**Resolution**
+
+*Every child input is now byte-immutable through consumption.* Images, JARs and
+script launchers are copied into private `memfd`s; the helper installs
+write/grow/shrink/final seals, verifies the installed seal set and re-hashes each
+finished copy. Native ELF launchers are different: moving one to a memfd changes
+`$ORIGIN` and `/proc/self/exe`, which breaks origin-relative runtime libraries.
+They preserve the retained source descriptor only when the operator neither owns
+nor can write that inode; an operator-mutable native launcher is refused. The
+successful `retained-descriptor` image mode is gone.
+
+*The real review-host shape is supported without weakening the invariant.* This
+Python 3.12 build omits `os.memfd_create` and every named `fcntl` seal constant,
+although libc and the Linux kernel implement both. The helper carries the stable
+Linux UAPI values and calls libc's `memfd_create` when Python omits its wrapper.
+Executable copies request `MFD_EXEC` on kernels that require an explicit opt-in
+and retry the historical flag set only when an older kernel reports `EINVAL`.
+Absence or failure of either route, any copy write, any required seal, or the
+post-copy digest is a hard refusal before the version probe and every device
+command.
+
+*The reservation distinguishes identity from consumption.* The released source
+path and SHA-256 remain the programmer identity. `image_pinning`,
+`programmer_pinning` and `programmer_java_pinning` independently record that the
+corresponding child input used a `sealed` copy or an
+`operator-read-only-source`; the direct form records no Java input. Existing
+PENDING records remain finalizable because these additive fields do not change
+the v1 identity fields finalization already requires.
+
+**Acceptance evidence, as delivered**
+
+- [x] `test/pic/flash_hook.py` can now rewrite an existing inode, with its device
+  and inode numbers unchanged, after the final source hash and immediately
+  before the write child. Separate direct-executable, Java-runtime, JAR and image
+  cases prove the decoy bytes really landed in each source while the fake writer
+  consumed the original sealed bytes.
+- [x] The image decoy programs calibration word `0x3FF`. The production path
+  writes the original image exactly once, publishes `PASS`, and leaves OSCCAL
+  unchanged. With immutable storage forced unavailable, the helper issues zero
+  version, read or write commands and creates no evidence transaction.
+- [x] A deterministic run hides `os.memfd_create` and completes through the libc
+  fallback with sealed programmer/image fields. Separate injections remove a
+  required reported seal, corrupt copied bytes, and fail the copy write; all
+  three stop before any tool invocation or evidence transaction.
+- [x] A real review-host Java probe preserves the root-owned native launcher's
+  source origin and runs `/usr/bin/java -version` through its retained descriptor
+  with `operator-read-only-source` recorded. The sealed-native negative probe
+  exits before Java startup because `libjli.so` cannot be found, which is why
+  native launchers are not blindly moved to memfds.
+- [x] Four independent negative controls restore an ordinary descriptor for the
+  direct tool, JAR, Java runtime and image. The first three execute their decoy
+  bytes instead of writing; the image control reaches the fake writer with the
+  forbidden image digest. Each makes its corresponding same-inode invariant
+  observably false for the expected reason.
+- [x] The byte-identical off-bundle helper and every pathname-replacement,
+  whole-device-readback, interruption, finalization and crash-atomic publication
+  contract remain in the focused gate: `test-pic12f675-flash-helper` passes 367
+  checks.
 
 ### B8 - evidence creation is not relative to the retained parent descriptor
 
@@ -3582,8 +3642,8 @@ it can approve one.
 Complete these only after R1-R6, F1-F4, P1-P2, T1-T2, D1-D5, and B1-B9 are done
 or an explicit owner disposition is recorded where an item permits one. The
 checked `fe8ecc8` run below is historical evidence, not final-candidate evidence;
-the pre-merge rows remain reopened because B7-B9 require helper, firmware, test,
-and documentation changes after the third-review fixes.
+the pre-merge rows remain reopened because B8-B9 still require helper, firmware,
+test, and documentation changes after the third-review fixes.
 
 - [ ] `git diff --check main...HEAD` passes after every fourth-review change.
 - [ ] `make test` passes on a host meeting the documented host-tool contract.
@@ -3650,7 +3710,7 @@ publication rows are release-time by construction. The dry-run row waits on the
 deletion of this document, which the merge decision below sequences before the
 release cut: the staging path's refusal while this file exists is the G1 guard
 working as specified. All other pre-merge rows must be reclosed on the actual
-fourth-review candidate after B7-B9 are resolved. PIC12F675's matrix identity was
+fourth-review candidate after B8-B9 are resolved. PIC12F675's matrix identity was
 proved on the earlier local path by `test/test_pic_build.sh` and
 `test/test_release_qualification.sh`; its clean-runner half remains release-time
 evidence and must be exercised for real by the tag workflow.
@@ -3694,7 +3754,7 @@ Record each completed item with its commit ID and decisive validation command.
 | F2 | DONE | `f6d9f82`, `f9dd333`, `5deb4e4`, `9999886`, `b6d06d2` | Fully provisioned current-HEAD validation reported passing: AVR-XT's 32-case matrix and PIC12F675's 43-check relay lane prove modeled physical coil-pin quiescence before reset; all affected resource, stack, timing, static, simulator, coverage, recovery, and merged 136-mutant gates pass |
 | F3 | DONE | `df89ec0` | PIC10F320 flash, return-stack, image-baseline, host/target fault, lock-step, target-I/O, coverage, analysis, and mutation gates pass; relay is 242/256 words at stack depth 3/8, both sequence-sensitive mutants are killed, and both CD4053 images are unchanged |
 | F4 | RE-OPENED (B9) | `fc23e48` | The current images retain wide measured watchdog margin, but B9 found that the exact-bound proof mixes wall-time ISR duty with additive delay stretch and underestimates the documented AVR relay bound. Reclose after one quantity is selected, conservatively derived, pinned at the exact boundary, and corroborated against the compiled images. |
-| P1 | SOFTWARE RE-OPENED (B7-B8); BENCH OPEN | `58fb829`, `37b20bd`, `64ad036`, `e625c8b` | B2 remains closed. B7 reopens B3 because descriptor-addressed ordinary inodes can still be rewritten after their final hash, and the image succeeds in `retained-descriptor` mode where sealing is unavailable. B8 reopens B4 because the evidence child is created by absolute pathname and a different parent can be flushed. The controlled PICkit 3/MPLAB X 6.20 bench run remains the separate `1.x.y` hardware gate; it does not substitute for either software correction. |
+| P1 | SOFTWARE RE-OPENED (B8); BENCH OPEN | `58fb829`, `37b20bd`, `64ad036`, `e625c8b` | B2 and B7 are closed. Every child-consumed executable/runtime/JAR/image now uses either a verified sealed private copy or an origin-preserving native source inode the operator neither owns nor can write; unavailable immutable storage refuses before any tool command. B8 still reopens B4 because the evidence child is created by absolute pathname and a different parent can be flushed. The controlled PICkit 3/MPLAB X 6.20 bench run remains the separate `1.x.y` hardware gate; it does not substitute for that software correction. |
 | P2 | DONE | `4cf4804`, `6ef8c4d` | The selected variant must belong to the current forced rebuild; final regular/non-symlink HEX revalidation and literal argument/action binding precede hardware; `test-avr-program-order` passes 56 exact-order, stale-image, mismatch, size, override, symlink, and stateful-input checks, with all supporting build/selector/fuse/serialization/release-preflight contracts green |
 | D4 | DONE (B6 closed) | `2585ad4`, `18cd7ee`, `64ad036` | The strict source-bound 35-file resource-evidence gate remains implemented. B6's two stale figures are corrected AND bound to oracles: `DESIGN_DOCUMENTATION.adoc`'s ATtiny202 occupancy summary now reads 47.3-50.8% against 81.8-85.7% with `test-resource-tables` recomputing both halves from their own tables (219 -> 222 checks), and `test/README.md`'s PIC12F675 relay fault count is 43, read back out of the document and compared with `pic12f675_target_count_table()` by `test-pic-target-result-records` (18 -> 24 checks). |
 | D5 | DONE (B6 closed) | `f36f085`, `64ad036` | `release_render_validation()` was the last generated claim still saying "physical-output checks"; the signed `MANIFEST.md`, published verbatim as the release body, now says "modeled-pin output checks". `test-release-qualification` renders that line and pins it in both directions -- the modeled wording required, `physical[- ](output|pin|port)` rejected (71 -> 73 checks). |
@@ -3704,26 +3764,26 @@ Record each completed item with its commit ID and decisive validation command.
 | B1 | DONE | `0110d45` | Closes F1. See F1's row and the B1 resolution block above. |
 | B6 | DONE | `64ad036` | Closes D4 and D5, and closes P1's documentation share. Every publisher carries the exact published/software-tested/not-hardware-qualified helper status; the Make route states its own position separately; the helper's `--power` diagnostic says supported rather than validated; helper identity is described as released-name-and-bytes, location-independent; generated release evidence says modeled-pin; `docs/flashing_simplicity.md`'s banner and both build-before-hardware statements acknowledge what shipped. Three contracts with negative controls: the extended flashing-helper validator, the new `release_validate_flashing_simplicity_status`, and the two figure oracles. `test-release-preflight` 174 -> 192. |
 | B2 | DONE | `e625c8b` | Closes P1's sparse-image false PASS. `verify_programmed()` compares every word `0x000`-`0x3FE` against one complete expected post-write device -- the image's value where supplied, erased `0x3FFF` elsewhere -- and `result.json` carries `verified_program_words` beside the total it must equal. The fake programmer gained `noerase` (every requested word correct, both trim values preserved, one stale instruction where the image never reaches) and `corrupthigh`. Observed red: the old image-address-only comparison publishes `PASS` over the no-erase overlay. `PIC12F675_FLASH_IMAGES=build` binds release qualification to the images the candidate ships. |
-| B3 | RE-OPENED BY B7 | `e625c8b` | Descriptor pathnames close replacement but not same-inode rewriting. Reclose only when every child-consumed tool/runtime/JAR/image byte is immutable through consumption and the helper fails before device access when it cannot enforce that property. |
+| B3 | DONE (B7 closed) | `e625c8b` | Descriptor pathnames retain their replacement protection, and B7 adds byte immutability: data/scripts use verified sealed memfds; native ELF launchers retain their origin only when operator ownership/access makes same-inode rewriting impossible. Same-inode rewrites reach each mutable fixture but never the child; four ordinary-descriptor controls expose the race independently. `test-pic12f675-flash-helper` passes 367 checks, including a real Java descriptor probe that preserves launcher behavior. |
 | B4 | RE-OPENED BY B8 | `e625c8b` | Atomic evidence-file publication remains implemented, but initial evidence-directory creation is not relative to the retained parent descriptor. Reclose after creation, attachment, cleanup and parent flush are proved to concern one descriptor-bound parent. |
 | B5 | DONE | `a3ce797` | Closes R6. Production Make goals reject direct, normalized, and inherited ignore-errors before their recipes; direct script use rejects ignore-errors, dry-run, question, and touch through all three GNU Make flag transports before any query, selected tool, scratch, or build. A failing nested-gate witness and a complete 21-image stale tree make both failure mechanisms explicit. |
-| B7 | OPEN | | Make every child-consumed tool/runtime/JAR/image immutable by bytes through consumption; fail before device access where that cannot be done; add synchronized same-inode rewrite regressions and negative controls. |
+| B7 | DONE | | Closes B3 and B7's share of P1. Every child-consumed tool/runtime/JAR/image is either a verified sealed copy or an operator-read-only native source preserving origin-relative libraries; the successful mutable-image fallback is removed; libc supports the review host that lacks Python's API; unavailable or incomplete immutability refuses before any command. Four synchronized same-inode regressions and four independent ordinary-descriptor controls prove the boundary. |
 | B8 | OPEN | | Create, attach, clean up and flush the evidence child relative to one retained parent descriptor; add a deterministic parent-replacement regression and negative control. |
 | B9 | OPEN | | Reconcile watchdog ISR duty versus additive stretch, correct or re-derive the bound, pin the true exact boundary, and rerun compiled-image timing and aggregate evidence. |
-| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; resolve B7-B9, then rerun every pre-merge gate on the actual final candidate. P1's bench run is a `1.x.y` hardware gate, not a substitute for the open software items. |
+| Final validation | RE-OPENED | | The `fe8ecc8` run remains historical evidence; resolve B8-B9, then rerun every pre-merge gate on the actual final candidate. P1's bench run is a `1.x.y` hardware gate, not a substitute for the open software items. |
 
 ## Merge decision
 
 Do not merge `v0.9.9-polish` or begin production `v0.9.10` qualification until
 the reopened final-candidate gate is complete and recorded above. The
-third-review implementation blockers were closed by B1-B6, but B7-B9 reopen
-P1/B3/B4 and F4 on the fourth-review candidate. The earlier aggregate run remains
-historical evidence rather than a substitute for correcting those blockers and
-rerunning the required gates.
+third-review implementation blockers were closed by B1-B6. B7 now closes B3;
+B8 and B9 still reopen P1/B4 and F4 on the fourth-review candidate. The earlier
+aggregate run remains historical evidence rather than a substitute for
+correcting those blockers and rerunning the required gates.
 
 P1's controlled PICkit 3/MPLAB X 6.20 bench run still needs silicon. It remains
 the `1.x.y` hardware gate tracked in `HARDWARE_VALIDATION_LOG.md` and `TODO.md`
-`T3-pic12f675-bench`, and is distinct from the B7-B8 software blockers. The owner
+`T3-pic12f675-bench`, and is distinct from the B8 software blocker. The owner
 direction remains to publish the helper with precise
 software-tested/hardware-unqualified language once those software guarantees are
 true; there is no additional publish-versus-withhold decision to make.

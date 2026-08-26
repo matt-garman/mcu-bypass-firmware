@@ -424,8 +424,14 @@ anywhere and an edited or renamed one is refused wherever it lives. It needs
 Linux, Python 3 and MPLAB X 6.20 `ipecmd`, and a NEW evidence directory per
 device. Linux is required because the helper hands `ipecmd` its own open
 descriptors rather than pathnames a third process could re-point between the
-check and the write; elsewhere it refuses to touch a device. The helper's
-`ipecmd` route is published and software-tested, but it is not
+check and the write. Images, JARs and script launchers use private sealed copies
+of the validated bytes. Native ELF launchers preserve origin-relative library
+lookup by using the retained source descriptor only when the operator neither
+owns nor can write that inode; an operator-mutable native launcher is refused.
+Thus rewriting an existing operator-owned source inode cannot change what the
+child consumes. If the required descriptor paths, immutable source, sealable
+anonymous files or seals are unavailable, the helper fails closed.
+The helper's `ipecmd` route is published and software-tested, but it is not
 hardware-qualified.
 
 ```sh

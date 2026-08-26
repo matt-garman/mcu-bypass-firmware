@@ -124,10 +124,10 @@ as "no damage was observed on this device", not as a validated programming path:
 - the write command with calibration-memory programming disabled preserves both
   OSCCAL and BG, on an initial program and on a repeat program of the same part;
 - `ipecmd` accepts the image argument in the descriptor-addressed form the
-  helper issues (`-F/proc/self/fd/<n>`), which is what stops a file swapped in
-  after the last check from being the one that gets written. If the tool infers
-  the image format from a file extension this is where that shows up, and it
-  shows up as a refusal to write rather than as a bad write;
+  helper issues (`-F/proc/self/fd/<n>`). That descriptor names a private sealed
+  copy of the validated image bytes, not the retained evidence inode. If the
+  tool infers the image format from a file extension this is where that shows
+  up, and it shows up as a refusal to write rather than as a bad write;
 - programmed code and the non-BG CONFIG bits read back exactly as expected, and
   every program word the image does NOT supply reads back erased -- the helper
   now compares the whole device, so a writer whose `-M` leaves stale words

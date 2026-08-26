@@ -172,10 +172,16 @@ Needs Linux, Python 3, the downloaded release bundle, and MPLAB X 6.20
 `ipecmd`. The helper's `ipecmd` route is published and software-tested, but it
 is not hardware-qualified. Linux is a hard requirement of the guarded
 transaction, not a preference: the helper hands `ipecmd` its own open
-descriptors as `/proc/self/fd/<n>` pathnames, because a name that is checked and
-then re-opened by another process can be pointed at a different file in between.
-Where that is unavailable it refuses to touch a device rather than run a check
-it cannot honour.
+descriptors as `/proc/self/fd/<n>` pathnames. Those descriptors name private
+sealed copies for the validated image, JAR and script launchers, not mutable
+ordinary source inodes. Native ELF launchers are the narrow exception needed to
+preserve `$ORIGIN` and `/proc/self/exe` library lookup: they run from the retained
+source descriptor only when the operator neither owns nor can write that inode;
+an operator-mutable native launcher is refused before any command. Where the
+required descriptor paths, immutable source, `memfd_create`, or
+write/grow/shrink/final seals are unavailable, the helper fails closed. Python
+builds that omit `os.memfd_create` use the same kernel facility through libc
+rather than weakening the invariant.
 **Power the board externally** — external power is the only arrangement this
 helper supports, programmer-supplied Vdd is refused, and the documented external
 arrangement itself still awaits controlled hardware validation. Choose a NEW
@@ -213,10 +219,14 @@ with two different values, is refused rather than trusted: the retained baseline
 is the only copy of what was on the chip, and an incomplete one would be
 incomplete for exactly the memory the next command erases. The `ipecmd` you name
 is also pinned by content, and re-checked immediately before every command it is
-given, so a tool replaced or edited part-way through a transaction stops it
-instead of running -- and because the tool, any Java runtime, the JAR and the
-image are handed to the child by descriptor, a file swapped in after that last
-check still never runs and never gets written.
+given, so a tool replaced or edited part-way through a transaction is diagnosed
+instead of silently accepted. The child consumes only sealed copies whose seal
+sets and post-copy digests were verified, or a native source inode proved
+operator-read-only; replacing a pathname or rewriting an operator-owned inode
+after the last source check therefore cannot change what runs or what gets
+written. `reservation.json` records the exact `sealed` or
+`operator-read-only-source` mechanism independently for the image, programmer,
+and Java runtime when the JAR form is used.
 
 The evidence directory itself is made durable before the device is touched: its
 directory entry is flushed in its parent, and every retained file, `result.json`

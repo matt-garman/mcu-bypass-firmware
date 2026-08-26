@@ -3,7 +3,7 @@
 # Copyright (c) Matthew Garman
 """Run the shipped PIC12F675 flashing helper with one deterministic hook.
 
-Two of that helper's properties cannot be proved from outside the process.
+Several of that helper's properties cannot be proved from outside the process.
 
   * The check-to-use race. The helper hashes the ipecmd it is about to run and
     the image it is about to write, then hands both to a child. Whether it is
@@ -26,8 +26,21 @@ that binding is computed from the module's own __file__.
 configured entirely by environment, so the helper's own argv stays untouched:
 
   FLASH_HOOK_SWAPS     JSON list of [source, target] pairs, renamed in order at
-                       the instant the write command is about to be exec'd --
-                       after every identity proof the helper makes.
+                       the instant the write command is about to be exec'd.
+  FLASH_HOOK_REWRITES  JSON list of [source, target] pairs. Each source's bytes
+                       are written into the existing target inode in that same
+                       check-to-exec window.
+  FLASH_HOOK_NO_MEMFD  make immutable storage unavailable before any tool runs.
+  FLASH_HOOK_HIDE_OS_MEMFD
+                       hide os.memfd_create to exercise the libc fallback.
+  FLASH_HOOK_MISSING_SEALS
+                       report a sealed copy without its write seal.
+  FLASH_HOOK_CORRUPT_COPY
+                       substring selecting a private copy to corrupt in memory.
+  FLASH_HOOK_UNSEALED  ipecmd|java runtime|image: replace that one sealed copy
+                       with its ordinary source descriptor (negative control).
+  FLASH_HOOK_UNSEALED_PATH
+                       selected image pathname for the image negative control.
   FLASH_HOOK_FAIL_OP   one of write|fsync|link: which durable primitive to fail.
   FLASH_HOOK_FAIL      substring of that primitive's subject; the first matching
                        call raises OSError instead of running.
@@ -72,6 +85,95 @@ def install_swaps(module, swaps):
                         pass_fds=pass_fds)
 
     module.run_tool = hooked
+
+
+def install_rewrites(module, rewrites):
+    """Rewrite existing inodes after the final hash and before child use."""
+    original = module.run_tool
+
+    def hooked(argv, timeout, label, executable=None, pass_fds=()):
+        if "-M" in argv:
+            for source, target in rewrites:
+                with open(source, "rb") as handle:
+                    data = handle.read()
+                mode = os.stat(target).st_mode & 0o777
+                os.chmod(target, mode | 0o200)
+                fd = os.open(target, os.O_WRONLY | os.O_TRUNC)
+                try:
+                    written = 0
+                    while written < len(data):
+                        written += os.write(fd, data[written:])
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+                    os.chmod(target, mode)
+        return original(argv, timeout, label, executable=executable,
+                        pass_fds=pass_fds)
+
+    module.run_tool = hooked
+
+
+def install_unsealed_control(module, target, image_path):
+    """Restore one vulnerable ordinary descriptor for a negative control."""
+    if target in ("ipecmd", "java runtime"):
+        original = module.open_identity
+
+        def hooked(path, label, max_bytes, executable=False):
+            handle = original(path, label, max_bytes, executable=executable)
+            if label == target:
+                os.close(handle["consume_fd"])
+                handle["consume_fd"] = handle["fd"]
+            return handle
+
+        module.open_identity = hooked
+        return
+    if target != "image" or not image_path:
+        raise ValueError("image unsealed control needs FLASH_HOOK_UNSEALED_PATH")
+
+    def unsealed_image(data, name, label):
+        fd = os.open(image_path, os.O_RDONLY)
+        if module.sha256_fd(fd, label, module.MAX_FILE_BYTES) \
+                != module.sha256_bytes(data):
+            os.close(fd)
+            raise ValueError("unsealed image source differs from validated bytes")
+        return fd
+
+    module.sealed_copy = unsealed_image
+
+
+def install_no_memfd(module):
+    def unavailable(name, label, executable=False):
+        del executable
+        raise module.FlashError(
+            "immutable sealed storage is unavailable for %s (forced by test); "
+            "no device command was issued" % label)
+
+    module.create_memfd = unavailable
+
+
+def install_missing_seals(module):
+    original = module.fcntl.fcntl
+
+    def hooked(fd, operation, *args):
+        result = original(fd, operation, *args)
+        if operation == module.F_GET_SEALS:
+            return result & ~module.F_SEAL_WRITE
+        return result
+
+    module.fcntl.fcntl = hooked
+
+
+def install_corrupt_copy(module, needle):
+    original = module.durable_write
+    armed = [True]
+
+    def hooked(fd, data, what):
+        if armed[0] and needle in what and data:
+            armed[0] = False
+            data = bytes((data[0] ^ 1,)) + data[1:]
+        return original(fd, data, what)
+
+    module.durable_write = hooked
 
 
 def closed_fd():
@@ -150,6 +252,36 @@ def main(argv):
                              "list of [source, target] pairs\n")
             return 93
         install_swaps(module, swaps)
+
+    raw = os.environ.get("FLASH_HOOK_REWRITES", "")
+    if raw:
+        rewrites = json.loads(raw)
+        if not isinstance(rewrites, list) or not rewrites \
+                or any(not isinstance(pair, list) or len(pair) != 2
+                       for pair in rewrites):
+            sys.stderr.write("flash_hook: FLASH_HOOK_REWRITES must be a "
+                             "non-empty list of [source, target] pairs\n")
+            return 94
+        install_rewrites(module, rewrites)
+
+    if os.environ.get("FLASH_HOOK_HIDE_OS_MEMFD", ""):
+        if hasattr(module.os, "memfd_create"):
+            delattr(module.os, "memfd_create")
+    if os.environ.get("FLASH_HOOK_NO_MEMFD", ""):
+        install_no_memfd(module)
+    if os.environ.get("FLASH_HOOK_MISSING_SEALS", ""):
+        install_missing_seals(module)
+    corrupt_copy = os.environ.get("FLASH_HOOK_CORRUPT_COPY", "")
+    if corrupt_copy:
+        install_corrupt_copy(module, corrupt_copy)
+    unsealed = os.environ.get("FLASH_HOOK_UNSEALED", "")
+    if unsealed:
+        if unsealed not in ("ipecmd", "java runtime", "image"):
+            sys.stderr.write("flash_hook: FLASH_HOOK_UNSEALED must be "
+                             "ipecmd|java runtime|image\n")
+            return 95
+        install_unsealed_control(
+            module, unsealed, os.environ.get("FLASH_HOOK_UNSEALED_PATH", ""))
 
     operation, needle = selected("FLASH_HOOK_FAIL_OP", "FLASH_HOOK_FAIL")
     if operation is not None:

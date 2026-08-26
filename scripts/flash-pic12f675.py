@@ -30,11 +30,13 @@ writer that skipped its bulk erase would satisfy every image-address check while
 leaving the other half of the old firmware in place, so each word the image does
 not supply is required to read back erased.
 
-PLATFORM. The tool, any Java runtime, the JAR and the release image are pinned
-by descriptor and handed to ipecmd as /proc/self/fd/<n>, because a name that is
-checked and then re-opened by a child can be pointed at something else in
-between. That makes the guarded transaction a Linux procedure; elsewhere it
-refuses to touch a device rather than run the check it cannot honour.
+PLATFORM. Every tool/runtime/JAR/image descriptor handed to ipecmd as
+/proc/self/fd/<n> names bytes the operator cannot change. Data and script inputs
+use private sealed files. A native launcher keeps its source origin only when it
+is neither owned nor writable by the operator; otherwise it is refused, because
+moving an ELF launcher to a memfd can break origin-relative libraries. That
+makes the guarded transaction a Linux procedure; without the required
+descriptor and immutable-storage guarantees it refuses to touch a device.
 
 WHAT IT DOES NOT PROVE. That a real PICkit 3 / MPLAB X 6.20 erase preserves the
 trim. This tool DETECTS damage after the fact; it cannot prevent a writer from
@@ -45,7 +47,9 @@ is retained, treat a PASS as "no damage was observed on this device", not as
 
 import argparse
 import base64
+import ctypes
 import datetime
+import errno
 import hashlib
 import json
 import os
@@ -58,6 +62,20 @@ try:
     import fcntl
 except ImportError:  # pragma: no cover - platforms without POSIX fcntl
     fcntl = None
+
+
+# Stable Linux UAPI values. Some Python builds omit os.memfd_create and the
+# fcntl seal constants even when libc and the kernel provide both facilities.
+MFD_CLOEXEC = 0x0001
+MFD_ALLOW_SEALING = 0x0002
+MFD_EXEC = 0x0010
+F_ADD_SEALS = 1033
+F_GET_SEALS = 1034
+F_SEAL_SEAL = 0x0001
+F_SEAL_SHRINK = 0x0002
+F_SEAL_GROW = 0x0004
+F_SEAL_WRITE = 0x0008
+REQUIRED_SEALS = F_SEAL_SEAL | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE
 
 
 SCHEMA = "mcu-bypass-pic12f675-flash-v1"
@@ -167,13 +185,13 @@ def utc_now():
 # ---------------------------------------------------------------------------
 
 # Every object this helper validates -- the ipecmd executable, a Java runtime,
-# the ipecmd JAR, the release image -- is ultimately consumed by a CHILD
-# process, which resolves a pathname of its own. Hashing a name and then handing
-# that same name to the child reopens, one instruction later, the exact race the
-# hash was meant to close: in between, the name can be pointed at a different
-# file. So the child is handed /proc/self/fd/<n> instead. The kernel resolves
-# that through the descriptor this process is already holding, to the inode this
-# helper validated, whatever the original name refers to by then.
+# the ipecmd JAR, the release image -- is ultimately consumed by a CHILD. A
+# retained ordinary descriptor pins only an inode: the owner can still rewrite
+# that inode after its final hash. Data and script inputs are therefore copied to
+# sealed anonymous files. Native ELF launchers retain their origin only when the
+# operator cannot own, chmod or write the inode; otherwise they are refused. The
+# original descriptor also diagnoses an installation that changes during the
+# transaction.
 DESCRIPTOR_DIR = "/proc/self/fd"
 
 
@@ -198,21 +216,18 @@ def descriptor_paths_available():
 
 
 def require_descriptor_paths():
-    """Refuse to drive a programmer on a platform that cannot pin its inputs.
+    """Refuse to drive a programmer without descriptor-addressed inputs.
 
     This is a deliberately narrow platform contract rather than a best effort.
-    Without descriptor-addressed pathnames the pinned ipecmd and the retained
-    image would have to be re-opened BY NAME at the instant they are used, and a
-    process running as this user can replace either one inside that window --
-    before the physical erase, where every image guard this helper runs would be
-    bypassed and the post-write comparison could only report the damage after it
-    happened.
+    Without descriptor-addressed pathnames the immutable ipecmd and sealed image
+    would have to be re-opened BY NAME at the instant they are used, recreating
+    the race before the physical erase.
     """
     if descriptor_paths_available():
         return
     raise FlashError(
         "this platform does not resolve %s/<n> to the descriptors this process "
-        "holds, so the pinned ipecmd and the retained image would have to be "
+        "holds, so the immutable ipecmd and sealed image would have to be "
         "re-opened by name at the instant they are used. That reopening is the "
         "race this transaction exists to close, so no device command was "
         "issued. The guarded transaction is supported on Linux." % DESCRIPTOR_DIR)
@@ -640,18 +655,130 @@ def sha256_fd(fd, label, max_bytes):
     return digest.hexdigest()
 
 
-def open_identity(path, label, max_bytes):
-    """Pin a file that will later be run or read by a child, and keep its handle.
+def create_memfd(name, label, executable=False):
+    """Create a sealable Linux memfd, including on Python builds without its API."""
+    if fcntl is None:
+        raise FlashError(
+            "immutable sealed storage is unavailable for %s: Python has no "
+            "fcntl module; no device command was issued" % label)
+    base_flags = MFD_ALLOW_SEALING | MFD_CLOEXEC
+    # Linux 6.3 added MFD_EXEC for hosts whose memfd policy requires callers to
+    # opt into executable mappings. Older kernels reject the unknown flag with
+    # EINVAL, in which case the historical executable default is the safe retry.
+    flag_attempts = [base_flags | MFD_EXEC, base_flags] \
+        if executable else [base_flags]
+    creator = getattr(os, "memfd_create", None)
+    if creator is not None:
+        for index, flags in enumerate(flag_attempts):
+            try:
+                return creator(name, flags)
+            except OSError as exc:
+                if index + 1 < len(flag_attempts) and exc.errno == errno.EINVAL:
+                    continue
+                raise FlashError(
+                    "immutable sealed storage is unavailable for %s: "
+                    "memfd_create failed: %s; no device command was issued"
+                    % (label, exc)) from exc
+
+    # Conda and other Python builds can omit os.memfd_create while running on a
+    # kernel and libc that support it. Calling the same libc entry point keeps
+    # the platform contract fail-closed without rejecting that supported host.
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        creator = getattr(libc, "memfd_create")
+    except (AttributeError, OSError) as exc:
+        raise FlashError(
+            "immutable sealed storage is unavailable for %s: neither Python "
+            "nor libc exposes memfd_create; no device command was issued"
+            % label) from exc
+    creator.argtypes = (ctypes.c_char_p, ctypes.c_uint)
+    creator.restype = ctypes.c_int
+    for index, flags in enumerate(flag_attempts):
+        fd = creator(os.fsencode(name), flags)
+        if fd >= 0:
+            return fd
+        error = ctypes.get_errno()
+        if index + 1 < len(flag_attempts) and error == errno.EINVAL:
+            continue
+        raise FlashError(
+            "immutable sealed storage is unavailable for %s: memfd_create "
+            "failed: %s; no device command was issued"
+            % (label, os.strerror(error)))
+    raise AssertionError("unreachable memfd_create attempt")
+
+
+def finish_sealed_copy(fd, expected_sha256, label, max_bytes, executable):
+    """Install and verify all seals before a private copy can reach a child."""
+    try:
+        os.fchmod(fd, 0o500 if executable else 0o400)
+        fcntl.fcntl(fd, F_ADD_SEALS, REQUIRED_SEALS)
+        seals = fcntl.fcntl(fd, F_GET_SEALS)
+    except (AttributeError, OSError, ValueError) as exc:
+        raise FlashError(
+            "could not make the private %s copy immutable: %s; no device "
+            "command was issued" % (label, exc)) from exc
+    if (seals & REQUIRED_SEALS) != REQUIRED_SEALS:
+        raise FlashError(
+            "the private %s copy lacks the required write/grow/shrink/final "
+            "seals; no device command was issued" % label)
+    if sha256_fd(fd, "private %s copy" % label, max_bytes) != expected_sha256:
+        raise FlashError(
+            "the private %s copy differs from the bytes that were validated; "
+            "no device command was issued" % label)
+
+
+def sealed_copy_from_fd(source_fd, name, label, max_bytes, executable):
+    """Copy one open regular file into immutable child-consumption storage."""
+    fd = create_memfd(name, label, executable=executable)
+    digest = hashlib.sha256()
+    total = 0
+    try:
+        os.lseek(source_fd, 0, os.SEEK_SET)
+        while True:
+            chunk = os.read(source_fd, 1 << 20)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                raise FlashError("%s exceeds the %d-byte limit"
+                                 % (label, max_bytes))
+            durable_write(fd, chunk, "private %s copy" % label)
+            digest.update(chunk)
+        if total == 0:
+            raise FlashError("%s is empty" % label)
+        identity = digest.hexdigest()
+        finish_sealed_copy(fd, identity, label, max_bytes, executable)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd, identity
+
+
+def sealed_copy(data, name, label):
+    """Copy validated in-memory bytes into immutable child-consumption storage."""
+    if not data:
+        raise FlashError("%s is empty" % label)
+    if len(data) > MAX_FILE_BYTES:
+        raise FlashError("%s exceeds the %d-byte limit" % (label, MAX_FILE_BYTES))
+    fd = create_memfd(name, label)
+    try:
+        durable_write(fd, data, "private %s copy" % label)
+        finish_sealed_copy(fd, sha256_bytes(data), label, MAX_FILE_BYTES, False)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def open_identity(path, label, max_bytes, executable=False):
+    """Record a source identity and select immutable child-consumption bytes.
 
     Hashing a path and then handing that same path to a child leaves a window:
     between the two, the name can be pointed at a different file, or the file
-    can be rewritten underneath it. The descriptor closes both halves. The
-    recorded digest is read THROUGH it; the child is handed descriptor_path() of
-    this same descriptor rather than the name, so what it runs or reads is this
-    inode and not whatever the name has become; and before every invocation the
-    pathname is re-stat'd and these bytes are re-hashed through the descriptor,
-    so a tool swapped in behind the name, or edited in place, is diagnosed and
-    refused rather than silently ignored.
+    can be rewritten underneath it. Data and scripts receive fully sealed private
+    copies. A native launcher keeps its source descriptor only if this operator
+    cannot alter the inode, preserving origin-relative runtime behavior. The
+    source stays open so replacement or editing is still diagnosed.
     """
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -662,7 +789,29 @@ def open_identity(path, label, max_bytes):
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
             raise FlashError("%s is not a regular file: %s" % (label, path))
-        digest = sha256_fd(fd, label, max_bytes)
+        if executable and info.st_mode & 0o111 == 0:
+            raise FlashError("%s is not executable: %s" % (label, path))
+        magic = os.pread(fd, 4, 0) if executable else b""
+        if magic == b"\x7fELF":
+            # Native launchers commonly use /proc/self/exe or ELF $ORIGIN for
+            # adjacent libraries. A memfd changes that origin. Preserve the
+            # source descriptor only when this operator cannot make the inode
+            # writable or chmod it; pathname replacement remains harmless.
+            operator_writable = info.st_uid == os.geteuid() \
+                or os.access(descriptor_path(fd), os.W_OK)
+            if operator_writable:
+                raise FlashError(
+                    "%s is a native executable whose origin must be preserved, "
+                    "but its inode is writable or owned by this operator. It "
+                    "cannot be made both immutable and origin-compatible; no "
+                    "device command was issued: %s" % (label, path))
+            digest = sha256_fd(fd, label, max_bytes)
+            consume_fd = os.dup(fd)
+            pinning = "operator-read-only-source"
+        else:
+            consume_fd, digest = sealed_copy_from_fd(
+                fd, os.path.basename(path), label, max_bytes, executable)
+            pinning = "sealed"
     except BaseException:
         os.close(fd)
         raise
@@ -673,19 +822,23 @@ def open_identity(path, label, max_bytes):
         "sha256": digest,
         "ident": (info.st_dev, info.st_ino),
         "max_bytes": max_bytes,
+        "consume_fd": consume_fd,
+        "pinning": pinning,
     }
 
 
 def programmer_identity(path, java):
     """Resolve the one supported ipecmd form and pin the exact bytes used.
 
-    Both supported forms are pinned the same way: the direct executable, and the
-    `java -jar ipecmd.jar` form, whose Java runtime is as much a part of what
-    runs as the jar is.
+    Both supported forms use operator-immutable bytes: sealed data/scripts, or
+    an origin-sensitive native launcher the operator neither owns nor can write.
+    In the `java -jar ipecmd.jar` form, the Java runtime is as much a part of
+    what runs as the jar is.
     """
     invoked = os.path.abspath(path)
     resolved = os.path.realpath(invoked)
-    handle = open_identity(resolved, "ipecmd", MAX_TOOL_BYTES)
+    handle = open_identity(resolved, "ipecmd", MAX_TOOL_BYTES,
+                           executable=not resolved.endswith(".jar"))
     java_handle = None
     try:
         if resolved.endswith(".jar"):
@@ -696,26 +849,25 @@ def programmer_identity(path, java):
                     "a .jar ipecmd needs a Java runtime; '%s' is not an "
                     "executable on PATH" % java)
             java_path = os.path.realpath(java_path)
-            java_handle = open_identity(java_path, "java runtime", MAX_TOOL_BYTES)
-            if not os.access(java_path, os.X_OK):
-                raise FlashError("java runtime is not executable: %s" % java_path)
+            java_handle = open_identity(java_path, "java runtime", MAX_TOOL_BYTES,
+                                        executable=True)
             # argv[0] stays the real name so the child, its own logs and the
             # retained transcript all say what ran; only the two things a child
             # would otherwise RESOLVE -- the runtime it execs and the jar it
             # opens -- are addressed by descriptor.
-            prefix = [java_path, "-jar", descriptor_path(handle["fd"])]
-            exec_path = descriptor_path(java_handle["fd"])
+            prefix = [java_path, "-jar", descriptor_path(handle["consume_fd"])]
+            exec_path = descriptor_path(java_handle["consume_fd"])
         else:
             kind = "executable"
-            if not os.access(resolved, os.X_OK):
-                raise FlashError("ipecmd is not executable: %s" % path)
             java_path = None
             prefix = [resolved]
-            exec_path = descriptor_path(handle["fd"])
+            exec_path = descriptor_path(handle["consume_fd"])
     except BaseException:
         os.close(handle["fd"])
+        os.close(handle["consume_fd"])
         if java_handle is not None:
             os.close(java_handle["fd"])
+            os.close(java_handle["consume_fd"])
         raise
     handles = [h for h in (handle, java_handle) if h is not None]
     return {
@@ -727,20 +879,20 @@ def programmer_identity(path, java):
         "java_sha256": None if java_handle is None else java_handle["sha256"],
         "prefix": prefix,
         "exec_path": exec_path,
-        "pass_fds": tuple(h["fd"] for h in handles),
+        "pass_fds": tuple(h["consume_fd"] for h in handles),
         "handles": handles,
+        "pinning": handle["pinning"],
+        "java_pinning": None if java_handle is None else java_handle["pinning"],
     }
 
 
 def programmer_unchanged(programmer):
-    """Re-prove the pinned identity immediately before an invocation.
+    """Re-prove the source identity immediately before an invocation.
 
-    The bytes about to run are the ones behind these descriptors whatever this
-    finds, because that is what the child is handed. What this adds is the
-    DIAGNOSIS: a tool whose name now points somewhere else, or whose inode was
-    edited underneath it, means the operator's installation moved mid-
-    transaction, and continuing to drive a device from it is not something to do
-    quietly.
+    The bytes about to run are either sealed or in an operator-read-only native
+    inode. This is the DIAGNOSIS: a tool whose name now points somewhere else, or
+    whose source inode was edited by another principal, means the installation
+    moved mid-transaction, and continuing is not something to do quietly.
     """
     for handle in programmer["handles"]:
         try:
@@ -763,10 +915,10 @@ def programmer_unchanged(programmer):
 
 
 def run_tool(argv, timeout, label, executable=None, pass_fds=()):
-    """Start one child on the PINNED objects.
+    """Start one child on immutable validated objects.
 
-    `executable` is descriptor_path() of the held tool, so the kernel execs the
-    inode this helper hashed rather than re-walking the name in argv[0].
+    `executable` names either a sealed copy or an operator-read-only native
+    launcher, so the kernel execs bytes that cannot change after their hash.
     `pass_fds` keeps exactly those descriptors open across the exec -- without
     it subprocess closes them before exec and every /proc/self/fd/<n> in the
     argv, including the one being exec'd, would resolve to nothing.
@@ -784,10 +936,10 @@ def run_tool(argv, timeout, label, executable=None, pass_fds=()):
 
 
 def invoke(programmer, argv, timeout, label, pass_fds=()):
-    """The only way a tool is started: identity re-proved, then run.
+    """The only way a tool is started: source re-proved, immutable bytes run.
 
     `pass_fds` carries whatever else this particular command has to READ by
-    descriptor -- for the single write, the pinned release image.
+    descriptor -- for the single write, the sealed release-image copy.
     """
     programmer_unchanged(programmer)
     return run_tool(argv, timeout, label, executable=programmer["exec_path"],
@@ -842,8 +994,9 @@ def write_argv(programmer, image_path):
     deliberately absent: the supported arrangement is an externally powered
     board, and no programmer-powered voltage/interface setup has been retained
     as hardware evidence. Nothing here is caller-supplied: `image_path` is
-    descriptor_path() of the pinned image, which is the one argument of this
-    command that a replaced file could otherwise turn into a different write.
+    descriptor_path() of the sealed image copy, which is the one argument of
+    this command that changed source bytes could otherwise turn into a different
+    write.
     """
     return programmer["prefix"] + [
         TOOL_FLAG + TOOL, "-P" + PART, "-F" + image_path, "-M", "-Y", "-OL",
@@ -910,40 +1063,6 @@ def durable_link(source, target, what, dir_fd=None):
         raise FlashError("%s already exists and is immutable" % what) from exc
     except OSError as exc:
         raise FlashError("could not publish %s: %s" % (what, exc)) from exc
-
-
-def sealed_copy(data, name, label):
-    """An immutable copy of already-validated bytes, addressable by descriptor.
-
-    Holding the retained image.hex open pins it against REPLACEMENT, but not
-    against being rewritten in place: mode 0400 does not stop the owner of a
-    file from restoring write permission and editing the very inode the
-    descriptor names. A sealed anonymous file has no name to replace and no
-    writable path at all, so the bytes the writer consumes are provably the
-    bytes that passed validate_release_image().
-
-    Returns None where the platform cannot seal one; the caller then falls back
-    to the retained evidence file and records which pinning was in force.
-    """
-    if fcntl is None or not hasattr(os, "memfd_create"):
-        return None
-    try:
-        fd = os.memfd_create(name, os.MFD_ALLOW_SEALING | os.MFD_CLOEXEC)
-    except (AttributeError, OSError):  # pragma: no cover - old kernels
-        return None
-    try:
-        durable_write(fd, data, label)
-        fcntl.fcntl(fd, fcntl.F_ADD_SEALS,
-                    fcntl.F_SEAL_WRITE | fcntl.F_SEAL_SHRINK
-                    | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SEAL)
-    except (AttributeError, FlashError, OSError,
-            ValueError):  # pragma: no cover - old kernels
-        os.close(fd)
-        return None
-    if sha256_fd(fd, label, MAX_FILE_BYTES) != sha256_bytes(data):
-        os.close(fd)
-        raise FlashError("%s was not sealed as it was written" % label)
-    return fd
 
 
 class Evidence(object):
@@ -1484,6 +1603,8 @@ def command_program(args, helper_path):
     bundle = bundle_identity(args.image, helper_path)
     image_facts = validate_release_image(bundle["image_data"],
                                          "selected release image")
+    image_fd = sealed_copy(bundle["image_data"], IMAGE_SNAPSHOT_NAME,
+                           "release image")
     programmer = programmer_identity(args.ipecmd, args.java)
     version = probe_version(programmer)
 
@@ -1494,16 +1615,8 @@ def command_program(args, helper_path):
     # those bytes; the descriptor below is what the writer is actually given, so
     # that no name -- not the operator's, not this directory's, not image.hex's
     # -- is resolved again between validation and the erase.
-    retained_fd = evidence.publish(IMAGE_SNAPSHOT_NAME, bundle["image_data"],
-                                   "retained release image", retain=True)
-    sealed_fd = sealed_copy(bundle["image_data"], IMAGE_SNAPSHOT_NAME,
-                            "retained release image")
-    if sealed_fd is None:
-        image_fd = retained_fd
-        image_pinning = "retained-descriptor"
-    else:
-        image_fd = sealed_fd
-        image_pinning = "sealed"
+    evidence.publish(IMAGE_SNAPSHOT_NAME, bundle["image_data"],
+                     "retained release image")
     snapshot_path = descriptor_path(image_fd)
 
     baseline, baseline_memory = device_read(programmer, evidence, "baseline")
@@ -1534,11 +1647,10 @@ def command_program(args, helper_path):
         "image_name": bundle["image_name"],
         "image_path": bundle["image_path"],
         "image_snapshot_path": evidence.filename(IMAGE_SNAPSHOT_NAME),
-        # Which of the two pinnings the platform allowed. "sealed" is an
-        # anonymous file that cannot be rewritten by anyone, including this
-        # helper; "retained-descriptor" is the retained image.hex held open,
-        # which cannot be REPLACED but whose inode its owner could still edit.
-        "image_pinning": image_pinning,
+        # These are consumption mechanisms, not new release identities. Data
+        # and scripts are sealed copies; a native launcher may retain its origin
+        # only when this operator neither owns nor can write its source inode.
+        "image_pinning": "sealed",
         "image_sha256": bundle["image_sha256"],
         "image_base64": base64.b64encode(bundle["image_data"]).decode("ascii"),
         "image_program_words": image_facts["program_words"],
@@ -1552,8 +1664,10 @@ def command_program(args, helper_path):
         "programmer_path": programmer["path"],
         "programmer_realpath": programmer["realpath"],
         "programmer_sha256": programmer["sha256"],
+        "programmer_pinning": programmer["pinning"],
         "programmer_java": programmer["java"],
         "programmer_java_sha256": programmer["java_sha256"],
+        "programmer_java_pinning": programmer["java_pinning"],
         # Both argvs are recorded exactly as issued, descriptor pathnames and
         # all. A /proc/self/fd number is meaningless once this process is gone,
         # which is precisely why the digests beside it are what identify what
@@ -1589,7 +1703,7 @@ def command_program(args, helper_path):
     if sha256_fd(image_fd, "retained release image", MAX_FILE_BYTES) \
             != bundle["image_sha256"]:
         raise FlashError(
-            "the pinned release image no longer holds the bytes this "
+            "the sealed release-image copy no longer holds the bytes this "
             "transaction reserved; no write was attempted")
     argv = write_argv(programmer, snapshot_path)
     program_exit, program_output = invoke(
@@ -1626,8 +1740,8 @@ def command_program(args, helper_path):
 def command_finalize(args, helper_path):
     # Finalization issues no write, but it does drive a tool whose output
     # becomes the published result. A programmer swapped in behind its name
-    # could fabricate a passing export, so the same descriptor pinning governs
-    # the read-only path.
+    # could fabricate a passing export, so the same operator-immutable input
+    # contract governs the read-only path.
     require_descriptor_paths()
 
     evidence = Evidence.open(args.evidence_dir)

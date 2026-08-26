@@ -313,8 +313,8 @@ def do_program(image_path, state, fault):
     state["programs"] = state["programs"] + 1
     version = fault.get("version", "6.20")
     # What the writer was actually handed, recorded before anything else: with
-    # the image pinned by descriptor, this digest is how a test tells whether a
-    # file swapped in mid-transaction reached the writer or not.
+    # the image consumed through a sealed descriptor, this digest tells whether
+    # replacement or same-inode rewrite bytes reached the writer.
     try:
         with open(image_path, "rb") as handle:
             state["image_sha256"] = hashlib.sha256(handle.read()).hexdigest()

@@ -20,11 +20,10 @@
 #   4. PENDING IS RECOVERABLE, READ-ONLY. A genuine SIGKILL between the write
 #      and the readback leaves a reservation with no result; finalization
 #      publishes one without ever constructing a write vector.
-#   5. THE PINNED OBJECT IS THE ONE THAT RUNS. test/pic/flash_hook.py replaces
-#      the tool, the Java runtime, the jar, the retained image and the evidence
-#      directory INSIDE the window between the helper's last identity proof and
-#      the child that consumes them. What the child actually got is read back
-#      out of the fake device, not inferred.
+#   5. ONLY IMMUTABLE BYTES RUN. test/pic/flash_hook.py replaces pathnames and
+#      rewrites the tool, Java runtime, jar and image IN PLACE inside the window
+#      between the helper's last identity proof and child consumption. What the
+#      child actually got is read back out of the fake device, not inferred.
 #   6. PUBLICATION IS ALL OR NOTHING. The same driver fails and SIGKILLs inside
 #      each durable step of result publication. Every outcome must be either one
 #      complete immutable result or a PENDING transaction a read-only
@@ -74,6 +73,35 @@ check() {
 	|| { printf 'FAIL: fake programmer is missing or not executable: %s\n' "$FAKE" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 \
 	|| { printf 'FAIL: python3 is required by the flashing-helper regression\n' >&2; exit 1; }
+
+# Native launchers cannot blindly move to memfds: Java and similar launchers use
+# their executable origin to find adjacent libraries. Exercise the accepted
+# operator-read-only source-descriptor branch with real Java where installed,
+# otherwise with a system ELF. A root test runner drops privilege for this probe
+# so root ownership does not make every system inode operator-owned.
+native_launcher=$(type -P java || type -P true)
+native_origin_probe=$(python3 -c '
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("flash_helper", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+if os.geteuid() == 0:
+    os.setgroups([])
+    os.setgid(65534)
+    os.setuid(65534)
+path = os.path.realpath(sys.argv[2])
+handle = module.open_identity(path, "native launcher", module.MAX_TOOL_BYTES,
+                              executable=True)
+argv = [path] + (["-version"] if os.path.basename(path) == "java" else [])
+rc, output = module.run_tool(
+    argv, 30, "native launcher probe",
+    executable=module.descriptor_path(handle["consume_fd"]),
+    pass_fds=(handle["consume_fd"],))
+print(1 if rc == 0 and handle["pinning"] == "operator-read-only-source"
+      and (not argv[1:] or output) else 0)
+' "$HELPER" "$native_launcher") || native_origin_probe=0
+check "an operator-read-only native launcher preserves its executable origin" \
+	"$native_origin_probe"
 
 # The shipping image is built by XC8, which no host gate requires. Prefer a
 # freshly built one; fall back to the newest released image so this gate runs
@@ -134,16 +162,6 @@ make_bundle() {
 		> "$dir/SHA256SUMS.asc"
 }
 
-# A sealed anonymous image cannot be rewritten by anyone, including the helper;
-# a held image.hex descriptor cannot be REPLACED but its inode remains the
-# owner's to edit. Which of the two the helper reaches for is a property of the
-# host, so the expected value is derived here rather than asserted blind.
-if python3 -c 'import os,sys; sys.exit(0 if hasattr(os, "memfd_create") else 1)'; then
-	EXPECTED_PINNING=sealed
-else
-	EXPECTED_PINNING=retained-descriptor
-fi
-
 case_no=0
 # Per-case private state: a fresh device, a fresh argument-vector log, and a
 # fresh bundle, so no case can be satisfied by another case's leftovers.
@@ -176,7 +194,10 @@ DRIVER="$ROOT/test/pic/flash_hook.py"
 hook_reset() {
 	HOOK=""
 	unset FLASH_HOOK_SWAPS FLASH_HOOK_FAIL_OP FLASH_HOOK_FAIL \
-		FLASH_HOOK_KILL_OP FLASH_HOOK_KILL
+		FLASH_HOOK_KILL_OP FLASH_HOOK_KILL FLASH_HOOK_REWRITES \
+		FLASH_HOOK_NO_MEMFD FLASH_HOOK_HIDE_OS_MEMFD \
+		FLASH_HOOK_MISSING_SEALS FLASH_HOOK_CORRUPT_COPY \
+		FLASH_HOOK_UNSEALED FLASH_HOOK_UNSEALED_PATH
 }
 hook_reset
 
@@ -249,6 +270,8 @@ reservation_field() { json_field "$EVIDENCE/reservation.json" "$1"; }
 device_field() { json_field "$DEVICE" "$1"; }
 
 sha256_of() { sha256sum -- "$1" | cut -d' ' -f1; }
+
+inode_of() { stat -c '%d:%i' -- "$1"; }
 
 # One publication remnant proves the temporary-file route was taken; the absence
 # of the final name proves nothing partial was published under it.
@@ -331,7 +354,10 @@ check "result verifies every program word below the calibration word" \
 		&& [ "$(result_field required_program_words)" = 1023 ] \
 		&& [ "$(result_field verified_config_word)" = True ] && echo 1 || echo 0)"
 check "the reservation records how the image was pinned for the writer" \
-	"$([ "$(reservation_field image_pinning)" = "$EXPECTED_PINNING" ] && echo 1 || echo 0)"
+	"$([ "$(reservation_field image_pinning)" = sealed ] && echo 1 || echo 0)"
+check "the reservation records the direct programmer's immutable consumption" \
+	"$([ "$(reservation_field programmer_pinning)" = sealed ] \
+		&& [ "$(reservation_field programmer_java_pinning)" = None ] && echo 1 || echo 0)"
 check "result carries no failures" \
 	"$([ "$(result_field failures)" = "[]" ] && echo 1 || echo 0)"
 check "the original device export is retained" \
@@ -625,6 +651,14 @@ run_helper '' program --image "$IMAGE" --ipecmd "$CASE_DIR/ipecmd" \
 assert_rejects "an ipecmd that is not executable" "ipecmd is not executable"
 
 new_case
+cp -- "$(type -P true)" "$CASE_DIR/ipecmd-native"
+chmod 0755 "$CASE_DIR/ipecmd-native"
+run_helper '' program --image "$IMAGE" --ipecmd "$CASE_DIR/ipecmd-native" \
+	--evidence-dir "$EVIDENCE"
+assert_rejects "an operator-owned native launcher whose origin must be preserved" \
+	"cannot be made both immutable and origin-compatible"
+
+new_case
 program_run 'version:6.25'
 assert_rejects "MPLAB X 6.25, which dropped PICkit 3" "this helper supports 6.20"
 
@@ -683,6 +717,9 @@ check "the reservation records the jar form" \
 	"$([ "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["programmer_kind"])' "$EVIDENCE/reservation.json")" = jar ] && echo 1 || echo 0)"
 check "the reservation pins the Java runtime that ran the jar" \
 	"$(python3 -c 'import hashlib,json,sys; r=json.load(open(sys.argv[1])); print(1 if r["programmer_java_sha256"]==hashlib.sha256(open(sys.argv[2],"rb").read()).hexdigest() else 0)' "$EVIDENCE/reservation.json" "$JAVA")"
+check "the reservation records immutable jar and Java consumption" \
+	"$([ "$(reservation_field programmer_pinning)" = sealed ] \
+		&& [ "$(reservation_field programmer_java_pinning)" = sealed ] && echo 1 || echo 0)"
 
 jar_case
 run_helper '' program --image "$IMAGE" --ipecmd "$JAR" \
@@ -775,12 +812,25 @@ swap_after_final_check() {
 	export FLASH_HOOK_SWAPS=$1
 }
 
+rewrite_after_final_check() {
+	HOOK=1
+	export FLASH_HOOK_REWRITES=$1
+}
+
 make_decoy_tool() {
 	cat > "$1" <<'SH'
 #!/bin/sh
 printf 'DECOY TOOL RAN\n'
 exit 0
 SH
+	chmod 0755 "$1"
+}
+
+make_decoy_python() {
+	cat > "$1" <<'PY'
+#!/usr/bin/env python3
+print('DECOY JAR RAN')
+PY
 	chmod 0755 "$1"
 }
 
@@ -805,6 +855,68 @@ make_calibration_image() {
 	cal=$(ihex_record 07FE 00 3434)
 	printf '%s\n%s\n%s\n%s\n' "$CODE" "$cal" "$CONFIG" "$EOFREC" > "$1"
 }
+
+# The review host has a working libc/kernel memfd_create but no Python API for
+# it. Hide the API deterministically on every host and prove that shape still
+# reaches only sealed copies.
+new_case
+HOOK=1
+export FLASH_HOOK_HIDE_OS_MEMFD=1
+program_run ''
+hook_reset
+check "the libc memfd fallback completes the guarded transaction" \
+	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
+check "the libc fallback still records sealed tool and image consumption" \
+	"$([ "$(reservation_field programmer_pinning)" = sealed ] \
+		&& [ "$(reservation_field image_pinning)" = sealed ] && echo 1 || echo 0)"
+
+# No ordinary-descriptor fallback is permitted. This is placed before the
+# version probe and therefore before any tool invocation, not merely before -M.
+new_case
+HOOK=1
+export FLASH_HOOK_NO_MEMFD=1
+program_run ''
+hook_reset
+check "unavailable immutable storage is a fail-closed pre-device refusal" \
+	"$([ "$RC" -eq 2 ] \
+		&& [[ "$OUT" == *"immutable sealed storage is unavailable"* ]] && echo 1 || echo 0)"
+check "that refusal issued no version, read, or write command" \
+	"$([ "$(reads)" = 0 ] && [ "$(writes)" = 0 ] \
+		&& [ ! -s "$ARGVLOG" ] && echo 1 || echo 0)"
+check "that refusal created no evidence transaction" \
+	"$([ ! -e "$EVIDENCE" ] && echo 1 || echo 0)"
+
+new_case
+HOOK=1
+export FLASH_HOOK_MISSING_SEALS=1
+program_run ''
+hook_reset
+check "a copy without every required seal is refused" \
+	"$([ "$RC" -eq 2 ] && [[ "$OUT" == *"lacks the required"*"seals"* ]] && echo 1 || echo 0)"
+check "a missing seal is detected before any tool or evidence transaction" \
+	"$([ ! -s "$ARGVLOG" ] && [ ! -e "$EVIDENCE" ] && echo 1 || echo 0)"
+
+new_case
+HOOK=1
+export FLASH_HOOK_CORRUPT_COPY='private release image copy'
+program_run ''
+hook_reset
+check "a post-copy digest mismatch is refused" \
+	"$([ "$RC" -eq 2 ] \
+		&& [[ "$OUT" == *"differs from the bytes that were validated"* ]] && echo 1 || echo 0)"
+check "a post-copy mismatch is detected before any tool or evidence transaction" \
+	"$([ ! -s "$ARGVLOG" ] && [ ! -e "$EVIDENCE" ] && echo 1 || echo 0)"
+
+new_case
+HOOK=1
+export FLASH_HOOK_FAIL_OP=write FLASH_HOOK_FAIL='private release image copy'
+program_run ''
+hook_reset
+check "a failed private-copy write is refused" \
+	"$([ "$RC" -eq 2 ] \
+		&& [[ "$OUT" == *"could not write private release image copy"* ]] && echo 1 || echo 0)"
+check "a failed private-copy write is detected before any tool or evidence transaction" \
+	"$([ ! -s "$ARGVLOG" ] && [ ! -e "$EVIDENCE" ] && echo 1 || echo 0)"
 
 tool_case
 make_decoy_tool "$CASE_DIR/decoy"
@@ -866,6 +978,134 @@ check "the pre-write image guards are not bypassed by the race" \
 	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
 check "the device's factory calibration word is untouched" \
 	"$([ "$(result_field post_osccal_word)" = "$(result_field baseline_osccal_word)" ] && echo 1 || echo 0)"
+
+# A descriptor pins an inode, not its bytes. Rewrite each source IN PLACE after
+# the final source digest and prove the child still consumes its sealed copy.
+tool_case
+make_decoy_tool "$CASE_DIR/decoy"
+before_inode=$(inode_of "$TOOL_COPY")
+decoy_sha=$(sha256_of "$CASE_DIR/decoy")
+rewrite_after_final_check "[[\"$CASE_DIR/decoy\", \"$TOOL_COPY\"]]"
+run_helper '' program --image "$IMAGE" --ipecmd "$TOOL_COPY" \
+	--evidence-dir "$EVIDENCE"
+hook_reset
+check "an ipecmd rewritten in place after its final hash never executes" \
+	"$(decoy_silent)"
+check "the sealed direct ipecmd performed the write instead" \
+	"$([ "$(writes)" = 1 ] && [ "$(device_field programs)" = 1 ] && echo 1 || echo 0)"
+check "the direct-tool race changed bytes without replacing the inode" \
+	"$([ "$(inode_of "$TOOL_COPY")" = "$before_inode" ] \
+		&& [ "$(sha256_of "$TOOL_COPY")" = "$decoy_sha" ] && echo 1 || echo 0)"
+check "the changed direct-tool source is diagnosed after the safe write" \
+	"$([ "$RC" -eq 1 ] && [[ "$OUT" == *"changed on disk between its identity check"* ]] && echo 1 || echo 0)"
+
+jar_case
+make_decoy_python "$CASE_DIR/decoy.py"
+before_inode=$(inode_of "$JAR")
+decoy_sha=$(sha256_of "$CASE_DIR/decoy.py")
+rewrite_after_final_check "[[\"$CASE_DIR/decoy.py\", \"$JAR\"]]"
+jar_run ''
+hook_reset
+check "a jar rewritten in place after its final hash is never loaded" \
+	"$(decoy_silent)"
+check "the sealed jar performed the write instead" \
+	"$([ "$(writes)" = 1 ] && [ "$(device_field programs)" = 1 ] && echo 1 || echo 0)"
+check "the jar race changed bytes without replacing the inode" \
+	"$([ "$(inode_of "$JAR")" = "$before_inode" ] \
+		&& [ "$(sha256_of "$JAR")" = "$decoy_sha" ] && echo 1 || echo 0)"
+
+jar_case
+cp -- "$JAVA" "$CASE_DIR/java-copy"
+chmod 0755 "$CASE_DIR/java-copy"
+make_decoy_tool "$CASE_DIR/decoy"
+before_inode=$(inode_of "$CASE_DIR/java-copy")
+decoy_sha=$(sha256_of "$CASE_DIR/decoy")
+rewrite_after_final_check \
+	"[[\"$CASE_DIR/decoy\", \"$CASE_DIR/java-copy\"]]"
+run_helper '' program --image "$IMAGE" --ipecmd "$JAR" \
+	--java "$CASE_DIR/java-copy" --evidence-dir "$EVIDENCE"
+hook_reset
+check "a Java runtime rewritten in place after its final hash never executes" \
+	"$(decoy_silent)"
+check "the sealed Java runtime performed the write instead" \
+	"$([ "$(writes)" = 1 ] && [ "$(device_field programs)" = 1 ] && echo 1 || echo 0)"
+check "the Java race changed bytes without replacing the inode" \
+	"$([ "$(inode_of "$CASE_DIR/java-copy")" = "$before_inode" ] \
+		&& [ "$(sha256_of "$CASE_DIR/java-copy")" = "$decoy_sha" ] && echo 1 || echo 0)"
+
+new_case
+make_calibration_image "$CASE_DIR/calibration.hex"
+original_sha=$(sha256_of "$IMAGE")
+calibration_sha=$(sha256_of "$CASE_DIR/calibration.hex")
+before_inode=$(inode_of "$IMAGE")
+rewrite_after_final_check "[[\"$CASE_DIR/calibration.hex\", \"$IMAGE\"]]"
+program_run ''
+hook_reset
+check "an image rewritten in place after its final digest never reaches the writer" \
+	"$([ "$(device_field image_sha256)" = "$original_sha" ] && echo 1 || echo 0)"
+check "the image race changed bytes without replacing the inode" \
+	"$([ "$(inode_of "$IMAGE")" = "$before_inode" ] \
+		&& [ "$(sha256_of "$IMAGE")" = "$calibration_sha" ] && echo 1 || echo 0)"
+check "the sealed image keeps the transaction safe and complete" \
+	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] \
+		&& [ "$(writes)" = 1 ] && echo 1 || echo 0)"
+check "the same-inode image race cannot alter factory calibration" \
+	"$([ "$(result_field post_osccal_word)" = "$(result_field baseline_osccal_word)" ] && echo 1 || echo 0)"
+
+# Independent negative controls restore the old ordinary descriptor for exactly
+# one object. Each same-inode fixture must then expose the race it just proved
+# the production sealed-copy path closes.
+tool_case
+make_decoy_tool "$CASE_DIR/decoy"
+rewrite_after_final_check "[[\"$CASE_DIR/decoy\", \"$TOOL_COPY\"]]"
+export FLASH_HOOK_UNSEALED=ipecmd
+run_helper '' program --image "$IMAGE" --ipecmd "$TOOL_COPY" \
+	--evidence-dir "$EVIDENCE"
+hook_reset
+check "negative control: an ordinary direct-tool descriptor runs rewritten bytes" \
+	"$([ -s "$EVIDENCE/program.log" ] \
+		&& grep -q 'DECOY TOOL RAN' "$EVIDENCE/program.log" && echo 1 || echo 0)"
+check "negative control: the rewritten direct tool performed no guarded write" \
+	"$([ "$(writes)" = 0 ] && echo 1 || echo 0)"
+
+jar_case
+make_decoy_python "$CASE_DIR/decoy.py"
+rewrite_after_final_check "[[\"$CASE_DIR/decoy.py\", \"$JAR\"]]"
+export FLASH_HOOK_UNSEALED=ipecmd
+jar_run ''
+hook_reset
+check "negative control: an ordinary jar descriptor loads rewritten bytes" \
+	"$([ -s "$EVIDENCE/program.log" ] \
+		&& grep -q 'DECOY JAR RAN' "$EVIDENCE/program.log" && echo 1 || echo 0)"
+check "negative control: the rewritten jar performed no guarded write" \
+	"$([ "$(writes)" = 0 ] && echo 1 || echo 0)"
+
+jar_case
+cp -- "$JAVA" "$CASE_DIR/java-copy"
+chmod 0755 "$CASE_DIR/java-copy"
+make_decoy_tool "$CASE_DIR/decoy"
+rewrite_after_final_check \
+	"[[\"$CASE_DIR/decoy\", \"$CASE_DIR/java-copy\"]]"
+export FLASH_HOOK_UNSEALED='java runtime'
+run_helper '' program --image "$IMAGE" --ipecmd "$JAR" \
+	--java "$CASE_DIR/java-copy" --evidence-dir "$EVIDENCE"
+hook_reset
+check "negative control: an ordinary Java descriptor runs rewritten bytes" \
+	"$([ -s "$EVIDENCE/program.log" ] \
+		&& grep -q 'DECOY TOOL RAN' "$EVIDENCE/program.log" && echo 1 || echo 0)"
+check "negative control: the rewritten Java runtime performed no guarded write" \
+	"$([ "$(writes)" = 0 ] && echo 1 || echo 0)"
+
+new_case
+make_calibration_image "$CASE_DIR/calibration.hex"
+calibration_sha=$(sha256_of "$CASE_DIR/calibration.hex")
+rewrite_after_final_check "[[\"$CASE_DIR/calibration.hex\", \"$IMAGE\"]]"
+export FLASH_HOOK_UNSEALED=image FLASH_HOOK_UNSEALED_PATH="$IMAGE"
+program_run ''
+hook_reset
+check "negative control: an ordinary image descriptor reaches the writer rewritten" \
+	"$([ "$(writes)" = 1 ] \
+		&& [ "$(device_field image_sha256)" = "$calibration_sha" ] && echo 1 || echo 0)"
 
 # The longest version of the same window: not the file, the DIRECTORY it sits
 # in. Renaming the evidence directory and recreating its name over a decoy makes
