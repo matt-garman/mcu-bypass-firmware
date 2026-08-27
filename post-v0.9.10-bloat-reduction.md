@@ -1119,7 +1119,7 @@ evidence, not mutable candidate measurements or speculative release status.
 
 ## BR-TEST-01 - Delete the retired v0.9.8 rename-identity lane
 
-**Status:** IN PROGRESS OpenCode
+**Status:** DONE `893d647`
 
 **Rationale:** `scripts/verify-rename-identity.sh:15-24` explicitly says the
 one-shot gate should be deleted after the rename table no longer names the
@@ -1152,9 +1152,9 @@ synthetic fixtures.
 
 ## BR-TEST-02 - Remove duplicate mutation execution from normal CI
 
-**Status:** TODO
+**Status:** IN PROGRESS OpenCode
 
-**Current behavior:**
+**Pre-change behavior:**
 
 - The PIC job runs authoritative fail-closed mutation testing at
   `.github/workflows/ci.yml:383-398` with every substrate provisioned.
@@ -1165,12 +1165,12 @@ synthetic fixtures.
 
 **Work:**
 
-- [ ] Add or expose a long/exhaustive aggregate without mutation for hosted
+- [x] Add or expose a long/exhaustive aggregate without mutation for hosted
   stress CI.
-- [ ] Keep ordinary `make test-long` unchanged for release qualification unless
+- [x] Keep ordinary `make test-long` unchanged for release qualification unless
   a separate release design explicitly replaces it.
-- [ ] Retain exactly one normal-CI fail-closed mutation run.
-- [ ] Update CI comments, job names, and routing tests.
+- [x] Retain exactly one normal-CI fail-closed mutation run.
+- [x] Update CI comments, job names, and routing tests.
 
 **Acceptance:**
 

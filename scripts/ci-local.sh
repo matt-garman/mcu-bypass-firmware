@@ -50,14 +50,16 @@
 #                    line per variant on each, because a per-variant skip
 #                    returns 0. See xt_gate() below; a bare `make` exit status
 #                    is a weaker check than the CI step it stands in for.
-#   verify        -> make test              ) covered together by `make
-#   stress        -> make test-long         ) test-long`, which is a strict
-#                                             superset of `make test`
-#                                             (adds mutation testing + the
-#                                             exhaustive FULL_* input domains).
+#   verify        -> make test              ) covered together by the local
+#   stress        -> make stress            ) `make test-long` invocation, which
+#                                             combines the fast gates, FULL_*
+#                                             domains, and one mutation run.
+#                    Hosted mutation runs in `pic`; local push mode folds that
+#                    gate into test-long instead of repeating the PIC setup.
 #
-#   `stress` is gated OFF pull requests in CI (push/schedule/dispatch only).
-#   Use --pr to mirror a PR run: `make test` instead of `make test-long`.
+#   `stress` and the mutation step are gated OFF pull requests in CI
+#   (push/schedule/dispatch only). Use --pr to mirror a PR run: `make test`
+#   instead of the combined local `make test-long`.
 #
 #   The `release` workflow (tag-triggered reproducibility gate) is a SEPARATE
 #   pipeline and is intentionally NOT reproduced here -- use scripts/make-release.sh.
@@ -65,8 +67,9 @@
 # USAGE
 #   scripts/ci-local.sh [options]
 #   options:
-#     --pr           mirror a pull-request run: skip the exhaustive/mutation
-#                    `stress` job and run `make test` instead of `make test-long`
+#     --pr           mirror a pull-request run: skip exhaustive stress and the
+#                    conditional mutation gate; run `make test` instead of
+#                    `make test-long`
 #     --no-clean     skip the initial `make clean` (faster, but not a true
 #                    clean-checkout reproduction of CI)
 #     --skip-pic     skip the PIC (XC8/gpsim) job -- ALL THREE parts, 10F322,
@@ -546,8 +549,9 @@ fi
 if [ "$PR_MODE" -eq 1 ]; then
 	run_step "verify job: make test" make test
 else
-	# test-long contains mutation testing. Keep every unskipped substrate strict,
-	# and authorize only the target toolchain(s) the caller explicitly skipped.
+	# One test-long invocation combines hosted verify, mutation-free stress, and
+	# the pic job's mutation gate. Keep every unskipped substrate strict and
+	# authorize only target toolchains the caller explicitly skipped.
 	if [ "$SKIP_PIC" -eq 1 ] && [ "$SKIP_ATTINY202" -eq 1 ]; then
 		run_step "verify + stress: make test-long (skipped-target mutations may skip)" \
 			make test-long MUTATION_ALLOW_SKIP=PIC,ATtiny202

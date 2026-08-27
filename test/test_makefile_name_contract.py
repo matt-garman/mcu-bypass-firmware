@@ -280,7 +280,7 @@ SELF_EXEMPT = "test/test_makefile_name_contract.py"
 # direction it should always move.
 #
 # MUTATION_ALLOW_SKIP survives because it genuinely is passed after the make
-# word (`make test-long MUTATION_ALLOW_SKIP=1`). Make exports command-line
+# word (`make test-long MUTATION_ALLOW_SKIP=0`). Make exports command-line
 # variables to recipe child processes, so it reaches test/mutation_policy.sh
 # through the environment; the Makefile itself neither defines nor reads it
 # (verified: zero occurrences). Nothing in the Makefile can infer that.

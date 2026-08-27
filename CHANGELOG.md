@@ -35,6 +35,14 @@ file is the human-readable summary of *what changed*.
 
 ## [Unreleased]
 
+### Changed
+
+- **Normal hosted CI now runs the full mutation driver once per applicable
+  event.** The fully provisioned PIC job remains the fail-closed mutation gate;
+  hosted `stress` keeps every exhaustive non-mutation workload without repeating
+  the skip-capable partial run. Release and local qualification retain
+  `make test-long` as the exhaustive-plus-mutation aggregate.
+
 ### Removed
 
 - **Retired the one-shot v0.9.8 rename-identity lane.** The signed v0.9.8 tag

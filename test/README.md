@@ -759,6 +759,14 @@ both. Thus skipping one toolchain cannot hide loss of the other substrate. The
 summary counts PIC and ATtiny202 skips separately, so a partial run always says
 which substrate went unexercised rather than reporting one anonymous number.
 
+Normal hosted CI runs mutation exactly once on push, schedule, and manual
+dispatch: the fully provisioned `pic` job invokes `make test-mutation` with
+`STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0`. After that job passes, `make stress`
+runs every shared gate with the FULL workload definitions but does not repeat
+the full mutation driver. `make test-long` remains the FULL-plus-mutation
+aggregate used by release qualification and by `ci-local.sh`, where one process
+combines the hosted verify, stress, and mutation responsibilities.
+
 The PIC mutation set includes target-level faults for the new coverage: collapsed
 TMR2IF cadence, exact-TRISA predicate removal, output-latch mask narrowing,
 exact WPUA pull-up state, ANSELA mask narrowing, muted-CD4053 startup

@@ -248,57 +248,142 @@ run_make test/avr/test_trace_cd4053_simple SIM_DEFS= >/dev/null
 	|| { printf 'FAIL: trace workload reused a stale binary\n' >&2; exit 1; }
 checks=$((checks + 1))
 
-# The parallel clean-tests race must not come back. Ask Make for the aggregate's
-# ACTUAL prerequisite set rather than grepping its recipe line: `test` and
-# `test-long` share one gate inventory, so a clean-tests added to it would never
-# appear on the `test-long:` line at all and a textual check would miss it.
-long_gates=" $(run_make -s print-TEST_LONG_GATES | tr '\n' ' ') "
-case "$long_gates" in
-	*" clean-tests "*)
-		printf 'FAIL: test-long reintroduced the parallel clean-tests race\n' >&2
-		exit 1 ;;
-esac
-# ...and the query itself has to be load-bearing: an empty or unresolved
-# variable would make the check above pass vacuously forever.
-case "$long_gates" in
-	*" test-mutation "*) ;;
-	*) printf 'FAIL: could not read test-long prerequisites from Make\n' >&2
-		exit 1 ;;
-esac
+# Shared prerequisites inherit a target-specific workload profile from their
+# parent. Mixing FAST and FULL parents in one graph is ambiguous and must fail
+# before either aggregate can print a misleading success banner.
+for request in "test stress" "test-fast test-long"; do
+	if output=$(run_make $request 2>&1); then
+		printf 'FAIL: mixed workload profiles were accepted: %s\n' "$request" >&2
+		exit 1
+	fi
+	case "$output" in
+		*"request either a FAST test/test-fast profile or a FULL stress/test-long profile, not both"*) ;;
+		*) printf 'FAIL: mixed workload profile produced the wrong diagnostic: %s\n' "$output" >&2
+			exit 1 ;;
+	esac
+done
 checks=$((checks + 2))
 
-# The shared inventory's whole purpose is that `test` and `test-long` run the
-# SAME gates, so assert that directly rather than trusting the two variables to
-# have been edited together. test-long is test plus test-mutation and nothing
-# else, in either direction: a gate added to only one aggregate, or dropped from
-# only one, fails here naming itself. The omission this guards against is
-# usually silent in the direction that matters least visibly -- test-long is the
-# release gate, where a missing gate reads as a green run.
-fast_gates=$(run_make -s print-TEST_GATES | tr ' ' '\n' | grep -v '^$' | sort)
-long_only=$(printf '%s\n' "$long_gates" | tr ' ' '\n' | grep -v '^$' \
-	| grep -Fxv test-mutation | sort)
-[ -n "$fast_gates" ] \
-	|| { printf 'FAIL: could not read test prerequisites from Make\n' >&2; exit 1; }
+# Read Make's expanded target database so these assertions cover the actual
+# aggregate prerequisites, not merely the variables they are intended to use.
+# Question mode normally returns 1 for an out-of-date phony default goal; only a
+# parse/database failure (status > 1) is an error here.
+make_db="$work/make.db"
+worktree_id=$(stat -Lc '%d:%i' "$repo")
+set +e
+run_make -pRrq _MAKE_SERIAL_LOCK_HELD="$worktree_id" > "$make_db" 2>/dev/null
+make_db_status=$?
+set -e
+[ "$make_db_status" -le 1 ] \
+	|| { printf 'FAIL: could not read Make target database\n' >&2; exit 1; }
+
+aggregate_prereqs() {
+	awk -v target="$1:" '
+		$1 == target && index($0, "=") == 0 {
+			for (i = 2; i <= NF; i++) print $i
+		}' "$make_db"
+}
+
+aggregate_profile() {
+	awk -v target="$1:" -v variable="$2" '
+		$1 == target && $2 == variable && $3 == "=" { print $4 }
+		' "$make_db"
+}
+
+fast_gates=$(aggregate_prereqs test | grep -v '^$' | sort)
+stress_gates=$(aggregate_prereqs stress | grep -v '^$' | sort)
+long_gates=$(aggregate_prereqs test-long | grep -v '^$' | sort)
+for aggregate in test stress test-long; do
+	gates=$(aggregate_prereqs "$aggregate")
+	[ -n "$gates" ] \
+		|| { printf 'FAIL: could not read %s prerequisites from Make\n' "$aggregate" >&2; exit 1; }
+	if printf '%s\n' "$gates" | grep -Fxq clean-tests; then
+		printf 'FAIL: %s reintroduced the parallel clean-tests race\n' "$aggregate" >&2
+		exit 1
+	fi
+done
+checks=$((checks + 7))
+
+# Both FULL aggregates must select the empty in-source-default profiles. Pin the
+# target-specific assignments as well as gate membership so `stress` cannot
+# accidentally become a fast non-mutation alias.
+for aggregate in stress test-long; do
+	[ "$(aggregate_profile "$aggregate" HOST_DEFS)" = '$(FULL_HOST_DEFS)' ] \
+		|| { printf 'FAIL: %s does not select FULL_HOST_DEFS\n' "$aggregate" >&2; exit 1; }
+	[ "$(aggregate_profile "$aggregate" SIM_DEFS)" = '$(FULL_SIM_DEFS)' ] \
+		|| { printf 'FAIL: %s does not select FULL_SIM_DEFS\n' "$aggregate" >&2; exit 1; }
+done
+checks=$((checks + 4))
+
+# Stress is exactly the shared non-mutation inventory. test-long is that same
+# inventory plus one full mutation gate, preserving release qualification while
+# normal hosted stress avoids the duplicate run.
 if ! diff_out=$(diff <(printf '%s\n' "$fast_gates") \
-		<(printf '%s\n' "$long_only")); then
-	printf 'FAIL: test and test-long do not run the same gates:\n%s\n' \
+		<(printf '%s\n' "$stress_gates")); then
+	printf 'FAIL: test and stress do not run the same base gates:\n%s\n' \
 		"$diff_out" >&2
 	exit 1
 fi
-checks=$((checks + 1))
+long_without_mutation=$(printf '%s\n' "$long_gates" | grep -Fxv test-mutation)
+if ! diff_out=$(diff <(printf '%s\n' "$fast_gates") \
+		<(printf '%s\n' "$long_without_mutation")); then
+	printf 'FAIL: test-long is not the base inventory plus mutation:\n%s\n' \
+		"$diff_out" >&2
+	exit 1
+fi
+[ "$(printf '%s\n' "$stress_gates" | grep -Fxc test-mutation || true)" -eq 0 ] \
+	|| { printf 'FAIL: stress includes the full mutation gate\n' >&2; exit 1; }
+[ "$(printf '%s\n' "$long_gates" | grep -Fxc test-mutation || true)" -eq 1 ] \
+	|| { printf 'FAIL: test-long does not include exactly one full mutation gate\n' >&2; exit 1; }
+[ "$(printf '%s\n' "$stress_gates" | grep -Fxc test-mutation-sandbox || true)" -eq 1 ] \
+	|| { printf 'FAIL: stress lost the mutation-driver sandbox regression\n' >&2; exit 1; }
+# Compute the reverse transitive closure as a separate assertion: no other Make
+# target may acquire mutation indirectly and become a second CI route. Ignore
+# Make's dot-prefixed special targets such as .PHONY, which list names rather
+# than execution prerequisites.
+mutation_ancestors=$(awk '
+	$0 == "# Files" { in_files = 1; next }
+	$0 == "# files hash-table stats:" { in_files = 0 }
+	in_files && $0 !~ /^[[:space:]#]/ && $1 ~ /:$/ && $1 !~ /^\./ \
+			&& index($0, "=") == 0 {
+		target = $1
+		sub(/:$/, "", target)
+		for (i = 2; i <= NF; i++) {
+			if ($i != "|") edge[target SUBSEP $i] = 1
+		}
+	}
+	END {
+		reaches["test-mutation"] = 1
+		changed = 1
+		while (changed) {
+			changed = 0
+			for (pair in edge) {
+				split(pair, nodes, SUBSEP)
+				if (reaches[nodes[2]] && !reaches[nodes[1]]) {
+					reaches[nodes[1]] = 1
+					changed = 1
+				}
+			}
+		}
+		for (target in reaches) {
+			if (target != "test-mutation" && reaches[target]) print target
+		}
+	}' "$make_db" | sort)
+[ "$mutation_ancestors" = test-long ] \
+	|| { printf 'FAIL: Make targets other than test-long reach full mutation: %s\n' \
+		"$mutation_ancestors" >&2; exit 1; }
+checks=$((checks + 6))
 
-# No gate may appear twice in either aggregate. Make would still run a phony
-# prerequisite once, so a duplicate is not a double execution -- it is the
-# fingerprint of a gate that was added by hand to a list that already had it,
-# and the next hand edit removes only one of the two copies.
-for aggregate in TEST_GATES TEST_LONG_GATES; do
-	dupes=$(run_make -s print-"$aggregate" | tr ' ' '\n' | grep -v '^$' \
-		| sort | uniq -d)
+# No gate may appear twice in any aggregate. Make would still run a phony
+# prerequisite once, so a duplicate is not double execution; it is the
+# fingerprint of a hand edit that can later remove only one copy.
+for aggregate in test stress test-long; do
+	dupes=$(aggregate_prereqs "$aggregate" | grep -v '^$' | sort | uniq -d)
 	[ -z "$dupes" ] \
 		|| { printf 'FAIL: %s lists a gate more than once: %s\n' \
 			"$aggregate" "$(printf '%s' "$dupes" | tr '\n' ' ')" >&2; exit 1; }
 done
-checks=$((checks + 2))
+checks=$((checks + 3))
 
 # The two PIC shipping-source coverage gates are named explicitly because they
 # are the ones that were reachable ONLY through standalone full-tool aggregates,
