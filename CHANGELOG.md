@@ -428,6 +428,17 @@ file is the human-readable summary of *what changed*.
   `Unreleased` draft, and production still requires an ISO-dated heading, but
   the date itself is release metadata rather than commit metadata.
 
+- **Mutation result classification now prefers complete behavioral evidence.**
+  The PIC12F675 atomic-clear mutant produced its exact three-variant failure
+  record but could still be reported as a compile error when unrelated
+  compiler-shaped text appeared elsewhere in the Make log. The exact complete
+  verdict now wins; a real compile failure still cannot produce that record and
+  remains an error, now with its first compiler diagnostic in the summary.
+  Mutation cleanup also reads procfs ownership tokens without
+  trusting permissive mode bits, silently skipping unrelated processes whose
+  `environ` is protected by the host's ptrace policy instead of printing
+  misleading permission-denied diagnostics.
+
 - **Every AVR `*-program` goal now builds and validates its image before it
   writes a fuse byte.** `attiny13a-program`, `attiny45-program`,
   `attiny85-program` and `attiny202-program` were each defined as

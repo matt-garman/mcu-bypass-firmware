@@ -838,14 +838,21 @@ can enable the tool-dependent PIC10F320 mutants. The host-only
 including the wrappers' executable mode, and covers inventory, conservation,
 record/command parsing, atomic publication, checker-status classification,
 PIC12F675 behavioral signatures, source substitutions and baseline reasons, and
-result grammar in 132 checks. `MUTATION_TIMEOUT_S` defaults only when unset and
+result grammar in 133 checks. A complete named behavioral verdict takes
+precedence over incidental compiler-shaped text elsewhere in the checker log;
+an actual compile failure cannot produce that complete three-variant record and
+remains an error whose summary includes the first compiler diagnostic instead
+of discarding it with the sandbox. `MUTATION_TIMEOUT_S` defaults only when unset and
 accepts `0.001..86400` seconds with at most three fractional digits; zero,
 negative, empty, malformed, under-resolution, and over-limit values fail before
 any Make or tool probe. Every bounded checker owns a registered process session,
 so normal return and interrupted-run cleanup reach nested timeout groups as well
 as Make, compiler, and simulator descendants. The regression interrupts both a
 nested-timeout session with a TERM-ignoring descendant and an unregistered
-launch-gap worker, then proves their PIDs and process groups disappear. It also
+launch-gap worker, then proves their PIDs and process groups disappear. Cleanup
+reads procfs ownership tokens directly and silently skips processes whose
+`environ` is protected by ptrace policy, rather than trusting permissive procfs
+mode bits and printing a false permission diagnostic. It also
 makes a failed PIC10F322 baseline build
 leave an apparently usable HEX, then proves the probe reports `baseline FAILED`
 without invoking gpsim or enabling mutants; ordinary nonzero checker statuses

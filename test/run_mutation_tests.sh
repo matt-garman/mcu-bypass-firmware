@@ -207,19 +207,24 @@ mutation_snapshot_processes() {
 
 mutation_process_has_env_entry() {
     local pid=$1 wanted_entry=$2 entry
-    [ -r "/proc/$pid/environ" ] || return 1
-    while IFS= read -r -d '' entry; do
+    local -a entries=()
+    # procfs mode bits can claim readability even when ptrace policy denies the
+    # open. Redirect stderr before opening environ so unrelated protected
+    # processes are skipped without polluting the mutation verdict.
+    mapfile -d '' -t entries 2>/dev/null < "/proc/$pid/environ" || return 1
+    for entry in "${entries[@]}"; do
         [ "$entry" = "$wanted_entry" ] && return 0
-    done < "/proc/$pid/environ"
+    done
     return 1
 }
 
 mutation_process_read_ownership_tokens() {
     local pid=$1 entry
+    local -a entries=()
     MUTATION_PROCESS_WORKER_TOKEN=
     MUTATION_PROCESS_CHECKER_TOKEN=
-    [ -r "/proc/$pid/environ" ] || return 1
-    while IFS= read -r -d '' entry; do
+    mapfile -d '' -t entries 2>/dev/null < "/proc/$pid/environ" || return 1
+    for entry in "${entries[@]}"; do
         case "$entry" in
             MUTATION_WORKER_TOKEN=*)
                 MUTATION_PROCESS_WORKER_TOKEN=${entry#MUTATION_WORKER_TOKEN=}
@@ -228,7 +233,7 @@ mutation_process_read_ownership_tokens() {
                 MUTATION_PROCESS_CHECKER_TOKEN=${entry#MUTATION_CHECKER_TOKEN=}
                 ;;
         esac
-    done < "/proc/$pid/environ"
+    done
 }
 
 mutation_env_entry_is_owned() {
@@ -1327,20 +1332,27 @@ pic12f675_mutation_completed_cleanly() {
 pic12f675_classify_checker_result() {
     local rc=$1 signature=$2 command=$3 log=$4
     PIC12F675_CHECKER_OUTCOME=checker-error
+    PIC12F675_CHECKER_DIAGNOSTIC=
     if mutation_checker_status_is_infrastructure_error "$rc"; then
         PIC12F675_CHECKER_OUTCOME=infrastructure-error
-    elif grep -Eq '^FAIL: variant (cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay) did not compile for PIC12F675$' \
-            "$log"; then
+    # A complete named behavioral verdict proves every required variant compiled
+    # and ran. Prefer that stronger evidence to an incidental compiler-shaped
+    # diagnostic elsewhere in the Make log.
+    elif [ "$rc" -ne 0 ] \
+            && pic12f675_mutation_has_signature "$signature" "$command" "$log"; then
+        PIC12F675_CHECKER_OUTCOME=killed
+    elif PIC12F675_CHECKER_DIAGNOSTIC=$(grep -Em1 \
+            '^FAIL: variant (cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay) did not compile for PIC12F675$' \
+            "$log"); then
         PIC12F675_CHECKER_OUTCOME=compile-error
     elif { [ "$signature" = host:atomic-clear ] || [ "$signature" = host:parked-output ]; } \
-            && grep -Eq ': (fatal )?error:|undefined reference|collect2: error:' "$log"; then
+            && PIC12F675_CHECKER_DIAGNOSTIC=$(grep -Em1 \
+                ': (fatal )?error:|undefined reference|collect2: error:' "$log"); then
         PIC12F675_CHECKER_OUTCOME=compile-error
     elif [ "$rc" -eq 0 ]; then
         if pic12f675_mutation_completed_cleanly "$command" "$log"; then
             PIC12F675_CHECKER_OUTCOME=survived
         fi
-    elif pic12f675_mutation_has_signature "$signature" "$command" "$log"; then
-        PIC12F675_CHECKER_OUTCOME=killed
     fi
 }
 
@@ -1634,7 +1646,7 @@ run_mutant() {
                 ;;
             compile-error)
                 publish_mutation_result "$stem" errored \
-                    "[$idx] ERROR  mutant did not compile ($label): $desc"
+                    "[$idx] ERROR  mutant did not compile ($label): $desc; first diagnostic: ${PIC12F675_CHECKER_DIAGNOSTIC:-unavailable}"
                 ;;
             checker-error)
                 publish_mutation_result "$stem" errored \
@@ -2417,6 +2429,21 @@ EOF
         exit 1
     }
     printf '%s\n' \
+        'cc: error: incidental diagnostic outside the completed host checker' \
+        'PIC shipping-source coverage harness: 86 checks, 0 failures' \
+        'PIC shipping-source coverage harness: 86 checks, 0 failures' \
+        'FAIL fixture: relay reassert from shadow coils 02 must clear both bits' \
+        'FAIL fixture: relay reassert from shadow coils 04 must clear both bits' \
+        'FAIL fixture: relay reassert from shadow coils 06 must clear both bits' \
+        'PIC shipping-source coverage harness: 105 checks, 3 failures' \
+        > "$signature_log"
+    pic12f675_classify_checker_result 2 host:atomic-clear \
+        pic12f675-coverage-check-fw "$signature_log"
+    [ "$PIC12F675_CHECKER_OUTCOME" = killed ] || {
+        echo "ERROR: a complete PIC12F675 behavioral verdict lost to incidental compiler text" >&2
+        exit 1
+    }
+    printf '%s\n' \
         'PIC shipping-source coverage harness: 86 checks, 0 failures' \
         'PIC shipping-source coverage harness: 86 checks, 0 failures' \
         'FAIL fixture: relay reassert from shadow coils 02 must clear both bits' \
@@ -2434,7 +2461,8 @@ EOF
         > "$signature_log"
     pic12f675_classify_checker_result 2 host:atomic-clear \
         pic12f675-coverage-check-fw "$signature_log"
-    [ "$PIC12F675_CHECKER_OUTCOME" = compile-error ] || {
+    [ "$PIC12F675_CHECKER_OUTCOME" = compile-error ] \
+        && [[ "$PIC12F675_CHECKER_DIAGNOSTIC" == *'compile fixture' ]] || {
         echo "ERROR: PIC12F675 host atomic-clear compile failure received kill credit" >&2
         exit 1
     }
@@ -2975,7 +3003,7 @@ EOF
             "$RESULT_DIR/selftest-no-newline.status" >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted an unterminated status" >&2; exit 1
     fi
-    echo "mutation sandbox/accounting validation: 132 checks, 0 failures"
+    echo "mutation sandbox/accounting validation: 133 checks, 0 failures"
     exit 0
 fi
 
