@@ -35,6 +35,14 @@ file is the human-readable summary of *what changed*.
 
 ## [Unreleased]
 
+### Removed
+
+- **Retired the one-shot v0.9.8 rename-identity lane.** The signed v0.9.8 tag
+  retains the historical verifier and its 17-identical/one-changed report.
+  Current releases continue to require exact canonical image reproduction,
+  expected-image identity, signed checksums, and a frozen publication inventory
+  without carrying inapplicable rename-report state.
+
 ## [0.9.10] - 2026-08-26
 
 ### Added

@@ -767,7 +767,7 @@ duplication. Revisit only under explicit triggers.
 
 ## BR-DOC-03 - Reduce the non-blocking output feasibility analysis
 
-**Status:** IN PROGRESS OpenCode
+**Status:** DONE `9c16f96`
 
 **Historical source:** `docs/non-blocking_output_schemes_feasibility.md`, 1,523
 lines, retained in Git history at commit `5ce3f59`
@@ -1119,7 +1119,7 @@ evidence, not mutable candidate measurements or speculative release status.
 
 ## BR-TEST-01 - Delete the retired v0.9.8 rename-identity lane
 
-**Status:** TODO
+**Status:** IN PROGRESS OpenCode
 
 **Rationale:** `scripts/verify-rename-identity.sh:15-24` explicitly says the
 one-shot gate should be deleted after the rename table no longer names the

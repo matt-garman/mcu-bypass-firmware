@@ -116,10 +116,10 @@ selection-first presentation, or copyable profile-specific commands.
 
 ### G1 — The release landing page is written for an auditor
 
-`.github/workflows/release.yml:348` fixes the published asset set to the image
-files plus `SHA256SUMS`, `SHA256SUMS.asc`, `MANIFEST.md` and `QUALIFICATION`
-(and `RENAME_IDENTITY.md` where applicable). The copy into the publish stage
-(`:357`) and the final asset array (`:453`) match it.
+`.github/workflows/release.yml` fixes the published asset set to the canonical
+images, required non-image helpers, `SHA256SUMS`, `SHA256SUMS.asc`,
+`MANIFEST.md`, and `QUALIFICATION`. The frozen inventory and final asset array
+must match exactly.
 
 Neither `release/README.md` nor the per-release `release/vX.Y.Z/README.md` is
 in that set. More importantly, `.github/workflows/release.yml:453-455` and

@@ -1367,37 +1367,6 @@ for img in "${PIC12F675_IMAGES[@]}"; do
 done
 ok "all ${#PIC12F675_IMAGES[@]} PIC12F675 images are structurally valid Intel HEX."
 
-# Exact rename/change evidence against the previous release: 17 images must be
-# byte-identical and the one documented PIC10F320 relay correction must differ.
-# Run HERE so an unexpected byte costs seconds instead of a 24-hour soak, then
-# run the same check again over the final validated images immediately before
-# staging. Validation rebuilds these paths, so only the second report is retained
-# as evidence about what is actually released.
-#
-# No version appears in this call and none is needed: the script reads which two
-# releases the published rename table in release/README.md is about, and says so
-# and does nothing for any other version. It therefore needs no maintenance
-# between releases and cannot become a false alarm the first time a release
-# legitimately changes a byte.
-RENAME_IDENTITY_DOC=""
-verify_rename_identity() {
-	local phase=$1
-	if ! scripts/verify-rename-identity.sh "$VERSION" "${IMAGES[@]}" \
-			>"$WORK/RENAME_IDENTITY.md" 2>"$WORK/rename-identity.err"; then
-		cat "$WORK/RENAME_IDENTITY.md" >&2
-		cat "$WORK/rename-identity.err" >&2
-		die "$phase images violate the published rename/change contract."
-	fi
-	if head -1 "$WORK/RENAME_IDENTITY.md" | grep -q '^rename identity: not applicable'; then
-		RENAME_IDENTITY_DOC=""
-		log "$(cat "$WORK/RENAME_IDENTITY.md")"
-	else
-		RENAME_IDENTITY_DOC="$WORK/RENAME_IDENTITY.md"
-		ok "$phase: $(grep -E '^identical=' "$RENAME_IDENTITY_DOC") -- rename/change evidence against the previous release."
-	fi
-}
-verify_rename_identity "initial build"
-
 hash_avr_elf_set() {
 	local elf
 	for elf in "$@"; do
@@ -1871,11 +1840,6 @@ resource_tables_sha256=$(sha256sum -- "$EVID/resource-tables.log") \
 resource_tables_sha256=${resource_tables_sha256%% *}
 ok "final resource evidence covers all images and retained RAM/stack measurements."
 
-# Replace the early fail-fast report with one computed from the exact final
-# image paths that staging consumes. A rebuild that changed bytes after the
-# early check must fail here, never leave stale evidence beside different files.
-verify_rename_identity "final validated images"
-
 # Builds and parallel soaks can run for 24 hours. The Make lock protects shared
 # artifacts from other Make invocations, but intentionally cannot prevent a
 # human or editor from changing source or moving HEAD. Recheck immediately
@@ -1965,16 +1929,6 @@ if [ "$staged_sorted" != "$wanted_sorted" ]; then
 	die "$OUTPUT_DIR holds images that are not part of this release (stale output?)."
 fi
 ok "wrote SHA256SUMS over ${#IMAGES[@]} images and ${#RELEASE_HELPER_NAMES[@]} required artifact(s); staging directory holds exactly that image set."
-
-# Retain the byte-identity proof beside the images it is about, for the one
-# release it applies to. NOT under evidence/ -- that directory's contents are
-# pinned exactly by RELEASE_EVIDENCE_FILES for EVERY release, and a file only
-# this release produces would fail the next release's qualification verifier.
-if [ -n "$RENAME_IDENTITY_DOC" ]; then
-	cp -p "$RENAME_IDENTITY_DOC" "$OUTPUT_DIR/RENAME_IDENTITY.md" \
-		|| die "could not retain the byte-identity proof"
-	ok "retained RENAME_IDENTITY.md beside the images."
-fi
 
 # Copy evidence. The per-combo soak logs and build/pic10f322-test logs are small and
 # kept in full; the exhaustive test-long log is large (100s of KB) and would
@@ -2184,9 +2138,6 @@ REL_BANNER=""
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
 	release_render_validation "$hours"
 	printf -- '- **Release set:** %d images, checked against the canonical `RELEASE_IMAGES` set declared in the Makefile -- not against whatever the build happened to produce.\n' "${#IMAGES[@]}"
-	if [ -n "$RENAME_IDENTITY_DOC" ]; then
-		printf -- '- **Rename/change evidence:** every renamed image was hashed against its counterpart in the previous release, through the old-to-new table and exact intentional-change declaration in `release/README.md`. The report requires 17 identities and the one documented PIC10F320 relay change: `RENAME_IDENTITY.md`.\n'
-	fi
 	printf '\n'
 
 	printf '## Toolchain\n\n'
@@ -2255,11 +2206,6 @@ ok "wrote MANIFEST.md"
 	printf 'CONFIG BG trim live in memory a programmer erases, and a device that loses\n'
 	printf 'either still appears to work. Pass its image to `flash-pic12f675.py` in this\n'
 	printf 'directory -- covered by the same SHA256SUMS -- never straight to a programmer.\n\n'
-	if [ -n "$RENAME_IDENTITY_DOC" ]; then
-		printf 'This release renamed its images and changed the PIC10F320 relay image for\n'
-		printf 'idle coil-latch safety. **RENAME_IDENTITY.md** requires the other 17 images\n'
-		printf 'to match their previous-release counterparts byte for byte.\n\n'
-	fi
 	printf 'Quick verify:\n```\ncd release/%s && sha256sum -c SHA256SUMS\n```\n' "$VERSION"
 	printf '\nVerify the required checksum signature first:\n'
 	printf '```\ngpg --verify SHA256SUMS.asc SHA256SUMS\n```\n'

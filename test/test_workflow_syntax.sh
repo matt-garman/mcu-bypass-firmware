@@ -319,7 +319,7 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
     repro_steps = [
         step for step in release_steps
         if isinstance(step, dict)
-        and step.get("name") == "Verify committed images and rename/change evidence reproduce bit-for-bit"
+        and step.get("name") == "Verify committed images reproduce bit-for-bit"
     ]
     publish_steps = [
         step for step in release_steps
@@ -464,20 +464,16 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
                     "${prerelease_flag[@]}", "${assets[@]}",
                 ]
             ]
-            rename_indices = [
-                i for i, command in enumerate(commands)
-                if command[:2] == ["case", "$RENAME_IDENTITY_APPLICABLE"]
-            ]
             check(
-                len(tag_indices) == 1 and len(rename_indices) == 1
-                and len(inventory_indices) == 2 and len(signature_indices) == 1
+                len(tag_indices) == 1 and len(inventory_indices) == 2
+                and len(signature_indices) == 1
                 and len(checksum_indices) == 1 and len(publish_indices) == 1,
                 "release.yml: active final publication command inventory is not exact",
             )
-            if tag_indices and rename_indices and len(inventory_indices) == 2 \
+            if tag_indices and len(inventory_indices) == 2 \
                     and signature_indices and checksum_indices and publish_indices:
                 check(
-                    tag_indices[0] < rename_indices[0] < inventory_indices[0]
+                    tag_indices[0] < inventory_indices[0]
                     < signature_indices[0] < checksum_indices[0] < inventory_indices[1]
                     and publish_indices[0] == inventory_indices[1] + 1,
                     "release.yml: active final checks do not dominate immediate gh publication",

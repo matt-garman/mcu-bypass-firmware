@@ -315,18 +315,16 @@ bit-identical to their `v0.9.7` counterparts. The one exception is the
 PIC10F320 relay image, which also adds the `v0.9.8` idle coil-latch safety
 correction and is required to differ:
 
-<!-- rename-identity: intentional-change=bypass-pic10f320-tq2_l2_5v_relay.hex -->
-
 `bypass-pic10f320-tq2_l2_5v_relay.hex` reasserts both relay-coil outputs low on
 every serviced iteration. The exact new bytes remain pinned by the PIC10F320
 expected-image manifest and the release checksum manifest.
 
-The release retains the checked result in
+The historical release retains the checked result in
 `release/v0.9.8/RENAME_IDENTITY.md`, listing both digests and the verdict for
-every image. Release creation fails before its soak unless exactly 17 images are
-identical and exactly the named relay image differs, with no missing, added, or
-other changed image. The comparison reads the table and intentional-change
-declaration above, so the published contract and verified contract cannot drift.
+every image. Its tag-local one-shot verifier required exactly 17 identities and
+the named relay-image difference, with no missing, added, or other changed
+image. The signed `v0.9.8` tag preserves that verifier and contract; current
+releases use the standing canonical reproduction and expected-image checks.
 
 **The build commands moved too.** Every make goal that acts on one part now
 carries that part's name, in the same vocabulary as the image field, so an
