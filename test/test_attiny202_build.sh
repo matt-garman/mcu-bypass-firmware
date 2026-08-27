@@ -13,6 +13,9 @@ mkdir -p "$tools" "$dfp/gcc/dev/attiny202/device-specs" "$dfp/include/avr"
 checks=0
 unset FAKE_CC_MODE FAKE_READELF_MODE FAKE_SIZE_MODE FAKE_OBJCOPY_MODE
 unset TEST_VARIANTS TEST_DFP XT_FLASH_BYTES XT_STATIC_RAM_LIMIT XT_SRAM_BYTES
+# Parent Make command-line assignments propagate through these variables and
+# must not override the isolated negative fixtures passed to each nested build.
+unset MAKEFLAGS MAKEOVERRIDES MFLAGS GNUMAKEFLAGS
 # The skip-policy checks below pin STRICT_TOOLS explicitly; clear any ambient
 # value (scripts/ci-local.sh exports STRICT_TOOLS=1) so nothing inherits it.
 unset STRICT_TOOLS
