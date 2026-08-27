@@ -28,9 +28,9 @@ _release_current_block() {
 }
 
 release_validate_current_documentation() {
-	[ "$#" -ge 4 ] && [ "$#" -le 6 ] || return 2
+	[ "$#" -ge 4 ] && [ "$#" -le 5 ] || return 2
 	local repo_root=$1 version=$2 image_count=$3 soak_count=$4
-	local expected_date=${5:-} allow_unreleased=${6:-0}
+	local allow_unreleased=${5:-0}
 	local release_number=${version#v} changelog="$repo_root/CHANGELOG.md"
 	local document block contract_line section_count previous_version link_count
 	local transition_line referenced release_heading dated_heading unreleased_heading
@@ -45,10 +45,6 @@ release_validate_current_documentation() {
 		|| _release_documentation_error "requested version is not vX.Y.Z: $version" || return
 	[[ "$image_count" =~ ^[1-9][0-9]*$ && "$soak_count" =~ ^[1-9][0-9]*$ ]] \
 		|| _release_documentation_error "canonical image/soak counts are invalid" || return
-	if [ -n "$expected_date" ]; then
-		[[ "$expected_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
-			|| _release_documentation_error "expected source-finalization date is not YYYY-MM-DD: $expected_date" || return
-	fi
 	case "$allow_unreleased" in
 		0|1) ;;
 		*) _release_documentation_error "allow-unreleased mode must be 0 or 1" || return ;;
@@ -71,13 +67,10 @@ release_validate_current_documentation() {
 		|| _release_documentation_error "CHANGELOG.md must contain exactly one dated or explicitly Unreleased [$release_number] section" || return
 	if [ -n "$unreleased_heading" ]; then
 		[ "$allow_unreleased" -eq 1 ] \
-			|| _release_documentation_error "CHANGELOG.md [$release_number] is still Unreleased; production requires the source-finalization date" || return
+			|| _release_documentation_error "CHANGELOG.md [$release_number] is still Unreleased; production requires a dated heading" || return
 		release_heading=$unreleased_heading
 	else
 		release_heading=$dated_heading
-		if [ -n "$expected_date" ] && [ "$release_heading" != "## [$release_number] - $expected_date" ]; then
-			_release_documentation_error "CHANGELOG.md [$release_number] date must equal source commit date $expected_date" || return
-		fi
 	fi
 	if ! awk -v release="$release_number" -v release_heading="$release_heading" '
 		$0 == "## [Unreleased]" {

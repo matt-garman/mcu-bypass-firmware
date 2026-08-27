@@ -774,14 +774,10 @@ done
 if [ "$VERSION_WAS_SUPPLIED" -eq 1 ]; then
 	read -r -a DOCUMENT_RELEASE_IMAGES <<<"$RELEASE_IMAGES"
 	read -r -a DOCUMENT_RELEASE_SOAKS <<<"$RELEASE_SOAK_NAMES"
-	SOURCE_FINALIZATION_DATE=$(git show -s --format=%cs HEAD) \
-		|| die "could not read the source commit date"
-	[[ "$SOURCE_FINALIZATION_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
-		|| die "source commit date is not canonical YYYY-MM-DD: $SOURCE_FINALIZATION_DATE"
 	ALLOW_UNRELEASED=$PREFLIGHT
 	release_validate_current_documentation "$REPO_ROOT" "$VERSION" \
 		"${#DOCUMENT_RELEASE_IMAGES[@]}" "${#DOCUMENT_RELEASE_SOAKS[@]}" \
-		"$SOURCE_FINALIZATION_DATE" "$ALLOW_UNRELEASED" \
+		"$ALLOW_UNRELEASED" \
 		|| die "current release documentation is not finalized for $VERSION"
 	# Published recovery instructions must actually recover the transaction the
 	# published programming command reserves. Checked here, on the live tree, so

@@ -419,11 +419,14 @@ file is the human-readable summary of *what changed*.
   `QUALIFICATION`; missing, partial, substituted, or edited evidence prevents
   staging or publication.
 
-- **The `0.9.10` heading no longer invents a future finalization date.** It read
-  2026-08-21 and then 2026-08-27 while candidate commits were still landing.
-  Until source finalization it says `Unreleased`; versioned preflight accepts
-  that explicit draft state, while production staging requires the heading's
-  ISO date to equal the qualified source commit date.
+- **The release date is no longer coupled to the source commit date.** The
+  `0.9.10` heading previously read 2026-08-21 and then 2026-08-27 while
+  candidate commits were still landing, after which the release gate required
+  the selected date to equal Git's date for the qualified source commit. That
+  rejected a valid release whenever its publication date differed from its
+  source commit date. Versioned preflight still accepts an explicit
+  `Unreleased` draft, and production still requires an ISO-dated heading, but
+  the date itself is release metadata rather than commit metadata.
 
 - **Every AVR `*-program` goal now builds and validates its image before it
   writes a fuse byte.** `attiny13a-program`, `attiny45-program`,
