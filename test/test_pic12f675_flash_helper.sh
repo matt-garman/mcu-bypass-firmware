@@ -79,10 +79,16 @@ command -v python3 >/dev/null 2>&1 \
 
 # Native launchers cannot blindly move to memfds: Java and similar launchers use
 # their executable origin to find adjacent libraries. Exercise the accepted
-# operator-read-only source-descriptor branch with real Java where installed,
-# otherwise with a system ELF. A root test runner drops privilege for this probe
-# so root ownership does not make every system inode operator-owned.
-native_launcher=$(type -P java || type -P true)
+# operator-read-only source-descriptor branch with real Java where suitable,
+# otherwise with a system ELF. Some CI Java installations are operator-owned and
+# must be rejected, so try each available candidate. A root test runner drops
+# privilege for this probe so root ownership does not make every system inode
+# operator-owned.
+native_launchers=()
+for command_name in java true; do
+	candidate=$(type -P "$command_name" || true)
+	[ -z "$candidate" ] || native_launchers+=("$candidate")
+done
 native_origin_probe=$(python3 -c '
 import importlib.util, os, sys
 spec = importlib.util.spec_from_file_location("flash_helper", sys.argv[1])
@@ -92,17 +98,31 @@ if os.geteuid() == 0:
     os.setgroups([])
     os.setgid(65534)
     os.setuid(65534)
-path = os.path.realpath(sys.argv[2])
-handle = module.open_identity(path, "native launcher", module.MAX_TOOL_BYTES,
-                              executable=True)
-argv = [path] + (["-version"] if os.path.basename(path) == "java" else [])
-rc, output = module.run_tool(
-    argv, 30, "native launcher probe",
-    executable=module.descriptor_path(handle["consume_fd"]),
-    pass_fds=(handle["consume_fd"],))
-print(1 if rc == 0 and handle["pinning"] == "operator-read-only-source"
-      and (not argv[1:] or output) else 0)
-' "$HELPER" "$native_launcher") || native_origin_probe=0
+result = 0
+for candidate in sys.argv[2:]:
+    path = os.path.realpath(candidate)
+    try:
+        handle = module.open_identity(
+            path, "native launcher", module.MAX_TOOL_BYTES, executable=True)
+    except module.FlashError:
+        continue
+    argv = [path] + (["-version"] if os.path.basename(path) == "java" else [])
+    try:
+        rc, output = module.run_tool(
+            argv, 30, "native launcher probe",
+            executable=module.descriptor_path(handle["consume_fd"]),
+            pass_fds=(handle["consume_fd"],))
+        if (rc == 0 and handle["pinning"] == "operator-read-only-source"
+                and (not argv[1:] or output)):
+            result = 1
+            break
+    except module.FlashError:
+        pass
+    finally:
+        os.close(handle["consume_fd"])
+        os.close(handle["fd"])
+print(result)
+' "$HELPER" "${native_launchers[@]}") || native_origin_probe=0
 check "an operator-read-only native launcher preserves its executable origin" \
 	"$native_origin_probe"
 
