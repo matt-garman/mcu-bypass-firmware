@@ -716,7 +716,7 @@ entire branch-era discussion.
 
 ## BR-DOC-01 - Delete the completed v0.9.6 polish journal
 
-**Status:** IN PROGRESS OpenCode
+**Status:** DONE `9b6dfc3`
 
 **Historical source:** `docs/v0.9.6_post_release_polish.md`, 3,688 lines,
 retained in Git history at commit `69f8bbf`
@@ -743,9 +743,10 @@ tree increases search noise and stale-reference exposure.
 
 ## BR-DOC-02 - Reduce the deferred Makefile-refactor record
 
-**Status:** TODO
+**Status:** IN PROGRESS OpenCode
 
-**Source:** `docs/makefile_refactor.md`, 284 lines
+**Historical source:** `docs/makefile_refactor.md`, 284 lines, retained in Git
+history at commit `9b6dfc3`
 
 **Durable conclusion:** Do not split the Makefile merely because it is long;
 the real costs are consumers that assume one file and hardware-specific PIC
@@ -753,10 +754,11 @@ duplication. Revisit only under explicit triggers.
 
 **Work:**
 
-- [ ] Preserve the decision and revisit triggers in a concise declined/revisit
+- [x] Preserve the decision and revisit triggers in a concise declined/revisit
   TODO entry or short decision record.
-- [ ] Preserve any warning about source-text consumers that remains current.
-- [ ] Delete the long analysis document.
+- [x] Preserve the current warning about source-text, sandbox, rebuild, and
+  release-provenance consumers.
+- [x] Delete the long analysis document.
 
 **Acceptance:**
 

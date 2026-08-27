@@ -593,6 +593,22 @@ outside firmware scope.
 Recorded so these do not get re-proposed. Each was judged to cost more than it
 returns for this project; reconsider only if its stated trigger appears.
 
+### Split the monolithic Makefile
+
+Do not split or template the Makefile merely because it is long.
+Hardware-specific PIC divergence is intentional, while tests and scripts still
+copy, mutate, grep, or parse only `Makefile`; production releases also reject
+multiple loaded makefiles as an injection defense. A naive split could silently
+weaken test coverage or violate the fail-closed release boundary.
+
+Reconsider when a new independent MCU build lane is added, cross-lane edits or
+merge conflicts become routine, or a reviewed fragment-set and provenance
+interface has removed those costs. If pursued, first migrate every source-text,
+sandbox, rebuild-dependency, and release consumer without splitting; then move
+one lane at a time and prove fail-closed coverage, rebuild invalidation, release
+identity and security, normalized Make-database semantics, and all affected
+gates.
+
 ### Run PIC10F320 firmware on PIC10F322 hardware
 
 The native PIC10F320 image is expected to execute on PIC10F322, but it omits the
