@@ -405,7 +405,7 @@ run_preflight() {
 		# testing the argument vector it actually passes.
 		unset VERSION RELEASE_ARGS MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEOVERRIDES MAKELEVEL \
 			STRICT_TOOLS MUTATION_ALLOW_SKIP XT_STATIC_RAM_LIMIT XT_STACK_MAX_FRAME \
-			PIC12F675_DATA_LIMIT
+			PIC12F675_DATA_LIMIT PIC12F675_FLASH_IMAGES
 		[ -z "$release_makeflags" ] || export MAKEFLAGS="$release_makeflags"
 		[ -z "$release_mflags" ] || export MFLAGS="$release_mflags"
 		[ -z "$release_gnumakeflags" ] || export GNUMAKEFLAGS="$release_gnumakeflags"
