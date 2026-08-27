@@ -743,7 +743,7 @@ tree increases search noise and stale-reference exposure.
 
 ## BR-DOC-02 - Reduce the deferred Makefile-refactor record
 
-**Status:** IN PROGRESS OpenCode
+**Status:** DONE `5ce3f59`
 
 **Historical source:** `docs/makefile_refactor.md`, 284 lines, retained in Git
 history at commit `9b6dfc3`
@@ -767,25 +767,30 @@ duplication. Revisit only under explicit triggers.
 
 ## BR-DOC-03 - Reduce the non-blocking output feasibility analysis
 
-**Status:** TODO
+**Status:** IN PROGRESS OpenCode
 
-**Source:** `docs/non-blocking_output_schemes_feasibility.md`, 1,523 lines
+**Historical source:** `docs/non-blocking_output_schemes_feasibility.md`, 1,523
+lines, retained in Git history at commit `5ce3f59`
 
 **Risk:** High if deleted without extraction. The analysis contains safety
 properties and an acceptance checklist for a possible future actuation redesign.
 
 **Work:**
 
-- [ ] Preserve the final recommendation.
-- [ ] Preserve the relay-coil safety properties that a non-blocking redesign
+- [x] Preserve the final recommendation.
+- [x] Preserve the relay-coil safety properties that a non-blocking redesign
   must maintain.
-- [ ] Preserve immediate-abort, watchdog, tick-source, progress-observation,
+- [x] Preserve immediate-abort, watchdog, tick-source, progress-observation,
   transient-state, and mutation requirements.
-- [ ] Preserve measured feasibility conclusions only as dated historical
+- [x] Preserve measured feasibility conclusions only as dated historical
   evidence, not current resource data.
-- [ ] Convert any actionable future redesign into a concise TODO with explicit
+- [x] Convert any actionable future redesign into a concise TODO with explicit
   proof obligations.
-- [ ] Delete the full spike analysis after the concise record is reviewed.
+- [x] Delete the full spike analysis after the concise record is reviewed.
+
+**Reference disposition:** The remaining exact path in the `v0.9.10` changelog
+is an intentional historical statement about that release's source tree, where
+the cited record exists; it is not a current authority.
 
 **Acceptance:**
 

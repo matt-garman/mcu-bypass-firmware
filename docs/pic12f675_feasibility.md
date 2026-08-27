@@ -440,10 +440,10 @@ error: (1347) can't find 0x2 words for psect "text18" in class "CODE"
 ```
 
 The linker needed a two-word contiguous range while the largest free range was
-one word. The later map analysis in `non-blocking_output_schemes_feasibility.md`
-places the build at 511/512 words, so this is fragmentation at the ceiling, not
-a proof that the program is simply two words oversized. A leaner conversion
-might genuinely land it. That is the wrong thing to optimize: it would mean
+one word. Dated 2026-08-05 ablation and map analysis inferred 511/512 words
+occupied, so this is fragmentation at the ceiling, not proof that the program
+is simply two words oversized. A leaner conversion might genuinely land it.
+That is the wrong thing to optimize: it would mean
 shipping three PIC10F322 images at
 94.3%, 99.4% and ~100% of flash, on a part whose largest variant already leaves
 only 39 words free. The honest reading is that the PIC10F322 is *at* the ceiling
@@ -1656,4 +1656,4 @@ now been applied, independent of whether this port happens:
 | Document | Correction |
 |---|---|
 | `docs/phase2_pic_shell.md` §6 | Protection is now required only for a future multi-byte shared object; the documented single-byte option preserves the AVR's lock-free protocol without `-fshort-enums` (§4.3.2 item 1). |
-| `docs/phase2_pic_shell.md` §1 | The original three reasons remain historical rationale; a separate later retention reason now records the relay ISR link failure, inferred flash occupancy and measured return-stack limit (`non-blocking_output_schemes_feasibility.md` §§2.2–2.4). |
+| `docs/phase2_pic_shell.md` §1 | The original three reasons remain historical rationale; a separate later retention reason now records the relay ISR link failure, inferred flash occupancy and measured return-stack limit. |

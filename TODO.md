@@ -424,6 +424,80 @@ mismatch fails loudly and names the count, exactly as it did this time.
 
 ## Tier 3 - platinum-grade hardening and silicon validation
 
+### T3-nonblocking-actuation - Qualify any non-blocking actuation redesign
+
+Retain the current blocking design unless a decision-quality spike discharges
+this item. Do not trade self-health checks for a PIC10F322 timer ISR. Dated
+historical evidence from 2026-08-05, using XC8 3.10 / DFP 1.9.189 against
+`main@59d55e9` and `main@831d1d3`, found that the relay ISR exhausted the
+planned PIC10F322 return-stack margin while check ablation freed flash rather
+than stack; four direction-specific `_pre`/`_post` primitives compiled
+materially better than a target-parameter pair; and a minimal PIC10F320
+countdown form linked and passed resource/stack gates but was never functionally
+or release-qualified. A 2026-08-06 FMEA at `main@cf29e12` established the safety
+obligations below. These are historical conclusions, not current resource
+values; remeasure every candidate against current source, tools, and gates.
+
+Before any shipping conversion:
+
+- Keep one shell-owned output state machine around direction-specific
+  `hw_set_bypass_pre/post()` and `hw_set_engaged_pre/post()` primitives. Publish
+  active before energizing an output, settle before publishing idle, make the
+  target immutable while active, reject duplicate or wrong-state requests, and
+  define exact launch/completion tick ordering. Serialize startup so no press
+  can overlap, restart, reverse, or truncate the initial RESET pulse. Compile
+  the simple CD4053 variant without deferred state.
+- Validate exact phase-dependent outputs rather than suppressing sanity checks:
+  RESET-only/LED-low for relay BYPASS, SET-only/LED-high for relay ENGAGE,
+  runtime mute `(CTL1, CTL2)=(0,1)` with the target LED state, and a distinct
+  all-low startup mute state. Never energize both relay coils or the wrong coil,
+  and retain the normal actuation-less-than-release-lockout proof.
+- Preserve the current fail-safe relay policy. Any direction, latch,
+  pin-control, or state mismatch during an active phase must invoke
+  target-specific physical output quiescence before the watchdog spin, then
+  reset and resynchronize to BYPASS. Withhold watchdog pets throughout deferred
+  actuation, but separately contain stalled/high and premature-zero progress.
+  If complete containment does not fit, keep that target/variant blocking.
+- Treat the tick source as safety-critical. Cover stopped, one-spurious,
+  persistent false-fast, delayed, and coalesced ticks; prove progress before
+  startup energizes a relay; and prevent repeated watchdog-length startup
+  pulses. Derive per-target physical pulse lower/upper bounds from accepted
+  hardware ticks, oscillator/WDT tolerance, service ordering, and active-path
+  WCET. Every active path must service within one tick, and the relay maximum
+  must be electrically and thermally safe.
+- Protect the complete persisted protocol, not only its upper range. Test zero,
+  high, every in-range value, every single-bit corruption, wrong target,
+  legal-but-wrong context state, and write ordering. Extend the context
+  transaction/check discipline or qualify an explicit constrained-target
+  exception. Add a watchdog-independent end-of-serviced-tick observation point
+  for context, phase, target, countdown, and exact pins, plus an independent
+  output-state-machine model and built-image timing/abort/recovery checks.
+- Add mutations for `N-1`/`N+1`, missing decrement or `_post`, early idle,
+  wrong direction/target, duplicate request, active-sanity suppression,
+  zero/high corruption, an illegal active watchdog pet, tick faults, and a
+  removed or weakened abort. Kill every applicable mutant without deriving the
+  oracle from production tables.
+- Qualify the complete then-supported target/variant matrix. Preserve AVR
+  ISR/main atomicity, each PIC polling model, PIC12F675 shadow and peripheral
+  ownership, and PIC10F320's hand-maintained output surface and latch-check
+  exception; convert PIC10F320 last. Retain exact spike sources, re-run all
+  resource, stack, behavioral, fault, timing, formal, mutation, and release
+  gates, and intentionally review every generated-image and release-identity
+  change.
+- Do not call simulator evidence hardware qualification. Before enabling a
+  non-blocking relay target, retain a controlled record covering source/image
+  identity, real tick/WDT cadence, minimum and worst-case coil pulse, physical
+  abort, relay/driver/flyback/supply/PCB behavior, and the applicable
+  temperature/voltage envelope. An unprovable generic upper bound requires a
+  blocking fallback.
+
+Dependencies: owner-authored firmware changes, complete pinned target
+toolchains/simulators, an independent output-state-machine model, relay
+electrical data, `T3-hw-procedure`, representative hardware, and retained
+controlled evidence. Effort: High. Risk: High; an incomplete conversion can
+create an unbounded relay-coil energy path or a permanent muted/output state
+where the current blocking implementation is bounded.
+
 ### T3-hw-procedure - Document a hardware-validation procedure
 
 Define a repeatable bench procedure for the primary ATtiny13A: observe output
@@ -675,6 +749,7 @@ The stable ID in each row matches exactly one open section above.
 | T25-power-ramp | Power-supply ramp analysis | 2.5 | 2-3 h | Medium |
 | T25-name-contract-shim | Check overrides handed to a routing Make shim | 2.5 | 2-3 h | Low |
 | T25-cbmc-proof-count | Cross-check dispatched CBMC proof count against source | 2.5 | 30-45 min | Low |
+| T3-nonblocking-actuation | Qualify non-blocking output actuation | 3 | High | High - hardware safety |
 | T3-hw-procedure | Hardware-validation procedure | 3 | 2-3 h | High |
 | T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - gates the part's 1.x.y hardware validation |
 | T3-toolchain | Broader compiler/toolchain portability | 3 | Medium | Medium-High |
