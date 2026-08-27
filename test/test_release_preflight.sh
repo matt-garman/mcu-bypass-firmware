@@ -1123,14 +1123,6 @@ release_reject_branch_only_documents "$branch_doc_root" \
 	|| fail "branch-only-document gate rejected the durable root-level document set"
 checks=$((checks + 1))
 
-# The retained docs/<ver>_post_release_polish.md must NOT be mistaken for a
-# branch-only document: it is under docs/ (not root) and uses `_polish`, not
-# `-polish`.
-: > "$branch_doc_root/docs/v0.9.6_post_release_polish.md"
-release_reject_branch_only_documents "$branch_doc_root" \
-	|| fail "branch-only-document gate wrongly flagged the retained docs/ polish document"
-checks=$((checks + 1))
-
 # A root-level v*-polish.md present -> rejected.
 : > "$branch_doc_root/v1.2.3-polish.md"
 assert_branch_doc_gate_rejects 'a tree containing a root-level v*-polish.md' \

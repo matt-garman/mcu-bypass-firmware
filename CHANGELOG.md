@@ -2904,11 +2904,10 @@ file is the human-readable summary of *what changed*.
 
 ## [0.9.7] - 2026-08-01
 
-> **Where the detail lives.** This entry is a post-release cleanup pass whose
-> 44 items were tracked individually, most of them compressed to a sentence
-> below. The per-item evidence — measured figures with the commands that
-> reproduce them, and the alternatives considered and rejected — is recorded in
-> [docs/v0.9.6_post_release_polish.md](docs/v0.9.6_post_release_polish.md).
+> **Historical detail.** This entry is a post-release cleanup pass whose 44
+> items were tracked individually, most of them compressed to a sentence below.
+> The completed work journal remains available from Git history at commit
+> `69f8bbf`.
 
 ### Fixed
 - **A non-executable Intel HEX validator passed the build's presence check.**
@@ -3158,8 +3157,7 @@ file is the human-readable summary of *what changed*.
   validation table, tool label, target count and several fragile source-line
   references were wrong across the live documentation; and the two `.gitignore`
   files contradicted each other about `commit_msg.txt` — both now state the same
-  working-note policy, under which the root file is ignored while
-  `release/<version>/commit_msg.txt` is deliberately tracked. The yasimavr
+  policy under which these disposable working notes are ignored. The yasimavr
   fetcher now uses POSIX signal 0 for its cleanup trap and passes ShellCheck,
   with no change to its path or replacement-safety behaviour.
 

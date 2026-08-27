@@ -716,9 +716,10 @@ entire branch-era discussion.
 
 ## BR-DOC-01 - Delete the completed v0.9.6 polish journal
 
-**Status:** TODO
+**Status:** IN PROGRESS OpenCode
 
-**Source:** `docs/v0.9.6_post_release_polish.md`, 3,688 lines
+**Historical source:** `docs/v0.9.6_post_release_polish.md`, 3,688 lines,
+retained in Git history at commit `69f8bbf`
 
 **Rationale:** The file says all 44 items are complete and warns not to use it
 for current status. Git history and the changelog retain the work. Keeping the
@@ -727,11 +728,12 @@ tree increases search noise and stale-reference exposure.
 
 **Work:**
 
-- [ ] Identify any still-live requirement cited only from this journal.
-- [ ] Move any genuinely open item to concise TODO form.
-- [ ] Confirm durable safety decisions have a current authority.
-- [ ] Delete the file.
-- [ ] Update release-documentation tests that special-case this branch-only
+- [x] Identify any still-live requirement cited only from this journal.
+- [x] Move any genuinely open item to concise TODO form. The two deferred
+  follow-ons are already tracked by BR-TEST-03 and BR-TEST-08.
+- [x] Confirm durable safety decisions have a current authority.
+- [x] Delete the file.
+- [x] Update release-documentation tests that special-case this branch-only
   filename family.
 
 **Acceptance:**

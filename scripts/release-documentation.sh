@@ -221,8 +221,7 @@ release_validate_staged_documentation() {
 # (where a working document legitimately still exists during branch work). This
 # gate is invoked only on the actual release-staging path, after preflight has
 # exited, so it fails a real release closed without breaking the preflight
-# capability probe. The retained docs/v0.9.6_post_release_polish.md is under
-# docs/, not root-level, so it is unaffected.
+# capability probe.
 release_reject_branch_only_documents() {
 	[ "$#" -eq 1 ] || return 2
 	local repo_root=$1 root_doc label durable_doc durable reference_file
