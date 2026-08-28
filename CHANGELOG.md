@@ -21,6 +21,16 @@ Per-release provenance (source commit, pinned toolchain, image hashes, flash
 usage, and validation evidence) lives in `release/<version>/MANIFEST.md`; this
 file is the human-readable summary of *what changed*.
 
+Prospective entries stay concise. `[Unreleased]` is the normal development
+state, and each release moves its relevant summary from there into a dated
+section. Record user-visible behavior, safety or compatibility changes, new
+targets or release artifacts, important fixed defects, material residual
+limitations, and any migration action users must take. Keep implementation
+journals, exhaustive test inventories, review chronology, current resource
+measurements, and duplicated design rationale in Git history or their dedicated
+design, test, and release records instead. Existing release sections are
+historical records and are not retroactively compacted by this policy.
+
 > **On the PIC10F320's version history.** The PIC10F320 target was developed in a
 > separate repository and merged into this one in `v0.9.6` below. That
 > project ran its own `v0.9.0`–`v0.9.5` series with **different content and

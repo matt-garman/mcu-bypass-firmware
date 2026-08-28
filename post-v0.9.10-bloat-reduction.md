@@ -953,7 +953,7 @@ of ordinary test changes and can turn prose formatting into a tested interface.
 
 ## BR-CHANGELOG-01 - Adopt a concise prospective changelog policy
 
-**Status:** TODO
+**Status:** IN PROGRESS
 
 **Current observations:**
 
@@ -981,11 +981,11 @@ of ordinary test changes and can turn prose formatting into a tested interface.
 
 **Work:**
 
-- [ ] Add or adopt a concise entry policy without rewriting signed historical
+- [x] Add or adopt a concise entry policy without rewriting signed historical
   releases.
-- [ ] Leave existing history intact unless a separate, explicitly reviewed
+- [x] Leave existing history intact unless a separate, explicitly reviewed
   archival compaction is chosen.
-- [ ] Ensure `[Unreleased]` is the normal development state.
+- [x] Ensure `[Unreleased]` is the normal development state.
 
 **Acceptance:**
 
@@ -1546,7 +1546,7 @@ deduplicated; loose evidence is the primary growth source.
 
 ## BR-REL-03 - Clarify full test-long log retention
 
-**Status:** IN PROGRESS
+**Status:** DONE `463aa2f`
 
 **Observation:** Release creation retains a summary and says the full log is
 archived by release CI, but the workflow does not appear to upload that log as a
@@ -1975,7 +1975,7 @@ dependencies and acceptance criteria.
 | BR-README-01 | Reduce root README | TODO |
 | BR-TESTDOC-01 | Reduce test README | TODO |
 | BR-TODO-01 | Reduce TODO to registry | TODO |
-| BR-CHANGELOG-01 | Adopt concise changelog policy | TODO |
+| BR-CHANGELOG-01 | Adopt concise changelog policy | IN PROGRESS |
 | BR-RELEASEDOC-01 | Reduce release README | TODO |
 | BR-COMMENT-01 | Trim live historical comments | TODO |
 | BR-STATE-01 | Remove repeated release declarations | TODO |
@@ -1992,7 +1992,7 @@ dependencies and acceptance criteria.
 | BR-QUALITY-01 | Define complete analysis matrix | DONE `edd9696` |
 | BR-REL-01 | Define canonical signed release index | TODO |
 | BR-REL-02 | Package deterministic evidence archive | TODO |
-| BR-REL-03 | Clarify full test-long retention | IN PROGRESS |
+| BR-REL-03 | Clarify full test-long retention | DONE `463aa2f` |
 | BR-REL-04 | Define hosted retention/mirroring | TODO |
 | BR-REL-05 | Keep releases self-contained | TODO |
 | BR-REL-06 | Consider tag-only artifact commits | TODO |
