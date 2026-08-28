@@ -156,7 +156,7 @@ for required in \
 		'exact canonical 35-file evidence set' \
 		'each of 18 release soak combinations' \
 		'historical 28-file/15-soak boundary for v0.9.6-v0.9.8' \
-		'36 PIC10F322, 75 PIC10F320, and 156 PIC12F675 checks' \
+		'47 PIC10F322, 91 PIC10F320, and 167 PIC12F675 checks' \
 		'## Known gaps (PIC — hardware-bench only)' \
 		'### PIC10F32x hardware gaps' \
 		'### PIC12F675 hardware gaps'; do

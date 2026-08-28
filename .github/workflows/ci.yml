@@ -224,22 +224,14 @@ jobs:
 
       - name: Assert PIC toolchain present (fail loud, do NOT skip)
         run: |
-          xc8="${XC8_DIR}/bin/xc8-cc"
-          test -x "${xc8}" || { echo "::error::XC8 missing: ${xc8}"; exit 1; }
-          # One DFP, three devices. Assert ALL THREE headers: a truncated unzip
-          # that left one behind would make that part's whole lane skip silently.
-          for d in pic10f322 pic10f320 pic12f675; do
-            dev="${XC8_DFP_ROOT}/xc8/pic/include/proc/${d}.h"
-            test -f "${dev}" || { echo "::error::DFP missing: ${dev}"; exit 1; }
-          done
-          for t in gpsim cppcheck c++; do
-            command -v "$t" >/dev/null || { echo "::error::no $t"; exit 1; }
-          done
-          # the libgpsim target aggregate needs the gpsim headers + glib
-          test -f /usr/include/gpsim/sim_context.h \
-            || { echo "::error::gpsim-dev headers missing"; exit 1; }
-          pkg-config --exists glib-2.0 \
-            || { echo "::error::libglib2.0-dev missing"; exit 1; }
+          scripts/assert_pic_toolchain.sh --github-actions \
+            --pic-cc "${XC8_DIR}/bin/xc8-cc" \
+            --pic-dfp "${XC8_DFP_ROOT}/xc8" \
+            --pic10f320-cc "${XC8_DIR}/bin/xc8-cc" \
+            --pic10f320-dfp "${XC8_DFP_ROOT}/xc8" \
+            --gpsim gpsim --cppcheck cppcheck \
+            --pic-cxx c++ --pic-gpsim-inc /usr/include/gpsim \
+            --pic10f320-cxx c++ --pic10f320-gpsim-inc /usr/include/gpsim
 
       # Save only after the assert passed, so a partial install is never cached.
       - name: Save XC8 + DFP cache

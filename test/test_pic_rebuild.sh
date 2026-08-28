@@ -159,7 +159,7 @@ done
 printf '%s\n' ':020000000028D6' ':02400E009E38DA' ':00000001FF' > "$out"
 printf 'fake assembly\n' > "${out%.hex}.s"
 printf '_gpio_shadow_ 0020\n' > "${out%.hex}.sym"
-printf 'Program space used (42)\n'
+printf 'Program space used 2Ah (42) of 400h words (4.1%%)\n'
 printf 'Data space used 20h (32) of 40h bytes (50.0%%)\n'
 EOF
 chmod 755 "$tools/cxx" "$tools/pkg-config" "$tools/timing-python" "$tools/xc8"

@@ -256,8 +256,7 @@ trap on_exit EXIT
 # and analyzer sub-targets skip cleanly when their tools are absent; pic10f320-test's
 # expected-image and stack prerequisites fail closed, but they do not replace
 # this complete preflight. Paths come from the Makefile
-# defaults; an exported PIC_CC / PIC_DFP / PIC10F320_CC / PIC10F320_DFP /
-# PIC_SOAK_GPSIM_INC wins (they are ?= in the Makefile).
+# defaults; exported selector overrides win because they are ?= in the Makefile.
 #
 # The two variable pairs are checked independently rather than assuming
 # PIC10F320_* still tracks PIC_*: the whole point of the separate pair (merge plan
@@ -270,31 +269,26 @@ assert_pic_toolchain() {
 	# recipe and each value below would arrive wrapped in "Entering/Leaving
 	# directory" lines -- reporting an installed toolchain as missing, at a path
 	# nobody configured.
-	local pic_cc pic_dfp pic10f320_cc pic10f320_dfp gpsim_inc
+	local pic_cc pic_dfp pic10f320_cc pic10f320_dfp gpsim cppcheck
+	local pic_cxx gpsim_inc pic10f320_cxx pic10f320_gpsim_inc
 	pic_cc="${PIC_CC:-$(make -s --no-print-directory print-PIC_CC)}"
 	pic_dfp="${PIC_DFP:-$(make -s --no-print-directory print-PIC_DFP)}"
 	pic10f320_cc="${PIC10F320_CC:-$(make -s --no-print-directory print-PIC10F320_CC)}"
 	pic10f320_dfp="${PIC10F320_DFP:-$(make -s --no-print-directory print-PIC10F320_DFP)}"
+	gpsim="${GPSIM:-$(make -s --no-print-directory print-GPSIM)}"
+	cppcheck="${CPPCHECK:-$(make -s --no-print-directory print-CPPCHECK)}"
+	pic_cxx="${PIC_SOAK_CXX:-$(make -s --no-print-directory print-PIC_SOAK_CXX)}"
 	gpsim_inc="${PIC_SOAK_GPSIM_INC:-$(make -s --no-print-directory print-PIC_SOAK_GPSIM_INC)}"
-	local missing=()
-	[ -x "$pic_cc" ]                                  || missing+=("XC8 (10F322) at $pic_cc  (export PIC_CC=...)")
-	[ -f "$pic_dfp/pic/include/proc/pic10f322.h" ]    || missing+=("PIC10-12Fxxx DFP at $pic_dfp  (export PIC_DFP=...)")
-	[ -x "$pic10f320_cc" ]                               || missing+=("XC8 (10F320) at $pic10f320_cc  (export PIC10F320_CC=...)")
-	[ -f "$pic10f320_dfp/pic/include/proc/pic10f320.h" ] || missing+=("PIC10F320 device header under $pic10f320_dfp  (export PIC10F320_DFP=...)")
-	# The PIC12F675 shares the 322's PIC_CC/PIC_DFP pair -- one installation,
-	# one DFP -- so only its device header is a separate fact to assert. A
-	# truncated unzip that left it behind would make every 12F675 lane skip.
-	[ -f "$pic_dfp/pic/include/proc/pic12f675.h" ]    || missing+=("PIC12F675 device header under $pic_dfp  (export PIC_DFP=...)")
-	command -v gpsim >/dev/null 2>&1                  || missing+=("gpsim  (apt: gpsim)")
-	command -v cppcheck >/dev/null 2>&1               || missing+=("cppcheck  (apt: cppcheck)")
-	command -v c++ >/dev/null 2>&1                    || missing+=("c++  (apt: g++; PIC target aggregates)")
-	[ -f "$gpsim_inc/sim_context.h" ]                 || missing+=("libgpsim headers at $gpsim_inc  (apt: gpsim-dev; PIC target aggregates)")
-	pkg-config --exists glib-2.0 2>/dev/null          || missing+=("glib-2.0  (apt: libglib2.0-dev; PIC target aggregates)")
-	if [ "${#missing[@]}" -gt 0 ]; then
-		log "PIC toolchain incomplete -- the pic10f322/pic10f320/pic12f675 targets would silently SKIP, not fail:"
-		for m in "${missing[@]}"; do log "  - $m"; done
-		die "install the above (see TOOLCHAIN.adoc), or --skip-pic (no longer mirrors CI)."
-	fi
+	pic10f320_cxx="${PIC10F320_SOAK_CXX:-$(make -s --no-print-directory print-PIC10F320_SOAK_CXX)}"
+	pic10f320_gpsim_inc="${PIC10F320_SOAK_GPSIM_INC:-$(make -s --no-print-directory print-PIC10F320_SOAK_GPSIM_INC)}"
+	"$REPO_ROOT/scripts/assert_pic_toolchain.sh" \
+		--pic-cc "$pic_cc" --pic-dfp "$pic_dfp" \
+		--pic10f320-cc "$pic10f320_cc" --pic10f320-dfp "$pic10f320_dfp" \
+		--gpsim "$gpsim" --cppcheck "$cppcheck" \
+		--pic-cxx "$pic_cxx" --pic-gpsim-inc "$gpsim_inc" \
+		--pic10f320-cxx "$pic10f320_cxx" \
+		--pic10f320-gpsim-inc "$pic10f320_gpsim_inc" \
+		|| die "install the missing PIC tools (see TOOLCHAIN.adoc), or --skip-pic (no longer mirrors CI)."
 	ok "PIC toolchain present, all three parts (XC8 + DFP + gpsim + gpsim-dev + glib + cppcheck + c++)."
 }
 

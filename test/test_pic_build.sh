@@ -91,7 +91,7 @@ case "$PB_PROFILE" in
 		PB_STACK_DEVICE_VAR=PIC10F322_DEVICE_INI
 		product_override_args=(PIC10F322_HEXES= PIC10F322_ASSEMBLIES= PIC10F322_SYMBOLS= PIC10F322_BUILD_PRODUCTS=)
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=36
+		expected_checks=47
 		;;
 	pic10f320)
 		PB_LABEL=PIC10F320
@@ -115,7 +115,7 @@ case "$PB_PROFILE" in
 		PB_SIZE_TARGET=pic10f320-size
 		PB_REBUILD_REQUIRED=1
 		product_override_args=(PIC10F320_HEX= PIC10F320_ASM= PIC10F320_SYM= PIC10F320_BUILD_PRODUCTS=)
-		expected_checks=75
+		expected_checks=91
 		;;
 	pic12f675)
 		PB_LABEL=PIC12F675
@@ -136,7 +136,7 @@ case "$PB_PROFILE" in
 		PB_STACK_DEVICE_VAR=PIC12F675_DEVICE_INI
 		product_override_args=(PIC12F675_HEXES= PIC12F675_ASSEMBLIES= PIC12F675_SYMBOLS= PIC12F675_BUILD_PRODUCTS=)
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=156
+		expected_checks=167
 		;;
 	*) printf 'FAIL: unknown internal PIC build profile: %s\n' "$PB_PROFILE" >&2; exit 2 ;;
 esac
@@ -191,6 +191,7 @@ sym=${hex%.hex}.sym
 size_probe_stem="$repo/$PB_BUILD_DIR/size_probe_$PB_VARIANT"
 checks=0
 unset FAKE_XC8_MODE FAKE_XC8_FAIL_NAME FAKE_XC8_SIGNAL_MARKER \
+	FAKE_XC8_PROGRAM_MODE FAKE_XC8_PROGRAM_FAIL_NAME \
 	FAKE_XC8_DATA_MODE FAKE_XC8_DATA_FAIL_NAME \
 	PIC12F675_PART PIC12F675_PROG PIC12F675_PROG_KIND PIC12F675_PROG_TOOL \
 	PIC12F675_READ_PROG PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT \
@@ -203,6 +204,8 @@ cp "$ROOT/Makefile" "$repo/Makefile"
 cp "$ROOT/scripts/validate-ihex.sh" "$repo/scripts/validate-ihex.sh"
 cp "$ROOT/test/check_stack_depth_pic.sh" "$repo/test/check_stack_depth_pic.sh"
 cp "$ROOT/test/check_pic_data_budget.sh" "$repo/test/check_pic_data_budget.sh"
+cp "$ROOT/test/parse_xc8_program_space.sh" "$repo/test/parse_xc8_program_space.sh"
+cp "$ROOT/test/check_pic_context_layout.sh" "$repo/test/check_pic_context_layout.sh"
 cp "$ROOT/test/pic10f320/return_stack_oracle.py" \
 	"$repo/test/pic10f320/return_stack_oracle.py"
 cp "$ROOT/test/pic10f320/check_expected_images.py" \
@@ -211,6 +214,7 @@ cp "$ROOT/test/pic10f320/check_expected_images.py" \
 : > "$host_cc_log"
 : > "$host_run_log"
 export FAKE_XC8_LOG="$xc8_log"
+export FAKE_XC8_PROGRAM_CAPACITY="$PB_FLASH_WORDS"
 # The over-budget fixture must be over THIS lane's budget, not a fixed 513: a
 # 513-word image is comfortably inside a 1024-word part, so a hard-coded value
 # silently stopped testing the budget gate the moment a bigger part arrived.
@@ -358,12 +362,46 @@ done
 [ -n "$out" ] || exit 2
 printf '%s\t%s\n' "$out" "$args" >> "${FAKE_XC8_LOG:?}"
 mode=${FAKE_XC8_MODE:-pass}
-case "$mode" in
+program_mode=${FAKE_XC8_PROGRAM_MODE:-$mode}
+if [ -n "${FAKE_XC8_PROGRAM_FAIL_NAME:-}" ] \
+		&& [ "$out" = "$FAKE_XC8_PROGRAM_FAIL_NAME" ]; then
+	program_mode=program-malformed
+fi
+write_program_record() {
+	local decimal_text=$1 decimal_value=$2 capacity=${FAKE_XC8_PROGRAM_CAPACITY:?}
+	local used_hex capacity_hex percent
+	printf -v used_hex '%X' "$decimal_value"
+	printf -v capacity_hex '%X' "$capacity"
+	percent=$(awk -v used="$decimal_value" -v total="$capacity" \
+		'BEGIN { printf "%.1f", used * 100 / total }')
+	printf 'Program space used %sh (%s) of %sh words (%s%%)\n' \
+		"$used_hex" "$decimal_text" "$capacity_hex" "$percent"
+}
+case "$program_mode" in
 	no-summary) ;;
-	over-budget) printf 'Program space used (%s)\n' "${FAKE_XC8_OVER_BUDGET_WORDS:-513}" ;;
-	huge-count) printf 'Program space used (9999999999999999999999999999999999999999)\n' ;;
-	leading-count) printf 'Program space used (00042)\n' ;;
-	*) printf 'Program space used (42)\n' ;;
+	over-budget)
+		words=${FAKE_XC8_OVER_BUDGET_WORDS:-513}
+		write_program_record "$words" "$words"
+		;;
+	huge-count)
+		printf 'Program space used FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFh (9999999999999999999999999999999999999999) of %Xh words (999.9%%)\n' \
+			"${FAKE_XC8_PROGRAM_CAPACITY:?}"
+		;;
+	leading-count) write_program_record 00042 42 ;;
+	program-malformed) printf 'Program space used (42)\n' ;;
+	program-duplicate)
+		write_program_record 42 42
+		write_program_record 42 42
+		;;
+	program-mixed)
+		write_program_record 42 42
+		printf 'Program space used garbage\n'
+		;;
+	program-zero) printf 'Program space used 0h (0) of %Xh words (0.0%%)\n' \
+		"${FAKE_XC8_PROGRAM_CAPACITY:?}" ;;
+	program-percent) printf 'Program space used 2Ah (42) of %Xh words (99.9%%)\n' \
+		"${FAKE_XC8_PROGRAM_CAPACITY:?}" ;;
+	*) write_program_record 42 42 ;;
 esac
 write_data_summary
 if [ -n "${FAKE_XC8_FAIL_NAME:-}" ] && [ "$out" = "$FAKE_XC8_FAIL_NAME" ]; then
@@ -979,6 +1017,76 @@ for mode in over-budget huge-count; do
 	checks=$((checks + 1))
 done
 
+for mode in no-summary program-malformed program-duplicate program-mixed \
+		program-zero program-percent; do
+	printf 'stale image\n' > "$hex"
+	if (export FAKE_XC8_MODE="$mode"; run_make) >/dev/null 2>&1; then
+		printf 'FAIL: PIC build accepted program-summary mode %s\n' "$mode" >&2
+		exit 1
+	fi
+	[[ ! -e "$hex" && ! -L "$hex" ]] \
+		|| { printf 'FAIL: program-summary mode %s left a stale image\n' "$mode" >&2; exit 1; }
+	checks=$((checks + 1))
+done
+
+canonical_program_parser="$repo/test/parse_xc8_program_space.sh"
+moved_program_parser="$tools/parse_xc8_program_space.sh"
+mv "$canonical_program_parser" "$moved_program_parser"
+ln -s "$moved_program_parser" "$canonical_program_parser"
+seed_stale_final_products
+if symlink_output=$(run_make 2>&1); then
+	symlink_accepted=1
+else
+	symlink_accepted=0
+fi
+rm -f "$canonical_program_parser"
+mv "$moved_program_parser" "$canonical_program_parser"
+[[ $symlink_accepted -eq 0 \
+	&& $symlink_output == *"XC8 program-space parser is missing, symlinked, or not executable"* ]] \
+	|| { printf 'FAIL: symlinked XC8 program parser produced the wrong result: %s\n' \
+		"$symlink_output" >&2; exit 1; }
+assert_no_final_products "symlinked XC8 program parser"
+checks=$((checks + 1))
+
+mv "$canonical_program_parser" "$moved_program_parser"
+seed_stale_final_products
+if missing_output=$(run_make 2>&1); then
+	missing_accepted=1
+else
+	missing_accepted=0
+fi
+mv "$moved_program_parser" "$canonical_program_parser"
+[[ $missing_accepted -eq 0 \
+	&& $missing_output == *"XC8 program-space parser is missing, symlinked, or not executable"* ]] \
+	|| { printf 'FAIL: missing XC8 program parser produced the wrong result: %s\n' \
+		"$missing_output" >&2; exit 1; }
+assert_no_final_products "missing XC8 program parser"
+checks=$((checks + 1))
+
+chmod 640 "$canonical_program_parser"
+seed_stale_final_products
+if nonexec_output=$(run_make 2>&1); then
+	nonexec_accepted=1
+else
+	nonexec_accepted=0
+fi
+chmod 750 "$canonical_program_parser"
+[[ $nonexec_accepted -eq 0 \
+	&& $nonexec_output == *"XC8 program-space parser is missing, symlinked, or not executable"* ]] \
+	|| { printf 'FAIL: non-executable XC8 program parser produced the wrong result: %s\n' \
+		"$nonexec_output" >&2; exit 1; }
+assert_no_final_products "non-executable XC8 program parser"
+checks=$((checks + 1))
+
+seed_stale_final_products
+if (export FAKE_XC8_MODE=program-malformed; \
+		run_make "XC8_PROGRAM_SPACE_PARSER=$tools/noop-data-gate") >/dev/null 2>&1; then
+	printf 'FAIL: PIC build accepted a program-parser override\n' >&2
+	exit 1
+fi
+assert_no_final_products "attempted XC8 program parser override"
+checks=$((checks + 1))
+
 expect_override_rejected "an empty flash budget" "$PB_FLASH_VAR="
 expect_override_rejected "a malformed flash budget" $PB_FLASH_VAR=malformed
 expect_override_rejected "a negative flash budget" $PB_FLASH_VAR=-1
@@ -1156,6 +1264,15 @@ fi
 assert_no_matrix_products "late $PB_LABEL matrix compiler failure"
 checks=$((checks + 1))
 
+seed_stale_matrix_products
+if (export FAKE_XC8_PROGRAM_FAIL_NAME="$PB_MATRIX_FAIL_IMAGE"; \
+		run_matrix_make "$PB_MATRIX_VARIANTS_VAR=$PB_MATRIX_VARIANTS") >/dev/null 2>&1; then
+	printf 'FAIL: late %s variant program-summary failure was accepted\n' "$PB_LABEL" >&2
+	exit 1
+fi
+assert_no_matrix_products "late $PB_LABEL matrix program-summary failure"
+checks=$((checks + 1))
+
 # PIC10F320's target/soak lanes have selectors separate from PIC10F320_VARIANT.
 # Each selector must control the image rebuilt by the pic10f320 prerequisite, even
 # when a caller supplies a conflicting PIC10F320_VARIANT that names a stale image.
@@ -1196,7 +1313,8 @@ if [ -n "$PB_SIZE_TARGET" ]; then
 	assert_no_size_probe
 	checks=$((checks + 1))
 
-	for mode in fail missing empty bad-checksum eof-only trailing symlink directory no-summary; do
+	for mode in fail missing empty bad-checksum eof-only trailing symlink directory no-summary \
+			program-malformed program-duplicate program-mixed program-zero program-percent; do
 		expect_size_mode_rejected "$mode"
 	done
 

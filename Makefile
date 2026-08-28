@@ -640,6 +640,34 @@ else
   SKIP := { echo "::error::STRICT_TOOLS=1: the tool/dependency reported above is required and must not be skipped"; exit 1; }
 endif
 
+# Shared strict parsers for XC8 transcript and sidecar facts. These helpers own
+# syntax/uniqueness validation only; each part keeps its own image identity,
+# resource policy, cleanup, shadow-register, and return-stack checks.
+override XC8_PROGRAM_SPACE_PARSER := test/parse_xc8_program_space.sh
+override PIC_CONTEXT_LAYOUT_CHECK := test/check_pic_context_layout.sh
+define xc8_program_space_parser_check_sh
+if [ ! -f "$(XC8_PROGRAM_SPACE_PARSER)" ] \
+		|| [ -L "$(XC8_PROGRAM_SPACE_PARSER)" ] \
+		|| [ ! -x "$(XC8_PROGRAM_SPACE_PARSER)" ]; then \
+	echo "FAIL: XC8 program-space parser is missing, symlinked, or not executable"; exit 1; \
+fi
+endef
+
+# Common optional libgpsim preflight. It expands inside the caller's shell so
+# $(SKIP) still exits the complete recipe in non-strict mode rather than merely
+# returning from an external helper and allowing compilation to continue.
+define pic_libgpsim_preflight_sh
+if ! command -v "$(1)" >/dev/null 2>&1; then \
+	echo "no C++ compiler ($(1)); skipping $(3)"; $(SKIP); \
+fi; \
+if [ ! -f "$(2)/sim_context.h" ] || [ -L "$(2)/sim_context.h" ]; then \
+	echo "gpsim-dev headers not at $(2); skipping $(3) (install gpsim-dev)"; $(SKIP); \
+fi; \
+if ! pkg-config --exists glib-2.0 2>/dev/null; then \
+	echo "libglib2.0-dev not found; skipping $(3) (install libglib2.0-dev)"; $(SKIP); \
+fi
+endef
+
 # Host-compiled copy of the firmware's PURE logic (bypass_pure.c), linked into
 # every test that includes model_step.h. Since the convergence, model_step.h's
 # step() delegates to the real debounce_integrate()/debounce_step() instead of a
@@ -892,6 +920,7 @@ FORCE:
         _test-make-safe-parallel-probe-b _test-mutation-policy-probe \
 		test-target-matrix test-target-lane-markers test-lockstep-progress \
 		test-pic-target-result-records \
+		test-xc8-helpers test-pic-toolchain-assert \
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
         test-variant-map-contract test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
@@ -1320,6 +1349,7 @@ pic10f322: $(PIC10F322_CORE_SRC) $(PIC10F322_HEADERS) $(foreach v,$(CLASSIC_VARI
 		echo "FAIL: VARIANTS must contain every supported name; required: $(CLASSIC_VARIANTS_SUPPORTED)"; exit 2; \
 	fi
 	@rm -f $(PIC10F322_BUILD_PRODUCTS)
+	@$(xc8_program_space_parser_check_sh)
 	@if [ ! -x "$(PIC_CC)" ] && ! command -v $(PIC_CC) >/dev/null 2>&1; then \
 		echo "XC8 not found at $(PIC_CC); skipping PIC build (override with PIC_CC=...)"; \
 		$(SKIP); \
@@ -1374,15 +1404,10 @@ pic10f322: $(PIC10F322_CORE_SRC) $(PIC10F322_HEADERS) $(foreach v,$(CLASSIC_VARI
 			echo "FAIL: XC8 produced an invalid Intel HEX image for variant $$v"; \
 			rm -f "$$hex"; fail=1; continue; \
 		fi; \
-		dec=`printf '%s\n' "$$out" | grep -E 'Program space' \
-			| grep -oE '\( *[0-9]+ *\)' | head -1 | tr -d '() '`; \
-		if [ -z "$$dec" ]; then \
-			echo "FAIL: $$v: could not parse program-word count from XC8 output:"; \
+		if ! dec=`printf '%s\n' "$$out" | "$(XC8_PROGRAM_SPACE_PARSER)"`; then \
+			echo "FAIL: $$v: invalid XC8 program-space summary:"; \
 			printf '%s\n' "$$out"; rm -f "$$hex"; fail=1; continue; \
 		fi; \
-		while [ "$${#dec}" -gt 1 ] && [ "$${dec#0}" != "$$dec" ]; do \
-			dec=$${dec#0}; \
-		done; \
 		over_budget=0; \
 		if [ "$${#dec}" -gt "$${#budget}" ]; then \
 			over_budget=1; \
@@ -1849,15 +1874,7 @@ $(PIC10F322_SOAK_BIN): $(PIC10F322_SOAK_DEPS) FORCE
 
 .PHONY: pic10f322-test-soak
 pic10f322-test-soak: variant-selectors-valid pic10f322
-	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
-		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC soak"; $(SKIP); \
-	fi; \
-	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
-		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC soak (install gpsim-dev)"; $(SKIP); \
-	fi; \
-	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
-		echo "libglib2.0-dev not found; skipping PIC soak (install libglib2.0-dev)"; $(SKIP); \
-	fi; \
+	@$(call pic_libgpsim_preflight_sh,$(PIC_SOAK_CXX),$(PIC_SOAK_GPSIM_INC),PIC soak); \
 	if [ ! -f "$(PIC10F322_SOAK_HEX)" ]; then \
 		echo "no $(PIC10F322_SOAK_HEX) (XC8 absent?); skipping PIC soak for variant $(PIC10F322_SOAK_VARIANT)"; $(SKIP); \
 	fi; \
@@ -1884,6 +1901,7 @@ PIC10F322_FAULT_SRC = test/pic/test_fault_pic.cc
 PIC10F322_FAULT_BIN = test/pic/test_fault_pic
 PIC10F322_FAULT_HEX = $(PIC10F322_BUILD_DIR)/$(call fw_image,$(PIC10F322_FAULT_VARIANT),$(PIC10F322_TAG)).hex
 PIC10F322_FAULT_SYM = $(PIC10F322_FAULT_HEX:.hex=.sym)
+PIC10F322_FAULT_ASM = $(PIC10F322_FAULT_HEX:.hex=.s)
 
 # The test's ctx_ field offsets (+0/+1/+2) depend on XC8's code generator
 # packing each enum to 1 byte -- which its clang FRONT END disagrees with
@@ -1891,14 +1909,8 @@ PIC10F322_FAULT_SYM = $(PIC10F322_FAULT_HEX:.hex=.sym)
 # pin the layout). The run recipe therefore asserts `_ctx_: ds 3` in the
 # generated .s before running.
 #
-# _ctx_'s data address from the XC8 .sym, as -DCTX_ADDR=0x<addr> for the ctx_
-# SRAM cases (so the test self-adjusts per variant instead of hard-coding it).
-# A $(shell) in this recursive (=) variable re-runs when PIC10F322_FAULT_COMPILE is
-# expanded in the recipe -- i.e. AFTER the `pic10f322` prerequisite has built the .sym.
-# Empty when the .sym is absent (XC8 not installed); the run recipe below fails
-# if the HEX exists but _ctx_ cannot be resolved, so the target cannot pass with
-# its SRAM cases omitted.
-PIC10F322_FAULT_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC10F322_FAULT_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DCTX_ADDR=0x$$a)
+# The recipe resolves and validates _ctx_ once, after the image prerequisite has
+# produced both sidecars, and carries that exact address into the compiler.
 
 # FW_PATH baked as an ABSOLUTE path so the binary is cwd-independent (parity with
 # the soak). Phony run rule always recompiles so a PIC10F322_FAULT_VARIANT override is
@@ -1906,49 +1918,26 @@ PIC10F322_FAULT_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC
 PIC10F322_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
 		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
 		-DFW_PATH='"$(CURDIR)/$(PIC10F322_FAULT_HEX)"' -DPROC_NAME='"$(PIC10F322_GPSIM_PROC)"' \
-		-DF_CPU_HZ=$(PIC10F322_XTAL) -D$(macro_$(PIC10F322_FAULT_VARIANT)) $(PIC10F322_FAULT_CTX_DEF) \
+		-DF_CPU_HZ=$(PIC10F322_XTAL) -D$(macro_$(PIC10F322_FAULT_VARIANT)) -DCTX_ADDR=0x$$ctx_addr \
 		$(BYPASS_CTX_CHECK_FLAG) \
 		$(PIC10F322_FAULT_SRC) -o $(PIC10F322_FAULT_BIN) -lgpsim
 
 $(PIC10F322_FAULT_BIN): $(PIC10F322_FAULT_SRC) $(PIC_TARGET_FAULT_CORE_HDR) $(PIC_TARGET_RESULT_HDR) $(PIC_PIN_LOOKUP_HDR) \
                   $(PIC_GPSIM_BOOTSTRAP_HDR) $(PIC10F32X_REGS_HDR) \
                   $(PIC10F32X_FAULT_MATRIX_HDR)
+	@rm -f $(PIC10F322_FAULT_BIN) || exit 1; \
+	ctx_addr=`$(PIC_CONTEXT_LAYOUT_CHECK) "$(PIC10F322_FAULT_ASM)" "$(PIC10F322_FAULT_SYM)"` || exit 1; \
 	$(PIC10F322_FAULT_COMPILE)
 
 .PHONY: pic10f322-test-fault
 pic10f322-test-fault: variant-selectors-valid pic10f322
-	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
-		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC fault-inject"; $(SKIP); \
-	fi; \
-	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
-		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC fault-inject (install gpsim-dev)"; $(SKIP); \
-	fi; \
-	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
-		echo "libglib2.0-dev not found; skipping PIC fault-inject (install libglib2.0-dev)"; $(SKIP); \
-	fi; \
+	@$(call pic_libgpsim_preflight_sh,$(PIC_SOAK_CXX),$(PIC_SOAK_GPSIM_INC),PIC fault-inject); \
 	if [ ! -f "$(PIC10F322_FAULT_HEX)" ]; then \
 		echo "no $(PIC10F322_FAULT_HEX) (XC8 absent?); skipping PIC fault-inject for variant $(PIC10F322_FAULT_VARIANT)"; $(SKIP); \
 	fi; \
-	s="$(PIC10F322_FAULT_HEX:.hex=.s)"; \
-	alloc=`awk 'prev=="_ctx_:"{print $$2; exit} {prev=$$1}' "$$s" 2>/dev/null`; \
-	if [ "$$alloc" != "3" ]; then \
-		echo "FAIL: _ctx_ allocates $${alloc:-?} bytes in $$s -- expected 3 (packed 1-byte enums)."; \
-		echo "      test_fault_pic.cc injects at the hard-coded byte offsets ctx_+0/+1/+2"; \
-		echo "      (program_state/effect_state/debounce_counter), which assume XC8's code"; \
-		echo "      generator packs each enum to 1 byte. It has stopped doing so: fix the"; \
-		echo "      offsets (and the RAM figures in DESIGN_DOCUMENTATION.adoc) before running."; \
-		echo "      NOTE: this is checked from the generated .s because it CANNOT be a"; \
-		echo "      static_assert -- XC8's clang front end sizes enums as int, so"; \
-		echo "      sizeof(debounce_context_t) evaluates to 5 even while the allocation is 3."; \
-		exit 1; \
-	fi; \
-	ctx_addr=`awk '$$1=="_ctx_"{print $$2; exit}' "$(PIC10F322_FAULT_SYM)" 2>/dev/null`; \
-	if [ -z "$$ctx_addr" ]; then \
-		echo "FAIL: _ctx_ symbol not found in $(PIC10F322_FAULT_SYM); ctx_ SRAM fault cases would be omitted."; \
-		exit 1; \
-	fi; \
+	rm -f $(PIC10F322_FAULT_BIN) || exit 1; \
+	ctx_addr=`$(PIC_CONTEXT_LAYOUT_CHECK) "$(PIC10F322_FAULT_ASM)" "$(PIC10F322_FAULT_SYM)"` || exit 1; \
 	echo "--- PIC fault-inject: variant=$(PIC10F322_FAULT_VARIANT) proc=$(PIC10F322_GPSIM_PROC) (ctx_ layout verified: 3 bytes) ---"; \
-	rm -f $(PIC10F322_FAULT_BIN) && \
 	$(PIC10F322_FAULT_COMPILE) && \
 	./$(PIC10F322_FAULT_BIN)
 
@@ -1963,48 +1952,31 @@ PIC10F322_LOCKSTEP_BIN = test/pic/test_lockstep_pic
 PIC10F322_LOCKSTEP_MODEL_OBJ = $(PIC10F322_BUILD_DIR)/bypass_pure_lockstep.o
 PIC10F322_LOCKSTEP_HEX = $(PIC10F322_BUILD_DIR)/$(call fw_image,$(PIC10F322_LOCKSTEP_VARIANT),$(PIC10F322_TAG)).hex
 PIC10F322_LOCKSTEP_SYM = $(PIC10F322_LOCKSTEP_HEX:.hex=.sym)
-PIC10F322_LOCKSTEP_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC10F322_LOCKSTEP_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DCTX_ADDR=0x$$a)
+PIC10F322_LOCKSTEP_ASM = $(PIC10F322_LOCKSTEP_HEX:.hex=.s)
 PIC10F322_LOCKSTEP_COMPILE = \
 		$(HOSTCC) $(HOST_CFLAGS) $(PURE_HOST_CFLAGS) -Itest -Isrc \
 			-c $(PURE_HOST_SRC) -o $(PIC10F322_LOCKSTEP_MODEL_OBJ) && \
 		$(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
 			-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
 			-DFW_PATH='"$(CURDIR)/$(PIC10F322_LOCKSTEP_HEX)"' -DPROC_NAME='"$(PIC10F322_GPSIM_PROC)"' \
-			-DF_CPU_HZ=$(PIC10F322_XTAL) $(PIC10F322_LOCKSTEP_CTX_DEF) \
+			-DF_CPU_HZ=$(PIC10F322_XTAL) -DCTX_ADDR=0x$$ctx_addr \
 			$(PIC10F322_LOCKSTEP_SRC) $(PIC10F322_LOCKSTEP_MODEL_OBJ) -o $(PIC10F322_LOCKSTEP_BIN) -lgpsim
 
 $(PIC10F322_LOCKSTEP_BIN): $(PIC10F322_LOCKSTEP_SRC) $(PIC_TARGET_LOCKSTEP_CORE_HDR) $(PIC_TARGET_RESULT_HDR) \
                      $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) $(PURE_HOST_DEP)
+	@rm -f $(PIC10F322_LOCKSTEP_BIN) || exit 1; \
+	ctx_addr=`$(PIC_CONTEXT_LAYOUT_CHECK) "$(PIC10F322_LOCKSTEP_ASM)" "$(PIC10F322_LOCKSTEP_SYM)"` || exit 1; \
 	$(PIC10F322_LOCKSTEP_COMPILE)
 
 .PHONY: pic10f322-test-lockstep
 pic10f322-test-lockstep: variant-selectors-valid pic10f322
-	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
-		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC lock-step"; $(SKIP); \
-	fi; \
-	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
-		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC lock-step (install gpsim-dev)"; $(SKIP); \
-	fi; \
-	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
-		echo "libglib2.0-dev not found; skipping PIC lock-step (install libglib2.0-dev)"; $(SKIP); \
-	fi; \
+	@$(call pic_libgpsim_preflight_sh,$(PIC_SOAK_CXX),$(PIC_SOAK_GPSIM_INC),PIC lock-step); \
 	if [ ! -f "$(PIC10F322_LOCKSTEP_HEX)" ]; then \
 		echo "no $(PIC10F322_LOCKSTEP_HEX) (XC8 absent?); skipping PIC lock-step for variant $(PIC10F322_LOCKSTEP_VARIANT)"; $(SKIP); \
 	fi; \
-	s="$(PIC10F322_LOCKSTEP_HEX:.hex=.s)"; \
-	alloc=`awk 'prev=="_ctx_:"{print $$2; exit} {prev=$$1}' "$$s" 2>/dev/null`; \
-	if [ "$$alloc" != "3" ]; then \
-		echo "FAIL: _ctx_ allocates $${alloc:-?} bytes in $$s -- expected 3 (packed 1-byte enums)."; \
-		echo "      test_lockstep_pic.cc reads ctx_+0/+1/+2; fix offsets if packing changed."; \
-		exit 1; \
-	fi; \
-	ctx_addr=`awk '$$1=="_ctx_"{print $$2; exit}' "$(PIC10F322_LOCKSTEP_SYM)" 2>/dev/null`; \
-	if [ -z "$$ctx_addr" ]; then \
-		echo "FAIL: _ctx_ symbol not found in $(PIC10F322_LOCKSTEP_SYM); lock-step cannot read firmware state."; \
-		exit 1; \
-	fi; \
+	rm -f $(PIC10F322_LOCKSTEP_BIN) || exit 1; \
+	ctx_addr=`$(PIC_CONTEXT_LAYOUT_CHECK) "$(PIC10F322_LOCKSTEP_ASM)" "$(PIC10F322_LOCKSTEP_SYM)"` || exit 1; \
 	echo "--- PIC lock-step: variant=$(PIC10F322_LOCKSTEP_VARIANT) proc=$(PIC10F322_GPSIM_PROC) (ctx_ layout verified: 3 bytes) ---"; \
-	rm -f $(PIC10F322_LOCKSTEP_BIN) && \
 	$(PIC10F322_LOCKSTEP_COMPILE) && \
 	./$(PIC10F322_LOCKSTEP_BIN)
 
@@ -2029,15 +2001,7 @@ $(PIC10F322_IO_BIN): $(PIC10F322_IO_SRC) $(PIC_TARGET_IO_CORE_HDR) $(PIC_TARGET_
 
 .PHONY: pic10f322-test-io
 pic10f322-test-io: variant-selectors-valid pic10f322
-	@if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
-		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC target-I/O test"; $(SKIP); \
-	fi; \
-	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
-		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC target-I/O test (install gpsim-dev)"; $(SKIP); \
-	fi; \
-	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
-		echo "libglib2.0-dev not found; skipping PIC target-I/O test (install libglib2.0-dev)"; $(SKIP); \
-	fi; \
+	@$(call pic_libgpsim_preflight_sh,$(PIC_SOAK_CXX),$(PIC_SOAK_GPSIM_INC),PIC target-I/O test); \
 	if [ ! -f "$(PIC10F322_IO_HEX)" ]; then \
 		echo "no $(PIC10F322_IO_HEX) (XC8 absent?); skipping PIC target-I/O for variant $(PIC10F322_IO_VARIANT)"; $(SKIP); \
 	fi; \
@@ -3160,7 +3124,8 @@ TEST_GATES_LATE = \
         test-pic12f675-flash-helper \
 		test-build-serialization test-target-matrix \
 		test-target-lane-markers test-pic-target-result-records \
-		test-lockstep-progress test-soak-timing \
+		test-lockstep-progress test-soak-timing test-xc8-helpers \
+		test-pic-toolchain-assert \
         test-variant-map-contract test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
         test-resource-tables \
         test-pinout-alignment test-misra-output-contract \
@@ -3290,6 +3255,15 @@ test-supply-chain:
 test-pic-build:
 	./test/test_pic_build.sh pic10f322 pic10f320 pic12f675
 
+# Dependency-free malformed/duplicate/ambiguous fixtures for the two shared XC8
+# transcript/sidecar helpers used by the PIC build and target lanes.
+test-xc8-helpers:
+	./test/test_xc8_helpers.sh
+
+# Behavioral contract for the one hosted/local PIC toolchain assertion helper.
+test-pic-toolchain-assert:
+	./test/test_pic_toolchain_assert.sh
+
 # Exact-set and hash checks for the tag workflow's committed/listed/fresh images.
 test-release-images:
 	./test/test_release_images.sh
@@ -3395,7 +3369,7 @@ test-ci-local-routing:
 # supply its own PIC_FAULT_WDT_NOTE and the core must consume it, so the
 # PIC12F675 lane no longer reports the PIC10F32x period. Reads source only.
 test-fault-wdt-note-contract:
-	./test/test_fault_wdt_note_contract.sh
+	@python3 test/test_fault_wdt_note_contract.py
 
 test-variant-map-contract:
 	./test/test_variant_map_contract.sh
@@ -4748,7 +4722,8 @@ pic10f320: variant-selectors-valid $(PIC10F320_SRC)
 	@# own recipe line, a missing XC8 would print "skipping" and then Make would
 	@# run the NEXT line and try to compile with it anyway. That is exactly what
 	@# happened until test/test_strict_tools.sh grew a PIC inventory and caught it.
-	@if [ ! -x "$(PIC10F320_CC)" ] && ! command -v $(PIC10F320_CC) >/dev/null 2>&1; then \
+	@$(xc8_program_space_parser_check_sh); \
+	if [ ! -x "$(PIC10F320_CC)" ] && ! command -v $(PIC10F320_CC) >/dev/null 2>&1; then \
 		echo "XC8 not found at $(PIC10F320_CC) (override with PIC10F320_CC=...)"; $(SKIP); \
 	fi; \
 	mkdir -p $(PIC10F320_BUILD_DIR); \
@@ -4792,13 +4767,10 @@ pic10f320: variant-selectors-valid $(PIC10F320_SRC)
 	if ! '$(IHEX_VALIDATOR_ARG)' "$$hex"; then \
 		echo "FAIL: XC8 produced an invalid Intel HEX image: $$hex"; exit 1; \
 	fi; \
-	dec=`printf '%s\n' "$$out" | grep -E 'Program space' \
-		| grep -oE '\( *[0-9]+ *\)' | head -1 | tr -d '() '`; \
-	if [ -z "$$dec" ]; then \
-		echo "FAIL: could not parse program-word count from XC8 output:"; \
+	if ! dec=`printf '%s\n' "$$out" | "$(XC8_PROGRAM_SPACE_PARSER)"`; then \
+		echo "FAIL: invalid XC8 program-space summary:"; \
 		printf '%s\n' "$$out"; exit 1; \
 	fi; \
-	while [ "$${#dec}" -gt 1 ] && [ "$${dec#0}" != "$$dec" ]; do dec=$${dec#0}; done; \
 	over_budget=0; \
 	if [ "$${#dec}" -gt "$${#budget}" ]; then over_budget=1; \
 	elif [ "$${#dec}" -eq "$${#budget}" ]; then \
@@ -4924,6 +4896,7 @@ pic10f320-size: variant-selectors-valid $(PIC10F320_SRC)
 		done; \
 	}; \
 	remove_probe || exit 1; \
+	$(xc8_program_space_parser_check_sh); \
 	if [ ! -x "$(PIC10F320_CC)" ] && ! command -v "$(PIC10F320_CC)" >/dev/null 2>&1; then \
 		echo "XC8 not found at $(PIC10F320_CC) (override with PIC10F320_CC=...)"; $(SKIP); \
 	fi; \
@@ -4946,7 +4919,7 @@ pic10f320-size: variant-selectors-valid $(PIC10F320_SRC)
 	if ! '$(IHEX_VALIDATOR_ARG)' "$$probe"; then \
 		echo "FAIL: XC8 produced an invalid Intel HEX size probe: $$probe"; exit 1; \
 	fi; \
-	if ! printf '%s\n' "$$out" | grep -qE 'Program space'; then \
+	if ! printf '%s\n' "$$out" | "$(XC8_PROGRAM_SPACE_PARSER)" >/dev/null; then \
 		echo "FAIL: XC8 output contained no parseable program-space summary:"; \
 		printf '%s\n' "$$out"; exit 1; \
 	fi; \
@@ -5073,15 +5046,12 @@ PIC10F320_FAULT_SRC = $(PIC10F320_GPSIM_DIR)/test_fault_pic.cc
 PIC10F320_FAULT_BIN = $(PIC10F320_BUILD_DIR)/test_fault_pic
 PIC10F320_FAULT_HEX = $(call pic10f320_hex_of,$(PIC10F320_FAULT_VARIANT))
 PIC10F320_FAULT_SYM = $(PIC10F320_FAULT_HEX:.hex=.sym)
-# _ctx_'s SRAM address from the XC8 .sym, so the harness self-adjusts per variant
-# instead of hard-coding it. Empty when the .sym is absent; the run recipe fails
-# rather than silently dropping the ctx_ cases.
-PIC10F320_FAULT_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC10F320_FAULT_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DCTX_ADDR=0x$$a)
+PIC10F320_FAULT_ASM = $(PIC10F320_FAULT_HEX:.hex=.s)
 PIC10F320_FAULT_COMPILE = $(PIC10F320_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
 		-isystem $(PIC10F320_SOAK_GPSIM_INC) -Itest \
 		-DFW_PATH='"$(CURDIR)/$(PIC10F320_FAULT_HEX)"' -DPROC_NAME='"$(PIC10F320_GPSIM_PROC)"' \
 		-DF_CPU_HZ=$(PIC10F320_XTAL) -D$(call pic10f320_macro_of,$(PIC10F320_FAULT_VARIANT)) \
-		$(PIC10F320_FAULT_CTX_DEF) $(PIC10F320_FAULT_SRC) -o $(PIC10F320_FAULT_BIN) -lgpsim
+		-DCTX_ADDR=0x$$ctx_addr $(PIC10F320_FAULT_SRC) -o $(PIC10F320_FAULT_BIN) -lgpsim
 $(PIC10F320_FAULT_BIN): $(PIC10F320_FAULT_SRC) $(PIC_TARGET_FAULT_CORE_HDR) $(PIC_TARGET_RESULT_HDR)
 
 PIC10F320_IO_SRC = $(PIC10F320_GPSIM_DIR)/test_io_pic.cc
@@ -5098,10 +5068,10 @@ PIC10F320_LOCKSTEP_SRC = $(PIC10F320_GPSIM_DIR)/test_lockstep_pic.cc
 PIC10F320_LOCKSTEP_BIN = $(PIC10F320_BUILD_DIR)/test_lockstep_pic
 PIC10F320_LOCKSTEP_HEX = $(call pic10f320_hex_of,$(PIC10F320_LOCKSTEP_VARIANT))
 PIC10F320_LOCKSTEP_SYM = $(PIC10F320_LOCKSTEP_HEX:.hex=.sym)
+PIC10F320_LOCKSTEP_ASM = $(PIC10F320_LOCKSTEP_HEX:.hex=.s)
 # Lock-step compares the running image's ctx_ against the SHARED verified core,
 # so it links src/bypass_pure.c -- never a vendored copy (Principle 2).
 PIC10F320_LOCKSTEP_MODEL_OBJ = $(PIC10F320_BUILD_DIR)/bypass_pure_lockstep.o
-PIC10F320_LOCKSTEP_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC10F320_LOCKSTEP_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DCTX_ADDR=0x$$a)
 PIC10F320_LOCKSTEP_COMPILE = \
 		$(HOSTCC) $(PURE_HOST_CFLAGS) -std=c11 -O2 -Itest -c $(PURE_HOST_SRC) \
 			-o $(PIC10F320_LOCKSTEP_MODEL_OBJ) && \
@@ -5109,7 +5079,7 @@ PIC10F320_LOCKSTEP_COMPILE = \
 			-isystem $(PIC10F320_SOAK_GPSIM_INC) -Itest -Isrc \
 			-DFW_PATH='"$(CURDIR)/$(PIC10F320_LOCKSTEP_HEX)"' -DPROC_NAME='"$(PIC10F320_GPSIM_PROC)"' \
 			-DF_CPU_HZ=$(PIC10F320_XTAL) -D$(call pic10f320_macro_of,$(PIC10F320_LOCKSTEP_VARIANT)) \
-			$(PIC10F320_LOCKSTEP_CTX_DEF) \
+			-DCTX_ADDR=0x$$ctx_addr \
 			$(PIC10F320_LOCKSTEP_SRC) $(PIC10F320_LOCKSTEP_MODEL_OBJ) \
 			-o $(PIC10F320_LOCKSTEP_BIN) -lgpsim
 $(PIC10F320_LOCKSTEP_BIN): $(PIC10F320_LOCKSTEP_SRC) $(PIC_TARGET_LOCKSTEP_CORE_HDR) $(PIC_TARGET_RESULT_HDR)
@@ -5291,54 +5261,28 @@ _pic10f320-build-soak: variant-selectors-valid
 	@$(MAKE) --no-print-directory PIC10F320_VARIANT=$(PIC10F320_SOAK_VARIANT) pic10f320
 
 pic10f320-test-fault-target: variant-selectors-valid _pic10f320-build-fault-target
-	@if ! command -v $(PIC10F320_SOAK_CXX) >/dev/null 2>&1; then \
-		echo "no C++ compiler ($(PIC10F320_SOAK_CXX)); skipping PIC10F320 target fault-inject"; $(SKIP); \
-	fi; \
-	if [ ! -f "$(PIC10F320_SOAK_GPSIM_INC)/sim_context.h" ]; then \
-		echo "gpsim-dev headers not at $(PIC10F320_SOAK_GPSIM_INC); skipping (install gpsim-dev)"; $(SKIP); \
-	fi; \
-	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
-		echo "libglib2.0-dev not found; skipping PIC10F320 target fault-inject"; $(SKIP); \
-	fi; \
+	@$(call pic_libgpsim_preflight_sh,$(PIC10F320_SOAK_CXX),$(PIC10F320_SOAK_GPSIM_INC),PIC10F320 target fault-inject); \
 	if [ ! -f "$(PIC10F320_FAULT_HEX)" ]; then \
 		echo "no $(PIC10F320_FAULT_HEX) (XC8 absent?); skipping"; $(SKIP); \
 	fi; \
-	s="$(PIC10F320_FAULT_HEX:.hex=.s)"; \
-	alloc=`awk 'prev=="_ctx_:"{print $$2; exit} {prev=$$1}' "$$s" 2>/dev/null`; \
-	if [ "$$alloc" != "3" ]; then \
-		echo "FAIL: _ctx_ allocates $${alloc:-?} bytes in $$s -- expected 3 (packed 1-byte enums)."; \
-		echo "      The harness injects at ctx_+0/+1/+2; XC8's code generator has"; \
-		echo "      stopped packing enums to 1 byte. Fix the offsets before running."; \
-		exit 1; \
-	fi; \
-	if [ -z "$(PIC10F320_FAULT_CTX_DEF)" ]; then \
-		echo "FAIL: could not resolve _ctx_ from $(PIC10F320_FAULT_SYM); refusing to run with the SRAM cases omitted"; exit 1; \
-	fi; \
+	rm -f $(PIC10F320_FAULT_BIN) || exit 1; \
+	ctx_addr=`$(PIC_CONTEXT_LAYOUT_CHECK) "$(PIC10F320_FAULT_ASM)" "$(PIC10F320_FAULT_SYM)"` || exit 1; \
 	$(PIC10F320_FAULT_COMPILE) && $(PIC10F320_FAULT_BIN)
 
 pic10f320-test-io: variant-selectors-valid _pic10f320-build-io
-	@if ! command -v $(PIC10F320_SOAK_CXX) >/dev/null 2>&1 \
-	   || [ ! -f "$(PIC10F320_SOAK_GPSIM_INC)/sim_context.h" ] \
-	   || ! pkg-config --exists glib-2.0 2>/dev/null; then \
-		echo "C++/gpsim-dev/glib not available; skipping PIC10F320 target I/O"; $(SKIP); \
-	fi; \
+	@$(call pic_libgpsim_preflight_sh,$(PIC10F320_SOAK_CXX),$(PIC10F320_SOAK_GPSIM_INC),PIC10F320 target I/O); \
 	if [ ! -f "$(PIC10F320_IO_HEX)" ]; then \
 		echo "no $(PIC10F320_IO_HEX) (XC8 absent?); skipping"; $(SKIP); \
 	fi; \
 	$(PIC10F320_IO_COMPILE) && $(PIC10F320_IO_BIN)
 
 pic10f320-test-lockstep: variant-selectors-valid _pic10f320-build-lockstep
-	@if ! command -v $(PIC10F320_SOAK_CXX) >/dev/null 2>&1 \
-	   || [ ! -f "$(PIC10F320_SOAK_GPSIM_INC)/sim_context.h" ] \
-	   || ! pkg-config --exists glib-2.0 2>/dev/null; then \
-		echo "C++/gpsim-dev/glib not available; skipping PIC10F320 lock-step"; $(SKIP); \
-	fi; \
+	@$(call pic_libgpsim_preflight_sh,$(PIC10F320_SOAK_CXX),$(PIC10F320_SOAK_GPSIM_INC),PIC10F320 lock-step); \
 	if [ ! -f "$(PIC10F320_LOCKSTEP_HEX)" ]; then \
 		echo "no $(PIC10F320_LOCKSTEP_HEX) (XC8 absent?); skipping"; $(SKIP); \
 	fi; \
-	if [ -z "$(PIC10F320_LOCKSTEP_CTX_DEF)" ]; then \
-		echo "FAIL: could not resolve _ctx_ from $(PIC10F320_LOCKSTEP_SYM); refusing to run blind"; exit 1; \
-	fi; \
+	rm -f $(PIC10F320_LOCKSTEP_BIN) || exit 1; \
+	ctx_addr=`$(PIC_CONTEXT_LAYOUT_CHECK) "$(PIC10F320_LOCKSTEP_ASM)" "$(PIC10F320_LOCKSTEP_SYM)"` || exit 1; \
 	$(PIC10F320_LOCKSTEP_COMPILE) && $(PIC10F320_LOCKSTEP_BIN)
 
 # All-variant HOST fault aggregate -- the PIC10F320 analogue of the child's
@@ -5481,11 +5425,7 @@ $(PIC10F320_SOAK_BIN): $(PIC10F320_SOAK_DEPS) FORCE
 
 .PHONY: pic10f320-test-soak
 pic10f320-test-soak: variant-selectors-valid _pic10f320-build-soak
-	@if ! command -v $(PIC10F320_SOAK_CXX) >/dev/null 2>&1 \
-	   || [ ! -f "$(PIC10F320_SOAK_GPSIM_INC)/sim_context.h" ] \
-	   || ! pkg-config --exists glib-2.0 2>/dev/null; then \
-		echo "C++/gpsim-dev/glib not available; skipping PIC10F320 soak"; $(SKIP); \
-	fi; \
+	@$(call pic_libgpsim_preflight_sh,$(PIC10F320_SOAK_CXX),$(PIC10F320_SOAK_GPSIM_INC),PIC10F320 soak); \
 	if [ ! -f "$(PIC10F320_SOAK_HEX)" ]; then \
 		echo "no $(PIC10F320_SOAK_HEX) (XC8 absent?); skipping PIC10F320 soak"; $(SKIP); \
 	fi; \
@@ -5663,6 +5603,7 @@ pic12f675: $(PIC12F675_CORE_SRC) $(PIC12F675_HEADERS) $(foreach v,$(CLASSIC_VARI
 	@rm -f "$(PIC12F675_BUILD_DIR)"/"$(FW_BASE)-$(PIC12F675_TAG)-"*.hex \
 		"$(PIC12F675_BUILD_DIR)"/"$(FW_BASE)-$(PIC12F675_TAG)-"*.s \
 		"$(PIC12F675_BUILD_DIR)"/"$(FW_BASE)-$(PIC12F675_TAG)-"*.sym
+	@$(xc8_program_space_parser_check_sh)
 	@if [ ! -f "$(PIC12F675_DATA_BUDGET_GATE)" ] \
 			|| [ -L "$(PIC12F675_DATA_BUDGET_GATE)" ] \
 			|| [ ! -x "$(PIC12F675_DATA_BUDGET_GATE)" ]; then \
@@ -5731,15 +5672,10 @@ pic12f675: $(PIC12F675_CORE_SRC) $(PIC12F675_HEADERS) $(foreach v,$(CLASSIC_VARI
 			echo "FAIL: $$v: invalid or over-budget PIC12F675 data-space usage"; \
 			rm -f "$$hex"; fail=1; continue; \
 		fi; \
-		dec=`printf '%s\n' "$$out" | grep -E 'Program space' \
-			| grep -oE '\( *[0-9]+ *\)' | head -1 | tr -d '() '`; \
-		if [ -z "$$dec" ]; then \
-			echo "FAIL: $$v: could not parse program-word count from XC8 output:"; \
+		if ! dec=`printf '%s\n' "$$out" | "$(XC8_PROGRAM_SPACE_PARSER)"`; then \
+			echo "FAIL: $$v: invalid XC8 program-space summary:"; \
 			printf '%s\n' "$$out"; rm -f "$$hex"; fail=1; continue; \
 		fi; \
-		while [ "$${#dec}" -gt 1 ] && [ "$${dec#0}" != "$$dec" ]; do \
-			dec=$${dec#0}; \
-		done; \
 		over_budget=0; \
 		if [ "$${#dec}" -gt "$${#budget}" ]; then \
 			over_budget=1; \
@@ -5963,15 +5899,7 @@ $(PIC12F675_IO_BIN): $(PIC12F675_IO_SRC) $(PIC_TARGET_IO_CORE_HDR) $(PIC_TARGET_
 .PHONY: pic12f675-test-io
 pic12f675-test-io: variant-selectors-valid pic12f675-simcal
 	@$(pic12f675_simcal_matrix_sh); \
-	if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
-		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC12F675 target-I/O test"; $(SKIP); \
-	fi; \
-	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
-		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC12F675 target-I/O test (install gpsim-dev)"; $(SKIP); \
-	fi; \
-	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
-		echo "libglib2.0-dev not found; skipping PIC12F675 target-I/O test (install libglib2.0-dev)"; $(SKIP); \
-	fi; \
+	$(call pic_libgpsim_preflight_sh,$(PIC_SOAK_CXX),$(PIC_SOAK_GPSIM_INC),PIC12F675 target-I/O test); \
 	if [ ! -f "$(PIC12F675_IO_HEX)" ]; then \
 		echo "no $(PIC12F675_IO_HEX) (XC8 absent?); skipping PIC12F675 target-I/O for variant $(PIC12F675_IO_VARIANT)"; $(SKIP); \
 	fi; \
@@ -6022,7 +5950,6 @@ PIC12F675_LOCKSTEP_HEX = $(PIC12F675_SIMCAL_DIR)/$(PIC12F675_LOCKSTEP_STEM)_simc
 # assembly of its own.
 PIC12F675_LOCKSTEP_SYM = $(PIC12F675_BUILD_DIR)/$(PIC12F675_LOCKSTEP_STEM).sym
 PIC12F675_LOCKSTEP_ASM = $(PIC12F675_BUILD_DIR)/$(PIC12F675_LOCKSTEP_STEM).s
-PIC12F675_LOCKSTEP_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC12F675_LOCKSTEP_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DCTX_ADDR=0x$$a)
 # The mkdir is not ceremony: the model object lands in the target build
 # directory, which only the `pic12f675` build target creates, and this recipe is
 # also reachable as a plain file target.
@@ -6035,43 +5962,27 @@ PIC12F675_LOCKSTEP_COMPILE = \
 			-DFW_PATH='"$(CURDIR)/$(PIC12F675_LOCKSTEP_HEX)"' -DPROC_NAME='"$(PIC12F675_GPSIM_PROC)"' \
 			-DPIC_TARGET_RESULT_DEVICE='"pic12f675"' \
 			-DPIC_TARGET_RESULT_VARIANT='"$(PIC12F675_LOCKSTEP_VARIANT)"' \
-			-DF_CPU_HZ=$(PIC12F675_XTAL) $(PIC12F675_LOCKSTEP_CTX_DEF) \
+			-DF_CPU_HZ=$(PIC12F675_XTAL) -DCTX_ADDR=0x$$ctx_addr \
 			$(PIC12F675_LOCKSTEP_SRC) $(PIC12F675_LOCKSTEP_MODEL_OBJ) \
 			-o $(PIC12F675_LOCKSTEP_BIN) -lgpsim
 
 $(PIC12F675_LOCKSTEP_BIN): $(PIC12F675_LOCKSTEP_SRC) $(PIC_TARGET_LOCKSTEP_CORE_HDR) $(PIC_TARGET_RESULT_HDR) \
                      $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
                      $(PIC12F675_REGS_HDR) $(PURE_HOST_DEP)
+	@rm -f $(PIC12F675_LOCKSTEP_BIN) || exit 1; \
+	ctx_addr=`$(PIC_CONTEXT_LAYOUT_CHECK) "$(PIC12F675_LOCKSTEP_ASM)" "$(PIC12F675_LOCKSTEP_SYM)"` || exit 1; \
 	$(PIC12F675_LOCKSTEP_COMPILE)
 
 .PHONY: pic12f675-test-lockstep
 pic12f675-test-lockstep: variant-selectors-valid pic12f675-simcal
 	@$(pic12f675_simcal_matrix_sh); \
-	if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
-		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC12F675 lock-step"; $(SKIP); \
-	fi; \
-	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
-		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC12F675 lock-step (install gpsim-dev)"; $(SKIP); \
-	fi; \
-	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
-		echo "libglib2.0-dev not found; skipping PIC12F675 lock-step (install libglib2.0-dev)"; $(SKIP); \
-	fi; \
+	$(call pic_libgpsim_preflight_sh,$(PIC_SOAK_CXX),$(PIC_SOAK_GPSIM_INC),PIC12F675 lock-step); \
 	if [ ! -f "$(PIC12F675_LOCKSTEP_HEX)" ]; then \
 		echo "no $(PIC12F675_LOCKSTEP_HEX) (XC8 absent?); skipping PIC12F675 lock-step for variant $(PIC12F675_LOCKSTEP_VARIANT)"; $(SKIP); \
 	fi; \
-	alloc=`awk 'prev=="_ctx_:"{print $$2; exit} {prev=$$1}' "$(PIC12F675_LOCKSTEP_ASM)" 2>/dev/null`; \
-	if [ "$$alloc" != "3" ]; then \
-		echo "FAIL: _ctx_ allocates $${alloc:-?} bytes in $(PIC12F675_LOCKSTEP_ASM) -- expected 3 (packed 1-byte enums)."; \
-		echo "      test_lockstep_pic12f675.cc reads ctx_+0/+1/+2; fix offsets if packing changed."; \
-		exit 1; \
-	fi; \
-	ctx_addr=`awk '$$1=="_ctx_"{print $$2; exit}' "$(PIC12F675_LOCKSTEP_SYM)" 2>/dev/null`; \
-	if [ -z "$$ctx_addr" ]; then \
-		echo "FAIL: _ctx_ symbol not found in $(PIC12F675_LOCKSTEP_SYM); lock-step cannot read firmware state."; \
-		exit 1; \
-	fi; \
+	rm -f $(PIC12F675_LOCKSTEP_BIN) || exit 1; \
+	ctx_addr=`$(PIC_CONTEXT_LAYOUT_CHECK) "$(PIC12F675_LOCKSTEP_ASM)" "$(PIC12F675_LOCKSTEP_SYM)"` || exit 1; \
 	echo "--- PIC12F675 lock-step: variant=$(PIC12F675_LOCKSTEP_VARIANT) proc=$(PIC12F675_GPSIM_PROC) (ctx_ at 0x$$ctx_addr, layout verified: 3 bytes) ---"; \
-	rm -f $(PIC12F675_LOCKSTEP_BIN) && \
 	$(PIC12F675_LOCKSTEP_COMPILE) && \
 	./$(PIC12F675_LOCKSTEP_BIN)
 
@@ -6113,11 +6024,8 @@ PIC12F675_FAULT_HEX = $(PIC12F675_SIMCAL_DIR)/$(PIC12F675_FAULT_STEM)_simcal.hex
 # assembly of its own.
 PIC12F675_FAULT_SYM = $(PIC12F675_BUILD_DIR)/$(PIC12F675_FAULT_STEM).sym
 PIC12F675_FAULT_ASM = $(PIC12F675_BUILD_DIR)/$(PIC12F675_FAULT_STEM).s
-# A $(shell) in these recursive (=) variables re-runs when the compile command
-# below is expanded, so a rebuilt .sym is picked up without re-entering make.
-# Empty when the symbol is absent; the run recipe FAILS closed on that, and the
-# adapter will not compile without the shadow address.
-PIC12F675_FAULT_CTX_DEF = $(shell a=$$(awk '$$1=="_ctx_"{print $$2; exit}' $(PIC12F675_FAULT_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DCTX_ADDR=0x$$a)
+# gpio_shadow_ remains a separate, part-specific fact. The shared context helper
+# validates only the common _ctx_ allocation and address contract.
 PIC12F675_FAULT_SHADOW_DEF = $(shell a=$$(awk '$$1=="_gpio_shadow_"{print $$2; exit}' $(PIC12F675_FAULT_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DPIC_SHADOW_ADDR=0x$$a)
 PIC12F675_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags glib-2.0) \
 		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
@@ -6125,42 +6033,26 @@ PIC12F675_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags 
 		-DPIC_TARGET_RESULT_DEVICE='"pic12f675"' \
 		-DPIC_TARGET_RESULT_VARIANT='"$(PIC12F675_FAULT_VARIANT)"' \
 		-DF_CPU_HZ=$(PIC12F675_XTAL) -D$(macro_$(PIC12F675_FAULT_VARIANT)) \
-		$(PIC12F675_FAULT_CTX_DEF) $(PIC12F675_FAULT_SHADOW_DEF) \
+		-DCTX_ADDR=0x$$ctx_addr $(PIC12F675_FAULT_SHADOW_DEF) \
 		$(BYPASS_CTX_CHECK_FLAG) \
 		$(PIC12F675_FAULT_SRC) -o $(PIC12F675_FAULT_BIN) -lgpsim
 
 $(PIC12F675_FAULT_BIN): $(PIC12F675_FAULT_SRC) $(PIC_TARGET_FAULT_CORE_HDR) $(PIC_TARGET_RESULT_HDR) \
                   $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
                   $(PIC12F675_REGS_HDR) $(PIC12F675_FAULT_MATRIX_HDR)
+	@rm -f $(PIC12F675_FAULT_BIN) || exit 1; \
+	ctx_addr=`$(PIC_CONTEXT_LAYOUT_CHECK) "$(PIC12F675_FAULT_ASM)" "$(PIC12F675_FAULT_SYM)"` || exit 1; \
 	$(PIC12F675_FAULT_COMPILE)
 
 .PHONY: pic12f675-test-fault
 pic12f675-test-fault: variant-selectors-valid pic12f675-simcal
 	@$(pic12f675_simcal_matrix_sh); \
-	if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
-		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC12F675 fault-inject"; $(SKIP); \
-	fi; \
-	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
-		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC12F675 fault-inject (install gpsim-dev)"; $(SKIP); \
-	fi; \
-	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
-		echo "libglib2.0-dev not found; skipping PIC12F675 fault-inject (install libglib2.0-dev)"; $(SKIP); \
-	fi; \
+	$(call pic_libgpsim_preflight_sh,$(PIC_SOAK_CXX),$(PIC_SOAK_GPSIM_INC),PIC12F675 fault-inject); \
 	if [ ! -f "$(PIC12F675_FAULT_HEX)" ]; then \
 		echo "no $(PIC12F675_FAULT_HEX) (XC8 absent?); skipping PIC12F675 fault-inject for variant $(PIC12F675_FAULT_VARIANT)"; $(SKIP); \
 	fi; \
-	alloc=`awk 'prev=="_ctx_:"{print $$2; exit} {prev=$$1}' "$(PIC12F675_FAULT_ASM)" 2>/dev/null`; \
-	if [ "$$alloc" != "3" ]; then \
-		echo "FAIL: _ctx_ allocates $${alloc:-?} bytes in $(PIC12F675_FAULT_ASM) -- expected 3 (packed 1-byte enums)."; \
-		echo "      test_fault_pic12f675.cc injects at the hard-coded byte offsets ctx_+0/+1/+2"; \
-		echo "      (program_state / effect_state / debounce_counter); fix them if packing changed."; \
-		exit 1; \
-	fi; \
-	ctx_addr=`awk '$$1=="_ctx_"{print $$2; exit}' "$(PIC12F675_FAULT_SYM)" 2>/dev/null`; \
-	if [ -z "$$ctx_addr" ]; then \
-		echo "FAIL: _ctx_ symbol not found in $(PIC12F675_FAULT_SYM); ctx_ SRAM fault cases would be omitted."; \
-		exit 1; \
-	fi; \
+	rm -f $(PIC12F675_FAULT_BIN) || exit 1; \
+	ctx_addr=`$(PIC_CONTEXT_LAYOUT_CHECK) "$(PIC12F675_FAULT_ASM)" "$(PIC12F675_FAULT_SYM)"` || exit 1; \
 	shadow_addr=`awk '$$1=="_gpio_shadow_"{print $$2; exit}' "$(PIC12F675_FAULT_SYM)" 2>/dev/null`; \
 	if [ -z "$$shadow_addr" ]; then \
 		echo "FAIL: _gpio_shadow_ symbol not found in $(PIC12F675_FAULT_SYM)."; \
@@ -6169,7 +6061,6 @@ pic12f675-test-fault: variant-selectors-valid pic12f675-simcal
 		exit 1; \
 	fi; \
 	echo "--- PIC12F675 fault-inject: variant=$(PIC12F675_FAULT_VARIANT) proc=$(PIC12F675_GPSIM_PROC) (ctx_ at 0x$$ctx_addr, gpio_shadow_ at 0x$$shadow_addr, layout verified: 3 bytes) ---"; \
-	rm -f $(PIC12F675_FAULT_BIN) && \
 	$(PIC12F675_FAULT_COMPILE) && \
 	./$(PIC12F675_FAULT_BIN)
 
@@ -6282,15 +6173,7 @@ $(PIC12F675_SOAK_BIN): $(PIC12F675_SOAK_DEPS) _pic12f675-build-soak FORCE | vari
 .PHONY: pic12f675-test-soak
 pic12f675-test-soak: variant-selectors-valid pic12f675-simcal
 	@$(pic12f675_simcal_matrix_sh); \
-	if ! command -v $(PIC_SOAK_CXX) >/dev/null 2>&1; then \
-		echo "no C++ compiler ($(PIC_SOAK_CXX)); skipping PIC12F675 soak"; $(SKIP); \
-	fi; \
-	if [ ! -f "$(PIC_SOAK_GPSIM_INC)/sim_context.h" ]; then \
-		echo "gpsim-dev headers not at $(PIC_SOAK_GPSIM_INC); skipping PIC12F675 soak (install gpsim-dev)"; $(SKIP); \
-	fi; \
-	if ! pkg-config --exists glib-2.0 2>/dev/null; then \
-		echo "libglib2.0-dev not found; skipping PIC12F675 soak (install libglib2.0-dev)"; $(SKIP); \
-	fi; \
+	$(call pic_libgpsim_preflight_sh,$(PIC_SOAK_CXX),$(PIC_SOAK_GPSIM_INC),PIC12F675 soak); \
 	if [ $$simcal_count -eq 0 ]; then \
 		echo "no PIC12F675 simulator images (XC8 absent?); skipping PIC12F675 soak for variant $(PIC12F675_SOAK_VARIANT)"; $(SKIP); \
 	fi; \

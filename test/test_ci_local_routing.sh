@@ -38,10 +38,10 @@ mkdir -p "$fakebin" "$work/dfp/pic/include/proc" "$work/gpsim-inc" \
 # through their own PIC_*/PIC10F320_* pairs and the 12F675 through the 322's
 # pair, so a fake DFP missing any one of them would fail the assert before any
 # routing was exercised.
-: > "$work/dfp/pic/include/proc/pic10f322.h"
-: > "$work/dfp/pic/include/proc/pic10f320.h"
-: > "$work/dfp/pic/include/proc/pic12f675.h"
-: > "$work/gpsim-inc/sim_context.h"
+printf '/* fixture */\n' > "$work/dfp/pic/include/proc/pic10f322.h"
+printf '/* fixture */\n' > "$work/dfp/pic/include/proc/pic10f320.h"
+printf '/* fixture */\n' > "$work/dfp/pic/include/proc/pic12f675.h"
+printf '/* fixture */\n' > "$work/gpsim-inc/sim_context.h"
 : > "$work/xt-dfp/gcc/dev/attiny202/device-specs/specs-attiny202"
 : > "$work/xt-dfp/include/avr/iotn202.h"
 
@@ -112,7 +112,7 @@ EOF
 # regression would start depending on which analyzers happen to be installed on
 # the box running it, and would fail on a machine that legitimately lacks, say,
 # cbmc -- turning a routing test into a toolchain test.
-for tool in gpsim cppcheck pkg-config cc clang clang-tidy cbmc gcov python3 gpg avr-objdump; do
+for tool in gpsim cppcheck pkg-config c++ cc clang clang-tidy cbmc gcov python3 gpg avr-objdump; do
 	cat > "$fakebin/$tool" <<'EOF'
 #!/usr/bin/env bash
 exit 0
@@ -141,11 +141,12 @@ chmod 750 "$fakebin"/* "$work/xc8" "$work/yasimavr-venv/bin/python"
 
 run_ci() {
 	: > "$log"
-	env PATH="$fakebin:$PATH" FAKE_REPO_ROOT="$ROOT" FAKE_MAKE_LOG="$log" \
+		env PATH="$fakebin:$PATH" FAKE_REPO_ROOT="$ROOT" FAKE_MAKE_LOG="$log" \
 		REAL_MAKE="$REAL_MAKE" \
 		PIC_CC="$work/xc8" PIC_DFP="$work/dfp" \
 		PIC10F320_CC="$work/xc8" PIC10F320_DFP="$work/dfp" \
 		PIC_SOAK_GPSIM_INC="$work/gpsim-inc" \
+		PIC10F320_SOAK_GPSIM_INC="${PIC10F320_SOAK_GPSIM_INC:-$work/gpsim-inc}" \
 		SIMAVR_INC="$work/simavr-inc" \
 		XT_DFP="$work/xt-dfp" YASIMAVR_VENV="$work/yasimavr-venv" \
 		"$CI_LOCAL" --no-clean "$@" 2>&1
@@ -153,11 +154,12 @@ run_ci() {
 
 run_ci_clean() {
 	: > "$log"
-	env PATH="$fakebin:$PATH" FAKE_REPO_ROOT="$ROOT" FAKE_MAKE_LOG="$log" \
+		env PATH="$fakebin:$PATH" FAKE_REPO_ROOT="$ROOT" FAKE_MAKE_LOG="$log" \
 		REAL_MAKE="$REAL_MAKE" \
 		PIC_CC="$work/xc8" PIC_DFP="$work/dfp" \
 		PIC10F320_CC="$work/xc8" PIC10F320_DFP="$work/dfp" \
 		PIC_SOAK_GPSIM_INC="$work/gpsim-inc" \
+		PIC10F320_SOAK_GPSIM_INC="${PIC10F320_SOAK_GPSIM_INC:-$work/gpsim-inc}" \
 		SIMAVR_INC="$work/simavr-inc" \
 		XT_DFP="$work/xt-dfp" YASIMAVR_VENV="$work/yasimavr-venv" \
 		"$CI_LOCAL" "$@" 2>&1
@@ -210,8 +212,19 @@ expect_calls "push without skips" "${pic_calls[@]}" "$build_call" \
 	"${xt_calls[@]}" "$strict_stress"
 [[ "$output" != *"job was skipped"* ]] \
 	|| fail "push without skips emitted a skipped-job warning"
+[[ "$output" == *"PIC toolchain present: XC8/DFP, gpsim, libgpsim/GLib, cppcheck, and C++"* ]] \
+	|| fail "push without skips did not execute the shared PIC toolchain assertion"
 [[ "$output" != *"Safe to push"* && "$output" == *"not a full push reproduction"* ]] \
 	|| fail "push --no-clean claimed to be a clean push reproduction"
+checks=$((checks + 1))
+
+if output=$(PIC10F320_SOAK_GPSIM_INC="$work/missing-gpsim-inc" run_ci 2>&1); then
+	fail "push accepted a missing selected PIC10F320 libgpsim header"
+fi
+mapfile -t calls < "$log"
+[[ ${#calls[@]} -eq 0 \
+	&& $output == *"PIC10F320 libgpsim header is missing"* ]] \
+	|| fail "missing selected PIC10F320 libgpsim input did not fail in shared preflight: $output"
 checks=$((checks + 1))
 
 if ! output=$(run_ci_clean); then

@@ -1293,7 +1293,7 @@ may be valuable. Repeating the literal at every call site is not.
 
 ## BR-TEST-06 - Move repeated Make profiles into named test profiles
 
-**Status:** IN PROGRESS OpenCode
+**Status:** DONE `746ddcf`
 
 **Current candidates:**
 
@@ -1319,16 +1319,29 @@ may be valuable. Repeating the literal at every call site is not.
 
 ## BR-TEST-07 - Consolidate shared strict helpers and remove trivial wrappers
 
-**Status:** TODO
+**Status:** IN PROGRESS OpenCode
 
-**Candidates:**
+**Completed work:**
 
-- Remove five-line `test/test_fault_wdt_note_contract.sh`; invoke Python
+- [x] Remove five-line `test/test_fault_wdt_note_contract.sh`; invoke Python
   directly.
-- Extract common XC8 program-space transcript parsing.
-- Extract strict context-layout/symbol parsing used by PIC fault/lock-step lanes.
-- Parameterize repeated optional libgpsim compiler/header/library preflight.
-- Reuse one strict hosted/local toolchain assertion helper where semantics match.
+- [x] Extract one strict XC8 program-space transcript parser for all three build
+  producers and the PIC10F320 size probe. Require one internally consistent
+  record and reject missing, malformed, duplicate, mixed, zero, contradictory,
+  over-capacity, and percentage-mismatched input.
+- [x] Extract strict context-layout/symbol parsing used by all six PIC
+  fault/lock-step consumers. Resolve one non-symlink sidecar pair once at recipe
+  time, require exactly one `_ctx_: ds 3` allocation and one hexadecimal symbol,
+  remove stale harness output first, and pass that captured address to C++.
+- [x] Parameterize the twelve repeated optional libgpsim
+  compiler/header/library preflights while retaining each caller's prerequisite,
+  image, matrix, and lane-specific checks.
+- [x] Reuse one strict hosted/local PIC toolchain assertion helper with both
+  independently selectable XC8/DFP and C++/libgpsim surfaces explicit. Keep the
+  release workflow's differently scoped assertion and the stronger release
+  compile/link preflight separate.
+- [x] Add dependency-free malformed/duplicate/ambiguous helper fixtures and
+  behavioral routing coverage for every libgpsim consumer and both CI callers.
 
 **Do not consolidate:**
 
@@ -1378,8 +1391,10 @@ consume the correct pair.
 **Candidates:**
 
 - One common modular-header dependency list plus per-target pin header.
-- One repository-owned XC8 program-space transcript checker.
-- One strict XC8 `_ctx_` allocation/symbol extraction helper.
+- Reuse the repository-owned XC8 program-space transcript checker completed by
+  BR-TEST-07 while consolidating common Make dependencies.
+- Reuse the strict XC8 `_ctx_` allocation/symbol extraction helper completed by
+  BR-TEST-07 rather than introducing another parser.
 - Derive or verify soak blocking times from firmware constants rather than
   maintaining unverified Make copies.
 
@@ -1960,8 +1975,8 @@ dependencies and acceptance criteria.
 | BR-TEST-03 | Route CI through aggregates | DONE `b9cbd36` |
 | BR-TEST-04 | Centralize policy constants per surface | DONE `bc5f11d` |
 | BR-TEST-05 | Prefer behavioral fixtures | DONE `7aab253` |
-| BR-TEST-06 | Introduce named test profiles | IN PROGRESS OpenCode |
-| BR-TEST-07 | Consolidate strict helpers/wrappers | TODO |
+| BR-TEST-06 | Introduce named test profiles | DONE `746ddcf` |
+| BR-TEST-07 | Consolidate strict helpers/wrappers | IN PROGRESS OpenCode |
 | BR-TEST-08 | Generate recipes from variant maps | TODO |
 | BR-TEST-09 | Consolidate dependencies/parsers | TODO |
 | BR-QUALITY-01 | Define complete analysis matrix | TODO |

@@ -29,13 +29,12 @@ set -euo pipefail
 # entered directly and only $(GPSIM) decides the outcome. Same verdict on any
 # runner, XC8 or not.
 #
-# Still NOT covered, same prerequisite problem and no equivalent lever: the
-# libgpsim and soak recipes (pic10f320-test-fault-target, pic10f32{2,0}-test-soak, ...),
-# whose guards check headers, glib and a C++ compiler rather than one binary, and
-# which -o would strand mid-way (the harness still has to compile and link). That
-# remains a stated gap -- but a narrower one, and both chips' gpsim lanes now
-# share ONE preflight definition in the Makefile, so the specific failure above
-# (a probe present on one chip, absent on the other) is no longer expressible.
+# The twelve libgpsim/soak recipes are covered through their first shared
+# preflight decision. Marking only each build prerequisite old enters the real
+# consumer recipe without compiling an image; a missing selected C++ compiler
+# must then take the common $(SKIP) path before any header, image, or harness use.
+# This proves every consumer calls the helper while the helper's header/GLib
+# branches are exercised by its focused contract test.
 #
 # test_gpsim_wrappers.sh covers the same two public targets behaviourally --
 # which processor and which stimulus each hands to gpsim -- so the two files are
@@ -99,6 +98,7 @@ missing_cbmc="$work/missing-cbmc"
 missing_cppcheck="$work/missing-cppcheck"
 missing_xc8="$work/missing-xc8"
 missing_gpsim="$work/missing-gpsim"
+missing_cxx="$work/missing-cxx"
 
 expect_both test-cbmc "cbmc not installed" "CBMC=$missing_cbmc"
 expect_both analyze-cppcheck "cppcheck not installed" "CPPCHECK=$missing_cppcheck"
@@ -153,6 +153,73 @@ expect_both pic12f675-test-gpsim \
 	"gpsim not installed; skipping PIC12F675 gpsim register-level test" \
 	"GPSIM=$missing_gpsim" -o pic12f675-simcal
 
+# Every optional libgpsim recipe uses the same compiler/header/GLib preflight.
+expect_both pic10f322-test-soak "no C++ compiler ($missing_cxx); skipping PIC soak" \
+	"PIC_SOAK_CXX=$missing_cxx" -o pic10f322
+expect_both pic10f322-test-fault "no C++ compiler ($missing_cxx); skipping PIC fault-inject" \
+	"PIC_SOAK_CXX=$missing_cxx" -o pic10f322
+expect_both pic10f322-test-lockstep "no C++ compiler ($missing_cxx); skipping PIC lock-step" \
+	"PIC_SOAK_CXX=$missing_cxx" -o pic10f322
+expect_both pic10f322-test-io "no C++ compiler ($missing_cxx); skipping PIC target-I/O test" \
+	"PIC_SOAK_CXX=$missing_cxx" -o pic10f322
+
+expect_both pic10f320-test-fault-target "no C++ compiler ($missing_cxx); skipping PIC10F320 target fault-inject" \
+	"PIC10F320_SOAK_CXX=$missing_cxx" "PIC10F320_BUILD_DIR=$pic10f320_build" \
+	-o _pic10f320-build-fault-target
+expect_both pic10f320-test-io "no C++ compiler ($missing_cxx); skipping PIC10F320 target I/O" \
+	"PIC10F320_SOAK_CXX=$missing_cxx" "PIC10F320_BUILD_DIR=$pic10f320_build" \
+	-o _pic10f320-build-io
+expect_both pic10f320-test-lockstep "no C++ compiler ($missing_cxx); skipping PIC10F320 lock-step" \
+	"PIC10F320_SOAK_CXX=$missing_cxx" "PIC10F320_BUILD_DIR=$pic10f320_build" \
+	-o _pic10f320-build-lockstep
+expect_both pic10f320-test-soak "no C++ compiler ($missing_cxx); skipping PIC10F320 soak" \
+	"PIC10F320_SOAK_CXX=$missing_cxx" "PIC10F320_BUILD_DIR=$pic10f320_build" \
+	-o _pic10f320-build-soak
+
+expect_both pic12f675-test-io "no C++ compiler ($missing_cxx); skipping PIC12F675 target-I/O test" \
+	"PIC_SOAK_CXX=$missing_cxx" "PIC12F675_BUILD_DIR=$pic12f675_build" \
+	-o pic12f675-simcal
+expect_both pic12f675-test-lockstep "no C++ compiler ($missing_cxx); skipping PIC12F675 lock-step" \
+	"PIC_SOAK_CXX=$missing_cxx" "PIC12F675_BUILD_DIR=$pic12f675_build" \
+	-o pic12f675-simcal
+expect_both pic12f675-test-fault "no C++ compiler ($missing_cxx); skipping PIC12F675 fault-inject" \
+	"PIC_SOAK_CXX=$missing_cxx" "PIC12F675_BUILD_DIR=$pic12f675_build" \
+	-o pic12f675-simcal
+expect_both pic12f675-test-soak "no C++ compiler ($missing_cxx); skipping PIC12F675 soak" \
+	"PIC_SOAK_CXX=$missing_cxx" "PIC12F675_BUILD_DIR=$pic12f675_build" \
+	-o pic12f675-simcal
+
+# Exercise the remaining branches once through a real consumer. Every consumer
+# above proves helper routing; these pin the helper's strict header and GLib
+# decisions without duplicating the same fixture twelve times.
+fake_cxx="$work/fake-cxx"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_cxx"
+chmod 750 "$fake_cxx"
+missing_inc="$work/missing-gpsim-inc"
+expect_both pic10f322-test-soak \
+	"gpsim-dev headers not at $missing_inc; skipping PIC soak" \
+	"PIC_SOAK_CXX=$fake_cxx" "PIC_SOAK_GPSIM_INC=$missing_inc" -o pic10f322
+
+real_inc="$work/real-gpsim-inc"
+linked_inc="$work/linked-gpsim-inc"
+mkdir -p "$real_inc" "$linked_inc"
+printf '/* fixture */\n' > "$real_inc/sim_context.h"
+ln -s "$real_inc/sim_context.h" "$linked_inc/sim_context.h"
+expect_both pic10f322-test-soak \
+	"gpsim-dev headers not at $linked_inc; skipping PIC soak" \
+	"PIC_SOAK_CXX=$fake_cxx" "PIC_SOAK_GPSIM_INC=$linked_inc" -o pic10f322
+
+fake_pkg_bin="$work/fake-pkg-bin"
+mkdir -p "$fake_pkg_bin"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$fake_pkg_bin/pkg-config"
+chmod 750 "$fake_pkg_bin/pkg-config"
+saved_path=$PATH
+PATH="$fake_pkg_bin:$PATH"
+expect_both pic10f322-test-soak \
+	"libglib2.0-dev not found; skipping PIC soak" \
+	"PIC_SOAK_CXX=$fake_cxx" "PIC_SOAK_GPSIM_INC=$real_inc" -o pic10f322
+PATH=$saved_path
+
 fake_cbmc="$work/fake-cbmc"
 fake_cppcheck="$work/fake-cppcheck"
 cbmc_log="$work/cbmc.log"
@@ -191,6 +258,6 @@ fi
 	|| fail "analyze-cppcheck omitted its execution diagnostic"
 checks=$((checks + 1))
 
-[ "$checks" -eq 30 ] \
-	|| fail "strict optional-tool inventory ran $checks checks, expected 30"
+[ "$checks" -eq 60 ] \
+	|| fail "strict optional-tool inventory ran $checks checks, expected 60"
 printf 'strict optional-tool validation (host + all three PIC parts): %d checks, 0 failures\n' "$checks"

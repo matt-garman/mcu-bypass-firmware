@@ -1481,49 +1481,77 @@ if check(isinstance(release_job, dict), "release.yml: required job 'release' is 
         )
 
 
-# Normal CI must reject a DFP missing any device header required by its shared
-# three-part PIC job. The installer's cache key changes with the same three-header
-# postcondition.
-required_pic_headers = ("pic10f322", "pic10f320", "pic12f675")
-for workflow_name, job_id in (("ci.yml", "pic"),):
-    doc = docs.get(workflow_name)
-    jobs = doc.get("jobs") if isinstance(doc, dict) else None
-    job = jobs.get(job_id) if isinstance(jobs, dict) else None
-    loops = []
-    body_checks = []
-    for step in job.get("steps", []) if isinstance(job, dict) else []:
-        run = step.get("run") if isinstance(step, dict) else None
-        if not isinstance(run, str):
-            continue
-        for tokens in shell_tokens(run):
-            if tokens[:3] != ["for", "d", "in"]:
-                continue
-            devices = []
-            for token in tokens[3:]:
-                token = token.rstrip(";")
-                if token == "do":
-                    break
-                devices.append(token)
-            if any(device in required_pic_headers for device in devices):
-                loops.append(tuple(devices))
-                body_checks.append(re.search(
-                    r'(?m)^\s*for d in pic10f322 pic10f320 pic12f675; do\s*$'
-                    r'\n\s*dev="\$\{XC8_DFP_ROOT\}/xc8/pic/include/proc/'
-                    r'\$\{d\}\.h"\s*$'
-                    r'\n\s*test -f "\$\{dev\}" \|\| \{ echo '
-                    r'"::error::DFP missing: \$\{dev\}"; exit 1; \}\s*$'
-                    r'\n\s*done\s*$',
-                    run,
-                ) is not None)
+# Normal CI must invoke the same strict PIC capability helper as ci-local, with
+# every independently selectable tool/header surface explicit. The helper's own
+# behavioral regression proves the three-header and malformed-input contracts;
+# this check owns only unconditional workflow routing and complete argv.
+ci_doc = docs.get("ci.yml")
+ci_jobs = ci_doc.get("jobs") if isinstance(ci_doc, dict) else None
+pic_job = ci_jobs.get("pic") if isinstance(ci_jobs, dict) else None
+pic_steps = pic_job.get("steps", []) if isinstance(pic_job, dict) else []
+pic_assert_steps = [
+    (idx, step) for idx, step in enumerate(pic_steps)
+    if isinstance(step, dict)
+    and step.get("name") == "Assert PIC toolchain present (fail loud, do NOT skip)"
+]
+check(
+    len(pic_assert_steps) == 1,
+    f"ci.yml: found {len(pic_assert_steps)} canonical PIC assertion steps, expected 1",
+)
+if len(pic_assert_steps) == 1:
+    assert_idx, step = pic_assert_steps[0]
+    run = step.get("run")
+    required_fragments = (
+        "scripts/assert_pic_toolchain.sh --github-actions",
+        '--pic-cc "${XC8_DIR}/bin/xc8-cc"',
+        '--pic-dfp "${XC8_DFP_ROOT}/xc8"',
+        '--pic10f320-cc "${XC8_DIR}/bin/xc8-cc"',
+        '--pic10f320-dfp "${XC8_DFP_ROOT}/xc8"',
+        "--gpsim gpsim",
+        "--cppcheck cppcheck",
+        "--pic-cxx c++",
+        "--pic-gpsim-inc /usr/include/gpsim",
+        "--pic10f320-cxx c++",
+        "--pic10f320-gpsim-inc /usr/include/gpsim",
+    )
+    check(isinstance(run, str), "ci.yml: PIC assertion step has no run body")
+    if isinstance(run, str):
+        for fragment in required_fragments:
+            check(
+                run.count(fragment) == 1,
+                f"ci.yml: PIC assertion must contain {fragment!r} exactly once",
+            )
+    check("if" not in step, "ci.yml: PIC toolchain assertion is conditional")
     check(
-        loops == [required_pic_headers],
-        f"{workflow_name}: active PIC-header assertion loops are {loops!r}, "
-        f"expected {[required_pic_headers]!r}",
+        step.get("continue-on-error", False) is False,
+        "ci.yml: PIC toolchain assertion may continue after failure",
+    )
+    verify_indices = [
+        idx for idx, candidate in enumerate(pic_steps)
+        if isinstance(candidate, dict)
+        and candidate.get("run") == "scripts/verify_pic_toolchain_cache.sh"
+    ]
+    save_indices = [
+        idx for idx, candidate in enumerate(pic_steps)
+        if isinstance(candidate, dict)
+        and candidate.get("name") == "Save XC8 + DFP cache"
+    ]
+    first_pic_gate = [
+        idx for idx, candidate in enumerate(pic_steps)
+        if isinstance(candidate, dict)
+        and str(candidate.get("name", "")).startswith("PIC10F322 pre-hardware gate")
+    ]
+    check(
+        len(verify_indices) == 1 and verify_indices[0] < assert_idx,
+        "ci.yml: PIC assertion must run after unconditional cache verification",
     )
     check(
-        body_checks == [True],
-        f"{workflow_name}: PIC-header loop does not fail on a missing "
-        "${XC8_DFP_ROOT}/xc8/pic/include/proc/${d}.h",
+        len(save_indices) == 1 and assert_idx < save_indices[0],
+        "ci.yml: PIC assertion must run before saving the XC8/DFP cache",
+    )
+    check(
+        len(first_pic_gate) == 1 and assert_idx < first_pic_gate[0],
+        "ci.yml: PIC assertion must run before the first PIC aggregate",
     )
 
 for msg in failures:
