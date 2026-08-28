@@ -1417,7 +1417,7 @@ consume the correct pair.
 
 ## BR-QUALITY-01 - Use a declarative static-analysis matrix
 
-**Status:** IN PROGRESS
+**Status:** DONE `edd9696`
 
 **Rationale:** This is a quality improvement enabled by consolidation, not a
 line-reduction target by itself. Classic AVR analysis covers shell, pure core,
@@ -1983,7 +1983,7 @@ dependencies and acceptance criteria.
 | BR-TEST-07 | Consolidate strict helpers/wrappers | DONE `cee6bab` |
 | BR-TEST-08 | Generate recipes from variant maps | DONE `d3ea121` |
 | BR-TEST-09 | Consolidate dependencies/parsers | DONE `4fa470b` |
-| BR-QUALITY-01 | Define complete analysis matrix | IN PROGRESS |
+| BR-QUALITY-01 | Define complete analysis matrix | DONE `edd9696` |
 | BR-REL-01 | Define canonical signed release index | TODO |
 | BR-REL-02 | Package deterministic evidence archive | TODO |
 | BR-REL-03 | Clarify full test-long retention | TODO |
