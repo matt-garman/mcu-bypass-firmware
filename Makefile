@@ -458,6 +458,14 @@ src_cd4053_simple    = src/bypass_output_cd4053_simple.c
 src_cd4053_with_mute = src/bypass_output_cd4053_with_mute.c
 src_tq2_l2_5v_relay  = src/bypass_output_tq2_l2_5v_relay.c
 
+# Render shell case arms from a producer's explicit supported set. The caller
+# still owns that set and every hardware-specific recipe action; these functions
+# only keep each variant's selector/source association tied to the maps above.
+override variant_macro_driver_case_arm = $(1)) m=$(macro_$(1)); drv=$(src_$(1));;
+override variant_macro_driver_case_arms = $(foreach v,$(1),$(call variant_macro_driver_case_arm,$(v)))
+override variant_macro_case_arm = $(1)) m=$(macro_$(1));;
+override variant_macro_case_arms = $(foreach v,$(1),$(call variant_macro_case_arm,$(v)))
+
 # --- canonical firmware image basename ---------------------------------------
 # THE single spelling rule for every published .elf/.hex basename, on every MCU:
 #
@@ -515,14 +523,19 @@ fw_image = $(FW_BASE)$(call fw_image_tail,$(1),$(2))
 # an image path. That is the property this whole section is for.
 fw_image_sh = fw_image_of() { echo "$(FW_BASE)-$$2-$$1"; }
 
-# Headers shared by every firmware build; any change rebuilds all variants.
-FW_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
-             src/bypass_pure.h \
-             src/bypass_output_common.h src/bypass_pins_avr_classic.h \
-             src/bypass_blocking_delay.h src/bypass_static_assert.h \
-             src/bypass_compile_checks.h \
-             src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
+# Headers shared by every modular backend. Each backend appends its own pin map
+# below, so a common-header change reaches every relevant build without making
+# the hardware-specific dependency interchangeable.
+override MODULAR_FW_HEADERS := src/bypass_config.h src/bypass_types.h \
+             src/bypass_hw_iface.h src/bypass_pure.h \
+             src/bypass_output_common.h src/bypass_blocking_delay.h \
+             src/bypass_static_assert.h src/bypass_compile_checks.h \
+             src/bypass_output_cd4053_simple.h \
+             src/bypass_output_cd4053_with_mute.h \
              src/bypass_output_tq2_l2_5v_relay.h
+
+# Classic-AVR headers; any change rebuilds all classic variants.
+FW_HEADERS = $(MODULAR_FW_HEADERS) src/bypass_pins_avr_classic.h
 
 # VARIANT selects the single-target build for the -size/-flash/-trace/-program
 # actions.
@@ -1269,15 +1282,8 @@ export GPSIM_TIMEOUT_SECONDS
 # bypass_mcu_avr_classic.c + bypass_pure.c).
 PIC10F322_CORE_SRC = src/bypass_mcu_pic10f322.c src/bypass_pure.c
 
-# Headers that, if changed, should rebuild the PIC images: the AVR FW_HEADERS
-# set with the PIC pin map substituted for the AVR-classic one.
-PIC10F322_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
-              src/bypass_pure.h \
-              src/bypass_output_common.h src/bypass_pins_pic10f322.h \
-              src/bypass_blocking_delay.h src/bypass_static_assert.h \
-              src/bypass_compile_checks.h \
-              src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
-              src/bypass_output_tq2_l2_5v_relay.h
+# Headers that, if changed, should rebuild the PIC images.
+PIC10F322_HEADERS = $(MODULAR_FW_HEADERS) src/bypass_pins_pic10f322.h
 
 # XC8 compile flags: select the PIC10F322 + its DFP, C99 (no C11 in XC8), the
 # PIC pin map, and _XTAL_FREQ for __delay_ms.
@@ -1329,11 +1335,10 @@ PIC10F322_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 --platform=pi
                       '--suppress=*:$(PIC10F322_DFP_INCLUDE)/*' \
                       $(PIC10F322_CPPCHECK_CPPFLAGS)
 
-# Build every PIC variant and enforce the flash-word budget. The variant -D
-# selector and driver source are chosen inline (the same case-pattern the AVR
-# analyze/budget recipes use, since $(macro_<v>)/$(src_<v>) cannot expand inside
-# a shell loop). Sources are passed as make-time absolute paths so the compiler
-# can run with its cwd in PIC10F322_BUILD_DIR.
+# Build every PIC variant and enforce the flash-word budget. Make renders the
+# shell case arms from the canonical selector/source maps and this target's
+# explicit supported set. Sources are passed as make-time absolute paths so the
+# compiler can run with its cwd in PIC10F322_BUILD_DIR.
 .PHONY: pic10f322
 pic10f322: $(PIC10F322_CORE_SRC) $(PIC10F322_HEADERS) $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(src_$(v)))
 	@if [ "$(CLASSIC_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
@@ -1383,9 +1388,8 @@ pic10f322: $(PIC10F322_CORE_SRC) $(PIC10F322_HEADERS) $(foreach v,$(CLASSIC_VARI
 	fail=0; \
 	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
 		case $$v in \
-			cd4053_with_mute) m=CD4053_WITH_MUTE; drv=src/bypass_output_cd4053_with_mute.c ;; \
-			tq2_l2_5v_relay)  m=TQ2_L2_5V_RELAY;  drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
-			*)                m=CD4053_SIMPLE;    drv=src/bypass_output_cd4053_simple.c ;; \
+			$(call variant_macro_driver_case_arms,$(CLASSIC_VARIANTS_SUPPORTED)) \
+			*) echo "FAIL: unsupported immutable PIC10F322 variant '$$v'"; fail=1; continue ;; \
 		esac; \
 		stem=`fw_image_of "$$v" $(PIC10F322_TAG)`; name=$$stem.hex; \
 		hex=$(PIC10F322_BUILD_DIR)/$$name; asm=$(PIC10F322_BUILD_DIR)/$$stem.s; sym=$(PIC10F322_BUILD_DIR)/$$stem.sym; \
@@ -2207,15 +2211,8 @@ override XT_VARIANTS_REQUESTED := $(filter $(XT_VARIANTS_SUPPORTED),$(VARIANTS))
 override XT_VARIANTS_UNKNOWN := $(CLASSIC_VARIANTS_UNKNOWN)
 # The shell + the unchanged pure core (the AVR-classic counterpart is CORE_SRC).
 XT_CORE_SRC = src/bypass_mcu_avr_xt.c src/bypass_pure.c
-# Headers that, if changed, should rebuild the XT images: the FW_HEADERS set with
-# the AVR-XT pin map substituted for the classic one.
-XT_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
-             src/bypass_pure.h \
-             src/bypass_output_common.h src/bypass_pins_avr_xt.h \
-             src/bypass_blocking_delay.h src/bypass_static_assert.h \
-             src/bypass_compile_checks.h \
-             src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
-             src/bypass_output_tq2_l2_5v_relay.h
+# Headers that, if changed, should rebuild the XT images.
+XT_HEADERS = $(MODULAR_FW_HEADERS) src/bypass_pins_avr_xt.h
 # Firmware compile flags: the smoke gate's strict XT_CFLAGS (-B/-I device-pack
 # injection + CFLAGS_COMMON) plus the runtime -D selectors (F_CPU + the AVR-XT
 # shell selector). XT_LDFLAGS (from the smoke section) carries the link flags.
@@ -2225,11 +2222,10 @@ $(XT_BUILD_DIR):
 	@mkdir -p $@
 
 # Build every variant for the ATtiny202 and enforce the 2 KB flash-word budget.
-# The variant -D selector + driver source are chosen inline (the same case-
-# pattern the PIC/analyze recipes use, since $(macro_<v>)/$(src_<v>) cannot
-# expand inside a shell loop). Emits bypass-attiny202-<output stage>.elf/.hex.
+# Make renders selector/source case arms from this target's explicit supported
+# set and the canonical maps. Emits bypass-attiny202-<output stage>.elf/.hex.
 .PHONY: attiny202
-attiny202: | $(XT_BUILD_DIR)
+attiny202: $(XT_CORE_SRC) $(XT_HEADERS) | $(XT_BUILD_DIR)
 	@if ! rm -f "$(XT_BUILD_DIR)"/$(FW_BASE)-$(XT_TAG)-*.elf \
 			"$(XT_BUILD_DIR)"/$(FW_BASE)-$(XT_TAG)-*.hex \
 			"$(XT_BUILD_DIR)"/$(FW_BASE)-$(XT_TAG)-*.elf.tmp \
@@ -2276,9 +2272,7 @@ attiny202: | $(XT_BUILD_DIR)
 	fail=0; \
 	for v in "$$@"; do \
 		case $$v in \
-			cd4053_simple)    m=CD4053_SIMPLE;    drv=src/bypass_output_cd4053_simple.c ;; \
-			cd4053_with_mute) m=CD4053_WITH_MUTE; drv=src/bypass_output_cd4053_with_mute.c ;; \
-			tq2_l2_5v_relay)  m=TQ2_L2_5V_RELAY;  drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
+			$(call variant_macro_driver_case_arms,$(XT_VARIANTS_SUPPORTED)) \
 			*) echo "FAIL: unsupported ATtiny202 variant '$$v'"; fail=1; continue ;; \
 		esac; \
 		stem=$(XT_BUILD_DIR)/`fw_image_of "$$v" $(XT_TAG)`; \
@@ -2420,9 +2414,7 @@ attiny202-test-stack-bound: $(XT_STACK_SOURCE)
 	expected=0; \
 	for v in $(XT_VARIANTS_SUPPORTED); do \
 		case $$v in \
-			cd4053_simple)    m=CD4053_SIMPLE ;; \
-			cd4053_with_mute) m=CD4053_WITH_MUTE ;; \
-			tq2_l2_5v_relay)  m=TQ2_L2_5V_RELAY ;; \
+			$(call variant_macro_case_arms,$(XT_VARIANTS_SUPPORTED)) \
 			*) echo "FAIL: unsupported immutable ATtiny202 stack variant '$$v'"; exit 2 ;; \
 		esac; \
 		obj="$$stack_dir/stack_xt_$${v}.o"; su="$${obj%.o}.su"; \
@@ -3571,7 +3563,8 @@ test-workload-rebuild:
 	./test/test_workload_rebuild.sh
 
 # The PIC counterpart: all three chips' soak binaries compile their workload sizing in
-# as -D flags, so their file rules must be unconditionally out of date. Fake
+# as -D flags, so their file rules must be unconditionally out of date. Also
+# prove each 10F32x variant routes its image and block-time map entry. Fake
 # compiler, so it needs no gpsim/glib and runs in `make test`.
 test-pic-build-rebuild:
 	./test/test_pic_rebuild.sh
@@ -4425,17 +4418,15 @@ PIC10F320_COVERAGE_DIR := $(PIC10F320_BUILD_DIR)/coverage
 PIC10F320_VARIANT      ?= cd4053_simple
 # The authoritative supported set and sanitized request are established before
 # serialization so command-line matrix text cannot execute during recursive Make.
+override pic10f320_macro_cd4053_simple    := OUTPUT_CD4053_SIMPLE
+override pic10f320_macro_cd4053_with_mute := OUTPUT_CD4053_WITH_MUTE
+override pic10f320_macro_tq2_l2_5v_relay  := OUTPUT_TQ2_RELAY
 
-ifeq ($(PIC10F320_VARIANT),cd4053_simple)
-  PIC10F320_OUTPUT_MACRO := OUTPUT_CD4053_SIMPLE
-else ifeq ($(PIC10F320_VARIANT),cd4053_with_mute)
-  PIC10F320_OUTPUT_MACRO := OUTPUT_CD4053_WITH_MUTE
-else ifeq ($(PIC10F320_VARIANT),tq2_l2_5v_relay)
-  PIC10F320_OUTPUT_MACRO := OUTPUT_TQ2_RELAY
-else
-  $(error PIC10F320_VARIANT must be one of: $(PIC10F320_VARIANTS_ALL) (got '$(PIC10F320_VARIANT)'))
+override PIC10F320_OUTPUT_MACRO := $(pic10f320_macro_$(PIC10F320_VARIANT))
+ifeq ($(PIC10F320_OUTPUT_MACRO),)
+  $(error PIC10F320_VARIANT must be one of: $(PIC10F320_VARIANTS_SUPPORTED) (got '$(PIC10F320_VARIANT)'))
 endif
-PIC10F320_OUTPUT_DEF := -D$(PIC10F320_OUTPUT_MACRO)
+override PIC10F320_OUTPUT_DEF := -D$(PIC10F320_OUTPUT_MACRO)
 
 PIC10F320_CFLAGS := -mcpu=$(PIC10F320_CHIP) -mdfp=$(PIC10F320_DFP) -std=c99 -O2 \
                  -D_XTAL_FREQ=$(PIC10F320_XTAL) $(PIC10F320_OUTPUT_DEF)
@@ -4549,7 +4540,7 @@ pic10f320-test-actuation: variant-selectors-valid
 # Host fault injection over the firmware's defensive layer: corrupt an SFR or the
 # debounce context, assert the sanity gate forces a watchdog reset. Distinct from
 # the libgpsim TARGET fault lane added in Phase 4 -- hence the -host suffix.
-pic10f320-test-fault-host:
+pic10f320-test-fault-host: variant-selectors-valid
 	@mkdir -p $(PIC10F320_BUILD_DIR)
 	@$(PIC10F320_HOST_CC) -std=c11 -O2 $(PIC10F320_FW_HOST_DEFS) $(PIC10F320_FAULT_INC) \
 		-c $(PIC10F320_FAULT_DIR)/fw_fault_harness.c \
@@ -5006,28 +4997,23 @@ PIC10F320_SOAK_VARIANT     ?= $(PIC10F320_TARGET_VARIANT)
 
 pic10f320_hex_of = $(PIC10F320_BUILD_DIR)/$(call fw_image,$(1),$(PIC10F320_TAG)).hex
 
-# Per-variant facts, each with a FAILING default rather than a fall-through.
+# Per-variant test facts, each with a FAILING default rather than a fall-through.
 #
-# The imported project held all three of these in the same ifeq/else ladder as
-# the output macro, ending in $(error) -- so adding a variant could not silently
-# inherit another one's expectations. Folding them into nested $(if ...) here
-# lost that: an unrecognized name used to resolve to tq2_l2_5v_relay's values (its
-# OUTPUT_ macro and its 0x1 settled LATA) and run a green-looking test against
-# the wrong contract. The top-level PIC10F320_VARIANT ladder still rejects unknown
-# names, but it is NOT the only entry point -- PIC10F320_{FAULT,IO,LOCKSTEP,
-# TARGET}_VARIANT can each be set directly on the command line and never pass
-# through it.
+# The imported project held these in one ifeq/else ladder ending in $(error), so
+# adding a variant could not silently inherit another one's expectations. The
+# shipping output selector and target-test compilers now share the registered
+# pic10f320_macro_ map above; the independent LATA expectations remain here.
+# PIC10F320_VARIANT is not the only entry point -- PIC10F320_{FAULT,IO,LOCKSTEP,
+# TARGET}_VARIANT can each be set directly on the command line.
 # The explicit final arm restores the imported behaviour: an unknown variant is a
 # hard error at the point of use, not a wrong answer.
 #
 # $(strip) wraps each one because a backslash-newline inside a variable
 # definition collapses to a SPACE: without it these would expand to
 # " OUTPUT_TQ2_RELAY" and land in the compile line as "-D OUTPUT_TQ2_RELAY".
-pic10f320_macro_of = $(strip \
-	$(if $(filter cd4053_simple,$(1)),OUTPUT_CD4053_SIMPLE, \
-	$(if $(filter cd4053_with_mute,$(1)),OUTPUT_CD4053_WITH_MUTE, \
-	$(if $(filter tq2_l2_5v_relay,$(1)),OUTPUT_TQ2_RELAY, \
-	$(error pic10f320_macro_of: no output macro for PIC10F320 variant '$(1)'; supported: $(PIC10F320_VARIANTS_SUPPORTED))))))
+override pic10f320_macro_of = $(strip \
+	$(if $(pic10f320_macro_$(1)),$(pic10f320_macro_$(1)), \
+	$(error pic10f320_macro_of: no output macro for PIC10F320 variant '$(1)'; supported: $(PIC10F320_VARIANTS_SUPPORTED))))
 
 # The full RA0..RA2 LATA each variant drives once settled, asserted by the gpsim
 # register-level test. RA0 (the LED) is bit 0 in all three. BYPASS settles to 0x0
@@ -5520,15 +5506,8 @@ override PIC12F675_DATA_BUDGET_GATE := test/check_pic_data_budget.sh
 # bypass_mcu_avr_classic.c + bypass_pure.c).
 override PIC12F675_CORE_SRC := src/bypass_mcu_pic12f675.c src/bypass_pure.c
 
-# Headers that, if changed, should rebuild the PIC images: the AVR FW_HEADERS
-# set with the PIC pin map substituted for the AVR-classic one.
-PIC12F675_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
-              src/bypass_pure.h \
-              src/bypass_output_common.h src/bypass_pins_pic12f675.h \
-              src/bypass_blocking_delay.h src/bypass_static_assert.h \
-              src/bypass_compile_checks.h \
-              src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
-              src/bypass_output_tq2_l2_5v_relay.h
+# Headers that, if changed, should rebuild the PIC images.
+PIC12F675_HEADERS = $(MODULAR_FW_HEADERS) src/bypass_pins_pic12f675.h
 
 # XC8 compile flags: select the PIC12F675 + its DFP, C99 (no C11 in XC8), the
 # PIC pin map, and _XTAL_FREQ for __delay_ms.
@@ -5581,11 +5560,10 @@ PIC12F675_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 --platform=pi
                       '--suppress=*:$(PIC12F675_DFP_INCLUDE)/*' \
                       $(PIC12F675_CPPCHECK_CPPFLAGS)
 
-# Build every PIC variant and enforce the flash-word and data-space budgets. The variant -D
-# selector and driver source are chosen inline (the same case-pattern the AVR
-# analyze/budget recipes use, since $(macro_<v>)/$(src_<v>) cannot expand inside
-# a shell loop). Sources are passed as make-time absolute paths so the compiler
-# can run with its cwd in PIC12F675_BUILD_DIR.
+# Build every PIC variant and enforce the flash-word and data-space budgets. Make
+# renders shell case arms from the canonical selector/source maps and this
+# target's explicit supported set. Sources are passed as make-time absolute paths
+# so the compiler can run with its cwd in PIC12F675_BUILD_DIR.
 .PHONY: pic12f675
 pic12f675: $(PIC12F675_CORE_SRC) $(PIC12F675_HEADERS) $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(src_$(v)))
 	@if [ "$(CLASSIC_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
@@ -5645,9 +5623,8 @@ pic12f675: $(PIC12F675_CORE_SRC) $(PIC12F675_HEADERS) $(foreach v,$(CLASSIC_VARI
 	fail=0; \
 	for v in $(CLASSIC_VARIANTS_SUPPORTED); do \
 		case $$v in \
-			cd4053_with_mute) m=CD4053_WITH_MUTE; drv=src/bypass_output_cd4053_with_mute.c ;; \
-			tq2_l2_5v_relay)  m=TQ2_L2_5V_RELAY;  drv=src/bypass_output_tq2_l2_5v_relay.c ;; \
-			*)                m=CD4053_SIMPLE;    drv=src/bypass_output_cd4053_simple.c ;; \
+			$(call variant_macro_driver_case_arms,$(CLASSIC_VARIANTS_SUPPORTED)) \
+			*) echo "FAIL: unsupported immutable PIC12F675 variant '$$v'"; fail=1; continue ;; \
 		esac; \
 		stem=`fw_image_of "$$v" $(PIC12F675_TAG)`; name=$$stem.hex; \
 		hex="$(PIC12F675_BUILD_DIR)/$$name"; asm="$(PIC12F675_BUILD_DIR)/$$stem.s"; sym="$(PIC12F675_BUILD_DIR)/$$stem.sym"; \
@@ -7687,6 +7664,7 @@ require_variant_map = $(foreach v,$(2), \
 # guard is written not to forbid.
 $(call require_variant_map,macro_,$(ALL_SUPPORTED_VARIANTS),output-macro selector)
 $(call require_variant_map,src_,$(ALL_SUPPORTED_VARIANTS),driver source)
+$(call require_variant_map,pic10f320_macro_,$(PIC10F320_VARIANTS_SUPPORTED),PIC10F320 output-macro selector)
 $(call require_variant_map,pic_soak_block_,$(CLASSIC_VARIANTS_SUPPORTED),PIC10F322 soak actuation-block time)
 $(call require_variant_map,pic10f320_soak_block_,$(PIC10F320_VARIANTS_SUPPORTED),PIC10F320 soak actuation-block time)
 
@@ -8274,7 +8252,7 @@ help:
 	@echo "  pic10f322-test-stack-bound / pic10f320-test-stack-bound / pic12f675-test-stack-bound"
 	@echo "                  8-level PIC hardware return-stack depth gates"
 	@echo "  test-lockstep-progress  all three PIC exact-pin/stall-propagation checks"
-	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
+	@echo "  test-soak-timing  host-only soak timing/block-value checks (included in test)"
 	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
 	@echo "  test-fault-wdt-note-contract  each PIC fault adapter supplies its own gpsim watchdog note (included in test)"
 	@echo "  test-makefile-name-contract  every make goal, variable and child-environment name a file or doc uses really exists (included in test)"
@@ -8289,7 +8267,7 @@ help:
 	@echo "  test-static-assert-guards  the firmware's compile-time guards really fail the build when violated (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
-	@echo "  test-pic-build-rebuild  PIC soak binaries rebuild on a workload change"
+	@echo "  test-pic-build-rebuild  PIC soak rebuild + image/block-value routing checks"
 	@echo "  test-soak       24-h soak test (standalone; AVR_SOAK_VARIANT, AVR_SOAK_CHIP,"
 	@echo "                  AVR_SOAK_DURATION_MS, AVR_SOAK_LIVENESS_INTERVAL_MS,"
 	@echo "                  AVR_SOAK_PROGRESS_INTERVAL_MS)"

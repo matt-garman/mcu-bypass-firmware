@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 HEADER="$ROOT/test/soak_timing_config.h"
+MAKEFILE="$ROOT/Makefile"
 RELEASE="$ROOT/scripts/make-release.sh"
 PIC12_TIMING="$ROOT/test/pic/pic12f675_soak_timing.py"
 HOSTCC=${HOSTCC:-cc}
@@ -278,6 +279,120 @@ expect_pic12f675_hold_contract() {
 	checks=$((checks + 1))
 }
 
+# The two PIC10F32x soak maps remain independent because their firmware
+# implementations are independent. Verify both copies against test-owned values
+# and the constants each firmware implementation actually consumes; deriving a
+# shared Make value would let firmware and its timing witness drift together.
+expect_pic_actuation_block_contract() {
+	local block_checks
+	block_checks=$(python3 - "$ROOT" "$MAKEFILE" "$PIC12_TIMING" <<'PY'
+import pathlib
+import re
+import runpy
+import sys
+
+
+root = pathlib.Path(sys.argv[1])
+make_text = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
+helpers = runpy.run_path(sys.argv[3])
+source_define = helpers["source_define"]
+source_define_text = helpers["source_define_text"]
+expected = {
+    "cd4053_simple": 0,
+    "cd4053_with_mute": 5,
+    "tq2_l2_5v_relay": 12,
+}
+checks = 0
+
+
+def make_decimal(text, name):
+    pattern = re.compile(
+        r"^\s*(?:override\s+)?{}\s*(?::=|=)\s*([0-9]+)\s*$".format(
+            re.escape(name)),
+        re.MULTILINE,
+    )
+    matches = pattern.findall(text)
+    if len(matches) != 1:
+        raise ValueError(
+            "Makefile must define {} as one decimal value (found {})".format(
+                name, len(matches)
+            )
+        )
+    return int(matches[0], 10)
+
+
+def require_equal(actual, wanted, what):
+    global checks
+    if actual != wanted:
+        raise ValueError("{} is {}, expected {}".format(what, actual, wanted))
+    checks += 1
+
+
+for prefix, lane in (
+    ("pic_soak_block_", "PIC10F322"),
+    ("pic10f320_soak_block_", "PIC10F320"),
+):
+    for variant, wanted in expected.items():
+        require_equal(
+            make_decimal(make_text, prefix + variant),
+            wanted,
+            "{} {} soak block".format(lane, variant),
+        )
+
+for path, name, wanted in (
+    (root / "src/bypass_output_cd4053_with_mute.h", "CD4053_MUTE_DELAY_MS", 5),
+    (root / "src/bypass_output_tq2_l2_5v_relay.h", "TQ2_L2_5V_PULSE_MS", 12),
+    (root / "src/bypass_mcu_pic10f320.c", "CD4053_MUTE_DELAY_MS", 5),
+    (root / "src/bypass_mcu_pic10f320.c", "TQ2_L2_5V_PULSE_MS", 12),
+):
+    if path.name == "bypass_mcu_pic10f320.c":
+        actual = source_define_text(path.read_text(encoding="utf-8"), name, path)
+    else:
+        actual = source_define(path, name)
+    require_equal(actual, wanted, "{} {}".format(path, name))
+
+
+def require_rejected(operation, what):
+    global checks
+    try:
+        operation()
+    except ValueError:
+        checks += 1
+        return
+    raise ValueError("strict decimal parser accepted {}".format(what))
+
+
+require_rejected(lambda: make_decimal("", "block"), "a missing Make value")
+require_rejected(
+    lambda: make_decimal("block = 5\nblock = 5\n", "block"),
+    "duplicate Make values",
+)
+require_rejected(
+    lambda: make_decimal("block = five\n", "block"), "a malformed Make value"
+)
+require_rejected(
+    lambda: source_define_text("", "BLOCK_MS", "fixture"),
+    "a missing source constant",
+)
+require_rejected(
+    lambda: source_define_text(
+        "#define BLOCK_MS (5U)\n#define BLOCK_MS (5U)\n", "BLOCK_MS", "fixture"
+    ),
+    "duplicate source constants",
+)
+require_rejected(
+    lambda: source_define_text("#define BLOCK_MS (five)\n", "BLOCK_MS", "fixture"),
+    "a malformed source constant",
+)
+
+print(checks)
+PY
+	) || fail "PIC actuation-block timing contract failed"
+	[ "$block_checks" = 16 ] \
+		|| fail "PIC actuation-block timing contract returned $block_checks checks instead of 16"
+	checks=$((checks + block_checks))
+}
+
 for language in c c++; do
 	if [ "$language" = c ]; then compiler=$HOSTCC; else compiler=$HOSTCXX; fi
 	expect_compile_pass "$compiler" "$language" 1 1 1
@@ -440,6 +555,7 @@ expect_release_pic10f320_soak_combos
 expect_release_avrxt_soak_combos
 expect_avrxt_soak_contract
 expect_pic_per_ms_transition_sampling
+expect_pic_actuation_block_contract
 expect_pic12f675_hold_contract
 
 printf 'soak timing validation: %d checks, 0 failures\n' "$checks"

@@ -769,6 +769,7 @@ for assignment in \
 		'LDFLAGS=-DINJECTED_CLASSIC_LINK' \
 		'CORE_SRC=/dev/null' \
 		'src_cd4053_simple=/dev/null' \
+		'pic10f320_macro_cd4053_simple=OUTPUT_TQ2_RELAY' \
 		'XT_CFLAGS=-DINJECTED_XT_FLAGS' \
 		'XT_LDFLAGS=-DINJECTED_XT_LINK' \
 		'XT_CORE_SRC=/dev/null' \

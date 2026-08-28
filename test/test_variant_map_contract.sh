@@ -66,8 +66,8 @@ checks=$((checks + 1))
 # Known floor. If a map is legitimately retired, lower this deliberately; it
 # exists so a harvest that silently halves cannot pass.
 used_count=$(printf '%s\n' "$used" | wc -l)
-[ "$used_count" -ge 4 ] \
-	|| fail "expected at least 4 per-variant maps, harvested $used_count: $(printf '%s' "$used" | tr '\n' ' ')"
+[ "$used_count" -ge 5 ] \
+	|| fail "expected at least 5 per-variant maps, harvested $used_count: $(printf '%s' "$used" | tr '\n' ' ')"
 checks=$((checks + 1))
 
 # The contract itself.

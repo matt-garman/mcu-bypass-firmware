@@ -91,7 +91,7 @@ case "$PB_PROFILE" in
 		PB_STACK_DEVICE_VAR=PIC10F322_DEVICE_INI
 		product_override_args=(PIC10F322_HEXES= PIC10F322_ASSEMBLIES= PIC10F322_SYMBOLS= PIC10F322_BUILD_PRODUCTS=)
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=47
+		expected_checks=48
 		;;
 	pic10f320)
 		PB_LABEL=PIC10F320
@@ -115,7 +115,7 @@ case "$PB_PROFILE" in
 		PB_SIZE_TARGET=pic10f320-size
 		PB_REBUILD_REQUIRED=1
 		product_override_args=(PIC10F320_HEX= PIC10F320_ASM= PIC10F320_SYM= PIC10F320_BUILD_PRODUCTS=)
-		expected_checks=91
+		expected_checks=102
 		;;
 	pic12f675)
 		PB_LABEL=PIC12F675
@@ -136,7 +136,7 @@ case "$PB_PROFILE" in
 		PB_STACK_DEVICE_VAR=PIC12F675_DEVICE_INI
 		product_override_args=(PIC12F675_HEXES= PIC12F675_ASSEMBLIES= PIC12F675_SYMBOLS= PIC12F675_BUILD_PRODUCTS=)
 		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=167
+		expected_checks=168
 		;;
 	*) printf 'FAIL: unknown internal PIC build profile: %s\n' "$PB_PROFILE" >&2; exit 2 ;;
 esac
@@ -175,6 +175,8 @@ tools="$work/tools"
 xc8_log="$work/xc8.log"
 host_cc_log="$work/host-cc.log"
 host_run_log="$work/host-run.log"
+target_cc_log="$work/target-cc.log"
+gpsim_inc="$work/gpsim"
 # Local restatement of the Makefile's canonical image basename (see its
 # "canonical firmware image basename" block): <prefix>-<mcu>-<output stage>,
 # where the stage field is the variant name itself. Deliberately independent of
@@ -199,7 +201,8 @@ unset FAKE_XC8_MODE FAKE_XC8_FAIL_NAME FAKE_XC8_SIGNAL_MARKER \
 	MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES
 mkdir -p "$repo/src" "$repo/scripts" "$repo/test/pic10f320/equiv" \
 	"$repo/test/pic10f320/actuation" "$repo/test/pic10f320/fault" \
-	"$repo/build_pic10f322" "$tools"
+	"$repo/test/pic10f320/gpsim" "$repo/test/pic" \
+	"$repo/build_pic10f322" "$tools" "$gpsim_inc"
 cp "$ROOT/Makefile" "$repo/Makefile"
 cp "$ROOT/scripts/validate-ihex.sh" "$repo/scripts/validate-ihex.sh"
 cp "$ROOT/test/check_stack_depth_pic.sh" "$repo/test/check_stack_depth_pic.sh"
@@ -213,6 +216,8 @@ cp "$ROOT/test/pic10f320/check_expected_images.py" \
 : > "$xc8_log"
 : > "$host_cc_log"
 : > "$host_run_log"
+: > "$target_cc_log"
+: > "$gpsim_inc/sim_context.h"
 export FAKE_XC8_LOG="$xc8_log"
 export FAKE_XC8_PROGRAM_CAPACITY="$PB_FLASH_WORDS"
 # The over-budget fixture must be over THIS lane's budget, not a fixed 513: a
@@ -479,7 +484,17 @@ RUNNER
 		;;
 esac
 EOF
+cat > "$tools/pkg-config" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+	--exists) exit 0 ;;
+	--cflags) exit 0 ;;
+	*) exit 2 ;;
+esac
+EOF
 chmod 750 "$tools/xc8" "$tools/host-cc" "$repo/scripts/validate-ihex.sh"
+chmod 750 "$tools/pkg-config"
 cat > "$tools/noop-oracle.py" <<'EOF'
 #!/usr/bin/env python3
 raise SystemExit(0)
@@ -532,6 +547,8 @@ files=(
 	src/bypass_output_cd4053_with_mute.c src/bypass_output_tq2_l2_5v_relay.c
 	src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h
 	src/bypass_output_tq2_l2_5v_relay.h
+	# An unlisted driver must not become a producer input merely by existing.
+	src/bypass_output_unlisted.c
 	# PIC10F320's shell is self-contained -- it includes no src/ header -- but
 	# the `pic10f320` rule still needs its source to exist. Harmless for the
 	# PIC10F322 leg, which never compiles it.
@@ -545,6 +562,13 @@ files=(
 	test/pic10f320/actuation/test_actuation.c
 	test/pic10f320/fault/fw_fault_harness.c
 	test/pic10f320/fault/test_fault.c
+	test/pic10f320/gpsim/test_fault_pic.cc
+	test/pic10f320/gpsim/test_io_pic.cc
+	test/pic10f320/gpsim/test_lockstep_pic.cc
+	test/pic/test_fault_pic_core.h
+	test/pic/test_io_pic_core.h
+	test/pic/test_lockstep_pic_core.h
+	test/pic/target_result.h
 )
 for file in "${files[@]}"; do : > "$repo/$file"; done
 
@@ -563,6 +587,20 @@ run_pic10f320_host_make() {
 		make --no-print-directory -C "$repo" "$target" \
 			CC=true HOSTCC=true PIC10F320_HOST_CC="$tools/host-cc" \
 			PIC10F320_BUILD_DIR="$PB_BUILD_DIR" PIC10F320_VARIANT="$PB_VARIANT" "$@"
+}
+
+run_pic10f320_target_make() {
+	local target=$1 selector=$2 variant=$3
+	PATH="$tools:$PATH" FAKE_HOST_CC_LOG="$target_cc_log" \
+		FAKE_HOST_RUN_LOG="$host_run_log" \
+		make --no-print-directory -C "$repo" "$target" \
+			CC=true HOSTCC="$tools/host-cc" PIC10F320_CC="$tools/xc8" \
+			PIC10F320_SOAK_CXX="$tools/host-cc" \
+			PIC10F320_SOAK_GPSIM_INC="$gpsim_inc" \
+			PIC10F320_BUILD_DIR="$PB_BUILD_DIR" FW_BASE="$PB_FW_BASE" \
+			PIC10F320_TAG="$PB_TAG" PIC10F320_FLASH_WORDS="$PB_FLASH_WORDS" \
+			PIC10F320_VARIANT="$variant" "$selector=$variant" \
+			STRICT_TOOLS=1 AWK=awk
 }
 
 logged_command_count() {
@@ -584,6 +622,81 @@ latest_logged_command() {
 
 command_has_arg() {
 	case " $1 " in *" $2 "*) return 0 ;; *) return 1 ;; esac
+}
+
+assert_firmware_variant_contracts() {
+	local variant image command expected_macro expected_driver unexpected
+	[ "$(wc -l < "$xc8_log")" -eq "${#PB_CANONICAL_VARIANTS[@]}" ] \
+		|| { printf 'FAIL: %s matrix issued an unexpected number of compiler commands\n' \
+			"$PB_LABEL" >&2; exit 1; }
+	for variant in "${PB_CANONICAL_VARIANTS[@]}"; do
+		image="$PB_FW_BASE-$PB_TAG-$variant.hex"
+		[ "$(logged_command_count "$xc8_log" "$image")" -eq 1 ] \
+			|| { printf 'FAIL: %s matrix did not compile %s exactly once\n' \
+				"$PB_LABEL" "$image" >&2; exit 1; }
+		command=$(latest_logged_command "$xc8_log" "$image")
+		case "$PB_PROFILE:$variant" in
+			pic10f320:cd4053_simple) expected_macro=OUTPUT_CD4053_SIMPLE ;;
+			pic10f320:cd4053_with_mute) expected_macro=OUTPUT_CD4053_WITH_MUTE ;;
+			pic10f320:tq2_l2_5v_relay) expected_macro=OUTPUT_TQ2_RELAY ;;
+			*:cd4053_simple)
+				expected_macro=CD4053_SIMPLE
+				expected_driver="$repo/src/bypass_output_cd4053_simple.c"
+				;;
+			*:cd4053_with_mute)
+				expected_macro=CD4053_WITH_MUTE
+				expected_driver="$repo/src/bypass_output_cd4053_with_mute.c"
+				;;
+			*:tq2_l2_5v_relay)
+				expected_macro=TQ2_L2_5V_RELAY
+				expected_driver="$repo/src/bypass_output_tq2_l2_5v_relay.c"
+				;;
+		esac
+		command_has_arg "$command" "-D$expected_macro" \
+			|| { printf 'FAIL: %s compiler used the wrong selector for %s\n' \
+				"$PB_LABEL" "$variant" >&2; exit 1; }
+		if [ "$PB_PROFILE" = pic10f320 ]; then
+			for unexpected in OUTPUT_CD4053_SIMPLE OUTPUT_CD4053_WITH_MUTE OUTPUT_TQ2_RELAY; do
+				if [ "$unexpected" != "$expected_macro" ] \
+						&& command_has_arg "$command" "-D$unexpected"; then
+					printf 'FAIL: PIC10F320 compiler mixed selectors for %s\n' "$variant" >&2
+					exit 1
+				fi
+			done
+			command_has_arg "$command" "$repo/src/bypass_mcu_pic10f320.c" \
+				|| { printf 'FAIL: PIC10F320 compiler omitted its monolithic source for %s\n' \
+					"$variant" >&2; exit 1; }
+			for unexpected in "$repo"/src/bypass_output_*.c; do
+				! command_has_arg "$command" "$unexpected" \
+					|| { printf 'FAIL: PIC10F320 compiler consumed modular driver %s\n' \
+						"$unexpected" >&2; exit 1; }
+			done
+		else
+			command_has_arg "$command" "$expected_driver" \
+				|| { printf 'FAIL: %s compiler used the wrong driver for %s\n' \
+					"$PB_LABEL" "$variant" >&2; exit 1; }
+			for unexpected in CD4053_SIMPLE CD4053_WITH_MUTE TQ2_L2_5V_RELAY; do
+				if [ "$unexpected" != "$expected_macro" ] \
+						&& command_has_arg "$command" "-D$unexpected"; then
+					printf 'FAIL: %s compiler mixed selectors for %s\n' \
+						"$PB_LABEL" "$variant" >&2
+					exit 1
+				fi
+			done
+			for unexpected in \
+					"$repo/src/bypass_output_cd4053_simple.c" \
+					"$repo/src/bypass_output_cd4053_with_mute.c" \
+					"$repo/src/bypass_output_tq2_l2_5v_relay.c" \
+					"$repo/src/bypass_output_unlisted.c"; do
+				if [ "$unexpected" != "$expected_driver" ] \
+						&& command_has_arg "$command" "$unexpected"; then
+					printf 'FAIL: %s compiler mixed or added driver %s for %s\n' \
+						"$PB_LABEL" "$unexpected" "$variant" >&2
+					exit 1
+				fi
+			done
+		fi
+	done
 }
 
 count_exact_lines() {
@@ -828,6 +941,24 @@ for sidecar in "$asm" "$sym"; do
 			"$PB_LABEL" "$sidecar" >&2; exit 1; }
 done
 checks=$((checks + 1))
+
+# Pin every shipping producer's variant-to-selector/source contract with
+# test-owned literals. The exact three-command matrix also proves that merely
+# adding an unlisted driver does not create a product.
+: > "$xc8_log"
+run_matrix_make "$PB_MATRIX_VARIANTS_VAR=$PB_MATRIX_VARIANTS" >/dev/null
+assert_firmware_variant_contracts
+checks=$((checks + 1))
+
+if [ "$PB_PROFILE" = pic10f320 ]; then
+	: > "$xc8_log"
+	run_matrix_make "$PB_MATRIX_VARIANTS_VAR=$PB_MATRIX_VARIANTS" \
+		PIC10F320_OUTPUT_MACRO=OUTPUT_TQ2_RELAY \
+		PIC10F320_OUTPUT_DEF=-DOUTPUT_TQ2_RELAY \
+		pic10f320_macro_cd4053_simple=OUTPUT_TQ2_RELAY >/dev/null
+	assert_firmware_variant_contracts
+	checks=$((checks + 1))
+fi
 
 if [ "$PB_TARGET" = pic12f675 ]; then
 	assert_pic12f675_resource_records "$build_output" default
@@ -1312,6 +1443,45 @@ if [ "$PB_SELECTOR_ROUTING" -eq 1 ]; then
 			|| { printf 'FAIL: %s built %s instead of selected %s\n' \
 				"$target" "$hex" "$selected_hex" >&2; exit 1; }
 		checks=$((checks + 1))
+	done
+
+	# The shipping compiler and all three target-test binary producers must read
+	# the same PIC10F320 selector map. Execute each final C++ command for every
+	# variant; do not infer expected selectors from Make.
+	: > "$target_cc_log"
+	target_compile_specs=(
+		"pic10f320-test-fault-target PIC10F320_FAULT_VARIANT test_fault_pic"
+		"pic10f320-test-io PIC10F320_IO_VARIANT test_io_pic"
+		"pic10f320-test-lockstep PIC10F320_LOCKSTEP_VARIANT test_lockstep_pic"
+	)
+	for variant in "${PB_CANONICAL_VARIANTS[@]}"; do
+		case "$variant" in
+			cd4053_simple) expected_macro=OUTPUT_CD4053_SIMPLE ;;
+			cd4053_with_mute) expected_macro=OUTPUT_CD4053_WITH_MUTE ;;
+			tq2_l2_5v_relay) expected_macro=OUTPUT_TQ2_RELAY ;;
+		esac
+		for spec in "${target_compile_specs[@]}"; do
+			read -r target selector binary <<<"$spec"
+			binary="$PB_BUILD_DIR/$binary"
+			before=$(logged_command_count "$target_cc_log" "$binary")
+			run_pic10f320_target_make "$target" "$selector" "$variant" >/dev/null
+			[ "$(logged_command_count "$target_cc_log" "$binary")" -eq $((before + 1)) ] \
+				|| { printf 'FAIL: %s did not compile its target binary exactly once for %s\n' \
+					"$target" "$variant" >&2; exit 1; }
+			command=$(latest_logged_command "$target_cc_log" "$binary")
+			command_has_arg "$command" "-D$expected_macro" \
+				|| { printf 'FAIL: %s used the wrong PIC10F320 selector for %s\n' \
+					"$target" "$variant" >&2; exit 1; }
+			for unexpected in OUTPUT_CD4053_SIMPLE OUTPUT_CD4053_WITH_MUTE OUTPUT_TQ2_RELAY; do
+				if [ "$unexpected" != "$expected_macro" ] \
+						&& command_has_arg "$command" "-D$unexpected"; then
+					printf 'FAIL: %s mixed PIC10F320 selectors for %s\n' \
+						"$target" "$variant" >&2
+					exit 1
+				fi
+			done
+			checks=$((checks + 1))
+		done
 	done
 fi
 
