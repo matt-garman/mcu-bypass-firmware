@@ -41,21 +41,41 @@ allocation=$(
 ) || fail "invalid context allocation in $asm"
 [[ $allocation == 3 ]] || fail "internal allocation parser error for $asm"
 
+# XC8 opens the .sym with its global symbol table -- one record per line,
+# "<name> <address> <end> <class> <bank>" with hexadecimal addresses -- and
+# then switches to unrelated record shapes at the first %-directive
+# (%segments, then %locals). Only the global table resolves _ctx_ to the SRAM
+# address the gpsim harnesses poke, so the scan stops at that boundary instead
+# of matching a like-named psect or local-symbol record further down. A _ctx_
+# the linker placed in CODE would contradict the `ds 3` data allocation just
+# verified above, so that is rejected rather than handed back as an address.
 address=$(
 	awk '
+		BEGIN { globals = 1 }
+		/^%/ { globals = 0 }
+		globals != 1 { next }
 		$1 == "_ctx_" {
 			records++
-			if (NF != 2 || $2 !~ /^[0-9A-Fa-f]+$/) malformed++
-			else address = toupper($2)
+			if (NF != 5 || $2 !~ /^[0-9A-Fa-f]+$/ || $3 !~ /^[0-9A-Fa-f]+$/ \
+					|| $4 !~ /^[A-Z][0-9A-Z_]*$/ || $5 !~ /^[0-9]+$/) {
+				malformed++
+				next
+			}
+			if ($4 == "CODE") { in_program++; next }
+			address = toupper($2)
 		}
 		END {
 			if (malformed != 0) {
 				printf "malformed _ctx_ symbol record(s): %d\n", malformed > "/dev/stderr"
 				exit 2
 			}
+			if (in_program != 0) {
+				printf "_ctx_ symbol resolves into program memory, not data\n" > "/dev/stderr"
+				exit 3
+			}
 			if (records != 1) {
 				printf "expected exactly one _ctx_ symbol, found %d\n", records > "/dev/stderr"
-				exit 3
+				exit 4
 			}
 			print address
 		}

@@ -315,7 +315,16 @@ __ptext_main:	;psect for function _main
 _ctx_:
 	ds 3
 ASM
-	printf '_ctx_ 005D\n' > "${out%.hex}.sym"
+	# Real XC8 .sym shape: a global symbol table of
+	# "<name> <address> <end> <class> <bank>" records, then the %segments and
+	# %locals sections. The context checker parses this file, so the stub has
+	# to emit the format the linker emits.
+	printf '%s\n' \
+		'_main 188 0 CODE 0' \
+		'_ctx_ 5D 0 BANK0 1' \
+		'%segments' \
+		'cstackBANK0 40 63 BANK0 40 1' \
+		'%locals' > "${out%.hex}.sym"
 }
 write_data_summary() {
 	local data_mode=${FAKE_XC8_DATA_MODE:-pass}
