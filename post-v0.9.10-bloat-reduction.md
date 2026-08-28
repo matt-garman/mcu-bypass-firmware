@@ -953,7 +953,7 @@ of ordinary test changes and can turn prose formatting into a tested interface.
 
 ## BR-CHANGELOG-01 - Adopt a concise prospective changelog policy
 
-**Status:** IN PROGRESS
+**Status:** DONE `da1d62d`
 
 **Current observations:**
 
@@ -1975,7 +1975,7 @@ dependencies and acceptance criteria.
 | BR-README-01 | Reduce root README | TODO |
 | BR-TESTDOC-01 | Reduce test README | TODO |
 | BR-TODO-01 | Reduce TODO to registry | TODO |
-| BR-CHANGELOG-01 | Adopt concise changelog policy | IN PROGRESS |
+| BR-CHANGELOG-01 | Adopt concise changelog policy | DONE `da1d62d` |
 | BR-RELEASEDOC-01 | Reduce release README | TODO |
 | BR-COMMENT-01 | Trim live historical comments | TODO |
 | BR-STATE-01 | Remove repeated release declarations | TODO |
