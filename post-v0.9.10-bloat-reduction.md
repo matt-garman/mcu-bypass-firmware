@@ -1360,7 +1360,7 @@ may be valuable. Repeating the literal at every call site is not.
 
 ## BR-TEST-08 - Generate variant recipe arms from existing maps
 
-**Status:** IN PROGRESS OpenCode
+**Status:** DONE `d3ea121`
 
 **Rationale:** The Makefile has canonical `macro_<variant>` and `src_<variant>`
 maps at `Makefile:451-459`, but several PIC/AVR-XT recipes restate associations
@@ -1386,17 +1386,18 @@ consume the correct pair.
 
 ## BR-TEST-09 - Consolidate common Make dependency declarations and parsers
 
-**Status:** TODO
+**Status:** IN PROGRESS
 
-**Candidates:**
+**Work:**
 
-- One common modular-header dependency list plus per-target pin header.
-- Reuse the repository-owned XC8 program-space transcript checker completed by
-  BR-TEST-07 while consolidating common Make dependencies.
-- Reuse the strict XC8 `_ctx_` allocation/symbol extraction helper completed by
-  BR-TEST-07 rather than introducing another parser.
-- Derive or verify soak blocking times from firmware constants rather than
-  maintaining unverified Make copies.
+- [x] Use one common modular-header dependency list plus each target's pin
+  header.
+- [x] Reuse the repository-owned XC8 program-space transcript checker completed
+  by BR-TEST-07 while consolidating common Make dependencies.
+- [x] Reuse the strict XC8 `_ctx_` allocation/symbol extraction helper completed
+  by BR-TEST-07 rather than introducing another parser.
+- [x] Verify independent soak blocking-time maps against firmware constants and
+  test-owned values rather than maintaining unverified Make copies.
 
 **Safeguards:**
 
@@ -1977,8 +1978,8 @@ dependencies and acceptance criteria.
 | BR-TEST-05 | Prefer behavioral fixtures | DONE `7aab253` |
 | BR-TEST-06 | Introduce named test profiles | DONE `746ddcf` |
 | BR-TEST-07 | Consolidate strict helpers/wrappers | DONE `cee6bab` |
-| BR-TEST-08 | Generate recipes from variant maps | IN PROGRESS OpenCode |
-| BR-TEST-09 | Consolidate dependencies/parsers | TODO |
+| BR-TEST-08 | Generate recipes from variant maps | DONE `d3ea121` |
+| BR-TEST-09 | Consolidate dependencies/parsers | IN PROGRESS |
 | BR-QUALITY-01 | Define complete analysis matrix | TODO |
 | BR-REL-01 | Define canonical signed release index | TODO |
 | BR-REL-02 | Package deterministic evidence archive | TODO |

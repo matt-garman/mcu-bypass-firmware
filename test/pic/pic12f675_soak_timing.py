@@ -22,20 +22,23 @@ def decimal_constant(text, what):
     return int(match.group(1), 10)
 
 
-def source_define(path, name):
+def source_define_text(text, name, source):
     pattern = re.compile(
         r"^\s*#\s*define\s+{}\s+\(\s*([0-9]+[uUlL]*)\s*\)\s*$".format(
             re.escape(name)))
     matches = []
-    with path.open(encoding="ascii") as stream:
-        for line in stream:
-            match = pattern.match(line)
-            if match:
-                matches.append(decimal_constant(match.group(1), name))
+    for line in text.splitlines():
+        match = pattern.match(line)
+        if match:
+            matches.append(decimal_constant(match.group(1), name))
     if len(matches) != 1:
         raise ValueError("{} must define {} exactly once (found {})".format(
-            path, name, len(matches)))
+            source, name, len(matches)))
     return matches[0]
+
+
+def source_define(path, name):
+    return source_define_text(path.read_text(encoding="ascii"), name, path)
 
 
 def source_hex_define(path, name):

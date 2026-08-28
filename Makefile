@@ -523,14 +523,19 @@ fw_image = $(FW_BASE)$(call fw_image_tail,$(1),$(2))
 # an image path. That is the property this whole section is for.
 fw_image_sh = fw_image_of() { echo "$(FW_BASE)-$$2-$$1"; }
 
-# Headers shared by every firmware build; any change rebuilds all variants.
-FW_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
-             src/bypass_pure.h \
-             src/bypass_output_common.h src/bypass_pins_avr_classic.h \
-             src/bypass_blocking_delay.h src/bypass_static_assert.h \
-             src/bypass_compile_checks.h \
-             src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
+# Headers shared by every modular backend. Each backend appends its own pin map
+# below, so a common-header change reaches every relevant build without making
+# the hardware-specific dependency interchangeable.
+override MODULAR_FW_HEADERS := src/bypass_config.h src/bypass_types.h \
+             src/bypass_hw_iface.h src/bypass_pure.h \
+             src/bypass_output_common.h src/bypass_blocking_delay.h \
+             src/bypass_static_assert.h src/bypass_compile_checks.h \
+             src/bypass_output_cd4053_simple.h \
+             src/bypass_output_cd4053_with_mute.h \
              src/bypass_output_tq2_l2_5v_relay.h
+
+# Classic-AVR headers; any change rebuilds all classic variants.
+FW_HEADERS = $(MODULAR_FW_HEADERS) src/bypass_pins_avr_classic.h
 
 # VARIANT selects the single-target build for the -size/-flash/-trace/-program
 # actions.
@@ -1277,15 +1282,8 @@ export GPSIM_TIMEOUT_SECONDS
 # bypass_mcu_avr_classic.c + bypass_pure.c).
 PIC10F322_CORE_SRC = src/bypass_mcu_pic10f322.c src/bypass_pure.c
 
-# Headers that, if changed, should rebuild the PIC images: the AVR FW_HEADERS
-# set with the PIC pin map substituted for the AVR-classic one.
-PIC10F322_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
-              src/bypass_pure.h \
-              src/bypass_output_common.h src/bypass_pins_pic10f322.h \
-              src/bypass_blocking_delay.h src/bypass_static_assert.h \
-              src/bypass_compile_checks.h \
-              src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
-              src/bypass_output_tq2_l2_5v_relay.h
+# Headers that, if changed, should rebuild the PIC images.
+PIC10F322_HEADERS = $(MODULAR_FW_HEADERS) src/bypass_pins_pic10f322.h
 
 # XC8 compile flags: select the PIC10F322 + its DFP, C99 (no C11 in XC8), the
 # PIC pin map, and _XTAL_FREQ for __delay_ms.
@@ -2213,15 +2211,8 @@ override XT_VARIANTS_REQUESTED := $(filter $(XT_VARIANTS_SUPPORTED),$(VARIANTS))
 override XT_VARIANTS_UNKNOWN := $(CLASSIC_VARIANTS_UNKNOWN)
 # The shell + the unchanged pure core (the AVR-classic counterpart is CORE_SRC).
 XT_CORE_SRC = src/bypass_mcu_avr_xt.c src/bypass_pure.c
-# Headers that, if changed, should rebuild the XT images: the FW_HEADERS set with
-# the AVR-XT pin map substituted for the classic one.
-XT_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
-             src/bypass_pure.h \
-             src/bypass_output_common.h src/bypass_pins_avr_xt.h \
-             src/bypass_blocking_delay.h src/bypass_static_assert.h \
-             src/bypass_compile_checks.h \
-             src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
-             src/bypass_output_tq2_l2_5v_relay.h
+# Headers that, if changed, should rebuild the XT images.
+XT_HEADERS = $(MODULAR_FW_HEADERS) src/bypass_pins_avr_xt.h
 # Firmware compile flags: the smoke gate's strict XT_CFLAGS (-B/-I device-pack
 # injection + CFLAGS_COMMON) plus the runtime -D selectors (F_CPU + the AVR-XT
 # shell selector). XT_LDFLAGS (from the smoke section) carries the link flags.
@@ -2234,7 +2225,7 @@ $(XT_BUILD_DIR):
 # Make renders selector/source case arms from this target's explicit supported
 # set and the canonical maps. Emits bypass-attiny202-<output stage>.elf/.hex.
 .PHONY: attiny202
-attiny202: | $(XT_BUILD_DIR)
+attiny202: $(XT_CORE_SRC) $(XT_HEADERS) | $(XT_BUILD_DIR)
 	@if ! rm -f "$(XT_BUILD_DIR)"/$(FW_BASE)-$(XT_TAG)-*.elf \
 			"$(XT_BUILD_DIR)"/$(FW_BASE)-$(XT_TAG)-*.hex \
 			"$(XT_BUILD_DIR)"/$(FW_BASE)-$(XT_TAG)-*.elf.tmp \
@@ -3572,7 +3563,8 @@ test-workload-rebuild:
 	./test/test_workload_rebuild.sh
 
 # The PIC counterpart: all three chips' soak binaries compile their workload sizing in
-# as -D flags, so their file rules must be unconditionally out of date. Fake
+# as -D flags, so their file rules must be unconditionally out of date. Also
+# prove each 10F32x variant routes its image and block-time map entry. Fake
 # compiler, so it needs no gpsim/glib and runs in `make test`.
 test-pic-build-rebuild:
 	./test/test_pic_rebuild.sh
@@ -5514,15 +5506,8 @@ override PIC12F675_DATA_BUDGET_GATE := test/check_pic_data_budget.sh
 # bypass_mcu_avr_classic.c + bypass_pure.c).
 override PIC12F675_CORE_SRC := src/bypass_mcu_pic12f675.c src/bypass_pure.c
 
-# Headers that, if changed, should rebuild the PIC images: the AVR FW_HEADERS
-# set with the PIC pin map substituted for the AVR-classic one.
-PIC12F675_HEADERS = src/bypass_config.h src/bypass_types.h src/bypass_hw_iface.h \
-              src/bypass_pure.h \
-              src/bypass_output_common.h src/bypass_pins_pic12f675.h \
-              src/bypass_blocking_delay.h src/bypass_static_assert.h \
-              src/bypass_compile_checks.h \
-              src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h \
-              src/bypass_output_tq2_l2_5v_relay.h
+# Headers that, if changed, should rebuild the PIC images.
+PIC12F675_HEADERS = $(MODULAR_FW_HEADERS) src/bypass_pins_pic12f675.h
 
 # XC8 compile flags: select the PIC12F675 + its DFP, C99 (no C11 in XC8), the
 # PIC pin map, and _XTAL_FREQ for __delay_ms.
@@ -8267,7 +8252,7 @@ help:
 	@echo "  pic10f322-test-stack-bound / pic10f320-test-stack-bound / pic12f675-test-stack-bound"
 	@echo "                  8-level PIC hardware return-stack depth gates"
 	@echo "  test-lockstep-progress  all three PIC exact-pin/stall-propagation checks"
-	@echo "  test-soak-timing  host-only soak timing boundary checks (included in test)"
+	@echo "  test-soak-timing  host-only soak timing/block-value checks (included in test)"
 	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
 	@echo "  test-fault-wdt-note-contract  each PIC fault adapter supplies its own gpsim watchdog note (included in test)"
 	@echo "  test-makefile-name-contract  every make goal, variable and child-environment name a file or doc uses really exists (included in test)"
@@ -8282,7 +8267,7 @@ help:
 	@echo "  test-static-assert-guards  the firmware's compile-time guards really fail the build when violated (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
-	@echo "  test-pic-build-rebuild  PIC soak binaries rebuild on a workload change"
+	@echo "  test-pic-build-rebuild  PIC soak rebuild + image/block-value routing checks"
 	@echo "  test-soak       24-h soak test (standalone; AVR_SOAK_VARIANT, AVR_SOAK_CHIP,"
 	@echo "                  AVR_SOAK_DURATION_MS, AVR_SOAK_LIVENESS_INTERVAL_MS,"
 	@echo "                  AVR_SOAK_PROGRESS_INTERVAL_MS)"

@@ -37,6 +37,7 @@ trap 'rm -rf "$work"' EXIT
 repo="$work/repo"
 tools="$work/tools"
 log="$work/compile.log"
+argv_log="$work/compile-argv.log"
 mklog="$work/make.log"
 checks=0
 
@@ -111,6 +112,11 @@ for a in "$@"; do
 	if [ "$want" = 1 ]; then out=$a; want=0; fi
 done
 printf '%s\n' "$*" >> "${FAKE_CXX_LOG:?}"
+if [ -n "${FAKE_CXX_ARGV_LOG:-}" ]; then
+	printf '%s\n' __COMMAND_BEGIN__ >> "$FAKE_CXX_ARGV_LOG"
+	printf '%s\n' "$@" >> "$FAKE_CXX_ARGV_LOG"
+	printf '%s\n' __COMMAND_END__ >> "$FAKE_CXX_ARGV_LOG"
+fi
 [ -n "$out" ] || exit 0
 printf 'fake soak binary\n' > "$out"
 chmod 755 "$out"
@@ -171,7 +177,7 @@ build() {
 	local target=$1; shift
 	(
 		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKE
-		PATH="$tools:$PATH" FAKE_CXX_LOG="$log" \
+		PATH="$tools:$PATH" FAKE_CXX_LOG="$log" FAKE_CXX_ARGV_LOG="$argv_log" \
 		_MAKE_SERIAL_LOCK_HELD="$repo_lock_id" \
 			"${MAKE_CMD[@]}" --no-print-directory -C "$repo" "$@" "$target" >"$mklog" 2>&1
 	)
@@ -256,6 +262,58 @@ check_chip "PIC10F320" "build_pic10f320/test_soak_pic" \
 check_chip "PIC12F675" "test/pic/test_soak_pic12f675" \
 	PIC_SOAK_CXX PIC12F675_SOAK_DURATION_MS \
 	"PIC_CC=$tools/xc8 PIC12F675_PYTHON=$tools/timing-python"
+
+# Each 10F32x implementation keeps its own timing map. Exercise every entry at
+# the producer boundary so a correct source constant paired with the wrong Make
+# lookup cannot pass the value-level timing contract alone.
+check_10f32x_variant() {
+	local label=$1 target=$2 cxx_var=$3 duration_var=$4 variant_var=$5
+	local image_prefix=$6 variant=$7 block=$8 args arg
+	local begin=0 end=0 block_args=0 fw_args=0
+	local expected_block="-DSOAK_ACTUATION_BLOCK_MS=${block}u"
+	local expected_fw="-DFW_PATH=\"$repo/${image_prefix}${variant}.hex\""
+	: > "$log"
+	: > "$argv_log"
+	build "$target" "$cxx_var=$tools/cxx" "$duration_var=60000" \
+		"$variant_var=$variant" \
+		|| fail "$label: direct $variant build failed"
+	[ "$(compiles)" -eq 1 ] \
+		|| fail "$label: $variant issued $(compiles) compiler commands instead of 1"
+	args=$(tail -1 "$log")
+	while IFS= read -r arg; do
+		case "$arg" in
+			__COMMAND_BEGIN__) begin=$((begin + 1)) ;;
+			__COMMAND_END__) end=$((end + 1)) ;;
+			-DFW_PATH=*)
+				fw_args=$((fw_args + 1))
+				[ "$arg" = "$expected_fw" ] \
+					|| fail "$label: $variant used the wrong firmware path: $arg"
+				;;
+			-DSOAK_ACTUATION_BLOCK_MS=*)
+				block_args=$((block_args + 1))
+				[ "$arg" = "$expected_block" ] \
+					|| fail "$label: $variant used the wrong actuation-block value: $arg"
+				;;
+		esac
+	done < "$argv_log"
+	[ "$begin" -eq 1 ] && [ "$end" -eq 1 ] \
+		|| fail "$label: $variant compiler argv transcript was incomplete"
+	[ "$fw_args" -eq 1 ] \
+		|| fail "$label: $variant compile carried $fw_args FW_PATH arguments: $args"
+	[ "$block_args" -eq 1 ] \
+		|| fail "$label: $variant compile carried $block_args actuation-block arguments: $args"
+	checks=$((checks + 1))
+}
+
+for spec in cd4053_simple:0 cd4053_with_mute:5 tq2_l2_5v_relay:12; do
+	variant=${spec%%:*}; block=${spec#*:}
+	check_10f32x_variant "PIC10F322" "test/pic/test_soak_pic" \
+		PIC_SOAK_CXX PIC10F322_SOAK_DURATION_MS PIC10F322_SOAK_VARIANT \
+		build_pic10f322/bypass-pic10f322- "$variant" "$block"
+	check_10f32x_variant "PIC10F320" "build_pic10f320/test_soak_pic" \
+		PIC10F320_SOAK_CXX PIC10F320_SOAK_DURATION_MS PIC10F320_SOAK_VARIANT \
+		build_pic10f320/bypass-pic10f320- "$variant" "$block"
+done
 
 # The selected variant must reach both the image path and timing derivation.
 for spec in cd4053_with_mute:5 tq2_l2_5v_relay:12; do

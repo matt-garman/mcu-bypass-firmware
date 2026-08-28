@@ -223,6 +223,22 @@ done
 	|| { printf 'FAIL: ATtiny202 build issued an unexpected number of compiler commands\n' >&2; exit 1; }
 checks=$((checks + 1))
 
+# The production target must consume XT_HEADERS, not merely use it for static
+# analysis. A missing shared-header dependency must stop before any compiler
+# command can publish a replacement image.
+before=$(wc -l < "$cc_log")
+if output=$(run_build XT_HEADERS="$work/missing-modular-header" 2>&1); then
+	printf 'FAIL: ATtiny202 build ignored a missing XT_HEADERS prerequisite\n' >&2
+	exit 1
+fi
+[[ "$output" == *"No rule to make target"* \
+	&& "$output" == *"missing-modular-header"* ]] \
+	|| { printf 'FAIL: missing XT_HEADERS prerequisite failed for the wrong reason: %s\n' \
+		"$output" >&2; exit 1; }
+[ "$(wc -l < "$cc_log")" -eq "$before" ] \
+	|| { printf 'FAIL: missing XT_HEADERS prerequisite still reached the compiler\n' >&2; exit 1; }
+checks=$((checks + 1))
+
 expect_failure "compiler failure" "did not compile" FAKE_CC_MODE=fail
 expect_failure "empty compiler output" "produced no ELF" FAKE_CC_MODE=empty
 expect_failure "readelf failure" "could not inspect ELF" FAKE_READELF_MODE=fail
