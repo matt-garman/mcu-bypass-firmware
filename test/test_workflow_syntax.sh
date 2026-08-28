@@ -754,6 +754,80 @@ if check(os.path.isfile(ci_local), "scripts/ci-local.sh: missing"):
 # Set equality is not enough here: both files could lose one part together, and
 # sets erase duplicates. These are five Make processes containing six required
 # aggregates; PIC12F675's two goals deliberately share one retained matrix.
+RESOURCE_POLICY = {
+    "XT_STATIC_RAM_LIMIT": "16",
+    "XT_STACK_MAX_FRAME": "32",
+    "PIC12F675_DATA_LIMIT": "48",
+}
+CI_RESOURCE_ENV = {
+    f"CI_{name}": value for name, value in RESOURCE_POLICY.items()
+}
+RELEASE_RESOURCE_ENV = {
+    f"RELEASE_{name}": value for name, value in RESOURCE_POLICY.items()
+}
+CI_RESOURCE_REFS = {
+    name: f"$CI_{name}" for name in RESOURCE_POLICY
+}
+RELEASE_RESOURCE_REFS = {
+    name: f"$RELEASE_{name}" for name in RESOURCE_POLICY
+}
+
+
+def release_resource_routes(refs):
+    static = refs["XT_STATIC_RAM_LIMIT"]
+    stack = refs["XT_STACK_MAX_FRAME"]
+    data = refs["PIC12F675_DATA_LIMIT"]
+    return {
+        "attiny202": {"XT_STATIC_RAM_LIMIT": static},
+        "pic12f675": {"PIC12F675_DATA_LIMIT": data},
+        "test-long": {
+            "XT_STATIC_RAM_LIMIT": static,
+            "PIC12F675_DATA_LIMIT": data,
+        },
+        "attiny202-test": {
+            "XT_STATIC_RAM_LIMIT": static,
+            "XT_STACK_MAX_FRAME": stack,
+        },
+        "attiny202-test-target": {"XT_STATIC_RAM_LIMIT": static},
+        "pic12f675-test": {"PIC12F675_DATA_LIMIT": data},
+    }
+
+
+CI_RESOURCE_ROUTES = {
+    "pic12f675-test": {
+        "PIC12F675_DATA_LIMIT": CI_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
+    },
+    "test-mutation": {
+        "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
+        "PIC12F675_DATA_LIMIT": CI_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
+    },
+    "attiny202-test": {
+        "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
+        "XT_STACK_MAX_FRAME": CI_RESOURCE_REFS["XT_STACK_MAX_FRAME"],
+    },
+    "attiny202-test-target": {
+        "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
+    },
+    "attiny202-soak": {
+        "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
+    },
+}
+RELEASE_RESOURCE_ROUTES = release_resource_routes(RELEASE_RESOURCE_REFS)
+
+for workflow_name, expected in (
+        ("ci.yml", CI_RESOURCE_ENV),
+        ("release.yml", RELEASE_RESOURCE_ENV)):
+    doc = docs.get(workflow_name)
+    env = doc.get("env") if isinstance(doc, dict) else None
+    actual = {
+        name: str(env.get(name)) if isinstance(env, dict) and name in env else None
+        for name in expected
+    }
+    check(
+        actual == expected,
+        f"{workflow_name}: resource-policy pins are {actual!r}, expected {expected!r}",
+    )
+
 PIC_COMMANDS = (
     (
         ("pic10f322-test",),
@@ -793,7 +867,6 @@ PIC_COMMANDS = (
             "STRICT_TOOLS": "1",
             "PIC_CC": "${XC8_DIR}/bin/xc8-cc",
             "PIC_DFP": "${XC8_DFP_ROOT}/xc8",
-            "PIC12F675_DATA_LIMIT": "48",
         },
     ),
 )
@@ -815,6 +888,35 @@ def make_command(tokens):
         else:
             goals.append(token)
     return tuple(goals), assignments, duplicate_assignment
+
+
+def check_resource_routes(commands, surface, routes):
+    for goal, expected in routes.items():
+        matches = [parsed for parsed in commands if goal in parsed[0]]
+        check(
+            len(matches) == 1,
+            f"{surface}: resource consumer '{goal}' occurs {len(matches)} "
+            "time(s), expected 1",
+        )
+        if len(matches) != 1:
+            continue
+        goals, assignments, duplicate_assignment = matches[0]
+        actual = {
+            name: value for name, value in assignments.items()
+            if name in RESOURCE_POLICY
+        }
+        check(
+            not duplicate_assignment and actual == expected,
+            f"{surface}: resource consumer '{goal}' receives {actual!r}, "
+            f"expected {expected!r}",
+        )
+
+
+def non_resource_assignments(assignments):
+    return {
+        name: value for name, value in assignments.items()
+        if name not in RESOURCE_POLICY
+    }
 
 
 ci_doc = docs.get("ci.yml")
@@ -849,6 +951,12 @@ if isinstance(ci_jobs, dict):
                         (job_id, idx, step, len(commands), parsed, tokens)
                     )
 
+check_resource_routes(
+    [invocation[4] for invocation in ci_make_invocations],
+    "ci.yml",
+    CI_RESOURCE_ROUTES,
+)
+
 # Hosted CI must consume the same fail-closed ATtiny202 target aggregate as
 # release qualification. test-target-matrix independently executes the aggregate
 # with a fake Make and proves sim, fault, and lock-step remain required members;
@@ -869,7 +977,10 @@ if check(isinstance(attiny_job, dict), "ci.yml: required job 'attiny202' is miss
         check(
             not parsed[2] and parsed[:2] == (
                 ("attiny202-test-target",),
-                {"STRICT_TOOLS": "1", "XT_STATIC_RAM_LIMIT": "16"},
+                {
+                    "STRICT_TOOLS": "1",
+                    "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
+                },
             ),
             "ci.yml: ATtiny202 target aggregate invocation is not canonical: "
             f"{' '.join(tokens)}",
@@ -923,6 +1034,8 @@ if len(mutation_invocations) == 1:
         "PIC_DFP": "${XC8_DFP_ROOT}/xc8",
         "PIC10F320_CC": "${XC8_DIR}/bin/xc8-cc",
         "PIC10F320_DFP": "${XC8_DFP_ROOT}/xc8",
+        "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
+        "PIC12F675_DATA_LIMIT": CI_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
     }
     check(
         job_id == "pic" and not parsed[2]
@@ -1040,7 +1153,8 @@ if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
     for idx, step, command_count, parsed, tokens in pic_invocations:
         goals, assignments, duplicate_assignment = parsed
         check(
-            not duplicate_assignment and (goals, assignments) in PIC_COMMANDS,
+            not duplicate_assignment
+            and (goals, non_resource_assignments(assignments)) in PIC_COMMANDS,
             f"ci.yml: pic step {idx} has a noncanonical aggregate command: "
             f"{' '.join(tokens)}",
         )
@@ -1056,7 +1170,8 @@ if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
 
     for goals, assignments in PIC_COMMANDS:
         matches = sum(
-            not parsed[2] and parsed[:2] == (goals, assignments)
+            not parsed[2] and parsed[0] == goals
+            and non_resource_assignments(parsed[1]) == assignments
             for _, _, _, parsed, _ in pic_invocations
         )
         check(
@@ -1115,11 +1230,7 @@ if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
     # paths from Make/environment defaults and exports strictness once globally.
     # The production data limit remains pinned on the PIC12F675 invocation.
     local_commands = tuple(
-        (
-            goals,
-            {"PIC12F675_DATA_LIMIT": "48"}
-            if "pic12f675-test" in goals else {},
-        )
+        (goals, {})
         for goals, _ in PIC_COMMANDS
     )
     local_invocations = []
@@ -1132,14 +1243,16 @@ if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
                 local_invocations.append(parsed)
     for goals, assignments, duplicate_assignment in local_invocations:
         check(
-            not duplicate_assignment and (goals, assignments) in local_commands,
+            not duplicate_assignment
+            and (goals, non_resource_assignments(assignments)) in local_commands,
             "scripts/ci-local.sh: noncanonical PIC job command: make "
             f"{' '.join(goals)}"
             + "".join(f" {key}={value}" for key, value in assignments.items()),
         )
     for goals, assignments in local_commands:
         occurrences = sum(
-            not parsed[2] and parsed[:2] == (goals, assignments)
+            not parsed[2] and parsed[0] == goals
+            and non_resource_assignments(parsed[1]) == assignments
             for parsed in local_invocations
         )
         check(
@@ -1155,23 +1268,69 @@ if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
     )
 
 
+def check_shell_resource_constants(text, surface, prefix):
+    expected = {f"{prefix}_{name}": value for name, value in RESOURCE_POLICY.items()}
+    actual = {}
+    for name in expected:
+        matches = re.findall(
+            rf"(?m)^readonly {re.escape(name)}=([^\s#]+)\s*$", text
+        )
+        actual[name] = matches[0] if len(matches) == 1 else matches
+    check(
+        actual == expected,
+        f"{surface}: resource-policy pins are {actual!r}, expected {expected!r}",
+    )
+
+
+ci_local_text = "\n".join(lines)
+check_shell_resource_constants(ci_local_text, "scripts/ci-local.sh", "CI")
+
+release_script_path = os.path.join(root, "scripts", "make-release.sh")
+if check(os.path.isfile(release_script_path), "scripts/make-release.sh: missing"):
+    with open(release_script_path, encoding="utf-8") as fh:
+        release_script_text = fh.read()
+    check_shell_resource_constants(
+        release_script_text, "scripts/make-release.sh", "RELEASE"
+    )
+    release_script_commands = []
+    for tokens in shell_tokens(release_script_text):
+        parsed = make_command(tokens)
+        if parsed is not None:
+            release_script_commands.append(parsed)
+    check_resource_routes(
+        release_script_commands,
+        "scripts/make-release.sh",
+        RELEASE_RESOURCE_ROUTES,
+    )
+
+
 # The public release attestation must use the same five-process PIC boundary as
 # normal CI. In particular, PIC12F675's two goals must occupy one command so GNU
 # Make executes their shared matrix qualifier once.
 if check(isinstance(release_job, dict), "release.yml: required job 'release' is missing"):
     release_pic_invocations = []
+    release_make_commands = []
     for idx, step in enumerate(release_job.get("steps") or [], 1):
         run = step.get("run") if isinstance(step, dict) else None
         commands = shell_tokens(run) if isinstance(run, str) else []
         for tokens in commands:
             parsed = make_command(tokens)
+            if parsed is not None:
+                release_make_commands.append(parsed)
             if parsed is not None and any(goal in PIC_GOALS for goal in parsed[0]):
                 release_pic_invocations.append((idx, step, len(commands), parsed, tokens))
+
+    check_resource_routes(
+        release_make_commands,
+        "release.yml",
+        RELEASE_RESOURCE_ROUTES,
+    )
 
     for idx, step, command_count, parsed, tokens in release_pic_invocations:
         goals, assignments, duplicate_assignment = parsed
         check(
-            not duplicate_assignment and (goals, assignments) in PIC_COMMANDS,
+            not duplicate_assignment
+            and (goals, non_resource_assignments(assignments)) in PIC_COMMANDS,
             f"release.yml: PIC step {idx} has a noncanonical aggregate command: "
             f"{' '.join(tokens)}",
         )
@@ -1187,7 +1346,8 @@ if check(isinstance(release_job, dict), "release.yml: required job 'release' is 
 
     for goals, assignments in PIC_COMMANDS:
         matches = sum(
-            not parsed[2] and parsed[:2] == (goals, assignments)
+            not parsed[2] and parsed[0] == goals
+            and non_resource_assignments(parsed[1]) == assignments
             for _, _, _, parsed, _ in release_pic_invocations
         )
         check(

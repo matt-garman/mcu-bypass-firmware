@@ -1180,7 +1180,7 @@ synthetic fixtures.
 
 ## BR-TEST-03 - Route CI and ci-local through authoritative aggregates
 
-**Status:** IN PROGRESS OpenCode
+**Status:** DONE `b9cbd36`
 
 **Primary case:** ATtiny202 target validation
 
@@ -1207,7 +1207,7 @@ normal CI and `scripts/ci-local.sh` restate component commands and assertions.
 
 ## BR-TEST-04 - Centralize resource-policy constants per independent surface
 
-**Status:** TODO
+**Status:** IN PROGRESS OpenCode
 
 **Current examples:**
 
@@ -1222,13 +1222,15 @@ may be valuable. Repeating the literal at every call site is not.
 
 **Work:**
 
-- [ ] Identify which surfaces are meant to be independent opinions.
-- [ ] Define each policy once per independent surface.
-- [ ] Pass or import that value at consumers.
-- [ ] Replace occurrence-count tests with fake-consumer tests proving the value
+- [x] Identify which surfaces are meant to be independent opinions: production
+  Make policy, hosted CI, local CI, local release creation, and public release
+  attestation.
+- [x] Define each policy once per independent surface.
+- [x] Pass or import that value at consumers.
+- [x] Replace occurrence-count tests with fake-consumer tests proving the value
   reaches every required gate.
-- [ ] Preserve deliberate mismatch detection between firmware assumptions and
-  build/test policy.
+- [x] Preserve deliberate mismatch detection between independently authored
+  production, CI/release, and test policy.
 
 **Acceptance:**
 
@@ -1936,8 +1938,8 @@ dependencies and acceptance criteria.
 | BR-STATE-02 | Make development/release state explicit | TODO |
 | BR-TEST-01 | Delete retired rename lane | DONE `893d647` |
 | BR-TEST-02 | Remove duplicate CI mutation run | DONE `b86a5a7` |
-| BR-TEST-03 | Route CI through aggregates | IN PROGRESS OpenCode |
-| BR-TEST-04 | Centralize policy constants per surface | TODO |
+| BR-TEST-03 | Route CI through aggregates | DONE `b9cbd36` |
+| BR-TEST-04 | Centralize policy constants per surface | IN PROGRESS OpenCode |
 | BR-TEST-05 | Prefer behavioral fixtures | TODO |
 | BR-TEST-06 | Introduce named test profiles | TODO |
 | BR-TEST-07 | Consolidate strict helpers/wrappers | TODO |

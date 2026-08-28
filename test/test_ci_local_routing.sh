@@ -175,23 +175,32 @@ expect_calls() {
 	done
 }
 
+tab=$'\t'
+expected_xt_static=16
+expected_xt_stack=32
+expected_pic_data=48
 pic_calls=(
 	$'STRICT_TOOLS=1\tpic10f322-test'
 	$'STRICT_TOOLS=1\tpic10f322-test-target-variants'
 	$'STRICT_TOOLS=1\tpic10f320-test'
 	$'STRICT_TOOLS=1\tpic10f320-test-target-variants'
-	$'STRICT_TOOLS=1\tpic12f675-test\tpic12f675-test-target-variants\tPIC12F675_DATA_LIMIT=48'
+	"STRICT_TOOLS=1${tab}pic12f675-test${tab}pic12f675-test-target-variants${tab}PIC12F675_DATA_LIMIT=$expected_pic_data"
 )
 xt_calls=(
-	$'STRICT_TOOLS=1\tattiny202-test\tXT_STATIC_RAM_LIMIT=16\tXT_STACK_MAX_FRAME=32'
-	$'STRICT_TOOLS=1\tattiny202-test-target\tXT_STATIC_RAM_LIMIT=16'
-	$'STRICT_TOOLS=1\tattiny202-soak\tXT_SOAK_DURATION_MS=300000\tXT_SOAK_PROGRESS_INTERVAL_MS=300000\tXT_STATIC_RAM_LIMIT=16'
+	"STRICT_TOOLS=1${tab}attiny202-test${tab}XT_STATIC_RAM_LIMIT=$expected_xt_static${tab}XT_STACK_MAX_FRAME=$expected_xt_stack"
+	"STRICT_TOOLS=1${tab}attiny202-test-target${tab}XT_STATIC_RAM_LIMIT=$expected_xt_static"
+	"STRICT_TOOLS=1${tab}attiny202-soak${tab}XT_SOAK_DURATION_MS=300000${tab}XT_SOAK_PROGRESS_INTERVAL_MS=300000${tab}XT_STATIC_RAM_LIMIT=$expected_xt_static"
 )
 build_call=$'STRICT_TOOLS=1\tattiny13a\tattiny85\tattiny45'
 strict_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=0'
 pic_partial_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=PIC'
 xt_partial_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=ATtiny202'
 both_partial_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=PIC,ATtiny202'
+resource_args="${tab}XT_STATIC_RAM_LIMIT=$expected_xt_static${tab}PIC12F675_DATA_LIMIT=$expected_pic_data"
+strict_stress+="$resource_args"
+pic_partial_stress+="$resource_args"
+xt_partial_stress+="$resource_args"
+both_partial_stress+="$resource_args"
 
 if ! output=$(run_ci); then
 	fail "push without skips failed: $output"

@@ -51,6 +51,11 @@ concurrency:
 
 env:
   DEBIAN_FRONTEND: noninteractive
+  # Independent CI policy pins. Make owns the production defaults; these values
+  # must be delivered explicitly so CI detects an unintended policy mismatch.
+  CI_XT_STATIC_RAM_LIMIT: "16"
+  CI_XT_STACK_MAX_FRAME: "32"
+  CI_PIC12F675_DATA_LIMIT: "48"
 
 jobs:
   # -------------------------------------------------------------------------
@@ -298,7 +303,8 @@ jobs:
         run: |
           make pic12f675-test pic12f675-test-target-variants STRICT_TOOLS=1 \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC_DFP="${XC8_DFP_ROOT}/xc8" PIC12F675_DATA_LIMIT=48
+            PIC_DFP="${XC8_DFP_ROOT}/xc8" \
+            PIC12F675_DATA_LIMIT="$CI_PIC12F675_DATA_LIMIT"
 
       # The mutation driver also runs its core AVR and ATtiny202 mutants. Keep
       # their extra toolchain and the minutes-long gate off the pull-request hot
@@ -395,7 +401,9 @@ jobs:
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC_DFP="${XC8_DFP_ROOT}/xc8" \
             PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
+            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8" \
+            XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT" \
+            PIC12F675_DATA_LIMIT="$CI_PIC12F675_DATA_LIMIT"
 
       # Three release-supported chips, three separately named artifacts -- never
       # one merged upload.
@@ -497,7 +505,10 @@ jobs:
             || { echo "::error::MISRA analysis inputs missing"; exit 1; }
 
       - name: ATtiny202 pre-hardware gate (make attiny202-test)
-        run: make attiny202-test STRICT_TOOLS=1 XT_STATIC_RAM_LIMIT=16 XT_STACK_MAX_FRAME=32
+        run: >-
+          make attiny202-test STRICT_TOOLS=1
+          XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT"
+          XT_STACK_MAX_FRAME="$CI_XT_STACK_MAX_FRAME"
 
       - name: Assert ATtiny202 images built (fail loud, do NOT skip)
         run: |
@@ -557,7 +568,9 @@ jobs:
       # One Make aggregate owns the sim/fault/lock-step orchestration and rejects
       # incomplete matrices, per-variant skips, and missing boot scenarios.
       - name: Fail-closed target aggregate (make attiny202-test-target)
-        run: make attiny202-test-target STRICT_TOOLS=1 XT_STATIC_RAM_LIMIT=16
+        run: >-
+          make attiny202-test-target STRICT_TOOLS=1
+          XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT"
 
       # Short soak smoke (5 min simulated ~= 2 s/variant) -- proves the soak
       # harness + liveness path work on every variant. Longer soaks remain an
@@ -569,7 +582,8 @@ jobs:
           set -o pipefail
           n=$(make -s print-XT_VARIANTS_SUPPORTED | wc -w)
           make attiny202-soak XT_SOAK_DURATION_MS=300000 \
-               XT_SOAK_PROGRESS_INTERVAL_MS=300000 XT_STATIC_RAM_LIMIT=16 \
+               XT_SOAK_PROGRESS_INTERVAL_MS=300000 \
+               XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT" \
                2>&1 | tee soak.log
           p=$(grep -c "SOAK PASS" soak.log || true)
           [ "$p" -eq "$n" ] || { echo "::error::attiny202-soak: $p/$n variants PASSed (skip or fail)"; exit 1; }

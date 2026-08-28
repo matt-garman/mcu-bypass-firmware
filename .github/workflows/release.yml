@@ -61,6 +61,11 @@ env:
   ATTINY_DFP_VER: "3.1.260"
   XC8_DIR: /opt/microchip/xc8/v3.10
   XC8_DFP_ROOT: /opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189
+  # Independent public-attestation pins. Keep these separate from Make's
+  # production defaults so a mismatch fails the release rather than self-agrees.
+  RELEASE_XT_STATIC_RAM_LIMIT: "16"
+  RELEASE_XT_STACK_MAX_FRAME: "32"
+  RELEASE_PIC12F675_DATA_LIMIT: "48"
 
 jobs:
   release:
@@ -239,7 +244,8 @@ jobs:
           make attiny13a attiny85 attiny45
           # STRICT_TOOLS=1: an absent ATtiny_DFP must fail the reproducibility
           # gate, never skip it into an image set that is short three files.
-          make attiny202 STRICT_TOOLS=1 XT_STATIC_RAM_LIMIT=16
+          make attiny202 STRICT_TOOLS=1 \
+            XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT"
           make pic10f322 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
           # pic10f320-variants, not pic10f320: it builds all three output stages and
           # removes the whole image set if any one of them fails, so a partial
@@ -250,7 +256,7 @@ jobs:
           # are in RELEASE_IMAGES, so they must be rebuilt here or the
           # reproducibility gate below fails on a set short three files.
           make pic12f675 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8" \
-            PIC12F675_DATA_LIMIT=48
+            PIC12F675_DATA_LIMIT="$RELEASE_PIC12F675_DATA_LIMIT"
 
       # --- THE reproducibility gate ----------------------------------------
       - name: Verify committed images reproduce bit-for-bit
@@ -357,17 +363,24 @@ jobs:
       # images rebuilt from the tagged source above, never fall back to the
       # previous release's HEXes.
       - name: Re-run make test-long
-        run: make test-long STRICT_TOOLS=1 XT_STATIC_RAM_LIMIT=16 \
-          XT_STACK_MAX_FRAME=32 PIC12F675_DATA_LIMIT=48 \
+        run: >-
+          make test-long STRICT_TOOLS=1
+          XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT"
+          PIC12F675_DATA_LIMIT="$RELEASE_PIC12F675_DATA_LIMIT"
           PIC12F675_FLASH_IMAGES=build
 
       - name: Re-run make attiny202-test
-        run: make attiny202-test STRICT_TOOLS=1 XT_STATIC_RAM_LIMIT=16 XT_STACK_MAX_FRAME=32
+        run: >-
+          make attiny202-test STRICT_TOOLS=1
+          XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT"
+          XT_STACK_MAX_FRAME="$RELEASE_XT_STACK_MAX_FRAME"
 
       # The AVR-XT target aggregate: functional + modeled-pin output trace, fault
       # injection, and firmware/model ctx_ lock-step on the real built image.
       - name: Re-run make attiny202-test-target (yasimavr, every variant)
-        run: make attiny202-test-target STRICT_TOOLS=1 XT_STATIC_RAM_LIMIT=16 XT_STACK_MAX_FRAME=32
+        run: >-
+          make attiny202-test-target STRICT_TOOLS=1
+          XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT"
 
       - name: Re-run make pic10f322-test
         run: make pic10f322-test STRICT_TOOLS=1 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
@@ -406,7 +419,8 @@ jobs:
         run: |
           make pic12f675-test pic12f675-test-target-variants STRICT_TOOLS=1 \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC_DFP="${XC8_DFP_ROOT}/xc8" PIC12F675_DATA_LIMIT=48
+            PIC_DFP="${XC8_DFP_ROOT}/xc8" \
+            PIC12F675_DATA_LIMIT="$RELEASE_PIC12F675_DATA_LIMIT"
 
       # --- publish ----------------------------------------------------------
       - name: Publish GitHub Release

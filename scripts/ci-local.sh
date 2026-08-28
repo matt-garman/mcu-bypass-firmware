@@ -110,6 +110,12 @@
 
 set -euo pipefail
 
+# Independent local-CI policy pins. Make owns the production defaults; explicit
+# command-line delivery keeps a mismatched edit observable and fail-closed.
+readonly CI_XT_STATIC_RAM_LIMIT=16
+readonly CI_XT_STACK_MAX_FRAME=32
+readonly CI_PIC12F675_DATA_LIMIT=48
+
 # ----------------------------------------------------------------------------
 # Small output helpers (mirrors scripts/make-release.sh)
 # ----------------------------------------------------------------------------
@@ -506,7 +512,8 @@ else
 	# One Make graph is load-bearing: the two goals share one qualified retained
 	# PIC12F675 matrix and verify its hashes after every consumer lane.
 	run_step "pic job: PIC12F675 immutable-matrix aggregates" make \
-		pic12f675-test pic12f675-test-target-variants PIC12F675_DATA_LIMIT=48
+		pic12f675-test pic12f675-test-target-variants \
+		PIC12F675_DATA_LIMIT="$CI_PIC12F675_DATA_LIMIT"
 fi
 
 run_step "build-matrix: make attiny13a attiny85 attiny45" make attiny13a attiny85 attiny45
@@ -523,15 +530,18 @@ else
 	[ "$XT_N" -gt 0 ] || die "XT_VARIANTS_SUPPORTED is empty; nothing would be gated"
 
 	run_step "attiny202 job: make attiny202-test" make attiny202-test \
-		XT_STATIC_RAM_LIMIT=16 XT_STACK_MAX_FRAME=32
+		XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT" \
+		XT_STACK_MAX_FRAME="$CI_XT_STACK_MAX_FRAME"
 	run_step "attiny202 job: make attiny202-test-target" \
-		make attiny202-test-target XT_STATIC_RAM_LIMIT=16
+		make attiny202-test-target \
+		XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT"
 	# CI runs a 5-minute simulated soak smoke, with the progress interval set to
 	# the full duration so the log carries one progress line per variant.
 	run_step "attiny202 job: make attiny202-soak" \
 		xt_gate "SOAK PASS" "$XT_N" -- \
 		make attiny202-soak XT_SOAK_DURATION_MS=300000 \
-			XT_SOAK_PROGRESS_INTERVAL_MS=300000 XT_STATIC_RAM_LIMIT=16
+			XT_SOAK_PROGRESS_INTERVAL_MS=300000 \
+			XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT"
 fi
 
 if [ "$PR_MODE" -eq 1 ]; then
@@ -542,16 +552,24 @@ else
 	# authorize only target toolchains the caller explicitly skipped.
 	if [ "$SKIP_PIC" -eq 1 ] && [ "$SKIP_ATTINY202" -eq 1 ]; then
 		run_step "verify + stress: make test-long (skipped-target mutations may skip)" \
-			make test-long MUTATION_ALLOW_SKIP=PIC,ATtiny202
+			make test-long MUTATION_ALLOW_SKIP=PIC,ATtiny202 \
+			XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT" \
+			PIC12F675_DATA_LIMIT="$CI_PIC12F675_DATA_LIMIT"
 	elif [ "$SKIP_PIC" -eq 1 ]; then
 		run_step "verify + stress: make test-long (PIC mutations may skip)" \
-			make test-long MUTATION_ALLOW_SKIP=PIC
+			make test-long MUTATION_ALLOW_SKIP=PIC \
+			XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT" \
+			PIC12F675_DATA_LIMIT="$CI_PIC12F675_DATA_LIMIT"
 	elif [ "$SKIP_ATTINY202" -eq 1 ]; then
 		run_step "verify + stress: make test-long (ATtiny202 mutations may skip)" \
-			make test-long MUTATION_ALLOW_SKIP=ATtiny202
+			make test-long MUTATION_ALLOW_SKIP=ATtiny202 \
+			XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT" \
+			PIC12F675_DATA_LIMIT="$CI_PIC12F675_DATA_LIMIT"
 	else
 		run_step "verify + stress: make test-long" \
-			make test-long MUTATION_ALLOW_SKIP=0
+			make test-long MUTATION_ALLOW_SKIP=0 \
+			XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT" \
+			PIC12F675_DATA_LIMIT="$CI_PIC12F675_DATA_LIMIT"
 	fi
 fi
 

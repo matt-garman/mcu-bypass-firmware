@@ -59,20 +59,28 @@ EOF
 chmod 750 "$tools/cc"
 
 run_gate() {
+	local -a policy=()
+	[ -z "${TEST_STACK_MAX+x}" ] \
+		|| policy+=("AVR_STACK_MAX_FRAME=$TEST_STACK_MAX")
 	make --no-print-directory -C "$ROOT" test-stack-bound \
-		AVR_STACK_BUILD_DIR="$build" AVR_STACK_MAX_FRAME="${TEST_STACK_MAX-32}" \
-		CC="$tools/cc" "$@"
+		AVR_STACK_BUILD_DIR="$build" CC="$tools/cc" "${policy[@]}" "$@"
 }
 
 run_gate_private() {
+	local -a policy=()
+	[ -z "${TEST_STACK_MAX+x}" ] \
+		|| policy+=("AVR_STACK_MAX_FRAME=$TEST_STACK_MAX")
 	make --no-print-directory -C "$ROOT" test-stack-bound \
-		AVR_STACK_MAX_FRAME="${TEST_STACK_MAX-32}" CC="$tools/cc"
+		CC="$tools/cc" "${policy[@]}"
 }
 
 run_xt_gate() {
+	local -a policy=()
+	[ -z "${TEST_STACK_MAX+x}" ] \
+		|| policy+=("XT_STACK_MAX_FRAME=$TEST_STACK_MAX")
 	make --no-print-directory -C "$ROOT" attiny202-test-stack-bound \
 		XT_STACK_BUILD_DIR="$xt_build" XT_DFP="${TEST_DFP-$dfp}" \
-		XT_STACK_MAX_FRAME="${TEST_STACK_MAX-32}" CC="$tools/cc" "$@"
+		CC="$tools/cc" "${policy[@]}" "$@"
 }
 
 seed_stale() {
