@@ -434,68 +434,11 @@ evidence_copy_line=${evidence_copy_lines[0]%%:*}
 	|| fail "classic-AVR byte binding does not dominate checksum/evidence acceptance"
 checks=$((checks + 1))
 
-# Tag CI snapshots the clean-build paths, proves four-way image reproduction,
-# freezes the exact publication inventory, and rechecks every trust boundary
-# before publication. Pin the source paths and fail-closed ordering.
-mapfile -t ci_final_build_lines < <(grep -nF \
-	'make pic10f320-variants PIC10F320_CC=' "$RELEASE_WORKFLOW")
-mapfile -t ci_snapshot_lines < <(grep -nF \
-	'cp -a -- "${image_dirs[$i]}"/. "$fresh_dir"/' "$RELEASE_WORKFLOW")
-mapfile -t ci_repro_lines < <(grep -nF \
-	'scripts/verify-release-images.sh "$dir"' "$RELEASE_WORKFLOW")
-mapfile -t ci_publish_snapshot_lines < <(grep -nF \
-	'cp -p -- "$dir"/*.hex' "$RELEASE_WORKFLOW")
-mapfile -t ci_state_output_lines < <(grep -nF \
-	'echo "inventory_sha256=$inventory_sha256"' "$RELEASE_WORKFLOW")
-mapfile -t ci_tag_verify_lines < <(grep -nF \
-	'scripts/verify-release-tag-target.sh origin' "$RELEASE_WORKFLOW")
-mapfile -t ci_inventory_verify_lines < <(grep -nF \
-	'python3 scripts/verify_release_publication.py verify \' "$RELEASE_WORKFLOW")
-mapfile -t ci_signature_lines < <(grep -nF \
-	'scripts/verify-release-signature.sh detached \' "$RELEASE_WORKFLOW")
-mapfile -t ci_checksum_lines < <(grep -nF \
-	'(cd "$dir" && sha256sum --check --strict -- SHA256SUMS)' "$RELEASE_WORKFLOW")
-mapfile -t ci_publish_lines < <(grep -nF \
-	'gh release create "$tag"' "$RELEASE_WORKFLOW")
-[ "${#ci_final_build_lines[@]}" -eq 1 ] \
-	&& [ "${#ci_snapshot_lines[@]}" -eq 1 ] \
-	&& [ "${#ci_repro_lines[@]}" -eq 1 ] \
-	&& [ "${#ci_publish_snapshot_lines[@]}" -eq 1 ] \
-	&& [ "${#ci_state_output_lines[@]}" -eq 1 ] \
-	&& [ "${#ci_tag_verify_lines[@]}" -eq 1 ] \
-	&& [ "${#ci_inventory_verify_lines[@]}" -eq 3 ] \
-	&& [ "${#ci_signature_lines[@]}" -eq 2 ] \
-	&& [ "${#ci_checksum_lines[@]}" -eq 1 ] \
-	&& [ "${#ci_publish_lines[@]}" -eq 1 ] \
-	|| fail "tag-CI reproduction/freeze/publication markers are missing or ambiguous"
-ci_final_build_line=${ci_final_build_lines[0]%%:*}
-ci_snapshot_line=${ci_snapshot_lines[0]%%:*}
-ci_repro_line=${ci_repro_lines[0]%%:*}
-ci_publish_snapshot_line=${ci_publish_snapshot_lines[0]%%:*}
-ci_state_output_line=${ci_state_output_lines[0]%%:*}
-ci_tag_verify_line=${ci_tag_verify_lines[0]%%:*}
-ci_initial_inventory_line=${ci_inventory_verify_lines[0]%%:*}
-ci_pre_signature_inventory_line=${ci_inventory_verify_lines[1]%%:*}
-ci_post_signature_inventory_line=${ci_inventory_verify_lines[2]%%:*}
-ci_final_signature_line=${ci_signature_lines[1]%%:*}
-ci_checksum_line=${ci_checksum_lines[0]%%:*}
-ci_publish_line=${ci_publish_lines[0]%%:*}
-[ "$ci_final_build_line" -lt "$ci_snapshot_line" ] \
-	&& [ "$ci_snapshot_line" -lt "$ci_repro_line" ] \
-	&& [ "$ci_repro_line" -lt "$ci_publish_snapshot_line" ] \
-	&& [ "$ci_publish_snapshot_line" -lt "$ci_initial_inventory_line" ] \
-	&& [ "$ci_initial_inventory_line" -lt "$ci_state_output_line" ] \
-	&& [ "$ci_state_output_line" -lt "$ci_tag_verify_line" ] \
-	&& [ "$ci_tag_verify_line" -lt "$ci_pre_signature_inventory_line" ] \
-	&& [ "$ci_pre_signature_inventory_line" -lt "$ci_final_signature_line" ] \
-	&& [ "$ci_final_signature_line" -lt "$ci_checksum_line" ] \
-	&& [ "$ci_checksum_line" -lt "$ci_post_signature_inventory_line" ] \
-	&& [ "$ci_post_signature_inventory_line" -lt "$ci_publish_line" ] \
-	|| fail "tag CI does not preserve reproduce-before-freeze-before-publish ordering"
-ci_repro_block=$(awk '/- name: Verify committed images reproduce bit-for-bit/ { in_block=1 }
+# The reproduction step is not practical to execute without a full release
+# toolchain. Keep its security-sensitive freeze boundary structural; parsed
+# workflow topology and publication ordering are owned by test-workflow-syntax.
+ci_repro_block=$(awk '/^[[:space:]]+id: repro$/ { in_block=1 }
 	/# --- re-run the gates on the clean runner/ { in_block=0 }
-	in_block { print }' "$RELEASE_WORKFLOW")
-ci_publish_block=$(awk '/- name: Publish GitHub Release/ { in_block=1 }
 	in_block { print }' "$RELEASE_WORKFLOW")
 for required in \
 	'set -euo pipefail' \
@@ -513,25 +456,6 @@ for required in \
 	[[ "$ci_repro_block" == *"$required"* ]] \
 		|| fail "tag-CI reproduction step omits required wiring: $required"
 done
-for required in \
-	'RELEASE_INVENTORY: ${{ steps.repro.outputs.inventory }}' \
-	'RELEASE_INVENTORY_SHA256: ${{ steps.repro.outputs.inventory_sha256 }}' \
-	'RELEASE_HELPER_ASSETS: ${{ steps.repro.outputs.helper_assets }}' \
-	'python3 scripts/verify_release_publication.py verify' \
-	'scripts/verify-release-signature.sh detached' \
-	'sha256sum --check --strict -- SHA256SUMS' \
-	'"${assets[@]}"'; do
-	[[ "$ci_publish_block" == *"$required"* ]] \
-		|| fail "tag-CI publication omits required frozen-asset wiring: $required"
-done
-if grep -Eq '^[[:space:]]+(continue-on-error|if):' <<<"$ci_repro_block" \
-		|| grep -Fq '|| true' <<<"$ci_repro_block"; then
-	fail "tag-CI reproduction can be skipped or ignored"
-fi
-if grep -Eq '^[[:space:]]+(continue-on-error|if):' <<<"$ci_publish_block" \
-		|| grep -Fq '|| true' <<<"$ci_publish_block"; then
-	fail "tag-CI publication can be skipped or ignored"
-fi
 if grep -Fq 'RELEASE_EXPECTED_IMAGES' "$RELEASE_WORKFLOW"; then
 	fail "tag CI exposes a non-Makefile canonical release-image input"
 fi
@@ -546,7 +470,7 @@ checks=$((checks + 1))
 # exact frozen asset vector rather than only looking right to grep.
 publish_step="$work/publish-step.sh"
 awk '
-	/- name: Publish GitHub Release/ { in_step=1 }
+	/^[[:space:]]+id: publish$/ { in_step=1 }
 	in_step && /^        run: \|$/ { in_run=1; next }
 	in_run && /^          / { print substr($0, 11); next }
 	in_run { exit }
@@ -566,7 +490,7 @@ set -euo pipefail
 [ "$#" -eq 3 ]
 [ "${TEST_TAG_VERIFY_FAIL:-0}" -eq 0 ] \
 	|| { printf 'tag verification fixture failure\n' >&2; exit 91; }
-printf '%s\n' "$*" > "$TAG_VERIFY_LOG"
+printf '%s\n' "$@" > "$TAG_VERIFY_LOG"
 EOF
 cat > "$publish_fixture/scripts/verify-release-signature.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -632,6 +556,34 @@ run_publish_step() {
 	)
 }
 
+expect_recorded_args() {
+	local label=$1 file=$2
+	shift 2
+	local -a actual=() expected=("$@")
+	local i
+	[ -f "$file" ] || fail "$label did not record an invocation"
+	mapfile -t actual < "$file"
+	[ "${#actual[@]}" -eq "${#expected[@]}" ] \
+		|| fail "$label recorded ${#actual[@]} arguments, expected ${#expected[@]}"
+	for ((i = 0; i < ${#expected[@]}; i++)); do
+		[ "${actual[$i]}" = "${expected[$i]}" ] \
+			|| fail "$label argument $((i + 1)) is '${actual[$i]}', expected '${expected[$i]}'"
+	done
+}
+
+expect_publish_invocation() {
+	local tag=$1 prerelease=$2 asset
+	local -a expected=(release create "$tag" --title "Firmware $tag"
+		--notes-file "$publish_assets/MANIFEST.md" --verify-tag)
+	[ "$prerelease" -eq 0 ] || expected+=(--prerelease)
+	for asset in "${publish_expected[@]}"; do
+		expected+=("$publish_assets/$asset")
+	done
+	expect_recorded_args "release publication" "$publish_args" "${expected[@]}"
+	expect_recorded_args "release tag verification" "$tag_verify_log" \
+		origin "$tag" 0000000000000000000000000000000000000000
+}
+
 expect_publish_fail() {
 	local label=$1 expected=$2 tag=${3:-v1.2.3}
 	if run_publish_step "$tag" \
@@ -648,13 +600,7 @@ expect_publish_fail() {
 record_publish_inventory
 run_publish_step >"$work/publish.out" 2>"$work/publish.err" \
 	|| fail "valid frozen bundle did not publish: $(<"$work/publish.err")"
-for asset in "$publish_assets/a.hex" "$publish_assets/flash-pic12f675.py" \
-		"$publish_assets/SHA256SUMS" \
-		"$publish_assets/SHA256SUMS.asc" "$publish_assets/MANIFEST.md" \
-		"$publish_assets/QUALIFICATION"; do
-	grep -Fxq "$asset" "$publish_args" \
-		|| fail "publication omitted frozen asset: $asset"
-done
+expect_publish_invocation v1.2.3 0
 checks=$((checks + 1))
 
 # Any stray file must be rejected by the generic exact inventory before
@@ -687,31 +633,9 @@ TEST_HELPER_ASSETS='absent-helper.py' expect_publish_fail 'an artifact the bundl
 # outside the version grammar must abort before gh is reached: the locate step
 # already rejected it before any build, so one arriving here means that gate
 # was bypassed, and defaulting to either kind would publish it.
-run_publish_step v1.2.3 >"$work/publish.out" 2>"$work/publish.err" \
-	|| fail "stable tag did not publish: $(<"$work/publish.err")"
-if grep -Fxq -- '--prerelease' "$publish_args"; then
-	fail "stable vX.Y.Z publication marked the release a prerelease"
-fi
-grep -Fxq -- '--verify-tag' "$publish_args" \
-	|| fail "stable publication dropped --verify-tag"
-grep -Fxq -- 'v1.2.3' "$publish_args" \
-	|| fail "stable publication did not publish under its own tag"
-# The flag lives in an array that is EMPTY for a stable tag. Under `set -u` a
-# shell older than bash 4.4 expands that to one empty word, which gh would read
-# as an empty asset path -- so require that no empty argument reaches it.
-if grep -qx '' "$publish_args"; then
-	fail "stable publication passed an empty argument to gh"
-fi
-checks=$((checks + 1))
-
 run_publish_step v1.2.3-rc.1 >"$work/publish.out" 2>"$work/publish.err" \
 	|| fail "suffixed tag did not publish: $(<"$work/publish.err")"
-[ "$(grep -Fxc -- '--prerelease' "$publish_args")" -eq 1 ] \
-	|| fail "suffixed publication did not mark the release a prerelease exactly once"
-grep -Fxq -- '--verify-tag' "$publish_args" \
-	|| fail "suffixed publication dropped --verify-tag"
-grep -Fxq -- 'v1.2.3-rc.1' "$publish_args" \
-	|| fail "suffixed publication did not publish under its own tag"
+expect_publish_invocation v1.2.3-rc.1 1
 checks=$((checks + 1))
 
 for malformed_tag in 'v1.2.3-' 'v1.2.3-rc..1' 'v1.2.3--rc' 'v1.2.3+1' 'v1.2' '1.2.3'; do

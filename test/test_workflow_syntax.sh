@@ -267,7 +267,7 @@ if len(token_steps) == 1:
     token_env = step.get("env", {})
     check(
         name == "release.yml" and job_id == "release"
-        and step.get("name") == "Publish GitHub Release"
+        and step.get("id") == "publish"
         and token_env.get("GH_TOKEN") == "${{ github.token }}",
         f"GH_TOKEN is exposed outside the release publication step: "
         f"{name} job '{job_id}' step {idx}",
@@ -316,20 +316,106 @@ release_jobs = release_doc.get("jobs") if isinstance(release_doc, dict) else Non
 release_job = release_jobs.get("release") if isinstance(release_jobs, dict) else None
 release_steps = release_job.get("steps") if isinstance(release_job, dict) else None
 if check(isinstance(release_steps, list), "release.yml: release job has no step list"):
+    release_checkout_steps = [
+        step for step in release_steps
+        if isinstance(step, dict)
+        and isinstance(step.get("uses"), str)
+        and step["uses"].startswith("actions/checkout@")
+    ]
+    check(
+        len(release_checkout_steps) == 1,
+        "release.yml: release checkout step is not unique",
+    )
+    if len(release_checkout_steps) == 1:
+        checkout_with = release_checkout_steps[0].get("with")
+        check(
+            isinstance(checkout_with, dict) and checkout_with.get("fetch-depth") == 2,
+            "release.yml: release checkout does not fetch the qualified source parent",
+        )
+
+    locate_steps = [
+        step for step in release_steps
+        if isinstance(step, dict) and step.get("id") == "rel"
+    ]
     repro_steps = [
         step for step in release_steps
         if isinstance(step, dict)
-        and step.get("name") == "Verify committed images reproduce bit-for-bit"
+        and step.get("id") == "repro"
     ]
     publish_steps = [
         step for step in release_steps
-        if isinstance(step, dict) and step.get("name") == "Publish GitHub Release"
+        if isinstance(step, dict) and step.get("id") == "publish"
     ]
+    check(len(locate_steps) == 1, "release.yml: committed-release locator is not unique")
     check(len(repro_steps) == 1, "release.yml: frozen-bundle producer step is not unique")
     check(len(publish_steps) == 1, "release.yml: publication step is not unique")
+    if len(release_checkout_steps) == 1 and len(locate_steps) == 1 \
+            and len(repro_steps) == 1 and len(publish_steps) == 1:
+        check(
+            release_steps.index(release_checkout_steps[0])
+            < release_steps.index(locate_steps[0])
+            < release_steps.index(repro_steps[0])
+            < release_steps.index(publish_steps[0]),
+            "release.yml: checkout/verification/freeze/publication step order is invalid",
+        )
+
+    if len(locate_steps) == 1:
+        locate = locate_steps[0]
+        locate_env = locate.get("env")
+        locate_run = locate.get("run")
+        check(
+            isinstance(locate_env, dict)
+            and locate_env.get("RELEASE_TAG") == "${{ github.ref_name }}"
+            and locate_env.get("RELEASE_OBJECT") == "${{ github.sha }}",
+            "release.yml: release tag/object are not routed through the locator environment",
+        )
+        check(isinstance(locate_run, str), "release.yml: committed-release locator has no shell body")
+        if isinstance(locate_run, str):
+            commands = shell_tokens(locate_run)
+            signature_command = [
+                "scripts/verify-release-signature.sh", "detached",
+                "$dir/SHA256SUMS.asc", "$dir/SHA256SUMS",
+            ]
+            qualification_command = [
+                "scripts/verify-release-qualification.sh", "$dir", "$tag",
+            ]
+            history_command = [
+                "scripts/verify-release-history.sh", "$dir", "$tag", "$RELEASE_OBJECT",
+            ]
+            signature_indices = [
+                i for i, command in enumerate(commands) if command == signature_command
+            ]
+            qualification_indices = [
+                i for i, command in enumerate(commands) if command == qualification_command
+            ]
+            history_indices = [
+                i for i, command in enumerate(commands) if command == history_command
+            ]
+            output_indices = [
+                i for i, command in enumerate(commands) if "$GITHUB_OUTPUT" in command
+            ]
+            check(
+                len(signature_indices) == 1 and len(qualification_indices) == 1
+                and len(history_indices) == 1 and bool(output_indices),
+                "release.yml: committed release verification command inventory is not exact",
+            )
+            if signature_indices and qualification_indices and history_indices and output_indices:
+                check(
+                    signature_indices[0] < qualification_indices[0]
+                    < history_indices[0] < output_indices[0],
+                    "release.yml: committed release is exposed before all verification completes",
+                )
+            check(
+                commands[:1] == [["set", "-euo", "pipefail"]]
+                and "${{" not in locate_run and "|| true" not in locate_run
+                and "if" not in locate
+                and locate.get("continue-on-error", False) is False,
+                "release.yml: committed-release verification is not fail-closed",
+            )
 
     if len(repro_steps) == 1:
-        repro_run = repro_steps[0].get("run")
+        repro = repro_steps[0]
+        repro_run = repro.get("run")
         check(isinstance(repro_run, str), "release.yml: frozen-bundle producer has no shell body")
         if isinstance(repro_run, str):
             commands = shell_tokens(repro_run)
@@ -340,6 +426,15 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
             asset_install_command = [
                 "sudo", "install", "-o", "root", "-g", "root", "-m", "0444",
                 "--", "$publish_stage/$asset", "$publish/$asset",
+            ]
+            metadata_command = [
+                "expected_assets+=(SHA256SUMS", "SHA256SUMS.asc", "MANIFEST.md",
+                "QUALIFICATION)",
+            ]
+            snapshot_command = [
+                "cp", "-p", "--", "$dir/*.hex", "$dir/SHA256SUMS",
+                "$dir/SHA256SUMS.asc", "$dir/MANIFEST.md", "$dir/QUALIFICATION",
+                "$publish_stage/",
             ]
             inventory_mode_command = [
                 "sudo", "chmod", "0444", "--", "$inventory",
@@ -356,6 +451,12 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
             ]
             asset_install_indices = [
                 i for i, command in enumerate(commands) if command == asset_install_command
+            ]
+            metadata_indices = [
+                i for i, command in enumerate(commands) if command == metadata_command
+            ]
+            snapshot_indices = [
+                i for i, command in enumerate(commands) if command == snapshot_command
             ]
             record_indices = [
                 i for i, command in enumerate(commands)
@@ -385,16 +486,19 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
             )
             check(
                 len(private_dir_indices) == 1 and len(asset_install_indices) == 1
+                and len(metadata_indices) == 1 and len(snapshot_indices) == 1
                 and len(record_indices) == 1 and len(inventory_mode_indices) == 1
                 and len(harden_indices) == 1
                 and len(initial_verify_indices) == 1 and len(output_indices) == 1,
                 "release.yml: active root-owned freeze commands are not exact",
             )
-            if private_dir_indices and asset_install_indices and record_indices \
+            if metadata_indices and snapshot_indices and private_dir_indices \
+                    and asset_install_indices and record_indices \
                     and inventory_mode_indices and harden_indices \
                     and initial_verify_indices and output_indices:
                 check(
-                    private_dir_indices[0] < asset_install_indices[0] < record_indices[0]
+                    metadata_indices[0] < snapshot_indices[0] < private_dir_indices[0]
+                    < asset_install_indices[0] < record_indices[0]
                     < inventory_mode_indices[0] < harden_indices[0]
                     < initial_verify_indices[0] < output_indices[0],
                     "release.yml: root-owned publication inventory is not hardened and verified before outputs",
@@ -403,6 +507,12 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
                 ["frozen_root=/opt/mcu-bypass-publication"] in commands
                 and ["echo", "inventory_sha256=$inventory_sha256"] in commands,
                 "release.yml: frozen-bundle producer omits the inventory digest output",
+            )
+            check(
+                "if" not in repro
+                and repro.get("continue-on-error", False) is False
+                and "|| true" not in repro_run,
+                "release.yml: frozen-bundle producer can be skipped or ignored",
             )
 
     if len(publish_steps) == 1:
@@ -419,6 +529,11 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
                 publish_env.get("RELEASE_INVENTORY_SHA256")
                 == "${{ steps.repro.outputs.inventory_sha256 }}",
                 "release.yml: publication inventory digest is not routed through step output/env",
+            )
+            check(
+                publish_env.get("RELEASE_HELPER_ASSETS")
+                == "${{ steps.repro.outputs.helper_assets }}",
+                "release.yml: helper assets are not routed through frozen-bundle step output/env",
             )
         check(isinstance(publish_run, str), "release.yml: publication step has no shell body")
         if isinstance(publish_run, str):
@@ -486,8 +601,9 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
                 "release.yml: publication shell does not retain strict fail-closed mode",
             )
             check(
-                publish.get("continue-on-error", False) is False,
-                "release.yml: publication step may continue after verification failure",
+                "if" not in publish
+                and publish.get("continue-on-error", False) is False,
+                "release.yml: publication step may be skipped or continue after verification failure",
             )
 
             # --- publication kind -------------------------------------------

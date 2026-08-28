@@ -166,8 +166,6 @@ done
 checks=$((checks + 1))
 
 for wiring in \
-	'source "$REPO_ROOT/scripts/release-documentation.sh"' \
-	'release_validate_current_documentation "$REPO_ROOT" "$VERSION"' \
 	$'\trelease_render_scope' \
 	$'\trelease_render_validation "$hours"' \
 	$'\trelease_render_pic_toolchain_rows "$PIC_CC" "$TC_XC8_322"' \
@@ -454,6 +452,11 @@ printf 'extra\n' > "$release/evidence/.hidden"
 expect_fail "hidden extra evidence" "invalid name"
 
 reset_fixture
+printf 'retired split evidence\n' > "$release/evidence/pic12f675-test.log"
+expect_fail "retired split PIC12F675 evidence" \
+	"does not exactly match RELEASE_EVIDENCE_FILES"
+
+reset_fixture
 : > "$release/evidence/${evidence_names[0]}"
 expect_fail "empty evidence file" "empty or not regular"
 
@@ -636,9 +639,6 @@ for wiring in \
 	grep -Fq "$wiring" "$RELEASE" \
 		|| fail "release producer is missing soak identity wiring: $wiring"
 done
-grep -Fq 'scripts/verify-release-qualification.sh "${qualification_args[@]}" "$OUTPUT_DIR" "$VERSION"' \
-	"$RELEASE" \
-	|| fail "release producer does not self-verify staged qualification"
 # MANIFEST.md is published verbatim as the GitHub Release body, where a
 # repo-relative link does not resolve. Pin all three properties of the fix --
 # absolute base, tag-pinned path, and the absence of the old relative form --
@@ -655,11 +655,6 @@ grep -Fq '"$REPO_URL" "$VERSION"' \
 	|| fail "release manifest special-case link does not interpolate REPO_URL and VERSION"
 ! grep -Fq '](../../docs/pic10f320_special_case.md)' "$RELEASE" \
 	|| fail "release manifest special-case link regressed to a repo-relative path"
-grep -Fq 'scripts/verify-release-qualification.sh "$dir" "$tag"' \
-	"$ROOT/.github/workflows/release.yml" \
-	|| fail "tag workflow does not verify committed release qualification"
-grep -Fq '"$dir/QUALIFICATION"' "$ROOT/.github/workflows/release.yml" \
-	|| fail "tag workflow does not retain QUALIFICATION for publication"
 grep -Fq 'a staged PIC image differs from the image exercised by the soak' \
 	"$RELEASE" \
 	|| fail "release producer does not bind staged PIC images to soak inputs"
@@ -678,11 +673,6 @@ for wiring in \
 	'make --old-file=_pic12f675-build-soak "$bin"'; do
 	grep -Fq "$wiring" "$RELEASE" \
 		|| fail "release producer omits one-matrix PIC12F675 wiring: $wiring"
-done
-for retired in '$EVID/pic12f675-test.log' \
-		'$EVID/pic12f675-test-target-variants.log'; do
-	! grep -Fq "$retired" "$RELEASE" \
-		|| fail "release producer still writes split PIC12F675 evidence: $retired"
 done
 checks=$((checks + 1))
 

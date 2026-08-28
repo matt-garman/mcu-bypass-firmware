@@ -7,7 +7,6 @@ TAG_VERIFY_SOURCE="$ROOT/scripts/verify-release-tag-target.sh"
 SIGNATURE_VERIFY_SOURCE="$ROOT/scripts/verify-release-signature.sh"
 PINNED_SIGNATURE_VERIFY="$SIGNATURE_VERIFY_SOURCE"
 PUBLICATION_VERIFY="$ROOT/scripts/verify_release_publication.py"
-WORKFLOW="$ROOT/.github/workflows/release.yml"
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-history.XXXXXX")
 repo="$work/repo"
 snapshot="$work/snapshot"
@@ -250,65 +249,6 @@ expect_fail "malformed release object" "not a full lowercase SHA-1" \
 setup_fixture
 expect_fail "non-triggering dotted release suffix" "invalid expected release version" \
 	"$snapshot" v99.0.0.rc1 "$release_sha"
-
-grep -Fq 'fetch-depth: 2' "$WORKFLOW" \
-	|| fail "release workflow does not fetch the qualified source parent"
-grep -Fq 'RELEASE_OBJECT: ${{ github.sha }}' "$WORKFLOW" \
-	|| fail "release workflow does not route the independent event object"
-grep -Fq 'scripts/verify-release-history.sh "$dir" "$tag" "$RELEASE_OBJECT"' "$WORKFLOW" \
-	|| fail "release workflow does not bind qualification to tag history"
-grep -Fq 'scripts/verify-release-tag-target.sh origin "$tag" "$VERIFIED_RELEASE_COMMIT"' "$WORKFLOW" \
-	|| fail "release workflow does not recheck the remote tag before publication"
-grep -Fq 'scripts/verify-release-signature.sh detached \' "$WORKFLOW" \
-	|| fail "release workflow does not verify the checksum signature"
-grep -Fq 'cp -p -- "$dir"/*.hex "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \' "$WORKFLOW" \
-	|| fail "release workflow does not snapshot the verified checksum signature"
-grep -Fq 'assets=( "$dir"/*.hex "${helper_assets[@]}" \' "$WORKFLOW" \
-	|| fail "release workflow does not publish the images and required artifacts"
-grep -Fq '"$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \' "$WORKFLOW" \
-	|| fail "release workflow does not publish the verified checksum signature"
-grep -Fq 'inventory_sha256=$(sudo python3 scripts/verify_release_publication.py \' "$WORKFLOW" \
-	|| fail "release workflow does not inventory the frozen publication bundle"
-grep -Fq 'RELEASE_INVENTORY_SHA256: ${{ steps.repro.outputs.inventory_sha256 }}' "$WORKFLOW" \
-	|| fail "release workflow does not route the independently recorded inventory digest"
-mapfile -t checksum_verify_lines \
-	< <(grep -nF 'scripts/verify-release-signature.sh detached \' "$WORKFLOW" | cut -d: -f1)
-[ "${#checksum_verify_lines[@]}" -eq 2 ] \
-	|| fail "release workflow must verify the detached checksum signature exactly twice"
-snapshot_line=$(grep -nF 'cp -p -- "$dir"/*.hex' "$WORKFLOW" | cut -d: -f1)
-inventory_record_line=$(grep -nF 'inventory_sha256=$(sudo python3 scripts/verify_release_publication.py \' "$WORKFLOW" | cut -d: -f1)
-tag_verify_line=$(grep -nF 'scripts/verify-release-tag-target.sh origin' "$WORKFLOW" | cut -d: -f1)
-mapfile -t inventory_verify_lines \
-	< <(grep -nF 'python3 scripts/verify_release_publication.py verify \' "$WORKFLOW" | cut -d: -f1)
-[ "${#inventory_verify_lines[@]}" -eq 3 ] \
-	|| fail "release workflow must verify the frozen bundle once after recording and twice before publication"
-strict_checksum_line=$(grep -nF '(cd "$dir" && sha256sum --check --strict -- SHA256SUMS)' "$WORKFLOW" | cut -d: -f1)
-publish_line=$(grep -nF 'gh release create "$tag"' "$WORKFLOW" | cut -d: -f1)
-[ "${checksum_verify_lines[0]}" -lt "$snapshot_line" ] \
-	&& [ "$snapshot_line" -lt "$inventory_record_line" ] \
-	&& [ "$inventory_record_line" -lt "${inventory_verify_lines[0]}" ] \
-	&& [ "${inventory_verify_lines[0]}" -lt "$tag_verify_line" ] \
-	&& [ "$tag_verify_line" -lt "${inventory_verify_lines[1]}" ] \
-	&& [ "${inventory_verify_lines[1]}" -lt "${checksum_verify_lines[1]}" ] \
-	&& [ "${checksum_verify_lines[1]}" -lt "$strict_checksum_line" ] \
-	&& [ "$strict_checksum_line" -lt "${inventory_verify_lines[2]}" ] \
-	&& [ "${inventory_verify_lines[2]}" -lt "$publish_line" ] \
-	|| fail "release signature/inventory/checksum verification does not dominate publication"
-locate_block=$(awk '/- name: Locate the committed release directory/ { in_block=1 }
-	/# --- toolchains/ { in_block=0 }
-	in_block { print }' "$WORKFLOW")
-publish_block=$(awk '/- name: Publish GitHub Release/ { in_block=1 }
-	in_block { print }' "$WORKFLOW")
-[[ "$locate_block" == *'set -euo pipefail'* ]] \
-	&& [[ "$locate_block" != *'verify-release-signature.sh detached'*'|| true'* ]] \
-	|| fail "checksum-signature workflow verification is not fail-closed"
-[[ "$publish_block" == *'set -euo pipefail'* ]] \
-	&& [[ "$publish_block" != *'verify-release-tag-target.sh'*'|| true'* ]] \
-	&& [[ "$publish_block" != *'verify_release_publication.py verify'*'|| true'* ]] \
-	&& [[ "$publish_block" != *'verify-release-signature.sh detached'*'|| true'* ]] \
-	&& [[ "$publish_block" != *'sha256sum --check --strict'*'|| true'* ]] \
-	|| fail "tag-signature workflow verification is not fail-closed"
-checks=$((checks + 1))
 
 [ -f "$PUBLICATION_VERIFY" ] && [ ! -L "$PUBLICATION_VERIFY" ] \
 	|| fail "publication-bundle verifier is missing or symlinked"

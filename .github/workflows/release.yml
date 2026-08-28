@@ -424,6 +424,7 @@ jobs:
 
       # --- publish ----------------------------------------------------------
       - name: Publish GitHub Release
+        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_DIR: ${{ steps.repro.outputs.dir }}

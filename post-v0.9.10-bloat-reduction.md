@@ -1207,7 +1207,7 @@ normal CI and `scripts/ci-local.sh` restate component commands and assertions.
 
 ## BR-TEST-04 - Centralize resource-policy constants per independent surface
 
-**Status:** IN PROGRESS OpenCode
+**Status:** DONE `bc5f11d`
 
 **Current examples:**
 
@@ -1240,7 +1240,7 @@ may be valuable. Repeating the literal at every call site is not.
 
 ## BR-TEST-05 - Replace source-spelling tests with behavioral fixtures
 
-**Status:** TODO
+**Status:** IN PROGRESS OpenCode
 
 **Candidates:**
 
@@ -1266,6 +1266,23 @@ may be valuable. Repeating the literal at every call site is not.
 - Which bytes were hashed, copied, frozen, and published.
 - Whether publication consumed the frozen inventory.
 - Whether skipped/partial lanes withheld the terminal PASS record.
+
+**Completed review:**
+
+- [x] Make the existing workflow publication fixture assert the complete fake
+  tag-verifier and `gh` argument vectors for stable and prerelease tags.
+- [x] Move release checkout, verification, freeze, and publication topology to
+  the YAML-aware workflow validator instead of repeating line-oriented workflow
+  greps in release-history and qualification tests.
+- [x] Replace the retired PIC12F675 evidence-path source scan with a staged
+  verifier fixture that rejects the obsolete evidence file behaviorally.
+- [x] Remove duplicate renderer-loading and staged-qualification source checks
+  where existing preflight and renderer fixtures already prove the invariant.
+- [x] Retain structural checks for final-candidate/staging order, root-owned
+  freeze ordering, output-path TOCTOU guards, compiler pins, and signal cleanup.
+- [x] Retain safety-language and evidence-substrate checks. Defer prose-only
+  synchronization removal until the owning documentation task removes the
+  duplicated prose, so existing copies do not become uncontrolled duplication.
 
 **Acceptance:**
 
@@ -1939,8 +1956,8 @@ dependencies and acceptance criteria.
 | BR-TEST-01 | Delete retired rename lane | DONE `893d647` |
 | BR-TEST-02 | Remove duplicate CI mutation run | DONE `b86a5a7` |
 | BR-TEST-03 | Route CI through aggregates | DONE `b9cbd36` |
-| BR-TEST-04 | Centralize policy constants per surface | IN PROGRESS OpenCode |
-| BR-TEST-05 | Prefer behavioral fixtures | TODO |
+| BR-TEST-04 | Centralize policy constants per surface | DONE `bc5f11d` |
+| BR-TEST-05 | Prefer behavioral fixtures | IN PROGRESS OpenCode |
 | BR-TEST-06 | Introduce named test profiles | TODO |
 | BR-TEST-07 | Consolidate strict helpers/wrappers | TODO |
 | BR-TEST-08 | Generate recipes from variant maps | TODO |
