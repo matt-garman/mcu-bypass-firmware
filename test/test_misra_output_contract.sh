@@ -87,6 +87,15 @@ rule_body() {
 	' "$file"
 }
 
+define_body() {
+	local name=$1 file=$2
+	awk -v wanted="$name" '
+	$0 == "define " wanted || $0 == "override define " wanted { active = 1; next }
+	active && $0 == "endef" { exit }
+	active { print }
+	' "$file"
+}
+
 targets=(
 	analyze-misra
 	attiny202-analyze-misra
@@ -95,13 +104,18 @@ targets=(
 	pic12f675-analyze-misra
 )
 
+runner=$(define_body run_misra_matrix_sh "$MAKEFILE")
+[[ "$runner" == *'$(MISRA_OUTPUT_GATE)'* ]] \
+	|| fail "shared MISRA matrix runner does not run the output gate"
+[[ "$runner" == *'$(MISRA_DIAGNOSTIC_TEMPLATE)'* ]] \
+	|| fail "shared MISRA matrix runner does not force the diagnostic template"
+checks=$((checks + 2))
+
 for target in "${targets[@]}"; do
 	body=$(rule_body "$target" "$MAKEFILE")
-	[[ "$body" == *'$(MISRA_OUTPUT_GATE)'* ]] \
-		|| fail "$target does not run the shared MISRA output gate"
-	[[ "$body" == *'$(MISRA_DIAGNOSTIC_TEMPLATE)'* ]] \
-		|| fail "$target does not force the machine-readable diagnostic template"
-	checks=$((checks + 2))
+	[[ "$body" == *'run_misra_matrix_sh'* ]] \
+		|| fail "$target does not run the shared MISRA matrix runner"
+	checks=$((checks + 1))
 done
 
 if grep -Eq -- '--suppress=misra-config' "$MAKEFILE"; then
@@ -132,16 +146,15 @@ checks=$((checks + 4))
 # Prove the rule census itself can detect a severed parser invocation.
 mutated_makefile="$work/Makefile"
 awk '
-/^analyze-misra:[^=]/ { in_target = 1 }
-in_target && /\$\(MISRA_OUTPUT_GATE\)/ && !removed { removed = 1; next }
+/^(override )?define run_misra_matrix_sh$/ { in_runner = 1 }
+in_runner && /\$\(MISRA_OUTPUT_GATE\)/ && !removed { removed = 1; next }
 { print }
-in_target && /^\t/ { seen_recipe = 1; next }
-in_target && seen_recipe && !/^\t/ { in_target = 0 }
+in_runner && /^endef$/ { in_runner = 0 }
 END { if (!removed) exit 2 }
 ' "$MAKEFILE" > "$mutated_makefile" \
 	|| fail "could not construct the severed-gate Makefile fixture"
-mutated_body=$(rule_body analyze-misra "$mutated_makefile")
-[[ "$mutated_body" != *'$(MISRA_OUTPUT_GATE)'* ]] \
+mutated_runner=$(define_body run_misra_matrix_sh "$mutated_makefile")
+[[ "$mutated_runner" != *'$(MISRA_OUTPUT_GATE)'* ]] \
 	|| fail "negative rule fixture still contains the output gate"
 checks=$((checks + 1))
 
@@ -164,11 +177,15 @@ printf '%s\n' "$*" >> "${FAKE_CPPCHECK_LOG:?}"
 diagnostic_id=${FAKE_DIAGNOSTIC_ID:-misra-c2012-14.4}
 diagnostic_path=${FAKE_DIAGNOSTIC_PATH:-src/bypass_hw_iface.h}
 suppressions=
+fail_selected=0
 for arg in "$@"; do
 	case "$arg" in
 		--suppressions-list=*) suppressions=${arg#--suppressions-list=} ;;
 	esac
+	[ "$arg" != "${FAKE_FAIL_SOURCE:-}" ] || fail_selected=1
 done
+
+[ "$fail_selected" -eq 0 ] || exit "${FAKE_FAIL_STATUS:-2}"
 
 if [ -n "$suppressions" ] && [ -f "$suppressions" ]; then
 	while IFS= read -r suppression; do
@@ -248,6 +265,19 @@ if output=$(run_make analyze-misra "$wrong_suppress" "${LANE_ARGS[@]}" 2>&1); th
 fi
 [[ "$output" == *"unwaived authored-firmware diagnostic"* ]] \
 	|| fail "wrong-file suppression failed for the wrong reason: $output"
+checks=$((checks + 1))
+
+# A failure in an early matrix row must survive later clean rows. The selected
+# shell rows emit no diagnostic and exit 2; every later fake invocation exits 0.
+# Only the retained tool status can make the shared output gate reject the lane.
+export FAKE_FAIL_SOURCE=src/bypass_mcu_avr_classic.c
+lane_args analyze-misra
+if output=$(run_make analyze-misra "$matching_suppress" "${LANE_ARGS[@]}" 2>&1); then
+	fail "analyze-misra lost an early matrix row's nonzero tool status"
+fi
+[[ "$output" == *"cppcheck exited with status 2"* ]] \
+	|| fail "early MISRA row failure was rejected for the wrong reason: $output"
+unset FAKE_FAIL_SOURCE
 checks=$((checks + 1))
 
 # Exercise the committed analyzer accommodations rather than only synthetic

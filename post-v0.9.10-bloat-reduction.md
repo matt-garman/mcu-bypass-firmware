@@ -1386,7 +1386,7 @@ consume the correct pair.
 
 ## BR-TEST-09 - Consolidate common Make dependency declarations and parsers
 
-**Status:** IN PROGRESS
+**Status:** DONE `4fa470b`
 
 **Work:**
 
@@ -1416,7 +1416,7 @@ consume the correct pair.
 
 ## BR-QUALITY-01 - Use a declarative static-analysis matrix
 
-**Status:** TODO
+**Status:** IN PROGRESS
 
 **Rationale:** This is a quality improvement enabled by consolidation, not a
 line-reduction target by itself. Classic AVR analysis covers shell, pure core,
@@ -1426,22 +1426,24 @@ branches may not be covered under `--max-configs=1` without explicit selectors.
 
 **Relevant Make areas:**
 
-- PIC10F322 analysis: `Makefile:1262-1291,1460-1492`
-- AVR-XT analysis: `Makefile:2796-2863`
-- PIC12F675 analysis: `Makefile:5743-5772,5914-5946`
-- Classic/shared analysis: `Makefile:4285-4363`
+- Shared matrix/runners: `Makefile:852-933`
+- PIC10F322 analysis: `Makefile:1369-1402,1550-1584`
+- AVR-XT analysis: `Makefile:2811-2870`
+- PIC10F320 analysis: `Makefile:4685-4720,4950-4980`
+- PIC12F675 analysis: `Makefile:5543-5580,5709-5736`
+- Classic/shared analysis: `Makefile:4187-4270`
 
 **Work:**
 
-- [ ] Define reviewed tuples of target, translation unit, and materially
+- [x] Define reviewed tuples of target, translation unit, and materially
   distinct output selector.
-- [ ] Analyze relay versus non-relay shell branches explicitly where behavior
+- [x] Analyze relay versus non-relay shell branches explicitly where behavior
   differs.
-- [ ] Analyze shared output drivers under each materially different target
+- [x] Analyze shared output drivers under each materially different target
   platform/header model.
-- [ ] Preserve separate `avr8`, `pic8`, and `pic8-enhanced` platform runs.
-- [ ] Reconcile or document shipping PIC C99 mode versus analyzer C11 mode.
-- [ ] Keep MISRA output gating and suppression review fail-closed.
+- [x] Preserve separate `avr8`, `pic8`, and `pic8-enhanced` platform runs.
+- [x] Reconcile or document shipping PIC C99 mode versus analyzer C11 mode.
+- [x] Keep MISRA output gating and suppression review fail-closed.
 
 **Acceptance:**
 
@@ -1979,8 +1981,8 @@ dependencies and acceptance criteria.
 | BR-TEST-06 | Introduce named test profiles | DONE `746ddcf` |
 | BR-TEST-07 | Consolidate strict helpers/wrappers | DONE `cee6bab` |
 | BR-TEST-08 | Generate recipes from variant maps | DONE `d3ea121` |
-| BR-TEST-09 | Consolidate dependencies/parsers | IN PROGRESS |
-| BR-QUALITY-01 | Define complete analysis matrix | TODO |
+| BR-TEST-09 | Consolidate dependencies/parsers | DONE `4fa470b` |
+| BR-QUALITY-01 | Define complete analysis matrix | IN PROGRESS |
 | BR-REL-01 | Define canonical signed release index | TODO |
 | BR-REL-02 | Package deterministic evidence archive | TODO |
 | BR-REL-03 | Clarify full test-long retention | TODO |

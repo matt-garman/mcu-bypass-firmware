@@ -33,6 +33,7 @@ test/
   python_version.py         shared: Python 3.7+ host-gate prerequisite
   host_compiler_version.sh  shared: GCC 10+/Clang host-gate prerequisite
   test_attiny202_build.sh   shared: fail-closed AVR-XT build checks
+  test_analysis_matrix.sh   shared: exact target/TU/selector analyzer matrix
   test_avr_build_rebuild.sh shared: modular-header dependency + classic rebuild checks
   test_avr_program_order.sh shared: AVR *-program build/validate-then-fuse-then-
                                     flash transaction order (fake programmer)
@@ -368,7 +369,7 @@ The split mirrors the PIC lanes: **the host-only rows below are members of
 | Output-sequence oracle | `test-attiny202-output-oracle` | The PA2/PA3 transition, ordering and pulse-presence checker itself is correct. | host |
 | Fault accounting oracle | `test-attiny202-fault-oracle` | The fault driver's run accounting cannot silently under-count injections, latch-only physical-pin handling is rejected, and the reviewed AVR-XT/PIC12F675 emergency register-write order is pinned. | host |
 | Coil-pulse width / ISR ceiling | `attiny202-delay-oracle` | Compiled relay (12 ms) and mute (5 ms) delay-body cycle counts, recovered from the disassembled `_delay_ms` loop in the built image, match design and clear the 4 ms datasheet minimum. The sole `reti` handler and its complete direct call tree stay at or below the reviewed 84-instruction ceiling; recursion, unresolved or indirect transfers, and cyclic intrafunction control flow fail closed, while acyclic branches to earlier shared epilogues remain countable. Four cycles per instruction plus a 16-cycle interrupt-entry/vector allowance bounds the complete response at 352 of 2000 tick cycles, below 25% duty. Timer-ISR preemption makes the edge-to-edge pin-high interval slightly longer. Every recognized loop candidate must provide a decodable 16-bit seed; no candidate can be dropped as missing evidence. | host, over real image |
-| Static analysis | `attiny202-analyze` | cppcheck + MISRA pass over the AVR-XT shell with real DFP/avr-libc headers. | host tools |
+| Static analysis | `attiny202-analyze` | cppcheck + MISRA run six explicit AVR-XT rows with real DFP/avr-libc headers: non-relay and relay shell branches, pure core, and all three matching-selector drivers. | host tools |
 | Register-level functional | `attiny202-sim` | The real image toggles on debounced press, boots dark with the WDT locked and `PORTA.DIR` exact, stays stable at idle, handles a switch held through power-on, and drives the correct PA2/PA3 sequence per variant. | yasimavr |
 | Fault response | `attiny202-fault` | 24 selected SFR/latch/state/pin-polarity corruptions (32 on the relay variant) each produce the correct response: the sanity gate's force-reset path, a witnessed watchdog reset for the tick timer itself, safe overwrite at the ISR/main persisted-context transaction seams, or relay-coil escalation with modeled PA2/PA3 pin levels low and OUT/DIR/PINnCTRL canonical before the spin. Relay fixtures cover both coils' INVEN, pull-up, direction, combined stale-register state, and OUT faults from BYPASS and ENGAGED. Zero skips, exact completion accounting over 25 (33) results. | yasimavr |
 | Firmware/model lock-step | `attiny202-lockstep` | `ctx_` in simulated SRAM equals the shipping core's state after **every settled tick**, over both boot scenarios, plus LED and settled control-line agreement. Catches a shell defect on the tick it happens rather than as a wrong output later. | yasimavr + host core via ctypes |
@@ -524,7 +525,7 @@ aggregates still run both gates, so nothing was moved out of them.
 | XC8 strict parsers | `test-xc8-helpers` | The shared program-space parser accepts one internally consistent XC8 record and rejects missing, malformed, duplicate, mixed, zero, over-capacity, contradictory, and percentage-mismatched transcripts. The shared context resolver requires one non-symlink assembly/symbol pair, exactly one `_ctx_: ds 3` allocation, and exactly one hexadecimal `_ctx_` address. | dependency-free Bash/awk fixtures |
 | PIC toolchain assertion | `test-pic-toolchain-assert` | The helper shared by hosted and local CI requires both selected XC8/DFP pairs, all three device headers, gpsim, both selected C++/libgpsim surfaces, GLib metadata, and cppcheck. Empty/symlinked headers and incomplete, duplicate, or unknown requests fail closed; GitHub mode emits annotations. | dependency-free fake toolchain |
 | CONFIG word | `pic10f322-test-config` | The XC8-emitted CONFIG word matches the documented oscillator/WDT/BOR/MCLR/LVP design intent. | host parser over HEX |
-| Static analysis | `pic10f322-analyze` | cppcheck + MISRA pass over the PIC shell with real XC8/DFP register headers. | host tools |
+| Static analysis | `pic10f322-analyze` | cppcheck + MISRA run five explicit `pic8-enhanced` rows with real XC8/DFP headers: shell, pure core, and all three matching-selector drivers. | host tools |
 | Shipping-source coverage | `pic10f322-coverage-check-fw` | Every executable line in the real PIC shell, shared pure core, and all three output drivers is host-executed except the documented non-returning reset path. Compiled with `BYPASS_CTX_CHECK`, because that is what ships. **This is a member of `make test`.** | host gcov with PIC SFR mock |
 | Register-level functional | `pic10f322-test-gpsim` | Real HEX toggles on press, handles power-on-held switch, keeps settled LATA/PORTA expectations, and includes the mid-debounce `PRESS1_EARLY` tick-cadence check. | gpsim CLI |
 | gpsim process gate | `test-gpsim-wrappers` | Both functional wrappers require a positive decimal timeout, reject nonzero or killed gpsim runs even after complete snapshots, prove routed stimuli contain one exact footswitch attachment, and fail rather than skip missing gpsim under `STRICT_TOOLS=1`. All three public lanes are additionally probed end-to-end: each must reach gpsim with its own part's processor, so a severed `PIC_GPSIM_PROC=` cannot leave a lane simulating another chip. The PIC12F675 route exhausts all six nonempty partial simulator-image subsets and rejects empty, symlinked, or unexpected members before gpsim runs. | Bash + fake gpsim |
@@ -655,13 +656,13 @@ targets are always fail-closed rather than skip-clean.
 | Expected image bytes | `test-pic10f320-expected-images`; `pic10f320-test-build` | The dependency-free checker pins exact manifest grammar and fail-closed file handling in `make test`; the full-tool target rebuilds the immutable three-variant matrix and compares each raw HEX file with the reviewed XC8 V3.10 / DFP 1.9.189 SHA-256 baseline. Kept out of mutation kill targets so a broad byte mismatch cannot mask a weak behavioural oracle. | Python 3; pinned XC8/DFP for the real-image comparison |
 | CONFIG word | `pic10f320-test-config` | The emitted CONFIG word matches design intent, over every built image. Uses the shared checker with a device-accurate label. | host parser over HEX |
 | Hardware return stack | every `pic10f320` build; `pic10f320-test-return-stack` | The base build strictly parses and traverses its final HEX before marking that image complete, so gpsim/target/soak/release rebuilds use the same fail-closed gate. The explicit target rebuilds the supported matrix and rechecks all three together, reporting each maximum and witness. | dependency-free Python 3 over final HEX |
-| Static analysis | `pic10f320-analyze` | cppcheck + MISRA over the shell, **swept across all three variants** — each compiles a different `#if defined(OUTPUT_*)` branch, so one run would leave two thirds unanalyzed. | host tools |
+| Static analysis | `pic10f320-analyze` | One direct invocation runs cppcheck + MISRA over all three explicit `OUTPUT_*` shell rows. Each selects a different source branch; the pre-hardware aggregate no longer needs to repeat the analyzer inside its gpsim variant loop. | host tools |
 | Register-level functional | `pic10f320-test-gpsim` | Real HEX toggles on press and handles a power-on-held switch via the shared wrappers, with the processor and chip-specific toggle-cadence stimulus overridden. | gpsim CLI |
 | Fault response | `pic10f320-test-fault-target` | The host fault argument re-made on the real emitted image: every guarded SFR/SRAM location and required `TRISA` direction, plus a negative control proving the documented unguarded RA0 LED latch does *not* reset, plus relay-only RESET, SET, and both-coil `LATA` injections at the reviewed trailing-`CLRWDT` seam, from both BYPASS and ENGAGED. Each coil case must de-energize both coils *in one write* — the wait for de-energization samples every instruction, so a latch or modeled port that shed its coil bits across more than one step fails — force exactly one reset, and be followed by a recovery RESET-coil pulse of at least the datasheet minimum with SET dark: 24 / 24 / 29 checks. | libgpsim |
 | HEX/model lock-step | `pic10f320-test-lockstep` | Live `_ctx_` SRAM from the XC8-built instruction stream matches `src/bypass_pure.c` after every completed main-loop iteration — 3,005 checks per variant, 66/66 states. | libgpsim |
 | Target I/O timing | `pic10f320-test-io` | Exact `TRISA`, modeled `PORTA` following every `LATA` transition, each variant's complete transition sequence, and mute/relay pulse widths from simulator cycles. | libgpsim |
 | Fail-closed aggregate | `pic10f320-test-target-variants` | Rejects any matrix other than the complete supported set, then requires fault, lock-step and target-I/O PASS sentinels for every variant. | Makefile wrapper |
-| Pre-hardware aggregate | `pic10f320-test` | The single target CI and the release script invoke: the host aggregate, expected-image hash, CONFIG and return-stack proof over all images, and analysis + gpsim per variant. | Makefile wrapper |
+| Pre-hardware aggregate | `pic10f320-test` | The single target CI and the release script invoke: the host aggregate, expected-image hash, CONFIG and return-stack proof over all images, one complete analysis matrix, and gpsim per variant. | Makefile wrapper |
 | Soak | `pic10f320-test-soak` | Long-duration libgpsim soak per output stage; three combos at full duration are part of release qualification. | libgpsim |
 
 The shared stale-sidecar and matrix cases run in the script-owned `pic10f322`,
@@ -720,6 +721,24 @@ whole immutable supported matrix in one reported invocation. This is execution-
 time enforcement, not a claim that a later staged/copied artifact cannot be
 modified; release provenance and reproduction checks remain separate controls.
 
+
+## Static analysis matrix
+
+Cppcheck and MISRA each execute the same 30 reviewed semantic rows. The matrix
+contains five ATtiny13A rows, five tinyx5 rows, six ATtiny202 rows, five
+PIC10F322 rows, three PIC10F320 rows, and six PIC12F675 rows. Modular profiles
+include the shell, pure core, and every matching-selector driver; AVR-XT and
+PIC12F675 add a second shell row for their relay-only emergency path. The
+platform remains profile-specific: `avr8`, `pic8-enhanced`, or `pic8`.
+
+`make test-analysis-matrix` drives every public plain and MISRA target through a
+fake cppcheck with synthetic device-pack headers and records argument boundaries.
+Its test-owned oracle requires all 60 invocations exactly once, with one shipping
+source, one selector, one platform, C11 analyzer mode, the correct target defines,
+and the MISRA template/addon/suppression arguments only in MISRA mode. Negative
+fixtures remove and duplicate rows, swap platform/standard policy, and mix
+selectors or sources. This complements the output gate below: the matrix test
+proves what ran, while the output contract proves how findings fail.
 
 ## MISRA output contract
 

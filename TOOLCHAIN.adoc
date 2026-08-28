@@ -204,9 +204,10 @@ aggregate so missing PIC tooling cannot produce a false green release gate.
                 fails unless every raw HEX file matches that reviewed baseline.
 
   cppcheck:     2.13.0  (the SAME binary as the AVR analysis, below)
-                `make pic10f322-analyze` runs it with --platform=pic8-enhanced over the
-                real XC8 + DFP register headers.  No install beyond the XC8/DFP
-                packs.
+                 `make pic10f322-analyze` runs the shell, pure core, and all
+                 three modular drivers with --platform=pic8-enhanced over the
+                 real XC8 + DFP register headers.  No install beyond the
+                 XC8/DFP packs.
 
 XC8 / device-pack behaviours relied on (proven against V3.10 + DFP v1.9.189):
 
@@ -258,8 +259,8 @@ PIC10F320 commands, for reference (same toolchain, `pic10f320-` targets):
   make pic10f320-test-build           reviewed SHA-256 baseline (all images)
   make pic10f320-test-return-stack    final-HEX reachable return-stack proof (all images)
   make pic10f320-test                 host equivalence/actuation/fault/coverage,
-                                     hashes/CONFIG/return stack, cppcheck+MISRA,
-                                     and CLI gpsim, swept across all variants
+                                     hashes/CONFIG/return stack, one complete
+                                     cppcheck+MISRA matrix, and CLI gpsim per variant
   make pic10f320-test-target-variants fail-closed libgpsim fault/lock-step/I-O
   make pic10f320-test-soak            long-duration libgpsim soak
 
@@ -409,7 +410,14 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   cppcheck:     2.13.0  (Ubuntu package: cppcheck)
   clang --analyze: provided by clang 18 (no separate install)
 
-  All three are wired into `make analyze`.  Warnings are treated as errors.
+  All three are wired into `make analyze`; that target's cppcheck/MISRA portion
+  runs the ten Classic rows.  The standalone AVR-XT and PIC analyzer targets
+  complete a declarative 30-row semantic matrix per mode across distinct
+  ATtiny13A/tinyx5/AVR-XT/PIC10F322/PIC10F320/PIC12F675 target models, explicit
+  output selectors, and every shipping C translation unit under each materially
+  relevant header model.  Warnings are treated as errors.  PIC analysis uses
+  C11 parsing as an analyzer accommodation; the image-defining XC8 builds remain
+  C99 and are the production-language authority.
 
 == Optional (symbolic execution)
 

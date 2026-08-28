@@ -8,8 +8,8 @@ set -euo pipefail
 # INVENTORY SCOPE (merge plan §6.12, §12). This used to cover exactly two
 # recipes -- test-cbmc and analyze-cppcheck -- which meant NEITHER PIC chip had
 # an enforcing regression, and a pic10f320- recipe with a private early `exit 0`
-# would have passed review. It now covers all three PIC parts' XC8 and cppcheck/MISRA
-# recipes as well.
+# would have passed review. It now covers the AVR-XT analyzers and all three PIC
+# parts' XC8 and cppcheck/MISRA recipes as well.
 #
 # It also covers all three parts' CLI-gpsim recipes, which used to be a stated gap --
 # and the reason that gap is gone is worth recording, because the sentence that
@@ -102,6 +102,10 @@ missing_cxx="$work/missing-cxx"
 
 expect_both test-cbmc "cbmc not installed" "CBMC=$missing_cbmc"
 expect_both analyze-cppcheck "cppcheck not installed" "CPPCHECK=$missing_cppcheck"
+expect_both attiny202-analyze-cppcheck "cppcheck not installed" \
+	"CPPCHECK=$missing_cppcheck"
+expect_both attiny202-analyze-misra "cppcheck and/or python3 not available" \
+	"CPPCHECK=$missing_cppcheck"
 
 # --- all three PIC parts' optional-tool recipes ------------------------------
 # The build directories are redirected into the scratch tree: `pic10f322`,
@@ -252,12 +256,13 @@ if ! output=$(FAKE_TOOL_LOG="$cppcheck_log" run_make analyze-cppcheck \
 		STRICT_TOOLS=1 "CPPCHECK=$fake_cppcheck" 2>&1); then
 	fail "analyze-cppcheck rejected an available tool under STRICT_TOOLS=1: $output"
 fi
-[ "$(wc -l < "$cppcheck_log")" -eq 1 ] \
-	|| fail "analyze-cppcheck did not execute exactly one analyzer command"
-[[ "$output" == *"cppcheck: $fake_cppcheck"* ]] \
-	|| fail "analyze-cppcheck omitted its execution diagnostic"
+[ "$(wc -l < "$cppcheck_log")" -eq 10 ] \
+	|| fail "analyze-cppcheck did not execute its exact 10-row Classic matrix"
+[[ "$output" == *"cppcheck (ATtiny13A/avr8): src/bypass_mcu_avr_classic.c"* \
+	&& "$output" == *"cppcheck (tinyx5/avr8): src/bypass_mcu_avr_classic.c"* ]] \
+	|| fail "analyze-cppcheck omitted its per-profile execution diagnostics"
 checks=$((checks + 1))
 
-[ "$checks" -eq 60 ] \
-	|| fail "strict optional-tool inventory ran $checks checks, expected 60"
-printf 'strict optional-tool validation (host + all three PIC parts): %d checks, 0 failures\n' "$checks"
+[ "$checks" -eq 64 ] \
+	|| fail "strict optional-tool inventory ran $checks checks, expected 64"
+printf 'strict optional-tool validation (host + AVR-XT + all three PIC parts): %d checks, 0 failures\n' "$checks"

@@ -24,56 +24,65 @@ of those records below.
 
 ## How it is checked
 
-### Classic AVR and shared modular source
+### Declarative target matrix
 
 | | |
 |---|---|
 | Analyzer | `cppcheck` 2.13.0, MISRA addon (`misra.py`) |
-| Target model | `--platform=avr8`, `--std=c11` |
+| Target model | `--platform=avr8`, `--std=c11`; separate ATtiny13A and tinyx5 configurations |
 | Compiler / headers | `avr-gcc` 7.3.0 (avr-libc register definitions) |
 | Build target | `make analyze-misra` |
 | Report target | `make analyze-misra-report` |
 | Direct source inputs | Classic AVR shell, `bypass_pure.c`, and the three `bypass_output_*.c` drivers |
 | Supporting files | [`test/misra.json`](test/misra.json) (addon config), [`test/misra_rules.txt`](test/misra_rules.txt) (rule-text paraphrases), [`test/misra_suppressions.txt`](test/misra_suppressions.txt) (project finding suppressions) |
 
-With the canonical default variant set, `make analyze-misra` invokes cppcheck
-separately on five translation units: `bypass_mcu_avr_classic.c`,
-`bypass_pure.c`, and all three output drivers. The mute and relay drivers each
-receive their own selector; the simple driver, shell, and core receive the
-caller-selected `VARIANT` selector (`CD4053_SIMPLE` by default). The target
-gates on findings not covered by the documented suppression records below. It
-does not trust cppcheck's process status alone: captured diagnostics are forced
-through a machine-readable template and `test/misra_output_gate.py` independently
-fails every record attributed to an authored C file or header. It is part of the
-`analyze` aggregate and therefore of `make test`. A caller can narrow `VARIANTS`,
-so full driver coverage requires
-an invocation whose `VARIANTS` contains all three supported variants.
+`make analyze-misra` invokes cppcheck separately on five translation units under
+both materially distinct Classic configurations: ATtiny13A at 1.2 MHz and a
+representative tinyx5 at 1 MHz. Each row has an explicit reviewed output
+selector; drivers receive their matching selector while the selector-neutral
+shell and core use `CD4053_SIMPLE`. The matrix is immutable: `VARIANTS` is still
+validated so bad caller input cannot be ignored, but it cannot shrink the
+compliance subject.
 
-`make analyze-misra-report` runs the same Classic/shared source list without the
-project suppression file, exposing that lane's waived findings. It retains the
+The target gates on findings not covered by the documented suppression records
+below. It does not trust cppcheck's process status alone: captured diagnostics
+are forced through a machine-readable template and
+`test/misra_output_gate.py` independently fails every record attributed to an
+authored C file or header. It is part of the `analyze` aggregate and therefore
+of `make test`.
+
+`make analyze-misra-report` runs both Classic configurations without the project
+suppression file, exposing that lane's waived findings. It retains the
 command-line exclusions for adopted toolchain headers and is **not** a
-project-wide report: it does not run the AVR-XT, PIC10F322, PIC10F320, or
-PIC12F675 implementation files. Those lanes currently have no report-only
-companions.
+project-wide report: the other target profiles have no report-only companions.
 
 ### Additional MCU implementation files
 
 | | AVR-XT (ATtiny202) | PIC10F322 | PIC10F320 | PIC12F675 |
 |---|---|---|---|---|
-| Direct source input | `bypass_mcu_avr_xt.c` only | `bypass_mcu_pic10f322.c` only | `bypass_mcu_pic10f320.c` only | `bypass_mcu_pic12f675.c` only |
+| Direct source rows | shell ×2, pure core, three drivers | shell, pure core, three drivers | monolithic shell ×3 selectors | shell ×2, pure core, three drivers |
 | Target model | `--platform=avr8`, `--std=c11` | `--platform=pic8-enhanced`, `--std=c11` | same | `--platform=pic8`, `--std=c11` |
 | Adopted headers | avr-libc + ATtiny DFP | XC8 v3.10 + `proc/pic10f322.h` | XC8 v3.10 + `proc/pic10f320.h` | XC8 v3.10 + `proc/pic12f675.h` |
 | Direct MISRA target | `make attiny202-analyze-misra` | `make pic10f322-analyze-misra` | `make pic10f320-analyze-misra` | `make pic12f675-analyze-misra` |
-| Direct target coverage | AVR-XT shell | PIC10F322 shell | one selected `PIC10F320_VARIANT` branch | PIC12F675 shell |
-| Canonical coverage | one shell configuration | one shell configuration | `make pic10f320-test STRICT_TOOLS=1` sweeps all three output branches | one shell configuration |
-| Project suppressions consumed | three (D-1) | one (D-4) | two (D-4) | one (D-4) |
+| Direct target coverage | complete six-row AVR-XT matrix | complete five-row modular matrix | all three `OUTPUT_*` branches | complete six-row modular matrix |
+| Shell selector policy | non-relay + relay | representative selector | all three selectors | non-relay + relay |
+| Suppression policy | shared reviewed per-file list | shared reviewed per-file list | shared reviewed per-file list | shared reviewed per-file list |
 
-These targets do not re-run `bypass_pure.c` or the modular output-driver
-translation units under each MCU target model; those shared C files are direct
-inputs only to the Classic/shared lane above. PIC10F320 is self-contained, so
-sweeping its three preprocessor branches covers its entire authored firmware
-translation unit. The optional-tool lanes can skip when tools or device headers
-are absent; CI and release qualification use `STRICT_TOOLS=1` so those skips fail.
+The AVR-XT, PIC10F322, and PIC12F675 targets re-run `bypass_pure.c` and all three
+modular drivers under their own pin-map, adopted-header, target-define, and
+cppcheck platform models. AVR-XT and PIC12F675 each analyze both the non-relay
+and relay shell branches explicitly. PIC10F320 is self-contained, so its three
+selector rows cover the entire authored firmware translation unit. Across the
+five public targets this is 30 semantic rows per analyzer mode. The host-only
+`test-analysis-matrix` gate independently pins all 60 plain/MISRA invocations.
+Optional-tool lanes can skip when tools or device headers are absent; CI and
+release qualification use `STRICT_TOOLS=1` so those skips fail.
+
+The three PIC production builds use XC8's `-std=c99`; their cppcheck frontend
+uses `--std=c11` deliberately so the analyzer interprets the `_Static_assert`
+compatibility path consistently. This is an analyzer accommodation, not a claim
+that shipping PIC firmware is C11. The complete XC8 C99 image builds remain the
+authority that rejects any C11-only production construct.
 
 PIC-specific analysis notes:
 
@@ -85,11 +94,11 @@ PIC-specific analysis notes:
   declarations, not a code defect. Each affected PIC lane scopes that diagnostic
   to its one shell through the suppression list (D-4 below); a `misra-config`
   record in any other authored source or header fails.
-- **Pinned configuration.** PIC10F322 and PIC12F675 force their device and shell
-  selectors and undefine the AVR selectors with `--max-configs=1`, so only the
-  intended PIC branch of `bypass_output_common.h` is active. PIC10F320 similarly
-  forces its device and one selected `OUTPUT_*` branch, swept by its canonical
-  aggregate. cppcheck still records
+- **Pinned configuration.** Every matrix row supplies exactly one output
+  selector with `--max-configs=1`. PIC10F322 and PIC12F675 force their device and
+  shell selectors and undefine the AVR selectors, so only the intended PIC
+  branch of `bypass_output_common.h` is active. PIC10F320 similarly forces its
+  device and each selected `OUTPUT_*` branch in turn. cppcheck still records
   *unselected* pin-map directives, so Rule 2.5 can fire on those inactive maps —
   covered as D-2 analyzer artifacts below. There are now four such maps; the
   PIC12F675's joined them when that shell landed.
@@ -112,11 +121,11 @@ Cppcheck receives C files as its direct inputs; authored headers are analyzed
 only when parsed through an include path from those inputs. The Makefile's
 `FW_HEADERS`, `XT_HEADERS`, `PIC10F322_HEADERS`, and `PIC12F675_HEADERS` are
 rebuild dependency lists, not additional analyzer source arguments. In
-particular,
-`bypass_output_cd4053_simple.h` is in the authored boundary but is not currently
-included by an analyzed C file, and the modular driver files are not re-analyzed
-under the AVR-XT or PIC target models. Those are explicit coverage limits, not
-claims that the files are outside the boundary.
+particular, `bypass_output_cd4053_simple.h` is in the authored boundary but is
+not currently included by an analyzed C file. The modular driver files are
+otherwise analyzed under every materially distinct modular target model. The
+unreferenced simple header is an explicit coverage limit, not a claim that the
+file is outside the boundary.
 
 The PIC10F320 implementation is one self-contained C file: its debounce
 algorithm is written directly in `main()` and its output variants are
@@ -457,25 +466,23 @@ citation that leads nowhere is worse than no citation.
 
 When changing the firmware:
 
-1. Run all current direct C-input lanes, keeping the Classic driver matrix and
-   PIC10F320 branch sweep explicit:
+1. Run all current direct C-input lanes. Each target owns its complete immutable
+   tuple matrix, including both Classic profiles, relay shell branches, modular
+   drivers, and all PIC10F320 branches:
 
    ```sh
-   make analyze-misra VARIANTS="cd4053_simple cd4053_with_mute tq2_l2_5v_relay" STRICT_TOOLS=1
+   make analyze-misra STRICT_TOOLS=1
    make attiny202-analyze-misra STRICT_TOOLS=1
    make pic10f322-analyze-misra STRICT_TOOLS=1
-   for v in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
-       make pic10f320-analyze-misra PIC10F320_VARIANT="$v" STRICT_TOOLS=1 || exit 1
-   done
+   make pic10f320-analyze-misra STRICT_TOOLS=1
    make pic12f675-analyze-misra STRICT_TOOLS=1
    ```
 
    Confirm the Classic and AVR-XT runs resolved their intended avr-gcc/avr-libc
    include paths; those path discoveries are not completeness gates. The PIC
    lanes explicitly guard their XC8/DFP headers.
-2. Run
-   `make analyze-misra-report VARIANTS="cd4053_simple cd4053_with_mute tq2_l2_5v_relay" STRICT_TOOLS=1`
-   to inspect the unsuppressed Classic/shared inventory. It does not report the
+2. Run `make analyze-misra-report STRICT_TOOLS=1` to inspect the unsuppressed
+   ATtiny13A/tinyx5 inventory. It does not report the
    other four MCU implementation files. When their suppression scope changes,
    use `make -n` to obtain the target's expanded cppcheck command and re-run it
    without `--suppressions-list=...`. An ordinary successful target discards
