@@ -849,6 +849,62 @@ if isinstance(ci_jobs, dict):
                         (job_id, idx, step, len(commands), parsed, tokens)
                     )
 
+# Hosted CI must consume the same fail-closed ATtiny202 target aggregate as
+# release qualification. test-target-matrix independently executes the aggregate
+# with a fake Make and proves sim, fault, and lock-step remain required members;
+# this check owns only workflow routing and does not restate that orchestration.
+attiny_job = ci_jobs.get("attiny202") if isinstance(ci_jobs, dict) else None
+if check(isinstance(attiny_job, dict), "ci.yml: required job 'attiny202' is missing"):
+    target_invocations = [
+        invocation for invocation in ci_make_invocations
+        if invocation[0] == "attiny202"
+        and "attiny202-test-target" in invocation[4][0]
+    ]
+    check(
+        len(target_invocations) == 1,
+        "ci.yml: attiny202 job must invoke attiny202-test-target exactly once",
+    )
+    if len(target_invocations) == 1:
+        _, idx, step, command_count, parsed, tokens = target_invocations[0]
+        check(
+            not parsed[2] and parsed[:2] == (
+                ("attiny202-test-target",),
+                {"STRICT_TOOLS": "1", "XT_STATIC_RAM_LIMIT": "16"},
+            ),
+            "ci.yml: ATtiny202 target aggregate invocation is not canonical: "
+            f"{' '.join(tokens)}",
+        )
+        check(
+            command_count == 1,
+            f"ci.yml: ATtiny202 target aggregate step {idx} must contain only "
+            "its Make command",
+        )
+        check("if" not in step, "ci.yml: ATtiny202 target aggregate is conditional")
+        check(
+            step.get("continue-on-error", False) is False,
+            "ci.yml: ATtiny202 target aggregate may continue after failure",
+        )
+
+    component_goals = {"attiny202-sim", "attiny202-fault", "attiny202-lockstep"}
+    direct_components = [
+        goal
+        for invocation in ci_make_invocations if invocation[0] == "attiny202"
+        for goal in invocation[4][0] if goal in component_goals
+    ]
+    check(
+        not direct_components,
+        "ci.yml: attiny202 job bypasses its target aggregate with direct "
+        f"component calls: {direct_components}",
+    )
+    soak_invocations = [
+        invocation for invocation in ci_make_invocations
+        if invocation[0] == "attiny202" and "attiny202-soak" in invocation[4][0]
+    ]
+    check(
+        len(soak_invocations) == 1,
+        "ci.yml: attiny202 job must retain one separately routed soak",
+    )
+
 mutation_invocations = [
     invocation for invocation in ci_make_invocations
     if "test-mutation" in invocation[4][0]

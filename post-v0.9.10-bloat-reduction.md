@@ -1152,7 +1152,7 @@ synthetic fixtures.
 
 ## BR-TEST-02 - Remove duplicate mutation execution from normal CI
 
-**Status:** IN PROGRESS OpenCode
+**Status:** DONE `b86a5a7`
 
 **Pre-change behavior:**
 
@@ -1180,7 +1180,7 @@ synthetic fixtures.
 
 ## BR-TEST-03 - Route CI and ci-local through authoritative aggregates
 
-**Status:** TODO
+**Status:** IN PROGRESS OpenCode
 
 **Primary case:** ATtiny202 target validation
 
@@ -1190,13 +1190,14 @@ normal CI and `scripts/ci-local.sh` restate component commands and assertions.
 
 **Work:**
 
-- [ ] Make hosted CI invoke `make attiny202-test-target`.
-- [ ] Make local CI invoke the same aggregate.
-- [ ] Keep the short soak as a separately named operation if it is not part of
+- [x] Make hosted CI invoke `make attiny202-test-target`.
+- [x] Make local CI invoke the same aggregate.
+- [x] Keep the short soak as a separately named operation if it is not part of
   the aggregate contract.
-- [ ] Retain one independent structural assertion that the required lanes remain
+- [x] Retain one independent structural assertion that the required lanes remain
   members; do not duplicate the full orchestration.
-- [ ] Review PIC routes for the same pattern.
+- [x] Review PIC routes for the same pattern. Hosted CI, local CI, and release CI
+  already share the same five-process boundary around the six PIC aggregates.
 
 **Acceptance:**
 
@@ -1905,7 +1906,7 @@ coverage.
 Update this board as tasks change state. Task sections remain authoritative for
 dependencies and acceptance criteria.
 
-| Task | Summary | Initial state |
+| Task | Summary | Status |
 |---|---|---|
 | BR-BASE-01 | Reconcile final v0.9.10 history | TODO |
 | BR-AUTH-01 | Finalize authority map | TODO |
@@ -1921,9 +1922,9 @@ dependencies and acceptance criteria.
 | BR-FLASH-01 | Make FLASHING.md authoritative | TODO |
 | BR-FLASH-02 | Generate release programming guide | TODO |
 | BR-FLASH-03 | Delete flashing proposal journal | TODO |
-| BR-DOC-01 | Delete completed v0.9.6 journal | TODO |
-| BR-DOC-02 | Reduce Makefile split decision | TODO |
-| BR-DOC-03 | Reduce non-blocking feasibility analysis | TODO |
+| BR-DOC-01 | Delete completed v0.9.6 journal | DONE `9b6dfc3` |
+| BR-DOC-02 | Reduce Makefile split decision | DONE `5ce3f59` |
+| BR-DOC-03 | Reduce non-blocking feasibility analysis | DONE `9c16f96` |
 | BR-DOC-04 | Classify feature safety records | TODO |
 | BR-README-01 | Reduce root README | TODO |
 | BR-TESTDOC-01 | Reduce test README | TODO |
@@ -1933,9 +1934,9 @@ dependencies and acceptance criteria.
 | BR-COMMENT-01 | Trim live historical comments | TODO |
 | BR-STATE-01 | Remove repeated release declarations | TODO |
 | BR-STATE-02 | Make development/release state explicit | TODO |
-| BR-TEST-01 | Delete retired rename lane | TODO |
-| BR-TEST-02 | Remove duplicate CI mutation run | TODO |
-| BR-TEST-03 | Route CI through aggregates | TODO |
+| BR-TEST-01 | Delete retired rename lane | DONE `893d647` |
+| BR-TEST-02 | Remove duplicate CI mutation run | DONE `b86a5a7` |
+| BR-TEST-03 | Route CI through aggregates | IN PROGRESS OpenCode |
 | BR-TEST-04 | Centralize policy constants per surface | TODO |
 | BR-TEST-05 | Prefer behavioral fixtures | TODO |
 | BR-TEST-06 | Introduce named test profiles | TODO |

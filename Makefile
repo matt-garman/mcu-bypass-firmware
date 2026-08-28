@@ -2918,10 +2918,10 @@ attiny202-test: test-fuses attiny202-smoke attiny202 attiny202-test-stack-bound 
 
 # The yasimavr target-level aggregate, over EVERY variant: functional + physical
 # output trace, fault injection, and ctx_-vs-model lock-step. The AVR-XT
-# counterpart of the three PIC target-variant aggregates, and what
-# release qualification runs (with STRICT_TOOLS=1, which turns each sub-target's
-# clean skip into a hard failure -- a release must never accept "the simulator
-# was missing" as evidence).
+# counterpart of the three PIC target-variant aggregates, and the authoritative
+# entry point for hosted CI, local CI, and release qualification (with
+# STRICT_TOOLS=1, which turns each sub-target's clean skip into a hard failure --
+# a gate must never accept "the simulator was missing" as evidence).
 #
 # Deliberately excludes the soak: the release drives that separately, one
 # combination per output stage at the full release duration, alongside every

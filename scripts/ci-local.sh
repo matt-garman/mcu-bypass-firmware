@@ -39,17 +39,15 @@
 #   attiny202     -> make attiny202-test    (fuses + smoke + build/budget +
 #                                            cppcheck/MISRA + coil-pulse width
 #                                            oracle; STRICT_TOOLS=1)
-#                    make attiny202-sim     (yasimavr functional + output trace)
-#                    make attiny202-fault   (yasimavr fault injection)
-#                    make attiny202-lockstep (yasimavr ctx_-vs-model co-sim)
+#                    make attiny202-test-target
+#                                           (fail-closed yasimavr functional +
+#                                            fault + lock-step aggregate)
 #                    make attiny202-soak    (yasimavr 5-min soak smoke)
 #                                           (the AVR-XT lane; needs the vendored
 #                                            ATtiny_DFP + the patched yasimavr
 #                                            venv)
-#                    Those four are COUNTED, not just run: CI asserts one PASS
-#                    line per variant on each, because a per-variant skip
-#                    returns 0. See xt_gate() below; a bare `make` exit status
-#                    is a weaker check than the CI step it stands in for.
+#                    The target aggregate validates every component PASS count;
+#                    xt_gate() independently counts the separate soak results.
 #   verify        -> make test              ) covered together by the local
 #   stress        -> make stress            ) `make test-long` invocation, which
 #                                             combines the fast gates, FULL_*
@@ -175,10 +173,12 @@ run_step() {
 }
 
 # ----------------------------------------------------------------------------
-# ATtiny202 harness gates: run the target AND count its per-variant PASS lines.
+# Standalone ATtiny202 harness gates: run the target AND count its per-variant
+# PASS lines. The authoritative target aggregate performs this validation for
+# sim/fault/lock-step; this helper remains for the separately scheduled soak.
 #
 # WHY THIS IS NOT JUST `run_step make attiny202-<x>`
-#   CI deliberately does not trust these targets' exit status. Each attiny202-*
+#   CI deliberately does not trust this target's exit status. attiny202-soak
 #   harness target iterates VARIANTS, and a variant that is skipped rather than
 #   run still leaves the target at exit 0 -- so `make` returning 0 does not mean
 #   the matrix was covered. ci.yml therefore greps one PASS marker per variant
@@ -188,10 +188,7 @@ run_step() {
 #
 #   The expected count comes from XT_VARIANTS_SUPPORTED (declared `override` in
 #   the Makefile, so it cannot be shrunk from the command line) rather than from
-#   VARIANTS, which can. The fault gate keeps ci.yml's hardcoded 3 as an
-#   independent cross-check on that variable: if both the Makefile's supported
-#   list and this expectation were sourced the same way, a wrong list would
-#   agree with itself and the gate would go green having tested less.
+#   VARIANTS, which can.
 #
 # Usage: xt_gate <marker> <count> [<marker> <count>...] -- <command...>
 # ----------------------------------------------------------------------------
@@ -519,25 +516,16 @@ if [ "$SKIP_ATTINY202" -eq 1 ]; then
 else
 	# Toolchain asserted in PREFLIGHT above.
 	#
-	# XT_N is read once, before any gate runs: a complete Make invocation holds
-	# the worktree lock, so `make print-...` issued while another make is in
-	# flight would block rather than answer.
+	# XT_N is read once before the standalone soak runs: a complete Make
+	# invocation holds the worktree lock, so `make print-...` issued while another
+	# make is in flight would block rather than answer.
 	XT_N=$(make -s --no-print-directory print-XT_VARIANTS_SUPPORTED | wc -w)
 	[ "$XT_N" -gt 0 ] || die "XT_VARIANTS_SUPPORTED is empty; nothing would be gated"
 
 	run_step "attiny202 job: make attiny202-test" make attiny202-test \
 		XT_STATIC_RAM_LIMIT=16 XT_STACK_MAX_FRAME=32
-	run_step "attiny202 job: make attiny202-sim" \
-		xt_gate "SIM PASS" "$XT_N" -- make attiny202-sim XT_STATIC_RAM_LIMIT=16
-	# Hardcoded 3, exactly as ci.yml does: an independent cross-check on
-	# XT_VARIANTS_SUPPORTED rather than a second reading of it.
-	run_step "attiny202 job: make attiny202-fault" \
-		xt_gate "FAULT PASS" 3 -- make attiny202-fault XT_STATIC_RAM_LIMIT=16
-	# Each variant co-simulates BOTH boot scenarios, so a scenario that bailed
-	# out early cannot hide behind a green per-variant verdict.
-	run_step "attiny202 job: make attiny202-lockstep" \
-		xt_gate "LOCKSTEP PASS" "$XT_N" "co-simulated" "$(( XT_N * 2 ))" \
-		-- make attiny202-lockstep XT_STATIC_RAM_LIMIT=16
+	run_step "attiny202 job: make attiny202-test-target" \
+		make attiny202-test-target XT_STATIC_RAM_LIMIT=16
 	# CI runs a 5-minute simulated soak smoke, with the progress interval set to
 	# the full duration so the log carries one progress line per variant.
 	run_step "attiny202 job: make attiny202-soak" \

@@ -374,7 +374,7 @@ The split mirrors the PIC lanes: **the host-only rows below are members of
 | Firmware/model lock-step | `attiny202-lockstep` | `ctx_` in simulated SRAM equals the shipping core's state after **every settled tick**, over both boot scenarios, plus LED and settled control-line agreement. Catches a shell defect on the tick it happens rather than as a wrong output later. | yasimavr + host core via ctypes |
 <!-- name-contract: exempt (SOAK_RESULT is the driver's stdout token, not a make variable) -->
 | Liveness soak | `attiny202-soak` | Over a long run the watchdog never resets the device (GPR0 reset witness), the sanity gate never force-resets, and a periodic 2-press round-trip still toggles. Emits the shared `SOAK_RESULT` release contract. | yasimavr |
-| Fail-closed aggregate | `attiny202-test-target` | sim + fault + lock-step across every variant, with no skip permitted. This is what release qualification runs. | yasimavr |
+| Fail-closed aggregate | `attiny202-test-target` | sim + fault + lock-step across every variant, with no skip permitted. Hosted CI, local CI, and release qualification all use this entry point. | yasimavr |
 
 Mutation coverage for this lane is described under "Mutation testing" below; it
 is gated on the same two inputs and by the same probe discipline as the PIC ones.
