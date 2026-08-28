@@ -84,7 +84,7 @@ test/
                                       convert wall-time ISR duty independently,
                                       prove ISR/tick/loop terms are load-bearing,
                                       and reject the former mixed formula
-  test_pic_build.sh         shared: PIC image/size/rebuild-trigger checks
+  test_pic_build.sh         shared: named PIC image/size/rebuild profiles
   test_pic10f320_coverage_archive.sh shared: coverage-gate source-archive mode checks
   test_pic_rebuild.sh       shared: PIC soak rebuild determinism
   test_release_images.sh    shared: isolated exact release artifact verification
@@ -662,13 +662,13 @@ targets are always fail-closed rather than skip-clean.
 | Pre-hardware aggregate | `pic10f320-test` | The single target CI and the release script invoke: the host aggregate, expected-image hash, CONFIG and return-stack proof over all images, and analysis + gpsim per variant. | Makefile wrapper |
 | Soak | `pic10f320-test-soak` | Long-duration libgpsim soak per output stage; three combos at full duration are part of release qualification. | libgpsim |
 
-The shared stale-sidecar and matrix cases run in all three parameterized
-`test-pic-build` invocations; the PIC10F320 rebuild cases run only in the second.
-The script itself requires
-`PB_REBUILD_REQUIRED=1` for canonical `PB_TARGET=pic10f320` and enforces exactly 75
-final checks; canonical `PB_TARGET=pic10f322` enforces 36 and
-`PB_TARGET=pic12f675` enforces 156. A missing or misspelled rebuild/matrix arm
-assignment therefore fails instead of reporting a smaller subset as green.
+The shared stale-sidecar and matrix cases run in the script-owned `pic10f322`,
+`pic10f320`, and `pic12f675` profiles; the PIC10F320 rebuild cases run only in
+its profile. Make requests the complete named set while the script independently
+requires each profile exactly once and rejects empty, unknown, duplicate, or
+incomplete requests. The profiles retain exact 36, 75, and 156 final-check
+contracts respectively, so an incomplete profile or a missing rebuild/matrix
+arm fails instead of reporting a smaller subset as green.
 
 In a fresh temporary repository the arm proves that identical requests reinvoke
 the compiler for `pic10f320`, `pic10f320-test-equiv`, `pic10f320-test-actuation`, and

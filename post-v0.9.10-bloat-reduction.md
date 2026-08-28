@@ -1240,7 +1240,7 @@ may be valuable. Repeating the literal at every call site is not.
 
 ## BR-TEST-05 - Replace source-spelling tests with behavioral fixtures
 
-**Status:** IN PROGRESS OpenCode
+**Status:** DONE `7aab253`
 
 **Candidates:**
 
@@ -1293,7 +1293,7 @@ may be valuable. Repeating the literal at every call site is not.
 
 ## BR-TEST-06 - Move repeated Make profiles into named test profiles
 
-**Status:** TODO
+**Status:** IN PROGRESS OpenCode
 
 **Current candidates:**
 
@@ -1303,11 +1303,13 @@ may be valuable. Repeating the literal at every call site is not.
 
 **Work:**
 
-- [ ] Give parameterized scripts named profiles such as `pic10f320`,
+- [x] Give parameterized scripts named profiles such as `pic10f320`,
   `pic10f322`, `pic12f675`, and `attiny202`.
-- [ ] Have Make pass the profile name rather than a large environment bundle.
-- [ ] Keep one independent test-owned literal canonical variant set.
-- [ ] Reject unknown, empty, duplicate, and incomplete profile requests.
+- [x] Have Make pass profile names rather than large environment bundles.
+- [x] Keep one independent test-owned literal canonical variant set beside each
+  consumer rather than querying production Make declarations.
+- [x] Reject unknown, empty, duplicate, and incomplete profile requests before
+  creating fixture state, with load-bearing negative selftests.
 
 **Acceptance:**
 
@@ -1957,8 +1959,8 @@ dependencies and acceptance criteria.
 | BR-TEST-02 | Remove duplicate CI mutation run | DONE `b86a5a7` |
 | BR-TEST-03 | Route CI through aggregates | DONE `b9cbd36` |
 | BR-TEST-04 | Centralize policy constants per surface | DONE `bc5f11d` |
-| BR-TEST-05 | Prefer behavioral fixtures | IN PROGRESS OpenCode |
-| BR-TEST-06 | Introduce named test profiles | TODO |
+| BR-TEST-05 | Prefer behavioral fixtures | DONE `7aab253` |
+| BR-TEST-06 | Introduce named test profiles | IN PROGRESS OpenCode |
 | BR-TEST-07 | Consolidate strict helpers/wrappers | TODO |
 | BR-TEST-08 | Generate recipes from variant maps | TODO |
 | BR-TEST-09 | Consolidate dependencies/parsers | TODO |

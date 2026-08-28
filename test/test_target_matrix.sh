@@ -2,40 +2,186 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-work=$(mktemp -d "${TMPDIR:-/tmp}/test-target-matrix.XXXXXX")
+readonly -a TM_REQUIRED_PROFILES=(
+	pic10f322-target
+	pic10f320-target
+	pic12f675-target
+	pic10f320-host
+	attiny202-target
+)
+readonly -a TM_CANONICAL_VARIANTS=(
+	cd4053_simple
+	cd4053_with_mute
+	tq2_l2_5v_relay
+)
+
+tm_validate_profile_request() {
+	local name required
+	local -a missing=()
+	local -A known=() seen=()
+	[ "$#" -gt 0 ] \
+		|| { printf 'FAIL: target-matrix profile request must not be empty\n' >&2; return 2; }
+	for required in "${TM_REQUIRED_PROFILES[@]}"; do known[$required]=1; done
+	for name in "$@"; do
+		[ -n "$name" ] \
+			|| { printf 'FAIL: target-matrix profile request contains an empty name\n' >&2; return 2; }
+		[ -n "${known[$name]+yes}" ] \
+			|| { printf 'FAIL: target-matrix profile request contains unknown name: %s\n' "$name" >&2; return 2; }
+		[ -z "${seen[$name]+yes}" ] \
+			|| { printf 'FAIL: target-matrix profile request contains duplicate name: %s\n' "$name" >&2; return 2; }
+		seen[$name]=1
+	done
+	for required in "${TM_REQUIRED_PROFILES[@]}"; do
+		[ -n "${seen[$required]+yes}" ] || missing+=("$required")
+	done
+	[ "${#missing[@]}" -eq 0 ] \
+		|| { printf 'FAIL: target-matrix profile request is incomplete; missing: %s\n' \
+			"${missing[*]}" >&2; return 2; }
+}
+
+tm_expect_profile_reject() {
+	local label=$1
+	shift
+	if tm_validate_profile_request "$@" >/dev/null 2>&1; then
+		printf 'FAIL: target-matrix profile validator accepted %s request\n' "$label" >&2
+		exit 1
+	fi
+}
+
+if [ "${1:-}" != --run-profile ]; then
+	tm_validate_profile_request "$@" || exit
+	tm_expect_profile_reject empty
+	tm_expect_profile_reject explicit-empty "${TM_REQUIRED_PROFILES[@]}" ""
+	tm_expect_profile_reject unknown "${TM_REQUIRED_PROFILES[@]}" unknown
+	tm_expect_profile_reject duplicate "${TM_REQUIRED_PROFILES[@]}" pic10f322-target
+	tm_expect_profile_reject incomplete \
+		pic10f322-target pic10f320-target pic12f675-target pic10f320-host
+	for profile in "${TM_REQUIRED_PROFILES[@]}"; do
+		"$0" --run-profile "$profile"
+	done
+	printf 'target-matrix profile request validation: 5 checks, 0 failures\n'
+	exit 0
+fi
+
+[ "$#" -eq 2 ] && [ -n "$2" ] \
+	|| { printf 'FAIL: internal target-matrix profile worker request is malformed\n' >&2; exit 2; }
+readonly TM_PROFILE=$2
+
+# Common marker policy. Each named profile below owns its targets/selectors;
+# the canonical variant set remains an independent test literal.
+TM_SUPPORTED="${TM_CANONICAL_VARIANTS[*]}"
+TM_SUBSET=${TM_CANONICAL_VARIANTS[1]}
+TM_UNSUPPORTED=unknown
+TM_CHECK_SENTINELS=1
+TM_FAULT_TARGET=pic10f322-test-fault
+TM_FAULT_VARIANT_ARG=PIC10F322_FAULT_VARIANT
+TM_LOCKSTEP_TARGET=pic10f322-test-lockstep
+TM_LOCKSTEP_VARIANT_ARG=PIC10F322_LOCKSTEP_VARIANT
+TM_IO_TARGET=pic10f322-test-io
+TM_IO_VARIANT_ARG=PIC10F322_IO_VARIANT
+TM_FAULT_MARKER='FAULT-INJECT PASS'
+TM_LOCKSTEP_MARKER='LOCK-STEP PASS'
+TM_IO_MARKER='TARGET-IO PASS'
+TM_FAULT_MARKER_COUNT=1
+TM_LOCKSTEP_MARKER_COUNT=1
+TM_IO_MARKER_COUNT=1
+TM_IO_EXTRA_MARKER=
+TM_IO_EXTRA_MARKER_COUNT=0
+TM_AGGREGATE_LANES=0
+TM_EXACT_FAULT_CHECKS=38
+TM_EXACT_RESULTS=0
+TM_PIC12F675=0
+case "$TM_PROFILE" in
+	pic10f322-target)
+		TM_LABEL=PIC
+		TM_TARGET=pic10f322-test-target-variants
+		TM_PER_VARIANT_TARGET=pic10f322-test-target
+		TM_VARIANTS_VAR=VARIANTS
+		TM_VARIANT_ARG=PIC10F322_TARGET_VARIANT
+		;;
+	pic10f320-target)
+		TM_LABEL=PIC10F320
+		TM_TARGET=pic10f320-test-target-variants
+		TM_PER_VARIANT_TARGET=pic10f320-test-target
+		TM_VARIANTS_VAR=PIC10F320_VARIANTS_ALL
+		TM_VARIANT_ARG=PIC10F320_TARGET_VARIANT
+		TM_UNSUPPORTED=tmux4053-simple
+		TM_FAULT_TARGET=pic10f320-test-fault-target
+		TM_FAULT_VARIANT_ARG=PIC10F320_FAULT_VARIANT
+		TM_LOCKSTEP_TARGET=pic10f320-test-lockstep
+		TM_LOCKSTEP_VARIANT_ARG=PIC10F320_LOCKSTEP_VARIANT
+		TM_IO_TARGET=pic10f320-test-io
+		TM_IO_VARIANT_ARG=PIC10F320_IO_VARIANT
+		;;
+	pic12f675-target)
+		TM_LABEL=PIC12F675
+		TM_TARGET=pic12f675-test-target-variants
+		TM_PER_VARIANT_TARGET=pic12f675-test-target
+		TM_VARIANTS_VAR=VARIANTS
+		TM_VARIANT_ARG=PIC12F675_TARGET_VARIANT
+		TM_UNSUPPORTED=tmux4053-simple
+		TM_FAULT_TARGET=pic12f675-test-fault
+		TM_FAULT_VARIANT_ARG=PIC12F675_FAULT_VARIANT
+		TM_LOCKSTEP_TARGET=pic12f675-test-lockstep
+		TM_LOCKSTEP_VARIANT_ARG=PIC12F675_LOCKSTEP_VARIANT
+		TM_IO_TARGET=pic12f675-test-io
+		TM_IO_VARIANT_ARG=PIC12F675_IO_VARIANT
+		TM_EXACT_RESULTS=1
+		TM_PIC12F675=1
+		;;
+	pic10f320-host)
+		TM_LABEL='PIC10F320 host'
+		TM_TARGET=pic10f320-test-host-variants
+		TM_PER_VARIANT_TARGET=pic10f320-test-host
+		TM_VARIANTS_VAR=PIC10F320_VARIANTS_ALL
+		TM_VARIANT_ARG=PIC10F320_VARIANT
+		TM_UNSUPPORTED=tmux4053-simple
+		TM_CHECK_SENTINELS=0
+		;;
+	attiny202-target)
+		TM_LABEL=ATtiny202
+		TM_TARGET=attiny202-test-target
+		TM_PER_VARIANT_TARGET=__unused__
+		TM_VARIANTS_VAR=VARIANTS
+		TM_VARIANT_ARG=__unused__
+		TM_FAULT_TARGET=attiny202-sim
+		TM_LOCKSTEP_TARGET=attiny202-fault
+		TM_IO_TARGET=attiny202-lockstep
+		TM_FAULT_VARIANT_ARG=__unused__
+		TM_LOCKSTEP_VARIANT_ARG=__unused__
+		TM_IO_VARIANT_ARG=__unused__
+		TM_FAULT_MARKER='SIM PASS'
+		TM_LOCKSTEP_MARKER='FAULT PASS'
+		TM_IO_MARKER='LOCKSTEP PASS'
+		TM_FAULT_MARKER_COUNT=3
+		TM_LOCKSTEP_MARKER_COUNT=3
+		TM_IO_MARKER_COUNT=3
+		TM_IO_EXTRA_MARKER=co-simulated
+		TM_IO_EXTRA_MARKER_COUNT=6
+		TM_AGGREGATE_LANES=1
+		;;
+	*) printf 'FAIL: unknown internal target-matrix profile: %s\n' "$TM_PROFILE" >&2; exit 2 ;;
+esac
+for value in "$TM_LABEL" "$TM_TARGET" "$TM_PER_VARIANT_TARGET" \
+		"$TM_VARIANTS_VAR" "$TM_VARIANT_ARG" "$TM_SUPPORTED" "$TM_SUBSET" \
+		"$TM_UNSUPPORTED" "$TM_FAULT_TARGET" "$TM_FAULT_VARIANT_ARG" \
+		"$TM_LOCKSTEP_TARGET" "$TM_LOCKSTEP_VARIANT_ARG" "$TM_IO_TARGET" \
+		"$TM_IO_VARIANT_ARG" "$TM_FAULT_MARKER" "$TM_LOCKSTEP_MARKER" \
+		"$TM_IO_MARKER"; do
+	[ -n "$value" ] || { printf 'FAIL: incomplete internal target-matrix profile: %s\n' "$TM_PROFILE" >&2; exit 2; }
+done
+for value in "$TM_CHECK_SENTINELS" "$TM_AGGREGATE_LANES" \
+		"$TM_EXACT_RESULTS" "$TM_PIC12F675"; do
+	[[ "$value" =~ ^[01]$ ]] \
+		|| { printf 'FAIL: invalid boolean in target-matrix profile: %s\n' "$TM_PROFILE" >&2; exit 2; }
+done
+
+test_temp_root=${TMPDIR:-${XDG_RUNTIME_DIR:-${HOME:?HOME is required when TMPDIR and XDG_RUNTIME_DIR are unset}}}
+work=$(mktemp -d -- "$test_temp_root/test-target-matrix.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 fake_make="$work/fake-make"
 log="$work/make.log"
 checks=0
-# Parameterized so one regression covers both PIC target aggregates, the
-# PIC10F320 host aggregate, and AVR-XT's whole-matrix lane aggregate. Every mode
-# requires the complete supported set; target modes also require explicit lane
-# completion markers. The host-only PIC10F320 invocation disables sentinels.
-TM_LABEL=${TM_LABEL:-PIC}
-TM_TARGET=${TM_TARGET:-pic10f322-test-target-variants}
-TM_PER_VARIANT_TARGET=${TM_PER_VARIANT_TARGET:-pic10f322-test-target}
-TM_VARIANTS_VAR=${TM_VARIANTS_VAR:-VARIANTS}
-TM_VARIANT_ARG=${TM_VARIANT_ARG:-PIC10F322_TARGET_VARIANT}
-TM_SUPPORTED=${TM_SUPPORTED:-cd4053_simple cd4053_with_mute tq2_l2_5v_relay}
-TM_SUBSET=${TM_SUBSET:-cd4053_with_mute}
-TM_UNSUPPORTED=${TM_UNSUPPORTED:-unknown}
-TM_CHECK_SENTINELS=${TM_CHECK_SENTINELS:-1}
-TM_FAULT_TARGET=${TM_FAULT_TARGET:-pic10f322-test-fault}
-TM_FAULT_VARIANT_ARG=${TM_FAULT_VARIANT_ARG:-PIC10F322_FAULT_VARIANT}
-TM_LOCKSTEP_TARGET=${TM_LOCKSTEP_TARGET:-pic10f322-test-lockstep}
-TM_LOCKSTEP_VARIANT_ARG=${TM_LOCKSTEP_VARIANT_ARG:-PIC10F322_LOCKSTEP_VARIANT}
-TM_IO_TARGET=${TM_IO_TARGET:-pic10f322-test-io}
-TM_IO_VARIANT_ARG=${TM_IO_VARIANT_ARG:-PIC10F322_IO_VARIANT}
-TM_FAULT_MARKER=${TM_FAULT_MARKER:-FAULT-INJECT PASS}
-TM_LOCKSTEP_MARKER=${TM_LOCKSTEP_MARKER:-LOCK-STEP PASS}
-TM_IO_MARKER=${TM_IO_MARKER:-TARGET-IO PASS}
-TM_FAULT_MARKER_COUNT=${TM_FAULT_MARKER_COUNT:-1}
-TM_LOCKSTEP_MARKER_COUNT=${TM_LOCKSTEP_MARKER_COUNT:-1}
-TM_IO_MARKER_COUNT=${TM_IO_MARKER_COUNT:-1}
-TM_IO_EXTRA_MARKER=${TM_IO_EXTRA_MARKER:-}
-TM_IO_EXTRA_MARKER_COUNT=${TM_IO_EXTRA_MARKER_COUNT:-0}
-TM_AGGREGATE_LANES=${TM_AGGREGATE_LANES:-0}
-TM_EXACT_FAULT_CHECKS=${TM_EXACT_FAULT_CHECKS:-38}
 read -r -a supported <<<"$TM_SUPPORTED"
 read -r -a MAKE_CMD <<<"${PROJECT_MAKE:-make}"
 [ "${#MAKE_CMD[@]}" -gt 0 ] \
@@ -43,10 +189,10 @@ read -r -a MAKE_CMD <<<"${PROJECT_MAKE:-make}"
 real_make=$(command -v make)
 matrix_contract_args=()
 expected_matrix_record=
-if [ "$TM_LABEL" = PIC12F675 ]; then
+if [ "$TM_PIC12F675" -eq 1 ]; then
 	matrix_dir="$work/pic12f675-matrix"
 	mkdir -p "$matrix_dir/simcal"
-	for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
+	for variant in "${TM_CANONICAL_VARIANTS[@]}"; do
 		stem="bypass-pic12f675-$variant"
 		printf 'shipping %s\n' "$variant" > "$matrix_dir/$stem.hex"
 		printf 'assembly %s\n' "$variant" > "$matrix_dir/$stem.s"
@@ -146,7 +292,7 @@ run_matrix() {
 		FAKE_EXACT_FAULT_CHECKS="$TM_EXACT_FAULT_CHECKS" \
 		FAKE_OMIT_MARKER="$omit_marker" \
 		FAKE_OMIT_EXTRA="$omit_extra" \
-		FAKE_EXACT_RESULTS="$([ "$TM_LABEL" = PIC12F675 ] && printf 1 || printf 0)" \
+		FAKE_EXACT_RESULTS="$TM_EXACT_RESULTS" \
 		FAKE_RESULT_VARIANT="$TM_SUBSET" \
 		"$fake_make" --no-print-directory -C "$ROOT" \
 			MAKE="$fake_make" PROJECT_MAKE=true "${matrix_contract_args[@]}" \
@@ -175,7 +321,7 @@ run_target() {
 		FAKE_IO_EXTRA_MARKER_COUNT="$TM_IO_EXTRA_MARKER_COUNT" \
 		FAKE_EXACT_FAULT_CHECKS="$TM_EXACT_FAULT_CHECKS" \
 		FAKE_OMIT_MARKER="$omit_marker" \
-		FAKE_EXACT_RESULTS="$([ "$TM_LABEL" = PIC12F675 ] && printf 1 || printf 0)" \
+		FAKE_EXACT_RESULTS="$TM_EXACT_RESULTS" \
 		FAKE_RESULT_VARIANT="$TM_SUBSET" \
 		"$fake_make" --no-print-directory -C "$ROOT" \
 			MAKE="$fake_make" PROJECT_MAKE=true "${matrix_contract_args[@]}" \
@@ -213,7 +359,7 @@ expect_accept() {
 				|| { printf 'FAIL: %s matrix call %d was wrong: %s\n' \
 					"$label" "$i" "${calls[$i]}" >&2; exit 1; }
 		fi
-		if [ "$TM_LABEL" = PIC12F675 ]; then
+		if [ "$TM_PIC12F675" -eq 1 ]; then
 			[[ "${calls[$i]}" == *"<--old-file=_pic12f675-qualify-matrix>"* ]] \
 				|| { printf 'FAIL: %s matrix call %d did not suppress requalification: %s\n' \
 					"$label" "$i" "${calls[$i]}" >&2; exit 1; }
@@ -341,7 +487,7 @@ expect_sentinels() {
 				"$TM_LABEL" "${markers[$i]}" >&2
 			exit 1
 		fi
-		if [ "$TM_LABEL" = PIC12F675 ]; then
+		if [ "$TM_PIC12F675" -eq 1 ]; then
 			[[ "$output" == *"did not report one exact terminal result"* ]] \
 				|| { printf 'FAIL: %s target aggregate reported the wrong strict-result error: %s\n' \
 					"$TM_LABEL" "$output" >&2; exit 1; }
@@ -362,12 +508,12 @@ fi
 expect_reject incomplete "$TM_SUBSET" \
 	"$TM_VARIANTS_VAR must contain every supported name"
 expect_reject empty "" "$TM_VARIANTS_VAR must not be empty"
-expect_reject duplicate "${supported[0]} $TM_SUBSET ${supported[0]}" \
+expect_reject duplicate "$TM_SUPPORTED ${supported[0]}" \
 	"$TM_VARIANTS_VAR must not contain duplicate names"
-expect_reject unsupported "${supported[0]} $TM_UNSUPPORTED" \
+expect_reject unsupported "$TM_SUPPORTED $TM_UNSUPPORTED" \
 	"$TM_VARIANTS_VAR contains unsupported names"
 
-if [ "$TM_LABEL" = PIC12F675 ]; then
+if [ "$TM_PIC12F675" -eq 1 ]; then
 	expect_selector_reject empty-target-selector "" \
 		"$TM_VARIANT_ARG is empty"
 	expect_selector_reject multi-target-selector "${supported[0]} ${supported[1]}" \

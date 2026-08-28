@@ -3284,63 +3284,11 @@ test-supply-chain:
 	./test/test_supply_chain.sh
 
 # Isolated fake-tool proof of fail-closed PIC image generation and PIC10F320
-# image/host rebuild triggering. The script enforces the canonical 36/75/156
-# counts, so missing PIC10F320 rebuild wiring cannot silently reduce coverage.
+# image/host rebuild triggering. Profile details and the independent canonical
+# variant set live beside the script that consumes them; this explicit complete
+# request detects a missing, duplicate, or unknown profile.
 test-pic-build:
-	./test/test_pic_build.sh
-	@# Same fake-XC8 regression against the PIC10F320 contract: its own
-	@# build target, build directory, image naming and 256-word budget.
-	PB_LABEL='PIC10F320' \
-	PB_TARGET='pic10f320' \
-	PB_CC_VAR='PIC10F320_CC' \
-	PB_BUILD_DIR_VAR='PIC10F320_BUILD_DIR' \
-	PB_BUILD_DIR='build_pic10f320' \
-	PB_FW_BASE_VAR='FW_BASE' \
-	PB_FW_BASE='bypass' \
-	PB_TAG_VAR='PIC10F320_TAG' \
-	PB_TAG='pic10f320' \
-	PB_FLASH_VAR='PIC10F320_FLASH_WORDS' \
-	PB_FLASH_WORDS='256' \
-	PB_VARIANT_VAR='PIC10F320_VARIANT' \
-	PB_VARIANT='cd4053_simple' \
-	PB_MATRIX_TARGET='pic10f320-variants' \
-	PB_MATRIX_VARIANTS_VAR='PIC10F320_VARIANTS_ALL' \
-	PB_MATRIX_VARIANTS='cd4053_simple cd4053_with_mute tq2_l2_5v_relay' \
-	PB_MATRIX_IMAGES='bypass-pic10f320-cd4053_simple.hex bypass-pic10f320-cd4053_with_mute.hex bypass-pic10f320-tq2_l2_5v_relay.hex' \
-	PB_MATRIX_FAIL_IMAGE='bypass-pic10f320-tq2_l2_5v_relay.hex' \
-	PB_MATRIX_REQUIRE_COMPLETE=1 PB_MATRIX_UNSUPPORTED='tmux4053-simple' \
-	PB_STACK_TARGET='pic10f320-test-stack-bound' \
-	PB_STACK_DEVICE_VAR='PIC10F320_DEVICE_INI' \
-	PB_RETURN_STACK_REQUIRED=1 \
-	PB_SELECTOR_ROUTING=1 PB_SIZE_TARGET='pic10f320-size' \
-	PB_REBUILD_REQUIRED=1 \
-		./test/test_pic_build.sh
-	@# And again against the PIC12F675 contract. Same modular shape as the
-	@# PIC10F322 (one target builds every variant), so the overrides differ only
-	@# in the names and the budget -- which is exactly the pair a copy-adapted
-	@# lane gets wrong, and exactly what a passing budget gate would hide.
-	PB_LABEL='PIC12F675' \
-	PB_TARGET='pic12f675' \
-	PB_CC_VAR='PIC_CC' \
-	PB_BUILD_DIR_VAR='PIC12F675_BUILD_DIR' \
-	PB_BUILD_DIR='build_pic12f675' \
-	PB_FW_BASE_VAR='FW_BASE' \
-	PB_FW_BASE='bypass' \
-	PB_TAG_VAR='PIC12F675_TAG' \
-	PB_TAG='pic12f675' \
-	PB_FLASH_VAR='PIC12F675_FLASH_WORDS' \
-	PB_FLASH_WORDS='1024' \
-	PB_VARIANT_VAR='VARIANTS' \
-	PB_VARIANT='cd4053_simple' \
-	PB_MATRIX_TARGET='pic12f675' \
-	PB_MATRIX_VARIANTS_VAR='VARIANTS' \
-	PB_MATRIX_VARIANTS='cd4053_simple cd4053_with_mute tq2_l2_5v_relay' \
-	PB_MATRIX_IMAGES='bypass-pic12f675-cd4053_simple.hex bypass-pic12f675-cd4053_with_mute.hex bypass-pic12f675-tq2_l2_5v_relay.hex' \
-	PB_MATRIX_FAIL_IMAGE='bypass-pic12f675-tq2_l2_5v_relay.hex' \
-	PB_MATRIX_REQUIRE_COMPLETE=1 PB_MATRIX_UNSUPPORTED='unknown' \
-	PB_STACK_TARGET='pic12f675-test-stack-bound' \
-	PB_STACK_DEVICE_VAR='PIC12F675_DEVICE_INI' \
-		./test/test_pic_build.sh
+	./test/test_pic_build.sh pic10f322 pic10f320 pic12f675
 
 # Exact-set and hash checks for the tag workflow's committed/listed/fresh images.
 test-release-images:
@@ -3609,83 +3557,12 @@ test-mutation-sandbox:
 	MUTATION_SANDBOX_SELFTEST=1 ./test/run_mutation_tests.sh
 
 # Host-only proof that authoritative target aggregates reject bad matrices and
-# skipped/incomplete target-level lanes.
+# skipped/incomplete target-level lanes. The profile details are script-owned;
+# Make supplies an explicit complete request as an independent routing pin.
 test-target-matrix:
-	./test/test_target_matrix.sh
-	@# Same parameterized regression, PIC10F320 contract; the next invocation
-	@# adds PIC12F675, so one script covers all three PIC targets (§4 FOLD).
-	TM_LABEL='PIC10F320' \
-	TM_TARGET='pic10f320-test-target-variants' \
-	TM_PER_VARIANT_TARGET='pic10f320-test-target' \
-	TM_VARIANTS_VAR='PIC10F320_VARIANTS_ALL' \
-	TM_VARIANT_ARG='PIC10F320_TARGET_VARIANT' \
-	TM_SUPPORTED='cd4053_simple cd4053_with_mute tq2_l2_5v_relay' \
-	TM_SUBSET='cd4053_with_mute' \
-	TM_UNSUPPORTED='tmux4053-simple' \
-	TM_FAULT_TARGET='pic10f320-test-fault-target' \
-	TM_FAULT_VARIANT_ARG='PIC10F320_FAULT_VARIANT' \
-	TM_LOCKSTEP_TARGET='pic10f320-test-lockstep' \
-	TM_LOCKSTEP_VARIANT_ARG='PIC10F320_LOCKSTEP_VARIANT' \
-	TM_IO_TARGET='pic10f320-test-io' \
-	TM_IO_VARIANT_ARG='PIC10F320_IO_VARIANT' \
-		./test/test_target_matrix.sh
-	@# Same regression again, PIC12F675 contract. Its lanes take the CLASSIC
-	@# variant set and its aggregate builds the whole image matrix, so this mode
-	@# is the 322's with the names swapped -- which is the point: a third part
-	@# reusing the script is what keeps the aggregates from drifting apart.
-	TM_LABEL='PIC12F675' \
-	TM_TARGET='pic12f675-test-target-variants' \
-	TM_PER_VARIANT_TARGET='pic12f675-test-target' \
-	TM_VARIANTS_VAR='VARIANTS' \
-	TM_VARIANT_ARG='PIC12F675_TARGET_VARIANT' \
-	TM_SUPPORTED='cd4053_simple cd4053_with_mute tq2_l2_5v_relay' \
-	TM_SUBSET='cd4053_with_mute' \
-	TM_UNSUPPORTED='tmux4053-simple' \
-	TM_FAULT_TARGET='pic12f675-test-fault' \
-	TM_FAULT_VARIANT_ARG='PIC12F675_FAULT_VARIANT' \
-	TM_EXACT_FAULT_CHECKS='38' \
-	TM_LOCKSTEP_TARGET='pic12f675-test-lockstep' \
-	TM_LOCKSTEP_VARIANT_ARG='PIC12F675_LOCKSTEP_VARIANT' \
-	TM_IO_TARGET='pic12f675-test-io' \
-	TM_IO_VARIANT_ARG='PIC12F675_IO_VARIANT' \
-		./test/test_target_matrix.sh
-	@# ...and the PIC10F320 HOST aggregate, which carries the same guard and is
-	@# what `make test` actually wires in -- so a bad matrix there would silently
-	@# reduce the default suite's PIC10F320 coverage rather than fail it. Guarding
-	@# this one also guards `pic10f320-test`, which reaches its own loop only after
-	@# this target has succeeded as a prerequisite.
-	TM_LABEL='PIC10F320 host' \
-	TM_TARGET='pic10f320-test-host-variants' \
-	TM_PER_VARIANT_TARGET='pic10f320-test-host' \
-	TM_VARIANTS_VAR='PIC10F320_VARIANTS_ALL' \
-	TM_VARIANT_ARG='PIC10F320_VARIANT' \
-	TM_SUPPORTED='cd4053_simple cd4053_with_mute tq2_l2_5v_relay' \
-	TM_SUBSET='cd4053_with_mute' \
-	TM_UNSUPPORTED='tmux4053-simple' \
-	TM_CHECK_SENTINELS=0 \
-		./test/test_target_matrix.sh
-	@# AVR-XT's three aggregate lanes each run the complete matrix themselves,
-	@# so this mode checks one recursive call per lane and exact per-variant PASS
-	@# counts (plus both lock-step boot scenarios) rather than a per-variant wrapper.
-	TM_LABEL='ATtiny202' \
-	TM_TARGET='attiny202-test-target' \
-	TM_VARIANTS_VAR='VARIANTS' \
-	TM_SUPPORTED='cd4053_simple cd4053_with_mute tq2_l2_5v_relay' \
-	TM_SUBSET='cd4053_with_mute' \
-	TM_UNSUPPORTED='unknown' \
-	TM_FAULT_TARGET='attiny202-sim' \
-	TM_LOCKSTEP_TARGET='attiny202-fault' \
-	TM_IO_TARGET='attiny202-lockstep' \
-	TM_FAULT_MARKER='SIM PASS' \
-	TM_LOCKSTEP_MARKER='FAULT PASS' \
-	TM_IO_MARKER='LOCKSTEP PASS' \
-	TM_FAULT_MARKER_COUNT=3 \
-	TM_LOCKSTEP_MARKER_COUNT=3 \
-	TM_IO_MARKER_COUNT=3 \
-	TM_IO_EXTRA_MARKER='co-simulated' \
-	TM_IO_EXTRA_MARKER_COUNT=6 \
-	TM_AGGREGATE_LANES=1 \
-		./test/test_target_matrix.sh
+	./test/test_target_matrix.sh \
+		pic10f322-target pic10f320-target pic12f675-target \
+		pic10f320-host attiny202-target
 
 # Host-only proof that the PIC target aggregates are fail-CLOSED, which the
 # matrix regression above does NOT cover: it proves the right variants are
@@ -3695,27 +3572,7 @@ test-target-matrix:
 # nothing. pic10f320-test-target shipped in exactly that shape; see the script
 # header. Three PIC targets, one script (§4 FOLD).
 test-target-lane-markers:
-	./test/test_target_lane_markers.sh
-	@# The PIC10F320 contract. LM_REQUIRE_ARG pins the second half of that fix:
-	@# its lanes' build prerequisite `pic10f320` compiles ONE image chosen by
-	@# PIC10F320_VARIANT, so an aggregate that forwards only PIC10F320_TARGET_VARIANT
-	@# builds one variant and then looks for another's HEX.
-	LM_LABEL='PIC10F320' \
-	LM_TARGET='pic10f320-test-target' \
-	LM_VARIANT_ARG='PIC10F320_TARGET_VARIANT' \
-	LM_VARIANT='cd4053_with_mute' \
-	LM_REQUIRE_ARG='PIC10F320_VARIANT=cd4053_with_mute' \
-		./test/test_target_lane_markers.sh
-	@# The PIC12F675 contract. No LM_REQUIRE_ARG: its lanes share one build
-	@# prerequisite (pic12f675-simcal) that derives every variant's image, so
-	@# there is no second variable to thread and nothing for it to pin.
-	@for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do \
-		LM_LABEL='PIC12F675' \
-		LM_TARGET='pic12f675-test-target' \
-		LM_VARIANT_ARG='PIC12F675_TARGET_VARIANT' \
-		LM_VARIANT="$$variant" \
-			./test/test_target_lane_markers.sh || exit; \
-	done
+	./test/test_target_lane_markers.sh pic10f322 pic10f320 pic12f675
 
 test-pic-target-result-records:
 	PIC_SOAK_CXX="$(PIC_SOAK_CXX)" ./test/test_pic_target_result_records.sh

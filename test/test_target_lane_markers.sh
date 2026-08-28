@@ -29,34 +29,138 @@ set -euo pipefail
 # submakes. The regression therefore needs neither XC8 nor gpsim, while
 # MAKE=/PROJECT_MAKE= command-line values cannot bypass the aggregate.
 #
-# Parameterized so ONE regression covers both PIC targets (merge plan §4: FOLD
-# the shared-name harnesses rather than forking them). Defaults reproduce the
-# PIC10F322 contract; the PIC10F320 lane re-invokes this script with the LM_*
-# overrides in the Makefile recipe.
+# Named profiles keep each target's lane contract beside this consumer rather
+# than assembling hybrid LM_* bundles in Make.
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-work=$(mktemp -d "${TMPDIR:-/tmp}/test-target-lane-markers.XXXXXX")
+readonly -a LM_REQUIRED_PROFILES=(pic10f322 pic10f320 pic12f675)
+readonly -a LM_CANONICAL_VARIANTS=(
+	cd4053_simple
+	cd4053_with_mute
+	tq2_l2_5v_relay
+)
+readonly LM_REPRESENTATIVE_VARIANT=cd4053_with_mute
+
+lm_validate_profile_request() {
+	local name required
+	local -a missing=()
+	local -A known=() seen=()
+	[ "$#" -gt 0 ] \
+		|| { printf 'FAIL: target-lane profile request must not be empty\n' >&2; return 2; }
+	for required in "${LM_REQUIRED_PROFILES[@]}"; do known[$required]=1; done
+	for name in "$@"; do
+		[ -n "$name" ] \
+			|| { printf 'FAIL: target-lane profile request contains an empty name\n' >&2; return 2; }
+		[ -n "${known[$name]+yes}" ] \
+			|| { printf 'FAIL: target-lane profile request contains unknown name: %s\n' "$name" >&2; return 2; }
+		[ -z "${seen[$name]+yes}" ] \
+			|| { printf 'FAIL: target-lane profile request contains duplicate name: %s\n' "$name" >&2; return 2; }
+		seen[$name]=1
+	done
+	for required in "${LM_REQUIRED_PROFILES[@]}"; do
+		[ -n "${seen[$required]+yes}" ] || missing+=("$required")
+	done
+	[ "${#missing[@]}" -eq 0 ] \
+		|| { printf 'FAIL: target-lane profile request is incomplete; missing: %s\n' \
+			"${missing[*]}" >&2; return 2; }
+}
+
+lm_expect_profile_reject() {
+	local label=$1
+	shift
+	if lm_validate_profile_request "$@" >/dev/null 2>&1; then
+		printf 'FAIL: target-lane profile validator accepted %s request\n' "$label" >&2
+		exit 1
+	fi
+}
+
+if [ "${1:-}" != --run-profile ]; then
+	lm_validate_profile_request "$@" || exit
+	lm_expect_profile_reject empty
+	lm_expect_profile_reject explicit-empty "${LM_REQUIRED_PROFILES[@]}" ""
+	lm_expect_profile_reject unknown "${LM_REQUIRED_PROFILES[@]}" unknown
+	lm_expect_profile_reject duplicate "${LM_REQUIRED_PROFILES[@]}" pic10f322
+	lm_expect_profile_reject incomplete pic10f322 pic10f320
+	for profile in "${LM_REQUIRED_PROFILES[@]}"; do
+		if [ "$profile" = pic12f675 ]; then
+			for variant in "${LM_CANONICAL_VARIANTS[@]}"; do
+				"$0" --run-profile "$profile" "$variant"
+			done
+		else
+			"$0" --run-profile "$profile"
+		fi
+	done
+	printf 'target-lane profile request validation: 5 checks, 0 failures\n'
+	exit 0
+fi
+
+[ "$#" -ge 2 ] && [ -n "$2" ] \
+	|| { printf 'FAIL: internal target-lane profile worker request is malformed\n' >&2; exit 2; }
+readonly LM_PROFILE=$2
+shift 2
+
+# A real supported output stage: this is passed to the REAL make (only the
+# per-lane sub-invocations are faked), so `variant-selectors-valid` rejects a
+# name no lane supports. It read `mute` until 2026-08-03 -- a pre-v0.9.8 stage
+# token the rename left behind, inert only because nothing had ever checked it.
+LM_VARIANT=$LM_REPRESENTATIVE_VARIANT
+LM_SUCCESS_MARKER='target fault/lock-step/I-O PASS'
+LM_REQUIRE_ARG=
+LM_EXACT_RESULTS=0
+LM_PIC12F675=0
+case "$LM_PROFILE" in
+	pic10f322)
+		[ "$#" -eq 0 ] \
+			|| { printf 'FAIL: PIC10F322 target-lane profile takes no variant argument\n' >&2; exit 2; }
+		LM_LABEL=PIC
+		LM_TARGET=pic10f322-test-target
+		LM_VARIANT_ARG=PIC10F322_TARGET_VARIANT
+		;;
+	pic10f320)
+		[ "$#" -eq 0 ] \
+			|| { printf 'FAIL: PIC10F320 target-lane profile takes no variant argument\n' >&2; exit 2; }
+		LM_LABEL=PIC10F320
+		LM_TARGET=pic10f320-test-target
+		LM_VARIANT_ARG=PIC10F320_TARGET_VARIANT
+		LM_REQUIRE_ARG="PIC10F320_VARIANT=$LM_VARIANT"
+		;;
+	pic12f675)
+		[ "$#" -eq 1 ] && [ -n "$1" ] \
+			|| { printf 'FAIL: PIC12F675 target-lane profile requires one variant\n' >&2; exit 2; }
+		case " ${LM_CANONICAL_VARIANTS[*]} " in
+			*" $1 "*) ;;
+			*) printf 'FAIL: PIC12F675 target-lane profile has unknown variant: %s\n' "$1" >&2; exit 2 ;;
+		esac
+		LM_LABEL=PIC12F675
+		LM_TARGET=pic12f675-test-target
+		LM_VARIANT_ARG=PIC12F675_TARGET_VARIANT
+		LM_VARIANT=$1
+		LM_EXACT_RESULTS=1
+		LM_PIC12F675=1
+		;;
+	*) printf 'FAIL: unknown internal target-lane profile: %s\n' "$LM_PROFILE" >&2; exit 2 ;;
+esac
+for value in "$LM_LABEL" "$LM_TARGET" "$LM_VARIANT_ARG" "$LM_VARIANT" \
+		"$LM_SUCCESS_MARKER"; do
+	[ -n "$value" ] || { printf 'FAIL: incomplete internal target-lane profile: %s\n' "$LM_PROFILE" >&2; exit 2; }
+done
+for value in "$LM_EXACT_RESULTS" "$LM_PIC12F675"; do
+	[[ "$value" =~ ^[01]$ ]] \
+		|| { printf 'FAIL: invalid boolean in target-lane profile: %s\n' "$LM_PROFILE" >&2; exit 2; }
+done
+
+test_temp_root=${TMPDIR:-${XDG_RUNTIME_DIR:-${HOME:?HOME is required when TMPDIR and XDG_RUNTIME_DIR are unset}}}
+work=$(mktemp -d -- "$test_temp_root/test-target-lane-markers.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 . "$ROOT/test/pic/pic12f675_target_counts.sh"
 fake_make="$work/fake-make"
 log="$work/make.log"
 checks=0
-
-LM_LABEL=${LM_LABEL:-PIC}
-LM_TARGET=${LM_TARGET:-pic10f322-test-target}
-LM_VARIANT_ARG=${LM_VARIANT_ARG:-PIC10F322_TARGET_VARIANT}
-# A real supported output stage: this is passed to the REAL make (only the
-# per-lane sub-invocations are faked), so `variant-selectors-valid` rejects a
-# name no lane supports. It read `mute` until 2026-08-03 -- a pre-v0.9.8 stage
-# token the rename left behind, inert only because nothing had ever checked it.
-LM_VARIANT=${LM_VARIANT:-cd4053_with_mute}
-LM_SUCCESS_MARKER=${LM_SUCCESS_MARKER:-target fault/lock-step/I-O PASS}
 # Optional: an argument that must appear on EVERY lane invocation. The PIC10F320
 # aggregate uses it to pin the build-variant threading, because its `pic10f320`
 # prerequisite builds exactly one image (unlike the 322's `pic10f322`, which builds the
 # whole matrix), so a lane invoked without it silently compiles against the wrong
 # variant's HEX.
-LM_REQUIRE_ARG=${LM_REQUIRE_ARG:-}
 
 fail() {
 	printf 'FAIL: %s %s\n' "$LM_LABEL" "$*" >&2
@@ -72,13 +176,13 @@ expected_matrix_record=
 fake_fault_checks=38
 fake_lockstep_checks=3005
 fake_io_checks=26
-if [ "$LM_LABEL" = PIC12F675 ]; then
+if [ "$LM_PIC12F675" -eq 1 ]; then
 	read -r fake_fault_checks fake_lockstep_checks fake_io_checks \
 		< <(pic12f675_target_counts "$LM_VARIANT") \
 		|| fail "no canonical result counts for variant '$LM_VARIANT'"
 	matrix_dir="$work/pic12f675-matrix"
 	mkdir -p "$matrix_dir/simcal"
-	for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
+	for variant in "${LM_CANONICAL_VARIANTS[@]}"; do
 		stem="bypass-pic12f675-$variant"
 		printf 'shipping %s\n' "$variant" > "$matrix_dir/$stem.hex"
 		printf 'assembly %s\n' "$variant" > "$matrix_dir/$stem.s"
@@ -185,7 +289,7 @@ run_aggregate() {
 		if [ -n "$tmpdir" ]; then export TMPDIR="$tmpdir"; fi
 		REAL_PROJECT_MAKE="$real_make" LM_ENTER_REAL_MAKE=1 \
 		FAKE_MAKE_LOG="$log" FAKE_MODE="$mode" FAKE_MODE_LANE="$mode_lane" \
-		FAKE_EXACT_RESULTS="$([ "$LM_LABEL" = PIC12F675 ] && printf 1 || printf 0)" \
+		FAKE_EXACT_RESULTS="$LM_EXACT_RESULTS" \
 		FAKE_VARIANT="$LM_VARIANT" \
 		FAKE_FAULT_CHECKS="$fake_fault_checks" \
 		FAKE_LOCKSTEP_CHECKS="$fake_lockstep_checks" \
@@ -206,7 +310,7 @@ assert_call_args() {
 		[[ "$call" == *"<$LM_REQUIRE_ARG>"* ]] \
 			|| fail "lane call $i did not carry '$LM_REQUIRE_ARG': $call"
 	fi
-	if [ "$LM_LABEL" = PIC12F675 ]; then
+	if [ "$LM_PIC12F675" -eq 1 ]; then
 		[[ "$call" == *"<--old-file=pic12f675-simcal>"* ]] \
 			|| fail "lane call $i did not suppress simulator-image production: $call"
 	fi
@@ -247,7 +351,7 @@ expect_reject() {
 	[[ "$output" != *"$LM_SUCCESS_MARKER"* ]] \
 		|| fail "aggregate printed its success marker after a '$mode' $mode_lane lane"
 	if [ -n "$want_marker" ]; then
-		if [ "$LM_LABEL" = PIC12F675 ]; then
+		if [ "$LM_PIC12F675" -eq 1 ]; then
 			[[ "$output" == *"did not report one exact terminal result"* ]] \
 				|| fail "aggregate did not report the strict result failure: $output"
 		else
@@ -263,7 +367,7 @@ expect_reject() {
 
 expect_accept
 
-if [ "$LM_LABEL" = PIC12F675 ]; then
+if [ "$LM_PIC12F675" -eq 1 ]; then
 	spaced_tmp="$work/tmp with spaces"
 	mkdir "$spaced_tmp"
 	if ! output=$(run_aggregate ok none "$spaced_tmp" 2>&1); then
@@ -284,7 +388,7 @@ expect_reject wrong fault 'FAULT-INJECT PASS' 1
 # ...and an outright nonzero lane still fails, marker check or not.
 expect_reject die fault '' 1
 
-if [ "$LM_LABEL" = PIC12F675 ]; then
+if [ "$LM_PIC12F675" -eq 1 ]; then
 	# Exit-zero output must still be one exact, variant-bound, terminal PASS
 	# record with the canonical check count and no contradictory failure.
 	expect_reject diagnostic       fault 'strict-result' 1

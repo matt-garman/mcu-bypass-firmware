@@ -2,6 +2,166 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+readonly -a PB_REQUIRED_PROFILES=(pic10f322 pic10f320 pic12f675)
+readonly -a PB_CANONICAL_VARIANTS=(
+	cd4053_simple
+	cd4053_with_mute
+	tq2_l2_5v_relay
+)
+
+pb_validate_profile_request() {
+	local name required
+	local -a missing=()
+	local -A known=() seen=()
+	[ "$#" -gt 0 ] \
+		|| { printf 'FAIL: PIC build profile request must not be empty\n' >&2; return 2; }
+	for required in "${PB_REQUIRED_PROFILES[@]}"; do known[$required]=1; done
+	for name in "$@"; do
+		[ -n "$name" ] \
+			|| { printf 'FAIL: PIC build profile request contains an empty name\n' >&2; return 2; }
+		[ -n "${known[$name]+yes}" ] \
+			|| { printf 'FAIL: PIC build profile request contains unknown name: %s\n' "$name" >&2; return 2; }
+		[ -z "${seen[$name]+yes}" ] \
+			|| { printf 'FAIL: PIC build profile request contains duplicate name: %s\n' "$name" >&2; return 2; }
+		seen[$name]=1
+	done
+	for required in "${PB_REQUIRED_PROFILES[@]}"; do
+		[ -n "${seen[$required]+yes}" ] || missing+=("$required")
+	done
+	[ "${#missing[@]}" -eq 0 ] \
+		|| { printf 'FAIL: PIC build profile request is incomplete; missing: %s\n' \
+			"${missing[*]}" >&2; return 2; }
+}
+
+pb_expect_profile_reject() {
+	local label=$1
+	shift
+	if pb_validate_profile_request "$@" >/dev/null 2>&1; then
+		printf 'FAIL: PIC build profile validator accepted %s request\n' "$label" >&2
+		exit 1
+	fi
+}
+
+if [ "${1:-}" != --run-profile ]; then
+	pb_validate_profile_request "$@" || exit
+	pb_expect_profile_reject empty
+	pb_expect_profile_reject explicit-empty "${PB_REQUIRED_PROFILES[@]}" ""
+	pb_expect_profile_reject unknown "${PB_REQUIRED_PROFILES[@]}" unknown
+	pb_expect_profile_reject duplicate "${PB_REQUIRED_PROFILES[@]}" pic10f320
+	pb_expect_profile_reject incomplete pic10f322 pic10f320
+	for profile in "${PB_REQUIRED_PROFILES[@]}"; do
+		"$0" --run-profile "$profile"
+	done
+	printf 'PIC build profile request validation: 5 checks, 0 failures\n'
+	exit 0
+fi
+
+[ "$#" -eq 2 ] && [ -n "$2" ] \
+	|| { printf 'FAIL: internal PIC build profile worker request is malformed\n' >&2; exit 2; }
+readonly PB_PROFILE=$2
+
+PB_FW_BASE_VAR=FW_BASE
+PB_FW_BASE=bypass
+PB_VARIANT=cd4053_simple
+PB_MATRIX_VARIANTS="${PB_CANONICAL_VARIANTS[*]}"
+PB_MATRIX_REQUIRE_COMPLETE=1
+PB_SELECTOR_ROUTING=0
+PB_SIZE_TARGET=
+PB_RETURN_STACK_REQUIRED=0
+PB_REBUILD_REQUIRED=0
+matrix_supported_var=
+product_override_args=()
+case "$PB_PROFILE" in
+	pic10f322)
+		PB_LABEL=PIC
+		PB_TARGET=pic10f322
+		PB_CC_VAR=PIC_CC
+		PB_BUILD_DIR_VAR=PIC10F322_BUILD_DIR
+		PB_BUILD_DIR=build_pic10f322
+		PB_TAG_VAR=PIC10F322_TAG
+		PB_TAG=pic10f322
+		PB_FLASH_VAR=PIC10F322_FLASH_WORDS
+		PB_FLASH_WORDS=512
+		PB_VARIANT_VAR=VARIANTS
+		PB_BUILD_VARIANTS=$PB_MATRIX_VARIANTS
+		PB_MATRIX_TARGET=pic10f322
+		PB_MATRIX_VARIANTS_VAR=VARIANTS
+		PB_MATRIX_UNSUPPORTED=unknown
+		PB_STACK_TARGET=pic10f322-test-stack-bound
+		PB_STACK_DEVICE_VAR=PIC10F322_DEVICE_INI
+		product_override_args=(PIC10F322_HEXES= PIC10F322_ASSEMBLIES= PIC10F322_SYMBOLS= PIC10F322_BUILD_PRODUCTS=)
+		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
+		expected_checks=36
+		;;
+	pic10f320)
+		PB_LABEL=PIC10F320
+		PB_TARGET=pic10f320
+		PB_CC_VAR=PIC10F320_CC
+		PB_BUILD_DIR_VAR=PIC10F320_BUILD_DIR
+		PB_BUILD_DIR=build_pic10f320
+		PB_TAG_VAR=PIC10F320_TAG
+		PB_TAG=pic10f320
+		PB_FLASH_VAR=PIC10F320_FLASH_WORDS
+		PB_FLASH_WORDS=256
+		PB_VARIANT_VAR=PIC10F320_VARIANT
+		PB_BUILD_VARIANTS=$PB_VARIANT
+		PB_MATRIX_TARGET=pic10f320-variants
+		PB_MATRIX_VARIANTS_VAR=PIC10F320_VARIANTS_ALL
+		PB_MATRIX_UNSUPPORTED=tmux4053-simple
+		PB_STACK_TARGET=pic10f320-test-stack-bound
+		PB_STACK_DEVICE_VAR=PIC10F320_DEVICE_INI
+		PB_RETURN_STACK_REQUIRED=1
+		PB_SELECTOR_ROUTING=1
+		PB_SIZE_TARGET=pic10f320-size
+		PB_REBUILD_REQUIRED=1
+		product_override_args=(PIC10F320_HEX= PIC10F320_ASM= PIC10F320_SYM= PIC10F320_BUILD_PRODUCTS=)
+		expected_checks=75
+		;;
+	pic12f675)
+		PB_LABEL=PIC12F675
+		PB_TARGET=pic12f675
+		PB_CC_VAR=PIC_CC
+		PB_BUILD_DIR_VAR=PIC12F675_BUILD_DIR
+		PB_BUILD_DIR=build_pic12f675
+		PB_TAG_VAR=PIC12F675_TAG
+		PB_TAG=pic12f675
+		PB_FLASH_VAR=PIC12F675_FLASH_WORDS
+		PB_FLASH_WORDS=1024
+		PB_VARIANT_VAR=VARIANTS
+		PB_BUILD_VARIANTS=$PB_MATRIX_VARIANTS
+		PB_MATRIX_TARGET=pic12f675
+		PB_MATRIX_VARIANTS_VAR=VARIANTS
+		PB_MATRIX_UNSUPPORTED=unknown
+		PB_STACK_TARGET=pic12f675-test-stack-bound
+		PB_STACK_DEVICE_VAR=PIC12F675_DEVICE_INI
+		product_override_args=(PIC12F675_HEXES= PIC12F675_ASSEMBLIES= PIC12F675_SYMBOLS= PIC12F675_BUILD_PRODUCTS=)
+		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
+		expected_checks=156
+		;;
+	*) printf 'FAIL: unknown internal PIC build profile: %s\n' "$PB_PROFILE" >&2; exit 2 ;;
+esac
+PB_MATRIX_IMAGES=
+for variant in "${PB_CANONICAL_VARIANTS[@]}"; do
+	PB_MATRIX_IMAGES+="${PB_MATRIX_IMAGES:+ }${PB_FW_BASE}-${PB_TAG}-${variant}.hex"
+done
+PB_MATRIX_FAIL_IMAGE="${PB_FW_BASE}-${PB_TAG}-${PB_CANONICAL_VARIANTS[2]}.hex"
+for value in "$PB_LABEL" "$PB_TARGET" "$PB_CC_VAR" "$PB_BUILD_DIR_VAR" \
+		"$PB_BUILD_DIR" "$PB_FW_BASE_VAR" "$PB_FW_BASE" "$PB_TAG_VAR" \
+		"$PB_TAG" "$PB_FLASH_VAR" "$PB_FLASH_WORDS" "$PB_VARIANT_VAR" \
+		"$PB_VARIANT" "$PB_BUILD_VARIANTS" "$PB_MATRIX_TARGET" \
+		"$PB_MATRIX_VARIANTS_VAR" "$PB_MATRIX_VARIANTS" "$PB_MATRIX_IMAGES" \
+		"$PB_MATRIX_FAIL_IMAGE" "$PB_MATRIX_UNSUPPORTED" "$PB_STACK_TARGET" \
+		"$PB_STACK_DEVICE_VAR" "$expected_checks"; do
+	[ -n "$value" ] || { printf 'FAIL: incomplete internal PIC build profile: %s\n' "$PB_PROFILE" >&2; exit 2; }
+done
+for value in "$PB_MATRIX_REQUIRE_COMPLETE" "$PB_SELECTOR_ROUTING" \
+		"$PB_RETURN_STACK_REQUIRED" "$PB_REBUILD_REQUIRED"; do
+	[[ "$value" =~ ^[01]$ ]] \
+		|| { printf 'FAIL: invalid boolean in PIC build profile: %s\n' "$PB_PROFILE" >&2; exit 2; }
+done
+[ "${#product_override_args[@]}" -eq 4 ] \
+	|| { printf 'FAIL: incomplete product overrides in PIC build profile: %s\n' "$PB_PROFILE" >&2; exit 2; }
+
 real_make=$(command -v make)
 test_temp_root=${TMPDIR:-${XDG_RUNTIME_DIR:-${HOME:?HOME is required when TMPDIR and XDG_RUNTIME_DIR are unset}}}
 work=$(mktemp -d -- "$test_temp_root/test-pic-build.XXXXXX")
@@ -15,79 +175,6 @@ tools="$work/tools"
 xc8_log="$work/xc8.log"
 host_cc_log="$work/host-cc.log"
 host_run_log="$work/host-run.log"
-# Parameterized so ONE fake-XC8 regression covers both PIC targets (§4 FOLD).
-# Defaults reproduce the PIC10F322 run exactly, so `make test-pic-build` is
-# unchanged; the PIC10F320 lane re-invokes with the PB_* overrides.
-PB_LABEL=${PB_LABEL:-PIC}
-PB_TARGET=${PB_TARGET:-pic10f322}
-PB_CC_VAR=${PB_CC_VAR:-PIC_CC}
-PB_BUILD_DIR_VAR=${PB_BUILD_DIR_VAR:-PIC10F322_BUILD_DIR}
-PB_BUILD_DIR=${PB_BUILD_DIR:-build_pic10f322}
-PB_FW_BASE_VAR=${PB_FW_BASE_VAR:-FW_BASE}
-PB_FW_BASE=${PB_FW_BASE:-bypass}
-PB_TAG_VAR=${PB_TAG_VAR:-PIC10F322_TAG}
-PB_TAG=${PB_TAG:-pic10f322}
-PB_FLASH_VAR=${PB_FLASH_VAR:-PIC10F322_FLASH_WORDS}
-PB_FLASH_WORDS=${PB_FLASH_WORDS:-512}
-PB_VARIANT_VAR=${PB_VARIANT_VAR:-VARIANTS}
-PB_VARIANT=${PB_VARIANT:-cd4053_simple}
-# The all-variant build target, and the images it must produce. `pic10f322` builds the
-# whole VARIANTS matrix in one invocation; the PIC10F320 lane splits that into
-# per-variant `pic10f320` plus the `pic10f320-variants` aggregate, so the matrix checks
-# below point at whichever target owns the matrix for this chip.
-PB_MATRIX_TARGET=${PB_MATRIX_TARGET:-pic10f322}
-PB_MATRIX_VARIANTS_VAR=${PB_MATRIX_VARIANTS_VAR:-VARIANTS}
-PB_MATRIX_VARIANTS=${PB_MATRIX_VARIANTS:-cd4053_simple cd4053_with_mute tq2_l2_5v_relay}
-PB_MATRIX_IMAGES=${PB_MATRIX_IMAGES:-bypass-pic10f322-cd4053_simple.hex bypass-pic10f322-cd4053_with_mute.hex bypass-pic10f322-tq2_l2_5v_relay.hex}
-PB_MATRIX_FAIL_IMAGE=${PB_MATRIX_FAIL_IMAGE:-bypass-pic10f322-tq2_l2_5v_relay.hex}
-PB_MATRIX_REQUIRE_COMPLETE=${PB_MATRIX_REQUIRE_COMPLETE:-1}
-PB_MATRIX_UNSUPPORTED=${PB_MATRIX_UNSUPPORTED:-unknown}
-PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-}
-PB_SELECTOR_ROUTING=${PB_SELECTOR_ROUTING:-0}
-PB_SIZE_TARGET=${PB_SIZE_TARGET:-}
-PB_STACK_TARGET=${PB_STACK_TARGET:-pic10f322-test-stack-bound}
-PB_STACK_DEVICE_VAR=${PB_STACK_DEVICE_VAR:-PIC10F322_DEVICE_INI}
-PB_RETURN_STACK_REQUIRED=${PB_RETURN_STACK_REQUIRED:-0}
-PB_REBUILD_REQUIRED=${PB_REBUILD_REQUIRED:-0}
-product_override_args=()
-matrix_supported_var=
-case "$PB_TARGET" in
-	pic10f322)
-		[ "$PB_LABEL" = PIC ] \
-			|| { printf 'FAIL: canonical pic10f322 build validation requires PB_LABEL=PIC\n' >&2; exit 1; }
-		PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_MATRIX_VARIANTS}
-		product_override_args=(PIC10F322_HEXES= PIC10F322_ASSEMBLIES= PIC10F322_SYMBOLS= PIC10F322_BUILD_PRODUCTS=)
-		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=36
-		;;
-	pic10f320)
-		[ "$PB_LABEL" = PIC10F320 ] \
-			|| { printf 'FAIL: canonical pic10f320 build validation requires PB_LABEL=PIC10F320\n' >&2; exit 1; }
-		[ "$PB_REBUILD_REQUIRED" = 1 ] \
-			|| { printf 'FAIL: canonical pic10f320 build validation requires PB_REBUILD_REQUIRED=1\n' >&2; exit 1; }
-		PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}
-		product_override_args=(PIC10F320_HEX= PIC10F320_ASM= PIC10F320_SYM= PIC10F320_BUILD_PRODUCTS=)
-		# This lane's supported set is PIC10F320_VARIANTS_ALL, which is a plain
-		# literal rather than the CLASSIC_VARIANTS_* machinery, so the
-		# self-whitelisting Make-function attack below does not apply to it.
-		matrix_supported_var=
-		expected_checks=75
-		;;
-	pic12f675)
-		[ "$PB_LABEL" = PIC12F675 ] \
-			|| { printf 'FAIL: canonical pic12f675 build validation requires PB_LABEL=PIC12F675\n' >&2; exit 1; }
-		PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_MATRIX_VARIANTS}
-		product_override_args=(PIC12F675_HEXES= PIC12F675_ASSEMBLIES= PIC12F675_SYMBOLS= PIC12F675_BUILD_PRODUCTS=)
-		# Same CLASSIC_VARIANTS_* validation preamble as the PIC10F322 target,
-		# so it is exposed to the same injection vector and must run the same
-		# check. Its additional checks pin simulator-image path separation and
-		# complete-matrix production/consumption and the hardware-programming
-		# calibration guard.
-		matrix_supported_var=CLASSIC_VARIANTS_SUPPORTED
-		expected_checks=156
-		;;
-	*) PB_BUILD_VARIANTS=${PB_BUILD_VARIANTS:-$PB_VARIANT}; matrix_supported_var=; expected_checks= ;;
-esac
 # Local restatement of the Makefile's canonical image basename (see its
 # "canonical firmware image basename" block): <prefix>-<mcu>-<output stage>,
 # where the stage field is the variant name itself. Deliberately independent of
@@ -1894,7 +1981,7 @@ EOF
 	[[ "$cal_output" == *"calibration contract holds for all 3 variants"* ]] \
 		|| { printf 'FAIL: complete PIC12F675 calibration contract omitted its matrix sentinel: %s\n' \
 			"$cal_output" >&2; exit 1; }
-	for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
+	for variant in "${PB_CANONICAL_VARIANTS[@]}"; do
 		[ "$(grep -cF "CALIBRATION PASS [$variant]:" <<<"$cal_output")" -eq 1 ] \
 			|| { printf 'FAIL: PIC12F675 calibration contract did not check %s exactly once: %s\n' \
 				"$variant" "$cal_output" >&2; exit 1; }
@@ -1914,7 +2001,7 @@ EOF
 	[[ "$1" = PIC12F675_MATRIX_SHA256 && "$2" = format=2 && "$#" -eq 14 ]] \
 		|| { printf 'FAIL: PIC12F675 matrix identity is not one format-2 twelve-artifact record: %s\n' \
 			"$matrix_record" >&2; exit 1; }
-	for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
+	for variant in "${PB_CANONICAL_VARIANTS[@]}"; do
 		for prefix in shipping assembly symbols simcal; do
 			field="${prefix}_${variant}"
 			[[ " $matrix_record " =~ [[:space:]]${field}=[0-9a-f]{64}[[:space:]] ]] \
