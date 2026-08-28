@@ -1331,8 +1331,9 @@ may be valuable. Repeating the literal at every call site is not.
   over-capacity, and percentage-mismatched input.
 - [x] Extract strict context-layout/symbol parsing used by all six PIC
   fault/lock-step consumers. Resolve one non-symlink sidecar pair once at recipe
-  time, require exactly one `_ctx_: ds 3` allocation and one hexadecimal symbol,
-  remove stale harness output first, and pass that captured address to C++.
+  time, require exactly one `_ctx_: ds 3` allocation and one `_ctx_` record of
+  XC8's real global symbol-table shape resolved into data memory, remove stale
+  harness output first, and pass that captured address to C++.
 - [x] Parameterize the twelve repeated optional libgpsim
   compiler/header/library preflights while retaining each caller's prerequisite,
   image, matrix, and lane-specific checks.

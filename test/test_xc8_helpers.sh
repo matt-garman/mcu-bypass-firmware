@@ -64,16 +64,31 @@ checks=$((checks + 1))
 
 asm="$work/image.s"
 sym="$work/image.sym"
+# The .sym fixtures reproduce real XC8 output rather than a convenient
+# shorthand: a global symbol table of "<name> <address> <end> <class> <bank>"
+# records, followed by the %segments and %locals sections whose records share
+# the file but not the symbol shape. A fixture that carried the address alone
+# would let a parser that cannot read an actual .sym pass this suite.
 write_valid_context() {
 	printf '%s\n' '_ctx_:' ' ds 3' > "$asm"
-	printf '_ctx_ 005d\n' > "$sym"
+	printf '%s\n' \
+		'_main 188 0 CODE 0' \
+		'debounce_init_context@ctx 44 0 BANK0 1' \
+		'_ctx_ 5d 0 BANK0 1' \
+		'__end_of_main 1FA 0 CODE 0' \
+		'%segments' \
+		'cstackBANK0 40 63 BANK0 40 1' \
+		'%locals' \
+		'image.o' \
+		'image.s' \
+		'329 1FA 0 CODE 0' > "$sym"
 }
 
 expect_context_pass() {
 	local label=$1 output
 	output=$("$CONTEXT_CHECKER" "$asm" "$sym") \
 		|| fail "$label: rejected valid context sidecars"
-	[[ $output == 005D ]] || fail "$label: emitted '$output', expected 005D"
+	[[ $output == 5D ]] || fail "$label: emitted '$output', expected 5D"
 	checks=$((checks + 1))
 }
 
@@ -99,11 +114,29 @@ write_valid_context
 printf '_ctx_: ds 3\n' > "$asm"
 expect_context_fail "inline malformed allocation" "malformed _ctx_ allocation"
 write_valid_context
-printf '_ctx_ xyz!\n' > "$sym"
+printf '_ctx_ xyz! 0 BANK0 1\n' > "$sym"
 expect_context_fail "malformed symbol" "malformed _ctx_ symbol"
 write_valid_context
-printf '%s\n' '_ctx_ 005D' '_ctx_ 005E' > "$sym"
+# The address on its own is not an XC8 symbol record; accepting it would mean
+# the parser is reading some other file's shape.
+printf '_ctx_ 5d\n' > "$sym"
+expect_context_fail "truncated symbol record" "malformed _ctx_ symbol"
+write_valid_context
+printf '%s\n' '_ctx_ 5d 0 BANK0 1' '_ctx_ 5e 0 BANK0 1' > "$sym"
 expect_context_fail "duplicate symbol" "expected exactly one"
+write_valid_context
+# A _ctx_ the linker resolved into program memory contradicts the `ds 3` data
+# allocation, so the address must not be handed to the SRAM harnesses.
+printf '_ctx_ 5d 0 CODE 0\n' > "$sym"
+expect_context_fail "symbol placed in program memory" "program memory"
+write_valid_context
+# %segments and %locals records are not symbols; a psect that happens to be
+# named _ctx_ must neither satisfy nor corrupt the lookup.
+printf '%s\n' '_main 188 0 CODE 0' '%segments' '_ctx_ 40 63 BANK0 40 1' > "$sym"
+expect_context_fail "symbol only in the segment table" "expected exactly one"
+write_valid_context
+printf '%s\n' '_ctx_ 5d 0 BANK0 1' '%segments' '_ctx_ 40 63 BANK0 40 1' > "$sym"
+expect_context_pass "segment record shadowing the symbol"
 write_valid_context
 : > "$sym"
 expect_context_fail "empty symbol file" "missing, empty, symlinked"
