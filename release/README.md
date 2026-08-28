@@ -128,6 +128,13 @@ validation suite — backs these binaries, through two mechanisms:
    before staging artifacts. Only explicitly non-publishable dry runs may proceed
    from a dirty tree.
 
+   The complete `make test-long` transcript is transient diagnostic output, not
+   required release evidence. Future releases produced by this pipeline retain
+   `evidence/test-long.summary.txt` with one exact, source-bound
+   `TEST_LONG_RESULT` PASS record and selected terminal output. Tag CI reruns the
+   gate independently; its hosted job log is subject to platform retention and
+   is not a release asset or a dependency of the qualification claim.
+
    The signed version tag points to a dedicated release-artifact commit. Tag CI
    fetches the exact remote annotated-tag object and verifies its OpenPGP
    signature against [`release/signing-key.asc`](signing-key.asc) and the pinned

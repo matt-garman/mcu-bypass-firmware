@@ -182,6 +182,24 @@ for wiring in \
 done
 checks=$((checks + 1))
 
+mapfile -t test_long_run_lines < <(grep -nF \
+	'make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 PIC12F675_FLASH_IMAGES=build' \
+	"$RELEASE")
+mapfile -t test_long_result_lines < <(grep -nF \
+	'TEST_LONG_RESULT format=1 status=pass source_commit=%s target=test-long strict_tools=1 mutation_allow_skip=0' \
+	"$RELEASE")
+[ "${#test_long_run_lines[@]}" -eq 1 ] \
+	&& [ "${#test_long_result_lines[@]}" -eq 1 ] \
+	|| fail "release producer test-long invocation/result markers are missing or ambiguous"
+test_long_run_line=${test_long_run_lines[0]%%:*}
+test_long_result_line=${test_long_result_lines[0]%%:*}
+[ "$test_long_run_line" -lt "$test_long_result_line" ] \
+	|| fail "release producer records test-long success before invoking the aggregate"
+if grep -Fq 'full log is reproduced (and archived)' "$RELEASE"; then
+	fail "release producer still claims tag CI durably archives the full test-long log"
+fi
+checks=$((checks + 1))
+
 # D4: final resource evidence must consume the post-qualification logs and the
 # final regenerated image set, not the initial clean build. Pin both its exact
 # arguments and its position before the final source-provenance check/staging.
@@ -232,6 +250,11 @@ reset_fixture() {
 	for file in "${evidence_names[@]}"; do
 		printf 'retained evidence: %s\n' "$file" > "$release/evidence/$file"
 	done
+	cat > "$release/evidence/test-long.summary.txt" <<EOF
+# test-long retained result
+
+TEST_LONG_RESULT format=1 status=pass source_commit=$sha target=test-long strict_tools=1 mutation_allow_skip=0
+EOF
 	cat > "$release/evidence/resource-tables.log" <<EOF
 resource tables: fixture checks, 0 failures (21 of 21 documented images measured; complete candidate required)
 RESOURCE_TABLES_RESULT format=1 status=pass source_commit=$sha images=21 avr_static=12 classic_stack=9 pic_data=6 pic_stack=9
@@ -446,6 +469,25 @@ expect_fail "wrong soak count" "does not match the canonical set"
 reset_fixture
 rm "$release/evidence/${evidence_names[0]}"
 expect_fail "missing evidence file" "does not exactly match RELEASE_EVIDENCE_FILES"
+
+reset_fixture
+sed -i '/^TEST_LONG_RESULT /d' "$release/evidence/test-long.summary.txt"
+expect_fail "missing test-long result" "exactly one TEST_LONG_RESULT"
+
+reset_fixture
+test_long_record=$(grep '^TEST_LONG_RESULT ' \
+	"$release/evidence/test-long.summary.txt")
+printf '%s\n' "$test_long_record" >> "$release/evidence/test-long.summary.txt"
+expect_fail "duplicate test-long result" "exactly one TEST_LONG_RESULT"
+
+reset_fixture
+sed -i 's/status=pass/status=fail/' "$release/evidence/test-long.summary.txt"
+expect_fail "failed test-long result" "no exact source-bound passing test-long result"
+
+reset_fixture
+sed -i "s/source_commit=$sha/source_commit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/" \
+	"$release/evidence/test-long.summary.txt"
+expect_fail "wrong-source test-long result" "no exact source-bound passing test-long result"
 
 reset_fixture
 printf 'extra\n' > "$release/evidence/.hidden"
@@ -1092,6 +1134,13 @@ grep -Fq 'all three PIC parts' "$rendered_manifest" \
 # reappear under any spelling.
 grep -Fq 'modeled-pin output checks' "$rendered_manifest" \
 	|| fail "rendered validation prose does not call the simulator output lanes modeled-pin checks"
+checks=$((checks + 1))
+for required in '`test-long` retention:' 'one source-bound `TEST_LONG_RESULT` PASS record' \
+		'the complete transcript is transient diagnostic output' \
+		'hosted job log is subject to platform retention and is not release evidence'; do
+	grep -Fq "$required" "$rendered_manifest" \
+		|| fail "rendered validation prose omits test-long retention policy: $required"
+done
 checks=$((checks + 1))
 if grep -Eqi 'physical[- ](output|pin|port)' "$rendered_manifest"; then
 	fail "rendered validation prose claims physical output evidence for simulator lanes"

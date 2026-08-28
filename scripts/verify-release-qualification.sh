@@ -244,6 +244,17 @@ mapfile -t resource_results < <(grep '^RESOURCE_TABLES_RESULT ' "$resource_log" 
 [ "${#resource_results[@]}" -eq 1 ] && [ "${resource_results[0]}" = "$resource_result" ] \
 	|| die "retained resource evidence has no exact source-bound complete result"
 
+# test-long's complete transcript is transient diagnostic output, not release
+# evidence. Its retained summary must still establish the exact aggregate,
+# strict-tool/mutation policy, source identity, and successful terminal result.
+test_long_summary="$evidence_dir/test-long.summary.txt"
+test_long_result="TEST_LONG_RESULT format=1 status=pass source_commit=${q[source_commit]} target=test-long strict_tools=1 mutation_allow_skip=0"
+mapfile -t test_long_results < <(grep '^TEST_LONG_RESULT ' "$test_long_summary" || true)
+[ "${#test_long_results[@]}" -eq 1 ] \
+	|| die "test-long.summary.txt must contain exactly one TEST_LONG_RESULT record"
+[ "${test_long_results[0]}" = "$test_long_result" ] \
+	|| die "test-long.summary.txt has no exact source-bound passing test-long result"
+
 for combination in "${canonical_soaks[@]}"; do
 	log="$evidence_dir/soak-$combination.log"
 	mapfile -t machine_lines < <(grep '^SOAK_RESULT ' "$log" || true)

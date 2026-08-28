@@ -1176,6 +1176,7 @@ release_render_validation() {
 	# evidence claims, and none of them is stated here.
 	printf ' (real-image fault handling, firmware/model ctx_ lock-step, and modeled-pin output checks across AVR-XT and all three PIC parts)'
 	printf ' + %s-h parallel soak of every release soak combination (see evidence/).\n' "$hours"
+	printf -- '- **`test-long` retention:** `evidence/test-long.summary.txt` retains one source-bound `TEST_LONG_RESULT` PASS record; the complete transcript is transient diagnostic output, is not a release asset, and is not required after verification. Tag CI reruns the gate independently, but its hosted job log is subject to platform retention and is not release evidence.\n'
 }
 
 release_render_pic_toolchain_rows() {

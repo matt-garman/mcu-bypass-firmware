@@ -1941,14 +1941,18 @@ if [ "$staged_sorted" != "$wanted_sorted" ]; then
 fi
 ok "wrote SHA256SUMS over ${#IMAGES[@]} images and ${#RELEASE_HELPER_NAMES[@]} required artifact(s); staging directory holds exactly that image set."
 
-# Copy evidence. The per-combo soak logs and build/pic10f322-test logs are small and
-# kept in full; the exhaustive test-long log is large (100s of KB) and would
-# bloat the repo on every release, so commit a concise summary instead -- the
-# full log is reproduced (and archived) by the tag-triggered release CI run.
+# Copy evidence. The per-combo soak logs and build/target logs are small and kept
+# in full. The exhaustive test-long transcript is large (100s of KB), duplicates
+# the detailed diagnostics of reproducible gates, and is transient diagnostic
+# output rather than required release evidence. Retain an exact source-bound PASS
+# record plus selected terminal output; tag CI independently reruns test-long,
+# but its hosted job log is subject to platform retention and is not an archive.
 for f in "$EVID"/*.log; do
 	case "$(basename "$f")" in
 		test-long.log)
-			{ echo "# test-long summary -- the full log is in the release CI run."; echo; \
+			{ echo "# test-long retained result"; echo; \
+			  printf 'TEST_LONG_RESULT format=1 status=pass source_commit=%s target=test-long strict_tools=1 mutation_allow_skip=0\n' "$GIT_SHA"; \
+			  echo; echo "# Selected terminal output (the full transcript is not retained)."; echo; \
 			  grep -nE '^(===|--- |OK:|FAIL|cbmc:|MISRA|golden-model|killed|survived|mutant)' "$f" || true; \
 			  echo; echo "# --- last 20 lines ---"; tail -20 "$f"; \
 			} > "$OUTPUT_DIR/evidence/test-long.summary.txt" ;;

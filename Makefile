@@ -7783,6 +7783,8 @@ override RELEASE_FIXED_EVIDENCE_FILES := \
 	pic10f320-test.log pic10f320-test-target-variants.log \
 	pic12f675-qualification.log pic12f675-qualified-matrix.json \
 	soak-build.log test-long.summary.txt
+# test-long.summary.txt carries one verified, source-bound TEST_LONG_RESULT. The
+# full transcript is intentionally transient and absent from the release set.
 override RELEASE_EVIDENCE_FILES := $(RELEASE_FIXED_EVIDENCE_FILES) \
 	$(addprefix soak-,$(addsuffix .log,$(RELEASE_SOAK_NAMES)))
 

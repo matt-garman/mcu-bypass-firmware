@@ -1546,19 +1546,25 @@ deduplicated; loose evidence is the primary growth source.
 
 ## BR-REL-03 - Clarify full test-long log retention
 
-**Status:** TODO
+**Status:** IN PROGRESS
 
 **Observation:** Release creation retains a summary and says the full log is
 archived by release CI, but the workflow does not appear to upload that log as a
 durable release asset. Ordinary hosted run-log retention is not equivalent to
 immutable release evidence.
 
+**Decision:** The full `test-long` transcript is transient diagnostic output,
+not required release evidence. Retain and verify one exact source-bound terminal
+record in `test-long.summary.txt`; tag CI independently reruns the gate, but its
+hosted log is not a release asset or a dependency of the qualification claim.
+
 **Work:**
 
-- [ ] Decide whether the full log is required evidence.
-- [ ] If required, include it in the compressed evidence archive.
-- [ ] If not required, correct claims that it is durably archived.
-- [ ] Ensure the summary has enough structured terminal data to establish the
+- [x] Decide whether the full log is required evidence.
+- [x] Resolve the compressed-archive branch as not applicable because the full
+  log is not required evidence.
+- [x] If not required, correct claims that it is durably archived.
+- [x] Ensure the summary has enough structured terminal data to establish the
   intended release claim.
 
 **Acceptance:**
@@ -1986,7 +1992,7 @@ dependencies and acceptance criteria.
 | BR-QUALITY-01 | Define complete analysis matrix | DONE `edd9696` |
 | BR-REL-01 | Define canonical signed release index | TODO |
 | BR-REL-02 | Package deterministic evidence archive | TODO |
-| BR-REL-03 | Clarify full test-long retention | TODO |
+| BR-REL-03 | Clarify full test-long retention | IN PROGRESS |
 | BR-REL-04 | Define hosted retention/mirroring | TODO |
 | BR-REL-05 | Keep releases self-contained | TODO |
 | BR-REL-06 | Consider tag-only artifact commits | TODO |

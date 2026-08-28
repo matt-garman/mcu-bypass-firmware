@@ -722,6 +722,16 @@ time enforcement, not a claim that a later staged/copied artifact cannot be
 modified; release provenance and reproduction checks remain separate controls.
 
 
+## Release test-long evidence
+
+The complete `make test-long` transcript is transient diagnostic output and is
+not part of the retained release inventory. The release producer writes
+`test-long.summary.txt` only after the aggregate succeeds, with one exact
+`TEST_LONG_RESULT` record naming the qualified source, `test-long`, strict tools,
+and the no-skip mutation policy. The qualification verifier rejects a missing,
+duplicate, failed, or wrong-source record. Tag CI reruns the aggregate
+independently, but its hosted job log is not treated as durable release evidence.
+
 ## Static analysis matrix
 
 Cppcheck and MISRA each execute the same 30 reviewed semantic rows. The matrix
