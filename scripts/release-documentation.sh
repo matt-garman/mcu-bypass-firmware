@@ -1353,6 +1353,12 @@ release_render_commit_message() {
 		production)
 			release_description='Prebuilt, fully-validated firmware images'
 			;;
+		express)
+			# The soak hours are printed verbatim further down, from the same
+			# $hours this line refers to, so the message cannot claim one
+			# duration in prose and record another in its validation list.
+			release_description='Prebuilt firmware images, express-qualified (every gate in full, shortened soak)'
+			;;
 		*)
 			return 2
 			;;

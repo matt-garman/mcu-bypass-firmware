@@ -119,7 +119,7 @@ def create_evidence(evidence):
     stack = {
         "PIC10F322": (3, 3, 4),
         "PIC10F320": (3, 3, 3),
-        "PIC12F675": (3, 3, 4),
+        "PIC12F675": (3, 3, 5),
     }
     files = {
         "PIC10F322": "pic10f322-test.log",

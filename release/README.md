@@ -120,7 +120,15 @@ validation suite — backs these binaries, through two mechanisms:
    `make pic10f322-test-target-variants`), both PIC10F320 gates (`make pic10f320-test` and
    `make pic10f320-test-target-variants`), both PIC12F675 gates (`make pic12f675-test` and
    `make pic12f675-test-target-variants`), and a **24-hour soak of every release
-   soak combination**. Releases `v0.9.0` through `v0.9.5` predate
+   soak combination**. One release mode, and only one, shortens that last item:
+   an **express** release (`RELEASE_ARGS='--express'`) runs every gate above in
+   full and soaks each combination for **1 hour** instead of 24. It is
+   publishable, and it says so where a reader looks — `release_mode=express`
+   and the true `soak_duration_ms` in `QUALIFICATION`, a shortened-soak banner
+   in `MANIFEST.md`, and both under the same checksum signature. The
+   qualification verifier enforces a 1-hour floor for `express` exactly as it
+   enforces 24 hours for `production`, and rejects an `express` record whose
+   manifest omits the banner. Releases `v0.9.0` through `v0.9.5` predate
    `QUALIFICATION` and use the manifest/evidence contract recorded in their own
    tags; they must not be judged against the later `QUALIFICATION` inventories.
    Because the gates are long-running, release orchestration
@@ -173,7 +181,8 @@ separation between the first and the third is enforced rather than conventional.
    `vX.Y.Z`. This commit is the **source contract**, and it is the commit the
    qualification run measures.
 2. **Production staging.** `scripts/make-release.sh vX.Y.Z` builds every image,
-   runs every gate, soaks every combination for 24 hours, and stages
+   runs every gate, soaks every combination for 24 hours (1 hour under
+   `--express`, recorded as such), and stages
    `release/vX.Y.Z/`. It refuses to start unless step 1 is already committed,
    and it stages without committing anything. Before handing off it re-checks
    the bounded declarations against the inventory it actually staged, so "21

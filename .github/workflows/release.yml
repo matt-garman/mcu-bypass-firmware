@@ -111,8 +111,20 @@ jobs:
             echo "::error::$dir was produced by a dry run and must not be published"
             exit 1
           fi
-          grep -Fxq -- '- **Release mode:** production' "$dir/MANIFEST.md" \
-            || { echo "::error::$dir/MANIFEST.md does not identify a production release"; exit 1; }
+          # Both publishable modes are accepted here and told apart by name:
+          # production carries the 24-h soak, express the shortened one it
+          # declares in its own banner. Anything else -- a dry run above, or a
+          # mode this workflow does not know -- is not publishable.
+          if grep -Fxq -- '- **Release mode:** production' "$dir/MANIFEST.md"; then
+            echo "release mode: production"
+          elif grep -Fxq -- '- **Release mode:** express' "$dir/MANIFEST.md"; then
+            grep -Fq 'EXPRESS QUALIFICATION -- SHORTENED SOAK' "$dir/MANIFEST.md" \
+              || { echo "::error::$dir/MANIFEST.md declares express mode without its shortened-soak banner"; exit 1; }
+            echo "release mode: express (shortened soak; see the MANIFEST banner)"
+          else
+            echo "::error::$dir/MANIFEST.md does not identify a publishable release mode"
+            exit 1
+          fi
           command -v make >/dev/null || { echo "::error::make is required by qualification verification"; exit 1; }
           scripts/verify-release-qualification.sh "$dir" "$tag"
           scripts/verify-release-history.sh "$dir" "$tag" "$RELEASE_OBJECT"

@@ -86,19 +86,24 @@ release_pinned_version_matches() {
 }
 
 release_require_main_branch() {
-	if [ "$#" -ne 1 ]; then
-		printf 'FATAL: release_require_main_branch requires the repository root\n' >&2
+	if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+		printf 'FATAL: release_require_main_branch requires the repository root and an optional release mode\n' >&2
 		return 2
 	fi
+	# The mode appears only in the diagnostic. Every publishable mode has the
+	# same requirement, so an express run must not be told that "production"
+	# needs main while its own die message names express.
 	local repo_root=$1 branch_ref
+	local release_mode=${2:-production}
 
 	branch_ref=$(git -C "$repo_root" symbolic-ref --quiet HEAD) || {
-		printf 'FATAL: production release requires the main branch; HEAD is detached or unreadable\n' >&2
+		printf 'FATAL: %s release requires the main branch; HEAD is detached or unreadable\n' \
+			"$release_mode" >&2
 		return 1
 	}
 	if [ "$branch_ref" != refs/heads/main ]; then
-		printf 'FATAL: production release requires refs/heads/main; checked out %s\n' \
-			"$branch_ref" >&2
+		printf 'FATAL: %s release requires refs/heads/main; checked out %s\n' \
+			"$release_mode" "$branch_ref" >&2
 		return 1
 	fi
 }
@@ -115,7 +120,7 @@ release_output_path_is_safe() {
 	local release_root output_abs expected_output
 
 	case "$release_mode" in
-		production|dry-run) ;;
+		production|express|dry-run) ;;
 		*)
 			printf 'FATAL: invalid release output mode: %s\n' "$release_mode" >&2
 			return 1
@@ -140,10 +145,13 @@ release_output_path_is_safe() {
 	}
 	expected_output="$release_root/$version"
 
-	if [ "$release_mode" = production ]; then
+	# Every publishable mode stages to exactly one path, the one the artifact
+	# commit and the tag will name. Express differs from production only in soak
+	# hours, never in where the release lands.
+	if [ "$release_mode" = production ] || [ "$release_mode" = express ]; then
 		if [ "$output_abs" != "$expected_output" ]; then
-			printf 'FATAL: production output must be exactly %s (found %s)\n' \
-				"$expected_output" "$output_abs" >&2
+			printf 'FATAL: %s output must be exactly %s (found %s)\n' \
+				"$release_mode" "$expected_output" "$output_abs" >&2
 			return 1
 		fi
 		return 0

@@ -9,7 +9,13 @@ LC_ALL=C
 export LC_ALL
 
 MIN_RELEASE_SOAK_MS=86400000
+# An express release is publishable with a shorter soak, and this floor is the
+# only thing that keeps "shorter" from meaning "any". It mirrors
+# MIN_EXPRESS_SOAK_MS in scripts/make-release.sh; the producer and this verifier
+# must agree, or a run that the producer accepted would be unpublishable.
+MIN_EXPRESS_SOAK_MS=3600000
 MAX_SOAK_DURATION_MS=4294967294
+EXPRESS_BANNER='EXPRESS QUALIFICATION -- SHORTENED SOAK'
 allow_dry_run=0
 
 die() {
@@ -96,6 +102,12 @@ case "${q[release_mode]}" in
 		[ "${q[source_dirty]}" = 0 ] \
 			|| die "production qualification must record source_dirty=0"
 		;;
+	express)
+		# Publishable, so it is held to every production rule except the soak
+		# floor checked below -- and it must SAY so where a reader looks.
+		[ "${q[source_dirty]}" = 0 ] \
+			|| die "express qualification must record source_dirty=0"
+		;;
 	dry-run)
 		[ "$allow_dry_run" -eq 1 ] \
 			|| die "dry-run qualification is not publishable"
@@ -120,6 +132,12 @@ if [ "${q[release_mode]}" = production ] \
 			|| { [ "${#duration}" -eq "${#MIN_RELEASE_SOAK_MS}" ] \
 				&& [[ "$duration" < "$MIN_RELEASE_SOAK_MS" ]]; }; }; then
 	die "production soak_duration_ms is below $MIN_RELEASE_SOAK_MS"
+fi
+if [ "${q[release_mode]}" = express ] \
+		&& { [ "${#duration}" -lt "${#MIN_EXPRESS_SOAK_MS}" ] \
+			|| { [ "${#duration}" -eq "${#MIN_EXPRESS_SOAK_MS}" ] \
+				&& [[ "$duration" < "$MIN_EXPRESS_SOAK_MS" ]]; }; }; then
+	die "express soak_duration_ms is below $MIN_EXPRESS_SOAK_MS"
 fi
 if [ "${#liveness}" -gt "${#duration}" ] \
 		|| { [ "${#liveness}" -eq "${#duration}" ] \
@@ -274,14 +292,32 @@ grep -Fxq -- "- **PIC12F675 qualified matrix:** \`evidence/pic12f675-qualified-m
 	|| die "MANIFEST.md PIC12F675 matrix digest does not match QUALIFICATION"
 grep -Fxq -- "- **Final resource evidence:** \`evidence/resource-tables.log\` (SHA-256 \`${q[resource_tables_sha256]}\`)" "$manifest" \
 	|| die "MANIFEST.md resource evidence digest does not match QUALIFICATION"
-if [ "${q[release_mode]}" = production ]; then
-	if grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$manifest"; then
-		die "production MANIFEST.md contains the dry-run banner"
-	fi
-else
-	grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$manifest" \
-		|| die "dry-run MANIFEST.md is missing its warning banner"
-fi
+# Each mode carries exactly its own banner, checked in both directions. The
+# recorded mode and the human-readable document are the same claim written
+# twice, and a reader who sees only one of them must not be misled by it: a
+# production manifest that quietly carries a shortened-soak banner, or an
+# express manifest that carries none, is a mismatch either way.
+case "${q[release_mode]}" in
+	production)
+		if grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$manifest"; then
+			die "production MANIFEST.md contains the dry-run banner"
+		fi
+		if grep -Fq "$EXPRESS_BANNER" "$manifest"; then
+			die "production MANIFEST.md contains the express banner"
+		fi
+		;;
+	express)
+		if grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$manifest"; then
+			die "express MANIFEST.md contains the dry-run banner"
+		fi
+		grep -Fq "$EXPRESS_BANNER" "$manifest" \
+			|| die "express MANIFEST.md is missing its shortened-soak banner"
+		;;
+	*)
+		grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$manifest" \
+			|| die "dry-run MANIFEST.md is missing its warning banner"
+		;;
+esac
 
 printf 'QUALIFIED: %s records clean %s qualification with %d exact %s-ms soak results.\n' \
 	"$expected_version" "${q[release_mode]}" "${#canonical_soaks[@]}" "$duration"

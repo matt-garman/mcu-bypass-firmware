@@ -15,7 +15,8 @@
 #        commit, the exact toolchain versions, the per-image fuse bytes / CONFIG
 #        word, and the validation evidence (test-long + both ATtiny202 gates +
 #        both pre-hardware and real-target aggregates for all three PIC parts +
-#        18-combination 24-h soak).
+#        18-combination 24-h soak, or the 1-h soak an --express release records
+#        as such in both QUALIFICATION and MANIFEST.md).
 #     2. REPRODUCIBILITY -- the Intel-HEX images are byte-deterministic for a
 #        fixed toolchain (objcopy ihex carries only code/data bytes, no
 #        timestamps/paths). SHA256SUMS pins those bytes; the tag-triggered CI
@@ -40,7 +41,12 @@
 #      `make pic10f322-test-target-variants`, `make pic10f320-test`,
 #      `make pic10f320-test-target-variants`, and one two-goal Make graph for
 #      `pic12f675-test pic12f675-test-target-variants` (the full qualification
-#      gates for every release-supported target).
+#      gates for every release-supported target), then measure the strict
+#      final-candidate resource evidence those gates just produced. That last
+#      check consumes only this step's logs and the built images -- nothing the
+#      soak produces -- so it runs HERE, where a stale documented figure costs
+#      seconds instead of a 24-hour soak. It is measured again after the soak,
+#      and only that second record is retained as release evidence.
 #   3. Run ALL release soak combinations IN PARALLEL for the full
 #      duration, collecting a pass/fail verdict and evidence from each. That is
 #      6 AVR Classic + 3 AVR-XT + 3 PIC10F322 + 3 PIC10F320 + 3 PIC12F675 = 18
@@ -84,15 +90,23 @@
 #     --dry-run                rehearse the whole pipeline with a SHORT soak
 #                              (does not produce a real release; output is
 #                              clearly marked and no git commands are emitted)
+#     --express                stage a REAL, publishable release whose soak runs
+#                              1 h per combination instead of 24 h. Every other
+#                              gate runs exactly as it does for a production
+#                              release, and the shortened soak is recorded --
+#                              release_mode=express in QUALIFICATION, a banner
+#                              in MANIFEST.md, and the true duration in both.
 #     --soak-duration-ms N     per-combo soak duration (default/minimum for a
-#                              real release: 24 h; dry runs may use less)
+#                              production release: 24 h; --express lowers that
+#                              floor to 1 h; dry runs may use less)
 #     --jobs N                 max concurrent soak combos (default: all of them)
 #     --output-dir DIR         where to stage (default release/<version>)
 #     -h | --help              this help
 #
 # This script is intentionally long-running (~24 h, dominated by the parallel
-# soaks). Run it on a machine that can stay up, with all toolchains installed
-# (AVR + XC8/DFP + simavr + gpsim/gpsim-dev + analyzers). See TOOLCHAIN.adoc.
+# soaks; ~1 h under --express). Run it on a machine that can stay up, with all
+# toolchains installed (AVR + XC8/DFP + simavr + gpsim/gpsim-dev + analyzers).
+# See TOOLCHAIN.adoc.
 
 set -euo pipefail
 
@@ -132,6 +146,7 @@ VERSION=""
 VERSION_WAS_SUPPLIED=0
 PREFLIGHT=0
 DRY_RUN=0
+EXPRESS=0
 RELEASE_MODE=production
 # Canonical project URL. MANIFEST.md is used verbatim as the GitHub Release
 # body, where repo-relative links do not resolve, so any link it carries must
@@ -139,8 +154,16 @@ RELEASE_MODE=production
 # the operator's SSH-vs-HTTPS remote and silently change published notes.
 REPO_URL=https://github.com/matt-garman/mcu-bypass-firmware
 MIN_RELEASE_SOAK_MS=86400000
+# An express release is a real, publishable release that trades soak hours for
+# turnaround. It moves the floor rather than removing it: every other gate still
+# runs in full, and one hour is still 60 liveness round-trips per combination at
+# the 60 s interval below. scripts/verify-release-qualification.sh enforces this
+# same floor for release_mode=express, so a shorter express run is not
+# publishable either.
+MIN_EXPRESS_SOAK_MS=3600000
 MAX_SOAK_DURATION_MS=4294967294    # uint32_t loop bound; preserve t + 1
 SOAK_DURATION_MS=$MIN_RELEASE_SOAK_MS
+SOAK_DURATION_WAS_SUPPLIED=0
 SOAK_LIVENESS_INTERVAL_MS=60000
 JOBS=""                            # empty => all combinations
 OUTPUT_DIR=""
@@ -162,7 +185,9 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 		--preflight)          PREFLIGHT=1; shift ;;
 		--dry-run)            DRY_RUN=1; shift ;;
-		--soak-duration-ms)   SOAK_DURATION_MS="${2:?--soak-duration-ms needs a value}"; shift 2 ;;
+		--express)            EXPRESS=1; shift ;;
+		--soak-duration-ms)   SOAK_DURATION_MS="${2:?--soak-duration-ms needs a value}"
+			SOAK_DURATION_WAS_SUPPLIED=1; shift 2 ;;
 		--jobs)               JOBS="${2:?--jobs needs a value}"; shift 2 ;;
 		--output-dir)         OUTPUT_DIR="${2:?--output-dir needs a value}"; shift 2 ;;
 		-h|--help)            usage; exit 0 ;;
@@ -173,8 +198,18 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
+# Each option below names what the run IS: --express a publishable release with
+# a shortened soak, --dry-run a rehearsal that is not a release, --preflight a
+# capability probe that builds nothing. Any pair leaves the recorded mode
+# ambiguous, so all three pairs are refused here, before anything is read or
+# built. The mode-defining pair is checked first so the diagnostic names the
+# contradiction the operator actually wrote.
+[ "$EXPRESS" -eq 0 ] || [ "$DRY_RUN" -eq 0 ] \
+	|| die "--express and --dry-run are mutually exclusive"
 [ "$PREFLIGHT" -eq 0 ] || [ "$DRY_RUN" -eq 0 ] \
 	|| die "--preflight and --dry-run are mutually exclusive"
+[ "$EXPRESS" -eq 0 ] || [ "$PREFLIGHT" -eq 0 ] \
+	|| die "--preflight and --express are mutually exclusive"
 if [ "$VERSION_WAS_SUPPLIED" -eq 0 ] && [ -n "$MAKE_VERSION" ]; then
 	# GNU Make exports command-line variables to recipes. Reading VERSION from
 	# that environment keeps arbitrary bytes out of the recipe's shell syntax;
@@ -298,8 +333,20 @@ fi
 if [ -n "$JOBS" ] && ! [[ "$JOBS" =~ ^[1-9][0-9]*$ ]]; then
 	die "--jobs must be a positive base-10 integer"
 fi
-if [ "$DRY_RUN" -eq 0 ] && [ "$SOAK_DURATION_MS" -lt "$MIN_RELEASE_SOAK_MS" ]; then
-	die "real releases require --soak-duration-ms >= $MIN_RELEASE_SOAK_MS (24 h); use --dry-run for a short rehearsal"
+if [ "$EXPRESS" -eq 1 ]; then
+	RELEASE_MODE=express
+	# An operator who names a duration gets exactly that duration, checked
+	# against the express floor below. Only the untouched 24-h default is
+	# shortened, so `--express --soak-duration-ms <24 h>` cannot be silently
+	# downgraded into the very short run the flag exists to allow.
+	[ "$SOAK_DURATION_WAS_SUPPLIED" -eq 1 ] || SOAK_DURATION_MS=$MIN_EXPRESS_SOAK_MS
+fi
+if [ "$DRY_RUN" -eq 0 ] && [ "$EXPRESS" -eq 0 ] \
+		&& [ "$SOAK_DURATION_MS" -lt "$MIN_RELEASE_SOAK_MS" ]; then
+	die "production releases require --soak-duration-ms >= $MIN_RELEASE_SOAK_MS (24 h); use --express for a 1-h publishable release, or --dry-run for a short rehearsal"
+fi
+if [ "$EXPRESS" -eq 1 ] && [ "$SOAK_DURATION_MS" -lt "$MIN_EXPRESS_SOAK_MS" ]; then
+	die "express releases require --soak-duration-ms >= $MIN_EXPRESS_SOAK_MS (1 h); use --dry-run for a short rehearsal"
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -314,6 +361,8 @@ fi
 	&& SOAK_LIVENESS_INTERVAL_MS=$SOAK_DURATION_MS
 [ "$DRY_RUN" -eq 1 ] \
 	&& warn "DRY RUN: short ${SOAK_DURATION_MS}ms soak (liveness interval ${SOAK_LIVENESS_INTERVAL_MS}ms); output is NOT a real release."
+[ "$EXPRESS" -eq 1 ] \
+	&& warn "EXPRESS: publishable release with a ${SOAK_DURATION_MS}ms soak per combination instead of ${MIN_RELEASE_SOAK_MS}ms; every other gate runs in full and the shortened soak is recorded in QUALIFICATION and MANIFEST.md."
 
 # ----------------------------------------------------------------------------
 # Locate the repo and read the Makefile's single source of truth
@@ -1250,12 +1299,15 @@ fi
 # that here -- after the preflight capability probe, which legitimately runs
 # against a live polish branch, and before any build -- so a release started
 # from an un-merged polish branch fails fast instead of trusting the manual
-# pre-merge checklist. Dry runs remain branch-safe rehearsals; only production
-# staging requires the checked-out main ref.
-if [ "$RELEASE_MODE" = production ]; then
-	release_require_main_branch "$REPO_ROOT" \
-		|| die "refusing production release outside the main branch (see the diagnostic above)."
-fi
+# pre-merge checklist. Dry runs remain branch-safe rehearsals; every publishable
+# mode -- production and express alike -- requires the checked-out main ref,
+# because both stage into release/<version> and end at a signed tag.
+case "$RELEASE_MODE" in
+	production|express)
+		release_require_main_branch "$REPO_ROOT" "$RELEASE_MODE" \
+			|| die "refusing $RELEASE_MODE release outside the main branch (see the diagnostic above)."
+		;;
+esac
 release_reject_branch_only_documents "$REPO_ROOT" \
 	|| die "refusing to release: a branch-only working document is still present or referenced (see the diagnostic above)."
 
@@ -1569,6 +1621,26 @@ matrix_line_count=$(grep -c 'PIC12F675_MATRIX_SHA256' \
 ok "both PIC12F675 aggregates passed against one retained matrix."
 validated_pic12f675_image_hashes=$(hash_pic_image_set "${PIC12F675_IMAGES[@]}")
 
+# Strict resource evidence, measured HERE for the same reason the rename/change
+# evidence above is: this gate reads only the images section 1 built and the
+# logs section 2 just wrote -- nothing the soak produces, and nothing the soak
+# may change (every one of those artifacts is pinned by hash across the soak
+# below). A documented figure that drifted from the built image is therefore a
+# failure this run can report in seconds instead of after a 24-hour wait.
+#
+# The report is written OUTSIDE $EVID on purpose. Staging copies every
+# $EVID/*.log into the release, where the retained set must equal
+# RELEASE_EVIDENCE_FILES exactly, so a second resource log there would fail
+# qualification. The authoritative record is the one measured again after the
+# soak, over the final image paths staging consumes; this one only fails fast.
+log "checking final-candidate resource evidence (pre-soak fail-fast)..."
+python3 "$REPO_ROOT/test/test_resource_tables.py" --root "$REPO_ROOT" \
+	--require-all-images --evidence-dir "$EVID" --source-commit "$GIT_SHA" \
+	>"$WORK/resource-tables-presoak.log" 2>&1 \
+	|| { cat "$WORK/resource-tables-presoak.log" >&2; \
+		die "resource evidence FAILED before the soak. No soak started."; }
+ok "resource evidence covers all images and this run's measurements (rechecked after the soak)."
+
 # ============================================================================
 # 3. PARALLEL SOAK -- every release combo, full duration
 # ============================================================================
@@ -1862,6 +1934,13 @@ ok "all validated release images are present and nonempty."
 # strict, source-bound record before test-long.log is summarized. Ordinary CI
 # may compare zero images; this release path must measure all 21, all 12 AVR
 # static-data records, and every retained stack/Data-space observation.
+#
+# The same gate already passed before the soak, against the same logs and the
+# same build directories. This second measurement is the one that is retained,
+# hashed into QUALIFICATION and staged: it reads the final image paths -- the
+# classic AVR HEX regenerated just above included -- so a byte that changed
+# after the early check fails here rather than leaving evidence about different
+# files. Reaching this line and failing means something moved during the soak.
 python3 "$REPO_ROOT/test/test_resource_tables.py" --root "$REPO_ROOT" \
 	--require-all-images --evidence-dir "$EVID" --source-commit "$GIT_SHA" \
 	>"$EVID/resource-tables.log" 2>&1 \
@@ -2129,6 +2208,14 @@ soak_table() {
 
 REL_BANNER=""
 [ "$DRY_RUN" -eq 1 ] && REL_BANNER=$'> **DRY RUN -- NOT A VALIDATED RELEASE.** Soak duration was reduced; do not publish.\n'
+# An express release is publishable, so its banner must not read as a warning
+# against publication -- it must say precisely which evidence is shorter. The
+# leading sentinel is what scripts/verify-release-qualification.sh and the tag
+# workflow match on, so it is a fixed string; only the hours interpolate.
+# The trailing newline is appended after the substitution, which strips them:
+# the banner is a Markdown blockquote and needs the blank line the dry-run
+# banner also carries, or the paragraph that follows joins the quote.
+[ "$EXPRESS" -eq 1 ] && REL_BANNER="$(printf '> **EXPRESS QUALIFICATION -- SHORTENED SOAK.** Every gate below ran in full; the parallel soak ran %s h per combination instead of 24 h.' "$hours")"$'\n'
 
 : > "$WORK/flashcmds.txt"
 {
@@ -2136,6 +2223,9 @@ REL_BANNER=""
 	[ -n "$REL_BANNER" ] && printf '%s\n' "$REL_BANNER"
 	if [ "$DRY_RUN" -eq 1 ]; then
 		printf 'Prebuilt firmware rehearsal images; not fully validated. Verify integrity with\n'
+	elif [ "$EXPRESS" -eq 1 ]; then
+		printf 'Prebuilt firmware images; every release gate passed, with the shortened soak\n'
+		printf 'recorded above and in QUALIFICATION. Verify integrity with\n'
 	else
 		printf 'Prebuilt, fully-validated firmware images. Verify integrity with\n'
 	fi
@@ -2294,6 +2384,12 @@ if [ "$DRY_RUN" -eq 1 ]; then
 	warn "This was a rehearsal with a short soak. Output staged at $OUTPUT_DIR is NOT a real release."
 	warn "Re-run WITHOUT --dry-run (full 24-h soak) to produce a publishable release."
 	exit 0
+fi
+# An express release is published like any other, so the recipe below is
+# printed. Say once more what it is, at the point the operator decides to sign.
+if [ "$EXPRESS" -eq 1 ]; then
+	warn "EXPRESS release: the soak ran ${hours} h per combination, not 24 h. Every other gate ran in full."
+	warn "MANIFEST.md carries the express banner and QUALIFICATION records release_mode=express; both are signed by the checksum signature below."
 fi
 
 # Everything below goes to STDOUT: the exact commands for the human to run.

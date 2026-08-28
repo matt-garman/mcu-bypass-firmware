@@ -2586,6 +2586,25 @@ grep -Fq -- '--preflight and --dry-run are mutually exclusive' "$output" \
 	|| fail "preflight/dry-run conflict failed for the wrong reason"
 checks=$((checks + 1))
 
+# --express names what a release IS; --preflight and --dry-run both say it is
+# not a release at all. Either combination would leave the recorded mode
+# ambiguous, so both are refused before anything is built.
+if run_preflight --express >"$output" 2>&1; then
+	fail "preflight accepted the contradictory --express mode"
+fi
+grep -Fq -- '--preflight and --express are mutually exclusive' "$output" \
+	|| fail "preflight/express conflict failed for the wrong reason"
+checks=$((checks + 1))
+
+# The mode-defining pair is refused first, so this reports the express/dry-run
+# contradiction rather than the --preflight this helper always passes.
+if run_preflight --express --dry-run >"$output" 2>&1; then
+	fail "preflight accepted both --express and --dry-run"
+fi
+grep -Fq -- '--express and --dry-run are mutually exclusive' "$output" \
+	|| fail "express/dry-run conflict failed for the wrong reason"
+checks=$((checks + 1))
+
 # Pin both consumers of an absolute venv. Step 0 above dynamically proves the
 # absolute interpreter is found and imported; these assertions cover the two
 # later paths that previously prepended the repository root to it.

@@ -184,22 +184,38 @@ for wiring in \
 done
 checks=$((checks + 1))
 
-# D4: final resource evidence must consume the post-qualification logs and the
-# final regenerated image set, not the initial clean build. Pin both its exact
-# arguments and its position before the final source-provenance check/staging.
+# D4: the strict resource gate runs exactly twice, and neither run is optional.
+# The first is a fail-fast: it reads the same gate logs and images, so it must
+# run BEFORE the soak starts, and it must report OUTSIDE $EVID -- staging copies
+# every $EVID/*.log into the release, where the retained set must equal
+# RELEASE_EVIDENCE_FILES exactly. The second is the retained record: it must
+# consume the post-qualification logs and the final regenerated image set, not
+# the initial clean build, and it must land before the final source-provenance
+# check and staging.
 for wiring in \
 	'python3 "$REPO_ROOT/test/test_resource_tables.py" --root "$REPO_ROOT"' \
 	'--require-all-images --evidence-dir "$EVID" --source-commit "$GIT_SHA"' \
-	'>"$EVID/resource-tables.log" 2>&1'; do
+	'>"$EVID/resource-tables.log" 2>&1' \
+	'>"$WORK/resource-tables-presoak.log" 2>&1'; do
 	grep -Fq -- "$wiring" "$RELEASE" \
 		|| fail "release producer omits strict resource-evidence wiring: $wiring"
 done
+resource_invocations=$(grep -Fc -- \
+	'python3 "$REPO_ROOT/test/test_resource_tables.py" --root "$REPO_ROOT"' "$RELEASE")
+[ "$resource_invocations" -eq 2 ] \
+	|| fail "release producer must run the strict resource gate exactly twice (found $resource_invocations)"
+presoak_resource_line=$(grep -Fn -- '>"$WORK/resource-tables-presoak.log" 2>&1' \
+	"$RELEASE" | cut -d: -f1)
+soak_section_line=$(grep -Fn -- 'section "3. soak (all release combos, parallel' \
+	"$RELEASE" | cut -d: -f1)
 final_image_line=$(grep -n 'regenerating classic AVR HEX from the validated ELFs' \
 	"$RELEASE" | cut -d: -f1)
-resource_line=$(grep -n 'python3 "$REPO_ROOT/test/test_resource_tables.py" --root "$REPO_ROOT"' \
-	"$RELEASE" | cut -d: -f1)
+resource_line=$(grep -Fn -- '>"$EVID/resource-tables.log" 2>&1' "$RELEASE" | cut -d: -f1)
 final_source_line=$(grep -n 'if ! release_source_is_unchanged "$GIT_SHA" "$DRY_RUN"' \
 	"$RELEASE" | cut -d: -f1)
+[[ "$presoak_resource_line" =~ ^[0-9]+$ && "$soak_section_line" =~ ^[0-9]+$ \
+	&& "$presoak_resource_line" -lt "$soak_section_line" ]] \
+	|| fail "the fail-fast resource gate does not run before the soak section"
 [[ "$final_image_line" =~ ^[0-9]+$ && "$resource_line" =~ ^[0-9]+$ \
 	&& "$final_source_line" =~ ^[0-9]+$ \
 	&& "$final_image_line" -lt "$resource_line" \
@@ -298,6 +314,8 @@ EOF
 		printf '# Firmware release %s\n\n' "$version"
 		[ "$mode" != dry-run ] \
 			|| printf '> **DRY RUN -- NOT A VALIDATED RELEASE.** Soak duration was reduced; do not publish.\n\n'
+		[ "$mode" != express ] \
+			|| printf '> **EXPRESS QUALIFICATION -- SHORTENED SOAK.** Every gate below ran in full; the parallel soak ran 1.0 h per combination instead of 24 h.\n\n'
 		printf -- '- **Release mode:** %s\n' "$mode"
 		printf -- '- **Source commit:** `%s`\n' "$sha"
 		printf -- '- **Soak duration per combination:** %s ms\n' "$duration"
@@ -436,6 +454,42 @@ expect_fail "dirty production qualification" "source_dirty=0"
 
 reset_fixture production 60000 60000 0
 expect_fail "short production soak" "below 86400000"
+
+# Express is publishable without --allow-dry-run, on its own soak floor, and
+# only while the recorded mode and the human-readable banner say the same thing.
+reset_fixture express 3600000 60000 0
+expect_pass "express qualification at the 1-h floor"
+
+reset_fixture express 86400000 60000 0
+expect_pass "express qualification above its floor"
+
+reset_fixture express 3599999 60000 0
+expect_fail "short express soak" "below 3600000"
+
+reset_fixture express 3600000 60000 1
+expect_fail "dirty express qualification" "source_dirty=0"
+
+reset_fixture express 3600000 60000 0
+sed -i '/EXPRESS QUALIFICATION -- SHORTENED SOAK/d' "$release/MANIFEST.md"
+expect_fail "express manifest without its banner" "missing its shortened-soak banner"
+
+reset_fixture production 86400000 60000 0
+sed -i '2i > **EXPRESS QUALIFICATION -- SHORTENED SOAK.** Every gate below ran in full; the parallel soak ran 1.0 h per combination instead of 24 h.' \
+	"$release/MANIFEST.md"
+expect_fail "production manifest carrying the express banner" \
+	"production MANIFEST.md contains the express banner"
+
+reset_fixture express 3600000 60000 0
+sed -i '2i > **DRY RUN -- NOT A VALIDATED RELEASE.** Soak duration was reduced; do not publish.' \
+	"$release/MANIFEST.md"
+expect_fail "express manifest carrying the dry-run banner" \
+	"express MANIFEST.md contains the dry-run banner"
+
+reset_fixture
+sed -i 's/^release_mode=production$/release_mode=turbo/' "$release/QUALIFICATION"
+sed -i 's/^- \*\*Release mode:\*\* production$/- **Release mode:** turbo/' \
+	"$release/MANIFEST.md"
+expect_fail "unknown release mode" "invalid release_mode: turbo"
 
 reset_fixture
 sed -i 's/^soak_duration_ms=.*/soak_duration_ms=4294967295/' "$release/QUALIFICATION"
@@ -1129,6 +1183,15 @@ release_render_commit_message v0.9.9 dry-run abc1234 21 24 \
 	> "$rendered_commit"
 grep -Fq 'Non-publishable dry-run rehearsal images for v0.9.9.' "$rendered_commit" \
 	|| fail "rendered dry-run commit message has the wrong release mode"
+# The express message must name its own mode AND carry the real soak hours it
+# was rendered with: the description and the validation list are the same claim.
+release_render_commit_message v0.9.9 express abc1234 21 1.0 \
+	> "$rendered_commit"
+grep -Fq 'Prebuilt firmware images, express-qualified (every gate in full, shortened soak) for v0.9.9.' \
+	"$rendered_commit" \
+	|| fail "rendered express commit message has the wrong release mode"
+grep -Fq '+ 1.0-h parallel soak of every release soak combination' "$rendered_commit" \
+	|| fail "rendered express commit message does not carry its actual soak duration"
 if release_render_commit_message v0.9.9 invalid abc1234 21 24 >/dev/null; then
 	fail "release commit-message renderer accepted an invalid release mode"
 fi
