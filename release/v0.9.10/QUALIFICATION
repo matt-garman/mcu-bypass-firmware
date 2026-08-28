@@ -1,0 +1,10 @@
+format=3
+version=v0.9.10
+release_mode=express
+source_commit=2027d2d7cead9ac7059d37e7072261b4a938694b
+source_dirty=0
+soak_duration_ms=3600000
+soak_liveness_interval_ms=60000
+soak_combination_count=18
+pic12f675_matrix_sha256=e67a69252f36d4eefd4039c3f47de04756f9ab4b2b95f467239594ec33555e15
+resource_tables_sha256=fb93e815c6833908085360a5e4c27ae699ab7efd4af771f007c0bb20a190327c
