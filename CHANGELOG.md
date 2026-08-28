@@ -51,6 +51,22 @@ file is the human-readable summary of *what changed*.
   expected-image identity, signed checksums, and a frozen publication inventory
   without carrying inapplicable rename-report state.
 
+### Fixed
+
+- **A branch-only working document is now recognized by the declaration it
+  carries rather than by its name.** The release documentation gate had been
+  taught one name family at a time, each after a document the previous pattern
+  could not see had already been written; the third such document was reported
+  as durable-document-set drift instead, which failed the release preflight for
+  a file the branch legitimately carries. A root-level Markdown file that
+  declares itself a branch-only working document in its opening blockquote is
+  now refused as one whatever it is named, and the live-tree documentation
+  sweeps prune it on the same terms. The declaration never decides acceptance:
+  every root-level document outside the durable set is still refused, so a
+  working document that omits its banner fails closed as drift with the
+  corrective action named, and a durable document that merely describes the
+  convention has not declared itself.
+
 ## [0.9.10] - 2026-08-26
 
 ### Added

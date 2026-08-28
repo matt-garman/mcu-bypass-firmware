@@ -1085,15 +1085,27 @@ rm -f "$staged_root"/*.hex
 assert_staged_rejected 'a staging that contains no images' 'contains no images'
 
 # H1: the actual release-staging path must refuse a tree that still CONTAINS or
-# still REFERENCES a branch-only working document -- a root-level v*-polish.md,
-# a root-level pre-v*-fixes.md, or any other root-level document outside the
-# durable set. This gate is deliberately OUTSIDE
+# still REFERENCES a branch-only working document -- one that declares itself in
+# its opening blockquote, or any other root-level document outside the durable
+# set. This gate is deliberately OUTSIDE
 # release_validate_current_documentation -- the versioned preflight above
-# legitimately validates the live polish branch, where such a document still
+# legitimately validates the live working branch, where such a document still
 # exists during branch work -- and runs only on the real release-staging path
 # (make-release.sh, after the preflight exit). Exercised here as a unit against
 # throwaway trees.
 branch_doc_root="$work/branch-only-doc"
+# A working document is recognized by the banner it carries, in the words its
+# human readers are shown, rather than by its name. Both spellings the
+# convention has used declare the same thing.
+write_branch_doc() {
+	local name=$1 spelling=${2:-Branch-only}
+	{
+		printf '# %s\n\n' "${name%.md}"
+		printf '> **%s working document.** Deleted before the merge to main.\n' \
+			"$spelling"
+	} > "$branch_doc_root/$name"
+}
+
 assert_branch_doc_gate_rejects() {
 	local description=$1 expected=${2-}
 	if release_reject_branch_only_documents "$branch_doc_root" >"$output" 2>&1; then
@@ -1123,26 +1135,58 @@ release_reject_branch_only_documents "$branch_doc_root" \
 	|| fail "branch-only-document gate rejected the durable root-level document set"
 checks=$((checks + 1))
 
-# A root-level v*-polish.md present -> rejected.
-: > "$branch_doc_root/v1.2.3-polish.md"
-assert_branch_doc_gate_rejects 'a tree containing a root-level v*-polish.md' \
+# A declared root-level working document present -> rejected, and named.
+write_branch_doc v1.2.3-polish.md
+assert_branch_doc_gate_rejects 'a tree containing a declared root-level v*-polish.md' \
 	'v1.2.3-polish.md'
 rm -f "$branch_doc_root/v1.2.3-polish.md"
 
-# ... and so is a pre-release fix list, whose name the polish pattern cannot
-# see. That miss is the defect this case pins: one name pattern per working
-# document is a blocklist, and the next document's name is never in it.
-: > "$branch_doc_root/pre-v1.2.3-fixes.md"
-assert_branch_doc_gate_rejects 'a tree containing a root-level pre-v*-fixes.md' \
+# ... and so is a pre-release fix list, whose name the polish pattern could not
+# see, and a third document neither name family anticipates. That progression is
+# the defect these cases pin: one name pattern per working document is a
+# blocklist, and the next document's name is never in it, so the declaration is
+# what the gate reads.
+write_branch_doc pre-v1.2.3-fixes.md
+assert_branch_doc_gate_rejects 'a tree containing a declared root-level pre-v*-fixes.md' \
 	'pre-v1.2.3-fixes.md'
 rm -f "$branch_doc_root/pre-v1.2.3-fixes.md"
 
-# ... and so is a working document neither family anticipates, which is why the
-# root document set is an allowlist rather than a pattern chase.
+write_branch_doc post-v1.2.3-bloat-reduction.md Branch-scoped
+assert_branch_doc_gate_rejects 'a declared working document outside both historical name families' \
+	'branch-only working document(s) must be deleted before release: post-v1.2.3-bloat-reduction.md'
+rm -f "$branch_doc_root/post-v1.2.3-bloat-reduction.md"
+
+# An UNDECLARED root-level document is refused too, as allowlist drift: the
+# declaration never decides acceptance, only which corrective action the release
+# is refused with. A working document that forgets its banner fails closed.
 : > "$branch_doc_root/merge-notes.md"
 assert_branch_doc_gate_rejects 'a tree containing a root-level document outside the durable set' \
 	'outside the durable root-document set'
 rm -f "$branch_doc_root/merge-notes.md"
+
+# ... including one carrying a working document's NAME but no declaration, which
+# is the same fail-closed path and not the branch-only one.
+: > "$branch_doc_root/v1.2.3-polish.md"
+assert_branch_doc_gate_rejects 'an undeclared root-level v*-polish.md' \
+	'outside the durable root-document set'
+rm -f "$branch_doc_root/v1.2.3-polish.md"
+
+# ... and so is a document that merely MENTIONS the phrase below its opening
+# blockquote. CHANGELOG.md and test/README.md both describe this convention at
+# length; describing it is not declaring it, so the banner is read only where a
+# declaration belongs.
+{
+	printf '# Late notes\n\n'
+	branch_doc_filler=0
+	while [ "$branch_doc_filler" -lt 30 ]; do
+		printf 'Filler line %d.\n' "$branch_doc_filler"
+		branch_doc_filler=$((branch_doc_filler + 1))
+	done
+	printf '\n> **Branch-only working document.** Too far down to declare it.\n'
+} > "$branch_doc_root/late-banner.md"
+assert_branch_doc_gate_rejects 'a declaration below the opening blockquote' \
+	'outside the durable root-document set'
+rm -f "$branch_doc_root/late-banner.md"
 
 # A durable file naming such a document -> rejected (the reference would dangle
 # once the document is deleted), for both branch-only families.
@@ -1159,11 +1203,13 @@ release_reject_branch_only_documents "$branch_doc_root" \
 	|| fail "branch-only-document gate rejected a tree after the violations were removed"
 checks=$((checks + 1))
 
-# Against the LIVE repository the gate may fail only for the branch-only working
-# document a polish branch legitimately carries -- never because a root-level
-# document this project actually ships is missing from the durable set. That
-# pins the allowlist to the real tree instead of letting it drift until the
-# release-staging path is the first thing to notice.
+# Against the LIVE repository the gate may fail only for a branch-only working
+# document the current branch legitimately carries and has declared -- never
+# because a root-level document this project actually ships is missing from the
+# durable set. That pins the allowlist to the real tree instead of letting it
+# drift until the release-staging path is the first thing to notice, and it is
+# why the declaration is a banner the document carries rather than a name
+# pattern this file would have to be taught one working document at a time.
 release_reject_branch_only_documents "$ROOT" >"$output" 2>&1 || true
 ! grep -Fq 'outside the durable root-document set' "$output" \
 	|| fail "the durable root-document set has drifted from the live tree: $(cat "$output")"
@@ -1710,16 +1756,35 @@ assert_hardware_rejects 'a bare assertion sharing a line with a quotation' \
 
 # Shipped release directories are immutable artifacts of past releases and
 # branch-only working documents quote retired wording in order to retire it.
-# Both must be pruned, or this contract cannot be introduced at all.
+# Both must be pruned, or this contract cannot be introduced at all. The working
+# documents are pruned by their declaration, so a name from no known family is
+# pruned on the same terms as one from either.
 write_hardware_fixture
 mkdir -p "$hardware_root/release/v0.9.9"
 printf 'None of these designs has run on silicon.\n' \
 	> "$hardware_root/release/v0.9.9/MANIFEST.md"
-printf 'The old wording said it had never run on a device.\n' \
-	> "$hardware_root/pre-v9.9.9-fixes.md"
-printf 'The old wording said it had never run on a device.\n' \
-	> "$hardware_root/v9.9.9-polish.md"
+for hardware_branch_doc in pre-v9.9.9-fixes.md v9.9.9-polish.md notes-on-bloat.md; do
+	{
+		printf '# %s\n\n' "${hardware_branch_doc%.md}"
+		printf '> **Branch-only working document.** Deleted before the merge.\n\n'
+		printf 'The old wording said it had never run on a device.\n'
+	} > "$hardware_root/$hardware_branch_doc"
+done
 assert_hardware_accepts 'shipped release artifacts and branch-only working documents'
+
+# An UNDECLARED root-level document is durable prose and is held to the
+# vocabulary, so the exemption is the declaration rather than the location. So
+# is a docs/ journal that declares itself: it ships until it is deleted.
+write_hardware_fixture
+printf 'None of these designs has run on silicon.\n' > "$hardware_root/notes.md"
+assert_hardware_rejects 'an undeclared root-level document' 'still use the conflated'
+
+write_hardware_fixture
+{
+	printf '> **Branch-only working document.** Not at root level.\n\n'
+	printf 'None of these designs has run on silicon.\n'
+} > "$hardware_root/docs/journal.md"
+assert_hardware_rejects 'a declaration inside a docs/ journal' 'still use the conflated'
 
 # Argument and input guards: a caller mistake must not pass vacuously.
 write_hardware_fixture
@@ -1999,9 +2064,25 @@ mkdir -p "$flashing_root/release/v0.9.9"
 	printf 'java -jar "$IPECMD" -TPPK3 -PPIC12F675 -Fimage.hex -M -Y -OL\n'
 	printf '```\n'
 } > "$flashing_root/release/v0.9.9/MANIFEST.md"
-cp "$flashing_root/release/v0.9.9/MANIFEST.md" "$flashing_root/pre-v9.9.9-fixes.md"
-cp "$flashing_root/release/v0.9.9/MANIFEST.md" "$flashing_root/v9.9.9-polish.md"
+for flashing_branch_doc in pre-v9.9.9-fixes.md v9.9.9-polish.md notes-on-bloat.md; do
+	{
+		printf '# %s\n\n' "${flashing_branch_doc%.md}"
+		printf '> **Branch-only working document.** Deleted before the merge.\n\n'
+		cat "$flashing_root/release/v0.9.9/MANIFEST.md"
+	} > "$flashing_root/$flashing_branch_doc"
+done
 assert_flashing_accepts 'shipped release artifacts and branch-only working documents'
+
+# The exemption is the declaration, not the location: the same block in an
+# undeclared root-level document is a published raw writer command.
+write_flashing_fixture
+{
+	printf '```\n'
+	printf 'java -jar "$IPECMD" -TPPK3 -PPIC12F675 -Fimage.hex -M -Y -OL\n'
+	printf '```\n'
+} > "$flashing_root/notes.md"
+assert_flashing_rejects 'an undeclared root-level document publishing a raw writer' \
+	'notes.md'
 
 # B6: the status the helper's procedure is published under. FLASHING.md
 # published an ipecmd procedure while README.md and TOOLCHAIN.adoc said no
