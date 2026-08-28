@@ -7,9 +7,12 @@ trap 'rm -rf "$work"' EXIT
 tools="$work/tools"
 dfp="$work/dfp"
 build="$work/build"
+cc_log="$work/cc.log"
 mkdir -p "$tools" "$dfp/gcc/dev/attiny202/device-specs" "$dfp/include/avr"
 : > "$dfp/gcc/dev/attiny202/device-specs/specs-attiny202"
 : > "$dfp/include/avr/iotn202.h"
+: > "$cc_log"
+export FAKE_CC_LOG="$cc_log"
 checks=0
 unset FAKE_CC_MODE FAKE_READELF_MODE FAKE_SIZE_MODE FAKE_OBJCOPY_MODE
 unset TEST_VARIANTS TEST_DFP XT_FLASH_BYTES XT_STATIC_RAM_LIMIT XT_SRAM_BYTES
@@ -25,10 +28,12 @@ cat > "$tools/cc" <<'EOF'
 set -euo pipefail
 if [ "${1:-}" = --version ]; then printf 'fake avr-gcc 1\n'; exit 0; fi
 out=
+args=$*
 while [ "$#" -gt 0 ]; do
 	if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi
 done
 [ -n "$out" ] || exit 2
+printf '%s\t%s\n' "$out" "$args" >> "${FAKE_CC_LOG:?}"
 case "${FAKE_CC_MODE:-pass}" in
 	fail) printf 'partial ELF\n' > "$out"; exit 1 ;;
 	empty) : > "$out" ;;
@@ -96,6 +101,19 @@ run_build() {
 		OBJCOPY="$tools/objcopy" "$@"
 }
 
+latest_cc_command() {
+	local output=$1 logged_output logged_command latest=
+	while IFS=$'\t' read -r logged_output logged_command; do
+		if [ "$logged_output" = "$output" ]; then latest=$logged_command; fi
+	done < "$cc_log"
+	[ -n "$latest" ] || return 1
+	printf '%s\n' "$latest"
+}
+
+command_has_arg() {
+	case " $1 " in *" $2 "*) return 0 ;; *) return 1 ;; esac
+}
+
 seed_stale() {
 	mkdir -p "$build"
 	printf 'stale ELF\n' > "$build/bypass-attiny202-cd4053_simple.elf"
@@ -146,6 +164,7 @@ expect_success() {
 }
 
 seed_stale
+: > "$cc_log"
 (export TEST_VARIANTS="cd4053_simple cd4053_with_mute tq2_l2_5v_relay"; run_build) >/dev/null
 # The stage field of the canonical basename IS the variant name, so these are
 # composed directly. Still spelled against a literal `bypass-attiny202-` prefix
@@ -161,8 +180,48 @@ for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
 		|| { printf 'FAIL: stale %s HEX survived\n' "$variant" >&2; exit 1; }
 	grep -Eq '^:00000001[Ff][Ff]\r?$' "$stem.hex" \
 		|| { printf 'FAIL: missing fresh valid %s HEX\n' "$variant" >&2; exit 1; }
+	case "$variant" in
+		cd4053_simple)
+			expected_macro=CD4053_SIMPLE
+			expected_driver=src/bypass_output_cd4053_simple.c
+			;;
+		cd4053_with_mute)
+			expected_macro=CD4053_WITH_MUTE
+			expected_driver=src/bypass_output_cd4053_with_mute.c
+			;;
+		tq2_l2_5v_relay)
+			expected_macro=TQ2_L2_5V_RELAY
+			expected_driver=src/bypass_output_tq2_l2_5v_relay.c
+			;;
+	esac
+	command=$(latest_cc_command "$stem.elf.tmp") \
+		|| { printf 'FAIL: missing ATtiny202 compiler command for %s\n' "$variant" >&2; exit 1; }
+	command_has_arg "$command" "-D$expected_macro" \
+		&& command_has_arg "$command" "$expected_driver" \
+		|| { printf 'FAIL: ATtiny202 compiler used the wrong selector/source pair for %s\n' \
+			"$variant" >&2; exit 1; }
+	for unexpected_macro in CD4053_SIMPLE CD4053_WITH_MUTE TQ2_L2_5V_RELAY; do
+		if [ "$unexpected_macro" != "$expected_macro" ] \
+				&& command_has_arg "$command" "-D$unexpected_macro"; then
+			printf 'FAIL: ATtiny202 compiler mixed selector macros for %s\n' "$variant" >&2
+			exit 1
+		fi
+	done
+	for unexpected_driver in \
+			src/bypass_output_cd4053_simple.c \
+			src/bypass_output_cd4053_with_mute.c \
+			src/bypass_output_tq2_l2_5v_relay.c; do
+		if [ "$unexpected_driver" != "$expected_driver" ] \
+				&& command_has_arg "$command" "$unexpected_driver"; then
+			printf 'FAIL: ATtiny202 compiler mixed driver sources for %s\n' "$variant" >&2
+			exit 1
+		fi
+	done
 	checks=$((checks + 1))
 done
+[ "$(wc -l < "$cc_log")" -eq 3 ] \
+	|| { printf 'FAIL: ATtiny202 build issued an unexpected number of compiler commands\n' >&2; exit 1; }
+checks=$((checks + 1))
 
 expect_failure "compiler failure" "did not compile" FAKE_CC_MODE=fail
 expect_failure "empty compiler output" "produced no ELF" FAKE_CC_MODE=empty

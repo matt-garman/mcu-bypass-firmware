@@ -1319,7 +1319,7 @@ may be valuable. Repeating the literal at every call site is not.
 
 ## BR-TEST-07 - Consolidate shared strict helpers and remove trivial wrappers
 
-**Status:** IN PROGRESS OpenCode
+**Status:** DONE `cee6bab`
 
 **Completed work:**
 
@@ -1360,23 +1360,23 @@ may be valuable. Repeating the literal at every call site is not.
 
 ## BR-TEST-08 - Generate variant recipe arms from existing maps
 
-**Status:** TODO
+**Status:** IN PROGRESS OpenCode
 
 **Rationale:** The Makefile has canonical `macro_<variant>` and `src_<variant>`
-maps at `Makefile:449-457`, but several PIC/AVR-XT recipes restate associations
+maps at `Makefile:451-459`, but several PIC/AVR-XT recipes restate associations
 manually. The current map guard proves values exist, not that manual recipe arms
 consume the correct pair.
 
 **Work:**
 
-- [ ] Generate modular recipe associations from existing maps where Make can do
+- [x] Generate modular recipe associations from existing maps where Make can do
   so clearly.
-- [ ] Replace PIC10F320's separate build and target-test mapping copies with one
+- [x] Replace PIC10F320's separate build and target-test mapping copies with one
   PIC10F320-specific map.
-- [ ] Add fake-compiler contract coverage for every producer.
-- [ ] Preserve explicit per-target supported sets where they may legitimately
+- [x] Add fake-compiler contract coverage for every producer.
+- [x] Preserve explicit per-target supported sets where they may legitimately
   diverge.
-- [ ] Do not derive supported variants by globbing driver filenames.
+- [x] Do not derive supported variants by globbing driver filenames.
 
 **Acceptance:**
 
@@ -1976,8 +1976,8 @@ dependencies and acceptance criteria.
 | BR-TEST-04 | Centralize policy constants per surface | DONE `bc5f11d` |
 | BR-TEST-05 | Prefer behavioral fixtures | DONE `7aab253` |
 | BR-TEST-06 | Introduce named test profiles | DONE `746ddcf` |
-| BR-TEST-07 | Consolidate strict helpers/wrappers | IN PROGRESS OpenCode |
-| BR-TEST-08 | Generate recipes from variant maps | TODO |
+| BR-TEST-07 | Consolidate strict helpers/wrappers | DONE `cee6bab` |
+| BR-TEST-08 | Generate recipes from variant maps | IN PROGRESS OpenCode |
 | BR-TEST-09 | Consolidate dependencies/parsers | TODO |
 | BR-QUALITY-01 | Define complete analysis matrix | TODO |
 | BR-REL-01 | Define canonical signed release index | TODO |
