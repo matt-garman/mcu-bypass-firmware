@@ -269,7 +269,8 @@ unexport _MAKE_SERIAL_VARIANT_EMPTY _MAKE_SERIAL_VARIANT_MULTI \
 #   make                 build every release-supported part's variant images
 #                        (.hex) + sizes
 #   make test            fast full test suite (all variants) -- use constantly
-#   make test-long       exhaustive test suite (minutes) -- before release/HW
+#   make stress          exhaustive suite without full mutation (normal CI)
+#   make test-long       exhaustive suite + full mutation -- before release/HW
 #   make attiny13a-trace emit build_avr_classic/bypass_trace.vcd (VARIANT=, GTKWave)
 #   make VARIANT=tq2_l2_5v_relay attiny13a-program   set fuses + flash one variant
 #                        (one ordered transaction: the image is built and
@@ -278,8 +279,9 @@ unexport _MAKE_SERIAL_VARIANT_EMPTY _MAKE_SERIAL_VARIANT_MULTI \
 #
 # FAST vs FULL TESTS
 #   `make test` compiles the fuzz/stress tests with reduced iteration counts
-#   (FAST_*_DEFS) so it finishes quickly. `make test-long` rebuilds them with
-#   the in-source defaults (FULL_*_DEFS = nothing extra) for exhaustive runs.
+#   (FAST_*_DEFS) so it finishes quickly. `make stress` and `make test-long`
+#   rebuild them with the in-source defaults (FULL_*_DEFS = nothing extra) for
+#   exhaustive runs; test-long additionally runs the full mutation gate.
 #   Any individual knob can also be overridden on the command line, e.g.:
 #       make test SIM_DEFS='-DSIM_RANDOM_NOISE_DURATION_MS=20000u'
 #
@@ -655,8 +657,16 @@ PURE_HOST_CFLAGS = -include test/bypass_config_host.h
 # --- Test workload sizing ----------------------------------------------------
 # The default `make test` runs a FAST but still-meaningful workload so it
 # finishes in a few seconds (good for edit/build/test loops and CI gating).
-# `make test-long` (alias: `make stress`) runs the FULL exhaustive workload.
+# `make stress` runs the FULL exhaustive workload without repeating the full
+# mutation gate; `make test-long` adds mutation for release/local qualification.
 # Every knob below can also be overridden individually on the command line.
+# A single graph cannot safely inherit both profiles: shared phony prerequisites
+# run once with whichever parent's target-specific values reach them first.
+ifneq ($(filter test test-fast,$(MAKECMDGOALS)),)
+ifneq ($(filter stress test-long,$(MAKECMDGOALS)),)
+$(error request either a FAST test/test-fast profile or a FULL stress/test-long profile, not both)
+endif
+endif
 #
 # Fast (default) sizing:
 FAST_HOST_DEFS = -DMODEL_FUZZ_RANDOM_DURATION_MS=100000u \
@@ -675,7 +685,7 @@ FAST_SIM_DEFS  = -DSIM_RANDOM_NOISE_DURATION_MS=5000u \
 FULL_HOST_DEFS =
 FULL_SIM_DEFS  =
 
-# Selected per-invocation; `test-long`/`stress` override these.
+# Selected per-invocation; `stress`/`test-long` override these.
 HOST_DEFS ?= $(FAST_HOST_DEFS)
 SIM_DEFS  ?= $(FAST_SIM_DEFS)
 
@@ -3103,19 +3113,19 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # ============================================================================
 
 # --- Shared gate inventory ---------------------------------------------------
-# `test` and `test-long` run the SAME gates in the SAME order. They differ only
-# in workload sizing (HOST_DEFS / SIM_DEFS, set on test-long below) and in
-# test-long additionally running test-mutation.
+# `test`, `stress`, and `test-long` run the SAME base gates in the SAME order.
+# `stress` and `test-long` select the FULL workload sizing, while test-long
+# additionally runs test-mutation.
 #
 # Listing the inventory ONCE is what keeps that true. Two hand-maintained
 # prerequisite lines invite a new gate landing in only one aggregate,
 # and the aggregate it misses is usually test-long -- the release gate, where
 # the omission surfaces as a green run rather than as a failure.
 #
-# The EARLY/LATE split exists only so test-mutation keeps its position between
-# the PIC10F320 host lanes and the simulator lanes; run order affects when a
-# failure is reported, not whether it is caught. A new gate may go in either
-# half, and lands in both aggregates either way.
+# The EARLY/LATE split exists only so test-mutation keeps its test-long position
+# between the PIC10F320 host lanes and the simulator lanes; run order affects
+# when a failure is reported, not whether it is caught. A new gate may go in
+# either half, and lands in all three aggregates either way.
 #
 # The two PIC shipping-source coverage gates that close the EARLY half are here
 # on the same grounds pic10f320-test-host-variants is, and the grounds are the
@@ -3196,17 +3206,20 @@ test: $(TEST_GATES)
 # Explicit alias for the fast suite (same as `make test`).
 test-fast: test
 
-# FULL exhaustive workload: same targets as `test`, but the fuzz/stress tests
-# are rebuilt with their large in-source default durations (FULL_*_DEFS adds no
-# overrides). Workload-dependent binaries have a FORCE prerequisite, so this
-# does not rely on a racy cleanup phase. Use before tagging a release/HW signoff.
+# FULL exhaustive workload without the full mutation run. Normal hosted CI uses
+# this after the separately provisioned fail-closed mutation gate has passed.
+stress: HOST_DEFS = $(FULL_HOST_DEFS)
+stress: SIM_DEFS  = $(FULL_SIM_DEFS)
+stress: $(TEST_GATES)
+	@echo "=== all FULL (exhaustive) non-mutation pre-hardware tests passed ==="
+
+# FULL exhaustive release/local qualification: same base targets and sizing as
+# `stress`, plus test-mutation at its reviewed position. Workload-dependent
+# binaries have a FORCE prerequisite, so this does not rely on a cleanup phase.
 test-long: HOST_DEFS = $(FULL_HOST_DEFS)
 test-long: SIM_DEFS  = $(FULL_SIM_DEFS)
 test-long: $(TEST_LONG_GATES)
 	@echo "=== all FULL (exhaustive) pre-hardware tests passed ==="
-
-# Friendly alias for the exhaustive suite (same as `make test-long`).
-stress: test-long
 
 # Remove ONLY the test binaries so the next test run rebuilds them with the
 # currently selected workload sizing (FAST vs FULL *_DEFS).
@@ -8469,7 +8482,8 @@ help:
 	@echo "  attiny202-program  set fuses + flash one variant over UPDI (VARIANT=, XT_UPDI_PORT=)"
 	@echo "Test (each runs across ALL variants):"
 	@echo "  test            FAST full suite -- analysis, model, Classic sim, host regressions, coverage"
-	@echo "  test-long       FULL exhaustive suite (minutes); alias: stress"
+	@echo "  stress          FULL exhaustive suite without full mutation (normal hosted CI)"
+	@echo "  test-long       FULL exhaustive suite plus full mutation (release/local qualification)"
 	@echo "  scripts/ci-local.sh  reproduce the GitHub CI suite locally before pushing (--pr, --help)"
 	@echo "  test-host       golden-model algorithm tests (host, variant-agnostic)"
 	@echo "  test-model-check exhaustive state-space proof of invariants"

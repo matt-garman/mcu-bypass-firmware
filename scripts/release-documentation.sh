@@ -198,14 +198,53 @@ release_validate_staged_documentation() {
 		"${#staged_images[@]}" "${#staged_soaks[@]}" || return
 }
 
+# A branch-only working document is recognized by the declaration it carries,
+# not by its name. Every name pattern this project has used was added after a
+# document the previous pattern could not see had already been written:
+# `v*-polish.md`, then `pre-v*-fixes.md`, then a third name matching neither.
+# The next one will not match any of them either. The banner, by contrast, is
+# written by whoever creates the document, in the words its human readers are
+# already shown:
+#
+#   > **Branch-only working document.** ...
+#
+# Required in the opening blockquote (the first 20 lines) of a ROOT-LEVEL
+# Markdown file, on both counts deliberately: a durable document that DESCRIBES
+# the convention -- CHANGELOG.md and test/README.md both do, far below any
+# banner -- is not a document making the declaration, and a working journal kept
+# under docs/ is durable prose that ships until it is deleted.
+#
+# Classification never decides acceptance. A root-level Markdown document
+# outside the durable set is refused by the release gate either way; the
+# declaration only selects which diagnostic refuses it, and whether the
+# live-tree documentation sweeps read the document as durable prose. A working
+# document that omits its banner therefore fails closed, as allowlist drift,
+# with the corrective action named -- as does one this helper cannot read.
+_release_is_branch_only_document() {
+	[ "$#" -eq 2 ] || return 2
+	local document=$1 label=$2 opening
+	case "$label" in
+		*/*) return 1 ;;
+		*.md) ;;
+		*) return 1 ;;
+	esac
+	# Read into a variable rather than piping `head` into `grep`: every caller
+	# runs under `pipefail`, where `grep -q` exiting on the first match can leave
+	# the pipeline reporting `head`'s SIGPIPE and turn a declared document into
+	# an undeclared one. An unreadable document stays undeclared, which is the
+	# fail-closed side.
+	opening=$(head -n 20 -- "$document" 2>/dev/null) || return 1
+	grep -Eqi '^>[[:space:]]*\*\*Branch-(only|scoped)[[:space:]]+working[[:space:]]+document\.\*\*' \
+		<<<"$opening"
+}
+
 # Reject a release cut from a tree that still contains -- or still references --
 # a branch-only working document. Two kinds must fail, for different reasons:
 #
-#   * A KNOWN branch-only name: root-level `v*-polish.md` (e.g. v0.9.9-polish.md)
-#     or root-level `pre-v*-fixes.md` (a pre-release fix list). Such a document
-#     exists ONLY on a branch and must be deleted, and de-referenced, in the
-#     final pre-merge commit; a production release is cut from main, so none may
-#     remain.
+#   * A DECLARED branch-only working document (see the helper above). Such a
+#     document exists ONLY on a branch and must be deleted, and de-referenced,
+#     in the final pre-merge commit; a production release is cut from main, so
+#     none may remain.
 #   * ANY other root-level Markdown document outside the durable set below.
 #     Adding one name pattern per working document is precisely how this gate
 #     came to miss `pre-v*-fixes.md`, so the root document set is an allowlist
@@ -214,15 +253,18 @@ release_validate_staged_documentation() {
 #     the set here, deliberately, because it now ships too.
 #
 # The reference half necessarily stays name-pattern based: once a document is
-# deleted, its name is the only thing left to search for.
+# deleted, its name is the only thing left to search for, so the two name
+# families that have existed are listed there literally. A durable reference to
+# a working document named outside them therefore dangles unseen once that
+# document is gone; the presence half above is what keeps the document itself
+# from ever reaching a release.
 #
 # Deliberately SEPARATE from release_validate_current_documentation: that
 # validator runs in `--preflight`, which exercises the live checked-in tree
 # (where a working document legitimately still exists during branch work). This
 # gate is invoked only on the actual release-staging path, after preflight has
 # exited, so it fails a real release closed without breaking the preflight
-# capability probe. The retained docs/v0.9.6_post_release_polish.md is under
-# docs/, not root-level, so it is unaffected.
+# capability probe.
 release_reject_branch_only_documents() {
 	[ "$#" -eq 1 ] || return 2
 	local repo_root=$1 root_doc label durable_doc durable reference_file
@@ -243,12 +285,6 @@ release_reject_branch_only_documents() {
 	while IFS= read -r -d '' root_doc; do
 		[ -n "$root_doc" ] || continue
 		label=${root_doc#$repo_root/}
-		case "$label" in
-			v*-polish.md|pre-v*-fixes.md)
-				present_branch_docs+=("$label")
-				continue
-				;;
-		esac
 		durable=0
 		for durable_doc in "${durable_root_docs[@]}"; do
 			if [ "$label" = "$durable_doc" ]; then
@@ -256,7 +292,13 @@ release_reject_branch_only_documents() {
 				break
 			fi
 		done
-		if [ "$durable" -eq 0 ]; then
+		# The durable set is consulted first, so a shipping document cannot be
+		# talked out of the release by prose inside it.
+		if [ "$durable" -eq 1 ]; then
+			continue
+		elif _release_is_branch_only_document "$root_doc" "$label"; then
+			present_branch_docs+=("$label")
+		else
 			undeclared_root_docs+=("$label")
 		fi
 	done < <(find "$repo_root" -maxdepth 1 -type f -name '*.md' -print0)
@@ -266,7 +308,7 @@ release_reject_branch_only_documents() {
 	[ "${#present_branch_docs[@]}" -eq 0 ] \
 		|| _release_documentation_error "branch-only working document(s) must be deleted before release: ${present_branch_docs[*]}" || return
 	[ "${#undeclared_root_docs[@]}" -eq 0 ] \
-		|| _release_documentation_error "root-level document(s) outside the durable root-document set must be deleted before release, or added to that set in release-documentation.sh if they now ship: ${undeclared_root_docs[*]}" || return
+		|| _release_documentation_error "root-level document(s) outside the durable root-document set must be deleted before release, added to that set in release-documentation.sh if they now ship, or given the branch-only working-document banner if they are branch notes: ${undeclared_root_docs[*]}" || return
 
 	# A durable file that still NAMES such a document (v<ver>-polish.md or
 	# pre-v<ver>-fixes.md) dangles once it is deleted. Exclude this checker and
@@ -472,9 +514,9 @@ release_validate_hardware_claims() {
 
 	while IFS= read -r -d '' document; do
 		label=${document#$repo_root/}
-		case "$label" in
-			v*-polish.md|pre-v*-fixes.md) continue ;;
-		esac
+		if _release_is_branch_only_document "$document" "$label"; then
+			continue
+		fi
 		# NAMING the retired wording is not USING it. A document that writes
 		# `run on silicon` or "run on silicon" is quoting a phrase in order to
 		# retire it -- which CHANGELOG.md, test/README.md and this file all have
@@ -671,10 +713,12 @@ release_validate_pic12f675_finalization() {
 		label=${document#$repo_root/}
 		case "$label" in
 			README.md|release/README.md) continue ;;
-			# Root-level working documents quote the defective form of a command
-			# while describing the defect; they are deleted before release.
-			v*-polish.md|pre-v*-fixes.md) continue ;;
 		esac
+		# Root-level working documents quote the defective form of a command
+		# while describing the defect; they are deleted before release.
+		if _release_is_branch_only_document "$document" "$label"; then
+			continue
+		fi
 		# A published command, not a prose mention. This finds a NEW document the
 		# day it is written; the two named above are scanned either way, so a
 		# command this pattern cannot see still fails inside the scan.
@@ -953,9 +997,9 @@ release_validate_pic12f675_flashing_helper() {
 	)
 	while IFS= read -r -d '' document; do
 		label=${document#$repo_root/}
-		case "$label" in
-			v*-polish.md|pre-v*-fixes.md) continue ;;
-		esac
+		if _release_is_branch_only_document "$document" "$label"; then
+			continue
+		fi
 		flowed=$(_release_flowed_text "$document") || return
 		for retired in "${retired_state[@]}"; do
 			case "${flowed,,}" in

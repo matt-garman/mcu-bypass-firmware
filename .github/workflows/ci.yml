@@ -31,8 +31,8 @@ name: CI
 # compiler, avr-gcc and simavr, all from apt. The jobs below wrap it, surface
 # the per-MCU build matrix as discrete checks, add the lanes `make test` cannot
 # reach without a vendor toolchain (XC8 + gpsim for all three PICs,
-# ATtiny_DFP + patched yasimavr for the ATtiny202), and run the slower
-# exhaustive/mutation suite off the PR hot path.
+# ATtiny_DFP + patched yasimavr for the ATtiny202), and run the slower exhaustive
+# suite plus one fully provisioned mutation gate off the PR hot path.
 
 on:
   push:
@@ -669,18 +669,17 @@ jobs:
           if-no-files-found: error
 
   # -------------------------------------------------------------------------
-  # Exhaustive / mutation suite (minutes-long). Kept off every PR: runs on
-  # pushes to main, the weekly schedule, and manual dispatch. `make test-long`
-  # = the full suite with the exhaustive input domains plus mutation testing
-  # (verifies the suite actually kills injected firmware faults).
+  # Exhaustive suite (minutes-long). Kept off every PR: runs on pushes to main,
+  # the weekly schedule, and manual dispatch. `make stress` uses the full input
+  # domains without repeating mutation; the fully provisioned `pic` job above
+  # owns the event's one fail-closed mutation run and must pass first.
   # -------------------------------------------------------------------------
   stress:
-    name: stress (make test-long)
+    name: stress (make stress)
     runs-on: ubuntu-24.04
-    # The job this exists for. In v0.9.8 a severed override left one mutant
-    # running a 24 h soak instead of 2 s; with no bound, GitHub cancelled at
-    # its 6 h default and reported nothing useful. 300 min is far above any
-    # observed run and still fails loudly, with the log, well before that.
+    # Full-domain simulation/model workloads are deliberately much larger than
+    # the PR suite. Keep a conservative bound so a severed workload override
+    # still fails with a useful log before GitHub's six-hour default.
     timeout-minutes: 300
     needs: pic   # gate behind the fast PIC job (see `verify`)
     if: >-
@@ -705,14 +704,5 @@ jobs:
           python3 -c 'import yaml' \
             || { echo "::error::PyYAML missing"; exit 1; }
 
-      # MUTATION_ALLOW_SKIP=1 is stated explicitly rather than left to the
-      # default. This job installs no XC8/gpsim and neither ATtiny202 input, so
-      # every part's PIC mutants AND the ATtiny202 lane are unavailable here and
-      # must be allowed to report skipped -- but that makes this job's mutation
-      # output for those substrates diagnostic only. The authoritative,
-      # fail-closed evidence for all of them comes from the `pic` job, which
-      # asserts every toolchain first and runs MUTATION_ALLOW_SKIP=0 (§11).
-      # Saying so on the command line means a future change to the default
-      # cannot silently turn this into either a false pass or a spurious failure.
-      - name: Exhaustive + mutation suite
-        run: make test-long MUTATION_ALLOW_SKIP=1
+      - name: Exhaustive suite (mutation runs fail-closed in pic)
+        run: make stress STRICT_TOOLS=1

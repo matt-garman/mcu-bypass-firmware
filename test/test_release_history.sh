@@ -321,16 +321,14 @@ publication_files=(
 	SHA256SUMS.asc
 	MANIFEST.md
 	QUALIFICATION
-	RENAME_IDENTITY.md
 )
 
 setup_publication_bundle() {
-	local include_rename=${1:-1} name
+	local name
 	local -a expected_assets=()
 	rm -rf "$publication_dir" "$publication_inventory"
 	mkdir "$publication_dir"
 	for name in "${publication_files[@]}"; do
-		[ "$include_rename" -eq 1 ] || [ "$name" != RENAME_IDENTITY.md ] || continue
 		printf 'publication fixture: %s\n' "$name" > "$publication_dir/$name"
 		expected_assets+=("$name")
 	done
@@ -359,11 +357,6 @@ expect_publication_fail() {
 setup_publication_bundle
 verify_publication_bundle >/dev/null \
 	|| fail "valid publication bundle was rejected"
-checks=$((checks + 1))
-
-setup_publication_bundle 0
-verify_publication_bundle >/dev/null \
-	|| fail "valid publication bundle without rename evidence was rejected"
 checks=$((checks + 1))
 
 for publication_asset in "${publication_files[@]}"; do
@@ -486,9 +479,9 @@ grep -Fq 'differs from the expected publication asset set' "$publication_log" \
 	|| fail "pre-record asset addition failed for the wrong reason"
 checks=$((checks + 1))
 
-# The checked-in trust root must still verify both the first signed fixture used
-# by this test and the rename verifier's latest historical baseline. This also
-# catches an accidental key replacement independently of the disposable keys.
+# The checked-in trust root must still verify representative historical release
+# manifests. This also catches an accidental key replacement independently of
+# the disposable keys.
 for historical_version in v0.9.5 v0.9.7; do
 	"$PINNED_SIGNATURE_VERIFY" detached \
 		"$ROOT/release/$historical_version/SHA256SUMS.asc" \

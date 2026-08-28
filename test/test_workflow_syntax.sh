@@ -319,7 +319,7 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
     repro_steps = [
         step for step in release_steps
         if isinstance(step, dict)
-        and step.get("name") == "Verify committed images and rename/change evidence reproduce bit-for-bit"
+        and step.get("name") == "Verify committed images reproduce bit-for-bit"
     ]
     publish_steps = [
         step for step in release_steps
@@ -464,20 +464,16 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
                     "${prerelease_flag[@]}", "${assets[@]}",
                 ]
             ]
-            rename_indices = [
-                i for i, command in enumerate(commands)
-                if command[:2] == ["case", "$RENAME_IDENTITY_APPLICABLE"]
-            ]
             check(
-                len(tag_indices) == 1 and len(rename_indices) == 1
-                and len(inventory_indices) == 2 and len(signature_indices) == 1
+                len(tag_indices) == 1 and len(inventory_indices) == 2
+                and len(signature_indices) == 1
                 and len(checksum_indices) == 1 and len(publish_indices) == 1,
                 "release.yml: active final publication command inventory is not exact",
             )
-            if tag_indices and rename_indices and len(inventory_indices) == 2 \
+            if tag_indices and len(inventory_indices) == 2 \
                     and signature_indices and checksum_indices and publish_indices:
                 check(
-                    tag_indices[0] < rename_indices[0] < inventory_indices[0]
+                    tag_indices[0] < inventory_indices[0]
                     < signature_indices[0] < checksum_indices[0] < inventory_indices[1]
                     and publish_indices[0] == inventory_indices[1] + 1,
                     "release.yml: active final checks do not dominate immediate gh publication",
@@ -665,10 +661,10 @@ def prior_steps(workflow_name, job_id, first_use, description):
 
 # Strict host suites consume Git history, GnuPG fixtures, and PyYAML. Hosted
 # runners happen to carry some of them, but the workflow contract must install
-# and assert them before the first make test/test-long invocation.
+# and assert them before the first make test/stress invocation.
 for job_id, gate_name in (
     ("verify", "test"),
-    ("stress", "test-long"),
+    ("stress", "stress"),
 ):
     before = prior_steps(
         "ci.yml",
@@ -823,6 +819,152 @@ def make_command(tokens):
 
 ci_doc = docs.get("ci.yml")
 ci_jobs = ci_doc.get("jobs") if isinstance(ci_doc, dict) else None
+
+
+def normalized_condition(value):
+    return re.sub(r"\s+", " ", value).strip() if isinstance(value, str) else value
+
+
+NORMAL_NON_PR_CONDITION = (
+    "github.event_name == 'push' || "
+    "github.event_name == 'schedule' || "
+    "github.event_name == 'workflow_dispatch'"
+)
+
+# Normal CI owns one fully provisioned mutation run. The hosted stress job must
+# retain the FULL workload without reaching mutation directly or through
+# test-long; test/test_workload_rebuild.sh independently proves what `stress`
+# expands to in Make.
+ci_make_invocations = []
+if isinstance(ci_jobs, dict):
+    for job_id, job in ci_jobs.items():
+        steps = (job.get("steps") or []) if isinstance(job, dict) else []
+        for idx, step in enumerate(steps, 1):
+            run = step.get("run") if isinstance(step, dict) else None
+            commands = shell_tokens(run) if isinstance(run, str) else []
+            for tokens in commands:
+                parsed = make_command(tokens)
+                if parsed is not None:
+                    ci_make_invocations.append(
+                        (job_id, idx, step, len(commands), parsed, tokens)
+                    )
+
+mutation_invocations = [
+    invocation for invocation in ci_make_invocations
+    if "test-mutation" in invocation[4][0]
+]
+check(
+    len(mutation_invocations) == 1,
+    f"ci.yml: direct test-mutation invocation count is "
+    f"{len(mutation_invocations)}, expected 1",
+)
+if len(mutation_invocations) == 1:
+    job_id, idx, step, command_count, parsed, tokens = mutation_invocations[0]
+    expected_assignments = {
+        "STRICT_TOOLS": "1",
+        "MUTATION_ALLOW_SKIP": "0",
+        "PIC_CC": "${XC8_DIR}/bin/xc8-cc",
+        "PIC_DFP": "${XC8_DFP_ROOT}/xc8",
+        "PIC10F320_CC": "${XC8_DIR}/bin/xc8-cc",
+        "PIC10F320_DFP": "${XC8_DFP_ROOT}/xc8",
+    }
+    check(
+        job_id == "pic" and not parsed[2]
+        and parsed[:2] == (("test-mutation",), expected_assignments),
+        "ci.yml: the one mutation command is not the canonical fail-closed "
+        f"pic invocation: {' '.join(tokens)}",
+    )
+    check(
+        command_count == 1,
+        f"ci.yml: pic mutation step {idx} must contain only its Make command",
+    )
+    check(
+        normalized_condition(step.get("if")) == NORMAL_NON_PR_CONDITION,
+        "ci.yml: pic mutation gate does not use the exact "
+        "push/schedule/workflow_dispatch condition",
+    )
+    check(
+        step.get("continue-on-error", False) is False,
+        "ci.yml: pic mutation gate may continue after failure",
+    )
+
+mutation_bearing_invocations = [
+    invocation for invocation in ci_make_invocations
+    if any(goal in {"test-mutation", "test-long"} for goal in invocation[4][0])
+]
+check(
+    mutation_bearing_invocations == mutation_invocations,
+    "ci.yml: a normal-CI job invokes mutation-bearing test-long in addition "
+    "to the one direct mutation gate",
+)
+
+stress_job = ci_jobs.get("stress") if isinstance(ci_jobs, dict) else None
+if check(isinstance(stress_job, dict), "ci.yml: required job 'stress' is missing"):
+    check(
+        normalized_condition(stress_job.get("if")) == NORMAL_NON_PR_CONDITION,
+        "ci.yml: stress job does not use the exact "
+        "push/schedule/workflow_dispatch condition",
+    )
+    check(
+        stress_job.get("continue-on-error", False) is False,
+        "ci.yml: stress job may continue after failure",
+    )
+    stress_invocations = [
+        invocation for invocation in ci_make_invocations
+        if invocation[0] == "stress"
+    ]
+    check(
+        len(stress_invocations) == 1,
+        f"ci.yml: stress job has {len(stress_invocations)} Make invocations, expected 1",
+    )
+    if len(stress_invocations) == 1:
+        _, idx, step, command_count, parsed, tokens = stress_invocations[0]
+        check(
+            not parsed[2] and parsed[:2] == (("stress",), {"STRICT_TOOLS": "1"}),
+            "ci.yml: stress job does not invoke the canonical mutation-free "
+            f"FULL aggregate: {' '.join(tokens)}",
+        )
+        check(
+            command_count == 1,
+            f"ci.yml: stress suite step {idx} must contain only its Make command",
+        )
+        check(
+            "MUTATION_ALLOW_SKIP" not in parsed[1],
+            "ci.yml: mutation-free stress still configures mutation skip policy",
+        )
+        check(
+            step.get("continue-on-error", False) is False,
+            "ci.yml: stress suite may continue after failure",
+        )
+    all_stress_invocations = [
+        invocation for invocation in ci_make_invocations
+        if "stress" in invocation[4][0]
+    ]
+    check(
+        all_stress_invocations == stress_invocations,
+        "ci.yml: another normal-CI job invokes the FULL stress aggregate",
+    )
+
+# Matrix-selected goals are expressions in the run command, so literal command
+# parsing cannot see their concrete values. Pin the small reviewed matrix here;
+# otherwise a row could route test-long/mutation without changing the command.
+build_matrix_job = ci_jobs.get("build-matrix") if isinstance(ci_jobs, dict) else None
+if check(
+        isinstance(build_matrix_job, dict),
+        "ci.yml: required job 'build-matrix' is missing"):
+    strategy = build_matrix_job.get("strategy")
+    matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
+    include = matrix.get("include") if isinstance(matrix, dict) else None
+    expected_build_matrix = [
+        {"mcu": "attiny13a", "build": "attiny13a", "size": "attiny13a-size"},
+        {"mcu": "attiny85", "build": "attiny85", "size": "attiny85-size"},
+        {"mcu": "attiny45", "build": "attiny45", "size": "attiny45-size"},
+    ]
+    check(
+        include == expected_build_matrix,
+        "ci.yml: build-matrix goals no longer match the reviewed Classic AVR set",
+    )
+
 pic_job = ci_jobs.get("pic") if isinstance(ci_jobs, dict) else None
 if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
     check("if" not in pic_job, "ci.yml: job 'pic' must be unconditional")

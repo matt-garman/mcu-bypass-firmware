@@ -4,7 +4,6 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 RELEASE="$ROOT/scripts/make-release.sh"
 RELEASE_WORKFLOW="$ROOT/.github/workflows/release.yml"
-RENAME_VERIFY="$ROOT/scripts/verify-rename-identity.sh"
 RELEASE_IMAGE_VERIFY="$ROOT/scripts/verify-release-images.sh"
 PUBLICATION_VERIFY="$ROOT/scripts/verify_release_publication.py"
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-provenance.XXXXXX")
@@ -27,8 +26,6 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 command -v git >/dev/null 2>&1 || fail "git is required"
-command -v gpg >/dev/null 2>&1 || fail "gpg is required"
-command -v timeout >/dev/null 2>&1 || fail "timeout is required"
 
 # shellcheck source=../scripts/release-provenance.sh
 source "$ROOT/scripts/release-provenance.sh"
@@ -437,86 +434,65 @@ evidence_copy_line=${evidence_copy_lines[0]%%:*}
 	|| fail "classic-AVR byte binding does not dominate checksum/evidence acceptance"
 checks=$((checks + 1))
 
-# Rename identity has two distinct jobs: reject a changed initial build before
-# the expensive gates, then replace that provisional report with one computed
-# from the final validated images. Pin both calls around the rebuild window and
-# before source/output provenance and staging.
-mapfile -t initial_identity_lines < <(grep -nF 'verify_rename_identity "initial build"' "$RELEASE")
-mapfile -t final_identity_lines < <(grep -nF 'verify_rename_identity "final validated images"' "$RELEASE")
-mapfile -t validation_lines < <(grep -nF 'section "2. validation:' "$RELEASE")
-mapfile -t final_image_lines < <(grep -nF 'ok "all validated release images are present and nonempty."' "$RELEASE")
-[ "${#initial_identity_lines[@]}" -eq 1 ] \
-	&& [ "${#final_identity_lines[@]}" -eq 1 ] \
-	&& [ "${#validation_lines[@]}" -eq 1 ] \
-	&& [ "${#final_image_lines[@]}" -eq 1 ] \
-	|| fail "release rename-identity/final-image markers are missing or ambiguous"
-initial_identity_line=${initial_identity_lines[0]%%:*}
-final_identity_line=${final_identity_lines[0]%%:*}
-validation_line=${validation_lines[0]%%:*}
-final_image_line=${final_image_lines[0]%%:*}
-[ "$initial_identity_line" -lt "$validation_line" ] \
-	&& [ "$final_image_line" -lt "$final_identity_line" ] \
-	&& [ "$final_identity_line" -lt "$check_line" ] \
-	&& [ "$final_identity_line" -lt "$stage_line" ] \
-	|| fail "rename identity is not checked both before validation and over the final pre-stage images"
-checks=$((checks + 1))
-
-# Tag CI has a third, independent job: regenerate from its clean-build paths and
-# compare before the normal four-way image gate snapshots anything for
-# publication. Pin the exact path enumeration and fail-closed ordering.
+# Tag CI snapshots the clean-build paths, proves four-way image reproduction,
+# freezes the exact publication inventory, and rechecks every trust boundary
+# before publication. Pin the source paths and fail-closed ordering.
 mapfile -t ci_final_build_lines < <(grep -nF \
 	'make pic10f320-variants PIC10F320_CC=' "$RELEASE_WORKFLOW")
 mapfile -t ci_snapshot_lines < <(grep -nF \
 	'cp -a -- "${image_dirs[$i]}"/. "$fresh_dir"/' "$RELEASE_WORKFLOW")
-mapfile -t ci_rename_lines < <(grep -nF \
-	'scripts/verify-rename-identity.sh --compare-report "$dir" \' "$RELEASE_WORKFLOW")
-mapfile -t ci_frozen_rename_lines < <(grep -nF \
-	'"$publish_stage/RENAME_IDENTITY.md" "$RELEASE_TAG" "${images[@]}" \' \
-	"$RELEASE_WORKFLOW")
 mapfile -t ci_repro_lines < <(grep -nF \
 	'scripts/verify-release-images.sh "$dir"' "$RELEASE_WORKFLOW")
 mapfile -t ci_publish_snapshot_lines < <(grep -nF \
 	'cp -p -- "$dir"/*.hex' "$RELEASE_WORKFLOW")
 mapfile -t ci_state_output_lines < <(grep -nF \
-	'echo "rename_identity_applicable=$rename_applicable"' "$RELEASE_WORKFLOW")
+	'echo "inventory_sha256=$inventory_sha256"' "$RELEASE_WORKFLOW")
 mapfile -t ci_tag_verify_lines < <(grep -nF \
 	'scripts/verify-release-tag-target.sh origin' "$RELEASE_WORKFLOW")
-mapfile -t ci_rename_asset_lines < <(grep -nF \
-	'assets+=("$rename_report")' "$RELEASE_WORKFLOW")
+mapfile -t ci_inventory_verify_lines < <(grep -nF \
+	'python3 scripts/verify_release_publication.py verify \' "$RELEASE_WORKFLOW")
+mapfile -t ci_signature_lines < <(grep -nF \
+	'scripts/verify-release-signature.sh detached \' "$RELEASE_WORKFLOW")
+mapfile -t ci_checksum_lines < <(grep -nF \
+	'(cd "$dir" && sha256sum --check --strict -- SHA256SUMS)' "$RELEASE_WORKFLOW")
 mapfile -t ci_publish_lines < <(grep -nF \
 	'gh release create "$tag"' "$RELEASE_WORKFLOW")
 [ "${#ci_final_build_lines[@]}" -eq 1 ] \
 	&& [ "${#ci_snapshot_lines[@]}" -eq 1 ] \
-	&& [ "${#ci_rename_lines[@]}" -eq 1 ] \
-	&& [ "${#ci_frozen_rename_lines[@]}" -eq 1 ] \
 	&& [ "${#ci_repro_lines[@]}" -eq 1 ] \
 	&& [ "${#ci_publish_snapshot_lines[@]}" -eq 1 ] \
 	&& [ "${#ci_state_output_lines[@]}" -eq 1 ] \
 	&& [ "${#ci_tag_verify_lines[@]}" -eq 1 ] \
-	&& [ "${#ci_rename_asset_lines[@]}" -eq 1 ] \
+	&& [ "${#ci_inventory_verify_lines[@]}" -eq 3 ] \
+	&& [ "${#ci_signature_lines[@]}" -eq 2 ] \
+	&& [ "${#ci_checksum_lines[@]}" -eq 1 ] \
 	&& [ "${#ci_publish_lines[@]}" -eq 1 ] \
-	|| fail "tag-CI rebuild/rename/reproduction/snapshot/publication markers are missing or ambiguous"
+	|| fail "tag-CI reproduction/freeze/publication markers are missing or ambiguous"
 ci_final_build_line=${ci_final_build_lines[0]%%:*}
 ci_snapshot_line=${ci_snapshot_lines[0]%%:*}
-ci_rename_line=${ci_rename_lines[0]%%:*}
-ci_frozen_rename_line=${ci_frozen_rename_lines[0]%%:*}
 ci_repro_line=${ci_repro_lines[0]%%:*}
 ci_publish_snapshot_line=${ci_publish_snapshot_lines[0]%%:*}
 ci_state_output_line=${ci_state_output_lines[0]%%:*}
 ci_tag_verify_line=${ci_tag_verify_lines[0]%%:*}
-ci_rename_asset_line=${ci_rename_asset_lines[0]%%:*}
+ci_initial_inventory_line=${ci_inventory_verify_lines[0]%%:*}
+ci_pre_signature_inventory_line=${ci_inventory_verify_lines[1]%%:*}
+ci_post_signature_inventory_line=${ci_inventory_verify_lines[2]%%:*}
+ci_final_signature_line=${ci_signature_lines[1]%%:*}
+ci_checksum_line=${ci_checksum_lines[0]%%:*}
 ci_publish_line=${ci_publish_lines[0]%%:*}
 [ "$ci_final_build_line" -lt "$ci_snapshot_line" ] \
-	&& [ "$ci_snapshot_line" -lt "$ci_rename_line" ] \
-	&& [ "$ci_rename_line" -lt "$ci_frozen_rename_line" ] \
-	&& [ "$ci_frozen_rename_line" -lt "$ci_repro_line" ] \
+	&& [ "$ci_snapshot_line" -lt "$ci_repro_line" ] \
 	&& [ "$ci_repro_line" -lt "$ci_publish_snapshot_line" ] \
-	&& [ "$ci_publish_snapshot_line" -lt "$ci_state_output_line" ] \
+	&& [ "$ci_publish_snapshot_line" -lt "$ci_initial_inventory_line" ] \
+	&& [ "$ci_initial_inventory_line" -lt "$ci_state_output_line" ] \
 	&& [ "$ci_state_output_line" -lt "$ci_tag_verify_line" ] \
-	&& [ "$ci_tag_verify_line" -lt "$ci_rename_asset_line" ] \
-	&& [ "$ci_rename_asset_line" -lt "$ci_publish_line" ] \
-	|| fail "tag CI does not preserve compare-before-freeze-before-publish ordering"
-ci_rename_block=$(awk '/- name: Verify committed images and rename\/change evidence reproduce bit-for-bit/ { in_block=1 }
+	&& [ "$ci_tag_verify_line" -lt "$ci_pre_signature_inventory_line" ] \
+	&& [ "$ci_pre_signature_inventory_line" -lt "$ci_final_signature_line" ] \
+	&& [ "$ci_final_signature_line" -lt "$ci_checksum_line" ] \
+	&& [ "$ci_checksum_line" -lt "$ci_post_signature_inventory_line" ] \
+	&& [ "$ci_post_signature_inventory_line" -lt "$ci_publish_line" ] \
+	|| fail "tag CI does not preserve reproduce-before-freeze-before-publish ordering"
+ci_repro_block=$(awk '/- name: Verify committed images reproduce bit-for-bit/ { in_block=1 }
 	/# --- re-run the gates on the clean runner/ { in_block=0 }
 	in_block { print }' "$RELEASE_WORKFLOW")
 ci_publish_block=$(awk '/- name: Publish GitHub Release/ { in_block=1 }
@@ -526,55 +502,48 @@ for required in \
 	'image_dirs_text=$(make -s print-RELEASE_IMAGE_DIRS)' \
 	'shopt -s nullglob dotglob' \
 	'cp -a -- "${image_dirs[$i]}"/. "$fresh_dir"/' \
-	'"$publish_stage/RENAME_IDENTITY.md" "$RELEASE_TAG" "${images[@]}"' \
-	'mapfile -t rename_fields < "$rename_status"' \
-	'rename_identity_applicable=1)' \
-	'rename_identity_applicable=0)' \
-	'[ "$frozen_rename_sha256" = "$rename_sha256" ]' \
-	'echo "rename_identity_applicable=$rename_applicable"' \
-	'echo "rename_identity_sha256=$rename_sha256"' \
 	'scripts/verify-release-images.sh "$dir" "${fresh_dirs[@]}"' \
+	'release_images_text=$(make -s --no-print-directory print-RELEASE_IMAGES)' \
+	'release_helper_text=$(make -s --no-print-directory print-RELEASE_HELPER_MAP)' \
+	'expected_assets+=(SHA256SUMS SHA256SUMS.asc MANIFEST.md QUALIFICATION)' \
 	'frozen_root=/opt/mcu-bypass-publication' \
 	'sudo install -d -o root -g root -m 0700 -- "$frozen_root" "$publish"' \
 	'record "$publish" "$inventory" "${expected_assets[@]}"' \
 	'sudo chmod 0555 -- "$publish" "$frozen_root"'; do
-	[[ "$ci_rename_block" == *"$required"* ]] \
-		|| fail "tag-CI rename step omits required clean-image wiring: $required"
+	[[ "$ci_repro_block" == *"$required"* ]] \
+		|| fail "tag-CI reproduction step omits required wiring: $required"
 done
 for required in \
-	'RENAME_IDENTITY_APPLICABLE: ${{ steps.repro.outputs.rename_identity_applicable }}' \
-	'RENAME_IDENTITY_SHA256: ${{ steps.repro.outputs.rename_identity_sha256 }}' \
 	'RELEASE_INVENTORY: ${{ steps.repro.outputs.inventory }}' \
 	'RELEASE_INVENTORY_SHA256: ${{ steps.repro.outputs.inventory_sha256 }}' \
-	'case "$RENAME_IDENTITY_APPLICABLE" in' \
-	'[ "$actual_rename_sha256" = "$RENAME_IDENTITY_SHA256" ]' \
-	'assets+=("$rename_report")' \
+	'RELEASE_HELPER_ASSETS: ${{ steps.repro.outputs.helper_assets }}' \
 	'python3 scripts/verify_release_publication.py verify' \
 	'scripts/verify-release-signature.sh detached' \
 	'sha256sum --check --strict -- SHA256SUMS' \
-	'"${assets[@]}"' \
-	'inapplicable release contains a frozen rename report'; do
+	'"${assets[@]}"'; do
 	[[ "$ci_publish_block" == *"$required"* ]] \
-		|| fail "tag-CI publication omits required conditional rename asset wiring: $required"
+		|| fail "tag-CI publication omits required frozen-asset wiring: $required"
 done
-[[ "$ci_rename_block" != *'"$dir/RENAME_IDENTITY.md"'* ]] \
-	|| fail "tag CI freezes rename evidence by reopening the mutable committed report"
-if grep -Eq '^[[:space:]]+(continue-on-error|if):' <<<"$ci_rename_block" \
-		|| grep -Fq '|| true' <<<"$ci_rename_block"; then
-	fail "tag-CI rename comparison can be skipped or ignored"
+if grep -Eq '^[[:space:]]+(continue-on-error|if):' <<<"$ci_repro_block" \
+		|| grep -Fq '|| true' <<<"$ci_repro_block"; then
+	fail "tag-CI reproduction can be skipped or ignored"
 fi
 if grep -Eq '^[[:space:]]+(continue-on-error|if):' <<<"$ci_publish_block" \
 		|| grep -Fq '|| true' <<<"$ci_publish_block"; then
-	fail "tag-CI rename publication can be skipped or ignored"
+	fail "tag-CI publication can be skipped or ignored"
 fi
 if grep -Fq 'RELEASE_EXPECTED_IMAGES' "$RELEASE_WORKFLOW"; then
 	fail "tag CI exposes a non-Makefile canonical release-image input"
 fi
+if grep -Eq 'verify-rename-identity|RENAME_IDENTITY|rename_identity' \
+		"$RELEASE_WORKFLOW" "$RELEASE"; then
+	fail "active release production still carries retired rename-identity state"
+fi
 checks=$((checks + 1))
 
 # Execute the workflow's publication shell itself with fake tag verification
-# and GitHub CLI commands. This proves the step-output consumer constructs the
-# final asset vector conditionally rather than only looking right to grep.
+# and GitHub CLI commands. This proves the step-output consumer publishes the
+# exact frozen asset vector rather than only looking right to grep.
 publish_step="$work/publish-step.sh"
 awk '
 	/- name: Publish GitHub Release/ { in_step=1 }
@@ -631,30 +600,21 @@ printf '%s  a.hex\n' "${publish_image_hash%% *}" > "$publish_assets/SHA256SUMS"
 printf 'dummy signature\n' > "$publish_assets/SHA256SUMS.asc"
 printf '# Test release\n' > "$publish_assets/MANIFEST.md"
 printf 'dummy qualification\n' > "$publish_assets/QUALIFICATION"
-publish_report="$publish_assets/RENAME_IDENTITY.md"
-saved_publish_report="$work/saved-publish-report"
-printf '# Verified rename report\n' > "$saved_publish_report"
-publish_hash=$(sha256sum -- "$saved_publish_report")
-publish_hash=${publish_hash%% *}
 tag_verify_log="$work/tag-verify.log"
 publish_inventory="$publish_fixture/publication.inventory.json"
 publish_inventory_sha256=
+publish_expected=(a.hex flash-pic12f675.py SHA256SUMS SHA256SUMS.asc \
+	MANIFEST.md QUALIFICATION)
 
 record_publish_inventory() {
-	local -a expected=(a.hex flash-pic12f675.py SHA256SUMS SHA256SUMS.asc \
-		MANIFEST.md QUALIFICATION)
-	[ -e "$publish_report" ] || [ -L "$publish_report" ] || :
-	if [ -f "$publish_report" ] && [ ! -L "$publish_report" ]; then
-		expected+=(RENAME_IDENTITY.md)
-	fi
 	rm -f "$publish_inventory"
 	publish_inventory_sha256=$(python3 "$PUBLICATION_VERIFY" record \
-		"$publish_assets" "$publish_inventory" "${expected[@]}") \
+		"$publish_assets" "$publish_inventory" "${publish_expected[@]}") \
 		|| fail "could not record publication-shell fixture inventory"
 }
 
 run_publish_step() {
-	local applicable=$1 digest=$2 tag=${3:-v0.9.8}
+	local tag=${1:-v1.2.3}
 	rm -f "$publish_args" "$tag_verify_log"
 	(
 		cd "$publish_fixture"
@@ -664,8 +624,6 @@ run_publish_step() {
 			RELEASE_INVENTORY="$publish_inventory" \
 			RELEASE_INVENTORY_SHA256="$publish_inventory_sha256" \
 			VERIFIED_RELEASE_COMMIT=0000000000000000000000000000000000000000 \
-			RENAME_IDENTITY_APPLICABLE="$applicable" \
-			RENAME_IDENTITY_SHA256="$digest" \
 			RELEASE_HELPER_ASSETS="${TEST_HELPER_ASSETS-$publish_helper_assets}" \
 			TEST_TAG_VERIFY_FAIL="${TEST_TAG_VERIFY_FAIL:-0}" \
 			TEST_SIGNATURE_FAIL="${TEST_SIGNATURE_FAIL:-0}" \
@@ -675,51 +633,53 @@ run_publish_step() {
 }
 
 expect_publish_fail() {
-	local label=$1 applicable=$2 digest=$3 expected=$4 tag=${5:-v0.9.8}
-	if run_publish_step "$applicable" "$digest" "$tag" \
+	local label=$1 expected=$2 tag=${3:-v1.2.3}
+	if run_publish_step "$tag" \
 			>"$work/publish-fail.out" 2>&1; then
 		fail "$label: invalid frozen publication state was accepted"
 	fi
 	grep -Fq "$expected" "$work/publish-fail.out" \
 		|| fail "$label failed without '$expected': $(<"$work/publish-fail.out")"
 	[ ! -e "$publish_args" ] \
-		|| fail "$label invoked gh after rejecting the frozen report"
+		|| fail "$label invoked gh after rejecting the frozen bundle"
 	checks=$((checks + 1))
 }
 
-cp "$saved_publish_report" "$publish_report"
 record_publish_inventory
-run_publish_step 1 "$publish_hash" >"$work/publish.out" 2>"$work/publish.err" \
-	|| fail "applicable frozen report did not publish: $(<"$work/publish.err")"
-[ "$(grep -Fxc "$publish_report" "$publish_args")" -eq 1 ] \
-	|| fail "applicable publication did not pass RENAME_IDENTITY.md to gh exactly once"
+run_publish_step >"$work/publish.out" 2>"$work/publish.err" \
+	|| fail "valid frozen bundle did not publish: $(<"$work/publish.err")"
 for asset in "$publish_assets/a.hex" "$publish_assets/flash-pic12f675.py" \
 		"$publish_assets/SHA256SUMS" \
 		"$publish_assets/SHA256SUMS.asc" "$publish_assets/MANIFEST.md" \
 		"$publish_assets/QUALIFICATION"; do
 	grep -Fxq "$asset" "$publish_args" \
-		|| fail "applicable publication omitted base asset: $asset"
+		|| fail "publication omitted frozen asset: $asset"
 done
+checks=$((checks + 1))
+
+# Any stray file must be rejected by the generic exact inventory before
+# publication state can be recorded.
+printf 'unexpected asset\n' > "$publish_assets/UNEXPECTED_ASSET"
+rm -f "$publish_inventory"
+if python3 "$PUBLICATION_VERIFY" record "$publish_assets" "$publish_inventory" \
+		"${publish_expected[@]}" >"$work/publish-extra.out" 2>&1; then
+	fail "publication inventory admitted an unexpected asset"
+fi
+grep -Fq 'differs from the expected publication asset set' "$work/publish-extra.out" \
+	|| fail "unexpected publication asset failed for the wrong reason: $(<"$work/publish-extra.out")"
+rm "$publish_assets/UNEXPECTED_ASSET"
+record_publish_inventory
 checks=$((checks + 1))
 
 # The required non-image artifacts are a fail-closed input, not a convenience.
 # A release that lost them between freezing and publication would otherwise
 # upload firmware for a part whose only safe writer is the missing tool.
 TEST_HELPER_ASSETS='' expect_publish_fail 'no carried-forward artifacts' \
-	1 "$publish_hash" 'no required release artifacts were carried forward'
+	'no required release artifacts were carried forward'
 TEST_HELPER_ASSETS='../escape.py' expect_publish_fail 'a path-bearing artifact name' \
-	1 "$publish_hash" 'invalid required release artifact'
+	'invalid required release artifact'
 TEST_HELPER_ASSETS='absent-helper.py' expect_publish_fail 'an artifact the bundle lacks' \
-	1 "$publish_hash" 'frozen bundle is missing required artifact'
-
-rm "$publish_report"
-record_publish_inventory
-run_publish_step 0 '' >"$work/publish.out" 2>"$work/publish.err" \
-	|| fail "inapplicable release without a report did not publish: $(<"$work/publish.err")"
-if grep -Fxq "$publish_report" "$publish_args"; then
-	fail "inapplicable publication passed RENAME_IDENTITY.md to gh"
-fi
-checks=$((checks + 1))
+	'frozen bundle is missing required artifact'
 
 # Publication kind. The same verified bundle must publish as an ordinary
 # release under a bare vX.Y.Z and as a GitHub PRERELEASE under any accepted
@@ -727,14 +687,14 @@ checks=$((checks + 1))
 # outside the version grammar must abort before gh is reached: the locate step
 # already rejected it before any build, so one arriving here means that gate
 # was bypassed, and defaulting to either kind would publish it.
-run_publish_step 0 '' v0.9.8 >"$work/publish.out" 2>"$work/publish.err" \
+run_publish_step v1.2.3 >"$work/publish.out" 2>"$work/publish.err" \
 	|| fail "stable tag did not publish: $(<"$work/publish.err")"
 if grep -Fxq -- '--prerelease' "$publish_args"; then
 	fail "stable vX.Y.Z publication marked the release a prerelease"
 fi
 grep -Fxq -- '--verify-tag' "$publish_args" \
 	|| fail "stable publication dropped --verify-tag"
-grep -Fxq -- 'v0.9.8' "$publish_args" \
+grep -Fxq -- 'v1.2.3' "$publish_args" \
 	|| fail "stable publication did not publish under its own tag"
 # The flag lives in an array that is EMPTY for a stable tag. Under `set -u` a
 # shell older than bash 4.4 expands that to one empty word, which gh would read
@@ -744,50 +704,29 @@ if grep -qx '' "$publish_args"; then
 fi
 checks=$((checks + 1))
 
-run_publish_step 0 '' v0.9.8-rc.1 >"$work/publish.out" 2>"$work/publish.err" \
+run_publish_step v1.2.3-rc.1 >"$work/publish.out" 2>"$work/publish.err" \
 	|| fail "suffixed tag did not publish: $(<"$work/publish.err")"
 [ "$(grep -Fxc -- '--prerelease' "$publish_args")" -eq 1 ] \
 	|| fail "suffixed publication did not mark the release a prerelease exactly once"
 grep -Fxq -- '--verify-tag' "$publish_args" \
 	|| fail "suffixed publication dropped --verify-tag"
-grep -Fxq -- 'v0.9.8-rc.1' "$publish_args" \
+grep -Fxq -- 'v1.2.3-rc.1' "$publish_args" \
 	|| fail "suffixed publication did not publish under its own tag"
 checks=$((checks + 1))
 
-for malformed_tag in 'v0.9.8-' 'v0.9.8-rc..1' 'v0.9.8--rc' 'v0.9.8+1' 'v0.9' '0.9.8'; do
-	expect_publish_fail "malformed tag '$malformed_tag'" 0 '' \
+for malformed_tag in 'v1.2.3-' 'v1.2.3-rc..1' 'v1.2.3--rc' 'v1.2.3+1' 'v1.2' '1.2.3'; do
+	expect_publish_fail "malformed tag '$malformed_tag'" \
 		"is not vX.Y.Z (optionally -suffix)" "$malformed_tag"
 done
 
-expect_publish_fail "missing applicable frozen report" 1 "$publish_hash" \
-	"frozen rename report is missing, empty, or not a regular file"
-
-ln -s "$saved_publish_report" "$publish_report"
-expect_publish_fail "symlinked applicable frozen report" 1 "$publish_hash" \
-	"frozen rename report is missing, empty, or not a regular file"
-rm "$publish_report"
-
-printf '# Changed rename report\n' > "$publish_report"
-expect_publish_fail "changed applicable frozen report" 1 "$publish_hash" \
-	"frozen rename report changed after verification"
-rm "$publish_report"
-
-cp "$saved_publish_report" "$publish_report"
-expect_publish_fail "stale inapplicable frozen report" 0 '' \
-	"inapplicable release contains a frozen rename report"
-rm "$publish_report"
-
-expect_publish_fail "invalid frozen applicability" invalid '' \
-	"invalid frozen rename applicability state"
-
-TEST_TAG_VERIFY_FAIL=1 expect_publish_fail "failed final tag verification" 0 '' \
+TEST_TAG_VERIFY_FAIL=1 expect_publish_fail "failed final tag verification" \
 	"tag verification fixture failure"
 
-TEST_SIGNATURE_FAIL=1 expect_publish_fail "failed final checksum signature" 0 '' \
+TEST_SIGNATURE_FAIL=1 expect_publish_fail "failed final checksum signature" \
 	"signature verification fixture failure"
 
 printf 'post-freeze mutation\n' >> "$publish_assets/MANIFEST.md"
-expect_publish_fail "failed first final inventory verification" 0 '' \
+expect_publish_fail "failed first final inventory verification" \
 	"frozen publication bundle differs from its inventory"
 printf '# Test release\n' > "$publish_assets/MANIFEST.md"
 record_publish_inventory
@@ -797,517 +736,73 @@ record_publish_inventory
 # Assert on the WORKFLOW's own annotation, not on sha256sum's text: the tool is
 # third-party and coreutils 9.x dropped the "SHA256" token from its message,
 # which broke this assertion once already.
-expect_publish_fail "failed strict image checksum verification" 0 '' \
+expect_publish_fail "failed strict image checksum verification" \
 	"::error::strict image checksum verification failed"
 printf '%s  a.hex\n' "${publish_image_hash%% *}" > "$publish_assets/SHA256SUMS"
 record_publish_inventory
 
 TEST_SIGNATURE_MUTATE=1 expect_publish_fail "failed post-signature inventory verification" \
-	0 '' "frozen publication bundle differs from its inventory"
+	"frozen publication bundle differs from its inventory"
 printf '# Test release\n' > "$publish_assets/MANIFEST.md"
 record_publish_inventory
 
-# Exercise the temporal defect directly. The published contract requires one
-# exact PIC10F320 relay change and 17 identities. An all-identical fixture must
-# fail; after making only that declared change, a later second mutation must make
-# the comparison that represents the final release fail by hash.
-rename_images="$work/rename-images"
-mkdir -p "$rename_images"
-rename_pairs=(
-	"bypass_cd4053.hex|bypass-attiny13a-cd4053_simple.hex"
-	"bypass_mute.hex|bypass-attiny13a-cd4053_with_mute.hex"
-	"bypass_relay.hex|bypass-attiny13a-tq2_l2_5v_relay.hex"
-	"bypass_cd4053_t85.hex|bypass-attiny85-cd4053_simple.hex"
-	"bypass_mute_t85.hex|bypass-attiny85-cd4053_with_mute.hex"
-	"bypass_relay_t85.hex|bypass-attiny85-tq2_l2_5v_relay.hex"
-	"bypass_cd4053_t45.hex|bypass-attiny45-cd4053_simple.hex"
-	"bypass_mute_t45.hex|bypass-attiny45-cd4053_with_mute.hex"
-	"bypass_relay_t45.hex|bypass-attiny45-tq2_l2_5v_relay.hex"
-	"bypass_cd4053_attiny202.hex|bypass-attiny202-cd4053_simple.hex"
-	"bypass_mute_attiny202.hex|bypass-attiny202-cd4053_with_mute.hex"
-	"bypass_relay_attiny202.hex|bypass-attiny202-tq2_l2_5v_relay.hex"
-	"bypass_cd4053_pic10f322.hex|bypass-pic10f322-cd4053_simple.hex"
-	"bypass_mute_pic10f322.hex|bypass-pic10f322-cd4053_with_mute.hex"
-	"bypass_relay_pic10f322.hex|bypass-pic10f322-tq2_l2_5v_relay.hex"
-	"bypass_mcu_cd4053-simple_pic10f320.hex|bypass-pic10f320-cd4053_simple.hex"
-	"bypass_mcu_cd4053-mute_pic10f320.hex|bypass-pic10f320-cd4053_with_mute.hex"
-	"bypass_mcu_tq2-relay_pic10f320.hex|bypass-pic10f320-tq2_l2_5v_relay.hex"
-)
-rename_paths=()
-rename_names=()
-for pair in "${rename_pairs[@]}"; do
-	old=${pair%%|*}
-	new=${pair#*|}
-	cp "$ROOT/release/v0.9.7/$old" "$rename_images/$new"
-	rename_paths+=("$rename_images/$new")
-	rename_names+=("$new")
-done
-if "$RENAME_VERIFY" v0.9.8 "${rename_paths[@]}" >"$work/rename-all-identical.out" \
-		2>"$work/rename-all-identical.err"; then
-	fail "all-identical fixture passed without the required PIC10F320 relay change"
-fi
-grep -Fq '**REQUIRED CHANGE ABSENT**' "$work/rename-all-identical.out" \
-	&& grep -Fq 'required_change_absent=1' "$work/rename-all-identical.err" \
-	|| fail "all-identical fixture failed for the wrong reason"
-checks=$((checks + 1))
-
-printf '\nintentional PIC10F320 relay safety correction\n' \
-	>> "$rename_images/bypass-pic10f320-tq2_l2_5v_relay.hex"
-"$RENAME_VERIFY" v0.9.8 "${rename_paths[@]}" >"$work/rename-early.out" \
-	2>"$work/rename-early.err" \
-	|| fail "valid 17+1 rename fixture failed: $(<"$work/rename-early.err")"
-grep -Fq 'identical=17 intentional_change=1 differ=0 missing=0 added=0' \
-	"$work/rename-early.out" \
-	|| fail "valid rename fixture did not enforce the complete 17+1 image set"
-grep -Fq 'detached signature verified against the pinned release key' \
-	"$work/rename-early.out" \
-	|| fail "rename report does not attest that the baseline signature was verified"
-checks=$((checks + 1))
-
-# The workflow-facing mode regenerates into private storage and compares exact
-# bytes with the committed report. Exercise path shapes dynamically rather than
-# trusting a source-text check of the workflow's test/cmp commands.
-committed_rename_release="$work/committed release"
-valid_rename_report="$work/valid RENAME_IDENTITY.md"
-verified_rename_dir="$work/verified rename"
-verified_rename_report="$verified_rename_dir/RENAME_IDENTITY.md"
-mkdir -p "$committed_rename_release"
-mkdir -p "$verified_rename_dir"
-cp "$work/rename-early.out" "$valid_rename_report"
-cp "$valid_rename_report" "$committed_rename_release/RENAME_IDENTITY.md"
-
-expect_rename_report_fail() {
-	local label=$1 version=$2 expected=$3 rc
-	rm -f "$verified_rename_report"
-	if timeout 15 "$RENAME_VERIFY" --compare-report "$committed_rename_release" \
-			"$verified_rename_report" "$version" "${rename_paths[@]}" \
-			>"$work/rename-compare.out" \
-			2>"$work/rename-compare.err"; then
-		fail "$label: invalid committed rename evidence was accepted"
-	else
-		rc=$?
-	fi
-	[ "$rc" -ne 124 ] || fail "$label: rename report comparison blocked"
-	grep -Fq "$expected" "$work/rename-compare.err" \
-		|| fail "$label failed without '$expected': $(<"$work/rename-compare.err")"
-	checks=$((checks + 1))
-}
-
-"$RENAME_VERIFY" --compare-report "$committed_rename_release" \
-	"$verified_rename_report" v0.9.8 "${rename_paths[@]}" \
-	>"$work/rename-compare.out" \
-	|| fail "correct committed rename evidence did not match its regeneration"
-cmp -s "$valid_rename_report" "$verified_rename_report" \
-	|| fail "successful comparison did not retain the exact verified report"
-valid_rename_hash=$(sha256sum -- "$valid_rename_report")
-valid_rename_hash=${valid_rename_hash%% *}
-printf 'rename_identity_applicable=1\nrename_identity_sha256=%s\n' \
-	"$valid_rename_hash" > "$work/rename-compare.expected"
-cmp -s "$work/rename-compare.expected" "$work/rename-compare.out" \
-	|| fail "applicable rename comparison returned malformed status"
-checks=$((checks + 1))
-
-rm "$committed_rename_release/RENAME_IDENTITY.md"
-expect_rename_report_fail "missing committed report" v0.9.8 \
-	"committed rename evidence is missing, empty, or not a regular file"
-
-: > "$committed_rename_release/RENAME_IDENTITY.md"
-expect_rename_report_fail "empty committed report" v0.9.8 \
-	"committed rename evidence is missing, empty, or not a regular file"
-
-rm "$committed_rename_release/RENAME_IDENTITY.md"
-ln -s "$valid_rename_report" "$committed_rename_release/RENAME_IDENTITY.md"
-expect_rename_report_fail "symlinked committed report" v0.9.8 \
-	"committed rename evidence is missing, empty, or not a regular file"
-
-rm "$committed_rename_release/RENAME_IDENTITY.md"
-ln -s "$work/absent-report" "$committed_rename_release/RENAME_IDENTITY.md"
-expect_rename_report_fail "dangling committed report symlink" v0.9.8 \
-	"committed rename evidence is missing, empty, or not a regular file"
-
-rm "$committed_rename_release/RENAME_IDENTITY.md"
-mkfifo "$committed_rename_release/RENAME_IDENTITY.md"
-expect_rename_report_fail "FIFO committed report" v0.9.8 \
-	"committed rename evidence is missing, empty, or not a regular file"
-
-rm "$committed_rename_release/RENAME_IDENTITY.md"
-mkdir "$committed_rename_release/RENAME_IDENTITY.md"
-expect_rename_report_fail "directory committed report" v0.9.8 \
-	"committed rename evidence is missing, empty, or not a regular file"
-
-# Replace a report after its initial regular-file check. Archive-mode cp must
-# preserve the raced FIFO in the private snapshot for prompt rejection rather
-# than opening it as a byte stream and blocking the release job.
-rm -rf "$committed_rename_release/RENAME_IDENTITY.md"
-cp "$valid_rename_report" "$committed_rename_release/RENAME_IDENTITY.md"
-report_race_bin="$work/report-race-bin"
-mkdir "$report_race_bin"
-real_cp=$(command -v cp) || fail "cp is required"
-cat > "$report_race_bin/cp" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-if [ "${1:-}" = -a ] && [ "${2:-}" = -- ] && [ "${3:-}" = "$RACE_REPORT" ]; then
-	rm -- "$RACE_REPORT"
-	mkfifo "$RACE_REPORT"
-fi
-exec "$REAL_CP" "$@"
-EOF
-chmod 750 "$report_race_bin/cp"
-rm -f "$verified_rename_report"
-if PATH="$report_race_bin:$PATH" REAL_CP="$real_cp" \
-		RACE_REPORT="$committed_rename_release/RENAME_IDENTITY.md" \
-		timeout 15 "$RENAME_VERIFY" --compare-report "$committed_rename_release" \
-		"$verified_rename_report" v0.9.8 "${rename_paths[@]}" \
-		>"$work/rename-report-race.out" 2>"$work/rename-report-race.err"; then
-	fail "report type-change race was accepted"
-else
-	rc=$?
-fi
-[ "$rc" -ne 124 ] || fail "report type-change race blocked on the FIFO"
-grep -Fq 'committed rename-evidence snapshot is empty or not a regular file' \
-	"$work/rename-report-race.err" \
-	|| fail "report type-change race failed for the wrong reason: $(<"$work/rename-report-race.err")"
-rm "$committed_rename_release/RENAME_IDENTITY.md"
-checks=$((checks + 1))
-
-cp "$valid_rename_report" "$committed_rename_release/RENAME_IDENTITY.md"
-# Race the initially absent retained-output path to a FIFO immediately before
-# creation. Atomic hard-link retention must fail without opening or replacing it.
-output_race_bin="$work/output-race-bin"
-mkdir "$output_race_bin"
-real_ln=$(command -v ln) || fail "ln is required"
-cat > "$output_race_bin/ln" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-if [ "${1:-}" = -- ] && [ "${3:-}" = "$RACE_OUTPUT" ]; then
-	mkfifo "$RACE_OUTPUT"
-fi
-exec "$REAL_LN" "$@"
-EOF
-chmod 750 "$output_race_bin/ln"
-rm -f "$verified_rename_report"
-if PATH="$output_race_bin:$PATH" REAL_LN="$real_ln" \
-		RACE_OUTPUT="$verified_rename_report" \
-		timeout 15 "$RENAME_VERIFY" --compare-report "$committed_rename_release" \
-		"$verified_rename_report" v0.9.8 "${rename_paths[@]}" \
-		>"$work/rename-output-race.out" 2>"$work/rename-output-race.err"; then
-	fail "retained-output path race was accepted"
-else
-	rc=$?
-fi
-[ "$rc" -ne 124 ] || fail "retained-output path race blocked on the FIFO"
-grep -Fq 'cannot retain verified rename evidence' "$work/rename-output-race.err" \
-	|| fail "retained-output path race failed for the wrong reason: $(<"$work/rename-output-race.err")"
-[ -p "$verified_rename_report" ] \
-	|| fail "retained-output race fixture did not create its FIFO"
-rm "$verified_rename_report"
-checks=$((checks + 1))
-
-printf X >> "$committed_rename_release/RENAME_IDENTITY.md"
-expect_rename_report_fail "one-byte changed committed report" v0.9.8 \
-	"committed rename evidence does not match the CI-regenerated report"
-
-rm "$committed_rename_release/RENAME_IDENTITY.md"
-rm -f "$verified_rename_report"
-"$RENAME_VERIFY" --compare-report "$committed_rename_release" \
-	"$verified_rename_report" v0.9.9 "${rename_paths[@]}" \
-	>"$work/rename-inapplicable.out" \
-	|| fail "an inapplicable later release incorrectly required rename evidence"
-printf 'rename_identity_applicable=0\nrename_identity_sha256=\n' \
-	> "$work/rename-inapplicable.expected"
-cmp -s "$work/rename-inapplicable.expected" "$work/rename-inapplicable.out" \
-	|| fail "inapplicable rename comparison returned malformed status"
-[ ! -e "$verified_rename_report" ] && [ ! -L "$verified_rename_report" ] \
-	|| fail "inapplicable rename comparison retained a report"
-checks=$((checks + 1))
-
-ln -s "$work/absent-report" "$committed_rename_release/RENAME_IDENTITY.md"
-expect_rename_report_fail "stale inapplicable report" v0.9.9 \
-	"rename identity is not applicable to v0.9.9, but committed evidence exists"
-rm "$committed_rename_release/RENAME_IDENTITY.md"
-cp "$valid_rename_report" "$committed_rename_release/RENAME_IDENTITY.md"
-
-# Signature verification must dominate every read of a baseline hash. A
-# malformed append is deliberate: if parsing moves ahead of verification, this
-# fails as an unparsable checksum line instead of as altered signed bytes.
-mapfile -t baseline_signature_lines < <(grep -nF \
-	'"$SIGNATURE_VERIFY" detached "$BASELINE_SIGNATURE"' \
-	"$RENAME_VERIFY")
-mapfile -t baseline_copy_lines < <(grep -nF \
-	'cp -P -- "$BASELINE_SUMS" "$BASELINE_SUMS_SNAPSHOT"' "$RENAME_VERIFY")
-mapfile -t baseline_parse_lines < <(grep -nF \
-	'done < "$BASELINE_SUMS_SNAPSHOT"' "$RENAME_VERIFY")
-[ "${#baseline_signature_lines[@]}" -eq 1 ] \
-	&& [ "${#baseline_copy_lines[@]}" -eq 1 ] \
-	&& [ "${#baseline_parse_lines[@]}" -eq 1 ] \
-	|| fail "rename verifier baseline signature/parse markers are missing or ambiguous"
-mapfile -t original_manifest_refs < <(grep -En \
-	'\$\{?BASELINE_SUMS\}?([^A-Za-z0-9_]|$)' "$RENAME_VERIFY")
-mapfile -t snapshot_manifest_refs < <(grep -En \
-	'\$\{?BASELINE_SUMS_SNAPSHOT\}?([^A-Za-z0-9_]|$)' "$RENAME_VERIFY")
-[ "${#original_manifest_refs[@]}" -eq 5 ] \
-	&& [ "${#snapshot_manifest_refs[@]}" -eq 3 ] \
-	|| fail "rename verifier has an unreviewed baseline-manifest reference that could bypass signature ordering"
-copy_line=${baseline_copy_lines[0]%%:*}
-signature_line=${baseline_signature_lines[0]%%:*}
-parse_line=${baseline_parse_lines[0]%%:*}
-[ "$copy_line" -lt "$signature_line" ] && [ "$signature_line" -lt "$parse_line" ] \
-	|| fail "rename verifier parses baseline hashes before signature verification"
-checks=$((checks + 1))
-
-# Use an isolated copy so every fail-closed input shape can be exercised without
-# touching the checked-in release. The fixture retains the production pinned key
-# and verifier; only the wrong-key case creates a disposable second signer.
-rename_fixture="$work/rename-fixture"
-mkdir -p "$rename_fixture/scripts" "$rename_fixture/release/v0.9.7"
-cp "$ROOT/scripts/verify-rename-identity.sh" \
-	"$ROOT/scripts/verify-release-signature.sh" \
-	"$ROOT/scripts/release-signing-policy.sh" "$rename_fixture/scripts/"
-cp "$ROOT/release/signing-key.asc" "$ROOT/release/README.md" \
-	"$rename_fixture/release/"
-cp "$ROOT/release/v0.9.7/SHA256SUMS" \
-	"$ROOT/release/v0.9.7/SHA256SUMS.asc" \
-	"$rename_fixture/release/v0.9.7/"
-chmod 750 "$rename_fixture/scripts/verify-rename-identity.sh" \
-	"$rename_fixture/scripts/verify-release-signature.sh"
-fixture_rename_verify="$rename_fixture/scripts/verify-rename-identity.sh"
-fixture_sums="$rename_fixture/release/v0.9.7/SHA256SUMS"
-fixture_signature="$rename_fixture/release/v0.9.7/SHA256SUMS.asc"
-saved_sums="$work/valid-v0.9.7-SHA256SUMS"
-saved_signature="$work/valid-v0.9.7-SHA256SUMS.asc"
-cp -p "$fixture_sums" "$saved_sums"
-cp -p "$fixture_signature" "$saved_signature"
-
-expect_rename_signature_fail() {
-	local label=$1 expected=$2 rc
-	if timeout 15 "$fixture_rename_verify" v0.9.8 "${rename_paths[@]}" \
-			>"$work/rename-signature.out" 2>"$work/rename-signature.err"; then
-		fail "$label: rename verifier accepted an untrusted baseline"
-	else
-		rc=$?
-	fi
-	[ "$rc" -ne 124 ] || fail "$label: rename verifier blocked on an invalid input"
-	grep -Fq "$expected" "$work/rename-signature.err" \
-		|| fail "$label failed without '$expected': $(<"$work/rename-signature.err")"
-	if grep -Fq 'unparsable line' "$work/rename-signature.err"; then
-		fail "$label parsed a baseline hash before signature verification"
-	fi
-	checks=$((checks + 1))
-}
-
-"$fixture_rename_verify" v0.9.8 "${rename_paths[@]}" \
-	>"$work/rename-fixture-valid.out" 2>"$work/rename-fixture-valid.err" \
-	|| fail "isolated valid baseline failed: $(<"$work/rename-fixture-valid.err")"
-checks=$((checks + 1))
-
-fixture_rename_doc="$rename_fixture/release/README.md"
-saved_rename_doc="$work/valid-release-README.md"
-cp "$fixture_rename_doc" "$saved_rename_doc"
-sed -i \
-	's@intentional-change=bypass-pic10f320-tq2_l2_5v_relay.hex@intentional-change=bypass-attiny13a-tq2_l2_5v_relay.hex@' \
-	"$fixture_rename_doc"
-if "$fixture_rename_verify" v0.9.8 "${rename_paths[@]}" \
-		>"$work/rename-wrong-exception.out" 2>"$work/rename-wrong-exception.err"; then
-	fail "rename verifier accepted the wrong intentional-change image"
-fi
-grep -Fq '**UNEXPECTED DIFFERENCE**' "$work/rename-wrong-exception.out" \
-	&& grep -Fq 'required_change_absent=1' "$work/rename-wrong-exception.err" \
-	|| fail "wrong intentional-change declaration failed for the wrong reason"
-cp "$saved_rename_doc" "$fixture_rename_doc"
-checks=$((checks + 1))
-
-intentional_change_line=$(grep -F 'rename-identity: intentional-change=' \
-	"$fixture_rename_doc" | head -1)
-printf '%s\n' "$intentional_change_line" >> "$fixture_rename_doc"
-if "$fixture_rename_verify" v0.9.8 "${rename_paths[@]}" \
-		>"$work/rename-duplicate-exception.out" 2>"$work/rename-duplicate-exception.err"; then
-	fail "rename verifier accepted two intentional-change declarations"
-fi
-grep -Fq 'must declare exactly one rename-identity intentional change' \
-	"$work/rename-duplicate-exception.err" \
-	|| fail "duplicate intentional-change declaration failed for the wrong reason"
-cp "$saved_rename_doc" "$fixture_rename_doc"
-checks=$((checks + 1))
-
-printf '| `unexpected_old.hex` | `unexpected_new.hex` |\n' \
-	>> "$fixture_rename_doc"
-if "$fixture_rename_verify" v0.9.8 "${rename_paths[@]}" \
-		>"$work/rename-extra-mapping.out" 2>"$work/rename-extra-mapping.err"; then
-	fail "rename verifier accepted a surplus published mapping"
-fi
-grep -Fq 'the published rename contract requires exactly 18' \
-	"$work/rename-extra-mapping.err" \
-	|| fail "surplus rename mapping failed for the wrong reason"
-cp "$saved_rename_doc" "$fixture_rename_doc"
-checks=$((checks + 1))
-
-# Replace the original manifest after the real GPG verification returns. The
-# comparison must continue over its already-verified private snapshot, never
-# reopen the now-untrusted release pathname.
-mv "$rename_fixture/scripts/verify-release-signature.sh" \
-	"$rename_fixture/scripts/verify-release-signature-real.sh"
-cat > "$rename_fixture/scripts/verify-release-signature.sh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
-"$script_dir/verify-release-signature-real.sh" "$@"
-printf 'post-verification pathname replacement\n' \
-	> "$script_dir/../release/v0.9.7/SHA256SUMS"
-EOF
-chmod 750 "$rename_fixture/scripts/verify-release-signature.sh"
-"$fixture_rename_verify" v0.9.8 "${rename_paths[@]}" \
-	>"$work/rename-snapshot.out" 2>"$work/rename-snapshot.err" \
-	|| fail "verified-manifest snapshot did not survive pathname replacement: $(<"$work/rename-snapshot.err")"
-grep -Fq 'identical=17 intentional_change=1 differ=0 missing=0 added=0' \
-	"$work/rename-snapshot.out" \
-	|| fail "pathname replacement changed the verified baseline comparison"
-grep -Fxq 'post-verification pathname replacement' "$fixture_sums" \
-	|| fail "pathname-replacement fixture did not run after signature verification"
-rm "$rename_fixture/scripts/verify-release-signature.sh"
-mv "$rename_fixture/scripts/verify-release-signature-real.sh" \
-	"$rename_fixture/scripts/verify-release-signature.sh"
-cp -p "$saved_sums" "$fixture_sums"
-checks=$((checks + 1))
-
-printf 'malformed unsigned append\n' >> "$fixture_sums"
-expect_rename_signature_fail "modified baseline manifest" \
-	"detached release signature is invalid"
-cp -p "$saved_sums" "$fixture_sums"
-
-rm "$fixture_signature"
-expect_rename_signature_fail "missing baseline signature" \
-	"detached signature is missing, empty, or not a regular file"
-cp -p "$saved_signature" "$fixture_signature"
-
-: > "$fixture_signature"
-expect_rename_signature_fail "empty baseline signature" \
-	"detached signature is missing, empty, or not a regular file"
-cp -p "$saved_signature" "$fixture_signature"
-
-rm "$fixture_signature"
-ln -s "$saved_signature" "$fixture_signature"
-expect_rename_signature_fail "symlinked baseline signature" \
-	"detached signature is missing, empty, or not a regular file"
-rm "$fixture_signature"
-cp -p "$saved_signature" "$fixture_signature"
-
-rm "$fixture_signature"
-mkfifo "$fixture_signature"
-expect_rename_signature_fail "FIFO baseline signature" \
-	"detached signature is missing, empty, or not a regular file"
-rm "$fixture_signature"
-cp -p "$saved_signature" "$fixture_signature"
-
-printf 'not an OpenPGP signature\n' > "$fixture_signature"
-expect_rename_signature_fail "malformed baseline signature" \
-	"detached release signature is invalid"
-cp -p "$saved_signature" "$fixture_signature"
-
-wrong_key_home="$work/wrong-rename-keyring"
-install -d -m 700 "$wrong_key_home"
-gpg --batch --no-options --homedir "$wrong_key_home" --pinentry-mode loopback \
-	--passphrase '' --quick-generate-key \
-	"Wrong Rename Baseline Signer <wrong-rename@example.invalid>" ed25519 sign 1d \
-	>/dev/null 2>&1 || fail "could not generate wrong rename-baseline key"
-wrong_key_fingerprint=$(gpg --batch --no-options --homedir "$wrong_key_home" \
-	--with-colons --fingerprint --list-secret-keys 2>/dev/null \
-	| awk -F: '$1 == "fpr" { print $10; exit }')
-[[ "$wrong_key_fingerprint" =~ ^[0-9A-F]{40}$ ]] \
-	|| fail "could not read wrong rename-baseline key fingerprint"
-rm "$fixture_signature"
-gpg --batch --no-options --homedir "$wrong_key_home" --pinentry-mode loopback \
-	--passphrase '' --local-user "$wrong_key_fingerprint" --armor --detach-sign \
-	--output "$fixture_signature" "$fixture_sums" \
-	|| fail "could not create wrong-key rename-baseline signature"
-expect_rename_signature_fail "wrong-key baseline signature" \
-	"detached release signature is invalid"
-cp -p "$saved_signature" "$fixture_signature"
-
-: > "$rename_fixture/scripts/verify-release-signature.sh"
-expect_rename_signature_fail "empty signature verifier" \
-	"release signature verifier is missing or not executable"
-cp -p "$ROOT/scripts/verify-release-signature.sh" \
-	"$rename_fixture/scripts/verify-release-signature.sh"
-
-# PIC12F675 graduated at v0.9.9: release-supported, but with no v0.9.7 name it is
-# absent from the rename mapping above (which stays the historical 18-image
-# contract). The reproducibility gate still checks the FULL canonical set, so
-# synthesize its three images into the fresh-build dir and extend the fixture
-# arrays for the reproduction below only -- the rename contract keeps using
-# rename_paths/rename_names untouched.
-pic12f675_repro_names=(
-	bypass-pic12f675-cd4053_simple.hex
-	bypass-pic12f675-cd4053_with_mute.hex
-	bypass-pic12f675-tq2_l2_5v_relay.hex
-)
-for n in "${pic12f675_repro_names[@]}"; do
-	printf 'synthetic pic12f675 reproduction fixture %s\n' "$n" > "$rename_images/$n"
-done
-repro_names=("${rename_names[@]}" "${pic12f675_repro_names[@]}")
-repro_paths=()
-for n in "${repro_names[@]}"; do repro_paths+=("$rename_images/$n"); done
-
-# Preserve the same valid fresh image set as a synthetic committed release for
-# the normal four-way reproducibility gate. The mutation below must be rejected
-# independently by both that gate and tag CI's rename-report regeneration.
+# Exercise the standing four-way reproduction contract using only current
+# Makefile declarations: canonical, checksum, committed and fresh image sets.
+repro_fresh="$work/reproduction fresh"
 repro_release="$work/reproduction release"
-mkdir -p "$repro_release"
-cp -- "${repro_paths[@]}" "$repro_release/"
-# A committed release also carries the required non-image artifacts, byte for
-# byte from their tracked sources. The fresh build directory does not: a
-# compiler produces images, not tools, and the reproduction leg is image-only.
-repro_helper_names=()
-while read -r repro_helper_entry; do
-	[ -n "$repro_helper_entry" ] || continue
-	repro_helper_base=${repro_helper_entry%%=*}
-	repro_helper_src=${repro_helper_entry#*=}
-	cp -p -- "$ROOT/$repro_helper_src" "$repro_release/$repro_helper_base" \
-		|| fail "could not stage required release artifact $repro_helper_base"
-	repro_helper_names+=("$repro_helper_base")
-done < <(cd "$ROOT" && make -s --no-print-directory print-RELEASE_HELPER_MAP | tr ' ' '\n')
-[ "${#repro_helper_names[@]}" -gt 0 ] \
+mkdir -p "$repro_fresh" "$repro_release"
+
+repro_images_raw=$(cd "$ROOT" \
+	&& make -s --no-print-directory print-RELEASE_IMAGES) \
+	|| fail "could not read RELEASE_IMAGES from the Makefile"
+read -r -a repro_image_names <<<"$repro_images_raw"
+[ "${#repro_image_names[@]}" -gt 0 ] \
+	|| fail "Makefile declares no release images"
+repro_image_paths=()
+for name in "${repro_image_names[@]}"; do
+	printf 'synthetic fresh image %s\n' "$name" > "$repro_fresh/$name"
+	repro_image_paths+=("$repro_fresh/$name")
+done
+cp -- "${repro_image_paths[@]}" "$repro_release/"
+
+repro_helpers_raw=$(cd "$ROOT" \
+	&& make -s --no-print-directory print-RELEASE_HELPER_MAP) \
+	|| fail "could not read RELEASE_HELPER_MAP from the Makefile"
+read -r -a repro_helper_entries <<<"$repro_helpers_raw"
+[ "${#repro_helper_entries[@]}" -gt 0 ] \
 	|| fail "Makefile declares no required release artifacts"
+repro_helper_names=()
+for entry in "${repro_helper_entries[@]}"; do
+	helper_name=${entry%%=*}
+	helper_source=${entry#*=}
+	cp -p -- "$ROOT/$helper_source" "$repro_release/$helper_name" \
+		|| fail "could not stage required release artifact $helper_name"
+	repro_helper_names+=("$helper_name")
+done
 (
 	cd "$repro_release"
-	sha256sum -- "${repro_names[@]}" "${repro_helper_names[@]}" > SHA256SUMS
+	sha256sum -- "${repro_image_names[@]}" "${repro_helper_names[@]}" \
+		> SHA256SUMS
 )
-ambient_release_expected=${repro_names[0]}
-RELEASE_EXPECTED_IMAGES="$ambient_release_expected" \
-	"$RELEASE_IMAGE_VERIFY" "$repro_release" "$rename_images" >/dev/null \
-	|| fail "ambient reduced image set replaced Makefile truth during valid reproduction"
-checks=$((checks + 1))
 
-printf '\npost-validation mutation\n' >> "$rename_images/bypass-attiny13a-cd4053_simple.hex"
-if "$RENAME_VERIFY" v0.9.8 "${rename_paths[@]}" >"$work/rename-final.out" \
-		2>"$work/rename-final.err"; then
-	fail "final rename comparison accepted an image changed after the initial check"
+ambient_release_expected=${repro_image_names[0]}
+if ! RELEASE_EXPECTED_IMAGES="$ambient_release_expected" \
+		"$RELEASE_IMAGE_VERIFY" "$repro_release" "$repro_fresh" \
+		>"$work/reproduction-valid.out" 2>&1; then
+	fail "ambient reduced image set replaced Makefile truth during valid reproduction: $(<"$work/reproduction-valid.out")"
 fi
-grep -Fq '**UNEXPECTED DIFFERENCE**' "$work/rename-final.out" \
-	&& grep -Fq 'unexpected_differences=1' "$work/rename-final.err" \
-	|| fail "final rename comparison rejected the mutation for the wrong reason"
 checks=$((checks + 1))
 
+printf '\npost-validation mutation\n' \
+	>> "$repro_fresh/${repro_image_names[0]}"
 if RELEASE_EXPECTED_IMAGES="$ambient_release_expected" \
-		"$RELEASE_IMAGE_VERIFY" "$repro_release" "$rename_images" \
+		"$RELEASE_IMAGE_VERIFY" "$repro_release" "$repro_fresh" \
 		>"$work/reproduction-mutation.out" 2>&1; then
-	fail "normal release reproduction accepted the changed clean-build image"
+	fail "release reproduction accepted a changed fresh image"
 fi
 grep -Fq 'fresh image checksum verification failed' \
 	"$work/reproduction-mutation.out" \
-	|| fail "normal reproduction rejected the changed image for the wrong reason"
-checks=$((checks + 1))
-
-rm -f "$verified_rename_report"
-if "$RENAME_VERIFY" --compare-report "$committed_rename_release" \
-		"$verified_rename_report" v0.9.8 "${rename_paths[@]}" \
-		>"$work/rename-mutated-compare.out" \
-		2>"$work/rename-mutated-compare.err"; then
-	fail "tag-CI report regeneration accepted the changed clean-build image"
-fi
-grep -Fq '**UNEXPECTED DIFFERENCE**' "$work/rename-mutated-compare.err" \
-	&& grep -Fq 'unexpected_differences=1' \
-		"$work/rename-mutated-compare.err" \
-	|| fail "tag-CI report regeneration rejected the changed image for the wrong reason"
+	|| fail "release reproduction rejected the changed image for the wrong reason"
 checks=$((checks + 1))
 
 # The release orchestrator must identify each selected compiler before building

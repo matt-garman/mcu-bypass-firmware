@@ -37,13 +37,15 @@ sample, update, sleep). Model B was chosen for three reasons:
    WDT-aware delay abstraction is needed.
 3. **It dissolves the shared-state hazard** — see §6.
 
-A later comparison supplied a separate reason to retain Model B instead of
-converting this shell to a timer ISR. The relay ISR build fails because the
-largest unused contiguous range is one word while a two-word psect remains;
+A dated 2026-08-05 comparison supplied a separate reason to retain Model B
+instead of converting this shell to a timer ISR. The relay ISR build fails
+because the largest unused contiguous range is one word while a two-word psect
+remains;
 ablation results infer 511/512 words occupied. Even after freeing flash, that
 shape uses 6 of the 8 hardware return-stack levels, leaving zero spare beyond
-the deliberate two-level reserve. See
-`non-blocking_output_schemes_feasibility.md` §2.2–§2.4.
+the deliberate two-level reserve. This is historical spike evidence, not a
+current resource measurement; the full record is retained in Git history at
+commit `5ce3f59`.
 
 Accepted trade-off: no low-power sleep. Fine for an always-powered pedal.
 
@@ -206,11 +208,10 @@ a normal tap clears them comfortably. This is a real firmware responsiveness
 effect as well as a test constraint: PIC timing tests must include the blocked
 interval, while the requested audible toggle has already been accepted.
 
-This is accepted behavior of the current blocking design, not a permanent
-architectural constraint. `non-blocking_output_schemes_feasibility.md` evaluates
-removing the divergence with tick-counted actuation and records the resulting
-startup, timer-progress, fault-containment and validation obligations; none of
-that feasibility design is implemented.
+This is accepted behavior of the current blocking design. A possible
+tick-counted redesign and its startup, timer-progress, fault-containment, and
+validation obligations are tracked by `TODO.md` item
+`T3-nonblocking-actuation`; no such design is implemented.
 
 ### 6. Concurrency model: single-threaded, so no atomicity requirement
 

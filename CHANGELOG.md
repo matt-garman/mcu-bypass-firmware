@@ -35,6 +35,38 @@ file is the human-readable summary of *what changed*.
 
 ## [Unreleased]
 
+### Changed
+
+- **Normal hosted CI now runs the full mutation driver once per applicable
+  event.** The fully provisioned PIC job remains the fail-closed mutation gate;
+  hosted `stress` keeps every exhaustive non-mutation workload without repeating
+  the skip-capable partial run. Release and local qualification retain
+  `make test-long` as the exhaustive-plus-mutation aggregate.
+
+### Removed
+
+- **Retired the one-shot v0.9.8 rename-identity lane.** The signed v0.9.8 tag
+  retains the historical verifier and its 17-identical/one-changed report.
+  Current releases continue to require exact canonical image reproduction,
+  expected-image identity, signed checksums, and a frozen publication inventory
+  without carrying inapplicable rename-report state.
+
+### Fixed
+
+- **A branch-only working document is now recognized by the declaration it
+  carries rather than by its name.** The release documentation gate had been
+  taught one name family at a time, each after a document the previous pattern
+  could not see had already been written; the third such document was reported
+  as durable-document-set drift instead, which failed the release preflight for
+  a file the branch legitimately carries. A root-level Markdown file that
+  declares itself a branch-only working document in its opening blockquote is
+  now refused as one whatever it is named, and the live-tree documentation
+  sweeps prune it on the same terms. The declaration never decides acceptance:
+  every root-level document outside the durable set is still refused, so a
+  working document that omits its banner fails closed as drift with the
+  corrective action named, and a durable document that merely describes the
+  convention has not declared itself.
+
 ## [0.9.10] - 2026-08-26
 
 ### Added
@@ -2904,11 +2936,10 @@ file is the human-readable summary of *what changed*.
 
 ## [0.9.7] - 2026-08-01
 
-> **Where the detail lives.** This entry is a post-release cleanup pass whose
-> 44 items were tracked individually, most of them compressed to a sentence
-> below. The per-item evidence — measured figures with the commands that
-> reproduce them, and the alternatives considered and rejected — is recorded in
-> [docs/v0.9.6_post_release_polish.md](docs/v0.9.6_post_release_polish.md).
+> **Historical detail.** This entry is a post-release cleanup pass whose 44
+> items were tracked individually, most of them compressed to a sentence below.
+> The completed work journal remains available from Git history at commit
+> `69f8bbf`.
 
 ### Fixed
 - **A non-executable Intel HEX validator passed the build's presence check.**
@@ -3158,8 +3189,7 @@ file is the human-readable summary of *what changed*.
   validation table, tool label, target count and several fragile source-line
   references were wrong across the live documentation; and the two `.gitignore`
   files contradicted each other about `commit_msg.txt` — both now state the same
-  working-note policy, under which the root file is ignored while
-  `release/<version>/commit_msg.txt` is deliberately tracked. The yasimavr
+  policy under which these disposable working notes are ignored. The yasimavr
   fetcher now uses POSIX signal 0 for its cleanup trap and passes ShellCheck,
   with no change to its path or replacement-safety behaviour.
 
