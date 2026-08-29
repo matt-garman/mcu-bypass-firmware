@@ -99,7 +99,9 @@ maintainability, reviewability, contradiction risk, and unbounded future growth.
 
 ## Target authority map
 
-This is the intended end state. BR-AUTH-01 must finalize it before broad edits.
+This was the intended end state. BR-AUTH-01 finalized and published it as the
+`Documentation map` section of `README.md`, which is the live authority; the
+table below is retained as the plan's own record of what was decided.
 
 | Topic | Intended sole live authority |
 |---|---|
@@ -209,7 +211,7 @@ unfinished release.
 
 ## BR-AUTH-01 - Finalize and publish the authority map
 
-**Status:** TODO
+**Status:** DONE (commit pending)
 
 **Depends on:** BR-BASE-01
 
@@ -219,18 +221,51 @@ another long narrative.
 
 **Work:**
 
-- [ ] Review the target authority map near the top of this plan.
-- [ ] Decide whether the durable map belongs in `README.md`, a short contributor
+- [x] Review the target authority map near the top of this plan.
+- [x] Decide whether the durable map belongs in `README.md`, a short contributor
   section, or another existing durable document.
-- [ ] Define document lifecycle labels: live specification, operator guidance,
+- [x] Define document lifecycle labels: live specification, operator guidance,
   compliance record, release evidence, decision/safety record, historical
   release artifact, and branch-only work plan.
-- [ ] State that Git history, not retained work journals on the branch tip, is
+- [x] State that Git history, not retained work journals on the branch tip, is
   the default archive for completed plans.
-- [ ] State that current measurements belong to CI output or release evidence,
+- [x] State that current measurements belong to CI output or release evidence,
   not development prose.
-- [ ] State that generated human views are not independently maintained sources
+- [x] State that generated human views are not independently maintained sources
   of truth.
+
+**Result:**
+
+Published as a `## Documentation map` section in `README.md`, chosen over a new
+root-level document and over an agent-facing section. README is the entry point
+a contributor reaches first, a documentation index is already part of its
+overview role, and the placement leaves the release gate's durable
+root-document allowlist in `scripts/release-documentation.sh` untouched.
+
+The section has three parts. A topic table names one live authority per topic
+and covers every durable root-level document -- `README.md`,
+`DESIGN_DOCUMENTATION.adoc`, `FLASHING.md`, `TOOLCHAIN.adoc`,
+`MISRA_COMPLIANCE.md`, `HARDWARE_VALIDATION_LOG.md`, `TODO.md`, `CHANGELOG.md`
+and `AGENTS.md`/`CLAUDE.md` -- plus `test/README.md`, `release/README.md`, the
+retained per-release records, the topic documents under `docs/`, the Makefile's
+canonical maps, the executable tests, and Git history. A lifecycle table
+assigns each durable document exactly one of the seven labels and says how that
+label is edited. Three standing rules close it: Git history is the archive for
+completed plans, current measurements belong to CI output or retained release
+evidence, and generated human views are corrected at their input rather than in
+the rendered copy.
+
+Two rows were made more precise than the target map: the exact per-release
+programming commands are owned by the generated `MANIFEST.md` inside each
+release directory, which is where they are actually rendered, and target,
+variant and resource policy is owned by the Makefile's canonical maps, added as
+a row because it is one of the duplication classes this plan names.
+
+`README.md` does not yet satisfy its own rule: its opening paragraph and target
+table restate the release-scope figures and first-released versions that
+`CHANGELOG.md` and the retained release records own. That is BR-README-01's
+scope, and the map is what gives that task a defined target rather than a
+judgement call.
 
 **Acceptance:**
 
@@ -2010,7 +2045,7 @@ dependencies and acceptance criteria.
 | Task | Summary | Status |
 |---|---|---|
 | BR-BASE-01 | Reconcile final release baseline | DONE `756e622` |
-| BR-AUTH-01 | Finalize authority map | TODO |
+| BR-AUTH-01 | Finalize authority map | DONE (commit pending) |
 | BR-AUTH-02 | Inventory references/contracts | TODO |
 | BR-RES-01 | Remove mutable resource tables | TODO |
 | BR-RES-02 | Retire prose synchronization tests | TODO |
