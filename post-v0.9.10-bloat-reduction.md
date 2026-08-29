@@ -156,9 +156,9 @@ phase even if it ships in the same eventual release.
 
 # A. Baseline, ownership, and lifecycle
 
-## BR-BASE-01 - Reconcile the final v0.9.10 state
+## BR-BASE-01 - Reconcile the final release baseline
 
-**Status:** TODO
+**Status:** DONE `756e622`
 
 **Risk:** High if skipped. This branch was created while the release was being
 completed elsewhere, so release artifacts, tag history, or final documentation
@@ -166,20 +166,44 @@ could advance independently.
 
 **Work:**
 
-- [ ] Identify the final qualified `v0.9.10` source commit, artifact commit, and
-  signed tag after the release completes.
-- [ ] Compare this branch with the final source and artifact history.
-- [ ] Bring forward the intended final release history using the user's chosen
+- [x] Identify the final qualified source commit, artifact commit, and signed
+  tag after the release completes.
+- [x] Compare this branch with the final source and artifact history.
+- [x] Bring forward the intended final release history using the user's chosen
   non-destructive Git workflow.
-- [ ] Confirm that historical `release/v0.9.10/` files, if added, remain
-  untouched by this cleanup except for prospective policy references outside
-  the immutable release directory.
-- [ ] Record the new baseline commit in this section.
-- [ ] Confirm the working tree is clean before starting substantive edits.
+- [x] Confirm that historical release directories, once added, remain untouched
+  by this cleanup except for prospective policy references outside the
+  immutable release directories.
+- [x] Record the new baseline commit in this section.
+- [x] Confirm the merged tree passes the full aggregate before further
+  substantive edits.
+
+**Result:**
+
+The release this section was written against did not complete. `v0.9.10` was
+tagged and never published: its tag CI reproduced all 21 images bit-for-bit and
+then failed the first gate re-run, because the release workflow exported
+`ATTINY_DFP_VER` into every step and the Makefile refuses a release goal under
+an unreviewed environment-origin build input. The signed tag and
+`release/v0.9.10/` are retained as the record of that cut rather than
+rewritten. `v0.9.11` is the completed release and is therefore the baseline
+this branch reconciles against.
+
+Reconciled by merging tag `v0.9.11` (`760f5fd`) into this branch as explicit
+merge commit `756e622`. No tag, release directory, or artifact commit was
+moved or rewritten: `release/v0.9.10/` and `release/v0.9.11/` are each
+byte-identical to their own tag in the merged tree. Three documents conflicted
+-- `CHANGELOG.md`, `release/README.md` and `test/README.md` -- and each
+resolution keeps both sides; the merge commit message records them
+individually.
+
+The branch's already-completed items predate this baseline and were merged
+forward rather than replayed onto it. No item on this plan now depends on an
+unfinished release.
 
 **Acceptance:**
 
-- The branch contains the intended final `v0.9.10` history.
+- The branch contains the intended final release history.
 - The release tag and artifact commit are not moved or rewritten.
 - No cleanup task accidentally changes in-flight release bytes or evidence.
 
@@ -869,7 +893,7 @@ rationale, so deletion is not automatic.
 
 ## BR-TESTDOC-01 - Convert test/README.md into a concise assurance map
 
-**Status:** DONE (commit pending)
+**Status:** DONE `a64c25e`
 
 **Current size:** 962 lines at plan time; 1,001 at implementation, now 625.
 
@@ -1985,7 +2009,7 @@ dependencies and acceptance criteria.
 
 | Task | Summary | Status |
 |---|---|---|
-| BR-BASE-01 | Reconcile final v0.9.10 history | TODO |
+| BR-BASE-01 | Reconcile final release baseline | DONE `756e622` |
 | BR-AUTH-01 | Finalize authority map | TODO |
 | BR-AUTH-02 | Inventory references/contracts | TODO |
 | BR-RES-01 | Remove mutable resource tables | TODO |
@@ -2004,7 +2028,7 @@ dependencies and acceptance criteria.
 | BR-DOC-03 | Reduce non-blocking feasibility analysis | DONE `9c16f96` |
 | BR-DOC-04 | Classify feature safety records | TODO |
 | BR-README-01 | Reduce root README | TODO |
-| BR-TESTDOC-01 | Reduce test README | TODO |
+| BR-TESTDOC-01 | Reduce test README | DONE `a64c25e` |
 | BR-TODO-01 | Reduce TODO to registry | TODO |
 | BR-CHANGELOG-01 | Adopt concise changelog policy | DONE `da1d62d` |
 | BR-RELEASEDOC-01 | Reduce release README | TODO |
