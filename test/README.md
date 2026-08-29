@@ -77,7 +77,8 @@ The substrate directories hold the adapters that cannot be shared:
   hand-inlined translation unit rather than a shell over the shared core, so it
   needs dedicated host harnesses (`equiv/`, `actuation/`, `fault/`) and thin
   target-simulator adapters (`gpsim/`), plus its own return-stack oracle and
-  expected-image manifest. `docs/pic10f320_special_case.md` states why.
+  expected-image manifest. "PIC10F320: the constrained target" in
+  `DESIGN_DOCUMENTATION.adoc` states why.
 
 The PIC10F320 lane reuses rather than forks everything it can: the shared
 CONFIG-word checker, both gpsim CLI wrappers, the shared soak adapter, all four
@@ -315,10 +316,11 @@ instead of reporting a smaller subset as green.
 
 The PIC10F320 is the one target whose verified core is *hand-inlined* into the
 firmware instead of compiled in, so it carries validation layers no other target
-needs. Three documents divide this target between them:
-`docs/pic10f320_special_case.md` states *why* the target needs a different
-assurance route, `docs/pic10f320_validation.md` records *what was run and what it
-returned*, and this section is the current layer inventory.
+needs. "PIC10F320: the constrained target" in `DESIGN_DOCUMENTATION.adoc` states
+*why* the target needs a different assurance route and what that route does and
+does not establish; the retained record under `release/<version>/` holds what
+was run and what it returned for a released version; this section is the current
+layer inventory.
 
 The first four layers need only a host C compiler and gcov, so they are members
 of `make test` and run on every push whether or not XC8 is installed, as are the
@@ -350,8 +352,8 @@ fail-closed rather than skip-clean.
 Note what `pic10f320-test-equiv` and `pic10f320-test-lockstep` run *against*.
 Both compile and link `src/bypass_pure.c` — the same file every other target
 compiles into its shipping image, not a vendored snapshot of it. That is the
-property the whole layer stack rests on; `docs/pic10f320_special_case.md` §3
-argues why.
+property the whole layer stack rests on; "PIC10F320: the constrained target" in
+`DESIGN_DOCUMENTATION.adoc` argues why.
 
 `return_stack_oracle.py` does not consume a compiler listing or trust a
 disassembler. It requires a nonempty, non-symlink regular file, validates every

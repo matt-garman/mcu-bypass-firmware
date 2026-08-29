@@ -130,7 +130,8 @@ file is outside the boundary.
 The PIC10F320 implementation is one self-contained C file: its debounce
 algorithm is written directly in `main()` and its output variants are
 source-local functions selected by preprocessor branches (see
-`docs/pic10f320_special_case.md`). It includes no project-authored header.
+`DESIGN_DOCUMENTATION.adoc`, "PIC10F320: the constrained target"). It includes
+no project-authored header.
 
 The **avr-libc / avr-gcc**, **ATtiny DFP**, **XC8 / PIC DFP**, and C-library
 headers are adopted toolchain code outside the compliance boundary. Cppcheck

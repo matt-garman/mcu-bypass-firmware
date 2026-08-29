@@ -11,9 +11,9 @@ build_pic10f322/
 # patterns above -- so without this line `git add -A` commits XC8 intermediates.
 build_pic/
 build_avr_xt/
-# PIC10F320 build + coverage artifacts (coverage lives UNDER the build dir --
-# see docs/pic10f320_merge_plan.md §5.7 -- so this one entry covers both, and no
-# PIC10F320 recipe can reach the shared top-level coverage/)
+# PIC10F320 build + coverage artifacts (coverage lives UNDER the build dir, so
+# this one entry covers both, and no PIC10F320 recipe can reach the shared
+# top-level coverage/)
 build_pic10f320/
 build_pic12f675/
 

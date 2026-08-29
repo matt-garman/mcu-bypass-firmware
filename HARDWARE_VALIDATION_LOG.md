@@ -171,9 +171,9 @@ programming compatibility, and not an electrical equivalence.
     to work.
   - The PIC10F32x parts (PIC10F320, PIC10F322) share a pinout, so one board
     accepts either. They are **not** the same build: the PIC10F320's 256-word
-    flash forces the self-contained firmware of
-    [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md), each part
-    has its own image, each image carries its own CONFIG word, and the
+    flash forces the self-contained firmware described in
+    [DESIGN_DOCUMENTATION.adoc](DESIGN_DOCUMENTATION.adoc#pic10f320-architecture),
+    each part has its own image, each image carries its own CONFIG word, and the
     programmer must be given the matching part name.
   - Supply range, per-pin drive and total device current are per-part datasheet
     limits. A shared pinout does not equalize them; check the datasheet for the

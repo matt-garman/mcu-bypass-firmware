@@ -936,8 +936,7 @@ $release_entry
 [1.2.3]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/matt-garman/mcu-bypass-firmware/releases/tag/v1.2.2
 EOF
-	for document in release/README.md TODO.md docs/pic10f320_special_case.md \
-			docs/pic10f320_validation.md; do
+	for document in release/README.md TODO.md; do
 		cat > "$documentation_root/$document" <<EOF
 <!-- current-release:start -->
 $declaration

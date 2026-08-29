@@ -7,9 +7,9 @@ validated against, so a new developer (or CI system) can reproduce
 the exact environment.
 
 This is a requirements and historical-environment record, not proof that every
-gate ran at the current tip. PIC10F320 historical release evidence and current
-release qualification status are recorded in
-`docs/pic10f320_validation.md`.
+gate ran at the current tip. Measured results and qualification status for any
+released version are retained under `release/<version>/`, which identifies the
+qualified source commit.
 
 Classic AVR firmware targets rebuild whenever they are requested, ensuring the
 current compiler, flags, and source tree are always consumed.  If you update a
@@ -69,6 +69,32 @@ AVR pre-hardware gate).  Individual PIC targets skip cleanly when their tools
 are absent, so the AVR workflow is unaffected if these are not installed.  CI
 and release use `STRICT_TOOLS=1` and the fail-closed `pic10f322-test-target-variants`
 aggregate so missing PIC tooling cannot produce a false green release gate.
+
+=== The free tier caps the optimizer, and that is a design input
+
+XC8 is used unlicensed.  The free tier runs the portable, IR-level
+optimizations -- inlining, dead-code elimination, GVN -- but gates the
+PIC-specific machine-level passes behind a PRO license, so `-Os` is accepted
+and then downgraded with advisory 2051: *"the current license does not permit
+the selected optimization level, using optimization level 2"*.  Measured on one
+source, `-O0` gave 397 words and `-O1`, `-O2` and `-Os` all gave 356.
+
+This is worth stating because the obvious workarounds do not exist.  The passes
+that would shrink 8-bit PIC code -- compiled-stack overlay, bank and page
+minimization, procedural abstraction -- are architecture-specific back-end work
+in Microchip's Optimizing Code Generator, not portable IR passes any optimizer
+can run.  Upstream LLVM has no 8-bit PIC target at all, so XC8's clang front end
+cannot emit code for these parts without that back end.  Compiled-stack overlay
+is in addition a whole-program decision, so there is no hand-off point where a
+foreign tool could contribute optimized objects.  SDCC's `pic14` port does
+target these parts, but without those optimizations, with experimental
+enhanced-mid-range support, and in a separate ABI, runtime and CONFIG world
+that would require a forked firmware shell.
+
+The consequence that matters is recorded in "PIC10F320: the constrained target"
+in DESIGN_DOCUMENTATION.adoc: the modular architecture's failure to fit 256
+words is measured against this tier, and the remaining levers are a paid
+license or hand-written assembly, neither of which this project will take.
 
   MPLAB XC8:    V3.10  (Microchip MPLAB XC8 C Compiler; build date Aug 13 2025)
                 install dir: /opt/microchip/xc8/v3.10
@@ -251,7 +277,7 @@ capacity, its reviewed ceiling, and the gate that enforces it; the measured
 per-variant figures belong to the release record.  The 320's margins are tight
 enough to be a design input rather than a footnote: they are why one of the
 PIC10F322 shell's defensive checks could not be ported to it; see
-docs/pic10f320_special_case.md.
+"PIC10F320: the constrained target" in DESIGN_DOCUMENTATION.adoc.
 
 PIC10F320 commands, for reference (same toolchain, `pic10f320-` targets):
 

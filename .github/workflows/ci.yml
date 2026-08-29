@@ -130,8 +130,9 @@ jobs:
   # PIC10F320 -- `make pic10f320-test` + `make pic10f320-test-target-variants`: the same
   # shape for the constrained 256-word part, plus the host lanes it alone has
   # (firmware<->core equivalence, actuation sequence, host fault injection, and
-  # the exact-line firmware coverage gate). See docs/pic10f320_special_case.md
-  # for why that chip's firmware inlines the verified core rather than calling it.
+  # the exact-line firmware coverage gate). See "PIC10F320: the constrained
+  # target" in DESIGN_DOCUMENTATION.adoc for why that chip's firmware inlines
+  # the verified core rather than calling it.
   #
   # PIC12F675 -- one `make pic12f675-test pic12f675-test-target-variants` graph:
   # the same two-aggregate shape again, for the classic mid-range part, but both

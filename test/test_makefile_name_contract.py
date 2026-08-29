@@ -118,10 +118,11 @@ them.
 ================================ AXIS B ================================
 
 A document naming a goal that no longer exists sends a reader to `No rule to
-make target`. The v0.9.8 prefix rename left 15 of these in
-docs/pic10f320_validation.md alone -- a document framed as CURRENT qualification
-evidence -- including its entire "Reproducing any of this" section, where four
-of six commands failed.
+make target`. The v0.9.8 prefix rename left 15 of these in the PIC10F320
+validation record alone -- a document framed as CURRENT qualification evidence
+-- including its entire "Reproducing any of this" section, where four of six
+commands failed. That document has since been folded away, but the failure mode
+it demonstrated is why this axis exists.
 
 THE ORACLE is `make -rRn --print-data-base`, parsed once. Reading make's own
 inventory rather than grepping rule heads is what makes the generated families
@@ -846,10 +847,10 @@ def check_axis_a():
         sys.exit("FAIL: negative case -- a historical banner is no longer recognised")
     if self_declared_historical("# Doc\n\nOrdinary current documentation.\n"):
         sys.exit("FAIL: negative case -- a document with no banner reads as historical")
-    with open(os.path.join(ROOT, "docs/pic10f320_validation.md"), encoding="utf-8") as fh:
+    with open(os.path.join(ROOT, "test/README.md"), encoding="utf-8") as fh:
         if self_declared_historical(fh.read()):
-            sys.exit("FAIL: negative case -- docs/pic10f320_validation.md is "
-                     "current qualification evidence and must not be exempt")
+            sys.exit("FAIL: negative case -- test/README.md is the current lane "
+                     "inventory and must not be exempt")
     checks += 1
 
     # (d) a computed query must be detected as computed rather than harvested as

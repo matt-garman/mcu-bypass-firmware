@@ -18,7 +18,7 @@ raising the canonical set to 21 images; see the table below.
 | ATtiny45 / ATtiny85 | release-supported | tinyx5 family |
 | **ATtiny202 (AVR-XT)** | release-supported | first released in `v0.9.6`; 2 KB flash, SOIC-8 only (no DIP), UPDI programming |
 | PIC10F322 | release-supported | 512 words |
-| **PIC10F320** | release-supported | **first released here in `v0.9.6`; constrained exception: 256 words, so the debounce algorithm is implemented directly rather than by compiling the verified core — see [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md)** |
+| **PIC10F320** | release-supported | **first released here in `v0.9.6`; constrained exception: 256 words, so the debounce algorithm is implemented directly rather than by compiling the verified core — see "PIC10F320: the constrained target" in [DESIGN_DOCUMENTATION.adoc](DESIGN_DOCUMENTATION.adoc#pic10f320-architecture)** |
 | **PIC12F675** | release-supported | **first released here in `v0.9.9`; classic mid-range: 1024 words, no `LATx` (the output latch is an SRAM shadow), 1.024 ms tick. Every pre-hardware lane the release parts have, plus a calibration contract they do not — and, uniquely, guarded development and signed-release programming procedures that check and record factory OSCCAL/BG before and after writing, plus a release-shipped `flash-pic12f675.py` so a downloaded image can be programmed under the same transaction with no source checkout (see [FLASHING.md](FLASHING.md)). Real preservation remains hardware-unvalidated (see [release/README.md](release/README.md) and `make pic12f675-release-program`). See [docs/pic12f675_feasibility.md](docs/pic12f675_feasibility.md)** |
 
 Every release target except one compiles the verified core (`src/bypass_pure.c`)
@@ -26,9 +26,9 @@ directly into its shipping image. The release-supported PIC10F320 cannot — its
 flash is half the PIC10F322's — so it carries an inlining seam that equivalence
 and real-HEX lock-step against that same core, plus independent fault injection,
 mitigate but do not eliminate. Prefer another part when the choice is yours;
-the caveat document explains the trade in full, and
-[docs/pic10f320_validation.md](docs/pic10f320_validation.md) records what was
-actually run and what it returned.
+[DESIGN_DOCUMENTATION.adoc](DESIGN_DOCUMENTATION.adoc#pic10f320-architecture)
+explains the trade in full, and the retained record under `release/<version>/`
+identifies the qualified source commit and what its gates returned.
 
 The firmware is intended to be used for electric instrument
 effects (e.g. guitar effect pedals) bypass switching.  The firmware

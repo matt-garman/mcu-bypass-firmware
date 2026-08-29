@@ -743,14 +743,16 @@ done
 grep -Eq '^REPO_URL=https://github\.com/matt-garman/mcu-bypass-firmware$' \
 	"$RELEASE" \
 	|| fail "release manifest link base REPO_URL is not the canonical absolute project URL"
-grep -Fq 'Full detail: [docs/pic10f320_special_case.md](%s/blob/%s/docs/pic10f320_special_case.md)' \
+grep -Fq 'Full detail: [DESIGN_DOCUMENTATION.adoc](%s/blob/%s/DESIGN_DOCUMENTATION.adoc#pic10f320-architecture)' \
 	"$RELEASE" \
 	|| fail "release manifest special-case link is not pinned to its version tag"
 grep -Fq '"$REPO_URL" "$VERSION"' \
 	"$RELEASE" \
 	|| fail "release manifest special-case link does not interpolate REPO_URL and VERSION"
-! grep -Fq '](../../docs/pic10f320_special_case.md)' "$RELEASE" \
+! grep -Eq '\]\(\.\./\.\./(docs/pic10f320_special_case\.md|DESIGN_DOCUMENTATION\.adoc)' "$RELEASE" \
 	|| fail "release manifest special-case link regressed to a repo-relative path"
+grep -Fq '[[pic10f320-architecture]]' "$ROOT/DESIGN_DOCUMENTATION.adoc" \
+	|| fail "release manifest special-case link targets an anchor the design document does not define"
 grep -Fq 'a staged PIC image differs from the image exercised by the soak' \
 	"$RELEASE" \
 	|| fail "release producer does not bind staged PIC images to soak inputs"

@@ -3125,7 +3125,8 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # on the same grounds pic10f320-test-host-variants is, and the grounds are the
 # TOOL CONTRACT, not the part: run_fw_coverage.sh needs a host C compiler, gcov
 # and Bash, all of which `test` already requires, and needs neither XC8, the
-# DFP, gpsim nor a built HEX (Principle 5, docs/pic10f320_merge_plan.md).
+# DFP, gpsim nor a built HEX: a gate belongs where its TOOLS are, not where its
+# subject matter is.
 # Reaching them only through pic10f322-test / pic12f675-test -- standalone
 # aggregates whose OTHER lanes do need those tools -- is what let a stale host
 # fault oracle, a non-shipping compile configuration and a dead coverage anchor
@@ -8166,7 +8167,7 @@ help:
 	@echo "                        Transients use private TMPDIR=, else XDG_RUNTIME_DIR/HOME; shared roots are rejected."
 	@echo "                        Checks/records preservation; real programmer behavior remains hardware-unvalidated."
 	@echo "                        ipecmd routing is software-only; no safe hardware attachment/handoff is published."
-	@echo "PIC10F320 (constrained 256-word target; docs/pic10f320_special_case.md):"
+	@echo "PIC10F320 (constrained 256-word target; see DESIGN_DOCUMENTATION.adoc):"
 	@echo "  pic10f320          build one PIC10F320 variant + 256-word and HW-stack gates"
 	@echo "                     (PIC10F320_VARIANT=cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay)"
 	@echo "  pic10f320-variants build every variant; removes the whole set if any one fails"

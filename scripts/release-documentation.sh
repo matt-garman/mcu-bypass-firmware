@@ -37,8 +37,6 @@ release_validate_current_documentation() {
 	local -a current_documents=(
 		"$repo_root/release/README.md"
 		"$repo_root/TODO.md"
-		"$repo_root/docs/pic10f320_special_case.md"
-		"$repo_root/docs/pic10f320_validation.md"
 	)
 
 	[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
@@ -162,11 +160,12 @@ release_validate_current_documentation() {
 # Bind the bounded current-release declarations to the inventory that was
 # actually STAGED, not to the canonical Makefile set that predicted it.
 # release_validate_current_documentation runs before any build, so the strongest
-# statement it can make is that four documents agree with what the Makefile says
-# a release will contain. This one runs on the staged directory and closes the
-# loop a human would otherwise close by eye: "21 images; 18 soak combinations"
-# in four documents against 21 files and 18 soak records on disk. It is the last
-# documentation check before the artifact commit and the tag.
+# statement it can make is that the designated current documents agree with what
+# the Makefile says a release will contain. This one runs on the staged
+# directory and closes the loop a human would otherwise close by eye:
+# "21 images; 18 soak combinations" in those documents against 21 files and 18
+# soak records on disk. It is the last documentation check before the artifact
+# commit and the tag.
 release_validate_staged_documentation() {
 	[ "$#" -eq 3 ] || return 2
 	local repo_root=$1 release_dir=$2 version=$3

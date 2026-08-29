@@ -48,7 +48,7 @@ targets, tests, CI, or release integration are absent.
    spare**. Measured, not estimated. So this part would carry the same
    "the verified code is the shipped code" property as the PIC10F322, the AVR
    Classic parts and the ATtiny202. It would **not** need the hand-inlined
-   treatment recorded in `pic10f320_special_case.md`.
+   treatment `DESIGN_DOCUMENTATION.adoc#pic10f320-architecture` records.
 2. The port needs **no new toolchain**: the same XC8, the same device pack, and
    the same simulator already installed for the PIC10F32x targets all support
    this part. Verified by building and by running firmware in the simulator.
@@ -208,9 +208,9 @@ Two observations worth recording:
   bank-1 access: `TRISIO`, `WPU`, `OPTION_REG`, `ANSEL`, `OSCCAL`) is already
   included in these numbers. It is real but it is not decisive at this flash size.
 
-The `-Os` license cap documented in §2 of `pic10f320_feasibility.md` still
-applies — it is the same free-tier compiler — but it is irrelevant here, because
-nothing is near the ceiling.
+The `-Os` license cap documented in `TOOLCHAIN.adoc` still applies — it is the
+same free-tier compiler — but it is irrelevant here, because nothing is near the
+ceiling.
 
 All figures in this section are for a **Model B (polled)** shell, matching the
 current PIC10F322 architecture. §4.3 prices ISR flash/RAM and records one gpsim

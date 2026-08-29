@@ -2214,7 +2214,7 @@ REL_BANNER=""
 	printf 'inlining seam means its architecture is not identical to the other targets.\n'
 	printf 'It is the constrained exception, not evidence that the reference architecture\n'
 	printf 'fits 256 words.\n\n'
-	if [ -f "$REPO_ROOT/docs/pic10f320_special_case.md" ]; then
+	if [ -f "$REPO_ROOT/DESIGN_DOCUMENTATION.adoc" ]; then
 		# Absolute and tag-pinned: this file is both committed at
 		# release/<version>/MANIFEST.md and published verbatim as the GitHub
 		# Release body, where '../../' does not resolve. The tag does not exist
@@ -2222,7 +2222,7 @@ REL_BANNER=""
 		# link goes live when the release is pushed. (Under --dry-run no tag is
 		# ever created, so the link will 404; the dry-run banner already says
 		# the output is not a real release.)
-		printf 'Full detail: [docs/pic10f320_special_case.md](%s/blob/%s/docs/pic10f320_special_case.md).\n\n' \
+		printf 'Full detail: [DESIGN_DOCUMENTATION.adoc](%s/blob/%s/DESIGN_DOCUMENTATION.adoc#pic10f320-architecture).\n\n' \
 			"$REPO_URL" "$VERSION"
 	fi
 	printf 'Its images follow the same `%s-<mcu>-<output stage>.hex` scheme as every\n' "$FW_BASE"
@@ -2324,8 +2324,8 @@ ok "release qualification metadata and evidence verified."
 # Step 0 validated the bounded current-release declarations against the
 # canonical set the Makefile PREDICTS a release will contain. Re-validate them
 # here against what was actually staged, so the last documentation check before
-# the artifact commit and the tag is that four documents and one directory
-# agree on the same inventory.
+# the artifact commit and the tag is that the designated current documents and
+# one directory agree on the same inventory.
 release_validate_staged_documentation "$REPO_ROOT" "$OUTPUT_DIR" "$VERSION" \
 	|| die "staged release inventory does not match the bounded current-release declarations"
 ok "bounded current-release declarations match the staged inventory."

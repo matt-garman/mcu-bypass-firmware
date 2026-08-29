@@ -707,7 +707,7 @@ cross-reference resolves.
 
 ## BR-PIC-02 - Fold PIC10F322 phase notes into the design document
 
-**Status:** DONE (commit pending)
+**Status:** DONE `3a3b661`
 
 **Depends on:** BR-PIC-01
 
@@ -811,7 +811,7 @@ working tree` and does not name the path, which is worth a look on its own.
 
 ## BR-PIC-03 - Consolidate the PIC10F320 constrained-target case
 
-**Status:** TODO
+**Status:** DONE (commit pending)
 
 **Depends on:** BR-PIC-01, BR-RES-01
 
@@ -865,22 +865,107 @@ working tree` and does not name the path, which is worth a look on its own.
 
 **Work:**
 
-- [ ] Extract the normative constrained-target design into one dedicated design
+- [x] Extract the normative constrained-target design into one dedicated design
   section.
-- [ ] Preserve one concise historical measurement statement tied to its
+- [x] Preserve one concise historical measurement statement tied to its
   toolchain/commit if needed to support the "does not fit" decision.
-- [ ] Ensure exact current resource numbers are handled by BR-RES-01.
-- [ ] Move remaining open hardware concerns to `TODO.md` or
+- [x] Ensure exact current resource numbers are handled by BR-RES-01.
+- [x] Move remaining open hardware concerns to `TODO.md` or
   `HARDWARE_VALIDATION_LOG.md` as appropriate.
-- [ ] Update README target-selection guidance.
-- [ ] Update test documentation to refer to the new design anchor.
-- [ ] Delete `docs/pic10f320_merge_plan.md`.
-- [ ] Delete `docs/pic10f320_special_case.md` after references move.
-- [ ] Delete `docs/pic10f320_validation.md` after unique durable facts are
+- [x] Update README target-selection guidance.
+- [x] Update test documentation to refer to the new design anchor.
+- [x] Delete `docs/pic10f320_merge_plan.md`.
+- [x] Delete `docs/pic10f320_special_case.md` after references move.
+- [x] Delete `docs/pic10f320_validation.md` after unique durable facts are
   accounted for.
-- [ ] Delete `docs/pic10f320_feasibility.md` if its concise decision evidence is
+- [x] Delete `docs/pic10f320_feasibility.md` if its concise decision evidence is
   fully retained; otherwise reduce it to a short immutable decision record with
   no current status or measurements.
+
+**Result:**
+
+All four documents deleted -- 4,571 lines. `pic10f320-architecture`, created by
+BR-PIC-01, is now the whole normative account rather than a summary with
+pointers.
+
+What it gained:
+
+- The "does not fit" finding as a self-contained, dated, toolchain-bound
+  statement: the three variants measured 356/386/381 words against 256 on
+  2026-06-26 under the pinned free-tier XC8 and device pack, with hard link
+  failures rather than near misses, and the three source-level reductions that
+  were priced rather than estimated -- packed enums (nothing, the optimizer
+  already emitted identical code), force-inlining (nothing, the free tier
+  ignores `always_inline`), a pointed-to result (twelve words), and bit-packing
+  (47 words, still 53 over). The two best did not compose, which is the
+  signature of a floor.
+- The manual shared surface, as a seven-row table. The equivalence lane enforces
+  most of it, but not the output-stage rows and not the defensive layer, and
+  saying which rows the gate does not reach is the point of keeping the table.
+- The hardware return stack, which had no design-level statement anywhere. Three
+  facts make it a design concern: it is a return stack, not the AVR's data
+  stack, so `test-stack-bound` has nothing to measure here; "inlined, so it cannot
+  recurse" is wrong because the output stages are still called from `init()`;
+  and the compiler cannot be the witness -- XC8 once reported 3 on a real relay
+  image whose emitted stream held a verified 4-deep `fcall` chain, its overflow
+  check is only a warning that still exits 0 and writes a HEX, and the core has
+  no `STKPTR`, `TOSL`/`TOSH`, `STKOVF` or `STVREN` to catch it at runtime. Hence
+  two independent witnesses whose disagreement is itself the finding, and a HEX
+  witness that fails closed at its own modelling boundary.
+- What the assurance package does not establish: the seam stays a seam, the
+  expected-image gate is not universal compiler reproducibility, the general
+  latch check is absent, and hardware-bench properties are simulated.
+- The provenance note -- non-squashed subtree import, six predecessor signed
+  tags under a `pic10f320/` namespace, and the fact that `git log --follow`
+  needs `-m` to cross the import merge. Without that sentence the preserved
+  history is effectively unreachable.
+
+The bit-packing refusal went to Failsafe Mechanisms instead, because it is not a
+PIC10F320 fact: the range check works only because the representation is wider
+than the domain, so packing the members to their legal widths makes the check
+dead code, puts all three in one byte where a flip is undetectable, and drops
+the counter bound from 255 to 63. That is a property of the core at every
+target. The free-tier optimizer cap went to `TOOLCHAIN.adoc` as its own section,
+since it is a toolchain fact two documents depended on: `-Os` downgrades with
+advisory 2051, and the passes that would help are PIC-specific back-end work
+with no open substitute -- no 8-bit PIC target in upstream LLVM, whole-program
+compiled-stack overlay with no hand-off point, and SDCC's `pic14` port a
+separate ABI world.
+
+Gate surfaces that had to move with the deletion, since two of the four
+documents were load-bearing:
+
+- `scripts/release-documentation.sh`: `current_documents` drops the two deleted
+  paths, leaving `release/README.md` and `TODO.md`. Whether that set should be
+  redesigned is BR-STATE-01/02's question, not this one's.
+- `test/test_release_preflight.sh`: its fixture writer must write the same set.
+- `scripts/make-release.sh`: the generated per-release "Full detail" link now
+  targets `DESIGN_DOCUMENTATION.adoc#pic10f320-architecture`, still absolute and
+  tag-pinned for the same reason as before.
+- `test/test_release_qualification.sh`: the three pinned link properties updated
+  to match, the negative case widened to reject a repo-relative form of either
+  path, and one check added -- the design document must actually define the
+  anchor the generated link points at, which the old assertion had no analogue
+  for.
+- `test/test_makefile_name_contract.py`: its axis-B negative case opened
+  `docs/pic10f320_validation.md` to prove a current document is not exempt from
+  the historical-banner rule. Repointed at `test/README.md`, which is current,
+  reader-facing and full of Make target names -- a better subject for that axis
+  than the document it replaced.
+
+Prose references retargeted in `README.md` (2), `TOOLCHAIN.adoc` (2),
+`test/README.md` (3), `MISRA_COMPLIANCE.md`, `HARDWARE_VALIDATION_LOG.md`,
+`.github/workflows/ci.yml`, `Makefile` (2), `.gitignore`,
+`docs/pic12f675_feasibility.md` (2) and `docs/relay_coil_fault_correction.md`.
+The adopter boundary the validation record carried -- this project does not
+specify the coil driver, supply, flyback network or PCB, so relay motion and the
+simultaneous-driver transient are the adopter's to validate -- moved into
+`docs/relay_coil_fault_correction.md`, which is the live relay policy document.
+
+Two firmware comments still name a deleted path,
+`src/bypass_mcu_pic10f320.c:178` and `src/bypass_compile_checks.h:17`. Both are
+user-owned and belong to BR-PIC-05; the replacement target is
+`DESIGN_DOCUMENTATION.adoc#pic10f320-architecture`.
 
 **Acceptance:**
 
@@ -2350,8 +2435,8 @@ dependencies and acceptance criteria.
 | BR-RES-02 | Retire prose synchronization tests | DONE `e7c4f68` |
 | BR-RES-03 | Publish generated release resource view | TODO |
 | BR-PIC-01 | Create coherent PIC design section | DONE `b1b98c3` |
-| BR-PIC-02 | Merge PIC10F322 phase notes | DONE (commit pending) |
-| BR-PIC-03 | Consolidate PIC10F320 documents | TODO |
+| BR-PIC-02 | Merge PIC10F322 phase notes | DONE `3a3b661` |
+| BR-PIC-03 | Consolidate PIC10F320 documents | DONE (commit pending) |
 | BR-PIC-04 | Consolidate PIC12F675 feasibility | TODO |
 | BR-PIC-05 | Update firmware document references | NEEDS USER |
 | BR-FLASH-01 | Make FLASHING.md authoritative | TODO |

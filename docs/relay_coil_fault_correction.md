@@ -211,7 +211,7 @@ calls `set_relay_coils_low()` directly, since this shell links no output driver.
 That direct call is a single constant-mask `LATA` write, matching half 1 above.
 It cleared the two bits separately until `v0.9.10`; folding them into one write
 freed six program words and a return-stack level on the part with the least of
-both (`docs/pic10f320_validation.md`, run 6). Both fault lanes now observe the
+both. Both fault lanes now observe the
 **write sequence** and not only the settled result: injecting both coil latches
 and finding one still driven after the clear began fails the host lane
 (`partial_clear_coils`) and the gpsim lane (instruction-granular sampling of
@@ -335,6 +335,13 @@ state; the inactive-high cases make the post-pulse clear load-bearing on
 PIC10F322. These are residual-risk characterizations. They are not evidence that
 an external output accepts the write, and not evidence that the relay cannot
 move.
+
+**Where this policy stops.** It closes at the firmware boundary. This project
+does not specify the external coil-driver topology, the power supply, the
+flyback network or the PCB, so an adopter must validate relay motion and the
+simultaneous-driver supply transient against their own hardware. That
+responsibility is not an argument for leaving the firmware's former unbounded
+energy path open; it is the part of the problem firmware cannot reach.
 
 ### PIC12F675 whole-port write
 

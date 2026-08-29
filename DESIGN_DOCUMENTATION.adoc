@@ -17,8 +17,8 @@ _some_ of the same benefits as AVR Classic, but the tooling is decidedly less
 compelling. Both use Microchip's XC8 compiler and PIC10-12Fxxx_DFP device pack.
 XC8 is not open source, although Microchip offers a limited free version; that
 free tier restricts the options that are available. PIC10F320's 256-word flash
-also requires the self-contained architecture documented in
-`docs/pic10f320_special_case.md`.
+also requires the self-contained architecture described in
+<<pic10f320-architecture>>.
 
 A third PIC, the PIC12F675, is **release-supported from `v0.9.9`** on the same
 toolchain: release images, a place in the default `all` goal, and the full
@@ -283,7 +283,19 @@ PIC12F675:: BOD is enabled (`BOREN=ON`) at a fixed 2.025-2.175v trip
       Every serviced tick therefore snapshots and re-validates the debounce
       context before acting on it.  A range check rejects any of
       `program_state`, `effect_state` or `debounce_counter` that has
-      left its legal domain.  A flip that lands *inside* the legal
+      left its legal domain.  That check exists only because the
+      representation is wider than the domain, which is a priced
+      decision rather than an accident.  Packing the three members
+      into bitfields exactly as wide as their legal values was
+      measured to save 47 program words, and was refused at every
+      target rather than only where flash is tight: a one-bit
+      `program_state` can never hold an out-of-range value, so the
+      check becomes dead code; all three members would then share a
+      single byte, so any one flip silently mutates live state with
+      nothing able to represent -- and therefore detect -- the
+      corruption; and the compile-time counter bound would fall from
+      255 to 63, narrowing the thresholds this design is allowed to
+      choose.  A flip that lands *inside* the legal
       range is caught by a checksum: the firmware keeps a
       complemented XOR fold of the three context members
       (`debounce_ctx_check_word()`).  Each enabled shell validates a
@@ -1340,8 +1352,8 @@ removing two per-bit helpers that had no other caller. That does not by itself
 reopen the latch-check question — `cd4053_with_mute`, which is unaffected by any
 of it, is the variant the check overflowed first — but a re-pricing would start
 from a different number than the one it was refused on.
-`docs/pic10f320_special_case.md` records those decisions and the measurements
-each was made against.
+<<pic10f320-architecture>> records those decisions; the measurements each was
+made against belong to the release record.
 
 === PIC12F675 (XC8 build)
 
@@ -1741,12 +1753,24 @@ this design, with the same peripherals and the same CONFIG posture -- and
 one number.
 
 **The modular architecture does not fit, and that is measured rather
-than assumed.** The modular firmware overshoots 256 words by roughly 100 under
-free-tier XC8, and no correctness-preserving source change closes the gap;
-`docs/pic10f320_feasibility.md` records the analysis. So
-`src/bypass_mcu_pic10f320.c` is a single self-contained file: the saturating
-integrator and the state machine are written directly in `main()`, debounce
-initialization directly in `init()`, and the three output variants are
+than assumed.** Measured 2026-06-26 on the pinned free-tier XC8 and PIC10-12Fxxx
+device pack of the day, the modular firmware built for this part at 356, 386 and
+381 words for the simple, mute and relay variants -- roughly 100 words over 256
+in every case, and hard link failures rather than near misses. Three
+source-level reductions were then priced rather than estimated. Packed enums
+saved nothing, because the optimizer already emitted identical code and packing
+shrank only the unconstrained RAM. Force-inlining the core saved nothing,
+because the free tier silently ignores `always_inline` and left
+`debounce_step()` a standalone function. Rewriting `debounce_step()` to fill a
+pointed-to result saved twelve words and was the only robustness-neutral win,
+which is not remotely enough. Bit-packing the context and result structs saved
+the most at 47 words, still left the image 53 words over, and was refused on
+correctness grounds that are stated in Failsafe Mechanisms rather than here,
+because they apply to every target. The two best ideas did not even compose:
+stacking them was *larger* than bit-packing alone, which is the signature of a
+floor. So `src/bypass_mcu_pic10f320.c` is a single self-contained file: the
+saturating integrator and the state machine are written directly in `main()`,
+debounce initialization directly in `init()`, and the three output variants are
 source-local static functions selected by `#if defined(OUTPUT_*)`. It links
 neither `src/bypass_pure.c` nor the modular output drivers.
 
@@ -1772,6 +1796,78 @@ different kind of statement from "the verified code is the shipped code". The
 honest summary is that this target's qualification design reaches for the same
 standard by a different and more elaborate route.
 
+**The shared surface, because a manual sync needs a checklist.** A core change
+does not propagate here the way it does everywhere else, so the surface that
+has to be mirrored by hand is worth naming in full. It is small, finite and
+auditable:
+
+|===
+| Item | Core or driver source | PIC10F320 firmware
+
+| Press threshold
+| `PRESSED_THRESH` in `src/bypass_config.h`
+| its own `#define`
+
+| Release / lock-out threshold
+| `RELEASE_THRESH` in `src/bypass_config.h`
+| its own `#define`
+
+| Saturating integrator
+| `debounce_integrate()` in `src/bypass_pure.c`
+| written directly in the `main()` loop
+
+| State machine
+| `debounce_step()` in `src/bypass_pure.c`
+| a `switch` written directly in `main()`
+
+| Power-on initialization
+| `debounce_init_context()` in `src/bypass_pure.c`
+| written directly in `init()`
+
+| Output stages
+| the three `src/bypass_output_*.c` drivers
+| source-local static functions under `#if defined(OUTPUT_*)`
+
+| Analog-switch polarity
+| the unified drive in both CD4053 drivers
+| source-local high/low helpers
+|===
+
+The pin map and the CONFIG word are PIC-local and shared with nothing. Read the
+table as the checklist for what to edit, not as the mechanism that catches you
+forgetting -- the equivalence lane is that mechanism, and it does not reach two
+of these rows. The output-stage rows are covered instead by the actuation lane,
+and a change that touches only the *defensive* layer is compared against the
+PIC10F322 shell by no automatic gate at all, which is why the omission below is
+recorded rather than merely known.
+
+**The hardware return stack, and why it gets its own gate.** This is the one
+resource bound on this part that no other gate observes, and three facts make
+it a design concern rather than a build detail. First, it is not the AVR's
+question: `test-stack-bound` bounds a *data* stack in bytes, and the PIC14 core
+has none -- XC8 overlays locals into static, non-reentrant storage -- so what
+is bounded here is the fixed eight-level hardware **return** stack, with the
+budget read from the device pack rather than hardcoded. Second, "it is inlined,
+so it cannot recurse" would have been the wrong answer: the debounce logic is
+inlined, but the output stages are not, and every variant reaches one from
+`init()`. Third, and decisively, the compiler cannot be the witness. XC8's own
+per-function estimate was once **3** on a real relay image whose emitted
+instruction stream contained a verified **4**-deep chain of `fcall`s, and its
+overflow check is only a warning -- a deliberately ten-deep chain compiles to
+`warning: (1393) possible hardware stack overflow detected` and `xc8-cc` still
+exits 0 and writes a HEX. Overflow is undetectable at runtime on this core:
+there is no `STKPTR`, no `TOSL`/`TOSH`, no `STKOVF` bit in `PCON` and no CONFIG
+`STVREN`, so the stack silently wraps and a return goes to the wrong address.
+The project therefore uses **two independent witnesses** -- one over the emitted
+assembly, one reconstructing control flow from the shipped HEX -- and a
+disagreement between them is itself the finding. The HEX witness fails closed at
+its own boundary rather than guessing: reserved words, `RETFIE`, computed `PCL`
+writes, data-dependent writes through `INDF` and any path that could enable
+`GIE` are rejected rather than modelled. One limit belongs with the design
+rather than the mechanics: running the oracle inside every build proves what
+the recipe produced, not that the file was not modified afterwards. Release
+provenance and reproduction are separate evidence.
+
 **One recorded omission.** The exact-`TRISA` direction check was ported here
 because it cost one word per variant; the general output-**latch** match was
 not, because in every formulation that preserves its meaning it overruns 256
@@ -1786,6 +1882,19 @@ is therefore precise: a wrong LED or analog signal path can persist until the
 next accepted press. The context checksum is likewise absent here for the same
 capacity reason, with the range check still in force.
 
+**What this package does not establish,** stated so nobody has to infer it.
+The seam remains a seam: everything above is a behavioural assurance argument,
+and however thorough it is, it is a different kind of statement from "the
+verified code is the shipped code". The expected-image gate is not universal
+compiler reproducibility -- it holds the three emitted images against a
+committed, reviewed baseline from the pinned toolchain, so byte drift fails
+until an intentional rebaseline, but it says nothing about what a different XC8
+version or environment would emit. The general output-latch check is absent,
+as above. And the hardware-bench properties -- watchdog and brown-out timing,
+absolute tick period, real-silicon pulse widths -- are simulated rather than
+proven, a limit this target shares with the PIC10F322 because both are
+validated in the same simulator; `test/README.md` carries the full list.
+
 **Target-selection consequence.** Prefer another part whenever the choice of MCU
 is yours: the AVR Classic parts, the ATtiny202 and the PIC10F322 all compile
 the verified core directly, and the PIC10F322 is pin-compatible with this part
@@ -1794,13 +1903,27 @@ the PIC10F320 when it is a hard requirement -- cost, existing inventory, or an
 established board. It is release-supported, with published prebuilt images
 beginning with `v0.9.6`.
 
-**Where the rest of it lives.** `docs/pic10f320_special_case.md` holds the
-assurance comparison and the manual shared-surface checklist;
-`docs/pic10f320_validation.md` owns execution evidence, its exact scope and
-current qualification status; `test/README.md` owns the current lane inventory
--- Make targets, substrates, and the property each layer establishes. Exact
-check counts and fixture inventories belong to the executable tests
-themselves, so no document can go stale against the suite.
+**Where the rest of it lives.** `test/README.md` owns the current lane
+inventory -- Make target, substrate, and the property each layer establishes.
+Measured results and qualification status belong to the retained release
+record under `release/<version>/`, which identifies the qualified source
+commit; this document does not restate them. Exact check counts and fixture
+inventories belong to the executable tests themselves, so no document can go
+stale against the suite. Standing expected-image digests are
+`test/pic10f320/expected_images.sha256`.
+
+**Where the firmware came from.** This target was merged in from a separate
+repository by a non-squashed `git subtree` import, so its full development
+history is reachable here and its six predecessor signed release tags are
+preserved under a `pic10f320/` namespace. Two consequences are worth knowing
+before doing archaeology on it. The import is a merge commit, so a plain
+`git log --follow` stops there -- `-m` is needed to descend into the second
+parent. And the predecessor project's own binaries were deliberately not
+copied in, because their version numbers collide with this project's line;
+unified prebuilt PIC10F320 images begin at `v0.9.6`. Making a single-command
+`--follow` work would have meant rewriting the imported commits, which
+sacrifices their object identity and invalidates those signed tags. That trade
+was declined.
 
 [[pic12f675-architecture]]
 === PIC12F675: the classic mid-range shell
