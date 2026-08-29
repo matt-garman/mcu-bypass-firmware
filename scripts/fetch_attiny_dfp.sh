@@ -42,6 +42,9 @@
 set -eu
 
 # --- pinned pack (bump VER + SHA together; get the new SHA from a trusted run) ---
+# This file is the ONLY place the pack version is pinned. The CI caches key on
+# hashFiles('scripts/fetch_attiny_dfp.sh'), so a bump here invalidates them; the
+# workflows must not carry a second copy of VER in a job env (see release.yml).
 VER="${ATTINY_DFP_VER:-3.1.260}"
 SHA256="${ATTINY_DFP_SHA256:-59e3b4317cfc3a07a4ee637e49df44c5bd9025d08cf071b4d0d0c83396af5aae}"
 URL_BASE="${ATTINY_DFP_URL_BASE:-https://packs.download.microchip.com}"

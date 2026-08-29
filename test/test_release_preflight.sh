@@ -27,6 +27,42 @@ REAL_STAT=$(command -v stat) || { printf 'FAIL: stat is required\n' >&2; exit 1;
 REAL_CP=$(command -v cp) || { printf 'FAIL: cp is required\n' >&2; exit 1; }
 REAL_MKTEMP=$(command -v mktemp) || { printf 'FAIL: mktemp is required\n' >&2; exit 1; }
 REAL_CC=$(command -v "${HOSTCC:-cc}") || { printf 'FAIL: a host C compiler is required\n' >&2; exit 1; }
+
+# This gate's positive control is "a clean release configuration passes", and
+# that assertion means nothing in a dirty environment. The Makefile refuses a
+# release goal under ANY environment-origin name in the project's build-input
+# vocabulary that is not a supported release input -- and this script inherits
+# whatever its caller exported. Two callers export such names as a matter of
+# course: `make` puts every command-line variable in its recipes' environment
+# (release CI runs `make test-long STRICT_TOOLS=1 ... PIC12F675_FLASH_IMAGES=build`),
+# and a workflow-level `env:` reaches every step in the job.
+#
+# Clearing a hand-maintained list of those names drifted twice -- once when
+# PIC12F675_FLASH_IMAGES was added to the release workflow, and again when an
+# ATTINY_DFP_VER job env failed v0.9.10's release run on a name the Makefile
+# never reads. So ask the Makefile for its own vocabulary and clear every match
+# once, here, before any case runs. A case that deliberately inherits an
+# override sets it at call time, after this, and is unaffected.
+#
+# --no-print-directory is required (a `w` inherited through MAKEFLAGS beats -s),
+# and this runs before the scrub so _MAKE_SERIAL_LOCK_HELD is still exported --
+# the serialization wrapper must see the lock this script already holds rather
+# than block on it. CC=: keeps the parse-time compiler probes quiet where the
+# cross toolchain is absent; the queried value does not depend on it.
+release_input_patterns=$("$REAL_MAKE" -s --no-print-directory -C "$ROOT" CC=: \
+	print-RELEASE_ENVIRONMENT_INPUT_PATTERNS) \
+	|| { printf 'FAIL: could not read the release environment-input vocabulary\n' >&2; exit 1; }
+[ -n "$release_input_patterns" ] \
+	|| { printf 'FAIL: release environment-input vocabulary is empty\n' >&2; exit 1; }
+while IFS= read -r inherited_name; do
+	for input_pattern in $release_input_patterns; do
+		# GNU Make's % stem is the shell's *; every pattern is one word.
+		case "$inherited_name" in
+			${input_pattern//%/\*}) unset "$inherited_name"; break ;;
+		esac
+	done
+done < <(compgen -e || true)
+unset inherited_name input_pattern
 # shellcheck source=scripts/release-provenance.sh
 source "$ROOT/scripts/release-provenance.sh"
 # shellcheck source=scripts/release-documentation.sh
@@ -402,10 +438,12 @@ run_preflight() {
 		# -- including the one running this gate -- inherits it, and a
 		# `run_preflight` with no version would silently exercise the
 		# *versioned* path instead. Clearing the names here keeps each case
-		# testing the argument vector it actually passes.
-		unset VERSION RELEASE_ARGS MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEOVERRIDES MAKELEVEL \
-			STRICT_TOOLS MUTATION_ALLOW_SKIP XT_STATIC_RAM_LIMIT XT_STACK_MAX_FRAME \
-			PIC12F675_DATA_LIMIT PIC12F675_FLASH_IMAGES
+		# testing the argument vector it actually passes. None of these names
+		# is in the project's build-input vocabulary, so the whole-environment
+		# scrub above does not cover them and they are listed by hand; every
+		# caller-exported build input the scrub DOES cover has been cleared
+		# before the first case runs, which is why no such name appears here.
+		unset VERSION RELEASE_ARGS MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEOVERRIDES MAKELEVEL
 		[ -z "$release_makeflags" ] || export MAKEFLAGS="$release_makeflags"
 		[ -z "$release_mflags" ] || export MFLAGS="$release_mflags"
 		[ -z "$release_gnumakeflags" ] || export GNUMAKEFLAGS="$release_gnumakeflags"
@@ -781,6 +819,23 @@ if GPSIM_TIMEOUT_SECONDS=1 run_preflight >"$output" 2>&1; then
 fi
 expect_configuration_refusal "an inherited GPSIM_TIMEOUT_SECONDS override" \
 	GPSIM_TIMEOUT_SECONDS 'not a supported production release override'
+
+# GPSIM_TIMEOUT_SECONDS above is a name the Makefile declares, so the script's
+# own inventory refuses it by name. ATTINY_DFP_VER is not declared anywhere in
+# the Makefile -- it selects which ATtiny device pack scripts/fetch_attiny_dfp.sh
+# vendors -- so the refusal has to come from the Makefile's parse-time guard on
+# the environment vocabulary instead, and it names a different diagnostic. Both
+# halves matter: an unreviewed build-input selector in the environment is what
+# the guard is for whether or not Make reads it, and a release workflow that
+# exported one is what failed v0.9.10. Pinning it keeps the refusal a tested
+# property rather than an accident of which names CI happens to export.
+: > "$tool_log"
+if ATTINY_DFP_VER=9.9.999 run_preflight >"$output" 2>&1; then
+	fail "preflight accepted an inherited ATTINY_DFP_VER override"
+fi
+expect_configuration_refusal "an inherited ATTINY_DFP_VER override" \
+	ATTINY_DFP_VER \
+	'refusing production release configuration under unsupported release overrides'
 
 injected_release_makefile="$work/injected-release.mk"
 printf 'override CFLAGS := -DINJECTED_MAKEFILE_FLAGS\n' \

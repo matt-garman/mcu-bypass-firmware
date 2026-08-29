@@ -136,6 +136,18 @@ validation suite — backs these binaries, through two mechanisms:
    before staging artifacts. Only explicitly non-publishable dry runs may proceed
    from a dirty tree.
 
+   `v0.9.10` is tagged but was never published, and no GitHub release exists for
+   it. Its tag CI reproduced every image bit-for-bit and then failed while
+   re-running the gates on the clean runner: the release job's environment
+   carried an ATtiny device-pack version variable, and the Makefile refuses a
+   release configuration under any unreviewed build input in the environment.
+   Publication never ran. The signed tag and `release/v0.9.10/` are retained as
+   the record of that cut rather than rewritten, so its `CHANGELOG.md` section
+   and comparison link stay resolvable. Its retained `test-long` summary is the
+   selected terminal output of that aggregate run and carries no machine-readable
+   result record; judge `v0.9.10` by the evidence contract recorded in its own
+   tag.
+
    The signed version tag points to a dedicated release-artifact commit. Tag CI
    fetches the exact remote annotated-tag object and verifies its OpenPGP
    signature against [`release/signing-key.asc`](signing-key.asc) and the pinned
