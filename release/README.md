@@ -25,7 +25,7 @@ keeps the combined aggregate log and the complete twelve-artifact matrix JSON;
 shipped HEX files and their `SHA256SUMS` entries.
 
 <!-- current-release:start -->
-> **Current release contract:** `v0.9.10`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
+> **Current release contract:** `v0.9.11`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
 > The images cover three output stages; PIC10F320 is the self-contained target.
 <!-- current-release:end -->
 

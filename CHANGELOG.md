@@ -35,6 +35,8 @@ file is the human-readable summary of *what changed*.
 
 ## [Unreleased]
 
+## [0.9.11] - 2026-08-29
+
 ### Fixed
 
 - **`v0.9.10` was tagged and never published: its own release gate refused the
@@ -3922,7 +3924,8 @@ file is the human-readable summary of *what changed*.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.10...HEAD
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.11...HEAD
+[0.9.11]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.10...v0.9.11
 [0.9.10]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.9...v0.9.10
 [0.9.9]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.8...v0.9.9
 [0.9.8]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.7...v0.9.8

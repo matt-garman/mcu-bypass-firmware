@@ -76,7 +76,7 @@ fi
 current_pic12f675_status_one_line=$(printf '%s\n' "$current_pic12f675_status" \
 	| tr '\n' ' ' | tr -s ' ')
 for required in \
-		'**Current status (v0.9.10;' \
+		'**Current status (v0.9.11;' \
 		'PIC12F675 is **release-supported from `v0.9.9`**' \
 		'included in the default `all` goal, both CI aggregates' \
 		'21-image release set, the 18-combination release soak, and the 35-file retained evidence inventory' \
@@ -92,7 +92,7 @@ fi
 for required in \
 		'| Implemented integration | default `all`, both CI aggregates' \
 		'**Status 2026-08-13 (v0.9.9 disposition).**' \
-		'**Current implementation status (v0.9.10):**' \
+		'**Current implementation status (v0.9.11):**' \
 		'## 9. Historical effort and suggested sequencing' \
 		'## 11. Historical documentation plan'; do
 	grep -Fq "$required" "$PIC12F675_FEASIBILITY" \

@@ -554,7 +554,7 @@ checks=$((checks + 1))
 
 # Versionless preflight remains a host-capability probe. Supplying a production
 # version additionally exercises the actual checked-in documentation contract.
-run_preflight v0.9.10 >"$output" 2>&1 \
+run_preflight v0.9.11 >"$output" 2>&1 \
 	|| fail "valid versioned preflight failed: $(<"$output")"
 assert_no_release_scratch
 checks=$((checks + 1))
@@ -1613,7 +1613,7 @@ checks=$((checks + 1))
 # The live checked-in tree must satisfy the contract, including the generated
 # documentation this repository would render today. This is the check that
 # actually pins README.md and release/README.md.
-release_validate_pic12f675_finalization "$ROOT" v0.9.10 >"$output" 2>&1 \
+release_validate_pic12f675_finalization "$ROOT" v0.9.11 >"$output" 2>&1 \
 	|| fail "the checked-in tree fails the PIC12F675 finalization contract: $(<"$output")"
 checks=$((checks + 1))
 
@@ -2594,28 +2594,28 @@ grep -Fq 'could not inspect working-tree status' "$output" \
 assert_no_release_scratch
 checks=$((checks + 1))
 
-TEST_GIT_LOCAL_TAG_FAIL=1 run_preflight v0.9.10 >"$output" 2>&1 \
+TEST_GIT_LOCAL_TAG_FAIL=1 run_preflight v0.9.11 >"$output" 2>&1 \
 	|| fail "versioned preflight treated a failed local-tag query as a host-capability failure"
-grep -Fq 'could not check local tag v0.9.10 (git rev-parse exited 74).' "$output" \
+grep -Fq 'could not check local tag v0.9.11 (git rev-parse exited 74).' "$output" \
 	|| fail "versioned preflight silently treated a local-tag query failure as absence"
 assert_no_release_scratch
 checks=$((checks + 1))
 
-TEST_GIT_REMOTE_CONFIG_FAIL=1 run_preflight v0.9.10 >"$output" 2>&1 \
+TEST_GIT_REMOTE_CONFIG_FAIL=1 run_preflight v0.9.11 >"$output" 2>&1 \
 	|| fail "versioned preflight treated failed origin inspection as a host-capability failure"
-grep -Fq 'could not inspect origin for tag v0.9.10 (git remote get-url exited 73).' "$output" \
+grep -Fq 'could not inspect origin for tag v0.9.11 (git remote get-url exited 73).' "$output" \
 	|| fail "versioned preflight silently treated failed origin inspection as no remote"
 assert_no_release_scratch
 checks=$((checks + 1))
 
-TEST_GIT_REMOTE_FAIL=1 run_preflight v0.9.10 >"$output" 2>&1 \
+TEST_GIT_REMOTE_FAIL=1 run_preflight v0.9.11 >"$output" 2>&1 \
 	|| fail "versioned preflight treated an unavailable remote as a host-capability failure"
-grep -Fq 'could not check tag v0.9.10 on origin (git ls-remote exited 72).' "$output" \
+grep -Fq 'could not check tag v0.9.11 on origin (git ls-remote exited 72).' "$output" \
 	|| fail "versioned preflight silently treated a remote failure as tag absence"
 assert_no_release_scratch
 checks=$((checks + 1))
 
-TEST_GIT_NO_ORIGIN=1 run_preflight v0.9.10 >"$output" 2>&1 \
+TEST_GIT_NO_ORIGIN=1 run_preflight v0.9.11 >"$output" 2>&1 \
 	|| fail "versioned preflight rejected a repository without origin: $(<"$output")"
 if grep -Fq 'could not inspect origin' "$output"; then
 	fail "an absent origin was misreported as an operational failure"

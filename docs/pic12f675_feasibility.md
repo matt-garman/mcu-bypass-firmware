@@ -1,7 +1,7 @@
 # PIC12F675 feasibility — porting the reference architecture to a classic mid-range PIC
 
 <!-- current-status:start -->
-**Current status (v0.9.10; updated 2026-08-25): release-supported in software.**
+**Current status (v0.9.11; updated 2026-08-29): release-supported in software.**
 The repository now contains the production Model-B PIC12F675 shell and pin map,
 the complete three-variant build with flash and 48-of-64-byte Data-space gates,
 static analysis,
@@ -1402,7 +1402,7 @@ before it can drive a wrong output:
 The one nominal-path case those range and actuation guards do **not** cover is
 an *in-range* single-bit upset of `debounce_counter` -- a flip that stays
 within `[0, RELEASE_THRESH]` yet crosses `PRESSED_THRESH`, fabricating a
-phantom toggle with no footswitch press. On the current v0.9.10 PIC12F675
+phantom toggle with no footswitch press. On the current v0.9.11 PIC12F675
 build that case is closed, not open: `PIC12F675_CFLAGS` defines
 `-DBYPASS_CTX_CHECK`, so the gate's first term compares a persisted-context
 snapshot against `debounce_ctx_check_word()`. The shell then computes and
@@ -1453,7 +1453,7 @@ review and verification evidence. The original sequencing rule remains useful
 review history; the only unfinished work in this section is the `1.x.y` hardware
 bench identified in §8.
 
-**Current implementation status (v0.9.10):** step 0 selected the 1.024 ms TMR0 design,
+**Current implementation status (v0.9.11):** step 0 selected the 1.024 ms TMR0 design,
 a single-part PIC12F675 shell, and Model B. Step 1 is not applicable unless the
 ISR alternative is reconsidered; steps 2 through 9 are implemented — step 9
 re-derived the holds through the tick period rather than letting the slack absorb

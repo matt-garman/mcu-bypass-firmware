@@ -14,16 +14,16 @@ reviewed successor digests now drive a standing gate, while the migration proof
 and its provenance remain durable only here.
 
 <!-- current-release:start -->
-**Current release contract:** `v0.9.10`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
+**Current release contract:** `v0.9.11`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
 
-**Qualification status (2026-08-23):** PIC10F320 remains the self-contained
-exception. This document summarizes the `v0.9.10` *source* contract. The
+**Qualification status (2026-08-29):** PIC10F320 remains the self-contained
+exception. This document summarizes the `v0.9.11` *source* contract. The
 authoritative `QUALIFICATION`, manifest, image checksums, and exact 35-file
 lane/soak evidence for the release it qualifies are retained under
-`release/v0.9.10/`; that retained record, rather than this summary, identifies
+`release/v0.9.11/`; that retained record, rather than this summary, identifies
 the qualified source commit and measured results.
 
-**Pre-tag transition:** `release/v0.9.10/` is created by the release cut and published with the signed `v0.9.10` tag, so the source tree that declares this contract does not contain it yet.
+**Pre-tag transition:** `release/v0.9.11/` is created by the release cut and published with the signed `v0.9.11` tag, so the source tree that declares this contract does not contain it yet.
 <!-- current-release:end -->
 
 The preceding `v0.9.9` production record retains all 21 canonical images and 18
