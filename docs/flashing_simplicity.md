@@ -425,7 +425,8 @@ memory a programmer erases**:
 - **The oscillator calibration word** — a `RETLW` at word `0x3FF`, the last
   word of flash. The device pack declares it as the `.oscval` CalDataZone, and
   XC8's startup code emits a literal `call 0x3ff` expecting it to be present.
-  `docs/pic12f675_feasibility.md:700` (§4.5) records what happens without it,
+  `docs/pic12f675_feasibility.md` §4.5, "Fixed 4 MHz INTOSC, and the OSCCAL
+  calibration word", records what happens without it,
   observed during the port spike: the program counter ran off the end of flash
   (`increment PC=0x400 == memory size 0x400`), the part watchdog-reset, and did
   so *in a loop* — `main()` was never reached.
@@ -514,7 +515,8 @@ helper does not attempt.
 ### 5.4 The honest limit of what the guarded workflow proves
 
 None of this establishes that `pk2cmd` or `ipecmd` actually preserves the trim.
-That is items 1 and 2 of `docs/pic12f675_feasibility.md:1094` (§8), both still
+That is items 1 and 2 of `docs/pic12f675_feasibility.md` §8, "Open risks and
+unknowns", both still
 open, both silicon-only, tracked for the `1.x.y` hardware pass as `TODO.md`
 `T3-pic12f675-bench`. The transaction *measures and retains* the programmer's
 behaviour; it does not guarantee the outcome. A FAIL is detected only after the

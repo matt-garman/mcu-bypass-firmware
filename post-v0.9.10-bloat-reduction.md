@@ -211,7 +211,7 @@ unfinished release.
 
 ## BR-AUTH-01 - Finalize and publish the authority map
 
-**Status:** DONE (commit pending)
+**Status:** DONE `620234f`
 
 **Depends on:** BR-BASE-01
 
@@ -276,7 +276,7 @@ judgement call.
 
 ## BR-AUTH-02 - Build a reference and contract inventory before deletion
 
-**Status:** TODO
+**Status:** DONE (commit pending)
 
 **Depends on:** BR-AUTH-01
 
@@ -306,14 +306,87 @@ contract test.
 
 **Work:**
 
-- [ ] Enumerate every live reference to each deletion candidate.
-- [ ] Classify each reference as normative, historical, generated, test
+- [x] Enumerate every live reference to each deletion candidate.
+- [x] Classify each reference as normative, historical, generated, test
   contract, source comment, or stale.
-- [ ] Replace section-number and line-number references with stable named
+- [x] Replace section-number and line-number references with stable named
   anchors where a durable cross-reference remains necessary.
-- [ ] Identify all tests that enforce the old document topology or exact prose.
-- [ ] Mark firmware-source comment changes as `NEEDS USER` rather than editing
+- [x] Identify all tests that enforce the old document topology or exact prose.
+- [x] Mark firmware-source comment changes as `NEEDS USER` rather than editing
   them through an agent.
+
+**Result:**
+
+The inventory is keyed to searchable content, not to line numbers, because the
+line numbers this section itself listed have already drifted. Of the eight
+`Makefile` lines named above, none still holds a document reference; the live
+ones are 938, 3128, 3458, 5842, 6730, 6749, 7713 and 7740. `make-release.sh`
+2158-2166 and `test_release_preflight.sh` 885-886 no longer reference a
+document either. Only `release-documentation.sh` 40-41 and
+`test_release_qualification.sh` 7 are still correct. Every entry below is
+stated as a name a grep can find.
+
+**Load-bearing documents.** A gate reads these files; deleting one fails a
+target rather than dangling a link.
+
+| Document | Bound by | Effect of deletion |
+|---|---|---|
+| `docs/pic10f320_validation.md` | `test-resource-tables` prerequisite; `release_validate_current_documentation`; `test_makefile_name_contract.py`; `test_resource_tables_contract.py` | Make cannot build the target; preflight loses a bounded current-release declaration; the name-contract negative case loses its input |
+| `docs/pic12f675_feasibility.md` | `test-resource-tables` prerequisite; `test_release_qualification.sh`; `test_resource_tables.py` | Make cannot build the target; release qualification fails; the program-word triple check loses its input |
+| `docs/context_seu_detection.md` | `test-resource-tables` prerequisite; `test_resource_tables.py`; `test_resource_tables_contract.py` | Make cannot build the target; the five-part resource restatement loses a copy |
+| `docs/pic10f320_special_case.md` | `release_validate_current_documentation`; `make-release.sh` generated per-release prose; `test_release_preflight.sh` | Preflight fails, and generated release documents link to a deleted path |
+| `docs/flashing_simplicity.md` | `release_validate_flashing_simplicity_status` | The gate fails closed on the missing file. It is also the one document allowed to record retired flashing wording in the past tense, which the raw-writer sweep depends on |
+
+`DESIGN_DOCUMENTATION.adoc` and `CHANGELOG.md` are prerequisites of
+`test-resource-tables` on the same terms.
+
+**Free-standing documents.** Referenced only by prose and comments; deletion
+dangles references but breaks no gate.
+
+| Document | Live non-document references | Class |
+|---|---|---|
+| `docs/relay_coil_fault_correction.md` | `src/bypass_hw_iface.h`, ten test files, `run_mutation_tests.sh` | Decision/safety record cited as rationale by the tests that enforce the policy |
+| `docs/phase2_pic_shell.md` | `src/bypass_mcu_pic10f322.c`, `src/bypass_mcu_pic12f675.c`, `DESIGN_DOCUMENTATION.adoc` | Normative cross-reference plus source comments |
+| `docs/pic10f320_merge_plan.md` | `.gitignore`, `Makefile` | Historical, but both references are live and neither is prose |
+| `docs/pic10f320_feasibility.md` | none outside `docs/` and `CHANGELOG.md` | Historical |
+
+**Fragile anchors.** Section and line numbers into a document that is about to
+be consolidated. Two are already wrong, which is the finding this task exists
+to produce:
+
+- `docs/flashing_simplicity.md` cites `docs/pic12f675_feasibility.md:700` as
+  section 4.5; line 700 is inside section 4.4.1.
+- `docs/flashing_simplicity.md` cites `docs/pic12f675_feasibility.md:1094` as
+  section 8; line 1094 is inside section 7.
+
+The remaining section-number references are `DESIGN_DOCUMENTATION.adoc` (five,
+into `phase2_pic_shell.md` and `pic12f675_feasibility.md`), the `Makefile`
+(five, into `pic12f675_feasibility.md`), `.gitignore` (one, into
+`pic10f320_merge_plan.md`), and the cross-references among the `docs/`
+documents themselves. Each must become a named anchor -- a quoted heading or a
+searchable phrase -- before its target is renumbered.
+
+**Firmware source comments -- NEEDS USER.** Nine, three more than this section
+listed. Five name a document only and survive any renumbering:
+`src/bypass_compile_checks.h`, `src/bypass_hw_iface.h`,
+`src/bypass_mcu_pic10f320.c`, `src/bypass_mcu_pic10f322.c` and
+`src/bypass_mcu_pic12f675.c` line 15. Four carry section numbers into
+`docs/pic12f675_feasibility.md` and break on renumbering:
+`src/bypass_mcu_pic12f675.c` at sections 4.4.1, 8 item 1 and 8 item 2, and
+`src/bypass_pins_pic12f675.h` at section 4.2 and section 8 item 9. No agent
+edits any of them.
+
+**Tests enforcing document topology or prose.** `test_resource_tables.py` and
+`test_resource_tables_contract.py` require the same measurements in four
+documents; that duplication is BR-RES-01's subject and the synchronization
+check is BR-RES-02's. `release_validate_current_documentation` requires bounded
+current-release declarations in four documents.
+`release_validate_flashing_simplicity_status` requires a status banner and
+per-version update markers in one. The PIC12F675 flashing contract binds
+`README.md`, `FLASHING.md` and `release/README.md` to one story. None of these
+may be deleted merely because its input document is consolidated: each
+underlying invariant is either moved to the document that inherits the role or
+retired deliberately, and the retirement recorded.
 
 **Acceptance:**
 
@@ -2045,8 +2118,8 @@ dependencies and acceptance criteria.
 | Task | Summary | Status |
 |---|---|---|
 | BR-BASE-01 | Reconcile final release baseline | DONE `756e622` |
-| BR-AUTH-01 | Finalize authority map | DONE (commit pending) |
-| BR-AUTH-02 | Inventory references/contracts | TODO |
+| BR-AUTH-01 | Finalize authority map | DONE `620234f` |
+| BR-AUTH-02 | Inventory references/contracts | DONE (commit pending) |
 | BR-RES-01 | Remove mutable resource tables | TODO |
 | BR-RES-02 | Retire prose synchronization tests | TODO |
 | BR-RES-03 | Publish generated release resource view | TODO |
