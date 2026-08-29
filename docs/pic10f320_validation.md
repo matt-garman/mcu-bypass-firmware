@@ -398,9 +398,10 @@ could create an unmodelled successor or an asynchronous push — reserved words,
 that could enable GIE — is rejected. That boundary is a design decision, not an
 implementation detail, which is why it is recorded as evidence.
 
-The decoder rules, the check inventory, the 9-bit PC/physical-fetch aliasing and
-the build-time enforcement path are current mechanics, and live in
-*PIC10F320 target validation layers* in `test/README.md`. One limit of that
+The decoder rules, the 9-bit PC/physical-fetch aliasing and the build-time
+enforcement path are current mechanics, and live in *PIC10F320 target
+validation layers* in `test/README.md`; the check inventory itself is held by
+`test/pic10f320/return_stack_oracle.py` and its regression. One limit of that
 enforcement belongs here rather than there: running the oracle inside every
 build proves what the recipe produced, not that the file cannot be modified
 afterwards. Release provenance and reproduction checks remain separate evidence.
@@ -419,8 +420,8 @@ of the eight hardware levels held in reserve for every variant.
 
 The PIC10F320-only arm of `test/test_pic_build.sh` closes merge-plan §6.12's
 rebuild row, in the existing fresh `mktemp` repository rather than a second
-sandbox. Its assertions, check counts and fail-closed activation are current
-mechanics and live in `test/README.md`; what belongs in the record is the exact
+sandbox. Its assertions and fail-closed activation are current mechanics and live in
+`test/README.md`, and its exact check counts in the script itself; what belongs in the record is the exact
 scope of what it does and does not establish, because that is the part most
 easily overread.
 
@@ -495,9 +496,10 @@ conservation equations, checked workers and process groups, atomic exact result
 records, and fail-closed infrastructure-status classification. Production must
 rerun the complete pinned inventory through that current accounting contract.
 
-The current category split, the pinned totals and the accounting equations are
-live mechanics and live under *Mutation testing and skipped optional tools* in
-`test/README.md`. One structural point is worth stating as evidence rather than
+The current category split and the accounting equations are live mechanics and
+live under *Mutation testing and skipped optional tools* in `test/README.md`;
+the pinned totals are held by `test/run_mutation_tests.sh`, which rejects
+category drift before probing. One structural point is worth stating as evidence rather than
 mechanics: **PIC10F320 mutants are split by what they need, not by what they
 test.** The host-only majority rides with the unskippable core batch, and the
 tool-dependent remainder sits behind a probe that first verifies the *unmutated*

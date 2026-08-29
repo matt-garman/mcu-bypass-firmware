@@ -869,9 +869,9 @@ rationale, so deletion is not automatic.
 
 ## BR-TESTDOC-01 - Convert test/README.md into a concise assurance map
 
-**Status:** TODO
+**Status:** DONE (commit pending)
 
-**Current size:** 962 lines
+**Current size:** 962 lines at plan time; 1,001 at implementation, now 625.
 
 Rows around `test/README.md:523-550` restate extensive negative fixtures and
 exact counts already encoded by tests. This makes documentation maintenance part
@@ -900,11 +900,11 @@ of ordinary test changes and can turn prose formatting into a tested interface.
 
 **Work:**
 
-- [ ] Replace giant table cells with concise property statements.
-- [ ] Where exact counts are independent policy, keep them in executable test
+- [x] Replace giant table cells with concise property statements.
+- [x] Where exact counts are independent policy, keep them in executable test
   data and optionally generate a report.
-- [ ] Ensure target-specific limitations remain explicit.
-- [ ] Update tests that parse README rows as current data.
+- [x] Ensure target-specific limitations remain explicit.
+- [x] Update tests that parse README rows as current data.
 
 **Acceptance:**
 
@@ -912,6 +912,37 @@ of ordinary test changes and can turn prose formatting into a tested interface.
 - A reviewer can still map every major assurance claim to its substrate and
   aggregate.
 - The README no longer acts as a mirror of the test implementation.
+
+**Result:**
+
+- The per-file tree index became a substrate/role map. A file index that already
+  omitted a dozen tracked files is not a maintainable authority; the directories
+  and the role of each group are.
+- Per-lane fixture inventories, fake-tool mechanics and check counts were
+  removed. Their authority is the executable test; where a count is reviewed
+  policy it stays in test data (`test/pic/pic12f675_target_counts.sh`, the
+  script-owned build profiles, `test/run_mutation_tests.sh`).
+- The PIC12F675 per-variant `fault/lock-step/I-O` triples were removed from the
+  prose, and the block of `test/test_pic_target_result_records.sh` that existed
+  only to keep those sentences synchronized with the count table went with them.
+  The producer/table/adapter oracles are untouched.
+- Exact figures retained deliberately, because `test-release-qualification`
+  requires this document to publish current release scope and independently
+  verifies the same values against real evidence: the 35-file evidence set, the
+  18 release soak combinations, the historical 28-file/15-soak boundary, and the
+  48/102/168 build-profile final-check contracts. The published host compiler
+  floor is retained for the same reason (`test-release-preflight`).
+- Assurance coverage was completed rather than reduced: Classic AVR lanes,
+  repository/structural contracts, and release/supply-chain gates now have
+  explicit rows instead of living as annotations inside the file index.
+- Known simulator and hardware gaps (yasimavr stepping, gpsim TMR2/WDT, PIC
+  silicon-only risks) are kept, minus their revision history.
+- Reference migration: `DESIGN_DOCUMENTATION.adoc`,
+  `docs/pic10f320_validation.md`, and `docs/pic12f675_feasibility.md` no longer
+  say that check counts, pinned mutation totals, or soak budgets live in
+  `test/README.md`; each now names the executable or document that owns them.
+- Verified: `test-makefile-name-contract`, `test-release-qualification`,
+  `test-release-preflight`, `test-pic-target-result-records`.
 
 ## BR-TODO-01 - Reduce TODO.md to an actionable registry
 

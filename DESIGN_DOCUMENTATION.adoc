@@ -1504,8 +1504,9 @@ authoritative statement of the architectural difference and assurance
 comparison; `docs/pic10f320_validation.md` owns execution evidence, current
 qualification status and the scope of what each result does and does not
 establish; `test/README.md` owns the current lane inventory — Make targets,
-substrates, mechanics and check counts. Counts and command lists are kept in
-that one place so the other two cannot go stale against the suite.**
+substrates, and the property each layer establishes. Exact check counts and
+fixture inventories belong to the executable tests themselves, so no document
+can go stale against the suite.**
 
 == AVR Classic Program Flow
 

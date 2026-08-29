@@ -47,32 +47,12 @@ done
 
 python3 "$ROOT/test/pic/check_target_result_producers.py"
 
-# The documented counts are bound to the same oracle the producers are.
-# test/README.md calls its target-result row authoritative and then carried a
-# stale relay fault count (46) for as long as the reviewed table, the Makefile
-# count map, the mutation records and the adapter all said 43 -- nothing
-# compared the sentence with the number. A reader checking whether a lane
-# regressed reads the row, not the table, so the row is now derived from the
-# table here: each variant must appear exactly once as "<fault>/<lockstep>/<io>
-# for `<variant>`", with the digits the oracle holds.
-readme="$ROOT/test/README.md"
-[ -f "$readme" ] && [ ! -L "$readme" ] \
-	|| { printf 'FAIL: test/README.md is not a regular file\n' >&2; exit 1; }
-documented=0
-while read -r variant fault_checks lockstep_checks io_checks; do
-	claim="${fault_checks}/${lockstep_checks}/${io_checks} for \`${variant}\`"
-	found=$(grep -Fc -- "$claim" "$readme" || true)
-	[ "$found" -eq 1 ] \
-		|| { printf 'FAIL: test/README.md states the %s target counts %d times, expected exactly one "%s"\n' \
-			"$variant" "$found" "$claim" >&2; exit 1; }
-	# A stale count left beside the corrected one would still satisfy the line
-	# above, so the variant may be credited with exactly one triple in total.
-	found=$(grep -Eo -- "[0-9]+/[0-9]+/[0-9]+ for \`${variant}\`" "$readme" | wc -l)
-	[ "$found" -eq 1 ] \
-		|| { printf 'FAIL: test/README.md credits %s with %d target-count triples, expected exactly one\n' \
-			"$variant" "$found" >&2; exit 1; }
-	documented=$((documented + 2))
-done < <(pic12f675_target_count_table)
-
+# The reviewed count table is the single place these numbers are written down.
+# test/README.md used to restate them, and carried a stale relay fault count for
+# as long as the reviewed table, the Makefile count map, the mutation records and
+# the adapter all agreed on another one -- nothing compared the sentence with the
+# number. The prose now names the table instead of copying it, so there is no
+# second copy left to synchronize, and the check that compared them is gone with
+# the duplication that made it necessary.
 printf 'PIC target result producer validation: %d checks, 0 failures\n' \
-	"$((${#expected[@]} + 9 + documented))"
+	"$((${#expected[@]} + 9))"

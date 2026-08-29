@@ -669,7 +669,7 @@ in the pure core (which counts samples, not milliseconds). It does change every
 | Soak budget, relay variant (+12 ms block) | 45 ms | ~46 ms |
 
 The qualification budgets in the last three rows are the ones documented in
-`test/README.md`. The soak driver does not read them as constants — it derives
+`DESIGN_DOCUMENTATION.adoc`. The soak driver does not read them as constants — it derives
 its holds, and since the step 9 lane it derives them **through** the tick period
 rather than assuming one. `test/pic/test_soak_pic_core.h` now reads
 
