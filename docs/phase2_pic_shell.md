@@ -15,11 +15,17 @@ target was integrated, but it is a historical decision record — do not read it
 for current status.
 
 The general architecture argument — why the algorithm is shared but the main
-loop is not — lives in `DESIGN_DOCUMENTATION.adoc`, "Multi-MCU Architecture".
+loop is not — lives in `DESIGN_DOCUMENTATION.adoc`, "Multi-MCU Architecture",
+and the PIC architecture itself lives in that document's "PIC Architecture"
+section (`#pic-architecture`).
 
 ---
 
 ## 1. Locked decision: tick/WDT model "B"
+
+The normative statement of this model is now
+`DESIGN_DOCUMENTATION.adoc#pic-model-b`; what follows is the dated decision
+record behind it.
 
 **Model B = polled hardware timer + pure fault watchdog.** TMR2 drives the
 ~1 ms tick, *polled* in the main loop (no sleep); the watchdog is a pure fault

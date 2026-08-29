@@ -174,8 +174,8 @@ adverse conditions:
       oscillator tolerance moves wall time in either direction.
     * On all three PIC parts, the footswitch loop is polled (Model B: a polled
       hardware timer tick with the watchdog kept as a pure fault watchdog,
-      no timer interrupt; the decision and its alternatives are recorded in
-      `docs/phase2_pic_shell.md` §1), so while a blocking
+      no timer interrupt; the decision and its alternatives are in
+      <<pic-model-b>>), so while a blocking
       output actuation runs - the relay coil pulse (12ms) or the
       CD4053 mute (5ms), a busy delay inside the state change -
       the loop pauses and the footswitch is not sampled.  The
@@ -308,8 +308,9 @@ silicon family:
 [horizontal]
 AVR Classic (ATtiny13a/45/85), ATtiny202, PIC10F322, PIC12F675::
   enabled (`BYPASS_CTX_CHECK`).  PIC10F322 is the binding capacity
-  case; the current images use 476/502/493 of 512 words for the
-  simple/mute/relay variants.
+  case: 512 words is the smallest budget that still holds the shared
+  core, the defensive layer and the fold, which is why the part below
+  it does without.
 PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
   shared pure core, so this shell inlines the debounce logic by hand
   and has no `debounce_ctx_check_word()` to call; even the cheapest
@@ -1104,11 +1105,11 @@ does not make them independently enforceable by this repository.
   not the silicon's physical trip voltage.
 
 | Quiescent current
-| see the PIC Power / Current Draw section above
+| see <<pic-clock-and-power>>
 | DS40001585, **D017–D019** (IDD)
-| **Documented vendor estimate.** The PIC Power / Current Draw section
-  interpolates D017-D019; there is no current-measurement gate or bench result in
-  this repository.
+| **Documented vendor estimate.** <<pic-clock-and-power>> interpolates
+  D017-D019; there is no current-measurement gate or bench result in this
+  repository.
 
 | Sleep wake-up ordering
 | one instruction executes after `SEI` before the pending interrupt is serviced
@@ -1294,9 +1295,8 @@ can support that claim.
 
 The PIC10F320 is the same silicon family with **half** the flash: 256
 fourteen-bit program words. It is the smallest-capacity supported part and the
-reason its firmware is structured differently from every other target (see "The
-one target that does not follow this rule" below, and
-`docs/pic10f320_special_case.md`). `make pic10f320` enforces
+reason its firmware is structured differently from every other target (see
+<<pic10f320-architecture>>). `make pic10f320` enforces
 `PIC10F320_FLASH_WORDS` per variant and fails the build on any overshoot.
 
 The persistent firmware state is `ctx_`. An exact whole-program XC8 Data-space
@@ -1340,55 +1340,6 @@ buys the work this core makes necessary — turning off a comparator and an ADC
 the 32x parts do not have, routing every output write through the shadow, and
 counting four timer rollovers in software to make the tick. Twice the PIC10F322's
 flash is the reason the modular architecture fits here at all.
-
-== PIC Power / Current Draw
-
-Applies to both PIC10F32x parts: they share a datasheet family, a clock choice
-and a main-loop model. The PIC12F675 shares the model and differs in the
-numbers; see the note at the end of this section.
-
-The PIC core runs at **2 MHz** (HFINTOSC) on a **polled 1 ms tick** — a busy-wait
-on `TMR2IF`, never asleep. This is the opposite of the AVR Classic design, which
-sleeps between ISR-driven samples, and it is deliberate. The PIC10F320/322 has no
-idle mode, and its only Sleep-capable periodic wake is the coarse WDT (TMR0/TMR2
-are FOSC/4-clocked and stop in Sleep), so a *precise nominal* 1 ms cadence
-necessarily means staying awake. The design spends that power to buy a
-timer-derived nominal cadence and a high-margin, independent watchdog; a
-deep-sleep scheme would have to give up one or both.
-
-Because the loop is always awake, the clock frequency sets the current draw. The
-core is clocked at 2 MHz rather than the part's 16 MHz maximum: the debounce plus
-per-tick sanity work is only ~210 instruction cycles, so 2 MHz (500 cycles/ms)
-runs it at ~42% utilisation — comfortable headroom — while roughly *halving* the
-supply current.
-
-|===
-| FOSC | active IDD @ 5 V (typ) | ~ power | per-tick headroom
-
-| 16 MHz   | ~0.85 mA | ~4.25 mW | 19x
-| *2 MHz*  | *~0.43 mA* | *~2.1 mW* | *2.4x*
-|===
-
-(IDD interpolated from DS40001585 D017–D019; the 16 MHz row is the tabulated
-figure.) A lower clock also emits less high-frequency switching noise into the
-analog audio path.
-
-This firmware is **not** battery-optimised, and the table should not be read as
-if it were: in a typical pedal the always-on status LED and the analog signal
-path dominate the supply, so the MCU's sub-milliamp draw is usually negligible.
-The 2 MHz choice is simply "no reason to burn 4 mW when 2 does the same job."
-
-**The PIC12F675 makes the same trade with different numbers.** It is also always
-awake, but its oscillator is fixed at 4 MHz in silicon by `FOSC=INTRCIO` — there
-is no `OSCCON` and nothing to select at runtime — so the clock is not a design
-variable on that part. Its tick is 1.024 ms rather than 1 ms because the core has
-no period register and one shared prescaler that goes to *either* the timer or
-the watchdog: giving it to the watchdog leaves TMR0 unprescaled at F_OSC/4, and
-four 256 us rollovers counted in software make the tick. The 2.4% stretch changes
-nothing in the debounce core, which counts samples rather than milliseconds, but
-it moves every physical timing figure — see `docs/pic12f675_feasibility.md`
-section 4.4.1.
-
 
 == Multi-MCU Architecture: Shared Core, Per-MCU Shell
 
@@ -1476,29 +1427,425 @@ drivers unchanged. No existing shell needs to be refactored.
 
 The PIC10F320 is the exception, and it is worth naming here rather than leaving
 the paragraph above to be read as universal. It has **256 words of flash, half
-the PIC10F322's**, and the shared-core-plus-shell arrangement does not fit —
-measured, not assumed: the modular firmware overshoots by roughly 100 words
-(`docs/pic10f320_feasibility.md`).
+the PIC10F322's**, so the shared-core-plus-shell arrangement does not fit and
+its firmware is a single self-contained file that links neither the core nor
+the output drivers. That trades the compile-the-verified-core property for a
+direct behavioural comparison against that same core, plus orthogonal fault,
+actuation, coverage, static-analysis, byte-identity and soak evidence. It first
+shipped in the unified `v0.9.6` release and remains release-supported.
 
-Its firmware, `src/bypass_mcu_pic10f320.c`, therefore reuses *neither* the core
-nor the output drivers as linked code. It is a single self-contained file: the
-integrator and state machine are written directly in `main()`, debounce
-initialization is written directly in `init()`, and source-local static output
-functions are selected by `#if defined(OUTPUT_*)`. It first shipped in the
-unified `v0.9.6` release.
+<<pic10f320-architecture>> is the normative account: why 256 words forces the
+architecture, what the resulting seam is, what closes it and how far, and what
+remains unequal.
 
-That trades the compile-the-verified-core property for direct behavioural
-comparison in the host-equivalence and real-HEX lock-step lanes, plus orthogonal
-fault, actuation, coverage, static-analysis, byte-identity and soak evidence. It
-is release-supported and has published prebuilt images beginning with `v0.9.6`.
-**`docs/pic10f320_special_case.md` is the single
-authoritative statement of the architectural difference and assurance
-comparison; `docs/pic10f320_validation.md` owns execution evidence, current
-qualification status and the scope of what each result does and does not
-establish; `test/README.md` owns the current lane inventory — Make targets,
-substrates, and the property each layer establishes. Exact check counts and
-fixture inventories belong to the executable tests themselves, so no document
-can go stale against the suite.**
+
+[[pic-architecture]]
+== PIC Architecture
+
+Three of the seven release parts are PICs, and they are not three
+configurations of one shell. PIC10F322 and PIC10F320 are enhanced mid-range
+cores from a single datasheet family (DS40001585); PIC12F675 is a classic
+mid-range core (DS41190G) whose register set differs from theirs at nearly
+every point this firmware touches. PIC10F320 then differs from PIC10F322 not
+in silicon generation but in capacity, and that one number changes its
+software architecture rather than its register code.
+
+What the three do share is one behavioural model. This section states that
+model once, then states what each part does differently and why, so that every
+target-specific difference has exactly one normative explanation.
+
+What it deliberately does not carry: package pin diagrams are in the pinout
+sections above, watchdog margin arithmetic is in Watchdog Pet-to-Pet Budget,
+sample-timing budgets are in Caveats and Limitations and Asymmetric Debounce
+Timing, defensive-layer behaviour common to every target is in Failsafe
+Mechanisms, compiler and device-pack versions are in `TOOLCHAIN.adoc`, the
+operator programming transaction is in `FLASHING.md`, hardware qualification
+is in `HARDWARE_VALIDATION_LOG.md`, and measured image sizes and test results
+belong to retained release evidence rather than to prose.
+
+[[pic-model-b]]
+=== The shared model: polled tick, pure fault watchdog
+
+All three PIC implementations use the model this project calls **Model B**: a
+polled hardware timer tick, with the watchdog kept as a pure fault watchdog
+and no timer interrupt. `init()` configures the part, applies the bypass
+output state and starts the tick timer; the loop then waits on the timer flag,
+runs the sanity gate, samples the footswitch, integrates, applies the debounce
+step, and pets the watchdog. Reaching the pet **is** the liveness proof: there
+is no ISR-to-main handshake to carry one, because there is no ISR.
+
+The alternative considered was a watchdog-periodic-wakeup loop -- sleep, wake
+on the watchdog, sample, update, sleep. Model B was chosen for three reasons,
+and each of them is still load-bearing:
+
+. **It matches the AVR design more closely.** The same nominal 1 ms sampling
+  cadence, polled rather than interrupt-driven, so one debounce design covers
+  both families and the pure core is untouched.
+. **It dissolves the blocking-actuation conflict.** The longest awake burst a
+  healthy loop can produce -- one tick wait plus the 12 ms relay coil pulse or
+  the 5 ms mute settle, plus bounded loop work -- fits inside one de-rated
+  watchdog period with a wide margin. The shared output drivers therefore keep
+  a plain blocking delay and no watchdog-aware delay abstraction exists. The
+  per-target arithmetic is in Watchdog Pet-to-Pet Budget.
+. **It dissolves the shared-state hazard.** One execution context means nothing
+  is shared: `ctx_` is owned solely by `main()`, no field has to be readable
+  and writable in a single uninterruptible instruction, and no PIC carries a
+  `timer_isr_called_` byte. This is why XC8 sizing enums as `int`, where the
+  AVR builds rely on `-fshort-enums`, is harmless here.
+
+Converting a PIC shell to a timer ISR was later priced on the real toolchain
+and rejected again: the relay build did not fit the PIC10F322's flash, and
+even with flash freed the call graph consumed most of the eight-level hardware
+return stack, leaving nothing beyond the deliberate two-level reserve. That is
+historical spike evidence rather than a current measurement, and it is
+recorded in `docs/phase2_pic_shell.md` §1 with its Git citation.
+
+Two consequences are accepted rather than mitigated, and both are stated
+elsewhere in this document because they are user-visible:
+
+* **No low-power sleep.** The loop is always awake, which makes the core clock
+  the thing that sets current draw -- see <<pic-clock-and-power>>.
+* **Sampling pauses during a blocking output actuation.** The footswitch is not
+  sampled for the 12 ms of a relay coil pulse or the 5 ms of a mute settle,
+  where both AVR generations keep integrating inside their timer ISRs. The
+  toggle itself is never at risk, because actuation begins only after the
+  press has been accepted; what moves is release recognition. See Caveats and
+  Limitations and Asymmetric Debounce Timing for the resulting budgets.
+
+A note for anyone tempted to add an ISR later: these are 8-bit cores with no
+atomic multi-byte access, so a future revision that shared a multi-byte object
+between an ISR and `main()` would have to add explicit protection. Note also
+that `INTCON` is deliberately absent from every PIC guard set. Under Model B
+the hazard is an upset that **enables** interrupts where no handler exists, and
+since no enable bit is ever set by the firmware, reaching a vector costs two
+coincident flips -- outside a single-event threat model.
+
+[[pic-core-generations]]
+=== Two PIC core generations
+
+The part numbers are adjacent; the silicon is not. Each row below is a
+difference this firmware has to answer, not a catalogue entry.
+
+|===
+| Facility | PIC10F32x (enhanced mid-range) | PIC12F675 (classic mid-range) | Consequence here
+
+| Port and direction
+| `PORTA` / `TRISA`
+| `GPIO` / `TRISIO`
+| same roles, different names and banks
+
+| Output latch
+| `LATA`
+| none -- `GPIO` reads pin levels
+| PIC12F675 keeps an SRAM output shadow (<<pic12f675-architecture>>)
+
+| Analog disable
+| `ANSELA`
+| `ANSEL`, plus `CMCON` and `ADCON0`
+| three analog encroachment paths instead of one
+
+| Weak pull-ups
+| `WPUA`, including the input-only RA3, plus `OPTION_REG.nWPUEN`
+| `WPU` with no GP3 bit, plus `OPTION_REG.nGPPU`
+| the footswitch cannot sit on PIC12F675's input-only pin
+
+| Oscillator
+| `OSCCON.IRCF`, selectable
+| fixed 4 MHz, `OSCCAL` factory trim, no `OSCCON`
+| the clock is a design variable on one family and not the other
+
+| Tick timer
+| TMR2 with the `PR2` period register
+| no period register on any timer
+| the tick is configured on one and constructed on the other
+
+| Watchdog period
+| `WDTCON.WDTPS`, independent of the timers
+| `OPTION_REG` `PSA`/`PS`, one prescaler shared with TMR0
+| tick and watchdog compete for one resource on PIC12F675
+
+| Hardware return stack
+| 8 levels
+| 8 levels
+| same bound, same gate; overflow is silent on both
+
+| CONFIG fields
+| the shared six, plus `BORV`, `LPBOR`, `LVP` and `WRT`
+| the shared six, plus `CPD` and `BG<1:0>` bandgap trim
+| per-part CONFIG decode; the BOD floors differ (Failsafe Mechanisms)
+|===
+
+The conclusion worth stating before the per-part subsections is that the
+PIC12F675 shell is a rewrite rather than a port of the PIC10F322 shell. It
+presents the same `src/bypass_hw_iface.h` boundary and links the same core; of
+what lies below that boundary, essentially nothing is shared.
+
+[[pic-clock-and-power]]
+=== Clock choice and current draw
+
+Applies to both PIC10F32x parts: they share a datasheet family, a clock choice
+and a main-loop model. The PIC12F675 shares the model and differs in the
+numbers; see the note at the end of this section.
+
+The PIC core runs at **2 MHz** (HFINTOSC) on a **polled 1 ms tick** — a busy-wait
+on `TMR2IF`, never asleep. This is the opposite of the AVR Classic design, which
+sleeps between ISR-driven samples, and it is deliberate. The PIC10F320/322 has no
+idle mode, and its only Sleep-capable periodic wake is the coarse WDT (TMR0/TMR2
+are FOSC/4-clocked and stop in Sleep), so a *precise nominal* 1 ms cadence
+necessarily means staying awake. The design spends that power to buy a
+timer-derived nominal cadence and a high-margin, independent watchdog; a
+deep-sleep scheme would have to give up one or both.
+
+Because the loop is always awake, the clock frequency sets the current draw. The
+core is clocked at 2 MHz rather than the part's 16 MHz maximum: the debounce plus
+per-tick sanity work is only ~210 instruction cycles, so 2 MHz (500 cycles/ms)
+runs it at ~42% utilisation — comfortable headroom — while roughly *halving* the
+supply current.
+
+|===
+| FOSC | active IDD @ 5 V (typ) | ~ power | per-tick headroom
+
+| 16 MHz   | ~0.85 mA | ~4.25 mW | 19x
+| *2 MHz*  | *~0.43 mA* | *~2.1 mW* | *2.4x*
+|===
+
+(IDD interpolated from DS40001585 D017–D019; the 16 MHz row is the tabulated
+figure.) A lower clock also emits less high-frequency switching noise into the
+analog audio path.
+
+This firmware is **not** battery-optimised, and the table should not be read as
+if it were: in a typical pedal the always-on status LED and the analog signal
+path dominate the supply, so the MCU's sub-milliamp draw is usually negligible.
+The 2 MHz choice is simply "no reason to burn 4 mW when 2 does the same job."
+
+**The PIC12F675 makes the same trade with different numbers.** It is also always
+awake, but its oscillator is fixed at 4 MHz in silicon by `FOSC=INTRCIO` — there
+is no `OSCCON` and nothing to select at runtime — so the clock is not a design
+variable on that part. Its tick is 1.024 ms rather than 1 ms because the core has
+no period register and one shared prescaler that goes to *either* the timer or
+the watchdog: giving it to the watchdog leaves TMR0 unprescaled at F_OSC/4, and
+four 256 us rollovers counted in software make the tick. The 2.4% stretch changes
+nothing in the debounce core, which counts samples rather than milliseconds, but
+it moves every physical timing figure — see <<pic12f675-architecture>>.
+
+[[pic10f322-architecture]]
+=== PIC10F322: the reference PIC shell
+
+The PIC10F322 carries the full defensive layer, and it is the shell the other
+two PIC targets are described against. It is a modular target:
+`src/bypass_mcu_pic10f322.c` and `src/bypass_pins_pic10f322.h` sit on top of
+the shared output drivers and compile and link `src/bypass_pure.c` unchanged.
+
+**Four I/O pins, and the map falls out of that.** `RA0`, `RA1` and `RA2` are
+bidirectional; `RA3` is input-only, sharing the MCLR/VPP function. With
+`MCLRE=OFF` the footswitch therefore goes on RA3, which frees all three
+bidirectional pins for outputs: RA0 drives the status LED, RA1 and RA2 carry
+the analog-switch control lines or the two relay coils. The map rests on RA3
+being both input-only **and** pull-up capable -- a coincidence of this family
+that PIC12F675 does not repeat. The relay and mute variants use all three
+output pins with none spare; `cd4053_simple` leaves RA2 driven low as a spare,
+which the integrity checks still cover.
+
+**The tick is configured, not constructed.** TMR2 counts against the `PR2`
+period register with the postscaler at 1:1, and the loop polls and clears
+`TMR2IF`. A period register is what makes an exact 1 ms tick a matter of
+choosing two numbers.
+
+**The watchdog is independent of the tick.** `WDTCON.WDTPS` selects the period
+from the 31 kHz LFINTOSC, which does not derive from `FOSC` and shares no
+prescaler with any timer, so the watchdog neither moves when the core clock
+changes nor competes with the tick for a resource. The selected period and the
+de-rated floor it is judged against are in Watchdog Pet-to-Pet Budget.
+
+**Two integrity checks are stronger than the obvious version, deliberately.**
+
+* `hw_output_state_intact()` compares the **complete** implemented `TRISA`
+  state, not merely the pins the caller requires, **and** compares the full
+  `LATA` output latch against the expected mask. Each half covers what the
+  other misses: a subset direction check cannot see a direction flip on a
+  spare output -- `cd4053_simple`'s RA2 would float invisibly -- and a
+  latch-only check cannot see a direction flip at all, because `LATA` still
+  reads back the correct value when the pin has been turned into an input.
+* The pull-up check covers both halves of a two-part enable. A weak pull-up
+  needs the per-pin `WPUA` latch **and** the global, active-low
+  `OPTION_REG.nWPUEN`; an upset of either silently floats the footswitch. The
+  AVR analogue checks a single `PORTB` latch, because there is only one thing
+  to check.
+
+**What the per-tick sanity gate guards:** `OSCCON.IRCF`, `WDTCON.WDTPS`, `PR2`,
+`T2CON`, `ANSELA` over the output pins, the `WPUA` latch, and
+`OPTION_REG.nWPUEN`. The emitted CONFIG word is not reviewed by eye -- it is
+read back out of the built HEX and compared against documented intent by a
+build gate, because a wrong CONFIG bit is invisible to every other test and
+would only bite on silicon.
+
+[[pic10f320-architecture]]
+=== PIC10F320: the constrained target
+
+The PIC10F320 is the same silicon family as the PIC10F322, pin-compatible in
+this design, with the same peripherals and the same CONFIG posture -- and
+**256 words of program flash, exactly half**. Everything below follows from that
+one number.
+
+**The modular architecture does not fit, and that is measured rather
+than assumed.** The modular firmware overshoots 256 words by roughly 100 under
+free-tier XC8, and no correctness-preserving source change closes the gap;
+`docs/pic10f320_feasibility.md` records the analysis. So
+`src/bypass_mcu_pic10f320.c` is a single self-contained file: the saturating
+integrator and the state machine are written directly in `main()`, debounce
+initialization directly in `init()`, and the three output variants are
+source-local static functions selected by `#if defined(OUTPUT_*)`. It links
+neither `src/bypass_pure.c` nor the modular output drivers.
+
+**The seam, stated plainly.** Inlining by hand creates two expressions of the
+same algorithm that no compiler is keeping in step. On every other target that
+seam does not exist, because there is one expression and it is compiled
+straight into the image. This is the one trust assumption the PIC10F320
+carries that no other target does. It is heavily mitigated, but it is
+mitigated rather than eliminated, and this project would rather say so than
+imply a parity it has not earned.
+
+**What closes the gap, and how far.** The host-equivalence and real-HEX
+lock-step lanes compare this firmware against `src/bypass_pure.c` **itself** --
+the same file every modular target compiles into its shipping image, not a
+vendored copy -- with the thresholds taken from `src/bypass_config.h` through
+a host shim. A core change this firmware does not mirror therefore produces a
+divergence that fails the suite, which makes the manual sync enforced rather
+than merely documented. Orthogonal evidence covers actuation sequencing, fault
+handling, source coverage, emitted bytes, CONFIG, return-stack depth, static
+analysis, soak and mutation. What none of that does is make the architecture
+identical: a behavioural equivalence argument, however thorough, is a
+different kind of statement from "the verified code is the shipped code". The
+honest summary is that this target's qualification design reaches for the same
+standard by a different and more elaborate route.
+
+**One recorded omission.** The exact-`TRISA` direction check was ported here
+because it cost one word per variant; the general output-**latch** match was
+not, because in every formulation that preserves its meaning it overruns 256
+words on two of the three variants. Taking it on `cd4053_simple` alone was
+considered and rejected, because a partial version of a general defence makes
+the same class of fault depend on the selected output stage. What the relay
+variant does buy, within its 256 words, is exactly the two coil latch bits --
+an energized coil has a hardware-energy and relay-position consequence that a
+wrong LED or analog-control level does not, so it escalates through the
+forced-reset path like any other fault (Failsafe Mechanisms). The residual gap
+is therefore precise: a wrong LED or analog signal path can persist until the
+next accepted press. The context checksum is likewise absent here for the same
+capacity reason, with the range check still in force.
+
+**Target-selection consequence.** Prefer another part whenever the choice of MCU
+is yours: the AVR Classic parts, the ATtiny202 and the PIC10F322 all compile
+the verified core directly, and the PIC10F322 is pin-compatible with this part
+in this design, has double the flash and carries the full defensive layer. Use
+the PIC10F320 when it is a hard requirement -- cost, existing inventory, or an
+established board. It is release-supported, with published prebuilt images
+beginning with `v0.9.6`.
+
+**Where the rest of it lives.** `docs/pic10f320_special_case.md` holds the
+assurance comparison and the manual shared-surface checklist;
+`docs/pic10f320_validation.md` owns execution evidence, its exact scope and
+current qualification status; `test/README.md` owns the current lane inventory
+-- Make targets, substrates, and the property each layer establishes. Exact
+check counts and fixture inventories belong to the executable tests
+themselves, so no document can go stale against the suite.
+
+[[pic12f675-architecture]]
+=== PIC12F675: the classic mid-range shell
+
+The PIC12F675 is a modular target -- `src/bypass_mcu_pic12f675.c` and
+`src/bypass_pins_pic12f675.h` on top of the shared output drivers, compiling
+and linking the same `src/bypass_pure.c` -- and its shell shares no register
+code with the PIC10F322's. Six differences drive the design.
+
+**There is no output latch.** `GPIO` reads the **physical pin levels**, not the
+last value written, so the read-modify-write idiom that is safe against `LATA`
+becomes a read-modify-write on the pins: a loaded output, or one still
+slewing, can read back a level other than the one written, and the write-back
+then corrupts other bits of the same port. Every level change therefore goes
+to an SRAM shadow, and the whole shadow is written to `GPIO`. That cuts three
+ways, and all three belong in the design record:
+
+* **It makes the integrity check stronger than the PIC10F322's.** With a shadow
+  it becomes possible to compare intent against reality as well: the shadow
+  against the expected mask, **and** the physical `GPIO` bits against the
+  shadow. The second comparison catches a driver, pin or bus fault where the
+  port does not follow the latch -- a class of fault the PIC10F322 cannot see
+  at all.
+* **It puts an SRAM byte in the safety path,** which is exactly what this
+  project's upset threat model says can flip. The shadow guards itself: an
+  upset diverges it from the expected mask or from the port, and either way
+  the gate fires. It is a guarded location and a fault-injection case in its
+  own right.
+* **It imports a board requirement.** Reading the outputs back makes the guard
+  depend on the output pins' **input** thresholds, and those are not uniform:
+  GP2 is the only output in this design whose input buffer is a Schmitt
+  trigger rather than TTL. A GP2 held high in a checked state must read back
+  above the Schmitt threshold or the gate fires permanently. Both documented
+  board options clear it by a wide margin; the PIC12F675 pinout section above
+  states the requirement and which variant it binds.
+
+**The clock is fixed, and its calibration lives in flash.** There is no
+`OSCCON` and no runtime frequency selection: the oscillator is 4 MHz, trimmed
+by `OSCCAL`, whose value is factory-programmed as a `RETLW` instruction in the
+**last program word** and loaded by the compiler's startup code. Three things
+follow. The oscillator guard cannot be a compile-time constant, so the shell
+snapshots `OSCCAL` at the end of initialization and compares it every tick.
+An erase that does not preserve that word leaves a device whose every delay
+and tick cadence is wrong -- which is why it is a gated part of the operator
+procedure in `FLASHING.md` rather than a footnote. And no unmodified image
+runs in a simulator at all: startup calls the missing word, runs off the end
+of flash and watchdog-resets in a loop. The simulation lanes therefore run a
+**derived** image with the calibration word injected, and the derivation
+boundary is a hard rule: the injected image is a build artifact that never
+becomes a shipping or programming image. A release therefore carries two
+distinct PIC12F675 artifacts -- the shipped HEX and the derived one the
+simulator lanes drive -- each hashed in its own right, so no simulator
+convenience can reach a device.
+
+**One prescaler, so the tick is constructed rather than configured.**
+`OPTION_REG.PSA` assigns the part's single prescaler to TMR0 **or** to the
+watchdog, never both, and no timer here has a period register. Giving the
+prescaler to the watchdog is what buys a watchdog period long enough to
+outlast a blocking coil pulse; TMR0 is then unprescaled at F_OSC/4, and four
+256 us rollovers counted in software make one tick. The tick is therefore
+1.024 ms rather than 1 ms. The pure core counts samples and is unaffected, but
+every wall-time figure derived from the tick moves by 2.4% -- see Caveats and
+Limitations and Asymmetric Debounce Timing, and note that the soak harness
+derives its holds **through** the tick period rather than assuming one. The
+blocking actuation does not scale with the tick: a coil pulse and a mute
+settle are wall-clock waits in the shared drivers, so a block of `B` ms costs
+`B` ms of tick accumulation whatever the tick period is.
+
+**The analog hazard surface is three paths wide, not one.** Where the
+PIC10F322's only analog encroachment is `ANSELA`, this part has three, and all
+three are cleared in initialization and guarded per tick:
+
+* `CMCON` -- out of reset the comparator mode makes GP0 and GP1 analog
+  inputs, and an analog input reads back 0 whatever the driver is doing.
+  `TRISIO` still owns direction, so what the reset state breaks is **readback**,
+  which is precisely what the port-follows-shadow comparison exists to catch.
+  Comparator output modes can additionally take GP2.
+* `ANSEL` -- covers GP0, GP1, GP2 and the parked GP4. Its bit for GP4 is
+  `ANS3`, not bit 4, so the GPIO output mask cannot be reused for this
+  comparison.
+* `ADCON0.ADON` -- the same class of hazard, and guarded for the same reason.
+
+**One register carries three safety-relevant fields.** `OPTION_REG` holds the
+watchdog period (`PSA`/`PS`), the tick clock source (`T0CS`) and the global
+pull-up enable (`nGPPU`). It is therefore compared exactly rather than field
+by field. This cuts both ways and is worth naming in review: on the PIC10F322
+those three concerns are three independent registers, so a single-bit upset
+here is more likely to land on something safety-relevant, and one exact
+comparison covers all of it.
+
+**The pin map is not the PIC10F32x map renamed.** `WPU` implements no bit for
+GP3, so the input-only pin has no internal weak pull-up and the footswitch
+cannot live there the way it does on the PIC10F322; it lives on GP5, the one
+bidirectional pin with no analog function. GP4 is a parked output driven low
+and inside the guarded mask rather than an unconnected spare. The complete map
+and the board requirements it imposes are in the PIC12F675 pinout section
+above.
+
 
 == AVR Classic Program Flow
 

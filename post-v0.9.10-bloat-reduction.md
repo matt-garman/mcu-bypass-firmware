@@ -402,7 +402,7 @@ retired deliberately, and the retirement recorded.
 
 ## BR-RES-01 - Remove mutable current resource tables from development docs
 
-**Status:** DONE (commit pending)
+**Status:** DONE `e7c4f68`
 
 **Depends on:** BR-AUTH-01, BR-BASE-01
 
@@ -505,7 +505,7 @@ bound to the tag that produced them, which is the form BR-RES-01 asks for.
 
 ## BR-RES-02 - Retire cross-document resource synchronization tests
 
-**Status:** DONE (commit pending)
+**Status:** DONE `e7c4f68`
 
 **Depends on:** BR-RES-01
 
@@ -616,7 +616,7 @@ needed updating.
 
 ## BR-PIC-01 - Create a coherent PIC architecture section in DESIGN_DOCUMENTATION
 
-**Status:** TODO
+**Status:** DONE (commit pending)
 
 **Depends on:** BR-AUTH-01, BR-RES-01
 
@@ -627,16 +627,77 @@ across completed feasibility and merge documents.
 
 **Work:**
 
-- [ ] Define a clear PIC architecture hierarchy covering common Model-B behavior
+- [x] Define a clear PIC architecture hierarchy covering common Model-B behavior
   and per-part differences.
-- [ ] Give PIC10F322, PIC10F320, and PIC12F675 stable named anchors.
-- [ ] Distinguish enhanced mid-range PIC10F32x from classic mid-range
+- [x] Give PIC10F322, PIC10F320, and PIC12F675 stable named anchors.
+- [x] Distinguish enhanced mid-range PIC10F32x from classic mid-range
   PIC12F675.
-- [ ] Keep design requirements separate from current test results.
-- [ ] Keep operator programming transactions in `FLASHING.md`, not in the
+- [x] Keep design requirements separate from current test results.
+- [x] Keep operator programming transactions in `FLASHING.md`, not in the
   design section.
-- [ ] Keep tool installation/version details in `TOOLCHAIN.adoc`.
-- [ ] Keep hardware qualification results in `HARDWARE_VALIDATION_LOG.md`.
+- [x] Keep tool installation/version details in `TOOLCHAIN.adoc`.
+- [x] Keep hardware qualification results in `HARDWARE_VALIDATION_LOG.md`.
+
+**Result:**
+
+`DESIGN_DOCUMENTATION.adoc` gains a `PIC Architecture` section carrying seven
+anchors: `pic-architecture`, `pic-model-b`, `pic-core-generations`,
+`pic-clock-and-power`, `pic10f322-architecture`, `pic10f320-architecture` and
+`pic12f675-architecture`. These are the document's first explicit anchors, so
+other documents can now deep-link a PIC design statement instead of naming a
+section title that renumbering would break.
+
+The hierarchy is model first, then generation, then part. `pic-model-b` states
+the polled-tick/pure-fault-watchdog model once for all three PIC targets --
+the loop shape, why reaching the pet is the liveness proof, the three reasons
+the model was chosen, the two accepted consequences, and why `INTCON` is
+absent from every PIC guard set. `pic-core-generations` carries a
+nine-row table separating the enhanced mid-range PIC10F32x from the classic
+mid-range PIC12F675 by facility, with a consequence column, and states the
+conclusion that follows: the PIC12F675 shell is a rewrite of the PIC10F322
+shell rather than a port, sharing the interface and the core and nothing
+below them.
+
+The three per-part subsections each state what that part does differently and
+why. PIC10F322 is written as the reference: four I/O pins forcing the map, a
+tick that is configured rather than constructed, a watchdog independent of the
+tick, and the two integrity checks that are deliberately stronger than the
+obvious version. PIC10F320 is written from its one number: 256 words, the
+measured non-fit, the hand-inlining seam, what the equivalence lane closes and
+how far, the deliberately omitted general latch match against the coil-bit
+guard that was affordable, and the target-selection consequence. PIC12F675 is
+written from six differences: no output latch and the read-modify-write hazard
+the SRAM shadow answers, the fixed clock whose calibration word lives in
+flash, the single shared prescaler that makes the tick 1.024ms, the
+three-path analog hazard surface, the one register carrying three
+safety-relevant fields, and the pin map that is not the PIC10F32x map renamed.
+
+Two existing sections moved rather than being duplicated. `PIC Power /
+Current Draw` became the `pic-clock-and-power` subsection with its body
+verbatim; its two `Datasheet References` pointers, which said "the section
+above" while pointing below, now cross-reference the anchor. The
+`Multi-MCU Architecture` exception subsection keeps its place in the
+cross-target argument and hands the architecture itself to
+`pic10f320-architecture`, so the two accounts no longer both claim to be
+normative.
+
+Ownership was settled in the two documents that also claimed it.
+`docs/pic10f320_special_case.md` said it was "the single authoritative
+statement of that difference"; it now names the design anchor as normative and
+scopes itself to the assurance comparison and the manual shared-surface
+checklist. `docs/phase2_pic_shell.md` §1 now names `pic-model-b` as normative
+and scopes itself to the dated decision record. Both files are retired by
+BR-PIC-02 and BR-PIC-03; until then neither is a second owner.
+
+One current measurement that BR-RES-01 missed was removed here, because it is
+in the PIC material this task owns: `Failsafe Mechanisms` stated that "the
+current images use 476/502/493 of 512 words". It now states the capacity fact
+that paragraph actually needs -- 512 words is the smallest budget that still
+holds the core, the defensive layer and the fold.
+
+No measurement, toolchain version, operator transaction or qualification
+result was added. `asciidoctor` renders the document without warnings and every
+cross-reference resolves.
 
 **Acceptance:**
 
@@ -2216,10 +2277,10 @@ dependencies and acceptance criteria.
 | BR-BASE-01 | Reconcile final release baseline | DONE `756e622` |
 | BR-AUTH-01 | Finalize authority map | DONE `620234f` |
 | BR-AUTH-02 | Inventory references/contracts | DONE `bc267a8` |
-| BR-RES-01 | Remove mutable resource tables | DONE (commit pending) |
-| BR-RES-02 | Retire prose synchronization tests | DONE (commit pending) |
+| BR-RES-01 | Remove mutable resource tables | DONE `e7c4f68` |
+| BR-RES-02 | Retire prose synchronization tests | DONE `e7c4f68` |
 | BR-RES-03 | Publish generated release resource view | TODO |
-| BR-PIC-01 | Create coherent PIC design section | TODO |
+| BR-PIC-01 | Create coherent PIC design section | DONE (commit pending) |
 | BR-PIC-02 | Merge PIC10F322 phase notes | TODO |
 | BR-PIC-03 | Consolidate PIC10F320 documents | TODO |
 | BR-PIC-04 | Consolidate PIC12F675 feasibility | TODO |
