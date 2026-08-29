@@ -65,20 +65,22 @@ resynchronization change:
 
 Those are historical F1 deltas, not current occupancy. The AVR-XT and PIC12F675
 relay images were remeasured after the emergency physical-pin path landed, and
-both grew again; the current figure for every image is in
-`DESIGN_DOCUMENTATION.adoc`'s Resource Utilization tables, which are measured
-from the latest fully provisioned candidate build and checked for consistency by
-`make test-resource-tables` rather than projected from the deltas here. The
-production release's strict mode performs and retains the final 21-image check.
+both grew again; the exact figure for every image is release evidence, bound to
+a source commit and a pinned toolchain, rather than something to project from
+the deltas here. `make test-resource-tables` measures each built image against
+the reviewed ceiling in `DESIGN_DOCUMENTATION.adoc`'s Resource Utilization
+section, and the production release's strict mode performs and retains the final
+21-image check.
 
 It is nearly free because the escalation **reuses the sanity gate that already
 compares the complete output latch**. Only PIC10F320, which cannot afford that
 general comparison, pays anything: three words for a coil-only `LATA` term.
 
 The 320 then gave those back and more. Making its coil clear one masked write
-(below) removed two per-bit helpers that had no other caller, so the shipping
-relay image is **242** words of 256 -- three fewer than before this policy was
-adopted at all -- and its worst-case return-stack depth dropped from 4 to 3 of 8.
+(below) removed two per-bit helpers that had no other caller, so at `v0.9.10`
+its relay image measured **242** words of 256 -- three fewer than before this
+policy was adopted at all -- and its worst-case return-stack depth dropped from
+4 to 3 of 8.
 
 ## Mechanism
 

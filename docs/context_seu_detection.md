@@ -139,8 +139,8 @@ chain costs 32 words rather than saving them -- its terms are calls and
 comparisons that need an explicit `? 1U : 0U` -- so that chain is deliberately
 left short-circuit. At F2 landing the folded image measured 476/502/505 words,
 two words better in the relay variant than the pre-transaction image. The later
-masked relay-coil clear reduced only the relay image, leaving the current matrix
-at 476/502/493; see Resource qualification below.
+masked relay-coil clear reduced only the relay image; see Resource
+qualification below.
 
 That margin is thin enough that the *spelling* of the fold matters, not just its
 logic, and the accumulator must stay `diff |= term`. Respelling it as the
@@ -243,40 +243,35 @@ function regardless (the host suite links it unconditionally).
 
 ## Resource qualification
 
-These are the latest fully provisioned candidate measurements for the build that
-carries the transaction and OR-folded integrity checks: XC8 v3.10 (free mode,
-`-O2`) for the PIC parts, avr-gcc for the AVR parts. They remain working values
-until the production release's strict resource gate remeasures all 21 images and
-retains its source-commit-bound result. The PIC10F322 row is the one F2 had to
-fit inside, but every row here has moved since F2 landed, for later firmware
-work outside this design; read them as current occupancy rather than as this
-change's cost.
+This change had to fit inside budgets it did not set. Those budgets, and the
+gates that enforce them, are the durable part; what each image occupies today is
+release evidence, retained per release with its source commit and pinned
+toolchain, and is not restated here.
 
-| Part | Budget | Simple / mute / relay | Tightest margin |
-| --- | --- | --- | --- |
-| PIC10F322 | 512 words | 476 / 502 / 493 words | 10 words (mute) |
-| PIC12F675 | 1024 words | 548 / 574 / 585 words | 439 words (relay) |
-| ATtiny13a (AVR classic) | 921 B | 838 / 878 / 868 B | 43 B (mute) |
-| ATtiny202 (AVR-XT) | 2048 B | 968 / 1008 / 1040 B | 1008 B (relay) |
-| PIC10F320 | 256 words | 220 / 241 / 242 words | 14 words; F2 excluded |
+| Part | Flash budget | Enforced by |
+| --- | --- | --- |
+| PIC10F322 | 512 words | `make pic10f322` |
+| PIC12F675 | 1024 words | `make pic12f675` |
+| ATtiny13a (AVR classic) | 90% of 1024 B | `make test-flash-budget` |
+| ATtiny202 (AVR-XT) | 2048 B | `make attiny202` |
+| PIC10F320 | 256 words | `make pic10f320` |
 
-PIC10F322 is the binding constraint, and it stays inside 512 words in every
-variant only because the integrity-check fold pays for the transaction -- see
-the flash margin note above, including the one-word-per-term cost of respelling
-that fold. The ATtiny13a budget is the gate's 90%-of-1024 utilisation limit, not
-the raw device size. PIC10F320 carries no F2 at all; its row records that the
-part still builds and where its own margin sits.
+PIC10F322 is the binding constraint. It stays inside 512 words in every variant
+only because the integrity-check fold pays for the transaction -- see the flash
+margin note above, including the one-word-per-term cost of respelling that fold.
+The ATtiny13a budget is the gate's 90%-of-1024 utilisation limit, not the raw
+device size. PIC10F320 carries no F2 at all; it is listed because the part still
+builds, and because its own margin is the reason it carries none.
 
 RAM and stack: the AVR `next_ctx` snapshot is an automatic, so it lands on the
 stack. The stack high-water gate in the simulator suite (`make test` and
-`make test-long`) measures 31-33 B of stack use across every classic-AVR variant and
-part. With 5 B of static data, aggregate occupancy is 36-38 B. The tightest
-margin is the ATtiny13a, whose 64 B of SRAM leaves 26 B free, against the gate's
-8 B floor. PIC10F322 return-stack depth is unchanged at 3 levels
-(`cd4053_simple`, `cd4053_with_mute`) and 4 (`tq2_l2_5v_relay`), each carrying a
-2-level reserve inside the part's 8 hardware levels. The image, RAM, stack and
-static-analysis gates all passed with the automatic `next_ctx`/`res` objects in
-place.
+`make test-long`) measures peak stack use across every classic-AVR variant and
+part, and fails unless at least 8 free bytes separate the deepest stack pointer
+from the top of the static data. The ATtiny13a, with 64 B of SRAM, is the
+tightest of them. On PIC10F322 this design leaves the return-stack depth
+unchanged, and every variant holds a 2-level reserve inside the part's 8
+hardware levels. The image, RAM, stack and static-analysis gates all passed with
+the automatic `next_ctx`/`res` objects in place.
 
 The transaction also removes the former AVR `ctx_fault_`, so persistent F2
 storage is one check byte rather than two bytes.

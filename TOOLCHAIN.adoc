@@ -246,10 +246,11 @@ duplicate, malformed, inconsistent, or over-limit summaries delete the complete
 image matrix. The 16-byte remainder is allocation headroom; XC8's Data-space
 total already accounts for statically overlaid automatic storage.
 
-See "Resource Utilization" in DESIGN_DOCUMENTATION.adoc for the measured
-figures, which own the per-variant word counts.  The 320's margins there are
-tight enough to be a design input rather than a footnote: they are why one of
-the PIC10F322 shell's defensive checks could not be ported to it; see
+See "Resource Utilization" in DESIGN_DOCUMENTATION.adoc for each part's
+capacity, its reviewed ceiling, and the gate that enforces it; the measured
+per-variant figures belong to the release record.  The 320's margins are tight
+enough to be a design input rather than a footnote: they are why one of the
+PIC10F322 shell's defensive checks could not be ported to it; see
 docs/pic10f320_special_case.md.
 
 PIC10F320 commands, for reference (same toolchain, `pic10f320-` targets):

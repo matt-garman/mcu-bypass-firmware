@@ -3438,25 +3438,30 @@ test-makefile-name-contract: python-version-valid
 test-todo-index: python-version-valid test/test_todo_index.py TODO.md
 	@python3 test/test_todo_index.py
 
-# Current resource documentation -- four utilization tables, the sentences
-# derived from them, and the same numbers restated elsewhere -- is checked for
-# exact structure, arithmetic and agreement. Same family as the two contracts above,
-# and it drifted the same way: at the v0.9.10 candidate the AVR Classic table
-# still held the pre-F1 ATtiny13a images, the ATtiny202 and PIC12F675 tables were
-# several changes behind, the ATtiny45/85 rows were missing outright, and the two
-# derived sentences had been computed from the stale numbers. A reader decides
-# whether a change fits from exactly these figures.
+# Every reviewed resource ceiling is enforced where it is declared, and this
+# gate measures what the build produced against those declarations. It used to
+# do something else: the same figures were restated in four documents, and it
+# kept the copies synchronized. They had drifted before it existed -- at the
+# v0.9.10 candidate three of the four tables were several changes behind and the
+# ATtiny45/85 rows were missing outright -- but synchronizing prose made a
+# documentation edit a precondition for a firmware size change, and made
+# formatting a tested interface. The documents now carry capacities, ceilings and
+# method; the exact figures belong to the release record that binds them to a
+# source commit. So the ceilings are read from this file, which declares them,
+# and the images are read from the build tree.
 #
-# It needs no AVR or PIC toolchain. The ordinary `make test` mode checks prose
-# and any existing images without calling that a final-candidate run. Production
-# release staging invokes the script's strict mode after all validation: it
-# requires 21/21 images plus the complete RAM/stack logs and retains one
-# source-commit-bound result.
+# It needs no AVR or PIC toolchain. The ordinary `make test` mode measures
+# whatever the tree already built without calling that a final-candidate run.
+# Production release staging invokes the script's strict mode after all
+# validation: it requires 21/21 images plus the complete RAM/stack logs and
+# retains one source-commit-bound result.
+#
+# Prerequisites name every input the checker reads, on the same discipline as
+# the gates above: this Makefile for the ceilings, and the simulator suite for
+# the free-SRAM floor its canary gate enforces.
 .PHONY: test-resource-tables
 test-resource-tables: python-version-valid test/test_resource_tables.py \
-		test/test_resource_tables_contract.py \
-		DESIGN_DOCUMENTATION.adoc docs/context_seu_detection.md \
-		docs/pic12f675_feasibility.md docs/pic10f320_validation.md CHANGELOG.md
+		test/test_resource_tables_contract.py Makefile test/avr/test_sim.c
 	@python3 test/test_resource_tables.py
 	@python3 test/test_resource_tables_contract.py
 
@@ -5496,9 +5501,9 @@ override PIC12F675_ASSEMBLIES := $(PIC12F675_HEXES:.hex=.s)
 override PIC12F675_SYMBOLS := $(PIC12F675_HEXES:.hex=.sym)
 override PIC12F675_BUILD_PRODUCTS := $(PIC12F675_HEXES) $(PIC12F675_ASSEMBLIES) $(PIC12F675_SYMBOLS)
 # PIC12F675 device budget: 1024 words flash / 64 B RAM. TWICE the PIC10F322's
-# flash, which is the measured reason the modular architecture fits here (the
-# tightest variant lands at 55.9%, against the 322's 98.0%) -- see
-# DESIGN_DOCUMENTATION.adoc, "Resource Utilization".
+# flash, which is the reason the modular architecture fits here: the 322 sits
+# near its ceiling on the tightest variant and this part sits near half of its
+# own -- see DESIGN_DOCUMENTATION.adoc, "Resource Utilization".
 PIC12F675_FLASH_WORDS ?= 1024
 # Silicon capacity is immutable. The policy limit is separately reviewable and
 # inclusive, preserving 16 bytes of allocation headroom at its default setting;

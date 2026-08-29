@@ -1,66 +1,69 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) Matthew Garman
-"""Check current resource documentation and final-candidate evidence.
+"""Measure the release images against the reviewed resource ceilings.
 
 WHY THIS EXISTS.  The measured flash/RAM figures for the seven release parts
-are restated in four current documents -- DESIGN_DOCUMENTATION.adoc's four
+used to be restated in four current documents -- DESIGN_DOCUMENTATION.adoc's
 utilization tables and the prose derived from them, docs/context_seu_detection.md's
 "Resource qualification" table, docs/pic12f675_feasibility.md's bounded
-current-status block, and CHANGELOG.md's PIC10F322 sentence -- and nothing
-compared them either with each other or with a build.  They drifted, exactly as
-a hand-maintained table always does.  At the v0.9.10 candidate the AVR Classic
-table still carried the pre-F1 ATtiny13a images (834/874/864 against a real
-838/878/868), the ATtiny202 table was three changes behind (964/1004/994 against
-968/1008/1040), the PIC12F675 tables were two behind (546/572/563 against
-548/574/583), the ATtiny45/85 rows were absent altogether, and two derived
-sentences -- the utilization span and the ATtiny13a's distance from its 90%
-ceiling -- had been computed from those stale numbers.  Every one of those is a
-number a reader would reasonably act on when deciding whether a change fits.
+current-status block, and CHANGELOG.md's PIC10F322 sentence -- and this gate
+kept those five copies synchronized with each other and with a build.  They had
+drifted before it existed, exactly as a hand-maintained table always does: at
+the v0.9.10 candidate three of the four tables were several changes behind, the
+ATtiny45/85 rows were absent altogether, and two derived sentences had been
+computed from the stale numbers.
 
-WHAT IS CHECKED, in four layers.
+Keeping the copies synchronized treated the symptom.  A measurement that must be
+transcribed into prose to be checked makes documentation editing a precondition
+for a firmware size change, and makes prose formatting a tested interface.  The
+documents now carry capacities, reviewed ceilings, measurement methods and the
+architectural consequences -- the parts that are stable under ordinary code
+changes -- and no current figure at all.  Exact per-image measurements belong to
+the release record that binds them to a source commit and a pinned toolchain.
 
-1. STRUCTURE AND ARITHMETIC, from DESIGN_DOCUMENTATION.adoc alone.  The four
-   tables must cover exactly the canonical 7 parts x 3 variants with no row
-   missing and none invented; each table's declared device capacity must match
-   the datasheet constant below; and every percentage and free-space cell must
-   be recomputed from its own size and capacity.  A transcription slip in one
-   cell therefore fails even if the size is right.
+So this gate no longer reads documentation.  It measures, and it compares what it
+measured against the ceiling the build itself enforces.
 
-2. AGREEMENT, across the four documents and the prose derived from the tables.
-   The other three documents restate subsets of the same figures and must agree
-   digit for digit.  The derived sentences are recomputed rather than matched:
-   the span sentence must name the true minimum and maximum utilization and the
-   parts that hold them, the binding-image and PIC10F320 free-word claims must
-   equal the tables' own margins, the ATtiny13a paragraph must agree with the
-   90%-of-1024 gate limit that test/check_flash_budget.sh actually enforces, and
-   the PIC12F675-versus-PIC10F322 relay comparison must equal the difference
-   between those two rows.
+WHAT IS CHECKED, in three layers.
 
-3. OPTIONAL IMAGE COMPARISON, against built images.  For every documented image that exists in a
-   build directory, the size is measured from the artifact and must equal the
-   documented figure.  AVR program size is the sum of the loaded, allocated
-   flash sections of the ELF -- what `avr-size` reports as `Program:` -- and PIC
-   program size is the number of distinct program words the Intel HEX occupies
-   below the device's flash capacity, which reproduces XC8's "Program space
-   used" exactly on all nine PIC images.  Both are read here rather than shelled
-   out to, so this layer needs no AVR or PIC toolchain: it measures whatever the
-   tree already built.
+1. REVIEWED POLICY, read from the Makefile.  Every ceiling below is owned by one
+   Makefile variable and is parsed from it rather than restated here; a missing,
+   duplicated or non-numeric definition fails.  The parsed policy is then checked
+   for coherence against the datasheet capacities, which are silicon and not
+   policy: no flash ceiling may exceed its part's capacity (the Makefile records
+   why -- a shared PIC_FLASH_WORDS=512 once silently gated the 256-word part),
+   no RAM sub-limit may reach its device's capacity, and no stack reserve may
+   consume the hardware stack.
 
-An absent build directory is not a failure in the ordinary documentation mode.
-`make test` runs on runners with no
-XC8 and no ATtiny_DFP (see .github/workflows/ci.yml), so requiring all 21 images
-would fail exactly where the AVR-only evidence is still worth having.  The count
-of images actually measured is printed, so this mode makes no final-candidate
-claim when it verified nothing.
+2. IMAGE MEASUREMENT, against those ceilings.  For every canonical image that
+   exists in a build directory, the size is measured from the artifact and must
+   be a positive figure at or below the part's ceiling.  AVR program size is the
+   sum of the loaded, allocated flash sections of the ELF -- what `avr-size`
+   reports as `Program:` -- and PIC program size is the number of distinct
+   program words the Intel HEX occupies below the device's flash capacity, which
+   reproduces XC8's "Program space used" exactly on all nine PIC images.  Both
+   are read here rather than shelled out to, so this layer needs no AVR or PIC
+   toolchain: it measures whatever the tree already built.
 
-4. FINAL-CANDIDATE EVIDENCE.  ``--require-all-images`` requires all 21 regular,
-non-symlinked images, validates AVR static data from all 12 ELFs, and consumes
-the release run's full build/test logs.  Those logs must contain nine Classic
-AVR stack high-water observations, the three-report AVR-XT frame-bound result,
-both three-variant PIC12F675 Data-space passes, and all nine PIC return-stack measurements.
-On success it emits one machine record bound to the exact source commit.  The
-release retains and hashes that record; this mode may never pass at 0/21.
+An absent build directory is not a failure in the ordinary mode.  `make test`
+runs on runners with no XC8 and no ATtiny_DFP (see .github/workflows/ci.yml), so
+requiring all 21 images would fail exactly where the AVR-only evidence is still
+worth having.  The count of images actually measured is printed, so this mode
+makes no final-candidate claim when it verified nothing.
+
+3. FINAL-CANDIDATE EVIDENCE.  ``--require-all-images`` requires all 21 regular,
+   non-symlinked images, validates AVR static data from all 12 ELFs, and consumes
+   the release run's full build/test logs.  Those logs must contain nine Classic
+   AVR stack high-water observations, the three-report AVR-XT frame-bound result,
+   both three-variant PIC12F675 Data-space passes, and all nine PIC return-stack
+   measurements.  Each record is checked for internal arithmetic consistency and
+   against the reviewed limit it reports against -- a truncated, reordered or
+   hand-edited log fails on its own arithmetic -- rather than against a
+   remembered figure, which would put this file back in the business of
+   restating today's numbers.  On success it emits one machine record bound to
+   the exact source commit.  The release retains and hashes that record; this
+   mode may never pass at 0/21.
 """
 
 import argparse
@@ -68,25 +71,18 @@ import os
 import re
 import struct
 import sys
-from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 ROOT = None
-DESIGN = None
-SEU = None
-FEASIBILITY = None
-PIC320_VALIDATION = None
-CHANGELOG = None
+MAKEFILE = None
+SIM_TEST = None
 
 
 def configure_root(root):
-    global ROOT, DESIGN, SEU, FEASIBILITY, PIC320_VALIDATION, CHANGELOG
+    global ROOT, MAKEFILE, SIM_TEST
     ROOT = root.resolve()
-    DESIGN = ROOT / "DESIGN_DOCUMENTATION.adoc"
-    SEU = ROOT / "docs" / "context_seu_detection.md"
-    FEASIBILITY = ROOT / "docs" / "pic12f675_feasibility.md"
-    PIC320_VALIDATION = ROOT / "docs" / "pic10f320_validation.md"
-    CHANGELOG = ROOT / "CHANGELOG.md"
+    MAKEFILE = ROOT / "Makefile"
+    SIM_TEST = ROOT / "test" / "avr" / "test_sim.c"
 
 
 configure_root(Path(__file__).resolve().parent.parent)
@@ -94,9 +90,11 @@ configure_root(Path(__file__).resolve().parent.parent)
 VARIANTS = ("cd4053_simple", "cd4053_with_mute", "tq2_l2_5v_relay")
 
 # Datasheet flash capacity per release part, and the unit its figures are
-# reported in.  AVR parts are measured in bytes by the linker; the PIC parts are
-# measured in 14-bit program words by XC8, and reporting either in the other's
-# unit is the mistake this pairing exists to prevent.
+# reported in.  This is silicon: it is not a ceiling, cannot be overridden, and
+# every reviewed ceiling below is checked against it.  AVR parts are measured in
+# bytes by the linker; the PIC parts are measured in 14-bit program words by XC8,
+# and reporting either in the other's unit is the mistake this pairing exists to
+# prevent.
 PARTS = {
     "attiny13a": (1024, "bytes"),
     "attiny45": (4096, "bytes"),
@@ -107,11 +105,26 @@ PARTS = {
     "pic12f675": (1024, "words"),
 }
 
-# test/check_flash_budget.sh is invoked for the ATtiny13a with these arguments
-# (Makefile, _test-flash-budget-measure) and computes its limit by integer
-# truncation, so the ceiling is 921 bytes and not 921.6.
-CLASSIC_BUDGET_PERCENT = 90
-CLASSIC_BUDGET_LIMIT = PARTS["attiny13a"][0] * CLASSIC_BUDGET_PERCENT // 100
+# The reviewed ceilings, each owned by exactly one Makefile variable and read
+# from it.  Restating a value here would recreate, in the test, the duplication
+# the documents were relieved of.
+POLICY_VARIABLES = (
+    "ATTINY13A_FLASH_BYTES",
+    "ATTINY13A_FLASH_BUDGET",
+    "XT_FLASH_BYTES",
+    "XT_SRAM_BYTES",
+    "XT_STATIC_RAM_LIMIT",
+    "XT_STACK_MAX_FRAME",
+    "PIC10F322_FLASH_WORDS",
+    "PIC10F322_STACK_RESERVE",
+    "PIC10F320_FLASH_WORDS",
+    "PIC10F320_STACK_RESERVE",
+    "PIC10F320_RETURN_STACK_LIMIT",
+    "PIC12F675_FLASH_WORDS",
+    "PIC12F675_DATA_BYTES",
+    "PIC12F675_DATA_LIMIT",
+    "PIC12F675_STACK_RESERVE",
+)
 
 # Where a built image lives, and how to measure it.  The Makefile's own build
 # directory variables are honoured so an out-of-tree build is still measured.
@@ -136,383 +149,145 @@ def check(condition, message):
         failures.append(message)
 
 
-def flatten(text):
-    """Collapse the line wrapping that both documents use inside a sentence."""
-    return re.sub(r"\s+", " ", text)
-
-
-def capture_numbers(text, pattern, expected, label):
-    """Require one prose claim and compare all captured decimal fields."""
-    match = re.search(pattern, text)
-    check(match is not None, "%s is missing or unparseable" % label)
-    if match is not None:
-        actual = tuple(int(value) for value in match.groups())
-        check(actual == expected,
-              "%s reports %s; expected %s"
-              % (label, "/".join(str(value) for value in actual),
-                 "/".join(str(value) for value in expected)))
-
-
-def percent(size, capacity):
-    """The utilization percentage as avr-size and XC8 both round it."""
-    exact = Decimal(size) * 100 / Decimal(capacity)
-    return exact.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
-
-
-def block_after(text, heading, path):
-    """The first |=== ... |=== table body following an AsciiDoc heading."""
-    start = text.find(heading)
-    if start < 0:
-        failures.append("%s has no '%s' section" % (path.name, heading.strip()))
-        return []
-    opened = text.find("\n|===", start)
-    closed = text.find("\n|===", opened + 1) if opened >= 0 else -1
-    if opened < 0 or closed < 0:
-        failures.append("%s has no complete table under '%s'"
-                        % (path.name, heading.strip()))
-        return []
-    return text[opened + 5:closed].splitlines()
-
-
-def cell_split(line):
-    return [c.strip() for c in line.strip().lstrip("|").split("|")]
-
-
-NUMBER_UNIT = re.compile(r"^([0-9]+) (bytes|words)$")
-PERCENT_ONLY = re.compile(r"^([0-9]+\.[0-9])%$")
-PERCENT_OF = re.compile(r"^([0-9]+\.[0-9])% of ([0-9]+) KB$")
-
-
-def parse_design(text):
-    """(part, variant) -> (size, documented percent, documented free or None)."""
-    figures = {}
-
-    # AVR Classic: one table for three parts, capacity stated per row in KB.
-    for line in block_after(text, "\n=== AVR Classic family", DESIGN):
-        cells = cell_split(line)
-        if len(cells) != 4 or cells[0] == "Part":
+def parse_policy():
+    """Read every reviewed ceiling from the Makefile that enforces it."""
+    try:
+        text = MAKEFILE.read_text(encoding="utf-8")
+    except OSError as error:
+        failures.append("the reviewed ceilings cannot be read: %s" % error)
+        return None
+    policy = {}
+    for name in POLICY_VARIABLES:
+        # `NAME ?= n`, `NAME = n` and `override NAME := n` are all definitions;
+        # anything else (a computed value, a reference to another variable) is
+        # not a reviewed constant this gate can check, and fails rather than
+        # being skipped.
+        matches = re.findall(
+            r"^(?:override[ \t]+)?%s[ \t]*[:?]?=[ \t]*([0-9]+)[ \t]*$" % name,
+            text, re.MULTILINE)
+        check(len(matches) == 1,
+              "the Makefile must define %s exactly once as a decimal constant; "
+              "found %d such definitions" % (name, len(matches)))
+        if len(matches) != 1:
             continue
-        part = cells[0].lower()
-        size = NUMBER_UNIT.match(cells[2])
-        stated = PERCENT_OF.match(cells[3])
-        check(part in PARTS, "AVR Classic table names unknown part '%s'" % cells[0])
-        check(size is not None and stated is not None,
-              "AVR Classic row is unparseable: %s" % line.strip())
-        if part not in PARTS or size is None or stated is None:
-            continue
-        check(int(stated.group(2)) * 1024 == PARTS[part][0],
-              "%s row claims a %s KB device; the datasheet capacity is %d bytes"
-              % (part, stated.group(2), PARTS[part][0]))
-        check(size.group(2) == PARTS[part][1],
-              "%s figures must be reported in %s, not %s"
-              % (part, PARTS[part][1], size.group(2)))
-        figures[(part, cells[1])] = (int(size.group(1)),
-                                     Decimal(stated.group(1)), None)
+        value = int(matches[0])
+        check(value > 0, "%s must be a positive integer; the Makefile says %d"
+              % (name, value))
+        policy[name] = value
+    return policy if len(policy) == len(POLICY_VARIABLES) else None
 
-    # One table per remaining part: | Variant | Flash | of <capacity> | Free.
-    for part, heading in (("attiny202", "\n=== ATtiny202 (AVR-XT build)"),
-                          ("pic10f322", "\n=== PIC10F322 (XC8 build)"),
-                          ("pic10f320", "\n=== PIC10F320 (XC8 build)"),
-                          ("pic12f675", "\n=== PIC12F675 (XC8 build)")):
+
+def parse_classic_stack_floor():
+    """The free-SRAM floor test/avr/test_sim.c's canary gate actually enforces."""
+    try:
+        text = SIM_TEST.read_text(encoding="utf-8")
+    except OSError as error:
+        failures.append("the Classic AVR stack floor cannot be read: %s" % error)
+        return None
+    matches = re.findall(r"margin_bytes >= ([0-9]+)u", text)
+    check(len(matches) == 1,
+          "test/avr/test_sim.c must state its free-SRAM floor exactly once; "
+          "found %d" % len(matches))
+    return int(matches[0]) if len(matches) == 1 else None
+
+
+def flash_ceilings(policy):
+    """The reviewed flash ceiling per part, in that part's own unit."""
+    return {
+        # check_flash_budget.sh computes its limit by integer truncation, so a
+        # 90% budget on 1024 B is 921 B and not 921.6.
+        "attiny13a": (policy["ATTINY13A_FLASH_BYTES"]
+                      * policy["ATTINY13A_FLASH_BUDGET"] // 100),
+        # The percentage gate covers the ATtiny13a, the part it binds.  On the
+        # tinyx5 parts the same firmware occupies a fifth or a tenth of the
+        # device, so the linker's device size is the bound those builds need.
+        "attiny45": PARTS["attiny45"][0],
+        "attiny85": PARTS["attiny85"][0],
+        "attiny202": policy["XT_FLASH_BYTES"],
+        "pic10f322": policy["PIC10F322_FLASH_WORDS"],
+        "pic10f320": policy["PIC10F320_FLASH_WORDS"],
+        "pic12f675": policy["PIC12F675_FLASH_WORDS"],
+    }
+
+
+def check_policy(policy, ceilings):
+    """The reviewed ceilings must be coherent with the silicon they bound."""
+    check(policy["ATTINY13A_FLASH_BYTES"] == PARTS["attiny13a"][0],
+          "the Makefile calls the ATtiny13a %d B of flash; the datasheet says %d"
+          % (policy["ATTINY13A_FLASH_BYTES"], PARTS["attiny13a"][0]))
+    check(1 <= policy["ATTINY13A_FLASH_BUDGET"] <= 100,
+          "ATTINY13A_FLASH_BUDGET is a percentage; the Makefile says %d"
+          % policy["ATTINY13A_FLASH_BUDGET"])
+    for part in sorted(PARTS):
         capacity, unit = PARTS[part]
-        for line in block_after(text, heading, DESIGN):
-            cells = cell_split(line)
-            if len(cells) != 4:
+        check(0 < ceilings[part] <= capacity,
+              "the reviewed %s ceiling is %d %s; the part holds %d"
+              % (part, ceilings[part], unit, capacity))
+    check(policy["XT_STATIC_RAM_LIMIT"] < policy["XT_SRAM_BYTES"],
+          "the ATtiny202 static-RAM ceiling (%d B) leaves no SRAM for the stack "
+          "(device %d B)" % (policy["XT_STATIC_RAM_LIMIT"],
+                             policy["XT_SRAM_BYTES"]))
+    check(policy["XT_STACK_MAX_FRAME"] <= policy["XT_SRAM_BYTES"],
+          "the ATtiny202 per-frame ceiling (%d B) exceeds the device's SRAM (%d B)"
+          % (policy["XT_STACK_MAX_FRAME"], policy["XT_SRAM_BYTES"]))
+    check(policy["PIC12F675_DATA_LIMIT"] < policy["PIC12F675_DATA_BYTES"],
+          "the PIC12F675 Data-space ceiling (%d B) is not inside the device's "
+          "%d B" % (policy["PIC12F675_DATA_LIMIT"],
+                    policy["PIC12F675_DATA_BYTES"]))
+    for part in ("PIC10F322", "PIC10F320", "PIC12F675"):
+        reserve = policy["%s_STACK_RESERVE" % part]
+        check(0 < reserve < policy["PIC10F320_RETURN_STACK_LIMIT"],
+              "the %s return-stack reserve (%d) does not leave usable levels "
+              "inside the %d-level hardware stack"
+              % (part, reserve, policy["PIC10F320_RETURN_STACK_LIMIT"]))
+
+
+def check_built_images(policy, ceilings, require_all=False):
+    measured = 0
+    avr_static_measured = 0
+    for part in sorted(PARTS):
+        variable, default, extension = BUILD_DIRS[part]
+        directory = ROOT / os.environ.get(variable) if os.environ.get(variable) \
+            else ROOT / default
+        for variant in VARIANTS:
+            image = directory / ("bypass-%s-%s.%s" % (part, variant, extension))
+            if not image.exists():
+                if require_all:
+                    check(False, "required final-candidate image is missing: %s" % image)
                 continue
-            if cells[0] == "Variant":
-                stated = re.match(r"^of ([0-9]+) (KB|words)$", cells[2])
-                check(stated is not None,
-                      "%s table header does not state a capacity: %s"
-                      % (part, line.strip()))
-                if stated is not None:
-                    declared = int(stated.group(1))
-                    if stated.group(2) == "KB":
-                        declared *= 1024
-                    check(declared == capacity,
-                          "%s table declares %d %s of flash; the datasheet says %d"
-                          % (part, declared, stated.group(2), capacity))
+            if image.is_symlink() or not image.is_file():
+                check(False, "image is not a regular non-symlinked file: %s" % image)
                 continue
-            size = NUMBER_UNIT.match(cells[1])
-            stated = PERCENT_ONLY.match(cells[2])
-            free = NUMBER_UNIT.match(cells[3])
-            check(size is not None and stated is not None and free is not None,
-                  "%s row is unparseable: %s" % (part, line.strip()))
-            if size is None or stated is None or free is None:
+            try:
+                if extension == "elf":
+                    actual, static_data = elf_resource_bytes(image)
+                    avr_static_measured += 1
+                    # 16 B is the project's only reviewed static-RAM ceiling.
+                    # Both AVR families allocate the same statics -- the shared
+                    # core's context, its check word, and the ISR handshake --
+                    # so it bounds them both.  The Classic parts' real guard is
+                    # the canary gate's free-SRAM floor, re-checked below from
+                    # the release run's own measurements.
+                    check(0 < static_data <= policy["XT_STATIC_RAM_LIMIT"],
+                          "%s allocates %d B of static data; the reviewed ceiling "
+                          "is %d B" % (image, static_data,
+                                       policy["XT_STATIC_RAM_LIMIT"]))
+                else:
+                    actual = hex_program_words(image, PARTS[part][0])
+            except (ValueError, OSError) as error:
+                check(False, "%s is not a measurable image: %s" % (image, error))
                 continue
-            check(size.group(2) == unit and free.group(2) == unit,
-                  "%s figures must be reported in %s: %s" % (part, unit, line.strip()))
-            figures[(part, cells[0])] = (int(size.group(1)),
-                                         Decimal(stated.group(1)),
-                                         int(free.group(1)))
-    return figures
-
-
-def check_tables(figures):
-    expected = {(part, variant) for part in PARTS for variant in VARIANTS}
-    check(set(figures) == expected,
-          "the utilization tables must cover exactly the 21 canonical images; "
-          "missing %s, unexpected %s"
-          % (sorted(expected - set(figures)) or "none",
-             sorted(set(figures) - expected) or "none"))
-    for (part, variant), (size, stated, free) in sorted(figures.items()):
-        capacity = PARTS[part][0]
-        check(0 < size <= capacity,
-              "%s %s is %d of %d -- outside the device"
-              % (part, variant, size, capacity))
-        check(stated == percent(size, capacity),
-              "%s %s says %s%% of %d; %d is %s%%"
-              % (part, variant, stated, capacity, size, percent(size, capacity)))
-        if free is not None:
-            check(free == capacity - size,
-                  "%s %s says %d free of %d; %d leaves %d"
-                  % (part, variant, free, capacity, size, capacity - size))
-
-
-def check_design_prose(prose, figures):
-    """Checks run against whitespace-normalized prose: these sentences wrap."""
-    largest = {part: max(figures[(part, v)][0] for v in VARIANTS) for part in PARTS}
-    utilization = {(part, variant): percent(size, PARTS[part][0])
-                   for (part, variant), (size, _, _) in figures.items()}
-    low = min(utilization.values())
-    high = max(utilization.values())
-
-    span = re.search(r"spans from ([0-9]+\.[0-9])% of an? (\w+)'s flash to "
-                     r"([0-9]+\.[0-9])% of an? (\w+)'s", prose)
-    check(span is not None, "the Resource Utilization span sentence is missing")
-    if span is not None:
-        check(Decimal(span.group(1)) == low and Decimal(span.group(3)) == high,
-              "the span sentence says %s%%-%s%%; the tables span %s%%-%s%%"
-              % (span.group(1), span.group(3), low, high))
-        holders = {part for (part, _), value in utilization.items() if value == low}
-        check(span.group(2).lower() in holders,
-              "the span sentence credits the minimum to %s; it belongs to %s"
-              % (span.group(2), ", ".join(sorted(holders))))
-        holders = {part for (part, _), value in utilization.items() if value == high}
-        check(span.group(4).lower() in holders,
-              "the span sentence credits the maximum to %s; it belongs to %s"
-              % (span.group(4), ", ".join(sorted(holders))))
-
-    binding = re.search(r"binding build with ([0-9]+) words free", prose)
-    check(binding is not None, "the binding-image sentence is missing")
-    if binding is not None:
-        free = PARTS["pic10f322"][0] - largest["pic10f322"]
-        check(int(binding.group(1)) == free,
-              "the binding image is said to leave %s words free; it leaves %d"
-              % (binding.group(1), free))
-
-    smallest = re.search(r"leaves ([0-9]+) of ([0-9]+) words free on its largest "
-                         r"variant", prose)
-    check(smallest is not None, "the PIC10F320 free-word sentence is missing")
-    if smallest is not None:
-        free = PARTS["pic10f320"][0] - largest["pic10f320"]
-        check(int(smallest.group(1)) == free
-              and int(smallest.group(2)) == PARTS["pic10f320"][0],
-              "PIC10F320 is said to leave %s of %s words free; it leaves %d of %d"
-              % (smallest.group(1), smallest.group(2), free, PARTS["pic10f320"][0]))
-
-    gate = re.search(r"at most ([0-9]+\.[0-9])% of 1 KB against the ([0-9]+)% "
-                     r"ceiling enforced by `make test-flash-budget`, leaving "
-                     r"([0-9]+) bytes or ([0-9]+\.[0-9]) percentage points", prose)
-    check(gate is not None, "the ATtiny13a flash-gate sentence is missing")
-    if gate is not None:
-        tightest = percent(largest["attiny13a"], PARTS["attiny13a"][0])
-        check(Decimal(gate.group(1)) == tightest,
-              "the flash-gate sentence says the tightest ATtiny13a image is %s%%; "
-              "it is %s%%" % (gate.group(1), tightest))
-        check(int(gate.group(2)) == CLASSIC_BUDGET_PERCENT,
-              "the flash-gate sentence says a %s%% ceiling; check_flash_budget.sh "
-              "is invoked with %d%%" % (gate.group(2), CLASSIC_BUDGET_PERCENT))
-        check(int(gate.group(3)) == CLASSIC_BUDGET_LIMIT - largest["attiny13a"],
-              "the flash-gate sentence leaves %s bytes; the %d-byte limit leaves %d"
-              % (gate.group(3), CLASSIC_BUDGET_LIMIT,
-                 CLASSIC_BUDGET_LIMIT - largest["attiny13a"]))
-        check(Decimal(gate.group(4)) == CLASSIC_BUDGET_PERCENT - tightest,
-              "the flash-gate sentence leaves %s percentage points; %d%% - %s%% is %s"
-              % (gate.group(4), CLASSIC_BUDGET_PERCENT, tightest,
-                 CLASSIC_BUDGET_PERCENT - tightest))
-
-    shell = re.search(r"on both parts: ([0-9]+) words here against the "
-                      r"PIC10F322's ([0-9]+)\. The extra ([0-9]+) words are shell",
-                      prose)
-    check(shell is not None, "the PIC12F675-versus-PIC10F322 relay sentence is missing")
-    if shell is not None:
-        big = figures[("pic12f675", "tq2_l2_5v_relay")][0]
-        small = figures[("pic10f322", "tq2_l2_5v_relay")][0]
-        check(int(shell.group(1)) == big and int(shell.group(2)) == small,
-              "the relay comparison says %s against %s; the images are %d and %d"
-              % (shell.group(1), shell.group(2), big, small))
-        check(int(shell.group(3)) == big - small,
-              "the relay comparison calls the difference %s words; it is %d"
-              % (shell.group(3), big - small))
-
-    # "Why ATtiny202" opens with the reason the part was chosen, so its
-    # occupancy range is read long before either table.  It stated 47-49%
-    # against a table that had already reached 50.8%, which is the specific
-    # direction that matters: a summary that understates the tightest image is
-    # the one a reader trusts when deciding a change fits.  Both ranges are
-    # recomputed here, each from its own part's table, so neither can be
-    # updated without the other.
-    occupancy = re.search(r"sits at ([0-9]+\.[0-9])-([0-9]+\.[0-9])% of flash "
-                          r"instead of ([0-9]+\.[0-9])-([0-9]+\.[0-9])%", prose)
-    check(occupancy is not None,
-          "the ATtiny202 flash-occupancy summary sentence is missing")
-    if occupancy is not None:
-        for part, low_group, high_group in (("attiny202", 1, 2),
-                                            ("attiny13a", 3, 4)):
-            values = [utilization[(part, variant)] for variant in VARIANTS]
-            check(Decimal(occupancy.group(low_group)) == min(values)
-                  and Decimal(occupancy.group(high_group)) == max(values),
-                  "the ATtiny202 summary puts %s at %s%%-%s%%; its table spans "
-                  "%s%%-%s%%"
-                  % (part, occupancy.group(low_group),
-                     occupancy.group(high_group), min(values), max(values)))
-
-
-# docs/context_seu_detection.md restates five parts as
-# "| <label> | <budget> | simple / mute / relay | <margin> ..." rows.  The
-# ATtiny13a's budget there is the 90% gate limit, not the device size, which is
-# the one row whose "of" number is deliberately not the capacity.
-SEU_ROW = re.compile(
-    r"^\| (PIC10F322|PIC12F675|ATtiny13a \(AVR classic\)|ATtiny202 \(AVR-XT\)|"
-    r"PIC10F320) \| ([0-9]+) (?:words|B) \| ([0-9]+) / ([0-9]+) / ([0-9]+) "
-    r"(?:words|B) \| ([0-9]+) (?:words|B)(?: \((\w+)\))?")
-SEU_PARTS = {
-    "PIC10F322": ("pic10f322", PARTS["pic10f322"][0]),
-    "PIC12F675": ("pic12f675", PARTS["pic12f675"][0]),
-    "ATtiny13a (AVR classic)": ("attiny13a", CLASSIC_BUDGET_LIMIT),
-    "ATtiny202 (AVR-XT)": ("attiny202", PARTS["attiny202"][0]),
-    "PIC10F320": ("pic10f320", PARTS["pic10f320"][0]),
-}
-
-
-def check_seu_table(figures):
-    seen = set()
-    for line in SEU.read_text(encoding="utf-8").splitlines():
-        row = SEU_ROW.match(line)
-        if row is None:
-            continue
-        label = row.group(1)
-        part, budget = SEU_PARTS[label]
-        seen.add(label)
-        documented = tuple(figures[(part, v)][0] for v in VARIANTS)
-        stated = tuple(int(row.group(i)) for i in (3, 4, 5))
-        check(int(row.group(2)) == budget,
-              "%s is budgeted at %s in context_seu_detection.md; it is %d"
-              % (label, row.group(2), budget))
-        check(stated == documented,
-              "%s is %s / %s / %s in context_seu_detection.md; the images are %s"
-              % (label, row.group(3), row.group(4), row.group(5),
-                 " / ".join(str(n) for n in documented)))
-        margin = budget - max(documented)
-        check(int(row.group(6)) == margin,
-              "%s claims a %s margin in context_seu_detection.md; it is %d"
-              % (label, row.group(6), margin))
-        if row.group(7) is not None:
-            tightest = VARIANTS[documented.index(max(documented))]
-            check(row.group(7) == tightest.split("_")[-1]
-                  or tightest.startswith(row.group(7)),
-                  "%s credits its tightest margin to '%s'; it is %s"
-                  % (label, row.group(7), tightest))
-    check(seen == set(SEU_PARTS),
-          "context_seu_detection.md's resource table is missing rows for %s"
-          % (sorted(set(SEU_PARTS) - seen) or "none"))
-
-
-def check_other_documents(figures):
-    triple = re.search(r"uses ([0-9]+)/([0-9]+)/([0-9]+) of ([0-9]+) program words "
-                       r"for the simple/mute/relay variants",
-                       flatten(FEASIBILITY.read_text(encoding="utf-8")))
-    check(triple is not None,
-          "docs/pic12f675_feasibility.md states no current program-word triple")
-    if triple is not None:
-        documented = tuple(figures[("pic12f675", v)][0] for v in VARIANTS)
-        check(tuple(int(triple.group(i)) for i in (1, 2, 3)) == documented,
-              "the PIC12F675 current-status block says %s/%s/%s; the images are %s"
-              % (triple.group(1), triple.group(2), triple.group(3),
-                 "/".join(str(n) for n in documented)))
-        check(int(triple.group(4)) == PARTS["pic12f675"][0],
-              "the PIC12F675 current-status block says %s program words; the part "
-              "has %d" % (triple.group(4), PARTS["pic12f675"][0]))
-
-    images = re.search(r"PIC10F322 images at ([0-9]+)/([0-9]+)/([0-9]+) of "
-                       r"([0-9]+) words", flatten(CHANGELOG.read_text(encoding="utf-8")))
-    check(images is not None, "CHANGELOG.md states no current PIC10F322 triple")
-    if images is not None:
-        documented = tuple(figures[("pic10f322", v)][0] for v in VARIANTS)
-        check(tuple(int(images.group(i)) for i in (1, 2, 3)) == documented,
-              "CHANGELOG.md says the PIC10F322 images are %s/%s/%s; they are %s"
-              % (images.group(1), images.group(2), images.group(3),
-                 "/".join(str(n) for n in documented)))
-        check(int(images.group(4)) == PARTS["pic10f322"][0],
-              "CHANGELOG.md says %s PIC10F322 words; the part has %d"
-              % (images.group(4), PARTS["pic10f322"][0]))
-
-
-def check_nonflash_claims(design_text):
-    """Pin every exact current RAM/stack number the documents publish."""
-    design = flatten(design_text)
-    capture_numbers(
-        design,
-        r"totalling ([0-9]+) bytes\. Peak stack.*?measures ([0-9]+)-([0-9]+) "
-        r"bytes.*?aggregate occupancy is ([0-9]+)-([0-9]+) bytes.*?leaving "
-        r"([0-9]+)-([0-9]+) bytes of free headroom",
-        (5, 31, 33, 36, 38, 28, 26),
-        "AVR Classic static/stack/headroom claim")
-    capture_numbers(
-        design,
-        r"Measured today: ([0-9]+)-([0-9]+) free bytes across the variants",
-        (26, 28), "AVR Classic measured free-SRAM claim")
-    capture_numbers(
-        design,
-        r"build reports ([0-9]+) bytes of static data in every variant.*?"
-        r"([0-9]+)-byte build limit leaves at least ([0-9]+) bytes",
-        (5, 16, 112), "ATtiny202 static-RAM claim")
-    capture_numbers(
-        design,
-        r"rejects any frame above ([0-9]+) bytes",
-        (32,), "ATtiny202 frame-bound claim")
-    check("No AVR-XT lane measures that maximum" in design,
-          "ATtiny202 must not claim a measured whole-program stack high-water mark")
-    capture_numbers(
-        design,
-        r"PIC12F675.*?XC8 reserves ([0-9]+) of the device's ([0-9]+) Data-space "
-        r"bytes \(([0-9]+)\.([0-9]+)%\).*?fails above ([0-9]+)/([0-9]+) bytes",
-        (40, 64, 62, 5, 48, 64), "PIC12F675 Data-space claim")
-
-    seu = flatten(SEU.read_text(encoding="utf-8"))
-    check("(`make test` and `make test-long`)" in seu,
-          "context_seu_detection.md must name both aggregates that run the Classic AVR stack gate")
-    capture_numbers(
-        seu,
-        r"measures ([0-9]+)-([0-9]+) B of stack use.*?With ([0-9]+) B of "
-        r"static data, aggregate occupancy is ([0-9]+)-([0-9]+) B.*?leaves "
-        r"([0-9]+) B free.*?gate's ([0-9]+) B floor",
-        (31, 33, 5, 36, 38, 26, 8),
-        "context-SEU Classic AVR RAM/stack claim")
-    capture_numbers(
-        seu,
-        r"PIC10F322 return-stack depth is unchanged at ([0-9]+) levels "
-        r"\(`cd4053_simple`, `cd4053_with_mute`\) and ([0-9]+) "
-        r"\(`tq2_l2_5v_relay`\)",
-        (3, 4), "context-SEU PIC10F322 return-stack claim")
-
-    feasibility = flatten(FEASIBILITY.read_text(encoding="utf-8"))
-    capture_numbers(
-        feasibility,
-        r"XC8 reserves ([0-9]+) of the device's ([0-9]+) Data-space bytes in "
-        r"all three variants.*?rejects use above ([0-9]+) of those ([0-9]+) bytes",
-        (40, 64, 48, 64), "PIC12F675 current-status Data-space claim")
-
-    pic320 = flatten(PIC320_VALIDATION.read_text(encoding="utf-8"))
-    capture_numbers(
-        pic320,
-        r"they agree.*?\*\*([0-9]+) / ([0-9]+) / ([0-9]+)\*\* entries for simple / "
-        r"mute / relay since `v0\.9\.10`",
-        (3, 3, 3), "PIC10F320 current final-HEX stack claim")
-    check(re.search(
-        r"Historical hardware return-stack depth.*?3 / 3 / 4.*?through "
-        r"`v0\.9\.9`.*?superseded", pic320) is not None,
-        "PIC10F320's old 3/3/4 stack row must be explicitly historical and superseded")
+            measured += 1
+            check(0 < actual <= ceilings[part],
+                  "%s measures %d %s; the reviewed ceiling is %d"
+                  % (image, actual, PARTS[part][1], ceilings[part]))
+    if require_all:
+        check(measured == 21,
+              "final-candidate mode requires 21 of 21 images; measured %d" % measured)
+        check(avr_static_measured == 12,
+              "final-candidate mode requires static-data measurements from 12 AVR ELFs; measured %d"
+              % avr_static_measured)
+    return measured, avr_static_measured
 
 
 def elf_resource_bytes(path):
@@ -537,11 +312,6 @@ def elf_resource_bytes(path):
         if (sh_flags & 0x2) and 0x800000 <= sh_addr < 0x810000:
             static_data += sh_size
     return program, static_data
-
-
-def elf_program_bytes(path):
-    """Compatibility wrapper used by the program-size comparison."""
-    return elf_resource_bytes(path)[0]
 
 
 def hex_program_words(path, capacity):
@@ -581,48 +351,6 @@ def hex_program_words(path, capacity):
     return len(occupied)
 
 
-def check_built_images(figures, require_all=False):
-    measured = 0
-    avr_static_measured = 0
-    for part in sorted(PARTS):
-        variable, default, extension = BUILD_DIRS[part]
-        directory = ROOT / os.environ.get(variable) if os.environ.get(variable) \
-            else ROOT / default
-        for variant in VARIANTS:
-            image = directory / ("bypass-%s-%s.%s" % (part, variant, extension))
-            if not image.exists():
-                if require_all:
-                    check(False, "required final-candidate image is missing: %s" % image)
-                continue
-            if image.is_symlink() or not image.is_file():
-                check(False, "image is not a regular non-symlinked file: %s" % image)
-                continue
-            documented = figures[(part, variant)][0]
-            try:
-                if extension == "elf":
-                    actual, static_data = elf_resource_bytes(image)
-                    avr_static_measured += 1
-                    check(static_data == 5,
-                          "%s has %d bytes of static data; the documentation says 5"
-                          % (image, static_data))
-                else:
-                    actual = hex_program_words(image, PARTS[part][0])
-            except (ValueError, OSError) as error:
-                check(False, "%s is not a measurable image: %s" % (image, error))
-                continue
-            measured += 1
-            check(actual == documented,
-                  "%s measures %d %s; the documentation says %d"
-                  % (image, actual, PARTS[part][1], documented))
-    if require_all:
-        check(measured == 21,
-              "final-candidate mode requires 21 of 21 images; measured %d" % measured)
-        check(avr_static_measured == 12,
-              "final-candidate mode requires static-data measurements from 12 AVR ELFs; measured %d"
-              % avr_static_measured)
-    return measured, avr_static_measured
-
-
 def read_evidence_file(directory, name):
     path = directory / name
     check(path.exists() and path.is_file() and not path.is_symlink() and path.stat().st_size > 0,
@@ -632,79 +360,119 @@ def read_evidence_file(directory, name):
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def check_final_evidence(directory):
-    """Validate retained non-flash measurements from the release run logs."""
-    classic = read_evidence_file(directory, "test-long.log")
-    hwm = re.findall(
-        r"^\s+stack HWM \[(attiny13a|attiny45|attiny85)\]: "
-        r".*?used=([0-9]+) B, margin=([0-9]+) B free "
-        r".*?static .*?, ([0-9]+) B\)$", classic, re.MULTILINE)
-    check(len(hwm) == 9,
+CLASSIC_HWM = re.compile(
+    r"^\s+stack HWM \[(attiny13a|attiny45|attiny85)\]: deepest SP=0x([0-9A-Fa-f]+), "
+    r"used=([0-9]+) B, margin=([0-9]+) B free "
+    r"\(SRAM 0x([0-9A-Fa-f]+)-0x([0-9A-Fa-f]+), ([0-9]+) B total; "
+    r"static 0x([0-9A-Fa-f]+)-0x([0-9A-Fa-f]+), ([0-9]+) B\)$",
+    re.MULTILINE)
+
+# check_stack_depth_pic.sh emits this line from a single printf, so it survives
+# the interleaving a parallel release build can produce between the multi-line
+# report's separate writes.
+PIC_STACK_PASS = r"^STACK-DEPTH PASS \[%s ([a-z0-9_]+)\]: ([0-9]+) \+ ([0-9]+) " \
+                 r"reserve <= ([0-9]+) levels \(([0-9]+) spare\)$"
+
+
+def check_classic_stack_evidence(classic, floor):
+    """Nine self-consistent canary observations, each above the gate's floor."""
+    rows = CLASSIC_HWM.findall(classic)
+    check(len(rows) == 9,
           "test-long.log must contain exactly 9 Classic AVR stack HWM records; found %d"
-          % len(hwm))
-    if len(hwm) == 9:
-        parts = [row[0] for row in hwm]
-        used = [int(row[1]) for row in hwm]
-        margins = [int(row[2]) for row in hwm]
-        static = [int(row[3]) for row in hwm]
-        part_counts = {part: parts.count(part) for part in set(parts)}
-        expected_part_counts = {"attiny13a": 3, "attiny45": 3, "attiny85": 3}
-        check(part_counts == expected_part_counts,
-              "test-long.log must contain three stack HWM records for each Classic AVR part")
-        check((min(used), max(used)) == (31, 33),
-              "Classic AVR stack HWM span is %d-%d B; documentation says 31-33 B"
-              % (min(used), max(used)))
-        if part_counts == expected_part_counts:
-            attiny13a_margins = [margin for part, margin in zip(parts, margins)
-                                 if part == "attiny13a"]
-            check((min(attiny13a_margins), max(attiny13a_margins)) == (26, 28),
-                  "ATtiny13a free-SRAM span is %d-%d B; documentation says 26-28 B"
-                  % (min(attiny13a_margins), max(attiny13a_margins)))
-        check(set(static) == {5},
-              "Classic AVR stack evidence does not report 5 static bytes in every run")
+          % len(rows))
+    parts = [row[0] for row in rows]
+    check({part: parts.count(part) for part in set(parts)}
+          == {"attiny13a": 3, "attiny45": 3, "attiny85": 3},
+          "test-long.log must contain three stack HWM records for each Classic AVR part")
+    for row in rows:
+        part = row[0]
+        deepest_sp, sram_bot, sram_top, static_bot, static_top = (
+            int(row[index], 16) for index in (1, 4, 5, 7, 8))
+        used, sram_size, static_bytes = (int(row[index]) for index in (2, 6, 9))
+        margin = int(row[3])
+        label = "%s stack HWM record (deepest SP 0x%03X)" % (part, deepest_sp)
+        # Each record carries the whole SRAM map it was derived from, so the
+        # arithmetic closes on itself: a truncated or edited log fails here
+        # without this file knowing what the figures ought to be.
+        check(sram_size == sram_top - sram_bot + 1,
+              "%s: %d B of SRAM is not 0x%03X-0x%03X"
+              % (label, sram_size, sram_bot, sram_top))
+        check(static_bot == sram_bot and static_bytes == static_top - sram_bot + 1,
+              "%s: %d B of static data is not 0x%03X-0x%03X from the SRAM base "
+              "0x%03X" % (label, static_bytes, static_bot, static_top, sram_bot))
+        check(used == sram_top - deepest_sp + 1,
+              "%s: %d B used does not reach ramend 0x%03X"
+              % (label, used, sram_top))
+        check(margin == max(0, deepest_sp - (sram_bot + static_bytes)),
+              "%s: %d B free does not separate the stack from %d B of static data"
+              % (label, margin, static_bytes))
+        check(static_bytes + used + margin == sram_size,
+              "%s: static + stack + free is %d B of a %d B device"
+              % (label, static_bytes + used + margin, sram_size))
+        check(margin >= floor,
+              "%s: %d B free is below the canary gate's %d B floor"
+              % (label, margin, floor))
+    return len(rows)
+
+
+def check_final_evidence(directory, policy, floor):
+    """Validate retained non-flash measurements from the release run logs."""
+    classic_stack = check_classic_stack_evidence(
+        read_evidence_file(directory, "test-long.log"), floor)
 
     xt = read_evidence_file(directory, "attiny202-test.log")
     frame = re.findall(
         r"^OK: ([0-9]+) fresh AVR-XT reports; all frames <= ([0-9]+) B$",
         xt, re.MULTILINE)
-    check(frame == [("3", "32")],
-          "attiny202-test.log must contain one three-report, 32-byte frame-bound result")
+    check(frame == [(str(len(VARIANTS)), str(policy["XT_STACK_MAX_FRAME"]))],
+          "attiny202-test.log must contain one %d-report, %d B frame-bound result"
+          % (len(VARIANTS), policy["XT_STACK_MAX_FRAME"]))
 
     pic_data = read_evidence_file(directory, "pic12f675-qualification.log")
     data_rows = re.findall(
         r"^PIC12F675_DATA_BUDGET PASS variant=([a-z0-9_]+) used=([0-9]+) "
         r"limit=([0-9]+) capacity=([0-9]+)$", pic_data, re.MULTILINE)
-    expected_data = {(variant, "40", "48", "64") for variant in VARIANTS}
-    check(set(data_rows) == expected_data and len(data_rows) == 6
-          and all(data_rows.count(row) == 2 for row in expected_data),
-          "pic12f675-qualification.log must contain two exact 40/48/64 Data-space records per variant (qualified and reproducibility builds)")
+    # Two builds report each variant: the qualified build and the
+    # reproducibility rebuild.
+    check(sorted(row[0] for row in data_rows) == sorted(VARIANTS * 2),
+          "pic12f675-qualification.log must contain two Data-space records per "
+          "variant (qualified and reproducibility builds); found %d records"
+          % len(data_rows))
+    for variant, used, limit, capacity in data_rows:
+        check((int(limit), int(capacity)) == (policy["PIC12F675_DATA_LIMIT"],
+                                              policy["PIC12F675_DATA_BYTES"]),
+              "the PIC12F675 %s Data-space record reports a %s/%s B budget; the "
+              "reviewed budget is %d/%d B"
+              % (variant, limit, capacity, policy["PIC12F675_DATA_LIMIT"],
+                 policy["PIC12F675_DATA_BYTES"]))
+        check(0 < int(used) <= int(limit),
+              "the PIC12F675 %s build reserves %s of %s permitted Data-space bytes"
+              % (variant, used, limit))
 
-    # The two relay figures differ because the deepest chain differs by part.
-    # The PIC10F322 reaches 4 through initialization (_main -> _init ->
-    # _hw_set_bypass_state -> _set_relay_coils_low -> _hw_pin_mask_set_low).
-    # The PIC12F675's deepest chain is one level longer, through the escalation
-    # its shadow-port architecture requires (_main -> _hw_force_wdt_reset ->
-    # _hw_emergency_outputs_quiesce -> _hw_outputs_reassert_safe ->
-    # _set_relay_coils_low -> _hw_pin_mask_set_low), which
-    # test/check_stack_depth_pic.sh bounds at 5 + 2 reserve of 8 levels.
-    expected_stack = {
-        "PIC10F322": dict(zip(VARIANTS, (3, 3, 4))),
-        "PIC10F320": dict(zip(VARIANTS, (3, 3, 3))),
-        "PIC12F675": dict(zip(VARIANTS, (3, 3, 5))),
-    }
+    pic_stack = 0
     for part, filename in (("PIC10F322", "pic10f322-test.log"),
                            ("PIC10F320", "pic10f320-test.log"),
                            ("PIC12F675", "pic12f675-qualification.log")):
         text = read_evidence_file(directory, filename)
-        rows = re.findall(
-            r"PIC hardware-stack depth \[%s ([a-z0-9_]+)\].*?"
-            r"measured peak\s*: ([0-9]+) level\(s\)" % part,
-            text, re.DOTALL)
-        actual = {variant: int(depth) for variant, depth in rows}
-        check(len(rows) == 3 and actual == expected_stack[part],
-              "%s must contain exact current stack depths for all three variants"
-              % filename)
-    return len(hwm), len(data_rows), 9
+        rows = re.findall(PIC_STACK_PASS % part, text, re.MULTILINE)
+        check(sorted(row[0] for row in rows) == sorted(VARIANTS),
+              "%s must contain one %s return-stack result for each of the three "
+              "variants; found %d" % (filename, part, len(rows)))
+        reserve_policy = policy["%s_STACK_RESERVE" % part]
+        for variant, peak, reserve, depth, spare in rows:
+            label = "%s %s return-stack result" % (part, variant)
+            check(int(reserve) == reserve_policy,
+                  "%s: %s levels held in reserve; the reviewed reserve is %d"
+                  % (label, reserve, reserve_policy))
+            check(int(depth) == policy["PIC10F320_RETURN_STACK_LIMIT"],
+                  "%s: the device reports %s hardware levels; the reviewed bound "
+                  "is %d" % (label, depth,
+                             policy["PIC10F320_RETURN_STACK_LIMIT"]))
+            check(int(peak) > 0 and int(peak) + int(reserve) + int(spare) == int(depth),
+                  "%s: peak %s + reserve %s + spare %s is not the %s-level "
+                  "hardware stack" % (label, peak, reserve, spare, depth))
+        pic_stack += len(rows)
+    return classic_stack, len(data_rows), pic_stack
 
 
 def report(measured=None, require_all=False, source_commit=None,
@@ -713,11 +481,11 @@ def report(measured=None, require_all=False, source_commit=None,
         print("FAIL: %s" % message, file=sys.stderr)
     if measured is None:
         print("resource tables: %d checks, %d failures (no image measured: the "
-              "tables must parse first)" % (checks, len(failures)))
+              "reviewed ceilings must parse first)" % (checks, len(failures)))
     else:
         qualifier = "; complete candidate required" if require_all else ""
         print("resource tables: %d checks, %d failures "
-              "(%d of 21 documented images measured%s)"
+              "(%d of 21 canonical images measured%s)"
               % (checks, len(failures), measured, qualifier))
     if require_all and not failures:
         classic_stack, pic_data, pic_stack = evidence_counts
@@ -750,24 +518,20 @@ def main():
               "final-candidate mode requires --source-commit as a full lowercase SHA-1")
         check(arguments.evidence_dir is not None,
               "final-candidate mode requires --evidence-dir")
-    text = DESIGN.read_text(encoding="utf-8")
-    figures = parse_design(text)
-    if failures:
+    policy = parse_policy()
+    floor = parse_classic_stack_floor()
+    # Nothing below can be judged without the ceilings to judge it against, so an
+    # unreadable policy is reported as that rather than as a traceback.
+    if policy is None or floor is None:
         return report()
-    check_tables(figures)
-    # Everything below indexes every canonical row, so an incomplete table is
-    # reported as the missing-row failure it is rather than as a traceback.
-    if set(figures) != {(part, variant) for part in PARTS for variant in VARIANTS}:
-        return report()
-    check_design_prose(flatten(text), figures)
-    check_seu_table(figures)
-    check_other_documents(figures)
-    check_nonflash_claims(text)
+    ceilings = flash_ceilings(policy)
+    check_policy(policy, ceilings)
     measured, avr_static_measured = check_built_images(
-        figures, require_all=arguments.require_all_images)
+        policy, ceilings, require_all=arguments.require_all_images)
     evidence_counts = None
     if arguments.require_all_images and arguments.evidence_dir is not None:
-        evidence_counts = check_final_evidence(arguments.evidence_dir.resolve())
+        evidence_counts = check_final_evidence(
+            arguments.evidence_dir.resolve(), policy, floor)
     if arguments.require_all_images and evidence_counts is None:
         evidence_counts = (0, 0, 0)
     return report(measured, require_all=arguments.require_all_images,

@@ -276,7 +276,7 @@ judgement call.
 
 ## BR-AUTH-02 - Build a reference and contract inventory before deletion
 
-**Status:** DONE (commit pending)
+**Status:** DONE `bc267a8`
 
 **Depends on:** BR-AUTH-01
 
@@ -402,7 +402,7 @@ retired deliberately, and the retirement recorded.
 
 ## BR-RES-01 - Remove mutable current resource tables from development docs
 
-**Status:** TODO
+**Status:** DONE (commit pending)
 
 **Depends on:** BR-AUTH-01, BR-BASE-01
 
@@ -439,15 +439,61 @@ image hashes, flash usage, and validation evidence belong to the release record.
 
 **Work:**
 
-- [ ] Replace the design document's candidate resource tables with capacities,
+- [x] Replace the design document's candidate resource tables with capacities,
   ceilings, measurement definitions, and architectural consequences.
-- [ ] Point readers to the latest signed release record for exact measurements.
-- [ ] Document the Make/CI commands that produce ephemeral candidate reports.
-- [ ] Ensure every build still fails at the reviewed ceiling.
-- [ ] Remove current resource copies from feature/feasibility documents.
-- [ ] Keep historical measurements only when they establish a past design
+- [x] Point readers to the latest signed release record for exact measurements.
+- [x] Document the Make/CI commands that produce ephemeral candidate reports.
+- [x] Ensure every build still fails at the reviewed ceiling.
+- [x] Remove current resource copies from feature/feasibility documents.
+- [x] Keep historical measurements only when they establish a past design
   decision, and bind them to a specific commit/tag/toolchain rather than calling
   them current.
+
+**Result:**
+
+Done together with BR-RES-02, because they are one atomic change: every
+expectation the gate held came from `parse_design()` reading
+`DESIGN_DOCUMENTATION.adoc`, including the `--require-all-images` mode that
+emits the release's `RESOURCE_TABLES_RESULT`. Deleting the tables first would
+have left `make test` red and the release evidence path unable to run, so the
+plan's arrow from BR-RES-02 to BR-RES-01 is inverted for the part that matters.
+The user chose the fused commit over a two-step landing.
+
+Five live copies are now zero. `DESIGN_DOCUMENTATION.adoc`'s "Resource
+Utilization" section (197 lines, now 187) opens with a capacity-and-ceiling
+table naming the Makefile variable that declares each ceiling and the goal that
+enforces it, then a new "Units and methods" subsection separating the three RAM
+quantities this project measures -- static data, per-function stack frame, and
+whole-path high-water mark -- because the old text let a frame bound be read as
+a maximum. The per-family subsections keep the architectural consequences and
+lose the figures: the PIC10F322 is still the binding constraint and says so
+without quoting a margin, and the PIC10F320's margins are still the whole story
+of that target but are now told through the decisions they forced rather than
+through this week's word counts. The ephemeral candidate reports are named by
+command: `make attiny13a-size` plus each PIC and AVR-XT build goal, which print
+per-variant usage against the ceiling as they gate it.
+
+`docs/context_seu_detection.md` keeps its F2-landing measurement, which
+establishes a design decision, and drops the current matrix it also carried;
+its "Resource qualification" table now lists budgets and the goal that
+enforces each.
+`docs/pic12f675_feasibility.md`'s bounded current-status block keeps the gates
+and the composition of persistent state and drops the occupancy. `CHANGELOG.md`
+kept its PIC10F322 sentence -- it sits inside the historical `[0.9.10]` section
+and records why the fold had to be spelled compactly -- but no longer calls
+those images current.
+
+Two references outside the plan's list also pointed at the tables as the owner
+of current figures and were retargeted: `TOOLCHAIN.adoc` and
+`docs/relay_coil_fault_correction.md`. The latter's `242`-word PIC10F320 figure
+is now bound to `v0.9.10`. `Makefile`'s PIC12F675 budget comment justified the
+part choice with "the tightest variant lands at 55.9%, against the 322's
+98.0%";
+55.9% had already drifted from the design document's own 57.1%, which is this
+task's thesis appearing in the one file the tables never checked.
+
+`docs/pic10f320_validation.md` needed no edit. Its measurements were already
+bound to the tag that produced them, which is the form BR-RES-01 asks for.
 
 **Acceptance:**
 
@@ -459,7 +505,7 @@ image hashes, flash usage, and validation evidence belong to the release record.
 
 ## BR-RES-02 - Retire cross-document resource synchronization tests
 
-**Status:** TODO
+**Status:** DONE (commit pending)
 
 **Depends on:** BR-RES-01
 
@@ -469,18 +515,68 @@ the symptom by making prose duplication a tested interface.
 
 **Work:**
 
-- [ ] Separate actual binary/resource measurement from prose parsing.
-- [ ] Preserve strict release-time measurement of all canonical images.
-- [ ] Preserve arithmetic validation, malformed-tool-output rejection, missing
+- [x] Separate actual binary/resource measurement from prose parsing.
+- [x] Preserve strict release-time measurement of all canonical images.
+- [x] Preserve arithmetic validation, malformed-tool-output rejection, missing
   image rejection, and source-commit binding.
-- [ ] Delete checks whose only purpose is comparing mutable values across prose
+- [x] Delete checks whose only purpose is comparing mutable values across prose
   files that no longer carry those values.
-- [ ] Use arbitrary synthetic values in parser contract tests rather than
+- [x] Use arbitrary synthetic values in parser contract tests rather than
   restating the current production matrix.
-- [ ] Rename targets/scripts if their remaining purpose is no longer "resource
+- [x] Rename targets/scripts if their remaining purpose is no longer "resource
   tables."
-- [ ] Update `Makefile`, release scripts, CI, test inventory, and generated
+- [x] Update `Makefile`, release scripts, CI, test inventory, and generated
   documentation contracts accordingly.
+
+**Result:**
+
+`test/test_resource_tables.py` is 780 lines to 544. Gone: `parse_design`,
+`check_tables`, `check_design_prose`, `check_seu_table`,
+`check_other_documents`, `check_nonflash_claims`, and the AsciiDoc table parser
+and percentage arithmetic that served them. The gate reads no document at all
+now; its prerequisites are the `Makefile` and `test/avr/test_sim.c`.
+
+Measurement is separated from prose by giving the ceilings one owner. Fifteen
+reviewed limits are parsed from the Makefile that declares them -- a missing,
+duplicated or non-constant definition fails closed -- and checked for coherence
+against the datasheet capacities, which are silicon and stay in the checker: no
+flash ceiling may exceed its part's capacity, which is the defect the Makefile
+records from its own history when one shared word budget silently gated the
+half-size part. Images are then measured exactly as before and compared against
+those ceilings instead of against a transcribed figure. The Classic AVR
+free-SRAM floor is read from the canary gate in `test/avr/test_sim.c` that
+enforces it, rather than copied.
+
+The release evidence layer keeps every property BR-RES-02 asked be preserved --
+21-of-21 images, 12 AVR static-data measurements, missing-image and
+malformed-tool-output rejection, source-commit binding, and the unchanged
+`RESOURCE_TABLES_RESULT` record -- and stops memorizing the current matrix.
+Each
+retained record is now checked against its own arithmetic: a canary observation
+carries the whole SRAM map it was derived from, so static + stack + free must
+close on the device size and the margin must land where the map says it does; a
+return-stack witness must account for peak, reserve and spare across the whole
+hardware stack. A truncated or hand-edited log fails on itself, without this
+file knowing what the figures ought to be. The PIC witness is parsed from
+`STACK-DEPTH PASS`, a single-printf line, rather than from the multi-line
+report
+whose separate writes a parallel release build can interleave.
+
+`test/test_resource_tables_contract.py` builds its own repository fixture -- a
+Makefile of arbitrary ceilings and a synthetic canary gate -- so no production
+figure appears in it. Five negative cases were added to the four it had: an
+image over its ceiling, a corrupted Intel HEX checksum, a ceiling wider than
+the
+silicon, a missing reviewed ceiling, and an internally inconsistent record of
+each evidence kind.
+
+The target was NOT renamed, and the decision is deliberate. `resource_tables`
+is
+the name of the retained evidence file, the machine record, the `QUALIFICATION`
+key and the `MANIFEST.md` line in two published releases; renaming it would
+orphan those artifacts to rename a goal whose purpose -- resource evidence --
+has not actually changed. Only `test/README.md`'s description of what it proves
+needed updating.
 
 **Acceptance:**
 
@@ -2119,9 +2215,9 @@ dependencies and acceptance criteria.
 |---|---|---|
 | BR-BASE-01 | Reconcile final release baseline | DONE `756e622` |
 | BR-AUTH-01 | Finalize authority map | DONE `620234f` |
-| BR-AUTH-02 | Inventory references/contracts | DONE (commit pending) |
-| BR-RES-01 | Remove mutable resource tables | TODO |
-| BR-RES-02 | Retire prose synchronization tests | TODO |
+| BR-AUTH-02 | Inventory references/contracts | DONE `bc267a8` |
+| BR-RES-01 | Remove mutable resource tables | DONE (commit pending) |
+| BR-RES-02 | Retire prose synchronization tests | DONE (commit pending) |
 | BR-RES-03 | Publish generated release resource view | TODO |
 | BR-PIC-01 | Create coherent PIC design section | TODO |
 | BR-PIC-02 | Merge PIC10F322 phase notes | TODO |

@@ -47,6 +47,19 @@ historical records and are not retroactively compacted by this policy.
 
 ### Changed
 
+- **Current resource measurements are no longer restated in development
+  documentation.** Each part's capacity, its reviewed ceiling and the gate that
+  enforces it stay in `DESIGN_DOCUMENTATION.adoc`; the exact per-image flash,
+  static-data and stack figures belong to the release record that binds them to
+  a source commit and a pinned toolchain. A firmware size change no longer
+  requires a documentation edit before release. `make test-resource-tables`
+  reads every ceiling from the Makefile that declares it, measures each built
+  image against it, and refuses a ceiling wider than the silicon it bounds; the
+  release-time evidence checks validate each retained record against its own
+  arithmetic and the limit it reports rather than against a remembered figure.
+  Release resource measurement remains fail-closed at 21 of 21 images with
+  complete RAM and stack evidence.
+
 - **Normal hosted CI now runs the full mutation driver once per applicable
   event.** The fully provisioned PIC job remains the fail-closed mutation gate;
   hosted `stress` keeps every exhaustive non-mutation workload without repeating
@@ -851,7 +864,7 @@ historical records and are not retroactively compacted by this policy.
   asserted. On AVR the integrator stays in the ISR, so both the ISR and
   `main()` perform complete local transactions; main's snapshot-through-publish
   sequence is one `ATOMIC_BLOCK`, which is the source of MISRA deviation D-5.
-  XC8 v3.10 measures the current PIC10F322 images at 476/502/493 of 512
+  XC8 v3.10 measured the `0.9.10` PIC10F322 images at 476/502/493 of 512
   words for the simple/mute/relay variants. Design:
   `docs/context_seu_detection.md`.
 

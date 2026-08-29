@@ -272,7 +272,7 @@ reset_fixture() {
 TEST_LONG_RESULT format=1 status=pass source_commit=$sha target=test-long strict_tools=1 mutation_allow_skip=0
 EOF
 	cat > "$release/evidence/resource-tables.log" <<EOF
-resource tables: fixture checks, 0 failures (21 of 21 documented images measured; complete candidate required)
+resource tables: fixture checks, 0 failures (21 of 21 canonical images measured; complete candidate required)
 RESOURCE_TABLES_RESULT format=1 status=pass source_commit=$sha images=21 avr_static=12 classic_stack=9 pic_data=6 pic_stack=9
 EOF
 	for variant in "${pic12f675_variants[@]}"; do

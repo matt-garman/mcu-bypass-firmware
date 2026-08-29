@@ -17,12 +17,12 @@ part. It is included in the default `all` goal, both CI aggregates, the canonica
 evidence inventory. The tag workflow rebuilds and requalifies its three shipping
 images with the pinned PIC toolchain before publication.
 
-The latest fully provisioned candidate build uses 548/574/585 of 1024 program words for the
-simple/mute/relay variants. Persistent firmware state is 6 bytes (`ctx_`,
-`ctx_check_`, `gpio_shadow_`, and `osccal_snapshot_`); XC8 reserves 40 of the
-device's 64 Data-space bytes in all three variants. Every build requires one
-consistent XC8 Data-space summary per variant and rejects use above 48 of those
-64 bytes.
+Every build gates all three variants against the device's 1024 program words,
+and requires one internally consistent XC8 Data-space summary per variant,
+rejecting use above 48 of the device's 64 bytes. Persistent firmware state is
+`ctx_`, `ctx_check_`, `gpio_shadow_`, and `osccal_snapshot_`. What each image
+occupies is release evidence, retained per release with its source commit and
+pinned toolchain.
 
 Like every current part, it has no controlled hardware-qualification record;
 unlike some, it has no field-use report either (see
