@@ -401,86 +401,41 @@ sha256sum -c SHA256SUMS
 
 ## Flash a chip
 
-**AVR (ATtiny13a / 45 / 85)** — the design requires the correct *fuse bytes* in
-addition to the flash write; both are in `MANIFEST.md` per image. With an ISP
-programmer (e.g. USBtiny/USBasp) and `avrdude`:
+The general per-part procedure — programmer choices, command templates, the
+fuse bytes each AVR image needs, and the safety rules attached to them — is in
+[`FLASHING.md`](../FLASHING.md), and the exact commands for one release's own
+images are in that release's generated `MANIFEST.md`. This section records only
+what the release process adds to them: the source-tree transactions, and the
+rules a wrong guess here damages hardware over.
 
-```sh
-# ATtiny13a example (fuse bytes from MANIFEST.md): lfuse=0x4a hfuse=0xf9
-avrdude -c usbtiny -p t13 \
-        -U lfuse:w:0x4a:m -U hfuse:w:0xf9:m \
-        -U flash:w:bypass-attiny13a-cd4053_simple.hex:i
-```
+**AVR images need the design fuse bytes as well as the flash write.** Both are
+in `MANIFEST.md` per image. From a source tree the Makefile does the two steps
+as one ordered transaction — it builds and validates the image first, then
+writes the fuses, then flashes, so a failed build reaches no programmer at all:
+`make attiny13a-program VARIANT=<variant>` (ATtiny13a),
+`make attiny85-program VARIANT=<variant>` (ATtiny85), and so on. `<variant>` is
+the output-stage name from the table above — `cd4053_simple`,
+`cd4053_with_mute` or `tq2_l2_5v_relay` — the same string that appears in the
+image filename. (Through `v0.9.7` these were spelled `cd4053`, `mute` and
+`relay`, and the PIC10F320 lane used `cd4053-simple`, `cd4053-mute` and
+`tq2-relay`; all six spellings were retired in `v0.9.8`.)
 
-If you have the source tree, the Makefile does both steps for you, in one
-ordered transaction — it builds and validates the image first, then writes the
-fuses, then flashes, so a failed build reaches no programmer at all:
-`make attiny13a-program VARIANT=<variant>` (ATtiny13a) or
-`make attiny85-program VARIANT=<variant>` (ATtiny85), etc. `<variant>` is the output-stage name from the table above —
-`cd4053_simple`, `cd4053_with_mute` or `tq2_l2_5v_relay` — the same string that
-appears in the image filename. (Through `v0.9.7` these were spelled `cd4053`,
-`mute` and `relay`, and the PIC10F320 lane used `cd4053-simple`, `cd4053-mute`
-and `tq2-relay`; all six spellings were retired in `v0.9.8`.)
+**The PIC10F32x parts carry their CONFIG word inside the HEX**, so writing the
+HEX configures the device and there is no separate fuse step.
+`make pic10f322-program VARIANT=<variant>` is the source-tree equivalent of the
+programmer command; the PIC10F320 lane has no such convenience goal, so flash
+that part with the command `MANIFEST.md` gives for its image.
 
-**PIC10F322** — the CONFIG word is embedded in the HEX, so writing the HEX
-configures the device; there is no separate fuse step:
-
-```sh
-pk2cmd -PPIC10F322 -Fbypass-pic10f322-cd4053_simple.hex -M -Y -R   # PICkit 2
-# or, from the source tree: make pic10f322-program VARIANT=<variant>
-```
-
-**PIC10F320** — same story; the CONFIG word is embedded in the HEX:
-
-```sh
-pk2cmd -PPIC10F320 -Fbypass-pic10f320-cd4053_simple.hex -M -Y -R   # PICkit 2
-```
-
-There is no `make pic10f320-program` convenience target yet; <!-- name-contract: exempt (documents an absent goal) --> flash it with the
-programmer command above.
-
-**PIC12F675** — do not issue a raw writer command; this part is not a raw write
-target. The board must be externally powered in both paths below.
-
-*Programming the downloaded image* (no source checkout, no build toolchain):
-pass the release HEX to this release's `flash-pic12f675.py`, never to `ipecmd`.
-The helper is identified by its released name and its bytes in the signed
-`SHA256SUMS`, not by where the file sits, so a byte-identical copy works from
-anywhere and an edited or renamed one is refused wherever it lives. It needs
-Linux, Python 3 and MPLAB X 6.20 `ipecmd`, and a NEW evidence directory per
-device. Linux is required because the helper hands `ipecmd` its own open
-descriptors rather than pathnames a third process could re-point between the
-check and the write. Images, JARs and script launchers use private sealed copies
-of the validated bytes. Native ELF launchers preserve origin-relative library
-lookup by using the retained source descriptor only when the operator neither
-owns nor can write that inode; an operator-mutable native launcher is refused.
-Thus rewriting an existing operator-owned source inode cannot change what the
-child consumes. If the required descriptor paths, immutable source, sealable
-anonymous files or seals are unavailable, the helper fails closed.
+**PIC12F675 is not a raw write target, on either route**, and the board must be
+externally powered for both. Programming a downloaded image needs no source
+checkout and no build toolchain: pass the release HEX to this release's
+`flash-pic12f675.py`, never to a programmer directly, and follow the
+transaction in [`FLASHING.md`](../FLASHING.md). The helper is identified by its
+released name and its bytes in the signed `SHA256SUMS`, not by where the file
+sits, so a byte-identical copy works from anywhere and an edited or renamed one
+is refused wherever it lives.
 The helper's `ipecmd` route is published and software-tested, but it is not
 hardware-qualified.
-
-```sh
-python3 flash-pic12f675.py program \
-  --image bypass-pic12f675-cd4053_simple.hex \
-  --ipecmd /opt/microchip/mplabx/v6.20/mplab_platform/mplab_ipe/ipecmd.jar \
-  --evidence-dir ./pic12f675-device-001
-```
-
-It validates the image against this directory's signed `SHA256SUMS`, refuses an
-image that programs word `0x3FF` or moves the CONFIG BG field, pins the tool to
-MPLAB X 6.20, reads the device twice before reserving the write, performs exactly
-one write, and compares the WHOLE device afterwards -- every word the image does
-not supply has to read back erased, so a writer that skipped its bulk erase is a
-FAIL rather than a PASS. It then publishes one immutable `result.json`, written
-under a temporary name and installed atomically. Evidence creation, attachment,
-cleanup, parent flush and device exports all use retained directory descriptors,
-so parent-path replacement cannot redirect or make the transaction durable in a
-different directory. An interruption leaves a recoverable PENDING transaction
-rather than a truncated record. A PENDING directory
-(reservation, no result) is resolved read-only with
-`python3 flash-pic12f675.py finalize --evidence-dir ... --ipecmd ...`, which
-never constructs a writer argument. Full details are in `FLASHING.md`.
 
 *Programming from a source checkout of this release's tag* (the development and
 release-provenance path). For each device, choose new baseline and result paths

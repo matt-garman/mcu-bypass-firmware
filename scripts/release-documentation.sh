@@ -691,19 +691,24 @@ release_validate_pic12f675_finalization_document() {
 # Validate every published finalization command in the CURRENT tree, plus the
 # generated per-release documentation, against the same oracle.
 #
-# The two static documents are named because deleting the recovery example from
-# either must fail; any other current markdown that publishes such a command is
-# DISCOVERED, so a new document is covered the day it is written. Shipped
-# release directories (release/vX.Y.Z/) are excluded: they are immutable
-# artifacts of past releases, and release/v0.9.9/MANIFEST.md legitimately
-# publishes the older unsigned pic12f675-program transaction.
+# release/README.md is named because it is the sole live home of the guarded
+# source-checkout transaction, so deleting the recovery example from it must
+# fail. Every other document is DISCOVERED, and discovery keys on either half of
+# the pair: a document that publishes a PROGRAMMING command is scanned exactly
+# like one that publishes a recovery, so dropping the recovery while keeping the
+# command it recovers cannot escape by no longer matching the search. A document
+# that publishes NEITHER is not a publisher at all -- which is how README.md now
+# points at the two routes without restating either. Shipped release directories
+# (release/vX.Y.Z/) are excluded: they are immutable artifacts of past releases,
+# and release/v0.9.9/MANIFEST.md legitimately publishes the older unsigned
+# pic12f675-program transaction.
 release_validate_pic12f675_finalization() {
 	[ "$#" -eq 2 ] || return 2
 	local repo_root=$1 version=$2
 	local document label rendered find_pid rc=0
-	# Always scanned, so deleting the recovery example from either is a failure
-	# with a precise diagnostic rather than a silently empty scan.
-	local -a publishers=("README.md" "release/README.md")
+	# Always scanned, so deleting the recovery example from it is a failure with
+	# a precise diagnostic rather than a silently empty scan.
+	local -a publishers=("release/README.md")
 
 	[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
 		|| _release_documentation_error "requested version is not vX.Y.Z: $version" || return
@@ -711,7 +716,7 @@ release_validate_pic12f675_finalization() {
 	while IFS= read -r -d '' document; do
 		label=${document#$repo_root/}
 		case "$label" in
-			README.md|release/README.md) continue ;;
+			release/README.md) continue ;;
 		esac
 		# Root-level working documents quote the defective form of a command
 		# while describing the defect; they are deleted before release.
@@ -719,9 +724,9 @@ release_validate_pic12f675_finalization() {
 			continue
 		fi
 		# A published command, not a prose mention. This finds a NEW document the
-		# day it is written; the two named above are scanned either way, so a
+		# day it is written; the document named above is scanned either way, so a
 		# command this pattern cannot see still fails inside the scan.
-		grep -Eq '^[[:space:]]*make([[:space:]].*)?[[:space:]]pic12f675-finalize([[:space:]]|\\|$)' \
+		grep -Eq '^[[:space:]]*make([[:space:]].*)?[[:space:]](pic12f675-finalize|pic12f675-program|pic12f675-release-program)([[:space:]]|\\|$)' \
 			"$document" || continue
 		publishers+=("$label")
 	done < <(find "$repo_root" \

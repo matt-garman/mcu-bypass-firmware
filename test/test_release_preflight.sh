@@ -1521,11 +1521,35 @@ write_finalization_fixture
 assert_finalization_rejects 'a recovery example with no transaction to recover' \
 	'README.md publishes a pic12f675-finalize command with no preceding'
 
-# Deleting the recovery instructions outright is a failure too: the two static
-# documents are scanned whether or not discovery finds a command in them.
+# Deleting the recovery instructions outright is a failure too: release/README.md
+# is the sole live home of the transaction and is scanned whether or not
+# discovery finds a command in it.
+write_finalization_fixture
+printf '%s\n' 'Programming is documented elsewhere.' \
+	> "$finalization_root/release/README.md"
+assert_finalization_rejects 'the named document dropping its recovery instructions' \
+	'release/README.md publishes no pic12f675-finalize command'
+
+# An unnamed document is not scanned for a recovery it never had -- README.md
+# now points at both routes without restating either -- but keeping the
+# PROGRAMMING command while dropping the recovery is still caught, because
+# discovery keys on either half of the pair rather than on the recovery alone.
 write_finalization_fixture
 printf '%s\n' 'Programming is documented elsewhere.' > "$finalization_root/README.md"
-assert_finalization_rejects 'a document that dropped its recovery instructions' \
+assert_finalization_accepts 'an unnamed document that publishes neither half'
+
+write_finalization_fixture
+{
+	printf '%s\n' 'Guarded transaction:' '' '```sh' \
+		'make -C "$repo" pic12f675-release-program \' \
+		'  VARIANT=cd4053_simple \' \
+		'  PIC12F675_RELEASE_TAG="$release_tag" \' \
+		'  PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \' \
+		'  PIC12F675_READ_PROG=pk2cmd \' \
+		'  PIC12F675_TRIM_EVIDENCE="$baseline" \' \
+		'  PIC12F675_BENCH_RESULT="$result"' '```'
+} > "$finalization_root/README.md"
+assert_finalization_rejects 'an unnamed document publishing a transaction with no recovery' \
 	'README.md publishes no pic12f675-finalize command'
 
 # Prose that merely names the goal is not a published command. test/README.md

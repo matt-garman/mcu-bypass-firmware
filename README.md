@@ -166,12 +166,11 @@ and programmer CLI. PIC12F675 additionally requires Python 3 and the release's
 flashing helper because its per-device factory calibration must be preserved and
 verified. The helper's `ipecmd` route is published and software-tested, but it is
 not hardware-qualified. See [FLASHING.md](FLASHING.md) for the per-part
-`avrdude` and `ipecmd`
-command templates and the PIC12F675 helper invocation, and
-[HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md) for which combinations
-builders have reported working and why a shared pinout does not make two parts
-interchangeable to flash. The rest of this section is about building from
-source.
+`avrdude` and `ipecmd` command templates and the PIC12F675 helper invocation,
+and [HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md) for which
+combinations builders have reported working and why a shared pinout does not
+make two parts interchangeable to flash. The rest of this section is about
+building from source.
 
 Requires avrtools, assumes a USBtiny programmer, and a fresh
 ATtiny13a chip (see `make help` for how to build/program other
@@ -228,79 +227,20 @@ make pic12f675-test pic12f675-test-target-variants
                                     # one retained hash-qualified matrix across
                                     # CONFIG, analysis, coverage, calibration,
                                     # gpsim, stack, and all libgpsim variants
-# Replace with the intended release tag containing pic12f675-release-program.
-release_tag=vX.Y.Z &&
-repo=$(git rev-parse --show-toplevel) &&
-head_commit=$(git -C "$repo" rev-parse --verify "HEAD^{commit}") &&
-tag_commit=$(git -C "$repo" rev-parse --verify \
-  "refs/tags/$release_tag^{commit}") &&
-worktree_status=$(git -C "$repo" status --porcelain=v1 --untracked-files=normal) &&
-test "$head_commit" = "$tag_commit" && test -z "$worktree_status" &&
-evidence_root=$(dirname "$repo") &&
-baseline="$evidence_root/pic12f675-factory-baseline.json" &&
-result="$evidence_root/pic12f675-program-result" &&
-test ! -e "$baseline" && test ! -e "$result" &&
-make -C "$repo" pic12f675-preflight \
-  PIC12F675_READ_PROG=pk2cmd \
-  PIC12F675_TRIM_EVIDENCE="$baseline" &&
-make -C "$repo" pic12f675-release-program \
-  VARIANT=cd4053_simple \
-  PIC12F675_RELEASE_TAG="$release_tag" \
-  PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \
-  PIC12F675_READ_PROG=pk2cmd \
-  PIC12F675_TRIM_EVIDENCE="$baseline" \
-  PIC12F675_BENCH_RESULT="$result"
 ```
 
-If an interruption leaves `reservation.json` but no `result.json`, the
-transaction is **PENDING**. Keep physical custody of the same attached device;
-do not write, reflash, capture a new baseline, or reuse the result path. From the
-same source checkout, resolve it with the same release identity, variant, and
-tool identities:
-
-```sh
-make -C "$repo" pic12f675-finalize \
-  VARIANT=cd4053_simple \
-  PIC12F675_RELEASE_TAG="$release_tag" \
-  PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \
-  PIC12F675_READ_PROG=pk2cmd \
-  PIC12F675_TRIM_EVIDENCE="$baseline" \
-  PIC12F675_BENCH_RESULT="$result"
-```
-
-Finalization never invokes writer arguments. It revalidates the selected release
-identity, the reservation, and the separately retained image first, verifies the
-reader version before a full-device read, and exclusively publishes the recovered
-PASS/FAIL `result.json`. Private read attempts are retry-safe after interruption.
-A FAIL is a resolved forensic record, not permission to retry the write. An
-existing result is immutable.
-
-`pic12f675-preflight` is read-only and device-specific; it does not take
-`VARIANT`. Only run the program step after preflight succeeds, using the same
-new baseline and a new result directory path. The parents of both paths must
-already exist.
-
-Transient full-device reads and the private programming build use `TMPDIR` when
-set, otherwise `XDG_RUNTIME_DIR`, otherwise `HOME`. The selected root must
-already exist, be owned by the current user, grant no group/other access, and
-have only current-user- or root-owned, non-group/other-writable ancestors;
-shared `/tmp` and `/var/tmp` roots are rejected. Its path may contain letters,
-digits, spaces, `/`, `.`, `_`, and `-`. Success, failure, and handled-signal
-paths remove those transient directories; only the explicitly requested
-baseline and result paths are retained.
-
-Run this workflow only from a clean checkout of the intended annotated release
-tag with the pinned XC8/DFP toolchain. `pic12f675-release-program` verifies the
-pinned tag and checksum signatures, validates the complete release image set,
-and requires its private fresh build to match the selected signed digest. It
-does not consume a downloaded release HEX. `pic12f675-program` remains an
-explicit development/bench path and does not claim signed-release provenance.
-Neither Make goal offers an operator `ipecmd` procedure, published or qualified:
-that route would need pk2cmd reads immediately before and after the IPE write,
-and no safe dual-programmer attachment or handoff has been validated. That is a
-different route from the downloaded-release helper, whose `ipecmd` procedure
-[FLASHING.md](FLASHING.md) does publish — software-tested, and still not
-hardware-qualified.
+Programming a real PIC12F675 is a guarded transaction rather than a command,
+because a bulk erase destroys per-device factory trim the image cannot supply.
+Which transaction applies depends on what you have, and each has one home:
+[FLASHING.md](FLASHING.md) carries the downloaded-release route through
+`flash-pic12f675.py`, and [release/README.md](release/README.md) carries the
+development and release-provenance route (`make pic12f675-preflight`, then
+`make pic12f675-release-program`, with `make pic12f675-finalize` to resolve an
+interrupted transaction). `pic12f675-program` remains an explicit
+development/bench path and does not claim signed-release provenance. Neither
+Make goal offers an operator `ipecmd` procedure, published or qualified: that
+route would need pk2cmd reads immediately before and after the IPE write, and
+no safe dual-programmer attachment or handoff has been validated.
 
 Its simulator lanes run *derived* images: `make pic12f675-simcal` injects the
 oscillator calibration word that a real device carries in its last program word
@@ -330,27 +270,13 @@ that same snapshot through directly constructed argv. External image and
 whole-command overrides are deliberately unsupported. The release goal adds the
 signed-byte gate; the development/bench goal deliberately does not impersonate it.
 
-Programming also requires a baseline made by the read-only
-`pic12f675-preflight` target. It records the exact reader binary/version and
-device ID/revision plus word `0x3FF`, CONFIG, and `BG<1:0>`. The write target
-repeats that read immediately before programming, refuses a mismatch, reads the
-device again afterwards, and publishes an exclusive result containing the raw
-transcripts, programmed-byte comparison, and before/after values. The
-`PIC12F675_BENCH_RESULT` path is reserved as a new directory before the write;
-`reservation.json` remains useful after interruption and `result.json` records
-the final PASS/FAIL. Until a PENDING reservation is finalized, keep the same
-device under physical custody and prohibit another write or baseline. A baseline
-is a one-device, pre-first-write record: the
-immediate read must match its complete exported HEX as well as identity/trim, so
-do not reuse it for another device or a later reflash. pk2cmd is the pinned
-readback dialect. This route's software-tested `ipecmd` write dialect would
-additionally require pk2cmd reads immediately before and after the write, and no
-safe dual-programmer attachment or handoff has been validated, so this route
-offers no operator procedure for it — unlike the downloaded-release helper,
-which publishes one and is separately bounded above. These records enable the
-silicon check but do not replace it: closing
-§8 items 1 and 2 needs retained
-real-hardware evidence, which is the `1.x.y` hardware-validation pass (TODO
+Both goals also require a baseline captured by the read-only
+`pic12f675-preflight` target, re-read the device immediately before writing,
+and publish an exclusive PASS/FAIL result afterwards; pk2cmd is the pinned
+readback dialect, and [release/README.md](release/README.md) states the rules
+that go with it. Those records enable the silicon check but do not replace it:
+closing the two open PIC12F675 hardware items needs retained real-hardware
+evidence, which is the `1.x.y` hardware-validation pass (TODO
 `T3-pic12f675-bench`) that every part in this repository still awaits — not a
 `0.9.x` release blocker for this one.
 

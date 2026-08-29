@@ -811,7 +811,7 @@ working tree` and does not name the path, which is worth a look on its own.
 
 ## BR-PIC-03 - Consolidate the PIC10F320 constrained-target case
 
-**Status:** DONE (commit pending)
+**Status:** DONE `b8b4af1`
 
 **Depends on:** BR-PIC-01, BR-RES-01
 
@@ -1069,7 +1069,7 @@ release/flashing, and MISRA documents.
 
 ## BR-FLASH-01 - Make FLASHING.md the sole live operator procedure
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Current duplication:**
 
@@ -1083,15 +1083,15 @@ in `CHANGELOG.md:42-87` and `CHANGELOG.md:166-195`.
 
 **Work:**
 
-- [ ] Keep general operator safety, hardware prerequisites, programmer choices,
+- [x] Keep general operator safety, hardware prerequisites, programmer choices,
   and transaction semantics in `FLASHING.md`.
-- [ ] Reduce README programming content to a quickstart and prominent links.
-- [ ] Remove full command sequences from `release/README.md` except where it is
+- [x] Reduce README programming content to a quickstart and prominent links.
+- [x] Remove full command sequences from `release/README.md` except where it is
   explicitly describing historical releases or the release-process contract.
-- [ ] Keep repeated short safety warnings where omission would create physical
+- [x] Keep repeated short safety warnings where omission would create physical
   risk.
-- [ ] Do not repeat PIC12F675 transaction steps in several files.
-- [ ] Clearly distinguish downloaded-release programming from development and
+- [x] Do not repeat PIC12F675 transaction steps in several files.
+- [x] Clearly distinguish downloaded-release programming from development and
   release-provenance Make targets.
 
 **Acceptance:**
@@ -1101,6 +1101,76 @@ in `CHANGELOG.md:42-87` and `CHANGELOG.md:166-195`.
   specification, not three documents.
 - PIC12F675 is never presented as a raw-write target.
 - The published/software-tested/not-hardware-qualified distinction remains.
+
+**Result:**
+
+`FLASHING.md` was already the complete general procedure and did not change.
+What changed is that the other two documents stopped restating it.
+
+Three routes existed, and the duplication was not that three documents said the
+same thing -- it is that each said a *part* of three different things:
+
+| Route | Sole live home now |
+|---|---|
+| Downloaded release, any part | `FLASHING.md` |
+| Exact commands for one release | its generated `MANIFEST.md` |
+| Source checkout at a signed tag | `release/README.md` |
+
+`README.md` (-82 lines) now publishes no programming command at all. The
+guarded PIC12F675 transaction it carried -- the `release_tag`/`repo` preamble,
+`pic12f675-preflight`, `pic12f675-release-program`, the PENDING recovery block,
+and the four paragraphs restating what each step guarantees -- was a verbatim
+second copy of `release/README.md`'s. In its place is one paragraph that says
+what kind of thing a PIC12F675 write is and names the two homes. The
+`pic12f675-preflight` baseline paragraph was reduced the same way, to the
+properties a reader of the overview needs and a pointer for the rules. Its
+build and test target listings stayed: those are development entry points, not
+programming procedure.
+
+`release/README.md` (-49 lines) lost the `avrdude` example, both PIC10F32x
+`pk2cmd` one-liners, and the downloaded-release helper block with its
+descriptor-sealing prose -- each of which the per-release `MANIFEST.md` or
+`FLASHING.md` already published, generated or maintained. It keeps the guarded
+source-checkout transaction, which is the release-process contract the plan
+exempts: that sequence exists to bind a device write to a signed tag, and
+nothing else in the tree specifies it.
+
+Safety warnings were kept where dropping one costs hardware, and shortened to
+the rule rather than the reasoning: AVR needs the design fuse bytes as well as
+the flash write, the PIC10F32x parts carry CONFIG inside the HEX so there is no
+fuse step, and PIC12F675 is not a raw write target on either route and needs
+external power on both.
+
+**One gate had to change, and it became stricter.**
+`release_validate_pic12f675_finalization` named `README.md` and
+`release/README.md` as always-scanned publishers, each required to publish a
+`pic12f675-finalize` command anchored to the programming command it recovers.
+That contract, as written, made "README.md stops restating the transaction"
+indistinguishable from "README.md silently dropped its recovery instructions",
+which is the defect it exists to catch. So discovery was widened from the
+recovery half of the pair to *either* half: a document that publishes
+`pic12f675-program` or `pic12f675-release-program` is now scanned exactly like
+one that publishes `pic12f675-finalize`. Dropping the recovery while keeping
+the command it recovers can no longer escape by no longer matching the search,
+and a document that publishes neither is not a publisher at all. Only
+`release/README.md` stays named. Two preflight cases were added for the new
+edges (an unnamed document publishing neither half is accepted; one publishing
+a transaction with no recovery is rejected) and the existing "dropped its
+recovery instructions" case was repointed at the named document.
+
+One fixture fragility surfaced and was fixed in the document rather than the
+test: `test_release_preflight.sh` spoils the helper-status sentence with a
+per-line `awk` substitution on `route is published and software-tested`, so
+that phrase has to survive on one physical line. A rewrap had split it, the
+spoiled fixture still passed, and the test correctly reported that its own
+negative case had stopped biting.
+
+**Deliberately not touched.** `TOOLCHAIN.adoc`'s PIC12F675 programmer block
+restates a third copy of the Make route's transaction semantics. It is outside
+this task's named duplication set, it is scoped as a toolchain fact (which
+readback dialect is pinned, what the tools must provide), and reducing it is a
+judgement about `TOOLCHAIN.adoc`'s boundary rather than about the operator
+procedure. BR-FINAL-01 should decide it.
 
 ## BR-FLASH-02 - Generate exact per-release programming guidance
 
@@ -2436,10 +2506,10 @@ dependencies and acceptance criteria.
 | BR-RES-03 | Publish generated release resource view | TODO |
 | BR-PIC-01 | Create coherent PIC design section | DONE `b1b98c3` |
 | BR-PIC-02 | Merge PIC10F322 phase notes | DONE `3a3b661` |
-| BR-PIC-03 | Consolidate PIC10F320 documents | DONE (commit pending) |
+| BR-PIC-03 | Consolidate PIC10F320 documents | DONE `b8b4af1` |
 | BR-PIC-04 | Consolidate PIC12F675 feasibility | TODO |
 | BR-PIC-05 | Update firmware document references | NEEDS USER |
-| BR-FLASH-01 | Make FLASHING.md authoritative | TODO |
+| BR-FLASH-01 | Make FLASHING.md authoritative | DONE `<commit>` |
 | BR-FLASH-02 | Generate release programming guide | TODO |
 | BR-FLASH-03 | Delete flashing proposal journal | TODO |
 | BR-DOC-01 | Delete completed v0.9.6 journal | DONE `9b6dfc3` |
