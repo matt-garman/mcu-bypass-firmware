@@ -635,6 +635,29 @@ user.  The release-debounce, or lock-out period, is longer so as to
                                                      +----+
 ....
 
+Only four pins exist, so the footswitch — an input — takes the input-only RA3
+(`MCLRE=OFF`) and all three bidirectional pins become outputs. Bit positions
+below are PORTA bit indices, with the AVR Classic assignment beside them for
+contrast:
+
+|===
+| Logical pin | PIC10F32x bit | AVR Classic bit
+
+| `FOOTSW_PIN` (input)      | RA3 = 3 | PB0 = 0
+| `LED_PIN`                 | RA0 = 0 | PB1 = 1
+| `CD4053_PIN` (simple)     | RA1 = 1 | PB2 = 2
+| `RELAY_RESET_PIN`         | RA1 = 1 | PB2 = 2
+| `RELAY_SET_PIN`           | RA2 = 2 | PB3 = 3
+| `CD4053_CTL1` (mute)      | RA1 = 1 | PB2 = 2
+| `CD4053_CTL2` (mute)      | RA2 = 2 | PB3 = 3
+| output mask, all variants | `0x07` (RA0–RA2) | `0x1E` (PB1–PB4)
+|===
+
+Not one logical pin lands on the same bit index in both families, which is why
+pin assignments live in a per-MCU pin map (`src/bypass_pins_pic10f322.h`)
+rather than in the shared output drivers. The relay and mute variants use all
+three output pins with none spare; `cd4053_simple` leaves RA2 driven low as a
+spare, which the integrity checks still cover (<<pic10f322-architecture>>).
 
 The PIC10F320 is pin-compatible with the PIC10F322 in this design — same
 package, same pin functions, same footswitch/LED/control assignment — so the
@@ -1060,14 +1083,15 @@ does not make them independently enforceable by this repository.
 | WDT time base
 | 31 kHz LFINTOSC, independent of `FOSC`
 | DS40001585, param **OS09** (LFINTOSC = 31 kHz ±25%)
-| **Documented vendor input.** `docs/phase2_pic_shell.md` §2 records the
-  LFINTOSC source and uses it in the watchdog sizing argument; no software gate
-  can verify the oscillator's physical frequency or tolerance.
+| **Documented vendor input.** <<pic10f322-architecture>> records why the
+  LFINTOSC source matters and Watchdog Pet-to-Pet Budget uses it in the sizing
+  argument; no software gate can verify the oscillator's physical frequency or
+  tolerance.
 
 | WDT period tolerance
 | −37% / +69% worst case, so ~256 ms nominal ≥ ~160 ms worst case
 | DS40001585, **param 31**
-| **Documented vendor input.** `docs/phase2_pic_shell.md` §2 applies the
+| **Documented vendor input.** Watchdog Pet-to-Pet Budget applies the
   characterized tolerance to the worst-case watchdog margin; it is not a
   machine measurement of silicon timing.
 
@@ -1092,9 +1116,10 @@ does not make them independently enforceable by this repository.
 | DS40001585, `T2CON` (0x13), `PR2` (0x12), `TMR2IF` = `PIR1` (0x0C) bit 1
 | **Runtime-checked configuration; documented derivation.**
   `src/bypass_mcu_pic10f322.c` writes and re-reads `PR2` and `T2CON`; target fault
-  injection exercises both guards. `docs/phase2_pic_shell.md` §2 records the
-  divisor arithmetic and that the register table, not incomplete datasheet
-  prose, is authoritative for the prescale code.
+  injection exercises both guards. The divisor arithmetic is FOSC/4 = 500 kHz,
+  prescaled 1:4 to 125 kHz, where `PR2` = 124 yields 125 counts. The register
+  table, not the incomplete datasheet prose, is authoritative for the prescale
+  code — see <<pic10f322-architecture>>.
 
 | Brown-out trip
 | `BOREN=ON`, `LPBOR=OFF`, `BORV=HI` → ~2.7 V (HI) / ~2.4 V (LO)
@@ -1120,13 +1145,14 @@ does not make them independently enforceable by this repository.
 |===
 
 NOTE: Scope, stated so this table is not over-trusted. The PIC10(L)F320/322
-references above were confirmed against DS40001585 and the DFP device header as
-recorded in `docs/phase2_pic_shell.md` §2, and the ATtiny13A reference against
-that part's datasheet. Machine gates can enforce configured encodings and
-software arithmetic, but not vendor physical specifications. The AVR Classic
-and AVR-XT *electrical* parameters used elsewhere in this document — the 4.3 V /
-4.2 V BOD levels, the ~16 ms post-reset watchdog window and internal-RC ±10%
-tolerance — are likewise physical inputs; their fuse selections and timing
+references above were confirmed against DS40001585 and the device pack's
+`pic10f322.h` header, which is authoritative for register and CONFIG names, and
+the ATtiny13A reference against that part's datasheet. Machine gates can
+enforce configured encodings and software arithmetic, but not vendor physical
+specifications. The AVR Classic and AVR-XT *electrical* parameters used
+elsewhere in this document — the 4.3 V / 4.2 V BOD levels, the ~16 ms
+post-reset watchdog window and internal-RC ±10% tolerance — are likewise
+physical inputs; their fuse selections and timing
 constants are gated, not the resulting voltage or silicon timing. Those inputs,
 `WDTON` semantics and the Timer0 CTC derivation are not yet traced here to exact
 datasheet sections. Completing them is tracked in `TODO.md`.
@@ -1494,11 +1520,17 @@ and each of them is still load-bearing:
   AVR builds rely on `-fshort-enums`, is harmless here.
 
 Converting a PIC shell to a timer ISR was later priced on the real toolchain
-and rejected again: the relay build did not fit the PIC10F322's flash, and
-even with flash freed the call graph consumed most of the eight-level hardware
-return stack, leaving nothing beyond the deliberate two-level reserve. That is
-historical spike evidence rather than a current measurement, and it is
-recorded in `docs/phase2_pic_shell.md` §1 with its Git citation.
+and rejected again. The conversion was applied to the shipping PIC10F322 shell
+-- ISR, handshake flag, `volatile ctx_`, and a flag protocol replacing the
+timer-flag poll -- and rebuilt. The relay variant did not link: the linker
+needed a two-word contiguous range and the largest free one was a single word,
+which is fragmentation at a full ceiling rather than a program two words too
+large. Freeing flash would not have settled it either, because that call shape
+consumes six of the eight hardware return-stack levels, leaving nothing beyond
+the deliberate two-level reserve. Those are dated 2026-08-05 figures for a
+spike build that was never shipped, not a measurement of any current image;
+what carries forward is the conclusion, which is that Model B is now held in
+place by the budget as well as chosen on merit.
 
 Two consequences are accepted rather than mitigated, and both are stated
 elsewhere in this document because they are user-visible:
@@ -1649,13 +1681,21 @@ which the integrity checks still cover.
 **The tick is configured, not constructed.** TMR2 counts against the `PR2`
 period register with the postscaler at 1:1, and the loop polls and clears
 `TMR2IF`. A period register is what makes an exact 1 ms tick a matter of
-choosing two numbers.
+choosing two numbers -- a prescale code and a period -- rather than something
+software has to assemble; Datasheet References records which two and how they
+divide. One caution for anyone re-deriving them: the datasheet *prose* is
+incomplete on the TMR2 prescale field, which is a two-bit code selecting 1:1,
+1:4, 1:16 or 1:64. The register table is the authority there, and the device
+pack's `pic10f322.h` is the authority for register and CONFIG *names*.
 
 **The watchdog is independent of the tick.** `WDTCON.WDTPS` selects the period
 from the 31 kHz LFINTOSC, which does not derive from `FOSC` and shares no
 prescaler with any timer, so the watchdog neither moves when the core clock
-changes nor competes with the tick for a resource. The selected period and the
-de-rated floor it is judged against are in Watchdog Pet-to-Pet Budget.
+changes nor competes with the tick for a resource. The nominal period is
+~256 ms, chosen to mirror the AVR Classic's 250 ms so that one margin argument
+covers both families; an earlier ~32 ms selection left only about 1.4x over the
+worst-case awake burst and was lengthened for exactly that reason. The de-rated
+floor the choice is judged against is in Watchdog Pet-to-Pet Budget.
 
 **Two integrity checks are stronger than the obvious version, deliberately.**
 
@@ -1674,10 +1714,23 @@ de-rated floor it is judged against are in Watchdog Pet-to-Pet Budget.
 
 **What the per-tick sanity gate guards:** `OSCCON.IRCF`, `WDTCON.WDTPS`, `PR2`,
 `T2CON`, `ANSELA` over the output pins, the `WPUA` latch, and
-`OPTION_REG.nWPUEN`. The emitted CONFIG word is not reviewed by eye -- it is
-read back out of the built HEX and compared against documented intent by a
-build gate, because a wrong CONFIG bit is invisible to every other test and
-would only bite on silicon.
+`OPTION_REG.nWPUEN`. `IRCF` is the only read/write field `OSCCON` implements on
+this part, so checking it covers that register's whole timing-relevant state
+rather than a chosen slice of it. The emitted CONFIG word is not reviewed by
+eye -- it is read back out of the built HEX and compared against documented
+intent by a build gate, because a wrong CONFIG bit is invisible to every other
+test and would only bite on silicon.
+
+**What still has to be validated, and what does not.** Because
+`src/bypass_pure.c` is compiled unchanged into this image, the host, golden
+model and formal suites that establish the algorithm establish it here too; no
+PIC-specific argument about the debounce or the state machine is required, and
+none is made. What remains is the shell, and it is validated on its own terms:
+the CONFIG word against the built HEX, register-level simulation and fault
+injection, built-HEX/model lock-step, target-I/O timing, static analysis and
+MISRA, a soak lane and mutation testing. `test/README.md` owns what each layer
+asserts and how to run it. The AVR Classic shell remains the reference
+implementation with the longest validation history.
 
 [[pic10f320-architecture]]
 === PIC10F320: the constrained target

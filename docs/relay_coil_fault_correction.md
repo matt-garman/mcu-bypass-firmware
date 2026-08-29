@@ -389,8 +389,8 @@ PIC gpsim/shadow harnesses were never affected.
 - `CHANGELOG.md` and commits `f78d168`, `93f637b`, `712589c` record the
   correct-in-place model this policy replaces.
 - `docs/context_seu_detection.md` — the sibling fault-hardening item (F2).
-- `docs/phase2_pic_shell.md` — the PIC Model-B polled-loop design the PIC shells
-  share.
+- `DESIGN_DOCUMENTATION.adoc#pic-model-b` — the PIC Model-B polled-loop design
+  the PIC shells share.
 - `src/bypass_mcu_pic12f675.c` header comment — the GPIO-shadow rationale.
 - `src/bypass_hw_iface.h` — the `hw_outputs_reassert_safe()` contract.
 

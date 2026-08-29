@@ -616,7 +616,7 @@ needed updating.
 
 ## BR-PIC-01 - Create a coherent PIC architecture section in DESIGN_DOCUMENTATION
 
-**Status:** DONE (commit pending)
+**Status:** DONE `b1b98c3`
 
 **Depends on:** BR-AUTH-01, BR-RES-01
 
@@ -707,7 +707,7 @@ cross-reference resolves.
 
 ## BR-PIC-02 - Fold PIC10F322 phase notes into the design document
 
-**Status:** TODO
+**Status:** DONE (commit pending)
 
 **Depends on:** BR-PIC-01
 
@@ -731,9 +731,78 @@ cross-reference resolves.
 
 **Work:**
 
-- [ ] Merge stable material into named design anchors.
-- [ ] Update current references to those anchors.
-- [ ] Delete `docs/phase2_pic_shell.md` from the branch tip.
+- [x] Merge stable material into named design anchors.
+- [x] Update current references to those anchors.
+- [x] Delete `docs/phase2_pic_shell.md` from the branch tip.
+
+**Result:**
+
+`docs/phase2_pic_shell.md` is deleted. BR-PIC-01 had already restated its §1
+(Model B) and most of §4 (the two stronger integrity checks, the guarded SFR
+set, the loop shape) in `pic-model-b` and `pic10f322-architecture`, so this task
+carried the residue and cut the pointers.
+
+What moved into `DESIGN_DOCUMENTATION.adoc`:
+
+- The ISR spike is now stated where the decision is stated. `pic-model-b` had
+  summarized it and delegated the numbers to §1; it now carries them -- the
+  relay variant's link failure and its cause (a two-word psect against a
+  one-word largest free range, so fragmentation at a full ceiling rather than a
+  program two words too large), and six of eight return-stack levels consumed
+  even with flash freed -- bound to their 2026-08-05 date and marked as a
+  never-shipped spike build, per BR-RES-01's rule for historical measurements.
+- The prescale-code caution from §2: the datasheet prose is incomplete on the
+  TMR2 prescale field and the register table is authoritative, with the device
+  pack header authoritative for register and CONFIG names. Datasheet References
+  had asserted this fact while citing the deleted file for it; it is now stated
+  in `pic10f322-architecture` and the table's evidence column carries the
+  divisor arithmetic itself (FOSC/4 = 500 kHz, 1:4 to 125 kHz, `PR2` = 124).
+- The watchdog period choice: ~256 ms mirroring the AVR Classic's 250 ms, and
+  the earlier ~32 ms selection that gave only ~1.4x over the worst-case awake
+  burst and was lengthened for that reason.
+- Why checking `OSCCON.IRCF` covers the whole register: it is the only
+  read/write field the part implements there.
+- §7's validation split, as the closing paragraph of `pic10f322-architecture`:
+  the core's suites carry the algorithm because the core is compiled unchanged,
+  so what remains is shell validation, and `test/README.md` owns the lanes.
+- §3's logical pin map, as a table in the existing PIC10F322 pinout section,
+  with the AVR Classic bit indices beside it. The point it exists to make is
+  that no logical pin shares a bit index across the two families, which is why
+  pin maps are per-MCU rather than in the drivers.
+
+Not carried, deliberately: the SFR address list (the device pack header is the
+authority and the design document does not otherwise inventory addresses), the
+hardware-contract operation table (a restatement of the shell, and the MISRA
+8.7 rationale behind its `static` helpers is already in Multi-MCU
+Architecture), the §5 behavioural-divergence argument (already in Caveats and
+Limitations and Asymmetric Debounce Timing, both gated), and the XC8 `sizeof`
+and `const`-SFR gotchas, which are toolchain notes rather than design record.
+
+Every live reference retargeted, so no current file reads the deleted path:
+four in `DESIGN_DOCUMENTATION.adoc`'s Datasheet References, four in
+`docs/pic12f675_feasibility.md` §4, two rows in that document's §11 (retitled
+to name the correction rather than the vanished document), one in
+`docs/relay_coil_fault_correction.md`'s Related list, and one dated audit note
+in `docs/pic10f320_merge_plan.md` annotated with the fold rather than rewritten.
+`CHANGELOG.md`'s two mentions are historical release records and stay.
+
+Two firmware comments still name the deleted path --
+`src/bypass_mcu_pic10f322.c:13` and `src/bypass_mcu_pic12f675.c:15`, both the
+`Tick/WDT model "B" (see docs/phase2_pic_shell.md)` line. Those are user-owned
+edits and are BR-PIC-05's, which depends on this task; the replacement target
+is `DESIGN_DOCUMENTATION.adoc#pic-model-b`.
+
+No script, test, Makefile or CI path referenced the file, so the deletion needed
+no gate change.
+
+One workflow note, since this is the branch's first content deletion under the
+current gate set. `make test` cannot go green until the deletion is staged:
+`test_release_preflight.sh`'s `tree_snapshot()` walks `git ls-files -co` and
+`stat`s every path, so a tracked file that is gone from disk but still in the
+index aborts the snapshot before the preflight body runs. Verified by isolation
+-- restoring the file and running the gate alone gives 214 checks, 0 failures,
+with every other edit in place. The failure text is `could not snapshot the
+working tree` and does not name the path, which is worth a look on its own.
 
 **Acceptance:**
 
@@ -2280,8 +2349,8 @@ dependencies and acceptance criteria.
 | BR-RES-01 | Remove mutable resource tables | DONE `e7c4f68` |
 | BR-RES-02 | Retire prose synchronization tests | DONE `e7c4f68` |
 | BR-RES-03 | Publish generated release resource view | TODO |
-| BR-PIC-01 | Create coherent PIC design section | DONE (commit pending) |
-| BR-PIC-02 | Merge PIC10F322 phase notes | TODO |
+| BR-PIC-01 | Create coherent PIC design section | DONE `b1b98c3` |
+| BR-PIC-02 | Merge PIC10F322 phase notes | DONE (commit pending) |
 | BR-PIC-03 | Consolidate PIC10F320 documents | TODO |
 | BR-PIC-04 | Consolidate PIC12F675 feasibility | TODO |
 | BR-PIC-05 | Update firmware document references | NEEDS USER |

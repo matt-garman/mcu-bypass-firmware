@@ -417,7 +417,8 @@ plan must respect:
   `docs/pic10f320_feasibility.md` now scopes its finding to the *modular*
   architecture and points here instead of declaring the part unsupported;
   `docs/phase2_pic_shell.md` was rewritten as PIC10F322-only design notes and no
-  longer claims the shared contract covers the 320. `docs/phase1_hw_abstraction.md`
+  longer claims the shared contract covers the 320 (that file has since been
+  folded into `DESIGN_DOCUMENTATION.adoc`, "PIC Architecture"). `docs/phase1_hw_abstraction.md`
   and `docs/phase2b_pic_shell_spec.md` were deleted (obsolete planning
   scaffolding); the multi-MCU architecture rationale they carried now lives in
   `DESIGN_DOCUMENTATION.adoc`, "Multi-MCU Architecture". Phase 7 should confirm

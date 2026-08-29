@@ -414,7 +414,7 @@ samples and integrates the footswitch while `main()` runs the state machine, so
 debounce keeps advancing *through* the 12 ms relay pulse and the 5 ms mute
 delay — and `main()` sleeps in IDLE between ticks. Both PIC shells are Model B:
 one polled loop, no ISR, sampling suspended for the duration of any blocking
-actuation (`docs/phase2_pic_shell.md` §1 and §5).
+actuation (`DESIGN_DOCUMENTATION.adoc#pic-model-b`).
 
 **The answer has three parts:** peripheral capability yes; measured flash/RAM
 fit yes; return-stack feasibility not yet established. The PIC10F322 has always
@@ -475,14 +475,16 @@ the worst-case hardware return-stack peak or its reserve.
 - **The behaviour matches the AVR.** Debounce integrates through the blocking
   actuation, which is the difference the user of a relay-equipped pedal could in
   principle feel.
-- **`docs/phase2_pic_shell.md` §5 stops needing to exist.** That section is
-  entirely an argument that the polled shell's ~12 ms sampling gap is benign. An
-  ISR-integrated shell has no gap to defend.
-- **So does its test-side consequence.** §5's closing line — *"any PIC timing
-  test that counts ticks must budget for the actuation stealing them, or it will
-  mis-measure the release gate"* — describes a real defect this tree has already
-  paid for once, in the relay soak's release gate. An ISR-integrated PIC would
-  use AVR-shaped budgets (modulo the 1.024 ms tick, §4.4.1).
+- **The sampling-gap argument stops needing to exist.** The design record's
+  case for the polled shell (`DESIGN_DOCUMENTATION.adoc#pic-model-b`, and the
+  budgets in "Caveats and Limitations") is entirely an argument that the polled
+  shell's ~12 ms sampling gap is benign. An ISR-integrated shell has no gap to
+  defend.
+- **So does its test-side consequence.** Any PIC timing test that counts ticks
+  must budget for the actuation stealing them, or it will mis-measure the
+  release gate — a real defect this tree has already paid for once, in the relay
+  soak's release gate. An ISR-integrated PIC would use AVR-shaped budgets
+  (modulo the 1.024 ms tick, §4.4.1).
 - **The watchdog liveness proof gets stronger.** Model B pets unconditionally at
   the bottom of the loop, so reaching `CLRWDT` proves *one* thread is alive. The
   AVR pattern pets only on the ISR handshake, proving **both** are.
@@ -490,16 +492,16 @@ the worst-case hardware return-stack peak or its reserve.
 #### 4.3.2 What it costs
 
 **1. The shared state is one byte, so the AVR's lock-free protocol ports
-directly.** `docs/phase2_pic_shell.md` §6 warns that a future ISR "must add
-explicit protection (disable interrupts around the access, or share only a
-single byte)" because multi-byte objects are not atomic on an 8-bit core. That
+directly.** `DESIGN_DOCUMENTATION.adoc#pic-model-b` warns that a future ISR
+sharing a multi-byte object with `main()` "would have to add explicit
+protection", because multi-byte objects are not atomic on an 8-bit core. That
 warning is correct in general but over-broad for this design: the ISR touches
 only `ctx_.debounce_counter` — a `uint8_t` — and the `timer_isr_called_` flag.
 `program_state` and `effect_state` are written exclusively by `main()`, so their
 being 2-byte `int` under XC8 is irrelevant to atomicity. **The consequence is
 that the AVR's protocol ports without needing `-fshort-enums`, which is exactly
-the property §6 assumed a PIC could not have.** That section should be corrected
-whether or not this port happens.
+the property the general warning assumed a PIC could not have.** The design
+record should be narrowed accordingly whether or not this port happens.
 
 **2. XC8 silently duplicates functions reachable from both contexts.** The build
 emits:
@@ -570,9 +572,9 @@ would make.
 So a PIC12F675 ISR design, **if accepted after the stack measurement**, would get
 the concurrency but keep a busy-waiting `main()`. That is a real difference from
 the AVR and should be stated plainly rather than implied — but it costs nothing
-that matters here, because `docs/phase2_pic_shell.md` §1 already books the same
-trade for the PIC10F322:
-*"Accepted trade-off: no low-power sleep. Fine for an always-powered pedal."*
+that matters here, because `DESIGN_DOCUMENTATION.adoc#pic-model-b` already
+books the same trade for every PIC target: no low-power sleep, accepted rather
+than mitigated, because the loop is always awake in an always-powered pedal.
 
 The WDT-periodic-wakeup loop ("Model A") that *would* sleep was considered and
 rejected for the PIC10F322 for reasons that apply here unchanged, and it is a
@@ -1650,10 +1652,11 @@ top of this document.
 | MISRA status and any new deviations | `MISRA_COMPLIANCE.md` |
 
 The PIC10F322 linker finding in §4.3 and the later PIC10F322 return-stack
-measurement produced two corrections to its existing design notes. Both have
-now been applied, independent of whether this port happens:
+measurement produced two corrections to the PIC10F322 design notes of the time.
+Both have now been applied, independent of whether this port happens, and both
+now live in `DESIGN_DOCUMENTATION.adoc#pic-model-b`:
 
-| Document | Correction |
+| Correction | Substance |
 |---|---|
-| `docs/phase2_pic_shell.md` §6 | Protection is now required only for a future multi-byte shared object; the documented single-byte option preserves the AVR's lock-free protocol without `-fshort-enums` (§4.3.2 item 1). |
-| `docs/phase2_pic_shell.md` §1 | The original three reasons remain historical rationale; a separate later retention reason now records the relay ISR link failure, inferred flash occupancy and measured return-stack limit. |
+| Concurrency warning narrowed | Protection is now required only for a future multi-byte shared object; the documented single-byte option preserves the AVR's lock-free protocol without `-fshort-enums` (§4.3.2 item 1). |
+| Model B retention reason added | The original three reasons remain historical rationale; a separate later retention reason now records the relay ISR link failure, inferred flash occupancy and measured return-stack limit. |
