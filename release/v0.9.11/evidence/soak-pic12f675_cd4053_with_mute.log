@@ -1,0 +1,5 @@
+SOAK START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic12f675/simcal/bypass-pic12f675-cd4053_with_mute_simcal.hex proc=p12f675 FOSC=4000000  dur=1.00 h  (NB: gpsim WDT ~288ms = the 1:16 nominal; silicon min is 160ms -- liveness only)
+SOAK [1.00/1.00 h] checks=60 fails=0 wdt_resets=0
+
+SOAK PASS: 3600000 ms (1.00 h) simulated. 3613875265 cycles (3613875.265 ms) advanced; wdt_resets=0 liveness_fails=0 checks=60
+SOAK_RESULT format=1 status=pass combination=pic12f675_cd4053_with_mute duration_ms=3600000 liveness_interval_ms=60000 checks=60 failures=0 watchdog_failures=0 liveness_failures=0

@@ -77,6 +77,47 @@ historical records and are not retroactively compacted by this policy.
   corrective action named, and a durable document that merely describes the
   convention has not declared itself.
 
+## [0.9.11] - 2026-08-29
+
+### Fixed
+
+- **`v0.9.10` was tagged and never published: its own release gate refused the
+  environment CI ran it in.** Tag CI rebuilt every image from the tagged source
+  and confirmed all 21 reproduced bit-for-bit, then failed on the first gate
+  re-run. `.github/workflows/release.yml` declared `ATTINY_DFP_VER` at workflow
+  scope, and a workflow-level `env:` is exported into every `run` step -- so the
+  variable was in the environment of `make test-long`, whose
+  `test-release-preflight` gate runs a real release configuration inside its
+  fixture. The Makefile refuses a release goal under any environment-origin name
+  in the project's build-input vocabulary that is not a supported release input;
+  `ATTINY_DFP_VER` matches `ATTINY%`, appears nowhere in the Makefile, and so
+  keeps environment origin. `Publish GitHub Release` never ran.
+
+  The guard was right -- that variable selects which ATtiny device pack
+  `scripts/fetch_attiny_dfp.sh` vendors, and a release must not run under an
+  unreviewed build input. What was wrong is that it was declared twice. The
+  workflows no longer carry it at all: the version is pinned in
+  `scripts/fetch_attiny_dfp.sh` beside its SHA-256, and the six ATtiny_DFP cache
+  keys bind to `hashFiles('scripts/fetch_attiny_dfp.sh')` alone, so a bump
+  invalidates them exactly as the neighbouring yasimavr venv keys already work.
+  A second copy of the pin that could disagree with the script is gone with it.
+
+- **The release-preflight gate's positive control was not hermetic.** That gate
+  asserts "a clean release configuration passes", and it inherited whatever its
+  caller exported -- while its callers export build inputs as a matter of
+  course, because GNU Make puts every command-line variable in its recipes'
+  environment and release CI runs `make test-long STRICT_TOOLS=1 ...
+  PIC12F675_FLASH_IMAGES=build`. The gate cleared a hand-maintained list of
+  those names, which had already drifted once when `PIC12F675_FLASH_IMAGES` was
+  added to the release workflow, and drifted again on a name Make never reads.
+  `test/test_release_preflight.sh` now asks the Makefile for its own
+  `RELEASE_ENVIRONMENT_INPUT_PATTERNS` vocabulary and clears every inherited
+  match once, before the first case runs, so the list cannot drift a third time
+  and the gate's result no longer depends on the machine it runs on. Cases that
+  deliberately inherit an override still set it at call time and are unaffected;
+  an inherited `ATTINY_DFP_VER` is now pinned as a refusal case in its own
+  right. `test-release-preflight`: 208 -> 209 checks.
+
 ## [0.9.10] - 2026-08-26
 
 ### Added
@@ -3923,7 +3964,8 @@ historical records and are not retroactively compacted by this policy.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.10...HEAD
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.11...HEAD
+[0.9.11]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.10...v0.9.11
 [0.9.10]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.9...v0.9.10
 [0.9.9]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.8...v0.9.9
 [0.9.8]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.7...v0.9.8

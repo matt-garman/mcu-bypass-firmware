@@ -25,7 +25,7 @@ keeps the combined aggregate log and the complete twelve-artifact matrix JSON;
 shipped HEX files and their `SHA256SUMS` entries.
 
 <!-- current-release:start -->
-> **Current release contract:** `v0.9.10`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
+> **Current release contract:** `v0.9.11`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
 > The images cover three output stages; PIC10F320 is the self-contained target.
 <!-- current-release:end -->
 
@@ -142,6 +142,18 @@ validation suite — backs these binaries, through two mechanisms:
    `TEST_LONG_RESULT` PASS record and selected terminal output. Tag CI reruns the
    gate independently; its hosted job log is subject to platform retention and
    is not a release asset or a dependency of the qualification claim.
+
+   `v0.9.10` is tagged but was never published, and no GitHub release exists for
+   it. Its tag CI reproduced every image bit-for-bit and then failed while
+   re-running the gates on the clean runner: the release job's environment
+   carried an ATtiny device-pack version variable, and the Makefile refuses a
+   release configuration under any unreviewed build input in the environment.
+   Publication never ran. The signed tag and `release/v0.9.10/` are retained as
+   the record of that cut rather than rewritten, so its `CHANGELOG.md` section
+   and comparison link stay resolvable. Its retained `test-long` summary is the
+   selected terminal output of that aggregate run and carries no machine-readable
+   result record; judge `v0.9.10` by the evidence contract recorded in its own
+   tag.
 
    The signed version tag points to a dedicated release-artifact commit. Tag CI
    fetches the exact remote annotated-tag object and verifies its OpenPGP

@@ -1,0 +1,9 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
+=== PIC12F675 build + resource budgets (flash 1024 words, data 48/64 bytes) ===
+OK:   cd4053_simple -> build_pic12f675/bypass-pic12f675-cd4053_simple.hex : 548 words (53.5%) of 1024
+PIC12F675_DATA_BUDGET PASS variant=cd4053_simple used=40 limit=48 capacity=64
+OK:   cd4053_with_mute -> build_pic12f675/bypass-pic12f675-cd4053_with_mute.hex : 574 words (56.1%) of 1024
+PIC12F675_DATA_BUDGET PASS variant=cd4053_with_mute used=40 limit=48 capacity=64
+OK:   tq2_l2_5v_relay -> build_pic12f675/bypass-pic12f675-tq2_l2_5v_relay.hex : 585 words (57.1%) of 1024
+PIC12F675_DATA_BUDGET PASS variant=tq2_l2_5v_relay used=40 limit=48 capacity=64
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware'

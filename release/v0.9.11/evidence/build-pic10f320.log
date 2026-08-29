@@ -1,0 +1,15 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
+=== PIC10F320 build + flash-budget (256 words, variant cd4053_simple) ===
+PASS: build_pic10f320/bypass-pic10f320-cd4053_simple.hex: max return-stack depth 3/8 (236 reachable states, 256-word program memory)
+  witness: reset@0x000 -> GOTO@0x000 -> 0x001 -> GOTO@0x005 -> 0x006 -> CALL@0x006 -> 0x05F (return 0x007, depth 1) -> CALL@0x070 -> 0x0CA (return 0x071, depth 2) -> CALL@0x0CA -> 0x0D0 (return 0x0CB, depth 3)
+OK:   build_pic10f320/bypass-pic10f320-cd4053_simple.hex : 220 words (85.9%) of 256; return stack validated
+=== PIC10F320 build + flash-budget (256 words, variant cd4053_with_mute) ===
+PASS: build_pic10f320/bypass-pic10f320-cd4053_with_mute.hex: max return-stack depth 3/8 (288 reachable states, 256-word program memory)
+  witness: reset@0x000 -> GOTO@0x000 -> 0x001 -> GOTO@0x005 -> 0x006 -> CALL@0x006 -> 0x05F (return 0x007, depth 1) -> CALL@0x070 -> 0x0DB (return 0x071, depth 2) -> CALL@0x0DB -> 0x0E0 (return 0x0DC, depth 3)
+OK:   build_pic10f320/bypass-pic10f320-cd4053_with_mute.hex : 241 words (94.1%) of 256; return stack validated
+=== PIC10F320 build + flash-budget (256 words, variant tq2_l2_5v_relay) ===
+PASS: build_pic10f320/bypass-pic10f320-tq2_l2_5v_relay.hex: max return-stack depth 3/8 (302 reachable states, 256-word program memory)
+  witness: reset@0x000 -> GOTO@0x000 -> 0x001 -> GOTO@0x005 -> 0x006 -> CALL@0x006 -> 0x05F (return 0x007, depth 1) -> CALL@0x070 -> 0x0D1 (return 0x071, depth 2) -> CALL@0x0D1 -> 0x0E9 (return 0x0D2, depth 3)
+OK:   build_pic10f320/bypass-pic10f320-tq2_l2_5v_relay.hex : 242 words (94.5%) of 256; return stack validated
+=== all PIC10F320 variants built within budget ===
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware'

@@ -51,14 +51,18 @@ on:
 permissions:
   contents: write          # required to create the GitHub Release
 
+# Nothing here may name a project build input. A workflow-level env is exported
+# into every `run` step, including the gate re-runs below, and the Makefile
+# refuses a release configuration under any environment-origin name in the
+# project's build-input vocabulary that is not a supported release input. An
+# `ATTINY_DFP_VER` pin here failed v0.9.10's `make test-long` for exactly that
+# reason; the ATtiny_DFP version lives in scripts/fetch_attiny_dfp.sh alone, and
+# the cache keys below bind to that file's hash.
 env:
   DEBIAN_FRONTEND: noninteractive
   # Pin to the versions in TOOLCHAIN.adoc; bump compiler + DFP together.
   XC8_VERSION: "3.10"
   DFP_VERSION: "1.9.189"
-  # ATtiny202 device pack; keep in step with scripts/fetch_attiny_dfp.sh's pin
-  # and with the ci.yml jobs that share this cache key.
-  ATTINY_DFP_VER: "3.1.260"
   XC8_DIR: /opt/microchip/xc8/v3.10
   XC8_DFP_ROOT: /opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189
   # Independent public-attestation pins. Keep these separate from Make's
@@ -181,7 +185,7 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: third_party/attiny_dfp
-          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
+          key: attiny-dfp-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
 
       - name: Restore cached patched yasimavr venv
         id: cache-yasimavr
@@ -200,7 +204,7 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: third_party/attiny_dfp
-          key: attiny-dfp-${{ env.ATTINY_DFP_VER }}-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
+          key: attiny-dfp-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
 
       - name: Save yasimavr venv cache
         if: steps.cache-yasimavr.outputs.cache-hit != 'true'

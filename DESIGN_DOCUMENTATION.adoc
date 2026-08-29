@@ -1155,8 +1155,9 @@ Specific tests verify specific requirements, as shown in the following table:
 == Resource Utilization
 
 The tables below carry the latest fully provisioned candidate measurements. They
-are working values, not retained final-`v0.9.10` evidence while the release is
-still unreleased. `make test-resource-tables` checks the tables, arithmetic,
+are working values, not the retained evidence a release cut binds to its own
+source commit; the version under declaration names that cut.
+`make test-resource-tables` checks the tables, arithmetic,
 cross-document copies and any images already built; the production release runs
 the strict form against all 21 images and the complete RAM/stack logs, retains
 its source-commit-bound result, and refuses to stage otherwise. Resource use
