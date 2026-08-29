@@ -1,0 +1,2 @@
+resource tables: 242 checks, 0 failures (21 of 21 documented images measured; complete candidate required)
+RESOURCE_TABLES_RESULT format=1 status=pass source_commit=e93401eb5556217bd544b8038aaf7144dceaf23b images=21 avr_static=12 classic_stack=9 pic_data=6 pic_stack=9

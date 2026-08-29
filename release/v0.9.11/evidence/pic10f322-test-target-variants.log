@@ -1,0 +1,314 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
+===================== PIC TARGET VARIANT cd4053_simple =====================
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053_simple -> build_pic10f322/bypass-pic10f322-cd4053_simple.hex : 476 words (93.0%) of 512
+OK:   cd4053_with_mute -> build_pic10f322/bypass-pic10f322-cd4053_with_mute.hex : 502 words (98.0%) of 512
+OK:   tq2_l2_5v_relay -> build_pic10f322/bypass-pic10f322-tq2_l2_5v_relay.hex : 493 words (96.3%) of 512
+--- PIC fault-inject: variant=cd4053_simple proc=p10f322 (ctx_ layout verified: 3 bytes) ---
+FAULT-INJECT START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic10f322/bypass-pic10f322-cd4053_simple.hex proc=p10f322 FOSC=2000000 window=2000 ms
+  (NB: gpsim WDT@WDTPS=0x08 ~1.057s -- recovery reset, not 256ms silicon)
+  PASS: startup WPUA is RA3-only (0x08)
+  PASS: startup TRISA is RA3 input, RA0..RA2 outputs (0x08)
+  loop CLRWDT identified at 0x02f (8 hits in 8 ms)
+  control (no injection)
+    PASS: quiescent device did not reset
+  inject TRISA.RA0          @0x006: 0x08 -> 0x09  (RA0 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISA.RA1          @0x006: 0x08 -> 0x0a  (RA1 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISA.RA2          @0x006: 0x08 -> 0x0c  (RA2 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject LATA.RA0           @0x007: 0x00 -> 0x01  (RA0 LED latch changed from settled low to high)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject LATA.RA1           @0x007: 0x00 -> 0x02  (RA1 control/reset-coil latch changed from low to high)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject LATA.RA2           @0x007: 0x00 -> 0x04  (RA2 control/set-coil/spare latch changed from low to high)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OSCCON.IRCF        @0x010: 0x49 -> 0x59  (IRCF 0b100->0b101: 2MHz->4MHz clock skew)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WDTCON.WDTPS       @0x030: 0x10 -> 0x00  (WDTPS 0b01000->0b00000: 1:8192->1:32, WDT miscalibrated (else silent))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject PR2                @0x012: 0x7c -> 0x63  (tick period 124->99: 1ms tick skewed)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject T2CON              @0x013: 0x05 -> 0x04  (T2CKPS 1:4->1:1, TMR2ON preserved: timer cfg skew)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSELA.RA0         @0x008: 0x00 -> 0x01  (ANSA0=1: RA0 (LED) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSELA.RA1         @0x008: 0x00 -> 0x02  (ANSA1=1: RA1 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSELA.RA2         @0x008: 0x00 -> 0x04  (ANSA2=1: RA2 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPUA.RA3           @0x009: 0x08 -> 0x00  (clear RA3 pull-up latch: footswitch weak pull-up disabled)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPUA.RA0           @0x009: 0x08 -> 0x09  (set RA0 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPUA.RA1           @0x009: 0x08 -> 0x0a  (set RA1 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPUA.RA2           @0x009: 0x08 -> 0x0c  (set RA2 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OPTION.nWPUEN      @0x00e: 0x7f -> 0xff  (set nWPUEN: global weak pull-ups disabled)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.program_state  @0x060: 0x00 -> 0x02  (0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.effect_state   @0x061: 0x00 -> 0x02  (->2: > ENGAGED (gate-only))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.debounce_counter @0x062: 0x00 -> 0xff  (->255: > RELEASE_THRESH (gate-only))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.debounce.inrange @0x062: 0x00 -> 0x10  (->16: in range, only the F2 XOR-fold shadow catches)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+
+FAULT-INJECT PASS: 26 checks, 0 failures
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053_simple -> build_pic10f322/bypass-pic10f322-cd4053_simple.hex : 476 words (93.0%) of 512
+OK:   cd4053_with_mute -> build_pic10f322/bypass-pic10f322-cd4053_with_mute.hex : 502 words (98.0%) of 512
+OK:   tq2_l2_5v_relay -> build_pic10f322/bypass-pic10f322-tq2_l2_5v_relay.hex : 493 words (96.3%) of 512
+--- PIC lock-step: variant=cd4053_simple proc=p10f322 (ctx_ layout verified: 3 bytes) ---
+LOCK-STEP START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic10f322/bypass-pic10f322-cd4053_simple.hex proc=p10f322 FOSC=2000000 ctx_=0x060 iters=3000
+  loop CLRWDT identified at 0x02f (8 hits in 8 ms; 2 CLRWDT sites total)
+  coverage: 66/66 reachable model states visited by the stimulus
+  lock-step: 3000 iterations compared, 27 toggles, 0 mismatches
+LOCK-STEP PASS: 3005 checks, 0 failures
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053_simple -> build_pic10f322/bypass-pic10f322-cd4053_simple.hex : 476 words (93.0%) of 512
+OK:   cd4053_with_mute -> build_pic10f322/bypass-pic10f322-cd4053_with_mute.hex : 502 words (98.0%) of 512
+OK:   tq2_l2_5v_relay -> build_pic10f322/bypass-pic10f322-tq2_l2_5v_relay.hex : 493 words (96.3%) of 512
+--- PIC target I/O: variant=cd4053_simple proc=p10f322 ---
+TARGET-IO START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic10f322/bypass-pic10f322-cd4053_simple.hex proc=p10f322 FOSC=2000000
+TARGET-IO PASS: 25 checks, 0 failures
+=== PIC target fault/lock-step/I-O PASS (variant cd4053_simple) ===
+===================== PIC TARGET VARIANT cd4053_with_mute =====================
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053_simple -> build_pic10f322/bypass-pic10f322-cd4053_simple.hex : 476 words (93.0%) of 512
+OK:   cd4053_with_mute -> build_pic10f322/bypass-pic10f322-cd4053_with_mute.hex : 502 words (98.0%) of 512
+OK:   tq2_l2_5v_relay -> build_pic10f322/bypass-pic10f322-tq2_l2_5v_relay.hex : 493 words (96.3%) of 512
+--- PIC fault-inject: variant=cd4053_with_mute proc=p10f322 (ctx_ layout verified: 3 bytes) ---
+FAULT-INJECT START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic10f322/bypass-pic10f322-cd4053_with_mute.hex proc=p10f322 FOSC=2000000 window=2000 ms
+  (NB: gpsim WDT@WDTPS=0x08 ~1.057s -- recovery reset, not 256ms silicon)
+  PASS: startup WPUA is RA3-only (0x08)
+  PASS: startup TRISA is RA3 input, RA0..RA2 outputs (0x08)
+  loop CLRWDT identified at 0x015 (8 hits in 8 ms)
+  control (no injection)
+    PASS: quiescent device did not reset
+  inject TRISA.RA0          @0x006: 0x08 -> 0x09  (RA0 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISA.RA1          @0x006: 0x08 -> 0x0a  (RA1 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISA.RA2          @0x006: 0x08 -> 0x0c  (RA2 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject LATA.RA0           @0x007: 0x00 -> 0x01  (RA0 LED latch changed from settled low to high)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject LATA.RA1           @0x007: 0x00 -> 0x02  (RA1 control/reset-coil latch changed from low to high)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject LATA.RA2           @0x007: 0x00 -> 0x04  (RA2 control/set-coil/spare latch changed from low to high)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OSCCON.IRCF        @0x010: 0x49 -> 0x59  (IRCF 0b100->0b101: 2MHz->4MHz clock skew)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WDTCON.WDTPS       @0x030: 0x10 -> 0x00  (WDTPS 0b01000->0b00000: 1:8192->1:32, WDT miscalibrated (else silent))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject PR2                @0x012: 0x7c -> 0x63  (tick period 124->99: 1ms tick skewed)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject T2CON              @0x013: 0x05 -> 0x04  (T2CKPS 1:4->1:1, TMR2ON preserved: timer cfg skew)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSELA.RA0         @0x008: 0x00 -> 0x01  (ANSA0=1: RA0 (LED) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSELA.RA1         @0x008: 0x00 -> 0x02  (ANSA1=1: RA1 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSELA.RA2         @0x008: 0x00 -> 0x04  (ANSA2=1: RA2 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPUA.RA3           @0x009: 0x08 -> 0x00  (clear RA3 pull-up latch: footswitch weak pull-up disabled)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPUA.RA0           @0x009: 0x08 -> 0x09  (set RA0 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPUA.RA1           @0x009: 0x08 -> 0x0a  (set RA1 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPUA.RA2           @0x009: 0x08 -> 0x0c  (set RA2 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OPTION.nWPUEN      @0x00e: 0x7f -> 0xff  (set nWPUEN: global weak pull-ups disabled)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.program_state  @0x060: 0x00 -> 0x02  (0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.effect_state   @0x061: 0x00 -> 0x02  (->2: > ENGAGED (gate-only))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.debounce_counter @0x062: 0x00 -> 0xff  (->255: > RELEASE_THRESH (gate-only))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.debounce.inrange @0x062: 0x00 -> 0x10  (->16: in range, only the F2 XOR-fold shadow catches)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+
+FAULT-INJECT PASS: 26 checks, 0 failures
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053_simple -> build_pic10f322/bypass-pic10f322-cd4053_simple.hex : 476 words (93.0%) of 512
+OK:   cd4053_with_mute -> build_pic10f322/bypass-pic10f322-cd4053_with_mute.hex : 502 words (98.0%) of 512
+OK:   tq2_l2_5v_relay -> build_pic10f322/bypass-pic10f322-tq2_l2_5v_relay.hex : 493 words (96.3%) of 512
+--- PIC lock-step: variant=cd4053_with_mute proc=p10f322 (ctx_ layout verified: 3 bytes) ---
+LOCK-STEP START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic10f322/bypass-pic10f322-cd4053_with_mute.hex proc=p10f322 FOSC=2000000 ctx_=0x060 iters=3000
+  loop CLRWDT identified at 0x015 (8 hits in 8 ms; 2 CLRWDT sites total)
+  coverage: 66/66 reachable model states visited by the stimulus
+  lock-step: 3000 iterations compared, 27 toggles, 0 mismatches
+LOCK-STEP PASS: 3005 checks, 0 failures
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053_simple -> build_pic10f322/bypass-pic10f322-cd4053_simple.hex : 476 words (93.0%) of 512
+OK:   cd4053_with_mute -> build_pic10f322/bypass-pic10f322-cd4053_with_mute.hex : 502 words (98.0%) of 512
+OK:   tq2_l2_5v_relay -> build_pic10f322/bypass-pic10f322-tq2_l2_5v_relay.hex : 493 words (96.3%) of 512
+--- PIC target I/O: variant=cd4053_with_mute proc=p10f322 ---
+TARGET-IO START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic10f322/bypass-pic10f322-cd4053_with_mute.hex proc=p10f322 FOSC=2000000
+  engage pulse: 2522 cycles (5.044 ms; design 5 ms)
+  bypass pulse: 2528 cycles (5.056 ms; design 5 ms)
+TARGET-IO PASS: 26 checks, 0 failures
+=== PIC target fault/lock-step/I-O PASS (variant cd4053_with_mute) ===
+===================== PIC TARGET VARIANT tq2_l2_5v_relay =====================
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053_simple -> build_pic10f322/bypass-pic10f322-cd4053_simple.hex : 476 words (93.0%) of 512
+OK:   cd4053_with_mute -> build_pic10f322/bypass-pic10f322-cd4053_with_mute.hex : 502 words (98.0%) of 512
+OK:   tq2_l2_5v_relay -> build_pic10f322/bypass-pic10f322-tq2_l2_5v_relay.hex : 493 words (96.3%) of 512
+--- PIC fault-inject: variant=tq2_l2_5v_relay proc=p10f322 (ctx_ layout verified: 3 bytes) ---
+FAULT-INJECT START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic10f322/bypass-pic10f322-tq2_l2_5v_relay.hex proc=p10f322 FOSC=2000000 window=2000 ms
+  (NB: gpsim WDT@WDTPS=0x08 ~1.057s -- recovery reset, not 256ms silicon)
+  PASS: startup WPUA is RA3-only (0x08)
+  PASS: startup TRISA is RA3 input, RA0..RA2 outputs (0x08)
+  loop CLRWDT identified at 0x020 (8 hits in 8 ms)
+  control (no injection)
+    PASS: quiescent device did not reset
+  inject TRISA.RA0          @0x006: 0x08 -> 0x09  (RA0 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISA.RA1          @0x006: 0x08 -> 0x0a  (RA1 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISA.RA2          @0x006: 0x08 -> 0x0c  (RA2 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject LATA.RA0           @0x007: 0x00 -> 0x01  (RA0 LED latch (intent) corruption still resets)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject relay coils    @0x007: 0x00 -> 0x02  (RA1 RESET-coil latch forced high, from BYPASS)
+    PASS: coils inactive in 324 cycles (0.648 ms) with no partially cleared coil latch, 1 reset, recovery drove a 10.816 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject relay coils    @0x007: 0x00 -> 0x04  (RA2 SET-coil latch forced high, from BYPASS)
+    PASS: coils inactive in 324 cycles (0.648 ms) with no partially cleared coil latch, 1 reset, recovery drove a 10.816 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject relay coils    @0x007: 0x00 -> 0x06  (both relay-coil latches forced high, from BYPASS)
+    PASS: coils inactive in 324 cycles (0.648 ms) with no partially cleared coil latch, 1 reset, recovery drove a 10.816 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject relay coils    @0x007: 0x01 -> 0x03  (RA1 RESET-coil latch forced high, from ENGAGED)
+    PASS: coils inactive in 324 cycles (0.648 ms) with no partially cleared coil latch, 1 reset, recovery drove a 10.816 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject relay coils    @0x007: 0x01 -> 0x05  (RA2 SET-coil latch forced high, from ENGAGED)
+    PASS: coils inactive in 324 cycles (0.648 ms) with no partially cleared coil latch, 1 reset, recovery drove a 10.816 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OSCCON.IRCF        @0x010: 0x49 -> 0x59  (IRCF 0b100->0b101: 2MHz->4MHz clock skew)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WDTCON.WDTPS       @0x030: 0x10 -> 0x00  (WDTPS 0b01000->0b00000: 1:8192->1:32, WDT miscalibrated (else silent))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject PR2                @0x012: 0x7c -> 0x63  (tick period 124->99: 1ms tick skewed)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject T2CON              @0x013: 0x05 -> 0x04  (T2CKPS 1:4->1:1, TMR2ON preserved: timer cfg skew)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSELA.RA0         @0x008: 0x00 -> 0x01  (ANSA0=1: RA0 (LED) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSELA.RA1         @0x008: 0x00 -> 0x02  (ANSA1=1: RA1 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSELA.RA2         @0x008: 0x00 -> 0x04  (ANSA2=1: RA2 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPUA.RA3           @0x009: 0x08 -> 0x00  (clear RA3 pull-up latch: footswitch weak pull-up disabled)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPUA.RA0           @0x009: 0x08 -> 0x09  (set RA0 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPUA.RA1           @0x009: 0x08 -> 0x0a  (set RA1 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPUA.RA2           @0x009: 0x08 -> 0x0c  (set RA2 output-pin pull-up latch: exact RA3-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OPTION.nWPUEN      @0x00e: 0x7f -> 0xff  (set nWPUEN: global weak pull-ups disabled)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.program_state  @0x060: 0x00 -> 0x02  (0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.effect_state   @0x061: 0x00 -> 0x02  (->2: > ENGAGED (gate-only))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.debounce_counter @0x062: 0x00 -> 0xff  (->255: > RELEASE_THRESH (gate-only))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.debounce.inrange @0x062: 0x00 -> 0x10  (->16: in range, only the F2 XOR-fold shadow catches)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+
+FAULT-INJECT PASS: 29 checks, 0 failures
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053_simple -> build_pic10f322/bypass-pic10f322-cd4053_simple.hex : 476 words (93.0%) of 512
+OK:   cd4053_with_mute -> build_pic10f322/bypass-pic10f322-cd4053_with_mute.hex : 502 words (98.0%) of 512
+OK:   tq2_l2_5v_relay -> build_pic10f322/bypass-pic10f322-tq2_l2_5v_relay.hex : 493 words (96.3%) of 512
+--- PIC lock-step: variant=tq2_l2_5v_relay proc=p10f322 (ctx_ layout verified: 3 bytes) ---
+LOCK-STEP START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic10f322/bypass-pic10f322-tq2_l2_5v_relay.hex proc=p10f322 FOSC=2000000 ctx_=0x060 iters=3000
+  loop CLRWDT identified at 0x020 (8 hits in 8 ms; 2 CLRWDT sites total)
+  coverage: 66/66 reachable model states visited by the stimulus
+  lock-step: 3000 iterations compared, 27 toggles, 0 mismatches
+LOCK-STEP PASS: 3005 checks, 0 failures
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053_simple -> build_pic10f322/bypass-pic10f322-cd4053_simple.hex : 476 words (93.0%) of 512
+OK:   cd4053_with_mute -> build_pic10f322/bypass-pic10f322-cd4053_with_mute.hex : 502 words (98.0%) of 512
+OK:   tq2_l2_5v_relay -> build_pic10f322/bypass-pic10f322-tq2_l2_5v_relay.hex : 493 words (96.3%) of 512
+--- PIC target I/O: variant=tq2_l2_5v_relay proc=p10f322 ---
+TARGET-IO START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware/build_pic10f322/bypass-pic10f322-tq2_l2_5v_relay.hex proc=p10f322 FOSC=2000000
+  startup pulse: 6010 cycles (12.020 ms; design 12 ms)
+  engage pulse: 6010 cycles (12.020 ms; design 12 ms)
+  bypass pulse: 6010 cycles (12.020 ms; design 12 ms)
+TARGET-IO PASS: 36 checks, 0 failures
+=== PIC target fault/lock-step/I-O PASS (variant tq2_l2_5v_relay) ===
+=== PIC target fault/lock-step/I-O validated for all variants ===
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
