@@ -75,6 +75,13 @@ expect_output_path_fail "wrong production version" "$ROOT/release/v99.0.1" produ
 	"production output must be exactly"
 expect_output_path_fail "external production tree" "$work/production/v99.0.0" production \
 	"production output must be exactly"
+# Express is publishable, so it obeys the production path rule exactly: one
+# staging directory, the one the artifact commit and the tag will name.
+expect_output_path_pass "express release tree" "$ROOT/release/v99.0.0" express
+expect_output_path_fail "express release root" "$ROOT/release" express \
+	"express output must be exactly"
+expect_output_path_fail "external express tree" "$work/express/v99.0.0" express \
+	"express output must be exactly"
 expect_output_path_pass "external dry-run tree" "$work/dry-run/v99.0.0" dry-run
 expect_output_path_fail "dry-run release root" "$ROOT/release" dry-run \
 	"dry-run output must not be staged under the repository release tree"

@@ -679,10 +679,18 @@ def check_final_evidence(directory):
           and all(data_rows.count(row) == 2 for row in expected_data),
           "pic12f675-qualification.log must contain two exact 40/48/64 Data-space records per variant (qualified and reproducibility builds)")
 
+    # The two relay figures differ because the deepest chain differs by part.
+    # The PIC10F322 reaches 4 through initialization (_main -> _init ->
+    # _hw_set_bypass_state -> _set_relay_coils_low -> _hw_pin_mask_set_low).
+    # The PIC12F675's deepest chain is one level longer, through the escalation
+    # its shadow-port architecture requires (_main -> _hw_force_wdt_reset ->
+    # _hw_emergency_outputs_quiesce -> _hw_outputs_reassert_safe ->
+    # _set_relay_coils_low -> _hw_pin_mask_set_low), which
+    # test/check_stack_depth_pic.sh bounds at 5 + 2 reserve of 8 levels.
     expected_stack = {
         "PIC10F322": dict(zip(VARIANTS, (3, 3, 4))),
         "PIC10F320": dict(zip(VARIANTS, (3, 3, 3))),
-        "PIC12F675": dict(zip(VARIANTS, (3, 3, 4))),
+        "PIC12F675": dict(zip(VARIANTS, (3, 3, 5))),
     }
     for part, filename in (("PIC10F322", "pic10f322-test.log"),
                            ("PIC10F320", "pic10f320-test.log"),

@@ -52,6 +52,20 @@ expect_release_reject() {
 	checks=$((checks + 1))
 }
 
+# --express shortens the soak; it does not remove the floor. A publishable
+# express release is still a soaked release, so a below-floor express run must
+# be refused by its OWN diagnostic -- refusing it with the production text
+# would send the operator to a 24-hour rerun they do not need.
+expect_release_express_reject() {
+	local value=$1 output
+	if output=$("$RELEASE" --express --soak-duration-ms "$value" v99.0.0 2>&1); then
+		fail "release accepted invalid express duration: $value"
+	fi
+	[[ "$output" == *"express releases require"* ]] \
+		|| fail "release rejected express '$value' for the wrong reason: $output"
+	checks=$((checks + 1))
+}
+
 expect_release_version_reject() {
 	local value=$1 expected=${2:-is not vX.Y.Z} output
 	if output=$("$RELEASE" "$value" 2>&1); then
@@ -541,7 +555,8 @@ expect_release_range_pass dry 4294967294
 expect_release_reject 0 "positive base-10 integer"
 expect_release_reject -1 "positive base-10 integer"
 expect_release_reject malformed "positive base-10 integer"
-expect_release_reject 60000 "real releases require"
+expect_release_reject 60000 "production releases require"
+expect_release_express_reject 60000
 expect_release_reject 4294967295 "must not exceed"
 expect_release_reject 9999999999999999999999999999999999999999 "must not exceed"
 expect_release_version_reject v99.0.0.rc1

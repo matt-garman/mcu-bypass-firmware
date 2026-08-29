@@ -1,0 +1,589 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/mcu-bypass-firmware-v0.9.10-release'
+=== PIC12F675 build + resource budgets (flash 1024 words, data 48/64 bytes) ===
+OK:   cd4053_simple -> build_pic12f675/bypass-pic12f675-cd4053_simple.hex : 548 words (53.5%) of 1024
+PIC12F675_DATA_BUDGET PASS variant=cd4053_simple used=40 limit=48 capacity=64
+OK:   cd4053_with_mute -> build_pic12f675/bypass-pic12f675-cd4053_with_mute.hex : 574 words (56.1%) of 1024
+PIC12F675_DATA_BUDGET PASS variant=cd4053_with_mute used=40 limit=48 capacity=64
+OK:   tq2_l2_5v_relay -> build_pic12f675/bypass-pic12f675-tq2_l2_5v_relay.hex : 585 words (57.1%) of 1024
+PIC12F675_DATA_BUDGET PASS variant=tq2_l2_5v_relay used=40 limit=48 capacity=64
+calibration word: RETLW 0x80 (opcode 0x3480) at word 0x3FF -> build_pic12f675/simcal/bypass-pic12f675-cd4053_simple_simcal.hex
+calibration word: RETLW 0x80 (opcode 0x3480) at word 0x3FF -> build_pic12f675/simcal/bypass-pic12f675-cd4053_with_mute_simcal.hex
+calibration word: RETLW 0x80 (opcode 0x3480) at word 0x3FF -> build_pic12f675/simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex
+=== PIC12F675 simulator images derived in build_pic12f675/simcal/ ===
+=== PIC12F675 build + resource budgets (flash 1024 words, data 48/64 bytes) ===
+OK:   cd4053_simple -> build_pic12f675.qualify.2H6hEM/bypass-pic12f675-cd4053_simple.hex : 548 words (53.5%) of 1024
+PIC12F675_DATA_BUDGET PASS variant=cd4053_simple used=40 limit=48 capacity=64
+OK:   cd4053_with_mute -> build_pic12f675.qualify.2H6hEM/bypass-pic12f675-cd4053_with_mute.hex : 574 words (56.1%) of 1024
+PIC12F675_DATA_BUDGET PASS variant=cd4053_with_mute used=40 limit=48 capacity=64
+OK:   tq2_l2_5v_relay -> build_pic12f675.qualify.2H6hEM/bypass-pic12f675-tq2_l2_5v_relay.hex : 585 words (57.1%) of 1024
+PIC12F675_DATA_BUDGET PASS variant=tq2_l2_5v_relay used=40 limit=48 capacity=64
+PIC calibration-word injection selftest: 56 checks, 0 failures
+CALIBRATION PASS [cd4053_simple]: :0207FE00803445 injected, shipping image unchanged
+CALIBRATION PASS [cd4053_with_mute]: :0207FE00803445 injected, shipping image unchanged
+CALIBRATION PASS [tq2_l2_5v_relay]: :0207FE00803445 injected, shipping image unchanged
+=== PIC12F675 calibration contract holds for all 3 variants ===
+=== PIC12F675 retained matrix qualified: PIC12F675_MATRIX_SHA256 format=2 shipping_cd4053_simple=8405c24723448d47504545411aff139626399476e332cc5f46e5b7bba3a202b1 assembly_cd4053_simple=0fd09d5fc13ef6cb950d1c201d54cb7bbf05430f27238322e8e5d5caf1a1b9dd symbols_cd4053_simple=72aa4975cced169e3b6c53e21273fd0842bd2df8aaebe5913d8d8935f1c68c9f simcal_cd4053_simple=ca4347cba6b403c0e50bd1572f83622386edba852f7fc7a5539f4bf2f564a252 shipping_cd4053_with_mute=655fd28fe8075389ab571218393c0cececf215d4a4a8aac5fa85452863e16c45 assembly_cd4053_with_mute=e88656bdc8b5ac9fcdd85a1bb0855bd56bcebea143410898b211033d9fd654e3 symbols_cd4053_with_mute=5ca8ab64b58619a27eaf94b794f0fddf45a79573a2ae4fe2e591a879396fc283 simcal_cd4053_with_mute=d43977a4096b907103e07e9555cd4fa97023adc1c0cef93507dc335b34c13c98 shipping_tq2_l2_5v_relay=30757b9429a91bfb90160ad2997c2cb9a50c69b7d22444f018a8d601ac3eb2fe assembly_tq2_l2_5v_relay=77e7f6198035ea523c05aaa5b762a06782d9771dfde3b750f919b2963ad08446 symbols_tq2_l2_5v_relay=b290c98999efb2047537153e536d13e4a42acc29fe653a32d7d86b2a8d5f8419 simcal_tq2_l2_5v_relay=d0c4846f8932b403373a5fe1680cb8741bea9d4b6bdd6a0ba2232fe14d451a51 ===
+cc -std=c11 -Wall -Wextra -Werror -Wconversion -fsanitize=undefined,address -fno-sanitize-recover=all -Itest -DPIC_DEVICE_NAME='"PIC12F675"' test/pic/test_config_pic12f675.c -o test/pic/test_config_pic12f675
+PIC12F675 CONFIG-word verification (word addr 0x2007 / byte 0x400E):
+  build_pic12f675/bypass-pic12f675-cd4053_simple.hex: CONFIG=0x31CC (implemented bits 0x31CC)
+  build_pic12f675/bypass-pic12f675-cd4053_with_mute.hex: CONFIG=0x31CC (implemented bits 0x31CC)
+  build_pic12f675/bypass-pic12f675-tq2_l2_5v_relay.hex: CONFIG=0x31CC (implemented bits 0x31CC)
+CONFIG checks: 42 checks, 0 failures
+cppcheck (PIC, pic8): cppcheck src/bypass_mcu_pic12f675.c
+Checking src/bypass_mcu_pic12f675.c ...
+Checking src/bypass_mcu_pic12f675.c: __XC8=1;_12F675=1;_XTAL_FREQ=4000000UL;BYPASS_MCU_PIC12F675=1;BYPASS_CTX_CHECK=1...
+MISRA-C:2012 analysis -- PIC shell (cppcheck + misra addon, pic8)
+Checking src/bypass_mcu_pic12f675.c ...
+Checking src/bypass_mcu_pic12f675.c: __XC8=1;_12F675=1;_XTAL_FREQ=4000000UL;BYPASS_MCU_PIC12F675=1;BYPASS_CTX_CHECK=1...
+MISRA-C:2012 (PIC shell): clean (documented deviations waived per MISRA_COMPLIANCE.md)
+=== PIC static analysis (cppcheck + MISRA) complete ===
+PIC shipping-source coverage harness: 86 checks, 0 failures
+PIC shipping-source coverage harness: 86 checks, 0 failures
+PIC shipping-source coverage harness: 105 checks, 0 failures
+  anchors located in bypass_mcu_pic12f675.c.gcov: range gate L636/L638/L639/L640, live reset L647, unreachable reset L677
+bypass_mcu_pic12f675.c.gcov: 129/130 executable lines, 1 allowed, 0 disallowed
+bypass_pure.c.gcov: 40/40 executable lines, 0 allowed, 0 disallowed
+bypass_output_cd4053_simple.c.gcov: 21/21 executable lines, 0 allowed, 0 disallowed
+bypass_output_cd4053_with_mute.c.gcov: 27/27 executable lines, 0 allowed, 0 disallowed
+bypass_output_tq2_l2_5v_relay.c.gcov: 33/33 executable lines, 0 allowed, 0 disallowed
+OK: all PIC shipping-source lines are covered except the documented reset path.
+PIC12F675 coverage-oracle negative probe: PASS (source line 677)
+--- gpsim register-level test: PIC12F675 variant cd4053_simple ---
+gpsim register-level test: build_pic12f675/simcal/bypass-pic12f675-cd4053_simple_simcal.hex (proc p12f675)
+  INIT_BYPASS    gpio=0x20
+  PRESS1_EARLY   gpio=0x0
+  PRESS1_LOW     gpio=0x3
+  ENGAGED        gpio=0x23
+  BYPASS_AGAIN   gpio=0x20
+  ok:   INIT: LED off (bypass)
+  ok:   INIT: full GPIO == 0x0 (bypass control pins)
+  ok:   INIT: footswitch released (GP5=1)
+  ok:   PRESS1_EARLY: footswitch pressed (GP5=0)
+  ok:   PRESS1_EARLY: LED still off (tick cadence intact)
+  ok:   PRESS1: footswitch pressed (GP5=0)
+  ok:   PRESS1: LED on (toggled on the press)
+  ok:   ENGAGED: LED on (latched)
+  ok:   ENGAGED: footswitch released (GP5=1)
+  ok:   ENGAGED: full GPIO == 0x3 (variant control pins)
+  ok:   BYPASS_AGAIN: LED off (toggled back)
+  ok:   BYPASS_AGAIN: full GPIO == 0x0 (bypass control pins)
+  ok:   BYPASS_AGAIN: footswitch released (GP5=1)
+RESULT: PASS (build_pic12f675/simcal/bypass-pic12f675-cd4053_simple_simcal.hex)
+gpsim power-on-pressed test: build_pic12f675/simcal/bypass-pic12f675-cd4053_simple_simcal.hex (proc p12f675)
+  PON_HELD       gpio=0x0
+  PON_RELEASED   gpio=0x20
+  PON_ENGAGED    gpio=0x23
+  ok:   PON_HELD: LED off (held switch did not engage)
+  ok:   PON_HELD: footswitch pressed (GP5=0)
+  ok:   PON_RELEASED: still bypass (release did not toggle)
+  ok:   PON_RELEASED: footswitch released (GP5=1)
+  ok:   PON_ENGAGED: LED on (fresh press toggled, latched)
+  ok:   PON_ENGAGED: footswitch released (GP5=1)
+RESULT: PASS (build_pic12f675/simcal/bypass-pic12f675-cd4053_simple_simcal.hex)
+--- gpsim register-level test: PIC12F675 variant cd4053_with_mute ---
+gpsim register-level test: build_pic12f675/simcal/bypass-pic12f675-cd4053_with_mute_simcal.hex (proc p12f675)
+  INIT_BYPASS    gpio=0x20
+  PRESS1_EARLY   gpio=0x0
+  PRESS1_LOW     gpio=0x5
+  ENGAGED        gpio=0x27
+  BYPASS_AGAIN   gpio=0x20
+  ok:   INIT: LED off (bypass)
+  ok:   INIT: full GPIO == 0x0 (bypass control pins)
+  ok:   INIT: footswitch released (GP5=1)
+  ok:   PRESS1_EARLY: footswitch pressed (GP5=0)
+  ok:   PRESS1_EARLY: LED still off (tick cadence intact)
+  ok:   PRESS1: footswitch pressed (GP5=0)
+  ok:   PRESS1: LED on (toggled on the press)
+  ok:   ENGAGED: LED on (latched)
+  ok:   ENGAGED: footswitch released (GP5=1)
+  ok:   ENGAGED: full GPIO == 0x7 (variant control pins)
+  ok:   BYPASS_AGAIN: LED off (toggled back)
+  ok:   BYPASS_AGAIN: full GPIO == 0x0 (bypass control pins)
+  ok:   BYPASS_AGAIN: footswitch released (GP5=1)
+RESULT: PASS (build_pic12f675/simcal/bypass-pic12f675-cd4053_with_mute_simcal.hex)
+gpsim power-on-pressed test: build_pic12f675/simcal/bypass-pic12f675-cd4053_with_mute_simcal.hex (proc p12f675)
+  PON_HELD       gpio=0x0
+  PON_RELEASED   gpio=0x20
+  PON_ENGAGED    gpio=0x27
+  ok:   PON_HELD: LED off (held switch did not engage)
+  ok:   PON_HELD: footswitch pressed (GP5=0)
+  ok:   PON_RELEASED: still bypass (release did not toggle)
+  ok:   PON_RELEASED: footswitch released (GP5=1)
+  ok:   PON_ENGAGED: LED on (fresh press toggled, latched)
+  ok:   PON_ENGAGED: footswitch released (GP5=1)
+RESULT: PASS (build_pic12f675/simcal/bypass-pic12f675-cd4053_with_mute_simcal.hex)
+--- gpsim register-level test: PIC12F675 variant tq2_l2_5v_relay ---
+gpsim register-level test: build_pic12f675/simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex (proc p12f675)
+  INIT_BYPASS    gpio=0x20
+  PRESS1_EARLY   gpio=0x0
+  PRESS1_LOW     gpio=0x5
+  ENGAGED        gpio=0x21
+  BYPASS_AGAIN   gpio=0x20
+  ok:   INIT: LED off (bypass)
+  ok:   INIT: full GPIO == 0x0 (bypass control pins)
+  ok:   INIT: footswitch released (GP5=1)
+  ok:   PRESS1_EARLY: footswitch pressed (GP5=0)
+  ok:   PRESS1_EARLY: LED still off (tick cadence intact)
+  ok:   PRESS1: footswitch pressed (GP5=0)
+  ok:   PRESS1: LED on (toggled on the press)
+  ok:   ENGAGED: LED on (latched)
+  ok:   ENGAGED: footswitch released (GP5=1)
+  ok:   ENGAGED: full GPIO == 0x1 (variant control pins)
+  ok:   BYPASS_AGAIN: LED off (toggled back)
+  ok:   BYPASS_AGAIN: full GPIO == 0x0 (bypass control pins)
+  ok:   BYPASS_AGAIN: footswitch released (GP5=1)
+RESULT: PASS (build_pic12f675/simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex)
+gpsim power-on-pressed test: build_pic12f675/simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex (proc p12f675)
+  PON_HELD       gpio=0x0
+  PON_RELEASED   gpio=0x20
+  PON_ENGAGED    gpio=0x21
+  ok:   PON_HELD: LED off (held switch did not engage)
+  ok:   PON_HELD: footswitch pressed (GP5=0)
+  ok:   PON_RELEASED: still bypass (release did not toggle)
+  ok:   PON_RELEASED: footswitch released (GP5=1)
+  ok:   PON_ENGAGED: LED on (fresh press toggled, latched)
+  ok:   PON_ENGAGED: footswitch released (GP5=1)
+RESULT: PASS (build_pic12f675/simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex)
+PIC hardware-stack depth [PIC12F675 cd4053_simple]
+  device depth  : 8 level(s)   (/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8/pic/dat/ini/12f675.ini)
+  reserve       : 2 level(s)
+  measured peak : 3 level(s)
+  XC8 callstack : 5 level(s) remaining -> 3 used (agrees)
+    reset tree _main: 3 level(s)
+      _main -> _init -> _hw_init_output_pins -> _hw_configure_output_pins
+STACK-DEPTH PASS [PIC12F675 cd4053_simple]: 3 + 2 reserve <= 8 levels (3 spare)
+PIC hardware-stack depth [PIC12F675 cd4053_with_mute]
+  device depth  : 8 level(s)   (/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8/pic/dat/ini/12f675.ini)
+  reserve       : 2 level(s)
+  measured peak : 3 level(s)
+  XC8 callstack : 5 level(s) remaining -> 3 used (agrees)
+    reset tree _main: 3 level(s)
+      _main -> _init -> _hw_init_output_pins -> _hw_configure_output_pins
+STACK-DEPTH PASS [PIC12F675 cd4053_with_mute]: 3 + 2 reserve <= 8 levels (3 spare)
+PIC hardware-stack depth [PIC12F675 tq2_l2_5v_relay]
+  device depth  : 8 level(s)   (/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8/pic/dat/ini/12f675.ini)
+  reserve       : 2 level(s)
+  measured peak : 5 level(s)
+  XC8 callstack : 3 level(s) remaining -> 5 used (agrees)
+    reset tree _main: 5 level(s)
+      _main -> _hw_force_wdt_reset -> _hw_emergency_outputs_quiesce -> _hw_outputs_reassert_safe -> _set_relay_coils_low -> _hw_pin_mask_set_low
+STACK-DEPTH PASS [PIC12F675 tq2_l2_5v_relay]: 5 + 2 reserve <= 8 levels (1 spare)
+=== PIC12F675 hardware stack bounded for every variant ===
+=== all PIC12F675 pre-hardware checks complete: PIC12F675_MATRIX_SHA256 format=2 shipping_cd4053_simple=8405c24723448d47504545411aff139626399476e332cc5f46e5b7bba3a202b1 assembly_cd4053_simple=0fd09d5fc13ef6cb950d1c201d54cb7bbf05430f27238322e8e5d5caf1a1b9dd symbols_cd4053_simple=72aa4975cced169e3b6c53e21273fd0842bd2df8aaebe5913d8d8935f1c68c9f simcal_cd4053_simple=ca4347cba6b403c0e50bd1572f83622386edba852f7fc7a5539f4bf2f564a252 shipping_cd4053_with_mute=655fd28fe8075389ab571218393c0cececf215d4a4a8aac5fa85452863e16c45 assembly_cd4053_with_mute=e88656bdc8b5ac9fcdd85a1bb0855bd56bcebea143410898b211033d9fd654e3 symbols_cd4053_with_mute=5ca8ab64b58619a27eaf94b794f0fddf45a79573a2ae4fe2e591a879396fc283 simcal_cd4053_with_mute=d43977a4096b907103e07e9555cd4fa97023adc1c0cef93507dc335b34c13c98 shipping_tq2_l2_5v_relay=30757b9429a91bfb90160ad2997c2cb9a50c69b7d22444f018a8d601ac3eb2fe assembly_tq2_l2_5v_relay=77e7f6198035ea523c05aaa5b762a06782d9771dfde3b750f919b2963ad08446 symbols_tq2_l2_5v_relay=b290c98999efb2047537153e536d13e4a42acc29fe653a32d7d86b2a8d5f8419 simcal_tq2_l2_5v_relay=d0c4846f8932b403373a5fe1680cb8741bea9d4b6bdd6a0ba2232fe14d451a51 ===
+===================== PIC12F675 TARGET VARIANT cd4053_simple =====================
+--- PIC12F675 fault-inject: variant=cd4053_simple proc=p12f675 (ctx_ at 0x40, gpio_shadow_ at 0x44, layout verified: 3 bytes) ---
+FAULT-INJECT START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware-v0.9.10-release/build_pic12f675/simcal/bypass-pic12f675-cd4053_simple_simcal.hex proc=p12f675 FOSC=4000000 window=2000 ms
+  (NB: gpsim WDT ~288ms = 1:16 nominal at OPTION_REG=0x0C; silicon min 160ms -- recovery reset, not RC spread)
+  PASS: startup WPU is GP5-only (0x20)
+  PASS: startup TRISIO is GP3/GP5 inputs, GP0..GP2/GP4 outputs (0x28)
+  loop CLRWDT identified at 0x1ea (8 hits in 8 ms)
+  control (no injection)
+    PASS: quiescent device did not reset
+  inject TRISIO.GP0         @0x085: 0x28 -> 0x29  (GP0 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISIO.GP1         @0x085: 0x28 -> 0x2a  (GP1 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISIO.GP2         @0x085: 0x28 -> 0x2c  (GP2 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISIO.GP4         @0x085: 0x28 -> 0x38  (GP4 parked output changed to input: exact-TRISIO violation)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISIO.GP5         @0x085: 0x28 -> 0x08  (GP5 footswitch input started driving against the switch)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject shadow.GP0         @0x044: 0x00 -> 0x01  (GP0 LED shadow changed from settled low to high)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject shadow.GP1         @0x044: 0x00 -> 0x02  (GP1 control/reset-coil shadow changed from low to high)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject shadow.GP2         @0x044: 0x00 -> 0x04  (GP2 control/set-coil/spare shadow changed from low to high)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject shadow.GP4         @0x044: 0x00 -> 0x10  (parked GP4 shadow changed from low to high)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject GPIO.GP0           @0x005: 0x20 -> 0x21  (GP0 pin driven high with its shadow low: port stopped following)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject GPIO.GP1           @0x005: 0x20 -> 0x22  (GP1 pin driven high with its shadow low: port stopped following)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject GPIO.GP2           @0x005: 0x20 -> 0x24  (GP2 pin driven high with its shadow low: port stopped following)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject GPIO.GP4           @0x005: 0x20 -> 0x30  (parked GP4 pin high with its shadow low: port stopped following)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject shadow.expected    gpio_shadow_@0x044 gpio@0x005: +0x01  (shadow+port GP0 high vs BYPASS expected: isolates shadow-vs-expected, F2-blind (ctx_ untouched))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OPTION.INTEDG      @0x081: 0x0c -> 0x4c  (INTEDG 0->1: INT edge select skewed (else silent, INT unused))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OPTION.T0SE        @0x081: 0x0c -> 0x1c  (T0SE 0->1: TMR0 edge select skewed (else silent, T0CS=0))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OPTION.PS          @0x081: 0x0c -> 0x0d  (PS 0b100->0b101: WDT 1:16->1:32 (~288ms->~576ms), tick preserved)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject CMCON.CM0          @0x019: 0x07 -> 0x06  (CM<2:0> 111->110: single-bit comparator-mode fault)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ADCON0.ADON        @0x01f: 0x00 -> 0x01  (ADON 0->1: ADC on, an output pin taken analog)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSEL.ANS0         @0x09f: 0x00 -> 0x01  (ANS0=1: GP0 (LED) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSEL.ANS1         @0x09f: 0x00 -> 0x02  (ANS1=1: GP1 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSEL.ANS2         @0x09f: 0x00 -> 0x04  (ANS2=1: GP2 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSEL.ANS3         @0x09f: 0x00 -> 0x08  (ANS3=1: parked GP4 re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OSCCAL.CAL0        @0x090: 0x80 -> 0x84  (toggle implemented CAL0: one physically realizable trim step)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPU.GP5            @0x095: 0x20 -> 0x00  (clear GP5 pull-up latch: footswitch weak pull-up disabled)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPU.GP0            @0x095: 0x20 -> 0x21  (set GP0 output-pin pull-up latch: exact GP5-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPU.GP1            @0x095: 0x20 -> 0x22  (set GP1 output-pin pull-up latch: exact GP5-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPU.GP2            @0x095: 0x20 -> 0x24  (set GP2 output-pin pull-up latch: exact GP5-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPU.GP4            @0x095: 0x20 -> 0x30  (set parked-output GP4 pull-up latch: exact GP5-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OPTION.nGPPU       @0x081: 0x0c -> 0x8c  (set nGPPU: global weak pull-ups disabled)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.program_state  @0x040: 0x00 -> 0x02  (0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.effect_state   @0x041: 0x00 -> 0x02  (->2: > ENGAGED (gate-only))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.debounce_counter @0x042: 0x00 -> 0xff  (->255: > RELEASE_THRESH (gate-only))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.debounce.inrange @0x042: 0x00 -> 0x10  (->16: in range, only the F2 XOR-fold shadow catches)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+
+FAULT-INJECT PASS: 38 checks, 0 failures
+PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=cd4053_simple status=pass checks=38 failures=0
+--- PIC12F675 lock-step: variant=cd4053_simple proc=p12f675 (ctx_ at 0x40, layout verified: 3 bytes) ---
+LOCK-STEP START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware-v0.9.10-release/build_pic12f675/simcal/bypass-pic12f675-cd4053_simple_simcal.hex proc=p12f675 FOSC=4000000 ctx_=0x040 iters=3000
+  loop CLRWDT identified at 0x1ea (8 hits in 8 ms; 2 CLRWDT sites total)
+  coverage: 66/66 reachable model states visited by the stimulus
+  lock-step: 3000 iterations compared, 27 toggles, 0 mismatches
+LOCK-STEP PASS: 3005 checks, 0 failures
+PIC_TARGET_RESULT format=1 device=pic12f675 lane=lockstep variant=cd4053_simple status=pass checks=3005 failures=0
+--- PIC12F675 target I/O: variant=cd4053_simple proc=p12f675 (gpio_shadow_ at 0x44) ---
+TARGET-IO START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware-v0.9.10-release/build_pic12f675/simcal/bypass-pic12f675-cd4053_simple_simcal.hex proc=p12f675 FOSC=4000000
+  startup max GPIO/gpio_shadow_ skew: 0 sample(s) (bound 1)
+  engage max GPIO/gpio_shadow_ skew: 1 sample(s) (bound 1)
+  release-after-engage max GPIO/gpio_shadow_ skew: 0 sample(s) (bound 1)
+  bypass max GPIO/gpio_shadow_ skew: 1 sample(s) (bound 1)
+  release-after-bypass max GPIO/gpio_shadow_ skew: 0 sample(s) (bound 1)
+TARGET-IO PASS: 25 checks, 0 failures
+PIC_TARGET_RESULT format=1 device=pic12f675 lane=io variant=cd4053_simple status=pass checks=25 failures=0
+=== PIC12F675 target fault/lock-step/I-O PASS (variant cd4053_simple): PIC12F675_MATRIX_SHA256 format=2 shipping_cd4053_simple=8405c24723448d47504545411aff139626399476e332cc5f46e5b7bba3a202b1 assembly_cd4053_simple=0fd09d5fc13ef6cb950d1c201d54cb7bbf05430f27238322e8e5d5caf1a1b9dd symbols_cd4053_simple=72aa4975cced169e3b6c53e21273fd0842bd2df8aaebe5913d8d8935f1c68c9f simcal_cd4053_simple=ca4347cba6b403c0e50bd1572f83622386edba852f7fc7a5539f4bf2f564a252 shipping_cd4053_with_mute=655fd28fe8075389ab571218393c0cececf215d4a4a8aac5fa85452863e16c45 assembly_cd4053_with_mute=e88656bdc8b5ac9fcdd85a1bb0855bd56bcebea143410898b211033d9fd654e3 symbols_cd4053_with_mute=5ca8ab64b58619a27eaf94b794f0fddf45a79573a2ae4fe2e591a879396fc283 simcal_cd4053_with_mute=d43977a4096b907103e07e9555cd4fa97023adc1c0cef93507dc335b34c13c98 shipping_tq2_l2_5v_relay=30757b9429a91bfb90160ad2997c2cb9a50c69b7d22444f018a8d601ac3eb2fe assembly_tq2_l2_5v_relay=77e7f6198035ea523c05aaa5b762a06782d9771dfde3b750f919b2963ad08446 symbols_tq2_l2_5v_relay=b290c98999efb2047537153e536d13e4a42acc29fe653a32d7d86b2a8d5f8419 simcal_tq2_l2_5v_relay=d0c4846f8932b403373a5fe1680cb8741bea9d4b6bdd6a0ba2232fe14d451a51 ===
+===================== PIC12F675 TARGET VARIANT cd4053_with_mute =====================
+--- PIC12F675 fault-inject: variant=cd4053_with_mute proc=p12f675 (ctx_ at 0x40, gpio_shadow_ at 0x44, layout verified: 3 bytes) ---
+FAULT-INJECT START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware-v0.9.10-release/build_pic12f675/simcal/bypass-pic12f675-cd4053_with_mute_simcal.hex proc=p12f675 FOSC=4000000 window=2000 ms
+  (NB: gpsim WDT ~288ms = 1:16 nominal at OPTION_REG=0x0C; silicon min 160ms -- recovery reset, not RC spread)
+  PASS: startup WPU is GP5-only (0x20)
+  PASS: startup TRISIO is GP3/GP5 inputs, GP0..GP2/GP4 outputs (0x28)
+  loop CLRWDT identified at 0x1d0 (8 hits in 8 ms)
+  control (no injection)
+    PASS: quiescent device did not reset
+  inject TRISIO.GP0         @0x085: 0x28 -> 0x29  (GP0 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISIO.GP1         @0x085: 0x28 -> 0x2a  (GP1 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISIO.GP2         @0x085: 0x28 -> 0x2c  (GP2 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISIO.GP4         @0x085: 0x28 -> 0x38  (GP4 parked output changed to input: exact-TRISIO violation)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISIO.GP5         @0x085: 0x28 -> 0x08  (GP5 footswitch input started driving against the switch)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject shadow.GP0         @0x044: 0x00 -> 0x01  (GP0 LED shadow changed from settled low to high)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject shadow.GP1         @0x044: 0x00 -> 0x02  (GP1 control/reset-coil shadow changed from low to high)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject shadow.GP2         @0x044: 0x00 -> 0x04  (GP2 control/set-coil/spare shadow changed from low to high)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject shadow.GP4         @0x044: 0x00 -> 0x10  (parked GP4 shadow changed from low to high)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject GPIO.GP0           @0x005: 0x20 -> 0x21  (GP0 pin driven high with its shadow low: port stopped following)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject GPIO.GP1           @0x005: 0x20 -> 0x22  (GP1 pin driven high with its shadow low: port stopped following)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject GPIO.GP2           @0x005: 0x20 -> 0x24  (GP2 pin driven high with its shadow low: port stopped following)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject GPIO.GP4           @0x005: 0x20 -> 0x30  (parked GP4 pin high with its shadow low: port stopped following)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject shadow.expected    gpio_shadow_@0x044 gpio@0x005: +0x01  (shadow+port GP0 high vs BYPASS expected: isolates shadow-vs-expected, F2-blind (ctx_ untouched))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OPTION.INTEDG      @0x081: 0x0c -> 0x4c  (INTEDG 0->1: INT edge select skewed (else silent, INT unused))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OPTION.T0SE        @0x081: 0x0c -> 0x1c  (T0SE 0->1: TMR0 edge select skewed (else silent, T0CS=0))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OPTION.PS          @0x081: 0x0c -> 0x0d  (PS 0b100->0b101: WDT 1:16->1:32 (~288ms->~576ms), tick preserved)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject CMCON.CM0          @0x019: 0x07 -> 0x06  (CM<2:0> 111->110: single-bit comparator-mode fault)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ADCON0.ADON        @0x01f: 0x00 -> 0x01  (ADON 0->1: ADC on, an output pin taken analog)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSEL.ANS0         @0x09f: 0x00 -> 0x01  (ANS0=1: GP0 (LED) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSEL.ANS1         @0x09f: 0x00 -> 0x02  (ANS1=1: GP1 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSEL.ANS2         @0x09f: 0x00 -> 0x04  (ANS2=1: GP2 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSEL.ANS3         @0x09f: 0x00 -> 0x08  (ANS3=1: parked GP4 re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OSCCAL.CAL0        @0x090: 0x80 -> 0x84  (toggle implemented CAL0: one physically realizable trim step)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPU.GP5            @0x095: 0x20 -> 0x00  (clear GP5 pull-up latch: footswitch weak pull-up disabled)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPU.GP0            @0x095: 0x20 -> 0x21  (set GP0 output-pin pull-up latch: exact GP5-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPU.GP1            @0x095: 0x20 -> 0x22  (set GP1 output-pin pull-up latch: exact GP5-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPU.GP2            @0x095: 0x20 -> 0x24  (set GP2 output-pin pull-up latch: exact GP5-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPU.GP4            @0x095: 0x20 -> 0x30  (set parked-output GP4 pull-up latch: exact GP5-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OPTION.nGPPU       @0x081: 0x0c -> 0x8c  (set nGPPU: global weak pull-ups disabled)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.program_state  @0x040: 0x00 -> 0x02  (0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.effect_state   @0x041: 0x00 -> 0x02  (->2: > ENGAGED (gate-only))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.debounce_counter @0x042: 0x00 -> 0xff  (->255: > RELEASE_THRESH (gate-only))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.debounce.inrange @0x042: 0x00 -> 0x10  (->16: in range, only the F2 XOR-fold shadow catches)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+
+FAULT-INJECT PASS: 38 checks, 0 failures
+PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=cd4053_with_mute status=pass checks=38 failures=0
+--- PIC12F675 lock-step: variant=cd4053_with_mute proc=p12f675 (ctx_ at 0x40, layout verified: 3 bytes) ---
+LOCK-STEP START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware-v0.9.10-release/build_pic12f675/simcal/bypass-pic12f675-cd4053_with_mute_simcal.hex proc=p12f675 FOSC=4000000 ctx_=0x040 iters=3000
+  loop CLRWDT identified at 0x1d0 (8 hits in 8 ms; 2 CLRWDT sites total)
+  coverage: 66/66 reachable model states visited by the stimulus
+  lock-step: 3000 iterations compared, 27 toggles, 0 mismatches
+LOCK-STEP PASS: 3005 checks, 0 failures
+PIC_TARGET_RESULT format=1 device=pic12f675 lane=lockstep variant=cd4053_with_mute status=pass checks=3005 failures=0
+--- PIC12F675 target I/O: variant=cd4053_with_mute proc=p12f675 (gpio_shadow_ at 0x44) ---
+TARGET-IO START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware-v0.9.10-release/build_pic12f675/simcal/bypass-pic12f675-cd4053_with_mute_simcal.hex proc=p12f675 FOSC=4000000
+  startup max GPIO/gpio_shadow_ skew: 0 sample(s) (bound 1)
+  engage max GPIO/gpio_shadow_ skew: 1 sample(s) (bound 1)
+  release-after-engage max GPIO/gpio_shadow_ skew: 0 sample(s) (bound 1)
+  bypass max GPIO/gpio_shadow_ skew: 1 sample(s) (bound 1)
+  release-after-bypass max GPIO/gpio_shadow_ skew: 0 sample(s) (bound 1)
+  engage pulse: 5026 cycles (5.026 ms; design 5 ms)
+  bypass pulse: 5032 cycles (5.032 ms; design 5 ms)
+TARGET-IO PASS: 26 checks, 0 failures
+PIC_TARGET_RESULT format=1 device=pic12f675 lane=io variant=cd4053_with_mute status=pass checks=26 failures=0
+=== PIC12F675 target fault/lock-step/I-O PASS (variant cd4053_with_mute): PIC12F675_MATRIX_SHA256 format=2 shipping_cd4053_simple=8405c24723448d47504545411aff139626399476e332cc5f46e5b7bba3a202b1 assembly_cd4053_simple=0fd09d5fc13ef6cb950d1c201d54cb7bbf05430f27238322e8e5d5caf1a1b9dd symbols_cd4053_simple=72aa4975cced169e3b6c53e21273fd0842bd2df8aaebe5913d8d8935f1c68c9f simcal_cd4053_simple=ca4347cba6b403c0e50bd1572f83622386edba852f7fc7a5539f4bf2f564a252 shipping_cd4053_with_mute=655fd28fe8075389ab571218393c0cececf215d4a4a8aac5fa85452863e16c45 assembly_cd4053_with_mute=e88656bdc8b5ac9fcdd85a1bb0855bd56bcebea143410898b211033d9fd654e3 symbols_cd4053_with_mute=5ca8ab64b58619a27eaf94b794f0fddf45a79573a2ae4fe2e591a879396fc283 simcal_cd4053_with_mute=d43977a4096b907103e07e9555cd4fa97023adc1c0cef93507dc335b34c13c98 shipping_tq2_l2_5v_relay=30757b9429a91bfb90160ad2997c2cb9a50c69b7d22444f018a8d601ac3eb2fe assembly_tq2_l2_5v_relay=77e7f6198035ea523c05aaa5b762a06782d9771dfde3b750f919b2963ad08446 symbols_tq2_l2_5v_relay=b290c98999efb2047537153e536d13e4a42acc29fe653a32d7d86b2a8d5f8419 simcal_tq2_l2_5v_relay=d0c4846f8932b403373a5fe1680cb8741bea9d4b6bdd6a0ba2232fe14d451a51 ===
+===================== PIC12F675 TARGET VARIANT tq2_l2_5v_relay =====================
+--- PIC12F675 fault-inject: variant=tq2_l2_5v_relay proc=p12f675 (ctx_ at 0x40, gpio_shadow_ at 0x44, layout verified: 3 bytes) ---
+FAULT-INJECT START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware-v0.9.10-release/build_pic12f675/simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex proc=p12f675 FOSC=4000000 window=2000 ms
+  (NB: gpsim WDT ~288ms = 1:16 nominal at OPTION_REG=0x0C; silicon min 160ms -- recovery reset, not RC spread)
+  PASS: startup WPU is GP5-only (0x20)
+  PASS: startup TRISIO is GP3/GP5 inputs, GP0..GP2/GP4 outputs (0x28)
+  loop CLRWDT identified at 0x1c6 (8 hits in 8 ms)
+  control (no injection)
+    PASS: quiescent device did not reset
+  inject TRISIO.GP0         @0x085: 0x28 -> 0x29  (GP0 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISIO.GP1         @0x085: 0x28 -> 0x2a  (GP1 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISIO.GP2         @0x085: 0x28 -> 0x2c  (GP2 changed from output to input)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISIO.GP4         @0x085: 0x28 -> 0x38  (GP4 parked output changed to input: exact-TRISIO violation)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject TRISIO.GP5         @0x085: 0x28 -> 0x08  (GP5 footswitch input started driving against the switch)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject shadow.GP0         @0x044: 0x00 -> 0x01  (GP0 LED shadow (intent) corruption resets)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject parked output  @0x044: 0x00 -> 0x10  (parked GP4 shadow (intent) corruption: reset, and the escalation's one whole-port write must not drive the pad, from BYPASS, GP4 pad 0.000V before escalation)
+    PASS: coils inactive in 0 cycles (0.000 ms) with no partially cleared coil latch, physical GP1=0.000V/GP2=0.000V and parked GP4=0.000V at watchdog spin, 1 reset, recovery drove a 11.296 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject GPIO.GP0           @0x005: 0x20 -> 0x21  (GP0 LED pin high with its shadow low: port stopped following)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject GPIO.GP4           @0x005: 0x20 -> 0x30  (parked GP4 pin high with its shadow low: port stopped following)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject relay coils    @0x044: 0x00 -> 0x02  (GP1 RESET-coil shadow (intent) forced high, from BYPASS)
+    PASS: coils inactive in 838 cycles (0.838 ms) with no partially cleared coil latch, physical GP1=0.000V/GP2=0.000V and parked GP4=0.000V at watchdog spin, 1 reset, recovery drove a 11.296 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject relay coils    @0x044: 0x00 -> 0x04  (GP2 SET-coil shadow (intent) forced high, from BYPASS)
+    PASS: coils inactive in 836 cycles (0.836 ms) with no partially cleared coil latch, physical GP1=0.000V/GP2=0.000V and parked GP4=0.000V at watchdog spin, 1 reset, recovery drove a 11.296 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject relay coils    @0x005: 0x20 -> 0x22  (GP1 RESET-coil pin energized, from BYPASS)
+    PASS: coils inactive in 852 cycles (0.852 ms) with no partially cleared coil latch, physical GP1=0.000V/GP2=0.000V and parked GP4=0.000V at watchdog spin, 1 reset, recovery drove a 11.312 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject relay coils    @0x005: 0x20 -> 0x24  (GP2 SET-coil pin energized, from BYPASS)
+    PASS: coils inactive in 852 cycles (0.852 ms) with no partially cleared coil latch, physical GP1=0.000V/GP2=0.000V and parked GP4=0.000V at watchdog spin, 1 reset, recovery drove a 11.312 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject relay coils    @0x005: 0x20 -> 0x26  (both coil pins energized, from BYPASS)
+    PASS: coils inactive in 852 cycles (0.852 ms) with no partially cleared coil latch, physical GP1=0.000V/GP2=0.000V and parked GP4=0.000V at watchdog spin, 1 reset, recovery drove a 11.312 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject relay coils    @0x005: 0x21 -> 0x23  (GP1 RESET-coil pin energized, from ENGAGED)
+    PASS: coils inactive in 852 cycles (0.852 ms) with no partially cleared coil latch, physical GP1=0.000V/GP2=0.000V and parked GP4=0.000V at watchdog spin, 1 reset, recovery drove a 11.312 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject relay coils    @0x005: 0x21 -> 0x25  (GP2 SET-coil pin energized, from ENGAGED)
+    PASS: coils inactive in 852 cycles (0.852 ms) with no partially cleared coil latch, physical GP1=0.000V/GP2=0.000V and parked GP4=0.000V at watchdog spin, 1 reset, recovery drove a 11.312 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject shadow.expected    gpio_shadow_@0x044 gpio@0x005: +0x01  (shadow+port GP0 high vs BYPASS expected: isolates shadow-vs-expected, F2-blind (ctx_ untouched))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OPTION.INTEDG      @0x081: 0x0c -> 0x4c  (INTEDG 0->1: INT edge select skewed (else silent, INT unused))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OPTION.T0SE        @0x081: 0x0c -> 0x1c  (T0SE 0->1: TMR0 edge select skewed (else silent, T0CS=0))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OPTION.PS          @0x081: 0x0c -> 0x0d  (PS 0b100->0b101: WDT 1:16->1:32 (~288ms->~576ms), tick preserved)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject CMCON.CM0          @0x019: mode=0b110 -> COUT=HIGH, GP2-owner=GPIO, physical GP1=0.000V GP2=0.000V (CIN+ pad 0.000V, not read by the model) (from BYPASS)
+    PASS: coils inactive in 3 cycles (0.003 ms) with no partially cleared coil latch, physical GP1=0.000V/GP2=0.000V and parked GP4=0.000V at watchdog spin, 1 reset, recovery drove a 11.312 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject CMCON.CM1          @0x019: mode=0b101 -> COUT=HIGH, GP2-owner=COUT, physical GP1=0.000V GP2=5.000V (CIN+ pad 0.000V, not read by the model) (from BYPASS)
+    fixture: COUT and physical GP2 were HIGH before escalation; latch-only clear left GP2 at 5.000V
+    PASS: coils inactive in 851 cycles (0.851 ms) with no partially cleared coil latch, physical GP1=0.000V/GP2=0.000V and parked GP4=0.000V at watchdog spin, 1 reset, recovery drove a 11.312 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject CMCON.CM2          @0x019: mode=0b011 -> COUT=HIGH, GP2-owner=COUT, physical GP1=0.000V GP2=5.000V (CIN+ pad 0.000V, not read by the model) (from BYPASS)
+    fixture: COUT and physical GP2 were HIGH before escalation; latch-only clear left GP2 at 5.000V
+    PASS: coils inactive in 851 cycles (0.851 ms) with no partially cleared coil latch, physical GP1=0.000V/GP2=0.000V and parked GP4=0.000V at watchdog spin, 1 reset, recovery drove a 11.312 ms RESET-coil pulse (>= 4 ms datasheet minimum) with SET dark, settled in BYPASS
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ADCON0.ADON        @0x01f: 0x00 -> 0x01  (ADON 0->1: ADC on, an output pin taken analog)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSEL.ANS0         @0x09f: 0x00 -> 0x01  (ANS0=1: GP0 (LED) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSEL.ANS1         @0x09f: 0x00 -> 0x02  (ANS1=1: GP1 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSEL.ANS2         @0x09f: 0x00 -> 0x04  (ANS2=1: GP2 (control pin) re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ANSEL.ANS3         @0x09f: 0x00 -> 0x08  (ANS3=1: parked GP4 re-selected analog, out of digital service)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OSCCAL.CAL0        @0x090: 0x80 -> 0x84  (toggle implemented CAL0: one physically realizable trim step)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPU.GP5            @0x095: 0x20 -> 0x00  (clear GP5 pull-up latch: footswitch weak pull-up disabled)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPU.GP0            @0x095: 0x20 -> 0x21  (set GP0 output-pin pull-up latch: exact GP5-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPU.GP1            @0x095: 0x20 -> 0x22  (set GP1 output-pin pull-up latch: exact GP5-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPU.GP2            @0x095: 0x20 -> 0x24  (set GP2 output-pin pull-up latch: exact GP5-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject WPU.GP4            @0x095: 0x20 -> 0x30  (set parked-output GP4 pull-up latch: exact GP5-only mask violated)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject OPTION.nGPPU       @0x081: 0x0c -> 0x8c  (set nGPPU: global weak pull-ups disabled)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.program_state  @0x040: 0x00 -> 0x02  (0->2: > RELEASE_DEBOUNCE_WAIT (also core res.fault))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.effect_state   @0x041: 0x00 -> 0x02  (->2: > ENGAGED (gate-only))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.debounce_counter @0x042: 0x00 -> 0xff  (->255: > RELEASE_THRESH (gate-only))
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+  inject ctx.debounce.inrange @0x042: 0x00 -> 0x10  (->16: in range, only the F2 XOR-fold shadow catches)
+    PASS: observed exactly 1 WDT reset
+    PASS: recovered image reached its loop CLRWDT again (renewed liveness)
+
+FAULT-INJECT PASS: 43 checks, 0 failures
+PIC_TARGET_RESULT format=1 device=pic12f675 lane=fault variant=tq2_l2_5v_relay status=pass checks=43 failures=0
+--- PIC12F675 lock-step: variant=tq2_l2_5v_relay proc=p12f675 (ctx_ at 0x40, layout verified: 3 bytes) ---
+LOCK-STEP START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware-v0.9.10-release/build_pic12f675/simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex proc=p12f675 FOSC=4000000 ctx_=0x040 iters=3000
+  loop CLRWDT identified at 0x1c6 (8 hits in 8 ms; 2 CLRWDT sites total)
+  coverage: 66/66 reachable model states visited by the stimulus
+  lock-step: 3000 iterations compared, 27 toggles, 0 mismatches
+LOCK-STEP PASS: 3005 checks, 0 failures
+PIC_TARGET_RESULT format=1 device=pic12f675 lane=lockstep variant=tq2_l2_5v_relay status=pass checks=3005 failures=0
+--- PIC12F675 target I/O: variant=tq2_l2_5v_relay proc=p12f675 (gpio_shadow_ at 0x44) ---
+TARGET-IO START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware-v0.9.10-release/build_pic12f675/simcal/bypass-pic12f675-tq2_l2_5v_relay_simcal.hex proc=p12f675 FOSC=4000000
+  startup max GPIO/gpio_shadow_ skew: 1 sample(s) (bound 1)
+  engage max GPIO/gpio_shadow_ skew: 1 sample(s) (bound 1)
+  release-after-engage max GPIO/gpio_shadow_ skew: 0 sample(s) (bound 1)
+  bypass max GPIO/gpio_shadow_ skew: 1 sample(s) (bound 1)
+  release-after-bypass max GPIO/gpio_shadow_ skew: 0 sample(s) (bound 1)
+  startup pulse: 12012 cycles (12.012 ms; design 12 ms)
+  engage pulse: 12014 cycles (12.014 ms; design 12 ms)
+  bypass pulse: 12012 cycles (12.012 ms; design 12 ms)
+TARGET-IO PASS: 36 checks, 0 failures
+PIC_TARGET_RESULT format=1 device=pic12f675 lane=io variant=tq2_l2_5v_relay status=pass checks=36 failures=0
+=== PIC12F675 target fault/lock-step/I-O PASS (variant tq2_l2_5v_relay): PIC12F675_MATRIX_SHA256 format=2 shipping_cd4053_simple=8405c24723448d47504545411aff139626399476e332cc5f46e5b7bba3a202b1 assembly_cd4053_simple=0fd09d5fc13ef6cb950d1c201d54cb7bbf05430f27238322e8e5d5caf1a1b9dd symbols_cd4053_simple=72aa4975cced169e3b6c53e21273fd0842bd2df8aaebe5913d8d8935f1c68c9f simcal_cd4053_simple=ca4347cba6b403c0e50bd1572f83622386edba852f7fc7a5539f4bf2f564a252 shipping_cd4053_with_mute=655fd28fe8075389ab571218393c0cececf215d4a4a8aac5fa85452863e16c45 assembly_cd4053_with_mute=e88656bdc8b5ac9fcdd85a1bb0855bd56bcebea143410898b211033d9fd654e3 symbols_cd4053_with_mute=5ca8ab64b58619a27eaf94b794f0fddf45a79573a2ae4fe2e591a879396fc283 simcal_cd4053_with_mute=d43977a4096b907103e07e9555cd4fa97023adc1c0cef93507dc335b34c13c98 shipping_tq2_l2_5v_relay=30757b9429a91bfb90160ad2997c2cb9a50c69b7d22444f018a8d601ac3eb2fe assembly_tq2_l2_5v_relay=77e7f6198035ea523c05aaa5b762a06782d9771dfde3b750f919b2963ad08446 symbols_tq2_l2_5v_relay=b290c98999efb2047537153e536d13e4a42acc29fe653a32d7d86b2a8d5f8419 simcal_tq2_l2_5v_relay=d0c4846f8932b403373a5fe1680cb8741bea9d4b6bdd6a0ba2232fe14d451a51 ===
+=== PIC12F675 target fault/lock-step/I-O validated for all variants: PIC12F675_MATRIX_SHA256 format=2 shipping_cd4053_simple=8405c24723448d47504545411aff139626399476e332cc5f46e5b7bba3a202b1 assembly_cd4053_simple=0fd09d5fc13ef6cb950d1c201d54cb7bbf05430f27238322e8e5d5caf1a1b9dd symbols_cd4053_simple=72aa4975cced169e3b6c53e21273fd0842bd2df8aaebe5913d8d8935f1c68c9f simcal_cd4053_simple=ca4347cba6b403c0e50bd1572f83622386edba852f7fc7a5539f4bf2f564a252 shipping_cd4053_with_mute=655fd28fe8075389ab571218393c0cececf215d4a4a8aac5fa85452863e16c45 assembly_cd4053_with_mute=e88656bdc8b5ac9fcdd85a1bb0855bd56bcebea143410898b211033d9fd654e3 symbols_cd4053_with_mute=5ca8ab64b58619a27eaf94b794f0fddf45a79573a2ae4fe2e591a879396fc283 simcal_cd4053_with_mute=d43977a4096b907103e07e9555cd4fa97023adc1c0cef93507dc335b34c13c98 shipping_tq2_l2_5v_relay=30757b9429a91bfb90160ad2997c2cb9a50c69b7d22444f018a8d601ac3eb2fe assembly_tq2_l2_5v_relay=77e7f6198035ea523c05aaa5b762a06782d9771dfde3b750f919b2963ad08446 symbols_tq2_l2_5v_relay=b290c98999efb2047537153e536d13e4a42acc29fe653a32d7d86b2a8d5f8419 simcal_tq2_l2_5v_relay=d0c4846f8932b403373a5fe1680cb8741bea9d4b6bdd6a0ba2232fe14d451a51 ===
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware-v0.9.10-release'

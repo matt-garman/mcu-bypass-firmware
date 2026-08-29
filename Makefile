@@ -7583,6 +7583,7 @@ origins:
 #   make release-preflight                 # capability check, no build/staging
 #   make release-preflight VERSION=v1.0.0  # require final docs; warn on tag/output state
 #   make release VERSION=v1.0.0
+#   make release VERSION=v1.0.0 RELEASE_ARGS='--express'   # publishable, 1-h soak
 #   make release VERSION=v1.0.0 RELEASE_ARGS='--dry-run'   # skip the 24-h soak
 
 # --- the canonical release product set ---------------------------------------
@@ -8293,7 +8294,9 @@ help:
 	@echo "  release         VERSION=vX.Y.Z: build+validate every release image -- AVR Classic"
 	@echo "                  + ATtiny202 + PIC10F322 + PIC10F320 + PIC12F675, the canonical"
 	@echo "                  RELEASE_IMAGES set (incl. 24-h soak of all 18 combos) + stage release/<ver>/."
-	@echo "                  RELEASE_ARGS='--dry-run' shortens the soak; see"
+	@echo "                  RELEASE_ARGS='--express' stages a publishable release with a 1-h"
+	@echo "                  soak instead of 24 h (recorded as release_mode=express);"
+	@echo "                  RELEASE_ARGS='--dry-run' rehearses with a 60-s soak; see"
 	@echo "                  scripts/make-release.sh"
 	@echo "Clean:"
 	@echo "  clean           remove build + test artifacts"

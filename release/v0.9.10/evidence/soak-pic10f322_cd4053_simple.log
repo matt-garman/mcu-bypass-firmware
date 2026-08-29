@@ -1,0 +1,5 @@
+SOAK START: fw=/mnt/home/matt/development/github/mcu-bypass-firmware-v0.9.10-release/build_pic10f322/bypass-pic10f322-cd4053_simple.hex proc=p10f322 FOSC=2000000  dur=1.00 h  (NB: gpsim WDT@WDTPS=0x08 ~1.057s, not 256ms -- liveness only)
+SOAK [1.00/1.00 h] checks=60 fails=0 wdt_resets=0
+
+SOAK PASS: 3600000 ms (1.00 h) simulated. 1807840965 cycles (3615681.930 ms) advanced; wdt_resets=0 liveness_fails=0 checks=60
+SOAK_RESULT format=1 status=pass combination=pic10f322_cd4053_simple duration_ms=3600000 liveness_interval_ms=60000 checks=60 failures=0 watchdog_failures=0 liveness_failures=0
