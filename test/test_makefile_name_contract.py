@@ -272,9 +272,9 @@ SELF_EXEMPT = "test/test_makefile_name_contract.py"
 # the Makefile can infer these, so they are listed. Keep this short: every entry
 # is a name this gate cannot check, so a wrong one is a permanent blind spot.
 # It has exactly one member, and that is a result rather than a coincidence.
-# The prototype sweep recorded in TODO.md needed at least seven, all of them
-# fake-tool shim parameters (FAKE_CC_LOG, FAKE_OBJCOPY_LOG, ...) plus the env
-# set handed to make-release.sh. Harvesting only what follows the make word
+# The prototype sweep of this allowlist needed at least seven entries, all of
+# them fake-tool shim parameters (FAKE_CC_LOG, FAKE_OBJCOPY_LOG, ...) plus the
+# env set handed to make-release.sh. Harvesting only what follows the make word
 # retires every one of them: they are environment prefixes, so they were never
 # claims about the Makefile's vocabulary in the first place. The allowlist got
 # shorter by fixing the harvest rather than by growing exemptions, which is the
@@ -1078,7 +1078,7 @@ def data_base():
     recipe lines containing $(MAKE), and the serialization wrapper's is one --
     so it blocks while a soak or test-long is running, exactly as `make -s
     print-VAR` already does. That lock wait, not parse cost, is the "over two
-    minutes" recorded against this approach in TODO.md.
+    minutes" this approach was once measured at.
 
     Standalone the output carries two data-base blocks (the wrapper's, then the
     real one); nested it carries one. Both are parsed and unioned, so the same

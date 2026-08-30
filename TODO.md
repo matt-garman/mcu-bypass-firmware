@@ -64,13 +64,10 @@ retire the known-limitation text, and reduce the derived-work discussion in
 `third_party/yasimavr/README.md` to a plain upstream-identity notice, because
 the project would then no longer distribute a modified work. Confirm that
 `test/test_supply_chain.sh` and the CI simulator cache key, which both key on
-the patch set, still fail closed once `patches/` is empty.
-
-Patch removal is already evidenced. Upstream `main` at `7d09002`, built
-unpatched with the fetch script's exact hash-locked, no-index pip invocation,
-runs the functional, fault-injection, soak and lockstep ATtiny202 drivers green
-on every variant, so the bump is expected to be a pin change rather than a
-harness change.
+the patch set, still fail closed once `patches/` is empty. Upstream `main` at
+`7d09002`, built unpatched through the fetch script's hash-locked, no-index pip
+invocation, already runs every ATtiny202 driver green on every variant, so the
+bump is expected to be a pin change rather than a harness change.
 
 Do not pin a bare upstream commit as an interim step. That trades the PyPI
 source-archive hash for a generated GitHub archive whose bytes are not
@@ -79,16 +76,13 @@ qualified. If it ever becomes necessary, pin the Git commit and verify it with
 `git rev-parse`, which is content-addressed, rather than hashing a generated
 archive.
 
-The in-simulator pulse-width caveat is not a reason to re-pin, and is not
-outstanding work. It was a property of the single-cycle sampling in
-`test/avr/test_sim_attiny202.py` rather than of the pinned release, and it went
-away when that tracer moved to the signal-hook pattern the upstream author
-recommends: it now free-runs in millisecond budgets, timestamps every pin edge
-from the hook, and asserts delivered pulse width alongside ordering, polarity,
-exclusion and presence. The disassembly-based delay oracle remains the
-authoritative *compiled* width either way, and is simulator-independent. So the
-rewind reaches no timing assertion today; re-pinning retires the vendored
-patches and the derived-work notice, not a measurement gap.
+The in-simulator pulse-width caveat is not a reason to re-pin and is not
+outstanding work: it belonged to the single-cycle sampling in
+`test/avr/test_sim_attiny202.py`, not to the pinned release, and it went away
+when that tracer moved to the upstream-recommended signal-hook pattern. The
+disassembly-based delay oracle remains the authoritative compiled width either
+way. Re-pinning retires vendored third-party modifications and a derived-work
+notice, not a measurement gap.
 
 Dependencies: an upstream release containing the three fixes. Effort: about
 1 hour. Risk: Low; this retires vendored third-party modifications and a
@@ -209,46 +203,28 @@ Dependencies: a sound treatment of interrupts, recursion, indirect control
 flow, and compiler-generated helpers. Effort: about 2-3 hours. Risk: Medium;
 adds a third independent witness for the Classic AVR stack bound.
 
-### T25-avr-xt-stack - Bound AVR-XT shell stack frames
+### T25-avr-xt-stack - Record the measured AVR-XT shell stack maxima
 
-**Implementation present on the F2 branch; provisioned measurement pending.**
-`attiny202-test-stack-bound` now compiles the shell under all three immutable
-production selectors, shares the Classic AVR `.su` parser, enforces 32 bytes per
-frame, and has a toolchain-free 23-check regression. Keep this item open until a
-pinned avr-gcc/ATtiny_DFP run records the actual maxima and the final resource
-documentation is refreshed.
+The lane exists. `attiny202-test-stack-bound` compiles `src/bypass_mcu_avr_xt.c`
+under all three immutable production selectors with the shipping `XT_FW_CFLAGS`
+contract and the SHA-verified DFP inputs, shares the Classic AVR `.su` parser,
+enforces 32 bytes per frame, rejects missing, empty, malformed, dynamic or
+unexpected reports, sits in the `attiny202-test` aggregate rather than the
+default `make test` path, and carries a toolchain-free regression. What is
+missing is a run: no pinned avr-gcc/ATtiny_DFP environment has yet produced the
+actual maxima.
 
-Add an ATtiny202-specific `-fstack-usage` lane for
-`src/bypass_mcu_avr_xt.c`. The existing `test-stack-bound` gate compiles the
-Classic AVR shell plus the shared core and output drivers under Classic
-`CFLAGS`; sharing those other translation units does not measure frames owned
-by the AVR-XT shell.
+Acceptance: a pinned run records the per-variant frame maxima, and the
+unmeasured-maximum notes in `DESIGN_DOCUMENTATION.adoc` and `test/README.md`
+are replaced by the retained result. Publish the number as what it is:
+`-fstack-usage` bounds individual frames, not complete call depth.
 
-Compile with the shipping `XT_FW_CFLAGS` contract: `-DF_CPU=$(XT_F_CPU)`,
-`-DBYPASS_MCU_AVR_XT`, `-mmcu=$(XT_MCU)`, `-B $(XT_SPEC_DIR)`,
-`-I $(XT_INC)`, and `$(CFLAGS_COMMON)`, plus each production variant selector.
-Require the `XT_DFP` path inputs represented by `XT_SPEC_FILE` and
-`XT_IO_HEADER`; those Makefile sentinels establish presence, while the canonical
-SHA-verified provenance comes from `scripts/fetch_attiny_dfp.sh`. Give the lane
-its own target and add it to the DFP-aware `attiny202-test` aggregate, not the
-default `make test` path. Follow the normal optional-tool policy locally while
-failing closed when release validation invokes that aggregate with
-`STRICT_TOOLS=1`.
-
-Require exactly the expected fresh object and `.su` reports, reject missing,
-empty, malformed, dynamic, or unexpected report/artifact files, and fail any
-frame above a reviewed AVR-XT ceiling. Pin function-record identities only if
-that stronger contract is deliberately chosen and regression-tested. Reuse or
-factor the existing parser/regression behavior rather than creating a weaker
-second format. State explicitly that `-fstack-usage` bounds individual frames,
-not complete call depth. Once measured, update the stale gap notes in
-`DESIGN_DOCUMENTATION.adoc` and `test/README.md` with the retained result.
-
-Dependencies: pinned avr-gcc plus the fetched, SHA-verified ATtiny_DFP device
-specs and headers. Effort: about 2-3 hours including negative regressions. Risk:
-Low and completeness-focused: ATtiny202 has 128 bytes of SRAM with 5 bytes of
-static data, while the ATtiny13A has half the SRAM and a tightest measured
-33-byte stack high-water mark that still leaves 26 bytes free after static data.
+Dependencies: a provisioned pinned avr-gcc plus the fetched, SHA-verified
+ATtiny_DFP device specs and headers. Effort: about 30 minutes once that
+toolchain exists. Risk: Low and completeness-focused: ATtiny202 has 128 bytes of
+SRAM with 5 bytes of static data, while the ATtiny13A has half the SRAM and a
+tightest measured 33-byte stack high-water mark that still leaves 26 bytes free
+after static data.
 
 ### T25-pic320-thresholds - Optionally centralize PIC10F320 thresholds
 
@@ -343,7 +319,7 @@ simulation alone.
 
 Axis C of `test/test_makefile_name_contract.py` harvests a `NAME=value` only
 where it follows a make word, and a make word is bare `make` or a `$(MAKE)`
-style reference. Five gate invocations now enter the real Make graph through a
+style reference. Five gate invocations enter the real Make graph through a
 routing shim whose command word is a shell variable instead -- `"$fake_make"`
 in `test/test_target_matrix.sh` and `test/test_target_lane_markers.sh`,
 `"$matrix_lane_make"` in `test/test_pic_build.sh` -- so no make word occurs in
@@ -351,25 +327,20 @@ those lines and the overrides they carry are checked by no axis at all. Those
 overrides are real: MAKE, PROJECT_MAKE, CC, HOSTCC, FW_BASE, STRICT_TOOLS and
 five PIC12F675 names travel that way, and MAKE and PROJECT_MAKE reach axis C
 from nowhere else in the tree. A rename would leave those five harnesses
-passing inert overrides -- the exact defect class the gate exists to catch,
-one level below where it currently looks.
-
-Measured 2026-08-12, when scoping the harvest per command context closed a
-false-positive class and revealed this as its cost: until then the five sites
-were harvested only by accident, because a `$(command -v make)` path lookup
-sitting in their environment prefixes anchored the line.
+passing inert overrides -- the exact defect class the gate exists to catch, one
+level below where it currently looks.
 
 The obvious repair is the wrong one, and it was measured rather than guessed.
 Widening the make word to accept a lowercase `$..._make` command word recovers
-MAKE and PROJECT_MAKE and adds four false positives -- MUTATION_MAKE_LOG,
+MAKE and PROJECT_MAKE but adds four false positives -- MUTATION_MAKE_LOG,
 PIC_BASELINE_STALE_HEX, PIC_GPSIM_SELFTEST_LOG and TOOL_LOG, every one an
-environment prefix for a child process -- so it buys two names at the price of
-four the gate could then never check again. What the harvest actually needs is
-command POSITION: the command word of a statement is its first word that is
-not an assignment, and an override is an assignment after it. That is the
-shell's own rule, it is already implemented for the prefix half in
-`env_channel_names()`, and it recognizes any invocation of a Make command
-without a name-shape heuristic.
+environment prefix for a child process -- buying two names at the price of four
+the gate could then never check again. What the harvest needs is command
+POSITION: the command word of a statement is its first word that is not an
+assignment, and an override is an assignment after it. That is the shell's own
+rule, it is already implemented for the prefix half in `env_channel_names()`,
+and it recognizes any invocation of a Make command without a name-shape
+heuristic.
 
 Acceptance test: the five shim sites contribute their overrides again, the four
 names above stay unharvested, and axis C's negative case (e) still rejects a
@@ -384,10 +355,9 @@ there would most likely surface as a loud harness failure rather than silently.
 
 `test/test_strict_tools.sh` asserts that `test-cbmc` under `STRICT_TOOLS=1`
 issues a fixed number of `cbmc` invocations, restating that number as a literal.
-It has now drifted once: F2 added `prove_ctx_check_single_bit_detected` and
-`prove_ctx_check_definition`, the Makefile's three proof lists grew to eleven
-entries, and the assertion still said nine, so the gate went red on an addition
-that was entirely correct.
+It has drifted once already: two proofs were added, the Makefile's three proof
+lists grew with them, the assertion still held the old number, and the gate went
+red on an addition that was entirely correct.
 
 The tempting repair is the wrong one. Deriving the expected count from
 `CBMC_PROOFS`, `CBMC_PROOFS_LOOP` and `CBMC_PROOFS_DEEP` makes the assertion
@@ -559,8 +529,7 @@ makes it the vehicle for item 8 as well as items 1 and 2 -- the properties its
 bench run must prove are enumerated under "Outstanding controlled runs" in
 `HARDWARE_VALIDATION_LOG.md`. What is missing in both cases is a retained result
 from real silicon. The fourth (GP2) needs a meter on a built `cd4053_with_mute`
-board. Record the measured OSCCAL/BG preservation result into
-`release/README.md`'s flashing procedure once it exists.
+board.
 
 Dependencies: a PIC12F675, a PICkit programmer, a meter, and a built board.
 Effort: about half a day at the bench plus 1-2 hours to retain and review the
@@ -735,7 +704,7 @@ The stable ID in each row matches exactly one open section above.
 | T25-cross-compiler | Narrow alternate-AVR-compiler lane | 2.5 | 2 h | Medium |
 | T25-opt-sweep | Compiler optimization sweep | 2.5 | 1 h | Medium |
 | T25-stack-cross | AVR disassembly stack cross-check | 2.5 | 2-3 h | Medium |
-| T25-avr-xt-stack | AVR-XT shell stack-frame bound | 2.5 | 2-3 h | Low - completeness |
+| T25-avr-xt-stack | Record the measured AVR-XT shell stack maxima | 2.5 | 30 min | Low - completeness |
 | T25-pic320-thresholds | Optionally centralize PIC10F320 thresholds | 2.5 | 20 min + reruns | Low |
 | T25-clock-sweep | Fine-grained oscillator-drift sweep | 2.5 | 1 h | Low |
 | T25-wdt-rate | Watchdog pet-frequency measurement | 2.5 | 1-2 h | Medium |

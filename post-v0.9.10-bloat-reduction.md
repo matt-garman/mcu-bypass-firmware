@@ -1735,7 +1735,7 @@ of ordinary test changes and can turn prose formatting into a tested interface.
 
 ## BR-TODO-01 - Reduce TODO.md to an actionable registry
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Current size:** 669 lines
 
@@ -1770,6 +1770,57 @@ of ordinary test changes and can turn prose formatting into a tested interface.
 - The priority summary and item set remain mechanically consistent if that test
   still provides value.
 - TODO no longer carries the current release contract.
+
+**Work:**
+
+- [x] Remove the implementation design from any item whose implementation is
+  already in the tree.
+- [x] Remove branch-era chronology that no longer identifies anything a reader
+  can act on.
+- [x] Check every item's named artifacts against the current tree, so an item
+  that reads as open really is.
+- [x] Keep the `Considered and declined` registry, the hardware-qualification
+  gaps, and the non-blocking safety obligations intact.
+- [x] Keep the priority summary and the item set mechanically consistent.
+
+**Result:** 756 -> 725 lines, and the small number is the finding. TODO.md was
+already close to registry shape; the bloat was concentrated in a handful of
+items, and cutting further would have cost acceptance conditions rather than
+prose.
+
+One item was carrying finished work. `T25-avr-xt-stack` opened with
+"Implementation present on the F2 branch" and then specified, in thirty lines,
+a lane that this tree already has: `attiny202-test-stack-bound` is defined at
+`Makefile:2431` and reached from `attiny202-test` at `Makefile:2910`, with its
+regression in `test/test_stack_bound.sh`. The spec is now history, so it is
+gone; the heading, the summary row and the effort estimate name what is actually
+left, which is a pinned-toolchain run and the number it produces.
+
+`T3-pic12f675-bench` ended with an instruction that duplicated its own item 2
+and was wrong in its tail: it said to record the measured result into
+`release/README.md`'s flashing procedure "once it exists", and that procedure
+has existed since BR-FLASH-01 (`release/README.md:409`). Item 2 already carries
+the surviving instruction. Every string `test/test_release_qualification.sh`
+pins in this section is unchanged.
+
+Every artifact named by every remaining item was checked against the tree --
+each source file, script, test, patch, Makefile variable and absent goal
+resolves, so no item reads as open on the strength of a stale reference.
+`T3-pic320-program` still documents an absent goal, which is what keeps its
+exemption marker suppressing something.
+
+Deliberately kept at full length: the six safety obligations under
+`T3-nonblocking-actuation`, which are the concise extraction BR-DOC-03 produced
+from a 1,523-line analysis and are the acceptance condition for that redesign;
+the four numbered PIC12F675 silicon risks, which
+`test/test_release_qualification.sh` treats as the definition rather than a
+summary; and the `Considered and declined` registry.
+
+Two comments cited TODO.md as the record for measurements it no longer holds --
+a prototype allowlist sweep and an "over two minutes" timing, both in
+`test/test_makefile_name_contract.py`. They now state the fact without the
+dangling citation. Two more remain in the Makefile and are recorded under
+BR-COMMENT-01, which owns comment text.
 
 ## BR-CHANGELOG-01 - Adopt a concise prospective changelog policy
 
@@ -1853,6 +1904,14 @@ numbers and duplicate changelog/Git history.
 **Example:** `Makefile:459-514` spends roughly 55 lines around a two-function
 image naming convention, including extensive pre-v0.9.8 archaeology.
 
+**Found during BR-TODO-01:** two live Makefile comments cite TODO.md as the
+record for content TODO.md no longer holds -- `Makefile:482` cites a
+"Unified naming scheme" item and `Makefile:3133` cites a "TODO.md history,
+2026-08-20". Both are inside the archaeology this item removes, and both send a
+reader to a file that will not answer. The same citation class was repaired in
+`test/test_makefile_name_contract.py` under BR-TODO-01; these two are Makefile
+comments and belong here.
+
 **Keep:**
 
 - Why a non-obvious invariant exists.
@@ -1881,7 +1940,7 @@ image naming convention, including extensive pre-v0.9.8 archaeology.
 
 ## BR-STATE-01 - Remove four-way current-release declarations from live docs
 
-**Status:** DONE `<commit>`
+**Status:** DONE `d799c14`
 
 **Current copies:**
 
@@ -2855,11 +2914,11 @@ dependencies and acceptance criteria.
 | BR-DOC-04 | Classify feature safety records | DONE `8180569` |
 | BR-README-01 | Reduce root README | DONE `d7104c9` |
 | BR-TESTDOC-01 | Reduce test README | DONE `a64c25e` |
-| BR-TODO-01 | Reduce TODO to registry | TODO |
+| BR-TODO-01 | Reduce TODO to registry | DONE `<commit>` |
 | BR-CHANGELOG-01 | Adopt concise changelog policy | DONE `da1d62d` |
 | BR-RELEASEDOC-01 | Reduce release README | TODO |
 | BR-COMMENT-01 | Trim live historical comments | TODO |
-| BR-STATE-01 | Remove repeated release declarations | DONE `<commit>` |
+| BR-STATE-01 | Remove repeated release declarations | DONE `d799c14` |
 | BR-STATE-02 | Make development/release state explicit | TODO |
 | BR-TEST-01 | Delete retired rename lane | DONE `893d647` |
 | BR-TEST-02 | Remove duplicate CI mutation run | DONE `b86a5a7` |
