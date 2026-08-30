@@ -3332,7 +3332,9 @@ test-release-history:
 # of what was run, not rebuildable from source -- covered by nothing. This gate
 # re-verifies each signed list, holds everything else to
 # test/published_release_digests.txt, requires the two to partition the
-# directory exactly, and compares against the tag where the clone has one.
+# directory exactly, rejects symbolic links -- every content check reads through
+# the path, so a link to identical bytes would satisfy all of them -- and
+# compares against the tag where the clone has one.
 # The one amendment ever made to a published release, the v0.9.0-v0.9.2 TMUX
 # errata, is named in the gate with its reason.
 test-published-release-immutability: python-version-valid

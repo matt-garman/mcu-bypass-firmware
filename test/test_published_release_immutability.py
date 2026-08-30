@@ -26,7 +26,9 @@ integrity holds today rather than being assumed from the fact it held once.
 Every remaining file matches test/published_release_digests.txt. The two lists
 partition the directory exactly, so a file added to a published release is
 covered by one or the other and never by neither, and no image can be dropped
-from the signed list into the merely-recorded one. Where tags are present the
+from the signed list into the merely-recorded one. Nothing under release/ is a
+symbolic link, because every check above reads content through the path and a
+link to identical bytes elsewhere would satisfy all of them. Where tags are present the
 tag tree is compared directly, an independent opinion on the same claim that
 owes nothing to either list.
 
@@ -201,6 +203,22 @@ def present(version):
                if path.is_file() and path.name not in skip)
 
 
+def entries(base):
+    """Every path under a directory -- links included, and never followed.
+
+    os.walk with followlinks=False reports a symlinked directory once, in its
+    parent's listing, and does not descend through it, so a link substituted
+    for a whole evidence tree is one entry here rather than a walk into
+    somewhere else. A dangling link is reported too, which rglob's is_file()
+    would drop silently.
+    """
+    found = []
+    for parent, directories, files in os.walk(base, followlinks=False):
+        for name in sorted(directories) + sorted(files):
+            found.append(Path(parent) / name)
+    return found
+
+
 @row("payload-still-verifies",
      "a release directory is verifiable on its own, offline, by a recipient "
      "who has only it and sha256sum. That is the promise its SHA256SUMS makes, "
@@ -244,6 +262,24 @@ def every_recorded_file_still_matches():
         counted(actual == recorded[path], identifier,
                 "%s differs from what was published (recorded %s, found %s)"
                 % (path, recorded[path][:12], actual[:12]))
+
+
+@row("no-published-file-is-a-link",
+     "the two rows above read content through the path, so an image replaced "
+     "by a link to identical bytes elsewhere satisfies both of them and the "
+     "record as well. What was published was a file; a link is a different "
+     "object, resolved when someone reads it, against a tree that can change "
+     "after this gate has gone green. Publication already refuses symlinked "
+     "assets, inventories and signatures -- this holds the published tree to "
+     "the same rule afterwards, which is where it was not being held")
+def nothing_under_release_is_a_link():
+    identifier = "no-published-file-is-a-link"
+    for path in sorted(entries(RELEASE)):
+        target = os.readlink(path) if path.is_symlink() else None
+        counted(target is None, identifier,
+                "release/%s is a symbolic link to %s, not the file that was "
+                "published" % ("/".join(path.relative_to(RELEASE).parts),
+                               target))
 
 
 @row("every-published-file-is-covered-once",

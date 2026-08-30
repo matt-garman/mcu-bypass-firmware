@@ -85,7 +85,8 @@ historical records and are not retroactively compacted by this policy.
   were covered by nothing. `make test-published-release-immutability`
   re-verifies each release's own list, holds the remainder to
   `test/published_release_digests.txt`, requires the two to partition each
-  directory exactly so a newly added file cannot fall between them, and
+  directory exactly so a newly added file cannot fall between them, rejects
+  symbolic links because every content check reads through the path, and
   compares against the release tag wherever the clone has one. The record is an
   ordinary `sha256sum -c` file, so `sha256sum -c
   test/published_release_digests.txt` reproduces its central claim with

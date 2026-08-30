@@ -2796,7 +2796,7 @@ tree rather than only the machinery that writes new ones.
 
 ## BR-REL-07 - Preserve historical releases during prospective migration
 
-**Status:** DONE `<commit>`
+**Status:** DONE `24c2ded`
 
 **Work:**
 
@@ -2857,7 +2857,11 @@ is-covered-once` (the two lists partition each directory exactly -- a file
 covered by neither can be rewritten silently, one covered by both invites the two
 to disagree -- plus the per-release header counts, which make a payload file
 moved into the record detectable where no tag is reachable);
-`no-image-escapes-the-signed-list`; `amendments-are-on-the-record`;
+`no-image-escapes-the-signed-list`; `no-published-file-is-a-link` (every check
+above reads content through the path, so an image swapped for a link to
+identical bytes elsewhere satisfies all of them -- publication already refuses
+symlinked assets, inventories and signatures, and this holds the published tree
+to the same rule afterwards); `amendments-are-on-the-record`;
 `the-tag-still-agrees`; `every-release-is-registered`.
 
 **The record is a `sha256sum -c` file on purpose.** From the repository root,
@@ -2874,18 +2878,21 @@ checks out shallow and untagged (no `fetch-depth: 0` in either workflow), so the
 row cannot always run -- it reports `tag cross-check ran for N of 12` rather than
 passing quietly, and the other seven rows are complete without it.
 
-**Verification:** 18 negative controls against a doctored full clone, each
+**Verification:** 21 negative controls against a doctored full clone, each
 required to fail with the specific row that should catch it -- an evidence log
 gaining a byte, an evidence log deleted, an image edited, an image deleted, an
 unlisted file appearing, a file claimed by both lists, an image moved out of the
 signed list into the record, a misstated per-release count, the errata stripped,
 the anchor renamed, the errata spread to a fourth release, an amended file pulled
 into the signed list, a release deleted, an unregistered release appearing, a
-missing detached signature, the record deleted, the signing key altered, and the
-edit-plus-matching-digest case. All 18 rejected with the intended row; the
-pristine copy passes. Also verified with no Git repository present at all: 2092
-checks, `tag cross-check ran for 0 of 12 (no release tags in this clone)`, and an
-edited evidence log still caught.
+missing detached signature, the record deleted, the signing key altered, the
+edit-plus-matching-digest case, an image swapped for a link to identical bytes, a
+whole evidence directory swapped for a link, and a dangling link appearing. All
+21 rejected with the intended row; the pristine copy passes. Also verified with
+no Git repository present at all: 2695 checks, `tag cross-check ran for 0 of 12
+(no release tags in this clone)`, an edited evidence log still caught, and all
+three link substitutions still caught -- which is the case that matters, since
+CI is exactly a clone with no tags.
 
 **Not done here.** Signature verification: `SHA256SUMS.asc` is pinned as bytes,
 but checking it against the signing key needs GnuPG and a trust decision
@@ -3445,7 +3452,7 @@ dependencies and acceptance criteria.
 | BR-REL-04 | Define hosted retention/mirroring | TODO |
 | BR-REL-05 | Keep releases self-contained | TODO |
 | BR-REL-06 | Consider tag-only artifact commits | TODO |
-| BR-REL-07 | Preserve historical releases | DONE `<commit>` |
+| BR-REL-07 | Preserve historical releases | DONE `24c2ded` |
 | BR-SRC-01 | Preserve deliberate source duplication | DONE `28f8ffe` |
 | BR-SRC-02 | Perform optional source cleanup | NEEDS USER |
 | BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
