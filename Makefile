@@ -989,6 +989,7 @@ FORCE:
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract test-static-assert-guards \
         test-attiny202-guard-mutations test-pic-guard-mutations \
+        test-deliberate-duplication \
 		pic12f675-target-selector-valid \
         pic10f322-test-target pic10f322-test-target-variants pic10f322-test-io pic10f322-test-lockstep \
         test-stack-bound attiny202-test-stack-bound test-stack-bound-regression test-flash-budget \
@@ -3121,6 +3122,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # test/test_workload_rebuild.sh, not left to inspection of these two lists.
 TEST_GATES_EARLY = \
         python-version-valid host-compiler-valid analyze test-static-assert-guards \
+        test-deliberate-duplication \
         test-host test-model-check test-symbolic test-cbmc \
         test-fuses test-stack-bound test-stack-bound-regression \
         test-stack-bound-pic-regression test-flash-budget-regression \
@@ -3564,6 +3566,17 @@ test-pic-guard-mutations:
 		echo "PIC device pack not found at PIC_DFP=$(PIC_DFP); skipping the PIC compile-guard mutations"; $(SKIP); \
 	fi; \
 	./test/test_target_guard_mutations.sh pic
+
+# Several facts in this tree are decided twice on purpose, by routes that can
+# disagree: two core generations, two compilers, two execution models, two
+# input artifacts. The pair is the evidence, not either half, and folding one
+# into a shared definition leaves every other gate green -- the survivor still
+# agrees with itself. This is the register of those duplications: each row
+# names the independent opinion a merge would destroy and asserts a structural
+# witness that fails when it does. Lexical only, so it runs wherever Python
+# does; the loss it detects is a source edit, not a build outcome.
+test-deliberate-duplication: python-version-valid
+	./test/test_deliberate_duplication.py
 
 # Parse the GitHub workflow files and cross-check ci.yml's job list against
 # ci-local.sh. Nothing else here loads them as YAML, so an unparseable workflow
@@ -8268,6 +8281,7 @@ help:
 	@echo "  test-clean-contract  clean/clean-tests remove everything the Makefile builds (included in test)"
 	@echo "  test-fuse-injection-contract  every fuse byte survives -D injection into the checker (included in test)"
 	@echo "  test-static-assert-guards  the firmware's compile-time guards really fail the build when violated (included in test)"
+	@echo "  test-deliberate-duplication  the duplications that are second opinions are still two (included in test)"
 	@echo "  test-attiny202-guard-mutations  the ATtiny202 shell's pin/clock/tick/watchdog guards fire under avr-gcc (included in test)"
 	@echo "  test-pic-guard-mutations  the three PIC shells' pin/clock/watchdog guards fire under XC8 (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"

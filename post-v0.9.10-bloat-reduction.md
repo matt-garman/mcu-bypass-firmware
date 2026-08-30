@@ -2809,7 +2809,7 @@ releases are safer than deltas or links to prior assets.
 
 ## BR-SRC-01 - Preserve deliberate firmware duplication
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 This is a review gate, not an instruction to edit source.
 
@@ -2835,6 +2835,84 @@ resource use, MISRA attribution, coverage allowlists, and fault behavior.
 
 - Every proposed source consolidation explicitly states why it does not destroy
   an independent opinion.
+
+**Result:** the list above is now enforced rather than only written down, in
+`test/test_deliberate_duplication.py` (`make test-deliberate-duplication`, in
+`TEST_GATES_EARLY`, so it reaches `test`, `stress` and `test-long`). 335 checks
+over eight rows; each row names the independent opinion a merge destroys and
+asserts a structural witness that fails when it does, and the failure message
+carries the reason so it is read at the moment of the merge.
+
+The defect class this closes: folding one of these pairs leaves EVERY existing
+gate green. The survivor still agrees with itself, and there is nothing left to
+disagree with, so the loss is silent by construction. A review gate that lives
+only in prose cannot report it -- and this plan document is scheduled for
+deletion by BR-FINAL-07, which would have taken the list with it.
+
+The eight rows and their witnesses:
+
+- **`pic10f320-shell-shares-no-header`** -- the shell includes only `<xc.h>`,
+  `<assert.h>` and `<stdint.h>`; no header this tree owns. It also still defines
+  its own two pin ordinals and its own four watchdog terms, because
+  self-containment is a claim about what it carries, not only about what it
+  declines to include.
+- **`pin-map-per-part`** -- each of the four pin maps includes no project
+  header, defines all six per-part names exactly once, and defines each as a
+  numeric LITERAL: `#define WDT_LOOP_WORK_MS OTHER_PART` would satisfy a
+  presence check while making two parts one. The selection chain in
+  `bypass_output_common.h` must still name every map and still refuse an
+  unselected target.
+- **`entry-point-per-shell`** -- each of the five shells defines exactly one
+  `main(void)`, and no other translation unit in `src/` defines one; a shared
+  loop TU is what a fold would look like.
+- **`two-loop-shapes`** -- the two AVR shells define exactly one interrupt
+  handler each, on DIFFERENT vector names (different peripherals on different
+  core generations); the three PIC shells define none, which is what makes their
+  watchdog bound legitimately computable with an ISR duty of zero.
+- **`clock-only-from-the-build`** -- no file in `src/` defines `F_CPU` or
+  `_XTAL_FREQ`; every shell asserts something about its own clock macro; and
+  `bypass_config.h` still rejects a build that omits it. Two statements that CAN
+  disagree is the point, and a firmware-side default would make them agree by
+  construction.
+- **`pic-harness-pin-facts-are-literal`** -- no file under `test/` includes a
+  part's pin map directly, and the four harnesses that reach one through the
+  selection chain are named, because they compile production code on the host
+  rather than state an expectation about it. A stale exception fails too.
+- **`two-pic-return-stack-witnesses`** -- both witnesses exist, each still names
+  its own input (generated assembly, shipped Intel HEX), neither has started
+  handling the other's, and the Makefile still runs both.
+- **`verification-layers-remain-distinct`** -- ten layers, each with an artifact
+  that exists, a target the Makefile defines, and a reference from the Makefile
+  to the artifact; artifacts and targets are pairwise distinct.
+
+Two rows from the list above are deliberately NOT restated here, because
+`test/test_static_assert_guards.sh` already holds them: the PIC10F320's copy of
+the watchdog conversion must stay textually identical to
+`bypass_output_common.h`'s, and a shell may only stop including the shared
+threshold header if it is recorded as carrying its own copy. Repeating those
+would create a third copy of the same claim, which is the failure mode this work
+exists to describe.
+
+One finding worth recording, because it corrects an assumption the list invites:
+**the AVR classic simulator harness shares the firmware's pin map on purpose.**
+`test/bypass_output_host.h` says so outright -- "the sim tests pull the pin
+numbers from the SAME firmware headers the firmware compiles against, so a pin
+reassignment can never silently diverge". So "independent simulator output
+masks" is true of the PIC harnesses, whose device identity is literal in
+`test/pic/pic10f32x_regs.h` and `test/pic/pic12f675_regs.h`, and NOT of the AVR
+classic sim, whose independent pin opinion is the documentation pinout that
+`test-pinout-alignment` compares against. The row is scoped to what is actually
+true rather than to the whole sentence.
+
+Verification: 18 negative controls against doctored copies of the tree via
+`DUPLICATION_ROOT` -- a shared header added to the self-contained shell, a pin
+map deferring to another, a per-part term turned into a reference, a dropped
+selection arm, a removed `#error`, a lifted main loop, a shared vector name, an
+ISR added to a polled shell, a firmware-supplied clock, a deleted clock assert,
+a harness reading a part map, a stale exception, a harness taking its facts from
+the firmware, a stack witness reading the other's artifact, a deleted witness,
+an unwired witness, a deleted layer subject, and a renamed layer target. All 18
+rejected with the intended message; the pristine copy passes. `make test` green.
 
 ## BR-SRC-02 - Low-risk firmware-source cleanup candidates
 
@@ -2877,7 +2955,7 @@ resource use, MISRA attribution, coverage allowlists, and fault behavior.
 
 ## BR-SRC-03 - Expand negative compile-guard coverage before source cleanup
 
-**Status:** DONE `<commit>`
+**Status:** DONE `781cb43`
 
 **Observation:** Existing static-assert negative testing is strongest for
 Classic AVR/shared sources and does not equivalently exercise every target-local
@@ -3027,6 +3105,12 @@ Any firmware refactor proposed during this effort must explicitly discharge:
 - [ ] MISRA/static analysis under all materially distinct configurations.
 - [ ] Preservation of independent pin/output/release identity oracles.
 
+The last obligation has a mechanical floor from BR-SRC-01: any refactor that
+folds one of the registered duplications fails `test-deliberate-duplication`
+with the independent opinion it destroys. Clearing that gate is necessary, not
+sufficient -- the register covers structure, not the judgement the other
+obligations ask for.
+
 **Acceptance:**
 
 - No firmware refactor is approved based on reduced line count alone.
@@ -3111,6 +3195,16 @@ under BR-FLASH-03; the `§` citations in `DESIGN_DOCUMENTATION.adoc` and
 - [ ] Confirm both PIC stack witnesses remain where applicable.
 - [ ] Confirm formal and simulation substrates remain distinct.
 - [ ] Confirm build constants and firmware guards can still disagree and fail.
+
+`make test-deliberate-duplication` (BR-SRC-01) now decides five of these
+mechanically on every run: the pin/output facts the PIC harnesses expect are
+literal rather than taken from the firmware map, the supported sets diverge by
+part because each part states its own pin ordinals and watchdog terms, both PIC
+stack witnesses remain and still read different artifacts, the formal and
+simulation substrates remain distinct subjects under distinct targets, and no
+file in `src/` supplies the clock its guards check. The remaining two -- the
+classification of each removed duplicate, and the release-identity literal --
+stay a reading of the diff.
 
 **Acceptance:**
 
@@ -3262,9 +3356,9 @@ dependencies and acceptance criteria.
 | BR-REL-05 | Keep releases self-contained | TODO |
 | BR-REL-06 | Consider tag-only artifact commits | TODO |
 | BR-REL-07 | Preserve historical releases | TODO |
-| BR-SRC-01 | Preserve deliberate source duplication | TODO |
+| BR-SRC-01 | Preserve deliberate source duplication | DONE `<commit>` |
 | BR-SRC-02 | Perform optional source cleanup | NEEDS USER |
-| BR-SRC-03 | Expand negative guard tests | DONE `<commit>` |
+| BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
 | BR-SRC-04 | Enforce source-refactor proof obligations | TODO |
 | BR-FINAL-01 | Audit current references | TODO |
 | BR-FINAL-02 | Verify safety/claim boundaries | TODO |

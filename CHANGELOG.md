@@ -76,6 +76,26 @@ historical records and are not retroactively compacted by this policy.
 
 ### Fixed
 
+- **Folding a deliberate duplication no longer passes silently.** Several facts
+  in this tree are decided twice on purpose, by routes able to disagree: the
+  PIC10F320 shell is a second implementation compiled by a different compiler
+  for a 256-word part, each part states its own pin ordinals and its own four
+  watchdog terms, the AVR shells are interrupt-driven where the PIC shells are
+  polled, the clock is stated by the build and re-derived by a firmware guard,
+  the PIC harnesses keep their register facts literal, and the PIC return stack
+  is bounded twice -- once over generated assembly, once over the shipped HEX.
+  In each case the pair is the evidence, not either half. Merging one into a
+  shared definition left every gate green, because the survivor still agreed
+  with itself and there was nothing left to disagree with. `make test` now runs
+  `test-deliberate-duplication`, a register in which each row names the
+  independent opinion a merge destroys and asserts a structural witness that
+  fails when it does, so the reason is read at the moment of the merge rather
+  than found afterwards. It is lexical -- no compiler, no device pack -- because
+  the loss it detects is a source edit, and it also holds every verification
+  layer (BFS, two symbolic engines, CBMC, mutation, coverage, both instruction
+  simulators, hardware qualification) to a subject and target of its own. The
+  firmware is unchanged.
+
 - **The compile-time guards in the AVR-XT and PIC shells are now proven to
   fire.** 52 of the firmware's 79 `static_assert` guards live in the four MCU
   shells that need a target toolchain, and nothing compiled a mutated input
