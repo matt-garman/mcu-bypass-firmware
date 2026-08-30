@@ -75,6 +75,8 @@ declare -F release_validate_current_documentation >/dev/null \
 	|| { printf 'FAIL: release documentation validator is missing\n' >&2; exit 1; }
 declare -F release_validate_staged_documentation >/dev/null \
 	|| { printf 'FAIL: staged release documentation validator is missing\n' >&2; exit 1; }
+declare -F release_validate_development_state >/dev/null \
+	|| { printf 'FAIL: development-state documentation validator is missing\n' >&2; exit 1; }
 declare -F release_validate_hardware_claims >/dev/null \
 	|| { printf 'FAIL: hardware evidence classifier is missing\n' >&2; exit 1; }
 declare -F release_validate_pic12f675_flashing_helper >/dev/null \
@@ -1152,6 +1154,115 @@ declare_in_block release/README.md '> Evidence is retained under `release/v1.2.3
 declare_in_block release/README.md "> $transition_line"
 release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
 	|| fail "documentation validator did not read a blockquoted transition line"
+checks=$((checks + 1))
+
+# D4: the same declaration, held continuously rather than on release day.
+#
+# release_validate_current_documentation is reached only through
+# make-release.sh, which supplies both the version being cut and the canonical
+# counts. So the single authority for the release contract -- the one bounded
+# block every other document was reduced to pointing at -- was verified on
+# release day and by nothing in between: between releases it could name any
+# version, any counts, and any retained record.
+#
+# release_validate_development_state closes that by taking the two inputs from
+# the two places that cannot be edited to agree with the declaration -- the
+# version from the declaration itself, the counts from the Makefile that builds
+# the images -- and then reconciling the declared version with the retained
+# record the tree can actually show.
+assert_development_state_rejected() {
+	local description=$1 expected=$2
+	if release_validate_development_state "$documentation_root" 21 18 \
+			>"$output" 2>&1; then
+		fail "development-state gate accepted $description"
+	fi
+	grep -Fq 'release documentation:' "$output" \
+		|| fail "$description failed without a documentation diagnostic"
+	grep -Fq "$expected" "$output" \
+		|| fail "$description was rejected without its diagnostic: $(<"$output")"
+	checks=$((checks + 1))
+}
+
+# Released: the declared version's retained record is present, so the tree owes
+# no disclosure and the declaration stands on its own.
+write_documentation_fixture v1.2.3 21 18 six four
+mkdir -p "$documentation_root/release/v1.2.3"
+: > "$documentation_root/release/v1.2.3/QUALIFICATION"
+release_validate_development_state "$documentation_root" 21 18 \
+	|| fail "development-state gate rejected a released tree"
+checks=$((checks + 1))
+
+# Pre-tag: source finalization has declared v1.2.3 and the artifact commit that
+# creates release/v1.2.3/ has not happened yet. Undisclosed, that is a tree
+# telling a reader a release exists whose evidence it does not contain -- and
+# the old rule saw it only if the block happened to name the directory.
+write_documentation_fixture v1.2.3 21 18 six four
+assert_development_state_rejected 'an undisclosed pre-tag window' \
+	'must carry the exact pre-tag transition line'
+
+# Disclosed, the same tree is the intended state.
+write_documentation_fixture v1.2.3 21 18 six four
+declare_in_block release/README.md "$transition_line"
+release_validate_development_state "$documentation_root" 21 18 \
+	|| fail "development-state gate rejected a disclosed pre-tag window"
+checks=$((checks + 1))
+
+# A directory an aborted cut left behind is not the release.
+# verify-release-history.sh reads release/<version>/QUALIFICATION as "this tree
+# already contains the release", so the disclosure is owed until that file
+# exists, not until the directory does.
+write_documentation_fixture v1.2.3 21 18 six four
+mkdir -p "$documentation_root/release/v1.2.3"
+assert_development_state_rejected 'a half-staged directory read as a published release' \
+	'must carry the exact pre-tag transition line'
+
+# The counts are the Makefile's, so a declaration cannot pass by agreeing with
+# itself -- which is exactly what a gate given the declaration's own numbers
+# would do.
+write_documentation_fixture v1.2.3 20 18 six four
+mkdir -p "$documentation_root/release/v1.2.3"
+: > "$documentation_root/release/v1.2.3/QUALIFICATION"
+assert_development_state_rejected 'a declared image count the build does not produce' \
+	'must contain the exact current release contract'
+
+# The version is the declaration's, so an abandoned or postponed finalization
+# commit that leaves a version standing which the rest of the tree cannot
+# substantiate fails here rather than at the next release.
+write_documentation_fixture v1.2.4 21 18 six four
+assert_development_state_rejected 'a declared version with no changelog section' \
+	'[1.2.4] section'
+
+# A block that declares no contract, or two, has no single version to reconcile
+# and is refused before any state question is asked.
+write_documentation_fixture v1.2.3 21 18 six four
+sed -i 's/^\*\*Current release contract:\*\*/**Release contract:**/' \
+	"$documentation_root/release/README.md"
+assert_development_state_rejected 'a block declaring no release contract' \
+	'exactly one current release contract version; found 0'
+
+write_documentation_fixture v1.2.3 21 18 six four
+declare_in_block release/README.md '**Current release contract:** `v1.2.2`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.'
+assert_development_state_rejected 'a block declaring two release contracts' \
+	'exactly one current release contract version; found 2'
+
+# The live tree, held to the same gate. print-RELEASE_IMAGES and
+# print-RELEASE_SOAK_NAMES are release configuration queries the Makefile
+# exempts from parse-time toolchain discovery, so this reads the canonical sets
+# on a host with no cross compiler; CC=: keeps that true if the exemption ever
+# narrows.
+live_release_images=$("$REAL_MAKE" -s --no-print-directory -C "$ROOT" CC=: \
+	print-RELEASE_IMAGES) \
+	|| fail "could not read the canonical release image set"
+live_release_soaks=$("$REAL_MAKE" -s --no-print-directory -C "$ROOT" CC=: \
+	print-RELEASE_SOAK_NAMES) \
+	|| fail "could not read the canonical release soak set"
+read -r -a live_images <<<"$live_release_images"
+read -r -a live_soaks <<<"$live_release_soaks"
+[ "${#live_images[@]}" -gt 0 ] && [ "${#live_soaks[@]}" -gt 0 ] \
+	|| fail "the canonical release image/soak sets are empty"
+release_validate_development_state "$ROOT" \
+	"${#live_images[@]}" "${#live_soaks[@]}" >"$output" 2>&1 \
+	|| fail "the live tree's release declaration does not match its state: $(<"$output")"
 checks=$((checks + 1))
 
 # D3: after staging, the same declarations are held to the inventory that was

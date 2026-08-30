@@ -27,6 +27,17 @@ _release_current_block() {
 	' "$1"
 }
 
+# The one spelling of the pre-tag disclosure. Two rules read it -- the release
+# preflight that requires it of a block naming its own not-yet-staged release
+# directory, and the development-state gate below that requires it of any tree
+# declaring a release whose retained record is absent -- and a disclosure the
+# two spelled differently would be a rule that silently stopped matching.
+_release_transition_line() {
+	[ "$#" -eq 1 ] || return 2
+	printf '**Pre-tag transition:** `release/%s/` is created by the release cut and published with the signed `%s` tag, so the source tree that declares this contract does not contain it yet.\n' \
+		"$1" "$1"
+}
+
 release_validate_current_documentation() {
 	[ "$#" -ge 4 ] && [ "$#" -le 5 ] || return 2
 	local repo_root=$1 version=$2 image_count=$3 soak_count=$4
@@ -135,7 +146,7 @@ release_validate_current_documentation() {
 	# names is evidence claimed to be retained now and must be present, so an
 	# abandoned or postponed release cannot leave a declaration standing on main
 	# that points at nothing.
-	transition_line="**Pre-tag transition:** \`release/$version/\` is created by the release cut and published with the signed \`$version\` tag, so the source tree that declares this contract does not contain it yet."
+	transition_line=$(_release_transition_line "$version")
 	for document in "${current_documents[@]}"; do
 		[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
 			|| _release_documentation_error "designated current-release document is not a regular nonempty file: ${document#$repo_root/}" || return
@@ -204,6 +215,67 @@ _release_reject_extra_current_blocks() {
 		|| _release_documentation_error "could not scan for duplicate current-release declarations" || return
 	[ "${#extra[@]}" -eq 0 ] \
 		|| _release_documentation_error "the current release contract is declared in $designated alone; remove the bounded current-release block from: ${extra[*]}" || return
+}
+
+# Hold the LIVE tree to its own declaration, continuously.
+#
+# release_validate_current_documentation is a release-time check: make-release.sh
+# supplies the version being cut and the canonical counts, and nothing calls it
+# in between. So the single authority for the release contract -- the one bounded
+# block that every other document was reduced to pointing at -- was verified only
+# on release day. Between releases it could name any version, any counts, and any
+# retained record, and the suite had no opinion.
+#
+# This is the same validator run against the working tree, with the two inputs
+# taken from the two places that cannot be edited to agree with it: the version
+# from the declaration itself, the image and soak counts from the Makefile that
+# builds them. It then reconciles the declared version with what the tree can
+# actually substantiate.
+#
+# The reconciliation is deliberately ONE-SIDED. A tree that declares a release
+# whose retained record is absent must disclose that in the block a reader reads;
+# a disclosure left standing after the cut is permitted, because the artifact
+# commit may change only release/<version>/ and so structurally cannot retract
+# it. Refusing the stale direction too would put main red between the artifact
+# commit and a retraction commit, which is a worse property than a disclosure
+# that understates. The next source finalization rewrites the line for its own
+# version, which is where a stale one is caught.
+release_validate_development_state() {
+	[ "$#" -eq 3 ] || return 2
+	local repo_root=$1 image_count=$2 soak_count=$3
+	local designated=release/README.md
+	local document="$repo_root/$designated"
+	local block plain version version_count transition_line
+
+	[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
+		|| _release_documentation_error "designated current-release document is not a regular nonempty file: $designated" || return
+	block=$(_release_current_block "$document") \
+		|| _release_documentation_error "$designated must contain one bounded current-release block" || return
+	# release/README.md carries its block as a blockquote; the declaration is the
+	# line, not its rendering.
+	plain=$(awk '{ sub(/^>[[:space:]]*/, ""); print }' <<<"$block") || return
+
+	version=$(sed -n 's/^\*\*Current release contract:\*\* `\(v[0-9][^`]*\)`;.*/\1/p' <<<"$plain") || return
+	version_count=$(grep -c . <<<"$version" || true)
+	[ "$version_count" -eq 1 ] \
+		|| _release_documentation_error "$designated must declare exactly one current release contract version; found $version_count" || return
+	[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
+		|| _release_documentation_error "$designated declares a version that is not vX.Y.Z: $version" || return
+
+	# The counts come from the Makefile, so the exact-contract-line check inside
+	# this call compares the declaration with the build rather than with itself.
+	release_validate_current_documentation "$repo_root" "$version" \
+		"$image_count" "$soak_count" || return
+
+	# QUALIFICATION, not the directory, is what verify-release-history.sh treats
+	# as "this tree already contains the release" -- so a half-staged directory
+	# left by an aborted cut is still the pre-tag state and still owes the
+	# disclosure.
+	if [ ! -f "$repo_root/release/$version/QUALIFICATION" ]; then
+		transition_line=$(_release_transition_line "$version")
+		[ "$(grep -Fxc "$transition_line" <<<"$plain" || true)" -eq 1 ] \
+			|| _release_documentation_error "$designated declares $version, whose retained record release/$version/ this tree does not contain, and must carry the exact pre-tag transition line: $transition_line" || return
+	fi
 }
 
 # Bind the bounded current-release declarations to the inventory that was

@@ -76,6 +76,21 @@ historical records and are not retroactively compacted by this policy.
 
 ### Fixed
 
+- **The single declaration of the release contract is now checked between
+  releases, not only on release day.** `release/README.md`'s bounded block is
+  the one place the version, part, image and soak counts are declared, and the
+  validator that holds it to the build was reachable only through
+  `scripts/make-release.sh`, which supplies both the version and the counts. In
+  between, the declaration could name any version, any counts and any retained
+  record with nothing to disagree. `make test` now runs the same validator
+  against the working tree, taking the version from the declaration and the
+  counts from the Makefile that builds the images, and additionally requires a
+  tree that declares `vX.Y.Z` while `release/vX.Y.Z/QUALIFICATION` is absent to
+  carry the exact pre-tag transition line. That disclosure was previously owed
+  only by a block that happened to name the directory, so the pre-tag window --
+  and an abandoned finalization commit left standing in it -- could pass
+  unmentioned. `test-release-preflight`: 221 -> 230 checks.
+
 - **A branch-only working document is now recognized by the declaration it
   carries rather than by its name.** The release documentation gate had been
   taught one name family at a time, each after a document the previous pattern

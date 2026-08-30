@@ -221,14 +221,22 @@ qualified, the **artifact commit** is what the tag publishes.
 contract while `release/vX.Y.Z/` is unpublished. That window is intended and is
 bounded by the qualification run. Two things keep it honest:
 
-- The bounded declaration is written to be true throughout it. It states the
-  source contract, and where it names the release directory it carries a fixed
-  pre-tag transition line recording that the release cut creates it. Release
-  preflight rejects a declaration that names any *other* release directory this
-  tree does not contain.
+- The bounded declaration is written to be true throughout it. Any tree that
+  declares `vX.Y.Z` while `release/vX.Y.Z/QUALIFICATION` is absent carries a
+  fixed pre-tag transition line recording that the release cut creates it, and a
+  declaration naming any *other* release directory this tree does not contain is
+  rejected outright.
 - **If the release is abandoned or postponed, the source-finalization commit is
   reverted or corrected on `main`.** A `vX.Y.Z` declaration must never stand on
   `main` with no `vX.Y.Z` tag in prospect.
+
+Both rules are checked on every `make test`, not only on release day. `make
+test-release-preflight` reads the declared version out of the block and the
+image and soak counts out of the Makefile that builds them, so a declaration
+that drifts from the tree fails on the commit that writes it. The disclosure is
+required, never refused: the artifact commit may change only `release/vX.Y.Z/`
+and so cannot retract the line it makes stale, and the next source finalization
+rewrites it for its own version.
 
 ## Which image do I want?
 

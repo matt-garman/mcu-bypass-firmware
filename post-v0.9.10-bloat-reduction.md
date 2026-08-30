@@ -1942,7 +1942,7 @@ retained by the release directory that ran it.
 
 ## BR-COMMENT-01 - Trim migration archaeology from live Make/script comments
 
-**Status:** DONE `<commit>`
+**Status:** DONE `b194731`
 
 **Rationale:** Live comments should explain invariants and non-obvious failure
 modes. Long histories of retired names and earlier approaches are prone to stale
@@ -2147,7 +2147,7 @@ topology into target-specific and TODO documents.
 
 ## BR-STATE-02 - Treat main as development and releases as immutable snapshots
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Rationale:** Unreleased source is inherently in development. Non-developers
 should consume signed release images and the corresponding tagged snapshot and
@@ -2155,18 +2155,94 @@ evidence, not mutable candidate measurements or speculative release status.
 
 **Work:**
 
-- [ ] Keep ordinary `main` under `[Unreleased]`.
-- [ ] Decide whether version/date declarations should be made only on a release
+- [x] Keep ordinary `main` under `[Unreleased]`.
+- [x] Decide whether version/date declarations should be made only on a release
   candidate branch or selected source-finalization commit.
-- [ ] Remove claims that an absent release directory already contains evidence.
-- [ ] Keep the source-commit versus artifact-commit distinction explicit.
-- [ ] Define abandonment/correction behavior for a selected release candidate.
+- [x] Remove claims that an absent release directory already contains evidence.
+- [x] Keep the source-commit versus artifact-commit distinction explicit.
+- [x] Define abandonment/correction behavior for a selected release candidate.
 
 **Acceptance:**
 
 - Development source never implies final evidence exists before publication.
 - Release consumers have one immutable snapshot and asset set to evaluate.
 - Release tooling still binds evidence to the exact qualified source.
+
+**Result:**
+
+- Four of the five work items were already discharged in prose and needed only
+  to be confirmed and recorded. `v0.9.9` defined the four-step sequence and the
+  rollback rule after `v0.9.10` was declared released in a tree that contained
+  no `release/v0.9.10/`; BR-STATE-01 reduced the declaration to one document.
+  The decision item is settled and has been settled since `v0.9.9`: version and
+  date declarations are made on a **selected source-finalization commit on
+  `main`**, not on a release-candidate branch. The reason is that
+  `scripts/verify-release-history.sh` requires the artifact commit's sole parent
+  to be the qualified source commit, so the qualified source must already be on
+  the line the artifact descends from; a candidate branch would either have to
+  be merged before qualification, which reintroduces the merge as an unqualified
+  parent, or produce an artifact whose parent is not on `main`. The suffixed-tag
+  grammar (`vX.Y.Z-rc.1`, published as a GitHub prerelease) already covers the
+  case a candidate branch would exist to serve.
+- The sweep for claims that an absent release directory contains evidence comes
+  back empty. Every live reference to a `release/vX.Y.Z/` path outside shipped
+  release directories names one the tree contains -- `v0.9.4` and
+  `v0.9.6`-`v0.9.10` in `release/README.md`, and `v0.9.9` in both
+  `docs/flashing_simplicity.md` and a `scripts/release-documentation.sh`
+  comment. `CHANGELOG.md`'s are historical record. The one live false claim of this class was already found
+  and removed by BR-STATE-01.
+- What was actually left undone was enforcement, and it was the whole of it:
+  **the single authority for the release contract was checked only on release
+  day.** `release_validate_current_documentation` is reachable only through
+  `scripts/make-release.sh`, which supplies the version being cut and the
+  canonical counts; nothing in `make test` called it against the working tree.
+  Between releases the bounded block could name any version, any image and soak
+  counts, and any retained record, and the suite had no opinion. Every other
+  live-tree release rule -- `release_validate_hardware_claims`,
+  `release_validate_pic12f675_finalization`,
+  `release_validate_pic12f675_flashing_helper` and
+  `release_validate_flashing_simplicity_status` -- is already asserted against
+  `$ROOT` in `test_release_preflight.sh`; the declaration BR-STATE-01 made
+  singular was the one that was not.
+- `release_validate_development_state` closes it, in the same file and asserted
+  the same way. It takes the two inputs from the two places that cannot be
+  edited to agree with the declaration: the version from the declaration itself,
+  the image and soak counts from the Makefile that builds them
+  (`print-RELEASE_IMAGES`, `print-RELEASE_SOAK_NAMES`, both already exempt from
+  parse-time toolchain discovery). Passing the declaration's own numbers back to
+  it would have made the check tautological, which is the trap this shape
+  avoids.
+- It then reconciles the declared version with what the tree can substantiate.
+  A tree declaring `vX.Y.Z` whose `release/vX.Y.Z/QUALIFICATION` is absent must
+  carry the exact pre-tag transition line. Previously that disclosure was owed
+  only by a block that happened to *name* the directory -- and the sole
+  surviving declaration does not name it, so the rule had become unreachable on
+  the live tree exactly when BR-STATE-01 removed the two blocks that did. The
+  marker is `QUALIFICATION`, not the directory, because that is what
+  `verify-release-history.sh` treats as "this tree already contains the
+  release", so a directory an aborted cut left behind is still the pre-tag state
+  and still owes the disclosure.
+- The reconciliation is deliberately **one-sided**: the disclosure is required
+  when it is owed and permitted when it is stale. Refusing the stale direction
+  would be the stronger claim, but the artifact commit may change only
+  `release/vX.Y.Z/` and so structurally cannot retract the line it makes false,
+  which would leave `main` red between the artifact commit and a retraction
+  commit on every release. A disclosure that understates is the safe direction,
+  and the next source finalization rewrites the line for its own version. The
+  trade-off is recorded at the function and in `release/README.md` so a later
+  reader sees a decision rather than an omission.
+- The pre-tag transition line had two spellings-in-waiting once two rules read
+  it, so it is now produced by one `_release_transition_line` helper.
+- `release/README.md`'s pre-tag-window section now states the rule in the
+  stronger form it is actually enforced in, and says the check runs on every
+  `make test` rather than on release day.
+- Verified: `test-release-preflight` 221 -> 230 checks, 0 failures, and the
+  full `make test`. Negative controls on a scratch copy of the live tree
+  confirmed all six refusals fire with their own diagnostics: a missing
+  disclosure during the window, a declared image count the build does not
+  produce, a declared version with no changelog section, a block declaring no
+  contract, a block declaring two, and -- now live rather than release-day --
+  BR-STATE-01's second copy in `TODO.md`.
 
 ---
 
@@ -3046,9 +3122,9 @@ dependencies and acceptance criteria.
 | BR-TODO-01 | Reduce TODO to registry | DONE `6fa9a1b` |
 | BR-CHANGELOG-01 | Adopt concise changelog policy | DONE `da1d62d` |
 | BR-RELEASEDOC-01 | Reduce release README | DONE `512d0c3` |
-| BR-COMMENT-01 | Trim live historical comments | DONE `<commit>` |
+| BR-COMMENT-01 | Trim live historical comments | DONE `b194731` |
 | BR-STATE-01 | Remove repeated release declarations | DONE `d799c14` |
-| BR-STATE-02 | Make development/release state explicit | TODO |
+| BR-STATE-02 | Make development/release state explicit | DONE `<commit>` |
 | BR-TEST-01 | Delete retired rename lane | DONE `893d647` |
 | BR-TEST-02 | Remove duplicate CI mutation run | DONE `b86a5a7` |
 | BR-TEST-03 | Route CI through aggregates | DONE `b9cbd36` |
